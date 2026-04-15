@@ -54,7 +54,7 @@
             <div class="card p-6">
               <AmountInput
                 v-model="amount"
-                :amounts="[10, 20, 50, 100, 200, 500, 1000, 2000, 5000]"
+                :options="checkout.recharge_options"
                 :min="globalMinAmount"
                 :max="globalMaxAmount"
               />
@@ -342,6 +342,7 @@ function onStripeRedirect(orderId: number, payUrl: string) {
 // All checkout data from single API call
 const checkout = ref<CheckoutInfoResponse>({
   methods: {}, global_min: 0, global_max: 0,
+  recharge_options: [],
   plans: [], balance_disabled: false, help_text: '', help_image_url: '', stripe_publishable_key: '',
 })
 

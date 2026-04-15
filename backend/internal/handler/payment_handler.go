@@ -92,6 +92,10 @@ func (h *PaymentHandler) GetChannels(c *gin.Context) {
 // GET /api/v1/payment/checkout-info
 func (h *PaymentHandler) GetCheckoutInfo(c *gin.Context) {
 	ctx := c.Request.Context()
+	subject, ok := requireAuth(c)
+	if !ok {
+		return
+	}
 
 	// Fetch limits (methods + global range)
 	limitsResp, err := h.configService.GetAvailableMethodLimits(ctx)
@@ -125,10 +129,17 @@ func (h *PaymentHandler) GetCheckoutInfo(c *gin.Context) {
 		})
 	}
 
+	rechargeOptions, err := h.paymentService.GetRechargeAmountOptions(ctx, subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
 	response.Success(c, checkoutInfoResponse{
 		Methods:              limitsResp.Methods,
 		GlobalMin:            limitsResp.GlobalMin,
 		GlobalMax:            limitsResp.GlobalMax,
+		RechargeOptions:      rechargeOptions,
 		Plans:                planList,
 		BalanceDisabled:      cfg.BalanceDisabled,
 		HelpText:             cfg.HelpText,
@@ -141,6 +152,7 @@ type checkoutInfoResponse struct {
 	Methods              map[string]service.MethodLimits `json:"methods"`
 	GlobalMin            float64                         `json:"global_min"`
 	GlobalMax            float64                         `json:"global_max"`
+	RechargeOptions      []service.RechargeAmountOption  `json:"recharge_options"`
 	Plans                []checkoutPlan                  `json:"plans"`
 	BalanceDisabled      bool                            `json:"balance_disabled"`
 	HelpText             string                          `json:"help_text"`

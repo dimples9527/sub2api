@@ -402,6 +402,8 @@ pnpm run build
 cd ../backend
 go build -tags embed -o sub2api ./cmd/server
 
+go build -tags embed -o sub2api.exe ./cmd/server 
+
 # 5. 创建配置文件
 cp ../deploy/config.example.yaml ./config.yaml
 

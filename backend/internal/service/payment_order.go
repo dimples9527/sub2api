@@ -44,13 +44,22 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 		return nil, infraerrors.Forbidden("USER_INACTIVE", "user account is disabled")
 	}
 	amount := req.Amount
+	chargeAmount := req.Amount
+	appliedIntroRecharge := false
 	if plan != nil {
 		amount = plan.Price
+		chargeAmount = plan.Price
+	} else if req.OrderType == payment.OrderTypeBalance {
+		introAvailable, err := s.IntroRechargeAvailable(ctx, req.UserID)
+		if err != nil {
+			return nil, fmt.Errorf("check intro recharge availability: %w", err)
+		}
+		amount, chargeAmount, appliedIntroRecharge = resolveRechargeAmounts(req.Amount, introAvailable)
 	}
 	feeRate := s.getFeeRate(req.PaymentType)
-	payAmountStr := payment.CalculatePayAmount(amount, feeRate)
+	payAmountStr := payment.CalculatePayAmount(chargeAmount, feeRate)
 	payAmount, _ := strconv.ParseFloat(payAmountStr, 64)
-	order, err := s.createOrderInTx(ctx, req, user, plan, cfg, amount, feeRate, payAmount)
+	order, err := s.createOrderInTx(ctx, req, user, plan, cfg, amount, feeRate, payAmount, appliedIntroRecharge)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +108,7 @@ func (s *PaymentService) validateSubOrder(ctx context.Context, req CreateOrderRe
 	return plan, nil
 }
 
-func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderRequest, user *User, plan *dbent.SubscriptionPlan, cfg *PaymentConfig, amount, feeRate, payAmount float64) (*dbent.PaymentOrder, error) {
+func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderRequest, user *User, plan *dbent.SubscriptionPlan, cfg *PaymentConfig, amount, feeRate, payAmount float64, appliedIntroRecharge bool) (*dbent.PaymentOrder, error) {
 	tx, err := s.entClient.Tx(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
@@ -143,7 +152,11 @@ func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderReq
 	if err != nil {
 		return nil, fmt.Errorf("create order: %w", err)
 	}
-	code := fmt.Sprintf("PAY-%d-%d", order.ID, time.Now().UnixNano()%100000)
+	codePrefix := "PAY-"
+	if appliedIntroRecharge {
+		codePrefix = introRechargeCodePrefix
+	}
+	code := fmt.Sprintf("%s%d-%d", codePrefix, order.ID, time.Now().UnixNano()%100000)
 	order, err = tx.PaymentOrder.UpdateOneID(order.ID).SetRechargeCode(code).Save(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("set recharge code: %w", err)

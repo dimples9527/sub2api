@@ -23,6 +23,7 @@ This directory contains files for deploying Sub2API on Linux servers.
 | `sub2api.service` | Systemd service unit file |
 | `sub2api-datamanagementd.service` | datamanagementd systemd service unit file |
 | `DATAMANAGEMENTD_CN.md` | datamanagementd 部署与联动说明（中文） |
+| `DEPLOY_CENTOS_NO_DOMAIN_CN.md` | CentOS no-domain deployment guide with SCP upload and local source build (Chinese) |
 | `config.example.yaml` | Example configuration file |
 
 ---

@@ -55,11 +55,19 @@ export interface MethodLimitsResponse {
   global_max: number  // widest max across all methods; 0 = no maximum
 }
 
+export interface RechargeAmountOption {
+  pay_amount: number
+  credit_amount: number
+  original_pay_amount?: number
+  one_time?: boolean
+}
+
 /** Response from /payment/checkout-info API — single call for the payment page */
 export interface CheckoutInfoResponse {
   methods: Record<string, MethodLimit>
   global_min: number
   global_max: number
+  recharge_options: RechargeAmountOption[]
   plans: SubscriptionPlan[]
   balance_disabled: boolean
   help_text: string

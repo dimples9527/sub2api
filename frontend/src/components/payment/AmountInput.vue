@@ -7,18 +7,31 @@
       </label>
       <div class="grid grid-cols-3 gap-2">
         <button
-          v-for="amt in filteredAmounts"
-          :key="amt"
+          v-for="option in filteredOptions"
+          :key="`${option.pay_amount}-${option.credit_amount}`"
           type="button"
           :class="[
             'rounded-lg border-2 px-4 py-3 text-center font-medium transition-colors',
-            modelValue === amt
+            modelValue === option.pay_amount
               ? 'border-primary-500 bg-primary-50 text-primary-700 dark:border-primary-400 dark:bg-primary-900/40 dark:text-primary-300'
               : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200 dark:hover:border-dark-500',
           ]"
-          @click="selectAmount(amt)"
+          @click="selectAmount(option.pay_amount)"
         >
-          {{ amt }}
+          <div class="text-base font-semibold">
+            {{ option.credit_amount }}
+          </div>
+          <div v-if="option.original_pay_amount && option.original_pay_amount > option.pay_amount" class="mt-1 space-y-0.5 text-xs">
+            <div class="text-gray-400 line-through dark:text-dark-500">
+              {{ t('payment.amountLabel') }} {{ option.original_pay_amount }}
+            </div>
+            <div class="font-medium text-rose-600 dark:text-rose-300">
+              {{ t('payment.actualPay') }} {{ option.pay_amount }}
+            </div>
+            <div v-if="option.one_time" class="text-[11px] text-amber-600 dark:text-amber-300">
+              1x
+            </div>
+          </div>
         </button>
       </div>
     </div>
@@ -48,14 +61,15 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import type { RechargeAmountOption } from '@/types/payment'
 
 const props = withDefaults(defineProps<{
-  amounts?: number[]
+  options?: RechargeAmountOption[]
   modelValue: number | null
   min?: number
   max?: number
 }>(), {
-  amounts: () => [10, 20, 50, 100, 200, 500, 1000, 2000, 5000],
+  options: () => [],
   min: 0,
   max: 0,
 })
@@ -69,8 +83,10 @@ const { t } = useI18n()
 const customText = ref('')
 
 // 0 = no limit
-const filteredAmounts = computed(() =>
-  props.amounts.filter((a) => (props.min <= 0 || a >= props.min) && (props.max <= 0 || a <= props.max))
+const filteredOptions = computed(() =>
+  props.options.filter((option) =>
+    (props.min <= 0 || option.pay_amount >= props.min) && (props.max <= 0 || option.pay_amount <= props.max)
+  )
 )
 
 const placeholderText = computed(() => {
