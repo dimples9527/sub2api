@@ -21,7 +21,14 @@
           <div class="text-[17px] font-semibold tracking-tight">
             {{ option.credit_amount }}$
           </div>
-          <div class="mt-1.5 text-[11px] font-medium text-gray-500 dark:text-dark-400">
+          <div
+            :class="[
+              'mt-1.5 text-[11px] font-semibold',
+              modelValue === option.pay_amount
+                ? 'text-primary-700 dark:text-primary-200'
+                : 'text-sky-600 dark:text-sky-300',
+            ]"
+          >
             实付金额 {{ option.pay_amount }} CNY
           </div>
           <div v-if="option.original_pay_amount && option.original_pay_amount > option.pay_amount" class="mt-1.5 space-y-1 text-xs">

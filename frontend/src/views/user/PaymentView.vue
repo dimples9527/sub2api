@@ -5,18 +5,6 @@
         <div class="h-8 w-8 animate-spin rounded-full border-4 border-primary-500 border-t-transparent"></div>
       </div>
       <template v-else>
-        <!-- Tab Switcher (hide during payment and subscription confirm) -->
-        <div
-          v-if="tabs.length > 1 && paymentPhase === 'select' && !selectedPlan"
-          class="grid grid-cols-2 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-900"
-        >
-          <button v-for="tab in tabs" :key="tab.key"
-            class="relative flex min-h-[56px] items-center justify-center px-6 py-4 text-base font-semibold tracking-tight transition-all"
-            :class="activeTab === tab.key
-              ? 'bg-gray-50 text-gray-900 dark:bg-dark-800 dark:text-white'
-              : 'text-gray-500 hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-dark-800/70 dark:hover:text-gray-200'"
-            @click="activeTab = tab.key">{{ tab.label }}</button>
-        </div>
         <!-- Payment in progress (shared by recharge and subscription) -->
         <template v-if="paymentPhase === 'paying'">
           <PaymentStatusPanel
@@ -42,10 +30,13 @@
             @redirect="onStripeRedirect"
           />
         </template>
-        <!-- Tab content (select phase) -->
+        <!-- Side-by-side content (select phase) -->
         <template v-else>
-          <!-- Top-up Tab -->
-          <template v-if="activeTab === 'recharge'">
+          <div :class="selectLayoutClass">
+          <section v-if="showRechargePanel" class="space-y-4">
+            <div class="rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm dark:border-dark-700 dark:bg-dark-900">
+              <p class="text-base font-semibold tracking-tight text-gray-900 dark:text-white">{{ t('payment.tabTopUp') }}</p>
+            </div>
             <!-- Recharge Account Card -->
             <div class="card p-5">
               <p class="text-[13px] font-medium text-gray-500 dark:text-gray-400">{{ t('payment.rechargeAccount') }}</p>
@@ -68,18 +59,18 @@
             <div v-if="enabledMethods.length >= 1" class="card p-6">
               <PaymentMethodSelector
                 :methods="methodOptions"
-                :selected="selectedMethod"
-                @select="selectedMethod = $event"
+                :selected="selectedRechargeMethod"
+                @select="selectedRechargeMethod = $event"
               />
             </div>
-            <div v-if="feeRate > 0 && validAmount > 0" class="card p-6">
+            <div v-if="rechargeFeeRate > 0 && validAmount > 0" class="card p-6">
               <div class="space-y-2.5 text-sm">
                 <div class="flex justify-between">
                   <span class="text-[13px] text-gray-500 dark:text-gray-400">{{ t('payment.amountLabel') }}</span>
                   <span class="text-gray-900 dark:text-white">￥{{ validAmount.toFixed(2) }}</span>
                 </div>
                 <div class="flex justify-between">
-                  <span class="text-[13px] text-gray-500 dark:text-gray-400">{{ t('payment.fee') }} ({{ feeRate }}%)</span>
+                  <span class="text-[13px] text-gray-500 dark:text-gray-400">{{ t('payment.fee') }} ({{ rechargeFeeRate }}%)</span>
                   <span class="text-gray-900 dark:text-white">￥{{ feeAmount.toFixed(2) }}</span>
                 </div>
                 <div class="flex justify-between border-t border-gray-200 pt-3 dark:border-dark-600">
@@ -88,20 +79,22 @@
                 </div>
               </div>
             </div>
-            <button :class="['btn w-full py-3 text-base font-medium', paymentButtonClass]" :disabled="!canSubmit || submitting" @click="handleSubmitRecharge">
+            <button :class="['btn w-full py-3 text-base font-medium', rechargePaymentButtonClass]" :disabled="!canSubmit || submitting" @click="handleSubmitRecharge">
               <span v-if="submitting" class="flex items-center justify-center gap-2">
                 <span class="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
                 {{ t('common.processing') }}
               </span>
-              <span v-else>{{ t('payment.createOrder') }} ￥{{ (feeRate > 0 && validAmount > 0 ? totalAmount : validAmount).toFixed(2) }}</span>
+              <span v-else>{{ t('payment.createOrder') }} ￥{{ (rechargeFeeRate > 0 && validAmount > 0 ? totalAmount : validAmount).toFixed(2) }}</span>
             </button>
             <div v-if="errorMessage" class="rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-800/50 dark:bg-red-900/20">
               <p class="text-sm text-red-700 dark:text-red-400">{{ errorMessage }}</p>
             </div>
             </template>
-          </template>
-          <!-- Subscribe Tab -->
-          <template v-else-if="activeTab === 'subscription'">
+          </section>
+          <section class="space-y-4">
+            <div class="rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm dark:border-dark-700 dark:bg-dark-900">
+              <p class="text-base font-semibold tracking-tight text-gray-900 dark:text-white">{{ t('payment.tabSubscribe') }}</p>
+            </div>
             <!-- Subscription confirm (inline, replaces plan list) -->
             <template v-if="selectedPlan">
               <div class="card p-5">
@@ -153,18 +146,18 @@
               <div v-if="enabledMethods.length >= 1" class="card p-6">
                 <PaymentMethodSelector
                   :methods="subMethodOptions"
-                  :selected="selectedMethod"
-                  @select="selectedMethod = $event"
+                  :selected="selectedSubscriptionMethod"
+                  @select="selectedSubscriptionMethod = $event"
                 />
               </div>
-              <div v-if="feeRate > 0 && selectedPlan.price > 0" class="card p-6">
+              <div v-if="subscriptionFeeRate > 0 && selectedPlan.price > 0" class="card p-6">
                 <div class="space-y-2.5 text-sm">
                   <div class="flex justify-between">
                     <span class="text-[13px] text-gray-500 dark:text-gray-400">{{ t('payment.amountLabel') }}</span>
                     <span class="text-gray-900 dark:text-white">￥{{ selectedPlan.price.toFixed(2) }}</span>
                   </div>
                   <div class="flex justify-between">
-                    <span class="text-[13px] text-gray-500 dark:text-gray-400">{{ t('payment.fee') }} ({{ feeRate }}%)</span>
+                    <span class="text-[13px] text-gray-500 dark:text-gray-400">{{ t('payment.fee') }} ({{ subscriptionFeeRate }}%)</span>
                     <span class="text-gray-900 dark:text-white">￥{{ subFeeAmount.toFixed(2) }}</span>
                   </div>
                   <div class="flex justify-between border-t border-gray-200 pt-3 dark:border-dark-600">
@@ -173,12 +166,12 @@
                   </div>
                 </div>
               </div>
-              <button :class="['btn w-full py-3 text-base font-medium', paymentButtonClass]" :disabled="!canSubmitSubscription || submitting" @click="confirmSubscribe">
+              <button :class="['btn w-full py-3 text-base font-medium', subscriptionPaymentButtonClass]" :disabled="!canSubmitSubscription || submitting" @click="confirmSubscribe">
                 <span v-if="submitting" class="flex items-center justify-center gap-2">
                   <span class="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
                   {{ t('common.processing') }}
                 </span>
-                <span v-else>{{ t('payment.createOrder') }} ￥{{ (feeRate > 0 ? subTotalAmount : selectedPlan.price).toFixed(2) }}</span>
+                <span v-else>{{ t('payment.createOrder') }} ￥{{ (subscriptionFeeRate > 0 ? subTotalAmount : selectedPlan.price).toFixed(2) }}</span>
               </button>
               <button class="btn btn-secondary w-full" @click="selectedPlan = null">{{ t('common.cancel') }}</button>
               <div v-if="errorMessage" class="rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-800/50 dark:bg-red-900/20">
@@ -218,7 +211,8 @@
                 </div>
               </div>
             </template>
-          </template>
+          </section>
+          </div>
         </template>
         <div v-if="(checkout.help_text || checkout.help_image_url) && paymentPhase === 'select' && !selectedPlan" class="card p-4">
           <div class="flex flex-col items-center gap-3">
@@ -299,9 +293,9 @@ function getDaysRemaining(expiresAt: string): number {
 const loading = ref(true)
 const submitting = ref(false)
 const errorMessage = ref('')
-const activeTab = ref<'recharge' | 'subscription'>('recharge')
 const amount = ref<number | null>(null)
-const selectedMethod = ref('')
+const selectedRechargeMethod = ref('')
+const selectedSubscriptionMethod = ref('')
 const selectedPlan = ref<SubscriptionPlan | null>(null)
 const previewImage = ref('')
 
@@ -351,12 +345,12 @@ const checkout = ref<CheckoutInfoResponse>({
   plans: [], balance_disabled: false, help_text: '', help_image_url: '', stripe_publishable_key: '',
 })
 
-const tabs = computed(() => {
-  const result: { key: 'recharge' | 'subscription'; label: string }[] = []
-  if (!checkout.value.balance_disabled) result.push({ key: 'recharge', label: t('payment.tabTopUp') })
-  result.push({ key: 'subscription', label: t('payment.tabSubscribe') })
-  return result
-})
+const showRechargePanel = computed(() => !checkout.value.balance_disabled)
+const selectLayoutClass = computed(() =>
+  showRechargePanel.value
+    ? 'grid grid-cols-2 items-start gap-6'
+    : 'space-y-6'
+)
 
 const enabledMethods = computed(() => Object.keys(checkout.value.methods))
 const validAmount = computed(() => amount.value ?? 0)
@@ -383,7 +377,8 @@ const globalMinAmount = computed(() => checkout.value.global_min)
 const globalMaxAmount = computed(() => checkout.value.global_max)
 
 // Selected method's limits (for validation and error messages)
-const selectedLimit = computed(() => checkout.value.methods[selectedMethod.value])
+const rechargeSelectedLimit = computed(() => checkout.value.methods[selectedRechargeMethod.value])
+const subscriptionSelectedLimit = computed(() => checkout.value.methods[selectedSubscriptionMethod.value])
 
 const methodOptions = computed<PaymentMethodOption[]>(() =>
   enabledMethods.value.map((type) => {
@@ -396,14 +391,14 @@ const methodOptions = computed<PaymentMethodOption[]>(() =>
   })
 )
 
-const feeRate = computed(() => selectedLimit.value?.fee_rate ?? 0)
+const rechargeFeeRate = computed(() => rechargeSelectedLimit.value?.fee_rate ?? 0)
 const feeAmount = computed(() =>
-  feeRate.value > 0 && validAmount.value > 0
-    ? Math.ceil(((validAmount.value * feeRate.value) / 100) * 100) / 100
+  rechargeFeeRate.value > 0 && validAmount.value > 0
+    ? Math.ceil(((validAmount.value * rechargeFeeRate.value) / 100) * 100) / 100
     : 0
 )
 const totalAmount = computed(() =>
-  feeRate.value > 0 && validAmount.value > 0
+  rechargeFeeRate.value > 0 && validAmount.value > 0
     ? Math.round((validAmount.value + feeAmount.value) * 100) / 100
     : validAmount.value
 )
@@ -415,7 +410,7 @@ const amountError = computed(() => {
     return t('payment.amountNoMethod')
   }
   // Selected method can't handle this amount (but others can)
-  const ml = selectedLimit.value
+  const ml = rechargeSelectedLimit.value
   if (ml) {
     if (ml.single_min > 0 && validAmount.value < ml.single_min) return t('payment.amountTooLow', { min: ml.single_min })
     if (ml.single_max > 0 && validAmount.value > ml.single_max) return t('payment.amountTooHigh', { max: ml.single_max })
@@ -425,8 +420,8 @@ const amountError = computed(() => {
 
 const canSubmit = computed(() =>
   validAmount.value > 0
-    && amountFitsMethod(validAmount.value, selectedMethod.value)
-    && selectedLimit.value?.available !== false
+    && amountFitsMethod(validAmount.value, selectedRechargeMethod.value)
+    && rechargeSelectedLimit.value?.available !== false
 )
 
 // Subscription-specific: method options based on plan price
@@ -442,40 +437,48 @@ const subMethodOptions = computed<PaymentMethodOption[]>(() => {
   })
 })
 
+const subscriptionFeeRate = computed(() => subscriptionSelectedLimit.value?.fee_rate ?? 0)
 const subFeeAmount = computed(() => {
   const price = selectedPlan.value?.price ?? 0
-  if (feeRate.value <= 0 || price <= 0) return 0
-  return Math.ceil(((price * feeRate.value) / 100) * 100) / 100
+  if (subscriptionFeeRate.value <= 0 || price <= 0) return 0
+  return Math.ceil(((price * subscriptionFeeRate.value) / 100) * 100) / 100
 })
 
 const subTotalAmount = computed(() => {
   const price = selectedPlan.value?.price ?? 0
-  if (feeRate.value <= 0 || price <= 0) return price
+  if (subscriptionFeeRate.value <= 0 || price <= 0) return price
   return Math.round((price + subFeeAmount.value) * 100) / 100
 })
 
 const canSubmitSubscription = computed(() =>
   selectedPlan.value !== null
-    && amountFitsMethod(selectedPlan.value.price, selectedMethod.value)
-    && selectedLimit.value?.available !== false
+    && amountFitsMethod(selectedPlan.value.price, selectedSubscriptionMethod.value)
+    && subscriptionSelectedLimit.value?.available !== false
 )
 
 // Auto-switch to first available method when current selection can't handle the amount
-watch(() => [validAmount.value, selectedMethod.value] as const, ([amt, method]) => {
+watch(() => [validAmount.value, selectedRechargeMethod.value] as const, ([amt, method]) => {
   if (amt <= 0 || amountFitsMethod(amt, method)) return
   const available = enabledMethods.value.find((m) => amountFitsMethod(amt, m))
-  if (available) selectedMethod.value = available
+  if (available) selectedRechargeMethod.value = available
 })
 
-// Payment button class: follows selected payment method color
-const paymentButtonClass = computed(() => {
-  const m = selectedMethod.value
+watch(() => [selectedPlan.value?.price ?? 0, selectedSubscriptionMethod.value] as const, ([price, method]) => {
+  if (price <= 0 || amountFitsMethod(price, method)) return
+  const available = enabledMethods.value.find((m) => amountFitsMethod(price, m))
+  if (available) selectedSubscriptionMethod.value = available
+})
+
+function getPaymentButtonClass(m: string): string {
   if (!m) return 'btn-primary'
   if (m.includes('alipay')) return 'btn-alipay'
   if (m.includes('wxpay')) return 'btn-wxpay'
   if (m === 'stripe') return 'btn-stripe'
   return 'btn-primary'
-})
+}
+
+const rechargePaymentButtonClass = computed(() => getPaymentButtonClass(selectedRechargeMethod.value))
+const subscriptionPaymentButtonClass = computed(() => getPaymentButtonClass(selectedSubscriptionMethod.value))
 
 // Subscription confirm: platform accent colors (clean card, no gradient)
 const planBadgeClass = computed(() => platformBadgeClass(selectedPlan.value?.group_platform || ''))
@@ -516,21 +519,21 @@ function closeRenewalModal() {
 
 async function handleSubmitRecharge() {
   if (!canSubmit.value || submitting.value) return
-  await createOrder(validAmount.value, 'balance')
+  await createOrder(validAmount.value, 'balance', undefined, selectedRechargeMethod.value)
 }
 
 async function confirmSubscribe() {
   if (!selectedPlan.value || submitting.value) return
-  await createOrder(selectedPlan.value.price, 'subscription', selectedPlan.value.id)
+  await createOrder(selectedPlan.value.price, 'subscription', selectedPlan.value.id, selectedSubscriptionMethod.value)
 }
 
-async function createOrder(orderAmount: number, orderType: string, planId?: number) {
+async function createOrder(orderAmount: number, orderType: string, planId?: number, paymentType?: string) {
   submitting.value = true
   errorMessage.value = ''
   try {
     const result = await paymentStore.createOrder({
       amount: orderAmount,
-      payment_type: selectedMethod.value,
+      payment_type: paymentType || '',
       order_type: orderType,
       plan_id: planId,
     })
@@ -544,7 +547,7 @@ async function createOrder(orderAmount: number, orderType: string, planId?: numb
       // Stripe: show Payment Element inline (user picks method → confirms → redirect if needed)
       paymentState.value = {
         orderId: result.order_id, qrCode: '', expiresAt: result.expires_at || '',
-        paymentType: selectedMethod.value, payUrl: '',
+        paymentType: paymentType || '', payUrl: '',
         clientSecret: result.client_secret, payAmount: result.pay_amount,
         orderType,
       }
@@ -553,7 +556,7 @@ async function createOrder(orderAmount: number, orderType: string, planId?: numb
       // Mobile + pay_url: redirect directly instead of QR/popup (mobile browsers block popups)
       paymentState.value = {
         orderId: result.order_id, qrCode: '', expiresAt: result.expires_at || '',
-        paymentType: selectedMethod.value, payUrl: result.pay_url,
+        paymentType: paymentType || '', payUrl: result.pay_url,
         clientSecret: '', payAmount: 0,
         orderType,
       }
@@ -564,7 +567,7 @@ async function createOrder(orderAmount: number, orderType: string, planId?: numb
       // QR mode: show QR code inline
       paymentState.value = {
         orderId: result.order_id, qrCode: result.qr_code,
-        expiresAt: result.expires_at || '', paymentType: selectedMethod.value, payUrl: '',
+        expiresAt: result.expires_at || '', paymentType: paymentType || '', payUrl: '',
         clientSecret: '', payAmount: 0,
         orderType,
       }
@@ -574,7 +577,7 @@ async function createOrder(orderAmount: number, orderType: string, planId?: numb
       openWindow(result.pay_url)
       paymentState.value = {
         orderId: result.order_id, qrCode: '', expiresAt: result.expires_at || '',
-        paymentType: selectedMethod.value, payUrl: result.pay_url,
+        paymentType: paymentType || '', payUrl: result.pay_url,
         clientSecret: '', payAmount: 0,
         orderType,
       }
@@ -610,23 +613,17 @@ onMounted(async () => {
         const bi = order.indexOf(b)
         return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi)
       })
-      selectedMethod.value = sorted[0]
+      selectedRechargeMethod.value = sorted[0]
+      selectedSubscriptionMethod.value = sorted[0]
     }
-    if (checkout.value.balance_disabled) {
-      activeTab.value = 'subscription'
-    }
-    // Handle renewal navigation: ?tab=subscription&group=123
-    if (route.query.tab === 'subscription') {
-      activeTab.value = 'subscription'
-      if (route.query.group) {
-        const groupId = Number(route.query.group)
-        const groupPlans = checkout.value.plans.filter(p => p.group_id === groupId)
-        if (groupPlans.length === 1) {
-          selectedPlan.value = groupPlans[0]
-        } else if (groupPlans.length > 1) {
-          renewGroupId.value = groupId
-          showRenewalModal.value = true
-        }
+    if (route.query.group) {
+      const groupId = Number(route.query.group)
+      const groupPlans = checkout.value.plans.filter(p => p.group_id === groupId)
+      if (groupPlans.length === 1) {
+        selectedPlan.value = groupPlans[0]
+      } else if (groupPlans.length > 1) {
+        renewGroupId.value = groupId
+        showRenewalModal.value = true
       }
     }
   } catch (err: unknown) { appStore.showError(extractApiErrorMessage(err, t('common.error'))) }
