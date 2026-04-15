@@ -11,34 +11,42 @@
           :key="`${option.pay_amount}-${option.credit_amount}`"
           type="button"
           :class="[
-            'rounded-xl border-2 px-4 py-3.5 text-center font-medium transition-colors',
+            'group relative overflow-hidden rounded-xl border-2 px-4 py-3.5 text-center font-medium transition-all duration-200',
             modelValue === option.pay_amount
               ? 'border-primary-500 bg-primary-50 text-primary-700 dark:border-primary-400 dark:bg-primary-900/40 dark:text-primary-300'
-              : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200 dark:hover:border-dark-500',
+              : 'border-gray-200 bg-white text-gray-700 hover:border-sky-300 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200 dark:hover:border-sky-500/50',
           ]"
           @click="selectAmount(option.pay_amount)"
         >
-          <div class="text-[17px] font-semibold tracking-tight">
-            {{ option.credit_amount }}$
-          </div>
-          <div
-            :class="[
-              'mt-1.5 text-[11px] font-semibold',
-              modelValue === option.pay_amount
-                ? 'text-primary-700 dark:text-primary-200'
-                : 'text-sky-600 dark:text-sky-300',
-            ]"
-          >
-            实付金额 {{ option.pay_amount }} CNY
-          </div>
-          <div v-if="option.original_pay_amount && option.original_pay_amount > option.pay_amount" class="mt-1.5 space-y-1 text-xs">
-            <div class="text-[11px] text-gray-400 line-through dark:text-dark-500">
-              原价 {{ option.original_pay_amount }} CNY
+          <span
+            class="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+            :class="modelValue === option.pay_amount
+              ? 'bg-gradient-to-br from-primary-100/70 via-white/10 to-primary-200/40 dark:from-primary-400/15 dark:via-transparent dark:to-primary-500/10'
+              : 'bg-gradient-to-br from-sky-100 via-cyan-50 to-white dark:from-sky-500/10 dark:via-cyan-500/5 dark:to-transparent'"
+          />
+          <span class="relative block">
+            <div class="text-[17px] font-semibold tracking-tight">
+              {{ option.credit_amount }}$
             </div>
-            <div v-if="option.one_time" class="text-[11px] text-amber-600 dark:text-amber-300">
-              1x
+            <div
+              :class="[
+                'mt-1.5 text-[11px] font-semibold',
+                modelValue === option.pay_amount
+                  ? 'text-primary-700 dark:text-primary-200'
+                  : 'text-sky-600 dark:text-sky-300',
+              ]"
+            >
+              实付金额 {{ option.pay_amount }} CNY
             </div>
-          </div>
+            <div v-if="option.original_pay_amount && option.original_pay_amount > option.pay_amount" class="mt-1.5 space-y-1 text-xs">
+              <div class="text-[11px] text-gray-400 line-through dark:text-dark-500">
+                原价 {{ option.original_pay_amount }} CNY
+              </div>
+              <div v-if="option.one_time" class="text-[11px] text-amber-600 dark:text-amber-300">
+                1x
+              </div>
+            </div>
+          </span>
         </button>
       </div>
     </div>
