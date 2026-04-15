@@ -1,0 +1,1 @@
+tar --exclude=.git --exclude=frontend/node_modules --exclude=frontend/dist --exclude=backend/internal/web/dist --exclude=backend/sub2api --exclude=backend/sub2api.exe -czf sub2api-src.tar.gz .

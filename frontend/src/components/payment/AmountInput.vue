@@ -1,32 +1,32 @@
 <template>
-  <div class="space-y-4">
+  <div class="space-y-5">
     <!-- Quick Amount Buttons -->
     <div>
-      <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+      <label class="mb-2.5 block text-[13px] font-semibold text-gray-700 dark:text-gray-300">
         {{ t('payment.quickAmounts') }}
       </label>
-      <div class="grid grid-cols-3 gap-2">
+      <div class="grid grid-cols-3 gap-3">
         <button
           v-for="option in filteredOptions"
           :key="`${option.pay_amount}-${option.credit_amount}`"
           type="button"
           :class="[
-            'rounded-lg border-2 px-4 py-3 text-center font-medium transition-colors',
+            'rounded-xl border-2 px-4 py-3.5 text-center font-medium transition-colors',
             modelValue === option.pay_amount
               ? 'border-primary-500 bg-primary-50 text-primary-700 dark:border-primary-400 dark:bg-primary-900/40 dark:text-primary-300'
               : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200 dark:hover:border-dark-500',
           ]"
           @click="selectAmount(option.pay_amount)"
         >
-          <div class="text-base font-semibold">
-            {{ option.credit_amount }}
+          <div class="text-[17px] font-semibold tracking-tight">
+            {{ option.credit_amount }}$
           </div>
-          <div v-if="option.original_pay_amount && option.original_pay_amount > option.pay_amount" class="mt-1 space-y-0.5 text-xs">
-            <div class="text-gray-400 line-through dark:text-dark-500">
-              {{ t('payment.amountLabel') }} {{ option.original_pay_amount }}
-            </div>
-            <div class="font-medium text-rose-600 dark:text-rose-300">
-              {{ t('payment.actualPay') }} {{ option.pay_amount }}
+          <div class="mt-1.5 text-[11px] font-medium text-gray-500 dark:text-dark-400">
+            实付金额 {{ option.pay_amount }} CNY
+          </div>
+          <div v-if="option.original_pay_amount && option.original_pay_amount > option.pay_amount" class="mt-1.5 space-y-1 text-xs">
+            <div class="text-[11px] text-gray-400 line-through dark:text-dark-500">
+              原价 {{ option.original_pay_amount }} CNY
             </div>
             <div v-if="option.one_time" class="text-[11px] text-amber-600 dark:text-amber-300">
               1x
@@ -38,11 +38,11 @@
 
     <!-- Custom Amount Input -->
     <div>
-      <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+      <label class="mb-2.5 block text-[13px] font-semibold text-gray-700 dark:text-gray-300">
         {{ t('payment.customAmount') }}
       </label>
       <div class="relative">
-        <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-dark-500">
+        <span class="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-gray-400 dark:text-dark-500">
           $
         </span>
         <input
@@ -50,7 +50,7 @@
           inputmode="decimal"
           :value="customText"
           :placeholder="placeholderText"
-          class="input w-full py-3 pl-8 pr-4"
+          class="input w-full py-3.5 pl-8 pr-4 text-sm"
           @input="handleInput"
         />
       </div>

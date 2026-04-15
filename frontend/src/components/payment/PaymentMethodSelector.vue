@@ -1,6 +1,6 @@
 <template>
   <div>
-    <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+    <label class="mb-2.5 block text-[13px] font-semibold text-gray-700 dark:text-gray-300">
       {{ t('payment.paymentMethod') }}
     </label>
     <div class="grid grid-cols-2 gap-3 sm:flex">
@@ -10,7 +10,7 @@
         type="button"
         :disabled="!method.available"
         :class="[
-          'relative flex h-[60px] flex-col items-center justify-center rounded-lg border px-3 transition-all sm:flex-1',
+          'relative flex min-h-[68px] flex-col items-center justify-center rounded-xl border px-3 py-3 transition-all sm:flex-1',
           !method.available
             ? 'cursor-not-allowed border-gray-200 bg-gray-50 opacity-50 dark:border-dark-700 dark:bg-dark-800/50'
             : selected === method.type
@@ -19,13 +19,13 @@
         ]"
         @click="method.available && emit('select', method.type)"
       >
-        <span class="flex items-center gap-2">
+        <span class="flex items-center gap-2.5">
           <img :src="methodIcon(method.type)" :alt="t(`payment.methods.${method.type}`)" class="h-7 w-7" />
-          <span class="flex flex-col items-start leading-none">
-            <span class="text-base font-semibold">{{ t(`payment.methods.${method.type}`) }}</span>
+          <span class="flex flex-col items-start gap-1 leading-none">
+            <span class="text-[15px] font-semibold tracking-tight">{{ t(`payment.methods.${method.type}`) }}</span>
             <span
               v-if="method.fee_rate > 0"
-              class="text-[10px] tracking-wide text-gray-500 dark:text-dark-400"
+              class="text-[11px] font-medium text-gray-500 dark:text-dark-400"
             >
               {{ t('payment.fee') }} {{ method.fee_rate }}%
             </span>
