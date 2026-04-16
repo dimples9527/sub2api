@@ -153,8 +153,8 @@ describe('路由守卫逻辑', () => {
       expect(redirect).toBeNull()
     })
 
-    it('访问 /home 公开页面允许通过', () => {
-      const redirect = simulateGuard('/home', { requiresAuth: false }, authState)
+    it('访问 /register 公开页面允许通过', () => {
+      const redirect = simulateGuard('/register', { requiresAuth: false }, authState)
       expect(redirect).toBeNull()
     })
   })
