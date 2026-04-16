@@ -113,6 +113,11 @@ onMounted(async () => {
 
 <template>
   <NavigationProgress />
+  <div class="border-b border-amber-200 bg-gradient-to-r from-amber-50 via-orange-50 to-red-50 px-4 py-3 text-center shadow-sm dark:border-amber-900/60 dark:from-amber-950/90 dark:via-orange-950/80 dark:to-red-950/80">
+    <p class="text-sm font-bold tracking-wide text-red-600 dark:text-red-300 md:text-base">
+      消耗很慢，10$相当于别的中转1亿Token
+    </p>
+  </div>
   <RouterView />
   <Toast />
   <AnnouncementPopup />
