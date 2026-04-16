@@ -30,10 +30,10 @@
             </div>
             <div
               :class="[
-                'mt-1.5 text-[11px] font-semibold',
+                'mt-1.5 text-[20px] font-bold leading-tight',
                 modelValue === option.pay_amount
-                  ? 'text-primary-700 dark:text-primary-200'
-                  : 'text-sky-600 dark:text-sky-300',
+                  ? 'text-red-600 dark:text-red-400'
+                  : 'text-red-500 dark:text-red-400',
               ]"
             >
               实付金额 {{ option.pay_amount }} CNY
