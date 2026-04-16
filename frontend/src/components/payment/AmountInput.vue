@@ -43,7 +43,7 @@
                 原价 {{ option.original_pay_amount }} CNY
               </div>
               <div v-if="option.one_time" class="text-[11px] text-amber-600 dark:text-amber-300">
-                1x
+                限购一次
               </div>
             </div>
           </span>

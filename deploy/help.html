@@ -190,6 +190,43 @@ body{margin:0}
 <body class="bg-gray-50 text-gray-900">
 
 <div class="offline-wrap">
+<section id="codex-install" class="mb-8 scroll-mt-20">
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <div class="bg-gradient-to-r from-sky-500 to-blue-600 px-6 sm:px-8 py-8" style="padding:32px 24px;">
+            <h2 class="text-2xl sm:text-3xl font-bold text-white mb-2">Codex 安装方式（Node.js）</h2>
+            <p class="text-blue-100">通过 Node.js 自带的 npm 全局安装 Codex CLI，安装完成后即可在终端直接使用。</p>
+        </div>
+
+        <div class="px-6 sm:px-8 py-8" style="padding:32px 24px;">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div class="bg-blue-50 rounded-xl p-4 card-hover">
+                    <div class="font-semibold text-blue-900 mb-1">1. 准备环境</div>
+                    <p class="text-sm text-blue-700">先确保本机已经安装 Node.js 和 npm，并且终端里可以直接运行 <code class="bg-blue-100 px-1 rounded">node</code> 和 <code class="bg-blue-100 px-1 rounded">npm</code>。</p>
+                </div>
+                <div class="bg-sky-50 rounded-xl p-4 card-hover">
+                    <div class="font-semibold text-sky-900 mb-1">2. 安装 Codex</div>
+                    <p class="text-sm text-sky-700">在终端执行官方 npm 安装命令，将 Codex CLI 全局安装到当前系统。</p>
+                </div>
+                <div class="bg-cyan-50 rounded-xl p-4 card-hover">
+                    <div class="font-semibold text-cyan-900 mb-1">3. 登录并开始</div>
+                    <p class="text-sm text-cyan-700">安装完成后先执行登录命令，随后即可运行 <code class="bg-cyan-100 px-1 rounded">codex</code> 开始使用。</p>
+                </div>
+            </div>
+
+            <div class="mb-4">
+                <div class="code-label">Terminal</div>
+                <div class="code-block">npm install -g @openai/codex
+codex --login
+codex<button class="copy-btn" onclick="copyCode(this)">复制</button></div>
+            </div>
+
+            <div class="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                <p class="text-sm text-amber-800 font-semibold mb-1">说明</p>
+                <p class="text-sm text-amber-700">如果终端提示找不到 <code class="bg-amber-100 px-1 rounded">codex</code> 命令，通常是 npm 全局安装目录没有加入 PATH。重新打开终端后再试一次，或检查 npm 全局路径配置。</p>
+            </div>
+        </div>
+    </div>
+</section>
 <section id="ccswitch" class="mb-16 scroll-mt-20">
     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
         <!-- Header -->
@@ -445,5 +482,20 @@ body{margin:0}
     </div>
 </section>
 </div>
+<script>
+function copyCode(button) {
+    const code = button.parentElement.cloneNode(true);
+    const copyButton = code.querySelector('.copy-btn');
+    if (copyButton) copyButton.remove();
+    const text = code.textContent.trim();
+    navigator.clipboard.writeText(text).then(() => {
+        const original = button.textContent;
+        button.textContent = 'Copied';
+        setTimeout(() => {
+            button.textContent = original;
+        }, 1200);
+    });
+}
+</script>
 </body>
 </html>
