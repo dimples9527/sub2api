@@ -10,7 +10,10 @@ import (
 	dbuser "github.com/Wei-Shaw/sub2api/ent/user"
 )
 
-const inviteCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+const (
+	inviteCodeAlphabet       = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	inviteCodeLetterAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+)
 
 func NormalizeInviteCode(code string) string {
 	return strings.ToUpper(strings.TrimSpace(code))
@@ -23,8 +26,21 @@ func GenerateInviteCode() (string, error) {
 		return "", fmt.Errorf("generate invite code: %w", err)
 	}
 	out := make([]byte, codeLen)
+	hasLetter := false
 	for i, b := range buf {
-		out[i] = inviteCodeAlphabet[int(b)%len(inviteCodeAlphabet)]
+		ch := inviteCodeAlphabet[int(b)%len(inviteCodeAlphabet)]
+		out[i] = ch
+		if strings.IndexByte(inviteCodeLetterAlphabet, ch) >= 0 {
+			hasLetter = true
+		}
+	}
+	if !hasLetter {
+		extra := make([]byte, 2)
+		if _, err := rand.Read(extra); err != nil {
+			return "", fmt.Errorf("generate invite code: %w", err)
+		}
+		pos := int(extra[0]) % codeLen
+		out[pos] = inviteCodeLetterAlphabet[int(extra[1])%len(inviteCodeLetterAlphabet)]
 	}
 	return string(out), nil
 }
