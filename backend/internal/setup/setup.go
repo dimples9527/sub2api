@@ -404,6 +404,11 @@ func createAdminUser(cfg *SetupConfig) (bool, string, error) {
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
+	inviteCode, err := service.GenerateInviteCode()
+	if err != nil {
+		return false, "", err
+	}
+	admin.InviteCode = inviteCode
 
 	if err := admin.SetPassword(cfg.Admin.Password); err != nil {
 		return false, "", err
@@ -411,14 +416,15 @@ func createAdminUser(cfg *SetupConfig) (bool, string, error) {
 
 	_, err = db.ExecContext(
 		ctx,
-		`INSERT INTO users (email, password_hash, role, balance, concurrency, status, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		`INSERT INTO users (email, password_hash, role, balance, concurrency, status, invite_code, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 		admin.Email,
 		admin.PasswordHash,
 		admin.Role,
 		admin.Balance,
 		admin.Concurrency,
 		admin.Status,
+		admin.InviteCode,
 		admin.CreatedAt,
 		admin.UpdatedAt,
 	)

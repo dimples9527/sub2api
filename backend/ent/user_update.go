@@ -161,6 +161,47 @@ func (_u *UserUpdate) SetNillableStatus(v *string) *UserUpdate {
 	return _u
 }
 
+// SetInviteCode sets the "invite_code" field.
+func (_u *UserUpdate) SetInviteCode(v string) *UserUpdate {
+	_u.mutation.SetInviteCode(v)
+	return _u
+}
+
+// SetNillableInviteCode sets the "invite_code" field if the given value is not nil.
+func (_u *UserUpdate) SetNillableInviteCode(v *string) *UserUpdate {
+	if v != nil {
+		_u.SetInviteCode(*v)
+	}
+	return _u
+}
+
+// SetInvitedByID sets the "invited_by_id" field.
+func (_u *UserUpdate) SetInvitedByID(v int64) *UserUpdate {
+	_u.mutation.ResetInvitedByID()
+	_u.mutation.SetInvitedByID(v)
+	return _u
+}
+
+// SetNillableInvitedByID sets the "invited_by_id" field if the given value is not nil.
+func (_u *UserUpdate) SetNillableInvitedByID(v *int64) *UserUpdate {
+	if v != nil {
+		_u.SetInvitedByID(*v)
+	}
+	return _u
+}
+
+// AddInvitedByID adds value to the "invited_by_id" field.
+func (_u *UserUpdate) AddInvitedByID(v int64) *UserUpdate {
+	_u.mutation.AddInvitedByID(v)
+	return _u
+}
+
+// ClearInvitedByID clears the value of the "invited_by_id" field.
+func (_u *UserUpdate) ClearInvitedByID() *UserUpdate {
+	_u.mutation.ClearInvitedByID()
+	return _u
+}
+
 // SetUsername sets the "username" field.
 func (_u *UserUpdate) SetUsername(v string) *UserUpdate {
 	_u.mutation.SetUsername(v)
@@ -672,6 +713,11 @@ func (_u *UserUpdate) check() error {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "User.status": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.InviteCode(); ok {
+		if err := user.InviteCodeValidator(v); err != nil {
+			return &ValidationError{Name: "invite_code", err: fmt.Errorf(`ent: validator failed for field "User.invite_code": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Username(); ok {
 		if err := user.UsernameValidator(v); err != nil {
 			return &ValidationError{Name: "username", err: fmt.Errorf(`ent: validator failed for field "User.username": %w`, err)}
@@ -724,6 +770,18 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(user.FieldStatus, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.InviteCode(); ok {
+		_spec.SetField(user.FieldInviteCode, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.InvitedByID(); ok {
+		_spec.SetField(user.FieldInvitedByID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedInvitedByID(); ok {
+		_spec.AddField(user.FieldInvitedByID, field.TypeInt64, value)
+	}
+	if _u.mutation.InvitedByIDCleared() {
+		_spec.ClearField(user.FieldInvitedByID, field.TypeInt64)
 	}
 	if value, ok := _u.mutation.Username(); ok {
 		_spec.SetField(user.FieldUsername, field.TypeString, value)
@@ -1352,6 +1410,47 @@ func (_u *UserUpdateOne) SetNillableStatus(v *string) *UserUpdateOne {
 	return _u
 }
 
+// SetInviteCode sets the "invite_code" field.
+func (_u *UserUpdateOne) SetInviteCode(v string) *UserUpdateOne {
+	_u.mutation.SetInviteCode(v)
+	return _u
+}
+
+// SetNillableInviteCode sets the "invite_code" field if the given value is not nil.
+func (_u *UserUpdateOne) SetNillableInviteCode(v *string) *UserUpdateOne {
+	if v != nil {
+		_u.SetInviteCode(*v)
+	}
+	return _u
+}
+
+// SetInvitedByID sets the "invited_by_id" field.
+func (_u *UserUpdateOne) SetInvitedByID(v int64) *UserUpdateOne {
+	_u.mutation.ResetInvitedByID()
+	_u.mutation.SetInvitedByID(v)
+	return _u
+}
+
+// SetNillableInvitedByID sets the "invited_by_id" field if the given value is not nil.
+func (_u *UserUpdateOne) SetNillableInvitedByID(v *int64) *UserUpdateOne {
+	if v != nil {
+		_u.SetInvitedByID(*v)
+	}
+	return _u
+}
+
+// AddInvitedByID adds value to the "invited_by_id" field.
+func (_u *UserUpdateOne) AddInvitedByID(v int64) *UserUpdateOne {
+	_u.mutation.AddInvitedByID(v)
+	return _u
+}
+
+// ClearInvitedByID clears the value of the "invited_by_id" field.
+func (_u *UserUpdateOne) ClearInvitedByID() *UserUpdateOne {
+	_u.mutation.ClearInvitedByID()
+	return _u
+}
+
 // SetUsername sets the "username" field.
 func (_u *UserUpdateOne) SetUsername(v string) *UserUpdateOne {
 	_u.mutation.SetUsername(v)
@@ -1876,6 +1975,11 @@ func (_u *UserUpdateOne) check() error {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "User.status": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.InviteCode(); ok {
+		if err := user.InviteCodeValidator(v); err != nil {
+			return &ValidationError{Name: "invite_code", err: fmt.Errorf(`ent: validator failed for field "User.invite_code": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Username(); ok {
 		if err := user.UsernameValidator(v); err != nil {
 			return &ValidationError{Name: "username", err: fmt.Errorf(`ent: validator failed for field "User.username": %w`, err)}
@@ -1945,6 +2049,18 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(user.FieldStatus, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.InviteCode(); ok {
+		_spec.SetField(user.FieldInviteCode, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.InvitedByID(); ok {
+		_spec.SetField(user.FieldInvitedByID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedInvitedByID(); ok {
+		_spec.AddField(user.FieldInvitedByID, field.TypeInt64, value)
+	}
+	if _u.mutation.InvitedByIDCleared() {
+		_spec.ClearField(user.FieldInvitedByID, field.TypeInt64)
 	}
 	if value, ok := _u.mutation.Username(); ok {
 		_spec.SetField(user.FieldUsername, field.TypeString, value)

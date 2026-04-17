@@ -32,6 +32,8 @@ export interface User {
   balance: number // User balance for API usage
   concurrency: number // Allowed concurrent requests
   status: 'active' | 'disabled' // Account status
+  invite_code: string
+  invited_by_id?: number | null
   allowed_groups: number[] | null // Allowed group IDs (null = all non-exclusive groups)
   subscriptions?: UserSubscription[] // User's active subscriptions
   created_at: string
@@ -94,6 +96,7 @@ export interface PublicSettings {
   promo_code_enabled: boolean
   password_reset_enabled: boolean
   invitation_code_enabled: boolean
+  invitation_reward?: number
   turnstile_enabled: boolean
   turnstile_site_key: string
   site_name: string

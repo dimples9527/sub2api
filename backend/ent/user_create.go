@@ -141,6 +141,26 @@ func (_c *UserCreate) SetNillableStatus(v *string) *UserCreate {
 	return _c
 }
 
+// SetInviteCode sets the "invite_code" field.
+func (_c *UserCreate) SetInviteCode(v string) *UserCreate {
+	_c.mutation.SetInviteCode(v)
+	return _c
+}
+
+// SetInvitedByID sets the "invited_by_id" field.
+func (_c *UserCreate) SetInvitedByID(v int64) *UserCreate {
+	_c.mutation.SetInvitedByID(v)
+	return _c
+}
+
+// SetNillableInvitedByID sets the "invited_by_id" field if the given value is not nil.
+func (_c *UserCreate) SetNillableInvitedByID(v *int64) *UserCreate {
+	if v != nil {
+		_c.SetInvitedByID(*v)
+	}
+	return _c
+}
+
 // SetUsername sets the "username" field.
 func (_c *UserCreate) SetUsername(v string) *UserCreate {
 	_c.mutation.SetUsername(v)
@@ -489,6 +509,14 @@ func (_c *UserCreate) check() error {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "User.status": %w`, err)}
 		}
 	}
+	if _, ok := _c.mutation.InviteCode(); !ok {
+		return &ValidationError{Name: "invite_code", err: errors.New(`ent: missing required field "User.invite_code"`)}
+	}
+	if v, ok := _c.mutation.InviteCode(); ok {
+		if err := user.InviteCodeValidator(v); err != nil {
+			return &ValidationError{Name: "invite_code", err: fmt.Errorf(`ent: validator failed for field "User.invite_code": %w`, err)}
+		}
+	}
 	if _, ok := _c.mutation.Username(); !ok {
 		return &ValidationError{Name: "username", err: errors.New(`ent: missing required field "User.username"`)}
 	}
@@ -565,6 +593,14 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Status(); ok {
 		_spec.SetField(user.FieldStatus, field.TypeString, value)
 		_node.Status = value
+	}
+	if value, ok := _c.mutation.InviteCode(); ok {
+		_spec.SetField(user.FieldInviteCode, field.TypeString, value)
+		_node.InviteCode = value
+	}
+	if value, ok := _c.mutation.InvitedByID(); ok {
+		_spec.SetField(user.FieldInvitedByID, field.TypeInt64, value)
+		_node.InvitedByID = &value
 	}
 	if value, ok := _c.mutation.Username(); ok {
 		_spec.SetField(user.FieldUsername, field.TypeString, value)
@@ -916,6 +952,42 @@ func (u *UserUpsert) UpdateStatus() *UserUpsert {
 	return u
 }
 
+// SetInviteCode sets the "invite_code" field.
+func (u *UserUpsert) SetInviteCode(v string) *UserUpsert {
+	u.Set(user.FieldInviteCode, v)
+	return u
+}
+
+// UpdateInviteCode sets the "invite_code" field to the value that was provided on create.
+func (u *UserUpsert) UpdateInviteCode() *UserUpsert {
+	u.SetExcluded(user.FieldInviteCode)
+	return u
+}
+
+// SetInvitedByID sets the "invited_by_id" field.
+func (u *UserUpsert) SetInvitedByID(v int64) *UserUpsert {
+	u.Set(user.FieldInvitedByID, v)
+	return u
+}
+
+// UpdateInvitedByID sets the "invited_by_id" field to the value that was provided on create.
+func (u *UserUpsert) UpdateInvitedByID() *UserUpsert {
+	u.SetExcluded(user.FieldInvitedByID)
+	return u
+}
+
+// AddInvitedByID adds v to the "invited_by_id" field.
+func (u *UserUpsert) AddInvitedByID(v int64) *UserUpsert {
+	u.Add(user.FieldInvitedByID, v)
+	return u
+}
+
+// ClearInvitedByID clears the value of the "invited_by_id" field.
+func (u *UserUpsert) ClearInvitedByID() *UserUpsert {
+	u.SetNull(user.FieldInvitedByID)
+	return u
+}
+
 // SetUsername sets the "username" field.
 func (u *UserUpsert) SetUsername(v string) *UserUpsert {
 	u.Set(user.FieldUsername, v)
@@ -1163,6 +1235,48 @@ func (u *UserUpsertOne) SetStatus(v string) *UserUpsertOne {
 func (u *UserUpsertOne) UpdateStatus() *UserUpsertOne {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateStatus()
+	})
+}
+
+// SetInviteCode sets the "invite_code" field.
+func (u *UserUpsertOne) SetInviteCode(v string) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetInviteCode(v)
+	})
+}
+
+// UpdateInviteCode sets the "invite_code" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdateInviteCode() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateInviteCode()
+	})
+}
+
+// SetInvitedByID sets the "invited_by_id" field.
+func (u *UserUpsertOne) SetInvitedByID(v int64) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetInvitedByID(v)
+	})
+}
+
+// AddInvitedByID adds v to the "invited_by_id" field.
+func (u *UserUpsertOne) AddInvitedByID(v int64) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.AddInvitedByID(v)
+	})
+}
+
+// UpdateInvitedByID sets the "invited_by_id" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdateInvitedByID() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateInvitedByID()
+	})
+}
+
+// ClearInvitedByID clears the value of the "invited_by_id" field.
+func (u *UserUpsertOne) ClearInvitedByID() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.ClearInvitedByID()
 	})
 }
 
@@ -1591,6 +1705,48 @@ func (u *UserUpsertBulk) SetStatus(v string) *UserUpsertBulk {
 func (u *UserUpsertBulk) UpdateStatus() *UserUpsertBulk {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateStatus()
+	})
+}
+
+// SetInviteCode sets the "invite_code" field.
+func (u *UserUpsertBulk) SetInviteCode(v string) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetInviteCode(v)
+	})
+}
+
+// UpdateInviteCode sets the "invite_code" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdateInviteCode() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateInviteCode()
+	})
+}
+
+// SetInvitedByID sets the "invited_by_id" field.
+func (u *UserUpsertBulk) SetInvitedByID(v int64) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetInvitedByID(v)
+	})
+}
+
+// AddInvitedByID adds v to the "invited_by_id" field.
+func (u *UserUpsertBulk) AddInvitedByID(v int64) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.AddInvitedByID(v)
+	})
+}
+
+// UpdateInvitedByID sets the "invited_by_id" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdateInvitedByID() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateInvitedByID()
+	})
+}
+
+// ClearInvitedByID clears the value of the "invited_by_id" field.
+func (u *UserUpsertBulk) ClearInvitedByID() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.ClearInvitedByID()
 	})
 }
 

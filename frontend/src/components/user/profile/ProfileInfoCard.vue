@@ -40,6 +40,29 @@
           <Icon name="user" size="sm" class="text-gray-400 dark:text-gray-500" />
           <span class="truncate">{{ user.username }}</span>
         </div>
+        <div
+          v-if="user?.invite_code"
+          class="rounded-xl border border-primary-100 bg-primary-50/70 p-3 dark:border-primary-900/40 dark:bg-primary-900/10"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-xs font-medium uppercase tracking-[0.12em] text-primary-600 dark:text-primary-300">
+                {{ t('profile.inviteCode') }}
+              </p>
+              <p class="mt-1 font-mono text-base font-semibold text-gray-900 dark:text-white">
+                {{ user.invite_code }}
+              </p>
+            </div>
+            <div class="flex gap-2">
+              <button type="button" class="btn btn-sm btn-secondary" @click="copyInviteCode">
+                {{ t('profile.copyCode') }}
+              </button>
+              <button type="button" class="btn btn-sm btn-secondary" @click="copyInviteLink">
+                {{ t('profile.copyInviteLink') }}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -49,10 +72,32 @@
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import type { User } from '@/types'
+import { useAppStore } from '@/stores'
 
-defineProps<{
+const props = defineProps<{
   user: User | null
 }>()
 
 const { t } = useI18n()
+const appStore = useAppStore()
+
+async function copyText(value: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(value)
+    appStore.showSuccess(t('common.copiedToClipboard'))
+  } catch {
+    appStore.showError(t('common.copyFailed'))
+  }
+}
+
+async function copyInviteCode(): Promise<void> {
+  if (!props.user?.invite_code) return
+  await copyText(props.user.invite_code)
+}
+
+async function copyInviteLink(): Promise<void> {
+  if (!props.user?.invite_code) return
+  const link = `${window.location.origin}/register?invite=${encodeURIComponent(props.user.invite_code)}`
+  await copyText(link)
+}
 </script>

@@ -52,6 +52,12 @@ func (User) Fields() []ent.Field {
 		field.String("status").
 			MaxLen(20).
 			Default(domain.StatusActive),
+		field.String("invite_code").
+			MaxLen(16).
+			NotEmpty(),
+		field.Int64("invited_by_id").
+			Optional().
+			Nillable(),
 
 		// Optional profile fields (added later; default '' in DB migration)
 		field.String("username").

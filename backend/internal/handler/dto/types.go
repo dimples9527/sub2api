@@ -14,6 +14,8 @@ type User struct {
 	Balance       float64   `json:"balance"`
 	Concurrency   int       `json:"concurrency"`
 	Status        string    `json:"status"`
+	InviteCode    string    `json:"invite_code"`
+	InvitedByID   *int64    `json:"invited_by_id,omitempty"`
 	AllowedGroups []int64   `json:"allowed_groups"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`

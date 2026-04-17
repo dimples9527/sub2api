@@ -169,6 +169,18 @@ func (s *PromoService) invalidatePromoCaches(ctx context.Context, userID int64, 
 	s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
 }
 
+func (s *PromoService) InvalidateRewardCaches(ctx context.Context, userID int64, amount float64) {
+	s.invalidatePromoCaches(ctx, userID, amount)
+	if amount == 0 || s.billingCacheService == nil {
+		return
+	}
+	go func() {
+		cacheCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = s.billingCacheService.InvalidateUserBalance(cacheCtx, userID)
+	}()
+}
+
 // GenerateRandomCode 生成随机优惠码
 func (s *PromoService) GenerateRandomCode() (string, error) {
 	bytes := make([]byte, 8)

@@ -16,6 +16,8 @@ type User struct {
 	Balance       float64
 	Concurrency   int
 	Status        string
+	InviteCode    string
+	InvitedByID   *int64
 	AllowedGroups []int64
 	TokenVersion  int64 // Incremented on password change to invalidate existing tokens
 	CreatedAt     time.Time

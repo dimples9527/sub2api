@@ -43,13 +43,13 @@ var (
 	ErrOAuthInvitationRequired = infraerrors.Forbidden("OAUTH_INVITATION_REQUIRED", "invitation code required to complete oauth registration")
 )
 
-// maxTokenLength 限制 token 大小，避免超长 header 触发解析时的异常内存分配。
+// maxTokenLength 闄愬埗 token 澶у皬锛岄伩鍏嶈秴闀?header 瑙﹀彂瑙ｆ瀽鏃剁殑寮傚父鍐呭瓨鍒嗛厤銆?
 const maxTokenLength = 8192
 
 // refreshTokenPrefix is the prefix for refresh tokens to distinguish them from access tokens.
 const refreshTokenPrefix = "rt_"
 
-// JWTClaims JWT载荷数据
+// JWTClaims JWT杞借嵎鏁版嵁
 type JWTClaims struct {
 	UserID       int64  `json:"user_id"`
 	Email        string `json:"email"`
@@ -58,7 +58,7 @@ type JWTClaims struct {
 	jwt.RegisteredClaims
 }
 
-// AuthService 认证服务
+// AuthService 璁よ瘉鏈嶅姟
 type AuthService struct {
 	entClient          *dbent.Client
 	userRepo           UserRepository
@@ -77,7 +77,7 @@ type DefaultSubscriptionAssigner interface {
 	AssignOrExtendSubscription(ctx context.Context, input *AssignSubscriptionInput) (*UserSubscription, bool, error)
 }
 
-// NewAuthService 创建认证服务实例
+// NewAuthService 鍒涘缓璁よ瘉鏈嶅姟瀹炰緥
 func NewAuthService(
 	entClient *dbent.Client,
 	userRepo UserRepository,
@@ -106,19 +106,17 @@ func NewAuthService(
 	}
 }
 
-// Register 用户注册，返回token和用户
+// Register 鐢ㄦ埛娉ㄥ唽锛岃繑鍥瀟oken鍜岀敤鎴?
 func (s *AuthService) Register(ctx context.Context, email, password string) (string, *User, error) {
 	return s.RegisterWithVerification(ctx, email, password, "", "", "")
 }
 
-// RegisterWithVerification 用户注册（支持邮件验证、优惠码和邀请码），返回token和用户
+// RegisterWithVerification 鐢ㄦ埛娉ㄥ唽锛堟敮鎸侀偖浠堕獙璇併€佷紭鎯犵爜鍜岄個璇风爜锛夛紝杩斿洖token鍜岀敤鎴?
 func (s *AuthService) RegisterWithVerification(ctx context.Context, email, password, verifyCode, promoCode, invitationCode string) (string, *User, error) {
-	// 检查是否开放注册（默认关闭：settingService 未配置时不允许注册）
 	if s.settingService == nil || !s.settingService.IsRegistrationEnabled(ctx) {
 		return "", nil, ErrRegDisabled
 	}
 
-	// 防止用户注册 LinuxDo OAuth 合成邮箱，避免第三方登录与本地账号发生碰撞。
 	if isReservedEmail(email) {
 		return "", nil, ErrEmailReserved
 	}
@@ -126,30 +124,25 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 		return "", nil, err
 	}
 
-	// 检查是否需要邀请码
-	var invitationRedeemCode *RedeemCode
+	var inviter *User
 	if s.settingService != nil && s.settingService.IsInvitationCodeEnabled(ctx) {
-		if invitationCode == "" {
+		if strings.TrimSpace(invitationCode) == "" {
 			return "", nil, ErrInvitationCodeRequired
 		}
-		// 验证邀请码
-		redeemCode, err := s.redeemRepo.GetByCode(ctx, invitationCode)
+		resolvedInviter, err := s.lookupInviterByCode(ctx, invitationCode)
 		if err != nil {
-			logger.LegacyPrintf("service.auth", "[Auth] Invalid invitation code: %s, error: %v", invitationCode, err)
+			logger.LegacyPrintf("service.auth", "[Auth] Invalid invitation code during registration: code=%s err=%v", invitationCode, err)
 			return "", nil, ErrInvitationCodeInvalid
 		}
-		// 检查类型和状态
-		if redeemCode.Type != RedeemTypeInvitation || redeemCode.Status != StatusUnused {
-			logger.LegacyPrintf("service.auth", "[Auth] Invitation code invalid: type=%s, status=%s", redeemCode.Type, redeemCode.Status)
-			return "", nil, ErrInvitationCodeInvalid
-		}
-		invitationRedeemCode = redeemCode
+		inviter = resolvedInviter
 	}
 
-	// 检查是否需要邮件验证
+	invitationReward := 0.0
+	if inviter != nil && s.settingService != nil {
+		invitationReward = s.settingService.GetInvitationReward(ctx)
+	}
+
 	if s.settingService != nil && s.settingService.IsEmailVerifyEnabled(ctx) {
-		// 如果邮件验证已开启但邮件服务未配置，拒绝注册
-		// 这是一个配置错误，不应该允许绕过验证
 		if s.emailService == nil {
 			logger.LegacyPrintf("service.auth", "%s", "[Auth] Email verification enabled but email service not configured, rejecting registration")
 			return "", nil, ErrServiceUnavailable
@@ -157,13 +150,11 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 		if verifyCode == "" {
 			return "", nil, ErrEmailVerifyRequired
 		}
-		// 验证邮箱验证码
 		if err := s.emailService.VerifyCode(ctx, email, verifyCode); err != nil {
 			return "", nil, fmt.Errorf("verify code: %w", err)
 		}
 	}
 
-	// 检查邮箱是否已存在
 	existsEmail, err := s.userRepo.ExistsByEmail(ctx, email)
 	if err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Database error checking email exists: %v", err)
@@ -173,13 +164,11 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 		return "", nil, ErrEmailExists
 	}
 
-	// 密码哈希
 	hashedPassword, err := s.HashPassword(password)
 	if err != nil {
 		return "", nil, fmt.Errorf("hash password: %w", err)
 	}
 
-	// 获取默认配置
 	defaultBalance := s.cfg.Default.UserBalance
 	defaultConcurrency := s.cfg.Default.UserConcurrency
 	if s.settingService != nil {
@@ -187,7 +176,6 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 		defaultConcurrency = s.settingService.GetDefaultConcurrency(ctx)
 	}
 
-	// 创建用户
 	user := &User{
 		Email:        email,
 		PasswordHash: hashedPassword,
@@ -197,37 +185,22 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 		Status:       StatusActive,
 	}
 
-	if err := s.userRepo.Create(ctx, user); err != nil {
-		// 优先检查邮箱冲突错误（竞态条件下可能发生）
+	if err := s.createUserWithInvitationReward(ctx, user, inviter, invitationReward); err != nil {
 		if errors.Is(err, ErrEmailExists) {
 			return "", nil, ErrEmailExists
 		}
 		logger.LegacyPrintf("service.auth", "[Auth] Database error creating user: %v", err)
 		return "", nil, ErrServiceUnavailable
 	}
-	s.assignDefaultSubscriptions(ctx, user.ID)
 
-	// 标记邀请码为已使用（如果使用了邀请码）
-	if invitationRedeemCode != nil {
-		if err := s.redeemRepo.Use(ctx, invitationRedeemCode.ID, user.ID); err != nil {
-			// 邀请码标记失败不影响注册，只记录日志
-			logger.LegacyPrintf("service.auth", "[Auth] Failed to mark invitation code as used for user %d: %v", user.ID, err)
-		}
-	}
-	// 应用优惠码（如果提供且功能已启用）
 	if promoCode != "" && s.promoService != nil && s.settingService != nil && s.settingService.IsPromoCodeEnabled(ctx) {
 		if err := s.promoService.ApplyPromoCode(ctx, user.ID, promoCode); err != nil {
-			// 优惠码应用失败不影响注册，只记录日志
 			logger.LegacyPrintf("service.auth", "[Auth] Failed to apply promo code for user %d: %v", user.ID, err)
-		} else {
-			// 重新获取用户信息以获取更新后的余额
-			if updatedUser, err := s.userRepo.GetByID(ctx, user.ID); err == nil {
-				user = updatedUser
-			}
+		} else if updatedUser, err := s.userRepo.GetByID(ctx, user.ID); err == nil {
+			user = updatedUser
 		}
 	}
 
-	// 生成token
 	token, err := s.GenerateToken(user)
 	if err != nil {
 		return "", nil, fmt.Errorf("generate token: %w", err)
@@ -236,14 +209,14 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 	return token, user, nil
 }
 
-// SendVerifyCodeResult 发送验证码返回结果
+// SendVerifyCodeResult 鍙戦€侀獙璇佺爜杩斿洖缁撴灉
 type SendVerifyCodeResult struct {
-	Countdown int `json:"countdown"` // 倒计时秒数
+	Countdown int `json:"countdown"` // 鍊掕鏃剁鏁?
 }
 
-// SendVerifyCode 发送邮箱验证码（同步方式）
+// SendVerifyCode 鍙戦€侀偖绠遍獙璇佺爜锛堝悓姝ユ柟寮忥級
 func (s *AuthService) SendVerifyCode(ctx context.Context, email string) error {
-	// 检查是否开放注册（默认关闭）
+	// 妫€鏌ユ槸鍚﹀紑鏀炬敞鍐岋紙榛樿鍏抽棴锛?
 	if s.settingService == nil || !s.settingService.IsRegistrationEnabled(ctx) {
 		return ErrRegDisabled
 	}
@@ -255,7 +228,7 @@ func (s *AuthService) SendVerifyCode(ctx context.Context, email string) error {
 		return err
 	}
 
-	// 检查邮箱是否已存在
+	// 妫€鏌ラ偖绠辨槸鍚﹀凡瀛樺湪
 	existsEmail, err := s.userRepo.ExistsByEmail(ctx, email)
 	if err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Database error checking email exists: %v", err)
@@ -265,12 +238,12 @@ func (s *AuthService) SendVerifyCode(ctx context.Context, email string) error {
 		return ErrEmailExists
 	}
 
-	// 发送验证码
+	// 鍙戦€侀獙璇佺爜
 	if s.emailService == nil {
 		return errors.New("email service not configured")
 	}
 
-	// 获取网站名称
+	// 鑾峰彇缃戠珯鍚嶇О
 	siteName := "Sub2API"
 	if s.settingService != nil {
 		siteName = s.settingService.GetSiteName(ctx)
@@ -279,11 +252,11 @@ func (s *AuthService) SendVerifyCode(ctx context.Context, email string) error {
 	return s.emailService.SendVerifyCode(ctx, email, siteName)
 }
 
-// SendVerifyCodeAsync 异步发送邮箱验证码并返回倒计时
+// SendVerifyCodeAsync 寮傛鍙戦€侀偖绠遍獙璇佺爜骞惰繑鍥炲€掕鏃?
 func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string) (*SendVerifyCodeResult, error) {
 	logger.LegacyPrintf("service.auth", "[Auth] SendVerifyCodeAsync called for email: %s", email)
 
-	// 检查是否开放注册（默认关闭）
+	// 妫€鏌ユ槸鍚﹀紑鏀炬敞鍐岋紙榛樿鍏抽棴锛?
 	if s.settingService == nil || !s.settingService.IsRegistrationEnabled(ctx) {
 		logger.LegacyPrintf("service.auth", "%s", "[Auth] Registration is disabled")
 		return nil, ErrRegDisabled
@@ -296,7 +269,7 @@ func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string) (*S
 		return nil, err
 	}
 
-	// 检查邮箱是否已存在
+	// 妫€鏌ラ偖绠辨槸鍚﹀凡瀛樺湪
 	existsEmail, err := s.userRepo.ExistsByEmail(ctx, email)
 	if err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Database error checking email exists: %v", err)
@@ -307,19 +280,19 @@ func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string) (*S
 		return nil, ErrEmailExists
 	}
 
-	// 检查邮件队列服务是否配置
+	// 妫€鏌ラ偖浠堕槦鍒楁湇鍔℃槸鍚﹂厤缃?
 	if s.emailQueueService == nil {
 		logger.LegacyPrintf("service.auth", "%s", "[Auth] Email queue service not configured")
 		return nil, errors.New("email queue service not configured")
 	}
 
-	// 获取网站名称
+	// 鑾峰彇缃戠珯鍚嶇О
 	siteName := "Sub2API"
 	if s.settingService != nil {
 		siteName = s.settingService.GetSiteName(ctx)
 	}
 
-	// 异步发送
+	// 寮傛鍙戦€?
 	logger.LegacyPrintf("service.auth", "[Auth] Enqueueing verify code for: %s", email)
 	if err := s.emailQueueService.EnqueueVerifyCode(email, siteName); err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Failed to enqueue: %v", err)
@@ -328,13 +301,13 @@ func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string) (*S
 
 	logger.LegacyPrintf("service.auth", "[Auth] Verify code enqueued successfully for: %s", email)
 	return &SendVerifyCodeResult{
-		Countdown: 60, // 60秒倒计时
+		Countdown: 60, // 60绉掑€掕鏃?
 	}, nil
 }
 
-// VerifyTurnstileForRegister 在注册场景下验证 Turnstile。
-// 当邮箱验证开启且已提交验证码时，说明验证码发送阶段已完成 Turnstile 校验，
-// 此处跳过二次校验，避免一次性 token 在注册提交时重复使用导致误报失败。
+// VerifyTurnstileForRegister 鍦ㄦ敞鍐屽満鏅笅楠岃瘉 Turnstile銆?
+// 褰撻偖绠遍獙璇佸紑鍚笖宸叉彁浜ら獙璇佺爜鏃讹紝璇存槑楠岃瘉鐮佸彂閫侀樁娈靛凡瀹屾垚 Turnstile 鏍￠獙锛?
+// 姝ゅ璺宠繃浜屾鏍￠獙锛岄伩鍏嶄竴娆℃€?token 鍦ㄦ敞鍐屾彁浜ゆ椂閲嶅浣跨敤瀵艰嚧璇姤澶辫触銆?
 func (s *AuthService) VerifyTurnstileForRegister(ctx context.Context, token, remoteIP, verifyCode string) error {
 	if s.IsEmailVerifyEnabled(ctx) && strings.TrimSpace(verifyCode) != "" {
 		logger.LegacyPrintf("service.auth", "%s", "[Auth] Email verify flow detected, skip duplicate Turnstile check on register")
@@ -343,7 +316,7 @@ func (s *AuthService) VerifyTurnstileForRegister(ctx context.Context, token, rem
 	return s.VerifyTurnstile(ctx, token, remoteIP)
 }
 
-// VerifyTurnstile 验证Turnstile token
+// VerifyTurnstile 楠岃瘉Turnstile token
 func (s *AuthService) VerifyTurnstile(ctx context.Context, token string, remoteIP string) error {
 	required := s.cfg != nil && s.cfg.Server.Mode == "release" && s.cfg.Turnstile.Required
 
@@ -365,7 +338,7 @@ func (s *AuthService) VerifyTurnstile(ctx context.Context, token string, remoteI
 			logger.LegacyPrintf("service.auth", "%s", "[Auth] Turnstile required but service not configured")
 			return ErrTurnstileNotConfigured
 		}
-		return nil // 服务未配置则跳过验证
+		return nil // 鏈嶅姟鏈厤缃垯璺宠繃楠岃瘉
 	}
 
 	if !required && s.settingService != nil && s.settingService.IsTurnstileEnabled(ctx) && s.settingService.GetTurnstileSecretKey(ctx) == "" {
@@ -375,7 +348,7 @@ func (s *AuthService) VerifyTurnstile(ctx context.Context, token string, remoteI
 	return s.turnstileService.VerifyToken(ctx, token, remoteIP)
 }
 
-// IsTurnstileEnabled 检查是否启用Turnstile验证
+// IsTurnstileEnabled 妫€鏌ユ槸鍚﹀惎鐢═urnstile楠岃瘉
 func (s *AuthService) IsTurnstileEnabled(ctx context.Context) bool {
 	if s.turnstileService == nil {
 		return false
@@ -383,15 +356,15 @@ func (s *AuthService) IsTurnstileEnabled(ctx context.Context) bool {
 	return s.turnstileService.IsEnabled(ctx)
 }
 
-// IsRegistrationEnabled 检查是否开放注册
+// IsRegistrationEnabled 妫€鏌ユ槸鍚﹀紑鏀炬敞鍐?
 func (s *AuthService) IsRegistrationEnabled(ctx context.Context) bool {
 	if s.settingService == nil {
-		return false // 安全默认：settingService 未配置时关闭注册
+		return false // 瀹夊叏榛樿锛歴ettingService 鏈厤缃椂鍏抽棴娉ㄥ唽
 	}
 	return s.settingService.IsRegistrationEnabled(ctx)
 }
 
-// IsEmailVerifyEnabled 检查是否开启邮件验证
+// IsEmailVerifyEnabled 妫€鏌ユ槸鍚﹀紑鍚偖浠堕獙璇?
 func (s *AuthService) IsEmailVerifyEnabled(ctx context.Context) bool {
 	if s.settingService == nil {
 		return false
@@ -399,30 +372,30 @@ func (s *AuthService) IsEmailVerifyEnabled(ctx context.Context) bool {
 	return s.settingService.IsEmailVerifyEnabled(ctx)
 }
 
-// Login 用户登录，返回JWT token
+// Login 鐢ㄦ埛鐧诲綍锛岃繑鍥濲WT token
 func (s *AuthService) Login(ctx context.Context, email, password string) (string, *User, error) {
-	// 查找用户
+	// 鏌ユ壘鐢ㄦ埛
 	user, err := s.userRepo.GetByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
 			return "", nil, ErrInvalidCredentials
 		}
-		// 记录数据库错误但不暴露给用户
+		// 璁板綍鏁版嵁搴撻敊璇絾涓嶆毚闇茬粰鐢ㄦ埛
 		logger.LegacyPrintf("service.auth", "[Auth] Database error during login: %v", err)
 		return "", nil, ErrServiceUnavailable
 	}
 
-	// 验证密码
+	// 楠岃瘉瀵嗙爜
 	if !s.CheckPassword(password, user.PasswordHash) {
 		return "", nil, ErrInvalidCredentials
 	}
 
-	// 检查用户状态
+	// 妫€鏌ョ敤鎴风姸鎬?
 	if !user.IsActive() {
 		return "", nil, ErrUserNotActive
 	}
 
-	// 生成JWT token
+	// 鐢熸垚JWT token
 	token, err := s.GenerateToken(user)
 	if err != nil {
 		return "", nil, fmt.Errorf("generate token: %w", err)
@@ -431,12 +404,12 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (string
 	return token, user, nil
 }
 
-// LoginOrRegisterOAuth 用于第三方 OAuth/SSO 登录：
-// - 如果邮箱已存在：直接登录（不需要本地密码）
-// - 如果邮箱不存在：创建新用户并登录
+// LoginOrRegisterOAuth 鐢ㄤ簬绗笁鏂?OAuth/SSO 鐧诲綍锛?
+// - 濡傛灉閭宸插瓨鍦細鐩存帴鐧诲綍锛堜笉闇€瑕佹湰鍦板瘑鐮侊級
+// - 濡傛灉閭涓嶅瓨鍦細鍒涘缓鏂扮敤鎴峰苟鐧诲綍
 //
-// 注意：该函数用于 LinuxDo OAuth 登录场景（不同于上游账号的 OAuth，例如 Claude/OpenAI/Gemini）。
-// 为了满足现有数据库约束（需要密码哈希），新用户会生成随机密码并进行哈希保存。
+// 娉ㄦ剰锛氳鍑芥暟鐢ㄤ簬 LinuxDo OAuth 鐧诲綍鍦烘櫙锛堜笉鍚屼簬涓婃父璐﹀彿鐨?OAuth锛屼緥濡?Claude/OpenAI/Gemini锛夈€?
+// 涓轰簡婊¤冻鐜版湁鏁版嵁搴撶害鏉燂紙闇€瑕佸瘑鐮佸搱甯岋級锛屾柊鐢ㄦ埛浼氱敓鎴愰殢鏈哄瘑鐮佸苟杩涜鍝堝笇淇濆瓨銆?
 func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username string) (string, *User, error) {
 	email = strings.TrimSpace(email)
 	if email == "" || len(email) > 255 {
@@ -454,7 +427,7 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 	user, err := s.userRepo.GetByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
-			// OAuth 首次登录视为注册（fail-close：settingService 未配置时不允许注册）
+			// OAuth 棣栨鐧诲綍瑙嗕负娉ㄥ唽锛坒ail-close锛歴ettingService 鏈厤缃椂涓嶅厑璁告敞鍐岋級
 			if s.settingService == nil || !s.settingService.IsRegistrationEnabled(ctx) {
 				return "", nil, ErrRegDisabled
 			}
@@ -469,7 +442,7 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 				return "", nil, fmt.Errorf("hash password: %w", err)
 			}
 
-			// 新用户默认值。
+			// 鏂扮敤鎴烽粯璁ゅ€笺€?
 			defaultBalance := s.cfg.Default.UserBalance
 			defaultConcurrency := s.cfg.Default.UserConcurrency
 			if s.settingService != nil {
@@ -489,7 +462,7 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 
 			if err := s.userRepo.Create(ctx, newUser); err != nil {
 				if errors.Is(err, ErrEmailExists) {
-					// 并发场景：GetByEmail 与 Create 之间用户被创建。
+					// 骞跺彂鍦烘櫙锛欸etByEmail 涓?Create 涔嬮棿鐢ㄦ埛琚垱寤恒€?
 					user, err = s.userRepo.GetByEmail(ctx, email)
 					if err != nil {
 						logger.LegacyPrintf("service.auth", "[Auth] Database error getting user after conflict: %v", err)
@@ -513,7 +486,7 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 		return "", nil, ErrUserNotActive
 	}
 
-	// 尽力补全：当用户名为空时，使用第三方返回的用户名回填。
+	// 灏藉姏琛ュ叏锛氬綋鐢ㄦ埛鍚嶄负绌烘椂锛屼娇鐢ㄧ涓夋柟杩斿洖鐨勭敤鎴峰悕鍥炲～銆?
 	if user.Username == "" && username != "" {
 		user.Username = username
 		if err := s.userRepo.Update(ctx, user); err != nil {
@@ -528,11 +501,10 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 	return token, user, nil
 }
 
-// LoginOrRegisterOAuthWithTokenPair 用于第三方 OAuth/SSO 登录，返回完整的 TokenPair。
-// 与 LoginOrRegisterOAuth 功能相同，但返回 TokenPair 而非单个 token。
-// invitationCode 仅在邀请码注册模式下新用户注册时使用；已有账号登录时忽略。
+// LoginOrRegisterOAuthWithTokenPair 鐢ㄤ簬绗笁鏂?OAuth/SSO 鐧诲綍锛岃繑鍥炲畬鏁寸殑 TokenPair銆?
+// 涓?LoginOrRegisterOAuth 鍔熻兘鐩稿悓锛屼絾杩斿洖 TokenPair 鑰岄潪鍗曚釜 token銆?
+// invitationCode 浠呭湪閭€璇风爜娉ㄥ唽妯″紡涓嬫柊鐢ㄦ埛娉ㄥ唽鏃朵娇鐢紱宸叉湁璐﹀彿鐧诲綍鏃跺拷鐣ャ€?
 func (s *AuthService) LoginOrRegisterOAuthWithTokenPair(ctx context.Context, email, username, invitationCode string) (*TokenPair, *User, error) {
-	// 检查 refreshTokenCache 是否可用
 	if s.refreshTokenCache == nil {
 		return nil, nil, errors.New("refresh token cache not configured")
 	}
@@ -553,25 +525,26 @@ func (s *AuthService) LoginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 	user, err := s.userRepo.GetByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
-			// OAuth 首次登录视为注册
 			if s.settingService == nil || !s.settingService.IsRegistrationEnabled(ctx) {
 				return nil, nil, ErrRegDisabled
 			}
 
-			// 检查是否需要邀请码
-			var invitationRedeemCode *RedeemCode
+			var inviter *User
 			if s.settingService != nil && s.settingService.IsInvitationCodeEnabled(ctx) {
-				if invitationCode == "" {
+				if strings.TrimSpace(invitationCode) == "" {
 					return nil, nil, ErrOAuthInvitationRequired
 				}
-				redeemCode, err := s.redeemRepo.GetByCode(ctx, invitationCode)
+				resolvedInviter, err := s.lookupInviterByCode(ctx, invitationCode)
 				if err != nil {
+					logger.LegacyPrintf("service.auth", "[Auth] Invalid invitation code during oauth registration: code=%s err=%v", invitationCode, err)
 					return nil, nil, ErrInvitationCodeInvalid
 				}
-				if redeemCode.Type != RedeemTypeInvitation || redeemCode.Status != StatusUnused {
-					return nil, nil, ErrInvitationCodeInvalid
-				}
-				invitationRedeemCode = redeemCode
+				inviter = resolvedInviter
+			}
+
+			invitationReward := 0.0
+			if inviter != nil && s.settingService != nil {
+				invitationReward = s.settingService.GetInvitationReward(ctx)
 			}
 
 			randomPassword, err := randomHexString(32)
@@ -601,58 +574,19 @@ func (s *AuthService) LoginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 				Status:       StatusActive,
 			}
 
-			if s.entClient != nil && invitationRedeemCode != nil {
-				tx, err := s.entClient.Tx(ctx)
-				if err != nil {
-					logger.LegacyPrintf("service.auth", "[Auth] Failed to begin transaction for oauth registration: %v", err)
+			if err := s.createUserWithInvitationReward(ctx, newUser, inviter, invitationReward); err != nil {
+				if errors.Is(err, ErrEmailExists) {
+					user, err = s.userRepo.GetByEmail(ctx, email)
+					if err != nil {
+						logger.LegacyPrintf("service.auth", "[Auth] Database error getting user after conflict: %v", err)
+						return nil, nil, ErrServiceUnavailable
+					}
+				} else {
+					logger.LegacyPrintf("service.auth", "[Auth] Database error creating oauth user: %v", err)
 					return nil, nil, ErrServiceUnavailable
 				}
-				defer func() { _ = tx.Rollback() }()
-				txCtx := dbent.NewTxContext(ctx, tx)
-
-				if err := s.userRepo.Create(txCtx, newUser); err != nil {
-					if errors.Is(err, ErrEmailExists) {
-						user, err = s.userRepo.GetByEmail(ctx, email)
-						if err != nil {
-							logger.LegacyPrintf("service.auth", "[Auth] Database error getting user after conflict: %v", err)
-							return nil, nil, ErrServiceUnavailable
-						}
-					} else {
-						logger.LegacyPrintf("service.auth", "[Auth] Database error creating oauth user: %v", err)
-						return nil, nil, ErrServiceUnavailable
-					}
-				} else {
-					if err := s.redeemRepo.Use(txCtx, invitationRedeemCode.ID, newUser.ID); err != nil {
-						return nil, nil, ErrInvitationCodeInvalid
-					}
-					if err := tx.Commit(); err != nil {
-						logger.LegacyPrintf("service.auth", "[Auth] Failed to commit oauth registration transaction: %v", err)
-						return nil, nil, ErrServiceUnavailable
-					}
-					user = newUser
-					s.assignDefaultSubscriptions(ctx, user.ID)
-				}
 			} else {
-				if err := s.userRepo.Create(ctx, newUser); err != nil {
-					if errors.Is(err, ErrEmailExists) {
-						user, err = s.userRepo.GetByEmail(ctx, email)
-						if err != nil {
-							logger.LegacyPrintf("service.auth", "[Auth] Database error getting user after conflict: %v", err)
-							return nil, nil, ErrServiceUnavailable
-						}
-					} else {
-						logger.LegacyPrintf("service.auth", "[Auth] Database error creating oauth user: %v", err)
-						return nil, nil, ErrServiceUnavailable
-					}
-				} else {
-					user = newUser
-					s.assignDefaultSubscriptions(ctx, user.ID)
-					if invitationRedeemCode != nil {
-						if err := s.redeemRepo.Use(ctx, invitationRedeemCode.ID, user.ID); err != nil {
-							return nil, nil, ErrInvitationCodeInvalid
-						}
-					}
-				}
+				user = newUser
 			}
 		} else {
 			logger.LegacyPrintf("service.auth", "[Auth] Database error during oauth login: %v", err)
@@ -735,6 +669,115 @@ func (s *AuthService) VerifyPendingOAuthToken(tokenStr string) (email, username 
 	return claims.Email, claims.Username, nil
 }
 
+func (s *AuthService) ValidateInvitationCode(ctx context.Context, invitationCode string) error {
+	_, err := s.lookupInviterByCode(ctx, invitationCode)
+	return err
+}
+
+func (s *AuthService) lookupInviterByCode(ctx context.Context, invitationCode string) (*User, error) {
+	inviter, err := FindInviterByInviteCode(ctx, s.entClient, invitationCode)
+	if err != nil {
+		return nil, err
+	}
+	if inviter == nil || !inviter.IsActive() {
+		return nil, ErrInvitationCodeInvalid
+	}
+	return inviter, nil
+}
+
+func inviterIDPointer(inviter *User) *int64 {
+	if inviter == nil {
+		return nil
+	}
+	id := inviter.ID
+	return &id
+}
+
+func (s *AuthService) createUserWithInvitationReward(ctx context.Context, user *User, inviter *User, reward float64) error {
+	if user == nil {
+		return fmt.Errorf("user is required")
+	}
+	if user.InviteCode == "" {
+		code, err := GenerateUniqueInviteCode(ctx, s.entClient)
+		if err != nil {
+			return fmt.Errorf("generate invite code: %w", err)
+		}
+		user.InviteCode = code
+	}
+	user.InvitedByID = inviterIDPointer(inviter)
+
+	if s.entClient == nil {
+		if err := s.userRepo.Create(ctx, user); err != nil {
+			return err
+		}
+		if err := s.recordInvitationReward(ctx, inviter, reward, user.Email); err != nil {
+			return err
+		}
+		s.assignDefaultSubscriptions(ctx, user.ID)
+		s.invalidateInvitationRewardCaches(ctx, inviter, reward)
+		return nil
+	}
+
+	tx, err := s.entClient.Tx(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	txCtx := dbent.NewTxContext(ctx, tx)
+	if err := s.userRepo.Create(txCtx, user); err != nil {
+		return err
+	}
+	if err := s.recordInvitationReward(txCtx, inviter, reward, user.Email); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	s.assignDefaultSubscriptions(ctx, user.ID)
+	s.invalidateInvitationRewardCaches(ctx, inviter, reward)
+	return nil
+}
+
+func (s *AuthService) recordInvitationReward(ctx context.Context, inviter *User, reward float64, inviteeEmail string) error {
+	if inviter == nil || inviter.ID <= 0 || reward <= 0 {
+		return nil
+	}
+	if err := s.userRepo.UpdateBalance(ctx, inviter.ID, reward); err != nil {
+		return fmt.Errorf("update inviter balance: %w", err)
+	}
+	if s.redeemRepo == nil {
+		return nil
+	}
+
+	code, err := GenerateRedeemCode()
+	if err != nil {
+		return fmt.Errorf("generate invitation reward record code: %w", err)
+	}
+	usedBy := inviter.ID
+	usedAt := time.Now()
+	record := &RedeemCode{
+		Code:   strings.ToUpper(code),
+		Type:   AdjustmentTypeAdminBalance,
+		Value:  reward,
+		Status: StatusUsed,
+		UsedBy: &usedBy,
+		UsedAt: &usedAt,
+		Notes:  fmt.Sprintf("invitation reward for %s", strings.TrimSpace(inviteeEmail)),
+	}
+	if err := s.redeemRepo.Create(ctx, record); err != nil {
+		return fmt.Errorf("create invitation reward record: %w", err)
+	}
+	return nil
+}
+
+func (s *AuthService) invalidateInvitationRewardCaches(ctx context.Context, inviter *User, reward float64) {
+	if inviter == nil || reward <= 0 || s.promoService == nil {
+		return
+	}
+	s.promoService.InvalidateRewardCaches(ctx, inviter.ID, reward)
+}
 func (s *AuthService) assignDefaultSubscriptions(ctx context.Context, userID int64) {
 	if s.settingService == nil || s.defaultSubAssigner == nil || userID <= 0 {
 		return
@@ -778,23 +821,23 @@ func buildEmailSuffixNotAllowedError(whitelist []string) error {
 	})
 }
 
-// ValidateToken 验证JWT token并返回用户声明
+// ValidateToken 楠岃瘉JWT token骞惰繑鍥炵敤鎴峰０鏄?
 func (s *AuthService) ValidateToken(tokenString string) (*JWTClaims, error) {
-	// 先做长度校验，尽早拒绝异常超长 token，降低 DoS 风险。
+	// 鍏堝仛闀垮害鏍￠獙锛屽敖鏃╂嫆缁濆紓甯歌秴闀?token锛岄檷浣?DoS 椋庨櫓銆?
 	if len(tokenString) > maxTokenLength {
 		return nil, ErrTokenTooLarge
 	}
 
-	// 使用解析器并限制可接受的签名算法，防止算法混淆。
+	// 浣跨敤瑙ｆ瀽鍣ㄥ苟闄愬埗鍙帴鍙楃殑绛惧悕绠楁硶锛岄槻姝㈢畻娉曟贩娣嗐€?
 	parser := jwt.NewParser(jwt.WithValidMethods([]string{
 		jwt.SigningMethodHS256.Name,
 		jwt.SigningMethodHS384.Name,
 		jwt.SigningMethodHS512.Name,
 	}))
 
-	// 保留默认 claims 校验（exp/nbf），避免放行过期或未生效的 token。
+	// 淇濈暀榛樿 claims 鏍￠獙锛坋xp/nbf锛夛紝閬垮厤鏀捐杩囨湡鎴栨湭鐢熸晥鐨?token銆?
 	token, err := parser.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (any, error) {
-		// 验证签名方法
+		// 楠岃瘉绛惧悕鏂规硶
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
@@ -803,8 +846,8 @@ func (s *AuthService) ValidateToken(tokenString string) (*JWTClaims, error) {
 
 	if err != nil {
 		if errors.Is(err, jwt.ErrTokenExpired) {
-			// token 过期但仍返回 claims（用于 RefreshToken 等场景）
-			// jwt-go 在解析时即使遇到过期错误，token.Claims 仍会被填充
+			// token 杩囨湡浣嗕粛杩斿洖 claims锛堢敤浜?RefreshToken 绛夊満鏅級
+			// jwt-go 鍦ㄨВ鏋愭椂鍗充娇閬囧埌杩囨湡閿欒锛宼oken.Claims 浠嶄細琚～鍏?
 			if claims, ok := token.Claims.(*JWTClaims); ok {
 				return claims, ErrTokenExpired
 			}
@@ -837,15 +880,15 @@ func isReservedEmail(email string) bool {
 		strings.HasSuffix(normalized, OIDCConnectSyntheticEmailDomain)
 }
 
-// GenerateToken 生成JWT access token
-// 使用新的access_token_expire_minutes配置项（如果配置了），否则回退到expire_hour
+// GenerateToken 鐢熸垚JWT access token
+// 浣跨敤鏂扮殑access_token_expire_minutes閰嶇疆椤癸紙濡傛灉閰嶇疆浜嗭級锛屽惁鍒欏洖閫€鍒癳xpire_hour
 func (s *AuthService) GenerateToken(user *User) (string, error) {
 	now := time.Now()
 	var expiresAt time.Time
 	if s.cfg.JWT.AccessTokenExpireMinutes > 0 {
 		expiresAt = now.Add(time.Duration(s.cfg.JWT.AccessTokenExpireMinutes) * time.Minute)
 	} else {
-		// 向后兼容：使用旧的expire_hour配置
+		// 鍚戝悗鍏煎锛氫娇鐢ㄦ棫鐨別xpire_hour閰嶇疆
 		expiresAt = now.Add(time.Duration(s.cfg.JWT.ExpireHour) * time.Hour)
 	}
 
@@ -870,8 +913,8 @@ func (s *AuthService) GenerateToken(user *User) (string, error) {
 	return tokenString, nil
 }
 
-// GetAccessTokenExpiresIn 返回Access Token的有效期（秒）
-// 用于前端设置刷新定时器
+// GetAccessTokenExpiresIn 杩斿洖Access Token鐨勬湁鏁堟湡锛堢锛?
+// 鐢ㄤ簬鍓嶇璁剧疆鍒锋柊瀹氭椂鍣?
 func (s *AuthService) GetAccessTokenExpiresIn() int {
 	if s.cfg.JWT.AccessTokenExpireMinutes > 0 {
 		return s.cfg.JWT.AccessTokenExpireMinutes * 60
@@ -879,7 +922,7 @@ func (s *AuthService) GetAccessTokenExpiresIn() int {
 	return s.cfg.JWT.ExpireHour * 3600
 }
 
-// HashPassword 使用bcrypt加密密码
+// HashPassword 浣跨敤bcrypt鍔犲瘑瀵嗙爜
 func (s *AuthService) HashPassword(password string) (string, error) {
 	hashedBytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -888,21 +931,21 @@ func (s *AuthService) HashPassword(password string) (string, error) {
 	return string(hashedBytes), nil
 }
 
-// CheckPassword 验证密码是否匹配
+// CheckPassword 楠岃瘉瀵嗙爜鏄惁鍖归厤
 func (s *AuthService) CheckPassword(password, hashedPassword string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
 	return err == nil
 }
 
-// RefreshToken 刷新token
+// RefreshToken 鍒锋柊token
 func (s *AuthService) RefreshToken(ctx context.Context, oldTokenString string) (string, error) {
-	// 验证旧token（即使过期也允许，用于刷新）
+	// 楠岃瘉鏃oken锛堝嵆浣胯繃鏈熶篃鍏佽锛岀敤浜庡埛鏂帮級
 	claims, err := s.ValidateToken(oldTokenString)
 	if err != nil && !errors.Is(err, ErrTokenExpired) {
 		return "", err
 	}
 
-	// 获取最新的用户信息
+	// 鑾峰彇鏈€鏂扮殑鐢ㄦ埛淇℃伅
 	user, err := s.userRepo.GetByID(ctx, claims.UserID)
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
@@ -912,7 +955,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, oldTokenString string) (
 		return "", ErrServiceUnavailable
 	}
 
-	// 检查用户状态
+	// 妫€鏌ョ敤鎴风姸鎬?
 	if !user.IsActive() {
 		return "", ErrUserNotActive
 	}
@@ -923,12 +966,12 @@ func (s *AuthService) RefreshToken(ctx context.Context, oldTokenString string) (
 		return "", ErrTokenRevoked
 	}
 
-	// 生成新token
+	// 鐢熸垚鏂皌oken
 	return s.GenerateToken(user)
 }
 
-// IsPasswordResetEnabled 检查是否启用密码重置功能
-// 要求：必须同时开启邮件验证且 SMTP 配置正确
+// IsPasswordResetEnabled 妫€鏌ユ槸鍚﹀惎鐢ㄥ瘑鐮侀噸缃姛鑳?
+// 瑕佹眰锛氬繀椤诲悓鏃跺紑鍚偖浠堕獙璇佷笖 SMTP 閰嶇疆姝ｇ‘
 func (s *AuthService) IsPasswordResetEnabled(ctx context.Context) bool {
 	if s.settingService == nil {
 		return false
@@ -974,7 +1017,7 @@ func (s *AuthService) preparePasswordReset(ctx context.Context, email, frontendB
 	return siteName, resetURL, true
 }
 
-// RequestPasswordReset 请求密码重置（同步发送）
+// RequestPasswordReset 璇锋眰瀵嗙爜閲嶇疆锛堝悓姝ュ彂閫侊級
 // Security: Returns the same response regardless of whether the email exists (prevent user enumeration)
 func (s *AuthService) RequestPasswordReset(ctx context.Context, email, frontendBaseURL string) error {
 	if !s.IsPasswordResetEnabled(ctx) {
@@ -998,7 +1041,7 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, email, frontendB
 	return nil
 }
 
-// RequestPasswordResetAsync 异步请求密码重置（队列发送）
+// RequestPasswordResetAsync 寮傛璇锋眰瀵嗙爜閲嶇疆锛堥槦鍒楀彂閫侊級
 // Security: Returns the same response regardless of whether the email exists (prevent user enumeration)
 func (s *AuthService) RequestPasswordResetAsync(ctx context.Context, email, frontendBaseURL string) error {
 	if !s.IsPasswordResetEnabled(ctx) {
@@ -1022,7 +1065,7 @@ func (s *AuthService) RequestPasswordResetAsync(ctx context.Context, email, fron
 	return nil
 }
 
-// ResetPassword 重置密码
+// ResetPassword 閲嶇疆瀵嗙爜
 // Security: Increments TokenVersion to invalidate all existing JWT tokens
 func (s *AuthService) ResetPassword(ctx context.Context, email, token, newPassword string) error {
 	// Check if password reset is enabled
@@ -1081,11 +1124,11 @@ func (s *AuthService) ResetPassword(ctx context.Context, email, token, newPasswo
 
 // ==================== Refresh Token Methods ====================
 
-// TokenPair 包含Access Token和Refresh Token
+// TokenPair 鍖呭惈Access Token鍜孯efresh Token
 type TokenPair struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
-	ExpiresIn    int    `json:"expires_in"` // Access Token有效期（秒）
+	ExpiresIn    int    `json:"expires_in"` // Access Token鏈夋晥鏈燂紙绉掞級
 }
 
 // TokenPairWithUser extends TokenPair with user role for backend mode checks
@@ -1094,21 +1137,21 @@ type TokenPairWithUser struct {
 	UserRole string
 }
 
-// GenerateTokenPair 生成Access Token和Refresh Token对
-// familyID: 可选的Token家族ID，用于Token轮转时保持家族关系
+// GenerateTokenPair 鐢熸垚Access Token鍜孯efresh Token瀵?
+// familyID: 鍙€夌殑Token瀹舵棌ID锛岀敤浜嶵oken杞浆鏃朵繚鎸佸鏃忓叧绯?
 func (s *AuthService) GenerateTokenPair(ctx context.Context, user *User, familyID string) (*TokenPair, error) {
-	// 检查 refreshTokenCache 是否可用
+	// 妫€鏌?refreshTokenCache 鏄惁鍙敤
 	if s.refreshTokenCache == nil {
 		return nil, errors.New("refresh token cache not configured")
 	}
 
-	// 生成Access Token
+	// 鐢熸垚Access Token
 	accessToken, err := s.GenerateToken(user)
 	if err != nil {
 		return nil, fmt.Errorf("generate access token: %w", err)
 	}
 
-	// 生成Refresh Token
+	// 鐢熸垚Refresh Token
 	refreshToken, err := s.generateRefreshToken(ctx, user, familyID)
 	if err != nil {
 		return nil, fmt.Errorf("generate refresh token: %w", err)
@@ -1121,19 +1164,19 @@ func (s *AuthService) GenerateTokenPair(ctx context.Context, user *User, familyI
 	}, nil
 }
 
-// generateRefreshToken 生成并存储Refresh Token
+// generateRefreshToken 鐢熸垚骞跺瓨鍌≧efresh Token
 func (s *AuthService) generateRefreshToken(ctx context.Context, user *User, familyID string) (string, error) {
-	// 生成随机Token
+	// 鐢熸垚闅忔満Token
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		return "", fmt.Errorf("generate random bytes: %w", err)
 	}
 	rawToken := refreshTokenPrefix + hex.EncodeToString(tokenBytes)
 
-	// 计算Token哈希（存储哈希而非原始Token）
+	// 璁＄畻Token鍝堝笇锛堝瓨鍌ㄥ搱甯岃€岄潪鍘熷Token锛?
 	tokenHash := hashToken(rawToken)
 
-	// 如果没有提供familyID，生成新的
+	// 濡傛灉娌℃湁鎻愪緵familyID锛岀敓鎴愭柊鐨?
 	if familyID == "" {
 		familyBytes := make([]byte, 16)
 		if _, err := rand.Read(familyBytes); err != nil {
@@ -1153,46 +1196,46 @@ func (s *AuthService) generateRefreshToken(ctx context.Context, user *User, fami
 		ExpiresAt:    now.Add(ttl),
 	}
 
-	// 存储Token数据
+	// 瀛樺偍Token鏁版嵁
 	if err := s.refreshTokenCache.StoreRefreshToken(ctx, tokenHash, data, ttl); err != nil {
 		return "", fmt.Errorf("store refresh token: %w", err)
 	}
 
-	// 添加到用户Token集合
+	// 娣诲姞鍒扮敤鎴稵oken闆嗗悎
 	if err := s.refreshTokenCache.AddToUserTokenSet(ctx, user.ID, tokenHash, ttl); err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Failed to add token to user set: %v", err)
-		// 不影响主流程
+		// 涓嶅奖鍝嶄富娴佺▼
 	}
 
-	// 添加到家族Token集合
+	// 娣诲姞鍒板鏃廡oken闆嗗悎
 	if err := s.refreshTokenCache.AddToFamilyTokenSet(ctx, familyID, tokenHash, ttl); err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Failed to add token to family set: %v", err)
-		// 不影响主流程
+		// 涓嶅奖鍝嶄富娴佺▼
 	}
 
 	return rawToken, nil
 }
 
-// RefreshTokenPair 使用Refresh Token刷新Token对
-// 实现Token轮转：每次刷新都会生成新的Refresh Token，旧Token立即失效
+// RefreshTokenPair 浣跨敤Refresh Token鍒锋柊Token瀵?
+// 瀹炵幇Token杞浆锛氭瘡娆″埛鏂伴兘浼氱敓鎴愭柊鐨凴efresh Token锛屾棫Token绔嬪嵆澶辨晥
 func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string) (*TokenPairWithUser, error) {
-	// 检查 refreshTokenCache 是否可用
+	// 妫€鏌?refreshTokenCache 鏄惁鍙敤
 	if s.refreshTokenCache == nil {
 		return nil, ErrRefreshTokenInvalid
 	}
 
-	// 验证Token格式
+	// 楠岃瘉Token鏍煎紡
 	if !strings.HasPrefix(refreshToken, refreshTokenPrefix) {
 		return nil, ErrRefreshTokenInvalid
 	}
 
 	tokenHash := hashToken(refreshToken)
 
-	// 获取Token数据
+	// 鑾峰彇Token鏁版嵁
 	data, err := s.refreshTokenCache.GetRefreshToken(ctx, tokenHash)
 	if err != nil {
 		if errors.Is(err, ErrRefreshTokenNotFound) {
-			// Token不存在，可能是已被使用（Token轮转）或已过期
+			// Token涓嶅瓨鍦紝鍙兘鏄凡琚娇鐢紙Token杞浆锛夋垨宸茶繃鏈?
 			logger.LegacyPrintf("service.auth", "[Auth] Refresh token not found, possible reuse attack")
 			return nil, ErrRefreshTokenInvalid
 		}
@@ -1200,18 +1243,18 @@ func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string)
 		return nil, ErrServiceUnavailable
 	}
 
-	// 检查Token是否过期
+	// 妫€鏌oken鏄惁杩囨湡
 	if time.Now().After(data.ExpiresAt) {
-		// 删除过期Token
+		// 鍒犻櫎杩囨湡Token
 		_ = s.refreshTokenCache.DeleteRefreshToken(ctx, tokenHash)
 		return nil, ErrRefreshTokenExpired
 	}
 
-	// 获取用户信息
+	// 鑾峰彇鐢ㄦ埛淇℃伅
 	user, err := s.userRepo.GetByID(ctx, data.UserID)
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
-			// 用户已删除，撤销整个Token家族
+			// 鐢ㄦ埛宸插垹闄わ紝鎾ら攢鏁翠釜Token瀹舵棌
 			_ = s.refreshTokenCache.DeleteTokenFamily(ctx, data.FamilyID)
 			return nil, ErrRefreshTokenInvalid
 		}
@@ -1219,27 +1262,27 @@ func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string)
 		return nil, ErrServiceUnavailable
 	}
 
-	// 检查用户状态
+	// 妫€鏌ョ敤鎴风姸鎬?
 	if !user.IsActive() {
-		// 用户被禁用，撤销整个Token家族
+		// 鐢ㄦ埛琚鐢紝鎾ら攢鏁翠釜Token瀹舵棌
 		_ = s.refreshTokenCache.DeleteTokenFamily(ctx, data.FamilyID)
 		return nil, ErrUserNotActive
 	}
 
-	// 检查TokenVersion（密码更改后所有Token失效）
+	// 妫€鏌okenVersion锛堝瘑鐮佹洿鏀瑰悗鎵€鏈塗oken澶辨晥锛?
 	if data.TokenVersion != user.TokenVersion {
-		// TokenVersion不匹配，撤销整个Token家族
+		// TokenVersion涓嶅尮閰嶏紝鎾ら攢鏁翠釜Token瀹舵棌
 		_ = s.refreshTokenCache.DeleteTokenFamily(ctx, data.FamilyID)
 		return nil, ErrTokenRevoked
 	}
 
-	// Token轮转：立即使旧Token失效
+	// Token杞浆锛氱珛鍗充娇鏃oken澶辨晥
 	if err := s.refreshTokenCache.DeleteRefreshToken(ctx, tokenHash); err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Failed to delete old refresh token: %v", err)
-		// 继续处理，不影响主流程
+		// 缁х画澶勭悊锛屼笉褰卞搷涓绘祦绋?
 	}
 
-	// 生成新的Token对，保持同一个家族ID
+	// 鐢熸垚鏂扮殑Token瀵癸紝淇濇寔鍚屼竴涓鏃廔D
 	pair, err := s.GenerateTokenPair(ctx, user, data.FamilyID)
 	if err != nil {
 		return nil, err
@@ -1250,7 +1293,7 @@ func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string)
 	}, nil
 }
 
-// RevokeRefreshToken 撤销单个Refresh Token
+// RevokeRefreshToken 鎾ら攢鍗曚釜Refresh Token
 func (s *AuthService) RevokeRefreshToken(ctx context.Context, refreshToken string) error {
 	if s.refreshTokenCache == nil {
 		return nil // No-op if cache not configured
@@ -1263,8 +1306,8 @@ func (s *AuthService) RevokeRefreshToken(ctx context.Context, refreshToken strin
 	return s.refreshTokenCache.DeleteRefreshToken(ctx, tokenHash)
 }
 
-// RevokeAllUserSessions 撤销用户的所有会话（所有Refresh Token）
-// 用于密码更改或用户主动登出所有设备
+// RevokeAllUserSessions 鎾ら攢鐢ㄦ埛鐨勬墍鏈変細璇濓紙鎵€鏈塕efresh Token锛?
+// 鐢ㄤ簬瀵嗙爜鏇存敼鎴栫敤鎴蜂富鍔ㄧ櫥鍑烘墍鏈夎澶?
 func (s *AuthService) RevokeAllUserSessions(ctx context.Context, userID int64) error {
 	if s.refreshTokenCache == nil {
 		return nil // No-op if cache not configured
@@ -1272,7 +1315,7 @@ func (s *AuthService) RevokeAllUserSessions(ctx context.Context, userID int64) e
 	return s.refreshTokenCache.DeleteUserRefreshTokens(ctx, userID)
 }
 
-// hashToken 计算Token的SHA256哈希
+// hashToken 璁＄畻Token鐨凷HA256鍝堝笇
 func hashToken(token string) string {
 	hash := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(hash[:])

@@ -868,6 +868,9 @@ export default {
     passwordTooShort: '密码至少需要 8 个字符',
     passwordChangeSuccess: '密码修改成功',
     passwordChangeFailed: '密码修改失败',
+    inviteCode: '邀请码',
+    copyCode: '复制邀请码',
+    copyInviteLink: '复制邀请链接',
     // TOTP 2FA
     totp: {
       title: '双因素认证 (2FA)',
@@ -4387,6 +4390,9 @@ export default {
         promoCodeHint: '允许用户在注册时使用优惠码',
         invitationCode: '邀请码注册',
         invitationCodeHint: '开启后，用户注册时需要填写有效的邀请码',
+        invitationReward: '邀请奖励',
+        invitationRewardPlaceholder: '0.00',
+        invitationRewardHint: '新用户通过邀请码注册成功后，给邀请人增加的余额',
         passwordReset: '忘记密码',
         passwordResetHint: '允许用户通过邮箱重置密码',
         frontendUrl: '前端地址',

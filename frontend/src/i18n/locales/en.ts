@@ -864,6 +864,9 @@ export default {
     passwordTooShort: 'Password must be at least 8 characters long',
     passwordChangeSuccess: 'Password changed successfully',
     passwordChangeFailed: 'Failed to change password',
+    inviteCode: 'Invite Code',
+    copyCode: 'Copy Code',
+    copyInviteLink: 'Copy Invite Link',
     // TOTP 2FA
     totp: {
       title: 'Two-Factor Authentication (2FA)',
@@ -4222,6 +4225,9 @@ export default {
         promoCodeHint: 'Allow users to use promo codes during registration',
         invitationCode: 'Invitation Code Registration',
         invitationCodeHint: 'When enabled, users must enter a valid invitation code to register',
+        invitationReward: 'Invitation Reward',
+        invitationRewardPlaceholder: '0.00',
+        invitationRewardHint: 'Reward balance credited to the inviter after successful registration',
         passwordReset: 'Password Reset',
         passwordResetHint: 'Allow users to reset their password via email',
         frontendUrl: 'Frontend URL',
