@@ -244,7 +244,12 @@ func (h *PaymentHandler) CreateProvider(c *gin.Context) {
 		return
 	}
 	h.paymentService.RefreshProviders(c.Request.Context())
-	response.Created(c, inst)
+	provider, err := h.configService.GetProviderInstanceWithConfig(c.Request.Context(), int64(inst.ID))
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Created(c, provider)
 }
 
 // UpdateProvider updates an existing payment provider instance.
@@ -265,7 +270,12 @@ func (h *PaymentHandler) UpdateProvider(c *gin.Context) {
 		return
 	}
 	h.paymentService.RefreshProviders(c.Request.Context())
-	response.Success(c, inst)
+	provider, err := h.configService.GetProviderInstanceWithConfig(c.Request.Context(), int64(inst.ID))
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, provider)
 }
 
 // DeleteProvider deletes a payment provider instance.

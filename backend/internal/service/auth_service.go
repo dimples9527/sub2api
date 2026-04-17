@@ -13,6 +13,7 @@ import (
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	dbuser "github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -40,6 +41,7 @@ var (
 	ErrServiceUnavailable      = infraerrors.ServiceUnavailable("SERVICE_UNAVAILABLE", "service temporarily unavailable")
 	ErrInvitationCodeRequired  = infraerrors.BadRequest("INVITATION_CODE_REQUIRED", "invitation code is required")
 	ErrInvitationCodeInvalid   = infraerrors.BadRequest("INVITATION_CODE_INVALID", "invalid or used invitation code")
+	ErrInvitationLimitReached  = infraerrors.BadRequest("INVITATION_LIMIT_REACHED", "invitation limit reached")
 	ErrOAuthInvitationRequired = infraerrors.Forbidden("OAUTH_INVITATION_REQUIRED", "invitation code required to complete oauth registration")
 )
 
@@ -131,8 +133,12 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 		}
 		resolvedInviter, err := s.lookupInviterByCode(ctx, invitationCode)
 		if err != nil {
-			logger.LegacyPrintf("service.auth", "[Auth] Invalid invitation code during registration: code=%s err=%v", invitationCode, err)
-			return "", nil, ErrInvitationCodeInvalid
+			if errors.Is(err, ErrInvitationCodeInvalid) || errors.Is(err, ErrInvitationLimitReached) {
+				logger.LegacyPrintf("service.auth", "[Auth] Invitation code rejected during registration: code=%s err=%v", invitationCode, err)
+				return "", nil, err
+			}
+			logger.LegacyPrintf("service.auth", "[Auth] Failed to validate invitation code during registration: code=%s err=%v", invitationCode, err)
+			return "", nil, ErrServiceUnavailable
 		}
 		inviter = resolvedInviter
 	}
@@ -536,8 +542,12 @@ func (s *AuthService) LoginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 				}
 				resolvedInviter, err := s.lookupInviterByCode(ctx, invitationCode)
 				if err != nil {
-					logger.LegacyPrintf("service.auth", "[Auth] Invalid invitation code during oauth registration: code=%s err=%v", invitationCode, err)
-					return nil, nil, ErrInvitationCodeInvalid
+					if errors.Is(err, ErrInvitationCodeInvalid) || errors.Is(err, ErrInvitationLimitReached) {
+						logger.LegacyPrintf("service.auth", "[Auth] Invitation code rejected during oauth registration: code=%s err=%v", invitationCode, err)
+						return nil, nil, err
+					}
+					logger.LegacyPrintf("service.auth", "[Auth] Failed to validate invitation code during oauth registration: code=%s err=%v", invitationCode, err)
+					return nil, nil, ErrServiceUnavailable
 				}
 				inviter = resolvedInviter
 			}
@@ -682,7 +692,33 @@ func (s *AuthService) lookupInviterByCode(ctx context.Context, invitationCode st
 	if inviter == nil || !inviter.IsActive() {
 		return nil, ErrInvitationCodeInvalid
 	}
+	if err := s.ensureInvitationLimitAvailable(ctx, inviter); err != nil {
+		return nil, err
+	}
 	return inviter, nil
+}
+
+func (s *AuthService) ensureInvitationLimitAvailable(ctx context.Context, inviter *User) error {
+	if inviter == nil || inviter.ID <= 0 || s.settingService == nil {
+		return nil
+	}
+
+	limit := s.settingService.GetInvitationLimit(ctx)
+	if limit <= 0 {
+		return nil
+	}
+	if s.entClient == nil {
+		return ErrServiceUnavailable
+	}
+
+	count, err := s.entClient.User.Query().Where(dbuser.InvitedByIDEQ(inviter.ID)).Count(ctx)
+	if err != nil {
+		return fmt.Errorf("count invited users: %w", err)
+	}
+	if count >= limit {
+		return ErrInvitationLimitReached
+	}
+	return nil
 }
 
 func inviterIDPointer(inviter *User) *int64 {

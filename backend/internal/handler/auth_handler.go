@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"log/slog"
 	"strings"
 
@@ -401,10 +402,21 @@ func (h *AuthHandler) ValidateInvitationCode(c *gin.Context) {
 	}
 
 	if err := h.authService.ValidateInvitationCode(c.Request.Context(), req.Code); err != nil {
-		response.Success(c, ValidateInvitationCodeResponse{
-			Valid:     false,
-			ErrorCode: "INVITATION_CODE_NOT_FOUND",
-		})
+		if errors.Is(err, service.ErrInvitationCodeInvalid) {
+			response.Success(c, ValidateInvitationCodeResponse{
+				Valid:     false,
+				ErrorCode: "INVITATION_CODE_INVALID",
+			})
+			return
+		}
+		if errors.Is(err, service.ErrInvitationLimitReached) {
+			response.Success(c, ValidateInvitationCodeResponse{
+				Valid:     false,
+				ErrorCode: "INVITATION_LIMIT_REACHED",
+			})
+			return
+		}
+		response.ErrorFrom(c, err)
 		return
 	}
 

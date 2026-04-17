@@ -59,7 +59,22 @@ func (s *PaymentConfigService) ListProviderInstancesWithConfig(ctx context.Conte
 }
 
 func (s *PaymentConfigService) decryptAndMaskConfig(encrypted string) (map[string]string, error) {
-	return s.decryptConfig(encrypted)
+	cfg, err := s.decryptConfig(encrypted)
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil {
+		return nil, nil
+	}
+	masked := make(map[string]string, len(cfg))
+	for k, v := range cfg {
+		if isSensitiveConfigField(k) && strings.TrimSpace(v) != "" {
+			masked[k] = maskedSensitiveConfigValue
+			continue
+		}
+		masked[k] = v
+	}
+	return masked, nil
 }
 
 // pendingOrderStatuses are order statuses considered "in progress".
@@ -68,6 +83,8 @@ var pendingOrderStatuses = []string{
 	payment.OrderStatusPaid,
 	payment.OrderStatusRecharging,
 }
+
+const maskedSensitiveConfigValue = "••••••••"
 
 var sensitiveConfigPatterns = []string{"key", "pkey", "secret", "private", "password"}
 
@@ -128,19 +145,85 @@ func validateProviderRequest(providerKey, name, supportedTypes string) error {
 	return nil
 }
 
+func isMaskedSensitiveConfigValue(value string) bool {
+	return strings.TrimSpace(value) == maskedSensitiveConfigValue
+}
+
+func (s *PaymentConfigService) getProviderInstance(ctx context.Context, id int64) (*dbent.PaymentProviderInstance, error) {
+	inst, err := s.entClient.PaymentProviderInstance.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("load provider instance: %w", err)
+	}
+	return inst, nil
+}
+
+func (s *PaymentConfigService) GetProviderInstanceWithConfig(ctx context.Context, id int64) (*ProviderInstanceResponse, error) {
+	inst, err := s.getProviderInstance(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := s.decryptAndMaskConfig(inst.Config)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt config for instance %d: %w", inst.ID, err)
+	}
+	return &ProviderInstanceResponse{
+		ID:             int64(inst.ID),
+		ProviderKey:    inst.ProviderKey,
+		Name:           inst.Name,
+		Config:         cfg,
+		SupportedTypes: splitTypes(inst.SupportedTypes),
+		Limits:         inst.Limits,
+		Enabled:        inst.Enabled,
+		RefundEnabled:  inst.RefundEnabled,
+		SortOrder:      inst.SortOrder,
+		PaymentMode:    inst.PaymentMode,
+	}, nil
+}
+
+func (s *PaymentConfigService) loadProviderConfig(ctx context.Context, id int64) (map[string]string, error) {
+	inst, err := s.getProviderInstance(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	existing, err := s.decryptConfig(inst.Config)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt existing config for instance %d: %w", id, err)
+	}
+	return existing, nil
+}
+
+func (s *PaymentConfigService) hasSensitiveConfigChanges(ctx context.Context, id int64, newConfig map[string]string) (bool, error) {
+	if len(newConfig) == 0 {
+		return false, nil
+	}
+	existing, err := s.loadProviderConfig(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	for k, v := range newConfig {
+		if !isSensitiveConfigField(k) {
+			continue
+		}
+		if strings.TrimSpace(v) == "" || isMaskedSensitiveConfigValue(v) {
+			continue
+		}
+		if existing == nil || existing[k] != v {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // UpdateProviderInstance updates a provider instance by ID (patch semantics).
 // NOTE: This function exceeds 30 lines due to per-field nil-check patch update
 // boilerplate and pending-order safety checks.
 func (s *PaymentConfigService) UpdateProviderInstance(ctx context.Context, id int64, req UpdateProviderInstanceRequest) (*dbent.PaymentProviderInstance, error) {
 	if req.Config != nil {
-		hasSensitive := false
-		for k := range req.Config {
-			if isSensitiveConfigField(k) && req.Config[k] != "" {
-				hasSensitive = true
-				break
-			}
+		hasSensitiveChanges, err := s.hasSensitiveConfigChanges(ctx, id, req.Config)
+		if err != nil {
+			return nil, err
 		}
-		if hasSensitive {
+		if hasSensitiveChanges {
 			count, err := s.countPendingOrders(ctx, id)
 			if err != nil {
 				return nil, fmt.Errorf("check pending orders: %w", err)
@@ -152,13 +235,19 @@ func (s *PaymentConfigService) UpdateProviderInstance(ctx context.Context, id in
 		}
 	}
 	if req.Enabled != nil && !*req.Enabled {
-		count, err := s.countPendingOrders(ctx, id)
+		inst, err := s.getProviderInstance(ctx, id)
 		if err != nil {
-			return nil, fmt.Errorf("check pending orders: %w", err)
+			return nil, err
 		}
-		if count > 0 {
-			return nil, infraerrors.Conflict("PENDING_ORDERS", "instance has pending orders").
-				WithMetadata(map[string]string{"count": strconv.Itoa(count)})
+		if inst.Enabled {
+			count, err := s.countPendingOrders(ctx, id)
+			if err != nil {
+				return nil, fmt.Errorf("check pending orders: %w", err)
+			}
+			if count > 0 {
+				return nil, infraerrors.Conflict("PENDING_ORDERS", "instance has pending orders").
+					WithMetadata(map[string]string{"count": strconv.Itoa(count)})
+			}
 		}
 	}
 	u := s.entClient.PaymentProviderInstance.UpdateOneID(id)
@@ -229,21 +318,21 @@ func (s *PaymentConfigService) UpdateProviderInstance(ctx context.Context, id in
 }
 
 func (s *PaymentConfigService) mergeConfig(ctx context.Context, id int64, newConfig map[string]string) (map[string]string, error) {
-	inst, err := s.entClient.PaymentProviderInstance.Get(ctx, id)
+	existing, err := s.loadProviderConfig(ctx, id)
 	if err != nil {
-		return nil, fmt.Errorf("load existing provider: %w", err)
+		return nil, err
 	}
-	existing, err := s.decryptConfig(inst.Config)
-	if err != nil {
-		return nil, fmt.Errorf("decrypt existing config for instance %d: %w", id, err)
-	}
-	if existing == nil {
-		return newConfig, nil
+	merged := make(map[string]string, len(existing)+len(newConfig))
+	for k, v := range existing {
+		merged[k] = v
 	}
 	for k, v := range newConfig {
-		existing[k] = v
+		if isSensitiveConfigField(k) && isMaskedSensitiveConfigValue(v) {
+			continue
+		}
+		merged[k] = v
 	}
-	return existing, nil
+	return merged, nil
 }
 
 func (s *PaymentConfigService) decryptConfig(encrypted string) (map[string]string, error) {

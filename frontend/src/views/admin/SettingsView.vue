@@ -909,6 +909,21 @@
               <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.settings.registration.invitationRewardHint') }}
               </p>
+
+              <label class="mb-2 mt-4 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {{ t('admin.settings.registration.invitationLimit') }}
+              </label>
+              <input
+                v-model.number="form.invitation_limit"
+                type="number"
+                min="0"
+                step="1"
+                class="input"
+                :placeholder="t('admin.settings.registration.invitationLimitPlaceholder')"
+              />
+              <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.settings.registration.invitationLimitHint') }}
+              </p>
             </div>
             <!-- Password Reset - Only show when email verification is enabled -->
             <div
@@ -1789,6 +1804,21 @@
                   {{ t('admin.settings.site.siteSubtitleHint') }}
                 </p>
               </div>
+            </div>
+
+            <div>
+              <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {{ t('admin.settings.site.globalBannerMessage') }}
+              </label>
+              <textarea
+                v-model="form.global_banner_message"
+                rows="3"
+                class="input"
+                :placeholder="t('admin.settings.site.globalBannerMessagePlaceholder')"
+              ></textarea>
+              <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.settings.site.globalBannerMessageHint') }}
+              </p>
             </div>
 
             <!-- API Base URL -->
@@ -2677,6 +2707,7 @@ const form = reactive<SettingsForm>({
   promo_code_enabled: true,
   invitation_code_enabled: false,
   invitation_reward: 0,
+  invitation_limit: 0,
   password_reset_enabled: false,
   totp_enabled: false,
   totp_encryption_key_configured: false,
@@ -2686,6 +2717,7 @@ const form = reactive<SettingsForm>({
   site_name: 'Sub2API',
   site_logo: '',
   site_subtitle: 'Subscription to API Conversion Platform',
+  global_banner_message: '欢迎亲测，消耗很慢，10$相当于别的中转1亿Token',
   api_base_url: '',
   contact_info: '',
   doc_url: '',
@@ -3095,6 +3127,7 @@ async function saveSettings() {
       promo_code_enabled: form.promo_code_enabled,
       invitation_code_enabled: form.invitation_code_enabled,
       invitation_reward: form.invitation_code_enabled ? Number(form.invitation_reward) || 0 : 0,
+      invitation_limit: form.invitation_code_enabled ? Math.max(0, Math.trunc(Number(form.invitation_limit) || 0)) : 0,
       password_reset_enabled: form.password_reset_enabled,
       totp_enabled: form.totp_enabled,
       default_balance: form.default_balance,
@@ -3103,6 +3136,7 @@ async function saveSettings() {
       site_name: form.site_name,
       site_logo: form.site_logo,
       site_subtitle: form.site_subtitle,
+      global_banner_message: form.global_banner_message,
       api_base_url: form.api_base_url,
       contact_info: form.contact_info,
       doc_url: form.doc_url,

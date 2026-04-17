@@ -564,6 +564,8 @@ function getInvitationErrorMessage(errorCode?: string): string {
       return t('auth.invitationCodeInvalid')
     case 'INVITATION_CODE_INVALID':
       return t('auth.invitationCodeInvalid')
+    case 'INVITATION_LIMIT_REACHED':
+      return t('auth.invitationLimitReached')
     case 'INVITATION_CODE_USED':
       return t('auth.invitationCodeInvalid')
     case 'INVITATION_CODE_DISABLED':

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { RouterView, useRouter, useRoute } from 'vue-router'
-import { onMounted, onBeforeUnmount, watch } from 'vue'
+import { computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import Toast from '@/components/common/Toast.vue'
 import NavigationProgress from '@/components/common/NavigationProgress.vue'
 import { resolveDocumentTitle } from '@/router/title'
@@ -14,7 +14,7 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 const subscriptionStore = useSubscriptionStore()
 const announcementStore = useAnnouncementStore()
-const globalBannerMessage = '欢迎亲测，消耗很慢，10$相当于别的中转1亿Token'
+const globalBannerMessage = computed(() => (appStore.globalBannerMessage || '').trim())
 
 /**
  * Update favicon dynamically
@@ -114,7 +114,7 @@ onMounted(async () => {
 
 <template>
   <NavigationProgress />
-  <div class="global-banner">
+  <div v-if="globalBannerMessage" class="global-banner">
     <div class="global-banner__glow" aria-hidden="true"></div>
     <div class="global-banner__inner">
       <div class="global-banner__badge" aria-hidden="true">

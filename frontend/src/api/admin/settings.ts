@@ -24,6 +24,7 @@ export interface SystemSettings {
   frontend_url: string
   invitation_code_enabled: boolean
   invitation_reward: number
+  invitation_limit: number
   totp_enabled: boolean // TOTP 双因素认证
   totp_encryption_key_configured: boolean // TOTP 加密密钥是否已配置
   // Default settings
@@ -34,6 +35,7 @@ export interface SystemSettings {
   site_name: string
   site_logo: string
   site_subtitle: string
+  global_banner_message?: string
   api_base_url: string
   contact_info: string
   doc_url: string
@@ -146,6 +148,7 @@ export interface UpdateSettingsRequest {
   frontend_url?: string
   invitation_code_enabled?: boolean
   invitation_reward?: number
+  invitation_limit?: number
   totp_enabled?: boolean // TOTP 双因素认证
   default_balance?: number
   default_concurrency?: number
@@ -153,6 +156,7 @@ export interface UpdateSettingsRequest {
   site_name?: string
   site_logo?: string
   site_subtitle?: string
+  global_banner_message?: string
   api_base_url?: string
   contact_info?: string
   doc_url?: string

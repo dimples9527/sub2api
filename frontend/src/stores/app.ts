@@ -26,6 +26,7 @@ export const useAppStore = defineStore('app', () => {
   const publicSettingsLoading = ref<boolean>(false)
   const siteName = ref<string>('Sub2API')
   const siteLogo = ref<string>('')
+  const globalBannerMessage = ref<string>('')
   const siteVersion = ref<string>('')
   const contactInfo = ref<string>('')
   const apiBaseUrl = ref<string>('')
@@ -290,6 +291,7 @@ export const useAppStore = defineStore('app', () => {
     cachedPublicSettings.value = config
     siteName.value = config.site_name || 'Sub2API'
     siteLogo.value = config.site_logo || ''
+    globalBannerMessage.value = config.global_banner_message || ''
     siteVersion.value = config.version || ''
     contactInfo.value = config.contact_info || ''
     apiBaseUrl.value = config.api_base_url || ''
@@ -325,6 +327,7 @@ export const useAppStore = defineStore('app', () => {
         site_name: siteName.value,
         site_logo: siteLogo.value,
         site_subtitle: '',
+        global_banner_message: globalBannerMessage.value,
         api_base_url: apiBaseUrl.value,
         contact_info: contactInfo.value,
         doc_url: docUrl.value,
@@ -395,6 +398,7 @@ export const useAppStore = defineStore('app', () => {
     publicSettingsLoaded,
     siteName,
     siteLogo,
+    globalBannerMessage,
     siteVersion,
     contactInfo,
     apiBaseUrl,

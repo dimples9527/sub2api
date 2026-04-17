@@ -156,6 +156,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeySiteName,
 		SettingKeySiteLogo,
 		SettingKeySiteSubtitle,
+		SettingKeyGlobalBannerMessage,
 		SettingKeyAPIBaseURL,
 		SettingKeyContactInfo,
 		SettingKeyDocURL,
@@ -224,6 +225,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SiteName:                         s.getStringOrDefault(settings, SettingKeySiteName, "Sub2API"),
 		SiteLogo:                         settings[SettingKeySiteLogo],
 		SiteSubtitle:                     s.getStringOrDefault(settings, SettingKeySiteSubtitle, "Subscription to API Conversion Platform"),
+		GlobalBannerMessage:              settings[SettingKeyGlobalBannerMessage],
 		APIBaseURL:                       settings[SettingKeyAPIBaseURL],
 		ContactInfo:                      settings[SettingKeyContactInfo],
 		DocURL:                           settings[SettingKeyDocURL],
@@ -277,6 +279,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		SiteName                         string          `json:"site_name"`
 		SiteLogo                         string          `json:"site_logo,omitempty"`
 		SiteSubtitle                     string          `json:"site_subtitle,omitempty"`
+		GlobalBannerMessage              string          `json:"global_banner_message,omitempty"`
 		APIBaseURL                       string          `json:"api_base_url,omitempty"`
 		ContactInfo                      string          `json:"contact_info,omitempty"`
 		DocURL                           string          `json:"doc_url,omitempty"`
@@ -308,6 +311,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		SiteName:                         settings.SiteName,
 		SiteLogo:                         settings.SiteLogo,
 		SiteSubtitle:                     settings.SiteSubtitle,
+		GlobalBannerMessage:              settings.GlobalBannerMessage,
 		APIBaseURL:                       settings.APIBaseURL,
 		ContactInfo:                      settings.ContactInfo,
 		DocURL:                           settings.DocURL,
@@ -479,6 +483,7 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 	updates[SettingKeyFrontendURL] = settings.FrontendURL
 	updates[SettingKeyInvitationCodeEnabled] = strconv.FormatBool(settings.InvitationCodeEnabled)
 	updates[SettingKeyInvitationReward] = strconv.FormatFloat(maxFloat64(settings.InvitationReward, 0), 'f', 8, 64)
+	updates[SettingKeyInvitationLimit] = strconv.Itoa(maxInt(settings.InvitationLimit, 0))
 	updates[SettingKeyTotpEnabled] = strconv.FormatBool(settings.TotpEnabled)
 
 	// 邮件服务设置（只有非空才更新密码）
@@ -537,6 +542,7 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 	updates[SettingKeySiteName] = settings.SiteName
 	updates[SettingKeySiteLogo] = settings.SiteLogo
 	updates[SettingKeySiteSubtitle] = settings.SiteSubtitle
+	updates[SettingKeyGlobalBannerMessage] = strings.TrimSpace(settings.GlobalBannerMessage)
 	updates[SettingKeyAPIBaseURL] = settings.APIBaseURL
 	updates[SettingKeyContactInfo] = settings.ContactInfo
 	updates[SettingKeyDocURL] = settings.DocURL
@@ -822,6 +828,14 @@ func (s *SettingService) GetInvitationReward(ctx context.Context) float64 {
 	return parseNonNegativeFloat(value, 0)
 }
 
+func (s *SettingService) GetInvitationLimit(ctx context.Context) int {
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyInvitationLimit)
+	if err != nil {
+		return 0
+	}
+	return parseNonNegativeInt(value, 0)
+}
+
 // IsPasswordResetEnabled 检查是否启用密码重置功能
 // 要求：必须同时开启邮件验证
 func (s *SettingService) IsPasswordResetEnabled(ctx context.Context) bool {
@@ -911,6 +925,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyEmailVerifyEnabled:               "false",
 		SettingKeyRegistrationEmailSuffixWhitelist: "[]",
 		SettingKeyInvitationReward:                 "0",
+		SettingKeyInvitationLimit:                  "0",
 		SettingKeyPromoCodeEnabled:                 "true", // 默认启用优惠码功能
 		SettingKeySiteName:                         "Sub2API",
 		SettingKeySiteLogo:                         "",
@@ -927,6 +942,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyDefaultSubscriptions:             "[]",
 		SettingKeySMTPPort:                         "587",
 		SettingKeySMTPUseTLS:                       "false",
+		SettingKeyGlobalBannerMessage:              "欢迎亲测，消耗很慢，10$相当于别的中转1亿Token",
 		// Model fallback defaults
 		SettingKeyEnableModelFallback:      "false",
 		SettingKeyFallbackModelAnthropic:   "claude-3-5-sonnet-20241022",
@@ -966,6 +982,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		FrontendURL:                      settings[SettingKeyFrontendURL],
 		InvitationCodeEnabled:            settings[SettingKeyInvitationCodeEnabled] == "true",
 		InvitationReward:                 parseNonNegativeFloat(settings[SettingKeyInvitationReward], 0),
+		InvitationLimit:                  parseNonNegativeInt(settings[SettingKeyInvitationLimit], 0),
 		TotpEnabled:                      settings[SettingKeyTotpEnabled] == "true",
 		SMTPHost:                         settings[SettingKeySMTPHost],
 		SMTPUsername:                     settings[SettingKeySMTPUsername],
@@ -979,6 +996,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		SiteName:                         s.getStringOrDefault(settings, SettingKeySiteName, "Sub2API"),
 		SiteLogo:                         settings[SettingKeySiteLogo],
 		SiteSubtitle:                     s.getStringOrDefault(settings, SettingKeySiteSubtitle, "Subscription to API Conversion Platform"),
+		GlobalBannerMessage:              settings[SettingKeyGlobalBannerMessage],
 		APIBaseURL:                       settings[SettingKeyAPIBaseURL],
 		ContactInfo:                      settings[SettingKeyContactInfo],
 		DocURL:                           settings[SettingKeyDocURL],
@@ -1322,7 +1340,22 @@ func parseNonNegativeFloat(raw string, fallback float64) float64 {
 	return value
 }
 
+func parseNonNegativeInt(raw string, fallback int) int {
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || value < 0 {
+		return fallback
+	}
+	return value
+}
+
 func maxFloat64(value, minimum float64) float64 {
+	if value < minimum {
+		return minimum
+	}
+	return value
+}
+
+func maxInt(value, minimum int) int {
 	if value < minimum {
 		return minimum
 	}

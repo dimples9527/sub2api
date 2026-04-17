@@ -560,6 +560,7 @@ func TestAPIContracts(t *testing.T) {
 						"site_name": "Sub2API",
 						"site_logo": "",
 						"site_subtitle": "Subtitle",
+						"global_banner_message": "欢迎亲测，消耗很慢，10$相当于别的中转1亿Token",
 						"api_base_url": "https://api.example.com",
 					"contact_info": "support",
 					"doc_url": "https://docs.example.com",

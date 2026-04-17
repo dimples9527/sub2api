@@ -9,6 +9,7 @@ type SystemSettings struct {
 	FrontendURL                      string
 	InvitationCodeEnabled            bool
 	InvitationReward                 float64
+	InvitationLimit                  int
 	TotpEnabled                      bool // TOTP 双因素认证
 
 	SMTPHost               string
@@ -60,6 +61,7 @@ type SystemSettings struct {
 	SiteName                    string
 	SiteLogo                    string
 	SiteSubtitle                string
+	GlobalBannerMessage         string
 	APIBaseURL                  string
 	ContactInfo                 string
 	DocURL                      string
@@ -128,6 +130,7 @@ type PublicSettings struct {
 	SiteName                         string
 	SiteLogo                         string
 	SiteSubtitle                     string
+	GlobalBannerMessage              string
 	APIBaseURL                       string
 	ContactInfo                      string
 	DocURL                           string

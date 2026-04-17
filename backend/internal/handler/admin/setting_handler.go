@@ -103,6 +103,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		FrontendURL:                          settings.FrontendURL,
 		InvitationCodeEnabled:                settings.InvitationCodeEnabled,
 		InvitationReward:                     settings.InvitationReward,
+		InvitationLimit:                      settings.InvitationLimit,
 		TotpEnabled:                          settings.TotpEnabled,
 		TotpEncryptionKeyConfigured:          h.settingService.IsTotpEncryptionKeyConfigured(),
 		SMTPHost:                             settings.SMTPHost,
@@ -144,6 +145,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		SiteName:                             settings.SiteName,
 		SiteLogo:                             settings.SiteLogo,
 		SiteSubtitle:                         settings.SiteSubtitle,
+		GlobalBannerMessage:                  settings.GlobalBannerMessage,
 		APIBaseURL:                           settings.APIBaseURL,
 		ContactInfo:                          settings.ContactInfo,
 		DocURL:                               settings.DocURL,
@@ -208,6 +210,7 @@ type UpdateSettingsRequest struct {
 	FrontendURL                      string   `json:"frontend_url"`
 	InvitationCodeEnabled            bool     `json:"invitation_code_enabled"`
 	InvitationReward                 float64  `json:"invitation_reward"`
+	InvitationLimit                  int      `json:"invitation_limit"`
 	TotpEnabled                      bool     `json:"totp_enabled"` // TOTP 双因素认证
 
 	// 邮件服务设置
@@ -258,6 +261,7 @@ type UpdateSettingsRequest struct {
 	SiteName                    string                `json:"site_name"`
 	SiteLogo                    string                `json:"site_logo"`
 	SiteSubtitle                string                `json:"site_subtitle"`
+	GlobalBannerMessage         string                `json:"global_banner_message"`
 	APIBaseURL                  string                `json:"api_base_url"`
 	ContactInfo                 string                `json:"contact_info"`
 	DocURL                      string                `json:"doc_url"`
@@ -777,6 +781,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		FrontendURL:                      req.FrontendURL,
 		InvitationCodeEnabled:            req.InvitationCodeEnabled,
 		InvitationReward:                 req.InvitationReward,
+		InvitationLimit:                  req.InvitationLimit,
 		TotpEnabled:                      req.TotpEnabled,
 		SMTPHost:                         req.SMTPHost,
 		SMTPPort:                         req.SMTPPort,
@@ -817,6 +822,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		SiteName:                         req.SiteName,
 		SiteLogo:                         req.SiteLogo,
 		SiteSubtitle:                     req.SiteSubtitle,
+		GlobalBannerMessage:              req.GlobalBannerMessage,
 		APIBaseURL:                       req.APIBaseURL,
 		ContactInfo:                      req.ContactInfo,
 		DocURL:                           req.DocURL,
@@ -958,6 +964,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		FrontendURL:                          updatedSettings.FrontendURL,
 		InvitationCodeEnabled:                updatedSettings.InvitationCodeEnabled,
 		InvitationReward:                     updatedSettings.InvitationReward,
+		InvitationLimit:                      updatedSettings.InvitationLimit,
 		TotpEnabled:                          updatedSettings.TotpEnabled,
 		TotpEncryptionKeyConfigured:          h.settingService.IsTotpEncryptionKeyConfigured(),
 		SMTPHost:                             updatedSettings.SMTPHost,
@@ -999,6 +1006,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		SiteName:                             updatedSettings.SiteName,
 		SiteLogo:                             updatedSettings.SiteLogo,
 		SiteSubtitle:                         updatedSettings.SiteSubtitle,
+		GlobalBannerMessage:                  updatedSettings.GlobalBannerMessage,
 		APIBaseURL:                           updatedSettings.APIBaseURL,
 		ContactInfo:                          updatedSettings.ContactInfo,
 		DocURL:                               updatedSettings.DocURL,
@@ -1104,6 +1112,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.InvitationReward != after.InvitationReward {
 		changed = append(changed, "invitation_reward")
+	}
+	if before.InvitationLimit != after.InvitationLimit {
+		changed = append(changed, "invitation_limit")
 	}
 	if before.PasswordResetEnabled != after.PasswordResetEnabled {
 		changed = append(changed, "password_reset_enabled")
@@ -1230,6 +1241,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.SiteSubtitle != after.SiteSubtitle {
 		changed = append(changed, "site_subtitle")
+	}
+	if before.GlobalBannerMessage != after.GlobalBannerMessage {
+		changed = append(changed, "global_banner_message")
 	}
 	if before.APIBaseURL != after.APIBaseURL {
 		changed = append(changed, "api_base_url")

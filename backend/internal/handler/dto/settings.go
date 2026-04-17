@@ -32,6 +32,7 @@ type SystemSettings struct {
 	FrontendURL                      string   `json:"frontend_url"`
 	InvitationCodeEnabled            bool     `json:"invitation_code_enabled"`
 	InvitationReward                 float64  `json:"invitation_reward"`
+	InvitationLimit                  int      `json:"invitation_limit"`
 	TotpEnabled                      bool     `json:"totp_enabled"`                   // TOTP 双因素认证
 	TotpEncryptionKeyConfigured      bool     `json:"totp_encryption_key_configured"` // TOTP 加密密钥是否已配置
 
@@ -78,6 +79,7 @@ type SystemSettings struct {
 	SiteName                    string           `json:"site_name"`
 	SiteLogo                    string           `json:"site_logo"`
 	SiteSubtitle                string           `json:"site_subtitle"`
+	GlobalBannerMessage         string           `json:"global_banner_message"`
 	APIBaseURL                  string           `json:"api_base_url"`
 	ContactInfo                 string           `json:"contact_info"`
 	DocURL                      string           `json:"doc_url"`
@@ -166,6 +168,7 @@ type PublicSettings struct {
 	SiteName                         string           `json:"site_name"`
 	SiteLogo                         string           `json:"site_logo"`
 	SiteSubtitle                     string           `json:"site_subtitle"`
+	GlobalBannerMessage              string           `json:"global_banner_message"`
 	APIBaseURL                       string           `json:"api_base_url"`
 	ContactInfo                      string           `json:"contact_info"`
 	DocURL                           string           `json:"doc_url"`
