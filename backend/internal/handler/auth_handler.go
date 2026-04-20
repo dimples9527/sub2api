@@ -45,20 +45,20 @@ type RegisterRequest struct {
 	Password       string `json:"password" binding:"required,min=6"`
 	VerifyCode     string `json:"verify_code"`
 	TurnstileToken string `json:"turnstile_token"`
-	PromoCode      string `json:"promo_code"`      // 娉ㄥ唽浼樻儬鐮?
-	InvitationCode string `json:"invitation_code"` // 閭€璇风爜
+	PromoCode      string `json:"promo_code"`      // 注册优惠码
+	InvitationCode string `json:"invitation_code"` // 邀请码
 }
 
-// SendVerifyCodeRequest 鍙戦€侀獙璇佺爜璇锋眰
+// SendVerifyCodeRequest 发送验证码请求
 type SendVerifyCodeRequest struct {
 	Email          string `json:"email" binding:"required,email"`
 	TurnstileToken string `json:"turnstile_token"`
 }
 
-// SendVerifyCodeResponse 鍙戦€侀獙璇佺爜鍝嶅簲
+// SendVerifyCodeResponse 发送验证码响应
 type SendVerifyCodeResponse struct {
 	Message   string `json:"message"`
-	Countdown int    `json:"countdown"` // 鍊掕鏃剁鏁?
+	Countdown int    `json:"countdown"` // 倒计时秒数
 }
 
 // LoginRequest represents the login request payload
@@ -68,22 +68,22 @@ type LoginRequest struct {
 	TurnstileToken string `json:"turnstile_token"`
 }
 
-// AuthResponse 璁よ瘉鍝嶅簲鏍煎紡锛堝尮閰嶅墠绔湡鏈涳級
+// AuthResponse 认证响应格式（匹配前端期望）
 type AuthResponse struct {
 	AccessToken  string    `json:"access_token"`
-	RefreshToken string    `json:"refresh_token,omitempty"` // 鏂板锛歊efresh Token
-	ExpiresIn    int       `json:"expires_in,omitempty"`    // 鏂板锛欰ccess Token鏈夋晥鏈燂紙绉掞級
+	RefreshToken string    `json:"refresh_token,omitempty"` // 新增：Refresh Token
+	ExpiresIn    int       `json:"expires_in,omitempty"`    // 新增：Access Token 有效期（秒）
 	TokenType    string    `json:"token_type"`
 	User         *dto.User `json:"user"`
 }
 
-// respondWithTokenPair 鐢熸垚 Token 瀵瑰苟杩斿洖璁よ瘉鍝嶅簲
-// 濡傛灉 Token 瀵圭敓鎴愬け璐ワ紝鍥為€€鍒板彧杩斿洖 Access Token锛堝悜鍚庡吋瀹癸級
+// respondWithTokenPair 生成 Token 对并返回认证响应
+// 如果 Token 对生成失败，回退到只返回 Access Token（向后兼容）
 func (h *AuthHandler) respondWithTokenPair(c *gin.Context, user *service.User) {
 	tokenPair, err := h.authService.GenerateTokenPair(c.Request.Context(), user, "")
 	if err != nil {
 		slog.Error("failed to generate token pair", "error", err, "user_id", user.ID)
-		// 鍥為€€鍒板彧杩斿洖Access Token
+		// 回退到只返回 Access Token
 		token, tokenErr := h.authService.GenerateToken(user)
 		if tokenErr != nil {
 			response.InternalError(c, "Failed to generate token")
@@ -114,7 +114,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	// Turnstile 楠岃瘉锛堥偖绠遍獙璇佺爜娉ㄥ唽鍦烘櫙閬垮厤閲嶅鏍￠獙涓€娆℃€?token锛?
+	// Turnstile 验证（邮箱验证码注册场景避免重复校验一次性 token）
 	if err := h.authService.VerifyTurnstileForRegister(c.Request.Context(), req.TurnstileToken, ip.GetClientIP(c), req.VerifyCode); err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -129,7 +129,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	h.respondWithTokenPair(c, user)
 }
 
-// SendVerifyCode 鍙戦€侀偖绠遍獙璇佺爜
+// SendVerifyCode 发送邮箱验证码
 // POST /api/v1/auth/send-verify-code
 func (h *AuthHandler) SendVerifyCode(c *gin.Context) {
 	var req SendVerifyCodeRequest
@@ -138,7 +138,7 @@ func (h *AuthHandler) SendVerifyCode(c *gin.Context) {
 		return
 	}
 
-	// Turnstile 楠岃瘉
+	// Turnstile 验证
 	if err := h.authService.VerifyTurnstile(c.Request.Context(), req.TurnstileToken, ip.GetClientIP(c)); err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -165,7 +165,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// Turnstile 楠岃瘉
+	// Turnstile 验证
 	if err := h.authService.VerifyTurnstile(c.Request.Context(), req.TurnstileToken, ip.GetClientIP(c)); err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -176,7 +176,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	_ = token // token 鐢?authService.Login 杩斿洖浣嗘澶勭敱 respondWithTokenPair 閲嶆柊鐢熸垚
+	_ = token // token 由 authService.Login 返回，但此处由 respondWithTokenPair 重新生成
 
 	// Check if TOTP 2FA is enabled for this user
 	if h.totpService != nil && h.settingSvc.IsTotpEnabled(c.Request.Context()) && user.TotpEnabled {
@@ -304,12 +304,12 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 	response.Success(c, UserResponse{User: dto.UserFromService(user), RunMode: runMode})
 }
 
-// ValidatePromoCodeRequest 楠岃瘉浼樻儬鐮佽姹?
+// ValidatePromoCodeRequest 验证优惠码请求
 type ValidatePromoCodeRequest struct {
 	Code string `json:"code" binding:"required"`
 }
 
-// ValidatePromoCodeResponse 楠岃瘉浼樻儬鐮佸搷搴?
+// ValidatePromoCodeResponse 验证优惠码响应
 type ValidatePromoCodeResponse struct {
 	Valid       bool    `json:"valid"`
 	BonusAmount float64 `json:"bonus_amount,omitempty"`
@@ -317,10 +317,10 @@ type ValidatePromoCodeResponse struct {
 	Message     string  `json:"message,omitempty"`
 }
 
-// ValidatePromoCode 楠岃瘉浼樻儬鐮侊紙鍏紑鎺ュ彛锛屾敞鍐屽墠璋冪敤锛?
+// ValidatePromoCode 验证优惠码（公开接口，注册前调用）
 // POST /api/v1/auth/validate-promo-code
 func (h *AuthHandler) ValidatePromoCode(c *gin.Context) {
-	// 妫€鏌ヤ紭鎯犵爜鍔熻兘鏄惁鍚敤
+	// 检查优惠码功能是否启用
 	if h.settingSvc != nil && !h.settingSvc.IsPromoCodeEnabled(c.Request.Context()) {
 		response.Success(c, ValidatePromoCodeResponse{
 			Valid:     false,
@@ -337,7 +337,7 @@ func (h *AuthHandler) ValidatePromoCode(c *gin.Context) {
 
 	promoCode, err := h.promoService.ValidatePromoCode(c.Request.Context(), req.Code)
 	if err != nil {
-		// 鏍规嵁閿欒绫诲瀷杩斿洖瀵瑰簲鐨勯敊璇爜
+		// 根据错误类型返回对应的错误码
 		errorCode := "PROMO_CODE_INVALID"
 		switch err {
 		case service.ErrPromoCodeNotFound:
@@ -373,18 +373,18 @@ func (h *AuthHandler) ValidatePromoCode(c *gin.Context) {
 	})
 }
 
-// ValidateInvitationCodeRequest 楠岃瘉閭€璇风爜璇锋眰
+// ValidateInvitationCodeRequest 验证邀请码请求
 type ValidateInvitationCodeRequest struct {
 	Code string `json:"code" binding:"required"`
 }
 
-// ValidateInvitationCodeResponse 楠岃瘉閭€璇风爜鍝嶅簲
+// ValidateInvitationCodeResponse 验证邀请码响应
 type ValidateInvitationCodeResponse struct {
 	Valid     bool   `json:"valid"`
 	ErrorCode string `json:"error_code,omitempty"`
 }
 
-// ValidateInvitationCode 楠岃瘉閭€璇风爜锛堝叕寮€鎺ュ彛锛屾敞鍐屽墠璋冪敤锛?
+// ValidateInvitationCode 验证邀请码（公开接口，注册前调用）
 // POST /api/v1/auth/validate-invitation-code
 func (h *AuthHandler) ValidateInvitationCode(c *gin.Context) {
 	if h.settingSvc == nil || !h.settingSvc.IsInvitationCodeEnabled(c.Request.Context()) {
@@ -425,18 +425,18 @@ func (h *AuthHandler) ValidateInvitationCode(c *gin.Context) {
 	})
 }
 
-// ForgotPasswordRequest 蹇樿瀵嗙爜璇锋眰
+// ForgotPasswordRequest 忘记密码请求
 type ForgotPasswordRequest struct {
 	Email          string `json:"email" binding:"required,email"`
 	TurnstileToken string `json:"turnstile_token"`
 }
 
-// ForgotPasswordResponse 蹇樿瀵嗙爜鍝嶅簲
+// ForgotPasswordResponse 忘记密码响应
 type ForgotPasswordResponse struct {
 	Message string `json:"message"`
 }
 
-// ForgotPassword 璇锋眰瀵嗙爜閲嶇疆
+// ForgotPassword 请求密码重置
 // POST /api/v1/auth/forgot-password
 func (h *AuthHandler) ForgotPassword(c *gin.Context) {
 	var req ForgotPasswordRequest
@@ -445,7 +445,7 @@ func (h *AuthHandler) ForgotPassword(c *gin.Context) {
 		return
 	}
 
-	// Turnstile 楠岃瘉
+	// Turnstile 验证
 	if err := h.authService.VerifyTurnstile(c.Request.Context(), req.TurnstileToken, ip.GetClientIP(c)); err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -470,19 +470,19 @@ func (h *AuthHandler) ForgotPassword(c *gin.Context) {
 	})
 }
 
-// ResetPasswordRequest 閲嶇疆瀵嗙爜璇锋眰
+// ResetPasswordRequest 重置密码请求
 type ResetPasswordRequest struct {
 	Email       string `json:"email" binding:"required,email"`
 	Token       string `json:"token" binding:"required"`
 	NewPassword string `json:"new_password" binding:"required,min=6"`
 }
 
-// ResetPasswordResponse 閲嶇疆瀵嗙爜鍝嶅簲
+// ResetPasswordResponse 重置密码响应
 type ResetPasswordResponse struct {
 	Message string `json:"message"`
 }
 
-// ResetPassword 閲嶇疆瀵嗙爜
+// ResetPassword 重置密码
 // POST /api/v1/auth/reset-password
 func (h *AuthHandler) ResetPassword(c *gin.Context) {
 	var req ResetPasswordRequest
@@ -504,20 +504,20 @@ func (h *AuthHandler) ResetPassword(c *gin.Context) {
 
 // ==================== Token Refresh Endpoints ====================
 
-// RefreshTokenRequest 鍒锋柊Token璇锋眰
+// RefreshTokenRequest 刷新 Token 请求
 type RefreshTokenRequest struct {
 	RefreshToken string `json:"refresh_token" binding:"required"`
 }
 
-// RefreshTokenResponse 鍒锋柊Token鍝嶅簲
+// RefreshTokenResponse 刷新 Token 响应
 type RefreshTokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
-	ExpiresIn    int    `json:"expires_in"` // Access Token鏈夋晥鏈燂紙绉掞級
+	ExpiresIn    int    `json:"expires_in"` // Access Token 有效期（秒）
 	TokenType    string `json:"token_type"`
 }
 
-// RefreshToken 鍒锋柊Token
+// RefreshToken 刷新 Token
 // POST /api/v1/auth/refresh
 func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	var req RefreshTokenRequest
@@ -546,28 +546,28 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	})
 }
 
-// LogoutRequest 鐧诲嚭璇锋眰
+// LogoutRequest 登出请求
 type LogoutRequest struct {
-	RefreshToken string `json:"refresh_token,omitempty"` // 鍙€夛細鎾ら攢鎸囧畾鐨凴efresh Token
+	RefreshToken string `json:"refresh_token,omitempty"` // 可选：撤销指定的 Refresh Token
 }
 
-// LogoutResponse 鐧诲嚭鍝嶅簲
+// LogoutResponse 登出响应
 type LogoutResponse struct {
 	Message string `json:"message"`
 }
 
-// Logout 鐢ㄦ埛鐧诲嚭
+// Logout 用户登出
 // POST /api/v1/auth/logout
 func (h *AuthHandler) Logout(c *gin.Context) {
 	var req LogoutRequest
-	// 鍏佽绌鸿姹備綋锛堝悜鍚庡吋瀹癸級
+	// 允许空请求体（向后兼容）
 	_ = c.ShouldBindJSON(&req)
 
-	// 濡傛灉鎻愪緵浜哛efresh Token锛屾挙閿€瀹?
+	// 如果提供了 Refresh Token，则撤销它
 	if req.RefreshToken != "" {
 		if err := h.authService.RevokeRefreshToken(c.Request.Context(), req.RefreshToken); err != nil {
 			slog.Debug("failed to revoke refresh token", "error", err)
-			// 涓嶅奖鍝嶇櫥鍑烘祦绋?
+			// 不影响登出流程
 		}
 	}
 
@@ -576,12 +576,12 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	})
 }
 
-// RevokeAllSessionsResponse 鎾ら攢鎵€鏈変細璇濆搷搴?
+// RevokeAllSessionsResponse 撤销所有会话响应
 type RevokeAllSessionsResponse struct {
 	Message string `json:"message"`
 }
 
-// RevokeAllSessions 鎾ら攢褰撳墠鐢ㄦ埛鐨勬墍鏈変細璇?
+// RevokeAllSessions 撤销当前用户的所有会话
 // POST /api/v1/auth/revoke-all-sessions
 func (h *AuthHandler) RevokeAllSessions(c *gin.Context) {
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)

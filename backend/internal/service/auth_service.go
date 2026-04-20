@@ -45,13 +45,13 @@ var (
 	ErrOAuthInvitationRequired = infraerrors.Forbidden("OAUTH_INVITATION_REQUIRED", "invitation code required to complete oauth registration")
 )
 
-// maxTokenLength 闄愬埗 token 澶у皬锛岄伩鍏嶈秴闀?header 瑙﹀彂瑙ｆ瀽鏃剁殑寮傚父鍐呭瓨鍒嗛厤銆?
+// maxTokenLength 限制 token 大小，避免超长 header 触发解析时的异常内存分配。
 const maxTokenLength = 8192
 
 // refreshTokenPrefix is the prefix for refresh tokens to distinguish them from access tokens.
 const refreshTokenPrefix = "rt_"
 
-// JWTClaims JWT杞借嵎鏁版嵁
+// JWTClaims JWT 载荷数据
 type JWTClaims struct {
 	UserID       int64  `json:"user_id"`
 	Email        string `json:"email"`
@@ -60,7 +60,7 @@ type JWTClaims struct {
 	jwt.RegisteredClaims
 }
 
-// AuthService 璁よ瘉鏈嶅姟
+// AuthService 认证服务
 type AuthService struct {
 	entClient          *dbent.Client
 	userRepo           UserRepository
@@ -79,7 +79,7 @@ type DefaultSubscriptionAssigner interface {
 	AssignOrExtendSubscription(ctx context.Context, input *AssignSubscriptionInput) (*UserSubscription, bool, error)
 }
 
-// NewAuthService 鍒涘缓璁よ瘉鏈嶅姟瀹炰緥
+// NewAuthService 创建认证服务实例
 func NewAuthService(
 	entClient *dbent.Client,
 	userRepo UserRepository,
@@ -108,12 +108,12 @@ func NewAuthService(
 	}
 }
 
-// Register 鐢ㄦ埛娉ㄥ唽锛岃繑鍥瀟oken鍜岀敤鎴?
+// Register 用户注册，返回 token 和用户
 func (s *AuthService) Register(ctx context.Context, email, password string) (string, *User, error) {
 	return s.RegisterWithVerification(ctx, email, password, "", "", "")
 }
 
-// RegisterWithVerification 鐢ㄦ埛娉ㄥ唽锛堟敮鎸侀偖浠堕獙璇併€佷紭鎯犵爜鍜岄個璇风爜锛夛紝杩斿洖token鍜岀敤鎴?
+// RegisterWithVerification 用户注册（支持邮件验证、优惠码和邀请码），返回 token 和用户
 func (s *AuthService) RegisterWithVerification(ctx context.Context, email, password, verifyCode, promoCode, invitationCode string) (string, *User, error) {
 	if s.settingService == nil || !s.settingService.IsRegistrationEnabled(ctx) {
 		return "", nil, ErrRegDisabled
@@ -215,14 +215,14 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 	return token, user, nil
 }
 
-// SendVerifyCodeResult 鍙戦€侀獙璇佺爜杩斿洖缁撴灉
+// SendVerifyCodeResult 发送验证码返回结果
 type SendVerifyCodeResult struct {
-	Countdown int `json:"countdown"` // 鍊掕鏃剁鏁?
+	Countdown int `json:"countdown"` // 倒计时秒数
 }
 
-// SendVerifyCode 鍙戦€侀偖绠遍獙璇佺爜锛堝悓姝ユ柟寮忥級
+// SendVerifyCode 发送邮箱验证码（同步方式）
 func (s *AuthService) SendVerifyCode(ctx context.Context, email string) error {
-	// 妫€鏌ユ槸鍚﹀紑鏀炬敞鍐岋紙榛樿鍏抽棴锛?
+	// 检查是否开放注册（默认关闭）
 	if s.settingService == nil || !s.settingService.IsRegistrationEnabled(ctx) {
 		return ErrRegDisabled
 	}
@@ -234,7 +234,7 @@ func (s *AuthService) SendVerifyCode(ctx context.Context, email string) error {
 		return err
 	}
 
-	// 妫€鏌ラ偖绠辨槸鍚﹀凡瀛樺湪
+	// 检查邮箱是否已存在
 	existsEmail, err := s.userRepo.ExistsByEmail(ctx, email)
 	if err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Database error checking email exists: %v", err)
@@ -244,12 +244,12 @@ func (s *AuthService) SendVerifyCode(ctx context.Context, email string) error {
 		return ErrEmailExists
 	}
 
-	// 鍙戦€侀獙璇佺爜
+	// 发送验证码
 	if s.emailService == nil {
 		return errors.New("email service not configured")
 	}
 
-	// 鑾峰彇缃戠珯鍚嶇О
+	// 获取站点名称
 	siteName := "Sub2API"
 	if s.settingService != nil {
 		siteName = s.settingService.GetSiteName(ctx)
@@ -258,11 +258,11 @@ func (s *AuthService) SendVerifyCode(ctx context.Context, email string) error {
 	return s.emailService.SendVerifyCode(ctx, email, siteName)
 }
 
-// SendVerifyCodeAsync 寮傛鍙戦€侀偖绠遍獙璇佺爜骞惰繑鍥炲€掕鏃?
+// SendVerifyCodeAsync 异步发送邮箱验证码并返回倒计时
 func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string) (*SendVerifyCodeResult, error) {
 	logger.LegacyPrintf("service.auth", "[Auth] SendVerifyCodeAsync called for email: %s", email)
 
-	// 妫€鏌ユ槸鍚﹀紑鏀炬敞鍐岋紙榛樿鍏抽棴锛?
+	// 检查是否开放注册（默认关闭）
 	if s.settingService == nil || !s.settingService.IsRegistrationEnabled(ctx) {
 		logger.LegacyPrintf("service.auth", "%s", "[Auth] Registration is disabled")
 		return nil, ErrRegDisabled
@@ -275,7 +275,7 @@ func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string) (*S
 		return nil, err
 	}
 
-	// 妫€鏌ラ偖绠辨槸鍚﹀凡瀛樺湪
+	// 检查邮箱是否已存在
 	existsEmail, err := s.userRepo.ExistsByEmail(ctx, email)
 	if err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Database error checking email exists: %v", err)
@@ -286,19 +286,19 @@ func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string) (*S
 		return nil, ErrEmailExists
 	}
 
-	// 妫€鏌ラ偖浠堕槦鍒楁湇鍔℃槸鍚﹂厤缃?
+	// 检查邮件队列服务是否已配置
 	if s.emailQueueService == nil {
 		logger.LegacyPrintf("service.auth", "%s", "[Auth] Email queue service not configured")
 		return nil, errors.New("email queue service not configured")
 	}
 
-	// 鑾峰彇缃戠珯鍚嶇О
+	// 获取站点名称
 	siteName := "Sub2API"
 	if s.settingService != nil {
 		siteName = s.settingService.GetSiteName(ctx)
 	}
 
-	// 寮傛鍙戦€?
+	// 异步发送
 	logger.LegacyPrintf("service.auth", "[Auth] Enqueueing verify code for: %s", email)
 	if err := s.emailQueueService.EnqueueVerifyCode(email, siteName); err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Failed to enqueue: %v", err)
@@ -307,13 +307,13 @@ func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string) (*S
 
 	logger.LegacyPrintf("service.auth", "[Auth] Verify code enqueued successfully for: %s", email)
 	return &SendVerifyCodeResult{
-		Countdown: 60, // 60绉掑€掕鏃?
+		Countdown: 60, // 60 秒倒计时
 	}, nil
 }
 
-// VerifyTurnstileForRegister 鍦ㄦ敞鍐屽満鏅笅楠岃瘉 Turnstile銆?
-// 褰撻偖绠遍獙璇佸紑鍚笖宸叉彁浜ら獙璇佺爜鏃讹紝璇存槑楠岃瘉鐮佸彂閫侀樁娈靛凡瀹屾垚 Turnstile 鏍￠獙锛?
-// 姝ゅ璺宠繃浜屾鏍￠獙锛岄伩鍏嶄竴娆℃€?token 鍦ㄦ敞鍐屾彁浜ゆ椂閲嶅浣跨敤瀵艰嚧璇姤澶辫触銆?
+// VerifyTurnstileForRegister 在注册场景下验证 Turnstile。
+// 当邮箱验证开启且已提交验证码时，说明验证码发送阶段已完成 Turnstile 校验。
+// 此处跳过二次校验，避免一次性 token 在注册提交时重复使用导致报错失败。
 func (s *AuthService) VerifyTurnstileForRegister(ctx context.Context, token, remoteIP, verifyCode string) error {
 	if s.IsEmailVerifyEnabled(ctx) && strings.TrimSpace(verifyCode) != "" {
 		logger.LegacyPrintf("service.auth", "%s", "[Auth] Email verify flow detected, skip duplicate Turnstile check on register")
@@ -322,7 +322,7 @@ func (s *AuthService) VerifyTurnstileForRegister(ctx context.Context, token, rem
 	return s.VerifyTurnstile(ctx, token, remoteIP)
 }
 
-// VerifyTurnstile 楠岃瘉Turnstile token
+// VerifyTurnstile 验证 Turnstile token
 func (s *AuthService) VerifyTurnstile(ctx context.Context, token string, remoteIP string) error {
 	required := s.cfg != nil && s.cfg.Server.Mode == "release" && s.cfg.Turnstile.Required
 
@@ -344,7 +344,7 @@ func (s *AuthService) VerifyTurnstile(ctx context.Context, token string, remoteI
 			logger.LegacyPrintf("service.auth", "%s", "[Auth] Turnstile required but service not configured")
 			return ErrTurnstileNotConfigured
 		}
-		return nil // 鏈嶅姟鏈厤缃垯璺宠繃楠岃瘉
+		return nil // 服务未配置则跳过验证
 	}
 
 	if !required && s.settingService != nil && s.settingService.IsTurnstileEnabled(ctx) && s.settingService.GetTurnstileSecretKey(ctx) == "" {
@@ -354,7 +354,7 @@ func (s *AuthService) VerifyTurnstile(ctx context.Context, token string, remoteI
 	return s.turnstileService.VerifyToken(ctx, token, remoteIP)
 }
 
-// IsTurnstileEnabled 妫€鏌ユ槸鍚﹀惎鐢═urnstile楠岃瘉
+// IsTurnstileEnabled 检查是否启用 Turnstile 验证
 func (s *AuthService) IsTurnstileEnabled(ctx context.Context) bool {
 	if s.turnstileService == nil {
 		return false
@@ -362,15 +362,15 @@ func (s *AuthService) IsTurnstileEnabled(ctx context.Context) bool {
 	return s.turnstileService.IsEnabled(ctx)
 }
 
-// IsRegistrationEnabled 妫€鏌ユ槸鍚﹀紑鏀炬敞鍐?
+// IsRegistrationEnabled 检查是否开放注册
 func (s *AuthService) IsRegistrationEnabled(ctx context.Context) bool {
 	if s.settingService == nil {
-		return false // 瀹夊叏榛樿锛歴ettingService 鏈厤缃椂鍏抽棴娉ㄥ唽
+		return false // 安全默认：settingService 未配置时关闭注册
 	}
 	return s.settingService.IsRegistrationEnabled(ctx)
 }
 
-// IsEmailVerifyEnabled 妫€鏌ユ槸鍚﹀紑鍚偖浠堕獙璇?
+// IsEmailVerifyEnabled 检查是否开启邮件验证
 func (s *AuthService) IsEmailVerifyEnabled(ctx context.Context) bool {
 	if s.settingService == nil {
 		return false
@@ -378,30 +378,30 @@ func (s *AuthService) IsEmailVerifyEnabled(ctx context.Context) bool {
 	return s.settingService.IsEmailVerifyEnabled(ctx)
 }
 
-// Login 鐢ㄦ埛鐧诲綍锛岃繑鍥濲WT token
+// Login 用户登录，返回 JWT token
 func (s *AuthService) Login(ctx context.Context, email, password string) (string, *User, error) {
-	// 鏌ユ壘鐢ㄦ埛
+	// 查找用户
 	user, err := s.userRepo.GetByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
 			return "", nil, ErrInvalidCredentials
 		}
-		// 璁板綍鏁版嵁搴撻敊璇絾涓嶆毚闇茬粰鐢ㄦ埛
+		// 记录数据库错误但不暴露给用户
 		logger.LegacyPrintf("service.auth", "[Auth] Database error during login: %v", err)
 		return "", nil, ErrServiceUnavailable
 	}
 
-	// 楠岃瘉瀵嗙爜
+	// 验证密码
 	if !s.CheckPassword(password, user.PasswordHash) {
 		return "", nil, ErrInvalidCredentials
 	}
 
-	// 妫€鏌ョ敤鎴风姸鎬?
+	// 检查用户状态
 	if !user.IsActive() {
 		return "", nil, ErrUserNotActive
 	}
 
-	// 鐢熸垚JWT token
+	// 生成 JWT token
 	token, err := s.GenerateToken(user)
 	if err != nil {
 		return "", nil, fmt.Errorf("generate token: %w", err)
@@ -410,12 +410,13 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (string
 	return token, user, nil
 }
 
-// LoginOrRegisterOAuth 鐢ㄤ簬绗笁鏂?OAuth/SSO 鐧诲綍锛?
-// - 濡傛灉閭宸插瓨鍦細鐩存帴鐧诲綍锛堜笉闇€瑕佹湰鍦板瘑鐮侊級
-// - 濡傛灉閭涓嶅瓨鍦細鍒涘缓鏂扮敤鎴峰苟鐧诲綍
+// LoginOrRegisterOAuth 用于第三方 OAuth/SSO 登录。
+// - 如果邮箱已存在：直接登录（不需要本地密码）
+// - 如果邮箱不存在：创建新用户并登录
 //
-// 娉ㄦ剰锛氳鍑芥暟鐢ㄤ簬 LinuxDo OAuth 鐧诲綍鍦烘櫙锛堜笉鍚屼簬涓婃父璐﹀彿鐨?OAuth锛屼緥濡?Claude/OpenAI/Gemini锛夈€?
-// 涓轰簡婊¤冻鐜版湁鏁版嵁搴撶害鏉燂紙闇€瑕佸瘑鐮佸搱甯岋級锛屾柊鐢ㄦ埛浼氱敓鎴愰殢鏈哄瘑鐮佸苟杩涜鍝堝笇淇濆瓨銆?
+// 注意：该函数用于 LinuxDo OAuth 登录场景，
+// 不同于上游账号 OAuth（例如 Claude/OpenAI/Gemini）。
+// 为了满足现有数据库约束（需要密码哈希），新用户会生成随机密码并进行哈希保存。
 func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username string) (string, *User, error) {
 	email = strings.TrimSpace(email)
 	if email == "" || len(email) > 255 {
@@ -433,7 +434,7 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 	user, err := s.userRepo.GetByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
-			// OAuth 棣栨鐧诲綍瑙嗕负娉ㄥ唽锛坒ail-close锛歴ettingService 鏈厤缃椂涓嶅厑璁告敞鍐岋級
+			// OAuth 首次登录视为注册（fail-close：settingService 未配置时不允许注册）
 			if s.settingService == nil || !s.settingService.IsRegistrationEnabled(ctx) {
 				return "", nil, ErrRegDisabled
 			}
@@ -448,7 +449,7 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 				return "", nil, fmt.Errorf("hash password: %w", err)
 			}
 
-			// 鏂扮敤鎴烽粯璁ゅ€笺€?
+			// 新用户默认值
 			defaultBalance := s.cfg.Default.UserBalance
 			defaultConcurrency := s.cfg.Default.UserConcurrency
 			if s.settingService != nil {
@@ -468,7 +469,7 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 
 			if err := s.userRepo.Create(ctx, newUser); err != nil {
 				if errors.Is(err, ErrEmailExists) {
-					// 骞跺彂鍦烘櫙锛欸etByEmail 涓?Create 涔嬮棿鐢ㄦ埛琚垱寤恒€?
+					// 并发场景：GetByEmail 与 Create 之间用户被创建
 					user, err = s.userRepo.GetByEmail(ctx, email)
 					if err != nil {
 						logger.LegacyPrintf("service.auth", "[Auth] Database error getting user after conflict: %v", err)
@@ -492,7 +493,7 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 		return "", nil, ErrUserNotActive
 	}
 
-	// 灏藉姏琛ュ叏锛氬綋鐢ㄦ埛鍚嶄负绌烘椂锛屼娇鐢ㄧ涓夋柟杩斿洖鐨勭敤鎴峰悕鍥炲～銆?
+	// 尽力补全：当用户名为空时，使用第三方返回的用户名回填
 	if user.Username == "" && username != "" {
 		user.Username = username
 		if err := s.userRepo.Update(ctx, user); err != nil {
@@ -507,9 +508,9 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 	return token, user, nil
 }
 
-// LoginOrRegisterOAuthWithTokenPair 鐢ㄤ簬绗笁鏂?OAuth/SSO 鐧诲綍锛岃繑鍥炲畬鏁寸殑 TokenPair銆?
-// 涓?LoginOrRegisterOAuth 鍔熻兘鐩稿悓锛屼絾杩斿洖 TokenPair 鑰岄潪鍗曚釜 token銆?
-// invitationCode 浠呭湪閭€璇风爜娉ㄥ唽妯″紡涓嬫柊鐢ㄦ埛娉ㄥ唽鏃朵娇鐢紱宸叉湁璐﹀彿鐧诲綍鏃跺拷鐣ャ€?
+// LoginOrRegisterOAuthWithTokenPair 用于第三方 OAuth/SSO 登录，返回完整的 TokenPair。
+// 与 LoginOrRegisterOAuth 功能相同，但返回 TokenPair 而非单个 token。
+// invitationCode 仅在邀请码注册模式下新用户注册时使用；已有账号登录时忽略。
 func (s *AuthService) LoginOrRegisterOAuthWithTokenPair(ctx context.Context, email, username, invitationCode string) (*TokenPair, *User, error) {
 	if s.refreshTokenCache == nil {
 		return nil, nil, errors.New("refresh token cache not configured")
@@ -857,23 +858,23 @@ func buildEmailSuffixNotAllowedError(whitelist []string) error {
 	})
 }
 
-// ValidateToken 楠岃瘉JWT token骞惰繑鍥炵敤鎴峰０鏄?
+// ValidateToken 验证 JWT token 并返回用户声明
 func (s *AuthService) ValidateToken(tokenString string) (*JWTClaims, error) {
-	// 鍏堝仛闀垮害鏍￠獙锛屽敖鏃╂嫆缁濆紓甯歌秴闀?token锛岄檷浣?DoS 椋庨櫓銆?
+	// 先做长度校验，尽早拒绝异常超长 token，降低 DoS 风险。
 	if len(tokenString) > maxTokenLength {
 		return nil, ErrTokenTooLarge
 	}
 
-	// 浣跨敤瑙ｆ瀽鍣ㄥ苟闄愬埗鍙帴鍙楃殑绛惧悕绠楁硶锛岄槻姝㈢畻娉曟贩娣嗐€?
+	// 使用解析器并限制可接受的签名算法，防止算法混淆。
 	parser := jwt.NewParser(jwt.WithValidMethods([]string{
 		jwt.SigningMethodHS256.Name,
 		jwt.SigningMethodHS384.Name,
 		jwt.SigningMethodHS512.Name,
 	}))
 
-	// 淇濈暀榛樿 claims 鏍￠獙锛坋xp/nbf锛夛紝閬垮厤鏀捐杩囨湡鎴栨湭鐢熸晥鐨?token銆?
+	// 保留默认 claims 校验（exp/nbf），避免放行过期或未生效的 token。
 	token, err := parser.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (any, error) {
-		// 楠岃瘉绛惧悕鏂规硶
+		// 验证签名方法
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
@@ -882,8 +883,8 @@ func (s *AuthService) ValidateToken(tokenString string) (*JWTClaims, error) {
 
 	if err != nil {
 		if errors.Is(err, jwt.ErrTokenExpired) {
-			// token 杩囨湡浣嗕粛杩斿洖 claims锛堢敤浜?RefreshToken 绛夊満鏅級
-			// jwt-go 鍦ㄨВ鏋愭椂鍗充娇閬囧埌杩囨湡閿欒锛宼oken.Claims 浠嶄細琚～鍏?
+			// token 过期但仍返回 claims（用于 RefreshToken 等场景）
+			// jwt-go 在解析时即使遇到过期错误，token.Claims 仍会被填充
 			if claims, ok := token.Claims.(*JWTClaims); ok {
 				return claims, ErrTokenExpired
 			}
@@ -916,15 +917,15 @@ func isReservedEmail(email string) bool {
 		strings.HasSuffix(normalized, OIDCConnectSyntheticEmailDomain)
 }
 
-// GenerateToken 鐢熸垚JWT access token
-// 浣跨敤鏂扮殑access_token_expire_minutes閰嶇疆椤癸紙濡傛灉閰嶇疆浜嗭級锛屽惁鍒欏洖閫€鍒癳xpire_hour
+// GenerateToken 生成 JWT access token
+// 使用新的 access_token_expire_minutes 配置项（如果配置了），否则回退到 expire_hour
 func (s *AuthService) GenerateToken(user *User) (string, error) {
 	now := time.Now()
 	var expiresAt time.Time
 	if s.cfg.JWT.AccessTokenExpireMinutes > 0 {
 		expiresAt = now.Add(time.Duration(s.cfg.JWT.AccessTokenExpireMinutes) * time.Minute)
 	} else {
-		// 鍚戝悗鍏煎锛氫娇鐢ㄦ棫鐨別xpire_hour閰嶇疆
+		// 向后兼容：使用旧的 expire_hour 配置
 		expiresAt = now.Add(time.Duration(s.cfg.JWT.ExpireHour) * time.Hour)
 	}
 
@@ -949,8 +950,8 @@ func (s *AuthService) GenerateToken(user *User) (string, error) {
 	return tokenString, nil
 }
 
-// GetAccessTokenExpiresIn 杩斿洖Access Token鐨勬湁鏁堟湡锛堢锛?
-// 鐢ㄤ簬鍓嶇璁剧疆鍒锋柊瀹氭椂鍣?
+// GetAccessTokenExpiresIn 返回 Access Token 的有效期（秒）
+// 用于前端设置刷新定时器
 func (s *AuthService) GetAccessTokenExpiresIn() int {
 	if s.cfg.JWT.AccessTokenExpireMinutes > 0 {
 		return s.cfg.JWT.AccessTokenExpireMinutes * 60
@@ -958,7 +959,7 @@ func (s *AuthService) GetAccessTokenExpiresIn() int {
 	return s.cfg.JWT.ExpireHour * 3600
 }
 
-// HashPassword 浣跨敤bcrypt鍔犲瘑瀵嗙爜
+// HashPassword 使用 bcrypt 加密密码
 func (s *AuthService) HashPassword(password string) (string, error) {
 	hashedBytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -967,21 +968,21 @@ func (s *AuthService) HashPassword(password string) (string, error) {
 	return string(hashedBytes), nil
 }
 
-// CheckPassword 楠岃瘉瀵嗙爜鏄惁鍖归厤
+// CheckPassword 验证密码是否匹配
 func (s *AuthService) CheckPassword(password, hashedPassword string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
 	return err == nil
 }
 
-// RefreshToken 鍒锋柊token
+// RefreshToken 刷新 token
 func (s *AuthService) RefreshToken(ctx context.Context, oldTokenString string) (string, error) {
-	// 楠岃瘉鏃oken锛堝嵆浣胯繃鏈熶篃鍏佽锛岀敤浜庡埛鏂帮級
+	// 验证旧 token（即使过期也允许，用于刷新）
 	claims, err := s.ValidateToken(oldTokenString)
 	if err != nil && !errors.Is(err, ErrTokenExpired) {
 		return "", err
 	}
 
-	// 鑾峰彇鏈€鏂扮殑鐢ㄦ埛淇℃伅
+	// 获取最新的用户信息
 	user, err := s.userRepo.GetByID(ctx, claims.UserID)
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
@@ -991,7 +992,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, oldTokenString string) (
 		return "", ErrServiceUnavailable
 	}
 
-	// 妫€鏌ョ敤鎴风姸鎬?
+	// 检查用户状态
 	if !user.IsActive() {
 		return "", ErrUserNotActive
 	}
@@ -1002,12 +1003,12 @@ func (s *AuthService) RefreshToken(ctx context.Context, oldTokenString string) (
 		return "", ErrTokenRevoked
 	}
 
-	// 鐢熸垚鏂皌oken
+	// 生成新 token
 	return s.GenerateToken(user)
 }
 
-// IsPasswordResetEnabled 妫€鏌ユ槸鍚﹀惎鐢ㄥ瘑鐮侀噸缃姛鑳?
-// 瑕佹眰锛氬繀椤诲悓鏃跺紑鍚偖浠堕獙璇佷笖 SMTP 閰嶇疆姝ｇ‘
+// IsPasswordResetEnabled 检查是否启用密码重置功能
+// 要求：必须同时开启邮件验证且 SMTP 配置正确
 func (s *AuthService) IsPasswordResetEnabled(ctx context.Context) bool {
 	if s.settingService == nil {
 		return false
@@ -1053,7 +1054,7 @@ func (s *AuthService) preparePasswordReset(ctx context.Context, email, frontendB
 	return siteName, resetURL, true
 }
 
-// RequestPasswordReset 璇锋眰瀵嗙爜閲嶇疆锛堝悓姝ュ彂閫侊級
+// RequestPasswordReset 请求密码重置（同步发送）
 // Security: Returns the same response regardless of whether the email exists (prevent user enumeration)
 func (s *AuthService) RequestPasswordReset(ctx context.Context, email, frontendBaseURL string) error {
 	if !s.IsPasswordResetEnabled(ctx) {
@@ -1077,7 +1078,7 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, email, frontendB
 	return nil
 }
 
-// RequestPasswordResetAsync 寮傛璇锋眰瀵嗙爜閲嶇疆锛堥槦鍒楀彂閫侊級
+// RequestPasswordResetAsync 异步请求密码重置（队列发送）
 // Security: Returns the same response regardless of whether the email exists (prevent user enumeration)
 func (s *AuthService) RequestPasswordResetAsync(ctx context.Context, email, frontendBaseURL string) error {
 	if !s.IsPasswordResetEnabled(ctx) {
@@ -1101,7 +1102,7 @@ func (s *AuthService) RequestPasswordResetAsync(ctx context.Context, email, fron
 	return nil
 }
 
-// ResetPassword 閲嶇疆瀵嗙爜
+// ResetPassword 重置密码
 // Security: Increments TokenVersion to invalidate all existing JWT tokens
 func (s *AuthService) ResetPassword(ctx context.Context, email, token, newPassword string) error {
 	// Check if password reset is enabled
@@ -1160,11 +1161,11 @@ func (s *AuthService) ResetPassword(ctx context.Context, email, token, newPasswo
 
 // ==================== Refresh Token Methods ====================
 
-// TokenPair 鍖呭惈Access Token鍜孯efresh Token
+// TokenPair 包含 Access Token 和 Refresh Token
 type TokenPair struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
-	ExpiresIn    int    `json:"expires_in"` // Access Token鏈夋晥鏈燂紙绉掞級
+	ExpiresIn    int    `json:"expires_in"` // Access Token 有效期（秒）
 }
 
 // TokenPairWithUser extends TokenPair with user role for backend mode checks
@@ -1173,21 +1174,21 @@ type TokenPairWithUser struct {
 	UserRole string
 }
 
-// GenerateTokenPair 鐢熸垚Access Token鍜孯efresh Token瀵?
-// familyID: 鍙€夌殑Token瀹舵棌ID锛岀敤浜嶵oken杞浆鏃朵繚鎸佸鏃忓叧绯?
+// GenerateTokenPair 生成 Access Token 和 Refresh Token 对
+// familyID：可选的 Token 家族 ID，用于 Token 轮转时保持家族关系
 func (s *AuthService) GenerateTokenPair(ctx context.Context, user *User, familyID string) (*TokenPair, error) {
-	// 妫€鏌?refreshTokenCache 鏄惁鍙敤
+	// 检查 refreshTokenCache 是否可用
 	if s.refreshTokenCache == nil {
 		return nil, errors.New("refresh token cache not configured")
 	}
 
-	// 鐢熸垚Access Token
+	// 生成 Access Token
 	accessToken, err := s.GenerateToken(user)
 	if err != nil {
 		return nil, fmt.Errorf("generate access token: %w", err)
 	}
 
-	// 鐢熸垚Refresh Token
+	// 生成 Refresh Token
 	refreshToken, err := s.generateRefreshToken(ctx, user, familyID)
 	if err != nil {
 		return nil, fmt.Errorf("generate refresh token: %w", err)
@@ -1200,19 +1201,19 @@ func (s *AuthService) GenerateTokenPair(ctx context.Context, user *User, familyI
 	}, nil
 }
 
-// generateRefreshToken 鐢熸垚骞跺瓨鍌≧efresh Token
+// generateRefreshToken 生成并存储 Refresh Token
 func (s *AuthService) generateRefreshToken(ctx context.Context, user *User, familyID string) (string, error) {
-	// 鐢熸垚闅忔満Token
+	// 生成随机 Token
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		return "", fmt.Errorf("generate random bytes: %w", err)
 	}
 	rawToken := refreshTokenPrefix + hex.EncodeToString(tokenBytes)
 
-	// 璁＄畻Token鍝堝笇锛堝瓨鍌ㄥ搱甯岃€岄潪鍘熷Token锛?
+	// 计算 Token 哈希（存储哈希而非原始 Token）
 	tokenHash := hashToken(rawToken)
 
-	// 濡傛灉娌℃湁鎻愪緵familyID锛岀敓鎴愭柊鐨?
+	// 如果没有提供 familyID，生成新的
 	if familyID == "" {
 		familyBytes := make([]byte, 16)
 		if _, err := rand.Read(familyBytes); err != nil {
@@ -1232,46 +1233,46 @@ func (s *AuthService) generateRefreshToken(ctx context.Context, user *User, fami
 		ExpiresAt:    now.Add(ttl),
 	}
 
-	// 瀛樺偍Token鏁版嵁
+	// 存储 Token 数据
 	if err := s.refreshTokenCache.StoreRefreshToken(ctx, tokenHash, data, ttl); err != nil {
 		return "", fmt.Errorf("store refresh token: %w", err)
 	}
 
-	// 娣诲姞鍒扮敤鎴稵oken闆嗗悎
+	// 添加到用户 Token 集合
 	if err := s.refreshTokenCache.AddToUserTokenSet(ctx, user.ID, tokenHash, ttl); err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Failed to add token to user set: %v", err)
-		// 涓嶅奖鍝嶄富娴佺▼
+		// 不影响主流程
 	}
 
-	// 娣诲姞鍒板鏃廡oken闆嗗悎
+	// 添加到家族 Token 集合
 	if err := s.refreshTokenCache.AddToFamilyTokenSet(ctx, familyID, tokenHash, ttl); err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Failed to add token to family set: %v", err)
-		// 涓嶅奖鍝嶄富娴佺▼
+		// 不影响主流程
 	}
 
 	return rawToken, nil
 }
 
-// RefreshTokenPair 浣跨敤Refresh Token鍒锋柊Token瀵?
-// 瀹炵幇Token杞浆锛氭瘡娆″埛鏂伴兘浼氱敓鎴愭柊鐨凴efresh Token锛屾棫Token绔嬪嵆澶辨晥
+// RefreshTokenPair 使用 Refresh Token 刷新 Token 对
+// 实现 Token 轮转：每次刷新都会生成新的 Refresh Token，旧 Token 立即失效
 func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string) (*TokenPairWithUser, error) {
-	// 妫€鏌?refreshTokenCache 鏄惁鍙敤
+	// 检查 refreshTokenCache 是否可用
 	if s.refreshTokenCache == nil {
 		return nil, ErrRefreshTokenInvalid
 	}
 
-	// 楠岃瘉Token鏍煎紡
+	// 验证 Token 格式
 	if !strings.HasPrefix(refreshToken, refreshTokenPrefix) {
 		return nil, ErrRefreshTokenInvalid
 	}
 
 	tokenHash := hashToken(refreshToken)
 
-	// 鑾峰彇Token鏁版嵁
+	// 获取 Token 数据
 	data, err := s.refreshTokenCache.GetRefreshToken(ctx, tokenHash)
 	if err != nil {
 		if errors.Is(err, ErrRefreshTokenNotFound) {
-			// Token涓嶅瓨鍦紝鍙兘鏄凡琚娇鐢紙Token杞浆锛夋垨宸茶繃鏈?
+			// Token 不存在，可能是已被使用（Token 轮转）或已过期
 			logger.LegacyPrintf("service.auth", "[Auth] Refresh token not found, possible reuse attack")
 			return nil, ErrRefreshTokenInvalid
 		}
@@ -1279,18 +1280,18 @@ func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string)
 		return nil, ErrServiceUnavailable
 	}
 
-	// 妫€鏌oken鏄惁杩囨湡
+	// 检查 Token 是否过期
 	if time.Now().After(data.ExpiresAt) {
-		// 鍒犻櫎杩囨湡Token
+		// 删除过期 Token
 		_ = s.refreshTokenCache.DeleteRefreshToken(ctx, tokenHash)
 		return nil, ErrRefreshTokenExpired
 	}
 
-	// 鑾峰彇鐢ㄦ埛淇℃伅
+	// 获取用户信息
 	user, err := s.userRepo.GetByID(ctx, data.UserID)
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
-			// 鐢ㄦ埛宸插垹闄わ紝鎾ら攢鏁翠釜Token瀹舵棌
+			// 用户已删除，撤销整个 Token 家族
 			_ = s.refreshTokenCache.DeleteTokenFamily(ctx, data.FamilyID)
 			return nil, ErrRefreshTokenInvalid
 		}
@@ -1298,27 +1299,27 @@ func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string)
 		return nil, ErrServiceUnavailable
 	}
 
-	// 妫€鏌ョ敤鎴风姸鎬?
+	// 检查用户状态
 	if !user.IsActive() {
-		// 鐢ㄦ埛琚鐢紝鎾ら攢鏁翠釜Token瀹舵棌
+		// 用户被禁用，撤销整个 Token 家族
 		_ = s.refreshTokenCache.DeleteTokenFamily(ctx, data.FamilyID)
 		return nil, ErrUserNotActive
 	}
 
-	// 妫€鏌okenVersion锛堝瘑鐮佹洿鏀瑰悗鎵€鏈塗oken澶辨晥锛?
+	// 检查 TokenVersion（密码更改后所有 Token 失效）
 	if data.TokenVersion != user.TokenVersion {
-		// TokenVersion涓嶅尮閰嶏紝鎾ら攢鏁翠釜Token瀹舵棌
+		// TokenVersion 不匹配，撤销整个 Token 家族
 		_ = s.refreshTokenCache.DeleteTokenFamily(ctx, data.FamilyID)
 		return nil, ErrTokenRevoked
 	}
 
-	// Token杞浆锛氱珛鍗充娇鏃oken澶辨晥
+	// Token 轮转：立即使旧 Token 失效
 	if err := s.refreshTokenCache.DeleteRefreshToken(ctx, tokenHash); err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Failed to delete old refresh token: %v", err)
-		// 缁х画澶勭悊锛屼笉褰卞搷涓绘祦绋?
+		// 继续处理，不影响主流程
 	}
 
-	// 鐢熸垚鏂扮殑Token瀵癸紝淇濇寔鍚屼竴涓鏃廔D
+	// 生成新的 Token 对，保持同一个家族 ID
 	pair, err := s.GenerateTokenPair(ctx, user, data.FamilyID)
 	if err != nil {
 		return nil, err
@@ -1329,7 +1330,7 @@ func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string)
 	}, nil
 }
 
-// RevokeRefreshToken 鎾ら攢鍗曚釜Refresh Token
+// RevokeRefreshToken 撤销单个 Refresh Token
 func (s *AuthService) RevokeRefreshToken(ctx context.Context, refreshToken string) error {
 	if s.refreshTokenCache == nil {
 		return nil // No-op if cache not configured
@@ -1342,8 +1343,8 @@ func (s *AuthService) RevokeRefreshToken(ctx context.Context, refreshToken strin
 	return s.refreshTokenCache.DeleteRefreshToken(ctx, tokenHash)
 }
 
-// RevokeAllUserSessions 鎾ら攢鐢ㄦ埛鐨勬墍鏈変細璇濓紙鎵€鏈塕efresh Token锛?
-// 鐢ㄤ簬瀵嗙爜鏇存敼鎴栫敤鎴蜂富鍔ㄧ櫥鍑烘墍鏈夎澶?
+// RevokeAllUserSessions 撤销用户的所有会话（所有 Refresh Token）
+// 用于密码更改或用户主动登出所有设备
 func (s *AuthService) RevokeAllUserSessions(ctx context.Context, userID int64) error {
 	if s.refreshTokenCache == nil {
 		return nil // No-op if cache not configured
@@ -1351,7 +1352,7 @@ func (s *AuthService) RevokeAllUserSessions(ctx context.Context, userID int64) e
 	return s.refreshTokenCache.DeleteUserRefreshTokens(ctx, userID)
 }
 
-// hashToken 璁＄畻Token鐨凷HA256鍝堝笇
+// hashToken 计算 Token 的 SHA256 哈希
 func hashToken(token string) string {
 	hash := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(hash[:])
