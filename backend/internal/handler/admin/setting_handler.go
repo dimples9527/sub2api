@@ -191,6 +191,9 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		PaymentProductNameSuffix:             paymentCfg.ProductNameSuffix,
 		PaymentHelpImageURL:                  paymentCfg.HelpImageURL,
 		PaymentHelpText:                      paymentCfg.HelpText,
+		PaymentRechargeOptions:               paymentCfg.RechargeOptions,
+		PaymentIntroRechargePay:              paymentCfg.IntroRechargePay,
+		PaymentIntroRechargeCredit:           paymentCfg.IntroRechargeCredit,
 		PaymentCancelRateLimitEnabled:        paymentCfg.CancelRateLimitEnabled,
 		PaymentCancelRateLimitMax:            paymentCfg.CancelRateLimitMax,
 		PaymentCancelRateLimitWindow:         paymentCfg.CancelRateLimitWindow,
@@ -311,19 +314,22 @@ type UpdateSettingsRequest struct {
 	EnableCCHSigning             *bool `json:"enable_cch_signing"`
 
 	// Payment configuration (integrated into settings, full replace)
-	PaymentEnabled           *bool    `json:"payment_enabled"`
-	PaymentMinAmount         *float64 `json:"payment_min_amount"`
-	PaymentMaxAmount         *float64 `json:"payment_max_amount"`
-	PaymentDailyLimit        *float64 `json:"payment_daily_limit"`
-	PaymentOrderTimeoutMin   *int     `json:"payment_order_timeout_minutes"`
-	PaymentMaxPendingOrders  *int     `json:"payment_max_pending_orders"`
-	PaymentEnabledTypes      []string `json:"payment_enabled_types"`
-	PaymentBalanceDisabled   *bool    `json:"payment_balance_disabled"`
-	PaymentLoadBalanceStrat  *string  `json:"payment_load_balance_strategy"`
-	PaymentProductNamePrefix *string  `json:"payment_product_name_prefix"`
-	PaymentProductNameSuffix *string  `json:"payment_product_name_suffix"`
-	PaymentHelpImageURL      *string  `json:"payment_help_image_url"`
-	PaymentHelpText          *string  `json:"payment_help_text"`
+	PaymentEnabled             *bool     `json:"payment_enabled"`
+	PaymentMinAmount           *float64  `json:"payment_min_amount"`
+	PaymentMaxAmount           *float64  `json:"payment_max_amount"`
+	PaymentDailyLimit          *float64  `json:"payment_daily_limit"`
+	PaymentOrderTimeoutMin     *int      `json:"payment_order_timeout_minutes"`
+	PaymentMaxPendingOrders    *int      `json:"payment_max_pending_orders"`
+	PaymentEnabledTypes        []string  `json:"payment_enabled_types"`
+	PaymentBalanceDisabled     *bool     `json:"payment_balance_disabled"`
+	PaymentLoadBalanceStrat    *string   `json:"payment_load_balance_strategy"`
+	PaymentProductNamePrefix   *string   `json:"payment_product_name_prefix"`
+	PaymentProductNameSuffix   *string   `json:"payment_product_name_suffix"`
+	PaymentHelpImageURL        *string   `json:"payment_help_image_url"`
+	PaymentHelpText            *string   `json:"payment_help_text"`
+	PaymentRechargeOptions     []float64 `json:"payment_recharge_options"`
+	PaymentIntroRechargePay    *float64  `json:"payment_intro_recharge_pay_amount"`
+	PaymentIntroRechargeCredit *float64  `json:"payment_intro_recharge_credit_amount"`
 
 	// Cancel rate limit
 	PaymentCancelRateLimitEnabled *bool   `json:"payment_cancel_rate_limit_enabled"`
@@ -914,6 +920,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			ProductNameSuffix:      req.PaymentProductNameSuffix,
 			HelpImageURL:           req.PaymentHelpImageURL,
 			HelpText:               req.PaymentHelpText,
+			RechargeOptions:        req.PaymentRechargeOptions,
+			IntroRechargePay:       req.PaymentIntroRechargePay,
+			IntroRechargeCredit:    req.PaymentIntroRechargeCredit,
 			CancelRateLimitEnabled: req.PaymentCancelRateLimitEnabled,
 			CancelRateLimitMax:     req.PaymentCancelRateLimitMax,
 			CancelRateLimitWindow:  req.PaymentCancelRateLimitWindow,
@@ -1052,6 +1061,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		PaymentProductNameSuffix:             updatedPaymentCfg.ProductNameSuffix,
 		PaymentHelpImageURL:                  updatedPaymentCfg.HelpImageURL,
 		PaymentHelpText:                      updatedPaymentCfg.HelpText,
+		PaymentRechargeOptions:               updatedPaymentCfg.RechargeOptions,
+		PaymentIntroRechargePay:              updatedPaymentCfg.IntroRechargePay,
+		PaymentIntroRechargeCredit:           updatedPaymentCfg.IntroRechargeCredit,
 		PaymentCancelRateLimitEnabled:        updatedPaymentCfg.CancelRateLimitEnabled,
 		PaymentCancelRateLimitMax:            updatedPaymentCfg.CancelRateLimitMax,
 		PaymentCancelRateLimitWindow:         updatedPaymentCfg.CancelRateLimitWindow,
@@ -1068,7 +1080,9 @@ func hasPaymentFields(req UpdateSettingsRequest) bool {
 		req.PaymentEnabledTypes != nil || req.PaymentBalanceDisabled != nil ||
 		req.PaymentLoadBalanceStrat != nil || req.PaymentProductNamePrefix != nil ||
 		req.PaymentProductNameSuffix != nil || req.PaymentHelpImageURL != nil ||
-		req.PaymentHelpText != nil || req.PaymentCancelRateLimitEnabled != nil ||
+		req.PaymentHelpText != nil || req.PaymentRechargeOptions != nil ||
+		req.PaymentIntroRechargePay != nil || req.PaymentIntroRechargeCredit != nil ||
+		req.PaymentCancelRateLimitEnabled != nil ||
 		req.PaymentCancelRateLimitMax != nil || req.PaymentCancelRateLimitWindow != nil ||
 		req.PaymentCancelRateLimitUnit != nil || req.PaymentCancelRateLimitMode != nil
 }

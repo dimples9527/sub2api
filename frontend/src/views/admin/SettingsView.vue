@@ -2201,7 +2201,17 @@
                 <div><label class="input-label">{{ t('admin.settings.payment.dailyLimit') }}</label><input :value="form.payment_daily_limit || ''" @input="form.payment_daily_limit = parseFloat(($event.target as HTMLInputElement).value) || 0" type="number" step="0.01" min="0" class="input" :placeholder="t('admin.settings.payment.noLimit')" /></div>
                 <div><label class="input-label">{{ t('admin.settings.payment.orderTimeout') }} <span class="text-red-500">*</span></label><input v-model.number="form.payment_order_timeout_minutes" type="number" min="1" class="input" required /><p class="mt-0.5 text-xs text-gray-400">{{ t('admin.settings.payment.orderTimeoutHint') }}</p></div>
               </div>
-              <!-- Row 3: Pending orders + load balance + cancel rate limit (all in one row) -->
+              <!-- Row 3: Recharge options + intro discount -->
+              <div class="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,2fr)_1fr_1fr]">
+                <div>
+                  <label class="input-label">{{ t('admin.settings.payment.rechargeOptions') }}</label>
+                  <input v-model="paymentRechargeOptionsInput" type="text" class="input" :placeholder="t('admin.settings.payment.rechargeOptionsPlaceholder')" />
+                  <p class="mt-0.5 text-xs text-gray-400">{{ t('admin.settings.payment.rechargeOptionsHint') }}</p>
+                </div>
+                <div><label class="input-label">{{ t('admin.settings.payment.introRechargePayAmount') }}</label><input v-model.number="form.payment_intro_recharge_pay_amount" type="number" step="0.01" min="0" class="input" /></div>
+                <div><label class="input-label">{{ t('admin.settings.payment.introRechargeCreditAmount') }}</label><input v-model.number="form.payment_intro_recharge_credit_amount" type="number" step="0.01" min="0" class="input" /><p class="mt-0.5 text-xs text-gray-400">{{ t('admin.settings.payment.introRechargeHint') }}</p></div>
+              </div>
+              <!-- Row 4: Pending orders + load balance + cancel rate limit (all in one row) -->
               <div class="flex flex-wrap items-end gap-4">
                 <div class="w-28"><label class="input-label">{{ t('admin.settings.payment.maxPendingOrders') }}</label><input v-model.number="form.payment_max_pending_orders" type="number" min="1" class="input" /></div>
                 <div>
@@ -2234,7 +2244,7 @@
                   </div>
                 </div>
               </div>
-              <!-- Row 4: Enabled payment types (provider badges like sub2apipay) -->
+              <!-- Row 5: Enabled payment types (provider badges like sub2apipay) -->
               <div>
                 <label class="input-label">{{ t('admin.settings.payment.enabledPaymentTypes') }}</label>
                 <div class="mt-1.5 flex flex-wrap gap-2">
@@ -2259,7 +2269,7 @@
                   </a>
                 </p>
               </div>
-              <!-- Row 5: Help image + text -->
+              <!-- Row 6: Help image + text -->
               <div class="grid grid-cols-2 gap-3">
                 <div>
                   <label class="input-label">{{ t('admin.settings.payment.helpImage') }}</label>
@@ -2625,6 +2635,7 @@ const testEmailAddress = ref('')
 const registrationEmailSuffixWhitelistTags = ref<string[]>([])
 const registrationEmailSuffixWhitelistDraft = ref('')
 const tablePageSizeOptionsInput = ref('10, 20, 50, 100')
+const paymentRechargeOptionsInput = ref('2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000')
 
 // Admin API Key 状态
 const adminApiKeyLoading = ref(true)
@@ -2724,7 +2735,7 @@ const form = reactive<SettingsForm>({
   home_content: '',
   backend_mode_enabled: false,
   hide_ccs_import_button: false,
-  payment_enabled: false,  payment_min_amount: 1,  payment_max_amount: 10000,  payment_daily_limit: 50000,  payment_max_pending_orders: 3,  payment_order_timeout_minutes: 30,  payment_balance_disabled: false,  payment_enabled_types: [],  payment_help_image_url: '',  payment_help_text: '',  payment_product_name_prefix: '',  payment_product_name_suffix: '',  payment_load_balance_strategy: 'round-robin',  payment_cancel_rate_limit_enabled: false,  payment_cancel_rate_limit_max: 10,  payment_cancel_rate_limit_window: 1,  payment_cancel_rate_limit_unit: 'day',  payment_cancel_rate_limit_window_mode: 'rolling',
+  payment_enabled: false,  payment_min_amount: 1,  payment_max_amount: 10000,  payment_daily_limit: 50000,  payment_max_pending_orders: 3,  payment_order_timeout_minutes: 30,  payment_balance_disabled: false,  payment_enabled_types: [],  payment_help_image_url: '',  payment_help_text: '',  payment_recharge_options: [2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000],  payment_intro_recharge_pay_amount: 2,  payment_intro_recharge_credit_amount: 10,  payment_product_name_prefix: '',  payment_product_name_suffix: '',  payment_load_balance_strategy: 'round-robin',  payment_cancel_rate_limit_enabled: false,  payment_cancel_rate_limit_max: 10,  payment_cancel_rate_limit_window: 1,  payment_cancel_rate_limit_unit: 'day',  payment_cancel_rate_limit_window_mode: 'rolling',
   table_default_page_size: tablePageSizeDefault,
   table_page_size_options: [10, 20, 50, 100],
   custom_menu_items: [] as Array<{id: string; label: string; icon_svg: string; url: string; visibility: 'user' | 'admin'; sort_order: number}>,
@@ -2954,6 +2965,28 @@ function formatTablePageSizeOptions(options: number[]): string {
   return options.join(', ')
 }
 
+function formatPaymentRechargeOptions(options: number[]): string {
+  return options.join(', ')
+}
+
+function parsePaymentRechargeOptions(raw: string): number[] | null {
+  const tokens = raw
+    .split(',')
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0)
+
+  if (tokens.length === 0) {
+    return null
+  }
+
+  const parsed = tokens.map((token) => Number(token))
+  if (parsed.some((value) => !Number.isFinite(value) || value <= 0)) {
+    return null
+  }
+
+  return Array.from(new Set(parsed)).sort((a, b) => a - b)
+}
+
 function parseTablePageSizeOptionsInput(raw: string): number[] | null {
   const tokens = raw
     .split(',')
@@ -3005,6 +3038,11 @@ async function loadSettings() {
     )
     tablePageSizeOptionsInput.value = formatTablePageSizeOptions(
       Array.isArray(settings.table_page_size_options) ? settings.table_page_size_options : [10, 20, 50, 100]
+    )
+    paymentRechargeOptionsInput.value = formatPaymentRechargeOptions(
+      Array.isArray(settings.payment_recharge_options) && settings.payment_recharge_options.length > 0
+        ? settings.payment_recharge_options
+        : [2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000]
     )
     registrationEmailSuffixWhitelistDraft.value = ''
     form.smtp_password = ''
@@ -3118,6 +3156,12 @@ async function saveSettings() {
     if (!isValidHttpUrl(form.frontend_url)) form.frontend_url = ''
     if (!isValidHttpUrl(form.doc_url)) form.doc_url = ''
 
+    const parsedRechargeOptions = parsePaymentRechargeOptions(paymentRechargeOptionsInput.value)
+    if (!parsedRechargeOptions) {
+      appStore.showError(t('admin.settings.payment.invalidRechargeOptions'))
+      return
+    }
+
     const payload: UpdateSettingsRequest = {
       registration_enabled: form.registration_enabled,
       email_verify_enabled: form.email_verify_enabled,
@@ -3211,6 +3255,9 @@ async function saveSettings() {
       payment_product_name_suffix: form.payment_product_name_suffix,
       payment_help_image_url: form.payment_help_image_url,
       payment_help_text: form.payment_help_text,
+      payment_recharge_options: parsedRechargeOptions,
+      payment_intro_recharge_pay_amount: Number(form.payment_intro_recharge_pay_amount) || 0,
+      payment_intro_recharge_credit_amount: Number(form.payment_intro_recharge_credit_amount) || 0,
       payment_cancel_rate_limit_enabled: form.payment_cancel_rate_limit_enabled,
       payment_cancel_rate_limit_max: Number(form.payment_cancel_rate_limit_max) || 10,
       payment_cancel_rate_limit_window: Number(form.payment_cancel_rate_limit_window) || 1,
@@ -3229,6 +3276,11 @@ async function saveSettings() {
     )
     tablePageSizeOptionsInput.value = formatTablePageSizeOptions(
       Array.isArray(updated.table_page_size_options) ? updated.table_page_size_options : [10, 20, 50, 100]
+    )
+    paymentRechargeOptionsInput.value = formatPaymentRechargeOptions(
+      Array.isArray(updated.payment_recharge_options) && updated.payment_recharge_options.length > 0
+        ? updated.payment_recharge_options
+        : [2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000]
     )
     registrationEmailSuffixWhitelistDraft.value = ''
     form.smtp_password = ''

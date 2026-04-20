@@ -36,6 +36,9 @@ export interface PaymentConfig {
   help_image_url: string
   help_text: string
   stripe_publishable_key: string
+  recharge_options: number[]
+  intro_recharge_pay_amount: number
+  intro_recharge_credit_amount: number
 }
 
 export interface MethodLimit {

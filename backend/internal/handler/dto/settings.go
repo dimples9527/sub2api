@@ -128,19 +128,22 @@ type SystemSettings struct {
 	EnableCCHSigning             bool `json:"enable_cch_signing"`
 
 	// Payment configuration
-	PaymentEnabled           bool     `json:"payment_enabled"`
-	PaymentMinAmount         float64  `json:"payment_min_amount"`
-	PaymentMaxAmount         float64  `json:"payment_max_amount"`
-	PaymentDailyLimit        float64  `json:"payment_daily_limit"`
-	PaymentOrderTimeoutMin   int      `json:"payment_order_timeout_minutes"`
-	PaymentMaxPendingOrders  int      `json:"payment_max_pending_orders"`
-	PaymentEnabledTypes      []string `json:"payment_enabled_types"`
-	PaymentBalanceDisabled   bool     `json:"payment_balance_disabled"`
-	PaymentLoadBalanceStrat  string   `json:"payment_load_balance_strategy"`
-	PaymentProductNamePrefix string   `json:"payment_product_name_prefix"`
-	PaymentProductNameSuffix string   `json:"payment_product_name_suffix"`
-	PaymentHelpImageURL      string   `json:"payment_help_image_url"`
-	PaymentHelpText          string   `json:"payment_help_text"`
+	PaymentEnabled             bool      `json:"payment_enabled"`
+	PaymentMinAmount           float64   `json:"payment_min_amount"`
+	PaymentMaxAmount           float64   `json:"payment_max_amount"`
+	PaymentDailyLimit          float64   `json:"payment_daily_limit"`
+	PaymentOrderTimeoutMin     int       `json:"payment_order_timeout_minutes"`
+	PaymentMaxPendingOrders    int       `json:"payment_max_pending_orders"`
+	PaymentEnabledTypes        []string  `json:"payment_enabled_types"`
+	PaymentBalanceDisabled     bool      `json:"payment_balance_disabled"`
+	PaymentLoadBalanceStrat    string    `json:"payment_load_balance_strategy"`
+	PaymentProductNamePrefix   string    `json:"payment_product_name_prefix"`
+	PaymentProductNameSuffix   string    `json:"payment_product_name_suffix"`
+	PaymentHelpImageURL        string    `json:"payment_help_image_url"`
+	PaymentHelpText            string    `json:"payment_help_text"`
+	PaymentRechargeOptions     []float64 `json:"payment_recharge_options"`
+	PaymentIntroRechargePay    float64   `json:"payment_intro_recharge_pay_amount"`
+	PaymentIntroRechargeCredit float64   `json:"payment_intro_recharge_credit_amount"`
 
 	// Cancel rate limit
 	PaymentCancelRateLimitEnabled bool   `json:"payment_cancel_rate_limit_enabled"`

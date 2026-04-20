@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -30,6 +31,9 @@ const (
 	SettingCancelWindowSize    = "CANCEL_RATE_LIMIT_WINDOW"
 	SettingCancelWindowUnit    = "CANCEL_RATE_LIMIT_UNIT"
 	SettingCancelWindowMode    = "CANCEL_RATE_LIMIT_WINDOW_MODE"
+	SettingRechargeOptions     = "PAYMENT_RECHARGE_OPTIONS"
+	SettingIntroRechargePay    = "PAYMENT_INTRO_RECHARGE_PAY_AMOUNT"
+	SettingIntroRechargeCredit = "PAYMENT_INTRO_RECHARGE_CREDIT_AMOUNT"
 )
 
 // Default values for payment configuration settings.
@@ -38,22 +42,27 @@ const (
 	defaultMaxPendingOrders = 3
 )
 
+var defaultRechargeOptionAmounts = []float64{2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000}
+
 // PaymentConfig holds the payment system configuration.
 type PaymentConfig struct {
-	Enabled              bool     `json:"enabled"`
-	MinAmount            float64  `json:"min_amount"`
-	MaxAmount            float64  `json:"max_amount"`
-	DailyLimit           float64  `json:"daily_limit"`
-	OrderTimeoutMin      int      `json:"order_timeout_minutes"`
-	MaxPendingOrders     int      `json:"max_pending_orders"`
-	EnabledTypes         []string `json:"enabled_payment_types"`
-	BalanceDisabled      bool     `json:"balance_disabled"`
-	LoadBalanceStrategy  string   `json:"load_balance_strategy"`
-	ProductNamePrefix    string   `json:"product_name_prefix"`
-	ProductNameSuffix    string   `json:"product_name_suffix"`
-	HelpImageURL         string   `json:"help_image_url"`
-	HelpText             string   `json:"help_text"`
-	StripePublishableKey string   `json:"stripe_publishable_key,omitempty"`
+	Enabled              bool      `json:"enabled"`
+	MinAmount            float64   `json:"min_amount"`
+	MaxAmount            float64   `json:"max_amount"`
+	DailyLimit           float64   `json:"daily_limit"`
+	OrderTimeoutMin      int       `json:"order_timeout_minutes"`
+	MaxPendingOrders     int       `json:"max_pending_orders"`
+	EnabledTypes         []string  `json:"enabled_payment_types"`
+	BalanceDisabled      bool      `json:"balance_disabled"`
+	LoadBalanceStrategy  string    `json:"load_balance_strategy"`
+	ProductNamePrefix    string    `json:"product_name_prefix"`
+	ProductNameSuffix    string    `json:"product_name_suffix"`
+	HelpImageURL         string    `json:"help_image_url"`
+	HelpText             string    `json:"help_text"`
+	StripePublishableKey string    `json:"stripe_publishable_key,omitempty"`
+	RechargeOptions      []float64 `json:"recharge_options"`
+	IntroRechargePay     float64   `json:"intro_recharge_pay_amount"`
+	IntroRechargeCredit  float64   `json:"intro_recharge_credit_amount"`
 
 	// Cancel rate limit settings
 	CancelRateLimitEnabled bool   `json:"cancel_rate_limit_enabled"`
@@ -65,19 +74,22 @@ type PaymentConfig struct {
 
 // UpdatePaymentConfigRequest contains fields to update payment configuration.
 type UpdatePaymentConfigRequest struct {
-	Enabled             *bool    `json:"enabled"`
-	MinAmount           *float64 `json:"min_amount"`
-	MaxAmount           *float64 `json:"max_amount"`
-	DailyLimit          *float64 `json:"daily_limit"`
-	OrderTimeoutMin     *int     `json:"order_timeout_minutes"`
-	MaxPendingOrders    *int     `json:"max_pending_orders"`
-	EnabledTypes        []string `json:"enabled_payment_types"`
-	BalanceDisabled     *bool    `json:"balance_disabled"`
-	LoadBalanceStrategy *string  `json:"load_balance_strategy"`
-	ProductNamePrefix   *string  `json:"product_name_prefix"`
-	ProductNameSuffix   *string  `json:"product_name_suffix"`
-	HelpImageURL        *string  `json:"help_image_url"`
-	HelpText            *string  `json:"help_text"`
+	Enabled             *bool     `json:"enabled"`
+	MinAmount           *float64  `json:"min_amount"`
+	MaxAmount           *float64  `json:"max_amount"`
+	DailyLimit          *float64  `json:"daily_limit"`
+	OrderTimeoutMin     *int      `json:"order_timeout_minutes"`
+	MaxPendingOrders    *int      `json:"max_pending_orders"`
+	EnabledTypes        []string  `json:"enabled_payment_types"`
+	BalanceDisabled     *bool     `json:"balance_disabled"`
+	LoadBalanceStrategy *string   `json:"load_balance_strategy"`
+	ProductNamePrefix   *string   `json:"product_name_prefix"`
+	ProductNameSuffix   *string   `json:"product_name_suffix"`
+	HelpImageURL        *string   `json:"help_image_url"`
+	HelpText            *string   `json:"help_text"`
+	RechargeOptions     []float64 `json:"recharge_options"`
+	IntroRechargePay    *float64  `json:"intro_recharge_pay_amount"`
+	IntroRechargeCredit *float64  `json:"intro_recharge_credit_amount"`
 
 	// Cancel rate limit settings
 	CancelRateLimitEnabled *bool   `json:"cancel_rate_limit_enabled"`
@@ -186,6 +198,7 @@ func (s *PaymentConfigService) GetPaymentConfig(ctx context.Context) (*PaymentCo
 		SettingHelpImageURL, SettingHelpText,
 		SettingCancelRateLimitOn, SettingCancelRateLimitMax,
 		SettingCancelWindowSize, SettingCancelWindowUnit, SettingCancelWindowMode,
+		SettingRechargeOptions, SettingIntroRechargePay, SettingIntroRechargeCredit,
 	}
 	vals, err := s.settingRepo.GetMultiple(ctx, keys)
 	if err != nil {
@@ -211,6 +224,9 @@ func (s *PaymentConfigService) parsePaymentConfig(vals map[string]string) *Payme
 		ProductNameSuffix:   vals[SettingProductNameSuffix],
 		HelpImageURL:        vals[SettingHelpImageURL],
 		HelpText:            vals[SettingHelpText],
+		RechargeOptions:     parseRechargeOptionAmounts(vals[SettingRechargeOptions]),
+		IntroRechargePay:    pcParseFloat(vals[SettingIntroRechargePay], introRechargeRequestAmount),
+		IntroRechargeCredit: pcParseFloat(vals[SettingIntroRechargeCredit], introRechargeCreditAmount),
 
 		CancelRateLimitEnabled: vals[SettingCancelRateLimitOn] == "true",
 		CancelRateLimitMax:     pcParseInt(vals[SettingCancelRateLimitMax], 10),
@@ -267,6 +283,9 @@ func (s *PaymentConfigService) UpdatePaymentConfig(ctx context.Context, req Upda
 		SettingProductNameSuffix:   derefStr(req.ProductNameSuffix),
 		SettingHelpImageURL:        derefStr(req.HelpImageURL),
 		SettingHelpText:            derefStr(req.HelpText),
+		SettingRechargeOptions:     formatFloatListOrEmpty(req.RechargeOptions),
+		SettingIntroRechargePay:    formatNonNegativeFloat(req.IntroRechargePay),
+		SettingIntroRechargeCredit: formatNonNegativeFloat(req.IntroRechargeCredit),
 		SettingCancelRateLimitOn:   formatBoolOrEmpty(req.CancelRateLimitEnabled),
 		SettingCancelRateLimitMax:  formatPositiveInt(req.CancelRateLimitMax),
 		SettingCancelWindowSize:    formatPositiveInt(req.CancelRateLimitWindow),
@@ -293,6 +312,28 @@ func formatPositiveFloat(v *float64) string {
 		return "" // empty → parsePaymentConfig uses default
 	}
 	return strconv.FormatFloat(*v, 'f', 2, 64)
+}
+
+func formatNonNegativeFloat(v *float64) string {
+	if v == nil {
+		return ""
+	}
+	if *v < 0 {
+		return "0.00"
+	}
+	return strconv.FormatFloat(*v, 'f', 2, 64)
+}
+
+func formatFloatListOrEmpty(values []float64) string {
+	if values == nil {
+		return ""
+	}
+	normalized := normalizeRechargeOptionAmounts(values)
+	raw, err := json.Marshal(normalized)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
 }
 
 func formatPositiveInt(v *int) string {
@@ -337,6 +378,54 @@ func pcParseFloat(s string, defaultVal float64) float64 {
 		return defaultVal
 	}
 	return v
+}
+
+func parseRechargeOptionAmounts(raw string) []float64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return append([]float64(nil), defaultRechargeOptionAmounts...)
+	}
+	var values []float64
+	if strings.HasPrefix(raw, "[") {
+		if err := json.Unmarshal([]byte(raw), &values); err == nil {
+			return normalizeRechargeOptionAmounts(values)
+		}
+	}
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		value, err := strconv.ParseFloat(part, 64)
+		if err != nil {
+			continue
+		}
+		values = append(values, value)
+	}
+	return normalizeRechargeOptionAmounts(values)
+}
+
+func normalizeRechargeOptionAmounts(values []float64) []float64 {
+	if len(values) == 0 {
+		return append([]float64(nil), defaultRechargeOptionAmounts...)
+	}
+	seen := make(map[string]struct{}, len(values))
+	normalized := make([]float64, 0, len(values))
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		key := strconv.FormatFloat(value, 'f', 2, 64)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		normalized = append(normalized, value)
+	}
+	if len(normalized) == 0 {
+		return append([]float64(nil), defaultRechargeOptionAmounts...)
+	}
+	return normalized
 }
 
 func pcParseInt(s string, defaultVal int) int {

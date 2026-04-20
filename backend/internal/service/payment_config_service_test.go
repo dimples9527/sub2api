@@ -92,6 +92,12 @@ func TestParsePaymentConfig(t *testing.T) {
 		if len(cfg.EnabledTypes) != 0 {
 			t.Fatalf("expected empty EnabledTypes, got %v", cfg.EnabledTypes)
 		}
+		if len(cfg.RechargeOptions) != len(defaultRechargeOptionAmounts) {
+			t.Fatalf("expected default recharge options, got %v", cfg.RechargeOptions)
+		}
+		if cfg.IntroRechargePay != introRechargeRequestAmount || cfg.IntroRechargeCredit != introRechargeCreditAmount {
+			t.Fatalf("unexpected intro recharge defaults: pay=%v credit=%v", cfg.IntroRechargePay, cfg.IntroRechargeCredit)
+		}
 	})
 
 	t.Run("all values populated", func(t *testing.T) {
@@ -108,6 +114,9 @@ func TestParsePaymentConfig(t *testing.T) {
 			SettingLoadBalanceStrategy: "least_amount",
 			SettingProductNamePrefix:   "PRE",
 			SettingProductNameSuffix:   "SUF",
+			SettingRechargeOptions:     `[6,18,30]`,
+			SettingIntroRechargePay:    "3.00",
+			SettingIntroRechargeCredit: "15.00",
 		}
 		cfg := svc.parsePaymentConfig(vals)
 
@@ -146,6 +155,12 @@ func TestParsePaymentConfig(t *testing.T) {
 		}
 		if cfg.ProductNameSuffix != "SUF" {
 			t.Fatalf("ProductNameSuffix = %q, want %q", cfg.ProductNameSuffix, "SUF")
+		}
+		if len(cfg.RechargeOptions) != 3 || cfg.RechargeOptions[0] != 6 || cfg.RechargeOptions[2] != 30 {
+			t.Fatalf("RechargeOptions = %v, want [6 18 30]", cfg.RechargeOptions)
+		}
+		if cfg.IntroRechargePay != 3 || cfg.IntroRechargeCredit != 15 {
+			t.Fatalf("unexpected intro recharge config: pay=%v credit=%v", cfg.IntroRechargePay, cfg.IntroRechargeCredit)
 		}
 	})
 
@@ -203,4 +218,24 @@ func TestGetBasePaymentType(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParseRechargeOptionAmounts(t *testing.T) {
+	t.Parallel()
+
+	t.Run("json array is parsed and normalized", func(t *testing.T) {
+		t.Parallel()
+		got := parseRechargeOptionAmounts(`[10, 5, 10, -2]`)
+		if len(got) != 2 || got[0] != 10 || got[1] != 5 {
+			t.Fatalf("parseRechargeOptionAmounts json = %v, want [10 5]", got)
+		}
+	})
+
+	t.Run("csv falls back when invalid", func(t *testing.T) {
+		t.Parallel()
+		got := parseRechargeOptionAmounts("abc")
+		if len(got) != len(defaultRechargeOptionAmounts) {
+			t.Fatalf("parseRechargeOptionAmounts invalid = %v, want defaults", got)
+		}
+	})
 }

@@ -54,7 +54,7 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 		if err != nil {
 			return nil, fmt.Errorf("check intro recharge availability: %w", err)
 		}
-		amount, chargeAmount, appliedIntroRecharge = resolveRechargeAmounts(req.Amount, introAvailable)
+		amount, chargeAmount, appliedIntroRecharge = resolveRechargeAmounts(req.Amount, cfg, introAvailable)
 	}
 	feeRate := s.getFeeRate(req.PaymentType)
 	payAmountStr := payment.CalculatePayAmount(chargeAmount, feeRate)

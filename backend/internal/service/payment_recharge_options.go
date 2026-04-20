@@ -21,43 +21,69 @@ type RechargeAmountOption struct {
 	OneTime           bool     `json:"one_time,omitempty"`
 }
 
-func buildRechargeAmountOptions(introAvailable bool) []RechargeAmountOption {
-	if introAvailable {
-		originalPay := introRechargeCreditAmount
-		return []RechargeAmountOption{
-			{PayAmount: introRechargeRequestAmount, CreditAmount: introRechargeCreditAmount, OriginalPayAmount: &originalPay, OneTime: true},
-			{PayAmount: 5, CreditAmount: 5},
-			{PayAmount: 20, CreditAmount: 20},
-			{PayAmount: 50, CreditAmount: 50},
-			{PayAmount: 100, CreditAmount: 100},
-			{PayAmount: 200, CreditAmount: 200},
-			{PayAmount: 500, CreditAmount: 500},
-			{PayAmount: 1000, CreditAmount: 1000},
-			{PayAmount: 2000, CreditAmount: 2000},
-			{PayAmount: 5000, CreditAmount: 5000},
-		}
+func buildRechargeAmountOptions(cfg *PaymentConfig, introAvailable bool) []RechargeAmountOption {
+	amounts := defaultRechargeOptionAmounts
+	if cfg != nil && len(cfg.RechargeOptions) > 0 {
+		amounts = cfg.RechargeOptions
 	}
 
-	return []RechargeAmountOption{
-		{PayAmount: 2, CreditAmount: 2},
-		{PayAmount: 5, CreditAmount: 5},
-		{PayAmount: 10, CreditAmount: 10},
-		{PayAmount: 20, CreditAmount: 20},
-		{PayAmount: 50, CreditAmount: 50},
-		{PayAmount: 100, CreditAmount: 100},
-		{PayAmount: 200, CreditAmount: 200},
-		{PayAmount: 500, CreditAmount: 500},
-		{PayAmount: 1000, CreditAmount: 1000},
-		{PayAmount: 2000, CreditAmount: 2000},
-		{PayAmount: 5000, CreditAmount: 5000},
+	options := make([]RechargeAmountOption, 0, len(amounts)+1)
+	introEnabled := isIntroRechargeEnabled(cfg)
+	introPay, introCredit := introRechargeValues(cfg)
+	if introAvailable && introEnabled {
+		originalPay := introCredit
+		options = append(options, RechargeAmountOption{
+			PayAmount:         introPay,
+			CreditAmount:      introCredit,
+			OriginalPayAmount: &originalPay,
+			OneTime:           true,
+		})
 	}
+
+	for _, amount := range amounts {
+		if amount <= 0 {
+			continue
+		}
+		if introAvailable && introEnabled && (sameRechargeAmount(amount, introPay) || sameRechargeAmount(amount, introCredit)) {
+			continue
+		}
+		options = append(options, RechargeAmountOption{PayAmount: amount, CreditAmount: amount})
+	}
+	return options
 }
 
-func resolveRechargeAmounts(requestedAmount float64, introAvailable bool) (creditedAmount, chargedAmount float64, appliedIntro bool) {
-	if introAvailable && math.Abs(requestedAmount-introRechargeRequestAmount) <= amountToleranceCNY {
-		return introRechargeCreditAmount, introRechargeRequestAmount, true
+func resolveRechargeAmounts(requestedAmount float64, cfg *PaymentConfig, introAvailable bool) (creditedAmount, chargedAmount float64, appliedIntro bool) {
+	if introAvailable && isIntroRechargeEnabled(cfg) {
+		introPay, introCredit := introRechargeValues(cfg)
+		if math.Abs(requestedAmount-introPay) <= amountToleranceCNY {
+			return introCredit, introPay, true
+		}
 	}
 	return requestedAmount, requestedAmount, false
+}
+
+func isIntroRechargeEnabled(cfg *PaymentConfig) bool {
+	introPay, introCredit := introRechargeValues(cfg)
+	return introPay > 0 && introCredit > introPay
+}
+
+func introRechargeValues(cfg *PaymentConfig) (payAmount, creditAmount float64) {
+	if cfg == nil {
+		return introRechargeRequestAmount, introRechargeCreditAmount
+	}
+	payAmount = cfg.IntroRechargePay
+	creditAmount = cfg.IntroRechargeCredit
+	if payAmount <= 0 {
+		payAmount = introRechargeRequestAmount
+	}
+	if creditAmount <= 0 {
+		creditAmount = introRechargeCreditAmount
+	}
+	return payAmount, creditAmount
+}
+
+func sameRechargeAmount(a, b float64) bool {
+	return math.Abs(a-b) <= amountToleranceCNY
 }
 
 func (s *PaymentService) IntroRechargeAvailable(ctx context.Context, userID int64) (bool, error) {
@@ -69,11 +95,15 @@ func (s *PaymentService) IntroRechargeAvailable(ctx context.Context, userID int6
 }
 
 func (s *PaymentService) GetRechargeAmountOptions(ctx context.Context, userID int64) ([]RechargeAmountOption, error) {
+	cfg, err := s.configService.GetPaymentConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
 	introAvailable, err := s.IntroRechargeAvailable(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-	return buildRechargeAmountOptions(introAvailable), nil
+	return buildRechargeAmountOptions(cfg, introAvailable), nil
 }
 
 func (s *PaymentService) hasClaimedIntroRecharge(ctx context.Context, userID int64) (bool, error) {

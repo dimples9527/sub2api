@@ -132,6 +132,9 @@ export interface SystemSettings {
   payment_product_name_suffix: string
   payment_help_image_url: string
   payment_help_text: string
+  payment_recharge_options: number[]
+  payment_intro_recharge_pay_amount: number
+  payment_intro_recharge_credit_amount: number
   payment_cancel_rate_limit_enabled: boolean
   payment_cancel_rate_limit_max: number
   payment_cancel_rate_limit_window: number
@@ -234,6 +237,9 @@ export interface UpdateSettingsRequest {
   payment_product_name_suffix?: string
   payment_help_image_url?: string
   payment_help_text?: string
+  payment_recharge_options?: number[]
+  payment_intro_recharge_pay_amount?: number
+  payment_intro_recharge_credit_amount?: number
   payment_cancel_rate_limit_enabled?: boolean
   payment_cancel_rate_limit_max?: number
   payment_cancel_rate_limit_window?: number

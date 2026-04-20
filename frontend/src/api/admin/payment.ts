@@ -28,6 +28,9 @@ export interface AdminPaymentConfig {
   product_name_suffix: string
   help_image_url: string
   help_text: string
+  recharge_options: number[]
+  intro_recharge_pay_amount: number
+  intro_recharge_credit_amount: number
 }
 
 /** Fields accepted by PUT /admin/payment/config (all optional via pointer semantics) */
@@ -45,6 +48,9 @@ export interface UpdatePaymentConfigRequest {
   product_name_suffix?: string
   help_image_url?: string
   help_text?: string
+  recharge_options?: number[]
+  intro_recharge_pay_amount?: number
+  intro_recharge_credit_amount?: number
 }
 
 export const adminPaymentAPI = {
