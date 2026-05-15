@@ -29,8 +29,8 @@ defineProps<{
   position: relative;
   align-items: center;
   gap: 0.65rem;
-  width: min(30vw, 22rem);
-  min-width: 14rem;
+  width: min(40vw, 30rem);
+  min-width: 16rem;
   height: 2.35rem;
   padding: 0 0.85rem 0 0.8rem;
   overflow: hidden;
