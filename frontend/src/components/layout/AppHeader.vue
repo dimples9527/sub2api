@@ -23,6 +23,8 @@
 
       <!-- Right: Announcements + Docs + Language + Subscriptions + Balance + User Dropdown -->
       <div class="flex items-center gap-3">
+        <HeaderAnnouncementBar v-if="globalBannerMessage" :message="globalBannerMessage" />
+
         <!-- Announcement Bell -->
         <AnnouncementBell v-if="user" />
 
@@ -218,6 +220,7 @@ import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import SubscriptionProgressMini from '@/components/common/SubscriptionProgressMini.vue'
 import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
 import Icon from '@/components/icons/Icon.vue'
+import HeaderAnnouncementBar from './HeaderAnnouncementBar.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -232,6 +235,7 @@ const dropdownOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
 const contactInfo = computed(() => appStore.contactInfo)
 const docUrl = computed(() => appStore.docUrl)
+const globalBannerMessage = computed(() => (appStore.globalBannerMessage || '').trim())
 
 // 只在标准模式的管理员下显示新手引导按钮
 const showOnboardingButton = computed(() => {
