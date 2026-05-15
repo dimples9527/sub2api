@@ -172,6 +172,25 @@ cd /opt/sub2api/runtime
 docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
 
+如果构建停在下面这个错误：
+
+```text
+ERR_PNPM_IGNORED_BUILDS Ignored build scripts: esbuild, vue-demi
+Run "pnpm approve-builds" to pick which dependencies should be allowed to run scripts.
+```
+
+不要在服务器里手动执行 `pnpm approve-builds`。这是交互式命令，不适合 Docker 构建。
+
+正确处理方式是：确认你上传到服务器的源码里包含最新的根目录 `Dockerfile`、`frontend/package.json` 和 `frontend/.npmrc`，然后重新执行“日常更新”里的打包、上传、解压和重建流程。
+
+如果服务器仍然使用了旧构建缓存，可以强制重建一次：
+
+```bash
+cd /opt/sub2api/runtime
+docker compose -f docker-compose.yml -f docker-compose.build.yml build --no-cache sub2api
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d
+```
+
 查看状态：
 
 ```bash
