@@ -156,6 +156,19 @@ reverse_proxy localhost:8080
 - TLS 配置
 - 健康检查
 - WebSocket/流式请求代理能力
+- 访问日志输出到 systemd journal，可用 `journalctl -u caddy` 查看
+
+日志配置应保持为：
+
+```caddyfile
+log {
+    output stdout
+    format json
+    level INFO
+}
+```
+
+不要把访问日志写到 `/var/log/caddy/sub2api.log`。在 CentOS/RHEL 系系统下，Caddy 通常以 `caddy` 用户运行，文件日志容易被目录权限或 SELinux 拦住，导致服务启动失败。
 
 校验并重载：
 
@@ -164,6 +177,51 @@ sudo caddy fmt --overwrite /etc/caddy/Caddyfile
 sudo caddy validate --config /etc/caddy/Caddyfile
 sudo systemctl enable --now caddy
 sudo systemctl reload caddy
+```
+
+如果 `caddy validate` 或 `systemctl start caddy` 报错类似：
+
+```text
+setting up custom log 'log0': opening log writer using &logging.FileWriter{Filename:"/var/log/caddy/sub2api.log"}
+```
+
+说明当前 `/etc/caddy/Caddyfile` 还在写文件日志。先确认旧配置是否存在：
+
+```bash
+sudo grep -n "/var/log/caddy/sub2api.log\|output file\|output stdout" /etc/caddy/Caddyfile
+```
+
+如果看到 `output file /var/log/caddy/sub2api.log`，先备份，再把文件日志替换成 `stdout`：
+
+```bash
+sudo cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak.$(date +%Y%m%d%H%M%S)
+sudo perl -0pi -e 's/output file \/var\/log\/caddy\/sub2api\.log\s*\{\s*roll_size\s+50mb\s*roll_keep\s+10\s*roll_keep_for\s+720h\s*\}/output stdout/s' /etc/caddy/Caddyfile
+sudo grep -n "/var/log/caddy/sub2api.log\|output file\|output stdout" /etc/caddy/Caddyfile
+```
+
+替换后，日志块应为：
+
+```caddyfile
+log {
+    output stdout
+    format json
+    level INFO
+}
+```
+
+然后重新校验并启动：
+
+```bash
+sudo caddy fmt --overwrite /etc/caddy/Caddyfile
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl restart caddy
+```
+
+如果仍然启动失败，查看完整日志：
+
+```bash
+sudo systemctl status caddy --no-pager -l
+sudo journalctl -u caddy -n 80 --no-pager
 ```
 
 如果是首次启动，Caddy 会自动申请 HTTPS 证书。

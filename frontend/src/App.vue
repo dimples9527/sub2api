@@ -115,7 +115,6 @@ onMounted(async () => {
 <template>
   <NavigationProgress />
   <div v-if="globalBannerMessage" class="global-banner">
-    <div class="global-banner__glow" aria-hidden="true"></div>
     <div class="global-banner__inner">
       <div class="global-banner__badge" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
@@ -140,42 +139,27 @@ onMounted(async () => {
 .global-banner {
   position: relative;
   overflow: hidden;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.72);
-  background:
-    radial-gradient(circle at 12% 50%, rgba(20, 184, 166, 0.14), transparent 28%),
-    radial-gradient(circle at 88% 50%, rgba(239, 68, 68, 0.14), transparent 22%),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.84), rgba(240, 253, 250, 0.88) 38%, rgba(255, 241, 242, 0.86));
-  box-shadow: 0 10px 32px rgba(15, 23, 42, 0.06);
-  backdrop-filter: blur(18px);
+  border-bottom: 1px solid rgba(229, 231, 235, 0.9);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(249, 250, 251, 0.96));
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
 .global-banner::before {
   content: '';
   position: absolute;
-  inset: 0 0 auto 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(45, 212, 191, 0.7), rgba(248, 113, 113, 0.65), transparent);
-  opacity: 0.9;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: linear-gradient(180deg, rgb(20, 184, 166), rgb(245, 158, 11));
+  opacity: 0.72;
 }
 
 .global-banner::after {
   content: '';
   position: absolute;
   inset: 0;
-  background-image:
-    linear-gradient(120deg, rgba(255, 255, 255, 0.14) 0, rgba(255, 255, 255, 0.14) 1px, transparent 1px, transparent 14px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.2), transparent 14%, transparent 86%, rgba(255, 255, 255, 0.16));
-  background-size: 22px 100%, 100% 100%;
-  opacity: 0.42;
+  background: linear-gradient(90deg, rgba(20, 184, 166, 0.07), transparent 32%, transparent 68%, rgba(245, 158, 11, 0.07));
+  opacity: 1;
   pointer-events: none;
-}
-
-.global-banner__glow {
-  position: absolute;
-  inset: auto 0 0 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(45, 212, 191, 0.52), rgba(239, 68, 68, 0.58), transparent);
-  opacity: 0.92;
 }
 
 .global-banner__inner {
@@ -183,9 +167,9 @@ onMounted(async () => {
   z-index: 1;
   display: flex;
   align-items: center;
-  gap: 0.85rem;
-  min-height: 3.5rem;
-  padding: 0.65rem 1rem;
+  gap: 0.625rem;
+  min-height: 2.5rem;
+  padding: 0.45rem 1rem 0.45rem 1.1rem;
 }
 
 .global-banner__badge {
@@ -193,25 +177,24 @@ onMounted(async () => {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 2.25rem;
-  height: 2.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.75);
-  border-radius: 9999px;
-  color: rgb(190 24 93);
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(236, 253, 245, 0.9) 45%, rgba(255, 228, 230, 0.92));
-  box-shadow: 0 10px 22px rgba(20, 184, 166, 0.12);
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 1px solid rgba(20, 184, 166, 0.2);
+  border-radius: 0.625rem;
+  color: rgb(13, 148, 136);
+  background: rgba(240, 253, 250, 0.92);
 }
 
 .global-banner__badge svg {
-  width: 1rem;
-  height: 1rem;
+  width: 0.95rem;
+  height: 0.95rem;
 }
 
 .global-banner__marquee {
   position: relative;
   flex: 1;
   overflow: hidden;
-  mask-image: linear-gradient(90deg, transparent, black 6%, black 94%, transparent);
+  mask-image: linear-gradient(90deg, transparent, black 2rem, black calc(100% - 2rem), transparent);
 }
 
 .global-banner__track {
@@ -219,16 +202,15 @@ onMounted(async () => {
   min-width: 100%;
   padding-left: 100%;
   white-space: nowrap;
-  animation: global-banner-scroll 18s linear infinite;
+  animation: global-banner-scroll 22s linear infinite;
   will-change: transform;
 }
 
 .global-banner__message {
-  font-size: 0.97rem;
-  font-weight: 800;
-  letter-spacing: 0.03em;
-  color: rgb(190 24 93);
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.82);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: rgb(55, 65, 81);
 }
 
 @keyframes global-banner-scroll {
@@ -242,53 +224,48 @@ onMounted(async () => {
 
 @media (max-width: 640px) {
   .global-banner__inner {
-    min-height: 3.2rem;
-    gap: 0.7rem;
-    padding: 0.55rem 0.8rem;
+    min-height: 2.375rem;
+    gap: 0.5rem;
+    padding: 0.4rem 0.75rem 0.4rem 0.85rem;
   }
 
   .global-banner__badge {
-    width: 2rem;
-    height: 2rem;
+    width: 1.6rem;
+    height: 1.6rem;
   }
 
   .global-banner__message {
-    font-size: 0.88rem;
-    letter-spacing: 0.02em;
+    font-size: 0.75rem;
   }
 
   .global-banner__track {
-    animation-duration: 15s;
+    animation-duration: 18s;
   }
 }
 
 :global(.dark) .global-banner {
-  border-bottom-color: rgba(71, 85, 105, 0.5);
-  background:
-    radial-gradient(circle at 12% 50%, rgba(45, 212, 191, 0.12), transparent 28%),
-    radial-gradient(circle at 88% 50%, rgba(244, 63, 94, 0.14), transparent 22%),
-    linear-gradient(90deg, rgba(15, 23, 42, 0.9), rgba(17, 24, 39, 0.88) 38%, rgba(76, 5, 25, 0.72));
-  box-shadow: 0 12px 36px rgba(2, 6, 23, 0.28);
+  border-bottom-color: rgba(51, 65, 85, 0.72);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(17, 24, 39, 0.96));
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.02);
 }
 
 :global(.dark) .global-banner::before {
-  background: linear-gradient(90deg, transparent, rgba(45, 212, 191, 0.48), rgba(251, 113, 133, 0.52), transparent);
+  background: linear-gradient(180deg, rgb(45, 212, 191), rgb(251, 191, 36));
+  opacity: 0.58;
 }
 
 :global(.dark) .global-banner::after {
-  opacity: 0.18;
+  background: linear-gradient(90deg, rgba(45, 212, 191, 0.08), transparent 36%, transparent 70%, rgba(251, 191, 36, 0.06));
 }
 
 :global(.dark) .global-banner__badge {
-  border-color: rgba(148, 163, 184, 0.28);
-  color: rgb(253 164 175);
-  background: linear-gradient(135deg, rgba(15, 118, 110, 0.34), rgba(30, 41, 59, 0.82) 45%, rgba(127, 29, 29, 0.7));
-  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.28);
+  border-color: rgba(45, 212, 191, 0.22);
+  color: rgb(94, 234, 212);
+  background: rgba(15, 118, 110, 0.16);
 }
 
 :global(.dark) .global-banner__message {
-  color: rgb(254 205 211);
-  text-shadow: none;
+  color: rgb(203, 213, 225);
 }
 
 @media (prefers-reduced-motion: reduce) {
