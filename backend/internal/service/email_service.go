@@ -7,8 +7,11 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"fmt"
+	"html"
 	"log"
 	"math/big"
+	"mime"
+	"net/mail"
 	"net/smtp"
 	"net/url"
 	"strconv"
@@ -81,6 +84,18 @@ type SMTPConfig struct {
 	UseTLS   bool
 }
 
+func emailSenderDisplayName(config *SMTPConfig) string {
+	if config != nil {
+		if name := strings.TrimSpace(config.FromName); name != "" {
+			return name
+		}
+		if from := strings.TrimSpace(config.From); from != "" {
+			return from
+		}
+	}
+	return "系统通知"
+}
+
 // EmailService 邮件服务
 type EmailService struct {
 	settingRepo SettingRepository
@@ -150,11 +165,12 @@ func (s *EmailService) SendEmail(ctx context.Context, to, subject, body string) 
 func (s *EmailService) SendEmailWithConfig(config *SMTPConfig, to, subject, body string) error {
 	from := config.From
 	if config.FromName != "" {
-		from = fmt.Sprintf("%s <%s>", config.FromName, config.From)
+		from = (&mail.Address{Name: config.FromName, Address: config.From}).String()
 	}
 
+	encodedSubject := mime.QEncoding.Encode("UTF-8", subject)
 	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
-		from, to, subject, body)
+		from, to, encodedSubject, body)
 
 	addr := fmt.Sprintf("%s:%d", config.Host, config.Port)
 	auth := smtp.PlainAuth("", config.Username, config.Password, config.Host)
@@ -259,12 +275,19 @@ func (s *EmailService) SendVerifyCode(ctx context.Context, email, siteName strin
 		return fmt.Errorf("save verify code: %w", err)
 	}
 
+	config, err := s.GetSMTPConfig(ctx)
+	if err != nil {
+		return err
+	}
+
+	senderName := emailSenderDisplayName(config)
+
 	// 构建邮件内容
-	subject := fmt.Sprintf("[%s] Email Verification Code", siteName)
-	body := s.buildVerifyCodeEmailBody(code, siteName)
+	subject := fmt.Sprintf("[%s] 邮箱验证码", senderName)
+	body := s.buildVerifyCodeEmailBody(code, senderName)
 
 	// 发送邮件
-	if err := s.SendEmail(ctx, email, subject, body); err != nil {
+	if err := s.SendEmailWithConfig(config, email, subject, body); err != nil {
 		return fmt.Errorf("send email: %w", err)
 	}
 
@@ -304,42 +327,59 @@ func (s *EmailService) VerifyCode(ctx context.Context, email, code string) error
 
 // buildVerifyCodeEmailBody 构建验证码邮件HTML内容
 func (s *EmailService) buildVerifyCodeEmailBody(code, siteName string) string {
+	escapedSiteName := html.EscapeString(siteName)
+	escapedCode := html.EscapeString(code)
+
 	return fmt.Sprintf(`
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif; background-color: #f5f5f5; margin: 0; padding: 20px; }
-        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-        .header { background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); color: white; padding: 30px; text-align: center; }
-        .header h1 { margin: 0; font-size: 24px; }
-        .content { padding: 40px 30px; text-align: center; }
-        .code { font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #333; background-color: #f8f9fa; padding: 20px 30px; border-radius: 8px; display: inline-block; margin: 20px 0; font-family: monospace; }
-        .info { color: #666; font-size: 14px; line-height: 1.6; margin-top: 20px; }
-        .footer { background-color: #f8f9fa; padding: 20px; text-align: center; color: #999; font-size: 12px; }
+        body { margin: 0; padding: 0; background: #05070d; color: #eef3ff; font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif; }
+        .email-shell { width: 100%%; background: linear-gradient(135deg, #101624 0%%, #05070d 100%%); padding: 32px 12px; }
+        .container { max-width: 640px; margin: 0 auto; border-radius: 18px; overflow: hidden; background: #0b1020; border: 1px solid rgba(214, 177, 95, 0.45); box-shadow: 0 28px 80px rgba(0, 0, 0, 0.48); }
+        .header { padding: 34px 34px 28px; text-align: left; background: radial-gradient(circle at 18%% 0%%, rgba(214, 177, 95, 0.28), transparent 34%%), linear-gradient(135deg, #111a2e 0%%, #07101f 100%%); border-bottom: 1px solid rgba(214, 177, 95, 0.28); }
+        .brand { color: #d6b15f; font-size: 13px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
+        .badge { display: inline-block; margin-top: 18px; padding: 7px 12px; color: #f7e7b0; border: 1px solid rgba(214, 177, 95, 0.46); border-radius: 999px; background: rgba(214, 177, 95, 0.10); font-size: 12px; letter-spacing: 1px; }
+        h1 { margin: 16px 0 8px; color: #ffffff; font-size: 28px; line-height: 1.28; font-weight: 800; }
+        .subtitle { margin: 0; color: #aebbd3; font-size: 15px; line-height: 1.7; }
+        .content { padding: 36px 34px 30px; text-align: center; background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0)); }
+        .label { margin: 0 0 14px; color: #d6b15f; font-size: 15px; font-weight: 700; letter-spacing: 1px; }
+        .code { display: inline-block; min-width: 260px; margin: 8px 0 24px; padding: 20px 26px; border-radius: 14px; background: linear-gradient(135deg, rgba(214,177,95,0.18), rgba(255,255,255,0.035)); border: 1px solid rgba(214,177,95,0.5); color: #ffe7a1; font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 38px; line-height: 1; font-weight: 800; letter-spacing: 9px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.08); }
+        .info { margin: 0 auto; max-width: 460px; color: #aebbd3; font-size: 14px; line-height: 1.8; }
+        .info strong { color: #f2d889; }
+        .warning { margin-top: 18px; padding: 14px 16px; border-radius: 12px; background: rgba(214, 177, 95, 0.08); border: 1px solid rgba(214, 177, 95, 0.22); color: #c6d0e2; }
+        .footer { padding: 22px 30px 26px; text-align: center; color: #71809a; font-size: 12px; line-height: 1.7; border-top: 1px solid rgba(214, 177, 95, 0.16); background: #080d18; }
+        @media (max-width: 520px) { .header, .content { padding-left: 22px; padding-right: 22px; } .code { min-width: 0; width: auto; font-size: 31px; letter-spacing: 6px; } h1 { font-size: 24px; } }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>%s</h1>
-        </div>
-        <div class="content">
-            <p style="font-size: 18px; color: #333;">Your verification code is:</p>
-            <div class="code">%s</div>
-            <div class="info">
-                <p>This code will expire in <strong>15 minutes</strong>.</p>
-                <p>If you did not request this code, please ignore this email.</p>
+    <div class="email-shell">
+        <div class="container">
+            <div class="header">
+                <div class="brand">%s</div>
+                <div class="badge">SECURE ACCESS</div>
+                <h1>邮箱安全验证</h1>
+                <p class="subtitle">系统已收到一次账户验证请求。请使用下方验证码完成操作，切勿转发或透露给他人。</p>
             </div>
-        </div>
-        <div class="footer">
-            <p>This is an automated message, please do not reply.</p>
+            <div class="content">
+                <p class="label">您的专属验证码</p>
+                <div class="code">%s</div>
+                <div class="info">
+                    <p>验证码 <strong>15 分钟内有效</strong>，超时后请重新获取。</p>
+                    <p class="warning">如果这不是您本人操作，可以忽略本邮件；您的账户信息不会因此发生变化。</p>
+                </div>
+            </div>
+            <div class="footer">
+                <p>这是一封系统自动发送的安全通知，请勿直接回复。</p>
+            </div>
         </div>
     </div>
 </body>
 </html>
-`, siteName, code)
+`, escapedSiteName, escapedCode)
 }
 
 // TestSMTPConnectionWithConfig 使用指定配置测试SMTP连接
@@ -430,12 +470,19 @@ func (s *EmailService) SendPasswordResetEmail(ctx context.Context, email, siteNa
 	// Build full reset URL with URL-encoded token and email
 	fullResetURL := fmt.Sprintf("%s?email=%s&token=%s", resetURL, url.QueryEscape(email), url.QueryEscape(token))
 
+	config, err := s.GetSMTPConfig(ctx)
+	if err != nil {
+		return err
+	}
+
+	senderName := emailSenderDisplayName(config)
+
 	// Build email content
-	subject := fmt.Sprintf("[%s] 密码重置请求", siteName)
-	body := s.buildPasswordResetEmailBody(fullResetURL, siteName)
+	subject := fmt.Sprintf("[%s] 密码重置请求", senderName)
+	body := s.buildPasswordResetEmailBody(fullResetURL, senderName)
 
 	// Send email
-	if err := s.SendEmail(ctx, email, subject, body); err != nil {
+	if err := s.SendEmailWithConfig(config, email, subject, body); err != nil {
 		return fmt.Errorf("send email: %w", err)
 	}
 
@@ -495,48 +542,60 @@ func (s *EmailService) ConsumePasswordResetToken(ctx context.Context, email, tok
 
 // buildPasswordResetEmailBody builds the HTML content for password reset email
 func (s *EmailService) buildPasswordResetEmailBody(resetURL, siteName string) string {
+	escapedSiteName := html.EscapeString(siteName)
+	escapedResetURL := html.EscapeString(resetURL)
+
 	return fmt.Sprintf(`
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif; background-color: #f5f5f5; margin: 0; padding: 20px; }
-        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-        .header { background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); color: white; padding: 30px; text-align: center; }
-        .header h1 { margin: 0; font-size: 24px; }
-        .content { padding: 40px 30px; text-align: center; }
-        .button { display: inline-block; background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-size: 16px; font-weight: 600; margin: 20px 0; }
-        .button:hover { opacity: 0.9; }
-        .info { color: #666; font-size: 14px; line-height: 1.6; margin-top: 20px; }
-        .link-fallback { color: #666; font-size: 12px; word-break: break-all; margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 4px; }
-        .footer { background-color: #f8f9fa; padding: 20px; text-align: center; color: #999; font-size: 12px; }
-        .warning { color: #e74c3c; font-weight: 500; }
+        body { margin: 0; padding: 0; background: #05070d; color: #eef3ff; font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif; }
+        .email-shell { width: 100%%; background: linear-gradient(135deg, #101624 0%%, #05070d 100%%); padding: 32px 12px; }
+        .container { max-width: 640px; margin: 0 auto; border-radius: 18px; overflow: hidden; background: #0b1020; border: 1px solid rgba(214, 177, 95, 0.45); box-shadow: 0 28px 80px rgba(0, 0, 0, 0.48); }
+        .header { padding: 34px 34px 28px; text-align: left; background: radial-gradient(circle at 18%% 0%%, rgba(214, 177, 95, 0.28), transparent 34%%), linear-gradient(135deg, #111a2e 0%%, #07101f 100%%); border-bottom: 1px solid rgba(214, 177, 95, 0.28); }
+        .brand { color: #d6b15f; font-size: 13px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
+        .badge { display: inline-block; margin-top: 18px; padding: 7px 12px; color: #f7e7b0; border: 1px solid rgba(214, 177, 95, 0.46); border-radius: 999px; background: rgba(214, 177, 95, 0.10); font-size: 12px; letter-spacing: 1px; }
+        h1 { margin: 16px 0 8px; color: #ffffff; font-size: 28px; line-height: 1.28; font-weight: 800; }
+        .subtitle { margin: 0; color: #aebbd3; font-size: 15px; line-height: 1.7; }
+        .content { padding: 36px 34px 30px; text-align: center; background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0)); }
+        .button { display: inline-block; margin: 10px 0 24px; padding: 15px 34px; border-radius: 12px; background: linear-gradient(135deg, #f2d889 0%%, #d6b15f 52%%, #9a7430 100%%); color: #111622; text-decoration: none; font-size: 16px; font-weight: 800; letter-spacing: 1px; box-shadow: 0 14px 32px rgba(214,177,95,0.24); }
+        .info { margin: 0 auto; max-width: 480px; color: #aebbd3; font-size: 14px; line-height: 1.8; }
+        .info strong { color: #f2d889; }
+        .warning { margin-top: 18px; padding: 14px 16px; border-radius: 12px; background: rgba(214, 177, 95, 0.08); border: 1px solid rgba(214, 177, 95, 0.22); color: #c6d0e2; }
+        .link-fallback { margin-top: 22px; padding: 16px; border-radius: 12px; color: #8f9db5; font-size: 12px; line-height: 1.7; word-break: break-all; background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.08); text-align: left; }
+        .footer { padding: 22px 30px 26px; text-align: center; color: #71809a; font-size: 12px; line-height: 1.7; border-top: 1px solid rgba(214, 177, 95, 0.16); background: #080d18; }
+        @media (max-width: 520px) { .header, .content { padding-left: 22px; padding-right: 22px; } h1 { font-size: 24px; } .button { display: block; } }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>%s</h1>
-        </div>
-        <div class="content">
-            <p style="font-size: 18px; color: #333;">密码重置请求</p>
-            <p style="color: #666;">您已请求重置密码。请点击下方按钮设置新密码：</p>
-            <a href="%s" class="button">重置密码</a>
-            <div class="info">
-                <p>此链接将在 <strong>30 分钟</strong>后失效。</p>
-                <p class="warning">如果您没有请求重置密码，请忽略此邮件。您的密码将保持不变。</p>
+    <div class="email-shell">
+        <div class="container">
+            <div class="header">
+                <div class="brand">%s</div>
+                <div class="badge">ACCOUNT RECOVERY</div>
+                <h1>密码重置请求</h1>
+                <p class="subtitle">系统已为您的账户生成一次性安全链接。请确认是本人操作后继续。</p>
             </div>
-            <div class="link-fallback">
-                <p>如果按钮无法点击，请复制以下链接到浏览器中打开：</p>
-                <p>%s</p>
+            <div class="content">
+                <a href="%s" class="button">重置登录密码</a>
+                <div class="info">
+                    <p>此安全链接 <strong>30 分钟内有效</strong>，使用后将自动失效。</p>
+                    <p class="warning">如果这不是您本人发起的请求，请忽略本邮件；当前密码不会被更改。</p>
+                </div>
+                <div class="link-fallback">
+                    <p>如果按钮无法打开，请复制以下链接到浏览器访问：</p>
+                    <p>%s</p>
+                </div>
             </div>
-        </div>
-        <div class="footer">
-            <p>这是一封自动发送的邮件，请勿回复。</p>
+            <div class="footer">
+                <p>这是一封系统自动发送的安全通知，请勿直接回复。</p>
+            </div>
         </div>
     </div>
 </body>
 </html>
-`, siteName, resetURL, resetURL)
+`, escapedSiteName, escapedResetURL, escapedResetURL)
 }
