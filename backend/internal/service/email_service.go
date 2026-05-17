@@ -337,22 +337,22 @@ func (s *EmailService) buildVerifyCodeEmailBody(code, siteName string) string {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body { margin: 0; padding: 0; background: #05070d; color: #eef3ff; font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif; }
-        .email-shell { width: 100%%; background: linear-gradient(135deg, #101624 0%%, #05070d 100%%); padding: 32px 12px; }
-        .container { max-width: 640px; margin: 0 auto; border-radius: 18px; overflow: hidden; background: #0b1020; border: 1px solid rgba(214, 177, 95, 0.45); box-shadow: 0 28px 80px rgba(0, 0, 0, 0.48); }
-        .header { padding: 34px 34px 28px; text-align: left; background: radial-gradient(circle at 18%% 0%%, rgba(214, 177, 95, 0.28), transparent 34%%), linear-gradient(135deg, #111a2e 0%%, #07101f 100%%); border-bottom: 1px solid rgba(214, 177, 95, 0.28); }
-        .brand { color: #d6b15f; font-size: 13px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
-        .badge { display: inline-block; margin-top: 18px; padding: 7px 12px; color: #f7e7b0; border: 1px solid rgba(214, 177, 95, 0.46); border-radius: 999px; background: rgba(214, 177, 95, 0.10); font-size: 12px; letter-spacing: 1px; }
-        h1 { margin: 16px 0 8px; color: #ffffff; font-size: 28px; line-height: 1.28; font-weight: 800; }
-        .subtitle { margin: 0; color: #aebbd3; font-size: 15px; line-height: 1.7; }
-        .content { padding: 36px 34px 30px; text-align: center; background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0)); }
-        .label { margin: 0 0 14px; color: #d6b15f; font-size: 15px; font-weight: 700; letter-spacing: 1px; }
-        .code { display: inline-block; min-width: 260px; margin: 8px 0 24px; padding: 20px 26px; border-radius: 14px; background: linear-gradient(135deg, rgba(214,177,95,0.18), rgba(255,255,255,0.035)); border: 1px solid rgba(214,177,95,0.5); color: #ffe7a1; font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 38px; line-height: 1; font-weight: 800; letter-spacing: 9px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.08); }
-        .info { margin: 0 auto; max-width: 460px; color: #aebbd3; font-size: 14px; line-height: 1.8; }
-        .info strong { color: #f2d889; }
-        .warning { margin-top: 18px; padding: 14px 16px; border-radius: 12px; background: rgba(214, 177, 95, 0.08); border: 1px solid rgba(214, 177, 95, 0.22); color: #c6d0e2; }
-        .footer { padding: 22px 30px 26px; text-align: center; color: #71809a; font-size: 12px; line-height: 1.7; border-top: 1px solid rgba(214, 177, 95, 0.16); background: #080d18; }
-        @media (max-width: 520px) { .header, .content { padding-left: 22px; padding-right: 22px; } .code { min-width: 0; width: auto; font-size: 31px; letter-spacing: 6px; } h1 { font-size: 24px; } }
+        body { margin: 0; padding: 0; background: #f4f1ea; color: #202738; font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif; }
+        .email-shell { width: 100%%; background: linear-gradient(180deg, #fbfaf6 0%%, #efe9db 100%%); padding: 32px 12px; }
+        .container { max-width: 640px; margin: 0 auto; border-radius: 14px; overflow: hidden; background: #fffdf8; border: 1px solid rgba(173, 135, 54, 0.28); box-shadow: 0 24px 70px rgba(69, 56, 30, 0.16); }
+        .header { position: relative; padding: 34px 38px 30px; text-align: left; background: linear-gradient(135deg, rgba(255,255,255,0.96), rgba(244,236,219,0.94)); border-bottom: 1px solid rgba(173, 135, 54, 0.22); }
+        .brand { color: #a77b28; font-size: 13px; font-weight: 700; letter-spacing: 2px; }
+        .badge { display: inline-block; margin-top: 16px; padding: 6px 12px; color: #85611e; border: 1px solid rgba(173, 135, 54, 0.34); border-radius: 999px; background: rgba(214, 177, 95, 0.11); font-size: 12px; letter-spacing: 1px; }
+        h1 { margin: 16px 0 10px; color: #1f2a44; font-size: 28px; line-height: 1.28; font-weight: 800; }
+        .subtitle { margin: 0; max-width: 470px; color: #5c6578; font-size: 15px; line-height: 1.75; }
+        .content { padding: 36px 38px 34px; text-align: center; background: #fffdf8; }
+        .label { margin: 0 0 14px; color: #9a7430; font-size: 15px; font-weight: 700; letter-spacing: 1px; }
+        .code { display: inline-block; min-width: 270px; margin: 4px 0 24px; padding: 18px 28px; border: 1px solid rgba(173, 135, 54, 0.38); border-radius: 12px; background: linear-gradient(135deg, #fff8e7 0%%, #f1e5c7 100%%); color: #795415; font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 38px; line-height: 1; font-weight: 800; letter-spacing: 9px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.8); }
+        .info { margin: 0 auto; max-width: 500px; color: #5c6578; font-size: 14px; line-height: 1.8; }
+        .info strong { color: #9a7430; }
+        .notice { margin-top: 18px; padding: 14px 16px; border-radius: 10px; background: #fbf6ea; border: 1px solid rgba(173, 135, 54, 0.22); color: #515b70; }
+        .footer { padding: 20px 30px 24px; text-align: center; color: #7a8293; font-size: 12px; line-height: 1.7; border-top: 1px solid rgba(173, 135, 54, 0.18); background: #f8f3e7; }
+        @media (max-width: 520px) { .header, .content { padding-left: 24px; padding-right: 24px; } .code { min-width: 0; width: auto; font-size: 31px; letter-spacing: 6px; } h1 { font-size: 24px; } }
     </style>
 </head>
 <body>
@@ -369,7 +369,7 @@ func (s *EmailService) buildVerifyCodeEmailBody(code, siteName string) string {
                 <div class="code">%s</div>
                 <div class="info">
                     <p>验证码 <strong>15 分钟内有效</strong>，超时后请重新获取。</p>
-                    <p class="warning">如果这不是您本人操作，可以忽略本邮件；您的账户信息不会因此发生变化。</p>
+                    <p class="notice">如果这不是您本人操作，可以忽略本邮件；您的账户信息不会因此发生变化。</p>
                 </div>
             </div>
             <div class="footer">
@@ -552,22 +552,22 @@ func (s *EmailService) buildPasswordResetEmailBody(resetURL, siteName string) st
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body { margin: 0; padding: 0; background: #05070d; color: #eef3ff; font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif; }
-        .email-shell { width: 100%%; background: linear-gradient(135deg, #101624 0%%, #05070d 100%%); padding: 32px 12px; }
-        .container { max-width: 640px; margin: 0 auto; border-radius: 18px; overflow: hidden; background: #0b1020; border: 1px solid rgba(214, 177, 95, 0.45); box-shadow: 0 28px 80px rgba(0, 0, 0, 0.48); }
-        .header { padding: 34px 34px 28px; text-align: left; background: radial-gradient(circle at 18%% 0%%, rgba(214, 177, 95, 0.28), transparent 34%%), linear-gradient(135deg, #111a2e 0%%, #07101f 100%%); border-bottom: 1px solid rgba(214, 177, 95, 0.28); }
-        .brand { color: #d6b15f; font-size: 13px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
-        .badge { display: inline-block; margin-top: 18px; padding: 7px 12px; color: #f7e7b0; border: 1px solid rgba(214, 177, 95, 0.46); border-radius: 999px; background: rgba(214, 177, 95, 0.10); font-size: 12px; letter-spacing: 1px; }
-        h1 { margin: 16px 0 8px; color: #ffffff; font-size: 28px; line-height: 1.28; font-weight: 800; }
-        .subtitle { margin: 0; color: #aebbd3; font-size: 15px; line-height: 1.7; }
-        .content { padding: 36px 34px 30px; text-align: center; background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0)); }
-        .button { display: inline-block; margin: 10px 0 24px; padding: 15px 34px; border-radius: 12px; background: linear-gradient(135deg, #f2d889 0%%, #d6b15f 52%%, #9a7430 100%%); color: #111622; text-decoration: none; font-size: 16px; font-weight: 800; letter-spacing: 1px; box-shadow: 0 14px 32px rgba(214,177,95,0.24); }
-        .info { margin: 0 auto; max-width: 480px; color: #aebbd3; font-size: 14px; line-height: 1.8; }
-        .info strong { color: #f2d889; }
-        .warning { margin-top: 18px; padding: 14px 16px; border-radius: 12px; background: rgba(214, 177, 95, 0.08); border: 1px solid rgba(214, 177, 95, 0.22); color: #c6d0e2; }
-        .link-fallback { margin-top: 22px; padding: 16px; border-radius: 12px; color: #8f9db5; font-size: 12px; line-height: 1.7; word-break: break-all; background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.08); text-align: left; }
-        .footer { padding: 22px 30px 26px; text-align: center; color: #71809a; font-size: 12px; line-height: 1.7; border-top: 1px solid rgba(214, 177, 95, 0.16); background: #080d18; }
-        @media (max-width: 520px) { .header, .content { padding-left: 22px; padding-right: 22px; } h1 { font-size: 24px; } .button { display: block; } }
+        body { margin: 0; padding: 0; background: #f4f1ea; color: #202738; font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif; }
+        .email-shell { width: 100%%; background: linear-gradient(180deg, #fbfaf6 0%%, #efe9db 100%%); padding: 32px 12px; }
+        .container { max-width: 640px; margin: 0 auto; border-radius: 14px; overflow: hidden; background: #fffdf8; border: 1px solid rgba(173, 135, 54, 0.28); box-shadow: 0 24px 70px rgba(69, 56, 30, 0.16); }
+        .header { position: relative; padding: 34px 38px 30px; text-align: left; background: linear-gradient(135deg, rgba(255,255,255,0.96), rgba(244,236,219,0.94)); border-bottom: 1px solid rgba(173, 135, 54, 0.22); }
+        .brand { color: #a77b28; font-size: 13px; font-weight: 700; letter-spacing: 2px; }
+        .badge { display: inline-block; margin-top: 16px; padding: 6px 12px; color: #85611e; border: 1px solid rgba(173, 135, 54, 0.34); border-radius: 999px; background: rgba(214, 177, 95, 0.11); font-size: 12px; letter-spacing: 1px; }
+        h1 { margin: 16px 0 10px; color: #1f2a44; font-size: 28px; line-height: 1.28; font-weight: 800; }
+        .subtitle { margin: 0; max-width: 470px; color: #5c6578; font-size: 15px; line-height: 1.75; }
+        .content { padding: 36px 38px 34px; text-align: center; background: #fffdf8; }
+        .button { display: inline-block; margin: 6px 0 24px; padding: 15px 34px; border-radius: 10px; background: linear-gradient(135deg, #d8b564 0%%, #a77b28 100%%); color: #ffffff; text-decoration: none; font-size: 16px; font-weight: 800; letter-spacing: 1px; box-shadow: 0 14px 30px rgba(167,123,40,0.24); }
+        .info { margin: 0 auto; max-width: 500px; color: #5c6578; font-size: 14px; line-height: 1.8; }
+        .info strong { color: #9a7430; }
+        .notice { margin-top: 18px; padding: 14px 16px; border-radius: 10px; background: #fbf6ea; border: 1px solid rgba(173, 135, 54, 0.22); color: #515b70; }
+        .fallback { margin-top: 20px; padding: 15px; border: 1px solid rgba(31, 42, 68, 0.10); border-radius: 10px; background: #f7f5ef; color: #6b7280; font-size: 12px; line-height: 1.7; text-align: left; word-break: break-all; }
+        .footer { padding: 20px 30px 24px; text-align: center; color: #7a8293; font-size: 12px; line-height: 1.7; border-top: 1px solid rgba(173, 135, 54, 0.18); background: #f8f3e7; }
+        @media (max-width: 520px) { .header, .content { padding-left: 24px; padding-right: 24px; } h1 { font-size: 24px; } .button { display: block; } }
     </style>
 </head>
 <body>
@@ -583,9 +583,9 @@ func (s *EmailService) buildPasswordResetEmailBody(resetURL, siteName string) st
                 <a href="%s" class="button">重置登录密码</a>
                 <div class="info">
                     <p>此安全链接 <strong>30 分钟内有效</strong>，使用后将自动失效。</p>
-                    <p class="warning">如果这不是您本人发起的请求，请忽略本邮件；当前密码不会被更改。</p>
+                    <p class="notice">如果这不是您本人发起的请求，请忽略本邮件；当前密码不会被更改。</p>
                 </div>
-                <div class="link-fallback">
+                <div class="fallback">
                     <p>如果按钮无法打开，请复制以下链接到浏览器访问：</p>
                     <p>%s</p>
                 </div>
