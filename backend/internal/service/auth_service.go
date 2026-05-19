@@ -260,6 +260,7 @@ func (s *AuthService) SendVerifyCode(ctx context.Context, email string) error {
 
 // SendVerifyCodeAsync 异步发送邮箱验证码并返回倒计时
 func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string) (*SendVerifyCodeResult, error) {
+	startedAt := time.Now()
 	logger.LegacyPrintf("service.auth", "[Auth] SendVerifyCodeAsync called for email: %s", email)
 
 	// 检查是否开放注册（默认关闭）
@@ -269,11 +270,14 @@ func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string) (*S
 	}
 
 	if isReservedEmail(email) {
+		logger.LegacyPrintf("service.auth", "[Auth] Verify code request rejected: reserved email=%s elapsed_ms=%d", email, time.Since(startedAt).Milliseconds())
 		return nil, ErrEmailReserved
 	}
 	if err := s.validateRegistrationEmailPolicy(ctx, email); err != nil {
+		logger.LegacyPrintf("service.auth", "[Auth] Verify code request rejected by email policy email=%s elapsed_ms=%d error=%v", email, time.Since(startedAt).Milliseconds(), err)
 		return nil, err
 	}
+	logger.LegacyPrintf("service.auth", "[Auth] Verify code email policy passed email=%s elapsed_ms=%d", email, time.Since(startedAt).Milliseconds())
 
 	// 检查邮箱是否已存在
 	existsEmail, err := s.userRepo.ExistsByEmail(ctx, email)
@@ -285,6 +289,7 @@ func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string) (*S
 		logger.LegacyPrintf("service.auth", "[Auth] Email already exists: %s", email)
 		return nil, ErrEmailExists
 	}
+	logger.LegacyPrintf("service.auth", "[Auth] Email availability check passed email=%s elapsed_ms=%d", email, time.Since(startedAt).Milliseconds())
 
 	// 检查邮件队列服务是否已配置
 	if s.emailQueueService == nil {
@@ -297,6 +302,7 @@ func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string) (*S
 	if s.settingService != nil {
 		siteName = s.settingService.GetSiteName(ctx)
 	}
+	logger.LegacyPrintf("service.auth", "[Auth] Verify code site resolved email=%s site=%s elapsed_ms=%d", email, siteName, time.Since(startedAt).Milliseconds())
 
 	// 异步发送
 	logger.LegacyPrintf("service.auth", "[Auth] Enqueueing verify code for: %s", email)
@@ -305,7 +311,7 @@ func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string) (*S
 		return nil, fmt.Errorf("enqueue verify code: %w", err)
 	}
 
-	logger.LegacyPrintf("service.auth", "[Auth] Verify code enqueued successfully for: %s", email)
+	logger.LegacyPrintf("service.auth", "[Auth] Verify code enqueued successfully for: %s elapsed_ms=%d", email, time.Since(startedAt).Milliseconds())
 	return &SendVerifyCodeResult{
 		Countdown: 60, // 60 秒倒计时
 	}, nil

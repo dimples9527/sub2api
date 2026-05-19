@@ -57,7 +57,7 @@ func (s *EmailQueueService) start() {
 		s.wg.Add(1)
 		go s.worker(i)
 	}
-	logger.LegacyPrintf("service.email_queue", "[EmailQueue] Started %d workers", s.workers)
+	logger.LegacyPrintf("service.email_queue", "[EmailQueue] Started %d workers with queue capacity %d", s.workers, cap(s.taskChan))
 }
 
 // worker 工作协程
@@ -77,21 +77,24 @@ func (s *EmailQueueService) worker(id int) {
 
 // processTask 处理任务
 func (s *EmailQueueService) processTask(workerID int, task EmailTask) {
+	startedAt := time.Now()
+	logger.LegacyPrintf("service.email_queue", "[EmailQueue] Worker %d processing task type=%s email=%s queue_len=%d queue_cap=%d", workerID, task.TaskType, task.Email, len(s.taskChan), cap(s.taskChan))
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	switch task.TaskType {
 	case TaskTypeVerifyCode:
 		if err := s.emailService.SendVerifyCode(ctx, task.Email, task.SiteName); err != nil {
-			logger.LegacyPrintf("service.email_queue", "[EmailQueue] Worker %d failed to send verify code to %s: %v", workerID, task.Email, err)
+			logger.LegacyPrintf("service.email_queue", "[EmailQueue] Worker %d failed to send verify code to %s after %dms: %v", workerID, task.Email, time.Since(startedAt).Milliseconds(), err)
 		} else {
-			logger.LegacyPrintf("service.email_queue", "[EmailQueue] Worker %d sent verify code to %s", workerID, task.Email)
+			logger.LegacyPrintf("service.email_queue", "[EmailQueue] Worker %d sent verify code to %s in %dms", workerID, task.Email, time.Since(startedAt).Milliseconds())
 		}
 	case TaskTypePasswordReset:
 		if err := s.emailService.SendPasswordResetEmailWithCooldown(ctx, task.Email, task.SiteName, task.ResetURL); err != nil {
-			logger.LegacyPrintf("service.email_queue", "[EmailQueue] Worker %d failed to send password reset to %s: %v", workerID, task.Email, err)
+			logger.LegacyPrintf("service.email_queue", "[EmailQueue] Worker %d failed to send password reset to %s after %dms: %v", workerID, task.Email, time.Since(startedAt).Milliseconds(), err)
 		} else {
-			logger.LegacyPrintf("service.email_queue", "[EmailQueue] Worker %d sent password reset to %s", workerID, task.Email)
+			logger.LegacyPrintf("service.email_queue", "[EmailQueue] Worker %d sent password reset to %s in %dms", workerID, task.Email, time.Since(startedAt).Milliseconds())
 		}
 	default:
 		logger.LegacyPrintf("service.email_queue", "[EmailQueue] Worker %d unknown task type: %s", workerID, task.TaskType)
@@ -108,9 +111,10 @@ func (s *EmailQueueService) EnqueueVerifyCode(email, siteName string) error {
 
 	select {
 	case s.taskChan <- task:
-		logger.LegacyPrintf("service.email_queue", "[EmailQueue] Enqueued verify code task for %s", email)
+		logger.LegacyPrintf("service.email_queue", "[EmailQueue] Enqueued verify code task for %s queue_len=%d queue_cap=%d", email, len(s.taskChan), cap(s.taskChan))
 		return nil
 	default:
+		logger.LegacyPrintf("service.email_queue", "[EmailQueue] Failed to enqueue verify code task for %s: queue full queue_len=%d queue_cap=%d", email, len(s.taskChan), cap(s.taskChan))
 		return fmt.Errorf("email queue is full")
 	}
 }

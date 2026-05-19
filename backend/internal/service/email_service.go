@@ -19,6 +19,7 @@ import (
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 )
 
 var (
@@ -102,6 +103,21 @@ type EmailService struct {
 	cache       EmailCache
 }
 
+func smtpConfigLogSummary(config *SMTPConfig) string {
+	if config == nil {
+		return "host= port=0 username_set=false password_set=false from= from_name_set=false use_tls=false"
+	}
+	return fmt.Sprintf("host=%s port=%d username_set=%t password_set=%t from=%s from_name_set=%t use_tls=%t",
+		config.Host,
+		config.Port,
+		strings.TrimSpace(config.Username) != "",
+		strings.TrimSpace(config.Password) != "",
+		config.From,
+		strings.TrimSpace(config.FromName) != "",
+		config.UseTLS,
+	)
+}
+
 // NewEmailService 创建邮件服务实例
 func NewEmailService(settingRepo SettingRepository, cache EmailCache) *EmailService {
 	return &EmailService{
@@ -163,6 +179,9 @@ func (s *EmailService) SendEmail(ctx context.Context, to, subject, body string) 
 
 // SendEmailWithConfig 使用指定配置发送邮件
 func (s *EmailService) SendEmailWithConfig(config *SMTPConfig, to, subject, body string) error {
+	startedAt := time.Now()
+	logger.LegacyPrintf("service.email", "[Email] SendEmailWithConfig start to=%s subject=%s %s", to, subject, smtpConfigLogSummary(config))
+
 	from := config.From
 	if config.FromName != "" {
 		from = (&mail.Address{Name: config.FromName, Address: config.From}).String()
@@ -176,14 +195,27 @@ func (s *EmailService) SendEmailWithConfig(config *SMTPConfig, to, subject, body
 	auth := smtp.PlainAuth("", config.Username, config.Password, config.Host)
 
 	if config.UseTLS {
-		return s.sendMailTLS(addr, auth, config.From, to, []byte(msg), config.Host)
+		if err := s.sendMailTLS(addr, auth, config.From, to, []byte(msg), config.Host); err != nil {
+			logger.LegacyPrintf("service.email", "[Email] SendEmailWithConfig failed to=%s elapsed_ms=%d error=%v", to, time.Since(startedAt).Milliseconds(), err)
+			return err
+		}
+		logger.LegacyPrintf("service.email", "[Email] SendEmailWithConfig success to=%s elapsed_ms=%d", to, time.Since(startedAt).Milliseconds())
+		return nil
 	}
 
-	return smtp.SendMail(addr, auth, config.From, []string{to}, []byte(msg))
+	if err := smtp.SendMail(addr, auth, config.From, []string{to}, []byte(msg)); err != nil {
+		logger.LegacyPrintf("service.email", "[Email] SendEmailWithConfig failed to=%s elapsed_ms=%d error=%v", to, time.Since(startedAt).Milliseconds(), err)
+		return err
+	}
+	logger.LegacyPrintf("service.email", "[Email] SendEmailWithConfig success to=%s elapsed_ms=%d", to, time.Since(startedAt).Milliseconds())
+	return nil
 }
 
 // sendMailTLS 使用TLS发送邮件
 func (s *EmailService) sendMailTLS(addr string, auth smtp.Auth, from, to string, msg []byte, host string) error {
+	startedAt := time.Now()
+	logger.LegacyPrintf("service.email", "[Email] TLS smtp dial start addr=%s host=%s from=%s to=%s", addr, host, from, to)
+
 	tlsConfig := &tls.Config{
 		ServerName: host,
 		// 强制 TLS 1.2+，避免协议降级导致的弱加密风险。
@@ -192,42 +224,55 @@ func (s *EmailService) sendMailTLS(addr string, auth smtp.Auth, from, to string,
 
 	conn, err := tls.Dial("tcp", addr, tlsConfig)
 	if err != nil {
+		logger.LegacyPrintf("service.email", "[Email] TLS smtp dial failed addr=%s elapsed_ms=%d error=%v", addr, time.Since(startedAt).Milliseconds(), err)
 		return fmt.Errorf("tls dial: %w", err)
 	}
 	defer func() { _ = conn.Close() }()
+	logger.LegacyPrintf("service.email", "[Email] TLS smtp dial success addr=%s elapsed_ms=%d", addr, time.Since(startedAt).Milliseconds())
 
 	client, err := smtp.NewClient(conn, host)
 	if err != nil {
+		logger.LegacyPrintf("service.email", "[Email] TLS smtp client creation failed host=%s error=%v", host, err)
 		return fmt.Errorf("new smtp client: %w", err)
 	}
 	defer func() { _ = client.Close() }()
 
 	if err = client.Auth(auth); err != nil {
+		logger.LegacyPrintf("service.email", "[Email] TLS smtp auth failed host=%s error=%v", host, err)
 		return fmt.Errorf("smtp auth: %w", err)
 	}
+	logger.LegacyPrintf("service.email", "[Email] TLS smtp auth success host=%s", host)
 
 	if err = client.Mail(from); err != nil {
+		logger.LegacyPrintf("service.email", "[Email] TLS smtp MAIL FROM failed from=%s error=%v", from, err)
 		return fmt.Errorf("smtp mail: %w", err)
 	}
+	logger.LegacyPrintf("service.email", "[Email] TLS smtp MAIL FROM accepted from=%s", from)
 
 	if err = client.Rcpt(to); err != nil {
+		logger.LegacyPrintf("service.email", "[Email] TLS smtp RCPT TO failed to=%s error=%v", to, err)
 		return fmt.Errorf("smtp rcpt: %w", err)
 	}
+	logger.LegacyPrintf("service.email", "[Email] TLS smtp RCPT TO accepted to=%s", to)
 
 	w, err := client.Data()
 	if err != nil {
+		logger.LegacyPrintf("service.email", "[Email] TLS smtp DATA command failed to=%s error=%v", to, err)
 		return fmt.Errorf("smtp data: %w", err)
 	}
 
 	_, err = w.Write(msg)
 	if err != nil {
+		logger.LegacyPrintf("service.email", "[Email] TLS smtp DATA write failed to=%s error=%v", to, err)
 		return fmt.Errorf("write msg: %w", err)
 	}
 
 	err = w.Close()
 	if err != nil {
+		logger.LegacyPrintf("service.email", "[Email] TLS smtp DATA close failed to=%s error=%v", to, err)
 		return fmt.Errorf("close writer: %w", err)
 	}
+	logger.LegacyPrintf("service.email", "[Email] TLS smtp message accepted to=%s elapsed_ms=%d", to, time.Since(startedAt).Milliseconds())
 
 	// Email is sent successfully after w.Close(), ignore Quit errors
 	// Some SMTP servers return non-standard responses on QUIT
@@ -251,19 +296,28 @@ func (s *EmailService) GenerateVerifyCode() (string, error) {
 
 // SendVerifyCode 发送验证码邮件
 func (s *EmailService) SendVerifyCode(ctx context.Context, email, siteName string) error {
+	startedAt := time.Now()
+	logger.LegacyPrintf("service.email", "[Email] SendVerifyCode start email=%s site=%s", email, siteName)
+
 	// 检查是否在冷却期内
 	existing, err := s.cache.GetVerificationCode(ctx, email)
 	if err == nil && existing != nil {
 		if time.Since(existing.CreatedAt) < verifyCodeCooldown {
+			logger.LegacyPrintf("service.email", "[Email] SendVerifyCode blocked by cooldown email=%s age_ms=%d cooldown_ms=%d", email, time.Since(existing.CreatedAt).Milliseconds(), verifyCodeCooldown.Milliseconds())
 			return ErrVerifyCodeTooFrequent
 		}
+		logger.LegacyPrintf("service.email", "[Email] Existing verification code found but cooldown expired email=%s age_ms=%d", email, time.Since(existing.CreatedAt).Milliseconds())
+	} else if err != nil {
+		logger.LegacyPrintf("service.email", "[Email] No reusable verification code found email=%s cache_error=%v", email, err)
 	}
 
 	// 生成验证码
 	code, err := s.GenerateVerifyCode()
 	if err != nil {
+		logger.LegacyPrintf("service.email", "[Email] Generate verification code failed email=%s error=%v", email, err)
 		return fmt.Errorf("generate code: %w", err)
 	}
+	logger.LegacyPrintf("service.email", "[Email] Verification code generated email=%s code_length=%d", email, len(code))
 
 	// 保存验证码到 Redis
 	data := &VerificationCodeData{
@@ -272,13 +326,17 @@ func (s *EmailService) SendVerifyCode(ctx context.Context, email, siteName strin
 		CreatedAt: time.Now(),
 	}
 	if err := s.cache.SetVerificationCode(ctx, email, data, verifyCodeTTL); err != nil {
+		logger.LegacyPrintf("service.email", "[Email] Save verification code failed email=%s ttl_seconds=%d error=%v", email, int(verifyCodeTTL.Seconds()), err)
 		return fmt.Errorf("save verify code: %w", err)
 	}
+	logger.LegacyPrintf("service.email", "[Email] Verification code saved email=%s ttl_seconds=%d", email, int(verifyCodeTTL.Seconds()))
 
 	config, err := s.GetSMTPConfig(ctx)
 	if err != nil {
+		logger.LegacyPrintf("service.email", "[Email] Get SMTP config failed email=%s error=%v", email, err)
 		return err
 	}
+	logger.LegacyPrintf("service.email", "[Email] SMTP config loaded for verification email=%s %s", email, smtpConfigLogSummary(config))
 
 	senderName := emailSenderDisplayName(config)
 
@@ -288,9 +346,11 @@ func (s *EmailService) SendVerifyCode(ctx context.Context, email, siteName strin
 
 	// 发送邮件
 	if err := s.SendEmailWithConfig(config, email, subject, body); err != nil {
+		logger.LegacyPrintf("service.email", "[Email] Send verification email failed email=%s elapsed_ms=%d error=%v", email, time.Since(startedAt).Milliseconds(), err)
 		return fmt.Errorf("send email: %w", err)
 	}
 
+	logger.LegacyPrintf("service.email", "[Email] SendVerifyCode success email=%s elapsed_ms=%d", email, time.Since(startedAt).Milliseconds())
 	return nil
 }
 
