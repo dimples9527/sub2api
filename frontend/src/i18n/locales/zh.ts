@@ -355,6 +355,7 @@ export default {
     mySubscriptions: '我的订阅',
     buySubscription: '充值/订阅',
     docs: '文档',
+    modelMonitor: '模型监控',
     myOrders: '我的订单',
     orderManagement: '订单管理',
     paymentDashboard: '支付概览',
@@ -4370,6 +4371,7 @@ export default {
         security: '安全与认证',
         users: '用户默认值',
         gateway: '网关服务',
+        monitor: '模型监控',
         email: '邮件设置',
         backup: '数据备份',
         payment: '支付设置',
@@ -4576,6 +4578,9 @@ export default {
         docUrl: '文档链接',
         docUrlHint: '文档网站的链接。留空则隐藏文档链接。',
         docUrlPlaceholder: 'https://docs.example.com',
+        llmMonitorStatusApiUrl: '模型监控接口',
+        llmMonitorStatusApiUrlHint: '模型监控页面通过后端代理请求该地址，留空时使用配置文件默认值。',
+        llmMonitorStatusApiUrlPlaceholder: 'https://jc.findcg.com/api/status',
         siteLogo: '站点Logo',
         uploadImage: '上传图片',
         remove: '移除',
@@ -4592,6 +4597,14 @@ export default {
           '⚠️ iframe 模式提示：部分网站设置了 X-Frame-Options 或 CSP 安全策略，禁止被嵌入到 iframe 中。如果页面显示空白或报错，请确认目标网站允许被嵌入，或考虑使用 HTML 模式自行构建页面内容。',
         hideCcsImportButton: '隐藏 CCS 导入按钮',
         hideCcsImportButtonHint: '启用后将在 API Keys 页面隐藏"导入 CCS"按钮'
+      },
+      modelMonitor: {
+        title: '模型监控',
+        description: '配置模型监控页面的数据来源。页面会通过后端代理访问该地址，避免浏览器跨域和防盗链限制。',
+        statusApiUrl: '状态接口地址',
+        statusApiUrlPlaceholder: 'https://jc.findcg.com/api/status',
+        statusApiUrlHint: '填写不带 period 和 board 的基础地址即可；页面会按所选时间窗口自动追加查询参数。',
+        proxyHint: '前端页面只请求同源 /api/llm-monitor/status，真实上游地址由后端读取这里的配置。'
       },
       purchase: {
         title: '充值/订阅页面',

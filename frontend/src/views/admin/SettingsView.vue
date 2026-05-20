@@ -2162,6 +2162,39 @@
 
         </div><!-- /Tab: General -->
 
+        <!-- Tab: Model Monitor -->
+        <div v-show="activeTab === 'monitor'" class="space-y-6">
+          <div class="card">
+            <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                {{ t('admin.settings.modelMonitor.title') }}
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {{ t('admin.settings.modelMonitor.description') }}
+              </p>
+            </div>
+            <div class="space-y-5 p-6">
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.modelMonitor.statusApiUrl') }}
+                </label>
+                <input
+                  v-model="form.llm_monitor_status_api_url"
+                  type="url"
+                  class="input font-mono text-sm"
+                  :placeholder="t('admin.settings.modelMonitor.statusApiUrlPlaceholder')"
+                />
+                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.modelMonitor.statusApiUrlHint') }}
+                </p>
+              </div>
+              <div class="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
+                {{ t('admin.settings.modelMonitor.proxyHint') }}
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Tab: Email -->
 <!-- Tab: Payment -->
         <div v-show="activeTab === 'payment'" class="space-y-6">
@@ -2612,13 +2645,14 @@ const { t, locale } = useI18n()
 const appStore = useAppStore()
 const adminSettingsStore = useAdminSettingsStore()
 
-type SettingsTab = 'general' | 'security' | 'users' | 'gateway' | 'payment' | 'email' | 'backup'
+type SettingsTab = 'general' | 'security' | 'users' | 'gateway' | 'monitor' | 'payment' | 'email' | 'backup'
 const activeTab = ref<SettingsTab>('general')
 const settingsTabs = [
   { key: 'general'  as SettingsTab, icon: 'home'   as const },
   { key: 'security' as SettingsTab, icon: 'shield' as const },
   { key: 'users'    as SettingsTab, icon: 'user'   as const },
   { key: 'gateway'  as SettingsTab, icon: 'server' as const },
+  { key: 'monitor'  as SettingsTab, icon: 'activity' as const },
   { key: 'payment'  as SettingsTab, icon: 'creditCard' as const },
   { key: 'email'    as SettingsTab, icon: 'mail'   as const },
   { key: 'backup'   as SettingsTab, icon: 'database' as const },
@@ -2740,6 +2774,7 @@ const form = reactive<SettingsForm>({
   table_page_size_options: [10, 20, 50, 100],
   custom_menu_items: [] as Array<{id: string; label: string; icon_svg: string; url: string; visibility: 'user' | 'admin'; sort_order: number}>,
   custom_endpoints: [] as Array<{name: string; endpoint: string; description: string}>,
+  llm_monitor_status_api_url: '',
   frontend_url: '',
   smtp_host: '',
   smtp_port: 587,
@@ -3155,6 +3190,7 @@ async function saveSettings() {
     // Optional URL fields: auto-clear invalid values so they don't cause backend 400 errors
     if (!isValidHttpUrl(form.frontend_url)) form.frontend_url = ''
     if (!isValidHttpUrl(form.doc_url)) form.doc_url = ''
+    if (!isValidHttpUrl(form.llm_monitor_status_api_url)) form.llm_monitor_status_api_url = ''
 
     const parsedRechargeOptions = parsePaymentRechargeOptions(paymentRechargeOptionsInput.value)
     if (!parsedRechargeOptions) {
@@ -3184,6 +3220,7 @@ async function saveSettings() {
       api_base_url: form.api_base_url,
       contact_info: form.contact_info,
       doc_url: form.doc_url,
+      llm_monitor_status_api_url: form.llm_monitor_status_api_url,
       home_content: form.home_content,
       backend_mode_enabled: form.backend_mode_enabled,
       hide_ccs_import_button: form.hide_ccs_import_button,

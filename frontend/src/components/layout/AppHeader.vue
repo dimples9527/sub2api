@@ -28,6 +28,18 @@
         <!-- Announcement Bell -->
         <AnnouncementBell v-if="user" />
 
+        <!-- Model Monitor Link -->
+        <a
+          v-if="llmMonitorStatusApiUrl"
+          href="/model-monitor.html"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
+        >
+          <Icon name="activity" size="sm" />
+          <span class="hidden sm:inline">{{ t('nav.modelMonitor') }}</span>
+        </a>
+
         <!-- Docs Link -->
         <a
           v-if="docUrl"
@@ -235,6 +247,7 @@ const dropdownOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
 const contactInfo = computed(() => appStore.contactInfo)
 const docUrl = computed(() => appStore.docUrl)
+const llmMonitorStatusApiUrl = computed(() => appStore.cachedPublicSettings?.llm_monitor_status_api_url || '')
 const globalBannerMessage = computed(() => (appStore.globalBannerMessage || '').trim())
 
 // 只在标准模式的管理员下显示新手引导按钮

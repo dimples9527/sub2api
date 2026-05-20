@@ -355,6 +355,7 @@ export default {
     mySubscriptions: 'My Subscriptions',
     buySubscription: 'Recharge / Subscription',
     docs: 'Docs',
+    modelMonitor: 'Model Monitor',
     myOrders: 'My Orders',
     orderManagement: 'Orders',
     paymentDashboard: 'Payment Dashboard',
@@ -4205,6 +4206,7 @@ export default {
         security: 'Security',
         users: 'Users',
         gateway: 'Gateway',
+        monitor: 'Model Monitor',
         email: 'Email',
         backup: 'Backup',
         payment: 'Payment',
@@ -4415,6 +4417,9 @@ export default {
         docUrl: 'Documentation URL',
         docUrlPlaceholder: 'https://docs.example.com',
         docUrlHint: 'Link to your documentation site. Leave empty to hide the documentation link.',
+        llmMonitorStatusApiUrl: 'Model monitor API',
+        llmMonitorStatusApiUrlPlaceholder: 'https://jc.findcg.com/api/status',
+        llmMonitorStatusApiUrlHint: 'The monitor page requests this URL through the backend proxy. Leave empty to use the config file default.',
         siteLogo: 'Site Logo',
         uploadImage: 'Upload Image',
         remove: 'Remove',
@@ -4428,6 +4433,14 @@ export default {
         homeContentIframeWarning: '⚠️ iframe mode note: Some websites have X-Frame-Options or CSP security policies that prevent embedding in iframes. If the page appears blank or shows an error, please verify the target website allows embedding, or consider using HTML mode to build your own content.',
         hideCcsImportButton: 'Hide CCS Import Button',
         hideCcsImportButtonHint: 'When enabled, the "Import to CCS" button will be hidden on the API Keys page'
+      },
+      modelMonitor: {
+        title: 'Model Monitor',
+        description: 'Configure the data source for the model monitor page. The page uses the backend proxy to avoid browser CORS and anti-hotlink restrictions.',
+        statusApiUrl: 'Status API URL',
+        statusApiUrlPlaceholder: 'https://jc.findcg.com/api/status',
+        statusApiUrlHint: 'Use the base URL without period and board. The page appends query parameters for the selected window.',
+        proxyHint: 'The browser only calls the same-origin /api/llm-monitor/status route. The real upstream URL is read by the backend from this setting.'
       },
       purchase: {
         title: 'Recharge / Subscription Page',

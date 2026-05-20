@@ -1,0 +1,1270 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>发现AI - Claude Code 监控面板</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #050812;
+      --panel: #0a101c;
+      --panel-2: #101827;
+      --line: rgba(119, 141, 169, 0.13);
+      --line-strong: rgba(119, 141, 169, 0.22);
+      --text: #dce7f3;
+      --muted: #8291a7;
+      --cyan: #1686a8;
+      --cyan-2: #2aa6c8;
+      --green: #2fca75;
+      --yellow: #d5b438;
+      --orange: #f59b3d;
+      --red: #ee5259;
+      --font-ui: "MiSans", "HarmonyOS Sans SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      --font-metric: "DIN Alternate", "Bahnschrift", "SFMono-Regular", "Consolas", monospace;
+      --shadow: 0 20px 55px rgba(0, 0, 0, 0.38);
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background:
+        linear-gradient(rgba(79, 98, 127, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(79, 98, 127, 0.026) 1px, transparent 1px),
+        linear-gradient(180deg, #060a14 0%, #050812 42%, #060a15 100%);
+      background-size: 44px 44px, 44px 44px, auto;
+      color: var(--text);
+      font-family: var(--font-ui);
+    }
+    body { padding: 14px 16px 28px; }
+    button, input { font: inherit; }
+    button {
+      border: 0;
+      background: none;
+      color: inherit;
+      cursor: pointer;
+    }
+
+    .page { max-width: 1120px; margin: 0 auto; }
+
+    .toolbar {
+      position: relative;
+      z-index: 30;
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 12px;
+      margin-bottom: 14px;
+      padding: 9px 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: 12px;
+      background:
+        linear-gradient(180deg, rgba(17, 26, 43, 0.86), rgba(8, 13, 24, 0.9));
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(14px);
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      scrollbar-width: thin;
+    }
+
+    .toolbar-left, .toolbar-right, .filter-group, .window-group, .view-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 0 0 auto;
+      flex-wrap: nowrap;
+    }
+    .toolbar-left { min-width: max-content; }
+    .toolbar-right { margin-left: auto; }
+
+    .funnel, .icon-chip, .chip, .window-btn, .view-btn, .refresh-btn, .select-trigger {
+      border-radius: 9px;
+      border: 1px solid var(--line-strong);
+      background: rgba(255, 255, 255, 0.018);
+      color: #cad5e6;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: border-color 0.16s ease, background-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
+    }
+
+    .icon-chip, .chip, .window-btn, .view-btn, .refresh-btn {
+      height: 32px;
+      padding: 0 12px;
+    }
+
+    .icon-chip { width: 32px; padding: 0; color: var(--muted); }
+    .icon-chip:hover,
+    .chip:hover,
+    .window-btn:hover,
+    .view-btn:hover,
+    .refresh-btn:hover,
+    .select-trigger:hover {
+      border-color: rgba(42, 166, 200, 0.42);
+      background-color: rgba(42, 166, 200, 0.045);
+      color: #ecf8ff;
+      transform: translateY(-1px);
+    }
+    .chip.primary {
+      border-color: rgba(22, 134, 168, 0.58);
+      background: rgba(22, 134, 168, 0.12);
+      color: #c9f3ff;
+    }
+
+    .funnel {
+      width: 32px;
+      height: 32px;
+      color: var(--muted);
+      flex: 0 0 auto;
+      background: rgba(5, 8, 18, 0.48);
+    }
+
+    .window-btn, .view-btn, .refresh-btn { padding: 0 12px; }
+    .window-btn.active, .view-btn.active, .refresh-btn.active {
+      border-color: rgba(22, 134, 168, 0.62);
+      background: rgba(22, 134, 168, 0.16);
+      color: #d9f5ff;
+      box-shadow: 0 0 0 1px rgba(22, 134, 168, 0.12) inset;
+    }
+    .window-btn.active {
+      color: #fff;
+      background: linear-gradient(180deg, rgba(42, 166, 200, 0.86), rgba(22, 120, 164, 0.88));
+      border-color: rgba(42, 166, 200, 0.56);
+      box-shadow: 0 10px 20px rgba(22, 134, 168, 0.14);
+    }
+    .window-btn { min-width: 74px; }
+    .view-btn { width: 34px; padding: 0; }
+
+    .toolbar .search {
+      height: 32px;
+      padding: 0 12px;
+      border-radius: 10px;
+      border: 1px solid var(--line-strong);
+      background: rgba(5, 8, 18, 0.5);
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.16s ease, background-color 0.16s ease, box-shadow 0.16s ease;
+    }
+    .search::placeholder { color: #64748b; }
+    .search:focus {
+      border-color: rgba(42, 166, 200, 0.68);
+      background: rgba(6, 14, 28, 0.78);
+      box-shadow: 0 0 0 3px rgba(22, 134, 168, 0.08);
+    }
+
+    .custom-select {
+      position: relative;
+      min-width: 122px;
+    }
+    .custom-select.provider-select { min-width: 130px; }
+    .select-trigger {
+      width: 100%;
+      height: 32px;
+      padding: 0 10px 0 12px;
+      justify-content: space-between;
+      background: #152033;
+      color: #aebbd0;
+    }
+    .custom-select.active .select-trigger,
+    .custom-select.open .select-trigger {
+      border-color: rgba(22, 134, 168, 0.68);
+      color: #e7f8ff;
+      box-shadow: 0 0 0 1px rgba(22, 134, 168, 0.16) inset, 0 10px 24px rgba(0, 0, 0, 0.2);
+    }
+    .custom-select.open .select-trigger {
+      background: #19263a;
+      border-color: rgba(42, 166, 200, 0.82);
+    }
+    .select-label {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 13px;
+    }
+    .select-caret {
+      width: 7px;
+      height: 7px;
+      border-right: 1.8px solid #74849b;
+      border-bottom: 1.8px solid #74849b;
+      transform: translateY(-2px) rotate(45deg);
+      transition: transform 0.16s ease;
+      flex: 0 0 auto;
+    }
+    .custom-select.open .select-caret { transform: translateY(2px) rotate(225deg); }
+    .select-menu {
+      position: absolute;
+      z-index: 100;
+      top: calc(100% + 7px);
+      left: 0;
+      width: max(100%, 228px);
+      max-height: 310px;
+      padding: 6px 0;
+      border: 1px solid rgba(46, 64, 92, 0.95);
+      border-radius: 8px;
+      background: #1b2638;
+      box-shadow: 0 18px 42px rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(16px);
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-4px);
+      transition: opacity 0.14s ease, transform 0.14s ease;
+      overflow: hidden;
+    }
+    .custom-select.open .select-menu {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+    }
+    .select-search-wrap {
+      padding: 0 8px 6px;
+      border-bottom: 1px solid rgba(119, 141, 169, 0.1);
+      margin-bottom: 2px;
+    }
+    .select-search {
+      width: 100%;
+      height: 36px;
+      padding: 0 10px 0 32px;
+      border-radius: 7px;
+      border: 1px solid rgba(42, 166, 200, 0.82);
+      background:
+        linear-gradient(90deg, transparent 0, transparent 30px, transparent 30px),
+        #101a2a;
+      color: #dce7f3;
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(22, 134, 168, 0.08);
+    }
+    .select-search::placeholder { color: #8d9bb0; }
+    .select-search-icon {
+      position: absolute;
+      width: 14px;
+      height: 14px;
+      margin: 11px 0 0 18px;
+      color: #8d9bb0;
+      pointer-events: none;
+    }
+    .select-options {
+      max-height: 246px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: #8b8170 transparent;
+    }
+    .select-options::-webkit-scrollbar { width: 10px; }
+    .select-options::-webkit-scrollbar-track { background: transparent; }
+    .select-options::-webkit-scrollbar-thumb {
+      background: #8b8170;
+      border: 2px solid #1b2638;
+      border-radius: 999px;
+    }
+    .select-option {
+      width: 100%;
+      min-height: 37px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 10px;
+      padding: 0 13px;
+      border-radius: 0;
+      color: #aebbd0;
+      text-align: left;
+      white-space: nowrap;
+    }
+    .select-option::before {
+      content: "";
+      width: 14px;
+      height: 14px;
+      border-radius: 3px;
+      border: 1px solid #3b4a61;
+      background: #202c3e;
+      flex: 0 0 auto;
+    }
+    .select-option:hover {
+      background: #243247;
+      color: #eff8ff;
+    }
+    .select-option.selected {
+      background: #26364d;
+      color: #d9e8fb;
+    }
+    .select-option.selected::after {
+      content: "";
+      display: none;
+    }
+    .select-option.selected::before {
+      border-color: rgba(42, 166, 200, 0.82);
+      background:
+        linear-gradient(135deg, transparent 35%, #2aa6c8 36%, #2aa6c8 50%, transparent 51%),
+        #152d40;
+    }
+
+    .panel {
+      position: relative;
+      z-index: 1;
+      border: 1px solid var(--line-strong);
+      border-radius: 14px;
+      background:
+        linear-gradient(180deg, rgba(10, 16, 28, 0.96), rgba(6, 11, 21, 0.98));
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      animation: panel-in 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    }
+
+    @keyframes panel-in {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .table-shell { overflow-x: auto; }
+    table {
+      width: 100%;
+      min-width: 1040px;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    thead th {
+      height: 46px;
+      padding: 0 12px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #8fa0b7;
+      text-align: left;
+      border-bottom: 1px solid var(--line-strong);
+      background: rgba(8, 13, 24, 0.96);
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      white-space: nowrap;
+    }
+    thead th.sortable { cursor: pointer; user-select: none; }
+    thead th.sortable:hover { color: #b9cae0; background: rgba(12, 18, 32, 0.96); }
+    .sort-icon { margin-left: 4px; color: #546178; font-size: 11px; }
+    .sort-icon.active { color: var(--cyan); }
+    tbody tr {
+      border-bottom: 1px solid rgba(119, 141, 169, 0.1);
+      transition: background-color 0.16s ease, box-shadow 0.16s ease;
+    }
+    tbody tr:hover {
+      background: rgba(22, 134, 168, 0.035);
+      box-shadow: inset 2px 0 0 rgba(22, 134, 168, 0.42);
+    }
+    td {
+      padding: 11px 12px;
+      vertical-align: middle;
+      font-size: 13px;
+      color: #d7e1ee;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .col-mark { width: 86px; }
+    .col-provider { width: 204px; }
+    .col-service { width: 88px; }
+    .col-model { width: 112px; }
+    .col-price { width: 108px; }
+    .col-availability { width: 98px; }
+    .col-latency { width: 100px; }
+
+    .marks { display: inline-flex; align-items: center; gap: 6px; color: #5a92ff; }
+    .mark-triangle { color: #2bc27a; font-size: 12px; }
+    .mark-shield { color: #3f8cff; font-size: 12px; }
+    .mark-clock { color: #4f5f82; font-size: 12px; }
+    .mark-star { color: #7d8aa1; font-size: 12px; }
+
+    .provider-cell { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .provider-name {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+      font-weight: 600;
+      color: #edf3fa;
+    }
+    .provider-name span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .provider-meta { color: #74849b; font-size: 11px; }
+    .ext, .fav { width: 12px; height: 12px; color: #7a89a4; flex: 0 0 auto; }
+
+    .service-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 8px;
+      border-radius: 7px;
+      border: 1px solid rgba(245, 163, 64, 0.28);
+      background: linear-gradient(180deg, rgba(245, 163, 64, 0.11), rgba(245, 163, 64, 0.06));
+      color: #ffb77f;
+      font-size: 12px;
+      line-height: 1;
+    }
+    .service-badge svg { width: 11px; height: 11px; }
+    .model { color: #c0ccdb; }
+    .price { color: #9eaac0; font-family: var(--font-metric); }
+    .price strong { color: #dbe7f5; font-weight: 600; }
+    .availability {
+      font-family: var(--font-metric);
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+    .availability.high { color: var(--green); }
+    .availability.mid { color: var(--orange); }
+    .availability.low { color: var(--red); }
+
+    .latency-cell { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .latency-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      flex: 0 0 auto;
+      background: var(--green);
+      box-shadow: 0 0 0 4px rgba(37, 192, 109, 0.08);
+    }
+    .latency-dot.warn {
+      background: var(--orange);
+      box-shadow: 0 0 0 4px rgba(245, 163, 64, 0.08);
+    }
+    .latency-dot.low {
+      background: #ff4f88;
+      box-shadow: 0 0 0 4px rgba(255, 79, 136, 0.08);
+    }
+    .latency-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .latency-ms {
+      color: #f2f6fb;
+      font-family: var(--font-metric);
+      font-size: 12px;
+      line-height: 1.1;
+    }
+    .latency-time {
+      color: #7e8da3;
+      font-family: var(--font-metric);
+      font-size: 11px;
+      line-height: 1.1;
+    }
+
+    .trend-head { color: #9aabc2; }
+    .trend-row { display: flex; align-items: center; gap: 3px; min-height: 18px; overflow: hidden; }
+    .trend-bar {
+      width: 10px;
+      height: 18px;
+      border-radius: 4px;
+      flex: 0 0 auto;
+      background: #3a465b;
+      box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.25);
+    }
+    .trend-bar.red { background: #de4b52; }
+    .trend-bar.yellow { background: #caa51d; }
+    .trend-bar.green { background: #2fa84f; }
+
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 4px 0;
+      color: #708096;
+      font-size: 12px;
+      flex-wrap: wrap;
+    }
+    .footer strong { color: #c4d0df; font-weight: 600; }
+
+    body.compact-view td { padding-top: 8px; padding-bottom: 8px; }
+    body.compact-view .trend-bar { width: 9px; height: 16px; }
+    body.compact-view table { min-width: 980px; }
+
+    @media (max-width: 900px) {
+      .toolbar { align-items: center; }
+      .toolbar-right { justify-content: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <section class="toolbar" aria-label="筛选工具栏">
+      <div class="toolbar-left">
+        <div class="funnel" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;">
+            <path d="M3 5h18l-7 8v5l-4 2v-7Z" />
+          </svg>
+        </div>
+        <div class="filter-group">
+          <div class="custom-select" data-filter="category" data-value="all">
+            <button class="select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+              <span class="select-label">全部分类</span>
+              <span class="select-caret" aria-hidden="true"></span>
+            </button>
+            <div class="select-menu" role="listbox">
+              <div class="select-options">
+                <button class="select-option selected" type="button" role="option" data-value="all">全部分类</button>
+                <button class="select-option" type="button" role="option" data-value="commercial">商业</button>
+              </div>
+            </div>
+          </div>
+          <div class="custom-select provider-select" data-filter="provider" data-value="all">
+            <button class="select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+              <span class="select-label">全部服务商</span>
+              <span class="select-caret" aria-hidden="true"></span>
+            </button>
+            <div class="select-menu" role="listbox">
+              <div class="select-search-wrap">
+                <svg class="select-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="m20 20-3.5-3.5" />
+                </svg>
+                <input class="select-search" type="search" placeholder="搜索..." aria-label="搜索服务商">
+              </div>
+              <div class="select-options" data-provider-options>
+                <button class="select-option selected" type="button" role="option" data-value="all">全部服务商</button>
+              </div>
+            </div>
+          </div>
+          <div class="custom-select" data-filter="service" data-value="all">
+            <button class="select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+              <span class="select-label">全部服务</span>
+              <span class="select-caret" aria-hidden="true"></span>
+            </button>
+            <div class="select-menu" role="listbox">
+              <div class="select-options">
+                <button class="select-option selected" type="button" role="option" data-value="all">全部服务</button>
+                <button class="select-option" type="button" role="option" data-value="CC">Claude Code (CC)</button>
+                <button class="select-option" type="button" role="option" data-value="CX">Codex (CX)</button>
+                <button class="select-option" type="button" role="option" data-value="GM">Gemini (GM)</button>
+              </div>
+            </div>
+          </div>
+          <div class="custom-select" data-filter="channel" data-value="all">
+            <button class="select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+              <span class="select-label">全部通道</span>
+              <span class="select-caret" aria-hidden="true"></span>
+            </button>
+            <div class="select-menu" role="listbox">
+              <div class="select-options">
+                <button class="select-option selected" type="button" role="option" data-value="all">全部通道</button>
+                <button class="select-option" type="button" role="option" data-value="自营">自营</button>
+              </div>
+            </div>
+          </div>
+          <input id="searchInput" class="search" type="search" placeholder="搜索服务商、模型或价格" aria-label="搜索">
+        </div>
+      </div>
+      <div class="toolbar-right">
+        <div class="window-group" role="tablist" aria-label="时间窗口">
+          <button class="window-btn active" data-window="90m" type="button">近90分钟</button>
+          <button class="window-btn" data-window="24h" type="button">近24小时</button>
+          <button class="window-btn" data-window="7d" type="button">近7天</button>
+          <button class="window-btn" data-window="30d" type="button">近30天</button>
+          <button class="window-btn" data-window="all" type="button">全天</button>
+        </div>
+        <div class="view-group" aria-label="视图切换">
+          <button class="view-btn active" data-view="list" type="button" title="列表视图">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;">
+              <line x1="8" y1="6" x2="20" y2="6" />
+              <line x1="8" y1="12" x2="20" y2="12" />
+              <line x1="8" y1="18" x2="20" y2="18" />
+              <circle cx="4" cy="6" r="1" />
+              <circle cx="4" cy="12" r="1" />
+              <circle cx="4" cy="18" r="1" />
+            </svg>
+          </button>
+          <button class="view-btn" data-view="grid" type="button" title="紧凑视图">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;">
+              <rect x="4" y="4" width="6" height="6" rx="1" />
+              <rect x="14" y="4" width="6" height="6" rx="1" />
+              <rect x="4" y="14" width="6" height="6" rx="1" />
+              <rect x="14" y="14" width="6" height="6" rx="1" />
+            </svg>
+          </button>
+        </div>
+        <button id="refreshBtn" class="refresh-btn" type="button" title="自动刷新">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;">
+            <path d="M21 12a9 9 0 1 1-2.6-6.4" />
+            <path d="M21 4v6h-6" />
+          </svg>
+        </button>
+        <input id="refreshSeconds" class="search" type="number" min="5" value="30" aria-label="自动刷新间隔（秒）" style="width:86px;">
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="table-shell">
+        <table>
+          <thead>
+            <tr>
+              <th class="col-mark">标注</th>
+              <th class="col-provider sortable" data-sort="provider">服务商 <span class="sort-icon">↕</span></th>
+              <th class="col-service sortable" data-sort="service">服务 <span class="sort-icon">↕</span></th>
+              <th class="col-model sortable" data-sort="model">模型 <span class="sort-icon">↕</span></th>
+              <th class="col-price sortable" data-sort="price">价格 $/s <span class="sort-icon">↕</span></th>
+              <th class="col-availability sortable" data-sort="availability">可用率 <span class="sort-icon">↕</span></th>
+              <th class="col-latency sortable" data-sort="latency">最后监测 <span class="sort-icon">↕</span></th>
+              <th class="trend-head">可用率趋势 <span id="windowLabel">近90分钟</span></th>
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="footer">
+      <div>当前筛选：<strong id="filterSummary">全部</strong></div>
+      <div>最后刷新：<strong id="lastRefresh">--:--:--</strong></div>
+    </div>
+  </div>
+
+  <script>
+    const STATUS_API_URL = '/api/llm-monitor/status';
+
+    let rows = [];
+
+    const state = {
+      query: '',
+      category: 'all',
+      provider: 'all',
+      service: 'all',
+      channel: 'all',
+      window: '90m',
+      view: 'list',
+      sortKey: 'availability',
+      sortDir: -1,
+      autoRefresh: false,
+      refreshHandle: null,
+      loading: true,
+      error: ''
+    };
+
+    const els = {
+      tableBody: document.getElementById('tableBody'),
+      search: document.getElementById('searchInput'),
+      refreshBtn: document.getElementById('refreshBtn'),
+      refreshSeconds: document.getElementById('refreshSeconds'),
+      windowLabel: document.getElementById('windowLabel'),
+      filterSummary: document.getElementById('filterSummary'),
+      lastRefresh: document.getElementById('lastRefresh')
+    };
+
+    function pickValue(source, keys, fallback = undefined) {
+      for (const key of keys) {
+        if (source && source[key] !== undefined && source[key] !== null) return source[key];
+      }
+      return fallback;
+    }
+
+    function statusApiUrl() {
+      const url = new URL(STATUS_API_URL, window.location.origin);
+      url.searchParams.set('period', state.window);
+      url.searchParams.set('board', 'hot');
+      return url.toString();
+    }
+
+    function asNumber(value, fallback = 0) {
+      if (typeof value === 'number' && Number.isFinite(value)) return value;
+      if (typeof value === 'string') {
+        const parsed = Number(value.replace('%', '').replace('×', '').replace('x', '').trim());
+        if (Number.isFinite(parsed)) return parsed;
+      }
+      return fallback;
+    }
+
+    function normalizeApiPayload(payload) {
+      if (Array.isArray(payload)) return payload;
+      if (!payload || typeof payload !== 'object') return [];
+
+      const candidates = [
+        payload.groups,
+        payload.data,
+        payload.items,
+        payload.list,
+        payload.status,
+        payload.statuses,
+        payload.providers,
+        payload.services,
+        payload.result
+      ];
+
+      for (const candidate of candidates) {
+        if (Array.isArray(candidate)) return candidate;
+        if (candidate && typeof candidate === 'object') {
+          const nested = normalizeApiPayload(candidate);
+          if (nested.length) return nested;
+        }
+      }
+      return [];
+    }
+
+    function statusAvailability(status) {
+      if (Number(status) === 1) return 100;
+      if (Number(status) === 2) return 70;
+      return 0;
+    }
+
+    function pointTone(point) {
+      const status = asNumber(pickValue(point, ['status'], undefined), undefined);
+      const availability = asNumber(pickValue(point, ['availability'], statusAvailability(status)), 0);
+      if (status === 1 || availability >= 75) return 'green';
+      if (status === 2 || availability >= 30) return 'yellow';
+      return 'red';
+    }
+
+    function serviceCode(value) {
+      const raw = String(value || '').trim();
+      const code = raw.toUpperCase();
+      if (code.includes('CLAUDE CODE')) return 'CC';
+      if (code.includes('CODEX')) return 'CX';
+      if (code.includes('GEMINI')) return 'GM';
+      return code || 'CC';
+    }
+
+    function formatServiceOption(code) {
+      switch (code) {
+        case 'CC': return 'Claude Code (CC)';
+        case 'CX': return 'Codex (CX)';
+        case 'GM': return 'Gemini (GM)';
+        default: return code;
+      }
+    }
+
+    function formatCheckedTime(value, fallback = '--:--') {
+      const numeric = asNumber(value, 0);
+      if (numeric > 0) {
+        const milliseconds = numeric < 10000000000 ? numeric * 1000 : numeric;
+        return new Date(milliseconds).toLocaleTimeString('zh-CN', {
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+      }
+      const text = String(value || '').trim();
+      return text ? text.slice(-5) : fallback;
+    }
+
+    function normalizeTrend(item, availability, index) {
+      const rawTrend = pickValue(item, ['trend', 'history', 'availability_trend', 'availabilityTrend', 'status_history', 'statusHistory'], null);
+      if (Array.isArray(rawTrend) && rawTrend.length) {
+        return rawTrend.map((entry) => {
+          if (entry && typeof entry === 'object' && ('status' in entry || 'availability' in entry)) {
+            return pointTone(entry);
+          }
+          const value = typeof entry === 'object'
+            ? pickValue(entry, ['state', 'color', 'rate', 'success_rate'], '')
+            : entry;
+          if (typeof value === 'number') {
+            if (value >= 75) return 'green';
+            if (value >= 30) return 'yellow';
+            return 'red';
+          }
+          const text = String(value).toLowerCase();
+          if (text.includes('green') || text.includes('ok') || text.includes('success') || text === '1' || text === 'true') return 'green';
+          if (text.includes('yellow') || text.includes('warn') || text.includes('partial')) return 'yellow';
+          return 'red';
+        }).slice(-18);
+      }
+      return trendBars(availability, index);
+    }
+
+    function normalizeStatusItem(item, index) {
+      const layer = Array.isArray(item.layers) && item.layers.length ? item.layers[0] : {};
+      const current = layer.current_status || {};
+      const timeline = Array.isArray(layer.timeline) ? layer.timeline : [];
+      const latestPoint = timeline.length ? timeline[timeline.length - 1] : {};
+      const provider = String(pickValue(item, ['provider', 'provider_name', 'providerName', 'name', 'title', 'service_provider'], `服务商 ${index + 1}`));
+      const service = serviceCode(pickValue(item, ['service', 'service_type', 'serviceType', 'type'], 'CC'));
+      const category = String(pickValue(item, ['category'], ''));
+      const model = String(pickValue(layer, ['model', 'request_model'], pickValue(item, ['model', 'model_name', 'modelName'], '')));
+      const priceMin = asNumber(pickValue(item, ['price_min', 'priceMin', 'price', 'price_rate', 'priceRate', 'rate', 'multiplier', 'cost'], 0));
+      const priceMax = asNumber(pickValue(item, ['price_max', 'priceMax'], priceMin));
+      const availabilityValues = timeline.map((point) => asNumber(point.availability, statusAvailability(point.status)));
+      const availability = availabilityValues.length
+        ? Math.round((availabilityValues.reduce((sum, value) => sum + value, 0) / availabilityValues.length) * 100) / 100
+        : asNumber(pickValue(item, ['availability', 'available_rate', 'availableRate', 'success_rate', 'successRate', 'rate_percent', 'uptime'], statusAvailability(pickValue(current, ['status'], item.current_status))), 0);
+      const latency = asNumber(pickValue(current, ['latency'], pickValue(latestPoint, ['latency'], pickValue(item, ['latency', 'latency_ms', 'latencyMs', 'response_time', 'responseTime', 'last_latency'], 0))));
+      const time = formatCheckedTime(pickValue(current, ['timestamp'], pickValue(latestPoint, ['time', 'timestamp'], pickValue(item, ['time', 'checked_at', 'checkedAt', 'last_check', 'lastCheck', 'last_monitor', 'lastMonitor'], ''))));
+      const note = String(pickValue(item, ['sponsor', 'channel', 'note', 'tag', 'owner', 'source'], '自营'));
+      const trend = timeline.length ? timeline.slice(-18).map(pointTone) : normalizeTrend(item, availability, index);
+      return {
+        provider,
+        providerUrl: String(pickValue(item, ['provider_url', 'providerUrl', 'url'], '')),
+        service,
+        category,
+        model,
+        price: priceMin,
+        priceMin,
+        priceMax,
+        availability,
+        latency,
+        time,
+        note,
+        channel: String(pickValue(item, ['channel'], '')),
+        annotations: Array.isArray(item.annotations) ? item.annotations : [],
+        trend
+      };
+    }
+
+    async function loadStatusData() {
+      state.loading = true;
+      state.error = '';
+      renderTable();
+
+      try {
+        const response = await fetch(statusApiUrl(), {
+          cache: 'no-store',
+          headers: { 'Accept': 'application/json' }
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const payload = await response.json();
+        const items = normalizeApiPayload(payload);
+        rows = items.map(normalizeStatusItem);
+        if (!rows.length) throw new Error('接口返回为空或结构不匹配');
+
+        state.loading = false;
+        state.error = '';
+        populateFilterOptions();
+        if (state.provider !== 'all' && !rows.some((row) => row.provider === state.provider)) {
+          state.provider = 'all';
+        }
+        if (state.service !== 'all' && !rows.some((row) => row.service === state.service)) {
+          state.service = 'all';
+        }
+        if (state.channel !== 'all' && !rows.some((row) => row.channel === state.channel || row.note === state.channel)) {
+          state.channel = 'all';
+        }
+        if (state.category !== 'all' && !rows.some((row) => row.category === state.category)) {
+          state.category = 'all';
+        }
+        syncAllSelects();
+        renderTable();
+      } catch (error) {
+        rows = [];
+        state.loading = false;
+        state.error = `加载失败：${error.message}`;
+        populateFilterOptions();
+        syncAllSelects();
+        renderTable();
+      }
+    }
+
+    function escapeHtml(text) {
+      return String(text)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function formatPrice(row) {
+      const min = asNumber(row.priceMin, asNumber(row.price, 0));
+      const max = asNumber(row.priceMax, min);
+      const compact = (value) => value.toFixed(3).replace(/\.?0+$/, '');
+      return min === max ? `${compact(min)}×` : `${compact(min)}-${compact(max)}×`;
+    }
+
+    function availabilityClass(value) {
+      if (value >= 75) return 'high';
+      if (value >= 30) return 'mid';
+      return 'low';
+    }
+
+    function latencyClass(latency) {
+      if (latency < 500) return '';
+      if (latency < 3000) return 'warn';
+      return 'low';
+    }
+
+    function trendBars(score, seed) {
+      const bars = [];
+      const len = 18;
+      const normalized = Math.max(0, Math.min(score, 100)) / 100;
+      for (let i = 0; i < len; i++) {
+        if (score <= 0) {
+          bars.push('red');
+          continue;
+        }
+        if (score >= 99) {
+          bars.push(i === 6 || i === 13 ? 'yellow' : 'green');
+          continue;
+        }
+        if (normalized >= 0.85) {
+          bars.push(i % 8 === (seed % 8) ? 'yellow' : 'green');
+          continue;
+        }
+        if (normalized >= 0.6) {
+          bars.push(i % 6 === (seed % 6) || (i > 9 && i % 4 === 1) ? 'yellow' : 'green');
+          continue;
+        }
+        if (normalized >= 0.3) {
+          bars.push(i < 4 || i > 13 ? 'red' : (i % 5 === (seed % 5) ? 'yellow' : 'green'));
+          continue;
+        }
+        bars.push(i < 10 ? 'red' : (i % 4 === (seed % 4) ? 'yellow' : 'red'));
+      }
+      return bars;
+    }
+
+    function windowLabel(windowKey) {
+      switch (windowKey) {
+        case '24h': return '近24小时';
+        case '7d': return '近7天';
+        case '30d': return '近30天';
+        case 'all': return '全天';
+        default: return '近90分钟';
+      }
+    }
+
+    function filterSummaryText() {
+      const parts = [];
+      if (state.category !== 'all') parts.push(state.category);
+      if (state.service !== 'all') parts.push(formatServiceOption(state.service));
+      if (state.provider !== 'all') parts.push(state.provider);
+      if (state.channel !== 'all') parts.push(state.channel);
+      if (state.query) parts.push(`搜索: ${state.query}`);
+      return parts.length ? parts.join(' · ') : '全部';
+    }
+
+    function searchText(row) {
+      return [row.provider, row.service, row.model, row.note, row.channel, row.category, row.price, row.availability, row.latency, row.time]
+        .join(' ')
+        .toLowerCase();
+    }
+
+    function applyFilters(rowsToFilter) {
+      const query = state.query.trim().toLowerCase();
+      return rowsToFilter.filter((row) => {
+        if (state.category !== 'all' && row.category !== state.category) return false;
+        if (state.provider !== 'all' && row.provider !== state.provider) return false;
+        if (state.service !== 'all' && row.service !== state.service) return false;
+        if (state.channel !== 'all' && row.channel !== state.channel && row.note !== state.channel) return false;
+        if (query && !searchText(row).includes(query)) return false;
+        return true;
+      });
+    }
+
+    function compareBy(key, dir, a, b) {
+      const av = a[key];
+      const bv = b[key];
+      if (key === 'provider' || key === 'service' || key === 'model') {
+        return dir * String(av).localeCompare(String(bv), 'zh-Hans-CN');
+      }
+      if (key === 'price' || key === 'availability' || key === 'latency') {
+        return dir * ((Number(av) || 0) - (Number(bv) || 0));
+      }
+      return dir * String(av).localeCompare(String(bv), 'zh-Hans-CN');
+    }
+
+    function sortRows(rowsToSort) {
+      return [...rowsToSort].sort((a, b) => compareBy(state.sortKey, state.sortDir, a, b));
+    }
+
+    function updateSortIndicators() {
+      document.querySelectorAll('th.sortable').forEach((th) => {
+        const icon = th.querySelector('.sort-icon');
+        if (!icon) return;
+        const key = th.dataset.sort;
+        if (key === state.sortKey) {
+          icon.textContent = state.sortDir > 0 ? '↑' : '↓';
+          icon.classList.add('active');
+        } else {
+          icon.textContent = '↕';
+          icon.classList.remove('active');
+        }
+      });
+    }
+
+    function annotationGlyph(annotation) {
+      const icon = String(annotation.icon || annotation.id || '').toLowerCase();
+      if (icon.includes('beacon')) return '▲';
+      if (icon.includes('shield')) return '◆';
+      if (icon.includes('activity') || icon.includes('clock') || icon.includes('frequency')) return '◎';
+      return '☆';
+    }
+
+    function annotationClass(annotation) {
+      const icon = String(annotation.icon || annotation.id || '').toLowerCase();
+      const family = String(annotation.family || '').toLowerCase();
+      if (icon.includes('beacon') || family === 'positive') return 'mark-triangle';
+      if (icon.includes('shield')) return 'mark-shield';
+      if (icon.includes('activity') || family === 'neutral') return 'mark-clock';
+      return 'mark-star';
+    }
+
+    function renderAnnotations(row) {
+      const annotations = row.annotations.length ? row.annotations.slice(0, 4) : [{ label: '无标注', icon: 'empty' }];
+      return annotations.map((annotation) => (
+        `<span class="${annotationClass(annotation)}" title="${escapeHtml(annotation.tooltip || annotation.label || '')}">${escapeHtml(annotationGlyph(annotation))}</span>`
+      )).join('');
+    }
+
+    function renderTable() {
+      if (state.loading) {
+        els.windowLabel.textContent = windowLabel(state.window);
+        els.filterSummary.textContent = '加载中';
+        els.lastRefresh.textContent = '--:--:--';
+        els.tableBody.innerHTML = `
+          <tr><td colspan="8" style="padding:30px 12px;color:#7f8da6;text-align:center;">正在从接口加载数据...</td></tr>
+        `;
+        updateSortIndicators();
+        return;
+      }
+
+      if (state.error) {
+        els.windowLabel.textContent = windowLabel(state.window);
+        els.filterSummary.textContent = '接口错误';
+        els.lastRefresh.textContent = '--:--:--';
+        els.tableBody.innerHTML = `
+          <tr><td colspan="8" style="padding:30px 12px;color:#ee8b91;text-align:center;">${escapeHtml(state.error)}</td></tr>
+        `;
+        updateSortIndicators();
+        return;
+      }
+
+      const filtered = sortRows(applyFilters(rows));
+      els.windowLabel.textContent = windowLabel(state.window);
+      els.filterSummary.textContent = filterSummaryText();
+      document.getElementById('windowLabel').textContent = windowLabel(state.window);
+      document.getElementById('filterSummary').textContent = filterSummaryText();
+      els.lastRefresh.textContent = new Date().toLocaleTimeString('zh-CN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
+
+      els.tableBody.innerHTML = filtered.map((row, index) => {
+        const trend = row.trend?.length ? row.trend.slice(-18) : trendBars(row.availability, index + row.provider.length);
+        return `
+          <tr>
+            <td class="col-mark">
+              <div class="marks" aria-hidden="true">
+                ${renderAnnotations(row)}
+              </div>
+            </td>
+            <td class="col-provider">
+              <div class="provider-cell">
+                <div class="provider-name">
+                  <span>${escapeHtml(row.provider)}</span>
+                  <svg class="ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M14 3h7v7" />
+                    <path d="M10 14 21 3" />
+                    <path d="M21 14v7h-7" />
+                    <path d="M21 3 3 21" />
+                  </svg>
+                  <svg class="fav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m12 17.3-5.8 3.1 1.1-6.5-4.7-4.6 6.5-1 2.9-5.8 2.9 5.8 6.5 1-4.7 4.6 1.1 6.5Z" />
+                  </svg>
+                </div>
+                <div class="provider-meta">${escapeHtml(row.note)}</div>
+              </div>
+            </td>
+            <td class="col-service">
+              <span class="service-badge">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 2 4 6l8 4 8-4-8-4Z" />
+                  <path d="M4 10l8 4 8-4" />
+                  <path d="M4 14l8 4 8-4" />
+                </svg>
+                ${escapeHtml(row.service)}
+              </span>
+            </td>
+            <td class="col-model model">${escapeHtml(row.model)}</td>
+            <td class="col-price price"><strong>${formatPrice(row)}</strong></td>
+            <td class="col-availability availability ${availabilityClass(row.availability)}">${row.availability.toFixed(row.availability % 1 ? 2 : 0)}%</td>
+            <td class="col-latency">
+              <div class="latency-cell">
+                <span class="latency-dot ${latencyClass(row.latency)}"></span>
+                <div class="latency-text">
+                  <span class="latency-ms">${row.latency}ms</span>
+                  <span class="latency-time">${row.time}</span>
+                </div>
+              </div>
+            </td>
+            <td class="col-trend">
+              <div class="trend-row" aria-label="可用率趋势">
+                ${trend.map((tone) => `<span class="trend-bar ${tone}"></span>`).join('')}
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('') || `
+        <tr><td colspan="8" style="padding:30px 12px;color:#7f8da6;text-align:center;">没有匹配的数据</td></tr>
+      `;
+
+      updateSortIndicators();
+    }
+
+    function closeAllSelects(except) {
+      document.querySelectorAll('.custom-select.open').forEach((node) => {
+        if (node !== except) {
+          node.classList.remove('open');
+          node.querySelector('.select-trigger')?.setAttribute('aria-expanded', 'false');
+        }
+      });
+    }
+
+    function syncSelect(select, value) {
+      const triggerLabel = select.querySelector('.select-label');
+      const options = Array.from(select.querySelectorAll('.select-option'));
+      const chosen = options.find((option) => option.dataset.value === value) || options[0];
+      select.dataset.value = value;
+      select.classList.toggle('active', value !== 'all');
+      triggerLabel.textContent = chosen ? chosen.textContent.trim() : '';
+      options.forEach((option) => option.classList.toggle('selected', option.dataset.value === value));
+    }
+
+    function uniqueValues(values) {
+      return [...new Set(values.filter((value) => value !== undefined && value !== null && String(value).trim() !== '').map(String))];
+    }
+
+    function optionButton(value, label, selectedValue) {
+      const selected = value === selectedValue ? ' selected' : '';
+      return `<button class="select-option${selected}" type="button" role="option" data-value="${escapeHtml(value)}">${escapeHtml(label)}</button>`;
+    }
+
+    function replaceOptions(filter, allLabel, options, selectedValue, labelForValue = (value) => value) {
+      const select = document.querySelector(`.custom-select[data-filter="${filter}"]`);
+      const container = select?.querySelector('.select-options');
+      if (!container) return;
+      container.innerHTML = [
+        optionButton('all', allLabel, selectedValue),
+        ...options.map((value) => optionButton(value, labelForValue(value), selectedValue))
+      ].join('');
+    }
+
+    function populateFilterOptions() {
+      replaceOptions('category', '全部分类', uniqueValues(rows.map((row) => row.category)), state.category, (value) => value === 'commercial' ? '商业' : value);
+      replaceOptions('provider', '全部服务商', uniqueValues(rows.map((row) => row.provider)), state.provider);
+      replaceOptions('service', '全部服务', uniqueValues(rows.map((row) => row.service)), state.service, formatServiceOption);
+      replaceOptions('channel', '全部通道', uniqueValues(rows.map((row) => row.channel || row.note)), state.channel);
+    }
+
+    function syncAllSelects() {
+      syncSelect(document.querySelector('.custom-select[data-filter="category"]'), state.category);
+      syncSelect(document.querySelector('.custom-select[data-filter="provider"]'), state.provider);
+      syncSelect(document.querySelector('.custom-select[data-filter="service"]'), state.service);
+      syncSelect(document.querySelector('.custom-select[data-filter="channel"]'), state.channel);
+    }
+
+    function bindCustomSelects() {
+      document.querySelectorAll('.custom-select').forEach((select) => {
+        const trigger = select.querySelector('.select-trigger');
+        const menu = select.querySelector('.select-menu');
+        const searchInput = select.querySelector('.select-search');
+        trigger.addEventListener('click', (event) => {
+          event.stopPropagation();
+          const willOpen = !select.classList.contains('open');
+          closeAllSelects(select);
+          select.classList.toggle('open', willOpen);
+          trigger.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+          if (willOpen && searchInput) {
+            searchInput.value = '';
+            filterSelectOptions(select, '');
+            setTimeout(() => searchInput.focus(), 0);
+          }
+        });
+        menu.addEventListener('click', (event) => {
+          const option = event.target.closest('.select-option');
+          if (!option || !menu.contains(option)) return;
+          event.stopPropagation();
+          const value = option.dataset.value || 'all';
+          syncSelect(select, value);
+          select.classList.remove('open');
+          trigger.setAttribute('aria-expanded', 'false');
+
+          switch (select.dataset.filter) {
+            case 'category': state.category = value; break;
+            case 'provider': state.provider = value; break;
+            case 'service': state.service = value; break;
+            case 'channel': state.channel = value; break;
+          }
+          renderTable();
+        });
+        if (searchInput) {
+          searchInput.addEventListener('click', (event) => event.stopPropagation());
+          searchInput.addEventListener('input', () => filterSelectOptions(select, searchInput.value));
+        }
+      });
+    }
+
+    function filterSelectOptions(select, query) {
+      const normalized = query.trim().toLowerCase();
+      select.querySelectorAll('.select-option').forEach((option) => {
+        const text = option.textContent.trim().toLowerCase();
+        option.style.display = text.includes(normalized) ? '' : 'none';
+      });
+    }
+
+    function bindEvents() {
+      document.querySelectorAll('th.sortable').forEach((th) => {
+        th.addEventListener('click', () => {
+          const key = th.dataset.sort;
+          if (!key) return;
+          if (state.sortKey === key) {
+            state.sortDir *= -1;
+          } else {
+            state.sortKey = key;
+            state.sortDir = key === 'availability' ? -1 : 1;
+          }
+          renderTable();
+        });
+      });
+
+      document.querySelectorAll('.window-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.window-btn').forEach((el) => el.classList.remove('active'));
+          btn.classList.add('active');
+          state.window = btn.dataset.window || '90m';
+          loadStatusData();
+        });
+      });
+
+      document.querySelectorAll('.view-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.view-btn').forEach((el) => el.classList.remove('active'));
+          btn.classList.add('active');
+          state.view = btn.dataset.view || 'list';
+          document.body.classList.toggle('compact-view', state.view === 'grid');
+        });
+      });
+
+      els.search.addEventListener('input', () => {
+        state.query = els.search.value;
+        renderTable();
+      });
+
+      els.refreshBtn.addEventListener('click', () => {
+        state.autoRefresh = !state.autoRefresh;
+        els.refreshBtn.classList.toggle('active', state.autoRefresh);
+        els.refreshBtn.title = state.autoRefresh ? '自动刷新开启' : '自动刷新';
+        updateAutoRefresh();
+      });
+
+      els.refreshSeconds.addEventListener('change', updateAutoRefresh);
+      els.refreshSeconds.addEventListener('blur', updateAutoRefresh);
+
+      document.addEventListener('click', () => closeAllSelects());
+      window.addEventListener('blur', () => closeAllSelects());
+    }
+
+    function updateAutoRefresh() {
+      if (state.refreshHandle) {
+        clearInterval(state.refreshHandle);
+        state.refreshHandle = null;
+      }
+      if (!state.autoRefresh) return;
+
+      const seconds = Math.max(5, Number(els.refreshSeconds.value) || 30);
+      els.refreshSeconds.value = String(seconds);
+      state.refreshHandle = setInterval(loadStatusData, seconds * 1000);
+    }
+
+    function init() {
+      bindCustomSelects();
+      bindEvents();
+      syncAllSelects();
+      loadStatusData();
+    }
+
+    init();
+  </script>
+</body>
+</html>
+

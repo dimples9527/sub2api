@@ -83,6 +83,7 @@ type Config struct {
 	Gemini                  GeminiConfig                  `mapstructure:"gemini"`
 	Update                  UpdateConfig                  `mapstructure:"update"`
 	Idempotency             IdempotencyConfig             `mapstructure:"idempotency"`
+	LLMMonitor              LLMMonitorConfig              `mapstructure:"llm_monitor"`
 }
 
 type LogConfig struct {
@@ -163,6 +164,10 @@ type IdempotencyConfig struct {
 	CleanupIntervalSeconds int `mapstructure:"cleanup_interval_seconds"`
 	// CleanupBatchSize 每次清理的最大记录数。
 	CleanupBatchSize int `mapstructure:"cleanup_batch_size"`
+}
+
+type LLMMonitorConfig struct {
+	StatusAPIURL string `mapstructure:"status_api_url"`
 }
 
 type LinuxDoConnectConfig struct {
@@ -1298,6 +1303,9 @@ func setDefaults() {
 
 	// Timezone (default to Asia/Shanghai for Chinese users)
 	viper.SetDefault("timezone", "Asia/Shanghai")
+
+	// LLM monitor upstream status API. The browser calls a same-origin proxy route.
+	viper.SetDefault("llm_monitor.status_api_url", "https://jc.findcg.com/api/status")
 
 	// API Key auth cache
 	viper.SetDefault("api_key_auth_cache.l1_size", 65535)

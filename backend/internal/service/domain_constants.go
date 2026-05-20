@@ -201,6 +201,9 @@ const (
 	// SettingKeyOpsRuntimeLogConfig stores JSON config for runtime log settings.
 	SettingKeyOpsRuntimeLogConfig = "ops_runtime_log_config"
 
+	// SettingKeyLLMMonitorStatusAPIURL stores the upstream API URL used by the model monitor proxy.
+	SettingKeyLLMMonitorStatusAPIURL = "llm_monitor_status_api_url"
+
 	// =========================
 	// Overload Cooldown (529)
 	// =========================
