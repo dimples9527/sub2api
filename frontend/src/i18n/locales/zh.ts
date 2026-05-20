@@ -4602,6 +4602,9 @@ export default {
         title: '模型监控',
         description: '配置模型监控页面的数据来源。页面会通过后端代理访问该地址，避免浏览器跨域和防盗链限制。',
         statusApiUrl: '状态接口地址',
+        pageTitle: '页面标题',
+        pageTitlePlaceholder: '蛋云AI - Claude Code 监控面板',
+        pageTitleHint: '用于模型监控页面的浏览器标签标题，留空时使用配置文件默认值。',
         statusApiUrlPlaceholder: 'https://jc.findcg.com/api/status',
         statusApiUrlHint: '填写不带 period 和 board 的基础地址即可；页面会按所选时间窗口自动追加查询参数。',
         proxyHint: '前端页面只请求同源 /api/llm-monitor/status，真实上游地址由后端读取这里的配置。'

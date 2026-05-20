@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>发现AI - Claude Code 监控面板</title>
+  <title>蛋云AI - Claude Code 监控面板</title>
   <style>
     :root {
       color-scheme: dark;
@@ -63,22 +63,28 @@
         linear-gradient(180deg, rgba(17, 26, 43, 0.86), rgba(8, 13, 24, 0.9));
       box-shadow: var(--shadow);
       backdrop-filter: blur(14px);
-      flex-wrap: nowrap;
-      overflow-x: auto;
-      scrollbar-width: thin;
+      flex-wrap: wrap;
+      overflow: visible;
     }
 
     .toolbar-left, .toolbar-right, .filter-group, .window-group, .view-group {
       display: flex;
       align-items: center;
       gap: 8px;
-      flex: 0 0 auto;
-      flex-wrap: nowrap;
+      flex: 1 1 auto;
+      flex-wrap: wrap;
     }
-    .toolbar-left { min-width: max-content; }
-    .toolbar-right { margin-left: auto; }
+    .toolbar-left { min-width: min(100%, 480px); }
+    .toolbar-right {
+      flex: 1 1 360px;
+      justify-content: flex-end;
+      margin-left: auto;
+    }
+    .filter-group { min-width: 0; }
+    .window-group { flex: 1 1 320px; justify-content: flex-end; }
+    .view-group { flex: 0 0 auto; }
 
-    .funnel, .icon-chip, .chip, .window-btn, .view-btn, .refresh-btn, .select-trigger {
+    .window-btn, .view-btn, .refresh-btn, .select-trigger {
       border-radius: 9px;
       border: 1px solid var(--line-strong);
       background: rgba(255, 255, 255, 0.018);
@@ -90,14 +96,11 @@
       transition: border-color 0.16s ease, background-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
     }
 
-    .icon-chip, .chip, .window-btn, .view-btn, .refresh-btn {
+    .window-btn, .view-btn, .refresh-btn {
       height: 32px;
-      padding: 0 12px;
+      padding: 0 10px;
     }
 
-    .icon-chip { width: 32px; padding: 0; color: var(--muted); }
-    .icon-chip:hover,
-    .chip:hover,
     .window-btn:hover,
     .view-btn:hover,
     .refresh-btn:hover,
@@ -107,37 +110,30 @@
       color: #ecf8ff;
       transform: translateY(-1px);
     }
-    .chip.primary {
-      border-color: rgba(22, 134, 168, 0.58);
-      background: rgba(22, 134, 168, 0.12);
-      color: #c9f3ff;
-    }
-
-    .funnel {
-      width: 32px;
-      height: 32px;
-      color: var(--muted);
-      flex: 0 0 auto;
-      background: rgba(5, 8, 18, 0.48);
-    }
-
-    .window-btn, .view-btn, .refresh-btn { padding: 0 12px; }
+    .window-btn, .view-btn, .refresh-btn { padding: 0 10px; }
     .window-btn.active, .view-btn.active, .refresh-btn.active {
-      border-color: rgba(22, 134, 168, 0.62);
-      background: rgba(22, 134, 168, 0.16);
-      color: #d9f5ff;
-      box-shadow: 0 0 0 1px rgba(22, 134, 168, 0.12) inset;
+      border-color: rgba(42, 166, 200, 0.36);
+      background: rgba(22, 134, 168, 0.08);
+      color: #ccecf6;
+      box-shadow: 0 0 0 1px rgba(22, 134, 168, 0.08) inset;
     }
     .window-btn.active {
-      color: #fff;
-      background: linear-gradient(180deg, rgba(42, 166, 200, 0.86), rgba(22, 120, 164, 0.88));
-      border-color: rgba(42, 166, 200, 0.56);
-      box-shadow: 0 10px 20px rgba(22, 134, 168, 0.14);
+      color: #d7f4fb;
+      background: linear-gradient(180deg, rgba(28, 132, 164, 0.34), rgba(16, 91, 125, 0.42));
+      border-color: rgba(42, 166, 200, 0.38);
+      box-shadow: 0 6px 14px rgba(22, 134, 168, 0.08);
     }
-    .window-btn { min-width: 74px; }
+    .window-btn {
+      min-width: 58px;
+      padding-inline: 8px;
+      font-size: 12px;
+    }
     .view-btn { width: 34px; padding: 0; }
 
     .toolbar .search {
+      flex: 1 1 220px;
+      min-width: 180px;
+      max-width: 340px;
       height: 32px;
       padding: 0 12px;
       border-radius: 10px;
@@ -156,9 +152,10 @@
 
     .custom-select {
       position: relative;
+      flex: 0 1 152px;
       min-width: 122px;
     }
-    .custom-select.provider-select { min-width: 130px; }
+    .custom-select.provider-select { flex-basis: 170px; min-width: 140px; }
     .select-trigger {
       width: 100%;
       height: 32px;
@@ -199,8 +196,8 @@
       z-index: 100;
       top: calc(100% + 7px);
       left: 0;
-      width: max(100%, 228px);
-      max-height: 310px;
+      width: min(680px, calc(100vw - 32px));
+      min-width: max(100%, 228px);
       padding: 6px 0;
       border: 1px solid rgba(46, 64, 92, 0.95);
       border-radius: 8px;
@@ -211,7 +208,7 @@
       pointer-events: none;
       transform: translateY(-4px);
       transition: opacity 0.14s ease, transform 0.14s ease;
-      overflow: hidden;
+      overflow: visible;
     }
     .custom-select.open .select-menu {
       opacity: 1;
@@ -246,17 +243,10 @@
       pointer-events: none;
     }
     .select-options {
-      max-height: 246px;
-      overflow-y: auto;
-      scrollbar-width: thin;
-      scrollbar-color: #8b8170 transparent;
-    }
-    .select-options::-webkit-scrollbar { width: 10px; }
-    .select-options::-webkit-scrollbar-track { background: transparent; }
-    .select-options::-webkit-scrollbar-thumb {
-      background: #8b8170;
-      border: 2px solid #1b2638;
-      border-radius: 999px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
+      max-height: none;
+      overflow: visible;
     }
     .select-option {
       width: 100%;
@@ -475,8 +465,27 @@
     body.compact-view table { min-width: 980px; }
 
     @media (max-width: 900px) {
-      .toolbar { align-items: center; }
-      .toolbar-right { justify-content: flex-start; }
+      body { padding-inline: 10px; }
+      .toolbar {
+        align-items: stretch;
+        gap: 10px;
+      }
+      .toolbar-left,
+      .toolbar-right,
+      .filter-group,
+      .window-group {
+        flex-basis: 100%;
+        justify-content: flex-start;
+      }
+      .toolbar .search {
+        max-width: none;
+      }
+      .custom-select {
+        flex: 1 1 142px;
+      }
+      .select-menu {
+        width: min(520px, calc(100vw - 24px));
+      }
     }
   </style>
 </head>
@@ -484,11 +493,6 @@
   <div class="page">
     <section class="toolbar" aria-label="筛选工具栏">
       <div class="toolbar-left">
-        <div class="funnel" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;">
-            <path d="M3 5h18l-7 8v5l-4 2v-7Z" />
-          </svg>
-        </div>
         <div class="filter-group">
           <div class="custom-select" data-filter="category" data-value="all">
             <button class="select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
@@ -613,8 +617,11 @@
     </div>
   </div>
 
-  <script>
+  <script nonce="__CSP_NONCE_VALUE__">
     const STATUS_API_URL = '/api/llm-monitor/status';
+    const DEFAULT_MONITOR_TITLE = '蛋云AI - Claude Code 监控面板';
+    const injectedMonitorTitle = window.__APP_CONFIG__?.llm_monitor_title?.trim();
+    document.title = injectedMonitorTitle || DEFAULT_MONITOR_TITLE;
 
     let rows = [];
 
@@ -1159,6 +1166,7 @@
             filterSelectOptions(select, '');
             setTimeout(() => searchInput.focus(), 0);
           }
+          if (willOpen) requestAnimationFrame(() => keepSelectMenuInViewport(select));
         });
         menu.addEventListener('click', (event) => {
           const option = event.target.closest('.select-option');
@@ -1182,6 +1190,20 @@
           searchInput.addEventListener('input', () => filterSelectOptions(select, searchInput.value));
         }
       });
+    }
+
+    function keepSelectMenuInViewport(select) {
+      const menu = select.querySelector('.select-menu');
+      if (!menu) return;
+      menu.style.left = '0px';
+      const rect = menu.getBoundingClientRect();
+      const padding = 12;
+      if (rect.right > window.innerWidth - padding) {
+        menu.style.left = `${window.innerWidth - padding - rect.right}px`;
+      }
+      if (rect.left < padding) {
+        menu.style.left = `${padding - rect.left}px`;
+      }
     }
 
     function filterSelectOptions(select, query) {

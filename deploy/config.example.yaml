@@ -67,6 +67,18 @@ server:
 run_mode: "standard"
 
 # =============================================================================
+# Model Monitor Configuration
+# 模型监控配置
+# =============================================================================
+llm_monitor:
+  # Browser title used by the standalone model monitor page.
+  # 模型监控独立页面的浏览器标题。
+  title: "蛋云AI - Claude Code 监控面板"
+  # Upstream status API used by /api/llm-monitor/status proxy.
+  # 模型监控代理使用的上游状态接口地址。
+  status_api_url: "https://jc.findcg.com/api/status"
+
+# =============================================================================
 # CORS Configuration
 # 跨域资源共享 (CORS) 配置
 # =============================================================================

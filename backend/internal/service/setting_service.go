@@ -161,6 +161,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeyContactInfo,
 		SettingKeyDocURL,
 		SettingKeyLLMMonitorStatusAPIURL,
+		SettingKeyLLMMonitorTitle,
 		SettingKeyHomeContent,
 		SettingKeyHideCcsImportButton,
 		SettingKeyPurchaseSubscriptionEnabled,
@@ -231,6 +232,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		ContactInfo:                      settings[SettingKeyContactInfo],
 		DocURL:                           settings[SettingKeyDocURL],
 		LLMMonitorStatusAPIURL:           s.llmMonitorStatusAPIURL(settings),
+		LLMMonitorTitle:                  s.llmMonitorTitle(settings),
 		HomeContent:                      settings[SettingKeyHomeContent],
 		HideCcsImportButton:              settings[SettingKeyHideCcsImportButton] == "true",
 		PurchaseSubscriptionEnabled:      settings[SettingKeyPurchaseSubscriptionEnabled] == "true",
@@ -286,6 +288,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		ContactInfo                      string          `json:"contact_info,omitempty"`
 		DocURL                           string          `json:"doc_url,omitempty"`
 		LLMMonitorStatusAPIURL           string          `json:"llm_monitor_status_api_url,omitempty"`
+		LLMMonitorTitle                  string          `json:"llm_monitor_title,omitempty"`
 		HomeContent                      string          `json:"home_content,omitempty"`
 		HideCcsImportButton              bool            `json:"hide_ccs_import_button"`
 		PurchaseSubscriptionEnabled      bool            `json:"purchase_subscription_enabled"`
@@ -319,6 +322,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		ContactInfo:                      settings.ContactInfo,
 		DocURL:                           settings.DocURL,
 		LLMMonitorStatusAPIURL:           settings.LLMMonitorStatusAPIURL,
+		LLMMonitorTitle:                  settings.LLMMonitorTitle,
 		HomeContent:                      settings.HomeContent,
 		HideCcsImportButton:              settings.HideCcsImportButton,
 		PurchaseSubscriptionEnabled:      settings.PurchaseSubscriptionEnabled,
@@ -551,6 +555,7 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 	updates[SettingKeyContactInfo] = settings.ContactInfo
 	updates[SettingKeyDocURL] = settings.DocURL
 	updates[SettingKeyLLMMonitorStatusAPIURL] = strings.TrimSpace(settings.LLMMonitorStatusAPIURL)
+	updates[SettingKeyLLMMonitorTitle] = strings.TrimSpace(settings.LLMMonitorTitle)
 	updates[SettingKeyHomeContent] = settings.HomeContent
 	updates[SettingKeyHideCcsImportButton] = strconv.FormatBool(settings.HideCcsImportButton)
 	updates[SettingKeyPurchaseSubscriptionEnabled] = strconv.FormatBool(settings.PurchaseSubscriptionEnabled)
@@ -937,6 +942,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyPurchaseSubscriptionEnabled:      "false",
 		SettingKeyPurchaseSubscriptionURL:          "",
 		SettingKeyLLMMonitorStatusAPIURL:           "",
+		SettingKeyLLMMonitorTitle:                  "",
 		SettingKeyTableDefaultPageSize:             "20",
 		SettingKeyTablePageSizeOptions:             "[10,20,50,100]",
 		SettingKeyCustomMenuItems:                  "[]",
@@ -1007,6 +1013,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		ContactInfo:                      settings[SettingKeyContactInfo],
 		DocURL:                           settings[SettingKeyDocURL],
 		LLMMonitorStatusAPIURL:           s.llmMonitorStatusAPIURL(settings),
+		LLMMonitorTitle:                  s.llmMonitorTitle(settings),
 		HomeContent:                      settings[SettingKeyHomeContent],
 		HideCcsImportButton:              settings[SettingKeyHideCcsImportButton] == "true",
 		PurchaseSubscriptionEnabled:      settings[SettingKeyPurchaseSubscriptionEnabled] == "true",
@@ -1384,6 +1391,16 @@ func (s *SettingService) llmMonitorStatusAPIURL(settings map[string]string) stri
 		return strings.TrimSpace(s.cfg.LLMMonitor.StatusAPIURL)
 	}
 	return "https://jc.findcg.com/api/status"
+}
+
+func (s *SettingService) llmMonitorTitle(settings map[string]string) string {
+	if value := strings.TrimSpace(settings[SettingKeyLLMMonitorTitle]); value != "" {
+		return value
+	}
+	if s.cfg != nil && strings.TrimSpace(s.cfg.LLMMonitor.Title) != "" {
+		return strings.TrimSpace(s.cfg.LLMMonitor.Title)
+	}
+	return "蛋云AI - Claude Code 监控面板"
 }
 
 // IsTurnstileEnabled 检查是否启用 Turnstile 验证

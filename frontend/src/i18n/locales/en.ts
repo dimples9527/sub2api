@@ -4437,6 +4437,9 @@ export default {
       modelMonitor: {
         title: 'Model Monitor',
         description: 'Configure the data source for the model monitor page. The page uses the backend proxy to avoid browser CORS and anti-hotlink restrictions.',
+        pageTitle: 'Page Title',
+        pageTitlePlaceholder: '蛋云AI - Claude Code Monitor',
+        pageTitleHint: 'Browser tab title for the model monitor page. Leave empty to use the config-file default.',
         statusApiUrl: 'Status API URL',
         statusApiUrlPlaceholder: 'https://jc.findcg.com/api/status',
         statusApiUrlHint: 'Use the base URL without period and board. The page appends query parameters for the selected window.',

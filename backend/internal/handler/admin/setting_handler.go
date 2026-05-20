@@ -150,6 +150,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		ContactInfo:                          settings.ContactInfo,
 		DocURL:                               settings.DocURL,
 		LLMMonitorStatusAPIURL:               settings.LLMMonitorStatusAPIURL,
+		LLMMonitorTitle:                      settings.LLMMonitorTitle,
 		HomeContent:                          settings.HomeContent,
 		HideCcsImportButton:                  settings.HideCcsImportButton,
 		PurchaseSubscriptionEnabled:          settings.PurchaseSubscriptionEnabled,
@@ -270,6 +271,7 @@ type UpdateSettingsRequest struct {
 	ContactInfo                 string                `json:"contact_info"`
 	DocURL                      string                `json:"doc_url"`
 	LLMMonitorStatusAPIURL      string                `json:"llm_monitor_status_api_url"`
+	LLMMonitorTitle             string                `json:"llm_monitor_title"`
 	HomeContent                 string                `json:"home_content"`
 	HideCcsImportButton         bool                  `json:"hide_ccs_import_button"`
 	PurchaseSubscriptionEnabled *bool                 `json:"purchase_subscription_enabled"`
@@ -835,6 +837,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		ContactInfo:                      req.ContactInfo,
 		DocURL:                           req.DocURL,
 		LLMMonitorStatusAPIURL:           req.LLMMonitorStatusAPIURL,
+		LLMMonitorTitle:                  req.LLMMonitorTitle,
 		HomeContent:                      req.HomeContent,
 		HideCcsImportButton:              req.HideCcsImportButton,
 		PurchaseSubscriptionEnabled:      purchaseEnabled,
@@ -1023,6 +1026,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		ContactInfo:                          updatedSettings.ContactInfo,
 		DocURL:                               updatedSettings.DocURL,
 		LLMMonitorStatusAPIURL:               updatedSettings.LLMMonitorStatusAPIURL,
+		LLMMonitorTitle:                      updatedSettings.LLMMonitorTitle,
 		HomeContent:                          updatedSettings.HomeContent,
 		HideCcsImportButton:                  updatedSettings.HideCcsImportButton,
 		PurchaseSubscriptionEnabled:          updatedSettings.PurchaseSubscriptionEnabled,
@@ -1274,6 +1278,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.LLMMonitorStatusAPIURL != after.LLMMonitorStatusAPIURL {
 		changed = append(changed, "llm_monitor_status_api_url")
+	}
+	if before.LLMMonitorTitle != after.LLMMonitorTitle {
+		changed = append(changed, "llm_monitor_title")
 	}
 	if before.HomeContent != after.HomeContent {
 		changed = append(changed, "home_content")

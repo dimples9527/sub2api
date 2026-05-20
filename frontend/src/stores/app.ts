@@ -339,6 +339,7 @@ export const useAppStore = defineStore('app', () => {
         custom_menu_items: [],
         custom_endpoints: [],
         llm_monitor_status_api_url: '',
+        llm_monitor_title: '蛋云AI - Claude Code 监控面板',
         linuxdo_oauth_enabled: false,
         oidc_oauth_enabled: false,
         oidc_oauth_provider_name: 'OIDC',

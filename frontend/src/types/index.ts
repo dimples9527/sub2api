@@ -107,6 +107,7 @@ export interface PublicSettings {
   contact_info: string
   doc_url: string
   llm_monitor_status_api_url: string
+  llm_monitor_title: string
   home_content: string
   hide_ccs_import_button: boolean
   payment_enabled: boolean

@@ -2176,6 +2176,20 @@
             <div class="space-y-5 p-6">
               <div>
                 <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.modelMonitor.pageTitle') }}
+                </label>
+                <input
+                  v-model="form.llm_monitor_title"
+                  type="text"
+                  class="input text-sm"
+                  :placeholder="t('admin.settings.modelMonitor.pageTitlePlaceholder')"
+                />
+                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.modelMonitor.pageTitleHint') }}
+                </p>
+              </div>
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   {{ t('admin.settings.modelMonitor.statusApiUrl') }}
                 </label>
                 <input
@@ -2775,6 +2789,7 @@ const form = reactive<SettingsForm>({
   custom_menu_items: [] as Array<{id: string; label: string; icon_svg: string; url: string; visibility: 'user' | 'admin'; sort_order: number}>,
   custom_endpoints: [] as Array<{name: string; endpoint: string; description: string}>,
   llm_monitor_status_api_url: '',
+  llm_monitor_title: '蛋云AI - Claude Code 监控面板',
   frontend_url: '',
   smtp_host: '',
   smtp_port: 587,
@@ -3221,6 +3236,7 @@ async function saveSettings() {
       contact_info: form.contact_info,
       doc_url: form.doc_url,
       llm_monitor_status_api_url: form.llm_monitor_status_api_url,
+      llm_monitor_title: form.llm_monitor_title.trim(),
       home_content: form.home_content,
       backend_mode_enabled: form.backend_mode_enabled,
       hide_ccs_import_button: form.hide_ccs_import_button,

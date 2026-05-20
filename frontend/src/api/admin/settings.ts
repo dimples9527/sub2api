@@ -40,6 +40,7 @@ export interface SystemSettings {
   contact_info: string
   doc_url: string
   llm_monitor_status_api_url: string
+  llm_monitor_title: string
   home_content: string
   hide_ccs_import_button: boolean
   table_default_page_size: number
@@ -165,6 +166,7 @@ export interface UpdateSettingsRequest {
   contact_info?: string
   doc_url?: string
   llm_monitor_status_api_url?: string
+  llm_monitor_title?: string
   home_content?: string
   hide_ccs_import_button?: boolean
   table_default_page_size?: number

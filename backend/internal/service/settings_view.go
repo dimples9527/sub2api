@@ -66,6 +66,7 @@ type SystemSettings struct {
 	ContactInfo                 string
 	DocURL                      string
 	LLMMonitorStatusAPIURL      string
+	LLMMonitorTitle             string
 	HomeContent                 string
 	HideCcsImportButton         bool
 	PurchaseSubscriptionEnabled bool
@@ -136,6 +137,7 @@ type PublicSettings struct {
 	ContactInfo                      string
 	DocURL                           string
 	LLMMonitorStatusAPIURL           string
+	LLMMonitorTitle                  string
 	HomeContent                      string
 	HideCcsImportButton              bool
 

@@ -69,6 +69,20 @@ func TestSettingServiceGetPublicSettingsUsesConfiguredLLMMonitorURL(t *testing.T
 	}
 }
 
+func TestSettingServiceGetPublicSettingsUsesConfiguredLLMMonitorTitle(t *testing.T) {
+	svc := NewSettingService(&llmMonitorSettingRepoStub{values: map[string]string{}}, &config.Config{
+		LLMMonitor: config.LLMMonitorConfig{Title: "Configured Monitor Title"},
+	})
+
+	settings, err := svc.GetPublicSettings(context.Background())
+	if err != nil {
+		t.Fatalf("GetPublicSettings() error = %v", err)
+	}
+	if settings.LLMMonitorTitle != "Configured Monitor Title" {
+		t.Fatalf("LLMMonitorTitle = %q", settings.LLMMonitorTitle)
+	}
+}
+
 func TestSettingServiceGetPublicSettingsAllowsLLMMonitorURLOverride(t *testing.T) {
 	svc := NewSettingService(&llmMonitorSettingRepoStub{values: map[string]string{
 		SettingKeyLLMMonitorStatusAPIURL: " https://override.example.com/api/status ",
@@ -82,5 +96,21 @@ func TestSettingServiceGetPublicSettingsAllowsLLMMonitorURLOverride(t *testing.T
 	}
 	if settings.LLMMonitorStatusAPIURL != "https://override.example.com/api/status" {
 		t.Fatalf("LLMMonitorStatusAPIURL = %q", settings.LLMMonitorStatusAPIURL)
+	}
+}
+
+func TestSettingServiceGetPublicSettingsAllowsLLMMonitorTitleOverride(t *testing.T) {
+	svc := NewSettingService(&llmMonitorSettingRepoStub{values: map[string]string{
+		SettingKeyLLMMonitorTitle: " Override Monitor Title ",
+	}}, &config.Config{
+		LLMMonitor: config.LLMMonitorConfig{Title: "Configured Monitor Title"},
+	})
+
+	settings, err := svc.GetPublicSettings(context.Background())
+	if err != nil {
+		t.Fatalf("GetPublicSettings() error = %v", err)
+	}
+	if settings.LLMMonitorTitle != "Override Monitor Title" {
+		t.Fatalf("LLMMonitorTitle = %q", settings.LLMMonitorTitle)
 	}
 }

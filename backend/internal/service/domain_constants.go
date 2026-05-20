@@ -203,6 +203,8 @@ const (
 
 	// SettingKeyLLMMonitorStatusAPIURL stores the upstream API URL used by the model monitor proxy.
 	SettingKeyLLMMonitorStatusAPIURL = "llm_monitor_status_api_url"
+	// SettingKeyLLMMonitorTitle stores the browser title used by the model monitor page.
+	SettingKeyLLMMonitorTitle = "llm_monitor_title"
 
 	// =========================
 	// Overload Cooldown (529)

@@ -168,6 +168,7 @@ type IdempotencyConfig struct {
 
 type LLMMonitorConfig struct {
 	StatusAPIURL string `mapstructure:"status_api_url"`
+	Title        string `mapstructure:"title"`
 }
 
 type LinuxDoConnectConfig struct {
@@ -1306,6 +1307,7 @@ func setDefaults() {
 
 	// LLM monitor upstream status API. The browser calls a same-origin proxy route.
 	viper.SetDefault("llm_monitor.status_api_url", "https://jc.findcg.com/api/status")
+	viper.SetDefault("llm_monitor.title", "蛋云AI - Claude Code 监控面板")
 
 	// API Key auth cache
 	viper.SetDefault("api_key_auth_cache.l1_size", 65535)
