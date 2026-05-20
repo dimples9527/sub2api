@@ -63,9 +63,14 @@
             <div class="flex-shrink-0">
               <Icon name="checkCircle" size="md" class="text-green-500" />
             </div>
-            <p class="text-sm text-green-700 dark:text-green-400">
-              {{ t('auth.codeSentSuccess') }}
-            </p>
+            <div class="space-y-1 text-sm">
+              <p class="text-green-700 dark:text-green-400">
+                {{ t('auth.codeSentSuccess') }}
+              </p>
+              <p class="text-green-600 dark:text-green-500">
+                {{ t('auth.codeSentSpamHint') }}
+              </p>
+            </div>
           </div>
         </div>
 
