@@ -83,6 +83,26 @@ func TestSettingServiceGetPublicSettingsUsesConfiguredLLMMonitorTitle(t *testing
 	}
 }
 
+func TestSettingServiceGetPublicSettingsUsesConfiguredLLMMonitorProviders(t *testing.T) {
+	svc := NewSettingService(&llmMonitorSettingRepoStub{values: map[string]string{}}, &config.Config{
+		LLMMonitor: config.LLMMonitorConfig{Providers: []string{" codex福利 ", "", "claude 福利"}},
+	})
+
+	settings, err := svc.GetPublicSettings(context.Background())
+	if err != nil {
+		t.Fatalf("GetPublicSettings() error = %v", err)
+	}
+	want := []string{"codex福利", "claude 福利"}
+	if len(settings.LLMMonitorProviders) != len(want) {
+		t.Fatalf("LLMMonitorProviders = %#v", settings.LLMMonitorProviders)
+	}
+	for i := range want {
+		if settings.LLMMonitorProviders[i] != want[i] {
+			t.Fatalf("LLMMonitorProviders = %#v", settings.LLMMonitorProviders)
+		}
+	}
+}
+
 func TestSettingServiceGetPublicSettingsAllowsLLMMonitorURLOverride(t *testing.T) {
 	svc := NewSettingService(&llmMonitorSettingRepoStub{values: map[string]string{
 		SettingKeyLLMMonitorStatusAPIURL: " https://override.example.com/api/status ",
@@ -112,5 +132,27 @@ func TestSettingServiceGetPublicSettingsAllowsLLMMonitorTitleOverride(t *testing
 	}
 	if settings.LLMMonitorTitle != "Override Monitor Title" {
 		t.Fatalf("LLMMonitorTitle = %q", settings.LLMMonitorTitle)
+	}
+}
+
+func TestSettingServiceGetPublicSettingsAllowsLLMMonitorProvidersOverride(t *testing.T) {
+	svc := NewSettingService(&llmMonitorSettingRepoStub{values: map[string]string{
+		SettingKeyLLMMonitorProviders: "codex福利\nclaude 福利,gemini",
+	}}, &config.Config{
+		LLMMonitor: config.LLMMonitorConfig{Providers: []string{"configured"}},
+	})
+
+	settings, err := svc.GetPublicSettings(context.Background())
+	if err != nil {
+		t.Fatalf("GetPublicSettings() error = %v", err)
+	}
+	want := []string{"codex福利", "claude 福利", "gemini"}
+	if len(settings.LLMMonitorProviders) != len(want) {
+		t.Fatalf("LLMMonitorProviders = %#v", settings.LLMMonitorProviders)
+	}
+	for i := range want {
+		if settings.LLMMonitorProviders[i] != want[i] {
+			t.Fatalf("LLMMonitorProviders = %#v", settings.LLMMonitorProviders)
+		}
 	}
 }
