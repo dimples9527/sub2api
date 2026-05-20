@@ -622,6 +622,7 @@
     const DEFAULT_MONITOR_TITLE = '蛋云AI - Claude Code 监控面板';
     const injectedMonitorTitle = window.__APP_CONFIG__?.llm_monitor_title?.trim();
     document.title = injectedMonitorTitle || DEFAULT_MONITOR_TITLE;
+    const MONITOR_PROVIDER_ALLOWLIST = normalizeMonitorProviderAllowlist(window.__APP_CONFIG__?.llm_monitor_providers);
 
     let rows = [];
 
@@ -656,6 +657,19 @@
         if (source && source[key] !== undefined && source[key] !== null) return source[key];
       }
       return fallback;
+    }
+
+    function normalizeMonitorProviderAllowlist(value) {
+      const values = Array.isArray(value)
+        ? value
+        : (typeof value === 'string' ? value.split(/[\n\r,，]+/) : []);
+      return [...new Set(values.map((item) => String(item).trim()).filter(Boolean))];
+    }
+
+    function applyConfiguredProviderFilter(items) {
+      if (!MONITOR_PROVIDER_ALLOWLIST.length) return items;
+      const allowed = new Set(MONITOR_PROVIDER_ALLOWLIST);
+      return items.filter((item) => allowed.has(String(pickValue(item, ['provider', 'provider_name', 'providerName'], '')).trim()));
     }
 
     function statusApiUrl() {
@@ -820,9 +834,11 @@
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const payload = await response.json();
-        const items = normalizeApiPayload(payload);
+        const items = applyConfiguredProviderFilter(normalizeApiPayload(payload));
         rows = items.map(normalizeStatusItem);
-        if (!rows.length) throw new Error('接口返回为空或结构不匹配');
+        if (!rows.length) {
+          throw new Error(MONITOR_PROVIDER_ALLOWLIST.length ? '没有匹配已配置服务商的记录' : '接口返回为空或结构不匹配');
+        }
 
         state.loading = false;
         state.error = '';

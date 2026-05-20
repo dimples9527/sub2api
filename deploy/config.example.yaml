@@ -74,6 +74,9 @@ llm_monitor:
   # Browser title used by the standalone model monitor page.
   # 模型监控独立页面的浏览器标题。
   title: "蛋云AI - Claude Code 监控面板"
+  # Optional provider allowlist. Empty means show all providers.
+  # 可选服务商白名单，留空表示展示全部服务商。
+  providers: []
   # Upstream status API used by /api/llm-monitor/status proxy.
   # 模型监控代理使用的上游状态接口地址。
   status_api_url: "https://jc.findcg.com/api/status"

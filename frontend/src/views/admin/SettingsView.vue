@@ -2202,6 +2202,20 @@
                   {{ t('admin.settings.modelMonitor.statusApiUrlHint') }}
                 </p>
               </div>
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.modelMonitor.providers') }}
+                </label>
+                <textarea
+                  v-model="llmMonitorProvidersInput"
+                  rows="4"
+                  class="input font-mono text-sm"
+                  :placeholder="t('admin.settings.modelMonitor.providersPlaceholder')"
+                />
+                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.modelMonitor.providersHint') }}
+                </p>
+              </div>
               <div class="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
                 {{ t('admin.settings.modelMonitor.proxyHint') }}
               </div>
@@ -2683,6 +2697,7 @@ const testEmailAddress = ref('')
 const registrationEmailSuffixWhitelistTags = ref<string[]>([])
 const registrationEmailSuffixWhitelistDraft = ref('')
 const tablePageSizeOptionsInput = ref('10, 20, 50, 100')
+const llmMonitorProvidersInput = ref('')
 const paymentRechargeOptionsInput = ref('2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000')
 
 // Admin API Key 状态
@@ -2790,6 +2805,7 @@ const form = reactive<SettingsForm>({
   custom_endpoints: [] as Array<{name: string; endpoint: string; description: string}>,
   llm_monitor_status_api_url: '',
   llm_monitor_title: '蛋云AI - Claude Code 监控面板',
+  llm_monitor_providers: [] as string[],
   frontend_url: '',
   smtp_host: '',
   smtp_port: 587,
@@ -2898,6 +2914,18 @@ function commitRegistrationEmailSuffixWhitelistDraft() {
   }
   addRegistrationEmailSuffixWhitelistTag(registrationEmailSuffixWhitelistDraft.value)
   registrationEmailSuffixWhitelistDraft.value = ''
+}
+
+function parseLLMMonitorProvidersInput(raw: string): string[] {
+  const providers = raw
+    .split(/[\n\r,，]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+  return Array.from(new Set(providers))
+}
+
+function formatLLMMonitorProviders(providers?: string[]): string {
+  return Array.isArray(providers) ? providers.join('\n') : ''
 }
 
 function handleRegistrationEmailSuffixWhitelistDraftInput() {
@@ -3089,6 +3117,7 @@ async function loadSettings() {
     tablePageSizeOptionsInput.value = formatTablePageSizeOptions(
       Array.isArray(settings.table_page_size_options) ? settings.table_page_size_options : [10, 20, 50, 100]
     )
+    llmMonitorProvidersInput.value = formatLLMMonitorProviders(settings.llm_monitor_providers)
     paymentRechargeOptionsInput.value = formatPaymentRechargeOptions(
       Array.isArray(settings.payment_recharge_options) && settings.payment_recharge_options.length > 0
         ? settings.payment_recharge_options
@@ -3237,6 +3266,7 @@ async function saveSettings() {
       doc_url: form.doc_url,
       llm_monitor_status_api_url: form.llm_monitor_status_api_url,
       llm_monitor_title: form.llm_monitor_title.trim(),
+      llm_monitor_providers: parseLLMMonitorProvidersInput(llmMonitorProvidersInput.value),
       home_content: form.home_content,
       backend_mode_enabled: form.backend_mode_enabled,
       hide_ccs_import_button: form.hide_ccs_import_button,
@@ -3330,6 +3360,7 @@ async function saveSettings() {
     tablePageSizeOptionsInput.value = formatTablePageSizeOptions(
       Array.isArray(updated.table_page_size_options) ? updated.table_page_size_options : [10, 20, 50, 100]
     )
+    llmMonitorProvidersInput.value = formatLLMMonitorProviders(updated.llm_monitor_providers)
     paymentRechargeOptionsInput.value = formatPaymentRechargeOptions(
       Array.isArray(updated.payment_recharge_options) && updated.payment_recharge_options.length > 0
         ? updated.payment_recharge_options
