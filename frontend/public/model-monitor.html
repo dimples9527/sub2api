@@ -1234,6 +1234,21 @@
       const time = formatCheckedTime(pickValue(current, ['timestamp'], pickValue(latestPoint, ['time', 'timestamp'], pickValue(item, ['time', 'checked_at', 'checkedAt', 'last_check', 'lastCheck', 'last_monitor', 'lastMonitor'], ''))));
       const note = String(pickValue(item, ['sponsor', 'channel', 'note', 'tag', 'owner', 'source'], '自营'));
       const trendSource = timeline.length ? timeline.slice(-18) : normalizeTrend(item, availability, index);
+      const currentTimestamp = asNumber(pickValue(current, ['timestamp'], 0), 0);
+      const latestTimestamp = asNumber(pickValue(latestPoint, ['timestamp'], 0), 0);
+      if (currentTimestamp > 0 && currentTimestamp >= latestTimestamp) {
+        const currentPoint = {
+          status: pickValue(current, ['status'], pickValue(item, ['current_status'], undefined)),
+          latency,
+          timestamp: currentTimestamp,
+          availability: statusAvailability(pickValue(current, ['status'], undefined))
+        };
+        if (trendSource.length) {
+          trendSource[trendSource.length - 1] = currentPoint;
+        } else {
+          trendSource.push(currentPoint);
+        }
+      }
       const trend = trendSource.map((point, pointIndex) => normalizeTrendPoint(point, { availability, latency, time }, pointIndex));
       return {
         provider,
