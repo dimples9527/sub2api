@@ -321,7 +321,7 @@ describe('useAppStore', () => {
         custom_endpoints: [],
         llm_monitor_status_api_url: '',
         llm_monitor_title: '蛋云AI - Claude Code 监控面板',
-        llm_monitor_providers: [],
+        llm_monitor_provider_url: 'https://api.sunshinelink.online/',
         linuxdo_oauth_enabled: false,
         backend_mode_enabled: false,
         version: '1.0.0'
