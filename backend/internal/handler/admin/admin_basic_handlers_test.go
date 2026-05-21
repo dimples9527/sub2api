@@ -32,6 +32,7 @@ func setupAdminRouter() (*gin.Engine, *stubAdminService) {
 
 	router.GET("/api/v1/admin/groups", groupHandler.List)
 	router.GET("/api/v1/admin/groups/all", groupHandler.GetAll)
+	router.GET("/api/llm-monitor/groups", groupHandler.GetLLMMonitorGroups)
 	router.GET("/api/v1/admin/groups/:id", groupHandler.GetByID)
 	router.POST("/api/v1/admin/groups", groupHandler.Create)
 	router.PUT("/api/v1/admin/groups/:id", groupHandler.Update)
@@ -125,6 +126,12 @@ func TestGroupHandlerEndpoints(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/groups/all", nil)
 	router.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/llm-monitor/groups", nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.JSONEq(t, `{"code":0,"message":"success","data":[{"name":"group","platform":"anthropic","rate_multiplier":0}]}`, rec.Body.String())
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/groups/2", nil)
