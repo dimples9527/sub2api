@@ -102,7 +102,8 @@ func registerRoutes(
 ) {
 	// 通用路由（健康检查、状态等）
 	routes.RegisterCommonRoutes(r)
-	routes.RegisterLLMMonitorRoutes(r, settingService)
+	routes.RegisterLLMMonitorRoutes(r, settingService, h.Admin.Group)
+	r.GET("/api/llm-monitor/groups", h.Admin.Group.GetLLMMonitorGroups)
 
 	// API v1
 	v1 := r.Group("/api/v1")
