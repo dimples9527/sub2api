@@ -570,6 +570,8 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		assert.Contains(t, w.Body.String(), `"llm_monitor_provider_url":"https://provider.example.com/"`)
 		assert.Contains(t, w.Body.String(), "https://api.sunshinelink.online/")
 		assert.Contains(t, w.Body.String(), "/api/llm-monitor/status")
+		assert.Contains(t, w.Body.String(), "autoRefresh: true")
+		assert.Contains(t, w.Body.String(), "updateAutoRefresh();")
 	})
 }
 

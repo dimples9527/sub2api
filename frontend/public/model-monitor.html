@@ -939,7 +939,7 @@
       view: 'list',
       sortKey: 'availability',
       sortDir: -1,
-      autoRefresh: false,
+      autoRefresh: true,
       refreshHandle: null,
       loading: true,
       error: ''
@@ -1807,6 +1807,7 @@
       bindEvents();
       syncAllSelects();
       loadStatusData();
+      updateAutoRefresh();
     }
 
     init();
