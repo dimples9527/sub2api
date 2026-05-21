@@ -358,7 +358,7 @@
     .col-provider { width: 204px; }
     .col-service { width: 88px; }
     .col-model { width: 112px; }
-    .col-price { width: 108px; }
+    .col-rate { width: 86px; }
     .col-availability { width: 98px; }
     .col-latency { width: 100px; }
 
@@ -417,8 +417,11 @@
       color: #c3d0df;
     }
     .model { color: #c0ccdb; }
-    .price { color: #9eaac0; font-family: var(--font-metric); }
-    .price strong { color: #dbe7f5; font-weight: 600; }
+    .rate {
+      color: #dbe7f5;
+      font-family: var(--font-metric);
+      font-weight: 700;
+    }
     .availability {
       font-family: var(--font-metric);
       font-weight: 700;
@@ -599,6 +602,10 @@
       color: #22f18b;
       font-weight: 800;
     }
+    .card-rate {
+      color: #dbe7f5;
+      font-weight: 800;
+    }
     .card-trend-head {
       display: flex;
       justify-content: space-between;
@@ -738,7 +745,7 @@
               </div>
             </div>
           </div>
-          <input id="searchInput" class="search" type="search" placeholder="搜索服务商、模型或价格" aria-label="搜索">
+          <input id="searchInput" class="search" type="search" placeholder="搜索服务商或模型" aria-label="搜索">
         </div>
       </div>
       <div class="toolbar-right">
@@ -788,7 +795,7 @@
               <th class="col-provider sortable" data-sort="provider">服务商 <span class="sort-icon">↕</span></th>
               <th class="col-service sortable" data-sort="service">服务 <span class="sort-icon">↕</span></th>
               <th class="col-model sortable" data-sort="model">模型 <span class="sort-icon">↕</span></th>
-              <th class="col-price sortable" data-sort="price">价格 $/s <span class="sort-icon">↕</span></th>
+              <th class="col-rate sortable" data-sort="rate">倍率 <span class="sort-icon">↕</span></th>
               <th class="col-availability sortable" data-sort="availability">可用率 <span class="sort-icon">↕</span></th>
               <th class="col-latency sortable" data-sort="latency">最后监测 <span class="sort-icon">↕</span></th>
               <th class="trend-head">可用率趋势 <span id="windowLabel">近90分钟</span></th>
@@ -808,12 +815,13 @@
 
   <script nonce="__CSP_NONCE_VALUE__">
     const STATUS_API_URL = '/api/llm-monitor/status';
+    const GROUPS_API_URL = '/api/llm-monitor/groups';
     const DEFAULT_MONITOR_TITLE = '蛋云AI - Claude Code 监控面板';
     const injectedMonitorTitle = window.__APP_CONFIG__?.llm_monitor_title?.trim();
     document.title = injectedMonitorTitle || DEFAULT_MONITOR_TITLE;
-    const MONITOR_PROVIDER_ALLOWLIST = normalizeMonitorProviderAllowlist(window.__APP_CONFIG__?.llm_monitor_providers);
 
     let rows = [];
+    let groupIndex = new Map();
 
     const state = {
       query: '',
@@ -849,21 +857,8 @@
       return fallback;
     }
 
-    function normalizeMonitorProviderAllowlist(value) {
-      const values = Array.isArray(value)
-        ? value
-        : (typeof value === 'string' ? value.split(/[\n\r,，]+/) : []);
-      return [...new Set(values.map(normalizeProviderKey).filter(Boolean))];
-    }
-
     function normalizeProviderKey(value) {
       return String(value || '').replace(/\s+/g, '').toLocaleLowerCase();
-    }
-
-    function applyConfiguredProviderFilter(items) {
-      if (!MONITOR_PROVIDER_ALLOWLIST.length) return items;
-      const allowed = new Set(MONITOR_PROVIDER_ALLOWLIST);
-      return items.filter((item) => allowed.has(normalizeProviderKey(pickValue(item, ['provider', 'provider_name', 'providerName'], ''))));
     }
 
     function statusApiUrl() {
@@ -906,6 +901,39 @@
         }
       }
       return [];
+    }
+
+    function normalizeGroupPayload(payload) {
+      const list = Array.isArray(payload)
+        ? payload
+        : (Array.isArray(payload?.data) ? payload.data : []);
+
+      return list.map((group) => ({
+        name: String(pickValue(group, ['name', 'group_name', 'groupName'], '')).trim(),
+        platform: String(pickValue(group, ['platform'], '')).trim(),
+        rateMultiplier: asNumber(pickValue(group, ['rate_multiplier', 'rateMultiplier'], 1), 1)
+      })).filter((group) => group.name);
+    }
+
+    async function loadMonitorGroups() {
+      const response = await fetch(GROUPS_API_URL, {
+        cache: 'no-store',
+        headers: { 'Accept': 'application/json' }
+      });
+      if (!response.ok) throw new Error(`分组 HTTP ${response.status}`);
+
+      const payload = await response.json();
+      const groups = normalizeGroupPayload(payload);
+      groupIndex = new Map(groups.map((group) => [normalizeProviderKey(group.name), group]));
+    }
+
+    function applyGroupFilter(items) {
+      if (!groupIndex.size) return [];
+
+      return items.map((item) => ({
+        item,
+        group: groupIndex.get(normalizeProviderKey(pickValue(item, ['provider', 'provider_name', 'providerName'], '')))
+      })).filter((entry) => entry.group);
     }
 
     function statusAvailability(status) {
@@ -1030,7 +1058,7 @@
       return trendBars(availability, index);
     }
 
-    function normalizeStatusItem(item, index) {
+    function normalizeStatusItem(item, index, group) {
       const layer = Array.isArray(item.layers) && item.layers.length ? item.layers[0] : {};
       const current = layer.current_status || {};
       const timeline = Array.isArray(layer.timeline) ? layer.timeline : [];
@@ -1039,8 +1067,7 @@
       const service = serviceCode(pickValue(item, ['service', 'service_type', 'serviceType', 'type'], 'CC'));
       const category = String(pickValue(item, ['category'], ''));
       const model = String(pickValue(layer, ['model', 'request_model'], pickValue(item, ['model', 'model_name', 'modelName'], '')));
-      const priceMin = asNumber(pickValue(item, ['price_min', 'priceMin', 'price', 'price_rate', 'priceRate', 'rate', 'multiplier', 'cost'], 0));
-      const priceMax = asNumber(pickValue(item, ['price_max', 'priceMax'], priceMin));
+      const rateMultiplier = asNumber(group?.rateMultiplier, 1);
       const availabilityValues = timeline.map((point) => asNumber(point.availability, statusAvailability(point.status)));
       const availability = availabilityValues.length
         ? Math.round((availabilityValues.reduce((sum, value) => sum + value, 0) / availabilityValues.length) * 100) / 100
@@ -1055,9 +1082,10 @@
         service,
         category,
         model,
-        price: priceMin,
-        priceMin,
-        priceMax,
+        rate: rateMultiplier,
+        rateMultiplier,
+        groupName: group?.name || provider,
+        groupPlatform: group?.platform || '',
         availability,
         latency,
         time,
@@ -1074,17 +1102,20 @@
       renderTable();
 
       try {
-        const response = await fetch(statusApiUrl(), {
-          cache: 'no-store',
-          headers: { 'Accept': 'application/json' }
-        });
+        const [response] = await Promise.all([
+          fetch(statusApiUrl(), {
+            cache: 'no-store',
+            headers: { 'Accept': 'application/json' }
+          }),
+          loadMonitorGroups()
+        ]);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const payload = await response.json();
-        const items = applyConfiguredProviderFilter(normalizeApiPayload(payload));
-        rows = items.map(normalizeStatusItem);
+        const matched = applyGroupFilter(normalizeApiPayload(payload));
+        rows = matched.map(({ item, group }, index) => normalizeStatusItem(item, index, group));
         if (!rows.length) {
-          throw new Error(MONITOR_PROVIDER_ALLOWLIST.length ? '没有匹配已配置服务商的记录' : '接口返回为空或结构不匹配');
+          throw new Error('没有匹配 API 分组名称的监控记录');
         }
 
         state.loading = false;
@@ -1123,11 +1154,9 @@
         .replaceAll("'", '&#39;');
     }
 
-    function formatPrice(row) {
-      const min = asNumber(row.priceMin, asNumber(row.price, 0));
-      const max = asNumber(row.priceMax, min);
-      const compact = (value) => value.toFixed(3).replace(/\.?0+$/, '');
-      return min === max ? `${compact(min)}×` : `${compact(min)}-${compact(max)}×`;
+    function formatRate(value) {
+      const numeric = asNumber(value, 1);
+      return `${numeric.toFixed(3).replace(/\.?0+$/, '')}x`;
     }
 
     function availabilityClass(value) {
@@ -1193,7 +1222,7 @@
     }
 
     function searchText(row) {
-      return [row.provider, row.service, row.model, row.note, row.channel, row.category, row.price, row.availability, row.latency, row.time]
+      return [row.provider, row.groupName, row.service, row.model, row.note, row.channel, row.category, row.rateMultiplier, row.availability, row.latency, row.time]
         .join(' ')
         .toLowerCase();
     }
@@ -1216,7 +1245,7 @@
       if (key === 'provider' || key === 'service' || key === 'model') {
         return dir * String(av).localeCompare(String(bv), 'zh-Hans-CN');
       }
-      if (key === 'price' || key === 'availability' || key === 'latency') {
+      if (key === 'rate' || key === 'availability' || key === 'latency') {
         return dir * ((Number(av) || 0) - (Number(bv) || 0));
       }
       return dir * String(av).localeCompare(String(bv), 'zh-Hans-CN');
@@ -1315,8 +1344,8 @@
               </div>
               <div class="card-meta">
                 ${serviceBadge(row.service, 'card-service')}
+                <span>倍率：<span class="card-rate">${escapeHtml(formatRate(row.rateMultiplier))}</span></span>
                 <span>⌁ 可用率：<span class="card-availability">${row.availability.toFixed(row.availability % 1 ? 2 : 0)}%</span></span>
-                <span>价格：${escapeHtml(formatPrice(row))}</span>
               </div>
             </div>
             <span class="card-status-dot" aria-hidden="true"></span>
@@ -1389,7 +1418,7 @@
               ${serviceBadge(row.service)}
             </td>
             <td class="col-model model">${escapeHtml(row.model)}</td>
-            <td class="col-price price"><strong>${formatPrice(row)}</strong></td>
+            <td class="col-rate rate">${escapeHtml(formatRate(row.rateMultiplier))}</td>
             <td class="col-availability availability ${availabilityClass(row.availability)}">${row.availability.toFixed(row.availability % 1 ? 2 : 0)}%</td>
             <td class="col-latency">
               <div class="latency-cell">
