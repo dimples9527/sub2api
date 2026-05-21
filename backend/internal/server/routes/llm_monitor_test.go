@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -16,6 +17,14 @@ type llmMonitorSettingsStub struct {
 
 func (s llmMonitorSettingsStub) GetPublicSettings(context.Context) (*service.PublicSettings, error) {
 	return &service.PublicSettings{LLMMonitorStatusAPIURL: s.statusAPIURL}, nil
+}
+
+type llmMonitorGroupStub struct {
+	groups []service.Group
+}
+
+func (s llmMonitorGroupStub) GetAllGroups(context.Context) ([]service.Group, error) {
+	return s.groups, nil
 }
 
 func TestLLMMonitorStatusProxyUsesConfiguredUpstream(t *testing.T) {
@@ -31,7 +40,9 @@ func TestLLMMonitorStatusProxyUsesConfiguredUpstream(t *testing.T) {
 	defer upstream.Close()
 
 	router := gin.New()
-	RegisterLLMMonitorRoutes(router, llmMonitorSettingsStub{statusAPIURL: upstream.URL + "/api/status"})
+	RegisterLLMMonitorRoutes(router, llmMonitorSettingsStub{statusAPIURL: upstream.URL + "/api/status"}, llmMonitorGroupStub{
+		groups: []service.Group{{Name: "demo"}},
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/llm-monitor/status?period=24h&board=hot", nil)
 	rec := httptest.NewRecorder()
@@ -51,11 +62,57 @@ func TestLLMMonitorStatusProxyUsesConfiguredUpstream(t *testing.T) {
 	}
 }
 
+func TestLLMMonitorStatusProxyFiltersGroupsAndScrubsFindCGURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"groups": [
+				{"provider":" Demo Provider ","provider_slug":"findcg-ai","provider_url":"https://www.findcg.com","probe_url":"https://www.findcg.com","layers":[]},
+				{"provider":"hidden provider","provider_slug":"findcg-ai","provider_url":"https://www.findcg.com","layers":[]}
+			],
+			"meta": {
+				"all_monitor_ids": ["Demo Provider-cc-vip1", "hidden provider-cc-vip1"],
+				"source_url": "https://www.findcg.com",
+				"source_slug": "findcg-ai"
+			}
+		}`))
+	}))
+	defer upstream.Close()
+
+	router := gin.New()
+	RegisterLLMMonitorRoutes(router, llmMonitorSettingsStub{statusAPIURL: upstream.URL + "/api/status"}, llmMonitorGroupStub{
+		groups: []service.Group{{Name: "demoprovider"}},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/llm-monitor/status", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "hidden provider") {
+		t.Fatalf("unexpected hidden provider in body = %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "https://www.findcg.com") {
+		t.Fatalf("unexpected findcg url in body = %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "findcg-ai") {
+		t.Fatalf("unexpected findcg slug in body = %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"provider":" Demo Provider "`) {
+		t.Fatalf("expected matched provider in body = %s", rec.Body.String())
+	}
+}
+
 func TestLLMMonitorStatusProxyRejectsInvalidConfiguredURL(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	router := gin.New()
-	RegisterLLMMonitorRoutes(router, llmMonitorSettingsStub{statusAPIURL: "://bad-url"})
+	RegisterLLMMonitorRoutes(router, llmMonitorSettingsStub{statusAPIURL: "://bad-url"}, llmMonitorGroupStub{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/llm-monitor/status", nil)
 	rec := httptest.NewRecorder()
