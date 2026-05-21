@@ -2208,8 +2208,8 @@
                 </label>
                 <textarea
                   v-model="llmMonitorProvidersInput"
-                  rows="4"
-                  class="input font-mono text-sm"
+                  rows="8"
+                  class="input min-h-40 resize-y font-mono text-sm leading-6"
                   :placeholder="t('admin.settings.modelMonitor.providersPlaceholder')"
                 />
                 <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
