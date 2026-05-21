@@ -151,7 +151,6 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		DocURL:                               settings.DocURL,
 		LLMMonitorStatusAPIURL:               settings.LLMMonitorStatusAPIURL,
 		LLMMonitorTitle:                      settings.LLMMonitorTitle,
-		LLMMonitorProviders:                  settings.LLMMonitorProviders,
 		HomeContent:                          settings.HomeContent,
 		HideCcsImportButton:                  settings.HideCcsImportButton,
 		PurchaseSubscriptionEnabled:          settings.PurchaseSubscriptionEnabled,
@@ -273,7 +272,7 @@ type UpdateSettingsRequest struct {
 	DocURL                      string                `json:"doc_url"`
 	LLMMonitorStatusAPIURL      string                `json:"llm_monitor_status_api_url"`
 	LLMMonitorTitle             string                `json:"llm_monitor_title"`
-	LLMMonitorProviders         []string              `json:"llm_monitor_providers"`
+	LLMMonitorProviderURL       string                `json:"llm_monitor_provider_url"`
 	HomeContent                 string                `json:"home_content"`
 	HideCcsImportButton         bool                  `json:"hide_ccs_import_button"`
 	PurchaseSubscriptionEnabled *bool                 `json:"purchase_subscription_enabled"`
@@ -840,7 +839,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		DocURL:                           req.DocURL,
 		LLMMonitorStatusAPIURL:           req.LLMMonitorStatusAPIURL,
 		LLMMonitorTitle:                  req.LLMMonitorTitle,
-		LLMMonitorProviders:              req.LLMMonitorProviders,
+		LLMMonitorProviderURL:            req.LLMMonitorProviderURL,
 		HomeContent:                      req.HomeContent,
 		HideCcsImportButton:              req.HideCcsImportButton,
 		PurchaseSubscriptionEnabled:      purchaseEnabled,
@@ -1030,7 +1029,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		DocURL:                               updatedSettings.DocURL,
 		LLMMonitorStatusAPIURL:               updatedSettings.LLMMonitorStatusAPIURL,
 		LLMMonitorTitle:                      updatedSettings.LLMMonitorTitle,
-		LLMMonitorProviders:                  updatedSettings.LLMMonitorProviders,
+		LLMMonitorProviderURL:                updatedSettings.LLMMonitorProviderURL,
 		HomeContent:                          updatedSettings.HomeContent,
 		HideCcsImportButton:                  updatedSettings.HideCcsImportButton,
 		PurchaseSubscriptionEnabled:          updatedSettings.PurchaseSubscriptionEnabled,
@@ -1286,8 +1285,8 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.LLMMonitorTitle != after.LLMMonitorTitle {
 		changed = append(changed, "llm_monitor_title")
 	}
-	if strings.Join(before.LLMMonitorProviders, "\n") != strings.Join(after.LLMMonitorProviders, "\n") {
-		changed = append(changed, "llm_monitor_providers")
+	if before.LLMMonitorProviderURL != after.LLMMonitorProviderURL {
+		changed = append(changed, "llm_monitor_provider_url")
 	}
 	if before.HomeContent != after.HomeContent {
 		changed = append(changed, "home_content")

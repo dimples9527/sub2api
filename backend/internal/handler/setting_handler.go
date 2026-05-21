@@ -50,7 +50,7 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 		DocURL:                           settings.DocURL,
 		LLMMonitorStatusAPIURL:           settings.LLMMonitorStatusAPIURL,
 		LLMMonitorTitle:                  settings.LLMMonitorTitle,
-		LLMMonitorProviders:              settings.LLMMonitorProviders,
+		LLMMonitorProviderURL:            settings.LLMMonitorProviderURL,
 		HomeContent:                      settings.HomeContent,
 		HideCcsImportButton:              settings.HideCcsImportButton,
 		PurchaseSubscriptionEnabled:      settings.PurchaseSubscriptionEnabled,

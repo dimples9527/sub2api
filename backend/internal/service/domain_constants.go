@@ -205,8 +205,8 @@ const (
 	SettingKeyLLMMonitorStatusAPIURL = "llm_monitor_status_api_url"
 	// SettingKeyLLMMonitorTitle stores the browser title used by the model monitor page.
 	SettingKeyLLMMonitorTitle = "llm_monitor_title"
-	// SettingKeyLLMMonitorProviders stores the provider allowlist used by the model monitor page.
-	SettingKeyLLMMonitorProviders = "llm_monitor_providers"
+	// SettingKeyLLMMonitorProviderURL stores the target URL opened from provider names.
+	SettingKeyLLMMonitorProviderURL = "llm_monitor_provider_url"
 
 	// =========================
 	// Overload Cooldown (529)

@@ -162,7 +162,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeyDocURL,
 		SettingKeyLLMMonitorStatusAPIURL,
 		SettingKeyLLMMonitorTitle,
-		SettingKeyLLMMonitorProviders,
+		SettingKeyLLMMonitorProviderURL,
 		SettingKeyHomeContent,
 		SettingKeyHideCcsImportButton,
 		SettingKeyPurchaseSubscriptionEnabled,
@@ -234,7 +234,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		DocURL:                           settings[SettingKeyDocURL],
 		LLMMonitorStatusAPIURL:           s.llmMonitorStatusAPIURL(settings),
 		LLMMonitorTitle:                  s.llmMonitorTitle(settings),
-		LLMMonitorProviders:              s.llmMonitorProviders(settings),
+		LLMMonitorProviderURL:            s.llmMonitorProviderURL(settings),
 		HomeContent:                      settings[SettingKeyHomeContent],
 		HideCcsImportButton:              settings[SettingKeyHideCcsImportButton] == "true",
 		PurchaseSubscriptionEnabled:      settings[SettingKeyPurchaseSubscriptionEnabled] == "true",
@@ -291,7 +291,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		DocURL                           string          `json:"doc_url,omitempty"`
 		LLMMonitorStatusAPIURL           string          `json:"llm_monitor_status_api_url,omitempty"`
 		LLMMonitorTitle                  string          `json:"llm_monitor_title,omitempty"`
-		LLMMonitorProviders              []string        `json:"llm_monitor_providers"`
+		LLMMonitorProviderURL            string          `json:"llm_monitor_provider_url,omitempty"`
 		HomeContent                      string          `json:"home_content,omitempty"`
 		HideCcsImportButton              bool            `json:"hide_ccs_import_button"`
 		PurchaseSubscriptionEnabled      bool            `json:"purchase_subscription_enabled"`
@@ -326,7 +326,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		DocURL:                           settings.DocURL,
 		LLMMonitorStatusAPIURL:           settings.LLMMonitorStatusAPIURL,
 		LLMMonitorTitle:                  settings.LLMMonitorTitle,
-		LLMMonitorProviders:              settings.LLMMonitorProviders,
+		LLMMonitorProviderURL:            settings.LLMMonitorProviderURL,
 		HomeContent:                      settings.HomeContent,
 		HideCcsImportButton:              settings.HideCcsImportButton,
 		PurchaseSubscriptionEnabled:      settings.PurchaseSubscriptionEnabled,
@@ -560,7 +560,7 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 	updates[SettingKeyDocURL] = settings.DocURL
 	updates[SettingKeyLLMMonitorStatusAPIURL] = strings.TrimSpace(settings.LLMMonitorStatusAPIURL)
 	updates[SettingKeyLLMMonitorTitle] = strings.TrimSpace(settings.LLMMonitorTitle)
-	updates[SettingKeyLLMMonitorProviders] = strings.Join(normalizeLLMMonitorProviders(settings.LLMMonitorProviders), "\n")
+	updates[SettingKeyLLMMonitorProviderURL] = strings.TrimSpace(settings.LLMMonitorProviderURL)
 	updates[SettingKeyHomeContent] = settings.HomeContent
 	updates[SettingKeyHideCcsImportButton] = strconv.FormatBool(settings.HideCcsImportButton)
 	updates[SettingKeyPurchaseSubscriptionEnabled] = strconv.FormatBool(settings.PurchaseSubscriptionEnabled)
@@ -948,7 +948,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyPurchaseSubscriptionURL:          "",
 		SettingKeyLLMMonitorStatusAPIURL:           "",
 		SettingKeyLLMMonitorTitle:                  "",
-		SettingKeyLLMMonitorProviders:              "",
+		SettingKeyLLMMonitorProviderURL:            "",
 		SettingKeyTableDefaultPageSize:             "20",
 		SettingKeyTablePageSizeOptions:             "[10,20,50,100]",
 		SettingKeyCustomMenuItems:                  "[]",
@@ -1020,7 +1020,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		DocURL:                           settings[SettingKeyDocURL],
 		LLMMonitorStatusAPIURL:           s.llmMonitorStatusAPIURL(settings),
 		LLMMonitorTitle:                  s.llmMonitorTitle(settings),
-		LLMMonitorProviders:              s.llmMonitorProviders(settings),
+		LLMMonitorProviderURL:            s.llmMonitorProviderURL(settings),
 		HomeContent:                      settings[SettingKeyHomeContent],
 		HideCcsImportButton:              settings[SettingKeyHideCcsImportButton] == "true",
 		PurchaseSubscriptionEnabled:      settings[SettingKeyPurchaseSubscriptionEnabled] == "true",
@@ -1410,41 +1410,14 @@ func (s *SettingService) llmMonitorTitle(settings map[string]string) string {
 	return "蛋云AI - Claude Code 监控面板"
 }
 
-func (s *SettingService) llmMonitorProviders(settings map[string]string) []string {
-	if raw, ok := settings[SettingKeyLLMMonitorProviders]; ok {
-		return parseLLMMonitorProviders(raw)
+func (s *SettingService) llmMonitorProviderURL(settings map[string]string) string {
+	if value := strings.TrimSpace(settings[SettingKeyLLMMonitorProviderURL]); value != "" {
+		return value
 	}
-	if s.cfg != nil {
-		return normalizeLLMMonitorProviders(s.cfg.LLMMonitor.Providers)
+	if s.cfg != nil && strings.TrimSpace(s.cfg.LLMMonitor.ProviderURL) != "" {
+		return strings.TrimSpace(s.cfg.LLMMonitor.ProviderURL)
 	}
-	return []string{}
-}
-
-func parseLLMMonitorProviders(raw string) []string {
-	if strings.TrimSpace(raw) == "" {
-		return []string{}
-	}
-	fields := strings.FieldsFunc(raw, func(r rune) bool {
-		return r == ',' || r == '，' || r == '\n' || r == '\r'
-	})
-	return normalizeLLMMonitorProviders(fields)
-}
-
-func normalizeLLMMonitorProviders(values []string) []string {
-	providers := make([]string, 0, len(values))
-	seen := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		provider := strings.TrimSpace(value)
-		if provider == "" {
-			continue
-		}
-		if _, ok := seen[provider]; ok {
-			continue
-		}
-		seen[provider] = struct{}{}
-		providers = append(providers, provider)
-	}
-	return providers
+	return "https://api.sunshinelink.online/"
 }
 
 // IsTurnstileEnabled 检查是否启用 Turnstile 验证

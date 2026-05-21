@@ -85,7 +85,7 @@ type SystemSettings struct {
 	DocURL                      string           `json:"doc_url"`
 	LLMMonitorStatusAPIURL      string           `json:"llm_monitor_status_api_url"`
 	LLMMonitorTitle             string           `json:"llm_monitor_title"`
-	LLMMonitorProviders         []string         `json:"llm_monitor_providers"`
+	LLMMonitorProviderURL       string           `json:"llm_monitor_provider_url"`
 	HomeContent                 string           `json:"home_content"`
 	HideCcsImportButton         bool             `json:"hide_ccs_import_button"`
 	PurchaseSubscriptionEnabled bool             `json:"purchase_subscription_enabled"`
@@ -180,7 +180,7 @@ type PublicSettings struct {
 	DocURL                           string           `json:"doc_url"`
 	LLMMonitorStatusAPIURL           string           `json:"llm_monitor_status_api_url"`
 	LLMMonitorTitle                  string           `json:"llm_monitor_title"`
-	LLMMonitorProviders              []string         `json:"llm_monitor_providers"`
+	LLMMonitorProviderURL            string           `json:"llm_monitor_provider_url"`
 	HomeContent                      string           `json:"home_content"`
 	HideCcsImportButton              bool             `json:"hide_ccs_import_button"`
 	PurchaseSubscriptionEnabled      bool             `json:"purchase_subscription_enabled"`
