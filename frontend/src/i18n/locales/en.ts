@@ -4440,12 +4440,12 @@ export default {
         pageTitle: 'Page Title',
         pageTitlePlaceholder: '蛋云AI - Claude Code Monitor',
         pageTitleHint: 'Browser tab title for the model monitor page. Leave empty to use the config-file default.',
+        providerUrl: 'Provider Link URL',
+        providerUrlPlaceholder: 'https://api.sunshinelink.online/',
+        providerUrlHint: 'Opened when clicking a provider name on the monitor page. Leave empty to use the config-file default.',
         statusApiUrl: 'Status API URL',
         statusApiUrlPlaceholder: 'https://jc.findcg.com/api/status',
         statusApiUrlHint: 'Use the base URL without period and board. The page appends query parameters for the selected window.',
-        providers: 'Visible Providers',
-        providersPlaceholder: 'codex福利\nclaude 福利',
-        providersHint: 'Only matching provider names will be shown. Separate multiple values with new lines or commas. Leave empty to show all.',
         proxyHint: 'The browser only calls the same-origin /api/llm-monitor/status route. The real upstream URL is read by the backend from this setting.'
       },
       purchase: {

@@ -4605,10 +4605,10 @@ export default {
         pageTitle: '页面标题',
         pageTitlePlaceholder: '蛋云AI - Claude Code 监控面板',
         pageTitleHint: '用于模型监控页面的浏览器标签标题，留空时使用配置文件默认值。',
+        providerUrl: '服务商跳转地址',
+        providerUrlPlaceholder: 'https://api.sunshinelink.online/',
+        providerUrlHint: '点击监控页中的服务商名称时打开该地址，留空时使用配置文件默认值。',
         statusApiUrlPlaceholder: 'https://jc.findcg.com/api/status',
-        providers: '显示服务商',
-        providersPlaceholder: 'codex福利\nclaude 福利',
-        providersHint: '只显示匹配服务商名称的记录，多个值可用换行或逗号分隔；留空显示全部。',
         statusApiUrlHint: '填写不带 period 和 board 的基础地址即可；页面会按所选时间窗口自动追加查询参数。',
         proxyHint: '前端页面只请求同源 /api/llm-monitor/status，真实上游地址由后端读取这里的配置。'
       },
