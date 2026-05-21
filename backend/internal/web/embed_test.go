@@ -542,7 +542,10 @@ func TestFrontendServer_Middleware(t *testing.T) {
 
 	t.Run("serves_model_monitor_html_with_nonce", func(t *testing.T) {
 		provider := &mockSettingsProvider{
-			settings: map[string]string{"llm_monitor_title": "Injected Monitor Title"},
+			settings: map[string]string{
+				"llm_monitor_title":        "Injected Monitor Title",
+				"llm_monitor_provider_url": "https://provider.example.com/",
+			},
 		}
 
 		server, err := NewFrontendServer(provider)
@@ -563,7 +566,9 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
 		assert.Contains(t, w.Body.String(), `nonce="monitor-nonce"`)
 		assert.NotContains(t, w.Body.String(), NonceHTMLPlaceholder)
-		assert.Contains(t, w.Body.String(), `window.__APP_CONFIG__={"llm_monitor_title":"Injected Monitor Title"};`)
+		assert.Contains(t, w.Body.String(), `"llm_monitor_title":"Injected Monitor Title"`)
+		assert.Contains(t, w.Body.String(), `"llm_monitor_provider_url":"https://provider.example.com/"`)
+		assert.Contains(t, w.Body.String(), "https://api.sunshinelink.online/")
 		assert.Contains(t, w.Body.String(), "/api/llm-monitor/status")
 	})
 }

@@ -83,23 +83,17 @@ func TestSettingServiceGetPublicSettingsUsesConfiguredLLMMonitorTitle(t *testing
 	}
 }
 
-func TestSettingServiceGetPublicSettingsUsesConfiguredLLMMonitorProviders(t *testing.T) {
+func TestSettingServiceGetPublicSettingsUsesConfiguredLLMMonitorProviderURL(t *testing.T) {
 	svc := NewSettingService(&llmMonitorSettingRepoStub{values: map[string]string{}}, &config.Config{
-		LLMMonitor: config.LLMMonitorConfig{Providers: []string{" codex福利 ", "", "claude 福利"}},
+		LLMMonitor: config.LLMMonitorConfig{ProviderURL: "https://provider.example.com/"},
 	})
 
 	settings, err := svc.GetPublicSettings(context.Background())
 	if err != nil {
 		t.Fatalf("GetPublicSettings() error = %v", err)
 	}
-	want := []string{"codex福利", "claude 福利"}
-	if len(settings.LLMMonitorProviders) != len(want) {
-		t.Fatalf("LLMMonitorProviders = %#v", settings.LLMMonitorProviders)
-	}
-	for i := range want {
-		if settings.LLMMonitorProviders[i] != want[i] {
-			t.Fatalf("LLMMonitorProviders = %#v", settings.LLMMonitorProviders)
-		}
+	if settings.LLMMonitorProviderURL != "https://provider.example.com/" {
+		t.Fatalf("LLMMonitorProviderURL = %q", settings.LLMMonitorProviderURL)
 	}
 }
 
@@ -135,24 +129,18 @@ func TestSettingServiceGetPublicSettingsAllowsLLMMonitorTitleOverride(t *testing
 	}
 }
 
-func TestSettingServiceGetPublicSettingsAllowsLLMMonitorProvidersOverride(t *testing.T) {
+func TestSettingServiceGetPublicSettingsAllowsLLMMonitorProviderURLOverride(t *testing.T) {
 	svc := NewSettingService(&llmMonitorSettingRepoStub{values: map[string]string{
-		SettingKeyLLMMonitorProviders: "codex福利\nclaude 福利,gemini",
+		SettingKeyLLMMonitorProviderURL: " https://override.example.com/provider ",
 	}}, &config.Config{
-		LLMMonitor: config.LLMMonitorConfig{Providers: []string{"configured"}},
+		LLMMonitor: config.LLMMonitorConfig{ProviderURL: "https://provider.example.com/"},
 	})
 
 	settings, err := svc.GetPublicSettings(context.Background())
 	if err != nil {
 		t.Fatalf("GetPublicSettings() error = %v", err)
 	}
-	want := []string{"codex福利", "claude 福利", "gemini"}
-	if len(settings.LLMMonitorProviders) != len(want) {
-		t.Fatalf("LLMMonitorProviders = %#v", settings.LLMMonitorProviders)
-	}
-	for i := range want {
-		if settings.LLMMonitorProviders[i] != want[i] {
-			t.Fatalf("LLMMonitorProviders = %#v", settings.LLMMonitorProviders)
-		}
+	if settings.LLMMonitorProviderURL != "https://override.example.com/provider" {
+		t.Fatalf("LLMMonitorProviderURL = %q", settings.LLMMonitorProviderURL)
 	}
 }
