@@ -300,12 +300,19 @@
       overflow: hidden;
       animation: panel-in 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
     }
+    body.grid-view .panel {
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+      overflow: visible;
+    }
 
     @keyframes panel-in {
       from { opacity: 0; transform: translateY(6px); }
       to { opacity: 1; transform: translateY(0); }
     }
     .table-shell { overflow-x: auto; }
+    body.grid-view .table-shell { display: none; }
     table {
       width: 100%;
       min-width: 1040px;
@@ -382,16 +389,33 @@
     .service-badge {
       display: inline-flex;
       align-items: center;
-      gap: 4px;
+      gap: 5px;
       padding: 4px 8px;
       border-radius: 7px;
-      border: 1px solid rgba(245, 163, 64, 0.28);
-      background: linear-gradient(180deg, rgba(245, 163, 64, 0.11), rgba(245, 163, 64, 0.06));
-      color: #ffb77f;
       font-size: 12px;
       line-height: 1;
     }
-    .service-badge svg { width: 11px; height: 11px; }
+    .service-badge svg { width: 12px; height: 12px; }
+    .service-badge.cx {
+      border: 1px solid rgba(49, 216, 169, 0.3);
+      background: linear-gradient(180deg, rgba(49, 216, 169, 0.12), rgba(49, 216, 169, 0.055));
+      color: #68f0c4;
+    }
+    .service-badge.cc {
+      border: 1px solid rgba(245, 140, 78, 0.34);
+      background: linear-gradient(180deg, rgba(245, 140, 78, 0.13), rgba(245, 101, 54, 0.06));
+      color: #ff9867;
+    }
+    .service-badge.gm {
+      border: 1px solid rgba(111, 162, 255, 0.34);
+      background: linear-gradient(180deg, rgba(111, 162, 255, 0.13), rgba(116, 96, 255, 0.06));
+      color: #9fc0ff;
+    }
+    .service-badge.other {
+      border: 1px solid rgba(148, 163, 184, 0.28);
+      background: rgba(148, 163, 184, 0.08);
+      color: #c3d0df;
+    }
     .model { color: #c0ccdb; }
     .price { color: #9eaac0; font-family: var(--font-metric); }
     .price strong { color: #dbe7f5; font-weight: 600; }
@@ -449,6 +473,157 @@
     .trend-bar.yellow { background: #caa51d; }
     .trend-bar.green { background: #2fa84f; }
 
+    .card-grid {
+      display: none;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 24px;
+    }
+    body.grid-view .card-grid { display: grid; }
+    .monitor-card {
+      min-height: 254px;
+      padding: 26px 25px 24px;
+      border: 1px solid rgba(34, 201, 135, 0.28);
+      border-radius: 8px;
+      background:
+        radial-gradient(circle at 74% 28%, rgba(42, 205, 126, 0.09), transparent 22%),
+        linear-gradient(180deg, rgba(8, 19, 25, 0.96), rgba(5, 13, 19, 0.98));
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+    }
+    .monitor-card.unstable {
+      border-color: rgba(42, 166, 200, 0.22);
+      background:
+        radial-gradient(circle at 74% 28%, rgba(42, 205, 126, 0.075), transparent 22%),
+        linear-gradient(180deg, rgba(11, 16, 27, 0.97), rgba(8, 13, 24, 0.98));
+    }
+    .card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 7px;
+    }
+    .card-marks {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 16px;
+    }
+    .card-latency {
+      text-align: right;
+      color: var(--green);
+      font-family: var(--font-metric);
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+    .card-latency span {
+      display: block;
+      margin-top: 3px;
+      color: #667792;
+      font-weight: 500;
+    }
+    .card-main {
+      display: grid;
+      grid-template-columns: 48px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 16px;
+      min-height: 72px;
+    }
+    .provider-avatar {
+      width: 48px;
+      height: 48px;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(129, 147, 174, 0.16);
+      background: #172132;
+      color: #fb8555;
+      font-size: 27px;
+      line-height: 1;
+    }
+    .provider-avatar.openai {
+      color: #d9e3ef;
+      font-size: 24px;
+    }
+    .card-title-row {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      min-width: 0;
+    }
+    .card-title {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 20px;
+      font-weight: 750;
+      color: #e0e9f4;
+      letter-spacing: 0;
+    }
+    .card-icons {
+      display: inline-flex;
+      gap: 5px;
+      flex: 0 0 auto;
+    }
+    .card-icons svg {
+      width: 13px;
+      height: 13px;
+      color: #8391aa;
+    }
+    .card-status-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      background: var(--green);
+      box-shadow: 0 0 16px rgba(47, 202, 117, 0.62);
+    }
+    .card-meta {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 8px;
+      color: #9caac0;
+      font-family: var(--font-metric);
+      font-size: 13px;
+    }
+    .card-service {
+      display: inline-flex;
+      align-items: center;
+      height: 22px;
+      padding: 0 8px;
+      border-radius: 5px;
+    }
+    .card-availability {
+      color: #22f18b;
+      font-weight: 800;
+    }
+    .card-trend-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin: 27px 0 8px;
+      color: #728198;
+      font-size: 12px;
+    }
+    .card-trend {
+      display: grid;
+      grid-template-columns: repeat(18, minmax(0, 1fr));
+      gap: 3px;
+    }
+    .card-trend .trend-bar {
+      width: 100%;
+      height: 40px;
+      border-radius: 4px;
+    }
+    .empty-card {
+      grid-column: 1 / -1;
+      padding: 30px 12px;
+      color: #7f8da6;
+      text-align: center;
+    }
+
     .footer {
       display: flex;
       justify-content: space-between;
@@ -485,6 +660,19 @@
       }
       .select-menu {
         width: min(520px, calc(100vw - 24px));
+      }
+      .card-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .card-grid {
+        grid-template-columns: 1fr;
+      }
+      .monitor-card {
+        padding: 22px 20px;
       }
     }
   </style>
@@ -572,7 +760,7 @@
               <circle cx="4" cy="18" r="1" />
             </svg>
           </button>
-          <button class="view-btn" data-view="grid" type="button" title="紧凑视图">
+          <button class="view-btn" data-view="grid" type="button" title="卡片视图">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;">
               <rect x="4" y="4" width="6" height="6" rx="1" />
               <rect x="14" y="4" width="6" height="6" rx="1" />
@@ -581,7 +769,7 @@
             </svg>
           </button>
         </div>
-        <button id="refreshBtn" class="refresh-btn" type="button" title="自动刷新">
+        <button id="refreshBtn" class="refresh-btn" type="button" title="手动刷新">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;">
             <path d="M21 12a9 9 0 1 1-2.6-6.4" />
             <path d="M21 4v6h-6" />
@@ -609,6 +797,7 @@
           <tbody id="tableBody"></tbody>
         </table>
       </div>
+      <div id="cardGrid" class="card-grid" aria-label="卡片视图"></div>
     </section>
 
     <div class="footer">
@@ -647,6 +836,7 @@
       search: document.getElementById('searchInput'),
       refreshBtn: document.getElementById('refreshBtn'),
       refreshSeconds: document.getElementById('refreshSeconds'),
+      cardGrid: document.getElementById('cardGrid'),
       windowLabel: document.getElementById('windowLabel'),
       filterSummary: document.getElementById('filterSummary'),
       lastRefresh: document.getElementById('lastRefresh')
@@ -663,13 +853,17 @@
       const values = Array.isArray(value)
         ? value
         : (typeof value === 'string' ? value.split(/[\n\r,，]+/) : []);
-      return [...new Set(values.map((item) => String(item).trim()).filter(Boolean))];
+      return [...new Set(values.map(normalizeProviderKey).filter(Boolean))];
+    }
+
+    function normalizeProviderKey(value) {
+      return String(value || '').replace(/\s+/g, '').toLocaleLowerCase();
     }
 
     function applyConfiguredProviderFilter(items) {
       if (!MONITOR_PROVIDER_ALLOWLIST.length) return items;
       const allowed = new Set(MONITOR_PROVIDER_ALLOWLIST);
-      return items.filter((item) => allowed.has(String(pickValue(item, ['provider', 'provider_name', 'providerName'], '')).trim()));
+      return items.filter((item) => allowed.has(normalizeProviderKey(pickValue(item, ['provider', 'provider_name', 'providerName'], ''))));
     }
 
     function statusApiUrl() {
@@ -744,6 +938,59 @@
         case 'GM': return 'Gemini (GM)';
         default: return code;
       }
+    }
+
+    function serviceTone(code) {
+      switch (String(code || '').toUpperCase()) {
+        case 'CX': return 'cx';
+        case 'CC': return 'cc';
+        case 'GM': return 'gm';
+        default: return 'other';
+      }
+    }
+
+    function serviceIcon(code) {
+      switch (String(code || '').toUpperCase()) {
+        case 'CX':
+          return `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 4.4c2.1-2 5.7-.4 5.7 2.6 2.9.2 4.3 3.8 2.1 5.7 2 2.1.4 5.7-2.6 5.7-.2 2.9-3.8 4.3-5.7 2.1-2.1 2-5.7.4-5.7-2.6-2.9-.2-4.3-3.8-2.1-5.7-2-2.1-.4-5.7 2.6-5.7.2-2.9 3.8-4.3 5.7-2.1Z" />
+              <path d="M8.3 8.5 15.7 16" />
+              <path d="M15.7 8.5 8.3 16" />
+            </svg>
+          `;
+        case 'CC':
+          return `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 3.2 13.8 9l5.9-1.8-4.1 4.6 4.1 4.6-5.9-1.8L12 20.8l-1.8-6.2-5.9 1.8 4.1-4.6-4.1-4.6L10.2 9 12 3.2Z" />
+            </svg>
+          `;
+        case 'GM':
+          return `
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M12 2.8 14.5 9.5 21.2 12l-6.7 2.5L12 21.2l-2.5-6.7L2.8 12l6.7-2.5L12 2.8Z" />
+              <path d="M5.6 3.8 6.5 6l2.2.9-2.2.9-.9 2.2-.9-2.2-2.2-.9 2.2-.9.9-2.2Z" opacity=".7" />
+            </svg>
+          `;
+        default:
+          return `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 2 4 6l8 4 8-4-8-4Z" />
+              <path d="M4 10l8 4 8-4" />
+              <path d="M4 14l8 4 8-4" />
+            </svg>
+          `;
+      }
+    }
+
+    function serviceBadge(code, extraClass = '') {
+      const normalized = String(code || '').toUpperCase();
+      return `
+        <span class="service-badge ${serviceTone(normalized)} ${extraClass}">
+          ${serviceIcon(normalized)}
+          ${escapeHtml(normalized || 'N/A')}
+        </span>
+      `;
     }
 
     function formatCheckedTime(value, fallback = '--:--') {
@@ -1018,14 +1265,77 @@
       )).join('');
     }
 
+    function renderTrendBars(row, index) {
+      const trend = row.trend?.length ? row.trend.slice(-18) : trendBars(row.availability, index + row.provider.length);
+      return trend.map((tone) => `<span class="trend-bar ${tone}"></span>`).join('');
+    }
+
+    function providerAvatar(row) {
+      const text = `${row.provider} ${row.service} ${row.model}`.toLowerCase();
+      if (text.includes('codex') || text.includes('openai') || text.includes('gpt')) {
+        return '<div class="provider-avatar openai">◎</div>';
+      }
+      return '<div class="provider-avatar">✹</div>';
+    }
+
+    function renderStatusMessage(message, tone = 'muted') {
+      const color = tone === 'error' ? '#ee8b91' : '#7f8da6';
+      els.tableBody.innerHTML = `
+        <tr><td colspan="8" style="padding:30px 12px;color:${color};text-align:center;">${escapeHtml(message)}</td></tr>
+      `;
+      els.cardGrid.innerHTML = `<div class="empty-card" style="color:${color};">${escapeHtml(message)}</div>`;
+    }
+
+    function renderCards(filtered) {
+      els.cardGrid.innerHTML = filtered.map((row, index) => `
+        <article class="monitor-card ${row.availability >= 99 ? '' : 'unstable'}">
+          <div class="card-top">
+            <div class="card-marks" aria-hidden="true">${renderAnnotations(row)}</div>
+            <div class="card-latency">
+              ${row.latency}ms
+              <span>${row.time}</span>
+            </div>
+          </div>
+          <div class="card-main">
+            ${providerAvatar(row)}
+            <div class="provider-cell">
+              <div class="card-title-row">
+                <div class="card-title" title="${escapeHtml(row.provider)}">${escapeHtml(row.provider)}</div>
+                <span class="card-icons" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14 3h7v7" />
+                    <path d="M10 14 21 3" />
+                    <path d="M21 14v7h-7" />
+                    <path d="M21 3 3 21" />
+                  </svg>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="m12 17.3-5.8 3.1 1.1-6.5-4.7-4.6 6.5-1 2.9-5.8 2.9 5.8 6.5 1-4.7 4.6 1.1 6.5Z" />
+                  </svg>
+                </span>
+              </div>
+              <div class="card-meta">
+                ${serviceBadge(row.service, 'card-service')}
+                <span>⌁ 可用率：<span class="card-availability">${row.availability.toFixed(row.availability % 1 ? 2 : 0)}%</span></span>
+                <span>价格：${escapeHtml(formatPrice(row))}</span>
+              </div>
+            </div>
+            <span class="card-status-dot" aria-hidden="true"></span>
+          </div>
+          <div class="card-trend-head">
+            <span>◷ ${escapeHtml(windowLabel(state.window))}</span>
+            <span>现在</span>
+          </div>
+          <div class="card-trend" aria-label="可用率趋势">${renderTrendBars(row, index)}</div>
+        </article>
+      `).join('') || '<div class="empty-card">没有匹配的数据</div>';
+    }
+
     function renderTable() {
       if (state.loading) {
         els.windowLabel.textContent = windowLabel(state.window);
         els.filterSummary.textContent = '加载中';
         els.lastRefresh.textContent = '--:--:--';
-        els.tableBody.innerHTML = `
-          <tr><td colspan="8" style="padding:30px 12px;color:#7f8da6;text-align:center;">正在从接口加载数据...</td></tr>
-        `;
+        renderStatusMessage('正在从接口加载数据...');
         updateSortIndicators();
         return;
       }
@@ -1034,9 +1344,7 @@
         els.windowLabel.textContent = windowLabel(state.window);
         els.filterSummary.textContent = '接口错误';
         els.lastRefresh.textContent = '--:--:--';
-        els.tableBody.innerHTML = `
-          <tr><td colspan="8" style="padding:30px 12px;color:#ee8b91;text-align:center;">${escapeHtml(state.error)}</td></tr>
-        `;
+        renderStatusMessage(state.error, 'error');
         updateSortIndicators();
         return;
       }
@@ -1053,7 +1361,6 @@
       });
 
       els.tableBody.innerHTML = filtered.map((row, index) => {
-        const trend = row.trend?.length ? row.trend.slice(-18) : trendBars(row.availability, index + row.provider.length);
         return `
           <tr>
             <td class="col-mark">
@@ -1079,14 +1386,7 @@
               </div>
             </td>
             <td class="col-service">
-              <span class="service-badge">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M12 2 4 6l8 4 8-4-8-4Z" />
-                  <path d="M4 10l8 4 8-4" />
-                  <path d="M4 14l8 4 8-4" />
-                </svg>
-                ${escapeHtml(row.service)}
-              </span>
+              ${serviceBadge(row.service)}
             </td>
             <td class="col-model model">${escapeHtml(row.model)}</td>
             <td class="col-price price"><strong>${formatPrice(row)}</strong></td>
@@ -1102,7 +1402,7 @@
             </td>
             <td class="col-trend">
               <div class="trend-row" aria-label="可用率趋势">
-                ${trend.map((tone) => `<span class="trend-bar ${tone}"></span>`).join('')}
+                ${renderTrendBars(row, index)}
               </div>
             </td>
           </tr>
@@ -1110,6 +1410,7 @@
       }).join('') || `
         <tr><td colspan="8" style="padding:30px 12px;color:#7f8da6;text-align:center;">没有匹配的数据</td></tr>
       `;
+      renderCards(filtered);
 
       updateSortIndicators();
     }
@@ -1259,7 +1560,8 @@
           document.querySelectorAll('.view-btn').forEach((el) => el.classList.remove('active'));
           btn.classList.add('active');
           state.view = btn.dataset.view || 'list';
-          document.body.classList.toggle('compact-view', state.view === 'grid');
+          document.body.classList.toggle('grid-view', state.view === 'grid');
+          renderTable();
         });
       });
 
@@ -1269,13 +1571,13 @@
       });
 
       els.refreshBtn.addEventListener('click', () => {
-        state.autoRefresh = !state.autoRefresh;
-        els.refreshBtn.classList.toggle('active', state.autoRefresh);
-        els.refreshBtn.title = state.autoRefresh ? '自动刷新开启' : '自动刷新';
-        updateAutoRefresh();
+        loadStatusData();
       });
 
-      els.refreshSeconds.addEventListener('change', updateAutoRefresh);
+      els.refreshSeconds.addEventListener('change', () => {
+        state.autoRefresh = true;
+        updateAutoRefresh();
+      });
       els.refreshSeconds.addEventListener('blur', updateAutoRefresh);
 
       document.addEventListener('click', () => closeAllSelects());
