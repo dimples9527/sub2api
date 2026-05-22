@@ -536,6 +536,19 @@
       opacity: 1;
       transform: translate(-50%, 0);
     }
+    tbody tr:first-child .trend-tooltip {
+      top: calc(100% + 10px);
+      bottom: auto;
+      transform: translate(-50%, -4px);
+    }
+    tbody tr:first-child .trend-tooltip::after {
+      top: -6px;
+      bottom: auto;
+      transform: translateX(-50%) rotate(225deg);
+    }
+    tbody tr:first-child .trend-item:hover .trend-tooltip {
+      transform: translate(-50%, 0);
+    }
     .trend-tooltip-title {
       display: flex;
       align-items: center;
@@ -1076,15 +1089,39 @@
     }
 
     function pointTime(point, fallback = '--:--') {
-      const value = pickValue(point, ['time', 'timestamp', 'checked_at', 'checkedAt'], '');
+      const value = pickValue(point, ['displayTimestamp', 'time', 'timestamp', 'checked_at', 'checkedAt'], '');
       if (typeof value === 'string' && value.trim() && !/^\d+$/.test(value.trim())) {
         return value.trim();
       }
       return formatCheckedTime(value, fallback);
     }
 
+    function pointTimestamp(point) {
+      return asNumber(pickValue(point, ['timestamp', 'checked_at', 'checkedAt'], 0), 0);
+    }
+
+    function monitorIntervalMs(item, layer) {
+      const interval = asNumber(
+        pickValue(item, ['interval_ms', 'intervalMs'], pickValue(layer, ['interval_ms', 'intervalMs'], 300000)),
+        300000
+      );
+      return Math.max(1000, interval);
+    }
+
     function normalizeTrendPoint(point, row, fallbackIndex) {
       if (point && typeof point === 'object') {
+        if ('tone' in point && !('status' in point) && !('availability' in point)) {
+          const tone = String(point.tone || 'red');
+          const status = tone === 'green' ? 1 : (tone === 'yellow' ? 2 : 0);
+          return {
+            tone,
+            status,
+            statusText: statusText(status),
+            time: pointTime(point, row?.time || '--:--'),
+            latency: row?.latency || 0,
+            availability: row?.availability || 0
+          };
+        }
         const status = asNumber(pickValue(point, ['status'], undefined), undefined);
         const latency = asNumber(pickValue(point, ['latency', 'latency_ms', 'latencyMs'], row?.latency || 0));
         return {
@@ -1233,7 +1270,9 @@
       const latency = asNumber(pickValue(current, ['latency'], pickValue(latestPoint, ['latency'], pickValue(item, ['latency', 'latency_ms', 'latencyMs', 'response_time', 'responseTime', 'last_latency'], 0))));
       const time = formatCheckedTime(pickValue(current, ['timestamp'], pickValue(latestPoint, ['time', 'timestamp'], pickValue(item, ['time', 'checked_at', 'checkedAt', 'last_check', 'lastCheck', 'last_monitor', 'lastMonitor'], ''))));
       const note = String(pickValue(item, ['sponsor', 'channel', 'note', 'tag', 'owner', 'source'], '自营'));
-      const trendSource = timeline.length ? timeline.slice(-18) : normalizeTrend(item, availability, index);
+      let trendSource = timeline.length
+        ? [...timeline].sort((a, b) => pointTimestamp(a) - pointTimestamp(b)).slice(-18)
+        : normalizeTrend(item, availability, index);
       const currentTimestamp = asNumber(pickValue(current, ['timestamp'], 0), 0);
       const latestTimestamp = asNumber(pickValue(latestPoint, ['timestamp'], 0), 0);
       if (currentTimestamp > 0 && currentTimestamp >= latestTimestamp) {
@@ -1248,6 +1287,20 @@
         } else {
           trendSource.push(currentPoint);
         }
+      }
+      const intervalMs = monitorIntervalMs(item, layer);
+      const anchorTimestamp = currentTimestamp > 0
+        ? currentTimestamp
+        : asNumber(pickValue(trendSource[trendSource.length - 1], ['timestamp', 'displayTimestamp'], 0), 0);
+      if (anchorTimestamp > 0) {
+        const intervalStep = anchorTimestamp > 10000000000 ? intervalMs : Math.round(intervalMs / 1000);
+        trendSource = trendSource.map((point, pointIndex) => {
+          const displayTimestamp = anchorTimestamp - ((trendSource.length - 1 - pointIndex) * intervalStep);
+          if (point && typeof point === 'object') {
+            return { ...point, displayTimestamp };
+          }
+          return { tone: point, displayTimestamp };
+        });
       }
       const trend = trendSource.map((point, pointIndex) => normalizeTrendPoint(point, { availability, latency, time }, pointIndex));
       return {
