@@ -159,6 +159,10 @@ Check your Browserslist config to be sure that your targets are set up correctly
         .tab-btn.active { transform: translateY(-1px); }
         .card-hover { transition: all 0.3s; }
         .card-hover:hover { transform: translateY(-2px); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
+        .doc-card { padding: 22px 24px; }
+        .doc-soft-card { padding: 18px 22px; }
+        .doc-note { padding: 12px 16px; line-height: 1.6; }
+        .doc-install-link { display: flex; align-items: center; min-height: 44px; padding: 10px 0; }
         .sidebar-link {
             padding: 6px 12px;
             border-left: 2px solid transparent;
@@ -185,6 +189,42 @@ html{scroll-behavior:smooth}
 body{margin:0}
 .offline-wrap{width:min(1200px,100%);margin:0 auto;padding:32px 24px 40px;box-sizing:border-box}
 .offline-wrap > section > div > div{padding-left:28px !important;padding-right:28px !important}
+.offline-wrap section [class*="rounded-xl"],
+.offline-wrap section [class*="rounded-lg"]{box-sizing:border-box}
+.offline-wrap section .rounded-xl:not(.code-block):not(img):not(.qr-modal__image){padding:22px 24px}
+.offline-wrap section .rounded-lg:not(.code-block){padding:14px 18px}
+.offline-wrap section p,
+.offline-wrap section li,
+.offline-wrap section td,
+.offline-wrap section summary{line-height:1.7}
+.offline-wrap section td{padding:12px 14px !important}
+.offline-wrap section code[class*="bg-"]{display:inline-block;padding:2px 7px;margin:0 2px;border-radius:5px;line-height:1.45}
+.offline-wrap section details summary{padding:18px 22px !important}
+.offline-wrap section details > div{padding:0 22px 20px !important}
+.offline-wrap section .code-block{padding:18px 56px 18px 18px}
+.offline-wrap section .doc-install-link{padding:12px 0}
+.ccs-console-demo{background:#fff;border:1px solid #d9e2ec;border-radius:12px;overflow:hidden;box-shadow:0 10px 24px rgba(15,23,42,.06)}
+.ccs-console-topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 22px;border-bottom:1px solid #e5e7eb;background:linear-gradient(180deg,#fff,#f8fafc)}
+.ccs-console-title{font-size:16px;font-weight:700;color:#111827}
+.ccs-console-subtitle{margin-top:4px;font-size:12px;color:#6b7280}
+.ccs-console-create{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:0 16px;border-radius:7px;background:#111827;color:#fff;font-size:13px;font-weight:700;white-space:nowrap}
+.ccs-console-toolbar{display:flex;align-items:center;gap:12px;padding:14px 22px;border-bottom:1px solid #edf2f7;background:#fff}
+.ccs-console-search{min-width:220px;min-height:34px;padding:0 12px;border:1px solid #d1d5db;border-radius:7px;color:#9ca3af;font-size:13px;background:#f9fafb}
+.ccs-console-filter{display:inline-flex;align-items:center;min-height:34px;padding:0 12px;border:1px solid #d1d5db;border-radius:7px;color:#4b5563;font-size:13px;background:#fff}
+.ccs-key-table{min-width:940px}
+.ccs-key-row{display:grid;grid-template-columns:1.15fr 1.2fr 1.35fr .7fr .9fr 1.55fr;align-items:center}
+.ccs-key-head{background:#f8fafc;color:#475569;font-size:12px;font-weight:700;border-bottom:1px solid #e5e7eb}
+.ccs-key-head>div,.ccs-key-body>div{padding:14px 16px}
+.ccs-key-body{background:#fff;color:#374151;font-size:13px}
+.ccs-key-body+.ccs-key-body{border-top:1px solid #edf2f7}
+.ccs-key-name{font-weight:700;color:#111827}
+.ccs-key-meta{margin-top:4px;font-size:12px;color:#94a3b8}
+.ccs-key-model{display:flex;flex-direction:column;gap:4px;color:#4b5563}
+.ccs-key-status{display:inline-flex;align-items:center;width:max-content;padding:4px 10px;border-radius:999px;background:#dcfce7;color:#15803d;font-size:12px;font-weight:700}
+.ccs-key-actions{display:flex;flex-wrap:wrap;gap:8px}
+.ccs-action-btn{display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:0 12px;border-radius:7px;border:1px solid #d1d5db;background:#fff;color:#374151;font-size:12px;font-weight:600}
+.ccs-action-btn.primary{border-color:#059669;background:#059669;color:#fff;box-shadow:0 6px 14px rgba(5,150,105,.18)}
+.ccs-action-btn.danger{border-color:#fecaca;background:#fff5f5;color:#dc2626}
 .qr-trigger{display:block;cursor:zoom-in;border:0;background:transparent;padding:0;border-radius:16px}
 .qr-trigger:focus-visible{outline:3px solid rgba(255,255,255,.45);outline-offset:4px}
 .qr-modal{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(15,23,42,.72);backdrop-filter:blur(4px);opacity:0;visibility:hidden;transition:opacity .2s ease,visibility .2s ease;z-index:1000}
@@ -197,6 +237,7 @@ body{margin:0}
 @media (max-width:640px){
 .offline-wrap{padding:20px 16px 32px}
 .offline-wrap > section > div > div{padding-left:20px !important;padding-right:20px !important}
+.ccs-console-topbar,.ccs-console-toolbar{align-items:flex-start;flex-direction:column}
 .qr-modal{padding:16px}
 .qr-modal__panel{padding:20px}
 }
@@ -273,21 +314,21 @@ codex<button class="copy-btn" onclick="copyCode(this)">复制</button></div>
             <!-- What is CCSwitch -->
             <div class="mb-10">
                 <h3 class="text-xl font-bold text-gray-900 mb-4">什么是 CCSwitch？</h3>
-                <p class="text-gray-700 mb-4">CCSwitch（CC Switch）是一款专为 Claude Code、CodeX、Gemini CLI 等 AI 编程工具设计的<strong>图形化配置管理工具</strong>。它可以帮助你：</p>
+                <p class="text-gray-700 mb-4">CCSwitch（CC Switch）是一款专为 Claude Code、Codex、Gemini CLI 等 AI 编程工具设计的<strong>图形化配置管理工具</strong>。它可以帮助你：</p>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div class="bg-purple-50 rounded-xl p-4 card-hover">
+                    <div class="bg-purple-50 rounded-xl doc-soft-card card-hover">
                         <div class="font-semibold text-purple-900 mb-1">模型自由切换</div>
                         <p class="text-sm text-purple-700">在多个 API 供应商和模型之间无缝切换，无需手动修改配置文件</p>
                     </div>
-                    <div class="bg-pink-50 rounded-xl p-4 card-hover">
+                    <div class="bg-pink-50 rounded-xl doc-soft-card card-hover">
                         <div class="font-semibold text-pink-900 mb-1">可视化操作</div>
                         <p class="text-sm text-pink-700">图形界面操作，免去手动编辑 settings.json 或环境变量的繁琐</p>
                     </div>
-                    <div class="bg-indigo-50 rounded-xl p-4 card-hover">
+                    <div class="bg-indigo-50 rounded-xl doc-soft-card card-hover">
                         <div class="font-semibold text-indigo-900 mb-1">多功能管理</div>
                         <p class="text-sm text-indigo-700">支持 MCP 服务器管理、Skills 插件管理、Prompts 管理等</p>
                     </div>
-                    <div class="bg-blue-50 rounded-xl p-4 card-hover">
+                    <div class="bg-blue-50 rounded-xl doc-soft-card card-hover">
                         <div class="font-semibold text-blue-900 mb-1">多配置切换</div>
                         <p class="text-sm text-blue-700">保存多套配置方案，一键在不同供应商之间切换</p>
                     </div>
@@ -297,16 +338,16 @@ codex<button class="copy-btn" onclick="copyCode(this)">复制</button></div>
             <!-- Install -->
             <div class="mb-10" id="ccs-install">
                 <h3 class="text-xl font-bold text-gray-900 mb-4">下载与安装</h3>
-                <div class="bg-gray-50 border border-gray-200 rounded-xl p-5 mb-4">
+                <div class="bg-gray-50 border border-gray-200 rounded-xl doc-card mb-5">
                     <p class="text-gray-700 mb-3">前往 CCSwitch GitHub 下载最新版本：</p>
-                    <a href="https://github.com/CC-Switch/CC-Switch/releases" target="_blank" class="inline-flex items-center text-purple-600 hover:text-purple-800 font-semibold">
+                    <a href="https://github.com/farion1231/cc-switch/releases" target="_blank" class="doc-install-link text-purple-600 hover:text-purple-800 font-semibold">
                         <svg class="w-5 h-5 mr-1" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-                        CC-Switch/CC-Switch Releases
+                        farion1231/cc-switch Releases
                     </a>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div class="border border-gray-200 rounded-xl p-5">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div class="border border-gray-200 rounded-xl doc-card">
                         <div class="flex items-center space-x-2 mb-3">
                             <span class="text-xl">&#127987;&#65039;</span>
                             <h4 class="font-bold text-gray-900">Windows</h4>
@@ -317,11 +358,11 @@ codex<button class="copy-btn" onclick="copyCode(this)">复制</button></div>
                             <li>按提示完成安装</li>
                             <li>安装完成后从开始菜单或桌面打开</li>
                         </ol>
-                        <div class="bg-amber-50 border border-amber-200 rounded-lg p-2 mt-3">
+                        <div class="bg-amber-50 border border-amber-200 rounded-lg doc-note mt-4">
                             <p class="text-xs text-amber-700">如果提示「未知发布者」，点击「更多信息」→「仍要运行」</p>
                         </div>
                     </div>
-                    <div class="border border-gray-200 rounded-xl p-5">
+                    <div class="border border-gray-200 rounded-xl doc-card">
                         <div class="flex items-center space-x-2 mb-3">
                             <span class="text-xl">&#127822;</span>
                             <h4 class="font-bold text-gray-900">macOS</h4>
@@ -331,7 +372,7 @@ codex<button class="copy-btn" onclick="copyCode(this)">复制</button></div>
                             <li>打开 DMG 并将应用拖到 Applications</li>
                             <li>首次打开可能需要在「系统偏好设置」→「安全性」中允许</li>
                         </ol>
-                        <div class="bg-amber-50 border border-amber-200 rounded-lg p-2 mt-3">
+                        <div class="bg-amber-50 border border-amber-200 rounded-lg doc-note mt-4">
                             <p class="text-xs text-amber-700">若提示「已损坏」，终端执行：<code>sudo xattr -rd com.apple.quarantine /Applications/CCSwitch.app</code></p>
                         </div>
                     </div>
@@ -345,64 +386,279 @@ codex<button class="copy-btn" onclick="copyCode(this)">复制</button></div>
                 <div class="mb-8">
                     <div class="flex items-center space-x-3 mb-4">
                         <div class="step-number purple">1</div>
-                        <h4 class="text-lg font-bold text-gray-900">添加 API 供应商</h4>
+                        <h4 class="text-lg font-bold text-gray-900">推荐：从 API 密钥页一键导入</h4>
                     </div>
                     <div class="ml-11">
-                        <ol class="list-decimal list-inside text-gray-600 space-y-2 text-sm mb-4">
-                            <li>打开 CCSwitch 主界面</li>
-                            <li>选择顶部第二个图标，点击「添加供应商」或「+」按钮</li>
-                            <li>填写以下信息：</li>
-                        </ol>
-                        <div class="bg-purple-50 border border-purple-200 rounded-xl p-4 mb-4">
-                            <table class="w-full text-sm">
-                                <tr class="border-b border-purple-100">
-                                    <td class="py-2 font-semibold text-purple-900 w-32">名称</td>
-                                    <td class="py-2 text-purple-700">自定义（如：sunshinelink API）</td>
-                                </tr>
-                                <tr class="border-b border-purple-100">
-                                    <td class="py-2 font-semibold text-purple-900">API 地址</td>
-                                    <td class="py-2 text-purple-700"><code class="bg-purple-100 px-1 rounded">https://api.sunshinelink.top</code></td>
-                                </tr>
-                                <tr>
-                                    <td class="py-2 font-semibold text-purple-900">API Key</td>
-                                    <td class="py-2 text-purple-700">在 <a href="https://api.sunshinelink.top/console/token" target="_blank" class="text-purple-600 underline">控制台</a> 生成的令牌</td>
-                                </tr>
-                            </table>
+                        <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-6 mb-5">
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+                                <div class="bg-white border border-emerald-100 rounded-xl p-5">
+                                    <div class="w-8 h-8 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-700 font-bold mb-3">1</div>
+                                    <div class="font-semibold text-gray-900 mb-1">创建密钥</div>
+                                    <p class="text-sm text-gray-600">进入 <a href="https://api.sunshinelink.online/console/token" target="_blank" class="text-emerald-700 underline">API 密钥</a> 页面，点击「创建密钥」，按需填写名称和额度限制。</p>
+                                </div>
+                                <div class="bg-white border border-emerald-100 rounded-xl p-5">
+                                    <div class="w-8 h-8 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-700 font-bold mb-3">2</div>
+                                    <div class="font-semibold text-gray-900 mb-1">点击导入 CCS</div>
+                                    <p class="text-sm text-gray-600">密钥创建完成后，在该密钥右侧操作区点击「导入 CCS」。浏览器会唤起 CCSwitch 并带入地址、密钥和模型配置。</p>
+                                </div>
+                                <div class="bg-white border border-emerald-100 rounded-xl p-5">
+                                    <div class="w-8 h-8 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-700 font-bold mb-3">3</div>
+                                    <div class="font-semibold text-gray-900 mb-1">确认并启用</div>
+                                    <p class="text-sm text-gray-600">在 CCSwitch 弹出的导入窗口中确认配置名称，点击保存或启用。之后直接在 CCSwitch 里切换 GPT/Codex 或 Claude Code 模型。</p>
+                                </div>
+                            </div>
                         </div>
-                        <li class="list-decimal text-gray-600 text-sm ml-5">点击「保存」完成添加</li>
+                        <div class="ccs-console-demo mb-5">
+                            <div class="ccs-console-topbar">
+                                <div>
+                                    <div class="ccs-console-title">API 密钥</div>
+                                    <div class="ccs-console-subtitle">创建密钥后，在列表右侧点击「导入 CCS」即可自动写入 CCSwitch。</div>
+                                </div>
+                                <span class="ccs-console-create">创建密钥</span>
+                            </div>
+                            <div class="ccs-console-toolbar">
+                                <div class="ccs-console-search">搜索名称 / API Key</div>
+                                <div class="ccs-console-filter">状态：全部</div>
+                                <div class="ccs-console-filter">模型：全部</div>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <div class="ccs-key-table">
+                                    <div class="ccs-key-row ccs-key-head">
+                                        <div>名称</div>
+                                        <div>API Key</div>
+                                        <div>可用模型</div>
+                                        <div>状态</div>
+                                        <div>额度</div>
+                                        <div>操作</div>
+                                    </div>
+                                    <div class="ccs-key-row ccs-key-body">
+                                        <div>
+                                            <div class="ccs-key-name">codex-claude-dev</div>
+                                            <div class="ccs-key-meta">刚刚创建 · 开发工具专用</div>
+                                        </div>
+                                        <div class="font-mono text-gray-500">sk-••••••••••••••••</div>
+                                        <div class="ccs-key-model">
+                                            <span>GPT / Codex：gpt-5.5</span>
+                                            <span>Claude Code：claude-sonnet-4-6</span>
+                                        </div>
+                                        <div><span class="ccs-key-status">启用</span></div>
+                                        <div>不限额</div>
+                                        <div class="ccs-key-actions">
+                                            <span class="ccs-action-btn">复制</span>
+                                            <span class="ccs-action-btn">编辑</span>
+                                            <span class="ccs-action-btn primary">导入 CCS</span>
+                                            <span class="ccs-action-btn danger">删除</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
+                            <p class="text-sm text-amber-700">如果点击「导入 CCS」后没有唤起 CCSwitch，请先确认已经安装 CCSwitch；仍无法导入时，再使用下面的手动添加方式。</p>
+                        </div>
                     </div>
                 </div>
 
                 <div class="mb-8">
                     <div class="flex items-center space-x-3 mb-4">
                         <div class="step-number purple">2</div>
-                        <h4 class="text-lg font-bold text-gray-900">切换模型/供应商</h4>
+                        <h4 class="text-lg font-bold text-gray-900">手动添加 API 供应商</h4>
                     </div>
                     <div class="ml-11">
-                        <ol class="list-decimal list-inside text-gray-600 space-y-2 text-sm">
-                            <li>在 CCSwitch 主界面或系统托盘中，选择顶部的第二个图标，就是GPT对应配置，可以看到已添加的所有供应商</li>
-                            <li>点击你想启用的供应商/配置</li>
-                            <li>CCSwitch 会自动更新 Codex 的 settings.json 配置</li>
-                            <li>切换后<strong>即时生效</strong>，无需重启 Codex</li>
+                        <ol class="list-decimal list-inside text-gray-600 space-y-2 text-sm mb-4">
+                            <li>打开 CCSwitch 主界面</li>
+                            <li>先进入「GPT / Codex」配置页，点击「添加供应商」或「+」按钮</li>
+                            <li>填写 Codex 使用的 OpenAI 兼容配置：</li>
                         </ol>
-                        <div class="bg-green-50 border border-green-200 rounded-lg p-3 mt-3">
-                            <p class="text-sm text-green-700">如果切换后没有立即生效，尝试重启终端或 Codex CLI。</p>
+                        <div class="bg-purple-50 border border-purple-200 rounded-xl p-5 mb-5">
+                            <table class="w-full text-sm">
+                                <tr class="border-b border-purple-100">
+                                    <td class="py-2 font-semibold text-purple-900 w-32">名称</td>
+                                    <td class="py-2 text-purple-700">自定义（如：sunshinelink GPT）</td>
+                                </tr>
+                                <tr class="border-b border-purple-100">
+                                    <td class="py-2 font-semibold text-purple-900">API 地址</td>
+                                    <td class="py-2 text-purple-700"><code class="bg-purple-100 px-1 rounded">https://api.sunshinelink.online</code></td>
+                                </tr>
+                                <tr>
+                                    <td class="py-2 font-semibold text-purple-900">API Key</td>
+                                    <td class="py-2 text-purple-700">在 <a href="https://api.sunshinelink.online/console/token" target="_blank" class="text-purple-600 underline">控制台</a> 生成的令牌</td>
+                                </tr>
+                            </table>
+                        </div>
+                        <div class="bg-blue-50 border border-blue-200 rounded-xl p-5 mb-5">
+                            <p class="text-sm text-blue-800 mb-2">如果还要让 Claude Code 使用 Claude 系列模型，再进入「Claude Code」配置页添加一套配置：</p>
+                            <table class="w-full text-sm">
+                                <tr class="border-b border-blue-100">
+                                    <td class="py-2 font-semibold text-blue-900 w-32">名称</td>
+                                    <td class="py-2 text-blue-700">自定义（如：sunshinelink Claude）</td>
+                                </tr>
+                                <tr class="border-b border-blue-100">
+                                    <td class="py-2 font-semibold text-blue-900">API 地址</td>
+                                    <td class="py-2 text-blue-700"><code class="bg-blue-100 px-1 rounded">https://api.sunshinelink.online</code></td>
+                                </tr>
+                                <tr>
+                                    <td class="py-2 font-semibold text-blue-900">API Key</td>
+                                    <td class="py-2 text-blue-700">使用同一个控制台令牌即可，除非你的平台单独区分了 GPT 和 Claude 额度</td>
+                                </tr>
+                            </table>
+                        </div>
+                        <p class="text-sm text-gray-600">保存后建议分别命名为「GPT 高质量」「GPT 经济」「Claude 高质量」「Claude 经济」等，后面切换时不容易选错。</p>
+                    </div>
+                </div>
+
+                <div class="mb-8">
+                    <div class="flex items-center space-x-3 mb-4">
+                        <div class="step-number purple">3</div>
+                        <h4 class="text-lg font-bold text-gray-900">配置 GPT / Codex 模型</h4>
+                    </div>
+                    <div class="ml-11">
+                        <ol class="list-decimal list-inside text-gray-600 space-y-2 text-sm mb-4">
+                            <li>在 CCSwitch 的「GPT / Codex」配置页选择刚添加的 sunshinelink GPT 供应商</li>
+                            <li>模型名填写 <code class="bg-gray-100 px-1 rounded">gpt-5.5</code></li>
+                            <li>点击「应用」或「切换」，让 CCSwitch 写入 Codex 配置</li>
+                            <li>Codex 的用户级配置文件是 <code class="bg-gray-100 px-1 rounded">~/.codex/config.toml</code>，不是 Claude Code 的 <code class="bg-gray-100 px-1 rounded">settings.json</code></li>
+                        </ol>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
+                            <div class="border border-gray-200 rounded-xl p-5">
+                                <h5 class="font-semibold text-gray-900 mb-3">CCSwitch 表单怎么填</h5>
+                                <div class="space-y-3 text-sm">
+                                    <div>
+                                        <div class="font-semibold text-gray-700 mb-1">供应商名称</div>
+                                        <div class="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 text-gray-700">sunshinelink GPT</div>
+                                    </div>
+                                    <div>
+                                        <div class="font-semibold text-gray-700 mb-1">API 地址</div>
+                                        <div class="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 font-mono text-gray-700">https://api.sunshinelink.online</div>
+                                    </div>
+                                    <div>
+                                        <div class="font-semibold text-gray-700 mb-1">模型名</div>
+                                        <div class="bg-gray-900 text-white rounded-lg px-4 py-3 font-mono text-sm">gpt-5.5</div>
+                                    </div>
+                                </div>
+                                <p class="text-sm text-gray-600 mt-3">普通用户不需要区分 GPT 和 Codex 专用模型。复杂代码、日常开发、解释代码、文档处理都优先使用 <code class="bg-gray-100 px-1 rounded">gpt-5.5</code>。</p>
+                            </div>
+                            <div class="border border-gray-200 rounded-xl p-5">
+                                <h5 class="font-semibold text-gray-900 mb-2">配置效果</h5>
+                                <p class="text-sm text-gray-600 mb-2">CCSwitch 通常会写出类似下面的 Codex 配置：</p>
+                                <div class="code-block" style="font-size:12px">model = "gpt-5.5"
+model_provider = "sunshinelink"
+
+[model_providers.sunshinelink]
+name = "sunshinelink GPT"
+base_url = "https://api.sunshinelink.online"
+env_key = "OPENAI_API_KEY"
+wire_api = "responses"<button class="copy-btn" onclick="copyCode(this)">复制</button></div>
+                            </div>
+                        </div>
+                        <p class="text-sm text-gray-600">切换后新开的 Codex 会读取新配置；如果当前会话没有变化，关闭当前 Codex 会话后重新执行 <code class="bg-gray-100 px-1 rounded">codex</code>。</p>
+                    </div>
+                </div>
+
+                <div class="mb-8">
+                    <div class="flex items-center space-x-3 mb-4">
+                        <div class="step-number purple">4</div>
+                        <h4 class="text-lg font-bold text-gray-900">配置 Claude Code 模型</h4>
+                    </div>
+                    <div class="ml-11">
+                        <ol class="list-decimal list-inside text-gray-600 space-y-2 text-sm mb-4">
+                            <li>在 CCSwitch 的「Claude Code」配置页选择 sunshinelink Claude 供应商</li>
+                            <li>按下面的表单示意填写模型和环境变量</li>
+                            <li>点击「应用」或「切换」，让 CCSwitch 写入 Claude Code 配置</li>
+                            <li>Claude Code 的用户级配置文件是 <code class="bg-gray-100 px-1 rounded">~/.claude/settings.json</code>，不是 Codex 的 <code class="bg-gray-100 px-1 rounded">config.toml</code></li>
+                        </ol>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
+                            <div class="border border-gray-200 rounded-xl p-5">
+                                <h5 class="font-semibold text-gray-900 mb-3">CCSwitch 表单怎么填</h5>
+                                <div class="space-y-3 text-sm">
+                                    <div>
+                                        <div class="font-semibold text-gray-700 mb-1">供应商名称</div>
+                                        <div class="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 text-gray-700">sunshinelink Claude</div>
+                                    </div>
+                                    <div>
+                                        <div class="font-semibold text-gray-700 mb-1">API 地址</div>
+                                        <div class="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 font-mono text-gray-700">https://api.sunshinelink.online</div>
+                                    </div>
+                                    <div>
+                                        <div class="font-semibold text-gray-700 mb-1">API Key</div>
+                                        <div class="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 text-gray-700">填写控制台创建的同一个 API 密钥</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="border border-gray-200 rounded-xl p-5">
+                                <h5 class="font-semibold text-gray-900 mb-3">模型怎么选</h5>
+                                <div class="space-y-3 text-sm">
+                                    <div class="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+                                        <div class="font-semibold text-blue-900">日常推荐</div>
+                                        <div class="font-mono text-blue-700 mt-1">claude-sonnet-4-6</div>
+                                        <p class="text-blue-700 mt-1">速度和质量均衡，适合大部分代码修改和文档任务。</p>
+                                    </div>
+                                    <div class="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3">
+                                        <div class="font-semibold text-gray-800">复杂任务</div>
+                                        <div class="font-mono text-gray-700 mt-1">claude-opus-4-6</div>
+                                    </div>
+                                    <div class="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3">
+                                        <div class="font-semibold text-gray-800">轻量快速</div>
+                                        <div class="font-mono text-gray-700 mt-1">claude-haiku-4-5</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="border border-gray-200 rounded-xl p-5 mb-5">
+                            <h5 class="font-semibold text-gray-900 mb-2">配置效果</h5>
+                            <p class="text-sm text-gray-600 mb-2">选择 <code class="bg-gray-100 px-1 rounded">claude-sonnet-4-6</code> 后，CCSwitch 通常会写出类似下面的 Claude Code 配置：</p>
+                            <div class="code-block" style="font-size:12px">{
+  "model": "claude-sonnet-4-6",
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://api.sunshinelink.online",
+    "ANTHROPIC_AUTH_TOKEN": "你的 API Key"
+  }
+}<button class="copy-btn" onclick="copyCode(this)">复制</button></div>
+                        </div>
+                        <div class="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                            <p class="text-sm text-amber-700">如果使用 <code class="bg-amber-100 px-1 rounded">--model</code> 或 <code class="bg-amber-100 px-1 rounded">ANTHROPIC_MODEL</code> 临时指定模型，它会覆盖 CCSwitch 写入的默认模型。</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-8">
+                    <div class="flex items-center space-x-3 mb-4">
+                        <div class="step-number purple">5</div>
+                        <h4 class="text-lg font-bold text-gray-900">一键切换工作流</h4>
+                    </div>
+                    <div class="ml-11">
+                        <p class="text-gray-600 text-sm mb-3">建议保存几套常用组合，使用时只在 CCSwitch 或系统托盘里点选对应配置：</p>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+                            <div class="bg-gray-50 border border-gray-200 rounded-xl p-5">
+                                <div class="font-semibold text-gray-900 mb-1">高质量编码</div>
+                                <p class="text-sm text-gray-600">Codex 选 <code>gpt-5.5</code>，Claude Code 选 <code>claude-opus-4-6</code>，适合架构设计、疑难排障、复杂重构。</p>
+                            </div>
+                            <div class="bg-gray-50 border border-gray-200 rounded-xl p-5">
+                                <div class="font-semibold text-gray-900 mb-1">日常开发</div>
+                                <p class="text-sm text-gray-600">Codex 选 <code>gpt-5.5</code>，Claude Code 选 <code>claude-sonnet-4-6</code>，适合大部分代码修改和文档任务。</p>
+                            </div>
+                            <div class="bg-gray-50 border border-gray-200 rounded-xl p-5">
+                                <div class="font-semibold text-gray-900 mb-1">轻量快速</div>
+                                <p class="text-sm text-gray-600">Codex 仍选 <code>gpt-5.5</code>，Claude Code 选 <code>claude-haiku-4-5</code>，适合小改动、解释代码、批量文本处理。</p>
+                            </div>
                         </div>
                     </div>
                 </div>
 
                 <div class="mb-4">
                     <div class="flex items-center space-x-3 mb-4">
-                        <div class="step-number purple">3</div>
-                        <h4 class="text-lg font-bold text-gray-900">多配置管理</h4>
+                        <div class="step-number purple">6</div>
+                        <h4 class="text-lg font-bold text-gray-900">验证是否生效</h4>
                     </div>
                     <div class="ml-11">
-                        <p class="text-gray-600 text-sm mb-2">你可以保存多套配置，例如：</p>
-                        <ul class="list-disc list-inside text-gray-600 text-sm space-y-1">
-                            <li><strong>工作配置</strong>：使用高质量模型（Opus/Sonnet），用于复杂任务</li>
-                            <li><strong>日常配置</strong>：使用经济型模型，用于简单代码补全</li>
-                            <li><strong>测试配置</strong>：连接本地或测试环境的 API</li>
+                        <ul class="list-disc list-inside text-gray-600 text-sm space-y-2 mb-4">
+                            <li>Codex：重新打开终端执行 <code class="bg-gray-100 px-1 rounded">codex</code>，让它读取 <code class="bg-gray-100 px-1 rounded">~/.codex/config.toml</code></li>
+                            <li>Claude Code：重新打开终端执行 <code class="bg-gray-100 px-1 rounded">claude</code>，在会话中用 <code class="bg-gray-100 px-1 rounded">/model</code> 查看或切换模型</li>
+                            <li>控制台：到 sunshinelink 的使用记录里确认请求模型、平台和消耗是否符合预期</li>
                         </ul>
+                        <div class="bg-green-50 border border-green-200 rounded-lg p-3">
+                            <p class="text-sm text-green-700">如果刚切换没有生效，优先重启当前 CLI 会话；仍不生效时检查 CCSwitch 是否写入了对应配置文件，以及 GPT 和 Claude 的 API 地址是否分别填写正确。</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -493,8 +749,24 @@ codex<button class="copy-btn" onclick="copyCode(this)">复制</button></div>
                         <div class="px-5 pb-4 text-sm text-gray-600">尝试以下步骤：1) 重启终端窗口；2) 重新运行 <code class="bg-gray-100 px-1 rounded">claude</code> 命令；3) 检查 <code class="bg-gray-100 px-1 rounded">~/.claude/settings.json</code> 配置是否已正确更新。</div>
                     </details>
                     <details class="border border-gray-200 rounded-xl overflow-hidden">
+                        <summary class="px-5 py-4 cursor-pointer hover:bg-gray-50 font-semibold text-gray-800 text-sm">Codex 切换 GPT 模型后没有生效怎么办？</summary>
+                        <div class="px-5 pb-4 text-sm text-gray-600">Codex 读取的是 <code class="bg-gray-100 px-1 rounded">~/.codex/config.toml</code>。请确认 CCSwitch 写入了 <code class="bg-gray-100 px-1 rounded">model</code>、<code class="bg-gray-100 px-1 rounded">model_provider</code> 和 <code class="bg-gray-100 px-1 rounded">base_url</code>，并重新打开终端执行 <code class="bg-gray-100 px-1 rounded">codex</code>。如果你手动设置了 <code class="bg-gray-100 px-1 rounded">OPENAI_API_KEY</code>，也要确认它和 CCSwitch 配置使用的是同一个令牌。</div>
+                    </details>
+                    <details class="border border-gray-200 rounded-xl overflow-hidden">
+                        <summary class="px-5 py-4 cursor-pointer hover:bg-gray-50 font-semibold text-gray-800 text-sm">为什么文档主流程只推荐 gpt-5.5？</summary>
+                        <div class="px-5 pb-4 text-sm text-gray-600">普通用户直接使用 <code class="bg-gray-100 px-1 rounded">gpt-5.5</code> 最省心。只有在平台明确提供 Codex 专用通道，或你需要兼容旧配置时，才考虑 <code class="bg-gray-100 px-1 rounded">gpt-5.3-codex</code>、<code class="bg-gray-100 px-1 rounded">gpt-5.2-codex</code> 这类模型名。</div>
+                    </details>
+                    <details class="border border-gray-200 rounded-xl overflow-hidden">
+                        <summary class="px-5 py-4 cursor-pointer hover:bg-gray-50 font-semibold text-gray-800 text-sm">GPT 和 Claude 的 API 地址可以填一样吗？</summary>
+                        <div class="px-5 pb-4 text-sm text-gray-600">不建议混用。Codex / GPT 和 Claude Code 都使用 <code class="bg-gray-100 px-1 rounded">https://api.sunshinelink.online</code>。地址填错时常见表现是 404、模型不存在、认证成功但无法请求。</div>
+                    </details>
+                    <details class="border border-gray-200 rounded-xl overflow-hidden">
+                        <summary class="px-5 py-4 cursor-pointer hover:bg-gray-50 font-semibold text-gray-800 text-sm">Claude Code 里看不到刚配置的模型怎么办？</summary>
+                        <div class="px-5 pb-4 text-sm text-gray-600">先重启 <code class="bg-gray-100 px-1 rounded">claude</code> 会话，再用 <code class="bg-gray-100 px-1 rounded">/model</code> 查看。若仍不显示，检查是否有命令行 <code class="bg-gray-100 px-1 rounded">--model</code>、环境变量 <code class="bg-gray-100 px-1 rounded">ANTHROPIC_MODEL</code> 或项目级配置覆盖了 CCSwitch 写入的用户级配置。</div>
+                    </details>
+                    <details class="border border-gray-200 rounded-xl overflow-hidden">
                         <summary class="px-5 py-4 cursor-pointer hover:bg-gray-50 font-semibold text-gray-800 text-sm">CCSwitch 支持哪些 AI 编程工具？</summary>
-                        <div class="px-5 pb-4 text-sm text-gray-600">CCSwitch 主要支持 Claude Code、CodeX CLI 和 Gemini CLI。还可以管理 MCP 服务器和 Skills 插件配置。</div>
+                        <div class="px-5 pb-4 text-sm text-gray-600">CCSwitch 主要支持 Claude Code、Codex CLI 和 Gemini CLI。还可以管理 MCP 服务器和 Skills 插件配置。</div>
                     </details>
                     <details class="border border-gray-200 rounded-xl overflow-hidden">
                         <summary class="px-5 py-4 cursor-pointer hover:bg-gray-50 font-semibold text-gray-800 text-sm">macOS 打开提示「已损坏，无法打开」？</summary>
@@ -506,7 +778,7 @@ codex<button class="copy-btn" onclick="copyCode(this)">复制</button></div>
                     <details class="border border-gray-200 rounded-xl overflow-hidden">
                         <summary class="px-5 py-4 cursor-pointer hover:bg-gray-50 font-semibold text-gray-800 text-sm">如何手动配置而不使用 CCSwitch？</summary>
                         <div class="px-5 pb-4 text-sm text-gray-600">
-                            可以直接编辑 <code class="bg-gray-100 px-1 rounded">~/.claude/settings.json</code> 文件，参考上方 <a href="#claude-code" class="text-blue-600 underline">Claude Code 安装教程</a> 中的 API 配置部分。
+                            Codex 可直接编辑 <code class="bg-gray-100 px-1 rounded">~/.codex/config.toml</code>；Claude Code 可直接编辑 <code class="bg-gray-100 px-1 rounded">~/.claude/settings.json</code>。手动配置时 API 地址统一填写 <code class="bg-gray-100 px-1 rounded">https://api.sunshinelink.online</code>。
                         </div>
                     </details>
                 </div>
