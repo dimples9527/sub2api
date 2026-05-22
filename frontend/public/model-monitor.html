@@ -1089,6 +1089,11 @@
     }
 
     function pointTime(point, fallback = '--:--') {
+      const displayStart = pickValue(point, ['displayStartTimestamp'], 0);
+      const displayEnd = pickValue(point, ['displayEndTimestamp'], 0);
+      if (displayStart && displayEnd) {
+        return formatTrendRange(displayStart, displayEnd, state.window);
+      }
       const value = pickValue(point, ['displayTimestamp', 'time', 'timestamp', 'checked_at', 'checkedAt'], '');
       if (typeof value === 'string' && value.trim() && !/^\d+$/.test(value.trim())) {
         return value.trim();
@@ -1106,6 +1111,63 @@
         300000
       );
       return Math.max(1000, interval);
+    }
+
+    function timestampToMs(value) {
+      const numeric = asNumber(value, 0);
+      if (numeric <= 0) return 0;
+      return numeric < 10000000000 ? numeric * 1000 : numeric;
+    }
+
+    function trendBucketStepMs(windowKey, monitorStepMs) {
+      switch (windowKey) {
+        case '24h':
+          return 60 * 60 * 1000;
+        case '7d':
+        case '30d':
+        case 'all':
+          return 24 * 60 * 60 * 1000;
+        default:
+          return Math.max(1000, monitorStepMs || 300000);
+      }
+    }
+
+    function alignTrendRangeEndMs(timestampMs, windowKey) {
+      if (windowKey === '24h') {
+        const date = new Date(timestampMs);
+        date.setMinutes(0, 0, 0);
+        const hourStart = date.getTime();
+        return hourStart < timestampMs ? hourStart + (60 * 60 * 1000) : hourStart;
+      }
+      if (windowKey === '7d' || windowKey === '30d' || windowKey === 'all') {
+        const date = new Date(timestampMs);
+        date.setHours(0, 0, 0, 0);
+        const dayStart = date.getTime();
+        return dayStart < timestampMs ? dayStart + (24 * 60 * 60 * 1000) : dayStart;
+      }
+      return timestampMs;
+    }
+
+    function formatHour(valueMs) {
+      return String(new Date(valueMs).getHours()).padStart(2, '0') + ':00';
+    }
+
+    function formatMonthDay(valueMs) {
+      const date = new Date(valueMs);
+      return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    }
+
+    function formatTrendRange(startValue, endValue, windowKey) {
+      const startMs = timestampToMs(startValue);
+      const endMs = timestampToMs(endValue);
+      if (!startMs || !endMs) return '--:--';
+      if (windowKey === '24h') {
+        return `${formatHour(startMs)} - ${formatHour(endMs)}`;
+      }
+      if (windowKey === '7d' || windowKey === '30d' || windowKey === 'all') {
+        return `${formatMonthDay(startMs)} - ${formatMonthDay(endMs)}`;
+      }
+      return formatCheckedTime(endMs);
     }
 
     function normalizeTrendPoint(point, row, fallbackIndex) {
@@ -1292,14 +1354,22 @@
       const anchorTimestamp = currentTimestamp > 0
         ? currentTimestamp
         : asNumber(pickValue(trendSource[trendSource.length - 1], ['timestamp', 'displayTimestamp'], 0), 0);
-      if (anchorTimestamp > 0) {
-        const intervalStep = anchorTimestamp > 10000000000 ? intervalMs : Math.round(intervalMs / 1000);
+      const anchorMs = timestampToMs(anchorTimestamp);
+      if (anchorMs > 0) {
+        const intervalStep = trendBucketStepMs(state.window, intervalMs);
+        const showRange = state.window !== '90m';
+        const anchorEndMs = showRange ? alignTrendRangeEndMs(anchorMs, state.window) : anchorMs;
         trendSource = trendSource.map((point, pointIndex) => {
-          const displayTimestamp = anchorTimestamp - ((trendSource.length - 1 - pointIndex) * intervalStep);
+          const displayEndTimestamp = anchorEndMs - ((trendSource.length - 1 - pointIndex) * intervalStep);
+          const displayStartTimestamp = displayEndTimestamp - intervalStep;
+          const displayTimestamp = displayEndTimestamp;
+          const displayFields = showRange
+            ? { displayTimestamp, displayStartTimestamp, displayEndTimestamp }
+            : { displayTimestamp };
           if (point && typeof point === 'object') {
-            return { ...point, displayTimestamp };
+            return { ...point, ...displayFields };
           }
-          return { tone: point, displayTimestamp };
+          return { tone: point, ...displayFields };
         });
       }
       const trend = trendSource.map((point, pointIndex) => normalizeTrendPoint(point, { availability, latency, time }, pointIndex));

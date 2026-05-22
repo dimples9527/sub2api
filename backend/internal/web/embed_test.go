@@ -573,6 +573,8 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "autoRefresh: true")
 		assert.Contains(t, w.Body.String(), "updateAutoRefresh();")
 		assert.Contains(t, w.Body.String(), "displayTimestamp")
+		assert.Contains(t, w.Body.String(), "trendBucketStepMs")
+		assert.Contains(t, w.Body.String(), "formatTrendRange")
 		assert.Contains(t, w.Body.String(), "tbody tr:first-child .trend-tooltip")
 	})
 }
