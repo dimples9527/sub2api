@@ -166,6 +166,9 @@
           <template #cell-select="{ row }">
             <input type="checkbox" :checked="selIds.includes(row.id)" @change="toggleSel(row.id)" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
           </template>
+          <template #cell-id="{ value }">
+            <span class="font-mono text-xs text-gray-500 dark:text-gray-400">#{{ value }}</span>
+          </template>
           <template #cell-name="{ row, value }">
             <div class="flex flex-col">
               <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
@@ -932,6 +935,7 @@ function getAntigravityTierClass(row: any): string {
 const allColumns = computed(() => {
   const c = [
     { key: 'select', label: '', sortable: false },
+    { key: 'id', label: 'ID', sortable: true },
     { key: 'name', label: t('admin.accounts.columns.name'), sortable: true },
     { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false },
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
@@ -955,15 +959,15 @@ const allColumns = computed(() => {
   return c
 })
 
-// Columns that can be toggled (exclude select, name, and actions)
+// Columns that can be toggled (exclude fixed identity/action columns)
 const toggleableColumns = computed(() =>
-  allColumns.value.filter(col => col.key !== 'select' && col.key !== 'name' && col.key !== 'actions')
+  allColumns.value.filter(col => col.key !== 'select' && col.key !== 'id' && col.key !== 'name' && col.key !== 'actions')
 )
 
 // Filtered columns based on visibility
 const cols = computed(() =>
   allColumns.value.filter(col =>
-    col.key === 'select' || col.key === 'name' || col.key === 'actions' || !hiddenColumns.has(col.key)
+    col.key === 'select' || col.key === 'id' || col.key === 'name' || col.key === 'actions' || !hiddenColumns.has(col.key)
   )
 )
 

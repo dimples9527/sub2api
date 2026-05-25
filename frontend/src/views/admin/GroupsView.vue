@@ -90,6 +90,10 @@
           default-sort-order="asc"
           @sort="handleSort"
         >
+          <template #cell-id="{ value }">
+            <span class="font-mono text-xs text-gray-500 dark:text-gray-400">#{{ value }}</span>
+          </template>
+
           <template #cell-name="{ value }">
             <span class="font-medium text-gray-900 dark:text-white">{{
               value
@@ -2727,6 +2731,7 @@ const appStore = useAppStore();
 const onboardingStore = useOnboardingStore();
 
 const columns = computed<Column[]>(() => [
+  { key: "id", label: "ID", sortable: true },
   { key: "name", label: t("admin.groups.columns.name"), sortable: true },
   {
     key: "platform",

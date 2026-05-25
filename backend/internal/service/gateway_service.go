@@ -530,8 +530,14 @@ func (s *GatewayService) TempUnscheduleRetryableError(ctx context.Context, accou
 	case http.StatusBadRequest:
 		tempUnscheduleGoogleConfigError(ctx, s.accountRepo, accountID, "[handler]")
 	case http.StatusBadGateway:
-		tempUnscheduleEmptyResponse(ctx, s.accountRepo, accountID, "[handler]")
+		if isEmptyStreamResponseFailover(failoverErr.ResponseBody) {
+			tempUnscheduleEmptyResponse(ctx, s.accountRepo, accountID, "[handler]")
+		}
 	}
+}
+
+func isEmptyStreamResponseFailover(responseBody []byte) bool {
+	return strings.Contains(strings.ToLower(string(responseBody)), "empty stream response")
 }
 
 // GatewayService handles API gateway operations

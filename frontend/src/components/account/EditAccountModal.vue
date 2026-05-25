@@ -2027,6 +2027,14 @@ const normalizePoolModeRetryCount = (value: number) => {
   return normalized
 }
 
+const normalizeRateMultiplierForSubmit = (value: unknown) => {
+  if (value === '' || value === null || value === undefined) {
+    return 1
+  }
+  const normalized = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(normalized) ? normalized : 1
+}
+
 const syncFormFromAccount = (newAccount: Account | null) => {
   if (!newAccount) {
     return
@@ -2294,6 +2302,15 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   editApiKey.value = ''
 }
 
+async function loadTLSProfiles() {
+  try {
+    const profiles = await adminAPI.tlsFingerprintProfiles.list()
+    tlsFingerprintProfiles.value = profiles.map(p => ({ id: p.id, name: p.name }))
+  } catch {
+    tlsFingerprintProfiles.value = []
+  }
+}
+
 watch(
   [() => props.show, () => props.account],
   ([show, newAccount], [wasShow, previousAccount]) => {
@@ -2307,15 +2324,6 @@ watch(
   },
   { immediate: true }
 )
-
-const loadTLSProfiles = async () => {
-  try {
-    const profiles = await adminAPI.tlsFingerprintProfiles.list()
-    tlsFingerprintProfiles.value = profiles.map(p => ({ id: p.id, name: p.name }))
-  } catch {
-    tlsFingerprintProfiles.value = []
-  }
-}
 
 // Model mapping helpers
 const addModelMapping = () => {
@@ -2728,6 +2736,7 @@ const handleSubmit = async () => {
 
   const updatePayload: Record<string, unknown> = { ...form }
   try {
+    updatePayload.rate_multiplier = normalizeRateMultiplierForSubmit(form.rate_multiplier)
     // 后端期望 proxy_id: 0 表示清除代理，而不是 null
     if (updatePayload.proxy_id === null) {
       updatePayload.proxy_id = 0

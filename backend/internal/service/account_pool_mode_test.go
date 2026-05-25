@@ -115,3 +115,28 @@ func TestGetPoolModeRetryCount(t *testing.T) {
 		})
 	}
 }
+
+func TestIsPoolModeRetryableStatus(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		expected   bool
+	}{
+		{name: "auth_error", statusCode: 401, expected: true},
+		{name: "forbidden", statusCode: 403, expected: true},
+		{name: "rate_limited", statusCode: 429, expected: true},
+		{name: "internal_server_error", statusCode: 500, expected: true},
+		{name: "bad_gateway", statusCode: 502, expected: true},
+		{name: "service_unavailable", statusCode: 503, expected: true},
+		{name: "gateway_timeout", statusCode: 504, expected: true},
+		{name: "bad_request", statusCode: 400, expected: false},
+		{name: "payment_required", statusCode: 402, expected: false},
+		{name: "not_found", statusCode: 404, expected: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.expected, isPoolModeRetryableStatus(tt.statusCode))
+		})
+	}
+}
