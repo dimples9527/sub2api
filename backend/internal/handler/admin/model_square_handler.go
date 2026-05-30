@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -32,6 +34,7 @@ type ModelSquareHandler struct {
 	email          string
 	password       string
 	settingService *service.SettingService
+	groupProvider  modelSquareGroupProvider
 
 	mu    sync.Mutex
 	token cachedFindCGToken
@@ -50,7 +53,12 @@ type ModelSquareHandlerConfig struct {
 	Password       string
 	AppConfig      *config.Config
 	SettingService *service.SettingService
+	GroupProvider  modelSquareGroupProvider
 	HTTPClient     *http.Client
+}
+
+type modelSquareGroupProvider interface {
+	GetAllGroups(ctx context.Context) ([]service.Group, error)
 }
 
 type findCGLoginResponse struct {
@@ -64,8 +72,8 @@ type findCGLoginResponse struct {
 }
 
 // NewModelSquareHandler creates a model square proxy handler.
-func NewModelSquareHandler(cfg *config.Config, settingService *service.SettingService) *ModelSquareHandler {
-	return newModelSquareHandler(ModelSquareHandlerConfig{AppConfig: cfg, SettingService: settingService})
+func NewModelSquareHandler(cfg *config.Config, settingService *service.SettingService, groupProvider service.AdminService) *ModelSquareHandler {
+	return newModelSquareHandler(ModelSquareHandlerConfig{AppConfig: cfg, SettingService: settingService, GroupProvider: groupProvider})
 }
 
 func newModelSquareHandler(cfg ModelSquareHandlerConfig) *ModelSquareHandler {
@@ -118,6 +126,7 @@ func newModelSquareHandler(cfg ModelSquareHandlerConfig) *ModelSquareHandler {
 		email:          email,
 		password:       password,
 		settingService: cfg.SettingService,
+		groupProvider:  cfg.GroupProvider,
 	}
 }
 
@@ -146,7 +155,7 @@ func (h *ModelSquareHandler) fetchModelSquare(ctx context.Context, forceLogin bo
 		if status < 200 || status >= 300 {
 			return nil, fmt.Errorf("findcg model-square failed: HTTP %d: %s", status, string(payload))
 		}
-		return payload, nil
+		return h.mergeGroups(ctx, payload)
 	}
 
 	token, err = h.getToken(ctx, true)
@@ -161,14 +170,14 @@ func (h *ModelSquareHandler) fetchModelSquare(ctx context.Context, forceLogin bo
 		return nil, fmt.Errorf("findcg model-square failed after relogin: HTTP %d: %s", status, string(payload))
 	}
 
-	return payload, nil
+	return h.mergeGroups(ctx, payload)
 }
 
 func (h *ModelSquareHandler) getToken(ctx context.Context, force bool) (cachedFindCGToken, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	baseURL, email, password := h.resolveConfigLocked(ctx)
+	baseURL, email, password, source := h.resolveConfigLocked(ctx)
 	if baseURL != h.baseURL || email != h.email || password != h.password {
 		h.baseURL = baseURL
 		h.email = email
@@ -183,6 +192,7 @@ func (h *ModelSquareHandler) getToken(ctx context.Context, force bool) (cachedFi
 	if email == "" || password == "" {
 		return cachedFindCGToken{}, fmt.Errorf("missing findcg credentials: set model_square.email/model_square.password or MODEL_SQUARE_EMAIL/MODEL_SQUARE_PASSWORD")
 	}
+	logFindCGLoginAttempt(h.baseURL, email, password, source)
 
 	body, err := json.Marshal(map[string]string{
 		"email":    email,
@@ -209,6 +219,7 @@ func (h *ModelSquareHandler) getToken(ctx context.Context, force bool) (cachedFi
 		return cachedFindCGToken{}, fmt.Errorf("read findcg login response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logFindCGLoginFailure(resp.StatusCode, raw, h.baseURL, email, password, source)
 		return cachedFindCGToken{}, fmt.Errorf("findcg login failed: HTTP %d: %s", resp.StatusCode, string(raw))
 	}
 
@@ -220,6 +231,7 @@ func (h *ModelSquareHandler) getToken(ctx context.Context, force bool) (cachedFi
 		if loginResp.Message == "" {
 			loginResp.Message = "missing access_token"
 		}
+		logFindCGLoginFailure(resp.StatusCode, raw, h.baseURL, email, password, source)
 		return cachedFindCGToken{}, fmt.Errorf("findcg login failed: %s", loginResp.Message)
 	}
 
@@ -241,10 +253,11 @@ func (h *ModelSquareHandler) getToken(ctx context.Context, force bool) (cachedFi
 	return h.token, nil
 }
 
-func (h *ModelSquareHandler) resolveConfigLocked(ctx context.Context) (string, string, string) {
+func (h *ModelSquareHandler) resolveConfigLocked(ctx context.Context) (string, string, string, string) {
 	baseURL := h.baseURL
 	email := h.email
 	password := h.password
+	source := "config_or_env"
 
 	if h.settingService != nil {
 		if settings, err := h.settingService.GetAllSettings(ctx); err == nil {
@@ -257,13 +270,141 @@ func (h *ModelSquareHandler) resolveConfigLocked(ctx context.Context) (string, s
 			if settings.ModelSquarePassword != "" {
 				password = settings.ModelSquarePassword
 			}
+			if settings.ModelSquareBaseURL != "" || settings.ModelSquareEmail != "" || settings.ModelSquarePassword != "" {
+				source = "settings"
+			}
+		} else {
+			slog.Warn("findcg model square settings lookup failed, using handler config", "error", err)
 		}
 	}
 
 	if baseURL == "" {
 		baseURL = defaultFindCGBaseURL
 	}
-	return strings.TrimRight(baseURL, "/"), strings.TrimSpace(email), password
+	return strings.TrimRight(baseURL, "/"), strings.TrimSpace(email), password, source
+}
+
+func logFindCGLoginAttempt(baseURL, email, password, source string) {
+	slog.Info(
+		"findcg login attempt",
+		"base_url", strings.TrimRight(baseURL, "/"),
+		"email", maskFindCGEmail(email),
+		"password_configured", password != "",
+		"password_length", len(password),
+		"config_source", source,
+	)
+}
+
+func logFindCGLoginFailure(status int, body []byte, baseURL, email, password, source string) {
+	slog.Warn(
+		"findcg login failed",
+		"status", status,
+		"body", string(body),
+		"base_url", strings.TrimRight(baseURL, "/"),
+		"email", maskFindCGEmail(email),
+		"password_configured", password != "",
+		"password_length", len(password),
+		"config_source", source,
+	)
+}
+
+func maskFindCGEmail(email string) string {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return "***"
+	}
+	parts := strings.SplitN(email, "@", 2)
+	if len(parts) != 2 {
+		if len(email) <= 2 {
+			return "***"
+		}
+		return email[:1] + "***" + email[len(email)-1:]
+	}
+	local := parts[0]
+	if len(local) <= 1 {
+		return local + "***@" + parts[1]
+	}
+	if len(local) <= 4 {
+		return local[:2] + "***" + local[len(local)-2:] + "@" + parts[1]
+	}
+	return local[:2] + "***" + local[len(local)-2:] + "@" + parts[1]
+}
+
+func (h *ModelSquareHandler) mergeGroups(ctx context.Context, payload []byte) ([]byte, error) {
+	if h.groupProvider == nil {
+		return payload, nil
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(payload, &body); err != nil {
+		return nil, fmt.Errorf("decode findcg model-square response: %w", err)
+	}
+
+	rawGroups, ok := body["groups"].([]any)
+	if !ok || len(rawGroups) == 0 {
+		return payload, nil
+	}
+
+	localGroups, err := h.groupProvider.GetAllGroups(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load local groups for model square: %w", err)
+	}
+	localByName := make(map[string]service.Group, len(localGroups))
+	for i := range localGroups {
+		key := normalizeModelSquareGroupName(localGroups[i].Name)
+		if key != "" {
+			localByName[key] = localGroups[i]
+		}
+	}
+
+	mergedGroups := make([]any, 0, len(rawGroups))
+	for _, rawGroup := range rawGroups {
+		groupMap, ok := rawGroup.(map[string]any)
+		if !ok {
+			mergedGroups = append(mergedGroups, rawGroup)
+			continue
+		}
+
+		remoteID, hasID := groupMap["id"]
+		remoteName, _ := groupMap["name"].(string)
+		localGroup, matched := localByName[normalizeModelSquareGroupName(remoteName)]
+		if !matched {
+			mergedGroups = append(mergedGroups, rawGroup)
+			continue
+		}
+
+		mergedGroup, err := modelSquareGroupMapFromLocal(localGroup)
+		if err != nil {
+			return nil, err
+		}
+		if hasID {
+			mergedGroup["id"] = remoteID
+		}
+		mergedGroups = append(mergedGroups, mergedGroup)
+	}
+
+	body["groups"] = mergedGroups
+	mergedPayload, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("encode merged model-square response: %w", err)
+	}
+	return mergedPayload, nil
+}
+
+func modelSquareGroupMapFromLocal(group service.Group) (map[string]any, error) {
+	raw, err := json.Marshal(dto.GroupFromServiceAdmin(&group))
+	if err != nil {
+		return nil, fmt.Errorf("encode local group for model square: %w", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("decode local group for model square: %w", err)
+	}
+	return out, nil
+}
+
+func normalizeModelSquareGroupName(name string) string {
+	return strings.ToLower(strings.Join(strings.Fields(name), ""))
 }
 
 func (h *ModelSquareHandler) requestModelSquare(ctx context.Context, token cachedFindCGToken) ([]byte, int, error) {

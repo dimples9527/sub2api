@@ -4,9 +4,6 @@
       <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 class="text-2xl font-semibold text-gray-900 dark:text-white">模型广场</h1>
-          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            来自后台代理的 findcg 模型数据，仅管理员可见。
-          </p>
         </div>
         <button type="button" class="btn btn-secondary btn-sm" :disabled="loading" @click="loadModels">
           <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
@@ -14,11 +11,15 @@
         </button>
       </div>
 
-      <div class="grid gap-3 md:grid-cols-[1fr_auto_auto]">
+      <div class="grid gap-3 md:grid-cols-[1fr_auto_auto_auto]">
         <div class="relative">
           <Icon name="search" size="sm" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input v-model="search" type="search" class="input pl-9" placeholder="搜索模型..." />
         </div>
+        <select v-model="groupId" class="input min-w-40">
+          <option value="">全部分组</option>
+          <option v-for="group in groups" :key="group.id" :value="String(group.id)">{{ group.name }}</option>
+        </select>
         <select v-model="provider" class="input min-w-40">
           <option value="">全部提供商</option>
           <option v-for="item in providers" :key="item" :value="item">{{ item }}</option>
@@ -140,6 +141,7 @@ const error = ref('')
 const search = ref('')
 const provider = ref('')
 const mode = ref('')
+const groupId = ref('')
 const models = ref<ModelSquareModel[]>([])
 const groups = ref<ModelSquareGroup[]>([])
 const updatedAt = ref('')
@@ -153,6 +155,7 @@ const filteredModels = computed(() => {
   const keyword = search.value.trim().toLowerCase()
   return models.value.filter((model) => {
     if (keyword && !String(model.id || '').toLowerCase().includes(keyword)) return false
+    if (groupId.value && !(model.group_ids || []).some((id) => String(id) === groupId.value)) return false
     if (provider.value && model.provider !== provider.value) return false
     if (mode.value && (model.mode || 'chat') !== mode.value) return false
     return true
