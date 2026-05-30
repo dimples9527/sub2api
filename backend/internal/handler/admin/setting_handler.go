@@ -167,6 +167,9 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		FallbackModelOpenAI:                  settings.FallbackModelOpenAI,
 		FallbackModelGemini:                  settings.FallbackModelGemini,
 		FallbackModelAntigravity:             settings.FallbackModelAntigravity,
+		ModelSquareBaseURL:                   settings.ModelSquareBaseURL,
+		ModelSquareEmail:                     settings.ModelSquareEmail,
+		ModelSquarePasswordConfigured:        settings.ModelSquarePasswordConfigured,
 		EnableIdentityPatch:                  settings.EnableIdentityPatch,
 		IdentityPatchPrompt:                  settings.IdentityPatchPrompt,
 		OpsMonitoringEnabled:                 opsEnabled && settings.OpsMonitoringEnabled,
@@ -294,6 +297,11 @@ type UpdateSettingsRequest struct {
 	FallbackModelGemini      string `json:"fallback_model_gemini"`
 	FallbackModelAntigravity string `json:"fallback_model_antigravity"`
 
+	// Model square upstream configuration
+	ModelSquareBaseURL  string `json:"model_square_base_url"`
+	ModelSquareEmail    string `json:"model_square_email"`
+	ModelSquarePassword string `json:"model_square_password"`
+
 	// Identity patch configuration (Claude -> Gemini)
 	EnableIdentityPatch bool   `json:"enable_identity_patch"`
 	IdentityPatchPrompt string `json:"identity_patch_prompt"`
@@ -376,6 +384,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	req.SMTPHost = strings.TrimSpace(req.SMTPHost)
 	req.SMTPUsername = strings.TrimSpace(req.SMTPUsername)
 	req.SMTPPassword = strings.TrimSpace(req.SMTPPassword)
+	req.ModelSquareBaseURL = strings.TrimRight(strings.TrimSpace(req.ModelSquareBaseURL), "/")
+	req.ModelSquareEmail = strings.TrimSpace(req.ModelSquareEmail)
 	req.SMTPFrom = strings.TrimSpace(req.SMTPFrom)
 	req.SMTPFromName = strings.TrimSpace(req.SMTPFromName)
 	if req.SMTPPort <= 0 {
@@ -856,6 +866,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		FallbackModelOpenAI:              req.FallbackModelOpenAI,
 		FallbackModelGemini:              req.FallbackModelGemini,
 		FallbackModelAntigravity:         req.FallbackModelAntigravity,
+		ModelSquareBaseURL:               req.ModelSquareBaseURL,
+		ModelSquareEmail:                 req.ModelSquareEmail,
+		ModelSquarePassword:              req.ModelSquarePassword,
 		EnableIdentityPatch:              req.EnableIdentityPatch,
 		IdentityPatchPrompt:              req.IdentityPatchPrompt,
 		MinClaudeCodeVersion:             req.MinClaudeCodeVersion,
@@ -1046,6 +1059,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		FallbackModelOpenAI:                  updatedSettings.FallbackModelOpenAI,
 		FallbackModelGemini:                  updatedSettings.FallbackModelGemini,
 		FallbackModelAntigravity:             updatedSettings.FallbackModelAntigravity,
+		ModelSquareBaseURL:                   updatedSettings.ModelSquareBaseURL,
+		ModelSquareEmail:                     updatedSettings.ModelSquareEmail,
+		ModelSquarePasswordConfigured:        updatedSettings.ModelSquarePasswordConfigured,
 		EnableIdentityPatch:                  updatedSettings.EnableIdentityPatch,
 		IdentityPatchPrompt:                  updatedSettings.IdentityPatchPrompt,
 		OpsMonitoringEnabled:                 updatedSettings.OpsMonitoringEnabled,

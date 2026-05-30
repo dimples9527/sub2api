@@ -2365,6 +2365,75 @@
 
         </div>
 
+        <!-- Tab: Model Square -->
+        <div v-show="activeTab === 'modelSquare'" class="space-y-6">
+          <div class="card">
+            <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                {{ t('admin.settings.modelSquare.title') }}
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {{ t('admin.settings.modelSquare.description') }}
+              </p>
+            </div>
+            <div class="space-y-6 p-6">
+              <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
+                <div>
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t('admin.settings.modelSquare.baseUrl') }}
+                  </label>
+                  <input
+                    v-model="form.model_square_base_url"
+                    type="url"
+                    class="input"
+                    placeholder="https://www.findcg.com"
+                  />
+                </div>
+                <div>
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t('admin.settings.modelSquare.email') }}
+                  </label>
+                  <input
+                    v-model="form.model_square_email"
+                    type="email"
+                    class="input"
+                    autocomplete="off"
+                    placeholder="admin@example.com"
+                  />
+                </div>
+                <div class="md:col-span-2">
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t('admin.settings.modelSquare.password') }}
+                  </label>
+                  <input
+                    v-model="form.model_square_password"
+                    type="password"
+                    class="input"
+                    autocomplete="new-password"
+                    autocapitalize="off"
+                    spellcheck="false"
+                    :placeholder="
+                      form.model_square_password_configured
+                        ? t('admin.settings.modelSquare.passwordConfiguredPlaceholder')
+                        : t('admin.settings.modelSquare.passwordPlaceholder')
+                    "
+                  />
+                  <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{
+                      form.model_square_password_configured
+                        ? t('admin.settings.modelSquare.passwordConfiguredHint')
+                        : t('admin.settings.modelSquare.passwordHint')
+                    }}
+                  </p>
+                </div>
+              </div>
+              <div class="rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm text-blue-700 dark:border-blue-900/50 dark:bg-blue-900/20 dark:text-blue-300">
+                {{ t('admin.settings.modelSquare.adminOnlyHint') }}
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div v-show="activeTab === 'email'" class="space-y-6">
         <!-- Email disabled hint - show when email_verify_enabled is off -->
         <div v-if="!form.email_verify_enabled" class="card">
@@ -2673,7 +2742,7 @@ const { t, locale } = useI18n()
 const appStore = useAppStore()
 const adminSettingsStore = useAdminSettingsStore()
 
-type SettingsTab = 'general' | 'security' | 'users' | 'gateway' | 'monitor' | 'payment' | 'email' | 'backup'
+type SettingsTab = 'general' | 'security' | 'users' | 'gateway' | 'monitor' | 'modelSquare' | 'payment' | 'email' | 'backup'
 const activeTab = ref<SettingsTab>('general')
 const settingsTabs = [
   { key: 'general'  as SettingsTab, icon: 'home'   as const },
@@ -2681,6 +2750,7 @@ const settingsTabs = [
   { key: 'users'    as SettingsTab, icon: 'user'   as const },
   { key: 'gateway'  as SettingsTab, icon: 'server' as const },
   { key: 'monitor'  as SettingsTab, icon: 'activity' as const },
+  { key: 'modelSquare' as SettingsTab, icon: 'grid' as const },
   { key: 'payment'  as SettingsTab, icon: 'creditCard' as const },
   { key: 'email'    as SettingsTab, icon: 'mail'   as const },
   { key: 'backup'   as SettingsTab, icon: 'database' as const },
@@ -2768,6 +2838,7 @@ interface DefaultSubscriptionGroupOption {
 
 type SettingsForm = SystemSettings & {
   smtp_password: string
+  model_square_password: string
   turnstile_secret_key: string
   linuxdo_connect_client_secret: string
   oidc_connect_client_secret: string
@@ -2855,6 +2926,10 @@ const form = reactive<SettingsForm>({
   fallback_model_openai: 'gpt-4o',
   fallback_model_gemini: 'gemini-2.5-pro',
   fallback_model_antigravity: 'gemini-2.5-pro',
+  model_square_base_url: 'https://www.findcg.com',
+  model_square_email: '',
+  model_square_password: '',
+  model_square_password_configured: false,
   // Identity patch (Claude -> Gemini)
   enable_identity_patch: true,
   identity_patch_prompt: '',
@@ -3111,6 +3186,7 @@ async function loadSettings() {
     )
     registrationEmailSuffixWhitelistDraft.value = ''
     form.smtp_password = ''
+    form.model_square_password = ''
     smtpPasswordManuallyEdited.value = false
     form.turnstile_secret_key = ''
     form.linuxdo_connect_client_secret = ''
@@ -3303,6 +3379,9 @@ async function saveSettings() {
       fallback_model_openai: form.fallback_model_openai,
       fallback_model_gemini: form.fallback_model_gemini,
       fallback_model_antigravity: form.fallback_model_antigravity,
+      model_square_base_url: form.model_square_base_url,
+      model_square_email: form.model_square_email,
+      model_square_password: form.model_square_password || undefined,
       enable_identity_patch: form.enable_identity_patch,
       identity_patch_prompt: form.identity_patch_prompt,
       min_claude_code_version: form.min_claude_code_version,
@@ -3354,6 +3433,7 @@ async function saveSettings() {
     )
     registrationEmailSuffixWhitelistDraft.value = ''
     form.smtp_password = ''
+    form.model_square_password = ''
     smtpPasswordManuallyEdited.value = false
     form.turnstile_secret_key = ''
     form.linuxdo_connect_client_secret = ''

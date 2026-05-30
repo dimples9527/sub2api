@@ -106,6 +106,11 @@ type SystemSettings struct {
 	FallbackModelGemini      string `json:"fallback_model_gemini"`
 	FallbackModelAntigravity string `json:"fallback_model_antigravity"`
 
+	// Model square upstream configuration
+	ModelSquareBaseURL            string `json:"model_square_base_url"`
+	ModelSquareEmail              string `json:"model_square_email"`
+	ModelSquarePasswordConfigured bool   `json:"model_square_password_configured"`
+
 	// Identity patch configuration (Claude -> Gemini)
 	EnableIdentityPatch bool   `json:"enable_identity_patch"`
 	IdentityPatchPrompt string `json:"identity_patch_prompt"`

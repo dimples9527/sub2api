@@ -14,6 +14,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -26,10 +27,11 @@ const (
 
 // ModelSquareHandler proxies the external model square API for admin users.
 type ModelSquareHandler struct {
-	baseURL    string
-	httpClient *http.Client
-	email      string
-	password   string
+	baseURL        string
+	httpClient     *http.Client
+	email          string
+	password       string
+	settingService *service.SettingService
 
 	mu    sync.Mutex
 	token cachedFindCGToken
@@ -43,11 +45,12 @@ type cachedFindCGToken struct {
 
 // ModelSquareHandlerConfig configures ModelSquareHandler, mainly for tests.
 type ModelSquareHandlerConfig struct {
-	BaseURL    string
-	Email      string
-	Password   string
-	AppConfig  *config.Config
-	HTTPClient *http.Client
+	BaseURL        string
+	Email          string
+	Password       string
+	AppConfig      *config.Config
+	SettingService *service.SettingService
+	HTTPClient     *http.Client
 }
 
 type findCGLoginResponse struct {
@@ -61,8 +64,8 @@ type findCGLoginResponse struct {
 }
 
 // NewModelSquareHandler creates a model square proxy handler.
-func NewModelSquareHandler(cfg *config.Config) *ModelSquareHandler {
-	return newModelSquareHandler(ModelSquareHandlerConfig{AppConfig: cfg})
+func NewModelSquareHandler(cfg *config.Config, settingService *service.SettingService) *ModelSquareHandler {
+	return newModelSquareHandler(ModelSquareHandlerConfig{AppConfig: cfg, SettingService: settingService})
 }
 
 func newModelSquareHandler(cfg ModelSquareHandlerConfig) *ModelSquareHandler {
@@ -110,10 +113,11 @@ func newModelSquareHandler(cfg ModelSquareHandlerConfig) *ModelSquareHandler {
 	}
 
 	return &ModelSquareHandler{
-		baseURL:    baseURL,
-		httpClient: client,
-		email:      email,
-		password:   password,
+		baseURL:        baseURL,
+		httpClient:     client,
+		email:          email,
+		password:       password,
+		settingService: cfg.SettingService,
 	}
 }
 
@@ -129,7 +133,7 @@ func (h *ModelSquareHandler) Get(c *gin.Context) {
 }
 
 func (h *ModelSquareHandler) fetchModelSquare(ctx context.Context, forceLogin bool) ([]byte, error) {
-	token, err := h.getToken(forceLogin)
+	token, err := h.getToken(ctx, forceLogin)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +149,7 @@ func (h *ModelSquareHandler) fetchModelSquare(ctx context.Context, forceLogin bo
 		return payload, nil
 	}
 
-	token, err = h.getToken(true)
+	token, err = h.getToken(ctx, true)
 	if err != nil {
 		return nil, err
 	}
@@ -160,16 +164,22 @@ func (h *ModelSquareHandler) fetchModelSquare(ctx context.Context, forceLogin bo
 	return payload, nil
 }
 
-func (h *ModelSquareHandler) getToken(force bool) (cachedFindCGToken, error) {
+func (h *ModelSquareHandler) getToken(ctx context.Context, force bool) (cachedFindCGToken, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	baseURL, email, password := h.resolveConfigLocked(ctx)
+	if baseURL != h.baseURL || email != h.email || password != h.password {
+		h.baseURL = baseURL
+		h.email = email
+		h.password = password
+		h.token = cachedFindCGToken{}
+	}
 
 	if !force && h.token.AccessToken != "" && time.Now().Before(h.token.ExpiresAt.Add(-time.Minute)) {
 		return h.token, nil
 	}
 
-	email := h.email
-	password := h.password
 	if email == "" || password == "" {
 		return cachedFindCGToken{}, fmt.Errorf("missing findcg credentials: set model_square.email/model_square.password or MODEL_SQUARE_EMAIL/MODEL_SQUARE_PASSWORD")
 	}
@@ -229,6 +239,31 @@ func (h *ModelSquareHandler) getToken(force bool) (cachedFindCGToken, error) {
 	}
 
 	return h.token, nil
+}
+
+func (h *ModelSquareHandler) resolveConfigLocked(ctx context.Context) (string, string, string) {
+	baseURL := h.baseURL
+	email := h.email
+	password := h.password
+
+	if h.settingService != nil {
+		if settings, err := h.settingService.GetAllSettings(ctx); err == nil {
+			if settings.ModelSquareBaseURL != "" {
+				baseURL = settings.ModelSquareBaseURL
+			}
+			if settings.ModelSquareEmail != "" {
+				email = settings.ModelSquareEmail
+			}
+			if settings.ModelSquarePassword != "" {
+				password = settings.ModelSquarePassword
+			}
+		}
+	}
+
+	if baseURL == "" {
+		baseURL = defaultFindCGBaseURL
+	}
+	return strings.TrimRight(baseURL, "/"), strings.TrimSpace(email), password
 }
 
 func (h *ModelSquareHandler) requestModelSquare(ctx context.Context, token cachedFindCGToken) ([]byte, int, error) {

@@ -593,6 +593,11 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 	updates[SettingKeyFallbackModelOpenAI] = settings.FallbackModelOpenAI
 	updates[SettingKeyFallbackModelGemini] = settings.FallbackModelGemini
 	updates[SettingKeyFallbackModelAntigravity] = settings.FallbackModelAntigravity
+	updates[SettingKeyModelSquareBaseURL] = strings.TrimRight(strings.TrimSpace(settings.ModelSquareBaseURL), "/")
+	updates[SettingKeyModelSquareEmail] = strings.TrimSpace(settings.ModelSquareEmail)
+	if settings.ModelSquarePassword != "" {
+		updates[SettingKeyModelSquarePassword] = settings.ModelSquarePassword
+	}
 
 	// Identity patch configuration (Claude -> Gemini)
 	updates[SettingKeyEnableIdentityPatch] = strconv.FormatBool(settings.EnableIdentityPatch)
@@ -967,6 +972,8 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyFallbackModelOpenAI:      "gpt-4o",
 		SettingKeyFallbackModelGemini:      "gemini-2.5-pro",
 		SettingKeyFallbackModelAntigravity: "gemini-2.5-pro",
+		SettingKeyModelSquareBaseURL:       "",
+		SettingKeyModelSquareEmail:         "",
 		// Identity patch defaults
 		SettingKeyEnableIdentityPatch: "true",
 		SettingKeyIdentityPatchPrompt: "",
@@ -1229,6 +1236,22 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.FallbackModelOpenAI = s.getStringOrDefault(settings, SettingKeyFallbackModelOpenAI, "gpt-4o")
 	result.FallbackModelGemini = s.getStringOrDefault(settings, SettingKeyFallbackModelGemini, "gemini-2.5-pro")
 	result.FallbackModelAntigravity = s.getStringOrDefault(settings, SettingKeyFallbackModelAntigravity, "gemini-2.5-pro")
+	result.ModelSquareBaseURL = strings.TrimRight(strings.TrimSpace(settings[SettingKeyModelSquareBaseURL]), "/")
+	result.ModelSquareEmail = strings.TrimSpace(settings[SettingKeyModelSquareEmail])
+	result.ModelSquarePassword = settings[SettingKeyModelSquarePassword]
+	result.ModelSquarePasswordConfigured = result.ModelSquarePassword != ""
+	if s.cfg != nil {
+		if result.ModelSquareBaseURL == "" {
+			result.ModelSquareBaseURL = strings.TrimRight(strings.TrimSpace(s.cfg.ModelSquare.BaseURL), "/")
+		}
+		if result.ModelSquareEmail == "" {
+			result.ModelSquareEmail = strings.TrimSpace(s.cfg.ModelSquare.Email)
+		}
+		if result.ModelSquarePassword == "" {
+			result.ModelSquarePassword = s.cfg.ModelSquare.Password
+			result.ModelSquarePasswordConfigured = result.ModelSquarePassword != ""
+		}
+	}
 
 	// Identity patch settings (default: enabled, to preserve existing behavior)
 	if v, ok := settings[SettingKeyEnableIdentityPatch]; ok && v != "" {
