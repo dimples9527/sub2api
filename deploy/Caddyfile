@@ -37,10 +37,8 @@ api.sub2api.com {
 		health_timeout 10s
 		health_status 200
 		
-		# 负载均衡策略（单节点可忽略，多节点时有用）
+		# 单节点上游：保留基础策略，不启用业务错误触发的被动摘除
 		lb_policy round_robin
-		lb_try_duration 5s
-		lb_try_interval 250ms
 		
 		# 传递真实客户端信息
 		# 兼容 Cloudflare 和直连：后端应优先读取 CF-Connecting-IP，其次 X-Real-IP
@@ -61,10 +59,6 @@ api.sub2api.com {
 			compression off
 		}
 		
-		# 故障转移
-		fail_duration 30s
-		max_fails 3
-		unhealthy_status 500 502 503 504
 	}
 
 	# =========================================================================
