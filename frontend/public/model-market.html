@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>模型广场</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #f6fafb;
+      --text: #0f172a;
+      --muted: #64748b;
+      --line: #e2e8f0;
+      --line-soft: #edf2f7;
+      --card: rgba(255, 255, 255, 0.94);
+      --teal: #21c9c7;
+      --teal-strong: #0d9488;
+      --green: #10b981;
+      --blue: #2563eb;
+      --purple: #7c3aed;
+      --pink: #db2777;
+      --orange: #f97316;
+      --font-ui: "HarmonyOS Sans SC", "MiSans", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      --font-code: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+      --shadow-card: 0 14px 34px rgba(15, 23, 42, 0.06);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background:
+        radial-gradient(circle at 8% -8%, rgba(45, 212, 191, 0.18), transparent 34rem),
+        radial-gradient(circle at 86% 0%, rgba(125, 211, 252, 0.18), transparent 32rem),
+        linear-gradient(180deg, #eaf8f8 0%, #f8fbfc 46%, #f8fafc 100%);
+      color: var(--text);
+      font-family: var(--font-ui);
+      letter-spacing: 0;
+    }
+
+    body { padding: 22px 24px; }
+
+    button, input {
+      font: inherit;
+    }
+
+    button {
+      cursor: default;
+      border: 0;
+      color: inherit;
+      background: transparent;
+    }
+
+    .market {
+      width: min(1352px, calc(100vw - 48px));
+      margin: 0 auto;
+    }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: minmax(280px, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 27px;
+    }
+
+    .search {
+      position: relative;
+      min-width: 0;
+    }
+
+    .search svg {
+      position: absolute;
+      top: 50%;
+      left: 13px;
+      width: 17px;
+      height: 17px;
+      transform: translateY(-50%);
+      color: #94a3b8;
+    }
+
+    .search input {
+      width: 100%;
+      height: 37px;
+      border: 1px solid #dbe3eb;
+      border-radius: 7px;
+      padding: 0 14px 0 38px;
+      outline: none;
+      background: rgba(255, 255, 255, 0.88);
+      color: #334155;
+      box-shadow: 0 1px 1px rgba(15, 23, 42, 0.02);
+    }
+
+    .search input::placeholder { color: #94a3b8; }
+
+    .filters {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 9px;
+      min-width: 0;
+    }
+
+    .filter-btn,
+    .view-toggle {
+      height: 37px;
+      border: 1px solid #dbe3eb;
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.86);
+      box-shadow: 0 1px 1px rgba(15, 23, 42, 0.025);
+    }
+
+    .filter-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 12px;
+      color: #334155;
+      white-space: nowrap;
+      font-size: 13px;
+    }
+
+    .filter-btn svg {
+      width: 16px;
+      height: 16px;
+      color: #475569;
+    }
+
+    .chevron {
+      width: 7px;
+      height: 7px;
+      border-right: 1.5px solid #64748b;
+      border-bottom: 1.5px solid #64748b;
+      transform: translateY(-2px) rotate(45deg);
+    }
+
+    .view-toggle {
+      display: grid;
+      grid-template-columns: 37px 37px;
+      padding: 4px;
+      gap: 2px;
+      width: 82px;
+    }
+
+    .view-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 6px;
+      color: #64748b;
+    }
+
+    .view-btn.active {
+      background: #ffffff;
+      color: #14b8a6;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+    }
+
+    .view-btn svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    .count {
+      color: #334155;
+      white-space: nowrap;
+      font-size: 14px;
+    }
+
+    .auth-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 28px;
+      padding: 0 10px;
+      border: 1px solid rgba(16, 185, 129, 0.22);
+      border-radius: 999px;
+      background: rgba(236, 253, 245, 0.78);
+      color: #047857;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .auth-pill::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: #10b981;
+    }
+
+    .models {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 17px 16px;
+    }
+
+    .model-card {
+      position: relative;
+      min-height: 266px;
+      display: flex;
+      flex-direction: column;
+      padding: 21px 20px 18px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--card);
+      box-shadow: var(--shadow-card);
+      overflow: hidden;
+    }
+
+    .model-card.featured {
+      border-color: rgba(20, 184, 166, 0.78);
+      box-shadow:
+        0 0 0 1px rgba(45, 212, 191, 0.2),
+        0 16px 36px rgba(13, 148, 136, 0.13);
+    }
+
+    .model-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: linear-gradient(145deg, rgba(45, 212, 191, 0.06), transparent 36%);
+      opacity: 0;
+    }
+
+    .model-card.featured::before { opacity: 1; }
+
+    .card-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 13px;
+    }
+
+    .provider {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: #475569;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .02em;
+      line-height: 1;
+      text-transform: lowercase;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #9aa6b2;
+    }
+
+    .available {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      height: 23px;
+      padding: 0 8px;
+      border-radius: 6px;
+      color: #047857;
+      background: #bdf4d8;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .available .mini-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 999px;
+      background: #10b981;
+    }
+
+    .model-name {
+      margin: 0 0 14px;
+      color: #0f172a;
+      font-size: 15px;
+      font-weight: 800;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    .featured .model-name { color: #0f5f64; }
+
+    .price-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px 8px;
+      margin-bottom: 13px;
+    }
+
+    .price-box {
+      min-height: 49px;
+      padding: 10px 10px 9px;
+      border: 1px solid #e9edf3;
+      border-radius: 7px;
+      background: rgba(248, 250, 252, 0.72);
+    }
+
+    .price-box.cache-read {
+      border-color: #d8eafe;
+      background: #eef6ff;
+    }
+
+    .price-box.cache-write {
+      border-color: #f0e4ff;
+      background: #fbf5ff;
+    }
+
+    .price-label {
+      margin-bottom: 4px;
+      color: #64748b;
+      font-size: 10px;
+      line-height: 1;
+    }
+
+    .cache-read .price-label,
+    .cache-read .price-value { color: var(--blue); }
+
+    .cache-write .price-label,
+    .cache-write .price-value { color: var(--purple); }
+
+    .price-value {
+      color: #0f172a;
+      font-family: var(--font-code);
+      font-size: 13px;
+      font-weight: 800;
+      line-height: 1;
+    }
+
+    .price-unit {
+      margin-top: 4px;
+      color: #8a97a8;
+      font-size: 8px;
+      line-height: 1;
+    }
+
+    .card-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: auto;
+      padding-top: 13px;
+      border-top: 1px solid var(--line-soft);
+      min-height: 34px;
+    }
+
+    .tags {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 5px;
+      min-width: 0;
+    }
+
+    .tags.right {
+      justify-content: flex-end;
+      margin-left: auto;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      height: 18px;
+      max-width: 142px;
+      padding: 0 7px;
+      border-radius: 5px;
+      background: #f1f5f9;
+      color: #334155;
+      font-size: 9px;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .tag.blue {
+      color: #1d4ed8;
+      background: #dbeafe;
+      font-size: 10px;
+    }
+
+    .tag.pink {
+      color: var(--pink);
+      background: #ffe5f0;
+      font-size: 10px;
+    }
+
+    .tag.more {
+      color: #0f766e;
+      background: #ccfbf1;
+      font-weight: 700;
+    }
+
+    .rate {
+      color: var(--orange);
+      font-family: var(--font-code);
+      font-weight: 800;
+    }
+
+    .model-card.media {
+      min-height: 266px;
+    }
+
+    .model-card.media .price-grid {
+      margin-bottom: 50px;
+    }
+
+    .empty-state {
+      grid-column: 1 / -1;
+      min-height: 180px;
+      display: grid;
+      place-items: center;
+      border: 1px dashed #cbd5e1;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.7);
+      color: #64748b;
+      font-size: 14px;
+    }
+
+    @media (max-width: 1100px) {
+      body { padding: 18px; }
+      .market { width: min(900px, calc(100vw - 36px)); }
+      .toolbar { grid-template-columns: 1fr; }
+      .filters { justify-content: flex-start; flex-wrap: wrap; }
+      .models { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 680px) {
+      body { padding: 14px; }
+      .market { width: 100%; }
+      .filters { gap: 7px; }
+      .filter-btn { flex: 1 1 calc(50% - 8px); justify-content: center; }
+      .view-toggle { width: 74px; grid-template-columns: 33px 33px; }
+      .count,
+      .auth-pill { width: 100%; }
+      .models { grid-template-columns: 1fr; }
+      .model-card { padding: 18px 16px 16px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="market">
+    <section class="toolbar" aria-label="模型筛选工具栏">
+      <label class="search" aria-label="搜索模型">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <input type="search" placeholder="搜索模型..." />
+      </label>
+
+      <div class="filters">
+        <button class="filter-btn" type="button" aria-label="全部分组">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M16 19v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2m14-8a4 4 0 1 0 0-8m4 16v-2a4 4 0 0 0-3-3.87M11 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>全部分组</span>
+          <span class="chevron" aria-hidden="true"></span>
+        </button>
+
+        <button class="filter-btn" type="button" aria-label="提供商">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+          </svg>
+          <span>提供商</span>
+          <span class="chevron" aria-hidden="true"></span>
+        </button>
+
+        <button class="filter-btn" type="button" aria-label="类型">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M13 2 3 14h8l-1 8 11-13h-8l0-7Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+          </svg>
+          <span>类型</span>
+          <span class="chevron" aria-hidden="true"></span>
+        </button>
+
+        <button class="filter-btn" type="button" aria-label="模型名称排序">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M8 7 5 4 2 7m3-3v16m11-3 3 3 3-3m-3 3V4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>模型名称</span>
+          <span class="chevron" aria-hidden="true"></span>
+        </button>
+
+        <div class="view-toggle" aria-label="视图切换">
+          <button class="view-btn active" type="button" aria-label="网格视图">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect x="4" y="4" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="2"/>
+              <rect x="14" y="4" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="2"/>
+              <rect x="4" y="14" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="2"/>
+              <rect x="14" y="14" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="2"/>
+            </svg>
+          </button>
+          <button class="view-btn" type="button" aria-label="列表视图">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
+
+        <span class="count" id="modelCount">正在加载模型</span>
+        <span class="auth-pill" id="authStatus">管理员数据接口</span>
+      </div>
+    </section>
+
+    <section class="models" id="modelGrid" aria-label="模型列表">
+      <div class="empty-state">正在从后台加载模型广场数据...</div>
+      <template id="staticFallback">
+      <article class="model-card featured">
+        <div class="card-head">
+          <span class="provider"><span class="dot"></span>openai</span>
+          <span class="available"><span class="mini-dot"></span>可用</span>
+        </div>
+        <h2 class="model-name">gpt-5.4-openai-compact</h2>
+        <div class="price-grid">
+          <div class="price-box">
+            <div class="price-label">输入</div>
+            <div class="price-value">$0.625</div>
+            <div class="price-unit">$/M tokens</div>
+          </div>
+          <div class="price-box">
+            <div class="price-label">输出</div>
+            <div class="price-value">$3.75</div>
+            <div class="price-unit">$/M tokens</div>
+          </div>
+          <div class="price-box cache-read">
+            <div class="price-label">Cache Read</div>
+            <div class="price-value">$0.063</div>
+          </div>
+          <div class="price-box cache-write">
+            <div class="price-label">Cache Write</div>
+            <div class="price-value">$0</div>
+          </div>
+        </div>
+        <div class="card-footer">
+          <div class="tags"><span class="tag blue">Chat</span></div>
+          <div class="tags right">
+            <span class="tag">codex特价稳定 <span class="rate">0.25x</span></span>
+            <span class="tag">gpt plus <span class="rate">0.045x</span></span>
+          </div>
+        </div>
+      </article>
+
+      <article class="model-card">
+        <div class="card-head">
+          <span class="provider"><span class="dot"></span>openai</span>
+          <span class="available"><span class="mini-dot"></span>可用</span>
+        </div>
+        <h2 class="model-name">gpt-5.4-pro</h2>
+        <div class="price-grid">
+          <div class="price-box"><div class="price-label">输入</div><div class="price-value">$12.00</div><div class="price-unit">$/M tokens</div></div>
+          <div class="price-box"><div class="price-label">输出</div><div class="price-value">$72.00</div><div class="price-unit">$/M tokens</div></div>
+          <div class="price-box cache-read"><div class="price-label">Cache Read</div><div class="price-value">$1.20</div></div>
+          <div class="price-box cache-write"><div class="price-label">Cache Write</div><div class="price-value">$0</div></div>
+        </div>
+        <div class="card-footer">
+          <div class="tags"><span class="tag">responses</span></div>
+          <div class="tags right"><span class="tag">Azure openai <span class="rate">0.4x</span></span></div>
+        </div>
+      </article>
+
+      <article class="model-card">
+        <div class="card-head">
+          <span class="provider"><span class="dot"></span>openai</span>
+          <span class="available"><span class="mini-dot"></span>可用</span>
+        </div>
+        <h2 class="model-name">gpt-5.4-xhigh</h2>
+        <div class="price-grid">
+          <div class="price-box"><div class="price-label">输入</div><div class="price-value">$0.625</div><div class="price-unit">$/M tokens</div></div>
+          <div class="price-box"><div class="price-label">输出</div><div class="price-value">$3.75</div><div class="price-unit">$/M tokens</div></div>
+          <div class="price-box cache-read"><div class="price-label">Cache Read</div><div class="price-value">$0.063</div></div>
+          <div class="price-box cache-write"><div class="price-label">Cache Write</div><div class="price-value">$0</div></div>
+        </div>
+        <div class="card-footer">
+          <div class="tags"><span class="tag blue">Chat</span></div>
+          <div class="tags right"><span class="tag">codex特价稳定 <span class="rate">0.25x</span></span></div>
+        </div>
+      </article>
+
+      <article class="model-card">
+        <div class="card-head">
+          <span class="provider"><span class="dot"></span>openai</span>
+          <span class="available"><span class="mini-dot"></span>可用</span>
+        </div>
+        <h2 class="model-name">gpt-5.5</h2>
+        <div class="price-grid">
+          <div class="price-box"><div class="price-label">输入</div><div class="price-value">$0.750</div><div class="price-unit">$/M tokens</div></div>
+          <div class="price-box"><div class="price-label">输出</div><div class="price-value">$4.50</div><div class="price-unit">$/M tokens</div></div>
+          <div class="price-box cache-read"><div class="price-label">Cache Read</div><div class="price-value">$0.075</div></div>
+          <div class="price-box cache-write"><div class="price-label">Cache Write</div><div class="price-value">$0</div></div>
+        </div>
+        <div class="card-footer">
+          <div class="tags"><span class="tag blue">Chat</span></div>
+          <div class="tags right">
+            <span class="tag">codex福利 <span class="rate">0.15x</span></span>
+            <span class="tag">codex特价稳定 <span class="rate">0.25x</span></span>
+            <span class="tag more">+4</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="model-card">
+        <div class="card-head">
+          <span class="provider"><span class="dot"></span>openai</span>
+          <span class="available"><span class="mini-dot"></span>可用</span>
+        </div>
+        <h2 class="model-name">gpt-5.5-fast</h2>
+        <div class="price-grid">
+          <div class="price-box"><div class="price-label">输入</div><div class="price-value">$0.225</div><div class="price-unit">$/M tokens</div></div>
+          <div class="price-box"><div class="price-label">输出</div><div class="price-value">$1.35</div><div class="price-unit">$/M tokens</div></div>
+          <div class="price-box cache-read"><div class="price-label">Cache Read</div><div class="price-value">$0.022</div></div>
+          <div class="price-box cache-write"><div class="price-label">Cache Write</div><div class="price-value">$0</div></div>
+        </div>
+        <div class="card-footer">
+          <div class="tags"><span class="tag blue">Chat</span></div>
+          <div class="tags right"><span class="tag">gpt plus <span class="rate">0.045x</span></span></div>
+        </div>
+      </article>
+
+      <article class="model-card">
+        <div class="card-head">
+          <span class="provider"><span class="dot"></span>openai</span>
+          <span class="available"><span class="mini-dot"></span>可用</span>
+        </div>
+        <h2 class="model-name">gpt-5.5-openai-compact</h2>
+        <div class="price-grid">
+          <div class="price-box"><div class="price-label">输入</div><div class="price-value">$1.25</div><div class="price-unit">$/M tokens</div></div>
+          <div class="price-box"><div class="price-label">输出</div><div class="price-value">$7.50</div><div class="price-unit">$/M tokens</div></div>
+          <div class="price-box cache-read"><div class="price-label">Cache Read</div><div class="price-value">$0.125</div></div>
+          <div class="price-box cache-write"><div class="price-label">Cache Write</div><div class="price-value">$0</div></div>
+        </div>
+        <div class="card-footer">
+          <div class="tags"><span class="tag blue">Chat</span></div>
+          <div class="tags right">
+            <span class="tag">codex特价稳定 <span class="rate">0.25x</span></span>
+            <span class="tag">gpt plus <span class="rate">0.045x</span></span>
+          </div>
+        </div>
+      </article>
+
+      <article class="model-card">
+        <div class="card-head">
+          <span class="provider"><span class="dot"></span>openai</span>
+          <span class="available"><span class="mini-dot"></span>可用</span>
+        </div>
+        <h2 class="model-name">gpt-5.5-pro</h2>
+        <div class="price-grid">
+          <div class="price-box"><div class="price-label">输入</div><div class="price-value">$12.00</div><div class="price-unit">$/M tokens</div></div>
+          <div class="price-box"><div class="price-label">输出</div><div class="price-value">$72.00</div><div class="price-unit">$/M tokens</div></div>
+          <div class="price-box cache-read"><div class="price-label">Cache Read</div><div class="price-value">$1.20</div></div>
+          <div class="price-box cache-write"><div class="price-label">Cache Write</div><div class="price-value">$0</div></div>
+        </div>
+        <div class="card-footer">
+          <div class="tags"><span class="tag">responses</span></div>
+          <div class="tags right"><span class="tag">Azure openai <span class="rate">0.4x</span></span></div>
+        </div>
+      </article>
+
+      <article class="model-card media">
+        <div class="card-head">
+          <span class="provider"><span class="dot"></span>openai</span>
+          <span class="available"><span class="mini-dot"></span>可用</span>
+        </div>
+        <h2 class="model-name">gpt-image-1</h2>
+        <div class="price-grid">
+          <div class="price-box"><div class="price-label">输入</div><div class="price-value">$0.750</div><div class="price-unit">$/M tokens</div></div>
+          <div class="price-box"><div class="price-label">输出</div><div class="price-value">$0</div><div class="price-unit">$/M tokens</div></div>
+        </div>
+        <div class="card-footer">
+          <div class="tags"><span class="tag pink">Image</span></div>
+          <div class="tags right">
+            <span class="tag">codex福利 <span class="rate">0.15x</span></span>
+            <span class="tag">codex福利2 <span class="rate">0.15x</span></span>
+          </div>
+        </div>
+      </article>
+
+      <article class="model-card media">
+        <div class="card-head">
+          <span class="provider"><span class="dot"></span>openai</span>
+          <span class="available"><span class="mini-dot"></span>可用</span>
+        </div>
+        <h2 class="model-name">gpt-image-1.5</h2>
+        <div class="price-grid">
+          <div class="price-box"><div class="price-label">输入</div><div class="price-value">$0.750</div><div class="price-unit">$/M tokens</div></div>
+          <div class="price-box"><div class="price-label">输出</div><div class="price-value">$1.50</div><div class="price-unit">$/M tokens</div></div>
+        </div>
+        <div class="card-footer">
+          <div class="tags"><span class="tag pink">Image</span></div>
+          <div class="tags right">
+            <span class="tag">codex福利 <span class="rate">0.15x</span></span>
+            <span class="tag">codex福利2 <span class="rate">0.15x</span></span>
+          </div>
+        </div>
+      </article>
+      </template>
+    </section>
+  </main>
+
+  <script>
+    const MODEL_SQUARE_API = "/api/v1/admin/model-square";
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function formatPrice(value) {
+      if (value === null || value === undefined || value === "") return "$0";
+      const number = Number(value);
+      if (!Number.isFinite(number)) return "$0";
+      return `$${number.toFixed(number >= 10 ? 2 : 3).replace(/0+$/, "").replace(/\.$/, "")}`;
+    }
+
+    function modeLabel(mode) {
+      if (mode === "image_generation") return "Image";
+      if (mode === "embedding") return "Embedding";
+      if (mode === "responses") return "responses";
+      return mode || "Chat";
+    }
+
+    function modeClass(mode) {
+      if (mode === "image_generation") return "pink";
+      if (mode === "chat" || !mode) return "blue";
+      return "";
+    }
+
+    function groupTags(model, groupById) {
+      return (model.group_ids || [])
+        .map((id) => groupById.get(id))
+        .filter(Boolean)
+        .slice(0, 3)
+        .map((group) => `<span class="tag">${escapeHtml(group.name)} <span class="rate">${Number(group.rate_multiplier || 0).toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}x</span></span>`)
+        .join("");
+    }
+
+    function renderModels(data) {
+      const grid = document.getElementById("modelGrid");
+      const count = document.getElementById("modelCount");
+      const status = document.getElementById("authStatus");
+      const models = Array.isArray(data.models) ? data.models : [];
+      const groups = Array.isArray(data.groups) ? data.groups : [];
+      const groupById = new Map(groups.map((group) => [group.id, group]));
+
+      count.textContent = `${models.filter((model) => model.available).length} 个可用模型`;
+      status.textContent = data.updated_at ? `更新于 ${data.updated_at}` : "真实数据";
+
+      if (!models.length) {
+        grid.innerHTML = '<div class="empty-state">暂无模型数据</div>';
+        return;
+      }
+
+      grid.innerHTML = models.map((model, index) => {
+        const isMedia = model.mode === "image_generation";
+        const tags = groupTags(model, groupById);
+        const moreCount = Math.max(0, (model.group_ids || []).length - 3);
+
+        return `
+          <article class="model-card ${index === 0 ? "featured" : ""} ${isMedia ? "media" : ""}">
+            <div class="card-head">
+              <span class="provider"><span class="dot"></span>${escapeHtml(model.provider || "unknown")}</span>
+              <span class="available"><span class="mini-dot"></span>${model.available ? "可用" : "不可用"}</span>
+            </div>
+            <h2 class="model-name">${escapeHtml(model.id)}</h2>
+            <div class="price-grid">
+              <div class="price-box"><div class="price-label">输入</div><div class="price-value">${formatPrice(model.input_price)}</div><div class="price-unit">$/M tokens</div></div>
+              <div class="price-box"><div class="price-label">输出</div><div class="price-value">${formatPrice(model.output_price)}</div><div class="price-unit">$/M tokens</div></div>
+              <div class="price-box cache-read"><div class="price-label">Cache Read</div><div class="price-value">${formatPrice(model.cache_read_price)}</div></div>
+              <div class="price-box cache-write"><div class="price-label">Cache Write</div><div class="price-value">${formatPrice(model.cache_create_price)}</div></div>
+            </div>
+            <div class="card-footer">
+              <div class="tags"><span class="tag ${modeClass(model.mode)}">${escapeHtml(modeLabel(model.mode))}</span></div>
+              <div class="tags right">${tags}${moreCount ? `<span class="tag more">+${moreCount}</span>` : ""}</div>
+            </div>
+          </article>
+        `;
+      }).join("");
+    }
+
+    async function loadModelSquare() {
+      const status = document.getElementById("authStatus");
+      const grid = document.getElementById("modelGrid");
+      const fallback = document.getElementById("staticFallback");
+
+      if (window.location.protocol === "file:") {
+        const count = document.getElementById("modelCount");
+        grid.innerHTML = fallback ? fallback.innerHTML : "";
+        count.textContent = `${grid.querySelectorAll(".model-card").length} 个示例模型`;
+        status.textContent = "静态预览";
+        status.title = "通过应用域名访问时会加载 /api/v1/admin/model-square 的真实数据";
+        return;
+      }
+
+      const headers = {};
+      const token = localStorage.getItem("auth_token");
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      try {
+        const response = await fetch(MODEL_SQUARE_API, { headers });
+        if (response.status === 401 || response.status === 403) {
+          status.textContent = "仅管理员可见";
+          grid.innerHTML = '<div class="empty-state">请使用管理员账号登录后查看模型广场。</div>';
+          return;
+        }
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(errorText || `HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        renderModels(data);
+      } catch (error) {
+        status.textContent = "加载失败";
+        status.title = error.message;
+        grid.innerHTML = `<div class="empty-state">模型广场数据加载失败：${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    loadModelSquare();
+  </script>
+</body>
+</html>
