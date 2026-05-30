@@ -82,6 +82,21 @@ llm_monitor:
   status_api_url: "https://jc.findcg.com/api/status"
 
 # =============================================================================
+# Model Square Configuration
+# 模型广场配置
+# =============================================================================
+model_square:
+  # Upstream base URL for model square data.
+  # 模型广场上游基础地址。
+  base_url: "https://www.findcg.com"
+  # Login email for fetching model-square data. Can also be set via MODEL_SQUARE_EMAIL.
+  # 拉取模型广场数据的登录邮箱。也可通过 MODEL_SQUARE_EMAIL 设置。
+  email: ""
+  # Login password for fetching model-square data. Prefer environment variable MODEL_SQUARE_PASSWORD in production.
+  # 拉取模型广场数据的登录密码。生产环境建议用环境变量 MODEL_SQUARE_PASSWORD。
+  password: ""
+
+# =============================================================================
 # CORS Configuration
 # 跨域资源共享 (CORS) 配置
 # =============================================================================
