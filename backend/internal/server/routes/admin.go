@@ -88,7 +88,14 @@ func RegisterAdminRoutes(
 
 		// 渠道管理
 		registerChannelRoutes(admin, h)
+
+		// 模型广场
+		registerModelSquareRoutes(admin, h)
 	}
+}
+
+func registerModelSquareRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	admin.GET("/model-square", h.Admin.ModelSquare.Get)
 }
 
 func registerAdminAPIKeyRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
