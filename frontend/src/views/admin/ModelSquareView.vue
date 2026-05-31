@@ -30,6 +30,30 @@
         </select>
       </div>
 
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div class="inline-grid w-fit grid-cols-2 gap-1 rounded-lg border border-gray-200 bg-gray-100 p-1 dark:border-dark-700 dark:bg-dark-800">
+          <button
+            type="button"
+            class="view-toggle-btn"
+            :class="{ active: viewMode === 'grid' }"
+            aria-label="网格视图"
+            @click="viewMode = 'grid'"
+          >
+            <Icon name="grid" size="sm" />
+          </button>
+          <button
+            type="button"
+            class="view-toggle-btn"
+            :class="{ active: viewMode === 'list' }"
+            aria-label="列表视图"
+            @click="viewMode = 'list'"
+          >
+            <Icon name="menu" size="sm" />
+          </button>
+        </div>
+        <span class="text-sm text-gray-500 dark:text-gray-400">{{ availableCount }} 个可用模型</span>
+      </div>
+
       <div v-if="loading" class="grid min-h-64 place-items-center rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800">
         <div class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
           <span class="h-5 w-5 animate-spin rounded-full border-2 border-primary-500 border-t-transparent"></span>
@@ -51,12 +75,17 @@
           暂无匹配模型
         </div>
 
-        <div v-else class="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+        <div v-else-if="viewMode === 'grid'" class="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
           <article
             v-for="(model, index) in filteredModels"
             :key="model.id || index"
-            class="model-card"
+            class="model-card cursor-pointer"
             :class="{ featured: index === 0 }"
+            role="button"
+            tabindex="0"
+            title="点击复制模型 ID"
+            @click="copyModelId(model)"
+            @keydown.enter.prevent="copyModelId(model)"
           >
             <div class="flex items-start justify-between gap-3">
               <span class="inline-flex items-center gap-2 text-xs font-semibold lowercase text-gray-500 dark:text-gray-400">
@@ -67,7 +96,7 @@
                 class="rounded-md px-2 py-1 text-xs font-semibold"
                 :class="model.available ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' : 'bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-gray-400'"
               >
-                {{ model.available ? '可用' : '不可用' }}
+                {{ copiedModelId === model.id ? '已复制' : (model.available ? '可用' : '不可用') }}
               </span>
             </div>
 
@@ -98,13 +127,80 @@
                   v-if="modelGroups(model).length > 3"
                   type="button"
                   class="rounded bg-teal-50 px-2 py-1 text-xs font-semibold text-teal-700 transition hover:bg-teal-100 focus:outline-none focus:ring-2 focus:ring-teal-400 dark:bg-teal-900/30 dark:text-teal-300 dark:hover:bg-teal-900/50"
-                  @click="openGroupModal(model)"
+                  @click.stop="openGroupModal(model)"
                 >
-                  +{{ modelGroups(model).length - 3 }}
+                  +{{ modelGroups(model).length - 3 }} &gt;
                 </button>
               </div>
             </div>
           </article>
+        </div>
+
+        <div v-else class="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800">
+          <div class="overflow-x-auto">
+            <table class="min-w-full text-left text-sm">
+              <thead class="bg-gray-50 text-xs font-semibold text-gray-500 dark:bg-dark-700/60 dark:text-gray-400">
+                <tr>
+                  <th class="whitespace-nowrap px-4 py-3">状态</th>
+                  <th class="whitespace-nowrap px-4 py-3">提供商</th>
+                  <th class="min-w-48 px-4 py-3">Model ID</th>
+                  <th class="whitespace-nowrap px-4 py-3">输入 $/M</th>
+                  <th class="whitespace-nowrap px-4 py-3">输出 $/M</th>
+                  <th class="whitespace-nowrap px-4 py-3">缓存读取 $/M</th>
+                  <th class="whitespace-nowrap px-4 py-3">缓存写入 $/M</th>
+                  <th class="whitespace-nowrap px-4 py-3">类型</th>
+                  <th class="whitespace-nowrap px-4 py-3">按次计费</th>
+                  <th class="min-w-72 px-4 py-3">分组</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
+                <tr
+                  v-for="(model, index) in filteredModels"
+                  :key="model.id || index"
+                  class="cursor-pointer transition hover:bg-teal-50/50 dark:hover:bg-dark-700/60"
+                  title="点击复制模型 ID"
+                  @click="copyModelId(model)"
+                >
+                  <td class="whitespace-nowrap px-4 py-4">
+                    <span class="inline-flex items-center gap-2 text-xs font-semibold" :class="model.available ? 'text-emerald-600 dark:text-emerald-300' : 'text-gray-500 dark:text-gray-400'">
+                      <span class="h-2 w-2 rounded-full" :class="model.available ? 'bg-emerald-300' : 'bg-gray-300 dark:bg-gray-600'"></span>
+                      {{ copiedModelId === model.id ? '已复制' : (model.available ? '可用' : '不可用') }}
+                    </span>
+                  </td>
+                  <td class="whitespace-nowrap px-4 py-4 text-gray-600 dark:text-gray-300">
+                    <span class="inline-flex items-center gap-2">
+                      <span class="h-2 w-2 rounded-full bg-slate-400"></span>
+                      {{ model.provider || 'unknown' }}
+                    </span>
+                  </td>
+                  <td class="max-w-64 px-4 py-4 font-medium text-gray-950 dark:text-white">
+                    <span class="break-words">{{ model.id || '未命名模型' }}</span>
+                  </td>
+                  <td class="whitespace-nowrap px-4 py-4 font-mono text-gray-900 dark:text-gray-100">{{ formatPrice(model.input_price) }}</td>
+                  <td class="whitespace-nowrap px-4 py-4 font-mono text-gray-900 dark:text-gray-100">{{ formatPrice(model.output_price) }}</td>
+                  <td class="whitespace-nowrap px-4 py-4 font-mono text-gray-900 dark:text-gray-100">{{ formatPrice(model.cache_read_price) }}</td>
+                  <td class="whitespace-nowrap px-4 py-4 font-mono text-gray-900 dark:text-gray-100">{{ formatPrice(model.cache_create_price) }}</td>
+                  <td class="whitespace-nowrap px-4 py-4">
+                    <span class="rounded bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                      {{ modeLabel(model.mode) }}
+                    </span>
+                  </td>
+                  <td class="whitespace-nowrap px-4 py-4 text-gray-400">—</td>
+                  <td class="px-4 py-4">
+                    <div class="flex min-w-72 flex-wrap gap-1.5">
+                      <span
+                        v-for="group in modelGroups(model)"
+                        :key="group.id"
+                        class="rounded bg-gray-100 px-2 py-1 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300"
+                      >
+                        {{ group.name }} <b class="text-orange-500">{{ formatRate(group.rate_multiplier) }}x</b>
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </template>
     </div>
@@ -203,10 +299,13 @@ const search = ref('')
 const provider = ref('')
 const mode = ref('')
 const groupId = ref('')
+const viewMode = ref<'grid' | 'list'>('grid')
 const models = ref<ModelSquareModel[]>([])
 const groups = ref<ModelSquareGroup[]>([])
 const updatedAt = ref('')
 const groupModalModel = ref<ModelSquareModel | null>(null)
+const copiedModelId = ref('')
+let copiedTimer: number | undefined
 
 const groupById = computed(() => new Map(groups.value.map((group) => [String(group.id), group])))
 const providers = computed(() => unique(models.value.map((model) => model.provider).filter(Boolean) as string[]))
@@ -253,6 +352,28 @@ function openGroupModal(model: ModelSquareModel) {
 
 function closeGroupModal() {
   groupModalModel.value = null
+}
+
+async function copyModelId(model: ModelSquareModel) {
+  if (!model.id) return
+  try {
+    await navigator.clipboard.writeText(model.id)
+  } catch {
+    const textarea = document.createElement('textarea')
+    textarea.value = model.id
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    document.execCommand('copy')
+    textarea.remove()
+  }
+
+  copiedModelId.value = model.id
+  if (copiedTimer) window.clearTimeout(copiedTimer)
+  copiedTimer = window.setTimeout(() => {
+    copiedModelId.value = ''
+  }, 1500)
 }
 
 function groupInitials(name: string) {
@@ -331,5 +452,36 @@ onMounted(loadModels)
 .model-card.featured {
   border-color: rgb(45 212 191 / 0.75);
   box-shadow: 0 0 0 1px rgb(45 212 191 / 0.18), 0 16px 34px rgb(13 148 136 / 0.12);
+}
+
+.view-toggle-btn {
+  display: inline-grid;
+  height: 2rem;
+  width: 2rem;
+  place-items: center;
+  border-radius: 0.375rem;
+  color: rgb(100 116 139);
+  transition: background-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
+}
+
+.view-toggle-btn:hover {
+  background: rgb(255 255 255 / 0.72);
+  color: rgb(15 23 42);
+}
+
+.view-toggle-btn.active {
+  background: white;
+  color: rgb(20 184 166);
+  box-shadow: 0 1px 3px rgb(15 23 42 / 0.1);
+}
+
+.dark .view-toggle-btn:hover {
+  background: rgb(55 65 81 / 0.72);
+  color: rgb(229 231 235);
+}
+
+.dark .view-toggle-btn.active {
+  background: rgb(55 65 81);
+  color: rgb(94 234 212);
 }
 </style>
