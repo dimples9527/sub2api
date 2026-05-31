@@ -233,16 +233,14 @@ func TestModelSquareHandlerMergesGroupsByNormalizedName(t *testing.T) {
 		} `json:"models"`
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
-	require.Len(t, body.Groups, 2)
+	require.Len(t, body.Groups, 1)
 	require.Equal(t, "remote-1", body.Groups[0]["id"])
 	require.Equal(t, "codex特价", body.Groups[0]["name"])
 	require.Equal(t, "local group", body.Groups[0]["description"])
 	require.Equal(t, service.PlatformOpenAI, body.Groups[0]["platform"])
 	require.Equal(t, 0.25, body.Groups[0]["rate_multiplier"])
 	require.Equal(t, service.StatusActive, body.Groups[0]["status"])
-	require.Equal(t, float64(2002), body.Groups[1]["id"])
-	require.Equal(t, "unmatched", body.Groups[1]["name"])
-	require.Equal(t, []any{"remote-1", float64(2002)}, body.Models[0].GroupIDs)
+	require.Equal(t, []any{"remote-1"}, body.Models[0].GroupIDs)
 }
 
 type modelSquareGroupProviderStub struct {

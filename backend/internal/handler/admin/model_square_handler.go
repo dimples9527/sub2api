@@ -357,19 +357,18 @@ func (h *ModelSquareHandler) mergeGroups(ctx context.Context, payload []byte) ([
 		}
 	}
 
+	keptGroupIDs := make(map[string]struct{}, len(rawGroups))
 	mergedGroups := make([]any, 0, len(rawGroups))
 	for _, rawGroup := range rawGroups {
 		groupMap, ok := rawGroup.(map[string]any)
 		if !ok {
-			mergedGroups = append(mergedGroups, rawGroup)
 			continue
 		}
 
 		remoteID, hasID := groupMap["id"]
 		remoteName, _ := groupMap["name"].(string)
 		localGroup, matched := localByName[normalizeModelSquareGroupName(remoteName)]
-		if !matched {
-			mergedGroups = append(mergedGroups, rawGroup)
+		if !matched || !hasID {
 			continue
 		}
 
@@ -377,18 +376,42 @@ func (h *ModelSquareHandler) mergeGroups(ctx context.Context, payload []byte) ([
 		if err != nil {
 			return nil, err
 		}
-		if hasID {
-			mergedGroup["id"] = remoteID
-		}
+		mergedGroup["id"] = remoteID
+		keptGroupIDs[modelSquareIDKey(remoteID)] = struct{}{}
 		mergedGroups = append(mergedGroups, mergedGroup)
 	}
 
 	body["groups"] = mergedGroups
+	filterModelSquareGroupIDs(body, keptGroupIDs)
 	mergedPayload, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("encode merged model-square response: %w", err)
 	}
 	return mergedPayload, nil
+}
+
+func filterModelSquareGroupIDs(body map[string]any, keptGroupIDs map[string]struct{}) {
+	rawModels, ok := body["models"].([]any)
+	if !ok {
+		return
+	}
+	for _, rawModel := range rawModels {
+		modelMap, ok := rawModel.(map[string]any)
+		if !ok {
+			continue
+		}
+		rawGroupIDs, ok := modelMap["group_ids"].([]any)
+		if !ok {
+			continue
+		}
+		filtered := make([]any, 0, len(rawGroupIDs))
+		for _, groupID := range rawGroupIDs {
+			if _, ok := keptGroupIDs[modelSquareIDKey(groupID)]; ok {
+				filtered = append(filtered, groupID)
+			}
+		}
+		modelMap["group_ids"] = filtered
+	}
 }
 
 func modelSquareGroupMapFromLocal(group service.Group) (map[string]any, error) {
@@ -405,6 +428,10 @@ func modelSquareGroupMapFromLocal(group service.Group) (map[string]any, error) {
 
 func normalizeModelSquareGroupName(name string) string {
 	return strings.ToLower(strings.Join(strings.Fields(name), ""))
+}
+
+func modelSquareIDKey(value any) string {
+	return fmt.Sprint(value)
 }
 
 func (h *ModelSquareHandler) requestModelSquare(ctx context.Context, token cachedFindCGToken) ([]byte, int, error) {

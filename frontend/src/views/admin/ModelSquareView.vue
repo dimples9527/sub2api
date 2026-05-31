@@ -94,14 +94,75 @@
                 >
                   {{ group.name }} <b class="text-orange-500">{{ formatRate(group.rate_multiplier) }}x</b>
                 </span>
-                <span v-if="modelGroups(model).length > 3" class="rounded bg-teal-50 px-2 py-1 text-xs font-semibold text-teal-700 dark:bg-teal-900/30 dark:text-teal-300">
+                <button
+                  v-if="modelGroups(model).length > 3"
+                  type="button"
+                  class="rounded bg-teal-50 px-2 py-1 text-xs font-semibold text-teal-700 transition hover:bg-teal-100 focus:outline-none focus:ring-2 focus:ring-teal-400 dark:bg-teal-900/30 dark:text-teal-300 dark:hover:bg-teal-900/50"
+                  @click="openGroupModal(model)"
+                >
                   +{{ modelGroups(model).length - 3 }}
-                </span>
+                </button>
               </div>
             </div>
           </article>
         </div>
       </template>
+    </div>
+
+    <div
+      v-if="groupModalModel"
+      class="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 px-4 py-6 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      @click.self="closeGroupModal"
+    >
+      <div class="w-full max-w-lg overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-dark-700 dark:bg-dark-800">
+        <div class="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-4 dark:border-dark-700">
+          <div class="min-w-0">
+            <h2 class="break-words text-base font-semibold text-gray-950 dark:text-white">
+              {{ groupModalModel.id || '未命名模型' }} 的可用分组
+            </h2>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              共 {{ groupModalGroups.length }} 个分组
+            </p>
+          </div>
+          <button
+            type="button"
+            class="rounded-md p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-400 dark:hover:bg-dark-700 dark:hover:text-gray-200"
+            aria-label="关闭"
+            @click="closeGroupModal"
+          >
+            <Icon name="x" size="sm" />
+          </button>
+        </div>
+
+        <div class="max-h-[56vh] space-y-2 overflow-y-auto px-5 py-4">
+          <div
+            v-for="group in groupModalGroups"
+            :key="group.id"
+            class="flex items-center justify-between gap-3 rounded-lg border border-gray-100 bg-gray-50 px-3 py-3 dark:border-dark-700 dark:bg-dark-700/50"
+          >
+            <div class="flex min-w-0 items-center gap-3">
+              <span class="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-teal-100 text-[10px] font-bold uppercase text-teal-700 dark:bg-teal-900/50 dark:text-teal-200">
+                {{ groupInitials(group.name) }}
+              </span>
+              <span class="min-w-0 break-words text-sm font-medium text-gray-950 dark:text-white">
+                {{ group.name }}
+              </span>
+            </div>
+            <div class="shrink-0 text-xs text-gray-500 dark:text-gray-400">
+              倍率
+              <span class="ml-2 rounded bg-amber-100 px-2 py-1 font-semibold text-orange-600 dark:bg-amber-900/40 dark:text-amber-300">
+                {{ formatRate(group.rate_multiplier) }}x
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex justify-end border-t border-gray-100 px-5 py-3 dark:border-dark-700">
+          <button type="button" class="btn btn-secondary btn-sm" @click="closeGroupModal">关闭</button>
+        </div>
+      </div>
     </div>
   </AppLayout>
 </template>
@@ -145,11 +206,13 @@ const groupId = ref('')
 const models = ref<ModelSquareModel[]>([])
 const groups = ref<ModelSquareGroup[]>([])
 const updatedAt = ref('')
+const groupModalModel = ref<ModelSquareModel | null>(null)
 
 const groupById = computed(() => new Map(groups.value.map((group) => [String(group.id), group])))
 const providers = computed(() => unique(models.value.map((model) => model.provider).filter(Boolean) as string[]))
 const modes = computed(() => unique(models.value.map((model) => model.mode || 'chat')))
 const availableCount = computed(() => models.value.filter((model) => model.available).length)
+const groupModalGroups = computed(() => groupModalModel.value ? modelGroups(groupModalModel.value) : [])
 
 const filteredModels = computed(() => {
   const keyword = search.value.trim().toLowerCase()
@@ -182,6 +245,20 @@ function modelGroups(model: ModelSquareModel): ModelSquareGroup[] {
   return (model.group_ids || [])
     .map((id) => groupById.value.get(String(id)))
     .filter(Boolean) as ModelSquareGroup[]
+}
+
+function openGroupModal(model: ModelSquareModel) {
+  groupModalModel.value = model
+}
+
+function closeGroupModal() {
+  groupModalModel.value = null
+}
+
+function groupInitials(name: string) {
+  const compact = String(name || '').trim().replace(/\s+/g, '')
+  if (!compact) return '--'
+  return compact.slice(0, 2).toUpperCase()
 }
 
 function modeLabel(value?: string) {
