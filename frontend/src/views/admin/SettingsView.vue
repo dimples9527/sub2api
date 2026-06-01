@@ -2386,7 +2386,7 @@
                     v-model="form.model_square_base_url"
                     type="url"
                     class="input"
-                    placeholder="https://www.findcg.com"
+                    placeholder="https://example.com"
                   />
                 </div>
                 <div>
@@ -2926,7 +2926,7 @@ const form = reactive<SettingsForm>({
   fallback_model_openai: 'gpt-4o',
   fallback_model_gemini: 'gemini-2.5-pro',
   fallback_model_antigravity: 'gemini-2.5-pro',
-  model_square_base_url: 'https://www.findcg.com',
+  model_square_base_url: '',
   model_square_email: '',
   model_square_password: '',
   model_square_password_configured: false,

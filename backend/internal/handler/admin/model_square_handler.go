@@ -153,7 +153,7 @@ func (h *ModelSquareHandler) fetchModelSquare(ctx context.Context, forceLogin bo
 	}
 	if status != http.StatusUnauthorized {
 		if status < 200 || status >= 300 {
-			return nil, fmt.Errorf("findcg model-square failed: HTTP %d: %s", status, string(payload))
+			return nil, fmt.Errorf("model square upstream failed: HTTP %d: %s", status, string(payload))
 		}
 		return h.mergeGroups(ctx, payload)
 	}
@@ -167,7 +167,7 @@ func (h *ModelSquareHandler) fetchModelSquare(ctx context.Context, forceLogin bo
 		return nil, err
 	}
 	if status < 200 || status >= 300 {
-		return nil, fmt.Errorf("findcg model-square failed after relogin: HTTP %d: %s", status, string(payload))
+		return nil, fmt.Errorf("model square upstream failed after relogin: HTTP %d: %s", status, string(payload))
 	}
 
 	return h.mergeGroups(ctx, payload)
@@ -190,7 +190,7 @@ func (h *ModelSquareHandler) getToken(ctx context.Context, force bool) (cachedFi
 	}
 
 	if email == "" || password == "" {
-		return cachedFindCGToken{}, fmt.Errorf("missing findcg credentials: set model_square.email/model_square.password or MODEL_SQUARE_EMAIL/MODEL_SQUARE_PASSWORD")
+		return cachedFindCGToken{}, fmt.Errorf("missing model square credentials: set model_square.email/model_square.password or MODEL_SQUARE_EMAIL/MODEL_SQUARE_PASSWORD")
 	}
 	logFindCGLoginAttempt(h.baseURL, email, password, source)
 
@@ -204,35 +204,35 @@ func (h *ModelSquareHandler) getToken(ctx context.Context, force bool) (cachedFi
 
 	req, err := http.NewRequest(http.MethodPost, h.baseURL+findCGLoginPath, bytes.NewReader(body))
 	if err != nil {
-		return cachedFindCGToken{}, fmt.Errorf("create findcg login request: %w", err)
+		return cachedFindCGToken{}, fmt.Errorf("create model square login request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := h.httpClient.Do(req)
 	if err != nil {
-		return cachedFindCGToken{}, fmt.Errorf("findcg login request failed: %w", err)
+		return cachedFindCGToken{}, fmt.Errorf("model square login request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return cachedFindCGToken{}, fmt.Errorf("read findcg login response: %w", err)
+		return cachedFindCGToken{}, fmt.Errorf("read model square login response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		logFindCGLoginFailure(resp.StatusCode, raw, h.baseURL, email, password, source)
-		return cachedFindCGToken{}, fmt.Errorf("findcg login failed: HTTP %d: %s", resp.StatusCode, string(raw))
+		return cachedFindCGToken{}, fmt.Errorf("model square login failed: HTTP %d: %s", resp.StatusCode, string(raw))
 	}
 
 	var loginResp findCGLoginResponse
 	if err := json.Unmarshal(raw, &loginResp); err != nil {
-		return cachedFindCGToken{}, fmt.Errorf("decode findcg login response: %w", err)
+		return cachedFindCGToken{}, fmt.Errorf("decode model square login response: %w", err)
 	}
 	if loginResp.Code != 0 || loginResp.Data.AccessToken == "" {
 		if loginResp.Message == "" {
 			loginResp.Message = "missing access_token"
 		}
 		logFindCGLoginFailure(resp.StatusCode, raw, h.baseURL, email, password, source)
-		return cachedFindCGToken{}, fmt.Errorf("findcg login failed: %s", loginResp.Message)
+		return cachedFindCGToken{}, fmt.Errorf("model square login failed: %s", loginResp.Message)
 	}
 
 	expiresIn := loginResp.Data.ExpiresIn
@@ -274,7 +274,7 @@ func (h *ModelSquareHandler) resolveConfigLocked(ctx context.Context) (string, s
 				source = "settings"
 			}
 		} else {
-			slog.Warn("findcg model square settings lookup failed, using handler config", "error", err)
+			slog.Warn("model square settings lookup failed, using handler config", "error", err)
 		}
 	}
 
@@ -286,7 +286,7 @@ func (h *ModelSquareHandler) resolveConfigLocked(ctx context.Context) (string, s
 
 func logFindCGLoginAttempt(baseURL, email, password, source string) {
 	slog.Info(
-		"findcg login attempt",
+		"model square login attempt",
 		"base_url", strings.TrimRight(baseURL, "/"),
 		"email", maskFindCGEmail(email),
 		"password_configured", password != "",
@@ -297,7 +297,7 @@ func logFindCGLoginAttempt(baseURL, email, password, source string) {
 
 func logFindCGLoginFailure(status int, body []byte, baseURL, email, password, source string) {
 	slog.Warn(
-		"findcg login failed",
+		"model square login failed",
 		"status", status,
 		"body", string(body),
 		"base_url", strings.TrimRight(baseURL, "/"),
@@ -337,7 +337,7 @@ func (h *ModelSquareHandler) mergeGroups(ctx context.Context, payload []byte) ([
 
 	var body map[string]any
 	if err := json.Unmarshal(payload, &body); err != nil {
-		return nil, fmt.Errorf("decode findcg model-square response: %w", err)
+		return nil, fmt.Errorf("decode model square upstream response: %w", err)
 	}
 
 	rawGroups, ok := body["groups"].([]any)
@@ -437,7 +437,7 @@ func modelSquareIDKey(value any) string {
 func (h *ModelSquareHandler) requestModelSquare(ctx context.Context, token cachedFindCGToken) ([]byte, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, h.baseURL+findCGModelPath, nil)
 	if err != nil {
-		return nil, 0, fmt.Errorf("create findcg model-square request: %w", err)
+		return nil, 0, fmt.Errorf("create model square upstream request: %w", err)
 	}
 	if token.TokenType == "" {
 		token.TokenType = "Bearer"
@@ -446,13 +446,13 @@ func (h *ModelSquareHandler) requestModelSquare(ctx context.Context, token cache
 
 	resp, err := h.httpClient.Do(req)
 	if err != nil {
-		return nil, 0, fmt.Errorf("findcg model-square request failed: %w", err)
+		return nil, 0, fmt.Errorf("model square upstream request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, 0, fmt.Errorf("read findcg model-square response: %w", err)
+		return nil, 0, fmt.Errorf("read model square upstream response: %w", err)
 	}
 
 	return raw, resp.StatusCode, nil

@@ -105,10 +105,10 @@
             </h2>
 
             <div class="mt-4 grid grid-cols-2 gap-3">
-              <PriceBox label="输入" :value="model.input_price" />
-              <PriceBox label="输出" :value="model.output_price" />
-              <PriceBox label="Cache Read" :value="model.cache_read_price" tone="blue" />
-              <PriceBox label="Cache Write" :value="model.cache_create_price" tone="purple" />
+              <PriceBox label="输入" :value="modelDisplayPrice(model, 'input_price')" />
+              <PriceBox label="输出" :value="modelDisplayPrice(model, 'output_price')" />
+              <PriceBox label="Cache Read" :value="modelDisplayPrice(model, 'cache_read_price')" tone="blue" />
+              <PriceBox label="Cache Write" :value="modelDisplayPrice(model, 'cache_create_price')" tone="purple" />
             </div>
 
             <div class="mt-auto flex items-center justify-between gap-3 border-t border-gray-100 pt-4 dark:border-dark-700">
@@ -176,10 +176,10 @@
                   <td class="max-w-64 px-4 py-4 font-medium text-gray-950 dark:text-white">
                     <span class="break-words">{{ model.id || '未命名模型' }}</span>
                   </td>
-                  <td class="whitespace-nowrap px-4 py-4 font-mono text-gray-900 dark:text-gray-100">{{ formatPrice(model.input_price) }}</td>
-                  <td class="whitespace-nowrap px-4 py-4 font-mono text-gray-900 dark:text-gray-100">{{ formatPrice(model.output_price) }}</td>
-                  <td class="whitespace-nowrap px-4 py-4 font-mono text-gray-900 dark:text-gray-100">{{ formatPrice(model.cache_read_price) }}</td>
-                  <td class="whitespace-nowrap px-4 py-4 font-mono text-gray-900 dark:text-gray-100">{{ formatPrice(model.cache_create_price) }}</td>
+                  <td class="whitespace-nowrap px-4 py-4 font-mono text-gray-900 dark:text-gray-100">{{ formatPrice(modelDisplayPrice(model, 'input_price')) }}</td>
+                  <td class="whitespace-nowrap px-4 py-4 font-mono text-gray-900 dark:text-gray-100">{{ formatPrice(modelDisplayPrice(model, 'output_price')) }}</td>
+                  <td class="whitespace-nowrap px-4 py-4 font-mono text-gray-900 dark:text-gray-100">{{ formatPrice(modelDisplayPrice(model, 'cache_read_price')) }}</td>
+                  <td class="whitespace-nowrap px-4 py-4 font-mono text-gray-900 dark:text-gray-100">{{ formatPrice(modelDisplayPrice(model, 'cache_create_price')) }}</td>
                   <td class="whitespace-nowrap px-4 py-4">
                     <span class="rounded bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
                       {{ modeLabel(model.mode) }}
@@ -344,6 +344,19 @@ function modelGroups(model: ModelSquareModel): ModelSquareGroup[] {
   return (model.group_ids || [])
     .map((id) => groupById.value.get(String(id)))
     .filter(Boolean) as ModelSquareGroup[]
+}
+
+function primaryGroupRate(model: ModelSquareModel) {
+  const firstGroupId = model.group_ids?.[0]
+  if (firstGroupId === undefined || firstGroupId === null) return 1
+  const rate = Number(groupById.value.get(String(firstGroupId))?.rate_multiplier ?? 1)
+  return Number.isFinite(rate) ? rate : 1
+}
+
+function modelDisplayPrice(model: ModelSquareModel, field: 'input_price' | 'output_price' | 'cache_read_price' | 'cache_create_price') {
+  const price = Number(model[field] ?? 0)
+  if (!Number.isFinite(price)) return 0
+  return price * primaryGroupRate(model)
 }
 
 function openGroupModal(model: ModelSquareModel) {
