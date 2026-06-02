@@ -25,19 +25,33 @@ const (
 	defaultFindCGBaseURL = "https://www.findcg.com"
 	findCGLoginPath      = "/api/v1/auth/login"
 	findCGModelPath      = "/api/v1/model-square"
+	findCGKeysPath       = "/api/v1/keys?page=1&page_size=100&timezone=Asia%2FShanghai"
+
+	modelSquareKeysSyncErrorBackoff = 30 * time.Second
+	modelSquareRateCompareEpsilon   = 1e-9
 )
 
 // ModelSquareHandler proxies the external model square API for admin users.
 type ModelSquareHandler struct {
 	baseURL        string
+	loginURL       string
+	modelURL       string
+	keysURL        string
 	httpClient     *http.Client
 	email          string
 	password       string
 	settingService *service.SettingService
 	groupProvider  modelSquareGroupProvider
+	syncInterval   time.Duration
 
 	mu    sync.Mutex
 	token cachedFindCGToken
+
+	syncRunMu sync.Mutex
+
+	backgroundMu      sync.Mutex
+	backgroundStop    chan struct{}
+	backgroundStopped chan struct{}
 }
 
 type cachedFindCGToken struct {
@@ -49,16 +63,21 @@ type cachedFindCGToken struct {
 // ModelSquareHandlerConfig configures ModelSquareHandler, mainly for tests.
 type ModelSquareHandlerConfig struct {
 	BaseURL        string
+	LoginURL       string
+	ModelURL       string
+	KeysURL        string
 	Email          string
 	Password       string
 	AppConfig      *config.Config
 	SettingService *service.SettingService
 	GroupProvider  modelSquareGroupProvider
 	HTTPClient     *http.Client
+	SyncInterval   time.Duration
 }
 
 type modelSquareGroupProvider interface {
 	GetAllGroups(ctx context.Context) ([]service.Group, error)
+	UpdateGroup(ctx context.Context, id int64, input *service.UpdateGroupInput) (*service.Group, error)
 }
 
 type findCGLoginResponse struct {
@@ -71,6 +90,30 @@ type findCGLoginResponse struct {
 	} `json:"data"`
 }
 
+type findCGKeysResponse struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    struct {
+		Items []findCGKeyItem `json:"items"`
+	} `json:"data"`
+}
+
+type findCGKeyItem struct {
+	Name  string          `json:"name"`
+	Group *findCGKeyGroup `json:"group"`
+}
+
+type findCGKeyGroup struct {
+	Name           string   `json:"name"`
+	RateMultiplier *float64 `json:"rate_multiplier"`
+}
+
+type modelSquareKeysSyncResult struct {
+	CheckedCount int `json:"checked_count"`
+	MatchedCount int `json:"matched_count"`
+	UpdatedCount int `json:"updated_count"`
+}
+
 // NewModelSquareHandler creates a model square proxy handler.
 func NewModelSquareHandler(cfg *config.Config, settingService *service.SettingService, groupProvider service.AdminService) *ModelSquareHandler {
 	return newModelSquareHandler(ModelSquareHandlerConfig{AppConfig: cfg, SettingService: settingService, GroupProvider: groupProvider})
@@ -78,8 +121,12 @@ func NewModelSquareHandler(cfg *config.Config, settingService *service.SettingSe
 
 func newModelSquareHandler(cfg ModelSquareHandlerConfig) *ModelSquareHandler {
 	baseURL := strings.TrimRight(cfg.BaseURL, "/")
+	loginURL := strings.TrimSpace(cfg.LoginURL)
+	modelURL := strings.TrimSpace(cfg.ModelURL)
+	keysURL := strings.TrimSpace(cfg.KeysURL)
 	email := strings.TrimSpace(cfg.Email)
 	password := cfg.Password
+	syncInterval := cfg.SyncInterval
 
 	if cfg.AppConfig != nil {
 		if baseURL == "" {
@@ -90,6 +137,18 @@ func newModelSquareHandler(cfg ModelSquareHandlerConfig) *ModelSquareHandler {
 		}
 		if password == "" {
 			password = cfg.AppConfig.ModelSquare.Password
+		}
+		if loginURL == "" {
+			loginURL = cfg.AppConfig.ModelSquare.LoginURL
+		}
+		if modelURL == "" {
+			modelURL = cfg.AppConfig.ModelSquare.ModelSquareURL
+		}
+		if keysURL == "" {
+			keysURL = cfg.AppConfig.ModelSquare.KeysURL
+		}
+		if syncInterval == 0 && cfg.AppConfig.ModelSquare.KeysSyncIntervalSeconds > 0 {
+			syncInterval = time.Duration(cfg.AppConfig.ModelSquare.KeysSyncIntervalSeconds) * time.Second
 		}
 	}
 
@@ -114,6 +173,15 @@ func newModelSquareHandler(cfg ModelSquareHandlerConfig) *ModelSquareHandler {
 	if password == "" {
 		password = os.Getenv("FINDCG_PASSWORD")
 	}
+	if loginURL == "" {
+		loginURL = strings.TrimSpace(os.Getenv("MODEL_SQUARE_LOGIN_URL"))
+	}
+	if modelURL == "" {
+		modelURL = strings.TrimSpace(os.Getenv("MODEL_SQUARE_MODEL_URL"))
+	}
+	if keysURL == "" {
+		keysURL = strings.TrimSpace(os.Getenv("MODEL_SQUARE_KEYS_URL"))
+	}
 
 	client := cfg.HTTPClient
 	if client == nil {
@@ -122,11 +190,15 @@ func newModelSquareHandler(cfg ModelSquareHandlerConfig) *ModelSquareHandler {
 
 	return &ModelSquareHandler{
 		baseURL:        baseURL,
+		loginURL:       loginURL,
+		modelURL:       modelURL,
+		keysURL:        keysURL,
 		httpClient:     client,
 		email:          email,
 		password:       password,
 		settingService: cfg.SettingService,
 		groupProvider:  cfg.GroupProvider,
+		syncInterval:   syncInterval,
 	}
 }
 
@@ -141,45 +213,198 @@ func (h *ModelSquareHandler) Get(c *gin.Context) {
 	c.Data(http.StatusOK, "application/json; charset=utf-8", payload)
 }
 
+// SyncKeys handles POST /api/v1/admin/model-square/sync.
+func (h *ModelSquareHandler) SyncKeys(c *gin.Context) {
+	result, err := h.syncKeysOnce(c.Request.Context(), false)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+
+	response.Success(c, result)
+}
+
 func (h *ModelSquareHandler) fetchModelSquare(ctx context.Context, forceLogin bool) ([]byte, error) {
-	token, err := h.getToken(ctx, forceLogin)
-	if err != nil {
-		return nil, err
-	}
-
-	payload, status, err := h.requestModelSquare(ctx, token)
-	if err != nil {
-		return nil, err
-	}
-	if status != http.StatusUnauthorized {
-		if status < 200 || status >= 300 {
-			return nil, fmt.Errorf("model square upstream failed: HTTP %d: %s", status, string(payload))
-		}
-		return h.mergeGroups(ctx, payload)
-	}
-
-	token, err = h.getToken(ctx, true)
-	if err != nil {
-		return nil, err
-	}
-	payload, status, err = h.requestModelSquare(ctx, token)
+	payload, status, err := h.requestModelSquareAuthenticated(ctx, findCGModelPath, "model square upstream", forceLogin)
 	if err != nil {
 		return nil, err
 	}
 	if status < 200 || status >= 300 {
-		return nil, fmt.Errorf("model square upstream failed after relogin: HTTP %d: %s", status, string(payload))
+		return nil, fmt.Errorf("model square upstream failed: HTTP %d: %s", status, string(payload))
 	}
 
 	return h.mergeGroups(ctx, payload)
+}
+
+func (h *ModelSquareHandler) StartBackgroundSync() {
+	if h == nil || h.groupProvider == nil || h.syncInterval <= 0 {
+		return
+	}
+
+	h.backgroundMu.Lock()
+	defer h.backgroundMu.Unlock()
+	if h.backgroundStop != nil {
+		return
+	}
+
+	stop := make(chan struct{})
+	stopped := make(chan struct{})
+	h.backgroundStop = stop
+	h.backgroundStopped = stopped
+	go h.runBackgroundSync(stop, stopped)
+}
+
+func (h *ModelSquareHandler) StopBackgroundSync() {
+	if h == nil {
+		return
+	}
+
+	h.backgroundMu.Lock()
+	stop := h.backgroundStop
+	stopped := h.backgroundStopped
+	h.backgroundStop = nil
+	h.backgroundStopped = nil
+	h.backgroundMu.Unlock()
+
+	if stop == nil {
+		return
+	}
+	close(stop)
+	<-stopped
+}
+
+func (h *ModelSquareHandler) runBackgroundSync(stop <-chan struct{}, stopped chan<- struct{}) {
+	defer close(stopped)
+
+	for {
+		if _, err := h.syncKeysOnce(context.Background(), false); err != nil {
+			slog.Warn("model square background key rate sync failed", "error", err)
+			if !waitModelSquareSyncInterval(modelSquareKeysSyncErrorBackoff, stop) {
+				return
+			}
+			continue
+		}
+		if !waitModelSquareSyncInterval(h.syncInterval, stop) {
+			return
+		}
+	}
+}
+
+func waitModelSquareSyncInterval(interval time.Duration, stop <-chan struct{}) bool {
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		return true
+	case <-stop:
+		return false
+	}
+}
+
+func (h *ModelSquareHandler) syncKeysOnce(ctx context.Context, forceLogin bool) (modelSquareKeysSyncResult, error) {
+	h.syncRunMu.Lock()
+	defer h.syncRunMu.Unlock()
+
+	return h.syncGroupRateMultipliersFromKeys(ctx, forceLogin)
+}
+
+func (h *ModelSquareHandler) syncGroupRateMultipliersFromKeys(ctx context.Context, forceLogin bool) (modelSquareKeysSyncResult, error) {
+	result := modelSquareKeysSyncResult{}
+	if h.groupProvider == nil {
+		return result, nil
+	}
+
+	localGroups, err := h.groupProvider.GetAllGroups(ctx)
+	if err != nil {
+		return result, fmt.Errorf("load local groups for model square key rate sync: %w", err)
+	}
+	if len(localGroups) == 0 {
+		return result, nil
+	}
+
+	localByName := make(map[string]service.Group, len(localGroups))
+	for i := range localGroups {
+		key := normalizeModelSquareGroupName(localGroups[i].Name)
+		if key != "" {
+			localByName[key] = localGroups[i]
+		}
+	}
+
+	payload, status, err := h.requestModelSquareAuthenticated(ctx, findCGKeysPath, "model square keys", forceLogin)
+	if err != nil {
+		return result, err
+	}
+	if status < 200 || status >= 300 {
+		return result, fmt.Errorf("model square keys upstream failed: HTTP %d: %s", status, string(payload))
+	}
+
+	var keysResp findCGKeysResponse
+	if err := json.Unmarshal(payload, &keysResp); err != nil {
+		return result, fmt.Errorf("decode model square keys response: %w", err)
+	}
+	if keysResp.Code != 0 {
+		if keysResp.Message == "" {
+			keysResp.Message = "unknown error"
+		}
+		return result, fmt.Errorf("model square keys upstream failed: %s", keysResp.Message)
+	}
+
+	maxRemoteRateByGroupID := make(map[int64]float64)
+	for _, item := range keysResp.Data.Items {
+		if item.Group == nil || item.Group.RateMultiplier == nil || *item.Group.RateMultiplier < 0 {
+			continue
+		}
+		name := item.Name
+		if strings.TrimSpace(name) == "" {
+			name = item.Group.Name
+		}
+		key := normalizeModelSquareGroupName(name)
+		if key == "" {
+			continue
+		}
+		result.CheckedCount++
+		localGroup, ok := localByName[key]
+		if !ok {
+			continue
+		}
+		result.MatchedCount++
+		if !modelSquareRemoteRateGreater(*item.Group.RateMultiplier, localGroup.RateMultiplier) {
+			continue
+		}
+		if current, ok := maxRemoteRateByGroupID[localGroup.ID]; !ok || modelSquareRemoteRateGreater(*item.Group.RateMultiplier, current) {
+			maxRemoteRateByGroupID[localGroup.ID] = *item.Group.RateMultiplier
+		}
+	}
+
+	for groupID, remoteRate := range maxRemoteRateByGroupID {
+		rate := remoteRate
+		if _, err := h.groupProvider.UpdateGroup(ctx, groupID, &service.UpdateGroupInput{RateMultiplier: &rate}); err != nil {
+			return result, fmt.Errorf("update local group rate multiplier for model square key sync: %w", err)
+		}
+		result.UpdatedCount++
+	}
+
+	return result, nil
+}
+
+func modelSquareRemoteRateGreater(remoteRate, localRate float64) bool {
+	return remoteRate-localRate > modelSquareRateCompareEpsilon
 }
 
 func (h *ModelSquareHandler) getToken(ctx context.Context, force bool) (cachedFindCGToken, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	baseURL, email, password, source := h.resolveConfigLocked(ctx)
-	if baseURL != h.baseURL || email != h.email || password != h.password {
+	baseURL, loginURL, modelURL, keysURL, email, password, source := h.resolveConfigLocked(ctx)
+	if baseURL != h.baseURL || loginURL != h.loginURL || modelURL != h.modelURL || keysURL != h.keysURL || email != h.email || password != h.password {
 		h.baseURL = baseURL
+		h.loginURL = loginURL
+		h.modelURL = modelURL
+		h.keysURL = keysURL
 		h.email = email
 		h.password = password
 		h.token = cachedFindCGToken{}
@@ -202,7 +427,7 @@ func (h *ModelSquareHandler) getToken(ctx context.Context, force bool) (cachedFi
 		return cachedFindCGToken{}, fmt.Errorf("marshal login payload: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, h.baseURL+findCGLoginPath, bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, h.upstreamURLLocked(findCGLoginPath, h.loginURL), bytes.NewReader(body))
 	if err != nil {
 		return cachedFindCGToken{}, fmt.Errorf("create model square login request: %w", err)
 	}
@@ -253,8 +478,11 @@ func (h *ModelSquareHandler) getToken(ctx context.Context, force bool) (cachedFi
 	return h.token, nil
 }
 
-func (h *ModelSquareHandler) resolveConfigLocked(ctx context.Context) (string, string, string, string) {
+func (h *ModelSquareHandler) resolveConfigLocked(ctx context.Context) (string, string, string, string, string, string, string) {
 	baseURL := h.baseURL
+	loginURL := h.loginURL
+	modelURL := h.modelURL
+	keysURL := h.keysURL
 	email := h.email
 	password := h.password
 	source := "config_or_env"
@@ -270,7 +498,16 @@ func (h *ModelSquareHandler) resolveConfigLocked(ctx context.Context) (string, s
 			if settings.ModelSquarePassword != "" {
 				password = settings.ModelSquarePassword
 			}
-			if settings.ModelSquareBaseURL != "" || settings.ModelSquareEmail != "" || settings.ModelSquarePassword != "" {
+			if settings.ModelSquareLoginURL != "" {
+				loginURL = settings.ModelSquareLoginURL
+			}
+			if settings.ModelSquareModelURL != "" {
+				modelURL = settings.ModelSquareModelURL
+			}
+			if settings.ModelSquareKeysURL != "" {
+				keysURL = settings.ModelSquareKeysURL
+			}
+			if settings.ModelSquareBaseURL != "" || settings.ModelSquareEmail != "" || settings.ModelSquarePassword != "" || settings.ModelSquareLoginURL != "" || settings.ModelSquareModelURL != "" || settings.ModelSquareKeysURL != "" {
 				source = "settings"
 			}
 		} else {
@@ -281,7 +518,7 @@ func (h *ModelSquareHandler) resolveConfigLocked(ctx context.Context) (string, s
 	if baseURL == "" {
 		baseURL = defaultFindCGBaseURL
 	}
-	return strings.TrimRight(baseURL, "/"), strings.TrimSpace(email), password, source
+	return strings.TrimRight(baseURL, "/"), strings.TrimSpace(loginURL), strings.TrimSpace(modelURL), strings.TrimSpace(keysURL), strings.TrimSpace(email), password, source
 }
 
 func logFindCGLoginAttempt(baseURL, email, password, source string) {
@@ -434,10 +671,28 @@ func modelSquareIDKey(value any) string {
 	return fmt.Sprint(value)
 }
 
-func (h *ModelSquareHandler) requestModelSquare(ctx context.Context, token cachedFindCGToken) ([]byte, int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, h.baseURL+findCGModelPath, nil)
+func (h *ModelSquareHandler) requestModelSquareAuthenticated(ctx context.Context, path, label string, forceLogin bool) ([]byte, int, error) {
+	token, err := h.getToken(ctx, forceLogin)
 	if err != nil {
-		return nil, 0, fmt.Errorf("create model square upstream request: %w", err)
+		return nil, 0, err
+	}
+
+	payload, status, err := h.requestModelSquareWithToken(ctx, token, path, label)
+	if err != nil || status != http.StatusUnauthorized {
+		return payload, status, err
+	}
+
+	token, err = h.getToken(ctx, true)
+	if err != nil {
+		return nil, 0, err
+	}
+	return h.requestModelSquareWithToken(ctx, token, path, label)
+}
+
+func (h *ModelSquareHandler) requestModelSquareWithToken(ctx context.Context, token cachedFindCGToken, path, label string) ([]byte, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, h.configuredUpstreamURL(path), nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("create %s request: %w", label, err)
 	}
 	if token.TokenType == "" {
 		token.TokenType = "Bearer"
@@ -446,14 +701,37 @@ func (h *ModelSquareHandler) requestModelSquare(ctx context.Context, token cache
 
 	resp, err := h.httpClient.Do(req)
 	if err != nil {
-		return nil, 0, fmt.Errorf("model square upstream request failed: %w", err)
+		return nil, 0, fmt.Errorf("%s request failed: %w", label, err)
 	}
 	defer resp.Body.Close()
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, 0, fmt.Errorf("read model square upstream response: %w", err)
+		return nil, 0, fmt.Errorf("read %s response: %w", label, err)
 	}
 
 	return raw, resp.StatusCode, nil
+}
+
+func (h *ModelSquareHandler) configuredUpstreamURL(path string) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	configuredURL := ""
+	switch path {
+	case findCGModelPath:
+		configuredURL = h.modelURL
+	case findCGKeysPath:
+		configuredURL = h.keysURL
+	case findCGLoginPath:
+		configuredURL = h.loginURL
+	}
+	return h.upstreamURLLocked(path, configuredURL)
+}
+
+func (h *ModelSquareHandler) upstreamURLLocked(path, configuredURL string) string {
+	if strings.TrimSpace(configuredURL) != "" {
+		return strings.TrimSpace(configuredURL)
+	}
+	return h.baseURL + path
 }

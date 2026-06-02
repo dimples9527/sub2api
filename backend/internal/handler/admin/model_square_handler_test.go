@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,7 +32,7 @@ func TestResolveConfigReportsSource(t *testing.T) {
 		}},
 	})
 
-	baseURL, email, password, source := h.resolveConfigLocked(context.Background())
+	baseURL, _, _, _, email, password, source := h.resolveConfigLocked(context.Background())
 
 	require.Equal(t, "https://yaml.example.com", baseURL)
 	require.Equal(t, "yaml@example.com", email)
@@ -50,7 +51,7 @@ func TestResolveConfigReportsSettingsSource(t *testing.T) {
 		SettingService: settingSvc,
 	})
 
-	baseURL, email, password, source := h.resolveConfigLocked(context.Background())
+	baseURL, _, _, _, email, password, source := h.resolveConfigLocked(context.Background())
 
 	require.Equal(t, "https://db.example.com", baseURL)
 	require.Equal(t, "db@example.com", email)
@@ -173,6 +174,86 @@ func TestModelSquareHandlerUsesDBBackedCredentials(t *testing.T) {
 	require.JSONEq(t, `{"email":"db@example.com","password":"db-secret"}`, loginBody)
 }
 
+func TestModelSquareHandlerUsesConfiguredEndpointURLs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/custom/login":
+			_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"access_token":"token-custom","expires_in":86400,"token_type":"Bearer"}}`))
+		case "/custom/models":
+			require.Equal(t, "Bearer token-custom", r.Header.Get("Authorization"))
+			_, _ = w.Write([]byte(`{"groups":[],"models":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	h := newModelSquareHandler(ModelSquareHandlerConfig{
+		AppConfig: &config.Config{ModelSquare: config.ModelSquareConfig{
+			BaseURL:        "https://unused.example.com",
+			LoginURL:       server.URL + "/custom/login",
+			ModelSquareURL: server.URL + "/custom/models",
+			Email:          "configured@example.com",
+			Password:       "configured-secret",
+		}},
+		HTTPClient: server.Client(),
+	})
+	router := gin.New()
+	router.GET("/admin/model-square", h.Get)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/model-square", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, []string{"/custom/login", "/custom/models"}, paths)
+}
+
+func TestModelSquareHandlerUsesSettingsEndpointURLs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/settings/login":
+			_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"access_token":"token-settings-url","expires_in":86400,"token_type":"Bearer"}}`))
+		case "/settings/models":
+			require.Equal(t, "Bearer token-settings-url", r.Header.Get("Authorization"))
+			_, _ = w.Write([]byte(`{"groups":[],"models":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	settingSvc := service.NewSettingService(&modelSquareSettingRepo{values: map[string]string{
+		service.SettingKeyModelSquareBaseURL:  "https://unused.example.com",
+		service.SettingKeyModelSquareLoginURL: server.URL + "/settings/login",
+		service.SettingKeyModelSquareModelURL: server.URL + "/settings/models",
+		service.SettingKeyModelSquareEmail:    "db@example.com",
+		service.SettingKeyModelSquarePassword: "db-secret",
+	}}, &config.Config{})
+	h := newModelSquareHandler(ModelSquareHandlerConfig{
+		AppConfig:      &config.Config{ModelSquare: config.ModelSquareConfig{Email: "yaml@example.com", Password: "yaml-secret"}},
+		SettingService: settingSvc,
+		HTTPClient:     server.Client(),
+	})
+	router := gin.New()
+	router.GET("/admin/model-square", h.Get)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/model-square", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, []string{"/settings/login", "/settings/models"}, paths)
+}
+
 func TestModelSquareHandlerMergesGroupsByNormalizedName(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -243,13 +324,207 @@ func TestModelSquareHandlerMergesGroupsByNormalizedName(t *testing.T) {
 	require.Equal(t, []any{"remote-1"}, body.Models[0].GroupIDs)
 }
 
+func TestModelSquareHandlerManualSyncRaisesLocalGroupRateFromKeys(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var keysAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"access_token":"token-keys","expires_in":86400,"token_type":"Bearer"}}`))
+		case "/api/v1/keys":
+			keysAuth = r.Header.Get("Authorization")
+			require.Equal(t, "1", r.URL.Query().Get("page"))
+			require.Equal(t, "100", r.URL.Query().Get("page_size"))
+			require.Equal(t, "Asia/Shanghai", r.URL.Query().Get("timezone"))
+			_, _ = w.Write([]byte(`{
+				"code":0,
+				"message":"success",
+				"data":{
+					"items":[
+						{"id":1,"name":" Codex Special ","group":{"rate_multiplier":0.6}},
+						{"id":2,"name":"Stable Group","group":{"rate_multiplier":0.25}},
+						{"id":3,"name":"Unmatched Group","group":{"rate_multiplier":9.9}},
+						{"id":4,"name":"codexspecial","group":{"rate_multiplier":0.7}}
+					],
+					"total":4,
+					"page":1,
+					"page_size":100,
+					"pages":1
+				}
+			}`))
+		case "/api/v1/model-square":
+			require.Equal(t, "Bearer token-keys", r.Header.Get("Authorization"))
+			_, _ = w.Write([]byte(`{"groups":[],"models":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	groupProvider := &modelSquareGroupProviderStub{groups: []service.Group{
+		{ID: 10, Name: "codex special", RateMultiplier: 0.5},
+		{ID: 20, Name: "StableGroup", RateMultiplier: 0.4},
+	}}
+	h := newModelSquareHandler(ModelSquareHandlerConfig{
+		AppConfig: &config.Config{ModelSquare: config.ModelSquareConfig{
+			BaseURL:  server.URL,
+			Email:    "configured@example.com",
+			Password: "configured-secret",
+		}},
+		GroupProvider: groupProvider,
+		HTTPClient:    server.Client(),
+	})
+	router := gin.New()
+	router.POST("/admin/model-square/sync", h.SyncKeys)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/model-square/sync", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "Bearer token-keys", keysAuth)
+	require.Equal(t, []modelSquareGroupRateUpdate{{id: 10, rate: 0.7}}, groupProvider.updatesSnapshot())
+	require.JSONEq(t, `{"code":0,"message":"success","data":{"checked_count":4,"matched_count":3,"updated_count":1}}`, rec.Body.String())
+}
+
+func TestModelSquareHandlerBackgroundSyncRunsOnInterval(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"access_token":"token-bg","expires_in":86400,"token_type":"Bearer"}}`))
+		case "/api/v1/keys":
+			require.Equal(t, "Bearer token-bg", r.Header.Get("Authorization"))
+			_, _ = w.Write([]byte(`{
+				"code":0,
+				"message":"success",
+				"data":{
+					"items":[{"id":1,"name":"Codex Special","group":{"rate_multiplier":0.3}}],
+					"total":1,
+					"page":1,
+					"page_size":100,
+					"pages":1
+				}
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	groupProvider := &modelSquareGroupProviderStub{groups: []service.Group{
+		{ID: 10, Name: "codexspecial", RateMultiplier: 0.2},
+	}}
+	h := newModelSquareHandler(ModelSquareHandlerConfig{
+		AppConfig: &config.Config{ModelSquare: config.ModelSquareConfig{
+			BaseURL:                 server.URL,
+			Email:                   "configured@example.com",
+			Password:                "configured-secret",
+			KeysSyncIntervalSeconds: 1,
+		}},
+		SyncInterval:  10 * time.Millisecond,
+		GroupProvider: groupProvider,
+		HTTPClient:    server.Client(),
+	})
+	h.StartBackgroundSync()
+	defer h.StopBackgroundSync()
+
+	require.Eventually(t, func() bool {
+		return len(groupProvider.updatesSnapshot()) == 1
+	}, time.Second, 10*time.Millisecond)
+	require.Equal(t, []modelSquareGroupRateUpdate{{id: 10, rate: 0.3}}, groupProvider.updatesSnapshot())
+}
+
+func TestModelSquareHandlerManualSyncIgnoresFloatTailDifference(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"access_token":"token-float","expires_in":86400,"token_type":"Bearer"}}`))
+		case "/api/v1/keys":
+			_, _ = w.Write([]byte(`{
+				"code":0,
+				"message":"success",
+				"data":{
+					"items":[{"id":1,"name":"Float Group","group":{"rate_multiplier":0.30000000000000004}}],
+					"total":1,
+					"page":1,
+					"page_size":100,
+					"pages":1
+				}
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	groupProvider := &modelSquareGroupProviderStub{groups: []service.Group{
+		{ID: 10, Name: "floatgroup", RateMultiplier: 0.3},
+	}}
+	h := newModelSquareHandler(ModelSquareHandlerConfig{
+		AppConfig: &config.Config{ModelSquare: config.ModelSquareConfig{
+			BaseURL:  server.URL,
+			Email:    "configured@example.com",
+			Password: "configured-secret",
+		}},
+		GroupProvider: groupProvider,
+		HTTPClient:    server.Client(),
+	})
+	router := gin.New()
+	router.POST("/admin/model-square/sync", h.SyncKeys)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/model-square/sync", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Empty(t, groupProvider.updatesSnapshot())
+	require.JSONEq(t, `{"code":0,"message":"success","data":{"checked_count":1,"matched_count":1,"updated_count":0}}`, rec.Body.String())
+}
+
+type modelSquareGroupRateUpdate struct {
+	id   int64
+	rate float64
+}
+
 type modelSquareGroupProviderStub struct {
-	groups []service.Group
-	err    error
+	mu      sync.Mutex
+	groups  []service.Group
+	err     error
+	updates []modelSquareGroupRateUpdate
 }
 
 func (s *modelSquareGroupProviderStub) GetAllGroups(context.Context) ([]service.Group, error) {
-	return s.groups, s.err
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	groups := append([]service.Group(nil), s.groups...)
+	return groups, s.err
+}
+
+func (s *modelSquareGroupProviderStub) UpdateGroup(_ context.Context, id int64, input *service.UpdateGroupInput) (*service.Group, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if input == nil || input.RateMultiplier == nil {
+		return nil, nil
+	}
+	s.updates = append(s.updates, modelSquareGroupRateUpdate{id: id, rate: *input.RateMultiplier})
+	for i := range s.groups {
+		if s.groups[i].ID == id {
+			s.groups[i].RateMultiplier = *input.RateMultiplier
+			return &s.groups[i], nil
+		}
+	}
+	return nil, nil
+}
+
+func (s *modelSquareGroupProviderStub) updatesSnapshot() []modelSquareGroupRateUpdate {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]modelSquareGroupRateUpdate(nil), s.updates...)
 }
 
 type modelSquareSettingRepo struct {
