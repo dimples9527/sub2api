@@ -55,6 +55,9 @@ func RegisterUserRoutes(
 			groups.GET("/rates", h.APIKey.GetUserGroupRates)
 		}
 
+		// 模型广场（所有已登录用户可见）
+		authenticated.GET("/model-square", h.Admin.ModelSquare.Get)
+
 		// 使用记录
 		usage := authenticated.Group("/usage")
 		{
