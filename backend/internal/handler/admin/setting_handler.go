@@ -168,6 +168,9 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		FallbackModelGemini:                  settings.FallbackModelGemini,
 		FallbackModelAntigravity:             settings.FallbackModelAntigravity,
 		ModelSquareBaseURL:                   settings.ModelSquareBaseURL,
+		ModelSquareLoginURL:                  settings.ModelSquareLoginURL,
+		ModelSquareModelURL:                  settings.ModelSquareModelURL,
+		ModelSquareKeysURL:                   settings.ModelSquareKeysURL,
 		ModelSquareEmail:                     settings.ModelSquareEmail,
 		ModelSquarePasswordConfigured:        settings.ModelSquarePasswordConfigured,
 		EnableIdentityPatch:                  settings.EnableIdentityPatch,
@@ -299,6 +302,9 @@ type UpdateSettingsRequest struct {
 
 	// Model square upstream configuration
 	ModelSquareBaseURL  string `json:"model_square_base_url"`
+	ModelSquareLoginURL string `json:"model_square_login_url"`
+	ModelSquareModelURL string `json:"model_square_model_url"`
+	ModelSquareKeysURL  string `json:"model_square_keys_url"`
 	ModelSquareEmail    string `json:"model_square_email"`
 	ModelSquarePassword string `json:"model_square_password"`
 
@@ -385,6 +391,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	req.SMTPUsername = strings.TrimSpace(req.SMTPUsername)
 	req.SMTPPassword = strings.TrimSpace(req.SMTPPassword)
 	req.ModelSquareBaseURL = strings.TrimRight(strings.TrimSpace(req.ModelSquareBaseURL), "/")
+	req.ModelSquareLoginURL = strings.TrimSpace(req.ModelSquareLoginURL)
+	req.ModelSquareModelURL = strings.TrimSpace(req.ModelSquareModelURL)
+	req.ModelSquareKeysURL = strings.TrimSpace(req.ModelSquareKeysURL)
 	req.ModelSquareEmail = strings.TrimSpace(req.ModelSquareEmail)
 	req.SMTPFrom = strings.TrimSpace(req.SMTPFrom)
 	req.SMTPFromName = strings.TrimSpace(req.SMTPFromName)
@@ -867,6 +876,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		FallbackModelGemini:              req.FallbackModelGemini,
 		FallbackModelAntigravity:         req.FallbackModelAntigravity,
 		ModelSquareBaseURL:               req.ModelSquareBaseURL,
+		ModelSquareLoginURL:              req.ModelSquareLoginURL,
+		ModelSquareModelURL:              req.ModelSquareModelURL,
+		ModelSquareKeysURL:               req.ModelSquareKeysURL,
 		ModelSquareEmail:                 req.ModelSquareEmail,
 		ModelSquarePassword:              req.ModelSquarePassword,
 		EnableIdentityPatch:              req.EnableIdentityPatch,
@@ -1060,6 +1072,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		FallbackModelGemini:                  updatedSettings.FallbackModelGemini,
 		FallbackModelAntigravity:             updatedSettings.FallbackModelAntigravity,
 		ModelSquareBaseURL:                   updatedSettings.ModelSquareBaseURL,
+		ModelSquareLoginURL:                  updatedSettings.ModelSquareLoginURL,
+		ModelSquareModelURL:                  updatedSettings.ModelSquareModelURL,
+		ModelSquareKeysURL:                   updatedSettings.ModelSquareKeysURL,
 		ModelSquareEmail:                     updatedSettings.ModelSquareEmail,
 		ModelSquarePasswordConfigured:        updatedSettings.ModelSquarePasswordConfigured,
 		EnableIdentityPatch:                  updatedSettings.EnableIdentityPatch,

@@ -108,6 +108,9 @@ type SystemSettings struct {
 
 	// Model square upstream configuration
 	ModelSquareBaseURL            string `json:"model_square_base_url"`
+	ModelSquareLoginURL           string `json:"model_square_login_url"`
+	ModelSquareModelURL           string `json:"model_square_model_url"`
+	ModelSquareKeysURL            string `json:"model_square_keys_url"`
 	ModelSquareEmail              string `json:"model_square_email"`
 	ModelSquarePasswordConfigured bool   `json:"model_square_password_configured"`
 

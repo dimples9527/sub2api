@@ -594,6 +594,9 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 	updates[SettingKeyFallbackModelGemini] = settings.FallbackModelGemini
 	updates[SettingKeyFallbackModelAntigravity] = settings.FallbackModelAntigravity
 	updates[SettingKeyModelSquareBaseURL] = strings.TrimRight(strings.TrimSpace(settings.ModelSquareBaseURL), "/")
+	updates[SettingKeyModelSquareLoginURL] = strings.TrimSpace(settings.ModelSquareLoginURL)
+	updates[SettingKeyModelSquareModelURL] = strings.TrimSpace(settings.ModelSquareModelURL)
+	updates[SettingKeyModelSquareKeysURL] = strings.TrimSpace(settings.ModelSquareKeysURL)
 	updates[SettingKeyModelSquareEmail] = strings.TrimSpace(settings.ModelSquareEmail)
 	if settings.ModelSquarePassword != "" {
 		updates[SettingKeyModelSquarePassword] = settings.ModelSquarePassword
@@ -973,6 +976,9 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyFallbackModelGemini:      "gemini-2.5-pro",
 		SettingKeyFallbackModelAntigravity: "gemini-2.5-pro",
 		SettingKeyModelSquareBaseURL:       "",
+		SettingKeyModelSquareLoginURL:      "",
+		SettingKeyModelSquareModelURL:      "",
+		SettingKeyModelSquareKeysURL:       "",
 		SettingKeyModelSquareEmail:         "",
 		// Identity patch defaults
 		SettingKeyEnableIdentityPatch: "true",
@@ -1237,12 +1243,24 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.FallbackModelGemini = s.getStringOrDefault(settings, SettingKeyFallbackModelGemini, "gemini-2.5-pro")
 	result.FallbackModelAntigravity = s.getStringOrDefault(settings, SettingKeyFallbackModelAntigravity, "gemini-2.5-pro")
 	result.ModelSquareBaseURL = strings.TrimRight(strings.TrimSpace(settings[SettingKeyModelSquareBaseURL]), "/")
+	result.ModelSquareLoginURL = strings.TrimSpace(settings[SettingKeyModelSquareLoginURL])
+	result.ModelSquareModelURL = strings.TrimSpace(settings[SettingKeyModelSquareModelURL])
+	result.ModelSquareKeysURL = strings.TrimSpace(settings[SettingKeyModelSquareKeysURL])
 	result.ModelSquareEmail = strings.TrimSpace(settings[SettingKeyModelSquareEmail])
 	result.ModelSquarePassword = settings[SettingKeyModelSquarePassword]
 	result.ModelSquarePasswordConfigured = result.ModelSquarePassword != ""
 	if s.cfg != nil {
 		if result.ModelSquareBaseURL == "" {
 			result.ModelSquareBaseURL = strings.TrimRight(strings.TrimSpace(s.cfg.ModelSquare.BaseURL), "/")
+		}
+		if result.ModelSquareLoginURL == "" {
+			result.ModelSquareLoginURL = strings.TrimSpace(s.cfg.ModelSquare.LoginURL)
+		}
+		if result.ModelSquareModelURL == "" {
+			result.ModelSquareModelURL = strings.TrimSpace(s.cfg.ModelSquare.ModelSquareURL)
+		}
+		if result.ModelSquareKeysURL == "" {
+			result.ModelSquareKeysURL = strings.TrimSpace(s.cfg.ModelSquare.KeysURL)
 		}
 		if result.ModelSquareEmail == "" {
 			result.ModelSquareEmail = strings.TrimSpace(s.cfg.ModelSquare.Email)

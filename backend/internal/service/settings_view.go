@@ -90,6 +90,9 @@ type SystemSettings struct {
 
 	// Model square upstream configuration
 	ModelSquareBaseURL            string
+	ModelSquareLoginURL           string
+	ModelSquareModelURL           string
+	ModelSquareKeysURL            string
 	ModelSquareEmail              string
 	ModelSquarePassword           string
 	ModelSquarePasswordConfigured bool

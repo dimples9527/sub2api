@@ -174,9 +174,13 @@ type LLMMonitorConfig struct {
 }
 
 type ModelSquareConfig struct {
-	BaseURL  string `mapstructure:"base_url"`
-	Email    string `mapstructure:"email"`
-	Password string `mapstructure:"password"`
+	BaseURL                 string `mapstructure:"base_url"`
+	LoginURL                string `mapstructure:"login_url"`
+	ModelSquareURL          string `mapstructure:"model_square_url"`
+	KeysURL                 string `mapstructure:"keys_url"`
+	Email                   string `mapstructure:"email"`
+	Password                string `mapstructure:"password"`
+	KeysSyncIntervalSeconds int    `mapstructure:"keys_sync_interval_seconds"`
 }
 
 type LinuxDoConnectConfig struct {
@@ -1039,6 +1043,9 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	cfg.OIDC.UserInfoIDPath = strings.TrimSpace(cfg.OIDC.UserInfoIDPath)
 	cfg.OIDC.UserInfoUsernamePath = strings.TrimSpace(cfg.OIDC.UserInfoUsernamePath)
 	cfg.ModelSquare.BaseURL = strings.TrimRight(strings.TrimSpace(cfg.ModelSquare.BaseURL), "/")
+	cfg.ModelSquare.LoginURL = strings.TrimSpace(cfg.ModelSquare.LoginURL)
+	cfg.ModelSquare.ModelSquareURL = strings.TrimSpace(cfg.ModelSquare.ModelSquareURL)
+	cfg.ModelSquare.KeysURL = strings.TrimSpace(cfg.ModelSquare.KeysURL)
 	cfg.ModelSquare.Email = strings.TrimSpace(cfg.ModelSquare.Email)
 	cfg.Dashboard.KeyPrefix = strings.TrimSpace(cfg.Dashboard.KeyPrefix)
 	cfg.CORS.AllowedOrigins = normalizeStringSlice(cfg.CORS.AllowedOrigins)
@@ -1323,8 +1330,12 @@ func setDefaults() {
 	// Model square upstream. Credentials can be set here or through
 	// MODEL_SQUARE_EMAIL / MODEL_SQUARE_PASSWORD environment variables.
 	viper.SetDefault("model_square.base_url", "https://www.findcg.com")
+	viper.SetDefault("model_square.login_url", "")
+	viper.SetDefault("model_square.model_square_url", "")
+	viper.SetDefault("model_square.keys_url", "")
 	viper.SetDefault("model_square.email", "")
 	viper.SetDefault("model_square.password", "")
+	viper.SetDefault("model_square.keys_sync_interval_seconds", 5)
 
 	// API Key auth cache
 	viper.SetDefault("api_key_auth_cache.l1_size", 65535)
