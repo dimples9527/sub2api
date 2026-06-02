@@ -328,7 +328,7 @@ async function loadModels() {
   loading.value = true
   error.value = ''
   try {
-    const data = await apiClient.get<ModelSquareResponse>('/admin/model-square')
+    const data = await apiClient.get<ModelSquareResponse>('/model-square')
     models.value = Array.isArray(data.data.models) ? data.data.models : []
     groups.value = Array.isArray(data.data.groups) ? data.data.groups : []
     updatedAt.value = data.data.updated_at || ''
