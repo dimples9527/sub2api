@@ -14,3 +14,25 @@ declare module '*.vue' {
   const component: DefineComponent<{}, {}, any>
   export default component
 }
+
+declare module '@airwallex/components-sdk' {
+  interface InitOptions {
+    env: 'demo' | 'prod'
+    enabledElements: string[]
+    locale?: string
+  }
+
+  interface RedirectToCheckoutOptions {
+    intent_id: string
+    client_secret: string
+    currency: string
+    country_code: string
+    successUrl: string
+  }
+
+  interface AirwallexPayments {
+    redirectToCheckout(options: RedirectToCheckoutOptions): string | void
+  }
+
+  export function init(options: InitOptions): Promise<{ payments?: AirwallexPayments }>
+}

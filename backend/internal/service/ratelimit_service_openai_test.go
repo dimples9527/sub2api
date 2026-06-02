@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCalculateOpenAI429ResetTime_7dExhausted(t *testing.T) {
@@ -48,7 +51,7 @@ func TestCalculateOpenAI429ResetTime_5hExhausted(t *testing.T) {
 	headers.Set("x-codex-primary-used-percent", "50")
 	headers.Set("x-codex-primary-reset-after-seconds", "500000")
 	headers.Set("x-codex-primary-window-minutes", "10080") // 7 days
-	headers.Set("x-codex-secondary-used-percent", "100")
+	headers.Set("x-codex-secondary-used-percent", "0")
 	headers.Set("x-codex-secondary-reset-after-seconds", "3600") // 1 hour
 	headers.Set("x-codex-secondary-window-minutes", "300")       // 5 hours
 
@@ -119,7 +122,7 @@ func TestCalculateOpenAI429ResetTime_ReversedWindowOrder(t *testing.T) {
 
 	// Test when OpenAI sends primary as 5h and secondary as 7d (reversed)
 	headers := http.Header{}
-	headers.Set("x-codex-primary-used-percent", "100")         // This is 5h
+	headers.Set("x-codex-primary-used-percent", "0")           // This is 5h remaining%
 	headers.Set("x-codex-primary-reset-after-seconds", "3600") // 1 hour
 	headers.Set("x-codex-primary-window-minutes", "300")       // 5 hours - smaller!
 	headers.Set("x-codex-secondary-used-percent", "50")
@@ -146,8 +149,10 @@ func TestCalculateOpenAI429ResetTime_ReversedWindowOrder(t *testing.T) {
 
 type openAI429SnapshotRepo struct {
 	mockAccountRepoForGemini
-	rateLimitedID int64
-	updatedExtra  map[string]any
+	rateLimitedID      int64
+	updatedExtra       map[string]any
+	bulkUpdatedIDs     []int64
+	bulkUpdatedPayload AccountBulkUpdate
 }
 
 func (r *openAI429SnapshotRepo) SetRateLimited(_ context.Context, id int64, _ time.Time) error {
@@ -160,6 +165,12 @@ func (r *openAI429SnapshotRepo) UpdateExtra(_ context.Context, _ int64, updates 
 	return nil
 }
 
+func (r *openAI429SnapshotRepo) BulkUpdate(_ context.Context, ids []int64, updates AccountBulkUpdate) (int64, error) {
+	r.bulkUpdatedIDs = append([]int64(nil), ids...)
+	r.bulkUpdatedPayload = updates
+	return int64(len(ids)), nil
+}
+
 func TestHandle429_OpenAIPersistsCodexSnapshotImmediately(t *testing.T) {
 	repo := &openAI429SnapshotRepo{}
 	svc := NewRateLimitService(repo, nil, nil, nil, nil)
@@ -169,7 +180,7 @@ func TestHandle429_OpenAIPersistsCodexSnapshotImmediately(t *testing.T) {
 	headers.Set("x-codex-primary-used-percent", "100")
 	headers.Set("x-codex-primary-reset-after-seconds", "604800")
 	headers.Set("x-codex-primary-window-minutes", "10080")
-	headers.Set("x-codex-secondary-used-percent", "100")
+	headers.Set("x-codex-secondary-used-percent", "0")
 	headers.Set("x-codex-secondary-reset-after-seconds", "18000")
 	headers.Set("x-codex-secondary-window-minutes", "300")
 
@@ -189,12 +200,31 @@ func TestHandle429_OpenAIPersistsCodexSnapshotImmediately(t *testing.T) {
 	}
 }
 
+func TestHandle429_OpenAISyncsObservedPlanType(t *testing.T) {
+	repo := &openAI429SnapshotRepo{}
+	svc := NewRateLimitService(repo, nil, nil, nil, nil)
+	account := &Account{
+		ID:          124,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"plan_type": "plus"},
+	}
+	body := []byte(`{"error":{"type":"usage_limit_reached","message":"limit reached","plan_type":"free","resets_at":1777283883}}`)
+
+	svc.handle429(context.Background(), account, http.Header{}, body)
+
+	require.Equal(t, []int64{account.ID}, repo.bulkUpdatedIDs)
+	require.Equal(t, "free", repo.bulkUpdatedPayload.Credentials["plan_type"])
+	require.Equal(t, "free", account.Credentials["plan_type"])
+	require.Equal(t, account.ID, repo.rateLimitedID)
+}
+
 func TestNormalizedCodexLimits(t *testing.T) {
 	// Test the Normalize() method directly
 	pUsed := 100.0
 	pReset := 384607
 	pWindow := 10080
-	sUsed := 3.0
+	sRemaining := 3.0
 	sReset := 17369
 	sWindow := 300
 
@@ -202,7 +232,7 @@ func TestNormalizedCodexLimits(t *testing.T) {
 		PrimaryUsedPercent:         &pUsed,
 		PrimaryResetAfterSeconds:   &pReset,
 		PrimaryWindowMinutes:       &pWindow,
-		SecondaryUsedPercent:       &sUsed,
+		SecondaryUsedPercent:       &sRemaining,
 		SecondaryResetAfterSeconds: &sReset,
 		SecondaryWindowMinutes:     &sWindow,
 	}
@@ -219,8 +249,8 @@ func TestNormalizedCodexLimits(t *testing.T) {
 	if normalized.Reset7dSeconds == nil || *normalized.Reset7dSeconds != 384607 {
 		t.Errorf("expected Reset7dSeconds=384607, got %v", normalized.Reset7dSeconds)
 	}
-	if normalized.Used5hPercent == nil || *normalized.Used5hPercent != 3.0 {
-		t.Errorf("expected Used5hPercent=3, got %v", normalized.Used5hPercent)
+	if normalized.Used5hPercent == nil || *normalized.Used5hPercent != 97.0 {
+		t.Errorf("expected Used5hPercent=97, got %v", normalized.Used5hPercent)
 	}
 	if normalized.Reset5hSeconds == nil || *normalized.Reset5hSeconds != 17369 {
 		t.Errorf("expected Reset5hSeconds=17369, got %v", normalized.Reset5hSeconds)
@@ -259,13 +289,60 @@ func TestNormalizedCodexLimits_OnlyPrimaryData(t *testing.T) {
 	}
 }
 
+func TestRateLimitService_HandleUpstreamError_403PreservesOriginalUpstreamMessage(t *testing.T) {
+	repo := &rateLimitAccountRepoStub{}
+	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	account := &Account{
+		ID:       201,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+	}
+
+	shouldDisable := service.HandleUpstreamError(
+		context.Background(),
+		account,
+		403,
+		http.Header{},
+		[]byte(`{"error":{"message":"workspace forbidden by policy","type":"invalid_request_error"}}`),
+	)
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Contains(t, repo.lastErrorMsg, "workspace forbidden by policy")
+	require.NotContains(t, repo.lastErrorMsg, "account may be suspended or lack permissions")
+}
+
+func TestRateLimitService_HandleUpstreamError_403FallsBackToRawBody(t *testing.T) {
+	repo := &rateLimitAccountRepoStub{}
+	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	account := &Account{
+		ID:       202,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+	}
+
+	shouldDisable := service.HandleUpstreamError(
+		context.Background(),
+		account,
+		403,
+		http.Header{},
+		[]byte(`{"error":{"type":"access_denied","details":{"reason":"ip_blocked"}}}`),
+	)
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Contains(t, repo.lastErrorMsg, `"access_denied"`)
+	require.Contains(t, repo.lastErrorMsg, `"ip_blocked"`)
+	require.NotContains(t, repo.lastErrorMsg, "account may be suspended or lack permissions")
+}
+
 func TestNormalizedCodexLimits_OnlySecondaryData(t *testing.T) {
 	// Test when only secondary has data, no window_minutes
-	sUsed := 60.0
+	sRemaining := 60.0
 	sReset := 3000
 
 	snapshot := &OpenAICodexUsageSnapshot{
-		SecondaryUsedPercent:       &sUsed,
+		SecondaryUsedPercent:       &sRemaining,
 		SecondaryResetAfterSeconds: &sReset,
 		// No window_minutes, no primary data
 	}
@@ -277,8 +354,8 @@ func TestNormalizedCodexLimits_OnlySecondaryData(t *testing.T) {
 
 	// Legacy assumption: primary=7d, secondary=5h
 	// So secondary goes to 5h
-	if normalized.Used5hPercent == nil || *normalized.Used5hPercent != 60.0 {
-		t.Errorf("expected Used5hPercent=60, got %v", normalized.Used5hPercent)
+	if normalized.Used5hPercent == nil || *normalized.Used5hPercent != 40.0 {
+		t.Errorf("expected Used5hPercent=40, got %v", normalized.Used5hPercent)
 	}
 	if normalized.Reset5hSeconds == nil || *normalized.Reset5hSeconds != 3000 {
 		t.Errorf("expected Reset5hSeconds=3000, got %v", normalized.Reset5hSeconds)
@@ -293,13 +370,13 @@ func TestNormalizedCodexLimits_BothDataNoWindowMinutes(t *testing.T) {
 	// Test when both have data but no window_minutes
 	pUsed := 100.0
 	pReset := 400000
-	sUsed := 50.0
+	sRemaining := 30.0
 	sReset := 10000
 
 	snapshot := &OpenAICodexUsageSnapshot{
 		PrimaryUsedPercent:         &pUsed,
 		PrimaryResetAfterSeconds:   &pReset,
-		SecondaryUsedPercent:       &sUsed,
+		SecondaryUsedPercent:       &sRemaining,
 		SecondaryResetAfterSeconds: &sReset,
 		// No window_minutes
 	}
@@ -316,8 +393,8 @@ func TestNormalizedCodexLimits_BothDataNoWindowMinutes(t *testing.T) {
 	if normalized.Reset7dSeconds == nil || *normalized.Reset7dSeconds != 400000 {
 		t.Errorf("expected Reset7dSeconds=400000, got %v", normalized.Reset7dSeconds)
 	}
-	if normalized.Used5hPercent == nil || *normalized.Used5hPercent != 50.0 {
-		t.Errorf("expected Used5hPercent=50, got %v", normalized.Used5hPercent)
+	if normalized.Used5hPercent == nil || *normalized.Used5hPercent != 70.0 {
+		t.Errorf("expected Used5hPercent=70, got %v", normalized.Used5hPercent)
 	}
 	if normalized.Reset5hSeconds == nil || *normalized.Reset5hSeconds != 10000 {
 		t.Errorf("expected Reset5hSeconds=10000, got %v", normalized.Reset5hSeconds)
@@ -348,7 +425,7 @@ func TestCalculateOpenAI429ResetTime_UserProvidedScenario(t *testing.T) {
 	// This is the exact scenario from the user:
 	// codex_7d_used_percent: 100
 	// codex_7d_reset_after_seconds: 384607 (约4.5天后重置)
-	// codex_5h_used_percent: 3
+	// codex_5h_used_percent: 97 (from upstream 3% remaining)
 	// codex_5h_reset_after_seconds: 17369 (约4.8小时后重置)
 
 	svc := &RateLimitService{}

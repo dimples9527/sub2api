@@ -1,12 +1,14 @@
 package handler
 
 import (
-	"errors"
+	"context"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -17,25 +19,30 @@ import (
 
 // AuthHandler handles authentication-related requests
 type AuthHandler struct {
-	cfg           *config.Config
-	authService   *service.AuthService
-	userService   *service.UserService
-	settingSvc    *service.SettingService
-	promoService  *service.PromoService
-	redeemService *service.RedeemService
-	totpService   *service.TotpService
+	cfg                  *config.Config
+	authService          *service.AuthService
+	userService          *service.UserService
+	settingSvc           *service.SettingService
+	promoService         *service.PromoService
+	redeemService        *service.RedeemService
+	totpService          *service.TotpService
+	userAttributeService *service.UserAttributeService
+
+	dingTalkClientInstance *DingTalkClient
+	dingTalkClientMu       sync.Mutex
 }
 
 // NewAuthHandler creates a new AuthHandler
-func NewAuthHandler(cfg *config.Config, authService *service.AuthService, userService *service.UserService, settingService *service.SettingService, promoService *service.PromoService, redeemService *service.RedeemService, totpService *service.TotpService) *AuthHandler {
+func NewAuthHandler(cfg *config.Config, authService *service.AuthService, userService *service.UserService, settingService *service.SettingService, promoService *service.PromoService, redeemService *service.RedeemService, totpService *service.TotpService, userAttributeService *service.UserAttributeService) *AuthHandler {
 	return &AuthHandler{
-		cfg:           cfg,
-		authService:   authService,
-		userService:   userService,
-		settingSvc:    settingService,
-		promoService:  promoService,
-		redeemService: redeemService,
-		totpService:   totpService,
+		cfg:                  cfg,
+		authService:          authService,
+		userService:          userService,
+		settingSvc:           settingService,
+		promoService:         promoService,
+		redeemService:        redeemService,
+		totpService:          totpService,
+		userAttributeService: userAttributeService,
 	}
 }
 
@@ -47,6 +54,7 @@ type RegisterRequest struct {
 	TurnstileToken string `json:"turnstile_token"`
 	PromoCode      string `json:"promo_code"`      // 注册优惠码
 	InvitationCode string `json:"invitation_code"` // 邀请码
+	AffCode        string `json:"aff_code"`        // 邀请返利码
 }
 
 // SendVerifyCodeRequest 发送验证码请求
@@ -72,18 +80,33 @@ type LoginRequest struct {
 type AuthResponse struct {
 	AccessToken  string    `json:"access_token"`
 	RefreshToken string    `json:"refresh_token,omitempty"` // 新增：Refresh Token
-	ExpiresIn    int       `json:"expires_in,omitempty"`    // 新增：Access Token 有效期（秒）
+	ExpiresIn    int       `json:"expires_in,omitempty"`    // 新增：Access Token有效期（秒）
 	TokenType    string    `json:"token_type"`
 	User         *dto.User `json:"user"`
+}
+
+func ensureLoginUserActive(user *service.User) error {
+	if user == nil {
+		return infraerrors.Unauthorized("INVALID_USER", "user not found")
+	}
+	if !user.IsActive() {
+		return service.ErrUserNotActive
+	}
+	return nil
 }
 
 // respondWithTokenPair 生成 Token 对并返回认证响应
 // 如果 Token 对生成失败，回退到只返回 Access Token（向后兼容）
 func (h *AuthHandler) respondWithTokenPair(c *gin.Context, user *service.User) {
+	if err := ensureLoginUserActive(user); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
 	tokenPair, err := h.authService.GenerateTokenPair(c.Request.Context(), user, "")
 	if err != nil {
 		slog.Error("failed to generate token pair", "error", err, "user_id", user.ID)
-		// 回退到只返回 Access Token
+		// 回退到只返回Access Token
 		token, tokenErr := h.authService.GenerateToken(user)
 		if tokenErr != nil {
 			response.InternalError(c, "Failed to generate token")
@@ -105,6 +128,34 @@ func (h *AuthHandler) respondWithTokenPair(c *gin.Context, user *service.User) {
 	})
 }
 
+func (h *AuthHandler) ensureBackendModeAllowsUser(ctx context.Context, user *service.User) error {
+	if user == nil {
+		return infraerrors.Unauthorized("INVALID_USER", "user not found")
+	}
+	if h == nil || !h.isBackendModeEnabled(ctx) || user.IsAdmin() {
+		return nil
+	}
+	return infraerrors.Forbidden("BACKEND_MODE_ADMIN_ONLY", "Backend mode is active. Only admin login is allowed.")
+}
+
+func (h *AuthHandler) ensureBackendModeAllowsNewUserLogin(ctx context.Context) error {
+	if h == nil || !h.isBackendModeEnabled(ctx) {
+		return nil
+	}
+	return infraerrors.Forbidden("BACKEND_MODE_ADMIN_ONLY", "Backend mode is active. Only admin login is allowed.")
+}
+
+func (h *AuthHandler) isBackendModeEnabled(ctx context.Context) bool {
+	if h == nil || h.settingSvc == nil {
+		return false
+	}
+	settings, err := h.settingSvc.GetPublicSettings(ctx)
+	if err == nil && settings != nil {
+		return settings.BackendModeEnabled
+	}
+	return h.settingSvc.IsBackendModeEnabled(ctx)
+}
+
 // Register handles user registration
 // POST /api/v1/auth/register
 func (h *AuthHandler) Register(c *gin.Context) {
@@ -120,7 +171,15 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	_, user, err := h.authService.RegisterWithVerification(c.Request.Context(), req.Email, req.Password, req.VerifyCode, req.PromoCode, req.InvitationCode)
+	_, user, err := h.authService.RegisterWithVerification(
+		c.Request.Context(),
+		req.Email,
+		req.Password,
+		req.VerifyCode,
+		req.PromoCode,
+		req.InvitationCode,
+		req.AffCode,
+	)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -144,7 +203,7 @@ func (h *AuthHandler) SendVerifyCode(c *gin.Context) {
 		return
 	}
 
-	result, err := h.authService.SendVerifyCodeAsync(c.Request.Context(), req.Email)
+	result, err := h.authService.SendVerifyCodeAsync(c.Request.Context(), req.Email, c.GetHeader("Accept-Language"))
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -176,7 +235,12 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	_ = token // token 由 authService.Login 返回，但此处由 respondWithTokenPair 重新生成
+	_ = token // token 由 authService.Login 返回但此处由 respondWithTokenPair 重新生成
+
+	if err := h.ensureBackendModeAllowsUser(c.Request.Context(), user); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 
 	// Check if TOTP 2FA is enabled for this user
 	if h.totpService != nil && h.settingSvc.IsTotpEnabled(c.Request.Context()) && user.TotpEnabled {
@@ -195,11 +259,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// Backend mode: only admin can login
-	if h.settingSvc.IsBackendModeEnabled(c.Request.Context()) && !user.IsAdmin() {
-		response.Forbidden(c, "Backend mode is active. Only admin login is allowed.")
-		return
-	}
+	h.authService.RecordSuccessfulLogin(c.Request.Context(), user.ID)
 
 	h.respondWithTokenPair(c, user)
 }
@@ -263,15 +323,79 @@ func (h *AuthHandler) Login2FA(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-
-	// Backend mode: only admin can login (check BEFORE deleting session)
-	if h.settingSvc.IsBackendModeEnabled(c.Request.Context()) && !user.IsAdmin() {
-		response.Forbidden(c, "Backend mode is active. Only admin login is allowed.")
+	if err := ensureLoginUserActive(user); err != nil {
+		response.ErrorFrom(c, err)
 		return
+	}
+
+	if err := h.ensureBackendModeAllowsUser(c.Request.Context(), user); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	if session.PendingOAuthBind != nil {
+		pendingSvc, err := h.pendingIdentityService()
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+
+		pendingSession, err := pendingSvc.GetBrowserSession(
+			c.Request.Context(),
+			session.PendingOAuthBind.PendingSessionToken,
+			session.PendingOAuthBind.BrowserSessionKey,
+		)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+
+		decision, err := h.ensurePendingOAuthAdoptionDecision(c, pendingSession.ID, oauthAdoptionDecisionRequest{})
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		if err := applyPendingOAuthBinding(
+			c.Request.Context(),
+			h.entClient(),
+			h.authService,
+			h.userService,
+			pendingSession,
+			decision,
+			&user.ID,
+			true,
+			true,
+		); err != nil {
+			response.ErrorFrom(c, infraerrors.InternalServer("PENDING_AUTH_BIND_APPLY_FAILED", "failed to bind pending oauth identity").WithCause(err))
+			return
+		}
+		if _, err := pendingSvc.ConsumeBrowserSession(
+			c.Request.Context(),
+			pendingSession.SessionToken,
+			pendingSession.BrowserSessionKey,
+		); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+
+		secureCookie := isRequestHTTPS(c)
+		clearOAuthPendingSessionCookie(c, secureCookie)
+		clearOAuthPendingBrowserCookie(c, secureCookie)
+		h.authService.RecordSuccessfulLogin(c.Request.Context(), user.ID)
+
+		user, err = h.userService.GetByID(c.Request.Context(), session.UserID)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
 	}
 
 	// Delete the login session (only after all checks pass)
 	_ = h.totpService.DeleteLoginSession(c.Request.Context(), req.TempToken)
+
+	if session.PendingOAuthBind == nil {
+		h.authService.RecordSuccessfulLogin(c.Request.Context(), user.ID)
+	}
 
 	h.respondWithTokenPair(c, user)
 }
@@ -291,8 +415,14 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 		return
 	}
 
+	identities, err := h.userService.GetProfileIdentitySummaries(c.Request.Context(), subject.UserID, user)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
 	type UserResponse struct {
-		*dto.User
+		userProfileResponse
 		RunMode string `json:"run_mode"`
 	}
 
@@ -301,7 +431,10 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 		runMode = h.cfg.RunMode
 	}
 
-	response.Success(c, UserResponse{User: dto.UserFromService(user), RunMode: runMode})
+	response.Success(c, UserResponse{
+		userProfileResponse: userProfileResponseFromService(user, identities),
+		RunMode:             runMode,
+	})
 }
 
 // ValidatePromoCodeRequest 验证优惠码请求
@@ -387,6 +520,7 @@ type ValidateInvitationCodeResponse struct {
 // ValidateInvitationCode 验证邀请码（公开接口，注册前调用）
 // POST /api/v1/auth/validate-invitation-code
 func (h *AuthHandler) ValidateInvitationCode(c *gin.Context) {
+	// 检查邀请码功能是否启用
 	if h.settingSvc == nil || !h.settingSvc.IsInvitationCodeEnabled(c.Request.Context()) {
 		response.Success(c, ValidateInvitationCodeResponse{
 			Valid:     false,
@@ -401,22 +535,30 @@ func (h *AuthHandler) ValidateInvitationCode(c *gin.Context) {
 		return
 	}
 
-	if err := h.authService.ValidateInvitationCode(c.Request.Context(), req.Code); err != nil {
-		if errors.Is(err, service.ErrInvitationCodeInvalid) {
-			response.Success(c, ValidateInvitationCodeResponse{
-				Valid:     false,
-				ErrorCode: "INVITATION_CODE_INVALID",
-			})
-			return
-		}
-		if errors.Is(err, service.ErrInvitationLimitReached) {
-			response.Success(c, ValidateInvitationCodeResponse{
-				Valid:     false,
-				ErrorCode: "INVITATION_LIMIT_REACHED",
-			})
-			return
-		}
-		response.ErrorFrom(c, err)
+	// 验证邀请码
+	redeemCode, err := h.redeemService.GetByCode(c.Request.Context(), req.Code)
+	if err != nil {
+		response.Success(c, ValidateInvitationCodeResponse{
+			Valid:     false,
+			ErrorCode: "INVITATION_CODE_NOT_FOUND",
+		})
+		return
+	}
+
+	// 检查类型和状态
+	if redeemCode.Type != service.RedeemTypeInvitation {
+		response.Success(c, ValidateInvitationCodeResponse{
+			Valid:     false,
+			ErrorCode: "INVITATION_CODE_INVALID",
+		})
+		return
+	}
+
+	if redeemCode.Status != service.StatusUnused {
+		response.Success(c, ValidateInvitationCodeResponse{
+			Valid:     false,
+			ErrorCode: "INVITATION_CODE_USED",
+		})
 		return
 	}
 
@@ -460,7 +602,7 @@ func (h *AuthHandler) ForgotPassword(c *gin.Context) {
 
 	// Request password reset (async)
 	// Note: This returns success even if email doesn't exist (to prevent enumeration)
-	if err := h.authService.RequestPasswordResetAsync(c.Request.Context(), req.Email, frontendBaseURL); err != nil {
+	if err := h.authService.RequestPasswordResetAsync(c.Request.Context(), req.Email, frontendBaseURL, c.GetHeader("Accept-Language")); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -504,20 +646,20 @@ func (h *AuthHandler) ResetPassword(c *gin.Context) {
 
 // ==================== Token Refresh Endpoints ====================
 
-// RefreshTokenRequest 刷新 Token 请求
+// RefreshTokenRequest 刷新Token请求
 type RefreshTokenRequest struct {
 	RefreshToken string `json:"refresh_token" binding:"required"`
 }
 
-// RefreshTokenResponse 刷新 Token 响应
+// RefreshTokenResponse 刷新Token响应
 type RefreshTokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
-	ExpiresIn    int    `json:"expires_in"` // Access Token 有效期（秒）
+	ExpiresIn    int    `json:"expires_in"` // Access Token有效期（秒）
 	TokenType    string `json:"token_type"`
 }
 
-// RefreshToken 刷新 Token
+// RefreshToken 刷新Token
 // POST /api/v1/auth/refresh
 func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	var req RefreshTokenRequest
@@ -548,7 +690,7 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 
 // LogoutRequest 登出请求
 type LogoutRequest struct {
-	RefreshToken string `json:"refresh_token,omitempty"` // 可选：撤销指定的 Refresh Token
+	RefreshToken string `json:"refresh_token,omitempty"` // 可选：撤销指定的Refresh Token
 }
 
 // LogoutResponse 登出响应
@@ -563,13 +705,15 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	// 允许空请求体（向后兼容）
 	_ = c.ShouldBindJSON(&req)
 
-	// 如果提供了 Refresh Token，则撤销它
+	// 如果提供了Refresh Token，撤销它
 	if req.RefreshToken != "" {
 		if err := h.authService.RevokeRefreshToken(c.Request.Context(), req.RefreshToken); err != nil {
 			slog.Debug("failed to revoke refresh token", "error", err)
 			// 不影响登出流程
 		}
 	}
+	h.consumePendingOAuthSessionOnLogout(c)
+	clearOAuthLogoutCookies(c)
 
 	response.Success(c, LogoutResponse{
 		Message: "Logged out successfully",
@@ -590,7 +734,7 @@ func (h *AuthHandler) RevokeAllSessions(c *gin.Context) {
 		return
 	}
 
-	if err := h.authService.RevokeAllUserSessions(c.Request.Context(), subject.UserID); err != nil {
+	if err := h.authService.RevokeAllUserTokens(c.Request.Context(), subject.UserID); err != nil {
 		slog.Error("failed to revoke all sessions", "user_id", subject.UserID, "error", err)
 		response.InternalError(c, "Failed to revoke sessions")
 		return
