@@ -167,6 +167,17 @@ export interface GroupRateMultiplierEntry {
   rate_multiplier: number
 }
 
+export interface ModelSquareRateSyncResult {
+  checked_count: number
+  matched_count: number
+  updated_count: number
+}
+
+export async function syncModelSquareRates(): Promise<ModelSquareRateSyncResult> {
+  const { data } = await apiClient.post<ModelSquareRateSyncResult>('/admin/model-square/sync')
+  return data
+}
+
 /**
  * Get rate multipliers for users in a group
  * @param id - Group ID
@@ -260,6 +271,7 @@ export const groupsAPI = {
   getStats,
   getGroupApiKeys,
   getGroupRateMultipliers,
+  syncModelSquareRates,
   clearGroupRateMultipliers,
   batchSetGroupRateMultipliers,
   updateSortOrder,

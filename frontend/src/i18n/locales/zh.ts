@@ -4373,7 +4373,7 @@ export default {
         users: '用户默认值',
         gateway: '网关服务',
         monitor: '模型监控',
-        modelSquare: '模型广场',
+        modelSquare: '上游同步',
         email: '邮件设置',
         backup: '数据备份',
         payment: '支付设置',
@@ -4381,16 +4381,19 @@ export default {
       emailTabDisabledTitle: '邮箱验证未启用',
       emailTabDisabledHint: '请在「安全与认证」选项卡中启用邮箱验证后，再配置 SMTP 设置。',
       modelSquare: {
-        title: '模型广场配置',
-        description: '配置模型广场数据源所需的地址和账号，前端不会暴露密码。',
+        title: '上游同步配置',
+        description: '配置上游登录、模型数据和 Keys 倍率同步接口，前端不会暴露密码。',
         baseUrl: '服务地址',
+        loginUrl: '登录接口地址',
+        modelUrl: '模型广场接口地址',
+        keysUrl: 'Keys 同步接口地址',
         email: '登录邮箱',
         password: '登录密码',
         passwordPlaceholder: '输入登录密码',
         passwordConfiguredPlaceholder: '已配置，留空则不修改',
-        passwordHint: '保存后仅后端使用，用于获取模型广场 access_token。',
+        passwordHint: '保存后仅后端使用，用于获取上游 access_token。',
         passwordConfiguredHint: '密码已配置；只有填写新密码才会覆盖原密码。',
-        adminOnlyHint: '模型广场页面和接口只对管理员开放，普通用户无法访问。'
+        adminOnlyHint: '同步接口只对管理员开放；模型广场页面仍对已登录用户可见。'
       },
       registration: {
         title: '注册设置',

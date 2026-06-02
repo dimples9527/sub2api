@@ -4208,7 +4208,7 @@ export default {
         users: 'Users',
         gateway: 'Gateway',
         monitor: 'Model Monitor',
-        modelSquare: 'Model Square',
+        modelSquare: 'Upstream Sync',
         email: 'Email',
         backup: 'Backup',
         payment: 'Payment',
@@ -4216,16 +4216,19 @@ export default {
       emailTabDisabledTitle: 'Email Verification Not Enabled',
       emailTabDisabledHint: 'Enable email verification in the Security tab to configure SMTP settings.',
       modelSquare: {
-        title: 'Model Square Configuration',
-        description: 'Configure the model square data source credentials. The password is never exposed to the frontend.',
+        title: 'Upstream Sync Configuration',
+        description: 'Configure upstream login, model data, and key rate sync endpoints. The password is never exposed to the frontend.',
         baseUrl: 'Base URL',
+        loginUrl: 'Login API URL',
+        modelUrl: 'Model Square API URL',
+        keysUrl: 'Keys Sync API URL',
         email: 'Login Email',
         password: 'Login Password',
         passwordPlaceholder: 'Enter login password',
         passwordConfiguredPlaceholder: 'Configured, leave blank to keep unchanged',
-        passwordHint: 'Saved for backend-only access token retrieval.',
+        passwordHint: 'Saved for backend-only upstream access token retrieval.',
         passwordConfiguredHint: 'Password is configured. Enter a new value only when replacing it.',
-        adminOnlyHint: 'The model square page and API are admin-only.'
+        adminOnlyHint: 'The sync endpoints are admin-only. The model square page remains visible to signed-in users.'
       },
       registration: {
         title: 'Registration Settings',

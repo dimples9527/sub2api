@@ -99,6 +99,9 @@ export interface SystemSettings {
   fallback_model_gemini: string
   fallback_model_antigravity: string
   model_square_base_url: string
+  model_square_login_url: string
+  model_square_model_url: string
+  model_square_keys_url: string
   model_square_email: string
   model_square_password_configured: boolean
 
@@ -221,6 +224,9 @@ export interface UpdateSettingsRequest {
   fallback_model_gemini?: string
   fallback_model_antigravity?: string
   model_square_base_url?: string
+  model_square_login_url?: string
+  model_square_model_url?: string
+  model_square_keys_url?: string
   model_square_email?: string
   model_square_password?: string
   enable_identity_patch?: boolean
