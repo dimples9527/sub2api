@@ -68,7 +68,6 @@
       <template v-else>
         <div class="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
           <span>{{ filteredModels.length }} 个模型，{{ availableCount }} 个可用</span>
-          <span v-if="updatedAt">更新于 {{ updatedAt }}</span>
         </div>
 
         <div v-if="filteredModels.length === 0" class="grid min-h-56 place-items-center rounded-lg border border-dashed border-gray-300 bg-white text-sm text-gray-500 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-400">
@@ -79,7 +78,7 @@
           <article
             v-for="(model, index) in filteredModels"
             :key="model.id || index"
-            class="model-card cursor-pointer"
+            class="model-card group cursor-pointer"
             :class="{ featured: index === 0 }"
             role="button"
             tabindex="0"
@@ -87,6 +86,20 @@
             @click="copyModelId(model)"
             @keydown.enter.prevent="copyModelId(model)"
           >
+            <div
+              v-if="copiedModelId === model.id"
+              class="absolute inset-0 z-20 flex items-center justify-center bg-white/72 text-center backdrop-blur-sm dark:bg-dark-900/65"
+              aria-hidden="true"
+            >
+              <div class="rounded-2xl border border-teal-200 bg-white/90 px-4 py-3 shadow-lg dark:border-teal-900/60 dark:bg-dark-800/90">
+                <Icon name="check" size="sm" class="mx-auto text-teal-500" />
+                <div class="mt-2 text-sm font-semibold text-gray-900 dark:text-white">已复制</div>
+                <div class="mt-1 max-w-[16rem] break-words text-xs text-gray-500 dark:text-gray-400">
+                  {{ model.id }}
+                </div>
+              </div>
+            </div>
+
             <div class="flex items-start justify-between gap-3">
               <span class="inline-flex items-center gap-2 text-xs font-semibold lowercase text-gray-500 dark:text-gray-400">
                 <span class="h-2 w-2 rounded-full bg-teal-500"></span>
@@ -290,7 +303,6 @@ interface ModelSquareModel {
 interface ModelSquareResponse {
   groups?: ModelSquareGroup[]
   models?: ModelSquareModel[]
-  updated_at?: string
 }
 
 const loading = ref(false)
@@ -302,7 +314,6 @@ const groupId = ref('')
 const viewMode = ref<'grid' | 'list'>('grid')
 const models = ref<ModelSquareModel[]>([])
 const groups = ref<ModelSquareGroup[]>([])
-const updatedAt = ref('')
 const groupModalModel = ref<ModelSquareModel | null>(null)
 const copiedModelId = ref('')
 let copiedTimer: number | undefined
@@ -331,7 +342,6 @@ async function loadModels() {
     const data = await apiClient.get<ModelSquareResponse>('/model-square')
     models.value = Array.isArray(data.data.models) ? data.data.models : []
     groups.value = Array.isArray(data.data.groups) ? data.data.groups : []
-    updatedAt.value = data.data.updated_at || ''
   } catch (err) {
     const e = err as { message?: string }
     error.value = e.message || '模型广场数据加载失败'
@@ -447,6 +457,7 @@ onMounted(loadModels)
 
 <style scoped>
 .model-card {
+  position: relative;
   min-height: 280px;
   display: flex;
   flex-direction: column;
@@ -455,6 +466,12 @@ onMounted(loadModels)
   background: rgba(255, 255, 255, 0.96);
   padding: 1.25rem;
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
+  transition:
+    transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform, box-shadow;
 }
 
 .dark .model-card {
@@ -465,6 +482,29 @@ onMounted(loadModels)
 .model-card.featured {
   border-color: rgb(45 212 191 / 0.75);
   box-shadow: 0 0 0 1px rgb(45 212 191 / 0.18), 0 16px 34px rgb(13 148 136 / 0.12);
+}
+
+.model-card:hover {
+  transform: translateY(-4px);
+  border-color: rgb(45 212 191 / 0.72);
+  box-shadow:
+    0 0 0 1px rgb(45 212 191 / 0.12),
+    0 18px 42px rgb(15 23 42 / 0.12);
+}
+
+.dark .model-card:hover {
+  border-color: rgb(45 212 191 / 0.58);
+  box-shadow:
+    0 0 0 1px rgb(45 212 191 / 0.08),
+    0 18px 42px rgb(0 0 0 / 0.34);
+}
+
+.model-card:hover::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(135deg, rgb(45 212 191 / 0.08), transparent 42%);
 }
 
 .view-toggle-btn {
