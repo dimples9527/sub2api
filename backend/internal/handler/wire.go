@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler/admin"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -66,6 +67,13 @@ func ProvideAdminHandlers(
 		Payment:               paymentHandler,
 		ModelSquare:           modelSquareHandler,
 	}
+}
+
+// ProvideModelSquareHandler creates ModelSquareHandler and starts its background key sync.
+func ProvideModelSquareHandler(cfg *config.Config, settingService *service.SettingService, groupProvider service.AdminService) *admin.ModelSquareHandler {
+	h := admin.NewModelSquareHandler(cfg, settingService, groupProvider)
+	h.StartBackgroundSync()
+	return h
 }
 
 // ProvideSystemHandler creates admin.SystemHandler with UpdateService
@@ -159,7 +167,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewScheduledTestHandler,
 	admin.NewChannelHandler,
 	admin.NewPaymentHandler,
-	admin.NewModelSquareHandler,
+	ProvideModelSquareHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,

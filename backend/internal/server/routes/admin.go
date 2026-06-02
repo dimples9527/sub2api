@@ -96,6 +96,7 @@ func RegisterAdminRoutes(
 
 func registerModelSquareRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	admin.GET("/model-square", h.Admin.ModelSquare.Get)
+	admin.POST("/model-square/sync", h.Admin.ModelSquare.SyncKeys)
 }
 
 func registerAdminAPIKeyRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
