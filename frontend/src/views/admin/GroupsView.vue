@@ -61,6 +61,20 @@
               />
             </button>
             <button
+              @click="syncModelSquareRates"
+              :disabled="syncingModelSquareRates || loading"
+              class="btn btn-secondary"
+              title="同步模型广场倍率"
+            >
+              <Icon
+                name="refresh"
+                size="md"
+                class="mr-2"
+                :class="syncingModelSquareRates ? 'animate-spin' : ''"
+              />
+              同步倍率
+            </button>
+            <button
               @click="openSortModal"
               class="btn btn-secondary"
               :title="t('admin.groups.sortOrder')"
@@ -2729,6 +2743,7 @@ import {
 const { t } = useI18n();
 const appStore = useAppStore();
 const onboardingStore = useOnboardingStore();
+const syncingModelSquareRates = ref(false);
 
 const columns = computed<Column[]>(() => [
   { key: "id", label: "ID", sortable: true },
@@ -3332,6 +3347,22 @@ const loadGroups = async () => {
     if (abortController === currentController && !signal.aborted) {
       loading.value = false;
     }
+  }
+};
+
+const syncModelSquareRates = async () => {
+  if (syncingModelSquareRates.value) return;
+  syncingModelSquareRates.value = true;
+  try {
+    const result = await adminAPI.groups.syncModelSquareRates();
+    appStore.showSuccess(
+      `模型广场倍率同步完成，检查 ${result.checked_count ?? 0} 个，匹配 ${result.matched_count ?? 0} 个，更新 ${result.updated_count ?? 0} 个分组`,
+    );
+    await loadGroups();
+  } catch (error: any) {
+    appStore.showError(error?.message || "模型广场倍率同步失败");
+  } finally {
+    syncingModelSquareRates.value = false;
   }
 };
 

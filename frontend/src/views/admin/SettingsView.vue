@@ -2391,6 +2391,39 @@
                 </div>
                 <div>
                   <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t('admin.settings.modelSquare.loginUrl') }}
+                  </label>
+                  <input
+                    v-model="form.model_square_login_url"
+                    type="url"
+                    class="input"
+                    placeholder="https://example.com/api/v1/auth/login"
+                  />
+                </div>
+                <div>
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t('admin.settings.modelSquare.modelUrl') }}
+                  </label>
+                  <input
+                    v-model="form.model_square_model_url"
+                    type="url"
+                    class="input"
+                    placeholder="https://example.com/api/v1/model-square"
+                  />
+                </div>
+                <div>
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t('admin.settings.modelSquare.keysUrl') }}
+                  </label>
+                  <input
+                    v-model="form.model_square_keys_url"
+                    type="url"
+                    class="input"
+                    placeholder="https://example.com/api/v1/keys?page=1&page_size=100&timezone=Asia%2FShanghai"
+                  />
+                </div>
+                <div>
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                     {{ t('admin.settings.modelSquare.email') }}
                   </label>
                   <input
@@ -2927,6 +2960,9 @@ const form = reactive<SettingsForm>({
   fallback_model_gemini: 'gemini-2.5-pro',
   fallback_model_antigravity: 'gemini-2.5-pro',
   model_square_base_url: '',
+  model_square_login_url: '',
+  model_square_model_url: '',
+  model_square_keys_url: '',
   model_square_email: '',
   model_square_password: '',
   model_square_password_configured: false,
@@ -3380,6 +3416,9 @@ async function saveSettings() {
       fallback_model_gemini: form.fallback_model_gemini,
       fallback_model_antigravity: form.fallback_model_antigravity,
       model_square_base_url: form.model_square_base_url,
+      model_square_login_url: form.model_square_login_url,
+      model_square_model_url: form.model_square_model_url,
+      model_square_keys_url: form.model_square_keys_url,
       model_square_email: form.model_square_email,
       model_square_password: form.model_square_password || undefined,
       enable_identity_patch: form.enable_identity_patch,
