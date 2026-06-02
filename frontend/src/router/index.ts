@@ -271,6 +271,17 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/model-square',
+    name: 'ModelSquare',
+    component: () => import('@/views/admin/ModelSquareView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Model Square',
+      titleKey: 'nav.modelSquare'
+    }
+  },
+  {
     path: '/custom/:id',
     name: 'CustomPage',
     component: () => import('@/views/user/CustomPageView.vue'),
@@ -350,13 +361,12 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/admin/model-square',
     name: 'AdminModelSquare',
-    component: () => import('@/views/admin/ModelSquareView.vue'),
+    redirect: '/model-square',
     meta: {
       requiresAuth: true,
-      requiresAdmin: true,
+      requiresAdmin: false,
       title: 'Model Square',
-      titleKey: 'nav.modelSquare',
-      descriptionKey: 'admin.settings.modelSquare.description'
+      titleKey: 'nav.modelSquare'
     }
   },
   {
