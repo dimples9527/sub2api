@@ -798,11 +798,26 @@
     }
 
     @media (max-width: 640px) {
+      body { padding: 0 0 20px; }
+      .page { max-width: none; width: 100%; }
+      .toolbar {
+        margin-bottom: 0;
+        border-inline: 0;
+        border-top: 0;
+        border-radius: 0;
+      }
+      .select-menu {
+        width: min(520px, 100vw);
+      }
       .card-grid {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 0;
       }
       .monitor-card {
-        padding: 22px 20px;
+        width: 100%;
+        padding: 20px 14px;
+        border-inline: 0;
+        border-radius: 0;
       }
     }
   </style>
