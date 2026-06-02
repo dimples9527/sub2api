@@ -347,10 +347,10 @@ function modelGroups(model: ModelSquareModel): ModelSquareGroup[] {
 }
 
 function primaryGroupRate(model: ModelSquareModel) {
-  const firstGroupId = model.group_ids?.[0]
-  if (firstGroupId === undefined || firstGroupId === null) return 1
-  const rate = Number(groupById.value.get(String(firstGroupId))?.rate_multiplier ?? 1)
-  return Number.isFinite(rate) ? rate : 1
+  const rates = modelGroups(model)
+    .map((group) => Number(group.rate_multiplier))
+    .filter((rate) => Number.isFinite(rate))
+  return rates.length > 0 ? Math.min(...rates) : 1
 }
 
 function modelDisplayPrice(model: ModelSquareModel, field: 'input_price' | 'output_price' | 'cache_read_price' | 'cache_create_price') {
