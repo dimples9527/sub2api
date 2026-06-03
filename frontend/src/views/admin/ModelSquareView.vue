@@ -351,16 +351,22 @@ async function loadModels() {
 }
 
 function modelGroups(model: ModelSquareModel): ModelSquareGroup[] {
-  return (model.group_ids || [])
+  return ((model.group_ids || [])
     .map((id) => groupById.value.get(String(id)))
-    .filter(Boolean) as ModelSquareGroup[]
+    .filter(Boolean) as ModelSquareGroup[])
+    .sort((a, b) => groupRate(a) - groupRate(b))
 }
 
 function primaryGroupRate(model: ModelSquareModel) {
   const rates = modelGroups(model)
-    .map((group) => Number(group.rate_multiplier))
+    .map((group) => groupRate(group))
     .filter((rate) => Number.isFinite(rate))
   return rates.length > 0 ? Math.min(...rates) : 1
+}
+
+function groupRate(group: ModelSquareGroup) {
+  const rate = Number(group.rate_multiplier)
+  return Number.isFinite(rate) ? rate : Number.POSITIVE_INFINITY
 }
 
 function modelDisplayPrice(model: ModelSquareModel, field: 'input_price' | 'output_price' | 'cache_read_price' | 'cache_create_price') {
