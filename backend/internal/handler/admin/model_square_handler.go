@@ -358,16 +358,8 @@ func (h *ModelSquareHandler) syncGroupRateMultipliersFromKeys(ctx context.Contex
 		if item.Group == nil || item.Group.RateMultiplier == nil || *item.Group.RateMultiplier < 0 {
 			continue
 		}
-		name := item.Name
-		if strings.TrimSpace(name) == "" {
-			name = item.Group.Name
-		}
-		key := normalizeModelSquareGroupName(name)
-		if key == "" {
-			continue
-		}
 		result.CheckedCount++
-		localGroup, ok := localByName[key]
+		localGroup, ok := modelSquareLocalGroupForKeyItem(item, localByName)
 		if !ok {
 			continue
 		}
@@ -393,6 +385,18 @@ func (h *ModelSquareHandler) syncGroupRateMultipliersFromKeys(ctx context.Contex
 
 func modelSquareRemoteRateGreater(remoteRate, localRate float64) bool {
 	return remoteRate-localRate > modelSquareRateCompareEpsilon
+}
+
+func modelSquareLocalGroupForKeyItem(item findCGKeyItem, localByName map[string]service.Group) (service.Group, bool) {
+	if item.Group != nil {
+		if group, ok := localByName[normalizeModelSquareGroupName(item.Group.Name)]; ok {
+			return group, true
+		}
+	}
+	if group, ok := localByName[normalizeModelSquareGroupName(item.Name)]; ok {
+		return group, true
+	}
+	return service.Group{}, false
 }
 
 func (h *ModelSquareHandler) getToken(ctx context.Context, force bool) (cachedFindCGToken, error) {

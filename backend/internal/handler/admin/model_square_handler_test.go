@@ -388,6 +388,53 @@ func TestModelSquareHandlerManualSyncRaisesLocalGroupRateFromKeys(t *testing.T) 
 	require.JSONEq(t, `{"code":0,"message":"success","data":{"checked_count":4,"matched_count":3,"updated_count":1}}`, rec.Body.String())
 }
 
+func TestModelSquareHandlerManualSyncMatchesKeysByGroupName(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"access_token":"token-group-name","expires_in":86400,"token_type":"Bearer"}}`))
+		case "/api/v1/keys":
+			_, _ = w.Write([]byte(`{
+				"code":0,
+				"message":"success",
+				"data":{
+					"items":[
+						{"id":1,"name":"Production Key A","group":{"name":"Codex Special","rate_multiplier":0.8}}
+					]
+				}
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	groupProvider := &modelSquareGroupProviderStub{groups: []service.Group{
+		{ID: 10, Name: "codex special", RateMultiplier: 0.5},
+	}}
+	h := newModelSquareHandler(ModelSquareHandlerConfig{
+		AppConfig: &config.Config{ModelSquare: config.ModelSquareConfig{
+			BaseURL:  server.URL,
+			Email:    "configured@example.com",
+			Password: "configured-secret",
+		}},
+		GroupProvider: groupProvider,
+		HTTPClient:    server.Client(),
+	})
+	router := gin.New()
+	router.POST("/admin/model-square/sync", h.SyncKeys)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/model-square/sync", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, []modelSquareGroupRateUpdate{{id: 10, rate: 0.8}}, groupProvider.updatesSnapshot())
+	require.JSONEq(t, `{"code":0,"message":"success","data":{"checked_count":1,"matched_count":1,"updated_count":1}}`, rec.Body.String())
+}
+
 func TestModelSquareHandlerBackgroundSyncRunsOnInterval(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
