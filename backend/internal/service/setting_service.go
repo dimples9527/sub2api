@@ -1902,6 +1902,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	if strings.TrimSpace(settings.ModelSquarePassword) != "" {
 		updates[SettingKeyModelSquarePassword] = settings.ModelSquarePassword
 	}
+	updates[SettingKeyModelSquareKeysSyncIntervalSeconds] = strconv.Itoa(normalizeModelSquareKeysSyncIntervalSeconds(settings.ModelSquareKeysSyncIntervalSeconds, s.cfg))
 
 	// Identity patch configuration (Claude -> Gemini)
 	updates[SettingKeyEnableIdentityPatch] = strconv.FormatBool(settings.EnableIdentityPatch)
@@ -2846,17 +2847,18 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeySMTPPort:                                  "587",
 		SettingKeySMTPUseTLS:                                "false",
 		// Model fallback defaults
-		SettingKeyEnableModelFallback:      "false",
-		SettingKeyFallbackModelAnthropic:   "claude-3-5-sonnet-20241022",
-		SettingKeyFallbackModelOpenAI:      "gpt-4o",
-		SettingKeyFallbackModelGemini:      "gemini-2.5-pro",
-		SettingKeyFallbackModelAntigravity: "gemini-2.5-pro",
-		SettingKeyModelSquareBaseURL:       "",
-		SettingKeyModelSquareLoginURL:      "",
-		SettingKeyModelSquareModelURL:      "",
-		SettingKeyModelSquareKeysURL:       "",
-		SettingKeyModelSquareEmail:         "",
-		SettingKeyModelSquarePassword:      "",
+		SettingKeyEnableModelFallback:                "false",
+		SettingKeyFallbackModelAnthropic:             "claude-3-5-sonnet-20241022",
+		SettingKeyFallbackModelOpenAI:                "gpt-4o",
+		SettingKeyFallbackModelGemini:                "gemini-2.5-pro",
+		SettingKeyFallbackModelAntigravity:           "gemini-2.5-pro",
+		SettingKeyModelSquareBaseURL:                 "",
+		SettingKeyModelSquareLoginURL:                "",
+		SettingKeyModelSquareModelURL:                "",
+		SettingKeyModelSquareKeysURL:                 "",
+		SettingKeyModelSquareEmail:                   "",
+		SettingKeyModelSquarePassword:                "",
+		SettingKeyModelSquareKeysSyncIntervalSeconds: strconv.Itoa(configModelSquareKeysSyncIntervalSeconds(s.cfg)),
 		// Identity patch defaults
 		SettingKeyEnableIdentityPatch: "true",
 		SettingKeyIdentityPatchPrompt: "",
@@ -3425,6 +3427,10 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.ModelSquareEmail = firstNonEmpty(settings[SettingKeyModelSquareEmail], configModelSquareEmail(s.cfg))
 	result.ModelSquarePassword = firstNonEmpty(settings[SettingKeyModelSquarePassword], configModelSquarePassword(s.cfg))
 	result.ModelSquarePasswordConfigured = strings.TrimSpace(result.ModelSquarePassword) != ""
+	result.ModelSquareKeysSyncIntervalSeconds = configModelSquareKeysSyncIntervalSeconds(s.cfg)
+	if v, err := strconv.Atoi(strings.TrimSpace(settings[SettingKeyModelSquareKeysSyncIntervalSeconds])); err == nil && v > 0 {
+		result.ModelSquareKeysSyncIntervalSeconds = v
+	}
 
 	// Web search emulation: quick enabled check from the JSON config
 	if raw := settings[SettingKeyWebSearchEmulationConfig]; raw != "" {
@@ -3509,6 +3515,20 @@ func configModelSquarePassword(cfg *config.Config) string {
 		return ""
 	}
 	return cfg.ModelSquare.Password
+}
+
+func configModelSquareKeysSyncIntervalSeconds(cfg *config.Config) int {
+	if cfg == nil || cfg.ModelSquare.KeysSyncIntervalSeconds <= 0 {
+		return 5
+	}
+	return cfg.ModelSquare.KeysSyncIntervalSeconds
+}
+
+func normalizeModelSquareKeysSyncIntervalSeconds(value int, cfg *config.Config) int {
+	if value > 0 {
+		return value
+	}
+	return configModelSquareKeysSyncIntervalSeconds(cfg)
 }
 
 func clampAffiliateRebateRate(value float64) float64 {

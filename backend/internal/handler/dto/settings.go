@@ -164,12 +164,13 @@ type SystemSettings struct {
 	FallbackModelGemini      string `json:"fallback_model_gemini"`
 	FallbackModelAntigravity string `json:"fallback_model_antigravity"`
 
-	ModelSquareBaseURL            string `json:"model_square_base_url"`
-	ModelSquareLoginURL           string `json:"model_square_login_url"`
-	ModelSquareModelURL           string `json:"model_square_model_url"`
-	ModelSquareKeysURL            string `json:"model_square_keys_url"`
-	ModelSquareEmail              string `json:"model_square_email"`
-	ModelSquarePasswordConfigured bool   `json:"model_square_password_configured"`
+	ModelSquareBaseURL                 string `json:"model_square_base_url"`
+	ModelSquareLoginURL                string `json:"model_square_login_url"`
+	ModelSquareModelURL                string `json:"model_square_model_url"`
+	ModelSquareKeysURL                 string `json:"model_square_keys_url"`
+	ModelSquareEmail                   string `json:"model_square_email"`
+	ModelSquarePasswordConfigured      bool   `json:"model_square_password_configured"`
+	ModelSquareKeysSyncIntervalSeconds int    `json:"model_square_keys_sync_interval_seconds"`
 
 	// Identity patch configuration (Claude -> Gemini)
 	EnableIdentityPatch bool   `json:"enable_identity_patch"`

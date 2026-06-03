@@ -484,6 +484,19 @@ func TestModelSquareHandlerBackgroundSyncRunsOnInterval(t *testing.T) {
 	require.Equal(t, []modelSquareGroupRateUpdate{{id: 10, rate: 0.3}}, groupProvider.updatesSnapshot())
 }
 
+func TestModelSquareHandlerUsesSettingsSyncInterval(t *testing.T) {
+	settingSvc := service.NewSettingService(&modelSquareSettingRepo{values: map[string]string{
+		service.SettingKeyModelSquareKeysSyncIntervalSeconds: "12",
+	}}, &config.Config{ModelSquare: config.ModelSquareConfig{KeysSyncIntervalSeconds: 30}})
+	h := newModelSquareHandler(ModelSquareHandlerConfig{
+		AppConfig:      &config.Config{ModelSquare: config.ModelSquareConfig{KeysSyncIntervalSeconds: 30}},
+		SettingService: settingSvc,
+		SyncInterval:   time.Second,
+	})
+
+	require.Equal(t, 12*time.Second, h.currentSyncInterval(context.Background()))
+}
+
 func TestModelSquareHandlerManualSyncIgnoresFloatTailDifference(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

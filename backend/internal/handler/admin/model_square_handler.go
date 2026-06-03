@@ -284,10 +284,24 @@ func (h *ModelSquareHandler) runBackgroundSync(stop <-chan struct{}, stopped cha
 			}
 			continue
 		}
-		if !waitModelSquareSyncInterval(h.syncInterval, stop) {
+		if !waitModelSquareSyncInterval(h.currentSyncInterval(context.Background()), stop) {
 			return
 		}
 	}
+}
+
+func (h *ModelSquareHandler) currentSyncInterval(ctx context.Context) time.Duration {
+	if h == nil {
+		return 0
+	}
+	if h.settingService != nil {
+		if settings, err := h.settingService.GetAllSettings(ctx); err == nil && settings != nil {
+			if settings.ModelSquareKeysSyncIntervalSeconds > 0 {
+				return time.Duration(settings.ModelSquareKeysSyncIntervalSeconds) * time.Second
+			}
+		}
+	}
+	return h.syncInterval
 }
 
 func waitModelSquareSyncInterval(interval time.Duration, stop <-chan struct{}) bool {

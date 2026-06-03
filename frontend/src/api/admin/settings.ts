@@ -546,6 +546,7 @@ export interface SystemSettings {
   model_square_keys_url: string;
   model_square_email: string;
   model_square_password_configured: boolean;
+  model_square_keys_sync_interval_seconds: number;
 
   // Identity patch configuration (Claude -> Gemini)
   enable_identity_patch: boolean;
@@ -804,6 +805,7 @@ export interface UpdateSettingsRequest {
   model_square_keys_url?: string;
   model_square_email?: string;
   model_square_password?: string;
+  model_square_keys_sync_interval_seconds?: number;
   enable_identity_patch?: boolean;
   identity_patch_prompt?: string;
   ops_monitoring_enabled?: boolean;

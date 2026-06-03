@@ -290,6 +290,28 @@ func TestSettingService_UpdateSettings_AntigravityUserAgentVersion(t *testing.T)
 	require.Equal(t, "1.23.2", repo.updates[SettingKeyAntigravityUserAgentVersion])
 }
 
+func TestSettingService_UpdateSettings_ModelSquareKeysSyncInterval(t *testing.T) {
+	repo := &settingUpdateRepoStub{}
+	svc := NewSettingService(repo, &config.Config{})
+
+	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		ModelSquareKeysSyncIntervalSeconds: 60,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "60", repo.updates[SettingKeyModelSquareKeysSyncIntervalSeconds])
+}
+
+func TestSettingService_ParseSettings_ModelSquareKeysSyncIntervalFallsBackToConfig(t *testing.T) {
+	svc := NewSettingService(&settingUpdateRepoStub{}, &config.Config{
+		ModelSquare: config.ModelSquareConfig{KeysSyncIntervalSeconds: 90},
+	})
+
+	got := svc.parseSettings(map[string]string{})
+
+	require.Equal(t, 90, got.ModelSquareKeysSyncIntervalSeconds)
+}
+
 func TestSettingService_UpdateSettings_APIKeyACLTrustForwardedIPRefreshesConfig(t *testing.T) {
 	repo := &settingUpdateRepoStub{}
 	cfg := &config.Config{}

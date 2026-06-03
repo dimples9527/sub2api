@@ -4794,7 +4794,7 @@
                     v-model="form.model_square_login_url"
                     type="url"
                     class="input font-mono text-sm"
-                    placeholder="留空使用 Base URL 默认路径"
+                    placeholder="留空使用 Base URL + /api/v1/auth/login"
                   />
                 </div>
                 <div>
@@ -4807,7 +4807,7 @@
                     v-model="form.model_square_model_url"
                     type="url"
                     class="input font-mono text-sm"
-                    placeholder="留空使用 Base URL 默认路径"
+                    placeholder="留空使用 Base URL + /api/v1/model-square"
                   />
                 </div>
                 <div>
@@ -4820,8 +4820,26 @@
                     v-model="form.model_square_keys_url"
                     type="url"
                     class="input font-mono text-sm"
-                    placeholder="留空使用 Base URL 默认路径"
+                    placeholder="留空使用 Base URL + /api/v1/keys?page=1&page_size=100&timezone=Asia%2FShanghai"
                   />
+                </div>
+                <div>
+                  <label
+                    class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    Keys 自动同步间隔（秒）
+                  </label>
+                  <input
+                    v-model.number="form.model_square_keys_sync_interval_seconds"
+                    type="number"
+                    min="1"
+                    step="1"
+                    class="input w-40"
+                    placeholder="5"
+                  />
+                  <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    保存后下一轮自动同步生效；建议生产环境按上游限制调大间隔。
+                  </p>
                 </div>
                 <div>
                   <label
@@ -7081,6 +7099,7 @@ type SettingsForm = Omit<
   github_oauth_client_secret: string;
   google_oauth_client_secret: string;
   model_square_password: string;
+  model_square_keys_sync_interval_seconds: number;
   force_email_on_third_party_signup: boolean;
   openai_advanced_scheduler_enabled: boolean;
   // 系统全局平台限额 map；form 内始终归一化为全 4 平台对象（模板非空绑定依赖此不变量）
@@ -7274,6 +7293,7 @@ const form = reactive<SettingsForm>({
   model_square_email: "",
   model_square_password: "",
   model_square_password_configured: false,
+  model_square_keys_sync_interval_seconds: 5,
   // Identity patch (Claude -> Gemini)
   enable_identity_patch: true,
   identity_patch_prompt: "",
@@ -8287,6 +8307,10 @@ async function saveSettings() {
       model_square_keys_url: form.model_square_keys_url,
       model_square_email: form.model_square_email,
       model_square_password: form.model_square_password || undefined,
+      model_square_keys_sync_interval_seconds: Math.max(
+        1,
+        Number(form.model_square_keys_sync_interval_seconds) || 5,
+      ),
       home_content: form.home_content,
       backend_mode_enabled: form.backend_mode_enabled,
       hide_ccs_import_button: form.hide_ccs_import_button,

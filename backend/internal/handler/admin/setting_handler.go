@@ -251,6 +251,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		ModelSquareKeysURL:                     settings.ModelSquareKeysURL,
 		ModelSquareEmail:                       settings.ModelSquareEmail,
 		ModelSquarePasswordConfigured:          settings.ModelSquarePasswordConfigured,
+		ModelSquareKeysSyncIntervalSeconds:     settings.ModelSquareKeysSyncIntervalSeconds,
 		EnableIdentityPatch:                    settings.EnableIdentityPatch,
 		IdentityPatchPrompt:                    settings.IdentityPatchPrompt,
 		OpsMonitoringEnabled:                   opsEnabled && settings.OpsMonitoringEnabled,
@@ -579,12 +580,13 @@ type UpdateSettingsRequest struct {
 	FallbackModelGemini      string `json:"fallback_model_gemini"`
 	FallbackModelAntigravity string `json:"fallback_model_antigravity"`
 
-	ModelSquareBaseURL  string `json:"model_square_base_url"`
-	ModelSquareLoginURL string `json:"model_square_login_url"`
-	ModelSquareModelURL string `json:"model_square_model_url"`
-	ModelSquareKeysURL  string `json:"model_square_keys_url"`
-	ModelSquareEmail    string `json:"model_square_email"`
-	ModelSquarePassword string `json:"model_square_password"`
+	ModelSquareBaseURL                 string `json:"model_square_base_url"`
+	ModelSquareLoginURL                string `json:"model_square_login_url"`
+	ModelSquareModelURL                string `json:"model_square_model_url"`
+	ModelSquareKeysURL                 string `json:"model_square_keys_url"`
+	ModelSquareEmail                   string `json:"model_square_email"`
+	ModelSquarePassword                string `json:"model_square_password"`
+	ModelSquareKeysSyncIntervalSeconds int    `json:"model_square_keys_sync_interval_seconds"`
 
 	// Identity patch configuration (Claude -> Gemini)
 	EnableIdentityPatch bool   `json:"enable_identity_patch"`
@@ -1628,6 +1630,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		ModelSquareKeysURL:                     req.ModelSquareKeysURL,
 		ModelSquareEmail:                       req.ModelSquareEmail,
 		ModelSquarePassword:                    req.ModelSquarePassword,
+		ModelSquareKeysSyncIntervalSeconds:     req.ModelSquareKeysSyncIntervalSeconds,
 		EnableIdentityPatch:                    req.EnableIdentityPatch,
 		IdentityPatchPrompt:                    req.IdentityPatchPrompt,
 		MinClaudeCodeVersion:                   req.MinClaudeCodeVersion,
@@ -2080,6 +2083,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		ModelSquareKeysURL:                     updatedSettings.ModelSquareKeysURL,
 		ModelSquareEmail:                       updatedSettings.ModelSquareEmail,
 		ModelSquarePasswordConfigured:          updatedSettings.ModelSquarePasswordConfigured,
+		ModelSquareKeysSyncIntervalSeconds:     updatedSettings.ModelSquareKeysSyncIntervalSeconds,
 		EnableIdentityPatch:                    updatedSettings.EnableIdentityPatch,
 		IdentityPatchPrompt:                    updatedSettings.IdentityPatchPrompt,
 		OpsMonitoringEnabled:                   updatedSettings.OpsMonitoringEnabled,

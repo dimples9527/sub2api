@@ -167,13 +167,14 @@ type SystemSettings struct {
 	FallbackModelAntigravity string `json:"fallback_model_antigravity"`
 
 	// Model square upstream configuration
-	ModelSquareBaseURL            string
-	ModelSquareLoginURL           string
-	ModelSquareModelURL           string
-	ModelSquareKeysURL            string
-	ModelSquareEmail              string
-	ModelSquarePassword           string
-	ModelSquarePasswordConfigured bool
+	ModelSquareBaseURL                 string
+	ModelSquareLoginURL                string
+	ModelSquareModelURL                string
+	ModelSquareKeysURL                 string
+	ModelSquareEmail                   string
+	ModelSquarePassword                string
+	ModelSquarePasswordConfigured      bool
+	ModelSquareKeysSyncIntervalSeconds int
 
 	// Identity patch configuration (Claude -> Gemini)
 	EnableIdentityPatch bool   `json:"enable_identity_patch"`
