@@ -1894,6 +1894,14 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyFallbackModelOpenAI] = settings.FallbackModelOpenAI
 	updates[SettingKeyFallbackModelGemini] = settings.FallbackModelGemini
 	updates[SettingKeyFallbackModelAntigravity] = settings.FallbackModelAntigravity
+	updates[SettingKeyModelSquareBaseURL] = strings.TrimSpace(settings.ModelSquareBaseURL)
+	updates[SettingKeyModelSquareLoginURL] = strings.TrimSpace(settings.ModelSquareLoginURL)
+	updates[SettingKeyModelSquareModelURL] = strings.TrimSpace(settings.ModelSquareModelURL)
+	updates[SettingKeyModelSquareKeysURL] = strings.TrimSpace(settings.ModelSquareKeysURL)
+	updates[SettingKeyModelSquareEmail] = strings.TrimSpace(settings.ModelSquareEmail)
+	if strings.TrimSpace(settings.ModelSquarePassword) != "" {
+		updates[SettingKeyModelSquarePassword] = settings.ModelSquarePassword
+	}
 
 	// Identity patch configuration (Claude -> Gemini)
 	updates[SettingKeyEnableIdentityPatch] = strconv.FormatBool(settings.EnableIdentityPatch)
@@ -2843,6 +2851,12 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyFallbackModelOpenAI:      "gpt-4o",
 		SettingKeyFallbackModelGemini:      "gemini-2.5-pro",
 		SettingKeyFallbackModelAntigravity: "gemini-2.5-pro",
+		SettingKeyModelSquareBaseURL:       "",
+		SettingKeyModelSquareLoginURL:      "",
+		SettingKeyModelSquareModelURL:      "",
+		SettingKeyModelSquareKeysURL:       "",
+		SettingKeyModelSquareEmail:         "",
+		SettingKeyModelSquarePassword:      "",
 		// Identity patch defaults
 		SettingKeyEnableIdentityPatch: "true",
 		SettingKeyIdentityPatchPrompt: "",
@@ -3404,6 +3418,14 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.OpenAICodexUserAgent = strings.TrimSpace(settings[SettingKeyOpenAICodexUserAgent])
 	result.OpenAIAllowClaudeCodeCodexPlugin = settings[SettingKeyOpenAIAllowClaudeCodeCodexPlugin] == "true"
 
+	result.ModelSquareBaseURL = firstNonEmpty(settings[SettingKeyModelSquareBaseURL], configModelSquareBaseURL(s.cfg))
+	result.ModelSquareLoginURL = firstNonEmpty(settings[SettingKeyModelSquareLoginURL], configModelSquareLoginURL(s.cfg))
+	result.ModelSquareModelURL = firstNonEmpty(settings[SettingKeyModelSquareModelURL], configModelSquareModelURL(s.cfg))
+	result.ModelSquareKeysURL = firstNonEmpty(settings[SettingKeyModelSquareKeysURL], configModelSquareKeysURL(s.cfg))
+	result.ModelSquareEmail = firstNonEmpty(settings[SettingKeyModelSquareEmail], configModelSquareEmail(s.cfg))
+	result.ModelSquarePassword = firstNonEmpty(settings[SettingKeyModelSquarePassword], configModelSquarePassword(s.cfg))
+	result.ModelSquarePasswordConfigured = strings.TrimSpace(result.ModelSquarePassword) != ""
+
 	// Web search emulation: quick enabled check from the JSON config
 	if raw := settings[SettingKeyWebSearchEmulationConfig]; raw != "" {
 		var wsCfg WebSearchEmulationConfig
@@ -3445,6 +3467,48 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	}
 
 	return result
+}
+
+func configModelSquareBaseURL(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	return cfg.ModelSquare.BaseURL
+}
+
+func configModelSquareLoginURL(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	return cfg.ModelSquare.LoginURL
+}
+
+func configModelSquareModelURL(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	return cfg.ModelSquare.ModelSquareURL
+}
+
+func configModelSquareKeysURL(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	return cfg.ModelSquare.KeysURL
+}
+
+func configModelSquareEmail(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	return cfg.ModelSquare.Email
+}
+
+func configModelSquarePassword(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	return cfg.ModelSquare.Password
 }
 
 func clampAffiliateRebateRate(value float64) float64 {

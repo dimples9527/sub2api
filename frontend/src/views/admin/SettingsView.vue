@@ -4757,6 +4757,110 @@
             </div>
           </div>
 
+          <!-- Model Square Settings -->
+          <div class="card">
+            <div
+              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
+            >
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                模型广场
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                配置模型广场上游地址和登录凭据，用于模型列表代理和分组倍率同步。
+              </p>
+            </div>
+            <div class="space-y-5 p-6">
+              <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
+                <div>
+                  <label
+                    class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    Base URL
+                  </label>
+                  <input
+                    v-model="form.model_square_base_url"
+                    type="url"
+                    class="input font-mono text-sm"
+                    placeholder="https://www.findcg.com"
+                  />
+                </div>
+                <div>
+                  <label
+                    class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    登录接口 URL
+                  </label>
+                  <input
+                    v-model="form.model_square_login_url"
+                    type="url"
+                    class="input font-mono text-sm"
+                    placeholder="留空使用 Base URL 默认路径"
+                  />
+                </div>
+                <div>
+                  <label
+                    class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    模型列表 URL
+                  </label>
+                  <input
+                    v-model="form.model_square_model_url"
+                    type="url"
+                    class="input font-mono text-sm"
+                    placeholder="留空使用 Base URL 默认路径"
+                  />
+                </div>
+                <div>
+                  <label
+                    class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    Keys 同步 URL
+                  </label>
+                  <input
+                    v-model="form.model_square_keys_url"
+                    type="url"
+                    class="input font-mono text-sm"
+                    placeholder="留空使用 Base URL 默认路径"
+                  />
+                </div>
+                <div>
+                  <label
+                    class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    登录邮箱
+                  </label>
+                  <input
+                    v-model="form.model_square_email"
+                    type="email"
+                    class="input"
+                    placeholder="name@example.com"
+                  />
+                </div>
+                <div>
+                  <label
+                    class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    登录密码
+                  </label>
+                  <input
+                    v-model="form.model_square_password"
+                    type="password"
+                    class="input"
+                    :placeholder="
+                      form.model_square_password_configured
+                        ? '已配置，留空不修改'
+                        : '请输入模型广场登录密码'
+                    "
+                    autocomplete="new-password"
+                  />
+                  <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    保存后密码不会回显；需要修改时重新输入新密码。
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Custom Menu Items -->
           <div class="card">
             <div
@@ -6976,6 +7080,7 @@ type SettingsForm = Omit<
   oidc_connect_client_secret: string;
   github_oauth_client_secret: string;
   google_oauth_client_secret: string;
+  model_square_password: string;
   force_email_on_third_party_signup: boolean;
   openai_advanced_scheduler_enabled: boolean;
   // 系统全局平台限额 map；form 内始终归一化为全 4 平台对象（模板非空绑定依赖此不变量）
@@ -7167,6 +7272,7 @@ const form = reactive<SettingsForm>({
   model_square_model_url: "",
   model_square_keys_url: "",
   model_square_email: "",
+  model_square_password: "",
   model_square_password_configured: false,
   // Identity patch (Claude -> Gemini)
   enable_identity_patch: true,
@@ -7899,6 +8005,7 @@ async function loadSettings() {
       form.wechat_connect_mode,
     );
     form.oidc_connect_client_secret = "";
+    form.model_square_password = "";
 
     // Load OpenAI fast/flex policy rules from bulk settings.
     // 仅当 payload 真的包含该字段时填充并标记为已加载；否则保持表单空值，
@@ -8167,9 +8274,19 @@ async function saveSettings() {
       site_name: form.site_name,
       site_logo: form.site_logo,
       site_subtitle: form.site_subtitle,
+      global_banner_message: form.global_banner_message,
       api_base_url: form.api_base_url,
       contact_info: form.contact_info,
       doc_url: form.doc_url,
+      llm_monitor_status_api_url: form.llm_monitor_status_api_url,
+      llm_monitor_title: form.llm_monitor_title,
+      llm_monitor_provider_url: form.llm_monitor_provider_url,
+      model_square_base_url: form.model_square_base_url,
+      model_square_login_url: form.model_square_login_url,
+      model_square_model_url: form.model_square_model_url,
+      model_square_keys_url: form.model_square_keys_url,
+      model_square_email: form.model_square_email,
+      model_square_password: form.model_square_password || undefined,
       home_content: form.home_content,
       backend_mode_enabled: form.backend_mode_enabled,
       hide_ccs_import_button: form.hide_ccs_import_button,

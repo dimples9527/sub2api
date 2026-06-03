@@ -315,6 +315,14 @@ const (
 	SettingKeyFallbackModelGemini      = "fallback_model_gemini"
 	SettingKeyFallbackModelAntigravity = "fallback_model_antigravity"
 
+	// Model square upstream settings
+	SettingKeyModelSquareBaseURL  = "model_square_base_url"
+	SettingKeyModelSquareLoginURL = "model_square_login_url"
+	SettingKeyModelSquareModelURL = "model_square_model_url"
+	SettingKeyModelSquareKeysURL  = "model_square_keys_url"
+	SettingKeyModelSquareEmail    = "model_square_email"
+	SettingKeyModelSquarePassword = "model_square_password"
+
 	// Request identity patch (Claude -> Gemini systemInstruction injection)
 	SettingKeyEnableIdentityPatch = "enable_identity_patch"
 	SettingKeyIdentityPatchPrompt = "identity_patch_prompt"
