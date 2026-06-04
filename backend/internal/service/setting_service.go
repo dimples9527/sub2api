@@ -1898,6 +1898,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyModelSquareLoginURL] = strings.TrimSpace(settings.ModelSquareLoginURL)
 	updates[SettingKeyModelSquareModelURL] = strings.TrimSpace(settings.ModelSquareModelURL)
 	updates[SettingKeyModelSquareKeysURL] = strings.TrimSpace(settings.ModelSquareKeysURL)
+	updates[SettingKeyModelSquareGroupsURL] = strings.TrimSpace(settings.ModelSquareGroupsURL)
 	updates[SettingKeyModelSquareEmail] = strings.TrimSpace(settings.ModelSquareEmail)
 	if strings.TrimSpace(settings.ModelSquarePassword) != "" {
 		updates[SettingKeyModelSquarePassword] = settings.ModelSquarePassword
@@ -2856,6 +2857,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyModelSquareLoginURL:                "",
 		SettingKeyModelSquareModelURL:                "",
 		SettingKeyModelSquareKeysURL:                 "",
+		SettingKeyModelSquareGroupsURL:               "",
 		SettingKeyModelSquareEmail:                   "",
 		SettingKeyModelSquarePassword:                "",
 		SettingKeyModelSquareKeysSyncIntervalSeconds: strconv.Itoa(configModelSquareKeysSyncIntervalSeconds(s.cfg)),
@@ -3424,6 +3426,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.ModelSquareLoginURL = firstNonEmpty(settings[SettingKeyModelSquareLoginURL], configModelSquareLoginURL(s.cfg))
 	result.ModelSquareModelURL = firstNonEmpty(settings[SettingKeyModelSquareModelURL], configModelSquareModelURL(s.cfg))
 	result.ModelSquareKeysURL = firstNonEmpty(settings[SettingKeyModelSquareKeysURL], configModelSquareKeysURL(s.cfg))
+	result.ModelSquareGroupsURL = firstNonEmpty(settings[SettingKeyModelSquareGroupsURL], configModelSquareGroupsURL(s.cfg))
 	result.ModelSquareEmail = firstNonEmpty(settings[SettingKeyModelSquareEmail], configModelSquareEmail(s.cfg))
 	result.ModelSquarePassword = firstNonEmpty(settings[SettingKeyModelSquarePassword], configModelSquarePassword(s.cfg))
 	result.ModelSquarePasswordConfigured = strings.TrimSpace(result.ModelSquarePassword) != ""
@@ -3501,6 +3504,13 @@ func configModelSquareKeysURL(cfg *config.Config) string {
 		return ""
 	}
 	return cfg.ModelSquare.KeysURL
+}
+
+func configModelSquareGroupsURL(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	return cfg.ModelSquare.GroupsURL
 }
 
 func configModelSquareEmail(cfg *config.Config) string {

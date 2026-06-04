@@ -249,6 +249,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		ModelSquareLoginURL:                    settings.ModelSquareLoginURL,
 		ModelSquareModelURL:                    settings.ModelSquareModelURL,
 		ModelSquareKeysURL:                     settings.ModelSquareKeysURL,
+		ModelSquareGroupsURL:                   settings.ModelSquareGroupsURL,
 		ModelSquareEmail:                       settings.ModelSquareEmail,
 		ModelSquarePasswordConfigured:          settings.ModelSquarePasswordConfigured,
 		ModelSquareKeysSyncIntervalSeconds:     settings.ModelSquareKeysSyncIntervalSeconds,
@@ -584,6 +585,7 @@ type UpdateSettingsRequest struct {
 	ModelSquareLoginURL                string `json:"model_square_login_url"`
 	ModelSquareModelURL                string `json:"model_square_model_url"`
 	ModelSquareKeysURL                 string `json:"model_square_keys_url"`
+	ModelSquareGroupsURL               string `json:"model_square_groups_url"`
 	ModelSquareEmail                   string `json:"model_square_email"`
 	ModelSquarePassword                string `json:"model_square_password"`
 	ModelSquareKeysSyncIntervalSeconds int    `json:"model_square_keys_sync_interval_seconds"`
@@ -1628,6 +1630,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		ModelSquareLoginURL:                    req.ModelSquareLoginURL,
 		ModelSquareModelURL:                    req.ModelSquareModelURL,
 		ModelSquareKeysURL:                     req.ModelSquareKeysURL,
+		ModelSquareGroupsURL:                   req.ModelSquareGroupsURL,
 		ModelSquareEmail:                       req.ModelSquareEmail,
 		ModelSquarePassword:                    req.ModelSquarePassword,
 		ModelSquareKeysSyncIntervalSeconds:     req.ModelSquareKeysSyncIntervalSeconds,
@@ -2081,6 +2084,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		ModelSquareLoginURL:                    updatedSettings.ModelSquareLoginURL,
 		ModelSquareModelURL:                    updatedSettings.ModelSquareModelURL,
 		ModelSquareKeysURL:                     updatedSettings.ModelSquareKeysURL,
+		ModelSquareGroupsURL:                   updatedSettings.ModelSquareGroupsURL,
 		ModelSquareEmail:                       updatedSettings.ModelSquareEmail,
 		ModelSquarePasswordConfigured:          updatedSettings.ModelSquarePasswordConfigured,
 		ModelSquareKeysSyncIntervalSeconds:     updatedSettings.ModelSquareKeysSyncIntervalSeconds,

@@ -171,6 +171,7 @@ type SystemSettings struct {
 	ModelSquareLoginURL                string
 	ModelSquareModelURL                string
 	ModelSquareKeysURL                 string
+	ModelSquareGroupsURL               string
 	ModelSquareEmail                   string
 	ModelSquarePassword                string
 	ModelSquarePasswordConfigured      bool

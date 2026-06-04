@@ -168,6 +168,7 @@ type SystemSettings struct {
 	ModelSquareLoginURL                string `json:"model_square_login_url"`
 	ModelSquareModelURL                string `json:"model_square_model_url"`
 	ModelSquareKeysURL                 string `json:"model_square_keys_url"`
+	ModelSquareGroupsURL               string `json:"model_square_groups_url"`
 	ModelSquareEmail                   string `json:"model_square_email"`
 	ModelSquarePasswordConfigured      bool   `json:"model_square_password_configured"`
 	ModelSquareKeysSyncIntervalSeconds int    `json:"model_square_keys_sync_interval_seconds"`

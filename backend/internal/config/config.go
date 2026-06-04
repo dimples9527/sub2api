@@ -188,6 +188,7 @@ type ModelSquareConfig struct {
 	LoginURL                string `mapstructure:"login_url"`
 	ModelSquareURL          string `mapstructure:"model_square_url"`
 	KeysURL                 string `mapstructure:"keys_url"`
+	GroupsURL               string `mapstructure:"groups_url"`
 	Email                   string `mapstructure:"email"`
 	Password                string `mapstructure:"password"`
 	KeysSyncIntervalSeconds int    `mapstructure:"keys_sync_interval_seconds"`
@@ -1446,6 +1447,7 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	cfg.ModelSquare.LoginURL = strings.TrimSpace(cfg.ModelSquare.LoginURL)
 	cfg.ModelSquare.ModelSquareURL = strings.TrimSpace(cfg.ModelSquare.ModelSquareURL)
 	cfg.ModelSquare.KeysURL = strings.TrimSpace(cfg.ModelSquare.KeysURL)
+	cfg.ModelSquare.GroupsURL = strings.TrimSpace(cfg.ModelSquare.GroupsURL)
 	cfg.ModelSquare.Email = strings.TrimSpace(cfg.ModelSquare.Email)
 	cfg.OIDC.UsePKCEExplicit = hasExplicitConfigOrEnv("oidc_connect.use_pkce", "OIDC_CONNECT_USE_PKCE")
 	cfg.OIDC.ValidateIDTokenExplicit = hasExplicitConfigOrEnv("oidc_connect.validate_id_token", "OIDC_CONNECT_VALIDATE_ID_TOKEN")
@@ -1773,6 +1775,7 @@ func setDefaults() {
 	viper.SetDefault("model_square.login_url", "")
 	viper.SetDefault("model_square.model_square_url", "")
 	viper.SetDefault("model_square.keys_url", "")
+	viper.SetDefault("model_square.groups_url", "")
 	viper.SetDefault("model_square.email", "")
 	viper.SetDefault("model_square.password", "")
 	viper.SetDefault("model_square.keys_sync_interval_seconds", 5)

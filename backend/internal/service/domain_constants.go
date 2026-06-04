@@ -320,6 +320,7 @@ const (
 	SettingKeyModelSquareLoginURL                = "model_square_login_url"
 	SettingKeyModelSquareModelURL                = "model_square_model_url"
 	SettingKeyModelSquareKeysURL                 = "model_square_keys_url"
+	SettingKeyModelSquareGroupsURL               = "model_square_groups_url"
 	SettingKeyModelSquareEmail                   = "model_square_email"
 	SettingKeyModelSquarePassword                = "model_square_password"
 	SettingKeyModelSquareKeysSyncIntervalSeconds = "model_square_keys_sync_interval_seconds"
