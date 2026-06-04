@@ -26,6 +26,7 @@ const (
 	findCGLoginPath      = "/api/v1/auth/login"
 	findCGModelPath      = "/api/v1/model-square"
 	findCGKeysPath       = "/api/v1/keys?page=1&page_size=100&timezone=Asia%2FShanghai"
+	findCGGroupsPath     = "/api/v1/groups/available?timezone=Asia%2FShanghai"
 
 	modelSquareKeysSyncErrorBackoff = 30 * time.Second
 	modelSquareRateCompareEpsilon   = 1e-9
@@ -37,6 +38,7 @@ type ModelSquareHandler struct {
 	loginURL       string
 	modelURL       string
 	keysURL        string
+	groupsURL      string
 	httpClient     *http.Client
 	email          string
 	password       string
@@ -66,6 +68,7 @@ type ModelSquareHandlerConfig struct {
 	LoginURL       string
 	ModelURL       string
 	KeysURL        string
+	GroupsURL      string
 	Email          string
 	Password       string
 	AppConfig      *config.Config
@@ -109,9 +112,17 @@ type findCGKeyGroup struct {
 }
 
 type modelSquareKeysSyncResult struct {
-	CheckedCount int `json:"checked_count"`
-	MatchedCount int `json:"matched_count"`
-	UpdatedCount int `json:"updated_count"`
+	CheckedCount int                           `json:"checked_count"`
+	MatchedCount int                           `json:"matched_count"`
+	UpdatedCount int                           `json:"updated_count"`
+	RateWarnings []modelSquareRateWarningEntry `json:"rate_warnings,omitempty"`
+}
+
+type modelSquareRateWarningEntry struct {
+	GroupID                int64   `json:"group_id"`
+	GroupName              string  `json:"group_name"`
+	LocalRateMultiplier    float64 `json:"local_rate_multiplier"`
+	UpstreamRateMultiplier float64 `json:"upstream_rate_multiplier"`
 }
 
 // NewModelSquareHandler creates a model square proxy handler.
@@ -124,6 +135,7 @@ func newModelSquareHandler(cfg ModelSquareHandlerConfig) *ModelSquareHandler {
 	loginURL := strings.TrimSpace(cfg.LoginURL)
 	modelURL := strings.TrimSpace(cfg.ModelURL)
 	keysURL := strings.TrimSpace(cfg.KeysURL)
+	groupsURL := strings.TrimSpace(cfg.GroupsURL)
 	email := strings.TrimSpace(cfg.Email)
 	password := cfg.Password
 	syncInterval := cfg.SyncInterval
@@ -146,6 +158,9 @@ func newModelSquareHandler(cfg ModelSquareHandlerConfig) *ModelSquareHandler {
 		}
 		if keysURL == "" {
 			keysURL = cfg.AppConfig.ModelSquare.KeysURL
+		}
+		if groupsURL == "" {
+			groupsURL = cfg.AppConfig.ModelSquare.GroupsURL
 		}
 		if syncInterval == 0 && cfg.AppConfig.ModelSquare.KeysSyncIntervalSeconds > 0 {
 			syncInterval = time.Duration(cfg.AppConfig.ModelSquare.KeysSyncIntervalSeconds) * time.Second
@@ -182,6 +197,9 @@ func newModelSquareHandler(cfg ModelSquareHandlerConfig) *ModelSquareHandler {
 	if keysURL == "" {
 		keysURL = strings.TrimSpace(os.Getenv("MODEL_SQUARE_KEYS_URL"))
 	}
+	if groupsURL == "" {
+		groupsURL = strings.TrimSpace(os.Getenv("MODEL_SQUARE_GROUPS_URL"))
+	}
 
 	client := cfg.HTTPClient
 	if client == nil {
@@ -193,6 +211,7 @@ func newModelSquareHandler(cfg ModelSquareHandlerConfig) *ModelSquareHandler {
 		loginURL:       loginURL,
 		modelURL:       modelURL,
 		keysURL:        keysURL,
+		groupsURL:      groupsURL,
 		httpClient:     client,
 		email:          email,
 		password:       password,
@@ -213,9 +232,31 @@ func (h *ModelSquareHandler) Get(c *gin.Context) {
 	c.Data(http.StatusOK, "application/json; charset=utf-8", payload)
 }
 
+// GetAvailableGroups handles GET /api/v1/admin/model-square/groups.
+func (h *ModelSquareHandler) GetAvailableGroups(c *gin.Context) {
+	payload, err := h.fetchAvailableGroups(c.Request.Context(), false)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+
+	c.Data(http.StatusOK, "application/json; charset=utf-8", payload)
+}
+
 // SyncKeys handles POST /api/v1/admin/model-square/sync.
 func (h *ModelSquareHandler) SyncKeys(c *gin.Context) {
 	result, err := h.syncKeysOnce(c.Request.Context(), false)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+
+	response.Success(c, result)
+}
+
+// RateWarnings handles GET /api/v1/admin/model-square/rate-warnings.
+func (h *ModelSquareHandler) RateWarnings(c *gin.Context) {
+	result, err := h.collectGroupRateWarningsFromKeys(c.Request.Context(), false)
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return
@@ -234,6 +275,17 @@ func (h *ModelSquareHandler) fetchModelSquare(ctx context.Context, forceLogin bo
 	}
 
 	return h.mergeGroups(ctx, payload)
+}
+
+func (h *ModelSquareHandler) fetchAvailableGroups(ctx context.Context, forceLogin bool) ([]byte, error) {
+	payload, status, err := h.requestModelSquareAuthenticated(ctx, findCGGroupsPath, "model square groups", forceLogin)
+	if err != nil {
+		return nil, err
+	}
+	if status < 200 || status >= 300 {
+		return nil, fmt.Errorf("model square groups upstream failed: HTTP %d: %s", status, string(payload))
+	}
+	return h.mergeAvailableGroupsWithLocal(ctx, payload)
 }
 
 func (h *ModelSquareHandler) StartBackgroundSync() {
@@ -327,63 +379,9 @@ func (h *ModelSquareHandler) syncKeysOnce(ctx context.Context, forceLogin bool) 
 }
 
 func (h *ModelSquareHandler) syncGroupRateMultipliersFromKeys(ctx context.Context, forceLogin bool) (modelSquareKeysSyncResult, error) {
-	result := modelSquareKeysSyncResult{}
-	if h.groupProvider == nil {
-		return result, nil
-	}
-
-	localGroups, err := h.groupProvider.GetAllGroups(ctx)
-	if err != nil {
-		return result, fmt.Errorf("load local groups for model square key rate sync: %w", err)
-	}
-	if len(localGroups) == 0 {
-		return result, nil
-	}
-
-	localByName := make(map[string]service.Group, len(localGroups))
-	for i := range localGroups {
-		key := normalizeModelSquareGroupName(localGroups[i].Name)
-		if key != "" {
-			localByName[key] = localGroups[i]
-		}
-	}
-
-	payload, status, err := h.requestModelSquareAuthenticated(ctx, findCGKeysPath, "model square keys", forceLogin)
+	result, maxRemoteRateByGroupID, err := h.collectGroupRateWarningsAndUpdatesFromKeys(ctx, forceLogin)
 	if err != nil {
 		return result, err
-	}
-	if status < 200 || status >= 300 {
-		return result, fmt.Errorf("model square keys upstream failed: HTTP %d: %s", status, string(payload))
-	}
-
-	var keysResp findCGKeysResponse
-	if err := json.Unmarshal(payload, &keysResp); err != nil {
-		return result, fmt.Errorf("decode model square keys response: %w", err)
-	}
-	if keysResp.Code != 0 {
-		if keysResp.Message == "" {
-			keysResp.Message = "unknown error"
-		}
-		return result, fmt.Errorf("model square keys upstream failed: %s", keysResp.Message)
-	}
-
-	maxRemoteRateByGroupID := make(map[int64]float64)
-	for _, item := range keysResp.Data.Items {
-		if item.Group == nil || item.Group.RateMultiplier == nil || *item.Group.RateMultiplier < 0 {
-			continue
-		}
-		result.CheckedCount++
-		localGroup, ok := modelSquareLocalGroupForKeyItem(item, localByName)
-		if !ok {
-			continue
-		}
-		result.MatchedCount++
-		if !modelSquareRemoteRateGreater(*item.Group.RateMultiplier, localGroup.RateMultiplier) {
-			continue
-		}
-		if current, ok := maxRemoteRateByGroupID[localGroup.ID]; !ok || modelSquareRemoteRateGreater(*item.Group.RateMultiplier, current) {
-			maxRemoteRateByGroupID[localGroup.ID] = *item.Group.RateMultiplier
-		}
 	}
 
 	for groupID, remoteRate := range maxRemoteRateByGroupID {
@@ -397,8 +395,97 @@ func (h *ModelSquareHandler) syncGroupRateMultipliersFromKeys(ctx context.Contex
 	return result, nil
 }
 
+func (h *ModelSquareHandler) collectGroupRateWarningsFromKeys(ctx context.Context, forceLogin bool) (modelSquareKeysSyncResult, error) {
+	result, _, err := h.collectGroupRateWarningsAndUpdatesFromKeys(ctx, forceLogin)
+	return result, err
+}
+
+func (h *ModelSquareHandler) collectGroupRateWarningsAndUpdatesFromKeys(ctx context.Context, forceLogin bool) (modelSquareKeysSyncResult, map[int64]float64, error) {
+	result := modelSquareKeysSyncResult{}
+	if h.groupProvider == nil {
+		return result, nil, nil
+	}
+
+	localGroups, err := h.groupProvider.GetAllGroups(ctx)
+	if err != nil {
+		return result, nil, fmt.Errorf("load local groups for model square key rate sync: %w", err)
+	}
+	if len(localGroups) == 0 {
+		return result, nil, nil
+	}
+
+	localByName := make(map[string]service.Group, len(localGroups))
+	for i := range localGroups {
+		key := normalizeModelSquareGroupName(localGroups[i].Name)
+		if key != "" {
+			localByName[key] = localGroups[i]
+		}
+	}
+
+	payload, status, err := h.requestModelSquareAuthenticated(ctx, findCGKeysPath, "model square keys", forceLogin)
+	if err != nil {
+		return result, nil, err
+	}
+	if status < 200 || status >= 300 {
+		return result, nil, fmt.Errorf("model square keys upstream failed: HTTP %d: %s", status, string(payload))
+	}
+
+	var keysResp findCGKeysResponse
+	if err := json.Unmarshal(payload, &keysResp); err != nil {
+		return result, nil, fmt.Errorf("decode model square keys response: %w", err)
+	}
+	if keysResp.Code != 0 {
+		if keysResp.Message == "" {
+			keysResp.Message = "unknown error"
+		}
+		return result, nil, fmt.Errorf("model square keys upstream failed: %s", keysResp.Message)
+	}
+
+	maxRemoteRateByGroupID := make(map[int64]float64)
+	warningIndexByGroupID := make(map[int64]int)
+	for _, item := range keysResp.Data.Items {
+		if item.Group == nil || item.Group.RateMultiplier == nil || *item.Group.RateMultiplier < 0 {
+			continue
+		}
+		result.CheckedCount++
+		localGroup, ok := modelSquareLocalGroupForKeyItem(item, localByName)
+		if !ok {
+			continue
+		}
+		result.MatchedCount++
+		if modelSquareRemoteRateNotLower(*item.Group.RateMultiplier, localGroup.RateMultiplier) {
+			warning := modelSquareRateWarningEntry{
+				GroupID:                localGroup.ID,
+				GroupName:              localGroup.Name,
+				LocalRateMultiplier:    localGroup.RateMultiplier,
+				UpstreamRateMultiplier: *item.Group.RateMultiplier,
+			}
+			if index, ok := warningIndexByGroupID[localGroup.ID]; ok {
+				if modelSquareRemoteRateGreater(warning.UpstreamRateMultiplier, result.RateWarnings[index].UpstreamRateMultiplier) {
+					result.RateWarnings[index] = warning
+				}
+			} else {
+				warningIndexByGroupID[localGroup.ID] = len(result.RateWarnings)
+				result.RateWarnings = append(result.RateWarnings, warning)
+			}
+		}
+		if !modelSquareRemoteRateGreater(*item.Group.RateMultiplier, localGroup.RateMultiplier) {
+			continue
+		}
+		if current, ok := maxRemoteRateByGroupID[localGroup.ID]; !ok || modelSquareRemoteRateGreater(*item.Group.RateMultiplier, current) {
+			maxRemoteRateByGroupID[localGroup.ID] = *item.Group.RateMultiplier
+		}
+	}
+
+	return result, maxRemoteRateByGroupID, nil
+}
+
 func modelSquareRemoteRateGreater(remoteRate, localRate float64) bool {
 	return remoteRate-localRate > modelSquareRateCompareEpsilon
+}
+
+func modelSquareRemoteRateNotLower(remoteRate, localRate float64) bool {
+	return localRate-remoteRate <= modelSquareRateCompareEpsilon
 }
 
 func modelSquareLocalGroupForKeyItem(item findCGKeyItem, localByName map[string]service.Group) (service.Group, bool) {
@@ -417,12 +504,13 @@ func (h *ModelSquareHandler) getToken(ctx context.Context, force bool) (cachedFi
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	baseURL, loginURL, modelURL, keysURL, email, password, source := h.resolveConfigLocked(ctx)
-	if baseURL != h.baseURL || loginURL != h.loginURL || modelURL != h.modelURL || keysURL != h.keysURL || email != h.email || password != h.password {
+	baseURL, loginURL, modelURL, keysURL, groupsURL, email, password, source := h.resolveConfigLocked(ctx)
+	if baseURL != h.baseURL || loginURL != h.loginURL || modelURL != h.modelURL || keysURL != h.keysURL || groupsURL != h.groupsURL || email != h.email || password != h.password {
 		h.baseURL = baseURL
 		h.loginURL = loginURL
 		h.modelURL = modelURL
 		h.keysURL = keysURL
+		h.groupsURL = groupsURL
 		h.email = email
 		h.password = password
 		h.token = cachedFindCGToken{}
@@ -496,11 +584,12 @@ func (h *ModelSquareHandler) getToken(ctx context.Context, force bool) (cachedFi
 	return h.token, nil
 }
 
-func (h *ModelSquareHandler) resolveConfigLocked(ctx context.Context) (string, string, string, string, string, string, string) {
+func (h *ModelSquareHandler) resolveConfigLocked(ctx context.Context) (string, string, string, string, string, string, string, string) {
 	baseURL := h.baseURL
 	loginURL := h.loginURL
 	modelURL := h.modelURL
 	keysURL := h.keysURL
+	groupsURL := h.groupsURL
 	email := h.email
 	password := h.password
 	source := "config_or_env"
@@ -525,7 +614,10 @@ func (h *ModelSquareHandler) resolveConfigLocked(ctx context.Context) (string, s
 			if settings.ModelSquareKeysURL != "" {
 				keysURL = settings.ModelSquareKeysURL
 			}
-			if settings.ModelSquareBaseURL != "" || settings.ModelSquareEmail != "" || settings.ModelSquarePassword != "" || settings.ModelSquareLoginURL != "" || settings.ModelSquareModelURL != "" || settings.ModelSquareKeysURL != "" {
+			if settings.ModelSquareGroupsURL != "" {
+				groupsURL = settings.ModelSquareGroupsURL
+			}
+			if settings.ModelSquareBaseURL != "" || settings.ModelSquareEmail != "" || settings.ModelSquarePassword != "" || settings.ModelSquareLoginURL != "" || settings.ModelSquareModelURL != "" || settings.ModelSquareKeysURL != "" || settings.ModelSquareGroupsURL != "" {
 				source = "settings"
 			}
 		} else {
@@ -536,7 +628,7 @@ func (h *ModelSquareHandler) resolveConfigLocked(ctx context.Context) (string, s
 	if baseURL == "" {
 		baseURL = defaultFindCGBaseURL
 	}
-	return strings.TrimRight(baseURL, "/"), strings.TrimSpace(loginURL), strings.TrimSpace(modelURL), strings.TrimSpace(keysURL), strings.TrimSpace(email), password, source
+	return strings.TrimRight(baseURL, "/"), strings.TrimSpace(loginURL), strings.TrimSpace(modelURL), strings.TrimSpace(keysURL), strings.TrimSpace(groupsURL), strings.TrimSpace(email), password, source
 }
 
 func logFindCGLoginAttempt(baseURL, email, password, source string) {
@@ -645,6 +737,56 @@ func (h *ModelSquareHandler) mergeGroups(ctx context.Context, payload []byte) ([
 	return mergedPayload, nil
 }
 
+func (h *ModelSquareHandler) mergeAvailableGroupsWithLocal(ctx context.Context, payload []byte) ([]byte, error) {
+	var body map[string]any
+	if err := json.Unmarshal(payload, &body); err != nil {
+		return nil, fmt.Errorf("decode model square groups upstream response: %w", err)
+	}
+
+	rawGroups, ok := body["data"].([]any)
+	if !ok {
+		return payload, nil
+	}
+
+	localByName := map[string]service.Group{}
+	if h.groupProvider != nil {
+		localGroups, err := h.groupProvider.GetAllGroups(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("load local groups for model square groups: %w", err)
+		}
+		localByName = make(map[string]service.Group, len(localGroups))
+		for i := range localGroups {
+			key := normalizeModelSquareGroupName(localGroups[i].Name)
+			if key != "" {
+				localByName[key] = localGroups[i]
+			}
+		}
+	}
+
+	for _, rawGroup := range rawGroups {
+		groupMap, ok := rawGroup.(map[string]any)
+		if !ok {
+			continue
+		}
+		remoteName, _ := groupMap["name"].(string)
+		if localGroup, matched := localByName[normalizeModelSquareGroupName(remoteName)]; matched {
+			groupMap["local_group_id"] = localGroup.ID
+			groupMap["local_group_name"] = localGroup.Name
+			groupMap["local_rate_multiplier"] = localGroup.RateMultiplier
+		} else {
+			groupMap["local_group_id"] = nil
+			groupMap["local_group_name"] = ""
+			groupMap["local_rate_multiplier"] = nil
+		}
+	}
+
+	mergedPayload, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("encode merged model-square groups response: %w", err)
+	}
+	return mergedPayload, nil
+}
+
 func filterModelSquareGroupIDs(body map[string]any, keptGroupIDs map[string]struct{}) {
 	rawModels, ok := body["models"].([]any)
 	if !ok {
@@ -741,6 +883,8 @@ func (h *ModelSquareHandler) configuredUpstreamURL(path string) string {
 		configuredURL = h.modelURL
 	case findCGKeysPath:
 		configuredURL = h.keysURL
+	case findCGGroupsPath:
+		configuredURL = h.groupsURL
 	case findCGLoginPath:
 		configuredURL = h.loginURL
 	}

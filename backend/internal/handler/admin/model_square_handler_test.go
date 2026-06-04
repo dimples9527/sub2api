@@ -32,7 +32,7 @@ func TestResolveConfigReportsSource(t *testing.T) {
 		}},
 	})
 
-	baseURL, _, _, _, email, password, source := h.resolveConfigLocked(context.Background())
+	baseURL, _, _, _, _, email, password, source := h.resolveConfigLocked(context.Background())
 
 	require.Equal(t, "https://yaml.example.com", baseURL)
 	require.Equal(t, "yaml@example.com", email)
@@ -51,7 +51,7 @@ func TestResolveConfigReportsSettingsSource(t *testing.T) {
 		SettingService: settingSvc,
 	})
 
-	baseURL, _, _, _, email, password, source := h.resolveConfigLocked(context.Background())
+	baseURL, _, _, _, _, email, password, source := h.resolveConfigLocked(context.Background())
 
 	require.Equal(t, "https://db.example.com", baseURL)
 	require.Equal(t, "db@example.com", email)
@@ -254,6 +254,65 @@ func TestModelSquareHandlerUsesSettingsEndpointURLs(t *testing.T) {
 	require.Equal(t, []string{"/settings/login", "/settings/models"}, paths)
 }
 
+func TestModelSquareHandlerGetsAvailableGroupsFromConfiguredURLWithLocalMatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/custom/login":
+			_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"access_token":"token-groups","expires_in":86400,"token_type":"Bearer"}}`))
+		case "/custom/groups":
+			require.Equal(t, "Bearer token-groups", r.Header.Get("Authorization"))
+			require.Equal(t, "Asia/Shanghai", r.URL.Query().Get("timezone"))
+			_, _ = w.Write([]byte(`{
+				"code":0,
+				"message":"success",
+				"data":[
+					{"id":2,"name":"codex福利","platform":"openai","rate_multiplier":0.15,"status":"active"},
+					{"id":5,"name":"unmatched","platform":"anthropic","rate_multiplier":0.75,"status":"active"}
+				]
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	groupProvider := &modelSquareGroupProviderStub{groups: []service.Group{
+		{ID: 10, Name: "codex 福利", RateMultiplier: 0.2},
+	}}
+	h := newModelSquareHandler(ModelSquareHandlerConfig{
+		AppConfig: &config.Config{ModelSquare: config.ModelSquareConfig{
+			BaseURL:   "https://unused.example.com",
+			LoginURL:  server.URL + "/custom/login",
+			GroupsURL: server.URL + "/custom/groups?timezone=Asia%2FShanghai",
+			Email:     "configured@example.com",
+			Password:  "configured-secret",
+		}},
+		GroupProvider: groupProvider,
+		HTTPClient:    server.Client(),
+	})
+	router := gin.New()
+	router.GET("/admin/model-square/groups", h.GetAvailableGroups)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/model-square/groups", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, []string{"/custom/login", "/custom/groups"}, paths)
+	require.JSONEq(t, `{
+		"code":0,
+		"message":"success",
+		"data":[
+			{"id":2,"name":"codex福利","platform":"openai","rate_multiplier":0.15,"status":"active","local_group_id":10,"local_group_name":"codex 福利","local_rate_multiplier":0.2},
+			{"id":5,"name":"unmatched","platform":"anthropic","rate_multiplier":0.75,"status":"active","local_group_id":null,"local_group_name":"","local_rate_multiplier":null}
+		]
+	}`, rec.Body.String())
+}
+
 func TestModelSquareHandlerMergesGroupsByNormalizedName(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -385,7 +444,18 @@ func TestModelSquareHandlerManualSyncRaisesLocalGroupRateFromKeys(t *testing.T) 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "Bearer token-keys", keysAuth)
 	require.Equal(t, []modelSquareGroupRateUpdate{{id: 10, rate: 0.7}}, groupProvider.updatesSnapshot())
-	require.JSONEq(t, `{"code":0,"message":"success","data":{"checked_count":4,"matched_count":3,"updated_count":1}}`, rec.Body.String())
+	require.JSONEq(t, `{
+		"code":0,
+		"message":"success",
+		"data":{
+			"checked_count":4,
+			"matched_count":3,
+			"updated_count":1,
+			"rate_warnings":[
+				{"group_id":10,"group_name":"codex special","local_rate_multiplier":0.5,"upstream_rate_multiplier":0.7}
+			]
+		}
+	}`, rec.Body.String())
 }
 
 func TestModelSquareHandlerManualSyncMatchesKeysByGroupName(t *testing.T) {
@@ -432,7 +502,141 @@ func TestModelSquareHandlerManualSyncMatchesKeysByGroupName(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, []modelSquareGroupRateUpdate{{id: 10, rate: 0.8}}, groupProvider.updatesSnapshot())
-	require.JSONEq(t, `{"code":0,"message":"success","data":{"checked_count":1,"matched_count":1,"updated_count":1}}`, rec.Body.String())
+	require.JSONEq(t, `{
+		"code":0,
+		"message":"success",
+		"data":{
+			"checked_count":1,
+			"matched_count":1,
+			"updated_count":1,
+			"rate_warnings":[
+				{"group_id":10,"group_name":"codex special","local_rate_multiplier":0.5,"upstream_rate_multiplier":0.8}
+			]
+		}
+	}`, rec.Body.String())
+}
+
+func TestModelSquareHandlerManualSyncReportsUpstreamRatesNotLowerThanLocal(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"access_token":"token-warning","expires_in":86400,"token_type":"Bearer"}}`))
+		case "/api/v1/keys":
+			_, _ = w.Write([]byte(`{
+				"code":0,
+				"message":"success",
+				"data":{
+					"items":[
+						{"id":1,"name":"Codex Special","group":{"name":"Codex Special","rate_multiplier":0.8}},
+						{"id":2,"name":"Stable Group","group":{"name":"Stable Group","rate_multiplier":0.4}},
+						{"id":3,"name":"Discount Group","group":{"name":"Discount Group","rate_multiplier":0.2}}
+					]
+				}
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	groupProvider := &modelSquareGroupProviderStub{groups: []service.Group{
+		{ID: 10, Name: "codex special", RateMultiplier: 0.5},
+		{ID: 20, Name: "Stable Group", RateMultiplier: 0.4},
+		{ID: 30, Name: "Discount Group", RateMultiplier: 0.3},
+	}}
+	h := newModelSquareHandler(ModelSquareHandlerConfig{
+		AppConfig: &config.Config{ModelSquare: config.ModelSquareConfig{
+			BaseURL:  server.URL,
+			Email:    "configured@example.com",
+			Password: "configured-secret",
+		}},
+		GroupProvider: groupProvider,
+		HTTPClient:    server.Client(),
+	})
+	router := gin.New()
+	router.POST("/admin/model-square/sync", h.SyncKeys)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/model-square/sync", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, []modelSquareGroupRateUpdate{{id: 10, rate: 0.8}}, groupProvider.updatesSnapshot())
+	require.JSONEq(t, `{
+		"code":0,
+		"message":"success",
+		"data":{
+			"checked_count":3,
+			"matched_count":3,
+			"updated_count":1,
+			"rate_warnings":[
+				{"group_id":10,"group_name":"codex special","local_rate_multiplier":0.5,"upstream_rate_multiplier":0.8},
+				{"group_id":20,"group_name":"Stable Group","local_rate_multiplier":0.4,"upstream_rate_multiplier":0.4}
+			]
+		}
+	}`, rec.Body.String())
+}
+
+func TestModelSquareHandlerRateWarningsDoesNotUpdateLocalGroups(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"access_token":"token-readonly","expires_in":86400,"token_type":"Bearer"}}`))
+		case "/api/v1/keys":
+			_, _ = w.Write([]byte(`{
+				"code":0,
+				"message":"success",
+				"data":{
+					"items":[
+						{"id":1,"name":"Codex Special","group":{"name":"Codex Special","rate_multiplier":0.8}},
+						{"id":2,"name":"Discount Group","group":{"name":"Discount Group","rate_multiplier":0.2}}
+					]
+				}
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	groupProvider := &modelSquareGroupProviderStub{groups: []service.Group{
+		{ID: 10, Name: "codex special", RateMultiplier: 0.5},
+		{ID: 20, Name: "Discount Group", RateMultiplier: 0.3},
+	}}
+	h := newModelSquareHandler(ModelSquareHandlerConfig{
+		AppConfig: &config.Config{ModelSquare: config.ModelSquareConfig{
+			BaseURL:  server.URL,
+			Email:    "configured@example.com",
+			Password: "configured-secret",
+		}},
+		GroupProvider: groupProvider,
+		HTTPClient:    server.Client(),
+	})
+	router := gin.New()
+	router.GET("/admin/model-square/rate-warnings", h.RateWarnings)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/model-square/rate-warnings", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Empty(t, groupProvider.updatesSnapshot())
+	require.JSONEq(t, `{
+		"code":0,
+		"message":"success",
+		"data":{
+			"checked_count":2,
+			"matched_count":2,
+			"updated_count":0,
+			"rate_warnings":[
+				{"group_id":10,"group_name":"codex special","local_rate_multiplier":0.5,"upstream_rate_multiplier":0.8}
+			]
+		}
+	}`, rec.Body.String())
 }
 
 func TestModelSquareHandlerBackgroundSyncRunsOnInterval(t *testing.T) {
@@ -543,7 +747,18 @@ func TestModelSquareHandlerManualSyncIgnoresFloatTailDifference(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Empty(t, groupProvider.updatesSnapshot())
-	require.JSONEq(t, `{"code":0,"message":"success","data":{"checked_count":1,"matched_count":1,"updated_count":0}}`, rec.Body.String())
+	require.JSONEq(t, `{
+		"code":0,
+		"message":"success",
+		"data":{
+			"checked_count":1,
+			"matched_count":1,
+			"updated_count":0,
+			"rate_warnings":[
+				{"group_id":10,"group_name":"floatgroup","local_rate_multiplier":0.3,"upstream_rate_multiplier":0.30000000000000004}
+			]
+		}
+	}`, rec.Body.String())
 }
 
 type modelSquareGroupRateUpdate struct {
