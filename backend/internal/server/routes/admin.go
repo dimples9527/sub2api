@@ -103,6 +103,8 @@ func RegisterAdminRoutes(
 
 func registerModelSquareRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	admin.GET("/model-square", h.Admin.ModelSquare.Get)
+	admin.GET("/model-square/groups", h.Admin.ModelSquare.GetAvailableGroups)
+	admin.GET("/model-square/rate-warnings", h.Admin.ModelSquare.RateWarnings)
 	admin.POST("/model-square/sync", h.Admin.ModelSquare.SyncKeys)
 }
 
