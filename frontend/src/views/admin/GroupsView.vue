@@ -2,11 +2,12 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
-        <div
-          class="flex flex-col justify-between gap-4 lg:flex-row lg:items-start"
-        >
-          <!-- Left: fuzzy search + filters (can wrap to multiple lines) -->
-          <div class="flex flex-1 flex-wrap items-center gap-3">
+        <div class="space-y-3">
+          <div
+            class="flex flex-col justify-between gap-4 lg:flex-row lg:items-start"
+          >
+            <!-- Left: fuzzy search + filters (can wrap to multiple lines) -->
+            <div class="flex flex-1 flex-wrap items-center gap-3">
             <div class="relative w-full sm:w-64">
               <Icon
                 name="search"
@@ -42,12 +43,12 @@
               class="w-44"
               @change="loadGroups"
             />
-          </div>
+            </div>
 
-          <!-- Right: actions -->
-          <div
-            class="flex w-full flex-shrink-0 flex-wrap items-center justify-end gap-3 lg:w-auto"
-          >
+            <!-- Right: actions -->
+            <div
+              class="flex w-full flex-shrink-0 flex-wrap items-center justify-end gap-3 lg:w-auto"
+            >
             <button
               @click="loadGroups"
               :disabled="loading"
@@ -90,6 +91,42 @@
               <Icon name="plus" size="md" class="mr-2" />
               {{ t("admin.groups.createGroup") }}
             </button>
+            </div>
+          </div>
+
+          <div
+            v-if="modelSquareRateWarningMessage"
+            class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-sm dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-100"
+            data-test="model-square-rate-warning"
+          >
+            <div class="flex gap-3">
+              <Icon
+                name="exclamationTriangle"
+                size="md"
+                class="mt-0.5 flex-shrink-0 text-amber-500 dark:text-amber-300"
+              />
+              <div class="min-w-0 space-y-2">
+                <p class="font-medium">{{ modelSquareRateWarningMessage }}</p>
+                <div class="flex flex-wrap gap-2">
+                  <span
+                    v-for="warning in visibleModelSquareRateWarningItems"
+                    :key="warning.group_id"
+                    class="inline-flex max-w-full items-center gap-1 rounded-md bg-white/70 px-2 py-1 text-xs font-medium text-amber-900 ring-1 ring-amber-200 dark:bg-dark-800/70 dark:text-amber-100 dark:ring-amber-800"
+                  >
+                    <span class="truncate">{{ warning.group_name || `#${warning.group_id}` }}</span>
+                    <span class="whitespace-nowrap">
+                      上游 {{ formatWarningRate(warning.upstream_rate_multiplier) }}x / 本地 {{ formatWarningRate(warning.local_rate_multiplier) }}x
+                    </span>
+                  </span>
+                  <span
+                    v-if="remainingModelSquareRateWarningItems > 0"
+                    class="inline-flex items-center rounded-md bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-100"
+                  >
+                    另有 {{ remainingModelSquareRateWarningItems }} 个分组
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </template>
@@ -3096,6 +3133,11 @@ import {
 } from "./groupsModelsList";
 import { createModelsListCandidatesTracker } from "./groupsModelsListCandidates";
 import { normalizeSupportedModelScopesForPlatform } from "./groupsSupportedModelScopes";
+import {
+  remainingModelSquareRateWarningCount,
+  visibleModelSquareRateWarnings,
+  type ModelSquareRateWarning,
+} from "./modelSquareRateSyncWarning";
 
 const { t } = useI18n();
 const appStore = useAppStore();
@@ -3280,6 +3322,8 @@ const copyAccountsGroupOptionsForEdit = computed(() => {
 
 const groups = ref<AdminGroup[]>([]);
 const loading = ref(false);
+const modelSquareRateWarnings = ref<ModelSquareRateWarning[]>([]);
+const modelSquareRateWarningsLoading = ref(false);
 const usageMap = ref<Map<number, { today_cost: number; total_cost: number }>>(
   new Map(),
 );
@@ -3315,6 +3359,7 @@ const sortState = reactive({
 });
 
 let abortController: AbortController | null = null;
+let modelSquareRateWarningRequestId = 0;
 
 const showCreateModal = ref(false);
 const showEditModal = ref(false);
@@ -3341,6 +3386,17 @@ const createModelsListSelectedCount = computed(
 );
 const editModelsListSelectedCount = computed(
   () => editModelsListState.items.filter((item) => item.selected).length,
+);
+const modelSquareRateWarningMessage = computed(() =>
+  modelSquareRateWarnings.value.length > 0
+    ? "检测到上游分组倍率大于或等于本地倍率，请确认利润空间。"
+    : "",
+);
+const visibleModelSquareRateWarningItems = computed(() =>
+  visibleModelSquareRateWarnings(modelSquareRateWarnings.value),
+);
+const remainingModelSquareRateWarningItems = computed(() =>
+  remainingModelSquareRateWarningCount(modelSquareRateWarnings.value),
 );
 
 const createForm = reactive({
@@ -3814,6 +3870,7 @@ const loadGroups = async () => {
     groups.value = response.items;
     pagination.total = response.total;
     pagination.pages = response.pages;
+    loadModelSquareRateWarnings();
     loadUsageSummary();
     loadCapacitySummary();
   } catch (error: any) {
@@ -3829,6 +3886,24 @@ const loadGroups = async () => {
   } finally {
     if (abortController === currentController && !signal.aborted) {
       loading.value = false;
+    }
+  }
+};
+
+const loadModelSquareRateWarnings = async () => {
+  const requestId = ++modelSquareRateWarningRequestId;
+  modelSquareRateWarningsLoading.value = true;
+  try {
+    const result = await adminAPI.groups.getModelSquareRateWarnings();
+    if (requestId !== modelSquareRateWarningRequestId) return;
+    modelSquareRateWarnings.value = result.rate_warnings || [];
+  } catch (error) {
+    if (requestId !== modelSquareRateWarningRequestId) return;
+    modelSquareRateWarnings.value = [];
+    console.error("Error loading model square rate warnings:", error);
+  } finally {
+    if (requestId === modelSquareRateWarningRequestId) {
+      modelSquareRateWarningsLoading.value = false;
     }
   }
 };
@@ -3853,6 +3928,11 @@ const formatCost = (cost: number): string => {
   if (cost >= 1000) return cost.toFixed(0);
   if (cost >= 100) return cost.toFixed(1);
   return cost.toFixed(2);
+};
+
+const formatWarningRate = (rate: number): string => {
+  if (!Number.isFinite(rate)) return "-";
+  return Number(rate.toFixed(6)).toString();
 };
 
 const loadUsageSummary = async () => {

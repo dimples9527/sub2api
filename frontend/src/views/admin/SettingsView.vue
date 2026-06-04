@@ -4814,13 +4814,26 @@
                   <label
                     class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
                   >
-                    Keys 同步 URL
+                    API秘钥获取URL
                   </label>
                   <input
                     v-model="form.model_square_keys_url"
                     type="url"
                     class="input font-mono text-sm"
                     placeholder="留空使用 Base URL + /api/v1/keys?page=1&page_size=100&timezone=Asia%2FShanghai"
+                  />
+                </div>
+                <div>
+                  <label
+                    class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    上游分组 URL
+                  </label>
+                  <input
+                    v-model="form.model_square_groups_url"
+                    type="url"
+                    class="input font-mono text-sm"
+                    placeholder="留空使用 Base URL + /api/v1/groups/available?timezone=Asia%2FShanghai"
                   />
                 </div>
                 <div>
@@ -7290,6 +7303,7 @@ const form = reactive<SettingsForm>({
   model_square_login_url: "",
   model_square_model_url: "",
   model_square_keys_url: "",
+  model_square_groups_url: "",
   model_square_email: "",
   model_square_password: "",
   model_square_password_configured: false,
@@ -8305,6 +8319,7 @@ async function saveSettings() {
       model_square_login_url: form.model_square_login_url,
       model_square_model_url: form.model_square_model_url,
       model_square_keys_url: form.model_square_keys_url,
+      model_square_groups_url: form.model_square_groups_url,
       model_square_email: form.model_square_email,
       model_square_password: form.model_square_password || undefined,
       model_square_keys_sync_interval_seconds: Math.max(
