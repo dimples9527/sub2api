@@ -189,11 +189,53 @@ export interface ModelSquareRateSyncResult {
   checked_count: number
   matched_count: number
   updated_count: number
+  rate_warnings?: Array<{
+    group_id: number
+    group_name: string
+    local_rate_multiplier: number
+    upstream_rate_multiplier: number
+  }>
+}
+
+export interface ModelSquareAvailableGroup {
+  id: number | string
+  name: string
+  description?: string | null
+  platform?: string
+  rate_multiplier?: number | null
+  status?: string
+  subscription_type?: string
+  daily_limit_usd?: number | null
+  weekly_limit_usd?: number | null
+  monthly_limit_usd?: number | null
+  image_price_1k?: number | null
+  image_price_2k?: number | null
+  image_price_4k?: number | null
+  claude_code_only?: boolean
+  allow_messages_dispatch?: boolean
+  per_request_price?: number | null
+  created_at?: string
+  updated_at?: string
+  local_group_id?: number | null
+  local_group_name?: string
+  local_rate_multiplier?: number | null
 }
 
 export async function syncModelSquareRates(): Promise<ModelSquareRateSyncResult> {
   const { data } = await apiClient.post<ModelSquareRateSyncResult>('/admin/model-square/sync')
   return data
+}
+
+export async function getModelSquareRateWarnings(): Promise<ModelSquareRateSyncResult> {
+  const { data } = await apiClient.get<ModelSquareRateSyncResult>(
+    '/admin/model-square/rate-warnings'
+  )
+  return data
+}
+
+export async function getModelSquareAvailableGroups(): Promise<ModelSquareAvailableGroup[]> {
+  const { data } = await apiClient.get<ModelSquareAvailableGroup[]>('/admin/model-square/groups')
+  return Array.isArray(data) ? data : []
 }
 
 /**
@@ -343,6 +385,8 @@ export const groupsAPI = {
   getGroupApiKeys,
   getGroupRateMultipliers,
   syncModelSquareRates,
+  getModelSquareRateWarnings,
+  getModelSquareAvailableGroups,
   clearGroupRateMultipliers,
   batchSetGroupRateMultipliers,
   getGroupRPMOverrides,

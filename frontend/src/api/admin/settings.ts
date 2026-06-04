@@ -544,6 +544,7 @@ export interface SystemSettings {
   model_square_login_url: string;
   model_square_model_url: string;
   model_square_keys_url: string;
+  model_square_groups_url: string;
   model_square_email: string;
   model_square_password_configured: boolean;
   model_square_keys_sync_interval_seconds: number;
@@ -803,6 +804,7 @@ export interface UpdateSettingsRequest {
   model_square_login_url?: string;
   model_square_model_url?: string;
   model_square_keys_url?: string;
+  model_square_groups_url?: string;
   model_square_email?: string;
   model_square_password?: string;
   model_square_keys_sync_interval_seconds?: number;
