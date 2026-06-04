@@ -464,6 +464,16 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/model-square/groups',
+    name: 'AdminUpstreamGroups',
+    component: () => import('@/views/admin/UpstreamGroupsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: '上游分组'
+    }
+  },
+  {
     path: '/admin/channels/monitor',
     name: 'AdminChannelMonitor',
     component: () => import('@/views/admin/ChannelMonitorView.vue'),
