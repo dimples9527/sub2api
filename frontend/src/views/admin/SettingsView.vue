@@ -4763,10 +4763,10 @@
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
               <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                模型广场
+                上游管理
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                配置模型广场上游地址和登录凭据，用于模型列表代理和分组倍率同步。
+                配置上游地址和登录凭据，用于模型列表代理、API 秘钥获取和分组倍率同步。
               </p>
             </div>
             <div class="space-y-5 p-6">
@@ -4778,7 +4778,7 @@
                     Base URL
                   </label>
                   <input
-                    v-model="form.model_square_base_url"
+                    v-model="form.upstream_management_base_url"
                     type="url"
                     class="input font-mono text-sm"
                     placeholder="https://www.findcg.com"
@@ -4791,7 +4791,7 @@
                     登录接口 URL
                   </label>
                   <input
-                    v-model="form.model_square_login_url"
+                    v-model="form.upstream_management_login_url"
                     type="url"
                     class="input font-mono text-sm"
                     placeholder="留空使用 Base URL + /api/v1/auth/login"
@@ -4804,7 +4804,7 @@
                     模型列表 URL
                   </label>
                   <input
-                    v-model="form.model_square_model_url"
+                    v-model="form.upstream_management_model_url"
                     type="url"
                     class="input font-mono text-sm"
                     placeholder="留空使用 Base URL + /api/v1/model-square"
@@ -4817,7 +4817,7 @@
                     API秘钥获取URL
                   </label>
                   <input
-                    v-model="form.model_square_keys_url"
+                    v-model="form.upstream_management_api_keys_url"
                     type="url"
                     class="input font-mono text-sm"
                     placeholder="留空使用 Base URL + /api/v1/keys?page=1&page_size=100&timezone=Asia%2FShanghai"
@@ -4830,7 +4830,7 @@
                     上游分组 URL
                   </label>
                   <input
-                    v-model="form.model_square_groups_url"
+                    v-model="form.upstream_management_groups_url"
                     type="url"
                     class="input font-mono text-sm"
                     placeholder="留空使用 Base URL + /api/v1/groups/available?timezone=Asia%2FShanghai"
@@ -4843,7 +4843,7 @@
                     Keys 自动同步间隔（秒）
                   </label>
                   <input
-                    v-model.number="form.model_square_keys_sync_interval_seconds"
+                    v-model.number="form.upstream_management_keys_sync_interval_seconds"
                     type="number"
                     min="1"
                     step="1"
@@ -4861,7 +4861,7 @@
                     登录邮箱
                   </label>
                   <input
-                    v-model="form.model_square_email"
+                    v-model="form.upstream_management_email"
                     type="email"
                     class="input"
                     placeholder="name@example.com"
@@ -4874,13 +4874,13 @@
                     登录密码
                   </label>
                   <input
-                    v-model="form.model_square_password"
+                    v-model="form.upstream_management_password"
                     type="password"
                     class="input"
                     :placeholder="
-                      form.model_square_password_configured
+                      form.upstream_management_password_configured
                         ? '已配置，留空不修改'
-                        : '请输入模型广场登录密码'
+                        : '请输入上游登录密码'
                     "
                     autocomplete="new-password"
                   />
@@ -6057,7 +6057,53 @@
                     </p>
                   </div>
                 </div>
-                <!-- Row 3: Pending orders + load balance + cancel rate limit (all in one row) -->
+                <!-- Row 3: Recharge presets + intro recharge -->
+                <div class="grid grid-cols-1 gap-3 lg:grid-cols-[2fr_1fr_1fr]">
+                  <div>
+                    <label class="input-label">{{
+                      t("admin.settings.payment.rechargeOptions")
+                    }}</label>
+                    <input
+                      v-model="paymentRechargeOptionsInput"
+                      type="text"
+                      class="input"
+                      :placeholder="
+                        t('admin.settings.payment.rechargeOptionsPlaceholder')
+                      "
+                    />
+                    <p class="mt-0.5 text-xs text-gray-400">
+                      {{ t("admin.settings.payment.rechargeOptionsHint") }}
+                    </p>
+                  </div>
+                  <div>
+                    <label class="input-label">{{
+                      t("admin.settings.payment.introRechargePayAmount")
+                    }}</label>
+                    <input
+                      v-model.number="form.payment_intro_recharge_pay_amount"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      class="input"
+                    />
+                  </div>
+                  <div>
+                    <label class="input-label">{{
+                      t("admin.settings.payment.introRechargeCreditAmount")
+                    }}</label>
+                    <input
+                      v-model.number="form.payment_intro_recharge_credit_amount"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      class="input"
+                    />
+                    <p class="mt-0.5 text-xs text-gray-400">
+                      {{ t("admin.settings.payment.introRechargeHint") }}
+                    </p>
+                  </div>
+                </div>
+                <!-- Row 4: Pending orders + load balance + cancel rate limit (all in one row) -->
                 <div class="flex flex-wrap items-end gap-4">
                   <div class="w-28">
                     <label class="input-label">{{
@@ -6203,7 +6249,7 @@
                     </div>
                   </div>
                 </div>
-                <!-- Row 4: Enabled payment types (provider badges like sub2apipay) -->
+                <!-- Row 5: Enabled payment types (provider badges like sub2apipay) -->
                 <div>
                   <label class="input-label">{{
                     t("admin.settings.payment.enabledPaymentTypes")
@@ -6249,7 +6295,7 @@
                     </a>
                   </p>
                 </div>
-                <!-- Row 5: Help image + text -->
+                <!-- Row 6: Help image + text -->
                 <div class="grid grid-cols-2 gap-3">
                   <div>
                     <label class="input-label">{{
@@ -6964,6 +7010,9 @@ const testEmailAddress = ref("");
 const registrationEmailSuffixWhitelistTags = ref<string[]>([]);
 const registrationEmailSuffixWhitelistDraft = ref("");
 const tablePageSizeOptionsInput = ref("10, 20, 50, 100");
+const paymentRechargeOptionsInput = ref(
+  "2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000",
+);
 
 // Admin API Key 状态
 const adminApiKeyLoading = ref(true);
@@ -7111,8 +7160,8 @@ type SettingsForm = Omit<
   oidc_connect_client_secret: string;
   github_oauth_client_secret: string;
   google_oauth_client_secret: string;
-  model_square_password: string;
-  model_square_keys_sync_interval_seconds: number;
+  upstream_management_password: string;
+  upstream_management_keys_sync_interval_seconds: number;
   force_email_on_third_party_signup: boolean;
   openai_advanced_scheduler_enabled: boolean;
   // 系统全局平台限额 map；form 内始终归一化为全 4 平台对象（模板非空绑定依赖此不变量）
@@ -7168,8 +7217,8 @@ const form = reactive<SettingsForm>({
   payment_balance_recharge_multiplier: 1,
   payment_recharge_fee_rate: 0,
   payment_recharge_options: [2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000],
-  payment_intro_recharge_pay_amount: 2,
-  payment_intro_recharge_credit_amount: 10,
+  payment_intro_recharge_pay_amount: 0,
+  payment_intro_recharge_credit_amount: 0,
   payment_enabled_types: [],
   payment_help_image_url: "",
   payment_help_text: "",
@@ -7299,15 +7348,15 @@ const form = reactive<SettingsForm>({
   fallback_model_openai: "gpt-4o",
   fallback_model_gemini: "gemini-2.5-pro",
   fallback_model_antigravity: "gemini-2.5-pro",
-  model_square_base_url: "",
-  model_square_login_url: "",
-  model_square_model_url: "",
-  model_square_keys_url: "",
-  model_square_groups_url: "",
-  model_square_email: "",
-  model_square_password: "",
-  model_square_password_configured: false,
-  model_square_keys_sync_interval_seconds: 5,
+  upstream_management_base_url: "",
+  upstream_management_login_url: "",
+  upstream_management_model_url: "",
+  upstream_management_api_keys_url: "",
+  upstream_management_groups_url: "",
+  upstream_management_email: "",
+  upstream_management_password: "",
+  upstream_management_password_configured: false,
+  upstream_management_keys_sync_interval_seconds: 5,
   // Identity patch (Claude -> Gemini)
   enable_identity_patch: true,
   identity_patch_prompt: "",
@@ -7947,6 +7996,30 @@ async function loadSettings() {
         (form as Record<string, unknown>)[key] = value;
       }
     }
+    form.upstream_management_base_url =
+      settings.upstream_management_base_url || settings.model_square_base_url || "";
+    form.upstream_management_login_url =
+      settings.upstream_management_login_url || settings.model_square_login_url || "";
+    form.upstream_management_model_url =
+      settings.upstream_management_model_url ||
+      settings.upstream_management_model_square_url ||
+      settings.model_square_model_url ||
+      "";
+    form.upstream_management_api_keys_url =
+      settings.upstream_management_api_keys_url || settings.model_square_keys_url || "";
+    form.upstream_management_groups_url =
+      settings.upstream_management_groups_url || settings.model_square_groups_url || "";
+    form.upstream_management_email =
+      settings.upstream_management_email || settings.model_square_email || "";
+    form.upstream_management_password_configured =
+      Boolean(settings.upstream_management_password_configured || settings.model_square_password_configured);
+    form.upstream_management_keys_sync_interval_seconds =
+      settings.upstream_management_keys_sync_interval_seconds ||
+      settings.model_square_keys_sync_interval_seconds ||
+      5;
+    paymentRechargeOptionsInput.value = formatRechargeOptions(
+      form.payment_recharge_options,
+    );
     form.login_agreement_mode =
       settings.login_agreement_mode === "checkbox" ? "checkbox" : "modal";
     form.login_agreement_updated_at =
@@ -8039,7 +8112,7 @@ async function loadSettings() {
       form.wechat_connect_mode,
     );
     form.oidc_connect_client_secret = "";
-    form.model_square_password = "";
+    form.upstream_management_password = "";
 
     // Load OpenAI fast/flex policy rules from bulk settings.
     // 仅当 payload 真的包含该字段时填充并标记为已加载；否则保持表单空值，
@@ -8315,16 +8388,16 @@ async function saveSettings() {
       llm_monitor_status_api_url: form.llm_monitor_status_api_url,
       llm_monitor_title: form.llm_monitor_title,
       llm_monitor_provider_url: form.llm_monitor_provider_url,
-      model_square_base_url: form.model_square_base_url,
-      model_square_login_url: form.model_square_login_url,
-      model_square_model_url: form.model_square_model_url,
-      model_square_keys_url: form.model_square_keys_url,
-      model_square_groups_url: form.model_square_groups_url,
-      model_square_email: form.model_square_email,
-      model_square_password: form.model_square_password || undefined,
-      model_square_keys_sync_interval_seconds: Math.max(
+      upstream_management_base_url: form.upstream_management_base_url,
+      upstream_management_login_url: form.upstream_management_login_url,
+      upstream_management_model_url: form.upstream_management_model_url,
+      upstream_management_api_keys_url: form.upstream_management_api_keys_url,
+      upstream_management_groups_url: form.upstream_management_groups_url,
+      upstream_management_email: form.upstream_management_email,
+      upstream_management_password: form.upstream_management_password || undefined,
+      upstream_management_keys_sync_interval_seconds: Math.max(
         1,
-        Number(form.model_square_keys_sync_interval_seconds) || 5,
+        Number(form.upstream_management_keys_sync_interval_seconds) || 5,
       ),
       home_content: form.home_content,
       backend_mode_enabled: form.backend_mode_enabled,
@@ -8466,6 +8539,13 @@ async function saveSettings() {
       payment_balance_recharge_multiplier:
         Number(form.payment_balance_recharge_multiplier) || 1,
       payment_recharge_fee_rate: Number(form.payment_recharge_fee_rate) || 0,
+      payment_recharge_options: parseRechargeOptionsInput(
+        paymentRechargeOptionsInput.value,
+      ),
+      payment_intro_recharge_pay_amount:
+        Number(form.payment_intro_recharge_pay_amount) || 0,
+      payment_intro_recharge_credit_amount:
+        Number(form.payment_intro_recharge_credit_amount) || 0,
       payment_enabled_types: form.payment_enabled_types,
       payment_load_balance_strategy: form.payment_load_balance_strategy,
       payment_product_name_prefix: form.payment_product_name_prefix,
@@ -9072,6 +9152,17 @@ const allPaymentTypes = computed(() => [
   { value: "stripe", label: t("payment.methods.stripe") },
   { value: "airwallex", label: t("payment.methods.airwallex") },
 ]);
+
+function formatRechargeOptions(values: number[] | undefined): string {
+  return Array.isArray(values) ? values.join(", ") : "";
+}
+
+function parseRechargeOptionsInput(value: string): number[] {
+  return value
+    .split(",")
+    .map((part) => Number(part.trim()))
+    .filter((amount) => Number.isFinite(amount) && amount > 0);
+}
 
 function isPaymentTypeEnabled(type: string): boolean {
   return form.payment_enabled_types.includes(type);

@@ -65,7 +65,7 @@
               @click="syncModelSquareRates"
               :disabled="syncingModelSquareRates || loading"
               class="btn btn-secondary"
-              title="同步模型广场倍率"
+              title="同步上游倍率"
             >
               <Icon
                 name="refresh"
@@ -3914,11 +3914,11 @@ const syncModelSquareRates = async () => {
   try {
     const result = await adminAPI.groups.syncModelSquareRates();
     appStore.showSuccess(
-      `模型广场倍率同步完成，检查 ${result.checked_count ?? 0} 个，匹配 ${result.matched_count ?? 0} 个，更新 ${result.updated_count ?? 0} 个分组`,
+      `上游倍率同步完成，检查 ${result.checked_count ?? 0} 个，匹配 ${result.matched_count ?? 0} 个，更新 ${result.updated_count ?? 0} 个分组`,
     );
     await loadGroups();
   } catch (error: any) {
-    appStore.showError(error?.message || "模型广场倍率同步失败");
+    appStore.showError(error?.message || "上游倍率同步失败");
   } finally {
     syncingModelSquareRates.value = false;
   }

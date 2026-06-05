@@ -5,7 +5,7 @@
         <div>
           <h1 class="text-2xl font-semibold text-gray-900 dark:text-white">上游分组</h1>
           <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            展示模型广场上游可用分组，并标记与本地分组的匹配关系。
+            展示上游可用分组，并标记与本地分组的匹配关系。
           </p>
         </div>
         <button type="button" class="btn btn-secondary btn-sm" :disabled="loading" @click="loadGroups">
@@ -122,7 +122,7 @@
 import { computed, onMounted, ref } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
-import { getModelSquareAvailableGroups, type ModelSquareAvailableGroup } from '@/api/admin/groups'
+import { getUpstreamAvailableGroups, type UpstreamAvailableGroup } from '@/api/admin/groups'
 
 type MatchStatus = '' | 'matched' | 'unmatched'
 
@@ -131,7 +131,7 @@ const error = ref('')
 const search = ref('')
 const platform = ref('')
 const matchStatus = ref<MatchStatus>('')
-const groups = ref<ModelSquareAvailableGroup[]>([])
+const groups = ref<UpstreamAvailableGroup[]>([])
 
 const platforms = computed(() =>
   Array.from(new Set(groups.value.map((group) => group.platform).filter(Boolean) as string[]))
@@ -164,7 +164,7 @@ async function loadGroups() {
   loading.value = true
   error.value = ''
   try {
-    groups.value = await getModelSquareAvailableGroups()
+    groups.value = await getUpstreamAvailableGroups()
   } catch (err) {
     const e = err as { message?: string }
     error.value = e.message || '上游分组加载失败'
@@ -173,7 +173,7 @@ async function loadGroups() {
   }
 }
 
-function hasLocalMatch(group: ModelSquareAvailableGroup) {
+function hasLocalMatch(group: UpstreamAvailableGroup) {
   return group.local_group_id != null || Boolean(group.local_group_name)
 }
 
