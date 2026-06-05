@@ -88,7 +88,7 @@ func RegisterAdminRoutes(
 
 		// 渠道管理
 		registerChannelRoutes(admin, h)
-		registerModelSquareRoutes(admin, h)
+		registerUpstreamManagementRoutes(admin, h)
 
 		// 渠道监控
 		registerChannelMonitorRoutes(admin, h)
@@ -101,8 +101,11 @@ func RegisterAdminRoutes(
 	}
 }
 
-func registerModelSquareRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+func registerUpstreamManagementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	admin.GET("/model-square", h.Admin.ModelSquare.Get)
+	admin.GET("/upstream-management/groups", h.Admin.ModelSquare.GetAvailableGroups)
+	admin.GET("/upstream-management/rate-warnings", h.Admin.ModelSquare.RateWarnings)
+	admin.POST("/upstream-management/sync", h.Admin.ModelSquare.SyncKeys)
 	admin.GET("/model-square/groups", h.Admin.ModelSquare.GetAvailableGroups)
 	admin.GET("/model-square/rate-warnings", h.Admin.ModelSquare.RateWarnings)
 	admin.POST("/model-square/sync", h.Admin.ModelSquare.SyncKeys)
