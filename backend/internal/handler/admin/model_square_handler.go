@@ -141,32 +141,39 @@ func newModelSquareHandler(cfg ModelSquareHandlerConfig) *ModelSquareHandler {
 	syncInterval := cfg.SyncInterval
 
 	if cfg.AppConfig != nil {
+		upstreamCfg := cfg.AppConfig.UpstreamManagement
+		legacyCfg := cfg.AppConfig.ModelSquare
 		if baseURL == "" {
-			baseURL = cfg.AppConfig.ModelSquare.BaseURL
+			baseURL = firstNonEmpty(upstreamCfg.BaseURL, legacyCfg.BaseURL)
 		}
 		if email == "" {
-			email = cfg.AppConfig.ModelSquare.Email
+			email = firstNonEmpty(upstreamCfg.Email, legacyCfg.Email)
 		}
 		if password == "" {
-			password = cfg.AppConfig.ModelSquare.Password
+			password = firstNonEmpty(upstreamCfg.Password, legacyCfg.Password)
 		}
 		if loginURL == "" {
-			loginURL = cfg.AppConfig.ModelSquare.LoginURL
+			loginURL = firstNonEmpty(upstreamCfg.LoginURL, legacyCfg.LoginURL)
 		}
 		if modelURL == "" {
-			modelURL = cfg.AppConfig.ModelSquare.ModelSquareURL
+			modelURL = firstNonEmpty(upstreamCfg.ModelURL, upstreamCfg.ModelSquareURL, legacyCfg.ModelURL, legacyCfg.ModelSquareURL)
 		}
 		if keysURL == "" {
-			keysURL = cfg.AppConfig.ModelSquare.KeysURL
+			keysURL = firstNonEmpty(upstreamCfg.APIKeysURL, upstreamCfg.KeysURL, legacyCfg.APIKeysURL, legacyCfg.KeysURL)
 		}
 		if groupsURL == "" {
-			groupsURL = cfg.AppConfig.ModelSquare.GroupsURL
+			groupsURL = firstNonEmpty(upstreamCfg.GroupsURL, legacyCfg.GroupsURL)
 		}
-		if syncInterval == 0 && cfg.AppConfig.ModelSquare.KeysSyncIntervalSeconds > 0 {
-			syncInterval = time.Duration(cfg.AppConfig.ModelSquare.KeysSyncIntervalSeconds) * time.Second
+		if syncInterval == 0 {
+			if interval := firstPositiveInt(upstreamCfg.KeysSyncIntervalSeconds, legacyCfg.KeysSyncIntervalSeconds); interval > 0 {
+				syncInterval = time.Duration(interval) * time.Second
+			}
 		}
 	}
 
+	if baseURL == "" {
+		baseURL = strings.TrimRight(os.Getenv("UPSTREAM_MANAGEMENT_BASE_URL"), "/")
+	}
 	if baseURL == "" {
 		baseURL = strings.TrimRight(os.Getenv("MODEL_SQUARE_BASE_URL"), "/")
 	}
@@ -177,10 +184,16 @@ func newModelSquareHandler(cfg ModelSquareHandlerConfig) *ModelSquareHandler {
 		baseURL = defaultFindCGBaseURL
 	}
 	if email == "" {
+		email = strings.TrimSpace(os.Getenv("UPSTREAM_MANAGEMENT_EMAIL"))
+	}
+	if email == "" {
 		email = strings.TrimSpace(os.Getenv("MODEL_SQUARE_EMAIL"))
 	}
 	if email == "" {
 		email = strings.TrimSpace(os.Getenv("FINDCG_EMAIL"))
+	}
+	if password == "" {
+		password = os.Getenv("UPSTREAM_MANAGEMENT_PASSWORD")
 	}
 	if password == "" {
 		password = os.Getenv("MODEL_SQUARE_PASSWORD")
@@ -189,13 +202,28 @@ func newModelSquareHandler(cfg ModelSquareHandlerConfig) *ModelSquareHandler {
 		password = os.Getenv("FINDCG_PASSWORD")
 	}
 	if loginURL == "" {
+		loginURL = strings.TrimSpace(os.Getenv("UPSTREAM_MANAGEMENT_LOGIN_URL"))
+	}
+	if loginURL == "" {
 		loginURL = strings.TrimSpace(os.Getenv("MODEL_SQUARE_LOGIN_URL"))
+	}
+	if modelURL == "" {
+		modelURL = strings.TrimSpace(os.Getenv("UPSTREAM_MANAGEMENT_MODEL_URL"))
+	}
+	if modelURL == "" {
+		modelURL = strings.TrimSpace(os.Getenv("UPSTREAM_MANAGEMENT_MODEL_SQUARE_URL"))
 	}
 	if modelURL == "" {
 		modelURL = strings.TrimSpace(os.Getenv("MODEL_SQUARE_MODEL_URL"))
 	}
 	if keysURL == "" {
+		keysURL = strings.TrimSpace(os.Getenv("UPSTREAM_MANAGEMENT_API_KEYS_URL"))
+	}
+	if keysURL == "" {
 		keysURL = strings.TrimSpace(os.Getenv("MODEL_SQUARE_KEYS_URL"))
+	}
+	if groupsURL == "" {
+		groupsURL = strings.TrimSpace(os.Getenv("UPSTREAM_MANAGEMENT_GROUPS_URL"))
 	}
 	if groupsURL == "" {
 		groupsURL = strings.TrimSpace(os.Getenv("MODEL_SQUARE_GROUPS_URL"))
@@ -232,7 +260,7 @@ func (h *ModelSquareHandler) Get(c *gin.Context) {
 	c.Data(http.StatusOK, "application/json; charset=utf-8", payload)
 }
 
-// GetAvailableGroups handles GET /api/v1/admin/model-square/groups.
+// GetAvailableGroups handles GET /api/v1/admin/upstream-management/groups.
 func (h *ModelSquareHandler) GetAvailableGroups(c *gin.Context) {
 	payload, err := h.fetchAvailableGroups(c.Request.Context(), false)
 	if err != nil {
@@ -243,7 +271,7 @@ func (h *ModelSquareHandler) GetAvailableGroups(c *gin.Context) {
 	c.Data(http.StatusOK, "application/json; charset=utf-8", payload)
 }
 
-// SyncKeys handles POST /api/v1/admin/model-square/sync.
+// SyncKeys handles POST /api/v1/admin/upstream-management/sync.
 func (h *ModelSquareHandler) SyncKeys(c *gin.Context) {
 	result, err := h.syncKeysOnce(c.Request.Context(), false)
 	if err != nil {
@@ -254,7 +282,7 @@ func (h *ModelSquareHandler) SyncKeys(c *gin.Context) {
 	response.Success(c, result)
 }
 
-// RateWarnings handles GET /api/v1/admin/model-square/rate-warnings.
+// RateWarnings handles GET /api/v1/admin/upstream-management/rate-warnings.
 func (h *ModelSquareHandler) RateWarnings(c *gin.Context) {
 	result, err := h.collectGroupRateWarningsFromKeys(c.Request.Context(), false)
 	if err != nil {
@@ -348,8 +376,8 @@ func (h *ModelSquareHandler) currentSyncInterval(ctx context.Context) time.Durat
 	}
 	if h.settingService != nil {
 		if settings, err := h.settingService.GetAllSettings(ctx); err == nil && settings != nil {
-			if settings.ModelSquareKeysSyncIntervalSeconds > 0 {
-				return time.Duration(settings.ModelSquareKeysSyncIntervalSeconds) * time.Second
+			if settings.UpstreamManagementKeysSyncIntervalSeconds > 0 {
+				return time.Duration(settings.UpstreamManagementKeysSyncIntervalSeconds) * time.Second
 			}
 		}
 	}
@@ -521,7 +549,7 @@ func (h *ModelSquareHandler) getToken(ctx context.Context, force bool) (cachedFi
 	}
 
 	if email == "" || password == "" {
-		return cachedFindCGToken{}, fmt.Errorf("missing model square credentials: set model_square.email/model_square.password or MODEL_SQUARE_EMAIL/MODEL_SQUARE_PASSWORD")
+		return cachedFindCGToken{}, fmt.Errorf("missing upstream management credentials: set upstream_management.email/upstream_management.password or UPSTREAM_MANAGEMENT_EMAIL/UPSTREAM_MANAGEMENT_PASSWORD")
 	}
 	logFindCGLoginAttempt(h.baseURL, email, password, source)
 
@@ -596,28 +624,28 @@ func (h *ModelSquareHandler) resolveConfigLocked(ctx context.Context) (string, s
 
 	if h.settingService != nil {
 		if settings, err := h.settingService.GetAllSettings(ctx); err == nil {
-			if settings.ModelSquareBaseURL != "" {
-				baseURL = settings.ModelSquareBaseURL
+			if settings.UpstreamManagementBaseURL != "" {
+				baseURL = settings.UpstreamManagementBaseURL
 			}
-			if settings.ModelSquareEmail != "" {
-				email = settings.ModelSquareEmail
+			if settings.UpstreamManagementEmail != "" {
+				email = settings.UpstreamManagementEmail
 			}
-			if settings.ModelSquarePassword != "" {
-				password = settings.ModelSquarePassword
+			if settings.UpstreamManagementPassword != "" {
+				password = settings.UpstreamManagementPassword
 			}
-			if settings.ModelSquareLoginURL != "" {
-				loginURL = settings.ModelSquareLoginURL
+			if settings.UpstreamManagementLoginURL != "" {
+				loginURL = settings.UpstreamManagementLoginURL
 			}
-			if settings.ModelSquareModelURL != "" {
-				modelURL = settings.ModelSquareModelURL
+			if settings.UpstreamManagementModelURL != "" {
+				modelURL = settings.UpstreamManagementModelURL
 			}
-			if settings.ModelSquareKeysURL != "" {
-				keysURL = settings.ModelSquareKeysURL
+			if settings.UpstreamManagementAPIKeysURL != "" {
+				keysURL = settings.UpstreamManagementAPIKeysURL
 			}
-			if settings.ModelSquareGroupsURL != "" {
-				groupsURL = settings.ModelSquareGroupsURL
+			if settings.UpstreamManagementGroupsURL != "" {
+				groupsURL = settings.UpstreamManagementGroupsURL
 			}
-			if settings.ModelSquareBaseURL != "" || settings.ModelSquareEmail != "" || settings.ModelSquarePassword != "" || settings.ModelSquareLoginURL != "" || settings.ModelSquareModelURL != "" || settings.ModelSquareKeysURL != "" || settings.ModelSquareGroupsURL != "" {
+			if settings.UpstreamManagementBaseURL != "" || settings.UpstreamManagementEmail != "" || settings.UpstreamManagementPassword != "" || settings.UpstreamManagementLoginURL != "" || settings.UpstreamManagementModelURL != "" || settings.UpstreamManagementAPIKeysURL != "" || settings.UpstreamManagementGroupsURL != "" {
 				source = "settings"
 			}
 		} else {

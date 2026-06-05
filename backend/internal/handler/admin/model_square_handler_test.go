@@ -295,9 +295,9 @@ func TestModelSquareHandlerGetsAvailableGroupsFromConfiguredURLWithLocalMatch(t 
 		HTTPClient:    server.Client(),
 	})
 	router := gin.New()
-	router.GET("/admin/model-square/groups", h.GetAvailableGroups)
+	router.GET("/admin/upstream-management/groups", h.GetAvailableGroups)
 
-	req := httptest.NewRequest(http.MethodGet, "/admin/model-square/groups", nil)
+	req := httptest.NewRequest(http.MethodGet, "/admin/upstream-management/groups", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
@@ -918,5 +918,5 @@ func TestModelSquareHandlerRequiresCredentials(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
-	require.Contains(t, rec.Body.String(), "model_square.email")
+	require.Contains(t, rec.Body.String(), "upstream_management.email")
 }
