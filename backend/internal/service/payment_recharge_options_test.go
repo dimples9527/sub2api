@@ -55,6 +55,22 @@ func TestBuildRechargeAmountOptions(t *testing.T) {
 			t.Fatalf("unexpected options without intro: %+v", options)
 		}
 	})
+
+	t.Run("missing intro config does not enable default intro offer", func(t *testing.T) {
+		t.Parallel()
+
+		options := buildRechargeAmountOptions(&PaymentConfig{
+			RechargeOptions: []float64{2, 5, 10},
+		}, true)
+		if len(options) != 3 {
+			t.Fatalf("expected regular options only, got %+v", options)
+		}
+		for _, option := range options {
+			if option.OneTime || option.CreditAmount != option.PayAmount {
+				t.Fatalf("did not expect intro offer, got %+v", option)
+			}
+		}
+	})
 }
 
 func TestResolveRechargeAmounts(t *testing.T) {

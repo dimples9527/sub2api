@@ -290,26 +290,59 @@ func TestSettingService_UpdateSettings_AntigravityUserAgentVersion(t *testing.T)
 	require.Equal(t, "1.23.2", repo.updates[SettingKeyAntigravityUserAgentVersion])
 }
 
-func TestSettingService_UpdateSettings_ModelSquareKeysSyncInterval(t *testing.T) {
+func TestSettingService_UpdateSettings_UpstreamManagementSettings(t *testing.T) {
 	repo := &settingUpdateRepoStub{}
 	svc := NewSettingService(repo, &config.Config{})
 
 	err := svc.UpdateSettings(context.Background(), &SystemSettings{
-		ModelSquareKeysSyncIntervalSeconds: 60,
+		UpstreamManagementBaseURL:                 " https://upstream.example.com/ ",
+		UpstreamManagementLoginURL:                " https://upstream.example.com/login ",
+		UpstreamManagementModelURL:                " https://upstream.example.com/models ",
+		UpstreamManagementAPIKeysURL:              " https://upstream.example.com/keys ",
+		UpstreamManagementGroupsURL:               " https://upstream.example.com/groups ",
+		UpstreamManagementEmail:                   " admin@example.com ",
+		UpstreamManagementPassword:                "secret",
+		UpstreamManagementKeysSyncIntervalSeconds: 60,
 	})
 
 	require.NoError(t, err)
-	require.Equal(t, "60", repo.updates[SettingKeyModelSquareKeysSyncIntervalSeconds])
+	require.Equal(t, "https://upstream.example.com/", repo.updates[SettingKeyUpstreamManagementBaseURL])
+	require.Equal(t, "https://upstream.example.com/login", repo.updates[SettingKeyUpstreamManagementLoginURL])
+	require.Equal(t, "https://upstream.example.com/models", repo.updates[SettingKeyUpstreamManagementModelURL])
+	require.Equal(t, "https://upstream.example.com/keys", repo.updates[SettingKeyUpstreamManagementAPIKeysURL])
+	require.Equal(t, "https://upstream.example.com/groups", repo.updates[SettingKeyUpstreamManagementGroupsURL])
+	require.Equal(t, "admin@example.com", repo.updates[SettingKeyUpstreamManagementEmail])
+	require.Equal(t, "secret", repo.updates[SettingKeyUpstreamManagementPassword])
+	require.Equal(t, "60", repo.updates[SettingKeyUpstreamManagementKeysSyncIntervalSeconds])
 }
 
-func TestSettingService_ParseSettings_ModelSquareKeysSyncIntervalFallsBackToConfig(t *testing.T) {
+func TestSettingService_ParseSettings_UpstreamManagementKeysSyncIntervalFallsBackToConfig(t *testing.T) {
 	svc := NewSettingService(&settingUpdateRepoStub{}, &config.Config{
-		ModelSquare: config.ModelSquareConfig{KeysSyncIntervalSeconds: 90},
+		UpstreamManagement: config.UpstreamManagementConfig{KeysSyncIntervalSeconds: 90},
 	})
 
 	got := svc.parseSettings(map[string]string{})
 
-	require.Equal(t, 90, got.ModelSquareKeysSyncIntervalSeconds)
+	require.Equal(t, 90, got.UpstreamManagementKeysSyncIntervalSeconds)
+}
+
+func TestSettingService_ParseSettings_UpstreamManagementPrefersNewKeysAndFallsBackToLegacy(t *testing.T) {
+	svc := NewSettingService(&settingUpdateRepoStub{}, &config.Config{})
+
+	got := svc.parseSettings(map[string]string{
+		SettingKeyModelSquareBaseURL:                 "https://legacy.example.com",
+		SettingKeyUpstreamManagementBaseURL:          "https://new.example.com",
+		SettingKeyModelSquareKeysURL:                 "https://legacy.example.com/keys",
+		SettingKeyUpstreamManagementGroupsURL:        "https://new.example.com/groups",
+		SettingKeyModelSquareEmail:                   "legacy@example.com",
+		SettingKeyModelSquareKeysSyncIntervalSeconds: "45",
+	})
+
+	require.Equal(t, "https://new.example.com", got.UpstreamManagementBaseURL)
+	require.Equal(t, "https://legacy.example.com/keys", got.UpstreamManagementAPIKeysURL)
+	require.Equal(t, "https://new.example.com/groups", got.UpstreamManagementGroupsURL)
+	require.Equal(t, "legacy@example.com", got.UpstreamManagementEmail)
+	require.Equal(t, 45, got.UpstreamManagementKeysSyncIntervalSeconds)
 }
 
 func TestSettingService_UpdateSettings_APIKeyACLTrustForwardedIPRefreshesConfig(t *testing.T) {

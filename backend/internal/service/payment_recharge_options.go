@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	introRechargeRequestAmount = 2.0
-	introRechargeCreditAmount  = 10.0
+	introRechargeRequestAmount = 0.0
+	introRechargeCreditAmount  = 0.0
 	introRechargeCodePrefix    = "PROMO10-"
 )
 
@@ -74,10 +74,10 @@ func introRechargeValues(cfg *PaymentConfig) (payAmount, creditAmount float64) {
 	payAmount = cfg.IntroRechargePay
 	creditAmount = cfg.IntroRechargeCredit
 	if payAmount <= 0 {
-		payAmount = introRechargeRequestAmount
+		payAmount = 0
 	}
 	if creditAmount <= 0 {
-		creditAmount = introRechargeCreditAmount
+		creditAmount = 0
 	}
 	return payAmount, creditAmount
 }

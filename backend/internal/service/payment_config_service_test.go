@@ -102,6 +102,9 @@ func TestParsePaymentConfig(t *testing.T) {
 		if len(cfg.EnabledTypes) != 0 {
 			t.Fatalf("expected empty EnabledTypes, got %v", cfg.EnabledTypes)
 		}
+		if cfg.IntroRechargePay != 0 || cfg.IntroRechargeCredit != 0 {
+			t.Fatalf("expected intro recharge disabled by default, got pay=%v credit=%v", cfg.IntroRechargePay, cfg.IntroRechargeCredit)
+		}
 	})
 
 	t.Run("all values populated", func(t *testing.T) {
@@ -429,6 +432,28 @@ func TestUpdatePaymentConfig_PersistsVisibleMethodRouting(t *testing.T) {
 	}
 	if repo.values[SettingPaymentVisibleMethodWxpaySource] != VisibleMethodSourceOfficialWechat {
 		t.Fatalf("wxpay source = %q, want %q", repo.values[SettingPaymentVisibleMethodWxpaySource], VisibleMethodSourceOfficialWechat)
+	}
+}
+
+func TestUpdatePaymentConfig_PersistsZeroIntroRechargeAmounts(t *testing.T) {
+	repo := &paymentConfigSettingRepoStub{values: map[string]string{}}
+	svc := &PaymentConfigService{settingRepo: repo}
+
+	payAmount := 0.0
+	creditAmount := 0.0
+	err := svc.UpdatePaymentConfig(context.Background(), UpdatePaymentConfigRequest{
+		IntroRechargePay:    &payAmount,
+		IntroRechargeCredit: &creditAmount,
+	})
+	if err != nil {
+		t.Fatalf("UpdatePaymentConfig returned error: %v", err)
+	}
+
+	if repo.values[SettingIntroRechargePay] != "0.00" {
+		t.Fatalf("intro pay = %q, want 0.00", repo.values[SettingIntroRechargePay])
+	}
+	if repo.values[SettingIntroRechargeCredit] != "0.00" {
+		t.Fatalf("intro credit = %q, want 0.00", repo.values[SettingIntroRechargeCredit])
 	}
 }
 
