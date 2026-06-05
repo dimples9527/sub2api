@@ -6,10 +6,12 @@ import UpstreamGroupsView from '../UpstreamGroupsView.vue'
 const {
   createGroupMock,
   getUpstreamAvailableGroupsMock,
+  getUpstreamKeySummaryMock,
   getUpstreamMonitorStatusMock,
 } = vi.hoisted(() => ({
   createGroupMock: vi.fn(),
   getUpstreamAvailableGroupsMock: vi.fn(),
+  getUpstreamKeySummaryMock: vi.fn(),
   getUpstreamMonitorStatusMock: vi.fn(),
 }))
 
@@ -18,9 +20,11 @@ vi.mock('@/api/admin/groups', () => ({
   default: {
     create: createGroupMock,
     getUpstreamAvailableGroups: getUpstreamAvailableGroupsMock,
+    getUpstreamKeySummary: getUpstreamKeySummaryMock,
     getUpstreamMonitorStatus: getUpstreamMonitorStatusMock,
   },
   getUpstreamAvailableGroups: getUpstreamAvailableGroupsMock,
+  getUpstreamKeySummary: getUpstreamKeySummaryMock,
   getUpstreamMonitorStatus: getUpstreamMonitorStatusMock,
 }))
 
@@ -39,8 +43,53 @@ describe('UpstreamGroupsView', () => {
   beforeEach(() => {
     createGroupMock.mockReset()
     getUpstreamAvailableGroupsMock.mockReset()
+    getUpstreamKeySummaryMock.mockReset()
     getUpstreamMonitorStatusMock.mockReset()
+    getUpstreamKeySummaryMock.mockResolvedValue({ groups: [] })
     getUpstreamMonitorStatusMock.mockResolvedValue({ groups: [] })
+  })
+
+  it('shows whether each upstream group has upstream api keys', async () => {
+    getUpstreamAvailableGroupsMock.mockResolvedValue([
+      {
+        id: 2,
+        name: 'codex 福利',
+        platform: 'openai',
+        rate_multiplier: 0.15,
+        status: 'active',
+      },
+      {
+        id: 5,
+        name: 'claude 福利',
+        platform: 'anthropic',
+        rate_multiplier: 0.2,
+        status: 'active',
+      },
+    ])
+    getUpstreamKeySummaryMock.mockResolvedValue({
+      groups: [
+        {
+          name: 'codex福利',
+          normalized_name: 'codex福利',
+          key_count: 2,
+          keys: [{ name: 'key-a' }, { name: 'key-b' }],
+        },
+      ],
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(getUpstreamKeySummaryMock).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-test="upstream-key-status-2"]').text()).toContain('有秘钥')
+    expect(wrapper.find('[data-test="upstream-key-status-2"]').text()).toContain('2')
+    expect(wrapper.find('[data-test="upstream-key-status-5"]').text()).toContain('无秘钥')
+
+    await wrapper.find('[data-test="upstream-key-status-2"]').trigger('click')
+
+    expect(wrapper.find('[data-test="upstream-key-dialog"]').text()).toContain('codex 福利')
+    expect(wrapper.find('[data-test="upstream-key-dialog"]').text()).toContain('key-a')
+    expect(wrapper.find('[data-test="upstream-key-dialog"]').text()).toContain('key-b')
   })
 
   it('syncs an unmatched upstream group to a local group with an editable rate multiplier', async () => {

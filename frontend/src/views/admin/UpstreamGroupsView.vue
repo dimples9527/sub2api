@@ -69,6 +69,9 @@
               <span v-if="monitorTrendError" class="ml-2 text-amber-600 dark:text-amber-300">
                 {{ monitorTrendError }}
               </span>
+              <span v-if="keySummaryError" class="ml-2 text-amber-600 dark:text-amber-300">
+                {{ keySummaryError }}
+              </span>
             </span>
           </div>
           <div v-if="filteredGroups.length === 0" class="grid min-h-56 place-items-center text-sm text-gray-500 dark:text-gray-400">
@@ -84,6 +87,7 @@
                 <th class="whitespace-nowrap px-4 py-3">平台</th>
                 <th class="whitespace-nowrap px-4 py-3">上游倍率</th>
                 <th class="whitespace-nowrap px-4 py-3">状态</th>
+                <th class="whitespace-nowrap px-4 py-3">上游秘钥</th>
                 <th class="min-w-52 px-4 py-3">本地分组名称</th>
                 <th class="min-w-56 px-4 py-3">近90分钟趋势</th>
                 <th class="whitespace-nowrap px-4 py-3">本地倍率</th>
@@ -118,6 +122,26 @@
                 <td class="whitespace-nowrap px-4 py-4">
                   <span class="rounded px-2 py-1 text-xs font-semibold" :class="statusClass(group.status)">
                     {{ group.status || '-' }}
+                  </span>
+                </td>
+                <td class="whitespace-nowrap px-4 py-4">
+                  <button
+                    v-if="hasUpstreamKeys(group)"
+                    type="button"
+                    class="rounded px-2 py-1 text-xs font-semibold transition hover:ring-2 hover:ring-emerald-300"
+                    :class="upstreamKeyStatusClass(group)"
+                    :data-test="`upstream-key-status-${group.id}`"
+                    @click="openKeySummaryDialog(group)"
+                  >
+                    {{ upstreamKeyStatusText(group) }}
+                  </button>
+                  <span
+                    v-else
+                    class="rounded px-2 py-1 text-xs font-semibold"
+                    :class="upstreamKeyStatusClass(group)"
+                    :data-test="`upstream-key-status-${group.id}`"
+                  >
+                    {{ upstreamKeyStatusText(group) }}
                   </span>
                 </td>
                 <td class="px-4 py-4">
@@ -227,6 +251,38 @@
           </div>
         </div>
       </div>
+
+      <div
+        v-if="keySummaryDialogGroup"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6"
+        @click.self="closeKeySummaryDialog"
+      >
+        <div class="w-full max-w-lg overflow-hidden rounded-lg bg-white shadow-xl dark:bg-dark-800" data-test="upstream-key-dialog">
+          <div class="border-b border-gray-100 px-5 py-4 dark:border-dark-700">
+            <h2 class="text-lg font-semibold text-gray-950 dark:text-white">上游秘钥</h2>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              {{ keySummaryDialogGroup.name || '-' }} 共 {{ keySummaryDialogKeys.length }} 个
+            </p>
+          </div>
+          <div class="max-h-80 overflow-auto px-5 py-4">
+            <div v-if="keySummaryDialogKeys.length === 0" class="text-sm text-gray-500 dark:text-gray-400">
+              暂无秘钥
+            </div>
+            <ul v-else class="space-y-2">
+              <li
+                v-for="item in keySummaryDialogKeys"
+                :key="item.name"
+                class="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-900 dark:border-dark-700 dark:bg-dark-900 dark:text-gray-100"
+              >
+                {{ item.name || '-' }}
+              </li>
+            </ul>
+          </div>
+          <div class="flex justify-end border-t border-gray-100 px-5 py-4 dark:border-dark-700">
+            <button type="button" class="btn btn-secondary btn-sm" @click="closeKeySummaryDialog">关闭</button>
+          </div>
+        </div>
+      </div>
     </div>
   </AppLayout>
 </template>
@@ -238,7 +294,9 @@ import Icon from '@/components/icons/Icon.vue'
 import {
   create as createLocalGroup,
   getUpstreamAvailableGroups,
+  getUpstreamKeySummary,
   getUpstreamMonitorStatus,
+  type UpstreamKeySummary,
   type UpstreamAvailableGroup
 } from '@/api/admin/groups'
 import type { CreateGroupRequest, GroupPlatform, SubscriptionType } from '@/types'
@@ -262,14 +320,23 @@ interface MonitorTrend {
   points: MonitorTrendPoint[]
 }
 
+interface UpstreamKeySummaryEntry {
+  name: string
+  count: number
+  keys: Array<{ name: string }>
+}
+
 const loading = ref(false)
 const error = ref('')
 const monitorTrendError = ref('')
+const keySummaryError = ref('')
 const search = ref('')
 const platform = ref('')
 const matchStatus = ref<MatchStatus>('')
 const groups = ref<UpstreamAvailableGroup[]>([])
 const monitorTrends = ref<Map<string, MonitorTrend>>(new Map())
+const upstreamKeySummary = ref<Map<string, UpstreamKeySummaryEntry> | null>(null)
+const keySummaryDialogGroup = ref<UpstreamAvailableGroup | null>(null)
 const syncDialogGroup = ref<UpstreamAvailableGroup | null>(null)
 const syncRateMultiplier = ref<number>(1)
 const syncSubmitting = ref(false)
@@ -307,10 +374,12 @@ async function loadGroups() {
   loading.value = true
   error.value = ''
   monitorTrendError.value = ''
+  keySummaryError.value = ''
   try {
     const [nextGroups] = await Promise.all([
       getUpstreamAvailableGroups(),
       loadMonitorTrends(),
+      loadUpstreamKeySummary(),
     ])
     groups.value = nextGroups
   } catch (err) {
@@ -318,6 +387,16 @@ async function loadGroups() {
     error.value = e.message || '上游分组加载失败'
   } finally {
     loading.value = false
+  }
+}
+
+async function loadUpstreamKeySummary() {
+  try {
+    const payload = await getUpstreamKeySummary()
+    upstreamKeySummary.value = buildUpstreamKeySummaryMap(payload)
+  } catch {
+    upstreamKeySummary.value = null
+    keySummaryError.value = '上游秘钥摘要加载失败'
   }
 }
 
@@ -431,6 +510,56 @@ function monitorTrendForGroup(group: UpstreamAvailableGroup) {
   return undefined
 }
 
+function upstreamKeyCountForGroup(group: UpstreamAvailableGroup) {
+  const entry = upstreamKeySummaryForGroup(group)
+  if (!upstreamKeySummary.value) return undefined
+  return entry?.count ?? 0
+}
+
+function upstreamKeySummaryForGroup(group: UpstreamAvailableGroup) {
+  if (!upstreamKeySummary.value) return undefined
+  const keys = [group.name, group.local_group_name]
+    .map((value) => normalizeMonitorKey(value))
+    .filter(Boolean)
+  for (const key of keys) {
+    const entry = upstreamKeySummary.value.get(key)
+    if (entry) return entry
+  }
+  return undefined
+}
+
+function upstreamKeyStatusText(group: UpstreamAvailableGroup) {
+  const count = upstreamKeyCountForGroup(group)
+  if (count == null) return '未知'
+  if (count > 0) return `有秘钥 ${count}`
+  return '无秘钥'
+}
+
+function upstreamKeyStatusClass(group: UpstreamAvailableGroup) {
+  const count = upstreamKeyCountForGroup(group)
+  if (count == null) return 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'
+  if (count > 0) return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+  return 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+}
+
+function hasUpstreamKeys(group: UpstreamAvailableGroup) {
+  return (upstreamKeyCountForGroup(group) || 0) > 0
+}
+
+const keySummaryDialogKeys = computed(() => {
+  if (!keySummaryDialogGroup.value) return []
+  return upstreamKeySummaryForGroup(keySummaryDialogGroup.value)?.keys || []
+})
+
+function openKeySummaryDialog(group: UpstreamAvailableGroup) {
+  if ((upstreamKeyCountForGroup(group) || 0) <= 0) return
+  keySummaryDialogGroup.value = group
+}
+
+function closeKeySummaryDialog() {
+  keySummaryDialogGroup.value = null
+}
+
 function formatRate(value?: number | null) {
   const n = Number(value)
   if (!Number.isFinite(n)) return '-'
@@ -467,6 +596,20 @@ function statusClass(status?: string) {
 
 function normalizeMonitorKey(value: unknown) {
   return String(value || '').replace(/\s+/g, '').toLocaleLowerCase()
+}
+
+function buildUpstreamKeySummaryMap(payload: UpstreamKeySummary) {
+  const map = new Map<string, UpstreamKeySummaryEntry>()
+  for (const item of payload.groups || []) {
+    const key = normalizeMonitorKey(item.normalized_name || item.name)
+    if (!key) continue
+    map.set(key, {
+      name: item.name,
+      count: Math.max(0, Number(item.key_count) || 0),
+      keys: (item.keys || []).map((entry) => ({ name: String(entry.name || '') })).filter((entry) => entry.name),
+    })
+  }
+  return map
 }
 
 function pickValue(source: unknown, keys: string[], fallback: unknown = undefined) {
