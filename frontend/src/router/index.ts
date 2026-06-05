@@ -464,9 +464,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/admin/model-square/groups',
+    path: '/admin/upstream-management/groups',
     name: 'AdminUpstreamGroups',
     component: () => import('@/views/admin/UpstreamGroupsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: '上游分组'
+    }
+  },
+  {
+    path: '/admin/model-square/groups',
+    redirect: '/admin/upstream-management/groups',
     meta: {
       requiresAuth: true,
       requiresAdmin: true,

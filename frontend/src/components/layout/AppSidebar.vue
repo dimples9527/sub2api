@@ -728,7 +728,7 @@ const adminNavItems = computed((): NavItem[] => {
       ],
     },
     { path: '/model-square', label: t('nav.modelSquare', '模型广场'), icon: ChannelIcon, hideInSimpleMode: true },
-    { path: '/admin/model-square/groups', label: '上游分组', icon: FolderIcon, hideInSimpleMode: true },
+    { path: '/admin/upstream-management/groups', label: '上游分组', icon: FolderIcon, hideInSimpleMode: true },
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
