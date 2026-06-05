@@ -94,6 +94,7 @@ type Config struct {
 	Update                  UpdateConfig                  `mapstructure:"update"`
 	Idempotency             IdempotencyConfig             `mapstructure:"idempotency"`
 	LLMMonitor              LLMMonitorConfig              `mapstructure:"llm_monitor"`
+	UpstreamManagement      UpstreamManagementConfig      `mapstructure:"upstream_management"`
 	ModelSquare             ModelSquareConfig             `mapstructure:"model_square"`
 }
 
@@ -183,16 +184,20 @@ type LLMMonitorConfig struct {
 	ProviderURL  string `mapstructure:"provider_url"`
 }
 
-type ModelSquareConfig struct {
+type UpstreamManagementConfig struct {
 	BaseURL                 string `mapstructure:"base_url"`
 	LoginURL                string `mapstructure:"login_url"`
+	ModelURL                string `mapstructure:"model_url"`
 	ModelSquareURL          string `mapstructure:"model_square_url"`
+	APIKeysURL              string `mapstructure:"api_keys_url"`
 	KeysURL                 string `mapstructure:"keys_url"`
 	GroupsURL               string `mapstructure:"groups_url"`
 	Email                   string `mapstructure:"email"`
 	Password                string `mapstructure:"password"`
 	KeysSyncIntervalSeconds int    `mapstructure:"keys_sync_interval_seconds"`
 }
+
+type ModelSquareConfig = UpstreamManagementConfig
 
 type LinuxDoConnectConfig struct {
 	Enabled             bool   `mapstructure:"enabled"`
@@ -1443,12 +1448,19 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	cfg.OIDC.UserInfoEmailPath = strings.TrimSpace(cfg.OIDC.UserInfoEmailPath)
 	cfg.OIDC.UserInfoIDPath = strings.TrimSpace(cfg.OIDC.UserInfoIDPath)
 	cfg.OIDC.UserInfoUsernamePath = strings.TrimSpace(cfg.OIDC.UserInfoUsernamePath)
-	cfg.ModelSquare.BaseURL = strings.TrimRight(strings.TrimSpace(cfg.ModelSquare.BaseURL), "/")
-	cfg.ModelSquare.LoginURL = strings.TrimSpace(cfg.ModelSquare.LoginURL)
-	cfg.ModelSquare.ModelSquareURL = strings.TrimSpace(cfg.ModelSquare.ModelSquareURL)
-	cfg.ModelSquare.KeysURL = strings.TrimSpace(cfg.ModelSquare.KeysURL)
-	cfg.ModelSquare.GroupsURL = strings.TrimSpace(cfg.ModelSquare.GroupsURL)
-	cfg.ModelSquare.Email = strings.TrimSpace(cfg.ModelSquare.Email)
+	cfg.UpstreamManagement.BaseURL = strings.TrimRight(strings.TrimSpace(firstNonEmptyString(cfg.UpstreamManagement.BaseURL, cfg.ModelSquare.BaseURL)), "/")
+	cfg.UpstreamManagement.LoginURL = strings.TrimSpace(firstNonEmptyString(cfg.UpstreamManagement.LoginURL, cfg.ModelSquare.LoginURL))
+	cfg.UpstreamManagement.ModelURL = strings.TrimSpace(firstNonEmptyString(cfg.UpstreamManagement.ModelURL, cfg.UpstreamManagement.ModelSquareURL, cfg.ModelSquare.ModelURL, cfg.ModelSquare.ModelSquareURL))
+	cfg.UpstreamManagement.ModelSquareURL = cfg.UpstreamManagement.ModelURL
+	cfg.UpstreamManagement.APIKeysURL = strings.TrimSpace(firstNonEmptyString(cfg.UpstreamManagement.APIKeysURL, cfg.UpstreamManagement.KeysURL, cfg.ModelSquare.APIKeysURL, cfg.ModelSquare.KeysURL))
+	cfg.UpstreamManagement.KeysURL = cfg.UpstreamManagement.APIKeysURL
+	cfg.UpstreamManagement.GroupsURL = strings.TrimSpace(firstNonEmptyString(cfg.UpstreamManagement.GroupsURL, cfg.ModelSquare.GroupsURL))
+	cfg.UpstreamManagement.Email = strings.TrimSpace(firstNonEmptyString(cfg.UpstreamManagement.Email, cfg.ModelSquare.Email))
+	cfg.UpstreamManagement.Password = firstNonEmptyString(cfg.UpstreamManagement.Password, cfg.ModelSquare.Password)
+	if cfg.UpstreamManagement.KeysSyncIntervalSeconds <= 0 {
+		cfg.UpstreamManagement.KeysSyncIntervalSeconds = cfg.ModelSquare.KeysSyncIntervalSeconds
+	}
+	cfg.ModelSquare = cfg.UpstreamManagement
 	cfg.OIDC.UsePKCEExplicit = hasExplicitConfigOrEnv("oidc_connect.use_pkce", "OIDC_CONNECT_USE_PKCE")
 	cfg.OIDC.ValidateIDTokenExplicit = hasExplicitConfigOrEnv("oidc_connect.validate_id_token", "OIDC_CONNECT_VALIDATE_ID_TOKEN")
 	cfg.Dashboard.KeyPrefix = strings.TrimSpace(cfg.Dashboard.KeyPrefix)
@@ -1769,9 +1781,17 @@ func setDefaults() {
 	viper.SetDefault("llm_monitor.title", "蛋云AI - Claude Code 监控面板")
 	viper.SetDefault("llm_monitor.provider_url", "https://api.sunshinelink.online/")
 
-	// Model square upstream. Credentials can be set here or through
-	// MODEL_SQUARE_EMAIL / MODEL_SQUARE_PASSWORD environment variables.
-	viper.SetDefault("model_square.base_url", "https://www.findcg.com")
+	// Upstream management. Credentials can be set here or through environment variables.
+	viper.SetDefault("upstream_management.base_url", "https://www.findcg.com")
+	viper.SetDefault("upstream_management.login_url", "")
+	viper.SetDefault("upstream_management.model_url", "")
+	viper.SetDefault("upstream_management.model_square_url", "")
+	viper.SetDefault("upstream_management.api_keys_url", "")
+	viper.SetDefault("upstream_management.groups_url", "")
+	viper.SetDefault("upstream_management.email", "")
+	viper.SetDefault("upstream_management.password", "")
+	viper.SetDefault("upstream_management.keys_sync_interval_seconds", 5)
+	viper.SetDefault("model_square.base_url", "")
 	viper.SetDefault("model_square.login_url", "")
 	viper.SetDefault("model_square.model_square_url", "")
 	viper.SetDefault("model_square.keys_url", "")

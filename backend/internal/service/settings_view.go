@@ -166,7 +166,18 @@ type SystemSettings struct {
 	FallbackModelGemini      string `json:"fallback_model_gemini"`
 	FallbackModelAntigravity string `json:"fallback_model_antigravity"`
 
-	// Model square upstream configuration
+	// Upstream management configuration
+	UpstreamManagementBaseURL                 string
+	UpstreamManagementLoginURL                string
+	UpstreamManagementModelURL                string
+	UpstreamManagementAPIKeysURL              string
+	UpstreamManagementGroupsURL               string
+	UpstreamManagementEmail                   string
+	UpstreamManagementPassword                string
+	UpstreamManagementPasswordConfigured      bool
+	UpstreamManagementKeysSyncIntervalSeconds int
+
+	// Legacy model_square aliases kept for backward compatibility while callers migrate.
 	ModelSquareBaseURL                 string
 	ModelSquareLoginURL                string
 	ModelSquareModelURL                string

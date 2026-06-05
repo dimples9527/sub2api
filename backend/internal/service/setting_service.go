@@ -1894,16 +1894,19 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyFallbackModelOpenAI] = settings.FallbackModelOpenAI
 	updates[SettingKeyFallbackModelGemini] = settings.FallbackModelGemini
 	updates[SettingKeyFallbackModelAntigravity] = settings.FallbackModelAntigravity
-	updates[SettingKeyModelSquareBaseURL] = strings.TrimSpace(settings.ModelSquareBaseURL)
-	updates[SettingKeyModelSquareLoginURL] = strings.TrimSpace(settings.ModelSquareLoginURL)
-	updates[SettingKeyModelSquareModelURL] = strings.TrimSpace(settings.ModelSquareModelURL)
-	updates[SettingKeyModelSquareKeysURL] = strings.TrimSpace(settings.ModelSquareKeysURL)
-	updates[SettingKeyModelSquareGroupsURL] = strings.TrimSpace(settings.ModelSquareGroupsURL)
-	updates[SettingKeyModelSquareEmail] = strings.TrimSpace(settings.ModelSquareEmail)
-	if strings.TrimSpace(settings.ModelSquarePassword) != "" {
-		updates[SettingKeyModelSquarePassword] = settings.ModelSquarePassword
+	updates[SettingKeyUpstreamManagementBaseURL] = strings.TrimSpace(firstNonEmpty(settings.UpstreamManagementBaseURL, settings.ModelSquareBaseURL))
+	updates[SettingKeyUpstreamManagementLoginURL] = strings.TrimSpace(firstNonEmpty(settings.UpstreamManagementLoginURL, settings.ModelSquareLoginURL))
+	updates[SettingKeyUpstreamManagementModelURL] = strings.TrimSpace(firstNonEmpty(settings.UpstreamManagementModelURL, settings.ModelSquareModelURL))
+	updates[SettingKeyUpstreamManagementAPIKeysURL] = strings.TrimSpace(firstNonEmpty(settings.UpstreamManagementAPIKeysURL, settings.ModelSquareKeysURL))
+	updates[SettingKeyUpstreamManagementGroupsURL] = strings.TrimSpace(firstNonEmpty(settings.UpstreamManagementGroupsURL, settings.ModelSquareGroupsURL))
+	updates[SettingKeyUpstreamManagementEmail] = strings.TrimSpace(firstNonEmpty(settings.UpstreamManagementEmail, settings.ModelSquareEmail))
+	if password := firstNonEmpty(settings.UpstreamManagementPassword, settings.ModelSquarePassword); strings.TrimSpace(password) != "" {
+		updates[SettingKeyUpstreamManagementPassword] = password
 	}
-	updates[SettingKeyModelSquareKeysSyncIntervalSeconds] = strconv.Itoa(normalizeModelSquareKeysSyncIntervalSeconds(settings.ModelSquareKeysSyncIntervalSeconds, s.cfg))
+	updates[SettingKeyUpstreamManagementKeysSyncIntervalSeconds] = strconv.Itoa(normalizeUpstreamManagementKeysSyncIntervalSeconds(
+		firstPositiveInt(settings.UpstreamManagementKeysSyncIntervalSeconds, settings.ModelSquareKeysSyncIntervalSeconds),
+		s.cfg,
+	))
 
 	// Identity patch configuration (Claude -> Gemini)
 	updates[SettingKeyEnableIdentityPatch] = strconv.FormatBool(settings.EnableIdentityPatch)
@@ -2848,19 +2851,19 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeySMTPPort:                                  "587",
 		SettingKeySMTPUseTLS:                                "false",
 		// Model fallback defaults
-		SettingKeyEnableModelFallback:                "false",
-		SettingKeyFallbackModelAnthropic:             "claude-3-5-sonnet-20241022",
-		SettingKeyFallbackModelOpenAI:                "gpt-4o",
-		SettingKeyFallbackModelGemini:                "gemini-2.5-pro",
-		SettingKeyFallbackModelAntigravity:           "gemini-2.5-pro",
-		SettingKeyModelSquareBaseURL:                 "",
-		SettingKeyModelSquareLoginURL:                "",
-		SettingKeyModelSquareModelURL:                "",
-		SettingKeyModelSquareKeysURL:                 "",
-		SettingKeyModelSquareGroupsURL:               "",
-		SettingKeyModelSquareEmail:                   "",
-		SettingKeyModelSquarePassword:                "",
-		SettingKeyModelSquareKeysSyncIntervalSeconds: strconv.Itoa(configModelSquareKeysSyncIntervalSeconds(s.cfg)),
+		SettingKeyEnableModelFallback:                       "false",
+		SettingKeyFallbackModelAnthropic:                    "claude-3-5-sonnet-20241022",
+		SettingKeyFallbackModelOpenAI:                       "gpt-4o",
+		SettingKeyFallbackModelGemini:                       "gemini-2.5-pro",
+		SettingKeyFallbackModelAntigravity:                  "gemini-2.5-pro",
+		SettingKeyUpstreamManagementBaseURL:                 "",
+		SettingKeyUpstreamManagementLoginURL:                "",
+		SettingKeyUpstreamManagementModelURL:                "",
+		SettingKeyUpstreamManagementAPIKeysURL:              "",
+		SettingKeyUpstreamManagementGroupsURL:               "",
+		SettingKeyUpstreamManagementEmail:                   "",
+		SettingKeyUpstreamManagementPassword:                "",
+		SettingKeyUpstreamManagementKeysSyncIntervalSeconds: strconv.Itoa(configUpstreamManagementKeysSyncIntervalSeconds(s.cfg)),
 		// Identity patch defaults
 		SettingKeyEnableIdentityPatch: "true",
 		SettingKeyIdentityPatchPrompt: "",
@@ -3422,18 +3425,27 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.OpenAICodexUserAgent = strings.TrimSpace(settings[SettingKeyOpenAICodexUserAgent])
 	result.OpenAIAllowClaudeCodeCodexPlugin = settings[SettingKeyOpenAIAllowClaudeCodeCodexPlugin] == "true"
 
-	result.ModelSquareBaseURL = firstNonEmpty(settings[SettingKeyModelSquareBaseURL], configModelSquareBaseURL(s.cfg))
-	result.ModelSquareLoginURL = firstNonEmpty(settings[SettingKeyModelSquareLoginURL], configModelSquareLoginURL(s.cfg))
-	result.ModelSquareModelURL = firstNonEmpty(settings[SettingKeyModelSquareModelURL], configModelSquareModelURL(s.cfg))
-	result.ModelSquareKeysURL = firstNonEmpty(settings[SettingKeyModelSquareKeysURL], configModelSquareKeysURL(s.cfg))
-	result.ModelSquareGroupsURL = firstNonEmpty(settings[SettingKeyModelSquareGroupsURL], configModelSquareGroupsURL(s.cfg))
-	result.ModelSquareEmail = firstNonEmpty(settings[SettingKeyModelSquareEmail], configModelSquareEmail(s.cfg))
-	result.ModelSquarePassword = firstNonEmpty(settings[SettingKeyModelSquarePassword], configModelSquarePassword(s.cfg))
-	result.ModelSquarePasswordConfigured = strings.TrimSpace(result.ModelSquarePassword) != ""
-	result.ModelSquareKeysSyncIntervalSeconds = configModelSquareKeysSyncIntervalSeconds(s.cfg)
-	if v, err := strconv.Atoi(strings.TrimSpace(settings[SettingKeyModelSquareKeysSyncIntervalSeconds])); err == nil && v > 0 {
-		result.ModelSquareKeysSyncIntervalSeconds = v
+	result.UpstreamManagementBaseURL = firstNonEmpty(settings[SettingKeyUpstreamManagementBaseURL], settings[SettingKeyModelSquareBaseURL], configUpstreamManagementBaseURL(s.cfg))
+	result.UpstreamManagementLoginURL = firstNonEmpty(settings[SettingKeyUpstreamManagementLoginURL], settings[SettingKeyModelSquareLoginURL], configUpstreamManagementLoginURL(s.cfg))
+	result.UpstreamManagementModelURL = firstNonEmpty(settings[SettingKeyUpstreamManagementModelURL], settings[SettingKeyUpstreamManagementModelSquareURL], settings[SettingKeyModelSquareModelURL], configUpstreamManagementModelURL(s.cfg))
+	result.UpstreamManagementAPIKeysURL = firstNonEmpty(settings[SettingKeyUpstreamManagementAPIKeysURL], settings[SettingKeyModelSquareKeysURL], configUpstreamManagementAPIKeysURL(s.cfg))
+	result.UpstreamManagementGroupsURL = firstNonEmpty(settings[SettingKeyUpstreamManagementGroupsURL], settings[SettingKeyModelSquareGroupsURL], configUpstreamManagementGroupsURL(s.cfg))
+	result.UpstreamManagementEmail = firstNonEmpty(settings[SettingKeyUpstreamManagementEmail], settings[SettingKeyModelSquareEmail], configUpstreamManagementEmail(s.cfg))
+	result.UpstreamManagementPassword = firstNonEmpty(settings[SettingKeyUpstreamManagementPassword], settings[SettingKeyModelSquarePassword], configUpstreamManagementPassword(s.cfg))
+	result.UpstreamManagementPasswordConfigured = strings.TrimSpace(result.UpstreamManagementPassword) != ""
+	result.UpstreamManagementKeysSyncIntervalSeconds = configUpstreamManagementKeysSyncIntervalSeconds(s.cfg)
+	if v, err := strconv.Atoi(strings.TrimSpace(firstNonEmpty(settings[SettingKeyUpstreamManagementKeysSyncIntervalSeconds], settings[SettingKeyModelSquareKeysSyncIntervalSeconds]))); err == nil && v > 0 {
+		result.UpstreamManagementKeysSyncIntervalSeconds = v
 	}
+	result.ModelSquareBaseURL = result.UpstreamManagementBaseURL
+	result.ModelSquareLoginURL = result.UpstreamManagementLoginURL
+	result.ModelSquareModelURL = result.UpstreamManagementModelURL
+	result.ModelSquareKeysURL = result.UpstreamManagementAPIKeysURL
+	result.ModelSquareGroupsURL = result.UpstreamManagementGroupsURL
+	result.ModelSquareEmail = result.UpstreamManagementEmail
+	result.ModelSquarePassword = result.UpstreamManagementPassword
+	result.ModelSquarePasswordConfigured = result.UpstreamManagementPasswordConfigured
+	result.ModelSquareKeysSyncIntervalSeconds = result.UpstreamManagementKeysSyncIntervalSeconds
 
 	// Web search emulation: quick enabled check from the JSON config
 	if raw := settings[SettingKeyWebSearchEmulationConfig]; raw != "" {
@@ -3478,67 +3490,76 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	return result
 }
 
-func configModelSquareBaseURL(cfg *config.Config) string {
+func configUpstreamManagementBaseURL(cfg *config.Config) string {
 	if cfg == nil {
 		return ""
 	}
-	return cfg.ModelSquare.BaseURL
+	return firstNonEmpty(cfg.UpstreamManagement.BaseURL, cfg.ModelSquare.BaseURL)
 }
 
-func configModelSquareLoginURL(cfg *config.Config) string {
+func configUpstreamManagementLoginURL(cfg *config.Config) string {
 	if cfg == nil {
 		return ""
 	}
-	return cfg.ModelSquare.LoginURL
+	return firstNonEmpty(cfg.UpstreamManagement.LoginURL, cfg.ModelSquare.LoginURL)
 }
 
-func configModelSquareModelURL(cfg *config.Config) string {
+func configUpstreamManagementModelURL(cfg *config.Config) string {
 	if cfg == nil {
 		return ""
 	}
-	return cfg.ModelSquare.ModelSquareURL
+	return firstNonEmpty(cfg.UpstreamManagement.ModelURL, cfg.UpstreamManagement.ModelSquareURL, cfg.ModelSquare.ModelURL, cfg.ModelSquare.ModelSquareURL)
 }
 
-func configModelSquareKeysURL(cfg *config.Config) string {
+func configUpstreamManagementAPIKeysURL(cfg *config.Config) string {
 	if cfg == nil {
 		return ""
 	}
-	return cfg.ModelSquare.KeysURL
+	return firstNonEmpty(cfg.UpstreamManagement.APIKeysURL, cfg.UpstreamManagement.KeysURL, cfg.ModelSquare.APIKeysURL, cfg.ModelSquare.KeysURL)
 }
 
-func configModelSquareGroupsURL(cfg *config.Config) string {
+func configUpstreamManagementGroupsURL(cfg *config.Config) string {
 	if cfg == nil {
 		return ""
 	}
-	return cfg.ModelSquare.GroupsURL
+	return firstNonEmpty(cfg.UpstreamManagement.GroupsURL, cfg.ModelSquare.GroupsURL)
 }
 
-func configModelSquareEmail(cfg *config.Config) string {
+func configUpstreamManagementEmail(cfg *config.Config) string {
 	if cfg == nil {
 		return ""
 	}
-	return cfg.ModelSquare.Email
+	return firstNonEmpty(cfg.UpstreamManagement.Email, cfg.ModelSquare.Email)
 }
 
-func configModelSquarePassword(cfg *config.Config) string {
+func configUpstreamManagementPassword(cfg *config.Config) string {
 	if cfg == nil {
 		return ""
 	}
-	return cfg.ModelSquare.Password
+	return firstNonEmpty(cfg.UpstreamManagement.Password, cfg.ModelSquare.Password)
 }
 
-func configModelSquareKeysSyncIntervalSeconds(cfg *config.Config) int {
-	if cfg == nil || cfg.ModelSquare.KeysSyncIntervalSeconds <= 0 {
+func configUpstreamManagementKeysSyncIntervalSeconds(cfg *config.Config) int {
+	if cfg == nil {
 		return 5
 	}
-	return cfg.ModelSquare.KeysSyncIntervalSeconds
+	return firstPositiveInt(cfg.UpstreamManagement.KeysSyncIntervalSeconds, cfg.ModelSquare.KeysSyncIntervalSeconds, 5)
 }
 
-func normalizeModelSquareKeysSyncIntervalSeconds(value int, cfg *config.Config) int {
+func normalizeUpstreamManagementKeysSyncIntervalSeconds(value int, cfg *config.Config) int {
 	if value > 0 {
 		return value
 	}
-	return configModelSquareKeysSyncIntervalSeconds(cfg)
+	return configUpstreamManagementKeysSyncIntervalSeconds(cfg)
+}
+
+func firstPositiveInt(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 func clampAffiliateRebateRate(value float64) float64 {
