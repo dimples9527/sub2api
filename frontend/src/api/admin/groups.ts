@@ -185,7 +185,7 @@ export interface GroupRateMultiplierEntry {
   rpm_override?: number | null
 }
 
-export interface ModelSquareRateSyncResult {
+export interface UpstreamRateSyncResult {
   checked_count: number
   matched_count: number
   updated_count: number
@@ -197,7 +197,7 @@ export interface ModelSquareRateSyncResult {
   }>
 }
 
-export interface ModelSquareAvailableGroup {
+export interface UpstreamAvailableGroup {
   id: number | string
   name: string
   description?: string | null
@@ -221,22 +221,29 @@ export interface ModelSquareAvailableGroup {
   local_rate_multiplier?: number | null
 }
 
-export async function syncModelSquareRates(): Promise<ModelSquareRateSyncResult> {
-  const { data } = await apiClient.post<ModelSquareRateSyncResult>('/admin/model-square/sync')
+export async function syncUpstreamRates(): Promise<UpstreamRateSyncResult> {
+  const { data } = await apiClient.post<UpstreamRateSyncResult>('/admin/upstream-management/sync')
   return data
 }
 
-export async function getModelSquareRateWarnings(): Promise<ModelSquareRateSyncResult> {
-  const { data } = await apiClient.get<ModelSquareRateSyncResult>(
-    '/admin/model-square/rate-warnings'
+export async function getUpstreamRateWarnings(): Promise<UpstreamRateSyncResult> {
+  const { data } = await apiClient.get<UpstreamRateSyncResult>(
+    '/admin/upstream-management/rate-warnings'
   )
   return data
 }
 
-export async function getModelSquareAvailableGroups(): Promise<ModelSquareAvailableGroup[]> {
-  const { data } = await apiClient.get<ModelSquareAvailableGroup[]>('/admin/model-square/groups')
+export async function getUpstreamAvailableGroups(): Promise<UpstreamAvailableGroup[]> {
+  const { data } = await apiClient.get<UpstreamAvailableGroup[]>('/admin/upstream-management/groups')
   return Array.isArray(data) ? data : []
 }
+
+export type ModelSquareRateSyncResult = UpstreamRateSyncResult
+export type ModelSquareAvailableGroup = UpstreamAvailableGroup
+
+export const syncModelSquareRates = syncUpstreamRates
+export const getModelSquareRateWarnings = getUpstreamRateWarnings
+export const getModelSquareAvailableGroups = getUpstreamAvailableGroups
 
 /**
  * Get rate multipliers for users in a group
@@ -384,6 +391,9 @@ export const groupsAPI = {
   getStats,
   getGroupApiKeys,
   getGroupRateMultipliers,
+  syncUpstreamRates,
+  getUpstreamRateWarnings,
+  getUpstreamAvailableGroups,
   syncModelSquareRates,
   getModelSquareRateWarnings,
   getModelSquareAvailableGroups,
