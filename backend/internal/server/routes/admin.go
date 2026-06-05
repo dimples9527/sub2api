@@ -104,6 +104,7 @@ func RegisterAdminRoutes(
 func registerUpstreamManagementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	admin.GET("/model-square", h.Admin.ModelSquare.Get)
 	admin.GET("/upstream-management/groups", h.Admin.ModelSquare.GetAvailableGroups)
+	RegisterAdminLLMMonitorRoutes(admin, h.Admin.Setting)
 	admin.GET("/upstream-management/rate-warnings", h.Admin.ModelSquare.RateWarnings)
 	admin.POST("/upstream-management/sync", h.Admin.ModelSquare.SyncKeys)
 	admin.GET("/model-square/groups", h.Admin.ModelSquare.GetAvailableGroups)

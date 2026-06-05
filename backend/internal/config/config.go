@@ -1777,7 +1777,7 @@ func setDefaults() {
 	viper.SetDefault("timezone", "Asia/Shanghai")
 
 	// LLM monitor upstream status API. The browser calls a same-origin proxy route.
-	viper.SetDefault("llm_monitor.status_api_url", "https://jc.findcg.com/api/status")
+	viper.SetDefault("llm_monitor.status_api_url", "https://jc.findcg.com/api/status?period=90m&board=hot")
 	viper.SetDefault("llm_monitor.title", "蛋云AI - Claude Code 监控面板")
 	viper.SetDefault("llm_monitor.provider_url", "https://api.sunshinelink.online/")
 

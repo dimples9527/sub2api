@@ -5897,7 +5897,7 @@ export default {
         docUrlPlaceholder: 'https://docs.example.com',
         llmMonitorStatusApiUrl: '模型监控接口',
         llmMonitorStatusApiUrlHint: '模型监控页面通过后端代理请求该地址，留空时使用配置文件默认值。',
-        llmMonitorStatusApiUrlPlaceholder: 'https://example.com/api/status',
+        llmMonitorStatusApiUrlPlaceholder: 'https://jc.findcg.com/api/status?period=90m&board=hot',
         siteLogo: '站点Logo',
         uploadImage: '上传图片',
         remove: '移除',
@@ -5925,8 +5925,8 @@ export default {
         providerUrl: '服务商跳转地址',
         providerUrlPlaceholder: 'https://api.sunshinelink.online/',
         providerUrlHint: '点击监控页中的服务商名称时打开该地址，留空时使用配置文件默认值。',
-        statusApiUrlPlaceholder: 'https://example.com/api/status',
-        statusApiUrlHint: '填写不带 period 和 board 的基础地址即可；页面会按所选时间窗口自动追加查询参数。',
+        statusApiUrlPlaceholder: 'https://jc.findcg.com/api/status?period=90m&board=hot',
+        statusApiUrlHint: '可填写完整状态接口地址；页面会按所选时间窗口覆盖 period 和 board 查询参数。',
         proxyHint: '前端页面只请求同源 /api/llm-monitor/status，真实上游地址由后端读取这里的配置。'
       },
       purchase: {

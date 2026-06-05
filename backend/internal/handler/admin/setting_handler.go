@@ -94,6 +94,10 @@ func (h *SettingHandler) SetNotificationEmailService(notificationEmailService *s
 	h.notificationEmailService = notificationEmailService
 }
 
+func (h *SettingHandler) GetPublicSettings(ctx context.Context) (*service.PublicSettings, error) {
+	return h.settingService.GetPublicSettings(ctx)
+}
+
 // GetSettings 获取所有系统设置
 // GET /api/v1/admin/settings
 func (h *SettingHandler) GetSettings(c *gin.Context) {

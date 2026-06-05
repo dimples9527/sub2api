@@ -108,6 +108,45 @@ func TestLLMMonitorStatusProxyFiltersGroupsAndScrubsFindCGURL(t *testing.T) {
 	}
 }
 
+func TestAdminLLMMonitorStatusProxyDoesNotFilterGroups(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var upstreamQuery string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"groups": [
+				{"provider":"matched provider"},
+				{"provider":"upstream only provider"}
+			]
+		}`))
+	}))
+	defer upstream.Close()
+
+	router := gin.New()
+	admin := router.Group("/admin")
+	RegisterAdminLLMMonitorRoutes(admin, llmMonitorSettingsStub{statusAPIURL: upstream.URL + "/api/status?period=30m&board=cold"})
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/upstream-management/monitor-status?period=90m&board=hot", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if upstreamQuery != "board=hot&period=90m" && upstreamQuery != "period=90m&board=hot" {
+		t.Fatalf("upstream query = %q", upstreamQuery)
+	}
+	if !strings.Contains(rec.Body.String(), "matched provider") {
+		t.Fatalf("expected matched provider in body = %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "upstream only provider") {
+		t.Fatalf("expected upstream-only provider in body = %s", rec.Body.String())
+	}
+}
+
 func TestLLMMonitorStatusProxyRejectsInvalidConfiguredURL(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

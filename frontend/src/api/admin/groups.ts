@@ -238,6 +238,19 @@ export async function getUpstreamAvailableGroups(): Promise<UpstreamAvailableGro
   return Array.isArray(data) ? data : []
 }
 
+export async function getUpstreamMonitorStatus(params?: {
+  period?: string
+  board?: string
+}): Promise<unknown> {
+  const { data } = await apiClient.get<unknown>('/admin/upstream-management/monitor-status', {
+    params: {
+      period: params?.period || '90m',
+      board: params?.board || 'hot'
+    }
+  })
+  return data
+}
+
 export type ModelSquareRateSyncResult = UpstreamRateSyncResult
 export type ModelSquareAvailableGroup = UpstreamAvailableGroup
 
@@ -394,6 +407,7 @@ export const groupsAPI = {
   syncUpstreamRates,
   getUpstreamRateWarnings,
   getUpstreamAvailableGroups,
+  getUpstreamMonitorStatus,
   syncModelSquareRates,
   getModelSquareRateWarnings,
   getModelSquareAvailableGroups,

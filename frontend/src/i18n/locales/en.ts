@@ -5743,7 +5743,7 @@ export default {
         docUrlPlaceholder: 'https://docs.example.com',
         docUrlHint: 'Link to your documentation site. Leave empty to hide the documentation link.',
         llmMonitorStatusApiUrl: 'Model monitor API',
-        llmMonitorStatusApiUrlPlaceholder: 'https://example.com/api/status',
+        llmMonitorStatusApiUrlPlaceholder: 'https://jc.findcg.com/api/status?period=90m&board=hot',
         llmMonitorStatusApiUrlHint: 'The monitor page requests this URL through the backend proxy. Leave empty to use the config file default.',
         siteLogo: 'Site Logo',
         uploadImage: 'Upload Image',
@@ -5769,8 +5769,8 @@ export default {
         providerUrlPlaceholder: 'https://api.sunshinelink.online/',
         providerUrlHint: 'Opened when clicking a provider name on the monitor page. Leave empty to use the config-file default.',
         statusApiUrl: 'Status API URL',
-        statusApiUrlPlaceholder: 'https://example.com/api/status',
-        statusApiUrlHint: 'Use the base URL without period and board. The page appends query parameters for the selected window.',
+        statusApiUrlPlaceholder: 'https://jc.findcg.com/api/status?period=90m&board=hot',
+        statusApiUrlHint: 'You can use the full status API URL. The page overwrites period and board for the selected window.',
         proxyHint: 'The browser only calls the same-origin /api/llm-monitor/status route. The real upstream URL is read by the backend from this setting.'
       },
       purchase: {
