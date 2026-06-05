@@ -10,7 +10,7 @@ vi.mock('@/api/client', () => ({
   }
 }))
 
-import { getUpstreamAvailableGroups, getUpstreamRateWarnings } from '@/api/admin/groups'
+import { getUpstreamAvailableGroups, getUpstreamKeySummary, getUpstreamRateWarnings } from '@/api/admin/groups'
 
 describe('admin groups api', () => {
   beforeEach(() => {
@@ -56,5 +56,22 @@ describe('admin groups api', () => {
     await expect(getUpstreamAvailableGroups()).resolves.toEqual(response)
 
     expect(get).toHaveBeenCalledWith('/admin/upstream-management/groups')
+  })
+
+  it('fetches upstream key summary for the admin upstream groups page', async () => {
+    const response = {
+      groups: [
+        {
+          name: 'codex福利',
+          normalized_name: 'codex福利',
+          key_count: 2
+        }
+      ]
+    }
+    get.mockResolvedValue({ data: response })
+
+    await expect(getUpstreamKeySummary()).resolves.toEqual(response)
+
+    expect(get).toHaveBeenCalledWith('/admin/upstream-management/key-summary')
   })
 })

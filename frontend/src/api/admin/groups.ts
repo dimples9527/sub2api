@@ -221,6 +221,17 @@ export interface UpstreamAvailableGroup {
   local_rate_multiplier?: number | null
 }
 
+export interface UpstreamKeySummary {
+  groups: Array<{
+    name: string
+    normalized_name: string
+    key_count: number
+    keys?: Array<{
+      name: string
+    }>
+  }>
+}
+
 export async function syncUpstreamRates(): Promise<UpstreamRateSyncResult> {
   const { data } = await apiClient.post<UpstreamRateSyncResult>('/admin/upstream-management/sync')
   return data
@@ -236,6 +247,11 @@ export async function getUpstreamRateWarnings(): Promise<UpstreamRateSyncResult>
 export async function getUpstreamAvailableGroups(): Promise<UpstreamAvailableGroup[]> {
   const { data } = await apiClient.get<UpstreamAvailableGroup[]>('/admin/upstream-management/groups')
   return Array.isArray(data) ? data : []
+}
+
+export async function getUpstreamKeySummary(): Promise<UpstreamKeySummary> {
+  const { data } = await apiClient.get<UpstreamKeySummary>('/admin/upstream-management/key-summary')
+  return data && Array.isArray(data.groups) ? data : { groups: [] }
 }
 
 export async function getUpstreamMonitorStatus(params?: {
@@ -407,6 +423,7 @@ export const groupsAPI = {
   syncUpstreamRates,
   getUpstreamRateWarnings,
   getUpstreamAvailableGroups,
+  getUpstreamKeySummary,
   getUpstreamMonitorStatus,
   syncModelSquareRates,
   getModelSquareRateWarnings,
