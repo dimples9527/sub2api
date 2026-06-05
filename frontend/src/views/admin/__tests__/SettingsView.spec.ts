@@ -366,7 +366,14 @@ const baseSettingsResponse = {
   fallback_model_openai: "",
   fallback_model_gemini: "",
   fallback_model_antigravity: "",
-  model_square_keys_sync_interval_seconds: 5,
+  upstream_management_base_url: "",
+  upstream_management_login_url: "",
+  upstream_management_model_url: "",
+  upstream_management_api_keys_url: "",
+  upstream_management_groups_url: "",
+  upstream_management_email: "",
+  upstream_management_password_configured: false,
+  upstream_management_keys_sync_interval_seconds: 5,
   enable_identity_patch: false,
   identity_patch_prompt: "",
   ops_monitoring_enabled: false,
@@ -393,6 +400,9 @@ const baseSettingsResponse = {
   payment_balance_disabled: false,
   payment_balance_recharge_multiplier: 1,
   payment_recharge_fee_rate: 0,
+  payment_recharge_options: [2, 5, 10, 20],
+  payment_intro_recharge_pay_amount: 0,
+  payment_intro_recharge_credit_amount: 0,
   payment_load_balance_strategy: "round-robin",
   payment_product_name_prefix: "",
   payment_product_name_suffix: "",
@@ -643,10 +653,11 @@ describe("admin SettingsView payment visible method controls", () => {
     );
   });
 
-  it("submits model square keys sync interval setting", async () => {
+  it("submits upstream management keys sync interval setting", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
-      model_square_keys_sync_interval_seconds: 45,
+      upstream_management_model_url: "https://upstream.example.com/models",
+      upstream_management_keys_sync_interval_seconds: 45,
     });
 
     const wrapper = mountView();
@@ -658,7 +669,32 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(updateSettings).toHaveBeenCalledTimes(1);
     expect(updateSettings).toHaveBeenCalledWith(
       expect.objectContaining({
-        model_square_keys_sync_interval_seconds: 45,
+        upstream_management_model_url: "https://upstream.example.com/models",
+        upstream_management_keys_sync_interval_seconds: 45,
+      }),
+    );
+  });
+
+  it("submits payment recharge amount configuration", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      payment_recharge_options: [2, 5, 20],
+      payment_intro_recharge_pay_amount: 0,
+      payment_intro_recharge_credit_amount: 0,
+    });
+
+    const wrapper = mountView();
+
+    await flushPromises();
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledTimes(1);
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payment_recharge_options: [2, 5, 20],
+        payment_intro_recharge_pay_amount: 0,
+        payment_intro_recharge_credit_amount: 0,
       }),
     );
   });

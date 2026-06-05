@@ -10,14 +10,14 @@ vi.mock('@/api/client', () => ({
   }
 }))
 
-import { getModelSquareAvailableGroups, getModelSquareRateWarnings } from '@/api/admin/groups'
+import { getUpstreamAvailableGroups, getUpstreamRateWarnings } from '@/api/admin/groups'
 
 describe('admin groups api', () => {
   beforeEach(() => {
     get.mockReset()
   })
 
-  it('fetches model square rate warnings from the read-only endpoint', async () => {
+  it('fetches upstream rate warnings from the read-only endpoint', async () => {
     const response = {
       checked_count: 2,
       matched_count: 1,
@@ -33,12 +33,12 @@ describe('admin groups api', () => {
     }
     get.mockResolvedValue({ data: response })
 
-    await expect(getModelSquareRateWarnings()).resolves.toEqual(response)
+    await expect(getUpstreamRateWarnings()).resolves.toEqual(response)
 
-    expect(get).toHaveBeenCalledWith('/admin/model-square/rate-warnings')
+    expect(get).toHaveBeenCalledWith('/admin/upstream-management/rate-warnings')
   })
 
-  it('fetches model square available groups for the admin upstream groups page', async () => {
+  it('fetches upstream available groups for the admin upstream groups page', async () => {
     const response = [
       {
         id: 2,
@@ -53,8 +53,8 @@ describe('admin groups api', () => {
     ]
     get.mockResolvedValue({ data: response })
 
-    await expect(getModelSquareAvailableGroups()).resolves.toEqual(response)
+    await expect(getUpstreamAvailableGroups()).resolves.toEqual(response)
 
-    expect(get).toHaveBeenCalledWith('/admin/model-square/groups')
+    expect(get).toHaveBeenCalledWith('/admin/upstream-management/groups')
   })
 })
