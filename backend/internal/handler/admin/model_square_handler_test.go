@@ -458,6 +458,68 @@ func TestModelSquareHandlerManualSyncRaisesLocalGroupRateFromKeys(t *testing.T) 
 	}`, rec.Body.String())
 }
 
+func TestModelSquareHandlerGetsKeySummaryFromConfiguredAPIKeysURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/custom/login":
+			_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"access_token":"token-key-summary","expires_in":86400,"token_type":"Bearer"}}`))
+		case "/custom/keys":
+			require.Equal(t, "Bearer token-key-summary", r.Header.Get("Authorization"))
+			require.Equal(t, "1", r.URL.Query().Get("page"))
+			_, _ = w.Write([]byte(`{
+				"code":0,
+				"message":"success",
+				"data":{
+					"items":[
+						{"id":1,"name":"key-a","group":{"name":"Codex Special","rate_multiplier":0.6}},
+						{"id":2,"name":"key-b","group":{"name":"Codex Special","rate_multiplier":0.7}},
+						{"id":3,"name":"key-c","group":{"name":"Stable Group","rate_multiplier":0.4}},
+						{"id":4,"name":"sk-secret-no-group"}
+					]
+				}
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	h := newModelSquareHandler(ModelSquareHandlerConfig{
+		AppConfig: &config.Config{ModelSquare: config.ModelSquareConfig{
+			BaseURL:    "https://unused.example.com",
+			LoginURL:   server.URL + "/custom/login",
+			APIKeysURL: server.URL + "/custom/keys?page=1",
+			Email:      "configured@example.com",
+			Password:   "configured-secret",
+		}},
+		HTTPClient: server.Client(),
+	})
+	router := gin.New()
+	router.GET("/admin/upstream-management/key-summary", h.KeySummary)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/upstream-management/key-summary", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, []string{"/custom/login", "/custom/keys"}, paths)
+	require.JSONEq(t, `{
+		"code":0,
+		"message":"success",
+		"data":{
+			"groups":[
+				{"name":"Codex Special","normalized_name":"codexspecial","key_count":2,"keys":[{"name":"key-a"},{"name":"key-b"}]},
+				{"name":"Stable Group","normalized_name":"stablegroup","key_count":1,"keys":[{"name":"key-c"}]}
+			]
+		}
+	}`, rec.Body.String())
+	require.NotContains(t, rec.Body.String(), "sk-secret-no-group")
+}
+
 func TestModelSquareHandlerManualSyncMatchesKeysByGroupName(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

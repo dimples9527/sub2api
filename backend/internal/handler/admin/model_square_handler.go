@@ -118,6 +118,21 @@ type modelSquareKeysSyncResult struct {
 	RateWarnings []modelSquareRateWarningEntry `json:"rate_warnings,omitempty"`
 }
 
+type modelSquareKeySummaryResult struct {
+	Groups []modelSquareKeySummaryGroup `json:"groups"`
+}
+
+type modelSquareKeySummaryGroup struct {
+	Name           string                     `json:"name"`
+	NormalizedName string                     `json:"normalized_name"`
+	KeyCount       int                        `json:"key_count"`
+	Keys           []modelSquareKeySummaryKey `json:"keys"`
+}
+
+type modelSquareKeySummaryKey struct {
+	Name string `json:"name"`
+}
+
 type modelSquareRateWarningEntry struct {
 	GroupID                int64   `json:"group_id"`
 	GroupName              string  `json:"group_name"`
@@ -285,6 +300,17 @@ func (h *ModelSquareHandler) SyncKeys(c *gin.Context) {
 // RateWarnings handles GET /api/v1/admin/upstream-management/rate-warnings.
 func (h *ModelSquareHandler) RateWarnings(c *gin.Context) {
 	result, err := h.collectGroupRateWarningsFromKeys(c.Request.Context(), false)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+
+	response.Success(c, result)
+}
+
+// KeySummary handles GET /api/v1/admin/upstream-management/key-summary.
+func (h *ModelSquareHandler) KeySummary(c *gin.Context) {
+	result, err := h.collectKeySummaryFromKeys(c.Request.Context(), false)
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return
@@ -506,6 +532,54 @@ func (h *ModelSquareHandler) collectGroupRateWarningsAndUpdatesFromKeys(ctx cont
 	}
 
 	return result, maxRemoteRateByGroupID, nil
+}
+
+func (h *ModelSquareHandler) collectKeySummaryFromKeys(ctx context.Context, forceLogin bool) (modelSquareKeySummaryResult, error) {
+	result := modelSquareKeySummaryResult{Groups: []modelSquareKeySummaryGroup{}}
+	payload, status, err := h.requestModelSquareAuthenticated(ctx, findCGKeysPath, "model square keys", forceLogin)
+	if err != nil {
+		return result, err
+	}
+	if status < 200 || status >= 300 {
+		return result, fmt.Errorf("model square keys upstream failed: HTTP %d: %s", status, string(payload))
+	}
+
+	var keysResp findCGKeysResponse
+	if err := json.Unmarshal(payload, &keysResp); err != nil {
+		return result, fmt.Errorf("decode model square keys response: %w", err)
+	}
+	if keysResp.Code != 0 {
+		if keysResp.Message == "" {
+			keysResp.Message = "unknown error"
+		}
+		return result, fmt.Errorf("model square keys upstream failed: %s", keysResp.Message)
+	}
+
+	indexByName := make(map[string]int)
+	for _, item := range keysResp.Data.Items {
+		if item.Group == nil {
+			continue
+		}
+		name := strings.TrimSpace(item.Group.Name)
+		normalizedName := normalizeModelSquareGroupName(name)
+		if normalizedName == "" {
+			continue
+		}
+		if index, ok := indexByName[normalizedName]; ok {
+			result.Groups[index].KeyCount++
+			result.Groups[index].Keys = append(result.Groups[index].Keys, modelSquareKeySummaryKey{Name: item.Name})
+			continue
+		}
+		indexByName[normalizedName] = len(result.Groups)
+		result.Groups = append(result.Groups, modelSquareKeySummaryGroup{
+			Name:           name,
+			NormalizedName: normalizedName,
+			KeyCount:       1,
+			Keys:           []modelSquareKeySummaryKey{{Name: item.Name}},
+		})
+	}
+
+	return result, nil
 }
 
 func modelSquareRemoteRateGreater(remoteRate, localRate float64) bool {
