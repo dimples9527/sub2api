@@ -608,6 +608,10 @@ func (s *stubAdminService) ResetAccountQuota(ctx context.Context, id int64) erro
 	return nil
 }
 
+func (s *stubAdminService) SetAccountTempUnschedulable(ctx context.Context, id int64, until time.Time, reason string) error {
+	return nil
+}
+
 func (s *stubAdminService) EnsureOpenAIPrivacy(ctx context.Context, account *service.Account) string {
 	return ""
 }

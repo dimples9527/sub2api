@@ -30,6 +30,7 @@ const (
 
 	modelSquareKeysSyncErrorBackoff = 30 * time.Second
 	modelSquareRateCompareEpsilon   = 1e-9
+	accountRateGuardMaxAuditEntries = 100
 )
 
 // ModelSquareHandler proxies the external model square API for admin users.
@@ -45,15 +46,27 @@ type ModelSquareHandler struct {
 	settingService *service.SettingService
 	groupProvider  modelSquareGroupProvider
 	syncInterval   time.Duration
+	providers      []upstreamProviderRuntime
 
 	mu    sync.Mutex
 	token cachedFindCGToken
 
-	syncRunMu sync.Mutex
+	syncRunMu             sync.Mutex
+	accountRateGuardRunMu sync.Mutex
 
 	backgroundMu      sync.Mutex
 	backgroundStop    chan struct{}
 	backgroundStopped chan struct{}
+
+	accountRateGuardInterval time.Duration
+	accountRateGuardMu       sync.Mutex
+	accountRateGuardStop     chan struct{}
+	accountRateGuardStopped  chan struct{}
+
+	accountRateGuardAuditMu sync.Mutex
+	accountRateGuardRunID   int64
+	accountRateGuardLastRun *accountRateGuardRunRecord
+	accountRateGuardAudits  []accountRateGuardAuditEntry
 }
 
 type cachedFindCGToken struct {
@@ -76,11 +89,15 @@ type ModelSquareHandlerConfig struct {
 	GroupProvider  modelSquareGroupProvider
 	HTTPClient     *http.Client
 	SyncInterval   time.Duration
+
+	AccountRateGuardInterval time.Duration
 }
 
 type modelSquareGroupProvider interface {
 	GetAllGroups(ctx context.Context) ([]service.Group, error)
 	UpdateGroup(ctx context.Context, id int64, input *service.UpdateGroupInput) (*service.Group, error)
+	ListAccounts(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupID int64, privacyMode string, sortBy, sortOrder string) ([]service.Account, int64, error)
+	UpdateAccount(ctx context.Context, id int64, input *service.UpdateAccountInput) (*service.Account, error)
 }
 
 type findCGLoginResponse struct {
@@ -140,6 +157,82 @@ type modelSquareRateWarningEntry struct {
 	UpstreamRateMultiplier float64 `json:"upstream_rate_multiplier"`
 }
 
+type accountRateGuardRunRequest struct {
+	DryRun bool `json:"dry_run"`
+}
+
+type accountRateGuardResult struct {
+	DryRun              bool                        `json:"dry_run"`
+	CheckedKeyCount     int                         `json:"checked_key_count"`
+	MatchedAccountCount int                         `json:"matched_account_count"`
+	ViolationCount      int                         `json:"violation_count"`
+	UnboundCount        int                         `json:"unbound_count"`
+	Violations          []accountRateGuardViolation `json:"violations"`
+	Providers           []accountRateGuardProvider  `json:"providers"`
+}
+
+type accountRateGuardStatus struct {
+	LastRun *accountRateGuardRunRecord   `json:"last_run,omitempty"`
+	Audits  []accountRateGuardAuditEntry `json:"audits"`
+}
+
+type accountRateGuardRunRecord struct {
+	RunID       int64                  `json:"run_id"`
+	StartedAt   time.Time              `json:"started_at"`
+	CompletedAt time.Time              `json:"completed_at"`
+	Result      accountRateGuardResult `json:"result"`
+	Error       string                 `json:"error,omitempty"`
+}
+
+type accountRateGuardAuditEntry struct {
+	RunID                   int64     `json:"run_id"`
+	CreatedAt               time.Time `json:"created_at"`
+	ProviderSlug            string    `json:"provider_slug"`
+	ProviderName            string    `json:"provider_name"`
+	UpstreamKeyName         string    `json:"upstream_key_name"`
+	MatchedLocalAccountID   int64     `json:"matched_local_account_id"`
+	MatchedLocalAccountName string    `json:"matched_local_account_name"`
+	UpstreamGroupName       string    `json:"upstream_group_name"`
+	UpstreamRateMultiplier  float64   `json:"upstream_rate_multiplier"`
+	LocalMinRateMultiplier  float64   `json:"local_min_rate_multiplier"`
+	UnboundGroupIDs         []int64   `json:"unbound_group_ids"`
+	UnboundGroupNames       []string  `json:"unbound_group_names"`
+	RemainingGroupIDs       []int64   `json:"remaining_group_ids"`
+}
+
+type accountRateGuardProvider struct {
+	Slug              string `json:"slug"`
+	Name              string `json:"name"`
+	AccountNamePrefix string `json:"account_name_prefix"`
+	CheckedKeyCount   int    `json:"checked_key_count"`
+	Error             string `json:"error,omitempty"`
+}
+
+type accountRateGuardViolation struct {
+	ProviderSlug            string   `json:"provider_slug"`
+	ProviderName            string   `json:"provider_name"`
+	UpstreamKeyName         string   `json:"upstream_key_name"`
+	MatchedLocalAccountID   int64    `json:"matched_local_account_id"`
+	MatchedLocalAccountName string   `json:"matched_local_account_name"`
+	UpstreamGroupName       string   `json:"upstream_group_name"`
+	UpstreamRateMultiplier  float64  `json:"upstream_rate_multiplier"`
+	LocalMinRateMultiplier  float64  `json:"local_min_rate_multiplier"`
+	UnboundGroupIDs         []int64  `json:"unbound_group_ids,omitempty"`
+	UnboundGroupNames       []string `json:"unbound_group_names,omitempty"`
+}
+
+type upstreamProviderRuntime struct {
+	Slug               string
+	Name               string
+	BaseURL            string
+	LoginURL           string
+	KeysURL            string
+	Email              string
+	Password           string
+	AccountNamePrefix  string
+	TempDisableMinutes int
+}
+
 // NewModelSquareHandler creates a model square proxy handler.
 func NewModelSquareHandler(cfg *config.Config, settingService *service.SettingService, groupProvider service.AdminService) *ModelSquareHandler {
 	return newModelSquareHandler(ModelSquareHandlerConfig{AppConfig: cfg, SettingService: settingService, GroupProvider: groupProvider})
@@ -154,10 +247,13 @@ func newModelSquareHandler(cfg ModelSquareHandlerConfig) *ModelSquareHandler {
 	email := strings.TrimSpace(cfg.Email)
 	password := cfg.Password
 	syncInterval := cfg.SyncInterval
+	accountRateGuardInterval := cfg.AccountRateGuardInterval
+	providers := []upstreamProviderRuntime{}
 
 	if cfg.AppConfig != nil {
 		upstreamCfg := cfg.AppConfig.UpstreamManagement
 		legacyCfg := cfg.AppConfig.ModelSquare
+		providers = upstreamProviderRuntimesFromConfig(upstreamCfg, legacyCfg)
 		if baseURL == "" {
 			baseURL = firstNonEmpty(upstreamCfg.BaseURL, legacyCfg.BaseURL)
 		}
@@ -184,6 +280,14 @@ func newModelSquareHandler(cfg ModelSquareHandlerConfig) *ModelSquareHandler {
 				syncInterval = time.Duration(interval) * time.Second
 			}
 		}
+		if accountRateGuardInterval == 0 {
+			if interval := firstPositiveInt(upstreamCfg.AccountRateGuardIntervalSeconds, legacyCfg.AccountRateGuardIntervalSeconds); interval > 0 {
+				accountRateGuardInterval = time.Duration(interval) * time.Second
+			}
+		}
+	}
+	if accountRateGuardInterval == 0 {
+		accountRateGuardInterval = 5 * time.Second
 	}
 
 	if baseURL == "" {
@@ -261,6 +365,9 @@ func newModelSquareHandler(cfg ModelSquareHandlerConfig) *ModelSquareHandler {
 		settingService: cfg.SettingService,
 		groupProvider:  cfg.GroupProvider,
 		syncInterval:   syncInterval,
+		providers:      providers,
+
+		accountRateGuardInterval: accountRateGuardInterval,
 	}
 }
 
@@ -317,6 +424,35 @@ func (h *ModelSquareHandler) KeySummary(c *gin.Context) {
 	}
 
 	response.Success(c, result)
+}
+
+// RunAccountRateGuard checks upstream key group rates against same-name local accounts.
+func (h *ModelSquareHandler) RunAccountRateGuard(c *gin.Context) {
+	var req accountRateGuardRunRequest
+	if c.Request.Body != nil {
+		if err := c.ShouldBindJSON(&req); err != nil && err != io.EOF {
+			response.BadRequest(c, "Invalid request: "+err.Error())
+			return
+		}
+	}
+
+	result, err := h.runAccountRateGuard(c.Request.Context(), req.DryRun)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+
+	response.Success(c, result)
+}
+
+// GetAccountRateGuardStatus returns the most recent guard run and recent audit entries.
+func (h *ModelSquareHandler) GetAccountRateGuardStatus(c *gin.Context) {
+	response.Success(c, h.accountRateGuardStatusSnapshot())
+}
+
+// ListAccountRateGuardAudits returns recent guard unbind audit entries.
+func (h *ModelSquareHandler) ListAccountRateGuardAudits(c *gin.Context) {
+	response.Success(c, h.accountRateGuardAuditsSnapshot())
 }
 
 func (h *ModelSquareHandler) fetchModelSquare(ctx context.Context, forceLogin bool) ([]byte, error) {
@@ -379,6 +515,43 @@ func (h *ModelSquareHandler) StopBackgroundSync() {
 	<-stopped
 }
 
+func (h *ModelSquareHandler) StartAccountRateGuard() {
+	if h == nil || h.groupProvider == nil || h.accountRateGuardInterval <= 0 {
+		return
+	}
+
+	h.accountRateGuardMu.Lock()
+	defer h.accountRateGuardMu.Unlock()
+	if h.accountRateGuardStop != nil {
+		return
+	}
+
+	stop := make(chan struct{})
+	stopped := make(chan struct{})
+	h.accountRateGuardStop = stop
+	h.accountRateGuardStopped = stopped
+	go h.runAccountRateGuardBackground(stop, stopped)
+}
+
+func (h *ModelSquareHandler) StopAccountRateGuard() {
+	if h == nil {
+		return
+	}
+
+	h.accountRateGuardMu.Lock()
+	stop := h.accountRateGuardStop
+	stopped := h.accountRateGuardStopped
+	h.accountRateGuardStop = nil
+	h.accountRateGuardStopped = nil
+	h.accountRateGuardMu.Unlock()
+
+	if stop == nil {
+		return
+	}
+	close(stop)
+	<-stopped
+}
+
 func (h *ModelSquareHandler) runBackgroundSync(stop <-chan struct{}, stopped chan<- struct{}) {
 	defer close(stopped)
 
@@ -396,6 +569,22 @@ func (h *ModelSquareHandler) runBackgroundSync(stop <-chan struct{}, stopped cha
 	}
 }
 
+func (h *ModelSquareHandler) runAccountRateGuardBackground(stop <-chan struct{}, stopped chan<- struct{}) {
+	defer close(stopped)
+
+	for {
+		ctx := context.Background()
+		if providers, explicit := h.configuredAccountRateGuardProviders(ctx); explicit && len(providers) > 0 {
+			if _, err := h.runAccountRateGuard(ctx, false); err != nil {
+				slog.Warn("upstream account rate guard failed", "error", err)
+			}
+		}
+		if !waitModelSquareSyncInterval(h.currentAccountRateGuardInterval(context.Background()), stop) {
+			return
+		}
+	}
+}
+
 func (h *ModelSquareHandler) currentSyncInterval(ctx context.Context) time.Duration {
 	if h == nil {
 		return 0
@@ -408,6 +597,20 @@ func (h *ModelSquareHandler) currentSyncInterval(ctx context.Context) time.Durat
 		}
 	}
 	return h.syncInterval
+}
+
+func (h *ModelSquareHandler) currentAccountRateGuardInterval(ctx context.Context) time.Duration {
+	if h == nil {
+		return 0
+	}
+	if h.settingService != nil {
+		if settings, err := h.settingService.GetAllSettings(ctx); err == nil && settings != nil {
+			if settings.UpstreamManagementAccountRateGuardIntervalSeconds > 0 {
+				return time.Duration(settings.UpstreamManagementAccountRateGuardIntervalSeconds) * time.Second
+			}
+		}
+	}
+	return h.accountRateGuardInterval
 }
 
 func waitModelSquareSyncInterval(interval time.Duration, stop <-chan struct{}) bool {
@@ -580,6 +783,516 @@ func (h *ModelSquareHandler) collectKeySummaryFromKeys(ctx context.Context, forc
 	}
 
 	return result, nil
+}
+
+func (h *ModelSquareHandler) runAccountRateGuard(ctx context.Context, dryRun bool) (accountRateGuardResult, error) {
+	h.accountRateGuardRunMu.Lock()
+	defer h.accountRateGuardRunMu.Unlock()
+
+	runID := h.nextAccountRateGuardRunID()
+	startedAt := time.Now()
+	result := accountRateGuardResult{DryRun: dryRun, Violations: []accountRateGuardViolation{}, Providers: []accountRateGuardProvider{}}
+	var runErr error
+	defer func() {
+		h.recordAccountRateGuardRun(accountRateGuardRunRecord{
+			RunID:       runID,
+			StartedAt:   startedAt,
+			CompletedAt: time.Now(),
+			Result:      result,
+			Error:       errorString(runErr),
+		})
+	}()
+	if h.groupProvider == nil {
+		return result, nil
+	}
+
+	providers := h.accountRateGuardProviders(ctx)
+	if len(providers) == 0 {
+		return result, nil
+	}
+
+	accounts, err := h.loadAccountRateGuardAccounts(ctx)
+	if err != nil {
+		runErr = err
+		return result, err
+	}
+	accountsByName := make(map[string][]service.Account, len(accounts))
+	for _, account := range accounts {
+		key := normalizeModelSquareGroupName(account.Name)
+		if key == "" {
+			continue
+		}
+		accountsByName[key] = append(accountsByName[key], account)
+	}
+
+	unboundAccounts := map[int64]struct{}{}
+	for _, provider := range providers {
+		providerResult := accountRateGuardProvider{
+			Slug:              provider.Slug,
+			Name:              provider.Name,
+			AccountNamePrefix: provider.AccountNamePrefix,
+		}
+		keys, err := h.fetchKeysForProvider(ctx, provider)
+		if err != nil {
+			providerResult.Error = err.Error()
+			result.Providers = append(result.Providers, providerResult)
+			continue
+		}
+		providerResult.CheckedKeyCount = len(keys)
+		result.Providers = append(result.Providers, providerResult)
+		result.CheckedKeyCount += len(keys)
+
+		for _, item := range keys {
+			if item.Group == nil || item.Group.RateMultiplier == nil || *item.Group.RateMultiplier < 0 {
+				continue
+			}
+			localNameKey := normalizeModelSquareGroupName(provider.AccountNamePrefix + item.Name)
+			if localNameKey == "" {
+				continue
+			}
+			matches := accountsByName[localNameKey]
+			if len(matches) == 0 {
+				continue
+			}
+			result.MatchedAccountCount += len(matches)
+			for _, account := range matches {
+				localMinRate, ok := accountMinGroupRate(account)
+				if !ok || localMinRate+modelSquareRateCompareEpsilon >= *item.Group.RateMultiplier {
+					continue
+				}
+				lowGroupIDs, lowGroupNames, remainingGroupIDs := accountRateGuardGroupChanges(account, *item.Group.RateMultiplier)
+				if len(lowGroupIDs) == 0 {
+					continue
+				}
+				violation := accountRateGuardViolation{
+					ProviderSlug:            provider.Slug,
+					ProviderName:            provider.Name,
+					UpstreamKeyName:         item.Name,
+					MatchedLocalAccountID:   account.ID,
+					MatchedLocalAccountName: account.Name,
+					UpstreamGroupName:       item.Group.Name,
+					UpstreamRateMultiplier:  *item.Group.RateMultiplier,
+					LocalMinRateMultiplier:  localMinRate,
+					UnboundGroupIDs:         lowGroupIDs,
+					UnboundGroupNames:       lowGroupNames,
+				}
+				result.Violations = append(result.Violations, violation)
+				result.ViolationCount++
+				if dryRun {
+					continue
+				}
+				if _, alreadyUnbound := unboundAccounts[account.ID]; alreadyUnbound {
+					continue
+				}
+				remaining := remainingGroupIDs
+				if _, err := h.groupProvider.UpdateAccount(ctx, account.ID, &service.UpdateAccountInput{
+					GroupIDs:              &remaining,
+					SkipMixedChannelCheck: true,
+				}); err != nil {
+					runErr = fmt.Errorf("unbind low-rate groups for account %d: %w", account.ID, err)
+					return result, runErr
+				}
+				h.recordAccountRateGuardAudit(accountRateGuardAuditEntry{
+					RunID:                   runID,
+					CreatedAt:               time.Now(),
+					ProviderSlug:            violation.ProviderSlug,
+					ProviderName:            violation.ProviderName,
+					UpstreamKeyName:         violation.UpstreamKeyName,
+					MatchedLocalAccountID:   violation.MatchedLocalAccountID,
+					MatchedLocalAccountName: violation.MatchedLocalAccountName,
+					UpstreamGroupName:       violation.UpstreamGroupName,
+					UpstreamRateMultiplier:  violation.UpstreamRateMultiplier,
+					LocalMinRateMultiplier:  violation.LocalMinRateMultiplier,
+					UnboundGroupIDs:         append([]int64(nil), lowGroupIDs...),
+					UnboundGroupNames:       append([]string(nil), lowGroupNames...),
+					RemainingGroupIDs:       append([]int64(nil), remainingGroupIDs...),
+				})
+				unboundAccounts[account.ID] = struct{}{}
+				result.UnboundCount += len(lowGroupIDs)
+			}
+		}
+	}
+
+	return result, nil
+}
+
+func (h *ModelSquareHandler) loadAccountRateGuardAccounts(ctx context.Context) ([]service.Account, error) {
+	const pageSize = 1000
+	all := []service.Account{}
+	for page := 1; ; page++ {
+		accounts, total, err := h.groupProvider.ListAccounts(ctx, page, pageSize, "", "", "", "", 0, "", "name", "asc")
+		if err != nil {
+			return nil, fmt.Errorf("load local accounts for upstream rate guard: %w", err)
+		}
+		all = append(all, accounts...)
+		if len(all) >= int(total) || len(accounts) == 0 {
+			return all, nil
+		}
+	}
+}
+
+func (h *ModelSquareHandler) nextAccountRateGuardRunID() int64 {
+	h.accountRateGuardAuditMu.Lock()
+	defer h.accountRateGuardAuditMu.Unlock()
+	h.accountRateGuardRunID++
+	return h.accountRateGuardRunID
+}
+
+func (h *ModelSquareHandler) recordAccountRateGuardRun(record accountRateGuardRunRecord) {
+	h.accountRateGuardAuditMu.Lock()
+	defer h.accountRateGuardAuditMu.Unlock()
+	record.Result = cloneAccountRateGuardResult(record.Result)
+	h.accountRateGuardLastRun = &record
+}
+
+func (h *ModelSquareHandler) recordAccountRateGuardAudit(entry accountRateGuardAuditEntry) {
+	h.accountRateGuardAuditMu.Lock()
+	defer h.accountRateGuardAuditMu.Unlock()
+	entry.UnboundGroupIDs = append([]int64(nil), entry.UnboundGroupIDs...)
+	entry.UnboundGroupNames = append([]string(nil), entry.UnboundGroupNames...)
+	entry.RemainingGroupIDs = append([]int64(nil), entry.RemainingGroupIDs...)
+	h.accountRateGuardAudits = append([]accountRateGuardAuditEntry{entry}, h.accountRateGuardAudits...)
+	if len(h.accountRateGuardAudits) > accountRateGuardMaxAuditEntries {
+		h.accountRateGuardAudits = h.accountRateGuardAudits[:accountRateGuardMaxAuditEntries]
+	}
+}
+
+func (h *ModelSquareHandler) accountRateGuardStatusSnapshot() accountRateGuardStatus {
+	h.accountRateGuardAuditMu.Lock()
+	defer h.accountRateGuardAuditMu.Unlock()
+	status := accountRateGuardStatus{Audits: cloneAccountRateGuardAudits(h.accountRateGuardAudits)}
+	if h.accountRateGuardLastRun != nil {
+		last := *h.accountRateGuardLastRun
+		last.Result = cloneAccountRateGuardResult(last.Result)
+		status.LastRun = &last
+	}
+	return status
+}
+
+func (h *ModelSquareHandler) accountRateGuardAuditsSnapshot() []accountRateGuardAuditEntry {
+	h.accountRateGuardAuditMu.Lock()
+	defer h.accountRateGuardAuditMu.Unlock()
+	return cloneAccountRateGuardAudits(h.accountRateGuardAudits)
+}
+
+func cloneAccountRateGuardResult(result accountRateGuardResult) accountRateGuardResult {
+	result.Violations = append([]accountRateGuardViolation(nil), result.Violations...)
+	for i := range result.Violations {
+		result.Violations[i].UnboundGroupIDs = append([]int64(nil), result.Violations[i].UnboundGroupIDs...)
+		result.Violations[i].UnboundGroupNames = append([]string(nil), result.Violations[i].UnboundGroupNames...)
+	}
+	result.Providers = append([]accountRateGuardProvider(nil), result.Providers...)
+	return result
+}
+
+func cloneAccountRateGuardAudits(entries []accountRateGuardAuditEntry) []accountRateGuardAuditEntry {
+	out := make([]accountRateGuardAuditEntry, 0, len(entries))
+	for _, entry := range entries {
+		copied := entry
+		copied.UnboundGroupIDs = append([]int64(nil), entry.UnboundGroupIDs...)
+		copied.UnboundGroupNames = append([]string(nil), entry.UnboundGroupNames...)
+		copied.RemainingGroupIDs = append([]int64(nil), entry.RemainingGroupIDs...)
+		out = append(out, copied)
+	}
+	return out
+}
+
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+func (h *ModelSquareHandler) accountRateGuardProviders(ctx context.Context) []upstreamProviderRuntime {
+	providers := []upstreamProviderRuntime{}
+	if h == nil {
+		return providers
+	}
+	if configured, explicit := h.configuredAccountRateGuardProviders(ctx); explicit {
+		return configured
+	}
+	baseURL, loginURL, _, keysURL, _, email, password, _ := h.resolveConfigLocked(ctx)
+	if strings.TrimSpace(keysURL) == "" {
+		keysURL = findCGKeysPath
+	}
+	providers = append(providers, normalizeUpstreamProviderRuntime(upstreamProviderRuntime{
+		Slug:               "default",
+		Name:               "Default Upstream",
+		BaseURL:            baseURL,
+		LoginURL:           loginURL,
+		KeysURL:            keysURL,
+		Email:              email,
+		Password:           password,
+		AccountNamePrefix:  "",
+		TempDisableMinutes: 1440,
+	}))
+	return providers
+}
+
+func (h *ModelSquareHandler) configuredAccountRateGuardProviders(ctx context.Context) ([]upstreamProviderRuntime, bool) {
+	providers := []upstreamProviderRuntime{}
+	if h == nil {
+		return providers, false
+	}
+	if h.settingService != nil {
+		if settings, err := h.settingService.GetAllSettings(ctx); err == nil && len(settings.UpstreamManagementProviders) > 0 {
+			for _, provider := range settings.UpstreamManagementProviders {
+				if !provider.Enabled {
+					continue
+				}
+				providers = append(providers, normalizeUpstreamProviderRuntime(upstreamProviderRuntime{
+					Slug:               provider.Slug,
+					Name:               provider.Name,
+					BaseURL:            firstNonEmpty(provider.BaseURL, settings.UpstreamManagementBaseURL),
+					LoginURL:           firstNonEmpty(provider.LoginURL, settings.UpstreamManagementLoginURL),
+					KeysURL:            firstNonEmpty(provider.APIKeysURL, provider.KeysURL, settings.UpstreamManagementAPIKeysURL),
+					Email:              firstNonEmpty(provider.Email, settings.UpstreamManagementEmail),
+					Password:           firstNonEmpty(provider.Password, settings.UpstreamManagementPassword),
+					AccountNamePrefix:  provider.AccountNamePrefix,
+					TempDisableMinutes: provider.TempDisableMinutes,
+				}))
+			}
+			return providers, true
+		}
+	}
+	if len(h.providers) > 0 {
+		return append(providers, h.providers...), true
+	}
+	return providers, false
+}
+
+func upstreamProviderRuntimesFromConfig(upstreamCfg config.UpstreamManagementConfig, legacyCfg config.ModelSquareConfig) []upstreamProviderRuntime {
+	providers := make([]upstreamProviderRuntime, 0, len(upstreamCfg.Providers)+len(legacyCfg.Providers))
+	addProvider := func(providerCfg config.UpstreamManagementProviderConfig) {
+		if !providerCfg.Enabled {
+			return
+		}
+		provider := normalizeUpstreamProviderRuntime(upstreamProviderRuntime{
+			Slug:               providerCfg.Slug,
+			Name:               providerCfg.Name,
+			BaseURL:            firstNonEmpty(providerCfg.BaseURL, upstreamCfg.BaseURL, legacyCfg.BaseURL),
+			LoginURL:           firstNonEmpty(providerCfg.LoginURL, upstreamCfg.LoginURL, legacyCfg.LoginURL),
+			KeysURL:            firstNonEmpty(providerCfg.APIKeysURL, providerCfg.KeysURL, upstreamCfg.APIKeysURL, upstreamCfg.KeysURL, legacyCfg.APIKeysURL, legacyCfg.KeysURL),
+			Email:              firstNonEmpty(providerCfg.Email, upstreamCfg.Email, legacyCfg.Email),
+			Password:           firstNonEmpty(providerCfg.Password, upstreamCfg.Password, legacyCfg.Password),
+			AccountNamePrefix:  providerCfg.AccountNamePrefix,
+			TempDisableMinutes: providerCfg.TempDisableMinutes,
+		})
+		providers = append(providers, provider)
+	}
+	for _, providerCfg := range upstreamCfg.Providers {
+		addProvider(providerCfg)
+	}
+	if len(legacyCfg.Providers) > 0 && len(providers) == 0 {
+		for _, providerCfg := range legacyCfg.Providers {
+			addProvider(providerCfg)
+		}
+	}
+	return providers
+}
+
+func normalizeUpstreamProviderRuntime(provider upstreamProviderRuntime) upstreamProviderRuntime {
+	provider.Slug = strings.TrimSpace(provider.Slug)
+	if provider.Slug == "" {
+		provider.Slug = normalizeModelSquareGroupName(provider.Name)
+	}
+	if provider.Slug == "" {
+		provider.Slug = "default"
+	}
+	provider.Name = strings.TrimSpace(provider.Name)
+	if provider.Name == "" {
+		provider.Name = provider.Slug
+	}
+	provider.BaseURL = strings.TrimRight(strings.TrimSpace(provider.BaseURL), "/")
+	if provider.BaseURL == "" {
+		provider.BaseURL = defaultFindCGBaseURL
+	}
+	provider.LoginURL = strings.TrimSpace(provider.LoginURL)
+	provider.KeysURL = strings.TrimSpace(provider.KeysURL)
+	if provider.KeysURL == "" {
+		provider.KeysURL = findCGKeysPath
+	}
+	provider.Email = strings.TrimSpace(provider.Email)
+	if provider.TempDisableMinutes <= 0 {
+		provider.TempDisableMinutes = 1440
+	}
+	return provider
+}
+
+func accountMinGroupRate(account service.Account) (float64, bool) {
+	minRate := 0.0
+	found := false
+	for _, group := range account.Groups {
+		if group == nil {
+			continue
+		}
+		if !found || group.RateMultiplier < minRate {
+			minRate = group.RateMultiplier
+			found = true
+		}
+	}
+	return minRate, found
+}
+
+func accountRateGuardGroupChanges(account service.Account, upstreamRate float64) ([]int64, []string, []int64) {
+	lowGroupIDs := []int64{}
+	lowGroupNames := []string{}
+	lowGroupIDSet := map[int64]struct{}{}
+	for _, group := range account.Groups {
+		if group == nil || group.ID <= 0 {
+			continue
+		}
+		if modelSquareRemoteRateGreater(upstreamRate, group.RateMultiplier) {
+			if _, ok := lowGroupIDSet[group.ID]; ok {
+				continue
+			}
+			lowGroupIDSet[group.ID] = struct{}{}
+			lowGroupIDs = append(lowGroupIDs, group.ID)
+			lowGroupNames = append(lowGroupNames, group.Name)
+		}
+	}
+
+	currentGroupIDs := account.GroupIDs
+	if len(currentGroupIDs) == 0 {
+		currentGroupIDs = make([]int64, 0, len(account.Groups))
+		seen := map[int64]struct{}{}
+		for _, group := range account.Groups {
+			if group == nil || group.ID <= 0 {
+				continue
+			}
+			if _, ok := seen[group.ID]; ok {
+				continue
+			}
+			seen[group.ID] = struct{}{}
+			currentGroupIDs = append(currentGroupIDs, group.ID)
+		}
+	}
+
+	remainingGroupIDs := make([]int64, 0, len(currentGroupIDs))
+	remainingSeen := map[int64]struct{}{}
+	for _, groupID := range currentGroupIDs {
+		if groupID <= 0 {
+			continue
+		}
+		if _, low := lowGroupIDSet[groupID]; low {
+			continue
+		}
+		if _, ok := remainingSeen[groupID]; ok {
+			continue
+		}
+		remainingSeen[groupID] = struct{}{}
+		remainingGroupIDs = append(remainingGroupIDs, groupID)
+	}
+	return lowGroupIDs, lowGroupNames, remainingGroupIDs
+}
+
+func (h *ModelSquareHandler) fetchKeysForProvider(ctx context.Context, provider upstreamProviderRuntime) ([]findCGKeyItem, error) {
+	token := cachedFindCGToken{}
+	if provider.Email != "" || provider.Password != "" {
+		nextToken, err := h.loginProvider(ctx, provider)
+		if err != nil {
+			return nil, err
+		}
+		token = nextToken
+	}
+	payload, status, err := h.requestProviderWithToken(ctx, provider, token, provider.KeysURL, "upstream provider keys")
+	if err != nil {
+		return nil, err
+	}
+	if status < 200 || status >= 300 {
+		return nil, fmt.Errorf("upstream provider keys failed: HTTP %d: %s", status, string(payload))
+	}
+	var keysResp findCGKeysResponse
+	if err := json.Unmarshal(payload, &keysResp); err != nil {
+		return nil, fmt.Errorf("decode upstream provider keys response: %w", err)
+	}
+	if keysResp.Code != 0 {
+		if keysResp.Message == "" {
+			keysResp.Message = "unknown error"
+		}
+		return nil, fmt.Errorf("upstream provider keys failed: %s", keysResp.Message)
+	}
+	return keysResp.Data.Items, nil
+}
+
+func (h *ModelSquareHandler) loginProvider(ctx context.Context, provider upstreamProviderRuntime) (cachedFindCGToken, error) {
+	body, err := json.Marshal(map[string]string{
+		"email":    provider.Email,
+		"password": provider.Password,
+	})
+	if err != nil {
+		return cachedFindCGToken{}, fmt.Errorf("marshal upstream provider login payload: %w", err)
+	}
+	loginURL := provider.LoginURL
+	if loginURL == "" {
+		loginURL = findCGLoginPath
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, providerURL(provider, loginURL), bytes.NewReader(body))
+	if err != nil {
+		return cachedFindCGToken{}, fmt.Errorf("create upstream provider login request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return cachedFindCGToken{}, fmt.Errorf("upstream provider login request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return cachedFindCGToken{}, fmt.Errorf("read upstream provider login response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return cachedFindCGToken{}, fmt.Errorf("upstream provider login failed: HTTP %d: %s", resp.StatusCode, string(raw))
+	}
+	var loginResp findCGLoginResponse
+	if err := json.Unmarshal(raw, &loginResp); err != nil {
+		return cachedFindCGToken{}, fmt.Errorf("decode upstream provider login response: %w", err)
+	}
+	if loginResp.Code != 0 || loginResp.Data.AccessToken == "" {
+		if loginResp.Message == "" {
+			loginResp.Message = "missing access_token"
+		}
+		return cachedFindCGToken{}, fmt.Errorf("upstream provider login failed: %s", loginResp.Message)
+	}
+	tokenType := loginResp.Data.TokenType
+	if tokenType == "" {
+		tokenType = "Bearer"
+	}
+	return cachedFindCGToken{AccessToken: loginResp.Data.AccessToken, TokenType: tokenType}, nil
+}
+
+func (h *ModelSquareHandler) requestProviderWithToken(ctx context.Context, provider upstreamProviderRuntime, token cachedFindCGToken, path, label string) ([]byte, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, providerURL(provider, path), nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("create %s request: %w", label, err)
+	}
+	if token.AccessToken != "" {
+		if token.TokenType == "" {
+			token.TokenType = "Bearer"
+		}
+		req.Header.Set("Authorization", token.TokenType+" "+token.AccessToken)
+	}
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("%s request failed: %w", label, err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, 0, fmt.Errorf("read %s response: %w", label, err)
+	}
+	return raw, resp.StatusCode, nil
+}
+
+func providerURL(provider upstreamProviderRuntime, path string) string {
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		return path
+	}
+	if strings.HasPrefix(path, "/") {
+		return strings.TrimRight(provider.BaseURL, "/") + path
+	}
+	return strings.TrimRight(provider.BaseURL, "/") + "/" + path
 }
 
 func modelSquareRemoteRateGreater(remoteRate, localRate float64) bool {

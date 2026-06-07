@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -520,6 +521,282 @@ func TestModelSquareHandlerGetsKeySummaryFromConfiguredAPIKeysURL(t *testing.T) 
 	require.NotContains(t, rec.Body.String(), "sk-secret-no-group")
 }
 
+func TestModelSquareHandlerAccountRateGuardUnbindsLowRateGroupsWhenLocalGroupRateIsLower(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/custom/login":
+			require.Equal(t, http.MethodPost, r.Method)
+			_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"access_token":"token-guard","expires_in":86400,"token_type":"Bearer"}}`))
+		case "/custom/keys":
+			require.Equal(t, "Bearer token-guard", r.Header.Get("Authorization"))
+			_, _ = w.Write([]byte(`{
+				"code":0,
+				"message":"success",
+				"data":{
+					"items":[
+						{"id":1,"name":"key-a","group":{"name":"VIP","rate_multiplier":0.8}},
+						{"id":2,"name":"key-b","group":{"name":"VIP","rate_multiplier":0.4}}
+					]
+				}
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	groupProvider := &modelSquareGroupProviderStub{accounts: []service.Account{
+		{
+			ID:       101,
+			Name:     "findcg-key-a",
+			GroupIDs: []int64{10, 11},
+			Groups: []*service.Group{
+				{ID: 10, Name: "cheap", RateMultiplier: 0.5},
+				{ID: 11, Name: "expensive", RateMultiplier: 1.2},
+			},
+		},
+		{
+			ID:       102,
+			Name:     "findcg-key-b",
+			GroupIDs: []int64{12},
+			Groups: []*service.Group{
+				{ID: 12, Name: "enough", RateMultiplier: 0.5},
+			},
+		},
+		{
+			ID:       103,
+			Name:     "other-key-a",
+			GroupIDs: []int64{13},
+			Groups: []*service.Group{
+				{ID: 13, Name: "wrong-upstream", RateMultiplier: 0.1},
+			},
+		},
+	}}
+	h := newModelSquareHandler(ModelSquareHandlerConfig{
+		AppConfig: &config.Config{UpstreamManagement: config.UpstreamManagementConfig{
+			Providers: []config.UpstreamManagementProviderConfig{
+				{
+					Slug:              "findcg",
+					Name:              "FindCG",
+					Enabled:           true,
+					BaseURL:           "https://unused.example.com",
+					LoginURL:          server.URL + "/custom/login",
+					APIKeysURL:        server.URL + "/custom/keys",
+					Email:             "admin@example.com",
+					Password:          "secret",
+					AccountNamePrefix: "findcg-",
+				},
+			},
+		}},
+		GroupProvider: groupProvider,
+		HTTPClient:    server.Client(),
+	})
+	router := gin.New()
+	router.POST("/admin/upstream-management/account-rate-guard/run", h.RunAccountRateGuard)
+	router.GET("/admin/upstream-management/account-rate-guard/status", h.GetAccountRateGuardStatus)
+	router.GET("/admin/upstream-management/account-rate-guard/audits", h.ListAccountRateGuardAudits)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/upstream-management/account-rate-guard/run", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, []string{"/custom/login", "/custom/keys"}, paths)
+	accountUpdates := groupProvider.accountUpdatesSnapshot()
+	require.Len(t, accountUpdates, 1)
+	require.Equal(t, int64(101), accountUpdates[0].id)
+	require.NotNil(t, accountUpdates[0].groupIDs)
+	require.Equal(t, []int64{11}, *accountUpdates[0].groupIDs)
+	var resp struct {
+		Code int                    `json:"code"`
+		Data accountRateGuardResult `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 0, resp.Code)
+	require.False(t, resp.Data.DryRun)
+	require.Equal(t, 2, resp.Data.CheckedKeyCount)
+	require.Equal(t, 2, resp.Data.MatchedAccountCount)
+	require.Equal(t, 1, resp.Data.ViolationCount)
+	require.Equal(t, 1, resp.Data.UnboundCount)
+	require.Equal(t, []accountRateGuardProvider{{Slug: "findcg", Name: "FindCG", AccountNamePrefix: "findcg-", CheckedKeyCount: 2}}, resp.Data.Providers)
+	require.Len(t, resp.Data.Violations, 1)
+	require.Equal(t, accountRateGuardViolation{
+		ProviderSlug:            "findcg",
+		ProviderName:            "FindCG",
+		UpstreamKeyName:         "key-a",
+		MatchedLocalAccountID:   101,
+		MatchedLocalAccountName: "findcg-key-a",
+		UpstreamGroupName:       "VIP",
+		UpstreamRateMultiplier:  0.8,
+		LocalMinRateMultiplier:  0.5,
+		UnboundGroupIDs:         []int64{10},
+		UnboundGroupNames:       []string{"cheap"},
+	}, resp.Data.Violations[0])
+
+	statusReq := httptest.NewRequest(http.MethodGet, "/admin/upstream-management/account-rate-guard/status", nil)
+	statusRec := httptest.NewRecorder()
+	router.ServeHTTP(statusRec, statusReq)
+	require.Equal(t, http.StatusOK, statusRec.Code)
+	var statusResp struct {
+		Code int                    `json:"code"`
+		Data accountRateGuardStatus `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(statusRec.Body.Bytes(), &statusResp))
+	require.NotNil(t, statusResp.Data.LastRun)
+	require.Equal(t, int64(1), statusResp.Data.LastRun.RunID)
+	require.False(t, statusResp.Data.LastRun.Result.DryRun)
+	require.Equal(t, 1, statusResp.Data.LastRun.Result.UnboundCount)
+
+	auditReq := httptest.NewRequest(http.MethodGet, "/admin/upstream-management/account-rate-guard/audits", nil)
+	auditRec := httptest.NewRecorder()
+	router.ServeHTTP(auditRec, auditReq)
+	require.Equal(t, http.StatusOK, auditRec.Code)
+	var auditResp struct {
+		Code int                          `json:"code"`
+		Data []accountRateGuardAuditEntry `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(auditRec.Body.Bytes(), &auditResp))
+	require.Len(t, auditResp.Data, 1)
+	require.Equal(t, int64(1), auditResp.Data[0].RunID)
+	require.Equal(t, int64(101), auditResp.Data[0].MatchedLocalAccountID)
+	require.Equal(t, []int64{10}, auditResp.Data[0].UnboundGroupIDs)
+	require.Equal(t, []string{"cheap"}, auditResp.Data[0].UnboundGroupNames)
+	require.Equal(t, []int64{11}, auditResp.Data[0].RemainingGroupIDs)
+}
+
+func TestModelSquareHandlerAccountRateGuardDryRunDoesNotUnbindGroups(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/custom/keys":
+			_, _ = w.Write([]byte(`{
+				"code":0,
+				"message":"success",
+				"data":{"items":[{"id":1,"name":"key-a","group":{"name":"VIP","rate_multiplier":0.8}}]}
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	groupProvider := &modelSquareGroupProviderStub{accounts: []service.Account{
+		{
+			ID:       101,
+			Name:     "findcg-key-a",
+			GroupIDs: []int64{10},
+			Groups:   []*service.Group{{ID: 10, Name: "cheap", RateMultiplier: 0.5}},
+		},
+	}}
+	h := newModelSquareHandler(ModelSquareHandlerConfig{
+		AppConfig: &config.Config{UpstreamManagement: config.UpstreamManagementConfig{
+			Providers: []config.UpstreamManagementProviderConfig{
+				{
+					Slug:              "findcg",
+					Name:              "FindCG",
+					Enabled:           true,
+					APIKeysURL:        server.URL + "/custom/keys",
+					AccountNamePrefix: "findcg-",
+				},
+			},
+		}},
+		GroupProvider: groupProvider,
+		HTTPClient:    server.Client(),
+	})
+	router := gin.New()
+	router.POST("/admin/upstream-management/account-rate-guard/run", h.RunAccountRateGuard)
+	router.GET("/admin/upstream-management/account-rate-guard/audits", h.ListAccountRateGuardAudits)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/upstream-management/account-rate-guard/run", strings.NewReader(`{"dry_run":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Empty(t, groupProvider.accountUpdatesSnapshot())
+	require.Contains(t, rec.Body.String(), `"dry_run":true`)
+	require.Contains(t, rec.Body.String(), `"violation_count":1`)
+	require.Contains(t, rec.Body.String(), `"unbound_count":0`)
+
+	auditReq := httptest.NewRequest(http.MethodGet, "/admin/upstream-management/account-rate-guard/audits", nil)
+	auditRec := httptest.NewRecorder()
+	router.ServeHTTP(auditRec, auditReq)
+	require.Equal(t, http.StatusOK, auditRec.Code)
+	require.Contains(t, auditRec.Body.String(), `"data":[]`)
+}
+
+func TestModelSquareHandlerAccountRateGuardContinuesWhenOneProviderFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/bad/keys":
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`{"message":"bad gateway"}`))
+		case "/good/keys":
+			_, _ = w.Write([]byte(`{
+				"code":0,
+				"message":"success",
+				"data":{"items":[{"id":1,"name":"key-a","group":{"name":"VIP","rate_multiplier":0.8}}]}
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	groupProvider := &modelSquareGroupProviderStub{accounts: []service.Account{
+		{
+			ID:       201,
+			Name:     "good-key-a",
+			GroupIDs: []int64{20},
+			Groups:   []*service.Group{{ID: 20, Name: "cheap", RateMultiplier: 0.5}},
+		},
+	}}
+	h := newModelSquareHandler(ModelSquareHandlerConfig{
+		AppConfig: &config.Config{UpstreamManagement: config.UpstreamManagementConfig{
+			Providers: []config.UpstreamManagementProviderConfig{
+				{
+					Slug:              "bad",
+					Name:              "Bad",
+					Enabled:           true,
+					APIKeysURL:        server.URL + "/bad/keys",
+					AccountNamePrefix: "bad-",
+				},
+				{
+					Slug:              "good",
+					Name:              "Good",
+					Enabled:           true,
+					APIKeysURL:        server.URL + "/good/keys",
+					AccountNamePrefix: "good-",
+				},
+			},
+		}},
+		GroupProvider: groupProvider,
+		HTTPClient:    server.Client(),
+	})
+
+	result, err := h.runAccountRateGuard(context.Background(), false)
+
+	require.NoError(t, err)
+	require.Len(t, result.Providers, 2)
+	require.Equal(t, "bad", result.Providers[0].Slug)
+	require.Contains(t, result.Providers[0].Error, "HTTP 502")
+	require.Equal(t, "good", result.Providers[1].Slug)
+	require.Empty(t, result.Providers[1].Error)
+	require.Equal(t, 1, result.UnboundCount)
+	accountUpdates := groupProvider.accountUpdatesSnapshot()
+	require.Len(t, accountUpdates, 1)
+	require.Equal(t, int64(201), accountUpdates[0].id)
+	require.NotNil(t, accountUpdates[0].groupIDs)
+	require.Empty(t, *accountUpdates[0].groupIDs)
+}
+
 func TestModelSquareHandlerManualSyncMatchesKeysByGroupName(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -750,6 +1027,59 @@ func TestModelSquareHandlerBackgroundSyncRunsOnInterval(t *testing.T) {
 	require.Equal(t, []modelSquareGroupRateUpdate{{id: 10, rate: 0.3}}, groupProvider.updatesSnapshot())
 }
 
+func TestModelSquareHandlerBackgroundAccountRateGuardRunsOnInterval(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/custom/keys":
+			_, _ = w.Write([]byte(`{
+				"code":0,
+				"message":"success",
+				"data":{"items":[{"id":1,"name":"key-a","group":{"name":"VIP","rate_multiplier":0.8}}]}
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	groupProvider := &modelSquareGroupProviderStub{accounts: []service.Account{
+		{
+			ID:       101,
+			Name:     "findcg-key-a",
+			GroupIDs: []int64{10},
+			Groups:   []*service.Group{{ID: 10, Name: "cheap", RateMultiplier: 0.5}},
+		},
+	}}
+	h := newModelSquareHandler(ModelSquareHandlerConfig{
+		AppConfig: &config.Config{UpstreamManagement: config.UpstreamManagementConfig{
+			Providers: []config.UpstreamManagementProviderConfig{
+				{
+					Slug:              "findcg",
+					Name:              "FindCG",
+					Enabled:           true,
+					APIKeysURL:        server.URL + "/custom/keys",
+					AccountNamePrefix: "findcg-",
+				},
+			},
+		}},
+		GroupProvider:            groupProvider,
+		HTTPClient:               server.Client(),
+		AccountRateGuardInterval: 10 * time.Millisecond,
+	})
+	h.StartAccountRateGuard()
+	defer h.StopAccountRateGuard()
+
+	require.Eventually(t, func() bool {
+		return len(groupProvider.accountUpdatesSnapshot()) > 0
+	}, time.Second, 10*time.Millisecond)
+	accountUpdates := groupProvider.accountUpdatesSnapshot()
+	require.Equal(t, int64(101), accountUpdates[0].id)
+	require.NotNil(t, accountUpdates[0].groupIDs)
+	require.Empty(t, *accountUpdates[0].groupIDs)
+}
+
 func TestModelSquareHandlerUsesSettingsSyncInterval(t *testing.T) {
 	settingSvc := service.NewSettingService(&modelSquareSettingRepo{values: map[string]string{
 		service.SettingKeyModelSquareKeysSyncIntervalSeconds: "12",
@@ -761,6 +1091,21 @@ func TestModelSquareHandlerUsesSettingsSyncInterval(t *testing.T) {
 	})
 
 	require.Equal(t, 12*time.Second, h.currentSyncInterval(context.Background()))
+}
+
+func TestModelSquareHandlerUsesSettingsAccountRateGuardInterval(t *testing.T) {
+	settingSvc := service.NewSettingService(&modelSquareSettingRepo{values: map[string]string{
+		service.SettingKeyUpstreamManagementAccountRateGuardIntervalSeconds: "12",
+	}}, &config.Config{UpstreamManagement: config.UpstreamManagementConfig{AccountRateGuardIntervalSeconds: 30}})
+	h := newModelSquareHandler(ModelSquareHandlerConfig{
+		AppConfig: &config.Config{UpstreamManagement: config.UpstreamManagementConfig{
+			AccountRateGuardIntervalSeconds: 30,
+		}},
+		SettingService:           settingSvc,
+		AccountRateGuardInterval: time.Second,
+	})
+
+	require.Equal(t, 12*time.Second, h.currentAccountRateGuardInterval(context.Background()))
 }
 
 func TestModelSquareHandlerManualSyncIgnoresFloatTailDifference(t *testing.T) {
@@ -828,11 +1173,18 @@ type modelSquareGroupRateUpdate struct {
 	rate float64
 }
 
+type modelSquareAccountUpdateCall struct {
+	id       int64
+	groupIDs *[]int64
+}
+
 type modelSquareGroupProviderStub struct {
-	mu      sync.Mutex
-	groups  []service.Group
-	err     error
-	updates []modelSquareGroupRateUpdate
+	mu             sync.Mutex
+	groups         []service.Group
+	accounts       []service.Account
+	err            error
+	updates        []modelSquareGroupRateUpdate
+	accountUpdates []modelSquareAccountUpdateCall
 }
 
 func (s *modelSquareGroupProviderStub) GetAllGroups(context.Context) ([]service.Group, error) {
@@ -862,6 +1214,48 @@ func (s *modelSquareGroupProviderStub) updatesSnapshot() []modelSquareGroupRateU
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]modelSquareGroupRateUpdate(nil), s.updates...)
+}
+
+func (s *modelSquareGroupProviderStub) ListAccounts(context.Context, int, int, string, string, string, string, int64, string, string, string) ([]service.Account, int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	accounts := append([]service.Account(nil), s.accounts...)
+	return accounts, int64(len(accounts)), s.err
+}
+
+func (s *modelSquareGroupProviderStub) UpdateAccount(_ context.Context, id int64, input *service.UpdateAccountInput) (*service.Account, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var groupIDsCopy *[]int64
+	if input != nil && input.GroupIDs != nil {
+		copied := append([]int64(nil), (*input.GroupIDs)...)
+		groupIDsCopy = &copied
+	}
+	s.accountUpdates = append(s.accountUpdates, modelSquareAccountUpdateCall{id: id, groupIDs: groupIDsCopy})
+	for i := range s.accounts {
+		if s.accounts[i].ID == id {
+			if groupIDsCopy != nil {
+				s.accounts[i].GroupIDs = append([]int64(nil), (*groupIDsCopy)...)
+			}
+			return &s.accounts[i], s.err
+		}
+	}
+	return &service.Account{ID: id}, s.err
+}
+
+func (s *modelSquareGroupProviderStub) accountUpdatesSnapshot() []modelSquareAccountUpdateCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]modelSquareAccountUpdateCall, 0, len(s.accountUpdates))
+	for _, call := range s.accountUpdates {
+		copied := modelSquareAccountUpdateCall{id: call.id}
+		if call.groupIDs != nil {
+			groupIDs := append([]int64(nil), (*call.groupIDs)...)
+			copied.groupIDs = &groupIDs
+		}
+		out = append(out, copied)
+	}
+	return out
 }
 
 type modelSquareSettingRepo struct {
