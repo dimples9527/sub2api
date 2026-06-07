@@ -85,6 +85,7 @@ type AdminService interface {
 	RefreshAccountCredentials(ctx context.Context, id int64) (*Account, error)
 	ClearAccountError(ctx context.Context, id int64) (*Account, error)
 	SetAccountError(ctx context.Context, id int64, errorMsg string) error
+	SetAccountTempUnschedulable(ctx context.Context, id int64, until time.Time, reason string) error
 	// EnsureOpenAIPrivacy 检查 OpenAI OAuth 账号 privacy_mode，未设置则尝试关闭训练数据共享并持久化。
 	EnsureOpenAIPrivacy(ctx context.Context, account *Account) string
 	// EnsureAntigravityPrivacy 检查 Antigravity OAuth 账号 privacy_mode，未设置则调用 setUserSettings 并持久化。
@@ -2911,6 +2912,10 @@ func (s *adminServiceImpl) ClearAccountError(ctx context.Context, id int64) (*Ac
 
 func (s *adminServiceImpl) SetAccountError(ctx context.Context, id int64, errorMsg string) error {
 	return s.accountRepo.SetError(ctx, id, errorMsg)
+}
+
+func (s *adminServiceImpl) SetAccountTempUnschedulable(ctx context.Context, id int64, until time.Time, reason string) error {
+	return s.accountRepo.SetTempUnschedulable(ctx, id, until, reason)
 }
 
 func (s *adminServiceImpl) SetAccountSchedulable(ctx context.Context, id int64, schedulable bool) (*Account, error) {

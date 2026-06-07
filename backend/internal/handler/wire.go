@@ -81,6 +81,7 @@ func ProvideAdminHandlers(
 func ProvideModelSquareHandler(cfg *config.Config, settingService *service.SettingService, groupProvider service.AdminService) *admin.ModelSquareHandler {
 	h := admin.NewModelSquareHandler(cfg, settingService, groupProvider)
 	h.StartBackgroundSync()
+	h.StartAccountRateGuard()
 	return h
 }
 

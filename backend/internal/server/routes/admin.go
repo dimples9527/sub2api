@@ -108,10 +108,16 @@ func registerUpstreamManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 	admin.GET("/upstream-management/key-summary", h.Admin.ModelSquare.KeySummary)
 	admin.GET("/upstream-management/rate-warnings", h.Admin.ModelSquare.RateWarnings)
 	admin.POST("/upstream-management/sync", h.Admin.ModelSquare.SyncKeys)
+	admin.POST("/upstream-management/account-rate-guard/run", h.Admin.ModelSquare.RunAccountRateGuard)
+	admin.GET("/upstream-management/account-rate-guard/status", h.Admin.ModelSquare.GetAccountRateGuardStatus)
+	admin.GET("/upstream-management/account-rate-guard/audits", h.Admin.ModelSquare.ListAccountRateGuardAudits)
 	admin.GET("/model-square/groups", h.Admin.ModelSquare.GetAvailableGroups)
 	admin.GET("/model-square/key-summary", h.Admin.ModelSquare.KeySummary)
 	admin.GET("/model-square/rate-warnings", h.Admin.ModelSquare.RateWarnings)
 	admin.POST("/model-square/sync", h.Admin.ModelSquare.SyncKeys)
+	admin.POST("/model-square/account-rate-guard/run", h.Admin.ModelSquare.RunAccountRateGuard)
+	admin.GET("/model-square/account-rate-guard/status", h.Admin.ModelSquare.GetAccountRateGuardStatus)
+	admin.GET("/model-square/account-rate-guard/audits", h.Admin.ModelSquare.ListAccountRateGuardAudits)
 }
 
 func registerContentModerationRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
