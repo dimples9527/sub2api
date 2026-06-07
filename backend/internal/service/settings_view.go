@@ -167,15 +167,17 @@ type SystemSettings struct {
 	FallbackModelAntigravity string `json:"fallback_model_antigravity"`
 
 	// Upstream management configuration
-	UpstreamManagementBaseURL                 string
-	UpstreamManagementLoginURL                string
-	UpstreamManagementModelURL                string
-	UpstreamManagementAPIKeysURL              string
-	UpstreamManagementGroupsURL               string
-	UpstreamManagementEmail                   string
-	UpstreamManagementPassword                string
-	UpstreamManagementPasswordConfigured      bool
-	UpstreamManagementKeysSyncIntervalSeconds int
+	UpstreamManagementBaseURL                         string
+	UpstreamManagementLoginURL                        string
+	UpstreamManagementModelURL                        string
+	UpstreamManagementAPIKeysURL                      string
+	UpstreamManagementGroupsURL                       string
+	UpstreamManagementEmail                           string
+	UpstreamManagementPassword                        string
+	UpstreamManagementPasswordConfigured              bool
+	UpstreamManagementKeysSyncIntervalSeconds         int
+	UpstreamManagementAccountRateGuardIntervalSeconds int
+	UpstreamManagementProviders                       []UpstreamManagementProviderSetting
 
 	// Legacy model_square aliases kept for backward compatibility while callers migrate.
 	ModelSquareBaseURL                 string
@@ -251,6 +253,21 @@ type SystemSettings struct {
 
 	// 系统全局默认平台配额（key = platform，nil/缺省 = 不限制）
 	DefaultPlatformQuotas map[string]*DefaultPlatformQuotaSetting `json:"default_platform_quotas"`
+}
+
+type UpstreamManagementProviderSetting struct {
+	Slug               string `json:"slug"`
+	Name               string `json:"name"`
+	Enabled            bool   `json:"enabled"`
+	BaseURL            string `json:"base_url"`
+	LoginURL           string `json:"login_url"`
+	APIKeysURL         string `json:"api_keys_url"`
+	KeysURL            string `json:"keys_url,omitempty"`
+	Email              string `json:"email"`
+	Password           string `json:"password,omitempty"`
+	PasswordConfigured bool   `json:"password_configured,omitempty"`
+	AccountNamePrefix  string `json:"account_name_prefix"`
+	TempDisableMinutes int    `json:"temp_disable_minutes"`
 }
 
 type DefaultSubscriptionSetting struct {

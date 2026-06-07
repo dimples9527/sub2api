@@ -164,14 +164,16 @@ type SystemSettings struct {
 	FallbackModelGemini      string `json:"fallback_model_gemini"`
 	FallbackModelAntigravity string `json:"fallback_model_antigravity"`
 
-	UpstreamManagementBaseURL                 string `json:"upstream_management_base_url"`
-	UpstreamManagementLoginURL                string `json:"upstream_management_login_url"`
-	UpstreamManagementModelURL                string `json:"upstream_management_model_url"`
-	UpstreamManagementAPIKeysURL              string `json:"upstream_management_api_keys_url"`
-	UpstreamManagementGroupsURL               string `json:"upstream_management_groups_url"`
-	UpstreamManagementEmail                   string `json:"upstream_management_email"`
-	UpstreamManagementPasswordConfigured      bool   `json:"upstream_management_password_configured"`
-	UpstreamManagementKeysSyncIntervalSeconds int    `json:"upstream_management_keys_sync_interval_seconds"`
+	UpstreamManagementBaseURL                         string                              `json:"upstream_management_base_url"`
+	UpstreamManagementLoginURL                        string                              `json:"upstream_management_login_url"`
+	UpstreamManagementModelURL                        string                              `json:"upstream_management_model_url"`
+	UpstreamManagementAPIKeysURL                      string                              `json:"upstream_management_api_keys_url"`
+	UpstreamManagementGroupsURL                       string                              `json:"upstream_management_groups_url"`
+	UpstreamManagementEmail                           string                              `json:"upstream_management_email"`
+	UpstreamManagementPasswordConfigured              bool                                `json:"upstream_management_password_configured"`
+	UpstreamManagementKeysSyncIntervalSeconds         int                                 `json:"upstream_management_keys_sync_interval_seconds"`
+	UpstreamManagementAccountRateGuardIntervalSeconds int                                 `json:"upstream_management_account_rate_guard_interval_seconds"`
+	UpstreamManagementProviders                       []UpstreamManagementProviderSetting `json:"upstream_management_providers"`
 
 	// Identity patch configuration (Claude -> Gemini)
 	EnableIdentityPatch bool   `json:"enable_identity_patch"`
@@ -270,6 +272,19 @@ type SystemSettings struct {
 
 	// 系统全局默认平台配额（key = platform，nil/缺省 = 不限制）
 	DefaultPlatformQuotas map[string]*service.DefaultPlatformQuotaSetting `json:"default_platform_quotas,omitempty"`
+}
+
+type UpstreamManagementProviderSetting struct {
+	Slug               string `json:"slug"`
+	Name               string `json:"name"`
+	Enabled            bool   `json:"enabled"`
+	BaseURL            string `json:"base_url"`
+	LoginURL           string `json:"login_url"`
+	APIKeysURL         string `json:"api_keys_url"`
+	Email              string `json:"email"`
+	PasswordConfigured bool   `json:"password_configured"`
+	AccountNamePrefix  string `json:"account_name_prefix"`
+	TempDisableMinutes int    `json:"temp_disable_minutes"`
 }
 
 type DefaultSubscriptionSetting struct {

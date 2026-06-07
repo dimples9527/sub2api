@@ -1907,6 +1907,19 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 		firstPositiveInt(settings.UpstreamManagementKeysSyncIntervalSeconds, settings.ModelSquareKeysSyncIntervalSeconds),
 		s.cfg,
 	))
+	updates[SettingKeyUpstreamManagementAccountRateGuardIntervalSeconds] = strconv.Itoa(normalizeUpstreamManagementAccountRateGuardIntervalSeconds(
+		settings.UpstreamManagementAccountRateGuardIntervalSeconds,
+		s.cfg,
+	))
+	providers, err := s.prepareUpstreamManagementProvidersForWrite(ctx, settings.UpstreamManagementProviders)
+	if err != nil {
+		return nil, err
+	}
+	providersRaw, err := json.Marshal(providers)
+	if err != nil {
+		return nil, fmt.Errorf("marshal upstream management providers: %w", err)
+	}
+	updates[SettingKeyUpstreamManagementProviders] = string(providersRaw)
 
 	// Identity patch configuration (Claude -> Gemini)
 	updates[SettingKeyEnableIdentityPatch] = strconv.FormatBool(settings.EnableIdentityPatch)
@@ -2851,19 +2864,21 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeySMTPPort:                                  "587",
 		SettingKeySMTPUseTLS:                                "false",
 		// Model fallback defaults
-		SettingKeyEnableModelFallback:                       "false",
-		SettingKeyFallbackModelAnthropic:                    "claude-3-5-sonnet-20241022",
-		SettingKeyFallbackModelOpenAI:                       "gpt-4o",
-		SettingKeyFallbackModelGemini:                       "gemini-2.5-pro",
-		SettingKeyFallbackModelAntigravity:                  "gemini-2.5-pro",
-		SettingKeyUpstreamManagementBaseURL:                 "",
-		SettingKeyUpstreamManagementLoginURL:                "",
-		SettingKeyUpstreamManagementModelURL:                "",
-		SettingKeyUpstreamManagementAPIKeysURL:              "",
-		SettingKeyUpstreamManagementGroupsURL:               "",
-		SettingKeyUpstreamManagementEmail:                   "",
-		SettingKeyUpstreamManagementPassword:                "",
-		SettingKeyUpstreamManagementKeysSyncIntervalSeconds: strconv.Itoa(configUpstreamManagementKeysSyncIntervalSeconds(s.cfg)),
+		SettingKeyEnableModelFallback:                               "false",
+		SettingKeyFallbackModelAnthropic:                            "claude-3-5-sonnet-20241022",
+		SettingKeyFallbackModelOpenAI:                               "gpt-4o",
+		SettingKeyFallbackModelGemini:                               "gemini-2.5-pro",
+		SettingKeyFallbackModelAntigravity:                          "gemini-2.5-pro",
+		SettingKeyUpstreamManagementBaseURL:                         "",
+		SettingKeyUpstreamManagementLoginURL:                        "",
+		SettingKeyUpstreamManagementModelURL:                        "",
+		SettingKeyUpstreamManagementAPIKeysURL:                      "",
+		SettingKeyUpstreamManagementGroupsURL:                       "",
+		SettingKeyUpstreamManagementEmail:                           "",
+		SettingKeyUpstreamManagementPassword:                        "",
+		SettingKeyUpstreamManagementKeysSyncIntervalSeconds:         strconv.Itoa(configUpstreamManagementKeysSyncIntervalSeconds(s.cfg)),
+		SettingKeyUpstreamManagementAccountRateGuardIntervalSeconds: strconv.Itoa(configUpstreamManagementAccountRateGuardIntervalSeconds(s.cfg)),
+		SettingKeyUpstreamManagementProviders:                       "",
 		// Identity patch defaults
 		SettingKeyEnableIdentityPatch: "true",
 		SettingKeyIdentityPatchPrompt: "",
@@ -3437,6 +3452,11 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	if v, err := strconv.Atoi(strings.TrimSpace(firstNonEmpty(settings[SettingKeyUpstreamManagementKeysSyncIntervalSeconds], settings[SettingKeyModelSquareKeysSyncIntervalSeconds]))); err == nil && v > 0 {
 		result.UpstreamManagementKeysSyncIntervalSeconds = v
 	}
+	result.UpstreamManagementAccountRateGuardIntervalSeconds = configUpstreamManagementAccountRateGuardIntervalSeconds(s.cfg)
+	if v, err := strconv.Atoi(strings.TrimSpace(settings[SettingKeyUpstreamManagementAccountRateGuardIntervalSeconds])); err == nil && v > 0 {
+		result.UpstreamManagementAccountRateGuardIntervalSeconds = v
+	}
+	result.UpstreamManagementProviders = parseUpstreamManagementProvidersSetting(settings[SettingKeyUpstreamManagementProviders], s.cfg)
 	result.ModelSquareBaseURL = result.UpstreamManagementBaseURL
 	result.ModelSquareLoginURL = result.UpstreamManagementLoginURL
 	result.ModelSquareModelURL = result.UpstreamManagementModelURL
@@ -3546,11 +3566,114 @@ func configUpstreamManagementKeysSyncIntervalSeconds(cfg *config.Config) int {
 	return firstPositiveInt(cfg.UpstreamManagement.KeysSyncIntervalSeconds, cfg.ModelSquare.KeysSyncIntervalSeconds, 5)
 }
 
+func configUpstreamManagementAccountRateGuardIntervalSeconds(cfg *config.Config) int {
+	if cfg == nil {
+		return 5
+	}
+	return firstPositiveInt(cfg.UpstreamManagement.AccountRateGuardIntervalSeconds, cfg.ModelSquare.AccountRateGuardIntervalSeconds, 5)
+}
+
+func parseUpstreamManagementProvidersSetting(raw string, cfg *config.Config) []UpstreamManagementProviderSetting {
+	raw = strings.TrimSpace(raw)
+	if raw != "" {
+		var providers []UpstreamManagementProviderSetting
+		if err := json.Unmarshal([]byte(raw), &providers); err == nil {
+			return normalizeUpstreamManagementProviderSettings(providers)
+		}
+		slog.Warn("failed to unmarshal upstream management providers setting")
+	}
+	if cfg == nil {
+		return []UpstreamManagementProviderSetting{}
+	}
+	providers := providerSettingsFromConfig(cfg.UpstreamManagement.Providers)
+	if len(providers) == 0 {
+		providers = providerSettingsFromConfig(cfg.ModelSquare.Providers)
+	}
+	return normalizeUpstreamManagementProviderSettings(providers)
+}
+
+func providerSettingsFromConfig(providers []config.UpstreamManagementProviderConfig) []UpstreamManagementProviderSetting {
+	if len(providers) == 0 {
+		return []UpstreamManagementProviderSetting{}
+	}
+	out := make([]UpstreamManagementProviderSetting, 0, len(providers))
+	for _, provider := range providers {
+		out = append(out, UpstreamManagementProviderSetting{
+			Slug:               provider.Slug,
+			Name:               provider.Name,
+			Enabled:            provider.Enabled,
+			BaseURL:            provider.BaseURL,
+			LoginURL:           provider.LoginURL,
+			APIKeysURL:         firstNonEmpty(provider.APIKeysURL, provider.KeysURL),
+			Email:              provider.Email,
+			Password:           provider.Password,
+			AccountNamePrefix:  provider.AccountNamePrefix,
+			TempDisableMinutes: provider.TempDisableMinutes,
+		})
+	}
+	return out
+}
+
+func normalizeUpstreamManagementProviderSettings(providers []UpstreamManagementProviderSetting) []UpstreamManagementProviderSetting {
+	out := make([]UpstreamManagementProviderSetting, 0, len(providers))
+	for _, provider := range providers {
+		provider.Slug = strings.TrimSpace(provider.Slug)
+		provider.Name = strings.TrimSpace(provider.Name)
+		provider.BaseURL = strings.TrimSpace(provider.BaseURL)
+		provider.LoginURL = strings.TrimSpace(provider.LoginURL)
+		provider.APIKeysURL = strings.TrimSpace(firstNonEmpty(provider.APIKeysURL, provider.KeysURL))
+		provider.KeysURL = ""
+		provider.Email = strings.TrimSpace(provider.Email)
+		provider.AccountNamePrefix = strings.TrimSpace(provider.AccountNamePrefix)
+		if provider.TempDisableMinutes <= 0 {
+			provider.TempDisableMinutes = 1440
+		}
+		provider.PasswordConfigured = strings.TrimSpace(provider.Password) != "" || provider.PasswordConfigured
+		if provider.Slug == "" && provider.Name == "" && provider.BaseURL == "" && provider.APIKeysURL == "" && provider.Email == "" && provider.AccountNamePrefix == "" {
+			continue
+		}
+		out = append(out, provider)
+	}
+	return out
+}
+
+func (s *SettingService) prepareUpstreamManagementProvidersForWrite(ctx context.Context, providers []UpstreamManagementProviderSetting) ([]UpstreamManagementProviderSetting, error) {
+	normalized := normalizeUpstreamManagementProviderSettings(providers)
+	if len(normalized) == 0 {
+		return normalized, nil
+	}
+	existingRaw, err := s.settingRepo.GetValue(ctx, SettingKeyUpstreamManagementProviders)
+	if err != nil && !errors.Is(err, ErrSettingNotFound) {
+		return nil, fmt.Errorf("load existing upstream management providers: %w", err)
+	}
+	existing := parseUpstreamManagementProvidersSetting(existingRaw, nil)
+	existingPasswordBySlug := make(map[string]string, len(existing))
+	for _, provider := range existing {
+		if provider.Slug != "" && provider.Password != "" {
+			existingPasswordBySlug[provider.Slug] = provider.Password
+		}
+	}
+	for i := range normalized {
+		if normalized[i].Password == "" && normalized[i].Slug != "" {
+			normalized[i].Password = existingPasswordBySlug[normalized[i].Slug]
+		}
+		normalized[i].PasswordConfigured = strings.TrimSpace(normalized[i].Password) != ""
+	}
+	return normalized, nil
+}
+
 func normalizeUpstreamManagementKeysSyncIntervalSeconds(value int, cfg *config.Config) int {
 	if value > 0 {
 		return value
 	}
 	return configUpstreamManagementKeysSyncIntervalSeconds(cfg)
+}
+
+func normalizeUpstreamManagementAccountRateGuardIntervalSeconds(value int, cfg *config.Config) int {
+	if value > 0 {
+		return value
+	}
+	return configUpstreamManagementAccountRateGuardIntervalSeconds(cfg)
 }
 
 func firstPositiveInt(values ...int) int {

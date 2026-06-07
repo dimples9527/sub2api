@@ -185,16 +185,32 @@ type LLMMonitorConfig struct {
 }
 
 type UpstreamManagementConfig struct {
-	BaseURL                 string `mapstructure:"base_url"`
-	LoginURL                string `mapstructure:"login_url"`
-	ModelURL                string `mapstructure:"model_url"`
-	ModelSquareURL          string `mapstructure:"model_square_url"`
-	APIKeysURL              string `mapstructure:"api_keys_url"`
-	KeysURL                 string `mapstructure:"keys_url"`
-	GroupsURL               string `mapstructure:"groups_url"`
-	Email                   string `mapstructure:"email"`
-	Password                string `mapstructure:"password"`
-	KeysSyncIntervalSeconds int    `mapstructure:"keys_sync_interval_seconds"`
+	BaseURL                         string                             `mapstructure:"base_url"`
+	LoginURL                        string                             `mapstructure:"login_url"`
+	ModelURL                        string                             `mapstructure:"model_url"`
+	ModelSquareURL                  string                             `mapstructure:"model_square_url"`
+	APIKeysURL                      string                             `mapstructure:"api_keys_url"`
+	KeysURL                         string                             `mapstructure:"keys_url"`
+	GroupsURL                       string                             `mapstructure:"groups_url"`
+	Email                           string                             `mapstructure:"email"`
+	Password                        string                             `mapstructure:"password"`
+	KeysSyncIntervalSeconds         int                                `mapstructure:"keys_sync_interval_seconds"`
+	AccountRateGuardIntervalSeconds int                                `mapstructure:"account_rate_guard_interval_seconds"`
+	Providers                       []UpstreamManagementProviderConfig `mapstructure:"providers"`
+}
+
+type UpstreamManagementProviderConfig struct {
+	Slug               string `mapstructure:"slug"`
+	Name               string `mapstructure:"name"`
+	Enabled            bool   `mapstructure:"enabled"`
+	BaseURL            string `mapstructure:"base_url"`
+	LoginURL           string `mapstructure:"login_url"`
+	APIKeysURL         string `mapstructure:"api_keys_url"`
+	KeysURL            string `mapstructure:"keys_url"`
+	Email              string `mapstructure:"email"`
+	Password           string `mapstructure:"password"`
+	AccountNamePrefix  string `mapstructure:"account_name_prefix"`
+	TempDisableMinutes int    `mapstructure:"temp_disable_minutes"`
 }
 
 type ModelSquareConfig = UpstreamManagementConfig
@@ -1460,6 +1476,9 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	if cfg.UpstreamManagement.KeysSyncIntervalSeconds <= 0 {
 		cfg.UpstreamManagement.KeysSyncIntervalSeconds = cfg.ModelSquare.KeysSyncIntervalSeconds
 	}
+	if cfg.UpstreamManagement.AccountRateGuardIntervalSeconds <= 0 {
+		cfg.UpstreamManagement.AccountRateGuardIntervalSeconds = cfg.ModelSquare.AccountRateGuardIntervalSeconds
+	}
 	cfg.ModelSquare = cfg.UpstreamManagement
 	cfg.OIDC.UsePKCEExplicit = hasExplicitConfigOrEnv("oidc_connect.use_pkce", "OIDC_CONNECT_USE_PKCE")
 	cfg.OIDC.ValidateIDTokenExplicit = hasExplicitConfigOrEnv("oidc_connect.validate_id_token", "OIDC_CONNECT_VALIDATE_ID_TOKEN")
@@ -1791,6 +1810,7 @@ func setDefaults() {
 	viper.SetDefault("upstream_management.email", "")
 	viper.SetDefault("upstream_management.password", "")
 	viper.SetDefault("upstream_management.keys_sync_interval_seconds", 5)
+	viper.SetDefault("upstream_management.account_rate_guard_interval_seconds", 5)
 	viper.SetDefault("model_square.base_url", "")
 	viper.SetDefault("model_square.login_url", "")
 	viper.SetDefault("model_square.model_square_url", "")
@@ -1799,6 +1819,7 @@ func setDefaults() {
 	viper.SetDefault("model_square.email", "")
 	viper.SetDefault("model_square.password", "")
 	viper.SetDefault("model_square.keys_sync_interval_seconds", 5)
+	viper.SetDefault("model_square.account_rate_guard_interval_seconds", 5)
 
 	// API Key auth cache
 	viper.SetDefault("api_key_auth_cache.l1_size", 65535)
