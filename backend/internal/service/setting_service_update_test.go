@@ -15,6 +15,7 @@ import (
 
 type settingUpdateRepoStub struct {
 	updates map[string]string
+	values  map[string]string
 }
 
 func (s *settingUpdateRepoStub) Get(ctx context.Context, key string) (*Setting, error) {
@@ -22,7 +23,12 @@ func (s *settingUpdateRepoStub) Get(ctx context.Context, key string) (*Setting, 
 }
 
 func (s *settingUpdateRepoStub) GetValue(ctx context.Context, key string) (string, error) {
-	panic("unexpected GetValue call")
+	if s.values != nil {
+		if value, ok := s.values[key]; ok {
+			return value, nil
+		}
+	}
+	return "", ErrSettingNotFound
 }
 
 func (s *settingUpdateRepoStub) Set(ctx context.Context, key, value string) error {
@@ -295,14 +301,15 @@ func TestSettingService_UpdateSettings_UpstreamManagementSettings(t *testing.T) 
 	svc := NewSettingService(repo, &config.Config{})
 
 	err := svc.UpdateSettings(context.Background(), &SystemSettings{
-		UpstreamManagementBaseURL:                 " https://upstream.example.com/ ",
-		UpstreamManagementLoginURL:                " https://upstream.example.com/login ",
-		UpstreamManagementModelURL:                " https://upstream.example.com/models ",
-		UpstreamManagementAPIKeysURL:              " https://upstream.example.com/keys ",
-		UpstreamManagementGroupsURL:               " https://upstream.example.com/groups ",
-		UpstreamManagementEmail:                   " admin@example.com ",
-		UpstreamManagementPassword:                "secret",
-		UpstreamManagementKeysSyncIntervalSeconds: 60,
+		UpstreamManagementBaseURL:                         " https://upstream.example.com/ ",
+		UpstreamManagementLoginURL:                        " https://upstream.example.com/login ",
+		UpstreamManagementModelURL:                        " https://upstream.example.com/models ",
+		UpstreamManagementAPIKeysURL:                      " https://upstream.example.com/keys ",
+		UpstreamManagementGroupsURL:                       " https://upstream.example.com/groups ",
+		UpstreamManagementEmail:                           " admin@example.com ",
+		UpstreamManagementPassword:                        "secret",
+		UpstreamManagementKeysSyncIntervalSeconds:         60,
+		UpstreamManagementAccountRateGuardIntervalSeconds: 15,
 	})
 
 	require.NoError(t, err)
@@ -314,28 +321,69 @@ func TestSettingService_UpdateSettings_UpstreamManagementSettings(t *testing.T) 
 	require.Equal(t, "admin@example.com", repo.updates[SettingKeyUpstreamManagementEmail])
 	require.Equal(t, "secret", repo.updates[SettingKeyUpstreamManagementPassword])
 	require.Equal(t, "60", repo.updates[SettingKeyUpstreamManagementKeysSyncIntervalSeconds])
+	require.Equal(t, "15", repo.updates[SettingKeyUpstreamManagementAccountRateGuardIntervalSeconds])
+}
+
+func TestSettingService_UpdateSettings_UpstreamManagementProvidersPreservesExistingPassword(t *testing.T) {
+	existingRaw := `[{"slug":"findcg","name":"FindCG","enabled":true,"api_keys_url":"https://old.example.com/keys","password":"existing-secret","account_name_prefix":"findcg-","temp_disable_minutes":1440}]`
+	repo := &settingUpdateRepoStub{values: map[string]string{SettingKeyUpstreamManagementProviders: existingRaw}}
+	svc := NewSettingService(repo, &config.Config{})
+
+	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		UpstreamManagementProviders: []UpstreamManagementProviderSetting{
+			{
+				Slug:               " findcg ",
+				Name:               " FindCG ",
+				Enabled:            true,
+				BaseURL:            " https://www.findcg.com ",
+				APIKeysURL:         " https://www.findcg.com/api/v1/keys?page=1 ",
+				Email:              " admin@example.com ",
+				AccountNamePrefix:  " findcg- ",
+				TempDisableMinutes: 0,
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	var providers []UpstreamManagementProviderSetting
+	require.NoError(t, json.Unmarshal([]byte(repo.updates[SettingKeyUpstreamManagementProviders]), &providers))
+	require.Len(t, providers, 1)
+	require.Equal(t, "findcg", providers[0].Slug)
+	require.Equal(t, "FindCG", providers[0].Name)
+	require.Equal(t, "https://www.findcg.com", providers[0].BaseURL)
+	require.Equal(t, "https://www.findcg.com/api/v1/keys?page=1", providers[0].APIKeysURL)
+	require.Equal(t, "admin@example.com", providers[0].Email)
+	require.Equal(t, "existing-secret", providers[0].Password)
+	require.True(t, providers[0].PasswordConfigured)
+	require.Equal(t, "findcg-", providers[0].AccountNamePrefix)
+	require.Equal(t, 1440, providers[0].TempDisableMinutes)
 }
 
 func TestSettingService_ParseSettings_UpstreamManagementKeysSyncIntervalFallsBackToConfig(t *testing.T) {
 	svc := NewSettingService(&settingUpdateRepoStub{}, &config.Config{
-		UpstreamManagement: config.UpstreamManagementConfig{KeysSyncIntervalSeconds: 90},
+		UpstreamManagement: config.UpstreamManagementConfig{
+			KeysSyncIntervalSeconds:         90,
+			AccountRateGuardIntervalSeconds: 11,
+		},
 	})
 
 	got := svc.parseSettings(map[string]string{})
 
 	require.Equal(t, 90, got.UpstreamManagementKeysSyncIntervalSeconds)
+	require.Equal(t, 11, got.UpstreamManagementAccountRateGuardIntervalSeconds)
 }
 
 func TestSettingService_ParseSettings_UpstreamManagementPrefersNewKeysAndFallsBackToLegacy(t *testing.T) {
 	svc := NewSettingService(&settingUpdateRepoStub{}, &config.Config{})
 
 	got := svc.parseSettings(map[string]string{
-		SettingKeyModelSquareBaseURL:                 "https://legacy.example.com",
-		SettingKeyUpstreamManagementBaseURL:          "https://new.example.com",
-		SettingKeyModelSquareKeysURL:                 "https://legacy.example.com/keys",
-		SettingKeyUpstreamManagementGroupsURL:        "https://new.example.com/groups",
-		SettingKeyModelSquareEmail:                   "legacy@example.com",
-		SettingKeyModelSquareKeysSyncIntervalSeconds: "45",
+		SettingKeyModelSquareBaseURL:                                "https://legacy.example.com",
+		SettingKeyUpstreamManagementBaseURL:                         "https://new.example.com",
+		SettingKeyModelSquareKeysURL:                                "https://legacy.example.com/keys",
+		SettingKeyUpstreamManagementGroupsURL:                       "https://new.example.com/groups",
+		SettingKeyModelSquareEmail:                                  "legacy@example.com",
+		SettingKeyModelSquareKeysSyncIntervalSeconds:                "45",
+		SettingKeyUpstreamManagementAccountRateGuardIntervalSeconds: "17",
 	})
 
 	require.Equal(t, "https://new.example.com", got.UpstreamManagementBaseURL)
@@ -343,6 +391,34 @@ func TestSettingService_ParseSettings_UpstreamManagementPrefersNewKeysAndFallsBa
 	require.Equal(t, "https://new.example.com/groups", got.UpstreamManagementGroupsURL)
 	require.Equal(t, "legacy@example.com", got.UpstreamManagementEmail)
 	require.Equal(t, 45, got.UpstreamManagementKeysSyncIntervalSeconds)
+	require.Equal(t, 17, got.UpstreamManagementAccountRateGuardIntervalSeconds)
+}
+
+func TestSettingService_ParseSettings_UpstreamManagementProvidersFallBackToConfig(t *testing.T) {
+	svc := NewSettingService(&settingUpdateRepoStub{}, &config.Config{
+		UpstreamManagement: config.UpstreamManagementConfig{
+			Providers: []config.UpstreamManagementProviderConfig{
+				{
+					Slug:              "findcg",
+					Name:              "FindCG",
+					Enabled:           true,
+					APIKeysURL:        "https://www.findcg.com/api/v1/keys",
+					Password:          "config-secret",
+					AccountNamePrefix: "findcg-",
+				},
+			},
+		},
+	})
+
+	got := svc.parseSettings(map[string]string{})
+
+	require.Len(t, got.UpstreamManagementProviders, 1)
+	require.Equal(t, "findcg", got.UpstreamManagementProviders[0].Slug)
+	require.Equal(t, "https://www.findcg.com/api/v1/keys", got.UpstreamManagementProviders[0].APIKeysURL)
+	require.Equal(t, "config-secret", got.UpstreamManagementProviders[0].Password)
+	require.True(t, got.UpstreamManagementProviders[0].PasswordConfigured)
+	require.Equal(t, "findcg-", got.UpstreamManagementProviders[0].AccountNamePrefix)
+	require.Equal(t, 1440, got.UpstreamManagementProviders[0].TempDisableMinutes)
 }
 
 func TestSettingService_UpdateSettings_APIKeyACLTrustForwardedIPRefreshesConfig(t *testing.T) {
