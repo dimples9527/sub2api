@@ -232,6 +232,66 @@ export interface UpstreamKeySummary {
   }>
 }
 
+export interface AccountRateGuardProviderResult {
+  slug: string
+  name: string
+  account_name_prefix: string
+  checked_key_count: number
+  error?: string
+}
+
+export interface AccountRateGuardViolation {
+  provider_slug: string
+  provider_name: string
+  upstream_key_name: string
+  matched_local_account_id: number
+  matched_local_account_name: string
+  upstream_group_name: string
+  upstream_rate_multiplier: number
+  local_min_rate_multiplier: number
+  unbound_group_ids?: number[]
+  unbound_group_names?: string[]
+}
+
+export interface AccountRateGuardResult {
+  dry_run: boolean
+  checked_key_count: number
+  matched_account_count: number
+  violation_count: number
+  unbound_count: number
+  violations: AccountRateGuardViolation[]
+  providers: AccountRateGuardProviderResult[]
+}
+
+export interface AccountRateGuardAuditEntry {
+  run_id: number
+  created_at: string
+  provider_slug: string
+  provider_name: string
+  upstream_key_name: string
+  matched_local_account_id: number
+  matched_local_account_name: string
+  upstream_group_name: string
+  upstream_rate_multiplier: number
+  local_min_rate_multiplier: number
+  unbound_group_ids: number[]
+  unbound_group_names: string[]
+  remaining_group_ids: number[]
+}
+
+export interface AccountRateGuardRunRecord {
+  run_id: number
+  started_at: string
+  completed_at: string
+  result: AccountRateGuardResult
+  error?: string
+}
+
+export interface AccountRateGuardStatus {
+  last_run?: AccountRateGuardRunRecord
+  audits: AccountRateGuardAuditEntry[]
+}
+
 export async function syncUpstreamRates(): Promise<UpstreamRateSyncResult> {
   const { data } = await apiClient.post<UpstreamRateSyncResult>('/admin/upstream-management/sync')
   return data
@@ -252,6 +312,28 @@ export async function getUpstreamAvailableGroups(): Promise<UpstreamAvailableGro
 export async function getUpstreamKeySummary(): Promise<UpstreamKeySummary> {
   const { data } = await apiClient.get<UpstreamKeySummary>('/admin/upstream-management/key-summary')
   return data && Array.isArray(data.groups) ? data : { groups: [] }
+}
+
+export async function runAccountRateGuard(dryRun = false): Promise<AccountRateGuardResult> {
+  const { data } = await apiClient.post<AccountRateGuardResult>(
+    '/admin/upstream-management/account-rate-guard/run',
+    { dry_run: dryRun }
+  )
+  return data
+}
+
+export async function getAccountRateGuardStatus(): Promise<AccountRateGuardStatus> {
+  const { data } = await apiClient.get<AccountRateGuardStatus>(
+    '/admin/upstream-management/account-rate-guard/status'
+  )
+  return data || { audits: [] }
+}
+
+export async function getAccountRateGuardAudits(): Promise<AccountRateGuardAuditEntry[]> {
+  const { data } = await apiClient.get<AccountRateGuardAuditEntry[]>(
+    '/admin/upstream-management/account-rate-guard/audits'
+  )
+  return Array.isArray(data) ? data : []
 }
 
 export async function getUpstreamMonitorStatus(params?: {

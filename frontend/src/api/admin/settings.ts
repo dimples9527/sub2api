@@ -549,6 +549,8 @@ export interface SystemSettings {
   upstream_management_email: string;
   upstream_management_password_configured: boolean;
   upstream_management_keys_sync_interval_seconds: number;
+  upstream_management_account_rate_guard_interval_seconds: number;
+  upstream_management_providers: UpstreamManagementProviderSetting[];
   model_square_base_url?: string;
   model_square_login_url?: string;
   model_square_model_url?: string;
@@ -638,6 +640,20 @@ export interface SystemSettings {
 
   // OpenAI fast/flex policy
   openai_fast_policy_settings?: OpenAIFastPolicySettings;
+}
+
+export interface UpstreamManagementProviderSetting {
+  slug: string;
+  name: string;
+  enabled: boolean;
+  base_url: string;
+  login_url: string;
+  api_keys_url: string;
+  email: string;
+  password?: string;
+  password_configured?: boolean;
+  account_name_prefix: string;
+  temp_disable_minutes?: number;
 }
 
 export interface UpdateSettingsRequest {
@@ -817,6 +833,8 @@ export interface UpdateSettingsRequest {
   upstream_management_email?: string;
   upstream_management_password?: string;
   upstream_management_keys_sync_interval_seconds?: number;
+  upstream_management_account_rate_guard_interval_seconds?: number;
+  upstream_management_providers?: UpstreamManagementProviderSetting[];
   enable_identity_patch?: boolean;
   identity_patch_prompt?: string;
   ops_monitoring_enabled?: boolean;
