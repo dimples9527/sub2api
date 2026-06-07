@@ -45,6 +45,93 @@
         </div>
       </div>
 
+      <div class="rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800" data-test="account-rate-guard-panel">
+        <div class="flex flex-col gap-3 border-b border-gray-100 px-4 py-3 dark:border-dark-700 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 class="text-sm font-semibold text-gray-950 dark:text-white">账号倍率守护</h2>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              检查同名账号绑定分组；本地分组倍率低于上游分组倍率时，正式运行会解除对应分组绑定。
+            </p>
+          </div>
+          <button
+            type="button"
+            class="btn btn-secondary btn-sm whitespace-nowrap"
+            :disabled="accountRateGuardRunning"
+            data-test="account-rate-guard-dry-run"
+            @click="runAccountRateGuardDryRun"
+          >
+            <Icon name="refresh" size="sm" :class="accountRateGuardRunning ? 'animate-spin' : ''" />
+            模拟检查
+          </button>
+        </div>
+        <div class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
+          <div class="space-y-3">
+            <div v-if="accountRateGuardError" class="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-900/20 dark:text-red-300">
+              {{ accountRateGuardError }}
+            </div>
+            <div v-if="accountRateGuardLastRun" class="grid grid-cols-2 gap-3 text-sm" data-test="account-rate-guard-last-run">
+              <div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">最近运行</div>
+                <div class="mt-1 font-medium text-gray-950 dark:text-white">{{ formatDate(accountRateGuardLastRun.completed_at) }}</div>
+              </div>
+              <div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">模式</div>
+                <div class="mt-1 font-medium text-gray-950 dark:text-white">
+                  {{ accountRateGuardLastRun.result.dry_run ? '模拟检查' : '正式运行' }}
+                </div>
+              </div>
+              <div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">检查秘钥</div>
+                <div class="mt-1 font-mono font-semibold text-gray-950 dark:text-white">{{ accountRateGuardLastRun.result.checked_key_count }}</div>
+              </div>
+              <div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">命中账号</div>
+                <div class="mt-1 font-mono font-semibold text-gray-950 dark:text-white">{{ accountRateGuardLastRun.result.matched_account_count }}</div>
+              </div>
+              <div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">风险项</div>
+                <div class="mt-1 font-mono font-semibold text-amber-600 dark:text-amber-300">{{ accountRateGuardLastRun.result.violation_count }}</div>
+              </div>
+              <div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">已解绑</div>
+                <div class="mt-1 font-mono font-semibold text-emerald-600 dark:text-emerald-300">{{ accountRateGuardLastRun.result.unbound_count }}</div>
+              </div>
+            </div>
+            <div v-else class="text-sm text-gray-500 dark:text-gray-400">
+              暂无运行记录，可先点击模拟检查确认影响范围。
+            </div>
+          </div>
+
+          <div>
+            <div class="mb-2 flex items-center justify-between">
+              <div class="text-sm font-semibold text-gray-950 dark:text-white">最近解绑审计</div>
+              <div class="text-xs text-gray-500 dark:text-gray-400">最近 {{ accountRateGuardAudits.length }} 条</div>
+            </div>
+            <div v-if="accountRateGuardAudits.length === 0" class="rounded border border-dashed border-gray-200 px-3 py-5 text-sm text-gray-500 dark:border-dark-600 dark:text-gray-400">
+              暂无正式解绑记录。模拟检查不会写入审计。
+            </div>
+            <div v-else class="max-h-48 overflow-auto rounded border border-gray-200 dark:border-dark-700" data-test="account-rate-guard-audits">
+              <div
+                v-for="entry in accountRateGuardAudits.slice(0, 8)"
+                :key="`${entry.run_id}-${entry.matched_local_account_id}-${entry.created_at}`"
+                class="border-b border-gray-100 px-3 py-2 text-sm last:border-b-0 dark:border-dark-700"
+              >
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="font-medium text-gray-950 dark:text-white">{{ entry.matched_local_account_name }}</span>
+                  <span class="rounded bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                    {{ formatRate(entry.local_min_rate_multiplier) }} → {{ formatRate(entry.upstream_rate_multiplier) }}
+                  </span>
+                  <span class="text-xs text-gray-500 dark:text-gray-400">{{ formatDate(entry.created_at) }}</span>
+                </div>
+                <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {{ entry.provider_name || entry.provider_slug }} / {{ entry.upstream_key_name }}，解绑：{{ entry.unbound_group_names.join(', ') || entry.unbound_group_ids.join(', ') }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div v-if="loading" class="grid min-h-64 place-items-center rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800">
         <div class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
           <span class="h-5 w-5 animate-spin rounded-full border-2 border-primary-500 border-t-transparent"></span>
@@ -293,9 +380,13 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import {
   create as createLocalGroup,
+  getAccountRateGuardStatus,
   getUpstreamAvailableGroups,
   getUpstreamKeySummary,
   getUpstreamMonitorStatus,
+  runAccountRateGuard,
+  type AccountRateGuardAuditEntry,
+  type AccountRateGuardRunRecord,
   type UpstreamKeySummary,
   type UpstreamAvailableGroup
 } from '@/api/admin/groups'
@@ -342,6 +433,10 @@ const syncRateMultiplier = ref<number>(1)
 const syncSubmitting = ref(false)
 const syncError = ref('')
 const syncSuccess = ref('')
+const accountRateGuardRunning = ref(false)
+const accountRateGuardError = ref('')
+const accountRateGuardLastRun = ref<AccountRateGuardRunRecord | null>(null)
+const accountRateGuardAudits = ref<AccountRateGuardAuditEntry[]>([])
 
 const platforms = computed(() =>
   Array.from(new Set(groups.value.map((group) => group.platform).filter(Boolean) as string[]))
@@ -380,6 +475,7 @@ async function loadGroups() {
       getUpstreamAvailableGroups(),
       loadMonitorTrends(),
       loadUpstreamKeySummary(),
+      loadAccountRateGuardStatus(),
     ])
     groups.value = nextGroups
   } catch (err) {
@@ -397,6 +493,37 @@ async function loadUpstreamKeySummary() {
   } catch {
     upstreamKeySummary.value = null
     keySummaryError.value = '上游秘钥摘要加载失败'
+  }
+}
+
+async function loadAccountRateGuardStatus() {
+  try {
+    const status = await getAccountRateGuardStatus()
+    accountRateGuardLastRun.value = status.last_run || null
+    accountRateGuardAudits.value = status.audits || []
+  } catch (err) {
+    const e = err as { message?: string }
+    accountRateGuardError.value = e.message || '账号倍率守护状态加载失败'
+  }
+}
+
+async function runAccountRateGuardDryRun() {
+  accountRateGuardRunning.value = true
+  accountRateGuardError.value = ''
+  try {
+    const result = await runAccountRateGuard(true)
+    accountRateGuardLastRun.value = {
+      run_id: accountRateGuardLastRun.value?.run_id ? accountRateGuardLastRun.value.run_id + 1 : 1,
+      started_at: new Date().toISOString(),
+      completed_at: new Date().toISOString(),
+      result,
+    }
+    await loadAccountRateGuardStatus()
+  } catch (err) {
+    const e = err as { message?: string }
+    accountRateGuardError.value = e.message || '模拟检查失败'
+  } finally {
+    accountRateGuardRunning.value = false
   }
 }
 

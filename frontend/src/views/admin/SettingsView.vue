@@ -4858,6 +4858,24 @@
                   <label
                     class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
                   >
+                    账号倍率守护间隔（秒）
+                  </label>
+                  <input
+                    v-model.number="form.upstream_management_account_rate_guard_interval_seconds"
+                    type="number"
+                    min="1"
+                    step="1"
+                    class="input w-40"
+                    placeholder="5"
+                  />
+                  <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    自动检查同名账号绑定分组；本地分组倍率低于上游分组倍率时，只解除该分组绑定。
+                  </p>
+                </div>
+                <div>
+                  <label
+                    class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
                     登录邮箱
                   </label>
                   <input
@@ -4887,6 +4905,161 @@
                   <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                     保存后密码不会回显；需要修改时重新输入新密码。
                   </p>
+                </div>
+              </div>
+
+              <div class="border-t border-gray-100 pt-5 dark:border-dark-700">
+                <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
+                      多上游秘钥与倍率守护
+                    </h3>
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      每个上游独立获取秘钥和倍率；同名账号绑定的本地分组倍率低于上游分组时，只解除该分组绑定。
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    class="btn btn-secondary whitespace-nowrap"
+                    @click="addUpstreamProvider"
+                  >
+                    添加上游
+                  </button>
+                </div>
+
+                <div
+                  v-if="form.upstream_management_providers.length === 0"
+                  class="rounded border border-dashed border-gray-200 px-4 py-5 text-sm text-gray-500 dark:border-dark-600 dark:text-gray-400"
+                >
+                  暂未配置额外上游。默认上游配置仍会按上方参数同步。
+                </div>
+
+                <div v-else class="space-y-4">
+                  <div
+                    v-for="(provider, index) in form.upstream_management_providers"
+                    :key="`${provider.slug || 'provider'}-${index}`"
+                    class="rounded border border-gray-200 p-4 dark:border-dark-600"
+                  >
+                    <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div class="flex items-center gap-3">
+                        <Toggle v-model="provider.enabled" />
+                        <div>
+                          <div class="text-sm font-medium text-gray-900 dark:text-white">
+                            {{ provider.name || provider.slug || `上游 ${index + 1}` }}
+                          </div>
+                          <div class="text-xs text-gray-500 dark:text-gray-400">
+                            {{ provider.slug || "未设置标识" }}
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        class="btn btn-danger btn-sm"
+                        @click="removeUpstreamProvider(index)"
+                      >
+                        删除
+                      </button>
+                    </div>
+
+                    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                      <div>
+                        <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                          上游标识
+                        </label>
+                        <input
+                          v-model="provider.slug"
+                          type="text"
+                          class="input font-mono text-sm"
+                          placeholder="findcg"
+                        />
+                      </div>
+                      <div>
+                        <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                          显示名称
+                        </label>
+                        <input
+                          v-model="provider.name"
+                          type="text"
+                          class="input"
+                          placeholder="FindCG"
+                        />
+                      </div>
+                      <div>
+                        <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                          Base URL
+                        </label>
+                        <input
+                          v-model="provider.base_url"
+                          type="url"
+                          class="input font-mono text-sm"
+                          placeholder="https://www.findcg.com"
+                        />
+                      </div>
+                      <div>
+                        <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                          登录接口 URL
+                        </label>
+                        <input
+                          v-model="provider.login_url"
+                          type="url"
+                          class="input font-mono text-sm"
+                          placeholder="留空使用 Base URL + /api/v1/auth/login"
+                        />
+                      </div>
+                      <div>
+                        <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                          API 秘钥获取 URL
+                        </label>
+                        <input
+                          v-model="provider.api_keys_url"
+                          type="url"
+                          class="input font-mono text-sm"
+                          placeholder="https://www.findcg.com/api/v1/keys?page=1"
+                        />
+                      </div>
+                      <div>
+                        <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                          账号名前缀
+                        </label>
+                        <input
+                          v-model="provider.account_name_prefix"
+                          type="text"
+                          class="input font-mono text-sm"
+                          placeholder="findcg-"
+                        />
+                        <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                          用于区分不同上游同步来的同名账号。
+                        </p>
+                      </div>
+                      <div>
+                        <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                          登录邮箱
+                        </label>
+                        <input
+                          v-model="provider.email"
+                          type="email"
+                          class="input"
+                          placeholder="name@example.com"
+                        />
+                      </div>
+                      <div>
+                        <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                          登录密码
+                        </label>
+                        <input
+                          v-model="provider.password"
+                          type="password"
+                          class="input"
+                          :placeholder="
+                            provider.password_configured
+                              ? '已配置，留空不修改'
+                              : '请输入上游登录密码'
+                          "
+                          autocomplete="new-password"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -6870,6 +7043,7 @@ import type {
   WebSearchEmulationConfig,
   WebSearchProviderConfig,
   WebSearchTestResult,
+  UpstreamManagementProviderSetting,
 } from "@/api/admin/settings";
 import type {
   AdminGroup,
@@ -7162,6 +7336,8 @@ type SettingsForm = Omit<
   google_oauth_client_secret: string;
   upstream_management_password: string;
   upstream_management_keys_sync_interval_seconds: number;
+  upstream_management_account_rate_guard_interval_seconds: number;
+  upstream_management_providers: UpstreamManagementProviderSetting[];
   force_email_on_third_party_signup: boolean;
   openai_advanced_scheduler_enabled: boolean;
   // 系统全局平台限额 map；form 内始终归一化为全 4 平台对象（模板非空绑定依赖此不变量）
@@ -7357,6 +7533,8 @@ const form = reactive<SettingsForm>({
   upstream_management_password: "",
   upstream_management_password_configured: false,
   upstream_management_keys_sync_interval_seconds: 5,
+  upstream_management_account_rate_guard_interval_seconds: 5,
+  upstream_management_providers: [],
   // Identity patch (Claude -> Gemini)
   enable_identity_patch: true,
   identity_patch_prompt: "",
@@ -7983,6 +8161,73 @@ function parseTablePageSizeOptionsInput(raw: string): number[] | null {
   return deduped;
 }
 
+function normalizeUpstreamProviders(
+  providers: UpstreamManagementProviderSetting[] | undefined,
+): UpstreamManagementProviderSetting[] {
+  if (!Array.isArray(providers)) {
+    return [];
+  }
+  return providers.map((provider) => ({
+    slug: provider.slug || "",
+    name: provider.name || "",
+    enabled: provider.enabled !== false,
+    base_url: provider.base_url || "",
+    login_url: provider.login_url || "",
+    api_keys_url: provider.api_keys_url || "",
+    email: provider.email || "",
+    password: "",
+    password_configured: Boolean(provider.password_configured),
+    account_name_prefix: provider.account_name_prefix || "",
+    temp_disable_minutes: provider.temp_disable_minutes,
+  }));
+}
+
+function buildUpstreamProvidersPayload(): UpstreamManagementProviderSetting[] {
+  return form.upstream_management_providers
+    .map((provider) => {
+      const payload: UpstreamManagementProviderSetting = {
+        slug: provider.slug.trim(),
+        name: provider.name.trim(),
+        enabled: provider.enabled !== false,
+        base_url: provider.base_url.trim(),
+        login_url: provider.login_url.trim(),
+        api_keys_url: provider.api_keys_url.trim(),
+        email: provider.email.trim(),
+        account_name_prefix: provider.account_name_prefix.trim(),
+      };
+      if (provider.password?.trim()) {
+        payload.password = provider.password.trim();
+      }
+      if (provider.password_configured) {
+        payload.password_configured = true;
+      }
+      if (provider.temp_disable_minutes !== undefined) {
+        payload.temp_disable_minutes = provider.temp_disable_minutes;
+      }
+      return payload;
+    })
+    .filter((provider) => provider.slug || provider.name || provider.base_url || provider.api_keys_url);
+}
+
+function addUpstreamProvider() {
+  form.upstream_management_providers.push({
+    slug: "",
+    name: "",
+    enabled: true,
+    base_url: "",
+    login_url: "",
+    api_keys_url: "",
+    email: "",
+    password: "",
+    password_configured: false,
+    account_name_prefix: "",
+  });
+}
+
+function removeUpstreamProvider(index: number) {
+  form.upstream_management_providers.splice(index, 1);
+}
+
 async function loadSettings() {
   loading.value = true;
   loadFailed.value = false;
@@ -8017,6 +8262,11 @@ async function loadSettings() {
       settings.upstream_management_keys_sync_interval_seconds ||
       settings.model_square_keys_sync_interval_seconds ||
       5;
+    form.upstream_management_account_rate_guard_interval_seconds =
+      settings.upstream_management_account_rate_guard_interval_seconds || 5;
+    form.upstream_management_providers = normalizeUpstreamProviders(
+      settings.upstream_management_providers,
+    );
     paymentRechargeOptionsInput.value = formatRechargeOptions(
       form.payment_recharge_options,
     );
@@ -8399,6 +8649,11 @@ async function saveSettings() {
         1,
         Number(form.upstream_management_keys_sync_interval_seconds) || 5,
       ),
+      upstream_management_account_rate_guard_interval_seconds: Math.max(
+        1,
+        Number(form.upstream_management_account_rate_guard_interval_seconds) || 5,
+      ),
+      upstream_management_providers: buildUpstreamProvidersPayload(),
       home_content: form.home_content,
       backend_mode_enabled: form.backend_mode_enabled,
       hide_ccs_import_button: form.hide_ccs_import_button,
@@ -8623,6 +8878,9 @@ async function saveSettings() {
       }
     }
     Object.assign(authSourceDefaults, buildAuthSourceDefaultsState(updated));
+    form.upstream_management_providers = normalizeUpstreamProviders(
+      updated.upstream_management_providers,
+    );
     form.default_platform_quotas = normalizePlatformQuotasMap(updated.default_platform_quotas);
     registrationEmailSuffixWhitelistTags.value =
       normalizeRegistrationEmailSuffixDomains(

@@ -374,6 +374,8 @@ const baseSettingsResponse = {
   upstream_management_email: "",
   upstream_management_password_configured: false,
   upstream_management_keys_sync_interval_seconds: 5,
+  upstream_management_account_rate_guard_interval_seconds: 5,
+  upstream_management_providers: [],
   enable_identity_patch: false,
   identity_patch_prompt: "",
   ops_monitoring_enabled: false,
@@ -658,6 +660,7 @@ describe("admin SettingsView payment visible method controls", () => {
       ...baseSettingsResponse,
       upstream_management_model_url: "https://upstream.example.com/models",
       upstream_management_keys_sync_interval_seconds: 45,
+      upstream_management_account_rate_guard_interval_seconds: 9,
     });
 
     const wrapper = mountView();
@@ -671,8 +674,50 @@ describe("admin SettingsView payment visible method controls", () => {
       expect.objectContaining({
         upstream_management_model_url: "https://upstream.example.com/models",
         upstream_management_keys_sync_interval_seconds: 45,
+        upstream_management_account_rate_guard_interval_seconds: 9,
       }),
     );
+  });
+
+  it("submits upstream management providers without echoing saved passwords", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      upstream_management_providers: [
+        {
+          slug: "findcg",
+          name: "FindCG",
+          enabled: true,
+          base_url: "https://www.findcg.com",
+          login_url: "",
+          api_keys_url: "https://www.findcg.com/api/v1/keys?page=1",
+          email: "admin@example.com",
+          password_configured: true,
+          account_name_prefix: "findcg-",
+        },
+      ],
+    });
+
+    const wrapper = mountView();
+
+    await flushPromises();
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledTimes(1);
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        upstream_management_providers: [
+          expect.not.objectContaining({ password: expect.anything() }),
+        ],
+      }),
+    );
+    expect(updateSettings.mock.calls[0]?.[0].upstream_management_providers?.[0]).toMatchObject({
+      slug: "findcg",
+      name: "FindCG",
+      enabled: true,
+      api_keys_url: "https://www.findcg.com/api/v1/keys?page=1",
+      account_name_prefix: "findcg-",
+    });
   });
 
   it("submits payment recharge amount configuration", async () => {

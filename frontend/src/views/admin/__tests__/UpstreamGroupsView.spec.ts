@@ -5,27 +5,35 @@ import UpstreamGroupsView from '../UpstreamGroupsView.vue'
 
 const {
   createGroupMock,
+  getAccountRateGuardStatusMock,
   getUpstreamAvailableGroupsMock,
   getUpstreamKeySummaryMock,
   getUpstreamMonitorStatusMock,
+  runAccountRateGuardMock,
 } = vi.hoisted(() => ({
   createGroupMock: vi.fn(),
+  getAccountRateGuardStatusMock: vi.fn(),
   getUpstreamAvailableGroupsMock: vi.fn(),
   getUpstreamKeySummaryMock: vi.fn(),
   getUpstreamMonitorStatusMock: vi.fn(),
+  runAccountRateGuardMock: vi.fn(),
 }))
 
 vi.mock('@/api/admin/groups', () => ({
   create: createGroupMock,
   default: {
     create: createGroupMock,
+    getAccountRateGuardStatus: getAccountRateGuardStatusMock,
     getUpstreamAvailableGroups: getUpstreamAvailableGroupsMock,
     getUpstreamKeySummary: getUpstreamKeySummaryMock,
     getUpstreamMonitorStatus: getUpstreamMonitorStatusMock,
+    runAccountRateGuard: runAccountRateGuardMock,
   },
+  getAccountRateGuardStatus: getAccountRateGuardStatusMock,
   getUpstreamAvailableGroups: getUpstreamAvailableGroupsMock,
   getUpstreamKeySummary: getUpstreamKeySummaryMock,
   getUpstreamMonitorStatus: getUpstreamMonitorStatusMock,
+  runAccountRateGuard: runAccountRateGuardMock,
 }))
 
 function mountView() {
@@ -42,9 +50,12 @@ function mountView() {
 describe('UpstreamGroupsView', () => {
   beforeEach(() => {
     createGroupMock.mockReset()
+    getAccountRateGuardStatusMock.mockReset()
     getUpstreamAvailableGroupsMock.mockReset()
     getUpstreamKeySummaryMock.mockReset()
     getUpstreamMonitorStatusMock.mockReset()
+    runAccountRateGuardMock.mockReset()
+    getAccountRateGuardStatusMock.mockResolvedValue({ audits: [] })
     getUpstreamKeySummaryMock.mockResolvedValue({ groups: [] })
     getUpstreamMonitorStatusMock.mockResolvedValue({ groups: [] })
   })
@@ -147,5 +158,81 @@ describe('UpstreamGroupsView', () => {
     })
     expect(getUpstreamAvailableGroupsMock).toHaveBeenCalledTimes(2)
     expect(wrapper.text()).toContain('同步成功')
+  })
+
+  it('runs account rate guard dry-run and renders recent result plus audits', async () => {
+    getUpstreamAvailableGroupsMock.mockResolvedValue([])
+    getAccountRateGuardStatusMock
+      .mockResolvedValueOnce({
+        audits: [
+          {
+            run_id: 1,
+            created_at: '2026-06-07T10:00:00Z',
+            provider_slug: 'findcg',
+            provider_name: 'FindCG',
+            upstream_key_name: 'key-a',
+            matched_local_account_id: 101,
+            matched_local_account_name: 'findcg-key-a',
+            upstream_group_name: 'VIP',
+            upstream_rate_multiplier: 0.8,
+            local_min_rate_multiplier: 0.5,
+            unbound_group_ids: [10],
+            unbound_group_names: ['cheap'],
+            remaining_group_ids: [11],
+          },
+        ],
+        last_run: {
+          run_id: 1,
+          started_at: '2026-06-07T10:00:00Z',
+          completed_at: '2026-06-07T10:00:01Z',
+          result: {
+            dry_run: false,
+            checked_key_count: 2,
+            matched_account_count: 1,
+            violation_count: 1,
+            unbound_count: 1,
+            violations: [],
+            providers: [],
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        audits: [],
+        last_run: {
+          run_id: 2,
+          started_at: '2026-06-07T10:01:00Z',
+          completed_at: '2026-06-07T10:01:01Z',
+          result: {
+            dry_run: true,
+            checked_key_count: 3,
+            matched_account_count: 2,
+            violation_count: 2,
+            unbound_count: 0,
+            violations: [],
+            providers: [],
+          },
+        },
+      })
+    runAccountRateGuardMock.mockResolvedValue({
+      dry_run: true,
+      checked_key_count: 3,
+      matched_account_count: 2,
+      violation_count: 2,
+      unbound_count: 0,
+      violations: [],
+      providers: [],
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="account-rate-guard-audits"]').text()).toContain('findcg-key-a')
+
+    await wrapper.find('[data-test="account-rate-guard-dry-run"]').trigger('click')
+    await flushPromises()
+
+    expect(runAccountRateGuardMock).toHaveBeenCalledWith(true)
+    expect(wrapper.find('[data-test="account-rate-guard-last-run"]').text()).toContain('模拟检查')
+    expect(wrapper.find('[data-test="account-rate-guard-last-run"]').text()).toContain('3')
   })
 })
