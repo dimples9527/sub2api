@@ -97,6 +97,25 @@ model_square:
   password: ""
 
 # =============================================================================
+# Upstream Management Configuration
+# =============================================================================
+upstream_management:
+  # Account rate guard interval in seconds (default: 5).
+  account_rate_guard_interval_seconds: 5
+  # Optional multi-upstream providers for account rate guard.
+  # account_name_prefix + upstream key name is matched against local account name.
+  providers:
+    # - slug: "findcg"
+    #   name: "FindCG"
+    #   enabled: true
+    #   base_url: "https://www.findcg.com"
+    #   login_url: ""
+    #   api_keys_url: ""
+    #   email: ""
+    #   password: ""
+    #   account_name_prefix: "findcg-"
+
+# =============================================================================
 # CORS Configuration
 # 跨域资源共享 (CORS) 配置
 # =============================================================================
