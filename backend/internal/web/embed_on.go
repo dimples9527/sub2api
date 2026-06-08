@@ -96,7 +96,7 @@ func (s *FrontendServer) Middleware() gin.HandlerFunc {
 		if cleanPath == "" {
 			cleanPath = "index.html"
 		}
-		if cleanPath == "model-monitor.html" {
+		if isStaticHTMLPage(cleanPath) {
 			s.serveStaticHTMLWithNonce(c, cleanPath)
 			return
 		}
@@ -307,7 +307,7 @@ func ServeEmbeddedFrontend() gin.HandlerFunc {
 			cleanPath = "index.html"
 		}
 
-		if cleanPath == "model-monitor.html" {
+		if isStaticHTMLPage(cleanPath) {
 			serveStaticHTML(c, distFS, cleanPath)
 			return
 		}
@@ -377,6 +377,15 @@ func shouldBypassEmbeddedFrontend(path string) bool {
 		trimmed == "/responses" ||
 		strings.HasPrefix(trimmed, "/responses/") ||
 		strings.HasPrefix(trimmed, "/images/")
+}
+
+func isStaticHTMLPage(path string) bool {
+	switch path {
+	case "model-monitor.html", "help.html":
+		return true
+	default:
+		return false
+	}
 }
 
 func serveIndexHTML(c *gin.Context, fsys fs.FS) {
