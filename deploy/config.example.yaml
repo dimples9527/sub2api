@@ -333,6 +333,12 @@ gateway:
     dial_timeout_seconds: 10
     read_timeout_seconds: 900
     write_timeout_seconds: 120
+    # WebSocket single-message read limit in bytes for both inbound Codex clients
+    # and outbound upstream WS clients. Increase on every sub2api layer if
+    # upstream logs StatusMessageTooBig after context compaction.
+    # WS 单消息读取上限（字节），同时用于 Codex 客户端入站和上游 WS 出站。
+    # 如果上下文压缩后出现 StatusMessageTooBig，需要在每一层 sub2api 同步调大。
+    client_read_limit_bytes: 67108864
     pool_target_utilization: 0.7
     queue_limit_per_conn: 64
     # 流式写出批量 flush 参数
