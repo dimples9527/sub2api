@@ -379,6 +379,7 @@ export default {
     mySubscriptions: 'My Subscriptions',
     buySubscription: 'Recharge / Subscription',
     docs: 'Docs',
+    helpCenter: 'Help Docs',
     modelMonitor: 'Model Monitor',
     myOrders: 'My Orders',
     orderManagement: 'Orders',
