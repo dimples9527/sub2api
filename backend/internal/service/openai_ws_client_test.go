@@ -6,8 +6,39 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
+
+func TestNewDefaultOpenAIWSClientDialer_ReadLimit(t *testing.T) {
+	defaultDialer, ok := newDefaultOpenAIWSClientDialer().(*coderOpenAIWSClientDialer)
+	require.True(t, ok)
+	require.Equal(t, openAIWSClientReadLimitBytesDefault, defaultDialer.readLimitBytes)
+
+	customDialer, ok := newDefaultOpenAIWSClientDialer(128 * 1024 * 1024).(*coderOpenAIWSClientDialer)
+	require.True(t, ok)
+	require.Equal(t, int64(128*1024*1024), customDialer.readLimitBytes)
+
+	fallbackDialer, ok := newDefaultOpenAIWSClientDialer(-1).(*coderOpenAIWSClientDialer)
+	require.True(t, ok)
+	require.Equal(t, openAIWSClientReadLimitBytesDefault, fallbackDialer.readLimitBytes)
+}
+
+func TestOpenAIWSDialersUseConfiguredReadLimit(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.ClientReadLimitBytes = 128 * 1024 * 1024
+
+	pool := newOpenAIWSConnPool(cfg)
+	defer pool.Close()
+	poolDialer, ok := pool.clientDialer.(*coderOpenAIWSClientDialer)
+	require.True(t, ok)
+	require.Equal(t, int64(128*1024*1024), poolDialer.readLimitBytes)
+
+	svc := &OpenAIGatewayService{cfg: cfg}
+	passthroughDialer, ok := svc.getOpenAIWSPassthroughDialer().(*coderOpenAIWSClientDialer)
+	require.True(t, ok)
+	require.Equal(t, int64(128*1024*1024), passthroughDialer.readLimitBytes)
+}
 
 func TestCoderOpenAIWSClientDialer_ProxyHTTPClientReuse(t *testing.T) {
 	dialer := newDefaultOpenAIWSClientDialer()

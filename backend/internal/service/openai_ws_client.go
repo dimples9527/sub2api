@@ -16,7 +16,6 @@ import (
 	"github.com/coder/websocket/wsjson"
 )
 
-const openAIWSMessageReadLimitBytes int64 = 16 * 1024 * 1024
 const (
 	openAIWSProxyTransportMaxIdleConns        = 128
 	openAIWSProxyTransportMaxIdleConnsPerHost = 64
@@ -48,17 +47,23 @@ type openAIWSTransportMetricsDialer interface {
 	SnapshotTransportMetrics() OpenAIWSTransportMetricsSnapshot
 }
 
-func newDefaultOpenAIWSClientDialer() openAIWSClientDialer {
+func newDefaultOpenAIWSClientDialer(readLimitBytes ...int64) openAIWSClientDialer {
+	readLimit := openAIWSClientReadLimitBytesDefault
+	if len(readLimitBytes) > 0 && readLimitBytes[0] > 0 {
+		readLimit = readLimitBytes[0]
+	}
 	return &coderOpenAIWSClientDialer{
-		proxyClients: make(map[string]*openAIWSProxyClientEntry),
+		proxyClients:   make(map[string]*openAIWSProxyClientEntry),
+		readLimitBytes: readLimit,
 	}
 }
 
 type coderOpenAIWSClientDialer struct {
-	proxyMu      sync.Mutex
-	proxyClients map[string]*openAIWSProxyClientEntry
-	proxyHits    atomic.Int64
-	proxyMisses  atomic.Int64
+	proxyMu        sync.Mutex
+	proxyClients   map[string]*openAIWSProxyClientEntry
+	readLimitBytes int64
+	proxyHits      atomic.Int64
+	proxyMisses    atomic.Int64
 }
 
 type openAIWSProxyClientEntry struct {
@@ -101,7 +106,7 @@ func (d *coderOpenAIWSClientDialer) Dial(
 	}
 	// coder/websocket 默认单消息读取上限为 32KB，Codex WS 事件（如 rate_limits/大 delta）
 	// 可能超过该阈值，需显式提高上限，避免本地 read_fail(message too big)。
-	conn.SetReadLimit(openAIWSMessageReadLimitBytes)
+	conn.SetReadLimit(d.readLimitBytes)
 	respHeaders := http.Header(nil)
 	if resp != nil {
 		respHeaders = cloneHeader(resp.Header)

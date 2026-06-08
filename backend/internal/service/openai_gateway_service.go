@@ -581,7 +581,7 @@ func (s *OpenAIGatewayService) logOpenAIWSModeBootstrap() {
 		wsCfg.RetryBackoffMaxMS,
 		wsCfg.RetryJitterRatio,
 		wsCfg.RetryTotalBudgetMS,
-		openAIWSMessageReadLimitBytes,
+		ResolveOpenAIWSClientReadLimitBytes(s.cfg),
 	)
 }
 
@@ -2637,7 +2637,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 		}
 	}
-	if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 && gjson.GetBytes(body, "previous_response_id").Exists() {
+	if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 && !isCompactRequest && gjson.GetBytes(body, "previous_response_id").Exists() {
 		markPatchDelete("previous_response_id")
 	}
 	if openAIRequestBodyMayContainEmptyBase64InputImage(body) {
