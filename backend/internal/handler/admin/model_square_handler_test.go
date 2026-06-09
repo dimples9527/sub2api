@@ -797,6 +797,183 @@ func TestModelSquareHandlerAccountRateGuardContinuesWhenOneProviderFails(t *test
 	require.Empty(t, *accountUpdates[0].groupIDs)
 }
 
+func TestModelSquareHandlerAccountRateGuardSupportsNewAPIProvider(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var loginBody string
+	var tokenUserHeader string
+	var tokenCookieHeader string
+	var groupsUserHeader string
+	var groupsCookieHeader string
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/api/user/login":
+			require.Equal(t, http.MethodPost, r.Method)
+			buf := make([]byte, r.ContentLength)
+			_, _ = r.Body.Read(buf)
+			loginBody = string(buf)
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "newapi-session"})
+			_, _ = w.Write([]byte(`{
+				"success":true,
+				"message":"",
+				"data":{"id":18,"username":"zhongyj","display_name":"zhongyj","group":"default","role":1,"status":1}
+			}`))
+		case "/api/token/":
+			tokenUserHeader = r.Header.Get("New-Api-User")
+			tokenCookieHeader = r.Header.Get("Cookie")
+			require.Equal(t, "1", r.URL.Query().Get("p"))
+			require.Equal(t, "200", r.URL.Query().Get("size"))
+			_, _ = w.Write([]byte(`{
+				"success":true,
+				"message":"",
+				"data":{
+					"page":1,
+					"page_size":200,
+					"total":1,
+					"items":[
+						{"id":16,"name":"codex【福利】","group":"CodeX【福利】","status":1}
+					]
+				}
+			}`))
+		case "/api/user/self/groups":
+			groupsUserHeader = r.Header.Get("New-Api-User")
+			groupsCookieHeader = r.Header.Get("Cookie")
+			_, _ = w.Write([]byte(`{
+				"success":true,
+				"message":"",
+				"data":{
+					"CodeX【福利】":{"desc":"Codex 福利渠道","ratio":0.001},
+					"default":{"desc":"用户分组","ratio":1}
+				}
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	groupProvider := &modelSquareGroupProviderStub{accounts: []service.Account{
+		{
+			ID:       301,
+			Name:     "newapi-codex【福利】",
+			GroupIDs: []int64{30, 31},
+			Groups: []*service.Group{
+				{ID: 30, Name: "below-newapi-ratio", RateMultiplier: 0.0005},
+				{ID: 31, Name: "above-newapi-ratio", RateMultiplier: 0.01},
+			},
+		},
+	}}
+	h := newModelSquareHandler(ModelSquareHandlerConfig{
+		AppConfig: &config.Config{UpstreamManagement: config.UpstreamManagementConfig{
+			Providers: []config.UpstreamManagementProviderConfig{
+				{
+					Type:              "newapi",
+					Slug:              "newapi",
+					Name:              "NewAPI",
+					Enabled:           true,
+					BaseURL:           server.URL,
+					LoginURL:          server.URL + "/api/user/login",
+					APIKeysURL:        server.URL + "/api/token/?p=1&size=200",
+					GroupsURL:         server.URL + "/api/user/self/groups",
+					Username:          "zhongyj",
+					Password:          "zhong960216",
+					AccountNamePrefix: "newapi-",
+				},
+			},
+		}},
+		GroupProvider: groupProvider,
+		HTTPClient:    server.Client(),
+	})
+
+	result, err := h.runAccountRateGuard(context.Background(), false)
+
+	require.NoError(t, err)
+	require.JSONEq(t, `{"username":"zhongyj","password":"zhong960216"}`, loginBody)
+	require.Equal(t, []string{"/api/user/login", "/api/token/", "/api/user/self/groups"}, paths)
+	require.Equal(t, "18", tokenUserHeader)
+	require.Contains(t, tokenCookieHeader, "session=newapi-session")
+	require.Equal(t, "18", groupsUserHeader)
+	require.Contains(t, groupsCookieHeader, "session=newapi-session")
+	require.Equal(t, 1, result.CheckedKeyCount)
+	require.Equal(t, 1, result.MatchedAccountCount)
+	require.Equal(t, 1, result.ViolationCount)
+	require.Equal(t, 1, result.UnboundCount)
+	require.Len(t, result.Violations, 1)
+	require.Equal(t, "codex【福利】", result.Violations[0].UpstreamKeyName)
+	require.Equal(t, "CodeX【福利】", result.Violations[0].UpstreamGroupName)
+	require.Equal(t, 0.001, result.Violations[0].UpstreamRateMultiplier)
+	require.Equal(t, []int64{30}, result.Violations[0].UnboundGroupIDs)
+	accountUpdates := groupProvider.accountUpdatesSnapshot()
+	require.Len(t, accountUpdates, 1)
+	require.Equal(t, int64(301), accountUpdates[0].id)
+	require.NotNil(t, accountUpdates[0].groupIDs)
+	require.Equal(t, []int64{31}, *accountUpdates[0].groupIDs)
+}
+
+func TestModelSquareHandlerAccountRateGuardLogsProviderFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	recorder := &slogRecordHandler{}
+	original := slog.Default()
+	slog.SetDefault(slog.New(recorder))
+	defer slog.SetDefault(original)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/user/login":
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "newapi-session"})
+			_, _ = w.Write([]byte(`{"success":true,"message":"","data":{"id":18}}`))
+		case "/api/token/":
+			_, _ = w.Write([]byte(`{
+				"success":true,
+				"message":"",
+				"data":{"items":[{"id":16,"name":"codex【福利】","group":"CodeX【福利】","status":1}]}
+			}`))
+		case "/api/user/self/groups":
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`{"success":false,"message":"bad gateway"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	h := newModelSquareHandler(ModelSquareHandlerConfig{
+		AppConfig: &config.Config{UpstreamManagement: config.UpstreamManagementConfig{
+			Providers: []config.UpstreamManagementProviderConfig{
+				{
+					Type:              "newapi",
+					Slug:              "newapi-main",
+					Name:              "NewAPI Main",
+					Enabled:           true,
+					BaseURL:           server.URL,
+					Username:          "zhongyj",
+					Password:          "secret",
+					AccountNamePrefix: "newapi-",
+				},
+			},
+		}},
+		GroupProvider: &modelSquareGroupProviderStub{accounts: []service.Account{
+			{ID: 301, Name: "newapi-codex【福利】", GroupIDs: []int64{30}, Groups: []*service.Group{{ID: 30, Name: "cheap", RateMultiplier: 0.0005}}},
+		}},
+		HTTPClient: server.Client(),
+	})
+
+	result, err := h.runAccountRateGuard(context.Background(), false)
+
+	require.NoError(t, err)
+	require.Len(t, result.Providers, 1)
+	require.Contains(t, result.Providers[0].Error, "newapi provider groups failed: HTTP 502")
+	require.Len(t, recorder.records, 1)
+	require.Contains(t, recorder.records[0], "upstream account rate guard provider failed")
+	require.Contains(t, recorder.records[0], "provider_slug=newapi-main")
+	require.Contains(t, recorder.records[0], "provider_type=newapi")
+	require.Contains(t, recorder.records[0], "stage=groups")
+	require.Contains(t, recorder.records[0], "newapi provider groups failed")
+}
+
 func TestModelSquareHandlerManualSyncMatchesKeysByGroupName(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

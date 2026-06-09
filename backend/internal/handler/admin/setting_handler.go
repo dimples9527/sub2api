@@ -722,6 +722,7 @@ type UpdateSettingsRequest struct {
 }
 
 type UpstreamManagementProviderRequest struct {
+	Type               string `json:"type"`
 	Slug               string `json:"slug"`
 	Name               string `json:"name"`
 	Enabled            bool   `json:"enabled"`
@@ -729,7 +730,9 @@ type UpstreamManagementProviderRequest struct {
 	LoginURL           string `json:"login_url"`
 	APIKeysURL         string `json:"api_keys_url"`
 	KeysURL            string `json:"keys_url"`
+	GroupsURL          string `json:"groups_url"`
 	Email              string `json:"email"`
+	Username           string `json:"username"`
 	Password           string `json:"password"`
 	AccountNamePrefix  string `json:"account_name_prefix"`
 	TempDisableMinutes int    `json:"temp_disable_minutes"`
@@ -3801,13 +3804,16 @@ func upstreamManagementProviderDTOs(providers []service.UpstreamManagementProvid
 	out := make([]dto.UpstreamManagementProviderSetting, 0, len(providers))
 	for _, provider := range providers {
 		out = append(out, dto.UpstreamManagementProviderSetting{
+			Type:               provider.Type,
 			Slug:               provider.Slug,
 			Name:               provider.Name,
 			Enabled:            provider.Enabled,
 			BaseURL:            provider.BaseURL,
 			LoginURL:           provider.LoginURL,
 			APIKeysURL:         firstNonEmpty(provider.APIKeysURL, provider.KeysURL),
+			GroupsURL:          provider.GroupsURL,
 			Email:              provider.Email,
+			Username:           provider.Username,
 			PasswordConfigured: strings.TrimSpace(provider.Password) != "" || provider.PasswordConfigured,
 			AccountNamePrefix:  provider.AccountNamePrefix,
 			TempDisableMinutes: provider.TempDisableMinutes,
@@ -3823,13 +3829,16 @@ func upstreamManagementProviderSettingsFromRequest(providers []UpstreamManagemen
 	out := make([]service.UpstreamManagementProviderSetting, 0, len(providers))
 	for _, provider := range providers {
 		out = append(out, service.UpstreamManagementProviderSetting{
+			Type:               strings.TrimSpace(provider.Type),
 			Slug:               strings.TrimSpace(provider.Slug),
 			Name:               strings.TrimSpace(provider.Name),
 			Enabled:            provider.Enabled,
 			BaseURL:            strings.TrimSpace(provider.BaseURL),
 			LoginURL:           strings.TrimSpace(provider.LoginURL),
 			APIKeysURL:         strings.TrimSpace(firstNonEmpty(provider.APIKeysURL, provider.KeysURL)),
+			GroupsURL:          strings.TrimSpace(provider.GroupsURL),
 			Email:              strings.TrimSpace(provider.Email),
+			Username:           strings.TrimSpace(provider.Username),
 			Password:           provider.Password,
 			AccountNamePrefix:  strings.TrimSpace(provider.AccountNamePrefix),
 			TempDisableMinutes: provider.TempDisableMinutes,

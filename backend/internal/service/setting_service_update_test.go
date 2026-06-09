@@ -334,10 +334,13 @@ func TestSettingService_UpdateSettings_UpstreamManagementProvidersPreservesExist
 			{
 				Slug:               " findcg ",
 				Name:               " FindCG ",
+				Type:               " newapi ",
 				Enabled:            true,
 				BaseURL:            " https://www.findcg.com ",
+				GroupsURL:          " https://www.findcg.com/api/user/self/groups ",
 				APIKeysURL:         " https://www.findcg.com/api/v1/keys?page=1 ",
 				Email:              " admin@example.com ",
+				Username:           " admin-user ",
 				AccountNamePrefix:  " findcg- ",
 				TempDisableMinutes: 0,
 			},
@@ -350,9 +353,12 @@ func TestSettingService_UpdateSettings_UpstreamManagementProvidersPreservesExist
 	require.Len(t, providers, 1)
 	require.Equal(t, "findcg", providers[0].Slug)
 	require.Equal(t, "FindCG", providers[0].Name)
+	require.Equal(t, "newapi", providers[0].Type)
 	require.Equal(t, "https://www.findcg.com", providers[0].BaseURL)
+	require.Equal(t, "https://www.findcg.com/api/user/self/groups", providers[0].GroupsURL)
 	require.Equal(t, "https://www.findcg.com/api/v1/keys?page=1", providers[0].APIKeysURL)
 	require.Equal(t, "admin@example.com", providers[0].Email)
+	require.Equal(t, "admin-user", providers[0].Username)
 	require.Equal(t, "existing-secret", providers[0].Password)
 	require.True(t, providers[0].PasswordConfigured)
 	require.Equal(t, "findcg-", providers[0].AccountNamePrefix)

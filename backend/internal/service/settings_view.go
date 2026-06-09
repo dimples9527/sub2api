@@ -256,6 +256,7 @@ type SystemSettings struct {
 }
 
 type UpstreamManagementProviderSetting struct {
+	Type               string `json:"type"`
 	Slug               string `json:"slug"`
 	Name               string `json:"name"`
 	Enabled            bool   `json:"enabled"`
@@ -263,7 +264,9 @@ type UpstreamManagementProviderSetting struct {
 	LoginURL           string `json:"login_url"`
 	APIKeysURL         string `json:"api_keys_url"`
 	KeysURL            string `json:"keys_url,omitempty"`
+	GroupsURL          string `json:"groups_url"`
 	Email              string `json:"email"`
+	Username           string `json:"username"`
 	Password           string `json:"password,omitempty"`
 	PasswordConfigured bool   `json:"password_configured,omitempty"`
 	AccountNamePrefix  string `json:"account_name_prefix"`

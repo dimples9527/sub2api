@@ -4964,6 +4964,18 @@
                     <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
                       <div>
                         <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                          上游类型
+                        </label>
+                        <select
+                          v-model="provider.type"
+                          class="input"
+                        >
+                          <option value="sub2api">Sub2API</option>
+                          <option value="newapi">NewAPI</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                           上游标识
                         </label>
                         <input
@@ -5019,6 +5031,17 @@
                       </div>
                       <div>
                         <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                          分组倍率 URL
+                        </label>
+                        <input
+                          v-model="provider.groups_url"
+                          type="url"
+                          class="input font-mono text-sm"
+                          placeholder="NewAPI: /api/user/self/groups"
+                        />
+                      </div>
+                      <div>
+                        <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                           账号名前缀
                         </label>
                         <input
@@ -5040,6 +5063,17 @@
                           type="email"
                           class="input"
                           placeholder="name@example.com"
+                        />
+                      </div>
+                      <div>
+                        <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                          登录用户名
+                        </label>
+                        <input
+                          v-model="provider.username"
+                          type="text"
+                          class="input"
+                          placeholder="NewAPI 用户名"
                         />
                       </div>
                       <div>
@@ -8168,13 +8202,16 @@ function normalizeUpstreamProviders(
     return [];
   }
   return providers.map((provider) => ({
+    type: provider.type === "newapi" ? "newapi" : "sub2api",
     slug: provider.slug || "",
     name: provider.name || "",
     enabled: provider.enabled !== false,
     base_url: provider.base_url || "",
     login_url: provider.login_url || "",
     api_keys_url: provider.api_keys_url || "",
+    groups_url: provider.groups_url || "",
     email: provider.email || "",
+    username: provider.username || "",
     password: "",
     password_configured: Boolean(provider.password_configured),
     account_name_prefix: provider.account_name_prefix || "",
@@ -8186,13 +8223,16 @@ function buildUpstreamProvidersPayload(): UpstreamManagementProviderSetting[] {
   return form.upstream_management_providers
     .map((provider) => {
       const payload: UpstreamManagementProviderSetting = {
+        type: provider.type === "newapi" ? "newapi" : "sub2api",
         slug: provider.slug.trim(),
         name: provider.name.trim(),
         enabled: provider.enabled !== false,
         base_url: provider.base_url.trim(),
         login_url: provider.login_url.trim(),
         api_keys_url: provider.api_keys_url.trim(),
+        groups_url: provider.groups_url.trim(),
         email: provider.email.trim(),
+        username: provider.username.trim(),
         account_name_prefix: provider.account_name_prefix.trim(),
       };
       if (provider.password?.trim()) {
@@ -8206,18 +8246,21 @@ function buildUpstreamProvidersPayload(): UpstreamManagementProviderSetting[] {
       }
       return payload;
     })
-    .filter((provider) => provider.slug || provider.name || provider.base_url || provider.api_keys_url);
+    .filter((provider) => provider.slug || provider.name || provider.base_url || provider.api_keys_url || provider.groups_url || provider.username);
 }
 
 function addUpstreamProvider() {
   form.upstream_management_providers.push({
+    type: "sub2api",
     slug: "",
     name: "",
     enabled: true,
     base_url: "",
     login_url: "",
     api_keys_url: "",
+    groups_url: "",
     email: "",
+    username: "",
     password: "",
     password_configured: false,
     account_name_prefix: "",

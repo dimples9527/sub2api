@@ -275,13 +275,16 @@ type SystemSettings struct {
 }
 
 type UpstreamManagementProviderSetting struct {
+	Type               string `json:"type"`
 	Slug               string `json:"slug"`
 	Name               string `json:"name"`
 	Enabled            bool   `json:"enabled"`
 	BaseURL            string `json:"base_url"`
 	LoginURL           string `json:"login_url"`
 	APIKeysURL         string `json:"api_keys_url"`
+	GroupsURL          string `json:"groups_url"`
 	Email              string `json:"email"`
+	Username           string `json:"username"`
 	PasswordConfigured bool   `json:"password_configured"`
 	AccountNamePrefix  string `json:"account_name_prefix"`
 	TempDisableMinutes int    `json:"temp_disable_minutes"`

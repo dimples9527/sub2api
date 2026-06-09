@@ -107,11 +107,14 @@ upstream_management:
   providers:
     # - slug: "findcg"
     #   name: "FindCG"
+    #   type: "sub2api" # sub2api or newapi
     #   enabled: true
     #   base_url: "https://www.findcg.com"
     #   login_url: ""
     #   api_keys_url: ""
+    #   groups_url: ""
     #   email: ""
+    #   username: "" # NewAPI uses username/password login; sub2api uses email/password.
     #   password: ""
     #   account_name_prefix: "findcg-"
 

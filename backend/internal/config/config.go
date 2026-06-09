@@ -200,6 +200,7 @@ type UpstreamManagementConfig struct {
 }
 
 type UpstreamManagementProviderConfig struct {
+	Type               string `mapstructure:"type"`
 	Slug               string `mapstructure:"slug"`
 	Name               string `mapstructure:"name"`
 	Enabled            bool   `mapstructure:"enabled"`
@@ -207,7 +208,9 @@ type UpstreamManagementProviderConfig struct {
 	LoginURL           string `mapstructure:"login_url"`
 	APIKeysURL         string `mapstructure:"api_keys_url"`
 	KeysURL            string `mapstructure:"keys_url"`
+	GroupsURL          string `mapstructure:"groups_url"`
 	Email              string `mapstructure:"email"`
+	Username           string `mapstructure:"username"`
 	Password           string `mapstructure:"password"`
 	AccountNamePrefix  string `mapstructure:"account_name_prefix"`
 	TempDisableMinutes int    `mapstructure:"temp_disable_minutes"`

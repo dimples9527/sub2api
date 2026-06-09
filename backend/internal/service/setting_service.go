@@ -3599,13 +3599,16 @@ func providerSettingsFromConfig(providers []config.UpstreamManagementProviderCon
 	out := make([]UpstreamManagementProviderSetting, 0, len(providers))
 	for _, provider := range providers {
 		out = append(out, UpstreamManagementProviderSetting{
+			Type:               provider.Type,
 			Slug:               provider.Slug,
 			Name:               provider.Name,
 			Enabled:            provider.Enabled,
 			BaseURL:            provider.BaseURL,
 			LoginURL:           provider.LoginURL,
 			APIKeysURL:         firstNonEmpty(provider.APIKeysURL, provider.KeysURL),
+			GroupsURL:          provider.GroupsURL,
 			Email:              provider.Email,
+			Username:           provider.Username,
 			Password:           provider.Password,
 			AccountNamePrefix:  provider.AccountNamePrefix,
 			TempDisableMinutes: provider.TempDisableMinutes,
@@ -3617,24 +3620,36 @@ func providerSettingsFromConfig(providers []config.UpstreamManagementProviderCon
 func normalizeUpstreamManagementProviderSettings(providers []UpstreamManagementProviderSetting) []UpstreamManagementProviderSetting {
 	out := make([]UpstreamManagementProviderSetting, 0, len(providers))
 	for _, provider := range providers {
+		provider.Type = normalizeUpstreamProviderType(provider.Type)
 		provider.Slug = strings.TrimSpace(provider.Slug)
 		provider.Name = strings.TrimSpace(provider.Name)
 		provider.BaseURL = strings.TrimSpace(provider.BaseURL)
 		provider.LoginURL = strings.TrimSpace(provider.LoginURL)
 		provider.APIKeysURL = strings.TrimSpace(firstNonEmpty(provider.APIKeysURL, provider.KeysURL))
 		provider.KeysURL = ""
+		provider.GroupsURL = strings.TrimSpace(provider.GroupsURL)
 		provider.Email = strings.TrimSpace(provider.Email)
+		provider.Username = strings.TrimSpace(provider.Username)
 		provider.AccountNamePrefix = strings.TrimSpace(provider.AccountNamePrefix)
 		if provider.TempDisableMinutes <= 0 {
 			provider.TempDisableMinutes = 1440
 		}
 		provider.PasswordConfigured = strings.TrimSpace(provider.Password) != "" || provider.PasswordConfigured
-		if provider.Slug == "" && provider.Name == "" && provider.BaseURL == "" && provider.APIKeysURL == "" && provider.Email == "" && provider.AccountNamePrefix == "" {
+		if provider.Slug == "" && provider.Name == "" && provider.BaseURL == "" && provider.APIKeysURL == "" && provider.GroupsURL == "" && provider.Email == "" && provider.Username == "" && provider.AccountNamePrefix == "" {
 			continue
 		}
 		out = append(out, provider)
 	}
 	return out
+}
+
+func normalizeUpstreamProviderType(providerType string) string {
+	switch strings.ToLower(strings.TrimSpace(providerType)) {
+	case "newapi":
+		return "newapi"
+	default:
+		return "sub2api"
+	}
 }
 
 func (s *SettingService) prepareUpstreamManagementProvidersForWrite(ctx context.Context, providers []UpstreamManagementProviderSetting) ([]UpstreamManagementProviderSetting, error) {

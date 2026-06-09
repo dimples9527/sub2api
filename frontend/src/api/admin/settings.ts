@@ -643,13 +643,16 @@ export interface SystemSettings {
 }
 
 export interface UpstreamManagementProviderSetting {
+  type: "sub2api" | "newapi" | string;
   slug: string;
   name: string;
   enabled: boolean;
   base_url: string;
   login_url: string;
   api_keys_url: string;
+  groups_url: string;
   email: string;
+  username: string;
   password?: string;
   password_configured?: boolean;
   account_name_prefix: string;

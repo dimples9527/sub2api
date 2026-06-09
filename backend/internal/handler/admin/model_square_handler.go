@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +28,12 @@ const (
 	findCGModelPath      = "/api/v1/model-square"
 	findCGKeysPath       = "/api/v1/keys?page=1&page_size=100&timezone=Asia%2FShanghai"
 	findCGGroupsPath     = "/api/v1/groups/available?timezone=Asia%2FShanghai"
+	newAPILoginPath      = "/api/user/login"
+	newAPIKeysPath       = "/api/token/?p=1&size=200"
+	newAPIGroupsPath     = "/api/user/self/groups"
+
+	upstreamProviderTypeSub2API = "sub2api"
+	upstreamProviderTypeNewAPI  = "newapi"
 
 	modelSquareKeysSyncErrorBackoff = 30 * time.Second
 	modelSquareRateCompareEpsilon   = 1e-9
@@ -128,6 +135,42 @@ type findCGKeyGroup struct {
 	RateMultiplier *float64 `json:"rate_multiplier"`
 }
 
+type newAPILoginResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    struct {
+		ID int64 `json:"id"`
+	} `json:"data"`
+}
+
+type newAPIKeysResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    struct {
+		Items []newAPIKeyItem `json:"items"`
+	} `json:"data"`
+}
+
+type newAPIKeyItem struct {
+	Name  string `json:"name"`
+	Group string `json:"group"`
+}
+
+type newAPIGroupsResponse struct {
+	Success bool                       `json:"success"`
+	Message string                     `json:"message"`
+	Data    map[string]newAPIGroupInfo `json:"data"`
+}
+
+type newAPIGroupInfo struct {
+	Ratio *float64 `json:"ratio"`
+}
+
+type newAPIAuthSession struct {
+	UserID       int64
+	CookieHeader string
+}
+
 type modelSquareKeysSyncResult struct {
 	CheckedCount int                           `json:"checked_count"`
 	MatchedCount int                           `json:"matched_count"`
@@ -222,12 +265,15 @@ type accountRateGuardViolation struct {
 }
 
 type upstreamProviderRuntime struct {
+	Type               string
 	Slug               string
 	Name               string
 	BaseURL            string
 	LoginURL           string
 	KeysURL            string
+	GroupsURL          string
 	Email              string
+	Username           string
 	Password           string
 	AccountNamePrefix  string
 	TempDisableMinutes int
@@ -836,6 +882,7 @@ func (h *ModelSquareHandler) runAccountRateGuard(ctx context.Context, dryRun boo
 		if err != nil {
 			providerResult.Error = err.Error()
 			result.Providers = append(result.Providers, providerResult)
+			logAccountRateGuardProviderFailure(provider, err)
 			continue
 		}
 		providerResult.CheckedKeyCount = len(keys)
@@ -1004,6 +1051,37 @@ func errorString(err error) string {
 	return err.Error()
 }
 
+func logAccountRateGuardProviderFailure(provider upstreamProviderRuntime, err error) {
+	if err == nil {
+		return
+	}
+	slog.Warn(
+		"upstream account rate guard provider failed",
+		"provider_slug", provider.Slug,
+		"provider_name", provider.Name,
+		"provider_type", provider.Type,
+		"stage", accountRateGuardProviderErrorStage(err),
+		"error", err,
+	)
+}
+
+func accountRateGuardProviderErrorStage(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "login"):
+		return "login"
+	case strings.Contains(msg, "groups"):
+		return "groups"
+	case strings.Contains(msg, "keys"):
+		return "keys"
+	default:
+		return "unknown"
+	}
+}
+
 func (h *ModelSquareHandler) accountRateGuardProviders(ctx context.Context) []upstreamProviderRuntime {
 	providers := []upstreamProviderRuntime{}
 	if h == nil {
@@ -1017,6 +1095,7 @@ func (h *ModelSquareHandler) accountRateGuardProviders(ctx context.Context) []up
 		keysURL = findCGKeysPath
 	}
 	providers = append(providers, normalizeUpstreamProviderRuntime(upstreamProviderRuntime{
+		Type:               upstreamProviderTypeSub2API,
 		Slug:               "default",
 		Name:               "Default Upstream",
 		BaseURL:            baseURL,
@@ -1042,12 +1121,15 @@ func (h *ModelSquareHandler) configuredAccountRateGuardProviders(ctx context.Con
 					continue
 				}
 				providers = append(providers, normalizeUpstreamProviderRuntime(upstreamProviderRuntime{
+					Type:               provider.Type,
 					Slug:               provider.Slug,
 					Name:               provider.Name,
 					BaseURL:            firstNonEmpty(provider.BaseURL, settings.UpstreamManagementBaseURL),
 					LoginURL:           firstNonEmpty(provider.LoginURL, settings.UpstreamManagementLoginURL),
 					KeysURL:            firstNonEmpty(provider.APIKeysURL, provider.KeysURL, settings.UpstreamManagementAPIKeysURL),
+					GroupsURL:          firstNonEmpty(provider.GroupsURL, settings.UpstreamManagementGroupsURL),
 					Email:              firstNonEmpty(provider.Email, settings.UpstreamManagementEmail),
+					Username:           provider.Username,
 					Password:           firstNonEmpty(provider.Password, settings.UpstreamManagementPassword),
 					AccountNamePrefix:  provider.AccountNamePrefix,
 					TempDisableMinutes: provider.TempDisableMinutes,
@@ -1069,12 +1151,15 @@ func upstreamProviderRuntimesFromConfig(upstreamCfg config.UpstreamManagementCon
 			return
 		}
 		provider := normalizeUpstreamProviderRuntime(upstreamProviderRuntime{
+			Type:               providerCfg.Type,
 			Slug:               providerCfg.Slug,
 			Name:               providerCfg.Name,
 			BaseURL:            firstNonEmpty(providerCfg.BaseURL, upstreamCfg.BaseURL, legacyCfg.BaseURL),
 			LoginURL:           firstNonEmpty(providerCfg.LoginURL, upstreamCfg.LoginURL, legacyCfg.LoginURL),
 			KeysURL:            firstNonEmpty(providerCfg.APIKeysURL, providerCfg.KeysURL, upstreamCfg.APIKeysURL, upstreamCfg.KeysURL, legacyCfg.APIKeysURL, legacyCfg.KeysURL),
+			GroupsURL:          firstNonEmpty(providerCfg.GroupsURL, upstreamCfg.GroupsURL, legacyCfg.GroupsURL),
 			Email:              firstNonEmpty(providerCfg.Email, upstreamCfg.Email, legacyCfg.Email),
+			Username:           providerCfg.Username,
 			Password:           firstNonEmpty(providerCfg.Password, upstreamCfg.Password, legacyCfg.Password),
 			AccountNamePrefix:  providerCfg.AccountNamePrefix,
 			TempDisableMinutes: providerCfg.TempDisableMinutes,
@@ -1093,6 +1178,7 @@ func upstreamProviderRuntimesFromConfig(upstreamCfg config.UpstreamManagementCon
 }
 
 func normalizeUpstreamProviderRuntime(provider upstreamProviderRuntime) upstreamProviderRuntime {
+	provider.Type = normalizeUpstreamProviderRuntimeType(provider.Type)
 	provider.Slug = strings.TrimSpace(provider.Slug)
 	if provider.Slug == "" {
 		provider.Slug = normalizeModelSquareGroupName(provider.Name)
@@ -1110,14 +1196,37 @@ func normalizeUpstreamProviderRuntime(provider upstreamProviderRuntime) upstream
 	}
 	provider.LoginURL = strings.TrimSpace(provider.LoginURL)
 	provider.KeysURL = strings.TrimSpace(provider.KeysURL)
+	provider.GroupsURL = strings.TrimSpace(provider.GroupsURL)
+	provider.Username = strings.TrimSpace(provider.Username)
 	if provider.KeysURL == "" {
-		provider.KeysURL = findCGKeysPath
+		if provider.Type == upstreamProviderTypeNewAPI {
+			provider.KeysURL = newAPIKeysPath
+		} else {
+			provider.KeysURL = findCGKeysPath
+		}
+	}
+	if provider.Type == upstreamProviderTypeNewAPI {
+		if provider.LoginURL == "" {
+			provider.LoginURL = newAPILoginPath
+		}
+		if provider.GroupsURL == "" {
+			provider.GroupsURL = newAPIGroupsPath
+		}
 	}
 	provider.Email = strings.TrimSpace(provider.Email)
 	if provider.TempDisableMinutes <= 0 {
 		provider.TempDisableMinutes = 1440
 	}
 	return provider
+}
+
+func normalizeUpstreamProviderRuntimeType(providerType string) string {
+	switch strings.ToLower(strings.TrimSpace(providerType)) {
+	case upstreamProviderTypeNewAPI:
+		return upstreamProviderTypeNewAPI
+	default:
+		return upstreamProviderTypeSub2API
+	}
 }
 
 func accountMinGroupRate(account service.Account) (float64, bool) {
@@ -1188,6 +1297,13 @@ func accountRateGuardGroupChanges(account service.Account, upstreamRate float64)
 }
 
 func (h *ModelSquareHandler) fetchKeysForProvider(ctx context.Context, provider upstreamProviderRuntime) ([]findCGKeyItem, error) {
+	if provider.Type == upstreamProviderTypeNewAPI {
+		return h.fetchNewAPIKeysForProvider(ctx, provider)
+	}
+	return h.fetchSub2APIKeysForProvider(ctx, provider)
+}
+
+func (h *ModelSquareHandler) fetchSub2APIKeysForProvider(ctx context.Context, provider upstreamProviderRuntime) ([]findCGKeyItem, error) {
 	token := cachedFindCGToken{}
 	if provider.Email != "" || provider.Password != "" {
 		nextToken, err := h.loginProvider(ctx, provider)
@@ -1214,6 +1330,169 @@ func (h *ModelSquareHandler) fetchKeysForProvider(ctx context.Context, provider 
 		return nil, fmt.Errorf("upstream provider keys failed: %s", keysResp.Message)
 	}
 	return keysResp.Data.Items, nil
+}
+
+func (h *ModelSquareHandler) fetchNewAPIKeysForProvider(ctx context.Context, provider upstreamProviderRuntime) ([]findCGKeyItem, error) {
+	session, err := h.loginNewAPIProvider(ctx, provider)
+	if err != nil {
+		return nil, err
+	}
+	keysPayload, status, err := h.requestNewAPIProvider(ctx, provider, session, provider.KeysURL, "newapi provider keys")
+	if err != nil {
+		return nil, err
+	}
+	if status < 200 || status >= 300 {
+		return nil, fmt.Errorf("newapi provider keys failed: HTTP %d: %s", status, string(keysPayload))
+	}
+	groupsPayload, status, err := h.requestNewAPIProvider(ctx, provider, session, provider.GroupsURL, "newapi provider groups")
+	if err != nil {
+		return nil, err
+	}
+	if status < 200 || status >= 300 {
+		return nil, fmt.Errorf("newapi provider groups failed: HTTP %d: %s", status, string(groupsPayload))
+	}
+
+	var keysResp newAPIKeysResponse
+	if err := json.Unmarshal(keysPayload, &keysResp); err != nil {
+		return nil, fmt.Errorf("decode newapi provider keys response: %w", err)
+	}
+	if !keysResp.Success {
+		if keysResp.Message == "" {
+			keysResp.Message = "unknown error"
+		}
+		return nil, fmt.Errorf("newapi provider keys failed: %s", keysResp.Message)
+	}
+	var groupsResp newAPIGroupsResponse
+	if err := json.Unmarshal(groupsPayload, &groupsResp); err != nil {
+		return nil, fmt.Errorf("decode newapi provider groups response: %w", err)
+	}
+	if !groupsResp.Success {
+		if groupsResp.Message == "" {
+			groupsResp.Message = "unknown error"
+		}
+		return nil, fmt.Errorf("newapi provider groups failed: %s", groupsResp.Message)
+	}
+
+	ratioByGroup := make(map[string]float64, len(groupsResp.Data)*2)
+	for name, group := range groupsResp.Data {
+		if group.Ratio == nil || *group.Ratio < 0 {
+			continue
+		}
+		trimmedName := strings.TrimSpace(name)
+		if trimmedName == "" {
+			continue
+		}
+		ratioByGroup[trimmedName] = *group.Ratio
+		ratioByGroup[normalizeModelSquareGroupName(trimmedName)] = *group.Ratio
+	}
+
+	items := make([]findCGKeyItem, 0, len(keysResp.Data.Items))
+	for _, key := range keysResp.Data.Items {
+		keyName := strings.TrimSpace(key.Name)
+		groupName := strings.TrimSpace(key.Group)
+		if keyName == "" || groupName == "" {
+			continue
+		}
+		ratio, ok := ratioByGroup[groupName]
+		if !ok {
+			ratio, ok = ratioByGroup[normalizeModelSquareGroupName(groupName)]
+		}
+		if !ok {
+			continue
+		}
+		rate := ratio
+		items = append(items, findCGKeyItem{
+			Name: keyName,
+			Group: &findCGKeyGroup{
+				Name:           groupName,
+				RateMultiplier: &rate,
+			},
+		})
+	}
+	return items, nil
+}
+
+func (h *ModelSquareHandler) loginNewAPIProvider(ctx context.Context, provider upstreamProviderRuntime) (newAPIAuthSession, error) {
+	username := firstNonEmpty(provider.Username, provider.Email)
+	if strings.TrimSpace(username) == "" || provider.Password == "" {
+		return newAPIAuthSession{}, fmt.Errorf("missing newapi credentials: set username/password for provider %s", provider.Slug)
+	}
+	body, err := json.Marshal(map[string]string{
+		"username": username,
+		"password": provider.Password,
+	})
+	if err != nil {
+		return newAPIAuthSession{}, fmt.Errorf("marshal newapi provider login payload: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, providerURL(provider, provider.LoginURL), bytes.NewReader(body))
+	if err != nil {
+		return newAPIAuthSession{}, fmt.Errorf("create newapi provider login request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return newAPIAuthSession{}, fmt.Errorf("newapi provider login request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return newAPIAuthSession{}, fmt.Errorf("read newapi provider login response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return newAPIAuthSession{}, fmt.Errorf("newapi provider login failed: HTTP %d: %s", resp.StatusCode, string(raw))
+	}
+	var loginResp newAPILoginResponse
+	if err := json.Unmarshal(raw, &loginResp); err != nil {
+		return newAPIAuthSession{}, fmt.Errorf("decode newapi provider login response: %w", err)
+	}
+	if !loginResp.Success {
+		if loginResp.Message == "" {
+			loginResp.Message = "unknown error"
+		}
+		return newAPIAuthSession{}, fmt.Errorf("newapi provider login failed: %s", loginResp.Message)
+	}
+	if loginResp.Data.ID <= 0 {
+		return newAPIAuthSession{}, fmt.Errorf("newapi provider login failed: missing user id")
+	}
+	cookieHeader := cookiesHeader(resp.Cookies())
+	if cookieHeader == "" {
+		return newAPIAuthSession{}, fmt.Errorf("newapi provider login failed: missing cookie")
+	}
+	return newAPIAuthSession{UserID: loginResp.Data.ID, CookieHeader: cookieHeader}, nil
+}
+
+func (h *ModelSquareHandler) requestNewAPIProvider(ctx context.Context, provider upstreamProviderRuntime, session newAPIAuthSession, path, label string) ([]byte, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, providerURL(provider, path), nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("create %s request: %w", label, err)
+	}
+	req.Header.Set("New-Api-User", strconv.FormatInt(session.UserID, 10))
+	if session.CookieHeader != "" {
+		req.Header.Set("Cookie", session.CookieHeader)
+	}
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("%s request failed: %w", label, err)
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, 0, fmt.Errorf("read %s response: %w", label, err)
+	}
+	return raw, resp.StatusCode, nil
+}
+
+func cookiesHeader(cookies []*http.Cookie) string {
+	parts := make([]string, 0, len(cookies))
+	for _, cookie := range cookies {
+		if cookie == nil || strings.TrimSpace(cookie.Name) == "" {
+			continue
+		}
+		parts = append(parts, cookie.Name+"="+cookie.Value)
+	}
+	return strings.Join(parts, "; ")
 }
 
 func (h *ModelSquareHandler) loginProvider(ctx context.Context, provider upstreamProviderRuntime) (cachedFindCGToken, error) {
