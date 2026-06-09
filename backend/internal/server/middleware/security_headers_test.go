@@ -233,6 +233,44 @@ func TestSecurityHeaders(t *testing.T) {
 		assert.Equal(t, 2, count, "both placeholders should be replaced with same nonce")
 	})
 
+	t.Run("help_route_allows_same_origin_iframe_source", func(t *testing.T) {
+		cfg := config.CSPConfig{
+			Enabled: true,
+			Policy:  config.DefaultCSPPolicy,
+		}
+		middleware := SecurityHeaders(cfg, nil)
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodGet, "/help", nil)
+
+		middleware(c)
+
+		csp := w.Header().Get("Content-Security-Policy")
+		assert.Equal(t, "DENY", w.Header().Get("X-Frame-Options"))
+		assert.Equal(t, 1, countDirectiveValue(csp, "frame-src", "'self'"))
+		assert.Equal(t, 1, countDirectiveValue(csp, "frame-ancestors", "'none'"))
+	})
+
+	t.Run("help_html_allows_same_origin_frame_ancestors", func(t *testing.T) {
+		cfg := config.CSPConfig{
+			Enabled: true,
+			Policy:  config.DefaultCSPPolicy,
+		}
+		middleware := SecurityHeaders(cfg, nil)
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodGet, "/help.html", nil)
+
+		middleware(c)
+
+		csp := w.Header().Get("Content-Security-Policy")
+		assert.Equal(t, "SAMEORIGIN", w.Header().Get("X-Frame-Options"))
+		assert.Equal(t, 1, countDirectiveValue(csp, "frame-ancestors", "'self'"))
+		assert.Equal(t, 0, countDirectiveValue(csp, "frame-ancestors", "'none'"))
+	})
+
 	t.Run("calls_next_handler", func(t *testing.T) {
 		cfg := config.CSPConfig{Enabled: true, Policy: "default-src 'self'"}
 		middleware := SecurityHeaders(cfg, nil)
