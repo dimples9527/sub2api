@@ -39,6 +39,13 @@ api.sub2api.com {
 		
 		# 单节点上游：保留基础策略，不启用业务错误触发的被动摘除
 		lb_policy round_robin
+		# lb_try_duration 5s
+		# lb_try_interval 250ms
+
+		# 立即刷新上游返回的流式数据，避免 SSE/Responses 的 chunk 或终止事件被 Caddy 缓冲。
+		flush_interval -1
+		# Caddy reload/重载时保留已有长连接一段时间，降低正在进行的流式响应被主动切断的概率。
+		stream_close_delay 5m
 		
 		# 传递真实客户端信息
 		# 兼容 Cloudflare 和直连：后端应优先读取 CF-Connecting-IP，其次 X-Real-IP
@@ -52,14 +59,32 @@ api.sub2api.com {
 		
 		# 连接池优化
 		transport http {
-			keepalive 120s
+			# 连接本机后端的超时时间；本地端口正常应很快连上，30 秒足够暴露异常。
+			dial_timeout 30s
+			# 不限制等待上游响应头的时间，兼容长时间排队或模型首 token 较慢的请求。
+			response_header_timeout 0s
+			# 不限制从上游读取响应体的时间，避免长推理/长流式输出中途被 Caddy 切断。
+			read_timeout 0s
+			# 不限制向上游写请求体的时间，避免大请求体或慢连接上传阶段被切断。
+			write_timeout 0s
+			# 降低后端空闲连接保留时间，减少复用到已被后端关闭的陈旧连接导致 EOF/reset。
+			keepalive 30s
+			# 对空闲连接定期做 TCP keepalive 探测，尽早发现已经不可用的后端连接。
+			keepalive_interval 15s
 			keepalive_idle_conns 256
+			# 限制单个后端主机的空闲连接数，避免单机连接池过大导致陈旧连接堆积。
+			keepalive_idle_conns_per_host 64
 			read_buffer 16KB
 			write_buffer 16KB
 			compression off
 		}
 		
 	}
+
+		# 故障转移
+		# fail_duration 30s
+		# max_fails 3
+		# unhealthy_status 500 502 503 504
 
 	# =========================================================================
 	# 压缩配置
@@ -69,8 +94,7 @@ api.sub2api.com {
 		gzip 6
 		minimum_length 256
 		match {
-			header Content-Type text/*
-			header Content-Type application/json*
+			# 不压缩 text/* 和 application/json*，避免 SSE/JSON API 流被压缩层缓冲。
 			header Content-Type application/javascript*
 			header Content-Type application/xml*
 			header Content-Type application/rss+xml*
