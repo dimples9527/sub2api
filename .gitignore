@@ -138,3 +138,5 @@ docs/*
 frontend/coverage/
 aicodex
 output/
+.gomodcache
+__tests__
