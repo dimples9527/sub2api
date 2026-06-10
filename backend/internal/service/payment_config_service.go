@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -35,6 +37,7 @@ const (
 	SettingCancelWindowUnit    = "CANCEL_RATE_LIMIT_UNIT"
 	SettingCancelWindowMode    = "CANCEL_RATE_LIMIT_WINDOW_MODE"
 	SettingAlipayForceQRCode   = "ALIPAY_FORCE_QRCODE"
+	SettingRechargeOptions     = "PAYMENT_RECHARGE_OPTIONS"
 )
 
 // Default values for payment configuration settings.
@@ -43,24 +46,27 @@ const (
 	defaultMaxPendingOrders = 3
 )
 
+var defaultRechargeOptionAmounts = []float64{2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000}
+
 // PaymentConfig holds the payment system configuration.
 type PaymentConfig struct {
-	Enabled                   bool     `json:"enabled"`
-	MinAmount                 float64  `json:"min_amount"`
-	MaxAmount                 float64  `json:"max_amount"`
-	DailyLimit                float64  `json:"daily_limit"`
-	OrderTimeoutMin           int      `json:"order_timeout_minutes"`
-	MaxPendingOrders          int      `json:"max_pending_orders"`
-	EnabledTypes              []string `json:"enabled_payment_types"`
-	BalanceDisabled           bool     `json:"balance_disabled"`
-	BalanceRechargeMultiplier float64  `json:"balance_recharge_multiplier"`
-	RechargeFeeRate           float64  `json:"recharge_fee_rate"`
-	LoadBalanceStrategy       string   `json:"load_balance_strategy"`
-	ProductNamePrefix         string   `json:"product_name_prefix"`
-	ProductNameSuffix         string   `json:"product_name_suffix"`
-	HelpImageURL              string   `json:"help_image_url"`
-	HelpText                  string   `json:"help_text"`
-	StripePublishableKey      string   `json:"stripe_publishable_key,omitempty"`
+	Enabled                   bool      `json:"enabled"`
+	MinAmount                 float64   `json:"min_amount"`
+	MaxAmount                 float64   `json:"max_amount"`
+	DailyLimit                float64   `json:"daily_limit"`
+	OrderTimeoutMin           int       `json:"order_timeout_minutes"`
+	MaxPendingOrders          int       `json:"max_pending_orders"`
+	EnabledTypes              []string  `json:"enabled_payment_types"`
+	BalanceDisabled           bool      `json:"balance_disabled"`
+	BalanceRechargeMultiplier float64   `json:"balance_recharge_multiplier"`
+	RechargeFeeRate           float64   `json:"recharge_fee_rate"`
+	LoadBalanceStrategy       string    `json:"load_balance_strategy"`
+	ProductNamePrefix         string    `json:"product_name_prefix"`
+	ProductNameSuffix         string    `json:"product_name_suffix"`
+	HelpImageURL              string    `json:"help_image_url"`
+	HelpText                  string    `json:"help_text"`
+	StripePublishableKey      string    `json:"stripe_publishable_key,omitempty"`
+	RechargeOptions           []float64 `json:"recharge_options"`
 
 	// Cancel rate limit settings
 	CancelRateLimitEnabled bool   `json:"cancel_rate_limit_enabled"`
@@ -75,21 +81,22 @@ type PaymentConfig struct {
 
 // UpdatePaymentConfigRequest contains fields to update payment configuration.
 type UpdatePaymentConfigRequest struct {
-	Enabled                   *bool    `json:"enabled"`
-	MinAmount                 *float64 `json:"min_amount"`
-	MaxAmount                 *float64 `json:"max_amount"`
-	DailyLimit                *float64 `json:"daily_limit"`
-	OrderTimeoutMin           *int     `json:"order_timeout_minutes"`
-	MaxPendingOrders          *int     `json:"max_pending_orders"`
-	EnabledTypes              []string `json:"enabled_payment_types"`
-	BalanceDisabled           *bool    `json:"balance_disabled"`
-	BalanceRechargeMultiplier *float64 `json:"balance_recharge_multiplier"`
-	RechargeFeeRate           *float64 `json:"recharge_fee_rate"`
-	LoadBalanceStrategy       *string  `json:"load_balance_strategy"`
-	ProductNamePrefix         *string  `json:"product_name_prefix"`
-	ProductNameSuffix         *string  `json:"product_name_suffix"`
-	HelpImageURL              *string  `json:"help_image_url"`
-	HelpText                  *string  `json:"help_text"`
+	Enabled                   *bool     `json:"enabled"`
+	MinAmount                 *float64  `json:"min_amount"`
+	MaxAmount                 *float64  `json:"max_amount"`
+	DailyLimit                *float64  `json:"daily_limit"`
+	OrderTimeoutMin           *int      `json:"order_timeout_minutes"`
+	MaxPendingOrders          *int      `json:"max_pending_orders"`
+	EnabledTypes              []string  `json:"enabled_payment_types"`
+	BalanceDisabled           *bool     `json:"balance_disabled"`
+	BalanceRechargeMultiplier *float64  `json:"balance_recharge_multiplier"`
+	RechargeFeeRate           *float64  `json:"recharge_fee_rate"`
+	LoadBalanceStrategy       *string   `json:"load_balance_strategy"`
+	ProductNamePrefix         *string   `json:"product_name_prefix"`
+	ProductNameSuffix         *string   `json:"product_name_suffix"`
+	HelpImageURL              *string   `json:"help_image_url"`
+	HelpText                  *string   `json:"help_text"`
+	RechargeOptions           []float64 `json:"recharge_options"`
 
 	// Cancel rate limit settings
 	CancelRateLimitEnabled *bool   `json:"cancel_rate_limit_enabled"`
@@ -209,7 +216,7 @@ func (s *PaymentConfigService) GetPaymentConfig(ctx context.Context) (*PaymentCo
 		SettingHelpImageURL, SettingHelpText,
 		SettingCancelRateLimitOn, SettingCancelRateLimitMax,
 		SettingCancelWindowSize, SettingCancelWindowUnit, SettingCancelWindowMode,
-		SettingAlipayForceQRCode,
+		SettingAlipayForceQRCode, SettingRechargeOptions,
 		SettingPaymentVisibleMethodAlipayEnabled, SettingPaymentVisibleMethodAlipaySource,
 		SettingPaymentVisibleMethodWxpayEnabled, SettingPaymentVisibleMethodWxpaySource,
 	}
@@ -239,6 +246,7 @@ func (s *PaymentConfigService) parsePaymentConfig(vals map[string]string) *Payme
 		ProductNameSuffix:         vals[SettingProductNameSuffix],
 		HelpImageURL:              vals[SettingHelpImageURL],
 		HelpText:                  vals[SettingHelpText],
+		RechargeOptions:           parseRechargeOptionAmounts(vals[SettingRechargeOptions]),
 
 		CancelRateLimitEnabled: vals[SettingCancelRateLimitOn] == "true",
 		CancelRateLimitMax:     pcParseInt(vals[SettingCancelRateLimitMax], 10),
@@ -335,6 +343,9 @@ func (s *PaymentConfigService) UpdatePaymentConfig(ctx context.Context, req Upda
 	} else {
 		m[SettingEnabledPaymentTypes] = ""
 	}
+	if req.RechargeOptions != nil {
+		m[SettingRechargeOptions] = formatFloatListOrEmpty(req.RechargeOptions)
+	}
 	return s.settingRepo.SetMultiple(ctx, m)
 }
 
@@ -357,6 +368,70 @@ func formatNonNegativeFloat(v *float64) string {
 		return ""
 	}
 	return strconv.FormatFloat(*v, 'f', 2, 64)
+}
+
+func formatFloatListOrEmpty(values []float64) string {
+	if values == nil {
+		return ""
+	}
+	normalized := normalizeRechargeOptionAmounts(values)
+	parts := make([]string, 0, len(normalized))
+	for _, value := range normalized {
+		parts = append(parts, strconv.FormatFloat(value, 'f', -1, 64))
+	}
+	return "[" + strings.Join(parts, ",") + "]"
+}
+
+func parseRechargeOptionAmounts(raw string) []float64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return append([]float64(nil), defaultRechargeOptionAmounts...)
+	}
+
+	values := make([]float64, 0)
+	if strings.HasPrefix(raw, "[") {
+		if err := json.Unmarshal([]byte(raw), &values); err != nil {
+			return append([]float64(nil), defaultRechargeOptionAmounts...)
+		}
+		return normalizeRechargeOptionAmounts(values)
+	}
+
+	parts := strings.Split(raw, ",")
+	values = make([]float64, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		value, err := strconv.ParseFloat(part, 64)
+		if err != nil {
+			continue
+		}
+		values = append(values, value)
+	}
+	return normalizeRechargeOptionAmounts(values)
+}
+
+func normalizeRechargeOptionAmounts(values []float64) []float64 {
+	normalized := make([]float64, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+			continue
+		}
+		value = math.Round(value*100) / 100
+		key := strconv.FormatFloat(value, 'f', 2, 64)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		normalized = append(normalized, value)
+	}
+	if len(normalized) == 0 {
+		return append([]float64(nil), defaultRechargeOptionAmounts...)
+	}
+	sort.Float64s(normalized)
+	return normalized
 }
 
 func formatPositiveInt(v *int) string {

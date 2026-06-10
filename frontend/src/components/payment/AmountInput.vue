@@ -1,29 +1,39 @@
 <template>
   <div class="space-y-4">
-    <!-- Quick Amount Buttons -->
     <div>
       <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
         {{ t('payment.quickAmounts') }}
       </label>
-      <div class="grid grid-cols-3 gap-2">
+      <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <button
-          v-for="amt in filteredAmounts"
-          :key="amt"
+          v-for="option in filteredOptions"
+          :key="option.pay_amount"
           type="button"
+          :data-testid="`amount-option-${option.pay_amount}`"
           :class="[
-            'rounded-lg border-2 px-4 py-3 text-center font-medium transition-colors',
-            modelValue === amt
-              ? 'border-primary-500 bg-primary-50 text-primary-700 dark:border-primary-400 dark:bg-primary-900/40 dark:text-primary-300'
-              : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200 dark:hover:border-dark-500',
+            'rounded-lg border p-3 text-left transition-all',
+            modelValue === option.pay_amount
+              ? 'border-primary-500 bg-primary-50 shadow-sm ring-1 ring-primary-500 dark:border-primary-400 dark:bg-primary-900/30 dark:ring-primary-400'
+              : 'border-gray-200 bg-white hover:border-primary-200 hover:bg-gray-50 dark:border-dark-600 dark:bg-dark-800 dark:hover:border-primary-700 dark:hover:bg-dark-700',
           ]"
-          @click="selectAmount(amt)"
+          @click="selectAmount(option.pay_amount)"
         >
-          {{ amt }}
+          <span class="block text-xs text-gray-400 dark:text-gray-500">
+            {{ t('payment.rechargePayAmount') }}
+          </span>
+          <span class="mt-1 block text-lg font-semibold text-gray-900 dark:text-white">
+            {{ formatAmount(option.pay_amount) }}
+          </span>
+          <span class="mt-2 block border-t border-gray-100 pt-2 text-xs text-gray-500 dark:border-dark-700 dark:text-gray-400">
+            {{ t('payment.rechargeCreditAmount') }}
+            <strong class="ml-1 font-semibold text-primary-600 dark:text-primary-400">
+              {{ formatAmount(option.credit_amount) }}
+            </strong>
+          </span>
         </button>
       </div>
     </div>
 
-    <!-- Custom Amount Input -->
     <div>
       <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
         {{ t('payment.customAmount') }}
@@ -46,11 +56,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import type { RechargeAmountOption } from '@/types/payment'
 
 const props = withDefaults(defineProps<{
   amounts?: number[]
+  options?: RechargeAmountOption[]
   modelValue: number | null
   min?: number
   max?: number
@@ -68,15 +80,25 @@ const { t } = useI18n()
 
 const customText = ref('')
 
-// 0 = no limit
-const filteredAmounts = computed(() =>
-  props.amounts.filter((a) => (props.min <= 0 || a >= props.min) && (props.max <= 0 || a <= props.max))
+const amountOptions = computed<RechargeAmountOption[]>(() => {
+  if (props.options?.length) return props.options
+  return props.amounts.map((amount) => ({
+    pay_amount: amount,
+    credit_amount: amount,
+  }))
+})
+
+const filteredOptions = computed(() =>
+  amountOptions.value.filter((option) =>
+    (props.min <= 0 || option.pay_amount >= props.min) &&
+    (props.max <= 0 || option.pay_amount <= props.max),
+  )
 )
 
 const placeholderText = computed(() => {
   if (props.min > 0 && props.max > 0) return `${props.min} - ${props.max}`
-  if (props.min > 0) return `≥ ${props.min}`
-  if (props.max > 0) return `≤ ${props.max}`
+  if (props.min > 0) return `>= ${props.min}`
+  if (props.max > 0) return `<= ${props.max}`
   return t('payment.enterAmount')
 })
 
@@ -101,6 +123,13 @@ function handleInput(e: Event) {
   } else {
     emit('update:modelValue', null)
   }
+}
+
+function formatAmount(value: number): string {
+  return `$${Number(value).toLocaleString(undefined, {
+    minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
+    maximumFractionDigits: 2,
+  })}`
 }
 
 watch(() => props.modelValue, (v) => {

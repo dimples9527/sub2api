@@ -102,6 +102,7 @@ func TestParsePaymentConfig(t *testing.T) {
 		if len(cfg.EnabledTypes) != 0 {
 			t.Fatalf("expected empty EnabledTypes, got %v", cfg.EnabledTypes)
 		}
+		assertFloatSliceEqual(t, cfg.RechargeOptions, []float64{2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000})
 	})
 
 	t.Run("all values populated", func(t *testing.T) {
@@ -196,6 +197,15 @@ func TestParsePaymentConfig(t *testing.T) {
 		if len(cfg.EnabledTypes) != 0 {
 			t.Fatalf("expected empty EnabledTypes for empty string, got %v", cfg.EnabledTypes)
 		}
+	})
+
+	t.Run("recharge options are parsed normalized and sorted", func(t *testing.T) {
+		t.Parallel()
+		vals := map[string]string{
+			SettingRechargeOptions: "20, 5, 5, invalid, -1, 10.129",
+		}
+		cfg := svc.parsePaymentConfig(vals)
+		assertFloatSliceEqual(t, cfg.RechargeOptions, []float64{5, 10.13, 20})
 	})
 }
 
@@ -429,6 +439,56 @@ func TestUpdatePaymentConfig_PersistsVisibleMethodRouting(t *testing.T) {
 	}
 	if repo.values[SettingPaymentVisibleMethodWxpaySource] != VisibleMethodSourceOfficialWechat {
 		t.Fatalf("wxpay source = %q, want %q", repo.values[SettingPaymentVisibleMethodWxpaySource], VisibleMethodSourceOfficialWechat)
+	}
+}
+
+func TestUpdatePaymentConfig_PersistsRechargeOptions(t *testing.T) {
+	repo := &paymentConfigSettingRepoStub{values: map[string]string{}}
+	svc := &PaymentConfigService{settingRepo: repo}
+
+	err := svc.UpdatePaymentConfig(context.Background(), UpdatePaymentConfigRequest{
+		RechargeOptions: []float64{50, 2, 2, 10.129},
+	})
+	if err != nil {
+		t.Fatalf("UpdatePaymentConfig returned error: %v", err)
+	}
+
+	if repo.values[SettingRechargeOptions] != "[2,10.13,50]" {
+		t.Fatalf("recharge options = %q, want %q", repo.values[SettingRechargeOptions], "[2,10.13,50]")
+	}
+}
+
+func TestUpdatePaymentConfig_SkipsRechargeOptionsWhenOmitted(t *testing.T) {
+	repo := &paymentConfigSettingRepoStub{values: map[string]string{
+		SettingRechargeOptions: "[2,5,10]",
+	}}
+	svc := &PaymentConfigService{settingRepo: repo}
+
+	enabled := true
+	err := svc.UpdatePaymentConfig(context.Background(), UpdatePaymentConfigRequest{
+		Enabled: &enabled,
+	})
+	if err != nil {
+		t.Fatalf("UpdatePaymentConfig returned error: %v", err)
+	}
+
+	if _, ok := repo.updates[SettingRechargeOptions]; ok {
+		t.Fatalf("expected omitted recharge options not to be written, got %q", repo.updates[SettingRechargeOptions])
+	}
+	if repo.values[SettingRechargeOptions] != "[2,5,10]" {
+		t.Fatalf("stored recharge options = %q, want existing value", repo.values[SettingRechargeOptions])
+	}
+}
+
+func assertFloatSliceEqual(t *testing.T, got []float64, want []float64) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("slice len = %d, want %d (got=%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("slice[%d] = %v, want %v (got=%v)", i, got[i], want[i], got)
+		}
 	}
 }
 

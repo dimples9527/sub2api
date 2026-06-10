@@ -5951,6 +5951,22 @@
                     </p>
                   </div>
                 </div>
+                <div>
+                  <label class="input-label">{{
+                    t("admin.settings.payment.rechargeOptions")
+                  }}</label>
+                  <input
+                    v-model="paymentRechargeOptionsInput"
+                    type="text"
+                    class="input"
+                    :placeholder="
+                      t('admin.settings.payment.rechargeOptionsPlaceholder')
+                    "
+                  />
+                  <p class="mt-0.5 text-xs text-gray-400">
+                    {{ t("admin.settings.payment.rechargeOptionsHint") }}
+                  </p>
+                </div>
                 <!-- Row 3: Pending orders + load balance + cancel rate limit (all in one row) -->
                 <div class="flex flex-wrap items-end gap-4">
                   <div class="w-28">
@@ -6858,6 +6874,7 @@ const testEmailAddress = ref("");
 const registrationEmailSuffixWhitelistTags = ref<string[]>([]);
 const registrationEmailSuffixWhitelistDraft = ref("");
 const tablePageSizeOptionsInput = ref("10, 20, 50, 100");
+const paymentRechargeOptionsInput = ref("2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000");
 
 // Admin API Key 状态
 const adminApiKeyLoading = ref(true);
@@ -6931,6 +6948,7 @@ const openaiFastPolicyLoaded = ref(false);
 const tablePageSizeMin = 5;
 const tablePageSizeMax = 1000;
 const tablePageSizeDefault = 20;
+const defaultPaymentRechargeOptions = [2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000];
 
 function defaultLoginAgreementDocuments(): LoginAgreementDocument[] {
   return [
@@ -7053,6 +7071,7 @@ const form = reactive<SettingsForm>({
   payment_balance_disabled: false,
   payment_balance_recharge_multiplier: 1,
   payment_recharge_fee_rate: 0,
+  payment_recharge_options: defaultPaymentRechargeOptions,
   payment_enabled_types: [],
   payment_help_image_url: "",
   payment_help_text: "",
@@ -7810,6 +7829,32 @@ function parseTablePageSizeOptionsInput(raw: string): number[] | null {
   return deduped;
 }
 
+function formatPaymentRechargeOptions(options: number[] | null | undefined): string {
+  return (
+    normalizePaymentRechargeOptions(options || defaultPaymentRechargeOptions) ||
+    defaultPaymentRechargeOptions
+  ).join(", ");
+}
+
+function parsePaymentRechargeOptionsInput(raw: string): number[] | null {
+  const values = raw
+    .split(/[,，\s]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0)
+    .map((token) => Number(token));
+
+  return normalizePaymentRechargeOptions(values);
+}
+
+function normalizePaymentRechargeOptions(values: number[]): number[] | null {
+  if (values.length === 0) return null;
+  const normalized = values.map((value) => Math.round(value * 100) / 100);
+  if (normalized.some((value) => !Number.isFinite(value) || value <= 0)) {
+    return null;
+  }
+  return Array.from(new Set(normalized)).sort((a, b) => a - b);
+}
+
 async function loadSettings() {
   loading.value = true;
   loadFailed.value = false;
@@ -7850,6 +7895,9 @@ async function loadSettings() {
       Array.isArray(settings.table_page_size_options)
         ? settings.table_page_size_options
         : [10, 20, 50, 100],
+    );
+    paymentRechargeOptionsInput.value = formatPaymentRechargeOptions(
+      settings.payment_recharge_options,
     );
     registrationEmailSuffixWhitelistDraft.value = "";
     form.smtp_password = "";
@@ -8145,6 +8193,13 @@ async function saveSettings() {
     // Optional URL fields: auto-clear invalid values so they don't cause backend 400 errors
     if (!isValidHttpUrl(form.frontend_url)) form.frontend_url = "";
     if (!isValidHttpUrl(form.doc_url)) form.doc_url = "";
+    const normalizedPaymentRechargeOptions =
+      parsePaymentRechargeOptionsInput(paymentRechargeOptionsInput.value);
+    if (!normalizedPaymentRechargeOptions) {
+      appStore.showError(t("admin.settings.payment.invalidRechargeOptions"));
+      return;
+    }
+    form.payment_recharge_options = normalizedPaymentRechargeOptions;
     syncWeChatConnectMode();
     const wechatStoredMode = deriveWeChatConnectStoredMode(
       form.wechat_connect_open_enabled,
@@ -8326,6 +8381,7 @@ async function saveSettings() {
       payment_balance_recharge_multiplier:
         Number(form.payment_balance_recharge_multiplier) || 1,
       payment_recharge_fee_rate: Number(form.payment_recharge_fee_rate) || 0,
+      payment_recharge_options: normalizedPaymentRechargeOptions,
       payment_enabled_types: form.payment_enabled_types,
       payment_load_balance_strategy: form.payment_load_balance_strategy,
       payment_product_name_prefix: form.payment_product_name_prefix,
@@ -8413,6 +8469,9 @@ async function saveSettings() {
       Array.isArray(updated.table_page_size_options)
         ? updated.table_page_size_options
         : [10, 20, 50, 100],
+    );
+    paymentRechargeOptionsInput.value = formatPaymentRechargeOptions(
+      updated.payment_recharge_options,
     );
     registrationEmailSuffixWhitelistDraft.value = "";
     form.smtp_password = "";
