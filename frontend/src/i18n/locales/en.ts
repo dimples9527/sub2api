@@ -403,6 +403,7 @@ export default {
     expand: 'Expand',
     logout: 'Logout',
     github: 'GitHub',
+    helpCenter: 'Help Docs',
     mySubscriptions: 'My Subscriptions',
     buySubscription: 'Recharge / Subscription',
     docs: 'Docs',

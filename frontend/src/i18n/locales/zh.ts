@@ -403,6 +403,7 @@ export default {
     expand: '展开',
     logout: '退出登录',
     github: 'GitHub',
+    helpCenter: '帮助文档',
     mySubscriptions: '我的订阅',
     buySubscription: '充值/订阅',
     docs: '文档',
