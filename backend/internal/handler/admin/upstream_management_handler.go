@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -12,6 +13,10 @@ type upstreamManagementService interface {
 	CompareGroups(ctx context.Context) (service.UpstreamGroupCompareResult, error)
 	ApplyRateFixes(ctx context.Context) (service.UpstreamGroupCompareResult, error)
 	SaveGroupMapping(ctx context.Context, input service.UpstreamGroupMappingInput) (service.UpstreamGroupCompareResult, error)
+}
+
+type upstreamModelSquareService interface {
+	FetchDefaultModelSquare(ctx context.Context) (json.RawMessage, service.UpstreamProviderConfig, error)
 }
 
 type UpstreamManagementHandler struct {
@@ -56,4 +61,23 @@ func (h *UpstreamManagementHandler) SaveGroupMapping(c *gin.Context) {
 		return
 	}
 	response.Success(c, result)
+}
+
+func (h *UpstreamManagementHandler) ModelSquare(c *gin.Context) {
+	modelSquareService, ok := h.service.(upstreamModelSquareService)
+	if !ok {
+		response.InternalError(c, "upstream model square service is unavailable")
+		return
+	}
+	payload, provider, err := modelSquareService.FetchDefaultModelSquare(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{
+		"provider_slug": provider.Slug,
+		"provider_name": provider.Name,
+		"provider_type": provider.Type,
+		"payload":       payload,
+	})
 }

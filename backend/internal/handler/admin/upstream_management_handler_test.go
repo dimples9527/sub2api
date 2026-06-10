@@ -3,6 +3,7 @@ package admin
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,8 +17,11 @@ type upstreamManagementHandlerServiceStub struct {
 	compareCalled     bool
 	applyCalled       bool
 	saveMappingCalled bool
+	modelSquareCalled bool
 	mappingInput      service.UpstreamGroupMappingInput
 	result            service.UpstreamGroupCompareResult
+	modelSquare       json.RawMessage
+	defaultProvider   service.UpstreamProviderConfig
 	err               error
 }
 
@@ -37,6 +41,11 @@ func (s *upstreamManagementHandlerServiceStub) SaveGroupMapping(_ context.Contex
 	return s.result, s.err
 }
 
+func (s *upstreamManagementHandlerServiceStub) FetchDefaultModelSquare(context.Context) (json.RawMessage, service.UpstreamProviderConfig, error) {
+	s.modelSquareCalled = true
+	return s.modelSquare, s.defaultProvider, s.err
+}
+
 func newUpstreamManagementHandlerTestRouter(svc upstreamManagementService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -44,6 +53,7 @@ func newUpstreamManagementHandlerTestRouter(svc upstreamManagementService) *gin.
 	router.GET("/admin/upstream-management/groups", handler.CompareGroups)
 	router.POST("/admin/upstream-management/groups/rate-fixes", handler.ApplyRateFixes)
 	router.PUT("/admin/upstream-management/groups/mappings", handler.SaveGroupMapping)
+	router.GET("/admin/upstream-management/model-square", handler.ModelSquare)
 	return router
 }
 
@@ -126,4 +136,21 @@ func TestUpstreamManagementHandlerSaveGroupMapping(t *testing.T) {
 	require.Equal(t, "VIP", svc.mappingInput.UpstreamGroupName)
 	require.NotNil(t, svc.mappingInput.LocalGroupID)
 	require.Equal(t, groupID, *svc.mappingInput.LocalGroupID)
+}
+
+func TestUpstreamManagementHandlerModelSquare(t *testing.T) {
+	svc := &upstreamManagementHandlerServiceStub{
+		defaultProvider: service.UpstreamProviderConfig{Slug: "default", Name: "Default"},
+		modelSquare:     json.RawMessage(`{"groups":[],"models":[{"id":"gpt-5.2"}]}`),
+	}
+	router := newUpstreamManagementHandlerTestRouter(svc)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/admin/upstream-management/model-square", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.True(t, svc.modelSquareCalled)
+	require.Contains(t, rec.Body.String(), `"provider_slug":"default"`)
+	require.Contains(t, rec.Body.String(), `"models":[{"id":"gpt-5.2"}]`)
 }

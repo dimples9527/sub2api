@@ -35,6 +35,7 @@ import adminComplianceAPI from './compliance'
 import upstreamProvidersAPI from './upstreamProviders'
 import upstreamManagementAPI from './upstreamManagement'
 import upstreamAccountSyncAPI from './upstreamAccountSync'
+import modelSquareAPI from './modelSquare'
 
 /**
  * Unified admin API object for convenient access
@@ -71,7 +72,8 @@ export const adminAPI = {
   compliance: adminComplianceAPI,
   upstreamProviders: upstreamProvidersAPI,
   upstreamManagement: upstreamManagementAPI,
-  upstreamAccountSync: upstreamAccountSyncAPI
+  upstreamAccountSync: upstreamAccountSyncAPI,
+  modelSquare: modelSquareAPI
 }
 
 export {
@@ -106,7 +108,8 @@ export {
   adminComplianceAPI,
   upstreamProvidersAPI,
   upstreamManagementAPI,
-  upstreamAccountSyncAPI
+  upstreamAccountSyncAPI,
+  modelSquareAPI
 }
 
 export default adminAPI
@@ -135,3 +138,9 @@ export type {
   UpstreamAccountSyncResult,
   UpstreamAccountSyncSummary
 } from './upstreamAccountSync'
+export type {
+  AdminModelSquareResult,
+  ModelSquareGroup,
+  ModelSquareModel,
+  ModelSquarePayload
+} from './modelSquare'

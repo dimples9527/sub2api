@@ -88,6 +88,16 @@ func NewUpstreamManagementService(
 	}
 }
 
+func (s *UpstreamManagementService) FetchDefaultModelSquare(ctx context.Context) (json.RawMessage, UpstreamProviderConfig, error) {
+	source, ok := s.providerSource.(interface {
+		FetchDefaultModelSquare(context.Context) (json.RawMessage, UpstreamProviderConfig, error)
+	})
+	if !ok {
+		return nil, UpstreamProviderConfig{}, infraerrors.InternalServer("UPSTREAM_MODEL_SQUARE_UNAVAILABLE", "upstream model square service is unavailable")
+	}
+	return source.FetchDefaultModelSquare(ctx)
+}
+
 func (s *UpstreamManagementService) CompareGroups(ctx context.Context) (UpstreamGroupCompareResult, error) {
 	result, err := s.compareGroups(ctx)
 	if err != nil {

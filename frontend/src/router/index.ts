@@ -537,6 +537,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/upstream-management/model-square',
+    name: 'AdminModelSquare',
+    component: () => import('@/views/admin/upstream-management/ModelSquareView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Model Square',
+      titleKey: 'admin.modelSquare.title',
+      descriptionKey: 'admin.modelSquare.description'
+    }
+  },
+  {
     path: '/admin/announcements',
     name: 'AdminAnnouncements',
     component: () => import('@/views/admin/AnnouncementsView.vue'),
