@@ -54,6 +54,9 @@
               <div class="flex items-center gap-2">
                 <span class="font-medium text-gray-900 dark:text-white">{{ row.name }}</span>
                 <span class="badge" :class="providerTypeClass(row.type)">{{ providerTypeLabel(row.type) }}</span>
+                <span v-if="row.is_default" class="badge badge-success">
+                  {{ t('admin.upstreamProviders.defaultProvider') }}
+                </span>
               </div>
               <code class="text-xs text-gray-500 dark:text-gray-400">{{ row.slug }}</code>
             </div>
@@ -110,6 +113,17 @@
 
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
+              <button
+                v-if="!row.is_default"
+                type="button"
+                class="action-button hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-900/20 dark:hover:text-amber-300"
+                :disabled="defaultingSlug === row.slug"
+                :title="t('admin.upstreamProviders.setDefault')"
+                @click="setDefaultProvider(row)"
+              >
+                <Icon name="badge" size="sm" :class="defaultingSlug === row.slug ? 'animate-pulse' : ''" />
+                <span>{{ t('admin.upstreamProviders.setDefaultShort') }}</span>
+              </button>
               <button
                 type="button"
                 class="action-button hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-900/20 dark:hover:text-emerald-300"
@@ -184,6 +198,15 @@
               <input v-model="form.enabled" type="checkbox" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
               <span class="text-sm text-gray-700 dark:text-gray-200">
                 {{ form.enabled ? t('common.enabled') : t('common.disabled') }}
+              </span>
+            </label>
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.upstreamProviders.defaultProvider') }}</label>
+            <label class="flex h-10 items-center gap-2 rounded-lg border border-gray-200 px-3 dark:border-dark-600">
+              <input v-model="form.is_default" type="checkbox" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+              <span class="text-sm text-gray-700 dark:text-gray-200">
+                {{ form.is_default ? t('admin.upstreamProviders.defaultProvider') : t('admin.upstreamProviders.notDefaultProvider') }}
               </span>
             </label>
           </div>
@@ -429,6 +452,7 @@ const loading = ref(false)
 const searchQuery = ref('')
 const typeFilter = ref('')
 const enabledFilter = ref('')
+const defaultingSlug = ref<string | null>(null)
 
 const showFormDialog = ref(false)
 const formMode = ref<'create' | 'edit'>('create')
@@ -454,6 +478,7 @@ const form = reactive<UpstreamProviderConfig>({
   slug: '',
   name: '',
   enabled: true,
+  is_default: false,
   base_url: '',
   login_url: '',
   api_keys_url: '',
@@ -512,6 +537,7 @@ function resetForm() {
     slug: '',
     name: '',
     enabled: true,
+    is_default: false,
     base_url: '',
     login_url: '',
     api_keys_url: '',
@@ -532,6 +558,7 @@ function fillForm(provider: UpstreamProviderConfig) {
     email: provider.email || '',
     username: provider.username || '',
     password: '',
+    is_default: Boolean(provider.is_default),
     account_name_prefix: provider.account_name_prefix || '',
     temp_disable_minutes: provider.temp_disable_minutes || 0,
   })
@@ -543,6 +570,7 @@ function buildPayload(): UpstreamProviderConfig {
     slug: form.slug.trim(),
     name: form.name.trim(),
     enabled: form.enabled,
+    is_default: Boolean(form.is_default),
     base_url: form.base_url.trim(),
     login_url: form.login_url?.trim() || '',
     api_keys_url: form.api_keys_url.trim(),
@@ -634,6 +662,19 @@ async function testSavedProvider(provider: UpstreamProviderConfig) {
     const done = new Set(testingSlugs.value)
     done.delete(provider.slug)
     testingSlugs.value = done
+  }
+}
+
+async function setDefaultProvider(provider: UpstreamProviderConfig) {
+  defaultingSlug.value = provider.slug
+  try {
+    await adminAPI.upstreamProviders.setDefault(provider.slug)
+    appStore.showSuccess(t('admin.upstreamProviders.setDefaultSuccess'))
+    await reload()
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamProviders.setDefaultFailed')))
+  } finally {
+    defaultingSlug.value = null
   }
 }
 

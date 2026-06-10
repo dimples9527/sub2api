@@ -169,6 +169,163 @@ func TestUpstreamProviderServiceUpdateKeepsPasswordWhenBlank(t *testing.T) {
 	}
 }
 
+func TestUpstreamProviderServiceCreateDefaultClearsOtherDefaults(t *testing.T) {
+	ctx := context.Background()
+	repo := newUpstreamProviderMemorySettingRepo()
+	svc := NewUpstreamProviderService(repo)
+
+	if _, err := svc.CreateProvider(ctx, UpstreamProviderConfig{
+		Type:       UpstreamProviderTypeSub2API,
+		Slug:       "primary",
+		Name:       "Primary upstream",
+		Enabled:    true,
+		IsDefault:  true,
+		BaseURL:    "https://primary.example.com",
+		APIKeysURL: "/api/admin/keys",
+	}); err != nil {
+		t.Fatalf("CreateProvider primary returned error: %v", err)
+	}
+	if _, err := svc.CreateProvider(ctx, UpstreamProviderConfig{
+		Type:       UpstreamProviderTypeSub2API,
+		Slug:       "secondary",
+		Name:       "Secondary upstream",
+		Enabled:    true,
+		IsDefault:  true,
+		BaseURL:    "https://secondary.example.com",
+		APIKeysURL: "/api/admin/keys",
+	}); err != nil {
+		t.Fatalf("CreateProvider secondary returned error: %v", err)
+	}
+
+	providers, err := svc.ListProviders(ctx)
+	if err != nil {
+		t.Fatalf("ListProviders returned error: %v", err)
+	}
+	if len(providers) != 2 {
+		t.Fatalf("provider count = %d, want 2", len(providers))
+	}
+	defaultSlug := ""
+	for _, provider := range providers {
+		if provider.IsDefault {
+			if defaultSlug != "" {
+				t.Fatalf("multiple default providers: %s and %s", defaultSlug, provider.Slug)
+			}
+			defaultSlug = provider.Slug
+		}
+	}
+	if defaultSlug != "secondary" {
+		t.Fatalf("default provider = %q, want secondary", defaultSlug)
+	}
+}
+
+func TestUpstreamProviderServiceSetDefaultProvider(t *testing.T) {
+	ctx := context.Background()
+	repo := newUpstreamProviderMemorySettingRepo()
+	svc := NewUpstreamProviderService(repo)
+
+	if _, err := svc.CreateProvider(ctx, UpstreamProviderConfig{
+		Type:       UpstreamProviderTypeSub2API,
+		Slug:       "primary",
+		Name:       "Primary upstream",
+		Enabled:    true,
+		BaseURL:    "https://primary.example.com",
+		APIKeysURL: "/api/admin/keys",
+	}); err != nil {
+		t.Fatalf("CreateProvider primary returned error: %v", err)
+	}
+	if _, err := svc.CreateProvider(ctx, UpstreamProviderConfig{
+		Type:       UpstreamProviderTypeSub2API,
+		Slug:       "secondary",
+		Name:       "Secondary upstream",
+		Enabled:    true,
+		IsDefault:  true,
+		BaseURL:    "https://secondary.example.com",
+		APIKeysURL: "/api/admin/keys",
+	}); err != nil {
+		t.Fatalf("CreateProvider secondary returned error: %v", err)
+	}
+
+	updated, err := svc.SetDefaultProvider(ctx, "primary")
+	if err != nil {
+		t.Fatalf("SetDefaultProvider returned error: %v", err)
+	}
+	if !updated.IsDefault {
+		t.Fatalf("updated provider should be default")
+	}
+	providers, err := svc.ListProviders(ctx)
+	if err != nil {
+		t.Fatalf("ListProviders returned error: %v", err)
+	}
+	for _, provider := range providers {
+		if provider.Slug == "primary" && !provider.IsDefault {
+			t.Fatalf("primary should be default")
+		}
+		if provider.Slug == "secondary" && provider.IsDefault {
+			t.Fatalf("secondary should no longer be default")
+		}
+	}
+}
+
+func TestUpstreamProviderServiceUpdateCanSetDefaultProvider(t *testing.T) {
+	ctx := context.Background()
+	repo := newUpstreamProviderMemorySettingRepo()
+	svc := NewUpstreamProviderService(repo)
+
+	if _, err := svc.CreateProvider(ctx, UpstreamProviderConfig{
+		Type:       UpstreamProviderTypeSub2API,
+		Slug:       "primary",
+		Name:       "Primary upstream",
+		Enabled:    true,
+		IsDefault:  true,
+		BaseURL:    "https://primary.example.com",
+		APIKeysURL: "/api/admin/keys",
+	}); err != nil {
+		t.Fatalf("CreateProvider primary returned error: %v", err)
+	}
+	updated, err := svc.CreateProvider(ctx, UpstreamProviderConfig{
+		Type:       UpstreamProviderTypeSub2API,
+		Slug:       "secondary",
+		Name:       "Secondary upstream",
+		Enabled:    true,
+		BaseURL:    "https://secondary.example.com",
+		APIKeysURL: "/api/admin/keys",
+	})
+	if err != nil {
+		t.Fatalf("CreateProvider secondary returned error: %v", err)
+	}
+	if updated.IsDefault {
+		t.Fatalf("secondary should not start as default")
+	}
+
+	updated, err = svc.UpdateProvider(ctx, "secondary", UpstreamProviderConfig{
+		Type:       UpstreamProviderTypeSub2API,
+		Slug:       "secondary",
+		Name:       "Secondary upstream",
+		Enabled:    true,
+		IsDefault:  true,
+		BaseURL:    "https://secondary.example.com",
+		APIKeysURL: "/api/admin/keys",
+	})
+	if err != nil {
+		t.Fatalf("UpdateProvider returned error: %v", err)
+	}
+	if !updated.IsDefault {
+		t.Fatalf("secondary should become default")
+	}
+	providers, err := svc.ListProviders(ctx)
+	if err != nil {
+		t.Fatalf("ListProviders returned error: %v", err)
+	}
+	for _, provider := range providers {
+		if provider.Slug == "primary" && provider.IsDefault {
+			t.Fatalf("primary should no longer be default")
+		}
+		if provider.Slug == "secondary" && !provider.IsDefault {
+			t.Fatalf("secondary should be default")
+		}
+	}
+}
+
 func TestSub2APIProviderAdapterFetchKeysUsesSingleEndpoint(t *testing.T) {
 	var keysRequests int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -210,6 +367,40 @@ func TestSub2APIProviderAdapterFetchKeysUsesSingleEndpoint(t *testing.T) {
 	}
 	if keys[0].KeyName != "sk-live-1" || keys[0].GroupName != "vip" || keys[0].RateMultiplier != 2.5 {
 		t.Fatalf("unexpected normalized key: %+v", keys[0])
+	}
+}
+
+func TestSub2APIProviderAdapterAppliesAccountNamePrefix(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"code": 0,
+			"data": {
+				"items": [
+					{"name": "sk-live-1", "group": {"name": "vip", "rate_multiplier": 2.5}}
+				]
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	adapter := NewSub2APIProviderAdapter(server.Client())
+	keys, _, err := adapter.FetchKeys(context.Background(), UpstreamProviderConfig{
+		Type:              UpstreamProviderTypeSub2API,
+		Slug:              "sub2api-main",
+		Name:              "Sub2API main",
+		BaseURL:           server.URL,
+		APIKeysURL:        "/api/admin/keys",
+		AccountNamePrefix: "sub-",
+	})
+	if err != nil {
+		t.Fatalf("FetchKeys returned error: %v", err)
+	}
+	if len(keys) != 1 {
+		t.Fatalf("key count = %d, want 1", len(keys))
+	}
+	if keys[0].KeyName != "sub-sk-live-1" {
+		t.Fatalf("key name = %q, want prefixed name", keys[0].KeyName)
 	}
 }
 
@@ -274,6 +465,47 @@ func TestNewAPIProviderAdapterFetchKeysMergesKeysAndGroups(t *testing.T) {
 	}
 	if keys[0].KeyName != "newapi-key-1" || keys[0].GroupName != "VIP" || keys[0].RateMultiplier != 3.25 {
 		t.Fatalf("unexpected normalized key: %+v", keys[0])
+	}
+}
+
+func TestNewAPIProviderAdapterAppliesAccountNamePrefix(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "abc"})
+			_, _ = w.Write([]byte(`{"success": true, "data": {"id": 42}}`))
+		case "/api/token/":
+			_, _ = w.Write([]byte(`{"success": true, "data": {"items": [{"name": "key-1", "group": "VIP"}]}}`))
+		case "/api/group/":
+			_, _ = w.Write([]byte(`{"success": true, "data": {"VIP": {"ratio": 3.25}}}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	adapter := NewNewAPIProviderAdapter(server.Client())
+	keys, _, err := adapter.FetchKeys(context.Background(), UpstreamProviderConfig{
+		Type:              UpstreamProviderTypeNewAPI,
+		Slug:              "newapi-main",
+		Name:              "NewAPI main",
+		BaseURL:           server.URL,
+		LoginURL:          "/api/user/login",
+		APIKeysURL:        "/api/token/",
+		GroupsURL:         "/api/group/",
+		Username:          "root",
+		Password:          "secret",
+		AccountNamePrefix: "new-",
+	})
+	if err != nil {
+		t.Fatalf("FetchKeys returned error: %v", err)
+	}
+	if len(keys) != 1 {
+		t.Fatalf("key count = %d, want 1", len(keys))
+	}
+	if keys[0].KeyName != "new-key-1" {
+		t.Fatalf("key name = %q, want prefixed name", keys[0].KeyName)
 	}
 }
 

@@ -7,6 +7,7 @@ export interface UpstreamProviderConfig {
   slug: string
   name: string
   enabled: boolean
+  is_default?: boolean
   base_url: string
   login_url?: string
   api_keys_url: string
@@ -94,6 +95,13 @@ export async function deleteProvider(slug: string): Promise<{ message: string }>
   return data
 }
 
+export async function setDefault(slug: string): Promise<UpstreamProviderConfig> {
+  const { data } = await apiClient.post<UpstreamProviderConfig>(
+    `/admin/upstream-management/providers/${encodeURIComponent(slug)}/default`
+  )
+  return data
+}
+
 export async function testSaved(slug: string): Promise<UpstreamProviderTestResult> {
   const { data } = await apiClient.post<UpstreamProviderTestResult>(
     `/admin/upstream-management/providers/${encodeURIComponent(slug)}/test`
@@ -123,6 +131,7 @@ export const upstreamProvidersAPI = {
   create,
   update,
   delete: deleteProvider,
+  setDefault,
   testSaved,
   testConfig,
   getKeys

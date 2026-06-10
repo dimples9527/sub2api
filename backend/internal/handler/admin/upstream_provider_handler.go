@@ -61,6 +61,15 @@ func (h *UpstreamProviderHandler) Delete(c *gin.Context) {
 	response.Success(c, gin.H{"message": "provider deleted"})
 }
 
+func (h *UpstreamProviderHandler) SetDefault(c *gin.Context) {
+	provider, err := h.service.SetDefaultProvider(c.Request.Context(), strings.TrimSpace(c.Param("slug")))
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, provider)
+}
+
 func (h *UpstreamProviderHandler) TestSaved(c *gin.Context) {
 	result, err := h.service.TestProvider(c.Request.Context(), strings.TrimSpace(c.Param("slug")))
 	if err != nil {

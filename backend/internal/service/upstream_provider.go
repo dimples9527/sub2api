@@ -26,6 +26,7 @@ type UpstreamProviderConfig struct {
 	Slug               string `json:"slug"`
 	Name               string `json:"name"`
 	Enabled            bool   `json:"enabled"`
+	IsDefault          bool   `json:"is_default"`
 	BaseURL            string `json:"base_url"`
 	LoginURL           string `json:"login_url"`
 	APIKeysURL         string `json:"api_keys_url"`
@@ -114,6 +115,7 @@ func (s *UpstreamProviderService) CreateProvider(ctx context.Context, input Upst
 		}
 	}
 	providers = append(providers, next)
+	normalizeUpstreamProviderDefaults(providers, next.Slug)
 	if err := s.saveProviders(ctx, providers); err != nil {
 		return UpstreamProviderConfig{}, err
 	}
@@ -146,10 +148,14 @@ func (s *UpstreamProviderService) UpdateProvider(ctx context.Context, slug strin
 	if next.Password == "" {
 		next.Password = providers[index].Password
 	}
+	if providers[index].IsDefault {
+		next.IsDefault = true
+	}
 	if err := s.validateProvider(next, next.Password != ""); err != nil {
 		return UpstreamProviderConfig{}, err
 	}
 	providers[index] = next
+	normalizeUpstreamProviderDefaults(providers, next.Slug)
 	if err := s.saveProviders(ctx, providers); err != nil {
 		return UpstreamProviderConfig{}, err
 	}
@@ -175,6 +181,42 @@ func (s *UpstreamProviderService) DeleteProvider(ctx context.Context, slug strin
 		return infraerrors.NotFound("UPSTREAM_PROVIDER_NOT_FOUND", "upstream provider not found")
 	}
 	return s.saveProviders(ctx, out)
+}
+
+func (s *UpstreamProviderService) SetDefaultProvider(ctx context.Context, slug string) (UpstreamProviderConfig, error) {
+	slug = strings.TrimSpace(slug)
+	providers, err := s.loadProviders(ctx)
+	if err != nil {
+		return UpstreamProviderConfig{}, err
+	}
+	index := -1
+	for i := range providers {
+		providers[i].IsDefault = false
+		if providers[i].Slug == slug {
+			index = i
+		}
+	}
+	if index < 0 {
+		return UpstreamProviderConfig{}, infraerrors.NotFound("UPSTREAM_PROVIDER_NOT_FOUND", "upstream provider not found")
+	}
+	providers[index].IsDefault = true
+	if err := s.saveProviders(ctx, providers); err != nil {
+		return UpstreamProviderConfig{}, err
+	}
+	return redactUpstreamProvider(providers[index]), nil
+}
+
+func (s *UpstreamProviderService) GetDefaultProvider(ctx context.Context) (UpstreamProviderConfig, error) {
+	providers, err := s.loadProviders(ctx)
+	if err != nil {
+		return UpstreamProviderConfig{}, err
+	}
+	for _, provider := range providers {
+		if provider.IsDefault {
+			return provider, nil
+		}
+	}
+	return UpstreamProviderConfig{}, infraerrors.NotFound("UPSTREAM_PROVIDER_DEFAULT_NOT_CONFIGURED", "default upstream provider is not configured")
 }
 
 func (s *UpstreamProviderService) TestProvider(ctx context.Context, slug string) (UpstreamProviderTestResult, error) {
@@ -249,6 +291,7 @@ func (s *UpstreamProviderService) loadProviders(ctx context.Context) ([]Upstream
 	sort.SliceStable(out, func(i, j int) bool {
 		return out[i].Slug < out[j].Slug
 	})
+	normalizeUpstreamProviderDefaults(out, "")
 	return out, nil
 }
 
@@ -312,6 +355,30 @@ func normalizeUpstreamProvider(provider UpstreamProviderConfig) UpstreamProvider
 		provider.TempDisableMinutes = 0
 	}
 	return provider
+}
+
+func normalizeUpstreamProviderDefaults(providers []UpstreamProviderConfig, preferredSlug string) {
+	preferredSlug = strings.TrimSpace(preferredSlug)
+	defaultSlug := ""
+	for _, provider := range providers {
+		if provider.IsDefault {
+			defaultSlug = provider.Slug
+		}
+	}
+	if preferredSlug != "" {
+		for _, provider := range providers {
+			if provider.Slug == preferredSlug && provider.IsDefault {
+				defaultSlug = preferredSlug
+				break
+			}
+		}
+	}
+	if defaultSlug == "" {
+		return
+	}
+	for i := range providers {
+		providers[i].IsDefault = providers[i].Slug == defaultSlug
+	}
 }
 
 func normalizeUpstreamProviderType(providerType string) string {

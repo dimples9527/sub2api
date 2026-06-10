@@ -15,8 +15,14 @@ func registerUpstreamManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 			providers.POST("/test", h.Admin.UpstreamProvider.TestConfig)
 			providers.PUT("/:slug", h.Admin.UpstreamProvider.Update)
 			providers.DELETE("/:slug", h.Admin.UpstreamProvider.Delete)
+			providers.POST("/:slug/default", h.Admin.UpstreamProvider.SetDefault)
 			providers.POST("/:slug/test", h.Admin.UpstreamProvider.TestSaved)
 			providers.GET("/:slug/keys", h.Admin.UpstreamProvider.Keys)
+		}
+		groups := upstream.Group("/groups")
+		{
+			groups.GET("", h.Admin.UpstreamManagement.CompareGroups)
+			groups.POST("/rate-fixes", h.Admin.UpstreamManagement.ApplyRateFixes)
 		}
 	}
 }

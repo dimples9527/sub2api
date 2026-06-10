@@ -404,6 +404,15 @@ func ProvideAPIKeyAuthCacheInvalidator(apiKeyService *APIKeyService) APIKeyAuthC
 	return apiKeyService
 }
 
+func ProvideUpstreamManagementService(
+	upstreamProviderService *UpstreamProviderService,
+	groupRepo GroupRepository,
+	settingRepo SettingRepository,
+	authCacheInvalidator APIKeyAuthCacheInvalidator,
+) *UpstreamManagementService {
+	return NewUpstreamManagementService(upstreamProviderService, groupRepo, settingRepo, authCacheInvalidator)
+}
+
 // ProvideBackupService creates and starts BackupService
 func ProvideBackupService(
 	settingRepo SettingRepository,
@@ -540,6 +549,7 @@ var ProviderSet = wire.NewSet(
 	NewAccountTestService,
 	ProvideSettingService,
 	NewUpstreamProviderService,
+	ProvideUpstreamManagementService,
 	NewDataManagementService,
 	ProvideBackupService,
 	ProvideOpsSystemLogSink,

@@ -96,6 +96,7 @@ func newUpstreamProviderHandlerTestRouter(svc *service.UpstreamProviderService) 
 	router.POST("/admin/upstream-management/providers", handler.Create)
 	router.PUT("/admin/upstream-management/providers/:slug", handler.Update)
 	router.DELETE("/admin/upstream-management/providers/:slug", handler.Delete)
+	router.POST("/admin/upstream-management/providers/:slug/default", handler.SetDefault)
 	router.POST("/admin/upstream-management/providers/:slug/test", handler.TestSaved)
 	router.GET("/admin/upstream-management/providers/:slug/keys", handler.Keys)
 	return router
@@ -193,4 +194,32 @@ func TestUpstreamProviderHandlerTestSavedProvider(t *testing.T) {
 	require.True(t, resp.Data.Keys.OK)
 	require.Len(t, resp.Data.ParsedKeys, 1)
 	require.Equal(t, "key-a", resp.Data.ParsedKeys[0].KeyName)
+}
+
+func TestUpstreamProviderHandlerSetDefaultProvider(t *testing.T) {
+	repo := newUpstreamProviderHandlerSettingRepo()
+	svc := service.NewUpstreamProviderService(repo)
+	_, err := svc.CreateProvider(context.Background(), service.UpstreamProviderConfig{
+		Type:       service.UpstreamProviderTypeSub2API,
+		Slug:       "primary",
+		Name:       "Primary",
+		Enabled:    true,
+		BaseURL:    "https://primary.example.com",
+		APIKeysURL: "/api/admin/keys",
+	})
+	require.NoError(t, err)
+	router := newUpstreamProviderHandlerTestRouter(svc)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/admin/upstream-management/providers/primary/default", nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Code int                            `json:"code"`
+		Data service.UpstreamProviderConfig `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.True(t, resp.Data.IsDefault)
+	require.Equal(t, "primary", resp.Data.Slug)
 }

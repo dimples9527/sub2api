@@ -188,7 +188,7 @@ func parseSub2APIProviderKeys(provider UpstreamProviderConfig, payload []byte) (
 			ProviderSlug:   provider.Slug,
 			ProviderName:   provider.Name,
 			ProviderType:   provider.Type,
-			KeyName:        item.Name,
+			KeyName:        upstreamProviderKeyName(provider, item.Name),
 			GroupName:      item.Group.Name,
 			RateMultiplier: *item.Group.RateMultiplier,
 			RawStatus:      item.Status,

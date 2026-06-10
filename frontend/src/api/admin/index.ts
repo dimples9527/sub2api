@@ -33,6 +33,7 @@ import affiliatesAPI from './affiliates'
 import riskControlAPI from './riskControl'
 import adminComplianceAPI from './compliance'
 import upstreamProvidersAPI from './upstreamProviders'
+import upstreamManagementAPI from './upstreamManagement'
 
 /**
  * Unified admin API object for convenient access
@@ -67,7 +68,8 @@ export const adminAPI = {
   affiliates: affiliatesAPI,
   riskControl: riskControlAPI,
   compliance: adminComplianceAPI,
-  upstreamProviders: upstreamProvidersAPI
+  upstreamProviders: upstreamProvidersAPI,
+  upstreamManagement: upstreamManagementAPI
 }
 
 export {
@@ -100,7 +102,8 @@ export {
   affiliatesAPI,
   riskControlAPI,
   adminComplianceAPI,
-  upstreamProvidersAPI
+  upstreamProvidersAPI,
+  upstreamManagementAPI
 }
 
 export default adminAPI
@@ -117,3 +120,8 @@ export type {
   UpstreamProviderTestResult,
   UpstreamProviderTestStage
 } from './upstreamProviders'
+export type {
+  UpstreamGroupCompareResult,
+  UpstreamGroupComparison,
+  UpstreamGroupRateFixRecord
+} from './upstreamManagement'

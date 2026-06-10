@@ -83,6 +83,18 @@ func normalizeUpstreamProviderGroupName(name string) string {
 	return strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(name)), " "))
 }
 
+func upstreamProviderKeyName(provider UpstreamProviderConfig, name string) string {
+	trimmedName := strings.TrimSpace(name)
+	if trimmedName == "" {
+		return ""
+	}
+	prefix := strings.TrimSpace(provider.AccountNamePrefix)
+	if prefix == "" {
+		return trimmedName
+	}
+	return prefix + trimmedName
+}
+
 func upstreamProviderCookiesHeader(cookies []*http.Cookie) string {
 	parts := make([]string, 0, len(cookies))
 	for _, cookie := range cookies {
