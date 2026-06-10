@@ -39,6 +39,7 @@ type AdminHandlers struct {
 	Compliance             *admin.ComplianceHandler
 	UpstreamProvider       *admin.UpstreamProviderHandler
 	UpstreamManagement     *admin.UpstreamManagementHandler
+	UpstreamAccountSync    *admin.UpstreamAccountSyncHandler
 }
 
 // Handlers contains all HTTP handlers

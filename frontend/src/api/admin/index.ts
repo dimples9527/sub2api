@@ -34,6 +34,7 @@ import riskControlAPI from './riskControl'
 import adminComplianceAPI from './compliance'
 import upstreamProvidersAPI from './upstreamProviders'
 import upstreamManagementAPI from './upstreamManagement'
+import upstreamAccountSyncAPI from './upstreamAccountSync'
 
 /**
  * Unified admin API object for convenient access
@@ -69,7 +70,8 @@ export const adminAPI = {
   riskControl: riskControlAPI,
   compliance: adminComplianceAPI,
   upstreamProviders: upstreamProvidersAPI,
-  upstreamManagement: upstreamManagementAPI
+  upstreamManagement: upstreamManagementAPI,
+  upstreamAccountSync: upstreamAccountSyncAPI
 }
 
 export {
@@ -103,7 +105,8 @@ export {
   riskControlAPI,
   adminComplianceAPI,
   upstreamProvidersAPI,
-  upstreamManagementAPI
+  upstreamManagementAPI,
+  upstreamAccountSyncAPI
 }
 
 export default adminAPI
@@ -125,3 +128,10 @@ export type {
   UpstreamGroupComparison,
   UpstreamGroupRateFixRecord
 } from './upstreamManagement'
+export type {
+  UpstreamAccountSyncItem,
+  UpstreamAccountSyncRecord,
+  UpstreamAccountSyncRequest,
+  UpstreamAccountSyncResult,
+  UpstreamAccountSyncSummary
+} from './upstreamAccountSync'

@@ -395,6 +395,7 @@ export default {
     upstreamManagement: 'Upstream',
     upstreamProviders: 'Upstream Providers',
     upstreamGroups: 'Upstream Groups',
+    upstreamAccounts: 'Upstream Accounts',
     redeemCodes: 'Redeem Codes',
     ops: 'Ops',
     promoCodes: 'Promo Codes',
@@ -1597,6 +1598,49 @@ export default {
         localGroup: 'Local group',
         localRate: 'Local rate',
         status: 'Status'
+      }
+    },
+
+    upstreamAccounts: {
+      title: 'Upstream Accounts',
+      description: 'Preview and sync local accounts from the default upstream provider, including group bindings and rate risks',
+      defaultProvider: 'Default upstream',
+      upstreamKeys: 'Upstream keys',
+      toCreate: 'To create',
+      toUpdate: 'To update',
+      rateRisks: 'Rate risks',
+      syncNow: 'Run sync',
+      syncConfirm: 'Run upstream account sync? This will create {create} account(s), update {update} account(s), and unbind {unbind} low-rate group(s).',
+      syncSuccess: 'Upstream account sync completed',
+      syncFailed: 'Failed to sync upstream accounts',
+      loadFailed: 'Failed to load upstream account preview',
+      conflictIds: 'Conflicting accounts: {ids}',
+      unbindGroups: 'Will unbind: {groups}',
+      syncRecords: 'Sync records',
+      latestRecords: 'Latest 100 records',
+      recordTime: 'Time',
+      provider: 'Provider',
+      created: 'Created',
+      updated: 'Updated',
+      unbound: 'Unbound',
+      status: 'Status',
+      noRecords: 'No sync records yet',
+      emptyTitle: 'No upstream accounts found',
+      emptyNoDefaultTitle: 'Default upstream not configured',
+      emptyDescription: 'The default upstream provider has no key data to sync.',
+      columns: {
+        upstreamKey: 'Upstream key',
+        upstreamRate: 'Upstream rate',
+        localAccount: 'Local account',
+        localGroup: 'Local group',
+        action: 'Action'
+      },
+      actions: {
+        create: 'Create',
+        update: 'Update',
+        noop: 'No change',
+        skip: 'Skip',
+        conflict: 'Conflict'
       }
     },
 

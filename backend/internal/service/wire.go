@@ -413,6 +413,15 @@ func ProvideUpstreamManagementService(
 	return NewUpstreamManagementService(upstreamProviderService, groupRepo, settingRepo, authCacheInvalidator)
 }
 
+func ProvideUpstreamAccountSyncService(
+	upstreamProviderService *UpstreamProviderService,
+	groupRepo GroupRepository,
+	adminService AdminService,
+	settingRepo SettingRepository,
+) *UpstreamAccountSyncService {
+	return NewUpstreamAccountSyncService(upstreamProviderService, groupRepo, adminService, settingRepo)
+}
+
 // ProvideBackupService creates and starts BackupService
 func ProvideBackupService(
 	settingRepo SettingRepository,
@@ -550,6 +559,7 @@ var ProviderSet = wire.NewSet(
 	ProvideSettingService,
 	NewUpstreamProviderService,
 	ProvideUpstreamManagementService,
+	ProvideUpstreamAccountSyncService,
 	NewDataManagementService,
 	ProvideBackupService,
 	ProvideOpsSystemLogSink,

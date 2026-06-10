@@ -42,6 +42,7 @@ func ProvideAdminHandlers(
 	complianceHandler *admin.ComplianceHandler,
 	upstreamProviderHandler *admin.UpstreamProviderHandler,
 	upstreamManagementHandler *admin.UpstreamManagementHandler,
+	upstreamAccountSyncHandler *admin.UpstreamAccountSyncHandler,
 ) *AdminHandlers {
 	return &AdminHandlers{
 		Dashboard:              dashboardHandler,
@@ -77,6 +78,7 @@ func ProvideAdminHandlers(
 		Compliance:             complianceHandler,
 		UpstreamProvider:       upstreamProviderHandler,
 		UpstreamManagement:     upstreamManagementHandler,
+		UpstreamAccountSync:    upstreamAccountSyncHandler,
 	}
 }
 
@@ -193,6 +195,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewComplianceHandler,
 	admin.NewUpstreamProviderHandler,
 	admin.NewUpstreamManagementHandler,
+	admin.NewUpstreamAccountSyncHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,

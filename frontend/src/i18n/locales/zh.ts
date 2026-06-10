@@ -395,6 +395,7 @@ export default {
     upstreamManagement: '上游管理',
     upstreamProviders: '上游配置',
     upstreamGroups: '上游分组',
+    upstreamAccounts: '上游账号',
     redeemCodes: '兑换码',
     ops: '运维监控',
     promoCodes: '优惠码',
@@ -1618,6 +1619,49 @@ export default {
         localGroup: '本地分组',
         localRate: '本地倍率',
         status: '状态'
+      }
+    },
+
+    upstreamAccounts: {
+      title: '上游账号',
+      description: '基于默认上游预览并同步本地账号，处理分组绑定和倍率风险',
+      defaultProvider: '默认上游',
+      upstreamKeys: '上游密钥',
+      toCreate: '待创建',
+      toUpdate: '待更新',
+      rateRisks: '倍率风险',
+      syncNow: '执行同步',
+      syncConfirm: '确认执行同步？将创建 {create} 个账号，更新 {update} 个账号，解绑 {unbind} 个低倍率分组。',
+      syncSuccess: '上游账号同步完成',
+      syncFailed: '上游账号同步失败',
+      loadFailed: '加载上游账号预览失败',
+      conflictIds: '冲突账号：{ids}',
+      unbindGroups: '将解绑：{groups}',
+      syncRecords: '同步记录',
+      latestRecords: '最近 100 条记录',
+      recordTime: '时间',
+      provider: '上游',
+      created: '创建',
+      updated: '更新',
+      unbound: '解绑',
+      status: '状态',
+      noRecords: '暂无同步记录',
+      emptyTitle: '暂无上游账号',
+      emptyNoDefaultTitle: '未配置默认上游',
+      emptyDescription: '默认上游还没有可同步的密钥数据。',
+      columns: {
+        upstreamKey: '上游密钥',
+        upstreamRate: '上游倍率',
+        localAccount: '本地账号',
+        localGroup: '本地分组',
+        action: '动作'
+      },
+      actions: {
+        create: '创建',
+        update: '更新',
+        noop: '无需处理',
+        skip: '跳过',
+        conflict: '冲突'
       }
     },
 

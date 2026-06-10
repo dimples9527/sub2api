@@ -758,6 +758,7 @@ const adminNavItems = computed((): NavItem[] => {
       children: [
         { path: '/admin/upstream-management/providers', label: t('nav.upstreamProviders'), icon: ServerIcon },
         { path: '/admin/upstream-management/groups', label: t('nav.upstreamGroups'), icon: FolderIcon },
+        { path: '/admin/upstream-management/accounts', label: t('nav.upstreamAccounts'), icon: GlobeIcon },
       ],
     },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },

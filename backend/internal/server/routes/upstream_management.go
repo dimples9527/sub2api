@@ -25,5 +25,11 @@ func registerUpstreamManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 			groups.PUT("/mappings", h.Admin.UpstreamManagement.SaveGroupMapping)
 			groups.POST("/rate-fixes", h.Admin.UpstreamManagement.ApplyRateFixes)
 		}
+		accounts := upstream.Group("/accounts")
+		{
+			accounts.GET("/sync-preview", h.Admin.UpstreamAccountSync.Preview)
+			accounts.POST("/sync", h.Admin.UpstreamAccountSync.Sync)
+			accounts.GET("/sync-records", h.Admin.UpstreamAccountSync.Records)
+		}
 	}
 }
