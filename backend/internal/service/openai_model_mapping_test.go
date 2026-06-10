@@ -113,13 +113,26 @@ func TestResolveOpenAIForwardModel(t *testing.T) {
 			expectedModel:      "openai/gpt-5.5",
 		},
 		{
-			name: "preserves compact gpt-5.5 instead of group default",
+			name: "normalizes compact-only gpt-5.5 alias for normal forward",
 			account: &Account{
 				Credentials: map[string]any{},
 			},
 			requestedModel:     "gpt-5.5-openai-compact",
 			defaultMappedModel: "gpt-5.4",
-			expectedModel:      "gpt-5.5-openai-compact",
+			expectedModel:      "gpt-5.5",
+		},
+		{
+			name: "normalizes normal mapping target when it is compact-only alias",
+			account: &Account{
+				Credentials: map[string]any{
+					"model_mapping": map[string]any{
+						"gpt-5.4": "gpt-5.4-openai-compact",
+					},
+				},
+			},
+			requestedModel:     "gpt-5.4",
+			defaultMappedModel: "gpt-4o-mini",
+			expectedModel:      "gpt-5.4",
 		},
 	}
 

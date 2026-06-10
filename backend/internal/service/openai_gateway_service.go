@@ -3972,6 +3972,11 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	if originalModel != "" && mappedModel != "" && originalModel != mappedModel {
 		body = s.replaceModelInResponseBody(body, mappedModel, originalModel)
 	}
+	if isOpenAIResponsesCompactPath(c) {
+		if err := validateCompactResponseOutput(body); err != nil {
+			return nil, s.writeOpenAINonStreamingProtocolError(resp, c, err.Error(), compactResponseDiagnostic(resp, body))
+		}
+	}
 	c.Data(resp.StatusCode, contentType, body)
 	return &openaiNonStreamingResultPassthrough{
 		OpenAIUsage:      usage,
@@ -4009,6 +4014,11 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 		}
 		// Correct tool calls in final response
 		body = s.correctToolCallsInResponseBody(body)
+		if isOpenAIResponsesCompactPath(c) {
+			if err := validateCompactResponseOutput(body); err != nil {
+				return nil, s.writeOpenAINonStreamingProtocolError(resp, c, err.Error(), compactResponseDiagnostic(resp, body))
+			}
+		}
 	} else {
 		terminalType, terminalPayload, terminalOK := extractOpenAISSETerminalEvent(bodyText)
 		if terminalOK && terminalType == "response.failed" {
@@ -5112,6 +5122,11 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	if originalModel != mappedModel {
 		body = s.replaceModelInResponseBody(body, mappedModel, originalModel)
 	}
+	if isOpenAIResponsesCompactPath(c) {
+		if err := validateCompactResponseOutput(body); err != nil {
+			return nil, s.writeOpenAINonStreamingProtocolError(resp, c, err.Error(), compactResponseDiagnostic(resp, body))
+		}
+	}
 
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 
@@ -5135,6 +5150,75 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 func isEventStreamResponse(header http.Header) bool {
 	contentType := strings.ToLower(header.Get("Content-Type"))
 	return strings.Contains(contentType, "text/event-stream")
+}
+
+func validateCompactResponseOutput(body []byte) error {
+	if len(body) == 0 || !gjson.ValidBytes(body) {
+		return nil
+	}
+	status := strings.TrimSpace(gjson.GetBytes(body, "status").String())
+	if status != "" && status != "completed" {
+		return nil
+	}
+	output := gjson.GetBytes(body, "output")
+	outputItems := output.Array()
+	if len(outputItems) != 1 {
+		return fmt.Errorf("upstream compact response must contain exactly one output item, got %d", len(outputItems))
+	}
+	return nil
+}
+
+func compactResponseDiagnostic(resp *http.Response, body []byte) string {
+	diag := map[string]any{
+		"body_bytes": len(body),
+		"json_valid": gjson.ValidBytes(body),
+	}
+	if resp != nil {
+		diag["http_status"] = resp.StatusCode
+		if ct := strings.TrimSpace(resp.Header.Get("Content-Type")); ct != "" {
+			diag["content_type"] = ct
+		}
+		if rid := strings.TrimSpace(resp.Header.Get("x-request-id")); rid != "" {
+			diag["upstream_request_id"] = rid
+		}
+	}
+	if gjson.ValidBytes(body) {
+		var top map[string]json.RawMessage
+		if err := json.Unmarshal(body, &top); err == nil {
+			keys := make([]string, 0, len(top))
+			for key := range top {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			diag["top_level_keys"] = keys
+		}
+		if status := strings.TrimSpace(gjson.GetBytes(body, "status").String()); status != "" {
+			diag["status"] = status
+		}
+		output := gjson.GetBytes(body, "output")
+		diag["output_exists"] = output.Exists()
+		items := output.Array()
+		diag["output_count"] = len(items)
+		if len(items) > 0 {
+			types := make([]string, 0, len(items))
+			contentCounts := make([]int, 0, len(items))
+			for _, item := range items {
+				types = append(types, strings.TrimSpace(item.Get("type").String()))
+				contentCounts = append(contentCounts, len(item.Get("content").Array()))
+			}
+			diag["output_types"] = types
+			diag["output_content_counts"] = contentCounts
+		}
+		if usage := gjson.GetBytes(body, "usage"); usage.Exists() && usage.IsObject() {
+			diag["usage_input_tokens"] = usage.Get("input_tokens").Int()
+			diag["usage_output_tokens"] = usage.Get("output_tokens").Int()
+		}
+	}
+	raw, err := json.Marshal(diag)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
 }
 
 func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Context, body []byte, originalModel, mappedModel string) (*openaiNonStreamingResult, error) {
@@ -5162,6 +5246,11 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		}
 		// Correct tool calls in final response
 		body = s.correctToolCallsInResponseBody(body)
+		if isOpenAIResponsesCompactPath(c) {
+			if err := validateCompactResponseOutput(body); err != nil {
+				return nil, s.writeOpenAINonStreamingProtocolError(resp, c, err.Error(), compactResponseDiagnostic(resp, body))
+			}
+		}
 	} else {
 		terminalType, terminalPayload, terminalOK := extractOpenAISSETerminalEvent(bodyText)
 		if terminalOK && terminalType == "response.failed" {
@@ -5229,12 +5318,27 @@ func extractOpenAISSEErrorMessage(payload []byte) string {
 	return sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(payload)))
 }
 
-func (s *OpenAIGatewayService) writeOpenAINonStreamingProtocolError(resp *http.Response, c *gin.Context, message string) error {
+func (s *OpenAIGatewayService) writeOpenAINonStreamingProtocolError(resp *http.Response, c *gin.Context, message string, details ...string) error {
 	message = sanitizeUpstreamErrorMessage(strings.TrimSpace(message))
 	if message == "" {
 		message = "Upstream returned an invalid non-streaming response"
 	}
-	setOpsUpstreamError(c, http.StatusBadGateway, message, "")
+	detail := ""
+	if len(details) > 0 {
+		detail = strings.TrimSpace(details[0])
+	}
+	setOpsUpstreamError(c, http.StatusBadGateway, message, detail)
+	event := OpsUpstreamErrorEvent{
+		UpstreamStatusCode: http.StatusBadGateway,
+		Kind:               "protocol_error",
+		Message:            message,
+		Detail:             detail,
+	}
+	if resp != nil {
+		event.UpstreamStatusCode = resp.StatusCode
+		event.UpstreamRequestID = strings.TrimSpace(resp.Header.Get("x-request-id"))
+	}
+	appendOpsUpstreamError(c, event)
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 	c.JSON(http.StatusBadGateway, gin.H{

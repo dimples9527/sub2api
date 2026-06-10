@@ -493,7 +493,7 @@ func TestOpenAIGatewayService_Forward_CompactPreservesPreviousResponseID(t *test
 		resp: &http.Response{
 			StatusCode: http.StatusOK,
 			Header:     http.Header{"Content-Type": []string{"application/json"}},
-			Body:       io.NopCloser(strings.NewReader(`{"usage":{"input_tokens":1,"output_tokens":2}}`)),
+			Body:       io.NopCloser(strings.NewReader(`{"status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"compact ok"}]}],"usage":{"input_tokens":1,"output_tokens":2}}`)),
 		},
 	}
 	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}

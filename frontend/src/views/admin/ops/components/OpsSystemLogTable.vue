@@ -20,6 +20,7 @@ const logs = ref<OpsSystemLog[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
+const selectedLog = ref<OpsSystemLog | null>(null)
 
 const health = ref<OpsSystemLogSinkHealth>({
   queue_depth: 0,
@@ -150,6 +151,32 @@ const formatSystemLogDetail = (row: OpsSystemLog) => {
 
   // 用空格拼接，交给 CSS 自动换行，尽量“填满再换行”。
   return parts.join('  ')
+}
+
+const prettyJSON = (value: unknown) => {
+  if (value == null) return '{}'
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return ''
+    try {
+      return JSON.stringify(JSON.parse(trimmed), null, 2)
+    } catch {
+      return trimmed
+    }
+  }
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+const openLogDetail = (row: OpsSystemLog) => {
+  selectedLog.value = row
+}
+
+const closeLogDetail = () => {
+  selectedLog.value = null
 }
 
 const toRFC3339 = (value: string) => {
@@ -491,6 +518,7 @@ onMounted(async () => {
               <th class="w-[170px] px-3 py-2 text-left text-[11px] font-semibold text-gray-500">时间</th>
               <th class="w-[80px] px-3 py-2 text-left text-[11px] font-semibold text-gray-500">级别</th>
               <th class="px-3 py-2 text-left text-[11px] font-semibold text-gray-500">日志详细信息</th>
+              <th class="w-[80px] px-3 py-2 text-right text-[11px] font-semibold text-gray-500">操作</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100 dark:divide-dark-800">
@@ -504,6 +532,11 @@ onMounted(async () => {
               <td class="px-3 py-2 text-xs text-gray-700 dark:text-gray-300 whitespace-normal break-all">
                 {{ formatSystemLogDetail(row) }}
               </td>
+              <td class="px-3 py-2 text-right text-xs">
+                <button type="button" class="font-semibold text-primary-600 hover:text-primary-700 dark:text-primary-400" @click="openLogDetail(row)">
+                  详情
+                </button>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -515,6 +548,59 @@ onMounted(async () => {
         @update:page="onPageChange"
         @update:page-size="onPageSizeChange"
       />
+    </div>
+
+    <div v-if="selectedLog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="closeLogDetail">
+      <div class="flex max-h-[86vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl dark:bg-dark-900">
+        <div class="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-dark-700">
+          <div>
+            <h4 class="text-sm font-bold text-gray-900 dark:text-white">系统日志详情</h4>
+            <p class="mt-1 font-mono text-xs text-gray-500 dark:text-gray-400">{{ selectedLog.request_id || selectedLog.client_request_id || `#${selectedLog.id}` }}</p>
+          </div>
+          <button type="button" class="rounded-lg px-3 py-1.5 text-sm font-semibold text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700" @click="closeLogDetail">
+            关闭
+          </button>
+        </div>
+
+        <div class="min-h-0 flex-1 overflow-auto p-5">
+          <div class="grid grid-cols-1 gap-3 text-xs md:grid-cols-3">
+            <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-800">
+              <div class="font-semibold text-gray-400">时间</div>
+              <div class="mt-1 text-gray-900 dark:text-white">{{ formatTime(selectedLog.created_at) }}</div>
+            </div>
+            <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-800">
+              <div class="font-semibold text-gray-400">组件</div>
+              <div class="mt-1 break-all text-gray-900 dark:text-white">{{ selectedLog.component || '-' }}</div>
+            </div>
+            <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-800">
+              <div class="font-semibold text-gray-400">级别</div>
+              <div class="mt-1 text-gray-900 dark:text-white">{{ selectedLog.level || '-' }}</div>
+            </div>
+            <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-800">
+              <div class="font-semibold text-gray-400">request_id</div>
+              <div class="mt-1 break-all font-mono text-gray-900 dark:text-white">{{ selectedLog.request_id || '-' }}</div>
+            </div>
+            <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-800">
+              <div class="font-semibold text-gray-400">client_request_id</div>
+              <div class="mt-1 break-all font-mono text-gray-900 dark:text-white">{{ selectedLog.client_request_id || '-' }}</div>
+            </div>
+            <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-800">
+              <div class="font-semibold text-gray-400">账号 / 用户</div>
+              <div class="mt-1 text-gray-900 dark:text-white">acc={{ selectedLog.account_id ?? '-' }} user={{ selectedLog.user_id ?? '-' }}</div>
+            </div>
+          </div>
+
+          <div class="mt-4 rounded-xl bg-gray-50 p-4 dark:bg-dark-800">
+            <div class="text-xs font-semibold text-gray-400">消息</div>
+            <div class="mt-2 whitespace-pre-wrap break-words text-sm text-gray-900 dark:text-white">{{ selectedLog.message || '-' }}</div>
+          </div>
+
+          <div class="mt-4 rounded-xl bg-gray-50 p-4 dark:bg-dark-800">
+            <div class="text-xs font-semibold text-gray-400">完整 extra</div>
+            <pre class="mt-2 max-h-[420px] overflow-auto rounded-xl border border-gray-200 bg-white p-4 text-xs text-gray-800 dark:border-dark-700 dark:bg-dark-900 dark:text-gray-100"><code>{{ prettyJSON(selectedLog.extra || {}) }}</code></pre>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 </template>

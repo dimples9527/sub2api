@@ -27,7 +27,7 @@ interface Props {
 const props = defineProps<Props>()
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
-  (e: 'openErrorDetail', errorId: number): void
+  (e: 'openErrorDetail', errorId: number, errorType: 'request'): void
 }>()
 
 const { t } = useI18n()
@@ -139,7 +139,7 @@ async function handleCopyRequestId(requestId: string) {
 function openErrorDetail(errorId: number | null | undefined) {
   if (!errorId) return
   close()
-  emit('openErrorDetail', errorId)
+  emit('openErrorDetail', errorId, 'request')
 }
 
 const kindBadgeClass = (kind: string) => {

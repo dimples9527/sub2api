@@ -17,7 +17,7 @@ interface Props {
 const props = defineProps<Props>()
 const emit = defineEmits<{
   (e: 'update:show', value: boolean): void
-  (e: 'openErrorDetail', errorId: number): void
+  (e: 'openErrorDetail', errorId: number, errorType: 'request' | 'upstream'): void
 }>()
 
 const { t } = useI18n()
@@ -252,7 +252,7 @@ watch(
             :loading="loading"
             :page="page"
             :page-size="pageSize"
-            @openErrorDetail="emit('openErrorDetail', $event)"
+            @openErrorDetail="emit('openErrorDetail', $event, props.errorType)"
 
             @update:page="page = $event"
             @update:pageSize="pageSize = $event"

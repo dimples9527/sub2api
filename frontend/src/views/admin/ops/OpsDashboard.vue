@@ -504,7 +504,8 @@ function onQueryModeChange(v: string | number | boolean | null) {
   queryMode.value = v as QueryMode
 }
 
-function openError(id: number) {
+function openError(id: number, kind: 'request' | 'upstream' = 'request') {
+  errorDetailsType.value = kind
   selectedErrorId.value = id
   // Ensure only one modal visible at a time.
   showErrorDetails.value = false
