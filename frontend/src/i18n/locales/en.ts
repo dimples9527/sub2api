@@ -410,6 +410,7 @@ export default {
     helpCenter: 'Help Docs',
     mySubscriptions: 'My Subscriptions',
     buySubscription: 'Recharge / Subscription',
+    modelMonitor: 'Model Monitor',
     docs: 'Docs',
     myOrders: 'My Orders',
     orderManagement: 'Orders',

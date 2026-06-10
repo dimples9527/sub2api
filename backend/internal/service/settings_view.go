@@ -177,6 +177,11 @@ type SystemSettings struct {
 	// Available Channels feature (user-facing aggregate view)
 	AvailableChannelsEnabled bool `json:"available_channels_enabled"`
 
+	// LLM Monitor page
+	LLMMonitorStatusAPIURL string
+	LLMMonitorTitle        string
+	LLMMonitorProviderURL  string
+
 	// Claude Code version check
 	MinClaudeCodeVersion string
 	MaxClaudeCodeVersion string
@@ -290,6 +295,10 @@ type PublicSettings struct {
 
 	// Available Channels feature (user-facing aggregate view)
 	AvailableChannelsEnabled bool `json:"available_channels_enabled"`
+
+	LLMMonitorStatusAPIURL string `json:"llm_monitor_status_api_url"`
+	LLMMonitorTitle        string `json:"llm_monitor_title"`
+	LLMMonitorProviderURL  string `json:"llm_monitor_provider_url"`
 
 	// Affiliate (邀请返利) feature toggle
 	AffiliateEnabled bool `json:"affiliate_enabled"`

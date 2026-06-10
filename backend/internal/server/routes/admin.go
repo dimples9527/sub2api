@@ -100,6 +100,7 @@ func RegisterAdminRoutes(
 
 		// 上游管理
 		registerUpstreamManagementRoutes(admin, h)
+		RegisterAdminLLMMonitorRoutes(admin, settingService)
 
 		// 风控中心
 		registerContentModerationRoutes(admin, h)

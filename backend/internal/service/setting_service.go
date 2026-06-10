@@ -759,6 +759,9 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeyChannelMonitorEnabled,
 		SettingKeyChannelMonitorDefaultIntervalSeconds,
 		SettingKeyAvailableChannelsEnabled,
+		SettingKeyLLMMonitorStatusAPIURL,
+		SettingKeyLLMMonitorTitle,
+		SettingKeyLLMMonitorProviderURL,
 		SettingKeyAffiliateEnabled,
 		SettingKeyRiskControlEnabled,
 		SettingKeyAllowUserViewErrorRequests,
@@ -871,12 +874,35 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 
 		AvailableChannelsEnabled: settings[SettingKeyAvailableChannelsEnabled] == "true",
 
+		LLMMonitorStatusAPIURL: s.llmMonitorSettingOrConfig(settings, SettingKeyLLMMonitorStatusAPIURL),
+		LLMMonitorTitle:        s.llmMonitorSettingOrConfig(settings, SettingKeyLLMMonitorTitle),
+		LLMMonitorProviderURL:  s.llmMonitorSettingOrConfig(settings, SettingKeyLLMMonitorProviderURL),
+
 		AffiliateEnabled: settings[SettingKeyAffiliateEnabled] == "true",
 
 		RiskControlEnabled: settings[SettingKeyRiskControlEnabled] == "true",
 
 		AllowUserViewErrorRequests: settings[SettingKeyAllowUserViewErrorRequests] == "true",
 	}, nil
+}
+
+func (s *SettingService) llmMonitorSettingOrConfig(settings map[string]string, key string) string {
+	if value := strings.TrimSpace(settings[key]); value != "" {
+		return value
+	}
+	if s.cfg == nil {
+		return ""
+	}
+	switch key {
+	case SettingKeyLLMMonitorStatusAPIURL:
+		return strings.TrimSpace(s.cfg.LLMMonitor.StatusAPIURL)
+	case SettingKeyLLMMonitorTitle:
+		return strings.TrimSpace(s.cfg.LLMMonitor.Title)
+	case SettingKeyLLMMonitorProviderURL:
+		return strings.TrimSpace(s.cfg.LLMMonitor.ProviderURL)
+	default:
+		return ""
+	}
 }
 
 // channelMonitorIntervalMin / channelMonitorIntervalMax bound the default interval
@@ -1184,12 +1210,15 @@ type PublicSettingsInjectionPayload struct {
 	// Feature flags — MUST match the opt-in/opt-out registry in
 	// frontend/src/utils/featureFlags.ts. Missing a field here is the bug
 	// that hid the "可用渠道" menu on page refresh.
-	ChannelMonitorEnabled                bool `json:"channel_monitor_enabled"`
-	ChannelMonitorDefaultIntervalSeconds int  `json:"channel_monitor_default_interval_seconds"`
-	AvailableChannelsEnabled             bool `json:"available_channels_enabled"`
-	AffiliateEnabled                     bool `json:"affiliate_enabled"`
-	RiskControlEnabled                   bool `json:"risk_control_enabled"`
-	AllowUserViewErrorRequests           bool `json:"allow_user_view_error_requests"`
+	ChannelMonitorEnabled                bool   `json:"channel_monitor_enabled"`
+	ChannelMonitorDefaultIntervalSeconds int    `json:"channel_monitor_default_interval_seconds"`
+	AvailableChannelsEnabled             bool   `json:"available_channels_enabled"`
+	LLMMonitorStatusAPIURL               string `json:"llm_monitor_status_api_url"`
+	LLMMonitorTitle                      string `json:"llm_monitor_title"`
+	LLMMonitorProviderURL                string `json:"llm_monitor_provider_url"`
+	AffiliateEnabled                     bool   `json:"affiliate_enabled"`
+	RiskControlEnabled                   bool   `json:"risk_control_enabled"`
+	AllowUserViewErrorRequests           bool   `json:"allow_user_view_error_requests"`
 }
 
 // GetPublicSettingsForInjection returns public settings in a format suitable for HTML injection.
@@ -1250,6 +1279,9 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		ChannelMonitorEnabled:                settings.ChannelMonitorEnabled,
 		ChannelMonitorDefaultIntervalSeconds: settings.ChannelMonitorDefaultIntervalSeconds,
 		AvailableChannelsEnabled:             settings.AvailableChannelsEnabled,
+		LLMMonitorStatusAPIURL:               settings.LLMMonitorStatusAPIURL,
+		LLMMonitorTitle:                      settings.LLMMonitorTitle,
+		LLMMonitorProviderURL:                settings.LLMMonitorProviderURL,
 		AffiliateEnabled:                     settings.AffiliateEnabled,
 		RiskControlEnabled:                   settings.RiskControlEnabled,
 		AllowUserViewErrorRequests:           settings.AllowUserViewErrorRequests,
@@ -2812,6 +2844,9 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 
 		// Available channels feature (default disabled; opt-in)
 		SettingKeyAvailableChannelsEnabled: "false",
+		SettingKeyLLMMonitorStatusAPIURL:   "",
+		SettingKeyLLMMonitorTitle:          "",
+		SettingKeyLLMMonitorProviderURL:    "",
 
 		// Affiliate (邀请返利) feature (default disabled; opt-in)
 		SettingKeyAffiliateEnabled: "false",

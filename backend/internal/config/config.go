@@ -80,6 +80,7 @@ type Config struct {
 	RateLimit               RateLimitConfig               `mapstructure:"rate_limit"`
 	Pricing                 PricingConfig                 `mapstructure:"pricing"`
 	Gateway                 GatewayConfig                 `mapstructure:"gateway"`
+	LLMMonitor              LLMMonitorConfig              `mapstructure:"llm_monitor"`
 	APIKeyAuth              APIKeyAuthCacheConfig         `mapstructure:"api_key_auth_cache"`
 	SubscriptionCache       SubscriptionCacheConfig       `mapstructure:"subscription_cache"`
 	SubscriptionMaintenance SubscriptionMaintenanceConfig `mapstructure:"subscription_maintenance"`
@@ -173,6 +174,12 @@ type IdempotencyConfig struct {
 	CleanupIntervalSeconds int `mapstructure:"cleanup_interval_seconds"`
 	// CleanupBatchSize 每次清理的最大记录数。
 	CleanupBatchSize int `mapstructure:"cleanup_batch_size"`
+}
+
+type LLMMonitorConfig struct {
+	StatusAPIURL string `mapstructure:"status_api_url"`
+	Title        string `mapstructure:"title"`
+	ProviderURL  string `mapstructure:"provider_url"`
 }
 
 type LinuxDoConnectConfig struct {
@@ -1962,6 +1969,11 @@ func setDefaults() {
 	viper.SetDefault("gemini.oauth.client_secret", "")
 	viper.SetDefault("gemini.oauth.scopes", "")
 	viper.SetDefault("gemini.quota.policy", "")
+
+	// LLM model monitor
+	viper.SetDefault("llm_monitor.status_api_url", "https://jc.findcg.com/api/status?period=90m&board=hot")
+	viper.SetDefault("llm_monitor.title", "蛋云AI - Claude Code 监控面板")
+	viper.SetDefault("llm_monitor.provider_url", "https://api.sunshinelink.online/")
 
 	// Subscription Maintenance (bounded queue + worker pool)
 	viper.SetDefault("subscription_maintenance.worker_count", 2)

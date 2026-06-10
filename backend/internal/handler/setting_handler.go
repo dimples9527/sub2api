@@ -95,6 +95,10 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 
 		AvailableChannelsEnabled: settings.AvailableChannelsEnabled,
 
+		LLMMonitorStatusAPIURL: settings.LLMMonitorStatusAPIURL,
+		LLMMonitorTitle:        settings.LLMMonitorTitle,
+		LLMMonitorProviderURL:  settings.LLMMonitorProviderURL,
+
 		AffiliateEnabled: settings.AffiliateEnabled,
 
 		RiskControlEnabled: settings.RiskControlEnabled,

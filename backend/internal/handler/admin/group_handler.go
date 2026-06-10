@@ -2,6 +2,7 @@ package admin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -161,6 +162,12 @@ type UpdateGroupRequest struct {
 	CopyAccountsFromGroupIDs []int64 `json:"copy_accounts_from_group_ids"`
 }
 
+type LLMMonitorGroup struct {
+	Name           string  `json:"name"`
+	Platform       string  `json:"platform"`
+	RateMultiplier float64 `json:"rate_multiplier"`
+}
+
 // List handles listing all groups with pagination
 // GET /api/v1/admin/groups
 func (h *GroupHandler) List(c *gin.Context) {
@@ -224,6 +231,30 @@ func (h *GroupHandler) GetAll(c *gin.Context) {
 	outGroups := make([]dto.AdminGroup, 0, len(groups))
 	for i := range groups {
 		outGroups = append(outGroups, *dto.GroupFromServiceAdmin(&groups[i]))
+	}
+	response.Success(c, outGroups)
+}
+
+func (h *GroupHandler) GetAllGroups(ctx context.Context) ([]service.Group, error) {
+	return h.adminService.GetAllGroups(ctx)
+}
+
+// GetLLMMonitorGroups returns the minimal active group data needed by the model monitor page.
+// GET /api/llm-monitor/groups
+func (h *GroupHandler) GetLLMMonitorGroups(c *gin.Context) {
+	groups, err := h.adminService.GetAllGroups(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	outGroups := make([]LLMMonitorGroup, 0, len(groups))
+	for _, group := range groups {
+		outGroups = append(outGroups, LLMMonitorGroup{
+			Name:           group.Name,
+			Platform:       group.Platform,
+			RateMultiplier: group.RateMultiplier,
+		})
 	}
 	response.Success(c, outGroups)
 }

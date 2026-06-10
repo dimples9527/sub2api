@@ -108,10 +108,49 @@ func (s *FrontendServer) Middleware() gin.HandlerFunc {
 			return
 		}
 
+		if isStaticHTMLPage(cleanPath) {
+			s.serveStaticHTMLWithNonce(c, cleanPath)
+			return
+		}
+
 		// Serve static files normally
 		s.fileServer.ServeHTTP(c.Writer, c.Request)
 		c.Abort()
 	}
+}
+
+func (s *FrontendServer) serveStaticHTMLWithNonce(c *gin.Context, path string) {
+	file, err := s.distFS.Open(path)
+	if err != nil {
+		c.String(http.StatusNotFound, "Frontend page not found")
+		c.Abort()
+		return
+	}
+	defer func() { _ = file.Close() }()
+
+	content, err := io.ReadAll(file)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Failed to read frontend page")
+		c.Abort()
+		return
+	}
+
+	if s.settings != nil {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		defer cancel()
+
+		if settings, err := s.settings.GetPublicSettingsForInjection(ctx); err == nil {
+			if settingsJSON, err := json.Marshal(settings); err == nil {
+				content = injectSettingsIntoHTML(content, settingsJSON)
+			}
+		}
+	}
+
+	nonce := middleware.GetNonceFromContext(c)
+	content = replaceNoncePlaceholder(content, nonce)
+	c.Header("Cache-Control", "no-cache")
+	c.Data(http.StatusOK, "text/html; charset=utf-8", content)
+	c.Abort()
 }
 
 func (s *FrontendServer) fileExists(path string) bool {
@@ -199,18 +238,19 @@ func (s *FrontendServer) serveIndexHTML(c *gin.Context) {
 }
 
 func (s *FrontendServer) injectSettings(settingsJSON []byte) []byte {
-	// Create the script tag to inject with nonce placeholder
-	// The placeholder will be replaced with actual nonce at request time
-	script := []byte(`<script nonce="` + NonceHTMLPlaceholder + `">window.__APP_CONFIG__=` + string(settingsJSON) + `;</script>`)
-
-	// Inject before </head>
-	headClose := []byte("</head>")
-	result := bytes.Replace(s.baseHTML, headClose, append(script, headClose...), 1)
+	result := injectSettingsIntoHTML(s.baseHTML, settingsJSON)
 
 	// Replace <title> with custom site name so the browser tab shows it immediately
 	result = injectSiteTitle(result, settingsJSON)
 
 	return result
+}
+
+func injectSettingsIntoHTML(html, settingsJSON []byte) []byte {
+	// The nonce placeholder is replaced with the request nonce before serving.
+	script := []byte(`<script nonce="` + NonceHTMLPlaceholder + `">window.__APP_CONFIG__=` + string(settingsJSON) + `;</script>`)
+	headClose := []byte("</head>")
+	return bytes.Replace(html, headClose, append(script, headClose...), 1)
 }
 
 // injectSiteTitle replaces the static <title> in HTML with the configured site name.
@@ -272,6 +312,10 @@ func ServeEmbeddedFrontend() gin.HandlerFunc {
 			if tryServeOverrideFile(c, overrideDir, cleanPath) {
 				return
 			}
+			if isStaticHTMLPage(cleanPath) {
+				serveStaticHTMLWithNonce(c, distFS, cleanPath)
+				return
+			}
 			fileServer.ServeHTTP(c.Writer, c.Request)
 			c.Abort()
 			return
@@ -308,6 +352,37 @@ func shouldBypassEmbeddedFrontend(path string) bool {
 		trimmed == "/responses" ||
 		strings.HasPrefix(trimmed, "/responses/") ||
 		strings.HasPrefix(trimmed, "/images/")
+}
+
+func isStaticHTMLPage(path string) bool {
+	switch path {
+	case "model-monitor.html", "help.html":
+		return true
+	default:
+		return false
+	}
+}
+
+func serveStaticHTMLWithNonce(c *gin.Context, fsys fs.FS, path string) {
+	file, err := fsys.Open(path)
+	if err != nil {
+		c.String(http.StatusNotFound, "Frontend page not found")
+		c.Abort()
+		return
+	}
+	defer func() { _ = file.Close() }()
+
+	content, err := io.ReadAll(file)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Failed to read frontend page")
+		c.Abort()
+		return
+	}
+
+	nonce := middleware.GetNonceFromContext(c)
+	content = replaceNoncePlaceholder(content, nonce)
+	c.Data(http.StatusOK, "text/html; charset=utf-8", content)
+	c.Abort()
 }
 
 func serveIndexHTML(c *gin.Context, fsys fs.FS) {

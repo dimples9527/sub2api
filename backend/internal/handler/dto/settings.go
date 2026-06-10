@@ -316,6 +316,10 @@ type PublicSettings struct {
 
 	AvailableChannelsEnabled bool `json:"available_channels_enabled"`
 
+	LLMMonitorStatusAPIURL string `json:"llm_monitor_status_api_url"`
+	LLMMonitorTitle        string `json:"llm_monitor_title"`
+	LLMMonitorProviderURL  string `json:"llm_monitor_provider_url"`
+
 	AffiliateEnabled bool `json:"affiliate_enabled"`
 
 	RiskControlEnabled bool `json:"risk_control_enabled"`

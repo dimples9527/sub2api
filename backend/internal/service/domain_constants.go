@@ -361,6 +361,11 @@ const (
 	// sidebar entry is hidden. Defaults to false (opt-in feature).
 	SettingKeyAvailableChannelsEnabled = "available_channels_enabled"
 
+	// LLM Monitor page settings.
+	SettingKeyLLMMonitorStatusAPIURL = "llm_monitor_status_api_url"
+	SettingKeyLLMMonitorTitle        = "llm_monitor_title"
+	SettingKeyLLMMonitorProviderURL  = "llm_monitor_provider_url"
+
 	// =========================
 	// Overload Cooldown (529)
 	// =========================

@@ -329,6 +329,19 @@ export async function getCapacitySummary(): Promise<
   return data
 }
 
+export async function getUpstreamMonitorStatus(params?: {
+  period?: string
+  board?: string
+}): Promise<unknown> {
+  const { data } = await apiClient.get<unknown>('/admin/upstream-management/monitor-status', {
+    params: {
+      period: params?.period || '90m',
+      board: params?.board || 'hot'
+    }
+  })
+  return data
+}
+
 export const groupsAPI = {
   list,
   getAll,
@@ -350,7 +363,8 @@ export const groupsAPI = {
   batchSetGroupRPMOverrides,
   updateSortOrder,
   getUsageSummary,
-  getCapacitySummary
+  getCapacitySummary,
+  getUpstreamMonitorStatus
 }
 
 export default groupsAPI
