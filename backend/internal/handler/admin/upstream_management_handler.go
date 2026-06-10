@@ -11,6 +11,7 @@ import (
 type upstreamManagementService interface {
 	CompareGroups(ctx context.Context) (service.UpstreamGroupCompareResult, error)
 	ApplyRateFixes(ctx context.Context) (service.UpstreamGroupCompareResult, error)
+	SaveGroupMapping(ctx context.Context, input service.UpstreamGroupMappingInput) (service.UpstreamGroupCompareResult, error)
 }
 
 type UpstreamManagementHandler struct {
@@ -36,6 +37,20 @@ func (h *UpstreamManagementHandler) CompareGroups(c *gin.Context) {
 
 func (h *UpstreamManagementHandler) ApplyRateFixes(c *gin.Context) {
 	result, err := h.service.ApplyRateFixes(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *UpstreamManagementHandler) SaveGroupMapping(c *gin.Context) {
+	var input service.UpstreamGroupMappingInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	result, err := h.service.SaveGroupMapping(c.Request.Context(), input)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

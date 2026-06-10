@@ -232,6 +232,113 @@ func TestUpstreamManagementServiceCompareGroupsMatchesByNormalizedName(t *testin
 	}
 }
 
+func TestUpstreamManagementServiceCompareGroupsPrefersManualMapping(t *testing.T) {
+	providerSource := &upstreamManagementProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "default-upstream", Name: "Default upstream", IsDefault: true},
+		keys: []UpstreamProviderKey{
+			{ProviderSlug: "default-upstream", GroupName: "VIP", RateMultiplier: 2.5},
+		},
+	}
+	groupRepo := &upstreamManagementGroupRepoStub{groups: []Group{
+		{ID: 7, Name: "VIP", RateMultiplier: 3, Status: StatusActive},
+		{ID: 9, Name: "Mapped VIP", RateMultiplier: 1, Status: StatusActive},
+	}}
+	settingRepo := newUpstreamManagementSettingRepoStub()
+	settingRepo.values[SettingKeyUpstreamGroupMappings] = `[{
+		"provider_slug": "default-upstream",
+		"upstream_group_name": "VIP",
+		"upstream_group_key": "vip",
+		"local_group_id": 9
+	}]`
+	svc := NewUpstreamManagementService(providerSource, groupRepo, settingRepo, nil)
+
+	result, err := svc.CompareGroups(context.Background())
+	if err != nil {
+		t.Fatalf("CompareGroups returned error: %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("item count = %d, want 1", len(result.Items))
+	}
+	item := result.Items[0]
+	if !item.Matched || item.LocalGroupID == nil || *item.LocalGroupID != 9 {
+		t.Fatalf("expected manual mapped local group 9, got %+v", item)
+	}
+	if item.MatchSource != "manual" {
+		t.Fatalf("match source = %q, want manual", item.MatchSource)
+	}
+	if !item.NeedsRateIncrease {
+		t.Fatalf("manual mapped group should need rate increase: %+v", item)
+	}
+}
+
+func TestUpstreamManagementServiceSaveGroupMappingStoresMapping(t *testing.T) {
+	providerSource := &upstreamManagementProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "default-upstream", Name: "Default upstream", IsDefault: true},
+		keys: []UpstreamProviderKey{
+			{ProviderSlug: "default-upstream", GroupName: "VIP", RateMultiplier: 2.5},
+		},
+	}
+	groupRepo := &upstreamManagementGroupRepoStub{groups: []Group{
+		{ID: 9, Name: "Mapped VIP", RateMultiplier: 1, Status: StatusActive},
+	}}
+	settingRepo := newUpstreamManagementSettingRepoStub()
+	svc := NewUpstreamManagementService(providerSource, groupRepo, settingRepo, nil)
+
+	result, err := svc.SaveGroupMapping(context.Background(), UpstreamGroupMappingInput{
+		UpstreamGroupName: " VIP ",
+		LocalGroupID:      ptrInt64(9),
+	})
+	if err != nil {
+		t.Fatalf("SaveGroupMapping returned error: %v", err)
+	}
+	if len(result.Items) != 1 || result.Items[0].LocalGroupID == nil || *result.Items[0].LocalGroupID != 9 {
+		t.Fatalf("expected mapped comparison result, got %+v", result.Items)
+	}
+	var stored []UpstreamGroupMappingRecord
+	if err := json.Unmarshal([]byte(settingRepo.values[SettingKeyUpstreamGroupMappings]), &stored); err != nil {
+		t.Fatalf("stored mappings should be JSON: %v", err)
+	}
+	if len(stored) != 1 || stored[0].ProviderSlug != "default-upstream" || stored[0].UpstreamGroupKey != "vip" || stored[0].LocalGroupID != 9 {
+		t.Fatalf("unexpected stored mappings: %+v", stored)
+	}
+}
+
+func TestUpstreamManagementServiceSaveGroupMappingClearsMapping(t *testing.T) {
+	providerSource := &upstreamManagementProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "default-upstream", Name: "Default upstream", IsDefault: true},
+		keys: []UpstreamProviderKey{
+			{ProviderSlug: "default-upstream", GroupName: "VIP", RateMultiplier: 2.5},
+		},
+	}
+	groupRepo := &upstreamManagementGroupRepoStub{groups: []Group{{ID: 9, Name: "Mapped VIP", RateMultiplier: 1, Status: StatusActive}}}
+	settingRepo := newUpstreamManagementSettingRepoStub()
+	settingRepo.values[SettingKeyUpstreamGroupMappings] = `[{
+		"provider_slug": "default-upstream",
+		"upstream_group_name": "VIP",
+		"upstream_group_key": "vip",
+		"local_group_id": 9
+	}]`
+	svc := NewUpstreamManagementService(providerSource, groupRepo, settingRepo, nil)
+
+	result, err := svc.SaveGroupMapping(context.Background(), UpstreamGroupMappingInput{
+		UpstreamGroupName: "VIP",
+		LocalGroupID:      nil,
+	})
+	if err != nil {
+		t.Fatalf("SaveGroupMapping clear returned error: %v", err)
+	}
+	if len(result.Items) != 1 || result.Items[0].Matched {
+		t.Fatalf("expected cleared mapping without name fallback, got %+v", result.Items)
+	}
+	var stored []UpstreamGroupMappingRecord
+	if err := json.Unmarshal([]byte(settingRepo.values[SettingKeyUpstreamGroupMappings]), &stored); err != nil {
+		t.Fatalf("stored mappings should be JSON: %v", err)
+	}
+	if len(stored) != 0 {
+		t.Fatalf("stored mappings = %+v, want empty", stored)
+	}
+}
+
 func TestUpstreamManagementServiceApplyRateFixesRaisesOnlyLowerLocalRates(t *testing.T) {
 	providerSource := &upstreamManagementProviderSourceStub{
 		defaultProvider: UpstreamProviderConfig{Slug: "default-upstream", Name: "Default upstream", IsDefault: true},
@@ -271,6 +378,10 @@ func TestUpstreamManagementServiceApplyRateFixesRaisesOnlyLowerLocalRates(t *tes
 	if len(stored) != 1 || stored[0].GroupID != 1 {
 		t.Fatalf("stored records = %+v", stored)
 	}
+}
+
+func ptrInt64(value int64) *int64 {
+	return &value
 }
 
 func TestUpstreamManagementServiceCompareGroupsRequiresDefaultProvider(t *testing.T) {

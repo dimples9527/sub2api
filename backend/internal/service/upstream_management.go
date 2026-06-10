@@ -11,7 +11,10 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
-const SettingKeyUpstreamGroupRateFixRecords = "upstream_group_rate_fix_records"
+const (
+	SettingKeyUpstreamGroupRateFixRecords = "upstream_group_rate_fix_records"
+	SettingKeyUpstreamGroupMappings       = "upstream_group_mappings"
+)
 
 type UpstreamManagementProviderSource interface {
 	GetDefaultProvider(ctx context.Context) (UpstreamProviderConfig, error)
@@ -22,12 +25,14 @@ type UpstreamGroupComparison struct {
 	ProviderSlug      string   `json:"provider_slug"`
 	ProviderName      string   `json:"provider_name"`
 	UpstreamGroupName string   `json:"upstream_group_name"`
+	UpstreamGroupKey  string   `json:"upstream_group_key"`
 	UpstreamRate      float64  `json:"upstream_rate"`
 	UpstreamKeyCount  int      `json:"upstream_key_count"`
 	LocalGroupID      *int64   `json:"local_group_id,omitempty"`
 	LocalGroupName    string   `json:"local_group_name,omitempty"`
 	LocalRate         *float64 `json:"local_rate,omitempty"`
 	Matched           bool     `json:"matched"`
+	MatchSource       string   `json:"match_source,omitempty"`
 	NeedsRateIncrease bool     `json:"needs_rate_increase"`
 }
 
@@ -47,6 +52,19 @@ type UpstreamGroupRateFixRecord struct {
 	OldRate           float64   `json:"old_rate"`
 	NewRate           float64   `json:"new_rate"`
 	ChangedAt         time.Time `json:"changed_at"`
+}
+
+type UpstreamGroupMappingInput struct {
+	UpstreamGroupName string `json:"upstream_group_name"`
+	LocalGroupID      *int64 `json:"local_group_id"`
+}
+
+type UpstreamGroupMappingRecord struct {
+	ProviderSlug      string    `json:"provider_slug"`
+	UpstreamGroupName string    `json:"upstream_group_name"`
+	UpstreamGroupKey  string    `json:"upstream_group_key"`
+	LocalGroupID      int64     `json:"local_group_id"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type UpstreamManagementService struct {
@@ -132,6 +150,50 @@ func (s *UpstreamManagementService) ApplyRateFixes(ctx context.Context) (Upstrea
 	return result, nil
 }
 
+func (s *UpstreamManagementService) SaveGroupMapping(ctx context.Context, input UpstreamGroupMappingInput) (UpstreamGroupCompareResult, error) {
+	if s == nil || s.providerSource == nil {
+		return UpstreamGroupCompareResult{}, infraerrors.InternalServer("UPSTREAM_MANAGEMENT_PROVIDER_SOURCE_UNAVAILABLE", "upstream management provider source unavailable")
+	}
+	if s.groupRepo == nil {
+		return UpstreamGroupCompareResult{}, infraerrors.InternalServer("UPSTREAM_MANAGEMENT_GROUP_REPO_UNAVAILABLE", "upstream management group repository unavailable")
+	}
+	defaultProvider, err := s.providerSource.GetDefaultProvider(ctx)
+	if err != nil {
+		return UpstreamGroupCompareResult{}, err
+	}
+	upstreamGroupName := strings.TrimSpace(input.UpstreamGroupName)
+	upstreamGroupKey := normalizeUpstreamGroupMatchName(upstreamGroupName)
+	if upstreamGroupKey == "" {
+		return UpstreamGroupCompareResult{}, infraerrors.BadRequest("UPSTREAM_GROUP_NAME_REQUIRED", "upstream group name is required")
+	}
+
+	records, err := s.loadGroupMappings(ctx)
+	if err != nil {
+		return UpstreamGroupCompareResult{}, err
+	}
+	records = removeUpstreamGroupMapping(records, defaultProvider.Slug, upstreamGroupKey)
+	if input.LocalGroupID != nil && *input.LocalGroupID > 0 {
+		group, err := s.groupRepo.GetByID(ctx, *input.LocalGroupID)
+		if err != nil {
+			return UpstreamGroupCompareResult{}, fmt.Errorf("get local group for upstream mapping: %w", err)
+		}
+		if group.Status != StatusActive {
+			return UpstreamGroupCompareResult{}, infraerrors.BadRequest("UPSTREAM_GROUP_MAPPING_LOCAL_GROUP_INACTIVE", "local group must be active")
+		}
+		records = append(records, UpstreamGroupMappingRecord{
+			ProviderSlug:      defaultProvider.Slug,
+			UpstreamGroupName: upstreamGroupName,
+			UpstreamGroupKey:  upstreamGroupKey,
+			LocalGroupID:      group.ID,
+			UpdatedAt:         time.Now().UTC(),
+		})
+	}
+	if err := s.saveGroupMappings(ctx, records); err != nil {
+		return UpstreamGroupCompareResult{}, err
+	}
+	return s.CompareGroups(ctx)
+}
+
 func (s *UpstreamManagementService) compareGroups(ctx context.Context) (UpstreamGroupCompareResult, error) {
 	if s == nil || s.providerSource == nil {
 		return UpstreamGroupCompareResult{}, infraerrors.InternalServer("UPSTREAM_MANAGEMENT_PROVIDER_SOURCE_UNAVAILABLE", "upstream management provider source unavailable")
@@ -151,7 +213,11 @@ func (s *UpstreamManagementService) compareGroups(ctx context.Context) (Upstream
 	if err != nil {
 		return UpstreamGroupCompareResult{}, fmt.Errorf("list local groups: %w", err)
 	}
-	items := compareUpstreamGroups(defaultProvider, keys, localGroups)
+	mappings, err := s.loadGroupMappings(ctx)
+	if err != nil {
+		return UpstreamGroupCompareResult{}, err
+	}
+	items := compareUpstreamGroups(defaultProvider, keys, localGroups, mappings)
 	return UpstreamGroupCompareResult{
 		DefaultProvider: redactUpstreamProvider(defaultProvider),
 		Items:           items,
@@ -160,9 +226,11 @@ func (s *UpstreamManagementService) compareGroups(ctx context.Context) (Upstream
 	}, nil
 }
 
-func compareUpstreamGroups(provider UpstreamProviderConfig, keys []UpstreamProviderKey, localGroups []Group) []UpstreamGroupComparison {
+func compareUpstreamGroups(provider UpstreamProviderConfig, keys []UpstreamProviderKey, localGroups []Group, mappings []UpstreamGroupMappingRecord) []UpstreamGroupComparison {
 	localByName := make(map[string]Group, len(localGroups))
+	localByID := make(map[int64]Group, len(localGroups))
 	for _, group := range localGroups {
+		localByID[group.ID] = group
 		normalized := normalizeUpstreamGroupMatchName(group.Name)
 		if normalized == "" {
 			continue
@@ -170,6 +238,20 @@ func compareUpstreamGroups(provider UpstreamProviderConfig, keys []UpstreamProvi
 		if _, exists := localByName[normalized]; !exists {
 			localByName[normalized] = group
 		}
+	}
+	mappedLocalGroupIDs := make(map[string]int64, len(mappings))
+	for _, mapping := range mappings {
+		if mapping.ProviderSlug != provider.Slug {
+			continue
+		}
+		key := normalizeUpstreamGroupMatchName(mapping.UpstreamGroupKey)
+		if key == "" {
+			key = normalizeUpstreamGroupMatchName(mapping.UpstreamGroupName)
+		}
+		if key == "" || mapping.LocalGroupID <= 0 {
+			continue
+		}
+		mappedLocalGroupIDs[key] = mapping.LocalGroupID
 	}
 
 	type upstreamGroupAggregate struct {
@@ -210,19 +292,112 @@ func compareUpstreamGroups(provider UpstreamProviderConfig, keys []UpstreamProvi
 			ProviderSlug:      provider.Slug,
 			ProviderName:      provider.Name,
 			UpstreamGroupName: aggregate.name,
+			UpstreamGroupKey:  normalized,
 			UpstreamRate:      aggregate.rate,
 			UpstreamKeyCount:  aggregate.keyCount,
 		}
-		if local, ok := localByName[normalized]; ok {
-			localID := local.ID
-			localRate := local.RateMultiplier
-			item.LocalGroupID = &localID
-			item.LocalGroupName = local.Name
-			item.LocalRate = &localRate
-			item.Matched = true
-			item.NeedsRateIncrease = aggregate.rate > local.RateMultiplier
+		if mappedID, ok := mappedLocalGroupIDs[normalized]; ok {
+			if local, exists := localByID[mappedID]; exists {
+				applyUpstreamGroupLocalMatch(&item, local, "manual")
+			}
+		}
+		if !item.Matched {
+			if local, ok := localByName[normalized]; ok {
+				applyUpstreamGroupLocalMatch(&item, local, "name")
+			}
 		}
 		out = append(out, item)
+	}
+	return out
+}
+
+func applyUpstreamGroupLocalMatch(item *UpstreamGroupComparison, local Group, source string) {
+	localID := local.ID
+	localRate := local.RateMultiplier
+	item.LocalGroupID = &localID
+	item.LocalGroupName = local.Name
+	item.LocalRate = &localRate
+	item.Matched = true
+	item.MatchSource = source
+	item.NeedsRateIncrease = item.UpstreamRate > local.RateMultiplier
+}
+
+func (s *UpstreamManagementService) loadGroupMappings(ctx context.Context) ([]UpstreamGroupMappingRecord, error) {
+	if s == nil || s.settingRepo == nil {
+		return []UpstreamGroupMappingRecord{}, nil
+	}
+	raw, err := s.settingRepo.GetValue(ctx, SettingKeyUpstreamGroupMappings)
+	if err != nil {
+		if err == ErrSettingNotFound {
+			return []UpstreamGroupMappingRecord{}, nil
+		}
+		return nil, fmt.Errorf("load upstream group mappings: %w", err)
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return []UpstreamGroupMappingRecord{}, nil
+	}
+	var records []UpstreamGroupMappingRecord
+	if err := json.Unmarshal([]byte(raw), &records); err != nil {
+		return nil, infraerrors.InternalServer("UPSTREAM_GROUP_MAPPINGS_INVALID", "upstream group mappings are invalid")
+	}
+	return normalizeUpstreamGroupMappings(records), nil
+}
+
+func (s *UpstreamManagementService) saveGroupMappings(ctx context.Context, records []UpstreamGroupMappingRecord) error {
+	if s == nil || s.settingRepo == nil {
+		return nil
+	}
+	records = normalizeUpstreamGroupMappings(records)
+	raw, err := json.Marshal(records)
+	if err != nil {
+		return fmt.Errorf("marshal upstream group mappings: %w", err)
+	}
+	if err := s.settingRepo.Set(ctx, SettingKeyUpstreamGroupMappings, string(raw)); err != nil {
+		return fmt.Errorf("save upstream group mappings: %w", err)
+	}
+	return nil
+}
+
+func normalizeUpstreamGroupMappings(records []UpstreamGroupMappingRecord) []UpstreamGroupMappingRecord {
+	out := make([]UpstreamGroupMappingRecord, 0, len(records))
+	seen := map[string]int{}
+	for _, record := range records {
+		record.ProviderSlug = strings.TrimSpace(record.ProviderSlug)
+		record.UpstreamGroupName = strings.TrimSpace(record.UpstreamGroupName)
+		record.UpstreamGroupKey = normalizeUpstreamGroupMatchName(record.UpstreamGroupKey)
+		if record.UpstreamGroupKey == "" {
+			record.UpstreamGroupKey = normalizeUpstreamGroupMatchName(record.UpstreamGroupName)
+		}
+		if record.ProviderSlug == "" || record.UpstreamGroupKey == "" || record.LocalGroupID <= 0 {
+			continue
+		}
+		key := record.ProviderSlug + "\x00" + record.UpstreamGroupKey
+		if index, exists := seen[key]; exists {
+			out[index] = record
+			continue
+		}
+		seen[key] = len(out)
+		out = append(out, record)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].ProviderSlug == out[j].ProviderSlug {
+			return out[i].UpstreamGroupKey < out[j].UpstreamGroupKey
+		}
+		return out[i].ProviderSlug < out[j].ProviderSlug
+	})
+	return out
+}
+
+func removeUpstreamGroupMapping(records []UpstreamGroupMappingRecord, providerSlug string, upstreamGroupKey string) []UpstreamGroupMappingRecord {
+	providerSlug = strings.TrimSpace(providerSlug)
+	upstreamGroupKey = normalizeUpstreamGroupMatchName(upstreamGroupKey)
+	out := make([]UpstreamGroupMappingRecord, 0, len(records))
+	for _, record := range normalizeUpstreamGroupMappings(records) {
+		if record.ProviderSlug == providerSlug && record.UpstreamGroupKey == upstreamGroupKey {
+			continue
+		}
+		out = append(out, record)
 	}
 	return out
 }

@@ -70,11 +70,26 @@
           </template>
 
           <template #cell-local_group_name="{ row }">
-            <div v-if="row.matched" class="flex min-w-[12rem] flex-col gap-1">
-              <span class="font-medium text-gray-900 dark:text-white">{{ row.local_group_name }}</span>
-              <code class="text-xs text-gray-500 dark:text-gray-400">#{{ row.local_group_id }}</code>
+            <div class="flex min-w-[16rem] flex-col gap-2">
+              <Select
+                :model-value="row.local_group_id ?? null"
+                :options="localGroupOptions"
+                :placeholder="t('admin.upstreamGroups.selectLocalGroup')"
+                searchable
+                clearable
+                :disabled="savingMappingKey === row.upstream_group_key"
+                @change="value => saveGroupMapping(row, value)"
+              />
+              <div v-if="row.matched" class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                <code>#{{ row.local_group_id }}</code>
+                <span :class="['badge', row.match_source === 'manual' ? 'badge-primary' : 'badge-gray']">
+                  {{ matchSourceLabel(row) }}
+                </span>
+              </div>
+              <div v-else class="text-xs text-gray-400">
+                {{ t('admin.upstreamGroups.notMatched') }}
+              </div>
             </div>
-            <span v-else class="text-sm text-gray-400">{{ t('admin.upstreamGroups.notMatched') }}</span>
           </template>
 
           <template #cell-local_rate="{ row }">
@@ -138,6 +153,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
+import type { AdminGroup } from '@/types'
 import type {
   UpstreamGroupCompareResult,
   UpstreamGroupComparison,
@@ -151,6 +167,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
+import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 
 const { t } = useI18n()
@@ -159,7 +176,9 @@ const appStore = useAppStore()
 const result = ref<UpstreamGroupCompareResult | null>(null)
 const loading = ref(false)
 const applying = ref(false)
+const savingMappingKey = ref<string | null>(null)
 const loadError = ref('')
+const localGroups = ref<AdminGroup[]>([])
 
 const columns = computed<Column[]>(() => [
   { key: 'upstream_group_name', label: t('admin.upstreamGroups.columns.upstreamGroup') },
@@ -172,6 +191,15 @@ const columns = computed<Column[]>(() => [
 const items = computed<UpstreamGroupComparison[]>(() => result.value?.items || [])
 const warnings = computed(() => result.value?.warnings || [])
 const records = computed<UpstreamGroupRateFixRecord[]>(() => result.value?.records || [])
+
+const localGroupOptions = computed<SelectOption[]>(() => [
+  { value: null, label: t('admin.upstreamGroups.clearMapping') },
+  ...localGroups.value.map(group => ({
+    value: group.id,
+    label: `${group.name} (${formatRate(group.rate_multiplier)})`,
+    description: `#${group.id}`
+  }))
+])
 
 const summary = computed(() => {
   const list = items.value
@@ -194,7 +222,12 @@ async function reload() {
   loading.value = true
   loadError.value = ''
   try {
-    result.value = await adminAPI.upstreamManagement.getGroups()
+    const [groupsResult, groups] = await Promise.all([
+      adminAPI.upstreamManagement.getGroups(),
+      adminAPI.groups.getAll()
+    ])
+    result.value = groupsResult
+    localGroups.value = groups
   } catch (err) {
     const message = extractApiErrorMessage(err, t('admin.upstreamGroups.loadFailed'))
     loadError.value = message
@@ -217,9 +250,27 @@ async function applyRateFixes() {
   }
 }
 
+async function saveGroupMapping(row: UpstreamGroupComparison, value: string | number | boolean | null) {
+  const localGroupId = typeof value === 'number' ? value : null
+  savingMappingKey.value = row.upstream_group_key
+  try {
+    result.value = await adminAPI.upstreamManagement.saveGroupMapping(row.upstream_group_name, localGroupId)
+    appStore.showSuccess(t('admin.upstreamGroups.mappingSaved'))
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamGroups.mappingSaveFailed')))
+  } finally {
+    savingMappingKey.value = null
+  }
+}
+
 function formatRate(value: number | undefined) {
   const n = Number(value)
   return Number.isFinite(n) ? `${n.toFixed(2)}x` : '-'
+}
+
+function matchSourceLabel(row: UpstreamGroupComparison) {
+  if (row.match_source === 'manual') return t('admin.upstreamGroups.manualMatched')
+  return t('admin.upstreamGroups.nameMatched')
 }
 
 function statusClass(row: UpstreamGroupComparison) {

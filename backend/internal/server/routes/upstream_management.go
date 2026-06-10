@@ -22,6 +22,7 @@ func registerUpstreamManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 		groups := upstream.Group("/groups")
 		{
 			groups.GET("", h.Admin.UpstreamManagement.CompareGroups)
+			groups.PUT("/mappings", h.Admin.UpstreamManagement.SaveGroupMapping)
 			groups.POST("/rate-fixes", h.Admin.UpstreamManagement.ApplyRateFixes)
 		}
 	}
