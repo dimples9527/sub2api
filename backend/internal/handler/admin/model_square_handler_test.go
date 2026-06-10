@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -910,6 +911,120 @@ func TestModelSquareHandlerAccountRateGuardSupportsNewAPIProvider(t *testing.T) 
 	require.Equal(t, int64(301), accountUpdates[0].id)
 	require.NotNil(t, accountUpdates[0].groupIDs)
 	require.Equal(t, []int64{31}, *accountUpdates[0].groupIDs)
+}
+
+func TestModelSquareHandlerTestUpstreamProviderReportsNewAPIStages(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var loginBody string
+	var tokenUserHeader string
+	var tokenCookieHeader string
+	var groupsUserHeader string
+	var groupsCookieHeader string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/user/login":
+			require.Equal(t, http.MethodPost, r.Method)
+			buf := make([]byte, r.ContentLength)
+			_, _ = r.Body.Read(buf)
+			loginBody = string(buf)
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "newapi-session"})
+			_, _ = w.Write([]byte(`{"success":true,"message":"","data":{"id":18,"username":"zhongyj"}}`))
+		case "/api/token/":
+			tokenUserHeader = r.Header.Get("New-Api-User")
+			tokenCookieHeader = r.Header.Get("Cookie")
+			_, _ = w.Write([]byte(`{
+				"success":true,
+				"message":"",
+				"data":{"items":[{"id":16,"name":"codex-key","group":"CodeX福利","status":1}]}
+			}`))
+		case "/api/user/self/groups":
+			groupsUserHeader = r.Header.Get("New-Api-User")
+			groupsCookieHeader = r.Header.Get("Cookie")
+			_, _ = w.Write([]byte(`{
+				"success":true,
+				"message":"",
+				"data":{"CodeX福利":{"desc":"Codex 福利渠道","ratio":0.001},"default":{"desc":"用户分组","ratio":1}}
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	h := newModelSquareHandler(ModelSquareHandlerConfig{HTTPClient: server.Client()})
+	router := gin.New()
+	router.POST("/test", h.TestUpstreamProvider)
+
+	body := strings.NewReader(fmt.Sprintf(`{
+		"type":"newapi",
+		"slug":"newapi-main",
+		"name":"NewAPI Main",
+		"base_url":"%s",
+		"login_url":"/api/user/login",
+		"api_keys_url":"/api/token/?p=1&size=200",
+		"groups_url":"/api/user/self/groups",
+		"username":"zhongyj",
+		"password":"secret",
+		"account_name_prefix":"newapi-"
+	}`, server.URL))
+	req := httptest.NewRequest(http.MethodPost, "/test", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.JSONEq(t, `{"username":"zhongyj","password":"secret"}`, loginBody)
+	require.Equal(t, "18", tokenUserHeader)
+	require.Contains(t, tokenCookieHeader, "session=newapi-session")
+	require.Equal(t, "18", groupsUserHeader)
+	require.Contains(t, groupsCookieHeader, "session=newapi-session")
+
+	var envelope struct {
+		Code int `json:"code"`
+		Data struct {
+			Type  string `json:"type"`
+			Slug  string `json:"slug"`
+			Login struct {
+				OK            bool  `json:"ok"`
+				StatusCode    int   `json:"status_code"`
+				UserID        int64 `json:"user_id"`
+				CookiePresent bool  `json:"cookie_present"`
+			} `json:"login"`
+			Keys struct {
+				OK        bool `json:"ok"`
+				ItemCount int  `json:"item_count"`
+			} `json:"keys"`
+			Groups struct {
+				OK         bool `json:"ok"`
+				GroupCount int  `json:"group_count"`
+			} `json:"groups"`
+			ParsedKeys []struct {
+				Name           string  `json:"name"`
+				GroupName      string  `json:"group_name"`
+				RateMultiplier float64 `json:"rate_multiplier"`
+			} `json:"parsed_keys"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+	require.Equal(t, 0, envelope.Code)
+	require.Equal(t, "newapi", envelope.Data.Type)
+	require.Equal(t, "newapi-main", envelope.Data.Slug)
+	require.True(t, envelope.Data.Login.OK)
+	require.Equal(t, http.StatusOK, envelope.Data.Login.StatusCode)
+	require.Equal(t, int64(18), envelope.Data.Login.UserID)
+	require.True(t, envelope.Data.Login.CookiePresent)
+	require.True(t, envelope.Data.Keys.OK)
+	require.Equal(t, 1, envelope.Data.Keys.ItemCount)
+	require.True(t, envelope.Data.Groups.OK)
+	require.Equal(t, 2, envelope.Data.Groups.GroupCount)
+	require.Len(t, envelope.Data.ParsedKeys, 1)
+	require.Equal(t, "codex-key", envelope.Data.ParsedKeys[0].Name)
+	require.Equal(t, "CodeX福利", envelope.Data.ParsedKeys[0].GroupName)
+	require.Equal(t, 0.001, envelope.Data.ParsedKeys[0].RateMultiplier)
+	require.NotContains(t, rec.Body.String(), "secret")
+	require.NotContains(t, rec.Body.String(), "newapi-session")
 }
 
 func TestModelSquareHandlerAccountRateGuardLogsProviderFailure(t *testing.T) {

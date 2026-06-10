@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -202,6 +203,55 @@ type modelSquareRateWarningEntry struct {
 
 type accountRateGuardRunRequest struct {
 	DryRun bool `json:"dry_run"`
+}
+
+type upstreamProviderTestRequest struct {
+	Type               string `json:"type"`
+	Slug               string `json:"slug"`
+	Name               string `json:"name"`
+	BaseURL            string `json:"base_url"`
+	LoginURL           string `json:"login_url"`
+	APIKeysURL         string `json:"api_keys_url"`
+	KeysURL            string `json:"keys_url"`
+	GroupsURL          string `json:"groups_url"`
+	Email              string `json:"email"`
+	Username           string `json:"username"`
+	Password           string `json:"password"`
+	AccountNamePrefix  string `json:"account_name_prefix"`
+	TempDisableMinutes int    `json:"temp_disable_minutes"`
+}
+
+type upstreamProviderTestResult struct {
+	Type              string                          `json:"type"`
+	Slug              string                          `json:"slug"`
+	Name              string                          `json:"name"`
+	BaseURL           string                          `json:"base_url"`
+	LoginURL          string                          `json:"login_url"`
+	KeysURL           string                          `json:"keys_url"`
+	GroupsURL         string                          `json:"groups_url,omitempty"`
+	AccountNamePrefix string                          `json:"account_name_prefix"`
+	Login             upstreamProviderTestStage       `json:"login"`
+	Keys              upstreamProviderTestStage       `json:"keys"`
+	Groups            upstreamProviderTestStage       `json:"groups,omitempty"`
+	ParsedKeys        []upstreamProviderTestParsedKey `json:"parsed_keys"`
+	Warnings          []string                        `json:"warnings,omitempty"`
+}
+
+type upstreamProviderTestStage struct {
+	OK            bool   `json:"ok"`
+	StatusCode    int    `json:"status_code,omitempty"`
+	UserID        int64  `json:"user_id,omitempty"`
+	CookiePresent bool   `json:"cookie_present,omitempty"`
+	ItemCount     int    `json:"item_count,omitempty"`
+	GroupCount    int    `json:"group_count,omitempty"`
+	Sample        any    `json:"sample,omitempty"`
+	Error         string `json:"error,omitempty"`
+}
+
+type upstreamProviderTestParsedKey struct {
+	Name           string  `json:"name"`
+	GroupName      string  `json:"group_name"`
+	RateMultiplier float64 `json:"rate_multiplier"`
 }
 
 type accountRateGuardResult struct {
@@ -499,6 +549,30 @@ func (h *ModelSquareHandler) GetAccountRateGuardStatus(c *gin.Context) {
 // ListAccountRateGuardAudits returns recent guard unbind audit entries.
 func (h *ModelSquareHandler) ListAccountRateGuardAudits(c *gin.Context) {
 	response.Success(c, h.accountRateGuardAuditsSnapshot())
+}
+
+// TestUpstreamProvider probes the current provider form values without saving settings or changing accounts.
+func (h *ModelSquareHandler) TestUpstreamProvider(c *gin.Context) {
+	var req upstreamProviderTestRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	provider := h.upstreamProviderRuntimeFromTestRequest(c.Request.Context(), req)
+	var (
+		result upstreamProviderTestResult
+		err    error
+	)
+	if provider.Type == upstreamProviderTypeNewAPI {
+		result, err = h.testNewAPIProvider(c.Request.Context(), provider)
+	} else {
+		result, err = h.testSub2APIProvider(c.Request.Context(), provider)
+	}
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, result)
 }
 
 func (h *ModelSquareHandler) fetchModelSquare(ctx context.Context, forceLogin bool) ([]byte, error) {
@@ -1229,6 +1303,68 @@ func normalizeUpstreamProviderRuntimeType(providerType string) string {
 	}
 }
 
+func (h *ModelSquareHandler) upstreamProviderRuntimeFromTestRequest(ctx context.Context, req upstreamProviderTestRequest) upstreamProviderRuntime {
+	provider := normalizeUpstreamProviderRuntime(upstreamProviderRuntime{
+		Type:               req.Type,
+		Slug:               req.Slug,
+		Name:               req.Name,
+		BaseURL:            req.BaseURL,
+		LoginURL:           req.LoginURL,
+		KeysURL:            firstNonEmpty(req.APIKeysURL, req.KeysURL),
+		GroupsURL:          req.GroupsURL,
+		Email:              req.Email,
+		Username:           req.Username,
+		Password:           req.Password,
+		AccountNamePrefix:  req.AccountNamePrefix,
+		TempDisableMinutes: req.TempDisableMinutes,
+	})
+	if provider.Password == "" {
+		if saved, ok := h.savedProviderPassword(ctx, provider.Slug); ok {
+			provider.Password = saved
+		}
+	}
+	return provider
+}
+
+func (h *ModelSquareHandler) savedProviderPassword(ctx context.Context, slug string) (string, bool) {
+	if h == nil || strings.TrimSpace(slug) == "" {
+		return "", false
+	}
+	if h.settingService != nil {
+		settings, err := h.settingService.GetAllSettings(ctx)
+		if err == nil {
+			for _, provider := range settings.UpstreamManagementProviders {
+				if strings.TrimSpace(provider.Slug) == slug && provider.Password != "" {
+					return provider.Password, true
+				}
+			}
+			if settings.UpstreamManagementPassword != "" {
+				return settings.UpstreamManagementPassword, true
+			}
+		}
+	}
+	for _, provider := range h.providers {
+		if strings.TrimSpace(provider.Slug) == slug && provider.Password != "" {
+			return provider.Password, true
+		}
+	}
+	return "", false
+}
+
+func newUpstreamProviderTestResult(provider upstreamProviderRuntime) upstreamProviderTestResult {
+	return upstreamProviderTestResult{
+		Type:              provider.Type,
+		Slug:              provider.Slug,
+		Name:              provider.Name,
+		BaseURL:           provider.BaseURL,
+		LoginURL:          provider.LoginURL,
+		KeysURL:           provider.KeysURL,
+		GroupsURL:         provider.GroupsURL,
+		AccountNamePrefix: provider.AccountNamePrefix,
+		ParsedKeys:        []upstreamProviderTestParsedKey{},
+	}
+}
+
 func accountMinGroupRate(account service.Account) (float64, bool) {
 	minRate := 0.0
 	found := false
@@ -1319,6 +1455,10 @@ func (h *ModelSquareHandler) fetchSub2APIKeysForProvider(ctx context.Context, pr
 	if status < 200 || status >= 300 {
 		return nil, fmt.Errorf("upstream provider keys failed: HTTP %d: %s", status, string(payload))
 	}
+	return parseSub2APIProviderKeys(payload)
+}
+
+func parseSub2APIProviderKeys(payload []byte) ([]findCGKeyItem, error) {
 	var keysResp findCGKeysResponse
 	if err := json.Unmarshal(payload, &keysResp); err != nil {
 		return nil, fmt.Errorf("decode upstream provider keys response: %w", err)
@@ -1330,6 +1470,62 @@ func (h *ModelSquareHandler) fetchSub2APIKeysForProvider(ctx context.Context, pr
 		return nil, fmt.Errorf("upstream provider keys failed: %s", keysResp.Message)
 	}
 	return keysResp.Data.Items, nil
+}
+
+func (h *ModelSquareHandler) testSub2APIProvider(ctx context.Context, provider upstreamProviderRuntime) (upstreamProviderTestResult, error) {
+	result := newUpstreamProviderTestResult(provider)
+	token := cachedFindCGToken{}
+	if provider.Email != "" || provider.Password != "" {
+		nextToken, rawLogin, status, err := h.loginProviderForTest(ctx, provider)
+		result.Login.StatusCode = status
+		if err != nil {
+			result.Login.Error = err.Error()
+			return result, nil
+		}
+		token = nextToken
+		result.Login.OK = true
+		result.Login.Sample = sanitizedJSONSample(rawLogin)
+	} else {
+		result.Login.OK = true
+		result.Login.Sample = map[string]any{"skipped": true, "reason": "email/password not configured"}
+	}
+
+	payload, status, err := h.requestProviderWithToken(ctx, provider, token, provider.KeysURL, "upstream provider keys")
+	result.Keys.StatusCode = status
+	if err != nil {
+		result.Keys.Error = err.Error()
+		return result, nil
+	}
+	if status < 200 || status >= 300 {
+		result.Keys.Error = fmt.Sprintf("upstream provider keys failed: HTTP %d: %s", status, truncateForDiagnostic(payload, 500))
+		return result, nil
+	}
+	var keysResp findCGKeysResponse
+	if err := json.Unmarshal(payload, &keysResp); err != nil {
+		result.Keys.Error = fmt.Sprintf("decode upstream provider keys response: %v", err)
+		return result, nil
+	}
+	result.Keys.ItemCount = len(keysResp.Data.Items)
+	result.Keys.Sample = sampleSub2APIKeyItems(keysResp.Data.Items, 5)
+	if keysResp.Code != 0 {
+		if keysResp.Message == "" {
+			keysResp.Message = "unknown error"
+		}
+		result.Keys.Error = "upstream provider keys failed: " + keysResp.Message
+		return result, nil
+	}
+	result.Keys.OK = true
+
+	items, err := parseSub2APIProviderKeys(payload)
+	if err != nil {
+		result.Warnings = append(result.Warnings, err.Error())
+		return result, nil
+	}
+	result.ParsedKeys = sampleParsedKeys(items, 20)
+	if len(result.ParsedKeys) == 0 && result.Keys.ItemCount > 0 {
+		result.Warnings = append(result.Warnings, "keys were returned, but no key had a usable group rate multiplier")
+	}
+	return result, nil
 }
 
 func (h *ModelSquareHandler) fetchNewAPIKeysForProvider(ctx context.Context, provider upstreamProviderRuntime) ([]findCGKeyItem, error) {
@@ -1352,6 +1548,10 @@ func (h *ModelSquareHandler) fetchNewAPIKeysForProvider(ctx context.Context, pro
 		return nil, fmt.Errorf("newapi provider groups failed: HTTP %d: %s", status, string(groupsPayload))
 	}
 
+	return parseNewAPIProviderKeys(keysPayload, groupsPayload)
+}
+
+func parseNewAPIProviderKeys(keysPayload, groupsPayload []byte) ([]findCGKeyItem, error) {
 	var keysResp newAPIKeysResponse
 	if err := json.Unmarshal(keysPayload, &keysResp); err != nil {
 		return nil, fmt.Errorf("decode newapi provider keys response: %w", err)
@@ -1412,54 +1612,136 @@ func (h *ModelSquareHandler) fetchNewAPIKeysForProvider(ctx context.Context, pro
 	return items, nil
 }
 
+func (h *ModelSquareHandler) testNewAPIProvider(ctx context.Context, provider upstreamProviderRuntime) (upstreamProviderTestResult, error) {
+	result := newUpstreamProviderTestResult(provider)
+	session, rawLogin, status, err := h.loginNewAPIProviderForTest(ctx, provider)
+	result.Login.StatusCode = status
+	if err != nil {
+		result.Login.Error = err.Error()
+		return result, nil
+	}
+	result.Login.OK = true
+	result.Login.UserID = session.UserID
+	result.Login.CookiePresent = session.CookieHeader != ""
+	result.Login.Sample = sanitizedJSONSample(rawLogin)
+
+	keysPayload, status, err := h.requestNewAPIProvider(ctx, provider, session, provider.KeysURL, "newapi provider keys")
+	result.Keys.StatusCode = status
+	if err != nil {
+		result.Keys.Error = err.Error()
+		return result, nil
+	}
+	if status < 200 || status >= 300 {
+		result.Keys.Error = fmt.Sprintf("newapi provider keys failed: HTTP %d: %s", status, truncateForDiagnostic(keysPayload, 500))
+		return result, nil
+	}
+	var keysResp newAPIKeysResponse
+	if err := json.Unmarshal(keysPayload, &keysResp); err != nil {
+		result.Keys.Error = fmt.Sprintf("decode newapi provider keys response: %v", err)
+		return result, nil
+	}
+	result.Keys.ItemCount = len(keysResp.Data.Items)
+	result.Keys.Sample = sampleNewAPIKeyItems(keysResp.Data.Items, 5)
+	if !keysResp.Success {
+		if keysResp.Message == "" {
+			keysResp.Message = "unknown error"
+		}
+		result.Keys.Error = "newapi provider keys failed: " + keysResp.Message
+		return result, nil
+	}
+	result.Keys.OK = true
+
+	groupsPayload, status, err := h.requestNewAPIProvider(ctx, provider, session, provider.GroupsURL, "newapi provider groups")
+	result.Groups.StatusCode = status
+	if err != nil {
+		result.Groups.Error = err.Error()
+		return result, nil
+	}
+	if status < 200 || status >= 300 {
+		result.Groups.Error = fmt.Sprintf("newapi provider groups failed: HTTP %d: %s", status, truncateForDiagnostic(groupsPayload, 500))
+		return result, nil
+	}
+	var groupsResp newAPIGroupsResponse
+	if err := json.Unmarshal(groupsPayload, &groupsResp); err != nil {
+		result.Groups.Error = fmt.Sprintf("decode newapi provider groups response: %v", err)
+		return result, nil
+	}
+	result.Groups.GroupCount = len(groupsResp.Data)
+	result.Groups.Sample = sampleNewAPIGroups(groupsResp.Data, 8)
+	if !groupsResp.Success {
+		if groupsResp.Message == "" {
+			groupsResp.Message = "unknown error"
+		}
+		result.Groups.Error = "newapi provider groups failed: " + groupsResp.Message
+		return result, nil
+	}
+	result.Groups.OK = true
+
+	items, err := parseNewAPIProviderKeys(keysPayload, groupsPayload)
+	if err != nil {
+		result.Warnings = append(result.Warnings, err.Error())
+		return result, nil
+	}
+	result.ParsedKeys = sampleParsedKeys(items, 20)
+	if len(result.ParsedKeys) == 0 && result.Keys.ItemCount > 0 {
+		result.Warnings = append(result.Warnings, "keys were returned, but none matched a group ratio from the groups response")
+	}
+	return result, nil
+}
+
 func (h *ModelSquareHandler) loginNewAPIProvider(ctx context.Context, provider upstreamProviderRuntime) (newAPIAuthSession, error) {
+	session, _, _, err := h.loginNewAPIProviderForTest(ctx, provider)
+	return session, err
+}
+
+func (h *ModelSquareHandler) loginNewAPIProviderForTest(ctx context.Context, provider upstreamProviderRuntime) (newAPIAuthSession, []byte, int, error) {
 	username := firstNonEmpty(provider.Username, provider.Email)
 	if strings.TrimSpace(username) == "" || provider.Password == "" {
-		return newAPIAuthSession{}, fmt.Errorf("missing newapi credentials: set username/password for provider %s", provider.Slug)
+		return newAPIAuthSession{}, nil, 0, fmt.Errorf("missing newapi credentials: set username/password for provider %s", provider.Slug)
 	}
 	body, err := json.Marshal(map[string]string{
 		"username": username,
 		"password": provider.Password,
 	})
 	if err != nil {
-		return newAPIAuthSession{}, fmt.Errorf("marshal newapi provider login payload: %w", err)
+		return newAPIAuthSession{}, nil, 0, fmt.Errorf("marshal newapi provider login payload: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, providerURL(provider, provider.LoginURL), bytes.NewReader(body))
 	if err != nil {
-		return newAPIAuthSession{}, fmt.Errorf("create newapi provider login request: %w", err)
+		return newAPIAuthSession{}, nil, 0, fmt.Errorf("create newapi provider login request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := h.httpClient.Do(req)
 	if err != nil {
-		return newAPIAuthSession{}, fmt.Errorf("newapi provider login request failed: %w", err)
+		return newAPIAuthSession{}, nil, 0, fmt.Errorf("newapi provider login request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return newAPIAuthSession{}, fmt.Errorf("read newapi provider login response: %w", err)
+		return newAPIAuthSession{}, nil, resp.StatusCode, fmt.Errorf("read newapi provider login response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return newAPIAuthSession{}, fmt.Errorf("newapi provider login failed: HTTP %d: %s", resp.StatusCode, string(raw))
+		return newAPIAuthSession{}, raw, resp.StatusCode, fmt.Errorf("newapi provider login failed: HTTP %d: %s", resp.StatusCode, string(raw))
 	}
 	var loginResp newAPILoginResponse
 	if err := json.Unmarshal(raw, &loginResp); err != nil {
-		return newAPIAuthSession{}, fmt.Errorf("decode newapi provider login response: %w", err)
+		return newAPIAuthSession{}, raw, resp.StatusCode, fmt.Errorf("decode newapi provider login response: %w", err)
 	}
 	if !loginResp.Success {
 		if loginResp.Message == "" {
 			loginResp.Message = "unknown error"
 		}
-		return newAPIAuthSession{}, fmt.Errorf("newapi provider login failed: %s", loginResp.Message)
+		return newAPIAuthSession{}, raw, resp.StatusCode, fmt.Errorf("newapi provider login failed: %s", loginResp.Message)
 	}
 	if loginResp.Data.ID <= 0 {
-		return newAPIAuthSession{}, fmt.Errorf("newapi provider login failed: missing user id")
+		return newAPIAuthSession{}, raw, resp.StatusCode, fmt.Errorf("newapi provider login failed: missing user id")
 	}
 	cookieHeader := cookiesHeader(resp.Cookies())
 	if cookieHeader == "" {
-		return newAPIAuthSession{}, fmt.Errorf("newapi provider login failed: missing cookie")
+		return newAPIAuthSession{}, raw, resp.StatusCode, fmt.Errorf("newapi provider login failed: missing cookie")
 	}
-	return newAPIAuthSession{UserID: loginResp.Data.ID, CookieHeader: cookieHeader}, nil
+	return newAPIAuthSession{UserID: loginResp.Data.ID, CookieHeader: cookieHeader}, raw, resp.StatusCode, nil
 }
 
 func (h *ModelSquareHandler) requestNewAPIProvider(ctx context.Context, provider upstreamProviderRuntime, session newAPIAuthSession, path, label string) ([]byte, int, error) {
@@ -1495,13 +1777,136 @@ func cookiesHeader(cookies []*http.Cookie) string {
 	return strings.Join(parts, "; ")
 }
 
+func sanitizedJSONSample(raw []byte) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return truncateForDiagnostic(raw, 500)
+	}
+	return redactDiagnosticValue(value)
+}
+
+func redactDiagnosticValue(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for key, item := range v {
+			normalized := strings.ToLower(key)
+			if strings.Contains(normalized, "password") || strings.Contains(normalized, "token") || strings.Contains(normalized, "cookie") || strings.Contains(normalized, "secret") {
+				out[key] = "***"
+				continue
+			}
+			out[key] = redactDiagnosticValue(item)
+		}
+		return out
+	case []any:
+		limit := len(v)
+		if limit > 5 {
+			limit = 5
+		}
+		out := make([]any, 0, limit)
+		for i := 0; i < limit; i++ {
+			out = append(out, redactDiagnosticValue(v[i]))
+		}
+		return out
+	default:
+		return value
+	}
+}
+
+func truncateForDiagnostic(raw []byte, max int) string {
+	text := strings.TrimSpace(string(raw))
+	if max <= 0 || len(text) <= max {
+		return text
+	}
+	return text[:max] + "..."
+}
+
+func sampleNewAPIKeyItems(items []newAPIKeyItem, max int) []map[string]string {
+	if max > len(items) {
+		max = len(items)
+	}
+	out := make([]map[string]string, 0, max)
+	for i := 0; i < max; i++ {
+		out = append(out, map[string]string{
+			"name":  items[i].Name,
+			"group": items[i].Group,
+		})
+	}
+	return out
+}
+
+func sampleSub2APIKeyItems(items []findCGKeyItem, max int) []map[string]any {
+	if max > len(items) {
+		max = len(items)
+	}
+	out := make([]map[string]any, 0, max)
+	for i := 0; i < max; i++ {
+		item := map[string]any{"name": items[i].Name}
+		if items[i].Group != nil {
+			item["group_name"] = items[i].Group.Name
+			if items[i].Group.RateMultiplier != nil {
+				item["rate_multiplier"] = *items[i].Group.RateMultiplier
+			}
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func sampleNewAPIGroups(groups map[string]newAPIGroupInfo, max int) []map[string]any {
+	names := make([]string, 0, len(groups))
+	for name := range groups {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	if max > len(names) {
+		max = len(names)
+	}
+	out := make([]map[string]any, 0, max)
+	for i := 0; i < max; i++ {
+		name := names[i]
+		item := map[string]any{"name": name}
+		if groups[name].Ratio != nil {
+			item["ratio"] = *groups[name].Ratio
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func sampleParsedKeys(items []findCGKeyItem, max int) []upstreamProviderTestParsedKey {
+	out := make([]upstreamProviderTestParsedKey, 0, max)
+	for _, item := range items {
+		if len(out) >= max {
+			break
+		}
+		if item.Group == nil || item.Group.RateMultiplier == nil {
+			continue
+		}
+		out = append(out, upstreamProviderTestParsedKey{
+			Name:           item.Name,
+			GroupName:      item.Group.Name,
+			RateMultiplier: *item.Group.RateMultiplier,
+		})
+	}
+	return out
+}
+
 func (h *ModelSquareHandler) loginProvider(ctx context.Context, provider upstreamProviderRuntime) (cachedFindCGToken, error) {
+	token, _, _, err := h.loginProviderForTest(ctx, provider)
+	return token, err
+}
+
+func (h *ModelSquareHandler) loginProviderForTest(ctx context.Context, provider upstreamProviderRuntime) (cachedFindCGToken, []byte, int, error) {
 	body, err := json.Marshal(map[string]string{
 		"email":    provider.Email,
 		"password": provider.Password,
 	})
 	if err != nil {
-		return cachedFindCGToken{}, fmt.Errorf("marshal upstream provider login payload: %w", err)
+		return cachedFindCGToken{}, nil, 0, fmt.Errorf("marshal upstream provider login payload: %w", err)
 	}
 	loginURL := provider.LoginURL
 	if loginURL == "" {
@@ -1509,36 +1914,36 @@ func (h *ModelSquareHandler) loginProvider(ctx context.Context, provider upstrea
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, providerURL(provider, loginURL), bytes.NewReader(body))
 	if err != nil {
-		return cachedFindCGToken{}, fmt.Errorf("create upstream provider login request: %w", err)
+		return cachedFindCGToken{}, nil, 0, fmt.Errorf("create upstream provider login request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := h.httpClient.Do(req)
 	if err != nil {
-		return cachedFindCGToken{}, fmt.Errorf("upstream provider login request failed: %w", err)
+		return cachedFindCGToken{}, nil, 0, fmt.Errorf("upstream provider login request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return cachedFindCGToken{}, fmt.Errorf("read upstream provider login response: %w", err)
+		return cachedFindCGToken{}, nil, resp.StatusCode, fmt.Errorf("read upstream provider login response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return cachedFindCGToken{}, fmt.Errorf("upstream provider login failed: HTTP %d: %s", resp.StatusCode, string(raw))
+		return cachedFindCGToken{}, raw, resp.StatusCode, fmt.Errorf("upstream provider login failed: HTTP %d: %s", resp.StatusCode, string(raw))
 	}
 	var loginResp findCGLoginResponse
 	if err := json.Unmarshal(raw, &loginResp); err != nil {
-		return cachedFindCGToken{}, fmt.Errorf("decode upstream provider login response: %w", err)
+		return cachedFindCGToken{}, raw, resp.StatusCode, fmt.Errorf("decode upstream provider login response: %w", err)
 	}
 	if loginResp.Code != 0 || loginResp.Data.AccessToken == "" {
 		if loginResp.Message == "" {
 			loginResp.Message = "missing access_token"
 		}
-		return cachedFindCGToken{}, fmt.Errorf("upstream provider login failed: %s", loginResp.Message)
+		return cachedFindCGToken{}, raw, resp.StatusCode, fmt.Errorf("upstream provider login failed: %s", loginResp.Message)
 	}
 	tokenType := loginResp.Data.TokenType
 	if tokenType == "" {
 		tokenType = "Bearer"
 	}
-	return cachedFindCGToken{AccessToken: loginResp.Data.AccessToken, TokenType: tokenType}, nil
+	return cachedFindCGToken{AccessToken: loginResp.Data.AccessToken, TokenType: tokenType}, raw, resp.StatusCode, nil
 }
 
 func (h *ModelSquareHandler) requestProviderWithToken(ctx context.Context, provider upstreamProviderRuntime, token cachedFindCGToken, path, label string) ([]byte, int, error) {

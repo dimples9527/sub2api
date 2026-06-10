@@ -659,6 +659,39 @@ export interface UpstreamManagementProviderSetting {
   temp_disable_minutes?: number;
 }
 
+export interface UpstreamProviderTestStage {
+  ok: boolean;
+  status_code?: number;
+  user_id?: number;
+  cookie_present?: boolean;
+  item_count?: number;
+  group_count?: number;
+  sample?: unknown;
+  error?: string;
+}
+
+export interface UpstreamProviderTestParsedKey {
+  name: string;
+  group_name: string;
+  rate_multiplier: number;
+}
+
+export interface UpstreamProviderTestResult {
+  type: string;
+  slug: string;
+  name: string;
+  base_url: string;
+  login_url: string;
+  keys_url: string;
+  groups_url?: string;
+  account_name_prefix: string;
+  login: UpstreamProviderTestStage;
+  keys: UpstreamProviderTestStage;
+  groups?: UpstreamProviderTestStage;
+  parsed_keys: UpstreamProviderTestParsedKey[];
+  warnings?: string[];
+}
+
 export interface UpdateSettingsRequest {
   registration_enabled?: boolean;
   email_verify_enabled?: boolean;
@@ -1389,6 +1422,16 @@ export async function resetWebSearchUsage(payload: {
   );
 }
 
+export async function testUpstreamProvider(
+  provider: UpstreamManagementProviderSetting,
+): Promise<UpstreamProviderTestResult> {
+  const { data } = await apiClient.post<UpstreamProviderTestResult>(
+    "/admin/upstream-management/providers/test",
+    provider,
+  );
+  return data;
+}
+
 export const settingsAPI = {
   getSettings,
   updateSettings,
@@ -1416,6 +1459,7 @@ export const settingsAPI = {
   updateWebSearchEmulationConfig,
   testWebSearchEmulation,
   resetWebSearchUsage,
+  testUpstreamProvider,
 };
 
 export default settingsAPI;

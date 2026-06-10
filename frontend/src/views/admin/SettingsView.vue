@@ -1028,6 +1028,7 @@
                         {{ t("admin.settings.betaPolicy.errorMessageHint") }}
                       </p>
                     </div>
+
                   </div>
                 </div>
 
@@ -4954,6 +4955,14 @@
                       </div>
                       <button
                         type="button"
+                        class="btn btn-secondary btn-sm"
+                        :disabled="getUpstreamProviderTestState(index).loading"
+                        @click="testUpstreamProvider(index)"
+                      >
+                        {{ getUpstreamProviderTestState(index).loading ? "测试中..." : "测试接口" }}
+                      </button>
+                      <button
+                        type="button"
                         class="btn btn-danger btn-sm"
                         @click="removeUpstreamProvider(index)"
                       >
@@ -5091,6 +5100,95 @@
                           "
                           autocomplete="new-password"
                         />
+                      </div>
+                    </div>
+
+                    <div
+                      v-if="getUpstreamProviderTestState(index).error || getUpstreamProviderTestState(index).result"
+                      class="mt-4 rounded border border-gray-200 bg-gray-50 p-3 dark:border-dark-600 dark:bg-dark-800/50"
+                    >
+                      <div
+                        v-if="getUpstreamProviderTestState(index).error"
+                        class="text-sm text-red-600 dark:text-red-300"
+                      >
+                        {{ getUpstreamProviderTestState(index).error }}
+                      </div>
+                      <div v-else-if="getUpstreamProviderTestState(index).result" class="space-y-3">
+                        <div class="flex flex-wrap items-center gap-2 text-xs">
+                          <span
+                            v-for="stage in [
+                              { key: 'login', label: '登录', value: getUpstreamProviderTestState(index).result?.login },
+                              { key: 'keys', label: '密钥', value: getUpstreamProviderTestState(index).result?.keys },
+                              { key: 'groups', label: '分组', value: getUpstreamProviderTestState(index).result?.groups },
+                            ]"
+                            :key="stage.key"
+                            class="inline-flex items-center gap-1 rounded px-2 py-1"
+                            :class="upstreamProviderStageClass(stage.value)"
+                          >
+                            <span>{{ stage.label }}：{{ upstreamProviderStageLabel(stage.value) }}</span>
+                            <span v-if="upstreamProviderStageMeta(stage.value)" class="opacity-80">
+                              {{ upstreamProviderStageMeta(stage.value) }}
+                            </span>
+                          </span>
+                        </div>
+
+                        <div
+                          v-for="stage in [
+                            { key: 'login-detail', label: '登录响应', value: getUpstreamProviderTestState(index).result?.login },
+                            { key: 'keys-detail', label: '密钥响应', value: getUpstreamProviderTestState(index).result?.keys },
+                            { key: 'groups-detail', label: '分组响应', value: getUpstreamProviderTestState(index).result?.groups },
+                          ]"
+                          :key="stage.key"
+                          class="text-xs"
+                        >
+                          <div class="font-medium text-gray-700 dark:text-gray-200">
+                            {{ stage.label }}
+                            <span v-if="stage.value?.error" class="ml-2 text-red-600 dark:text-red-300">
+                              {{ stage.value.error }}
+                            </span>
+                          </div>
+                          <pre
+                            v-if="stage.value?.sample"
+                            class="mt-1 max-h-40 overflow-auto rounded bg-white p-2 font-mono text-[11px] leading-4 text-gray-700 dark:bg-dark-900 dark:text-gray-200"
+                          >{{ formatUpstreamProviderSample(stage.value.sample) }}</pre>
+                        </div>
+
+                        <div
+                          v-if="getUpstreamProviderTestState(index).result?.parsed_keys?.length"
+                          class="overflow-auto"
+                        >
+                          <table class="min-w-full text-left text-xs">
+                            <thead class="text-gray-500 dark:text-gray-400">
+                              <tr>
+                                <th class="py-1 pr-3 font-medium">密钥名</th>
+                                <th class="py-1 pr-3 font-medium">上游分组</th>
+                                <th class="py-1 pr-3 font-medium">倍率</th>
+                              </tr>
+                            </thead>
+                            <tbody class="text-gray-700 dark:text-gray-200">
+                              <tr
+                                v-for="item in getUpstreamProviderTestState(index).result?.parsed_keys"
+                                :key="`${item.name}-${item.group_name}`"
+                              >
+                                <td class="py-1 pr-3 font-mono">{{ item.name }}</td>
+                                <td class="py-1 pr-3">{{ item.group_name }}</td>
+                                <td class="py-1 pr-3 font-mono">{{ item.rate_multiplier }}</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div
+                          v-if="getUpstreamProviderTestState(index).result?.warnings?.length"
+                          class="space-y-1 text-xs text-amber-700 dark:text-amber-200"
+                        >
+                          <div
+                            v-for="warning in getUpstreamProviderTestState(index).result?.warnings"
+                            :key="warning"
+                          >
+                            {{ warning }}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -7078,6 +7176,8 @@ import type {
   WebSearchProviderConfig,
   WebSearchTestResult,
   UpstreamManagementProviderSetting,
+  UpstreamProviderTestResult,
+  UpstreamProviderTestStage,
 } from "@/api/admin/settings";
 import type {
   AdminGroup,
@@ -7229,6 +7329,16 @@ const adminApiKeyMasked = ref("");
 const adminApiKeyOperating = ref(false);
 const newAdminApiKey = ref("");
 const subscriptionGroups = ref<AdminGroup[]>([]);
+const upstreamProviderTestStates = reactive<
+  Record<
+    number,
+    {
+      loading: boolean;
+      result: UpstreamProviderTestResult | null;
+      error: string;
+    }
+  >
+>({});
 
 // Overload Cooldown (529) 状态
 const overloadCooldownLoading = ref(true);
@@ -8219,33 +8329,37 @@ function normalizeUpstreamProviders(
   }));
 }
 
+function buildUpstreamProviderPayload(
+  provider: UpstreamManagementProviderSetting,
+): UpstreamManagementProviderSetting {
+  const payload: UpstreamManagementProviderSetting = {
+    type: provider.type === "newapi" ? "newapi" : "sub2api",
+    slug: provider.slug.trim(),
+    name: provider.name.trim(),
+    enabled: provider.enabled !== false,
+    base_url: provider.base_url.trim(),
+    login_url: provider.login_url.trim(),
+    api_keys_url: provider.api_keys_url.trim(),
+    groups_url: provider.groups_url.trim(),
+    email: provider.email.trim(),
+    username: provider.username.trim(),
+    account_name_prefix: provider.account_name_prefix.trim(),
+  };
+  if (provider.password?.trim()) {
+    payload.password = provider.password.trim();
+  }
+  if (provider.password_configured) {
+    payload.password_configured = true;
+  }
+  if (provider.temp_disable_minutes !== undefined) {
+    payload.temp_disable_minutes = provider.temp_disable_minutes;
+  }
+  return payload;
+}
+
 function buildUpstreamProvidersPayload(): UpstreamManagementProviderSetting[] {
   return form.upstream_management_providers
-    .map((provider) => {
-      const payload: UpstreamManagementProviderSetting = {
-        type: provider.type === "newapi" ? "newapi" : "sub2api",
-        slug: provider.slug.trim(),
-        name: provider.name.trim(),
-        enabled: provider.enabled !== false,
-        base_url: provider.base_url.trim(),
-        login_url: provider.login_url.trim(),
-        api_keys_url: provider.api_keys_url.trim(),
-        groups_url: provider.groups_url.trim(),
-        email: provider.email.trim(),
-        username: provider.username.trim(),
-        account_name_prefix: provider.account_name_prefix.trim(),
-      };
-      if (provider.password?.trim()) {
-        payload.password = provider.password.trim();
-      }
-      if (provider.password_configured) {
-        payload.password_configured = true;
-      }
-      if (provider.temp_disable_minutes !== undefined) {
-        payload.temp_disable_minutes = provider.temp_disable_minutes;
-      }
-      return payload;
-    })
+    .map((provider) => buildUpstreamProviderPayload(provider))
     .filter((provider) => provider.slug || provider.name || provider.base_url || provider.api_keys_url || provider.groups_url || provider.username);
 }
 
@@ -8269,6 +8383,68 @@ function addUpstreamProvider() {
 
 function removeUpstreamProvider(index: number) {
   form.upstream_management_providers.splice(index, 1);
+  delete upstreamProviderTestStates[index];
+}
+
+function getUpstreamProviderTestState(index: number) {
+  if (!upstreamProviderTestStates[index]) {
+    upstreamProviderTestStates[index] = {
+      loading: false,
+      result: null,
+      error: "",
+    };
+  }
+  return upstreamProviderTestStates[index];
+}
+
+async function testUpstreamProvider(index: number) {
+  const provider = form.upstream_management_providers[index];
+  if (!provider) return;
+  const state = getUpstreamProviderTestState(index);
+  state.loading = true;
+  state.error = "";
+  state.result = null;
+  try {
+    state.result = await adminAPI.settings.testUpstreamProvider(
+      buildUpstreamProviderPayload(provider),
+    );
+  } catch (error) {
+    state.error = extractApiErrorMessage(error, "测试上游接口失败");
+  } finally {
+    state.loading = false;
+  }
+}
+
+function upstreamProviderStageLabel(stage: UpstreamProviderTestStage | undefined): string {
+  if (!stage) return "未执行";
+  if (stage.error) return "异常";
+  return stage.ok ? "正常" : "未通过";
+}
+
+function upstreamProviderStageClass(stage: UpstreamProviderTestStage | undefined): string {
+  if (!stage) return "bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300";
+  if (stage.error || !stage.ok) return "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-200";
+  return "bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-200";
+}
+
+function upstreamProviderStageMeta(stage: UpstreamProviderTestStage | undefined): string {
+  if (!stage) return "";
+  const parts: string[] = [];
+  if (stage.status_code) parts.push(`HTTP ${stage.status_code}`);
+  if (stage.user_id) parts.push(`User ${stage.user_id}`);
+  if (stage.cookie_present !== undefined) parts.push(stage.cookie_present ? "Cookie 已获取" : "Cookie 缺失");
+  if (stage.item_count !== undefined) parts.push(`密钥 ${stage.item_count}`);
+  if (stage.group_count !== undefined) parts.push(`分组 ${stage.group_count}`);
+  return parts.join(" · ");
+}
+
+function formatUpstreamProviderSample(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 async function loadSettings() {

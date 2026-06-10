@@ -108,6 +108,7 @@ func registerUpstreamManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 	admin.GET("/upstream-management/key-summary", h.Admin.ModelSquare.KeySummary)
 	admin.GET("/upstream-management/rate-warnings", h.Admin.ModelSquare.RateWarnings)
 	admin.POST("/upstream-management/sync", h.Admin.ModelSquare.SyncKeys)
+	admin.POST("/upstream-management/providers/test", h.Admin.ModelSquare.TestUpstreamProvider)
 	admin.POST("/upstream-management/account-rate-guard/run", h.Admin.ModelSquare.RunAccountRateGuard)
 	admin.GET("/upstream-management/account-rate-guard/status", h.Admin.ModelSquare.GetAccountRateGuardStatus)
 	admin.GET("/upstream-management/account-rate-guard/audits", h.Admin.ModelSquare.ListAccountRateGuardAudits)
