@@ -98,6 +98,9 @@ func RegisterAdminRoutes(
 		// 渠道监控
 		registerChannelMonitorRoutes(admin, h)
 
+		// 上游管理
+		registerUpstreamManagementRoutes(admin, h)
+
 		// 风控中心
 		registerContentModerationRoutes(admin, h)
 

@@ -1,0 +1,304 @@
+package service
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strconv"
+)
+
+type NewAPIProviderAdapter struct {
+	httpClient *http.Client
+}
+
+type newAPIProviderSession struct {
+	UserID       int64
+	CookieHeader string
+}
+
+func NewNewAPIProviderAdapter(httpClient *http.Client) *NewAPIProviderAdapter {
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	return &NewAPIProviderAdapter{httpClient: httpClient}
+}
+
+func (a *NewAPIProviderAdapter) FetchKeys(ctx context.Context, provider UpstreamProviderConfig) ([]UpstreamProviderKey, []string, error) {
+	session, _, _, err := a.login(ctx, provider)
+	if err != nil {
+		return nil, nil, err
+	}
+	keysPayload, status, err := a.request(ctx, provider, session, provider.APIKeysURL, "newapi provider keys")
+	if err != nil {
+		return nil, nil, err
+	}
+	if status < 200 || status >= 300 {
+		return nil, nil, upstreamProviderHTTPError("newapi provider keys", status, keysPayload)
+	}
+	groupsPayload, status, err := a.request(ctx, provider, session, provider.GroupsURL, "newapi provider groups")
+	if err != nil {
+		return nil, nil, err
+	}
+	if status < 200 || status >= 300 {
+		return nil, nil, upstreamProviderHTTPError("newapi provider groups", status, groupsPayload)
+	}
+	return parseNewAPIProviderKeys(provider, keysPayload, groupsPayload)
+}
+
+func (a *NewAPIProviderAdapter) Test(ctx context.Context, provider UpstreamProviderConfig) UpstreamProviderTestResult {
+	result := newUpstreamProviderTestResult(provider)
+	groupStage := UpstreamProviderTestStage{}
+	result.Groups = &groupStage
+
+	session, _, status, err := a.login(ctx, provider)
+	result.Login.StatusCode = status
+	if err != nil {
+		result.Login.Error = err.Error()
+		return result
+	}
+	result.Login.OK = true
+	result.Login.UserID = session.UserID
+	result.Login.CookiePresent = session.CookieHeader != ""
+
+	keysPayload, status, err := a.request(ctx, provider, session, provider.APIKeysURL, "newapi provider keys")
+	result.Keys.StatusCode = status
+	if err != nil {
+		result.Keys.Error = err.Error()
+		return result
+	}
+	if status < 200 || status >= 300 {
+		result.Keys.Error = upstreamProviderHTTPError("newapi provider keys", status, keysPayload).Error()
+		return result
+	}
+	keyCount, err := countNewAPIProviderKeys(keysPayload)
+	if err != nil {
+		result.Keys.Error = err.Error()
+		return result
+	}
+	result.Keys.OK = true
+	result.Keys.ItemCount = keyCount
+
+	groupsPayload, status, err := a.request(ctx, provider, session, provider.GroupsURL, "newapi provider groups")
+	result.Groups.StatusCode = status
+	if err != nil {
+		result.Groups.Error = err.Error()
+		return result
+	}
+	if status < 200 || status >= 300 {
+		result.Groups.Error = upstreamProviderHTTPError("newapi provider groups", status, groupsPayload).Error()
+		return result
+	}
+	groupCount, err := countNewAPIProviderGroups(groupsPayload)
+	if err != nil {
+		result.Groups.Error = err.Error()
+		return result
+	}
+	result.Groups.OK = true
+	result.Groups.GroupCount = groupCount
+
+	keys, warnings, err := parseNewAPIProviderKeys(provider, keysPayload, groupsPayload)
+	if err != nil {
+		result.Warnings = append(result.Warnings, err.Error())
+		return result
+	}
+	result.ParsedKeys = limitUpstreamProviderKeys(keys, 20)
+	result.Warnings = append(result.Warnings, warnings...)
+	return result
+}
+
+func (a *NewAPIProviderAdapter) login(ctx context.Context, provider UpstreamProviderConfig) (newAPIProviderSession, []byte, int, error) {
+	username := provider.Username
+	if username == "" {
+		username = provider.Email
+	}
+	body, err := json.Marshal(map[string]string{
+		"username": username,
+		"password": provider.Password,
+	})
+	if err != nil {
+		return newAPIProviderSession{}, nil, 0, fmt.Errorf("marshal newapi login payload: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamProviderURL(provider, provider.LoginURL), bytes.NewReader(body))
+	if err != nil {
+		return newAPIProviderSession{}, nil, 0, fmt.Errorf("create newapi login request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return newAPIProviderSession{}, nil, 0, fmt.Errorf("newapi login request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return newAPIProviderSession{}, nil, resp.StatusCode, fmt.Errorf("read newapi login response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return newAPIProviderSession{}, raw, resp.StatusCode, upstreamProviderHTTPError("newapi login", resp.StatusCode, raw)
+	}
+	var parsed struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return newAPIProviderSession{}, raw, resp.StatusCode, fmt.Errorf("decode newapi login response: %w", err)
+	}
+	if !parsed.Success {
+		if parsed.Message == "" {
+			parsed.Message = "unknown error"
+		}
+		return newAPIProviderSession{}, raw, resp.StatusCode, fmt.Errorf("newapi login failed: %s", parsed.Message)
+	}
+	if parsed.Data.ID <= 0 {
+		return newAPIProviderSession{}, raw, resp.StatusCode, fmt.Errorf("newapi login failed: missing user id")
+	}
+	cookieHeader := upstreamProviderCookiesHeader(resp.Cookies())
+	if cookieHeader == "" {
+		return newAPIProviderSession{}, raw, resp.StatusCode, fmt.Errorf("newapi login failed: missing cookie")
+	}
+	return newAPIProviderSession{UserID: parsed.Data.ID, CookieHeader: cookieHeader}, raw, resp.StatusCode, nil
+}
+
+func (a *NewAPIProviderAdapter) request(ctx context.Context, provider UpstreamProviderConfig, session newAPIProviderSession, path, label string) ([]byte, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstreamProviderURL(provider, path), nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("create %s request: %w", label, err)
+	}
+	req.Header.Set("New-Api-User", strconv.FormatInt(session.UserID, 10))
+	if session.CookieHeader != "" {
+		req.Header.Set("Cookie", session.CookieHeader)
+	}
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("%s request failed: %w", label, err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read %s response: %w", label, err)
+	}
+	return raw, resp.StatusCode, nil
+}
+
+func parseNewAPIProviderKeys(provider UpstreamProviderConfig, keysPayload, groupsPayload []byte) ([]UpstreamProviderKey, []string, error) {
+	var keysResp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			Items []struct {
+				Name   string `json:"name"`
+				Group  string `json:"group"`
+				Status any    `json:"status"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(keysPayload, &keysResp); err != nil {
+		return nil, nil, fmt.Errorf("decode newapi provider keys response: %w", err)
+	}
+	if !keysResp.Success {
+		if keysResp.Message == "" {
+			keysResp.Message = "unknown error"
+		}
+		return nil, nil, fmt.Errorf("newapi provider keys failed: %s", keysResp.Message)
+	}
+	var groupsResp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    map[string]struct {
+			Ratio *float64 `json:"ratio"`
+			ID    any      `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(groupsPayload, &groupsResp); err != nil {
+		return nil, nil, fmt.Errorf("decode newapi provider groups response: %w", err)
+	}
+	if !groupsResp.Success {
+		if groupsResp.Message == "" {
+			groupsResp.Message = "unknown error"
+		}
+		return nil, nil, fmt.Errorf("newapi provider groups failed: %s", groupsResp.Message)
+	}
+	type groupInfo struct {
+		name  string
+		ratio float64
+		id    string
+	}
+	ratioByGroup := make(map[string]groupInfo, len(groupsResp.Data)*2)
+	for name, group := range groupsResp.Data {
+		if group.Ratio == nil || *group.Ratio < 0 {
+			continue
+		}
+		info := groupInfo{name: name, ratio: *group.Ratio, id: fmt.Sprint(group.ID)}
+		ratioByGroup[name] = info
+		ratioByGroup[normalizeUpstreamProviderGroupName(name)] = info
+	}
+	keys := make([]UpstreamProviderKey, 0, len(keysResp.Data.Items))
+	warnings := []string{}
+	for _, item := range keysResp.Data.Items {
+		if item.Name == "" || item.Group == "" {
+			continue
+		}
+		info, ok := ratioByGroup[item.Group]
+		if !ok {
+			info, ok = ratioByGroup[normalizeUpstreamProviderGroupName(item.Group)]
+		}
+		if !ok {
+			warnings = append(warnings, fmt.Sprintf("newapi key %s group %s has no matching group ratio", item.Name, item.Group))
+			continue
+		}
+		keys = append(keys, UpstreamProviderKey{
+			ProviderSlug:   provider.Slug,
+			ProviderName:   provider.Name,
+			ProviderType:   provider.Type,
+			KeyName:        item.Name,
+			GroupName:      item.Group,
+			RateMultiplier: info.ratio,
+			RawStatus:      fmt.Sprint(item.Status),
+			RawGroupID:     info.id,
+		})
+	}
+	return keys, warnings, nil
+}
+
+func countNewAPIProviderKeys(payload []byte) (int, error) {
+	var resp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			Items []json.RawMessage `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(payload, &resp); err != nil {
+		return 0, fmt.Errorf("decode newapi provider keys response: %w", err)
+	}
+	if !resp.Success {
+		if resp.Message == "" {
+			resp.Message = "unknown error"
+		}
+		return 0, fmt.Errorf("newapi provider keys failed: %s", resp.Message)
+	}
+	return len(resp.Data.Items), nil
+}
+
+func countNewAPIProviderGroups(payload []byte) (int, error) {
+	var resp struct {
+		Success bool                       `json:"success"`
+		Message string                     `json:"message"`
+		Data    map[string]json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(payload, &resp); err != nil {
+		return 0, fmt.Errorf("decode newapi provider groups response: %w", err)
+	}
+	if !resp.Success {
+		if resp.Message == "" {
+			resp.Message = "unknown error"
+		}
+		return 0, fmt.Errorf("newapi provider groups failed: %s", resp.Message)
+	}
+	return len(resp.Data), nil
+}
