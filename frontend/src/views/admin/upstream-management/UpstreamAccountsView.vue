@@ -29,6 +29,10 @@
               <span>{{ t('admin.upstreamAccounts.rateRisks') }}</span>
               <strong>{{ summary.rate_violation_count }}</strong>
             </div>
+            <div class="summary-pill">
+              <span>{{ t('admin.upstreamAccounts.filteredCount') }}</span>
+              <strong>{{ filteredItems.length }}</strong>
+            </div>
           </div>
 
           <div class="flex flex-wrap items-center justify-end gap-2">
@@ -52,6 +56,29 @@
             </button>
           </div>
         </div>
+        <div class="mt-3 flex flex-wrap items-center gap-3">
+          <input
+            v-model.trim="searchQuery"
+            type="search"
+            class="input w-full sm:w-64"
+            :placeholder="t('admin.upstreamAccounts.searchPlaceholder')"
+          />
+          <Select
+            v-model="providerFilter"
+            class="w-48"
+            :options="providerOptions"
+          />
+          <Select
+            v-model="sourceFilter"
+            class="w-44"
+            :options="sourceOptions"
+          />
+          <Select
+            v-model="actionFilter"
+            class="w-44"
+            :options="actionOptions"
+          />
+        </div>
       </template>
 
       <template #table>
@@ -59,7 +86,14 @@
           <div v-for="warning in warnings" :key="warning">{{ warning }}</div>
         </div>
 
-        <DataTable :columns="columns" :data="items" :loading="loading">
+        <DataTable :columns="columns" :data="filteredItems" :loading="loading">
+          <template #cell-source="{ row }">
+            <div class="flex min-w-[11rem] flex-col gap-1">
+              <span class="font-medium text-gray-900 dark:text-white">{{ row.provider_name || row.provider_slug }}</span>
+              <code class="text-xs text-gray-500 dark:text-gray-400">{{ row.provider_slug }}</code>
+            </div>
+          </template>
+
           <template #cell-upstream_key_name="{ row }">
             <div class="flex min-w-[14rem] flex-col gap-1">
               <span class="font-medium text-gray-900 dark:text-white">{{ row.upstream_key_name }}</span>
@@ -166,6 +200,7 @@ import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime } from '@/utils/format'
 import type { Column } from '@/components/common/types'
+import Select, { type SelectOption } from '@/components/common/Select.vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
@@ -179,8 +214,13 @@ const result = ref<UpstreamAccountSyncResult | null>(null)
 const loading = ref(false)
 const syncing = ref(false)
 const loadError = ref('')
+const searchQuery = ref('')
+const providerFilter = ref('')
+const sourceFilter = ref('')
+const actionFilter = ref('')
 
 const columns = computed<Column[]>(() => [
+  { key: 'source', label: t('admin.upstreamAccounts.columns.source') },
   { key: 'upstream_key_name', label: t('admin.upstreamAccounts.columns.upstreamKey') },
   { key: 'upstream_rate_multiplier', label: t('admin.upstreamAccounts.columns.upstreamRate') },
   { key: 'local_account_name', label: t('admin.upstreamAccounts.columns.localAccount') },
@@ -204,6 +244,54 @@ const items = computed<UpstreamAccountSyncItem[]>(() => result.value?.items || [
 const warnings = computed(() => result.value?.warnings || [])
 const records = computed<UpstreamAccountSyncRecord[]>(() => result.value?.records || [])
 const canSync = computed(() => summary.value.create_count > 0 || summary.value.update_count > 0 || summary.value.rate_violation_count > 0)
+const providerOptions = computed<SelectOption[]>(() => [
+  { value: '', label: t('admin.upstreamAccounts.allProviders') },
+  ...Array.from(new Map(items.value.map(item => [
+    item.provider_slug,
+    {
+      value: item.provider_slug,
+      label: item.provider_name ? `${item.provider_name} (${item.provider_slug})` : item.provider_slug
+    }
+  ])).values())
+])
+const sourceOptions = computed<SelectOption[]>(() => [
+  { value: '', label: t('admin.upstreamAccounts.allSources') },
+  { value: 'synced', label: t('admin.upstreamAccounts.sourceSynced') },
+  { value: 'unsynced', label: t('admin.upstreamAccounts.sourceUnsynced') }
+])
+const actionOptions = computed<SelectOption[]>(() => [
+  { value: '', label: t('admin.upstreamAccounts.allActions') },
+  { value: 'create', label: t('admin.upstreamAccounts.actions.create') },
+  { value: 'update', label: t('admin.upstreamAccounts.actions.update') },
+  { value: 'noop', label: t('admin.upstreamAccounts.actions.noop') },
+  { value: 'skip', label: t('admin.upstreamAccounts.actions.skip') },
+  { value: 'conflict', label: t('admin.upstreamAccounts.actions.conflict') },
+  { value: 'rate_risk', label: t('admin.upstreamAccounts.rateRisks') }
+])
+const filteredItems = computed(() => {
+  const keyword = searchQuery.value.trim().toLowerCase()
+  return items.value.filter((item) => {
+    if (providerFilter.value && item.provider_slug !== providerFilter.value) return false
+    if (sourceFilter.value === 'synced' && !item.matched_account_id) return false
+    if (sourceFilter.value === 'unsynced' && item.matched_account_id) return false
+    if (actionFilter.value === 'rate_risk') {
+      if (!item.rate_violation) return false
+    } else if (actionFilter.value && item.action !== actionFilter.value) {
+      return false
+    }
+    if (!keyword) return true
+    const haystack = [
+      item.provider_name,
+      item.provider_slug,
+      item.upstream_key_name,
+      item.upstream_group_name,
+      item.local_account_name,
+      item.matched_account_name,
+      item.local_group_name
+    ].filter(Boolean).join(' ').toLowerCase()
+    return haystack.includes(keyword)
+  })
+})
 
 const emptyTitle = computed(() => {
   return loadError.value ? t('admin.upstreamAccounts.emptyNoDefaultTitle') : t('admin.upstreamAccounts.emptyTitle')
