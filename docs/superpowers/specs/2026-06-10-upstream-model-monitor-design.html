@@ -1,0 +1,718 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>上游管理、模型广场、LLM 监控与充值配置详细设计</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --paper: #ffffff;
+      --ink: #172033;
+      --muted: #5f6b7a;
+      --line: #d9e0ea;
+      --soft: #eef3f8;
+      --accent: #0f766e;
+      --accent-soft: #e5f5f2;
+      --warn: #a16207;
+      --code: #243044;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      line-height: 1.72;
+    }
+
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 40px 22px 72px;
+    }
+
+    article {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 18px 50px rgba(21, 31, 46, 0.08);
+      overflow: hidden;
+    }
+
+    header {
+      padding: 34px 42px 28px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #ffffff, #f9fbfd);
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 30px;
+      line-height: 1.28;
+      letter-spacing: 0;
+    }
+
+    .summary {
+      margin: 14px 0 0;
+      max-width: 850px;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    section {
+      padding: 28px 42px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    section:last-child {
+      border-bottom: 0;
+    }
+
+    h2 {
+      margin: 0 0 16px;
+      font-size: 21px;
+      line-height: 1.35;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 22px 0 10px;
+      font-size: 16px;
+      line-height: 1.4;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 12px;
+    }
+
+    ul,
+    ol {
+      margin: 8px 0 16px 22px;
+      padding: 0;
+    }
+
+    li {
+      margin: 5px 0;
+    }
+
+    code {
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: var(--soft);
+      color: var(--code);
+      font-family: Consolas, "SFMono-Regular", Menlo, monospace;
+      font-size: 0.92em;
+    }
+
+    pre {
+      margin: 12px 0 18px;
+      padding: 14px 16px;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #111827;
+      color: #e5e7eb;
+      font-family: Consolas, "SFMono-Regular", Menlo, monospace;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    pre code {
+      padding: 0;
+      background: transparent;
+      color: inherit;
+      font-size: inherit;
+    }
+
+    table {
+      width: 100%;
+      margin: 12px 0 18px;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--soft);
+      font-weight: 700;
+    }
+
+    .note {
+      margin: 12px 0 18px;
+      padding: 12px 14px;
+      border: 1px solid #b7e3dc;
+      border-radius: 6px;
+      background: var(--accent-soft);
+      color: #12443f;
+    }
+
+    .warning {
+      margin: 12px 0 18px;
+      padding: 12px 14px;
+      border: 1px solid #fde68a;
+      border-radius: 6px;
+      background: #fffbeb;
+      color: var(--warn);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin: 12px 0 18px;
+    }
+
+    .card {
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fbfcfe;
+    }
+
+    .card h3 {
+      margin-top: 0;
+    }
+
+    @media (max-width: 760px) {
+      main {
+        padding: 18px 10px 40px;
+      }
+
+      header,
+      section {
+        padding-left: 18px;
+        padding-right: 18px;
+      }
+
+      h1 {
+        font-size: 24px;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <article>
+    <header>
+      <p class="eyebrow">Detailed Design · 2026-06-10</p>
+      <h1>上游管理、模型广场、LLM 监控与充值配置详细设计</h1>
+      <p class="summary">
+        本文档用于重新开发相关功能，范围限定为上游管理/模型广场、LLM 监控、充值金额可配置、账号倍率守护、帮助文档。
+        设计目标是把现有功能重新拆成边界清晰、配置可控、可测试、可迭代的模块。
+      </p>
+    </header>
+
+    <section>
+      <h2>1. 背景与目标</h2>
+      <p>
+        当前分支已经实现过一轮相关功能，但存在几个重新开发时需要规避的问题：后端模型广场 handler 承载了过多职责，前端管理页面较重，配置项存在新旧命名兼容，部分功能和展示逻辑耦合较深。
+        新设计不直接复刻文件结构，而是保留业务能力，重新划分模块边界。
+      </p>
+      <div class="grid">
+        <div class="card">
+          <h3>核心目标</h3>
+          <ul>
+            <li>管理员可以配置多个上游管理源。</li>
+            <li>系统可以拉取上游模型、分组、API Key 摘要。</li>
+            <li>用户可以查看模型广场中的可用模型和价格信息。</li>
+            <li>管理员可以查看上游分组和本地分组匹配关系。</li>
+            <li>LLM 监控数据通过后端代理、过滤、脱敏后展示。</li>
+            <li>充值金额档位和首充优惠可配置。</li>
+            <li>账号倍率守护可以发现并处理成本倒挂风险。</li>
+            <li>帮助文档作为独立静态文档在用户侧展示。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>非目标</h3>
+          <ul>
+            <li>第一版不做帮助文档后台 CMS 编辑。</li>
+            <li>第一版不做复杂上游账号和本地账号的手动映射系统。</li>
+            <li>第一版不把 LLM 监控大屏重写成完整 Vue 应用。</li>
+            <li>第一版不改变现有支付订单核心流程，只扩展档位和到账金额计算。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>2. 总体架构</h2>
+      <p>
+        后端按配置、客户端、业务服务、HTTP handler 分层。handler 只负责鉴权后的请求解析和响应封装，复杂逻辑放入 service。不同上游系统通过 provider client 接口适配。
+        前端按 API 类型、页面容器、业务组件、纯工具函数拆分，避免把所有交互堆在单个视图文件。
+      </p>
+      <pre><code>Frontend
+  ├─ ModelSquareView
+  ├─ UpstreamGroupsView
+  ├─ PaymentView
+  ├─ HelpView
+  └─ API clients
+
+Backend
+  ├─ SettingService / PaymentConfigService
+  ├─ UpstreamManagementService
+  ├─ UpstreamProviderClient implementations
+  ├─ LLMMonitorService
+  ├─ RechargeOptionService
+  ├─ AccountRateGuardService
+  └─ HTTP handlers / routes</code></pre>
+      <p>
+        配置来源采用“数据库 settings 优先，config.yaml 作为默认值”的规则。敏感字段只允许写入，不在读取接口中返回明文。
+      </p>
+    </section>
+
+    <section>
+      <h2>3. 上游管理 / 模型广场</h2>
+
+      <h3>3.1 功能说明</h3>
+      <p>
+        上游管理负责连接外部模型平台或上游 sub2api/new-api 实例，拉取模型、分组、key 信息，并把这些信息和本地分组关联。
+        模型广场是用户侧展示层，展示可用模型、价格、模式、所属分组、倍率等信息。
+      </p>
+
+      <h3>3.2 后端模块</h3>
+      <table>
+        <thead>
+        <tr>
+          <th>模块</th>
+          <th>职责</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+          <td><code>UpstreamManagementService</code></td>
+          <td>业务入口，聚合 provider 配置、上游客户端、本地分组，输出模型广场和管理页所需数据。</td>
+        </tr>
+        <tr>
+          <td><code>UpstreamProviderClient</code></td>
+          <td>接口，定义 <code>FetchModels</code>、<code>FetchGroups</code>、<code>FetchKeys</code>、<code>Test</code>。</td>
+        </tr>
+        <tr>
+          <td><code>Sub2APIProviderClient</code></td>
+          <td>适配 sub2api 风格上游。</td>
+        </tr>
+        <tr>
+          <td><code>NewAPIProviderClient</code></td>
+          <td>适配 new-api 风格上游。</td>
+        </tr>
+        <tr>
+          <td><code>UpstreamConfigService</code></td>
+          <td>读取和规范化 provider 配置，处理密码保留、默认值、启停状态。</td>
+        </tr>
+        <tr>
+          <td><code>UpstreamManagementHandler</code></td>
+          <td>注册 HTTP API，调用 service 并返回标准响应。</td>
+        </tr>
+        </tbody>
+      </table>
+
+      <h3>3.3 数据模型</h3>
+      <pre><code>{
+  "id": "primary",
+  "name": "Primary Upstream",
+  "type": "sub2api",
+  "enabled": true,
+  "base_url": "https://upstream.example.com",
+  "login_url": "/api/user/login",
+  "models_url": "/api/channel/models",
+  "groups_url": "/api/groups",
+  "keys_url": "/api/tokens",
+  "email": "admin@example.com",
+  "password_configured": true,
+  "sort_order": 10
+}</code></pre>
+
+      <h3>3.4 API 设计</h3>
+      <table>
+        <thead>
+        <tr>
+          <th>接口</th>
+          <th>说明</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+          <td><code>GET /api/v1/admin/upstream-management/providers</code></td>
+          <td>读取 provider 配置，不返回密码明文。</td>
+        </tr>
+        <tr>
+          <td><code>POST /api/v1/admin/upstream-management/providers/test</code></td>
+          <td>用表单中的 provider 配置测试登录、模型、分组、key 接口。</td>
+        </tr>
+        <tr>
+          <td><code>GET /api/v1/admin/upstream-management/models</code></td>
+          <td>管理员查看上游模型原始聚合结果。</td>
+        </tr>
+        <tr>
+          <td><code>GET /api/v1/admin/upstream-management/groups</code></td>
+          <td>管理员查看上游分组和本地分组匹配结果。</td>
+        </tr>
+        <tr>
+          <td><code>GET /api/v1/admin/upstream-management/key-summary</code></td>
+          <td>按上游分组汇总 key 数量和 key 名称。</td>
+        </tr>
+        <tr>
+          <td><code>POST /api/v1/admin/upstream-management/sync-rates</code></td>
+          <td>把上游更高的分组倍率同步到本地分组。</td>
+        </tr>
+        <tr>
+          <td><code>GET /api/v1/model-square</code></td>
+          <td>用户侧模型广场数据，只返回用户需要的信息。</td>
+        </tr>
+        </tbody>
+      </table>
+
+      <h3>3.5 匹配规则</h3>
+      <ul>
+        <li>分组匹配默认按名称规范化后匹配：去空格、转小写、折叠连续空白。</li>
+        <li>上游分组未匹配本地分组时仍展示，但标记为 <code>unmatched</code>。</li>
+        <li>同一个本地分组匹配多个上游分组时，倍率同步使用最高上游倍率。</li>
+        <li>倍率同步只允许调高本地倍率，不自动调低。</li>
+      </ul>
+
+      <h3>3.6 前端页面</h3>
+      <ul>
+        <li><code>ModelSquareView</code>：用户侧模型列表，支持搜索、按分组过滤、按 provider 过滤、复制模型 ID。</li>
+        <li><code>UpstreamGroupsView</code>：管理员页面，支持搜索、平台过滤、匹配状态过滤、key 摘要弹窗、倍率同步、监控趋势摘要。</li>
+        <li><code>SettingsView</code>：只保留 provider 配置表单和测试按钮。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>4. LLM 监控</h2>
+
+      <h3>4.1 功能说明</h3>
+      <p>
+        LLM 监控用于接入外部状态 API，后端代理请求，按本地分组过滤 provider，移除敏感字段后返回给前端。
+        管理页只展示与上游分组相关的简要趋势，完整展示继续使用独立静态页。
+      </p>
+
+      <h3>4.2 后端模块</h3>
+      <table>
+        <thead>
+        <tr>
+          <th>模块</th>
+          <th>职责</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+          <td><code>LLMMonitorService</code></td>
+          <td>代理、过滤、脱敏、错误映射。</td>
+        </tr>
+        <tr>
+          <td><code>LLMMonitorClient</code></td>
+          <td>访问外部 status API，处理超时和请求参数。</td>
+        </tr>
+        <tr>
+          <td><code>LLMMonitorFilter</code></td>
+          <td>根据本地分组生成允许 provider 集合，过滤 groups 和 meta IDs。</td>
+        </tr>
+        </tbody>
+      </table>
+
+      <h3>4.3 API 设计</h3>
+      <table>
+        <thead>
+        <tr>
+          <th>接口</th>
+          <th>说明</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+          <td><code>GET /api/llm-monitor/status?period=90m&amp;board=hot</code></td>
+          <td>公开或半公开监控代理，返回过滤后的上游状态数据。</td>
+        </tr>
+        <tr>
+          <td><code>GET /api/llm-monitor/groups</code></td>
+          <td>返回可展示的监控分组元信息。</td>
+        </tr>
+        <tr>
+          <td><code>GET /api/v1/admin/upstream-management/monitor-status</code></td>
+          <td>管理侧使用，标准 API 响应结构。</td>
+        </tr>
+        </tbody>
+      </table>
+
+      <h3>4.4 规则</h3>
+      <ul>
+        <li>默认 <code>period=90m</code>，默认 <code>board=hot</code>。</li>
+        <li>监控上游 URL 必须是 http/https 绝对 URL，不能包含 fragment。</li>
+        <li>上游请求超时建议 15 秒。</li>
+        <li>上游非 2xx 状态原样透传状态码和 body，但不写缓存。</li>
+        <li>响应脱敏移除已知敏感域名、内部 provider 标识、未匹配本地分组的数据。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>5. 充值金额可配置</h2>
+
+      <h3>5.1 功能说明</h3>
+      <p>
+        管理员可以配置充值档位、首充优惠、帮助图片和帮助文案。用户侧充值页根据后端返回的配置渲染，不自行计算到账金额。
+      </p>
+
+      <h3>5.2 配置字段</h3>
+      <table>
+        <thead>
+        <tr>
+          <th>字段</th>
+          <th>说明</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+          <td><code>payment_recharge_options</code></td>
+          <td>普通充值档位数组，例如 <code>[10, 20, 50, 100]</code>。</td>
+        </tr>
+        <tr>
+          <td><code>payment_intro_recharge_pay_amount</code></td>
+          <td>首充优惠实付金额。</td>
+        </tr>
+        <tr>
+          <td><code>payment_intro_recharge_credit_amount</code></td>
+          <td>首充优惠到账金额。</td>
+        </tr>
+        <tr>
+          <td><code>payment_help_text</code></td>
+          <td>充值页帮助文案。</td>
+        </tr>
+        <tr>
+          <td><code>payment_help_image_url</code></td>
+          <td>充值页帮助图片 URL。</td>
+        </tr>
+        </tbody>
+      </table>
+
+      <h3>5.3 业务规则</h3>
+      <ul>
+        <li>普通档位必须大于 0，保存时去重并升序。</li>
+        <li>首充优惠只有 <code>credit_amount &gt; pay_amount &gt; 0</code> 时启用。</li>
+        <li>首充优惠只对没有领取过首充的用户展示。</li>
+        <li>已取消、已过期、失败订单不算领取过首充；支付中和已成功订单算领取过。</li>
+        <li>创建订单时，后端根据配置计算实付金额和到账金额，不能信任前端传入的到账金额。</li>
+      </ul>
+
+      <h3>5.4 API 设计</h3>
+      <ul>
+        <li><code>GET /api/v1/payment/config</code>：返回支付开关、帮助文案、帮助图片等。</li>
+        <li><code>GET /api/v1/payment/recharge-options</code>：返回当前用户可见档位，包含首充优惠状态。</li>
+        <li><code>PUT /api/v1/admin/payment/config</code> 或 <code>PUT /api/v1/admin/settings</code>：保存管理员配置。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>6. 账号倍率守护</h2>
+
+      <h3>6.1 功能说明</h3>
+      <p>
+        账号倍率守护用于发现并处理成本倒挂风险：本地账号绑定了低倍率分组，但上游 key 所属分组倍率更高。
+        它支持模拟检查和正式运行。模拟检查只报告风险，正式运行会解除低倍率分组绑定并写入审计记录。
+      </p>
+
+      <h3>6.2 后端模块</h3>
+      <table>
+        <thead>
+        <tr>
+          <th>模块</th>
+          <th>职责</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+          <td><code>AccountRateGuardService</code></td>
+          <td>执行倍率检查、风险判断、解绑、审计记录。</td>
+        </tr>
+        <tr>
+          <td><code>AccountRateGuardScheduler</code></td>
+          <td>按配置间隔定时运行正式检查。</td>
+        </tr>
+        <tr>
+          <td><code>AccountRateGuardRepository</code></td>
+          <td>持久化运行记录和解绑审计。</td>
+        </tr>
+        </tbody>
+      </table>
+
+      <h3>6.3 API 设计</h3>
+      <table>
+        <thead>
+        <tr>
+          <th>接口</th>
+          <th>说明</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+          <td><code>POST /api/v1/admin/upstream-management/account-rate-guard/run</code></td>
+          <td>手动运行，body 支持 <code>{"dry_run": true}</code>。</td>
+        </tr>
+        <tr>
+          <td><code>GET /api/v1/admin/upstream-management/account-rate-guard/status</code></td>
+          <td>读取最近一次运行状态和结果。</td>
+        </tr>
+        <tr>
+          <td><code>GET /api/v1/admin/upstream-management/account-rate-guard/audits</code></td>
+          <td>读取最近解绑审计记录。</td>
+        </tr>
+        </tbody>
+      </table>
+
+      <h3>6.4 匹配与处理规则</h3>
+      <ul>
+        <li>默认按本地账号名和上游 key 名规范化后匹配。</li>
+        <li>规范化规则与分组名称一致：去空格、转小写、折叠连续空白。</li>
+        <li>如果上游 key 倍率高于本地账号任一绑定分组倍率，则生成风险项。</li>
+        <li>dry-run 不写任何账号变更，也不写解绑审计。</li>
+        <li>正式运行只解除低于上游倍率的分组绑定，不影响满足倍率要求的分组。</li>
+        <li>正式解绑写审计：run_id、account_id、account_name、provider、upstream_key、local_rate、upstream_rate、unbound_group_ids。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>7. 帮助文档</h2>
+      <p>
+        第一版采用静态 HTML 方案，降低实现复杂度。前端新增用户侧 <code>/help</code> 路由，页面内 iframe 加载同源 <code>/help.html</code>。
+        构建产物和部署目录都需要包含该文件。
+      </p>
+      <ul>
+        <li><code>frontend/public/help.html</code>：前端静态资源。</li>
+        <li><code>frontend/src/views/user/HelpView.vue</code>：iframe 容器。</li>
+        <li><code>deploy/help.html</code>：部署示例使用。</li>
+        <li>CSP 需要允许同源 iframe，并确保帮助页不会被默认安全头阻断。</li>
+      </ul>
+      <div class="warning">
+        后台编辑帮助文档属于后续独立功能，不进入第一版，避免引入富文本、版本管理和权限审计复杂度。
+      </div>
+    </section>
+
+    <section>
+      <h2>8. 设置项与兼容策略</h2>
+      <p>
+        新开发使用统一命名，旧命名仅在迁移期读取兼容，不继续扩散到新代码。
+      </p>
+      <table>
+        <thead>
+        <tr>
+          <th>前缀</th>
+          <th>用途</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+          <td><code>upstream_management_*</code></td>
+          <td>上游 provider、模型、分组、key、登录相关配置。</td>
+        </tr>
+        <tr>
+          <td><code>llm_monitor_*</code></td>
+          <td>监控 status API、标题、provider URL。</td>
+        </tr>
+        <tr>
+          <td><code>payment_recharge_*</code></td>
+          <td>充值档位、首充优惠、到账金额规则。</td>
+        </tr>
+        <tr>
+          <td><code>account_rate_guard_*</code></td>
+          <td>倍率守护开关、运行间隔、审计保留数量。</td>
+        </tr>
+        </tbody>
+      </table>
+      <p>
+        密码类字段保存时如果为空表示保留旧值；读取时只返回 <code>password_configured</code>。
+      </p>
+    </section>
+
+    <section>
+      <h2>9. 错误处理</h2>
+      <ul>
+        <li>上游 provider 测试接口返回分阶段结果：登录、模型、分组、key，每阶段包含成功状态、状态码、错误摘要。</li>
+        <li>模型广场用户接口在单个 provider 失败时可以降级返回其他 provider 数据，并在管理员接口中暴露失败详情。</li>
+        <li>LLM 监控上游失败返回 502；配置 URL 非法返回 500 或管理侧校验错误。</li>
+        <li>充值配置保存时返回明确字段错误，例如档位为空、首充到账小于等于实付。</li>
+        <li>账号倍率守护单 provider 失败不阻断其他 provider，最终结果中记录 provider error。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>10. 测试计划</h2>
+      <h3>10.1 后端测试</h3>
+      <ul>
+        <li>provider client：登录成功/失败、模型拉取、分组拉取、key 拉取、非 2xx 响应。</li>
+        <li>上游分组匹配：大小写、空格、未匹配、多上游分组匹配同一本地分组。</li>
+        <li>倍率同步：只调高、不调低、空分组、不存在本地分组。</li>
+        <li>LLM 监控：URL 校验、provider 过滤、敏感字段脱敏、上游超时、上游 500。</li>
+        <li>充值配置：档位去重排序、首充可用性、订单金额计算、重复领取拦截。</li>
+        <li>倍率守护：dry-run 不写入、正式运行解绑、审计记录、provider 部分失败。</li>
+      </ul>
+
+      <h3>10.2 前端测试</h3>
+      <ul>
+        <li>API wrapper：请求路径和参数正确。</li>
+        <li><code>ModelSquareView</code>：搜索、provider 过滤、分组过滤、复制 model ID。</li>
+        <li><code>UpstreamGroupsView</code>：匹配状态、key 摘要、倍率风险、守护运行状态。</li>
+        <li><code>PaymentView</code>：普通档位、首充档位、帮助文案和图片。</li>
+        <li><code>HelpView</code>：iframe 指向 <code>/help.html</code>。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>11. 开发顺序</h2>
+      <ol>
+        <li>定义 settings 字段、DTO、配置读取和默认值。</li>
+        <li>实现 provider client 接口和 sub2api/new-api 适配。</li>
+        <li>实现上游管理 service、模型广场用户 API、管理侧分组 API。</li>
+        <li>实现模型广场页面和上游分组管理页面。</li>
+        <li>实现 LLM 监控代理、过滤、脱敏和管理页趋势摘要。</li>
+        <li>实现充值金额配置、首充优惠和充值页展示。</li>
+        <li>实现账号倍率守护 service、API、定时任务和审计展示。</li>
+        <li>接入帮助文档、侧边栏导航、CSP 和部署配置。</li>
+        <li>执行后端单元测试、前端单元测试、构建验证。</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>12. 评审检查清单</h2>
+      <ul>
+        <li>handler 是否只做 HTTP 层职责。</li>
+        <li>provider client 是否可以独立单元测试。</li>
+        <li>敏感配置是否没有明文返回。</li>
+        <li>用户侧模型广场是否不会暴露管理字段。</li>
+        <li>LLM 监控是否做了 URL 校验和脱敏。</li>
+        <li>充值订单金额是否以后端计算结果为准。</li>
+        <li>账号倍率守护正式运行是否有审计记录。</li>
+        <li>帮助页是否在生产构建和部署目录中都可访问。</li>
+      </ul>
+      <div class="note">
+        该设计文档聚焦可重新开发的功能边界，不要求复用当前分支里的具体实现文件。后续实施计划应按本设计拆成可独立验证的小任务。
+      </div>
+    </section>
+  </article>
+</main>
+</body>
+</html>
