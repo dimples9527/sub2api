@@ -404,6 +404,61 @@ func TestSub2APIProviderAdapterAppliesAccountNamePrefix(t *testing.T) {
 	}
 }
 
+func TestSub2APIProviderAdapterLoginAcceptsAccessTokenResponse(t *testing.T) {
+	var keysAuthorization string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			if r.Method != http.MethodPost {
+				t.Fatalf("login method = %s, want POST", r.Method)
+			}
+			_, _ = w.Write([]byte(`{
+				"code": 0,
+				"data": {
+					"access_token": "access-123",
+					"token_type": "Bearer"
+				}
+			}`))
+		case "/api/admin/keys":
+			keysAuthorization = r.Header.Get("Authorization")
+			_, _ = w.Write([]byte(`{
+				"code": 0,
+				"data": {
+					"items": [
+						{"name": "sk-live-1", "group": {"name": "vip", "rate_multiplier": 2.5}}
+					]
+				}
+			}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	adapter := NewSub2APIProviderAdapter(server.Client())
+	result := adapter.Test(context.Background(), UpstreamProviderConfig{
+		Type:       UpstreamProviderTypeSub2API,
+		Slug:       "sub2api-main",
+		Name:       "Sub2API main",
+		BaseURL:    server.URL,
+		LoginURL:   "/api/v1/auth/login",
+		APIKeysURL: "/api/admin/keys",
+		Email:      "admin@example.com",
+		Password:   "secret",
+	})
+
+	if !result.Login.OK {
+		t.Fatalf("login should pass, got error: %s", result.Login.Error)
+	}
+	if !result.Keys.OK {
+		t.Fatalf("keys should pass, got error: %s", result.Keys.Error)
+	}
+	if keysAuthorization != "Bearer access-123" {
+		t.Fatalf("Authorization = %q, want Bearer access-123", keysAuthorization)
+	}
+}
+
 func TestNewAPIProviderAdapterFetchKeysMergesKeysAndGroups(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

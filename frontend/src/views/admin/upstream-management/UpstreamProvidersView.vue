@@ -246,7 +246,7 @@
               :required="form.type === 'newapi'"
               type="text"
               class="input"
-              placeholder="/api/user/login"
+              :placeholder="form.type === 'sub2api' ? '/api/v1/auth/login' : '/api/user/login'"
             />
           </div>
           <div v-if="form.type === 'newapi'" class="md:col-span-2">

@@ -111,9 +111,13 @@ func (a *Sub2APIProviderAdapter) login(ctx context.Context, provider UpstreamPro
 		Code    int    `json:"code"`
 		Message string `json:"message"`
 		Data    struct {
-			Token string `json:"token"`
+			AccessToken string `json:"access_token"`
+			Token       string `json:"token"`
+			TokenType   string `json:"token_type"`
 		} `json:"data"`
-		Token string `json:"token"`
+		AccessToken string `json:"access_token"`
+		Token       string `json:"token"`
+		TokenType   string `json:"token_type"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return "", raw, resp.StatusCode, fmt.Errorf("decode sub2api login response: %w", err)
@@ -124,14 +128,20 @@ func (a *Sub2APIProviderAdapter) login(ctx context.Context, provider UpstreamPro
 		}
 		return "", raw, resp.StatusCode, fmt.Errorf("sub2api login failed: %s", parsed.Message)
 	}
-	token := parsed.Data.Token
-	if token == "" {
-		token = parsed.Token
-	}
+	token := firstNonEmptySub2APIString(parsed.Data.AccessToken, parsed.Data.Token, parsed.AccessToken, parsed.Token)
 	if token == "" {
 		return "", raw, resp.StatusCode, fmt.Errorf("sub2api login failed: missing token")
 	}
 	return token, raw, resp.StatusCode, nil
+}
+
+func firstNonEmptySub2APIString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (a *Sub2APIProviderAdapter) request(ctx context.Context, provider UpstreamProviderConfig, token, path, label string) ([]byte, int, error) {
