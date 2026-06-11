@@ -127,8 +127,10 @@ export type {
   UpstreamProviderTestStage
 } from './upstreamProviders'
 export type {
+  UpstreamGroupAutoRateFixConfig,
   UpstreamGroupCompareResult,
   UpstreamGroupComparison,
+  UpstreamGroupLocalCreateRequest,
   UpstreamGroupRateFixRecord
 } from './upstreamManagement'
 export type {

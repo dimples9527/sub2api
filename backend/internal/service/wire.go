@@ -413,6 +413,12 @@ func ProvideUpstreamManagementService(
 	return NewUpstreamManagementService(upstreamProviderService, groupRepo, settingRepo, authCacheInvalidator)
 }
 
+func ProvideUpstreamGroupRateFixScheduler(upstreamManagementService *UpstreamManagementService) *UpstreamGroupRateFixScheduler {
+	svc := NewUpstreamGroupRateFixScheduler(upstreamManagementService)
+	svc.Start()
+	return svc
+}
+
 func ProvideUpstreamAccountSyncService(
 	upstreamProviderService *UpstreamProviderService,
 	groupRepo GroupRepository,
@@ -559,6 +565,7 @@ var ProviderSet = wire.NewSet(
 	ProvideSettingService,
 	NewUpstreamProviderService,
 	ProvideUpstreamManagementService,
+	ProvideUpstreamGroupRateFixScheduler,
 	ProvideUpstreamAccountSyncService,
 	NewDataManagementService,
 	ProvideBackupService,

@@ -49,6 +49,7 @@ export interface UpstreamAccountSyncRecord {
 
 export interface UpstreamAccountSyncResult {
   default_provider: UpstreamProviderConfig
+  providers: UpstreamProviderConfig[]
   summary: UpstreamAccountSyncSummary
   items: UpstreamAccountSyncItem[]
   warnings?: string[]

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -27,11 +28,25 @@ func (s *upstreamManagementProviderSourceStub) FetchProviderKeys(ctx context.Con
 }
 
 type upstreamManagementGroupRepoStub struct {
-	groups  []Group
-	updates []Group
+	groups    []Group
+	updates   []Group
+	creates   []Group
+	nextID    int64
+	updateErr error
 }
 
-func (s *upstreamManagementGroupRepoStub) Create(context.Context, *Group) error { panic("unexpected") }
+func (s *upstreamManagementGroupRepoStub) Create(_ context.Context, group *Group) error {
+	s.creates = append(s.creates, *group)
+	if group.ID == 0 {
+		if s.nextID == 0 {
+			s.nextID = 100
+		}
+		group.ID = s.nextID
+		s.nextID++
+	}
+	s.groups = append(s.groups, *group)
+	return nil
+}
 
 func (s *upstreamManagementGroupRepoStub) GetByID(_ context.Context, id int64) (*Group, error) {
 	for i := range s.groups {
@@ -48,6 +63,9 @@ func (s *upstreamManagementGroupRepoStub) GetByIDLite(ctx context.Context, id in
 }
 
 func (s *upstreamManagementGroupRepoStub) Update(_ context.Context, group *Group) error {
+	if s.updateErr != nil {
+		return s.updateErr
+	}
 	s.updates = append(s.updates, *group)
 	for i := range s.groups {
 		if s.groups[i].ID == group.ID {
@@ -81,8 +99,13 @@ func (s *upstreamManagementGroupRepoStub) ListActiveByPlatform(context.Context, 
 	panic("unexpected")
 }
 
-func (s *upstreamManagementGroupRepoStub) ExistsByName(context.Context, string) (bool, error) {
-	panic("unexpected")
+func (s *upstreamManagementGroupRepoStub) ExistsByName(_ context.Context, name string) (bool, error) {
+	for _, group := range s.groups {
+		if group.Name == name {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *upstreamManagementGroupRepoStub) GetAccountCount(context.Context, int64) (int64, int64, error) {
@@ -339,6 +362,93 @@ func TestUpstreamManagementServiceSaveGroupMappingClearsMapping(t *testing.T) {
 	}
 }
 
+func TestUpstreamManagementServiceCreateLocalGroupCreatesAndMapsDefaultUpstreamGroup(t *testing.T) {
+	providerSource := &upstreamManagementProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "default-upstream", Name: "Default upstream", IsDefault: true},
+		keys: []UpstreamProviderKey{
+			{ProviderSlug: "default-upstream", GroupName: "VIP", RateMultiplier: 2.5},
+		},
+	}
+	groupRepo := &upstreamManagementGroupRepoStub{groups: []Group{}, nextID: 42}
+	settingRepo := newUpstreamManagementSettingRepoStub()
+	svc := NewUpstreamManagementService(providerSource, groupRepo, settingRepo, nil)
+
+	result, err := svc.CreateLocalGroupFromUpstream(context.Background(), UpstreamGroupLocalCreateInput{
+		UpstreamGroupName: " VIP ",
+		RateMultiplier:    2.5,
+	})
+	if err != nil {
+		t.Fatalf("CreateLocalGroupFromUpstream returned error: %v", err)
+	}
+	if len(groupRepo.creates) != 1 {
+		t.Fatalf("created group count = %d, want 1", len(groupRepo.creates))
+	}
+	created := groupRepo.groups[len(groupRepo.groups)-1]
+	if created.ID != 42 || created.Name != "VIP" || created.Platform != PlatformOpenAI || created.Status != StatusActive {
+		t.Fatalf("created group = %+v, want active OpenAI VIP group", created)
+	}
+	if created.RateMultiplier != 2.5 || created.SubscriptionType != SubscriptionTypeStandard {
+		t.Fatalf("created group pricing = %+v, want rate 2.5 standard", created)
+	}
+	var stored []UpstreamGroupMappingRecord
+	if err := json.Unmarshal([]byte(settingRepo.values[SettingKeyUpstreamGroupMappings]), &stored); err != nil {
+		t.Fatalf("stored mappings should be JSON: %v", err)
+	}
+	if len(stored) != 1 || stored[0].ProviderSlug != "default-upstream" || stored[0].UpstreamGroupKey != "vip" || stored[0].LocalGroupID != 42 {
+		t.Fatalf("unexpected stored mappings: %+v", stored)
+	}
+	if len(result.Items) != 1 || !result.Items[0].Matched || result.Items[0].LocalGroupID == nil || *result.Items[0].LocalGroupID != 42 {
+		t.Fatalf("expected comparison result mapped to new group, got %+v", result.Items)
+	}
+}
+
+func TestUpstreamManagementServiceCreateLocalGroupRejectsUnknownUpstreamGroup(t *testing.T) {
+	providerSource := &upstreamManagementProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "default-upstream", Name: "Default upstream", IsDefault: true},
+		keys: []UpstreamProviderKey{
+			{ProviderSlug: "default-upstream", GroupName: "VIP", RateMultiplier: 2.5},
+		},
+	}
+	groupRepo := &upstreamManagementGroupRepoStub{groups: []Group{}, nextID: 42}
+	svc := NewUpstreamManagementService(providerSource, groupRepo, newUpstreamManagementSettingRepoStub(), nil)
+
+	_, err := svc.CreateLocalGroupFromUpstream(context.Background(), UpstreamGroupLocalCreateInput{
+		UpstreamGroupName: "Missing",
+		RateMultiplier:    1,
+	})
+	if err == nil || !infraerrors.IsBadRequest(err) {
+		t.Fatalf("CreateLocalGroupFromUpstream error = %v, want bad request", err)
+	}
+	if len(groupRepo.creates) != 0 {
+		t.Fatalf("created group count = %d, want 0", len(groupRepo.creates))
+	}
+}
+
+func TestUpstreamManagementServiceCreateLocalGroupRejectsNormalizedDuplicateLocalGroup(t *testing.T) {
+	providerSource := &upstreamManagementProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "default-upstream", Name: "Default upstream", IsDefault: true},
+		keys: []UpstreamProviderKey{
+			{ProviderSlug: "default-upstream", GroupName: "VIP", RateMultiplier: 2.5},
+		},
+	}
+	groupRepo := &upstreamManagementGroupRepoStub{
+		groups: []Group{{ID: 7, Name: " vip ", RateMultiplier: 1, Status: StatusActive}},
+		nextID: 42,
+	}
+	svc := NewUpstreamManagementService(providerSource, groupRepo, newUpstreamManagementSettingRepoStub(), nil)
+
+	_, err := svc.CreateLocalGroupFromUpstream(context.Background(), UpstreamGroupLocalCreateInput{
+		UpstreamGroupName: "VIP",
+		RateMultiplier:    2.5,
+	})
+	if err == nil || !infraerrors.IsConflict(err) {
+		t.Fatalf("CreateLocalGroupFromUpstream error = %v, want conflict", err)
+	}
+	if len(groupRepo.creates) != 0 {
+		t.Fatalf("created group count = %d, want 0", len(groupRepo.creates))
+	}
+}
+
 func TestUpstreamManagementServiceApplyRateFixesRaisesOnlyLowerLocalRates(t *testing.T) {
 	providerSource := &upstreamManagementProviderSourceStub{
 		defaultProvider: UpstreamProviderConfig{Slug: "default-upstream", Name: "Default upstream", IsDefault: true},
@@ -377,6 +487,93 @@ func TestUpstreamManagementServiceApplyRateFixesRaisesOnlyLowerLocalRates(t *tes
 	}
 	if len(stored) != 1 || stored[0].GroupID != 1 {
 		t.Fatalf("stored records = %+v", stored)
+	}
+}
+
+func TestUpstreamManagementServiceRateFixConfigDefaultsDisabledWithSecondsInterval(t *testing.T) {
+	svc := NewUpstreamManagementService(
+		&upstreamManagementProviderSourceStub{},
+		&upstreamManagementGroupRepoStub{},
+		newUpstreamManagementSettingRepoStub(),
+		nil,
+	)
+
+	cfg, err := svc.GetRateFixConfig(context.Background())
+	if err != nil {
+		t.Fatalf("GetRateFixConfig returned error: %v", err)
+	}
+	if cfg.Enabled {
+		t.Fatalf("default config should be disabled: %+v", cfg)
+	}
+	if cfg.IntervalSeconds != DefaultUpstreamGroupRateFixIntervalSeconds {
+		t.Fatalf("default interval = %d, want %d", cfg.IntervalSeconds, DefaultUpstreamGroupRateFixIntervalSeconds)
+	}
+}
+
+func TestUpstreamManagementServiceUpdateRateFixConfigStoresSecondsInterval(t *testing.T) {
+	settingRepo := newUpstreamManagementSettingRepoStub()
+	svc := NewUpstreamManagementService(
+		&upstreamManagementProviderSourceStub{},
+		&upstreamManagementGroupRepoStub{},
+		settingRepo,
+		nil,
+	)
+
+	cfg, err := svc.UpdateRateFixConfig(context.Background(), UpstreamGroupAutoRateFixConfig{
+		Enabled:         true,
+		IntervalSeconds: 45,
+	})
+	if err != nil {
+		t.Fatalf("UpdateRateFixConfig returned error: %v", err)
+	}
+	if !cfg.Enabled || cfg.IntervalSeconds != 45 || cfg.UpdatedAt == nil {
+		t.Fatalf("stored config = %+v, want enabled interval 45 with updated_at", cfg)
+	}
+
+	loaded, err := svc.GetRateFixConfig(context.Background())
+	if err != nil {
+		t.Fatalf("GetRateFixConfig returned error: %v", err)
+	}
+	if !loaded.Enabled || loaded.IntervalSeconds != 45 {
+		t.Fatalf("loaded config = %+v, want enabled interval 45", loaded)
+	}
+}
+
+func TestUpstreamManagementServiceRunScheduledRateFixStoresFailureStatus(t *testing.T) {
+	providerSource := &upstreamManagementProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "default-upstream", Name: "Default upstream", IsDefault: true},
+		keys: []UpstreamProviderKey{
+			{ProviderSlug: "default-upstream", GroupName: "VIP", RateMultiplier: 2.5},
+		},
+	}
+	settingRepo := newUpstreamManagementSettingRepoStub()
+	groupRepo := &upstreamManagementGroupRepoStub{
+		groups:    []Group{{ID: 1, Name: "VIP", RateMultiplier: 1, Status: StatusActive}},
+		updateErr: errors.New("database unavailable"),
+	}
+	svc := NewUpstreamManagementService(providerSource, groupRepo, settingRepo, nil)
+	_, err := svc.UpdateRateFixConfig(context.Background(), UpstreamGroupAutoRateFixConfig{
+		Enabled:         true,
+		IntervalSeconds: 3600,
+	})
+	if err != nil {
+		t.Fatalf("UpdateRateFixConfig returned error: %v", err)
+	}
+
+	cfg, err := svc.RunScheduledRateFix(context.Background())
+	if err == nil {
+		t.Fatalf("RunScheduledRateFix should return the rate-fix error")
+	}
+	if cfg.LastRunAt == nil || cfg.LastRunStatus != "failed" || cfg.LastRunMessage == "" {
+		t.Fatalf("config after failed run = %+v, want failed status with message", cfg)
+	}
+
+	loaded, err := svc.GetRateFixConfig(context.Background())
+	if err != nil {
+		t.Fatalf("GetRateFixConfig returned error: %v", err)
+	}
+	if loaded.LastRunAt == nil || loaded.LastRunStatus != "failed" || loaded.LastRunMessage == "" {
+		t.Fatalf("persisted config = %+v, want failed status with message", loaded)
 	}
 }
 

@@ -255,7 +255,7 @@ func parseNewAPIProviderKeys(provider UpstreamProviderConfig, keysPayload, group
 			ProviderSlug:   provider.Slug,
 			ProviderName:   provider.Name,
 			ProviderType:   provider.Type,
-			KeyName:        upstreamProviderKeyName(provider, item.Name),
+			KeyName:        item.Name,
 			GroupName:      item.Group,
 			RateMultiplier: info.ratio,
 			RawStatus:      fmt.Sprint(item.Status),

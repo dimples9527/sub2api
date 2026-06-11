@@ -370,7 +370,7 @@ func TestSub2APIProviderAdapterFetchKeysUsesSingleEndpoint(t *testing.T) {
 	}
 }
 
-func TestSub2APIProviderAdapterAppliesAccountNamePrefix(t *testing.T) {
+func TestSub2APIProviderAdapterPreservesRawKeyName(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
@@ -399,8 +399,8 @@ func TestSub2APIProviderAdapterAppliesAccountNamePrefix(t *testing.T) {
 	if len(keys) != 1 {
 		t.Fatalf("key count = %d, want 1", len(keys))
 	}
-	if keys[0].KeyName != "sub-sk-live-1" {
-		t.Fatalf("key name = %q, want prefixed name", keys[0].KeyName)
+	if keys[0].KeyName != "sk-live-1" {
+		t.Fatalf("key name = %q, want raw key name", keys[0].KeyName)
 	}
 }
 
@@ -523,7 +523,7 @@ func TestNewAPIProviderAdapterFetchKeysMergesKeysAndGroups(t *testing.T) {
 	}
 }
 
-func TestNewAPIProviderAdapterAppliesAccountNamePrefix(t *testing.T) {
+func TestNewAPIProviderAdapterPreservesRawKeyName(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
@@ -559,8 +559,8 @@ func TestNewAPIProviderAdapterAppliesAccountNamePrefix(t *testing.T) {
 	if len(keys) != 1 {
 		t.Fatalf("key count = %d, want 1", len(keys))
 	}
-	if keys[0].KeyName != "new-key-1" {
-		t.Fatalf("key name = %q, want prefixed name", keys[0].KeyName)
+	if keys[0].KeyName != "key-1" {
+		t.Fatalf("key name = %q, want raw key name", keys[0].KeyName)
 	}
 }
 

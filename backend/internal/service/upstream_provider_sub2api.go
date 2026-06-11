@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 type Sub2APIProviderAdapter struct {
@@ -198,7 +199,7 @@ func parseSub2APIProviderKeys(provider UpstreamProviderConfig, payload []byte) (
 			ProviderSlug:   provider.Slug,
 			ProviderName:   provider.Name,
 			ProviderType:   provider.Type,
-			KeyName:        upstreamProviderKeyName(provider, item.Name),
+			KeyName:        strings.TrimSpace(item.Name),
 			GroupName:      item.Group.Name,
 			RateMultiplier: *item.Group.RateMultiplier,
 			RawStatus:      item.Status,

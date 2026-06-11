@@ -14,6 +14,10 @@ import (
 const (
 	SettingKeyUpstreamGroupRateFixRecords = "upstream_group_rate_fix_records"
 	SettingKeyUpstreamGroupMappings       = "upstream_group_mappings"
+	SettingKeyUpstreamGroupRateFixConfig  = "upstream_group_rate_fix_config"
+
+	DefaultUpstreamGroupRateFixIntervalSeconds = 3600
+	MinUpstreamGroupRateFixIntervalSeconds     = 1
 )
 
 type UpstreamManagementProviderSource interface {
@@ -54,9 +58,23 @@ type UpstreamGroupRateFixRecord struct {
 	ChangedAt         time.Time `json:"changed_at"`
 }
 
+type UpstreamGroupAutoRateFixConfig struct {
+	Enabled         bool       `json:"enabled"`
+	IntervalSeconds int        `json:"interval_seconds"`
+	LastRunAt       *time.Time `json:"last_run_at,omitempty"`
+	LastRunStatus   string     `json:"last_run_status,omitempty"`
+	LastRunMessage  string     `json:"last_run_message,omitempty"`
+	UpdatedAt       *time.Time `json:"updated_at,omitempty"`
+}
+
 type UpstreamGroupMappingInput struct {
 	UpstreamGroupName string `json:"upstream_group_name"`
 	LocalGroupID      *int64 `json:"local_group_id"`
+}
+
+type UpstreamGroupLocalCreateInput struct {
+	UpstreamGroupName string  `json:"upstream_group_name"`
+	RateMultiplier    float64 `json:"rate_multiplier"`
 }
 
 type UpstreamGroupMappingRecord struct {
@@ -109,6 +127,76 @@ func (s *UpstreamManagementService) CompareGroups(ctx context.Context) (Upstream
 	}
 	result.Records = records
 	return result, nil
+}
+
+func (s *UpstreamManagementService) GetRateFixConfig(ctx context.Context) (UpstreamGroupAutoRateFixConfig, error) {
+	if s == nil || s.settingRepo == nil {
+		return defaultUpstreamGroupRateFixConfig(), nil
+	}
+	raw, err := s.settingRepo.GetValue(ctx, SettingKeyUpstreamGroupRateFixConfig)
+	if err != nil {
+		if err == ErrSettingNotFound {
+			return defaultUpstreamGroupRateFixConfig(), nil
+		}
+		return UpstreamGroupAutoRateFixConfig{}, fmt.Errorf("load upstream group rate fix config: %w", err)
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return defaultUpstreamGroupRateFixConfig(), nil
+	}
+	var config UpstreamGroupAutoRateFixConfig
+	if err := json.Unmarshal([]byte(raw), &config); err != nil {
+		return UpstreamGroupAutoRateFixConfig{}, infraerrors.InternalServer("UPSTREAM_GROUP_RATE_FIX_CONFIG_INVALID", "upstream group rate fix config is invalid")
+	}
+	return normalizeUpstreamGroupRateFixConfig(config), nil
+}
+
+func (s *UpstreamManagementService) UpdateRateFixConfig(ctx context.Context, input UpstreamGroupAutoRateFixConfig) (UpstreamGroupAutoRateFixConfig, error) {
+	config := normalizeUpstreamGroupRateFixConfig(input)
+	if input.IntervalSeconds > 0 && input.IntervalSeconds < MinUpstreamGroupRateFixIntervalSeconds {
+		return UpstreamGroupAutoRateFixConfig{}, infraerrors.BadRequest("UPSTREAM_GROUP_RATE_FIX_INTERVAL_INVALID", fmt.Sprintf("interval_seconds must be at least %d", MinUpstreamGroupRateFixIntervalSeconds))
+	}
+	now := time.Now().UTC()
+	config.UpdatedAt = &now
+	if s == nil || s.settingRepo == nil {
+		return config, nil
+	}
+	raw, err := json.Marshal(config)
+	if err != nil {
+		return UpstreamGroupAutoRateFixConfig{}, fmt.Errorf("marshal upstream group rate fix config: %w", err)
+	}
+	if err := s.settingRepo.Set(ctx, SettingKeyUpstreamGroupRateFixConfig, string(raw)); err != nil {
+		return UpstreamGroupAutoRateFixConfig{}, fmt.Errorf("save upstream group rate fix config: %w", err)
+	}
+	return config, nil
+}
+
+func (s *UpstreamManagementService) RunScheduledRateFix(ctx context.Context) (UpstreamGroupAutoRateFixConfig, error) {
+	config, err := s.GetRateFixConfig(ctx)
+	if err != nil {
+		return UpstreamGroupAutoRateFixConfig{}, err
+	}
+	now := time.Now().UTC()
+	config.LastRunAt = &now
+	_, runErr := s.ApplyRateFixes(ctx)
+	if runErr != nil {
+		config.LastRunStatus = "failed"
+		config.LastRunMessage = runErr.Error()
+	} else {
+		config.LastRunStatus = "success"
+		config.LastRunMessage = ""
+	}
+	config.UpdatedAt = &now
+	if s != nil && s.settingRepo != nil {
+		raw, marshalErr := json.Marshal(config)
+		if marshalErr != nil {
+			return UpstreamGroupAutoRateFixConfig{}, fmt.Errorf("marshal upstream group rate fix config: %w", marshalErr)
+		}
+		if saveErr := s.settingRepo.Set(ctx, SettingKeyUpstreamGroupRateFixConfig, string(raw)); saveErr != nil {
+			return UpstreamGroupAutoRateFixConfig{}, fmt.Errorf("save upstream group rate fix config: %w", saveErr)
+		}
+	}
+	return config, runErr
 }
 
 func (s *UpstreamManagementService) ApplyRateFixes(ctx context.Context) (UpstreamGroupCompareResult, error) {
@@ -202,6 +290,112 @@ func (s *UpstreamManagementService) SaveGroupMapping(ctx context.Context, input 
 		return UpstreamGroupCompareResult{}, err
 	}
 	return s.CompareGroups(ctx)
+}
+
+func (s *UpstreamManagementService) CreateLocalGroupFromUpstream(ctx context.Context, input UpstreamGroupLocalCreateInput) (UpstreamGroupCompareResult, error) {
+	if s == nil || s.providerSource == nil {
+		return UpstreamGroupCompareResult{}, infraerrors.InternalServer("UPSTREAM_MANAGEMENT_PROVIDER_SOURCE_UNAVAILABLE", "upstream management provider source unavailable")
+	}
+	if s.groupRepo == nil {
+		return UpstreamGroupCompareResult{}, infraerrors.InternalServer("UPSTREAM_MANAGEMENT_GROUP_REPO_UNAVAILABLE", "upstream management group repository unavailable")
+	}
+	defaultProvider, err := s.providerSource.GetDefaultProvider(ctx)
+	if err != nil {
+		return UpstreamGroupCompareResult{}, err
+	}
+	upstreamGroupName := strings.TrimSpace(input.UpstreamGroupName)
+	upstreamGroupKey := normalizeUpstreamGroupMatchName(upstreamGroupName)
+	if upstreamGroupKey == "" {
+		return UpstreamGroupCompareResult{}, infraerrors.BadRequest("UPSTREAM_GROUP_NAME_REQUIRED", "upstream group name is required")
+	}
+	if input.RateMultiplier <= 0 {
+		return UpstreamGroupCompareResult{}, infraerrors.BadRequest("UPSTREAM_GROUP_RATE_INVALID", "upstream group rate multiplier must be greater than 0")
+	}
+	upstreamGroupName, err = s.resolveDefaultUpstreamGroupName(ctx, defaultProvider, upstreamGroupKey)
+	if err != nil {
+		return UpstreamGroupCompareResult{}, err
+	}
+	exists, err := s.groupRepo.ExistsByName(ctx, upstreamGroupName)
+	if err != nil {
+		return UpstreamGroupCompareResult{}, fmt.Errorf("check local group exists: %w", err)
+	}
+	if exists {
+		return UpstreamGroupCompareResult{}, ErrGroupExists
+	}
+	localGroups, err := s.groupRepo.ListActive(ctx)
+	if err != nil {
+		return UpstreamGroupCompareResult{}, fmt.Errorf("list local groups before create: %w", err)
+	}
+	for _, localGroup := range localGroups {
+		if normalizeUpstreamGroupMatchName(localGroup.Name) == upstreamGroupKey {
+			return UpstreamGroupCompareResult{}, ErrGroupExists
+		}
+	}
+
+	group := &Group{
+		Name:                 upstreamGroupName,
+		Platform:             PlatformOpenAI,
+		RateMultiplier:       input.RateMultiplier,
+		Status:               StatusActive,
+		SubscriptionType:     SubscriptionTypeStandard,
+		ImageRateMultiplier:  1,
+		AllowImageGeneration: false,
+		ImageRateIndependent: false,
+	}
+	if err := s.groupRepo.Create(ctx, group); err != nil {
+		return UpstreamGroupCompareResult{}, fmt.Errorf("create local group from upstream group: %w", err)
+	}
+
+	records, err := s.loadGroupMappings(ctx)
+	if err != nil {
+		return UpstreamGroupCompareResult{}, err
+	}
+	records = removeUpstreamGroupMapping(records, defaultProvider.Slug, upstreamGroupKey)
+	records = append(records, UpstreamGroupMappingRecord{
+		ProviderSlug:      defaultProvider.Slug,
+		UpstreamGroupName: upstreamGroupName,
+		UpstreamGroupKey:  upstreamGroupKey,
+		LocalGroupID:      group.ID,
+		UpdatedAt:         time.Now().UTC(),
+	})
+	if err := s.saveGroupMappings(ctx, records); err != nil {
+		return UpstreamGroupCompareResult{}, err
+	}
+	return s.CompareGroups(ctx)
+}
+
+func defaultUpstreamGroupRateFixConfig() UpstreamGroupAutoRateFixConfig {
+	return UpstreamGroupAutoRateFixConfig{
+		Enabled:         false,
+		IntervalSeconds: DefaultUpstreamGroupRateFixIntervalSeconds,
+	}
+}
+
+func normalizeUpstreamGroupRateFixConfig(config UpstreamGroupAutoRateFixConfig) UpstreamGroupAutoRateFixConfig {
+	if config.IntervalSeconds <= 0 {
+		config.IntervalSeconds = DefaultUpstreamGroupRateFixIntervalSeconds
+	}
+	return config
+}
+
+func (s *UpstreamManagementService) resolveDefaultUpstreamGroupName(ctx context.Context, defaultProvider UpstreamProviderConfig, upstreamGroupKey string) (string, error) {
+	keys, _, err := s.providerSource.FetchProviderKeys(ctx, defaultProvider.Slug)
+	if err != nil {
+		return "", err
+	}
+	for _, key := range keys {
+		if key.ProviderSlug != "" && key.ProviderSlug != defaultProvider.Slug {
+			continue
+		}
+		if normalizeUpstreamGroupMatchName(key.GroupName) != upstreamGroupKey {
+			continue
+		}
+		name := strings.TrimSpace(key.GroupName)
+		if name != "" {
+			return name, nil
+		}
+	}
+	return "", infraerrors.BadRequest("UPSTREAM_GROUP_NOT_FOUND", "upstream group does not exist on default provider")
 }
 
 func (s *UpstreamManagementService) compareGroups(ctx context.Context) (UpstreamGroupCompareResult, error) {

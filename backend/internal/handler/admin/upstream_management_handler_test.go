@@ -14,15 +14,21 @@ import (
 )
 
 type upstreamManagementHandlerServiceStub struct {
-	compareCalled     bool
-	applyCalled       bool
-	saveMappingCalled bool
-	modelSquareCalled bool
-	mappingInput      service.UpstreamGroupMappingInput
-	result            service.UpstreamGroupCompareResult
-	modelSquare       json.RawMessage
-	defaultProvider   service.UpstreamProviderConfig
-	err               error
+	compareCalled      bool
+	applyCalled        bool
+	getConfigCalled    bool
+	updateConfigCalled bool
+	saveMappingCalled  bool
+	createLocalCalled  bool
+	modelSquareCalled  bool
+	mappingInput       service.UpstreamGroupMappingInput
+	configInput        service.UpstreamGroupAutoRateFixConfig
+	createLocalInput   service.UpstreamGroupLocalCreateInput
+	result             service.UpstreamGroupCompareResult
+	config             service.UpstreamGroupAutoRateFixConfig
+	modelSquare        json.RawMessage
+	defaultProvider    service.UpstreamProviderConfig
+	err                error
 }
 
 func (s *upstreamManagementHandlerServiceStub) CompareGroups(context.Context) (service.UpstreamGroupCompareResult, error) {
@@ -35,9 +41,26 @@ func (s *upstreamManagementHandlerServiceStub) ApplyRateFixes(context.Context) (
 	return s.result, s.err
 }
 
+func (s *upstreamManagementHandlerServiceStub) GetRateFixConfig(context.Context) (service.UpstreamGroupAutoRateFixConfig, error) {
+	s.getConfigCalled = true
+	return s.config, s.err
+}
+
+func (s *upstreamManagementHandlerServiceStub) UpdateRateFixConfig(_ context.Context, input service.UpstreamGroupAutoRateFixConfig) (service.UpstreamGroupAutoRateFixConfig, error) {
+	s.updateConfigCalled = true
+	s.configInput = input
+	return input, s.err
+}
+
 func (s *upstreamManagementHandlerServiceStub) SaveGroupMapping(_ context.Context, input service.UpstreamGroupMappingInput) (service.UpstreamGroupCompareResult, error) {
 	s.saveMappingCalled = true
 	s.mappingInput = input
+	return s.result, s.err
+}
+
+func (s *upstreamManagementHandlerServiceStub) CreateLocalGroupFromUpstream(_ context.Context, input service.UpstreamGroupLocalCreateInput) (service.UpstreamGroupCompareResult, error) {
+	s.createLocalCalled = true
+	s.createLocalInput = input
 	return s.result, s.err
 }
 
@@ -52,7 +75,10 @@ func newUpstreamManagementHandlerTestRouter(svc upstreamManagementService) *gin.
 	handler := newUpstreamManagementHandlerWithService(svc)
 	router.GET("/admin/upstream-management/groups", handler.CompareGroups)
 	router.POST("/admin/upstream-management/groups/rate-fixes", handler.ApplyRateFixes)
+	router.GET("/admin/upstream-management/groups/rate-fix-config", handler.GetRateFixConfig)
+	router.PUT("/admin/upstream-management/groups/rate-fix-config", handler.UpdateRateFixConfig)
 	router.PUT("/admin/upstream-management/groups/mappings", handler.SaveGroupMapping)
+	router.POST("/admin/upstream-management/groups/local-groups", handler.CreateLocalGroupFromUpstream)
 	router.GET("/admin/upstream-management/model-square", handler.ModelSquare)
 	return router
 }
@@ -113,6 +139,43 @@ func TestUpstreamManagementHandlerApplyRateFixes(t *testing.T) {
 	require.Contains(t, rec.Body.String(), `"new_rate":2`)
 }
 
+func TestUpstreamManagementHandlerGetRateFixConfig(t *testing.T) {
+	svc := &upstreamManagementHandlerServiceStub{config: service.UpstreamGroupAutoRateFixConfig{
+		Enabled:         true,
+		IntervalSeconds: 30,
+		LastRunStatus:   "success",
+	}}
+	router := newUpstreamManagementHandlerTestRouter(svc)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/admin/upstream-management/groups/rate-fix-config", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.True(t, svc.getConfigCalled)
+	require.Contains(t, rec.Body.String(), `"interval_seconds":30`)
+}
+
+func TestUpstreamManagementHandlerUpdateRateFixConfig(t *testing.T) {
+	svc := &upstreamManagementHandlerServiceStub{}
+	router := newUpstreamManagementHandlerTestRouter(svc)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/admin/upstream-management/groups/rate-fix-config",
+		bytes.NewBufferString(`{"enabled":true,"interval_seconds":15}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.True(t, svc.updateConfigCalled)
+	require.True(t, svc.configInput.Enabled)
+	require.Equal(t, 15, svc.configInput.IntervalSeconds)
+	require.Contains(t, rec.Body.String(), `"interval_seconds":15`)
+}
+
 func TestUpstreamManagementHandlerSaveGroupMapping(t *testing.T) {
 	groupID := int64(9)
 	svc := &upstreamManagementHandlerServiceStub{result: service.UpstreamGroupCompareResult{
@@ -136,6 +199,39 @@ func TestUpstreamManagementHandlerSaveGroupMapping(t *testing.T) {
 	require.Equal(t, "VIP", svc.mappingInput.UpstreamGroupName)
 	require.NotNil(t, svc.mappingInput.LocalGroupID)
 	require.Equal(t, groupID, *svc.mappingInput.LocalGroupID)
+}
+
+func TestUpstreamManagementHandlerCreateLocalGroupFromUpstream(t *testing.T) {
+	groupID := int64(42)
+	svc := &upstreamManagementHandlerServiceStub{result: service.UpstreamGroupCompareResult{
+		DefaultProvider: service.UpstreamProviderConfig{Slug: "default", Name: "Default"},
+		Items: []service.UpstreamGroupComparison{{
+			ProviderSlug:      "default",
+			ProviderName:      "Default",
+			UpstreamGroupName: "VIP",
+			UpstreamRate:      2.5,
+			LocalGroupID:      &groupID,
+			LocalGroupName:    "VIP",
+			Matched:           true,
+		}},
+		Records: []service.UpstreamGroupRateFixRecord{},
+	}}
+	router := newUpstreamManagementHandlerTestRouter(svc)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/admin/upstream-management/groups/local-groups",
+		bytes.NewBufferString(`{"upstream_group_name":"VIP","rate_multiplier":2.5}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.True(t, svc.createLocalCalled)
+	require.Equal(t, "VIP", svc.createLocalInput.UpstreamGroupName)
+	require.Equal(t, 2.5, svc.createLocalInput.RateMultiplier)
+	require.Contains(t, rec.Body.String(), `"local_group_id":42`)
 }
 
 func TestUpstreamManagementHandlerModelSquare(t *testing.T) {

@@ -34,6 +34,20 @@ export interface UpstreamGroupCompareResult {
   records: UpstreamGroupRateFixRecord[]
 }
 
+export interface UpstreamGroupAutoRateFixConfig {
+  enabled: boolean
+  interval_seconds: number
+  last_run_at?: string
+  last_run_status?: string
+  last_run_message?: string
+  updated_at?: string
+}
+
+export interface UpstreamGroupLocalCreateRequest {
+  upstream_group_name: string
+  rate_multiplier: number
+}
+
 export async function getGroups(): Promise<UpstreamGroupCompareResult> {
   const { data } = await apiClient.get<UpstreamGroupCompareResult>(
     '/admin/upstream-management/groups'
@@ -44,6 +58,23 @@ export async function getGroups(): Promise<UpstreamGroupCompareResult> {
 export async function applyRateFixes(): Promise<UpstreamGroupCompareResult> {
   const { data } = await apiClient.post<UpstreamGroupCompareResult>(
     '/admin/upstream-management/groups/rate-fixes'
+  )
+  return data
+}
+
+export async function getRateFixConfig(): Promise<UpstreamGroupAutoRateFixConfig> {
+  const { data } = await apiClient.get<UpstreamGroupAutoRateFixConfig>(
+    '/admin/upstream-management/groups/rate-fix-config'
+  )
+  return data
+}
+
+export async function updateRateFixConfig(
+  payload: Pick<UpstreamGroupAutoRateFixConfig, 'enabled' | 'interval_seconds'>
+): Promise<UpstreamGroupAutoRateFixConfig> {
+  const { data } = await apiClient.put<UpstreamGroupAutoRateFixConfig>(
+    '/admin/upstream-management/groups/rate-fix-config',
+    payload
   )
   return data
 }
@@ -62,10 +93,23 @@ export async function saveGroupMapping(
   return data
 }
 
+export async function createLocalGroupFromUpstream(
+  payload: UpstreamGroupLocalCreateRequest
+): Promise<UpstreamGroupCompareResult> {
+  const { data } = await apiClient.post<UpstreamGroupCompareResult>(
+    '/admin/upstream-management/groups/local-groups',
+    payload
+  )
+  return data
+}
+
 export const upstreamManagementAPI = {
   getGroups,
   applyRateFixes,
-  saveGroupMapping
+  getRateFixConfig,
+  updateRateFixConfig,
+  saveGroupMapping,
+  createLocalGroupFromUpstream
 }
 
 export default upstreamManagementAPI

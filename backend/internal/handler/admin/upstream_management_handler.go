@@ -12,7 +12,10 @@ import (
 type upstreamManagementService interface {
 	CompareGroups(ctx context.Context) (service.UpstreamGroupCompareResult, error)
 	ApplyRateFixes(ctx context.Context) (service.UpstreamGroupCompareResult, error)
+	GetRateFixConfig(ctx context.Context) (service.UpstreamGroupAutoRateFixConfig, error)
+	UpdateRateFixConfig(ctx context.Context, input service.UpstreamGroupAutoRateFixConfig) (service.UpstreamGroupAutoRateFixConfig, error)
 	SaveGroupMapping(ctx context.Context, input service.UpstreamGroupMappingInput) (service.UpstreamGroupCompareResult, error)
+	CreateLocalGroupFromUpstream(ctx context.Context, input service.UpstreamGroupLocalCreateInput) (service.UpstreamGroupCompareResult, error)
 }
 
 type upstreamModelSquareService interface {
@@ -49,6 +52,29 @@ func (h *UpstreamManagementHandler) ApplyRateFixes(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *UpstreamManagementHandler) GetRateFixConfig(c *gin.Context) {
+	result, err := h.service.GetRateFixConfig(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *UpstreamManagementHandler) UpdateRateFixConfig(c *gin.Context) {
+	var input service.UpstreamGroupAutoRateFixConfig
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	result, err := h.service.UpdateRateFixConfig(c.Request.Context(), input)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
 func (h *UpstreamManagementHandler) SaveGroupMapping(c *gin.Context) {
 	var input service.UpstreamGroupMappingInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -56,6 +82,20 @@ func (h *UpstreamManagementHandler) SaveGroupMapping(c *gin.Context) {
 		return
 	}
 	result, err := h.service.SaveGroupMapping(c.Request.Context(), input)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *UpstreamManagementHandler) CreateLocalGroupFromUpstream(c *gin.Context) {
+	var input service.UpstreamGroupLocalCreateInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	result, err := h.service.CreateLocalGroupFromUpstream(c.Request.Context(), input)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

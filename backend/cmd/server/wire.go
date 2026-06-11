@@ -100,6 +100,7 @@ func provideCleanup(
 	paymentOrderExpiry *service.PaymentOrderExpiryService,
 	channelMonitorRunner *service.ChannelMonitorRunner,
 	quotaFlusher *service.UserPlatformQuotaUsageFlusher,
+	upstreamGroupRateFixScheduler *service.UpstreamGroupRateFixScheduler,
 ) func() {
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -255,6 +256,12 @@ func provideCleanup(
 			{"UserPlatformQuotaUsageFlusher", func() error {
 				if quotaFlusher != nil {
 					quotaFlusher.Stop()
+				}
+				return nil
+			}},
+			{"UpstreamGroupRateFixScheduler", func() error {
+				if upstreamGroupRateFixScheduler != nil {
+					upstreamGroupRateFixScheduler.Stop()
 				}
 				return nil
 			}},

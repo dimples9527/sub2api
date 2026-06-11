@@ -8,18 +8,36 @@ import (
 
 type upstreamAccountSyncProviderSourceStub struct {
 	defaultProvider UpstreamProviderConfig
+	providers       []UpstreamProviderConfig
 	keys            []UpstreamProviderKey
+	keysBySlug      map[string][]UpstreamProviderKey
 	defaultErr      error
+	providersErr    error
 	keysErr         error
 	fetchedSlug     string
+	fetchedSlugs    []string
 }
 
 func (s *upstreamAccountSyncProviderSourceStub) GetDefaultProvider(ctx context.Context) (UpstreamProviderConfig, error) {
 	return s.defaultProvider, s.defaultErr
 }
 
+func (s *upstreamAccountSyncProviderSourceStub) ListProviders(ctx context.Context) ([]UpstreamProviderConfig, error) {
+	if s.providersErr != nil {
+		return nil, s.providersErr
+	}
+	if s.providers != nil {
+		return s.providers, nil
+	}
+	return []UpstreamProviderConfig{s.defaultProvider}, nil
+}
+
 func (s *upstreamAccountSyncProviderSourceStub) FetchProviderKeys(ctx context.Context, slug string) ([]UpstreamProviderKey, []string, error) {
 	s.fetchedSlug = slug
+	s.fetchedSlugs = append(s.fetchedSlugs, slug)
+	if s.keysBySlug != nil {
+		return s.keysBySlug[slug], []string{"provider warning"}, s.keysErr
+	}
 	return s.keys, []string{"provider warning"}, s.keysErr
 }
 
@@ -94,7 +112,7 @@ func newUpstreamAccountSyncServiceForTest(
 	return svc, accountManager
 }
 
-func TestUpstreamAccountSyncPreviewUsesDefaultProviderAndManualGroupMapping(t *testing.T) {
+func TestUpstreamAccountSyncPreviewUsesNonDefaultProvidersAndManualGroupMapping(t *testing.T) {
 	provider := &upstreamAccountSyncProviderSourceStub{
 		defaultProvider: UpstreamProviderConfig{
 			Slug:              "main",
@@ -104,13 +122,20 @@ func TestUpstreamAccountSyncPreviewUsesDefaultProviderAndManualGroupMapping(t *t
 			AccountNamePrefix: "up-",
 			IsDefault:         true,
 		},
-		keys: []UpstreamProviderKey{
-			{ProviderSlug: "main", KeyName: "up-alice", GroupName: "VIP", RateMultiplier: 2.5},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main upstream", Type: UpstreamProviderTypeSub2API, BaseURL: "https://main.example.com", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup upstream", Type: UpstreamProviderTypeSub2API, BaseURL: "https://backup.example.com", AccountNamePrefix: "backup-", Enabled: true},
+			{Slug: "disabled", Name: "Disabled upstream", Type: UpstreamProviderTypeSub2API, BaseURL: "https://disabled.example.com", Enabled: false},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {
+				{ProviderSlug: "backup", KeyName: "alice", GroupName: "VIP", RateMultiplier: 2.5},
+			},
 		},
 	}
 	settings := newUpstreamManagementSettingRepoStub()
 	settings.values[SettingKeyUpstreamGroupMappings] = `[{
-		"provider_slug":"main",
+		"provider_slug":"backup",
 		"upstream_group_name":"VIP",
 		"upstream_group_key":"vip",
 		"local_group_id":9
@@ -129,11 +154,14 @@ func TestUpstreamAccountSyncPreviewUsesDefaultProviderAndManualGroupMapping(t *t
 	if err != nil {
 		t.Fatalf("Preview returned error: %v", err)
 	}
-	if provider.fetchedSlug != "main" {
-		t.Fatalf("fetched slug = %q, want main", provider.fetchedSlug)
+	if len(provider.fetchedSlugs) != 1 || provider.fetchedSlugs[0] != "backup" {
+		t.Fatalf("fetched slugs = %+v, want [backup]", provider.fetchedSlugs)
 	}
 	if result.Summary.UpstreamKeyCount != 1 || result.Summary.CreateCount != 1 {
 		t.Fatalf("summary = %+v, want one upstream key and one create", result.Summary)
+	}
+	if len(result.Providers) != 1 || result.Providers[0].Slug != "backup" {
+		t.Fatalf("providers = %+v, want only backup", result.Providers)
 	}
 	if len(result.Items) != 1 {
 		t.Fatalf("item count = %d, want 1", len(result.Items))
@@ -142,8 +170,11 @@ func TestUpstreamAccountSyncPreviewUsesDefaultProviderAndManualGroupMapping(t *t
 	if item.Action != UpstreamAccountSyncActionCreate {
 		t.Fatalf("action = %q, want create", item.Action)
 	}
-	if item.LocalAccountName != "up-alice" {
-		t.Fatalf("local account name = %q, want up-alice", item.LocalAccountName)
+	if item.UpstreamKeyName != "alice" {
+		t.Fatalf("upstream key name = %q, want alice", item.UpstreamKeyName)
+	}
+	if item.LocalAccountName != "backup-alice" {
+		t.Fatalf("local account name = %q, want backup-alice", item.LocalAccountName)
 	}
 	if item.LocalGroupID == nil || *item.LocalGroupID != 9 || item.LocalGroupName != "Mapped VIP" {
 		t.Fatalf("local group match = id %v name %q, want 9 Mapped VIP", item.LocalGroupID, item.LocalGroupName)
@@ -152,8 +183,14 @@ func TestUpstreamAccountSyncPreviewUsesDefaultProviderAndManualGroupMapping(t *t
 
 func TestUpstreamAccountSyncPreviewDetectsDuplicateLocalAccountNames(t *testing.T) {
 	provider := &upstreamAccountSyncProviderSourceStub{
-		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", AccountNamePrefix: "up-"},
-		keys:            []UpstreamProviderKey{{ProviderSlug: "main", KeyName: "up-alice", GroupName: "VIP", RateMultiplier: 1}},
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", AccountNamePrefix: "main-", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup", AccountNamePrefix: "up-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {{ProviderSlug: "backup", KeyName: "alice", GroupName: "VIP", RateMultiplier: 1}},
+		},
 	}
 	svc, _ := newUpstreamAccountSyncServiceForTest(
 		provider,
@@ -186,9 +223,15 @@ func TestUpstreamAccountSyncRunCreatesUpdatesAndAppliesRateGuard(t *testing.T) {
 			BaseURL:           "https://upstream.example.com",
 			AccountNamePrefix: "up-",
 		},
-		keys: []UpstreamProviderKey{
-			{ProviderSlug: "main", KeyName: "up-new", GroupName: "VIP", RateMultiplier: 2},
-			{ProviderSlug: "main", KeyName: "up-old", GroupName: "VIP", RateMultiplier: 2},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", Type: UpstreamProviderTypeSub2API, BaseURL: "https://main.example.com", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup", Type: UpstreamProviderTypeSub2API, BaseURL: "https://backup.example.com", AccountNamePrefix: "up-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {
+				{ProviderSlug: "backup", KeyName: "new", GroupName: "VIP", RateMultiplier: 2},
+				{ProviderSlug: "backup", KeyName: "old", GroupName: "VIP", RateMultiplier: 2},
+			},
 		},
 	}
 	settings := newUpstreamManagementSettingRepoStub()
@@ -232,7 +275,7 @@ func TestUpstreamAccountSyncRunCreatesUpdatesAndAppliesRateGuard(t *testing.T) {
 	if created.Name != "up-new" || created.Platform != PlatformOpenAI || created.Type != AccountTypeAPIKey {
 		t.Fatalf("created input = %+v, want OpenAI API key named up-new", created)
 	}
-	if created.Credentials["api_key"] != "up-new" || created.Credentials["base_url"] != "https://upstream.example.com" {
+	if created.Credentials["api_key"] != "new" || created.Credentials["base_url"] != "https://backup.example.com" {
 		t.Fatalf("created credentials = %+v, want upstream key and base_url", created.Credentials)
 	}
 	if len(created.GroupIDs) != 1 || created.GroupIDs[0] != 7 {
@@ -245,7 +288,7 @@ func TestUpstreamAccountSyncRunCreatesUpdatesAndAppliesRateGuard(t *testing.T) {
 	if update.id != 10 {
 		t.Fatalf("updated account id = %d, want 10", update.id)
 	}
-	if update.input.Credentials["api_key"] != "up-old" || update.input.Credentials["base_url"] != "https://upstream.example.com" {
+	if update.input.Credentials["api_key"] != "old" || update.input.Credentials["base_url"] != "https://backup.example.com" {
 		t.Fatalf("updated credentials = %+v, want refreshed upstream key and base_url", update.input.Credentials)
 	}
 	if _, ok := update.input.Credentials["model_mapping"]; !ok {
@@ -273,8 +316,14 @@ func TestUpstreamAccountSyncRunDoesNotUpdateNoopAccount(t *testing.T) {
 			Type:    UpstreamProviderTypeSub2API,
 			BaseURL: "https://upstream.example.com",
 		},
-		keys: []UpstreamProviderKey{
-			{ProviderSlug: "main", KeyName: "up-stable", GroupName: "VIP", RateMultiplier: 2},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", Type: UpstreamProviderTypeSub2API, BaseURL: "https://main.example.com", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup", Type: UpstreamProviderTypeSub2API, BaseURL: "https://upstream.example.com", AccountNamePrefix: "up-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {
+				{ProviderSlug: "backup", KeyName: "stable", GroupName: "VIP", RateMultiplier: 2},
+			},
 		},
 	}
 	svc, accounts := newUpstreamAccountSyncServiceForTest(
@@ -285,7 +334,7 @@ func TestUpstreamAccountSyncRunDoesNotUpdateNoopAccount(t *testing.T) {
 			Name:        "up-stable",
 			Platform:    PlatformOpenAI,
 			Type:        AccountTypeAPIKey,
-			Credentials: map[string]any{"api_key": "up-stable", "base_url": "https://upstream.example.com"},
+			Credentials: map[string]any{"api_key": "stable", "base_url": "https://upstream.example.com"},
 			GroupIDs:    []int64{7},
 			Groups:      []*Group{{ID: 7, Name: "VIP", RateMultiplier: 2}},
 		}},

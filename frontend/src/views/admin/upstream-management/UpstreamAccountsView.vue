@@ -5,11 +5,11 @@
         <div class="flex flex-wrap items-center gap-3">
           <div class="flex min-w-0 flex-1 flex-wrap items-center gap-3">
             <div class="rounded-lg border border-gray-200 px-3 py-2 dark:border-dark-600">
-              <div class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.upstreamAccounts.defaultProvider') }}</div>
+              <div class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.upstreamAccounts.syncProviders') }}</div>
               <div class="mt-0.5 flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
-                <span>{{ result?.default_provider?.name || '-' }}</span>
-                <code v-if="result?.default_provider?.slug" class="text-xs font-normal text-gray-500 dark:text-gray-400">
-                  {{ result.default_provider.slug }}
+                <span>{{ syncProviderLabel }}</span>
+                <code v-if="syncProviderCode" class="text-xs font-normal text-gray-500 dark:text-gray-400">
+                  {{ syncProviderCode }}
                 </code>
               </div>
             </div>
@@ -240,10 +240,20 @@ const emptySummary = {
 }
 
 const summary = computed(() => result.value?.summary || emptySummary)
+const syncProviders = computed(() => result.value?.providers || [])
 const items = computed<UpstreamAccountSyncItem[]>(() => result.value?.items || [])
 const warnings = computed(() => result.value?.warnings || [])
 const records = computed<UpstreamAccountSyncRecord[]>(() => result.value?.records || [])
 const canSync = computed(() => summary.value.create_count > 0 || summary.value.update_count > 0 || summary.value.rate_violation_count > 0)
+const syncProviderLabel = computed(() => {
+  if (syncProviders.value.length === 1) return syncProviders.value[0].name || syncProviders.value[0].slug
+  if (syncProviders.value.length > 1) return t('admin.upstreamAccounts.multipleProviders', { count: syncProviders.value.length })
+  return '-'
+})
+const syncProviderCode = computed(() => {
+  if (syncProviders.value.length === 1) return syncProviders.value[0].slug
+  return ''
+})
 const providerOptions = computed<SelectOption[]>(() => [
   { value: '', label: t('admin.upstreamAccounts.allProviders') },
   ...Array.from(new Map(items.value.map(item => [

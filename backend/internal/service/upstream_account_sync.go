@@ -66,6 +66,7 @@ type UpstreamAccountSyncItem struct {
 
 type UpstreamAccountSyncResult struct {
 	DefaultProvider UpstreamProviderConfig      `json:"default_provider"`
+	Providers       []UpstreamProviderConfig    `json:"providers"`
 	Summary         UpstreamAccountSyncSummary  `json:"summary"`
 	Items           []UpstreamAccountSyncItem   `json:"items"`
 	Warnings        []string                    `json:"warnings,omitempty"`
@@ -132,6 +133,10 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 	now := time.Now().UTC()
 	for index := range result.Items {
 		item := &result.Items[index]
+		provider := previewState.providerBySlug[item.ProviderSlug]
+		if provider.Slug == "" {
+			provider = result.DefaultProvider
+		}
 		switch item.Action {
 		case UpstreamAccountSyncActionCreate:
 			if !req.CreateMissing {
@@ -147,12 +152,12 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 				result.Summary.SkipCount++
 				continue
 			}
-			extra := upstreamAccountSyncExtra(result.DefaultProvider, *item, now, nil)
+			extra := upstreamAccountSyncExtra(provider, *item, now, nil)
 			_, err := s.accountManager.CreateAccount(ctx, &CreateAccountInput{
 				Name:                  item.LocalAccountName,
 				Platform:              PlatformOpenAI,
 				Type:                  AccountTypeAPIKey,
-				Credentials:           upstreamAccountSyncCredentials(nil, item.UpstreamKeyName, result.DefaultProvider.BaseURL),
+				Credentials:           upstreamAccountSyncCredentials(nil, item.UpstreamKeyName, provider.BaseURL),
 				Extra:                 extra,
 				GroupIDs:              groupIDs,
 				SkipDefaultGroupBind:  true,
@@ -183,9 +188,9 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 				result.Summary.RateViolationCount++
 				result.Summary.UnboundGroupCount += len(lowGroupIDs)
 			}
-			extra := upstreamAccountSyncExtra(result.DefaultProvider, *item, now, account.Extra)
+			extra := upstreamAccountSyncExtra(provider, *item, now, account.Extra)
 			_, err := s.accountManager.UpdateAccount(ctx, account.ID, &UpdateAccountInput{
-				Credentials:           upstreamAccountSyncCredentials(account.Credentials, item.UpstreamKeyName, result.DefaultProvider.BaseURL),
+				Credentials:           upstreamAccountSyncCredentials(account.Credentials, item.UpstreamKeyName, provider.BaseURL),
 				Extra:                 extra,
 				GroupIDs:              &nextGroupIDs,
 				SkipMixedChannelCheck: true,
@@ -198,9 +203,10 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 		}
 	}
 
+	recordProviderSlug, recordProviderName := upstreamAccountSyncRecordProvider(result)
 	records, err := s.prependRecord(ctx, UpstreamAccountSyncRecord{
-		ProviderSlug:       result.DefaultProvider.Slug,
-		ProviderName:       result.DefaultProvider.Name,
+		ProviderSlug:       recordProviderSlug,
+		ProviderName:       recordProviderName,
 		CreatedCount:       result.Summary.CreateCount,
 		UpdatedCount:       result.Summary.UpdateCount,
 		SkippedCount:       result.Summary.SkipCount,
@@ -239,7 +245,8 @@ func (s *UpstreamAccountSyncService) ListRecords(ctx context.Context) ([]Upstrea
 }
 
 type upstreamAccountSyncPreviewState struct {
-	accountByID map[int64]Account
+	accountByID    map[int64]Account
+	providerBySlug map[string]UpstreamProviderConfig
 }
 
 func (s *UpstreamAccountSyncService) preview(ctx context.Context) (UpstreamAccountSyncResult, upstreamAccountSyncPreviewState, error) {
@@ -256,7 +263,7 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context) (UpstreamAccou
 	if err != nil {
 		return UpstreamAccountSyncResult{}, upstreamAccountSyncPreviewState{}, err
 	}
-	keys, warnings, err := s.providerSource.FetchProviderKeys(ctx, defaultProvider.Slug)
+	syncProviders, err := s.listAccountSyncProviders(ctx, defaultProvider)
 	if err != nil {
 		return UpstreamAccountSyncResult{}, upstreamAccountSyncPreviewState{}, err
 	}
@@ -273,97 +280,137 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context) (UpstreamAccou
 		return UpstreamAccountSyncResult{}, upstreamAccountSyncPreviewState{}, err
 	}
 
-	groupResolver := newUpstreamAccountSyncGroupResolver(defaultProvider, localGroups, mappings)
 	accountsByName := upstreamAccountSyncAccountsByName(accounts)
 	accountByID := make(map[int64]Account, len(accounts))
 	for _, account := range accounts {
 		accountByID[account.ID] = account
 	}
+	providerBySlug := make(map[string]UpstreamProviderConfig, len(syncProviders))
+	redactedProviders := make([]UpstreamProviderConfig, 0, len(syncProviders))
+	for _, provider := range syncProviders {
+		providerBySlug[provider.Slug] = provider
+		redactedProviders = append(redactedProviders, redactUpstreamProvider(provider))
+	}
 
 	result := UpstreamAccountSyncResult{
 		DefaultProvider: redactUpstreamProvider(defaultProvider),
+		Providers:       redactedProviders,
 		Items:           []UpstreamAccountSyncItem{},
-		Warnings:        warnings,
+		Warnings:        []string{},
 		Records:         []UpstreamAccountSyncRecord{},
 	}
-	for _, key := range keys {
-		if key.ProviderSlug != "" && key.ProviderSlug != defaultProvider.Slug {
-			continue
+	for _, provider := range syncProviders {
+		groupResolver := newUpstreamAccountSyncGroupResolver(provider, localGroups, mappings)
+		keys, warnings, err := s.providerSource.FetchProviderKeys(ctx, provider.Slug)
+		if err != nil {
+			return UpstreamAccountSyncResult{}, upstreamAccountSyncPreviewState{}, err
 		}
-		result.Summary.UpstreamKeyCount++
-		item := UpstreamAccountSyncItem{
-			ProviderSlug:           defaultProvider.Slug,
-			ProviderName:           defaultProvider.Name,
-			UpstreamKeyName:        strings.TrimSpace(key.KeyName),
-			LocalAccountName:       strings.TrimSpace(key.KeyName),
-			UpstreamGroupName:      strings.TrimSpace(key.GroupName),
-			UpstreamRateMultiplier: key.RateMultiplier,
+		for _, warning := range warnings {
+			if strings.TrimSpace(warning) == "" {
+				continue
+			}
+			result.Warnings = append(result.Warnings, fmt.Sprintf("%s: %s", provider.Name, warning))
 		}
-		if item.LocalAccountName == "" {
-			item.Action = UpstreamAccountSyncActionSkip
-			item.SkipReason = "upstream key name is empty"
-			result.Summary.SkipCount++
-			result.Items = append(result.Items, item)
-			continue
-		}
-		if group, ok := groupResolver.resolve(key.GroupName); ok {
-			groupID := group.ID
-			rate := group.RateMultiplier
-			item.LocalGroupID = &groupID
-			item.LocalGroupName = group.Name
-			item.LocalRateMultiplier = &rate
-		} else {
-			item.Action = UpstreamAccountSyncActionSkip
-			item.SkipReason = "upstream group is not matched"
-			result.Summary.SkipCount++
-			result.Items = append(result.Items, item)
-			continue
-		}
+		for _, key := range keys {
+			if key.ProviderSlug != "" && key.ProviderSlug != provider.Slug {
+				continue
+			}
+			result.Summary.UpstreamKeyCount++
+			item := UpstreamAccountSyncItem{
+				ProviderSlug:           provider.Slug,
+				ProviderName:           provider.Name,
+				UpstreamKeyName:        strings.TrimSpace(key.KeyName),
+				LocalAccountName:       upstreamProviderKeyName(provider, key.KeyName),
+				UpstreamGroupName:      strings.TrimSpace(key.GroupName),
+				UpstreamRateMultiplier: key.RateMultiplier,
+			}
+			if item.LocalAccountName == "" {
+				item.Action = UpstreamAccountSyncActionSkip
+				item.SkipReason = "upstream key name is empty"
+				result.Summary.SkipCount++
+				result.Items = append(result.Items, item)
+				continue
+			}
+			if group, ok := groupResolver.resolve(key.GroupName); ok {
+				groupID := group.ID
+				rate := group.RateMultiplier
+				item.LocalGroupID = &groupID
+				item.LocalGroupName = group.Name
+				item.LocalRateMultiplier = &rate
+			} else {
+				item.Action = UpstreamAccountSyncActionSkip
+				item.SkipReason = "upstream group is not matched"
+				result.Summary.SkipCount++
+				result.Items = append(result.Items, item)
+				continue
+			}
 
-		matches := accountsByName[normalizeUpstreamGroupMatchName(item.LocalAccountName)]
-		if len(matches) > 1 {
-			item.Action = UpstreamAccountSyncActionConflict
-			item.ConflictAccountIDs = accountIDs(matches)
-			result.Summary.ConflictCount++
-			result.Items = append(result.Items, item)
-			continue
-		}
-		if len(matches) == 0 {
-			item.Action = UpstreamAccountSyncActionCreate
-			result.Summary.CreateCount++
-			result.Items = append(result.Items, item)
-			continue
-		}
+			matches := accountsByName[normalizeUpstreamGroupMatchName(item.LocalAccountName)]
+			if len(matches) > 1 {
+				item.Action = UpstreamAccountSyncActionConflict
+				item.ConflictAccountIDs = accountIDs(matches)
+				result.Summary.ConflictCount++
+				result.Items = append(result.Items, item)
+				continue
+			}
+			if len(matches) == 0 {
+				item.Action = UpstreamAccountSyncActionCreate
+				result.Summary.CreateCount++
+				result.Items = append(result.Items, item)
+				continue
+			}
 
-		account := matches[0]
-		accountID := account.ID
-		item.MatchedAccountID = &accountID
-		item.MatchedAccountName = account.Name
-		result.Summary.MatchedAccountCount++
-		if !upstreamAccountSyncAccountCompatible(account) {
-			item.Action = UpstreamAccountSyncActionSkip
-			item.SkipReason = "matched account is not an OpenAI API key account"
-			result.Summary.SkipCount++
+			account := matches[0]
+			accountID := account.ID
+			item.MatchedAccountID = &accountID
+			item.MatchedAccountName = account.Name
+			result.Summary.MatchedAccountCount++
+			if !upstreamAccountSyncAccountCompatible(account) {
+				item.Action = UpstreamAccountSyncActionSkip
+				item.SkipReason = "matched account is not an OpenAI API key account"
+				result.Summary.SkipCount++
+				result.Items = append(result.Items, item)
+				continue
+			}
+			lowGroupIDs, lowGroupNames, _ := upstreamAccountSyncLowRateGroups(account, item.UpstreamRateMultiplier)
+			if len(lowGroupIDs) > 0 {
+				item.RateViolation = true
+				item.UnboundGroupIDs = lowGroupIDs
+				item.UnboundGroupNames = lowGroupNames
+				result.Summary.RateViolationCount++
+				result.Summary.UnboundGroupCount += len(lowGroupIDs)
+			}
+			if upstreamAccountSyncNeedsUpdate(account, item, provider) || item.RateViolation {
+				item.Action = UpstreamAccountSyncActionUpdate
+				result.Summary.UpdateCount++
+			} else {
+				item.Action = UpstreamAccountSyncActionNoop
+			}
 			result.Items = append(result.Items, item)
-			continue
 		}
-		lowGroupIDs, lowGroupNames, _ := upstreamAccountSyncLowRateGroups(account, item.UpstreamRateMultiplier)
-		if len(lowGroupIDs) > 0 {
-			item.RateViolation = true
-			item.UnboundGroupIDs = lowGroupIDs
-			item.UnboundGroupNames = lowGroupNames
-			result.Summary.RateViolationCount++
-			result.Summary.UnboundGroupCount += len(lowGroupIDs)
-		}
-		if upstreamAccountSyncNeedsUpdate(account, item, defaultProvider) || item.RateViolation {
-			item.Action = UpstreamAccountSyncActionUpdate
-			result.Summary.UpdateCount++
-		} else {
-			item.Action = UpstreamAccountSyncActionNoop
-		}
-		result.Items = append(result.Items, item)
 	}
-	return result, upstreamAccountSyncPreviewState{accountByID: accountByID}, nil
+	return result, upstreamAccountSyncPreviewState{accountByID: accountByID, providerBySlug: providerBySlug}, nil
+}
+
+func (s *UpstreamAccountSyncService) listAccountSyncProviders(ctx context.Context, defaultProvider UpstreamProviderConfig) ([]UpstreamProviderConfig, error) {
+	source, ok := s.providerSource.(interface {
+		ListProviders(context.Context) ([]UpstreamProviderConfig, error)
+	})
+	if !ok {
+		return []UpstreamProviderConfig{}, nil
+	}
+	providers, err := source.ListProviders(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list upstream account sync providers: %w", err)
+	}
+	out := make([]UpstreamProviderConfig, 0, len(providers))
+	for _, provider := range providers {
+		if provider.Slug == "" || provider.Slug == defaultProvider.Slug || provider.IsDefault || !provider.Enabled {
+			continue
+		}
+		out = append(out, provider)
+	}
+	return out, nil
 }
 
 func (s *UpstreamAccountSyncService) loadAccounts(ctx context.Context) ([]Account, error) {
@@ -424,9 +471,10 @@ func (s *UpstreamAccountSyncService) prependRecord(ctx context.Context, record U
 }
 
 func (s *UpstreamAccountSyncService) finishSyncWithError(ctx context.Context, result UpstreamAccountSyncResult, runErr error) (UpstreamAccountSyncResult, error) {
+	providerSlug, providerName := upstreamAccountSyncRecordProvider(result)
 	record := UpstreamAccountSyncRecord{
-		ProviderSlug:       result.DefaultProvider.Slug,
-		ProviderName:       result.DefaultProvider.Name,
+		ProviderSlug:       providerSlug,
+		ProviderName:       providerName,
 		CreatedCount:       result.Summary.CreateCount,
 		UpdatedCount:       result.Summary.UpdateCount,
 		SkippedCount:       result.Summary.SkipCount,
@@ -442,6 +490,16 @@ func (s *UpstreamAccountSyncService) finishSyncWithError(ctx context.Context, re
 	}
 	result.Records = records
 	return result, runErr
+}
+
+func upstreamAccountSyncRecordProvider(result UpstreamAccountSyncResult) (string, string) {
+	if len(result.Providers) == 1 {
+		return result.Providers[0].Slug, result.Providers[0].Name
+	}
+	if len(result.Providers) > 1 {
+		return "multiple", "Multiple upstream providers"
+	}
+	return result.DefaultProvider.Slug, result.DefaultProvider.Name
 }
 
 type upstreamAccountSyncGroupResolver struct {
