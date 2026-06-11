@@ -194,6 +194,23 @@ func TestSecurityHeaders(t *testing.T) {
 		assert.Contains(t, csp, "default-src 'self'")
 	})
 
+	t.Run("default_policy_allows_same_origin_frames", func(t *testing.T) {
+		cfg := config.CSPConfig{
+			Enabled: true,
+			Policy:  config.DefaultCSPPolicy,
+		}
+		middleware := SecurityHeaders(cfg, nil)
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+
+		middleware(c)
+
+		csp := w.Header().Get("Content-Security-Policy")
+		assert.Contains(t, csp, "frame-src 'self'")
+	})
+
 	t.Run("uses_default_policy_when_whitespace_only", func(t *testing.T) {
 		cfg := config.CSPConfig{
 			Enabled: true,
