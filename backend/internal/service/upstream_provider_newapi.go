@@ -108,12 +108,16 @@ func (a *NewAPIProviderAdapter) FetchKeys(ctx context.Context, provider Upstream
 }
 
 func (a *NewAPIProviderAdapter) FetchGroups(ctx context.Context, provider UpstreamProviderConfig) ([]UpstreamProviderGroup, []string, error) {
+	groupsURL := strings.TrimSpace(provider.AvailableGroupsURL)
+	if groupsURL == "" {
+		groupsURL = provider.GroupsURL
+	}
 	for attempt := 0; attempt < 2; attempt++ {
 		session, err := a.ensureSession(ctx, provider)
 		if err != nil {
 			return nil, nil, err
 		}
-		groupsPayload, status, err := a.request(ctx, provider, session, provider.GroupsURL, "newapi provider groups")
+		groupsPayload, status, err := a.request(ctx, provider, session, groupsURL, "newapi provider groups")
 		if err != nil {
 			return nil, nil, err
 		}

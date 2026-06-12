@@ -44,15 +44,16 @@ func (r *UpstreamProviderAdapterRegistry) Get(providerType string) (UpstreamProv
 
 func newUpstreamProviderTestResult(provider UpstreamProviderConfig) UpstreamProviderTestResult {
 	return UpstreamProviderTestResult{
-		Type:              provider.Type,
-		Slug:              provider.Slug,
-		Name:              provider.Name,
-		BaseURL:           provider.BaseURL,
-		LoginURL:          provider.LoginURL,
-		KeysURL:           provider.APIKeysURL,
-		GroupsURL:         provider.GroupsURL,
-		AccountNamePrefix: provider.AccountNamePrefix,
-		ParsedKeys:        []UpstreamProviderKey{},
+		Type:               provider.Type,
+		Slug:               provider.Slug,
+		Name:               provider.Name,
+		BaseURL:            provider.BaseURL,
+		LoginURL:           provider.LoginURL,
+		KeysURL:            provider.APIKeysURL,
+		GroupsURL:          provider.GroupsURL,
+		AvailableGroupsURL: provider.AvailableGroupsURL,
+		AccountNamePrefix:  provider.AccountNamePrefix,
+		ParsedKeys:         []UpstreamProviderKey{},
 	}
 }
 

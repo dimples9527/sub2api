@@ -12,6 +12,7 @@ export interface UpstreamProviderConfig {
   login_url?: string
   api_keys_url: string
   groups_url?: string
+  available_groups_url?: string
   email?: string
   username?: string
   password?: string
@@ -49,6 +50,7 @@ export interface UpstreamProviderTestResult {
   login_url: string
   keys_url: string
   groups_url?: string
+  available_groups_url?: string
   account_name_prefix: string
   login: UpstreamProviderTestStage
   keys: UpstreamProviderTestStage

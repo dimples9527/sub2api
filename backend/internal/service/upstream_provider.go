@@ -31,6 +31,7 @@ type UpstreamProviderConfig struct {
 	LoginURL           string `json:"login_url"`
 	APIKeysURL         string `json:"api_keys_url"`
 	GroupsURL          string `json:"groups_url"`
+	AvailableGroupsURL string `json:"available_groups_url"`
 	Email              string `json:"email"`
 	Username           string `json:"username"`
 	Password           string `json:"password,omitempty"`
@@ -71,19 +72,20 @@ type UpstreamProviderTestStage struct {
 }
 
 type UpstreamProviderTestResult struct {
-	Type              string                     `json:"type"`
-	Slug              string                     `json:"slug"`
-	Name              string                     `json:"name"`
-	BaseURL           string                     `json:"base_url"`
-	LoginURL          string                     `json:"login_url"`
-	KeysURL           string                     `json:"keys_url"`
-	GroupsURL         string                     `json:"groups_url,omitempty"`
-	AccountNamePrefix string                     `json:"account_name_prefix"`
-	Login             UpstreamProviderTestStage  `json:"login"`
-	Keys              UpstreamProviderTestStage  `json:"keys"`
-	Groups            *UpstreamProviderTestStage `json:"groups,omitempty"`
-	ParsedKeys        []UpstreamProviderKey      `json:"parsed_keys"`
-	Warnings          []string                   `json:"warnings,omitempty"`
+	Type               string                     `json:"type"`
+	Slug               string                     `json:"slug"`
+	Name               string                     `json:"name"`
+	BaseURL            string                     `json:"base_url"`
+	LoginURL           string                     `json:"login_url"`
+	KeysURL            string                     `json:"keys_url"`
+	GroupsURL          string                     `json:"groups_url,omitempty"`
+	AvailableGroupsURL string                     `json:"available_groups_url,omitempty"`
+	AccountNamePrefix  string                     `json:"account_name_prefix"`
+	Login              UpstreamProviderTestStage  `json:"login"`
+	Keys               UpstreamProviderTestStage  `json:"keys"`
+	Groups             *UpstreamProviderTestStage `json:"groups,omitempty"`
+	ParsedKeys         []UpstreamProviderKey      `json:"parsed_keys"`
+	Warnings           []string                   `json:"warnings,omitempty"`
 }
 
 type UpstreamProviderService struct {
@@ -376,6 +378,7 @@ func normalizeUpstreamProvider(provider UpstreamProviderConfig) UpstreamProvider
 	provider.LoginURL = strings.TrimSpace(provider.LoginURL)
 	provider.APIKeysURL = strings.TrimSpace(provider.APIKeysURL)
 	provider.GroupsURL = strings.TrimSpace(provider.GroupsURL)
+	provider.AvailableGroupsURL = strings.TrimSpace(provider.AvailableGroupsURL)
 	provider.Email = strings.TrimSpace(provider.Email)
 	provider.Username = strings.TrimSpace(provider.Username)
 	provider.AccountNamePrefix = strings.TrimSpace(provider.AccountNamePrefix)

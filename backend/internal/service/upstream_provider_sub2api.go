@@ -97,7 +97,10 @@ func (a *Sub2APIProviderAdapter) FetchKeys(ctx context.Context, provider Upstrea
 }
 
 func (a *Sub2APIProviderAdapter) FetchGroups(ctx context.Context, provider UpstreamProviderConfig) ([]UpstreamProviderGroup, []string, error) {
-	groupsURL := strings.TrimSpace(provider.GroupsURL)
+	groupsURL := strings.TrimSpace(provider.AvailableGroupsURL)
+	if groupsURL == "" {
+		groupsURL = strings.TrimSpace(provider.GroupsURL)
+	}
 	if groupsURL == "" {
 		groupsURL = defaultSub2APIProviderGroupsURL
 	}

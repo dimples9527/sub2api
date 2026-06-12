@@ -97,9 +97,13 @@
                 <span class="text-gray-400">{{ t('admin.upstreamProviders.loginEndpointShort') }}:</span>
                 <code>{{ row.login_url }}</code>
               </span>
-              <span v-if="row.groups_url" class="truncate" :title="row.groups_url">
+              <span v-if="row.type === 'newapi' && row.groups_url" class="truncate" :title="row.groups_url">
                 <span class="text-gray-400">{{ t('admin.upstreamProviders.groupsEndpointShort') }}:</span>
                 <code>{{ row.groups_url }}</code>
+              </span>
+              <span v-if="availableGroupsURL(row)" class="truncate" :title="availableGroupsURL(row)">
+                <span class="text-gray-400">{{ t('admin.upstreamProviders.availableGroupsEndpointShort') }}:</span>
+                <code>{{ availableGroupsURL(row) }}</code>
               </span>
             </div>
           </template>
@@ -252,6 +256,18 @@
           <div v-if="form.type === 'newapi'" class="md:col-span-2">
             <label class="input-label">{{ t('admin.upstreamProviders.groupsUrl') }}</label>
             <input v-model.trim="form.groups_url" required type="text" class="input" placeholder="/api/group/" />
+          </div>
+          <div class="md:col-span-2">
+            <label class="input-label">
+              {{ t('admin.upstreamProviders.availableGroupsUrl') }}
+              <span class="text-xs font-normal text-gray-400">({{ t('common.optional') }})</span>
+            </label>
+            <input
+              v-model.trim="form.available_groups_url"
+              type="text"
+              class="input"
+              placeholder="/api/v1/groups/available?timezone=Asia%2FShanghai"
+            />
           </div>
         </div>
 
@@ -483,6 +499,7 @@ const form = reactive<UpstreamProviderConfig>({
   login_url: '',
   api_keys_url: '',
   groups_url: '',
+  available_groups_url: '',
   email: '',
   username: '',
   password: '',
@@ -515,6 +532,7 @@ const filteredProviders = computed(() => {
       provider.api_keys_url,
       provider.login_url,
       provider.groups_url,
+      provider.available_groups_url,
     ]
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(keyword))
@@ -542,6 +560,7 @@ function resetForm() {
     login_url: '',
     api_keys_url: '',
     groups_url: '',
+    available_groups_url: '',
     email: '',
     username: '',
     password: '',
@@ -555,6 +574,7 @@ function fillForm(provider: UpstreamProviderConfig) {
     ...provider,
     login_url: provider.login_url || '',
     groups_url: provider.groups_url || '',
+    available_groups_url: provider.available_groups_url || (provider.type === 'newapi' ? '' : provider.groups_url || ''),
     email: provider.email || '',
     username: provider.username || '',
     password: '',
@@ -575,6 +595,7 @@ function buildPayload(): UpstreamProviderConfig {
     login_url: form.login_url?.trim() || '',
     api_keys_url: form.api_keys_url.trim(),
     groups_url: form.type === 'newapi' ? form.groups_url?.trim() || '' : '',
+    available_groups_url: form.available_groups_url?.trim() || '',
     email: form.email?.trim() || '',
     username: form.username?.trim() || '',
     account_name_prefix: form.account_name_prefix?.trim() || '',
@@ -728,6 +749,10 @@ function providerTypeLabel(type: string) {
 function providerTypeClass(type: string) {
   if (type === 'newapi') return 'badge-primary'
   return 'badge-gray'
+}
+
+function availableGroupsURL(provider: UpstreamProviderConfig) {
+  return provider.available_groups_url || (provider.type === 'newapi' ? '' : provider.groups_url || '')
 }
 
 function formatRate(value: number | undefined) {

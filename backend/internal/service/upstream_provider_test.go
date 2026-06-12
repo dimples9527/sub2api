@@ -128,6 +128,36 @@ func TestUpstreamProviderServiceCreateAndListRedactsPassword(t *testing.T) {
 	}
 }
 
+func TestUpstreamProviderServicePersistsAvailableGroupsURL(t *testing.T) {
+	ctx := context.Background()
+	repo := newUpstreamProviderMemorySettingRepo()
+	svc := NewUpstreamProviderService(repo)
+
+	created, err := svc.CreateProvider(ctx, UpstreamProviderConfig{
+		Type:               UpstreamProviderTypeSub2API,
+		Slug:               "primary",
+		Name:               "Primary upstream",
+		Enabled:            true,
+		BaseURL:            "https://upstream.example.com",
+		APIKeysURL:         "/api/admin/keys",
+		AvailableGroupsURL: " /api/v1/groups/available?timezone=Asia%2FShanghai ",
+	})
+	if err != nil {
+		t.Fatalf("CreateProvider returned error: %v", err)
+	}
+	if created.AvailableGroupsURL != "/api/v1/groups/available?timezone=Asia%2FShanghai" {
+		t.Fatalf("available groups url = %q", created.AvailableGroupsURL)
+	}
+
+	providers, err := svc.ListProviders(ctx)
+	if err != nil {
+		t.Fatalf("ListProviders returned error: %v", err)
+	}
+	if len(providers) != 1 || providers[0].AvailableGroupsURL != "/api/v1/groups/available?timezone=Asia%2FShanghai" {
+		t.Fatalf("providers = %+v, want available groups url persisted", providers)
+	}
+}
+
 func TestUpstreamProviderServiceUpdateKeepsPasswordWhenBlank(t *testing.T) {
 	ctx := context.Background()
 	repo := newUpstreamProviderMemorySettingRepo()
@@ -450,6 +480,33 @@ func TestSub2APIProviderAdapterFetchGroupsUsesAvailableGroupsEndpoint(t *testing
 	}
 	if groups[1].GroupName != "claude 福利" || groups[1].RateMultiplier != 0.6 || groups[1].RawGroupID != "5" {
 		t.Fatalf("unexpected second group: %+v", groups[1])
+	}
+}
+
+func TestSub2APIProviderAdapterFetchGroupsPrefersAvailableGroupsURL(t *testing.T) {
+	var requestedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedPath = r.URL.RequestURI()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"data":[{"id":2,"name":"vip","rate_multiplier":0.15}]}`))
+	}))
+	defer server.Close()
+
+	adapter := NewSub2APIProviderAdapter(server.Client())
+	_, _, err := adapter.FetchGroups(context.Background(), UpstreamProviderConfig{
+		Type:               UpstreamProviderTypeSub2API,
+		Slug:               "sub2api-main",
+		Name:               "Sub2API main",
+		BaseURL:            server.URL,
+		APIKeysURL:         "/api/admin/keys",
+		GroupsURL:          "/legacy/groups",
+		AvailableGroupsURL: "/api/v1/groups/available?timezone=Asia%2FShanghai",
+	})
+	if err != nil {
+		t.Fatalf("FetchGroups returned error: %v", err)
+	}
+	if requestedPath != "/api/v1/groups/available?timezone=Asia%2FShanghai" {
+		t.Fatalf("requested path = %q, want available groups URL", requestedPath)
 	}
 }
 
