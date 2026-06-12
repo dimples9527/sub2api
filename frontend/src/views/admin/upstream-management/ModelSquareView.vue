@@ -4,17 +4,6 @@
       <template #filters>
         <div class="flex flex-wrap items-center gap-3">
           <div class="flex min-w-0 flex-1 flex-wrap items-center gap-3">
-            <div class="rounded-lg border border-gray-200 px-3 py-2 dark:border-dark-600">
-              <div class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.modelSquare.defaultProvider') }}</div>
-              <div class="mt-0.5 flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
-                <span>{{ result?.provider_name || '-' }}</span>
-                <code v-if="result?.provider_slug" class="text-xs font-normal text-gray-500 dark:text-gray-400">
-                  {{ result.provider_slug }}
-                </code>
-                <span v-if="result?.provider_type" class="badge badge-gray">{{ providerTypeLabel(result.provider_type) }}</span>
-              </div>
-            </div>
-
             <div class="summary-pill">
               <span>{{ t('admin.modelSquare.modelCount') }}</span>
               <strong>{{ models.length }}</strong>
@@ -177,22 +166,25 @@
               <span class="text-xs text-gray-400 dark:text-gray-500">{{ t('admin.modelSquare.perMillionTokens') }}</span>
             </div>
 
-            <div class="mt-3 flex flex-wrap gap-1.5">
-              <span
-                v-for="group in modelGroups(model).slice(0, 3)"
-                :key="String(group.id)"
-                class="group-chip"
-              >
-                {{ group.name }}
-                <b>{{ formatRate(group.rate_multiplier) }}</b>
-              </span>
+            <div class="mt-3 flex items-end justify-between gap-2">
+              <div class="flex min-w-0 flex-1 flex-wrap gap-1.5">
+                <span
+                  v-for="group in modelGroups(model).slice(0, 3)"
+                  :key="String(group.id)"
+                  class="group-chip"
+                >
+                  {{ group.name }}
+                  <b>{{ formatRate(group.rate_multiplier) }}</b>
+                </span>
+              </div>
               <button
                 v-if="modelGroups(model).length > 3"
                 type="button"
                 class="group-more"
                 @click.stop="openGroupDialog(model)"
               >
-                +{{ modelGroups(model).length - 3 }}
+                {{ t('admin.modelSquare.moreGroups') }}
+                <span>+{{ modelGroups(model).length - 3 }}</span>
               </button>
             </div>
           </article>
@@ -399,11 +391,6 @@ function modelSearchText(model: ModelSquareModel) {
 
 function modelKey(model: ModelSquareModel, index: number) {
   return `${model.provider || 'unknown'}:${model.id || index}`
-}
-
-function providerTypeLabel(type: string) {
-  if (type === 'newapi') return 'NewAPI'
-  return 'Sub2API'
 }
 
 function modeLabel(value?: string) {

@@ -1,10 +1,12 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 import ModelSquareView from '../ModelSquareView.vue'
 
-const { getModelSquareMock } = vi.hoisted(() => ({
+const { getModelSquareMock, showErrorMock, showSuccessMock } = vi.hoisted(() => ({
   getModelSquareMock: vi.fn(),
+  showErrorMock: vi.fn(),
+  showSuccessMock: vi.fn(),
 }))
 
 vi.mock('vue-i18n', async (importOriginal) => {
@@ -13,8 +15,26 @@ vi.mock('vue-i18n', async (importOriginal) => {
     ...actual,
     useI18n: () => ({
       t: (key: string, params?: Record<string, unknown>) => {
-        if (!params) return key
-        return `${key} ${JSON.stringify(params)}`
+        const labels: Record<string, string> = {
+          'admin.modelSquare.defaultProvider': 'Default upstream',
+          'admin.modelSquare.modelCount': 'Models',
+          'admin.modelSquare.availableCount': 'Available',
+          'admin.modelSquare.groupCount': 'Groups',
+          'admin.modelSquare.moreGroups': 'More',
+          'admin.modelSquare.inputPrice': 'Input',
+          'admin.modelSquare.outputPrice': 'Output',
+          'admin.modelSquare.cacheReadPrice': 'Cache read',
+          'admin.modelSquare.cacheWritePrice': 'Cache write',
+          'admin.modelSquare.perMillionTokens': '$/M tokens',
+          'admin.modelSquare.available': 'Available',
+          'admin.modelSquare.unavailable': 'Unavailable',
+          'admin.modelSquare.copied': 'Copied',
+          'admin.modelSquare.unnamedModel': 'Unnamed model',
+          'admin.modelSquare.groupDialogTitle': `${params?.id ?? ''} groups`,
+          'common.refresh': 'Refresh',
+          'common.close': 'Close',
+        }
+        return labels[key] ?? key
       },
     }),
   }
@@ -22,8 +42,8 @@ vi.mock('vue-i18n', async (importOriginal) => {
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
-    showError: vi.fn(),
-    showSuccess: vi.fn(),
+    showError: showErrorMock,
+    showSuccess: showSuccessMock,
   }),
 }))
 
@@ -35,8 +55,28 @@ vi.mock('@/api/admin', () => ({
   },
 }))
 
+function mountView() {
+  return mount(ModelSquareView, {
+    global: {
+      stubs: {
+        AppLayout: { template: '<div><slot /></div>' },
+        TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+        BaseDialog: { template: '<div v-if="show"><slot /><slot name="footer" /></div>', props: ['show'] },
+        EmptyState: { template: '<div />' },
+        Icon: { template: '<span />' },
+      },
+    },
+  })
+}
+
 describe('Upstream ModelSquareView', () => {
-  it('loads the default upstream model square and prices models with the lowest group rate', async () => {
+  beforeEach(() => {
+    getModelSquareMock.mockReset()
+    showErrorMock.mockReset()
+    showSuccessMock.mockReset()
+  })
+
+  it('loads the model square and prices models with the lowest group rate', async () => {
     getModelSquareMock.mockResolvedValueOnce({
       provider_slug: 'default-sub2api',
       provider_name: 'Default Sub2API',
@@ -64,21 +104,11 @@ describe('Upstream ModelSquareView', () => {
       },
     })
 
-    const wrapper = mount(ModelSquareView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' },
-          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
-          Icon: { template: '<span />' },
-          EmptyState: { template: '<div />' },
-        },
-      },
-    })
+    const wrapper = mountView()
 
     await flushPromises()
 
     expect(getModelSquareMock).toHaveBeenCalledOnce()
-    expect(wrapper.text()).toContain('Default Sub2API')
 
     const cardText = wrapper.find('[data-test="model-card"]').text()
     const proIndex = cardText.indexOf('codex pro')
@@ -89,5 +119,41 @@ describe('Upstream ModelSquareView', () => {
     expect(fallbackIndex).toBeGreaterThan(proIndex)
     expect(welfareIndex).toBeGreaterThan(fallbackIndex)
     expect(cardText).toContain('$0.14')
+  })
+
+  it('hides upstream identity text and exposes an explicit more button for extra groups', async () => {
+    getModelSquareMock.mockResolvedValueOnce({
+      provider_slug: 'findcg',
+      provider_name: 'FindCG',
+      provider_type: 'sub2api',
+      payload: {
+        groups: [
+          { id: 1, name: 'vip', rate_multiplier: 0.4 },
+          { id: 2, name: 'pro', rate_multiplier: 0.2 },
+          { id: 3, name: 'basic', rate_multiplier: 0.6 },
+          { id: 4, name: 'trial', rate_multiplier: 0.8 },
+        ],
+        models: [{
+          id: 'gpt-5.2',
+          provider: 'openai',
+          available: true,
+          mode: 'chat',
+          input_price: 1,
+          output_price: 2,
+          cache_read_price: 0.1,
+          cache_create_price: 0,
+          group_ids: [1, 2, 3, 4],
+        }],
+      },
+    })
+
+    const wrapper = mountView()
+
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).not.toContain('Default upstream')
+    expect(text.toLowerCase()).not.toContain('findcg')
+    expect(wrapper.find('[data-test="model-card"]').text()).toContain('More')
   })
 })

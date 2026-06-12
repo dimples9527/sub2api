@@ -1740,6 +1740,7 @@ export default {
       cacheWritePrice: '缓存写入',
       perMillionTokens: '$/百万 tokens',
       rate: '倍率',
+      moreGroups: '更多',
       groupDialogTitle: '{id} 的分组',
       columns: {
         status: '状态',

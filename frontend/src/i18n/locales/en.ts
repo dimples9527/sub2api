@@ -1719,6 +1719,7 @@ export default {
       cacheWritePrice: 'Cache write',
       perMillionTokens: '$/M tokens',
       rate: 'Rate',
+      moreGroups: 'More',
       groupDialogTitle: '{id} groups',
       columns: {
         status: 'Status',

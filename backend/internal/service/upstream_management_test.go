@@ -13,8 +13,10 @@ import (
 type upstreamManagementProviderSourceStub struct {
 	defaultProvider UpstreamProviderConfig
 	keys            []UpstreamProviderKey
+	modelSquare     json.RawMessage
 	defaultErr      error
 	keysErr         error
+	modelSquareErr  error
 	fetchedSlug     string
 }
 
@@ -25,6 +27,10 @@ func (s *upstreamManagementProviderSourceStub) GetDefaultProvider(ctx context.Co
 func (s *upstreamManagementProviderSourceStub) FetchProviderKeys(ctx context.Context, slug string) ([]UpstreamProviderKey, []string, error) {
 	s.fetchedSlug = slug
 	return s.keys, []string{"upstream warning"}, s.keysErr
+}
+
+func (s *upstreamManagementProviderSourceStub) FetchDefaultModelSquare(context.Context) (json.RawMessage, UpstreamProviderConfig, error) {
+	return s.modelSquare, s.defaultProvider, s.modelSquareErr
 }
 
 type upstreamManagementGroupRepoStub struct {
@@ -222,6 +228,61 @@ func TestUpstreamManagementServiceCompareGroupsUsesDefaultProviderOnly(t *testin
 	}
 	if result.DefaultProvider.Slug != "default-upstream" {
 		t.Fatalf("default provider slug = %q", result.DefaultProvider.Slug)
+	}
+}
+
+func TestUpstreamManagementServiceFetchDefaultModelSquareUsesLocalGroupRates(t *testing.T) {
+	providerSource := &upstreamManagementProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "default-upstream", Name: "Default upstream", IsDefault: true},
+		modelSquare: json.RawMessage(`{
+			"groups":[
+				{"id":"remote-1","name":" VIP Group ","rate_multiplier":9.9,"description":"remote"},
+				{"id":"remote-2","name":"unmatched","rate_multiplier":2.2}
+			],
+			"models":[{"id":"gpt-5.2","group_ids":["remote-1","remote-2"]}]
+		}`),
+	}
+	groupRepo := &upstreamManagementGroupRepoStub{groups: []Group{{
+		ID:             7,
+		Name:           "vip group",
+		Description:    "local",
+		Platform:       PlatformOpenAI,
+		RateMultiplier: 0.25,
+		Status:         StatusActive,
+	}}}
+	svc := NewUpstreamManagementService(providerSource, groupRepo, newUpstreamManagementSettingRepoStub(), nil)
+
+	payload, provider, err := svc.FetchDefaultModelSquare(context.Background())
+	if err != nil {
+		t.Fatalf("FetchDefaultModelSquare returned error: %v", err)
+	}
+	if provider.Slug != "default-upstream" {
+		t.Fatalf("provider slug = %q, want default-upstream", provider.Slug)
+	}
+
+	var body struct {
+		Groups []map[string]any `json:"groups"`
+		Models []struct {
+			GroupIDs []string `json:"group_ids"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(payload, &body); err != nil {
+		t.Fatalf("payload should be JSON: %v", err)
+	}
+	if len(body.Groups) != 1 {
+		t.Fatalf("group count = %d, want 1: %s", len(body.Groups), string(payload))
+	}
+	if body.Groups[0]["id"] != "remote-1" {
+		t.Fatalf("group id = %v, want remote-1", body.Groups[0]["id"])
+	}
+	if body.Groups[0]["name"] != "vip group" {
+		t.Fatalf("group name = %v, want local group name", body.Groups[0]["name"])
+	}
+	if body.Groups[0]["rate_multiplier"] != 0.25 {
+		t.Fatalf("rate_multiplier = %v, want local 0.25", body.Groups[0]["rate_multiplier"])
+	}
+	if len(body.Models) != 1 || len(body.Models[0].GroupIDs) != 1 || body.Models[0].GroupIDs[0] != "remote-1" {
+		t.Fatalf("model group ids not filtered to local matches: %+v", body.Models)
 	}
 }
 

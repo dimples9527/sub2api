@@ -113,7 +113,159 @@ func (s *UpstreamManagementService) FetchDefaultModelSquare(ctx context.Context)
 	if !ok {
 		return nil, UpstreamProviderConfig{}, infraerrors.InternalServer("UPSTREAM_MODEL_SQUARE_UNAVAILABLE", "upstream model square service is unavailable")
 	}
-	return source.FetchDefaultModelSquare(ctx)
+	payload, provider, err := source.FetchDefaultModelSquare(ctx)
+	if err != nil {
+		return nil, UpstreamProviderConfig{}, err
+	}
+	merged, err := s.mergeDefaultModelSquareGroups(ctx, payload, provider)
+	if err != nil {
+		return nil, UpstreamProviderConfig{}, err
+	}
+	return merged, provider, nil
+}
+
+func (s *UpstreamManagementService) mergeDefaultModelSquareGroups(ctx context.Context, payload json.RawMessage, provider UpstreamProviderConfig) (json.RawMessage, error) {
+	if s == nil || s.groupRepo == nil || len(payload) == 0 {
+		return payload, nil
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(payload, &body); err != nil {
+		return nil, fmt.Errorf("decode upstream model-square response: %w", err)
+	}
+	container := modelSquarePayloadContainer(body)
+	rawGroups, ok := container["groups"].([]any)
+	if !ok || len(rawGroups) == 0 {
+		return payload, nil
+	}
+
+	localGroups, err := s.groupRepo.ListActive(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list local groups for model square: %w", err)
+	}
+	localByID := make(map[int64]Group, len(localGroups))
+	localByName := make(map[string]Group, len(localGroups))
+	for _, group := range localGroups {
+		localByID[group.ID] = group
+		key := normalizeUpstreamGroupMatchName(group.Name)
+		if key != "" {
+			if _, exists := localByName[key]; !exists {
+				localByName[key] = group
+			}
+		}
+	}
+
+	mappings, err := s.loadGroupMappings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	mappedLocalGroupIDs := make(map[string]int64, len(mappings))
+	for _, mapping := range mappings {
+		if mapping.ProviderSlug != provider.Slug {
+			continue
+		}
+		key := normalizeUpstreamGroupMatchName(mapping.UpstreamGroupKey)
+		if key == "" {
+			key = normalizeUpstreamGroupMatchName(mapping.UpstreamGroupName)
+		}
+		if key != "" && mapping.LocalGroupID > 0 {
+			mappedLocalGroupIDs[key] = mapping.LocalGroupID
+		}
+	}
+
+	keptGroupIDs := make(map[string]struct{}, len(rawGroups))
+	mergedGroups := make([]any, 0, len(rawGroups))
+	for _, rawGroup := range rawGroups {
+		groupMap, ok := rawGroup.(map[string]any)
+		if !ok {
+			continue
+		}
+		remoteID, hasID := groupMap["id"]
+		if !hasID {
+			continue
+		}
+		remoteName, _ := groupMap["name"].(string)
+		key := normalizeUpstreamGroupMatchName(remoteName)
+		localGroup, matched := localByName[key]
+		if mappedID, ok := mappedLocalGroupIDs[key]; ok {
+			if mappedLocal, exists := localByID[mappedID]; exists {
+				localGroup = mappedLocal
+				matched = true
+			}
+		}
+		if !matched {
+			continue
+		}
+
+		mergedGroup := modelSquareGroupMapFromLocal(localGroup)
+		mergedGroup["id"] = remoteID
+		keptGroupIDs[modelSquareIDKey(remoteID)] = struct{}{}
+		mergedGroups = append(mergedGroups, mergedGroup)
+	}
+
+	container["groups"] = mergedGroups
+	filterModelSquareGroupIDs(container, keptGroupIDs)
+	mergedPayload, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("encode merged upstream model-square response: %w", err)
+	}
+	return mergedPayload, nil
+}
+
+func modelSquarePayloadContainer(body map[string]any) map[string]any {
+	if data, ok := body["data"].(map[string]any); ok {
+		if _, hasGroups := data["groups"]; hasGroups {
+			return data
+		}
+		if _, hasModels := data["models"]; hasModels {
+			return data
+		}
+	}
+	return body
+}
+
+func modelSquareGroupMapFromLocal(group Group) map[string]any {
+	return map[string]any{
+		"id":                     group.ID,
+		"name":                   group.Name,
+		"description":            group.Description,
+		"platform":               group.Platform,
+		"rate_multiplier":        group.RateMultiplier,
+		"status":                 group.Status,
+		"is_exclusive":           group.IsExclusive,
+		"subscription_type":      group.SubscriptionType,
+		"allow_image_generation": group.AllowImageGeneration,
+		"image_rate_independent": group.ImageRateIndependent,
+		"image_rate_multiplier":  group.ImageRateMultiplier,
+	}
+}
+
+func filterModelSquareGroupIDs(container map[string]any, keptGroupIDs map[string]struct{}) {
+	rawModels, ok := container["models"].([]any)
+	if !ok {
+		return
+	}
+	for _, rawModel := range rawModels {
+		modelMap, ok := rawModel.(map[string]any)
+		if !ok {
+			continue
+		}
+		rawGroupIDs, ok := modelMap["group_ids"].([]any)
+		if !ok {
+			continue
+		}
+		filtered := make([]any, 0, len(rawGroupIDs))
+		for _, groupID := range rawGroupIDs {
+			if _, ok := keptGroupIDs[modelSquareIDKey(groupID)]; ok {
+				filtered = append(filtered, groupID)
+			}
+		}
+		modelMap["group_ids"] = filtered
+	}
+}
+
+func modelSquareIDKey(value any) string {
+	return fmt.Sprint(value)
 }
 
 func (s *UpstreamManagementService) CompareGroups(ctx context.Context) (UpstreamGroupCompareResult, error) {
