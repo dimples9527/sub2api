@@ -155,3 +155,14 @@ func TestMigration135AllowsGitHubAndGoogleAuthProviders(t *testing.T) {
 	require.Contains(t, sql, "'github'")
 	require.Contains(t, sql, "'google'")
 }
+
+func TestMigration151RelaxesLegacyUsersInviteCodeColumn(t *testing.T) {
+	content, err := FS.ReadFile("151_relax_legacy_users_invite_code.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	require.Contains(t, sql, "ALTER TABLE users")
+	require.Contains(t, sql, "ALTER COLUMN invite_code DROP NOT NULL")
+	require.Contains(t, sql, "ALTER COLUMN invite_code SET DEFAULT ''")
+	require.NotContains(t, sql, "DROP COLUMN")
+}
