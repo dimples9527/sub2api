@@ -120,22 +120,24 @@
 
           <template #cell-local_group_name="{ row }">
             <div class="flex min-w-[16rem] flex-col gap-2">
-              <Select
-                :model-value="row.local_group_id ?? null"
-                :options="localGroupOptions"
-                :placeholder="t('admin.upstreamGroups.selectLocalGroup')"
-                searchable
-                clearable
-                :disabled="savingMappingKey === row.upstream_group_key"
-                @change="value => saveGroupMapping(row, value)"
-              />
-              <div v-if="row.matched" class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                <code>#{{ row.local_group_id }}</code>
-                <span :class="['badge', row.match_source === 'manual' ? 'badge-primary' : 'badge-gray']">
-                  {{ matchSourceLabel(row) }}
-                </span>
-              </div>
-              <div v-else class="text-xs text-gray-400">
+              <template v-if="row.matched">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="font-medium text-gray-900 dark:text-white">{{ row.local_group_name }}</span>
+                  <code class="text-xs text-gray-500 dark:text-gray-400">#{{ row.local_group_id }}</code>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 text-xs">
+                  <span :class="['badge', row.match_source === 'manual' ? 'badge-primary' : 'badge-gray']">
+                    {{ matchSourceLabel(row) }}
+                  </span>
+                  <span v-if="row.needs_rate_increase" class="badge badge-warning">
+                    {{ t('admin.upstreamGroups.needsIncrease') }}
+                  </span>
+                  <span v-else class="badge badge-success">
+                    {{ t('admin.upstreamGroups.inSync') }}
+                  </span>
+                </div>
+              </template>
+              <div v-else class="text-sm text-gray-400">
                 {{ t('admin.upstreamGroups.notMatched') }}
               </div>
             </div>
@@ -164,7 +166,7 @@
               {{ t('admin.upstreamGroups.syncLocalGroup') }}
             </button>
             <span v-else class="text-xs font-medium text-gray-400 dark:text-gray-500">
-              {{ t('admin.upstreamGroups.alreadyMatched') }}
+              {{ t('admin.upstreamGroups.noActionNeeded') }}
             </span>
           </template>
 
@@ -259,7 +261,6 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
-import type { AdminGroup } from '@/types'
 import type {
   UpstreamGroupAutoRateFixConfig,
   UpstreamGroupCompareResult,
@@ -285,10 +286,8 @@ const loading = ref(false)
 const applying = ref(false)
 const loadingRateFixConfig = ref(false)
 const savingRateFixConfig = ref(false)
-const savingMappingKey = ref<string | null>(null)
 const syncingGroupKey = ref<string | null>(null)
 const loadError = ref('')
-const localGroups = ref<AdminGroup[]>([])
 const rateFixConfig = ref<UpstreamGroupAutoRateFixConfig | null>(null)
 const autoFixForm = ref({
   enabled: false,
@@ -303,7 +302,7 @@ const syncRateMultiplier = ref(1)
 const columns = computed<Column[]>(() => [
   { key: 'upstream_group_name', label: t('admin.upstreamGroups.columns.upstreamGroup') },
   { key: 'upstream_rate', label: t('admin.upstreamGroups.columns.upstreamRate') },
-  { key: 'local_group_name', label: t('admin.upstreamGroups.columns.localGroup') },
+  { key: 'local_group_name', label: t('admin.upstreamGroups.columns.matchResult') },
   { key: 'local_rate', label: t('admin.upstreamGroups.columns.localRate') },
   { key: 'status', label: t('admin.upstreamGroups.columns.status') },
   { key: 'action', label: t('admin.upstreamGroups.columns.action') },
@@ -350,15 +349,6 @@ const filteredItems = computed(() => {
   })
 })
 
-const localGroupOptions = computed<SelectOption[]>(() => [
-  { value: null, label: t('admin.upstreamGroups.clearMapping') },
-  ...localGroups.value.map(group => ({
-    value: group.id,
-    label: `${group.name} (${formatRate(group.rate_multiplier)})`,
-    description: `#${group.id}`
-  }))
-])
-
 const summary = computed(() => {
   const list = items.value
   return {
@@ -381,13 +371,11 @@ async function reload() {
   loadingRateFixConfig.value = true
   loadError.value = ''
   try {
-    const [groupsResult, groups, config] = await Promise.all([
+    const [groupsResult, config] = await Promise.all([
       adminAPI.upstreamManagement.getGroups(),
-      adminAPI.groups.getAll(),
       adminAPI.upstreamManagement.getRateFixConfig()
     ])
     result.value = groupsResult
-    localGroups.value = groups
     applyRateFixConfig(config)
   } catch (err) {
     const message = extractApiErrorMessage(err, t('admin.upstreamGroups.loadFailed'))
@@ -433,19 +421,6 @@ async function saveRateFixConfig() {
   }
 }
 
-async function saveGroupMapping(row: UpstreamGroupComparison, value: string | number | boolean | null) {
-  const localGroupId = typeof value === 'number' ? value : null
-  savingMappingKey.value = row.upstream_group_key
-  try {
-    result.value = await adminAPI.upstreamManagement.saveGroupMapping(row.upstream_group_name, localGroupId)
-    appStore.showSuccess(t('admin.upstreamGroups.mappingSaved'))
-  } catch (err) {
-    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamGroups.mappingSaveFailed')))
-  } finally {
-    savingMappingKey.value = null
-  }
-}
-
 function applyRateFixConfig(config: UpstreamGroupAutoRateFixConfig) {
   rateFixConfig.value = config
   autoFixForm.value = {
@@ -478,7 +453,6 @@ async function syncLocalGroup() {
       upstream_group_name: item.upstream_group_name,
       rate_multiplier: rate,
     })
-    localGroups.value = await adminAPI.groups.getAll()
     syncDialogItem.value = null
     appStore.showSuccess(t('admin.upstreamGroups.syncSuccess'))
   } catch (err) {
@@ -516,8 +490,8 @@ function statusClass(row: UpstreamGroupComparison) {
 
 function statusLabel(row: UpstreamGroupComparison) {
   if (!row.matched) return t('admin.upstreamGroups.notMatched')
-  if (row.needs_rate_increase) return t('admin.upstreamGroups.needsIncrease')
-  return t('admin.upstreamGroups.inSync')
+  if (row.needs_rate_increase) return t('admin.upstreamGroups.rateRiskStatus')
+  return t('admin.upstreamGroups.rateOkStatus')
 }
 
 onMounted(reload)
