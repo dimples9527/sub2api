@@ -106,88 +106,99 @@
           @action="reload"
         />
 
-        <div v-else-if="viewMode === 'grid'" class="grid gap-4 p-1 lg:grid-cols-2 xl:grid-cols-3">
-          <article
-            v-for="(model, index) in filteredModels"
-            :key="modelKey(model, index)"
-            data-test="model-card"
-            class="model-card"
-            role="button"
-            tabindex="0"
-            :title="t('admin.modelSquare.copyTitle')"
-            @click="copyModelId(model)"
-            @keydown.enter.prevent="copyModelId(model)"
+        <div v-else-if="viewMode === 'grid'" class="model-square-board">
+          <section
+            v-for="section in providerSections"
+            :key="section.provider"
+            class="provider-section"
           >
-            <div class="flex items-start justify-between gap-3">
-              <span class="inline-flex min-w-0 items-center gap-2 text-xs font-semibold text-gray-500 dark:text-gray-400">
-                <span class="h-2 w-2 shrink-0 rounded-full bg-slate-400"></span>
-                <span class="truncate">{{ model.provider || 'unknown' }}</span>
-              </span>
-              <span :class="['badge', isAvailable(model) ? 'badge-success' : 'badge-gray']">
-                {{ copiedModelId === model.id ? t('admin.modelSquare.copied') : availabilityLabel(model) }}
-              </span>
+            <div class="provider-section-header">
+              <div class="min-w-0">
+                <div class="provider-title">
+                  <span class="provider-dot"></span>
+                  <span class="truncate">{{ section.provider }}</span>
+                </div>
+                <div class="provider-meta">
+                  {{ section.models.length }} · {{ t('admin.modelSquare.rate') }} {{ formatRate(section.lowestRate) }}
+                </div>
+              </div>
+              <span class="provider-count">{{ section.models.length }}</span>
             </div>
 
-            <div class="mt-4 flex items-start gap-2">
-              <h3 class="min-w-0 flex-1 break-words text-base font-semibold text-gray-950 dark:text-white">
-                {{ model.id || t('admin.modelSquare.unnamedModel') }}
-              </h3>
-              <button
-                type="button"
-                class="copy-button"
+            <div class="model-card-grid">
+              <article
+                v-for="(model, index) in section.models"
+                :key="modelKey(model, index)"
+                data-test="model-card"
+                class="model-card"
+                role="button"
+                tabindex="0"
                 :title="t('admin.modelSquare.copyTitle')"
-                @click.stop="copyModelId(model)"
+                @click="copyModelId(model)"
+                @keydown.enter.prevent="copyModelId(model)"
               >
-                <Icon :name="copiedModelId === model.id ? 'check' : 'copy'" size="sm" />
-              </button>
-            </div>
+                <div class="model-card-top">
+                  <span class="model-provider">
+                    <span class="model-provider-dot"></span>
+                    <span class="truncate">{{ model.provider || 'unknown' }}</span>
+                  </span>
+                  <span :class="['model-status', isAvailable(model) ? 'model-status-available' : 'model-status-muted']">
+                    <span class="status-dot"></span>
+                    {{ copiedModelId === model.id ? t('admin.modelSquare.copied') : availabilityLabel(model) }}
+                  </span>
+                </div>
 
-            <div class="mt-4 grid grid-cols-2 gap-3">
-              <div class="price-box">
-                <span>{{ t('admin.modelSquare.inputPrice') }}</span>
-                <strong>{{ formatPrice(modelDisplayPrice(model, 'input_price')) }}</strong>
-              </div>
-              <div class="price-box">
-                <span>{{ t('admin.modelSquare.outputPrice') }}</span>
-                <strong>{{ formatPrice(modelDisplayPrice(model, 'output_price')) }}</strong>
-              </div>
-              <div class="price-box">
-                <span>{{ t('admin.modelSquare.cacheReadPrice') }}</span>
-                <strong>{{ formatPrice(modelDisplayPrice(model, 'cache_read_price')) }}</strong>
-              </div>
-              <div class="price-box">
-                <span>{{ t('admin.modelSquare.cacheWritePrice') }}</span>
-                <strong>{{ formatPrice(modelDisplayPrice(model, 'cache_create_price')) }}</strong>
-              </div>
-            </div>
+                <div class="model-title-row">
+                  <h3 class="model-title">
+                    {{ model.id || t('admin.modelSquare.unnamedModel') }}
+                  </h3>
+                  <button
+                    type="button"
+                    class="copy-button"
+                    :title="t('admin.modelSquare.copyTitle')"
+                    @click.stop="copyModelId(model)"
+                  >
+                    <Icon :name="copiedModelId === model.id ? 'check' : 'copy'" size="sm" />
+                  </button>
+                </div>
 
-            <div class="mt-4 flex items-center justify-between gap-3 border-t border-gray-100 pt-4 dark:border-dark-700">
-              <span class="badge badge-primary">{{ modeLabel(model.mode) }}</span>
-              <span class="text-xs text-gray-400 dark:text-gray-500">{{ t('admin.modelSquare.perMillionTokens') }}</span>
-            </div>
+                <div class="price-grid">
+                  <div class="price-box price-box-neutral">
+                    <span>{{ t('admin.modelSquare.inputPrice') }}</span>
+                    <strong>{{ formatPrice(modelDisplayPrice(model, 'input_price')) }}</strong>
+                    <small>{{ t('admin.modelSquare.perMillionTokens') }}</small>
+                  </div>
+                  <div class="price-box price-box-neutral">
+                    <span>{{ t('admin.modelSquare.outputPrice') }}</span>
+                    <strong>{{ formatPrice(modelDisplayPrice(model, 'output_price')) }}</strong>
+                    <small>{{ t('admin.modelSquare.perMillionTokens') }}</small>
+                  </div>
+                  <div class="price-box price-box-blue">
+                    <span>{{ t('admin.modelSquare.cacheReadPrice') }}</span>
+                    <strong>{{ formatPrice(modelDisplayPrice(model, 'cache_read_price')) }}</strong>
+                  </div>
+                  <div class="price-box price-box-violet">
+                    <span>{{ t('admin.modelSquare.cacheWritePrice') }}</span>
+                    <strong>{{ formatPrice(modelDisplayPrice(model, 'cache_create_price')) }}</strong>
+                  </div>
+                </div>
 
-            <div class="mt-3 flex items-end justify-between gap-2">
-              <div class="flex min-w-0 flex-1 flex-wrap gap-1.5">
-                <span
-                  v-for="group in modelGroups(model).slice(0, 3)"
-                  :key="String(group.id)"
-                  class="group-chip"
-                >
-                  {{ group.name }}
-                  <b>{{ formatRate(group.rate_multiplier) }}</b>
-                </span>
-              </div>
-              <button
-                v-if="modelGroups(model).length > 3"
-                type="button"
-                class="group-more"
-                @click.stop="openGroupDialog(model)"
-              >
-                {{ t('admin.modelSquare.moreGroups') }}
-                <span>+{{ modelGroups(model).length - 3 }}</span>
-              </button>
+                <div class="model-card-footer">
+                  <span class="mode-chip">{{ modeLabel(model.mode) }}</span>
+                  <button
+                    v-if="primaryGroup(model)"
+                    type="button"
+                    class="primary-group-chip"
+                    @click.stop="openGroupDialog(model)"
+                  >
+                    <span class="truncate">{{ primaryGroup(model)?.name }}</span>
+                    <b>{{ formatRate(primaryGroup(model)?.rate_multiplier) }}</b>
+                    <span v-if="modelGroupOverflowCount(model) > 0" class="group-overflow">+{{ modelGroupOverflowCount(model) }}</span>
+                  </button>
+                </div>
+              </article>
             </div>
-          </article>
+          </section>
         </div>
 
         <div v-else class="overflow-x-auto">
@@ -294,6 +305,11 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import Icon from '@/components/icons/Icon.vue'
 
 type PriceField = 'input_price' | 'output_price' | 'cache_read_price' | 'cache_create_price'
+type ModelSquareProviderSection = {
+  provider: string
+  models: ModelSquareModel[]
+  lowestRate: number
+}
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -333,6 +349,35 @@ const filteredModels = computed(() => {
     return true
   })
 })
+const providerSections = computed<ModelSquareProviderSection[]>(() => {
+  const sections = new Map<string, ModelSquareModel[]>()
+  for (const model of filteredModels.value) {
+    const provider = model.provider || 'unknown'
+    const list = sections.get(provider) || []
+    list.push(model)
+    sections.set(provider, list)
+  }
+
+  return Array.from(sections.entries())
+    .map(([provider, sectionModels]) => {
+      const sortedModels = [...sectionModels].sort((a, b) => {
+        if (isAvailable(a) !== isAvailable(b)) return isAvailable(a) ? -1 : 1
+        const rateDiff = primaryGroupRate(a) - primaryGroupRate(b)
+        if (rateDiff !== 0) return rateDiff
+        return (a.id || '').localeCompare(b.id || '')
+      })
+      return {
+        provider,
+        models: sortedModels,
+        lowestRate: Math.min(...sortedModels.map(primaryGroupRate))
+      }
+    })
+    .sort((a, b) => {
+      const rateDiff = a.lowestRate - b.lowestRate
+      if (rateDiff !== 0) return rateDiff
+      return a.provider.localeCompare(b.provider)
+    })
+})
 
 async function reload() {
   loading.value = true
@@ -357,10 +402,16 @@ function modelGroups(model: ModelSquareModel): ModelSquareGroup[] {
 }
 
 function primaryGroupRate(model: ModelSquareModel) {
-  const rates = modelGroups(model)
-    .map(groupRate)
-    .filter(rate => Number.isFinite(rate))
-  return rates.length > 0 ? Math.min(...rates) : 1
+  const rate = groupRate(primaryGroup(model))
+  return Number.isFinite(rate) ? rate : 1
+}
+
+function primaryGroup(model: ModelSquareModel) {
+  return modelGroups(model)[0]
+}
+
+function modelGroupOverflowCount(model: ModelSquareModel) {
+  return Math.max(0, modelGroups(model).length - 1)
 }
 
 function groupRate(group?: ModelSquareGroup) {
@@ -476,24 +527,156 @@ onMounted(reload)
   @apply bg-white text-primary-600 shadow-sm dark:bg-dark-700 dark:text-primary-400;
 }
 
+.model-square-board {
+  @apply h-full space-y-5 overflow-y-auto p-4;
+}
+
+.provider-section {
+  @apply space-y-3;
+}
+
+.provider-section-header {
+  @apply flex items-center justify-between gap-3 px-1;
+}
+
+.provider-title {
+  @apply flex min-w-0 items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white;
+}
+
+.provider-dot,
+.model-provider-dot {
+  @apply h-2 w-2 shrink-0 rounded-full bg-slate-400;
+}
+
+.provider-meta {
+  @apply mt-0.5 text-xs text-gray-500 dark:text-gray-400;
+}
+
+.provider-count {
+  @apply grid h-7 min-w-7 place-items-center rounded-md bg-gray-100 px-2 font-mono text-xs font-semibold text-gray-600 dark:bg-dark-700 dark:text-gray-300;
+}
+
+.model-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  @apply gap-4;
+}
+
 .model-card {
-  @apply flex min-h-[18rem] cursor-pointer flex-col rounded-lg border border-gray-200 bg-white p-4 transition hover:border-primary-300 hover:shadow-sm dark:border-dark-700 dark:bg-dark-800 dark:hover:border-primary-700;
+  @apply relative flex min-h-[16.5rem] cursor-pointer flex-col rounded-lg border border-gray-200 bg-white p-5 transition duration-200 dark:border-dark-700 dark:bg-dark-800;
+}
+
+.model-card:hover,
+.model-card:focus-visible {
+  @apply -translate-y-0.5 border-cyan-400 outline-none dark:border-cyan-500;
+  box-shadow: 0 16px 38px rgba(15, 23, 42, 0.08), 0 0 0 1px rgba(6, 182, 212, 0.18);
+}
+
+.model-card-top {
+  @apply flex items-start justify-between gap-3;
+}
+
+.model-provider {
+  @apply inline-flex min-w-0 items-center gap-2 text-xs font-semibold text-gray-500 dark:text-gray-400;
+}
+
+.model-status {
+  @apply inline-flex shrink-0 items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold;
+}
+
+.model-status-available {
+  @apply bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300;
+}
+
+.model-status-muted {
+  @apply bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-gray-300;
+}
+
+.status-dot {
+  @apply h-1.5 w-1.5 rounded-full bg-current opacity-70;
+}
+
+.model-title-row {
+  @apply mt-3 flex min-h-[2.5rem] items-start gap-2;
+}
+
+.model-title {
+  @apply min-w-0 flex-1 text-base font-bold leading-snug text-gray-950 transition-colors dark:text-white;
+  overflow-wrap: anywhere;
+}
+
+.model-card:hover .model-title,
+.model-card:focus-visible .model-title {
+  @apply text-teal-700 dark:text-teal-300;
 }
 
 .copy-button {
-  @apply grid h-8 w-8 shrink-0 place-items-center rounded-md text-gray-400 transition hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400;
+  @apply grid h-8 w-8 shrink-0 place-items-center rounded-md text-gray-300 opacity-0 transition hover:bg-gray-100 hover:text-teal-700 focus:opacity-100 dark:hover:bg-dark-700 dark:hover:text-teal-300;
+}
+
+.model-card:hover .copy-button,
+.model-card:focus-within .copy-button {
+  @apply opacity-100;
+}
+
+.price-grid {
+  @apply mt-4 grid grid-cols-2 gap-3;
 }
 
 .price-box {
-  @apply rounded-lg border border-gray-100 bg-gray-50 p-3 dark:border-dark-700 dark:bg-dark-700/60;
+  @apply min-h-[4.6rem] rounded-lg border p-3;
+}
+
+.price-box-neutral {
+  @apply border-gray-100 bg-gray-50 dark:border-dark-700 dark:bg-dark-700/50;
+}
+
+.price-box-blue {
+  @apply border-blue-100 bg-blue-50 text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-300;
+}
+
+.price-box-violet {
+  @apply border-violet-100 bg-violet-50 text-violet-700 dark:border-violet-900/50 dark:bg-violet-950/30 dark:text-violet-300;
 }
 
 .price-box span {
-  @apply block text-xs text-gray-500 dark:text-gray-400;
+  @apply block text-xs font-medium text-gray-500 dark:text-gray-400;
 }
 
 .price-box strong {
-  @apply mt-1 block font-mono text-sm text-gray-950 dark:text-white;
+  @apply mt-1 block font-mono text-sm font-bold text-gray-950 dark:text-white;
+}
+
+.price-box-blue strong {
+  @apply text-blue-700 dark:text-blue-300;
+}
+
+.price-box-violet strong {
+  @apply text-violet-700 dark:text-violet-300;
+}
+
+.price-box small {
+  @apply mt-0.5 block text-[11px] font-medium text-gray-400 dark:text-gray-500;
+}
+
+.model-card-footer {
+  @apply mt-auto flex items-end justify-between gap-3 pt-4;
+}
+
+.mode-chip {
+  @apply inline-flex h-7 items-center rounded-md bg-blue-50 px-2.5 text-xs font-semibold text-blue-700 dark:bg-blue-950/40 dark:text-blue-300;
+}
+
+.primary-group-chip {
+  @apply inline-flex min-w-0 max-w-[68%] items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-gray-500 transition hover:bg-amber-50 hover:text-amber-700 dark:text-gray-400 dark:hover:bg-amber-950/30 dark:hover:text-amber-300;
+}
+
+.primary-group-chip b {
+  @apply shrink-0 font-bold text-orange-500;
+}
+
+.group-overflow {
+  @apply shrink-0 rounded bg-gray-100 px-1 font-mono text-[10px] text-gray-500 dark:bg-dark-700 dark:text-gray-300;
 }
 
 .group-chip {
@@ -506,5 +689,19 @@ onMounted(reload)
 
 .group-more {
   @apply rounded bg-primary-50 px-2 py-1 text-xs font-semibold text-primary-700 transition hover:bg-primary-100 dark:bg-primary-900/30 dark:text-primary-300 dark:hover:bg-primary-900/50;
+}
+
+@media (max-width: 480px) {
+  .model-square-board {
+    @apply p-3;
+  }
+
+  .model-card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .model-card {
+    @apply p-4;
+  }
 }
 </style>
