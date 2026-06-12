@@ -78,6 +78,9 @@ func RegisterUserRoutes(
 			channels.GET("/available", h.AvailableChannel.List)
 		}
 
+		// 模型广场（用户只读）
+		authenticated.GET("/model-square", h.Admin.UpstreamManagement.ModelSquare)
+
 		// 使用记录
 		usage := authenticated.Group("/usage")
 		{

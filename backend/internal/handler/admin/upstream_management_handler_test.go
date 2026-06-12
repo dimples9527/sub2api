@@ -80,6 +80,7 @@ func newUpstreamManagementHandlerTestRouter(svc upstreamManagementService) *gin.
 	router.PUT("/admin/upstream-management/groups/mappings", handler.SaveGroupMapping)
 	router.POST("/admin/upstream-management/groups/local-groups", handler.CreateLocalGroupFromUpstream)
 	router.GET("/admin/upstream-management/model-square", handler.ModelSquare)
+	router.GET("/model-square", handler.ModelSquare)
 	return router
 }
 
@@ -243,6 +244,23 @@ func TestUpstreamManagementHandlerModelSquare(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/admin/upstream-management/model-square", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.True(t, svc.modelSquareCalled)
+	require.Contains(t, rec.Body.String(), `"provider_slug":"default"`)
+	require.Contains(t, rec.Body.String(), `"models":[{"id":"gpt-5.2"}]`)
+}
+
+func TestUpstreamManagementHandlerModelSquareUserPath(t *testing.T) {
+	svc := &upstreamManagementHandlerServiceStub{
+		defaultProvider: service.UpstreamProviderConfig{Slug: "default", Name: "Default"},
+		modelSquare:     json.RawMessage(`{"groups":[],"models":[{"id":"gpt-5.2"}]}`),
+	}
+	router := newUpstreamManagementHandlerTestRouter(svc)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/model-square", nil)
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)

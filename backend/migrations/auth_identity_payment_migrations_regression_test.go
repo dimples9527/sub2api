@@ -166,3 +166,14 @@ func TestMigration151RelaxesLegacyUsersInviteCodeColumn(t *testing.T) {
 	require.Contains(t, sql, "ALTER COLUMN invite_code SET DEFAULT ''")
 	require.NotContains(t, sql, "DROP COLUMN")
 }
+
+func TestMigration152DropsLegacyUsersInviteCodeUniqueness(t *testing.T) {
+	content, err := FS.ReadFile("152_drop_legacy_invite_code_unique_constraint.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	require.Contains(t, sql, "users_invite_code_key")
+	require.Contains(t, sql, "users_invite_code_unique_active")
+	require.Contains(t, sql, "DROP INDEX IF EXISTS users_invite_code_unique_active")
+	require.NotContains(t, sql, "DROP COLUMN")
+}

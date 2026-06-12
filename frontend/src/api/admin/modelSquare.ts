@@ -37,9 +37,7 @@ export interface AdminModelSquareResult {
 }
 
 export async function getModelSquare(): Promise<AdminModelSquareResult> {
-  const { data } = await apiClient.get<AdminModelSquareResult>(
-    '/admin/upstream-management/model-square'
-  )
+  const { data } = await apiClient.get<AdminModelSquareResult>('/model-square')
   return data
 }
 
