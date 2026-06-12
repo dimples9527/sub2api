@@ -17,6 +17,7 @@ const (
 type UpstreamAccountRateGuardSchedulerService interface {
 	GetRateGuardConfig(ctx context.Context) (UpstreamAccountRateGuardConfig, error)
 	RunScheduledRateGuard(ctx context.Context) (UpstreamAccountRateGuardConfig, error)
+	RunRateGuard(ctx context.Context, triggerSource string) (UpstreamAccountRateGuardConfig, error)
 }
 
 type UpstreamAccountRateGuardPollLog struct {
@@ -141,7 +142,7 @@ func (s *UpstreamAccountRateGuardScheduler) runDue(ctx context.Context, now time
 
 	runCtx, cancel := context.WithTimeout(ctx, upstreamAccountRateGuardRunTimeout)
 	defer cancel()
-	if _, err := s.service.RunScheduledRateGuard(runCtx); err != nil {
+	if _, err := s.service.RunRateGuard(runCtx, UpstreamAccountSyncTriggerScheduledRateGuard); err != nil {
 		s.appendPollLog(UpstreamAccountRateGuardPollLog{
 			CheckedAt: now.UTC(),
 			Trigger:   "scheduled",
@@ -188,7 +189,7 @@ func (s *UpstreamAccountRateGuardScheduler) RunNow(ctx context.Context) (Upstrea
 
 	runCtx, cancel := context.WithTimeout(ctx, upstreamAccountRateGuardRunTimeout)
 	defer cancel()
-	config, err := s.service.RunScheduledRateGuard(runCtx)
+	config, err := s.service.RunRateGuard(runCtx, UpstreamAccountSyncTriggerManualRateGuard)
 	if err != nil {
 		s.appendPollLog(UpstreamAccountRateGuardPollLog{
 			CheckedAt: now,

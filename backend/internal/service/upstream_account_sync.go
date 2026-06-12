@@ -22,6 +22,10 @@ const (
 	UpstreamAccountSyncActionSkip     = "skip"
 	UpstreamAccountSyncActionConflict = "conflict"
 
+	UpstreamAccountSyncTriggerManualSync         = "manual_sync"
+	UpstreamAccountSyncTriggerScheduledRateGuard = "scheduled_rate_guard"
+	UpstreamAccountSyncTriggerManualRateGuard    = "manual_rate_guard"
+
 	DefaultUpstreamAccountRateGuardIntervalSeconds = 3600
 	MinUpstreamAccountRateGuardIntervalSeconds     = 1
 )
@@ -33,9 +37,10 @@ type UpstreamAccountSyncAccountManager interface {
 }
 
 type UpstreamAccountSyncRequest struct {
-	CreateMissing  bool `json:"create_missing"`
-	UpdateExisting bool `json:"update_existing"`
-	ApplyRateGuard bool `json:"apply_rate_guard"`
+	CreateMissing  bool   `json:"create_missing"`
+	UpdateExisting bool   `json:"update_existing"`
+	ApplyRateGuard bool   `json:"apply_rate_guard"`
+	TriggerSource  string `json:"trigger_source,omitempty"`
 }
 
 type UpstreamAccountRateGuardConfig struct {
@@ -105,6 +110,7 @@ type UpstreamAccountSyncRecord struct {
 	RateViolationCount int                               `json:"rate_violation_count"`
 	UnboundGroupCount  int                               `json:"unbound_group_count"`
 	CreatedAt          time.Time                         `json:"created_at"`
+	TriggerSource      string                            `json:"trigger_source,omitempty"`
 	Error              string                            `json:"error,omitempty"`
 	UnbindDetails      []UpstreamAccountSyncUnbindDetail `json:"unbind_details,omitempty"`
 }
@@ -121,6 +127,7 @@ type UpstreamAccountSyncUnbindDetail struct {
 	UnboundGroupIDs         []int64  `json:"unbound_group_ids"`
 	UnboundGroupNames       []string `json:"unbound_group_names"`
 	RemainingGroupIDs       []int64  `json:"remaining_group_ids"`
+	TriggerSource           string   `json:"trigger_source,omitempty"`
 }
 
 type UpstreamAccountSyncService struct {
@@ -158,6 +165,7 @@ func (s *UpstreamAccountSyncService) Preview(ctx context.Context) (UpstreamAccou
 }
 
 func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccountSyncRequest) (UpstreamAccountSyncResult, error) {
+	triggerSource := normalizeUpstreamAccountSyncTriggerSource(req.TriggerSource)
 	result, previewState, err := s.preview(ctx)
 	if err != nil {
 		return UpstreamAccountSyncResult{}, err
@@ -202,7 +210,7 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 				SkipMixedChannelCheck: true,
 			})
 			if err != nil {
-				return s.finishSyncWithError(ctx, result, unbindDetails, err)
+				return s.finishSyncWithError(ctx, result, triggerSource, unbindDetails, err)
 			}
 			result.Summary.CreateCount++
 		case UpstreamAccountSyncActionUpdate:
@@ -232,10 +240,10 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 				SkipMixedChannelCheck: true,
 			})
 			if err != nil {
-				return s.finishSyncWithError(ctx, result, unbindDetails, err)
+				return s.finishSyncWithError(ctx, result, triggerSource, unbindDetails, err)
 			}
 			if req.ApplyRateGuard && len(lowGroupIDs) > 0 {
-				detail := buildUpstreamAccountSyncUnbindDetail(provider, *item, account, lowGroupIDs, lowGroupNames, remainingGroupIDs)
+				detail := buildUpstreamAccountSyncUnbindDetail(provider, *item, account, lowGroupIDs, lowGroupNames, remainingGroupIDs, triggerSource)
 				unbindDetails = append(unbindDetails, detail)
 				logUpstreamAccountSyncUnbindAudit(detail)
 				result.Summary.RateViolationCount++
@@ -257,6 +265,7 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 		RateViolationCount: result.Summary.RateViolationCount,
 		UnboundGroupCount:  result.Summary.UnboundGroupCount,
 		CreatedAt:          now,
+		TriggerSource:      triggerSource,
 		UnbindDetails:      unbindDetails,
 	})
 	if err != nil {
@@ -299,6 +308,10 @@ func (s *UpstreamAccountSyncService) UpdateRateGuardConfig(ctx context.Context, 
 }
 
 func (s *UpstreamAccountSyncService) RunScheduledRateGuard(ctx context.Context) (UpstreamAccountRateGuardConfig, error) {
+	return s.RunRateGuard(ctx, UpstreamAccountSyncTriggerScheduledRateGuard)
+}
+
+func (s *UpstreamAccountSyncService) RunRateGuard(ctx context.Context, triggerSource string) (UpstreamAccountRateGuardConfig, error) {
 	config, err := s.GetRateGuardConfig(ctx)
 	if err != nil {
 		return UpstreamAccountRateGuardConfig{}, err
@@ -309,6 +322,7 @@ func (s *UpstreamAccountSyncService) RunScheduledRateGuard(ctx context.Context) 
 		CreateMissing:  false,
 		UpdateExisting: true,
 		ApplyRateGuard: true,
+		TriggerSource:  normalizeUpstreamAccountRateGuardTriggerSource(triggerSource),
 	})
 	if runErr != nil {
 		config.LastRunStatus = "failed"
@@ -574,7 +588,7 @@ func (s *UpstreamAccountSyncService) prependRecord(ctx context.Context, record U
 	return records, nil
 }
 
-func (s *UpstreamAccountSyncService) finishSyncWithError(ctx context.Context, result UpstreamAccountSyncResult, unbindDetails []UpstreamAccountSyncUnbindDetail, runErr error) (UpstreamAccountSyncResult, error) {
+func (s *UpstreamAccountSyncService) finishSyncWithError(ctx context.Context, result UpstreamAccountSyncResult, triggerSource string, unbindDetails []UpstreamAccountSyncUnbindDetail, runErr error) (UpstreamAccountSyncResult, error) {
 	providerSlug, providerName := upstreamAccountSyncRecordProvider(result)
 	record := UpstreamAccountSyncRecord{
 		ProviderSlug:       providerSlug,
@@ -586,6 +600,7 @@ func (s *UpstreamAccountSyncService) finishSyncWithError(ctx context.Context, re
 		RateViolationCount: result.Summary.RateViolationCount,
 		UnboundGroupCount:  result.Summary.UnboundGroupCount,
 		CreatedAt:          time.Now().UTC(),
+		TriggerSource:      normalizeUpstreamAccountSyncTriggerSource(triggerSource),
 		Error:              runErr.Error(),
 		UnbindDetails:      unbindDetails,
 	}
@@ -777,7 +792,7 @@ func upstreamAccountSyncBoundGroups(account Account, upstreamRate float64) []Ups
 	return out
 }
 
-func buildUpstreamAccountSyncUnbindDetail(provider UpstreamProviderConfig, item UpstreamAccountSyncItem, account Account, unboundGroupIDs []int64, unboundGroupNames []string, remainingGroupIDs []int64) UpstreamAccountSyncUnbindDetail {
+func buildUpstreamAccountSyncUnbindDetail(provider UpstreamProviderConfig, item UpstreamAccountSyncItem, account Account, unboundGroupIDs []int64, unboundGroupNames []string, remainingGroupIDs []int64, triggerSource string) UpstreamAccountSyncUnbindDetail {
 	localMinRate, _ := upstreamAccountSyncMinGroupRate(account)
 	return UpstreamAccountSyncUnbindDetail{
 		ProviderSlug:            provider.Slug,
@@ -791,6 +806,7 @@ func buildUpstreamAccountSyncUnbindDetail(provider UpstreamProviderConfig, item 
 		UnboundGroupIDs:         append([]int64(nil), unboundGroupIDs...),
 		UnboundGroupNames:       append([]string(nil), unboundGroupNames...),
 		RemainingGroupIDs:       append([]int64(nil), remainingGroupIDs...),
+		TriggerSource:           normalizeUpstreamAccountSyncTriggerSource(triggerSource),
 	}
 }
 
@@ -825,7 +841,28 @@ func logUpstreamAccountSyncUnbindAudit(detail UpstreamAccountSyncUnbindDetail) {
 		"unbound_group_ids":          detail.UnboundGroupIDs,
 		"unbound_group_names":        detail.UnboundGroupNames,
 		"remaining_group_ids":        detail.RemainingGroupIDs,
+		"trigger_source":             normalizeUpstreamAccountSyncTriggerSource(detail.TriggerSource),
 	})
+}
+
+func normalizeUpstreamAccountSyncTriggerSource(triggerSource string) string {
+	switch strings.TrimSpace(triggerSource) {
+	case UpstreamAccountSyncTriggerScheduledRateGuard:
+		return UpstreamAccountSyncTriggerScheduledRateGuard
+	case UpstreamAccountSyncTriggerManualRateGuard:
+		return UpstreamAccountSyncTriggerManualRateGuard
+	default:
+		return UpstreamAccountSyncTriggerManualSync
+	}
+}
+
+func normalizeUpstreamAccountRateGuardTriggerSource(triggerSource string) string {
+	switch strings.TrimSpace(triggerSource) {
+	case UpstreamAccountSyncTriggerManualRateGuard:
+		return UpstreamAccountSyncTriggerManualRateGuard
+	default:
+		return UpstreamAccountSyncTriggerScheduledRateGuard
+	}
 }
 
 func accountIDs(accounts []Account) []int64 {

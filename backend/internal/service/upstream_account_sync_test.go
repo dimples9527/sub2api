@@ -353,10 +353,16 @@ func TestUpstreamAccountSyncRunCreatesUpdatesAndAppliesRateGuard(t *testing.T) {
 	if len(records) != 1 || records[0].CreatedCount != 1 || records[0].UpdatedCount != 1 || records[0].UnboundGroupCount != 1 {
 		t.Fatalf("records = %+v, want one sync record with counts", records)
 	}
+	if records[0].TriggerSource != UpstreamAccountSyncTriggerManualSync {
+		t.Fatalf("record trigger source = %q, want %q", records[0].TriggerSource, UpstreamAccountSyncTriggerManualSync)
+	}
 	if len(records[0].UnbindDetails) != 1 {
 		t.Fatalf("unbind details = %+v, want one entry", records[0].UnbindDetails)
 	}
 	detail := records[0].UnbindDetails[0]
+	if detail.TriggerSource != UpstreamAccountSyncTriggerManualSync {
+		t.Fatalf("unbind detail trigger source = %q, want %q", detail.TriggerSource, UpstreamAccountSyncTriggerManualSync)
+	}
 	if detail.MatchedLocalAccountID != 10 || detail.MatchedLocalAccountName != "up-old" {
 		t.Fatalf("unbind detail account = %+v, want account 10 up-old", detail)
 	}
@@ -519,5 +525,11 @@ func TestUpstreamAccountRateGuardRunOnlyAppliesRateGuard(t *testing.T) {
 	}
 	if len(records) != 1 || records[0].CreatedCount != 0 || records[0].UpdatedCount != 1 || records[0].UnboundGroupCount != 1 {
 		t.Fatalf("records = %+v, want one rate guard record without creates", records)
+	}
+	if records[0].TriggerSource != UpstreamAccountSyncTriggerScheduledRateGuard {
+		t.Fatalf("record trigger source = %q, want %q", records[0].TriggerSource, UpstreamAccountSyncTriggerScheduledRateGuard)
+	}
+	if len(records[0].UnbindDetails) != 1 || records[0].UnbindDetails[0].TriggerSource != UpstreamAccountSyncTriggerScheduledRateGuard {
+		t.Fatalf("unbind detail trigger source = %+v, want scheduled rate guard", records[0].UnbindDetails)
 	}
 }

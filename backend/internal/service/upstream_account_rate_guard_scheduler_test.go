@@ -14,6 +14,7 @@ type upstreamAccountRateGuardSchedulerServiceStub struct {
 
 	mu         sync.Mutex
 	runs       int
+	runSources []string
 	activeRuns int
 	maxActive  int
 	blockRun   chan struct{}
@@ -25,8 +26,13 @@ func (s *upstreamAccountRateGuardSchedulerServiceStub) GetRateGuardConfig(contex
 }
 
 func (s *upstreamAccountRateGuardSchedulerServiceStub) RunScheduledRateGuard(context.Context) (UpstreamAccountRateGuardConfig, error) {
+	return s.RunRateGuard(context.Background(), UpstreamAccountSyncTriggerScheduledRateGuard)
+}
+
+func (s *upstreamAccountRateGuardSchedulerServiceStub) RunRateGuard(_ context.Context, triggerSource string) (UpstreamAccountRateGuardConfig, error) {
 	s.mu.Lock()
 	s.runs++
+	s.runSources = append(s.runSources, triggerSource)
 	s.activeRuns++
 	if s.activeRuns > s.maxActive {
 		s.maxActive = s.activeRuns
@@ -136,6 +142,30 @@ func TestUpstreamAccountRateGuardSchedulerRunDueReportsRunErrorAsExecuted(t *tes
 	}
 	if stub.runs != 1 {
 		t.Fatalf("run count = %d, want 1", stub.runs)
+	}
+}
+
+func TestUpstreamAccountRateGuardSchedulerPassesTriggerSource(t *testing.T) {
+	stub := &upstreamAccountRateGuardSchedulerServiceStub{
+		config: UpstreamAccountRateGuardConfig{Enabled: true, IntervalSeconds: 1},
+	}
+	scheduler := NewUpstreamAccountRateGuardScheduler(stub)
+
+	if !scheduler.runDue(context.Background(), time.Now()) {
+		t.Fatalf("scheduled run should execute")
+	}
+	if _, err := scheduler.RunNow(context.Background()); err != nil {
+		t.Fatalf("RunNow returned error: %v", err)
+	}
+
+	if len(stub.runSources) != 2 {
+		t.Fatalf("run sources = %+v, want scheduled and manual", stub.runSources)
+	}
+	if stub.runSources[0] != UpstreamAccountSyncTriggerScheduledRateGuard {
+		t.Fatalf("scheduled source = %q, want %q", stub.runSources[0], UpstreamAccountSyncTriggerScheduledRateGuard)
+	}
+	if stub.runSources[1] != UpstreamAccountSyncTriggerManualRateGuard {
+		t.Fatalf("manual source = %q, want %q", stub.runSources[1], UpstreamAccountSyncTriggerManualRateGuard)
 	}
 }
 

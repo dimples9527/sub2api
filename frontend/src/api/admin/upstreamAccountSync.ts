@@ -54,6 +54,7 @@ export interface UpstreamAccountSyncUnbindDetail {
   unbound_group_ids: number[]
   unbound_group_names: string[]
   remaining_group_ids: number[]
+  trigger_source?: string
 }
 
 export interface UpstreamAccountSyncRecord {
@@ -66,6 +67,7 @@ export interface UpstreamAccountSyncRecord {
   rate_violation_count: number
   unbound_group_count: number
   created_at: string
+  trigger_source?: string
   error?: string
   unbind_details?: UpstreamAccountSyncUnbindDetail[]
 }

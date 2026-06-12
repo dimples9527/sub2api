@@ -236,6 +236,7 @@
               <thead class="bg-gray-50 dark:bg-dark-800">
                 <tr>
                   <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.recordTime') }}</th>
+                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.recordTriggerSource') }}</th>
                   <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.provider') }}</th>
                   <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.created') }}</th>
                   <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.updated') }}</th>
@@ -246,6 +247,7 @@
               <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
                 <tr v-for="record in records" :key="`${record.provider_slug}-${record.created_at}`" class="records-row">
                   <td class="px-4 py-2">{{ formatDateTime(record.created_at) }}</td>
+                  <td class="px-4 py-2">{{ upstreamAccountSyncTriggerSourceLabel(record.trigger_source) }}</td>
                   <td class="px-4 py-2">{{ record.provider_name || record.provider_slug }}</td>
                   <td class="px-4 py-2 font-mono">{{ record.created_count }}</td>
                   <td class="px-4 py-2 font-mono">{{ record.updated_count }}</td>
@@ -256,7 +258,7 @@
                   </td>
                 </tr>
                 <tr v-if="!records.length">
-                  <td colspan="6" class="px-4 py-8 text-center text-gray-400">{{ t('admin.upstreamAccounts.noRecords') }}</td>
+                  <td colspan="7" class="px-4 py-8 text-center text-gray-400">{{ t('admin.upstreamAccounts.noRecords') }}</td>
                 </tr>
               </tbody>
             </table>
@@ -313,6 +315,7 @@
               <thead class="bg-gray-50 dark:bg-dark-800">
                 <tr>
                   <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logTime') }}</th>
+                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logTriggerSource') }}</th>
                   <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logAccount') }}</th>
                   <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logUpstream') }}</th>
                   <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logRateCompare') }}</th>
@@ -323,6 +326,7 @@
               <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
                 <tr v-for="entry in syncLogEntries" :key="entry.key" class="records-row">
                   <td class="px-4 py-3 text-gray-600 dark:text-gray-300">{{ formatDateTime(entry.created_at) }}</td>
+                  <td class="px-4 py-3">{{ upstreamAccountSyncTriggerSourceLabel(entry.trigger_source) }}</td>
                   <td class="px-4 py-3">
                     <div class="table-main-cell min-w-[12rem]">
                       <span class="font-medium text-gray-900 dark:text-white">{{ entry.matched_local_account_name }}</span>
@@ -355,7 +359,7 @@
                   </td>
                 </tr>
                 <tr v-if="!syncLogEntries.length">
-                  <td colspan="6" class="px-4 py-8 text-center text-gray-400">{{ t('admin.upstreamAccounts.noSyncLogs') }}</td>
+                  <td colspan="7" class="px-4 py-8 text-center text-gray-400">{{ t('admin.upstreamAccounts.noSyncLogs') }}</td>
                 </tr>
               </tbody>
             </table>
@@ -651,6 +655,12 @@ function rateGuardPollLogStatusClass(log: UpstreamAccountRateGuardPollLog) {
   if (log.status === 'success') return 'record-status-success'
   if (log.status === 'failed') return 'record-status-error'
   return 'record-status-muted'
+}
+
+function upstreamAccountSyncTriggerSourceLabel(triggerSource: string | undefined) {
+  if (triggerSource === 'scheduled_rate_guard') return t('admin.upstreamAccounts.triggerScheduledRateGuard')
+  if (triggerSource === 'manual_rate_guard') return t('admin.upstreamAccounts.triggerManualRateGuard')
+  return t('admin.upstreamAccounts.triggerManualSync')
 }
 
 function actionLabel(row: UpstreamAccountSyncItem) {
