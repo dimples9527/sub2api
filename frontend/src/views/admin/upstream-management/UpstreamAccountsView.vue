@@ -265,7 +265,7 @@
                 <tr v-for="record in records" :key="`${record.provider_slug}-${record.created_at}`" class="records-row">
                   <td class="px-4 py-2">{{ formatDateTime(record.created_at) }}</td>
                   <td class="px-4 py-2">{{ upstreamAccountSyncTriggerSourceLabel(record.trigger_source) }}</td>
-                  <td class="px-4 py-2">{{ record.provider_name || record.provider_slug }}</td>
+                  <td class="px-4 py-2">{{ syncRecordProviderLabel(record) }}</td>
                   <td class="px-4 py-2 font-mono">{{ record.created_count }}</td>
                   <td class="px-4 py-2 font-mono">{{ record.updated_count }}</td>
                   <td class="px-4 py-2 font-mono">{{ record.unbound_group_count }}</td>
@@ -694,6 +694,11 @@ function upstreamAccountSyncTriggerSourceLabel(triggerSource: string | undefined
   if (triggerSource === 'scheduled_rate_guard') return t('admin.upstreamAccounts.triggerScheduledRateGuard')
   if (triggerSource === 'manual_rate_guard') return t('admin.upstreamAccounts.triggerManualRateGuard')
   return t('admin.upstreamAccounts.triggerManualSync')
+}
+
+function syncRecordProviderLabel(record: UpstreamAccountSyncRecord) {
+  if (record.provider_slug === 'multiple') return t('admin.upstreamAccounts.legacyMultipleProviders')
+  return record.provider_name || record.provider_slug
 }
 
 function actionLabel(row: UpstreamAccountSyncItem) {

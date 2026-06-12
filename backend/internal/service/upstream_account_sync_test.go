@@ -387,6 +387,73 @@ func TestUpstreamAccountSyncRunCreatesUpdatesAndAppliesRateGuard(t *testing.T) {
 	}
 }
 
+func TestUpstreamAccountSyncRunRecordsEachProviderSeparately(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{
+			Slug:    "main",
+			Name:    "Main",
+			Type:    UpstreamProviderTypeSub2API,
+			BaseURL: "https://main.example.com",
+		},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", Type: UpstreamProviderTypeSub2API, BaseURL: "https://main.example.com", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup", Type: UpstreamProviderTypeSub2API, BaseURL: "https://backup.example.com", AccountNamePrefix: "backup-", Enabled: true},
+			{Slug: "mirror", Name: "Mirror", Type: UpstreamProviderTypeSub2API, BaseURL: "https://mirror.example.com", AccountNamePrefix: "mirror-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {
+				{ProviderSlug: "backup", KeyName: "alice", GroupName: "VIP", RateMultiplier: 2},
+			},
+			"mirror": {
+				{ProviderSlug: "mirror", KeyName: "bob", GroupName: "VIP", RateMultiplier: 2},
+			},
+		},
+	}
+	settings := newUpstreamManagementSettingRepoStub()
+	svc, _ := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 2, Status: StatusActive}},
+		nil,
+		settings,
+	)
+
+	result, err := svc.Sync(context.Background(), UpstreamAccountSyncRequest{
+		CreateMissing: true,
+		TriggerSource: UpstreamAccountSyncTriggerManualSync,
+	})
+	if err != nil {
+		t.Fatalf("Sync returned error: %v", err)
+	}
+	if result.Summary.CreateCount != 2 {
+		t.Fatalf("create count = %d, want 2", result.Summary.CreateCount)
+	}
+
+	rawRecords := settings.values[SettingKeyUpstreamAccountSyncRecords]
+	var records []UpstreamAccountSyncRecord
+	if err := json.Unmarshal([]byte(rawRecords), &records); err != nil {
+		t.Fatalf("decode records: %v raw=%s", err, rawRecords)
+	}
+	if len(records) != 2 {
+		t.Fatalf("records = %+v, want one record per provider", records)
+	}
+	recordsByProvider := map[string]UpstreamAccountSyncRecord{}
+	for _, record := range records {
+		recordsByProvider[record.ProviderSlug] = record
+	}
+	if _, exists := recordsByProvider["multiple"]; exists {
+		t.Fatalf("records = %+v, should not use synthetic multiple provider", records)
+	}
+	for slug, name := range map[string]string{"backup": "Backup", "mirror": "Mirror"} {
+		record, exists := recordsByProvider[slug]
+		if !exists {
+			t.Fatalf("records = %+v, missing provider %s", records, slug)
+		}
+		if record.ProviderName != name || record.CreatedCount != 1 || record.TriggerSource != UpstreamAccountSyncTriggerManualSync {
+			t.Fatalf("record[%s] = %+v, want provider name %s and one create", slug, record, name)
+		}
+	}
+}
+
 func TestUpstreamAccountSyncRunDoesNotUpdateNoopAccount(t *testing.T) {
 	provider := &upstreamAccountSyncProviderSourceStub{
 		defaultProvider: UpstreamProviderConfig{

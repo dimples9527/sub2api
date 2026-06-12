@@ -144,6 +144,19 @@ type UpstreamAccountSyncService struct {
 	settingRepo    SettingRepository
 }
 
+type upstreamAccountSyncRecordStats struct {
+	providerSlug       string
+	providerName       string
+	createdCount       int
+	updatedCount       int
+	skippedCount       int
+	conflictCount      int
+	rateViolationCount int
+	unboundGroupCount  int
+	error              string
+	unbindDetails      []UpstreamAccountSyncUnbindDetail
+}
+
 func NewUpstreamAccountSyncService(
 	providerSource UpstreamManagementProviderSource,
 	groupRepo GroupRepository,
@@ -183,7 +196,7 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 	result.Summary.UnboundGroupCount = 0
 
 	now := time.Now().UTC()
-	unbindDetails := make([]UpstreamAccountSyncUnbindDetail, 0)
+	recordStats, recordOrder := newUpstreamAccountSyncRecordStats(result)
 	for index := range result.Items {
 		item := &result.Items[index]
 		provider := previewState.providerBySlug[item.ProviderSlug]
@@ -217,9 +230,10 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 				SkipMixedChannelCheck: true,
 			})
 			if err != nil {
-				return s.finishSyncWithError(ctx, result, triggerSource, unbindDetails, err)
+				return s.finishSyncWithError(ctx, result, triggerSource, recordStats, recordOrder, item.ProviderSlug, err)
 			}
 			result.Summary.CreateCount++
+			recordStats[item.ProviderSlug].createdCount++
 		case UpstreamAccountSyncActionUpdate:
 			if !req.UpdateExisting || item.MatchedAccountID == nil {
 				continue
@@ -247,34 +261,25 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 				SkipMixedChannelCheck: true,
 			})
 			if err != nil {
-				return s.finishSyncWithError(ctx, result, triggerSource, unbindDetails, err)
+				return s.finishSyncWithError(ctx, result, triggerSource, recordStats, recordOrder, item.ProviderSlug, err)
 			}
 			if req.ApplyRateGuard && len(lowGroupIDs) > 0 {
 				detail := buildUpstreamAccountSyncUnbindDetail(provider, *item, account, lowGroupIDs, lowGroupNames, remainingGroupIDs, triggerSource)
-				unbindDetails = append(unbindDetails, detail)
+				recordStats[item.ProviderSlug].unbindDetails = append(recordStats[item.ProviderSlug].unbindDetails, detail)
 				logUpstreamAccountSyncUnbindAudit(detail)
 				result.Summary.RateViolationCount++
 				result.Summary.UnboundGroupCount += len(lowGroupIDs)
+				recordStats[item.ProviderSlug].rateViolationCount++
+				recordStats[item.ProviderSlug].unboundGroupCount += len(lowGroupIDs)
 			}
 			item.Action = UpstreamAccountSyncActionUpdate
 			result.Summary.UpdateCount++
+			recordStats[item.ProviderSlug].updatedCount++
 		}
 	}
 
-	recordProviderSlug, recordProviderName := upstreamAccountSyncRecordProvider(result)
-	records, err := s.prependRecord(ctx, UpstreamAccountSyncRecord{
-		ProviderSlug:       recordProviderSlug,
-		ProviderName:       recordProviderName,
-		CreatedCount:       result.Summary.CreateCount,
-		UpdatedCount:       result.Summary.UpdateCount,
-		SkippedCount:       result.Summary.SkipCount,
-		ConflictCount:      result.Summary.ConflictCount,
-		RateViolationCount: result.Summary.RateViolationCount,
-		UnboundGroupCount:  result.Summary.UnboundGroupCount,
-		CreatedAt:          now,
-		TriggerSource:      triggerSource,
-		UnbindDetails:      unbindDetails,
-	})
+	recordsToPrepend := upstreamAccountSyncRecordsFromStats(result, recordStats, recordOrder, now, triggerSource)
+	records, err := s.prependRecords(ctx, recordsToPrepend)
 	if err != nil {
 		return UpstreamAccountSyncResult{}, err
 	}
@@ -576,12 +581,13 @@ func (s *UpstreamAccountSyncService) loadGroupMappings(ctx context.Context) ([]U
 	return normalizeUpstreamGroupMappings(records), nil
 }
 
-func (s *UpstreamAccountSyncService) prependRecord(ctx context.Context, record UpstreamAccountSyncRecord) ([]UpstreamAccountSyncRecord, error) {
+func (s *UpstreamAccountSyncService) prependRecords(ctx context.Context, newRecords []UpstreamAccountSyncRecord) ([]UpstreamAccountSyncRecord, error) {
 	existing, err := s.ListRecords(ctx)
 	if err != nil {
 		return nil, err
 	}
-	records := append([]UpstreamAccountSyncRecord{record}, existing...)
+	records := append([]UpstreamAccountSyncRecord{}, newRecords...)
+	records = append(records, existing...)
 	records = limitUpstreamAccountSyncRecords(records)
 	if s == nil || s.settingRepo == nil {
 		return records, nil
@@ -596,23 +602,12 @@ func (s *UpstreamAccountSyncService) prependRecord(ctx context.Context, record U
 	return records, nil
 }
 
-func (s *UpstreamAccountSyncService) finishSyncWithError(ctx context.Context, result UpstreamAccountSyncResult, triggerSource string, unbindDetails []UpstreamAccountSyncUnbindDetail, runErr error) (UpstreamAccountSyncResult, error) {
-	providerSlug, providerName := upstreamAccountSyncRecordProvider(result)
-	record := UpstreamAccountSyncRecord{
-		ProviderSlug:       providerSlug,
-		ProviderName:       providerName,
-		CreatedCount:       result.Summary.CreateCount,
-		UpdatedCount:       result.Summary.UpdateCount,
-		SkippedCount:       result.Summary.SkipCount,
-		ConflictCount:      result.Summary.ConflictCount,
-		RateViolationCount: result.Summary.RateViolationCount,
-		UnboundGroupCount:  result.Summary.UnboundGroupCount,
-		CreatedAt:          time.Now().UTC(),
-		TriggerSource:      normalizeUpstreamAccountSyncTriggerSource(triggerSource),
-		Error:              runErr.Error(),
-		UnbindDetails:      unbindDetails,
+func (s *UpstreamAccountSyncService) finishSyncWithError(ctx context.Context, result UpstreamAccountSyncResult, triggerSource string, recordStats map[string]*upstreamAccountSyncRecordStats, recordOrder []string, failedProviderSlug string, runErr error) (UpstreamAccountSyncResult, error) {
+	if stats := recordStats[failedProviderSlug]; stats != nil {
+		stats.error = runErr.Error()
 	}
-	records, err := s.prependRecord(ctx, record)
+	recordsToPrepend := upstreamAccountSyncRecordsFromStats(result, recordStats, recordOrder, time.Now().UTC(), triggerSource)
+	records, err := s.prependRecords(ctx, recordsToPrepend)
 	if err != nil {
 		return UpstreamAccountSyncResult{}, err
 	}
@@ -620,14 +615,74 @@ func (s *UpstreamAccountSyncService) finishSyncWithError(ctx context.Context, re
 	return result, runErr
 }
 
-func upstreamAccountSyncRecordProvider(result UpstreamAccountSyncResult) (string, string) {
-	if len(result.Providers) == 1 {
-		return result.Providers[0].Slug, result.Providers[0].Name
+func newUpstreamAccountSyncRecordStats(result UpstreamAccountSyncResult) (map[string]*upstreamAccountSyncRecordStats, []string) {
+	statsByProvider := map[string]*upstreamAccountSyncRecordStats{}
+	order := []string{}
+	ensure := func(slug, name string) {
+		slug = strings.TrimSpace(slug)
+		if slug == "" {
+			slug = result.DefaultProvider.Slug
+			name = result.DefaultProvider.Name
+		}
+		if _, exists := statsByProvider[slug]; exists {
+			return
+		}
+		statsByProvider[slug] = &upstreamAccountSyncRecordStats{
+			providerSlug: slug,
+			providerName: strings.TrimSpace(name),
+		}
+		order = append(order, slug)
 	}
-	if len(result.Providers) > 1 {
-		return "multiple", "Multiple upstream providers"
+	for _, item := range result.Items {
+		ensure(item.ProviderSlug, item.ProviderName)
 	}
-	return result.DefaultProvider.Slug, result.DefaultProvider.Name
+	if len(order) == 0 {
+		for _, provider := range result.Providers {
+			ensure(provider.Slug, provider.Name)
+		}
+	}
+	if len(order) == 0 {
+		ensure(result.DefaultProvider.Slug, result.DefaultProvider.Name)
+	}
+	return statsByProvider, order
+}
+
+func upstreamAccountSyncRecordsFromStats(result UpstreamAccountSyncResult, statsByProvider map[string]*upstreamAccountSyncRecordStats, order []string, createdAt time.Time, triggerSource string) []UpstreamAccountSyncRecord {
+	for _, item := range result.Items {
+		stats := statsByProvider[item.ProviderSlug]
+		if stats == nil {
+			continue
+		}
+		switch item.Action {
+		case UpstreamAccountSyncActionSkip:
+			stats.skippedCount++
+		case UpstreamAccountSyncActionConflict:
+			stats.conflictCount++
+		}
+	}
+
+	records := make([]UpstreamAccountSyncRecord, 0, len(order))
+	for _, slug := range order {
+		stats := statsByProvider[slug]
+		if stats == nil {
+			continue
+		}
+		records = append(records, UpstreamAccountSyncRecord{
+			ProviderSlug:       stats.providerSlug,
+			ProviderName:       stats.providerName,
+			CreatedCount:       stats.createdCount,
+			UpdatedCount:       stats.updatedCount,
+			SkippedCount:       stats.skippedCount,
+			ConflictCount:      stats.conflictCount,
+			RateViolationCount: stats.rateViolationCount,
+			UnboundGroupCount:  stats.unboundGroupCount,
+			CreatedAt:          createdAt,
+			TriggerSource:      normalizeUpstreamAccountSyncTriggerSource(triggerSource),
+			Error:              stats.error,
+			UnbindDetails:      stats.unbindDetails,
+		})
+	}
+	return records
 }
 
 type upstreamAccountSyncGroupResolver struct {

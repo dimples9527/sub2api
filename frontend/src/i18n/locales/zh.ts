@@ -1709,6 +1709,7 @@ export default {
       conflictIds: '冲突账号：{ids}',
       unbindGroups: '将解绑：{groups}',
       syncRecords: '同步记录',
+      legacyMultipleProviders: '多个上游（历史汇总）',
       latestRecords: '最近 100 条执行记录',
       recordTime: '时间',
       recordTriggerSource: '来源',

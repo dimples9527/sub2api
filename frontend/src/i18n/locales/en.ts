@@ -1688,6 +1688,7 @@ export default {
       conflictIds: 'Conflicting accounts: {ids}',
       unbindGroups: 'Will unbind: {groups}',
       syncRecords: 'Sync records',
+      legacyMultipleProviders: 'Multiple upstreams (legacy summary)',
       latestRecords: 'Latest 100 execution records',
       recordTime: 'Time',
       recordTriggerSource: 'Source',
