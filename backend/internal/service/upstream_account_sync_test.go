@@ -214,6 +214,53 @@ func TestUpstreamAccountSyncPreviewDetectsDuplicateLocalAccountNames(t *testing.
 	}
 }
 
+func TestUpstreamAccountSyncPreviewIncludesMatchedAccountBoundGroups(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup", AccountNamePrefix: "up-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {{ProviderSlug: "backup", KeyName: "alice", GroupName: "VIP", RateMultiplier: 2}},
+		},
+	}
+	svc, _ := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 2, Status: StatusActive}},
+		[]Account{{
+			ID:       10,
+			Name:     "up-alice",
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeAPIKey,
+			GroupIDs: []int64{7, 8},
+			Groups: []*Group{
+				{ID: 7, Name: "VIP", RateMultiplier: 2},
+				{ID: 8, Name: "Trial", RateMultiplier: 0.5},
+			},
+		}},
+		nil,
+	)
+
+	result, err := svc.Preview(context.Background())
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("item count = %d, want 1", len(result.Items))
+	}
+	groups := result.Items[0].BoundGroups
+	if len(groups) != 2 {
+		t.Fatalf("bound groups = %+v, want VIP and Trial", groups)
+	}
+	if groups[0].ID != 7 || groups[0].Name != "VIP" || groups[0].RateMultiplier != 2 || groups[0].RateViolation {
+		t.Fatalf("first bound group = %+v, want non-risk VIP", groups[0])
+	}
+	if groups[1].ID != 8 || groups[1].Name != "Trial" || groups[1].RateMultiplier != 0.5 || !groups[1].RateViolation {
+		t.Fatalf("second bound group = %+v, want low-rate Trial", groups[1])
+	}
+}
+
 func TestUpstreamAccountSyncRunCreatesUpdatesAndAppliesRateGuard(t *testing.T) {
 	provider := &upstreamAccountSyncProviderSourceStub{
 		defaultProvider: UpstreamProviderConfig{

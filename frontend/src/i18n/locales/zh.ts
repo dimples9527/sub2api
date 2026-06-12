@@ -1701,6 +1701,7 @@ export default {
         upstreamRate: '上游倍率',
         localAccount: '本地账号',
         localGroup: '本地分组',
+        boundGroups: '账号绑定分组',
         action: '动作'
       },
       actions: {

@@ -8,58 +8,78 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 )
+
+type upstreamSub2APIAuth struct {
+	Token     string
+	TokenType string
+}
 
 type Sub2APIProviderAdapter struct {
 	httpClient *http.Client
+
+	mu         sync.Mutex
+	authBySlug map[string]upstreamSub2APIAuth
 }
 
 func NewSub2APIProviderAdapter(httpClient *http.Client) *Sub2APIProviderAdapter {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
-	return &Sub2APIProviderAdapter{httpClient: httpClient}
+	return &Sub2APIProviderAdapter{
+		httpClient: httpClient,
+		authBySlug: map[string]upstreamSub2APIAuth{},
+	}
 }
 
 func (a *Sub2APIProviderAdapter) FetchKeys(ctx context.Context, provider UpstreamProviderConfig) ([]UpstreamProviderKey, []string, error) {
-	token := ""
-	if provider.Email != "" || provider.Password != "" {
-		nextToken, _, _, err := a.login(ctx, provider)
+	for attempt := 0; attempt < 2; attempt++ {
+		auth, err := a.ensureAuth(ctx, provider)
 		if err != nil {
 			return nil, nil, err
 		}
-		token = nextToken
+		payload, status, err := a.request(ctx, provider, auth, provider.APIKeysURL, "sub2api provider keys")
+		if err != nil {
+			return nil, nil, err
+		}
+		if status < 200 || status >= 300 {
+			requestErr := upstreamProviderHTTPError("sub2api provider keys", status, payload)
+			if attempt == 0 && hasSub2APICredentials(provider) && upstreamProviderAuthFailureHint(status, payload, requestErr) {
+				a.clearAuth(provider.Slug)
+				continue
+			}
+			return nil, nil, requestErr
+		}
+		keys, err := parseSub2APIProviderKeys(provider, payload)
+		if err != nil {
+			if attempt == 0 && hasSub2APICredentials(provider) && upstreamProviderAuthFailureHint(status, payload, err) {
+				a.clearAuth(provider.Slug)
+				continue
+			}
+			return nil, nil, err
+		}
+		return keys, nil, nil
 	}
-	payload, status, err := a.request(ctx, provider, token, provider.APIKeysURL, "sub2api provider keys")
-	if err != nil {
-		return nil, nil, err
-	}
-	if status < 200 || status >= 300 {
-		return nil, nil, upstreamProviderHTTPError("sub2api provider keys", status, payload)
-	}
-	keys, err := parseSub2APIProviderKeys(provider, payload)
-	if err != nil {
-		return nil, nil, err
-	}
-	return keys, nil, nil
+	return nil, nil, fmt.Errorf("sub2api provider keys failed after auth retry")
 }
 
 func (a *Sub2APIProviderAdapter) Test(ctx context.Context, provider UpstreamProviderConfig) UpstreamProviderTestResult {
 	result := newUpstreamProviderTestResult(provider)
-	token := ""
-	if provider.Email != "" || provider.Password != "" {
-		nextToken, _, status, err := a.login(ctx, provider)
+	auth := upstreamSub2APIAuth{}
+	if hasSub2APICredentials(provider) {
+		nextAuth, _, status, err := a.login(ctx, provider)
 		result.Login.StatusCode = status
 		if err != nil {
 			result.Login.Error = err.Error()
 			return result
 		}
-		token = nextToken
+		auth = nextAuth
 		result.Login.OK = true
 	} else {
 		result.Login.OK = true
 	}
-	payload, status, err := a.request(ctx, provider, token, provider.APIKeysURL, "sub2api provider keys")
+	payload, status, err := a.request(ctx, provider, auth, provider.APIKeysURL, "sub2api provider keys")
 	result.Keys.StatusCode = status
 	if err != nil {
 		result.Keys.Error = err.Error()
@@ -80,33 +100,90 @@ func (a *Sub2APIProviderAdapter) Test(ctx context.Context, provider UpstreamProv
 	return result
 }
 
-func (a *Sub2APIProviderAdapter) login(ctx context.Context, provider UpstreamProviderConfig) (string, []byte, int, error) {
-	if provider.LoginURL == "" {
-		return "", nil, 0, fmt.Errorf("sub2api provider login_url is required when credentials are configured")
+func (a *Sub2APIProviderAdapter) ensureAuth(ctx context.Context, provider UpstreamProviderConfig) (upstreamSub2APIAuth, error) {
+	if !hasSub2APICredentials(provider) {
+		return upstreamSub2APIAuth{}, nil
+	}
+	if auth, ok := a.cachedAuth(provider.Slug); ok {
+		return auth, nil
+	}
+	auth, _, _, err := a.login(ctx, provider)
+	if err != nil {
+		return upstreamSub2APIAuth{}, err
+	}
+	a.storeAuth(provider.Slug, auth)
+	return auth, nil
+}
+
+func (a *Sub2APIProviderAdapter) cachedAuth(slug string) (upstreamSub2APIAuth, bool) {
+	if a == nil {
+		return upstreamSub2APIAuth{}, false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	auth, ok := a.authBySlug[strings.TrimSpace(slug)]
+	if !ok || strings.TrimSpace(auth.Token) == "" {
+		return upstreamSub2APIAuth{}, false
+	}
+	if strings.TrimSpace(auth.TokenType) == "" {
+		auth.TokenType = "Bearer"
+	}
+	return auth, true
+}
+
+func (a *Sub2APIProviderAdapter) storeAuth(slug string, auth upstreamSub2APIAuth) {
+	if a == nil || strings.TrimSpace(slug) == "" || strings.TrimSpace(auth.Token) == "" {
+		return
+	}
+	if strings.TrimSpace(auth.TokenType) == "" {
+		auth.TokenType = "Bearer"
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.authBySlug[strings.TrimSpace(slug)] = auth
+}
+
+func (a *Sub2APIProviderAdapter) clearAuth(slug string) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	delete(a.authBySlug, strings.TrimSpace(slug))
+}
+
+func hasSub2APICredentials(provider UpstreamProviderConfig) bool {
+	return strings.TrimSpace(provider.Email) != "" || strings.TrimSpace(provider.Password) != ""
+}
+
+func (a *Sub2APIProviderAdapter) login(ctx context.Context, provider UpstreamProviderConfig) (upstreamSub2APIAuth, []byte, int, error) {
+	loginPath := provider.LoginURL
+	if strings.TrimSpace(loginPath) == "" {
+		loginPath = "/api/v1/auth/login"
 	}
 	body, err := json.Marshal(map[string]string{
 		"email":    provider.Email,
 		"password": provider.Password,
 	})
 	if err != nil {
-		return "", nil, 0, fmt.Errorf("marshal sub2api login payload: %w", err)
+		return upstreamSub2APIAuth{}, nil, 0, fmt.Errorf("marshal sub2api login payload: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamProviderURL(provider, provider.LoginURL), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamProviderURL(provider, loginPath), bytes.NewReader(body))
 	if err != nil {
-		return "", nil, 0, fmt.Errorf("create sub2api login request: %w", err)
+		return upstreamSub2APIAuth{}, nil, 0, fmt.Errorf("create sub2api login request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
-		return "", nil, 0, fmt.Errorf("sub2api login request failed: %w", err)
+		return upstreamSub2APIAuth{}, nil, 0, fmt.Errorf("sub2api login request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", nil, resp.StatusCode, fmt.Errorf("read sub2api login response: %w", err)
+		return upstreamSub2APIAuth{}, nil, resp.StatusCode, fmt.Errorf("read sub2api login response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", raw, resp.StatusCode, upstreamProviderHTTPError("sub2api login", resp.StatusCode, raw)
+		return upstreamSub2APIAuth{}, raw, resp.StatusCode, upstreamProviderHTTPError("sub2api login", resp.StatusCode, raw)
 	}
 	var parsed struct {
 		Code    int    `json:"code"`
@@ -121,19 +198,20 @@ func (a *Sub2APIProviderAdapter) login(ctx context.Context, provider UpstreamPro
 		TokenType   string `json:"token_type"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return "", raw, resp.StatusCode, fmt.Errorf("decode sub2api login response: %w", err)
+		return upstreamSub2APIAuth{}, raw, resp.StatusCode, fmt.Errorf("decode sub2api login response: %w", err)
 	}
 	if parsed.Code != 0 {
 		if parsed.Message == "" {
 			parsed.Message = "unknown error"
 		}
-		return "", raw, resp.StatusCode, fmt.Errorf("sub2api login failed: %s", parsed.Message)
+		return upstreamSub2APIAuth{}, raw, resp.StatusCode, fmt.Errorf("sub2api login failed: %s", parsed.Message)
 	}
 	token := firstNonEmptySub2APIString(parsed.Data.AccessToken, parsed.Data.Token, parsed.AccessToken, parsed.Token)
 	if token == "" {
-		return "", raw, resp.StatusCode, fmt.Errorf("sub2api login failed: missing token")
+		return upstreamSub2APIAuth{}, raw, resp.StatusCode, fmt.Errorf("sub2api login failed: missing token")
 	}
-	return token, raw, resp.StatusCode, nil
+	tokenType := firstNonEmptySub2APIString(parsed.Data.TokenType, parsed.TokenType, "Bearer")
+	return upstreamSub2APIAuth{Token: token, TokenType: tokenType}, raw, resp.StatusCode, nil
 }
 
 func firstNonEmptySub2APIString(values ...string) string {
@@ -145,13 +223,17 @@ func firstNonEmptySub2APIString(values ...string) string {
 	return ""
 }
 
-func (a *Sub2APIProviderAdapter) request(ctx context.Context, provider UpstreamProviderConfig, token, path, label string) ([]byte, int, error) {
+func (a *Sub2APIProviderAdapter) request(ctx context.Context, provider UpstreamProviderConfig, auth upstreamSub2APIAuth, path, label string) ([]byte, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstreamProviderURL(provider, path), nil)
 	if err != nil {
 		return nil, 0, fmt.Errorf("create %s request: %w", label, err)
 	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+	if strings.TrimSpace(auth.Token) != "" {
+		tokenType := strings.TrimSpace(auth.TokenType)
+		if tokenType == "" {
+			tokenType = "Bearer"
+		}
+		req.Header.Set("Authorization", tokenType+" "+auth.Token)
 	}
 	resp, err := a.httpClient.Do(req)
 	if err != nil {

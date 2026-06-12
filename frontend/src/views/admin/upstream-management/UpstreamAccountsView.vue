@@ -119,11 +119,25 @@
           </template>
 
           <template #cell-local_group_name="{ row }">
-            <div class="table-main-cell min-w-[12rem]">
-              <span>{{ row.local_group_name || '-' }}</span>
-              <span v-if="row.local_rate_multiplier !== undefined" class="text-xs font-mono text-gray-500 dark:text-gray-400">
-                {{ formatRate(row.local_rate_multiplier) }}
-              </span>
+            <div class="table-main-cell min-w-[16rem]">
+              <div v-if="row.bound_groups?.length" class="tag-list max-w-[22rem]">
+                <span
+                  v-for="group in row.bound_groups"
+                  :key="`${row.provider_slug}-${row.upstream_key_name}-${group.id}`"
+                  class="group-chip"
+                  :class="group.rate_violation ? 'group-chip-warning' : ''"
+                  :title="`${group.name} ${formatRate(group.rate_multiplier)}`"
+                >
+                  {{ group.name }}
+                  <span class="font-mono">{{ formatRate(group.rate_multiplier) }}</span>
+                </span>
+              </div>
+              <template v-else>
+                <span>{{ row.local_group_name || '-' }}</span>
+                <span v-if="row.local_rate_multiplier !== undefined" class="text-xs font-mono text-gray-500 dark:text-gray-400">
+                  {{ formatRate(row.local_rate_multiplier) }}
+                </span>
+              </template>
             </div>
           </template>
 
@@ -300,7 +314,7 @@ const columns = computed<Column[]>(() => [
   { key: 'upstream_key_name', label: t('admin.upstreamAccounts.columns.upstreamKey') },
   { key: 'upstream_rate_multiplier', label: t('admin.upstreamAccounts.columns.upstreamRate') },
   { key: 'local_account_name', label: t('admin.upstreamAccounts.columns.localAccount') },
-  { key: 'local_group_name', label: t('admin.upstreamAccounts.columns.localGroup') },
+  { key: 'local_group_name', label: t('admin.upstreamAccounts.columns.boundGroups') },
   { key: 'action', label: t('admin.upstreamAccounts.columns.action') },
 ])
 
@@ -590,6 +604,14 @@ onMounted(reload)
 
 .tag-list {
   @apply flex max-w-[18rem] flex-wrap gap-1;
+}
+
+.group-chip {
+  @apply inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700 dark:bg-dark-700 dark:text-gray-200;
+}
+
+.group-chip-warning {
+  @apply bg-amber-50 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-900/20 dark:text-amber-200 dark:ring-amber-700/40;
 }
 
 .log-chip {

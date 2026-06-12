@@ -46,23 +46,31 @@ type UpstreamAccountSyncSummary struct {
 }
 
 type UpstreamAccountSyncItem struct {
-	Action                 string   `json:"action"`
-	ProviderSlug           string   `json:"provider_slug"`
-	ProviderName           string   `json:"provider_name"`
-	UpstreamKeyName        string   `json:"upstream_key_name"`
-	LocalAccountName       string   `json:"local_account_name"`
-	MatchedAccountID       *int64   `json:"matched_account_id,omitempty"`
-	MatchedAccountName     string   `json:"matched_account_name,omitempty"`
-	UpstreamGroupName      string   `json:"upstream_group_name"`
-	UpstreamRateMultiplier float64  `json:"upstream_rate_multiplier"`
-	LocalGroupID           *int64   `json:"local_group_id,omitempty"`
-	LocalGroupName         string   `json:"local_group_name,omitempty"`
-	LocalRateMultiplier    *float64 `json:"local_rate_multiplier,omitempty"`
-	RateViolation          bool     `json:"rate_violation"`
-	UnboundGroupIDs        []int64  `json:"unbound_group_ids,omitempty"`
-	UnboundGroupNames      []string `json:"unbound_group_names,omitempty"`
-	SkipReason             string   `json:"skip_reason,omitempty"`
-	ConflictAccountIDs     []int64  `json:"conflict_account_ids,omitempty"`
+	Action                 string                          `json:"action"`
+	ProviderSlug           string                          `json:"provider_slug"`
+	ProviderName           string                          `json:"provider_name"`
+	UpstreamKeyName        string                          `json:"upstream_key_name"`
+	LocalAccountName       string                          `json:"local_account_name"`
+	MatchedAccountID       *int64                          `json:"matched_account_id,omitempty"`
+	MatchedAccountName     string                          `json:"matched_account_name,omitempty"`
+	UpstreamGroupName      string                          `json:"upstream_group_name"`
+	UpstreamRateMultiplier float64                         `json:"upstream_rate_multiplier"`
+	LocalGroupID           *int64                          `json:"local_group_id,omitempty"`
+	LocalGroupName         string                          `json:"local_group_name,omitempty"`
+	LocalRateMultiplier    *float64                        `json:"local_rate_multiplier,omitempty"`
+	RateViolation          bool                            `json:"rate_violation"`
+	UnboundGroupIDs        []int64                         `json:"unbound_group_ids,omitempty"`
+	UnboundGroupNames      []string                        `json:"unbound_group_names,omitempty"`
+	SkipReason             string                          `json:"skip_reason,omitempty"`
+	ConflictAccountIDs     []int64                         `json:"conflict_account_ids,omitempty"`
+	BoundGroups            []UpstreamAccountSyncBoundGroup `json:"bound_groups,omitempty"`
+}
+
+type UpstreamAccountSyncBoundGroup struct {
+	ID             int64   `json:"id"`
+	Name           string  `json:"name"`
+	RateMultiplier float64 `json:"rate_multiplier"`
+	RateViolation  bool    `json:"rate_violation"`
 }
 
 type UpstreamAccountSyncResult struct {
@@ -387,6 +395,7 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context) (UpstreamAccou
 			accountID := account.ID
 			item.MatchedAccountID = &accountID
 			item.MatchedAccountName = account.Name
+			item.BoundGroups = upstreamAccountSyncBoundGroups(account, item.UpstreamRateMultiplier)
 			result.Summary.MatchedAccountCount++
 			if !upstreamAccountSyncAccountCompatible(account) {
 				item.Action = UpstreamAccountSyncActionSkip
@@ -672,6 +681,28 @@ func upstreamAccountSyncLowRateGroups(account Account, upstreamRate float64) ([]
 		remaining = appendUniqueInt64(remaining, id)
 	}
 	return lowIDs, lowNames, remaining
+}
+
+func upstreamAccountSyncBoundGroups(account Account, upstreamRate float64) []UpstreamAccountSyncBoundGroup {
+	out := make([]UpstreamAccountSyncBoundGroup, 0, len(account.Groups))
+	seen := map[int64]struct{}{}
+	for _, group := range account.Groups {
+		if group == nil || group.ID <= 0 {
+			continue
+		}
+		if _, exists := seen[group.ID]; exists {
+			continue
+		}
+		seen[group.ID] = struct{}{}
+		out = append(out, UpstreamAccountSyncBoundGroup{
+			ID:             group.ID,
+			Name:           group.Name,
+			RateMultiplier: group.RateMultiplier,
+			RateViolation:  upstreamRate-group.RateMultiplier > 0.0000001,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
 }
 
 func buildUpstreamAccountSyncUnbindDetail(provider UpstreamProviderConfig, item UpstreamAccountSyncItem, account Account, unboundGroupIDs []int64, unboundGroupNames []string, remainingGroupIDs []int64) UpstreamAccountSyncUnbindDetail {

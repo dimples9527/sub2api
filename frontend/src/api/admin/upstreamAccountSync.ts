@@ -32,6 +32,14 @@ export interface UpstreamAccountSyncItem {
   unbound_group_names?: string[]
   skip_reason?: string
   conflict_account_ids?: number[]
+  bound_groups?: UpstreamAccountSyncBoundGroup[]
+}
+
+export interface UpstreamAccountSyncBoundGroup {
+  id: number
+  name: string
+  rate_multiplier: number
+  rate_violation: boolean
 }
 
 export interface UpstreamAccountSyncUnbindDetail {

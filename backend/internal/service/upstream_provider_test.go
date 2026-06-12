@@ -603,3 +603,244 @@ func TestNewAPIProviderAdapterWarnsWhenKeyGroupHasNoRatio(t *testing.T) {
 		t.Fatalf("warnings = %v, want missing group warning", warnings)
 	}
 }
+
+func TestSub2APIProviderAdapterReusesCachedTokenAcrossKeysAndModelSquare(t *testing.T) {
+	var loginRequests int
+	var keyRequests int
+	var modelRequests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			loginRequests++
+			_, _ = w.Write([]byte(`{"code":0,"data":{"access_token":"shared-token","token_type":"Bearer"}}`))
+		case "/api/admin/keys":
+			keyRequests++
+			if r.Header.Get("Authorization") != "Bearer shared-token" {
+				t.Fatalf("Authorization = %q, want Bearer shared-token", r.Header.Get("Authorization"))
+			}
+			_, _ = w.Write([]byte(`{"code":0,"data":{"items":[{"name":"sk-live-1","group":{"name":"vip","rate_multiplier":2.5}}]}}`))
+		case "/api/v1/model-square":
+			modelRequests++
+			if r.Header.Get("Authorization") != "Bearer shared-token" {
+				t.Fatalf("Authorization = %q, want Bearer shared-token", r.Header.Get("Authorization"))
+			}
+			_, _ = w.Write([]byte(`{"groups":[],"models":[]}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	adapter := NewSub2APIProviderAdapter(server.Client())
+	provider := UpstreamProviderConfig{
+		Type:       UpstreamProviderTypeSub2API,
+		Slug:       "sub2api-main",
+		Name:       "Sub2API main",
+		BaseURL:    server.URL,
+		LoginURL:   "/api/v1/auth/login",
+		APIKeysURL: "/api/admin/keys",
+		Email:      "admin@example.com",
+		Password:   "secret",
+	}
+	if _, _, err := adapter.FetchKeys(context.Background(), provider); err != nil {
+		t.Fatalf("FetchKeys returned error: %v", err)
+	}
+	if _, err := adapter.FetchModelSquare(context.Background(), provider); err != nil {
+		t.Fatalf("FetchModelSquare returned error: %v", err)
+	}
+	if loginRequests != 1 {
+		t.Fatalf("login requests = %d, want 1", loginRequests)
+	}
+	if keyRequests != 1 || modelRequests != 1 {
+		t.Fatalf("key/model requests = %d/%d, want 1/1", keyRequests, modelRequests)
+	}
+}
+
+func TestSub2APIProviderAdapterRefreshesCachedTokenAfterUnauthorized(t *testing.T) {
+	var loginRequests int
+	var keyRequests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			loginRequests++
+			token := "token-1"
+			if loginRequests > 1 {
+				token = "token-2"
+			}
+			_, _ = w.Write([]byte(`{"code":0,"data":{"access_token":"` + token + `","token_type":"Bearer"}}`))
+		case "/api/admin/keys":
+			keyRequests++
+			switch r.Header.Get("Authorization") {
+			case "Bearer token-1":
+				if keyRequests == 1 {
+					_, _ = w.Write([]byte(`{"code":0,"data":{"items":[{"name":"sk-live-1","group":{"name":"vip","rate_multiplier":2.5}}]}}`))
+					return
+				}
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"code":401,"message":"token expired"}`))
+			case "Bearer token-2":
+				_, _ = w.Write([]byte(`{"code":0,"data":{"items":[{"name":"sk-live-2","group":{"name":"vip","rate_multiplier":2.5}}]}}`))
+			default:
+				t.Fatalf("unexpected Authorization %q", r.Header.Get("Authorization"))
+			}
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	adapter := NewSub2APIProviderAdapter(server.Client())
+	provider := UpstreamProviderConfig{
+		Type:       UpstreamProviderTypeSub2API,
+		Slug:       "sub2api-main",
+		Name:       "Sub2API main",
+		BaseURL:    server.URL,
+		LoginURL:   "/api/v1/auth/login",
+		APIKeysURL: "/api/admin/keys",
+		Email:      "admin@example.com",
+		Password:   "secret",
+	}
+	if _, _, err := adapter.FetchKeys(context.Background(), provider); err != nil {
+		t.Fatalf("first FetchKeys returned error: %v", err)
+	}
+	keys, _, err := adapter.FetchKeys(context.Background(), provider)
+	if err != nil {
+		t.Fatalf("second FetchKeys returned error: %v", err)
+	}
+	if loginRequests != 2 {
+		t.Fatalf("login requests = %d, want 2", loginRequests)
+	}
+	if keyRequests != 3 {
+		t.Fatalf("key requests = %d, want 3", keyRequests)
+	}
+	if len(keys) != 1 || keys[0].KeyName != "sk-live-2" {
+		t.Fatalf("keys = %+v, want refreshed token result", keys)
+	}
+}
+
+func TestNewAPIProviderAdapterReusesCachedSessionAcrossKeysAndModelSquare(t *testing.T) {
+	var loginRequests int
+	var keyRequests int
+	var modelRequests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			loginRequests++
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "abc"})
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":42}}`))
+		case "/api/token/":
+			keyRequests++
+			if r.Header.Get("New-Api-User") != "42" || !strings.Contains(r.Header.Get("Cookie"), "session=abc") {
+				t.Fatalf("unexpected key request auth user=%q cookie=%q", r.Header.Get("New-Api-User"), r.Header.Get("Cookie"))
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"name":"key-1","group":"VIP"}]}}`))
+		case "/api/group/":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"VIP":{"ratio":3.25}}}`))
+		case "/api/v1/model-square":
+			modelRequests++
+			if r.Header.Get("New-Api-User") != "42" || !strings.Contains(r.Header.Get("Cookie"), "session=abc") {
+				t.Fatalf("unexpected model request auth user=%q cookie=%q", r.Header.Get("New-Api-User"), r.Header.Get("Cookie"))
+			}
+			_, _ = w.Write([]byte(`{"groups":[],"models":[]}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	adapter := NewNewAPIProviderAdapter(server.Client())
+	provider := UpstreamProviderConfig{
+		Type:       UpstreamProviderTypeNewAPI,
+		Slug:       "newapi-main",
+		Name:       "NewAPI main",
+		BaseURL:    server.URL,
+		LoginURL:   "/api/user/login",
+		APIKeysURL: "/api/token/",
+		GroupsURL:  "/api/group/",
+		Username:   "root",
+		Password:   "secret",
+	}
+	if _, _, err := adapter.FetchKeys(context.Background(), provider); err != nil {
+		t.Fatalf("FetchKeys returned error: %v", err)
+	}
+	if _, err := adapter.FetchModelSquare(context.Background(), provider); err != nil {
+		t.Fatalf("FetchModelSquare returned error: %v", err)
+	}
+	if loginRequests != 1 {
+		t.Fatalf("login requests = %d, want 1", loginRequests)
+	}
+	if keyRequests != 1 || modelRequests != 1 {
+		t.Fatalf("key/model requests = %d/%d, want 1/1", keyRequests, modelRequests)
+	}
+}
+
+func TestNewAPIProviderAdapterRefreshesCachedSessionAfterUnauthorized(t *testing.T) {
+	var loginRequests int
+	var keyRequests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			loginRequests++
+			cookieValue := "session-1"
+			if loginRequests > 1 {
+				cookieValue = "session-2"
+			}
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: cookieValue})
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":42}}`))
+		case "/api/token/":
+			keyRequests++
+			cookie := r.Header.Get("Cookie")
+			switch {
+			case strings.Contains(cookie, "session=session-1"):
+				if keyRequests == 1 {
+					_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"name":"key-1","group":"VIP"}]}}`))
+					return
+				}
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"success":false,"message":"session expired"}`))
+			case strings.Contains(cookie, "session=session-2"):
+				_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"name":"key-2","group":"VIP"}]}}`))
+			default:
+				t.Fatalf("unexpected Cookie %q", cookie)
+			}
+		case "/api/group/":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"VIP":{"ratio":3.25}}}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	adapter := NewNewAPIProviderAdapter(server.Client())
+	provider := UpstreamProviderConfig{
+		Type:       UpstreamProviderTypeNewAPI,
+		Slug:       "newapi-main",
+		Name:       "NewAPI main",
+		BaseURL:    server.URL,
+		LoginURL:   "/api/user/login",
+		APIKeysURL: "/api/token/",
+		GroupsURL:  "/api/group/",
+		Username:   "root",
+		Password:   "secret",
+	}
+	if _, _, err := adapter.FetchKeys(context.Background(), provider); err != nil {
+		t.Fatalf("first FetchKeys returned error: %v", err)
+	}
+	keys, _, err := adapter.FetchKeys(context.Background(), provider)
+	if err != nil {
+		t.Fatalf("second FetchKeys returned error: %v", err)
+	}
+	if loginRequests != 2 {
+		t.Fatalf("login requests = %d, want 2", loginRequests)
+	}
+	if keyRequests != 3 {
+		t.Fatalf("key requests = %d, want 3", keyRequests)
+	}
+	if len(keys) != 1 || keys[0].KeyName != "key-2" {
+		t.Fatalf("keys = %+v, want refreshed session result", keys)
+	}
+}

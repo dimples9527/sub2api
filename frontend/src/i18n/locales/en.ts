@@ -1680,6 +1680,7 @@ export default {
         upstreamRate: 'Upstream rate',
         localAccount: 'Local account',
         localGroup: 'Local group',
+        boundGroups: 'Bound groups',
         action: 'Action'
       },
       actions: {

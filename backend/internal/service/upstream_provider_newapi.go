@@ -8,10 +8,15 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
+	"sync"
 )
 
 type NewAPIProviderAdapter struct {
 	httpClient *http.Client
+
+	mu            sync.Mutex
+	sessionBySlug map[string]newAPIProviderSession
 }
 
 type newAPIProviderSession struct {
@@ -23,29 +28,53 @@ func NewNewAPIProviderAdapter(httpClient *http.Client) *NewAPIProviderAdapter {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
-	return &NewAPIProviderAdapter{httpClient: httpClient}
+	return &NewAPIProviderAdapter{
+		httpClient:    httpClient,
+		sessionBySlug: map[string]newAPIProviderSession{},
+	}
 }
 
 func (a *NewAPIProviderAdapter) FetchKeys(ctx context.Context, provider UpstreamProviderConfig) ([]UpstreamProviderKey, []string, error) {
-	session, _, _, err := a.login(ctx, provider)
-	if err != nil {
-		return nil, nil, err
+	for attempt := 0; attempt < 2; attempt++ {
+		session, err := a.ensureSession(ctx, provider)
+		if err != nil {
+			return nil, nil, err
+		}
+		keysPayload, status, err := a.request(ctx, provider, session, provider.APIKeysURL, "newapi provider keys")
+		if err != nil {
+			return nil, nil, err
+		}
+		if status < 200 || status >= 300 {
+			requestErr := upstreamProviderHTTPError("newapi provider keys", status, keysPayload)
+			if attempt == 0 && upstreamProviderAuthFailureHint(status, keysPayload, requestErr) {
+				a.clearSession(provider.Slug)
+				continue
+			}
+			return nil, nil, requestErr
+		}
+		groupsPayload, groupStatus, err := a.request(ctx, provider, session, provider.GroupsURL, "newapi provider groups")
+		if err != nil {
+			return nil, nil, err
+		}
+		if groupStatus < 200 || groupStatus >= 300 {
+			requestErr := upstreamProviderHTTPError("newapi provider groups", groupStatus, groupsPayload)
+			if attempt == 0 && upstreamProviderAuthFailureHint(groupStatus, groupsPayload, requestErr) {
+				a.clearSession(provider.Slug)
+				continue
+			}
+			return nil, nil, requestErr
+		}
+		keys, warnings, err := parseNewAPIProviderKeys(provider, keysPayload, groupsPayload)
+		if err != nil {
+			if attempt == 0 && upstreamProviderAuthFailureHint(status, keysPayload, err) {
+				a.clearSession(provider.Slug)
+				continue
+			}
+			return nil, nil, err
+		}
+		return keys, warnings, nil
 	}
-	keysPayload, status, err := a.request(ctx, provider, session, provider.APIKeysURL, "newapi provider keys")
-	if err != nil {
-		return nil, nil, err
-	}
-	if status < 200 || status >= 300 {
-		return nil, nil, upstreamProviderHTTPError("newapi provider keys", status, keysPayload)
-	}
-	groupsPayload, status, err := a.request(ctx, provider, session, provider.GroupsURL, "newapi provider groups")
-	if err != nil {
-		return nil, nil, err
-	}
-	if status < 200 || status >= 300 {
-		return nil, nil, upstreamProviderHTTPError("newapi provider groups", status, groupsPayload)
-	}
-	return parseNewAPIProviderKeys(provider, keysPayload, groupsPayload)
+	return nil, nil, fmt.Errorf("newapi provider keys failed after auth retry")
 }
 
 func (a *NewAPIProviderAdapter) Test(ctx context.Context, provider UpstreamProviderConfig) UpstreamProviderTestResult {
@@ -107,6 +136,49 @@ func (a *NewAPIProviderAdapter) Test(ctx context.Context, provider UpstreamProvi
 	result.ParsedKeys = limitUpstreamProviderKeys(keys, 20)
 	result.Warnings = append(result.Warnings, warnings...)
 	return result
+}
+
+func (a *NewAPIProviderAdapter) ensureSession(ctx context.Context, provider UpstreamProviderConfig) (newAPIProviderSession, error) {
+	if session, ok := a.cachedSession(provider.Slug); ok {
+		return session, nil
+	}
+	session, _, _, err := a.login(ctx, provider)
+	if err != nil {
+		return newAPIProviderSession{}, err
+	}
+	a.storeSession(provider.Slug, session)
+	return session, nil
+}
+
+func (a *NewAPIProviderAdapter) cachedSession(slug string) (newAPIProviderSession, bool) {
+	if a == nil {
+		return newAPIProviderSession{}, false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	session, ok := a.sessionBySlug[strings.TrimSpace(slug)]
+	if !ok || session.UserID <= 0 || strings.TrimSpace(session.CookieHeader) == "" {
+		return newAPIProviderSession{}, false
+	}
+	return session, true
+}
+
+func (a *NewAPIProviderAdapter) storeSession(slug string, session newAPIProviderSession) {
+	if a == nil || strings.TrimSpace(slug) == "" || session.UserID <= 0 || strings.TrimSpace(session.CookieHeader) == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.sessionBySlug[strings.TrimSpace(slug)] = session
+}
+
+func (a *NewAPIProviderAdapter) clearSession(slug string) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	delete(a.sessionBySlug, strings.TrimSpace(slug))
 }
 
 func (a *NewAPIProviderAdapter) login(ctx context.Context, provider UpstreamProviderConfig) (newAPIProviderSession, []byte, int, error) {
