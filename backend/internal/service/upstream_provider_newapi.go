@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -104,6 +105,37 @@ func (a *NewAPIProviderAdapter) FetchKeys(ctx context.Context, provider Upstream
 		return keys, warnings, nil
 	}
 	return nil, nil, fmt.Errorf("newapi provider keys failed after auth retry")
+}
+
+func (a *NewAPIProviderAdapter) FetchGroups(ctx context.Context, provider UpstreamProviderConfig) ([]UpstreamProviderGroup, []string, error) {
+	for attempt := 0; attempt < 2; attempt++ {
+		session, err := a.ensureSession(ctx, provider)
+		if err != nil {
+			return nil, nil, err
+		}
+		groupsPayload, status, err := a.request(ctx, provider, session, provider.GroupsURL, "newapi provider groups")
+		if err != nil {
+			return nil, nil, err
+		}
+		if status < 200 || status >= 300 {
+			requestErr := upstreamProviderHTTPError("newapi provider groups", status, groupsPayload)
+			if attempt == 0 && upstreamProviderAuthFailureHint(status, groupsPayload, requestErr) {
+				a.clearSession(provider.Slug)
+				continue
+			}
+			return nil, nil, requestErr
+		}
+		groups, err := parseNewAPIProviderGroups(provider, groupsPayload)
+		if err != nil {
+			if attempt == 0 && upstreamProviderAuthFailureHint(status, groupsPayload, err) {
+				a.clearSession(provider.Slug)
+				continue
+			}
+			return nil, nil, err
+		}
+		return groups, nil, nil
+	}
+	return nil, nil, fmt.Errorf("newapi provider groups failed after auth retry")
 }
 
 func (a *NewAPIProviderAdapter) Test(ctx context.Context, provider UpstreamProviderConfig) UpstreamProviderTestResult {
@@ -364,6 +396,47 @@ func parseNewAPIProviderKeys(provider UpstreamProviderConfig, keysPayload, group
 		})
 	}
 	return keys, warnings, nil
+}
+
+func parseNewAPIProviderGroups(provider UpstreamProviderConfig, groupsPayload []byte) ([]UpstreamProviderGroup, error) {
+	var groupsResp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    map[string]struct {
+			Ratio newAPIProviderGroupRatio `json:"ratio"`
+			ID    any                      `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(groupsPayload, &groupsResp); err != nil {
+		return nil, fmt.Errorf("decode newapi provider groups response: %w", err)
+	}
+	if !groupsResp.Success {
+		if groupsResp.Message == "" {
+			groupsResp.Message = "unknown error"
+		}
+		return nil, fmt.Errorf("newapi provider groups failed: %s", groupsResp.Message)
+	}
+	names := make([]string, 0, len(groupsResp.Data))
+	for name := range groupsResp.Data {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	groups := make([]UpstreamProviderGroup, 0, len(names))
+	for _, name := range names {
+		group := groupsResp.Data[name]
+		if strings.TrimSpace(name) == "" || !group.Ratio.valid || group.Ratio.value < 0 {
+			continue
+		}
+		groups = append(groups, UpstreamProviderGroup{
+			ProviderSlug:   provider.Slug,
+			ProviderName:   provider.Name,
+			ProviderType:   provider.Type,
+			GroupName:      name,
+			RateMultiplier: group.Ratio.value,
+			RawGroupID:     fmt.Sprint(group.ID),
+		})
+	}
+	return groups, nil
 }
 
 func countNewAPIProviderKeys(payload []byte) (int, error) {

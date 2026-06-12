@@ -653,6 +653,71 @@ func TestNewAPIProviderAdapterParsesStringGroupRatio(t *testing.T) {
 	}
 }
 
+func TestNewAPIProviderAdapterFetchGroupsUsesGroupsEndpoint(t *testing.T) {
+	var groupsRequests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "abc"})
+			_, _ = w.Write([]byte(`{"success": true, "data": {"id": 42}}`))
+		case "/api/group/":
+			groupsRequests++
+			if r.Header.Get("New-Api-User") != "42" {
+				t.Fatalf("New-Api-User = %q, want 42", r.Header.Get("New-Api-User"))
+			}
+			if !strings.Contains(r.Header.Get("Cookie"), "session=abc") {
+				t.Fatalf("Cookie header = %q, want session cookie", r.Header.Get("Cookie"))
+			}
+			_, _ = w.Write([]byte(`{
+				"success": true,
+				"data": {
+					"VIP": {"id": 7, "ratio": "3.25"},
+					"No Key Group": {"id": 8, "ratio": 0.15}
+				}
+			}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	adapter := NewNewAPIProviderAdapter(server.Client())
+	groups, warnings, err := adapter.FetchGroups(context.Background(), UpstreamProviderConfig{
+		Type:       UpstreamProviderTypeNewAPI,
+		Slug:       "newapi-main",
+		Name:       "NewAPI main",
+		BaseURL:    server.URL,
+		LoginURL:   "/api/user/login",
+		APIKeysURL: "/api/token/",
+		GroupsURL:  "/api/group/",
+		Username:   "root",
+		Password:   "secret",
+	})
+	if err != nil {
+		t.Fatalf("FetchGroups returned error: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", warnings)
+	}
+	if groupsRequests != 1 {
+		t.Fatalf("groups endpoint requests = %d, want 1", groupsRequests)
+	}
+	byName := map[string]UpstreamProviderGroup{}
+	for _, group := range groups {
+		byName[group.GroupName] = group
+	}
+	if len(byName) != 2 {
+		t.Fatalf("groups = %+v, want 2 groups", groups)
+	}
+	if byName["VIP"].RateMultiplier != 3.25 || byName["VIP"].RawGroupID != "7" {
+		t.Fatalf("VIP group = %+v, want ratio 3.25 id 7", byName["VIP"])
+	}
+	if byName["No Key Group"].RateMultiplier != 0.15 || byName["No Key Group"].RawGroupID != "8" {
+		t.Fatalf("No Key Group = %+v, want ratio 0.15 id 8", byName["No Key Group"])
+	}
+}
+
 func TestNewAPIProviderAdapterWarnsWhenKeyGroupHasNoRatio(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
