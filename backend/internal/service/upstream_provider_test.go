@@ -564,6 +564,46 @@ func TestNewAPIProviderAdapterPreservesRawKeyName(t *testing.T) {
 	}
 }
 
+func TestNewAPIProviderAdapterParsesStringGroupRatio(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "abc"})
+			_, _ = w.Write([]byte(`{"success": true, "data": {"id": 42}}`))
+		case "/api/token/":
+			_, _ = w.Write([]byte(`{"success": true, "data": {"items": [{"name": "key-1", "group": "VIP"}]}}`))
+		case "/api/group/":
+			_, _ = w.Write([]byte(`{"success": true, "data": {"VIP": {"ratio": "3.25"}}}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	adapter := NewNewAPIProviderAdapter(server.Client())
+	keys, warnings, err := adapter.FetchKeys(context.Background(), UpstreamProviderConfig{
+		Type:       UpstreamProviderTypeNewAPI,
+		Slug:       "newapi-main",
+		Name:       "NewAPI main",
+		BaseURL:    server.URL,
+		LoginURL:   "/api/user/login",
+		APIKeysURL: "/api/token/",
+		GroupsURL:  "/api/group/",
+		Username:   "root",
+		Password:   "secret",
+	})
+	if err != nil {
+		t.Fatalf("FetchKeys returned error: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", warnings)
+	}
+	if len(keys) != 1 || keys[0].RateMultiplier != 3.25 {
+		t.Fatalf("keys = %+v, want one key with ratio 3.25", keys)
+	}
+}
+
 func TestNewAPIProviderAdapterWarnsWhenKeyGroupHasNoRatio(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

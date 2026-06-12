@@ -24,6 +24,35 @@ type newAPIProviderSession struct {
 	CookieHeader string
 }
 
+type newAPIProviderGroupRatio struct {
+	value float64
+	valid bool
+}
+
+func (r *newAPIProviderGroupRatio) UnmarshalJSON(raw []byte) error {
+	value := strings.TrimSpace(string(raw))
+	if value == "" || value == "null" {
+		return nil
+	}
+	if strings.HasPrefix(value, `"`) {
+		var text string
+		if err := json.Unmarshal(raw, &text); err != nil {
+			return err
+		}
+		value = strings.TrimSpace(text)
+	}
+	if value == "" {
+		return nil
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return nil
+	}
+	r.value = parsed
+	r.valid = true
+	return nil
+}
+
 func NewNewAPIProviderAdapter(httpClient *http.Client) *NewAPIProviderAdapter {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
@@ -282,8 +311,8 @@ func parseNewAPIProviderKeys(provider UpstreamProviderConfig, keysPayload, group
 		Success bool   `json:"success"`
 		Message string `json:"message"`
 		Data    map[string]struct {
-			Ratio *float64 `json:"ratio"`
-			ID    any      `json:"id"`
+			Ratio newAPIProviderGroupRatio `json:"ratio"`
+			ID    any                      `json:"id"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(groupsPayload, &groupsResp); err != nil {
@@ -302,10 +331,10 @@ func parseNewAPIProviderKeys(provider UpstreamProviderConfig, keysPayload, group
 	}
 	ratioByGroup := make(map[string]groupInfo, len(groupsResp.Data)*2)
 	for name, group := range groupsResp.Data {
-		if group.Ratio == nil || *group.Ratio < 0 {
+		if !group.Ratio.valid || group.Ratio.value < 0 {
 			continue
 		}
-		info := groupInfo{name: name, ratio: *group.Ratio, id: fmt.Sprint(group.ID)}
+		info := groupInfo{name: name, ratio: group.Ratio.value, id: fmt.Sprint(group.ID)}
 		ratioByGroup[name] = info
 		ratioByGroup[normalizeUpstreamProviderGroupName(name)] = info
 	}
