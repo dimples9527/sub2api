@@ -50,6 +50,16 @@ type UpstreamProviderKey struct {
 	RawGroupID     string  `json:"raw_group_id,omitempty"`
 }
 
+type UpstreamProviderGroup struct {
+	ProviderSlug   string  `json:"provider_slug"`
+	ProviderName   string  `json:"provider_name"`
+	ProviderType   string  `json:"provider_type"`
+	GroupName      string  `json:"group_name"`
+	RateMultiplier float64 `json:"rate_multiplier"`
+	RawStatus      string  `json:"raw_status,omitempty"`
+	RawGroupID     string  `json:"raw_group_id,omitempty"`
+}
+
 type UpstreamProviderTestStage struct {
 	OK            bool   `json:"ok"`
 	StatusCode    int    `json:"status_code,omitempty"`
@@ -249,6 +259,24 @@ func (s *UpstreamProviderService) FetchProviderKeys(ctx context.Context, slug st
 		return nil, nil, err
 	}
 	return adapter.FetchKeys(ctx, provider)
+}
+
+func (s *UpstreamProviderService) FetchProviderGroups(ctx context.Context, slug string) ([]UpstreamProviderGroup, []string, error) {
+	provider, err := s.getStoredProvider(ctx, slug)
+	if err != nil {
+		return nil, nil, err
+	}
+	adapter, err := s.registry.Get(provider.Type)
+	if err != nil {
+		return nil, nil, err
+	}
+	groupAdapter, ok := adapter.(interface {
+		FetchGroups(context.Context, UpstreamProviderConfig) ([]UpstreamProviderGroup, []string, error)
+	})
+	if !ok {
+		return nil, nil, infraerrors.BadRequest("UPSTREAM_PROVIDER_GROUPS_UNSUPPORTED", "upstream provider groups are unsupported")
+	}
+	return groupAdapter.FetchGroups(ctx, provider)
 }
 
 func (s *UpstreamProviderService) getStoredProvider(ctx context.Context, slug string) (UpstreamProviderConfig, error) {

@@ -25,6 +25,10 @@ type UpstreamManagementProviderSource interface {
 	FetchProviderKeys(ctx context.Context, slug string) ([]UpstreamProviderKey, []string, error)
 }
 
+type upstreamManagementProviderGroupSource interface {
+	FetchProviderGroups(ctx context.Context, slug string) ([]UpstreamProviderGroup, []string, error)
+}
+
 type UpstreamGroupComparison struct {
 	ProviderSlug      string   `json:"provider_slug"`
 	ProviderName      string   `json:"provider_name"`
@@ -531,6 +535,23 @@ func normalizeUpstreamGroupRateFixConfig(config UpstreamGroupAutoRateFixConfig) 
 }
 
 func (s *UpstreamManagementService) resolveDefaultUpstreamGroupName(ctx context.Context, defaultProvider UpstreamProviderConfig, upstreamGroupKey string) (string, error) {
+	if source, ok := s.providerSource.(upstreamManagementProviderGroupSource); ok {
+		groups, _, err := source.FetchProviderGroups(ctx, defaultProvider.Slug)
+		if err == nil {
+			for _, group := range groups {
+				if group.ProviderSlug != "" && group.ProviderSlug != defaultProvider.Slug {
+					continue
+				}
+				if normalizeUpstreamGroupMatchName(group.GroupName) != upstreamGroupKey {
+					continue
+				}
+				name := strings.TrimSpace(group.GroupName)
+				if name != "" {
+					return name, nil
+				}
+			}
+		}
+	}
 	keys, _, err := s.providerSource.FetchProviderKeys(ctx, defaultProvider.Slug)
 	if err != nil {
 		return "", err
@@ -565,6 +586,17 @@ func (s *UpstreamManagementService) compareGroups(ctx context.Context) (Upstream
 	if err != nil {
 		return UpstreamGroupCompareResult{}, err
 	}
+	groups := []UpstreamProviderGroup{}
+	if source, ok := s.providerSource.(upstreamManagementProviderGroupSource); ok {
+		providerGroups, groupWarnings, err := source.FetchProviderGroups(ctx, defaultProvider.Slug)
+		if err == nil {
+			warnings = append(warnings, groupWarnings...)
+			groups = providerGroups
+		} else if !isUpstreamProviderGroupsUnsupported(err) {
+			warnings = append(warnings, groupWarnings...)
+			warnings = append(warnings, fmt.Sprintf("fetch upstream groups failed: %v", err))
+		}
+	}
 	localGroups, err := s.groupRepo.ListActive(ctx)
 	if err != nil {
 		return UpstreamGroupCompareResult{}, fmt.Errorf("list local groups: %w", err)
@@ -573,7 +605,7 @@ func (s *UpstreamManagementService) compareGroups(ctx context.Context) (Upstream
 	if err != nil {
 		return UpstreamGroupCompareResult{}, err
 	}
-	items := compareUpstreamGroups(defaultProvider, keys, localGroups, mappings)
+	items := compareUpstreamGroups(defaultProvider, keys, groups, localGroups, mappings)
 	return UpstreamGroupCompareResult{
 		DefaultProvider: redactUpstreamProvider(defaultProvider),
 		Items:           items,
@@ -582,7 +614,11 @@ func (s *UpstreamManagementService) compareGroups(ctx context.Context) (Upstream
 	}, nil
 }
 
-func compareUpstreamGroups(provider UpstreamProviderConfig, keys []UpstreamProviderKey, localGroups []Group, mappings []UpstreamGroupMappingRecord) []UpstreamGroupComparison {
+func isUpstreamProviderGroupsUnsupported(err error) bool {
+	return infraerrors.Reason(err) == "UPSTREAM_PROVIDER_GROUPS_UNSUPPORTED"
+}
+
+func compareUpstreamGroups(provider UpstreamProviderConfig, keys []UpstreamProviderKey, groups []UpstreamProviderGroup, localGroups []Group, mappings []UpstreamGroupMappingRecord) []UpstreamGroupComparison {
 	localByName := make(map[string]Group, len(localGroups))
 	localByID := make(map[int64]Group, len(localGroups))
 	for _, group := range localGroups {
@@ -610,12 +646,7 @@ func compareUpstreamGroups(provider UpstreamProviderConfig, keys []UpstreamProvi
 		mappedLocalGroupIDs[key] = mapping.LocalGroupID
 	}
 
-	type upstreamGroupAggregate struct {
-		name     string
-		rate     float64
-		keyCount int
-	}
-	aggregates := map[string]upstreamGroupAggregate{}
+	keyCounts := map[string]int{}
 	for _, key := range keys {
 		if key.ProviderSlug != "" && key.ProviderSlug != provider.Slug {
 			continue
@@ -624,15 +655,53 @@ func compareUpstreamGroups(provider UpstreamProviderConfig, keys []UpstreamProvi
 		if normalized == "" {
 			continue
 		}
+		keyCounts[normalized]++
+	}
+
+	type upstreamGroupAggregate struct {
+		name     string
+		rate     float64
+		keyCount int
+	}
+	aggregates := map[string]upstreamGroupAggregate{}
+
+	for _, group := range groups {
+		if group.ProviderSlug != "" && group.ProviderSlug != provider.Slug {
+			continue
+		}
+		normalized := normalizeUpstreamGroupMatchName(group.GroupName)
+		if normalized == "" {
+			continue
+		}
 		aggregate := aggregates[normalized]
 		if aggregate.name == "" {
-			aggregate.name = strings.TrimSpace(key.GroupName)
+			aggregate.name = strings.TrimSpace(group.GroupName)
 		}
-		if key.RateMultiplier > aggregate.rate {
-			aggregate.rate = key.RateMultiplier
+		if group.RateMultiplier > aggregate.rate {
+			aggregate.rate = group.RateMultiplier
 		}
-		aggregate.keyCount++
+		aggregate.keyCount = keyCounts[normalized]
 		aggregates[normalized] = aggregate
+	}
+	if len(aggregates) == 0 {
+		for _, key := range keys {
+			if key.ProviderSlug != "" && key.ProviderSlug != provider.Slug {
+				continue
+			}
+			normalized := normalizeUpstreamGroupMatchName(key.GroupName)
+			if normalized == "" {
+				continue
+			}
+			aggregate := aggregates[normalized]
+			if aggregate.name == "" {
+				aggregate.name = strings.TrimSpace(key.GroupName)
+			}
+			if key.RateMultiplier > aggregate.rate {
+				aggregate.rate = key.RateMultiplier
+			}
+			aggregate.keyCount++
+			aggregates[normalized] = aggregate
+		}
 	}
 
 	names := make([]string, 0, len(aggregates))

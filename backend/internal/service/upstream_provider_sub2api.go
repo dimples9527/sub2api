@@ -7,13 +7,45 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 )
 
+const defaultSub2APIProviderGroupsURL = "/api/v1/groups/available?timezone=Asia%2FShanghai"
+
 type upstreamSub2APIAuth struct {
 	Token     string
 	TokenType string
+}
+
+type sub2APIProviderRateMultiplier struct {
+	value float64
+	valid bool
+}
+
+func (r *sub2APIProviderRateMultiplier) UnmarshalJSON(raw []byte) error {
+	value := strings.TrimSpace(string(raw))
+	if value == "" || value == "null" {
+		return nil
+	}
+	if strings.HasPrefix(value, `"`) {
+		var text string
+		if err := json.Unmarshal(raw, &text); err != nil {
+			return err
+		}
+		value = strings.TrimSpace(text)
+	}
+	if value == "" {
+		return nil
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return nil
+	}
+	r.value = parsed
+	r.valid = true
+	return nil
 }
 
 type Sub2APIProviderAdapter struct {
@@ -62,6 +94,41 @@ func (a *Sub2APIProviderAdapter) FetchKeys(ctx context.Context, provider Upstrea
 		return keys, nil, nil
 	}
 	return nil, nil, fmt.Errorf("sub2api provider keys failed after auth retry")
+}
+
+func (a *Sub2APIProviderAdapter) FetchGroups(ctx context.Context, provider UpstreamProviderConfig) ([]UpstreamProviderGroup, []string, error) {
+	groupsURL := strings.TrimSpace(provider.GroupsURL)
+	if groupsURL == "" {
+		groupsURL = defaultSub2APIProviderGroupsURL
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		auth, err := a.ensureAuth(ctx, provider)
+		if err != nil {
+			return nil, nil, err
+		}
+		payload, status, err := a.request(ctx, provider, auth, groupsURL, "sub2api provider groups")
+		if err != nil {
+			return nil, nil, err
+		}
+		if status < 200 || status >= 300 {
+			requestErr := upstreamProviderHTTPError("sub2api provider groups", status, payload)
+			if attempt == 0 && hasSub2APICredentials(provider) && upstreamProviderAuthFailureHint(status, payload, requestErr) {
+				a.clearAuth(provider.Slug)
+				continue
+			}
+			return nil, nil, requestErr
+		}
+		groups, err := parseSub2APIProviderGroups(provider, payload)
+		if err != nil {
+			if attempt == 0 && hasSub2APICredentials(provider) && upstreamProviderAuthFailureHint(status, payload, err) {
+				a.clearAuth(provider.Slug)
+				continue
+			}
+			return nil, nil, err
+		}
+		return groups, nil, nil
+	}
+	return nil, nil, fmt.Errorf("sub2api provider groups failed after auth retry")
 }
 
 func (a *Sub2APIProviderAdapter) Test(ctx context.Context, provider UpstreamProviderConfig) UpstreamProviderTestResult {
@@ -289,6 +356,45 @@ func parseSub2APIProviderKeys(provider UpstreamProviderConfig, payload []byte) (
 		})
 	}
 	return keys, nil
+}
+
+func parseSub2APIProviderGroups(provider UpstreamProviderConfig, payload []byte) ([]UpstreamProviderGroup, error) {
+	var resp struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Data    []struct {
+			ID             any                           `json:"id"`
+			Name           string                        `json:"name"`
+			Status         string                        `json:"status"`
+			RateMultiplier sub2APIProviderRateMultiplier `json:"rate_multiplier"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(payload, &resp); err != nil {
+		return nil, fmt.Errorf("decode sub2api provider groups response: %w", err)
+	}
+	if resp.Code != 0 {
+		if resp.Message == "" {
+			resp.Message = "unknown error"
+		}
+		return nil, fmt.Errorf("sub2api provider groups failed: %s", resp.Message)
+	}
+	groups := make([]UpstreamProviderGroup, 0, len(resp.Data))
+	for _, item := range resp.Data {
+		name := strings.TrimSpace(item.Name)
+		if name == "" || !item.RateMultiplier.valid {
+			continue
+		}
+		groups = append(groups, UpstreamProviderGroup{
+			ProviderSlug:   provider.Slug,
+			ProviderName:   provider.Name,
+			ProviderType:   provider.Type,
+			GroupName:      name,
+			RateMultiplier: item.RateMultiplier.value,
+			RawStatus:      item.Status,
+			RawGroupID:     fmt.Sprint(item.ID),
+		})
+	}
+	return groups, nil
 }
 
 func limitUpstreamProviderKeys(keys []UpstreamProviderKey, limit int) []UpstreamProviderKey {

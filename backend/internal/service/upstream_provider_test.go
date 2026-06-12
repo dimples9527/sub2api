@@ -404,6 +404,55 @@ func TestSub2APIProviderAdapterPreservesRawKeyName(t *testing.T) {
 	}
 }
 
+func TestSub2APIProviderAdapterFetchGroupsUsesAvailableGroupsEndpoint(t *testing.T) {
+	var groupsRequests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/groups/available" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("timezone") != "Asia/Shanghai" {
+			t.Fatalf("timezone query = %q, want Asia/Shanghai", r.URL.Query().Get("timezone"))
+		}
+		groupsRequests++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"code": 0,
+			"data": [
+				{"id": 2, "name": "codex福利", "platform": "openai", "rate_multiplier": 0.15, "status": "active"},
+				{"id": 5, "name": "claude 福利", "platform": "anthropic", "rate_multiplier": "0.6", "status": "active"}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	adapter := NewSub2APIProviderAdapter(server.Client())
+	groups, warnings, err := adapter.FetchGroups(context.Background(), UpstreamProviderConfig{
+		Type:       UpstreamProviderTypeSub2API,
+		Slug:       "sub2api-main",
+		Name:       "Sub2API main",
+		BaseURL:    server.URL,
+		APIKeysURL: "/api/admin/keys",
+	})
+	if err != nil {
+		t.Fatalf("FetchGroups returned error: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", warnings)
+	}
+	if groupsRequests != 1 {
+		t.Fatalf("groups endpoint requests = %d, want 1", groupsRequests)
+	}
+	if len(groups) != 2 {
+		t.Fatalf("group count = %d, want 2", len(groups))
+	}
+	if groups[0].GroupName != "codex福利" || groups[0].RateMultiplier != 0.15 || groups[0].RawGroupID != "2" || groups[0].RawStatus != "active" {
+		t.Fatalf("unexpected first group: %+v", groups[0])
+	}
+	if groups[1].GroupName != "claude 福利" || groups[1].RateMultiplier != 0.6 || groups[1].RawGroupID != "5" {
+		t.Fatalf("unexpected second group: %+v", groups[1])
+	}
+}
+
 func TestSub2APIProviderAdapterLoginAcceptsAccessTokenResponse(t *testing.T) {
 	var keysAuthorization string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

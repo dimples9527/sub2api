@@ -11,13 +11,16 @@ import (
 )
 
 type upstreamManagementProviderSourceStub struct {
-	defaultProvider UpstreamProviderConfig
-	keys            []UpstreamProviderKey
-	modelSquare     json.RawMessage
-	defaultErr      error
-	keysErr         error
-	modelSquareErr  error
-	fetchedSlug     string
+	defaultProvider  UpstreamProviderConfig
+	keys             []UpstreamProviderKey
+	groups           []UpstreamProviderGroup
+	modelSquare      json.RawMessage
+	defaultErr       error
+	keysErr          error
+	groupsErr        error
+	modelSquareErr   error
+	fetchedSlug      string
+	fetchedGroupSlug string
 }
 
 func (s *upstreamManagementProviderSourceStub) GetDefaultProvider(ctx context.Context) (UpstreamProviderConfig, error) {
@@ -27,6 +30,11 @@ func (s *upstreamManagementProviderSourceStub) GetDefaultProvider(ctx context.Co
 func (s *upstreamManagementProviderSourceStub) FetchProviderKeys(ctx context.Context, slug string) ([]UpstreamProviderKey, []string, error) {
 	s.fetchedSlug = slug
 	return s.keys, []string{"upstream warning"}, s.keysErr
+}
+
+func (s *upstreamManagementProviderSourceStub) FetchProviderGroups(ctx context.Context, slug string) ([]UpstreamProviderGroup, []string, error) {
+	s.fetchedGroupSlug = slug
+	return s.groups, []string{"upstream group warning"}, s.groupsErr
 }
 
 func (s *upstreamManagementProviderSourceStub) FetchDefaultModelSquare(context.Context) (json.RawMessage, UpstreamProviderConfig, error) {
@@ -228,6 +236,43 @@ func TestUpstreamManagementServiceCompareGroupsUsesDefaultProviderOnly(t *testin
 	}
 	if result.DefaultProvider.Slug != "default-upstream" {
 		t.Fatalf("default provider slug = %q", result.DefaultProvider.Slug)
+	}
+}
+
+func TestUpstreamManagementServiceCompareGroupsUsesAvailableProviderGroups(t *testing.T) {
+	providerSource := &upstreamManagementProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "default-upstream", Name: "Default upstream", IsDefault: true},
+		keys: []UpstreamProviderKey{
+			{ProviderSlug: "default-upstream", GroupName: "VIP", RateMultiplier: 2.5},
+		},
+		groups: []UpstreamProviderGroup{
+			{ProviderSlug: "default-upstream", GroupName: "VIP", RateMultiplier: 2.5, RawGroupID: "1"},
+			{ProviderSlug: "default-upstream", GroupName: "No Key Group", RateMultiplier: 0.15, RawGroupID: "2"},
+		},
+	}
+	groupRepo := &upstreamManagementGroupRepoStub{groups: []Group{{ID: 1, Name: "VIP", RateMultiplier: 1.5, Status: StatusActive}}}
+	svc := NewUpstreamManagementService(providerSource, groupRepo, newUpstreamManagementSettingRepoStub(), nil)
+
+	result, err := svc.CompareGroups(context.Background())
+	if err != nil {
+		t.Fatalf("CompareGroups returned error: %v", err)
+	}
+	if providerSource.fetchedGroupSlug != "default-upstream" {
+		t.Fatalf("fetched group slug = %q, want default-upstream", providerSource.fetchedGroupSlug)
+	}
+	if len(result.Items) != 2 {
+		t.Fatalf("items = %+v, want upstream groups from available groups endpoint", result.Items)
+	}
+	byName := map[string]UpstreamGroupComparison{}
+	for _, item := range result.Items {
+		byName[item.UpstreamGroupName] = item
+	}
+	if byName["VIP"].UpstreamKeyCount != 1 {
+		t.Fatalf("VIP item = %+v, want key count 1", byName["VIP"])
+	}
+	noKey := byName["No Key Group"]
+	if noKey.UpstreamRate != 0.15 || noKey.UpstreamKeyCount != 0 || noKey.Matched {
+		t.Fatalf("No Key Group item = %+v, want unmatched group with rate 0.15 and no keys", noKey)
 	}
 }
 
@@ -505,6 +550,43 @@ func TestUpstreamManagementServiceCreateLocalGroupCreatesAndMapsDefaultUpstreamG
 	}
 	if len(result.Items) != 1 || !result.Items[0].Matched || result.Items[0].LocalGroupID == nil || *result.Items[0].LocalGroupID != 42 {
 		t.Fatalf("expected comparison result mapped to new group, got %+v", result.Items)
+	}
+}
+
+func TestUpstreamManagementServiceCreateLocalGroupUsesAvailableProviderGroups(t *testing.T) {
+	providerSource := &upstreamManagementProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "default-upstream", Name: "Default upstream", IsDefault: true},
+		groups: []UpstreamProviderGroup{
+			{ProviderSlug: "default-upstream", GroupName: "No Key Group", RateMultiplier: 0.15, RawGroupID: "2"},
+		},
+	}
+	groupRepo := &upstreamManagementGroupRepoStub{groups: []Group{}, nextID: 42}
+	settingRepo := newUpstreamManagementSettingRepoStub()
+	svc := NewUpstreamManagementService(providerSource, groupRepo, settingRepo, nil)
+
+	result, err := svc.CreateLocalGroupFromUpstream(context.Background(), UpstreamGroupLocalCreateInput{
+		UpstreamGroupName: " no-key group ",
+		RateMultiplier:    0.15,
+	})
+	if err != nil {
+		t.Fatalf("CreateLocalGroupFromUpstream returned error: %v", err)
+	}
+	if len(groupRepo.creates) != 1 {
+		t.Fatalf("created group count = %d, want 1", len(groupRepo.creates))
+	}
+	created := groupRepo.groups[len(groupRepo.groups)-1]
+	if created.ID != 42 || created.Name != "No Key Group" {
+		t.Fatalf("created group = %+v, want canonical upstream group name", created)
+	}
+	var stored []UpstreamGroupMappingRecord
+	if err := json.Unmarshal([]byte(settingRepo.values[SettingKeyUpstreamGroupMappings]), &stored); err != nil {
+		t.Fatalf("stored mappings should be JSON: %v", err)
+	}
+	if len(stored) != 1 || stored[0].UpstreamGroupKey != "nokeygroup" || stored[0].LocalGroupID != 42 {
+		t.Fatalf("unexpected stored mappings: %+v", stored)
+	}
+	if len(result.Items) != 1 || !result.Items[0].Matched || result.Items[0].UpstreamKeyCount != 0 {
+		t.Fatalf("expected no-key upstream group mapped to new local group, got %+v", result.Items)
 	}
 }
 
