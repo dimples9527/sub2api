@@ -74,6 +74,35 @@ func TestUpstreamAccountRateGuardSchedulerRunDueHonorsEnabledAndSecondsInterval(
 	}
 }
 
+func TestUpstreamAccountRateGuardSchedulerRunDueDoesNotLogWaitingTicks(t *testing.T) {
+	stub := &upstreamAccountRateGuardSchedulerServiceStub{
+		config: UpstreamAccountRateGuardConfig{Enabled: true, IntervalSeconds: 60},
+	}
+	scheduler := NewUpstreamAccountRateGuardScheduler(stub)
+	now := time.Date(2026, 6, 11, 10, 0, 0, 0, time.UTC)
+
+	if !scheduler.runDue(context.Background(), now) {
+		t.Fatalf("first due run should execute")
+	}
+	if scheduler.runDue(context.Background(), now.Add(time.Second)) {
+		t.Fatalf("second run before interval should be skipped")
+	}
+	if scheduler.runDue(context.Background(), now.Add(2*time.Second)) {
+		t.Fatalf("third run before interval should be skipped")
+	}
+
+	logs := scheduler.ListPollLogs()
+	if len(logs) != 1 {
+		t.Fatalf("log count = %d, want only executed run log", len(logs))
+	}
+	if logs[0].Status != "success" || logs[0].Message != "executed" {
+		t.Fatalf("log = %+v, want scheduled execution log", logs[0])
+	}
+	if stub.runs != 1 {
+		t.Fatalf("run count = %d, want 1", stub.runs)
+	}
+}
+
 func TestUpstreamAccountRateGuardSchedulerRunDueSkipsWhenDisabled(t *testing.T) {
 	stub := &upstreamAccountRateGuardSchedulerServiceStub{
 		config: UpstreamAccountRateGuardConfig{Enabled: false, IntervalSeconds: 1},
@@ -85,6 +114,9 @@ func TestUpstreamAccountRateGuardSchedulerRunDueSkipsWhenDisabled(t *testing.T) 
 	}
 	if stub.runs != 0 {
 		t.Fatalf("run count = %d, want 0", stub.runs)
+	}
+	if logs := scheduler.ListPollLogs(); len(logs) != 0 {
+		t.Fatalf("logs = %+v, want no disabled heartbeat logs", logs)
 	}
 }
 

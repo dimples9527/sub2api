@@ -96,12 +96,6 @@ func (s *UpstreamAccountRateGuardScheduler) runDue(ctx context.Context, now time
 		return false
 	}
 	if !config.Enabled {
-		s.appendPollLog(UpstreamAccountRateGuardPollLog{
-			CheckedAt: now.UTC(),
-			Trigger:   "scheduled",
-			Status:    "skipped",
-			Message:   "disabled",
-		})
 		return false
 	}
 	interval := time.Duration(config.IntervalSeconds) * time.Second
@@ -121,14 +115,7 @@ func (s *UpstreamAccountRateGuardScheduler) runDue(ctx context.Context, now time
 		return false
 	}
 	if !s.lastRunAt.IsZero() && now.Sub(s.lastRunAt) < interval {
-		nextRunAt := s.lastRunAt.Add(interval)
 		s.mu.Unlock()
-		s.appendPollLog(UpstreamAccountRateGuardPollLog{
-			CheckedAt: now.UTC(),
-			Trigger:   "scheduled",
-			Status:    "skipped",
-			Message:   "waiting until " + nextRunAt.Format(time.RFC3339),
-		})
 		return false
 	}
 	s.lastRunAt = now

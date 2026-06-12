@@ -145,98 +145,102 @@
       </template>
 
       <template #table>
-        <div v-if="warnings.length" class="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200">
-          <div v-for="warning in warnings" :key="warning">{{ warning }}</div>
-        </div>
+        <div class="accounts-table-content">
+          <div v-if="warnings.length" class="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200">
+            <div v-for="warning in warnings" :key="warning">{{ warning }}</div>
+          </div>
 
-        <DataTable :columns="columns" :data="filteredItems" :loading="loading">
-          <template #cell-source="{ row }">
-            <div class="table-main-cell min-w-[11rem]">
-              <span class="font-medium text-gray-900 dark:text-white">{{ row.provider_name || row.provider_slug }}</span>
-              <code class="text-xs text-gray-500 dark:text-gray-400">{{ row.provider_slug }}</code>
-            </div>
-          </template>
-
-          <template #cell-upstream_key_name="{ row }">
-            <div class="table-main-cell min-w-[14rem]">
-              <span class="font-medium text-gray-900 dark:text-white">{{ row.upstream_key_name }}</span>
-              <span class="text-xs text-gray-500 dark:text-gray-400">{{ row.upstream_group_name }}</span>
-            </div>
-          </template>
-
-          <template #cell-local_account_name="{ row }">
-            <div class="table-main-cell min-w-[14rem]">
-              <span class="font-medium text-gray-900 dark:text-white">{{ row.local_account_name || '-' }}</span>
-              <span v-if="row.matched_account_id" class="text-xs text-gray-500 dark:text-gray-400">
-                #{{ row.matched_account_id }} {{ row.matched_account_name }}
-              </span>
-              <div v-else-if="row.conflict_accounts?.length" class="tag-list max-w-[24rem]">
-                <span
-                  v-for="account in row.conflict_accounts"
-                  :key="`${row.provider_slug}-${row.upstream_key_name}-conflict-${account.id}`"
-                  class="group-chip group-chip-warning"
-                  :title="conflictAccountTitle(account)"
-                >
-                  #{{ account.id }} {{ account.name }}
-                  <span v-if="account.bound_groups?.length" class="font-mono">
-                    {{ conflictAccountRates(account) }}
-                  </span>
-                </span>
-              </div>
-              <span v-else-if="row.conflict_account_ids?.length" class="text-xs text-amber-600 dark:text-amber-300">
-                {{ t('admin.upstreamAccounts.conflictIds', { ids: row.conflict_account_ids.join(', ') }) }}
-              </span>
-            </div>
-          </template>
-
-          <template #cell-local_group_name="{ row }">
-            <div class="table-main-cell min-w-[16rem]">
-              <div v-if="row.bound_groups?.length" class="tag-list max-w-[22rem]">
-                <span
-                  v-for="group in row.bound_groups"
-                  :key="`${row.provider_slug}-${row.upstream_key_name}-${group.id}`"
-                  class="group-chip"
-                  :class="group.rate_violation ? 'group-chip-warning' : ''"
-                  :title="`${group.name} ${formatRate(group.rate_multiplier)}`"
-                >
-                  {{ group.name }}
-                  <span class="font-mono">{{ formatRate(group.rate_multiplier) }}</span>
-                </span>
-              </div>
-              <template v-else>
-                <span>{{ row.local_group_name || '-' }}</span>
-                <span v-if="row.local_rate_multiplier !== undefined" class="text-xs font-mono text-gray-500 dark:text-gray-400">
-                  {{ formatRate(row.local_rate_multiplier) }}
-                </span>
+          <div class="accounts-table-primary">
+            <DataTable :columns="columns" :data="filteredItems" :loading="loading">
+              <template #cell-source="{ row }">
+                <div class="table-main-cell min-w-[11rem]">
+                  <span class="font-medium text-gray-900 dark:text-white">{{ row.provider_name || row.provider_slug }}</span>
+                  <code class="text-xs text-gray-500 dark:text-gray-400">{{ row.provider_slug }}</code>
+                </div>
               </template>
-            </div>
-          </template>
 
-          <template #cell-upstream_rate_multiplier="{ value }">
-            <span class="rate-value">{{ formatRate(value) }}</span>
-          </template>
+              <template #cell-upstream_key_name="{ row }">
+                <div class="table-main-cell min-w-[14rem]">
+                  <span class="font-medium text-gray-900 dark:text-white">{{ row.upstream_key_name }}</span>
+                  <span class="text-xs text-gray-500 dark:text-gray-400">{{ row.upstream_group_name }}</span>
+                </div>
+              </template>
 
-          <template #cell-action="{ row }">
-            <div class="table-main-cell min-w-[12rem]">
-              <span :class="['badge', actionClass(row)]">{{ actionLabel(row) }}</span>
-              <span v-if="row.skip_reason" class="text-xs text-gray-500 dark:text-gray-400">{{ row.skip_reason }}</span>
-              <span v-if="row.unbound_group_names?.length" class="inline-alert">
-                {{ t('admin.upstreamAccounts.unbindGroups', { groups: row.unbound_group_names.join(', ') }) }}
-              </span>
-            </div>
-          </template>
+              <template #cell-local_account_name="{ row }">
+                <div class="table-main-cell min-w-[14rem]">
+                  <span class="font-medium text-gray-900 dark:text-white">{{ row.local_account_name || '-' }}</span>
+                  <span v-if="row.matched_account_id" class="text-xs text-gray-500 dark:text-gray-400">
+                    #{{ row.matched_account_id }} {{ row.matched_account_name }}
+                  </span>
+                  <div v-else-if="row.conflict_accounts?.length" class="tag-list max-w-[24rem]">
+                    <span
+                      v-for="account in row.conflict_accounts"
+                      :key="`${row.provider_slug}-${row.upstream_key_name}-conflict-${account.id}`"
+                      class="group-chip group-chip-warning"
+                      :title="conflictAccountTitle(account)"
+                    >
+                      #{{ account.id }} {{ account.name }}
+                      <span v-if="account.bound_groups?.length" class="font-mono">
+                        {{ conflictAccountRates(account) }}
+                      </span>
+                    </span>
+                  </div>
+                  <span v-else-if="row.conflict_account_ids?.length" class="text-xs text-amber-600 dark:text-amber-300">
+                    {{ t('admin.upstreamAccounts.conflictIds', { ids: row.conflict_account_ids.join(', ') }) }}
+                  </span>
+                </div>
+              </template>
 
-          <template #empty>
-            <EmptyState
-              :title="emptyTitle"
-              :description="emptyDescription"
-              :action-text="t('common.refresh')"
-              @action="reload"
-            />
-          </template>
-        </DataTable>
+              <template #cell-local_group_name="{ row }">
+                <div class="table-main-cell min-w-[16rem]">
+                  <div v-if="row.bound_groups?.length" class="tag-list max-w-[22rem]">
+                    <span
+                      v-for="group in row.bound_groups"
+                      :key="`${row.provider_slug}-${row.upstream_key_name}-${group.id}`"
+                      class="group-chip"
+                      :class="group.rate_violation ? 'group-chip-warning' : ''"
+                      :title="`${group.name} ${formatRate(group.rate_multiplier)}`"
+                    >
+                      {{ group.name }}
+                      <span class="font-mono">{{ formatRate(group.rate_multiplier) }}</span>
+                    </span>
+                  </div>
+                  <template v-else>
+                    <span>{{ row.local_group_name || '-' }}</span>
+                    <span v-if="row.local_rate_multiplier !== undefined" class="text-xs font-mono text-gray-500 dark:text-gray-400">
+                      {{ formatRate(row.local_rate_multiplier) }}
+                    </span>
+                  </template>
+                </div>
+              </template>
 
-        <div class="records-panel">
+              <template #cell-upstream_rate_multiplier="{ value }">
+                <span class="rate-value">{{ formatRate(value) }}</span>
+              </template>
+
+              <template #cell-action="{ row }">
+                <div class="table-main-cell min-w-[12rem]">
+                  <span :class="['badge', actionClass(row)]">{{ actionLabel(row) }}</span>
+                  <span v-if="row.skip_reason" class="text-xs text-gray-500 dark:text-gray-400">{{ row.skip_reason }}</span>
+                  <span v-if="row.unbound_group_names?.length" class="inline-alert">
+                    {{ t('admin.upstreamAccounts.unbindGroups', { groups: row.unbound_group_names.join(', ') }) }}
+                  </span>
+                </div>
+              </template>
+
+              <template #empty>
+                <EmptyState
+                  :title="emptyTitle"
+                  :description="emptyDescription"
+                  :action-text="t('common.refresh')"
+                  @action="reload"
+                />
+              </template>
+            </DataTable>
+          </div>
+
+          <div class="accounts-records-stack">
+            <div class="records-panel">
           <div class="records-header">
             <div>
               <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.upstreamAccounts.syncRecords') }}</h3>
@@ -376,6 +380,8 @@
                 </tr>
               </tbody>
             </table>
+          </div>
+        </div>
           </div>
         </div>
       </template>
@@ -791,6 +797,28 @@ onMounted(reload)
   @apply flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300;
 }
 
+.accounts-table-content {
+  @apply flex h-full min-h-0 flex-col overflow-y-auto;
+}
+
+.accounts-table-primary {
+  @apply flex flex-none flex-col overflow-hidden;
+  height: clamp(28rem, 52vh, 42rem);
+  min-height: 28rem;
+}
+
+.accounts-table-primary :deep(.table-wrapper) {
+  @apply min-h-0;
+}
+
+.accounts-records-stack {
+  @apply flex flex-none flex-col gap-4 pt-4;
+}
+
+.accounts-records-stack .records-panel {
+  @apply mt-0;
+}
+
 .table-main-cell {
   @apply flex flex-col gap-1 leading-tight;
 }
@@ -865,5 +893,15 @@ onMounted(reload)
 
 .log-chip-warning {
   @apply bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-200;
+}
+
+@media (max-width: 1023px) {
+  .accounts-table-content {
+    @apply h-auto overflow-visible;
+  }
+
+  .accounts-table-primary {
+    @apply h-auto min-h-0 overflow-visible;
+  }
 }
 </style>
