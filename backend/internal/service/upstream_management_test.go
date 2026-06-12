@@ -286,6 +286,51 @@ func TestUpstreamManagementServiceFetchDefaultModelSquareUsesLocalGroupRates(t *
 	}
 }
 
+func TestUpstreamManagementServiceFetchDefaultModelSquareMatchesGroupsIgnoringSeparators(t *testing.T) {
+	providerSource := &upstreamManagementProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "default-upstream", Name: "Default upstream", IsDefault: true},
+		modelSquare: json.RawMessage(`{
+			"groups":[{"id":"remote-plus","name":"gpt plus","rate_multiplier":9.9}],
+			"models":[{"id":"gpt-5.2","group_ids":["remote-plus"]}]
+		}`),
+	}
+	groupRepo := &upstreamManagementGroupRepoStub{groups: []Group{{
+		ID:             8,
+		Name:           "gptplus",
+		Platform:       PlatformOpenAI,
+		RateMultiplier: 0.35,
+		Status:         StatusActive,
+	}}}
+	svc := NewUpstreamManagementService(providerSource, groupRepo, newUpstreamManagementSettingRepoStub(), nil)
+
+	payload, _, err := svc.FetchDefaultModelSquare(context.Background())
+	if err != nil {
+		t.Fatalf("FetchDefaultModelSquare returned error: %v", err)
+	}
+
+	var body struct {
+		Groups []map[string]any `json:"groups"`
+		Models []struct {
+			GroupIDs []string `json:"group_ids"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(payload, &body); err != nil {
+		t.Fatalf("payload should be JSON: %v", err)
+	}
+	if len(body.Groups) != 1 {
+		t.Fatalf("group count = %d, want 1: %s", len(body.Groups), string(payload))
+	}
+	if body.Groups[0]["name"] != "gptplus" {
+		t.Fatalf("group name = %v, want local gptplus", body.Groups[0]["name"])
+	}
+	if body.Groups[0]["rate_multiplier"] != 0.35 {
+		t.Fatalf("rate_multiplier = %v, want local 0.35", body.Groups[0]["rate_multiplier"])
+	}
+	if len(body.Models) != 1 || len(body.Models[0].GroupIDs) != 1 || body.Models[0].GroupIDs[0] != "remote-plus" {
+		t.Fatalf("model group ids not retained for matched local group: %+v", body.Models)
+	}
+}
+
 func TestUpstreamManagementServiceCompareGroupsMatchesByNormalizedName(t *testing.T) {
 	providerSource := &upstreamManagementProviderSourceStub{
 		defaultProvider: UpstreamProviderConfig{Slug: "default-upstream", Name: "Default upstream", IsDefault: true},

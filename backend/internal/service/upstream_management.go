@@ -811,5 +811,16 @@ func limitUpstreamGroupRateFixRecords(records []UpstreamGroupRateFixRecord) []Up
 }
 
 func normalizeUpstreamGroupMatchName(name string) string {
-	return strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(name)), " "))
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	var b strings.Builder
+	b.Grow(len(normalized))
+	for _, r := range normalized {
+		switch r {
+		case ' ', '\t', '\n', '\r', '_', '-':
+			continue
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
