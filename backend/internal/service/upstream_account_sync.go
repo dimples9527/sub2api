@@ -9,6 +9,7 @@ import (
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 )
 
 const (
@@ -74,16 +75,31 @@ type UpstreamAccountSyncResult struct {
 }
 
 type UpstreamAccountSyncRecord struct {
-	ProviderSlug       string    `json:"provider_slug"`
-	ProviderName       string    `json:"provider_name"`
-	CreatedCount       int       `json:"created_count"`
-	UpdatedCount       int       `json:"updated_count"`
-	SkippedCount       int       `json:"skipped_count"`
-	ConflictCount      int       `json:"conflict_count"`
-	RateViolationCount int       `json:"rate_violation_count"`
-	UnboundGroupCount  int       `json:"unbound_group_count"`
-	CreatedAt          time.Time `json:"created_at"`
-	Error              string    `json:"error,omitempty"`
+	ProviderSlug       string                            `json:"provider_slug"`
+	ProviderName       string                            `json:"provider_name"`
+	CreatedCount       int                               `json:"created_count"`
+	UpdatedCount       int                               `json:"updated_count"`
+	SkippedCount       int                               `json:"skipped_count"`
+	ConflictCount      int                               `json:"conflict_count"`
+	RateViolationCount int                               `json:"rate_violation_count"`
+	UnboundGroupCount  int                               `json:"unbound_group_count"`
+	CreatedAt          time.Time                         `json:"created_at"`
+	Error              string                            `json:"error,omitempty"`
+	UnbindDetails      []UpstreamAccountSyncUnbindDetail `json:"unbind_details,omitempty"`
+}
+
+type UpstreamAccountSyncUnbindDetail struct {
+	ProviderSlug            string   `json:"provider_slug"`
+	ProviderName            string   `json:"provider_name"`
+	UpstreamKeyName         string   `json:"upstream_key_name"`
+	MatchedLocalAccountID   int64    `json:"matched_local_account_id"`
+	MatchedLocalAccountName string   `json:"matched_local_account_name"`
+	UpstreamGroupName       string   `json:"upstream_group_name"`
+	UpstreamRateMultiplier  float64  `json:"upstream_rate_multiplier"`
+	LocalMinRateMultiplier  float64  `json:"local_min_rate_multiplier"`
+	UnboundGroupIDs         []int64  `json:"unbound_group_ids"`
+	UnboundGroupNames       []string `json:"unbound_group_names"`
+	RemainingGroupIDs       []int64  `json:"remaining_group_ids"`
 }
 
 type UpstreamAccountSyncService struct {
@@ -131,6 +147,7 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 	result.Summary.UnboundGroupCount = 0
 
 	now := time.Now().UTC()
+	unbindDetails := make([]UpstreamAccountSyncUnbindDetail, 0)
 	for index := range result.Items {
 		item := &result.Items[index]
 		provider := previewState.providerBySlug[item.ProviderSlug]
@@ -164,7 +181,7 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 				SkipMixedChannelCheck: true,
 			})
 			if err != nil {
-				return s.finishSyncWithError(ctx, result, err)
+				return s.finishSyncWithError(ctx, result, unbindDetails, err)
 			}
 			result.Summary.CreateCount++
 		case UpstreamAccountSyncActionUpdate:
@@ -185,8 +202,6 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 				item.RateViolation = true
 				item.UnboundGroupIDs = lowGroupIDs
 				item.UnboundGroupNames = lowGroupNames
-				result.Summary.RateViolationCount++
-				result.Summary.UnboundGroupCount += len(lowGroupIDs)
 			}
 			extra := upstreamAccountSyncExtra(provider, *item, now, account.Extra)
 			_, err := s.accountManager.UpdateAccount(ctx, account.ID, &UpdateAccountInput{
@@ -196,7 +211,14 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 				SkipMixedChannelCheck: true,
 			})
 			if err != nil {
-				return s.finishSyncWithError(ctx, result, err)
+				return s.finishSyncWithError(ctx, result, unbindDetails, err)
+			}
+			if req.ApplyRateGuard && len(lowGroupIDs) > 0 {
+				detail := buildUpstreamAccountSyncUnbindDetail(provider, *item, account, lowGroupIDs, lowGroupNames, remainingGroupIDs)
+				unbindDetails = append(unbindDetails, detail)
+				logUpstreamAccountSyncUnbindAudit(detail)
+				result.Summary.RateViolationCount++
+				result.Summary.UnboundGroupCount += len(lowGroupIDs)
 			}
 			item.Action = UpstreamAccountSyncActionUpdate
 			result.Summary.UpdateCount++
@@ -214,6 +236,7 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 		RateViolationCount: result.Summary.RateViolationCount,
 		UnboundGroupCount:  result.Summary.UnboundGroupCount,
 		CreatedAt:          now,
+		UnbindDetails:      unbindDetails,
 	})
 	if err != nil {
 		return UpstreamAccountSyncResult{}, err
@@ -470,7 +493,7 @@ func (s *UpstreamAccountSyncService) prependRecord(ctx context.Context, record U
 	return records, nil
 }
 
-func (s *UpstreamAccountSyncService) finishSyncWithError(ctx context.Context, result UpstreamAccountSyncResult, runErr error) (UpstreamAccountSyncResult, error) {
+func (s *UpstreamAccountSyncService) finishSyncWithError(ctx context.Context, result UpstreamAccountSyncResult, unbindDetails []UpstreamAccountSyncUnbindDetail, runErr error) (UpstreamAccountSyncResult, error) {
 	providerSlug, providerName := upstreamAccountSyncRecordProvider(result)
 	record := UpstreamAccountSyncRecord{
 		ProviderSlug:       providerSlug,
@@ -483,6 +506,7 @@ func (s *UpstreamAccountSyncService) finishSyncWithError(ctx context.Context, re
 		UnboundGroupCount:  result.Summary.UnboundGroupCount,
 		CreatedAt:          time.Now().UTC(),
 		Error:              runErr.Error(),
+		UnbindDetails:      unbindDetails,
 	}
 	records, err := s.prependRecord(ctx, record)
 	if err != nil {
@@ -648,6 +672,57 @@ func upstreamAccountSyncLowRateGroups(account Account, upstreamRate float64) ([]
 		remaining = appendUniqueInt64(remaining, id)
 	}
 	return lowIDs, lowNames, remaining
+}
+
+func buildUpstreamAccountSyncUnbindDetail(provider UpstreamProviderConfig, item UpstreamAccountSyncItem, account Account, unboundGroupIDs []int64, unboundGroupNames []string, remainingGroupIDs []int64) UpstreamAccountSyncUnbindDetail {
+	localMinRate, _ := upstreamAccountSyncMinGroupRate(account)
+	return UpstreamAccountSyncUnbindDetail{
+		ProviderSlug:            provider.Slug,
+		ProviderName:            provider.Name,
+		UpstreamKeyName:         item.UpstreamKeyName,
+		MatchedLocalAccountID:   account.ID,
+		MatchedLocalAccountName: account.Name,
+		UpstreamGroupName:       item.UpstreamGroupName,
+		UpstreamRateMultiplier:  item.UpstreamRateMultiplier,
+		LocalMinRateMultiplier:  localMinRate,
+		UnboundGroupIDs:         append([]int64(nil), unboundGroupIDs...),
+		UnboundGroupNames:       append([]string(nil), unboundGroupNames...),
+		RemainingGroupIDs:       append([]int64(nil), remainingGroupIDs...),
+	}
+}
+
+func upstreamAccountSyncMinGroupRate(account Account) (float64, bool) {
+	minRate := 0.0
+	found := false
+	for _, group := range account.Groups {
+		if group == nil || group.ID <= 0 {
+			continue
+		}
+		if !found || group.RateMultiplier < minRate {
+			minRate = group.RateMultiplier
+			found = true
+		}
+	}
+	return minRate, found
+}
+
+func logUpstreamAccountSyncUnbindAudit(detail UpstreamAccountSyncUnbindDetail) {
+	if len(detail.UnboundGroupIDs) == 0 {
+		return
+	}
+	logger.WriteSinkEvent("info", "audit.upstream_account_sync", "upstream_account_sync_unbound_low_rate_groups", map[string]any{
+		"provider_slug":              detail.ProviderSlug,
+		"provider_name":              detail.ProviderName,
+		"upstream_key_name":          detail.UpstreamKeyName,
+		"matched_local_account_id":   detail.MatchedLocalAccountID,
+		"matched_local_account_name": detail.MatchedLocalAccountName,
+		"upstream_group_name":        detail.UpstreamGroupName,
+		"upstream_rate_multiplier":   detail.UpstreamRateMultiplier,
+		"local_min_rate_multiplier":  detail.LocalMinRateMultiplier,
+		"unbound_group_ids":          detail.UnboundGroupIDs,
+		"unbound_group_names":        detail.UnboundGroupNames,
+		"remaining_group_ids":        detail.RemainingGroupIDs,
+	})
 }
 
 func accountIDs(accounts []Account) []int64 {

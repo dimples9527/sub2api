@@ -34,6 +34,20 @@ export interface UpstreamAccountSyncItem {
   conflict_account_ids?: number[]
 }
 
+export interface UpstreamAccountSyncUnbindDetail {
+  provider_slug: string
+  provider_name: string
+  upstream_key_name: string
+  matched_local_account_id: number
+  matched_local_account_name: string
+  upstream_group_name: string
+  upstream_rate_multiplier: number
+  local_min_rate_multiplier: number
+  unbound_group_ids: number[]
+  unbound_group_names: string[]
+  remaining_group_ids: number[]
+}
+
 export interface UpstreamAccountSyncRecord {
   provider_slug: string
   provider_name: string
@@ -45,6 +59,7 @@ export interface UpstreamAccountSyncRecord {
   unbound_group_count: number
   created_at: string
   error?: string
+  unbind_details?: UpstreamAccountSyncUnbindDetail[]
 }
 
 export interface UpstreamAccountSyncResult {

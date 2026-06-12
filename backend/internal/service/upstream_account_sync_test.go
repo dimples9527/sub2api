@@ -306,6 +306,22 @@ func TestUpstreamAccountSyncRunCreatesUpdatesAndAppliesRateGuard(t *testing.T) {
 	if len(records) != 1 || records[0].CreatedCount != 1 || records[0].UpdatedCount != 1 || records[0].UnboundGroupCount != 1 {
 		t.Fatalf("records = %+v, want one sync record with counts", records)
 	}
+	if len(records[0].UnbindDetails) != 1 {
+		t.Fatalf("unbind details = %+v, want one entry", records[0].UnbindDetails)
+	}
+	detail := records[0].UnbindDetails[0]
+	if detail.MatchedLocalAccountID != 10 || detail.MatchedLocalAccountName != "up-old" {
+		t.Fatalf("unbind detail account = %+v, want account 10 up-old", detail)
+	}
+	if detail.UpstreamKeyName != "old" || detail.UpstreamGroupName != "VIP" || detail.UpstreamRateMultiplier != 2 {
+		t.Fatalf("unbind detail upstream = %+v, want old/VIP/2", detail)
+	}
+	if len(detail.UnboundGroupIDs) != 1 || detail.UnboundGroupIDs[0] != 8 || len(detail.UnboundGroupNames) != 1 || detail.UnboundGroupNames[0] != "Trial" {
+		t.Fatalf("unbind detail groups = %+v/%+v, want Trial group 8", detail.UnboundGroupIDs, detail.UnboundGroupNames)
+	}
+	if len(detail.RemainingGroupIDs) != 1 || detail.RemainingGroupIDs[0] != 7 {
+		t.Fatalf("unbind detail remaining groups = %+v, want [7]", detail.RemainingGroupIDs)
+	}
 }
 
 func TestUpstreamAccountSyncRunDoesNotUpdateNoopAccount(t *testing.T) {

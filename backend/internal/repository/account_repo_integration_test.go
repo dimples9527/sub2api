@@ -11,6 +11,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/accountgroup"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -550,12 +551,33 @@ func (s *AccountRepoSuite) TestBindGroups_EmptyList() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-empty"})
 	group := mustCreateGroup(s.T(), s.client, &service.Group{Name: "g-empty"})
 	mustBindAccountToGroup(s.T(), s.client, account.ID, group.ID, 1)
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
 
 	s.Require().NoError(s.repo.BindGroups(s.ctx, account.ID, []int64{}), "BindGroups empty")
 
 	groups, err := s.repo.GetGroups(s.ctx, account.ID)
 	s.Require().NoError(err)
 	s.Require().Empty(groups, "expected 0 groups after binding empty list")
+
+	var (
+		eventType string
+		accountID int64
+		groupIDs  []int64
+	)
+	err = scanSingleRow(
+		s.ctx,
+		s.repo.sql,
+		"SELECT event_type, account_id, ARRAY(SELECT jsonb_array_elements_text(payload->'group_ids')::bigint) FROM scheduler_outbox",
+		nil,
+		&eventType,
+		&accountID,
+		pq.Array(&groupIDs),
+	)
+	s.Require().NoError(err)
+	s.Require().Equal(service.SchedulerOutboxEventAccountGroupsChanged, eventType)
+	s.Require().Equal(account.ID, accountID)
+	s.Require().Equal([]int64{group.ID}, groupIDs)
 }
 
 // --- Schedulable ---

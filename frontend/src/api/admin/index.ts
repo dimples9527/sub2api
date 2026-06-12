@@ -138,7 +138,8 @@ export type {
   UpstreamAccountSyncRecord,
   UpstreamAccountSyncRequest,
   UpstreamAccountSyncResult,
-  UpstreamAccountSyncSummary
+  UpstreamAccountSyncSummary,
+  UpstreamAccountSyncUnbindDetail
 } from './upstreamAccountSync'
 export type {
   AdminModelSquareResult,
