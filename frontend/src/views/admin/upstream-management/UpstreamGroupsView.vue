@@ -118,6 +118,17 @@
             <span class="font-mono text-sm text-gray-900 dark:text-white">{{ formatRate(value) }}</span>
           </template>
 
+          <template #cell-monitor_trend="{ row }">
+            <UpstreamGroupAvailabilityTrend
+              :row="monitorTrendFor(row)"
+              :loading="monitorLoading"
+              :error="monitorError"
+              :empty-text="t('admin.upstreamGroups.monitorTrendEmpty')"
+              :loading-text="t('admin.upstreamGroups.monitorTrendLoading')"
+              :label="t('admin.upstreamGroups.columns.monitorTrend')"
+            />
+          </template>
+
           <template #cell-local_group_name="{ row }">
             <div class="flex min-w-[16rem] flex-col gap-2">
               <template v-if="row.matched">
@@ -270,6 +281,11 @@ import type {
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime } from '@/utils/format'
+import {
+  buildUpstreamMonitorTrendIndex,
+  normalizeUpstreamMonitorGroupKey,
+  type UpstreamMonitorTrendRow
+} from '@/utils/upstreamMonitorTrend'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -277,6 +293,7 @@ import DataTable from '@/components/common/DataTable.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
+import UpstreamGroupAvailabilityTrend from '@/components/admin/upstream/UpstreamGroupAvailabilityTrend.vue'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -287,6 +304,9 @@ const applying = ref(false)
 const loadingRateFixConfig = ref(false)
 const savingRateFixConfig = ref(false)
 const syncingGroupKey = ref<string | null>(null)
+const monitorTrendIndex = ref<Map<string, UpstreamMonitorTrendRow>>(new Map())
+const monitorLoading = ref(false)
+const monitorError = ref('')
 const loadError = ref('')
 const rateFixConfig = ref<UpstreamGroupAutoRateFixConfig | null>(null)
 const autoFixForm = ref({
@@ -298,10 +318,12 @@ const matchFilter = ref('')
 const rateFilter = ref('')
 const syncDialogItem = ref<UpstreamGroupComparison | null>(null)
 const syncRateMultiplier = ref(1)
+let reloadRequestId = 0
 
 const columns = computed<Column[]>(() => [
-  { key: 'upstream_group_name', label: t('admin.upstreamGroups.columns.upstreamGroup') },
+  { key: 'upstream_group_name', label: t('admin.upstreamGroups.columns.upstreamGroup'), class: 'min-w-[12rem]' },
   { key: 'upstream_rate', label: t('admin.upstreamGroups.columns.upstreamRate') },
+  { key: 'monitor_trend', label: t('admin.upstreamGroups.columns.monitorTrend'), class: 'min-w-[10.5rem]' },
   { key: 'local_group_name', label: t('admin.upstreamGroups.columns.matchResult') },
   { key: 'local_rate', label: t('admin.upstreamGroups.columns.localRate') },
   { key: 'status', label: t('admin.upstreamGroups.columns.status') },
@@ -367,9 +389,11 @@ const emptyDescription = computed(() => {
 })
 
 async function reload() {
+  const requestId = ++reloadRequestId
   loading.value = true
   loadingRateFixConfig.value = true
   loadError.value = ''
+  void loadMonitorTrend(requestId)
   try {
     const [groupsResult, config] = await Promise.all([
       adminAPI.upstreamManagement.getGroups(),
@@ -385,6 +409,24 @@ async function reload() {
   } finally {
     loading.value = false
     loadingRateFixConfig.value = false
+  }
+}
+
+async function loadMonitorTrend(requestId: number) {
+  monitorLoading.value = true
+  monitorError.value = ''
+  try {
+    const payload = await adminAPI.groups.getUpstreamMonitorStatus({ period: '90m', board: 'hot' })
+    if (requestId !== reloadRequestId) return
+    monitorTrendIndex.value = buildUpstreamMonitorTrendIndex(payload)
+  } catch (err) {
+    if (requestId !== reloadRequestId) return
+    monitorTrendIndex.value = new Map()
+    monitorError.value = extractApiErrorMessage(err, t('admin.upstreamGroups.monitorTrendLoadFailed'))
+  } finally {
+    if (requestId === reloadRequestId) {
+      monitorLoading.value = false
+    }
   }
 }
 
@@ -427,6 +469,19 @@ function applyRateFixConfig(config: UpstreamGroupAutoRateFixConfig) {
     enabled: Boolean(config.enabled),
     interval_seconds: normalizePositiveInteger(config.interval_seconds, 3600),
   }
+}
+
+function monitorTrendFor(row: UpstreamGroupComparison) {
+  const keys = [
+    row.upstream_group_name,
+    row.upstream_group_key,
+    row.local_group_name,
+  ]
+  for (const key of keys) {
+    const trendRow = monitorTrendIndex.value.get(normalizeUpstreamMonitorGroupKey(key))
+    if (trendRow) return trendRow
+  }
+  return undefined
 }
 
 function openSyncDialog(row: UpstreamGroupComparison) {

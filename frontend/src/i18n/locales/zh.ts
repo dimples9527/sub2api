@@ -1647,9 +1647,13 @@ export default {
       loadFailed: '加载上游分组失败',
       fixSuccess: '本地分组倍率已更新',
       fixFailed: '修正本地分组倍率失败',
+      monitorTrendEmpty: '暂无监控数据',
+      monitorTrendLoading: '加载中',
+      monitorTrendLoadFailed: '加载监控趋势失败',
       columns: {
         upstreamGroup: '上游分组',
         upstreamRate: '上游倍率',
+        monitorTrend: '可用率趋势',
         matchResult: '匹配结果',
         localGroup: '本地分组',
         localRate: '本地倍率',

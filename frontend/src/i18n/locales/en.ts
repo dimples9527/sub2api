@@ -1626,9 +1626,13 @@ export default {
       loadFailed: 'Failed to load upstream groups',
       fixSuccess: 'Local group rates updated',
       fixFailed: 'Failed to fix local group rates',
+      monitorTrendEmpty: 'No monitor data',
+      monitorTrendLoading: 'Loading',
+      monitorTrendLoadFailed: 'Failed to load monitor trend',
       columns: {
         upstreamGroup: 'Upstream group',
         upstreamRate: 'Upstream rate',
+        monitorTrend: 'Availability trend',
         matchResult: 'Match result',
         localGroup: 'Local group',
         localRate: 'Local rate',
