@@ -134,6 +134,7 @@ export type {
   UpstreamGroupRateFixRecord
 } from './upstreamManagement'
 export type {
+  UpstreamAccountRateGuardConfig,
   UpstreamAccountSyncItem,
   UpstreamAccountSyncRecord,
   UpstreamAccountSyncRequest,

@@ -13,6 +13,8 @@ type upstreamAccountSyncService interface {
 	Preview(ctx context.Context) (service.UpstreamAccountSyncResult, error)
 	Sync(ctx context.Context, req service.UpstreamAccountSyncRequest) (service.UpstreamAccountSyncResult, error)
 	ListRecords(ctx context.Context) ([]service.UpstreamAccountSyncRecord, error)
+	GetRateGuardConfig(ctx context.Context) (service.UpstreamAccountRateGuardConfig, error)
+	UpdateRateGuardConfig(ctx context.Context, input service.UpstreamAccountRateGuardConfig) (service.UpstreamAccountRateGuardConfig, error)
 }
 
 type UpstreamAccountSyncHandler struct {
@@ -63,4 +65,27 @@ func (h *UpstreamAccountSyncHandler) Records(c *gin.Context) {
 		return
 	}
 	response.Success(c, records)
+}
+
+func (h *UpstreamAccountSyncHandler) GetRateGuardConfig(c *gin.Context) {
+	result, err := h.service.GetRateGuardConfig(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *UpstreamAccountSyncHandler) UpdateRateGuardConfig(c *gin.Context) {
+	var input service.UpstreamAccountRateGuardConfig
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	result, err := h.service.UpdateRateGuardConfig(c.Request.Context(), input)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
 }

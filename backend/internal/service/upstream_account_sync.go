@@ -13,13 +13,17 @@ import (
 )
 
 const (
-	SettingKeyUpstreamAccountSyncRecords = "upstream_account_sync_records"
+	SettingKeyUpstreamAccountSyncRecords     = "upstream_account_sync_records"
+	SettingKeyUpstreamAccountRateGuardConfig = "upstream_account_rate_guard_config"
 
 	UpstreamAccountSyncActionCreate   = "create"
 	UpstreamAccountSyncActionUpdate   = "update"
 	UpstreamAccountSyncActionNoop     = "noop"
 	UpstreamAccountSyncActionSkip     = "skip"
 	UpstreamAccountSyncActionConflict = "conflict"
+
+	DefaultUpstreamAccountRateGuardIntervalSeconds = 3600
+	MinUpstreamAccountRateGuardIntervalSeconds     = 1
 )
 
 type UpstreamAccountSyncAccountManager interface {
@@ -32,6 +36,15 @@ type UpstreamAccountSyncRequest struct {
 	CreateMissing  bool `json:"create_missing"`
 	UpdateExisting bool `json:"update_existing"`
 	ApplyRateGuard bool `json:"apply_rate_guard"`
+}
+
+type UpstreamAccountRateGuardConfig struct {
+	Enabled         bool       `json:"enabled"`
+	IntervalSeconds int        `json:"interval_seconds"`
+	LastRunAt       *time.Time `json:"last_run_at,omitempty"`
+	LastRunStatus   string     `json:"last_run_status,omitempty"`
+	LastRunMessage  string     `json:"last_run_message,omitempty"`
+	UpdatedAt       *time.Time `json:"updated_at,omitempty"`
 }
 
 type UpstreamAccountSyncSummary struct {
@@ -251,6 +264,65 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 	}
 	result.Records = records
 	return result, nil
+}
+
+func (s *UpstreamAccountSyncService) GetRateGuardConfig(ctx context.Context) (UpstreamAccountRateGuardConfig, error) {
+	if s == nil || s.settingRepo == nil {
+		return defaultUpstreamAccountRateGuardConfig(), nil
+	}
+	raw, err := s.settingRepo.GetValue(ctx, SettingKeyUpstreamAccountRateGuardConfig)
+	if err != nil {
+		if err == ErrSettingNotFound {
+			return defaultUpstreamAccountRateGuardConfig(), nil
+		}
+		return UpstreamAccountRateGuardConfig{}, fmt.Errorf("load upstream account rate guard config: %w", err)
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return defaultUpstreamAccountRateGuardConfig(), nil
+	}
+	var config UpstreamAccountRateGuardConfig
+	if err := json.Unmarshal([]byte(raw), &config); err != nil {
+		return UpstreamAccountRateGuardConfig{}, infraerrors.InternalServer("UPSTREAM_ACCOUNT_RATE_GUARD_CONFIG_INVALID", "upstream account rate guard config is invalid")
+	}
+	return normalizeUpstreamAccountRateGuardConfig(config), nil
+}
+
+func (s *UpstreamAccountSyncService) UpdateRateGuardConfig(ctx context.Context, input UpstreamAccountRateGuardConfig) (UpstreamAccountRateGuardConfig, error) {
+	config := normalizeUpstreamAccountRateGuardConfig(input)
+	if input.IntervalSeconds > 0 && input.IntervalSeconds < MinUpstreamAccountRateGuardIntervalSeconds {
+		return UpstreamAccountRateGuardConfig{}, infraerrors.BadRequest("UPSTREAM_ACCOUNT_RATE_GUARD_INTERVAL_INVALID", fmt.Sprintf("interval_seconds must be at least %d", MinUpstreamAccountRateGuardIntervalSeconds))
+	}
+	now := time.Now().UTC()
+	config.UpdatedAt = &now
+	return s.saveRateGuardConfig(ctx, config)
+}
+
+func (s *UpstreamAccountSyncService) RunScheduledRateGuard(ctx context.Context) (UpstreamAccountRateGuardConfig, error) {
+	config, err := s.GetRateGuardConfig(ctx)
+	if err != nil {
+		return UpstreamAccountRateGuardConfig{}, err
+	}
+	now := time.Now().UTC()
+	config.LastRunAt = &now
+	_, runErr := s.Sync(ctx, UpstreamAccountSyncRequest{
+		CreateMissing:  false,
+		UpdateExisting: true,
+		ApplyRateGuard: true,
+	})
+	if runErr != nil {
+		config.LastRunStatus = "failed"
+		config.LastRunMessage = runErr.Error()
+	} else {
+		config.LastRunStatus = "success"
+		config.LastRunMessage = ""
+	}
+	config.UpdatedAt = &now
+	saved, saveErr := s.saveRateGuardConfig(ctx, config)
+	if saveErr != nil {
+		return UpstreamAccountRateGuardConfig{}, saveErr
+	}
+	return saved, runErr
 }
 
 func (s *UpstreamAccountSyncService) ListRecords(ctx context.Context) ([]UpstreamAccountSyncRecord, error) {
@@ -790,4 +862,33 @@ func limitUpstreamAccountSyncRecords(records []UpstreamAccountSyncRecord) []Upst
 	out := make([]UpstreamAccountSyncRecord, 100)
 	copy(out, records[:100])
 	return out
+}
+
+func defaultUpstreamAccountRateGuardConfig() UpstreamAccountRateGuardConfig {
+	return UpstreamAccountRateGuardConfig{
+		Enabled:         false,
+		IntervalSeconds: DefaultUpstreamAccountRateGuardIntervalSeconds,
+	}
+}
+
+func normalizeUpstreamAccountRateGuardConfig(config UpstreamAccountRateGuardConfig) UpstreamAccountRateGuardConfig {
+	if config.IntervalSeconds <= 0 {
+		config.IntervalSeconds = DefaultUpstreamAccountRateGuardIntervalSeconds
+	}
+	return config
+}
+
+func (s *UpstreamAccountSyncService) saveRateGuardConfig(ctx context.Context, config UpstreamAccountRateGuardConfig) (UpstreamAccountRateGuardConfig, error) {
+	config = normalizeUpstreamAccountRateGuardConfig(config)
+	if s == nil || s.settingRepo == nil {
+		return config, nil
+	}
+	raw, err := json.Marshal(config)
+	if err != nil {
+		return UpstreamAccountRateGuardConfig{}, fmt.Errorf("marshal upstream account rate guard config: %w", err)
+	}
+	if err := s.settingRepo.Set(ctx, SettingKeyUpstreamAccountRateGuardConfig, string(raw)); err != nil {
+		return UpstreamAccountRateGuardConfig{}, fmt.Errorf("save upstream account rate guard config: %w", err)
+	}
+	return config, nil
 }

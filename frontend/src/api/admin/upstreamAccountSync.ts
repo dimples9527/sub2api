@@ -85,6 +85,15 @@ export interface UpstreamAccountSyncRequest {
   apply_rate_guard: boolean
 }
 
+export interface UpstreamAccountRateGuardConfig {
+  enabled: boolean
+  interval_seconds: number
+  last_run_at?: string
+  last_run_status?: string
+  last_run_message?: string
+  updated_at?: string
+}
+
 export async function getPreview(): Promise<UpstreamAccountSyncResult> {
   const { data } = await apiClient.get<UpstreamAccountSyncResult>(
     '/admin/upstream-management/accounts/sync-preview'
@@ -107,10 +116,29 @@ export async function getRecords(): Promise<UpstreamAccountSyncRecord[]> {
   return data
 }
 
+export async function getRateGuardConfig(): Promise<UpstreamAccountRateGuardConfig> {
+  const { data } = await apiClient.get<UpstreamAccountRateGuardConfig>(
+    '/admin/upstream-management/accounts/rate-guard-config'
+  )
+  return data
+}
+
+export async function updateRateGuardConfig(
+  payload: UpstreamAccountRateGuardConfig
+): Promise<UpstreamAccountRateGuardConfig> {
+  const { data } = await apiClient.put<UpstreamAccountRateGuardConfig>(
+    '/admin/upstream-management/accounts/rate-guard-config',
+    payload
+  )
+  return data
+}
+
 export const upstreamAccountSyncAPI = {
   getPreview,
   runSync,
-  getRecords
+  getRecords,
+  getRateGuardConfig,
+  updateRateGuardConfig
 }
 
 export default upstreamAccountSyncAPI

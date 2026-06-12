@@ -34,6 +34,8 @@ func registerUpstreamManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 			accounts.GET("/sync-preview", h.Admin.UpstreamAccountSync.Preview)
 			accounts.POST("/sync", h.Admin.UpstreamAccountSync.Sync)
 			accounts.GET("/sync-records", h.Admin.UpstreamAccountSync.Records)
+			accounts.GET("/rate-guard-config", h.Admin.UpstreamAccountSync.GetRateGuardConfig)
+			accounts.PUT("/rate-guard-config", h.Admin.UpstreamAccountSync.UpdateRateGuardConfig)
 		}
 	}
 }

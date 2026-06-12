@@ -422,3 +422,102 @@ func TestUpstreamAccountSyncRunDoesNotUpdateNoopAccount(t *testing.T) {
 		t.Fatalf("items = %+v, want noop item", result.Items)
 	}
 }
+
+func TestUpstreamAccountRateGuardConfigDefaultsDisabled(t *testing.T) {
+	settings := newUpstreamManagementSettingRepoStub()
+	svc, _ := newUpstreamAccountSyncServiceForTest(
+		&upstreamAccountSyncProviderSourceStub{},
+		nil,
+		nil,
+		settings,
+	)
+
+	cfg, err := svc.GetRateGuardConfig(context.Background())
+	if err != nil {
+		t.Fatalf("GetRateGuardConfig returned error: %v", err)
+	}
+	if cfg.Enabled {
+		t.Fatalf("default config should be disabled")
+	}
+	if cfg.IntervalSeconds != DefaultUpstreamAccountRateGuardIntervalSeconds {
+		t.Fatalf("default interval = %d, want %d", cfg.IntervalSeconds, DefaultUpstreamAccountRateGuardIntervalSeconds)
+	}
+}
+
+func TestUpstreamAccountRateGuardRunOnlyAppliesRateGuard(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup", BaseURL: "https://backup.example.com", AccountNamePrefix: "up-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {
+				{ProviderSlug: "backup", KeyName: "matched", GroupName: "VIP", RateMultiplier: 2},
+				{ProviderSlug: "backup", KeyName: "missing", GroupName: "VIP", RateMultiplier: 2},
+			},
+		},
+	}
+	settings := newUpstreamManagementSettingRepoStub()
+	svc, accounts := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{
+			{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 2, Status: StatusActive},
+			{ID: 8, Name: "Trial", Platform: PlatformOpenAI, RateMultiplier: 0.5, Status: StatusActive},
+		},
+		[]Account{{
+			ID:          10,
+			Name:        "up-matched",
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Credentials: map[string]any{"api_key": "matched", "base_url": "https://backup.example.com"},
+			GroupIDs:    []int64{7, 8},
+			Groups: []*Group{
+				{ID: 7, Name: "VIP", RateMultiplier: 2},
+				{ID: 8, Name: "Trial", RateMultiplier: 0.5},
+			},
+		}},
+		settings,
+	)
+
+	cfg, err := svc.UpdateRateGuardConfig(context.Background(), UpstreamAccountRateGuardConfig{
+		Enabled:         true,
+		IntervalSeconds: 5,
+	})
+	if err != nil {
+		t.Fatalf("UpdateRateGuardConfig returned error: %v", err)
+	}
+	if !cfg.Enabled || cfg.IntervalSeconds != 5 {
+		t.Fatalf("saved config = %+v, want enabled interval 5", cfg)
+	}
+
+	cfg, err = svc.RunScheduledRateGuard(context.Background())
+	if err != nil {
+		t.Fatalf("RunScheduledRateGuard returned error: %v", err)
+	}
+	if cfg.LastRunAt == nil || cfg.LastRunStatus != "success" {
+		t.Fatalf("run config = %+v, want successful last run", cfg)
+	}
+	if len(accounts.createdInputs) != 0 {
+		t.Fatalf("scheduled guard should not create missing accounts, created %d", len(accounts.createdInputs))
+	}
+	if len(accounts.updateInputs) != 1 {
+		t.Fatalf("update count = %d, want one rate guard update", len(accounts.updateInputs))
+	}
+	update := accounts.updateInputs[0]
+	if update.id != 10 {
+		t.Fatalf("updated account id = %d, want 10", update.id)
+	}
+	if update.input.GroupIDs == nil || len(*update.input.GroupIDs) != 1 || (*update.input.GroupIDs)[0] != 7 {
+		t.Fatalf("updated group ids = %+v, want [7]", update.input.GroupIDs)
+	}
+
+	rawRecords := settings.values[SettingKeyUpstreamAccountSyncRecords]
+	var records []UpstreamAccountSyncRecord
+	if err := json.Unmarshal([]byte(rawRecords), &records); err != nil {
+		t.Fatalf("decode records: %v raw=%s", err, rawRecords)
+	}
+	if len(records) != 1 || records[0].CreatedCount != 0 || records[0].UpdatedCount != 1 || records[0].UnboundGroupCount != 1 {
+		t.Fatalf("records = %+v, want one rate guard record without creates", records)
+	}
+}

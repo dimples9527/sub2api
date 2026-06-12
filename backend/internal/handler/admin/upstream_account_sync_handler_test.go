@@ -17,8 +17,10 @@ type upstreamAccountSyncHandlerServiceStub struct {
 	syncCalled    bool
 	recordsCalled bool
 	syncRequest   service.UpstreamAccountSyncRequest
+	configInput   service.UpstreamAccountRateGuardConfig
 	result        service.UpstreamAccountSyncResult
 	records       []service.UpstreamAccountSyncRecord
+	config        service.UpstreamAccountRateGuardConfig
 	err           error
 }
 
@@ -38,6 +40,16 @@ func (s *upstreamAccountSyncHandlerServiceStub) ListRecords(context.Context) ([]
 	return s.records, s.err
 }
 
+func (s *upstreamAccountSyncHandlerServiceStub) GetRateGuardConfig(context.Context) (service.UpstreamAccountRateGuardConfig, error) {
+	return s.config, s.err
+}
+
+func (s *upstreamAccountSyncHandlerServiceStub) UpdateRateGuardConfig(_ context.Context, input service.UpstreamAccountRateGuardConfig) (service.UpstreamAccountRateGuardConfig, error) {
+	s.configInput = input
+	s.config = input
+	return s.config, s.err
+}
+
 func newUpstreamAccountSyncHandlerTestRouter(svc upstreamAccountSyncService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -45,6 +57,8 @@ func newUpstreamAccountSyncHandlerTestRouter(svc upstreamAccountSyncService) *gi
 	router.GET("/admin/upstream-management/accounts/sync-preview", handler.Preview)
 	router.POST("/admin/upstream-management/accounts/sync", handler.Sync)
 	router.GET("/admin/upstream-management/accounts/sync-records", handler.Records)
+	router.GET("/admin/upstream-management/accounts/rate-guard-config", handler.GetRateGuardConfig)
+	router.PUT("/admin/upstream-management/accounts/rate-guard-config", handler.UpdateRateGuardConfig)
 	return router
 }
 
@@ -125,4 +139,41 @@ func TestUpstreamAccountSyncHandlerRecords(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.True(t, svc.recordsCalled)
 	require.Contains(t, rec.Body.String(), `"provider_slug":"main"`)
+}
+
+func TestUpstreamAccountSyncHandlerGetRateGuardConfig(t *testing.T) {
+	svc := &upstreamAccountSyncHandlerServiceStub{config: service.UpstreamAccountRateGuardConfig{
+		Enabled:         true,
+		IntervalSeconds: 60,
+		LastRunStatus:   "success",
+	}}
+	router := newUpstreamAccountSyncHandlerTestRouter(svc)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/admin/upstream-management/accounts/rate-guard-config", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"enabled":true`)
+	require.Contains(t, rec.Body.String(), `"interval_seconds":60`)
+	require.Contains(t, rec.Body.String(), `"last_run_status":"success"`)
+}
+
+func TestUpstreamAccountSyncHandlerUpdateRateGuardConfig(t *testing.T) {
+	svc := &upstreamAccountSyncHandlerServiceStub{}
+	router := newUpstreamAccountSyncHandlerTestRouter(svc)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/admin/upstream-management/accounts/rate-guard-config",
+		bytes.NewBufferString(`{"enabled":true,"interval_seconds":120}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.True(t, svc.configInput.Enabled)
+	require.Equal(t, 120, svc.configInput.IntervalSeconds)
+	require.Contains(t, rec.Body.String(), `"interval_seconds":120`)
 }

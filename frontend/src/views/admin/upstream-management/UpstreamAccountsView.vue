@@ -84,6 +84,55 @@
             <strong>{{ filteredItems.length }}</strong>
           </div>
         </div>
+
+        <div class="rate-guard-panel">
+          <div class="min-w-0">
+            <div class="meta-label">{{ t('admin.upstreamAccounts.rateGuardTitle') }}</div>
+            <div class="mt-1 text-sm text-gray-600 dark:text-gray-300">
+              {{ t('admin.upstreamAccounts.rateGuardDescription') }}
+            </div>
+            <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
+              <span :class="['badge', rateGuardForm.enabled ? 'badge-success' : 'badge-gray']">
+                {{ rateGuardForm.enabled ? t('admin.upstreamAccounts.rateGuardEnabled') : t('admin.upstreamAccounts.rateGuardDisabled') }}
+              </span>
+              <span class="text-gray-500 dark:text-gray-400">
+                {{ t('admin.upstreamAccounts.rateGuardLastRun') }}:
+                {{ rateGuardLastRunText }}
+              </span>
+              <span
+                v-if="rateGuardConfig?.last_run_status"
+                :class="['record-status', rateGuardConfig.last_run_status === 'failed' ? 'record-status-error' : 'record-status-success']"
+              >
+                {{ rateGuardConfig.last_run_status === 'failed' ? t('admin.upstreamAccounts.rateGuardStatusFailed') : t('admin.upstreamAccounts.rateGuardStatusSuccess') }}
+              </span>
+              <span v-if="rateGuardConfig?.last_run_message" class="text-red-600 dark:text-red-300">
+                {{ rateGuardConfig.last_run_message }}
+              </span>
+            </div>
+          </div>
+          <label class="guard-toggle">
+            <input v-model="rateGuardForm.enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+            <span>{{ t('admin.upstreamAccounts.rateGuardAutoRun') }}</span>
+          </label>
+          <label class="guard-interval">
+            <span>{{ t('admin.upstreamAccounts.rateGuardIntervalSeconds') }}</span>
+            <input
+              v-model.number="rateGuardForm.interval_seconds"
+              type="number"
+              min="1"
+              class="input h-9 w-28"
+            />
+          </label>
+          <button
+            type="button"
+            class="btn btn-secondary"
+            :disabled="loadingRateGuardConfig || savingRateGuardConfig"
+            @click="saveRateGuardConfig"
+          >
+            <Icon name="cog" size="sm" class="mr-2" :class="savingRateGuardConfig ? 'animate-spin' : ''" />
+            {{ t('common.save') }}
+          </button>
+        </div>
       </template>
 
       <template #table>
@@ -276,6 +325,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type {
+  UpstreamAccountRateGuardConfig,
   UpstreamAccountSyncItem,
   UpstreamAccountSyncRecord,
   UpstreamAccountSyncResult,
@@ -298,11 +348,18 @@ const appStore = useAppStore()
 const result = ref<UpstreamAccountSyncResult | null>(null)
 const loading = ref(false)
 const syncing = ref(false)
+const loadingRateGuardConfig = ref(false)
+const savingRateGuardConfig = ref(false)
 const loadError = ref('')
 const searchQuery = ref('')
 const providerFilter = ref('')
 const sourceFilter = ref('')
 const actionFilter = ref('')
+const rateGuardConfig = ref<UpstreamAccountRateGuardConfig | null>(null)
+const rateGuardForm = ref({
+  enabled: false,
+  interval_seconds: 3600
+})
 
 type UpstreamAccountSyncLogEntry = UpstreamAccountSyncUnbindDetail & {
   created_at: string
@@ -356,6 +413,12 @@ const syncProviderLabel = computed(() => {
 const syncProviderCode = computed(() => {
   if (syncProviders.value.length === 1) return syncProviders.value[0].slug
   return ''
+})
+const rateGuardLastRunText = computed(() => {
+  if (!rateGuardConfig.value?.last_run_at) {
+    return t('admin.upstreamAccounts.rateGuardNeverRun')
+  }
+  return formatDateTime(rateGuardConfig.value.last_run_at)
 })
 const providerOptions = computed<SelectOption[]>(() => [
   { value: '', label: t('admin.upstreamAccounts.allProviders') },
@@ -416,9 +479,15 @@ const emptyDescription = computed(() => {
 
 async function reload() {
   loading.value = true
+  loadingRateGuardConfig.value = true
   loadError.value = ''
   try {
-    result.value = await adminAPI.upstreamAccountSync.getPreview()
+    const [preview, config] = await Promise.all([
+      adminAPI.upstreamAccountSync.getPreview(),
+      adminAPI.upstreamAccountSync.getRateGuardConfig()
+    ])
+    result.value = preview
+    applyRateGuardConfig(config)
   } catch (err) {
     const message = extractApiErrorMessage(err, t('admin.upstreamAccounts.loadFailed'))
     loadError.value = message
@@ -426,6 +495,7 @@ async function reload() {
     appStore.showError(message)
   } finally {
     loading.value = false
+    loadingRateGuardConfig.value = false
   }
 }
 
@@ -453,6 +523,39 @@ async function runSync() {
     appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.syncFailed')))
   } finally {
     syncing.value = false
+  }
+}
+
+function applyRateGuardConfig(config: UpstreamAccountRateGuardConfig) {
+  rateGuardConfig.value = config
+  rateGuardForm.value = {
+    enabled: Boolean(config.enabled),
+    interval_seconds: Number(config.interval_seconds) > 0 ? Number(config.interval_seconds) : 3600
+  }
+}
+
+async function saveRateGuardConfig() {
+  if (!Number.isInteger(rateGuardForm.value.interval_seconds) || rateGuardForm.value.interval_seconds <= 0) {
+    appStore.showError(t('admin.upstreamAccounts.invalidRateGuardInterval'))
+    return
+  }
+  savingRateGuardConfig.value = true
+  try {
+    const base = rateGuardConfig.value || {
+      enabled: false,
+      interval_seconds: 3600
+    }
+    const config = await adminAPI.upstreamAccountSync.updateRateGuardConfig({
+      ...base,
+      enabled: rateGuardForm.value.enabled,
+      interval_seconds: rateGuardForm.value.interval_seconds
+    })
+    applyRateGuardConfig(config)
+    appStore.showSuccess(t('admin.upstreamAccounts.rateGuardSaved'))
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.rateGuardSaveFailed')))
+  } finally {
+    savingRateGuardConfig.value = false
   }
 }
 
@@ -548,6 +651,18 @@ onMounted(reload)
 
 .filtered-count strong {
   @apply font-mono text-base text-gray-900 dark:text-white;
+}
+
+.rate-guard-panel {
+  @apply mt-3 grid items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-dark-600 dark:bg-dark-800/40 lg:grid-cols-[minmax(16rem,1fr)_auto_auto_auto];
+}
+
+.guard-toggle {
+  @apply inline-flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200;
+}
+
+.guard-interval {
+  @apply flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300;
 }
 
 .table-main-cell {
