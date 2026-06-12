@@ -138,3 +138,69 @@ func TestUpstreamAccountRateGuardSchedulerRunDueReportsRunErrorAsExecuted(t *tes
 		t.Fatalf("run count = %d, want 1", stub.runs)
 	}
 }
+
+func TestUpstreamAccountRateGuardSchedulerKeepsLatestTenLogs(t *testing.T) {
+	stub := &upstreamAccountRateGuardSchedulerServiceStub{
+		config: UpstreamAccountRateGuardConfig{Enabled: true, IntervalSeconds: 1},
+	}
+	scheduler := NewUpstreamAccountRateGuardScheduler(stub)
+	now := time.Date(2026, 6, 11, 10, 0, 0, 0, time.UTC)
+
+	for i := 0; i < 12; i++ {
+		scheduler.runDue(context.Background(), now.Add(time.Duration(i)*time.Second))
+	}
+
+	logs := scheduler.ListPollLogs()
+	if len(logs) != 10 {
+		t.Fatalf("log count = %d, want latest 10", len(logs))
+	}
+	if !logs[0].CheckedAt.Equal(now.Add(11 * time.Second)) {
+		t.Fatalf("first log time = %s, want newest tick", logs[0].CheckedAt)
+	}
+	if !logs[9].CheckedAt.Equal(now.Add(2 * time.Second)) {
+		t.Fatalf("last log time = %s, want tenth newest tick", logs[9].CheckedAt)
+	}
+	for _, log := range logs {
+		if log.Status != "success" || log.Trigger != "scheduled" {
+			t.Fatalf("log = %+v, want scheduled success logs", log)
+		}
+	}
+}
+
+func TestUpstreamAccountRateGuardSchedulerRunNowUsesSameInFlightLock(t *testing.T) {
+	stub := &upstreamAccountRateGuardSchedulerServiceStub{
+		config:     UpstreamAccountRateGuardConfig{Enabled: true, IntervalSeconds: 1},
+		blockRun:   make(chan struct{}),
+		runStarted: make(chan struct{}, 2),
+	}
+	scheduler := NewUpstreamAccountRateGuardScheduler(stub)
+
+	done := make(chan bool, 1)
+	go func() {
+		done <- scheduler.runDue(context.Background(), time.Now())
+	}()
+	select {
+	case <-stub.runStarted:
+	case <-time.After(time.Second):
+		t.Fatalf("scheduled run did not start")
+	}
+
+	_, err := scheduler.RunNow(context.Background())
+	if err == nil {
+		close(stub.blockRun)
+		<-done
+		t.Fatalf("RunNow should reject while scheduled run is in flight")
+	}
+	logs := scheduler.ListPollLogs()
+	if len(logs) == 0 || logs[0].Status != "skipped" || logs[0].Trigger != "manual" {
+		close(stub.blockRun)
+		<-done
+		t.Fatalf("latest log = %+v, want manual skipped log before scheduled run completes", logs)
+	}
+	close(stub.blockRun)
+	<-done
+
+	if stub.runs != 1 {
+		t.Fatalf("run count = %d, want only scheduled run", stub.runs)
+	}
+}

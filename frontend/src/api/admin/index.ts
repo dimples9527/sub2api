@@ -135,6 +135,7 @@ export type {
 } from './upstreamManagement'
 export type {
   UpstreamAccountRateGuardConfig,
+  UpstreamAccountRateGuardPollLog,
   UpstreamAccountSyncItem,
   UpstreamAccountSyncRecord,
   UpstreamAccountSyncRequest,

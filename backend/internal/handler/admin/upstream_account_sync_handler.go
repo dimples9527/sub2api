@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -17,16 +18,26 @@ type upstreamAccountSyncService interface {
 	UpdateRateGuardConfig(ctx context.Context, input service.UpstreamAccountRateGuardConfig) (service.UpstreamAccountRateGuardConfig, error)
 }
 
-type UpstreamAccountSyncHandler struct {
-	service upstreamAccountSyncService
+type upstreamAccountRateGuardScheduler interface {
+	RunNow(ctx context.Context) (service.UpstreamAccountRateGuardConfig, error)
+	ListPollLogs() []service.UpstreamAccountRateGuardPollLog
 }
 
-func NewUpstreamAccountSyncHandler(service *service.UpstreamAccountSyncService) *UpstreamAccountSyncHandler {
-	return &UpstreamAccountSyncHandler{service: service}
+type UpstreamAccountSyncHandler struct {
+	service   upstreamAccountSyncService
+	scheduler upstreamAccountRateGuardScheduler
+}
+
+func NewUpstreamAccountSyncHandler(service *service.UpstreamAccountSyncService, scheduler *service.UpstreamAccountRateGuardScheduler) *UpstreamAccountSyncHandler {
+	return &UpstreamAccountSyncHandler{service: service, scheduler: scheduler}
 }
 
 func newUpstreamAccountSyncHandlerWithService(service upstreamAccountSyncService) *UpstreamAccountSyncHandler {
 	return &UpstreamAccountSyncHandler{service: service}
+}
+
+func newUpstreamAccountSyncHandlerWithDeps(service upstreamAccountSyncService, scheduler upstreamAccountRateGuardScheduler) *UpstreamAccountSyncHandler {
+	return &UpstreamAccountSyncHandler{service: service, scheduler: scheduler}
 }
 
 func (h *UpstreamAccountSyncHandler) Preview(c *gin.Context) {
@@ -88,4 +99,25 @@ func (h *UpstreamAccountSyncHandler) UpdateRateGuardConfig(c *gin.Context) {
 		return
 	}
 	response.Success(c, result)
+}
+
+func (h *UpstreamAccountSyncHandler) RunRateGuardNow(c *gin.Context) {
+	if h.scheduler == nil {
+		response.ErrorFrom(c, infraerrors.ServiceUnavailable("UPSTREAM_ACCOUNT_RATE_GUARD_UNAVAILABLE", "upstream account rate guard scheduler is unavailable"))
+		return
+	}
+	result, err := h.scheduler.RunNow(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *UpstreamAccountSyncHandler) RateGuardPollLogs(c *gin.Context) {
+	if h.scheduler == nil {
+		response.Success(c, []service.UpstreamAccountRateGuardPollLog{})
+		return
+	}
+	response.Success(c, h.scheduler.ListPollLogs())
 }

@@ -132,6 +132,15 @@
             <Icon name="cog" size="sm" class="mr-2" :class="savingRateGuardConfig ? 'animate-spin' : ''" />
             {{ t('common.save') }}
           </button>
+          <button
+            type="button"
+            class="btn btn-primary"
+            :disabled="loadingRateGuardConfig || savingRateGuardConfig || runningRateGuardNow"
+            @click="runRateGuardNow"
+          >
+            <Icon name="play" size="sm" class="mr-2" :class="runningRateGuardNow ? 'animate-pulse' : ''" />
+            {{ t('admin.upstreamAccounts.rateGuardRunNow') }}
+          </button>
         </div>
       </template>
 
@@ -257,6 +266,43 @@
         <div class="records-panel">
           <div class="records-header">
             <div>
+              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.upstreamAccounts.rateGuardPollLogs') }}</h3>
+              <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.upstreamAccounts.rateGuardPollLogsDescription') }}</span>
+            </div>
+            <div class="records-total">{{ rateGuardPollLogs.length }}</div>
+          </div>
+          <div class="max-h-72 overflow-auto">
+            <table class="w-full min-w-[860px] divide-y divide-gray-100 text-sm dark:divide-dark-700">
+              <thead class="bg-gray-50 dark:bg-dark-800">
+                <tr>
+                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.rateGuardPollTime') }}</th>
+                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.rateGuardPollTrigger') }}</th>
+                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.rateGuardPollStatus') }}</th>
+                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.rateGuardPollMessage') }}</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
+                <tr v-for="log in rateGuardPollLogs" :key="`${log.checked_at}-${log.trigger}-${log.status}-${log.message || ''}`" class="records-row">
+                  <td class="px-4 py-2 whitespace-nowrap">{{ formatDateTime(log.checked_at) }}</td>
+                  <td class="px-4 py-2">{{ rateGuardPollLogTriggerLabel(log) }}</td>
+                  <td class="px-4 py-2">
+                    <span :class="['record-status', rateGuardPollLogStatusClass(log)]">
+                      {{ rateGuardPollLogStatusLabel(log) }}
+                    </span>
+                  </td>
+                  <td class="px-4 py-2 text-gray-600 dark:text-gray-300">{{ log.message || '-' }}</td>
+                </tr>
+                <tr v-if="!rateGuardPollLogs.length">
+                  <td colspan="4" class="px-4 py-8 text-center text-gray-400">{{ t('admin.upstreamAccounts.noRateGuardPollLogs') }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="records-panel">
+          <div class="records-header">
+            <div>
               <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.upstreamAccounts.syncLogs') }}</h3>
               <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.upstreamAccounts.syncLogsDescription') }}</span>
             </div>
@@ -326,6 +372,7 @@ import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type {
   UpstreamAccountRateGuardConfig,
+  UpstreamAccountRateGuardPollLog,
   UpstreamAccountSyncItem,
   UpstreamAccountSyncRecord,
   UpstreamAccountSyncResult,
@@ -350,6 +397,7 @@ const loading = ref(false)
 const syncing = ref(false)
 const loadingRateGuardConfig = ref(false)
 const savingRateGuardConfig = ref(false)
+const runningRateGuardNow = ref(false)
 const loadError = ref('')
 const searchQuery = ref('')
 const providerFilter = ref('')
@@ -360,6 +408,7 @@ const rateGuardForm = ref({
   enabled: false,
   interval_seconds: 3600
 })
+const rateGuardPollLogs = ref<UpstreamAccountRateGuardPollLog[]>([])
 
 type UpstreamAccountSyncLogEntry = UpstreamAccountSyncUnbindDetail & {
   created_at: string
@@ -482,12 +531,14 @@ async function reload() {
   loadingRateGuardConfig.value = true
   loadError.value = ''
   try {
-    const [preview, config] = await Promise.all([
+    const [preview, config, pollLogs] = await Promise.all([
       adminAPI.upstreamAccountSync.getPreview(),
-      adminAPI.upstreamAccountSync.getRateGuardConfig()
+      adminAPI.upstreamAccountSync.getRateGuardConfig(),
+      adminAPI.upstreamAccountSync.getRateGuardPollLogs()
     ])
     result.value = preview
     applyRateGuardConfig(config)
+    rateGuardPollLogs.value = pollLogs
   } catch (err) {
     const message = extractApiErrorMessage(err, t('admin.upstreamAccounts.loadFailed'))
     loadError.value = message
@@ -559,9 +610,47 @@ async function saveRateGuardConfig() {
   }
 }
 
+async function runRateGuardNow() {
+  runningRateGuardNow.value = true
+  try {
+    const config = await adminAPI.upstreamAccountSync.runRateGuardNow()
+    applyRateGuardConfig(config)
+    const [pollLogs, preview] = await Promise.all([
+      adminAPI.upstreamAccountSync.getRateGuardPollLogs(),
+      adminAPI.upstreamAccountSync.getPreview()
+    ])
+    rateGuardPollLogs.value = pollLogs
+    result.value = preview
+    appStore.showSuccess(t('admin.upstreamAccounts.rateGuardRunSuccess'))
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.rateGuardRunFailed')))
+  } finally {
+    runningRateGuardNow.value = false
+  }
+}
+
 function formatRate(value: number | undefined) {
   const n = Number(value)
   return Number.isFinite(n) ? `${n.toFixed(2)}x` : '-'
+}
+
+function rateGuardPollLogTriggerLabel(log: UpstreamAccountRateGuardPollLog) {
+  if (log.trigger === 'scheduled') return t('admin.upstreamAccounts.rateGuardPollTriggerScheduled')
+  if (log.trigger === 'manual') return t('admin.upstreamAccounts.rateGuardPollTriggerManual')
+  return log.trigger || '-'
+}
+
+function rateGuardPollLogStatusLabel(log: UpstreamAccountRateGuardPollLog) {
+  if (log.status === 'success') return t('admin.upstreamAccounts.rateGuardPollStatusSuccess')
+  if (log.status === 'failed') return t('admin.upstreamAccounts.rateGuardPollStatusFailed')
+  if (log.status === 'skipped') return t('admin.upstreamAccounts.rateGuardPollStatusSkipped')
+  return log.status || '-'
+}
+
+function rateGuardPollLogStatusClass(log: UpstreamAccountRateGuardPollLog) {
+  if (log.status === 'success') return 'record-status-success'
+  if (log.status === 'failed') return 'record-status-error'
+  return 'record-status-muted'
 }
 
 function actionLabel(row: UpstreamAccountSyncItem) {
@@ -654,7 +743,7 @@ onMounted(reload)
 }
 
 .rate-guard-panel {
-  @apply mt-3 grid items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-dark-600 dark:bg-dark-800/40 lg:grid-cols-[minmax(16rem,1fr)_auto_auto_auto];
+  @apply mt-3 grid items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-dark-600 dark:bg-dark-800/40 lg:grid-cols-[minmax(16rem,1fr)_auto_auto_auto_auto];
 }
 
 .guard-toggle {
@@ -703,6 +792,10 @@ onMounted(reload)
 
 .record-status-error {
   @apply bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-200;
+}
+
+.record-status-muted {
+  @apply bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300;
 }
 
 .record-detail-list {

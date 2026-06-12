@@ -94,6 +94,13 @@ export interface UpstreamAccountRateGuardConfig {
   updated_at?: string
 }
 
+export interface UpstreamAccountRateGuardPollLog {
+  checked_at: string
+  trigger: 'scheduled' | 'manual' | string
+  status: 'success' | 'failed' | 'skipped' | string
+  message?: string
+}
+
 export async function getPreview(): Promise<UpstreamAccountSyncResult> {
   const { data } = await apiClient.get<UpstreamAccountSyncResult>(
     '/admin/upstream-management/accounts/sync-preview'
@@ -133,12 +140,28 @@ export async function updateRateGuardConfig(
   return data
 }
 
+export async function runRateGuardNow(): Promise<UpstreamAccountRateGuardConfig> {
+  const { data } = await apiClient.post<UpstreamAccountRateGuardConfig>(
+    '/admin/upstream-management/accounts/rate-guard-runs'
+  )
+  return data
+}
+
+export async function getRateGuardPollLogs(): Promise<UpstreamAccountRateGuardPollLog[]> {
+  const { data } = await apiClient.get<UpstreamAccountRateGuardPollLog[]>(
+    '/admin/upstream-management/accounts/rate-guard-poll-logs'
+  )
+  return data
+}
+
 export const upstreamAccountSyncAPI = {
   getPreview,
   runSync,
   getRecords,
   getRateGuardConfig,
-  updateRateGuardConfig
+  updateRateGuardConfig,
+  runRateGuardNow,
+  getRateGuardPollLogs
 }
 
 export default upstreamAccountSyncAPI
