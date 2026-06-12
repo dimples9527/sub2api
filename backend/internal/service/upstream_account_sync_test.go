@@ -196,8 +196,8 @@ func TestUpstreamAccountSyncPreviewDetectsDuplicateLocalAccountNames(t *testing.
 		provider,
 		[]Group{{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 1, Status: StatusActive}},
 		[]Account{
-			{ID: 1, Name: "up-alice", Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
-			{ID: 2, Name: " UP-ALICE ", Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
+			{ID: 1, Name: "up-alice", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Groups: []*Group{{ID: 7, Name: "VIP", RateMultiplier: 1}}},
+			{ID: 2, Name: " UP-ALICE ", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Groups: []*Group{{ID: 8, Name: "Trial", RateMultiplier: 0.5}}},
 		},
 		nil,
 	)
@@ -211,6 +211,16 @@ func TestUpstreamAccountSyncPreviewDetectsDuplicateLocalAccountNames(t *testing.
 	}
 	if len(result.Items[0].ConflictAccountIDs) != 2 {
 		t.Fatalf("conflict ids = %+v, want 2 ids", result.Items[0].ConflictAccountIDs)
+	}
+	conflicts := result.Items[0].ConflictAccounts
+	if len(conflicts) != 2 {
+		t.Fatalf("conflict accounts = %+v, want 2 accounts", conflicts)
+	}
+	if conflicts[0].ID != 1 || conflicts[0].Name != "up-alice" || len(conflicts[0].BoundGroups) != 1 || conflicts[0].BoundGroups[0].Name != "VIP" {
+		t.Fatalf("first conflict account = %+v, want up-alice with VIP", conflicts[0])
+	}
+	if conflicts[1].ID != 2 || conflicts[1].Name != " UP-ALICE " || len(conflicts[1].BoundGroups) != 1 || conflicts[1].BoundGroups[0].RateMultiplier != 0.5 {
+		t.Fatalf("second conflict account = %+v, want duplicate account with 0.5x group", conflicts[1])
 	}
 }
 

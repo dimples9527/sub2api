@@ -170,6 +170,19 @@
               <span v-if="row.matched_account_id" class="text-xs text-gray-500 dark:text-gray-400">
                 #{{ row.matched_account_id }} {{ row.matched_account_name }}
               </span>
+              <div v-else-if="row.conflict_accounts?.length" class="tag-list max-w-[24rem]">
+                <span
+                  v-for="account in row.conflict_accounts"
+                  :key="`${row.provider_slug}-${row.upstream_key_name}-conflict-${account.id}`"
+                  class="group-chip group-chip-warning"
+                  :title="conflictAccountTitle(account)"
+                >
+                  #{{ account.id }} {{ account.name }}
+                  <span v-if="account.bound_groups?.length" class="font-mono">
+                    {{ conflictAccountRates(account) }}
+                  </span>
+                </span>
+              </div>
               <span v-else-if="row.conflict_account_ids?.length" class="text-xs text-amber-600 dark:text-amber-300">
                 {{ t('admin.upstreamAccounts.conflictIds', { ids: row.conflict_account_ids.join(', ') }) }}
               </span>
@@ -377,6 +390,7 @@ import { adminAPI } from '@/api/admin'
 import type {
   UpstreamAccountRateGuardConfig,
   UpstreamAccountRateGuardPollLog,
+  UpstreamAccountSyncConflictAccount,
   UpstreamAccountSyncItem,
   UpstreamAccountSyncRecord,
   UpstreamAccountSyncResult,
@@ -636,6 +650,19 @@ async function runRateGuardNow() {
 function formatRate(value: number | undefined) {
   const n = Number(value)
   return Number.isFinite(n) ? `${n.toFixed(2)}x` : '-'
+}
+
+function conflictAccountRates(account: UpstreamAccountSyncConflictAccount) {
+  return (account.bound_groups || [])
+    .map(group => formatRate(group.rate_multiplier))
+    .join(' / ')
+}
+
+function conflictAccountTitle(account: UpstreamAccountSyncConflictAccount) {
+  const groups = (account.bound_groups || [])
+    .map(group => `${group.name} ${formatRate(group.rate_multiplier)}`)
+    .join(', ')
+  return groups ? `${account.name}: ${groups}` : account.name
 }
 
 function rateGuardPollLogTriggerLabel(log: UpstreamAccountRateGuardPollLog) {

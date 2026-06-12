@@ -64,24 +64,31 @@ type UpstreamAccountSyncSummary struct {
 }
 
 type UpstreamAccountSyncItem struct {
-	Action                 string                          `json:"action"`
-	ProviderSlug           string                          `json:"provider_slug"`
-	ProviderName           string                          `json:"provider_name"`
-	UpstreamKeyName        string                          `json:"upstream_key_name"`
-	LocalAccountName       string                          `json:"local_account_name"`
-	MatchedAccountID       *int64                          `json:"matched_account_id,omitempty"`
-	MatchedAccountName     string                          `json:"matched_account_name,omitempty"`
-	UpstreamGroupName      string                          `json:"upstream_group_name"`
-	UpstreamRateMultiplier float64                         `json:"upstream_rate_multiplier"`
-	LocalGroupID           *int64                          `json:"local_group_id,omitempty"`
-	LocalGroupName         string                          `json:"local_group_name,omitempty"`
-	LocalRateMultiplier    *float64                        `json:"local_rate_multiplier,omitempty"`
-	RateViolation          bool                            `json:"rate_violation"`
-	UnboundGroupIDs        []int64                         `json:"unbound_group_ids,omitempty"`
-	UnboundGroupNames      []string                        `json:"unbound_group_names,omitempty"`
-	SkipReason             string                          `json:"skip_reason,omitempty"`
-	ConflictAccountIDs     []int64                         `json:"conflict_account_ids,omitempty"`
-	BoundGroups            []UpstreamAccountSyncBoundGroup `json:"bound_groups,omitempty"`
+	Action                 string                               `json:"action"`
+	ProviderSlug           string                               `json:"provider_slug"`
+	ProviderName           string                               `json:"provider_name"`
+	UpstreamKeyName        string                               `json:"upstream_key_name"`
+	LocalAccountName       string                               `json:"local_account_name"`
+	MatchedAccountID       *int64                               `json:"matched_account_id,omitempty"`
+	MatchedAccountName     string                               `json:"matched_account_name,omitempty"`
+	UpstreamGroupName      string                               `json:"upstream_group_name"`
+	UpstreamRateMultiplier float64                              `json:"upstream_rate_multiplier"`
+	LocalGroupID           *int64                               `json:"local_group_id,omitempty"`
+	LocalGroupName         string                               `json:"local_group_name,omitempty"`
+	LocalRateMultiplier    *float64                             `json:"local_rate_multiplier,omitempty"`
+	RateViolation          bool                                 `json:"rate_violation"`
+	UnboundGroupIDs        []int64                              `json:"unbound_group_ids,omitempty"`
+	UnboundGroupNames      []string                             `json:"unbound_group_names,omitempty"`
+	SkipReason             string                               `json:"skip_reason,omitempty"`
+	ConflictAccountIDs     []int64                              `json:"conflict_account_ids,omitempty"`
+	ConflictAccounts       []UpstreamAccountSyncConflictAccount `json:"conflict_accounts,omitempty"`
+	BoundGroups            []UpstreamAccountSyncBoundGroup      `json:"bound_groups,omitempty"`
+}
+
+type UpstreamAccountSyncConflictAccount struct {
+	ID          int64                           `json:"id"`
+	Name        string                          `json:"name"`
+	BoundGroups []UpstreamAccountSyncBoundGroup `json:"bound_groups,omitempty"`
 }
 
 type UpstreamAccountSyncBoundGroup struct {
@@ -466,6 +473,7 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context) (UpstreamAccou
 			if len(matches) > 1 {
 				item.Action = UpstreamAccountSyncActionConflict
 				item.ConflictAccountIDs = accountIDs(matches)
+				item.ConflictAccounts = upstreamAccountSyncConflictAccounts(matches, item.UpstreamRateMultiplier)
 				result.Summary.ConflictCount++
 				result.Items = append(result.Items, item)
 				continue
@@ -786,6 +794,19 @@ func upstreamAccountSyncBoundGroups(account Account, upstreamRate float64) []Ups
 			Name:           group.Name,
 			RateMultiplier: group.RateMultiplier,
 			RateViolation:  upstreamRate-group.RateMultiplier > 0.0000001,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+func upstreamAccountSyncConflictAccounts(accounts []Account, upstreamRate float64) []UpstreamAccountSyncConflictAccount {
+	out := make([]UpstreamAccountSyncConflictAccount, 0, len(accounts))
+	for _, account := range accounts {
+		out = append(out, UpstreamAccountSyncConflictAccount{
+			ID:          account.ID,
+			Name:        account.Name,
+			BoundGroups: upstreamAccountSyncBoundGroups(account, upstreamRate),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })

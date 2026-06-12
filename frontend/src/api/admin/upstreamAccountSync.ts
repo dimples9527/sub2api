@@ -32,6 +32,13 @@ export interface UpstreamAccountSyncItem {
   unbound_group_names?: string[]
   skip_reason?: string
   conflict_account_ids?: number[]
+  conflict_accounts?: UpstreamAccountSyncConflictAccount[]
+  bound_groups?: UpstreamAccountSyncBoundGroup[]
+}
+
+export interface UpstreamAccountSyncConflictAccount {
+  id: number
+  name: string
   bound_groups?: UpstreamAccountSyncBoundGroup[]
 }
 
