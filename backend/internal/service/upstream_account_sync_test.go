@@ -224,6 +224,47 @@ func TestUpstreamAccountSyncPreviewDetectsDuplicateLocalAccountNames(t *testing.
 	}
 }
 
+func TestUpstreamAccountSyncPreviewMatchesPrefixedKeyNameIgnoringUnicodeSpacesAndCase(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup", BaseURL: "https://backup.example.com", AccountNamePrefix: "FindCG ", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {{ProviderSlug: "backup", KeyName: "Alice Key", GroupName: "VIP", RateMultiplier: 1}},
+		},
+	}
+	svc, _ := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 1, Status: StatusActive}},
+		[]Account{{
+			ID:          10,
+			Name:        " findcg\u3000ALICE key ",
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Credentials: map[string]any{"api_key": "Alice Key", "base_url": "https://backup.example.com"},
+			GroupIDs:    []int64{7},
+		}},
+		nil,
+	)
+
+	result, err := svc.Preview(context.Background())
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("item count = %d, want 1", len(result.Items))
+	}
+	item := result.Items[0]
+	if item.MatchedAccountID == nil || *item.MatchedAccountID != 10 {
+		t.Fatalf("matched account id = %v, want 10", item.MatchedAccountID)
+	}
+	if item.Action != UpstreamAccountSyncActionNoop {
+		t.Fatalf("action = %q, want noop", item.Action)
+	}
+}
+
 func TestUpstreamAccountSyncPreviewIncludesMatchedAccountBoundGroups(t *testing.T) {
 	provider := &upstreamAccountSyncProviderSourceStub{
 		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},

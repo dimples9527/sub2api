@@ -228,6 +228,70 @@
               </template>
             </DataTable>
           </div>
+
+          <div class="records-panel">
+            <div class="records-header">
+              <div>
+                <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.upstreamAccounts.syncLogs') }}</h3>
+                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.upstreamAccounts.syncLogsDescription') }}</span>
+              </div>
+              <div class="records-total">{{ syncLogEntries.length }}</div>
+            </div>
+            <div class="max-h-80 overflow-auto">
+              <table class="w-full min-w-[1080px] divide-y divide-gray-100 text-sm dark:divide-dark-700">
+                <thead class="bg-gray-50 dark:bg-dark-800">
+                  <tr>
+                    <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logTime') }}</th>
+                    <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logTriggerSource') }}</th>
+                    <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logAccount') }}</th>
+                    <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logUpstream') }}</th>
+                    <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logRateCompare') }}</th>
+                    <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logUnboundGroups') }}</th>
+                    <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logRemainingGroups') }}</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
+                  <tr v-for="entry in syncLogEntries" :key="entry.key" class="records-row">
+                    <td class="px-4 py-3 text-gray-600 dark:text-gray-300">{{ formatDateTime(entry.created_at) }}</td>
+                    <td class="px-4 py-3">{{ upstreamAccountSyncTriggerSourceLabel(entry.trigger_source) }}</td>
+                    <td class="px-4 py-3">
+                      <div class="table-main-cell min-w-[12rem]">
+                        <span class="font-medium text-gray-900 dark:text-white">{{ entry.matched_local_account_name }}</span>
+                        <code class="text-xs text-gray-500 dark:text-gray-400">#{{ entry.matched_local_account_id }}</code>
+                      </div>
+                    </td>
+                    <td class="px-4 py-3">
+                      <div class="table-main-cell min-w-[14rem]">
+                        <span class="font-medium text-gray-900 dark:text-white">{{ entry.upstream_key_name }}</span>
+                        <span class="text-xs text-gray-500 dark:text-gray-400">{{ entry.provider_name || entry.provider_slug }} / {{ entry.upstream_group_name }}</span>
+                      </div>
+                    </td>
+                    <td class="px-4 py-3">
+                      <div class="rate-compare">
+                        <span>{{ formatRate(entry.upstream_rate_multiplier) }}</span>
+                        <span class="text-gray-400">/</span>
+                        <span>{{ formatRate(entry.local_min_rate_multiplier) }}</span>
+                      </div>
+                    </td>
+                    <td class="px-4 py-3">
+                      <div class="tag-list">
+                        <span v-for="group in entry.unbound_group_names" :key="`${entry.key}-${group}`" class="log-chip log-chip-warning">{{ group }}</span>
+                      </div>
+                    </td>
+                    <td class="px-4 py-3">
+                      <div class="tag-list">
+                        <span v-if="!entry.remaining_group_ids.length" class="text-xs text-gray-400">-</span>
+                        <code v-for="groupID in entry.remaining_group_ids" :key="`${entry.key}-${groupID}`" class="log-chip">#{{ groupID }}</code>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr v-if="!syncLogEntries.length">
+                    <td colspan="7" class="px-4 py-8 text-center text-gray-400">{{ t('admin.upstreamAccounts.noSyncLogs') }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </template>
     </TablePageLayout>
@@ -242,7 +306,9 @@ import type {
   UpstreamAccountRateGuardConfig,
   UpstreamAccountSyncConflictAccount,
   UpstreamAccountSyncItem,
-  UpstreamAccountSyncResult
+  UpstreamAccountSyncRecord,
+  UpstreamAccountSyncResult,
+  UpstreamAccountSyncUnbindDetail
 } from '@/api/admin/upstreamAccountSync'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -275,6 +341,11 @@ const rateGuardForm = ref({
   interval_seconds: 3600
 })
 
+type UpstreamAccountSyncLogEntry = UpstreamAccountSyncUnbindDetail & {
+  created_at: string
+  key: string
+}
+
 const columns = computed<Column[]>(() => [
   { key: 'source', label: t('admin.upstreamAccounts.columns.source') },
   { key: 'upstream_key_name', label: t('admin.upstreamAccounts.columns.upstreamKey') },
@@ -298,6 +369,20 @@ const summary = computed(() => result.value?.summary || emptySummary)
 const syncProviders = computed(() => result.value?.providers || [])
 const items = computed<UpstreamAccountSyncItem[]>(() => result.value?.items || [])
 const warnings = computed(() => result.value?.warnings || [])
+const records = computed<UpstreamAccountSyncRecord[]>(() => result.value?.records || [])
+const syncLogEntries = computed<UpstreamAccountSyncLogEntry[]>(() => {
+  const entries: UpstreamAccountSyncLogEntry[] = []
+  for (const record of records.value) {
+    for (const detail of record.unbind_details || []) {
+      entries.push({
+        ...detail,
+        created_at: record.created_at,
+        key: `${record.created_at}-${detail.matched_local_account_id}-${detail.upstream_key_name}-${detail.unbound_group_ids.join('_')}`
+      })
+    }
+  }
+  return entries
+})
 const canSync = computed(() => summary.value.create_count > 0 || summary.value.update_count > 0 || summary.value.rate_violation_count > 0)
 const syncProviderLabel = computed(() => {
   if (syncProviders.value.length === 1) return syncProviders.value[0].name || syncProviders.value[0].slug
@@ -486,6 +571,12 @@ function conflictAccountTitle(account: UpstreamAccountSyncConflictAccount) {
   return groups ? `${account.name}: ${groups}` : account.name
 }
 
+function upstreamAccountSyncTriggerSourceLabel(triggerSource: string | undefined) {
+  if (triggerSource === 'scheduled_rate_guard') return t('admin.upstreamAccounts.triggerScheduledRateGuard')
+  if (triggerSource === 'manual_rate_guard') return t('admin.upstreamAccounts.triggerManualRateGuard')
+  return t('admin.upstreamAccounts.triggerManualSync')
+}
+
 onMounted(reload)
 </script>
 
@@ -584,6 +675,22 @@ onMounted(reload)
   @apply min-h-0;
 }
 
+.records-panel {
+  @apply mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-600 dark:bg-dark-800/30;
+}
+
+.records-header {
+  @apply flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-dark-600;
+}
+
+.records-total {
+  @apply flex h-8 min-w-8 items-center justify-center rounded-md bg-gray-100 px-2 font-mono text-sm font-semibold text-gray-700 dark:bg-dark-700 dark:text-gray-200;
+}
+
+.records-row {
+  @apply align-top;
+}
+
 .table-main-cell {
   @apply flex flex-col gap-1 leading-tight;
 }
@@ -604,6 +711,10 @@ onMounted(reload)
   @apply bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-200;
 }
 
+.rate-compare {
+  @apply inline-flex items-center gap-2 rounded-md bg-gray-100 px-2 py-1 font-mono text-sm font-semibold text-gray-900 dark:bg-dark-700 dark:text-white;
+}
+
 .tag-list {
   @apply flex max-w-[18rem] flex-wrap gap-1;
 }
@@ -614,6 +725,14 @@ onMounted(reload)
 
 .group-chip-warning {
   @apply bg-amber-50 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-900/20 dark:text-amber-200 dark:ring-amber-700/40;
+}
+
+.log-chip {
+  @apply inline-flex items-center rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700 dark:bg-dark-700 dark:text-gray-200;
+}
+
+.log-chip-warning {
+  @apply bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-200;
 }
 
 @media (max-width: 1023px) {

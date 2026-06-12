@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
@@ -884,8 +885,10 @@ func normalizeUpstreamGroupMatchName(name string) string {
 	var b strings.Builder
 	b.Grow(len(normalized))
 	for _, r := range normalized {
-		switch r {
-		case ' ', '\t', '\n', '\r', '_', '-':
+		switch {
+		case unicode.IsSpace(r):
+			continue
+		case r == '_' || r == '-':
 			continue
 		default:
 			b.WriteRune(r)
