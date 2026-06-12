@@ -408,6 +408,7 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context) (UpstreamAccou
 	if err != nil {
 		return UpstreamAccountSyncResult{}, upstreamAccountSyncPreviewState{}, err
 	}
+	accounts = hydrateUpstreamAccountSyncAccountGroups(accounts, localGroups)
 
 	accountsByName := upstreamAccountSyncAccountsByName(accounts)
 	accountByID := make(map[int64]Account, len(accounts))
@@ -743,6 +744,62 @@ func upstreamAccountSyncAccountsByName(accounts []Account) map[string][]Account 
 			continue
 		}
 		out[key] = append(out[key], account)
+	}
+	return out
+}
+
+func hydrateUpstreamAccountSyncAccountGroups(accounts []Account, groups []Group) []Account {
+	if len(accounts) == 0 || len(groups) == 0 {
+		return accounts
+	}
+	groupByID := make(map[int64]*Group, len(groups))
+	for i := range groups {
+		if groups[i].ID <= 0 {
+			continue
+		}
+		group := groups[i]
+		groupByID[group.ID] = &group
+	}
+	if len(groupByID) == 0 {
+		return accounts
+	}
+
+	out := make([]Account, len(accounts))
+	copy(out, accounts)
+	for i := range out {
+		if len(out[i].GroupIDs) == 0 {
+			continue
+		}
+		seen := make(map[int64]struct{}, len(out[i].Groups)+len(out[i].GroupIDs))
+		merged := make([]*Group, 0, len(out[i].Groups)+len(out[i].GroupIDs))
+		for _, group := range out[i].Groups {
+			if group == nil || group.ID <= 0 {
+				continue
+			}
+			if _, exists := seen[group.ID]; exists {
+				continue
+			}
+			seen[group.ID] = struct{}{}
+			merged = append(merged, group)
+		}
+		for _, groupID := range out[i].GroupIDs {
+			if groupID <= 0 {
+				continue
+			}
+			if _, exists := seen[groupID]; exists {
+				continue
+			}
+			group, exists := groupByID[groupID]
+			if !exists || group == nil {
+				continue
+			}
+			seen[groupID] = struct{}{}
+			merged = append(merged, group)
+		}
+		if len(merged) > 0 {
+			sort.Slice(merged, func(a, b int) bool { return merged[a].ID < merged[b].ID })
+			out[i].Groups = merged
+		}
 	}
 	return out
 }

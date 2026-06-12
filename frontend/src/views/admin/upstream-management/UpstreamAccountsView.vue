@@ -218,16 +218,6 @@
                 <span class="rate-value">{{ formatRate(value) }}</span>
               </template>
 
-              <template #cell-action="{ row }">
-                <div class="table-main-cell min-w-[12rem]">
-                  <span :class="['badge', actionClass(row)]">{{ actionLabel(row) }}</span>
-                  <span v-if="row.skip_reason" class="text-xs text-gray-500 dark:text-gray-400">{{ row.skip_reason }}</span>
-                  <span v-if="row.unbound_group_names?.length" class="inline-alert">
-                    {{ t('admin.upstreamAccounts.unbindGroups', { groups: row.unbound_group_names.join(', ') }) }}
-                  </span>
-                </div>
-              </template>
-
               <template #empty>
                 <EmptyState
                   :title="emptyTitle"
@@ -237,151 +227,6 @@
                 />
               </template>
             </DataTable>
-          </div>
-
-          <div class="accounts-records-stack">
-            <div class="records-panel">
-          <div class="records-header">
-            <div>
-              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.upstreamAccounts.syncRecords') }}</h3>
-              <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.upstreamAccounts.latestRecords') }}</span>
-            </div>
-            <div class="records-total">{{ records.length }}</div>
-          </div>
-          <div class="max-h-72 overflow-auto">
-            <table class="w-full min-w-[860px] divide-y divide-gray-100 text-sm dark:divide-dark-700">
-              <thead class="bg-gray-50 dark:bg-dark-800">
-                <tr>
-                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.recordTime') }}</th>
-                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.recordTriggerSource') }}</th>
-                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.provider') }}</th>
-                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.created') }}</th>
-                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.updated') }}</th>
-                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.unbound') }}</th>
-                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.status') }}</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
-                <tr v-for="record in records" :key="`${record.provider_slug}-${record.created_at}`" class="records-row">
-                  <td class="px-4 py-2">{{ formatDateTime(record.created_at) }}</td>
-                  <td class="px-4 py-2">{{ upstreamAccountSyncTriggerSourceLabel(record.trigger_source) }}</td>
-                  <td class="px-4 py-2">{{ syncRecordProviderLabel(record) }}</td>
-                  <td class="px-4 py-2 font-mono">{{ record.created_count }}</td>
-                  <td class="px-4 py-2 font-mono">{{ record.updated_count }}</td>
-                  <td class="px-4 py-2 font-mono">{{ record.unbound_group_count }}</td>
-                  <td class="px-4 py-2">
-                    <span v-if="record.error" class="record-status record-status-error">{{ record.error }}</span>
-                    <span v-else class="record-status record-status-success">{{ t('common.success') }}</span>
-                  </td>
-                </tr>
-                <tr v-if="!records.length">
-                  <td colspan="7" class="px-4 py-8 text-center text-gray-400">{{ t('admin.upstreamAccounts.noRecords') }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div class="records-panel">
-          <div class="records-header">
-            <div>
-              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.upstreamAccounts.rateGuardPollLogs') }}</h3>
-              <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.upstreamAccounts.rateGuardPollLogsDescription') }}</span>
-            </div>
-            <div class="records-total">{{ rateGuardPollLogs.length }}</div>
-          </div>
-          <div class="max-h-72 overflow-auto">
-            <table class="w-full min-w-[860px] divide-y divide-gray-100 text-sm dark:divide-dark-700">
-              <thead class="bg-gray-50 dark:bg-dark-800">
-                <tr>
-                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.rateGuardPollTime') }}</th>
-                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.rateGuardPollTrigger') }}</th>
-                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.rateGuardPollStatus') }}</th>
-                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.rateGuardPollMessage') }}</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
-                <tr v-for="log in rateGuardPollLogs" :key="`${log.checked_at}-${log.trigger}-${log.status}-${log.message || ''}`" class="records-row">
-                  <td class="px-4 py-2 whitespace-nowrap">{{ formatDateTime(log.checked_at) }}</td>
-                  <td class="px-4 py-2">{{ rateGuardPollLogTriggerLabel(log) }}</td>
-                  <td class="px-4 py-2">
-                    <span :class="['record-status', rateGuardPollLogStatusClass(log)]">
-                      {{ rateGuardPollLogStatusLabel(log) }}
-                    </span>
-                  </td>
-                  <td class="px-4 py-2 text-gray-600 dark:text-gray-300">{{ log.message || '-' }}</td>
-                </tr>
-                <tr v-if="!rateGuardPollLogs.length">
-                  <td colspan="4" class="px-4 py-8 text-center text-gray-400">{{ t('admin.upstreamAccounts.noRateGuardPollLogs') }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div class="records-panel">
-          <div class="records-header">
-            <div>
-              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.upstreamAccounts.syncLogs') }}</h3>
-              <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.upstreamAccounts.syncLogsDescription') }}</span>
-            </div>
-            <div class="records-total">{{ syncLogEntries.length }}</div>
-          </div>
-          <div class="max-h-80 overflow-auto">
-            <table class="w-full min-w-[1080px] divide-y divide-gray-100 text-sm dark:divide-dark-700">
-              <thead class="bg-gray-50 dark:bg-dark-800">
-                <tr>
-                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logTime') }}</th>
-                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logTriggerSource') }}</th>
-                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logAccount') }}</th>
-                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logUpstream') }}</th>
-                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logRateCompare') }}</th>
-                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logUnboundGroups') }}</th>
-                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logRemainingGroups') }}</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
-                <tr v-for="entry in syncLogEntries" :key="entry.key" class="records-row">
-                  <td class="px-4 py-3 text-gray-600 dark:text-gray-300">{{ formatDateTime(entry.created_at) }}</td>
-                  <td class="px-4 py-3">{{ upstreamAccountSyncTriggerSourceLabel(entry.trigger_source) }}</td>
-                  <td class="px-4 py-3">
-                    <div class="table-main-cell min-w-[12rem]">
-                      <span class="font-medium text-gray-900 dark:text-white">{{ entry.matched_local_account_name }}</span>
-                      <code class="text-xs text-gray-500 dark:text-gray-400">#{{ entry.matched_local_account_id }}</code>
-                    </div>
-                  </td>
-                  <td class="px-4 py-3">
-                    <div class="table-main-cell min-w-[14rem]">
-                      <span class="font-medium text-gray-900 dark:text-white">{{ entry.upstream_key_name }}</span>
-                      <span class="text-xs text-gray-500 dark:text-gray-400">{{ entry.provider_name || entry.provider_slug }} / {{ entry.upstream_group_name }}</span>
-                    </div>
-                  </td>
-                  <td class="px-4 py-3">
-                    <div class="rate-compare">
-                      <span>{{ formatRate(entry.upstream_rate_multiplier) }}</span>
-                      <span class="text-gray-400">/</span>
-                      <span>{{ formatRate(entry.local_min_rate_multiplier) }}</span>
-                    </div>
-                  </td>
-                  <td class="px-4 py-3">
-                    <div class="tag-list">
-                      <span v-for="group in entry.unbound_group_names" :key="`${entry.key}-${group}`" class="log-chip log-chip-warning">{{ group }}</span>
-                    </div>
-                  </td>
-                  <td class="px-4 py-3">
-                    <div class="tag-list">
-                      <span v-if="!entry.remaining_group_ids.length" class="text-xs text-gray-400">-</span>
-                      <code v-for="groupID in entry.remaining_group_ids" :key="`${entry.key}-${groupID}`" class="log-chip">#{{ groupID }}</code>
-                    </div>
-                  </td>
-                </tr>
-                <tr v-if="!syncLogEntries.length">
-                  <td colspan="7" class="px-4 py-8 text-center text-gray-400">{{ t('admin.upstreamAccounts.noSyncLogs') }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
           </div>
         </div>
       </template>
@@ -395,12 +240,9 @@ import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type {
   UpstreamAccountRateGuardConfig,
-  UpstreamAccountRateGuardPollLog,
   UpstreamAccountSyncConflictAccount,
   UpstreamAccountSyncItem,
-  UpstreamAccountSyncRecord,
-  UpstreamAccountSyncResult,
-  UpstreamAccountSyncUnbindDetail
+  UpstreamAccountSyncResult
 } from '@/api/admin/upstreamAccountSync'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -432,12 +274,6 @@ const rateGuardForm = ref({
   enabled: false,
   interval_seconds: 3600
 })
-const rateGuardPollLogs = ref<UpstreamAccountRateGuardPollLog[]>([])
-
-type UpstreamAccountSyncLogEntry = UpstreamAccountSyncUnbindDetail & {
-  created_at: string
-  key: string
-}
 
 const columns = computed<Column[]>(() => [
   { key: 'source', label: t('admin.upstreamAccounts.columns.source') },
@@ -445,7 +281,6 @@ const columns = computed<Column[]>(() => [
   { key: 'upstream_rate_multiplier', label: t('admin.upstreamAccounts.columns.upstreamRate') },
   { key: 'local_account_name', label: t('admin.upstreamAccounts.columns.localAccount') },
   { key: 'local_group_name', label: t('admin.upstreamAccounts.columns.boundGroups') },
-  { key: 'action', label: t('admin.upstreamAccounts.columns.action') },
 ])
 
 const emptySummary = {
@@ -463,20 +298,6 @@ const summary = computed(() => result.value?.summary || emptySummary)
 const syncProviders = computed(() => result.value?.providers || [])
 const items = computed<UpstreamAccountSyncItem[]>(() => result.value?.items || [])
 const warnings = computed(() => result.value?.warnings || [])
-const records = computed<UpstreamAccountSyncRecord[]>(() => result.value?.records || [])
-const syncLogEntries = computed<UpstreamAccountSyncLogEntry[]>(() => {
-  const entries: UpstreamAccountSyncLogEntry[] = []
-  for (const record of records.value) {
-    for (const detail of record.unbind_details || []) {
-      entries.push({
-        ...detail,
-        created_at: record.created_at,
-        key: `${record.created_at}-${detail.matched_local_account_id}-${detail.upstream_key_name}-${detail.unbound_group_ids.join('_')}`
-      })
-    }
-  }
-  return entries
-})
 const canSync = computed(() => summary.value.create_count > 0 || summary.value.update_count > 0 || summary.value.rate_violation_count > 0)
 const syncProviderLabel = computed(() => {
   if (syncProviders.value.length === 1) return syncProviders.value[0].name || syncProviders.value[0].slug
@@ -555,14 +376,12 @@ async function reload() {
   loadingRateGuardConfig.value = true
   loadError.value = ''
   try {
-    const [preview, config, pollLogs] = await Promise.all([
+    const [preview, config] = await Promise.all([
       adminAPI.upstreamAccountSync.getPreview(),
-      adminAPI.upstreamAccountSync.getRateGuardConfig(),
-      adminAPI.upstreamAccountSync.getRateGuardPollLogs()
+      adminAPI.upstreamAccountSync.getRateGuardConfig()
     ])
     result.value = preview
     applyRateGuardConfig(config)
-    rateGuardPollLogs.value = pollLogs
   } catch (err) {
     const message = extractApiErrorMessage(err, t('admin.upstreamAccounts.loadFailed'))
     loadError.value = message
@@ -639,11 +458,7 @@ async function runRateGuardNow() {
   try {
     const config = await adminAPI.upstreamAccountSync.runRateGuardNow()
     applyRateGuardConfig(config)
-    const [pollLogs, preview] = await Promise.all([
-      adminAPI.upstreamAccountSync.getRateGuardPollLogs(),
-      adminAPI.upstreamAccountSync.getPreview()
-    ])
-    rateGuardPollLogs.value = pollLogs
+    const preview = await adminAPI.upstreamAccountSync.getPreview()
     result.value = preview
     appStore.showSuccess(t('admin.upstreamAccounts.rateGuardRunSuccess'))
   } catch (err) {
@@ -669,53 +484,6 @@ function conflictAccountTitle(account: UpstreamAccountSyncConflictAccount) {
     .map(group => `${group.name} ${formatRate(group.rate_multiplier)}`)
     .join(', ')
   return groups ? `${account.name}: ${groups}` : account.name
-}
-
-function rateGuardPollLogTriggerLabel(log: UpstreamAccountRateGuardPollLog) {
-  if (log.trigger === 'scheduled') return t('admin.upstreamAccounts.rateGuardPollTriggerScheduled')
-  if (log.trigger === 'manual') return t('admin.upstreamAccounts.rateGuardPollTriggerManual')
-  return log.trigger || '-'
-}
-
-function rateGuardPollLogStatusLabel(log: UpstreamAccountRateGuardPollLog) {
-  if (log.status === 'success') return t('admin.upstreamAccounts.rateGuardPollStatusSuccess')
-  if (log.status === 'failed') return t('admin.upstreamAccounts.rateGuardPollStatusFailed')
-  if (log.status === 'skipped') return t('admin.upstreamAccounts.rateGuardPollStatusSkipped')
-  return log.status || '-'
-}
-
-function rateGuardPollLogStatusClass(log: UpstreamAccountRateGuardPollLog) {
-  if (log.status === 'success') return 'record-status-success'
-  if (log.status === 'failed') return 'record-status-error'
-  return 'record-status-muted'
-}
-
-function upstreamAccountSyncTriggerSourceLabel(triggerSource: string | undefined) {
-  if (triggerSource === 'scheduled_rate_guard') return t('admin.upstreamAccounts.triggerScheduledRateGuard')
-  if (triggerSource === 'manual_rate_guard') return t('admin.upstreamAccounts.triggerManualRateGuard')
-  return t('admin.upstreamAccounts.triggerManualSync')
-}
-
-function syncRecordProviderLabel(record: UpstreamAccountSyncRecord) {
-  if (record.provider_slug === 'multiple') return t('admin.upstreamAccounts.legacyMultipleProviders')
-  return record.provider_name || record.provider_slug
-}
-
-function actionLabel(row: UpstreamAccountSyncItem) {
-  if (row.action === 'create') return t('admin.upstreamAccounts.actions.create')
-  if (row.action === 'update') return t('admin.upstreamAccounts.actions.update')
-  if (row.action === 'noop') return t('admin.upstreamAccounts.actions.noop')
-  if (row.action === 'skip') return t('admin.upstreamAccounts.actions.skip')
-  if (row.action === 'conflict') return t('admin.upstreamAccounts.actions.conflict')
-  return row.action
-}
-
-function actionClass(row: UpstreamAccountSyncItem) {
-  if (row.action === 'create') return 'badge-primary'
-  if (row.action === 'update') return row.rate_violation ? 'badge-warning' : 'badge-success'
-  if (row.action === 'noop') return 'badge-gray'
-  if (row.action === 'conflict') return 'badge-warning'
-  return 'badge-gray'
 }
 
 onMounted(reload)
@@ -816,40 +584,12 @@ onMounted(reload)
   @apply min-h-0;
 }
 
-.accounts-records-stack {
-  @apply flex flex-none flex-col gap-4 pt-4;
-}
-
-.accounts-records-stack .records-panel {
-  @apply mt-0;
-}
-
 .table-main-cell {
   @apply flex flex-col gap-1 leading-tight;
 }
 
 .rate-value {
   @apply inline-flex rounded-md bg-gray-100 px-2 py-1 font-mono text-sm font-semibold text-gray-900 dark:bg-dark-700 dark:text-white;
-}
-
-.inline-alert {
-  @apply rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-200;
-}
-
-.records-panel {
-  @apply mt-6 overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-600 dark:bg-dark-800/30;
-}
-
-.records-header {
-  @apply flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-dark-600;
-}
-
-.records-total {
-  @apply flex h-8 min-w-8 items-center justify-center rounded-md bg-gray-100 px-2 font-mono text-sm font-semibold text-gray-700 dark:bg-dark-700 dark:text-gray-200;
-}
-
-.records-row {
-  @apply align-top;
 }
 
 .record-status {
@@ -864,22 +604,6 @@ onMounted(reload)
   @apply bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-200;
 }
 
-.record-status-muted {
-  @apply bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300;
-}
-
-.record-detail-list {
-  @apply mt-2 space-y-1 text-xs text-gray-500 dark:text-gray-400;
-}
-
-.record-detail-item {
-  @apply flex max-w-[22rem] items-center gap-1 truncate;
-}
-
-.rate-compare {
-  @apply inline-flex items-center gap-2 rounded-md bg-gray-100 px-2 py-1 font-mono text-sm font-semibold text-gray-900 dark:bg-dark-700 dark:text-white;
-}
-
 .tag-list {
   @apply flex max-w-[18rem] flex-wrap gap-1;
 }
@@ -890,14 +614,6 @@ onMounted(reload)
 
 .group-chip-warning {
   @apply bg-amber-50 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-900/20 dark:text-amber-200 dark:ring-amber-700/40;
-}
-
-.log-chip {
-  @apply inline-flex items-center rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700 dark:bg-dark-700 dark:text-gray-200;
-}
-
-.log-chip-warning {
-  @apply bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-200;
 }
 
 @media (max-width: 1023px) {

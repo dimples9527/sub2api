@@ -271,6 +271,52 @@ func TestUpstreamAccountSyncPreviewIncludesMatchedAccountBoundGroups(t *testing.
 	}
 }
 
+func TestUpstreamAccountSyncPreviewHydratesBoundGroupsFromGroupIDs(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup", AccountNamePrefix: "up-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {{ProviderSlug: "backup", KeyName: "alice", GroupName: "VIP", RateMultiplier: 2}},
+		},
+	}
+	svc, _ := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{
+			{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 2, Status: StatusActive},
+			{ID: 8, Name: "Trial", Platform: PlatformOpenAI, RateMultiplier: 0.5, Status: StatusActive},
+		},
+		[]Account{{
+			ID:       10,
+			Name:     "up-alice",
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeAPIKey,
+			GroupIDs: []int64{7, 8},
+		}},
+		nil,
+	)
+
+	result, err := svc.Preview(context.Background())
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("item count = %d, want 1", len(result.Items))
+	}
+	item := result.Items[0]
+	if !item.RateViolation || item.Action != UpstreamAccountSyncActionUpdate {
+		t.Fatalf("item = %+v, want update with rate violation", item)
+	}
+	if len(item.BoundGroups) != 2 {
+		t.Fatalf("bound groups = %+v, want hydrated VIP and Trial", item.BoundGroups)
+	}
+	if len(item.UnboundGroupIDs) != 1 || item.UnboundGroupIDs[0] != 8 {
+		t.Fatalf("unbound group ids = %+v, want [8]", item.UnboundGroupIDs)
+	}
+}
+
 func TestUpstreamAccountSyncRunCreatesUpdatesAndAppliesRateGuard(t *testing.T) {
 	provider := &upstreamAccountSyncProviderSourceStub{
 		defaultProvider: UpstreamProviderConfig{
