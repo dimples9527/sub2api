@@ -160,24 +160,35 @@
           <div class="accounts-table-primary">
             <DataTable :columns="columns" :data="filteredItems" :loading="loading">
               <template #cell-source="{ row }">
-                <div class="table-main-cell min-w-[11rem]">
-                  <span class="font-medium text-gray-900 dark:text-white">{{ row.provider_name || row.provider_slug }}</span>
-                  <code class="text-xs text-gray-500 dark:text-gray-400">{{ row.provider_slug }}</code>
+                <div :class="['source-card min-w-[12rem]', sourceCardClass(row)]">
+                  <span class="font-semibold text-gray-950 dark:text-white">{{ row.provider_name || row.provider_slug }}</span>
+                  <code class="table-tag tag-provider">{{ row.provider_slug }}</code>
                 </div>
               </template>
 
               <template #cell-upstream_key_name="{ row }">
-                <div class="table-main-cell min-w-[14rem]">
-                  <span class="font-medium text-gray-900 dark:text-white">{{ row.upstream_key_name }}</span>
-                  <span class="text-xs text-gray-500 dark:text-gray-400">{{ row.upstream_group_name }}</span>
+                <div class="key-card min-w-[15rem]">
+                  <span class="font-semibold text-gray-950 dark:text-white">{{ row.upstream_key_name }}</span>
+                  <div class="tag-list max-w-[20rem]">
+                    <span class="table-tag tag-group">{{ row.upstream_group_name }}</span>
+                    <span v-if="row.rate_violation" class="table-tag tag-warning">
+                      {{ t('admin.upstreamAccounts.rateRisks') }}
+                    </span>
+                  </div>
                 </div>
               </template>
 
+              <template #cell-action="{ row }">
+                <span :class="['action-chip', actionClass(row)]">
+                  {{ actionLabel(row.action) }}
+                </span>
+              </template>
+
               <template #cell-local_account_name="{ row }">
-                <div class="table-main-cell min-w-[14rem]">
-                  <span class="font-medium text-gray-900 dark:text-white">{{ row.local_account_name || '-' }}</span>
+                <div :class="['account-card min-w-[14rem]', accountCardClass(row)]">
+                  <span class="font-semibold text-gray-950 dark:text-white">{{ row.local_account_name || '-' }}</span>
                   <span v-if="row.matched_account_id" class="text-xs text-gray-500 dark:text-gray-400">
-                    #{{ row.matched_account_id }} {{ row.matched_account_name }}
+                    <span class="table-tag tag-account">#{{ row.matched_account_id }} {{ row.matched_account_name }}</span>
                   </span>
                   <div v-else-if="row.conflict_accounts?.length" class="tag-list max-w-[24rem]">
                     <span
@@ -202,10 +213,9 @@
                 <div class="table-main-cell min-w-[16rem]">
                   <div v-if="row.bound_groups?.length" class="tag-list max-w-[22rem]">
                     <span
-                      v-for="group in row.bound_groups"
+                      v-for="(group, index) in row.bound_groups"
                       :key="`${row.provider_slug}-${row.upstream_key_name}-${group.id}`"
-                      class="group-chip"
-                      :class="group.rate_violation ? 'group-chip-warning' : ''"
+                      :class="['group-chip', groupChipClass(group.rate_violation, index)]"
                       :title="`${group.name} ${formatRate(group.rate_multiplier)}`"
                     >
                       {{ group.name }}
@@ -222,7 +232,7 @@
               </template>
 
               <template #cell-upstream_rate_multiplier="{ value }">
-                <span class="rate-value">{{ formatRate(value) }}</span>
+                <span :class="['rate-value', rateToneClass(value)]">{{ formatRate(value) }}</span>
               </template>
 
               <template #empty>
@@ -246,7 +256,7 @@
             </div>
             <div class="max-h-80 overflow-auto">
               <table class="records-table min-w-[1080px]">
-                <thead class="bg-gray-50 dark:bg-dark-800">
+                <thead class="bg-primary-50/80 dark:bg-primary-950/30">
                   <tr>
                     <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logTime') }}</th>
                     <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logTriggerSource') }}</th>
@@ -260,24 +270,31 @@
                 <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
                   <tr v-for="entry in syncLogEntries" :key="entry.key" class="records-row">
                     <td class="px-4 py-3 text-gray-600 dark:text-gray-300">{{ formatDateTime(entry.created_at) }}</td>
-                    <td class="px-4 py-3">{{ upstreamAccountSyncTriggerSourceLabel(entry.trigger_source) }}</td>
+                    <td class="px-4 py-3">
+                      <span :class="['trigger-chip', triggerClass(entry.trigger_source)]">
+                        {{ upstreamAccountSyncTriggerSourceLabel(entry.trigger_source) }}
+                      </span>
+                    </td>
                     <td class="px-4 py-3">
                       <div class="table-main-cell min-w-[12rem]">
                         <span class="font-medium text-gray-900 dark:text-white">{{ entry.matched_local_account_name }}</span>
-                        <code class="text-xs text-gray-500 dark:text-gray-400">#{{ entry.matched_local_account_id }}</code>
+                        <code class="table-tag tag-account">#{{ entry.matched_local_account_id }}</code>
                       </div>
                     </td>
                     <td class="px-4 py-3">
                       <div class="table-main-cell min-w-[14rem]">
                         <span class="font-medium text-gray-900 dark:text-white">{{ entry.upstream_key_name }}</span>
-                        <span class="text-xs text-gray-500 dark:text-gray-400">{{ entry.provider_name || entry.provider_slug }} / {{ entry.upstream_group_name }}</span>
+                        <div class="tag-list max-w-[22rem]">
+                          <span class="table-tag tag-provider">{{ entry.provider_name || entry.provider_slug }}</span>
+                          <span class="table-tag tag-group">{{ entry.upstream_group_name }}</span>
+                        </div>
                       </div>
                     </td>
                     <td class="px-4 py-3">
                       <div class="rate-compare">
-                        <span>{{ formatRate(entry.upstream_rate_multiplier) }}</span>
+                        <span class="rate-compare-upstream">{{ formatRate(entry.upstream_rate_multiplier) }}</span>
                         <span class="text-gray-400">/</span>
-                        <span>{{ formatRate(entry.local_min_rate_multiplier) }}</span>
+                        <span class="rate-compare-local">{{ formatRate(entry.local_min_rate_multiplier) }}</span>
                       </div>
                     </td>
                     <td class="px-4 py-3">
@@ -357,6 +374,7 @@ const columns = computed<Column[]>(() => [
   { key: 'source', label: t('admin.upstreamAccounts.columns.source') },
   { key: 'upstream_key_name', label: t('admin.upstreamAccounts.columns.upstreamKey') },
   { key: 'upstream_rate_multiplier', label: t('admin.upstreamAccounts.columns.upstreamRate') },
+  { key: 'action', label: t('admin.upstreamAccounts.columns.action') },
   { key: 'local_account_name', label: t('admin.upstreamAccounts.columns.localAccount') },
   { key: 'local_group_name', label: t('admin.upstreamAccounts.columns.boundGroups') },
 ])
@@ -565,6 +583,61 @@ function formatRate(value: number | undefined) {
   return Number.isFinite(n) ? `${n.toFixed(2)}x` : '-'
 }
 
+function actionLabel(action: string | undefined) {
+  if (!action) return '-'
+  const labels: Record<string, string> = {
+    create: t('admin.upstreamAccounts.actions.create'),
+    update: t('admin.upstreamAccounts.actions.update'),
+    noop: t('admin.upstreamAccounts.actions.noop'),
+    skip: t('admin.upstreamAccounts.actions.skip'),
+    conflict: t('admin.upstreamAccounts.actions.conflict')
+  }
+  return labels[action] || action
+}
+
+function actionClass(row: UpstreamAccountSyncItem) {
+  if (row.rate_violation) return 'action-warning'
+  if (row.action === 'create') return 'action-create'
+  if (row.action === 'update') return 'action-update'
+  if (row.action === 'conflict') return 'action-danger'
+  if (row.action === 'skip') return 'action-muted'
+  return 'action-stable'
+}
+
+function sourceCardClass(row: UpstreamAccountSyncItem) {
+  if (row.rate_violation) return 'source-card-warning'
+  if (row.action === 'create') return 'source-card-create'
+  if (row.action === 'update') return 'source-card-update'
+  return 'source-card-stable'
+}
+
+function accountCardClass(row: UpstreamAccountSyncItem) {
+  if (row.conflict_accounts?.length || row.conflict_account_ids?.length) return 'account-card-conflict'
+  if (!row.matched_account_id) return 'account-card-new'
+  if (row.rate_violation) return 'account-card-warning'
+  return 'account-card-matched'
+}
+
+function groupChipClass(rateViolation: boolean, index: number) {
+  if (rateViolation) return 'group-chip-warning'
+  const tones = ['group-chip-blue', 'group-chip-emerald', 'group-chip-violet', 'group-chip-cyan']
+  return tones[index % tones.length]
+}
+
+function rateToneClass(value: number | undefined) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return ''
+  if (n >= 2) return 'rate-purple'
+  if (n > 1) return 'rate-primary'
+  return 'rate-success'
+}
+
+function triggerClass(triggerSource: string | undefined) {
+  if (triggerSource === 'scheduled_rate_guard') return 'trigger-scheduled'
+  if (triggerSource === 'manual_rate_guard') return 'trigger-guard'
+  return 'trigger-sync'
+}
+
 function conflictAccountRates(account: UpstreamAccountSyncConflictAccount) {
   return (account.bound_groups || [])
     .map(group => formatRate(group.rate_multiplier))
@@ -722,8 +795,96 @@ onMounted(reload)
   @apply flex flex-col gap-1 leading-tight;
 }
 
+.source-card,
+.key-card,
+.account-card {
+  @apply flex flex-col gap-2 rounded-md border px-3 py-2 leading-tight;
+}
+
+.source-card-create,
+.account-card-new {
+  @apply border-sky-200 bg-sky-50/70 dark:border-sky-800/50 dark:bg-sky-950/25;
+}
+
+.source-card-update,
+.account-card-matched {
+  @apply border-emerald-200 bg-emerald-50/70 dark:border-emerald-800/50 dark:bg-emerald-950/25;
+}
+
+.source-card-warning,
+.account-card-warning {
+  @apply border-amber-200 bg-amber-50/80 dark:border-amber-700/40 dark:bg-amber-950/25;
+}
+
+.source-card-stable,
+.account-card-conflict {
+  @apply border-violet-200 bg-violet-50/70 dark:border-violet-800/50 dark:bg-violet-950/25;
+}
+
+.key-card {
+  @apply border-primary-100 bg-primary-50/60 dark:border-primary-800/40 dark:bg-primary-950/20;
+}
+
+.table-tag {
+  @apply inline-flex max-w-full items-center gap-1 truncate rounded-md px-2 py-1 text-xs font-semibold ring-1;
+}
+
+.tag-provider {
+  @apply bg-sky-50 text-sky-700 ring-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:ring-sky-800/60;
+}
+
+.tag-group {
+  @apply bg-primary-50 text-primary-700 ring-primary-200 dark:bg-primary-950/40 dark:text-primary-300 dark:ring-primary-800/60;
+}
+
+.tag-warning {
+  @apply bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-800/60;
+}
+
+.tag-account {
+  @apply bg-indigo-50 font-mono text-indigo-700 ring-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 dark:ring-indigo-800/60;
+}
+
+.action-chip,
+.trigger-chip {
+  @apply inline-flex rounded-full px-2.5 py-1 text-xs font-bold ring-1;
+}
+
+.action-create {
+  @apply bg-sky-100 text-sky-800 ring-sky-200 dark:bg-sky-950/40 dark:text-sky-200 dark:ring-sky-800/60;
+}
+
+.action-update,
+.action-stable {
+  @apply bg-emerald-100 text-emerald-800 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-200 dark:ring-emerald-800/60;
+}
+
+.action-warning {
+  @apply bg-amber-100 text-amber-800 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-800/60;
+}
+
+.action-danger {
+  @apply bg-red-100 text-red-800 ring-red-200 dark:bg-red-950/40 dark:text-red-200 dark:ring-red-800/60;
+}
+
+.action-muted {
+  @apply bg-slate-100 text-slate-600 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700;
+}
+
 .rate-value {
-  @apply inline-flex rounded-md bg-gray-100 px-2 py-1 font-mono text-sm font-semibold text-gray-900 dark:bg-dark-700 dark:text-white;
+  @apply inline-flex rounded-md px-2 py-1 font-mono text-sm font-semibold ring-1;
+}
+
+.rate-success {
+  @apply bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:ring-emerald-800/60;
+}
+
+.rate-primary {
+  @apply bg-primary-50 text-primary-700 ring-primary-200 dark:bg-primary-950/30 dark:text-primary-300 dark:ring-primary-800/60;
+}
+
+.rate-purple {
+  @apply bg-violet-50 text-violet-700 ring-violet-200 dark:bg-violet-950/30 dark:text-violet-300 dark:ring-violet-800/60;
 }
 
 .record-status {
@@ -739,19 +900,55 @@ onMounted(reload)
 }
 
 .rate-compare {
-  @apply inline-flex items-center gap-2 rounded-md bg-gray-100 px-2 py-1 font-mono text-sm font-semibold text-gray-900 dark:bg-dark-700 dark:text-white;
+  @apply inline-flex items-center gap-2 rounded-md bg-slate-100 px-2 py-1 font-mono text-sm font-semibold ring-1 ring-slate-200 dark:bg-slate-900/60 dark:ring-slate-700;
+}
+
+.rate-compare-upstream {
+  @apply text-amber-700 dark:text-amber-300;
+}
+
+.rate-compare-local {
+  @apply text-emerald-700 dark:text-emerald-300;
 }
 
 .tag-list {
-  @apply flex max-w-[18rem] flex-wrap gap-1;
+  @apply flex max-w-[18rem] flex-wrap gap-1.5;
 }
 
 .group-chip {
-  @apply inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700 dark:bg-dark-700 dark:text-gray-200;
+  @apply inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold ring-1;
+}
+
+.group-chip-blue {
+  @apply bg-sky-50 text-sky-700 ring-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:ring-sky-800/60;
+}
+
+.group-chip-emerald {
+  @apply bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-800/60;
+}
+
+.group-chip-violet {
+  @apply bg-violet-50 text-violet-700 ring-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:ring-violet-800/60;
+}
+
+.group-chip-cyan {
+  @apply bg-cyan-50 text-cyan-700 ring-cyan-200 dark:bg-cyan-950/40 dark:text-cyan-300 dark:ring-cyan-800/60;
 }
 
 .group-chip-warning {
   @apply bg-amber-50 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-900/20 dark:text-amber-200 dark:ring-amber-700/40;
+}
+
+.trigger-sync {
+  @apply bg-primary-50 text-primary-700 ring-primary-200 dark:bg-primary-950/40 dark:text-primary-300 dark:ring-primary-800/60;
+}
+
+.trigger-scheduled {
+  @apply bg-violet-50 text-violet-700 ring-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:ring-violet-800/60;
+}
+
+.trigger-guard {
+  @apply bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-800/60;
 }
 
 .log-chip {

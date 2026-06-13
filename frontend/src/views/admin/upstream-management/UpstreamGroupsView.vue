@@ -121,16 +121,22 @@
           <div class="groups-table-primary">
             <DataTable :columns="columns" :data="filteredItems" :loading="loading">
               <template #cell-upstream_group_name="{ row }">
-                <div class="table-main-cell min-w-[12rem]">
-                  <span class="font-medium text-gray-900 dark:text-white">{{ row.upstream_group_name }}</span>
-                  <span class="text-xs text-gray-500 dark:text-gray-400">
-                    {{ t('admin.upstreamGroups.keyCount', { count: row.upstream_key_count }) }}
-                  </span>
+                <div :class="['group-name-card min-w-[14rem]', groupToneClass(row)]">
+                  <div class="flex min-w-0 items-center gap-2">
+                    <span class="truncate font-semibold text-gray-950 dark:text-white">{{ row.upstream_group_name }}</span>
+                    <span class="table-tag tag-provider">{{ row.provider_name || row.provider_slug }}</span>
+                  </div>
+                  <div class="tag-list">
+                    <span class="table-tag tag-count">
+                      {{ t('admin.upstreamGroups.keyCount', { count: row.upstream_key_count }) }}
+                    </span>
+                    <code class="table-tag tag-code">{{ row.upstream_group_key }}</code>
+                  </div>
                 </div>
               </template>
 
               <template #cell-upstream_rate="{ value }">
-                <span class="rate-value">{{ formatRate(value) }}</span>
+                <span :class="['rate-value', rateToneClass(value)]">{{ formatRate(value) }}</span>
               </template>
 
               <template #cell-monitor_trend="{ row }">
@@ -145,11 +151,11 @@
               </template>
 
               <template #cell-local_group_name="{ row }">
-                <div class="table-main-cell min-w-[16rem]">
+                <div :class="['local-match-card min-w-[16rem]', localMatchClass(row)]">
                   <template v-if="row.matched">
                     <div class="flex flex-wrap items-center gap-2">
-                      <span class="font-medium text-gray-900 dark:text-white">{{ row.local_group_name }}</span>
-                      <code class="text-xs text-gray-500 dark:text-gray-400">#{{ row.local_group_id }}</code>
+                      <span class="font-semibold text-gray-950 dark:text-white">{{ row.local_group_name }}</span>
+                      <code class="table-tag tag-id">#{{ row.local_group_id }}</code>
                     </div>
                     <div class="flex flex-wrap items-center gap-2 text-xs">
                       <span :class="['badge', row.match_source === 'manual' ? 'badge-primary' : 'badge-gray']">
@@ -163,21 +169,27 @@
                       </span>
                     </div>
                   </template>
-                  <div v-else class="text-sm text-gray-400">
-                    {{ t('admin.upstreamGroups.notMatched') }}
+                  <div v-else class="flex flex-wrap items-center gap-2">
+                    <span class="table-tag tag-missing">
+                      {{ t('admin.upstreamGroups.notMatched') }}
+                    </span>
+                    <code class="table-tag tag-code">{{ row.upstream_group_key }}</code>
                   </div>
                 </div>
               </template>
 
               <template #cell-local_rate="{ row }">
-                <span v-if="row.local_rate !== undefined" class="rate-value">
+                <span
+                  v-if="row.local_rate !== undefined"
+                  :class="['rate-value', row.needs_rate_increase ? 'rate-warning' : 'rate-success']"
+                >
                   {{ formatRate(row.local_rate) }}
                 </span>
-                <span v-else class="text-sm text-gray-400">-</span>
+                <span v-else class="table-tag tag-missing">-</span>
               </template>
 
               <template #cell-status="{ row }">
-                <span :class="['badge', statusClass(row)]">{{ statusLabel(row) }}</span>
+                <span :class="['status-chip', statusClass(row)]">{{ statusLabel(row) }}</span>
               </template>
 
               <template #cell-action="{ row }">
@@ -191,7 +203,7 @@
                   <Icon name="sync" size="sm" class="mr-1" :class="syncingGroupKey === row.upstream_group_key ? 'animate-spin' : ''" />
                   {{ t('admin.upstreamGroups.syncLocalGroup') }}
                 </button>
-                <span v-else class="text-xs font-medium text-gray-400 dark:text-gray-500">
+                <span v-else class="table-tag tag-done">
                   {{ t('admin.upstreamGroups.noActionNeeded') }}
                 </span>
               </template>
@@ -217,7 +229,7 @@
             </div>
             <div class="max-h-72 overflow-auto">
               <table class="records-table">
-              <thead class="bg-gray-50 dark:bg-dark-800">
+              <thead class="bg-primary-50/80 dark:bg-primary-950/30">
                 <tr>
                   <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamGroups.localGroup') }}</th>
                   <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamGroups.upstreamGroup') }}</th>
@@ -228,11 +240,19 @@
               </thead>
               <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
                 <tr v-for="record in records" :key="`${record.group_id}-${record.changed_at}`">
-                  <td class="px-4 py-2">{{ record.group_name }}</td>
-                  <td class="px-4 py-2">{{ record.upstream_group_name }}</td>
-                  <td class="px-4 py-2 font-mono">{{ formatRate(record.old_rate) }}</td>
-                  <td class="px-4 py-2 font-mono">{{ formatRate(record.new_rate) }}</td>
-                  <td class="px-4 py-2">{{ formatDateTime(record.changed_at) }}</td>
+                  <td class="px-4 py-2">
+                    <span class="table-tag tag-local">{{ record.group_name }}</span>
+                  </td>
+                  <td class="px-4 py-2">
+                    <span class="table-tag tag-provider">{{ record.upstream_group_name }}</span>
+                  </td>
+                  <td class="px-4 py-2">
+                    <span class="rate-value rate-warning">{{ formatRate(record.old_rate) }}</span>
+                  </td>
+                  <td class="px-4 py-2">
+                    <span class="rate-value rate-success">{{ formatRate(record.new_rate) }}</span>
+                  </td>
+                  <td class="px-4 py-2 text-gray-600 dark:text-gray-300">{{ formatDateTime(record.changed_at) }}</td>
                 </tr>
                 <tr v-if="!records.length">
                   <td colspan="5" class="px-4 py-8 text-center text-gray-400">{{ t('admin.upstreamGroups.noRecords') }}</td>
@@ -557,10 +577,30 @@ function matchSourceLabel(row: UpstreamGroupComparison) {
   return t('admin.upstreamGroups.nameMatched')
 }
 
+function groupToneClass(row: UpstreamGroupComparison) {
+  if (!row.matched) return 'group-name-card-missing'
+  if (row.needs_rate_increase) return 'group-name-card-warning'
+  return 'group-name-card-success'
+}
+
+function localMatchClass(row: UpstreamGroupComparison) {
+  if (!row.matched) return 'local-match-missing'
+  if (row.needs_rate_increase) return 'local-match-warning'
+  return 'local-match-success'
+}
+
+function rateToneClass(value: number | undefined) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return ''
+  if (n >= 2) return 'rate-purple'
+  if (n > 1) return 'rate-primary'
+  return 'rate-success'
+}
+
 function statusClass(row: UpstreamGroupComparison) {
-  if (!row.matched) return 'badge-gray'
-  if (row.needs_rate_increase) return 'badge-warning'
-  return 'badge-success'
+  if (!row.matched) return 'status-muted'
+  if (row.needs_rate_increase) return 'status-warning'
+  return 'status-success'
 }
 
 function statusLabel(row: UpstreamGroupComparison) {
@@ -663,8 +703,93 @@ onMounted(reload)
   @apply flex flex-col gap-1 leading-tight;
 }
 
+.group-name-card,
+.local-match-card {
+  @apply flex flex-col gap-2 rounded-md border px-3 py-2 leading-tight;
+}
+
+.group-name-card-success,
+.local-match-success {
+  @apply border-emerald-100 bg-emerald-50/60 dark:border-emerald-800/40 dark:bg-emerald-950/20;
+}
+
+.group-name-card-warning,
+.local-match-warning {
+  @apply border-amber-200 bg-amber-50/80 dark:border-amber-700/40 dark:bg-amber-950/20;
+}
+
+.group-name-card-missing,
+.local-match-missing {
+  @apply border-slate-200 bg-slate-50 dark:border-slate-700/60 dark:bg-slate-900/40;
+}
+
+.tag-list {
+  @apply flex max-w-full flex-wrap gap-1.5;
+}
+
+.table-tag {
+  @apply inline-flex max-w-full items-center gap-1 truncate rounded-md px-2 py-1 text-xs font-semibold ring-1;
+}
+
+.tag-provider {
+  @apply bg-sky-50 text-sky-700 ring-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:ring-sky-800/60;
+}
+
+.tag-count {
+  @apply bg-primary-50 text-primary-700 ring-primary-200 dark:bg-primary-950/40 dark:text-primary-300 dark:ring-primary-800/60;
+}
+
+.tag-code,
+.tag-id {
+  @apply bg-violet-50 font-mono text-violet-700 ring-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:ring-violet-800/60;
+}
+
+.tag-missing {
+  @apply bg-slate-100 text-slate-600 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700;
+}
+
+.tag-done {
+  @apply bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:ring-emerald-800/50;
+}
+
+.tag-local {
+  @apply bg-indigo-50 text-indigo-700 ring-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 dark:ring-indigo-800/60;
+}
+
 .rate-value {
-  @apply inline-flex rounded-md bg-gray-100 px-2 py-1 font-mono text-sm font-semibold text-gray-900 dark:bg-dark-700 dark:text-white;
+  @apply inline-flex rounded-md px-2 py-1 font-mono text-sm font-semibold ring-1;
+}
+
+.rate-success {
+  @apply bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:ring-emerald-800/60;
+}
+
+.rate-primary {
+  @apply bg-primary-50 text-primary-700 ring-primary-200 dark:bg-primary-950/30 dark:text-primary-300 dark:ring-primary-800/60;
+}
+
+.rate-purple {
+  @apply bg-violet-50 text-violet-700 ring-violet-200 dark:bg-violet-950/30 dark:text-violet-300 dark:ring-violet-800/60;
+}
+
+.rate-warning {
+  @apply bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:ring-amber-800/60;
+}
+
+.status-chip {
+  @apply inline-flex rounded-full px-2.5 py-1 text-xs font-bold ring-1;
+}
+
+.status-success {
+  @apply bg-emerald-100 text-emerald-800 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-200 dark:ring-emerald-800/60;
+}
+
+.status-warning {
+  @apply bg-amber-100 text-amber-800 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-800/60;
+}
+
+.status-muted {
+  @apply bg-slate-100 text-slate-600 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700;
 }
 
 .records-panel {
