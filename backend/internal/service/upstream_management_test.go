@@ -42,11 +42,12 @@ func (s *upstreamManagementProviderSourceStub) FetchDefaultModelSquare(context.C
 }
 
 type upstreamManagementGroupRepoStub struct {
-	groups    []Group
-	updates   []Group
-	creates   []Group
-	nextID    int64
-	updateErr error
+	groups                 []Group
+	updates                []Group
+	creates                []Group
+	nextID                 int64
+	updateErr              error
+	boundGroupsByAccountID map[int64][]*Group
 }
 
 func (s *upstreamManagementGroupRepoStub) Create(_ context.Context, group *Group) error {
@@ -106,6 +107,21 @@ func (s *upstreamManagementGroupRepoStub) ListWithFilters(context.Context, pagin
 func (s *upstreamManagementGroupRepoStub) ListActive(context.Context) ([]Group, error) {
 	out := make([]Group, len(s.groups))
 	copy(out, s.groups)
+	return out, nil
+}
+
+func (s *upstreamManagementGroupRepoStub) ListGroupsByAccountIDs(_ context.Context, accountIDs []int64) (map[int64][]*Group, error) {
+	if s.boundGroupsByAccountID == nil {
+		return nil, nil
+	}
+	out := make(map[int64][]*Group, len(accountIDs))
+	for _, accountID := range accountIDs {
+		groups := s.boundGroupsByAccountID[accountID]
+		if len(groups) == 0 {
+			continue
+		}
+		out[accountID] = append([]*Group(nil), groups...)
+	}
 	return out, nil
 }
 

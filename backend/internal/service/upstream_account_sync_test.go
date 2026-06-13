@@ -358,6 +358,61 @@ func TestUpstreamAccountSyncPreviewHydratesBoundGroupsFromGroupIDs(t *testing.T)
 	}
 }
 
+func TestUpstreamAccountSyncPreviewLoadsBoundGroupsByMatchedAccountID(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup", AccountNamePrefix: "up-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {{ProviderSlug: "backup", KeyName: "alice", GroupName: "VIP", RateMultiplier: 2}},
+		},
+	}
+	groupRepo := &upstreamManagementGroupRepoStub{
+		groups: []Group{
+			{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 2, Status: StatusActive},
+			{ID: 8, Name: "Trial", Platform: PlatformOpenAI, RateMultiplier: 0.5, Status: StatusActive},
+		},
+		boundGroupsByAccountID: map[int64][]*Group{
+			10: {
+				{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 2, Status: StatusActive},
+				{ID: 8, Name: "Trial", Platform: PlatformOpenAI, RateMultiplier: 0.5, Status: StatusActive},
+			},
+		},
+	}
+	accountManager := &upstreamAccountSyncAccountManagerStub{
+		accounts: []Account{{
+			ID:       10,
+			Name:     "up-alice",
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeAPIKey,
+		}},
+	}
+	svc := NewUpstreamAccountSyncService(provider, groupRepo, accountManager, newUpstreamManagementSettingRepoStub())
+
+	result, err := svc.Preview(context.Background())
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("item count = %d, want 1", len(result.Items))
+	}
+	item := result.Items[0]
+	if item.MatchedAccountID == nil || *item.MatchedAccountID != 10 {
+		t.Fatalf("matched account id = %+v, want 10", item.MatchedAccountID)
+	}
+	if len(item.BoundGroups) != 2 {
+		t.Fatalf("bound groups = %+v, want groups loaded by matched account id", item.BoundGroups)
+	}
+	if item.BoundGroups[0].ID != 7 || item.BoundGroups[1].ID != 8 {
+		t.Fatalf("bound groups = %+v, want [7, 8]", item.BoundGroups)
+	}
+	if !item.RateViolation || len(item.UnboundGroupIDs) != 1 || item.UnboundGroupIDs[0] != 8 {
+		t.Fatalf("rate guard fields = violation:%v unbound:%+v, want low-rate group 8", item.RateViolation, item.UnboundGroupIDs)
+	}
+}
+
 func TestUpstreamAccountSyncRunCreatesUpdatesAndAppliesRateGuard(t *testing.T) {
 	provider := &upstreamAccountSyncProviderSourceStub{
 		defaultProvider: UpstreamProviderConfig{

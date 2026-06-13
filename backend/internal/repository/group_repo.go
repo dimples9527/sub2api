@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	dbaccountgroup "github.com/Wei-Shaw/sub2api/ent/accountgroup"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -766,6 +767,46 @@ func (r *groupRepository) GetAccountIDsByGroupIDs(ctx context.Context, groupIDs 
 	}
 
 	return accountIDs, nil
+}
+
+func (r *groupRepository) ListGroupsByAccountIDs(ctx context.Context, accountIDs []int64) (map[int64][]*service.Group, error) {
+	out := make(map[int64][]*service.Group)
+	if len(accountIDs) == 0 {
+		return out, nil
+	}
+
+	ids := make([]int64, 0, len(accountIDs))
+	seen := make(map[int64]struct{}, len(accountIDs))
+	for _, accountID := range accountIDs {
+		if accountID <= 0 {
+			continue
+		}
+		if _, exists := seen[accountID]; exists {
+			continue
+		}
+		seen[accountID] = struct{}{}
+		ids = append(ids, accountID)
+	}
+	if len(ids) == 0 {
+		return out, nil
+	}
+
+	entries, err := r.client.AccountGroup.Query().
+		Where(dbaccountgroup.AccountIDIn(ids...)).
+		WithGroup().
+		Order(dbaccountgroup.ByAccountID(), dbaccountgroup.ByPriority()).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range entries {
+		groupSvc := groupEntityToService(entry.Edges.Group)
+		if groupSvc == nil {
+			continue
+		}
+		out[entry.AccountID] = append(out[entry.AccountID], groupSvc)
+	}
+	return out, nil
 }
 
 // BindAccountsToGroup 将多个账号绑定到指定分组（批量插入，忽略已存在的绑定）

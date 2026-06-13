@@ -36,6 +36,10 @@ type UpstreamAccountSyncAccountManager interface {
 	UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error)
 }
 
+type upstreamAccountSyncBoundGroupLoader interface {
+	ListGroupsByAccountIDs(ctx context.Context, accountIDs []int64) (map[int64][]*Group, error)
+}
+
 type UpstreamAccountSyncRequest struct {
 	CreateMissing  bool   `json:"create_missing"`
 	UpdateExisting bool   `json:"update_existing"`
@@ -409,6 +413,10 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context) (UpstreamAccou
 		return UpstreamAccountSyncResult{}, upstreamAccountSyncPreviewState{}, err
 	}
 	accounts = hydrateUpstreamAccountSyncAccountGroups(accounts, localGroups)
+	accounts, err = refreshUpstreamAccountSyncAccountGroups(ctx, s.groupRepo, accounts)
+	if err != nil {
+		return UpstreamAccountSyncResult{}, upstreamAccountSyncPreviewState{}, err
+	}
 
 	accountsByName := upstreamAccountSyncAccountsByName(accounts)
 	accountByID := make(map[int64]Account, len(accounts))
@@ -801,6 +809,61 @@ func hydrateUpstreamAccountSyncAccountGroups(accounts []Account, groups []Group)
 			out[i].Groups = merged
 		}
 	}
+	return out
+}
+
+func refreshUpstreamAccountSyncAccountGroups(ctx context.Context, groupRepo GroupRepository, accounts []Account) ([]Account, error) {
+	if len(accounts) == 0 {
+		return accounts, nil
+	}
+	loader, ok := groupRepo.(upstreamAccountSyncBoundGroupLoader)
+	if !ok {
+		return accounts, nil
+	}
+
+	accountIDs := make([]int64, 0, len(accounts))
+	seen := make(map[int64]struct{}, len(accounts))
+	for _, account := range accounts {
+		if account.ID <= 0 {
+			continue
+		}
+		if _, exists := seen[account.ID]; exists {
+			continue
+		}
+		seen[account.ID] = struct{}{}
+		accountIDs = append(accountIDs, account.ID)
+	}
+	if len(accountIDs) == 0 {
+		return accounts, nil
+	}
+
+	groupsByAccount, err := loader.ListGroupsByAccountIDs(ctx, accountIDs)
+	if err != nil {
+		return nil, fmt.Errorf("load account bound groups for upstream account sync: %w", err)
+	}
+	if groupsByAccount == nil {
+		return accounts, nil
+	}
+
+	out := make([]Account, len(accounts))
+	copy(out, accounts)
+	for i := range out {
+		groups := groupsByAccount[out[i].ID]
+		out[i].Groups = groups
+		out[i].GroupIDs = upstreamAccountSyncGroupIDs(groups)
+	}
+	return out, nil
+}
+
+func upstreamAccountSyncGroupIDs(groups []*Group) []int64 {
+	out := make([]int64, 0, len(groups))
+	for _, group := range groups {
+		if group == nil || group.ID <= 0 {
+			continue
+		}
+		out = appendUniqueInt64(out, group.ID)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out
 }
 
