@@ -413,6 +413,62 @@ func TestUpstreamAccountSyncPreviewLoadsBoundGroupsByMatchedAccountID(t *testing
 	}
 }
 
+func TestUpstreamAccountSyncPreviewShowsMatchedAccountGroupsWhenUpstreamGroupUnmatched(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup", AccountNamePrefix: " Up Stream - ", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {{ProviderSlug: "backup", KeyName: " Alice Key ", GroupName: "Remote Only", RateMultiplier: 2}},
+		},
+	}
+	groupRepo := &upstreamManagementGroupRepoStub{
+		groups: []Group{
+			{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 2, Status: StatusActive},
+		},
+		boundGroupsByAccountID: map[int64][]*Group{
+			10: {
+				{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 2, Status: StatusActive},
+			},
+		},
+	}
+	accountManager := &upstreamAccountSyncAccountManagerStub{
+		accounts: []Account{{
+			ID:       10,
+			Name:     "upstreamalicekey",
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeAPIKey,
+		}},
+	}
+	svc := NewUpstreamAccountSyncService(provider, groupRepo, accountManager, newUpstreamManagementSettingRepoStub())
+
+	result, err := svc.Preview(context.Background())
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("item count = %d, want 1", len(result.Items))
+	}
+	item := result.Items[0]
+	if item.MatchedAccountID == nil || *item.MatchedAccountID != 10 {
+		t.Fatalf("matched account id = %+v, want 10", item.MatchedAccountID)
+	}
+	if item.MatchedAccountName != "upstreamalicekey" {
+		t.Fatalf("matched account name = %q, want upstreamalicekey", item.MatchedAccountName)
+	}
+	if len(item.BoundGroups) != 1 || item.BoundGroups[0].ID != 7 || item.BoundGroups[0].Name != "VIP" {
+		t.Fatalf("bound groups = %+v, want VIP from matched account", item.BoundGroups)
+	}
+	if item.Action != UpstreamAccountSyncActionSkip || item.SkipReason != "upstream group is not matched" {
+		t.Fatalf("action/skip = %q/%q, want skip because upstream group is not matched", item.Action, item.SkipReason)
+	}
+	if result.Summary.MatchedAccountCount != 1 || result.Summary.SkipCount != 1 {
+		t.Fatalf("summary = %+v, want one matched account and one skip", result.Summary)
+	}
+}
+
 func TestUpstreamAccountSyncRunCreatesUpdatesAndAppliesRateGuard(t *testing.T) {
 	provider := &upstreamAccountSyncProviderSourceStub{
 		defaultProvider: UpstreamProviderConfig{

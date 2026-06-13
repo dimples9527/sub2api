@@ -469,6 +469,33 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context) (UpstreamAccou
 				result.Items = append(result.Items, item)
 				continue
 			}
+
+			matches := accountsByName[normalizeUpstreamGroupMatchName(item.LocalAccountName)]
+			if len(matches) > 1 {
+				item.Action = UpstreamAccountSyncActionConflict
+				item.ConflictAccountIDs = accountIDs(matches)
+				item.ConflictAccounts = upstreamAccountSyncConflictAccounts(matches, item.UpstreamRateMultiplier)
+				result.Summary.ConflictCount++
+				result.Items = append(result.Items, item)
+				continue
+			}
+
+			if len(matches) == 1 {
+				account := matches[0]
+				accountID := account.ID
+				item.MatchedAccountID = &accountID
+				item.MatchedAccountName = account.Name
+				item.BoundGroups = upstreamAccountSyncBoundGroups(account, item.UpstreamRateMultiplier)
+				result.Summary.MatchedAccountCount++
+				if !upstreamAccountSyncAccountCompatible(account) {
+					item.Action = UpstreamAccountSyncActionSkip
+					item.SkipReason = "matched account is not an OpenAI API key account"
+					result.Summary.SkipCount++
+					result.Items = append(result.Items, item)
+					continue
+				}
+			}
+
 			if group, ok := groupResolver.resolve(key.GroupName); ok {
 				groupID := group.ID
 				rate := group.RateMultiplier
@@ -483,15 +510,6 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context) (UpstreamAccou
 				continue
 			}
 
-			matches := accountsByName[normalizeUpstreamGroupMatchName(item.LocalAccountName)]
-			if len(matches) > 1 {
-				item.Action = UpstreamAccountSyncActionConflict
-				item.ConflictAccountIDs = accountIDs(matches)
-				item.ConflictAccounts = upstreamAccountSyncConflictAccounts(matches, item.UpstreamRateMultiplier)
-				result.Summary.ConflictCount++
-				result.Items = append(result.Items, item)
-				continue
-			}
 			if len(matches) == 0 {
 				item.Action = UpstreamAccountSyncActionCreate
 				result.Summary.CreateCount++
@@ -500,18 +518,6 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context) (UpstreamAccou
 			}
 
 			account := matches[0]
-			accountID := account.ID
-			item.MatchedAccountID = &accountID
-			item.MatchedAccountName = account.Name
-			item.BoundGroups = upstreamAccountSyncBoundGroups(account, item.UpstreamRateMultiplier)
-			result.Summary.MatchedAccountCount++
-			if !upstreamAccountSyncAccountCompatible(account) {
-				item.Action = UpstreamAccountSyncActionSkip
-				item.SkipReason = "matched account is not an OpenAI API key account"
-				result.Summary.SkipCount++
-				result.Items = append(result.Items, item)
-				continue
-			}
 			lowGroupIDs, lowGroupNames, _ := upstreamAccountSyncLowRateGroups(account, item.UpstreamRateMultiplier)
 			if len(lowGroupIDs) > 0 {
 				item.RateViolation = true
