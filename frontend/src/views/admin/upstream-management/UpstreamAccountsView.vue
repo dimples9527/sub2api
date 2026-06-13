@@ -58,12 +58,19 @@
         </div>
 
         <div class="filter-row">
-          <input
-            v-model.trim="searchQuery"
-            type="search"
-            class="input filter-search"
-            :placeholder="t('admin.upstreamAccounts.searchPlaceholder')"
-          />
+          <div class="relative min-w-0">
+            <Icon
+              name="search"
+              size="md"
+              class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
+            />
+            <input
+              v-model.trim="searchQuery"
+              type="search"
+              class="input filter-search pl-10"
+              :placeholder="t('admin.upstreamAccounts.searchPlaceholder')"
+            />
+          </div>
           <Select
             v-model="providerFilter"
             class="filter-select"
@@ -146,7 +153,7 @@
 
       <template #table>
         <div class="accounts-table-content">
-          <div v-if="warnings.length" class="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200">
+          <div v-if="warnings.length" class="warning-banner">
             <div v-for="warning in warnings" :key="warning">{{ warning }}</div>
           </div>
 
@@ -238,7 +245,7 @@
               <div class="records-total">{{ syncLogEntries.length }}</div>
             </div>
             <div class="max-h-80 overflow-auto">
-              <table class="w-full min-w-[1080px] divide-y divide-gray-100 text-sm dark:divide-dark-700">
+              <table class="records-table min-w-[1080px]">
                 <thead class="bg-gray-50 dark:bg-dark-800">
                   <tr>
                     <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logTime') }}</th>
@@ -665,14 +672,22 @@ onMounted(reload)
   @apply flex h-full min-h-0 flex-col overflow-y-auto;
 }
 
+.warning-banner {
+  @apply mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200;
+}
+
 .accounts-table-primary {
-  @apply flex flex-none flex-col overflow-hidden;
+  @apply flex flex-none flex-col overflow-hidden rounded-lg border border-gray-100 dark:border-dark-700;
   height: clamp(28rem, 52vh, 42rem);
   min-height: 28rem;
 }
 
 .accounts-table-primary :deep(.table-wrapper) {
   @apply min-h-0;
+}
+
+.accounts-table-primary :deep(tbody tr) {
+  @apply transition-colors;
 }
 
 .records-panel {
@@ -689,6 +704,18 @@ onMounted(reload)
 
 .records-row {
   @apply align-top;
+}
+
+.records-table {
+  @apply w-full divide-y divide-gray-100 text-sm dark:divide-dark-700;
+}
+
+.records-table tbody {
+  @apply divide-y divide-gray-100 dark:divide-dark-700;
+}
+
+.records-table tbody tr {
+  @apply transition-colors hover:bg-gray-50 dark:hover:bg-dark-700/40;
 }
 
 .table-main-cell {

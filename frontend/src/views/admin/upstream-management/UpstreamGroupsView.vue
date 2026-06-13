@@ -2,32 +2,40 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
-        <div class="flex flex-wrap items-center gap-3">
-          <div class="flex min-w-0 flex-1 flex-wrap items-center gap-3">
-            <div class="rounded-lg border border-gray-200 px-3 py-2 dark:border-dark-600">
-              <div class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.upstreamGroups.defaultProvider') }}</div>
+        <div class="groups-toolbar">
+          <div class="provider-panel">
+            <div class="min-w-0">
+              <div class="meta-label">{{ t('admin.upstreamGroups.defaultProvider') }}</div>
               <div class="mt-0.5 flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
-                <span>{{ result?.default_provider?.name || '-' }}</span>
+                <span class="truncate">{{ result?.default_provider?.name || '-' }}</span>
                 <code v-if="result?.default_provider?.slug" class="text-xs font-normal text-gray-500 dark:text-gray-400">
                   {{ result.default_provider.slug }}
                 </code>
               </div>
             </div>
-            <div class="summary-pill">
+            <div class="provider-count">{{ result?.default_provider?.slug ? 1 : 0 }}</div>
+          </div>
+
+          <div class="stats-strip">
+            <div class="stat-tile">
               <span>{{ t('admin.upstreamGroups.upstreamGroups') }}</span>
               <strong>{{ summary.upstreamGroups }}</strong>
             </div>
-            <div class="summary-pill">
+            <div class="stat-tile stat-tile-success">
               <span>{{ t('admin.upstreamGroups.matchedGroups') }}</span>
               <strong>{{ summary.matchedGroups }}</strong>
             </div>
-            <div class="summary-pill" :class="summary.rateRisks > 0 ? 'summary-pill-warning' : ''">
+            <div class="stat-tile" :class="summary.rateRisks > 0 ? 'stat-tile-warning' : ''">
               <span>{{ t('admin.upstreamGroups.rateRisks') }}</span>
               <strong>{{ summary.rateRisks }}</strong>
             </div>
+            <div class="stat-tile">
+              <span>{{ t('admin.upstreamGroups.filteredCount') }}</span>
+              <strong>{{ filteredItems.length }}</strong>
+            </div>
           </div>
 
-          <div class="flex flex-wrap items-center justify-end gap-2">
+          <div class="groups-actions">
             <button
               type="button"
               class="btn btn-secondary"
@@ -48,22 +56,31 @@
             </button>
           </div>
         </div>
-        <div class="mt-3 flex flex-wrap items-center gap-3">
-          <input
-            v-model.trim="searchQuery"
-            type="search"
-            class="input w-full sm:w-72"
-            :placeholder="t('admin.upstreamGroups.searchPlaceholder')"
-          />
-          <Select v-model="matchFilter" class="w-44" :options="matchFilterOptions" />
-          <Select v-model="rateFilter" class="w-44" :options="rateFilterOptions" />
-          <div class="summary-pill h-10">
-            <span>{{ t('admin.upstreamGroups.filteredCount') }}</span>
-            <strong>{{ filteredItems.length }}</strong>
+
+        <div class="filter-row">
+          <div class="relative min-w-0">
+            <Icon
+              name="search"
+              size="md"
+              class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
+            />
+            <input
+              v-model.trim="searchQuery"
+              type="search"
+              class="input w-full pl-10"
+              :placeholder="t('admin.upstreamGroups.searchPlaceholder')"
+            />
           </div>
+          <Select v-model="matchFilter" class="filter-select" :options="matchFilterOptions" />
+          <Select v-model="rateFilter" class="filter-select" :options="rateFilterOptions" />
         </div>
-        <div class="mt-3 flex flex-wrap items-end gap-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600">
-          <label class="flex h-10 items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200">
+
+        <div class="rate-fix-panel">
+          <div class="min-w-0">
+            <div class="meta-label">{{ t('admin.upstreamGroups.autoFixEnabled') }}</div>
+            <div class="mt-1 text-sm text-gray-600 dark:text-gray-300">{{ t('admin.upstreamGroups.autoFixLastRun') }}: {{ autoFixLastRunText }}</div>
+          </div>
+          <label class="rate-fix-toggle">
             <input
               v-model="autoFixForm.enabled"
               type="checkbox"
@@ -72,25 +89,21 @@
             />
             {{ t('admin.upstreamGroups.autoFixEnabled') }}
           </label>
-          <div>
-            <label class="input-label" for="auto-fix-interval-seconds">{{ t('admin.upstreamGroups.autoFixIntervalSeconds') }}</label>
+          <label class="rate-fix-interval">
+            <span>{{ t('admin.upstreamGroups.autoFixIntervalSeconds') }}</span>
             <input
               id="auto-fix-interval-seconds"
               v-model.number="autoFixForm.interval_seconds"
               type="number"
               min="1"
               step="1"
-              class="input mt-1 w-36"
+              class="input h-9 w-28"
               :disabled="savingRateFixConfig || loadingRateFixConfig"
             />
-          </div>
-          <div class="min-w-[13rem] text-xs text-gray-500 dark:text-gray-400">
-            <div class="font-medium text-gray-600 dark:text-gray-300">{{ t('admin.upstreamGroups.autoFixLastRun') }}</div>
-            <div class="mt-1">{{ autoFixLastRunText }}</div>
-          </div>
+          </label>
           <button
             type="button"
-            class="btn btn-secondary btn-sm h-10"
+            class="btn btn-secondary"
             :disabled="savingRateFixConfig || loadingRateFixConfig"
             @click="saveRateFixConfig"
           >
@@ -100,104 +113,110 @@
       </template>
 
       <template #table>
-        <div v-if="warnings.length" class="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200">
-          <div v-for="warning in warnings" :key="warning">{{ warning }}</div>
-        </div>
+        <div class="groups-table-content">
+          <div v-if="warnings.length" class="warning-banner">
+            <div v-for="warning in warnings" :key="warning">{{ warning }}</div>
+          </div>
 
-        <DataTable :columns="columns" :data="filteredItems" :loading="loading">
-          <template #cell-upstream_group_name="{ row }">
-            <div class="flex min-w-[12rem] flex-col gap-1">
-              <span class="font-medium text-gray-900 dark:text-white">{{ row.upstream_group_name }}</span>
-              <span class="text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.upstreamGroups.keyCount', { count: row.upstream_key_count }) }}
-              </span>
-            </div>
-          </template>
-
-          <template #cell-upstream_rate="{ value }">
-            <span class="font-mono text-sm text-gray-900 dark:text-white">{{ formatRate(value) }}</span>
-          </template>
-
-          <template #cell-monitor_trend="{ row }">
-            <UpstreamGroupAvailabilityTrend
-              :row="monitorTrendFor(row)"
-              :loading="monitorLoading"
-              :error="monitorError"
-              :empty-text="t('admin.upstreamGroups.monitorTrendEmpty')"
-              :loading-text="t('admin.upstreamGroups.monitorTrendLoading')"
-              :label="t('admin.upstreamGroups.columns.monitorTrend')"
-            />
-          </template>
-
-          <template #cell-local_group_name="{ row }">
-            <div class="flex min-w-[16rem] flex-col gap-2">
-              <template v-if="row.matched">
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="font-medium text-gray-900 dark:text-white">{{ row.local_group_name }}</span>
-                  <code class="text-xs text-gray-500 dark:text-gray-400">#{{ row.local_group_id }}</code>
-                </div>
-                <div class="flex flex-wrap items-center gap-2 text-xs">
-                  <span :class="['badge', row.match_source === 'manual' ? 'badge-primary' : 'badge-gray']">
-                    {{ matchSourceLabel(row) }}
-                  </span>
-                  <span v-if="row.needs_rate_increase" class="badge badge-warning">
-                    {{ t('admin.upstreamGroups.needsIncrease') }}
-                  </span>
-                  <span v-else class="badge badge-success">
-                    {{ t('admin.upstreamGroups.inSync') }}
+          <div class="groups-table-primary">
+            <DataTable :columns="columns" :data="filteredItems" :loading="loading">
+              <template #cell-upstream_group_name="{ row }">
+                <div class="table-main-cell min-w-[12rem]">
+                  <span class="font-medium text-gray-900 dark:text-white">{{ row.upstream_group_name }}</span>
+                  <span class="text-xs text-gray-500 dark:text-gray-400">
+                    {{ t('admin.upstreamGroups.keyCount', { count: row.upstream_key_count }) }}
                   </span>
                 </div>
               </template>
-              <div v-else class="text-sm text-gray-400">
-                {{ t('admin.upstreamGroups.notMatched') }}
-              </div>
-            </div>
-          </template>
 
-          <template #cell-local_rate="{ row }">
-            <span v-if="row.local_rate !== undefined" class="font-mono text-sm text-gray-900 dark:text-white">
-              {{ formatRate(row.local_rate) }}
-            </span>
-            <span v-else class="text-sm text-gray-400">-</span>
-          </template>
+              <template #cell-upstream_rate="{ value }">
+                <span class="rate-value">{{ formatRate(value) }}</span>
+              </template>
 
-          <template #cell-status="{ row }">
-            <span :class="['badge', statusClass(row)]">{{ statusLabel(row) }}</span>
-          </template>
+              <template #cell-monitor_trend="{ row }">
+                <UpstreamGroupAvailabilityTrend
+                  :row="monitorTrendFor(row)"
+                  :loading="monitorLoading"
+                  :error="monitorError"
+                  :empty-text="t('admin.upstreamGroups.monitorTrendEmpty')"
+                  :loading-text="t('admin.upstreamGroups.monitorTrendLoading')"
+                  :label="t('admin.upstreamGroups.columns.monitorTrend')"
+                />
+              </template>
 
-          <template #cell-action="{ row }">
-            <button
-              v-if="!row.matched"
-              type="button"
-              class="btn btn-primary btn-sm whitespace-nowrap"
-              :disabled="syncingGroupKey === row.upstream_group_key"
-              @click="openSyncDialog(row)"
-            >
-              <Icon name="sync" size="sm" class="mr-1" :class="syncingGroupKey === row.upstream_group_key ? 'animate-spin' : ''" />
-              {{ t('admin.upstreamGroups.syncLocalGroup') }}
-            </button>
-            <span v-else class="text-xs font-medium text-gray-400 dark:text-gray-500">
-              {{ t('admin.upstreamGroups.noActionNeeded') }}
-            </span>
-          </template>
+              <template #cell-local_group_name="{ row }">
+                <div class="table-main-cell min-w-[16rem]">
+                  <template v-if="row.matched">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span class="font-medium text-gray-900 dark:text-white">{{ row.local_group_name }}</span>
+                      <code class="text-xs text-gray-500 dark:text-gray-400">#{{ row.local_group_id }}</code>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2 text-xs">
+                      <span :class="['badge', row.match_source === 'manual' ? 'badge-primary' : 'badge-gray']">
+                        {{ matchSourceLabel(row) }}
+                      </span>
+                      <span v-if="row.needs_rate_increase" class="badge badge-warning">
+                        {{ t('admin.upstreamGroups.needsIncrease') }}
+                      </span>
+                      <span v-else class="badge badge-success">
+                        {{ t('admin.upstreamGroups.inSync') }}
+                      </span>
+                    </div>
+                  </template>
+                  <div v-else class="text-sm text-gray-400">
+                    {{ t('admin.upstreamGroups.notMatched') }}
+                  </div>
+                </div>
+              </template>
 
-          <template #empty>
-            <EmptyState
-              :title="emptyTitle"
-              :description="emptyDescription"
-              :action-text="t('common.refresh')"
-              @action="reload"
-            />
-          </template>
-        </DataTable>
+              <template #cell-local_rate="{ row }">
+                <span v-if="row.local_rate !== undefined" class="rate-value">
+                  {{ formatRate(row.local_rate) }}
+                </span>
+                <span v-else class="text-sm text-gray-400">-</span>
+              </template>
 
-        <div class="mt-6 rounded-lg border border-gray-200 dark:border-dark-600">
-          <div class="flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-dark-600">
-            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.upstreamGroups.changeRecords') }}</h3>
-            <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.upstreamGroups.latestRecords') }}</span>
+              <template #cell-status="{ row }">
+                <span :class="['badge', statusClass(row)]">{{ statusLabel(row) }}</span>
+              </template>
+
+              <template #cell-action="{ row }">
+                <button
+                  v-if="!row.matched"
+                  type="button"
+                  class="btn btn-primary btn-sm whitespace-nowrap"
+                  :disabled="syncingGroupKey === row.upstream_group_key"
+                  @click="openSyncDialog(row)"
+                >
+                  <Icon name="sync" size="sm" class="mr-1" :class="syncingGroupKey === row.upstream_group_key ? 'animate-spin' : ''" />
+                  {{ t('admin.upstreamGroups.syncLocalGroup') }}
+                </button>
+                <span v-else class="text-xs font-medium text-gray-400 dark:text-gray-500">
+                  {{ t('admin.upstreamGroups.noActionNeeded') }}
+                </span>
+              </template>
+
+              <template #empty>
+                <EmptyState
+                  :title="emptyTitle"
+                  :description="emptyDescription"
+                  :action-text="t('common.refresh')"
+                  @action="reload"
+                />
+              </template>
+            </DataTable>
           </div>
-          <div class="max-h-72 overflow-auto">
-            <table class="w-full min-w-[760px] divide-y divide-gray-100 text-sm dark:divide-dark-700">
+
+          <div class="records-panel">
+            <div class="records-header">
+              <div>
+                <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.upstreamGroups.changeRecords') }}</h3>
+                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.upstreamGroups.latestRecords') }}</span>
+              </div>
+              <div class="records-total">{{ records.length }}</div>
+            </div>
+            <div class="max-h-72 overflow-auto">
+              <table class="records-table">
               <thead class="bg-gray-50 dark:bg-dark-800">
                 <tr>
                   <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamGroups.localGroup') }}</th>
@@ -220,6 +239,7 @@
                 </tr>
               </tbody>
             </table>
+            </div>
           </div>
         </div>
 
@@ -553,15 +573,131 @@ onMounted(reload)
 </script>
 
 <style scoped>
-.summary-pill {
-  @apply flex h-11 items-center gap-3 rounded-lg border border-gray-200 px-3 text-sm text-gray-600 dark:border-dark-600 dark:text-gray-300;
+.groups-toolbar {
+  @apply grid gap-3 xl:grid-cols-[minmax(14rem,18rem)_1fr_auto];
 }
 
-.summary-pill strong {
-  @apply font-mono text-base text-gray-900 dark:text-white;
+.provider-panel {
+  @apply flex min-h-16 items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-dark-600 dark:bg-dark-800/40;
 }
 
-.summary-pill-warning {
+.meta-label {
+  @apply text-xs font-medium text-gray-500 dark:text-gray-400;
+}
+
+.provider-count {
+  @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-gray-100 font-mono text-sm font-semibold text-gray-700 dark:bg-dark-700 dark:text-gray-200;
+}
+
+.stats-strip {
+  @apply grid grid-cols-2 gap-2 sm:grid-cols-4;
+}
+
+.stat-tile {
+  @apply flex min-h-16 flex-col justify-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 dark:border-dark-600 dark:bg-dark-800/40 dark:text-gray-300;
+}
+
+.stat-tile span {
+  @apply text-xs font-medium text-gray-500 dark:text-gray-400;
+}
+
+.stat-tile strong {
+  @apply mt-1 font-mono text-xl text-gray-950 dark:text-white;
+}
+
+.stat-tile-success {
+  @apply border-emerald-200 bg-emerald-50/60 dark:border-emerald-800/50 dark:bg-emerald-950/20;
+}
+
+.stat-tile-warning {
   @apply border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200;
+}
+
+.groups-actions {
+  @apply flex flex-wrap items-center justify-end gap-2 xl:min-h-16;
+}
+
+.filter-row {
+  @apply mt-3 grid gap-3 md:grid-cols-[minmax(14rem,1fr)_12rem_12rem];
+}
+
+.filter-select {
+  @apply w-full;
+}
+
+.rate-fix-panel {
+  @apply mt-3 grid items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-dark-600 dark:bg-dark-800/40 lg:grid-cols-[minmax(16rem,1fr)_auto_auto_auto];
+}
+
+.rate-fix-toggle {
+  @apply inline-flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200;
+}
+
+.rate-fix-interval {
+  @apply flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300;
+}
+
+.groups-table-content {
+  @apply flex h-full min-h-0 flex-col overflow-y-auto;
+}
+
+.warning-banner {
+  @apply mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200;
+}
+
+.groups-table-primary {
+  @apply flex flex-none flex-col overflow-hidden rounded-lg border border-gray-100 dark:border-dark-700;
+  height: clamp(28rem, 54vh, 44rem);
+  min-height: 28rem;
+}
+
+.groups-table-primary :deep(.table-wrapper) {
+  @apply min-h-0;
+}
+
+.groups-table-primary :deep(tbody tr) {
+  @apply transition-colors;
+}
+
+.table-main-cell {
+  @apply flex flex-col gap-1 leading-tight;
+}
+
+.rate-value {
+  @apply inline-flex rounded-md bg-gray-100 px-2 py-1 font-mono text-sm font-semibold text-gray-900 dark:bg-dark-700 dark:text-white;
+}
+
+.records-panel {
+  @apply mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-600 dark:bg-dark-800/30;
+}
+
+.records-header {
+  @apply flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-dark-600;
+}
+
+.records-total {
+  @apply flex h-8 min-w-8 items-center justify-center rounded-md bg-gray-100 px-2 font-mono text-sm font-semibold text-gray-700 dark:bg-dark-700 dark:text-gray-200;
+}
+
+.records-table {
+  @apply w-full min-w-[760px] divide-y divide-gray-100 text-sm dark:divide-dark-700;
+}
+
+.records-table tbody {
+  @apply divide-y divide-gray-100 dark:divide-dark-700;
+}
+
+.records-table tbody tr {
+  @apply transition-colors hover:bg-gray-50 dark:hover:bg-dark-700/40;
+}
+
+@media (max-width: 1023px) {
+  .groups-table-content {
+    @apply h-auto overflow-visible;
+  }
+
+  .groups-table-primary {
+    @apply h-auto min-h-0 overflow-visible;
+  }
 }
 </style>
