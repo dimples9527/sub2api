@@ -9,6 +9,7 @@ import (
 type upstreamAccountSyncProviderSourceStub struct {
 	defaultProvider UpstreamProviderConfig
 	providers       []UpstreamProviderConfig
+	storedProviders map[string]UpstreamProviderConfig
 	keys            []UpstreamProviderKey
 	keysBySlug      map[string][]UpstreamProviderKey
 	defaultErr      error
@@ -30,6 +31,23 @@ func (s *upstreamAccountSyncProviderSourceStub) ListProviders(ctx context.Contex
 		return s.providers, nil
 	}
 	return []UpstreamProviderConfig{s.defaultProvider}, nil
+}
+
+func (s *upstreamAccountSyncProviderSourceStub) getStoredProvider(_ context.Context, slug string) (UpstreamProviderConfig, error) {
+	if s.storedProviders != nil {
+		if provider, ok := s.storedProviders[slug]; ok {
+			return provider, nil
+		}
+	}
+	for _, provider := range s.providers {
+		if provider.Slug == slug {
+			return provider, nil
+		}
+	}
+	if s.defaultProvider.Slug == slug {
+		return s.defaultProvider, nil
+	}
+	return UpstreamProviderConfig{}, ErrSettingNotFound
 }
 
 func (s *upstreamAccountSyncProviderSourceStub) FetchProviderKeys(ctx context.Context, slug string) ([]UpstreamProviderKey, []string, error) {
@@ -466,6 +484,55 @@ func TestUpstreamAccountSyncPreviewShowsMatchedAccountGroupsWhenUpstreamGroupUnm
 	}
 	if result.Summary.MatchedAccountCount != 1 || result.Summary.SkipCount != 1 {
 		t.Fatalf("summary = %+v, want one matched account and one skip", result.Summary)
+	}
+}
+
+func TestUpstreamAccountSyncPreviewUsesStoredProviderAccountNamePrefix(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+			{Slug: "beikun", Name: "北鲲", Enabled: true},
+		},
+		storedProviders: map[string]UpstreamProviderConfig{
+			"beikun": {Slug: "beikun", Name: "北鲲", AccountNamePrefix: "北鲲-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"beikun": {{ProviderSlug: "beikun", KeyName: "codex_pro2", GroupName: "codex_pro2", RateMultiplier: 0.25}},
+		},
+	}
+	svc, _ := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{{ID: 7, Name: "codex_pro2", Platform: PlatformOpenAI, RateMultiplier: 0.25, Status: StatusActive}},
+		[]Account{{
+			ID:       10,
+			Name:     "北鲲-Codex_pro2",
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeAPIKey,
+			GroupIDs: []int64{7},
+		}},
+		nil,
+	)
+
+	result, err := svc.Preview(context.Background())
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if len(result.Providers) != 1 {
+		t.Fatalf("providers = %+v, want one sync provider", result.Providers)
+	}
+	if result.Providers[0].AccountNamePrefix != "北鲲-" {
+		t.Fatalf("provider prefix = %q, want stored prefix", result.Providers[0].AccountNamePrefix)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("item count = %d, want 1", len(result.Items))
+	}
+	item := result.Items[0]
+	if item.LocalAccountName != "北鲲-codex_pro2" {
+		t.Fatalf("local account name = %q, want prefix applied", item.LocalAccountName)
+	}
+	if item.MatchedAccountID == nil || *item.MatchedAccountID != 10 {
+		t.Fatalf("matched account id = %+v, want 10", item.MatchedAccountID)
 	}
 }
 

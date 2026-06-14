@@ -36,6 +36,10 @@ type UpstreamAccountSyncAccountManager interface {
 	UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error)
 }
 
+type upstreamAccountSyncStoredProviderSource interface {
+	getStoredProvider(ctx context.Context, slug string) (UpstreamProviderConfig, error)
+}
+
 type upstreamAccountSyncBoundGroupLoader interface {
 	ListGroupsByAccountIDs(ctx context.Context, accountIDs []int64) (map[int64][]*Group, error)
 }
@@ -554,9 +558,22 @@ func (s *UpstreamAccountSyncService) listAccountSyncProviders(ctx context.Contex
 		if provider.Slug == "" || provider.Slug == defaultProvider.Slug || provider.IsDefault || !provider.Enabled {
 			continue
 		}
+		provider = s.hydrateStoredProvider(ctx, provider)
 		out = append(out, provider)
 	}
 	return out, nil
+}
+
+func (s *UpstreamAccountSyncService) hydrateStoredProvider(ctx context.Context, provider UpstreamProviderConfig) UpstreamProviderConfig {
+	source, ok := s.providerSource.(upstreamAccountSyncStoredProviderSource)
+	if !ok {
+		return provider
+	}
+	stored, err := source.getStoredProvider(ctx, provider.Slug)
+	if err != nil {
+		return provider
+	}
+	return stored
 }
 
 func (s *UpstreamAccountSyncService) loadAccounts(ctx context.Context) ([]Account, error) {
