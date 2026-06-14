@@ -1657,6 +1657,7 @@ export default {
         matchResult: '匹配结果',
         localGroup: '本地分组',
         localRate: '本地倍率',
+        rateDelta: '倍率差值',
         status: '状态',
         action: '操作'
       }

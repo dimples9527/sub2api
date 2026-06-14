@@ -188,6 +188,16 @@
                 <span v-else class="table-tag tag-missing">-</span>
               </template>
 
+              <template #cell-rate_delta="{ row }">
+                <span
+                  v-if="rateDelta(row) !== undefined"
+                  :class="['rate-value', rateDeltaClass(rateDelta(row))]"
+                >
+                  {{ formatRateDelta(rateDelta(row)) }}
+                </span>
+                <span v-else class="table-tag tag-missing">-</span>
+              </template>
+
               <template #cell-status="{ row }">
                 <span :class="['status-chip', statusClass(row)]">{{ statusLabel(row) }}</span>
               </template>
@@ -366,6 +376,7 @@ const columns = computed<Column[]>(() => [
   { key: 'monitor_trend', label: t('admin.upstreamGroups.columns.monitorTrend'), class: 'min-w-[10.5rem]' },
   { key: 'local_group_name', label: t('admin.upstreamGroups.columns.matchResult') },
   { key: 'local_rate', label: t('admin.upstreamGroups.columns.localRate') },
+  { key: 'rate_delta', label: t('admin.upstreamGroups.columns.rateDelta') },
   { key: 'status', label: t('admin.upstreamGroups.columns.status') },
   { key: 'action', label: t('admin.upstreamGroups.columns.action') },
 ])
@@ -570,6 +581,26 @@ function normalizePositiveInteger(value: number | undefined, fallback: number) {
 function formatRate(value: number | undefined) {
   const n = Number(value)
   return Number.isFinite(n) ? `${n.toFixed(2)}x` : '-'
+}
+
+function rateDelta(row: UpstreamGroupComparison) {
+  const upstream = Number(row.upstream_rate)
+  const local = Number(row.local_rate)
+  if (!Number.isFinite(upstream) || !Number.isFinite(local)) return undefined
+  return upstream - local
+}
+
+function formatRateDelta(value: number | undefined) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return '-'
+  if (Math.abs(n) <= 0.0000001) return '0.00x'
+  return `${n > 0 ? '+' : ''}${n.toFixed(2)}x`
+}
+
+function rateDeltaClass(value: number | undefined) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return ''
+  return n > 0.0000001 ? 'rate-warning' : 'rate-success'
 }
 
 function matchSourceLabel(row: UpstreamGroupComparison) {

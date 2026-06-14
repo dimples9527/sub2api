@@ -1636,6 +1636,7 @@ export default {
         matchResult: 'Match result',
         localGroup: 'Local group',
         localRate: 'Local rate',
+        rateDelta: 'Rate delta',
         status: 'Status',
         action: 'Action'
       }
