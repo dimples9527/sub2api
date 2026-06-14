@@ -22,22 +22,23 @@ const (
 var upstreamProviderSlugPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
 
 type UpstreamProviderConfig struct {
-	Type               string `json:"type"`
-	Slug               string `json:"slug"`
-	Name               string `json:"name"`
-	Enabled            bool   `json:"enabled"`
-	IsDefault          bool   `json:"is_default"`
-	BaseURL            string `json:"base_url"`
-	LoginURL           string `json:"login_url"`
-	APIKeysURL         string `json:"api_keys_url"`
-	GroupsURL          string `json:"groups_url"`
-	AvailableGroupsURL string `json:"available_groups_url"`
-	Email              string `json:"email"`
-	Username           string `json:"username"`
-	Password           string `json:"password,omitempty"`
-	PasswordConfigured bool   `json:"password_configured,omitempty"`
-	AccountNamePrefix  string `json:"account_name_prefix"`
-	TempDisableMinutes int    `json:"temp_disable_minutes,omitempty"`
+	Type                       string  `json:"type"`
+	Slug                       string  `json:"slug"`
+	Name                       string  `json:"name"`
+	Enabled                    bool    `json:"enabled"`
+	IsDefault                  bool    `json:"is_default"`
+	BaseURL                    string  `json:"base_url"`
+	LoginURL                   string  `json:"login_url"`
+	APIKeysURL                 string  `json:"api_keys_url"`
+	GroupsURL                  string  `json:"groups_url"`
+	AvailableGroupsURL         string  `json:"available_groups_url"`
+	Email                      string  `json:"email"`
+	Username                   string  `json:"username"`
+	Password                   string  `json:"password,omitempty"`
+	PasswordConfigured         bool    `json:"password_configured,omitempty"`
+	AccountNamePrefix          string  `json:"account_name_prefix"`
+	TempDisableMinutes         int     `json:"temp_disable_minutes,omitempty"`
+	AccountRateMultiplierScale float64 `json:"account_rate_multiplier_scale"`
 }
 
 type UpstreamProviderKey struct {
@@ -349,6 +350,9 @@ func (s *UpstreamProviderService) validateProvider(provider UpstreamProviderConf
 	if provider.APIKeysURL == "" {
 		return infraerrors.BadRequest("UPSTREAM_PROVIDER_KEYS_URL_REQUIRED", "upstream provider api_keys_url is required")
 	}
+	if provider.AccountRateMultiplierScale < 0 {
+		return infraerrors.BadRequest("UPSTREAM_PROVIDER_ACCOUNT_RATE_MULTIPLIER_SCALE_INVALID", "upstream provider account_rate_multiplier_scale must be greater than 0")
+	}
 	if _, err := s.registry.Get(provider.Type); err != nil {
 		return err
 	}
@@ -384,6 +388,9 @@ func normalizeUpstreamProvider(provider UpstreamProviderConfig) UpstreamProvider
 	provider.AccountNamePrefix = strings.TrimSpace(provider.AccountNamePrefix)
 	if provider.TempDisableMinutes < 0 {
 		provider.TempDisableMinutes = 0
+	}
+	if provider.AccountRateMultiplierScale == 0 {
+		provider.AccountRateMultiplierScale = 1
 	}
 	return provider
 }

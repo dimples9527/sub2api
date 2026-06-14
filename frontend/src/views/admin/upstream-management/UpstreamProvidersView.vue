@@ -111,6 +111,7 @@
           <template #cell-policy="{ row }">
             <div class="flex flex-col gap-1 text-xs text-gray-600 dark:text-gray-300">
               <span>{{ t('admin.upstreamProviders.prefix') }}: {{ row.account_name_prefix || '-' }}</span>
+              <span>{{ t('admin.upstreamProviders.accountRateMultiplierScaleShort') }}: {{ formatRateScale(row.account_rate_multiplier_scale) }}</span>
               <span>{{ t('admin.upstreamProviders.tempDisableMinutes') }}: {{ row.temp_disable_minutes || 0 }}</span>
             </div>
           </template>
@@ -297,6 +298,20 @@
           <div>
             <label class="input-label">{{ t('admin.upstreamProviders.accountNamePrefix') }}</label>
             <input v-model.trim="form.account_name_prefix" type="text" class="input" />
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.upstreamProviders.accountRateMultiplierScale') }}</label>
+            <input
+              v-model.number="form.account_rate_multiplier_scale"
+              required
+              type="number"
+              min="0.000001"
+              step="0.01"
+              class="input"
+            />
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.upstreamProviders.accountRateMultiplierScaleHint') }}
+            </p>
           </div>
           <div>
             <label class="input-label">{{ t('admin.upstreamProviders.tempDisableMinutes') }}</label>
@@ -505,6 +520,7 @@ const form = reactive<UpstreamProviderConfig>({
   password: '',
   account_name_prefix: '',
   temp_disable_minutes: 0,
+  account_rate_multiplier_scale: 1,
 })
 
 const columns = computed<Column[]>(() => [
@@ -566,6 +582,7 @@ function resetForm() {
     password: '',
     account_name_prefix: '',
     temp_disable_minutes: 0,
+    account_rate_multiplier_scale: 1,
   })
 }
 
@@ -581,6 +598,7 @@ function fillForm(provider: UpstreamProviderConfig) {
     is_default: Boolean(provider.is_default),
     account_name_prefix: provider.account_name_prefix || '',
     temp_disable_minutes: provider.temp_disable_minutes || 0,
+    account_rate_multiplier_scale: Number(provider.account_rate_multiplier_scale) > 0 ? Number(provider.account_rate_multiplier_scale) : 1,
   })
 }
 
@@ -600,6 +618,7 @@ function buildPayload(): UpstreamProviderConfig {
     username: form.username?.trim() || '',
     account_name_prefix: form.account_name_prefix?.trim() || '',
     temp_disable_minutes: Number(form.temp_disable_minutes) || 0,
+    account_rate_multiplier_scale: Number(form.account_rate_multiplier_scale) > 0 ? Number(form.account_rate_multiplier_scale) : 1,
   }
   const password = form.password?.trim()
   if (password) {
@@ -758,6 +777,11 @@ function availableGroupsURL(provider: UpstreamProviderConfig) {
 function formatRate(value: number | undefined) {
   const n = Number(value)
   return Number.isFinite(n) ? `${n.toFixed(2)}x` : '-'
+}
+
+function formatRateScale(value: number | undefined) {
+  const n = Number(value)
+  return Number.isFinite(n) && n > 0 ? `${n.toFixed(4)}x` : '1.0000x'
 }
 
 function testStages(result: UpstreamProviderTestResult) {

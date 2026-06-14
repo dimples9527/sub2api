@@ -19,6 +19,7 @@ export interface UpstreamProviderConfig {
   password_configured?: boolean
   account_name_prefix?: string
   temp_disable_minutes?: number
+  account_rate_multiplier_scale: number
 }
 
 export interface UpstreamProviderKey {

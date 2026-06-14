@@ -876,6 +876,73 @@ func TestUpstreamAccountRateGuardRunOnlyAppliesRateGuard(t *testing.T) {
 	}
 }
 
+func TestUpstreamAccountRateGuardUsesProviderAccountRateMultiplierScale(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+			{
+				Slug:                       "backup",
+				Name:                       "Backup",
+				BaseURL:                    "https://backup.example.com",
+				AccountNamePrefix:          "up-",
+				Enabled:                    true,
+				AccountRateMultiplierScale: 0.1,
+			},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {
+				{ProviderSlug: "backup", KeyName: "matched", GroupName: "Trial", RateMultiplier: 1},
+			},
+		},
+	}
+	settings := newUpstreamManagementSettingRepoStub()
+	svc, accounts := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{
+			{ID: 8, Name: "Trial", Platform: PlatformOpenAI, RateMultiplier: 0.5, Status: StatusActive},
+		},
+		[]Account{{
+			ID:          10,
+			Name:        "up-matched",
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Credentials: map[string]any{"api_key": "matched", "base_url": "https://backup.example.com"},
+			GroupIDs:    []int64{8},
+			Groups: []*Group{
+				{ID: 8, Name: "Trial", RateMultiplier: 0.5},
+			},
+		}},
+		settings,
+	)
+
+	preview, err := svc.Preview(context.Background())
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if len(preview.Items) != 1 {
+		t.Fatalf("item count = %d, want 1", len(preview.Items))
+	}
+	item := preview.Items[0]
+	if item.UpstreamRateMultiplier != 0.1 {
+		t.Fatalf("upstream rate multiplier = %v, want scaled 0.1", item.UpstreamRateMultiplier)
+	}
+	if item.RateViolation || item.Action != UpstreamAccountSyncActionNoop {
+		t.Fatalf("item = %+v, want no rate violation and noop action", item)
+	}
+
+	cfg, err := svc.RunScheduledRateGuard(context.Background())
+	if err != nil {
+		t.Fatalf("RunScheduledRateGuard returned error: %v", err)
+	}
+	if cfg.LastRunAt == nil || cfg.LastRunStatus != "success" {
+		t.Fatalf("run config = %+v, want successful last run", cfg)
+	}
+	if len(accounts.updateInputs) != 0 {
+		t.Fatalf("update count = %d, want no rate guard update", len(accounts.updateInputs))
+	}
+}
+
 func TestUpstreamAccountRateGuardUnbindsLowGroupsWithoutActionUpdate(t *testing.T) {
 	provider := &upstreamAccountSyncProviderSourceStub{
 		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},

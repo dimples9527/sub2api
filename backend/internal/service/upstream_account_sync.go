@@ -513,6 +513,7 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context) (UpstreamAccou
 			if key.ProviderSlug != "" && key.ProviderSlug != provider.Slug {
 				continue
 			}
+			upstreamRateMultiplier := effectiveUpstreamAccountRateMultiplier(key.RateMultiplier, provider.AccountRateMultiplierScale)
 			result.Summary.UpstreamKeyCount++
 			item := UpstreamAccountSyncItem{
 				ProviderSlug:           provider.Slug,
@@ -520,7 +521,7 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context) (UpstreamAccou
 				UpstreamKeyName:        strings.TrimSpace(key.KeyName),
 				LocalAccountName:       upstreamProviderKeyName(provider, key.KeyName),
 				UpstreamGroupName:      strings.TrimSpace(key.GroupName),
-				UpstreamRateMultiplier: key.RateMultiplier,
+				UpstreamRateMultiplier: upstreamRateMultiplier,
 			}
 			if item.LocalAccountName == "" {
 				item.Action = UpstreamAccountSyncActionSkip
@@ -596,6 +597,13 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context) (UpstreamAccou
 		}
 	}
 	return result, upstreamAccountSyncPreviewState{accountByID: accountByID, providerBySlug: providerBySlug}, nil
+}
+
+func effectiveUpstreamAccountRateMultiplier(rawRate, scale float64) float64 {
+	if scale == 0 {
+		scale = 1
+	}
+	return rawRate * scale
 }
 
 func (s *UpstreamAccountSyncService) listAccountSyncProviders(ctx context.Context, defaultProvider UpstreamProviderConfig) ([]UpstreamProviderConfig, error) {
