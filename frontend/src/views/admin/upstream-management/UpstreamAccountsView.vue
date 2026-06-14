@@ -155,9 +155,9 @@
           <div class="accounts-table-primary">
             <DataTable :columns="columns" :data="filteredItems" :loading="loading">
               <template #cell-source="{ row }">
-                <div :class="['source-card min-w-[12rem]', sourceCardClass(row)]">
+                <div :class="['source-card min-w-[12rem]', providerToneClass(row.provider_slug, 'card')]">
                   <span class="font-semibold text-gray-950 dark:text-white">{{ row.provider_name || row.provider_slug }}</span>
-                  <code class="table-tag tag-provider">{{ row.provider_slug }}</code>
+                  <code :class="['table-tag', providerToneClass(row.provider_slug, 'tag')]">{{ row.provider_slug }}</code>
                 </div>
               </template>
 
@@ -274,7 +274,7 @@
                       <div class="table-main-cell min-w-[14rem]">
                         <span class="font-medium text-gray-900 dark:text-white">{{ entry.upstream_key_name }}</span>
                         <div class="tag-list max-w-[22rem]">
-                          <span class="table-tag tag-provider">{{ entry.provider_name || entry.provider_slug }}</span>
+                          <span :class="['table-tag', providerToneClass(entry.provider_slug, 'tag')]">{{ entry.provider_name || entry.provider_slug }}</span>
                           <span class="table-tag tag-group">{{ entry.upstream_group_name }}</span>
                         </div>
                       </div>
@@ -556,17 +556,31 @@ function formatRate(value: number | undefined) {
   return Number.isFinite(n) ? `${n.toFixed(2)}x` : '-'
 }
 
-function sourceCardClass(row: UpstreamAccountSyncItem) {
-  if (row.rate_violation) return 'source-card-warning'
-  if (!row.matched_account_id) return 'source-card-create'
-  return 'source-card-stable'
-}
-
 function accountCardClass(row: UpstreamAccountSyncItem) {
   if (row.conflict_accounts?.length || row.conflict_account_ids?.length) return 'account-card-conflict'
   if (!row.matched_account_id) return 'account-card-new'
   if (row.rate_violation) return 'account-card-warning'
   return 'account-card-matched'
+}
+
+function providerToneClass(providerSlug: string | undefined, target: 'card' | 'tag') {
+  const tones = [
+    'sky',
+    'emerald',
+    'violet',
+    'cyan',
+    'rose',
+    'amber',
+    'indigo',
+    'teal'
+  ]
+  const slug = providerSlug?.trim() || 'default'
+  let hash = 0
+  for (let i = 0; i < slug.length; i++) {
+    hash = (hash * 31 + slug.charCodeAt(i)) >>> 0
+  }
+  const tone = tones[hash % tones.length]
+  return `${target === 'card' ? 'source-card' : 'tag-provider'}-${tone}`
 }
 
 function groupChipClass(rateViolation: boolean, index: number) {
@@ -752,7 +766,6 @@ onMounted(reload)
   @apply flex flex-col gap-2 rounded-md border px-3 py-2 leading-tight;
 }
 
-.source-card-create,
 .account-card-new {
   @apply border-sky-200 bg-sky-50/70 dark:border-sky-800/50 dark:bg-sky-950/25;
 }
@@ -761,14 +774,44 @@ onMounted(reload)
   @apply border-emerald-200 bg-emerald-50/70 dark:border-emerald-800/50 dark:bg-emerald-950/25;
 }
 
-.source-card-warning,
 .account-card-warning {
   @apply border-amber-200 bg-amber-50/80 dark:border-amber-700/40 dark:bg-amber-950/25;
 }
 
-.source-card-stable,
 .account-card-conflict {
   @apply border-violet-200 bg-violet-50/70 dark:border-violet-800/50 dark:bg-violet-950/25;
+}
+
+.source-card-sky {
+  @apply border-sky-200 bg-sky-50/70 dark:border-sky-800/50 dark:bg-sky-950/25;
+}
+
+.source-card-emerald {
+  @apply border-emerald-200 bg-emerald-50/70 dark:border-emerald-800/50 dark:bg-emerald-950/25;
+}
+
+.source-card-violet {
+  @apply border-violet-200 bg-violet-50/70 dark:border-violet-800/50 dark:bg-violet-950/25;
+}
+
+.source-card-cyan {
+  @apply border-cyan-200 bg-cyan-50/70 dark:border-cyan-800/50 dark:bg-cyan-950/25;
+}
+
+.source-card-rose {
+  @apply border-rose-200 bg-rose-50/70 dark:border-rose-800/50 dark:bg-rose-950/25;
+}
+
+.source-card-amber {
+  @apply border-amber-200 bg-amber-50/70 dark:border-amber-800/50 dark:bg-amber-950/25;
+}
+
+.source-card-indigo {
+  @apply border-indigo-200 bg-indigo-50/70 dark:border-indigo-800/50 dark:bg-indigo-950/25;
+}
+
+.source-card-teal {
+  @apply border-teal-200 bg-teal-50/70 dark:border-teal-800/50 dark:bg-teal-950/25;
 }
 
 .key-card {
@@ -779,8 +822,36 @@ onMounted(reload)
   @apply inline-flex max-w-full items-center gap-1 truncate rounded-md px-2 py-1 text-xs font-semibold ring-1;
 }
 
-.tag-provider {
+.tag-provider-sky {
   @apply bg-sky-50 text-sky-700 ring-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:ring-sky-800/60;
+}
+
+.tag-provider-emerald {
+  @apply bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-800/60;
+}
+
+.tag-provider-violet {
+  @apply bg-violet-50 text-violet-700 ring-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:ring-violet-800/60;
+}
+
+.tag-provider-cyan {
+  @apply bg-cyan-50 text-cyan-700 ring-cyan-200 dark:bg-cyan-950/40 dark:text-cyan-300 dark:ring-cyan-800/60;
+}
+
+.tag-provider-rose {
+  @apply bg-rose-50 text-rose-700 ring-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:ring-rose-800/60;
+}
+
+.tag-provider-amber {
+  @apply bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-800/60;
+}
+
+.tag-provider-indigo {
+  @apply bg-indigo-50 text-indigo-700 ring-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 dark:ring-indigo-800/60;
+}
+
+.tag-provider-teal {
+  @apply bg-teal-50 text-teal-700 ring-teal-200 dark:bg-teal-950/40 dark:text-teal-300 dark:ring-teal-800/60;
 }
 
 .tag-group {
