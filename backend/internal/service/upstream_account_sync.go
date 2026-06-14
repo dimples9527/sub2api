@@ -338,12 +338,7 @@ func (s *UpstreamAccountSyncService) RunRateGuard(ctx context.Context, triggerSo
 	}
 	now := time.Now().UTC()
 	config.LastRunAt = &now
-	_, runErr := s.Sync(ctx, UpstreamAccountSyncRequest{
-		CreateMissing:  false,
-		UpdateExisting: true,
-		ApplyRateGuard: true,
-		TriggerSource:  normalizeUpstreamAccountRateGuardTriggerSource(triggerSource),
-	})
+	_, runErr := s.runMatchedAccountRateGuard(ctx, normalizeUpstreamAccountRateGuardTriggerSource(triggerSource))
 	if runErr != nil {
 		config.LastRunStatus = "failed"
 		config.LastRunMessage = runErr.Error()
@@ -357,6 +352,67 @@ func (s *UpstreamAccountSyncService) RunRateGuard(ctx context.Context, triggerSo
 		return UpstreamAccountRateGuardConfig{}, saveErr
 	}
 	return saved, runErr
+}
+
+func (s *UpstreamAccountSyncService) runMatchedAccountRateGuard(ctx context.Context, triggerSource string) (UpstreamAccountSyncResult, error) {
+	result, previewState, err := s.preview(ctx)
+	if err != nil {
+		return UpstreamAccountSyncResult{}, err
+	}
+	result.Summary.CreateCount = 0
+	result.Summary.UpdateCount = 0
+	result.Summary.RateViolationCount = 0
+	result.Summary.UnboundGroupCount = 0
+
+	now := time.Now().UTC()
+	recordStats, recordOrder := newUpstreamAccountSyncRecordStats(result)
+	for index := range result.Items {
+		item := &result.Items[index]
+		if item.MatchedAccountID == nil {
+			continue
+		}
+		account := previewState.accountByID[*item.MatchedAccountID]
+		if !upstreamAccountSyncAccountCompatible(account) {
+			continue
+		}
+		lowGroupIDs, lowGroupNames, remainingGroupIDs := upstreamAccountSyncLowRateGroups(account, item.UpstreamRateMultiplier)
+		if len(lowGroupIDs) == 0 {
+			continue
+		}
+
+		_, err := s.accountManager.UpdateAccount(ctx, account.ID, &UpdateAccountInput{
+			GroupIDs:              &remainingGroupIDs,
+			SkipMixedChannelCheck: true,
+		})
+		if err != nil {
+			return s.finishSyncWithError(ctx, result, triggerSource, recordStats, recordOrder, item.ProviderSlug, err)
+		}
+
+		provider := previewState.providerBySlug[item.ProviderSlug]
+		if provider.Slug == "" {
+			provider = result.DefaultProvider
+		}
+		item.RateViolation = true
+		item.UnboundGroupIDs = lowGroupIDs
+		item.UnboundGroupNames = lowGroupNames
+		detail := buildUpstreamAccountSyncUnbindDetail(provider, *item, account, lowGroupIDs, lowGroupNames, remainingGroupIDs, triggerSource)
+		recordStats[item.ProviderSlug].updatedCount++
+		recordStats[item.ProviderSlug].rateViolationCount++
+		recordStats[item.ProviderSlug].unboundGroupCount += len(lowGroupIDs)
+		recordStats[item.ProviderSlug].unbindDetails = append(recordStats[item.ProviderSlug].unbindDetails, detail)
+		logUpstreamAccountSyncUnbindAudit(detail)
+		result.Summary.UpdateCount++
+		result.Summary.RateViolationCount++
+		result.Summary.UnboundGroupCount += len(lowGroupIDs)
+	}
+
+	recordsToPrepend := upstreamAccountSyncRecordsFromStats(result, recordStats, recordOrder, now, triggerSource)
+	records, err := s.prependRecords(ctx, recordsToPrepend)
+	if err != nil {
+		return UpstreamAccountSyncResult{}, err
+	}
+	result.Records = records
+	return result, nil
 }
 
 func (s *UpstreamAccountSyncService) ListRecords(ctx context.Context) ([]UpstreamAccountSyncRecord, error) {

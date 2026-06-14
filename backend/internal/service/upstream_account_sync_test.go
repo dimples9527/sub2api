@@ -875,3 +875,74 @@ func TestUpstreamAccountRateGuardRunOnlyAppliesRateGuard(t *testing.T) {
 		t.Fatalf("unbind detail trigger source = %+v, want scheduled rate guard", records[0].UnbindDetails)
 	}
 }
+
+func TestUpstreamAccountRateGuardUnbindsLowGroupsWithoutActionUpdate(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup", AccountNamePrefix: "up-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {
+				{ProviderSlug: "backup", KeyName: "matched", GroupName: "Unmapped upstream group", RateMultiplier: 2},
+			},
+		},
+	}
+	settings := newUpstreamManagementSettingRepoStub()
+	svc, accounts := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{
+			{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 2, Status: StatusActive},
+			{ID: 8, Name: "Trial", Platform: PlatformOpenAI, RateMultiplier: 0.5, Status: StatusActive},
+			{ID: 9, Name: "Premium", Platform: PlatformOpenAI, RateMultiplier: 3, Status: StatusActive},
+		},
+		[]Account{{
+			ID:       10,
+			Name:     "up-matched",
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeAPIKey,
+			GroupIDs: []int64{7, 8, 9},
+			Groups: []*Group{
+				{ID: 7, Name: "VIP", RateMultiplier: 2},
+				{ID: 8, Name: "Trial", RateMultiplier: 0.5},
+				{ID: 9, Name: "Premium", RateMultiplier: 3},
+			},
+		}},
+		settings,
+	)
+
+	cfg, err := svc.RunScheduledRateGuard(context.Background())
+	if err != nil {
+		t.Fatalf("RunScheduledRateGuard returned error: %v", err)
+	}
+	if cfg.LastRunAt == nil || cfg.LastRunStatus != "success" {
+		t.Fatalf("run config = %+v, want successful last run", cfg)
+	}
+	if len(accounts.updateInputs) != 1 {
+		t.Fatalf("update count = %d, want one rate guard update", len(accounts.updateInputs))
+	}
+	update := accounts.updateInputs[0]
+	if update.id != 10 {
+		t.Fatalf("updated account id = %d, want 10", update.id)
+	}
+	if update.input.GroupIDs == nil {
+		t.Fatalf("updated group ids = nil, want [7 9]")
+	}
+	got := *update.input.GroupIDs
+	if len(got) != 2 || got[0] != 7 || got[1] != 9 {
+		t.Fatalf("updated group ids = %+v, want [7 9]", got)
+	}
+
+	rawRecords := settings.values[SettingKeyUpstreamAccountSyncRecords]
+	var records []UpstreamAccountSyncRecord
+	if err := json.Unmarshal([]byte(rawRecords), &records); err != nil {
+		t.Fatalf("decode records: %v raw=%s", err, rawRecords)
+	}
+	if len(records) != 1 || records[0].UnboundGroupCount != 1 || records[0].UpdatedCount != 1 {
+		t.Fatalf("records = %+v, want one update and one unbound group", records)
+	}
+	if len(records[0].UnbindDetails) != 1 || records[0].UnbindDetails[0].UnboundGroupIDs[0] != 8 {
+		t.Fatalf("unbind details = %+v, want group 8", records[0].UnbindDetails)
+	}
+}

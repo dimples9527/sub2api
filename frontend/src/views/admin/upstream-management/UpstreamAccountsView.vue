@@ -81,11 +81,6 @@
             class="filter-select"
             :options="sourceOptions"
           />
-          <Select
-            v-model="actionFilter"
-            class="filter-select"
-            :options="actionOptions"
-          />
           <div class="filtered-count">
             <span>{{ t('admin.upstreamAccounts.filteredCount') }}</span>
             <strong>{{ filteredItems.length }}</strong>
@@ -176,12 +171,6 @@
                     </span>
                   </div>
                 </div>
-              </template>
-
-              <template #cell-action="{ row }">
-                <span :class="['action-chip', actionClass(row)]">
-                  {{ actionLabel(row.action) }}
-                </span>
               </template>
 
               <template #cell-local_account_name="{ row }">
@@ -358,7 +347,6 @@ const loadError = ref('')
 const searchQuery = ref('')
 const providerFilter = ref('')
 const sourceFilter = ref('')
-const actionFilter = ref('')
 const rateGuardConfig = ref<UpstreamAccountRateGuardConfig | null>(null)
 const rateGuardForm = ref({
   enabled: false,
@@ -374,7 +362,6 @@ const columns = computed<Column[]>(() => [
   { key: 'source', label: t('admin.upstreamAccounts.columns.source') },
   { key: 'upstream_key_name', label: t('admin.upstreamAccounts.columns.upstreamKey') },
   { key: 'upstream_rate_multiplier', label: t('admin.upstreamAccounts.columns.upstreamRate') },
-  { key: 'action', label: t('admin.upstreamAccounts.columns.action') },
   { key: 'local_account_name', label: t('admin.upstreamAccounts.columns.localAccount') },
   { key: 'local_group_name', label: t('admin.upstreamAccounts.columns.boundGroups') },
 ])
@@ -439,26 +426,12 @@ const sourceOptions = computed<SelectOption[]>(() => [
   { value: 'synced', label: t('admin.upstreamAccounts.sourceSynced') },
   { value: 'unsynced', label: t('admin.upstreamAccounts.sourceUnsynced') }
 ])
-const actionOptions = computed<SelectOption[]>(() => [
-  { value: '', label: t('admin.upstreamAccounts.allActions') },
-  { value: 'create', label: t('admin.upstreamAccounts.actions.create') },
-  { value: 'update', label: t('admin.upstreamAccounts.actions.update') },
-  { value: 'noop', label: t('admin.upstreamAccounts.actions.noop') },
-  { value: 'skip', label: t('admin.upstreamAccounts.actions.skip') },
-  { value: 'conflict', label: t('admin.upstreamAccounts.actions.conflict') },
-  { value: 'rate_risk', label: t('admin.upstreamAccounts.rateRisks') }
-])
 const filteredItems = computed(() => {
   const keyword = searchQuery.value.trim().toLowerCase()
   return items.value.filter((item) => {
     if (providerFilter.value && item.provider_slug !== providerFilter.value) return false
     if (sourceFilter.value === 'synced' && !item.matched_account_id) return false
     if (sourceFilter.value === 'unsynced' && item.matched_account_id) return false
-    if (actionFilter.value === 'rate_risk') {
-      if (!item.rate_violation) return false
-    } else if (actionFilter.value && item.action !== actionFilter.value) {
-      return false
-    }
     if (!keyword) return true
     const haystack = [
       item.provider_name,
@@ -583,31 +556,9 @@ function formatRate(value: number | undefined) {
   return Number.isFinite(n) ? `${n.toFixed(2)}x` : '-'
 }
 
-function actionLabel(action: string | undefined) {
-  if (!action) return '-'
-  const labels: Record<string, string> = {
-    create: t('admin.upstreamAccounts.actions.create'),
-    update: t('admin.upstreamAccounts.actions.update'),
-    noop: t('admin.upstreamAccounts.actions.noop'),
-    skip: t('admin.upstreamAccounts.actions.skip'),
-    conflict: t('admin.upstreamAccounts.actions.conflict')
-  }
-  return labels[action] || action
-}
-
-function actionClass(row: UpstreamAccountSyncItem) {
-  if (row.rate_violation) return 'action-warning'
-  if (row.action === 'create') return 'action-create'
-  if (row.action === 'update') return 'action-update'
-  if (row.action === 'conflict') return 'action-danger'
-  if (row.action === 'skip') return 'action-muted'
-  return 'action-stable'
-}
-
 function sourceCardClass(row: UpstreamAccountSyncItem) {
   if (row.rate_violation) return 'source-card-warning'
-  if (row.action === 'create') return 'source-card-create'
-  if (row.action === 'update') return 'source-card-update'
+  if (!row.matched_account_id) return 'source-card-create'
   return 'source-card-stable'
 }
 
@@ -806,7 +757,6 @@ onMounted(reload)
   @apply border-sky-200 bg-sky-50/70 dark:border-sky-800/50 dark:bg-sky-950/25;
 }
 
-.source-card-update,
 .account-card-matched {
   @apply border-emerald-200 bg-emerald-50/70 dark:border-emerald-800/50 dark:bg-emerald-950/25;
 }
@@ -845,30 +795,8 @@ onMounted(reload)
   @apply bg-indigo-50 font-mono text-indigo-700 ring-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 dark:ring-indigo-800/60;
 }
 
-.action-chip,
 .trigger-chip {
   @apply inline-flex rounded-full px-2.5 py-1 text-xs font-bold ring-1;
-}
-
-.action-create {
-  @apply bg-sky-100 text-sky-800 ring-sky-200 dark:bg-sky-950/40 dark:text-sky-200 dark:ring-sky-800/60;
-}
-
-.action-update,
-.action-stable {
-  @apply bg-emerald-100 text-emerald-800 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-200 dark:ring-emerald-800/60;
-}
-
-.action-warning {
-  @apply bg-amber-100 text-amber-800 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-800/60;
-}
-
-.action-danger {
-  @apply bg-red-100 text-red-800 ring-red-200 dark:bg-red-950/40 dark:text-red-200 dark:ring-red-800/60;
-}
-
-.action-muted {
-  @apply bg-slate-100 text-slate-600 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700;
 }
 
 .rate-value {
