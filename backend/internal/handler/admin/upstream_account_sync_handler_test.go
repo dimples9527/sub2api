@@ -141,6 +141,12 @@ func newUpstreamAccountSyncHandlerTestRouterWithBalanceScheduler(svc upstreamAcc
 	router.POST("/admin/upstream-management/accounts/balance-consumption/recharges", handler.AddBalanceRecharge)
 	router.POST("/admin/upstream-management/accounts/balance-consumption/samples", handler.RunBalanceSampleNow)
 	router.GET("/admin/upstream-management/accounts/balance-consumption/poll-logs", handler.BalanceSamplerPollLogs)
+	router.GET("/admin/upstream-management/providers/balance-consumption", handler.BalanceConsumptionOverview)
+	router.GET("/admin/upstream-management/providers/balance-consumption/config", handler.GetBalanceSamplerConfig)
+	router.PUT("/admin/upstream-management/providers/balance-consumption/config", handler.UpdateBalanceSamplerConfig)
+	router.POST("/admin/upstream-management/providers/balance-consumption/recharges", handler.AddBalanceRecharge)
+	router.POST("/admin/upstream-management/providers/balance-consumption/samples", handler.RunBalanceSampleNow)
+	router.GET("/admin/upstream-management/providers/balance-consumption/poll-logs", handler.BalanceSamplerPollLogs)
 	return router
 }
 
@@ -328,6 +334,29 @@ func TestUpstreamAccountSyncHandlerBalanceConsumptionOverview(t *testing.T) {
 	require.Contains(t, rec.Body.String(), `"provider_slug":"backup"`)
 	require.Contains(t, rec.Body.String(), `"today_consumption":70`)
 	require.Contains(t, rec.Body.String(), `"interval_seconds":600`)
+}
+
+func TestUpstreamAccountSyncHandlerProviderBalanceConsumptionOverviewAlias(t *testing.T) {
+	svc := &upstreamAccountSyncHandlerServiceStub{balanceOverview: service.UpstreamBalanceConsumptionOverview{
+		Config: service.UpstreamBalanceSamplerConfig{Enabled: true, IntervalSeconds: 600},
+		Summaries: map[string]service.UpstreamBalanceProviderSummary{
+			"backup": {
+				ProviderSlug:     "backup",
+				ProviderName:     "Backup",
+				TodayConsumption: 70,
+			},
+		},
+	}}
+	router := newUpstreamAccountSyncHandlerTestRouter(svc)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/admin/upstream-management/providers/balance-consumption?days=7", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.True(t, svc.overviewCalled)
+	require.Contains(t, rec.Body.String(), `"provider_slug":"backup"`)
+	require.Contains(t, rec.Body.String(), `"today_consumption":70`)
 }
 
 func TestUpstreamAccountSyncHandlerUpdateBalanceSamplerConfig(t *testing.T) {

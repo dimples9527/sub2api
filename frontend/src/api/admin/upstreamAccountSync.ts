@@ -240,7 +240,7 @@ export async function getBalanceConsumption(
   days = 30
 ): Promise<UpstreamBalanceConsumptionOverview> {
   const { data } = await apiClient.get<UpstreamBalanceConsumptionOverview>(
-    '/admin/upstream-management/accounts/balance-consumption',
+    '/admin/upstream-management/providers/balance-consumption',
     { params: { days } }
   )
   return data
@@ -248,7 +248,7 @@ export async function getBalanceConsumption(
 
 export async function getBalanceSamplerConfig(): Promise<UpstreamBalanceSamplerConfig> {
   const { data } = await apiClient.get<UpstreamBalanceSamplerConfig>(
-    '/admin/upstream-management/accounts/balance-consumption/config'
+    '/admin/upstream-management/providers/balance-consumption/config'
   )
   return data
 }
@@ -257,7 +257,7 @@ export async function updateBalanceSamplerConfig(
   payload: UpstreamBalanceSamplerConfig
 ): Promise<UpstreamBalanceSamplerConfig> {
   const { data } = await apiClient.put<UpstreamBalanceSamplerConfig>(
-    '/admin/upstream-management/accounts/balance-consumption/config',
+    '/admin/upstream-management/providers/balance-consumption/config',
     payload
   )
   return data
@@ -267,7 +267,7 @@ export async function addBalanceRecharge(
   payload: UpstreamBalanceRechargeInput
 ): Promise<UpstreamBalanceRecharge> {
   const { data } = await apiClient.post<UpstreamBalanceRecharge>(
-    '/admin/upstream-management/accounts/balance-consumption/recharges',
+    '/admin/upstream-management/providers/balance-consumption/recharges',
     payload
   )
   return data
@@ -275,14 +275,14 @@ export async function addBalanceRecharge(
 
 export async function runBalanceSampleNow(): Promise<UpstreamBalanceSamplerConfig> {
   const { data } = await apiClient.post<UpstreamBalanceSamplerConfig>(
-    '/admin/upstream-management/accounts/balance-consumption/samples'
+    '/admin/upstream-management/providers/balance-consumption/samples'
   )
   return data
 }
 
 export async function getBalanceSamplerPollLogs(): Promise<UpstreamBalanceSamplerPollLog[]> {
   const { data } = await apiClient.get<UpstreamBalanceSamplerPollLog[]>(
-    '/admin/upstream-management/accounts/balance-consumption/poll-logs'
+    '/admin/upstream-management/providers/balance-consumption/poll-logs'
   )
   return data
 }

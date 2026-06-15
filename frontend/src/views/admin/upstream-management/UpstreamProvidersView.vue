@@ -49,16 +49,33 @@
 
       <template #table>
         <DataTable :columns="columns" :data="filteredProviders" :loading="loading">
+          <template #cell-homepage="{ row }">
+            <a
+              v-if="row.base_url"
+              :href="row.base_url"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="homepage-button"
+              :title="t('admin.upstreamProviders.openHomepage')"
+            >
+              <Icon name="home" size="sm" />
+              <span>{{ t('admin.upstreamProviders.homepageShort') }}</span>
+            </a>
+            <span v-else class="text-xs text-gray-400">-</span>
+          </template>
+
           <template #cell-name="{ row }">
-            <div class="flex min-w-[12rem] flex-col gap-1">
+            <div :class="['provider-name-card min-w-[12rem]', providerToneClass(row.slug, 'card')]">
               <div class="flex items-center gap-2">
-                <span class="font-medium text-gray-900 dark:text-white">{{ row.name }}</span>
-                <span class="badge" :class="providerTypeClass(row.type)">{{ providerTypeLabel(row.type) }}</span>
+                <span class="min-w-0 flex-1 truncate font-semibold">{{ row.name }}</span>
                 <span v-if="row.is_default" class="badge badge-success">
                   {{ t('admin.upstreamProviders.defaultProvider') }}
                 </span>
               </div>
-              <code class="text-xs text-gray-500 dark:text-gray-400">{{ row.slug }}</code>
+              <div class="mt-1 flex flex-wrap gap-1">
+                <span class="badge" :class="providerTypeClass(row.type)">{{ providerTypeLabel(row.type) }}</span>
+                <code :class="['provider-slug-tag', providerToneClass(row.slug, 'tag')]">{{ row.slug }}</code>
+              </div>
             </div>
           </template>
 
@@ -69,63 +86,91 @@
           </template>
 
           <template #cell-base_url="{ value }">
-            <div class="flex max-w-xs items-center gap-2">
-              <code class="block min-w-0 flex-1 truncate text-xs" :title="value">{{ value || '-' }}</code>
-              <a
-                v-if="value"
-                :href="value"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="action-button shrink-0 hover:bg-sky-50 hover:text-sky-600 dark:hover:bg-sky-900/20 dark:hover:text-sky-300"
-                :title="t('admin.upstreamProviders.openHomepage')"
-              >
-                <Icon name="home" size="sm" />
-                <span>{{ t('admin.upstreamProviders.homepageShort') }}</span>
-              </a>
-            </div>
+            <code class="provider-url-tag" :title="value">{{ value || '-' }}</code>
           </template>
 
           <template #cell-auth="{ row }">
-            <div class="flex flex-col gap-1 text-xs">
-              <span v-if="row.username || row.email" class="text-gray-700 dark:text-gray-200">
+            <div class="tag-list max-w-[14rem]">
+              <span v-if="row.username || row.email" class="info-tag tag-auth">
                 {{ row.username || row.email }}
               </span>
-              <span v-else class="text-gray-400">-</span>
-              <span
-                v-if="row.password_configured"
-                class="inline-flex w-fit items-center rounded bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
-              >
+              <span v-else class="info-tag tag-muted">-</span>
+              <span v-if="row.password_configured" class="info-tag tag-success">
                 {{ t('admin.upstreamProviders.passwordConfigured') }}
               </span>
             </div>
           </template>
 
           <template #cell-endpoints="{ row }">
-            <div class="flex max-w-md flex-col gap-1 text-xs">
-              <span class="truncate" :title="row.api_keys_url">
-                <span class="text-gray-400">{{ t('admin.upstreamProviders.keysEndpointShort') }}:</span>
+            <div class="tag-list max-w-md">
+              <span class="endpoint-tag" :title="row.api_keys_url">
+                <span>{{ t('admin.upstreamProviders.keysEndpointShort') }}</span>
                 <code>{{ row.api_keys_url || '-' }}</code>
               </span>
-              <span v-if="row.login_url" class="truncate" :title="row.login_url">
-                <span class="text-gray-400">{{ t('admin.upstreamProviders.loginEndpointShort') }}:</span>
+              <span v-if="row.login_url" class="endpoint-tag" :title="row.login_url">
+                <span>{{ t('admin.upstreamProviders.loginEndpointShort') }}</span>
                 <code>{{ row.login_url }}</code>
               </span>
-              <span v-if="row.type === 'newapi' && row.groups_url" class="truncate" :title="row.groups_url">
-                <span class="text-gray-400">{{ t('admin.upstreamProviders.groupsEndpointShort') }}:</span>
+              <span v-if="row.type === 'newapi' && row.groups_url" class="endpoint-tag" :title="row.groups_url">
+                <span>{{ t('admin.upstreamProviders.groupsEndpointShort') }}</span>
                 <code>{{ row.groups_url }}</code>
               </span>
-              <span v-if="availableGroupsURL(row)" class="truncate" :title="availableGroupsURL(row)">
-                <span class="text-gray-400">{{ t('admin.upstreamProviders.availableGroupsEndpointShort') }}:</span>
+              <span v-if="availableGroupsURL(row)" class="endpoint-tag" :title="availableGroupsURL(row)">
+                <span>{{ t('admin.upstreamProviders.availableGroupsEndpointShort') }}</span>
                 <code>{{ availableGroupsURL(row) }}</code>
               </span>
             </div>
           </template>
 
           <template #cell-policy="{ row }">
-            <div class="flex flex-col gap-1 text-xs text-gray-600 dark:text-gray-300">
-              <span>{{ t('admin.upstreamProviders.prefix') }}: {{ row.account_name_prefix || '-' }}</span>
-              <span>{{ t('admin.upstreamProviders.accountRateMultiplierScaleShort') }}: {{ formatRateScale(row.account_rate_multiplier_scale) }}</span>
-              <span>{{ t('admin.upstreamProviders.tempDisableMinutes') }}: {{ row.temp_disable_minutes || 0 }}</span>
+            <div class="tag-list max-w-[18rem]">
+              <span class="info-tag tag-muted">{{ t('admin.upstreamProviders.prefix') }}: {{ row.account_name_prefix || '-' }}</span>
+              <span class="info-tag tag-rate">{{ t('admin.upstreamProviders.accountRateMultiplierScaleShort') }}: {{ formatRateScale(row.account_rate_multiplier_scale) }}</span>
+              <span class="info-tag tag-muted">{{ t('admin.upstreamProviders.tempDisableMinutes') }}: {{ row.temp_disable_minutes || 0 }}</span>
+            </div>
+          </template>
+
+          <template #cell-balance_consumption="{ row }">
+            <div class="balance-cost-cell">
+              <div class="flex flex-wrap items-center gap-2">
+                <span
+                  v-if="providerBalances[row.slug]"
+                  class="balance-pill"
+                  :title="t('admin.upstreamProviders.balance')"
+                >
+                  {{ formatBalance(providerBalances[row.slug].balance) }}
+                </span>
+                <span class="font-mono text-sm font-semibold text-gray-950 dark:text-white">
+                  {{ formatMoney(balanceSummaryFor(row.slug)?.today_consumption) }}
+                </span>
+              </div>
+              <div class="mt-1 flex flex-wrap gap-1">
+                <button
+                  type="button"
+                  class="action-button action-button-inline hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-900/20 dark:hover:text-emerald-300"
+                  :disabled="balanceLoadingSlugs.has(row.slug)"
+                  :title="t('admin.upstreamProviders.fetchBalance')"
+                  @click="fetchProviderBalance(row)"
+                >
+                  <Icon name="dollar" size="sm" :class="balanceLoadingSlugs.has(row.slug) ? 'animate-pulse' : ''" />
+                  <span>{{ t('admin.upstreamProviders.balanceShort') }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="action-button action-button-inline hover:bg-violet-50 hover:text-violet-600 dark:hover:bg-violet-900/20 dark:hover:text-violet-300"
+                  :title="t('common.more')"
+                  @click="openBalanceDetails(row.slug)"
+                >
+                  <Icon name="more" size="sm" />
+                  <span>{{ t('common.more') }}</span>
+                </button>
+                <span :class="['info-tag', balanceSummaryFor(row.slug)?.complete ? 'tag-success' : 'tag-muted']">
+                  {{ balanceSummaryFor(row.slug)?.complete ? t('admin.upstreamProviders.balanceComplete') : t('admin.upstreamProviders.balanceIncomplete') }}
+                </span>
+                <span v-if="balanceSummaryFor(row.slug)?.anomaly" class="info-tag tag-warning">
+                  {{ t('admin.upstreamProviders.balanceAnomaly') }}
+                </span>
+              </div>
             </div>
           </template>
 
@@ -162,23 +207,6 @@
                 <Icon name="key" size="sm" :class="keysLoadingSlug === row.slug ? 'animate-pulse' : ''" />
                 <span>{{ t('admin.upstreamProviders.keysShort') }}</span>
               </button>
-              <button
-                type="button"
-                class="action-button hover:bg-violet-50 hover:text-violet-600 dark:hover:bg-violet-900/20 dark:hover:text-violet-300"
-                :disabled="balanceLoadingSlugs.has(row.slug)"
-                :title="t('admin.upstreamProviders.fetchBalance')"
-                @click="fetchProviderBalance(row)"
-              >
-                <Icon name="dollar" size="sm" :class="balanceLoadingSlugs.has(row.slug) ? 'animate-pulse' : ''" />
-                <span>{{ t('admin.upstreamProviders.balanceShort') }}</span>
-              </button>
-              <span
-                v-if="providerBalances[row.slug]"
-                class="balance-pill"
-                :title="t('admin.upstreamProviders.balance')"
-              >
-                {{ formatBalance(providerBalances[row.slug].balance) }}
-              </span>
               <button
                 type="button"
                 class="action-button hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
@@ -489,6 +517,119 @@
       </div>
     </BaseDialog>
 
+    <div
+      v-if="balanceDetailsOpen"
+      class="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
+      @click.self="closeBalanceDetails"
+    >
+      <div class="balance-dialog">
+        <div class="balance-dialog-header">
+          <div class="min-w-0">
+            <h3 class="truncate text-base font-semibold text-gray-950 dark:text-white">
+              {{ selectedBalanceProviderLabel }}
+            </h3>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              {{ t('admin.upstreamProviders.balanceDialogDescription') }}
+            </p>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" @click="closeBalanceDetails">
+            {{ t('common.close') }}
+          </button>
+        </div>
+
+        <div class="balance-dialog-body">
+          <div class="balance-summary-grid">
+            <div class="balance-metric">
+              <span>{{ t('admin.upstreamProviders.currentBalance') }}</span>
+              <strong>{{ formatMoney(selectedBalanceSummary?.current_balance) }}</strong>
+            </div>
+            <div class="balance-metric">
+              <span>{{ t('admin.upstreamProviders.todayConsumption') }}</span>
+              <strong>{{ formatMoney(selectedBalanceSummary?.today_consumption) }}</strong>
+            </div>
+            <div class="balance-metric">
+              <span>{{ t('admin.upstreamProviders.amountScale') }}</span>
+              <strong>{{ formatScale(selectedBalanceScale) }}</strong>
+            </div>
+            <div class="balance-metric">
+              <span>{{ t('admin.upstreamProviders.lastSnapshot') }}</span>
+              <strong class="text-sm">{{ selectedBalanceSummary?.last_snapshot_at ? formatDateTime(selectedBalanceSummary.last_snapshot_at) : '-' }}</strong>
+            </div>
+          </div>
+
+          <div class="balance-config-panel">
+            <label class="guard-toggle">
+              <input v-model="balanceSamplerForm.enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+              <span>{{ t('admin.upstreamProviders.balanceSamplerAutoRun') }}</span>
+            </label>
+            <label class="guard-interval">
+              <span>{{ t('admin.upstreamProviders.balanceSamplerIntervalSeconds') }}</span>
+              <input v-model.number="balanceSamplerForm.interval_seconds" type="number" min="60" class="input h-9 w-28" />
+            </label>
+            <label class="guard-interval">
+              <span>{{ t('admin.upstreamProviders.amountScale') }}</span>
+              <input v-model.number="selectedProviderScaleInput" type="number" min="0.000001" step="0.000001" class="input h-9 w-28" />
+            </label>
+            <button type="button" class="btn btn-secondary" :disabled="savingBalanceSamplerConfig" @click="saveBalanceSamplerConfig">
+              <Icon name="cog" size="sm" class="mr-2" :class="savingBalanceSamplerConfig ? 'animate-spin' : ''" />
+              {{ t('common.save') }}
+            </button>
+            <button type="button" class="btn btn-primary" :disabled="runningBalanceSampleNow" @click="runBalanceSampleNow">
+              <Icon name="play" size="sm" class="mr-2" :class="runningBalanceSampleNow ? 'animate-pulse' : ''" />
+              {{ t('admin.upstreamProviders.balanceSampleNow') }}
+            </button>
+          </div>
+
+          <div class="balance-recharge-panel">
+            <div class="balance-section-title">{{ t('admin.upstreamProviders.addRecharge') }}</div>
+            <div class="balance-recharge-form">
+              <input v-model.number="rechargeForm.amount" type="number" min="0" step="0.000001" class="input" :placeholder="t('admin.upstreamProviders.rechargeAmount')" />
+              <input v-model="rechargeForm.note" type="text" class="input" :placeholder="t('admin.upstreamProviders.rechargeNote')" />
+              <button type="button" class="btn btn-secondary" :disabled="addingRecharge" @click="addBalanceRecharge">
+                <Icon name="plus" size="sm" class="mr-2" />
+                {{ t('common.add') }}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <div class="balance-section-title">{{ t('admin.upstreamProviders.balanceHistory') }}</div>
+            <div class="max-h-72 overflow-auto rounded-lg border border-gray-200 dark:border-dark-600">
+              <table class="records-table min-w-[760px]">
+                <thead class="bg-gray-50 dark:bg-dark-800">
+                  <tr>
+                    <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamProviders.balanceDate') }}</th>
+                    <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamProviders.openingBalance') }}</th>
+                    <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamProviders.rechargeAmount') }}</th>
+                    <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamProviders.closingBalance') }}</th>
+                    <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamProviders.consumptionAmount') }}</th>
+                    <th class="px-4 py-2 text-left font-medium">{{ t('common.status') }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in selectedBalanceRows" :key="`${row.provider_slug}-${row.date}`" class="records-row">
+                    <td class="px-4 py-3 font-mono text-gray-600 dark:text-gray-300">{{ row.date }}</td>
+                    <td class="px-4 py-3 font-mono">{{ formatMoney(row.opening_balance) }}</td>
+                    <td class="px-4 py-3 font-mono">{{ formatMoney(row.recharge_amount) }}</td>
+                    <td class="px-4 py-3 font-mono">{{ formatMoney(row.closing_balance) }}</td>
+                    <td class="px-4 py-3 font-mono">{{ formatMoney(row.consumption_amount) }}</td>
+                    <td class="px-4 py-3">
+                      <span :class="['record-status', row.anomaly ? 'record-status-error' : row.complete ? 'record-status-success' : 'record-status-muted']">
+                        {{ balanceRowStatus(row) }}
+                      </span>
+                    </td>
+                  </tr>
+                  <tr v-if="!selectedBalanceRows.length">
+                    <td colspan="6" class="px-4 py-8 text-center text-gray-400">{{ t('admin.upstreamProviders.noBalanceHistory') }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <ConfirmDialog
       :show="showDeleteDialog"
       :title="t('common.delete')"
@@ -513,8 +654,15 @@ import type {
   UpstreamProviderTestResult,
   UpstreamProviderTestStage,
 } from '@/api/admin/upstreamProviders'
+import type {
+  UpstreamBalanceConsumptionOverview,
+  UpstreamBalanceDailyRow,
+  UpstreamBalanceProviderSummary,
+  UpstreamBalanceSamplerConfig,
+} from '@/api/admin/upstreamAccountSync'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
+import { formatDateTime } from '@/utils/format'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -545,6 +693,22 @@ const testResult = ref<UpstreamProviderTestResult | null>(null)
 const testingSlugs = ref(new Set<string>())
 const balanceLoadingSlugs = ref(new Set<string>())
 const providerBalances = ref<Record<string, UpstreamProviderBalance>>({})
+const savingBalanceSamplerConfig = ref(false)
+const runningBalanceSampleNow = ref(false)
+const addingRecharge = ref(false)
+const balanceOverview = ref<UpstreamBalanceConsumptionOverview | null>(null)
+const balanceDetailsOpen = ref(false)
+const selectedBalanceProviderSlug = ref('')
+const selectedProviderScaleInput = ref(1)
+const balanceSamplerForm = ref({
+  enabled: false,
+  interval_seconds: 3600,
+  provider_amount_scales: {} as Record<string, number>,
+})
+const rechargeForm = ref({
+  amount: null as number | null,
+  note: '',
+})
 
 const showKeysDialog = ref(false)
 const keysProvider = ref<UpstreamProviderConfig | null>(null)
@@ -575,12 +739,14 @@ const form = reactive<UpstreamProviderConfig>({
 })
 
 const columns = computed<Column[]>(() => [
+  { key: 'homepage', label: t('admin.upstreamProviders.columns.homepage') },
   { key: 'name', label: t('admin.upstreamProviders.columns.name') },
   { key: 'enabled', label: t('admin.upstreamProviders.columns.status') },
   { key: 'base_url', label: t('admin.upstreamProviders.columns.baseUrl') },
   { key: 'auth', label: t('admin.upstreamProviders.columns.auth') },
   { key: 'endpoints', label: t('admin.upstreamProviders.columns.endpoints') },
   { key: 'policy', label: t('admin.upstreamProviders.columns.policy') },
+  { key: 'balance_consumption', label: t('admin.upstreamProviders.columns.balanceConsumption') },
   { key: 'actions', label: t('common.actions') },
 ])
 
@@ -622,6 +788,23 @@ const keysDialogTitle = computed(() => {
 const deleteMessage = computed(() => {
   const name = deletingProvider.value?.name || ''
   return t('admin.upstreamProviders.deleteConfirm', { name })
+})
+const balanceSummaries = computed<Record<string, UpstreamBalanceProviderSummary>>(() => balanceOverview.value?.summaries || {})
+const balanceRows = computed<UpstreamBalanceDailyRow[]>(() => balanceOverview.value?.rows || [])
+const selectedBalanceSummary = computed(() => selectedBalanceProviderSlug.value ? balanceSummaries.value[selectedBalanceProviderSlug.value] : undefined)
+const selectedBalanceRows = computed(() => balanceRows.value.filter(row => row.provider_slug === selectedBalanceProviderSlug.value))
+const selectedBalanceScale = computed(() => {
+  const configured = balanceSamplerForm.value.provider_amount_scales[selectedBalanceProviderSlug.value]
+  if (Number(configured) > 0) return Number(configured)
+  if (Number(selectedBalanceSummary.value?.amount_scale) > 0) return Number(selectedBalanceSummary.value?.amount_scale)
+  return 1
+})
+const selectedBalanceProviderLabel = computed(() => {
+  const slug = selectedBalanceProviderSlug.value
+  if (!slug) return '-'
+  const provider = providers.value.find(item => item.slug === slug)
+  const summary = selectedBalanceSummary.value
+  return provider?.name || summary?.provider_name || slug
 })
 
 function resetForm() {
@@ -689,8 +872,12 @@ function buildPayload(): UpstreamProviderConfig {
 async function reload() {
   loading.value = true
   try {
-    const nextProviders = await adminAPI.upstreamProviders.list()
+    const [nextProviders, balance] = await Promise.all([
+      adminAPI.upstreamProviders.list(),
+      adminAPI.upstreamAccountSync.getBalanceConsumption(30),
+    ])
     providers.value = nextProviders
+    applyBalanceOverview(balance)
     retainBalancesForProviders(nextProviders)
     void fetchProviderBalances(nextProviders)
   } catch (err) {
@@ -825,6 +1012,132 @@ async function fetchProviderBalance(provider: UpstreamProviderConfig, options: {
   }
 }
 
+function applyBalanceOverview(overview: UpstreamBalanceConsumptionOverview) {
+  balanceOverview.value = overview
+  applyBalanceSamplerConfig(overview.config)
+}
+
+function applyBalanceSamplerConfig(config: UpstreamBalanceSamplerConfig) {
+  balanceSamplerForm.value = {
+    enabled: Boolean(config.enabled),
+    interval_seconds: Number(config.interval_seconds) > 0 ? Number(config.interval_seconds) : 3600,
+    provider_amount_scales: { ...(config.provider_amount_scales || {}) },
+  }
+  if (selectedBalanceProviderSlug.value) {
+    selectedProviderScaleInput.value = selectedBalanceScale.value
+  }
+}
+
+async function saveBalanceSamplerConfig() {
+  if (!Number.isInteger(balanceSamplerForm.value.interval_seconds) || balanceSamplerForm.value.interval_seconds < 60) {
+    appStore.showError(t('admin.upstreamProviders.invalidBalanceSamplerInterval'))
+    return
+  }
+  if (!selectedBalanceProviderSlug.value) return
+  const scale = Number(selectedProviderScaleInput.value)
+  if (!Number.isFinite(scale) || scale <= 0) {
+    appStore.showError(t('admin.upstreamProviders.invalidAmountScale'))
+    return
+  }
+  savingBalanceSamplerConfig.value = true
+  try {
+    const providerAmountScales = {
+      ...balanceSamplerForm.value.provider_amount_scales,
+      [selectedBalanceProviderSlug.value]: scale,
+    }
+    const base = balanceOverview.value?.config || { enabled: false, interval_seconds: 3600 }
+    const config = await adminAPI.upstreamAccountSync.updateBalanceSamplerConfig({
+      ...base,
+      enabled: balanceSamplerForm.value.enabled,
+      interval_seconds: balanceSamplerForm.value.interval_seconds,
+      provider_amount_scales: providerAmountScales,
+    })
+    applyBalanceSamplerConfig(config)
+    appStore.showSuccess(t('admin.upstreamProviders.balanceSamplerSaved'))
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamProviders.balanceSamplerSaveFailed')))
+  } finally {
+    savingBalanceSamplerConfig.value = false
+  }
+}
+
+async function runBalanceSampleNow() {
+  runningBalanceSampleNow.value = true
+  try {
+    const config = await adminAPI.upstreamAccountSync.runBalanceSampleNow()
+    applyBalanceSamplerConfig(config)
+    const balance = await adminAPI.upstreamAccountSync.getBalanceConsumption(30)
+    applyBalanceOverview(balance)
+    appStore.showSuccess(t('admin.upstreamProviders.balanceSampleSuccess'))
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamProviders.balanceSampleFailed')))
+  } finally {
+    runningBalanceSampleNow.value = false
+  }
+}
+
+async function addBalanceRecharge() {
+  if (!selectedBalanceProviderSlug.value) return
+  const amount = Number(rechargeForm.value.amount)
+  if (!Number.isFinite(amount) || amount <= 0) {
+    appStore.showError(t('admin.upstreamProviders.invalidRechargeAmount'))
+    return
+  }
+  addingRecharge.value = true
+  try {
+    await adminAPI.upstreamAccountSync.addBalanceRecharge({
+      provider_slug: selectedBalanceProviderSlug.value,
+      amount,
+      amount_scale: selectedBalanceScale.value,
+      note: rechargeForm.value.note.trim() || undefined,
+      occurred_at: new Date().toISOString(),
+    })
+    rechargeForm.value = { amount: null, note: '' }
+    const balance = await adminAPI.upstreamAccountSync.getBalanceConsumption(30)
+    applyBalanceOverview(balance)
+    appStore.showSuccess(t('admin.upstreamProviders.rechargeAdded'))
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamProviders.rechargeAddFailed')))
+  } finally {
+    addingRecharge.value = false
+  }
+}
+
+function openBalanceDetails(providerSlug: string) {
+  selectedBalanceProviderSlug.value = providerSlug
+  selectedProviderScaleInput.value = selectedBalanceScale.value
+  balanceDetailsOpen.value = true
+}
+
+function closeBalanceDetails() {
+  balanceDetailsOpen.value = false
+}
+
+function balanceSummaryFor(providerSlug: string | undefined) {
+  if (!providerSlug) return undefined
+  return balanceSummaries.value[providerSlug]
+}
+
+function balanceRowStatus(row: UpstreamBalanceDailyRow) {
+  if (row.anomaly) return t('admin.upstreamProviders.balanceAnomaly')
+  if (row.complete) return t('admin.upstreamProviders.balanceComplete')
+  return t('admin.upstreamProviders.balanceIncomplete')
+}
+
+function formatScale(value: number | undefined) {
+  const n = Number(value)
+  return Number.isFinite(n) && n > 0 ? `${n.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')}x` : '-'
+}
+
+function formatMoney(value: number | undefined) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return '-'
+  return n.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 6,
+  })
+}
+
 function closeKeysDialog() {
   showKeysDialog.value = false
   keysProvider.value = null
@@ -858,6 +1171,17 @@ function providerTypeLabel(type: string) {
 function providerTypeClass(type: string) {
   if (type === 'newapi') return 'badge-primary'
   return 'badge-gray'
+}
+
+function providerToneClass(providerSlug: string | undefined, target: 'card' | 'tag') {
+  const tones = ['sky', 'emerald', 'violet', 'cyan', 'rose', 'amber', 'indigo', 'teal']
+  const slug = providerSlug?.trim() || 'default'
+  let hash = 0
+  for (let i = 0; i < slug.length; i++) {
+    hash = (hash * 31 + slug.charCodeAt(i)) >>> 0
+  }
+  const tone = tones[hash % tones.length]
+  return `${target === 'card' ? 'provider-name-card' : 'provider-slug-tag'}-${tone}`
 }
 
 function availableGroupsURL(provider: UpstreamProviderConfig) {
@@ -917,6 +1241,175 @@ onMounted(reload)
 <style scoped>
 .action-button {
   @apply flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.action-button-inline {
+  @apply flex-row items-center gap-1 px-2 py-1 text-xs;
+}
+
+.homepage-button {
+  @apply inline-flex items-center gap-1.5 rounded-md bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-700 ring-1 ring-sky-200 hover:bg-sky-100 dark:bg-sky-950/30 dark:text-sky-300 dark:ring-sky-800/60 dark:hover:bg-sky-900/40;
+}
+
+.provider-name-card {
+  @apply rounded-lg border px-3 py-2 shadow-sm;
+}
+
+.provider-name-card-sky {
+  @apply border-sky-200 bg-sky-50/70 text-sky-950 dark:border-sky-800/50 dark:bg-sky-950/20 dark:text-white;
+}
+
+.provider-name-card-emerald {
+  @apply border-emerald-200 bg-emerald-50/70 text-emerald-950 dark:border-emerald-800/50 dark:bg-emerald-950/20 dark:text-white;
+}
+
+.provider-name-card-violet {
+  @apply border-violet-200 bg-violet-50/70 text-violet-950 dark:border-violet-800/50 dark:bg-violet-950/20 dark:text-white;
+}
+
+.provider-name-card-cyan {
+  @apply border-cyan-200 bg-cyan-50/70 text-cyan-950 dark:border-cyan-800/50 dark:bg-cyan-950/20 dark:text-white;
+}
+
+.provider-name-card-rose {
+  @apply border-rose-200 bg-rose-50/70 text-rose-950 dark:border-rose-800/50 dark:bg-rose-950/20 dark:text-white;
+}
+
+.provider-name-card-amber {
+  @apply border-amber-200 bg-amber-50/70 text-amber-950 dark:border-amber-800/50 dark:bg-amber-950/20 dark:text-white;
+}
+
+.provider-name-card-indigo {
+  @apply border-indigo-200 bg-indigo-50/70 text-indigo-950 dark:border-indigo-800/50 dark:bg-indigo-950/20 dark:text-white;
+}
+
+.provider-name-card-teal {
+  @apply border-teal-200 bg-teal-50/70 text-teal-950 dark:border-teal-800/50 dark:bg-teal-950/20 dark:text-white;
+}
+
+.provider-slug-tag {
+  @apply inline-flex items-center rounded-md px-2 py-1 font-mono text-xs font-semibold ring-1;
+}
+
+.provider-slug-tag-sky {
+  @apply bg-sky-100 text-sky-700 ring-sky-200 dark:bg-sky-950/50 dark:text-sky-300 dark:ring-sky-800/60;
+}
+
+.provider-slug-tag-emerald {
+  @apply bg-emerald-100 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:ring-emerald-800/60;
+}
+
+.provider-slug-tag-violet {
+  @apply bg-violet-100 text-violet-700 ring-violet-200 dark:bg-violet-950/50 dark:text-violet-300 dark:ring-violet-800/60;
+}
+
+.provider-slug-tag-cyan {
+  @apply bg-cyan-100 text-cyan-700 ring-cyan-200 dark:bg-cyan-950/50 dark:text-cyan-300 dark:ring-cyan-800/60;
+}
+
+.provider-slug-tag-rose {
+  @apply bg-rose-100 text-rose-700 ring-rose-200 dark:bg-rose-950/50 dark:text-rose-300 dark:ring-rose-800/60;
+}
+
+.provider-slug-tag-amber {
+  @apply bg-amber-100 text-amber-700 ring-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:ring-amber-800/60;
+}
+
+.provider-slug-tag-indigo {
+  @apply bg-indigo-100 text-indigo-700 ring-indigo-200 dark:bg-indigo-950/50 dark:text-indigo-300 dark:ring-indigo-800/60;
+}
+
+.provider-slug-tag-teal {
+  @apply bg-teal-100 text-teal-700 ring-teal-200 dark:bg-teal-950/50 dark:text-teal-300 dark:ring-teal-800/60;
+}
+
+.provider-url-tag {
+  @apply inline-flex max-w-full items-center rounded-md bg-gray-100 px-2 py-1 font-mono text-xs text-gray-700 ring-1 ring-gray-200 dark:bg-dark-700 dark:text-gray-200 dark:ring-dark-600;
+}
+
+.info-tag {
+  @apply inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1;
+}
+
+.tag-auth {
+  @apply bg-indigo-50 font-mono text-indigo-700 ring-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 dark:ring-indigo-800/60;
+}
+
+.tag-rate {
+  @apply bg-violet-50 font-mono text-violet-700 ring-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:ring-violet-800/60;
+}
+
+.tag-warning {
+  @apply bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-900/20 dark:text-amber-200 dark:ring-amber-700/40;
+}
+
+.tag-success {
+  @apply bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-800/60;
+}
+
+.tag-muted {
+  @apply bg-gray-100 text-gray-600 ring-gray-200 dark:bg-dark-700 dark:text-gray-300 dark:ring-dark-600;
+}
+
+.endpoint-tag {
+  @apply inline-flex max-w-full items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-xs ring-1 ring-gray-200 dark:bg-dark-700 dark:ring-dark-600;
+}
+
+.endpoint-tag span {
+  @apply shrink-0 text-gray-500 dark:text-gray-400;
+}
+
+.endpoint-tag code {
+  @apply truncate font-mono text-gray-700 dark:text-gray-200;
+}
+
+.balance-cost-cell {
+  @apply min-w-[12rem] leading-tight;
+}
+
+.balance-dialog {
+  @apply max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-dark-800;
+}
+
+.balance-dialog-header {
+  @apply flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4 dark:border-dark-600;
+}
+
+.balance-dialog-body {
+  @apply max-h-[calc(90vh-5rem)] space-y-4 overflow-auto p-5;
+}
+
+.balance-summary-grid {
+  @apply grid gap-3 md:grid-cols-4;
+}
+
+.balance-metric {
+  @apply rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 dark:border-dark-600 dark:bg-dark-900/40;
+}
+
+.balance-metric span {
+  @apply block text-xs font-medium text-gray-500 dark:text-gray-400;
+}
+
+.balance-metric strong {
+  @apply mt-1 block font-mono text-lg text-gray-950 dark:text-white;
+}
+
+.balance-config-panel,
+.balance-recharge-panel {
+  @apply rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800/70;
+}
+
+.balance-config-panel {
+  @apply flex flex-wrap items-center gap-3;
+}
+
+.balance-recharge-form {
+  @apply mt-3 grid gap-3 md:grid-cols-[12rem_1fr_auto];
+}
+
+.balance-section-title {
+  @apply text-sm font-semibold text-gray-900 dark:text-white;
 }
 
 .balance-pill {

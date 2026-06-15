@@ -1,4 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
+import { h } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import UpstreamAccountsView from './UpstreamAccountsView.vue'
@@ -250,65 +251,17 @@ describe('UpstreamAccountsView', () => {
     expect(homepage.attributes('target')).toBe('_blank')
   })
 
-  it('renders balance consumption summary in the account table', async () => {
-    upstreamAccountSyncMock.getPreview.mockResolvedValueOnce({
-      default_provider: {},
-      providers: [{ slug: 'upstream-a', name: 'Upstream A' }],
-      summary: {
-        upstream_key_count: 1,
-        matched_account_count: 0,
-        create_count: 1,
-        update_count: 0,
-        skip_count: 0,
-        conflict_count: 0,
-        rate_violation_count: 0,
-        unbound_group_count: 0,
-      },
-      items: [
-        {
-          action: 'create',
-          provider_slug: 'upstream-a',
-          provider_name: 'Upstream A',
-          upstream_key_name: 'key-a',
-          local_account_name: 'local-a',
-          upstream_group_name: 'vip',
-          upstream_rate_multiplier: 1,
-          rate_violation: false,
-        },
-      ],
-      warnings: [],
-      records: [],
-    })
-    upstreamAccountSyncMock.getBalanceConsumption.mockResolvedValueOnce({
-      config: {
-        enabled: true,
-        interval_seconds: 600,
-        provider_amount_scales: { 'upstream-a': 1.2 },
-      },
-      summaries: {
-        'upstream-a': {
-          provider_slug: 'upstream-a',
-          provider_name: 'Upstream A',
-          current_balance: 80,
-          today_consumption: 24.5,
-          amount_scale: 1.2,
-          complete: true,
-          anomaly: false,
-          snapshot_count: 2,
-          last_snapshot_at: '2026-06-15T12:00:00Z',
-        },
-      },
-      rows: [],
-    })
-
+  it('does not expose provider balance consumption as an account table column', async () => {
     const wrapper = mount(UpstreamAccountsView, {
       global: {
         stubs: {
           AppLayout: { template: '<div><slot /></div>' },
           TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
           DataTable: {
-            props: ['data'],
-            template: '<div><div v-for="row in data" :key="row.upstream_key_name"><slot name="cell-balance_consumption" :row="row" /></div></div>',
+            props: ['columns'],
+            setup(props) {
+              return () => h('div', { class: 'columns' }, props.columns.map((column: any) => column.key).join(','))
+            },
           },
           EmptyState: true,
           Icon: true,
@@ -319,7 +272,6 @@ describe('UpstreamAccountsView', () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).toContain('24.50')
-    expect(wrapper.text()).toContain('admin.upstreamAccounts.balanceComplete')
+    expect(wrapper.find('.columns').text()).not.toContain('balance_consumption')
   })
 })

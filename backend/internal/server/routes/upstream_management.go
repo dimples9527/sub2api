@@ -46,5 +46,11 @@ func registerUpstreamManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 			accounts.POST("/balance-consumption/samples", h.Admin.UpstreamAccountSync.RunBalanceSampleNow)
 			accounts.GET("/balance-consumption/poll-logs", h.Admin.UpstreamAccountSync.BalanceSamplerPollLogs)
 		}
+		providers.GET("/balance-consumption", h.Admin.UpstreamAccountSync.BalanceConsumptionOverview)
+		providers.GET("/balance-consumption/config", h.Admin.UpstreamAccountSync.GetBalanceSamplerConfig)
+		providers.PUT("/balance-consumption/config", h.Admin.UpstreamAccountSync.UpdateBalanceSamplerConfig)
+		providers.POST("/balance-consumption/recharges", h.Admin.UpstreamAccountSync.AddBalanceRecharge)
+		providers.POST("/balance-consumption/samples", h.Admin.UpstreamAccountSync.RunBalanceSampleNow)
+		providers.GET("/balance-consumption/poll-logs", h.Admin.UpstreamAccountSync.BalanceSamplerPollLogs)
 	}
 }
