@@ -3,10 +3,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import UpstreamAccountsView from './UpstreamAccountsView.vue'
 
-const { upstreamAccountSyncMock } = vi.hoisted(() => ({
+const { upstreamAccountSyncMock, appStoreMock } = vi.hoisted(() => ({
   upstreamAccountSyncMock: {
     getPreview: vi.fn(),
     getRateGuardConfig: vi.fn(),
+    runRateGuardNow: vi.fn(),
+  },
+  appStoreMock: {
+    showError: vi.fn(),
+    showSuccess: vi.fn(),
+    showWarning: vi.fn(),
   },
 }))
 
@@ -33,14 +39,12 @@ vi.mock('@/api/admin/index', () => ({
 }))
 
 vi.mock('@/stores/app', () => ({
-  useAppStore: () => ({
-    showError: vi.fn(),
-    showSuccess: vi.fn(),
-  }),
+  useAppStore: () => appStoreMock,
 }))
 
 describe('UpstreamAccountsView', () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     upstreamAccountSyncMock.getPreview.mockResolvedValue({
       default_provider: {},
       providers: [],
@@ -90,6 +94,11 @@ describe('UpstreamAccountsView', () => {
       enabled: false,
       interval_seconds: 3600,
     })
+    upstreamAccountSyncMock.runRateGuardNow.mockResolvedValue({
+      enabled: false,
+      interval_seconds: 3600,
+      last_run_status: 'success',
+    })
   })
 
   it('renders sync log entries when legacy remaining group ids are null', async () => {
@@ -110,5 +119,67 @@ describe('UpstreamAccountsView', () => {
 
     expect(wrapper.text()).toContain('local-a')
     expect(wrapper.text()).toContain('-')
+  })
+
+  it('warns when manual rate guard leaves rate risks after refresh', async () => {
+    upstreamAccountSyncMock.getPreview
+      .mockResolvedValueOnce({
+        default_provider: {},
+        providers: [],
+        summary: {
+          upstream_key_count: 0,
+          matched_account_count: 0,
+          create_count: 0,
+          update_count: 0,
+          skip_count: 0,
+          conflict_count: 0,
+          rate_violation_count: 0,
+          unbound_group_count: 0,
+        },
+        items: [],
+        warnings: [],
+        records: [],
+      })
+      .mockResolvedValueOnce({
+        default_provider: {},
+        providers: [],
+        summary: {
+          upstream_key_count: 1,
+          matched_account_count: 1,
+          create_count: 0,
+          update_count: 1,
+          skip_count: 0,
+          conflict_count: 0,
+          rate_violation_count: 1,
+          unbound_group_count: 0,
+        },
+        items: [],
+        warnings: [],
+        records: [],
+      })
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: { template: '<div><slot name="empty" /></div>' },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+        },
+      },
+    })
+
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text().includes('admin.upstreamAccounts.rateGuardRunNow'))?.trigger('click')
+    await flushPromises()
+
+    expect(appStoreMock.showWarning).toHaveBeenCalledWith(
+      'admin.upstreamAccounts.rateGuardRunCompletedWithRisks'
+    )
+    expect(appStoreMock.showSuccess).not.toHaveBeenCalledWith(
+      'admin.upstreamAccounts.rateGuardRunSuccess'
+    )
   })
 })

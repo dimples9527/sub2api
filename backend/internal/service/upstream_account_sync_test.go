@@ -943,6 +943,78 @@ func TestUpstreamAccountRateGuardUsesProviderAccountRateMultiplierScale(t *testi
 	}
 }
 
+func TestUpstreamAccountRateGuardUnbindsLowGroupsForUnschedulableAccounts(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup", BaseURL: "https://backup.example.com", AccountNamePrefix: "up-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {
+				{ProviderSlug: "backup", KeyName: "matched", GroupName: "Trial", RateMultiplier: 0.13},
+			},
+		},
+	}
+	settings := newUpstreamManagementSettingRepoStub()
+	svc, accounts := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{
+			{ID: 8, Name: "Trial", Platform: PlatformOpenAI, RateMultiplier: 0.1, Status: StatusActive},
+		},
+		[]Account{{
+			ID:          10,
+			Name:        "up-matched",
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Schedulable: false,
+			Credentials: map[string]any{"api_key": "matched", "base_url": "https://backup.example.com"},
+			GroupIDs:    []int64{8},
+			Groups: []*Group{
+				{ID: 8, Name: "Trial", RateMultiplier: 0.1},
+			},
+		}},
+		settings,
+	)
+
+	cfg, err := svc.RunScheduledRateGuard(context.Background())
+	if err != nil {
+		t.Fatalf("RunScheduledRateGuard returned error: %v", err)
+	}
+	if cfg.LastRunAt == nil || cfg.LastRunStatus != "success" {
+		t.Fatalf("run config = %+v, want successful last run", cfg)
+	}
+	if len(accounts.updateInputs) != 1 {
+		t.Fatalf("update count = %d, want one rate guard update", len(accounts.updateInputs))
+	}
+	update := accounts.updateInputs[0]
+	if update.input.GroupIDs == nil || len(*update.input.GroupIDs) != 0 {
+		t.Fatalf("updated group ids = %+v, want empty groups", update.input.GroupIDs)
+	}
+
+	rawRecords := settings.values[SettingKeyUpstreamAccountSyncRecords]
+	var records []UpstreamAccountSyncRecord
+	if err := json.Unmarshal([]byte(rawRecords), &records); err != nil {
+		t.Fatalf("decode records: %v raw=%s", err, rawRecords)
+	}
+	if len(records) != 1 || records[0].UnboundGroupCount != 1 || records[0].RateViolationCount != 1 {
+		t.Fatalf("records = %+v, want one rate guard unbind record", records)
+	}
+	if len(records[0].UnbindDetails) != 1 {
+		t.Fatalf("unbind details = %+v, want one detail", records[0].UnbindDetails)
+	}
+	detail := records[0].UnbindDetails[0]
+	if detail.MatchedLocalAccountID != 10 || detail.UpstreamRateMultiplier != 0.13 {
+		t.Fatalf("unbind detail = %+v, want account 10 with upstream rate 0.13", detail)
+	}
+	if len(detail.UnboundGroupIDs) != 1 || detail.UnboundGroupIDs[0] != 8 {
+		t.Fatalf("unbound groups = %+v, want [8]", detail.UnboundGroupIDs)
+	}
+	if len(detail.RemainingGroupIDs) != 0 {
+		t.Fatalf("remaining groups = %+v, want empty", detail.RemainingGroupIDs)
+	}
+}
+
 func TestUpstreamAccountRateGuardUnbindsLowGroupsWithoutActionUpdate(t *testing.T) {
 	provider := &upstreamAccountSyncProviderSourceStub{
 		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},

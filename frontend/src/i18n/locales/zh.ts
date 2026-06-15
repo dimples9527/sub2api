@@ -1690,6 +1690,7 @@ export default {
       rateGuardSaveFailed: '保存账号倍率守护设置失败',
       rateGuardRunNow: '立即执行',
       rateGuardRunSuccess: '账号倍率守护执行完成',
+      rateGuardRunCompletedWithRisks: '账号倍率守护执行完成，仍有 {count} 条倍率风险未解除，请查看同步日志或刷新后重试',
       rateGuardRunFailed: '账号倍率守护执行失败',
       rateGuardPollLogs: '倍率守护调度日志',
       rateGuardPollLogsDescription: '仅保留当前进程最新 10 条执行、跳过或异常记录，不再记录未到期的每秒检查。',

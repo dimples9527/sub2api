@@ -1669,6 +1669,7 @@ export default {
       rateGuardSaveFailed: 'Failed to save account rate guard settings',
       rateGuardRunNow: 'Run now',
       rateGuardRunSuccess: 'Account rate guard completed',
+      rateGuardRunCompletedWithRisks: 'Account rate guard completed, but {count} rate risk(s) remain. Check sync logs or refresh and retry.',
       rateGuardRunFailed: 'Failed to run account rate guard',
       rateGuardPollLogs: 'Rate guard scheduler logs',
       rateGuardPollLogsDescription: 'Keeps the latest 10 execution, skipped, or error records in this process. Waiting checks before the next due time are not logged.',

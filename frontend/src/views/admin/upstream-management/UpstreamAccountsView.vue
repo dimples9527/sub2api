@@ -547,7 +547,12 @@ async function runRateGuardNow() {
     applyRateGuardConfig(config)
     const preview = await adminAPI.upstreamAccountSync.getPreview()
     result.value = preview
-    appStore.showSuccess(t('admin.upstreamAccounts.rateGuardRunSuccess'))
+    const remainingRisks = preview.summary?.rate_violation_count || 0
+    if (remainingRisks > 0) {
+      appStore.showWarning(t('admin.upstreamAccounts.rateGuardRunCompletedWithRisks', { count: remainingRisks }))
+    } else {
+      appStore.showSuccess(t('admin.upstreamAccounts.rateGuardRunSuccess'))
+    }
   } catch (err) {
     appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.rateGuardRunFailed')))
   } finally {
