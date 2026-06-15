@@ -75,6 +75,7 @@ type UpstreamAccountSyncItem struct {
 	Action                 string                               `json:"action"`
 	ProviderSlug           string                               `json:"provider_slug"`
 	ProviderName           string                               `json:"provider_name"`
+	ProviderBaseURL        string                               `json:"provider_base_url,omitempty"`
 	UpstreamKeyName        string                               `json:"upstream_key_name"`
 	LocalAccountName       string                               `json:"local_account_name"`
 	MatchedAccountID       *int64                               `json:"matched_account_id,omitempty"`
@@ -518,6 +519,7 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context) (UpstreamAccou
 			item := UpstreamAccountSyncItem{
 				ProviderSlug:           provider.Slug,
 				ProviderName:           provider.Name,
+				ProviderBaseURL:        provider.BaseURL,
 				UpstreamKeyName:        strings.TrimSpace(key.KeyName),
 				LocalAccountName:       upstreamProviderKeyName(provider, key.KeyName),
 				UpstreamGroupName:      strings.TrimSpace(key.GroupName),

@@ -194,6 +194,9 @@ func TestUpstreamAccountSyncPreviewUsesNonDefaultProvidersAndManualGroupMapping(
 	if item.LocalAccountName != "backup-alice" {
 		t.Fatalf("local account name = %q, want backup-alice", item.LocalAccountName)
 	}
+	if item.ProviderBaseURL != "https://backup.example.com" {
+		t.Fatalf("provider base url = %q, want backup provider base url", item.ProviderBaseURL)
+	}
 	if item.LocalGroupID == nil || *item.LocalGroupID != 9 || item.LocalGroupName != "Mapped VIP" {
 		t.Fatalf("local group match = id %v name %q, want 9 Mapped VIP", item.LocalGroupID, item.LocalGroupName)
 	}

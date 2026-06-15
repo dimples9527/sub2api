@@ -156,7 +156,20 @@
             <DataTable :columns="columns" :data="filteredItems" :loading="loading">
               <template #cell-source="{ row }">
                 <div :class="['source-card min-w-[12rem]', providerToneClass(row.provider_slug, 'card')]">
-                  <span class="font-semibold text-gray-950 dark:text-white">{{ row.provider_name || row.provider_slug }}</span>
+                  <div class="flex items-center gap-2">
+                    <span class="min-w-0 flex-1 truncate font-semibold text-gray-950 dark:text-white">{{ row.provider_name || row.provider_slug }}</span>
+                    <a
+                      v-if="row.provider_base_url"
+                      :href="row.provider_base_url"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="source-home-link"
+                      :title="t('admin.upstreamProviders.openHomepage')"
+                    >
+                      <Icon name="home" size="sm" />
+                      <span>{{ t('admin.upstreamProviders.homepageShort') }}</span>
+                    </a>
+                  </div>
                   <code :class="['table-tag', providerToneClass(row.provider_slug, 'tag')]">{{ row.provider_slug }}</code>
                 </div>
               </template>
@@ -732,7 +745,7 @@ onMounted(reload)
 }
 
 .accounts-table-primary {
-  @apply flex flex-none flex-col overflow-hidden rounded-lg border border-gray-100 dark:border-dark-700;
+  @apply flex flex-none flex-col overflow-hidden;
   height: clamp(28rem, 52vh, 42rem);
   min-height: 28rem;
 }
@@ -781,6 +794,10 @@ onMounted(reload)
 .key-card,
 .account-card {
   @apply flex flex-col gap-2 rounded-md border px-3 py-2 leading-tight;
+}
+
+.source-home-link {
+  @apply inline-flex shrink-0 flex-col items-center gap-0.5 rounded-md p-1 text-xs font-medium text-gray-500 transition-colors hover:bg-white/70 hover:text-sky-600 dark:text-gray-400 dark:hover:bg-dark-700/70 dark:hover:text-sky-300;
 }
 
 .account-card-new {

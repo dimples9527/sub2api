@@ -18,6 +18,7 @@ export interface UpstreamAccountSyncItem {
   action: UpstreamAccountSyncAction
   provider_slug: string
   provider_name: string
+  provider_base_url?: string
   upstream_key_name: string
   local_account_name: string
   matched_account_id?: number

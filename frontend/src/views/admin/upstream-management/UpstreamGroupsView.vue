@@ -717,7 +717,7 @@ onMounted(reload)
 }
 
 .groups-table-primary {
-  @apply flex flex-none flex-col overflow-hidden rounded-lg border border-gray-100 dark:border-dark-700;
+  @apply flex flex-none flex-col overflow-hidden;
   height: clamp(28rem, 54vh, 44rem);
   min-height: 28rem;
 }

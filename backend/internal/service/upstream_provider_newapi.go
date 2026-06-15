@@ -30,6 +30,8 @@ type newAPIProviderGroupRatio struct {
 	valid bool
 }
 
+const defaultNewAPIProviderBalanceURL = "/api/user/self"
+
 func (r *newAPIProviderGroupRatio) UnmarshalJSON(raw []byte) error {
 	value := strings.TrimSpace(string(raw))
 	if value == "" || value == "null" {
@@ -140,6 +142,37 @@ func (a *NewAPIProviderAdapter) FetchGroups(ctx context.Context, provider Upstre
 		return groups, nil, nil
 	}
 	return nil, nil, fmt.Errorf("newapi provider groups failed after auth retry")
+}
+
+func (a *NewAPIProviderAdapter) FetchBalance(ctx context.Context, provider UpstreamProviderConfig) (UpstreamProviderBalance, error) {
+	for attempt := 0; attempt < 2; attempt++ {
+		session, err := a.ensureSession(ctx, provider)
+		if err != nil {
+			return UpstreamProviderBalance{}, err
+		}
+		payload, status, err := a.request(ctx, provider, session, defaultNewAPIProviderBalanceURL, "newapi provider balance")
+		if err != nil {
+			return UpstreamProviderBalance{}, err
+		}
+		if status < 200 || status >= 300 {
+			requestErr := upstreamProviderHTTPError("newapi provider balance", status, payload)
+			if attempt == 0 && upstreamProviderAuthFailureHint(status, payload, requestErr) {
+				a.clearSession(provider.Slug)
+				continue
+			}
+			return UpstreamProviderBalance{}, requestErr
+		}
+		balance, err := parseNewAPIProviderBalance(provider, payload)
+		if err != nil {
+			if attempt == 0 && upstreamProviderAuthFailureHint(status, payload, err) {
+				a.clearSession(provider.Slug)
+				continue
+			}
+			return UpstreamProviderBalance{}, err
+		}
+		return balance, nil
+	}
+	return UpstreamProviderBalance{}, fmt.Errorf("newapi provider balance failed after auth retry")
 }
 
 func (a *NewAPIProviderAdapter) Test(ctx context.Context, provider UpstreamProviderConfig) UpstreamProviderTestResult {
@@ -441,6 +474,31 @@ func parseNewAPIProviderGroups(provider UpstreamProviderConfig, groupsPayload []
 		})
 	}
 	return groups, nil
+}
+
+func parseNewAPIProviderBalance(provider UpstreamProviderConfig, payload []byte) (UpstreamProviderBalance, error) {
+	var resp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			Quota float64 `json:"quota"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(payload, &resp); err != nil {
+		return UpstreamProviderBalance{}, fmt.Errorf("decode newapi provider balance response: %w", err)
+	}
+	if !resp.Success {
+		if resp.Message == "" {
+			resp.Message = "unknown error"
+		}
+		return UpstreamProviderBalance{}, fmt.Errorf("newapi provider balance failed: %s", resp.Message)
+	}
+	return UpstreamProviderBalance{
+		ProviderSlug: provider.Slug,
+		ProviderName: provider.Name,
+		ProviderType: provider.Type,
+		Balance:      resp.Data.Quota / 500000,
+	}, nil
 }
 
 func countNewAPIProviderKeys(payload []byte) (int, error) {

@@ -19,6 +19,7 @@ func registerUpstreamManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 			providers.POST("/:slug/default", h.Admin.UpstreamProvider.SetDefault)
 			providers.POST("/:slug/test", h.Admin.UpstreamProvider.TestSaved)
 			providers.GET("/:slug/keys", h.Admin.UpstreamProvider.Keys)
+			providers.GET("/:slug/balance", h.Admin.UpstreamProvider.Balance)
 		}
 		groups := upstream.Group("/groups")
 		{

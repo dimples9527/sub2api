@@ -65,6 +65,13 @@ export interface UpstreamProviderKeysResult {
   warnings: string[]
 }
 
+export interface UpstreamProviderBalance {
+  provider_slug: string
+  provider_name: string
+  provider_type: string
+  balance: number
+}
+
 export async function list(): Promise<UpstreamProviderConfig[]> {
   const { data } = await apiClient.get<UpstreamProviderConfig[]>(
     '/admin/upstream-management/providers'
@@ -129,6 +136,13 @@ export async function getKeys(slug: string): Promise<UpstreamProviderKeysResult>
   return data
 }
 
+export async function getBalance(slug: string): Promise<UpstreamProviderBalance> {
+  const { data } = await apiClient.get<UpstreamProviderBalance>(
+    `/admin/upstream-management/providers/${encodeURIComponent(slug)}/balance`
+  )
+  return data
+}
+
 export const upstreamProvidersAPI = {
   list,
   create,
@@ -137,7 +151,8 @@ export const upstreamProvidersAPI = {
   setDefault,
   testSaved,
   testConfig,
-  getKeys
+  getKeys,
+  getBalance
 }
 
 export default upstreamProvidersAPI

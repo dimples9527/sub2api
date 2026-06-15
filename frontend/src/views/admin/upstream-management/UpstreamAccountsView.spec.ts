@@ -182,4 +182,58 @@ describe('UpstreamAccountsView', () => {
       'admin.upstreamAccounts.rateGuardRunSuccess'
     )
   })
+
+  it('renders provider homepage link in source column', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValueOnce({
+      default_provider: {},
+      providers: [],
+      summary: {
+        upstream_key_count: 1,
+        matched_account_count: 0,
+        create_count: 1,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'create',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          provider_base_url: 'https://upstream.example.com',
+          upstream_key_name: 'key-a',
+          local_account_name: 'local-a',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 1,
+          rate_violation: false,
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            template: '<div><div v-for="row in data" :key="row.upstream_key_name"><slot name="cell-source" :row="row" /></div></div>',
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const homepage = wrapper.find('a[href="https://upstream.example.com"]')
+    expect(homepage.exists()).toBe(true)
+    expect(homepage.attributes('target')).toBe('_blank')
+  })
 })

@@ -69,7 +69,20 @@
           </template>
 
           <template #cell-base_url="{ value }">
-            <code class="block max-w-xs truncate text-xs" :title="value">{{ value || '-' }}</code>
+            <div class="flex max-w-xs items-center gap-2">
+              <code class="block min-w-0 flex-1 truncate text-xs" :title="value">{{ value || '-' }}</code>
+              <a
+                v-if="value"
+                :href="value"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="action-button shrink-0 hover:bg-sky-50 hover:text-sky-600 dark:hover:bg-sky-900/20 dark:hover:text-sky-300"
+                :title="t('admin.upstreamProviders.openHomepage')"
+              >
+                <Icon name="home" size="sm" />
+                <span>{{ t('admin.upstreamProviders.homepageShort') }}</span>
+              </a>
+            </div>
           </template>
 
           <template #cell-auth="{ row }">
@@ -149,6 +162,23 @@
                 <Icon name="key" size="sm" :class="keysLoadingSlug === row.slug ? 'animate-pulse' : ''" />
                 <span>{{ t('admin.upstreamProviders.keysShort') }}</span>
               </button>
+              <button
+                type="button"
+                class="action-button hover:bg-violet-50 hover:text-violet-600 dark:hover:bg-violet-900/20 dark:hover:text-violet-300"
+                :disabled="balanceLoadingSlugs.has(row.slug)"
+                :title="t('admin.upstreamProviders.fetchBalance')"
+                @click="fetchProviderBalance(row)"
+              >
+                <Icon name="dollar" size="sm" :class="balanceLoadingSlugs.has(row.slug) ? 'animate-pulse' : ''" />
+                <span>{{ t('admin.upstreamProviders.balanceShort') }}</span>
+              </button>
+              <span
+                v-if="providerBalances[row.slug]"
+                class="balance-pill"
+                :title="t('admin.upstreamProviders.balance')"
+              >
+                {{ formatBalance(providerBalances[row.slug].balance) }}
+              </span>
               <button
                 type="button"
                 class="action-button hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
@@ -235,11 +265,11 @@
         <div class="grid gap-4 md:grid-cols-2">
           <div class="md:col-span-2">
             <label class="input-label">{{ t('admin.upstreamProviders.baseUrl') }}</label>
-            <input v-model.trim="form.base_url" required type="url" class="input" placeholder="https://example.com" />
+            <input v-model.trim="form.base_url" required type="url" class="input" list="upstream-provider-base-url-options" placeholder="https://example.com" />
           </div>
           <div>
             <label class="input-label">{{ t('admin.upstreamProviders.apiKeysUrl') }}</label>
-            <input v-model.trim="form.api_keys_url" required type="text" class="input" placeholder="/api/token/" />
+            <input v-model.trim="form.api_keys_url" required type="text" class="input" list="upstream-provider-api-keys-url-options" placeholder="/api/token/" />
           </div>
           <div>
             <label class="input-label">
@@ -251,12 +281,13 @@
               :required="form.type === 'newapi'"
               type="text"
               class="input"
+              list="upstream-provider-login-url-options"
               :placeholder="form.type === 'sub2api' ? '/api/v1/auth/login' : '/api/user/login'"
             />
           </div>
           <div v-if="form.type === 'newapi'" class="md:col-span-2">
             <label class="input-label">{{ t('admin.upstreamProviders.groupsUrl') }}</label>
-            <input v-model.trim="form.groups_url" required type="text" class="input" placeholder="/api/group/" />
+            <input v-model.trim="form.groups_url" required type="text" class="input" list="upstream-provider-groups-url-options" placeholder="/api/group/" />
           </div>
           <div class="md:col-span-2">
             <label class="input-label">
@@ -267,10 +298,27 @@
               v-model.trim="form.available_groups_url"
               type="text"
               class="input"
+              list="upstream-provider-available-groups-url-options"
               placeholder="/api/v1/groups/available?timezone=Asia%2FShanghai"
             />
           </div>
         </div>
+
+        <datalist id="upstream-provider-base-url-options">
+          <option v-for="option in urlOptions.base_url" :key="`base-${option}`" :value="option" />
+        </datalist>
+        <datalist id="upstream-provider-api-keys-url-options">
+          <option v-for="option in urlOptions.api_keys_url" :key="`keys-${option}`" :value="option" />
+        </datalist>
+        <datalist id="upstream-provider-login-url-options">
+          <option v-for="option in urlOptions.login_url" :key="`login-${option}`" :value="option" />
+        </datalist>
+        <datalist id="upstream-provider-groups-url-options">
+          <option v-for="option in urlOptions.groups_url" :key="`groups-${option}`" :value="option" />
+        </datalist>
+        <datalist id="upstream-provider-available-groups-url-options">
+          <option v-for="option in urlOptions.available_groups_url" :key="`available-groups-${option}`" :value="option" />
+        </datalist>
 
         <div class="grid gap-4 md:grid-cols-2">
           <div>
@@ -459,6 +507,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type {
+  UpstreamProviderBalance,
   UpstreamProviderConfig,
   UpstreamProviderKey,
   UpstreamProviderTestResult,
@@ -494,6 +543,8 @@ const testingDraft = ref(false)
 const showTestDialog = ref(false)
 const testResult = ref<UpstreamProviderTestResult | null>(null)
 const testingSlugs = ref(new Set<string>())
+const balanceLoadingSlugs = ref(new Set<string>())
+const providerBalances = ref<Record<string, UpstreamProviderBalance>>({})
 
 const showKeysDialog = ref(false)
 const keysProvider = ref<UpstreamProviderConfig | null>(null)
@@ -554,6 +605,14 @@ const filteredProviders = computed(() => {
       .some((value) => String(value).toLowerCase().includes(keyword))
   })
 })
+
+const urlOptions = computed(() => ({
+  base_url: uniqueProviderURLs('base_url'),
+  api_keys_url: uniqueProviderURLs('api_keys_url'),
+  login_url: uniqueProviderURLs('login_url'),
+  groups_url: uniqueProviderURLs('groups_url'),
+  available_groups_url: uniqueProviderURLs('available_groups_url'),
+}))
 
 const keysDialogTitle = computed(() => {
   const name = keysProvider.value?.name || ''
@@ -630,7 +689,10 @@ function buildPayload(): UpstreamProviderConfig {
 async function reload() {
   loading.value = true
   try {
-    providers.value = await adminAPI.upstreamProviders.list()
+    const nextProviders = await adminAPI.upstreamProviders.list()
+    providers.value = nextProviders
+    retainBalancesForProviders(nextProviders)
+    void fetchProviderBalances(nextProviders)
   } catch (err) {
     appStore.showError(extractApiErrorMessage(err, t('admin.upstreamProviders.loadFailed')))
   } finally {
@@ -735,6 +797,34 @@ async function openKeysDialog(provider: UpstreamProviderConfig) {
   }
 }
 
+async function fetchProviderBalances(nextProviders: UpstreamProviderConfig[]) {
+  await Promise.allSettled(nextProviders.map(provider => fetchProviderBalance(provider, { silent: true })))
+}
+
+async function fetchProviderBalance(provider: UpstreamProviderConfig, options: { silent?: boolean } = {}) {
+  const nextLoading = new Set(balanceLoadingSlugs.value)
+  nextLoading.add(provider.slug)
+  balanceLoadingSlugs.value = nextLoading
+  try {
+    const balance = await adminAPI.upstreamProviders.getBalance(provider.slug)
+    providerBalances.value = {
+      ...providerBalances.value,
+      [provider.slug]: balance,
+    }
+    if (!options.silent) {
+      appStore.showSuccess(t('admin.upstreamProviders.balanceFetchSuccess'))
+    }
+  } catch (err) {
+    if (!options.silent) {
+      appStore.showError(extractApiErrorMessage(err, t('admin.upstreamProviders.balanceFailed')))
+    }
+  } finally {
+    const done = new Set(balanceLoadingSlugs.value)
+    done.delete(provider.slug)
+    balanceLoadingSlugs.value = done
+  }
+}
+
 function closeKeysDialog() {
   showKeysDialog.value = false
   keysProvider.value = null
@@ -774,9 +864,35 @@ function availableGroupsURL(provider: UpstreamProviderConfig) {
   return provider.available_groups_url || (provider.type === 'newapi' ? '' : provider.groups_url || '')
 }
 
+function retainBalancesForProviders(nextProviders: UpstreamProviderConfig[]) {
+  const slugs = new Set(nextProviders.map(provider => provider.slug))
+  providerBalances.value = Object.fromEntries(
+    Object.entries(providerBalances.value).filter(([slug]) => slugs.has(slug))
+  )
+}
+
+function uniqueProviderURLs(field: 'base_url' | 'api_keys_url' | 'login_url' | 'groups_url' | 'available_groups_url') {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const provider of providers.value) {
+    const value = String(provider[field] || '').trim()
+    if (!value || seen.has(value)) {
+      continue
+    }
+    seen.add(value)
+    out.push(value)
+  }
+  return out
+}
+
 function formatRate(value: number | undefined) {
   const n = Number(value)
   return Number.isFinite(n) ? `${n.toFixed(2)}x` : '-'
+}
+
+function formatBalance(value: number | undefined) {
+  const n = Number(value)
+  return Number.isFinite(n) ? n.toFixed(6).replace(/\.?0+$/, '') : '-'
 }
 
 function formatRateScale(value: number | undefined) {
@@ -801,5 +917,9 @@ onMounted(reload)
 <style scoped>
 .action-button {
   @apply flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.balance-pill {
+  @apply inline-flex items-center rounded-md bg-violet-50 px-2 py-1 font-mono text-xs font-semibold text-violet-700 ring-1 ring-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:ring-violet-800/60;
 }
 </style>

@@ -13,6 +13,7 @@ import (
 )
 
 const defaultSub2APIProviderGroupsURL = "/api/v1/groups/available?timezone=Asia%2FShanghai"
+const defaultSub2APIProviderBalanceURL = "/api/v1/auth/me?timezone=Asia%2FShanghai"
 
 type upstreamSub2APIAuth struct {
 	Token     string
@@ -132,6 +133,37 @@ func (a *Sub2APIProviderAdapter) FetchGroups(ctx context.Context, provider Upstr
 		return groups, nil, nil
 	}
 	return nil, nil, fmt.Errorf("sub2api provider groups failed after auth retry")
+}
+
+func (a *Sub2APIProviderAdapter) FetchBalance(ctx context.Context, provider UpstreamProviderConfig) (UpstreamProviderBalance, error) {
+	for attempt := 0; attempt < 2; attempt++ {
+		auth, err := a.ensureAuth(ctx, provider)
+		if err != nil {
+			return UpstreamProviderBalance{}, err
+		}
+		payload, status, err := a.request(ctx, provider, auth, defaultSub2APIProviderBalanceURL, "sub2api provider balance")
+		if err != nil {
+			return UpstreamProviderBalance{}, err
+		}
+		if status < 200 || status >= 300 {
+			requestErr := upstreamProviderHTTPError("sub2api provider balance", status, payload)
+			if attempt == 0 && hasSub2APICredentials(provider) && upstreamProviderAuthFailureHint(status, payload, requestErr) {
+				a.clearAuth(provider.Slug)
+				continue
+			}
+			return UpstreamProviderBalance{}, requestErr
+		}
+		balance, err := parseSub2APIProviderBalance(provider, payload)
+		if err != nil {
+			if attempt == 0 && hasSub2APICredentials(provider) && upstreamProviderAuthFailureHint(status, payload, err) {
+				a.clearAuth(provider.Slug)
+				continue
+			}
+			return UpstreamProviderBalance{}, err
+		}
+		return balance, nil
+	}
+	return UpstreamProviderBalance{}, fmt.Errorf("sub2api provider balance failed after auth retry")
 }
 
 func (a *Sub2APIProviderAdapter) Test(ctx context.Context, provider UpstreamProviderConfig) UpstreamProviderTestResult {
@@ -398,6 +430,31 @@ func parseSub2APIProviderGroups(provider UpstreamProviderConfig, payload []byte)
 		})
 	}
 	return groups, nil
+}
+
+func parseSub2APIProviderBalance(provider UpstreamProviderConfig, payload []byte) (UpstreamProviderBalance, error) {
+	var resp struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Data    struct {
+			Balance float64 `json:"balance"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(payload, &resp); err != nil {
+		return UpstreamProviderBalance{}, fmt.Errorf("decode sub2api provider balance response: %w", err)
+	}
+	if resp.Code != 0 {
+		if resp.Message == "" {
+			resp.Message = "unknown error"
+		}
+		return UpstreamProviderBalance{}, fmt.Errorf("sub2api provider balance failed: %s", resp.Message)
+	}
+	return UpstreamProviderBalance{
+		ProviderSlug: provider.Slug,
+		ProviderName: provider.Name,
+		ProviderType: provider.Type,
+		Balance:      resp.Data.Balance,
+	}, nil
 }
 
 func limitUpstreamProviderKeys(keys []UpstreamProviderKey, limit int) []UpstreamProviderKey {

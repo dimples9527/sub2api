@@ -62,6 +62,13 @@ type UpstreamProviderGroup struct {
 	RawGroupID     string  `json:"raw_group_id,omitempty"`
 }
 
+type UpstreamProviderBalance struct {
+	ProviderSlug string  `json:"provider_slug"`
+	ProviderName string  `json:"provider_name"`
+	ProviderType string  `json:"provider_type"`
+	Balance      float64 `json:"balance"`
+}
+
 type UpstreamProviderTestStage struct {
 	OK            bool   `json:"ok"`
 	StatusCode    int    `json:"status_code,omitempty"`
@@ -262,6 +269,18 @@ func (s *UpstreamProviderService) FetchProviderKeys(ctx context.Context, slug st
 		return nil, nil, err
 	}
 	return adapter.FetchKeys(ctx, provider)
+}
+
+func (s *UpstreamProviderService) FetchProviderBalance(ctx context.Context, slug string) (UpstreamProviderBalance, error) {
+	provider, err := s.getStoredProvider(ctx, slug)
+	if err != nil {
+		return UpstreamProviderBalance{}, err
+	}
+	adapter, err := s.registry.Get(provider.Type)
+	if err != nil {
+		return UpstreamProviderBalance{}, err
+	}
+	return adapter.FetchBalance(ctx, provider)
 }
 
 func (s *UpstreamProviderService) FetchProviderGroups(ctx context.Context, slug string) ([]UpstreamProviderGroup, []string, error) {

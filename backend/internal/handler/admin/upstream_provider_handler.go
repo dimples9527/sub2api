@@ -104,3 +104,12 @@ func (h *UpstreamProviderHandler) Keys(c *gin.Context) {
 		"warnings": warnings,
 	})
 }
+
+func (h *UpstreamProviderHandler) Balance(c *gin.Context) {
+	balance, err := h.service.FetchProviderBalance(c.Request.Context(), strings.TrimSpace(c.Param("slug")))
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, balance)
+}

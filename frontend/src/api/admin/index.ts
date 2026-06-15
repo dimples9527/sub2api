@@ -121,6 +121,7 @@ export type { BackupAgentHealth, DataManagementConfig } from './dataManagement'
 export type { TLSFingerprintProfile, CreateProfileRequest, UpdateProfileRequest } from './tlsFingerprintProfile'
 export type { ContentModerationConfig, ContentModerationLog, ModerationMode } from './riskControl'
 export type {
+  UpstreamProviderBalance,
   UpstreamProviderConfig,
   UpstreamProviderKey,
   UpstreamProviderTestResult,

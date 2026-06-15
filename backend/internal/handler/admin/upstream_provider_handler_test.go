@@ -99,6 +99,7 @@ func newUpstreamProviderHandlerTestRouter(svc *service.UpstreamProviderService) 
 	router.POST("/admin/upstream-management/providers/:slug/default", handler.SetDefault)
 	router.POST("/admin/upstream-management/providers/:slug/test", handler.TestSaved)
 	router.GET("/admin/upstream-management/providers/:slug/keys", handler.Keys)
+	router.GET("/admin/upstream-management/providers/:slug/balance", handler.Balance)
 	return router
 }
 
@@ -222,4 +223,49 @@ func TestUpstreamProviderHandlerSetDefaultProvider(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.True(t, resp.Data.IsDefault)
 	require.Equal(t, "primary", resp.Data.Slug)
+}
+
+func TestUpstreamProviderHandlerFetchBalance(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			_, _ = w.Write([]byte(`{"code":0,"data":{"access_token":"token","token_type":"Bearer"}}`))
+		case "/api/v1/auth/me":
+			require.Equal(t, "Bearer token", r.Header.Get("Authorization"))
+			_, _ = w.Write([]byte(`{"code":0,"data":{"balance":12.5}}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer upstream.Close()
+
+	repo := newUpstreamProviderHandlerSettingRepo()
+	svc := service.NewUpstreamProviderServiceWithHTTPClient(repo, upstream.Client())
+	_, err := svc.CreateProvider(context.Background(), service.UpstreamProviderConfig{
+		Type:       service.UpstreamProviderTypeSub2API,
+		Slug:       "primary",
+		Name:       "Primary",
+		Enabled:    true,
+		BaseURL:    upstream.URL,
+		LoginURL:   "/api/v1/auth/login",
+		APIKeysURL: "/api/admin/keys",
+		Email:      "admin@example.com",
+		Password:   "secret",
+	})
+	require.NoError(t, err)
+	router := newUpstreamProviderHandlerTestRouter(svc)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/admin/upstream-management/providers/primary/balance", nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Code int                             `json:"code"`
+		Data service.UpstreamProviderBalance `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, "primary", resp.Data.ProviderSlug)
+	require.Equal(t, 12.5, resp.Data.Balance)
 }

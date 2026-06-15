@@ -868,6 +868,53 @@ func TestSub2APIProviderAdapterReusesCachedTokenAcrossKeysAndModelSquare(t *test
 	}
 }
 
+func TestSub2APIProviderAdapterFetchBalanceUsesCachedToken(t *testing.T) {
+	var loginRequests int
+	var balanceRequests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			loginRequests++
+			_, _ = w.Write([]byte(`{"code":0,"data":{"access_token":"cached-token","token_type":"Bearer"}}`))
+		case "/api/v1/auth/me":
+			balanceRequests++
+			if r.URL.Query().Get("timezone") != "Asia/Shanghai" {
+				t.Fatalf("timezone query = %q, want Asia/Shanghai", r.URL.Query().Get("timezone"))
+			}
+			if r.Header.Get("Authorization") != "Bearer cached-token" {
+				t.Fatalf("Authorization = %q, want Bearer cached-token", r.Header.Get("Authorization"))
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"balance":334.74079414}}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	adapter := NewSub2APIProviderAdapter(server.Client())
+	provider := UpstreamProviderConfig{
+		Type:       UpstreamProviderTypeSub2API,
+		Slug:       "sub2api-main",
+		Name:       "Sub2API main",
+		BaseURL:    server.URL,
+		LoginURL:   "/api/v1/auth/login",
+		APIKeysURL: "/api/admin/keys",
+		Email:      "admin@example.com",
+		Password:   "secret",
+	}
+	balance, err := adapter.FetchBalance(context.Background(), provider)
+	if err != nil {
+		t.Fatalf("FetchBalance returned error: %v", err)
+	}
+	if balance.ProviderSlug != provider.Slug || balance.Balance != 334.74079414 {
+		t.Fatalf("balance = %+v, want provider slug and raw sub2api balance", balance)
+	}
+	if loginRequests != 1 || balanceRequests != 1 {
+		t.Fatalf("login/balance requests = %d/%d, want 1/1", loginRequests, balanceRequests)
+	}
+}
+
 func TestSub2APIProviderAdapterRefreshesCachedTokenAfterUnauthorized(t *testing.T) {
 	var loginRequests int
 	var keyRequests int
@@ -985,6 +1032,55 @@ func TestNewAPIProviderAdapterReusesCachedSessionAcrossKeysAndModelSquare(t *tes
 	}
 	if keyRequests != 1 || modelRequests != 1 {
 		t.Fatalf("key/model requests = %d/%d, want 1/1", keyRequests, modelRequests)
+	}
+}
+
+func TestNewAPIProviderAdapterFetchBalanceConvertsQuota(t *testing.T) {
+	var loginRequests int
+	var balanceRequests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			loginRequests++
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "abc"})
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":42}}`))
+		case "/api/user/self":
+			balanceRequests++
+			if r.Header.Get("New-Api-User") != "42" {
+				t.Fatalf("New-Api-User = %q, want 42", r.Header.Get("New-Api-User"))
+			}
+			if !strings.Contains(r.Header.Get("Cookie"), "session=abc") {
+				t.Fatalf("Cookie header = %q, want session cookie", r.Header.Get("Cookie"))
+			}
+			_, _ = w.Write([]byte(`{"success":true,"message":"","data":{"quota":9402397}}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	adapter := NewNewAPIProviderAdapter(server.Client())
+	provider := UpstreamProviderConfig{
+		Type:       UpstreamProviderTypeNewAPI,
+		Slug:       "newapi-main",
+		Name:       "NewAPI main",
+		BaseURL:    server.URL,
+		LoginURL:   "/api/user/login",
+		APIKeysURL: "/api/token/",
+		GroupsURL:  "/api/group/",
+		Username:   "root",
+		Password:   "secret",
+	}
+	balance, err := adapter.FetchBalance(context.Background(), provider)
+	if err != nil {
+		t.Fatalf("FetchBalance returned error: %v", err)
+	}
+	if balance.ProviderSlug != provider.Slug || balance.Balance != 18.804794 {
+		t.Fatalf("balance = %+v, want converted newapi quota", balance)
+	}
+	if loginRequests != 1 || balanceRequests != 1 {
+		t.Fatalf("login/balance requests = %d/%d, want 1/1", loginRequests, balanceRequests)
 	}
 }
 

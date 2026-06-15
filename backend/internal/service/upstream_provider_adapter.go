@@ -12,6 +12,7 @@ import (
 
 type UpstreamProviderAdapter interface {
 	FetchKeys(ctx context.Context, provider UpstreamProviderConfig) ([]UpstreamProviderKey, []string, error)
+	FetchBalance(ctx context.Context, provider UpstreamProviderConfig) (UpstreamProviderBalance, error)
 	Test(ctx context.Context, provider UpstreamProviderConfig) UpstreamProviderTestResult
 }
 
