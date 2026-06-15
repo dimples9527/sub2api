@@ -306,7 +306,7 @@
               required
               type="number"
               min="0.000001"
-              step="0.01"
+              step="any"
               class="input"
             />
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
