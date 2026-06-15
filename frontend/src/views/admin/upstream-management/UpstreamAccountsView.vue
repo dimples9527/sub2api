@@ -386,10 +386,14 @@ const syncLogEntries = computed<UpstreamAccountSyncLogEntry[]>(() => {
   const entries: UpstreamAccountSyncLogEntry[] = []
   for (const record of records.value) {
     for (const detail of record.unbind_details || []) {
+      const unboundGroupIDs = numberArray(detail.unbound_group_ids)
       entries.push({
         ...detail,
+        unbound_group_ids: unboundGroupIDs,
+        unbound_group_names: stringArray(detail.unbound_group_names),
+        remaining_group_ids: numberArray(detail.remaining_group_ids),
         created_at: record.created_at,
-        key: `${record.created_at}-${detail.matched_local_account_id}-${detail.upstream_key_name}-${detail.unbound_group_ids.join('_')}`
+        key: `${record.created_at}-${detail.matched_local_account_id}-${detail.upstream_key_name}-${unboundGroupIDs.join('_')}`
       })
     }
   }
@@ -607,6 +611,14 @@ function conflictAccountRates(account: UpstreamAccountSyncConflictAccount) {
   return (account.bound_groups || [])
     .map(group => formatRate(group.rate_multiplier))
     .join(' / ')
+}
+
+function numberArray(value: unknown): number[] {
+  return Array.isArray(value) ? value.filter((item): item is number => Number.isFinite(Number(item))).map(Number) : []
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(String).filter(Boolean) : []
 }
 
 function conflictAccountTitle(account: UpstreamAccountSyncConflictAccount) {
