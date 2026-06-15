@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import UpstreamAccountsView from './UpstreamAccountsView.vue'
 
-const { upstreamAccountSyncMock, appStoreMock } = vi.hoisted(() => ({
+const { upstreamAccountSyncMock, accountsMock, groupsMock, appStoreMock } = vi.hoisted(() => ({
   upstreamAccountSyncMock: {
     getPreview: vi.fn(),
     getRateGuardConfig: vi.fn(),
@@ -13,6 +13,12 @@ const { upstreamAccountSyncMock, appStoreMock } = vi.hoisted(() => ({
     updateBalanceSamplerConfig: vi.fn(),
     addBalanceRecharge: vi.fn(),
     runBalanceSampleNow: vi.fn(),
+  },
+  accountsMock: {
+    update: vi.fn(),
+  },
+  groupsMock: {
+    getAllIncludingInactive: vi.fn(),
   },
   appStoreMock: {
     showError: vi.fn(),
@@ -34,12 +40,16 @@ vi.mock('vue-i18n', async (importOriginal) => {
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     upstreamAccountSync: upstreamAccountSyncMock,
+    accounts: accountsMock,
+    groups: groupsMock,
   },
 }))
 
 vi.mock('@/api/admin/index', () => ({
   adminAPI: {
     upstreamAccountSync: upstreamAccountSyncMock,
+    accounts: accountsMock,
+    groups: groupsMock,
   },
 }))
 
@@ -113,6 +123,12 @@ describe('UpstreamAccountsView', () => {
       summaries: {},
       rows: [],
     })
+    groupsMock.getAllIncludingInactive.mockResolvedValue([
+      { id: 7, name: 'VIP', platform: 'openai', rate_multiplier: 2, status: 'active' },
+      { id: 8, name: 'Trial', platform: 'openai', rate_multiplier: 0.5, status: 'active' },
+      { id: 9, name: 'Claude', platform: 'anthropic', rate_multiplier: 1, status: 'active' },
+    ])
+    accountsMock.update.mockResolvedValue({})
   })
 
   it('renders sync log entries when legacy remaining group ids are null', async () => {
@@ -273,5 +289,81 @@ describe('UpstreamAccountsView', () => {
     await flushPromises()
 
     expect(wrapper.find('.columns').text()).not.toContain('balance_consumption')
+  })
+
+  it('edits matched account group bindings from the action column', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValue({
+      default_provider: {},
+      providers: [],
+      summary: {
+        upstream_key_count: 1,
+        matched_account_count: 1,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'noop',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-a',
+          local_account_name: 'local-a',
+          matched_account_id: 12,
+          matched_account_name: 'local-a',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 2,
+          rate_violation: false,
+          bound_groups: [
+            { id: 7, name: 'VIP', rate_multiplier: 2, rate_violation: false },
+          ],
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any) => h('div', [
+                slots['cell-actions']?.({ row }),
+              ])))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const editButton = wrapper.findAll('button').find(button => button.text().includes('admin.upstreamAccounts.editBoundGroups'))
+    expect(editButton).toBeTruthy()
+    await editButton!.trigger('click')
+    await flushPromises()
+
+    const select = wrapper.find('#account-group-select')
+    expect(select.exists()).toBe(true)
+    expect(select.text()).toContain('VIP')
+    expect(select.text()).toContain('Trial')
+    expect(select.text()).not.toContain('Claude')
+
+    await select.setValue(['7', '8'])
+    const saveButtons = wrapper.findAll('button').filter(button => button.text().includes('common.save'))
+    await saveButtons[saveButtons.length - 1].trigger('click')
+    await flushPromises()
+
+    expect(accountsMock.update).toHaveBeenCalledWith(12, { group_ids: [7, 8] })
   })
 })

@@ -31,18 +31,19 @@ type upstreamManagementProviderGroupSource interface {
 }
 
 type UpstreamGroupComparison struct {
-	ProviderSlug      string   `json:"provider_slug"`
-	ProviderName      string   `json:"provider_name"`
-	UpstreamGroupName string   `json:"upstream_group_name"`
-	UpstreamGroupKey  string   `json:"upstream_group_key"`
-	UpstreamRate      float64  `json:"upstream_rate"`
-	UpstreamKeyCount  int      `json:"upstream_key_count"`
-	LocalGroupID      *int64   `json:"local_group_id,omitempty"`
-	LocalGroupName    string   `json:"local_group_name,omitempty"`
-	LocalRate         *float64 `json:"local_rate,omitempty"`
-	Matched           bool     `json:"matched"`
-	MatchSource       string   `json:"match_source,omitempty"`
-	NeedsRateIncrease bool     `json:"needs_rate_increase"`
+	ProviderSlug       string   `json:"provider_slug"`
+	ProviderName       string   `json:"provider_name"`
+	UpstreamGroupName  string   `json:"upstream_group_name"`
+	UpstreamGroupKey   string   `json:"upstream_group_key"`
+	UpstreamRate       float64  `json:"upstream_rate"`
+	UpstreamKeyCount   int      `json:"upstream_key_count"`
+	LocalGroupID       *int64   `json:"local_group_id,omitempty"`
+	LocalGroupName     string   `json:"local_group_name,omitempty"`
+	LocalGroupPlatform string   `json:"local_group_platform,omitempty"`
+	LocalRate          *float64 `json:"local_rate,omitempty"`
+	Matched            bool     `json:"matched"`
+	MatchSource        string   `json:"match_source,omitempty"`
+	NeedsRateIncrease  bool     `json:"needs_rate_increase"`
 }
 
 type UpstreamGroupCompareResult struct {
@@ -79,6 +80,7 @@ type UpstreamGroupMappingInput struct {
 
 type UpstreamGroupLocalCreateInput struct {
 	UpstreamGroupName string  `json:"upstream_group_name"`
+	Platform          string  `json:"platform"`
 	RateMultiplier    float64 `json:"rate_multiplier"`
 }
 
@@ -468,6 +470,13 @@ func (s *UpstreamManagementService) CreateLocalGroupFromUpstream(ctx context.Con
 	if input.RateMultiplier <= 0 {
 		return UpstreamGroupCompareResult{}, infraerrors.BadRequest("UPSTREAM_GROUP_RATE_INVALID", "upstream group rate multiplier must be greater than 0")
 	}
+	platform := strings.ToLower(strings.TrimSpace(input.Platform))
+	if platform == "" {
+		return UpstreamGroupCompareResult{}, infraerrors.BadRequest("UPSTREAM_GROUP_PLATFORM_REQUIRED", "platform is required")
+	}
+	if platform != PlatformAnthropic && platform != PlatformOpenAI && platform != PlatformGemini && platform != PlatformAntigravity {
+		return UpstreamGroupCompareResult{}, infraerrors.BadRequest("UPSTREAM_GROUP_PLATFORM_INVALID", "platform is invalid")
+	}
 	upstreamGroupName, err = s.resolveDefaultUpstreamGroupName(ctx, defaultProvider, upstreamGroupKey)
 	if err != nil {
 		return UpstreamGroupCompareResult{}, err
@@ -491,7 +500,7 @@ func (s *UpstreamManagementService) CreateLocalGroupFromUpstream(ctx context.Con
 
 	group := &Group{
 		Name:                 upstreamGroupName,
-		Platform:             PlatformOpenAI,
+		Platform:             platform,
 		RateMultiplier:       input.RateMultiplier,
 		Status:               StatusActive,
 		SubscriptionType:     SubscriptionTypeStandard,
@@ -742,6 +751,7 @@ func applyUpstreamGroupLocalMatch(item *UpstreamGroupComparison, local Group, so
 	localRate := local.RateMultiplier
 	item.LocalGroupID = &localID
 	item.LocalGroupName = local.Name
+	item.LocalGroupPlatform = local.Platform
 	item.LocalRate = &localRate
 	item.Matched = true
 	item.MatchSource = source

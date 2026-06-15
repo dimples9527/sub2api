@@ -430,8 +430,8 @@ func TestUpstreamManagementServiceCompareGroupsPrefersManualMapping(t *testing.T
 		},
 	}
 	groupRepo := &upstreamManagementGroupRepoStub{groups: []Group{
-		{ID: 7, Name: "VIP", RateMultiplier: 3, Status: StatusActive},
-		{ID: 9, Name: "Mapped VIP", RateMultiplier: 1, Status: StatusActive},
+		{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 3, Status: StatusActive},
+		{ID: 9, Name: "Mapped VIP", Platform: PlatformGemini, RateMultiplier: 1, Status: StatusActive},
 	}}
 	settingRepo := newUpstreamManagementSettingRepoStub()
 	settingRepo.values[SettingKeyUpstreamGroupMappings] = `[{
@@ -455,6 +455,9 @@ func TestUpstreamManagementServiceCompareGroupsPrefersManualMapping(t *testing.T
 	}
 	if item.MatchSource != "manual" {
 		t.Fatalf("match source = %q, want manual", item.MatchSource)
+	}
+	if item.LocalGroupPlatform != PlatformGemini {
+		t.Fatalf("local group platform = %q, want %q", item.LocalGroupPlatform, PlatformGemini)
 	}
 	if !item.NeedsRateIncrease {
 		t.Fatalf("manual mapped group should need rate increase: %+v", item)
@@ -542,6 +545,7 @@ func TestUpstreamManagementServiceCreateLocalGroupCreatesAndMapsDefaultUpstreamG
 
 	result, err := svc.CreateLocalGroupFromUpstream(context.Background(), UpstreamGroupLocalCreateInput{
 		UpstreamGroupName: " VIP ",
+		Platform:          PlatformAnthropic,
 		RateMultiplier:    2.5,
 	})
 	if err != nil {
@@ -551,8 +555,8 @@ func TestUpstreamManagementServiceCreateLocalGroupCreatesAndMapsDefaultUpstreamG
 		t.Fatalf("created group count = %d, want 1", len(groupRepo.creates))
 	}
 	created := groupRepo.groups[len(groupRepo.groups)-1]
-	if created.ID != 42 || created.Name != "VIP" || created.Platform != PlatformOpenAI || created.Status != StatusActive {
-		t.Fatalf("created group = %+v, want active OpenAI VIP group", created)
+	if created.ID != 42 || created.Name != "VIP" || created.Platform != PlatformAnthropic || created.Status != StatusActive {
+		t.Fatalf("created group = %+v, want active Anthropic VIP group", created)
 	}
 	if created.RateMultiplier != 2.5 || created.SubscriptionType != SubscriptionTypeStandard {
 		t.Fatalf("created group pricing = %+v, want rate 2.5 standard", created)
@@ -582,6 +586,7 @@ func TestUpstreamManagementServiceCreateLocalGroupUsesAvailableProviderGroups(t 
 
 	result, err := svc.CreateLocalGroupFromUpstream(context.Background(), UpstreamGroupLocalCreateInput{
 		UpstreamGroupName: " no-key group ",
+		Platform:          PlatformOpenAI,
 		RateMultiplier:    0.15,
 	})
 	if err != nil {
@@ -618,7 +623,30 @@ func TestUpstreamManagementServiceCreateLocalGroupRejectsUnknownUpstreamGroup(t 
 
 	_, err := svc.CreateLocalGroupFromUpstream(context.Background(), UpstreamGroupLocalCreateInput{
 		UpstreamGroupName: "Missing",
+		Platform:          PlatformOpenAI,
 		RateMultiplier:    1,
+	})
+	if err == nil || !infraerrors.IsBadRequest(err) {
+		t.Fatalf("CreateLocalGroupFromUpstream error = %v, want bad request", err)
+	}
+	if len(groupRepo.creates) != 0 {
+		t.Fatalf("created group count = %d, want 0", len(groupRepo.creates))
+	}
+}
+
+func TestUpstreamManagementServiceCreateLocalGroupRequiresPlatform(t *testing.T) {
+	providerSource := &upstreamManagementProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "default-upstream", Name: "Default upstream", IsDefault: true},
+		keys: []UpstreamProviderKey{
+			{ProviderSlug: "default-upstream", GroupName: "VIP", RateMultiplier: 2.5},
+		},
+	}
+	groupRepo := &upstreamManagementGroupRepoStub{groups: []Group{}, nextID: 42}
+	svc := NewUpstreamManagementService(providerSource, groupRepo, newUpstreamManagementSettingRepoStub(), nil)
+
+	_, err := svc.CreateLocalGroupFromUpstream(context.Background(), UpstreamGroupLocalCreateInput{
+		UpstreamGroupName: "VIP",
+		RateMultiplier:    2.5,
 	})
 	if err == nil || !infraerrors.IsBadRequest(err) {
 		t.Fatalf("CreateLocalGroupFromUpstream error = %v, want bad request", err)
@@ -643,6 +671,7 @@ func TestUpstreamManagementServiceCreateLocalGroupRejectsNormalizedDuplicateLoca
 
 	_, err := svc.CreateLocalGroupFromUpstream(context.Background(), UpstreamGroupLocalCreateInput{
 		UpstreamGroupName: "VIP",
+		Platform:          PlatformOpenAI,
 		RateMultiplier:    2.5,
 	})
 	if err == nil || !infraerrors.IsConflict(err) {

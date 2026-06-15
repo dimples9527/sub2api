@@ -237,6 +237,20 @@
                 <span :class="['rate-value', rateToneClass(value)]">{{ formatRate(value) }}</span>
               </template>
 
+              <template #cell-actions="{ row }">
+                <button
+                  v-if="row.matched_account_id"
+                  type="button"
+                  class="btn btn-secondary btn-sm whitespace-nowrap"
+                  :disabled="savingAccountGroupId === row.matched_account_id"
+                  @click="openAccountGroupDialog(row)"
+                >
+                  <Icon name="cog" size="sm" class="mr-1" :class="savingAccountGroupId === row.matched_account_id ? 'animate-spin' : ''" />
+                  {{ t('admin.upstreamAccounts.editBoundGroups') }}
+                </button>
+                <span v-else class="table-tag tag-missing">-</span>
+              </template>
+
               <template #empty>
                 <EmptyState
                   :title="emptyTitle"
@@ -319,6 +333,60 @@
             </div>
           </div>
         </div>
+
+        <div v-if="accountGroupDialogItem" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6" @click.self="closeAccountGroupDialog">
+          <div class="w-full max-w-lg overflow-hidden rounded-lg bg-white shadow-xl dark:bg-dark-800">
+            <div class="border-b border-gray-100 px-5 py-4 dark:border-dark-700">
+              <h3 class="text-lg font-semibold text-gray-950 dark:text-white">{{ t('admin.upstreamAccounts.editBoundGroupsTitle') }}</h3>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.upstreamAccounts.editBoundGroupsDescription') }}</p>
+            </div>
+            <div class="space-y-4 px-5 py-4">
+              <div>
+                <div class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.upstreamAccounts.columns.localAccount') }}</div>
+                <div class="mt-1 text-sm font-semibold text-gray-950 dark:text-white">{{ accountGroupDialogItem.matched_account_name || accountGroupDialogItem.local_account_name }}</div>
+              </div>
+              <div>
+                <label class="input-label" for="account-group-select">{{ t('admin.upstreamAccounts.boundGroups') }}</label>
+                <select
+                  id="account-group-select"
+                  class="input mt-1"
+                  multiple
+                  size="8"
+                  :value="accountGroupIds.map(String)"
+                  @change="handleAccountGroupSelection"
+                >
+                  <option
+                    v-for="group in accountGroupOptions"
+                    :key="group.id"
+                    :value="group.id"
+                  >
+                    {{ group.name }} - {{ formatRate(group.rate_multiplier) }}
+                  </option>
+                </select>
+                <p class="input-hint">{{ t('admin.upstreamAccounts.boundGroupsHint') }}</p>
+              </div>
+              <div v-if="accountGroupIds.length" class="tag-list">
+                <span v-for="groupID in accountGroupIds" :key="groupID" class="group-chip group-chip-blue">
+                  {{ groupNameById(groupID) }}
+                </span>
+              </div>
+            </div>
+            <div class="flex justify-between gap-2 border-t border-gray-100 px-5 py-4 dark:border-dark-700">
+              <button type="button" class="btn btn-danger btn-sm" :disabled="savingAccountGroupId === accountGroupDialogItem.matched_account_id" @click="clearAccountGroups">
+                {{ t('admin.upstreamAccounts.clearBoundGroups') }}
+              </button>
+              <div class="flex gap-2">
+                <button type="button" class="btn btn-secondary btn-sm" :disabled="savingAccountGroupId === accountGroupDialogItem.matched_account_id" @click="closeAccountGroupDialog">
+                  {{ t('common.cancel') }}
+                </button>
+                <button type="button" class="btn btn-primary btn-sm" :disabled="savingAccountGroupId === accountGroupDialogItem.matched_account_id" @click="saveAccountGroups">
+                  <Icon name="cog" size="sm" class="mr-1" :class="savingAccountGroupId === accountGroupDialogItem.matched_account_id ? 'animate-spin' : ''" />
+                  {{ t('common.save') }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       </template>
     </TablePageLayout>
   </AppLayout>
@@ -331,11 +399,13 @@ import { adminAPI } from '@/api/admin'
 import type {
   UpstreamAccountRateGuardConfig,
   UpstreamAccountSyncConflictAccount,
+  UpstreamAccountSyncBoundGroup,
   UpstreamAccountSyncItem,
   UpstreamAccountSyncRecord,
   UpstreamAccountSyncResult,
   UpstreamAccountSyncUnbindDetail,
 } from '@/api/admin/upstreamAccountSync'
+import type { AdminGroup } from '@/types'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime } from '@/utils/format'
@@ -356,6 +426,8 @@ const syncing = ref(false)
 const loadingRateGuardConfig = ref(false)
 const savingRateGuardConfig = ref(false)
 const runningRateGuardNow = ref(false)
+const savingAccountGroupId = ref<number | null>(null)
+const localGroups = ref<AdminGroup[]>([])
 const loadError = ref('')
 const searchQuery = ref('')
 const providerFilter = ref('')
@@ -365,6 +437,8 @@ const rateGuardForm = ref({
   enabled: false,
   interval_seconds: 3600
 })
+const accountGroupDialogItem = ref<UpstreamAccountSyncItem | null>(null)
+const accountGroupIds = ref<number[]>([])
 
 type UpstreamAccountSyncLogEntry = UpstreamAccountSyncUnbindDetail & {
   created_at: string
@@ -376,7 +450,8 @@ const columns = computed<Column[]>(() => [
   { key: 'upstream_key_name', label: t('admin.upstreamAccounts.columns.upstreamKey') },
   { key: 'upstream_rate_multiplier', label: t('admin.upstreamAccounts.columns.upstreamRate') },
   { key: 'local_account_name', label: t('admin.upstreamAccounts.columns.localAccount') },
-  { key: 'local_group_name', label: t('admin.upstreamAccounts.columns.boundGroups') }
+  { key: 'local_group_name', label: t('admin.upstreamAccounts.columns.boundGroups') },
+  { key: 'actions', label: t('common.actions') }
 ])
 
 const emptySummary = {
@@ -462,6 +537,11 @@ const filteredItems = computed(() => {
     return haystack.includes(keyword)
   })
 })
+const accountGroupOptions = computed(() => {
+  const row = accountGroupDialogItem.value
+  if (!row) return []
+  return localGroups.value.filter(group => group.platform === 'openai' && group.status === 'active')
+})
 
 const emptyTitle = computed(() => {
   return loadError.value ? t('admin.upstreamAccounts.emptyNoDefaultTitle') : t('admin.upstreamAccounts.emptyTitle')
@@ -482,6 +562,7 @@ async function reload() {
     ])
     result.value = preview
     applyRateGuardConfig(config)
+    void loadLocalGroups()
   } catch (err) {
     const message = extractApiErrorMessage(err, t('admin.upstreamAccounts.loadFailed'))
     loadError.value = message
@@ -578,6 +659,14 @@ function formatRate(value: number | undefined) {
   return Number.isFinite(n) ? `${n.toFixed(2)}x` : '-'
 }
 
+async function loadLocalGroups() {
+  try {
+    localGroups.value = await adminAPI.groups.getAllIncludingInactive()
+  } catch {
+    localGroups.value = []
+  }
+}
+
 function accountCardClass(row: UpstreamAccountSyncItem) {
   if (row.conflict_accounts?.length || row.conflict_account_ids?.length) return 'account-card-conflict'
   if (!row.matched_account_id) return 'account-card-new'
@@ -609,6 +698,53 @@ function groupChipClass(rateViolation: boolean, index: number) {
   if (rateViolation) return 'group-chip-warning'
   const tones = ['group-chip-blue', 'group-chip-emerald', 'group-chip-violet', 'group-chip-cyan']
   return tones[index % tones.length]
+}
+
+function openAccountGroupDialog(row: UpstreamAccountSyncItem) {
+  accountGroupDialogItem.value = row
+  accountGroupIds.value = (row.bound_groups || [])
+    .map((group: UpstreamAccountSyncBoundGroup) => Number(group.id))
+    .filter((id) => Number.isFinite(id))
+}
+
+function closeAccountGroupDialog() {
+  if (savingAccountGroupId.value) return
+  accountGroupDialogItem.value = null
+  accountGroupIds.value = []
+}
+
+function handleAccountGroupSelection(event: Event) {
+  const select = event.target as HTMLSelectElement
+  accountGroupIds.value = Array.from(select.selectedOptions)
+    .map(option => Number(option.value))
+    .filter(id => Number.isFinite(id))
+}
+
+async function saveAccountGroups() {
+  const row = accountGroupDialogItem.value
+  if (!row?.matched_account_id) return
+  savingAccountGroupId.value = row.matched_account_id
+  try {
+    await adminAPI.accounts.update(row.matched_account_id, { group_ids: accountGroupIds.value })
+    accountGroupDialogItem.value = null
+    accountGroupIds.value = []
+    await reload()
+    appStore.showSuccess(t('admin.upstreamAccounts.boundGroupsSaved'))
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.boundGroupsSaveFailed')))
+  } finally {
+    savingAccountGroupId.value = null
+  }
+}
+
+async function clearAccountGroups() {
+  accountGroupIds.value = []
+  await saveAccountGroups()
+}
+
+function groupNameById(groupID: number) {
+  const group = localGroups.value.find(item => item.id === groupID)
+  return group ? `${group.name} ${formatRate(group.rate_multiplier)}` : `#${groupID}`
 }
 
 function rateToneClass(value: number | undefined) {

@@ -10,6 +10,7 @@ export interface UpstreamGroupComparison {
   upstream_key_count: number
   local_group_id?: number
   local_group_name?: string
+  local_group_platform?: string
   local_rate?: number
   matched: boolean
   match_source?: 'manual' | 'name' | string
@@ -45,6 +46,7 @@ export interface UpstreamGroupAutoRateFixConfig {
 
 export interface UpstreamGroupLocalCreateRequest {
   upstream_group_name: string
+  platform: string
   rate_multiplier: number
 }
 

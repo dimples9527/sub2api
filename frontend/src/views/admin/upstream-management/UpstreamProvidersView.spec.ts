@@ -229,6 +229,41 @@ describe('UpstreamProvidersView', () => {
           anomaly: false,
         },
       ],
+      snapshots: [
+        {
+          id: 1,
+          provider_slug: 'sub-main',
+          provider_name: 'Sub Main',
+          provider_type: 'sub2api',
+          balance: 100,
+          amount_scale: 1.2,
+          status: 'success',
+          captured_at: '2026-06-15T01:00:00Z',
+          created_at: '2026-06-15T01:00:00Z',
+        },
+        {
+          id: 2,
+          provider_slug: 'sub-main',
+          provider_name: 'Sub Main',
+          provider_type: 'sub2api',
+          balance: 90,
+          amount_scale: 1.2,
+          status: 'success',
+          captured_at: '2026-06-15T08:00:00Z',
+          created_at: '2026-06-15T08:00:00Z',
+        },
+        {
+          id: 3,
+          provider_slug: 'sub-main',
+          provider_name: 'Sub Main',
+          provider_type: 'sub2api',
+          balance: 80,
+          amount_scale: 1.2,
+          status: 'success',
+          captured_at: '2026-06-15T12:00:00Z',
+          created_at: '2026-06-15T12:00:00Z',
+        },
+      ],
     })
 
     const wrapper = mount(UpstreamProvidersView, {
@@ -271,6 +306,11 @@ describe('UpstreamProvidersView', () => {
     expect(wrapper.find('.balance-dialog').text()).toContain('admin.upstreamProviders.balanceDialogDescription')
     expect(wrapper.find('.balance-dialog').text()).toContain('2026-06-15')
     expect(wrapper.find('.balance-dialog').text()).toContain('24.50')
+    expect(wrapper.find('.balance-dialog').text()).toContain('admin.upstreamProviders.balanceSamples')
+    expect(wrapper.findAll('.snapshot-row')).toHaveLength(3)
+    expect(wrapper.find('.balance-dialog').text()).toContain('100.00')
+    expect(wrapper.find('.balance-dialog').text()).toContain('90.00')
+    expect(wrapper.find('.balance-dialog').text()).toContain('80.00')
   })
 
   it('offers existing URLs as datalist choices in provider form', async () => {

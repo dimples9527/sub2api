@@ -95,6 +95,7 @@ type UpstreamBalanceConsumptionOverview struct {
 	Config    UpstreamBalanceSamplerConfig              `json:"config"`
 	Summaries map[string]UpstreamBalanceProviderSummary `json:"summaries"`
 	Rows      []UpstreamBalanceDailyRow                 `json:"rows"`
+	Snapshots []UpstreamBalanceSnapshot                 `json:"snapshots"`
 }
 
 type UpstreamBalanceStore interface {
@@ -316,7 +317,7 @@ func (s *UpstreamBalanceConsumptionService) GetOverview(ctx context.Context, day
 		return UpstreamBalanceConsumptionOverview{}, err
 	}
 	if s == nil || s.store == nil {
-		return UpstreamBalanceConsumptionOverview{Config: config, Summaries: map[string]UpstreamBalanceProviderSummary{}, Rows: []UpstreamBalanceDailyRow{}}, nil
+		return UpstreamBalanceConsumptionOverview{Config: config, Summaries: map[string]UpstreamBalanceProviderSummary{}, Rows: []UpstreamBalanceDailyRow{}, Snapshots: []UpstreamBalanceSnapshot{}}, nil
 	}
 	now := s.currentTime()
 	loc := upstreamBalanceStatsLocation()
@@ -328,6 +329,7 @@ func (s *UpstreamBalanceConsumptionService) GetOverview(ctx context.Context, day
 	if err != nil {
 		return UpstreamBalanceConsumptionOverview{}, fmt.Errorf("list upstream balance snapshots: %w", err)
 	}
+	periodSnapshots := append([]UpstreamBalanceSnapshot{}, snapshots...)
 	openingSnapshots, err := s.store.ListSnapshotsBefore(ctx, start)
 	if err != nil {
 		return UpstreamBalanceConsumptionOverview{}, fmt.Errorf("list upstream balance opening snapshots: %w", err)
@@ -340,7 +342,7 @@ func (s *UpstreamBalanceConsumptionService) GetOverview(ctx context.Context, day
 	rows := buildUpstreamBalanceDailyRowsInLocation(snapshots, recharges, start, end, 1, loc)
 	latest, _ := s.store.ListLatestSnapshots(ctx)
 	summaries := buildUpstreamBalanceSummaries(rows, latest, now, loc)
-	return UpstreamBalanceConsumptionOverview{Config: config, Summaries: summaries, Rows: rows}, nil
+	return UpstreamBalanceConsumptionOverview{Config: config, Summaries: summaries, Rows: rows, Snapshots: periodSnapshots}, nil
 }
 
 func (s *UpstreamBalanceConsumptionService) RunSample(ctx context.Context) (UpstreamBalanceSamplerConfig, error) {

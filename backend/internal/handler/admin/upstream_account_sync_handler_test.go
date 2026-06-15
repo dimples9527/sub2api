@@ -322,6 +322,11 @@ func TestUpstreamAccountSyncHandlerBalanceConsumptionOverview(t *testing.T) {
 			ConsumptionAmount: 70,
 			Complete:          true,
 		}},
+		Snapshots: []service.UpstreamBalanceSnapshot{{
+			ProviderSlug: "backup",
+			Balance:      100,
+			Status:       "success",
+		}},
 	}}
 	router := newUpstreamAccountSyncHandlerTestRouter(svc)
 
@@ -334,6 +339,7 @@ func TestUpstreamAccountSyncHandlerBalanceConsumptionOverview(t *testing.T) {
 	require.Contains(t, rec.Body.String(), `"provider_slug":"backup"`)
 	require.Contains(t, rec.Body.String(), `"today_consumption":70`)
 	require.Contains(t, rec.Body.String(), `"interval_seconds":600`)
+	require.Contains(t, rec.Body.String(), `"snapshots"`)
 }
 
 func TestUpstreamAccountSyncHandlerProviderBalanceConsumptionOverviewAlias(t *testing.T) {

@@ -223,7 +223,7 @@ func TestUpstreamManagementHandlerCreateLocalGroupFromUpstream(t *testing.T) {
 	req := httptest.NewRequest(
 		http.MethodPost,
 		"/admin/upstream-management/groups/local-groups",
-		bytes.NewBufferString(`{"upstream_group_name":"VIP","rate_multiplier":2.5}`),
+		bytes.NewBufferString(`{"upstream_group_name":"VIP","platform":"gemini","rate_multiplier":2.5}`),
 	)
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
@@ -231,6 +231,7 @@ func TestUpstreamManagementHandlerCreateLocalGroupFromUpstream(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.True(t, svc.createLocalCalled)
 	require.Equal(t, "VIP", svc.createLocalInput.UpstreamGroupName)
+	require.Equal(t, "gemini", svc.createLocalInput.Platform)
 	require.Equal(t, 2.5, svc.createLocalInput.RateMultiplier)
 	require.Contains(t, rec.Body.String(), `"local_group_id":42`)
 }

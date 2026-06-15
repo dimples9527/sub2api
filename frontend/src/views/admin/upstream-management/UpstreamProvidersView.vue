@@ -593,6 +593,37 @@
           </div>
 
           <div>
+            <div class="balance-section-title">{{ t('admin.upstreamProviders.balanceSamples') }}</div>
+            <div class="mb-5 max-h-72 overflow-auto rounded-lg border border-gray-200 dark:border-dark-600">
+              <table class="records-table min-w-[760px]">
+                <thead class="bg-gray-50 dark:bg-dark-800">
+                  <tr>
+                    <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamProviders.sampleTime') }}</th>
+                    <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamProviders.currentBalance') }}</th>
+                    <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamProviders.amountScale') }}</th>
+                    <th class="px-4 py-2 text-left font-medium">{{ t('common.status') }}</th>
+                    <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamProviders.sampleError') }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="snapshot in selectedBalanceSnapshots" :key="snapshot.id || `${snapshot.provider_slug}-${snapshot.captured_at}`" class="records-row snapshot-row">
+                    <td class="px-4 py-3 font-mono text-gray-600 dark:text-gray-300">{{ formatDateTime(snapshot.captured_at) }}</td>
+                    <td class="px-4 py-3 font-mono">{{ formatMoney(snapshot.balance) }}</td>
+                    <td class="px-4 py-3 font-mono">{{ formatScale(snapshot.amount_scale) }}</td>
+                    <td class="px-4 py-3">
+                      <span :class="['record-status', snapshot.status === 'success' ? 'record-status-success' : 'record-status-error']">
+                        {{ snapshot.status === 'success' ? t('admin.upstreamProviders.balanceComplete') : t('admin.upstreamProviders.balanceAnomaly') }}
+                      </span>
+                    </td>
+                    <td class="px-4 py-3 text-gray-500 dark:text-gray-300">{{ snapshot.error || '-' }}</td>
+                  </tr>
+                  <tr v-if="!selectedBalanceSnapshots.length">
+                    <td colspan="5" class="px-4 py-8 text-center text-gray-400">{{ t('admin.upstreamProviders.noBalanceSamples') }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
             <div class="balance-section-title">{{ t('admin.upstreamProviders.balanceHistory') }}</div>
             <div class="max-h-72 overflow-auto rounded-lg border border-gray-200 dark:border-dark-600">
               <table class="records-table min-w-[760px]">
@@ -659,6 +690,7 @@ import type {
   UpstreamBalanceDailyRow,
   UpstreamBalanceProviderSummary,
   UpstreamBalanceSamplerConfig,
+  UpstreamBalanceSnapshot,
 } from '@/api/admin/upstreamAccountSync'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -791,8 +823,13 @@ const deleteMessage = computed(() => {
 })
 const balanceSummaries = computed<Record<string, UpstreamBalanceProviderSummary>>(() => balanceOverview.value?.summaries || {})
 const balanceRows = computed<UpstreamBalanceDailyRow[]>(() => balanceOverview.value?.rows || [])
+const balanceSnapshots = computed<UpstreamBalanceSnapshot[]>(() => balanceOverview.value?.snapshots || [])
 const selectedBalanceSummary = computed(() => selectedBalanceProviderSlug.value ? balanceSummaries.value[selectedBalanceProviderSlug.value] : undefined)
 const selectedBalanceRows = computed(() => balanceRows.value.filter(row => row.provider_slug === selectedBalanceProviderSlug.value))
+const selectedBalanceSnapshots = computed(() => balanceSnapshots.value
+  .filter(snapshot => snapshot.provider_slug === selectedBalanceProviderSlug.value)
+  .slice()
+  .sort((left, right) => new Date(right.captured_at).getTime() - new Date(left.captured_at).getTime()))
 const selectedBalanceScale = computed(() => {
   const configured = balanceSamplerForm.value.provider_amount_scales[selectedBalanceProviderSlug.value]
   if (Number(configured) > 0) return Number(configured)

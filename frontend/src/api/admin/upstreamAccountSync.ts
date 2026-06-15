@@ -151,10 +151,24 @@ export interface UpstreamBalanceDailyRow {
   last_snapshot_at?: string
 }
 
+export interface UpstreamBalanceSnapshot {
+  id: number
+  provider_slug: string
+  provider_name?: string
+  provider_type?: string
+  balance: number
+  amount_scale: number
+  status: 'success' | 'failed' | string
+  error?: string
+  captured_at: string
+  created_at: string
+}
+
 export interface UpstreamBalanceConsumptionOverview {
   config: UpstreamBalanceSamplerConfig
   summaries: Record<string, UpstreamBalanceProviderSummary>
   rows: UpstreamBalanceDailyRow[]
+  snapshots: UpstreamBalanceSnapshot[]
 }
 
 export interface UpstreamBalanceRechargeInput {

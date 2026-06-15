@@ -213,9 +213,16 @@
                   <Icon name="sync" size="sm" class="mr-1" :class="syncingGroupKey === row.upstream_group_key ? 'animate-spin' : ''" />
                   {{ t('admin.upstreamGroups.syncLocalGroup') }}
                 </button>
-                <span v-else class="table-tag tag-done">
-                  {{ t('admin.upstreamGroups.noActionNeeded') }}
-                </span>
+                <button
+                  v-else
+                  type="button"
+                  class="btn btn-secondary btn-sm whitespace-nowrap"
+                  :disabled="savingLocalRateGroupId === row.local_group_id"
+                  @click="openLocalRateDialog(row)"
+                >
+                  <Icon name="cog" size="sm" class="mr-1" :class="savingLocalRateGroupId === row.local_group_id ? 'animate-spin' : ''" />
+                  {{ t('admin.upstreamGroups.editLocalRate') }}
+                </button>
               </template>
 
               <template #empty>
@@ -290,6 +297,16 @@
                   <div class="mt-1 font-mono text-sm font-semibold text-gray-950 dark:text-white">{{ formatRate(syncDialogItem.upstream_rate) }}</div>
                 </div>
                 <div class="sm:col-span-2">
+                  <label class="input-label" for="sync-local-platform">{{ t('admin.groups.form.platform') }}</label>
+                  <Select
+                    id="sync-local-platform"
+                    v-model="syncPlatform"
+                    class="mt-1"
+                    :options="syncPlatformOptions"
+                  />
+                  <p class="input-hint">{{ t('admin.groups.platformHint') }}</p>
+                </div>
+                <div class="sm:col-span-2">
                   <label class="input-label" for="sync-rate-multiplier">{{ t('admin.upstreamGroups.localRate') }}</label>
                   <input
                     id="sync-rate-multiplier"
@@ -309,6 +326,47 @@
               <button type="button" class="btn btn-primary btn-sm" :disabled="syncingGroupKey === syncDialogItem.upstream_group_key" @click="syncLocalGroup">
                 <Icon name="sync" size="sm" class="mr-1" :class="syncingGroupKey === syncDialogItem.upstream_group_key ? 'animate-spin' : ''" />
                 {{ t('admin.upstreamGroups.confirmSync') }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="localRateDialogItem" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6" @click.self="closeLocalRateDialog">
+          <div class="w-full max-w-lg overflow-hidden rounded-lg bg-white shadow-xl dark:bg-dark-800">
+            <div class="border-b border-gray-100 px-5 py-4 dark:border-dark-700">
+              <h3 class="text-lg font-semibold text-gray-950 dark:text-white">{{ t('admin.upstreamGroups.editLocalRateTitle') }}</h3>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.upstreamGroups.editLocalRateDescription') }}</p>
+            </div>
+            <div class="space-y-4 px-5 py-4">
+              <div class="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <div class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.upstreamGroups.localGroup') }}</div>
+                  <div class="mt-1 break-words text-sm font-semibold text-gray-950 dark:text-white">{{ localRateDialogItem.local_group_name }}</div>
+                </div>
+                <div>
+                  <div class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.upstreamGroups.upstreamRate') }}</div>
+                  <div class="mt-1 font-mono text-sm font-semibold text-gray-950 dark:text-white">{{ formatRate(localRateDialogItem.upstream_rate) }}</div>
+                </div>
+                <div class="sm:col-span-2">
+                  <label class="input-label" for="local-rate-multiplier">{{ t('admin.upstreamGroups.localRate') }}</label>
+                  <input
+                    id="local-rate-multiplier"
+                    v-model.number="localRateInput"
+                    type="number"
+                    min="0.0001"
+                    step="0.0001"
+                    class="input mt-1"
+                  />
+                </div>
+              </div>
+            </div>
+            <div class="flex justify-end gap-2 border-t border-gray-100 px-5 py-4 dark:border-dark-700">
+              <button type="button" class="btn btn-secondary btn-sm" :disabled="savingLocalRateGroupId === localRateDialogItem.local_group_id" @click="closeLocalRateDialog">
+                {{ t('common.cancel') }}
+              </button>
+              <button type="button" class="btn btn-primary btn-sm" :disabled="savingLocalRateGroupId === localRateDialogItem.local_group_id" @click="saveLocalGroupRate">
+                <Icon name="cog" size="sm" class="mr-1" :class="savingLocalRateGroupId === localRateDialogItem.local_group_id ? 'animate-spin' : ''" />
+                {{ t('common.save') }}
               </button>
             </div>
           </div>
@@ -354,6 +412,7 @@ const applying = ref(false)
 const loadingRateFixConfig = ref(false)
 const savingRateFixConfig = ref(false)
 const syncingGroupKey = ref<string | null>(null)
+const savingLocalRateGroupId = ref<number | null>(null)
 const monitorTrendIndex = ref<Map<string, UpstreamMonitorTrendRow>>(new Map())
 const monitorLoading = ref(false)
 const monitorError = ref('')
@@ -368,7 +427,21 @@ const matchFilter = ref('')
 const rateFilter = ref('')
 const syncDialogItem = ref<UpstreamGroupComparison | null>(null)
 const syncRateMultiplier = ref(1)
+const syncPlatform = ref('')
+const localRateDialogItem = ref<UpstreamGroupComparison | null>(null)
+const localRateInput = ref(1)
 let reloadRequestId = 0
+
+const platformOptions = computed<SelectOption[]>(() => [
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'gemini', label: 'Gemini' },
+  { value: 'antigravity', label: 'Antigravity' },
+])
+const syncPlatformOptions = computed<SelectOption[]>(() => [
+  { value: '', label: t('admin.upstreamGroups.selectPlatform') },
+  ...platformOptions.value,
+])
 
 const columns = computed<Column[]>(() => [
   { key: 'upstream_group_name', label: t('admin.upstreamGroups.columns.upstreamGroup'), class: 'min-w-[12rem]' },
@@ -538,11 +611,45 @@ function monitorTrendFor(row: UpstreamGroupComparison) {
 function openSyncDialog(row: UpstreamGroupComparison) {
   syncDialogItem.value = row
   syncRateMultiplier.value = normalizePositiveRate(row.upstream_rate, 1)
+  syncPlatform.value = ''
 }
 
 function closeSyncDialog() {
   if (syncingGroupKey.value) return
   syncDialogItem.value = null
+  syncPlatform.value = ''
+}
+
+function openLocalRateDialog(row: UpstreamGroupComparison) {
+  if (!row.local_group_id) return
+  localRateDialogItem.value = row
+  localRateInput.value = normalizePositiveRate(row.local_rate, 1)
+}
+
+function closeLocalRateDialog() {
+  if (savingLocalRateGroupId.value) return
+  localRateDialogItem.value = null
+}
+
+async function saveLocalGroupRate() {
+  const row = localRateDialogItem.value
+  if (!row?.local_group_id) return
+  const rate = Number(localRateInput.value)
+  if (!Number.isFinite(rate) || rate <= 0) {
+    appStore.showError(t('admin.upstreamGroups.invalidRate'))
+    return
+  }
+  savingLocalRateGroupId.value = row.local_group_id
+  try {
+    await adminAPI.groups.update(row.local_group_id, { rate_multiplier: rate })
+    localRateDialogItem.value = null
+    await reload()
+    appStore.showSuccess(t('admin.upstreamGroups.localRateSaved'))
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamGroups.localRateSaveFailed')))
+  } finally {
+    savingLocalRateGroupId.value = null
+  }
 }
 
 async function syncLocalGroup() {
@@ -552,14 +659,20 @@ async function syncLocalGroup() {
     appStore.showError(t('admin.upstreamGroups.invalidRate'))
     return
   }
+  if (!syncPlatform.value) {
+    appStore.showError(t('admin.upstreamGroups.invalidPlatform'))
+    return
+  }
   const item = syncDialogItem.value
   syncingGroupKey.value = item.upstream_group_key
   try {
     result.value = await adminAPI.upstreamManagement.createLocalGroupFromUpstream({
       upstream_group_name: item.upstream_group_name,
+      platform: syncPlatform.value,
       rate_multiplier: rate,
     })
     syncDialogItem.value = null
+    syncPlatform.value = ''
     appStore.showSuccess(t('admin.upstreamGroups.syncSuccess'))
   } catch (err) {
     appStore.showError(extractApiErrorMessage(err, t('admin.upstreamGroups.syncFailed')))
