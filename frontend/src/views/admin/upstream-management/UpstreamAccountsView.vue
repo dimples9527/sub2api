@@ -334,7 +334,7 @@
           </div>
         </div>
 
-        <div v-if="accountGroupDialogItem" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6" @click.self="closeAccountGroupDialog">
+        <div v-if="accountGroupDialogItem" class="account-group-dialog fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6" @click.self="closeAccountGroupDialog">
           <div class="w-full max-w-lg overflow-hidden rounded-lg bg-white shadow-xl dark:bg-dark-800">
             <div class="border-b border-gray-100 px-5 py-4 dark:border-dark-700">
               <h3 class="text-lg font-semibold text-gray-950 dark:text-white">{{ t('admin.upstreamAccounts.editBoundGroupsTitle') }}</h3>
@@ -345,26 +345,12 @@
                 <div class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.upstreamAccounts.columns.localAccount') }}</div>
                 <div class="mt-1 text-sm font-semibold text-gray-950 dark:text-white">{{ accountGroupDialogItem.matched_account_name || accountGroupDialogItem.local_account_name }}</div>
               </div>
-              <div>
-                <label class="input-label" for="account-group-select">{{ t('admin.upstreamAccounts.boundGroups') }}</label>
-                <select
-                  id="account-group-select"
-                  class="input mt-1"
-                  multiple
-                  size="8"
-                  :value="accountGroupIds.map(String)"
-                  @change="handleAccountGroupSelection"
-                >
-                  <option
-                    v-for="group in accountGroupOptions"
-                    :key="group.id"
-                    :value="group.id"
-                  >
-                    {{ group.name }} - {{ formatRate(group.rate_multiplier) }}
-                  </option>
-                </select>
-                <p class="input-hint">{{ t('admin.upstreamAccounts.boundGroupsHint') }}</p>
-              </div>
+              <GroupSelector
+                v-model="accountGroupIds"
+                :groups="accountGroupOptions"
+                platform="openai"
+                searchable
+              />
               <div v-if="accountGroupIds.length" class="tag-list">
                 <span v-for="groupID in accountGroupIds" :key="groupID" class="group-chip group-chip-blue">
                   {{ groupNameById(groupID) }}
@@ -416,6 +402,7 @@ import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Icon from '@/components/icons/Icon.vue'
+import GroupSelector from '@/components/common/GroupSelector.vue'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -711,13 +698,6 @@ function closeAccountGroupDialog() {
   if (savingAccountGroupId.value) return
   accountGroupDialogItem.value = null
   accountGroupIds.value = []
-}
-
-function handleAccountGroupSelection(event: Event) {
-  const select = event.target as HTMLSelectElement
-  accountGroupIds.value = Array.from(select.selectedOptions)
-    .map(option => Number(option.value))
-    .filter(id => Number.isFinite(id))
 }
 
 async function saveAccountGroups() {

@@ -141,6 +141,7 @@ describe('UpstreamAccountsView', () => {
           EmptyState: true,
           Icon: true,
           Select: true,
+          GroupSelector: true,
         },
       },
     })
@@ -353,13 +354,16 @@ describe('UpstreamAccountsView', () => {
     await editButton!.trigger('click')
     await flushPromises()
 
-    const select = wrapper.find('#account-group-select')
-    expect(select.exists()).toBe(true)
-    expect(select.text()).toContain('VIP')
-    expect(select.text()).toContain('Trial')
-    expect(select.text()).not.toContain('Claude')
+    const dialog = wrapper.find('.account-group-dialog')
+    expect(dialog.exists()).toBe(true)
+    const checkboxes = dialog.findAll('input[type="checkbox"]')
+    expect(checkboxes).toHaveLength(2)
+    expect(wrapper.text()).toContain('VIP')
+    expect(wrapper.text()).toContain('Trial')
+    expect(wrapper.text()).not.toContain('Claude')
+    expect((checkboxes[0].element as HTMLInputElement).checked).toBe(true)
 
-    await select.setValue(['7', '8'])
+    await checkboxes[1].setValue(true)
     const saveButtons = wrapper.findAll('button').filter(button => button.text().includes('common.save'))
     await saveButtons[saveButtons.length - 1].trigger('click')
     await flushPromises()
