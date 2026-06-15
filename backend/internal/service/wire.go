@@ -434,6 +434,20 @@ func ProvideUpstreamAccountRateGuardScheduler(upstreamAccountSyncService *Upstre
 	return svc
 }
 
+func ProvideUpstreamBalanceConsumptionService(
+	store UpstreamBalanceStore,
+	upstreamProviderService *UpstreamProviderService,
+	settingRepo SettingRepository,
+) *UpstreamBalanceConsumptionService {
+	return NewUpstreamBalanceConsumptionService(store, upstreamProviderService, settingRepo)
+}
+
+func ProvideUpstreamBalanceSamplerScheduler(service *UpstreamBalanceConsumptionService) *UpstreamBalanceSamplerScheduler {
+	svc := NewUpstreamBalanceSamplerScheduler(service)
+	svc.Start()
+	return svc
+}
+
 // ProvideBackupService creates and starts BackupService
 func ProvideBackupService(
 	settingRepo SettingRepository,
@@ -574,6 +588,8 @@ var ProviderSet = wire.NewSet(
 	ProvideUpstreamGroupRateFixScheduler,
 	ProvideUpstreamAccountSyncService,
 	ProvideUpstreamAccountRateGuardScheduler,
+	ProvideUpstreamBalanceConsumptionService,
+	ProvideUpstreamBalanceSamplerScheduler,
 	NewDataManagementService,
 	ProvideBackupService,
 	ProvideOpsSystemLogSink,

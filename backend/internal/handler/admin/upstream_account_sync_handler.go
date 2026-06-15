@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"net/http"
+	"strconv"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -23,13 +24,27 @@ type upstreamAccountRateGuardScheduler interface {
 	ListPollLogs() []service.UpstreamAccountRateGuardPollLog
 }
 
-type UpstreamAccountSyncHandler struct {
-	service   upstreamAccountSyncService
-	scheduler upstreamAccountRateGuardScheduler
+type upstreamBalanceConsumptionService interface {
+	GetOverview(ctx context.Context, days int) (service.UpstreamBalanceConsumptionOverview, error)
+	GetConfig(ctx context.Context) (service.UpstreamBalanceSamplerConfig, error)
+	UpdateConfig(ctx context.Context, input service.UpstreamBalanceSamplerConfig) (service.UpstreamBalanceSamplerConfig, error)
+	AddRecharge(ctx context.Context, input service.UpstreamBalanceRechargeInput) (service.UpstreamBalanceRecharge, error)
 }
 
-func NewUpstreamAccountSyncHandler(service *service.UpstreamAccountSyncService, scheduler *service.UpstreamAccountRateGuardScheduler) *UpstreamAccountSyncHandler {
-	return &UpstreamAccountSyncHandler{service: service, scheduler: scheduler}
+type upstreamBalanceSamplerScheduler interface {
+	RunNow(ctx context.Context) (service.UpstreamBalanceSamplerConfig, error)
+	ListPollLogs() []service.UpstreamBalanceSamplerPollLog
+}
+
+type UpstreamAccountSyncHandler struct {
+	service          upstreamAccountSyncService
+	scheduler        upstreamAccountRateGuardScheduler
+	balance          upstreamBalanceConsumptionService
+	balanceScheduler upstreamBalanceSamplerScheduler
+}
+
+func NewUpstreamAccountSyncHandler(service *service.UpstreamAccountSyncService, scheduler *service.UpstreamAccountRateGuardScheduler, balance *service.UpstreamBalanceConsumptionService, balanceScheduler *service.UpstreamBalanceSamplerScheduler) *UpstreamAccountSyncHandler {
+	return &UpstreamAccountSyncHandler{service: service, scheduler: scheduler, balance: balance, balanceScheduler: balanceScheduler}
 }
 
 func newUpstreamAccountSyncHandlerWithService(service upstreamAccountSyncService) *UpstreamAccountSyncHandler {
@@ -37,7 +52,15 @@ func newUpstreamAccountSyncHandlerWithService(service upstreamAccountSyncService
 }
 
 func newUpstreamAccountSyncHandlerWithDeps(service upstreamAccountSyncService, scheduler upstreamAccountRateGuardScheduler) *UpstreamAccountSyncHandler {
-	return &UpstreamAccountSyncHandler{service: service, scheduler: scheduler}
+	balance, _ := service.(upstreamBalanceConsumptionService)
+	return &UpstreamAccountSyncHandler{service: service, scheduler: scheduler, balance: balance}
+}
+
+func newUpstreamAccountSyncHandlerWithAllDeps(service upstreamAccountSyncService, scheduler upstreamAccountRateGuardScheduler, balance upstreamBalanceConsumptionService, balanceScheduler upstreamBalanceSamplerScheduler) *UpstreamAccountSyncHandler {
+	if balance == nil {
+		balance, _ = service.(upstreamBalanceConsumptionService)
+	}
+	return &UpstreamAccountSyncHandler{service: service, scheduler: scheduler, balance: balance, balanceScheduler: balanceScheduler}
 }
 
 func (h *UpstreamAccountSyncHandler) Preview(c *gin.Context) {
@@ -120,4 +143,93 @@ func (h *UpstreamAccountSyncHandler) RateGuardPollLogs(c *gin.Context) {
 		return
 	}
 	response.Success(c, h.scheduler.ListPollLogs())
+}
+
+func (h *UpstreamAccountSyncHandler) BalanceConsumptionOverview(c *gin.Context) {
+	if h.balance == nil {
+		response.InternalError(c, "upstream balance consumption service is unavailable")
+		return
+	}
+	days := 30
+	if raw := c.Query("days"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			days = parsed
+		}
+	}
+	result, err := h.balance.GetOverview(c.Request.Context(), days)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *UpstreamAccountSyncHandler) GetBalanceSamplerConfig(c *gin.Context) {
+	if h.balance == nil {
+		response.InternalError(c, "upstream balance consumption service is unavailable")
+		return
+	}
+	result, err := h.balance.GetConfig(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *UpstreamAccountSyncHandler) UpdateBalanceSamplerConfig(c *gin.Context) {
+	if h.balance == nil {
+		response.InternalError(c, "upstream balance consumption service is unavailable")
+		return
+	}
+	var input service.UpstreamBalanceSamplerConfig
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	result, err := h.balance.UpdateConfig(c.Request.Context(), input)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *UpstreamAccountSyncHandler) AddBalanceRecharge(c *gin.Context) {
+	if h.balance == nil {
+		response.InternalError(c, "upstream balance consumption service is unavailable")
+		return
+	}
+	var input service.UpstreamBalanceRechargeInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	result, err := h.balance.AddRecharge(c.Request.Context(), input)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *UpstreamAccountSyncHandler) RunBalanceSampleNow(c *gin.Context) {
+	if h.balanceScheduler == nil {
+		response.ErrorFrom(c, infraerrors.ServiceUnavailable("UPSTREAM_BALANCE_SAMPLER_UNAVAILABLE", "upstream balance sampler scheduler is unavailable"))
+		return
+	}
+	result, err := h.balanceScheduler.RunNow(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *UpstreamAccountSyncHandler) BalanceSamplerPollLogs(c *gin.Context) {
+	if h.balanceScheduler == nil {
+		response.Success(c, []service.UpstreamBalanceSamplerPollLog{})
+		return
+	}
+	response.Success(c, h.balanceScheduler.ListPollLogs())
 }

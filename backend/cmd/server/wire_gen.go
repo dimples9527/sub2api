@@ -74,6 +74,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	promoService := service.NewPromoService(promoCodeRepository, userRepository, billingCacheService, client, apiKeyAuthCacheInvalidator)
 	subscriptionService := service.NewSubscriptionService(groupRepository, userSubscriptionRepository, billingCacheService, client, configConfig)
 	affiliateRepository := repository.NewAffiliateRepository(client, db)
+	upstreamBalanceRepository := repository.NewUpstreamBalanceRepository(client, db)
 	affiliateService := service.NewAffiliateService(affiliateRepository, settingService, apiKeyAuthCacheInvalidator, billingCacheService)
 	authService := service.NewAuthService(client, userRepository, redeemCodeRepository, refreshTokenCache, configConfig, settingService, emailService, turnstileService, emailQueueService, promoService, subscriptionService, affiliateService, serviceUserPlatformQuotaRepository)
 	userService := service.NewUserService(userRepository, settingRepository, apiKeyAuthCacheInvalidator, billingCache)
@@ -177,6 +178,8 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	adminService := service.NewAdminService(userRepository, groupRepository, accountRepository, proxyRepository, apiKeyRepository, redeemCodeRepository, userGroupRateRepository, userRPMCache, billingCacheService, proxyExitInfoProber, proxyLatencyCache, apiKeyAuthCacheInvalidator, client, settingService, subscriptionService, userSubscriptionRepository, privacyClientFactory, openAIGatewayService)
 	upstreamAccountSyncService := service.ProvideUpstreamAccountSyncService(upstreamProviderService, groupRepository, adminService, settingRepository)
 	upstreamAccountRateGuardScheduler := service.ProvideUpstreamAccountRateGuardScheduler(upstreamAccountSyncService)
+	upstreamBalanceConsumptionService := service.ProvideUpstreamBalanceConsumptionService(upstreamBalanceRepository, upstreamProviderService, settingRepository)
+	upstreamBalanceSamplerScheduler := service.ProvideUpstreamBalanceSamplerScheduler(upstreamBalanceConsumptionService)
 	adminUserHandler := admin.NewUserHandler(adminService, concurrencyService, serviceUserPlatformQuotaRepository, billingCache)
 	groupCapacityService := service.NewGroupCapacityService(accountRepository, groupRepository, concurrencyService, sessionLimitCache, rpmCache)
 	groupHandler := admin.NewGroupHandler(adminService, dashboardService, groupCapacityService)
@@ -247,7 +250,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	complianceHandler := admin.NewComplianceHandler(settingService)
 	upstreamProviderHandler := admin.NewUpstreamProviderHandler(upstreamProviderService)
 	upstreamManagementHandler := admin.NewUpstreamManagementHandler(upstreamManagementService)
-	upstreamAccountSyncHandler := admin.NewUpstreamAccountSyncHandler(upstreamAccountSyncService, upstreamAccountRateGuardScheduler)
+	upstreamAccountSyncHandler := admin.NewUpstreamAccountSyncHandler(upstreamAccountSyncService, upstreamAccountRateGuardScheduler, upstreamBalanceConsumptionService, upstreamBalanceSamplerScheduler)
 	adminHandlers := handler.ProvideAdminHandlers(dashboardHandler, adminUserHandler, groupHandler, accountHandler, adminAnnouncementHandler, dataManagementHandler, backupHandler, oAuthHandler, openAIOAuthHandler, geminiOAuthHandler, antigravityOAuthHandler, proxyHandler, adminRedeemHandler, promoHandler, settingHandler, opsHandler, systemHandler, adminSubscriptionHandler, adminUsageHandler, userAttributeHandler, errorPassthroughHandler, tlsFingerprintProfileHandler, adminAPIKeyHandler, scheduledTestHandler, channelHandler, channelMonitorHandler, channelMonitorRequestTemplateHandler, contentModerationHandler, paymentHandler, affiliateHandler, complianceHandler, upstreamProviderHandler, upstreamManagementHandler, upstreamAccountSyncHandler)
 	usageRecordWorkerPool := service.NewUsageRecordWorkerPool(configConfig)
 	userMsgQueueCache := repository.NewUserMsgQueueCache(redisClient)
@@ -281,7 +284,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	channelMonitorRunner := service.ProvideChannelMonitorRunner(channelMonitorService, settingService)
 	userPlatformQuotaUsageFlusher := service.ProvideUserPlatformQuotaUsageFlusher(configConfig, billingCache, serviceUserPlatformQuotaRepository, timingWheelService)
 	upstreamGroupRateFixScheduler := service.ProvideUpstreamGroupRateFixScheduler(upstreamManagementService)
-	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, userPlatformQuotaUsageFlusher, upstreamGroupRateFixScheduler, upstreamAccountRateGuardScheduler)
+	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, userPlatformQuotaUsageFlusher, upstreamGroupRateFixScheduler, upstreamAccountRateGuardScheduler, upstreamBalanceSamplerScheduler)
 	application := &Application{
 		Server:  httpServer,
 		Cleanup: v,
@@ -340,6 +343,7 @@ func provideCleanup(
 	quotaFlusher *service.UserPlatformQuotaUsageFlusher,
 	upstreamGroupRateFixScheduler *service.UpstreamGroupRateFixScheduler,
 	upstreamAccountRateGuardScheduler *service.UpstreamAccountRateGuardScheduler,
+	upstreamBalanceSamplerScheduler *service.UpstreamBalanceSamplerScheduler,
 ) func() {
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -506,6 +510,12 @@ func provideCleanup(
 			{"UpstreamAccountRateGuardScheduler", func() error {
 				if upstreamAccountRateGuardScheduler != nil {
 					upstreamAccountRateGuardScheduler.Stop()
+				}
+				return nil
+			}},
+			{"UpstreamBalanceSamplerScheduler", func() error {
+				if upstreamBalanceSamplerScheduler != nil {
+					upstreamBalanceSamplerScheduler.Stop()
 				}
 				return nil
 			}},

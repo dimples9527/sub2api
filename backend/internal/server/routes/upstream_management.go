@@ -39,6 +39,12 @@ func registerUpstreamManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 			accounts.PUT("/rate-guard-config", h.Admin.UpstreamAccountSync.UpdateRateGuardConfig)
 			accounts.POST("/rate-guard-runs", h.Admin.UpstreamAccountSync.RunRateGuardNow)
 			accounts.GET("/rate-guard-poll-logs", h.Admin.UpstreamAccountSync.RateGuardPollLogs)
+			accounts.GET("/balance-consumption", h.Admin.UpstreamAccountSync.BalanceConsumptionOverview)
+			accounts.GET("/balance-consumption/config", h.Admin.UpstreamAccountSync.GetBalanceSamplerConfig)
+			accounts.PUT("/balance-consumption/config", h.Admin.UpstreamAccountSync.UpdateBalanceSamplerConfig)
+			accounts.POST("/balance-consumption/recharges", h.Admin.UpstreamAccountSync.AddBalanceRecharge)
+			accounts.POST("/balance-consumption/samples", h.Admin.UpstreamAccountSync.RunBalanceSampleNow)
+			accounts.GET("/balance-consumption/poll-logs", h.Admin.UpstreamAccountSync.BalanceSamplerPollLogs)
 		}
 	}
 }

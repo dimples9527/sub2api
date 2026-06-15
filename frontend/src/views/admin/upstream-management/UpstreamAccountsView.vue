@@ -237,6 +237,33 @@
                 <span :class="['rate-value', rateToneClass(value)]">{{ formatRate(value) }}</span>
               </template>
 
+              <template #cell-balance_consumption="{ row }">
+                <div class="balance-cost-cell">
+                  <div class="font-mono text-sm font-semibold text-gray-950 dark:text-white">
+                    {{ formatMoney(balanceSummaryFor(row.provider_slug)?.today_consumption) }}
+                  </div>
+                  <div class="mt-1 flex flex-wrap gap-1">
+                    <span :class="['table-tag', balanceSummaryFor(row.provider_slug)?.complete ? 'tag-success' : 'tag-muted']">
+                      {{ balanceSummaryFor(row.provider_slug)?.complete ? t('admin.upstreamAccounts.balanceComplete') : t('admin.upstreamAccounts.balanceIncomplete') }}
+                    </span>
+                    <span v-if="balanceSummaryFor(row.provider_slug)?.anomaly" class="table-tag tag-warning">
+                      {{ t('admin.upstreamAccounts.balanceAnomaly') }}
+                    </span>
+                  </div>
+                </div>
+              </template>
+
+              <template #cell-actions="{ row }">
+                <button
+                  type="button"
+                  class="btn btn-secondary btn-sm"
+                  @click="openBalanceDetails(row.provider_slug)"
+                >
+                  <Icon name="more" size="sm" class="mr-1" />
+                  {{ t('common.more') }}
+                </button>
+              </template>
+
               <template #empty>
                 <EmptyState
                   :title="emptyTitle"
@@ -246,6 +273,119 @@
                 />
               </template>
             </DataTable>
+          </div>
+
+          <div
+            v-if="balanceDetailsOpen"
+            class="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
+            @click.self="closeBalanceDetails"
+          >
+            <div class="balance-dialog">
+              <div class="balance-dialog-header">
+                <div class="min-w-0">
+                  <h3 class="truncate text-base font-semibold text-gray-950 dark:text-white">
+                    {{ selectedBalanceProviderLabel }}
+                  </h3>
+                  <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                    {{ t('admin.upstreamAccounts.balanceDialogDescription') }}
+                  </p>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" @click="closeBalanceDetails">
+                  {{ t('common.close') }}
+                </button>
+              </div>
+
+              <div class="balance-dialog-body">
+                <div class="balance-summary-grid">
+                  <div class="balance-metric">
+                    <span>{{ t('admin.upstreamAccounts.currentBalance') }}</span>
+                    <strong>{{ formatMoney(selectedBalanceSummary?.current_balance) }}</strong>
+                  </div>
+                  <div class="balance-metric">
+                    <span>{{ t('admin.upstreamAccounts.todayConsumption') }}</span>
+                    <strong>{{ formatMoney(selectedBalanceSummary?.today_consumption) }}</strong>
+                  </div>
+                  <div class="balance-metric">
+                    <span>{{ t('admin.upstreamAccounts.amountScale') }}</span>
+                    <strong>{{ formatScale(selectedBalanceScale) }}</strong>
+                  </div>
+                  <div class="balance-metric">
+                    <span>{{ t('admin.upstreamAccounts.lastSnapshot') }}</span>
+                    <strong class="text-sm">{{ selectedBalanceSummary?.last_snapshot_at ? formatDateTime(selectedBalanceSummary.last_snapshot_at) : '-' }}</strong>
+                  </div>
+                </div>
+
+                <div class="balance-config-panel">
+                  <label class="guard-toggle">
+                    <input v-model="balanceSamplerForm.enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+                    <span>{{ t('admin.upstreamAccounts.balanceSamplerAutoRun') }}</span>
+                  </label>
+                  <label class="guard-interval">
+                    <span>{{ t('admin.upstreamAccounts.balanceSamplerIntervalSeconds') }}</span>
+                    <input v-model.number="balanceSamplerForm.interval_seconds" type="number" min="60" class="input h-9 w-28" />
+                  </label>
+                  <label class="guard-interval">
+                    <span>{{ t('admin.upstreamAccounts.amountScale') }}</span>
+                    <input v-model.number="selectedProviderScaleInput" type="number" min="0.000001" step="0.000001" class="input h-9 w-28" />
+                  </label>
+                  <button type="button" class="btn btn-secondary" :disabled="savingBalanceSamplerConfig" @click="saveBalanceSamplerConfig">
+                    <Icon name="cog" size="sm" class="mr-2" :class="savingBalanceSamplerConfig ? 'animate-spin' : ''" />
+                    {{ t('common.save') }}
+                  </button>
+                  <button type="button" class="btn btn-primary" :disabled="runningBalanceSampleNow" @click="runBalanceSampleNow">
+                    <Icon name="play" size="sm" class="mr-2" :class="runningBalanceSampleNow ? 'animate-pulse' : ''" />
+                    {{ t('admin.upstreamAccounts.balanceSampleNow') }}
+                  </button>
+                </div>
+
+                <div class="balance-recharge-panel">
+                  <div class="balance-section-title">{{ t('admin.upstreamAccounts.addRecharge') }}</div>
+                  <div class="balance-recharge-form">
+                    <input v-model.number="rechargeForm.amount" type="number" min="0" step="0.000001" class="input" :placeholder="t('admin.upstreamAccounts.rechargeAmount')" />
+                    <input v-model="rechargeForm.note" type="text" class="input" :placeholder="t('admin.upstreamAccounts.rechargeNote')" />
+                    <button type="button" class="btn btn-secondary" :disabled="addingRecharge" @click="addBalanceRecharge">
+                      <Icon name="plus" size="sm" class="mr-2" />
+                      {{ t('common.add') }}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <div class="balance-section-title">{{ t('admin.upstreamAccounts.balanceHistory') }}</div>
+                  <div class="max-h-72 overflow-auto rounded-lg border border-gray-200 dark:border-dark-600">
+                    <table class="records-table min-w-[760px]">
+                      <thead class="bg-gray-50 dark:bg-dark-800">
+                        <tr>
+                          <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.balanceDate') }}</th>
+                          <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.openingBalance') }}</th>
+                          <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.rechargeAmount') }}</th>
+                          <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.closingBalance') }}</th>
+                          <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.consumptionAmount') }}</th>
+                          <th class="px-4 py-2 text-left font-medium">{{ t('common.status') }}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="row in selectedBalanceRows" :key="`${row.provider_slug}-${row.date}`" class="records-row">
+                          <td class="px-4 py-3 font-mono text-gray-600 dark:text-gray-300">{{ row.date }}</td>
+                          <td class="px-4 py-3 font-mono">{{ formatMoney(row.opening_balance) }}</td>
+                          <td class="px-4 py-3 font-mono">{{ formatMoney(row.recharge_amount) }}</td>
+                          <td class="px-4 py-3 font-mono">{{ formatMoney(row.closing_balance) }}</td>
+                          <td class="px-4 py-3 font-mono">{{ formatMoney(row.consumption_amount) }}</td>
+                          <td class="px-4 py-3">
+                            <span :class="['record-status', row.anomaly ? 'record-status-error' : row.complete ? 'record-status-success' : 'record-status-muted']">
+                              {{ balanceRowStatus(row) }}
+                            </span>
+                          </td>
+                        </tr>
+                        <tr v-if="!selectedBalanceRows.length">
+                          <td colspan="6" class="px-4 py-8 text-center text-gray-400">{{ t('admin.upstreamAccounts.noBalanceHistory') }}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div class="records-panel">
@@ -334,7 +474,11 @@ import type {
   UpstreamAccountSyncItem,
   UpstreamAccountSyncRecord,
   UpstreamAccountSyncResult,
-  UpstreamAccountSyncUnbindDetail
+  UpstreamAccountSyncUnbindDetail,
+  UpstreamBalanceConsumptionOverview,
+  UpstreamBalanceDailyRow,
+  UpstreamBalanceProviderSummary,
+  UpstreamBalanceSamplerConfig
 } from '@/api/admin/upstreamAccountSync'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -356,14 +500,30 @@ const syncing = ref(false)
 const loadingRateGuardConfig = ref(false)
 const savingRateGuardConfig = ref(false)
 const runningRateGuardNow = ref(false)
+const savingBalanceSamplerConfig = ref(false)
+const runningBalanceSampleNow = ref(false)
+const addingRecharge = ref(false)
 const loadError = ref('')
 const searchQuery = ref('')
 const providerFilter = ref('')
 const sourceFilter = ref('')
 const rateGuardConfig = ref<UpstreamAccountRateGuardConfig | null>(null)
+const balanceOverview = ref<UpstreamBalanceConsumptionOverview | null>(null)
+const balanceDetailsOpen = ref(false)
+const selectedBalanceProviderSlug = ref('')
+const selectedProviderScaleInput = ref(1)
 const rateGuardForm = ref({
   enabled: false,
   interval_seconds: 3600
+})
+const balanceSamplerForm = ref({
+  enabled: false,
+  interval_seconds: 3600,
+  provider_amount_scales: {} as Record<string, number>
+})
+const rechargeForm = ref({
+  amount: null as number | null,
+  note: ''
 })
 
 type UpstreamAccountSyncLogEntry = UpstreamAccountSyncUnbindDetail & {
@@ -375,8 +535,10 @@ const columns = computed<Column[]>(() => [
   { key: 'source', label: t('admin.upstreamAccounts.columns.source') },
   { key: 'upstream_key_name', label: t('admin.upstreamAccounts.columns.upstreamKey') },
   { key: 'upstream_rate_multiplier', label: t('admin.upstreamAccounts.columns.upstreamRate') },
+  { key: 'balance_consumption', label: t('admin.upstreamAccounts.columns.balanceConsumption') },
   { key: 'local_account_name', label: t('admin.upstreamAccounts.columns.localAccount') },
   { key: 'local_group_name', label: t('admin.upstreamAccounts.columns.boundGroups') },
+  { key: 'actions', label: t('common.actions') }
 ])
 
 const emptySummary = {
@@ -395,6 +557,8 @@ const syncProviders = computed(() => result.value?.providers || [])
 const items = computed<UpstreamAccountSyncItem[]>(() => result.value?.items || [])
 const warnings = computed(() => result.value?.warnings || [])
 const records = computed<UpstreamAccountSyncRecord[]>(() => result.value?.records || [])
+const balanceSummaries = computed<Record<string, UpstreamBalanceProviderSummary>>(() => balanceOverview.value?.summaries || {})
+const balanceRows = computed<UpstreamBalanceDailyRow[]>(() => balanceOverview.value?.rows || [])
 const syncLogEntries = computed<UpstreamAccountSyncLogEntry[]>(() => {
   const entries: UpstreamAccountSyncLogEntry[] = []
   for (const record of records.value) {
@@ -427,6 +591,21 @@ const rateGuardLastRunText = computed(() => {
     return t('admin.upstreamAccounts.rateGuardNeverRun')
   }
   return formatDateTime(rateGuardConfig.value.last_run_at)
+})
+const selectedBalanceSummary = computed(() => selectedBalanceProviderSlug.value ? balanceSummaries.value[selectedBalanceProviderSlug.value] : undefined)
+const selectedBalanceRows = computed(() => balanceRows.value.filter(row => row.provider_slug === selectedBalanceProviderSlug.value))
+const selectedBalanceScale = computed(() => {
+  const configured = balanceSamplerForm.value.provider_amount_scales[selectedBalanceProviderSlug.value]
+  if (Number(configured) > 0) return Number(configured)
+  if (Number(selectedBalanceSummary.value?.amount_scale) > 0) return Number(selectedBalanceSummary.value?.amount_scale)
+  return 1
+})
+const selectedBalanceProviderLabel = computed(() => {
+  const slug = selectedBalanceProviderSlug.value
+  if (!slug) return '-'
+  const provider = syncProviders.value.find(item => item.slug === slug)
+  const summary = selectedBalanceSummary.value
+  return provider?.name || summary?.provider_name || slug
 })
 const providerOptions = computed<SelectOption[]>(() => [
   { value: '', label: t('admin.upstreamAccounts.allProviders') },
@@ -476,12 +655,14 @@ async function reload() {
   loadingRateGuardConfig.value = true
   loadError.value = ''
   try {
-    const [preview, config] = await Promise.all([
+    const [preview, config, balance] = await Promise.all([
       adminAPI.upstreamAccountSync.getPreview(),
-      adminAPI.upstreamAccountSync.getRateGuardConfig()
+      adminAPI.upstreamAccountSync.getRateGuardConfig(),
+      adminAPI.upstreamAccountSync.getBalanceConsumption(30)
     ])
     result.value = preview
     applyRateGuardConfig(config)
+    applyBalanceOverview(balance)
   } catch (err) {
     const message = extractApiErrorMessage(err, t('admin.upstreamAccounts.loadFailed'))
     loadError.value = message
@@ -525,6 +706,22 @@ function applyRateGuardConfig(config: UpstreamAccountRateGuardConfig) {
   rateGuardForm.value = {
     enabled: Boolean(config.enabled),
     interval_seconds: Number(config.interval_seconds) > 0 ? Number(config.interval_seconds) : 3600
+  }
+}
+
+function applyBalanceOverview(overview: UpstreamBalanceConsumptionOverview) {
+  balanceOverview.value = overview
+  applyBalanceSamplerConfig(overview.config)
+}
+
+function applyBalanceSamplerConfig(config: UpstreamBalanceSamplerConfig) {
+  balanceSamplerForm.value = {
+    enabled: Boolean(config.enabled),
+    interval_seconds: Number(config.interval_seconds) > 0 ? Number(config.interval_seconds) : 3600,
+    provider_amount_scales: { ...(config.provider_amount_scales || {}) }
+  }
+  if (selectedBalanceProviderSlug.value) {
+    selectedProviderScaleInput.value = selectedBalanceScale.value
   }
 }
 
@@ -573,9 +770,119 @@ async function runRateGuardNow() {
   }
 }
 
+async function saveBalanceSamplerConfig() {
+  if (!Number.isInteger(balanceSamplerForm.value.interval_seconds) || balanceSamplerForm.value.interval_seconds < 60) {
+    appStore.showError(t('admin.upstreamAccounts.invalidBalanceSamplerInterval'))
+    return
+  }
+  if (!selectedBalanceProviderSlug.value) return
+  const scale = Number(selectedProviderScaleInput.value)
+  if (!Number.isFinite(scale) || scale <= 0) {
+    appStore.showError(t('admin.upstreamAccounts.invalidAmountScale'))
+    return
+  }
+  savingBalanceSamplerConfig.value = true
+  try {
+    const providerAmountScales = {
+      ...balanceSamplerForm.value.provider_amount_scales,
+      [selectedBalanceProviderSlug.value]: scale
+    }
+    const base = balanceOverview.value?.config || { enabled: false, interval_seconds: 3600 }
+    const config = await adminAPI.upstreamAccountSync.updateBalanceSamplerConfig({
+      ...base,
+      enabled: balanceSamplerForm.value.enabled,
+      interval_seconds: balanceSamplerForm.value.interval_seconds,
+      provider_amount_scales: providerAmountScales
+    })
+    applyBalanceSamplerConfig(config)
+    appStore.showSuccess(t('admin.upstreamAccounts.balanceSamplerSaved'))
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.balanceSamplerSaveFailed')))
+  } finally {
+    savingBalanceSamplerConfig.value = false
+  }
+}
+
+async function runBalanceSampleNow() {
+  runningBalanceSampleNow.value = true
+  try {
+    const config = await adminAPI.upstreamAccountSync.runBalanceSampleNow()
+    applyBalanceSamplerConfig(config)
+    const balance = await adminAPI.upstreamAccountSync.getBalanceConsumption(30)
+    applyBalanceOverview(balance)
+    appStore.showSuccess(t('admin.upstreamAccounts.balanceSampleSuccess'))
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.balanceSampleFailed')))
+  } finally {
+    runningBalanceSampleNow.value = false
+  }
+}
+
+async function addBalanceRecharge() {
+  if (!selectedBalanceProviderSlug.value) return
+  const amount = Number(rechargeForm.value.amount)
+  if (!Number.isFinite(amount) || amount <= 0) {
+    appStore.showError(t('admin.upstreamAccounts.invalidRechargeAmount'))
+    return
+  }
+  addingRecharge.value = true
+  try {
+    await adminAPI.upstreamAccountSync.addBalanceRecharge({
+      provider_slug: selectedBalanceProviderSlug.value,
+      amount,
+      amount_scale: selectedBalanceScale.value,
+      note: rechargeForm.value.note.trim() || undefined,
+      occurred_at: new Date().toISOString()
+    })
+    rechargeForm.value = { amount: null, note: '' }
+    const balance = await adminAPI.upstreamAccountSync.getBalanceConsumption(30)
+    applyBalanceOverview(balance)
+    appStore.showSuccess(t('admin.upstreamAccounts.rechargeAdded'))
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.rechargeAddFailed')))
+  } finally {
+    addingRecharge.value = false
+  }
+}
+
+function openBalanceDetails(providerSlug: string) {
+  selectedBalanceProviderSlug.value = providerSlug
+  selectedProviderScaleInput.value = selectedBalanceScale.value
+  balanceDetailsOpen.value = true
+}
+
+function closeBalanceDetails() {
+  balanceDetailsOpen.value = false
+}
+
+function balanceSummaryFor(providerSlug: string | undefined) {
+  if (!providerSlug) return undefined
+  return balanceSummaries.value[providerSlug]
+}
+
+function balanceRowStatus(row: UpstreamBalanceDailyRow) {
+  if (row.anomaly) return t('admin.upstreamAccounts.balanceAnomaly')
+  if (row.complete) return t('admin.upstreamAccounts.balanceComplete')
+  return t('admin.upstreamAccounts.balanceIncomplete')
+}
+
 function formatRate(value: number | undefined) {
   const n = Number(value)
   return Number.isFinite(n) ? `${n.toFixed(2)}x` : '-'
+}
+
+function formatScale(value: number | undefined) {
+  const n = Number(value)
+  return Number.isFinite(n) && n > 0 ? `${n.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')}x` : '-'
+}
+
+function formatMoney(value: number | undefined) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return '-'
+  return n.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 6
+  })
 }
 
 function accountCardClass(row: UpstreamAccountSyncItem) {
@@ -930,6 +1237,67 @@ onMounted(reload)
 
 .record-status-error {
   @apply bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-200;
+}
+
+.record-status-muted {
+  @apply bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300;
+}
+
+.balance-cost-cell {
+  @apply min-w-[10rem] leading-tight;
+}
+
+.balance-dialog {
+  @apply flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg bg-white shadow-xl dark:bg-dark-800;
+}
+
+.balance-dialog-header {
+  @apply flex items-start justify-between gap-3 border-b border-gray-200 px-5 py-4 dark:border-dark-600;
+}
+
+.balance-dialog-body {
+  @apply space-y-4 overflow-y-auto p-5;
+}
+
+.balance-summary-grid {
+  @apply grid gap-3 sm:grid-cols-2 lg:grid-cols-4;
+}
+
+.balance-metric {
+  @apply rounded-lg border border-gray-200 bg-gray-50 px-3 py-3 dark:border-dark-600 dark:bg-dark-900/40;
+}
+
+.balance-metric span {
+  @apply text-xs font-medium text-gray-500 dark:text-gray-400;
+}
+
+.balance-metric strong {
+  @apply mt-1 block font-mono text-lg text-gray-950 dark:text-white;
+}
+
+.balance-config-panel,
+.balance-recharge-panel {
+  @apply rounded-lg border border-gray-200 bg-white p-3 dark:border-dark-600 dark:bg-dark-800/50;
+}
+
+.balance-config-panel {
+  @apply grid items-center gap-3 lg:grid-cols-[auto_auto_auto_auto_auto];
+}
+
+.balance-recharge-form {
+  @apply mt-3 grid gap-3 md:grid-cols-[minmax(10rem,12rem)_1fr_auto];
+}
+
+.balance-section-title {
+  @apply text-sm font-semibold text-gray-900 dark:text-white;
+}
+
+.tag-success {
+  @apply bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-800/60;
+}
+
+.tag-muted {
+  @apply bg-gray-100 text-gray-600 ring-gray-200 dark:bg-dark-700 dark:text-gray-300 dark:ring-dark-600;
 }
 
 .rate-compare {

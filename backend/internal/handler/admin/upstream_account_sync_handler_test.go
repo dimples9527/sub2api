@@ -13,17 +13,27 @@ import (
 )
 
 type upstreamAccountSyncHandlerServiceStub struct {
-	previewCalled bool
-	syncCalled    bool
-	recordsCalled bool
-	runNowCalled  bool
-	syncRequest   service.UpstreamAccountSyncRequest
-	configInput   service.UpstreamAccountRateGuardConfig
-	result        service.UpstreamAccountSyncResult
-	records       []service.UpstreamAccountSyncRecord
-	config        service.UpstreamAccountRateGuardConfig
-	pollLogs      []service.UpstreamAccountRateGuardPollLog
-	err           error
+	previewCalled       bool
+	syncCalled          bool
+	recordsCalled       bool
+	runNowCalled        bool
+	overviewCalled      bool
+	configCalled        bool
+	rechargeCalled      bool
+	balanceRunNowCalled bool
+	syncRequest         service.UpstreamAccountSyncRequest
+	configInput         service.UpstreamAccountRateGuardConfig
+	balanceConfigInput  service.UpstreamBalanceSamplerConfig
+	rechargeInput       service.UpstreamBalanceRechargeInput
+	result              service.UpstreamAccountSyncResult
+	records             []service.UpstreamAccountSyncRecord
+	config              service.UpstreamAccountRateGuardConfig
+	balanceOverview     service.UpstreamBalanceConsumptionOverview
+	balanceConfig       service.UpstreamBalanceSamplerConfig
+	recharge            service.UpstreamBalanceRecharge
+	pollLogs            []service.UpstreamAccountRateGuardPollLog
+	balancePollLogs     []service.UpstreamBalanceSamplerPollLog
+	err                 error
 }
 
 func (s *upstreamAccountSyncHandlerServiceStub) Preview(context.Context) (service.UpstreamAccountSyncResult, error) {
@@ -61,11 +71,63 @@ func (s *upstreamAccountSyncHandlerServiceStub) ListPollLogs() []service.Upstrea
 	return s.pollLogs
 }
 
+func (s *upstreamAccountSyncHandlerServiceStub) GetOverview(context.Context, int) (service.UpstreamBalanceConsumptionOverview, error) {
+	s.overviewCalled = true
+	return s.balanceOverview, s.err
+}
+
+func (s *upstreamAccountSyncHandlerServiceStub) GetConfig(context.Context) (service.UpstreamBalanceSamplerConfig, error) {
+	return s.balanceConfig, s.err
+}
+
+func (s *upstreamAccountSyncHandlerServiceStub) UpdateConfig(_ context.Context, input service.UpstreamBalanceSamplerConfig) (service.UpstreamBalanceSamplerConfig, error) {
+	s.configCalled = true
+	s.balanceConfigInput = input
+	s.balanceConfig = input
+	return s.balanceConfig, s.err
+}
+
+func (s *upstreamAccountSyncHandlerServiceStub) AddRecharge(_ context.Context, input service.UpstreamBalanceRechargeInput) (service.UpstreamBalanceRecharge, error) {
+	s.rechargeCalled = true
+	s.rechargeInput = input
+	if s.recharge.ProviderSlug == "" {
+		s.recharge = service.UpstreamBalanceRecharge{
+			ID:           1,
+			ProviderSlug: input.ProviderSlug,
+			Amount:       input.Amount,
+			Note:         input.Note,
+			OccurredAt:   input.OccurredAt,
+		}
+	}
+	return s.recharge, s.err
+}
+
+type upstreamBalanceSamplerSchedulerStub struct {
+	called bool
+	config service.UpstreamBalanceSamplerConfig
+	logs   []service.UpstreamBalanceSamplerPollLog
+	err    error
+}
+
+func (s *upstreamBalanceSamplerSchedulerStub) RunNow(context.Context) (service.UpstreamBalanceSamplerConfig, error) {
+	s.called = true
+	return s.config, s.err
+}
+
+func (s *upstreamBalanceSamplerSchedulerStub) ListPollLogs() []service.UpstreamBalanceSamplerPollLog {
+	return s.logs
+}
+
 func newUpstreamAccountSyncHandlerTestRouter(svc upstreamAccountSyncService) *gin.Engine {
+	return newUpstreamAccountSyncHandlerTestRouterWithBalanceScheduler(svc, nil)
+}
+
+func newUpstreamAccountSyncHandlerTestRouterWithBalanceScheduler(svc upstreamAccountSyncService, balanceScheduler upstreamBalanceSamplerScheduler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	scheduler, _ := svc.(upstreamAccountRateGuardScheduler)
-	handler := newUpstreamAccountSyncHandlerWithDeps(svc, scheduler)
+	balance, _ := svc.(upstreamBalanceConsumptionService)
+	handler := newUpstreamAccountSyncHandlerWithAllDeps(svc, scheduler, balance, balanceScheduler)
 	router.GET("/admin/upstream-management/accounts/sync-preview", handler.Preview)
 	router.POST("/admin/upstream-management/accounts/sync", handler.Sync)
 	router.GET("/admin/upstream-management/accounts/sync-records", handler.Records)
@@ -73,6 +135,12 @@ func newUpstreamAccountSyncHandlerTestRouter(svc upstreamAccountSyncService) *gi
 	router.PUT("/admin/upstream-management/accounts/rate-guard-config", handler.UpdateRateGuardConfig)
 	router.POST("/admin/upstream-management/accounts/rate-guard-runs", handler.RunRateGuardNow)
 	router.GET("/admin/upstream-management/accounts/rate-guard-poll-logs", handler.RateGuardPollLogs)
+	router.GET("/admin/upstream-management/accounts/balance-consumption", handler.BalanceConsumptionOverview)
+	router.GET("/admin/upstream-management/accounts/balance-consumption/config", handler.GetBalanceSamplerConfig)
+	router.PUT("/admin/upstream-management/accounts/balance-consumption/config", handler.UpdateBalanceSamplerConfig)
+	router.POST("/admin/upstream-management/accounts/balance-consumption/recharges", handler.AddBalanceRecharge)
+	router.POST("/admin/upstream-management/accounts/balance-consumption/samples", handler.RunBalanceSampleNow)
+	router.GET("/admin/upstream-management/accounts/balance-consumption/poll-logs", handler.BalanceSamplerPollLogs)
 	return router
 }
 
@@ -225,4 +293,119 @@ func TestUpstreamAccountSyncHandlerRateGuardPollLogs(t *testing.T) {
 	require.Contains(t, rec.Body.String(), `"trigger":"scheduled"`)
 	require.Contains(t, rec.Body.String(), `"status":"success"`)
 	require.Contains(t, rec.Body.String(), `"message":"executed"`)
+}
+
+func TestUpstreamAccountSyncHandlerBalanceConsumptionOverview(t *testing.T) {
+	svc := &upstreamAccountSyncHandlerServiceStub{balanceOverview: service.UpstreamBalanceConsumptionOverview{
+		Config: service.UpstreamBalanceSamplerConfig{Enabled: true, IntervalSeconds: 600},
+		Summaries: map[string]service.UpstreamBalanceProviderSummary{
+			"backup": {
+				ProviderSlug:     "backup",
+				ProviderName:     "Backup",
+				CurrentBalance:   80,
+				TodayConsumption: 70,
+				Complete:         true,
+			},
+		},
+		Rows: []service.UpstreamBalanceDailyRow{{
+			ProviderSlug:      "backup",
+			Date:              "2026-06-15",
+			OpeningBalance:    100,
+			ClosingBalance:    80,
+			RechargeAmount:    50,
+			ConsumptionAmount: 70,
+			Complete:          true,
+		}},
+	}}
+	router := newUpstreamAccountSyncHandlerTestRouter(svc)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/admin/upstream-management/accounts/balance-consumption?days=7", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.True(t, svc.overviewCalled)
+	require.Contains(t, rec.Body.String(), `"provider_slug":"backup"`)
+	require.Contains(t, rec.Body.String(), `"today_consumption":70`)
+	require.Contains(t, rec.Body.String(), `"interval_seconds":600`)
+}
+
+func TestUpstreamAccountSyncHandlerUpdateBalanceSamplerConfig(t *testing.T) {
+	svc := &upstreamAccountSyncHandlerServiceStub{}
+	router := newUpstreamAccountSyncHandlerTestRouter(svc)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/admin/upstream-management/accounts/balance-consumption/config",
+		bytes.NewBufferString(`{"enabled":true,"interval_seconds":900}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.True(t, svc.configCalled)
+	require.True(t, svc.balanceConfigInput.Enabled)
+	require.Equal(t, 900, svc.balanceConfigInput.IntervalSeconds)
+	require.Contains(t, rec.Body.String(), `"interval_seconds":900`)
+}
+
+func TestUpstreamAccountSyncHandlerAddBalanceRecharge(t *testing.T) {
+	svc := &upstreamAccountSyncHandlerServiceStub{}
+	router := newUpstreamAccountSyncHandlerTestRouter(svc)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/admin/upstream-management/accounts/balance-consumption/recharges",
+		bytes.NewBufferString(`{"provider_slug":"backup","amount":50,"occurred_at":"2026-06-15T12:00:00Z","note":"manual top-up"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.True(t, svc.rechargeCalled)
+	require.Equal(t, "backup", svc.rechargeInput.ProviderSlug)
+	require.Equal(t, 50.0, svc.rechargeInput.Amount)
+	require.Equal(t, "manual top-up", svc.rechargeInput.Note)
+	require.Contains(t, rec.Body.String(), `"provider_slug":"backup"`)
+	require.Contains(t, rec.Body.String(), `"amount":50`)
+}
+
+func TestUpstreamAccountSyncHandlerRunBalanceSampleNow(t *testing.T) {
+	svc := &upstreamAccountSyncHandlerServiceStub{}
+	balanceScheduler := &upstreamBalanceSamplerSchedulerStub{
+		config: service.UpstreamBalanceSamplerConfig{
+			Enabled:         true,
+			IntervalSeconds: 600,
+			LastRunStatus:   "success",
+		},
+	}
+	router := newUpstreamAccountSyncHandlerTestRouterWithBalanceScheduler(svc, balanceScheduler)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/admin/upstream-management/accounts/balance-consumption/samples", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.True(t, balanceScheduler.called)
+	require.Contains(t, rec.Body.String(), `"last_run_status":"success"`)
+}
+
+func TestUpstreamAccountSyncHandlerBalanceSamplerPollLogs(t *testing.T) {
+	svc := &upstreamAccountSyncHandlerServiceStub{}
+	balanceScheduler := &upstreamBalanceSamplerSchedulerStub{logs: []service.UpstreamBalanceSamplerPollLog{{
+		Trigger: "manual",
+		Status:  "success",
+		Message: "executed",
+	}}}
+	router := newUpstreamAccountSyncHandlerTestRouterWithBalanceScheduler(svc, balanceScheduler)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/admin/upstream-management/accounts/balance-consumption/poll-logs", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"trigger":"manual"`)
+	require.Contains(t, rec.Body.String(), `"status":"success"`)
 }

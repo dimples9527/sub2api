@@ -111,6 +111,78 @@ export interface UpstreamAccountRateGuardPollLog {
   message?: string
 }
 
+export interface UpstreamBalanceSamplerConfig {
+  enabled: boolean
+  interval_seconds: number
+  provider_amount_scales?: Record<string, number>
+  last_run_at?: string
+  last_run_status?: string
+  last_run_message?: string
+  updated_at?: string
+}
+
+export interface UpstreamBalanceProviderSummary {
+  provider_slug: string
+  provider_name?: string
+  current_balance: number
+  today_consumption: number
+  amount_scale: number
+  complete: boolean
+  anomaly: boolean
+  snapshot_count: number
+  last_snapshot_at?: string
+  last_snapshot_error?: string
+}
+
+export interface UpstreamBalanceDailyRow {
+  provider_slug: string
+  provider_name?: string
+  date: string
+  amount_scale: number
+  opening_balance: number
+  closing_balance: number
+  current_balance: number
+  recharge_amount: number
+  consumption_amount: number
+  snapshot_count: number
+  complete: boolean
+  anomaly: boolean
+  first_snapshot_at?: string
+  last_snapshot_at?: string
+}
+
+export interface UpstreamBalanceConsumptionOverview {
+  config: UpstreamBalanceSamplerConfig
+  summaries: Record<string, UpstreamBalanceProviderSummary>
+  rows: UpstreamBalanceDailyRow[]
+}
+
+export interface UpstreamBalanceRechargeInput {
+  provider_slug: string
+  amount: number
+  amount_scale?: number
+  note?: string
+  occurred_at?: string
+}
+
+export interface UpstreamBalanceRecharge {
+  id: number
+  provider_slug: string
+  provider_name?: string
+  amount: number
+  amount_scale: number
+  note?: string
+  occurred_at: string
+  created_at: string
+}
+
+export interface UpstreamBalanceSamplerPollLog {
+  checked_at: string
+  trigger: 'scheduled' | 'manual' | string
+  status: 'success' | 'failed' | 'skipped' | string
+  message?: string
+}
+
 export async function getPreview(): Promise<UpstreamAccountSyncResult> {
   const { data } = await apiClient.get<UpstreamAccountSyncResult>(
     '/admin/upstream-management/accounts/sync-preview'
@@ -164,6 +236,57 @@ export async function getRateGuardPollLogs(): Promise<UpstreamAccountRateGuardPo
   return data
 }
 
+export async function getBalanceConsumption(
+  days = 30
+): Promise<UpstreamBalanceConsumptionOverview> {
+  const { data } = await apiClient.get<UpstreamBalanceConsumptionOverview>(
+    '/admin/upstream-management/accounts/balance-consumption',
+    { params: { days } }
+  )
+  return data
+}
+
+export async function getBalanceSamplerConfig(): Promise<UpstreamBalanceSamplerConfig> {
+  const { data } = await apiClient.get<UpstreamBalanceSamplerConfig>(
+    '/admin/upstream-management/accounts/balance-consumption/config'
+  )
+  return data
+}
+
+export async function updateBalanceSamplerConfig(
+  payload: UpstreamBalanceSamplerConfig
+): Promise<UpstreamBalanceSamplerConfig> {
+  const { data } = await apiClient.put<UpstreamBalanceSamplerConfig>(
+    '/admin/upstream-management/accounts/balance-consumption/config',
+    payload
+  )
+  return data
+}
+
+export async function addBalanceRecharge(
+  payload: UpstreamBalanceRechargeInput
+): Promise<UpstreamBalanceRecharge> {
+  const { data } = await apiClient.post<UpstreamBalanceRecharge>(
+    '/admin/upstream-management/accounts/balance-consumption/recharges',
+    payload
+  )
+  return data
+}
+
+export async function runBalanceSampleNow(): Promise<UpstreamBalanceSamplerConfig> {
+  const { data } = await apiClient.post<UpstreamBalanceSamplerConfig>(
+    '/admin/upstream-management/accounts/balance-consumption/samples'
+  )
+  return data
+}
+
+export async function getBalanceSamplerPollLogs(): Promise<UpstreamBalanceSamplerPollLog[]> {
+  const { data } = await apiClient.get<UpstreamBalanceSamplerPollLog[]>(
+    '/admin/upstream-management/accounts/balance-consumption/poll-logs'
+  )
+  return data
+}
+
 export const upstreamAccountSyncAPI = {
   getPreview,
   runSync,
@@ -171,7 +294,13 @@ export const upstreamAccountSyncAPI = {
   getRateGuardConfig,
   updateRateGuardConfig,
   runRateGuardNow,
-  getRateGuardPollLogs
+  getRateGuardPollLogs,
+  getBalanceConsumption,
+  getBalanceSamplerConfig,
+  updateBalanceSamplerConfig,
+  addBalanceRecharge,
+  runBalanceSampleNow,
+  getBalanceSamplerPollLogs
 }
 
 export default upstreamAccountSyncAPI
