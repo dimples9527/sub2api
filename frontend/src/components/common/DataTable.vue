@@ -193,7 +193,11 @@
                 </slot>
               </td>
             </tr>
-            <tr v-if="isRowDetailVisible(sortedData[virtualRow.index], virtualRow.index)" class="data-table-detail-row">
+            <tr
+              v-if="isRowDetailVisible(sortedData[virtualRow.index], virtualRow.index)"
+              :ref="measureElement"
+              class="data-table-detail-row"
+            >
               <td :colspan="columns.length" class="p-0">
                 <slot
                   name="row-detail"
@@ -590,6 +594,16 @@ watch(actionsExpanded, async () => {
   await nextTick()
   checkScrollable()
 })
+
+watch(
+  () => props.data.map((row, index) => `${resolveRowKey(row, index)}:${isRowDetailVisible(row, index) ? '1' : '0'}`).join('|'),
+  async () => {
+    await nextTick()
+    rowVirtualizer.value.measure()
+    checkScrollable()
+  },
+  { flush: 'post' }
+)
 
 const handleSort = (key: string) => {
   let newOrder: 'asc' | 'desc' = 'asc'

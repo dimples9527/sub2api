@@ -1834,6 +1834,7 @@ export default {
       logUnboundGroups: '解绑分组',
       logRemainingGroups: '剩余分组',
       editBoundGroups: '编辑绑定',
+      testConnection: '测试连接',
       editBoundGroupsTitle: '编辑账号绑定分组',
       editBoundGroupsDescription: '添加或移除该账号绑定的本地分组。',
       boundGroupsHint: '按住 Ctrl 或 Cmd 可选择多个分组。',

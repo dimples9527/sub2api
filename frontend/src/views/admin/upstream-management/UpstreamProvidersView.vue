@@ -135,7 +135,7 @@
             <div class="numeric-cell">
               <span
                 v-if="providerBalances[row.slug]"
-                :class="['numeric-value', isLowBalance(providerBalances[row.slug].balance) && 'numeric-alert']"
+                :class="['numeric-value', 'numeric-balance', isLowBalance(providerBalances[row.slug].balance) && 'numeric-alert']"
                 :title="t('admin.upstreamProviders.balance')"
               >
                 {{ formatBalance(providerBalances[row.slug].balance) }}
@@ -155,7 +155,7 @@
 
           <template #cell-today_consumption="{ row }">
             <div class="numeric-cell">
-              <span :class="['numeric-value', 'numeric-cost', isHighConsumption(balanceSummaryFor(row.slug)?.today_consumption) && 'numeric-alert']">
+              <span class="numeric-value numeric-cost">
                 {{ formatMoney(balanceSummaryFor(row.slug)?.today_consumption) }}
               </span>
               <button
@@ -309,11 +309,11 @@
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
+            <div class="action-button-group">
               <button
                 v-if="!row.is_default"
                 type="button"
-                class="action-button hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-900/20 dark:hover:text-amber-300"
+                class="action-button"
                 :disabled="defaultingSlug === row.slug"
                 :title="t('admin.upstreamProviders.setDefault')"
                 @click="setDefaultProvider(row)"
@@ -323,7 +323,7 @@
               </button>
               <button
                 type="button"
-                class="action-button hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-900/20 dark:hover:text-emerald-300"
+                class="action-button"
                 :disabled="testingSlugs.has(row.slug)"
                 :title="t('admin.upstreamProviders.testProvider')"
                 @click="testSavedProvider(row)"
@@ -333,7 +333,7 @@
               </button>
               <button
                 type="button"
-                class="action-button hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-300"
+                class="action-button"
                 :disabled="keysLoadingSlug === row.slug"
                 :title="t('admin.upstreamProviders.fetchKeys')"
                 @click="openKeysDialog(row)"
@@ -343,7 +343,7 @@
               </button>
               <button
                 type="button"
-                class="action-button hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                class="action-button"
                 :title="t('common.edit')"
                 @click="openEditDialog(row)"
               >
@@ -352,7 +352,7 @@
               </button>
               <button
                 type="button"
-                class="action-button hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-300"
+                class="action-button action-danger"
                 :title="t('common.delete')"
                 @click="openDeleteDialog(row)"
               >
@@ -850,7 +850,7 @@ const typeFilter = ref('')
 const enabledFilter = ref('')
 const defaultingSlug = ref<string | null>(null)
 const showColumnSettings = ref(false)
-const visibleOptionalColumns = ref<string[]>(['temp_disable_minutes'])
+const visibleOptionalColumns = ref<string[]>([])
 const expandedProviderSlugs = ref(new Set<string>())
 const endpointTabs = ref<Record<string, string>>({})
 const copiedValue = ref('')
@@ -913,7 +913,6 @@ const form = reactive<UpstreamProviderConfig>({
 })
 
 const optionalColumnOptions = computed(() => [
-  { key: 'temp_disable_minutes', label: t('admin.upstreamProviders.tempDisableMinutes') },
   { key: 'base_url', label: t('admin.upstreamProviders.columns.baseUrl') },
   { key: 'auth', label: t('admin.upstreamProviders.columns.auth') },
 ])
@@ -924,6 +923,7 @@ const baseColumns = computed<Column[]>(() => [
   { key: 'interface', label: t('admin.upstreamProviders.columns.interface'), class: 'upstream-interface-column' },
   { key: 'prefix', label: t('admin.upstreamProviders.columns.prefix'), class: 'upstream-prefix-column' },
   { key: 'rate_scale', label: t('admin.upstreamProviders.columns.rateScale'), class: 'upstream-numeric-column' },
+  { key: 'temp_disable_minutes', label: t('admin.upstreamProviders.tempDisableMinutes'), class: 'upstream-temp-column' },
   { key: 'balance', label: t('admin.upstreamProviders.columns.balance'), class: 'upstream-numeric-column' },
   { key: 'today_consumption', label: t('admin.upstreamProviders.columns.todayCost'), class: 'upstream-numeric-column' },
 ])
@@ -935,18 +935,12 @@ const optionalColumns = computed<Record<string, Column>>(() => ({
 }))
 
 const columns = computed<Column[]>(() => {
-  const tempDisableColumn = visibleOptionalColumns.value.includes('temp_disable_minutes')
-    ? optionalColumns.value.temp_disable_minutes
-    : undefined
   const secondaryColumns = visibleOptionalColumns.value
-    .filter(key => key !== 'temp_disable_minutes')
     .map(key => optionalColumns.value[key])
     .filter((column): column is Column => Boolean(column))
 
   return [
-    ...baseColumns.value.slice(0, 5),
-    ...(tempDisableColumn ? [tempDisableColumn] : []),
-    ...baseColumns.value.slice(5),
+    ...baseColumns.value,
     ...secondaryColumns,
     { key: 'actions', label: t('common.actions'), class: 'upstream-actions-column' },
   ]
@@ -1558,11 +1552,6 @@ function isLowBalance(value: number | undefined) {
   return Number.isFinite(n) && n < 10
 }
 
-function isHighConsumption(value: number | undefined) {
-  const n = Number(value)
-  return Number.isFinite(n) && n > 10
-}
-
 function formatRateScale(value: number | undefined) {
   const n = Number(value)
   return Number.isFinite(n) && n > 0 ? `${n.toFixed(4)}x` : '1.0000x'
@@ -1628,11 +1617,15 @@ onMounted(reload)
 }
 
 .action-button {
-  @apply inline-flex h-7 w-7 items-center justify-center rounded text-gray-400 transition-colors disabled:cursor-not-allowed disabled:opacity-50 hover:bg-blue-50 hover:text-blue-600 dark:text-gray-500 dark:hover:bg-dark-700 dark:hover:text-primary-300;
+  @apply inline-flex h-7 items-center gap-1 rounded border border-gray-200 bg-white px-2 text-xs text-gray-500 transition-colors disabled:cursor-not-allowed disabled:opacity-50 hover:border-primary-300 hover:bg-blue-50 hover:text-primary-600 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-300 dark:hover:bg-dark-700 dark:hover:text-primary-300;
 }
 
-.action-button span {
-  @apply sr-only;
+.action-button-group {
+  @apply flex min-w-[18rem] flex-wrap items-center justify-end gap-1.5;
+}
+
+.action-danger {
+  @apply hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-300;
 }
 
 .homepage-button {
@@ -1772,7 +1765,7 @@ onMounted(reload)
 
 .numeric-value,
 .numeric-muted {
-  @apply block min-w-[6rem] text-right font-mono text-xs tabular-nums text-gray-950 dark:text-gray-100;
+  @apply block min-w-[6.5rem] text-right font-mono text-sm font-semibold tabular-nums text-gray-950 dark:text-gray-100;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1780,8 +1773,12 @@ onMounted(reload)
   @apply text-gray-400;
 }
 
-.numeric-cost {
+.numeric-balance {
   @apply text-orange-600 dark:text-orange-300;
+}
+
+.numeric-cost {
+  @apply text-emerald-600 dark:text-emerald-300;
 }
 
 .numeric-alert {
@@ -1834,7 +1831,7 @@ onMounted(reload)
 }
 
 .provider-detail-panel {
-  @apply grid gap-8 bg-gray-50 px-5 py-4 md:grid-cols-[18rem_18rem_minmax(22rem,1fr)] dark:bg-dark-800/70;
+  @apply grid min-h-[6.25rem] gap-8 border-t border-gray-100 bg-gray-50 px-5 py-4 md:grid-cols-[18rem_18rem_minmax(22rem,1fr)] dark:border-dark-700 dark:bg-dark-800/70;
 }
 
 .detail-column {
@@ -1921,12 +1918,17 @@ onMounted(reload)
   text-align: right;
 }
 
+:deep(.upstream-temp-column) {
+  min-width: 7.25rem;
+  text-align: center;
+}
+
 :deep(.upstream-interface-column) {
   min-width: 14.75rem;
 }
 
 :deep(.upstream-actions-column) {
-  min-width: 12.75rem;
+  min-width: 18rem;
   text-align: right;
 }
 
@@ -1958,6 +1960,12 @@ onMounted(reload)
 
 :deep(.data-table-detail-row td) {
   height: auto;
+  padding: 0;
+  overflow: visible;
+}
+
+:deep(.data-table-detail-row) {
+  display: table-row;
 }
 
 .balance-cost-cell {

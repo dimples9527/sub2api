@@ -253,20 +253,6 @@ describe('UpstreamProvidersView', () => {
     expect(wrapper.find('.details-cell').text()).toContain('/api/user/login')
     expect(wrapper.find('.details-cell').text()).toContain('/api/group/')
 
-    const settingsButton = wrapper.find('.column-settings-button')
-    expect(settingsButton.exists()).toBe(true)
-    await settingsButton.trigger('click')
-    const tempToggle = wrapper.find('input[type="checkbox"][value="temp_disable_minutes"]')
-    expect(tempToggle.exists()).toBe(true)
-    expect((tempToggle.element as HTMLInputElement).checked).toBe(true)
-    expect(wrapper.find('.temp-cell').text()).toContain('15分钟')
-
-    await tempToggle.setValue(false)
-    expect(wrapper.find('.columns').text()).not.toContain('temp_disable_minutes')
-
-    await tempToggle.setValue(true)
-
-    expect(wrapper.find('.columns').text()).toContain('temp_disable_minutes')
     expect(wrapper.find('.temp-cell').text()).toContain('15分钟')
   })
 
@@ -384,7 +370,7 @@ describe('UpstreamProvidersView', () => {
     await flushPromises()
 
     expect(wrapper.find('.today-cost-cell').text()).toContain('24.5000')
-    expect(wrapper.find('.numeric-alert').exists()).toBe(true)
+    expect(wrapper.find('.numeric-cost').exists()).toBe(true)
 
     const detailButton = wrapper
       .findAll('button')

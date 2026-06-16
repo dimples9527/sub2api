@@ -1813,6 +1813,7 @@ export default {
       logUnboundGroups: 'Unbound groups',
       logRemainingGroups: 'Remaining groups',
       editBoundGroups: 'Edit bindings',
+      testConnection: 'Test Connection',
       editBoundGroupsTitle: 'Edit account group bindings',
       editBoundGroupsDescription: 'Add or remove local groups bound to this account.',
       boundGroupsHint: 'Hold Ctrl or Cmd to select multiple groups.',
