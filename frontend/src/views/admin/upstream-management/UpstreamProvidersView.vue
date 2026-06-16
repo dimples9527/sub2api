@@ -2,80 +2,272 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
-        <div class="flex flex-wrap items-center gap-3">
-          <div class="relative w-full sm:w-72">
-            <Icon
-              name="search"
-              size="md"
-              class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
-            />
-            <input
-              v-model="searchQuery"
-              type="text"
-              class="input pl-10"
-              :placeholder="t('admin.upstreamProviders.searchPlaceholder')"
-            />
-          </div>
-
-          <select v-model="typeFilter" class="input w-full sm:w-40">
-            <option value="">{{ t('admin.upstreamProviders.allTypes') }}</option>
-            <option value="sub2api">Sub2API</option>
-            <option value="newapi">NewAPI</option>
-          </select>
-
-          <select v-model="enabledFilter" class="input w-full sm:w-40">
-            <option value="">{{ t('admin.upstreamProviders.allStatus') }}</option>
-            <option value="enabled">{{ t('common.enabled') }}</option>
-            <option value="disabled">{{ t('common.disabled') }}</option>
-          </select>
-
-          <div class="flex flex-1 flex-wrap items-center justify-end gap-2">
+        <div class="upstream-toolbar">
+          <div class="upstream-toolbar-left">
+            <div class="upstream-toolbar-title">{{ t('admin.upstreamProviders.title') }}</div>
+            <button type="button" class="btn btn-primary upstream-toolbar-action" @click="openCreateDialog">
+              {{ t('admin.upstreamProviders.createProvider') }}
+            </button>
             <button
               type="button"
-              class="btn btn-secondary"
+              class="btn btn-secondary upstream-toolbar-action"
               :disabled="loading"
               :title="t('common.refresh')"
               @click="reload"
             >
-              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
+              {{ t('common.refresh') }}
             </button>
-            <button type="button" class="btn btn-primary" @click="openCreateDialog">
-              <Icon name="plus" size="md" class="mr-2" />
-              {{ t('admin.upstreamProviders.createProvider') }}
-            </button>
+          </div>
+
+          <div class="upstream-toolbar-filters">
+            <div class="relative w-full sm:w-56">
+              <Icon
+                name="search"
+                size="sm"
+                class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
+              />
+              <input
+                v-model="searchQuery"
+                type="text"
+                class="input upstream-compact-input pl-9"
+                :placeholder="t('admin.upstreamProviders.searchPlaceholder')"
+              />
+            </div>
+
+            <select v-model="typeFilter" class="input upstream-compact-input w-full sm:w-32">
+              <option value="">{{ t('admin.upstreamProviders.allTypes') }}</option>
+              <option value="sub2api">Sub2API</option>
+              <option value="newapi">NewAPI</option>
+            </select>
+
+            <select v-model="enabledFilter" class="input upstream-compact-input w-full sm:w-32">
+              <option value="">{{ t('admin.upstreamProviders.allStatus') }}</option>
+              <option value="enabled">{{ t('common.enabled') }}</option>
+              <option value="disabled">{{ t('common.disabled') }}</option>
+            </select>
+          </div>
+
+          <div class="upstream-toolbar-right">
+            <div class="upstream-total">
+              <span>{{ t('admin.upstreamProviders.totalBalance') }}</span>
+              <strong>{{ formatTotalMoney(totalProviderBalance) }} 元</strong>
+            </div>
+            <div class="upstream-total">
+              <span>{{ t('admin.upstreamProviders.todayConsumption') }}</span>
+              <strong class="is-cost">{{ formatTotalMoney(totalTodayConsumption) }} 元</strong>
+            </div>
+            <div class="relative">
+              <button
+                type="button"
+                class="column-settings-button"
+                :title="t('admin.upstreamProviders.columnSettings')"
+                @click="showColumnSettings = !showColumnSettings"
+              >
+                <Icon name="cog" size="sm" />
+              </button>
+              <div
+                v-if="showColumnSettings"
+                class="column-settings-panel"
+              >
+                <label
+                  v-for="option in optionalColumnOptions"
+                  :key="option.key"
+                  class="column-settings-option"
+                >
+                  <input
+                    v-model="visibleOptionalColumns"
+                    type="checkbox"
+                    class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                    :value="option.key"
+                  />
+                  <span>{{ option.label }}</span>
+                </label>
+              </div>
+            </div>
           </div>
         </div>
       </template>
 
       <template #table>
-        <DataTable :columns="columns" :data="filteredProviders" :loading="loading">
+        <DataTable
+          :columns="columns"
+          :data="filteredProviders"
+          :loading="loading"
+          row-key="slug"
+          :is-row-detail-visible="isExpanded"
+          :estimate-row-height="92"
+        >
           <template #cell-homepage="{ row }">
-            <a
-              v-if="row.base_url"
-              :href="row.base_url"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="homepage-button"
-              :title="t('admin.upstreamProviders.openHomepage')"
-            >
-              <Icon name="home" size="sm" />
-              <span>{{ t('admin.upstreamProviders.homepageShort') }}</span>
-            </a>
-            <span v-else class="text-xs text-gray-400">-</span>
+            <div class="homepage-control-cell">
+              <button
+                type="button"
+                class="expand-toggle"
+                :title="isExpanded(row.slug) ? t('common.collapse') : t('common.expand')"
+                :aria-expanded="isExpanded(row.slug)"
+                @click="toggleExpanded(row.slug)"
+              >
+                <Icon name="chevronRight" size="sm" :class="['expand-toggle-icon', isExpanded(row.slug) && 'is-expanded']" />
+              </button>
+              <a
+                v-if="row.base_url"
+                :href="row.base_url"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="homepage-button"
+                :title="t('admin.upstreamProviders.openHomepage')"
+              >
+                <Icon name="home" size="sm" />
+                <span>{{ t('admin.upstreamProviders.homepageShort') }}</span>
+              </a>
+              <span v-else class="text-xs text-gray-400">-</span>
+            </div>
+          </template>
+
+          <template #cell-prefix="{ row }">
+            <span class="prefix-value">{{ row.account_name_prefix || '-' }}</span>
+          </template>
+
+          <template #cell-rate_scale="{ row }">
+            <span class="numeric-value">{{ formatRateScale(row.account_rate_multiplier_scale) }}</span>
+          </template>
+
+          <template #cell-balance="{ row }">
+            <div class="numeric-cell">
+              <span
+                v-if="providerBalances[row.slug]"
+                :class="['numeric-value', isLowBalance(providerBalances[row.slug].balance) && 'numeric-alert']"
+                :title="t('admin.upstreamProviders.balance')"
+              >
+                {{ formatBalance(providerBalances[row.slug].balance) }}
+              </span>
+              <span v-else class="numeric-muted">-</span>
+              <button
+                type="button"
+                class="mini-icon-button"
+                :disabled="balanceLoadingSlugs.has(row.slug)"
+                :title="t('admin.upstreamProviders.fetchBalance')"
+                @click="fetchProviderBalance(row)"
+              >
+                <Icon name="dollar" size="sm" :class="balanceLoadingSlugs.has(row.slug) ? 'animate-pulse' : ''" />
+              </button>
+            </div>
+          </template>
+
+          <template #cell-today_consumption="{ row }">
+            <div class="numeric-cell">
+              <span :class="['numeric-value', 'numeric-cost', isHighConsumption(balanceSummaryFor(row.slug)?.today_consumption) && 'numeric-alert']">
+                {{ formatMoney(balanceSummaryFor(row.slug)?.today_consumption) }}
+              </span>
+              <button
+                type="button"
+                class="mini-icon-button"
+                :title="t('common.more')"
+                @click="openBalanceDetails(row.slug)"
+              >
+                <Icon name="more" size="sm" />
+              </button>
+            </div>
+          </template>
+
+          <template #cell-interface="{ row }">
+            <div class="interface-switcher">
+              <div class="interface-tabs">
+                <button
+                  v-for="endpoint in endpointOptions(row)"
+                  :key="endpoint.key"
+                  type="button"
+                  :class="['interface-tab', activeEndpointTab(row.slug) === endpoint.key && 'interface-tab-active']"
+                  @click="setEndpointTab(row.slug, endpoint.key)"
+                >
+                  {{ endpoint.label }}
+                </button>
+              </div>
+              <button
+                type="button"
+                class="copyable-text interface-path"
+                :title="copyTitle(endpointValue(row, activeEndpointTab(row.slug)))"
+                @click="copyValue(endpointValue(row, activeEndpointTab(row.slug)))"
+              >
+                <code>{{ endpointValue(row, activeEndpointTab(row.slug)) || '-' }}</code>
+                <span class="copy-hint">{{ copyHint(endpointValue(row, activeEndpointTab(row.slug))) }}</span>
+              </button>
+            </div>
+          </template>
+
+          <template #cell-temp_disable_minutes="{ row }">
+            <div class="center-cell">{{ formatTempDisable(row.temp_disable_minutes) }}</div>
+          </template>
+
+          <template #row-detail="{ row }">
+            <div v-if="isExpanded(row.slug)" class="provider-detail-panel">
+              <div class="detail-column">
+                <div class="detail-title">{{ t('admin.upstreamProviders.baseUrl') }}</div>
+                <button
+                  type="button"
+                  class="copyable-text detail-copy"
+                  :title="copyTitle(row.base_url)"
+                  @click="copyValue(row.base_url)"
+                >
+                  <code>{{ row.base_url || '-' }}</code>
+                  <span class="copy-hint">{{ copyHint(row.base_url) }}</span>
+                </button>
+              </div>
+              <div class="detail-column">
+                <div class="detail-title">{{ t('admin.upstreamProviders.auth') }}</div>
+                <button
+                  type="button"
+                  class="copyable-text detail-copy"
+                  :title="copyTitle(accountIdentity(row))"
+                  @click="copyValue(accountIdentity(row))"
+                >
+                  <code>{{ accountIdentity(row) || '-' }}</code>
+                  <span class="copy-hint">{{ copyHint(accountIdentity(row)) }}</span>
+                </button>
+                <span :class="['password-state-tag', row.password_configured ? 'password-state-ok' : 'password-state-muted']">
+                  {{ row.password_configured ? t('admin.upstreamProviders.passwordConfigured') : t('admin.upstreamProviders.passwordNotConfigured') }}
+                </span>
+              </div>
+              <div class="detail-column detail-column-wide">
+                <div class="detail-title">{{ t('admin.upstreamProviders.endpoints') }}</div>
+                <div class="detail-endpoint-list">
+                  <button
+                    v-for="endpoint in endpointOptions(row)"
+                    :key="endpoint.key"
+                    type="button"
+                    class="copyable-text detail-endpoint"
+                    :title="copyTitle(endpoint.value)"
+                    @click="copyValue(endpoint.value)"
+                  >
+                    <span>{{ endpoint.label }}</span>
+                    <code>{{ endpoint.value || '-' }}</code>
+                    <span class="copy-hint">{{ copyHint(endpoint.value) }}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
           </template>
 
           <template #cell-name="{ row }">
-            <div :class="['provider-name-card min-w-[12rem]', providerToneClass(row.slug, 'card')]">
-              <div class="flex items-center gap-2">
-                <span class="min-w-0 flex-1 truncate font-semibold">{{ row.name }}</span>
-                <span v-if="row.is_default" class="badge badge-success">
+            <div class="provider-name-card">
+              <div class="provider-title-line">
+                <span class="provider-name">{{ row.name }}</span>
+                <span class="provider-type-tag" :class="providerTypeClass(row.type)">{{ providerTypeLabel(row.type) }}</span>
+                <span v-if="row.is_default" class="provider-default-tag">
                   {{ t('admin.upstreamProviders.defaultProvider') }}
                 </span>
+                <span :class="['provider-enabled-tag', row.enabled ? 'is-enabled' : 'is-disabled']">
+                  {{ row.enabled ? t('common.enabled') : t('common.disabled') }}
+                </span>
               </div>
-              <div class="mt-1 flex flex-wrap gap-1">
-                <span class="badge" :class="providerTypeClass(row.type)">{{ providerTypeLabel(row.type) }}</span>
-                <code :class="['provider-slug-tag', providerToneClass(row.slug, 'tag')]">{{ row.slug }}</code>
-              </div>
+              <button
+                type="button"
+                class="copyable-text provider-inline-url"
+                :title="copyTitle(row.base_url)"
+                @click="copyValue(row.base_url)"
+              >
+                <span>{{ row.base_url || '-' }}</span>
+                <span class="copy-hint">{{ copyHint(row.base_url) }}</span>
+              </button>
             </div>
           </template>
 
@@ -86,91 +278,33 @@
           </template>
 
           <template #cell-base_url="{ value }">
-            <code class="provider-url-tag" :title="value">{{ value || '-' }}</code>
+            <button
+              type="button"
+              class="copyable-text provider-url-tag"
+              :title="copyTitle(value)"
+              @click="copyValue(value)"
+            >
+              <code>{{ value || '-' }}</code>
+              <span class="copy-hint">{{ copyHint(value) }}</span>
+            </button>
           </template>
 
           <template #cell-auth="{ row }">
             <div class="tag-list max-w-[14rem]">
-              <span v-if="row.username || row.email" class="info-tag tag-auth">
+              <button
+                v-if="row.username || row.email"
+                type="button"
+                class="copyable-text info-tag tag-auth"
+                :title="copyTitle(row.username || row.email)"
+                @click="copyValue(row.username || row.email)"
+              >
                 {{ row.username || row.email }}
-              </span>
+                <span class="copy-hint">{{ copyHint(row.username || row.email) }}</span>
+              </button>
               <span v-else class="info-tag tag-muted">-</span>
               <span v-if="row.password_configured" class="info-tag tag-success">
                 {{ t('admin.upstreamProviders.passwordConfigured') }}
               </span>
-            </div>
-          </template>
-
-          <template #cell-endpoints="{ row }">
-            <div class="tag-list max-w-md">
-              <span class="endpoint-tag" :title="row.api_keys_url">
-                <span>{{ t('admin.upstreamProviders.keysEndpointShort') }}</span>
-                <code>{{ row.api_keys_url || '-' }}</code>
-              </span>
-              <span v-if="row.login_url" class="endpoint-tag" :title="row.login_url">
-                <span>{{ t('admin.upstreamProviders.loginEndpointShort') }}</span>
-                <code>{{ row.login_url }}</code>
-              </span>
-              <span v-if="row.type === 'newapi' && row.groups_url" class="endpoint-tag" :title="row.groups_url">
-                <span>{{ t('admin.upstreamProviders.groupsEndpointShort') }}</span>
-                <code>{{ row.groups_url }}</code>
-              </span>
-              <span v-if="availableGroupsURL(row)" class="endpoint-tag" :title="availableGroupsURL(row)">
-                <span>{{ t('admin.upstreamProviders.availableGroupsEndpointShort') }}</span>
-                <code>{{ availableGroupsURL(row) }}</code>
-              </span>
-            </div>
-          </template>
-
-          <template #cell-policy="{ row }">
-            <div class="tag-list max-w-[18rem]">
-              <span class="info-tag tag-muted">{{ t('admin.upstreamProviders.prefix') }}: {{ row.account_name_prefix || '-' }}</span>
-              <span class="info-tag tag-rate">{{ t('admin.upstreamProviders.accountRateMultiplierScaleShort') }}: {{ formatRateScale(row.account_rate_multiplier_scale) }}</span>
-              <span class="info-tag tag-muted">{{ t('admin.upstreamProviders.tempDisableMinutes') }}: {{ row.temp_disable_minutes || 0 }}</span>
-            </div>
-          </template>
-
-          <template #cell-balance_consumption="{ row }">
-            <div class="balance-cost-cell">
-              <div class="flex flex-wrap items-center gap-2">
-                <span
-                  v-if="providerBalances[row.slug]"
-                  :class="['balance-pill', isLowBalance(providerBalances[row.slug].balance) && 'balance-pill-warning']"
-                  :title="t('admin.upstreamProviders.balance')"
-                >
-                  {{ formatBalance(providerBalances[row.slug].balance) }}
-                </span>
-                <span class="font-mono text-sm font-semibold text-gray-950 dark:text-white">
-                  {{ formatMoney(balanceSummaryFor(row.slug)?.today_consumption) }}
-                </span>
-              </div>
-              <div class="mt-1 flex flex-wrap gap-1">
-                <button
-                  type="button"
-                  class="action-button action-button-inline hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-900/20 dark:hover:text-emerald-300"
-                  :disabled="balanceLoadingSlugs.has(row.slug)"
-                  :title="t('admin.upstreamProviders.fetchBalance')"
-                  @click="fetchProviderBalance(row)"
-                >
-                  <Icon name="dollar" size="sm" :class="balanceLoadingSlugs.has(row.slug) ? 'animate-pulse' : ''" />
-                  <span>{{ t('admin.upstreamProviders.balanceShort') }}</span>
-                </button>
-                <button
-                  type="button"
-                  class="action-button action-button-inline hover:bg-violet-50 hover:text-violet-600 dark:hover:bg-violet-900/20 dark:hover:text-violet-300"
-                  :title="t('common.more')"
-                  @click="openBalanceDetails(row.slug)"
-                >
-                  <Icon name="more" size="sm" />
-                  <span>{{ t('common.more') }}</span>
-                </button>
-                <span :class="['info-tag', balanceSummaryFor(row.slug)?.complete ? 'tag-success' : 'tag-muted']">
-                  {{ balanceSummaryFor(row.slug)?.complete ? t('admin.upstreamProviders.balanceComplete') : t('admin.upstreamProviders.balanceIncomplete') }}
-                </span>
-                <span v-if="balanceSummaryFor(row.slug)?.anomaly" class="info-tag tag-warning">
-                  {{ t('admin.upstreamProviders.balanceAnomaly') }}
-                </span>
-              </div>
             </div>
           </template>
 
@@ -695,6 +829,7 @@ import type {
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime } from '@/utils/format'
+import { useClipboard } from '@/composables/useClipboard'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -706,6 +841,7 @@ import Icon from '@/components/icons/Icon.vue'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const { copyToClipboard } = useClipboard()
 
 const providers = ref<UpstreamProviderConfig[]>([])
 const loading = ref(false)
@@ -713,6 +849,12 @@ const searchQuery = ref('')
 const typeFilter = ref('')
 const enabledFilter = ref('')
 const defaultingSlug = ref<string | null>(null)
+const showColumnSettings = ref(false)
+const visibleOptionalColumns = ref<string[]>(['temp_disable_minutes'])
+const expandedProviderSlugs = ref(new Set<string>())
+const endpointTabs = ref<Record<string, string>>({})
+const copiedValue = ref('')
+let copiedTimer: ReturnType<typeof setTimeout> | undefined
 
 const showFormDialog = ref(false)
 const formMode = ref<'create' | 'edit'>('create')
@@ -770,17 +912,45 @@ const form = reactive<UpstreamProviderConfig>({
   account_rate_multiplier_scale: 1,
 })
 
-const columns = computed<Column[]>(() => [
-  { key: 'homepage', label: t('admin.upstreamProviders.columns.homepage') },
-  { key: 'name', label: t('admin.upstreamProviders.columns.name') },
-  { key: 'enabled', label: t('admin.upstreamProviders.columns.status') },
+const optionalColumnOptions = computed(() => [
+  { key: 'temp_disable_minutes', label: t('admin.upstreamProviders.tempDisableMinutes') },
   { key: 'base_url', label: t('admin.upstreamProviders.columns.baseUrl') },
   { key: 'auth', label: t('admin.upstreamProviders.columns.auth') },
-  { key: 'endpoints', label: t('admin.upstreamProviders.columns.endpoints') },
-  { key: 'policy', label: t('admin.upstreamProviders.columns.policy') },
-  { key: 'balance_consumption', label: t('admin.upstreamProviders.columns.balanceConsumption') },
-  { key: 'actions', label: t('common.actions') },
 ])
+
+const baseColumns = computed<Column[]>(() => [
+  { key: 'homepage', label: t('admin.upstreamProviders.columns.homepage'), class: 'upstream-homepage-column' },
+  { key: 'name', label: t('admin.upstreamProviders.columns.name'), class: 'upstream-name-column' },
+  { key: 'interface', label: t('admin.upstreamProviders.columns.interface'), class: 'upstream-interface-column' },
+  { key: 'prefix', label: t('admin.upstreamProviders.columns.prefix'), class: 'upstream-prefix-column' },
+  { key: 'rate_scale', label: t('admin.upstreamProviders.columns.rateScale'), class: 'upstream-numeric-column' },
+  { key: 'balance', label: t('admin.upstreamProviders.columns.balance'), class: 'upstream-numeric-column' },
+  { key: 'today_consumption', label: t('admin.upstreamProviders.columns.todayCost'), class: 'upstream-numeric-column' },
+])
+
+const optionalColumns = computed<Record<string, Column>>(() => ({
+  temp_disable_minutes: { key: 'temp_disable_minutes', label: t('admin.upstreamProviders.tempDisableMinutes'), class: 'upstream-numeric-column' },
+  base_url: { key: 'base_url', label: t('admin.upstreamProviders.columns.baseUrl'), class: 'upstream-url-column' },
+  auth: { key: 'auth', label: t('admin.upstreamProviders.columns.auth'), class: 'upstream-auth-column' },
+}))
+
+const columns = computed<Column[]>(() => {
+  const tempDisableColumn = visibleOptionalColumns.value.includes('temp_disable_minutes')
+    ? optionalColumns.value.temp_disable_minutes
+    : undefined
+  const secondaryColumns = visibleOptionalColumns.value
+    .filter(key => key !== 'temp_disable_minutes')
+    .map(key => optionalColumns.value[key])
+    .filter((column): column is Column => Boolean(column))
+
+  return [
+    ...baseColumns.value.slice(0, 5),
+    ...(tempDisableColumn ? [tempDisableColumn] : []),
+    ...baseColumns.value.slice(5),
+    ...secondaryColumns,
+    { key: 'actions', label: t('common.actions'), class: 'upstream-actions-column' },
+  ]
+})
 
 const filteredProviders = computed(() => {
   const keyword = searchQuery.value.trim().toLowerCase()
@@ -830,6 +1000,31 @@ const selectedBalanceSnapshots = computed(() => balanceSnapshots.value
   .filter(snapshot => snapshot.provider_slug === selectedBalanceProviderSlug.value)
   .slice()
   .sort((left, right) => new Date(right.captured_at).getTime() - new Date(left.captured_at).getTime()))
+const totalProviderBalance = computed(() => {
+  const seen = new Set<string>()
+  let total = 0
+
+  for (const [slug, balance] of Object.entries(providerBalances.value)) {
+    const amount = Number(balance.balance)
+    if (Number.isFinite(amount)) {
+      seen.add(slug)
+      total += amount
+    }
+  }
+
+  for (const summary of Object.values(balanceSummaries.value)) {
+    const slug = summary.provider_slug
+    if (slug && seen.has(slug)) continue
+    const amount = Number(summary.current_balance)
+    if (Number.isFinite(amount)) total += amount
+  }
+
+  return total
+})
+const totalTodayConsumption = computed(() => Object.values(balanceSummaries.value).reduce((total, summary) => {
+  const amount = Number(summary.today_consumption)
+  return Number.isFinite(amount) ? total + amount : total
+}, 0))
 const selectedBalanceScale = computed(() => {
   const configured = balanceSamplerForm.value.provider_amount_scales[selectedBalanceProviderSlug.value]
   if (Number(configured) > 0) return Number(configured)
@@ -1161,6 +1356,107 @@ function balanceRowStatus(row: UpstreamBalanceDailyRow) {
   return t('admin.upstreamProviders.balanceIncomplete')
 }
 
+function isExpanded(providerSlug: string | undefined) {
+  return Boolean(providerSlug && expandedProviderSlugs.value.has(providerSlug))
+}
+
+function toggleExpanded(providerSlug: string | undefined) {
+  if (!providerSlug) return
+  const next = new Set(expandedProviderSlugs.value)
+  if (next.has(providerSlug)) {
+    next.delete(providerSlug)
+  } else {
+    next.add(providerSlug)
+  }
+  expandedProviderSlugs.value = next
+}
+
+type EndpointOption = {
+  key: string
+  label: string
+  value: string
+}
+
+function endpointOptions(provider: UpstreamProviderConfig): EndpointOption[] {
+  const options: EndpointOption[] = [
+    {
+      key: 'keys',
+      label: t('admin.upstreamProviders.keysEndpointShort'),
+      value: provider.api_keys_url || '',
+    },
+  ]
+
+  if (provider.login_url) {
+    options.push({
+      key: 'login',
+      label: t('admin.upstreamProviders.loginEndpointShort'),
+      value: provider.login_url,
+    })
+  }
+
+  if (provider.groups_url) {
+    options.push({
+      key: 'groups',
+      label: t('admin.upstreamProviders.groupsEndpointShort'),
+      value: provider.groups_url,
+    })
+  }
+
+  const availableURL = availableGroupsURL(provider)
+  if (availableURL && availableURL !== provider.groups_url) {
+    options.push({
+      key: 'available_groups',
+      label: t('admin.upstreamProviders.availableGroupsEndpointShort'),
+      value: availableURL,
+    })
+  }
+
+  return options
+}
+
+function activeEndpointTab(providerSlug: string | undefined) {
+  if (!providerSlug) return 'keys'
+  return endpointTabs.value[providerSlug] || 'keys'
+}
+
+function setEndpointTab(providerSlug: string | undefined, tab: string) {
+  if (!providerSlug) return
+  endpointTabs.value = {
+    ...endpointTabs.value,
+    [providerSlug]: tab,
+  }
+}
+
+function endpointValue(provider: UpstreamProviderConfig, tab: string) {
+  return endpointOptions(provider).find(option => option.key === tab)?.value || provider.api_keys_url || ''
+}
+
+function accountIdentity(provider: UpstreamProviderConfig) {
+  return provider.username || provider.email || ''
+}
+
+function copyTitle(value: string | undefined) {
+  return value ? t('admin.upstreamProviders.clickToCopy') : ''
+}
+
+function copyHint(value: string | undefined) {
+  return copiedValue.value && copiedValue.value === value
+    ? `${t('common.copied')} ✓`
+    : t('admin.upstreamProviders.clickToCopy')
+}
+
+async function copyValue(value: string | undefined) {
+  const text = String(value || '').trim()
+  if (!text) return
+  const success = await copyToClipboard(text, t('common.copiedToClipboard'))
+  if (!success) return
+  copiedValue.value = text
+  if (copiedTimer) clearTimeout(copiedTimer)
+  copiedTimer = setTimeout(() => {
+    copiedValue.value = ''
+  }, 1400)
+}
+
 function formatScale(value: number | undefined) {
   const n = Number(value)
   return Number.isFinite(n) && n > 0 ? `${n.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')}x` : '-'
@@ -1170,8 +1466,8 @@ function formatMoney(value: number | undefined) {
   const n = Number(value)
   if (!Number.isFinite(n)) return '-'
   return n.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 6,
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 4,
   })
 }
 
@@ -1206,19 +1502,8 @@ function providerTypeLabel(type: string) {
 }
 
 function providerTypeClass(type: string) {
-  if (type === 'newapi') return 'badge-primary'
-  return 'badge-gray'
-}
-
-function providerToneClass(providerSlug: string | undefined, target: 'card' | 'tag') {
-  const tones = ['sky', 'emerald', 'violet', 'cyan', 'rose', 'amber', 'indigo', 'teal']
-  const slug = providerSlug?.trim() || 'default'
-  let hash = 0
-  for (let i = 0; i < slug.length; i++) {
-    hash = (hash * 31 + slug.charCodeAt(i)) >>> 0
-  }
-  const tone = tones[hash % tones.length]
-  return `${target === 'card' ? 'provider-name-card' : 'provider-slug-tag'}-${tone}`
+  if (type === 'newapi') return 'type-newapi'
+  return 'type-sub2api'
 }
 
 function availableGroupsURL(provider: UpstreamProviderConfig) {
@@ -1248,17 +1533,34 @@ function uniqueProviderURLs(field: 'base_url' | 'api_keys_url' | 'login_url' | '
 
 function formatRate(value: number | undefined) {
   const n = Number(value)
-  return Number.isFinite(n) ? `${n.toFixed(2)}x` : '-'
+  return Number.isFinite(n) ? `${n.toFixed(4)}x` : '-'
 }
 
 function formatBalance(value: number | undefined) {
   const n = Number(value)
-  return Number.isFinite(n) ? n.toFixed(6).replace(/\.?0+$/, '') : '-'
+  return Number.isFinite(n) ? n.toFixed(4) : '-'
+}
+
+function formatTotalMoney(value: number | undefined) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return '0.00'
+  return n.toFixed(2)
+}
+
+function formatTempDisable(value: number | undefined) {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n <= 0) return '0分钟'
+  return `${n}分钟`
 }
 
 function isLowBalance(value: number | undefined) {
   const n = Number(value)
   return Number.isFinite(n) && n < 10
+}
+
+function isHighConsumption(value: number | undefined) {
+  const n = Number(value)
+  return Number.isFinite(n) && n > 10
 }
 
 function formatRateScale(value: number | undefined) {
@@ -1281,92 +1583,147 @@ onMounted(reload)
 </script>
 
 <style scoped>
-.action-button {
-  @apply flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+.upstream-toolbar {
+  @apply flex min-h-20 flex-wrap items-center gap-4 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm dark:border-dark-700 dark:bg-dark-800;
 }
 
-.action-button-inline {
-  @apply flex-row items-center gap-1 px-2 py-1 text-xs;
+.upstream-toolbar-left {
+  @apply flex items-center gap-4;
+}
+
+.upstream-toolbar-title {
+  @apply whitespace-nowrap text-sm font-medium text-gray-950 dark:text-white;
+}
+
+.upstream-toolbar-action {
+  @apply h-8 rounded px-3 text-xs;
+}
+
+.upstream-toolbar-filters {
+  @apply flex flex-1 flex-wrap items-center justify-end gap-2;
+}
+
+.upstream-compact-input {
+  @apply h-8 rounded-md text-xs;
+}
+
+.upstream-toolbar-right {
+  @apply flex items-center justify-end gap-7;
+}
+
+.upstream-total {
+  @apply min-w-[5.5rem] whitespace-nowrap;
+}
+
+.upstream-total span {
+  @apply mb-1 block text-xs text-gray-500 dark:text-gray-400;
+}
+
+.upstream-total strong {
+  @apply block text-lg font-bold leading-none text-gray-950 dark:text-white;
+}
+
+.upstream-total strong.is-cost {
+  @apply text-orange-600 dark:text-orange-300;
+}
+
+.action-button {
+  @apply inline-flex h-7 w-7 items-center justify-center rounded text-gray-400 transition-colors disabled:cursor-not-allowed disabled:opacity-50 hover:bg-blue-50 hover:text-blue-600 dark:text-gray-500 dark:hover:bg-dark-700 dark:hover:text-primary-300;
+}
+
+.action-button span {
+  @apply sr-only;
 }
 
 .homepage-button {
-  @apply inline-flex items-center gap-1.5 rounded-md bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-700 ring-1 ring-sky-200 hover:bg-sky-100 dark:bg-sky-950/30 dark:text-sky-300 dark:ring-sky-800/60 dark:hover:bg-sky-900/40;
+  @apply inline-flex h-7 w-7 items-center justify-center rounded text-gray-400 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:text-gray-500 dark:hover:bg-dark-700 dark:hover:text-primary-300;
+}
+
+.homepage-button span {
+  @apply sr-only;
+}
+
+.homepage-control-cell {
+  @apply flex min-w-[4.5rem] items-center justify-center gap-3;
+}
+
+.expand-toggle {
+  @apply inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-gray-400 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:text-gray-500 dark:hover:bg-dark-700 dark:hover:text-primary-300;
+}
+
+.expand-toggle-icon {
+  @apply transition-transform duration-150;
+}
+
+.expand-toggle-icon.is-expanded {
+  @apply rotate-90;
+}
+
+.column-settings-panel {
+  @apply absolute right-0 z-30 mt-2 w-52 rounded-md border border-gray-200 bg-white p-2 shadow-lg dark:border-dark-600 dark:bg-dark-800;
+}
+
+.column-settings-option {
+  @apply flex cursor-pointer items-center gap-2 rounded px-2 py-2 text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-dark-700;
+}
+
+.column-settings-button {
+  @apply inline-flex h-8 w-8 items-center justify-center rounded border border-gray-200 bg-white text-gray-400 transition-colors hover:border-primary-500 hover:text-primary-600 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-500 dark:hover:text-primary-300;
 }
 
 .provider-name-card {
-  @apply rounded-lg border px-3 py-2 shadow-sm;
+  @apply min-w-[14rem] max-w-[18rem] space-y-2;
 }
 
-.provider-name-card-sky {
-  @apply border-sky-200 bg-sky-50/70 text-sky-950 dark:border-sky-800/50 dark:bg-sky-950/20 dark:text-white;
+.provider-title-line {
+  @apply flex min-w-0 flex-wrap items-center gap-1.5;
 }
 
-.provider-name-card-emerald {
-  @apply border-emerald-200 bg-emerald-50/70 text-emerald-950 dark:border-emerald-800/50 dark:bg-emerald-950/20 dark:text-white;
+.provider-name {
+  @apply max-w-[9rem] truncate text-sm font-bold text-gray-950 dark:text-white;
 }
 
-.provider-name-card-violet {
-  @apply border-violet-200 bg-violet-50/70 text-violet-950 dark:border-violet-800/50 dark:bg-violet-950/20 dark:text-white;
+.provider-type-tag,
+.provider-default-tag,
+.provider-enabled-tag {
+  @apply inline-flex h-6 items-center gap-1 rounded px-1.5 text-xs leading-none;
 }
 
-.provider-name-card-cyan {
-  @apply border-cyan-200 bg-cyan-50/70 text-cyan-950 dark:border-cyan-800/50 dark:bg-cyan-950/20 dark:text-white;
+.provider-type-tag.type-newapi {
+  @apply bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300;
 }
 
-.provider-name-card-rose {
-  @apply border-rose-200 bg-rose-50/70 text-rose-950 dark:border-rose-800/50 dark:bg-rose-950/20 dark:text-white;
+.provider-type-tag.type-sub2api {
+  @apply bg-violet-50 text-violet-600 dark:bg-violet-950/40 dark:text-violet-300;
 }
 
-.provider-name-card-amber {
-  @apply border-amber-200 bg-amber-50/70 text-amber-950 dark:border-amber-800/50 dark:bg-amber-950/20 dark:text-white;
+.provider-default-tag {
+  @apply bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300;
 }
 
-.provider-name-card-indigo {
-  @apply border-indigo-200 bg-indigo-50/70 text-indigo-950 dark:border-indigo-800/50 dark:bg-indigo-950/20 dark:text-white;
+.provider-enabled-tag.is-enabled {
+  @apply bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-300;
 }
 
-.provider-name-card-teal {
-  @apply border-teal-200 bg-teal-50/70 text-teal-950 dark:border-teal-800/50 dark:bg-teal-950/20 dark:text-white;
+.provider-enabled-tag.is-enabled::before {
+  @apply h-2 w-2 rounded-full bg-emerald-500;
+  content: '';
 }
 
-.provider-slug-tag {
-  @apply inline-flex items-center rounded-md px-2 py-1 font-mono text-xs font-semibold ring-1;
+.provider-enabled-tag.is-disabled {
+  @apply bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-gray-300;
 }
 
-.provider-slug-tag-sky {
-  @apply bg-sky-100 text-sky-700 ring-sky-200 dark:bg-sky-950/50 dark:text-sky-300 dark:ring-sky-800/60;
+.provider-inline-url {
+  @apply block w-full max-w-full text-xs text-gray-500 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-300;
 }
 
-.provider-slug-tag-emerald {
-  @apply bg-emerald-100 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:ring-emerald-800/60;
-}
-
-.provider-slug-tag-violet {
-  @apply bg-violet-100 text-violet-700 ring-violet-200 dark:bg-violet-950/50 dark:text-violet-300 dark:ring-violet-800/60;
-}
-
-.provider-slug-tag-cyan {
-  @apply bg-cyan-100 text-cyan-700 ring-cyan-200 dark:bg-cyan-950/50 dark:text-cyan-300 dark:ring-cyan-800/60;
-}
-
-.provider-slug-tag-rose {
-  @apply bg-rose-100 text-rose-700 ring-rose-200 dark:bg-rose-950/50 dark:text-rose-300 dark:ring-rose-800/60;
-}
-
-.provider-slug-tag-amber {
-  @apply bg-amber-100 text-amber-700 ring-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:ring-amber-800/60;
-}
-
-.provider-slug-tag-indigo {
-  @apply bg-indigo-100 text-indigo-700 ring-indigo-200 dark:bg-indigo-950/50 dark:text-indigo-300 dark:ring-indigo-800/60;
-}
-
-.provider-slug-tag-teal {
-  @apply bg-teal-100 text-teal-700 ring-teal-200 dark:bg-teal-950/50 dark:text-teal-300 dark:ring-teal-800/60;
+.provider-inline-url span:first-child {
+  @apply block truncate;
 }
 
 .provider-url-tag {
-  @apply inline-flex max-w-full items-center rounded-md bg-gray-100 px-2 py-1 font-mono text-xs text-gray-700 ring-1 ring-gray-200 dark:bg-dark-700 dark:text-gray-200 dark:ring-dark-600;
+  @apply inline-flex max-w-full items-center rounded bg-gray-50 px-2 py-1 font-mono text-xs text-gray-700 dark:bg-dark-700 dark:text-gray-200;
 }
 
 .info-tag {
@@ -1403,6 +1760,204 @@ onMounted(reload)
 
 .endpoint-tag code {
   @apply truncate font-mono text-gray-700 dark:text-gray-200;
+}
+
+.prefix-value {
+  @apply inline-flex max-w-[8rem] truncate font-sans text-xs text-gray-950 dark:text-white;
+}
+
+.numeric-cell {
+  @apply flex min-w-[7.5rem] items-center justify-end gap-2;
+}
+
+.numeric-value,
+.numeric-muted {
+  @apply block min-w-[6rem] text-right font-mono text-xs tabular-nums text-gray-950 dark:text-gray-100;
+  font-variant-numeric: tabular-nums;
+}
+
+.numeric-muted {
+  @apply text-gray-400;
+}
+
+.numeric-cost {
+  @apply text-orange-600 dark:text-orange-300;
+}
+
+.numeric-alert {
+  @apply font-bold text-red-600 dark:text-red-300;
+}
+
+.mini-icon-button {
+  @apply inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-gray-400 transition-colors hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-500 dark:hover:bg-dark-700 dark:hover:text-primary-300;
+}
+
+.center-cell {
+  @apply whitespace-nowrap text-center text-xs text-gray-950 dark:text-white;
+}
+
+.interface-switcher {
+  @apply min-w-[15rem] max-w-[16rem] space-y-2;
+}
+
+.interface-tabs {
+  @apply inline-flex gap-1;
+}
+
+.interface-tab {
+  @apply h-8 rounded border border-gray-200 bg-white px-2.5 text-xs text-gray-500 transition-colors hover:border-primary-500 hover:text-primary-600 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-400 dark:hover:text-primary-300;
+}
+
+.interface-tab-active {
+  @apply border-primary-600 bg-primary-600 text-white hover:text-white dark:border-primary-500 dark:bg-primary-600 dark:text-white;
+}
+
+.copyable-text {
+  @apply relative min-w-0 cursor-pointer border-0 text-left transition-colors;
+}
+
+.copyable-text code {
+  @apply min-w-0 truncate;
+}
+
+.interface-path {
+  @apply flex w-full items-center rounded bg-gray-50 px-2.5 py-1.5 font-mono text-xs text-gray-950 hover:bg-gray-100 dark:bg-dark-700 dark:text-gray-100 dark:hover:bg-dark-600;
+}
+
+.copy-hint {
+  @apply pointer-events-none absolute -top-7 right-0 z-20 whitespace-nowrap rounded bg-gray-900 px-2 py-1 text-[11px] font-medium text-white opacity-0 shadow transition-opacity dark:bg-white dark:text-gray-900;
+}
+
+.copyable-text:hover .copy-hint,
+.copyable-text:focus-visible .copy-hint {
+  @apply opacity-100;
+}
+
+.provider-detail-panel {
+  @apply grid gap-8 bg-gray-50 px-5 py-4 md:grid-cols-[18rem_18rem_minmax(22rem,1fr)] dark:bg-dark-800/70;
+}
+
+.detail-column {
+  @apply min-w-0 bg-transparent p-0;
+}
+
+.detail-column-wide {
+  @apply min-w-0;
+}
+
+.detail-title {
+  @apply mb-2 text-xs font-medium text-gray-500 dark:text-gray-400;
+}
+
+.detail-copy {
+  @apply flex w-full items-center font-mono text-xs text-gray-950 hover:text-primary-600 dark:text-gray-100 dark:hover:text-primary-300;
+}
+
+.password-state-tag {
+  @apply mt-2 inline-flex rounded-md px-2 py-1 text-xs font-medium ring-1;
+}
+
+.password-state-ok {
+  @apply bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-800/60;
+}
+
+.password-state-muted {
+  @apply bg-gray-100 text-gray-600 ring-gray-200 dark:bg-dark-700 dark:text-gray-300 dark:ring-dark-600;
+}
+
+.detail-endpoint-list {
+  @apply space-y-1;
+}
+
+.detail-endpoint {
+  @apply grid w-full grid-cols-[4rem_minmax(0,1fr)] items-center gap-2 rounded text-xs hover:text-primary-600 dark:hover:text-primary-300;
+}
+
+.detail-endpoint > span:first-child {
+  @apply text-gray-500 dark:text-gray-400;
+}
+
+.detail-endpoint code {
+  @apply font-mono text-gray-800 dark:text-gray-100;
+}
+
+:deep(.table-wrapper table) {
+  min-width: 1280px;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+:deep(.table-body .data-table-row:nth-of-type(4n + 1)) {
+  background-color: rgb(252 252 253);
+}
+
+:deep(.dark .table-body .data-table-row:nth-of-type(4n + 1)) {
+  background-color: rgb(31 41 55 / 0.28);
+}
+
+:deep(.table-body .data-table-row:hover) {
+  background-color: rgb(248 250 252);
+}
+
+:deep(.dark .table-body .data-table-row:hover) {
+  background-color: rgb(31 41 55);
+}
+
+:deep(.upstream-homepage-column) {
+  width: 5.75rem;
+  min-width: 5.75rem;
+}
+
+:deep(.upstream-name-column) {
+  min-width: 16.25rem;
+}
+
+:deep(.upstream-prefix-column) {
+  min-width: 8.5rem;
+}
+
+:deep(.upstream-numeric-column) {
+  min-width: 8.25rem;
+  text-align: right;
+}
+
+:deep(.upstream-interface-column) {
+  min-width: 14.75rem;
+}
+
+:deep(.upstream-actions-column) {
+  min-width: 12.75rem;
+  text-align: right;
+}
+
+:deep(.table-scroll-container) {
+  border-radius: 0.5rem;
+}
+
+:deep(.table-scroll-container th) {
+  height: 2.5rem;
+  padding-top: 0;
+  padding-bottom: 0;
+  background-color: rgb(246 247 249);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgb(111 127 145);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+:deep(.dark .table-scroll-container th) {
+  background-color: rgb(31 41 55);
+}
+
+:deep(.table-scroll-container td) {
+  height: 6rem;
+  padding-top: 0.875rem;
+  padding-bottom: 0.875rem;
+}
+
+:deep(.data-table-detail-row td) {
+  height: auto;
 }
 
 .balance-cost-cell {

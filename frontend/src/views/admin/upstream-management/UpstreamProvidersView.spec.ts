@@ -146,7 +146,8 @@ describe('UpstreamProvidersView', () => {
                 h('div', { class: 'columns' }, props.columns.map((column: any) => column.key).join(',')),
                 h('div', { class: 'homepage-cell' }, slots['cell-homepage']?.({ row })),
                 h('div', { class: 'name-cell' }, slots['cell-name']?.({ row })),
-                h('div', { class: 'balance-cell' }, slots['cell-balance_consumption']?.({ row })),
+                h('div', { class: 'balance-cell' }, slots['cell-balance']?.({ row })),
+                h('div', { class: 'today-cost-cell' }, slots['cell-today_consumption']?.({ row })),
                 h('div', { class: 'actions-cell' }, slots['cell-actions']?.({ row })),
               ]))
             },
@@ -164,9 +165,10 @@ describe('UpstreamProvidersView', () => {
 
     await flushPromises()
 
-    expect(wrapper.find('.columns').text()).toBe('homepage,name,enabled,base_url,auth,endpoints,policy,balance_consumption,actions')
+    expect(wrapper.find('.columns').text()).toBe('homepage,name,interface,prefix,rate_scale,temp_disable_minutes,balance,today_consumption,actions')
     expect(wrapper.find('.provider-name-card').exists()).toBe(true)
-    expect(wrapper.find('.provider-slug-tag').exists()).toBe(true)
+    expect(wrapper.find('.provider-type-tag').exists()).toBe(true)
+    expect(wrapper.find('.provider-enabled-tag').exists()).toBe(true)
 
     const homepage = wrapper.find('a[href="https://upstream.example.com"]')
     expect(homepage.exists()).toBe(true)
@@ -174,17 +176,98 @@ describe('UpstreamProvidersView', () => {
 
     const balanceButton = wrapper
       .findAll('button')
-      .find((button) => button.text().includes('admin.upstreamProviders.balanceShort'))
+      .find((button) => button.attributes('title') === 'admin.upstreamProviders.fetchBalance')
     expect(balanceButton).toBeTruthy()
 
     expect(adminAPIMock.upstreamProviders.getBalance).toHaveBeenCalledWith('sub-main')
-    expect(wrapper.text()).toContain('9.5')
-    expect(wrapper.find('.balance-pill-warning').exists()).toBe(true)
-    expect(wrapper.text()).toContain('admin.upstreamProviders.balanceIncomplete')
+    expect(wrapper.text()).toContain('9.5000')
+    expect(wrapper.find('.numeric-alert').exists()).toBe(true)
 
     await balanceButton!.trigger('click')
     await flushPromises()
     expect(adminAPIMock.upstreamProviders.getBalance).toHaveBeenCalledTimes(2)
+  })
+
+  it('supports table controls, row expansion, and secondary column visibility', async () => {
+    adminAPIMock.upstreamProviders.list.mockResolvedValue([
+      {
+        type: 'newapi',
+        slug: 'new-main',
+        name: 'New Main',
+        enabled: true,
+        is_default: false,
+        base_url: 'https://new.example.com',
+        login_url: '/api/user/login',
+        api_keys_url: '/api/token/',
+        groups_url: '/api/group/',
+        username: 'admin@example.com',
+        password_configured: true,
+        account_name_prefix: 'np-',
+        temp_disable_minutes: 15,
+        account_rate_multiplier_scale: 1.25,
+      },
+    ])
+
+    const wrapper = mount(UpstreamProvidersView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['columns', 'data'],
+            setup(props, { slots }) {
+              return () => h('div', [
+                h('div', { class: 'columns' }, props.columns.map((column: any) => column.key).join(',')),
+                ...props.data.flatMap((row: any) => [
+                  h('div', { class: 'homepage-cell' }, slots['cell-homepage']?.({ row })),
+                  h('div', { class: 'interface-cell' }, slots['cell-interface']?.({ row })),
+                  h('div', { class: 'temp-cell' }, slots['cell-temp_disable_minutes']?.({ row })),
+                  h('div', { class: 'details-cell' }, slots['row-detail']?.({ row, colspan: props.columns.length })),
+                ]),
+              ])
+            },
+          },
+          BaseDialog: {
+            props: ['show'],
+            template: '<div v-if="show"><slot /><slot name="footer" /></div>',
+          },
+          ConfirmDialog: true,
+          EmptyState: true,
+          Icon: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('.columns').text()).toBe('homepage,name,interface,prefix,rate_scale,temp_disable_minutes,balance,today_consumption,actions')
+    expect(wrapper.find('.details-cell').text()).toBe('')
+
+    const expandButton = wrapper.find('.expand-toggle')
+    expect(expandButton.exists()).toBe(true)
+    await expandButton.trigger('click')
+
+    expect(wrapper.find('.details-cell').text()).toContain('https://new.example.com')
+    expect(wrapper.find('.details-cell').text()).toContain('admin@example.com')
+    expect(wrapper.find('.details-cell').text()).toContain('/api/token/')
+    expect(wrapper.find('.details-cell').text()).toContain('/api/user/login')
+    expect(wrapper.find('.details-cell').text()).toContain('/api/group/')
+
+    const settingsButton = wrapper.find('.column-settings-button')
+    expect(settingsButton.exists()).toBe(true)
+    await settingsButton.trigger('click')
+    const tempToggle = wrapper.find('input[type="checkbox"][value="temp_disable_minutes"]')
+    expect(tempToggle.exists()).toBe(true)
+    expect((tempToggle.element as HTMLInputElement).checked).toBe(true)
+    expect(wrapper.find('.temp-cell').text()).toContain('15分钟')
+
+    await tempToggle.setValue(false)
+    expect(wrapper.find('.columns').text()).not.toContain('temp_disable_minutes')
+
+    await tempToggle.setValue(true)
+
+    expect(wrapper.find('.columns').text()).toContain('temp_disable_minutes')
+    expect(wrapper.find('.temp-cell').text()).toContain('15分钟')
   })
 
   it('opens balance maintenance from provider balance column', async () => {
@@ -281,9 +364,10 @@ describe('UpstreamProvidersView', () => {
           DataTable: {
             props: ['data'],
             setup(props, { slots }) {
-              return () => h('div', props.data.map((row: any) => (
-                h('div', { class: 'balance-cell' }, slots['cell-balance_consumption']?.({ row }))
-              )))
+              return () => h('div', props.data.flatMap((row: any) => [
+                h('div', { class: 'balance-cell' }, slots['cell-balance']?.({ row })),
+                h('div', { class: 'today-cost-cell' }, slots['cell-today_consumption']?.({ row })),
+              ]))
             },
           },
           BaseDialog: {
@@ -299,12 +383,12 @@ describe('UpstreamProvidersView', () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).toContain('24.50')
-    expect(wrapper.text()).toContain('admin.upstreamProviders.balanceComplete')
+    expect(wrapper.find('.today-cost-cell').text()).toContain('24.5000')
+    expect(wrapper.find('.numeric-alert').exists()).toBe(true)
 
     const detailButton = wrapper
       .findAll('button')
-      .find((button) => button.text().includes('common.more'))
+      .find((button) => button.attributes('title') === 'common.more')
     expect(detailButton).toBeTruthy()
 
     await detailButton!.trigger('click')
@@ -312,12 +396,12 @@ describe('UpstreamProvidersView', () => {
 
     expect(wrapper.find('.balance-dialog').text()).toContain('admin.upstreamProviders.balanceDialogDescription')
     expect(wrapper.find('.balance-dialog').text()).toContain('2026-06-15')
-    expect(wrapper.find('.balance-dialog').text()).toContain('24.50')
+    expect(wrapper.find('.balance-dialog').text()).toContain('24.5000')
     expect(wrapper.find('.balance-dialog').text()).toContain('admin.upstreamProviders.balanceSamples')
     expect(wrapper.findAll('.snapshot-row')).toHaveLength(3)
-    expect(wrapper.find('.balance-dialog').text()).toContain('100.00')
-    expect(wrapper.find('.balance-dialog').text()).toContain('90.00')
-    expect(wrapper.find('.balance-dialog').text()).toContain('80.00')
+    expect(wrapper.find('.balance-dialog').text()).toContain('100.0000')
+    expect(wrapper.find('.balance-dialog').text()).toContain('90.0000')
+    expect(wrapper.find('.balance-dialog').text()).toContain('80.0000')
   })
 
   it('offers existing URLs as datalist choices in provider form', async () => {
