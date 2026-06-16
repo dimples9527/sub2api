@@ -135,7 +135,7 @@
               <div class="flex flex-wrap items-center gap-2">
                 <span
                   v-if="providerBalances[row.slug]"
-                  class="balance-pill"
+                  :class="['balance-pill', isLowBalance(providerBalances[row.slug].balance) && 'balance-pill-warning']"
                   :title="t('admin.upstreamProviders.balance')"
                 >
                   {{ formatBalance(providerBalances[row.slug].balance) }}
@@ -1256,6 +1256,11 @@ function formatBalance(value: number | undefined) {
   return Number.isFinite(n) ? n.toFixed(6).replace(/\.?0+$/, '') : '-'
 }
 
+function isLowBalance(value: number | undefined) {
+  const n = Number(value)
+  return Number.isFinite(n) && n < 10
+}
+
 function formatRateScale(value: number | undefined) {
   const n = Number(value)
   return Number.isFinite(n) && n > 0 ? `${n.toFixed(4)}x` : '1.0000x'
@@ -1451,5 +1456,9 @@ onMounted(reload)
 
 .balance-pill {
   @apply inline-flex items-center rounded-md bg-violet-50 px-2 py-1 font-mono text-xs font-semibold text-violet-700 ring-1 ring-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:ring-violet-800/60;
+}
+
+.balance-pill-warning {
+  @apply bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-800/60;
 }
 </style>

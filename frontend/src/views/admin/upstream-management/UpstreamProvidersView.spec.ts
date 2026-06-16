@@ -114,6 +114,12 @@ describe('UpstreamProvidersView', () => {
   })
 
   it('puts homepage first, balance before actions, and automatically fetches provider balance', async () => {
+    adminAPIMock.upstreamProviders.getBalance.mockResolvedValue({
+      provider_slug: 'sub-main',
+      provider_name: 'Sub Main',
+      provider_type: 'sub2api',
+      balance: 9.5,
+    })
     adminAPIMock.upstreamProviders.list.mockResolvedValue([
       {
         type: 'sub2api',
@@ -172,7 +178,8 @@ describe('UpstreamProvidersView', () => {
     expect(balanceButton).toBeTruthy()
 
     expect(adminAPIMock.upstreamProviders.getBalance).toHaveBeenCalledWith('sub-main')
-    expect(wrapper.text()).toContain('334.740794')
+    expect(wrapper.text()).toContain('9.5')
+    expect(wrapper.find('.balance-pill-warning').exists()).toBe(true)
     expect(wrapper.text()).toContain('admin.upstreamProviders.balanceIncomplete')
 
     await balanceButton!.trigger('click')
