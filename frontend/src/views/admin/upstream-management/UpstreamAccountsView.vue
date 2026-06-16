@@ -1,198 +1,206 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <TablePageLayout class="upstream-accounts-page">
       <template #filters>
-        <div class="accounts-toolbar">
-          <div class="provider-panel">
-            <div class="min-w-0">
-              <div class="meta-label">{{ t('admin.upstreamAccounts.syncProviders') }}</div>
-              <div class="mt-1 flex min-w-0 items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
-                <span class="truncate">{{ syncProviderLabel }}</span>
-                <code v-if="syncProviderCode" class="text-xs font-normal text-gray-500 dark:text-gray-400">
-                  {{ syncProviderCode }}
-                </code>
+        <div class="accounts-shell">
+          <section class="accounts-topbar">
+            <div class="stats-strip">
+              <article
+                v-for="card in statCards"
+                :key="card.key"
+                :class="['stat-card', `stat-card-${card.tone}`]"
+              >
+                <span v-if="card.key === 'update' && summary.update_count > 0" class="stat-alert-dot"></span>
+                <span class="stat-icon">
+                  <Icon :name="card.icon" size="md" :stroke-width="2" />
+                </span>
+                <span class="stat-copy">
+                  <strong>{{ card.value }}</strong>
+                  <span>{{ card.label }}</span>
+                </span>
+              </article>
+            </div>
+            <div class="accounts-actions">
+              <div class="provider-summary">
+                <span>{{ t('admin.upstreamAccounts.syncProviders') }}</span>
+                <strong>{{ syncProviderLabel }}</strong>
+                <code v-if="syncProviderCode">{{ syncProviderCode }}</code>
+              </div>
+              <button
+                type="button"
+                class="ui-button ui-button-icon"
+                :disabled="loading || syncing"
+                :title="t('common.refresh')"
+                @click="reload"
+              >
+                <Icon name="refresh" size="md" :stroke-width="2" :class="loading ? 'animate-spin' : ''" />
+              </button>
+              <button
+                type="button"
+                class="ui-button ui-button-primary"
+                :disabled="loading || syncing || !canSync"
+                @click="runSync"
+              >
+                <Icon name="sync" size="sm" :stroke-width="2" :class="syncing ? 'animate-spin' : ''" />
+                {{ t('admin.upstreamAccounts.syncNow') }}
+              </button>
+            </div>
+          </section>
+
+          <section class="rate-guard-panel">
+            <div class="guard-left">
+              <label class="guard-switch" :class="{ 'is-on': rateGuardForm.enabled }">
+                <input v-model="rateGuardForm.enabled" type="checkbox" />
+                <span></span>
+              </label>
+              <div class="guard-copy">
+                <div class="guard-title">{{ t('admin.upstreamAccounts.rateGuardTitle') }}</div>
+                <div class="guard-description">{{ t('admin.upstreamAccounts.rateGuardDescription') }}</div>
+                <div class="guard-status-line">
+                  <span :class="['status-pill', rateGuardForm.enabled ? 'status-pill-on' : 'status-pill-muted']">
+                    {{ rateGuardForm.enabled ? t('admin.upstreamAccounts.rateGuardEnabled') : t('admin.upstreamAccounts.rateGuardDisabled') }}
+                  </span>
+                  <span>
+                    {{ t('admin.upstreamAccounts.rateGuardLastRun') }}:
+                    {{ rateGuardLastRunText }}
+                  </span>
+                  <span
+                    v-if="rateGuardConfig?.last_run_status"
+                    :class="['record-status', rateGuardConfig.last_run_status === 'failed' ? 'record-status-error' : 'record-status-success']"
+                  >
+                    {{ rateGuardConfig.last_run_status === 'failed' ? t('admin.upstreamAccounts.rateGuardStatusFailed') : t('admin.upstreamAccounts.rateGuardStatusSuccess') }}
+                  </span>
+                  <span v-if="rateGuardConfig?.last_run_message" class="status-error-message">
+                    {{ rateGuardConfig.last_run_message }}
+                  </span>
+                </div>
               </div>
             </div>
-            <div class="provider-count">{{ syncProviders.length }}</div>
-          </div>
-
-          <div class="stats-strip">
-            <div class="stat-tile">
-              <span>{{ t('admin.upstreamAccounts.upstreamKeys') }}</span>
-              <strong>{{ summary.upstream_key_count }}</strong>
-            </div>
-            <div class="stat-tile stat-tile-create">
-              <span>{{ t('admin.upstreamAccounts.toCreate') }}</span>
-              <strong>{{ summary.create_count }}</strong>
-            </div>
-            <div class="stat-tile stat-tile-update">
-              <span>{{ t('admin.upstreamAccounts.toUpdate') }}</span>
-              <strong>{{ summary.update_count }}</strong>
-            </div>
-            <div class="stat-tile" :class="summary.rate_violation_count > 0 ? 'stat-tile-warning' : ''">
-              <span>{{ t('admin.upstreamAccounts.rateRisks') }}</span>
-              <strong>{{ summary.rate_violation_count }}</strong>
-            </div>
-          </div>
-
-          <div class="accounts-actions">
-            <button
-              type="button"
-              class="btn btn-secondary"
-              :disabled="loading || syncing"
-              :title="t('common.refresh')"
-              @click="reload"
-            >
-              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
-            </button>
-            <button
-              type="button"
-              class="btn btn-primary"
-              :disabled="loading || syncing || !canSync"
-              @click="runSync"
-            >
-              <Icon name="sync" size="sm" class="mr-2" :class="syncing ? 'animate-spin' : ''" />
-              {{ t('admin.upstreamAccounts.syncNow') }}
-            </button>
-          </div>
-        </div>
-
-        <div class="filter-row">
-          <div class="relative min-w-0">
-            <Icon
-              name="search"
-              size="md"
-              class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
-            />
-            <input
-              v-model.trim="searchQuery"
-              type="search"
-              class="input filter-search pl-10"
-              :placeholder="t('admin.upstreamAccounts.searchPlaceholder')"
-            />
-          </div>
-          <Select
-            v-model="providerFilter"
-            class="filter-select"
-            :options="providerOptions"
-          />
-          <Select
-            v-model="sourceFilter"
-            class="filter-select"
-            :options="sourceOptions"
-          />
-          <div class="filtered-count">
-            <span>{{ t('admin.upstreamAccounts.filteredCount') }}</span>
-            <strong>{{ filteredItems.length }}</strong>
-          </div>
-        </div>
-
-        <div class="rate-guard-panel">
-          <div class="min-w-0">
-            <div class="meta-label">{{ t('admin.upstreamAccounts.rateGuardTitle') }}</div>
-            <div class="mt-1 text-sm text-gray-600 dark:text-gray-300">
-              {{ t('admin.upstreamAccounts.rateGuardDescription') }}
-            </div>
-            <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
-              <span :class="['badge', rateGuardForm.enabled ? 'badge-success' : 'badge-gray']">
-                {{ rateGuardForm.enabled ? t('admin.upstreamAccounts.rateGuardEnabled') : t('admin.upstreamAccounts.rateGuardDisabled') }}
-              </span>
-              <span class="text-gray-500 dark:text-gray-400">
-                {{ t('admin.upstreamAccounts.rateGuardLastRun') }}:
-                {{ rateGuardLastRunText }}
-              </span>
-              <span
-                v-if="rateGuardConfig?.last_run_status"
-                :class="['record-status', rateGuardConfig.last_run_status === 'failed' ? 'record-status-error' : 'record-status-success']"
+            <div class="guard-controls">
+              <span class="control-label">{{ t('admin.upstreamAccounts.rateGuardAutoRun') }} {{ t('admin.upstreamAccounts.rateGuardIntervalSeconds') }}</span>
+              <input
+                v-model.number="rateGuardForm.interval_seconds"
+                type="number"
+                min="1"
+                class="ui-input interval-input"
+              />
+              <span class="guard-hint">{{ rateGuardDailyRunsText }}</span>
+              <button
+                type="button"
+                class="ui-button"
+                :disabled="loadingRateGuardConfig || savingRateGuardConfig"
+                @click="saveRateGuardConfig"
               >
-                {{ rateGuardConfig.last_run_status === 'failed' ? t('admin.upstreamAccounts.rateGuardStatusFailed') : t('admin.upstreamAccounts.rateGuardStatusSuccess') }}
-              </span>
-              <span v-if="rateGuardConfig?.last_run_message" class="text-red-600 dark:text-red-300">
-                {{ rateGuardConfig.last_run_message }}
-              </span>
+                {{ t('common.save') }}
+              </button>
+              <button
+                type="button"
+                class="ui-button ui-button-primary"
+                :disabled="loadingRateGuardConfig || savingRateGuardConfig || runningRateGuardNow"
+                @click="runRateGuardNow"
+              >
+                <Icon name="play" size="sm" :stroke-width="2" :class="runningRateGuardNow ? 'animate-pulse' : ''" />
+                {{ t('admin.upstreamAccounts.rateGuardRunNow') }}
+              </button>
             </div>
-          </div>
-          <label class="guard-toggle">
-            <input v-model="rateGuardForm.enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
-            <span>{{ t('admin.upstreamAccounts.rateGuardAutoRun') }}</span>
-          </label>
-          <label class="guard-interval">
-            <span>{{ t('admin.upstreamAccounts.rateGuardIntervalSeconds') }}</span>
-            <input
-              v-model.number="rateGuardForm.interval_seconds"
-              type="number"
-              min="1"
-              class="input h-9 w-28"
+          </section>
+
+          <section class="filter-row">
+            <Select
+              v-model="providerFilter"
+              class="filter-select"
+              :options="providerOptions"
             />
-          </label>
-          <button
-            type="button"
-            class="btn btn-secondary"
-            :disabled="loadingRateGuardConfig || savingRateGuardConfig"
-            @click="saveRateGuardConfig"
-          >
-            <Icon name="cog" size="sm" class="mr-2" :class="savingRateGuardConfig ? 'animate-spin' : ''" />
-            {{ t('common.save') }}
-          </button>
-          <button
-            type="button"
-            class="btn btn-primary"
-            :disabled="loadingRateGuardConfig || savingRateGuardConfig || runningRateGuardNow"
-            @click="runRateGuardNow"
-          >
-            <Icon name="play" size="sm" class="mr-2" :class="runningRateGuardNow ? 'animate-pulse' : ''" />
-            {{ t('admin.upstreamAccounts.rateGuardRunNow') }}
-          </button>
+            <Select
+              v-model="sourceFilter"
+              class="filter-select"
+              :options="sourceOptions"
+            />
+            <div class="search-wrap">
+              <Icon name="search" size="sm" :stroke-width="2" />
+              <input
+                v-model.trim="searchQuery"
+                type="search"
+                class="ui-input filter-search"
+                :placeholder="t('admin.upstreamAccounts.searchPlaceholder')"
+              />
+            </div>
+            <div class="filtered-count">
+              <span>{{ t('admin.upstreamAccounts.filteredCount') }}</span>
+              <strong>{{ filteredItems.length }}</strong>
+            </div>
+          </section>
+
+          <nav class="quick-tags" aria-label="quick filters">
+            <button
+              v-for="(tag, index) in quickFilterTags"
+              :key="tag"
+              type="button"
+              :class="['quick-tag', { active: index === 0 }]"
+            >
+              {{ tag }}
+            </button>
+          </nav>
         </div>
       </template>
 
       <template #table>
         <div class="accounts-table-content">
           <div v-if="warnings.length" class="warning-banner">
-            <div v-for="warning in warnings" :key="warning">{{ warning }}</div>
+            <Icon name="exclamationTriangle" size="sm" :stroke-width="2" />
+            <div>
+              <div v-for="warning in warnings" :key="warning">{{ warning }}</div>
+            </div>
           </div>
 
-          <div class="accounts-table-primary">
-            <DataTable :columns="columns" :data="filteredItems" :loading="loading">
+          <section class="accounts-table-card">
+            <DataTable
+              :columns="columns"
+              :data="filteredItems"
+              :loading="loading"
+              :row-class="accountRowClass"
+              :estimate-row-height="92"
+            >
               <template #cell-source="{ row }">
-                <div :class="['source-card min-w-[12rem]', providerToneClass(row.provider_slug, 'card')]">
-                  <div class="flex items-center gap-2">
-                    <span class="min-w-0 flex-1 truncate font-semibold text-gray-950 dark:text-white">{{ row.provider_name || row.provider_slug }}</span>
-                    <a
-                      v-if="row.provider_base_url"
-                      :href="row.provider_base_url"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      class="source-home-link"
-                      :title="t('admin.upstreamProviders.openHomepage')"
-                    >
-                      <Icon name="home" size="sm" />
-                      <span>{{ t('admin.upstreamProviders.homepageShort') }}</span>
-                    </a>
+                <div class="source-cell">
+                  <span :class="['source-line', sourceToneClass(row)]"></span>
+                  <div class="source-main">
+                    <div class="source-title">
+                      <Icon v-if="row.rate_violation" name="exclamationTriangle" size="sm" :stroke-width="2" class="source-warning-icon" />
+                      <span :class="['table-tag', providerToneClass(row.provider_slug, 'tag')]">
+                        {{ row.provider_name || row.provider_slug }}
+                      </span>
+                    </div>
+                    <code class="source-id">{{ row.provider_slug || '-' }}</code>
                   </div>
-                  <code :class="['table-tag', providerToneClass(row.provider_slug, 'tag')]">{{ row.provider_slug }}</code>
+                  <a
+                    v-if="row.provider_base_url"
+                    :href="row.provider_base_url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="table-tag home-tag"
+                    :title="t('admin.upstreamProviders.openHomepage')"
+                  >
+                    <Icon name="home" size="xs" :stroke-width="2" />
+                    {{ t('admin.upstreamProviders.homepageShort') }}
+                  </a>
                 </div>
               </template>
 
               <template #cell-upstream_key_name="{ row }">
-                <div class="key-card min-w-[15rem]">
-                  <span class="font-semibold text-gray-950 dark:text-white">{{ row.upstream_key_name }}</span>
-                  <div class="tag-list max-w-[20rem]">
-                    <span class="table-tag tag-group">{{ row.upstream_group_name }}</span>
-                    <span v-if="row.rate_violation" class="table-tag tag-warning">
-                      {{ t('admin.upstreamAccounts.rateRisks') }}
-                    </span>
-                  </div>
+                <div class="two-line-cell">
+                  <span class="main-text">{{ row.upstream_key_name }}</span>
+                  <span class="sub-text">{{ row.upstream_group_name || '-' }}</span>
                 </div>
               </template>
 
               <template #cell-local_account_name="{ row }">
-                <div :class="['account-card min-w-[14rem]', accountCardClass(row)]">
-                  <span class="font-semibold text-gray-950 dark:text-white">{{ row.local_account_name || '-' }}</span>
-                  <span v-if="row.matched_account_id" class="text-xs text-gray-500 dark:text-gray-400">
-                    <span class="table-tag tag-account">#{{ row.matched_account_id }} {{ row.matched_account_name }}</span>
+                <div class="two-line-cell">
+                  <span class="main-text">{{ row.local_account_name || row.matched_account_name || '-' }}</span>
+                  <span v-if="row.matched_account_id" class="table-tag tag-account account-id-tag">
+                    #{{ row.matched_account_id }} {{ row.matched_account_name || row.local_account_name }}
                   </span>
-                  <div v-else-if="row.conflict_accounts?.length" class="tag-list max-w-[24rem]">
+                  <div v-else-if="row.conflict_accounts?.length" class="tag-list">
                     <span
                       v-for="account in row.conflict_accounts"
                       :key="`${row.provider_slug}-${row.upstream_key_name}-conflict-${account.id}`"
@@ -205,60 +213,64 @@
                       </span>
                     </span>
                   </div>
-                  <span v-else-if="row.conflict_account_ids?.length" class="text-xs text-amber-600 dark:text-amber-300">
+                  <span v-else-if="row.conflict_account_ids?.length" class="sub-text sub-text-warning">
                     {{ t('admin.upstreamAccounts.conflictIds', { ids: row.conflict_account_ids.join(', ') }) }}
+                  </span>
+                  <span v-else class="table-tag tag-account account-id-tag">-</span>
+                </div>
+              </template>
+
+              <template #cell-upstream_rate_multiplier="{ value }">
+                <div class="rate-cell">
+                  <span :class="['rate-value', rateToneClass(value)]">{{ formatRate(value) }}</span>
+                  <span :class="['rate-bar', rateToneClass(value)]">
+                    <span :style="{ width: rateProgressWidth(value) }"></span>
                   </span>
                 </div>
               </template>
 
               <template #cell-local_group_name="{ row }">
-                <div class="table-main-cell min-w-[16rem]">
-                  <div v-if="row.bound_groups?.length" class="tag-list max-w-[22rem]">
-                    <span
-                      v-for="(group, index) in row.bound_groups"
-                      :key="`${row.provider_slug}-${row.upstream_key_name}-${group.id}`"
-                      :class="['group-chip', groupChipClass(group.rate_violation, index)]"
-                      :title="`${group.name} ${formatRate(group.rate_multiplier)}`"
-                    >
-                      {{ group.name }}
-                      <span class="font-mono">{{ formatRate(group.rate_multiplier) }}</span>
-                    </span>
-                  </div>
-                  <template v-else>
-                    <span>{{ row.local_group_name || '-' }}</span>
-                    <span v-if="row.local_rate_multiplier !== undefined" class="text-xs font-mono text-gray-500 dark:text-gray-400">
-                      {{ formatRate(row.local_rate_multiplier) }}
-                    </span>
-                  </template>
+                <div v-if="row.bound_groups?.length" class="tag-list group-list">
+                  <span
+                    v-for="(group, index) in row.bound_groups"
+                    :key="`${row.provider_slug}-${row.upstream_key_name}-${group.id}`"
+                    :class="['group-chip', groupChipClass(group, index)]"
+                    :title="`${group.name} ${formatRate(group.rate_multiplier)}`"
+                  >
+                    {{ group.name }}
+                    <span class="font-mono">{{ formatRate(group.rate_multiplier) }}</span>
+                  </span>
                 </div>
-              </template>
-
-              <template #cell-upstream_rate_multiplier="{ value }">
-                <span :class="['rate-value', rateToneClass(value)]">{{ formatRate(value) }}</span>
+                <div v-else class="two-line-cell">
+                  <span class="dash">{{ row.local_group_name || '-' }}</span>
+                  <span v-if="row.local_rate_multiplier !== undefined" class="sub-text">
+                    {{ formatRate(row.local_rate_multiplier) }}
+                  </span>
+                </div>
               </template>
 
               <template #cell-actions="{ row }">
-                <div v-if="row.matched_account_id" class="flex items-center gap-2">
+                <div v-if="row.matched_account_id" class="action-cell">
                   <button
                     type="button"
-                    class="btn btn-secondary btn-sm whitespace-nowrap"
+                    :class="['text-action', row.rate_violation ? 'text-action-danger' : '']"
                     :disabled="savingAccountGroupId === row.matched_account_id || testingAccountId === row.matched_account_id"
                     @click="openAccountGroupDialog(row)"
                   >
-                    <Icon name="cog" size="sm" class="mr-1" :class="savingAccountGroupId === row.matched_account_id ? 'animate-spin' : ''" />
-                    {{ t('admin.upstreamAccounts.editBoundGroups') }}
+                    <Icon :name="row.rate_violation ? 'exclamationTriangle' : 'edit'" size="sm" :stroke-width="2" :class="savingAccountGroupId === row.matched_account_id ? 'animate-spin' : ''" />
+                    {{ row.rate_violation ? '\u5904\u7406\u98ce\u9669' : t('admin.upstreamAccounts.editBoundGroups') }}
                   </button>
                   <button
                     type="button"
-                    class="btn btn-secondary btn-sm whitespace-nowrap"
+                    class="text-action text-action-muted"
                     :disabled="testingAccountId === row.matched_account_id || savingAccountGroupId === row.matched_account_id"
                     @click="openAccountTestDialog(row)"
                   >
-                    <Icon name="play" size="sm" class="mr-1" :class="testingAccountId === row.matched_account_id ? 'animate-spin' : ''" />
+                    <Icon name="play" size="sm" :stroke-width="2" :class="testingAccountId === row.matched_account_id ? 'animate-spin' : ''" />
                     {{ t('admin.upstreamAccounts.testConnection') }}
                   </button>
                 </div>
-                <span v-else class="table-tag tag-missing">-</span>
+                <span v-else class="dash action-dash">-</span>
               </template>
 
               <template #empty>
@@ -270,78 +282,80 @@
                 />
               </template>
             </DataTable>
-          </div>
+          </section>
 
-          <div class="records-panel">
+          <section class="records-panel">
             <div class="records-header">
-              <div>
-                <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.upstreamAccounts.syncLogs') }}</h3>
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.upstreamAccounts.syncLogsDescription') }}</span>
-              </div>
-              <div class="records-total">{{ syncLogEntries.length }}</div>
+              <h3>{{ t('admin.upstreamAccounts.syncLogs') }}</h3>
+              <span>{{ t('admin.upstreamAccounts.latestRecords', { count: syncLogEntries.length }) }} {{ syncLogEntries.length }}</span>
             </div>
-            <div class="max-h-80 overflow-auto">
-              <table class="records-table min-w-[1080px]">
-                <thead class="bg-primary-50/80 dark:bg-primary-950/30">
+            <div class="records-info">{{ t('admin.upstreamAccounts.syncLogsDescription') }}</div>
+            <div v-if="syncLogEntries.length" class="records-table-wrap">
+              <table class="records-table">
+                <thead>
                   <tr>
-                    <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logTime') }}</th>
-                    <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logTriggerSource') }}</th>
-                    <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logAccount') }}</th>
-                    <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logUpstream') }}</th>
-                    <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logRateCompare') }}</th>
-                    <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logUnboundGroups') }}</th>
-                    <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamAccounts.logRemainingGroups') }}</th>
+                    <th>{{ t('admin.upstreamAccounts.logTime') }}</th>
+                    <th>{{ t('admin.upstreamAccounts.logTriggerSource') }}</th>
+                    <th>{{ t('admin.upstreamAccounts.logAccount') }}</th>
+                    <th>{{ t('admin.upstreamAccounts.logUpstream') }}</th>
+                    <th>{{ t('admin.upstreamAccounts.logRateCompare') }}</th>
+                    <th>{{ t('admin.upstreamAccounts.logUnboundGroups') }}</th>
+                    <th>{{ t('admin.upstreamAccounts.logRemainingGroups') }}</th>
                   </tr>
                 </thead>
-                <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
+                <tbody>
                   <tr v-for="entry in syncLogEntries" :key="entry.key" class="records-row">
-                    <td class="px-4 py-3 text-gray-600 dark:text-gray-300">{{ formatDateTime(entry.created_at) }}</td>
-                    <td class="px-4 py-3">
+                    <td>{{ formatDateTime(entry.created_at) }}</td>
+                    <td>
                       <span :class="['trigger-chip', triggerClass(entry.trigger_source)]">
                         {{ upstreamAccountSyncTriggerSourceLabel(entry.trigger_source) }}
                       </span>
                     </td>
-                    <td class="px-4 py-3">
-                      <div class="table-main-cell min-w-[12rem]">
-                        <span class="font-medium text-gray-900 dark:text-white">{{ entry.matched_local_account_name }}</span>
+                    <td>
+                      <div class="two-line-cell">
+                        <span class="main-text">{{ entry.matched_local_account_name }}</span>
                         <code class="table-tag tag-account">#{{ entry.matched_local_account_id }}</code>
                       </div>
                     </td>
-                    <td class="px-4 py-3">
-                      <div class="table-main-cell min-w-[14rem]">
-                        <span class="font-medium text-gray-900 dark:text-white">{{ entry.upstream_key_name }}</span>
-                        <div class="tag-list max-w-[22rem]">
+                    <td>
+                      <div class="two-line-cell">
+                        <span class="main-text">{{ entry.upstream_key_name }}</span>
+                        <div class="tag-list">
                           <span :class="['table-tag', providerToneClass(entry.provider_slug, 'tag')]">{{ entry.provider_name || entry.provider_slug }}</span>
-                          <span class="table-tag tag-group">{{ entry.upstream_group_name }}</span>
+                          <span class="table-tag tag-gray">{{ entry.upstream_group_name }}</span>
                         </div>
                       </div>
                     </td>
-                    <td class="px-4 py-3">
+                    <td>
                       <div class="rate-compare">
                         <span class="rate-compare-upstream">{{ formatRate(entry.upstream_rate_multiplier) }}</span>
-                        <span class="text-gray-400">/</span>
+                        <span>/</span>
                         <span class="rate-compare-local">{{ formatRate(entry.local_min_rate_multiplier) }}</span>
                       </div>
                     </td>
-                    <td class="px-4 py-3">
+                    <td>
                       <div class="tag-list">
                         <span v-for="group in entry.unbound_group_names" :key="`${entry.key}-${group}`" class="log-chip log-chip-warning">{{ group }}</span>
                       </div>
                     </td>
-                    <td class="px-4 py-3">
+                    <td>
                       <div class="tag-list">
-                        <span v-if="!entry.remaining_group_ids.length" class="text-xs text-gray-400">-</span>
+                        <span v-if="!entry.remaining_group_ids.length" class="dash">-</span>
                         <code v-for="groupID in entry.remaining_group_ids" :key="`${entry.key}-${groupID}`" class="log-chip">#{{ groupID }}</code>
                       </div>
                     </td>
                   </tr>
-                  <tr v-if="!syncLogEntries.length">
-                    <td colspan="7" class="px-4 py-8 text-center text-gray-400">{{ t('admin.upstreamAccounts.noSyncLogs') }}</td>
-                  </tr>
                 </tbody>
               </table>
             </div>
-          </div>
+            <div v-else class="records-empty">
+              <Icon name="document" size="xl" :stroke-width="2" />
+              <span>{{ t('admin.upstreamAccounts.noSyncLogs') }}</span>
+              <button type="button" class="ui-button" :disabled="loading || syncing || !canSync" @click="runSync">
+                {{ t('admin.upstreamAccounts.syncNow') }}
+              </button>
+            </div>
+          </section>
         </div>
 
         <div v-if="accountGroupDialogItem" class="account-group-dialog fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6" @click.self="closeAccountGroupDialog">
@@ -451,8 +465,8 @@ type UpstreamAccountSyncLogEntry = UpstreamAccountSyncUnbindDetail & {
 const columns = computed<Column[]>(() => [
   { key: 'source', label: t('admin.upstreamAccounts.columns.source') },
   { key: 'upstream_key_name', label: t('admin.upstreamAccounts.columns.upstreamKey') },
-  { key: 'upstream_rate_multiplier', label: t('admin.upstreamAccounts.columns.upstreamRate') },
   { key: 'local_account_name', label: t('admin.upstreamAccounts.columns.localAccount') },
+  { key: 'upstream_rate_multiplier', label: t('admin.upstreamAccounts.columns.upstreamRate') },
   { key: 'local_group_name', label: t('admin.upstreamAccounts.columns.boundGroups') },
   { key: 'actions', label: t('common.actions') }
 ])
@@ -473,6 +487,44 @@ const syncProviders = computed(() => result.value?.providers || [])
 const items = computed<UpstreamAccountSyncItem[]>(() => result.value?.items || [])
 const warnings = computed(() => result.value?.warnings || [])
 const records = computed<UpstreamAccountSyncRecord[]>(() => result.value?.records || [])
+const statCards = computed(() => [
+  {
+    key: 'total',
+    label: t('admin.upstreamAccounts.upstreamKeys'),
+    value: summary.value.upstream_key_count,
+    icon: 'database' as const,
+    tone: 'emerald'
+  },
+  {
+    key: 'create',
+    label: t('admin.upstreamAccounts.toCreate'),
+    value: summary.value.create_count,
+    icon: 'plus' as const,
+    tone: 'gray'
+  },
+  {
+    key: 'update',
+    label: t('admin.upstreamAccounts.toUpdate'),
+    value: summary.value.update_count,
+    icon: 'refresh' as const,
+    tone: 'orange'
+  },
+  {
+    key: 'risk',
+    label: t('admin.upstreamAccounts.rateRisks'),
+    value: summary.value.rate_violation_count,
+    icon: 'exclamationTriangle' as const,
+    tone: 'red'
+  }
+])
+const quickFilterTags = computed(() => [
+  '\u5168\u90e8',
+  'Happiness',
+  'NikoAPI',
+  t('admin.upstreamAccounts.toUpdate'),
+  '\u65e0\u7ed1\u5b9a\u5206\u7ec4',
+  '\u500d\u7387\u5f02\u5e38'
+])
 const syncLogEntries = computed<UpstreamAccountSyncLogEntry[]>(() => {
   const entries: UpstreamAccountSyncLogEntry[] = []
   for (const record of records.value) {
@@ -505,6 +557,11 @@ const rateGuardLastRunText = computed(() => {
     return t('admin.upstreamAccounts.rateGuardNeverRun')
   }
   return formatDateTime(rateGuardConfig.value.last_run_at)
+})
+const rateGuardDailyRunsText = computed(() => {
+  const seconds = Number(rateGuardForm.value.interval_seconds)
+  if (!Number.isFinite(seconds) || seconds <= 0) return '\u7ea6\u6bcf\u65e5\u6267\u884c - \u6b21'
+  return `\u7ea6\u6bcf\u65e5\u6267\u884c ${Math.floor(86400 / seconds)} \u6b21`
 })
 const providerOptions = computed<SelectOption[]>(() => [
   { value: '', label: t('admin.upstreamAccounts.allProviders') },
@@ -670,11 +727,16 @@ async function loadLocalGroups() {
   }
 }
 
-function accountCardClass(row: UpstreamAccountSyncItem) {
-  if (row.conflict_accounts?.length || row.conflict_account_ids?.length) return 'account-card-conflict'
-  if (!row.matched_account_id) return 'account-card-new'
-  if (row.rate_violation) return 'account-card-warning'
-  return 'account-card-matched'
+function accountRowClass(row: UpstreamAccountSyncItem) {
+  if (row.rate_violation) return 'risk-row'
+  return ''
+}
+
+function sourceToneClass(row: UpstreamAccountSyncItem) {
+  if (row.rate_violation) return 'source-line-red'
+  const slug = (row.provider_slug || row.provider_name || '').toLowerCase()
+  if (slug.includes('niko')) return 'source-line-blue'
+  return 'source-line-emerald'
 }
 
 function providerToneClass(providerSlug: string | undefined, target: 'card' | 'tag') {
@@ -697,9 +759,13 @@ function providerToneClass(providerSlug: string | undefined, target: 'card' | 't
   return `${target === 'card' ? 'source-card' : 'tag-provider'}-${tone}`
 }
 
-function groupChipClass(rateViolation: boolean, index: number) {
-  if (rateViolation) return 'group-chip-warning'
-  const tones = ['group-chip-blue', 'group-chip-emerald', 'group-chip-violet', 'group-chip-cyan']
+function groupChipClass(group: UpstreamAccountSyncBoundGroup, index: number) {
+  if (group.rate_violation) return 'group-chip-warning'
+  const name = (group.name || '').toLowerCase()
+  if (name.includes('绂忓埄') || name.includes('trial') || name.includes('free')) return 'group-chip-emerald'
+  if (name.includes('浼佷笟') || name.includes('enterprise') || name.includes('pro')) return 'group-chip-violet'
+  if (name.includes('娓犻亾') || name.includes('channel')) return 'group-chip-blue'
+  const tones = ['group-chip-emerald', 'group-chip-violet', 'group-chip-blue']
   return tones[index % tones.length]
 }
 
@@ -763,10 +829,18 @@ function groupNameById(groupID: number) {
 
 function rateToneClass(value: number | undefined) {
   const n = Number(value)
-  if (!Number.isFinite(n)) return ''
-  if (n >= 2) return 'rate-purple'
-  if (n > 1) return 'rate-primary'
-  return 'rate-success'
+  if (!Number.isFinite(n)) return 'rate-muted'
+  if (n >= 0.4) return 'rate-red'
+  if (n >= 0.3) return 'rate-deep-orange'
+  if (n >= 0.2) return 'rate-orange'
+  if (n > 0.1) return 'rate-green'
+  return 'rate-deep-green'
+}
+
+function rateProgressWidth(value: number | undefined) {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n <= 0) return '0%'
+  return `${Math.min(100, Math.max(8, (n / 0.5) * 100))}%`
 }
 
 function triggerClass(triggerSource: string | undefined) {
@@ -806,361 +880,924 @@ onMounted(reload)
 </script>
 
 <style scoped>
-.accounts-toolbar {
-  @apply grid gap-3 xl:grid-cols-[minmax(14rem,18rem)_1fr_auto];
+.upstream-accounts-page {
+  max-width: 1280px;
+  margin: 0 auto;
 }
 
-.provider-panel {
-  @apply flex min-h-16 items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-dark-600 dark:bg-dark-800/40;
+.upstream-accounts-page :deep(.table-page-layout) {
+  gap: 16px;
 }
 
-.meta-label {
-  @apply text-xs font-medium text-gray-500 dark:text-gray-400;
+.upstream-accounts-page :deep(.table-scroll-container) {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
-.provider-count {
-  @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-gray-100 font-mono text-sm font-semibold text-gray-700 dark:bg-dark-700 dark:text-gray-200;
+.accounts-shell {
+  display: grid;
+  gap: 16px;
+}
+
+.accounts-topbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
 }
 
 .stats-strip {
-  @apply grid grid-cols-2 gap-2 sm:grid-cols-4;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
 }
 
-.stat-tile {
-  @apply flex min-h-16 flex-col justify-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 dark:border-dark-600 dark:bg-dark-800/40 dark:text-gray-300;
+.stat-card,
+.rate-guard-panel,
+.accounts-table-card,
+.records-panel {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
 }
 
-.stat-tile span {
-  @apply text-xs font-medium text-gray-500 dark:text-gray-400;
+.stat-card {
+  position: relative;
+  display: flex;
+  min-height: 82px;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
 }
 
-.stat-tile strong {
-  @apply mt-1 font-mono text-xl text-gray-950 dark:text-white;
+.stat-alert-dot {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #dc2626;
 }
 
-.stat-tile-create {
-  @apply border-sky-200 bg-sky-50/60 dark:border-sky-800/50 dark:bg-sky-950/20;
+.stat-icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  place-items: center;
+  border-radius: 999px;
 }
 
-.stat-tile-update {
-  @apply border-emerald-200 bg-emerald-50/60 dark:border-emerald-800/50 dark:bg-emerald-950/20;
+.stat-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
 }
 
-.stat-tile-warning {
-  @apply border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200;
+.stat-copy strong {
+  font-size: 24px;
+  font-weight: 750;
+  line-height: 1.1;
+  color: #111827;
+}
+
+.stat-copy span {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.stat-card-emerald .stat-icon {
+  background: #ecfdf5;
+  color: #059669;
+}
+
+.stat-card-gray .stat-icon {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.stat-card-orange .stat-icon {
+  background: #fff7ed;
+  color: #d97706;
+}
+
+.stat-card-red .stat-icon {
+  background: #fef2f2;
+  color: #dc2626;
 }
 
 .accounts-actions {
-  @apply flex flex-wrap items-center justify-end gap-2 xl:min-h-16;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
-.filter-row {
-  @apply mt-3 grid gap-3 md:grid-cols-[minmax(14rem,1fr)_12rem_11rem_11rem_auto];
+.provider-summary {
+  display: grid;
+  min-width: 150px;
+  gap: 2px;
+  color: #64748b;
+  font-size: 12px;
 }
 
-.filter-search {
-  @apply w-full;
+.provider-summary strong {
+  overflow: hidden;
+  color: #111827;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.filter-select {
-  @apply w-full;
+.provider-summary code {
+  color: #64748b;
+  font-size: 11px;
 }
 
-.filtered-count {
-  @apply flex h-10 items-center justify-between gap-3 rounded-lg border border-gray-200 px-3 text-sm text-gray-600 dark:border-dark-600 dark:text-gray-300;
+.ui-button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  padding: 0 14px;
+  color: #374151;
+  font-weight: 600;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease, box-shadow 150ms ease;
 }
 
-.filtered-count strong {
-  @apply font-mono text-base text-gray-900 dark:text-white;
+.ui-button:hover:not(:disabled) {
+  border-color: #a7f3d0;
+  color: #059669;
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.08);
+}
+
+.ui-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.ui-button-primary {
+  border-color: #059669;
+  background: #059669;
+  color: #fff;
+}
+
+.ui-button-primary:hover:not(:disabled) {
+  border-color: #047857;
+  background: #047857;
+  color: #fff;
+}
+
+.ui-button-icon {
+  width: 38px;
+  padding: 0;
 }
 
 .rate-guard-panel {
-  @apply mt-3 grid items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-dark-600 dark:bg-dark-800/40 lg:grid-cols-[minmax(16rem,1fr)_auto_auto_auto_auto];
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) auto;
+  gap: 20px;
+  align-items: center;
+  padding: 18px;
 }
 
-.guard-toggle {
-  @apply inline-flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200;
+.guard-left {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 14px;
 }
 
-.guard-interval {
-  @apply flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300;
+.guard-switch {
+  position: relative;
+  width: 42px;
+  height: 24px;
+  flex: none;
+  margin-top: 2px;
+  cursor: pointer;
+}
+
+.guard-switch input {
+  position: absolute;
+  opacity: 0;
+}
+
+.guard-switch span {
+  display: block;
+  width: 42px;
+  height: 24px;
+  border-radius: 999px;
+  background: #cbd5e1;
+  transition: background 150ms ease;
+}
+
+.guard-switch span::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.2);
+  transition: transform 150ms ease;
+}
+
+.guard-switch.is-on span {
+  background: #059669;
+}
+
+.guard-switch.is-on span::after {
+  transform: translateX(18px);
+}
+
+.guard-title {
+  color: #111827;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.guard-description {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.guard-status-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.guard-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.control-label {
+  color: #475569;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.guard-hint {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.ui-input {
+  height: 38px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  color: #111827;
+  outline: none;
+  padding: 0 12px;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.ui-input:focus {
+  border-color: #059669;
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.12);
+}
+
+.interval-input {
+  width: 92px;
+}
+
+.filter-row {
+  display: grid;
+  grid-template-columns: 156px 172px minmax(260px, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.filter-select {
+  width: 100%;
+}
+
+.filter-select :deep(select),
+.filter-select :deep(button) {
+  min-height: 38px;
+  border-radius: 8px;
+  border-color: #d1d5db;
+  background: #fff;
+}
+
+.search-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+.search-wrap > svg {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  color: #94a3b8;
+  transform: translateY(-50%);
+}
+
+.filter-search {
+  width: 100%;
+  padding-left: 38px;
+}
+
+.filtered-count {
+  display: inline-flex;
+  height: 34px;
+  align-items: center;
+  gap: 6px;
+  border-radius: 8px;
+  background: #f1f5f9;
+  padding: 0 12px;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.filtered-count strong {
+  color: #111827;
+  font-weight: 750;
+}
+
+.quick-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.quick-tag {
+  height: 30px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  padding: 0 12px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 650;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+}
+
+.quick-tag:hover {
+  border-color: #059669;
+  color: #059669;
+}
+
+.quick-tag.active {
+  border-color: #059669;
+  background: #059669;
+  color: #fff;
 }
 
 .accounts-table-content {
-  @apply flex h-full min-h-0 flex-col overflow-y-auto;
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
 }
 
 .warning-banner {
-  @apply mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200;
+  display: flex;
+  gap: 8px;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  background: #fff7ed;
+  padding: 12px;
+  color: #c2410c;
+  font-size: 13px;
 }
 
-.accounts-table-primary {
-  @apply flex flex-none flex-col overflow-hidden;
+.accounts-table-card {
+  flex: none;
+  overflow: hidden;
   height: clamp(28rem, 52vh, 42rem);
   min-height: 28rem;
 }
 
-.accounts-table-primary :deep(.table-wrapper) {
-  @apply min-h-0;
+.accounts-table-card :deep(.table-wrapper) {
+  min-height: 0;
 }
 
-.accounts-table-primary :deep(tbody tr) {
-  @apply transition-colors;
+.accounts-table-card :deep(table) {
+  border-collapse: collapse;
 }
 
-.records-panel {
-  @apply mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-600 dark:bg-dark-800/30;
+.accounts-table-card :deep(thead),
+.accounts-table-card :deep(.table-header),
+.accounts-table-card :deep(.sticky-header-cell) {
+  background: #f8fafc;
 }
 
-.records-header {
-  @apply flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-dark-600;
+.accounts-table-card :deep(th) {
+  border-bottom: 1px solid #e5e7eb;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
-.records-total {
-  @apply flex h-8 min-w-8 items-center justify-center rounded-md bg-gray-100 px-2 font-mono text-sm font-semibold text-gray-700 dark:bg-dark-700 dark:text-gray-200;
+.accounts-table-card :deep(th:nth-child(4)),
+.accounts-table-card :deep(th:nth-child(6)) {
+  text-align: right;
 }
 
-.records-row {
-  @apply align-top;
+.accounts-table-card :deep(th:nth-child(4) > div),
+.accounts-table-card :deep(th:nth-child(6) > div) {
+  justify-content: flex-end;
 }
 
-.records-table {
-  @apply w-full divide-y divide-gray-100 text-sm dark:divide-dark-700;
+.accounts-table-card :deep(td) {
+  border-bottom: 1px solid #eef2f7;
+  color: #334155;
 }
 
-.records-table tbody {
-  @apply divide-y divide-gray-100 dark:divide-dark-700;
+.accounts-table-card :deep(.data-table-row) {
+  transition: background 150ms ease;
 }
 
-.records-table tbody tr {
-  @apply transition-colors hover:bg-gray-50 dark:hover:bg-dark-700/40;
+.accounts-table-card :deep(.data-table-row:hover) {
+  background: #f8fafc;
 }
 
-.table-main-cell {
-  @apply flex flex-col gap-1 leading-tight;
+.accounts-table-card :deep(.data-table-row.risk-row),
+.accounts-table-card :deep(.data-table-row.risk-row .sticky-col) {
+  background: #fff7f7;
 }
 
-.source-card,
-.key-card,
-.account-card {
-  @apply flex flex-col gap-2 rounded-md border px-3 py-2 leading-tight;
+.accounts-table-card :deep(.data-table-row.risk-row:hover),
+.accounts-table-card :deep(.data-table-row.risk-row:hover .sticky-col) {
+  background: #fef2f2;
 }
 
-.source-home-link {
-  @apply inline-flex shrink-0 flex-col items-center gap-0.5 rounded-md p-1 text-xs font-medium text-gray-500 transition-colors hover:bg-white/70 hover:text-sky-600 dark:text-gray-400 dark:hover:bg-dark-700/70 dark:hover:text-sky-300;
+.source-cell {
+  display: grid;
+  min-width: 13rem;
+  grid-template-columns: 2px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
 }
 
-.account-card-new {
-  @apply border-sky-200 bg-sky-50/70 dark:border-sky-800/50 dark:bg-sky-950/25;
+.source-line {
+  width: 2px;
+  height: 42px;
+  border-radius: 999px;
 }
 
-.account-card-matched {
-  @apply border-emerald-200 bg-emerald-50/70 dark:border-emerald-800/50 dark:bg-emerald-950/25;
+.source-line-emerald {
+  background: #059669;
 }
 
-.account-card-warning {
-  @apply border-amber-200 bg-amber-50/80 dark:border-amber-700/40 dark:bg-amber-950/25;
+.source-line-blue {
+  background: #2563eb;
 }
 
-.account-card-conflict {
-  @apply border-violet-200 bg-violet-50/70 dark:border-violet-800/50 dark:bg-violet-950/25;
+.source-line-red {
+  background: #dc2626;
 }
 
-.source-card-sky {
-  @apply border-sky-200 bg-sky-50/70 dark:border-sky-800/50 dark:bg-sky-950/25;
+.source-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
 }
 
-.source-card-emerald {
-  @apply border-emerald-200 bg-emerald-50/70 dark:border-emerald-800/50 dark:bg-emerald-950/25;
+.source-warning-icon {
+  color: #dc2626;
 }
 
-.source-card-violet {
-  @apply border-violet-200 bg-violet-50/70 dark:border-violet-800/50 dark:bg-violet-950/25;
+.source-id,
+.sub-text {
+  display: block;
+  overflow: hidden;
+  margin-top: 5px;
+  color: #64748b;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.source-card-cyan {
-  @apply border-cyan-200 bg-cyan-50/70 dark:border-cyan-800/50 dark:bg-cyan-950/25;
+.source-main,
+.two-line-cell {
+  min-width: 0;
 }
 
-.source-card-rose {
-  @apply border-rose-200 bg-rose-50/70 dark:border-rose-800/50 dark:bg-rose-950/25;
+.main-text {
+  display: block;
+  overflow: hidden;
+  color: #1f2937;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.source-card-amber {
-  @apply border-amber-200 bg-amber-50/70 dark:border-amber-800/50 dark:bg-amber-950/25;
-}
-
-.source-card-indigo {
-  @apply border-indigo-200 bg-indigo-50/70 dark:border-indigo-800/50 dark:bg-indigo-950/25;
-}
-
-.source-card-teal {
-  @apply border-teal-200 bg-teal-50/70 dark:border-teal-800/50 dark:bg-teal-950/25;
-}
-
-.key-card {
-  @apply border-primary-100 bg-primary-50/60 dark:border-primary-800/40 dark:bg-primary-950/20;
+.table-tag,
+.group-chip,
+.log-chip,
+.trigger-chip,
+.status-pill {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
 }
 
 .table-tag {
-  @apply inline-flex max-w-full items-center gap-1 truncate rounded-md px-2 py-1 text-xs font-semibold ring-1;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.tag-provider-sky {
-  @apply bg-sky-50 text-sky-700 ring-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:ring-sky-800/60;
+.status-pill::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
 }
 
-.tag-provider-emerald {
-  @apply bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-800/60;
+.status-pill-on {
+  background: #ecfdf5;
+  color: #059669;
 }
 
-.tag-provider-violet {
-  @apply bg-violet-50 text-violet-700 ring-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:ring-violet-800/60;
-}
-
-.tag-provider-cyan {
-  @apply bg-cyan-50 text-cyan-700 ring-cyan-200 dark:bg-cyan-950/40 dark:text-cyan-300 dark:ring-cyan-800/60;
-}
-
-.tag-provider-rose {
-  @apply bg-rose-50 text-rose-700 ring-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:ring-rose-800/60;
-}
-
-.tag-provider-amber {
-  @apply bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-800/60;
-}
-
-.tag-provider-indigo {
-  @apply bg-indigo-50 text-indigo-700 ring-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 dark:ring-indigo-800/60;
-}
-
-.tag-provider-teal {
-  @apply bg-teal-50 text-teal-700 ring-teal-200 dark:bg-teal-950/40 dark:text-teal-300 dark:ring-teal-800/60;
-}
-
-.tag-group {
-  @apply bg-primary-50 text-primary-700 ring-primary-200 dark:bg-primary-950/40 dark:text-primary-300 dark:ring-primary-800/60;
-}
-
-.tag-warning {
-  @apply bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-800/60;
-}
-
+.status-pill-muted,
+.tag-gray,
+.home-tag,
 .tag-account {
-  @apply bg-indigo-50 font-mono text-indigo-700 ring-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 dark:ring-indigo-800/60;
-}
-
-.trigger-chip {
-  @apply inline-flex rounded-full px-2.5 py-1 text-xs font-bold ring-1;
-}
-
-.rate-value {
-  @apply inline-flex rounded-md px-2 py-1 font-mono text-sm font-semibold ring-1;
-}
-
-.rate-success {
-  @apply bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:ring-emerald-800/60;
-}
-
-.rate-primary {
-  @apply bg-primary-50 text-primary-700 ring-primary-200 dark:bg-primary-950/30 dark:text-primary-300 dark:ring-primary-800/60;
-}
-
-.rate-purple {
-  @apply bg-violet-50 text-violet-700 ring-violet-200 dark:bg-violet-950/30 dark:text-violet-300 dark:ring-violet-800/60;
+  background: #f1f5f9;
+  color: #64748b;
 }
 
 .record-status {
-  @apply inline-flex rounded-md px-2 py-1 text-xs font-medium;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .record-status-success {
-  @apply bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-200;
+  background: #ecfdf5;
+  color: #047857;
 }
 
-.record-status-error {
-  @apply bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-200;
+.record-status-error,
+.status-error-message,
+.sub-text-warning {
+  color: #dc2626;
 }
 
-.record-status-muted {
-  @apply bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300;
+.tag-provider-sky,
+.tag-provider-cyan,
+.tag-provider-indigo {
+  background: #eff6ff;
+  color: #1d4ed8;
 }
 
-.tag-success {
-  @apply bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-800/60;
+.tag-provider-emerald,
+.tag-provider-teal {
+  background: #ecfdf5;
+  color: #047857;
 }
 
-.tag-muted {
-  @apply bg-gray-100 text-gray-600 ring-gray-200 dark:bg-dark-700 dark:text-gray-300 dark:ring-dark-600;
+.tag-provider-violet {
+  background: #f5f3ff;
+  color: #6d28d9;
 }
 
-.rate-compare {
-  @apply inline-flex items-center gap-2 rounded-md bg-slate-100 px-2 py-1 font-mono text-sm font-semibold ring-1 ring-slate-200 dark:bg-slate-900/60 dark:ring-slate-700;
+.tag-provider-rose {
+  background: #fef2f2;
+  color: #b91c1c;
 }
 
-.rate-compare-upstream {
-  @apply text-amber-700 dark:text-amber-300;
+.tag-provider-amber,
+.tag-warning {
+  background: #fff7ed;
+  color: #c2410c;
 }
 
-.rate-compare-local {
-  @apply text-emerald-700 dark:text-emerald-300;
+.account-id-tag {
+  margin-top: 6px;
+}
+
+.rate-cell {
+  display: grid;
+  justify-items: end;
+  gap: 7px;
+}
+
+.rate-value {
+  min-width: 62px;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.rate-bar {
+  display: block;
+  width: 76px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e5e7eb;
+}
+
+.rate-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: currentColor;
+}
+
+.rate-deep-green {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.rate-green {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.rate-orange {
+  background: #ffedd5;
+  color: #c2410c;
+}
+
+.rate-deep-orange {
+  background: #fed7aa;
+  color: #9a3412;
+}
+
+.rate-red {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.rate-muted {
+  background: #f1f5f9;
+  color: #64748b;
 }
 
 .tag-list {
-  @apply flex max-w-[18rem] flex-wrap gap-1.5;
+  display: flex;
+  max-width: none;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
-.group-chip {
-  @apply inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold ring-1;
+.group-list {
+  min-width: 16rem;
+  white-space: normal;
 }
 
 .group-chip-blue {
-  @apply bg-sky-50 text-sky-700 ring-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:ring-sky-800/60;
+  background: #eff6ff;
+  color: #1d4ed8;
 }
 
 .group-chip-emerald {
-  @apply bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-800/60;
+  background: #ecfdf5;
+  color: #047857;
 }
 
 .group-chip-violet {
-  @apply bg-violet-50 text-violet-700 ring-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:ring-violet-800/60;
+  background: #f5f3ff;
+  color: #6d28d9;
 }
 
-.group-chip-cyan {
-  @apply bg-cyan-50 text-cyan-700 ring-cyan-200 dark:bg-cyan-950/40 dark:text-cyan-300 dark:ring-cyan-800/60;
+.group-chip-warning,
+.log-chip-warning {
+  background: #fef2f2;
+  color: #b91c1c;
 }
 
-.group-chip-warning {
-  @apply bg-amber-50 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-900/20 dark:text-amber-200 dark:ring-amber-700/40;
+.dash {
+  color: #94a3b8;
+}
+
+.action-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.action-dash {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.text-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  padding: 4px 0;
+  color: #059669;
+  font-weight: 650;
+  transition: color 150ms ease;
+}
+
+.text-action:hover:not(:disabled) {
+  color: #047857;
+}
+
+.text-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.text-action-danger {
+  color: #dc2626;
+}
+
+.text-action-muted {
+  color: #64748b;
+}
+
+.records-panel {
+  overflow: hidden;
+}
+
+.records-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 16px 18px;
+}
+
+.records-header h3 {
+  margin: 0;
+  color: #111827;
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.records-header span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.records-info {
+  margin: 14px 18px 0;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 10px 12px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.records-table-wrap {
+  max-height: 20rem;
+  overflow: auto;
+}
+
+.records-table {
+  min-width: 1080px;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.records-table th {
+  border-bottom: 1px solid #e5e7eb;
+  background: #f8fafc;
+  padding: 10px 16px;
+  color: #64748b;
+  font-weight: 600;
+  text-align: left;
+}
+
+.records-table td {
+  border-bottom: 1px solid #eef2f7;
+  padding: 12px 16px;
+  color: #334155;
+  vertical-align: top;
+}
+
+.records-table tbody tr {
+  transition: background 150ms ease;
+}
+
+.records-table tbody tr:hover {
+  background: #f8fafc;
 }
 
 .trigger-sync {
-  @apply bg-primary-50 text-primary-700 ring-primary-200 dark:bg-primary-950/40 dark:text-primary-300 dark:ring-primary-800/60;
+  background: #ecfdf5;
+  color: #047857;
 }
 
 .trigger-scheduled {
-  @apply bg-violet-50 text-violet-700 ring-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:ring-violet-800/60;
+  background: #f5f3ff;
+  color: #6d28d9;
 }
 
 .trigger-guard {
-  @apply bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-800/60;
+  background: #fff7ed;
+  color: #c2410c;
 }
 
 .log-chip {
-  @apply inline-flex items-center rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700 dark:bg-dark-700 dark:text-gray-200;
+  background: #f1f5f9;
+  color: #475569;
 }
 
-.log-chip-warning {
-  @apply bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-200;
+.rate-compare {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 6px;
+  background: #f1f5f9;
+  padding: 4px 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.rate-compare-upstream {
+  color: #c2410c;
+}
+
+.rate-compare-local {
+  color: #047857;
+}
+
+.records-empty {
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  padding: 42px 16px 46px;
+  color: #64748b;
+  text-align: center;
+}
+
+.records-empty svg {
+  color: #cbd5e1;
 }
 
 @media (max-width: 1023px) {
-  .accounts-table-content {
-    @apply h-auto overflow-visible;
+  .accounts-topbar,
+  .rate-guard-panel,
+  .filter-row {
+    grid-template-columns: 1fr;
   }
 
-  .accounts-table-primary {
-    @apply h-auto min-h-0 overflow-visible;
+  .accounts-actions,
+  .guard-controls {
+    justify-content: flex-start;
+  }
+
+  .accounts-table-content {
+    height: auto;
+    overflow: visible;
+  }
+
+  .accounts-table-card {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+}
+
+@media (max-width: 768px) {
+  .stats-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .stats-strip {
+    grid-template-columns: 1fr;
   }
 }
 </style>

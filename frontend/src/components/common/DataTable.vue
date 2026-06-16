@@ -35,7 +35,10 @@
       <div
         v-for="(row, index) in sortedData"
         :key="resolveRowKey(row, index)"
-        class="rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900"
+        :class="[
+          'rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900',
+          resolveRowClass(row, index)
+        ]"
       >
         <div class="space-y-3">
           <div
@@ -55,6 +58,7 @@
           <div v-if="hasActionsColumn" class="border-t border-gray-200 pt-3 dark:border-dark-700">
             <slot name="cell-actions" :row="row" :value="row['actions']" :expanded="actionsExpanded"></slot>
           </div>
+          <slot v-if="isRowDetailVisible(row, index)" name="row-detail" :row="row" :colspan="columns.length" />
         </div>
       </div>
     </template>
@@ -156,34 +160,50 @@
                 :style="{ height: virtualPaddingTop + 'px', padding: 0, border: 'none' }">
             </td>
           </tr>
-          <tr
+          <template
             v-for="virtualRow in virtualItems"
             :key="resolveRowKey(sortedData[virtualRow.index], virtualRow.index)"
-            :data-row-id="resolveRowKey(sortedData[virtualRow.index], virtualRow.index)"
-            :data-index="virtualRow.index"
-            :ref="measureElement"
-            class="hover:bg-gray-50 dark:hover:bg-dark-800"
           >
-            <td
-              v-for="(column, colIndex) in columns"
-              :key="column.key"
+            <tr
+              :data-row-id="resolveRowKey(sortedData[virtualRow.index], virtualRow.index)"
+              :data-index="virtualRow.index"
+              :ref="measureElement"
               :class="[
-                'whitespace-nowrap py-4 text-sm text-gray-900 dark:text-gray-100',
-                getAdaptivePaddingClass(),
-                getStickyColumnClass(column, colIndex),
-                column.class
+                'data-table-row hover:bg-gray-50 dark:hover:bg-dark-800',
+                resolveRowClass(sortedData[virtualRow.index], virtualRow.index)
               ]"
             >
-              <slot :name="`cell-${column.key}`"
-                    :row="sortedData[virtualRow.index]"
-                    :value="sortedData[virtualRow.index][column.key]"
-                    :expanded="actionsExpanded">
-                {{ column.formatter
-                   ? column.formatter(sortedData[virtualRow.index][column.key], sortedData[virtualRow.index])
-                   : sortedData[virtualRow.index][column.key] }}
-              </slot>
-            </td>
-          </tr>
+              <td
+                v-for="(column, colIndex) in columns"
+                :key="column.key"
+                :class="[
+                  'whitespace-nowrap py-4 text-sm text-gray-900 dark:text-gray-100',
+                  getAdaptivePaddingClass(),
+                  getStickyColumnClass(column, colIndex),
+                  column.class
+                ]"
+              >
+                <slot :name="`cell-${column.key}`"
+                      :row="sortedData[virtualRow.index]"
+                      :value="sortedData[virtualRow.index][column.key]"
+                      :expanded="actionsExpanded">
+                  {{ column.formatter
+                     ? column.formatter(sortedData[virtualRow.index][column.key], sortedData[virtualRow.index])
+                     : sortedData[virtualRow.index][column.key] }}
+                </slot>
+              </td>
+            </tr>
+            <tr v-if="isRowDetailVisible(sortedData[virtualRow.index], virtualRow.index)" class="data-table-detail-row">
+              <td :colspan="columns.length" class="p-0">
+                <slot
+                  name="row-detail"
+                  :row="sortedData[virtualRow.index]"
+                  :colspan="columns.length"
+                  :index="virtualRow.index"
+                />
+              </td>
+            </tr>
+          </template>
           <tr v-if="virtualPaddingBottom > 0" aria-hidden="true">
             <td :colspan="columns.length"
                 :style="{ height: virtualPaddingBottom + 'px', padding: 0, border: 'none' }">
@@ -196,13 +216,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch, nextTick, useSlots } from 'vue'
 import { useVirtualizer, observeElementRect as observeElementRectDefault } from '@tanstack/vue-virtual'
 import { useI18n } from 'vue-i18n'
 import type { Column } from './types'
 import Icon from '@/components/icons/Icon.vue'
 
 const { t } = useI18n()
+const slots = useSlots()
 
 const desktopViewportQuery = '(min-width: 768px)'
 const isDesktopViewport = ref(
@@ -363,6 +384,8 @@ interface Props {
   expandableActions?: boolean
   actionsCount?: number // 操作按钮总数，用于判断是否需要展开功能
   rowKey?: string | ((row: any) => string | number)
+  rowClass?: string | ((row: any, index: number) => string | string[] | Record<string, boolean> | undefined)
+  isRowDetailVisible?: (row: any, index: number) => boolean
   /**
    * Default sort configuration (only applied when there is no persisted sort state)
    */
@@ -521,6 +544,17 @@ const resolveRowKey = (row: any, index: number) => {
   }
   const key = row?.id
   return key ?? index
+}
+
+const resolveRowClass = (row: any, index: number) => {
+  if (typeof props.rowClass === 'function') {
+    return props.rowClass(row, index)
+  }
+  return props.rowClass
+}
+
+const isRowDetailVisible = (row: any, index: number) => {
+  return Boolean(slots['row-detail'] && (!props.isRowDetailVisible || props.isRowDetailVisible(row, index)))
 }
 
 const dataColumns = computed(() => props.columns.filter((column) => column.key !== 'actions'))
