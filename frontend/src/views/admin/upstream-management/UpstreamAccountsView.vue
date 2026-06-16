@@ -238,16 +238,26 @@
               </template>
 
               <template #cell-actions="{ row }">
-                <button
-                  v-if="row.matched_account_id"
-                  type="button"
-                  class="btn btn-secondary btn-sm whitespace-nowrap"
-                  :disabled="savingAccountGroupId === row.matched_account_id"
-                  @click="openAccountGroupDialog(row)"
-                >
-                  <Icon name="cog" size="sm" class="mr-1" :class="savingAccountGroupId === row.matched_account_id ? 'animate-spin' : ''" />
-                  {{ t('admin.upstreamAccounts.editBoundGroups') }}
-                </button>
+                <div v-if="row.matched_account_id" class="flex items-center gap-2">
+                  <button
+                    type="button"
+                    class="btn btn-secondary btn-sm whitespace-nowrap"
+                    :disabled="savingAccountGroupId === row.matched_account_id || testingAccountId === row.matched_account_id"
+                    @click="openAccountGroupDialog(row)"
+                  >
+                    <Icon name="cog" size="sm" class="mr-1" :class="savingAccountGroupId === row.matched_account_id ? 'animate-spin' : ''" />
+                    {{ t('admin.upstreamAccounts.editBoundGroups') }}
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-secondary btn-sm whitespace-nowrap"
+                    :disabled="testingAccountId === row.matched_account_id || savingAccountGroupId === row.matched_account_id"
+                    @click="openAccountTestDialog(row)"
+                  >
+                    <Icon name="play" size="sm" class="mr-1" :class="testingAccountId === row.matched_account_id ? 'animate-spin' : ''" />
+                    {{ t('admin.upstreamAccounts.testConnection') }}
+                  </button>
+                </div>
                 <span v-else class="table-tag tag-missing">-</span>
               </template>
 
@@ -373,6 +383,8 @@
             </div>
           </div>
         </div>
+
+        <AccountTestModal :show="showTestModal" :account="testingAccount" @close="closeTestModal" />
       </template>
     </TablePageLayout>
   </AppLayout>
@@ -391,7 +403,7 @@ import type {
   UpstreamAccountSyncResult,
   UpstreamAccountSyncUnbindDetail,
 } from '@/api/admin/upstreamAccountSync'
-import type { AdminGroup } from '@/types'
+import type { Account, AdminGroup } from '@/types'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime } from '@/utils/format'
@@ -403,6 +415,7 @@ import DataTable from '@/components/common/DataTable.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Icon from '@/components/icons/Icon.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
+import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -414,6 +427,9 @@ const loadingRateGuardConfig = ref(false)
 const savingRateGuardConfig = ref(false)
 const runningRateGuardNow = ref(false)
 const savingAccountGroupId = ref<number | null>(null)
+const testingAccountId = ref<number | null>(null)
+const showTestModal = ref(false)
+const testingAccount = ref<Account | null>(null)
 const localGroups = ref<AdminGroup[]>([])
 const loadError = ref('')
 const searchQuery = ref('')
@@ -720,6 +736,24 @@ async function saveAccountGroups() {
 async function clearAccountGroups() {
   accountGroupIds.value = []
   await saveAccountGroups()
+}
+
+async function openAccountTestDialog(row: UpstreamAccountSyncItem) {
+  if (!row.matched_account_id) return
+  testingAccountId.value = row.matched_account_id
+  try {
+    testingAccount.value = await adminAPI.accounts.getById(row.matched_account_id)
+    showTestModal.value = true
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.testConnectionFailed')))
+  } finally {
+    testingAccountId.value = null
+  }
+}
+
+function closeTestModal() {
+  showTestModal.value = false
+  testingAccount.value = null
 }
 
 function groupNameById(groupID: number) {

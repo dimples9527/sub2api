@@ -15,6 +15,7 @@ const { upstreamAccountSyncMock, accountsMock, groupsMock, appStoreMock } = vi.h
     runBalanceSampleNow: vi.fn(),
   },
   accountsMock: {
+    getById: vi.fn(),
     update: vi.fn(),
   },
   groupsMock: {
@@ -128,6 +129,17 @@ describe('UpstreamAccountsView', () => {
       { id: 8, name: 'Trial', platform: 'openai', rate_multiplier: 0.5, status: 'active' },
       { id: 9, name: 'Claude', platform: 'anthropic', rate_multiplier: 1, status: 'active' },
     ])
+    accountsMock.getById.mockResolvedValue({
+      id: 12,
+      name: 'local-a',
+      platform: 'openai',
+      type: 'apikey',
+      status: 'active',
+      group_ids: [7],
+      groups: [
+        { id: 7, name: 'VIP', description: null, platform: 'openai', rate_multiplier: 2, is_exclusive: false, status: 'active', subscription_type: 'standard', daily_limit_usd: null, weekly_limit_usd: null, monthly_limit_usd: null, allow_image_generation: false, image_rate_independent: false, image_rate_multiplier: 1, image_price_1k: null, image_price_2k: null, image_price_4k: null, fallback_group_id: null, fallback_group_id_on_invalid_request: null, require_oauth_only: false, require_privacy_set: false, created_at: '2026-06-15T00:00:00Z', updated_at: '2026-06-15T00:00:00Z' },
+      ],
+    })
     accountsMock.update.mockResolvedValue({})
   })
 
@@ -198,6 +210,7 @@ describe('UpstreamAccountsView', () => {
           EmptyState: true,
           Icon: true,
           Select: true,
+          AccountTestModal: true,
         },
       },
     })
@@ -369,5 +382,76 @@ describe('UpstreamAccountsView', () => {
     await flushPromises()
 
     expect(accountsMock.update).toHaveBeenCalledWith(12, { group_ids: [7, 8] })
+  })
+
+  it('opens the account test modal from the action column', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValue({
+      default_provider: {},
+      providers: [],
+      summary: {
+        upstream_key_count: 1,
+        matched_account_count: 1,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'noop',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-a',
+          local_account_name: 'local-a',
+          matched_account_id: 12,
+          matched_account_name: 'local-a',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 2,
+          rate_violation: false,
+          bound_groups: [
+            { id: 7, name: 'VIP', rate_multiplier: 2, rate_violation: false },
+          ],
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any) => h('div', [
+                slots['cell-actions']?.({ row }),
+              ])))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+          AccountTestModal: {
+            props: ['show'],
+            emits: ['close'],
+            template: '<div v-if="show" class="account-test-modal"><slot /></div>',
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const testButton = wrapper.findAll('button').find(button => button.text().includes('admin.upstreamAccounts.testConnection'))
+    expect(testButton).toBeTruthy()
+    await testButton!.trigger('click')
+    await flushPromises()
+
+    expect(accountsMock.getById).toHaveBeenCalledWith(12)
+    expect(wrapper.find('.account-test-modal').exists()).toBe(true)
   })
 })
