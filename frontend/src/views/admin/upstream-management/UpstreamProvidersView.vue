@@ -1625,7 +1625,7 @@ onMounted(reload)
 }
 
 .action-button-group {
-  @apply flex min-w-[18rem] flex-wrap items-center justify-end gap-1.5;
+  @apply flex min-w-[18rem] flex-wrap items-center justify-center gap-1.5;
 }
 
 .action-danger {
@@ -1669,7 +1669,7 @@ onMounted(reload)
 }
 
 .provider-name-card {
-  @apply min-w-[14rem] max-w-[18rem] space-y-2;
+  @apply mx-auto min-w-[14rem] max-w-[18rem] space-y-2 text-left;
 }
 
 .provider-title-line {
@@ -1764,12 +1764,12 @@ onMounted(reload)
 }
 
 .numeric-cell {
-  @apply flex min-w-[7.5rem] items-center justify-end gap-2;
+  @apply flex min-w-[7.5rem] items-center justify-center gap-2;
 }
 
 .numeric-value,
 .numeric-muted {
-  @apply block min-w-[6.5rem] text-right font-mono text-sm font-semibold tabular-nums text-gray-950 dark:text-gray-100;
+  @apply block min-w-[6.5rem] text-center font-mono text-sm font-semibold tabular-nums text-gray-950 dark:text-gray-100;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1778,11 +1778,11 @@ onMounted(reload)
 }
 
 .numeric-balance {
-  @apply text-orange-600 dark:text-orange-300;
+  @apply text-lg font-bold text-orange-600 dark:text-orange-300;
 }
 
 .numeric-cost {
-  @apply text-emerald-600 dark:text-emerald-300;
+  @apply text-lg font-bold text-emerald-600 dark:text-emerald-300;
 }
 
 .numeric-alert {
@@ -1798,7 +1798,7 @@ onMounted(reload)
 }
 
 .interface-switcher {
-  @apply min-w-[15rem] max-w-[16rem] space-y-2;
+  @apply mx-auto min-w-[15rem] max-w-[16rem] space-y-2 text-left;
 }
 
 .interface-tabs {
@@ -1835,7 +1835,7 @@ onMounted(reload)
 }
 
 .provider-detail-panel {
-  @apply grid min-h-[6.25rem] gap-8 border-t border-gray-100 bg-gray-50 px-5 py-4 md:grid-cols-[18rem_18rem_minmax(22rem,1fr)] dark:border-dark-700 dark:bg-dark-800/70;
+  @apply grid min-h-[6.25rem] gap-8 border-t border-gray-100 bg-gray-50 py-4 pl-24 pr-6 md:grid-cols-[18rem_18rem_minmax(22rem,1fr)] dark:border-dark-700 dark:bg-dark-800/70;
 }
 
 .detail-column {
@@ -1920,22 +1920,11 @@ onMounted(reload)
 :deep(th.upstream-numeric-column),
 :deep(td.upstream-numeric-column) {
   min-width: 8.25rem;
-  text-align: right;
-}
-
-:deep(th.upstream-numeric-column > div),
-:deep(th.upstream-actions-column > div) {
-  justify-content: flex-end;
 }
 
 :deep(th.upstream-temp-column),
 :deep(td.upstream-temp-column) {
   min-width: 7.25rem;
-  text-align: center;
-}
-
-:deep(th.upstream-temp-column > div) {
-  justify-content: center;
 }
 
 :deep(.upstream-interface-column) {
@@ -1945,7 +1934,18 @@ onMounted(reload)
 :deep(th.upstream-actions-column),
 :deep(td.upstream-actions-column) {
   min-width: 18rem;
-  text-align: right;
+}
+
+:deep(.table-wrapper tbody td) {
+  text-align: center;
+}
+
+:deep(.table-wrapper thead th) {
+  text-align: center;
+}
+
+:deep(.table-wrapper thead th > div) {
+  justify-content: center;
 }
 
 :deep(.table-wrapper) {
