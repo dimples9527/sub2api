@@ -372,7 +372,7 @@
               <GroupSelector
                 v-model="accountGroupIds"
                 :groups="accountGroupOptions"
-                platform="openai"
+                :platform="accountGroupPlatform"
                 searchable
               />
               <div v-if="accountGroupIds.length" class="tag-list">
@@ -417,7 +417,7 @@ import type {
   UpstreamAccountSyncResult,
   UpstreamAccountSyncUnbindDetail,
 } from '@/api/admin/upstreamAccountSync'
-import type { Account, AdminGroup } from '@/types'
+import type { Account, AdminGroup, GroupPlatform } from '@/types'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime } from '@/utils/format'
@@ -456,6 +456,7 @@ const rateGuardForm = ref({
 })
 const accountGroupDialogItem = ref<UpstreamAccountSyncItem | null>(null)
 const accountGroupIds = ref<number[]>([])
+const accountGroupPlatform = ref<GroupPlatform | undefined>()
 
 type UpstreamAccountSyncLogEntry = UpstreamAccountSyncUnbindDetail & {
   created_at: string
@@ -598,9 +599,9 @@ const filteredItems = computed(() => {
   })
 })
 const accountGroupOptions = computed(() => {
-  const row = accountGroupDialogItem.value
-  if (!row) return []
-  return localGroups.value.filter(group => group.platform === 'openai' && group.status === 'active')
+  if (!accountGroupDialogItem.value) return []
+  const platform = accountGroupPlatform.value
+  return localGroups.value.filter(group => (!platform || group.platform === platform) && group.status === 'active')
 })
 
 const emptyTitle = computed(() => {
@@ -769,17 +770,28 @@ function groupChipClass(group: UpstreamAccountSyncBoundGroup, index: number) {
   return tones[index % tones.length]
 }
 
-function openAccountGroupDialog(row: UpstreamAccountSyncItem) {
+async function openAccountGroupDialog(row: UpstreamAccountSyncItem) {
   accountGroupDialogItem.value = row
   accountGroupIds.value = (row.bound_groups || [])
     .map((group: UpstreamAccountSyncBoundGroup) => Number(group.id))
     .filter((id) => Number.isFinite(id))
+  accountGroupPlatform.value = inferAccountGroupPlatform(row)
+
+  if (row.matched_account_id) {
+    try {
+      const account = await adminAPI.accounts.getById(row.matched_account_id)
+      accountGroupPlatform.value = account.platform
+    } catch (err) {
+      appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.loadAccountFailed')))
+    }
+  }
 }
 
 function closeAccountGroupDialog() {
   if (savingAccountGroupId.value) return
   accountGroupDialogItem.value = null
   accountGroupIds.value = []
+  accountGroupPlatform.value = undefined
 }
 
 async function saveAccountGroups() {
@@ -790,6 +802,7 @@ async function saveAccountGroups() {
     await adminAPI.accounts.update(row.matched_account_id, { group_ids: accountGroupIds.value })
     accountGroupDialogItem.value = null
     accountGroupIds.value = []
+    accountGroupPlatform.value = undefined
     await reload()
     appStore.showSuccess(t('admin.upstreamAccounts.boundGroupsSaved'))
   } catch (err) {
@@ -825,6 +838,20 @@ function closeTestModal() {
 function groupNameById(groupID: number) {
   const group = localGroups.value.find(item => item.id === groupID)
   return group ? `${group.name} ${formatRate(group.rate_multiplier)}` : `#${groupID}`
+}
+
+function inferAccountGroupPlatform(row: UpstreamAccountSyncItem): GroupPlatform | undefined {
+  const groupIDs = [
+    row.local_group_id,
+    ...(row.bound_groups || []).map((group) => group.id)
+  ]
+    .map((id) => Number(id))
+    .filter((id) => Number.isFinite(id))
+  for (const groupID of groupIDs) {
+    const group = localGroups.value.find(item => item.id === groupID)
+    if (group?.platform) return group.platform
+  }
+  return undefined
 }
 
 function rateToneClass(value: number | undefined) {

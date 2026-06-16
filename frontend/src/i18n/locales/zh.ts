@@ -1841,6 +1841,7 @@ export default {
       clearBoundGroups: '清空绑定',
       boundGroupsSaved: '账号绑定分组已保存',
       boundGroupsSaveFailed: '保存账号绑定分组失败',
+      loadAccountFailed: '加载本地账号失败',
       triggerManualSync: '手动同步',
       triggerScheduledRateGuard: '定时守护',
       triggerManualRateGuard: '手动守护',

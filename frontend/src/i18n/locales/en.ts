@@ -1820,6 +1820,7 @@ export default {
       clearBoundGroups: 'Clear bindings',
       boundGroupsSaved: 'Account group bindings saved',
       boundGroupsSaveFailed: 'Failed to save account group bindings',
+      loadAccountFailed: 'Failed to load local account',
       triggerManualSync: 'Manual sync',
       triggerScheduledRateGuard: 'Scheduled guard',
       triggerManualRateGuard: 'Manual guard',

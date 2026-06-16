@@ -384,6 +384,94 @@ describe('UpstreamAccountsView', () => {
     expect(accountsMock.update).toHaveBeenCalledWith(12, { group_ids: [7, 8] })
   })
 
+  it('shows anthropic groups in the edit bindings dialog for anthropic accounts', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValue({
+      default_provider: {},
+      providers: [],
+      summary: {
+        upstream_key_count: 1,
+        matched_account_count: 1,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'noop',
+          provider_slug: 'anthropic-upstream',
+          provider_name: 'Anthropic Upstream',
+          upstream_key_name: 'claude-key',
+          local_account_name: 'local-claude',
+          matched_account_id: 12,
+          matched_account_name: 'local-claude',
+          upstream_group_name: 'claude',
+          upstream_rate_multiplier: 1,
+          rate_violation: false,
+          bound_groups: [
+            { id: 9, name: 'Claude', rate_multiplier: 1, rate_violation: false },
+          ],
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+    accountsMock.getById.mockResolvedValueOnce({
+      id: 12,
+      name: 'local-claude',
+      platform: 'anthropic',
+      type: 'apikey',
+      status: 'active',
+      group_ids: [9],
+      groups: [
+        { id: 9, name: 'Claude', description: null, platform: 'anthropic', rate_multiplier: 1, is_exclusive: false, status: 'active', subscription_type: 'standard', daily_limit_usd: null, weekly_limit_usd: null, monthly_limit_usd: null, allow_image_generation: false, image_rate_independent: false, image_rate_multiplier: 1, image_price_1k: null, image_price_2k: null, image_price_4k: null, fallback_group_id: null, fallback_group_id_on_invalid_request: null, require_oauth_only: false, require_privacy_set: false, created_at: '2026-06-15T00:00:00Z', updated_at: '2026-06-15T00:00:00Z' },
+      ],
+    })
+    groupsMock.getAllIncludingInactive.mockResolvedValueOnce([
+      { id: 7, name: 'VIP', platform: 'openai', rate_multiplier: 2, status: 'active' },
+      { id: 8, name: 'Trial', platform: 'openai', rate_multiplier: 0.5, status: 'active' },
+      { id: 9, name: 'Claude', platform: 'anthropic', rate_multiplier: 1, status: 'active' },
+    ])
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            template: '<div><div v-for="row in data" :key="row.upstream_key_name"><slot name="cell-actions" :row="row" /></div></div>',
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+          GroupSelector: {
+            props: ['platform', 'groups', 'modelValue'],
+            setup(props) {
+              return () => h('div', { class: 'group-selector', 'data-platform': props.platform }, props.groups.map((group: any) => group.name).join(','))
+            },
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const editButton = wrapper.findAll('button').find(button => button.text().includes('admin.upstreamAccounts.editBoundGroups'))
+    expect(editButton).toBeTruthy()
+    await editButton!.trigger('click')
+    await flushPromises()
+
+    const selector = wrapper.find('.group-selector')
+    expect(selector.exists()).toBe(true)
+    expect(selector.attributes('data-platform')).toBe('anthropic')
+    expect(selector.text()).toContain('Claude')
+    expect(selector.text()).not.toContain('VIP')
+    expect(selector.text()).not.toContain('Trial')
+  })
+
   it('opens the account test modal from the action column', async () => {
     upstreamAccountSyncMock.getPreview.mockResolvedValue({
       default_provider: {},
