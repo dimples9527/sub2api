@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { h } from 'vue'
+import { h, onMounted } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import UpstreamAccountsView from './UpstreamAccountsView.vue'
@@ -349,6 +349,7 @@ describe('UpstreamAccountsView', () => {
             props: ['data'],
             setup(props, { slots }) {
               return () => h('div', props.data.map((row: any) => h('div', [
+                slots['cell-test_status']?.({ row }),
                 slots['cell-actions']?.({ row }),
               ])))
             },
@@ -516,6 +517,7 @@ describe('UpstreamAccountsView', () => {
             props: ['data'],
             setup(props, { slots }) {
               return () => h('div', props.data.map((row: any) => h('div', [
+                slots['cell-test_status']?.({ row }),
                 slots['cell-actions']?.({ row }),
               ])))
             },
@@ -541,5 +543,76 @@ describe('UpstreamAccountsView', () => {
 
     expect(accountsMock.getById).toHaveBeenCalledWith(12)
     expect(wrapper.find('.account-test-modal').exists()).toBe(true)
+  })
+
+  it('shows account test status in the action column after test completion', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValue({
+      default_provider: {},
+      providers: [],
+      summary: {
+        upstream_key_count: 1,
+        matched_account_count: 1,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'noop',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-a',
+          local_account_name: 'local-a',
+          matched_account_id: 12,
+          matched_account_name: 'local-a',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 2,
+          rate_violation: false,
+          bound_groups: [
+            { id: 7, name: 'VIP', rate_multiplier: 2, rate_violation: false },
+          ],
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any) => h('div', [
+                slots['cell-test_status']?.({ row }),
+                slots['cell-actions']?.({ row }),
+              ])))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+          AccountTestModal: {
+            props: ['show'],
+            emits: ['close', 'test-result'],
+            setup(_, { emit }) {
+              onMounted(() => {
+                emit('test-result', { accountId: 12, status: 'success' })
+              })
+              return () => h('div', { class: 'account-test-modal' })
+            },
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('admin.upstreamAccounts.testStatusSuccess')
   })
 })

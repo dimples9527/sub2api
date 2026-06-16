@@ -1814,6 +1814,9 @@ export default {
       logRemainingGroups: 'Remaining groups',
       editBoundGroups: 'Edit bindings',
       testConnection: 'Test Connection',
+      testStatusTesting: 'Testing',
+      testStatusSuccess: 'Success',
+      testStatusFailed: 'Failed',
       editBoundGroupsTitle: 'Edit account group bindings',
       editBoundGroupsDescription: 'Add or remove local groups bound to this account.',
       boundGroupsHint: 'Hold Ctrl or Cmd to select multiple groups.',
@@ -1837,6 +1840,7 @@ export default {
         localAccount: 'Local account',
         localGroup: 'Local group',
         boundGroups: 'Bound groups',
+        testStatus: 'Test status',
         action: 'Action'
       },
       actions: {

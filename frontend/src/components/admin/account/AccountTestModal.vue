@@ -261,6 +261,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'close'): void
+  (e: 'test-result', payload: { accountId: number; status: 'testing' | 'success' | 'failed' }): void
 }>()
 
 const terminalRef = ref<HTMLElement | null>(null)
@@ -361,6 +362,14 @@ const resetState = () => {
   previewImageUrl.value = ''
 }
 
+const emitTestResult = (nextStatus: 'testing' | 'success' | 'failed') => {
+  if (!props.account) return
+  emit('test-result', {
+    accountId: props.account.id,
+    status: nextStatus
+  })
+}
+
 const handleClose = () => {
   abortStream()
   emit('close')
@@ -390,6 +399,7 @@ const startTest = async () => {
 
   resetState()
   status.value = 'connecting'
+  emitTestResult('testing')
   addLine(t('admin.accounts.startingTestForAccount', { name: props.account.name }), 'text-blue-400')
   addLine(t('admin.accounts.testAccountTypeLabel', { type: props.account.type }), 'text-gray-400')
   addLine('', 'text-gray-300')
@@ -512,15 +522,18 @@ const handleEvent = (event: {
       }
       if (event.success) {
         status.value = 'success'
+        emitTestResult('success')
       } else {
         status.value = 'error'
         errorMessage.value = event.error || 'Test failed'
+        emitTestResult('failed')
       }
       break
 
     case 'error':
       status.value = 'error'
       errorMessage.value = event.error || 'Unknown error'
+      emitTestResult('failed')
       if (streamingContent.value) {
         addLine(streamingContent.value, 'text-green-300')
         streamingContent.value = ''

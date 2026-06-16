@@ -249,6 +249,30 @@
                 </div>
               </template>
 
+              <template #cell-test_status="{ row }">
+                <div class="test-status-cell">
+                  <span
+                    v-if="accountTestStatusById[row.matched_account_id || 0]"
+                    :class="[
+                      'test-status-pill',
+                      `test-status-${accountTestStatusById[row.matched_account_id || 0]}`
+                    ]"
+                  >
+                    <Icon
+                      :name="accountTestStatusById[row.matched_account_id || 0] === 'success'
+                        ? 'checkCircle'
+                        : accountTestStatusById[row.matched_account_id || 0] === 'failed'
+                          ? 'xCircle'
+                          : 'clock'"
+                      size="sm"
+                      :stroke-width="2"
+                    />
+                    {{ accountTestStatusLabel(accountTestStatusById[row.matched_account_id || 0]) }}
+                  </span>
+                  <span v-else class="dash">-</span>
+                </div>
+              </template>
+
               <template #cell-actions="{ row }">
                 <div v-if="row.matched_account_id" class="action-cell">
                   <button
@@ -398,7 +422,12 @@
           </div>
         </div>
 
-        <AccountTestModal :show="showTestModal" :account="testingAccount" @close="closeTestModal" />
+        <AccountTestModal
+          :show="showTestModal"
+          :account="testingAccount"
+          @close="closeTestModal"
+          @test-result="handleAccountTestResult"
+        />
       </template>
     </TablePageLayout>
   </AppLayout>
@@ -444,6 +473,7 @@ const savingAccountGroupId = ref<number | null>(null)
 const testingAccountId = ref<number | null>(null)
 const showTestModal = ref(false)
 const testingAccount = ref<Account | null>(null)
+const accountTestStatusById = ref<Record<number, 'testing' | 'success' | 'failed'>>({})
 const localGroups = ref<AdminGroup[]>([])
 const loadError = ref('')
 const searchQuery = ref('')
@@ -469,6 +499,7 @@ const columns = computed<Column[]>(() => [
   { key: 'local_account_name', label: t('admin.upstreamAccounts.columns.localAccount') },
   { key: 'upstream_rate_multiplier', label: t('admin.upstreamAccounts.columns.upstreamRate') },
   { key: 'local_group_name', label: t('admin.upstreamAccounts.columns.boundGroups') },
+  { key: 'test_status', label: t('admin.upstreamAccounts.columns.testStatus') },
   { key: 'actions', label: t('common.actions') }
 ])
 
@@ -733,6 +764,13 @@ function accountRowClass(row: UpstreamAccountSyncItem) {
   return ''
 }
 
+function accountTestStatusLabel(status: 'testing' | 'success' | 'failed' | undefined) {
+  if (status === 'testing') return t('admin.upstreamAccounts.testStatusTesting')
+  if (status === 'failed') return t('admin.upstreamAccounts.testStatusFailed')
+  if (status === 'success') return t('admin.upstreamAccounts.testStatusSuccess')
+  return '-'
+}
+
 function sourceToneClass(row: UpstreamAccountSyncItem) {
   if (row.rate_violation) return 'source-line-red'
   const slug = (row.provider_slug || row.provider_name || '').toLowerCase()
@@ -833,6 +871,13 @@ async function openAccountTestDialog(row: UpstreamAccountSyncItem) {
 function closeTestModal() {
   showTestModal.value = false
   testingAccount.value = null
+}
+
+function handleAccountTestResult(payload: { accountId: number; status: 'testing' | 'success' | 'failed' }) {
+  accountTestStatusById.value = {
+    ...accountTestStatusById.value,
+    [payload.accountId]: payload.status
+  }
 }
 
 function groupNameById(groupID: number) {
@@ -1303,7 +1348,7 @@ onMounted(reload)
   min-height: 0;
   flex-direction: column;
   gap: 16px;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .warning-banner {
@@ -1318,13 +1363,17 @@ onMounted(reload)
 }
 
 .accounts-table-card {
-  flex: none;
+  display: flex;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
   height: clamp(28rem, 52vh, 42rem);
   min-height: 28rem;
 }
 
 .accounts-table-card :deep(.table-wrapper) {
+  display: flex;
+  flex: 1;
   min-height: 0;
 }
 
@@ -1348,12 +1397,12 @@ onMounted(reload)
 }
 
 .accounts-table-card :deep(th:nth-child(4)),
-.accounts-table-card :deep(th:nth-child(6)) {
+.accounts-table-card :deep(th:nth-child(7)) {
   text-align: right;
 }
 
 .accounts-table-card :deep(th:nth-child(4) > div),
-.accounts-table-card :deep(th:nth-child(6) > div) {
+.accounts-table-card :deep(th:nth-child(7) > div) {
   justify-content: flex-end;
 }
 
@@ -1636,6 +1685,38 @@ onMounted(reload)
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.test-status-cell {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+}
+
+.test-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.test-status-testing {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.test-status-success {
+  background: #ecfdf5;
+  color: #059669;
+}
+
+.test-status-failed {
+  background: #fef2f2;
+  color: #dc2626;
 }
 
 .action-dash {

@@ -1835,6 +1835,9 @@ export default {
       logRemainingGroups: '剩余分组',
       editBoundGroups: '编辑绑定',
       testConnection: '测试连接',
+      testStatusTesting: '测试中',
+      testStatusSuccess: '测试成功',
+      testStatusFailed: '测试失败',
       editBoundGroupsTitle: '编辑账号绑定分组',
       editBoundGroupsDescription: '添加或移除该账号绑定的本地分组。',
       boundGroupsHint: '按住 Ctrl 或 Cmd 可选择多个分组。',
@@ -1858,6 +1861,7 @@ export default {
         localAccount: '本地账号',
         localGroup: '本地分组',
         boundGroups: '账号绑定分组',
+        testStatus: '测试状态',
         action: '动作'
       },
       actions: {
