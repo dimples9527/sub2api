@@ -94,7 +94,7 @@
           :data="filteredProviders"
           :loading="loading"
           row-key="slug"
-          :is-row-detail-visible="isExpanded"
+          :is-row-detail-visible="isProviderDetailVisible"
           :estimate-row-height="92"
         >
           <template #cell-homepage="{ row }">
@@ -1354,6 +1354,10 @@ function isExpanded(providerSlug: string | undefined) {
   return Boolean(providerSlug && expandedProviderSlugs.value.has(providerSlug))
 }
 
+function isProviderDetailVisible(row: UpstreamProviderConfig | undefined) {
+  return isExpanded(row?.slug)
+}
+
 function toggleExpanded(providerSlug: string | undefined) {
   if (!providerSlug) return
   const next = new Set(expandedProviderSlugs.value)
@@ -1913,30 +1917,42 @@ onMounted(reload)
   min-width: 8.5rem;
 }
 
-:deep(.upstream-numeric-column) {
+:deep(th.upstream-numeric-column),
+:deep(td.upstream-numeric-column) {
   min-width: 8.25rem;
   text-align: right;
 }
 
-:deep(.upstream-temp-column) {
+:deep(th.upstream-numeric-column > div),
+:deep(th.upstream-actions-column > div) {
+  justify-content: flex-end;
+}
+
+:deep(th.upstream-temp-column),
+:deep(td.upstream-temp-column) {
   min-width: 7.25rem;
   text-align: center;
+}
+
+:deep(th.upstream-temp-column > div) {
+  justify-content: center;
 }
 
 :deep(.upstream-interface-column) {
   min-width: 14.75rem;
 }
 
-:deep(.upstream-actions-column) {
+:deep(th.upstream-actions-column),
+:deep(td.upstream-actions-column) {
   min-width: 18rem;
   text-align: right;
 }
 
-:deep(.table-scroll-container) {
+:deep(.table-wrapper) {
   border-radius: 0.5rem;
 }
 
-:deep(.table-scroll-container th) {
+:deep(.table-wrapper th) {
   height: 2.5rem;
   padding-top: 0;
   padding-bottom: 0;
@@ -1948,14 +1964,15 @@ onMounted(reload)
   letter-spacing: 0;
 }
 
-:deep(.dark .table-scroll-container th) {
+:deep(.dark .table-wrapper th) {
   background-color: rgb(31 41 55);
 }
 
-:deep(.table-scroll-container td) {
+:deep(.table-wrapper td) {
   height: 6rem;
   padding-top: 0.875rem;
   padding-bottom: 0.875rem;
+  vertical-align: middle;
 }
 
 :deep(.data-table-detail-row td) {
