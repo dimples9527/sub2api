@@ -1679,8 +1679,12 @@ export default {
       newRate: 'New rate',
       changedAt: 'Changed at',
       changeRecords: 'Change records',
-      latestRecords: 'Latest 100 records',
+      latestRecords: 'Latest 10 records',
+      recordsSortNewest: 'Newest first',
+      recordsSortOldest: 'Oldest first',
       noRecords: 'No rate changes yet',
+      localRateLow: 'Local rate low',
+      needsAdjust: 'Needs increase',
       emptyTitle: 'No upstream groups found',
       emptyNoDefaultTitle: 'Default upstream not configured',
       emptyDescription: 'The default upstream provider has no group data from fetched keys.',
@@ -1697,7 +1701,7 @@ export default {
         matchResult: 'Match result',
         localGroup: 'Local group',
         localRate: 'Local rate',
-        rateDelta: 'Rate delta',
+        rateDelta: 'Profit',
         status: 'Status',
         action: 'Action'
       }

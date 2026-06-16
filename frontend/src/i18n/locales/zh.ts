@@ -1700,8 +1700,12 @@ export default {
       newRate: '新倍率',
       changedAt: '修改时间',
       changeRecords: '修改记录',
-      latestRecords: '最近 100 条记录',
+      latestRecords: '最近 10 条记录',
+      recordsSortNewest: '最新优先',
+      recordsSortOldest: '最早优先',
       noRecords: '暂无倍率修改记录',
+      localRateLow: '本地倍率偏低',
+      needsAdjust: '需上调',
       emptyTitle: '暂无上游分组',
       emptyNoDefaultTitle: '未配置默认上游',
       emptyDescription: '默认上游还没有从密钥数据中解析出分组信息。',
@@ -1718,7 +1722,7 @@ export default {
         matchResult: '匹配结果',
         localGroup: '本地分组',
         localRate: '本地倍率',
-        rateDelta: '倍率差值',
+        rateDelta: '收益倍率',
         status: '状态',
         action: '操作'
       }

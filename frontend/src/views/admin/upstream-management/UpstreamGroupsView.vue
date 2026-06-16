@@ -2,141 +2,148 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
-        <div class="groups-toolbar">
-          <div class="provider-panel">
-            <div class="min-w-0">
-              <div class="meta-label">{{ t('admin.upstreamGroups.defaultProvider') }}</div>
-              <div class="mt-0.5 flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
-                <span class="truncate">{{ result?.default_provider?.name || '-' }}</span>
-                <code v-if="result?.default_provider?.slug" class="text-xs font-normal text-gray-500 dark:text-gray-400">
-                  {{ result.default_provider.slug }}
-                </code>
-              </div>
-            </div>
-            <div class="provider-count">{{ result?.default_provider?.slug ? 1 : 0 }}</div>
-          </div>
-
-          <div class="stats-strip">
-            <div class="stat-tile">
-              <span>{{ t('admin.upstreamGroups.upstreamGroups') }}</span>
-              <strong>{{ summary.upstreamGroups }}</strong>
-            </div>
-            <div class="stat-tile stat-tile-success">
-              <span>{{ t('admin.upstreamGroups.matchedGroups') }}</span>
-              <strong>{{ summary.matchedGroups }}</strong>
-            </div>
-            <div class="stat-tile" :class="summary.rateRisks > 0 ? 'stat-tile-warning' : ''">
-              <span>{{ t('admin.upstreamGroups.rateRisks') }}</span>
-              <strong>{{ summary.rateRisks }}</strong>
-            </div>
-            <div class="stat-tile">
-              <span>{{ t('admin.upstreamGroups.filteredCount') }}</span>
-              <strong>{{ filteredItems.length }}</strong>
+        <div class="ug-stats-row">
+          <div class="ug-stat-card">
+            <span class="ug-stat-bar ug-stat-bar-primary"></span>
+            <div class="ug-stat-content">
+              <div class="ug-stat-label">{{ t('admin.upstreamGroups.upstreamGroups') }}</div>
+              <div class="ug-stat-value">{{ summary.upstreamGroups }}</div>
             </div>
           </div>
-
-          <div class="groups-actions">
-            <button
-              type="button"
-              class="btn btn-secondary"
-              :disabled="loading || applying"
-              :title="t('common.refresh')"
-              @click="reload"
-            >
-              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
-            </button>
-            <button
-              type="button"
-              class="btn btn-primary"
-              :disabled="loading || applying || summary.rateRisks === 0"
-              @click="applyRateFixes"
-            >
-              <Icon name="sync" size="sm" class="mr-2" :class="applying ? 'animate-spin' : ''" />
-              {{ t('admin.upstreamGroups.fixRates') }}
-            </button>
+          <div class="ug-stat-card">
+            <span class="ug-stat-bar ug-stat-bar-success"></span>
+            <div class="ug-stat-content">
+              <div class="ug-stat-label">{{ t('admin.upstreamGroups.matchedGroups') }}</div>
+              <div class="ug-stat-value">{{ summary.matchedGroups }}</div>
+            </div>
+          </div>
+          <div class="ug-stat-card">
+            <span class="ug-stat-bar ug-stat-bar-warning"></span>
+            <div class="ug-stat-content">
+              <div class="ug-stat-label">{{ t('admin.upstreamGroups.rateRisks') }}</div>
+              <div class="ug-stat-value">{{ summary.rateRisks }}</div>
+            </div>
+          </div>
+          <div class="ug-stat-card">
+            <span class="ug-stat-bar ug-stat-bar-info"></span>
+            <div class="ug-stat-content">
+              <div class="ug-stat-label">{{ t('admin.upstreamGroups.filteredCount') }}</div>
+              <div class="ug-stat-value">{{ filteredItems.length }}</div>
+            </div>
           </div>
         </div>
 
-        <div class="filter-row">
-          <div class="relative min-w-0">
-            <Icon
-              name="search"
-              size="md"
-              class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
-            />
-            <input
-              v-model.trim="searchQuery"
-              type="search"
-              class="input w-full pl-10"
-              :placeholder="t('admin.upstreamGroups.searchPlaceholder')"
-            />
+        <div class="ug-provider-strip">
+          <div class="ug-provider-meta">
+            <span class="ug-meta-label">{{ t('admin.upstreamGroups.defaultProvider') }}</span>
+            <span class="ug-provider-name">{{ result?.default_provider?.name || '-' }}</span>
+            <code v-if="result?.default_provider?.slug" class="ug-provider-slug">{{ result.default_provider.slug }}</code>
           </div>
-          <Select v-model="matchFilter" class="filter-select" :options="matchFilterOptions" />
-          <Select v-model="rateFilter" class="filter-select" :options="rateFilterOptions" />
+          <span class="ug-provider-count">{{ result?.default_provider?.slug ? 1 : 0 }}</span>
         </div>
 
-        <div class="rate-fix-panel">
-          <div class="min-w-0">
-            <div class="meta-label">{{ t('admin.upstreamGroups.autoFixEnabled') }}</div>
-            <div class="mt-1 text-sm text-gray-600 dark:text-gray-300">{{ t('admin.upstreamGroups.autoFixLastRun') }}: {{ autoFixLastRunText }}</div>
+        <div class="ug-filter-card">
+          <div class="ug-filter-top">
+            <div class="ug-search">
+              <Icon name="search" size="sm" class="ug-search-icon" />
+              <input
+                v-model.trim="searchQuery"
+                type="search"
+                class="ug-input ug-search-input"
+                :placeholder="t('admin.upstreamGroups.searchPlaceholder')"
+              />
+            </div>
+            <div class="ug-filter-right">
+              <Select v-model="matchFilter" class="ug-filter-select" :options="matchFilterOptions" />
+              <Select v-model="rateFilter" class="ug-filter-select" :options="rateFilterOptions" />
+              <button
+                type="button"
+                class="ug-btn ug-btn-default"
+                :disabled="loading || applying"
+                :title="t('common.refresh')"
+                @click="reload"
+              >
+                <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
+                <span>{{ t('common.refresh') }}</span>
+              </button>
+              <button
+                type="button"
+                class="ug-btn ug-btn-primary"
+                :disabled="loading || applying || summary.rateRisks === 0"
+                @click="applyRateFixes"
+              >
+                <Icon name="sync" size="sm" :class="applying ? 'animate-spin' : ''" />
+                <span>{{ t('admin.upstreamGroups.fixRates') }}</span>
+              </button>
+            </div>
           </div>
-          <label class="rate-fix-toggle">
-            <input
-              v-model="autoFixForm.enabled"
-              type="checkbox"
-              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-              :disabled="savingRateFixConfig || loadingRateFixConfig"
-            />
-            {{ t('admin.upstreamGroups.autoFixEnabled') }}
-          </label>
-          <label class="rate-fix-interval">
-            <span>{{ t('admin.upstreamGroups.autoFixIntervalSeconds') }}</span>
-            <input
-              id="auto-fix-interval-seconds"
-              v-model.number="autoFixForm.interval_seconds"
-              type="number"
-              min="1"
-              step="1"
-              class="input h-9 w-28"
-              :disabled="savingRateFixConfig || loadingRateFixConfig"
-            />
-          </label>
-          <button
-            type="button"
-            class="btn btn-secondary"
-            :disabled="savingRateFixConfig || loadingRateFixConfig"
-            @click="saveRateFixConfig"
-          >
-            {{ savingRateFixConfig ? t('common.saving') : t('common.save') }}
-          </button>
+          <div class="ug-auto-row">
+            <span class="ug-auto-meta">{{ t('admin.upstreamGroups.autoFixLastRun') }}: {{ autoFixLastRunText }}</span>
+            <div class="ug-auto-controls">
+              <label class="ug-auto-toggle">
+                <input
+                  v-model="autoFixForm.enabled"
+                  type="checkbox"
+                  class="ug-checkbox"
+                  :disabled="savingRateFixConfig || loadingRateFixConfig"
+                />
+                <span>{{ t('admin.upstreamGroups.autoFixEnabled') }}</span>
+              </label>
+              <label class="ug-auto-interval">
+                <span>{{ t('admin.upstreamGroups.autoFixIntervalSeconds') }}</span>
+                <input
+                  id="auto-fix-interval-seconds"
+                  v-model.number="autoFixForm.interval_seconds"
+                  type="number"
+                  min="1"
+                  step="1"
+                  class="ug-input ug-auto-input"
+                  :disabled="savingRateFixConfig || loadingRateFixConfig"
+                />
+              </label>
+              <button
+                type="button"
+                class="ug-btn ug-btn-default ug-btn-small"
+                :disabled="savingRateFixConfig || loadingRateFixConfig"
+                @click="saveRateFixConfig"
+              >
+                {{ savingRateFixConfig ? t('common.saving') : t('common.save') }}
+              </button>
+            </div>
+          </div>
         </div>
       </template>
 
       <template #table>
-        <div class="groups-table-content">
-          <div v-if="warnings.length" class="warning-banner">
+        <div class="ug-content">
+          <div v-if="warnings.length" class="ug-warning-banner">
             <div v-for="warning in warnings" :key="warning">{{ warning }}</div>
           </div>
 
-          <div class="groups-table-primary">
-            <DataTable :columns="columns" :data="filteredItems" :loading="loading">
+          <div class="ug-table-card">
+            <DataTable
+              :columns="columns"
+              :data="filteredItems"
+              :loading="loading"
+              :row-class="rowClass"
+              :estimate-row-height="80"
+            >
               <template #cell-upstream_group_name="{ row }">
-                <div :class="['group-name-card min-w-[14rem]', groupToneClass(row)]">
-                  <div class="flex min-w-0 items-center gap-2">
-                    <span class="truncate font-semibold text-gray-950 dark:text-white">{{ row.upstream_group_name }}</span>
-                    <span class="table-tag tag-provider">{{ row.provider_name || row.provider_slug }}</span>
+                <div class="ug-group-cell">
+                  <div class="ug-group-title">
+                    <span class="ug-group-name">{{ row.upstream_group_name }}</span>
+                    <span class="ug-tag ug-tag-info">{{ row.provider_name || row.provider_slug }}</span>
                   </div>
-                  <div class="tag-list">
-                    <span class="table-tag tag-count">
-                      {{ t('admin.upstreamGroups.keyCount', { count: row.upstream_key_count }) }}
-                    </span>
-                    <code class="table-tag tag-code">{{ row.upstream_group_key }}</code>
+                  <div class="ug-group-sub">
+                    <span>{{ t('admin.upstreamGroups.keyCount', { count: row.upstream_key_count }) }}</span>
+                    <span class="ug-group-sub-sep">·</span>
+                    <code class="ug-group-sub-code">{{ row.upstream_group_key }}</code>
                   </div>
                 </div>
               </template>
 
               <template #cell-upstream_rate="{ value }">
-                <span :class="['rate-value', rateToneClass(value)]">{{ formatRate(value) }}</span>
+                <span :class="['ug-rate', rateToneClass(value)]">{{ formatRate(value) }}</span>
               </template>
 
               <template #cell-monitor_trend="{ row }">
@@ -151,76 +158,71 @@
               </template>
 
               <template #cell-local_group_name="{ row }">
-                <div :class="['local-match-card min-w-[16rem]', localMatchClass(row)]">
+                <div class="ug-match-cell">
                   <template v-if="row.matched">
-                    <div class="flex flex-wrap items-center gap-2">
-                      <span class="font-semibold text-gray-950 dark:text-white">{{ row.local_group_name }}</span>
-                      <code class="table-tag tag-id">#{{ row.local_group_id }}</code>
+                    <div class="ug-match-id">
+                      <span>{{ row.local_group_name }}</span>
+                      <span class="ug-match-id-num">#{{ row.local_group_id }}</span>
                     </div>
-                    <div class="flex flex-wrap items-center gap-2 text-xs">
-                      <span :class="['badge', row.match_source === 'manual' ? 'badge-primary' : 'badge-gray']">
+                    <div class="ug-match-desc">
+                      <span :class="['ug-tag', row.match_source === 'manual' ? 'ug-tag-violet' : 'ug-tag-info']">
                         {{ matchSourceLabel(row) }}
                       </span>
-                      <span v-if="row.needs_rate_increase" class="badge badge-warning">
-                        {{ t('admin.upstreamGroups.needsIncrease') }}
+                      <span v-if="row.needs_rate_increase" class="ug-match-desc-text ug-match-desc-warn">
+                        {{ t('admin.upstreamGroups.localRateLow') }} · {{ t('admin.upstreamGroups.needsAdjust') }}
                       </span>
-                      <span v-else class="badge badge-success">
-                        {{ t('admin.upstreamGroups.inSync') }}
-                      </span>
+                      <span v-else class="ug-match-desc-text">{{ t('admin.upstreamGroups.inSync') }}</span>
                     </div>
                   </template>
-                  <div v-else class="flex flex-wrap items-center gap-2">
-                    <span class="table-tag tag-missing">
-                      {{ t('admin.upstreamGroups.notMatched') }}
-                    </span>
-                    <code class="table-tag tag-code">{{ row.upstream_group_key }}</code>
-                  </div>
+                  <template v-else>
+                    <span class="ug-tag ug-tag-warning">{{ t('admin.upstreamGroups.notMatched') }}</span>
+                    <div class="ug-match-desc-text ug-match-desc-muted">{{ row.upstream_group_key }}</div>
+                  </template>
                 </div>
               </template>
 
               <template #cell-local_rate="{ row }">
                 <span
                   v-if="row.local_rate !== undefined"
-                  :class="['rate-value', row.needs_rate_increase ? 'rate-warning' : 'rate-success']"
+                  :class="['ug-rate', row.needs_rate_increase ? 'ug-rate-warning' : 'ug-rate-success']"
                 >
                   {{ formatRate(row.local_rate) }}
                 </span>
-                <span v-else class="table-tag tag-missing">-</span>
+                <span v-else class="ug-rate-empty">-</span>
               </template>
 
               <template #cell-rate_delta="{ row }">
                 <span
-                  v-if="rateDelta(row) !== undefined"
-                  :class="['rate-value', rateDeltaClass(rateDelta(row))]"
+                  v-if="rateProfit(row) !== undefined"
+                  :class="['ug-profit', profitClass(rateProfit(row))]"
                 >
-                  {{ formatRateDelta(rateDelta(row)) }}
+                  {{ formatProfit(rateProfit(row)) }}
                 </span>
-                <span v-else class="table-tag tag-missing">-</span>
+                <span v-else class="ug-rate-empty">-</span>
               </template>
 
               <template #cell-status="{ row }">
-                <span :class="['status-chip', statusClass(row)]">{{ statusLabel(row) }}</span>
+                <span :class="['ug-status', statusClass(row)]">{{ statusLabel(row) }}</span>
               </template>
 
               <template #cell-action="{ row }">
                 <button
                   v-if="!row.matched"
                   type="button"
-                  class="btn btn-primary btn-sm whitespace-nowrap"
+                  class="ug-btn ug-btn-primary ug-btn-small ug-btn-cell"
                   :disabled="syncingGroupKey === row.upstream_group_key"
                   @click="openSyncDialog(row)"
                 >
-                  <Icon name="sync" size="sm" class="mr-1" :class="syncingGroupKey === row.upstream_group_key ? 'animate-spin' : ''" />
-                  {{ t('admin.upstreamGroups.syncLocalGroup') }}
+                  <Icon name="sync" size="sm" :class="syncingGroupKey === row.upstream_group_key ? 'animate-spin' : ''" />
+                  <span>{{ t('admin.upstreamGroups.syncLocalGroup') }}</span>
                 </button>
                 <button
                   v-else
                   type="button"
-                  class="btn btn-secondary btn-sm whitespace-nowrap"
+                  class="ug-btn-text"
                   :disabled="savingLocalRateGroupId === row.local_group_id"
                   @click="openLocalRateDialog(row)"
                 >
-                  <Icon name="cog" size="sm" class="mr-1" :class="savingLocalRateGroupId === row.local_group_id ? 'animate-spin' : ''" />
                   {{ t('admin.upstreamGroups.editLocalRate') }}
                 </button>
               </template>
@@ -236,46 +238,52 @@
             </DataTable>
           </div>
 
-          <div class="records-panel">
-            <div class="records-header">
-              <div>
-                <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.upstreamGroups.changeRecords') }}</h3>
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.upstreamGroups.latestRecords') }}</span>
+          <div class="ug-records-card">
+            <div class="ug-records-header">
+              <div class="ug-records-title-block">
+                <span class="ug-records-title">{{ t('admin.upstreamGroups.changeRecords') }}</span>
+                <span class="ug-records-sub">{{ t('admin.upstreamGroups.latestRecords') }}</span>
               </div>
-              <div class="records-total">{{ records.length }}</div>
+              <div class="ug-records-actions">
+                <button type="button" class="ug-records-sort-btn" @click="toggleRecordsSort">
+                  <Icon
+                    name="chevronDown"
+                    size="sm"
+                    :class="recordsSortOrder === 'asc' ? 'rotate-180' : ''"
+                  />
+                  <span>
+                    {{ recordsSortOrder === 'desc'
+                      ? t('admin.upstreamGroups.recordsSortNewest')
+                      : t('admin.upstreamGroups.recordsSortOldest') }}
+                  </span>
+                </button>
+                <span class="ug-records-count">{{ visibleRecords.length }}</span>
+              </div>
             </div>
-            <div class="max-h-72 overflow-auto">
-              <table class="records-table">
-              <thead class="bg-primary-50/80 dark:bg-primary-950/30">
-                <tr>
-                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamGroups.localGroup') }}</th>
-                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamGroups.upstreamGroup') }}</th>
-                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamGroups.oldRate') }}</th>
-                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamGroups.newRate') }}</th>
-                  <th class="px-4 py-2 text-left font-medium">{{ t('admin.upstreamGroups.changedAt') }}</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
-                <tr v-for="record in records" :key="`${record.group_id}-${record.changed_at}`">
-                  <td class="px-4 py-2">
-                    <span class="table-tag tag-local">{{ record.group_name }}</span>
-                  </td>
-                  <td class="px-4 py-2">
-                    <span class="table-tag tag-provider">{{ record.upstream_group_name }}</span>
-                  </td>
-                  <td class="px-4 py-2">
-                    <span class="rate-value rate-warning">{{ formatRate(record.old_rate) }}</span>
-                  </td>
-                  <td class="px-4 py-2">
-                    <span class="rate-value rate-success">{{ formatRate(record.new_rate) }}</span>
-                  </td>
-                  <td class="px-4 py-2 text-gray-600 dark:text-gray-300">{{ formatDateTime(record.changed_at) }}</td>
-                </tr>
-                <tr v-if="!records.length">
-                  <td colspan="5" class="px-4 py-8 text-center text-gray-400">{{ t('admin.upstreamGroups.noRecords') }}</td>
-                </tr>
-              </tbody>
-            </table>
+            <div class="ug-records-table-wrapper">
+              <table class="ug-records-table">
+                <thead>
+                  <tr>
+                    <th>{{ t('admin.upstreamGroups.localGroup') }}</th>
+                    <th>{{ t('admin.upstreamGroups.upstreamGroup') }}</th>
+                    <th>{{ t('admin.upstreamGroups.oldRate') }}</th>
+                    <th>{{ t('admin.upstreamGroups.newRate') }}</th>
+                    <th class="ug-records-time-th">{{ t('admin.upstreamGroups.changedAt') }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="record in visibleRecords" :key="`${record.group_id}-${record.changed_at}`">
+                    <td><span class="ug-tag ug-tag-default">{{ record.group_name }}</span></td>
+                    <td><span class="ug-tag ug-tag-default">{{ record.upstream_group_name }}</span></td>
+                    <td><span class="ug-old-rate">{{ formatRate(record.old_rate) }}</span></td>
+                    <td><span class="ug-new-rate">{{ formatRate(record.new_rate) }}</span></td>
+                    <td class="ug-records-time">{{ formatDateTime(record.changed_at) }}</td>
+                  </tr>
+                  <tr v-if="!visibleRecords.length">
+                    <td colspan="5" class="ug-records-empty">{{ t('admin.upstreamGroups.noRecords') }}</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -406,6 +414,8 @@ import UpstreamGroupAvailabilityTrend from '@/components/admin/upstream/Upstream
 const { t } = useI18n()
 const appStore = useAppStore()
 
+const RECORDS_VISIBLE_LIMIT = 10
+
 const result = ref<UpstreamGroupCompareResult | null>(null)
 const loading = ref(false)
 const applying = ref(false)
@@ -430,6 +440,7 @@ const syncRateMultiplier = ref(1)
 const syncPlatform = ref('')
 const localRateDialogItem = ref<UpstreamGroupComparison | null>(null)
 const localRateInput = ref(1)
+const recordsSortOrder = ref<'desc' | 'asc'>('desc')
 let reloadRequestId = 0
 
 const platformOptions = computed<SelectOption[]>(() => [
@@ -457,6 +468,14 @@ const columns = computed<Column[]>(() => [
 const items = computed<UpstreamGroupComparison[]>(() => result.value?.items || [])
 const warnings = computed(() => result.value?.warnings || [])
 const records = computed<UpstreamGroupRateFixRecord[]>(() => result.value?.records || [])
+const visibleRecords = computed<UpstreamGroupRateFixRecord[]>(() => {
+  const sorted = [...records.value].sort((a, b) => {
+    const aTime = recordTimestamp(a.changed_at)
+    const bTime = recordTimestamp(b.changed_at)
+    return recordsSortOrder.value === 'desc' ? bTime - aTime : aTime - bTime
+  })
+  return sorted.slice(0, RECORDS_VISIBLE_LIMIT)
+})
 const autoFixLastRunText = computed(() => {
   if (!rateFixConfig.value?.last_run_at) return t('admin.upstreamGroups.autoFixNeverRun')
   const status = rateFixConfig.value.last_run_status === 'failed'
@@ -681,6 +700,19 @@ async function syncLocalGroup() {
   }
 }
 
+function toggleRecordsSort() {
+  recordsSortOrder.value = recordsSortOrder.value === 'desc' ? 'asc' : 'desc'
+}
+
+function recordTimestamp(value: string | number | undefined) {
+  if (typeof value === 'number') return value
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value)
+    return Number.isFinite(parsed) ? parsed : 0
+  }
+  return 0
+}
+
 function normalizePositiveRate(value: number | undefined, fallback: number) {
   const n = Number(value)
   return Number.isFinite(n) && n > 0 ? n : fallback
@@ -696,24 +728,26 @@ function formatRate(value: number | undefined) {
   return Number.isFinite(n) ? `${n.toFixed(2)}x` : '-'
 }
 
-function rateDelta(row: UpstreamGroupComparison) {
+function rateProfit(row: UpstreamGroupComparison) {
   const upstream = Number(row.upstream_rate)
   const local = Number(row.local_rate)
   if (!Number.isFinite(upstream) || !Number.isFinite(local)) return undefined
-  return upstream - local
+  return local - upstream
 }
 
-function formatRateDelta(value: number | undefined) {
+function formatProfit(value: number | undefined) {
   const n = Number(value)
   if (!Number.isFinite(n)) return '-'
   if (Math.abs(n) <= 0.0000001) return '0.00x'
   return `${n > 0 ? '+' : ''}${n.toFixed(2)}x`
 }
 
-function rateDeltaClass(value: number | undefined) {
+function profitClass(value: number | undefined) {
   const n = Number(value)
-  if (!Number.isFinite(n)) return ''
-  return n > 0.0000001 ? 'rate-warning' : 'rate-success'
+  if (!Number.isFinite(n)) return 'ug-profit-neutral'
+  if (n > 0.0000001) return 'ug-profit-positive'
+  if (n < -0.0000001) return 'ug-profit-negative'
+  return 'ug-profit-neutral'
 }
 
 function matchSourceLabel(row: UpstreamGroupComparison) {
@@ -721,30 +755,24 @@ function matchSourceLabel(row: UpstreamGroupComparison) {
   return t('admin.upstreamGroups.nameMatched')
 }
 
-function groupToneClass(row: UpstreamGroupComparison) {
-  if (!row.matched) return 'group-name-card-missing'
-  if (row.needs_rate_increase) return 'group-name-card-warning'
-  return 'group-name-card-success'
-}
-
-function localMatchClass(row: UpstreamGroupComparison) {
-  if (!row.matched) return 'local-match-missing'
-  if (row.needs_rate_increase) return 'local-match-warning'
-  return 'local-match-success'
+function rowClass(row: UpstreamGroupComparison) {
+  if (!row.matched) return 'ug-row-unmatched'
+  if (row.needs_rate_increase) return 'ug-row-risk'
+  return 'ug-row-ok'
 }
 
 function rateToneClass(value: number | undefined) {
   const n = Number(value)
   if (!Number.isFinite(n)) return ''
-  if (n >= 2) return 'rate-purple'
-  if (n > 1) return 'rate-primary'
-  return 'rate-success'
+  if (n >= 2) return 'ug-rate-purple'
+  if (n > 1) return 'ug-rate-primary'
+  return 'ug-rate-success'
 }
 
 function statusClass(row: UpstreamGroupComparison) {
-  if (!row.matched) return 'status-muted'
-  if (row.needs_rate_increase) return 'status-warning'
-  return 'status-success'
+  if (!row.matched) return 'ug-status-muted'
+  if (row.needs_rate_increase) return 'ug-status-warning'
+  return 'ug-status-success'
 }
 
 function statusLabel(row: UpstreamGroupComparison) {
@@ -757,215 +785,456 @@ onMounted(reload)
 </script>
 
 <style scoped>
-.groups-toolbar {
-  @apply grid gap-3 xl:grid-cols-[minmax(14rem,18rem)_1fr_auto];
+.ug-stats-row {
+  @apply grid grid-cols-2 gap-3 sm:grid-cols-4;
 }
 
-.provider-panel {
-  @apply flex min-h-16 items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-dark-600 dark:bg-dark-800/40;
+.ug-stat-card {
+  @apply flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm transition-shadow dark:border-dark-600 dark:bg-dark-800/60;
 }
 
-.meta-label {
+.ug-stat-card:hover {
+  @apply shadow-md;
+}
+
+.ug-stat-bar {
+  @apply h-9 w-1 rounded-full;
+}
+
+.ug-stat-bar-primary { background-color: #00B42A; }
+.ug-stat-bar-success { background-color: #00B42A; }
+.ug-stat-bar-warning { background-color: #FF7D00; }
+.ug-stat-bar-info { background-color: #165DFF; }
+
+.ug-stat-content {
+  @apply flex-1 min-w-0;
+}
+
+.ug-stat-label {
   @apply text-xs font-medium text-gray-500 dark:text-gray-400;
 }
 
-.provider-count {
-  @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-gray-100 font-mono text-sm font-semibold text-gray-700 dark:bg-dark-700 dark:text-gray-200;
+.ug-stat-value {
+  @apply mt-1 font-mono text-xl font-semibold text-gray-900 dark:text-white;
 }
 
-.stats-strip {
-  @apply grid grid-cols-2 gap-2 sm:grid-cols-4;
+.ug-provider-strip {
+  @apply mt-3 flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-dark-600 dark:bg-dark-800/40;
 }
 
-.stat-tile {
-  @apply flex min-h-16 flex-col justify-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 dark:border-dark-600 dark:bg-dark-800/40 dark:text-gray-300;
+.ug-provider-meta {
+  @apply flex min-w-0 flex-wrap items-center gap-2;
 }
 
-.stat-tile span {
+.ug-meta-label {
   @apply text-xs font-medium text-gray-500 dark:text-gray-400;
 }
 
-.stat-tile strong {
-  @apply mt-1 font-mono text-xl text-gray-950 dark:text-white;
+.ug-provider-name {
+  @apply truncate text-sm font-semibold text-gray-900 dark:text-white;
 }
 
-.stat-tile-success {
-  @apply border-emerald-200 bg-emerald-50/60 dark:border-emerald-800/50 dark:bg-emerald-950/20;
+.ug-provider-slug {
+  @apply rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300;
 }
 
-.stat-tile-warning {
-  @apply border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200;
+.ug-provider-count {
+  @apply flex h-8 min-w-8 shrink-0 items-center justify-center rounded-md bg-gray-100 px-2 font-mono text-sm font-semibold text-gray-700 dark:bg-dark-700 dark:text-gray-200;
 }
 
-.groups-actions {
-  @apply flex flex-wrap items-center justify-end gap-2 xl:min-h-16;
+.ug-filter-card {
+  @apply mt-3 rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-dark-600 dark:bg-dark-800/40;
 }
 
-.filter-row {
-  @apply mt-3 grid gap-3 md:grid-cols-[minmax(14rem,1fr)_12rem_12rem];
+.ug-filter-top {
+  @apply flex flex-wrap items-center gap-3;
 }
 
-.filter-select {
-  @apply w-full;
+.ug-search {
+  @apply relative min-w-0 flex-1;
 }
 
-.rate-fix-panel {
-  @apply mt-3 grid items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-dark-600 dark:bg-dark-800/40 lg:grid-cols-[minmax(16rem,1fr)_auto_auto_auto];
+.ug-search-icon {
+  @apply absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500;
 }
 
-.rate-fix-toggle {
+.ug-search-input {
+  @apply w-full pl-9;
+}
+
+.ug-input {
+  @apply h-9 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-900 outline-none transition-colors focus:border-primary-500 focus:ring-1 focus:ring-primary-500/20 dark:border-dark-600 dark:bg-dark-900 dark:text-white;
+}
+
+.ug-filter-right {
+  @apply flex flex-wrap items-center gap-2;
+}
+
+.ug-filter-select {
+  @apply w-32;
+}
+
+.ug-btn {
+  @apply inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-medium transition-all duration-150;
+}
+
+.ug-btn:hover:not(:disabled) {
+  @apply -translate-y-px;
+}
+
+.ug-btn:active:not(:disabled) {
+  @apply translate-y-0;
+}
+
+.ug-btn:disabled {
+  @apply cursor-not-allowed opacity-60;
+}
+
+.ug-btn-primary {
+  background-color: #00B42A;
+  @apply text-white;
+}
+
+.ug-btn-primary:hover:not(:disabled) {
+  background-color: #00A026;
+}
+
+.ug-btn-default {
+  @apply border border-gray-200 bg-white text-gray-700 dark:border-dark-600 dark:bg-dark-900 dark:text-gray-200;
+}
+
+.ug-btn-default:hover:not(:disabled) {
+  @apply border-primary-400 text-primary-600 dark:border-primary-500 dark:text-primary-300;
+}
+
+.ug-btn-small {
+  @apply h-8 px-3 text-xs;
+}
+
+.ug-btn-cell {
+  @apply whitespace-nowrap;
+}
+
+.ug-btn-text {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  @apply text-sm font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300;
+}
+
+.ug-btn-text:disabled {
+  @apply cursor-not-allowed opacity-60;
+}
+
+.ug-auto-row {
+  @apply mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-3 text-xs text-gray-500 dark:border-dark-700 dark:text-gray-400;
+}
+
+.ug-auto-meta {
+  @apply min-w-0 truncate;
+}
+
+.ug-auto-controls {
+  @apply flex flex-wrap items-center gap-3;
+}
+
+.ug-auto-toggle {
   @apply inline-flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200;
 }
 
-.rate-fix-interval {
-  @apply flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300;
+.ug-checkbox {
+  @apply h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500;
 }
 
-.groups-table-content {
+.ug-auto-interval {
+  @apply inline-flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300;
+}
+
+.ug-auto-input {
+  @apply h-8 w-20 px-2 text-sm;
+}
+
+.ug-content {
   @apply flex h-full min-h-0 flex-col overflow-y-auto;
 }
 
-.warning-banner {
-  @apply mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200;
+.ug-warning-banner {
+  background: #FFF7E8;
+  border: 1px solid #FFE4B3;
+  color: #B25A00;
+  @apply mb-3 rounded-lg px-4 py-2 text-sm;
 }
 
-.groups-table-primary {
-  @apply flex flex-none flex-col overflow-hidden;
+.ug-table-card {
+  @apply flex flex-none flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-dark-600 dark:bg-dark-800/30;
   height: clamp(28rem, 54vh, 44rem);
   min-height: 28rem;
 }
 
-.groups-table-primary :deep(.table-wrapper) {
+.ug-table-card :deep(.table-wrapper) {
   @apply min-h-0;
 }
 
-.groups-table-primary :deep(tbody tr) {
-  @apply transition-colors;
+.ug-table-card :deep(.table-wrapper) {
+  border-radius: 0.5rem;
 }
 
-.table-main-cell {
+.ug-table-card :deep(tr.ug-row-unmatched) > td:first-child {
+  border-left: 3px solid #FF7D00;
+}
+
+.ug-table-card :deep(tr.ug-row-risk) > td:first-child {
+  border-left: 3px solid #F53F3F;
+}
+
+.ug-table-card :deep(tr.ug-row-ok) > td:first-child {
+  border-left: 3px solid transparent;
+}
+
+.ug-group-cell {
   @apply flex flex-col gap-1 leading-tight;
 }
 
-.group-name-card,
-.local-match-card {
-  @apply flex flex-col gap-2 rounded-md border px-3 py-2 leading-tight;
+.ug-group-title {
+  @apply flex min-w-0 flex-wrap items-center gap-2;
 }
 
-.group-name-card-success,
-.local-match-success {
-  @apply border-emerald-100 bg-emerald-50/60 dark:border-emerald-800/40 dark:bg-emerald-950/20;
+.ug-group-name {
+  @apply truncate font-semibold text-gray-900 dark:text-white;
 }
 
-.group-name-card-warning,
-.local-match-warning {
-  @apply border-amber-200 bg-amber-50/80 dark:border-amber-700/40 dark:bg-amber-950/20;
+.ug-group-sub {
+  @apply flex flex-wrap items-center gap-1 text-xs text-gray-500 dark:text-gray-400;
 }
 
-.group-name-card-missing,
-.local-match-missing {
-  @apply border-slate-200 bg-slate-50 dark:border-slate-700/60 dark:bg-slate-900/40;
+.ug-group-sub-sep {
+  @apply text-gray-300 dark:text-gray-600;
 }
 
-.tag-list {
-  @apply flex max-w-full flex-wrap gap-1.5;
+.ug-group-sub-code {
+  @apply rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300;
 }
 
-.table-tag {
-  @apply inline-flex max-w-full items-center gap-1 truncate rounded-md px-2 py-1 text-xs font-semibold ring-1;
+.ug-match-cell {
+  @apply flex flex-col gap-1.5 leading-tight;
 }
 
-.tag-provider {
-  @apply bg-sky-50 text-sky-700 ring-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:ring-sky-800/60;
+.ug-match-id {
+  @apply flex flex-wrap items-center gap-1.5 text-sm font-semibold text-gray-900 dark:text-white;
 }
 
-.tag-count {
-  @apply bg-primary-50 text-primary-700 ring-primary-200 dark:bg-primary-950/40 dark:text-primary-300 dark:ring-primary-800/60;
+.ug-match-id-num {
+  @apply font-mono text-xs font-normal text-gray-400 dark:text-gray-500;
 }
 
-.tag-code,
-.tag-id {
-  @apply bg-violet-50 font-mono text-violet-700 ring-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:ring-violet-800/60;
+.ug-match-desc {
+  @apply flex flex-wrap items-center gap-1.5;
 }
 
-.tag-missing {
-  @apply bg-slate-100 text-slate-600 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700;
+.ug-match-desc-text {
+  @apply text-xs text-gray-500 dark:text-gray-400;
 }
 
-.tag-done {
-  @apply bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:ring-emerald-800/50;
+.ug-match-desc-warn {
+  color: #F53F3F;
 }
 
-.tag-local {
-  @apply bg-indigo-50 text-indigo-700 ring-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 dark:ring-indigo-800/60;
+.ug-match-desc-muted {
+  @apply text-xs text-gray-400 dark:text-gray-500;
 }
 
-.rate-value {
-  @apply inline-flex rounded-md px-2 py-1 font-mono text-sm font-semibold ring-1;
+.ug-tag {
+  @apply inline-flex items-center rounded px-2 py-0.5 text-xs font-medium;
 }
 
-.rate-success {
-  @apply bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:ring-emerald-800/60;
+.ug-tag-info {
+  background-color: #E8F3FF;
+  color: #165DFF;
 }
 
-.rate-primary {
-  @apply bg-primary-50 text-primary-700 ring-primary-200 dark:bg-primary-950/30 dark:text-primary-300 dark:ring-primary-800/60;
+.ug-tag-violet {
+  background-color: #F2EBFF;
+  color: #722ED1;
 }
 
-.rate-purple {
-  @apply bg-violet-50 text-violet-700 ring-violet-200 dark:bg-violet-950/30 dark:text-violet-300 dark:ring-violet-800/60;
+.ug-tag-warning {
+  background-color: #FFF3E8;
+  color: #FF7D00;
 }
 
-.rate-warning {
-  @apply bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:ring-amber-800/60;
+.ug-tag-default {
+  @apply bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-gray-200;
 }
 
-.status-chip {
-  @apply inline-flex rounded-full px-2.5 py-1 text-xs font-bold ring-1;
+:global(.dark) .ug-tag-info {
+  background-color: rgba(22, 93, 255, 0.15);
+  color: #6FAAFF;
 }
 
-.status-success {
-  @apply bg-emerald-100 text-emerald-800 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-200 dark:ring-emerald-800/60;
+:global(.dark) .ug-tag-violet {
+  background-color: rgba(114, 46, 209, 0.18);
+  color: #B58BE6;
 }
 
-.status-warning {
-  @apply bg-amber-100 text-amber-800 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-800/60;
+:global(.dark) .ug-tag-warning {
+  background-color: rgba(255, 125, 0, 0.16);
+  color: #FFB46B;
 }
 
-.status-muted {
-  @apply bg-slate-100 text-slate-600 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700;
+.ug-rate {
+  @apply inline-flex font-mono text-sm font-semibold;
 }
 
-.records-panel {
-  @apply mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-600 dark:bg-dark-800/30;
+.ug-rate-text {
+  @apply text-gray-900 dark:text-gray-100;
 }
 
-.records-header {
-  @apply flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-dark-600;
+.ug-rate-success {
+  color: #00B42A;
 }
 
-.records-total {
-  @apply flex h-8 min-w-8 items-center justify-center rounded-md bg-gray-100 px-2 font-mono text-sm font-semibold text-gray-700 dark:bg-dark-700 dark:text-gray-200;
+.ug-rate-warning {
+  color: #FF7D00;
 }
 
-.records-table {
+.ug-rate-primary {
+  color: #165DFF;
+}
+
+.ug-rate-purple {
+  color: #722ED1;
+}
+
+.ug-rate-empty {
+  @apply font-mono text-sm text-gray-400 dark:text-gray-500;
+}
+
+.ug-profit {
+  @apply font-mono text-sm font-semibold;
+}
+
+.ug-profit-positive {
+  color: #00B42A;
+}
+
+.ug-profit-negative {
+  color: #F53F3F;
+}
+
+.ug-profit-neutral {
+  @apply text-gray-500 dark:text-gray-400;
+}
+
+.ug-status {
+  @apply inline-flex rounded-full px-2.5 py-1 text-xs font-bold;
+}
+
+.ug-status-success {
+  background-color: #E8FFEA;
+  color: #00B42A;
+}
+
+.ug-status-warning {
+  background-color: #FFECE8;
+  color: #F53F3F;
+}
+
+.ug-status-muted {
+  @apply bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300;
+}
+
+:global(.dark) .ug-status-success {
+  background-color: rgba(0, 180, 42, 0.18);
+  color: #6FE08A;
+}
+
+:global(.dark) .ug-status-warning {
+  background-color: rgba(245, 63, 63, 0.18);
+  color: #FF8C8C;
+}
+
+.ug-records-card {
+  @apply mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-dark-600 dark:bg-dark-800/30;
+}
+
+.ug-records-header {
+  @apply flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3 dark:border-dark-700;
+}
+
+.ug-records-title-block {
+  @apply flex min-w-0 flex-wrap items-center gap-2;
+}
+
+.ug-records-title {
+  @apply text-sm font-semibold text-gray-900 dark:text-white;
+}
+
+.ug-records-sub {
+  @apply text-xs text-gray-500 dark:text-gray-400;
+}
+
+.ug-records-actions {
+  @apply flex items-center gap-2;
+}
+
+.ug-records-sort-btn {
+  @apply inline-flex h-7 items-center gap-1 rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-600 transition-colors hover:border-primary-400 hover:text-primary-600 dark:border-dark-600 dark:bg-dark-900 dark:text-gray-300 dark:hover:border-primary-500 dark:hover:text-primary-300;
+}
+
+.ug-records-count {
+  @apply flex h-7 min-w-7 items-center justify-center rounded-md bg-gray-100 px-2 font-mono text-xs font-semibold text-gray-700 dark:bg-dark-700 dark:text-gray-200;
+}
+
+.ug-records-table-wrapper {
+  @apply max-h-72 overflow-auto;
+}
+
+.ug-records-table {
   @apply w-full min-w-[760px] divide-y divide-gray-100 text-sm dark:divide-dark-700;
 }
 
-.records-table tbody {
-  @apply divide-y divide-gray-100 dark:divide-dark-700;
+.ug-records-table thead {
+  background-color: #FAFBFC;
+  @apply text-xs font-medium text-gray-500 dark:bg-dark-800/60 dark:text-gray-400;
 }
 
-.records-table tbody tr {
+.ug-records-table th {
+  @apply px-4 py-2 text-left;
+}
+
+.ug-records-table tbody tr {
   @apply transition-colors hover:bg-gray-50 dark:hover:bg-dark-700/40;
 }
 
+.ug-records-table tbody td {
+  @apply px-4 py-2;
+}
+
+.ug-old-rate {
+  @apply font-mono text-sm text-gray-400 line-through;
+}
+
+.ug-new-rate {
+  @apply font-mono text-sm font-semibold;
+  color: #00B42A;
+}
+
+.ug-records-time-th,
+.ug-records-time {
+  @apply text-right tabular-nums text-gray-500 dark:text-gray-400;
+}
+
+.ug-records-empty {
+  @apply px-4 py-8 text-center text-sm text-gray-400 dark:text-gray-500;
+}
+
 @media (max-width: 1023px) {
-  .groups-table-content {
+  .ug-content {
     @apply h-auto overflow-visible;
   }
 
-  .groups-table-primary {
+  .ug-table-card {
     @apply h-auto min-h-0 overflow-visible;
   }
 }
