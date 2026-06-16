@@ -1941,11 +1941,12 @@ onMounted(reload)
 }
 
 :deep(.table-wrapper thead th) {
-  text-align: center;
+  text-align: center !important;
 }
 
-:deep(.table-wrapper thead th > div) {
-  justify-content: center;
+:deep(.table-wrapper thead th > div),
+:deep(.table-wrapper thead th .sticky-header-cell) {
+  justify-content: center !important;
 }
 
 :deep(.table-wrapper) {
