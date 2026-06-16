@@ -127,6 +127,9 @@
               :loading="loading"
               :row-class="rowClass"
               :estimate-row-height="80"
+              default-sort-key="status"
+              default-sort-order="asc"
+              sort-storage-key="upstream-groups-sort"
             >
               <template #cell-upstream_group_name="{ row }">
                 <div class="ug-group-cell">
@@ -455,13 +458,13 @@ const syncPlatformOptions = computed<SelectOption[]>(() => [
 ])
 
 const columns = computed<Column[]>(() => [
-  { key: 'upstream_group_name', label: t('admin.upstreamGroups.columns.upstreamGroup'), class: 'min-w-[12rem]' },
-  { key: 'upstream_rate', label: t('admin.upstreamGroups.columns.upstreamRate') },
+  { key: 'upstream_group_name', label: t('admin.upstreamGroups.columns.upstreamGroup'), class: 'min-w-[12rem]', sortable: true },
+  { key: 'upstream_rate', label: t('admin.upstreamGroups.columns.upstreamRate'), sortable: true },
   { key: 'monitor_trend', label: t('admin.upstreamGroups.columns.monitorTrend'), class: 'min-w-[10.5rem]' },
-  { key: 'local_group_name', label: t('admin.upstreamGroups.columns.matchResult') },
-  { key: 'local_rate', label: t('admin.upstreamGroups.columns.localRate') },
-  { key: 'rate_delta', label: t('admin.upstreamGroups.columns.rateDelta') },
-  { key: 'status', label: t('admin.upstreamGroups.columns.status') },
+  { key: 'local_group_name', label: t('admin.upstreamGroups.columns.matchResult'), sortable: true },
+  { key: 'local_rate', label: t('admin.upstreamGroups.columns.localRate'), sortable: true },
+  { key: 'rate_delta', label: t('admin.upstreamGroups.columns.rateDelta'), sortable: true },
+  { key: 'status', label: t('admin.upstreamGroups.columns.status'), sortable: true },
   { key: 'action', label: t('admin.upstreamGroups.columns.action') },
 ])
 
@@ -496,22 +499,28 @@ const rateFilterOptions = computed<SelectOption[]>(() => [
 ])
 const filteredItems = computed(() => {
   const keyword = searchQuery.value.trim().toLowerCase()
-  return items.value.filter((item) => {
-    if (matchFilter.value === 'matched' && !item.matched) return false
-    if (matchFilter.value === 'unmatched' && item.matched) return false
-    if (rateFilter.value === 'risk' && !item.needs_rate_increase) return false
-    if (rateFilter.value === 'ok' && item.needs_rate_increase) return false
-    if (!keyword) return true
-    const haystack = [
-      item.upstream_group_name,
-      item.upstream_group_key,
-      item.local_group_name,
-      item.provider_name,
-      item.provider_slug,
-      item.match_source,
-    ].filter(Boolean).join(' ').toLowerCase()
-    return haystack.includes(keyword)
-  })
+  return items.value
+    .filter((item) => {
+      if (matchFilter.value === 'matched' && !item.matched) return false
+      if (matchFilter.value === 'unmatched' && item.matched) return false
+      if (rateFilter.value === 'risk' && !item.needs_rate_increase) return false
+      if (rateFilter.value === 'ok' && item.needs_rate_increase) return false
+      if (!keyword) return true
+      const haystack = [
+        item.upstream_group_name,
+        item.upstream_group_key,
+        item.local_group_name,
+        item.provider_name,
+        item.provider_slug,
+        item.match_source,
+      ].filter(Boolean).join(' ').toLowerCase()
+      return haystack.includes(keyword)
+    })
+    .map((item) => ({
+      ...item,
+      rate_delta: rateProfit(item),
+      status: statusSortValue(item),
+    }))
 })
 
 const summary = computed(() => {
@@ -779,6 +788,12 @@ function statusLabel(row: UpstreamGroupComparison) {
   if (!row.matched) return t('admin.upstreamGroups.notMatched')
   if (row.needs_rate_increase) return t('admin.upstreamGroups.rateRiskStatus')
   return t('admin.upstreamGroups.rateOkStatus')
+}
+
+function statusSortValue(row: UpstreamGroupComparison) {
+  if (row.matched && row.needs_rate_increase) return 0
+  if (!row.matched) return 1
+  return 2
 }
 
 onMounted(reload)
