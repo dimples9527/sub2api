@@ -881,12 +881,15 @@ onMounted(reload)
 
 <style scoped>
 .upstream-accounts-page {
-  max-width: 1280px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: none;
+  margin: 0;
 }
 
 .upstream-accounts-page :deep(.table-page-layout) {
   gap: 16px;
+  width: 100%;
+  max-width: none;
 }
 
 .upstream-accounts-page :deep(.table-scroll-container) {
