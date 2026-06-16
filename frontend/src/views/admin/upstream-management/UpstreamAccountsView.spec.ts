@@ -305,6 +305,30 @@ describe('UpstreamAccountsView', () => {
     expect(wrapper.find('.columns').text()).not.toContain('balance_consumption')
   })
 
+  it('marks upstream rate as a sortable account table column', async () => {
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['columns'],
+            setup(props) {
+              return () => h('div', { class: 'columns' }, props.columns.map((column: any) => `${column.key}:${column.sortable ? '1' : '0'}`).join(','))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('.columns').text()).toContain('upstream_rate_multiplier:1')
+  })
+
   it('edits matched account group bindings from the action column', async () => {
     upstreamAccountSyncMock.getPreview.mockResolvedValue({
       default_provider: {},

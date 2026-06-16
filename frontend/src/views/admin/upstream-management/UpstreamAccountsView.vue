@@ -494,13 +494,13 @@ type UpstreamAccountSyncLogEntry = UpstreamAccountSyncUnbindDetail & {
 }
 
 const columns = computed<Column[]>(() => [
-  { key: 'source', label: t('admin.upstreamAccounts.columns.source') },
-  { key: 'upstream_key_name', label: t('admin.upstreamAccounts.columns.upstreamKey') },
-  { key: 'local_account_name', label: t('admin.upstreamAccounts.columns.localAccount') },
-  { key: 'upstream_rate_multiplier', label: t('admin.upstreamAccounts.columns.upstreamRate') },
-  { key: 'local_group_name', label: t('admin.upstreamAccounts.columns.boundGroups') },
-  { key: 'test_status', label: t('admin.upstreamAccounts.columns.testStatus') },
-  { key: 'actions', label: t('common.actions') }
+  { key: 'source', label: t('admin.upstreamAccounts.columns.source'), class: 'upstream-center-column' },
+  { key: 'upstream_key_name', label: t('admin.upstreamAccounts.columns.upstreamKey'), class: 'upstream-center-column' },
+  { key: 'local_account_name', label: t('admin.upstreamAccounts.columns.localAccount'), class: 'upstream-center-column' },
+  { key: 'upstream_rate_multiplier', label: t('admin.upstreamAccounts.columns.upstreamRate'), sortable: true, class: 'upstream-center-column upstream-rate-column' },
+  { key: 'local_group_name', label: t('admin.upstreamAccounts.columns.boundGroups'), class: 'upstream-center-column' },
+  { key: 'test_status', label: t('admin.upstreamAccounts.columns.testStatus'), class: 'upstream-center-column' },
+  { key: 'actions', label: t('common.actions'), class: 'upstream-center-column' }
 ])
 
 const emptySummary = {
@@ -1396,14 +1396,9 @@ onMounted(reload)
   letter-spacing: 0;
 }
 
-.accounts-table-card :deep(th:nth-child(4)),
-.accounts-table-card :deep(th:nth-child(7)) {
-  text-align: right;
-}
-
-.accounts-table-card :deep(th:nth-child(4) > div),
-.accounts-table-card :deep(th:nth-child(7) > div) {
-  justify-content: flex-end;
+.accounts-table-card :deep(th.upstream-center-column),
+.accounts-table-card :deep(td.upstream-center-column) {
+  text-align: center;
 }
 
 .accounts-table-card :deep(td) {
@@ -1717,6 +1712,14 @@ onMounted(reload)
 .test-status-failed {
   background: #fef2f2;
   color: #dc2626;
+}
+
+.accounts-table-card :deep(.upstream-rate-column .rate-cell) {
+  justify-items: center;
+}
+
+.accounts-table-card :deep(.upstream-rate-column .rate-value) {
+  min-width: 72px;
 }
 
 .action-dash {
