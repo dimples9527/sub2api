@@ -213,7 +213,7 @@
                 </button>
               </div>
               <div class="detail-column">
-                <div class="detail-title">{{ t('admin.upstreamProviders.auth') }}</div>
+                <div class="detail-title">{{ t('admin.upstreamProviders.columns.auth') }}</div>
                 <button
                   type="button"
                   class="copyable-text detail-copy"
@@ -228,7 +228,7 @@
                 </span>
               </div>
               <div class="detail-column detail-column-wide">
-                <div class="detail-title">{{ t('admin.upstreamProviders.endpoints') }}</div>
+                <div class="detail-title">{{ t('admin.upstreamProviders.columns.endpoints') }}</div>
                 <div class="detail-endpoint-list">
                   <button
                     v-for="endpoint in endpointOptions(row)"
