@@ -445,10 +445,199 @@ describe('UpstreamProvidersView', () => {
     expect(wrapper.find('.balance-dialog').text()).toContain('2026-06-15')
     expect(wrapper.find('.balance-dialog').text()).toContain('24.5000')
     expect(wrapper.find('.balance-dialog').text()).toContain('admin.upstreamProviders.balanceSamples')
+    expect(wrapper.find('.balance-dialog').text()).not.toContain('admin.upstreamProviders.balanceSamplerAutoRun')
+    expect(wrapper.find('.balance-dialog').text()).not.toContain('admin.upstreamProviders.balanceSamplerIntervalSeconds')
+    expect(wrapper.find('.balance-dialog').text()).not.toContain('admin.upstreamProviders.balanceSampleNow')
     expect(wrapper.findAll('.snapshot-row')).toHaveLength(3)
     expect(wrapper.find('.balance-dialog').text()).toContain('100.0000')
     expect(wrapper.find('.balance-dialog').text()).toContain('90.0000')
     expect(wrapper.find('.balance-dialog').text()).toContain('80.0000')
+  })
+
+  it('runs balance sampling from the main toolbar and renders refined filter selects', async () => {
+    adminAPIMock.upstreamProviders.list.mockResolvedValue([
+      {
+        type: 'sub2api',
+        slug: 'sub-main',
+        name: 'Sub Main',
+        enabled: true,
+        is_default: true,
+        base_url: 'https://upstream.example.com',
+        login_url: '/api/v1/auth/login',
+        api_keys_url: '/api/admin/keys',
+        account_rate_multiplier_scale: 1,
+      },
+    ])
+    adminAPIMock.upstreamAccountSync.getBalanceConsumption
+      .mockResolvedValueOnce({
+        config: {
+          enabled: true,
+          interval_seconds: 3600,
+          provider_amount_scales: {},
+        },
+        summaries: {},
+        rows: [],
+        snapshots: [],
+      })
+      .mockResolvedValueOnce({
+        config: {
+          enabled: true,
+          interval_seconds: 3600,
+          provider_amount_scales: {},
+        },
+        summaries: {
+          'sub-main': {
+            provider_slug: 'sub-main',
+            provider_name: 'Sub Main',
+            current_balance: 80,
+            today_consumption: 12.25,
+            amount_scale: 1,
+            complete: true,
+            anomaly: false,
+            snapshot_count: 1,
+          },
+        },
+        rows: [],
+        snapshots: [],
+      })
+
+    const wrapper = mount(UpstreamProvidersView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: { template: '<div />' },
+          BaseDialog: {
+            props: ['show'],
+            template: '<div v-if="show"><slot /><slot name="footer" /></div>',
+          },
+          ConfirmDialog: true,
+          EmptyState: true,
+          Icon: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.findAll('.upstream-filter-select')).toHaveLength(2)
+    const sampleButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('admin.upstreamProviders.balanceSampleNow'))
+    expect(sampleButton).toBeTruthy()
+
+    await sampleButton!.trigger('click')
+    await flushPromises()
+
+    expect(adminAPIMock.upstreamAccountSync.runBalanceSampleNow).toHaveBeenCalledTimes(1)
+    expect(adminAPIMock.upstreamAccountSync.getBalanceConsumption).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('12.25')
+  })
+
+  it('opens global balance sampler settings from the main toolbar and saves provider scales', async () => {
+    adminAPIMock.upstreamProviders.list.mockResolvedValue([
+      {
+        type: 'sub2api',
+        slug: 'sub-main',
+        name: 'Sub Main',
+        enabled: true,
+        is_default: true,
+        base_url: 'https://upstream.example.com',
+        login_url: '/api/v1/auth/login',
+        api_keys_url: '/api/admin/keys',
+        account_rate_multiplier_scale: 1,
+      },
+      {
+        type: 'newapi',
+        slug: 'new-main',
+        name: 'New Main',
+        enabled: true,
+        is_default: false,
+        base_url: 'https://new.example.com',
+        login_url: '/api/user/login',
+        api_keys_url: '/api/token/',
+        account_rate_multiplier_scale: 1,
+      },
+    ])
+    adminAPIMock.upstreamAccountSync.getBalanceConsumption.mockResolvedValue({
+      config: {
+        enabled: true,
+        interval_seconds: 900,
+        provider_amount_scales: { 'sub-main': 1.2 },
+      },
+      summaries: {},
+      rows: [],
+      snapshots: [],
+    })
+    adminAPIMock.upstreamAccountSync.updateBalanceSamplerConfig.mockResolvedValue({
+      enabled: false,
+      interval_seconds: 1200,
+      provider_amount_scales: {
+        'sub-main': 1.5,
+        'new-main': 1,
+      },
+    })
+
+    const wrapper = mount(UpstreamProvidersView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: { template: '<div />' },
+          BaseDialog: {
+            props: ['show', 'title'],
+            template: '<div v-if="show" class="dialog"><h2>{{ title }}</h2><slot /><slot name="footer" /></div>',
+          },
+          ConfirmDialog: true,
+          EmptyState: true,
+          Icon: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const settingsButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('admin.upstreamProviders.balanceSamplerSettings'))
+    expect(settingsButton).toBeTruthy()
+
+    await settingsButton!.trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.find('.balance-sampler-dialog')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.text()).toContain('admin.upstreamProviders.balanceSamplerAutoRun')
+    expect(dialog.text()).toContain('admin.upstreamProviders.balanceSamplerIntervalSeconds')
+    expect(dialog.text()).toContain('Sub Main')
+    expect(dialog.text()).toContain('New Main')
+
+    const autoRun = dialog.find('input[type="checkbox"]')
+    expect((autoRun.element as HTMLInputElement).checked).toBe(true)
+    await autoRun.setValue(false)
+
+    const interval = dialog.find('input[data-test="balance-sampler-interval"]')
+    await interval.setValue('1200')
+
+    const subMainScale = dialog.find('input[data-test="balance-sampler-scale-sub-main"]')
+    await subMainScale.setValue('1.5')
+
+    const saveButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('common.save'))
+    expect(saveButton).toBeTruthy()
+
+    await saveButton!.trigger('click')
+    await flushPromises()
+
+    expect(adminAPIMock.upstreamAccountSync.updateBalanceSamplerConfig).toHaveBeenCalledWith({
+      enabled: false,
+      interval_seconds: 1200,
+      provider_amount_scales: {
+        'sub-main': 1.5,
+        'new-main': 1,
+      },
+    })
   })
 
   it('offers existing URLs as datalist choices in provider form', async () => {

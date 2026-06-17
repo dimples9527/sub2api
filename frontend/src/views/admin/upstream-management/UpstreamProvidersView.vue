@@ -17,6 +17,25 @@
             >
               {{ t('common.refresh') }}
             </button>
+            <button
+              type="button"
+              class="btn btn-secondary upstream-toolbar-action upstream-sample-action"
+              :disabled="runningBalanceSampleNow"
+              :title="t('admin.upstreamProviders.balanceSampleNow')"
+              @click="runBalanceSampleNow"
+            >
+              <Icon name="play" size="sm" :class="runningBalanceSampleNow ? 'animate-pulse' : ''" />
+              <span>{{ t('admin.upstreamProviders.balanceSampleNow') }}</span>
+            </button>
+            <button
+              type="button"
+              class="btn btn-secondary upstream-toolbar-action upstream-sampler-settings-action"
+              :title="t('admin.upstreamProviders.balanceSamplerSettings')"
+              @click="openBalanceSamplerDialog"
+            >
+              <Icon name="cog" size="sm" />
+              <span>{{ t('admin.upstreamProviders.balanceSamplerSettings') }}</span>
+            </button>
           </div>
 
           <div class="upstream-toolbar-filters">
@@ -34,17 +53,25 @@
               />
             </div>
 
-            <select v-model="typeFilter" class="input upstream-compact-input w-full sm:w-32">
-              <option value="">{{ t('admin.upstreamProviders.allTypes') }}</option>
-              <option value="sub2api">Sub2API</option>
-              <option value="newapi">NewAPI</option>
-            </select>
+            <label class="upstream-filter-select">
+              <span>{{ t('admin.upstreamProviders.type') }}</span>
+              <select v-model="typeFilter" class="upstream-filter-native">
+                <option value="">{{ t('admin.upstreamProviders.allTypes') }}</option>
+                <option value="sub2api">Sub2API</option>
+                <option value="newapi">NewAPI</option>
+              </select>
+              <Icon name="chevronDown" size="sm" class="upstream-filter-chevron" />
+            </label>
 
-            <select v-model="enabledFilter" class="input upstream-compact-input w-full sm:w-32">
-              <option value="">{{ t('admin.upstreamProviders.allStatus') }}</option>
-              <option value="enabled">{{ t('common.enabled') }}</option>
-              <option value="disabled">{{ t('common.disabled') }}</option>
-            </select>
+            <label class="upstream-filter-select">
+              <span>{{ t('common.status') }}</span>
+              <select v-model="enabledFilter" class="upstream-filter-native">
+                <option value="">{{ t('admin.upstreamProviders.allStatus') }}</option>
+                <option value="enabled">{{ t('common.enabled') }}</option>
+                <option value="disabled">{{ t('common.disabled') }}</option>
+              </select>
+              <Icon name="chevronDown" size="sm" class="upstream-filter-chevron" />
+            </label>
           </div>
 
           <div class="upstream-toolbar-right">
@@ -379,6 +406,77 @@
         />
       </template>
     </TablePageLayout>
+
+    <BaseDialog
+      :show="showBalanceSamplerDialog"
+      :title="t('admin.upstreamProviders.balanceSamplerSettings')"
+      width="wide"
+      @close="closeBalanceSamplerDialog"
+    >
+      <div class="balance-sampler-dialog space-y-5">
+        <div class="balance-sampler-controls">
+          <label class="balance-sampler-toggle">
+            <input
+              v-model="balanceSamplerForm.enabled"
+              type="checkbox"
+              class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+            />
+            <span>{{ t('admin.upstreamProviders.balanceSamplerAutoRun') }}</span>
+          </label>
+
+          <label class="balance-sampler-interval">
+            <span>{{ t('admin.upstreamProviders.balanceSamplerIntervalSeconds') }}</span>
+            <input
+              v-model.number="balanceSamplerForm.interval_seconds"
+              data-test="balance-sampler-interval"
+              type="number"
+              min="60"
+              step="60"
+              class="input"
+            />
+          </label>
+        </div>
+
+        <div class="balance-sampler-provider-panel">
+          <div class="balance-section-title">{{ t('admin.upstreamProviders.amountScale') }}</div>
+          <div class="balance-sampler-provider-list">
+            <label
+              v-for="provider in providers"
+              :key="provider.slug"
+              class="balance-sampler-provider-row"
+            >
+              <span class="balance-sampler-provider-name">
+                <strong>{{ provider.name }}</strong>
+                <small>{{ provider.slug }}</small>
+              </span>
+              <input
+                v-model.number="balanceSamplerForm.provider_amount_scales[provider.slug]"
+                :data-test="`balance-sampler-scale-${provider.slug}`"
+                type="number"
+                min="0.000001"
+                step="any"
+                class="input"
+                :placeholder="formatScale(defaultBalanceSamplerScaleForProvider(provider.slug))"
+              />
+            </label>
+            <div v-if="!providers.length" class="balance-sampler-empty">
+              {{ t('common.noData') }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <template #footer>
+        <div class="flex justify-end gap-3">
+          <button type="button" class="btn btn-secondary" :disabled="savingBalanceSamplerConfig" @click="closeBalanceSamplerDialog">
+            {{ t('common.cancel') }}
+          </button>
+          <button type="button" class="btn btn-primary" :disabled="savingBalanceSamplerConfig" @click="saveBalanceSamplerConfig">
+            {{ savingBalanceSamplerConfig ? t('common.saving') : t('common.save') }}
+          </button>
+        </div>
+      </template>
+    </BaseDialog>
 
     <BaseDialog
       :show="showFormDialog"
@@ -731,29 +829,6 @@
             </div>
           </div>
 
-          <div class="balance-config-panel">
-            <label class="guard-toggle">
-              <input v-model="balanceSamplerForm.enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
-              <span>{{ t('admin.upstreamProviders.balanceSamplerAutoRun') }}</span>
-            </label>
-            <label class="guard-interval">
-              <span>{{ t('admin.upstreamProviders.balanceSamplerIntervalSeconds') }}</span>
-              <input v-model.number="balanceSamplerForm.interval_seconds" type="number" min="60" class="input h-9 w-28" />
-            </label>
-            <label class="guard-interval">
-              <span>{{ t('admin.upstreamProviders.amountScale') }}</span>
-              <input v-model.number="selectedProviderScaleInput" type="number" min="0.000001" step="0.000001" class="input h-9 w-28" />
-            </label>
-            <button type="button" class="btn btn-secondary" :disabled="savingBalanceSamplerConfig" @click="saveBalanceSamplerConfig">
-              <Icon name="cog" size="sm" class="mr-2" :class="savingBalanceSamplerConfig ? 'animate-spin' : ''" />
-              {{ t('common.save') }}
-            </button>
-            <button type="button" class="btn btn-primary" :disabled="runningBalanceSampleNow" @click="runBalanceSampleNow">
-              <Icon name="play" size="sm" class="mr-2" :class="runningBalanceSampleNow ? 'animate-pulse' : ''" />
-              {{ t('admin.upstreamProviders.balanceSampleNow') }}
-            </button>
-          </div>
-
           <div class="balance-recharge-panel">
             <div class="balance-section-title">{{ t('admin.upstreamProviders.addRecharge') }}</div>
             <div class="balance-recharge-form">
@@ -903,18 +978,19 @@ const editingProvider = ref<UpstreamProviderConfig | null>(null)
 const submitting = ref(false)
 const testingDraft = ref(false)
 
+const showBalanceSamplerDialog = ref(false)
+const savingBalanceSamplerConfig = ref(false)
+
 const showTestDialog = ref(false)
 const testResult = ref<UpstreamProviderTestResult | null>(null)
 const testingSlugs = ref(new Set<string>())
 const balanceLoadingSlugs = ref(new Set<string>())
 const providerBalances = ref<Record<string, UpstreamProviderBalance>>({})
-const savingBalanceSamplerConfig = ref(false)
 const runningBalanceSampleNow = ref(false)
 const addingRecharge = ref(false)
 const balanceOverview = ref<UpstreamBalanceConsumptionOverview | null>(null)
 const balanceDetailsOpen = ref(false)
 const selectedBalanceProviderSlug = ref('')
-const selectedProviderScaleInput = ref(1)
 const balanceSamplerForm = ref({
   enabled: false,
   interval_seconds: 3600,
@@ -1202,6 +1278,14 @@ function closeFormDialog() {
   editingProvider.value = null
 }
 
+function openBalanceSamplerDialog() {
+  showBalanceSamplerDialog.value = true
+}
+
+function closeBalanceSamplerDialog() {
+  showBalanceSamplerDialog.value = false
+}
+
 async function submitForm() {
   submitting.value = true
   try {
@@ -1319,37 +1403,37 @@ function applyBalanceSamplerConfig(config: UpstreamBalanceSamplerConfig) {
     interval_seconds: Number(config.interval_seconds) > 0 ? Number(config.interval_seconds) : 3600,
     provider_amount_scales: { ...(config.provider_amount_scales || {}) },
   }
-  if (selectedBalanceProviderSlug.value) {
-    selectedProviderScaleInput.value = selectedBalanceScale.value
-  }
+}
+
+function defaultBalanceSamplerScaleForProvider(providerSlug: string) {
+  const configured = balanceSamplerForm.value.provider_amount_scales[providerSlug]
+  if (Number(configured) > 0) return Number(configured)
+  const summaryScale = balanceSummaries.value[providerSlug]?.amount_scale
+  if (Number(summaryScale) > 0) return Number(summaryScale)
+  return 1
 }
 
 async function saveBalanceSamplerConfig() {
-  if (!Number.isInteger(balanceSamplerForm.value.interval_seconds) || balanceSamplerForm.value.interval_seconds < 60) {
-    appStore.showError(t('admin.upstreamProviders.invalidBalanceSamplerInterval'))
-    return
-  }
-  if (!selectedBalanceProviderSlug.value) return
-  const scale = Number(selectedProviderScaleInput.value)
-  if (!Number.isFinite(scale) || scale <= 0) {
-    appStore.showError(t('admin.upstreamProviders.invalidAmountScale'))
-    return
-  }
   savingBalanceSamplerConfig.value = true
   try {
-    const providerAmountScales = {
-      ...balanceSamplerForm.value.provider_amount_scales,
-      [selectedBalanceProviderSlug.value]: scale,
+    const payload = {
+      enabled: Boolean(balanceSamplerForm.value.enabled),
+      interval_seconds: Math.max(60, Math.floor(Number(balanceSamplerForm.value.interval_seconds) || 0)),
+      provider_amount_scales: Object.fromEntries(
+        providers.value
+          .map(provider => {
+            const raw = balanceSamplerForm.value.provider_amount_scales[provider.slug]
+            const fallback = defaultBalanceSamplerScaleForProvider(provider.slug)
+            const parsed = Number(raw)
+            const scale = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+            return [provider.slug, scale]
+          })
+      ),
     }
-    const base = balanceOverview.value?.config || { enabled: false, interval_seconds: 3600 }
-    const config = await adminAPI.upstreamAccountSync.updateBalanceSamplerConfig({
-      ...base,
-      enabled: balanceSamplerForm.value.enabled,
-      interval_seconds: balanceSamplerForm.value.interval_seconds,
-      provider_amount_scales: providerAmountScales,
-    })
+    const config = await adminAPI.upstreamAccountSync.updateBalanceSamplerConfig(payload)
     applyBalanceSamplerConfig(config)
     appStore.showSuccess(t('admin.upstreamProviders.balanceSamplerSaved'))
+    closeBalanceSamplerDialog()
   } catch (err) {
     appStore.showError(extractApiErrorMessage(err, t('admin.upstreamProviders.balanceSamplerSaveFailed')))
   } finally {
@@ -1401,7 +1485,6 @@ async function addBalanceRecharge() {
 
 function openBalanceDetails(providerSlug: string) {
   selectedBalanceProviderSlug.value = providerSlug
-  selectedProviderScaleInput.value = selectedBalanceScale.value
   balanceDetailsOpen.value = true
 }
 
@@ -1679,7 +1762,7 @@ onMounted(reload)
 }
 
 .upstream-toolbar-left {
-  @apply flex items-center gap-4;
+  @apply flex flex-wrap items-center gap-3;
 }
 
 .upstream-toolbar-title {
@@ -1690,12 +1773,36 @@ onMounted(reload)
   @apply h-8 rounded px-3 text-xs;
 }
 
+.upstream-sample-action {
+  @apply inline-flex items-center gap-1.5 border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/50;
+}
+
+.upstream-sampler-settings-action {
+  @apply inline-flex items-center gap-1.5;
+}
+
 .upstream-toolbar-filters {
   @apply flex flex-1 flex-wrap items-center justify-end gap-2;
 }
 
 .upstream-compact-input {
   @apply h-8 rounded-md text-xs;
+}
+
+.upstream-filter-select {
+  @apply relative inline-flex h-8 min-w-[8.5rem] items-center gap-2 rounded-md border border-gray-200 bg-gray-50 pl-2.5 pr-7 text-xs text-gray-500 shadow-sm transition-colors hover:border-primary-300 hover:bg-white dark:border-dark-600 dark:bg-dark-700 dark:text-gray-300 dark:hover:border-primary-700 dark:hover:bg-dark-800;
+}
+
+.upstream-filter-select span {
+  @apply shrink-0 text-[11px] font-medium text-gray-400 dark:text-gray-500;
+}
+
+.upstream-filter-native {
+  @apply h-full min-w-0 flex-1 appearance-none border-0 bg-transparent p-0 text-xs font-medium text-gray-800 outline-none dark:text-gray-100;
+}
+
+.upstream-filter-chevron {
+  @apply pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500;
 }
 
 .upstream-toolbar-right {
@@ -2131,6 +2238,60 @@ onMounted(reload)
 
 .balance-config-panel {
   @apply flex flex-wrap items-center gap-3;
+}
+
+.balance-sampler-controls {
+  @apply grid gap-3 md:grid-cols-[minmax(14rem,1fr)_16rem];
+}
+
+.balance-sampler-toggle,
+.balance-sampler-interval {
+  @apply flex min-h-12 items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 dark:border-dark-600 dark:bg-dark-900/40 dark:text-gray-200;
+}
+
+.balance-sampler-toggle span,
+.balance-sampler-interval span {
+  @apply font-medium;
+}
+
+.balance-sampler-interval {
+  @apply justify-between;
+}
+
+.balance-sampler-interval .input {
+  @apply h-9 w-28 text-right font-mono text-sm;
+}
+
+.balance-sampler-provider-panel {
+  @apply rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800/70;
+}
+
+.balance-sampler-provider-list {
+  @apply mt-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200 dark:divide-dark-700 dark:border-dark-600;
+}
+
+.balance-sampler-provider-row {
+  @apply grid min-h-14 grid-cols-[minmax(0,1fr)_9rem] items-center gap-4 bg-white px-3 py-2 dark:bg-dark-800;
+}
+
+.balance-sampler-provider-name {
+  @apply min-w-0;
+}
+
+.balance-sampler-provider-name strong {
+  @apply block truncate text-sm font-semibold text-gray-950 dark:text-white;
+}
+
+.balance-sampler-provider-name small {
+  @apply block truncate font-mono text-xs text-gray-500 dark:text-gray-400;
+}
+
+.balance-sampler-provider-row .input {
+  @apply h-9 text-right font-mono text-sm;
+}
+
+.balance-sampler-empty {
+  @apply px-4 py-8 text-center text-sm text-gray-400;
 }
 
 .balance-recharge-form {
