@@ -329,6 +329,31 @@ describe('UpstreamAccountsView', () => {
     expect(wrapper.find('.columns').text()).toContain('upstream_rate_multiplier:1')
   })
 
+  it('adds status and schedulable columns to the upstream account table', async () => {
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['columns'],
+            setup(props) {
+              return () => h('div', { class: 'columns' }, props.columns.map((column: any) => column.key).join(','))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('.columns').text()).toContain('status')
+    expect(wrapper.find('.columns').text()).toContain('schedulable')
+  })
+
   it('edits matched account group bindings from the action column', async () => {
     upstreamAccountSyncMock.getPreview.mockResolvedValue({
       default_provider: {},
@@ -567,6 +592,174 @@ describe('UpstreamAccountsView', () => {
 
     expect(accountsMock.getById).toHaveBeenCalledWith(12)
     expect(wrapper.find('.account-test-modal').exists()).toBe(true)
+  })
+
+  it('toggles schedulable state from the upstream table', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValue({
+      default_provider: {},
+      providers: [],
+      summary: {
+        upstream_key_count: 1,
+        matched_account_count: 1,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'noop',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-a',
+          local_account_name: 'local-a',
+          matched_account_id: 12,
+          matched_account_name: 'local-a',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 2,
+          rate_violation: false,
+          bound_groups: [
+            { id: 7, name: 'VIP', rate_multiplier: 2, rate_violation: false },
+          ],
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+    accountsMock.getById.mockResolvedValueOnce({
+      id: 12,
+      name: 'local-a',
+      platform: 'openai',
+      type: 'apikey',
+      status: 'active',
+      schedulable: true,
+      group_ids: [7],
+      groups: [],
+    })
+    accountsMock.setSchedulable = vi.fn().mockResolvedValue({
+      id: 12,
+      name: 'local-a',
+      platform: 'openai',
+      type: 'apikey',
+      status: 'active',
+      schedulable: false,
+      group_ids: [7],
+      groups: [],
+    })
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any) => h('div', [
+                slots['cell-schedulable']?.({ row }),
+              ])))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const toggle = wrapper.find('button.schedulable-toggle')
+    expect(toggle.exists()).toBe(true)
+    await toggle.trigger('click')
+    await flushPromises()
+
+    expect(accountsMock.setSchedulable).toHaveBeenCalledWith(12, false)
+  })
+
+  it('opens temp unsched modal from the status indicator', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValue({
+      default_provider: {},
+      providers: [],
+      summary: {
+        upstream_key_count: 1,
+        matched_account_count: 1,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'noop',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-a',
+          local_account_name: 'local-a',
+          matched_account_id: 12,
+          matched_account_name: 'local-a',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 2,
+          rate_violation: false,
+          bound_groups: [
+            { id: 7, name: 'VIP', rate_multiplier: 2, rate_violation: false },
+          ],
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+    accountsMock.getById.mockResolvedValueOnce({
+      id: 12,
+      name: 'local-a',
+      platform: 'openai',
+      type: 'apikey',
+      status: 'active',
+      schedulable: true,
+      temp_unschedulable_until: '2026-06-16T00:00:00Z',
+      group_ids: [7],
+      groups: [],
+    })
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any) => h('div', [
+                slots['cell-status']?.({ row }),
+              ])))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+          AccountStatusIndicator: {
+            emits: ['show-temp-unsched'],
+            template: '<button class="account-status-indicator" @click="$emit(\'show-temp-unsched\', { id: 12, name: \'local-a\', schedulable: true, status: \'active\' })">status</button>',
+          },
+          TempUnschedStatusModal: {
+            props: ['show'],
+            emits: ['close'],
+            template: '<div v-if="show" class="temp-unsched-modal"></div>',
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    await wrapper.find('.account-status-indicator').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.temp-unsched-modal').exists()).toBe(true)
   })
 
   it('shows account test status in the action column after test completion', async () => {

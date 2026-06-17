@@ -249,6 +249,37 @@
                 </div>
               </template>
 
+              <template #cell-status="{ row }">
+                <div v-if="getMatchedAccount(row)" class="status-cell">
+                  <AccountStatusIndicator
+                    :account="getMatchedAccount(row)!"
+                    @show-temp-unsched="handleShowTempUnsched"
+                  />
+                </div>
+                <span v-else class="dash">-</span>
+              </template>
+
+              <template #cell-schedulable="{ row }">
+                <div v-if="getMatchedAccount(row)" class="status-cell">
+                  <button
+                    type="button"
+                    class="schedulable-toggle"
+                    :disabled="togglingSchedulableId === getMatchedAccount(row)!.id"
+                    :class="[getMatchedAccount(row)!.schedulable ? 'schedulable-on' : 'schedulable-off']"
+                    :title="getMatchedAccount(row)!.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')"
+                    @click="handleToggleSchedulable(getMatchedAccount(row)!)"
+                  >
+                    <span class="schedulable-track">
+                      <span
+                        class="schedulable-thumb"
+                        :class="[getMatchedAccount(row)!.schedulable ? 'schedulable-thumb-on' : 'schedulable-thumb-off']"
+                      />
+                    </span>
+                  </button>
+                </div>
+                <span v-else class="dash">-</span>
+              </template>
+
               <template #cell-test_status="{ row }">
                 <div class="test-status-cell">
                   <span
@@ -428,6 +459,12 @@
           @close="closeTestModal"
           @test-result="handleAccountTestResult"
         />
+        <TempUnschedStatusModal
+          :show="showTempUnsched"
+          :account="tempUnschedAccount"
+          @close="closeTempUnschedModal"
+          @reset="handleTempUnschedReset"
+        />
       </template>
     </TablePageLayout>
   </AppLayout>
@@ -459,6 +496,8 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import Icon from '@/components/icons/Icon.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
+import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
+import TempUnschedStatusModal from '@/components/account/TempUnschedStatusModal.vue'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -471,9 +510,13 @@ const savingRateGuardConfig = ref(false)
 const runningRateGuardNow = ref(false)
 const savingAccountGroupId = ref<number | null>(null)
 const testingAccountId = ref<number | null>(null)
+const togglingSchedulableId = ref<number | null>(null)
 const showTestModal = ref(false)
+const showTempUnsched = ref(false)
 const testingAccount = ref<Account | null>(null)
+const tempUnschedAccount = ref<Account | null>(null)
 const accountTestStatusById = ref<Record<number, 'testing' | 'success' | 'failed'>>({})
+const matchedAccountsById = ref<Record<number, Account>>({})
 const localGroups = ref<AdminGroup[]>([])
 const loadError = ref('')
 const searchQuery = ref('')
@@ -499,6 +542,8 @@ const columns = computed<Column[]>(() => [
   { key: 'local_account_name', label: t('admin.upstreamAccounts.columns.localAccount'), class: 'upstream-center-column' },
   { key: 'upstream_rate_multiplier', label: t('admin.upstreamAccounts.columns.upstreamRate'), sortable: true, class: 'upstream-center-column upstream-rate-column' },
   { key: 'local_group_name', label: t('admin.upstreamAccounts.columns.boundGroups'), class: 'upstream-center-column' },
+  { key: 'status', label: t('admin.accounts.columns.status'), class: 'upstream-center-column' },
+  { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), class: 'upstream-center-column' },
   { key: 'test_status', label: t('admin.upstreamAccounts.columns.testStatus'), class: 'upstream-center-column' },
   { key: 'actions', label: t('common.actions'), class: 'upstream-center-column' }
 ])
@@ -653,6 +698,7 @@ async function reload() {
       adminAPI.upstreamAccountSync.getRateGuardConfig()
     ])
     result.value = preview
+    await syncMatchedAccounts(preview.items || [])
     applyRateGuardConfig(config)
     void loadLocalGroups()
   } catch (err) {
@@ -685,6 +731,7 @@ async function runSync() {
       update_existing: true,
       apply_rate_guard: true
     })
+    await syncMatchedAccounts(result.value?.items || [])
     appStore.showSuccess(t('admin.upstreamAccounts.syncSuccess'))
   } catch (err) {
     appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.syncFailed')))
@@ -759,6 +806,59 @@ async function loadLocalGroups() {
   }
 }
 
+async function syncMatchedAccounts(syncItems: UpstreamAccountSyncItem[]) {
+  const matchedIDs = Array.from(
+    new Set(
+      syncItems
+        .map(item => Number(item.matched_account_id))
+        .filter(id => Number.isFinite(id) && id > 0)
+    )
+  )
+  if (!matchedIDs.length) {
+    matchedAccountsById.value = {}
+    return
+  }
+
+  const entries = await Promise.allSettled(
+    matchedIDs.map(async (accountId) => {
+      const account = await adminAPI.accounts.getById(accountId)
+      return [accountId, account] as const
+    })
+  )
+
+  const nextMap: Record<number, Account> = {}
+  for (const entry of entries) {
+    if (entry.status !== 'fulfilled') continue
+    const [accountId, account] = entry.value
+    nextMap[accountId] = account
+  }
+  matchedAccountsById.value = nextMap
+}
+
+async function ensureMatchedAccount(row: UpstreamAccountSyncItem) {
+  const accountId = Number(row.matched_account_id)
+  if (!Number.isFinite(accountId) || accountId <= 0) return null
+  const cached = matchedAccountsById.value[accountId]
+  if (cached) return cached
+  try {
+    const account = await adminAPI.accounts.getById(accountId)
+    matchedAccountsById.value = {
+      ...matchedAccountsById.value,
+      [accountId]: account
+    }
+    return account
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.loadAccountFailed')))
+    return null
+  }
+}
+
+function getMatchedAccount(row: UpstreamAccountSyncItem) {
+  const accountId = Number(row.matched_account_id)
+  if (!Number.isFinite(accountId) || accountId <= 0) return null
+  return matchedAccountsById.value[accountId] || null
+}
+
 function accountRowClass(row: UpstreamAccountSyncItem) {
   if (row.rate_violation) return 'risk-row'
   return ''
@@ -815,13 +915,9 @@ async function openAccountGroupDialog(row: UpstreamAccountSyncItem) {
     .filter((id) => Number.isFinite(id))
   accountGroupPlatform.value = inferAccountGroupPlatform(row)
 
-  if (row.matched_account_id) {
-    try {
-      const account = await adminAPI.accounts.getById(row.matched_account_id)
-      accountGroupPlatform.value = account.platform
-    } catch (err) {
-      appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.loadAccountFailed')))
-    }
+  const account = await ensureMatchedAccount(row)
+  if (account) {
+    accountGroupPlatform.value = account.platform
   }
 }
 
@@ -837,11 +933,11 @@ async function saveAccountGroups() {
   if (!row?.matched_account_id) return
   savingAccountGroupId.value = row.matched_account_id
   try {
-    await adminAPI.accounts.update(row.matched_account_id, { group_ids: accountGroupIds.value })
+    const updated = await adminAPI.accounts.update(row.matched_account_id, { group_ids: accountGroupIds.value })
+    if (updated) updateMatchedAccount(updated)
     accountGroupDialogItem.value = null
     accountGroupIds.value = []
     accountGroupPlatform.value = undefined
-    await reload()
     appStore.showSuccess(t('admin.upstreamAccounts.boundGroupsSaved'))
   } catch (err) {
     appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.boundGroupsSaveFailed')))
@@ -856,10 +952,12 @@ async function clearAccountGroups() {
 }
 
 async function openAccountTestDialog(row: UpstreamAccountSyncItem) {
-  if (!row.matched_account_id) return
-  testingAccountId.value = row.matched_account_id
+  const accountId = Number(row.matched_account_id)
+  if (!Number.isFinite(accountId) || accountId <= 0) return
+  testingAccountId.value = accountId
   try {
-    testingAccount.value = await adminAPI.accounts.getById(row.matched_account_id)
+    testingAccount.value = await ensureMatchedAccount(row)
+    if (!testingAccount.value) return
     showTestModal.value = true
   } catch (err) {
     appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.testConnectionFailed')))
@@ -878,6 +976,41 @@ function handleAccountTestResult(payload: { accountId: number; status: 'testing'
     ...accountTestStatusById.value,
     [payload.accountId]: payload.status
   }
+}
+
+function updateMatchedAccount(account: Account) {
+  matchedAccountsById.value = {
+    ...matchedAccountsById.value,
+    [account.id]: account
+  }
+}
+
+async function handleToggleSchedulable(account: Account) {
+  togglingSchedulableId.value = account.id
+  try {
+    const updated = await adminAPI.accounts.setSchedulable(account.id, !account.schedulable)
+    updateMatchedAccount(updated || { ...account, schedulable: !account.schedulable })
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.accounts.failedToToggleSchedulable')))
+  } finally {
+    togglingSchedulableId.value = null
+  }
+}
+
+function handleShowTempUnsched(account: Account) {
+  tempUnschedAccount.value = account
+  showTempUnsched.value = true
+}
+
+function handleTempUnschedReset(updated: Account) {
+  tempUnschedAccount.value = null
+  showTempUnsched.value = false
+  updateMatchedAccount(updated)
+}
+
+function closeTempUnschedModal() {
+  tempUnschedAccount.value = null
+  showTempUnsched.value = false
 }
 
 function groupNameById(groupID: number) {
@@ -1401,6 +1534,10 @@ onMounted(reload)
   text-align: center;
 }
 
+.accounts-table-card :deep(th.upstream-center-column > div) {
+  justify-content: center;
+}
+
 .accounts-table-card :deep(td) {
   border-bottom: 1px solid #eef2f7;
   color: #334155;
@@ -1714,12 +1851,67 @@ onMounted(reload)
   color: #dc2626;
 }
 
+.status-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+}
+
+.schedulable-toggle {
+  display: inline-flex;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.schedulable-track {
+  display: inline-flex;
+  width: 38px;
+  height: 22px;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px;
+  transition: background 150ms ease;
+}
+
+.schedulable-on .schedulable-track {
+  background: #059669;
+}
+
+.schedulable-off .schedulable-track {
+  background: #cbd5e1;
+}
+
+.schedulable-thumb {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.24);
+  transition: transform 150ms ease;
+}
+
+.schedulable-thumb-on {
+  transform: translateX(16px);
+}
+
+.schedulable-thumb-off {
+  transform: translateX(0);
+}
+
 .accounts-table-card :deep(.upstream-rate-column .rate-cell) {
   justify-items: center;
 }
 
 .accounts-table-card :deep(.upstream-rate-column .rate-value) {
   min-width: 72px;
+}
+
+.accounts-table-card :deep(.upstream-rate-column .rate-bar) {
+  margin-inline: auto;
 }
 
 .action-dash {
