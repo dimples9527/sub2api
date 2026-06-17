@@ -32,6 +32,7 @@ type UpstreamProviderConfig struct {
 	APIKeysURL                 string  `json:"api_keys_url"`
 	GroupsURL                  string  `json:"groups_url"`
 	AvailableGroupsURL         string  `json:"available_groups_url"`
+	BalanceURL                 string  `json:"balance_url"`
 	Email                      string  `json:"email"`
 	Username                   string  `json:"username"`
 	Password                   string  `json:"password,omitempty"`
@@ -402,6 +403,7 @@ func normalizeUpstreamProvider(provider UpstreamProviderConfig) UpstreamProvider
 	provider.APIKeysURL = strings.TrimSpace(provider.APIKeysURL)
 	provider.GroupsURL = strings.TrimSpace(provider.GroupsURL)
 	provider.AvailableGroupsURL = strings.TrimSpace(provider.AvailableGroupsURL)
+	provider.BalanceURL = strings.TrimSpace(provider.BalanceURL)
 	provider.Email = strings.TrimSpace(provider.Email)
 	provider.Username = strings.TrimSpace(provider.Username)
 	provider.AccountNamePrefix = strings.TrimSpace(provider.AccountNamePrefix)

@@ -145,12 +145,16 @@ func (a *NewAPIProviderAdapter) FetchGroups(ctx context.Context, provider Upstre
 }
 
 func (a *NewAPIProviderAdapter) FetchBalance(ctx context.Context, provider UpstreamProviderConfig) (UpstreamProviderBalance, error) {
+	balanceURL := strings.TrimSpace(provider.BalanceURL)
+	if balanceURL == "" {
+		balanceURL = defaultNewAPIProviderBalanceURL
+	}
 	for attempt := 0; attempt < 2; attempt++ {
 		session, err := a.ensureSession(ctx, provider)
 		if err != nil {
 			return UpstreamProviderBalance{}, err
 		}
-		payload, status, err := a.request(ctx, provider, session, defaultNewAPIProviderBalanceURL, "newapi provider balance")
+		payload, status, err := a.request(ctx, provider, session, balanceURL, "newapi provider balance")
 		if err != nil {
 			return UpstreamProviderBalance{}, err
 		}

@@ -19,6 +19,9 @@ const { adminAPIMock } = vi.hoisted(() => ({
     upstreamProviders: {
       list: vi.fn().mockResolvedValue([]),
       getBalance: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      testConfig: vi.fn(),
     },
     upstreamAccountSync: {
       getBalanceConsumption: vi.fn(),
@@ -58,6 +61,9 @@ describe('UpstreamProvidersView', () => {
       provider_type: 'sub2api',
       balance: 334.74079414,
     })
+    adminAPIMock.upstreamProviders.create.mockResolvedValue({})
+    adminAPIMock.upstreamProviders.update.mockResolvedValue({})
+    adminAPIMock.upstreamProviders.testConfig.mockResolvedValue({})
     adminAPIMock.upstreamAccountSync.getBalanceConsumption.mockResolvedValue({
       config: {
         enabled: false,
@@ -442,5 +448,67 @@ describe('UpstreamProvidersView', () => {
     expect(wrapper.find('option[value="https://sub.example.com"]').exists()).toBe(true)
     expect(wrapper.find('option[value="/api/admin/keys"]').exists()).toBe(true)
     expect(wrapper.find('option[value="/api/v1/auth/login"]').exists()).toBe(true)
+  })
+
+  it('edits provider balance URL like other upstream endpoints', async () => {
+    adminAPIMock.upstreamProviders.list.mockResolvedValue([
+      {
+        type: 'sub2api',
+        slug: 'sub-main',
+        name: 'Sub Main',
+        enabled: true,
+        base_url: 'https://sub.example.com',
+        login_url: '/api/v1/auth/login',
+        api_keys_url: '/api/admin/keys',
+        available_groups_url: '/api/v1/groups/available?timezone=Asia%2FShanghai',
+        balance_url: '/api/v1/auth/me?timezone=Asia%2FShanghai',
+        account_rate_multiplier_scale: 1,
+      },
+    ])
+
+    const wrapper = mount(UpstreamProvidersView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any) => h('div', { class: 'actions-cell' }, slots['cell-actions']?.({ row }))))
+            },
+          },
+          BaseDialog: {
+            props: ['show'],
+            template: '<div v-if="show"><slot /><slot name="footer" /></div>',
+          },
+          ConfirmDialog: true,
+          EmptyState: true,
+          Icon: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const editButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('common.edit'))
+    expect(editButton).toBeTruthy()
+    await editButton!.trigger('click')
+
+    const balanceInput = wrapper.find('input[list="upstream-provider-balance-url-options"]')
+    expect(balanceInput.exists()).toBe(true)
+    expect((balanceInput.element as HTMLInputElement).value).toBe('/api/v1/auth/me?timezone=Asia%2FShanghai')
+
+    await balanceInput.setValue('/api/custom/balance')
+    await wrapper.find('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPIMock.upstreamProviders.update).toHaveBeenCalledWith(
+      'sub-main',
+      expect.objectContaining({
+        balance_url: '/api/custom/balance',
+      })
+    )
   })
 })

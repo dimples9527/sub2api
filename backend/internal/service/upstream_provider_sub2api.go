@@ -136,12 +136,16 @@ func (a *Sub2APIProviderAdapter) FetchGroups(ctx context.Context, provider Upstr
 }
 
 func (a *Sub2APIProviderAdapter) FetchBalance(ctx context.Context, provider UpstreamProviderConfig) (UpstreamProviderBalance, error) {
+	balanceURL := strings.TrimSpace(provider.BalanceURL)
+	if balanceURL == "" {
+		balanceURL = defaultSub2APIProviderBalanceURL
+	}
 	for attempt := 0; attempt < 2; attempt++ {
 		auth, err := a.ensureAuth(ctx, provider)
 		if err != nil {
 			return UpstreamProviderBalance{}, err
 		}
-		payload, status, err := a.request(ctx, provider, auth, defaultSub2APIProviderBalanceURL, "sub2api provider balance")
+		payload, status, err := a.request(ctx, provider, auth, balanceURL, "sub2api provider balance")
 		if err != nil {
 			return UpstreamProviderBalance{}, err
 		}

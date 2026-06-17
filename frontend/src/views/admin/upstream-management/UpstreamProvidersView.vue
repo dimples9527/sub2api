@@ -464,6 +464,19 @@
               placeholder="/api/v1/groups/available?timezone=Asia%2FShanghai"
             />
           </div>
+          <div class="md:col-span-2">
+            <label class="input-label">
+              {{ t('admin.upstreamProviders.balanceUrl') }}
+              <span class="text-xs font-normal text-gray-400">({{ t('common.optional') }})</span>
+            </label>
+            <input
+              v-model.trim="form.balance_url"
+              type="text"
+              class="input"
+              list="upstream-provider-balance-url-options"
+              :placeholder="form.type === 'newapi' ? '/api/user/self' : '/api/v1/auth/me?timezone=Asia%2FShanghai'"
+            />
+          </div>
         </div>
 
         <datalist id="upstream-provider-base-url-options">
@@ -480,6 +493,9 @@
         </datalist>
         <datalist id="upstream-provider-available-groups-url-options">
           <option v-for="option in urlOptions.available_groups_url" :key="`available-groups-${option}`" :value="option" />
+        </datalist>
+        <datalist id="upstream-provider-balance-url-options">
+          <option v-for="option in urlOptions.balance_url" :key="`balance-${option}`" :value="option" />
         </datalist>
 
         <div class="grid gap-4 md:grid-cols-2">
@@ -904,6 +920,7 @@ const form = reactive<UpstreamProviderConfig>({
   api_keys_url: '',
   groups_url: '',
   available_groups_url: '',
+  balance_url: '',
   email: '',
   username: '',
   password: '',
@@ -962,6 +979,7 @@ const filteredProviders = computed(() => {
       provider.login_url,
       provider.groups_url,
       provider.available_groups_url,
+      provider.balance_url,
     ]
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(keyword))
@@ -974,6 +992,7 @@ const urlOptions = computed(() => ({
   login_url: uniqueProviderURLs('login_url'),
   groups_url: uniqueProviderURLs('groups_url'),
   available_groups_url: uniqueProviderURLs('available_groups_url'),
+  balance_url: uniqueProviderURLs('balance_url'),
 }))
 
 const keysDialogTitle = computed(() => {
@@ -1045,6 +1064,7 @@ function resetForm() {
     api_keys_url: '',
     groups_url: '',
     available_groups_url: '',
+    balance_url: '',
     email: '',
     username: '',
     password: '',
@@ -1060,6 +1080,7 @@ function fillForm(provider: UpstreamProviderConfig) {
     login_url: provider.login_url || '',
     groups_url: provider.groups_url || '',
     available_groups_url: provider.available_groups_url || (provider.type === 'newapi' ? '' : provider.groups_url || ''),
+    balance_url: provider.balance_url || '',
     email: provider.email || '',
     username: provider.username || '',
     password: '',
@@ -1082,6 +1103,7 @@ function buildPayload(): UpstreamProviderConfig {
     api_keys_url: form.api_keys_url.trim(),
     groups_url: form.type === 'newapi' ? form.groups_url?.trim() || '' : '',
     available_groups_url: form.available_groups_url?.trim() || '',
+    balance_url: form.balance_url?.trim() || '',
     email: form.email?.trim() || '',
     username: form.username?.trim() || '',
     account_name_prefix: form.account_name_prefix?.trim() || '',
@@ -1409,6 +1431,15 @@ function endpointOptions(provider: UpstreamProviderConfig): EndpointOption[] {
     })
   }
 
+  const balanceURL = balanceURLForProvider(provider)
+  if (balanceURL) {
+    options.push({
+      key: 'balance',
+      label: t('admin.upstreamProviders.balanceEndpointShort'),
+      value: balanceURL,
+    })
+  }
+
   return options
 }
 
@@ -1508,6 +1539,10 @@ function availableGroupsURL(provider: UpstreamProviderConfig) {
   return provider.available_groups_url || (provider.type === 'newapi' ? '' : provider.groups_url || '')
 }
 
+function balanceURLForProvider(provider: UpstreamProviderConfig) {
+  return provider.balance_url || ''
+}
+
 function retainBalancesForProviders(nextProviders: UpstreamProviderConfig[]) {
   const slugs = new Set(nextProviders.map(provider => provider.slug))
   providerBalances.value = Object.fromEntries(
@@ -1515,7 +1550,7 @@ function retainBalancesForProviders(nextProviders: UpstreamProviderConfig[]) {
   )
 }
 
-function uniqueProviderURLs(field: 'base_url' | 'api_keys_url' | 'login_url' | 'groups_url' | 'available_groups_url') {
+function uniqueProviderURLs(field: 'base_url' | 'api_keys_url' | 'login_url' | 'groups_url' | 'available_groups_url' | 'balance_url') {
   const seen = new Set<string>()
   const out: string[] = []
   for (const provider of providers.value) {

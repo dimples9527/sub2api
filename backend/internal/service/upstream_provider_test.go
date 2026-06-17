@@ -158,6 +158,36 @@ func TestUpstreamProviderServicePersistsAvailableGroupsURL(t *testing.T) {
 	}
 }
 
+func TestUpstreamProviderServicePersistsBalanceURL(t *testing.T) {
+	ctx := context.Background()
+	repo := newUpstreamProviderMemorySettingRepo()
+	svc := NewUpstreamProviderService(repo)
+
+	created, err := svc.CreateProvider(ctx, UpstreamProviderConfig{
+		Type:       UpstreamProviderTypeSub2API,
+		Slug:       "primary",
+		Name:       "Primary upstream",
+		Enabled:    true,
+		BaseURL:    "https://upstream.example.com",
+		APIKeysURL: "/api/admin/keys",
+		BalanceURL: " /api/custom/balance ",
+	})
+	if err != nil {
+		t.Fatalf("CreateProvider returned error: %v", err)
+	}
+	if created.BalanceURL != "/api/custom/balance" {
+		t.Fatalf("balance url = %q", created.BalanceURL)
+	}
+
+	providers, err := svc.ListProviders(ctx)
+	if err != nil {
+		t.Fatalf("ListProviders returned error: %v", err)
+	}
+	if len(providers) != 1 || providers[0].BalanceURL != "/api/custom/balance" {
+		t.Fatalf("providers = %+v, want balance url persisted", providers)
+	}
+}
+
 func TestUpstreamProviderServiceUpdateKeepsPasswordWhenBlank(t *testing.T) {
 	ctx := context.Background()
 	repo := newUpstreamProviderMemorySettingRepo()
@@ -915,6 +945,48 @@ func TestSub2APIProviderAdapterFetchBalanceUsesCachedToken(t *testing.T) {
 	}
 }
 
+func TestSub2APIProviderAdapterFetchBalanceUsesConfiguredURL(t *testing.T) {
+	var requestedURI string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			_, _ = w.Write([]byte(`{"code":0,"data":{"access_token":"cached-token","token_type":"Bearer"}}`))
+		case "/api/custom/balance":
+			requestedURI = r.URL.RequestURI()
+			if r.Header.Get("Authorization") != "Bearer cached-token" {
+				t.Fatalf("Authorization = %q, want Bearer cached-token", r.Header.Get("Authorization"))
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"balance":42.5}}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	adapter := NewSub2APIProviderAdapter(server.Client())
+	balance, err := adapter.FetchBalance(context.Background(), UpstreamProviderConfig{
+		Type:       UpstreamProviderTypeSub2API,
+		Slug:       "sub2api-main",
+		Name:       "Sub2API main",
+		BaseURL:    server.URL,
+		LoginURL:   "/api/v1/auth/login",
+		APIKeysURL: "/api/admin/keys",
+		BalanceURL: "/api/custom/balance?source=config",
+		Email:      "admin@example.com",
+		Password:   "secret",
+	})
+	if err != nil {
+		t.Fatalf("FetchBalance returned error: %v", err)
+	}
+	if balance.Balance != 42.5 {
+		t.Fatalf("balance = %+v, want configured endpoint balance", balance)
+	}
+	if requestedURI != "/api/custom/balance?source=config" {
+		t.Fatalf("requested URI = %q, want configured balance URL", requestedURI)
+	}
+}
+
 func TestSub2APIProviderAdapterRefreshesCachedTokenAfterUnauthorized(t *testing.T) {
 	var loginRequests int
 	var keyRequests int
@@ -1081,6 +1153,53 @@ func TestNewAPIProviderAdapterFetchBalanceConvertsQuota(t *testing.T) {
 	}
 	if loginRequests != 1 || balanceRequests != 1 {
 		t.Fatalf("login/balance requests = %d/%d, want 1/1", loginRequests, balanceRequests)
+	}
+}
+
+func TestNewAPIProviderAdapterFetchBalanceUsesConfiguredURL(t *testing.T) {
+	var requestedURI string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "abc"})
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":42}}`))
+		case "/api/custom/self":
+			requestedURI = r.URL.RequestURI()
+			if r.Header.Get("New-Api-User") != "42" {
+				t.Fatalf("New-Api-User = %q, want 42", r.Header.Get("New-Api-User"))
+			}
+			if !strings.Contains(r.Header.Get("Cookie"), "session=abc") {
+				t.Fatalf("Cookie header = %q, want session cookie", r.Header.Get("Cookie"))
+			}
+			_, _ = w.Write([]byte(`{"success":true,"message":"","data":{"quota":1000000}}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	adapter := NewNewAPIProviderAdapter(server.Client())
+	balance, err := adapter.FetchBalance(context.Background(), UpstreamProviderConfig{
+		Type:       UpstreamProviderTypeNewAPI,
+		Slug:       "newapi-main",
+		Name:       "NewAPI main",
+		BaseURL:    server.URL,
+		LoginURL:   "/api/user/login",
+		APIKeysURL: "/api/token/",
+		GroupsURL:  "/api/group/",
+		BalanceURL: "/api/custom/self?source=config",
+		Username:   "root",
+		Password:   "secret",
+	})
+	if err != nil {
+		t.Fatalf("FetchBalance returned error: %v", err)
+	}
+	if balance.Balance != 2 {
+		t.Fatalf("balance = %+v, want converted configured endpoint quota", balance)
+	}
+	if requestedURI != "/api/custom/self?source=config" {
+		t.Fatalf("requested URI = %q, want configured balance URL", requestedURI)
 	}
 }
 

@@ -13,6 +13,7 @@ export interface UpstreamProviderConfig {
   api_keys_url: string
   groups_url?: string
   available_groups_url?: string
+  balance_url?: string
   email?: string
   username?: string
   password?: string
