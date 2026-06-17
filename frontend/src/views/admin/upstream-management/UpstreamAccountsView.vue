@@ -1228,6 +1228,12 @@ onMounted(reload)
   gap: 16px;
   width: 100%;
   max-width: none;
+  height: auto;
+  min-height: calc(100vh - 64px - 4rem);
+}
+
+.upstream-accounts-page :deep(.layout-section-scrollable) {
+  overflow: visible;
 }
 
 .upstream-accounts-page :deep(.table-scroll-container) {
@@ -1235,6 +1241,7 @@ onMounted(reload)
   border-radius: 0;
   background: transparent;
   box-shadow: none;
+  overflow: auto;
 }
 
 .accounts-shell {
@@ -1614,7 +1621,7 @@ onMounted(reload)
   min-height: 0;
   flex-direction: column;
   gap: 16px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .warning-banner {
@@ -1630,11 +1637,11 @@ onMounted(reload)
 
 .accounts-table-card {
   display: flex;
-  flex: 1;
+  flex: none;
   min-height: 0;
-  overflow: hidden;
-  height: clamp(28rem, 52vh, 42rem);
-  min-height: 28rem;
+  overflow: auto;
+  height: auto;
+  max-height: 42rem;
 }
 
 .accounts-table-card :deep(.table-wrapper) {
