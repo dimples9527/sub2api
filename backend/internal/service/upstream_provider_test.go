@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 type upstreamProviderMemorySettingRepo struct {
@@ -185,6 +186,36 @@ func TestUpstreamProviderServicePersistsBalanceURL(t *testing.T) {
 	}
 	if len(providers) != 1 || providers[0].BalanceURL != "/api/custom/balance" {
 		t.Fatalf("providers = %+v, want balance url persisted", providers)
+	}
+}
+
+func TestUpstreamProviderServicePersistsUsageCostURL(t *testing.T) {
+	ctx := context.Background()
+	repo := newUpstreamProviderMemorySettingRepo()
+	svc := NewUpstreamProviderService(repo)
+
+	created, err := svc.CreateProvider(ctx, UpstreamProviderConfig{
+		Type:         UpstreamProviderTypeSub2API,
+		Slug:         "primary",
+		Name:         "Primary upstream",
+		Enabled:      true,
+		BaseURL:      "https://upstream.example.com",
+		APIKeysURL:   "/api/admin/keys",
+		UsageCostURL: " /api/custom/usage-cost ",
+	})
+	if err != nil {
+		t.Fatalf("CreateProvider returned error: %v", err)
+	}
+	if created.UsageCostURL != "/api/custom/usage-cost" {
+		t.Fatalf("usage cost url = %q", created.UsageCostURL)
+	}
+
+	providers, err := svc.ListProviders(ctx)
+	if err != nil {
+		t.Fatalf("ListProviders returned error: %v", err)
+	}
+	if len(providers) != 1 || providers[0].UsageCostURL != "/api/custom/usage-cost" {
+		t.Fatalf("providers = %+v, want usage cost url persisted", providers)
 	}
 }
 
@@ -987,6 +1018,49 @@ func TestSub2APIProviderAdapterFetchBalanceUsesConfiguredURL(t *testing.T) {
 	}
 }
 
+func TestSub2APIProviderAdapterFetchTodayCostUsesConfiguredURL(t *testing.T) {
+	var requestedURI string
+	day := time.Date(2026, 6, 17, 0, 0, 0, 0, time.FixedZone("CST", 8*60*60))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			_, _ = w.Write([]byte(`{"code":0,"data":{"access_token":"cached-token","token_type":"Bearer"}}`))
+		case "/api/custom/usage":
+			requestedURI = r.URL.RequestURI()
+			if r.Header.Get("Authorization") != "Bearer cached-token" {
+				t.Fatalf("Authorization = %q, want Bearer cached-token", r.Header.Get("Authorization"))
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"today_actual_cost":70.45062742}}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	adapter := NewSub2APIProviderAdapter(server.Client())
+	cost, err := adapter.FetchTodayCost(context.Background(), UpstreamProviderConfig{
+		Type:         UpstreamProviderTypeSub2API,
+		Slug:         "sub2api-main",
+		Name:         "Sub2API main",
+		BaseURL:      server.URL,
+		LoginURL:     "/api/v1/auth/login",
+		APIKeysURL:   "/api/admin/keys",
+		UsageCostURL: "/api/custom/usage?timezone=Asia%2FShanghai",
+		Email:        "admin@example.com",
+		Password:     "secret",
+	}, day)
+	if err != nil {
+		t.Fatalf("FetchTodayCost returned error: %v", err)
+	}
+	if cost.ProviderSlug != "sub2api-main" || cost.TodayCost != 70.45062742 {
+		t.Fatalf("cost = %+v, want parsed today_actual_cost", cost)
+	}
+	if requestedURI != "/api/custom/usage?timezone=Asia%2FShanghai" {
+		t.Fatalf("requested URI = %q, want configured usage cost URL", requestedURI)
+	}
+}
+
 func TestSub2APIProviderAdapterRefreshesCachedTokenAfterUnauthorized(t *testing.T) {
 	var loginRequests int
 	var keyRequests int
@@ -1200,6 +1274,60 @@ func TestNewAPIProviderAdapterFetchBalanceUsesConfiguredURL(t *testing.T) {
 	}
 	if requestedURI != "/api/custom/self?source=config" {
 		t.Fatalf("requested URI = %q, want configured balance URL", requestedURI)
+	}
+}
+
+func TestNewAPIProviderAdapterFetchTodayCostUsesConfiguredURLWithDayTimestamps(t *testing.T) {
+	var requestedURI string
+	day := time.Date(2026, 6, 17, 12, 30, 0, 0, time.FixedZone("CST", 8*60*60))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "abc"})
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":42}}`))
+		case "/api/log/self/stat":
+			requestedURI = r.URL.RequestURI()
+			if r.Header.Get("New-Api-User") != "42" {
+				t.Fatalf("New-Api-User = %q, want 42", r.Header.Get("New-Api-User"))
+			}
+			if !strings.Contains(r.Header.Get("Cookie"), "session=abc") {
+				t.Fatalf("Cookie header = %q, want session cookie", r.Header.Get("Cookie"))
+			}
+			if r.URL.Query().Get("start_timestamp") != "1781625600" {
+				t.Fatalf("start_timestamp = %q, want 1781625600", r.URL.Query().Get("start_timestamp"))
+			}
+			if r.URL.Query().Get("end_timestamp") != "1781711999" {
+				t.Fatalf("end_timestamp = %q, want 1781711999", r.URL.Query().Get("end_timestamp"))
+			}
+			_, _ = w.Write([]byte(`{"success":true,"message":"","data":{"quota":1306899,"rpm":0,"tpm":0}}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	adapter := NewNewAPIProviderAdapter(server.Client())
+	cost, err := adapter.FetchTodayCost(context.Background(), UpstreamProviderConfig{
+		Type:         UpstreamProviderTypeNewAPI,
+		Slug:         "newapi-main",
+		Name:         "NewAPI main",
+		BaseURL:      server.URL,
+		LoginURL:     "/api/user/login",
+		APIKeysURL:   "/api/token/",
+		GroupsURL:    "/api/group/",
+		UsageCostURL: "/api/log/self/stat?type=0&token_name=&model_name=&start_timestamp={start_timestamp}&end_timestamp={end_timestamp}&group=",
+		Username:     "root",
+		Password:     "secret",
+	}, day)
+	if err != nil {
+		t.Fatalf("FetchTodayCost returned error: %v", err)
+	}
+	if cost.ProviderSlug != "newapi-main" || cost.TodayCost != 2.613798 {
+		t.Fatalf("cost = %+v, want quota converted to cost", cost)
+	}
+	if !strings.Contains(requestedURI, "type=0") || !strings.Contains(requestedURI, "group=") {
+		t.Fatalf("requested URI = %q, want configured query preserved", requestedURI)
 	}
 }
 

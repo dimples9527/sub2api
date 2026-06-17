@@ -14,6 +14,7 @@ export interface UpstreamProviderConfig {
   groups_url?: string
   available_groups_url?: string
   balance_url?: string
+  usage_cost_url?: string
   email?: string
   username?: string
   password?: string
@@ -71,6 +72,7 @@ export interface UpstreamProviderBalance {
   provider_name: string
   provider_type: string
   balance: number
+  today_cost?: number
 }
 
 export async function list(): Promise<UpstreamProviderConfig[]> {

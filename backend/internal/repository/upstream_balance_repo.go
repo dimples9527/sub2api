@@ -32,8 +32,8 @@ func (r *upstreamBalanceRepository) AddSnapshot(ctx context.Context, snapshot se
 	}
 	query := `
 		INSERT INTO upstream_balance_snapshots (
-			provider_slug, provider_name, provider_type, balance, amount_scale, status, error, captured_at, created_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+			provider_slug, provider_name, provider_type, balance, today_cost, amount_scale, status, error, captured_at, created_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 		RETURNING id, created_at
 	`
 	err := scanSingleRow(ctx, r.sql, query, []any{
@@ -41,6 +41,7 @@ func (r *upstreamBalanceRepository) AddSnapshot(ctx context.Context, snapshot se
 		snapshot.ProviderName,
 		snapshot.ProviderType,
 		snapshot.Balance,
+		snapshot.TodayCost,
 		snapshot.AmountScale,
 		snapshot.Status,
 		snapshot.Error,
@@ -52,7 +53,7 @@ func (r *upstreamBalanceRepository) AddSnapshot(ctx context.Context, snapshot se
 
 func (r *upstreamBalanceRepository) ListSnapshots(ctx context.Context, startTime, endTime time.Time) ([]service.UpstreamBalanceSnapshot, error) {
 	rows, err := r.sql.QueryContext(ctx, `
-		SELECT id, provider_slug, provider_name, provider_type, balance, amount_scale, status, error, captured_at, created_at
+		SELECT id, provider_slug, provider_name, provider_type, balance, today_cost, amount_scale, status, error, captured_at, created_at
 		FROM upstream_balance_snapshots
 		WHERE captured_at >= $1 AND captured_at < $2
 		ORDER BY captured_at ASC, id ASC
@@ -70,6 +71,7 @@ func (r *upstreamBalanceRepository) ListSnapshots(ctx context.Context, startTime
 			&item.ProviderName,
 			&item.ProviderType,
 			&item.Balance,
+			&item.TodayCost,
 			&item.AmountScale,
 			&item.Status,
 			&item.Error,
@@ -86,7 +88,7 @@ func (r *upstreamBalanceRepository) ListSnapshots(ctx context.Context, startTime
 func (r *upstreamBalanceRepository) ListSnapshotsBefore(ctx context.Context, before time.Time) ([]service.UpstreamBalanceSnapshot, error) {
 	rows, err := r.sql.QueryContext(ctx, `
 		SELECT DISTINCT ON (provider_slug)
-			id, provider_slug, provider_name, provider_type, balance, amount_scale, status, error, captured_at, created_at
+			id, provider_slug, provider_name, provider_type, balance, today_cost, amount_scale, status, error, captured_at, created_at
 		FROM upstream_balance_snapshots
 		WHERE captured_at < $1 AND status = 'success'
 		ORDER BY provider_slug, captured_at DESC, id DESC
@@ -104,6 +106,7 @@ func (r *upstreamBalanceRepository) ListSnapshotsBefore(ctx context.Context, bef
 			&item.ProviderName,
 			&item.ProviderType,
 			&item.Balance,
+			&item.TodayCost,
 			&item.AmountScale,
 			&item.Status,
 			&item.Error,
@@ -120,7 +123,7 @@ func (r *upstreamBalanceRepository) ListSnapshotsBefore(ctx context.Context, bef
 func (r *upstreamBalanceRepository) ListLatestSnapshots(ctx context.Context) ([]service.UpstreamBalanceSnapshot, error) {
 	rows, err := r.sql.QueryContext(ctx, `
 		SELECT DISTINCT ON (provider_slug)
-			id, provider_slug, provider_name, provider_type, balance, amount_scale, status, error, captured_at, created_at
+			id, provider_slug, provider_name, provider_type, balance, today_cost, amount_scale, status, error, captured_at, created_at
 		FROM upstream_balance_snapshots
 		ORDER BY provider_slug, captured_at DESC, id DESC
 	`)
@@ -137,6 +140,7 @@ func (r *upstreamBalanceRepository) ListLatestSnapshots(ctx context.Context) ([]
 			&item.ProviderName,
 			&item.ProviderType,
 			&item.Balance,
+			&item.TodayCost,
 			&item.AmountScale,
 			&item.Status,
 			&item.Error,

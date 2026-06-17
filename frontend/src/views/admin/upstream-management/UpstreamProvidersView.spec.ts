@@ -125,6 +125,7 @@ describe('UpstreamProvidersView', () => {
       provider_name: 'Sub Main',
       provider_type: 'sub2api',
       balance: 9.5,
+      today_cost: 1.75,
     })
     adminAPIMock.upstreamProviders.list.mockResolvedValue([
       {
@@ -187,6 +188,7 @@ describe('UpstreamProvidersView', () => {
 
     expect(adminAPIMock.upstreamProviders.getBalance).toHaveBeenCalledWith('sub-main')
     expect(wrapper.text()).toContain('9.5000')
+    expect(wrapper.find('.today-cost-cell').text()).toContain('1.7500')
     expect(wrapper.find('.numeric-alert').exists()).toBe(true)
 
     await balanceButton!.trigger('click')
@@ -508,6 +510,71 @@ describe('UpstreamProvidersView', () => {
       'sub-main',
       expect.objectContaining({
         balance_url: '/api/custom/balance',
+      })
+    )
+  })
+
+  it('edits provider usage cost URL like other upstream endpoints', async () => {
+    adminAPIMock.upstreamProviders.list.mockResolvedValue([
+      {
+        type: 'newapi',
+        slug: 'new-main',
+        name: 'New Main',
+        enabled: true,
+        base_url: 'https://new.example.com',
+        login_url: '/api/user/login',
+        api_keys_url: '/api/token/',
+        groups_url: '/api/group/',
+        balance_url: '/api/user/self',
+        usage_cost_url: '/api/log/self/stat?type=0&start_timestamp={start_timestamp}&end_timestamp={end_timestamp}',
+        username: 'root',
+        password_configured: true,
+        account_rate_multiplier_scale: 1,
+      },
+    ])
+
+    const wrapper = mount(UpstreamProvidersView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any) => h('div', { class: 'actions-cell' }, slots['cell-actions']?.({ row }))))
+            },
+          },
+          BaseDialog: {
+            props: ['show'],
+            template: '<div v-if="show"><slot /><slot name="footer" /></div>',
+          },
+          ConfirmDialog: true,
+          EmptyState: true,
+          Icon: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const editButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('common.edit'))
+    expect(editButton).toBeTruthy()
+    await editButton!.trigger('click')
+
+    const costInput = wrapper.find('input[list="upstream-provider-usage-cost-url-options"]')
+    expect(costInput.exists()).toBe(true)
+    expect((costInput.element as HTMLInputElement).value).toContain('/api/log/self/stat')
+
+    await costInput.setValue('/api/custom/cost?start_timestamp={start_timestamp}&end_timestamp={end_timestamp}')
+    await wrapper.find('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPIMock.upstreamProviders.update).toHaveBeenCalledWith(
+      'new-main',
+      expect.objectContaining({
+        usage_cost_url: '/api/custom/cost?start_timestamp={start_timestamp}&end_timestamp={end_timestamp}',
       })
     )
   })

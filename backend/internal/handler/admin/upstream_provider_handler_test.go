@@ -234,6 +234,9 @@ func TestUpstreamProviderHandlerFetchBalance(t *testing.T) {
 		case "/api/v1/auth/me":
 			require.Equal(t, "Bearer token", r.Header.Get("Authorization"))
 			_, _ = w.Write([]byte(`{"code":0,"data":{"balance":12.5}}`))
+		case "/api/v1/usage/dashboard/stats":
+			require.Equal(t, "Bearer token", r.Header.Get("Authorization"))
+			_, _ = w.Write([]byte(`{"code":0,"data":{"today_actual_cost":3.25}}`))
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
@@ -262,10 +265,11 @@ func TestUpstreamProviderHandlerFetchBalance(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	var resp struct {
-		Code int                             `json:"code"`
-		Data service.UpstreamProviderBalance `json:"data"`
+		Code int                                   `json:"code"`
+		Data service.UpstreamProviderBalanceStatus `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.Equal(t, "primary", resp.Data.ProviderSlug)
 	require.Equal(t, 12.5, resp.Data.Balance)
+	require.Equal(t, 3.25, resp.Data.TodayCost)
 }

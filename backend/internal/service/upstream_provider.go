@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
@@ -33,6 +34,7 @@ type UpstreamProviderConfig struct {
 	GroupsURL                  string  `json:"groups_url"`
 	AvailableGroupsURL         string  `json:"available_groups_url"`
 	BalanceURL                 string  `json:"balance_url"`
+	UsageCostURL               string  `json:"usage_cost_url"`
 	Email                      string  `json:"email"`
 	Username                   string  `json:"username"`
 	Password                   string  `json:"password,omitempty"`
@@ -68,6 +70,21 @@ type UpstreamProviderBalance struct {
 	ProviderName string  `json:"provider_name"`
 	ProviderType string  `json:"provider_type"`
 	Balance      float64 `json:"balance"`
+}
+
+type UpstreamProviderCost struct {
+	ProviderSlug string  `json:"provider_slug"`
+	ProviderName string  `json:"provider_name"`
+	ProviderType string  `json:"provider_type"`
+	TodayCost    float64 `json:"today_cost"`
+}
+
+type UpstreamProviderBalanceStatus struct {
+	ProviderSlug string  `json:"provider_slug"`
+	ProviderName string  `json:"provider_name"`
+	ProviderType string  `json:"provider_type"`
+	Balance      float64 `json:"balance"`
+	TodayCost    float64 `json:"today_cost"`
 }
 
 type UpstreamProviderTestStage struct {
@@ -284,6 +301,54 @@ func (s *UpstreamProviderService) FetchProviderBalance(ctx context.Context, slug
 	return adapter.FetchBalance(ctx, provider)
 }
 
+func (s *UpstreamProviderService) FetchProviderBalanceStatus(ctx context.Context, slug string) (UpstreamProviderBalanceStatus, error) {
+	provider, err := s.getStoredProvider(ctx, slug)
+	if err != nil {
+		return UpstreamProviderBalanceStatus{}, err
+	}
+	adapter, err := s.registry.Get(provider.Type)
+	if err != nil {
+		return UpstreamProviderBalanceStatus{}, err
+	}
+	balance, err := adapter.FetchBalance(ctx, provider)
+	if err != nil {
+		return UpstreamProviderBalanceStatus{}, err
+	}
+	cost, err := adapter.FetchTodayCost(ctx, provider, time.Now())
+	if err != nil {
+		return UpstreamProviderBalanceStatus{}, err
+	}
+	status := UpstreamProviderBalanceStatus{
+		ProviderSlug: balance.ProviderSlug,
+		ProviderName: balance.ProviderName,
+		ProviderType: balance.ProviderType,
+		Balance:      balance.Balance,
+		TodayCost:    cost.TodayCost,
+	}
+	if status.ProviderSlug == "" {
+		status.ProviderSlug = cost.ProviderSlug
+	}
+	if status.ProviderName == "" {
+		status.ProviderName = cost.ProviderName
+	}
+	if status.ProviderType == "" {
+		status.ProviderType = cost.ProviderType
+	}
+	return status, nil
+}
+
+func (s *UpstreamProviderService) FetchProviderTodayCost(ctx context.Context, slug string, day time.Time) (UpstreamProviderCost, error) {
+	provider, err := s.getStoredProvider(ctx, slug)
+	if err != nil {
+		return UpstreamProviderCost{}, err
+	}
+	adapter, err := s.registry.Get(provider.Type)
+	if err != nil {
+		return UpstreamProviderCost{}, err
+	}
+	return adapter.FetchTodayCost(ctx, provider, day)
+}
+
 func (s *UpstreamProviderService) FetchProviderGroups(ctx context.Context, slug string) ([]UpstreamProviderGroup, []string, error) {
 	provider, err := s.getStoredProvider(ctx, slug)
 	if err != nil {
@@ -404,6 +469,7 @@ func normalizeUpstreamProvider(provider UpstreamProviderConfig) UpstreamProvider
 	provider.GroupsURL = strings.TrimSpace(provider.GroupsURL)
 	provider.AvailableGroupsURL = strings.TrimSpace(provider.AvailableGroupsURL)
 	provider.BalanceURL = strings.TrimSpace(provider.BalanceURL)
+	provider.UsageCostURL = strings.TrimSpace(provider.UsageCostURL)
 	provider.Email = strings.TrimSpace(provider.Email)
 	provider.Username = strings.TrimSpace(provider.Username)
 	provider.AccountNamePrefix = strings.TrimSpace(provider.AccountNamePrefix)

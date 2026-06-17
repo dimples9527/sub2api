@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
@@ -13,6 +15,7 @@ import (
 type UpstreamProviderAdapter interface {
 	FetchKeys(ctx context.Context, provider UpstreamProviderConfig) ([]UpstreamProviderKey, []string, error)
 	FetchBalance(ctx context.Context, provider UpstreamProviderConfig) (UpstreamProviderBalance, error)
+	FetchTodayCost(ctx context.Context, provider UpstreamProviderConfig, day time.Time) (UpstreamProviderCost, error)
 	Test(ctx context.Context, provider UpstreamProviderConfig) UpstreamProviderTestResult
 }
 
@@ -71,6 +74,37 @@ func upstreamProviderURL(provider UpstreamProviderConfig, path string) string {
 		return base + trimmedPath
 	}
 	return base + "/" + trimmedPath
+}
+
+func upstreamProviderUsageCostURL(path string, day time.Time, loc *time.Location) string {
+	if loc == nil {
+		loc = time.UTC
+	}
+	localDay := day.In(loc)
+	start := time.Date(localDay.Year(), localDay.Month(), localDay.Day(), 0, 0, 0, 0, loc)
+	end := start.Add(24 * time.Hour).Add(-time.Second)
+	startText := strconv.FormatInt(start.Unix(), 10)
+	endText := strconv.FormatInt(end.Unix(), 10)
+
+	out := strings.TrimSpace(path)
+	out = strings.ReplaceAll(out, "{start_timestamp}", startText)
+	out = strings.ReplaceAll(out, "{end_timestamp}", endText)
+	if out == "" {
+		return out
+	}
+	parsed, err := url.Parse(out)
+	if err != nil {
+		return out
+	}
+	query := parsed.Query()
+	if query.Get("start_timestamp") == "" {
+		query.Set("start_timestamp", startText)
+	}
+	if query.Get("end_timestamp") == "" {
+		query.Set("end_timestamp", endText)
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
 }
 
 func upstreamProviderHTTPError(label string, status int, payload []byte) error {

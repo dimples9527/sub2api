@@ -10,10 +10,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 const defaultSub2APIProviderGroupsURL = "/api/v1/groups/available?timezone=Asia%2FShanghai"
 const defaultSub2APIProviderBalanceURL = "/api/v1/auth/me?timezone=Asia%2FShanghai"
+const defaultSub2APIProviderUsageCostURL = "/api/v1/usage/dashboard/stats?timezone=Asia%2FShanghai"
 
 type upstreamSub2APIAuth struct {
 	Token     string
@@ -168,6 +170,41 @@ func (a *Sub2APIProviderAdapter) FetchBalance(ctx context.Context, provider Upst
 		return balance, nil
 	}
 	return UpstreamProviderBalance{}, fmt.Errorf("sub2api provider balance failed after auth retry")
+}
+
+func (a *Sub2APIProviderAdapter) FetchTodayCost(ctx context.Context, provider UpstreamProviderConfig, day time.Time) (UpstreamProviderCost, error) {
+	usageCostURL := strings.TrimSpace(provider.UsageCostURL)
+	if usageCostURL == "" {
+		usageCostURL = defaultSub2APIProviderUsageCostURL
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		auth, err := a.ensureAuth(ctx, provider)
+		if err != nil {
+			return UpstreamProviderCost{}, err
+		}
+		payload, status, err := a.request(ctx, provider, auth, usageCostURL, "sub2api provider usage cost")
+		if err != nil {
+			return UpstreamProviderCost{}, err
+		}
+		if status < 200 || status >= 300 {
+			requestErr := upstreamProviderHTTPError("sub2api provider usage cost", status, payload)
+			if attempt == 0 && hasSub2APICredentials(provider) && upstreamProviderAuthFailureHint(status, payload, requestErr) {
+				a.clearAuth(provider.Slug)
+				continue
+			}
+			return UpstreamProviderCost{}, requestErr
+		}
+		cost, err := parseSub2APIProviderTodayCost(provider, payload)
+		if err != nil {
+			if attempt == 0 && hasSub2APICredentials(provider) && upstreamProviderAuthFailureHint(status, payload, err) {
+				a.clearAuth(provider.Slug)
+				continue
+			}
+			return UpstreamProviderCost{}, err
+		}
+		return cost, nil
+	}
+	return UpstreamProviderCost{}, fmt.Errorf("sub2api provider usage cost failed after auth retry")
 }
 
 func (a *Sub2APIProviderAdapter) Test(ctx context.Context, provider UpstreamProviderConfig) UpstreamProviderTestResult {
@@ -458,6 +495,31 @@ func parseSub2APIProviderBalance(provider UpstreamProviderConfig, payload []byte
 		ProviderName: provider.Name,
 		ProviderType: provider.Type,
 		Balance:      resp.Data.Balance,
+	}, nil
+}
+
+func parseSub2APIProviderTodayCost(provider UpstreamProviderConfig, payload []byte) (UpstreamProviderCost, error) {
+	var resp struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Data    struct {
+			TodayActualCost float64 `json:"today_actual_cost"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(payload, &resp); err != nil {
+		return UpstreamProviderCost{}, fmt.Errorf("decode sub2api provider usage cost response: %w", err)
+	}
+	if resp.Code != 0 {
+		if resp.Message == "" {
+			resp.Message = "unknown error"
+		}
+		return UpstreamProviderCost{}, fmt.Errorf("sub2api provider usage cost failed: %s", resp.Message)
+	}
+	return UpstreamProviderCost{
+		ProviderSlug: provider.Slug,
+		ProviderName: provider.Name,
+		ProviderType: provider.Type,
+		TodayCost:    resp.Data.TodayActualCost,
 	}, nil
 }
 

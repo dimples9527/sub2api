@@ -156,7 +156,7 @@
           <template #cell-today_consumption="{ row }">
             <div class="numeric-cell">
               <span class="numeric-value numeric-cost">
-                {{ formatMoney(balanceSummaryFor(row.slug)?.today_consumption) }}
+                {{ formatMoney(todayConsumptionForProvider(row.slug)) }}
               </span>
               <button
                 type="button"
@@ -477,6 +477,21 @@
               :placeholder="form.type === 'newapi' ? '/api/user/self' : '/api/v1/auth/me?timezone=Asia%2FShanghai'"
             />
           </div>
+          <div class="md:col-span-2">
+            <label class="input-label">
+              {{ t('admin.upstreamProviders.usageCostUrl') }}
+              <span class="text-xs font-normal text-gray-400">({{ t('common.optional') }})</span>
+            </label>
+            <input
+              v-model.trim="form.usage_cost_url"
+              type="text"
+              class="input"
+              list="upstream-provider-usage-cost-url-options"
+              :placeholder="form.type === 'newapi'
+                ? '/api/log/self/stat?type=0&token_name=&model_name=&start_timestamp={start_timestamp}&end_timestamp={end_timestamp}&group='
+                : '/api/v1/usage/dashboard/stats?timezone=Asia%2FShanghai'"
+            />
+          </div>
         </div>
 
         <datalist id="upstream-provider-base-url-options">
@@ -496,6 +511,9 @@
         </datalist>
         <datalist id="upstream-provider-balance-url-options">
           <option v-for="option in urlOptions.balance_url" :key="`balance-${option}`" :value="option" />
+        </datalist>
+        <datalist id="upstream-provider-usage-cost-url-options">
+          <option v-for="option in urlOptions.usage_cost_url" :key="`usage-cost-${option}`" :value="option" />
         </datalist>
 
         <div class="grid gap-4 md:grid-cols-2">
@@ -695,7 +713,7 @@
             </div>
             <div class="balance-metric">
               <span>{{ t('admin.upstreamProviders.todayConsumption') }}</span>
-              <strong>{{ formatMoney(selectedBalanceSummary?.today_consumption) }}</strong>
+              <strong>{{ formatMoney(todayConsumptionForProvider(selectedBalanceProviderSlug)) }}</strong>
             </div>
             <div class="balance-metric">
               <span>{{ t('admin.upstreamProviders.amountScale') }}</span>
@@ -921,6 +939,7 @@ const form = reactive<UpstreamProviderConfig>({
   groups_url: '',
   available_groups_url: '',
   balance_url: '',
+  usage_cost_url: '',
   email: '',
   username: '',
   password: '',
@@ -980,6 +999,7 @@ const filteredProviders = computed(() => {
       provider.groups_url,
       provider.available_groups_url,
       provider.balance_url,
+      provider.usage_cost_url,
     ]
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(keyword))
@@ -993,6 +1013,7 @@ const urlOptions = computed(() => ({
   groups_url: uniqueProviderURLs('groups_url'),
   available_groups_url: uniqueProviderURLs('available_groups_url'),
   balance_url: uniqueProviderURLs('balance_url'),
+  usage_cost_url: uniqueProviderURLs('usage_cost_url'),
 }))
 
 const keysDialogTitle = computed(() => {
@@ -1034,10 +1055,27 @@ const totalProviderBalance = computed(() => {
 
   return total
 })
-const totalTodayConsumption = computed(() => Object.values(balanceSummaries.value).reduce((total, summary) => {
-  const amount = Number(summary.today_consumption)
-  return Number.isFinite(amount) ? total + amount : total
-}, 0))
+const totalTodayConsumption = computed(() => {
+  const seen = new Set<string>()
+  let total = 0
+
+  for (const [slug, balance] of Object.entries(providerBalances.value)) {
+    const amount = Number(balance.today_cost)
+    if (Number.isFinite(amount)) {
+      seen.add(slug)
+      total += amount
+    }
+  }
+
+  for (const summary of Object.values(balanceSummaries.value)) {
+    const slug = summary.provider_slug
+    if (slug && seen.has(slug)) continue
+    const amount = Number(summary.today_consumption)
+    if (Number.isFinite(amount)) total += amount
+  }
+
+  return total
+})
 const selectedBalanceScale = computed(() => {
   const configured = balanceSamplerForm.value.provider_amount_scales[selectedBalanceProviderSlug.value]
   if (Number(configured) > 0) return Number(configured)
@@ -1065,6 +1103,7 @@ function resetForm() {
     groups_url: '',
     available_groups_url: '',
     balance_url: '',
+    usage_cost_url: '',
     email: '',
     username: '',
     password: '',
@@ -1081,6 +1120,7 @@ function fillForm(provider: UpstreamProviderConfig) {
     groups_url: provider.groups_url || '',
     available_groups_url: provider.available_groups_url || (provider.type === 'newapi' ? '' : provider.groups_url || ''),
     balance_url: provider.balance_url || '',
+    usage_cost_url: provider.usage_cost_url || '',
     email: provider.email || '',
     username: provider.username || '',
     password: '',
@@ -1104,6 +1144,7 @@ function buildPayload(): UpstreamProviderConfig {
     groups_url: form.type === 'newapi' ? form.groups_url?.trim() || '' : '',
     available_groups_url: form.available_groups_url?.trim() || '',
     balance_url: form.balance_url?.trim() || '',
+    usage_cost_url: form.usage_cost_url?.trim() || '',
     email: form.email?.trim() || '',
     username: form.username?.trim() || '',
     account_name_prefix: form.account_name_prefix?.trim() || '',
@@ -1361,9 +1402,11 @@ function closeBalanceDetails() {
   balanceDetailsOpen.value = false
 }
 
-function balanceSummaryFor(providerSlug: string | undefined) {
+function todayConsumptionForProvider(providerSlug: string | undefined) {
   if (!providerSlug) return undefined
-  return balanceSummaries.value[providerSlug]
+  const liveCost = Number(providerBalances.value[providerSlug]?.today_cost)
+  if (Number.isFinite(liveCost)) return liveCost
+  return balanceSummaries.value[providerSlug]?.today_consumption
 }
 
 function balanceRowStatus(row: UpstreamBalanceDailyRow) {
@@ -1437,6 +1480,15 @@ function endpointOptions(provider: UpstreamProviderConfig): EndpointOption[] {
       key: 'balance',
       label: t('admin.upstreamProviders.balanceEndpointShort'),
       value: balanceURL,
+    })
+  }
+
+  const usageCostURL = usageCostURLForProvider(provider)
+  if (usageCostURL) {
+    options.push({
+      key: 'usage_cost',
+      label: t('admin.upstreamProviders.usageCostEndpointShort'),
+      value: usageCostURL,
     })
   }
 
@@ -1543,6 +1595,10 @@ function balanceURLForProvider(provider: UpstreamProviderConfig) {
   return provider.balance_url || ''
 }
 
+function usageCostURLForProvider(provider: UpstreamProviderConfig) {
+  return provider.usage_cost_url || ''
+}
+
 function retainBalancesForProviders(nextProviders: UpstreamProviderConfig[]) {
   const slugs = new Set(nextProviders.map(provider => provider.slug))
   providerBalances.value = Object.fromEntries(
@@ -1550,7 +1606,7 @@ function retainBalancesForProviders(nextProviders: UpstreamProviderConfig[]) {
   )
 }
 
-function uniqueProviderURLs(field: 'base_url' | 'api_keys_url' | 'login_url' | 'groups_url' | 'available_groups_url' | 'balance_url') {
+function uniqueProviderURLs(field: 'base_url' | 'api_keys_url' | 'login_url' | 'groups_url' | 'available_groups_url' | 'balance_url' | 'usage_cost_url') {
   const seen = new Set<string>()
   const out: string[] = []
   for (const provider of providers.value) {

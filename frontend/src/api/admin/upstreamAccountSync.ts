@@ -157,6 +157,7 @@ export interface UpstreamBalanceSnapshot {
   provider_name?: string
   provider_type?: string
   balance: number
+  today_cost?: number
   amount_scale: number
   status: 'success' | 'failed' | string
   error?: string

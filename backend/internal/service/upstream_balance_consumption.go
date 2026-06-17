@@ -25,6 +25,7 @@ type UpstreamBalanceSnapshot struct {
 	ProviderName string    `json:"provider_name"`
 	ProviderType string    `json:"provider_type"`
 	Balance      float64   `json:"balance"`
+	TodayCost    float64   `json:"today_cost"`
 	AmountScale  float64   `json:"amount_scale"`
 	Status       string    `json:"status"`
 	Error        string    `json:"error,omitempty"`
@@ -110,6 +111,7 @@ type UpstreamBalanceStore interface {
 type upstreamBalanceProviderSource interface {
 	ListProviders(ctx context.Context) ([]UpstreamProviderConfig, error)
 	FetchProviderBalance(ctx context.Context, slug string) (UpstreamProviderBalance, error)
+	FetchProviderTodayCost(ctx context.Context, slug string, day time.Time) (UpstreamProviderCost, error)
 }
 
 type UpstreamBalanceConsumptionService struct {
@@ -237,10 +239,8 @@ func buildUpstreamBalanceDailyRowsInLocation(snapshots []UpstreamBalanceSnapshot
 			row.CurrentBalance = last.Balance * lastScale
 			row.FirstSnapshotAt = &first.CapturedAt
 			row.LastSnapshotAt = &last.CapturedAt
-		}
-		if row.SnapshotCount >= 2 {
 			row.Complete = true
-			row.ConsumptionAmount = row.OpeningBalance + row.RechargeAmount - row.ClosingBalance
+			row.ConsumptionAmount = last.TodayCost
 			row.Anomaly = row.ConsumptionAmount < 0
 		}
 		rows = append(rows, row)
@@ -377,6 +377,7 @@ func (s *UpstreamBalanceConsumptionService) RunSample(ctx context.Context) (Upst
 			continue
 		}
 		balance, err := s.provider.FetchProviderBalance(ctx, provider.Slug)
+		cost, costErr := s.provider.FetchProviderTodayCost(ctx, provider.Slug, now)
 		amountScale := upstreamBalanceAmountScale(config, provider.Slug)
 		snapshot := UpstreamBalanceSnapshot{
 			ProviderSlug: provider.Slug,
@@ -394,6 +395,22 @@ func (s *UpstreamBalanceConsumptionService) RunSample(ctx context.Context) (Upst
 			snapshot.ProviderName = balance.ProviderName
 			snapshot.ProviderType = balance.ProviderType
 			snapshot.Balance = balance.Balance
+		}
+		if costErr != nil {
+			snapshot.Status = "failed"
+			if snapshot.Error != "" {
+				snapshot.Error += "; "
+			}
+			snapshot.Error += costErr.Error()
+			failures = append(failures, provider.Slug+": "+costErr.Error())
+		} else {
+			if snapshot.ProviderName == "" {
+				snapshot.ProviderName = cost.ProviderName
+			}
+			if snapshot.ProviderType == "" {
+				snapshot.ProviderType = cost.ProviderType
+			}
+			snapshot.TodayCost = cost.TodayCost
 		}
 		if _, addErr := s.store.AddSnapshot(ctx, snapshot); addErr != nil {
 			failures = append(failures, provider.Slug+": "+addErr.Error())

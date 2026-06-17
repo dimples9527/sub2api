@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 type NewAPIProviderAdapter struct {
@@ -31,6 +32,7 @@ type newAPIProviderGroupRatio struct {
 }
 
 const defaultNewAPIProviderBalanceURL = "/api/user/self"
+const defaultNewAPIProviderUsageCostURL = "/api/log/self/stat?type=0&token_name=&model_name=&start_timestamp={start_timestamp}&end_timestamp={end_timestamp}&group="
 
 func (r *newAPIProviderGroupRatio) UnmarshalJSON(raw []byte) error {
 	value := strings.TrimSpace(string(raw))
@@ -177,6 +179,42 @@ func (a *NewAPIProviderAdapter) FetchBalance(ctx context.Context, provider Upstr
 		return balance, nil
 	}
 	return UpstreamProviderBalance{}, fmt.Errorf("newapi provider balance failed after auth retry")
+}
+
+func (a *NewAPIProviderAdapter) FetchTodayCost(ctx context.Context, provider UpstreamProviderConfig, day time.Time) (UpstreamProviderCost, error) {
+	usageCostURL := strings.TrimSpace(provider.UsageCostURL)
+	if usageCostURL == "" {
+		usageCostURL = defaultNewAPIProviderUsageCostURL
+	}
+	usageCostURL = upstreamProviderUsageCostURL(usageCostURL, day, upstreamBalanceStatsLocation())
+	for attempt := 0; attempt < 2; attempt++ {
+		session, err := a.ensureSession(ctx, provider)
+		if err != nil {
+			return UpstreamProviderCost{}, err
+		}
+		payload, status, err := a.request(ctx, provider, session, usageCostURL, "newapi provider usage cost")
+		if err != nil {
+			return UpstreamProviderCost{}, err
+		}
+		if status < 200 || status >= 300 {
+			requestErr := upstreamProviderHTTPError("newapi provider usage cost", status, payload)
+			if attempt == 0 && upstreamProviderAuthFailureHint(status, payload, requestErr) {
+				a.clearSession(provider.Slug)
+				continue
+			}
+			return UpstreamProviderCost{}, requestErr
+		}
+		cost, err := parseNewAPIProviderTodayCost(provider, payload)
+		if err != nil {
+			if attempt == 0 && upstreamProviderAuthFailureHint(status, payload, err) {
+				a.clearSession(provider.Slug)
+				continue
+			}
+			return UpstreamProviderCost{}, err
+		}
+		return cost, nil
+	}
+	return UpstreamProviderCost{}, fmt.Errorf("newapi provider usage cost failed after auth retry")
 }
 
 func (a *NewAPIProviderAdapter) Test(ctx context.Context, provider UpstreamProviderConfig) UpstreamProviderTestResult {
@@ -502,6 +540,31 @@ func parseNewAPIProviderBalance(provider UpstreamProviderConfig, payload []byte)
 		ProviderName: provider.Name,
 		ProviderType: provider.Type,
 		Balance:      resp.Data.Quota / 500000,
+	}, nil
+}
+
+func parseNewAPIProviderTodayCost(provider UpstreamProviderConfig, payload []byte) (UpstreamProviderCost, error) {
+	var resp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			Quota float64 `json:"quota"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(payload, &resp); err != nil {
+		return UpstreamProviderCost{}, fmt.Errorf("decode newapi provider usage cost response: %w", err)
+	}
+	if !resp.Success {
+		if resp.Message == "" {
+			resp.Message = "unknown error"
+		}
+		return UpstreamProviderCost{}, fmt.Errorf("newapi provider usage cost failed: %s", resp.Message)
+	}
+	return UpstreamProviderCost{
+		ProviderSlug: provider.Slug,
+		ProviderName: provider.Name,
+		ProviderType: provider.Type,
+		TodayCost:    resp.Data.Quota / 500000,
 	}, nil
 }
 
