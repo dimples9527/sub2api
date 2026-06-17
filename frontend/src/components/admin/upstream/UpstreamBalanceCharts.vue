@@ -51,7 +51,7 @@
           type="button"
           class="stat-action-btn stat-action-success"
           title="记录充值"
-          @click="$emit('add-recharge')"
+          @click="emit('add-recharge')"
         >
           <Icon name="plus" size="sm" :stroke-width="2" />
         </button>
@@ -70,7 +70,7 @@
           type="button"
           class="stat-action-btn stat-action-danger"
           title="查看异常详情"
-          @click="$emit('show-anomalies')"
+          @click="emit('show-anomalies')"
         >
           <Icon name="eye" size="sm" :stroke-width="2" />
         </button>

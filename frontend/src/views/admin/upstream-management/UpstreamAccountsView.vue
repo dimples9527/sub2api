@@ -255,6 +255,42 @@
                 </div>
               </template>
 
+              <template #cell-balance="{ row }">
+                <div class="balance-cell">
+                  <span v-if="getProviderBalance(row.provider_slug) !== null" class="balance-value">
+                    ${{ formatMoney(getProviderBalance(row.provider_slug) || 0) }}
+                  </span>
+                  <span v-else class="dash">-</span>
+                  <button
+                    v-if="getProviderBalance(row.provider_slug) !== null"
+                    type="button"
+                    class="trend-btn"
+                    title="查看余额趋势"
+                    @click="openTrendModal(row.provider_slug, row.provider_name)"
+                  >
+                    <Icon name="chart" size="xs" :stroke-width="2" />
+                  </button>
+                </div>
+              </template>
+
+              <template #cell-today_consumption="{ row }">
+                <div class="balance-cell">
+                  <span v-if="getProviderConsumption(row.provider_slug) !== null" class="consumption-value">
+                    ${{ formatMoney(getProviderConsumption(row.provider_slug) || 0) }}
+                  </span>
+                  <span v-else class="dash">-</span>
+                  <button
+                    v-if="getProviderConsumption(row.provider_slug) !== null"
+                    type="button"
+                    class="trend-btn"
+                    title="查看消费趋势"
+                    @click="openTrendModal(row.provider_slug, row.provider_name)"
+                  >
+                    <Icon name="trendingUp" size="xs" :stroke-width="2" />
+                  </button>
+                </div>
+              </template>
+
               <template #cell-status="{ row }">
                 <div v-if="getMatchedAccount(row)" class="status-cell">
                   <AccountStatusIndicator
@@ -471,6 +507,13 @@
           @close="closeTempUnschedModal"
           @reset="handleTempUnschedReset"
         />
+        <UpstreamProviderTrendModal
+          :show="showTrendModal"
+          :provider-slug="trendProviderSlug"
+          :provider-name="trendProviderName"
+          :rows="balanceOverview?.rows || []"
+          @close="closeTrendModal"
+        />
       </template>
     </TablePageLayout>
   </AppLayout>
@@ -506,6 +549,7 @@ import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
 import TempUnschedStatusModal from '@/components/account/TempUnschedStatusModal.vue'
 import UpstreamBalanceCharts from '@/components/admin/upstream/UpstreamBalanceCharts.vue'
+import UpstreamProviderTrendModal from '@/components/admin/upstream/UpstreamProviderTrendModal.vue'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -543,6 +587,9 @@ const accountGroupPlatform = ref<GroupPlatform | undefined>()
 const balanceOverview = ref<UpstreamBalanceConsumptionOverview | null>(null)
 const loadingBalance = ref(false)
 const balanceStatsDays = ref(30)
+const showTrendModal = ref(false)
+const trendProviderSlug = ref('')
+const trendProviderName = ref('')
 
 type UpstreamAccountSyncLogEntry = UpstreamAccountSyncUnbindDetail & {
   created_at: string
@@ -555,6 +602,8 @@ const columns = computed<Column[]>(() => [
   { key: 'local_account_name', label: t('admin.upstreamAccounts.columns.localAccount'), class: 'upstream-center-column' },
   { key: 'upstream_rate_multiplier', label: t('admin.upstreamAccounts.columns.upstreamRate'), sortable: true, class: 'upstream-center-column upstream-rate-column' },
   { key: 'local_group_name', label: t('admin.upstreamAccounts.columns.boundGroups'), class: 'upstream-center-column' },
+  { key: 'balance', label: '余额', class: 'upstream-center-column' },
+  { key: 'today_consumption', label: '今日消费', class: 'upstream-center-column' },
   { key: 'status', label: t('admin.accounts.columns.status'), class: 'upstream-center-column' },
   { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), class: 'upstream-center-column' },
   { key: 'test_status', label: t('admin.upstreamAccounts.columns.testStatus'), class: 'upstream-center-column' },
@@ -1128,6 +1177,41 @@ function upstreamAccountSyncTriggerSourceLabel(triggerSource: string | undefined
   if (triggerSource === 'scheduled_rate_guard') return t('admin.upstreamAccounts.triggerScheduledRateGuard')
   if (triggerSource === 'manual_rate_guard') return t('admin.upstreamAccounts.triggerManualRateGuard')
   return t('admin.upstreamAccounts.triggerManualSync')
+}
+
+function getProviderBalance(providerSlug: string): number | null {
+  if (!balanceOverview.value?.summaries) return null
+  const summary = balanceOverview.value.summaries[providerSlug]
+  return summary ? summary.current_balance : null
+}
+
+function getProviderConsumption(providerSlug: string): number | null {
+  if (!balanceOverview.value?.summaries) return null
+  const summary = balanceOverview.value.summaries[providerSlug]
+  return summary ? summary.today_consumption : null
+}
+
+function formatMoney(value: number): string {
+  if (value >= 1000000) {
+    return (value / 1000000).toFixed(2) + 'M'
+  } else if (value >= 1000) {
+    return (value / 1000).toFixed(2) + 'K'
+  } else if (value >= 1) {
+    return value.toFixed(2)
+  } else if (value >= 0.01) {
+    return value.toFixed(3)
+  }
+  return value.toFixed(4)
+}
+
+function openTrendModal(providerSlug: string, providerName: string) {
+  trendProviderSlug.value = providerSlug
+  trendProviderName.value = providerName
+  showTrendModal.value = true
+}
+
+function closeTrendModal() {
+  showTrendModal.value = false
 }
 
 onMounted(reload)
@@ -1764,6 +1848,49 @@ onMounted(reload)
 
 .account-id-tag {
   margin-top: 6px;
+}
+
+.balance-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.balance-value {
+  color: #059669;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+.consumption-value {
+  color: #ea580c;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+.trend-btn {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  background: #fff;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.trend-btn:hover {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #2563eb;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.2);
+}
+
+.trend-btn:active {
+  transform: translateY(0);
 }
 
 .platform-text-openai {
