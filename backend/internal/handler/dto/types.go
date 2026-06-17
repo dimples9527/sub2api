@@ -190,6 +190,9 @@ type Account struct {
 	SessionWindowStart  *time.Time `json:"session_window_start"`
 	SessionWindowEnd    *time.Time `json:"session_window_end"`
 	SessionWindowStatus string     `json:"session_window_status"`
+	LastTestStatus      string     `json:"last_test_status,omitempty"`
+	LastTestedAt        string     `json:"last_tested_at,omitempty"`
+	LastTestError       string     `json:"last_test_error,omitempty"`
 
 	// 5h窗口费用控制（仅 Anthropic OAuth/SetupToken 账号有效）
 	// 从 extra 字段提取，方便前端显示和编辑

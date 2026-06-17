@@ -61,6 +61,7 @@ vi.mock('@/stores/app', () => ({
 describe('UpstreamAccountsView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    window.localStorage.clear()
     upstreamAccountSyncMock.getPreview.mockResolvedValue({
       default_provider: {},
       providers: [],
@@ -352,6 +353,81 @@ describe('UpstreamAccountsView', () => {
 
     expect(wrapper.find('.columns').text()).toContain('status')
     expect(wrapper.find('.columns').text()).toContain('schedulable')
+  })
+
+  it('colors upstream key, local account, and bound groups by matched account platform', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValue({
+      default_provider: {},
+      providers: [],
+      summary: {
+        upstream_key_count: 1,
+        matched_account_count: 1,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'noop',
+          provider_slug: 'anthropic-upstream',
+          provider_name: 'Anthropic Upstream',
+          upstream_key_name: 'claude-key',
+          local_account_name: 'local-claude',
+          matched_account_id: 12,
+          matched_account_name: 'local-claude',
+          upstream_group_name: 'claude',
+          upstream_rate_multiplier: 1,
+          rate_violation: false,
+          bound_groups: [
+            { id: 9, name: 'Claude', rate_multiplier: 1, rate_violation: false },
+          ],
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+    accountsMock.getById.mockResolvedValueOnce({
+      id: 12,
+      name: 'local-claude',
+      platform: 'anthropic',
+      type: 'apikey',
+      status: 'active',
+      schedulable: true,
+      group_ids: [9],
+      groups: [],
+    })
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any) => h('div', [
+                h('div', { class: 'upstream-slot' }, slots['cell-upstream_key_name']?.({ row })),
+                h('div', { class: 'local-slot' }, slots['cell-local_account_name']?.({ row })),
+                h('div', { class: 'groups-slot' }, slots['cell-local_group_name']?.({ row })),
+              ])))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('.upstream-slot .main-text').classes()).toContain('platform-text-anthropic')
+    expect(wrapper.find('.local-slot .main-text').classes()).toContain('platform-text-anthropic')
+    expect(wrapper.find('.local-slot .account-id-tag').classes()).toContain('platform-tag-anthropic')
+    expect(wrapper.find('.groups-slot .group-chip').classes()).toContain('platform-tag-anthropic')
   })
 
   it('edits matched account group bindings from the action column', async () => {
@@ -831,5 +907,78 @@ describe('UpstreamAccountsView', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('admin.upstreamAccounts.testStatusSuccess')
+  })
+
+  it('restores the last final account test status from the matched account response', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValue({
+      default_provider: {},
+      providers: [],
+      summary: {
+        upstream_key_count: 1,
+        matched_account_count: 1,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'noop',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-a',
+          local_account_name: 'local-a',
+          matched_account_id: 12,
+          matched_account_name: 'local-a',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 2,
+          rate_violation: false,
+          bound_groups: [
+            { id: 7, name: 'VIP', rate_multiplier: 2, rate_violation: false },
+          ],
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+    accountsMock.getById.mockResolvedValueOnce({
+      id: 12,
+      name: 'local-a',
+      platform: 'openai',
+      type: 'apikey',
+      status: 'active',
+      schedulable: true,
+      group_ids: [7],
+      groups: [],
+      last_test_status: 'failed',
+      last_tested_at: '2026-06-16T00:00:00Z',
+      last_test_error: 'upstream failed',
+    })
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any) => h('div', [
+                slots['cell-test_status']?.({ row }),
+              ])))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('admin.upstreamAccounts.testStatusFailed')
   })
 })

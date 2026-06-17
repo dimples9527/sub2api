@@ -179,20 +179,39 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		return s.sendErrorAndEnd(c, "Account not found")
 	}
 
+	var testErr error
 	// Route to platform-specific test method
 	if account.IsOpenAI() {
-		return s.testOpenAIAccountConnection(c, account, modelID, prompt, normalizeAccountTestMode(mode))
+		testErr = s.testOpenAIAccountConnection(c, account, modelID, prompt, normalizeAccountTestMode(mode))
+	} else if account.IsGemini() {
+		testErr = s.testGeminiAccountConnection(c, account, modelID, prompt)
+	} else if account.Platform == PlatformAntigravity {
+		testErr = s.routeAntigravityTest(c, account, modelID, prompt)
+	} else {
+		testErr = s.testClaudeAccountConnection(c, account, modelID)
 	}
 
-	if account.IsGemini() {
-		return s.testGeminiAccountConnection(c, account, modelID, prompt)
-	}
+	s.persistLastAccountTestStatus(ctx, account.ID, testErr)
+	return testErr
+}
 
-	if account.Platform == PlatformAntigravity {
-		return s.routeAntigravityTest(c, account, modelID, prompt)
+func (s *AccountTestService) persistLastAccountTestStatus(ctx context.Context, accountID int64, testErr error) {
+	if s == nil || s.accountRepo == nil || accountID <= 0 {
+		return
 	}
-
-	return s.testClaudeAccountConnection(c, account, modelID)
+	status := "success"
+	errorMsg := ""
+	if testErr != nil {
+		status = "failed"
+		errorMsg = testErr.Error()
+	}
+	if err := s.accountRepo.UpdateExtra(ctx, accountID, map[string]any{
+		"last_test_status": status,
+		"last_tested_at":   time.Now().UTC().Format(time.RFC3339Nano),
+		"last_test_error":  errorMsg,
+	}); err != nil {
+		log.Printf("failed to persist account test status: account=%d err=%v", accountID, err)
+	}
 }
 
 // testClaudeAccountConnection tests an Anthropic Claude account's connection

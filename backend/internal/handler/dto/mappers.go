@@ -236,6 +236,18 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		GroupIDs:                a.GroupIDs,
 	}
 
+	if a.Extra != nil {
+		if status, ok := a.Extra["last_test_status"].(string); ok && (status == "success" || status == "failed") {
+			out.LastTestStatus = status
+		}
+		if testedAt, ok := a.Extra["last_tested_at"].(string); ok {
+			out.LastTestedAt = testedAt
+		}
+		if testError, ok := a.Extra["last_test_error"].(string); ok {
+			out.LastTestError = testError
+		}
+	}
+
 	// 提取 5h 窗口费用控制和会话数量控制配置（仅 Anthropic OAuth/SetupToken 账号有效）
 	if a.IsAnthropicOAuthOrSetupToken() {
 		if limit := a.GetWindowCostLimit(); limit > 0 {

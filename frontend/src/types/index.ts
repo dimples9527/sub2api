@@ -868,6 +868,9 @@ export interface Account {
   session_window_start: string | null
   session_window_end: string | null
   session_window_status: 'allowed' | 'allowed_warning' | 'rejected' | null
+  last_test_status?: 'success' | 'failed' | null
+  last_tested_at?: string | null
+  last_test_error?: string | null
 
   // 5h窗口费用控制（仅 Anthropic OAuth/SetupToken 账号有效）
   window_cost_limit?: number | null
