@@ -143,7 +143,7 @@
               <span v-else class="numeric-muted">-</span>
               <button
                 type="button"
-                class="mini-icon-button"
+                class="balance-action-button"
                 :disabled="balanceLoadingSlugs.has(row.slug)"
                 :title="t('admin.upstreamProviders.fetchBalance')"
                 @click="fetchProviderBalance(row)"
@@ -160,7 +160,7 @@
               </span>
               <button
                 type="button"
-                class="mini-icon-button"
+                class="balance-action-button balance-more-button"
                 :title="t('common.more')"
                 @click="openBalanceDetails(row.slug)"
               >
@@ -1791,6 +1791,14 @@ onMounted(reload)
 
 .mini-icon-button {
   @apply inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-gray-400 transition-colors hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-500 dark:hover:bg-dark-700 dark:hover:text-primary-300;
+}
+
+.balance-action-button {
+  @apply inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-primary-200 bg-primary-50 text-primary-600 shadow-sm transition-all hover:border-primary-300 hover:bg-primary-100 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 dark:border-primary-800 dark:bg-primary-950/40 dark:text-primary-400 dark:hover:border-primary-700 dark:hover:bg-primary-900/50;
+}
+
+.balance-more-button {
+  @apply border-violet-200 bg-violet-50 text-violet-600 hover:border-violet-300 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-400 dark:hover:border-violet-700 dark:hover:bg-violet-900/50;
 }
 
 .center-cell {
