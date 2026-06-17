@@ -371,6 +371,12 @@
             />
           </template>
         </DataTable>
+
+        <UpstreamBalanceCharts
+          :overview="balanceOverview"
+          :loading="loading"
+          :days="30"
+        />
       </template>
     </TablePageLayout>
 
@@ -872,6 +878,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Icon from '@/components/icons/Icon.vue'
+import UpstreamBalanceCharts from '@/components/admin/upstream/UpstreamBalanceCharts.vue'
 
 const { t } = useI18n()
 const appStore = useAppStore()

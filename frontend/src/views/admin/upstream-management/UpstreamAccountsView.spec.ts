@@ -155,6 +155,7 @@ describe('UpstreamAccountsView', () => {
           Icon: true,
           Select: true,
           GroupSelector: true,
+          UpstreamBalanceCharts: { template: '<div data-test="balance-charts" />' },
         },
       },
     })
@@ -163,6 +164,28 @@ describe('UpstreamAccountsView', () => {
 
     expect(wrapper.text()).toContain('local-a')
     expect(wrapper.text()).toContain('-')
+  })
+
+  it('does not render balance charts above the upstream account table', async () => {
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><div data-test="filters"><slot name="filters" /></div><div data-test="table"><slot name="table" /></div></div>' },
+          DataTable: { template: '<div data-test="accounts-table" />' },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+          GroupSelector: true,
+          UpstreamBalanceCharts: { template: '<div data-test="balance-charts" />' },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="balance-charts"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="accounts-table"]').exists()).toBe(true)
   })
 
   it('warns when manual rate guard leaves rate risks after refresh', async () => {

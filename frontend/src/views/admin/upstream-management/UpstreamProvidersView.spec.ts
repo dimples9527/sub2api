@@ -51,6 +51,13 @@ vi.mock('@/stores/app', () => ({
   }),
 }))
 
+vi.mock('@/components/admin/upstream/UpstreamBalanceCharts.vue', () => ({
+  default: {
+    props: ['overview', 'loading', 'days'],
+    template: '<div data-test="balance-charts">{{ days }}-{{ Boolean(overview) }}-{{ loading }}</div>',
+  },
+}))
+
 describe('UpstreamProvidersView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -194,6 +201,52 @@ describe('UpstreamProvidersView', () => {
     await balanceButton!.trigger('click')
     await flushPromises()
     expect(adminAPIMock.upstreamProviders.getBalance).toHaveBeenCalledTimes(2)
+  })
+
+  it('renders balance charts at the bottom of the upstream provider table area', async () => {
+    adminAPIMock.upstreamProviders.list.mockResolvedValue([
+      {
+        type: 'sub2api',
+        slug: 'sub-main',
+        name: 'Sub Main',
+        enabled: true,
+        is_default: true,
+        base_url: 'https://upstream.example.com',
+        login_url: '/api/v1/auth/login',
+        api_keys_url: '/api/admin/keys',
+        account_rate_multiplier_scale: 1,
+      },
+    ])
+
+    const wrapper = mount(UpstreamProvidersView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><div data-test="filters"><slot name="filters" /></div><div data-test="table"><slot name="table" /></div></div>' },
+          DataTable: { template: '<div data-test="providers-table" />' },
+          BaseDialog: {
+            props: ['show'],
+            template: '<div v-if="show"><slot /><slot name="footer" /></div>',
+          },
+          ConfirmDialog: true,
+          EmptyState: true,
+          Icon: true,
+          UpstreamBalanceCharts: {
+            props: ['overview', 'loading', 'days'],
+            template: '<div data-test="balance-charts">{{ days }}-{{ Boolean(overview) }}-{{ loading }}</div>',
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const tableArea = wrapper.find('[data-test="table"]')
+    expect(tableArea.find('[data-test="providers-table"]').exists()).toBe(true)
+    expect(tableArea.find('[data-test="balance-charts"]').exists()).toBe(true)
+    expect(tableArea.text()).toContain('30-true-false')
+    expect(tableArea.element.lastElementChild?.getAttribute('data-test')).toBe('balance-charts')
+    expect(wrapper.find('[data-test="filters"] [data-test="balance-charts"]').exists()).toBe(false)
   })
 
   it('supports table controls, row expansion, and secondary column visibility', async () => {

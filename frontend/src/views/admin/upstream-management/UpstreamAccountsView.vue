@@ -3,12 +3,6 @@
     <TablePageLayout class="upstream-accounts-page">
       <template #filters>
         <div class="accounts-shell">
-          <!-- Balance Statistics Charts -->
-          <UpstreamBalanceCharts
-            :overview="balanceOverview"
-            :loading="loadingBalance"
-            :days="balanceStatsDays"
-          />
           <section class="accounts-topbar">
             <div class="stats-strip">
               <article
@@ -548,7 +542,6 @@ import GroupSelector from '@/components/common/GroupSelector.vue'
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
 import TempUnschedStatusModal from '@/components/account/TempUnschedStatusModal.vue'
-import UpstreamBalanceCharts from '@/components/admin/upstream/UpstreamBalanceCharts.vue'
 import UpstreamProviderTrendModal from '@/components/admin/upstream/UpstreamProviderTrendModal.vue'
 
 const { t } = useI18n()
@@ -585,8 +578,6 @@ const accountGroupDialogItem = ref<UpstreamAccountSyncItem | null>(null)
 const accountGroupIds = ref<number[]>([])
 const accountGroupPlatform = ref<GroupPlatform | undefined>()
 const balanceOverview = ref<UpstreamBalanceConsumptionOverview | null>(null)
-const loadingBalance = ref(false)
-const balanceStatsDays = ref(30)
 const showTrendModal = ref(false)
 const trendProviderSlug = ref('')
 const trendProviderName = ref('')
@@ -754,13 +745,12 @@ const emptyDescription = computed(() => {
 async function reload() {
   loading.value = true
   loadingRateGuardConfig.value = true
-  loadingBalance.value = true
   loadError.value = ''
   try {
     const [preview, config, balance] = await Promise.all([
       adminAPI.upstreamAccountSync.getPreview(),
       adminAPI.upstreamAccountSync.getRateGuardConfig(),
-      adminAPI.upstreamAccountSync.getBalanceConsumption(balanceStatsDays.value)
+      adminAPI.upstreamAccountSync.getBalanceConsumption(30)
     ])
     result.value = preview
     await syncMatchedAccounts(preview.items || [])
@@ -775,7 +765,6 @@ async function reload() {
   } finally {
     loading.value = false
     loadingRateGuardConfig.value = false
-    loadingBalance.value = false
   }
 }
 
