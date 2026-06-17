@@ -179,7 +179,13 @@ const routes: RouteRecordRaw[] = [
   // ==================== User Routes ====================
   {
     path: '/',
-    redirect: '/home'
+    redirect: () => {
+      const authStore = useAuthStore()
+      if (authStore.isAuthenticated && authStore.isAdmin) {
+        return '/admin/dashboard'
+      }
+      return '/dashboard'
+    }
   },
   {
     path: '/dashboard',
