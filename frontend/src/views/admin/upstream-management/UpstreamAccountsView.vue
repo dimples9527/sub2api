@@ -3,6 +3,12 @@
     <TablePageLayout class="upstream-accounts-page">
       <template #filters>
         <div class="accounts-shell">
+          <!-- Balance Statistics Charts -->
+          <UpstreamBalanceCharts
+            :overview="balanceOverview"
+            :loading="loadingBalance"
+            :days="balanceStatsDays"
+          />
           <section class="accounts-topbar">
             <div class="stats-strip">
               <article
@@ -189,15 +195,15 @@
 
               <template #cell-upstream_key_name="{ row }">
                 <div class="two-line-cell">
-                  <span class="main-text">{{ row.upstream_key_name }}</span>
+                  <span :class="['main-text', matchedAccountPlatformTextClass(row)]">{{ row.upstream_key_name }}</span>
                   <span class="sub-text">{{ row.upstream_group_name || '-' }}</span>
                 </div>
               </template>
 
               <template #cell-local_account_name="{ row }">
                 <div class="two-line-cell">
-                  <span class="main-text">{{ row.local_account_name || row.matched_account_name || '-' }}</span>
-                  <span v-if="row.matched_account_id" class="table-tag tag-account account-id-tag">
+                  <span :class="['main-text', matchedAccountPlatformTextClass(row)]">{{ row.local_account_name || row.matched_account_name || '-' }}</span>
+                  <span v-if="row.matched_account_id" :class="['table-tag', 'tag-account', 'account-id-tag', matchedAccountPlatformTagClass(row)]">
                     #{{ row.matched_account_id }} {{ row.matched_account_name || row.local_account_name }}
                   </span>
                   <div v-else-if="row.conflict_accounts?.length" class="tag-list">
@@ -232,9 +238,9 @@
               <template #cell-local_group_name="{ row }">
                 <div v-if="row.bound_groups?.length" class="tag-list group-list">
                   <span
-                    v-for="(group, index) in row.bound_groups"
+                    v-for="group in row.bound_groups"
                     :key="`${row.provider_slug}-${row.upstream_key_name}-${group.id}`"
-                    :class="['group-chip', groupChipClass(group, index)]"
+                    :class="['group-chip', matchedAccountPlatformTagClass(row)]"
                     :title="`${group.name} ${formatRate(group.rate_multiplier)}`"
                   >
                     {{ group.name }}
@@ -431,7 +437,7 @@
                 searchable
               />
               <div v-if="accountGroupIds.length" class="tag-list">
-                <span v-for="groupID in accountGroupIds" :key="groupID" class="group-chip group-chip-blue">
+                <span v-for="groupID in accountGroupIds" :key="groupID" :class="['group-chip', accountGroupPlatformTagClass]">
                   {{ groupNameById(groupID) }}
                 </span>
               </div>
@@ -482,6 +488,7 @@ import type {
   UpstreamAccountSyncRecord,
   UpstreamAccountSyncResult,
   UpstreamAccountSyncUnbindDetail,
+  UpstreamBalanceConsumptionOverview,
 } from '@/api/admin/upstreamAccountSync'
 import type { Account, AdminGroup, GroupPlatform } from '@/types'
 import { useAppStore } from '@/stores/app'
@@ -498,9 +505,12 @@ import GroupSelector from '@/components/common/GroupSelector.vue'
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
 import TempUnschedStatusModal from '@/components/account/TempUnschedStatusModal.vue'
+import UpstreamBalanceCharts from '@/components/admin/upstream/UpstreamBalanceCharts.vue'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+
+type AccountTestStatus = 'testing' | 'success' | 'failed'
 
 const result = ref<UpstreamAccountSyncResult | null>(null)
 const loading = ref(false)
@@ -515,7 +525,7 @@ const showTestModal = ref(false)
 const showTempUnsched = ref(false)
 const testingAccount = ref<Account | null>(null)
 const tempUnschedAccount = ref<Account | null>(null)
-const accountTestStatusById = ref<Record<number, 'testing' | 'success' | 'failed'>>({})
+const accountTestStatusById = ref<Record<number, AccountTestStatus>>({})
 const matchedAccountsById = ref<Record<number, Account>>({})
 const localGroups = ref<AdminGroup[]>([])
 const loadError = ref('')
@@ -530,6 +540,9 @@ const rateGuardForm = ref({
 const accountGroupDialogItem = ref<UpstreamAccountSyncItem | null>(null)
 const accountGroupIds = ref<number[]>([])
 const accountGroupPlatform = ref<GroupPlatform | undefined>()
+const balanceOverview = ref<UpstreamBalanceConsumptionOverview | null>(null)
+const loadingBalance = ref(false)
+const balanceStatsDays = ref(30)
 
 type UpstreamAccountSyncLogEntry = UpstreamAccountSyncUnbindDetail & {
   created_at: string
@@ -679,6 +692,7 @@ const accountGroupOptions = computed(() => {
   const platform = accountGroupPlatform.value
   return localGroups.value.filter(group => (!platform || group.platform === platform) && group.status === 'active')
 })
+const accountGroupPlatformTagClass = computed(() => platformTagClass(accountGroupPlatform.value))
 
 const emptyTitle = computed(() => {
   return loadError.value ? t('admin.upstreamAccounts.emptyNoDefaultTitle') : t('admin.upstreamAccounts.emptyTitle')
@@ -691,15 +705,18 @@ const emptyDescription = computed(() => {
 async function reload() {
   loading.value = true
   loadingRateGuardConfig.value = true
+  loadingBalance.value = true
   loadError.value = ''
   try {
-    const [preview, config] = await Promise.all([
+    const [preview, config, balance] = await Promise.all([
       adminAPI.upstreamAccountSync.getPreview(),
-      adminAPI.upstreamAccountSync.getRateGuardConfig()
+      adminAPI.upstreamAccountSync.getRateGuardConfig(),
+      adminAPI.upstreamAccountSync.getBalanceConsumption(balanceStatsDays.value)
     ])
     result.value = preview
     await syncMatchedAccounts(preview.items || [])
     applyRateGuardConfig(config)
+    balanceOverview.value = balance
     void loadLocalGroups()
   } catch (err) {
     const message = extractApiErrorMessage(err, t('admin.upstreamAccounts.loadFailed'))
@@ -709,6 +726,7 @@ async function reload() {
   } finally {
     loading.value = false
     loadingRateGuardConfig.value = false
+    loadingBalance.value = false
   }
 }
 
@@ -827,12 +845,25 @@ async function syncMatchedAccounts(syncItems: UpstreamAccountSyncItem[]) {
   )
 
   const nextMap: Record<number, Account> = {}
+  const nextTestStatusMap: Record<number, AccountTestStatus> = {}
   for (const entry of entries) {
     if (entry.status !== 'fulfilled') continue
     const [accountId, account] = entry.value
     nextMap[accountId] = account
+    if (account.last_test_status === 'success' || account.last_test_status === 'failed') {
+      nextTestStatusMap[accountId] = account.last_test_status
+    }
   }
   matchedAccountsById.value = nextMap
+  const currentTestStatuses = accountTestStatusById.value
+  for (const [accountId, status] of Object.entries(currentTestStatuses)) {
+    const numericId = Number(accountId)
+    if (!Number.isFinite(numericId) || numericId <= 0) continue
+    if (!nextTestStatusMap[numericId]) {
+      nextTestStatusMap[numericId] = status
+    }
+  }
+  accountTestStatusById.value = nextTestStatusMap
 }
 
 async function ensureMatchedAccount(row: UpstreamAccountSyncItem) {
@@ -864,7 +895,7 @@ function accountRowClass(row: UpstreamAccountSyncItem) {
   return ''
 }
 
-function accountTestStatusLabel(status: 'testing' | 'success' | 'failed' | undefined) {
+function accountTestStatusLabel(status: AccountTestStatus | undefined) {
   if (status === 'testing') return t('admin.upstreamAccounts.testStatusTesting')
   if (status === 'failed') return t('admin.upstreamAccounts.testStatusFailed')
   if (status === 'success') return t('admin.upstreamAccounts.testStatusSuccess')
@@ -898,14 +929,32 @@ function providerToneClass(providerSlug: string | undefined, target: 'card' | 't
   return `${target === 'card' ? 'source-card' : 'tag-provider'}-${tone}`
 }
 
-function groupChipClass(group: UpstreamAccountSyncBoundGroup, index: number) {
-  if (group.rate_violation) return 'group-chip-warning'
-  const name = (group.name || '').toLowerCase()
-  if (name.includes('绂忓埄') || name.includes('trial') || name.includes('free')) return 'group-chip-emerald'
-  if (name.includes('浼佷笟') || name.includes('enterprise') || name.includes('pro')) return 'group-chip-violet'
-  if (name.includes('娓犻亾') || name.includes('channel')) return 'group-chip-blue'
-  const tones = ['group-chip-emerald', 'group-chip-violet', 'group-chip-blue']
-  return tones[index % tones.length]
+function matchedAccountPlatform(row: UpstreamAccountSyncItem) {
+  return getMatchedAccount(row)?.platform || inferAccountGroupPlatform(row) || ''
+}
+
+function matchedAccountPlatformTagClass(row: UpstreamAccountSyncItem) {
+  return platformTagClass(matchedAccountPlatform(row))
+}
+
+function matchedAccountPlatformTextClass(row: UpstreamAccountSyncItem) {
+  return platformTextToneClass(matchedAccountPlatform(row))
+}
+
+function platformTagClass(platform: string | undefined) {
+  if (platform === 'anthropic') return 'platform-tag-anthropic'
+  if (platform === 'openai') return 'platform-tag-openai'
+  if (platform === 'antigravity') return 'platform-tag-antigravity'
+  if (platform === 'gemini') return 'platform-tag-gemini'
+  return 'platform-tag-default'
+}
+
+function platformTextToneClass(platform: string | undefined) {
+  if (platform === 'anthropic') return 'platform-text-anthropic'
+  if (platform === 'openai') return 'platform-text-openai'
+  if (platform === 'antigravity') return 'platform-text-antigravity'
+  if (platform === 'gemini') return 'platform-text-gemini'
+  return 'platform-text-default'
 }
 
 async function openAccountGroupDialog(row: UpstreamAccountSyncItem) {
@@ -971,7 +1020,7 @@ function closeTestModal() {
   testingAccount.value = null
 }
 
-function handleAccountTestResult(payload: { accountId: number; status: 'testing' | 'success' | 'failed' }) {
+function handleAccountTestResult(payload: { accountId: number; status: AccountTestStatus }) {
   accountTestStatusById.value = {
     ...accountTestStatusById.value,
     [payload.accountId]: payload.status
@@ -1715,6 +1764,51 @@ onMounted(reload)
 
 .account-id-tag {
   margin-top: 6px;
+}
+
+.platform-text-openai {
+  color: #047857;
+}
+
+.platform-text-anthropic {
+  color: #c2410c;
+}
+
+.platform-text-gemini {
+  color: #1d4ed8;
+}
+
+.platform-text-antigravity {
+  color: #6d28d9;
+}
+
+.platform-text-default {
+  color: #1f2937;
+}
+
+.platform-tag-openai {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.platform-tag-anthropic {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.platform-tag-gemini {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.platform-tag-antigravity {
+  background: #f5f3ff;
+  color: #6d28d9;
+}
+
+.platform-tag-default {
+  background: #f1f5f9;
+  color: #64748b;
 }
 
 .rate-cell {
