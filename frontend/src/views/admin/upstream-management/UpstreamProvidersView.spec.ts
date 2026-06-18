@@ -218,7 +218,7 @@ describe('UpstreamProvidersView', () => {
     expect(upstreamProvidersSource).toContain('@apply rounded-md bg-red-50 font-bold text-red-700 ring-1 ring-red-100')
   })
 
-  it('renders balance charts at the bottom of the upstream provider table area', async () => {
+  it('renders balance charts below the table layout instead of inside the table scroll container', async () => {
     adminAPIMock.upstreamProviders.list.mockResolvedValue([
       {
         type: 'sub2api',
@@ -236,8 +236,8 @@ describe('UpstreamProvidersView', () => {
     const wrapper = mount(UpstreamProvidersView, {
       global: {
         stubs: {
-          AppLayout: { template: '<div><slot /></div>' },
-          TablePageLayout: { template: '<div><div data-test="filters"><slot name="filters" /></div><div data-test="table"><slot name="table" /></div></div>' },
+          AppLayout: { template: '<div data-test="page"><slot /></div>' },
+          TablePageLayout: { template: '<div data-test="table-layout"><div data-test="filters"><slot name="filters" /></div><div data-test="table"><slot name="table" /></div></div>' },
           DataTable: { template: '<div data-test="providers-table" />' },
           BaseDialog: {
             props: ['show'],
@@ -258,10 +258,16 @@ describe('UpstreamProvidersView', () => {
 
     const tableArea = wrapper.find('[data-test="table"]')
     expect(tableArea.find('[data-test="providers-table"]').exists()).toBe(true)
-    expect(tableArea.find('[data-test="balance-charts"]').exists()).toBe(true)
-    expect(tableArea.text()).toContain('30-true-false')
-    expect(tableArea.element.lastElementChild?.getAttribute('data-test')).toBe('balance-charts')
+    expect(tableArea.find('[data-test="balance-charts"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="table-layout"] [data-test="balance-charts"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="provider-balance-charts-section"] [data-test="balance-charts"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="provider-balance-charts-section"]').text()).toContain('30-true-false')
     expect(wrapper.find('[data-test="filters"] [data-test="balance-charts"]').exists()).toBe(false)
+
+    expect(upstreamProvidersSource).toContain('.upstream-providers-page :deep(.table-page-layout)')
+    expect(upstreamProvidersSource).toContain('height: auto;')
+    expect(upstreamProvidersSource).toContain('.upstream-providers-page :deep(.layout-section-scrollable)')
+    expect(upstreamProvidersSource).toContain('overflow: visible;')
   })
 
   it('supports table controls, row expansion, and secondary column visibility', async () => {

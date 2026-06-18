@@ -1,7 +1,8 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
-      <template #filters>
+    <div class="upstream-providers-page">
+      <TablePageLayout>
+        <template #filters>
         <div class="upstream-toolbar">
           <div class="upstream-toolbar-left">
             <div class="upstream-toolbar-title">{{ t('admin.upstreamProviders.title') }}</div>
@@ -109,9 +110,9 @@
             </div>
           </div>
         </div>
-      </template>
+        </template>
 
-      <template #table>
+        <template #table>
         <DataTable
           :columns="columns"
           :data="filteredProviders"
@@ -393,15 +394,18 @@
               @action="openCreateDialog"
             />
           </template>
-        </DataTable>
+          </DataTable>
+        </template>
+      </TablePageLayout>
 
+      <section data-test="provider-balance-charts-section" class="upstream-balance-charts-section">
         <UpstreamBalanceCharts
           :overview="balanceOverview"
           :loading="loading"
           :days="30"
         />
-      </template>
-    </TablePageLayout>
+      </section>
+    </div>
 
     <BaseDialog
       :show="showBalanceSamplerDialog"
@@ -1766,6 +1770,23 @@ onMounted(reload)
 </script>
 
 <style scoped>
+.upstream-providers-page {
+  @apply space-y-6;
+}
+
+.upstream-providers-page :deep(.table-page-layout) {
+  height: auto;
+  min-height: calc(100vh - 64px - 4rem);
+}
+
+.upstream-providers-page :deep(.layout-section-scrollable) {
+  overflow: visible;
+}
+
+.upstream-balance-charts-section {
+  @apply min-w-0;
+}
+
 .upstream-toolbar {
   @apply flex min-h-20 flex-wrap items-center gap-4 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm dark:border-dark-700 dark:bg-dark-800;
 }
