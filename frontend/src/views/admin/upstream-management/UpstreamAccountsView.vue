@@ -38,6 +38,15 @@
               <button
                 type="button"
                 class="ui-button ui-button-primary"
+                :disabled="loading || syncing"
+                @click="openCreateAccountDialog"
+              >
+                <Icon name="plus" size="sm" :stroke-width="2" />
+                {{ t('admin.accounts.createAccount') }}
+              </button>
+              <button
+                type="button"
+                class="ui-button ui-button-primary"
                 :disabled="loading || syncing || !canSync"
                 @click="runSync"
               >
@@ -525,6 +534,14 @@
           @close="closeTestModal"
           @test-result="handleAccountTestResult"
         />
+        <CreateAccountModal
+          v-if="showCreateAccountModal"
+          :show="showCreateAccountModal"
+          :proxies="accountProxies"
+          :groups="accountEditGroups"
+          @close="closeCreateAccountDialog"
+          @created="handleAccountCreated"
+        />
         <EditAccountModal
           v-if="showEditAccountModal"
           :show="showEditAccountModal"
@@ -589,7 +606,7 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
-import { EditAccountModal } from '@/components/account'
+import { CreateAccountModal, EditAccountModal } from '@/components/account'
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
 import TempUnschedStatusModal from '@/components/account/TempUnschedStatusModal.vue'
@@ -611,6 +628,7 @@ const testingAccountId = ref<number | null>(null)
 const togglingSchedulableId = ref<number | null>(null)
 const showTestModal = ref(false)
 const showTempUnsched = ref(false)
+const showCreateAccountModal = ref(false)
 const showEditAccountModal = ref(false)
 const showDeleteAccountDialog = ref(false)
 const testingAccount = ref<Account | null>(null)
@@ -1152,6 +1170,24 @@ async function loadAccountEditOptions() {
   ])
   accountProxies.value = proxies
   accountEditGroups.value = groups
+}
+
+async function openCreateAccountDialog() {
+  try {
+    await loadAccountEditOptions()
+    showCreateAccountModal.value = true
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.loadAccountFailed')))
+  }
+}
+
+function closeCreateAccountDialog() {
+  showCreateAccountModal.value = false
+}
+
+async function handleAccountCreated() {
+  showCreateAccountModal.value = false
+  await reload()
 }
 
 async function openAccountEditDialog(row: UpstreamAccountSyncItem) {
@@ -1805,7 +1841,7 @@ onMounted(reload)
 .accounts-table-card :deep(table) {
   border-collapse: collapse;
   table-layout: fixed;
-  width: 1700px;
+  width: max(100%, 1700px);
   min-width: 1700px;
 }
 

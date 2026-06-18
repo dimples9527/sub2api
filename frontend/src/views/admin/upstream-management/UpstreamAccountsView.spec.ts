@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { h, onMounted } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import upstreamAccountsSource from './UpstreamAccountsView.vue?raw'
 import UpstreamAccountsView from './UpstreamAccountsView.vue'
 
 const { upstreamAccountSyncMock, accountsMock, groupsMock, proxiesMock, appStoreMock } = vi.hoisted(() => ({
@@ -574,6 +575,48 @@ describe('UpstreamAccountsView', () => {
     expect(classes).toContain('source:upstream-center-column upstream-source-column')
     expect(classes).toContain('local_group_name:upstream-center-column upstream-bound-groups-column')
     expect(classes).toContain('actions:upstream-center-column upstream-actions-column')
+  })
+
+  it('lets the fixed upstream account table fill wide containers', () => {
+    expect(upstreamAccountsSource).toContain('width: max(100%, 1700px);')
+    expect(upstreamAccountsSource).not.toMatch(/^\s+width:\s*1700px;$/m)
+  })
+
+  it('opens create account modal from upstream account toolbar and refreshes after create', async () => {
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: { template: '<div><slot name="empty" /></div>' },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+          CreateAccountModal: {
+            props: ['show', 'proxies', 'groups'],
+            emits: ['created', 'close'],
+            setup(props, { emit }) {
+              return () => props.show
+                ? h('button', { class: 'create-account-modal', onClick: () => emit('created') }, 'create')
+                : null
+            },
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text().includes('admin.accounts.createAccount'))?.trigger('click')
+    await flushPromises()
+
+    expect(proxiesMock.getAll).toHaveBeenCalled()
+    expect(groupsMock.getAll).toHaveBeenCalled()
+    expect(wrapper.find('.create-account-modal').exists()).toBe(true)
+
+    await wrapper.find('.create-account-modal').trigger('click')
+    await flushPromises()
+
+    expect(upstreamAccountSyncMock.getPreview).toHaveBeenCalledTimes(2)
   })
 
   it('colors upstream key, local account, and bound groups by matched account platform', async () => {
