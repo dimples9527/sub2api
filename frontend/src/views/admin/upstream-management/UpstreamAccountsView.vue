@@ -116,6 +116,11 @@
               class="filter-select"
               :options="sourceOptions"
             />
+            <Select
+              v-model="groupFilter"
+              class="filter-select"
+              :options="groupOptions"
+            />
             <div class="search-wrap">
               <Icon name="search" size="sm" :stroke-width="2" />
               <input
@@ -569,6 +574,7 @@ const loadError = ref('')
 const searchQuery = ref('')
 const providerFilter = ref('')
 const sourceFilter = ref('')
+const groupFilter = ref('')
 const rateGuardConfig = ref<UpstreamAccountRateGuardConfig | null>(null)
 const rateGuardForm = ref({
   enabled: false,
@@ -708,12 +714,29 @@ const sourceOptions = computed<SelectOption[]>(() => [
   { value: 'synced', label: t('admin.upstreamAccounts.sourceSynced') },
   { value: 'unsynced', label: t('admin.upstreamAccounts.sourceUnsynced') }
 ])
+const groupOptions = computed<SelectOption[]>(() => [
+  { value: '', label: t('admin.upstreamAccounts.allGroups') },
+  ...localGroups.value.map(group => ({
+    value: String(group.id),
+    label: group.name
+  }))
+])
 const filteredItems = computed(() => {
   const keyword = searchQuery.value.trim().toLowerCase()
+  const selectedGroupID = Number(groupFilter.value)
   return items.value.filter((item) => {
     if (providerFilter.value && item.provider_slug !== providerFilter.value) return false
     if (sourceFilter.value === 'synced' && !item.matched_account_id) return false
     if (sourceFilter.value === 'unsynced' && item.matched_account_id) return false
+    if (groupFilter.value) {
+      const boundGroupIDs = [
+        item.local_group_id,
+        ...(item.bound_groups || []).map(group => group.id)
+      ]
+        .map(id => Number(id))
+        .filter(id => Number.isFinite(id))
+      if (!boundGroupIDs.includes(selectedGroupID)) return false
+    }
     if (!keyword) return true
     const haystack = [
       item.provider_name,
@@ -1535,7 +1558,7 @@ onMounted(reload)
 
 .filter-row {
   display: grid;
-  grid-template-columns: 156px 172px minmax(260px, 1fr) auto;
+  grid-template-columns: 156px 172px 172px minmax(260px, 1fr) auto;
   gap: 12px;
   align-items: center;
 }

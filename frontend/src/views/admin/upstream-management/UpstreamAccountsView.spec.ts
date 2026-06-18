@@ -305,6 +305,109 @@ describe('UpstreamAccountsView', () => {
     expect(homepage.attributes('target')).toBe('_blank')
   })
 
+  it('filters upstream accounts by bound group', async () => {
+    groupsMock.getAllIncludingInactive.mockResolvedValueOnce([
+      { id: 7, name: 'VIP', platform: 'openai', rate_multiplier: 2, status: 'active' },
+      { id: 8, name: 'Trial', platform: 'openai', rate_multiplier: 0.5, status: 'active' },
+    ])
+    upstreamAccountSyncMock.getPreview.mockResolvedValueOnce({
+      default_provider: {},
+      providers: [],
+      summary: {
+        upstream_key_count: 2,
+        matched_account_count: 2,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'noop',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-a',
+          local_account_name: 'local-a',
+          matched_account_id: 12,
+          matched_account_name: 'local-a',
+          upstream_group_name: 'vip',
+          local_group_id: 7,
+          local_group_name: 'VIP',
+          upstream_rate_multiplier: 2,
+          rate_violation: false,
+          bound_groups: [
+            { id: 7, name: 'VIP', rate_multiplier: 2, rate_violation: false },
+          ],
+        },
+        {
+          action: 'noop',
+          provider_slug: 'upstream-b',
+          provider_name: 'Upstream B',
+          upstream_key_name: 'key-b',
+          local_account_name: 'local-b',
+          matched_account_id: 13,
+          matched_account_name: 'local-b',
+          upstream_group_name: 'trial',
+          local_group_id: 8,
+          local_group_name: 'Trial',
+          upstream_rate_multiplier: 0.5,
+          rate_violation: false,
+          bound_groups: [
+            { id: 8, name: 'Trial', rate_multiplier: 0.5, rate_violation: false },
+          ],
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any) => h('div', { class: 'row' }, [
+                h('div', { class: 'account-cell' }, slots['cell-local_account_name']?.({ row })),
+              ])))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: {
+            props: ['modelValue', 'options'],
+            emits: ['update:modelValue'],
+            setup(props, { emit }) {
+              return () => h('button', {
+                class: 'select-stub',
+                onClick: () => emit('update:modelValue', props.options?.[1]?.value ?? ''),
+              }, props.options?.map((option: any) => option.label).join(','))
+            },
+          },
+          GroupSelector: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('local-a')
+    expect(wrapper.text()).toContain('local-b')
+
+    const groupSelect = wrapper.findAll('.select-stub').at(2)
+    expect(groupSelect).toBeTruthy()
+    expect(groupSelect!.text()).toContain('VIP')
+    expect(groupSelect!.text()).toContain('Trial')
+    await groupSelect!.trigger('click')
+
+    expect(wrapper.text()).toContain('local-a')
+    expect(wrapper.text()).not.toContain('local-b')
+  })
+
   it('does not expose provider balance consumption as an account table column', async () => {
     const wrapper = mount(UpstreamAccountsView, {
       global: {
