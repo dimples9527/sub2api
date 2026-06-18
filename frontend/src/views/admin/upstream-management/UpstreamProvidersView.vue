@@ -1980,7 +1980,7 @@ onMounted(reload)
 }
 
 .numeric-balance {
-  @apply text-lg font-bold text-orange-600 dark:text-orange-300;
+  @apply text-lg font-bold text-teal-600 dark:text-teal-300;
 }
 
 .numeric-cost {
@@ -1988,7 +1988,7 @@ onMounted(reload)
 }
 
 .numeric-alert {
-  @apply font-bold text-red-600 dark:text-red-300;
+  @apply rounded-md bg-red-50 font-bold text-red-700 ring-1 ring-red-100 dark:bg-red-950/30 dark:text-red-300 dark:ring-red-900/60;
 }
 
 .mini-icon-button {

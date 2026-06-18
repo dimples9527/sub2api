@@ -1,8 +1,16 @@
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { flushPromises, mount } from '@vue/test-utils'
 import { h } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import UpstreamProvidersView from './UpstreamProvidersView.vue'
+
+const upstreamProvidersSource = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), 'UpstreamProvidersView.vue'),
+  'utf-8'
+)
 
 vi.mock('vue-i18n', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-i18n')>()
@@ -195,12 +203,19 @@ describe('UpstreamProvidersView', () => {
 
     expect(adminAPIMock.upstreamProviders.getBalance).toHaveBeenCalledWith('sub-main')
     expect(wrapper.text()).toContain('9.5000')
-    expect(wrapper.find('.today-cost-cell').text()).toContain('1.7500')
+    expect(wrapper.find('.numeric-balance').exists()).toBe(true)
     expect(wrapper.find('.numeric-alert').exists()).toBe(true)
+    expect(wrapper.find('.today-cost-cell').text()).toContain('1.7500')
 
     await balanceButton!.trigger('click')
     await flushPromises()
     expect(adminAPIMock.upstreamProviders.getBalance).toHaveBeenCalledTimes(2)
+  })
+
+  it('uses distinct color treatments for balance, today cost, and low balance warnings', () => {
+    expect(upstreamProvidersSource).toContain('@apply text-lg font-bold text-teal-600 dark:text-teal-300;')
+    expect(upstreamProvidersSource).toContain('@apply text-lg font-bold text-emerald-600 dark:text-emerald-300;')
+    expect(upstreamProvidersSource).toContain('@apply rounded-md bg-red-50 font-bold text-red-700 ring-1 ring-red-100')
   })
 
   it('renders balance charts at the bottom of the upstream provider table area', async () => {
