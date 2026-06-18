@@ -166,6 +166,61 @@ describe('UpstreamAccountsView', () => {
     expect(wrapper.text()).toContain('-')
   })
 
+  it('renders persisted sync summary records without unbind details after refresh', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValueOnce({
+      default_provider: {},
+      providers: [],
+      summary: {
+        upstream_key_count: 0,
+        matched_account_count: 0,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [],
+      warnings: [],
+      records: [
+        {
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          created_count: 1,
+          updated_count: 2,
+          skipped_count: 0,
+          conflict_count: 0,
+          rate_violation_count: 0,
+          unbound_group_count: 0,
+          created_at: '2026-06-15T00:00:00Z',
+          trigger_source: 'manual_sync',
+          unbind_details: [],
+        },
+      ],
+    })
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: { template: '<div><slot name="empty" /></div>' },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+          GroupSelector: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Upstream A')
+    expect(wrapper.text()).toContain('admin.upstreamAccounts.syncSummaryCreated 1')
+    expect(wrapper.text()).toContain('admin.upstreamAccounts.syncSummaryUpdated 2')
+    expect(wrapper.text()).not.toContain('admin.upstreamAccounts.noSyncLogs')
+  })
+
   it('does not render balance charts above the upstream account table', async () => {
     const wrapper = mount(UpstreamAccountsView, {
       global: {

@@ -946,6 +946,79 @@ func TestUpstreamAccountRateGuardUsesProviderAccountRateMultiplierScale(t *testi
 	}
 }
 
+func TestUpstreamAccountRateGuardDoesNotPersistEmptyRecords(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup", AccountNamePrefix: "up-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {
+				{ProviderSlug: "backup", KeyName: "matched", GroupName: "VIP", RateMultiplier: 2},
+			},
+		},
+	}
+	settings := newUpstreamManagementSettingRepoStub()
+	settings.values[SettingKeyUpstreamAccountSyncRecords] = `[{
+		"provider_slug":"backup",
+		"provider_name":"Backup",
+		"updated_count":1,
+		"rate_violation_count":1,
+		"unbound_group_count":1,
+		"created_at":"2026-06-18T00:00:00Z",
+		"trigger_source":"scheduled_rate_guard",
+		"unbind_details":[{
+			"provider_slug":"backup",
+			"provider_name":"Backup",
+			"upstream_key_name":"matched",
+			"matched_local_account_id":10,
+			"matched_local_account_name":"up-matched",
+			"upstream_group_name":"VIP",
+			"upstream_rate_multiplier":2,
+			"local_min_rate_multiplier":0.5,
+			"unbound_group_ids":[8],
+			"unbound_group_names":["Trial"],
+			"remaining_group_ids":[7],
+			"trigger_source":"scheduled_rate_guard"
+		}]
+	}]`
+	svc, accounts := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{
+			{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 2, Status: StatusActive},
+		},
+		[]Account{{
+			ID:          10,
+			Name:        "up-matched",
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Credentials: map[string]any{"api_key": "matched"},
+			GroupIDs:    []int64{7},
+			Groups: []*Group{
+				{ID: 7, Name: "VIP", RateMultiplier: 2},
+			},
+		}},
+		settings,
+	)
+
+	if _, err := svc.RunScheduledRateGuard(context.Background()); err != nil {
+		t.Fatalf("RunScheduledRateGuard returned error: %v", err)
+	}
+	if len(accounts.updateInputs) != 0 {
+		t.Fatalf("update count = %d, want no rate guard update", len(accounts.updateInputs))
+	}
+
+	rawRecords := settings.values[SettingKeyUpstreamAccountSyncRecords]
+	var records []UpstreamAccountSyncRecord
+	if err := json.Unmarshal([]byte(rawRecords), &records); err != nil {
+		t.Fatalf("decode records: %v raw=%s", err, rawRecords)
+	}
+	if len(records) != 1 || len(records[0].UnbindDetails) != 1 {
+		t.Fatalf("records = %+v, want existing unbind record without a new empty record", records)
+	}
+}
+
 func TestUpstreamAccountRateGuardUnbindsLowGroupsForUnschedulableAccounts(t *testing.T) {
 	provider := &upstreamAccountSyncProviderSourceStub{
 		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},

@@ -684,6 +684,10 @@ func (s *UpstreamAccountSyncService) prependRecords(ctx context.Context, newReco
 	if err != nil {
 		return nil, err
 	}
+	newRecords = meaningfulUpstreamAccountSyncRecords(newRecords)
+	if len(newRecords) == 0 {
+		return existing, nil
+	}
 	records := append([]UpstreamAccountSyncRecord{}, newRecords...)
 	records = append(records, existing...)
 	records = limitUpstreamAccountSyncRecords(records)
@@ -698,6 +702,28 @@ func (s *UpstreamAccountSyncService) prependRecords(ctx context.Context, newReco
 		return nil, fmt.Errorf("save upstream account sync records: %w", err)
 	}
 	return records, nil
+}
+
+func meaningfulUpstreamAccountSyncRecords(records []UpstreamAccountSyncRecord) []UpstreamAccountSyncRecord {
+	out := make([]UpstreamAccountSyncRecord, 0, len(records))
+	for _, record := range records {
+		if !upstreamAccountSyncRecordHasActivity(record) {
+			continue
+		}
+		out = append(out, record)
+	}
+	return out
+}
+
+func upstreamAccountSyncRecordHasActivity(record UpstreamAccountSyncRecord) bool {
+	return record.CreatedCount > 0 ||
+		record.UpdatedCount > 0 ||
+		record.SkippedCount > 0 ||
+		record.ConflictCount > 0 ||
+		record.RateViolationCount > 0 ||
+		record.UnboundGroupCount > 0 ||
+		strings.TrimSpace(record.Error) != "" ||
+		len(record.UnbindDetails) > 0
 }
 
 func (s *UpstreamAccountSyncService) finishSyncWithError(ctx context.Context, result UpstreamAccountSyncResult, triggerSource string, recordStats map[string]*upstreamAccountSyncRecordStats, recordOrder []string, failedProviderSlug string, runErr error) (UpstreamAccountSyncResult, error) {

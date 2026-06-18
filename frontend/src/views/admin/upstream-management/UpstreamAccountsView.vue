@@ -408,36 +408,55 @@
                       </span>
                     </td>
                     <td>
-                      <div class="two-line-cell">
+                      <div v-if="entry.kind === 'detail'" class="two-line-cell">
                         <span class="main-text">{{ entry.matched_local_account_name }}</span>
                         <code class="table-tag tag-account">#{{ entry.matched_local_account_id }}</code>
                       </div>
+                      <div v-else class="two-line-cell">
+                        <span class="main-text">{{ entry.provider_name || entry.provider_slug }}</span>
+                        <span class="muted-text">{{ t('admin.upstreamAccounts.syncSummary') }}</span>
+                      </div>
                     </td>
                     <td>
-                      <div class="two-line-cell">
+                      <div v-if="entry.kind === 'detail'" class="two-line-cell">
                         <span class="main-text">{{ entry.upstream_key_name }}</span>
                         <div class="tag-list">
                           <span :class="['table-tag', providerToneClass(entry.provider_slug, 'tag')]">{{ entry.provider_name || entry.provider_slug }}</span>
                           <span class="table-tag tag-gray">{{ entry.upstream_group_name }}</span>
                         </div>
                       </div>
+                      <div v-else class="tag-list">
+                        <span :class="['table-tag', providerToneClass(entry.provider_slug, 'tag')]">{{ entry.provider_name || entry.provider_slug }}</span>
+                        <span v-if="entry.error" class="table-tag tag-red">{{ t('admin.upstreamAccounts.status') }}: {{ entry.error }}</span>
+                      </div>
                     </td>
                     <td>
-                      <div class="rate-compare">
+                      <div v-if="entry.kind === 'detail'" class="rate-compare">
                         <span class="rate-compare-upstream">{{ formatRate(entry.upstream_rate_multiplier) }}</span>
                         <span>/</span>
                         <span class="rate-compare-local">{{ formatRate(entry.local_min_rate_multiplier) }}</span>
                       </div>
-                    </td>
-                    <td>
-                      <div class="tag-list">
-                        <span v-for="group in entry.unbound_group_names" :key="`${entry.key}-${group}`" class="log-chip log-chip-warning">{{ group }}</span>
+                      <div v-else class="tag-list">
+                        <span v-for="item in entry.summary_items" :key="`${entry.key}-${item.key}`" :class="['log-chip', item.tone]">
+                          {{ t(item.label) }} {{ item.count }}
+                        </span>
                       </div>
                     </td>
                     <td>
                       <div class="tag-list">
-                        <span v-if="!entry.remaining_group_ids.length" class="dash">-</span>
-                        <code v-for="groupID in entry.remaining_group_ids" :key="`${entry.key}-${groupID}`" class="log-chip">#{{ groupID }}</code>
+                        <template v-if="entry.kind === 'detail'">
+                          <span v-for="group in entry.unbound_group_names" :key="`${entry.key}-${group}`" class="log-chip log-chip-warning">{{ group }}</span>
+                        </template>
+                        <span v-else class="dash">-</span>
+                      </div>
+                    </td>
+                    <td>
+                      <div class="tag-list">
+                        <template v-if="entry.kind === 'detail'">
+                          <span v-if="!entry.remaining_group_ids.length" class="dash">-</span>
+                          <code v-for="groupID in entry.remaining_group_ids" :key="`${entry.key}-${groupID}`" class="log-chip">#{{ groupID }}</code>
+                        </template>
+                        <span v-else class="dash">-</span>
                       </div>
                     </td>
                   </tr>
@@ -588,10 +607,31 @@ const showTrendModal = ref(false)
 const trendProviderSlug = ref('')
 const trendProviderName = ref('')
 
-type UpstreamAccountSyncLogEntry = UpstreamAccountSyncUnbindDetail & {
+type UpstreamAccountSyncLogSummaryItem = {
+  key: string
+  label: string
+  count: number
+  tone: string
+}
+
+type UpstreamAccountSyncLogDetailEntry = UpstreamAccountSyncUnbindDetail & {
+  kind: 'detail'
   created_at: string
   key: string
 }
+
+type UpstreamAccountSyncLogSummaryEntry = {
+  kind: 'summary'
+  provider_slug: string
+  provider_name: string
+  created_at: string
+  trigger_source?: string
+  error?: string
+  summary_items: UpstreamAccountSyncLogSummaryItem[]
+  key: string
+}
+
+type UpstreamAccountSyncLogEntry = UpstreamAccountSyncLogDetailEntry | UpstreamAccountSyncLogSummaryEntry
 
 const columns = computed<Column[]>(() => [
   { key: 'source', label: t('admin.upstreamAccounts.columns.source'), class: 'upstream-center-column' },
@@ -664,10 +704,29 @@ const quickFilterTags = computed(() => [
 const syncLogEntries = computed<UpstreamAccountSyncLogEntry[]>(() => {
   const entries: UpstreamAccountSyncLogEntry[] = []
   for (const record of records.value) {
-    for (const detail of record.unbind_details || []) {
+    const details = record.unbind_details || []
+    if (!details.length) {
+      const summaryItems = syncRecordSummaryItems(record)
+      if (!summaryItems.length && !record.error) {
+        continue
+      }
+      entries.push({
+        kind: 'summary',
+        provider_slug: record.provider_slug,
+        provider_name: record.provider_name,
+        created_at: record.created_at,
+        trigger_source: record.trigger_source,
+        error: record.error,
+        summary_items: summaryItems,
+        key: `${record.created_at}-${record.provider_slug}-summary`
+      })
+      continue
+    }
+    for (const detail of details) {
       const unboundGroupIDs = numberArray(detail.unbound_group_ids)
       entries.push({
         ...detail,
+        kind: 'detail',
         unbound_group_ids: unboundGroupIDs,
         unbound_group_names: stringArray(detail.unbound_group_names),
         remaining_group_ids: numberArray(detail.remaining_group_ids),
@@ -881,6 +940,16 @@ async function refreshPreview() {
 function formatRate(value: number | undefined) {
   const n = Number(value)
   return Number.isFinite(n) ? `${n.toFixed(2)}x` : '-'
+}
+
+function syncRecordSummaryItems(record: UpstreamAccountSyncRecord): UpstreamAccountSyncLogSummaryItem[] {
+  return [
+    { key: 'created', label: 'admin.upstreamAccounts.syncSummaryCreated', count: Number(record.created_count) || 0, tone: 'log-chip-success' },
+    { key: 'updated', label: 'admin.upstreamAccounts.syncSummaryUpdated', count: Number(record.updated_count) || 0, tone: 'log-chip-info' },
+    { key: 'skipped', label: 'admin.upstreamAccounts.syncSummarySkipped', count: Number(record.skipped_count) || 0, tone: 'log-chip-muted' },
+    { key: 'conflict', label: 'admin.upstreamAccounts.syncSummaryConflict', count: Number(record.conflict_count) || 0, tone: 'log-chip-danger' },
+    { key: 'unbound', label: 'admin.upstreamAccounts.syncSummaryUnbound', count: Number(record.unbound_group_count) || 0, tone: 'log-chip-warning' },
+  ].filter(item => item.count > 0)
 }
 
 async function loadLocalGroups() {
@@ -2287,6 +2356,26 @@ onMounted(reload)
 .log-chip {
   background: #f1f5f9;
   color: #475569;
+}
+
+.log-chip-success {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.log-chip-info {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.log-chip-muted {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.log-chip-danger {
+  background: #fef2f2;
+  color: #b91c1c;
 }
 
 .rate-compare {
