@@ -834,8 +834,7 @@ async function runRateGuardNow() {
   try {
     const config = await adminAPI.upstreamAccountSync.runRateGuardNow()
     applyRateGuardConfig(config)
-    const preview = await adminAPI.upstreamAccountSync.getPreview()
-    result.value = preview
+    const preview = await refreshPreview()
     const remainingRisks = preview.summary?.rate_violation_count || 0
     if (remainingRisks > 0) {
       appStore.showWarning(t('admin.upstreamAccounts.rateGuardRunCompletedWithRisks', { count: remainingRisks }))
@@ -847,6 +846,13 @@ async function runRateGuardNow() {
   } finally {
     runningRateGuardNow.value = false
   }
+}
+
+async function refreshPreview() {
+  const preview = await adminAPI.upstreamAccountSync.getPreview()
+  result.value = preview
+  await syncMatchedAccounts(preview.items || [])
+  return preview
 }
 
 function formatRate(value: number | undefined) {
@@ -1026,6 +1032,11 @@ async function saveAccountGroups() {
     accountGroupIds.value = []
     accountGroupPlatform.value = undefined
     appStore.showSuccess(t('admin.upstreamAccounts.boundGroupsSaved'))
+    try {
+      await refreshPreview()
+    } catch (err) {
+      appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.loadFailed')))
+    }
   } catch (err) {
     appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.boundGroupsSaveFailed')))
   } finally {
