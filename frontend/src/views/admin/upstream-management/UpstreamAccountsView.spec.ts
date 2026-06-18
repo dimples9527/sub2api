@@ -166,7 +166,7 @@ describe('UpstreamAccountsView', () => {
     expect(wrapper.text()).toContain('-')
   })
 
-  it('renders persisted sync summary records without unbind details after refresh', async () => {
+  it('does not render persisted sync records without unbind details', async () => {
     upstreamAccountSyncMock.getPreview.mockResolvedValueOnce({
       default_provider: {},
       providers: [],
@@ -215,10 +215,9 @@ describe('UpstreamAccountsView', () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Upstream A')
-    expect(wrapper.text()).toContain('admin.upstreamAccounts.syncSummaryCreated 1')
-    expect(wrapper.text()).toContain('admin.upstreamAccounts.syncSummaryUpdated 2')
-    expect(wrapper.text()).not.toContain('admin.upstreamAccounts.noSyncLogs')
+    expect(wrapper.text()).not.toContain('Upstream A')
+    expect(wrapper.text()).not.toContain('admin.upstreamAccounts.syncSummaryCreated 1')
+    expect(wrapper.text()).toContain('admin.upstreamAccounts.noSyncLogs')
   })
 
   it('does not render balance charts above the upstream account table', async () => {

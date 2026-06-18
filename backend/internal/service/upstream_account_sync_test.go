@@ -655,7 +655,7 @@ func TestUpstreamAccountSyncRunCreatesUpdatesAndAppliesRateGuard(t *testing.T) {
 	}
 }
 
-func TestUpstreamAccountSyncRunRecordsEachProviderSeparately(t *testing.T) {
+func TestUpstreamAccountSyncRunDoesNotPersistRecordsWithoutUnbindDetails(t *testing.T) {
 	provider := &upstreamAccountSyncProviderSourceStub{
 		defaultProvider: UpstreamProviderConfig{
 			Slug:    "main",
@@ -696,29 +696,12 @@ func TestUpstreamAccountSyncRunRecordsEachProviderSeparately(t *testing.T) {
 		t.Fatalf("create count = %d, want 2", result.Summary.CreateCount)
 	}
 
-	rawRecords := settings.values[SettingKeyUpstreamAccountSyncRecords]
-	var records []UpstreamAccountSyncRecord
-	if err := json.Unmarshal([]byte(rawRecords), &records); err != nil {
-		t.Fatalf("decode records: %v raw=%s", err, rawRecords)
+	records, err := svc.ListRecords(context.Background())
+	if err != nil {
+		t.Fatalf("ListRecords returned error: %v", err)
 	}
-	if len(records) != 2 {
-		t.Fatalf("records = %+v, want one record per provider", records)
-	}
-	recordsByProvider := map[string]UpstreamAccountSyncRecord{}
-	for _, record := range records {
-		recordsByProvider[record.ProviderSlug] = record
-	}
-	if _, exists := recordsByProvider["multiple"]; exists {
-		t.Fatalf("records = %+v, should not use synthetic multiple provider", records)
-	}
-	for slug, name := range map[string]string{"backup": "Backup", "mirror": "Mirror"} {
-		record, exists := recordsByProvider[slug]
-		if !exists {
-			t.Fatalf("records = %+v, missing provider %s", records, slug)
-		}
-		if record.ProviderName != name || record.CreatedCount != 1 || record.TriggerSource != UpstreamAccountSyncTriggerManualSync {
-			t.Fatalf("record[%s] = %+v, want provider name %s and one create", slug, record, name)
-		}
+	if len(records) != 0 {
+		t.Fatalf("records = %+v, want no persisted sync records without unbind details", records)
 	}
 }
 
