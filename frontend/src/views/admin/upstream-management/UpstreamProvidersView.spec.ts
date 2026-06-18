@@ -521,6 +521,7 @@ describe('UpstreamProvidersView', () => {
     await flushPromises()
 
     expect(wrapper.findAll('.upstream-filter-select')).toHaveLength(2)
+    expect(wrapper.findAllComponents({ name: 'Select' })).toHaveLength(2)
     const sampleButton = wrapper
       .findAll('button')
       .find((button) => button.text().includes('admin.upstreamProviders.balanceSampleNow'))

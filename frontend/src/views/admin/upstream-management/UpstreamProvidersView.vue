@@ -39,7 +39,7 @@
           </div>
 
           <div class="upstream-toolbar-filters">
-            <div class="relative w-full sm:w-56">
+            <div class="relative w-full sm:w-64">
               <Icon
                 name="search"
                 size="sm"
@@ -53,25 +53,21 @@
               />
             </div>
 
-            <label class="upstream-filter-select">
-              <span>{{ t('admin.upstreamProviders.type') }}</span>
-              <select v-model="typeFilter" class="upstream-filter-native">
-                <option value="">{{ t('admin.upstreamProviders.allTypes') }}</option>
-                <option value="sub2api">Sub2API</option>
-                <option value="newapi">NewAPI</option>
-              </select>
-              <Icon name="chevronDown" size="sm" class="upstream-filter-chevron" />
-            </label>
+            <Select
+              v-model="typeFilter"
+              class="upstream-filter-select"
+              :options="typeFilterOptions"
+              :searchable="false"
+              :placeholder="t('admin.upstreamProviders.type')"
+            />
 
-            <label class="upstream-filter-select">
-              <span>{{ t('common.status') }}</span>
-              <select v-model="enabledFilter" class="upstream-filter-native">
-                <option value="">{{ t('admin.upstreamProviders.allStatus') }}</option>
-                <option value="enabled">{{ t('common.enabled') }}</option>
-                <option value="disabled">{{ t('common.disabled') }}</option>
-              </select>
-              <Icon name="chevronDown" size="sm" class="upstream-filter-chevron" />
-            </label>
+            <Select
+              v-model="enabledFilter"
+              class="upstream-filter-select"
+              :options="enabledFilterOptions"
+              :searchable="false"
+              :placeholder="t('common.status')"
+            />
           </div>
 
           <div class="upstream-toolbar-right">
@@ -952,6 +948,7 @@ import DataTable from '@/components/common/DataTable.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
+import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 import UpstreamBalanceCharts from '@/components/admin/upstream/UpstreamBalanceCharts.vue'
 
@@ -1034,6 +1031,18 @@ const form = reactive<UpstreamProviderConfig>({
 const optionalColumnOptions = computed(() => [
   { key: 'base_url', label: t('admin.upstreamProviders.columns.baseUrl') },
   { key: 'auth', label: t('admin.upstreamProviders.columns.auth') },
+])
+
+const typeFilterOptions = computed<SelectOption[]>(() => [
+  { value: '', label: t('admin.upstreamProviders.allTypes') },
+  { value: 'sub2api', label: 'Sub2API' },
+  { value: 'newapi', label: 'NewAPI' },
+])
+
+const enabledFilterOptions = computed<SelectOption[]>(() => [
+  { value: '', label: t('admin.upstreamProviders.allStatus') },
+  { value: 'enabled', label: t('common.enabled') },
+  { value: 'disabled', label: t('common.disabled') },
 ])
 
 const baseColumns = computed<Column[]>(() => [
@@ -1770,39 +1779,27 @@ onMounted(reload)
 }
 
 .upstream-toolbar-action {
-  @apply h-8 rounded px-3 text-xs;
+  @apply h-9 rounded-md px-4 text-sm;
 }
 
 .upstream-sample-action {
-  @apply inline-flex items-center gap-1.5 border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/50;
+  @apply inline-flex items-center gap-2 border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/50;
 }
 
 .upstream-sampler-settings-action {
-  @apply inline-flex items-center gap-1.5;
+  @apply inline-flex items-center gap-2;
 }
 
 .upstream-toolbar-filters {
-  @apply flex flex-1 flex-wrap items-center justify-end gap-2;
+  @apply flex flex-1 flex-wrap items-center justify-end gap-3;
 }
 
 .upstream-compact-input {
-  @apply h-8 rounded-md text-xs;
+  @apply h-9 rounded-md text-sm;
 }
 
 .upstream-filter-select {
-  @apply relative inline-flex h-8 min-w-[8.5rem] items-center gap-2 rounded-md border border-gray-200 bg-gray-50 pl-2.5 pr-7 text-xs text-gray-500 shadow-sm transition-colors hover:border-primary-300 hover:bg-white dark:border-dark-600 dark:bg-dark-700 dark:text-gray-300 dark:hover:border-primary-700 dark:hover:bg-dark-800;
-}
-
-.upstream-filter-select span {
-  @apply shrink-0 text-[11px] font-medium text-gray-400 dark:text-gray-500;
-}
-
-.upstream-filter-native {
-  @apply h-full min-w-0 flex-1 appearance-none border-0 bg-transparent p-0 text-xs font-medium text-gray-800 outline-none dark:text-gray-100;
-}
-
-.upstream-filter-chevron {
-  @apply pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500;
+  @apply w-40;
 }
 
 .upstream-toolbar-right {
