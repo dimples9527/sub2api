@@ -1869,6 +1869,7 @@ export default {
         localGroup: '本地分组',
         boundGroups: '账号绑定分组',
         testStatus: '测试状态',
+        lastTestedAt: '上次测试时间',
         action: '动作'
       },
       actions: {

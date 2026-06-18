@@ -1848,6 +1848,7 @@ export default {
         localGroup: 'Local group',
         boundGroups: 'Bound groups',
         testStatus: 'Test status',
+        lastTestedAt: 'Last tested',
         action: 'Action'
       },
       actions: {

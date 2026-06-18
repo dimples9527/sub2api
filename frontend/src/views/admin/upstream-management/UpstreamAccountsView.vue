@@ -345,6 +345,13 @@
                 </div>
               </template>
 
+              <template #cell-last_tested_at="{ row }">
+                <span v-if="getMatchedAccount(row)?.last_tested_at" class="test-time">
+                  {{ formatDateTime(getMatchedAccount(row)!.last_tested_at!) }}
+                </span>
+                <span v-else class="dash">-</span>
+              </template>
+
               <template #cell-actions="{ row }">
                 <div v-if="row.matched_account_id" class="action-cell">
                   <button
@@ -604,6 +611,7 @@ const columns = computed<Column[]>(() => [
   { key: 'status', label: t('admin.accounts.columns.status'), class: 'upstream-center-column' },
   { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), class: 'upstream-center-column' },
   { key: 'test_status', label: t('admin.upstreamAccounts.columns.testStatus'), class: 'upstream-center-column' },
+  { key: 'last_tested_at', label: t('admin.upstreamAccounts.columns.lastTestedAt'), class: 'upstream-center-column' },
   { key: 'actions', label: t('common.actions'), class: 'upstream-center-column' }
 ])
 
@@ -1092,10 +1100,13 @@ function closeTestModal() {
   testingAccount.value = null
 }
 
-function handleAccountTestResult(payload: { accountId: number; status: AccountTestStatus }) {
+async function handleAccountTestResult(payload: { accountId: number; status: AccountTestStatus }) {
   accountTestStatusById.value = {
     ...accountTestStatusById.value,
     [payload.accountId]: payload.status
+  }
+  if (payload.status === 'success' || payload.status === 'failed') {
+    await refreshMatchedAccount(payload.accountId)
   }
 }
 
@@ -1115,6 +1126,22 @@ async function handleToggleSchedulable(account: Account) {
     appStore.showError(extractApiErrorMessage(err, t('admin.accounts.failedToToggleSchedulable')))
   } finally {
     togglingSchedulableId.value = null
+  }
+}
+
+async function refreshMatchedAccount(accountId: number) {
+  if (!Number.isFinite(accountId) || accountId <= 0) return
+  try {
+    const account = await adminAPI.accounts.getById(accountId)
+    updateMatchedAccount(account)
+    if (account.last_test_status === 'success' || account.last_test_status === 'failed') {
+      accountTestStatusById.value = {
+        ...accountTestStatusById.value,
+        [accountId]: account.last_test_status
+      }
+    }
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.loadAccountFailed')))
   }
 }
 

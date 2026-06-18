@@ -510,7 +510,7 @@ describe('UpstreamAccountsView', () => {
     expect(wrapper.find('.columns').text()).toContain('upstream_rate_multiplier:1')
   })
 
-  it('adds status and schedulable columns to the upstream account table', async () => {
+  it('adds status, schedulable, and last tested columns to the upstream account table', async () => {
     const wrapper = mount(UpstreamAccountsView, {
       global: {
         stubs: {
@@ -533,6 +533,7 @@ describe('UpstreamAccountsView', () => {
 
     expect(wrapper.find('.columns').text()).toContain('status')
     expect(wrapper.find('.columns').text()).toContain('schedulable')
+    expect(wrapper.find('.columns').text()).toContain('last_tested_at')
   })
 
   it('colors upstream key, local account, and bound groups by matched account platform', async () => {
@@ -1251,5 +1252,101 @@ describe('UpstreamAccountsView', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('admin.upstreamAccounts.testStatusFailed')
+  })
+
+  it('renders and refreshes the last account test time', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValue({
+      default_provider: {},
+      providers: [],
+      summary: {
+        upstream_key_count: 1,
+        matched_account_count: 1,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'noop',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-a',
+          local_account_name: 'local-a',
+          matched_account_id: 12,
+          matched_account_name: 'local-a',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 2,
+          rate_violation: false,
+          bound_groups: [
+            { id: 7, name: 'VIP', rate_multiplier: 2, rate_violation: false },
+          ],
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+    accountsMock.getById
+      .mockResolvedValueOnce({
+        id: 12,
+        name: 'local-a',
+        platform: 'openai',
+        type: 'apikey',
+        status: 'active',
+        schedulable: true,
+        group_ids: [7],
+        groups: [],
+        last_test_status: 'failed',
+        last_tested_at: '2026-06-16T00:00:00Z',
+      })
+      .mockResolvedValueOnce({
+        id: 12,
+        name: 'local-a',
+        platform: 'openai',
+        type: 'apikey',
+        status: 'active',
+        schedulable: true,
+        group_ids: [7],
+        groups: [],
+        last_test_status: 'success',
+        last_tested_at: '2026-06-17T00:00:00Z',
+      })
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any) => h('div', [
+                slots['cell-last_tested_at']?.({ row }),
+              ])))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+          AccountTestModal: {
+            emits: ['test-result'],
+            setup(_, { emit }) {
+              onMounted(() => {
+                emit('test-result', { accountId: 12, status: 'success' })
+              })
+              return () => h('div')
+            },
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+    await flushPromises()
+
+    expect(accountsMock.getById).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('06/17/2026')
   })
 })
