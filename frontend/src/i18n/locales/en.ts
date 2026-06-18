@@ -1792,6 +1792,7 @@ export default {
       loadFailed: 'Failed to load upstream account preview',
       searchPlaceholder: 'Search upstream key, group, local account...',
       allProviders: 'All upstreams',
+      allGroups: 'All groups',
       allSources: 'All source states',
       sourceSynced: 'Synced locally',
       sourceUnsynced: 'Not synced locally',

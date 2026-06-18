@@ -1813,6 +1813,7 @@ export default {
       loadFailed: '加载上游账号预览失败',
       searchPlaceholder: '搜索上游密钥、分组、本地账号...',
       allProviders: '全部上游',
+      allGroups: '全部分组',
       allSources: '全部来源状态',
       sourceSynced: '已同步到本地',
       sourceUnsynced: '未同步到本地',
