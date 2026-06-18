@@ -356,6 +356,15 @@
                 <div v-if="row.matched_account_id" class="action-cell">
                   <button
                     type="button"
+                    class="text-action text-action-muted"
+                    :disabled="savingAccountGroupId === row.matched_account_id || testingAccountId === row.matched_account_id"
+                    @click="openAccountEditDialog(row)"
+                  >
+                    <Icon name="edit" size="sm" :stroke-width="2" />
+                    {{ t('common.edit') }}
+                  </button>
+                  <button
+                    type="button"
                     :class="['text-action', row.rate_violation ? 'text-action-danger' : '']"
                     :disabled="savingAccountGroupId === row.matched_account_id || testingAccountId === row.matched_account_id"
                     @click="openAccountGroupDialog(row)"
@@ -371,6 +380,15 @@
                   >
                     <Icon name="play" size="sm" :stroke-width="2" :class="testingAccountId === row.matched_account_id ? 'animate-spin' : ''" />
                     {{ t('admin.upstreamAccounts.testConnection') }}
+                  </button>
+                  <button
+                    type="button"
+                    class="text-action text-action-danger"
+                    :disabled="savingAccountGroupId === row.matched_account_id || testingAccountId === row.matched_account_id"
+                    @click="openAccountDeleteDialog(row)"
+                  >
+                    <Icon name="trash" size="sm" :stroke-width="2" />
+                    {{ t('common.delete') }}
                   </button>
                 </div>
                 <span v-else class="dash action-dash">-</span>
@@ -507,6 +525,25 @@
           @close="closeTestModal"
           @test-result="handleAccountTestResult"
         />
+        <EditAccountModal
+          v-if="showEditAccountModal"
+          :show="showEditAccountModal"
+          :account="editingAccount"
+          :proxies="accountProxies"
+          :groups="accountEditGroups"
+          @close="closeAccountEditDialog"
+          @updated="handleAccountUpdated"
+        />
+        <ConfirmDialog
+          :show="showDeleteAccountDialog"
+          :title="t('admin.accounts.deleteAccount')"
+          :message="t('admin.accounts.deleteConfirm', { name: deletingAccount?.name })"
+          :confirm-text="t('common.delete')"
+          :cancel-text="t('common.cancel')"
+          danger
+          @confirm="confirmDeleteAccount"
+          @cancel="closeAccountDeleteDialog"
+        />
         <TempUnschedStatusModal
           :show="showTempUnsched"
           :account="tempUnschedAccount"
@@ -539,7 +576,7 @@ import type {
   UpstreamAccountSyncUnbindDetail,
   UpstreamBalanceConsumptionOverview,
 } from '@/api/admin/upstreamAccountSync'
-import type { Account, AdminGroup, GroupPlatform } from '@/types'
+import type { Account, AdminGroup, GroupPlatform, Proxy as AccountProxy } from '@/types'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime } from '@/utils/format'
@@ -549,8 +586,10 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
+import { EditAccountModal } from '@/components/account'
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
 import TempUnschedStatusModal from '@/components/account/TempUnschedStatusModal.vue'
@@ -572,11 +611,17 @@ const testingAccountId = ref<number | null>(null)
 const togglingSchedulableId = ref<number | null>(null)
 const showTestModal = ref(false)
 const showTempUnsched = ref(false)
+const showEditAccountModal = ref(false)
+const showDeleteAccountDialog = ref(false)
 const testingAccount = ref<Account | null>(null)
 const tempUnschedAccount = ref<Account | null>(null)
+const editingAccount = ref<Account | null>(null)
+const deletingAccount = ref<Account | null>(null)
 const accountTestStatusById = ref<Record<number, AccountTestStatus>>({})
 const matchedAccountsById = ref<Record<number, Account>>({})
 const localGroups = ref<AdminGroup[]>([])
+const accountEditGroups = ref<AdminGroup[]>([])
+const accountProxies = ref<AccountProxy[]>([])
 const loadError = ref('')
 const searchQuery = ref('')
 const providerFilter = ref('')
@@ -601,18 +646,18 @@ type UpstreamAccountSyncLogEntry = UpstreamAccountSyncUnbindDetail & {
 }
 
 const columns = computed<Column[]>(() => [
-  { key: 'source', label: t('admin.upstreamAccounts.columns.source'), class: 'upstream-center-column' },
-  { key: 'upstream_key_name', label: t('admin.upstreamAccounts.columns.upstreamKey'), class: 'upstream-center-column' },
-  { key: 'local_account_name', label: t('admin.upstreamAccounts.columns.localAccount'), class: 'upstream-center-column' },
+  { key: 'source', label: t('admin.upstreamAccounts.columns.source'), class: 'upstream-center-column upstream-source-column' },
+  { key: 'upstream_key_name', label: t('admin.upstreamAccounts.columns.upstreamKey'), class: 'upstream-center-column upstream-key-column' },
+  { key: 'local_account_name', label: t('admin.upstreamAccounts.columns.localAccount'), class: 'upstream-center-column upstream-local-account-column' },
   { key: 'upstream_rate_multiplier', label: t('admin.upstreamAccounts.columns.upstreamRate'), sortable: true, class: 'upstream-center-column upstream-rate-column' },
-  { key: 'local_group_name', label: t('admin.upstreamAccounts.columns.boundGroups'), class: 'upstream-center-column' },
-  { key: 'balance', label: '余额', class: 'upstream-center-column' },
-  { key: 'today_consumption', label: '今日消费', class: 'upstream-center-column' },
-  { key: 'status', label: t('admin.accounts.columns.status'), class: 'upstream-center-column' },
-  { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), class: 'upstream-center-column' },
-  { key: 'test_status', label: t('admin.upstreamAccounts.columns.testStatus'), class: 'upstream-center-column' },
-  { key: 'last_tested_at', label: t('admin.upstreamAccounts.columns.lastTestedAt'), class: 'upstream-center-column' },
-  { key: 'actions', label: t('common.actions'), class: 'upstream-center-column' }
+  { key: 'local_group_name', label: t('admin.upstreamAccounts.columns.boundGroups'), class: 'upstream-center-column upstream-bound-groups-column' },
+  { key: 'balance', label: '余额', class: 'upstream-center-column upstream-money-column' },
+  { key: 'today_consumption', label: '今日消费', class: 'upstream-center-column upstream-money-column' },
+  { key: 'status', label: t('admin.accounts.columns.status'), class: 'upstream-center-column upstream-status-column' },
+  { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), class: 'upstream-center-column upstream-schedulable-column' },
+  { key: 'test_status', label: t('admin.upstreamAccounts.columns.testStatus'), class: 'upstream-center-column upstream-test-status-column' },
+  { key: 'last_tested_at', label: t('admin.upstreamAccounts.columns.lastTestedAt'), class: 'upstream-center-column upstream-test-time-column' },
+  { key: 'actions', label: t('common.actions'), class: 'upstream-center-column upstream-actions-column' }
 ])
 
 const emptySummary = {
@@ -1098,6 +1143,63 @@ async function openAccountTestDialog(row: UpstreamAccountSyncItem) {
 function closeTestModal() {
   showTestModal.value = false
   testingAccount.value = null
+}
+
+async function loadAccountEditOptions() {
+  const [proxies, groups] = await Promise.all([
+    adminAPI.proxies.getAll(),
+    adminAPI.groups.getAll()
+  ])
+  accountProxies.value = proxies
+  accountEditGroups.value = groups
+}
+
+async function openAccountEditDialog(row: UpstreamAccountSyncItem) {
+  const account = await ensureMatchedAccount(row)
+  if (!account) return
+  try {
+    await loadAccountEditOptions()
+    editingAccount.value = account
+    showEditAccountModal.value = true
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.loadAccountFailed')))
+  }
+}
+
+function closeAccountEditDialog() {
+  showEditAccountModal.value = false
+  editingAccount.value = null
+}
+
+function handleAccountUpdated(account: Account) {
+  updateMatchedAccount(account)
+  if (editingAccount.value?.id === account.id) {
+    editingAccount.value = account
+  }
+  showEditAccountModal.value = false
+}
+
+async function openAccountDeleteDialog(row: UpstreamAccountSyncItem) {
+  const account = await ensureMatchedAccount(row)
+  if (!account) return
+  deletingAccount.value = account
+  showDeleteAccountDialog.value = true
+}
+
+function closeAccountDeleteDialog() {
+  showDeleteAccountDialog.value = false
+  deletingAccount.value = null
+}
+
+async function confirmDeleteAccount() {
+  if (!deletingAccount.value) return
+  try {
+    await adminAPI.accounts.delete(deletingAccount.value.id)
+    closeAccountDeleteDialog()
+    await refreshPreview()
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.accounts.deleteFailed')))
+  }
 }
 
 async function handleAccountTestResult(payload: { accountId: number; status: AccountTestStatus }) {
@@ -1702,6 +1804,55 @@ onMounted(reload)
 
 .accounts-table-card :deep(table) {
   border-collapse: collapse;
+  table-layout: fixed;
+  width: 1700px;
+  min-width: 1700px;
+}
+
+.accounts-table-card :deep(.upstream-source-column) {
+  width: 170px;
+}
+
+.accounts-table-card :deep(.upstream-key-column) {
+  width: 150px;
+}
+
+.accounts-table-card :deep(.upstream-local-account-column) {
+  width: 190px;
+}
+
+.accounts-table-card :deep(.upstream-rate-column) {
+  width: 115px;
+}
+
+.accounts-table-card :deep(.upstream-bound-groups-column) {
+  width: 260px;
+  white-space: normal;
+}
+
+.accounts-table-card :deep(.upstream-money-column) {
+  width: 120px;
+}
+
+.accounts-table-card :deep(.upstream-status-column) {
+  width: 120px;
+}
+
+.accounts-table-card :deep(.upstream-schedulable-column) {
+  width: 105px;
+}
+
+.accounts-table-card :deep(.upstream-test-status-column) {
+  width: 130px;
+}
+
+.accounts-table-card :deep(.upstream-test-time-column) {
+  width: 155px;
+}
+
+.accounts-table-card :deep(.upstream-actions-column) {
+  width: 185px;
+  white-space: normal;
 }
 
 .accounts-table-card :deep(thead),
@@ -2061,7 +2212,8 @@ onMounted(reload)
 }
 
 .group-list {
-  min-width: 16rem;
+  width: 100%;
+  min-width: 0;
   white-space: normal;
 }
 
@@ -2092,9 +2244,10 @@ onMounted(reload)
 
 .action-cell {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
+  justify-content: center;
+  gap: 8px;
 }
 
 .test-status-cell {

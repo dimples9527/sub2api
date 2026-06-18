@@ -3591,6 +3591,7 @@ export default {
       crsBack: '返回',
       editAccount: '编辑账号',
       deleteAccount: '删除账号',
+      deleteFailed: '删除账号失败',
       deleteConfirmMessage: "确定要删除账号 '{name}' 吗？",
       refreshCookie: '刷新 Cookie',
       testAccount: '测试账号',

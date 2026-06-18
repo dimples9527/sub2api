@@ -3516,6 +3516,7 @@ export default {
       crsBack: 'Back',
       editAccount: 'Edit Account',
       deleteAccount: 'Delete Account',
+      deleteFailed: 'Failed to delete account',
       searchAccounts: 'Search accounts...',
       notes: 'Notes',
       notesPlaceholder: 'Enter notes',

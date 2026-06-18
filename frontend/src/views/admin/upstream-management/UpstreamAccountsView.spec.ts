@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import UpstreamAccountsView from './UpstreamAccountsView.vue'
 
-const { upstreamAccountSyncMock, accountsMock, groupsMock, appStoreMock } = vi.hoisted(() => ({
+const { upstreamAccountSyncMock, accountsMock, groupsMock, proxiesMock, appStoreMock } = vi.hoisted(() => ({
   upstreamAccountSyncMock: {
     getPreview: vi.fn(),
     getRateGuardConfig: vi.fn(),
@@ -17,9 +17,14 @@ const { upstreamAccountSyncMock, accountsMock, groupsMock, appStoreMock } = vi.h
   accountsMock: {
     getById: vi.fn(),
     update: vi.fn(),
+    delete: vi.fn(),
   },
   groupsMock: {
     getAllIncludingInactive: vi.fn(),
+    getAll: vi.fn(),
+  },
+  proxiesMock: {
+    getAll: vi.fn(),
   },
   appStoreMock: {
     showError: vi.fn(),
@@ -43,6 +48,7 @@ vi.mock('@/api/admin', () => ({
     upstreamAccountSync: upstreamAccountSyncMock,
     accounts: accountsMock,
     groups: groupsMock,
+    proxies: proxiesMock,
   },
 }))
 
@@ -51,6 +57,7 @@ vi.mock('@/api/admin/index', () => ({
     upstreamAccountSync: upstreamAccountSyncMock,
     accounts: accountsMock,
     groups: groupsMock,
+    proxies: proxiesMock,
   },
 }))
 
@@ -130,6 +137,11 @@ describe('UpstreamAccountsView', () => {
       { id: 8, name: 'Trial', platform: 'openai', rate_multiplier: 0.5, status: 'active' },
       { id: 9, name: 'Claude', platform: 'anthropic', rate_multiplier: 1, status: 'active' },
     ])
+    groupsMock.getAll.mockResolvedValue([
+      { id: 7, name: 'VIP', platform: 'openai', rate_multiplier: 2, status: 'active' },
+      { id: 8, name: 'Trial', platform: 'openai', rate_multiplier: 0.5, status: 'active' },
+    ])
+    proxiesMock.getAll.mockResolvedValue([])
     accountsMock.getById.mockResolvedValue({
       id: 12,
       name: 'local-a',
@@ -142,6 +154,7 @@ describe('UpstreamAccountsView', () => {
       ],
     })
     accountsMock.update.mockResolvedValue({})
+    accountsMock.delete.mockResolvedValue({})
   })
 
   it('renders sync log entries when legacy remaining group ids are null', async () => {
@@ -534,6 +547,33 @@ describe('UpstreamAccountsView', () => {
     expect(wrapper.find('.columns').text()).toContain('status')
     expect(wrapper.find('.columns').text()).toContain('schedulable')
     expect(wrapper.find('.columns').text()).toContain('last_tested_at')
+  })
+
+  it('uses fixed upstream account table column classes for stable headers and wrapping groups', async () => {
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['columns'],
+            setup(props) {
+              return () => h('div', { class: 'columns' }, props.columns.map((column: any) => `${column.key}:${column.class || ''}`).join('|'))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const classes = wrapper.find('.columns').text()
+    expect(classes).toContain('source:upstream-center-column upstream-source-column')
+    expect(classes).toContain('local_group_name:upstream-center-column upstream-bound-groups-column')
+    expect(classes).toContain('actions:upstream-center-column upstream-actions-column')
   })
 
   it('colors upstream key, local account, and bound groups by matched account platform', async () => {
@@ -1348,5 +1388,159 @@ describe('UpstreamAccountsView', () => {
 
     expect(accountsMock.getById).toHaveBeenCalledTimes(2)
     expect(wrapper.text()).toContain('06/17/2026')
+  })
+
+  it('opens edit account modal from upstream account actions and applies updates', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValue({
+      default_provider: {},
+      providers: [],
+      summary: {
+        upstream_key_count: 1,
+        matched_account_count: 1,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'noop',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-a',
+          local_account_name: 'local-a',
+          matched_account_id: 12,
+          matched_account_name: 'local-a',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 2,
+          rate_violation: false,
+          bound_groups: [
+            { id: 7, name: 'VIP', rate_multiplier: 2, rate_violation: false },
+          ],
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any) => h('div', [
+                slots['cell-actions']?.({ row }),
+                slots['cell-last_tested_at']?.({ row }),
+              ])))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+          EditAccountModal: {
+            props: ['show', 'account'],
+            emits: ['updated', 'close'],
+            setup(props, { emit }) {
+              return () => props.show
+                ? h('button', {
+                  class: 'edit-account-modal',
+                  onClick: () => emit('updated', { ...props.account, id: 12, name: 'local-a-updated', last_tested_at: '2026-06-18T00:00:00Z' }),
+                }, 'edit')
+                : null
+            },
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text().includes('common.edit'))?.trigger('click')
+    await flushPromises()
+
+    expect(proxiesMock.getAll).toHaveBeenCalled()
+    expect(groupsMock.getAll).toHaveBeenCalled()
+    expect(wrapper.find('.edit-account-modal').exists()).toBe(true)
+
+    await wrapper.find('.edit-account-modal').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('06/18/2026')
+  })
+
+  it('deletes matched account from upstream account actions after confirmation', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValue({
+      default_provider: {},
+      providers: [],
+      summary: {
+        upstream_key_count: 1,
+        matched_account_count: 1,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'noop',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-a',
+          local_account_name: 'local-a',
+          matched_account_id: 12,
+          matched_account_name: 'local-a',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 2,
+          rate_violation: false,
+          bound_groups: [
+            { id: 7, name: 'VIP', rate_multiplier: 2, rate_violation: false },
+          ],
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any) => h('div', [
+                slots['cell-actions']?.({ row }),
+              ])))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+          ConfirmDialog: {
+            props: ['show'],
+            emits: ['confirm', 'cancel'],
+            setup(props, { emit }) {
+              return () => props.show ? h('button', { class: 'confirm-delete', onClick: () => emit('confirm') }, 'confirm') : null
+            },
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text().includes('common.delete'))?.trigger('click')
+    await flushPromises()
+    await wrapper.find('.confirm-delete').trigger('click')
+    await flushPromises()
+
+    expect(accountsMock.delete).toHaveBeenCalledWith(12)
+    expect(upstreamAccountSyncMock.getPreview).toHaveBeenCalledTimes(2)
   })
 })
