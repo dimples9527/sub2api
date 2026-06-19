@@ -63,6 +63,7 @@ export interface UpstreamAccountSyncUnbindDetail {
   unbound_group_names: string[]
   remaining_group_ids: number[]
   trigger_source?: string
+  handled?: boolean
 }
 
 export interface UpstreamAccountSyncRecord {
@@ -220,6 +221,13 @@ export async function getRecords(): Promise<UpstreamAccountSyncRecord[]> {
   return data
 }
 
+export async function markRecordHandled(key: string): Promise<UpstreamAccountSyncRecord[]> {
+  const { data } = await apiClient.post<UpstreamAccountSyncRecord[]>(
+    `/admin/upstream-management/accounts/sync-records/${encodeURIComponent(key)}/handled`
+  )
+  return data
+}
+
 export async function getRateGuardConfig(): Promise<UpstreamAccountRateGuardConfig> {
   const { data } = await apiClient.get<UpstreamAccountRateGuardConfig>(
     '/admin/upstream-management/accounts/rate-guard-config'
@@ -306,6 +314,7 @@ export const upstreamAccountSyncAPI = {
   getPreview,
   runSync,
   getRecords,
+  markRecordHandled,
   getRateGuardConfig,
   updateRateGuardConfig,
   runRateGuardNow,

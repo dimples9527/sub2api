@@ -16,6 +16,7 @@ type upstreamAccountSyncHandlerServiceStub struct {
 	previewCalled       bool
 	syncCalled          bool
 	recordsCalled       bool
+	markHandledCalled   bool
 	runNowCalled        bool
 	overviewCalled      bool
 	configCalled        bool
@@ -25,6 +26,7 @@ type upstreamAccountSyncHandlerServiceStub struct {
 	configInput         service.UpstreamAccountRateGuardConfig
 	balanceConfigInput  service.UpstreamBalanceSamplerConfig
 	rechargeInput       service.UpstreamBalanceRechargeInput
+	handledRecordKey    string
 	result              service.UpstreamAccountSyncResult
 	records             []service.UpstreamAccountSyncRecord
 	config              service.UpstreamAccountRateGuardConfig
@@ -49,6 +51,12 @@ func (s *upstreamAccountSyncHandlerServiceStub) Sync(_ context.Context, req serv
 
 func (s *upstreamAccountSyncHandlerServiceStub) ListRecords(context.Context) ([]service.UpstreamAccountSyncRecord, error) {
 	s.recordsCalled = true
+	return s.records, s.err
+}
+
+func (s *upstreamAccountSyncHandlerServiceStub) MarkRecordHandled(_ context.Context, key string) ([]service.UpstreamAccountSyncRecord, error) {
+	s.markHandledCalled = true
+	s.handledRecordKey = key
 	return s.records, s.err
 }
 
@@ -131,6 +139,7 @@ func newUpstreamAccountSyncHandlerTestRouterWithBalanceScheduler(svc upstreamAcc
 	router.GET("/admin/upstream-management/accounts/sync-preview", handler.Preview)
 	router.POST("/admin/upstream-management/accounts/sync", handler.Sync)
 	router.GET("/admin/upstream-management/accounts/sync-records", handler.Records)
+	router.POST("/admin/upstream-management/accounts/sync-records/:key/handled", handler.MarkRecordHandled)
 	router.GET("/admin/upstream-management/accounts/rate-guard-config", handler.GetRateGuardConfig)
 	router.PUT("/admin/upstream-management/accounts/rate-guard-config", handler.UpdateRateGuardConfig)
 	router.POST("/admin/upstream-management/accounts/rate-guard-runs", handler.RunRateGuardNow)
@@ -227,6 +236,26 @@ func TestUpstreamAccountSyncHandlerRecords(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.True(t, svc.recordsCalled)
 	require.Contains(t, rec.Body.String(), `"provider_slug":"main"`)
+}
+
+func TestUpstreamAccountSyncHandlerMarkRecordHandled(t *testing.T) {
+	svc := &upstreamAccountSyncHandlerServiceStub{records: []service.UpstreamAccountSyncRecord{{
+		ProviderSlug: "main",
+		UnbindDetails: []service.UpstreamAccountSyncUnbindDetail{{
+			UpstreamKeyName: "key-a",
+			Handled:         true,
+		}},
+	}}}
+	router := newUpstreamAccountSyncHandlerTestRouter(svc)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/admin/upstream-management/accounts/sync-records/2026-06-18T00:00:00Z-10-key-a-8/handled", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.True(t, svc.markHandledCalled)
+	require.Equal(t, "2026-06-18T00:00:00Z-10-key-a-8", svc.handledRecordKey)
+	require.Contains(t, rec.Body.String(), `"handled":true`)
 }
 
 func TestUpstreamAccountSyncHandlerGetRateGuardConfig(t *testing.T) {

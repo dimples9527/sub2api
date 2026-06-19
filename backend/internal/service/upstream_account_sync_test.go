@@ -1002,6 +1002,50 @@ func TestUpstreamAccountRateGuardDoesNotPersistEmptyRecords(t *testing.T) {
 	}
 }
 
+func TestUpstreamAccountSyncMarkRecordHandledPersistsUnbindDetail(t *testing.T) {
+	settings := newUpstreamManagementSettingRepoStub()
+	settings.values[SettingKeyUpstreamAccountSyncRecords] = `[{
+		"provider_slug":"backup",
+		"provider_name":"Backup",
+		"updated_count":1,
+		"rate_violation_count":1,
+		"unbound_group_count":1,
+		"created_at":"2026-06-18T00:00:00Z",
+		"trigger_source":"scheduled_rate_guard",
+		"unbind_details":[{
+			"provider_slug":"backup",
+			"provider_name":"Backup",
+			"upstream_key_name":"matched",
+			"matched_local_account_id":10,
+			"matched_local_account_name":"up-matched",
+			"upstream_group_name":"VIP",
+			"upstream_rate_multiplier":2,
+			"local_min_rate_multiplier":0.5,
+			"unbound_group_ids":[8],
+			"unbound_group_names":["Trial"],
+			"remaining_group_ids":[7],
+			"trigger_source":"scheduled_rate_guard"
+		}]
+	}]`
+	svc := NewUpstreamAccountSyncService(nil, nil, nil, settings)
+
+	records, err := svc.MarkRecordHandled(context.Background(), "2026-06-18T00:00:00Z-10-matched-8")
+	if err != nil {
+		t.Fatalf("MarkRecordHandled returned error: %v", err)
+	}
+	if len(records) != 1 || len(records[0].UnbindDetails) != 1 || !records[0].UnbindDetails[0].Handled {
+		t.Fatalf("records = %+v, want handled unbind detail", records)
+	}
+
+	var persisted []UpstreamAccountSyncRecord
+	if err := json.Unmarshal([]byte(settings.values[SettingKeyUpstreamAccountSyncRecords]), &persisted); err != nil {
+		t.Fatalf("decode persisted records: %v", err)
+	}
+	if !persisted[0].UnbindDetails[0].Handled {
+		t.Fatalf("persisted records = %+v, want handled unbind detail", persisted)
+	}
+}
+
 func TestUpstreamAccountRateGuardUnbindsLowGroupsForUnschedulableAccounts(t *testing.T) {
 	provider := &upstreamAccountSyncProviderSourceStub{
 		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},

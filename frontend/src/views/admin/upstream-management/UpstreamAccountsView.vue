@@ -85,6 +85,18 @@
                 </div>
               </div>
             </div>
+            <div v-if="unhandledSyncLogEntries.length" class="guard-sync-log-warning">
+              <div class="guard-warning-icon">
+                <Icon name="exclamationTriangle" size="md" :stroke-width="2" />
+              </div>
+              <div class="guard-warning-copy">
+                <strong>{{ t('admin.upstreamAccounts.unhandledSyncLogs', '待处理同步日志') }} {{ unhandledSyncLogEntries.length }}</strong>
+                <span>{{ t('admin.upstreamAccounts.unhandledSyncLogsDescription', '有低倍率分组解绑记录需要确认处理') }}</span>
+              </div>
+              <button type="button" class="ui-button ui-button-warning" @click="openSyncLogsDialog">
+                {{ t('admin.upstreamAccounts.openSyncLogs', '打开同步日志') }}
+              </button>
+            </div>
             <div class="guard-controls">
               <span class="control-label">{{ t('admin.upstreamAccounts.rateGuardAutoRun') }} {{ t('admin.upstreamAccounts.rateGuardIntervalSeconds') }}</span>
               <input
@@ -416,14 +428,36 @@
 
           <section class="records-panel">
             <div class="records-header">
-              <h3>{{ t('admin.upstreamAccounts.syncLogs') }}</h3>
-              <span>{{ t('admin.upstreamAccounts.latestRecords', { count: syncLogEntries.length }) }} {{ syncLogEntries.length }}</span>
+              <div>
+                <h3>{{ t('admin.upstreamAccounts.syncLogs') }}</h3>
+                <span>{{ t('admin.upstreamAccounts.latestRecords', { count: syncLogEntries.length }) }} {{ syncLogEntries.length }}</span>
+              </div>
+              <button type="button" class="ui-button" @click="openSyncLogsDialog">
+                <Icon name="document" size="sm" :stroke-width="2" />
+                {{ t('admin.upstreamAccounts.openSyncLogs', '打开同步日志') }}
+              </button>
             </div>
             <div class="records-info">{{ t('admin.upstreamAccounts.syncLogsDescription') }}</div>
-            <div v-if="syncLogEntries.length" class="records-table-wrap">
+          </section>
+        </div>
+
+        <div v-if="showSyncLogsDialog" class="sync-logs-dialog fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6" @click.self="closeSyncLogsDialog">
+          <div class="sync-logs-modal">
+            <div class="sync-logs-modal-header">
+              <div>
+                <h3>{{ t('admin.upstreamAccounts.syncLogs') }}</h3>
+                <p>{{ t('admin.upstreamAccounts.latestRecords', { count: syncLogEntries.length }) }} {{ syncLogEntries.length }}</p>
+              </div>
+              <button type="button" class="modal-close-button" :aria-label="t('common.close')" @click="closeSyncLogsDialog">
+                <Icon name="x" size="md" :stroke-width="2" />
+              </button>
+            </div>
+            <div class="records-info sync-logs-modal-info">{{ t('admin.upstreamAccounts.syncLogsDescription') }}</div>
+            <div v-if="syncLogEntries.length" class="records-table-wrap sync-logs-table-wrap">
               <table class="records-table">
                 <thead>
                   <tr>
+                    <th>{{ t('admin.upstreamAccounts.logStatus', '处理状态') }}</th>
                     <th>{{ t('admin.upstreamAccounts.logTime') }}</th>
                     <th>{{ t('admin.upstreamAccounts.logTriggerSource') }}</th>
                     <th>{{ t('admin.upstreamAccounts.logAccount') }}</th>
@@ -431,10 +465,16 @@
                     <th>{{ t('admin.upstreamAccounts.logRateCompare') }}</th>
                     <th>{{ t('admin.upstreamAccounts.logUnboundGroups') }}</th>
                     <th>{{ t('admin.upstreamAccounts.logRemainingGroups') }}</th>
+                    <th>{{ t('common.actions') }}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="entry in syncLogEntries" :key="entry.key" class="records-row">
+                  <tr v-for="entry in syncLogEntries" :key="entry.key" :class="['records-row', { 'records-row-handled': isSyncLogHandled(entry) }]">
+                    <td>
+                      <span :class="['sync-log-status', isSyncLogHandled(entry) ? 'sync-log-status-handled' : 'sync-log-status-unhandled']">
+                        {{ isSyncLogHandled(entry) ? t('admin.upstreamAccounts.syncLogHandled', '已处理') : t('admin.upstreamAccounts.syncLogUnhandled', '待处理') }}
+                      </span>
+                    </td>
                     <td>{{ formatDateTime(entry.created_at) }}</td>
                     <td>
                       <span :class="['trigger-chip', triggerClass(entry.trigger_source)]">
@@ -474,6 +514,17 @@
                         <code v-for="groupID in entry.remaining_group_ids" :key="`${entry.key}-${groupID}`" class="log-chip">#{{ groupID }}</code>
                       </div>
                     </td>
+                    <td>
+                      <button
+                        v-if="!isSyncLogHandled(entry)"
+                        type="button"
+                        class="text-action sync-log-handle-button"
+                        @click="markSyncLogHandled(entry)"
+                      >
+                        {{ t('admin.upstreamAccounts.markSyncLogHandled', '标记已处理') }}
+                      </button>
+                      <span v-else class="dash">-</span>
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -485,7 +536,7 @@
                 {{ t('admin.upstreamAccounts.syncNow') }}
               </button>
             </div>
-          </section>
+          </div>
         </div>
 
         <div v-if="accountGroupDialogItem" class="account-group-dialog fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6" @click.self="closeAccountGroupDialog">
@@ -657,6 +708,7 @@ const balanceOverview = ref<UpstreamBalanceConsumptionOverview | null>(null)
 const showTrendModal = ref(false)
 const trendProviderSlug = ref('')
 const trendProviderName = ref('')
+const showSyncLogsDialog = ref(false)
 
 type UpstreamAccountSyncLogEntry = UpstreamAccountSyncUnbindDetail & {
   created_at: string
@@ -749,6 +801,7 @@ const syncLogEntries = computed<UpstreamAccountSyncLogEntry[]>(() => {
   }
   return entries
 })
+const unhandledSyncLogEntries = computed(() => syncLogEntries.value.filter(entry => !isSyncLogHandled(entry)))
 const canSync = computed(() => summary.value.create_count > 0 || summary.value.update_count > 0 || summary.value.rate_violation_count > 0)
 const syncProviderLabel = computed(() => {
   if (syncProviders.value.length === 1) return syncProviders.value[0].name || syncProviders.value[0].slug
@@ -1367,6 +1420,33 @@ function upstreamAccountSyncTriggerSourceLabel(triggerSource: string | undefined
   return t('admin.upstreamAccounts.triggerManualSync')
 }
 
+function isSyncLogHandled(entry: UpstreamAccountSyncLogEntry) {
+  return Boolean(entry.handled)
+}
+
+async function markSyncLogHandled(entry: UpstreamAccountSyncLogEntry) {
+  try {
+    const records = await adminAPI.upstreamAccountSync.markRecordHandled(entry.key)
+    if (result.value) {
+      result.value = {
+        ...result.value,
+        records
+      }
+    }
+    appStore.showSuccess(t('admin.upstreamAccounts.syncLogMarkedHandled', '同步日志已标记为已处理'))
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.syncLogMarkHandledFailed', '标记同步日志失败')))
+  }
+}
+
+function openSyncLogsDialog() {
+  showSyncLogsDialog.value = true
+}
+
+function closeSyncLogsDialog() {
+  showSyncLogsDialog.value = false
+}
+
 function getProviderBalance(providerSlug: string): number | null {
   if (!balanceOverview.value?.summaries) return null
   const summary = balanceOverview.value.summaries[providerSlug]
@@ -1595,6 +1675,19 @@ onMounted(reload)
   color: #fff;
 }
 
+.ui-button-warning {
+  border-color: #f59e0b;
+  background: #fff7ed;
+  color: #b45309;
+}
+
+.ui-button-warning:hover:not(:disabled) {
+  border-color: #d97706;
+  background: #fffbeb;
+  color: #92400e;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.12);
+}
+
 .ui-button-icon {
   width: 38px;
   padding: 0;
@@ -1602,7 +1695,7 @@ onMounted(reload)
 
 .rate-guard-panel {
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) auto;
+  grid-template-columns: minmax(280px, 1fr) minmax(260px, auto) auto;
   gap: 20px;
   align-items: center;
   padding: 18px;
@@ -1679,6 +1772,45 @@ onMounted(reload)
   margin-top: 10px;
   color: #64748b;
   font-size: 12px;
+}
+
+.guard-sync-log-warning {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  background: #fffbeb;
+  padding: 10px 12px;
+}
+
+.guard-warning-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #d97706;
+}
+
+.guard-warning-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.guard-warning-copy strong {
+  color: #92400e;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.guard-warning-copy span {
+  color: #b45309;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .guard-controls {
@@ -2419,6 +2551,71 @@ onMounted(reload)
   overflow: hidden;
 }
 
+.sync-logs-dialog {
+  overflow-y: auto;
+}
+
+.sync-logs-modal {
+  display: flex;
+  width: min(1180px, 100%);
+  max-height: min(78vh, 760px);
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.28);
+}
+
+.sync-logs-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 18px 20px;
+}
+
+.sync-logs-modal-header h3 {
+  margin: 0;
+  color: #111827;
+  font-size: 16px;
+  font-weight: 750;
+}
+
+.sync-logs-modal-header p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.modal-close-button {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  color: #64748b;
+  transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
+}
+
+.modal-close-button:hover {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  color: #111827;
+}
+
+.sync-logs-modal-info {
+  flex: none;
+}
+
+.sync-logs-table-wrap {
+  flex: 1 1 auto;
+  max-height: none;
+}
+
 .records-header {
   display: flex;
   align-items: center;
@@ -2455,7 +2652,7 @@ onMounted(reload)
 }
 
 .records-table {
-  min-width: 1080px;
+  min-width: 1240px;
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
@@ -2483,6 +2680,30 @@ onMounted(reload)
 
 .records-table tbody tr:hover {
   background: #f8fafc;
+}
+
+.records-row-handled {
+  opacity: 0.72;
+}
+
+.sync-log-status {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.sync-log-status-unhandled {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.sync-log-status-handled {
+  background: #ecfdf5;
+  color: #047857;
 }
 
 .trigger-sync {
@@ -2548,6 +2769,15 @@ onMounted(reload)
   .accounts-actions,
   .guard-controls {
     justify-content: flex-start;
+  }
+
+  .guard-sync-log-warning {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .guard-sync-log-warning .ui-button {
+    grid-column: 1 / -1;
+    justify-self: flex-start;
   }
 
   .accounts-table-content {

@@ -14,6 +14,7 @@ const { upstreamAccountSyncMock, accountsMock, groupsMock, proxiesMock, appStore
     updateBalanceSamplerConfig: vi.fn(),
     addBalanceRecharge: vi.fn(),
     runBalanceSampleNow: vi.fn(),
+    markRecordHandled: vi.fn(),
   },
   accountsMock: {
     getById: vi.fn(),
@@ -124,6 +125,36 @@ describe('UpstreamAccountsView', () => {
       interval_seconds: 3600,
       last_run_status: 'success',
     })
+    upstreamAccountSyncMock.markRecordHandled.mockResolvedValue([
+      {
+        provider_slug: 'upstream-a',
+        provider_name: 'Upstream A',
+        created_count: 0,
+        updated_count: 1,
+        skipped_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 1,
+        unbound_group_count: 1,
+        created_at: '2026-06-15T00:00:00Z',
+        trigger_source: 'manual_sync',
+        unbind_details: [
+          {
+            provider_slug: 'upstream-a',
+            provider_name: 'Upstream A',
+            upstream_key_name: 'key-a',
+            matched_local_account_id: 12,
+            matched_local_account_name: 'local-a',
+            upstream_group_name: 'upstream-group',
+            upstream_rate_multiplier: 1,
+            local_min_rate_multiplier: 0.5,
+            unbound_group_ids: [8],
+            unbound_group_names: ['low-rate'],
+            remaining_group_ids: [],
+            handled: true,
+          },
+        ],
+      },
+    ])
     upstreamAccountSyncMock.getBalanceConsumption.mockResolvedValue({
       config: {
         enabled: false,
@@ -158,7 +189,7 @@ describe('UpstreamAccountsView', () => {
     accountsMock.delete.mockResolvedValue({})
   })
 
-  it('renders sync log entries when legacy remaining group ids are null', async () => {
+  it('opens sync log entries in a dialog when legacy remaining group ids are null', async () => {
     const wrapper = mount(UpstreamAccountsView, {
       global: {
         stubs: {
@@ -176,7 +207,13 @@ describe('UpstreamAccountsView', () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).toContain('local-a')
+    expect(wrapper.text()).toContain('admin.upstreamAccounts.openSyncLogs')
+    expect(wrapper.text()).not.toContain('local-a')
+    await wrapper.findAll('button').find(button => button.text().includes('admin.upstreamAccounts.openSyncLogs'))?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.sync-logs-dialog').exists()).toBe(true)
+    expect(wrapper.find('.sync-logs-dialog').text()).toContain('local-a')
     expect(wrapper.text()).toContain('-')
   })
 
@@ -231,7 +268,45 @@ describe('UpstreamAccountsView', () => {
 
     expect(wrapper.text()).not.toContain('Upstream A')
     expect(wrapper.text()).not.toContain('admin.upstreamAccounts.syncSummaryCreated 1')
-    expect(wrapper.text()).toContain('admin.upstreamAccounts.noSyncLogs')
+    expect(wrapper.text()).toContain('admin.upstreamAccounts.openSyncLogs')
+
+    await wrapper.findAll('button').find(button => button.text().includes('admin.upstreamAccounts.openSyncLogs'))?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.sync-logs-dialog').text()).toContain('admin.upstreamAccounts.noSyncLogs')
+  })
+
+  it('shows unhandled sync logs in the rate guard panel and marks them handled', async () => {
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: { template: '<div><slot name="empty" /></div>' },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+          GroupSelector: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('.guard-sync-log-warning').exists()).toBe(true)
+    expect(wrapper.find('.guard-sync-log-warning').text()).toContain('1')
+
+    await wrapper.find('.guard-sync-log-warning button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.sync-logs-dialog').exists()).toBe(true)
+    expect(wrapper.find('.sync-logs-dialog').text()).toContain('admin.upstreamAccounts.syncLogUnhandled')
+
+    await wrapper.find('.sync-log-handle-button').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.guard-sync-log-warning').exists()).toBe(false)
+    expect(wrapper.find('.sync-logs-dialog').text()).toContain('admin.upstreamAccounts.syncLogHandled')
+    expect(upstreamAccountSyncMock.markRecordHandled).toHaveBeenCalledWith('2026-06-15T00:00:00Z-12-key-a-8')
   })
 
   it('does not render balance charts above the upstream account table', async () => {

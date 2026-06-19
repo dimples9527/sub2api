@@ -144,6 +144,7 @@ type UpstreamAccountSyncUnbindDetail struct {
 	UnboundGroupNames       []string `json:"unbound_group_names"`
 	RemainingGroupIDs       []int64  `json:"remaining_group_ids"`
 	TriggerSource           string   `json:"trigger_source,omitempty"`
+	Handled                 bool     `json:"handled,omitempty"`
 }
 
 type UpstreamAccountSyncService struct {
@@ -436,6 +437,46 @@ func (s *UpstreamAccountSyncService) ListRecords(ctx context.Context) ([]Upstrea
 		return nil, infraerrors.InternalServer("UPSTREAM_ACCOUNT_SYNC_RECORDS_INVALID", "upstream account sync records are invalid")
 	}
 	return limitUpstreamAccountSyncRecords(records), nil
+}
+
+func (s *UpstreamAccountSyncService) MarkRecordHandled(ctx context.Context, key string) ([]UpstreamAccountSyncRecord, error) {
+	records, err := s.ListRecords(ctx)
+	if err != nil {
+		return nil, err
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return nil, infraerrors.BadRequest("UPSTREAM_ACCOUNT_SYNC_RECORD_KEY_REQUIRED", "upstream account sync record key is required")
+	}
+
+	found := false
+	for recordIndex := range records {
+		for detailIndex := range records[recordIndex].UnbindDetails {
+			if upstreamAccountSyncRecordDetailKey(records[recordIndex], records[recordIndex].UnbindDetails[detailIndex]) != key {
+				continue
+			}
+			records[recordIndex].UnbindDetails[detailIndex].Handled = true
+			found = true
+			break
+		}
+		if found {
+			break
+		}
+	}
+	if !found {
+		return nil, infraerrors.NotFound("UPSTREAM_ACCOUNT_SYNC_RECORD_NOT_FOUND", "upstream account sync record was not found")
+	}
+	if s == nil || s.settingRepo == nil {
+		return records, nil
+	}
+	raw, err := json.Marshal(records)
+	if err != nil {
+		return nil, fmt.Errorf("marshal upstream account sync records: %w", err)
+	}
+	if err := s.settingRepo.Set(ctx, SettingKeyUpstreamAccountSyncRecords, string(raw)); err != nil {
+		return nil, fmt.Errorf("save upstream account sync records: %w", err)
+	}
+	return records, nil
 }
 
 type upstreamAccountSyncPreviewState struct {
@@ -1167,6 +1208,14 @@ func normalizeUpstreamAccountRateGuardTriggerSource(triggerSource string) string
 	default:
 		return UpstreamAccountSyncTriggerScheduledRateGuard
 	}
+}
+
+func upstreamAccountSyncRecordDetailKey(record UpstreamAccountSyncRecord, detail UpstreamAccountSyncUnbindDetail) string {
+	parts := make([]string, 0, len(detail.UnboundGroupIDs))
+	for _, id := range detail.UnboundGroupIDs {
+		parts = append(parts, fmt.Sprint(id))
+	}
+	return fmt.Sprintf("%s-%d-%s-%s", record.CreatedAt.Format(time.RFC3339), detail.MatchedLocalAccountID, detail.UpstreamKeyName, strings.Join(parts, "_"))
 }
 
 func accountIDs(accounts []Account) []int64 {

@@ -15,6 +15,7 @@ type upstreamAccountSyncService interface {
 	Preview(ctx context.Context) (service.UpstreamAccountSyncResult, error)
 	Sync(ctx context.Context, req service.UpstreamAccountSyncRequest) (service.UpstreamAccountSyncResult, error)
 	ListRecords(ctx context.Context) ([]service.UpstreamAccountSyncRecord, error)
+	MarkRecordHandled(ctx context.Context, key string) ([]service.UpstreamAccountSyncRecord, error)
 	GetRateGuardConfig(ctx context.Context) (service.UpstreamAccountRateGuardConfig, error)
 	UpdateRateGuardConfig(ctx context.Context, input service.UpstreamAccountRateGuardConfig) (service.UpstreamAccountRateGuardConfig, error)
 }
@@ -94,6 +95,15 @@ func (h *UpstreamAccountSyncHandler) Sync(c *gin.Context) {
 
 func (h *UpstreamAccountSyncHandler) Records(c *gin.Context) {
 	records, err := h.service.ListRecords(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, records)
+}
+
+func (h *UpstreamAccountSyncHandler) MarkRecordHandled(c *gin.Context) {
+	records, err := h.service.MarkRecordHandled(c.Request.Context(), c.Param("key"))
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

@@ -58,6 +58,15 @@
               <Select v-model="rateFilter" class="ug-filter-select" :options="rateFilterOptions" />
               <button
                 type="button"
+                class="ug-btn ug-btn-primary"
+                :disabled="loading || applying"
+                @click="openCreateAccountDialog"
+              >
+                <Icon name="plus" size="sm" />
+                <span>{{ t('admin.accounts.createAccount') }}</span>
+              </button>
+              <button
+                type="button"
                 class="ug-btn ug-btn-default"
                 :disabled="loading || applying"
                 :title="t('common.refresh')"
@@ -204,30 +213,93 @@
                 <span v-else class="ug-rate-empty">-</span>
               </template>
 
+              <template #cell-bound_accounts="{ row }">
+                <span v-if="loadingGroupAccounts" class="ug-rate-empty">{{ t('common.loading') }}</span>
+                <div v-else-if="boundAccountsFor(row).length" class="ug-account-list">
+                  <span
+                    v-for="account in visibleBoundAccounts(row)"
+                    :key="account.id"
+                    class="ug-account-chip"
+                    :title="`#${account.id} ${account.name}`"
+                  >
+                    <span class="ug-account-chip-name">{{ account.name }}</span>
+                    <span class="ug-account-chip-id">#{{ account.id }}</span>
+                  </span>
+                  <span v-if="hiddenBoundAccountCount(row) > 0" class="ug-account-more">
+                    +{{ hiddenBoundAccountCount(row) }}
+                  </span>
+                </div>
+                <span v-else class="ug-rate-empty">-</span>
+              </template>
+
+              <template #cell-account_status="{ row }">
+                <span v-if="loadingGroupAccounts" class="ug-rate-empty">{{ t('common.loading') }}</span>
+                <div v-else-if="boundAccountsFor(row).length" class="ug-account-status-list">
+                  <AccountStatusIndicator
+                    v-for="account in visibleBoundAccounts(row)"
+                    :key="account.id"
+                    :account="account"
+                    @show-temp-unsched="handleShowTempUnsched"
+                  />
+                  <span v-if="hiddenBoundAccountCount(row) > 0" class="ug-account-more">
+                    +{{ hiddenBoundAccountCount(row) }}
+                  </span>
+                </div>
+                <span v-else class="ug-rate-empty">-</span>
+              </template>
+
               <template #cell-status="{ row }">
                 <span :class="['ug-status', statusClass(row)]">{{ statusLabel(row) }}</span>
               </template>
 
               <template #cell-action="{ row }">
-                <button
-                  v-if="!row.matched"
-                  type="button"
-                  class="ug-btn ug-btn-primary ug-btn-small ug-btn-cell"
-                  :disabled="syncingGroupKey === row.upstream_group_key"
-                  @click="openSyncDialog(row)"
-                >
-                  <Icon name="sync" size="sm" :class="syncingGroupKey === row.upstream_group_key ? 'animate-spin' : ''" />
-                  <span>{{ t('admin.upstreamGroups.syncLocalGroup') }}</span>
-                </button>
-                <button
-                  v-else
-                  type="button"
-                  class="ug-btn-text"
-                  :disabled="savingLocalRateGroupId === row.local_group_id"
-                  @click="openLocalRateDialog(row)"
-                >
-                  {{ t('admin.upstreamGroups.editLocalRate') }}
-                </button>
+                <div class="ug-action-stack">
+                  <button
+                    v-if="!row.matched"
+                    type="button"
+                    class="ug-btn ug-btn-primary ug-btn-small ug-btn-cell"
+                    :disabled="syncingGroupKey === row.upstream_group_key"
+                    @click="openSyncDialog(row)"
+                  >
+                    <Icon name="sync" size="sm" :class="syncingGroupKey === row.upstream_group_key ? 'animate-spin' : ''" />
+                    <span>{{ t('admin.upstreamGroups.syncLocalGroup') }}</span>
+                  </button>
+                  <button
+                    v-else
+                    type="button"
+                    class="ug-btn-text"
+                    :disabled="savingLocalRateGroupId === row.local_group_id"
+                    @click="openLocalRateDialog(row)"
+                  >
+                    {{ t('admin.upstreamGroups.editLocalRate') }}
+                  </button>
+                  <div
+                    v-for="account in visibleBoundAccounts(row)"
+                    :key="`action-${account.id}`"
+                    class="ug-account-action-row"
+                  >
+                    <span class="ug-account-action-name">#{{ account.id }}</span>
+                    <button
+                      type="button"
+                      class="ug-btn-text"
+                      :disabled="editingAccountId === account.id || savingAccountGroupId === account.id"
+                      @click="openAccountEditDialog(account)"
+                    >
+                    {{ t('admin.upstreamGroups.editAccount', '编辑账号') }}
+                    </button>
+                    <button
+                      type="button"
+                      class="ug-btn-text"
+                      :disabled="editingAccountId === account.id || savingAccountGroupId === account.id"
+                      @click="openAccountGroupDialog(account)"
+                    >
+                      {{ t('admin.upstreamGroups.editAccountBinding', '编辑绑定') }}
+                    </button>
+                  </div>
+                  <span v-if="hiddenBoundAccountCount(row) > 0" class="ug-account-more">
+                    +{{ hiddenBoundAccountCount(row) }}
+                  </span>
+                </div>
               </template>
 
               <template #empty>
@@ -382,6 +454,71 @@
             </div>
           </div>
         </div>
+
+        <CreateAccountModal
+          v-if="showCreateAccountModal"
+          :show="showCreateAccountModal"
+          :proxies="accountProxies"
+          :groups="accountEditGroups"
+          @close="closeCreateAccountDialog"
+          @created="handleAccountCreated"
+        />
+        <EditAccountModal
+          v-if="showEditAccountModal"
+          :show="showEditAccountModal"
+          :account="editingAccount"
+          :proxies="accountProxies"
+          :groups="accountEditGroups"
+          @close="closeAccountEditDialog"
+          @updated="handleAccountUpdated"
+        />
+        <div
+          v-if="accountGroupDialogAccount"
+          class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6"
+          @click.self="closeAccountGroupDialog"
+        >
+          <div class="w-full max-w-xl overflow-hidden rounded-lg bg-white shadow-xl dark:bg-dark-800">
+            <div class="border-b border-gray-100 px-5 py-4 dark:border-dark-700">
+              <h3 class="text-lg font-semibold text-gray-950 dark:text-white">{{ t('admin.upstreamGroups.editAccountBindingTitle', '编辑账号绑定分组') }}</h3>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.upstreamGroups.editAccountBindingDescription', '添加或移除该账号绑定的本地分组。') }}</p>
+            </div>
+            <div class="space-y-4 px-5 py-4">
+              <div class="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <div class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.upstreamGroups.boundAccounts', '绑定账号') }}</div>
+                  <div class="mt-1 text-sm font-semibold text-gray-950 dark:text-white">
+                    #{{ accountGroupDialogAccount.id }} {{ accountGroupDialogAccount.name }}
+                  </div>
+                </div>
+                <div>
+                  <div class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.accounts.platform') }}</div>
+                  <div class="mt-1 text-sm font-semibold text-gray-950 dark:text-white">{{ accountGroupDialogAccount.platform }}</div>
+                </div>
+              </div>
+              <GroupSelector
+                v-model="accountGroupIds"
+                :groups="accountEditGroups"
+                :platform="accountGroupPlatform"
+                searchable
+              />
+            </div>
+            <div class="flex justify-end gap-2 border-t border-gray-100 px-5 py-4 dark:border-dark-700">
+              <button type="button" class="btn btn-secondary btn-sm" :disabled="savingAccountGroupId === accountGroupDialogAccount.id" @click="closeAccountGroupDialog">
+                {{ t('common.cancel') }}
+              </button>
+              <button type="button" class="btn btn-primary btn-sm" :disabled="savingAccountGroupId === accountGroupDialogAccount.id" @click="saveAccountGroups">
+                <Icon name="cog" size="sm" class="mr-1" :class="savingAccountGroupId === accountGroupDialogAccount.id ? 'animate-spin' : ''" />
+                {{ t('common.save') }}
+              </button>
+            </div>
+          </div>
+        </div>
+        <TempUnschedStatusModal
+          :show="showTempUnsched"
+          :account="tempUnschedAccount"
+          @close="closeTempUnschedModal"
+          @reset="handleTempUnschedReset"
+        />
       </template>
     </TablePageLayout>
   </AppLayout>
@@ -405,14 +542,17 @@ import {
   normalizeUpstreamMonitorGroupKey,
   type UpstreamMonitorTrendRow
 } from '@/utils/upstreamMonitorTrend'
+import type { Account, AdminGroup, GroupPlatform, Proxy as AccountProxy } from '@/types'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
+import GroupSelector from '@/components/common/GroupSelector.vue'
 import Icon from '@/components/icons/Icon.vue'
 import UpstreamGroupAvailabilityTrend from '@/components/admin/upstream/UpstreamGroupAvailabilityTrend.vue'
+import { AccountStatusIndicator, CreateAccountModal, EditAccountModal, TempUnschedStatusModal } from '@/components/account'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -426,6 +566,21 @@ const loadingRateFixConfig = ref(false)
 const savingRateFixConfig = ref(false)
 const syncingGroupKey = ref<string | null>(null)
 const savingLocalRateGroupId = ref<number | null>(null)
+const savingAccountGroupId = ref<number | null>(null)
+const editingAccountId = ref<number | null>(null)
+const showCreateAccountModal = ref(false)
+const showEditAccountModal = ref(false)
+const accountEditGroups = ref<AdminGroup[]>([])
+const accountProxies = ref<AccountProxy[]>([])
+const editingAccount = ref<Account | null>(null)
+const accountGroupDialogAccount = ref<Account | null>(null)
+const accountGroupIds = ref<number[]>([])
+const accountGroupPlatform = ref<GroupPlatform | undefined>()
+const groupAccountsByGroupId = ref<Record<number, Account[]>>({})
+const groupAccountTotalsByGroupId = ref<Record<number, number>>({})
+const loadingGroupAccounts = ref(false)
+const showTempUnsched = ref(false)
+const tempUnschedAccount = ref<Account | null>(null)
 const monitorTrendIndex = ref<Map<string, UpstreamMonitorTrendRow>>(new Map())
 const monitorLoading = ref(false)
 const monitorError = ref('')
@@ -458,14 +613,16 @@ const syncPlatformOptions = computed<SelectOption[]>(() => [
 ])
 
 const columns = computed<Column[]>(() => [
-  { key: 'upstream_group_name', label: t('admin.upstreamGroups.columns.upstreamGroup'), class: 'min-w-[12rem]', sortable: true },
-  { key: 'upstream_rate', label: t('admin.upstreamGroups.columns.upstreamRate'), sortable: true },
-  { key: 'monitor_trend', label: t('admin.upstreamGroups.columns.monitorTrend'), class: 'min-w-[10.5rem]' },
-  { key: 'local_group_name', label: t('admin.upstreamGroups.columns.matchResult'), sortable: true },
-  { key: 'local_rate', label: t('admin.upstreamGroups.columns.localRate'), sortable: true },
-  { key: 'rate_delta', label: t('admin.upstreamGroups.columns.rateDelta'), sortable: true },
-  { key: 'status', label: t('admin.upstreamGroups.columns.status'), sortable: true },
-  { key: 'action', label: t('admin.upstreamGroups.columns.action') },
+  { key: 'upstream_group_name', label: t('admin.upstreamGroups.columns.upstreamGroup'), class: 'ug-table-upstream-group-column', sortable: true },
+  { key: 'upstream_rate', label: t('admin.upstreamGroups.columns.upstreamRate'), class: 'ug-table-rate-column', sortable: true },
+  { key: 'monitor_trend', label: t('admin.upstreamGroups.columns.monitorTrend'), class: 'ug-table-monitor-column' },
+  { key: 'local_group_name', label: t('admin.upstreamGroups.columns.matchResult'), class: 'ug-table-local-group-column', sortable: true },
+  { key: 'local_rate', label: t('admin.upstreamGroups.columns.localRate'), class: 'ug-table-rate-column', sortable: true },
+  { key: 'rate_delta', label: t('admin.upstreamGroups.columns.rateDelta'), class: 'ug-table-delta-column', sortable: true },
+  { key: 'bound_accounts', label: t('admin.upstreamGroups.columns.boundAccounts', '绑定账号'), class: 'ug-table-bound-accounts-column' },
+  { key: 'account_status', label: t('admin.upstreamGroups.columns.accountStatus', '账号状态'), class: 'ug-table-account-status-column' },
+  { key: 'status', label: t('admin.upstreamGroups.columns.status'), class: 'ug-table-status-column', sortable: true },
+  { key: 'action', label: t('admin.upstreamGroups.columns.action'), class: 'ug-table-action-column' },
 ])
 
 const items = computed<UpstreamGroupComparison[]>(() => result.value?.items || [])
@@ -553,14 +710,69 @@ async function reload() {
     ])
     result.value = groupsResult
     applyRateFixConfig(config)
+    await syncBoundAccounts(groupsResult.items || [], requestId)
   } catch (err) {
     const message = extractApiErrorMessage(err, t('admin.upstreamGroups.loadFailed'))
     loadError.value = message
     result.value = null
+    groupAccountsByGroupId.value = {}
+    groupAccountTotalsByGroupId.value = {}
     appStore.showError(message)
   } finally {
     loading.value = false
     loadingRateFixConfig.value = false
+  }
+}
+
+async function syncBoundAccounts(groupItems: UpstreamGroupComparison[], requestId: number) {
+  const groupIds = Array.from(
+    new Set(
+      groupItems
+        .map((item) => Number(item.local_group_id))
+        .filter((id) => Number.isFinite(id) && id > 0)
+    )
+  )
+  if (!groupIds.length) {
+    groupAccountsByGroupId.value = {}
+    groupAccountTotalsByGroupId.value = {}
+    return
+  }
+
+  loadingGroupAccounts.value = true
+  try {
+    const entries = await Promise.allSettled(
+      groupIds.map(async (groupId) => {
+        const response = await adminAPI.accounts.list(1, 100, {
+          group: String(groupId),
+          sort_by: 'id',
+          sort_order: 'asc',
+        })
+        return [groupId, response] as const
+      })
+    )
+    if (requestId !== reloadRequestId) return
+
+    const nextAccounts: Record<number, Account[]> = {}
+    const nextTotals: Record<number, number> = {}
+    let hasFailure = false
+    for (const entry of entries) {
+      if (entry.status !== 'fulfilled') {
+        hasFailure = true
+        continue
+      }
+      const [groupId, response] = entry.value
+      nextAccounts[groupId] = response.items || []
+      nextTotals[groupId] = response.total ?? response.items?.length ?? 0
+    }
+    groupAccountsByGroupId.value = nextAccounts
+    groupAccountTotalsByGroupId.value = nextTotals
+    if (hasFailure) {
+      appStore.showError(t('admin.upstreamGroups.boundAccountsLoadFailed', '加载绑定账号失败'))
+    }
+  } finally {
+    if (requestId === reloadRequestId) {
+      loadingGroupAccounts.value = false
+    }
   }
 }
 
@@ -680,6 +892,109 @@ async function saveLocalGroupRate() {
   }
 }
 
+async function loadAccountEditOptions() {
+  const [proxies, groups] = await Promise.all([
+    adminAPI.proxies.getAll(),
+    adminAPI.groups.getAll()
+  ])
+  accountProxies.value = proxies
+  accountEditGroups.value = groups
+}
+
+async function openCreateAccountDialog() {
+  try {
+    await loadAccountEditOptions()
+    showCreateAccountModal.value = true
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.loadAccountFailed')))
+  }
+}
+
+function closeCreateAccountDialog() {
+  showCreateAccountModal.value = false
+}
+
+async function handleAccountCreated() {
+  showCreateAccountModal.value = false
+  await reload()
+}
+
+async function openAccountEditDialog(account: Account) {
+  editingAccountId.value = account.id
+  try {
+    await loadAccountEditOptions()
+    editingAccount.value = account
+    showEditAccountModal.value = true
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.loadAccountFailed')))
+  } finally {
+    editingAccountId.value = null
+  }
+}
+
+function closeAccountEditDialog() {
+  showEditAccountModal.value = false
+  editingAccount.value = null
+}
+
+async function handleAccountUpdated() {
+  showEditAccountModal.value = false
+  editingAccount.value = null
+  await reload()
+}
+
+async function openAccountGroupDialog(account: Account) {
+  try {
+    if (!accountEditGroups.value.length) {
+      await loadAccountEditOptions()
+    }
+    accountGroupDialogAccount.value = account
+    accountGroupIds.value = [...(account.group_ids || account.groups?.map(group => group.id) || [])]
+    accountGroupPlatform.value = account.platform
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.loadAccountFailed')))
+  }
+}
+
+function closeAccountGroupDialog() {
+  if (savingAccountGroupId.value) return
+  accountGroupDialogAccount.value = null
+  accountGroupIds.value = []
+  accountGroupPlatform.value = undefined
+}
+
+async function saveAccountGroups() {
+  const account = accountGroupDialogAccount.value
+  if (!account) return
+  savingAccountGroupId.value = account.id
+  try {
+    await adminAPI.accounts.update(account.id, { group_ids: accountGroupIds.value })
+    closeAccountGroupDialog()
+    appStore.showSuccess(t('admin.upstreamAccounts.boundGroupsSaved'))
+    await reload()
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.boundGroupsSaveFailed')))
+  } finally {
+    savingAccountGroupId.value = null
+  }
+}
+
+function handleShowTempUnsched(account: Account) {
+  tempUnschedAccount.value = account
+  showTempUnsched.value = true
+}
+
+function handleTempUnschedReset() {
+  tempUnschedAccount.value = null
+  showTempUnsched.value = false
+  void reload()
+}
+
+function closeTempUnschedModal() {
+  tempUnschedAccount.value = null
+  showTempUnsched.value = false
+}
+
 async function syncLocalGroup() {
   if (!syncDialogItem.value) return
   const rate = Number(syncRateMultiplier.value)
@@ -730,6 +1045,27 @@ function normalizePositiveRate(value: number | undefined, fallback: number) {
 function normalizePositiveInteger(value: number | undefined, fallback: number) {
   const n = Number(value)
   return Number.isInteger(n) && n > 0 ? n : fallback
+}
+
+function localGroupId(row: UpstreamGroupComparison) {
+  const id = Number(row.local_group_id)
+  return Number.isFinite(id) && id > 0 ? id : null
+}
+
+function boundAccountsFor(row: UpstreamGroupComparison) {
+  const id = localGroupId(row)
+  return id ? groupAccountsByGroupId.value[id] || [] : []
+}
+
+function visibleBoundAccounts(row: UpstreamGroupComparison) {
+  return boundAccountsFor(row).slice(0, 4)
+}
+
+function hiddenBoundAccountCount(row: UpstreamGroupComparison) {
+  const id = localGroupId(row)
+  const shown = visibleBoundAccounts(row).length
+  const total = id ? groupAccountTotalsByGroupId.value[id] ?? boundAccountsFor(row).length : 0
+  return Math.max(0, total - shown)
 }
 
 function formatRate(value: number | undefined) {
@@ -995,6 +1331,60 @@ onMounted(reload)
   border-radius: 0.5rem;
 }
 
+.ug-table-card :deep(table) {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: max(100%, 1560px);
+  min-width: 1560px;
+}
+
+.ug-table-card :deep(th),
+.ug-table-card :deep(td) {
+  vertical-align: middle;
+}
+
+.ug-table-card :deep(.ug-table-upstream-group-column) {
+  width: 220px;
+  white-space: normal;
+}
+
+.ug-table-card :deep(.ug-table-rate-column) {
+  width: 105px;
+}
+
+.ug-table-card :deep(.ug-table-monitor-column) {
+  width: 160px;
+  white-space: normal;
+}
+
+.ug-table-card :deep(.ug-table-local-group-column) {
+  width: 220px;
+  white-space: normal;
+}
+
+.ug-table-card :deep(.ug-table-delta-column) {
+  width: 105px;
+}
+
+.ug-table-card :deep(.ug-table-bound-accounts-column) {
+  width: 240px;
+  white-space: normal;
+}
+
+.ug-table-card :deep(.ug-table-account-status-column) {
+  width: 220px;
+  white-space: normal;
+}
+
+.ug-table-card :deep(.ug-table-status-column) {
+  width: 105px;
+}
+
+.ug-table-card :deep(.ug-table-action-column) {
+  width: 245px;
+  white-space: normal;
+}
+
 .ug-table-card :deep(tr.ug-row-unmatched) > td:first-child {
   border-left: 3px solid #FF7D00;
 }
@@ -1009,6 +1399,7 @@ onMounted(reload)
 
 .ug-group-cell {
   @apply flex flex-col gap-1 leading-tight;
+  overflow-wrap: anywhere;
 }
 
 .ug-group-title {
@@ -1016,7 +1407,8 @@ onMounted(reload)
 }
 
 .ug-group-name {
-  @apply truncate font-semibold text-gray-900 dark:text-white;
+  @apply font-semibold text-gray-900 dark:text-white;
+  overflow-wrap: anywhere;
 }
 
 .ug-group-sub {
@@ -1029,10 +1421,93 @@ onMounted(reload)
 
 .ug-group-sub-code {
   @apply rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .ug-match-cell {
   @apply flex flex-col gap-1.5 leading-tight;
+  overflow-wrap: anywhere;
+}
+
+.ug-account-list,
+.ug-account-status-list,
+.ug-action-stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.ug-account-status-list {
+  align-items: flex-start;
+}
+
+.ug-action-stack {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.ug-account-chip {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 5px;
+  border-radius: 6px;
+  background: #f1f5f9;
+  padding: 2px 8px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.ug-account-chip-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ug-account-chip-id {
+  flex: none;
+  color: #94a3b8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+}
+
+.ug-account-more {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 6px;
+  background: #e5e7eb;
+  padding: 2px 7px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 18px;
+}
+
+.ug-account-action-row {
+  display: flex;
+  max-width: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ug-account-action-name {
+  color: #94a3b8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+}
+
+:global(.dark) .ug-account-chip {
+  background: #334155;
+  color: #e2e8f0;
+}
+
+:global(.dark) .ug-account-more {
+  background: #1f2937;
+  color: #cbd5e1;
 }
 
 .ug-match-id {
