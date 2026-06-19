@@ -53,6 +53,10 @@
                 <Icon name="sync" size="sm" :stroke-width="2" :class="syncing ? 'animate-spin' : ''" />
                 {{ t('admin.upstreamAccounts.syncNow') }}
               </button>
+              <button type="button" class="ui-button" @click="openSyncLogsDialog">
+                <Icon name="document" size="sm" :stroke-width="2" />
+                {{ t('admin.upstreamAccounts.openSyncLogs') }}
+              </button>
             </div>
           </section>
 
@@ -426,19 +430,6 @@
             </DataTable>
           </section>
 
-          <section class="records-panel">
-            <div class="records-header">
-              <div>
-                <h3>{{ t('admin.upstreamAccounts.syncLogs') }}</h3>
-                <span>{{ t('admin.upstreamAccounts.latestRecords', { count: syncLogEntries.length }) }} {{ syncLogEntries.length }}</span>
-              </div>
-              <button type="button" class="ui-button" @click="openSyncLogsDialog">
-                <Icon name="document" size="sm" :stroke-width="2" />
-                {{ t('admin.upstreamAccounts.openSyncLogs', '打开同步日志') }}
-              </button>
-            </div>
-            <div class="records-info">{{ t('admin.upstreamAccounts.syncLogsDescription') }}</div>
-          </section>
         </div>
 
         <div v-if="showSyncLogsDialog" class="sync-logs-dialog fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6" @click.self="closeSyncLogsDialog">
@@ -471,9 +462,17 @@
                 <tbody>
                   <tr v-for="entry in syncLogEntries" :key="entry.key" :class="['records-row', { 'records-row-handled': isSyncLogHandled(entry) }]">
                     <td>
-                      <span :class="['sync-log-status', isSyncLogHandled(entry) ? 'sync-log-status-handled' : 'sync-log-status-unhandled']">
-                        {{ isSyncLogHandled(entry) ? t('admin.upstreamAccounts.syncLogHandled', '已处理') : t('admin.upstreamAccounts.syncLogUnhandled', '待处理') }}
+                      <span v-if="isSyncLogHandled(entry)" class="sync-log-status sync-log-status-handled">
+                        {{ t('admin.upstreamAccounts.syncLogHandled', '已处理') }}
                       </span>
+                      <button
+                        v-else
+                        type="button"
+                        class="sync-log-status sync-log-status-unhandled"
+                        @click="markSyncLogHandled(entry)"
+                      >
+                        {{ t('admin.upstreamAccounts.syncLogUnhandled', '待处理') }}
+                      </button>
                     </td>
                     <td>{{ formatDateTime(entry.created_at) }}</td>
                     <td>
@@ -1496,12 +1495,12 @@ onMounted(reload)
   gap: 16px;
   width: 100%;
   max-width: none;
-  height: auto;
+  height: calc(100vh - 64px - 4rem);
   min-height: calc(100vh - 64px - 4rem);
 }
 
 .upstream-accounts-page :deep(.layout-section-scrollable) {
-  overflow: visible;
+  overflow: hidden;
 }
 
 .upstream-accounts-page :deep(.table-scroll-container) {
@@ -1532,8 +1531,7 @@ onMounted(reload)
 
 .stat-card,
 .rate-guard-panel,
-.accounts-table-card,
-.records-panel {
+.accounts-table-card {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #fff;
@@ -1938,10 +1936,11 @@ onMounted(reload)
 
 .accounts-table-content {
   display: flex;
+  flex: 1 1 auto;
   min-height: 0;
   flex-direction: column;
   gap: 16px;
-  overflow: visible;
+  overflow: hidden;
 }
 
 .warning-banner {
@@ -1957,11 +1956,11 @@ onMounted(reload)
 
 .accounts-table-card {
   display: flex;
-  flex: none;
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   height: auto;
-  max-height: 42rem;
+  max-height: none;
 }
 
 .accounts-table-card :deep(.table-wrapper) {
@@ -2547,10 +2546,6 @@ onMounted(reload)
   color: #64748b;
 }
 
-.records-panel {
-  overflow: hidden;
-}
-
 .sync-logs-dialog {
   overflow-y: auto;
 }
@@ -2616,27 +2611,6 @@ onMounted(reload)
   max-height: none;
 }
 
-.records-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border-bottom: 1px solid #e5e7eb;
-  padding: 16px 18px;
-}
-
-.records-header h3 {
-  margin: 0;
-  color: #111827;
-  font-size: 15px;
-  font-weight: 750;
-}
-
-.records-header span {
-  color: #64748b;
-  font-size: 12px;
-}
-
 .records-info {
   margin: 14px 18px 0;
   border-radius: 8px;
@@ -2689,6 +2663,7 @@ onMounted(reload)
 .sync-log-status {
   display: inline-flex;
   align-items: center;
+  border: 0;
   border-radius: 999px;
   padding: 3px 8px;
   font-size: 12px;
@@ -2696,9 +2671,17 @@ onMounted(reload)
   white-space: nowrap;
 }
 
+button.sync-log-status {
+  cursor: pointer;
+}
+
 .sync-log-status-unhandled {
   background: #fff7ed;
   color: #c2410c;
+}
+
+button.sync-log-status-unhandled:hover {
+  background: #ffedd5;
 }
 
 .sync-log-status-handled {
@@ -2760,6 +2743,15 @@ onMounted(reload)
 }
 
 @media (max-width: 1023px) {
+  .upstream-accounts-page :deep(.table-page-layout.mobile-mode) {
+    height: auto;
+    min-height: calc(100vh - 64px - 2rem);
+  }
+
+  .upstream-accounts-page :deep(.table-page-layout.mobile-mode .layout-section-scrollable) {
+    overflow: visible;
+  }
+
   .accounts-topbar,
   .rate-guard-panel,
   .filter-row {

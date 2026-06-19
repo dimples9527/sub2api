@@ -207,6 +207,8 @@ describe('UpstreamAccountsView', () => {
 
     await flushPromises()
 
+    expect(wrapper.find('.records-panel').exists()).toBe(false)
+    expect(wrapper.find('.accounts-actions').text()).toContain('admin.upstreamAccounts.openSyncLogs')
     expect(wrapper.text()).toContain('admin.upstreamAccounts.openSyncLogs')
     expect(wrapper.text()).not.toContain('local-a')
     await wrapper.findAll('button').find(button => button.text().includes('admin.upstreamAccounts.openSyncLogs'))?.trigger('click')
@@ -301,7 +303,9 @@ describe('UpstreamAccountsView', () => {
     expect(wrapper.find('.sync-logs-dialog').exists()).toBe(true)
     expect(wrapper.find('.sync-logs-dialog').text()).toContain('admin.upstreamAccounts.syncLogUnhandled')
 
-    await wrapper.find('.sync-log-handle-button').trigger('click')
+    const unhandledStatus = wrapper.find('.sync-log-status-unhandled')
+    expect(unhandledStatus.element.tagName).toBe('BUTTON')
+    await unhandledStatus.trigger('click')
     await flushPromises()
 
     expect(wrapper.find('.guard-sync-log-warning').exists()).toBe(false)
@@ -655,6 +659,12 @@ describe('UpstreamAccountsView', () => {
   it('lets the fixed upstream account table fill wide containers', () => {
     expect(upstreamAccountsSource).toContain('width: max(100%, 1700px);')
     expect(upstreamAccountsSource).not.toMatch(/^\s+width:\s*1700px;$/m)
+  })
+
+  it('lets the upstream account table occupy the page instead of reserving space for a sync log card', () => {
+    expect(upstreamAccountsSource).not.toContain('class="records-panel"')
+    expect(upstreamAccountsSource).not.toContain('max-height: 42rem;')
+    expect(upstreamAccountsSource).toContain('flex: 1 1 auto;')
   })
 
   it('opens create account modal from upstream account toolbar and refreshes after create', async () => {
