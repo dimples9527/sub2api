@@ -3,7 +3,10 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"sync"
 	"testing"
+	"time"
 )
 
 type upstreamAccountSyncProviderSourceStub struct {
@@ -12,11 +15,16 @@ type upstreamAccountSyncProviderSourceStub struct {
 	storedProviders map[string]UpstreamProviderConfig
 	keys            []UpstreamProviderKey
 	keysBySlug      map[string][]UpstreamProviderKey
+	keysErrBySlug   map[string]error
+	keyFetchDelay   time.Duration
+	keyFetchCount   map[string]int
+	keyFetchMu      sync.Mutex
 	defaultErr      error
 	providersErr    error
 	keysErr         error
 	fetchedSlug     string
 	fetchedSlugs    []string
+	fetchedMu       sync.Mutex
 }
 
 func (s *upstreamAccountSyncProviderSourceStub) GetDefaultProvider(ctx context.Context) (UpstreamProviderConfig, error) {
@@ -51,12 +59,35 @@ func (s *upstreamAccountSyncProviderSourceStub) getStoredProvider(_ context.Cont
 }
 
 func (s *upstreamAccountSyncProviderSourceStub) FetchProviderKeys(ctx context.Context, slug string) ([]UpstreamProviderKey, []string, error) {
+	if s.keyFetchDelay > 0 {
+		time.Sleep(s.keyFetchDelay)
+	}
+	s.keyFetchMu.Lock()
+	if s.keyFetchCount == nil {
+		s.keyFetchCount = map[string]int{}
+	}
+	s.keyFetchCount[slug]++
+	s.keyFetchMu.Unlock()
+
+	s.fetchedMu.Lock()
 	s.fetchedSlug = slug
 	s.fetchedSlugs = append(s.fetchedSlugs, slug)
+	s.fetchedMu.Unlock()
+	if s.keysErrBySlug != nil {
+		if err, ok := s.keysErrBySlug[slug]; ok {
+			return nil, nil, err
+		}
+	}
 	if s.keysBySlug != nil {
 		return s.keysBySlug[slug], []string{"provider warning"}, s.keysErr
 	}
 	return s.keys, []string{"provider warning"}, s.keysErr
+}
+
+func (s *upstreamAccountSyncProviderSourceStub) fetchCount(slug string) int {
+	s.keyFetchMu.Lock()
+	defer s.keyFetchMu.Unlock()
+	return s.keyFetchCount[slug]
 }
 
 type upstreamAccountSyncAccountManagerStub struct {
@@ -199,6 +230,145 @@ func TestUpstreamAccountSyncPreviewUsesNonDefaultProvidersAndManualGroupMapping(
 	}
 	if item.LocalGroupID == nil || *item.LocalGroupID != 9 || item.LocalGroupName != "Mapped VIP" {
 		t.Fatalf("local group match = id %v name %q, want 9 Mapped VIP", item.LocalGroupID, item.LocalGroupName)
+	}
+}
+
+func TestUpstreamAccountSyncPreviewKeepsAvailableProvidersWhenOneProviderKeysFail(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},
+			{Slug: "bad", Name: "Bad upstream", AccountNamePrefix: "bad-", Enabled: true},
+			{Slug: "good", Name: "Good upstream", AccountNamePrefix: "good-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"good": {
+				{ProviderSlug: "good", KeyName: "alice", GroupName: "VIP", RateMultiplier: 1},
+			},
+		},
+		keysErrBySlug: map[string]error{
+			"bad": errors.New("newapi provider keys failed: HTTP 502"),
+		},
+	}
+	svc, _ := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 1, Status: StatusActive}},
+		nil,
+		newUpstreamManagementSettingRepoStub(),
+	)
+
+	result, err := svc.Preview(context.Background())
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if result.Summary.UpstreamKeyCount != 1 || len(result.Items) != 1 {
+		t.Fatalf("summary/items = %+v/%+v, want one good provider key", result.Summary, result.Items)
+	}
+	if len(result.Warnings) == 0 || result.Warnings[0] != "Bad upstream: newapi provider keys failed: HTTP 502" {
+		t.Fatalf("warnings = %+v, want failed provider warning", result.Warnings)
+	}
+	if provider.fetchCount("bad") != 1 || provider.fetchCount("good") != 1 {
+		t.Fatalf("fetch counts bad/good = %d/%d, want one fetch for each provider", provider.fetchCount("bad"), provider.fetchCount("good"))
+	}
+}
+
+func TestUpstreamAccountSyncPreviewFetchesProviderKeysConcurrently(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},
+			{Slug: "first", Name: "First upstream", AccountNamePrefix: "first-", Enabled: true},
+			{Slug: "second", Name: "Second upstream", AccountNamePrefix: "second-", Enabled: true},
+			{Slug: "third", Name: "Third upstream", AccountNamePrefix: "third-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"first":  {{ProviderSlug: "first", KeyName: "alice", GroupName: "VIP", RateMultiplier: 1}},
+			"second": {{ProviderSlug: "second", KeyName: "bob", GroupName: "VIP", RateMultiplier: 1}},
+			"third":  {{ProviderSlug: "third", KeyName: "carol", GroupName: "VIP", RateMultiplier: 1}},
+		},
+		keyFetchDelay: 80 * time.Millisecond,
+	}
+	svc, _ := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 1, Status: StatusActive}},
+		nil,
+		newUpstreamManagementSettingRepoStub(),
+	)
+
+	start := time.Now()
+	result, err := svc.Preview(context.Background())
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if result.Summary.UpstreamKeyCount != 3 {
+		t.Fatalf("summary = %+v, want three upstream keys", result.Summary)
+	}
+	if elapsed >= 200*time.Millisecond {
+		t.Fatalf("preview elapsed = %s, want concurrent provider fetches under 200ms", elapsed)
+	}
+}
+
+func TestUpstreamAccountSyncPreviewCachesProviderKeysForThirtySeconds(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup upstream", AccountNamePrefix: "backup-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {{ProviderSlug: "backup", KeyName: "alice", GroupName: "VIP", RateMultiplier: 1}},
+		},
+	}
+	svc, _ := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 1, Status: StatusActive}},
+		nil,
+		newUpstreamManagementSettingRepoStub(),
+	)
+
+	if _, err := svc.Preview(context.Background()); err != nil {
+		t.Fatalf("first Preview returned error: %v", err)
+	}
+	if _, err := svc.Preview(context.Background()); err != nil {
+		t.Fatalf("second Preview returned error: %v", err)
+	}
+	if count := provider.fetchCount("backup"); count != 1 {
+		t.Fatalf("backup fetch count = %d, want cached second preview", count)
+	}
+}
+
+func TestUpstreamAccountSyncSyncBypassesPreviewProviderKeysCache(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup upstream", AccountNamePrefix: "backup-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {{ProviderSlug: "backup", KeyName: "old", GroupName: "VIP", RateMultiplier: 1}},
+		},
+	}
+	svc, accounts := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 1, Status: StatusActive}},
+		nil,
+		newUpstreamManagementSettingRepoStub(),
+	)
+
+	if _, err := svc.Preview(context.Background()); err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	provider.keysBySlug["backup"] = []UpstreamProviderKey{{ProviderSlug: "backup", KeyName: "new", GroupName: "VIP", RateMultiplier: 1}}
+
+	if _, err := svc.Sync(context.Background(), UpstreamAccountSyncRequest{CreateMissing: true, UpdateExisting: true}); err != nil {
+		t.Fatalf("Sync returned error: %v", err)
+	}
+	if len(accounts.createdInputs) != 1 || accounts.createdInputs[0].Name != "backup-new" {
+		t.Fatalf("created inputs = %+v, want sync to bypass cached preview keys and create backup-new", accounts.createdInputs)
+	}
+	if count := provider.fetchCount("backup"); count != 2 {
+		t.Fatalf("backup fetch count = %d, want preview fetch plus sync fetch", count)
 	}
 }
 

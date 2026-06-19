@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -28,6 +29,7 @@ const (
 
 	DefaultUpstreamAccountRateGuardIntervalSeconds = 3600
 	MinUpstreamAccountRateGuardIntervalSeconds     = 1
+	upstreamAccountSyncProviderKeysCacheTTL        = 30 * time.Second
 )
 
 type UpstreamAccountSyncAccountManager interface {
@@ -152,6 +154,20 @@ type UpstreamAccountSyncService struct {
 	groupRepo      GroupRepository
 	accountManager UpstreamAccountSyncAccountManager
 	settingRepo    SettingRepository
+	keysCacheMu    sync.Mutex
+	keysCache      map[string]upstreamAccountSyncProviderKeysCacheEntry
+}
+
+type upstreamAccountSyncProviderKeysCacheEntry struct {
+	keys      []UpstreamProviderKey
+	warnings  []string
+	expiresAt time.Time
+}
+
+type upstreamAccountSyncProviderKeysResult struct {
+	keys     []UpstreamProviderKey
+	warnings []string
+	err      error
 }
 
 type upstreamAccountSyncRecordStats struct {
@@ -182,7 +198,7 @@ func NewUpstreamAccountSyncService(
 }
 
 func (s *UpstreamAccountSyncService) Preview(ctx context.Context) (UpstreamAccountSyncResult, error) {
-	result, _, err := s.preview(ctx)
+	result, _, err := s.preview(ctx, true)
 	if err != nil {
 		return UpstreamAccountSyncResult{}, err
 	}
@@ -196,7 +212,7 @@ func (s *UpstreamAccountSyncService) Preview(ctx context.Context) (UpstreamAccou
 
 func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccountSyncRequest) (UpstreamAccountSyncResult, error) {
 	triggerSource := normalizeUpstreamAccountSyncTriggerSource(req.TriggerSource)
-	result, previewState, err := s.preview(ctx)
+	result, previewState, err := s.preview(ctx, false)
 	if err != nil {
 		return UpstreamAccountSyncResult{}, err
 	}
@@ -357,7 +373,7 @@ func (s *UpstreamAccountSyncService) RunRateGuard(ctx context.Context, triggerSo
 }
 
 func (s *UpstreamAccountSyncService) runMatchedAccountRateGuard(ctx context.Context, triggerSource string) (UpstreamAccountSyncResult, error) {
-	result, previewState, err := s.preview(ctx)
+	result, previewState, err := s.preview(ctx, false)
 	if err != nil {
 		return UpstreamAccountSyncResult{}, err
 	}
@@ -484,7 +500,7 @@ type upstreamAccountSyncPreviewState struct {
 	providerBySlug map[string]UpstreamProviderConfig
 }
 
-func (s *UpstreamAccountSyncService) preview(ctx context.Context) (UpstreamAccountSyncResult, upstreamAccountSyncPreviewState, error) {
+func (s *UpstreamAccountSyncService) preview(ctx context.Context, useProviderKeysCache bool) (UpstreamAccountSyncResult, upstreamAccountSyncPreviewState, error) {
 	if s == nil || s.providerSource == nil {
 		return UpstreamAccountSyncResult{}, upstreamAccountSyncPreviewState{}, infraerrors.InternalServer("UPSTREAM_ACCOUNT_SYNC_PROVIDER_SOURCE_UNAVAILABLE", "upstream account sync provider source unavailable")
 	}
@@ -539,19 +555,21 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context) (UpstreamAccou
 		Warnings:        []string{},
 		Records:         []UpstreamAccountSyncRecord{},
 	}
+	providerKeysBySlug := s.fetchProviderKeysForAccountSync(ctx, syncProviders, useProviderKeysCache)
 	for _, provider := range syncProviders {
 		groupResolver := newUpstreamAccountSyncGroupResolver(provider, localGroups, mappings)
-		keys, warnings, err := s.providerSource.FetchProviderKeys(ctx, provider.Slug)
-		if err != nil {
-			return UpstreamAccountSyncResult{}, upstreamAccountSyncPreviewState{}, err
+		keyResult := providerKeysBySlug[provider.Slug]
+		if keyResult.err != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("%s: %s", provider.Name, keyResult.err.Error()))
+			continue
 		}
-		for _, warning := range warnings {
+		for _, warning := range keyResult.warnings {
 			if strings.TrimSpace(warning) == "" {
 				continue
 			}
 			result.Warnings = append(result.Warnings, fmt.Sprintf("%s: %s", provider.Name, warning))
 		}
-		for _, key := range keys {
+		for _, key := range keyResult.keys {
 			if key.ProviderSlug != "" && key.ProviderSlug != provider.Slug {
 				continue
 			}
@@ -696,6 +714,85 @@ func (s *UpstreamAccountSyncService) loadAccounts(ctx context.Context) ([]Accoun
 			return all, nil
 		}
 	}
+}
+
+func (s *UpstreamAccountSyncService) fetchProviderKeysForAccountSync(ctx context.Context, providers []UpstreamProviderConfig, useCache bool) map[string]upstreamAccountSyncProviderKeysResult {
+	results := make(map[string]upstreamAccountSyncProviderKeysResult, len(providers))
+	now := time.Now()
+	missingProviders := make([]UpstreamProviderConfig, 0, len(providers))
+
+	if useCache {
+		s.keysCacheMu.Lock()
+		for _, provider := range providers {
+			if s.keysCache != nil {
+				if entry, ok := s.keysCache[provider.Slug]; ok && now.Before(entry.expiresAt) {
+					results[provider.Slug] = upstreamAccountSyncProviderKeysResult{
+						keys:     append([]UpstreamProviderKey(nil), entry.keys...),
+						warnings: append([]string(nil), entry.warnings...),
+					}
+					continue
+				}
+			}
+			missingProviders = append(missingProviders, provider)
+		}
+		s.keysCacheMu.Unlock()
+	} else {
+		missingProviders = append(missingProviders, providers...)
+	}
+
+	type providerKeysFetchResult struct {
+		slug     string
+		keys     []UpstreamProviderKey
+		warnings []string
+		err      error
+	}
+	resultCh := make(chan providerKeysFetchResult, len(missingProviders))
+	var wg sync.WaitGroup
+	for _, provider := range missingProviders {
+		provider := provider
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			keys, warnings, err := s.providerSource.FetchProviderKeys(ctx, provider.Slug)
+			resultCh <- providerKeysFetchResult{
+				slug:     provider.Slug,
+				keys:     keys,
+				warnings: warnings,
+				err:      err,
+			}
+		}()
+	}
+	wg.Wait()
+	close(resultCh)
+
+	cacheEntries := map[string]upstreamAccountSyncProviderKeysCacheEntry{}
+	for result := range resultCh {
+		results[result.slug] = upstreamAccountSyncProviderKeysResult{
+			keys:     result.keys,
+			warnings: result.warnings,
+			err:      result.err,
+		}
+		if useCache && result.err == nil {
+			cacheEntries[result.slug] = upstreamAccountSyncProviderKeysCacheEntry{
+				keys:      append([]UpstreamProviderKey(nil), result.keys...),
+				warnings:  append([]string(nil), result.warnings...),
+				expiresAt: now.Add(upstreamAccountSyncProviderKeysCacheTTL),
+			}
+		}
+	}
+
+	if len(cacheEntries) > 0 {
+		s.keysCacheMu.Lock()
+		if s.keysCache == nil {
+			s.keysCache = map[string]upstreamAccountSyncProviderKeysCacheEntry{}
+		}
+		for slug, entry := range cacheEntries {
+			s.keysCache[slug] = entry
+		}
+		s.keysCacheMu.Unlock()
+	}
+
+	return results
 }
 
 func (s *UpstreamAccountSyncService) loadGroupMappings(ctx context.Context) ([]UpstreamGroupMappingRecord, error) {
