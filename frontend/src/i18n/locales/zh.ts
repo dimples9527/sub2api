@@ -1,4 +1,4 @@
-export default {
+﻿export default {
   // Home Page
   home: {
     viewOnGithub: '在 GitHub 上查看',
@@ -1833,6 +1833,15 @@ export default {
       status: '状态',
       syncLogs: '同步日志',
       syncLogsDescription: '上游账号同步中低倍率分组解绑明细',
+      openSyncLogs: '打开同步日志',
+      unhandledSyncLogs: '待处理同步日志',
+      unhandledSyncLogsDescription: '有低倍率分组解绑记录需要确认处理',
+      logStatus: '处理状态',
+      syncLogUnhandled: '待处理',
+      syncLogHandled: '已处理',
+      markSyncLogHandled: '标记已处理',
+      syncLogMarkedHandled: '同步日志已标记为已处理',
+      syncLogMarkHandledFailed: '标记同步日志失败',
       logTime: '时间',
       logTriggerSource: '来源',
       logAccount: '本地账号',
