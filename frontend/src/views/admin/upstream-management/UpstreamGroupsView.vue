@@ -84,10 +84,24 @@
                 <Icon name="sync" size="sm" :class="applying ? 'animate-spin' : ''" />
                 <span>{{ t('admin.upstreamGroups.fixRates') }}</span>
               </button>
+              <button type="button" class="ug-btn ug-btn-default" @click="openRateFixLogsDialog">
+                <Icon name="document" size="sm" />
+                <span>{{ t('admin.upstreamGroups.openRateFixLogs') }}</span>
+              </button>
             </div>
           </div>
           <div class="ug-auto-row">
-            <span class="ug-auto-meta">{{ t('admin.upstreamGroups.autoFixLastRun') }}: {{ autoFixLastRunText }}</span>
+            <span class="ug-auto-meta">
+              {{ t('admin.upstreamGroups.autoFixLastRun') }}: {{ autoFixLastRunText }}
+              <button
+                v-if="unhandledRateFixRecords.length"
+                type="button"
+                class="ug-rate-fix-warning"
+                @click="openRateFixLogsDialog"
+              >
+                {{ t('admin.upstreamGroups.unhandledRateFixLogs') }} {{ unhandledRateFixRecords.length }}
+              </button>
+            </span>
             <div class="ug-auto-controls">
               <label class="ug-auto-toggle">
                 <input
@@ -308,33 +322,38 @@
               </template>
             </DataTable>
           </div>
+        </div>
 
-          <div class="ug-records-card">
-            <div class="ug-records-header">
-              <div class="ug-records-title-block">
-                <span class="ug-records-title">{{ t('admin.upstreamGroups.changeRecords') }}</span>
-                <span class="ug-records-sub">{{ t('admin.upstreamGroups.latestRecords') }}</span>
+        <div v-if="showRateFixLogsDialog" class="ug-rate-fix-logs-dialog fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6" @click.self="closeRateFixLogsDialog">
+          <div class="ug-rate-fix-logs-modal">
+            <div class="ug-bound-accounts-header">
+              <div>
+                <h3>{{ t('admin.upstreamGroups.changeRecords') }}</h3>
+                <p>{{ t('admin.upstreamGroups.latestRecords') }} {{ sortedRateFixRecords.length }}</p>
               </div>
-              <div class="ug-records-actions">
-                <button type="button" class="ug-records-sort-btn" @click="toggleRecordsSort">
-                  <Icon
-                    name="chevronDown"
-                    size="sm"
-                    :class="recordsSortOrder === 'asc' ? 'rotate-180' : ''"
-                  />
-                  <span>
-                    {{ recordsSortOrder === 'desc'
-                      ? t('admin.upstreamGroups.recordsSortNewest')
-                      : t('admin.upstreamGroups.recordsSortOldest') }}
-                  </span>
-                </button>
-                <span class="ug-records-count">{{ visibleRecords.length }}</span>
-              </div>
+              <button type="button" class="ug-dialog-close" :aria-label="t('common.close')" @click="closeRateFixLogsDialog">
+                <Icon name="x" size="md" />
+              </button>
             </div>
-            <div class="ug-records-table-wrapper">
+            <div class="ug-records-actions ug-rate-fix-logs-actions">
+              <button type="button" class="ug-records-sort-btn" @click="toggleRecordsSort">
+                <Icon
+                  name="chevronDown"
+                  size="sm"
+                  :class="recordsSortOrder === 'asc' ? 'rotate-180' : ''"
+                />
+                <span>
+                  {{ recordsSortOrder === 'desc'
+                    ? t('admin.upstreamGroups.recordsSortNewest')
+                    : t('admin.upstreamGroups.recordsSortOldest') }}
+                </span>
+              </button>
+            </div>
+            <div class="ug-records-table-wrapper ug-rate-fix-logs-table-wrapper">
               <table class="ug-records-table">
                 <thead>
                   <tr>
+                    <th>{{ t('admin.upstreamGroups.rateFixLogStatus') }}</th>
                     <th>{{ t('admin.upstreamGroups.localGroup') }}</th>
                     <th>{{ t('admin.upstreamGroups.upstreamGroup') }}</th>
                     <th>{{ t('admin.upstreamGroups.oldRate') }}</th>
@@ -343,15 +362,29 @@
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="record in visibleRecords" :key="`${record.group_id}-${record.changed_at}`">
+                  <tr v-for="record in sortedRateFixRecords" :key="rateFixRecordKey(record)">
+                    <td>
+                      <span v-if="record.handled" class="ug-rate-fix-log-status ug-rate-fix-log-status-handled">
+                        {{ t('admin.upstreamGroups.rateFixLogHandled') }}
+                      </span>
+                      <button
+                        v-else
+                        type="button"
+                        class="ug-rate-fix-log-status ug-rate-fix-log-status-unhandled"
+                        :disabled="markingRateFixRecordKey === rateFixRecordKey(record)"
+                        @click="markRateFixLogHandled(record)"
+                      >
+                        {{ t('admin.upstreamGroups.rateFixLogUnhandled') }}
+                      </button>
+                    </td>
                     <td><span class="ug-tag ug-tag-default">{{ record.group_name }}</span></td>
                     <td><span class="ug-tag ug-tag-default">{{ record.upstream_group_name }}</span></td>
                     <td><span class="ug-old-rate">{{ formatRate(record.old_rate) }}</span></td>
                     <td><span class="ug-new-rate">{{ formatRate(record.new_rate) }}</span></td>
                     <td class="ug-records-time">{{ formatDateTime(record.changed_at) }}</td>
                   </tr>
-                  <tr v-if="!visibleRecords.length">
-                    <td colspan="5" class="ug-records-empty">{{ t('admin.upstreamGroups.noRecords') }}</td>
+                  <tr v-if="!sortedRateFixRecords.length">
+                    <td colspan="6" class="ug-records-empty">{{ t('admin.upstreamGroups.noRecords') }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -616,8 +649,6 @@ import { AccountStatusIndicator, CreateAccountModal, EditAccountModal, TempUnsch
 const { t } = useI18n()
 const appStore = useAppStore()
 
-const RECORDS_VISIBLE_LIMIT = 10
-
 const result = ref<UpstreamGroupCompareResult | null>(null)
 const loading = ref(false)
 const applying = ref(false)
@@ -658,6 +689,8 @@ const syncRateMultiplier = ref(1)
 const syncPlatform = ref('')
 const localRateDialogItem = ref<UpstreamGroupComparison | null>(null)
 const localRateInput = ref(1)
+const showRateFixLogsDialog = ref(false)
+const markingRateFixRecordKey = ref<string | null>(null)
 const recordsSortOrder = ref<'desc' | 'asc'>('desc')
 let reloadRequestId = 0
 
@@ -688,14 +721,15 @@ const columns = computed<Column[]>(() => [
 const items = computed<UpstreamGroupComparison[]>(() => result.value?.items || [])
 const warnings = computed(() => result.value?.warnings || [])
 const records = computed<UpstreamGroupRateFixRecord[]>(() => result.value?.records || [])
-const visibleRecords = computed<UpstreamGroupRateFixRecord[]>(() => {
+const sortedRateFixRecords = computed<UpstreamGroupRateFixRecord[]>(() => {
   const sorted = [...records.value].sort((a, b) => {
     const aTime = recordTimestamp(a.changed_at)
     const bTime = recordTimestamp(b.changed_at)
     return recordsSortOrder.value === 'desc' ? bTime - aTime : aTime - bTime
   })
-  return sorted.slice(0, RECORDS_VISIBLE_LIMIT)
+  return sorted
 })
+const unhandledRateFixRecords = computed(() => records.value.filter(record => !record.handled))
 const autoFixLastRunText = computed(() => {
   if (!rateFixConfig.value?.last_run_at) return t('admin.upstreamGroups.autoFixNeverRun')
   const status = rateFixConfig.value.last_run_status === 'failed'
@@ -1031,6 +1065,15 @@ function closeBoundAccountsDialog() {
   boundAccountsDialogRow.value = null
 }
 
+function openRateFixLogsDialog() {
+  showRateFixLogsDialog.value = true
+}
+
+function closeRateFixLogsDialog() {
+  if (markingRateFixRecordKey.value) return
+  showRateFixLogsDialog.value = false
+}
+
 async function saveAccountGroups() {
   const account = accountGroupDialogAccount.value
   if (!account) return
@@ -1103,6 +1146,36 @@ function recordTimestamp(value: string | number | undefined) {
     return Number.isFinite(parsed) ? parsed : 0
   }
   return 0
+}
+
+function toRFC3339(value: string) {
+  if (!value) return value
+  const parsed = new Date(value)
+  if (!Number.isFinite(parsed.getTime())) return value
+  return parsed.toISOString().replace(/\.\d+Z$/, 'Z')
+}
+
+function rateFixRecordKey(record: UpstreamGroupRateFixRecord) {
+  return `${toRFC3339(record.changed_at)}-${record.group_id}-${record.provider_slug}-${record.upstream_group_name}`
+}
+
+async function markRateFixLogHandled(record: UpstreamGroupRateFixRecord) {
+  const key = rateFixRecordKey(record)
+  markingRateFixRecordKey.value = key
+  try {
+    const nextRecords = await adminAPI.upstreamManagement.markRateFixRecordHandled(key)
+    if (result.value) {
+      result.value = {
+        ...result.value,
+        records: nextRecords,
+      }
+    }
+    appStore.showSuccess(t('admin.upstreamGroups.rateFixLogMarkedHandled'))
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamGroups.rateFixLogMarkHandledFailed')))
+  } finally {
+    markingRateFixRecordKey.value = null
+  }
 }
 
 function normalizePositiveRate(value: number | undefined, fallback: number) {
@@ -1356,7 +1429,20 @@ onMounted(reload)
 }
 
 .ug-auto-meta {
-  @apply min-w-0 truncate;
+  @apply flex min-w-0 flex-wrap items-center gap-2;
+}
+
+.ug-rate-fix-warning {
+  @apply inline-flex items-center rounded-md border px-2 py-1 text-xs font-semibold transition-colors;
+  border-color: #FFB46B;
+  background: #FFF7E8;
+  color: #B25A00;
+}
+
+.ug-rate-fix-warning:hover {
+  border-color: #FF7D00;
+  background: #FFF3E8;
+  color: #873800;
 }
 
 .ug-auto-controls {
@@ -1380,7 +1466,11 @@ onMounted(reload)
 }
 
 .ug-content {
-  @apply flex h-full min-h-0 flex-col overflow-y-auto;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .ug-warning-banner {
@@ -1391,13 +1481,14 @@ onMounted(reload)
 }
 
 .ug-table-card {
-  @apply flex flex-none flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-dark-600 dark:bg-dark-800/30;
-  height: clamp(28rem, 54vh, 44rem);
-  min-height: 28rem;
+  @apply flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-dark-600 dark:bg-dark-800/30;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .ug-table-card :deep(.table-wrapper) {
   @apply min-h-0;
+  flex: 1 1 auto;
 }
 
 .ug-table-card :deep(.table-wrapper) {
@@ -1858,36 +1949,12 @@ onMounted(reload)
   color: #FF8C8C;
 }
 
-.ug-records-card {
-  @apply mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-dark-600 dark:bg-dark-800/30;
-}
-
-.ug-records-header {
-  @apply flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3 dark:border-dark-700;
-}
-
-.ug-records-title-block {
-  @apply flex min-w-0 flex-wrap items-center gap-2;
-}
-
-.ug-records-title {
-  @apply text-sm font-semibold text-gray-900 dark:text-white;
-}
-
-.ug-records-sub {
-  @apply text-xs text-gray-500 dark:text-gray-400;
-}
-
 .ug-records-actions {
   @apply flex items-center gap-2;
 }
 
 .ug-records-sort-btn {
   @apply inline-flex h-7 items-center gap-1 rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-600 transition-colors hover:border-primary-400 hover:text-primary-600 dark:border-dark-600 dark:bg-dark-900 dark:text-gray-300 dark:hover:border-primary-500 dark:hover:text-primary-300;
-}
-
-.ug-records-count {
-  @apply flex h-7 min-w-7 items-center justify-center rounded-md bg-gray-100 px-2 font-mono text-xs font-semibold text-gray-700 dark:bg-dark-700 dark:text-gray-200;
 }
 
 .ug-records-table-wrapper {
@@ -1931,6 +1998,62 @@ onMounted(reload)
 
 .ug-records-empty {
   @apply px-4 py-8 text-center text-sm text-gray-400 dark:text-gray-500;
+}
+
+.ug-rate-fix-logs-modal {
+  @apply flex w-full overflow-hidden rounded-lg bg-white shadow-xl dark:bg-dark-800;
+  max-width: min(980px, 100%);
+  max-height: min(78vh, 760px);
+  flex-direction: column;
+}
+
+.ug-rate-fix-logs-actions {
+  @apply border-b border-gray-100 px-4 py-3 dark:border-dark-700;
+}
+
+.ug-rate-fix-logs-table-wrapper {
+  @apply max-h-none flex-1;
+}
+
+.ug-rate-fix-log-status {
+  @apply inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold transition-colors;
+}
+
+.ug-rate-fix-log-status-unhandled {
+  border-color: #FFB46B;
+  background: #FFF7E8;
+  color: #B25A00;
+  cursor: pointer;
+}
+
+.ug-rate-fix-log-status-unhandled:hover:not(:disabled) {
+  border-color: #FF7D00;
+  background: #FFF3E8;
+  color: #873800;
+}
+
+.ug-rate-fix-log-status-unhandled:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.ug-rate-fix-log-status-handled {
+  border-color: #A7F3D0;
+  background: #ECFDF5;
+  color: #047857;
+}
+
+:global(.dark) .ug-rate-fix-warning,
+:global(.dark) .ug-rate-fix-log-status-unhandled {
+  border-color: rgba(255, 125, 0, 0.45);
+  background: rgba(255, 125, 0, 0.16);
+  color: #FFB46B;
+}
+
+:global(.dark) .ug-rate-fix-log-status-handled {
+  border-color: rgba(0, 180, 42, 0.35);
+  background: rgba(0, 180, 42, 0.18);
+  color: #6FE08A;
 }
 
 @media (max-width: 1023px) {

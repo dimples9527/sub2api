@@ -29,6 +29,7 @@ func registerUpstreamManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 			groups.GET("/rate-fix-config", h.Admin.UpstreamManagement.GetRateFixConfig)
 			groups.PUT("/rate-fix-config", h.Admin.UpstreamManagement.UpdateRateFixConfig)
 			groups.POST("/rate-fixes", h.Admin.UpstreamManagement.ApplyRateFixes)
+			groups.POST("/rate-fix-records/:key/handled", h.Admin.UpstreamManagement.MarkRateFixRecordHandled)
 		}
 		accounts := upstream.Group("/accounts")
 		{

@@ -20,10 +20,12 @@ type upstreamManagementHandlerServiceStub struct {
 	updateConfigCalled bool
 	saveMappingCalled  bool
 	createLocalCalled  bool
+	markHandledCalled  bool
 	modelSquareCalled  bool
 	mappingInput       service.UpstreamGroupMappingInput
 	configInput        service.UpstreamGroupAutoRateFixConfig
 	createLocalInput   service.UpstreamGroupLocalCreateInput
+	handledRecordKey   string
 	result             service.UpstreamGroupCompareResult
 	config             service.UpstreamGroupAutoRateFixConfig
 	modelSquare        json.RawMessage
@@ -64,6 +66,12 @@ func (s *upstreamManagementHandlerServiceStub) CreateLocalGroupFromUpstream(_ co
 	return s.result, s.err
 }
 
+func (s *upstreamManagementHandlerServiceStub) MarkRateFixRecordHandled(_ context.Context, key string) ([]service.UpstreamGroupRateFixRecord, error) {
+	s.markHandledCalled = true
+	s.handledRecordKey = key
+	return s.result.Records, s.err
+}
+
 func (s *upstreamManagementHandlerServiceStub) FetchDefaultModelSquare(context.Context) (json.RawMessage, service.UpstreamProviderConfig, error) {
 	s.modelSquareCalled = true
 	return s.modelSquare, s.defaultProvider, s.err
@@ -75,6 +83,7 @@ func newUpstreamManagementHandlerTestRouter(svc upstreamManagementService) *gin.
 	handler := newUpstreamManagementHandlerWithService(svc)
 	router.GET("/admin/upstream-management/groups", handler.CompareGroups)
 	router.POST("/admin/upstream-management/groups/rate-fixes", handler.ApplyRateFixes)
+	router.POST("/admin/upstream-management/groups/rate-fix-records/:key/handled", handler.MarkRateFixRecordHandled)
 	router.GET("/admin/upstream-management/groups/rate-fix-config", handler.GetRateFixConfig)
 	router.PUT("/admin/upstream-management/groups/rate-fix-config", handler.UpdateRateFixConfig)
 	router.PUT("/admin/upstream-management/groups/mappings", handler.SaveGroupMapping)
@@ -138,6 +147,31 @@ func TestUpstreamManagementHandlerApplyRateFixes(t *testing.T) {
 	require.True(t, svc.applyCalled)
 	require.Contains(t, rec.Body.String(), `"records"`)
 	require.Contains(t, rec.Body.String(), `"new_rate":2`)
+}
+
+func TestUpstreamManagementHandlerMarkRateFixRecordHandled(t *testing.T) {
+	svc := &upstreamManagementHandlerServiceStub{result: service.UpstreamGroupCompareResult{
+		Records: []service.UpstreamGroupRateFixRecord{{
+			GroupID:           9,
+			GroupName:         "vip",
+			ProviderSlug:      "default",
+			ProviderName:      "Default",
+			UpstreamGroupName: "VIP",
+			OldRate:           1,
+			NewRate:           2,
+			Handled:           true,
+		}},
+	}}
+	router := newUpstreamManagementHandlerTestRouter(svc)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/admin/upstream-management/groups/rate-fix-records/2026-06-20T00:00:00Z-9-default-VIP/handled", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.True(t, svc.markHandledCalled)
+	require.Equal(t, "2026-06-20T00:00:00Z-9-default-VIP", svc.handledRecordKey)
+	require.Contains(t, rec.Body.String(), `"handled":true`)
 }
 
 func TestUpstreamManagementHandlerGetRateFixConfig(t *testing.T) {

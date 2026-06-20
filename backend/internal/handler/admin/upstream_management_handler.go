@@ -14,6 +14,7 @@ type upstreamManagementService interface {
 	ApplyRateFixes(ctx context.Context) (service.UpstreamGroupCompareResult, error)
 	GetRateFixConfig(ctx context.Context) (service.UpstreamGroupAutoRateFixConfig, error)
 	UpdateRateFixConfig(ctx context.Context, input service.UpstreamGroupAutoRateFixConfig) (service.UpstreamGroupAutoRateFixConfig, error)
+	MarkRateFixRecordHandled(ctx context.Context, key string) ([]service.UpstreamGroupRateFixRecord, error)
 	SaveGroupMapping(ctx context.Context, input service.UpstreamGroupMappingInput) (service.UpstreamGroupCompareResult, error)
 	CreateLocalGroupFromUpstream(ctx context.Context, input service.UpstreamGroupLocalCreateInput) (service.UpstreamGroupCompareResult, error)
 }
@@ -73,6 +74,15 @@ func (h *UpstreamManagementHandler) UpdateRateFixConfig(c *gin.Context) {
 		return
 	}
 	response.Success(c, result)
+}
+
+func (h *UpstreamManagementHandler) MarkRateFixRecordHandled(c *gin.Context) {
+	records, err := h.service.MarkRateFixRecordHandled(c.Request.Context(), c.Param("key"))
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, records)
 }
 
 func (h *UpstreamManagementHandler) SaveGroupMapping(c *gin.Context) {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -723,6 +724,46 @@ func TestUpstreamManagementServiceApplyRateFixesRaisesOnlyLowerLocalRates(t *tes
 	}
 }
 
+func TestUpstreamManagementServiceMarkRateFixRecordHandledPersistsRecord(t *testing.T) {
+	settingRepo := newUpstreamManagementSettingRepoStub()
+	changedAt := mustParseTime(t, "2026-06-20T00:00:00Z")
+	rawRecords, err := json.Marshal([]UpstreamGroupRateFixRecord{{
+		GroupID:           7,
+		GroupName:         "VIP",
+		ProviderSlug:      "default-upstream",
+		ProviderName:      "Default upstream",
+		UpstreamGroupName: "VIP",
+		OldRate:           1,
+		NewRate:           2.5,
+		ChangedAt:         changedAt,
+	}})
+	if err != nil {
+		t.Fatalf("marshal records: %v", err)
+	}
+	settingRepo.values[SettingKeyUpstreamGroupRateFixRecords] = string(rawRecords)
+	svc := NewUpstreamManagementService(
+		&upstreamManagementProviderSourceStub{},
+		&upstreamManagementGroupRepoStub{},
+		settingRepo,
+		&upstreamManagementAuthCacheInvalidatorStub{},
+	)
+
+	records, err := svc.MarkRateFixRecordHandled(context.Background(), "2026-06-20T00:00:00Z-7-default-upstream-VIP")
+	if err != nil {
+		t.Fatalf("MarkRateFixRecordHandled returned error: %v", err)
+	}
+	if len(records) != 1 || !records[0].Handled {
+		t.Fatalf("records = %+v, want handled record", records)
+	}
+	var persisted []UpstreamGroupRateFixRecord
+	if err := json.Unmarshal([]byte(settingRepo.values[SettingKeyUpstreamGroupRateFixRecords]), &persisted); err != nil {
+		t.Fatalf("decode persisted records: %v", err)
+	}
+	if len(persisted) != 1 || !persisted[0].Handled {
+		t.Fatalf("persisted records = %+v, want handled record", persisted)
+	}
+}
+
 func TestUpstreamManagementServiceRateFixConfigDefaultsDisabledWithSecondsInterval(t *testing.T) {
 	svc := NewUpstreamManagementService(
 		&upstreamManagementProviderSourceStub{},
@@ -812,6 +853,15 @@ func TestUpstreamManagementServiceRunScheduledRateFixStoresFailureStatus(t *test
 
 func ptrInt64(value int64) *int64 {
 	return &value
+}
+
+func mustParseTime(t *testing.T, value string) time.Time {
+	t.Helper()
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		t.Fatalf("parse time %q: %v", value, err)
+	}
+	return parsed
 }
 
 func TestUpstreamManagementServiceCompareGroupsRequiresDefaultProvider(t *testing.T) {

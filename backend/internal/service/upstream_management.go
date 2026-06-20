@@ -62,6 +62,7 @@ type UpstreamGroupRateFixRecord struct {
 	OldRate           float64   `json:"old_rate"`
 	NewRate           float64   `json:"new_rate"`
 	ChangedAt         time.Time `json:"changed_at"`
+	Handled           bool      `json:"handled,omitempty"`
 }
 
 type UpstreamGroupAutoRateFixConfig struct {
@@ -405,6 +406,41 @@ func (s *UpstreamManagementService) ApplyRateFixes(ctx context.Context) (Upstrea
 	}
 	result.Records = records
 	return result, nil
+}
+
+func (s *UpstreamManagementService) MarkRateFixRecordHandled(ctx context.Context, key string) ([]UpstreamGroupRateFixRecord, error) {
+	records, err := s.loadRateFixRecords(ctx)
+	if err != nil {
+		return nil, err
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return nil, infraerrors.BadRequest("UPSTREAM_GROUP_RATE_FIX_RECORD_KEY_REQUIRED", "upstream group rate fix record key is required")
+	}
+
+	found := false
+	for index := range records {
+		if upstreamGroupRateFixRecordKey(records[index]) != key {
+			continue
+		}
+		records[index].Handled = true
+		found = true
+		break
+	}
+	if !found {
+		return nil, infraerrors.NotFound("UPSTREAM_GROUP_RATE_FIX_RECORD_NOT_FOUND", "upstream group rate fix record was not found")
+	}
+	if s == nil || s.settingRepo == nil {
+		return records, nil
+	}
+	raw, err := json.Marshal(records)
+	if err != nil {
+		return nil, fmt.Errorf("marshal upstream group rate fix records: %w", err)
+	}
+	if err := s.settingRepo.Set(ctx, SettingKeyUpstreamGroupRateFixRecords, string(raw)); err != nil {
+		return nil, fmt.Errorf("save upstream group rate fix records: %w", err)
+	}
+	return records, nil
 }
 
 func (s *UpstreamManagementService) SaveGroupMapping(ctx context.Context, input UpstreamGroupMappingInput) (UpstreamGroupCompareResult, error) {
@@ -879,6 +915,16 @@ func (s *UpstreamManagementService) prependRateFixRecords(ctx context.Context, r
 		return nil, fmt.Errorf("save upstream group rate fix records: %w", err)
 	}
 	return out, nil
+}
+
+func upstreamGroupRateFixRecordKey(record UpstreamGroupRateFixRecord) string {
+	return fmt.Sprintf(
+		"%s-%d-%s-%s",
+		record.ChangedAt.Format(time.RFC3339),
+		record.GroupID,
+		record.ProviderSlug,
+		record.UpstreamGroupName,
+	)
 }
 
 func limitUpstreamGroupRateFixRecords(records []UpstreamGroupRateFixRecord) []UpstreamGroupRateFixRecord {

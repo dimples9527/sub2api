@@ -11,6 +11,7 @@ const { adminAPIMock, appStoreMock } = vi.hoisted(() => ({
       getGroups: vi.fn(),
       getRateFixConfig: vi.fn(),
       createLocalGroupFromUpstream: vi.fn(),
+      markRateFixRecordHandled: vi.fn(),
     },
     groups: {
       getUpstreamMonitorStatus: vi.fn(),
@@ -85,6 +86,7 @@ describe('UpstreamGroupsView', () => {
       warnings: [],
       records: [],
     })
+    adminAPIMock.upstreamManagement.markRateFixRecordHandled.mockResolvedValue([])
     adminAPIMock.groups.getUpstreamMonitorStatus.mockResolvedValue({ rows: [] })
     adminAPIMock.groups.update.mockResolvedValue({})
     adminAPIMock.groups.getAll.mockResolvedValue([
@@ -138,6 +140,8 @@ describe('UpstreamGroupsView', () => {
     expect(upstreamGroupsSource).toContain('table-layout: fixed;')
     expect(upstreamGroupsSource).toContain('width: max(100%, 1560px);')
     expect(upstreamGroupsSource).not.toMatch(/^\s+width:\s*1560px;$/m)
+    expect(upstreamGroupsSource).not.toContain('class="ug-records-card"')
+    expect(upstreamGroupsSource).toContain('flex: 1 1 auto;')
   })
 
   it('opens create account modal from upstream group toolbar and refreshes after create', async () => {
@@ -577,5 +581,74 @@ describe('UpstreamGroupsView', () => {
     await flushPromises()
 
     expect(adminAPIMock.groups.update).toHaveBeenCalledWith(42, { rate_multiplier: 2.5 })
+  })
+
+  it('opens rate fix logs in a dialog and marks pending records handled', async () => {
+    adminAPIMock.upstreamManagement.getGroups.mockResolvedValue({
+      default_provider: { slug: 'default-upstream', name: 'Default upstream' },
+      items: [],
+      warnings: [],
+      records: [
+        {
+          group_id: 42,
+          group_name: 'VIP local',
+          provider_slug: 'default-upstream',
+          provider_name: 'Default upstream',
+          upstream_group_name: 'VIP',
+          old_rate: 1.5,
+          new_rate: 2.5,
+          changed_at: '2026-06-20T00:00:00Z',
+          handled: false,
+        },
+      ],
+    })
+    adminAPIMock.upstreamManagement.markRateFixRecordHandled.mockResolvedValue([
+      {
+        group_id: 42,
+        group_name: 'VIP local',
+        provider_slug: 'default-upstream',
+        provider_name: 'Default upstream',
+        upstream_group_name: 'VIP',
+        old_rate: 1.5,
+        new_rate: 2.5,
+        changed_at: '2026-06-20T00:00:00Z',
+        handled: true,
+      },
+    ])
+
+    const wrapper = mount(UpstreamGroupsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: { template: '<div />' },
+          EmptyState: true,
+          Icon: true,
+          UpstreamGroupAvailabilityTrend: { template: '<div />' },
+          Select: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('.ug-rate-fix-warning').exists()).toBe(true)
+    expect(wrapper.find('.ug-rate-fix-warning').text()).toContain('1')
+    expect(wrapper.text()).toContain('admin.upstreamGroups.openRateFixLogs')
+    expect(wrapper.find('.ug-records-card').exists()).toBe(false)
+
+    await wrapper.findAll('button').find(button => button.text().includes('admin.upstreamGroups.openRateFixLogs'))?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.ug-rate-fix-logs-dialog').exists()).toBe(true)
+    expect(wrapper.find('.ug-rate-fix-logs-dialog').text()).toContain('VIP local')
+    expect(wrapper.find('.ug-rate-fix-logs-dialog').text()).toContain('admin.upstreamGroups.rateFixLogUnhandled')
+
+    await wrapper.find('.ug-rate-fix-log-status-unhandled').trigger('click')
+    await flushPromises()
+
+    expect(adminAPIMock.upstreamManagement.markRateFixRecordHandled).toHaveBeenCalledWith('2026-06-20T00:00:00Z-42-default-upstream-VIP')
+    expect(wrapper.find('.ug-rate-fix-warning').exists()).toBe(false)
+    expect(wrapper.find('.ug-rate-fix-logs-dialog').text()).toContain('admin.upstreamGroups.rateFixLogHandled')
   })
 })

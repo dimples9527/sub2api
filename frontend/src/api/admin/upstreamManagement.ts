@@ -26,6 +26,7 @@ export interface UpstreamGroupRateFixRecord {
   old_rate: number
   new_rate: number
   changed_at: string
+  handled?: boolean
 }
 
 export interface UpstreamGroupCompareResult {
@@ -60,6 +61,13 @@ export async function getGroups(): Promise<UpstreamGroupCompareResult> {
 export async function applyRateFixes(): Promise<UpstreamGroupCompareResult> {
   const { data } = await apiClient.post<UpstreamGroupCompareResult>(
     '/admin/upstream-management/groups/rate-fixes'
+  )
+  return data
+}
+
+export async function markRateFixRecordHandled(key: string): Promise<UpstreamGroupRateFixRecord[]> {
+  const { data } = await apiClient.post<UpstreamGroupRateFixRecord[]>(
+    `/admin/upstream-management/groups/rate-fix-records/${encodeURIComponent(key)}/handled`
   )
   return data
 }
@@ -108,6 +116,7 @@ export async function createLocalGroupFromUpstream(
 export const upstreamManagementAPI = {
   getGroups,
   applyRateFixes,
+  markRateFixRecordHandled,
   getRateFixConfig,
   updateRateFixConfig,
   saveGroupMapping,
