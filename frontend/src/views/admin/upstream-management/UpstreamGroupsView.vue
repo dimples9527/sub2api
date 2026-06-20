@@ -225,9 +225,15 @@
                     <span class="ug-account-chip-name">{{ account.name }}</span>
                     <span class="ug-account-chip-id">#{{ account.id }}</span>
                   </span>
-                  <span v-if="hiddenBoundAccountCount(row) > 0" class="ug-account-more">
-                    +{{ hiddenBoundAccountCount(row) }}
-                  </span>
+                  <button
+                    v-if="hiddenBoundAccountCount(row) > 0"
+                    type="button"
+                    class="ug-account-more ug-account-more-button"
+                    :title="t('admin.upstreamGroups.viewAllBoundAccounts', '查看全部绑定账号')"
+                    @click="openBoundAccountsDialog(row)"
+                  >
+                    +{{ hiddenBoundAccountCount(row) }} {{ t('admin.upstreamGroups.moreBoundAccounts', '更多') }}
+                  </button>
                 </div>
                 <span v-else class="ug-rate-empty">-</span>
               </template>
@@ -241,9 +247,15 @@
                     :account="account"
                     @show-temp-unsched="handleShowTempUnsched"
                   />
-                  <span v-if="hiddenBoundAccountCount(row) > 0" class="ug-account-more">
-                    +{{ hiddenBoundAccountCount(row) }}
-                  </span>
+                  <button
+                    v-if="hiddenBoundAccountCount(row) > 0"
+                    type="button"
+                    class="ug-account-more ug-account-more-button"
+                    :title="t('admin.upstreamGroups.viewAllBoundAccounts', '查看全部绑定账号')"
+                    @click="openBoundAccountsDialog(row)"
+                  >
+                    +{{ hiddenBoundAccountCount(row) }} {{ t('admin.upstreamGroups.moreBoundAccounts', '更多') }}
+                  </button>
                 </div>
                 <span v-else class="ug-rate-empty">-</span>
               </template>
@@ -273,32 +285,16 @@
                   >
                     {{ t('admin.upstreamGroups.editLocalRate') }}
                   </button>
-                  <div
-                    v-for="account in visibleBoundAccounts(row)"
-                    :key="`action-${account.id}`"
-                    class="ug-account-action-row"
+                  <button
+                    v-if="boundAccountsFor(row).length"
+                    type="button"
+                    class="ug-btn ug-btn-default ug-btn-small ug-btn-cell"
+                    @click="openBoundAccountsDialog(row)"
                   >
-                    <span class="ug-account-action-name">#{{ account.id }}</span>
-                    <button
-                      type="button"
-                      class="ug-btn-text"
-                      :disabled="editingAccountId === account.id || savingAccountGroupId === account.id"
-                      @click="openAccountEditDialog(account)"
-                    >
-                    {{ t('admin.upstreamGroups.editAccount', '编辑账号') }}
-                    </button>
-                    <button
-                      type="button"
-                      class="ug-btn-text"
-                      :disabled="editingAccountId === account.id || savingAccountGroupId === account.id"
-                      @click="openAccountGroupDialog(account)"
-                    >
-                      {{ t('admin.upstreamGroups.editAccountBinding', '编辑绑定') }}
-                    </button>
-                  </div>
-                  <span v-if="hiddenBoundAccountCount(row) > 0" class="ug-account-more">
-                    +{{ hiddenBoundAccountCount(row) }}
-                  </span>
+                    <Icon name="users" size="sm" />
+                    <span>{{ t('admin.upstreamGroups.manageBoundAccounts', '账号管理') }}</span>
+                    <span class="ug-action-count">{{ boundAccountTotal(row) }}</span>
+                  </button>
                 </div>
               </template>
 
@@ -473,6 +469,69 @@
           @updated="handleAccountUpdated"
         />
         <div
+          v-if="boundAccountsDialogRow"
+          class="ug-bound-accounts-dialog fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6"
+          @click.self="closeBoundAccountsDialog"
+        >
+          <div class="ug-bound-accounts-modal">
+            <div class="ug-bound-accounts-header">
+              <div>
+                <h3>{{ t('admin.upstreamGroups.boundAccountsManagerTitle', '绑定账号管理') }}</h3>
+                <p>
+                  {{ boundAccountsDialogRow.local_group_name || boundAccountsDialogRow.upstream_group_name }}
+                  · {{ t('admin.upstreamGroups.boundAccountsTotal', '共') }} {{ boundAccountTotal(boundAccountsDialogRow) }} {{ t('admin.upstreamGroups.boundAccountsUnit', '个账号') }}
+                </p>
+              </div>
+              <button type="button" class="ug-dialog-close" :aria-label="t('common.close')" @click="closeBoundAccountsDialog">
+                <Icon name="x" size="md" />
+              </button>
+            </div>
+            <div class="ug-bound-accounts-list">
+              <div
+                v-for="account in boundAccountsFor(boundAccountsDialogRow)"
+                :key="account.id"
+                class="ug-bound-account-row"
+              >
+                <div class="ug-bound-account-main">
+                  <div class="ug-bound-account-title">
+                    <span>{{ account.name }}</span>
+                    <code>#{{ account.id }}</code>
+                  </div>
+                  <div class="ug-bound-account-meta">
+                    <span class="ug-tag ug-tag-default">{{ account.platform }}</span>
+                    <span class="ug-tag ug-tag-info">{{ account.type || '-' }}</span>
+                    <span>{{ account.status }}</span>
+                  </div>
+                </div>
+                <div class="ug-bound-account-status">
+                  <AccountStatusIndicator :account="account" @show-temp-unsched="handleShowTempUnsched" />
+                </div>
+                <div class="ug-bound-account-actions">
+                  <button
+                    type="button"
+                    class="ug-btn-text"
+                    :disabled="editingAccountId === account.id || savingAccountGroupId === account.id"
+                    @click="openAccountEditDialog(account)"
+                  >
+                    {{ t('admin.upstreamGroups.editAccount', '编辑账号') }}
+                  </button>
+                  <button
+                    type="button"
+                    class="ug-btn-text"
+                    :disabled="editingAccountId === account.id || savingAccountGroupId === account.id"
+                    @click="openAccountGroupDialog(account)"
+                  >
+                    {{ t('admin.upstreamGroups.editAccountBinding', '编辑绑定') }}
+                  </button>
+                </div>
+              </div>
+              <div v-if="!boundAccountsFor(boundAccountsDialogRow).length" class="ug-bound-accounts-empty">
+                {{ t('admin.upstreamGroups.noBoundAccounts', '暂无绑定账号') }}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div
           v-if="accountGroupDialogAccount"
           class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6"
           @click.self="closeAccountGroupDialog"
@@ -576,6 +635,7 @@ const editingAccount = ref<Account | null>(null)
 const accountGroupDialogAccount = ref<Account | null>(null)
 const accountGroupIds = ref<number[]>([])
 const accountGroupPlatform = ref<GroupPlatform | undefined>()
+const boundAccountsDialogRow = ref<UpstreamGroupComparison | null>(null)
 const groupAccountsByGroupId = ref<Record<number, Account[]>>({})
 const groupAccountTotalsByGroupId = ref<Record<number, number>>({})
 const loadingGroupAccounts = ref(false)
@@ -963,6 +1023,14 @@ function closeAccountGroupDialog() {
   accountGroupPlatform.value = undefined
 }
 
+function openBoundAccountsDialog(row: UpstreamGroupComparison) {
+  boundAccountsDialogRow.value = row
+}
+
+function closeBoundAccountsDialog() {
+  boundAccountsDialogRow.value = null
+}
+
 async function saveAccountGroups() {
   const account = accountGroupDialogAccount.value
   if (!account) return
@@ -1066,6 +1134,11 @@ function hiddenBoundAccountCount(row: UpstreamGroupComparison) {
   const shown = visibleBoundAccounts(row).length
   const total = id ? groupAccountTotalsByGroupId.value[id] ?? boundAccountsFor(row).length : 0
   return Math.max(0, total - shown)
+}
+
+function boundAccountTotal(row: UpstreamGroupComparison) {
+  const id = localGroupId(row)
+  return id ? groupAccountTotalsByGroupId.value[id] ?? boundAccountsFor(row).length : boundAccountsFor(row).length
 }
 
 function formatRate(value: number | undefined) {
@@ -1381,7 +1454,7 @@ onMounted(reload)
 }
 
 .ug-table-card :deep(.ug-table-action-column) {
-  width: 245px;
+  width: 170px;
   white-space: normal;
 }
 
@@ -1477,6 +1550,7 @@ onMounted(reload)
 .ug-account-more {
   display: inline-flex;
   align-items: center;
+  border: 0;
   border-radius: 6px;
   background: #e5e7eb;
   padding: 2px 7px;
@@ -1484,6 +1558,16 @@ onMounted(reload)
   font-size: 12px;
   font-weight: 650;
   line-height: 18px;
+}
+
+.ug-account-more-button {
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.ug-account-more-button:hover {
+  background: #dbeafe;
+  color: #1d4ed8;
 }
 
 .ug-account-action-row {
@@ -1498,6 +1582,136 @@ onMounted(reload)
   color: #94a3b8;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 11px;
+}
+
+.ug-action-count {
+  display: inline-flex;
+  min-width: 18px;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ug-bound-accounts-modal {
+  display: flex;
+  width: min(980px, 100%);
+  max-height: min(78vh, 760px);
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.28);
+}
+
+.ug-bound-accounts-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 18px 20px;
+}
+
+.ug-bound-accounts-header h3 {
+  margin: 0;
+  color: #111827;
+  font-size: 16px;
+  font-weight: 750;
+}
+
+.ug-bound-accounts-header p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.ug-dialog-close {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  color: #64748b;
+}
+
+.ug-dialog-close:hover {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  color: #111827;
+}
+
+.ug-bound-accounts-list {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 12px;
+}
+
+.ug-bound-account-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(130px, auto) auto;
+  gap: 12px;
+  align-items: center;
+  border-bottom: 1px solid #eef2f7;
+  padding: 12px 8px;
+}
+
+.ug-bound-account-row:last-child {
+  border-bottom: 0;
+}
+
+.ug-bound-account-main {
+  min-width: 0;
+}
+
+.ug-bound-account-title {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: #111827;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.ug-bound-account-title code {
+  color: #94a3b8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+}
+
+.ug-bound-account-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.ug-bound-account-status {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.ug-bound-account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.ug-bound-accounts-empty {
+  padding: 36px 12px;
+  color: #64748b;
+  text-align: center;
+  font-size: 13px;
 }
 
 :global(.dark) .ug-account-chip {
@@ -1726,6 +1940,15 @@ onMounted(reload)
 
   .ug-table-card {
     @apply h-auto min-h-0 overflow-visible;
+  }
+
+  .ug-bound-account-row {
+    grid-template-columns: 1fr;
+    align-items: flex-start;
+  }
+
+  .ug-bound-account-actions {
+    justify-content: flex-start;
   }
 }
 </style>

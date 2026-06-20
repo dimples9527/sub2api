@@ -257,8 +257,99 @@ describe('UpstreamGroupsView', () => {
     expect(wrapper.find('.columns').text()).toContain('account_status')
     expect(wrapper.text()).toContain('local-a')
     expect(wrapper.text()).toContain('active')
-    expect(wrapper.text()).toContain('admin.upstreamGroups.editAccount')
-    expect(wrapper.text()).toContain('admin.upstreamGroups.editAccountBinding')
+    expect(wrapper.text()).toContain('admin.upstreamGroups.manageBoundAccounts')
+
+    await wrapper.findAll('button').find(button => button.text().includes('admin.upstreamGroups.manageBoundAccounts'))?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.ug-bound-accounts-dialog').text()).toContain('admin.upstreamGroups.editAccount')
+    expect(wrapper.find('.ug-bound-accounts-dialog').text()).toContain('admin.upstreamGroups.editAccountBinding')
+  })
+
+  it('opens a full bound account manager from hidden account count and compact action button', async () => {
+    adminAPIMock.upstreamManagement.getGroups.mockResolvedValue({
+      default_provider: { slug: 'default-upstream', name: 'Default upstream' },
+      items: [
+        {
+          provider_slug: 'default-upstream',
+          provider_name: 'Default upstream',
+          upstream_group_name: 'VIP',
+          upstream_group_key: 'vip',
+          upstream_rate: 2.5,
+          upstream_key_count: 3,
+          local_group_id: 7,
+          local_group_name: 'VIP local',
+          local_group_platform: 'openai',
+          local_rate: 2.5,
+          matched: true,
+          needs_rate_increase: false,
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+    adminAPIMock.accounts.list.mockResolvedValueOnce({
+      items: Array.from({ length: 6 }, (_, index) => ({
+        id: 12 + index,
+        name: `local-${String.fromCharCode(97 + index)}`,
+        platform: 'openai',
+        type: 'apikey',
+        status: index === 5 ? 'disabled' : 'active',
+        schedulable: true,
+        group_ids: [7],
+        groups: [],
+      })),
+      total: 6,
+      page: 1,
+      page_size: 100,
+      pages: 1,
+    })
+
+    const wrapper = mount(UpstreamGroupsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any) => h('div', [
+                h('div', { class: 'bound-cell' }, slots['cell-bound_accounts']?.({ row })),
+                h('div', { class: 'status-cell' }, slots['cell-account_status']?.({ row })),
+                h('div', { class: 'action-cell' }, slots['cell-action']?.({ row })),
+              ])))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          UpstreamGroupAvailabilityTrend: { template: '<div />' },
+          Select: true,
+          AccountStatusIndicator: {
+            props: ['account'],
+            template: '<span class="account-status-indicator">{{ account.status }}</span>',
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.find('.bound-cell').text()).toContain('+2')
+    expect(wrapper.find('.bound-cell').text()).not.toContain('local-f')
+    expect(wrapper.findAll('.ug-account-action-row')).toHaveLength(0)
+    expect(wrapper.find('.action-cell').text()).toContain('admin.upstreamGroups.manageBoundAccounts')
+
+    const moreButton = wrapper.find('.bound-cell .ug-account-more-button')
+    expect(moreButton.element.tagName).toBe('BUTTON')
+    await moreButton.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.ug-bound-accounts-dialog').exists()).toBe(true)
+    expect(wrapper.find('.ug-bound-accounts-dialog').text()).toContain('local-f')
+    expect(wrapper.find('.ug-bound-accounts-dialog').text()).toContain('disabled')
+    expect(wrapper.find('.ug-bound-accounts-dialog').text()).toContain('admin.upstreamGroups.editAccount')
+    expect(wrapper.find('.ug-bound-accounts-dialog').text()).toContain('admin.upstreamGroups.editAccountBinding')
   })
 
   it('edits bound account groups from the upstream group action column', async () => {
@@ -354,6 +445,8 @@ describe('UpstreamGroupsView', () => {
     await flushPromises()
     await flushPromises()
 
+    await wrapper.findAll('button').find(button => button.text().includes('admin.upstreamGroups.manageBoundAccounts'))?.trigger('click')
+    await flushPromises()
     await wrapper.findAll('button').find(button => button.text().includes('admin.upstreamGroups.editAccountBinding'))?.trigger('click')
     await flushPromises()
 
