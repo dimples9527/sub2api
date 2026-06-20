@@ -2003,7 +2003,8 @@ onMounted(reload)
 .ug-rate-fix-logs-modal {
   @apply flex w-full overflow-hidden rounded-lg bg-white shadow-xl dark:bg-dark-800;
   max-width: min(980px, 100%);
-  max-height: min(88vh, 920px);
+  height: 80vh;
+  max-height: 80vh;
   flex-direction: column;
 }
 
@@ -2013,6 +2014,8 @@ onMounted(reload)
 
 .ug-rate-fix-logs-table-wrapper {
   @apply max-h-none flex-1;
+  min-height: 0;
+  height: 100%;
 }
 
 .ug-rate-fix-log-status {

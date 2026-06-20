@@ -710,7 +710,9 @@ describe('UpstreamAccountsView', () => {
     expect(upstreamAccountsSource).not.toContain('class="records-panel"')
     expect(upstreamAccountsSource).not.toContain('max-height: 42rem;')
     expect(upstreamAccountsSource).toContain('flex: 1 1 auto;')
-    expect(upstreamAccountsSource).toContain('max-height: min(88vh, 920px);')
+    expect(upstreamAccountsSource).toMatch(/^\s+height: 80vh;$/m)
+    expect(upstreamAccountsSource).toContain('max-height: 80vh;')
+    expect(upstreamAccountsSource).toContain('.records-table-wrap.sync-logs-table-wrap')
   })
 
   it('opens create account modal from upstream account toolbar and refreshes after create', async () => {

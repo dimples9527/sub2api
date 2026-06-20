@@ -2560,7 +2560,8 @@ onMounted(reload)
 .sync-logs-modal {
   display: flex;
   width: min(1180px, 100%);
-  max-height: min(88vh, 920px);
+  height: 80vh;
+  max-height: 80vh;
   flex-direction: column;
   overflow: hidden;
   border-radius: 8px;
@@ -2615,6 +2616,7 @@ onMounted(reload)
 
 .sync-logs-table-wrap {
   flex: 1 1 auto;
+  min-height: 0;
   max-height: none;
 }
 
@@ -2630,6 +2632,11 @@ onMounted(reload)
 .records-table-wrap {
   max-height: 20rem;
   overflow: auto;
+}
+
+.records-table-wrap.sync-logs-table-wrap {
+  height: 100%;
+  max-height: none;
 }
 
 .records-table {
