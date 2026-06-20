@@ -794,7 +794,7 @@ const syncLogEntries = computed<UpstreamAccountSyncLogEntry[]>(() => {
         unbound_group_names: stringArray(detail.unbound_group_names),
         remaining_group_ids: numberArray(detail.remaining_group_ids),
         created_at: record.created_at,
-        key: `${record.created_at}-${detail.matched_local_account_id}-${detail.upstream_key_name}-${unboundGroupIDs.join('_')}`
+        key: `${toRFC3339(record.created_at)}-${detail.matched_local_account_id}-${detail.upstream_key_name}-${unboundGroupIDs.join('_')}`
       })
     }
   }
@@ -1396,6 +1396,13 @@ function conflictAccountRates(account: UpstreamAccountSyncConflictAccount) {
   return (account.bound_groups || [])
     .map(group => formatRate(group.rate_multiplier))
     .join(' / ')
+}
+
+function toRFC3339(value: string) {
+  if (!value) return value
+  const parsed = new Date(value)
+  if (!Number.isFinite(parsed.getTime())) return value
+  return parsed.toISOString().replace(/\.\d+Z$/, 'Z')
 }
 
 function numberArray(value: unknown): number[] {

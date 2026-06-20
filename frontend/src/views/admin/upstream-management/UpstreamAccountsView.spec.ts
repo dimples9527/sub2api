@@ -278,7 +278,52 @@ describe('UpstreamAccountsView', () => {
     expect(wrapper.find('.sync-logs-dialog').text()).toContain('admin.upstreamAccounts.noSyncLogs')
   })
 
-  it('shows unhandled sync logs in the rate guard panel and marks them handled', async () => {
+  it('normalizes sync log timestamps before marking unhandled entries handled', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValueOnce({
+      default_provider: {},
+      providers: [],
+      summary: {
+        upstream_key_count: 0,
+        matched_account_count: 0,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 1,
+        unbound_group_count: 1,
+      },
+      items: [],
+      warnings: [],
+      records: [
+        {
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          created_count: 0,
+          updated_count: 1,
+          skipped_count: 0,
+          conflict_count: 0,
+          rate_violation_count: 1,
+          unbound_group_count: 1,
+          created_at: '2026-06-15T00:00:00.000Z',
+          trigger_source: 'manual_sync',
+          unbind_details: [
+            {
+              provider_slug: 'upstream-a',
+              provider_name: 'Upstream A',
+              upstream_key_name: 'key-a',
+              matched_local_account_id: 12,
+              matched_local_account_name: 'local-a',
+              upstream_group_name: 'upstream-group',
+              upstream_rate_multiplier: 1,
+              local_min_rate_multiplier: 0.5,
+              unbound_group_ids: [8],
+              unbound_group_names: ['low-rate'],
+              remaining_group_ids: null,
+            },
+          ],
+        },
+      ],
+    })
     const wrapper = mount(UpstreamAccountsView, {
       global: {
         stubs: {

@@ -464,6 +464,7 @@ func (s *UpstreamAccountSyncService) MarkRecordHandled(ctx context.Context, key 
 	if key == "" {
 		return nil, infraerrors.BadRequest("UPSTREAM_ACCOUNT_SYNC_RECORD_KEY_REQUIRED", "upstream account sync record key is required")
 	}
+	key = normalizeUpstreamAccountSyncRecordDetailKey(key)
 
 	found := false
 	for recordIndex := range records {
@@ -1313,6 +1314,21 @@ func upstreamAccountSyncRecordDetailKey(record UpstreamAccountSyncRecord, detail
 		parts = append(parts, fmt.Sprint(id))
 	}
 	return fmt.Sprintf("%s-%d-%s-%s", record.CreatedAt.Format(time.RFC3339), detail.MatchedLocalAccountID, detail.UpstreamKeyName, strings.Join(parts, "_"))
+}
+
+func normalizeUpstreamAccountSyncRecordDetailKey(key string) string {
+	key = strings.TrimSpace(key)
+	for index := len(key) - 1; index >= 0; index-- {
+		if key[index] != '-' {
+			continue
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, key[:index])
+		if err != nil {
+			continue
+		}
+		return parsed.Format(time.RFC3339) + key[index:]
+	}
+	return key
 }
 
 func accountIDs(accounts []Account) []int64 {
