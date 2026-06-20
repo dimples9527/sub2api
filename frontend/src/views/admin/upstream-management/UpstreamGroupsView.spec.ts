@@ -142,6 +142,7 @@ describe('UpstreamGroupsView', () => {
     expect(upstreamGroupsSource).not.toMatch(/^\s+width:\s*1560px;$/m)
     expect(upstreamGroupsSource).not.toContain('class="ug-records-card"')
     expect(upstreamGroupsSource).toContain('flex: 1 1 auto;')
+    expect(upstreamGroupsSource).toContain('max-height: min(88vh, 920px);')
   })
 
   it('opens create account modal from upstream group toolbar and refreshes after create', async () => {

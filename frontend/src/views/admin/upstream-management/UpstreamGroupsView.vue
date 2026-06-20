@@ -2003,7 +2003,7 @@ onMounted(reload)
 .ug-rate-fix-logs-modal {
   @apply flex w-full overflow-hidden rounded-lg bg-white shadow-xl dark:bg-dark-800;
   max-width: min(980px, 100%);
-  max-height: min(78vh, 760px);
+  max-height: min(88vh, 920px);
   flex-direction: column;
 }
 

@@ -2560,7 +2560,7 @@ onMounted(reload)
 .sync-logs-modal {
   display: flex;
   width: min(1180px, 100%);
-  max-height: min(78vh, 760px);
+  max-height: min(88vh, 920px);
   flex-direction: column;
   overflow: hidden;
   border-radius: 8px;

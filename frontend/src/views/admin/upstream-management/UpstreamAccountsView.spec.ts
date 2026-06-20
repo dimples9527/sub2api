@@ -710,6 +710,7 @@ describe('UpstreamAccountsView', () => {
     expect(upstreamAccountsSource).not.toContain('class="records-panel"')
     expect(upstreamAccountsSource).not.toContain('max-height: 42rem;')
     expect(upstreamAccountsSource).toContain('flex: 1 1 auto;')
+    expect(upstreamAccountsSource).toContain('max-height: min(88vh, 920px);')
   })
 
   it('opens create account modal from upstream account toolbar and refreshes after create', async () => {
