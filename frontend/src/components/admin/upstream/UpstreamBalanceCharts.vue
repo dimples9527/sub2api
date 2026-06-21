@@ -338,17 +338,23 @@ const balanceBarChartOptions = computed(() => ({
 }))
 
 // 每日消费数据 (按日期聚合所有上游)
-const dailyConsumptionData = computed<Array<{ date: string; consumption: number; recharge: number }>>(() => {
-  if (!props.overview?.rows) return []
+const dailyConsumptionData = computed<Array<{ date: string; consumption: number; recharge: number; localConsumption: number }>>(() => {
+  if (!props.overview) return []
 
-  const dateMap = new Map<string, { consumption: number; recharge: number }>()
+  const dateMap = new Map<string, { consumption: number; recharge: number; localConsumption: number }>()
 
-  props.overview.rows.forEach(row => {
+  props.overview.rows?.forEach(row => {
     if (!row.complete) return // 只统计完整的数据
 
-    const existing = dateMap.get(row.date) || { consumption: 0, recharge: 0 }
+    const existing = dateMap.get(row.date) || { consumption: 0, recharge: 0, localConsumption: 0 }
     existing.consumption += row.consumption_amount
     existing.recharge += row.recharge_amount
+    dateMap.set(row.date, existing)
+  })
+
+  props.overview.local_daily_consumptions?.forEach(row => {
+    const existing = dateMap.get(row.date) || { consumption: 0, recharge: 0, localConsumption: 0 }
+    existing.localConsumption += row.actual_cost
     dateMap.set(row.date, existing)
   })
 
@@ -378,6 +384,14 @@ const consumptionChartData = computed(() => ({
       backgroundColor: 'rgba(16, 185, 129, 0.1)',
       tension: 0.3,
       fill: true
+    },
+    {
+      label: '本地消费',
+      data: dailyConsumptionData.value.map(d => d.localConsumption),
+      borderColor: '#2563eb',
+      backgroundColor: 'rgba(37, 99, 235, 0.08)',
+      tension: 0.3,
+      fill: false
     }
   ]
 }))

@@ -438,8 +438,11 @@ func ProvideUpstreamBalanceConsumptionService(
 	store UpstreamBalanceStore,
 	upstreamProviderService *UpstreamProviderService,
 	settingRepo SettingRepository,
+	usageRepo UsageLogRepository,
 ) *UpstreamBalanceConsumptionService {
-	return NewUpstreamBalanceConsumptionService(store, upstreamProviderService, settingRepo)
+	svc := NewUpstreamBalanceConsumptionService(store, upstreamProviderService, settingRepo)
+	svc.SetLocalDailyUsageSource(usageRepo)
+	return svc
 }
 
 func ProvideUpstreamBalanceSamplerScheduler(service *UpstreamBalanceConsumptionService) *UpstreamBalanceSamplerScheduler {

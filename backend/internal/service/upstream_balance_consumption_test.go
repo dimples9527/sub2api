@@ -73,6 +73,20 @@ func (s *upstreamBalanceConsumptionProviderStub) FetchProviderTodayCost(_ contex
 	return s.costs[slug], nil
 }
 
+type upstreamBalanceConsumptionUsageStub struct {
+	rows      []map[string]any
+	userID    int64
+	startTime time.Time
+	endTime   time.Time
+}
+
+func (s *upstreamBalanceConsumptionUsageStub) GetGlobalDailyStatsAggregated(_ context.Context, startTime, endTime time.Time) ([]map[string]any, error) {
+	s.userID = 0
+	s.startTime = startTime
+	s.endTime = endTime
+	return s.rows, nil
+}
+
 func TestUpstreamBalanceConsumptionDailyComplete(t *testing.T) {
 	day := time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC)
 	rows := BuildUpstreamBalanceDailyRows(
@@ -334,5 +348,34 @@ func TestUpstreamBalanceConsumptionRunSampleStoresTodayCost(t *testing.T) {
 	snapshot := store.snapshots[0]
 	if snapshot.Balance != 80 || snapshot.TodayCost != 12.5 {
 		t.Fatalf("snapshot = %+v, want balance and today cost stored", snapshot)
+	}
+}
+
+func TestUpstreamBalanceConsumptionOverviewIncludesLocalDailyConsumption(t *testing.T) {
+	store := &upstreamBalanceConsumptionMemoryStore{}
+	usage := &upstreamBalanceConsumptionUsageStub{rows: []map[string]any{
+		{"date": "2026-06-16", "total_actual_cost": 12.34},
+		{"date": "2026-06-17", "total_actual_cost": int64(8)},
+	}}
+	svc := NewUpstreamBalanceConsumptionService(store, &upstreamBalanceConsumptionProviderStub{}, nil)
+	svc.SetLocalDailyUsageSource(usage)
+	svc.now = func() time.Time { return time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC) }
+
+	overview, err := svc.GetOverview(context.Background(), 2)
+	if err != nil {
+		t.Fatalf("GetOverview returned error: %v", err)
+	}
+
+	if usage.userID != 0 {
+		t.Fatalf("usage userID = %d, want 0 for global daily usage", usage.userID)
+	}
+	if len(overview.LocalDailyConsumptions) != 2 {
+		t.Fatalf("local daily consumption count = %d, want 2", len(overview.LocalDailyConsumptions))
+	}
+	if overview.LocalDailyConsumptions[0].Date != "2026-06-16" || overview.LocalDailyConsumptions[0].ActualCost != 12.34 {
+		t.Fatalf("first local consumption = %+v, want 2026-06-16/12.34", overview.LocalDailyConsumptions[0])
+	}
+	if overview.LocalDailyConsumptions[1].Date != "2026-06-17" || overview.LocalDailyConsumptions[1].ActualCost != 8 {
+		t.Fatalf("second local consumption = %+v, want 2026-06-17/8", overview.LocalDailyConsumptions[1])
 	}
 }

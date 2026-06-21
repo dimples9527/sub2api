@@ -166,11 +166,17 @@ export interface UpstreamBalanceSnapshot {
   created_at: string
 }
 
+export interface UpstreamLocalDailyConsumption {
+  date: string
+  actual_cost: number
+}
+
 export interface UpstreamBalanceConsumptionOverview {
   config: UpstreamBalanceSamplerConfig
   summaries: Record<string, UpstreamBalanceProviderSummary>
   rows: UpstreamBalanceDailyRow[]
   snapshots: UpstreamBalanceSnapshot[]
+  local_daily_consumptions?: UpstreamLocalDailyConsumption[]
 }
 
 export interface UpstreamBalanceRechargeInput {

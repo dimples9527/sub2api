@@ -178,7 +178,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	adminService := service.NewAdminService(userRepository, groupRepository, accountRepository, proxyRepository, apiKeyRepository, redeemCodeRepository, userGroupRateRepository, userRPMCache, billingCacheService, proxyExitInfoProber, proxyLatencyCache, apiKeyAuthCacheInvalidator, client, settingService, subscriptionService, userSubscriptionRepository, privacyClientFactory, openAIGatewayService)
 	upstreamAccountSyncService := service.ProvideUpstreamAccountSyncService(upstreamProviderService, groupRepository, adminService, settingRepository)
 	upstreamAccountRateGuardScheduler := service.ProvideUpstreamAccountRateGuardScheduler(upstreamAccountSyncService)
-	upstreamBalanceConsumptionService := service.ProvideUpstreamBalanceConsumptionService(upstreamBalanceRepository, upstreamProviderService, settingRepository)
+	upstreamBalanceConsumptionService := service.ProvideUpstreamBalanceConsumptionService(upstreamBalanceRepository, upstreamProviderService, settingRepository, usageLogRepository)
 	upstreamBalanceSamplerScheduler := service.ProvideUpstreamBalanceSamplerScheduler(upstreamBalanceConsumptionService)
 	adminUserHandler := admin.NewUserHandler(adminService, concurrencyService, serviceUserPlatformQuotaRepository, billingCache)
 	groupCapacityService := service.NewGroupCapacityService(accountRepository, groupRepository, concurrencyService, sessionLimitCache, rpmCache)

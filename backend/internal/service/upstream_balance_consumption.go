@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,6 +70,11 @@ type UpstreamBalanceDailyRow struct {
 	LastSnapshotAt    *time.Time `json:"last_snapshot_at,omitempty"`
 }
 
+type UpstreamLocalDailyConsumption struct {
+	Date       string  `json:"date"`
+	ActualCost float64 `json:"actual_cost"`
+}
+
 type UpstreamBalanceProviderSummary struct {
 	ProviderSlug      string     `json:"provider_slug"`
 	ProviderName      string     `json:"provider_name,omitempty"`
@@ -93,10 +99,11 @@ type UpstreamBalanceSamplerConfig struct {
 }
 
 type UpstreamBalanceConsumptionOverview struct {
-	Config    UpstreamBalanceSamplerConfig              `json:"config"`
-	Summaries map[string]UpstreamBalanceProviderSummary `json:"summaries"`
-	Rows      []UpstreamBalanceDailyRow                 `json:"rows"`
-	Snapshots []UpstreamBalanceSnapshot                 `json:"snapshots"`
+	Config                 UpstreamBalanceSamplerConfig              `json:"config"`
+	Summaries              map[string]UpstreamBalanceProviderSummary `json:"summaries"`
+	Rows                   []UpstreamBalanceDailyRow                 `json:"rows"`
+	Snapshots              []UpstreamBalanceSnapshot                 `json:"snapshots"`
+	LocalDailyConsumptions []UpstreamLocalDailyConsumption           `json:"local_daily_consumptions"`
 }
 
 type UpstreamBalanceStore interface {
@@ -114,10 +121,15 @@ type upstreamBalanceProviderSource interface {
 	FetchProviderTodayCost(ctx context.Context, slug string, day time.Time) (UpstreamProviderCost, error)
 }
 
+type upstreamLocalDailyUsageSource interface {
+	GetGlobalDailyStatsAggregated(ctx context.Context, startTime, endTime time.Time) ([]map[string]any, error)
+}
+
 type UpstreamBalanceConsumptionService struct {
 	store       UpstreamBalanceStore
 	provider    upstreamBalanceProviderSource
 	settingRepo SettingRepository
+	usageSource upstreamLocalDailyUsageSource
 	now         func() time.Time
 }
 
@@ -128,6 +140,13 @@ func NewUpstreamBalanceConsumptionService(store UpstreamBalanceStore, provider u
 		settingRepo: settingRepo,
 		now:         func() time.Time { return time.Now().UTC() },
 	}
+}
+
+func (s *UpstreamBalanceConsumptionService) SetLocalDailyUsageSource(source upstreamLocalDailyUsageSource) {
+	if s == nil {
+		return
+	}
+	s.usageSource = source
 }
 
 func BuildUpstreamBalanceDailyRows(snapshots []UpstreamBalanceSnapshot, recharges []UpstreamBalanceRecharge, startTime, endTime time.Time, defaultScale float64) []UpstreamBalanceDailyRow {
@@ -317,7 +336,13 @@ func (s *UpstreamBalanceConsumptionService) GetOverview(ctx context.Context, day
 		return UpstreamBalanceConsumptionOverview{}, err
 	}
 	if s == nil || s.store == nil {
-		return UpstreamBalanceConsumptionOverview{Config: config, Summaries: map[string]UpstreamBalanceProviderSummary{}, Rows: []UpstreamBalanceDailyRow{}, Snapshots: []UpstreamBalanceSnapshot{}}, nil
+		return UpstreamBalanceConsumptionOverview{
+			Config:                 config,
+			Summaries:              map[string]UpstreamBalanceProviderSummary{},
+			Rows:                   []UpstreamBalanceDailyRow{},
+			Snapshots:              []UpstreamBalanceSnapshot{},
+			LocalDailyConsumptions: []UpstreamLocalDailyConsumption{},
+		}, nil
 	}
 	now := s.currentTime()
 	loc := upstreamBalanceStatsLocation()
@@ -340,9 +365,19 @@ func (s *UpstreamBalanceConsumptionService) GetOverview(ctx context.Context, day
 		return UpstreamBalanceConsumptionOverview{}, fmt.Errorf("list upstream balance recharges: %w", err)
 	}
 	rows := buildUpstreamBalanceDailyRowsInLocation(snapshots, recharges, start, end, 1, loc)
+	localDailyConsumptions, err := s.listLocalDailyConsumptions(ctx, start, end)
+	if err != nil {
+		return UpstreamBalanceConsumptionOverview{}, err
+	}
 	latest, _ := s.store.ListLatestSnapshots(ctx)
 	summaries := buildUpstreamBalanceSummaries(rows, latest, now, loc)
-	return UpstreamBalanceConsumptionOverview{Config: config, Summaries: summaries, Rows: rows, Snapshots: periodSnapshots}, nil
+	return UpstreamBalanceConsumptionOverview{
+		Config:                 config,
+		Summaries:              summaries,
+		Rows:                   rows,
+		Snapshots:              periodSnapshots,
+		LocalDailyConsumptions: localDailyConsumptions,
+	}, nil
 }
 
 func (s *UpstreamBalanceConsumptionService) RunSample(ctx context.Context) (UpstreamBalanceSamplerConfig, error) {
@@ -474,6 +509,61 @@ func buildUpstreamBalanceSummaries(rows []UpstreamBalanceDailyRow, latest []Upst
 		out[snap.ProviderSlug] = summary
 	}
 	return out
+}
+
+func (s *UpstreamBalanceConsumptionService) listLocalDailyConsumptions(ctx context.Context, start, end time.Time) ([]UpstreamLocalDailyConsumption, error) {
+	if s == nil || s.usageSource == nil {
+		return []UpstreamLocalDailyConsumption{}, nil
+	}
+	rawRows, err := s.usageSource.GetGlobalDailyStatsAggregated(ctx, start, end)
+	if err != nil {
+		return nil, fmt.Errorf("list local daily consumption: %w", err)
+	}
+	rows := make([]UpstreamLocalDailyConsumption, 0, len(rawRows))
+	for _, raw := range rawRows {
+		date, _ := raw["date"].(string)
+		date = strings.TrimSpace(date)
+		if date == "" {
+			continue
+		}
+		rows = append(rows, UpstreamLocalDailyConsumption{
+			Date:       date,
+			ActualCost: float64FromAny(raw["total_actual_cost"]),
+		})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		return rows[i].Date < rows[j].Date
+	})
+	return rows, nil
+}
+
+func float64FromAny(value any) float64 {
+	switch v := value.(type) {
+	case float64:
+		return v
+	case float32:
+		return float64(v)
+	case int:
+		return float64(v)
+	case int64:
+		return float64(v)
+	case int32:
+		return float64(v)
+	case uint:
+		return float64(v)
+	case uint64:
+		return float64(v)
+	case uint32:
+		return float64(v)
+	case json.Number:
+		n, _ := v.Float64()
+		return n
+	case string:
+		n, _ := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		return n
+	default:
+		return 0
+	}
 }
 
 func defaultUpstreamBalanceSamplerConfig() UpstreamBalanceSamplerConfig {
