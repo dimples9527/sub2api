@@ -1499,6 +1499,8 @@ export default {
       enabled: 'Enabled',
       name: 'Name',
       slug: 'Slug',
+      sortOrder: 'Sort order',
+      sortOrderHint: 'Lower numbers appear first. The default upstream always stays first.',
       baseUrl: 'Base URL',
       apiKeysUrl: 'Keys endpoint',
       loginUrl: 'Login endpoint',
@@ -1609,6 +1611,7 @@ export default {
       columns: {
         homepage: 'Homepage',
         name: 'Provider',
+        sortOrder: 'Sort',
         status: 'Status',
         prefix: 'Prefix',
         rateScale: 'Rate',

@@ -6,6 +6,7 @@ export interface UpstreamProviderConfig {
   type: UpstreamProviderType
   slug: string
   name: string
+  sort_order?: number
   enabled: boolean
   is_default?: boolean
   base_url: string

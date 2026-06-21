@@ -151,6 +151,10 @@
             <span class="prefix-value">{{ row.account_name_prefix || '-' }}</span>
           </template>
 
+          <template #cell-sort_order="{ row }">
+            <span class="sort-order-value">{{ formatSortOrder(row.sort_order) }}</span>
+          </template>
+
           <template #cell-rate_scale="{ row }">
             <span class="numeric-value">{{ formatRateScale(row.account_rate_multiplier_scale) }}</span>
           </template>
@@ -525,6 +529,19 @@
               pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,63}"
               :disabled="formMode === 'edit'"
             />
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.upstreamProviders.sortOrder') }}</label>
+            <input
+              v-model.number="form.sort_order"
+              type="number"
+              min="0"
+              step="1"
+              class="input"
+            />
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.upstreamProviders.sortOrderHint') }}
+            </p>
           </div>
         </div>
 
@@ -1015,6 +1032,7 @@ const form = reactive<UpstreamProviderConfig>({
   type: 'sub2api',
   slug: '',
   name: '',
+  sort_order: 0,
   enabled: true,
   is_default: false,
   base_url: '',
@@ -1052,6 +1070,7 @@ const enabledFilterOptions = computed<SelectOption[]>(() => [
 const baseColumns = computed<Column[]>(() => [
   { key: 'homepage', label: t('admin.upstreamProviders.columns.homepage'), class: 'upstream-homepage-column' },
   { key: 'name', label: t('admin.upstreamProviders.columns.name'), class: 'upstream-name-column' },
+  { key: 'sort_order', label: t('admin.upstreamProviders.columns.sortOrder'), class: 'upstream-sort-order-column' },
   { key: 'interface', label: t('admin.upstreamProviders.columns.interface'), class: 'upstream-interface-column' },
   { key: 'prefix', label: t('admin.upstreamProviders.columns.prefix'), class: 'upstream-prefix-column' },
   { key: 'rate_scale', label: t('admin.upstreamProviders.columns.rateScale'), class: 'upstream-numeric-column' },
@@ -1191,6 +1210,7 @@ function resetForm() {
     type: 'sub2api',
     slug: '',
     name: '',
+    sort_order: 0,
     enabled: true,
     is_default: false,
     base_url: '',
@@ -1220,6 +1240,7 @@ function fillForm(provider: UpstreamProviderConfig) {
     email: provider.email || '',
     username: provider.username || '',
     password: '',
+    sort_order: Math.max(0, Math.floor(Number(provider.sort_order) || 0)),
     is_default: Boolean(provider.is_default),
     account_name_prefix: provider.account_name_prefix || '',
     temp_disable_minutes: provider.temp_disable_minutes || 0,
@@ -1232,6 +1253,7 @@ function buildPayload(): UpstreamProviderConfig {
     type: form.type,
     slug: form.slug.trim(),
     name: form.name.trim(),
+    sort_order: Math.max(0, Math.floor(Number(form.sort_order) || 0)),
     enabled: form.enabled,
     is_default: Boolean(form.is_default),
     base_url: form.base_url.trim(),
@@ -1745,6 +1767,11 @@ function formatTempDisable(value: number | undefined) {
   return `${n}分钟`
 }
 
+function formatSortOrder(value: number | undefined) {
+  const n = Number(value)
+  return Number.isFinite(n) && n >= 0 ? String(Math.floor(n)) : '0'
+}
+
 function isLowBalance(value: number | undefined) {
   const n = Number(value)
   return Number.isFinite(n) && n < 10
@@ -1986,6 +2013,10 @@ onMounted(reload)
   @apply inline-flex max-w-[8rem] truncate font-sans text-xs text-gray-950 dark:text-white;
 }
 
+.sort-order-value {
+  @apply inline-flex min-w-10 justify-center rounded bg-gray-100 px-2 py-1 font-mono text-xs font-semibold text-gray-700 dark:bg-dark-700 dark:text-gray-200;
+}
+
 .numeric-cell {
   @apply flex min-w-[7.5rem] items-center justify-center gap-2;
 }
@@ -2142,6 +2173,11 @@ onMounted(reload)
 
 :deep(.upstream-name-column) {
   min-width: 16.25rem;
+}
+
+:deep(.upstream-sort-order-column) {
+  width: 5.5rem;
+  min-width: 5.5rem;
 }
 
 :deep(.upstream-prefix-column) {

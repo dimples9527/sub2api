@@ -417,6 +417,101 @@ func TestUpstreamProviderServiceUpdateCanSetDefaultProvider(t *testing.T) {
 	}
 }
 
+func TestUpstreamProviderServiceListsProvidersBySortOrder(t *testing.T) {
+	ctx := context.Background()
+	repo := newUpstreamProviderMemorySettingRepo()
+	repo.values[SettingKeyUpstreamProviderConfigs] = `[
+		{
+			"type":"sub2api",
+			"slug":"z-last",
+			"name":"Last upstream",
+			"enabled":true,
+			"base_url":"https://last.example.com",
+			"api_keys_url":"/api/admin/keys",
+			"sort_order":10
+		},
+		{
+			"type":"sub2api",
+			"slug":"a-first",
+			"name":"First upstream",
+			"enabled":true,
+			"base_url":"https://first.example.com",
+			"api_keys_url":"/api/admin/keys",
+			"sort_order":20
+		},
+		{
+			"type":"sub2api",
+			"slug":"default-upstream",
+			"name":"Default upstream",
+			"enabled":true,
+			"is_default":true,
+			"base_url":"https://default.example.com",
+			"api_keys_url":"/api/admin/keys",
+			"sort_order":99
+		}
+	]`
+	svc := NewUpstreamProviderService(repo)
+
+	providers, err := svc.ListProviders(ctx)
+	if err != nil {
+		t.Fatalf("ListProviders returned error: %v", err)
+	}
+	if len(providers) != 3 {
+		t.Fatalf("provider count = %d, want 3", len(providers))
+	}
+	if providers[0].Slug != "default-upstream" || providers[1].Slug != "z-last" || providers[2].Slug != "a-first" {
+		t.Fatalf("providers = %+v, want default first then sort_order ascending", providers)
+	}
+}
+
+func TestUpstreamProviderServicePersistsSortOrder(t *testing.T) {
+	ctx := context.Background()
+	repo := newUpstreamProviderMemorySettingRepo()
+	svc := NewUpstreamProviderService(repo)
+
+	created, err := svc.CreateProvider(ctx, UpstreamProviderConfig{
+		Type:                       UpstreamProviderTypeSub2API,
+		Slug:                       "primary",
+		Name:                       "Primary upstream",
+		Enabled:                    true,
+		BaseURL:                    "https://upstream.example.com",
+		APIKeysURL:                 "/api/admin/keys",
+		SortOrder:                  18,
+		AccountRateMultiplierScale: 1.2,
+	})
+	if err != nil {
+		t.Fatalf("CreateProvider returned error: %v", err)
+	}
+	if created.SortOrder != 18 {
+		t.Fatalf("created provider sort order = %d, want 18", created.SortOrder)
+	}
+
+	updated, err := svc.UpdateProvider(ctx, "primary", UpstreamProviderConfig{
+		Type:                       UpstreamProviderTypeSub2API,
+		Slug:                       "primary",
+		Name:                       "Primary upstream",
+		Enabled:                    true,
+		BaseURL:                    "https://upstream.example.com",
+		APIKeysURL:                 "/api/admin/keys",
+		SortOrder:                  7,
+		AccountRateMultiplierScale: 1.2,
+	})
+	if err != nil {
+		t.Fatalf("UpdateProvider returned error: %v", err)
+	}
+	if updated.SortOrder != 7 {
+		t.Fatalf("updated provider sort order = %d, want 7", updated.SortOrder)
+	}
+
+	providers, err := svc.ListProviders(ctx)
+	if err != nil {
+		t.Fatalf("ListProviders returned error: %v", err)
+	}
+	if len(providers) != 1 || providers[0].SortOrder != 7 {
+		t.Fatalf("providers = %+v, want persisted sort order", providers)
+	}
+}
+
 func TestSub2APIProviderAdapterFetchKeysUsesSingleEndpoint(t *testing.T) {
 	var keysRequests int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

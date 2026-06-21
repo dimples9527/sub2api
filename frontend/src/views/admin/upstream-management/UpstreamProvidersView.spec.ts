@@ -187,7 +187,7 @@ describe('UpstreamProvidersView', () => {
 
     await flushPromises()
 
-    expect(wrapper.find('.columns').text()).toBe('homepage,name,interface,prefix,rate_scale,temp_disable_minutes,balance,today_consumption,actions')
+    expect(wrapper.find('.columns').text()).toBe('homepage,name,sort_order,interface,prefix,rate_scale,temp_disable_minutes,balance,today_consumption,actions')
     expect(wrapper.find('.provider-name-card').exists()).toBe(true)
     expect(wrapper.find('.provider-type-tag').exists()).toBe(true)
     expect(wrapper.find('.provider-enabled-tag').exists()).toBe(true)
@@ -322,7 +322,7 @@ describe('UpstreamProvidersView', () => {
 
     await flushPromises()
 
-    expect(wrapper.find('.columns').text()).toBe('homepage,name,interface,prefix,rate_scale,temp_disable_minutes,balance,today_consumption,actions')
+    expect(wrapper.find('.columns').text()).toBe('homepage,name,sort_order,interface,prefix,rate_scale,temp_disable_minutes,balance,today_consumption,actions')
     expect(wrapper.find('.details-cell').text()).toBe('')
 
     const expandButton = wrapper.find('.expand-toggle')

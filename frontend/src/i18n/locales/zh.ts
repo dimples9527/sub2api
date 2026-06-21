@@ -1520,6 +1520,8 @@
       enabled: '启用',
       name: '名称',
       slug: '标识',
+      sortOrder: '排序',
+      sortOrderHint: '数字越小越靠前；默认上游始终排在最前。',
       baseUrl: '基础 URL',
       apiKeysUrl: '密钥接口',
       loginUrl: '登录接口',
@@ -1630,6 +1632,7 @@
       columns: {
         homepage: '主页',
         name: '上游',
+        sortOrder: '排序',
         status: '状态',
         prefix: '前缀',
         rateScale: '倍率',

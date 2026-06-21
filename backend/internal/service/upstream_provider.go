@@ -26,6 +26,7 @@ type UpstreamProviderConfig struct {
 	Type                       string  `json:"type"`
 	Slug                       string  `json:"slug"`
 	Name                       string  `json:"name"`
+	SortOrder                  int     `json:"sort_order"`
 	Enabled                    bool    `json:"enabled"`
 	IsDefault                  bool    `json:"is_default"`
 	BaseURL                    string  `json:"base_url"`
@@ -404,18 +405,34 @@ func (s *UpstreamProviderService) loadProviders(ctx context.Context) ([]Upstream
 	for _, provider := range providers {
 		out = append(out, normalizeUpstreamProvider(provider))
 	}
+	normalizeUpstreamProviderDefaults(out, "")
 	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].IsDefault != out[j].IsDefault {
+			return out[i].IsDefault
+		}
+		if out[i].SortOrder != out[j].SortOrder {
+			return out[i].SortOrder < out[j].SortOrder
+		}
 		return out[i].Slug < out[j].Slug
 	})
-	normalizeUpstreamProviderDefaults(out, "")
 	return out, nil
 }
 
 func (s *UpstreamProviderService) saveProviders(ctx context.Context, providers []UpstreamProviderConfig) error {
-	sort.SliceStable(providers, func(i, j int) bool {
-		return providers[i].Slug < providers[j].Slug
+	out := make([]UpstreamProviderConfig, 0, len(providers))
+	for _, provider := range providers {
+		out = append(out, normalizeUpstreamProvider(provider))
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].IsDefault != out[j].IsDefault {
+			return out[i].IsDefault
+		}
+		if out[i].SortOrder != out[j].SortOrder {
+			return out[i].SortOrder < out[j].SortOrder
+		}
+		return out[i].Slug < out[j].Slug
 	})
-	raw, err := json.Marshal(providers)
+	raw, err := json.Marshal(out)
 	if err != nil {
 		return fmt.Errorf("marshal upstream provider configs: %w", err)
 	}
@@ -473,6 +490,9 @@ func normalizeUpstreamProvider(provider UpstreamProviderConfig) UpstreamProvider
 	provider.Email = strings.TrimSpace(provider.Email)
 	provider.Username = strings.TrimSpace(provider.Username)
 	provider.AccountNamePrefix = strings.TrimSpace(provider.AccountNamePrefix)
+	if provider.SortOrder < 0 {
+		provider.SortOrder = 0
+	}
 	if provider.TempDisableMinutes < 0 {
 		provider.TempDisableMinutes = 0
 	}
