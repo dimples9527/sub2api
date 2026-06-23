@@ -15,10 +15,10 @@
       </template>
 
       <template #table>
-        <DataTable :columns="columns" :data="monitors" :loading="loading">
+        <DataTable :columns="columns" :data="monitors" :loading="loading" class="monitor-table">
           <template #cell-name="{ row, value }">
-            <div class="flex items-center gap-1.5">
-              <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+            <div class="flex min-w-0 flex-wrap items-center justify-end gap-1.5 md:justify-start">
+              <span class="min-w-0 break-all font-medium text-gray-900 dark:text-white">{{ value }}</span>
               <HelpTooltip v-if="row.api_key_decrypt_failed" :content="t('admin.channelMonitor.apiKeyDecryptFailed')">
                 <Icon name="exclamationTriangle" size="sm" class="text-red-500" />
               </HelpTooltip>
@@ -172,13 +172,13 @@ let abortController: AbortController | null = null
 let searchTimeout: ReturnType<typeof setTimeout> | null = null
 
 const columns = computed<Column[]>(() => [
-  { key: 'name', label: t('admin.channelMonitor.columns.name'), sortable: false },
-  { key: 'provider', label: t('admin.channelMonitor.columns.provider'), sortable: false },
-  { key: 'primary_model', label: t('admin.channelMonitor.columns.primaryModel'), sortable: false },
-  { key: 'availability_7d', label: t('admin.channelMonitor.columns.availability7d'), sortable: false },
-  { key: 'latency', label: t('admin.channelMonitor.columns.latency'), sortable: false },
-  { key: 'enabled', label: t('admin.channelMonitor.columns.enabled'), sortable: false },
-  { key: 'actions', label: t('admin.channelMonitor.columns.actions'), sortable: false },
+  { key: 'name', label: t('admin.channelMonitor.columns.name'), sortable: false, class: 'monitor-name-column' },
+  { key: 'provider', label: t('admin.channelMonitor.columns.provider'), sortable: false, class: 'monitor-provider-column' },
+  { key: 'primary_model', label: t('admin.channelMonitor.columns.primaryModel'), sortable: false, class: 'monitor-model-column' },
+  { key: 'availability_7d', label: t('admin.channelMonitor.columns.availability7d'), sortable: false, class: 'monitor-compact-column' },
+  { key: 'latency', label: t('admin.channelMonitor.columns.latency'), sortable: false, class: 'monitor-compact-column' },
+  { key: 'enabled', label: t('admin.channelMonitor.columns.enabled'), sortable: false, class: 'monitor-enabled-column' },
+  { key: 'actions', label: t('admin.channelMonitor.columns.actions'), sortable: false, class: 'monitor-actions-column' },
 ])
 
 const deleteConfirmMessage = computed(() => {
@@ -302,3 +302,38 @@ onUnmounted(() => {
   abortController?.abort()
 })
 </script>
+
+<style scoped>
+.monitor-table :deep(table) {
+  min-width: 860px;
+}
+
+.monitor-table :deep(.monitor-name-column) {
+  min-width: 12rem;
+}
+
+.monitor-table :deep(.monitor-model-column) {
+  min-width: 14rem;
+}
+
+.monitor-table :deep(.monitor-provider-column),
+.monitor-table :deep(.monitor-compact-column),
+.monitor-table :deep(.monitor-enabled-column) {
+  min-width: 7rem;
+}
+
+.monitor-table :deep(.monitor-actions-column) {
+  min-width: 10rem;
+}
+
+@media (max-width: 767px) {
+  .monitor-table :deep(.monitor-name-column),
+  .monitor-table :deep(.monitor-model-column),
+  .monitor-table :deep(.monitor-provider-column),
+  .monitor-table :deep(.monitor-compact-column),
+  .monitor-table :deep(.monitor-enabled-column),
+  .monitor-table :deep(.monitor-actions-column) {
+    min-width: 0;
+  }
+}
+</style>

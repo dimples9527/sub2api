@@ -1,5 +1,5 @@
 <template>
-  <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
+  <div class="monitor-filters-bar flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
     <!-- Left: Search + Filters -->
     <div class="flex flex-1 flex-wrap items-center gap-3">
       <div class="relative w-full sm:w-64">
@@ -21,7 +21,7 @@
         v-model="provider"
         :options="providerFilterOptions"
         :placeholder="t('admin.channelMonitor.allProviders')"
-        class="w-44"
+        class="monitor-filter-select w-44"
         @change="$emit('reload')"
       />
 
@@ -29,7 +29,7 @@
         v-model="enabled"
         :options="enabledFilterOptions"
         :placeholder="t('admin.channelMonitor.enabledFilter')"
-        class="w-40"
+        class="monitor-filter-select w-40"
         @change="$emit('reload')"
       />
     </div>
@@ -102,3 +102,17 @@ const enabledFilterOptions = computed(() => [
   { value: 'false', label: t('admin.channelMonitor.onlyDisabled') },
 ])
 </script>
+
+<style scoped>
+@media (max-width: 767px) {
+  .monitor-filters-bar .monitor-filter-select {
+    width: 100%;
+  }
+
+  .monitor-filters-bar :deep(.btn) {
+    min-width: 0;
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+}
+</style>

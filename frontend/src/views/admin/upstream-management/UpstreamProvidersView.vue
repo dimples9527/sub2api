@@ -2363,4 +2363,135 @@ onMounted(reload)
 .balance-pill-warning {
   @apply bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-800/60;
 }
+
+@media (max-width: 767px) {
+  .upstream-providers-page :deep(.table-page-layout.mobile-mode) {
+    height: auto;
+    min-height: calc(100vh - 64px - 2rem);
+  }
+
+  .upstream-toolbar {
+    @apply items-stretch gap-3 px-3;
+  }
+
+  .upstream-toolbar-left,
+  .upstream-toolbar-filters,
+  .upstream-toolbar-right {
+    @apply w-full justify-start;
+  }
+
+  .upstream-toolbar-left {
+    @apply gap-2;
+  }
+
+  .upstream-toolbar-title {
+    @apply w-full whitespace-normal;
+  }
+
+  .upstream-toolbar-action {
+    @apply min-w-0 flex-1 justify-center px-3;
+  }
+
+  .upstream-sample-action,
+  .upstream-sampler-settings-action {
+    @apply w-full;
+  }
+
+  .upstream-filter-select {
+    @apply w-full;
+  }
+
+  .upstream-toolbar-right {
+    @apply gap-3;
+  }
+
+  .upstream-total {
+    @apply min-w-0 flex-1 whitespace-normal rounded-md bg-gray-50 px-3 py-2 dark:bg-dark-900/40;
+  }
+
+  .column-settings-panel {
+    @apply right-auto left-0 w-[min(13rem,calc(100vw-2rem))];
+  }
+
+  .provider-name-card,
+  .interface-switcher,
+  .action-button-group,
+  .homepage-control-cell,
+  .numeric-cell {
+    @apply mx-0 min-w-0 max-w-full justify-end text-right;
+  }
+
+  .provider-title-line {
+    @apply justify-end;
+  }
+
+  .provider-name,
+  .provider-inline-url span:first-child,
+  .copyable-text code,
+  .prefix-value {
+    @apply whitespace-normal break-all;
+  }
+
+  .action-button-group {
+    @apply justify-end;
+  }
+
+  .action-button {
+    @apply h-8;
+  }
+
+  .provider-detail-panel {
+    @apply grid-cols-1 gap-4 px-4 py-4;
+  }
+
+  .detail-endpoint {
+    @apply grid-cols-1 gap-1;
+  }
+
+  .detail-endpoint code,
+  .detail-copy code {
+    @apply whitespace-normal break-all;
+  }
+
+  .balance-dialog {
+    @apply max-h-[92vh] rounded-lg;
+  }
+
+  .balance-dialog-header {
+    @apply items-start;
+  }
+
+  .balance-dialog-body {
+    @apply max-h-[calc(92vh-5rem)] p-4;
+  }
+
+  .balance-summary-grid,
+  .balance-sampler-controls,
+  .balance-recharge-form {
+    @apply grid-cols-1;
+  }
+
+  .balance-config-panel {
+    @apply items-stretch;
+  }
+
+  .balance-config-panel .input,
+  .balance-config-panel .btn,
+  .balance-sampler-interval .input {
+    @apply w-full;
+  }
+
+  .balance-sampler-toggle,
+  .balance-sampler-interval {
+    @apply flex-col items-start;
+  }
+
+  .balance-sampler-provider-row {
+    @apply grid-cols-1 gap-2;
+  }
+
+  .balance-sampler-provider-row .input {
+    @apply w-full text-left;
+  }
+}
 </style>

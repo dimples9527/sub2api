@@ -2060,12 +2060,75 @@ onMounted(reload)
 }
 
 @media (max-width: 1023px) {
+  .ug-stats-row {
+    @apply grid-cols-2;
+  }
+
+  .ug-provider-strip {
+    @apply items-start;
+  }
+
+  .ug-provider-meta,
+  .ug-filter-top,
+  .ug-auto-row {
+    @apply items-stretch;
+  }
+
+  .ug-search,
+  .ug-filter-right,
+  .ug-auto-meta,
+  .ug-auto-controls {
+    @apply w-full;
+  }
+
+  .ug-filter-select {
+    @apply w-full flex-1;
+  }
+
+  .ug-filter-right .ug-btn {
+    @apply flex-1 justify-center;
+  }
+
+  .ug-auto-controls {
+    @apply justify-start;
+  }
+
+  .ug-auto-interval {
+    @apply flex-wrap;
+  }
+
+  .ug-auto-input {
+    @apply w-28;
+  }
+
   .ug-content {
     @apply h-auto overflow-visible;
   }
 
   .ug-table-card {
     @apply h-auto min-h-0 overflow-visible;
+  }
+
+  .ug-group-name,
+  .ug-provider-name,
+  .ug-provider-slug,
+  .ug-tag,
+  .ug-match-desc-text,
+  .ug-account-chip-name {
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .ug-account-list,
+  .ug-account-status-list,
+  .ug-match-desc,
+  .ug-group-title,
+  .ug-action-stack {
+    justify-content: flex-end;
+  }
+
+  .ug-action-stack {
+    align-items: flex-end;
   }
 
   .ug-bound-account-row {
@@ -2075,6 +2138,68 @@ onMounted(reload)
 
   .ug-bound-account-actions {
     justify-content: flex-start;
+  }
+
+  .ug-bound-accounts-modal,
+  .ug-rate-fix-logs-modal {
+    max-height: 86vh;
+  }
+
+  .ug-bound-accounts-header {
+    align-items: flex-start;
+    padding: 14px 16px;
+  }
+
+  .ug-records-table-wrapper {
+    max-width: 100%;
+    overflow: auto;
+  }
+
+  .ug-records-table {
+    min-width: 760px;
+  }
+}
+
+@media (max-width: 520px) {
+  .ug-stats-row {
+    @apply grid-cols-1;
+  }
+
+  .ug-provider-strip {
+    @apply flex-col;
+  }
+
+  .ug-provider-count {
+    @apply self-start;
+  }
+
+  .ug-filter-right,
+  .ug-auto-controls {
+    @apply flex-col items-stretch;
+  }
+
+  .ug-filter-right .ug-btn,
+  .ug-auto-controls .ug-btn,
+  .ug-auto-interval,
+  .ug-auto-input {
+    @apply w-full;
+  }
+
+  .ug-account-list,
+  .ug-account-status-list,
+  .ug-match-desc,
+  .ug-group-title,
+  .ug-action-stack {
+    justify-content: flex-start;
+  }
+
+  .ug-action-stack {
+    align-items: flex-start;
+  }
+
+  .ug-bound-accounts-dialog,
+  .ug-rate-fix-logs-dialog {
+    @apply px-2 py-4;
   }
 }
 </style>

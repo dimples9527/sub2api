@@ -1,6 +1,6 @@
 <template>
-  <div class="flex items-center gap-2">
-    <span class="text-sm text-gray-900 dark:text-gray-100">{{ row.primary_model }}</span>
+  <div class="monitor-primary-model-cell flex min-w-0 flex-wrap items-center justify-end gap-2 md:justify-start">
+    <span class="min-w-0 break-all text-sm text-gray-900 dark:text-gray-100">{{ row.primary_model }}</span>
     <HelpTooltip>
       <template #trigger>
         <span

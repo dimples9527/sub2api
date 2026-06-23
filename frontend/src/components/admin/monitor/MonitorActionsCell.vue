@@ -1,5 +1,5 @@
 <template>
-  <div class="flex items-center gap-1">
+  <div class="monitor-actions-cell flex flex-wrap items-center justify-end gap-1 md:justify-start">
     <button
       @click="$emit('run', row)"
       :disabled="running"
@@ -43,3 +43,16 @@ defineEmits<{
 
 const { t } = useI18n()
 </script>
+
+<style scoped>
+@media (max-width: 420px) {
+  .monitor-actions-cell {
+    justify-content: stretch;
+  }
+
+  .monitor-actions-cell button {
+    flex: 1 1 calc(50% - 0.25rem);
+    min-width: 4.75rem;
+  }
+}
+</style>

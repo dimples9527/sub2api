@@ -2772,9 +2772,48 @@ button.sync-log-status-unhandled:hover {
     grid-template-columns: 1fr;
   }
 
+  .accounts-shell {
+    padding: 14px;
+  }
+
   .accounts-actions,
   .guard-controls {
     justify-content: flex-start;
+  }
+
+  .provider-summary {
+    width: 100%;
+  }
+
+  .provider-summary strong,
+  .provider-summary code,
+  .main-text,
+  .source-id,
+  .sub-text,
+  .table-tag,
+  .group-chip,
+  .log-chip,
+  .trigger-chip {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .source-cell {
+    min-width: 0;
+    justify-items: end;
+    text-align: right;
+  }
+
+  .source-title,
+  .tag-list,
+  .action-cell {
+    justify-content: flex-end;
+  }
+
+  .rate-cell {
+    justify-items: end;
   }
 
   .guard-sync-log-warning {
@@ -2796,17 +2835,86 @@ button.sync-log-status-unhandled:hover {
     min-height: 0;
     overflow: visible;
   }
+
+  .sync-logs-modal {
+    width: 100%;
+    height: min(86vh, 760px);
+    max-height: 86vh;
+  }
+
+  .sync-logs-modal-header {
+    align-items: flex-start;
+    padding: 14px 16px;
+  }
+
+  .records-table-wrap {
+    max-width: 100%;
+    overflow: auto;
+  }
 }
 
 @media (max-width: 768px) {
   .stats-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .accounts-actions {
+    width: 100%;
+  }
+
+  .accounts-actions .ui-button {
+    flex: 1 1 calc(50% - 6px);
+    min-width: 0;
+  }
+
+  .accounts-actions .ui-button-icon {
+    flex: 0 0 38px;
+  }
+
+  .guard-left,
+  .guard-controls,
+  .guard-status-line {
+    align-items: flex-start;
+  }
+
+  .guard-controls .ui-button,
+  .guard-controls .ui-input {
+    width: 100%;
+  }
+
+  .control-label {
+    white-space: normal;
+  }
+
+  .filtered-count {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .records-table {
+    min-width: 900px;
+  }
 }
 
 @media (max-width: 520px) {
   .stats-strip {
     grid-template-columns: 1fr;
+  }
+
+  .accounts-actions .ui-button {
+    flex-basis: 100%;
+  }
+
+  .accounts-actions .ui-button-icon {
+    flex-basis: 38px;
+  }
+
+  .guard-sync-log-warning {
+    grid-template-columns: 1fr;
+  }
+
+  .guard-warning-icon {
+    display: none;
   }
 }
 </style>
