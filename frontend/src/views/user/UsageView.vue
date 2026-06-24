@@ -106,7 +106,7 @@
           <div class="px-6 py-4">
           <div class="flex flex-wrap items-end gap-4">
             <!-- API Key Filter -->
-            <div class="min-w-[180px]">
+            <div class="w-full min-w-0 sm:w-auto sm:min-w-[180px]">
               <label class="input-label">{{ t('usage.apiKeyFilter') }}</label>
               <Select
                 v-model="filters.api_key_id"
@@ -117,7 +117,7 @@
             </div>
 
             <!-- Date Range Filter -->
-            <div>
+            <div class="w-full min-w-0 sm:w-auto">
               <label class="input-label">{{ t('usage.timeRange') }}</label>
               <DateRangePicker
                 v-model:start-date="startDate"
@@ -127,7 +127,7 @@
             </div>
 
             <!-- Actions -->
-            <div class="ml-auto flex items-center gap-3">
+            <div class="flex w-full flex-wrap items-center gap-3 sm:ml-auto sm:w-auto">
               <button @click="applyFilters" :disabled="loading" class="btn btn-secondary">
                 {{ t('common.refresh') }}
               </button>

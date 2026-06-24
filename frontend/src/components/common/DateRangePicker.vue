@@ -1,5 +1,5 @@
 <template>
-  <div class="relative" ref="containerRef">
+  <div class="date-picker-root relative" ref="containerRef">
     <button
       type="button"
       @click="toggle"
@@ -321,6 +321,10 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.date-picker-root {
+  @apply inline-block min-w-0;
+}
+
 .date-picker-trigger {
   @apply flex items-center gap-2;
   @apply rounded-lg px-3 py-2 text-sm;
@@ -433,5 +437,41 @@ onUnmounted(() => {
 .date-picker-dropdown-leave-to {
   opacity: 0;
   transform: translateY(-8px);
+}
+
+@media (max-width: 640px) {
+  .date-picker-root {
+    @apply w-full;
+  }
+
+  .date-picker-trigger {
+    @apply w-full min-w-0 justify-between;
+  }
+
+  .date-picker-value {
+    @apply min-w-0 truncate;
+  }
+
+  .date-picker-dropdown {
+    @apply left-0 right-auto min-w-0;
+    width: min(320px, 100%);
+    max-width: 100%;
+  }
+
+  .date-picker-custom {
+    @apply flex-col items-stretch gap-3;
+  }
+
+  .date-picker-separator {
+    @apply hidden;
+  }
+
+  .date-picker-actions {
+    @apply px-3 pb-3;
+  }
+
+  .date-picker-apply {
+    @apply w-full justify-center;
+  }
 }
 </style>
