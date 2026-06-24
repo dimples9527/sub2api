@@ -424,12 +424,21 @@ func ProvideUpstreamAccountSyncService(
 	groupRepo GroupRepository,
 	adminService AdminService,
 	settingRepo SettingRepository,
+	previewCache UpstreamAccountSyncPreviewCache,
 ) *UpstreamAccountSyncService {
-	return NewUpstreamAccountSyncService(upstreamProviderService, groupRepo, adminService, settingRepo)
+	svc := NewUpstreamAccountSyncService(upstreamProviderService, groupRepo, adminService, settingRepo)
+	svc.SetPreviewCache(previewCache)
+	return svc
 }
 
 func ProvideUpstreamAccountRateGuardScheduler(upstreamAccountSyncService *UpstreamAccountSyncService) *UpstreamAccountRateGuardScheduler {
 	svc := NewUpstreamAccountRateGuardScheduler(upstreamAccountSyncService)
+	svc.Start()
+	return svc
+}
+
+func ProvideUpstreamAccountSyncPreviewScheduler(upstreamAccountSyncService *UpstreamAccountSyncService) *UpstreamAccountSyncPreviewScheduler {
+	svc := NewUpstreamAccountSyncPreviewScheduler(upstreamAccountSyncService)
 	svc.Start()
 	return svc
 }
@@ -590,6 +599,7 @@ var ProviderSet = wire.NewSet(
 	ProvideUpstreamManagementService,
 	ProvideUpstreamGroupRateFixScheduler,
 	ProvideUpstreamAccountSyncService,
+	ProvideUpstreamAccountSyncPreviewScheduler,
 	ProvideUpstreamAccountRateGuardScheduler,
 	ProvideUpstreamBalanceConsumptionService,
 	ProvideUpstreamBalanceSamplerScheduler,

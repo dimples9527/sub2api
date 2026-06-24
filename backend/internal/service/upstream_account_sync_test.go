@@ -142,6 +142,25 @@ func (s *upstreamAccountSyncAccountManagerStub) UpdateAccount(ctx context.Contex
 	return nil, ErrAccountNotFound
 }
 
+type upstreamAccountSyncPreviewCacheStub struct {
+	result UpstreamAccountSyncResult
+	found  bool
+	gets   int
+	sets   int
+}
+
+func (s *upstreamAccountSyncPreviewCacheStub) Get(ctx context.Context) (UpstreamAccountSyncResult, bool, error) {
+	s.gets++
+	return s.result, s.found, nil
+}
+
+func (s *upstreamAccountSyncPreviewCacheStub) Set(ctx context.Context, result UpstreamAccountSyncResult) error {
+	s.sets++
+	s.result = result
+	s.found = true
+	return nil
+}
+
 func newUpstreamAccountSyncServiceForTest(
 	provider *upstreamAccountSyncProviderSourceStub,
 	groups []Group,
@@ -159,6 +178,126 @@ func newUpstreamAccountSyncServiceForTest(
 		settings,
 	)
 	return svc, accountManager
+}
+
+func TestUpstreamAccountSyncPreviewReturnsCachedSnapshotWithoutFetchingProviders(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup upstream", AccountNamePrefix: "backup-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {{ProviderSlug: "backup", KeyName: "live", GroupName: "VIP", RateMultiplier: 1}},
+		},
+	}
+	svc, _ := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 1, Status: StatusActive}},
+		nil,
+		newUpstreamManagementSettingRepoStub(),
+	)
+	cache := &upstreamAccountSyncPreviewCacheStub{
+		found: true,
+		result: UpstreamAccountSyncResult{
+			Summary: UpstreamAccountSyncSummary{UpstreamKeyCount: 1},
+			Items: []UpstreamAccountSyncItem{{
+				Action:           UpstreamAccountSyncActionNoop,
+				ProviderSlug:     "backup",
+				ProviderName:     "Backup upstream",
+				UpstreamKeyName:  "cached",
+				LocalAccountName: "backup-cached",
+			}},
+			Records: []UpstreamAccountSyncRecord{},
+		},
+	}
+	svc.SetPreviewCache(cache)
+
+	result, err := svc.Preview(context.Background())
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if len(result.Items) != 1 || result.Items[0].UpstreamKeyName != "cached" {
+		t.Fatalf("items = %+v, want cached snapshot", result.Items)
+	}
+	if provider.fetchCount("backup") != 0 {
+		t.Fatalf("backup fetch count = %d, want cache hit to avoid provider fetch", provider.fetchCount("backup"))
+	}
+	if cache.gets != 1 || cache.sets != 0 {
+		t.Fatalf("cache gets/sets = %d/%d, want one get and no set", cache.gets, cache.sets)
+	}
+}
+
+func TestUpstreamAccountSyncPreviewRefreshesAndStoresSnapshotOnCacheMiss(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup upstream", AccountNamePrefix: "backup-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {{ProviderSlug: "backup", KeyName: "live", GroupName: "VIP", RateMultiplier: 1}},
+		},
+	}
+	svc, _ := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 1, Status: StatusActive}},
+		nil,
+		newUpstreamManagementSettingRepoStub(),
+	)
+	cache := &upstreamAccountSyncPreviewCacheStub{}
+	svc.SetPreviewCache(cache)
+
+	result, err := svc.Preview(context.Background())
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if len(result.Items) != 1 || result.Items[0].UpstreamKeyName != "live" {
+		t.Fatalf("items = %+v, want live snapshot", result.Items)
+	}
+	if provider.fetchCount("backup") != 1 {
+		t.Fatalf("backup fetch count = %d, want cache miss to fetch provider", provider.fetchCount("backup"))
+	}
+	if cache.sets != 1 || !cache.found || len(cache.result.Items) != 1 || cache.result.Items[0].UpstreamKeyName != "live" {
+		t.Fatalf("cache sets/found/result = %d/%v/%+v, want stored live snapshot", cache.sets, cache.found, cache.result.Items)
+	}
+}
+
+func TestUpstreamAccountSyncSyncStoresFreshSnapshotAfterRealtimeFetch(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup upstream", AccountNamePrefix: "backup-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {{ProviderSlug: "backup", KeyName: "fresh", GroupName: "VIP", RateMultiplier: 1}},
+		},
+	}
+	svc, _ := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 1, Status: StatusActive}},
+		nil,
+		newUpstreamManagementSettingRepoStub(),
+	)
+	cache := &upstreamAccountSyncPreviewCacheStub{
+		found: true,
+		result: UpstreamAccountSyncResult{
+			Items: []UpstreamAccountSyncItem{{ProviderSlug: "backup", UpstreamKeyName: "stale"}},
+		},
+	}
+	svc.SetPreviewCache(cache)
+
+	result, err := svc.Sync(context.Background(), UpstreamAccountSyncRequest{CreateMissing: true, UpdateExisting: true})
+	if err != nil {
+		t.Fatalf("Sync returned error: %v", err)
+	}
+	if len(result.Items) != 1 || result.Items[0].UpstreamKeyName != "fresh" {
+		t.Fatalf("sync items = %+v, want fresh provider data", result.Items)
+	}
+	if cache.sets != 1 || cache.result.Items[0].UpstreamKeyName != "fresh" {
+		t.Fatalf("cache sets/result = %d/%+v, want sync to overwrite snapshot", cache.sets, cache.result.Items)
+	}
 }
 
 func TestUpstreamAccountSyncPreviewUsesNonDefaultProvidersAndManualGroupMapping(t *testing.T) {
@@ -327,10 +466,10 @@ func TestUpstreamAccountSyncPreviewCachesProviderKeysForThirtySeconds(t *testing
 		newUpstreamManagementSettingRepoStub(),
 	)
 
-	if _, err := svc.Preview(context.Background()); err != nil {
+	if _, _, err := svc.preview(context.Background(), true); err != nil {
 		t.Fatalf("first Preview returned error: %v", err)
 	}
-	if _, err := svc.Preview(context.Background()); err != nil {
+	if _, _, err := svc.preview(context.Background(), true); err != nil {
 		t.Fatalf("second Preview returned error: %v", err)
 	}
 	if count := provider.fetchCount("backup"); count != 1 {

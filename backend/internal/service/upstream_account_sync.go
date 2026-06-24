@@ -154,8 +154,14 @@ type UpstreamAccountSyncService struct {
 	groupRepo      GroupRepository
 	accountManager UpstreamAccountSyncAccountManager
 	settingRepo    SettingRepository
+	previewCache   UpstreamAccountSyncPreviewCache
 	keysCacheMu    sync.Mutex
 	keysCache      map[string]upstreamAccountSyncProviderKeysCacheEntry
+}
+
+type UpstreamAccountSyncPreviewCache interface {
+	Get(ctx context.Context) (UpstreamAccountSyncResult, bool, error)
+	Set(ctx context.Context, result UpstreamAccountSyncResult) error
 }
 
 type upstreamAccountSyncProviderKeysCacheEntry struct {
@@ -197,11 +203,31 @@ func NewUpstreamAccountSyncService(
 	}
 }
 
+func (s *UpstreamAccountSyncService) SetPreviewCache(cache UpstreamAccountSyncPreviewCache) {
+	if s == nil {
+		return
+	}
+	s.previewCache = cache
+}
+
 func (s *UpstreamAccountSyncService) Preview(ctx context.Context) (UpstreamAccountSyncResult, error) {
-	result, _, err := s.preview(ctx, true)
+	if s != nil && s.previewCache != nil {
+		if result, ok, err := s.previewCache.Get(ctx); err == nil && ok {
+			records, err := s.ListRecords(ctx)
+			if err != nil {
+				return UpstreamAccountSyncResult{}, err
+			}
+			result.Records = records
+			return result, nil
+		} else if err != nil {
+			logger.LegacyPrintf("service.upstream_account_sync", "Warning: load preview cache failed: %v", err)
+		}
+	}
+	result, _, err := s.preview(ctx, false)
 	if err != nil {
 		return UpstreamAccountSyncResult{}, err
 	}
+	s.storePreviewCache(ctx, result)
 	records, err := s.ListRecords(ctx)
 	if err != nil {
 		return UpstreamAccountSyncResult{}, err
@@ -310,7 +336,31 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 		return UpstreamAccountSyncResult{}, err
 	}
 	result.Records = records
+	s.storePreviewCache(ctx, result)
 	return result, nil
+}
+
+func (s *UpstreamAccountSyncService) RefreshPreviewCache(ctx context.Context) (UpstreamAccountSyncResult, error) {
+	result, _, err := s.preview(ctx, false)
+	if err != nil {
+		return UpstreamAccountSyncResult{}, err
+	}
+	records, err := s.ListRecords(ctx)
+	if err != nil {
+		return UpstreamAccountSyncResult{}, err
+	}
+	result.Records = records
+	s.storePreviewCache(ctx, result)
+	return result, nil
+}
+
+func (s *UpstreamAccountSyncService) storePreviewCache(ctx context.Context, result UpstreamAccountSyncResult) {
+	if s == nil || s.previewCache == nil {
+		return
+	}
+	if err := s.previewCache.Set(ctx, result); err != nil {
+		logger.LegacyPrintf("service.upstream_account_sync", "Warning: store preview cache failed: %v", err)
+	}
 }
 
 func (s *UpstreamAccountSyncService) GetRateGuardConfig(ctx context.Context) (UpstreamAccountRateGuardConfig, error) {

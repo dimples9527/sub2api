@@ -101,6 +101,7 @@ func provideCleanup(
 	channelMonitorRunner *service.ChannelMonitorRunner,
 	quotaFlusher *service.UserPlatformQuotaUsageFlusher,
 	upstreamGroupRateFixScheduler *service.UpstreamGroupRateFixScheduler,
+	upstreamAccountSyncPreviewScheduler *service.UpstreamAccountSyncPreviewScheduler,
 	upstreamAccountRateGuardScheduler *service.UpstreamAccountRateGuardScheduler,
 	upstreamBalanceSamplerScheduler *service.UpstreamBalanceSamplerScheduler,
 ) func() {
@@ -264,6 +265,12 @@ func provideCleanup(
 			{"UpstreamGroupRateFixScheduler", func() error {
 				if upstreamGroupRateFixScheduler != nil {
 					upstreamGroupRateFixScheduler.Stop()
+				}
+				return nil
+			}},
+			{"UpstreamAccountSyncPreviewScheduler", func() error {
+				if upstreamAccountSyncPreviewScheduler != nil {
+					upstreamAccountSyncPreviewScheduler.Stop()
 				}
 				return nil
 			}},

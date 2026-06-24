@@ -176,7 +176,9 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	proxyExitInfoProber := repository.NewProxyExitInfoProber(configConfig)
 	proxyLatencyCache := repository.NewProxyLatencyCache(redisClient)
 	adminService := service.NewAdminService(userRepository, groupRepository, accountRepository, proxyRepository, apiKeyRepository, redeemCodeRepository, userGroupRateRepository, userRPMCache, billingCacheService, proxyExitInfoProber, proxyLatencyCache, apiKeyAuthCacheInvalidator, client, settingService, subscriptionService, userSubscriptionRepository, privacyClientFactory, openAIGatewayService)
-	upstreamAccountSyncService := service.ProvideUpstreamAccountSyncService(upstreamProviderService, groupRepository, adminService, settingRepository)
+	upstreamAccountSyncPreviewCache := repository.NewUpstreamAccountSyncPreviewCache(redisClient)
+	upstreamAccountSyncService := service.ProvideUpstreamAccountSyncService(upstreamProviderService, groupRepository, adminService, settingRepository, upstreamAccountSyncPreviewCache)
+	upstreamAccountSyncPreviewScheduler := service.ProvideUpstreamAccountSyncPreviewScheduler(upstreamAccountSyncService)
 	upstreamAccountRateGuardScheduler := service.ProvideUpstreamAccountRateGuardScheduler(upstreamAccountSyncService)
 	upstreamBalanceConsumptionService := service.ProvideUpstreamBalanceConsumptionService(upstreamBalanceRepository, upstreamProviderService, settingRepository, usageLogRepository)
 	upstreamBalanceSamplerScheduler := service.ProvideUpstreamBalanceSamplerScheduler(upstreamBalanceConsumptionService)
@@ -284,7 +286,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	channelMonitorRunner := service.ProvideChannelMonitorRunner(channelMonitorService, settingService)
 	userPlatformQuotaUsageFlusher := service.ProvideUserPlatformQuotaUsageFlusher(configConfig, billingCache, serviceUserPlatformQuotaRepository, timingWheelService)
 	upstreamGroupRateFixScheduler := service.ProvideUpstreamGroupRateFixScheduler(upstreamManagementService)
-	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, userPlatformQuotaUsageFlusher, upstreamGroupRateFixScheduler, upstreamAccountRateGuardScheduler, upstreamBalanceSamplerScheduler)
+	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, userPlatformQuotaUsageFlusher, upstreamGroupRateFixScheduler, upstreamAccountSyncPreviewScheduler, upstreamAccountRateGuardScheduler, upstreamBalanceSamplerScheduler)
 	application := &Application{
 		Server:  httpServer,
 		Cleanup: v,
@@ -342,6 +344,7 @@ func provideCleanup(
 	channelMonitorRunner *service.ChannelMonitorRunner,
 	quotaFlusher *service.UserPlatformQuotaUsageFlusher,
 	upstreamGroupRateFixScheduler *service.UpstreamGroupRateFixScheduler,
+	upstreamAccountSyncPreviewScheduler *service.UpstreamAccountSyncPreviewScheduler,
 	upstreamAccountRateGuardScheduler *service.UpstreamAccountRateGuardScheduler,
 	upstreamBalanceSamplerScheduler *service.UpstreamBalanceSamplerScheduler,
 ) func() {
@@ -504,6 +507,12 @@ func provideCleanup(
 			{"UpstreamGroupRateFixScheduler", func() error {
 				if upstreamGroupRateFixScheduler != nil {
 					upstreamGroupRateFixScheduler.Stop()
+				}
+				return nil
+			}},
+			{"UpstreamAccountSyncPreviewScheduler", func() error {
+				if upstreamAccountSyncPreviewScheduler != nil {
+					upstreamAccountSyncPreviewScheduler.Stop()
 				}
 				return nil
 			}},
