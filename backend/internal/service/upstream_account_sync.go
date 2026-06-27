@@ -47,10 +47,19 @@ type upstreamAccountSyncBoundGroupLoader interface {
 }
 
 type UpstreamAccountSyncRequest struct {
-	CreateMissing  bool   `json:"create_missing"`
-	UpdateExisting bool   `json:"update_existing"`
-	ApplyRateGuard bool   `json:"apply_rate_guard"`
-	TriggerSource  string `json:"trigger_source,omitempty"`
+	CreateMissing  bool                              `json:"create_missing"`
+	UpdateExisting bool                              `json:"update_existing"`
+	ApplyRateGuard bool                              `json:"apply_rate_guard"`
+	TriggerSource  string                            `json:"trigger_source,omitempty"`
+	SelectedItems  []UpstreamAccountSyncSelectedItem `json:"selected_items,omitempty"`
+}
+
+type UpstreamAccountSyncSelectedItem struct {
+	ProviderSlug    string `json:"provider_slug"`
+	UpstreamKeyName string `json:"upstream_key_name"`
+	CreateMissing   bool   `json:"create_missing"`
+	UpdateExisting  bool   `json:"update_existing"`
+	ApplyRateGuard  bool   `json:"apply_rate_guard"`
 }
 
 type UpstreamAccountRateGuardConfig struct {
@@ -79,6 +88,8 @@ type UpstreamAccountSyncItem struct {
 	ProviderName           string                               `json:"provider_name"`
 	ProviderBaseURL        string                               `json:"provider_base_url,omitempty"`
 	UpstreamKeyName        string                               `json:"upstream_key_name"`
+	UpstreamAPIKey         string                               `json:"upstream_api_key,omitempty"`
+	UpstreamBaseURL        string                               `json:"upstream_base_url,omitempty"`
 	LocalAccountName       string                               `json:"local_account_name"`
 	MatchedAccountID       *int64                               `json:"matched_account_id,omitempty"`
 	MatchedAccountName     string                               `json:"matched_account_name,omitempty"`
@@ -94,6 +105,8 @@ type UpstreamAccountSyncItem struct {
 	ConflictAccountIDs     []int64                              `json:"conflict_account_ids,omitempty"`
 	ConflictAccounts       []UpstreamAccountSyncConflictAccount `json:"conflict_accounts,omitempty"`
 	BoundGroups            []UpstreamAccountSyncBoundGroup      `json:"bound_groups,omitempty"`
+	ChangeDetails          []UpstreamAccountSyncChangeDetail    `json:"change_details,omitempty"`
+	Execution              UpstreamAccountSyncExecutionResult   `json:"execution,omitempty"`
 }
 
 type UpstreamAccountSyncConflictAccount struct {
@@ -107,6 +120,25 @@ type UpstreamAccountSyncBoundGroup struct {
 	Name           string  `json:"name"`
 	RateMultiplier float64 `json:"rate_multiplier"`
 	RateViolation  bool    `json:"rate_violation"`
+}
+
+type UpstreamAccountSyncChangeDetail struct {
+	Kind       string   `json:"kind"`
+	Field      string   `json:"field,omitempty"`
+	Label      string   `json:"label,omitempty"`
+	Before     string   `json:"before,omitempty"`
+	After      string   `json:"after,omitempty"`
+	GroupIDs   []int64  `json:"group_ids,omitempty"`
+	GroupNames []string `json:"group_names,omitempty"`
+}
+
+type UpstreamAccountSyncExecutionResult struct {
+	Executed          bool     `json:"executed,omitempty"`
+	Action            string   `json:"action,omitempty"`
+	AccountID         *int64   `json:"account_id,omitempty"`
+	AccountName       string   `json:"account_name,omitempty"`
+	UnboundGroupIDs   []int64  `json:"unbound_group_ids,omitempty"`
+	UnboundGroupNames []string `json:"unbound_group_names,omitempty"`
 }
 
 type UpstreamAccountSyncResult struct {
@@ -249,15 +281,28 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 
 	now := time.Now().UTC()
 	recordStats, recordOrder := newUpstreamAccountSyncRecordStats(result)
+	selection, hasSelection := upstreamAccountSyncSelectedItems(req.SelectedItems)
 	for index := range result.Items {
 		item := &result.Items[index]
+		selected, selectedOK := selection[upstreamAccountSyncSelectionKey(item.ProviderSlug, item.UpstreamKeyName)]
+		if hasSelection && !selectedOK {
+			continue
+		}
+		createMissing := req.CreateMissing
+		updateExisting := req.UpdateExisting
+		applyRateGuard := req.ApplyRateGuard
+		if hasSelection {
+			createMissing = selected.CreateMissing
+			updateExisting = selected.UpdateExisting
+			applyRateGuard = selected.ApplyRateGuard
+		}
 		provider := previewState.providerBySlug[item.ProviderSlug]
 		if provider.Slug == "" {
 			provider = result.DefaultProvider
 		}
 		switch item.Action {
 		case UpstreamAccountSyncActionCreate:
-			if !req.CreateMissing {
+			if !createMissing {
 				continue
 			}
 			groupIDs := []int64{}
@@ -271,7 +316,7 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 				continue
 			}
 			extra := upstreamAccountSyncExtra(provider, *item, now, nil)
-			_, err := s.accountManager.CreateAccount(ctx, &CreateAccountInput{
+			created, err := s.accountManager.CreateAccount(ctx, &CreateAccountInput{
 				Name:                  item.LocalAccountName,
 				Platform:              PlatformOpenAI,
 				Type:                  AccountTypeAPIKey,
@@ -284,10 +329,19 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 			if err != nil {
 				return s.finishSyncWithError(ctx, result, triggerSource, recordStats, recordOrder, item.ProviderSlug, err)
 			}
+			if created != nil {
+				accountID := created.ID
+				item.Execution = UpstreamAccountSyncExecutionResult{
+					Executed:    true,
+					Action:      UpstreamAccountSyncActionCreate,
+					AccountID:   &accountID,
+					AccountName: created.Name,
+				}
+			}
 			result.Summary.CreateCount++
 			recordStats[item.ProviderSlug].createdCount++
 		case UpstreamAccountSyncActionUpdate:
-			if !req.UpdateExisting || item.MatchedAccountID == nil {
+			if !updateExisting || item.MatchedAccountID == nil {
 				continue
 			}
 			account := previewState.accountByID[*item.MatchedAccountID]
@@ -299,14 +353,14 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 				nextGroupIDs = appendUniqueInt64(nextGroupIDs, *item.LocalGroupID)
 			}
 			lowGroupIDs, lowGroupNames, remainingGroupIDs := upstreamAccountSyncLowRateGroups(account, item.UpstreamRateMultiplier)
-			if req.ApplyRateGuard && len(lowGroupIDs) > 0 {
+			if applyRateGuard && len(lowGroupIDs) > 0 {
 				nextGroupIDs = remainingGroupIDs
 				item.RateViolation = true
 				item.UnboundGroupIDs = lowGroupIDs
 				item.UnboundGroupNames = lowGroupNames
 			}
 			extra := upstreamAccountSyncExtra(provider, *item, now, account.Extra)
-			_, err := s.accountManager.UpdateAccount(ctx, account.ID, &UpdateAccountInput{
+			updated, err := s.accountManager.UpdateAccount(ctx, account.ID, &UpdateAccountInput{
 				Credentials:           upstreamAccountSyncCredentials(account.Credentials, item.UpstreamKeyName, provider.BaseURL),
 				Extra:                 extra,
 				GroupIDs:              &nextGroupIDs,
@@ -315,7 +369,26 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 			if err != nil {
 				return s.finishSyncWithError(ctx, result, triggerSource, recordStats, recordOrder, item.ProviderSlug, err)
 			}
-			if req.ApplyRateGuard && len(lowGroupIDs) > 0 {
+			accountName := account.Name
+			if updated != nil && strings.TrimSpace(updated.Name) != "" {
+				accountName = updated.Name
+			}
+			accountID := account.ID
+			executedUnboundGroupIDs := []int64{}
+			executedUnboundGroupNames := []string{}
+			if applyRateGuard && len(lowGroupIDs) > 0 {
+				executedUnboundGroupIDs = append([]int64(nil), lowGroupIDs...)
+				executedUnboundGroupNames = append([]string(nil), lowGroupNames...)
+			}
+			item.Execution = UpstreamAccountSyncExecutionResult{
+				Executed:          true,
+				Action:            UpstreamAccountSyncActionUpdate,
+				AccountID:         &accountID,
+				AccountName:       accountName,
+				UnboundGroupIDs:   executedUnboundGroupIDs,
+				UnboundGroupNames: executedUnboundGroupNames,
+			}
+			if applyRateGuard && len(lowGroupIDs) > 0 {
 				detail := buildUpstreamAccountSyncUnbindDetail(provider, *item, account, lowGroupIDs, lowGroupNames, remainingGroupIDs, triggerSource)
 				recordStats[item.ProviderSlug].unbindDetails = append(recordStats[item.ProviderSlug].unbindDetails, detail)
 				logUpstreamAccountSyncUnbindAudit(detail)
@@ -631,6 +704,8 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context, useProviderKey
 				ProviderName:           provider.Name,
 				ProviderBaseURL:        provider.BaseURL,
 				UpstreamKeyName:        strings.TrimSpace(key.KeyName),
+				UpstreamAPIKey:         strings.TrimSpace(key.KeyName),
+				UpstreamBaseURL:        provider.BaseURL,
 				LocalAccountName:       upstreamProviderKeyName(provider, key.KeyName),
 				UpstreamGroupName:      strings.TrimSpace(key.GroupName),
 				UpstreamRateMultiplier: upstreamRateMultiplier,
@@ -699,6 +774,7 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context, useProviderKey
 				result.Summary.RateViolationCount++
 				result.Summary.UnboundGroupCount += len(lowGroupIDs)
 			}
+			item.ChangeDetails = upstreamAccountSyncChangeDetails(account, item, provider)
 			if upstreamAccountSyncNeedsUpdate(account, item, provider) || item.RateViolation {
 				item.Action = UpstreamAccountSyncActionUpdate
 				result.Summary.UpdateCount++
@@ -1181,13 +1257,97 @@ func upstreamAccountSyncNeedsUpdate(account Account, item UpstreamAccountSyncIte
 	return false
 }
 
+func upstreamAccountSyncSelectedItems(items []UpstreamAccountSyncSelectedItem) (map[string]UpstreamAccountSyncSelectedItem, bool) {
+	if len(items) == 0 {
+		return nil, false
+	}
+	out := make(map[string]UpstreamAccountSyncSelectedItem, len(items))
+	for _, item := range items {
+		key := upstreamAccountSyncSelectionKey(item.ProviderSlug, item.UpstreamKeyName)
+		if key == "" {
+			continue
+		}
+		out[key] = item
+	}
+	return out, len(out) > 0
+}
+
+func upstreamAccountSyncSelectionKey(providerSlug, upstreamKeyName string) string {
+	providerSlug = strings.TrimSpace(providerSlug)
+	upstreamKeyName = strings.TrimSpace(upstreamKeyName)
+	if providerSlug == "" || upstreamKeyName == "" {
+		return ""
+	}
+	return providerSlug + "\x00" + upstreamKeyName
+}
+
+func upstreamAccountSyncChangeDetails(account Account, item UpstreamAccountSyncItem, provider UpstreamProviderConfig) []UpstreamAccountSyncChangeDetail {
+	details := []UpstreamAccountSyncChangeDetail{}
+	currentAPIKey := strings.TrimSpace(account.GetCredential("api_key"))
+	nextAPIKey := strings.TrimSpace(item.UpstreamKeyName)
+	if currentAPIKey != nextAPIKey {
+		details = append(details, UpstreamAccountSyncChangeDetail{
+			Kind:   "credential",
+			Field:  "api_key",
+			Label:  "API key",
+			Before: currentAPIKey,
+			After:  nextAPIKey,
+		})
+	}
+
+	currentBaseURL := normalizeUpstreamAccountSyncBaseURL(account.GetCredential("base_url"))
+	nextBaseURL := normalizeUpstreamAccountSyncBaseURL(provider.BaseURL)
+	if currentBaseURL != nextBaseURL {
+		details = append(details, UpstreamAccountSyncChangeDetail{
+			Kind:   "credential",
+			Field:  "base_url",
+			Label:  "Base URL",
+			Before: currentBaseURL,
+			After:  nextBaseURL,
+		})
+	}
+
+	details = append(details, UpstreamAccountSyncChangeDetail{
+		Kind:  "metadata",
+		Field: "upstream",
+		Label: "Upstream sync metadata",
+	})
+
+	existingGroupIDs := upstreamAccountSyncExistingGroupIDs(account)
+	if item.LocalGroupID != nil && !containsInt64(existingGroupIDs, *item.LocalGroupID) {
+		details = append(details, UpstreamAccountSyncChangeDetail{
+			Kind:       "group_bind",
+			Field:      "group_ids",
+			Label:      "Bind local group",
+			GroupIDs:   []int64{*item.LocalGroupID},
+			GroupNames: []string{strings.TrimSpace(item.LocalGroupName)},
+		})
+	}
+
+	lowGroupIDs, lowGroupNames, _ := upstreamAccountSyncLowRateGroups(account, item.UpstreamRateMultiplier)
+	if len(lowGroupIDs) > 0 {
+		details = append(details, UpstreamAccountSyncChangeDetail{
+			Kind:       "group_unbind",
+			Field:      "group_ids",
+			Label:      "Unbind low-rate groups",
+			GroupIDs:   lowGroupIDs,
+			GroupNames: lowGroupNames,
+		})
+	}
+	return details
+}
+
+func normalizeUpstreamAccountSyncBaseURL(value string) string {
+	return strings.TrimRight(strings.TrimSpace(value), "/")
+}
+
 func upstreamAccountSyncCredentials(existing map[string]any, apiKey, baseURL string) map[string]any {
 	out := copyAnyMap(existing)
 	if out == nil {
 		out = map[string]any{}
 	}
 	out["api_key"] = strings.TrimSpace(apiKey)
-	out["base_url"] = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	out["base_url"] = normalizeUpstreamAccountSyncBaseURL(baseURL)
 	return out
 }
 

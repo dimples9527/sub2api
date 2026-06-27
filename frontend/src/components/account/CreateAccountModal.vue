@@ -3194,7 +3194,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import {
@@ -3293,6 +3293,16 @@ interface Props {
   show: boolean
   proxies: Proxy[]
   groups: AdminGroup[]
+  initialValues?: CreateAccountInitialValues | null
+}
+
+export interface CreateAccountInitialValues {
+  name?: string
+  platform?: AccountPlatform
+  type?: AccountType
+  base_url?: string
+  api_key?: string
+  group_ids?: number[]
 }
 
 const props = defineProps<Props>()
@@ -3739,6 +3749,8 @@ watch(
   () => props.show,
   (newVal) => {
     if (newVal) {
+      resetForm()
+      void applyInitialValues()
       // Load TLS fingerprint profiles
       adminAPI.tlsFingerprintProfiles.list()
         .then(profiles => { tlsFingerprintProfiles.value = profiles.map(p => ({ id: p.id, name: p.name })) })
@@ -4290,6 +4302,33 @@ const resetForm = () => {
   oauthFlowRef.value?.reset()
   antigravityMixedChannelConfirmed.value = false
   clearMixedChannelDialog()
+}
+
+const applyInitialValues = async () => {
+  const initialValues = props.initialValues
+  if (!initialValues) return
+
+  if (initialValues.name !== undefined) {
+    form.name = initialValues.name
+  }
+  if (initialValues.platform) {
+    form.platform = initialValues.platform
+  }
+  if (initialValues.type === 'apikey') {
+    accountCategory.value = 'apikey'
+    addMethod.value = 'oauth'
+    form.type = 'apikey'
+  }
+  await nextTick()
+  if (initialValues.base_url !== undefined) {
+    apiKeyBaseUrl.value = initialValues.base_url
+  }
+  if (initialValues.api_key !== undefined) {
+    apiKeyValue.value = initialValues.api_key
+  }
+  if (initialValues.group_ids) {
+    form.group_ids = [...initialValues.group_ids]
+  }
 }
 
 const handleClose = () => {

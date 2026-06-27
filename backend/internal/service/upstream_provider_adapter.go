@@ -128,7 +128,13 @@ func upstreamProviderKeyName(provider UpstreamProviderConfig, name string) strin
 	if prefix == "" {
 		return trimmedName
 	}
-	return prefix + trimmedName
+	if strings.HasSuffix(prefix, "-") {
+		return prefix + trimmedName
+	}
+	if strings.HasPrefix(trimmedName, "-") {
+		return prefix + trimmedName
+	}
+	return prefix + "-" + trimmedName
 }
 
 func upstreamProviderCookiesHeader(cookies []*http.Cookie) string {

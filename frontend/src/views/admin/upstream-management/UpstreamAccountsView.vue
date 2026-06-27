@@ -39,7 +39,7 @@
                 type="button"
                 class="ui-button ui-button-primary"
                 :disabled="loading || syncing"
-                @click="openCreateAccountDialog"
+                @click="() => openCreateAccountDialog()"
               >
                 <Icon name="plus" size="sm" :stroke-width="2" />
                 {{ t('admin.accounts.createAccount') }}
@@ -48,7 +48,7 @@
                 type="button"
                 class="ui-button ui-button-primary"
                 :disabled="loading || syncing || !canSync"
-                @click="runSync"
+                @click="openSyncConfirmDialog"
               >
                 <Icon name="sync" size="sm" :stroke-width="2" :class="syncing ? 'animate-spin' : ''" />
                 {{ t('admin.upstreamAccounts.syncNow') }}
@@ -416,7 +416,17 @@
                     {{ t('common.delete') }}
                   </button>
                 </div>
-                <span v-else class="dash action-dash">-</span>
+                <div v-else class="action-cell">
+                  <button
+                    type="button"
+                    class="text-action text-action-primary"
+                    :data-test="`create-local-account-${slugForDataTest(row.provider_slug)}-${slugForDataTest(row.upstream_key_name)}`"
+                    @click="openCreateAccountDialog(row)"
+                  >
+                    <Icon name="plus" size="sm" :stroke-width="2" />
+                    {{ t('admin.upstreamAccounts.createLocalAccount') }}
+                  </button>
+                </div>
               </template>
 
               <template #empty>
@@ -531,8 +541,239 @@
             <div v-else class="records-empty">
               <Icon name="document" size="xl" :stroke-width="2" />
               <span>{{ t('admin.upstreamAccounts.noSyncLogs') }}</span>
-              <button type="button" class="ui-button" :disabled="loading || syncing || !canSync" @click="runSync">
+              <button type="button" class="ui-button" :disabled="loading || syncing || !canSync" @click="openSyncConfirmDialog">
                 {{ t('admin.upstreamAccounts.syncNow') }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="showSyncConfirmDialog" class="sync-confirm-dialog fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6" data-test="sync-confirm-dialog" @click.self="closeSyncConfirmDialog">
+          <div class="sync-confirm-modal">
+            <div class="sync-confirm-header">
+              <div>
+                <h3>{{ t('admin.upstreamAccounts.syncConfirmTitle') }}</h3>
+                <p>{{ t('admin.upstreamAccounts.syncConfirmDescription') }}</p>
+              </div>
+              <button type="button" class="modal-close-button" :aria-label="t('common.close')" @click="closeSyncConfirmDialog">
+                <Icon name="x" size="md" :stroke-width="2" />
+              </button>
+            </div>
+
+            <div class="sync-confirm-summary">
+              <label class="sync-confirm-option">
+                <input
+                  v-model="syncConfirmOptions.create_missing"
+                  type="checkbox"
+                  :disabled="syncCreateItems.length === 0"
+                  data-test="sync-confirm-create-missing"
+                />
+                <span>
+                  <strong>{{ t('admin.upstreamAccounts.syncConfirmCreateMissing') }}</strong>
+                  <small>{{ syncCreateItems.length }}</small>
+                </span>
+              </label>
+              <label class="sync-confirm-option">
+                <input
+                  v-model="syncConfirmOptions.update_existing"
+                  type="checkbox"
+                  :disabled="syncUpdateItems.length === 0"
+                  data-test="sync-confirm-update-existing"
+                />
+                <span>
+                  <strong>{{ t('admin.upstreamAccounts.syncConfirmUpdateExisting') }}</strong>
+                  <small>{{ syncUpdateItems.length }}</small>
+                </span>
+              </label>
+              <label class="sync-confirm-option">
+                <input
+                  v-model="syncConfirmOptions.apply_rate_guard"
+                  type="checkbox"
+                  :disabled="syncRateGuardItems.length === 0 || !syncConfirmOptions.update_existing"
+                  data-test="sync-confirm-apply-rate-guard"
+                />
+                <span>
+                  <strong>{{ t('admin.upstreamAccounts.syncConfirmApplyRateGuard') }}</strong>
+                  <small>{{ syncRateGuardItems.length }}</small>
+                </span>
+              </label>
+            </div>
+
+            <div class="sync-confirm-body">
+              <section class="sync-confirm-section">
+                <div class="sync-confirm-section-title">
+                  <span>{{ t('admin.upstreamAccounts.syncConfirmCreateSection') }}</span>
+                  <strong>{{ syncCreateItems.length }}</strong>
+                </div>
+                <div v-if="syncCreateItems.length" class="sync-confirm-list">
+                  <article v-for="item in syncCreateItems" :key="syncConfirmItemKey(item, 'create')" class="sync-confirm-item">
+                    <div class="sync-confirm-item-main">
+                      <input
+                        v-model="syncConfirmSelectedItems[syncConfirmSelectionKey(item)]"
+                        type="checkbox"
+                        class="sync-confirm-item-checkbox"
+                        :data-test="syncConfirmItemDataTest(item, 'create')"
+                      />
+                      <span :class="['table-tag', providerToneClass(item.provider_slug, 'tag')]">{{ item.provider_name || item.provider_slug }}</span>
+                      <strong>{{ item.local_account_name }}</strong>
+                      <code>{{ item.upstream_key_name }}</code>
+                    </div>
+                    <div class="sync-confirm-item-meta">
+                      <span>{{ t('admin.upstreamAccounts.syncConfirmUpstreamGroup') }}: {{ item.upstream_group_name || '-' }}</span>
+                      <span>{{ t('admin.upstreamAccounts.syncConfirmLocalGroup') }}: {{ item.local_group_name || '-' }}</span>
+                      <span>{{ t('admin.upstreamAccounts.syncConfirmRate') }}: {{ formatRate(item.upstream_rate_multiplier) }}</span>
+                    </div>
+                  </article>
+                </div>
+                <div v-else class="sync-confirm-empty">{{ t('admin.upstreamAccounts.syncConfirmNoCreate') }}</div>
+              </section>
+
+              <section class="sync-confirm-section">
+                <div class="sync-confirm-section-title">
+                  <span>{{ t('admin.upstreamAccounts.syncConfirmUpdateSection') }}</span>
+                  <strong>{{ syncUpdateItems.length }}</strong>
+                </div>
+                <div v-if="syncUpdateItems.length" class="sync-confirm-list">
+                  <article v-for="item in syncUpdateItems" :key="syncConfirmItemKey(item, 'update')" class="sync-confirm-item">
+                    <div class="sync-confirm-item-main">
+                      <input
+                        v-model="syncConfirmSelectedItems[syncConfirmSelectionKey(item)]"
+                        type="checkbox"
+                        class="sync-confirm-item-checkbox"
+                        :data-test="syncConfirmItemDataTest(item, 'update')"
+                      />
+                      <span :class="['table-tag', providerToneClass(item.provider_slug, 'tag')]">{{ item.provider_name || item.provider_slug }}</span>
+                      <strong>{{ item.matched_account_name || item.local_account_name }}</strong>
+                      <code v-if="item.matched_account_id">#{{ item.matched_account_id }}</code>
+                      <code>{{ item.upstream_key_name }}</code>
+                    </div>
+                    <div class="sync-confirm-item-meta">
+                      <span>{{ t('admin.upstreamAccounts.syncConfirmUpstreamGroup') }}: {{ item.upstream_group_name || '-' }}</span>
+                      <span>{{ t('admin.upstreamAccounts.syncConfirmLocalGroup') }}: {{ item.local_group_name || '-' }}</span>
+                      <span v-if="item.rate_violation" class="sync-confirm-danger">{{ t('admin.upstreamAccounts.syncConfirmHasRateRisk') }}</span>
+                    </div>
+                    <div class="sync-confirm-detail-list">
+                      <span v-for="detail in syncConfirmUpdateDetails(item)" :key="`${syncConfirmItemKey(item, 'detail')}-${detail}`" class="sync-confirm-detail-chip">
+                        {{ detail }}
+                      </span>
+                    </div>
+                  </article>
+                </div>
+                <div v-else class="sync-confirm-empty">{{ t('admin.upstreamAccounts.syncConfirmNoUpdate') }}</div>
+              </section>
+
+              <section class="sync-confirm-section">
+                <div class="sync-confirm-section-title">
+                  <span>{{ t('admin.upstreamAccounts.syncConfirmRateGuardSection') }}</span>
+                  <strong>{{ syncRateGuardItems.length }}</strong>
+                </div>
+                <div v-if="syncRateGuardItems.length" class="sync-confirm-list">
+                  <article v-for="item in syncRateGuardItems" :key="syncConfirmItemKey(item, 'rate')" class="sync-confirm-item sync-confirm-item-risk">
+                    <div class="sync-confirm-item-main">
+                      <span :class="['table-tag', providerToneClass(item.provider_slug, 'tag')]">{{ item.provider_name || item.provider_slug }}</span>
+                      <strong>{{ item.matched_account_name || item.local_account_name }}</strong>
+                      <code v-if="item.matched_account_id">#{{ item.matched_account_id }}</code>
+                      <code>{{ item.upstream_key_name }}</code>
+                    </div>
+                    <div class="sync-confirm-item-meta">
+                      <span>{{ t('admin.upstreamAccounts.syncConfirmUnbindGroups') }}: {{ syncConfirmUnboundGroups(item) }}</span>
+                      <span>{{ t('admin.upstreamAccounts.syncConfirmRate') }}: {{ formatRate(item.upstream_rate_multiplier) }}</span>
+                    </div>
+                  </article>
+                </div>
+                <div v-else class="sync-confirm-empty">{{ t('admin.upstreamAccounts.syncConfirmNoRateGuard') }}</div>
+              </section>
+            </div>
+
+            <div class="sync-confirm-footer">
+              <button type="button" class="ui-button" :disabled="syncing" @click="closeSyncConfirmDialog">
+                {{ t('common.cancel') }}
+              </button>
+              <button
+                type="button"
+                class="ui-button ui-button-primary"
+                :disabled="syncing || !syncConfirmCanSubmit"
+                data-test="sync-confirm-submit"
+                @click="submitSyncConfirm"
+              >
+                <Icon name="sync" size="sm" :stroke-width="2" :class="syncing ? 'animate-spin' : ''" />
+                {{ t('admin.upstreamAccounts.syncConfirmSubmit') }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="showSyncResultDialog" class="sync-result-dialog fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6" data-test="sync-result-dialog" @click.self="closeSyncResultDialog">
+          <div class="sync-result-modal">
+            <div class="sync-confirm-header">
+              <div>
+                <h3>{{ t('admin.upstreamAccounts.syncResultTitle') }}</h3>
+                <p>{{ t('admin.upstreamAccounts.syncResultDescription') }}</p>
+              </div>
+              <button type="button" class="modal-close-button" :aria-label="t('common.close')" @click="closeSyncResultDialog">
+                <Icon name="x" size="md" :stroke-width="2" />
+              </button>
+            </div>
+            <div class="sync-confirm-summary">
+              <div class="sync-result-stat">
+                <span>{{ t('admin.upstreamAccounts.created') }}</span>
+                <strong>{{ syncResultCreatedItems.length }}</strong>
+              </div>
+              <div class="sync-result-stat">
+                <span>{{ t('admin.upstreamAccounts.updated') }}</span>
+                <strong>{{ syncResultUpdatedItems.length }}</strong>
+              </div>
+              <div class="sync-result-stat">
+                <span>{{ t('admin.upstreamAccounts.unbound') }}</span>
+                <strong>{{ syncResultUnboundCount }}</strong>
+              </div>
+            </div>
+            <div class="sync-confirm-body">
+              <section class="sync-confirm-section">
+                <div class="sync-confirm-section-title">
+                  <span>{{ t('admin.upstreamAccounts.syncResultCreatedSection') }}</span>
+                  <strong>{{ syncResultCreatedItems.length }}</strong>
+                </div>
+                <div v-if="syncResultCreatedItems.length" class="sync-confirm-list">
+                  <article v-for="item in syncResultCreatedItems" :key="syncConfirmItemKey(item, 'result-create')" class="sync-confirm-item">
+                    <div class="sync-confirm-item-main">
+                      <span :class="['table-tag', providerToneClass(item.provider_slug, 'tag')]">{{ item.provider_name || item.provider_slug }}</span>
+                      <strong>{{ item.execution?.account_name || item.local_account_name }}</strong>
+                      <code v-if="item.execution?.account_id">#{{ item.execution.account_id }}</code>
+                      <code>{{ item.upstream_key_name }}</code>
+                    </div>
+                  </article>
+                </div>
+                <div v-else class="sync-confirm-empty">{{ t('admin.upstreamAccounts.syncResultNoCreated') }}</div>
+              </section>
+
+              <section class="sync-confirm-section">
+                <div class="sync-confirm-section-title">
+                  <span>{{ t('admin.upstreamAccounts.syncResultUpdatedSection') }}</span>
+                  <strong>{{ syncResultUpdatedItems.length }}</strong>
+                </div>
+                <div v-if="syncResultUpdatedItems.length" class="sync-confirm-list">
+                  <article v-for="item in syncResultUpdatedItems" :key="syncConfirmItemKey(item, 'result-update')" class="sync-confirm-item">
+                    <div class="sync-confirm-item-main">
+                      <span :class="['table-tag', providerToneClass(item.provider_slug, 'tag')]">{{ item.provider_name || item.provider_slug }}</span>
+                      <strong>{{ item.execution?.account_name || item.matched_account_name || item.local_account_name }}</strong>
+                      <code v-if="item.execution?.account_id">#{{ item.execution.account_id }}</code>
+                      <code>{{ item.upstream_key_name }}</code>
+                    </div>
+                    <div v-if="syncResultUnboundGroups(item) !== '-'" class="sync-confirm-detail-list">
+                      <span class="sync-confirm-detail-chip sync-confirm-detail-warning">
+                        {{ t('admin.upstreamAccounts.syncResultUnboundGroups', { groups: syncResultUnboundGroups(item) }) }}
+                        <strong>{{ syncResultUnboundGroups(item) }}</strong>
+                      </span>
+                    </div>
+                  </article>
+                </div>
+                <div v-else class="sync-confirm-empty">{{ t('admin.upstreamAccounts.syncResultNoUpdated') }}</div>
+              </section>
+            </div>
+            <div class="sync-confirm-footer">
+              <button type="button" class="ui-button ui-button-primary" @click="closeSyncResultDialog">
+                {{ t('common.close') }}
               </button>
             </div>
           </div>
@@ -589,6 +830,7 @@
           :show="showCreateAccountModal"
           :proxies="accountProxies"
           :groups="accountEditGroups"
+          :initial-values="createAccountInitialValues"
           @close="closeCreateAccountDialog"
           @created="handleAccountCreated"
         />
@@ -635,6 +877,7 @@ import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type {
   UpstreamAccountRateGuardConfig,
+  UpstreamAccountSyncChangeDetail,
   UpstreamAccountSyncConflictAccount,
   UpstreamAccountSyncBoundGroup,
   UpstreamAccountSyncItem,
@@ -657,6 +900,7 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import { CreateAccountModal, EditAccountModal } from '@/components/account'
+import type { CreateAccountInitialValues } from '@/components/account/CreateAccountModal.vue'
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
 import TempUnschedStatusModal from '@/components/account/TempUnschedStatusModal.vue'
@@ -685,6 +929,7 @@ const testingAccount = ref<Account | null>(null)
 const tempUnschedAccount = ref<Account | null>(null)
 const editingAccount = ref<Account | null>(null)
 const deletingAccount = ref<Account | null>(null)
+const createAccountInitialValues = ref<CreateAccountInitialValues | null>(null)
 const accountTestStatusById = ref<Record<number, AccountTestStatus>>({})
 const matchedAccountsById = ref<Record<number, Account>>({})
 const localGroups = ref<AdminGroup[]>([])
@@ -708,6 +953,15 @@ const showTrendModal = ref(false)
 const trendProviderSlug = ref('')
 const trendProviderName = ref('')
 const showSyncLogsDialog = ref(false)
+const showSyncConfirmDialog = ref(false)
+const showSyncResultDialog = ref(false)
+const lastSyncResult = ref<UpstreamAccountSyncResult | null>(null)
+const syncConfirmOptions = ref({
+  create_missing: true,
+  update_existing: true,
+  apply_rate_guard: true
+})
+const syncConfirmSelectedItems = ref<Record<string, boolean>>({})
 
 type UpstreamAccountSyncLogEntry = UpstreamAccountSyncUnbindDetail & {
   created_at: string
@@ -802,6 +1056,17 @@ const syncLogEntries = computed<UpstreamAccountSyncLogEntry[]>(() => {
 })
 const unhandledSyncLogEntries = computed(() => syncLogEntries.value.filter(entry => !isSyncLogHandled(entry)))
 const canSync = computed(() => summary.value.create_count > 0 || summary.value.update_count > 0 || summary.value.rate_violation_count > 0)
+const syncCreateItems = computed(() => items.value.filter(item => item.action === 'create'))
+const syncUpdateItems = computed(() => items.value.filter(item => item.action === 'update'))
+const syncRateGuardItems = computed(() => items.value.filter(item => item.rate_violation && numberArray(item.unbound_group_ids).length > 0))
+const syncConfirmCanSubmit = computed(() => (
+  (syncConfirmOptions.value.create_missing && syncCreateItems.value.some(syncConfirmItemSelected)) ||
+  (syncConfirmOptions.value.update_existing && syncUpdateItems.value.some(syncConfirmItemSelected))
+))
+const syncResultItems = computed(() => (lastSyncResult.value?.items || []).filter(item => item.execution?.executed))
+const syncResultCreatedItems = computed(() => syncResultItems.value.filter(item => item.execution?.action === 'create'))
+const syncResultUpdatedItems = computed(() => syncResultItems.value.filter(item => item.execution?.action === 'update'))
+const syncResultUnboundCount = computed(() => syncResultUpdatedItems.value.reduce((total, item) => total + numberArray(item.execution?.unbound_group_ids).length, 0))
 const syncProviderLabel = computed(() => {
   if (syncProviders.value.length === 1) return syncProviders.value[0].name || syncProviders.value[0].slug
   if (syncProviders.value.length > 1) return t('admin.upstreamAccounts.multipleProviders', { count: syncProviders.value.length })
@@ -914,26 +1179,43 @@ async function reload() {
   }
 }
 
-async function runSync() {
-  const confirmed = window.confirm(
-    t('admin.upstreamAccounts.syncConfirm', {
-      create: summary.value.create_count,
-      update: summary.value.update_count,
-      unbind: summary.value.unbound_group_count
-    })
-  )
-  if (!confirmed) {
+function openSyncConfirmDialog() {
+  syncConfirmOptions.value = {
+    create_missing: syncCreateItems.value.length > 0,
+    update_existing: syncUpdateItems.value.length > 0,
+    apply_rate_guard: syncRateGuardItems.value.length > 0
+  }
+  const selected: Record<string, boolean> = {}
+  for (const item of [...syncCreateItems.value, ...syncUpdateItems.value]) {
+    selected[syncConfirmSelectionKey(item)] = true
+  }
+  syncConfirmSelectedItems.value = selected
+  showSyncConfirmDialog.value = true
+}
+
+function closeSyncConfirmDialog() {
+  if (syncing.value) return
+  showSyncConfirmDialog.value = false
+}
+
+async function submitSyncConfirm() {
+  const payload = {
+    create_missing: syncConfirmOptions.value.create_missing && syncCreateItems.value.some(syncConfirmItemSelected),
+    update_existing: syncConfirmOptions.value.update_existing && syncUpdateItems.value.some(syncConfirmItemSelected),
+    apply_rate_guard: syncConfirmOptions.value.apply_rate_guard && syncConfirmOptions.value.update_existing && syncRateGuardItems.value.some(syncConfirmItemSelected),
+    selected_items: syncConfirmSelectedPayload()
+  }
+  if (!payload.create_missing && !payload.update_existing) {
     return
   }
-
   syncing.value = true
   try {
-    result.value = await adminAPI.upstreamAccountSync.runSync({
-      create_missing: true,
-      update_existing: true,
-      apply_rate_guard: true
-    })
-    await syncMatchedAccounts(result.value?.items || [])
+    const syncResult = await adminAPI.upstreamAccountSync.runSync(payload)
+    result.value = syncResult
+    lastSyncResult.value = syncResult
+    await syncMatchedAccounts(syncResult.items || [])
+    showSyncConfirmDialog.value = false
+    showSyncResultDialog.value = syncResultItems.value.length > 0
     appStore.showSuccess(t('admin.upstreamAccounts.syncSuccess'))
   } catch (err) {
     appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.syncFailed')))
@@ -1224,22 +1506,46 @@ async function loadAccountEditOptions() {
   accountEditGroups.value = groups
 }
 
-async function openCreateAccountDialog() {
+async function openCreateAccountDialog(row?: UpstreamAccountSyncItem) {
   try {
+    createAccountInitialValues.value = row ? createAccountInitialValuesFromSyncItem(row) : null
     await loadAccountEditOptions()
     showCreateAccountModal.value = true
   } catch (err) {
+    createAccountInitialValues.value = null
     appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.loadAccountFailed')))
   }
 }
 
 function closeCreateAccountDialog() {
   showCreateAccountModal.value = false
+  createAccountInitialValues.value = null
 }
 
 async function handleAccountCreated() {
   showCreateAccountModal.value = false
+  createAccountInitialValues.value = null
   await reload()
+}
+
+function createAccountInitialValuesFromSyncItem(row: UpstreamAccountSyncItem): CreateAccountInitialValues {
+  const groupIDs = numberArray([row.local_group_id])
+  return {
+    name: row.local_account_name || upstreamLocalAccountName(row),
+    platform: 'openai',
+    type: 'apikey',
+    base_url: row.upstream_base_url || row.provider_base_url || undefined,
+    api_key: row.upstream_api_key || row.upstream_key_name,
+    group_ids: groupIDs
+  }
+}
+
+function upstreamLocalAccountName(row: UpstreamAccountSyncItem) {
+  const providerPrefix = row.provider_slug || row.provider_name || ''
+  const keyName = row.upstream_key_name || ''
+  if (!providerPrefix) return keyName
+  if (!keyName) return providerPrefix
+  return `${providerPrefix.replace(/-+$/g, '')}-${keyName.replace(/^-+/g, '')}`
 }
 
 async function openAccountEditDialog(row: UpstreamAccountSyncItem) {
@@ -1284,7 +1590,7 @@ async function confirmDeleteAccount() {
   try {
     await adminAPI.accounts.delete(deletingAccount.value.id)
     closeAccountDeleteDialog()
-    await refreshPreview()
+    await reload()
   } catch (err) {
     appStore.showError(extractApiErrorMessage(err, t('admin.accounts.deleteFailed')))
   }
@@ -1418,6 +1724,95 @@ function conflictAccountTitle(account: UpstreamAccountSyncConflictAccount) {
     .map(group => `${group.name} ${formatRate(group.rate_multiplier)}`)
     .join(', ')
   return groups ? `${account.name}: ${groups}` : account.name
+}
+
+function syncConfirmItemKey(item: UpstreamAccountSyncItem, scope: string) {
+  return `${scope}-${item.provider_slug}-${item.upstream_key_name}-${item.matched_account_id || item.local_account_name}`
+}
+
+function syncConfirmSelectionKey(item: UpstreamAccountSyncItem) {
+  return `${item.provider_slug}\u0000${item.upstream_key_name}`
+}
+
+function syncConfirmItemSelected(item: UpstreamAccountSyncItem) {
+  return Boolean(syncConfirmSelectedItems.value[syncConfirmSelectionKey(item)])
+}
+
+function syncConfirmItemDataTest(item: UpstreamAccountSyncItem, scope: string) {
+  return `sync-confirm-item-${scope}-${slugForDataTest(item.provider_slug)}-${slugForDataTest(item.upstream_key_name)}`
+}
+
+function syncConfirmSelectedPayload() {
+  const selected = [...syncCreateItems.value, ...syncUpdateItems.value]
+    .filter(syncConfirmItemSelected)
+    .map(item => ({
+      provider_slug: item.provider_slug,
+      upstream_key_name: item.upstream_key_name,
+      create_missing: item.action === 'create' && syncConfirmOptions.value.create_missing,
+      update_existing: item.action === 'update' && syncConfirmOptions.value.update_existing,
+      apply_rate_guard: item.action === 'update' && syncConfirmOptions.value.update_existing && syncConfirmOptions.value.apply_rate_guard && item.rate_violation
+    }))
+  return selected
+}
+
+function slugForDataTest(value: string) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+function syncConfirmUnboundGroups(item: UpstreamAccountSyncItem) {
+  const names = stringArray(item.unbound_group_names)
+  if (names.length > 0) return names.join(', ')
+  const ids = numberArray(item.unbound_group_ids)
+  return ids.length > 0 ? ids.map(id => `#${id}`).join(', ') : '-'
+}
+
+function closeSyncResultDialog() {
+  showSyncResultDialog.value = false
+}
+
+function syncResultUnboundGroups(item: UpstreamAccountSyncItem) {
+  const names = stringArray(item.execution?.unbound_group_names)
+  if (names.length > 0) return names.join(', ')
+  const ids = numberArray(item.execution?.unbound_group_ids)
+  return ids.length > 0 ? ids.map(id => `#${id}`).join(', ') : '-'
+}
+
+function syncConfirmUpdateDetails(item: UpstreamAccountSyncItem) {
+  if (item.change_details?.length) {
+    return item.change_details.map(syncConfirmChangeDetailLabel).filter(Boolean)
+  }
+  const details = [t('admin.upstreamAccounts.syncConfirmRefreshCredentials')]
+  if (item.local_group_id && !(item.bound_groups || []).some(group => Number(group.id) === Number(item.local_group_id))) {
+    details.push(t('admin.upstreamAccounts.syncConfirmBindGroup', { group: item.local_group_name || `#${item.local_group_id}` }))
+  }
+  const unboundGroups = syncConfirmUnboundGroups(item)
+  if (item.rate_violation && unboundGroups !== '-') {
+    details.push(t('admin.upstreamAccounts.syncConfirmUnbindGroupsDetail', { groups: unboundGroups }))
+  }
+  return details
+}
+
+function syncConfirmChangeDetailLabel(detail: UpstreamAccountSyncChangeDetail) {
+  const label = detail.label || detail.field || detail.kind
+  if (detail.kind === 'credential') {
+    return `${label}: ${detail.before || '-'} -> ${detail.after || '-'}`
+  }
+  const groupNames = stringArray(detail.group_names)
+  if (detail.kind === 'group_bind') {
+    return groupNames.length > 0
+      ? `${label}: ${groupNames.join(', ')}`
+      : `${label}: ${numberArray(detail.group_ids).map(id => `#${id}`).join(', ') || '-'}`
+  }
+  if (detail.kind === 'group_unbind') {
+    return groupNames.length > 0
+      ? `${label}: ${groupNames.join(', ')}`
+      : `${label}: ${numberArray(detail.group_ids).map(id => `#${id}`).join(', ') || '-'}`
+  }
+  return label
 }
 
 function upstreamAccountSyncTriggerSourceLabel(triggerSource: string | undefined) {
@@ -2553,8 +2948,286 @@ onMounted(reload)
   color: #64748b;
 }
 
+.text-action-primary {
+  color: #047857;
+}
+
+.text-action-primary:hover {
+  color: #065f46;
+}
+
 .sync-logs-dialog {
   overflow-y: auto;
+}
+
+.sync-confirm-dialog {
+  overflow-y: auto;
+}
+
+.sync-result-dialog {
+  overflow-y: auto;
+}
+
+.sync-confirm-modal {
+  display: flex;
+  width: min(980px, 100%);
+  max-height: 86vh;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.28);
+}
+
+.sync-result-modal {
+  display: flex;
+  width: min(920px, 100%);
+  max-height: 86vh;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.28);
+}
+
+.sync-confirm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 18px 20px;
+}
+
+.sync-confirm-header h3 {
+  margin: 0;
+  color: #111827;
+  font-size: 16px;
+  font-weight: 750;
+}
+
+.sync-confirm-header p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.sync-confirm-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  border-bottom: 1px solid #eef2f7;
+  padding: 14px 18px;
+  background: #f8fafc;
+}
+
+.sync-confirm-option {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px 12px;
+}
+
+.sync-confirm-option input {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  accent-color: #059669;
+}
+
+.sync-confirm-option span {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sync-confirm-option strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sync-confirm-option small {
+  display: inline-flex;
+  min-width: 28px;
+  justify-content: center;
+  border-radius: 999px;
+  background: #ecfdf5;
+  padding: 2px 8px;
+  color: #047857;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.sync-confirm-option:has(input:disabled) {
+  opacity: 0.58;
+}
+
+.sync-result-stat {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px 12px;
+}
+
+.sync-result-stat span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.sync-result-stat strong {
+  color: #111827;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.sync-confirm-body {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 14px;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 18px;
+}
+
+.sync-confirm-section {
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.sync-confirm-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #eef2f7;
+  background: #f8fafc;
+  padding: 10px 12px;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.sync-confirm-section-title strong {
+  border-radius: 999px;
+  background: #e2e8f0;
+  padding: 2px 8px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.sync-confirm-list {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.sync-confirm-item {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #eef2f7;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.sync-confirm-item-risk {
+  border-color: #fed7aa;
+  background: #fff7ed;
+}
+
+.sync-confirm-item-main,
+.sync-confirm-item-meta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.sync-confirm-item-main strong {
+  min-width: 0;
+  max-width: 320px;
+  overflow: hidden;
+  color: #111827;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sync-confirm-item-main code {
+  border-radius: 6px;
+  background: #f1f5f9;
+  padding: 2px 6px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.sync-confirm-item-checkbox {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  accent-color: #059669;
+}
+
+.sync-confirm-item-meta {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.sync-confirm-detail-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sync-confirm-detail-chip {
+  border-radius: 999px;
+  background: #eef2ff;
+  padding: 3px 8px;
+  color: #3730a3;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.sync-confirm-detail-warning {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.sync-confirm-danger {
+  color: #dc2626;
+  font-weight: 750;
+}
+
+.sync-confirm-empty {
+  padding: 14px 12px;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.sync-confirm-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  border-top: 1px solid #e5e7eb;
+  padding: 14px 18px;
 }
 
 .sync-logs-modal {
@@ -2840,6 +3513,37 @@ button.sync-log-status-unhandled:hover {
     width: 100%;
     height: min(86vh, 760px);
     max-height: 86vh;
+  }
+
+  .sync-confirm-modal {
+    width: 100%;
+    max-height: 88vh;
+  }
+
+  .sync-result-modal {
+    width: 100%;
+    max-height: 88vh;
+  }
+
+  .sync-confirm-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .sync-confirm-item-main strong {
+    max-width: 100%;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .sync-confirm-footer {
+    flex-direction: column-reverse;
+  }
+
+  .sync-confirm-footer .ui-button {
+    width: 100%;
+    justify-content: center;
   }
 
   .sync-logs-modal-header {

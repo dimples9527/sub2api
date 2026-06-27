@@ -20,6 +20,8 @@ export interface UpstreamAccountSyncItem {
   provider_name: string
   provider_base_url?: string
   upstream_key_name: string
+  upstream_api_key?: string
+  upstream_base_url?: string
   local_account_name: string
   matched_account_id?: number
   matched_account_name?: string
@@ -35,6 +37,27 @@ export interface UpstreamAccountSyncItem {
   conflict_account_ids?: number[]
   conflict_accounts?: UpstreamAccountSyncConflictAccount[]
   bound_groups?: UpstreamAccountSyncBoundGroup[]
+  change_details?: UpstreamAccountSyncChangeDetail[]
+  execution?: UpstreamAccountSyncExecutionResult
+}
+
+export interface UpstreamAccountSyncChangeDetail {
+  kind: 'credential' | 'metadata' | 'group_bind' | 'group_unbind' | string
+  field?: string
+  label?: string
+  before?: string
+  after?: string
+  group_ids?: number[]
+  group_names?: string[]
+}
+
+export interface UpstreamAccountSyncExecutionResult {
+  executed?: boolean
+  action?: 'create' | 'update' | string
+  account_id?: number
+  account_name?: string
+  unbound_group_ids?: number[]
+  unbound_group_names?: string[]
 }
 
 export interface UpstreamAccountSyncConflictAccount {
@@ -91,6 +114,15 @@ export interface UpstreamAccountSyncResult {
 }
 
 export interface UpstreamAccountSyncRequest {
+  create_missing: boolean
+  update_existing: boolean
+  apply_rate_guard: boolean
+  selected_items?: UpstreamAccountSyncSelectedItem[]
+}
+
+export interface UpstreamAccountSyncSelectedItem {
+  provider_slug: string
+  upstream_key_name: string
   create_missing: boolean
   update_existing: boolean
   apply_rate_guard: boolean

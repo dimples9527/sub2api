@@ -8,6 +8,7 @@ import UpstreamAccountsView from './UpstreamAccountsView.vue'
 const { upstreamAccountSyncMock, accountsMock, groupsMock, proxiesMock, appStoreMock } = vi.hoisted(() => ({
   upstreamAccountSyncMock: {
     getPreview: vi.fn(),
+    runSync: vi.fn(),
     getRateGuardConfig: vi.fn(),
     runRateGuardNow: vi.fn(),
     getBalanceConsumption: vi.fn(),
@@ -120,6 +121,23 @@ describe('UpstreamAccountsView', () => {
       enabled: false,
       interval_seconds: 3600,
     })
+    upstreamAccountSyncMock.runSync.mockResolvedValue({
+      default_provider: {},
+      providers: [],
+      summary: {
+        upstream_key_count: 0,
+        matched_account_count: 0,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [],
+      warnings: [],
+      records: [],
+    })
     upstreamAccountSyncMock.runRateGuardNow.mockResolvedValue({
       enabled: false,
       interval_seconds: 3600,
@@ -217,6 +235,208 @@ describe('UpstreamAccountsView', () => {
     expect(wrapper.find('.sync-logs-dialog').exists()).toBe(true)
     expect(wrapper.find('.sync-logs-dialog').text()).toContain('local-a')
     expect(wrapper.text()).toContain('-')
+  })
+
+  it('shows detailed sync confirmation and submits selected sync categories', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValueOnce({
+      default_provider: {},
+      providers: [{ slug: 'upstream-a', name: 'Upstream A' }],
+      summary: {
+        upstream_key_count: 3,
+        matched_account_count: 2,
+        create_count: 1,
+        update_count: 2,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 1,
+        unbound_group_count: 1,
+      },
+      items: [
+        {
+          action: 'create',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-new',
+          local_account_name: 'local-new',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 1,
+          local_group_id: 7,
+          local_group_name: 'VIP',
+          local_rate_multiplier: 2,
+          rate_violation: false,
+        },
+        {
+          action: 'update',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-existing',
+          local_account_name: 'local-existing',
+          matched_account_id: 12,
+          matched_account_name: 'local-existing',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 1,
+          local_group_id: 7,
+          local_group_name: 'VIP',
+          local_rate_multiplier: 2,
+          rate_violation: false,
+          bound_groups: [
+            { id: 9, name: 'Legacy', rate_multiplier: 1, rate_violation: false },
+          ],
+          change_details: [
+            { kind: 'credential', field: 'api_key', label: 'API key', before: 'old-key', after: 'key-existing' },
+            { kind: 'credential', field: 'base_url', label: 'Base URL', before: 'https://old.example.com', after: 'https://upstream.example.com' },
+            { kind: 'metadata', field: 'upstream', label: 'Upstream sync metadata' },
+            { kind: 'group_bind', field: 'group_ids', label: 'Bind local group', group_ids: [7], group_names: ['VIP'] },
+          ],
+        },
+        {
+          action: 'update',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-risk',
+          local_account_name: 'local-risk',
+          matched_account_id: 13,
+          matched_account_name: 'local-risk',
+          upstream_group_name: 'basic',
+          upstream_rate_multiplier: 1,
+          local_group_id: 7,
+          local_group_name: 'VIP',
+          local_rate_multiplier: 2,
+          rate_violation: true,
+          unbound_group_ids: [8],
+          unbound_group_names: ['Trial'],
+          bound_groups: [
+            { id: 7, name: 'VIP', rate_multiplier: 2, rate_violation: false },
+            { id: 8, name: 'Trial', rate_multiplier: 0.5, rate_violation: true },
+          ],
+          change_details: [
+            { kind: 'group_unbind', field: 'group_ids', label: 'Unbind low-rate groups', group_ids: [8], group_names: ['Trial'] },
+          ],
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+    upstreamAccountSyncMock.runSync.mockResolvedValueOnce({
+      default_provider: {},
+      providers: [{ slug: 'upstream-a', name: 'Upstream A' }],
+      summary: {
+        upstream_key_count: 3,
+        matched_account_count: 2,
+        create_count: 0,
+        update_count: 2,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'update',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-existing',
+          local_account_name: 'local-existing',
+          matched_account_id: 12,
+          matched_account_name: 'local-existing',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 1,
+          rate_violation: false,
+          execution: {
+            executed: true,
+            action: 'update',
+            account_id: 12,
+            account_name: 'local-existing',
+          },
+        },
+        {
+          action: 'update',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-risk',
+          local_account_name: 'local-risk',
+          matched_account_id: 13,
+          matched_account_name: 'local-risk',
+          upstream_group_name: 'basic',
+          upstream_rate_multiplier: 1,
+          rate_violation: true,
+          execution: {
+            executed: true,
+            action: 'update',
+            account_id: 13,
+            account_name: 'local-risk',
+            unbound_group_ids: [8],
+            unbound_group_names: ['Trial'],
+          },
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: { template: '<div data-test="accounts-table" />' },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+          GroupSelector: true,
+        },
+      },
+    })
+
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text().includes('admin.upstreamAccounts.syncNow'))?.trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.find('[data-test="sync-confirm-dialog"]')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.text()).toContain('key-new')
+    expect(dialog.text()).toContain('local-new')
+    expect(dialog.text()).toContain('key-existing')
+    expect(dialog.text()).toContain('local-existing')
+    expect(dialog.text()).toContain('key-risk')
+    expect(dialog.text()).toContain('Trial')
+    expect(dialog.text()).toContain('API key: old-key -> key-existing')
+    expect(dialog.text()).toContain('Base URL: https://old.example.com -> https://upstream.example.com')
+    expect(dialog.text()).toContain('Upstream sync metadata')
+    expect(dialog.text()).toContain('Bind local group: VIP')
+    expect(dialog.text()).toContain('VIP')
+    expect(dialog.text()).toContain('Unbind low-rate groups: Trial')
+
+    await wrapper.find('[data-test="sync-confirm-item-create-upstream-a-key-new"]').setValue(false)
+    await wrapper.find('[data-test="sync-confirm-apply-rate-guard"]').setValue(false)
+    await wrapper.find('[data-test="sync-confirm-submit"]').trigger('click')
+    await flushPromises()
+
+    expect(upstreamAccountSyncMock.runSync).toHaveBeenCalledWith({
+      create_missing: false,
+      update_existing: true,
+      apply_rate_guard: false,
+      selected_items: [
+        {
+          provider_slug: 'upstream-a',
+          upstream_key_name: 'key-existing',
+          create_missing: false,
+          update_existing: true,
+          apply_rate_guard: false,
+        },
+        {
+          provider_slug: 'upstream-a',
+          upstream_key_name: 'key-risk',
+          create_missing: false,
+          update_existing: true,
+          apply_rate_guard: false,
+        },
+      ],
+    })
+    expect(wrapper.find('[data-test="sync-result-dialog"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="sync-result-dialog"]').text()).toContain('local-existing')
+    expect(wrapper.find('[data-test="sync-result-dialog"]').text()).toContain('local-risk')
+    expect(wrapper.find('[data-test="sync-result-dialog"]').text()).toContain('Trial')
   })
 
   it('does not render persisted sync records without unbind details', async () => {
@@ -750,6 +970,83 @@ describe('UpstreamAccountsView', () => {
     await flushPromises()
 
     expect(upstreamAccountSyncMock.getPreview).toHaveBeenCalledTimes(2)
+  })
+
+  it('opens create account modal from an unmatched upstream account row with upstream defaults', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValue({
+      default_provider: {},
+      providers: [],
+      summary: {
+        upstream_key_count: 1,
+        matched_account_count: 0,
+        create_count: 1,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'create',
+          provider_slug: 'backup',
+          provider_name: 'Backup',
+          provider_base_url: 'https://backup.example.com',
+          upstream_key_name: 'sk-live-001',
+          upstream_api_key: 'sk-live-001',
+          upstream_base_url: 'https://backup.example.com',
+          local_account_name: 'backup-sk-live-001',
+          upstream_group_name: 'VIP',
+          upstream_rate_multiplier: 1,
+          local_group_id: 7,
+          local_group_name: 'VIP',
+          rate_violation: false,
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+    let modalProps: any
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any) => h('div', [
+                h('div', { class: 'actions-slot' }, slots['cell-actions']?.({ row })),
+              ])))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+          CreateAccountModal: {
+            props: ['show', 'proxies', 'groups', 'initialValues'],
+            setup(props) {
+              modalProps = props
+              return () => props.show ? h('div', { class: 'create-account-modal' }, 'create') : null
+            },
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+    await wrapper.find('[data-test="create-local-account-backup-sk-live-001"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.create-account-modal').exists()).toBe(true)
+    expect(modalProps.initialValues).toEqual({
+      name: 'backup-sk-live-001',
+      platform: 'openai',
+      type: 'apikey',
+      base_url: 'https://backup.example.com',
+      api_key: 'sk-live-001',
+      group_ids: [7],
+    })
   })
 
   it('colors upstream key, local account, and bound groups by matched account platform', async () => {
@@ -1649,39 +1946,68 @@ describe('UpstreamAccountsView', () => {
   })
 
   it('deletes matched account from upstream account actions after confirmation', async () => {
-    upstreamAccountSyncMock.getPreview.mockResolvedValue({
-      default_provider: {},
-      providers: [],
-      summary: {
-        upstream_key_count: 1,
-        matched_account_count: 1,
-        create_count: 0,
-        update_count: 0,
-        skip_count: 0,
-        conflict_count: 0,
-        rate_violation_count: 0,
-        unbound_group_count: 0,
-      },
-      items: [
-        {
-          action: 'noop',
-          provider_slug: 'upstream-a',
-          provider_name: 'Upstream A',
-          upstream_key_name: 'key-a',
-          local_account_name: 'local-a',
-          matched_account_id: 12,
-          matched_account_name: 'local-a',
-          upstream_group_name: 'vip',
-          upstream_rate_multiplier: 2,
-          rate_violation: false,
-          bound_groups: [
-            { id: 7, name: 'VIP', rate_multiplier: 2, rate_violation: false },
-          ],
+    upstreamAccountSyncMock.getPreview
+      .mockResolvedValueOnce({
+        default_provider: {},
+        providers: [],
+        summary: {
+          upstream_key_count: 1,
+          matched_account_count: 1,
+          create_count: 0,
+          update_count: 0,
+          skip_count: 0,
+          conflict_count: 0,
+          rate_violation_count: 0,
+          unbound_group_count: 0,
         },
-      ],
-      warnings: [],
-      records: [],
-    })
+        items: [
+          {
+            action: 'noop',
+            provider_slug: 'upstream-a',
+            provider_name: 'Upstream A',
+            upstream_key_name: 'key-a',
+            local_account_name: 'local-a',
+            matched_account_id: 12,
+            matched_account_name: 'local-a',
+            upstream_group_name: 'vip',
+            upstream_rate_multiplier: 2,
+            rate_violation: false,
+            bound_groups: [
+              { id: 7, name: 'VIP', rate_multiplier: 2, rate_violation: false },
+            ],
+          },
+        ],
+        warnings: [],
+        records: [],
+      })
+      .mockResolvedValueOnce({
+        default_provider: {},
+        providers: [],
+        summary: {
+          upstream_key_count: 1,
+          matched_account_count: 0,
+          create_count: 1,
+          update_count: 0,
+          skip_count: 0,
+          conflict_count: 0,
+          rate_violation_count: 0,
+          unbound_group_count: 0,
+        },
+        items: [
+          {
+            action: 'create',
+            provider_slug: 'upstream-a',
+            provider_name: 'Upstream A',
+            upstream_key_name: 'key-a',
+            local_account_name: 'local-a',
+            upstream_group_name: 'vip',
+            upstream_rate_multiplier: 2,
+            rate_violation: false,
+          },
+        ],
+        warnings: [],
+        records: [],
+      })
 
     const wrapper = mount(UpstreamAccountsView, {
       global: {
@@ -1715,8 +2041,10 @@ describe('UpstreamAccountsView', () => {
     await flushPromises()
     await wrapper.find('.confirm-delete').trigger('click')
     await flushPromises()
+    await flushPromises()
 
     expect(accountsMock.delete).toHaveBeenCalledWith(12)
     expect(upstreamAccountSyncMock.getPreview).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-test="create-local-account-upstream-a-key-a"]').exists()).toBe(true)
   })
 })

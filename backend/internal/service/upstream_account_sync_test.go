@@ -642,6 +642,83 @@ func TestUpstreamAccountSyncPreviewIncludesMatchedAccountBoundGroups(t *testing.
 	}
 }
 
+func TestUpstreamAccountSyncPreviewIncludesChangeDetails(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup", AccountNamePrefix: "up-", BaseURL: "https://backup.example.com", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {{ProviderSlug: "backup", KeyName: "alice-new", GroupName: "VIP", RateMultiplier: 1}},
+		},
+	}
+	svc, _ := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{
+			{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 1, Status: StatusActive},
+			{ID: 8, Name: "Trial", Platform: PlatformOpenAI, RateMultiplier: 0.5, Status: StatusActive},
+		},
+		[]Account{{
+			ID:          10,
+			Name:        "up-alice-new",
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Credentials: map[string]any{"api_key": "alice-old", "base_url": "https://old.example.com/"},
+			GroupIDs:    []int64{8},
+			Groups: []*Group{
+				{ID: 8, Name: "Trial", Platform: PlatformOpenAI, RateMultiplier: 0.5, Status: StatusActive},
+			},
+		}},
+		nil,
+	)
+
+	result, err := svc.Preview(context.Background())
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("item count = %d, want 1", len(result.Items))
+	}
+	item := result.Items[0]
+	if item.Action != UpstreamAccountSyncActionUpdate {
+		t.Fatalf("action = %q, want update", item.Action)
+	}
+	if len(item.ChangeDetails) != 5 {
+		t.Fatalf("change details = %+v, want credential/base_url/metadata/bind/unbind", item.ChangeDetails)
+	}
+	assertChangeDetail := func(kind, field string) UpstreamAccountSyncChangeDetail {
+		t.Helper()
+		for _, detail := range item.ChangeDetails {
+			if detail.Kind == kind && detail.Field == field {
+				return detail
+			}
+		}
+		t.Fatalf("change details = %+v, missing %s/%s", item.ChangeDetails, kind, field)
+		return UpstreamAccountSyncChangeDetail{}
+	}
+	apiKey := assertChangeDetail("credential", "api_key")
+	if apiKey.Before != "alice-old" || apiKey.After != "alice-new" {
+		t.Fatalf("api key detail = %+v, want old/new key names", apiKey)
+	}
+	baseURL := assertChangeDetail("credential", "base_url")
+	if baseURL.Before != "https://old.example.com" || baseURL.After != "https://backup.example.com" {
+		t.Fatalf("base url detail = %+v, want normalized old/new base urls", baseURL)
+	}
+	metadata := assertChangeDetail("metadata", "upstream")
+	if metadata.Label == "" {
+		t.Fatalf("metadata detail = %+v, want label", metadata)
+	}
+	bind := assertChangeDetail("group_bind", "group_ids")
+	if len(bind.GroupIDs) != 1 || bind.GroupIDs[0] != 7 || len(bind.GroupNames) != 1 || bind.GroupNames[0] != "VIP" {
+		t.Fatalf("bind detail = %+v, want VIP group 7", bind)
+	}
+	unbind := assertChangeDetail("group_unbind", "group_ids")
+	if len(unbind.GroupIDs) != 1 || unbind.GroupIDs[0] != 8 || len(unbind.GroupNames) != 1 || unbind.GroupNames[0] != "Trial" {
+		t.Fatalf("unbind detail = %+v, want Trial group 8", unbind)
+	}
+}
+
 func TestUpstreamAccountSyncPreviewHydratesBoundGroupsFromGroupIDs(t *testing.T) {
 	provider := &upstreamAccountSyncProviderSourceStub{
 		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
@@ -767,7 +844,7 @@ func TestUpstreamAccountSyncPreviewShowsMatchedAccountGroupsWhenUpstreamGroupUnm
 	accountManager := &upstreamAccountSyncAccountManagerStub{
 		accounts: []Account{{
 			ID:       10,
-			Name:     "upstreamalicekey",
+			Name:     "Up Stream-Alice Key",
 			Platform: PlatformOpenAI,
 			Type:     AccountTypeAPIKey,
 		}},
@@ -785,8 +862,8 @@ func TestUpstreamAccountSyncPreviewShowsMatchedAccountGroupsWhenUpstreamGroupUnm
 	if item.MatchedAccountID == nil || *item.MatchedAccountID != 10 {
 		t.Fatalf("matched account id = %+v, want 10", item.MatchedAccountID)
 	}
-	if item.MatchedAccountName != "upstreamalicekey" {
-		t.Fatalf("matched account name = %q, want upstreamalicekey", item.MatchedAccountName)
+	if item.MatchedAccountName != "Up Stream-Alice Key" {
+		t.Fatalf("matched account name = %q, want Up Stream-Alice Key", item.MatchedAccountName)
 	}
 	if len(item.BoundGroups) != 1 || item.BoundGroups[0].ID != 7 || item.BoundGroups[0].Name != "VIP" {
 		t.Fatalf("bound groups = %+v, want VIP from matched account", item.BoundGroups)
@@ -796,6 +873,36 @@ func TestUpstreamAccountSyncPreviewShowsMatchedAccountGroupsWhenUpstreamGroupUnm
 	}
 	if result.Summary.MatchedAccountCount != 1 || result.Summary.SkipCount != 1 {
 		t.Fatalf("summary = %+v, want one matched account and one skip", result.Summary)
+	}
+}
+
+func TestUpstreamAccountSyncPreviewAddsSeparatorBetweenPrefixAndKeyName(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup", AccountNamePrefix: "backup", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {{ProviderSlug: "backup", KeyName: "alice", GroupName: "VIP", RateMultiplier: 1}},
+		},
+	}
+	svc, _ := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 1, Status: StatusActive}},
+		nil,
+		nil,
+	)
+
+	result, err := svc.Preview(context.Background())
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("item count = %d, want 1", len(result.Items))
+	}
+	if result.Items[0].LocalAccountName != "backup-alice" {
+		t.Fatalf("local account name = %q, want backup-alice", result.Items[0].LocalAccountName)
 	}
 }
 
@@ -961,6 +1068,82 @@ func TestUpstreamAccountSyncRunCreatesUpdatesAndAppliesRateGuard(t *testing.T) {
 	}
 	if len(detail.RemainingGroupIDs) != 1 || detail.RemainingGroupIDs[0] != 7 {
 		t.Fatalf("unbind detail remaining groups = %+v, want [7]", detail.RemainingGroupIDs)
+	}
+}
+
+func TestUpstreamAccountSyncRunHonorsSelectedItems(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup", AccountNamePrefix: "up-", BaseURL: "https://backup.example.com", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {
+				{ProviderSlug: "backup", KeyName: "new-a", GroupName: "VIP", RateMultiplier: 1},
+				{ProviderSlug: "backup", KeyName: "new-b", GroupName: "VIP", RateMultiplier: 1},
+				{ProviderSlug: "backup", KeyName: "matched", GroupName: "VIP", RateMultiplier: 1},
+			},
+		},
+	}
+	svc, accounts := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{
+			{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 1, Status: StatusActive},
+			{ID: 8, Name: "Trial", Platform: PlatformOpenAI, RateMultiplier: 0.5, Status: StatusActive},
+		},
+		[]Account{{
+			ID:          10,
+			Name:        "up-matched",
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Credentials: map[string]any{"api_key": "matched-old", "base_url": "https://old.example.com"},
+			GroupIDs:    []int64{8},
+			Groups: []*Group{
+				{ID: 8, Name: "Trial", Platform: PlatformOpenAI, RateMultiplier: 0.5, Status: StatusActive},
+			},
+		}},
+		nil,
+	)
+
+	result, err := svc.Sync(context.Background(), UpstreamAccountSyncRequest{
+		CreateMissing:  true,
+		UpdateExisting: true,
+		ApplyRateGuard: true,
+		SelectedItems: []UpstreamAccountSyncSelectedItem{
+			{ProviderSlug: "backup", UpstreamKeyName: "new-b", CreateMissing: true},
+			{ProviderSlug: "backup", UpstreamKeyName: "matched", UpdateExisting: true, ApplyRateGuard: false},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Sync returned error: %v", err)
+	}
+	if result.Summary.CreateCount != 1 || result.Summary.UpdateCount != 1 || result.Summary.UnboundGroupCount != 0 {
+		t.Fatalf("summary = %+v, want one selected create, one selected update, no unbind", result.Summary)
+	}
+	executed := map[string]UpstreamAccountSyncExecutionResult{}
+	for _, item := range result.Items {
+		if item.Execution.Executed {
+			executed[item.UpstreamKeyName] = item.Execution
+		}
+	}
+	if len(executed) != 2 {
+		t.Fatalf("executed items = %+v, want new-b and matched", executed)
+	}
+	if executed["new-b"].Action != UpstreamAccountSyncActionCreate {
+		t.Fatalf("new-b execution = %+v, want create", executed["new-b"])
+	}
+	if executed["matched"].Action != UpstreamAccountSyncActionUpdate || len(executed["matched"].UnboundGroupIDs) != 0 {
+		t.Fatalf("matched execution = %+v, want update without unbound groups", executed["matched"])
+	}
+	if len(accounts.createdInputs) != 1 || accounts.createdInputs[0].Name != "up-new-b" {
+		t.Fatalf("created inputs = %+v, want only up-new-b", accounts.createdInputs)
+	}
+	if len(accounts.updateInputs) != 1 || accounts.updateInputs[0].id != 10 {
+		t.Fatalf("update inputs = %+v, want only matched account", accounts.updateInputs)
+	}
+	if accounts.updateInputs[0].input.GroupIDs == nil || len(*accounts.updateInputs[0].input.GroupIDs) != 2 {
+		t.Fatalf("updated group ids = %+v, want existing low group retained and VIP added when rate guard is disabled", accounts.updateInputs[0].input.GroupIDs)
 	}
 }
 
