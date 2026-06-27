@@ -2197,9 +2197,23 @@ describe('UpstreamAccountsView', () => {
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('local-a')
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('local-b')
+    expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('2.00x')
+    expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('1.00x')
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('admin.upstreamAccounts.batchTestSchedulableEnabled')
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('admin.upstreamAccounts.batchTestSchedulableDisabled')
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('account test timed out')
+    await wrapper.find('[data-test="batch-test-sort-upstream_rate"]').trigger('click')
+    await flushPromises()
+
+    let dialogText = wrapper.find('[data-test="batch-test-result-dialog"]').text()
+    expect(dialogText.indexOf('local-b')).toBeLessThan(dialogText.indexOf('local-a'))
+
+    await wrapper.find('[data-test="batch-test-sort-upstream_rate"]').trigger('click')
+    await flushPromises()
+
+    dialogText = wrapper.find('[data-test="batch-test-result-dialog"]').text()
+    expect(dialogText.indexOf('local-a')).toBeLessThan(dialogText.indexOf('local-b'))
+
     await wrapper.find('[data-test="batch-test-schedulable-toggle-13"]').trigger('click')
     await flushPromises()
 

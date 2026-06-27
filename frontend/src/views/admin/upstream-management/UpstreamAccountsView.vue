@@ -850,7 +850,7 @@
         </div>
 
         <div v-if="showBatchTestResultDialog" class="batch-test-result-dialog fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6" data-test="batch-test-result-dialog" @click.self="closeBatchTestResultDialog">
-          <div class="sync-result-modal">
+          <div class="sync-result-modal batch-test-result-modal">
             <div class="sync-confirm-header">
               <div>
                 <h3>{{ t('admin.upstreamAccounts.batchTestResultTitle') }}</h3>
@@ -888,12 +888,48 @@
                   <table class="records-table batch-test-table">
                     <thead>
                       <tr>
-                        <th>{{ t('admin.upstreamAccounts.batchTestAccount') }}</th>
-                        <th>{{ t('admin.upstreamAccounts.batchTestPlatform') }}</th>
-                        <th>{{ t('admin.upstreamAccounts.batchTestSchedulable') }}</th>
-                        <th>{{ t('admin.upstreamAccounts.batchTestStatus') }}</th>
-                        <th>{{ t('admin.upstreamAccounts.batchTestLatency') }}</th>
-                        <th>{{ t('admin.upstreamAccounts.batchTestFinishedAt') }}</th>
+                        <th>
+                          <button type="button" class="batch-test-sort-button" data-test="batch-test-sort-account" @click="toggleBatchTestSort('account')">
+                            {{ t('admin.upstreamAccounts.batchTestAccount') }}
+                            <span>{{ batchTestSortIndicator('account') }}</span>
+                          </button>
+                        </th>
+                        <th>
+                          <button type="button" class="batch-test-sort-button" data-test="batch-test-sort-platform" @click="toggleBatchTestSort('platform')">
+                            {{ t('admin.upstreamAccounts.batchTestPlatform') }}
+                            <span>{{ batchTestSortIndicator('platform') }}</span>
+                          </button>
+                        </th>
+                        <th>
+                          <button type="button" class="batch-test-sort-button" data-test="batch-test-sort-upstream_rate" @click="toggleBatchTestSort('upstream_rate')">
+                            {{ t('admin.upstreamAccounts.batchTestUpstreamRate') }}
+                            <span>{{ batchTestSortIndicator('upstream_rate') }}</span>
+                          </button>
+                        </th>
+                        <th>
+                          <button type="button" class="batch-test-sort-button" data-test="batch-test-sort-schedulable" @click="toggleBatchTestSort('schedulable')">
+                            {{ t('admin.upstreamAccounts.batchTestSchedulable') }}
+                            <span>{{ batchTestSortIndicator('schedulable') }}</span>
+                          </button>
+                        </th>
+                        <th>
+                          <button type="button" class="batch-test-sort-button" data-test="batch-test-sort-status" @click="toggleBatchTestSort('status')">
+                            {{ t('admin.upstreamAccounts.batchTestStatus') }}
+                            <span>{{ batchTestSortIndicator('status') }}</span>
+                          </button>
+                        </th>
+                        <th>
+                          <button type="button" class="batch-test-sort-button" data-test="batch-test-sort-latency" @click="toggleBatchTestSort('latency')">
+                            {{ t('admin.upstreamAccounts.batchTestLatency') }}
+                            <span>{{ batchTestSortIndicator('latency') }}</span>
+                          </button>
+                        </th>
+                        <th>
+                          <button type="button" class="batch-test-sort-button" data-test="batch-test-sort-finished_at" @click="toggleBatchTestSort('finished_at')">
+                            {{ t('admin.upstreamAccounts.batchTestFinishedAt') }}
+                            <span>{{ batchTestSortIndicator('finished_at') }}</span>
+                          </button>
+                        </th>
                         <th>{{ t('admin.upstreamAccounts.batchTestError') }}</th>
                         <th>{{ t('common.actions') }}</th>
                       </tr>
@@ -908,6 +944,11 @@
                         </td>
                         <td>
                           <span :class="['table-tag', platformTagClass(item.platform)]">{{ item.platform || '-' }}</span>
+                        </td>
+                        <td>
+                          <span :class="['rate-value', rateToneClass(batchTestUpstreamRate(item))]">
+                            {{ formatRate(batchTestUpstreamRate(item)) }}
+                          </span>
                         </td>
                         <td>
                           <div class="batch-test-schedulable-cell">
@@ -1117,6 +1158,8 @@ type BatchTestPlatformOption = {
   accountId: number
   accountCount: number
 }
+type BatchTestSortKey = 'account' | 'platform' | 'upstream_rate' | 'schedulable' | 'status' | 'latency' | 'finished_at'
+type SortOrder = 'asc' | 'desc'
 
 const MAX_BATCH_TEST_ACCOUNTS = 200
 const BATCH_TEST_REFRESH_CONCURRENCY = 5
@@ -1173,6 +1216,8 @@ const batchTestResult = ref<BatchAccountTestJob | null>(null)
 const batchTestModelByPlatform = ref<Record<string, string>>({})
 const batchTestModelOptionsByPlatform = ref<Record<string, ClaudeModel[]>>({})
 const batchTestModelLoadingByPlatform = ref<Record<string, boolean>>({})
+const batchTestSortKey = ref<BatchTestSortKey | null>(null)
+const batchTestSortOrder = ref<SortOrder>('asc')
 const batchTestPollTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 const batchTestPollToken = ref(0)
 const lastSyncResult = ref<UpstreamAccountSyncResult | null>(null)
@@ -1384,7 +1429,31 @@ const batchTestPlatformOptions = computed<BatchTestPlatformOption[]>(() => {
   }
   return Array.from(byPlatform.values()).sort((a, b) => a.platform.localeCompare(b.platform))
 })
-const batchTestResultItems = computed<BatchAccountTestItem[]>(() => batchTestResult.value?.results || [])
+const batchTestRateByAccountId = computed(() => {
+  const byAccountId = new Map<number, number>()
+  for (const item of filteredItems.value) {
+    const accountId = Number(item.matched_account_id)
+    const rate = Number(item.upstream_rate_multiplier)
+    if (Number.isFinite(accountId) && Number.isFinite(rate)) {
+      byAccountId.set(accountId, rate)
+    }
+  }
+  return byAccountId
+})
+const batchTestResultItems = computed<BatchAccountTestItem[]>(() => {
+  const items = batchTestResult.value?.results || []
+  if (!batchTestSortKey.value) return items
+  const key = batchTestSortKey.value
+  const order = batchTestSortOrder.value
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => {
+      const compared = compareBatchTestItems(a.item, b.item, key)
+      if (compared !== 0) return order === 'asc' ? compared : -compared
+      return a.index - b.index
+    })
+    .map(entry => entry.item)
+})
 const batchTestCanCancel = computed(() => {
   const status = batchTestResult.value?.status
   return status === 'queued' || status === 'running'
@@ -1556,6 +1625,58 @@ function formatLatency(value: number | undefined) {
   if (!Number.isFinite(n) || n < 0) return '-'
   if (n >= 1000) return `${(n / 1000).toFixed(1)}s`
   return `${Math.round(n)}ms`
+}
+
+function batchTestUpstreamRate(item: BatchAccountTestItem) {
+  return batchTestRateByAccountId.value.get(item.account_id)
+}
+
+function toggleBatchTestSort(key: BatchTestSortKey) {
+  if (batchTestSortKey.value === key) {
+    batchTestSortOrder.value = batchTestSortOrder.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    batchTestSortKey.value = key
+    batchTestSortOrder.value = 'asc'
+  }
+}
+
+function batchTestSortIndicator(key: BatchTestSortKey) {
+  if (batchTestSortKey.value !== key) return ''
+  return batchTestSortOrder.value === 'asc' ? '↑' : '↓'
+}
+
+function compareBatchTestItems(a: BatchAccountTestItem, b: BatchAccountTestItem, key: BatchTestSortKey) {
+  const av = batchTestSortValue(a, key)
+  const bv = batchTestSortValue(b, key)
+  if (typeof av === 'number' && typeof bv === 'number') {
+    return av - bv
+  }
+  return String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' })
+}
+
+function batchTestSortValue(item: BatchAccountTestItem, key: BatchTestSortKey): string | number {
+  if (key === 'account') return (item.account_name || `#${item.account_id}`).toLowerCase()
+  if (key === 'platform') return (item.platform || '').toLowerCase()
+  if (key === 'upstream_rate') return batchTestUpstreamRate(item) ?? Number.POSITIVE_INFINITY
+  if (key === 'schedulable') return batchTestItemSchedulable(item) ? 1 : 0
+  if (key === 'status') return batchTestStatusSortValue(item.status)
+  if (key === 'latency') return Number.isFinite(Number(item.latency_ms)) ? Number(item.latency_ms) : Number.POSITIVE_INFINITY
+  if (key === 'finished_at') {
+    const time = Date.parse(item.finished_at || '')
+    return Number.isFinite(time) ? time : Number.POSITIVE_INFINITY
+  }
+  return ''
+}
+
+function batchTestStatusSortValue(status: BatchAccountTestStatus | string) {
+  const order: Record<string, number> = {
+    success: 0,
+    failed: 1,
+    timeout: 2,
+    not_found: 3,
+    cancelled: 4
+  }
+  return order[status] ?? 99
 }
 
 async function loadLocalGroups() {
@@ -3569,6 +3690,10 @@ onBeforeUnmount(() => {
   width: min(720px, 100%);
 }
 
+.batch-test-result-modal {
+  width: min(1280px, calc(100vw - 32px));
+}
+
 .sync-confirm-header {
   display: flex;
   align-items: center;
@@ -3891,7 +4016,7 @@ onBeforeUnmount(() => {
 }
 
 .batch-test-table {
-  min-width: 1180px;
+  min-width: 1280px;
 }
 
 .batch-test-error {
@@ -3952,6 +4077,25 @@ onBeforeUnmount(() => {
 
 .batch-test-actions-cell {
   flex-wrap: nowrap;
+}
+
+.batch-test-sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.batch-test-sort-button span {
+  display: inline-block;
+  min-width: 10px;
+  color: #0f766e;
 }
 
 .ui-button-xs {

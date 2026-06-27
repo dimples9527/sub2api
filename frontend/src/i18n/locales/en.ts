@@ -1896,6 +1896,7 @@ export default {
       batchTestResultSection: 'Results',
       batchTestAccount: 'Account',
       batchTestPlatform: 'Platform',
+      batchTestUpstreamRate: 'Upstream Rate',
       batchTestSchedulable: 'Scheduling',
       batchTestSchedulableEnabled: 'Enabled',
       batchTestSchedulableDisabled: 'Disabled',

@@ -1911,6 +1911,7 @@
       batchTestResultSection: '测试明细',
       batchTestAccount: '账号',
       batchTestPlatform: '平台',
+      batchTestUpstreamRate: '上游倍率',
       batchTestSchedulable: '调度',
       batchTestSchedulableEnabled: '已打开',
       batchTestSchedulableDisabled: '已关闭',
