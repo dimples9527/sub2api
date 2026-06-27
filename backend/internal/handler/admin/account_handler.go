@@ -703,6 +703,13 @@ type TestAccountRequest struct {
 	Mode    string `json:"mode"`
 }
 
+type BatchTestAccountsRequest struct {
+	AccountIDs            []int64 `json:"account_ids" binding:"required"`
+	ModelID               string  `json:"model_id"`
+	Concurrency           int     `json:"concurrency"`
+	TimeoutPerAccountSecs int     `json:"timeout_per_account_seconds"`
+}
+
 type SyncFromCRSRequest struct {
 	BaseURL            string   `json:"base_url" binding:"required"`
 	Username           string   `json:"username" binding:"required"`
@@ -741,6 +748,74 @@ func (h *AccountHandler) Test(c *gin.Context) {
 			_ = c.Error(err)
 		}
 	}
+}
+
+// BatchTest handles testing multiple account connections with bounded concurrency.
+// POST /api/v1/admin/accounts/batch-test
+func (h *AccountHandler) BatchTest(c *gin.Context) {
+	if h.accountTestService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Account test service unavailable")
+		return
+	}
+
+	var req BatchTestAccountsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	timeout := time.Duration(req.TimeoutPerAccountSecs) * time.Second
+	if req.TimeoutPerAccountSecs <= 0 {
+		timeout = defaultBatchAccountTestHTTPTimeout()
+	}
+	job, err := h.accountTestService.StartBatchTestAccounts(c.Request.Context(), service.BatchAccountTestInput{
+		AccountIDs:        req.AccountIDs,
+		ModelID:           req.ModelID,
+		Concurrency:       req.Concurrency,
+		TimeoutPerAccount: timeout,
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, job)
+}
+
+// GetBatchTest returns the current status of a batch account test job.
+// GET /api/v1/admin/accounts/batch-test/:job_id
+func (h *AccountHandler) GetBatchTest(c *gin.Context) {
+	if h.accountTestService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Account test service unavailable")
+		return
+	}
+
+	job, err := h.accountTestService.GetBatchTestJob(c.Request.Context(), c.Param("job_id"))
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, job)
+}
+
+// CancelBatchTest cancels a running batch account test job.
+// POST /api/v1/admin/accounts/batch-test/:job_id/cancel
+func (h *AccountHandler) CancelBatchTest(c *gin.Context) {
+	if h.accountTestService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Account test service unavailable")
+		return
+	}
+
+	job, err := h.accountTestService.CancelBatchTestJob(c.Request.Context(), c.Param("job_id"))
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, job)
+}
+
+func defaultBatchAccountTestHTTPTimeout() time.Duration {
+	return 90 * time.Second
 }
 
 // RecoverState handles unified recovery of recoverable account runtime state.

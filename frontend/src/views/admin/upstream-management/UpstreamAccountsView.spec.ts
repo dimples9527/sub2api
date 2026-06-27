@@ -21,6 +21,9 @@ const { upstreamAccountSyncMock, accountsMock, groupsMock, proxiesMock, appStore
     getById: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
+    batchTestAccounts: vi.fn(),
+    getBatchTestJob: vi.fn(),
+    cancelBatchTestJob: vi.fn(),
   },
   groupsMock: {
     getAllIncludingInactive: vi.fn(),
@@ -2046,5 +2049,123 @@ describe('UpstreamAccountsView', () => {
     expect(accountsMock.delete).toHaveBeenCalledWith(12)
     expect(upstreamAccountSyncMock.getPreview).toHaveBeenCalledTimes(2)
     expect(wrapper.find('[data-test="create-local-account-upstream-a-key-a"]').exists()).toBe(true)
+  })
+
+  it('runs batch connection tests for visible matched accounts and shows result dialog', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValue({
+      default_provider: {},
+      providers: [],
+      summary: {
+        upstream_key_count: 2,
+        matched_account_count: 2,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 2,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'noop',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-a',
+          local_account_name: 'local-a',
+          matched_account_id: 12,
+          matched_account_name: 'local-a',
+          upstream_rate_multiplier: 2,
+          rate_violation: false,
+          bound_groups: [],
+        },
+        {
+          action: 'noop',
+          provider_slug: 'upstream-b',
+          provider_name: 'Upstream B',
+          upstream_key_name: 'key-b',
+          local_account_name: 'local-b',
+          matched_account_id: 13,
+          matched_account_name: 'local-b',
+          upstream_rate_multiplier: 1,
+          rate_violation: false,
+          bound_groups: [],
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+    accountsMock.getById.mockImplementation(async (id: number) => ({
+      id,
+      name: id === 12 ? 'local-a' : 'local-b',
+      platform: id === 12 ? 'openai' : 'gemini',
+      type: 'apikey',
+      status: 'active',
+      schedulable: true,
+      last_test_status: id === 12 ? 'success' : 'failed',
+      last_tested_at: '2026-06-27T10:00:00Z',
+    }))
+    accountsMock.batchTestAccounts.mockResolvedValue({
+      job_id: 'job-1',
+      status: 'completed',
+      total: 2,
+      completed: 2,
+      success: 1,
+      failed: 1,
+      results: [
+        {
+          account_id: 12,
+          account_name: 'local-a',
+          platform: 'openai',
+          status: 'success',
+          latency_ms: 42,
+          finished_at: '2026-06-27T10:00:00Z',
+        },
+        {
+          account_id: 13,
+          account_name: 'local-b',
+          platform: 'gemini',
+          status: 'timeout',
+          error_message: 'account test timed out',
+          latency_ms: 90000,
+          finished_at: '2026-06-27T10:01:30Z',
+        },
+      ],
+    })
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: true,
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+          ConfirmDialog: true,
+          AccountStatusIndicator: true,
+          AccountTestModal: true,
+          CreateAccountModal: true,
+          EditAccountModal: true,
+          TempUnschedStatusModal: true,
+          UpstreamProviderTrendModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+    await wrapper.find('[data-test="batch-test-accounts"]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    expect(accountsMock.batchTestAccounts).toHaveBeenCalledWith({
+      account_ids: [12, 13],
+      concurrency: 3,
+      timeout_per_account_seconds: 90,
+    })
+    expect(wrapper.find('[data-test="batch-test-result-dialog"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('local-a')
+    expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('local-b')
+    expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('account test timed out')
+    expect(appStoreMock.showWarning).toHaveBeenCalled()
   })
 })

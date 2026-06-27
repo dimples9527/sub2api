@@ -13,6 +13,7 @@ import type {
   WindowStats,
   ClaudeModel,
   AccountUsageStatsResponse,
+  BatchAccountTestJob,
   TempUnschedulableStatus,
   AdminDataPayload,
   AdminDataImportResult,
@@ -21,6 +22,8 @@ import type {
   CheckMixedChannelRequest,
   CheckMixedChannelResponse
 } from '@/types'
+
+const BATCH_ACCOUNT_TEST_START_TIMEOUT_MS = 30 * 1000
 
 /**
  * List all accounts with pagination
@@ -191,6 +194,28 @@ export async function testAccount(id: number): Promise<{
     message: string
     latency_ms?: number
   }>(`/admin/accounts/${id}/test`)
+  return data
+}
+
+export async function batchTestAccounts(payload: {
+  account_ids: number[]
+  model_id?: string
+  concurrency?: number
+  timeout_per_account_seconds?: number
+}): Promise<BatchAccountTestJob> {
+  const { data } = await apiClient.post<BatchAccountTestJob>('/admin/accounts/batch-test', payload, {
+    timeout: BATCH_ACCOUNT_TEST_START_TIMEOUT_MS
+  })
+  return data
+}
+
+export async function getBatchTestJob(jobId: string): Promise<BatchAccountTestJob> {
+  const { data } = await apiClient.get<BatchAccountTestJob>(`/admin/accounts/batch-test/${jobId}`)
+  return data
+}
+
+export async function cancelBatchTestJob(jobId: string): Promise<BatchAccountTestJob> {
+  const { data } = await apiClient.post<BatchAccountTestJob>(`/admin/accounts/batch-test/${jobId}/cancel`)
   return data
 }
 
@@ -715,6 +740,9 @@ export const accountsAPI = {
   delete: deleteAccount,
   toggleStatus,
   testAccount,
+  batchTestAccounts,
+  getBatchTestJob,
+  cancelBatchTestJob,
   refreshCredentials,
   applyOAuthCredentials,
   getStats,

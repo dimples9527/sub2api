@@ -53,6 +53,16 @@
                 <Icon name="sync" size="sm" :stroke-width="2" :class="syncing ? 'animate-spin' : ''" />
                 {{ t('admin.upstreamAccounts.syncNow') }}
               </button>
+              <button
+                type="button"
+                class="ui-button"
+                :disabled="loading || syncing || batchTesting || batchTestAccountIds.length === 0"
+                data-test="batch-test-accounts"
+                @click="runBatchAccountTest"
+              >
+                <Icon name="play" size="sm" :stroke-width="2" :class="batchTesting ? 'animate-pulse' : ''" />
+                {{ t('admin.upstreamAccounts.testAllConnections') }}
+              </button>
               <button type="button" class="ui-button" @click="openSyncLogsDialog">
                 <Icon name="document" size="sm" :stroke-width="2" />
                 {{ t('admin.upstreamAccounts.openSyncLogs') }}
@@ -779,6 +789,90 @@
           </div>
         </div>
 
+        <div v-if="showBatchTestResultDialog" class="batch-test-result-dialog fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6" data-test="batch-test-result-dialog" @click.self="closeBatchTestResultDialog">
+          <div class="sync-result-modal">
+            <div class="sync-confirm-header">
+              <div>
+                <h3>{{ t('admin.upstreamAccounts.batchTestResultTitle') }}</h3>
+                <p>{{ batchTestProgressDescription }}</p>
+              </div>
+              <button type="button" class="modal-close-button" :aria-label="t('common.close')" @click="closeBatchTestResultDialog">
+                <Icon name="x" size="md" :stroke-width="2" />
+              </button>
+            </div>
+            <div class="sync-confirm-summary">
+              <div class="sync-result-stat">
+                <span>{{ t('admin.upstreamAccounts.batchTestTotal') }}</span>
+                <strong>{{ batchTestResult?.total || 0 }}</strong>
+              </div>
+              <div class="sync-result-stat">
+                <span>{{ t('admin.upstreamAccounts.batchTestCompleted') }}</span>
+                <strong>{{ batchTestResult?.completed || 0 }}</strong>
+              </div>
+              <div class="sync-result-stat">
+                <span>{{ t('admin.upstreamAccounts.batchTestSuccess') }}</span>
+                <strong>{{ batchTestResult?.success || 0 }}</strong>
+              </div>
+              <div class="sync-result-stat">
+                <span>{{ t('admin.upstreamAccounts.batchTestFailed') }}</span>
+                <strong>{{ batchTestResult?.failed || 0 }}</strong>
+              </div>
+            </div>
+            <div class="sync-confirm-body">
+              <section class="sync-confirm-section">
+                <div class="sync-confirm-section-title">
+                  <span>{{ t('admin.upstreamAccounts.batchTestResultSection') }}</span>
+                  <strong>{{ batchTestResultItems.length }}</strong>
+                </div>
+                <div v-if="batchTestResultItems.length" class="records-table-wrap batch-test-table-wrap">
+                  <table class="records-table batch-test-table">
+                    <thead>
+                      <tr>
+                        <th>{{ t('admin.upstreamAccounts.batchTestAccount') }}</th>
+                        <th>{{ t('admin.upstreamAccounts.batchTestPlatform') }}</th>
+                        <th>{{ t('admin.upstreamAccounts.batchTestStatus') }}</th>
+                        <th>{{ t('admin.upstreamAccounts.batchTestLatency') }}</th>
+                        <th>{{ t('admin.upstreamAccounts.batchTestFinishedAt') }}</th>
+                        <th>{{ t('admin.upstreamAccounts.batchTestError') }}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="item in batchTestResultItems" :key="`batch-test-${item.account_id}`">
+                        <td>
+                          <div class="two-line-cell">
+                            <span class="main-text">{{ item.account_name || `#${item.account_id}` }}</span>
+                            <code class="source-id">#{{ item.account_id }}</code>
+                          </div>
+                        </td>
+                        <td>
+                          <span :class="['table-tag', platformTagClass(item.platform)]">{{ item.platform || '-' }}</span>
+                        </td>
+                        <td>
+                          <span :class="['test-status-pill', batchTestStatusClass(item.status)]">
+                            {{ batchTestStatusLabel(item.status) }}
+                          </span>
+                        </td>
+                        <td>{{ formatLatency(item.latency_ms) }}</td>
+                        <td>{{ item.finished_at ? formatDateTime(item.finished_at) : '-' }}</td>
+                        <td class="batch-test-error">{{ item.error_message || '-' }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div v-else class="sync-confirm-empty">{{ t('admin.upstreamAccounts.batchTestNoResults') }}</div>
+              </section>
+            </div>
+            <div class="sync-confirm-footer">
+              <button v-if="batchTestCanCancel" type="button" class="ui-button" @click="cancelBatchAccountTest">
+                {{ t('admin.upstreamAccounts.batchTestCancel') }}
+              </button>
+              <button type="button" class="ui-button ui-button-primary" @click="closeBatchTestResultDialog">
+                {{ t('common.close') }}
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div v-if="accountGroupDialogItem" class="account-group-dialog fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6" @click.self="closeAccountGroupDialog">
           <div class="w-full max-w-lg overflow-hidden rounded-lg bg-white shadow-xl dark:bg-dark-800">
             <div class="border-b border-gray-100 px-5 py-4 dark:border-dark-700">
@@ -872,7 +966,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type {
@@ -886,7 +980,16 @@ import type {
   UpstreamAccountSyncUnbindDetail,
   UpstreamBalanceConsumptionOverview,
 } from '@/api/admin/upstreamAccountSync'
-import type { Account, AdminGroup, GroupPlatform, Proxy as AccountProxy } from '@/types'
+import type {
+  Account,
+  AdminGroup,
+  BatchAccountTestItem,
+  BatchAccountTestJob,
+  BatchAccountTestJobStatus,
+  BatchAccountTestStatus,
+  GroupPlatform,
+  Proxy as AccountProxy
+} from '@/types'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime } from '@/utils/format'
@@ -910,6 +1013,10 @@ const { t } = useI18n()
 const appStore = useAppStore()
 
 type AccountTestStatus = 'testing' | 'success' | 'failed'
+
+const MAX_BATCH_TEST_ACCOUNTS = 200
+const BATCH_TEST_REFRESH_CONCURRENCY = 5
+const BATCH_TEST_POLL_INTERVAL_MS = 1500
 
 const result = ref<UpstreamAccountSyncResult | null>(null)
 const loading = ref(false)
@@ -955,6 +1062,11 @@ const trendProviderName = ref('')
 const showSyncLogsDialog = ref(false)
 const showSyncConfirmDialog = ref(false)
 const showSyncResultDialog = ref(false)
+const showBatchTestResultDialog = ref(false)
+const batchTesting = ref(false)
+const batchTestResult = ref<BatchAccountTestJob | null>(null)
+const batchTestPollTimer = ref<ReturnType<typeof setTimeout> | null>(null)
+const batchTestPollToken = ref(0)
 const lastSyncResult = ref<UpstreamAccountSyncResult | null>(null)
 const syncConfirmOptions = ref({
   create_missing: true,
@@ -1138,6 +1250,30 @@ const filteredItems = computed(() => {
     return haystack.includes(keyword)
   })
 })
+const batchTestAccountIds = computed(() => Array.from(
+  new Set(
+    filteredItems.value
+      .map(item => Number(item.matched_account_id))
+      .filter(id => Number.isFinite(id) && id > 0)
+  )
+))
+const batchTestResultItems = computed<BatchAccountTestItem[]>(() => batchTestResult.value?.results || [])
+const batchTestCanCancel = computed(() => {
+  const status = batchTestResult.value?.status
+  return status === 'queued' || status === 'running'
+})
+const batchTestProgressDescription = computed(() => {
+  const job = batchTestResult.value
+  if (!job) return t('admin.upstreamAccounts.batchTestResultDescription')
+  if (job.status === 'queued') return t('admin.upstreamAccounts.batchTestStatusQueued')
+  if (job.status === 'running') {
+    return t('admin.upstreamAccounts.batchTestProgressDescription', { completed: job.completed, total: job.total })
+  }
+  if (job.status === 'cancelling') return t('admin.upstreamAccounts.batchTestStatusCancelling')
+  if (job.status === 'cancelled') return t('admin.upstreamAccounts.batchTestStatusCancelled')
+  if (job.status === 'failed') return job.error_message || t('admin.upstreamAccounts.batchTestFailedMessage')
+  return t('admin.upstreamAccounts.batchTestResultDescription')
+})
 const accountGroupOptions = computed(() => {
   if (!accountGroupDialogItem.value) return []
   const platform = accountGroupPlatform.value
@@ -1288,6 +1424,13 @@ function formatRate(value: number | undefined) {
   return Number.isFinite(n) ? `${n.toFixed(2)}x` : '-'
 }
 
+function formatLatency(value: number | undefined) {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n < 0) return '-'
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}s`
+  return `${Math.round(n)}ms`
+}
+
 async function loadLocalGroups() {
   try {
     localGroups.value = await adminAPI.groups.getAllIncludingInactive()
@@ -1372,6 +1515,136 @@ function accountTestStatusLabel(status: AccountTestStatus | undefined) {
   if (status === 'failed') return t('admin.upstreamAccounts.testStatusFailed')
   if (status === 'success') return t('admin.upstreamAccounts.testStatusSuccess')
   return '-'
+}
+
+function batchTestStatusLabel(status: BatchAccountTestStatus | string) {
+  if (status === 'success') return t('admin.upstreamAccounts.testStatusSuccess')
+  if (status === 'timeout') return t('admin.upstreamAccounts.batchTestStatusTimeout')
+  if (status === 'not_found') return t('admin.upstreamAccounts.batchTestStatusNotFound')
+  if (status === 'cancelled') return t('admin.upstreamAccounts.batchTestStatusCancelled')
+  return t('admin.upstreamAccounts.testStatusFailed')
+}
+
+function batchTestStatusClass(status: BatchAccountTestStatus | string) {
+  if (status === 'success') return 'test-status-success'
+  if (status === 'timeout' || status === 'cancelled') return 'test-status-testing'
+  return 'test-status-failed'
+}
+
+function isBatchTestJobTerminal(status: BatchAccountTestJobStatus | undefined) {
+  return status === 'completed' || status === 'cancelled' || status === 'failed'
+}
+
+async function runBatchAccountTest() {
+  const accountIds = batchTestAccountIds.value
+  if (!accountIds.length || batchTesting.value) return
+  if (accountIds.length > MAX_BATCH_TEST_ACCOUNTS) {
+    appStore.showWarning(t('admin.upstreamAccounts.batchTestTooManyAccounts', { max: MAX_BATCH_TEST_ACCOUNTS }))
+    return
+  }
+
+  batchTesting.value = true
+  batchTestResult.value = null
+  showBatchTestResultDialog.value = false
+  clearBatchTestPollTimer()
+  const pollToken = batchTestPollToken.value + 1
+  batchTestPollToken.value = pollToken
+  accountTestStatusById.value = {
+    ...accountTestStatusById.value,
+    ...Object.fromEntries(accountIds.map(id => [id, 'testing' as AccountTestStatus]))
+  }
+  try {
+    const job = await adminAPI.accounts.batchTestAccounts({
+      account_ids: accountIds,
+      concurrency: 3,
+      timeout_per_account_seconds: 90
+    })
+    batchTestResult.value = job
+    showBatchTestResultDialog.value = true
+    if (isBatchTestJobTerminal(job.status)) {
+      await finishBatchAccountTestJob(job)
+    } else {
+      scheduleBatchTestPoll(job.job_id, pollToken)
+    }
+  } catch (err) {
+    batchTesting.value = false
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.batchTestFailedMessage')))
+  }
+}
+
+function scheduleBatchTestPoll(jobId: string, pollToken: number) {
+  clearBatchTestPollTimer()
+  batchTestPollTimer.value = setTimeout(async () => {
+    if (pollToken !== batchTestPollToken.value) return
+    try {
+      const job = await adminAPI.accounts.getBatchTestJob(jobId)
+      if (pollToken !== batchTestPollToken.value) return
+      batchTestResult.value = job
+      if (isBatchTestJobTerminal(job.status)) {
+        await finishBatchAccountTestJob(job)
+      } else {
+        scheduleBatchTestPoll(jobId, pollToken)
+      }
+    } catch (err) {
+      batchTesting.value = false
+      appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.batchTestFailedMessage')))
+    }
+  }, BATCH_TEST_POLL_INTERVAL_MS)
+}
+
+async function cancelBatchAccountTest() {
+  const jobId = batchTestResult.value?.job_id
+  if (!jobId || !batchTestCanCancel.value) return
+  try {
+    const job = await adminAPI.accounts.cancelBatchTestJob(jobId)
+    batchTestResult.value = job
+    if (isBatchTestJobTerminal(job.status)) {
+      await finishBatchAccountTestJob(job)
+    }
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.batchTestFailedMessage')))
+  }
+}
+
+async function finishBatchAccountTestJob(job: BatchAccountTestJob) {
+  clearBatchTestPollTimer()
+  batchTesting.value = false
+  batchTestResult.value = job
+  const nextStatuses = { ...accountTestStatusById.value }
+  for (const item of job.results || []) {
+    nextStatuses[item.account_id] = item.status === 'success' ? 'success' : 'failed'
+  }
+  accountTestStatusById.value = nextStatuses
+  await refreshBatchTestAccountsSilently((job.results || []).map(item => item.account_id))
+  if (job.status === 'cancelled') {
+    appStore.showWarning(t('admin.upstreamAccounts.batchTestCancelledMessage'))
+  } else if (job.status === 'failed') {
+    appStore.showError(job.error_message || t('admin.upstreamAccounts.batchTestFailedMessage'))
+  } else if (job.failed > 0) {
+    appStore.showWarning(t('admin.upstreamAccounts.batchTestCompletedWithFailures', { failed: job.failed, total: job.total }))
+  } else {
+    appStore.showSuccess(t('admin.upstreamAccounts.batchTestSuccessMessage', { total: job.total }))
+  }
+}
+
+function clearBatchTestPollTimer() {
+  if (batchTestPollTimer.value) {
+    clearTimeout(batchTestPollTimer.value)
+    batchTestPollTimer.value = null
+  }
+}
+
+async function refreshBatchTestAccountsSilently(accountIds: number[]) {
+  const uniqueIds = Array.from(new Set(accountIds.filter(id => Number.isFinite(id) && id > 0)))
+  let cursor = 0
+  const workers = Array.from({ length: Math.min(BATCH_TEST_REFRESH_CONCURRENCY, uniqueIds.length) }, async () => {
+    while (cursor < uniqueIds.length) {
+      const id = uniqueIds[cursor]
+      cursor += 1
+      await refreshMatchedAccountSilently(id)
+    }
+  })
+  await Promise.all(workers)
 }
 
 function sourceToneClass(row: UpstreamAccountSyncItem) {
@@ -1641,6 +1914,22 @@ async function refreshMatchedAccount(accountId: number) {
   }
 }
 
+async function refreshMatchedAccountSilently(accountId: number) {
+  if (!Number.isFinite(accountId) || accountId <= 0) return
+  try {
+    const account = await adminAPI.accounts.getById(accountId)
+    updateMatchedAccount(account)
+    if (account.last_test_status === 'success' || account.last_test_status === 'failed') {
+      accountTestStatusById.value = {
+        ...accountTestStatusById.value,
+        [accountId]: account.last_test_status
+      }
+    }
+  } catch {
+    // The batch result dialog still shows the authoritative test result.
+  }
+}
+
 function handleShowTempUnsched(account: Account) {
   tempUnschedAccount.value = account
   showTempUnsched.value = true
@@ -1774,6 +2063,10 @@ function closeSyncResultDialog() {
   showSyncResultDialog.value = false
 }
 
+function closeBatchTestResultDialog() {
+  showBatchTestResultDialog.value = false
+}
+
 function syncResultUnboundGroups(item: UpstreamAccountSyncItem) {
   const names = stringArray(item.execution?.unbound_group_names)
   if (names.length > 0) return names.join(', ')
@@ -1884,6 +2177,10 @@ function closeTrendModal() {
 }
 
 onMounted(reload)
+onBeforeUnmount(() => {
+  batchTestPollToken.value += 1
+  clearBatchTestPollTimer()
+})
 </script>
 
 <style scoped>
@@ -3305,6 +3602,20 @@ onMounted(reload)
 .records-table-wrap {
   max-height: 20rem;
   overflow: auto;
+}
+
+.batch-test-table-wrap {
+  max-height: 32rem;
+}
+
+.batch-test-table {
+  min-width: 980px;
+}
+
+.batch-test-error {
+  max-width: 320px;
+  overflow-wrap: anywhere;
+  color: #64748b;
 }
 
 .records-table-wrap.sync-logs-table-wrap {

@@ -15,10 +15,12 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
@@ -51,9 +53,17 @@ type TestEvent struct {
 }
 
 const (
-	defaultGeminiTextTestPrompt  = "hi"
-	defaultGeminiImageTestPrompt = "Generate a cute orange cat astronaut sticker on a clean pastel background."
-	defaultOpenAIImageTestPrompt = "Generate a cute orange cat astronaut sticker on a clean pastel background."
+	defaultGeminiTextTestPrompt        = "hi"
+	defaultGeminiImageTestPrompt       = "Generate a cute orange cat astronaut sticker on a clean pastel background."
+	defaultOpenAIImageTestPrompt       = "Generate a cute orange cat astronaut sticker on a clean pastel background."
+	defaultBatchAccountTestConcurrency = 3
+	defaultBatchAccountTestTimeout     = 90 * time.Second
+	defaultBatchAccountTestPersistWait = 3 * time.Second
+	batchAccountTestJobRetention       = 30 * time.Minute
+	maxBatchAccountTestAccounts        = 200
+	maxBatchAccountTestConcurrency     = 8
+	maxBatchAccountTestTimeout         = 5 * time.Minute
+	maxBatchAccountTestJobs            = 100
 )
 
 // isOpenAIImageModel checks if the model is an OpenAI image generation model (e.g. gpt-image-2).
@@ -70,6 +80,61 @@ type AccountTestService struct {
 	httpUpstream              HTTPUpstream
 	cfg                       *config.Config
 	tlsFPProfileService       *TLSFingerprintProfileService
+	runTestBackgroundFunc     func(ctx context.Context, accountID int64, modelID string) (*ScheduledTestResult, error)
+	batchTestJobsMu           sync.RWMutex
+	batchTestJobs             map[string]*BatchAccountTestJob
+}
+
+type BatchAccountTestInput struct {
+	AccountIDs        []int64
+	ModelID           string
+	Concurrency       int
+	TimeoutPerAccount time.Duration
+}
+
+type normalizedBatchAccountTestInput struct {
+	AccountIDs        []int64
+	ModelID           string
+	Concurrency       int
+	TimeoutPerAccount time.Duration
+}
+
+type BatchAccountTestJob struct {
+	JobID        string                 `json:"job_id"`
+	Status       string                 `json:"status"`
+	Total        int                    `json:"total"`
+	Completed    int                    `json:"completed"`
+	Success      int                    `json:"success"`
+	Failed       int                    `json:"failed"`
+	Results      []BatchAccountTestItem `json:"results"`
+	ErrorMessage string                 `json:"error_message,omitempty"`
+	CreatedAt    string                 `json:"created_at,omitempty"`
+	StartedAt    string                 `json:"started_at,omitempty"`
+	FinishedAt   string                 `json:"finished_at,omitempty"`
+
+	cancel         context.CancelFunc
+	resultSlots    []BatchAccountTestItem
+	createdAtTime  time.Time
+	finishedAtTime time.Time
+}
+
+type BatchAccountTestResult struct {
+	Total      int                    `json:"total"`
+	Success    int                    `json:"success"`
+	Failed     int                    `json:"failed"`
+	Results    []BatchAccountTestItem `json:"results"`
+	SkippedIDs []int64                `json:"skipped_ids,omitempty"`
+}
+
+type BatchAccountTestItem struct {
+	AccountID    int64  `json:"account_id"`
+	AccountName  string `json:"account_name,omitempty"`
+	Platform     string `json:"platform,omitempty"`
+	Status       string `json:"status"`
+	ErrorMessage string `json:"error_message,omitempty"`
+	LatencyMs    int64  `json:"latency_ms"`
+	StartedAt    string `json:"started_at,omitempty"`
+	FinishedAt   string `json:"finished_at,omitempty"`
 }
 
 // NewAccountTestService creates a new AccountTestService
@@ -91,6 +156,417 @@ func NewAccountTestService(
 		cfg:                       cfg,
 		tlsFPProfileService:       tlsFPProfileService,
 	}
+}
+
+func NewAccountTestServiceWithRunner(
+	accountRepo AccountRepository,
+	run func(ctx context.Context, accountID int64, modelID string) (*ScheduledTestResult, error),
+) *AccountTestService {
+	return &AccountTestService{
+		accountRepo:           accountRepo,
+		runTestBackgroundFunc: run,
+	}
+}
+
+func (s *AccountTestService) BatchTestAccounts(ctx context.Context, input BatchAccountTestInput) (*BatchAccountTestResult, error) {
+	normalized, err := s.normalizeBatchAccountTestInput(input)
+	if err != nil {
+		return nil, err
+	}
+	return s.runBatchTestAccounts(ctx, normalized, nil)
+}
+
+func (s *AccountTestService) StartBatchTestAccounts(ctx context.Context, input BatchAccountTestInput) (*BatchAccountTestJob, error) {
+	normalized, err := s.normalizeBatchAccountTestInput(input)
+	if err != nil {
+		return nil, err
+	}
+
+	jobCtx, cancel := context.WithCancel(context.Background())
+	now := time.Now().UTC()
+	job := &BatchAccountTestJob{
+		JobID:         uuid.NewString(),
+		Status:        "queued",
+		Total:         len(normalized.AccountIDs),
+		CreatedAt:     now.Format(time.RFC3339Nano),
+		cancel:        cancel,
+		resultSlots:   make([]BatchAccountTestItem, len(normalized.AccountIDs)),
+		createdAtTime: now,
+	}
+
+	if err := s.storeBatchTestJob(job); err != nil {
+		cancel()
+		return nil, err
+	}
+	go s.runBatchTestJob(jobCtx, job.JobID, normalized)
+
+	return s.GetBatchTestJob(ctx, job.JobID)
+}
+
+func (s *AccountTestService) GetBatchTestJob(_ context.Context, jobID string) (*BatchAccountTestJob, error) {
+	if strings.TrimSpace(jobID) == "" {
+		return nil, infraerrors.BadRequest("BATCH_ACCOUNT_TEST_JOB_ID_REQUIRED", "job_id is required")
+	}
+	s.batchTestJobsMu.RLock()
+	defer s.batchTestJobsMu.RUnlock()
+	job := s.batchTestJobs[jobID]
+	if job == nil {
+		return nil, infraerrors.NotFound("BATCH_ACCOUNT_TEST_JOB_NOT_FOUND", "batch account test job not found")
+	}
+	return snapshotBatchAccountTestJob(job), nil
+}
+
+func (s *AccountTestService) CancelBatchTestJob(ctx context.Context, jobID string) (*BatchAccountTestJob, error) {
+	if strings.TrimSpace(jobID) == "" {
+		return nil, infraerrors.BadRequest("BATCH_ACCOUNT_TEST_JOB_ID_REQUIRED", "job_id is required")
+	}
+
+	s.batchTestJobsMu.Lock()
+	job := s.batchTestJobs[jobID]
+	if job == nil {
+		s.batchTestJobsMu.Unlock()
+		return nil, infraerrors.NotFound("BATCH_ACCOUNT_TEST_JOB_NOT_FOUND", "batch account test job not found")
+	}
+	if job.Status == "queued" || job.Status == "running" {
+		job.Status = "cancelling"
+		if job.cancel != nil {
+			job.cancel()
+		}
+	}
+	s.batchTestJobsMu.Unlock()
+	return s.GetBatchTestJob(ctx, jobID)
+}
+
+func (s *AccountTestService) normalizeBatchAccountTestInput(input BatchAccountTestInput) (normalizedBatchAccountTestInput, error) {
+	ids := normalizeBatchAccountTestIDs(input.AccountIDs)
+	if len(ids) == 0 {
+		return normalizedBatchAccountTestInput{
+			AccountIDs:        []int64{},
+			ModelID:           input.ModelID,
+			Concurrency:       defaultBatchAccountTestConcurrency,
+			TimeoutPerAccount: defaultBatchAccountTestTimeout,
+		}, nil
+	}
+	if len(ids) > maxBatchAccountTestAccounts {
+		return normalizedBatchAccountTestInput{}, infraerrors.BadRequest("BATCH_ACCOUNT_TEST_TOO_MANY_ACCOUNTS", fmt.Sprintf("too many accounts: max %d", maxBatchAccountTestAccounts))
+	}
+	if s == nil || s.accountRepo == nil {
+		return normalizedBatchAccountTestInput{}, fmt.Errorf("account repository is not configured")
+	}
+
+	concurrency := input.Concurrency
+	if concurrency <= 0 {
+		concurrency = defaultBatchAccountTestConcurrency
+	}
+	if concurrency > maxBatchAccountTestConcurrency {
+		concurrency = maxBatchAccountTestConcurrency
+	}
+	if concurrency > len(ids) {
+		concurrency = len(ids)
+	}
+
+	timeout := input.TimeoutPerAccount
+	if timeout <= 0 {
+		timeout = defaultBatchAccountTestTimeout
+	}
+	if timeout > maxBatchAccountTestTimeout {
+		timeout = maxBatchAccountTestTimeout
+	}
+
+	return normalizedBatchAccountTestInput{
+		AccountIDs:        ids,
+		ModelID:           input.ModelID,
+		Concurrency:       concurrency,
+		TimeoutPerAccount: timeout,
+	}, nil
+}
+
+func (s *AccountTestService) runBatchTestAccounts(
+	ctx context.Context,
+	input normalizedBatchAccountTestInput,
+	onItem func(index int, item BatchAccountTestItem),
+) (*BatchAccountTestResult, error) {
+	ids := input.AccountIDs
+	if len(ids) == 0 {
+		return &BatchAccountTestResult{Results: []BatchAccountTestItem{}}, nil
+	}
+
+	accounts, err := s.accountRepo.GetByIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("load accounts: %w", err)
+	}
+	accountByID := make(map[int64]*Account, len(accounts))
+	for _, account := range accounts {
+		if account != nil {
+			accountByID[account.ID] = account
+		}
+	}
+
+	result := &BatchAccountTestResult{
+		Total:   len(ids),
+		Results: make([]BatchAccountTestItem, len(ids)),
+	}
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for worker := 0; worker < input.Concurrency; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for index := range jobs {
+				accountID := ids[index]
+				account := accountByID[accountID]
+				if account == nil {
+					result.Results[index] = BatchAccountTestItem{
+						AccountID:    accountID,
+						Status:       "not_found",
+						ErrorMessage: "account not found",
+					}
+					if onItem != nil {
+						onItem(index, result.Results[index])
+					}
+					continue
+				}
+				result.Results[index] = s.runBatchAccountTestItem(ctx, account, input.ModelID, input.TimeoutPerAccount)
+				if onItem != nil {
+					onItem(index, result.Results[index])
+				}
+			}
+		}()
+	}
+enqueue:
+	for index := range ids {
+		select {
+		case <-ctx.Done():
+			break enqueue
+		case jobs <- index:
+		}
+	}
+	close(jobs)
+	wg.Wait()
+
+	for i := range result.Results {
+		if result.Results[i].Status == "" {
+			errorMessage := "account test cancelled"
+			if ctx.Err() != nil {
+				errorMessage = ctx.Err().Error()
+			}
+			result.Results[i] = BatchAccountTestItem{
+				AccountID:    ids[i],
+				Status:       "cancelled",
+				ErrorMessage: errorMessage,
+			}
+			if onItem != nil {
+				onItem(i, result.Results[i])
+			}
+		}
+		if result.Results[i].Status == "success" {
+			result.Success++
+		} else {
+			result.Failed++
+		}
+	}
+	return result, nil
+}
+
+func (s *AccountTestService) storeBatchTestJob(job *BatchAccountTestJob) error {
+	s.batchTestJobsMu.Lock()
+	defer s.batchTestJobsMu.Unlock()
+	if s.batchTestJobs == nil {
+		s.batchTestJobs = make(map[string]*BatchAccountTestJob)
+	}
+	s.pruneBatchTestJobsLocked(time.Now())
+	if len(s.batchTestJobs) >= maxBatchAccountTestJobs {
+		return infraerrors.TooManyRequests("BATCH_ACCOUNT_TEST_JOBS_FULL", "too many batch account test jobs are running or retained")
+	}
+	s.batchTestJobs[job.JobID] = job
+	return nil
+}
+
+func (s *AccountTestService) runBatchTestJob(ctx context.Context, jobID string, input normalizedBatchAccountTestInput) {
+	s.updateBatchTestJobStarted(jobID)
+	_, err := s.runBatchTestAccounts(ctx, input, func(index int, item BatchAccountTestItem) {
+		s.updateBatchTestJobItem(jobID, index, item)
+	})
+	s.finishBatchTestJob(jobID, ctx, err)
+}
+
+func (s *AccountTestService) updateBatchTestJobStarted(jobID string) {
+	s.batchTestJobsMu.Lock()
+	defer s.batchTestJobsMu.Unlock()
+	job := s.batchTestJobs[jobID]
+	if job == nil {
+		return
+	}
+	if job.Status == "queued" {
+		job.Status = "running"
+	}
+	job.StartedAt = time.Now().UTC().Format(time.RFC3339Nano)
+}
+
+func (s *AccountTestService) updateBatchTestJobItem(jobID string, index int, item BatchAccountTestItem) {
+	s.batchTestJobsMu.Lock()
+	defer s.batchTestJobsMu.Unlock()
+	job := s.batchTestJobs[jobID]
+	if job == nil || index < 0 || index >= len(job.resultSlots) {
+		return
+	}
+	if job.resultSlots[index].Status == "" {
+		job.Completed++
+		if item.Status == "success" {
+			job.Success++
+		} else {
+			job.Failed++
+		}
+	}
+	job.resultSlots[index] = item
+}
+
+func (s *AccountTestService) finishBatchTestJob(jobID string, ctx context.Context, err error) {
+	s.batchTestJobsMu.Lock()
+	defer s.batchTestJobsMu.Unlock()
+	job := s.batchTestJobs[jobID]
+	if job == nil {
+		return
+	}
+	if err != nil {
+		job.Status = "failed"
+		job.ErrorMessage = err.Error()
+	} else if ctx.Err() != nil {
+		job.Status = "cancelled"
+	} else {
+		job.Status = "completed"
+	}
+	now := time.Now().UTC()
+	job.FinishedAt = now.Format(time.RFC3339Nano)
+	job.finishedAtTime = now
+	job.cancel = nil
+}
+
+func (s *AccountTestService) pruneBatchTestJobsLocked(now time.Time) {
+	for jobID, job := range s.batchTestJobs {
+		if !isBatchAccountTestJobTerminal(job.Status) || job.finishedAtTime.IsZero() {
+			continue
+		}
+		if now.Sub(job.finishedAtTime) > batchAccountTestJobRetention {
+			delete(s.batchTestJobs, jobID)
+		}
+	}
+}
+
+func isBatchAccountTestJobTerminal(status string) bool {
+	return status == "completed" || status == "cancelled" || status == "failed"
+}
+
+func snapshotBatchAccountTestJob(job *BatchAccountTestJob) *BatchAccountTestJob {
+	out := &BatchAccountTestJob{
+		JobID:        job.JobID,
+		Status:       job.Status,
+		Total:        job.Total,
+		Completed:    job.Completed,
+		Success:      job.Success,
+		Failed:       job.Failed,
+		ErrorMessage: job.ErrorMessage,
+		CreatedAt:    job.CreatedAt,
+		StartedAt:    job.StartedAt,
+		FinishedAt:   job.FinishedAt,
+	}
+	out.Results = make([]BatchAccountTestItem, 0, len(job.resultSlots))
+	for _, item := range job.resultSlots {
+		if item.Status != "" {
+			out.Results = append(out.Results, item)
+		}
+	}
+	return out
+}
+
+func (s *AccountTestService) runBatchAccountTestItem(parent context.Context, account *Account, modelID string, timeout time.Duration) (item BatchAccountTestItem) {
+	startedAt := time.Now().UTC()
+	item = BatchAccountTestItem{
+		AccountID:   account.ID,
+		AccountName: account.Name,
+		Platform:    account.Platform,
+		StartedAt:   startedAt.Format(time.RFC3339Nano),
+	}
+	defer func() {
+		s.persistBatchAccountTestItemStatus(item)
+	}()
+
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+
+	result, err := s.runTestBackground(ctx, account.ID, modelID)
+	finishedAt := time.Now().UTC()
+	item.FinishedAt = finishedAt.Format(time.RFC3339Nano)
+	item.LatencyMs = finishedAt.Sub(startedAt).Milliseconds()
+	if result != nil {
+		item.LatencyMs = result.LatencyMs
+		if !result.StartedAt.IsZero() {
+			item.StartedAt = result.StartedAt.UTC().Format(time.RFC3339Nano)
+		}
+		if !result.FinishedAt.IsZero() {
+			item.FinishedAt = result.FinishedAt.UTC().Format(time.RFC3339Nano)
+		}
+	}
+
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		item.Status = "timeout"
+		item.ErrorMessage = "account test timed out"
+		return item
+	}
+	if errors.Is(ctx.Err(), context.Canceled) {
+		item.Status = "cancelled"
+		item.ErrorMessage = "account test cancelled"
+		return item
+	}
+	if err != nil {
+		item.Status = "failed"
+		item.ErrorMessage = err.Error()
+		if result != nil && result.ErrorMessage != "" {
+			item.ErrorMessage = result.ErrorMessage
+		}
+		return item
+	}
+	if result != nil && result.Status == "failed" {
+		item.Status = "failed"
+		item.ErrorMessage = result.ErrorMessage
+		return item
+	}
+
+	item.Status = "success"
+	return item
+}
+
+func (s *AccountTestService) persistBatchAccountTestItemStatus(item BatchAccountTestItem) {
+	if item.AccountID <= 0 || (item.Status != "timeout" && item.Status != "cancelled") {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultBatchAccountTestPersistWait)
+	defer cancel()
+	s.persistLastAccountTestStatus(ctx, item.AccountID, errors.New(item.ErrorMessage))
+}
+
+func (s *AccountTestService) runTestBackground(ctx context.Context, accountID int64, modelID string) (*ScheduledTestResult, error) {
+	if s.runTestBackgroundFunc != nil {
+		return s.runTestBackgroundFunc(ctx, accountID, modelID)
+	}
+	return s.RunTestBackground(ctx, accountID, modelID)
+}
+
+func normalizeBatchAccountTestIDs(ids []int64) []int64 {
+	out := make([]int64, 0, len(ids))
+	seen := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
 }
 
 func (s *AccountTestService) validateUpstreamBaseURL(raw string) (string, error) {

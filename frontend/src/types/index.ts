@@ -1721,6 +1721,42 @@ export interface AccountUsageStatsResponse {
   upstream_endpoints: EndpointStat[]
 }
 
+export type BatchAccountTestStatus = 'success' | 'failed' | 'timeout' | 'not_found' | 'cancelled'
+export type BatchAccountTestJobStatus = 'queued' | 'running' | 'cancelling' | 'completed' | 'cancelled' | 'failed'
+
+export interface BatchAccountTestItem {
+  account_id: number
+  account_name?: string
+  platform?: string
+  status: BatchAccountTestStatus
+  error_message?: string
+  latency_ms: number
+  started_at?: string
+  finished_at?: string
+}
+
+export interface BatchAccountTestResult {
+  total: number
+  success: number
+  failed: number
+  results: BatchAccountTestItem[]
+  skipped_ids?: number[]
+}
+
+export interface BatchAccountTestJob {
+  job_id: string
+  status: BatchAccountTestJobStatus
+  total: number
+  completed: number
+  success: number
+  failed: number
+  results: BatchAccountTestItem[]
+  error_message?: string
+  created_at?: string
+  started_at?: string
+  finished_at?: string
+}
+
 // ==================== User Attribute Types ====================
 
 export type UserAttributeType = 'text' | 'textarea' | 'number' | 'email' | 'url' | 'date' | 'select' | 'multi_select'
