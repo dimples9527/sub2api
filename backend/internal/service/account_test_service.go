@@ -86,17 +86,19 @@ type AccountTestService struct {
 }
 
 type BatchAccountTestInput struct {
-	AccountIDs        []int64
-	ModelID           string
-	Concurrency       int
-	TimeoutPerAccount time.Duration
+	AccountIDs         []int64
+	ModelID            string
+	ModelIDsByPlatform map[string]string
+	Concurrency        int
+	TimeoutPerAccount  time.Duration
 }
 
 type normalizedBatchAccountTestInput struct {
-	AccountIDs        []int64
-	ModelID           string
-	Concurrency       int
-	TimeoutPerAccount time.Duration
+	AccountIDs         []int64
+	ModelID            string
+	ModelIDsByPlatform map[string]string
+	Concurrency        int
+	TimeoutPerAccount  time.Duration
 }
 
 type BatchAccountTestJob struct {
@@ -130,6 +132,7 @@ type BatchAccountTestItem struct {
 	AccountID    int64  `json:"account_id"`
 	AccountName  string `json:"account_name,omitempty"`
 	Platform     string `json:"platform,omitempty"`
+	Schedulable  bool   `json:"schedulable"`
 	Status       string `json:"status"`
 	ErrorMessage string `json:"error_message,omitempty"`
 	LatencyMs    int64  `json:"latency_ms"`
@@ -241,10 +244,11 @@ func (s *AccountTestService) normalizeBatchAccountTestInput(input BatchAccountTe
 	ids := normalizeBatchAccountTestIDs(input.AccountIDs)
 	if len(ids) == 0 {
 		return normalizedBatchAccountTestInput{
-			AccountIDs:        []int64{},
-			ModelID:           input.ModelID,
-			Concurrency:       defaultBatchAccountTestConcurrency,
-			TimeoutPerAccount: defaultBatchAccountTestTimeout,
+			AccountIDs:         []int64{},
+			ModelID:            strings.TrimSpace(input.ModelID),
+			ModelIDsByPlatform: normalizeBatchAccountTestPlatformModels(input.ModelIDsByPlatform),
+			Concurrency:        defaultBatchAccountTestConcurrency,
+			TimeoutPerAccount:  defaultBatchAccountTestTimeout,
 		}, nil
 	}
 	if len(ids) > maxBatchAccountTestAccounts {
@@ -274,10 +278,11 @@ func (s *AccountTestService) normalizeBatchAccountTestInput(input BatchAccountTe
 	}
 
 	return normalizedBatchAccountTestInput{
-		AccountIDs:        ids,
-		ModelID:           input.ModelID,
-		Concurrency:       concurrency,
-		TimeoutPerAccount: timeout,
+		AccountIDs:         ids,
+		ModelID:            strings.TrimSpace(input.ModelID),
+		ModelIDsByPlatform: normalizeBatchAccountTestPlatformModels(input.ModelIDsByPlatform),
+		Concurrency:        concurrency,
+		TimeoutPerAccount:  timeout,
 	}, nil
 }
 
@@ -326,7 +331,7 @@ func (s *AccountTestService) runBatchTestAccounts(
 					}
 					continue
 				}
-				result.Results[index] = s.runBatchAccountTestItem(ctx, account, input.ModelID, input.TimeoutPerAccount)
+				result.Results[index] = s.runBatchAccountTestItem(ctx, account, input.modelIDForPlatform(account.Platform), input.TimeoutPerAccount)
 				if onItem != nil {
 					onItem(index, result.Results[index])
 				}
@@ -350,10 +355,16 @@ enqueue:
 			if ctx.Err() != nil {
 				errorMessage = ctx.Err().Error()
 			}
+			account := accountByID[ids[i]]
 			result.Results[i] = BatchAccountTestItem{
 				AccountID:    ids[i],
 				Status:       "cancelled",
 				ErrorMessage: errorMessage,
+			}
+			if account != nil {
+				result.Results[i].AccountName = account.Name
+				result.Results[i].Platform = account.Platform
+				result.Results[i].Schedulable = account.Schedulable
 			}
 			if onItem != nil {
 				onItem(i, result.Results[i])
@@ -485,6 +496,7 @@ func (s *AccountTestService) runBatchAccountTestItem(parent context.Context, acc
 		AccountID:   account.ID,
 		AccountName: account.Name,
 		Platform:    account.Platform,
+		Schedulable: account.Schedulable,
 		StartedAt:   startedAt.Format(time.RFC3339Nano),
 	}
 	defer func() {
@@ -567,6 +579,34 @@ func normalizeBatchAccountTestIDs(ids []int64) []int64 {
 		out = append(out, id)
 	}
 	return out
+}
+
+func normalizeBatchAccountTestPlatformModels(models map[string]string) map[string]string {
+	if len(models) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(models))
+	for platform, modelID := range models {
+		platform = strings.ToLower(strings.TrimSpace(platform))
+		modelID = strings.TrimSpace(modelID)
+		if platform == "" || modelID == "" {
+			continue
+		}
+		out[platform] = modelID
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func (input normalizedBatchAccountTestInput) modelIDForPlatform(platform string) string {
+	if len(input.ModelIDsByPlatform) > 0 {
+		if modelID := strings.TrimSpace(input.ModelIDsByPlatform[strings.ToLower(strings.TrimSpace(platform))]); modelID != "" {
+			return modelID
+		}
+	}
+	return input.ModelID
 }
 
 func (s *AccountTestService) validateUpstreamBaseURL(raw string) (string, error) {

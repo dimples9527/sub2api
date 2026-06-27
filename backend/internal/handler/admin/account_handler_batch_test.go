@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,9 +22,14 @@ func TestAccountHandlerBatchTestStartsJobAndPollsResult(t *testing.T) {
 			2: {ID: 2, Name: "beta", Platform: service.PlatformGemini},
 		},
 	}
+	var seenMu sync.Mutex
+	seenModels := make(map[int64]string)
 	testSvc := service.NewAccountTestServiceWithRunner(
 		repo,
 		func(ctx context.Context, accountID int64, modelID string) (*service.ScheduledTestResult, error) {
+			seenMu.Lock()
+			seenModels[accountID] = modelID
+			seenMu.Unlock()
 			return &service.ScheduledTestResult{
 				Status:     "success",
 				LatencyMs:  7,
@@ -54,6 +60,7 @@ func TestAccountHandlerBatchTestStartsJobAndPollsResult(t *testing.T) {
 	body, _ := json.Marshal(BatchTestAccountsRequest{
 		AccountIDs:            []int64{1, 2},
 		ModelID:               "probe-model",
+		ModelIDsByPlatform:    map[string]string{service.PlatformGemini: "gemini-2.5-flash"},
 		Concurrency:           2,
 		TimeoutPerAccountSecs: 1,
 	})
@@ -102,6 +109,12 @@ func TestAccountHandlerBatchTestStartsJobAndPollsResult(t *testing.T) {
 	}
 	if polled.Results[0].AccountName != "alpha" || polled.Results[1].AccountName != "beta" {
 		t.Fatalf("results = %+v, want account names", polled.Results)
+	}
+	seenMu.Lock()
+	gotGeminiModel := seenModels[2]
+	seenMu.Unlock()
+	if gotGeminiModel != "gemini-2.5-flash" {
+		t.Fatalf("gemini model = %q, want platform-specific model", gotGeminiModel)
 	}
 }
 

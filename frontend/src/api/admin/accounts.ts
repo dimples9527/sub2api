@@ -200,6 +200,7 @@ export async function testAccount(id: number): Promise<{
 export async function batchTestAccounts(payload: {
   account_ids: number[]
   model_id?: string
+  model_ids_by_platform?: Record<string, string>
   concurrency?: number
   timeout_per_account_seconds?: number
 }): Promise<BatchAccountTestJob> {

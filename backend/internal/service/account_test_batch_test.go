@@ -74,6 +74,59 @@ func TestAccountTestServiceBatchTestAccountsLimitsConcurrencyAndKeepsOrder(t *te
 	}
 }
 
+func TestAccountTestServiceBatchTestAccountsUsesPlatformModelsAndIncludesSchedulable(t *testing.T) {
+	repo := &batchAccountTestRepo{
+		accounts: map[int64]*Account{
+			1: {ID: 1, Name: "openai-account", Platform: PlatformOpenAI, Schedulable: true},
+			2: {ID: 2, Name: "gemini-account", Platform: PlatformGemini, Schedulable: false},
+		},
+	}
+	var seenMu sync.Mutex
+	seenModels := make(map[int64]string)
+	svc := &AccountTestService{
+		accountRepo: repo,
+		runTestBackgroundFunc: func(ctx context.Context, accountID int64, modelID string) (*ScheduledTestResult, error) {
+			seenMu.Lock()
+			seenModels[accountID] = modelID
+			seenMu.Unlock()
+			return &ScheduledTestResult{
+				Status:     "success",
+				LatencyMs:  3,
+				StartedAt:  time.Now().UTC(),
+				FinishedAt: time.Now().UTC(),
+			}, nil
+		},
+	}
+
+	result, err := svc.BatchTestAccounts(context.Background(), BatchAccountTestInput{
+		AccountIDs: []int64{1, 2},
+		ModelID:    "fallback-model",
+		ModelIDsByPlatform: map[string]string{
+			PlatformOpenAI: "gpt-4.1-mini",
+			PlatformGemini: "gemini-2.5-flash",
+		},
+		Concurrency:       2,
+		TimeoutPerAccount: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("BatchTestAccounts returned error: %v", err)
+	}
+
+	seenMu.Lock()
+	openAIModel := seenModels[1]
+	geminiModel := seenModels[2]
+	seenMu.Unlock()
+	if openAIModel != "gpt-4.1-mini" || geminiModel != "gemini-2.5-flash" {
+		t.Fatalf("seen models = %#v, want platform-specific models", seenModels)
+	}
+	if !result.Results[0].Schedulable {
+		t.Fatalf("first result schedulable = false, want true")
+	}
+	if result.Results[1].Schedulable {
+		t.Fatalf("second result schedulable = true, want false")
+	}
+}
+
 func TestAccountTestServiceBatchTestAccountsIsolatesFailuresAndTimeouts(t *testing.T) {
 	repo := &batchAccountTestRepo{
 		accounts: map[int64]*Account{

@@ -24,6 +24,8 @@ const { upstreamAccountSyncMock, accountsMock, groupsMock, proxiesMock, appStore
     batchTestAccounts: vi.fn(),
     getBatchTestJob: vi.fn(),
     cancelBatchTestJob: vi.fn(),
+    setSchedulable: vi.fn(),
+    getAvailableModels: vi.fn(),
   },
   groupsMock: {
     getAllIncludingInactive: vi.fn(),
@@ -208,6 +210,8 @@ describe('UpstreamAccountsView', () => {
     })
     accountsMock.update.mockResolvedValue({})
     accountsMock.delete.mockResolvedValue({})
+    accountsMock.setSchedulable.mockResolvedValue({})
+    accountsMock.getAvailableModels.mockResolvedValue([])
   })
 
   it('opens sync log entries in a dialog when legacy remaining group ids are null', async () => {
@@ -2051,7 +2055,7 @@ describe('UpstreamAccountsView', () => {
     expect(wrapper.find('[data-test="create-local-account-upstream-a-key-a"]').exists()).toBe(true)
   })
 
-  it('runs batch connection tests for visible matched accounts and shows result dialog', async () => {
+  it('configures platform models before batch tests and toggles schedulable in the result dialog', async () => {
     upstreamAccountSyncMock.getPreview.mockResolvedValue({
       default_provider: {},
       providers: [],
@@ -2100,10 +2104,18 @@ describe('UpstreamAccountsView', () => {
       platform: id === 12 ? 'openai' : 'gemini',
       type: 'apikey',
       status: 'active',
-      schedulable: true,
+      schedulable: id === 12,
       last_test_status: id === 12 ? 'success' : 'failed',
       last_tested_at: '2026-06-27T10:00:00Z',
     }))
+    accountsMock.setSchedulable.mockResolvedValue({
+      id: 13,
+      name: 'local-b',
+      platform: 'gemini',
+      type: 'apikey',
+      status: 'active',
+      schedulable: true,
+    })
     accountsMock.batchTestAccounts.mockResolvedValue({
       job_id: 'job-1',
       status: 'completed',
@@ -2116,6 +2128,7 @@ describe('UpstreamAccountsView', () => {
           account_id: 12,
           account_name: 'local-a',
           platform: 'openai',
+          schedulable: true,
           status: 'success',
           latency_ms: 42,
           finished_at: '2026-06-27T10:00:00Z',
@@ -2124,6 +2137,7 @@ describe('UpstreamAccountsView', () => {
           account_id: 13,
           account_name: 'local-b',
           platform: 'gemini',
+          schedulable: false,
           status: 'timeout',
           error_message: 'account test timed out',
           latency_ms: 90000,
@@ -2155,17 +2169,33 @@ describe('UpstreamAccountsView', () => {
     await flushPromises()
     await wrapper.find('[data-test="batch-test-accounts"]').trigger('click')
     await flushPromises()
+
+    expect(wrapper.find('[data-test="batch-test-config-dialog"]').exists()).toBe(true)
+    await wrapper.find('[data-test="batch-test-model-openai"]').setValue('gpt-4.1-mini')
+    await wrapper.find('[data-test="batch-test-model-gemini"]').setValue('gemini-2.5-flash')
+    await wrapper.find('[data-test="batch-test-config-submit"]').trigger('click')
+    await flushPromises()
     await flushPromises()
 
     expect(accountsMock.batchTestAccounts).toHaveBeenCalledWith({
       account_ids: [12, 13],
+      model_ids_by_platform: {
+        openai: 'gpt-4.1-mini',
+        gemini: 'gemini-2.5-flash',
+      },
       concurrency: 3,
       timeout_per_account_seconds: 90,
     })
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('local-a')
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('local-b')
+    expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('admin.upstreamAccounts.batchTestSchedulableEnabled')
+    expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('admin.upstreamAccounts.batchTestSchedulableDisabled')
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('account test timed out')
+    await wrapper.find('[data-test="batch-test-schedulable-toggle-13"]').trigger('click')
+    await flushPromises()
+
+    expect(accountsMock.setSchedulable).toHaveBeenCalledWith(13, true)
     expect(appStoreMock.showWarning).toHaveBeenCalled()
   })
 })

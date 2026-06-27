@@ -1728,6 +1728,7 @@ export interface BatchAccountTestItem {
   account_id: number
   account_name?: string
   platform?: string
+  schedulable?: boolean
   status: BatchAccountTestStatus
   error_message?: string
   latency_ms: number

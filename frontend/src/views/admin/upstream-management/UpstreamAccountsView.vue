@@ -58,7 +58,7 @@
                 class="ui-button"
                 :disabled="loading || syncing || batchTesting || batchTestAccountIds.length === 0"
                 data-test="batch-test-accounts"
-                @click="runBatchAccountTest"
+                @click="openBatchTestConfigDialog"
               >
                 <Icon name="play" size="sm" :stroke-width="2" :class="batchTesting ? 'animate-pulse' : ''" />
                 {{ t('admin.upstreamAccounts.testAllConnections') }}
@@ -789,6 +789,66 @@
           </div>
         </div>
 
+        <div v-if="showBatchTestConfigDialog" class="batch-test-config-dialog fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6" data-test="batch-test-config-dialog" @click.self="closeBatchTestConfigDialog">
+          <div class="sync-result-modal batch-test-config-modal">
+            <div class="sync-confirm-header">
+              <div>
+                <h3>{{ t('admin.upstreamAccounts.batchTestConfigTitle') }}</h3>
+                <p>{{ t('admin.upstreamAccounts.batchTestConfigDescription') }}</p>
+              </div>
+              <button type="button" class="modal-close-button" :aria-label="t('common.close')" @click="closeBatchTestConfigDialog">
+                <Icon name="x" size="md" :stroke-width="2" />
+              </button>
+            </div>
+            <div class="sync-confirm-body">
+              <section class="sync-confirm-section">
+                <div class="sync-confirm-section-title">
+                  <span>{{ t('admin.upstreamAccounts.batchTestPlatformModels') }}</span>
+                  <strong>{{ batchTestPlatformOptions.length }}</strong>
+                </div>
+                <div class="batch-test-config-list">
+                  <label v-for="option in batchTestPlatformOptions" :key="option.platform" class="batch-test-config-row">
+                    <div class="batch-test-config-platform">
+                      <span :class="['table-tag', platformTagClass(option.platform)]">{{ option.platform }}</span>
+                      <span>{{ t('admin.upstreamAccounts.batchTestPlatformAccountCount', { count: option.accountCount }) }}</span>
+                    </div>
+                    <div class="batch-test-model-control">
+                      <input
+                        v-model.trim="batchTestModelByPlatform[option.platform]"
+                        type="text"
+                        class="ui-input"
+                        :list="`batch-test-model-options-${option.platform}`"
+                        :placeholder="t('admin.upstreamAccounts.batchTestModelPlaceholder')"
+                        :data-test="`batch-test-model-${option.platform}`"
+                      />
+                      <datalist :id="`batch-test-model-options-${option.platform}`">
+                        <option
+                          v-for="model in batchTestModelOptionsByPlatform[option.platform] || []"
+                          :key="model.id"
+                          :value="model.id"
+                        >
+                          {{ model.display_name || model.id }}
+                        </option>
+                      </datalist>
+                      <span v-if="batchTestModelLoadingByPlatform[option.platform]" class="batch-test-model-hint">
+                        {{ t('admin.upstreamAccounts.batchTestModelLoading') }}
+                      </span>
+                    </div>
+                  </label>
+                </div>
+              </section>
+            </div>
+            <div class="sync-confirm-footer">
+              <button type="button" class="ui-button" :disabled="batchTesting" @click="closeBatchTestConfigDialog">
+                {{ t('common.cancel') }}
+              </button>
+              <button type="button" class="ui-button ui-button-primary" :disabled="batchTesting" data-test="batch-test-config-submit" @click="confirmBatchAccountTest">
+                {{ t('admin.upstreamAccounts.batchTestStart') }}
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div v-if="showBatchTestResultDialog" class="batch-test-result-dialog fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6" data-test="batch-test-result-dialog" @click.self="closeBatchTestResultDialog">
           <div class="sync-result-modal">
             <div class="sync-confirm-header">
@@ -830,6 +890,7 @@
                       <tr>
                         <th>{{ t('admin.upstreamAccounts.batchTestAccount') }}</th>
                         <th>{{ t('admin.upstreamAccounts.batchTestPlatform') }}</th>
+                        <th>{{ t('admin.upstreamAccounts.batchTestSchedulable') }}</th>
                         <th>{{ t('admin.upstreamAccounts.batchTestStatus') }}</th>
                         <th>{{ t('admin.upstreamAccounts.batchTestLatency') }}</th>
                         <th>{{ t('admin.upstreamAccounts.batchTestFinishedAt') }}</th>
@@ -846,6 +907,22 @@
                         </td>
                         <td>
                           <span :class="['table-tag', platformTagClass(item.platform)]">{{ item.platform || '-' }}</span>
+                        </td>
+                        <td>
+                          <div class="batch-test-schedulable-cell">
+                            <span :class="['test-status-pill', batchTestItemSchedulable(item) ? 'test-status-success' : 'test-status-failed']">
+                              {{ batchTestItemSchedulable(item) ? t('admin.upstreamAccounts.batchTestSchedulableEnabled') : t('admin.upstreamAccounts.batchTestSchedulableDisabled') }}
+                            </span>
+                            <button
+                              type="button"
+                              class="ui-button ui-button-xs"
+                              :disabled="togglingSchedulableId === item.account_id"
+                              :data-test="`batch-test-schedulable-toggle-${item.account_id}`"
+                              @click="toggleBatchTestItemSchedulable(item)"
+                            >
+                              {{ batchTestItemSchedulable(item) ? t('admin.upstreamAccounts.batchTestSchedulableDisable') : t('admin.upstreamAccounts.batchTestSchedulableEnable') }}
+                            </button>
+                          </div>
                         </td>
                         <td>
                           <span :class="['test-status-pill', batchTestStatusClass(item.status)]">
@@ -987,6 +1064,7 @@ import type {
   BatchAccountTestJob,
   BatchAccountTestJobStatus,
   BatchAccountTestStatus,
+  ClaudeModel,
   GroupPlatform,
   Proxy as AccountProxy
 } from '@/types'
@@ -1013,6 +1091,11 @@ const { t } = useI18n()
 const appStore = useAppStore()
 
 type AccountTestStatus = 'testing' | 'success' | 'failed'
+type BatchTestPlatformOption = {
+  platform: string
+  accountId: number
+  accountCount: number
+}
 
 const MAX_BATCH_TEST_ACCOUNTS = 200
 const BATCH_TEST_REFRESH_CONCURRENCY = 5
@@ -1062,9 +1145,13 @@ const trendProviderName = ref('')
 const showSyncLogsDialog = ref(false)
 const showSyncConfirmDialog = ref(false)
 const showSyncResultDialog = ref(false)
+const showBatchTestConfigDialog = ref(false)
 const showBatchTestResultDialog = ref(false)
 const batchTesting = ref(false)
 const batchTestResult = ref<BatchAccountTestJob | null>(null)
+const batchTestModelByPlatform = ref<Record<string, string>>({})
+const batchTestModelOptionsByPlatform = ref<Record<string, ClaudeModel[]>>({})
+const batchTestModelLoadingByPlatform = ref<Record<string, boolean>>({})
 const batchTestPollTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 const batchTestPollToken = ref(0)
 const lastSyncResult = ref<UpstreamAccountSyncResult | null>(null)
@@ -1257,6 +1344,25 @@ const batchTestAccountIds = computed(() => Array.from(
       .filter(id => Number.isFinite(id) && id > 0)
   )
 ))
+const batchTestPlatformOptions = computed<BatchTestPlatformOption[]>(() => {
+  const byPlatform = new Map<string, BatchTestPlatformOption>()
+  for (const accountId of batchTestAccountIds.value) {
+    const account = matchedAccountsById.value[accountId]
+    const platform = account?.platform?.trim()
+    if (!platform) continue
+    const existing = byPlatform.get(platform)
+    if (existing) {
+      existing.accountCount += 1
+    } else {
+      byPlatform.set(platform, {
+        platform,
+        accountId,
+        accountCount: 1
+      })
+    }
+  }
+  return Array.from(byPlatform.values()).sort((a, b) => a.platform.localeCompare(b.platform))
+})
 const batchTestResultItems = computed<BatchAccountTestItem[]>(() => batchTestResult.value?.results || [])
 const batchTestCanCancel = computed(() => {
   const status = batchTestResult.value?.status
@@ -1531,8 +1637,80 @@ function batchTestStatusClass(status: BatchAccountTestStatus | string) {
   return 'test-status-failed'
 }
 
+function batchTestItemSchedulable(item: BatchAccountTestItem) {
+  if (typeof item.schedulable === 'boolean') return item.schedulable
+  const account = matchedAccountsById.value[item.account_id]
+  return account?.schedulable === true
+}
+
 function isBatchTestJobTerminal(status: BatchAccountTestJobStatus | undefined) {
   return status === 'completed' || status === 'cancelled' || status === 'failed'
+}
+
+function openBatchTestConfigDialog() {
+  const accountIds = batchTestAccountIds.value
+  if (!accountIds.length || batchTesting.value) return
+  if (accountIds.length > MAX_BATCH_TEST_ACCOUNTS) {
+    appStore.showWarning(t('admin.upstreamAccounts.batchTestTooManyAccounts', { max: MAX_BATCH_TEST_ACCOUNTS }))
+    return
+  }
+
+  const nextModels: Record<string, string> = {}
+  for (const option of batchTestPlatformOptions.value) {
+    nextModels[option.platform] = batchTestModelByPlatform.value[option.platform] || ''
+  }
+  batchTestModelByPlatform.value = nextModels
+  showBatchTestConfigDialog.value = true
+  void loadBatchTestPlatformModels()
+}
+
+function closeBatchTestConfigDialog() {
+  if (batchTesting.value) return
+  showBatchTestConfigDialog.value = false
+}
+
+async function loadBatchTestPlatformModels() {
+  const options = batchTestPlatformOptions.value
+  await Promise.allSettled(options.map(async option => {
+    if (batchTestModelOptionsByPlatform.value[option.platform]?.length) return
+    batchTestModelLoadingByPlatform.value = {
+      ...batchTestModelLoadingByPlatform.value,
+      [option.platform]: true
+    }
+    try {
+      const models = await adminAPI.accounts.getAvailableModels(option.accountId)
+      batchTestModelOptionsByPlatform.value = {
+        ...batchTestModelOptionsByPlatform.value,
+        [option.platform]: models || []
+      }
+    } catch {
+      batchTestModelOptionsByPlatform.value = {
+        ...batchTestModelOptionsByPlatform.value,
+        [option.platform]: []
+      }
+    } finally {
+      batchTestModelLoadingByPlatform.value = {
+        ...batchTestModelLoadingByPlatform.value,
+        [option.platform]: false
+      }
+    }
+  }))
+}
+
+async function confirmBatchAccountTest() {
+  showBatchTestConfigDialog.value = false
+  await runBatchAccountTest()
+}
+
+function selectedBatchTestModelsByPlatform() {
+  const models: Record<string, string> = {}
+  for (const option of batchTestPlatformOptions.value) {
+    const modelID = batchTestModelByPlatform.value[option.platform]?.trim()
+    if (modelID) {
+      models[option.platform] = modelID
+    }
+  }
+  return models
 }
 
 async function runBatchAccountTest() {
@@ -1554,8 +1732,10 @@ async function runBatchAccountTest() {
     ...Object.fromEntries(accountIds.map(id => [id, 'testing' as AccountTestStatus]))
   }
   try {
+    const modelIDsByPlatform = selectedBatchTestModelsByPlatform()
     const job = await adminAPI.accounts.batchTestAccounts({
       account_ids: accountIds,
+      ...(Object.keys(modelIDsByPlatform).length > 0 ? { model_ids_by_platform: modelIDsByPlatform } : {}),
       concurrency: 3,
       timeout_per_account_seconds: 90
     })
@@ -1624,6 +1804,31 @@ async function finishBatchAccountTestJob(job: BatchAccountTestJob) {
     appStore.showWarning(t('admin.upstreamAccounts.batchTestCompletedWithFailures', { failed: job.failed, total: job.total }))
   } else {
     appStore.showSuccess(t('admin.upstreamAccounts.batchTestSuccessMessage', { total: job.total }))
+  }
+}
+
+async function toggleBatchTestItemSchedulable(item: BatchAccountTestItem) {
+  const accountId = item.account_id
+  if (!Number.isFinite(accountId) || accountId <= 0) return
+  const nextSchedulable = !batchTestItemSchedulable(item)
+  togglingSchedulableId.value = accountId
+  try {
+    const updated = await adminAPI.accounts.setSchedulable(accountId, nextSchedulable)
+    if (updated) {
+      updateMatchedAccount(updated)
+    }
+    if (batchTestResult.value) {
+      batchTestResult.value = {
+        ...batchTestResult.value,
+        results: (batchTestResult.value.results || []).map(resultItem => resultItem.account_id === accountId
+          ? { ...resultItem, schedulable: updated?.schedulable ?? nextSchedulable }
+          : resultItem)
+      }
+    }
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.accounts.failedToToggleSchedulable')))
+  } finally {
+    togglingSchedulableId.value = null
   }
 }
 
@@ -3287,6 +3492,10 @@ onBeforeUnmount(() => {
   box-shadow: 0 24px 80px rgba(15, 23, 42, 0.28);
 }
 
+.batch-test-config-modal {
+  width: min(720px, 100%);
+}
+
 .sync-confirm-header {
   display: flex;
   align-items: center;
@@ -3609,13 +3818,68 @@ onBeforeUnmount(() => {
 }
 
 .batch-test-table {
-  min-width: 980px;
+  min-width: 1080px;
 }
 
 .batch-test-error {
   max-width: 320px;
   overflow-wrap: anywhere;
   color: #64748b;
+}
+
+.batch-test-config-list {
+  display: grid;
+  gap: 12px;
+}
+
+.batch-test-config-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.45fr) minmax(260px, 1fr);
+  gap: 12px;
+  align-items: center;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+}
+
+.batch-test-config-platform,
+.batch-test-model-control,
+.batch-test-schedulable-cell {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.batch-test-config-platform {
+  flex-wrap: wrap;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.batch-test-model-control {
+  flex-wrap: wrap;
+}
+
+.batch-test-model-control .ui-input {
+  min-width: 220px;
+  flex: 1 1 220px;
+}
+
+.batch-test-model-hint {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.batch-test-schedulable-cell {
+  flex-wrap: wrap;
+}
+
+.ui-button-xs {
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 12px;
 }
 
 .records-table-wrap.sync-logs-table-wrap {
