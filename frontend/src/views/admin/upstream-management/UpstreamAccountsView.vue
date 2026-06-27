@@ -895,6 +895,7 @@
                         <th>{{ t('admin.upstreamAccounts.batchTestLatency') }}</th>
                         <th>{{ t('admin.upstreamAccounts.batchTestFinishedAt') }}</th>
                         <th>{{ t('admin.upstreamAccounts.batchTestError') }}</th>
+                        <th>{{ t('common.actions') }}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -932,6 +933,26 @@
                         <td>{{ formatLatency(item.latency_ms) }}</td>
                         <td>{{ item.finished_at ? formatDateTime(item.finished_at) : '-' }}</td>
                         <td class="batch-test-error">{{ item.error_message || '-' }}</td>
+                        <td>
+                          <div class="batch-test-actions-cell">
+                            <button
+                              type="button"
+                              class="ui-button ui-button-xs"
+                              :data-test="`batch-test-edit-account-${item.account_id}`"
+                              @click="openBatchTestAccountEditDialog(item)"
+                            >
+                              {{ t('common.edit') }}
+                            </button>
+                            <button
+                              type="button"
+                              class="ui-button ui-button-xs ui-button-danger"
+                              :data-test="`batch-test-delete-account-${item.account_id}`"
+                              @click="openBatchTestAccountDeleteDialog(item)"
+                            >
+                              {{ t('common.delete') }}
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     </tbody>
                   </table>
@@ -1832,6 +1853,40 @@ async function toggleBatchTestItemSchedulable(item: BatchAccountTestItem) {
   }
 }
 
+async function accountFromBatchTestItem(item: BatchAccountTestItem): Promise<Account | null> {
+  const accountId = item.account_id
+  if (!Number.isFinite(accountId) || accountId <= 0) return null
+  const cached = matchedAccountsById.value[accountId]
+  if (cached) return cached
+  try {
+    const account = await adminAPI.accounts.getById(accountId)
+    updateMatchedAccount(account)
+    return account
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.loadAccountFailed')))
+    return null
+  }
+}
+
+async function openBatchTestAccountEditDialog(item: BatchAccountTestItem) {
+  const account = await accountFromBatchTestItem(item)
+  if (!account) return
+  try {
+    await loadAccountEditOptions()
+    editingAccount.value = account
+    showEditAccountModal.value = true
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.loadAccountFailed')))
+  }
+}
+
+async function openBatchTestAccountDeleteDialog(item: BatchAccountTestItem) {
+  const account = await accountFromBatchTestItem(item)
+  if (!account) return
+  deletingAccount.value = account
+  showDeleteAccountDialog.value = true
+}
+
 function clearBatchTestPollTimer() {
   if (batchTestPollTimer.value) {
     clearTimeout(batchTestPollTimer.value)
@@ -2065,12 +2120,30 @@ function closeAccountDeleteDialog() {
 
 async function confirmDeleteAccount() {
   if (!deletingAccount.value) return
+  const deletedAccountId = deletingAccount.value.id
   try {
-    await adminAPI.accounts.delete(deletingAccount.value.id)
+    await adminAPI.accounts.delete(deletedAccountId)
     closeAccountDeleteDialog()
+    removeBatchTestResultItem(deletedAccountId)
     await reload()
   } catch (err) {
     appStore.showError(extractApiErrorMessage(err, t('admin.accounts.deleteFailed')))
+  }
+}
+
+function removeBatchTestResultItem(accountId: number) {
+  if (!batchTestResult.value) return
+  const currentResults = batchTestResult.value.results || []
+  const removedItem = currentResults.find(item => item.account_id === accountId)
+  if (!removedItem) return
+  const results = currentResults.filter(item => item.account_id !== accountId)
+  batchTestResult.value = {
+    ...batchTestResult.value,
+    results,
+    total: Math.max(0, batchTestResult.value.total - 1),
+    completed: Math.max(0, batchTestResult.value.completed - 1),
+    success: Math.max(0, batchTestResult.value.success - (removedItem.status === 'success' ? 1 : 0)),
+    failed: Math.max(0, batchTestResult.value.failed - (removedItem.status === 'success' ? 0 : 1))
   }
 }
 
@@ -3818,7 +3891,7 @@ onBeforeUnmount(() => {
 }
 
 .batch-test-table {
-  min-width: 1080px;
+  min-width: 1180px;
 }
 
 .batch-test-error {
@@ -3845,7 +3918,8 @@ onBeforeUnmount(() => {
 
 .batch-test-config-platform,
 .batch-test-model-control,
-.batch-test-schedulable-cell {
+.batch-test-schedulable-cell,
+.batch-test-actions-cell {
   display: flex;
   min-width: 0;
   align-items: center;
@@ -3876,10 +3950,24 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 
+.batch-test-actions-cell {
+  flex-wrap: nowrap;
+}
+
 .ui-button-xs {
   min-height: 28px;
   padding: 4px 8px;
   font-size: 12px;
+}
+
+.ui-button-danger {
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
+.ui-button-danger:hover:not(:disabled) {
+  border-color: #fca5a5;
+  background: #fef2f2;
 }
 
 .records-table-wrap.sync-logs-table-wrap {

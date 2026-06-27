@@ -2159,7 +2159,15 @@ describe('UpstreamAccountsView', () => {
           AccountStatusIndicator: true,
           AccountTestModal: true,
           CreateAccountModal: true,
-          EditAccountModal: true,
+          EditAccountModal: {
+            props: ['show', 'account'],
+            emits: ['close', 'updated'],
+            setup(props) {
+              return () => props.show
+                ? h('div', { class: 'edit-account-modal' }, props.account?.name || '')
+                : null
+            },
+          },
           TempUnschedStatusModal: true,
           UpstreamProviderTrendModal: true,
         },
@@ -2196,6 +2204,17 @@ describe('UpstreamAccountsView', () => {
     await flushPromises()
 
     expect(accountsMock.setSchedulable).toHaveBeenCalledWith(13, true)
+    await wrapper.find('[data-test="batch-test-edit-account-12"]').trigger('click')
+    await flushPromises()
+
+    expect(proxiesMock.getAll).toHaveBeenCalled()
+    expect(groupsMock.getAll).toHaveBeenCalled()
+    expect(wrapper.find('.edit-account-modal').exists()).toBe(true)
+
+    await wrapper.find('[data-test="batch-test-delete-account-13"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.findComponent({ name: 'ConfirmDialog' }).exists()).toBe(true)
     expect(appStoreMock.showWarning).toHaveBeenCalled()
   })
 })
