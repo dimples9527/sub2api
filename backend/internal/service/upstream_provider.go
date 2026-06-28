@@ -50,6 +50,7 @@ type UpstreamProviderKey struct {
 	ProviderName   string  `json:"provider_name"`
 	ProviderType   string  `json:"provider_type"`
 	KeyName        string  `json:"key_name"`
+	APIKey         string  `json:"api_key,omitempty"`
 	GroupName      string  `json:"group_name"`
 	RateMultiplier float64 `json:"rate_multiplier"`
 	RawStatus      string  `json:"raw_status,omitempty"`

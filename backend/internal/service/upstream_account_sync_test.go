@@ -498,7 +498,7 @@ func TestUpstreamAccountSyncSyncBypassesPreviewProviderKeysCache(t *testing.T) {
 	if _, err := svc.Preview(context.Background()); err != nil {
 		t.Fatalf("Preview returned error: %v", err)
 	}
-	provider.keysBySlug["backup"] = []UpstreamProviderKey{{ProviderSlug: "backup", KeyName: "new", GroupName: "VIP", RateMultiplier: 1}}
+	provider.keysBySlug["backup"] = []UpstreamProviderKey{{ProviderSlug: "backup", KeyName: "new", APIKey: "sk-new", GroupName: "VIP", RateMultiplier: 1}}
 
 	if _, err := svc.Sync(context.Background(), UpstreamAccountSyncRequest{CreateMissing: true, UpdateExisting: true}); err != nil {
 		t.Fatalf("Sync returned error: %v", err)
@@ -684,8 +684,8 @@ func TestUpstreamAccountSyncPreviewIncludesChangeDetails(t *testing.T) {
 	if item.Action != UpstreamAccountSyncActionUpdate {
 		t.Fatalf("action = %q, want update", item.Action)
 	}
-	if len(item.ChangeDetails) != 5 {
-		t.Fatalf("change details = %+v, want credential/base_url/metadata/bind/unbind", item.ChangeDetails)
+	if len(item.ChangeDetails) != 4 {
+		t.Fatalf("change details = %+v, want base_url/metadata/bind/unbind", item.ChangeDetails)
 	}
 	assertChangeDetail := func(kind, field string) UpstreamAccountSyncChangeDetail {
 		t.Helper()
@@ -696,10 +696,6 @@ func TestUpstreamAccountSyncPreviewIncludesChangeDetails(t *testing.T) {
 		}
 		t.Fatalf("change details = %+v, missing %s/%s", item.ChangeDetails, kind, field)
 		return UpstreamAccountSyncChangeDetail{}
-	}
-	apiKey := assertChangeDetail("credential", "api_key")
-	if apiKey.Before != "alice-old" || apiKey.After != "alice-new" {
-		t.Fatalf("api key detail = %+v, want old/new key names", apiKey)
 	}
 	baseURL := assertChangeDetail("credential", "base_url")
 	if baseURL.Before != "https://old.example.com" || baseURL.After != "https://backup.example.com" {
@@ -1006,21 +1002,11 @@ func TestUpstreamAccountSyncRunCreatesUpdatesAndAppliesRateGuard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Sync returned error: %v", err)
 	}
-	if result.Summary.CreateCount != 1 || result.Summary.UpdateCount != 1 || result.Summary.RateViolationCount != 1 || result.Summary.UnboundGroupCount != 1 {
-		t.Fatalf("summary = %+v, want create/update/rate guard counts", result.Summary)
+	if result.Summary.CreateCount != 0 || result.Summary.UpdateCount != 1 || result.Summary.RateViolationCount != 1 || result.Summary.UnboundGroupCount != 1 {
+		t.Fatalf("summary = %+v, want update/rate guard counts and no created account without real api key", result.Summary)
 	}
-	if len(accounts.createdInputs) != 1 {
-		t.Fatalf("created count = %d, want 1", len(accounts.createdInputs))
-	}
-	created := accounts.createdInputs[0]
-	if created.Name != "up-new" || created.Platform != PlatformOpenAI || created.Type != AccountTypeAPIKey {
-		t.Fatalf("created input = %+v, want OpenAI API key named up-new", created)
-	}
-	if created.Credentials["api_key"] != "new" || created.Credentials["base_url"] != "https://backup.example.com" {
-		t.Fatalf("created credentials = %+v, want upstream key and base_url", created.Credentials)
-	}
-	if len(created.GroupIDs) != 1 || created.GroupIDs[0] != 7 {
-		t.Fatalf("created group ids = %+v, want [7]", created.GroupIDs)
+	if len(accounts.createdInputs) != 0 {
+		t.Fatalf("created count = %d, want 0 because upstream key name is not a usable api key", len(accounts.createdInputs))
 	}
 	if len(accounts.updateInputs) != 1 {
 		t.Fatalf("update count = %d, want 1", len(accounts.updateInputs))
@@ -1029,8 +1015,8 @@ func TestUpstreamAccountSyncRunCreatesUpdatesAndAppliesRateGuard(t *testing.T) {
 	if update.id != 10 {
 		t.Fatalf("updated account id = %d, want 10", update.id)
 	}
-	if update.input.Credentials["api_key"] != "old" || update.input.Credentials["base_url"] != "https://backup.example.com" {
-		t.Fatalf("updated credentials = %+v, want refreshed upstream key and base_url", update.input.Credentials)
+	if update.input.Credentials["api_key"] != "old-key" || update.input.Credentials["base_url"] != "https://backup.example.com" {
+		t.Fatalf("updated credentials = %+v, want existing api_key preserved and base_url refreshed", update.input.Credentials)
 	}
 	if _, ok := update.input.Credentials["model_mapping"]; !ok {
 		t.Fatalf("updated credentials lost model_mapping: %+v", update.input.Credentials)
@@ -1044,7 +1030,7 @@ func TestUpstreamAccountSyncRunCreatesUpdatesAndAppliesRateGuard(t *testing.T) {
 	if err := json.Unmarshal([]byte(rawRecords), &records); err != nil {
 		t.Fatalf("decode records: %v raw=%s", err, rawRecords)
 	}
-	if len(records) != 1 || records[0].CreatedCount != 1 || records[0].UpdatedCount != 1 || records[0].UnboundGroupCount != 1 {
+	if len(records) != 1 || records[0].CreatedCount != 0 || records[0].UpdatedCount != 1 || records[0].UnboundGroupCount != 1 {
 		t.Fatalf("records = %+v, want one sync record with counts", records)
 	}
 	if records[0].TriggerSource != UpstreamAccountSyncTriggerManualSync {
@@ -1080,8 +1066,8 @@ func TestUpstreamAccountSyncRunHonorsSelectedItems(t *testing.T) {
 		},
 		keysBySlug: map[string][]UpstreamProviderKey{
 			"backup": {
-				{ProviderSlug: "backup", KeyName: "new-a", GroupName: "VIP", RateMultiplier: 1},
-				{ProviderSlug: "backup", KeyName: "new-b", GroupName: "VIP", RateMultiplier: 1},
+				{ProviderSlug: "backup", KeyName: "new-a", APIKey: "sk-new-a", GroupName: "VIP", RateMultiplier: 1},
+				{ProviderSlug: "backup", KeyName: "new-b", APIKey: "sk-new-b", GroupName: "VIP", RateMultiplier: 1},
 				{ProviderSlug: "backup", KeyName: "matched", GroupName: "VIP", RateMultiplier: 1},
 			},
 		},
@@ -1162,10 +1148,10 @@ func TestUpstreamAccountSyncRunDoesNotPersistRecordsWithoutUnbindDetails(t *test
 		},
 		keysBySlug: map[string][]UpstreamProviderKey{
 			"backup": {
-				{ProviderSlug: "backup", KeyName: "alice", GroupName: "VIP", RateMultiplier: 2},
+				{ProviderSlug: "backup", KeyName: "alice", APIKey: "sk-alice", GroupName: "VIP", RateMultiplier: 2},
 			},
 			"mirror": {
-				{ProviderSlug: "mirror", KeyName: "bob", GroupName: "VIP", RateMultiplier: 2},
+				{ProviderSlug: "mirror", KeyName: "bob", APIKey: "sk-bob", GroupName: "VIP", RateMultiplier: 2},
 			},
 		},
 	}

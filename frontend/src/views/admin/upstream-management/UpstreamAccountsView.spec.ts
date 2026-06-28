@@ -264,7 +264,21 @@ describe('UpstreamAccountsView', () => {
           provider_slug: 'upstream-a',
           provider_name: 'Upstream A',
           upstream_key_name: 'key-new',
+          upstream_api_key: 'sk-key-new',
           local_account_name: 'local-new',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 1,
+          local_group_id: 7,
+          local_group_name: 'VIP',
+          local_rate_multiplier: 2,
+          rate_violation: false,
+        },
+        {
+          action: 'create',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'display-only',
+          local_account_name: 'local-display-only',
           upstream_group_name: 'vip',
           upstream_rate_multiplier: 1,
           local_group_id: 7,
@@ -403,6 +417,8 @@ describe('UpstreamAccountsView', () => {
     expect(dialog.exists()).toBe(true)
     expect(dialog.text()).toContain('key-new')
     expect(dialog.text()).toContain('local-new')
+    expect(dialog.text()).not.toContain('display-only')
+    expect(dialog.text()).not.toContain('local-display-only')
     expect(dialog.text()).toContain('key-existing')
     expect(dialog.text()).toContain('local-existing')
     expect(dialog.text()).toContain('key-risk')
@@ -1054,6 +1070,74 @@ describe('UpstreamAccountsView', () => {
       api_key: 'sk-live-001',
       group_ids: [7],
     })
+  })
+
+  it('does not prefill create account api key from upstream key name', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValue({
+      default_provider: {},
+      providers: [],
+      summary: {
+        upstream_key_count: 1,
+        matched_account_count: 0,
+        create_count: 1,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'create',
+          provider_slug: 'backup',
+          provider_name: 'Backup',
+          provider_base_url: 'https://backup.example.com',
+          upstream_key_name: 'display-name-only',
+          upstream_base_url: 'https://backup.example.com',
+          local_account_name: 'backup-display-name-only',
+          upstream_group_name: 'VIP',
+          upstream_rate_multiplier: 1,
+          local_group_id: 7,
+          local_group_name: 'VIP',
+          rate_violation: false,
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+    let modalProps: any
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any) => h('div', [
+                h('div', { class: 'actions-slot' }, slots['cell-actions']?.({ row })),
+              ])))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+          CreateAccountModal: {
+            props: ['show', 'proxies', 'groups', 'initialValues'],
+            setup(props) {
+              modalProps = props
+              return () => props.show ? h('div', { class: 'create-account-modal' }, 'create') : null
+            },
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+    await wrapper.find('[data-test="create-local-account-backup-display-name-only"]').trigger('click')
+    await flushPromises()
+
+    expect(modalProps.initialValues.api_key).toBe('')
   })
 
   it('colors upstream key, local account, and bound groups by matched account platform', async () => {

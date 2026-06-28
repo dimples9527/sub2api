@@ -305,6 +305,12 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 			if !createMissing {
 				continue
 			}
+			if strings.TrimSpace(item.UpstreamAPIKey) == "" {
+				item.Action = UpstreamAccountSyncActionSkip
+				item.SkipReason = "upstream provider did not return a usable api key"
+				result.Summary.SkipCount++
+				continue
+			}
 			groupIDs := []int64{}
 			if item.LocalGroupID != nil {
 				groupIDs = append(groupIDs, *item.LocalGroupID)
@@ -320,7 +326,7 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 				Name:                  item.LocalAccountName,
 				Platform:              PlatformOpenAI,
 				Type:                  AccountTypeAPIKey,
-				Credentials:           upstreamAccountSyncCredentials(nil, item.UpstreamKeyName, provider.BaseURL),
+				Credentials:           upstreamAccountSyncCredentials(nil, item.UpstreamAPIKey, provider.BaseURL),
 				Extra:                 extra,
 				GroupIDs:              groupIDs,
 				SkipDefaultGroupBind:  true,
@@ -361,7 +367,7 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 			}
 			extra := upstreamAccountSyncExtra(provider, *item, now, account.Extra)
 			updated, err := s.accountManager.UpdateAccount(ctx, account.ID, &UpdateAccountInput{
-				Credentials:           upstreamAccountSyncCredentials(account.Credentials, item.UpstreamKeyName, provider.BaseURL),
+				Credentials:           upstreamAccountSyncCredentials(account.Credentials, "", provider.BaseURL),
 				Extra:                 extra,
 				GroupIDs:              &nextGroupIDs,
 				SkipMixedChannelCheck: true,
@@ -704,7 +710,7 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context, useProviderKey
 				ProviderName:           provider.Name,
 				ProviderBaseURL:        provider.BaseURL,
 				UpstreamKeyName:        strings.TrimSpace(key.KeyName),
-				UpstreamAPIKey:         strings.TrimSpace(key.KeyName),
+				UpstreamAPIKey:         strings.TrimSpace(key.APIKey),
 				UpstreamBaseURL:        provider.BaseURL,
 				LocalAccountName:       upstreamProviderKeyName(provider, key.KeyName),
 				UpstreamGroupName:      strings.TrimSpace(key.GroupName),
@@ -1245,7 +1251,8 @@ func upstreamAccountSyncAccountCompatible(account Account) bool {
 }
 
 func upstreamAccountSyncNeedsUpdate(account Account, item UpstreamAccountSyncItem, provider UpstreamProviderConfig) bool {
-	if strings.TrimSpace(account.GetCredential("api_key")) != strings.TrimSpace(item.UpstreamKeyName) {
+	nextAPIKey := strings.TrimSpace(item.UpstreamAPIKey)
+	if nextAPIKey != "" && strings.TrimSpace(account.GetCredential("api_key")) != nextAPIKey {
 		return true
 	}
 	if strings.TrimRight(strings.TrimSpace(account.GetCredential("base_url")), "/") != strings.TrimRight(strings.TrimSpace(provider.BaseURL), "/") {
@@ -1284,8 +1291,8 @@ func upstreamAccountSyncSelectionKey(providerSlug, upstreamKeyName string) strin
 func upstreamAccountSyncChangeDetails(account Account, item UpstreamAccountSyncItem, provider UpstreamProviderConfig) []UpstreamAccountSyncChangeDetail {
 	details := []UpstreamAccountSyncChangeDetail{}
 	currentAPIKey := strings.TrimSpace(account.GetCredential("api_key"))
-	nextAPIKey := strings.TrimSpace(item.UpstreamKeyName)
-	if currentAPIKey != nextAPIKey {
+	nextAPIKey := strings.TrimSpace(item.UpstreamAPIKey)
+	if nextAPIKey != "" && currentAPIKey != nextAPIKey {
 		details = append(details, UpstreamAccountSyncChangeDetail{
 			Kind:   "credential",
 			Field:  "api_key",
@@ -1346,7 +1353,9 @@ func upstreamAccountSyncCredentials(existing map[string]any, apiKey, baseURL str
 	if out == nil {
 		out = map[string]any{}
 	}
-	out["api_key"] = strings.TrimSpace(apiKey)
+	if apiKey = strings.TrimSpace(apiKey); apiKey != "" {
+		out["api_key"] = apiKey
+	}
 	out["base_url"] = normalizeUpstreamAccountSyncBaseURL(baseURL)
 	return out
 }

@@ -1321,7 +1321,7 @@ const syncLogEntries = computed<UpstreamAccountSyncLogEntry[]>(() => {
 })
 const unhandledSyncLogEntries = computed(() => syncLogEntries.value.filter(entry => !isSyncLogHandled(entry)))
 const canSync = computed(() => summary.value.create_count > 0 || summary.value.update_count > 0 || summary.value.rate_violation_count > 0)
-const syncCreateItems = computed(() => items.value.filter(item => item.action === 'create'))
+const syncCreateItems = computed(() => items.value.filter(item => item.action === 'create' && item.upstream_api_key))
 const syncUpdateItems = computed(() => items.value.filter(item => item.action === 'update'))
 const syncRateGuardItems = computed(() => items.value.filter(item => item.rate_violation && numberArray(item.unbound_group_ids).length > 0))
 const syncConfirmCanSubmit = computed(() => (
@@ -2189,7 +2189,7 @@ function createAccountInitialValuesFromSyncItem(row: UpstreamAccountSyncItem): C
     platform: 'openai',
     type: 'apikey',
     base_url: row.upstream_base_url || row.provider_base_url || undefined,
-    api_key: row.upstream_api_key || row.upstream_key_name,
+    api_key: row.upstream_api_key || '',
     group_ids: groupIDs
   }
 }
