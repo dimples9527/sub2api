@@ -36,6 +36,7 @@ type UpstreamAccountSyncAccountManager interface {
 	ListAccounts(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupID int64, privacyMode string, sortBy, sortOrder string) ([]Account, int64, error)
 	CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error)
 	UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error)
+	SetAccountSchedulable(ctx context.Context, id int64, schedulable bool) (*Account, error)
 }
 
 type upstreamAccountSyncStoredProviderSource interface {
@@ -245,6 +246,7 @@ func (s *UpstreamAccountSyncService) SetPreviewCache(cache UpstreamAccountSyncPr
 func (s *UpstreamAccountSyncService) Preview(ctx context.Context) (UpstreamAccountSyncResult, error) {
 	if s != nil && s.previewCache != nil {
 		if result, ok, err := s.previewCache.Get(ctx); err == nil && ok {
+			result = s.filterCachedResultByEnabledProviders(ctx, result)
 			records, err := s.ListRecords(ctx)
 			if err != nil {
 				return UpstreamAccountSyncResult{}, err
@@ -266,6 +268,68 @@ func (s *UpstreamAccountSyncService) Preview(ctx context.Context) (UpstreamAccou
 	}
 	result.Records = records
 	return result, nil
+}
+
+func (s *UpstreamAccountSyncService) filterCachedResultByEnabledProviders(ctx context.Context, result UpstreamAccountSyncResult) UpstreamAccountSyncResult {
+	source, ok := s.providerSource.(interface {
+		ListProviders(context.Context) ([]UpstreamProviderConfig, error)
+	})
+	if !ok {
+		return result
+	}
+	providers, err := source.ListProviders(ctx)
+	if err != nil {
+		logger.LegacyPrintf("service.upstream_account_sync", "Warning: filter cached preview providers failed: %v", err)
+		return result
+	}
+	enabled := make(map[string]UpstreamProviderConfig, len(providers))
+	for _, provider := range providers {
+		if provider.Slug == "" || provider.IsDefault || !provider.Enabled {
+			continue
+		}
+		enabled[provider.Slug] = provider
+	}
+	filteredProviders := make([]UpstreamProviderConfig, 0, len(result.Providers))
+	for _, provider := range result.Providers {
+		if _, ok := enabled[provider.Slug]; ok {
+			filteredProviders = append(filteredProviders, provider)
+		}
+	}
+	filteredItems := make([]UpstreamAccountSyncItem, 0, len(result.Items))
+	for _, item := range result.Items {
+		if _, ok := enabled[item.ProviderSlug]; ok {
+			filteredItems = append(filteredItems, item)
+		}
+	}
+	result.Providers = filteredProviders
+	result.Items = filteredItems
+	result.Summary = upstreamAccountSyncSummaryFromItems(filteredItems)
+	return result
+}
+
+func upstreamAccountSyncSummaryFromItems(items []UpstreamAccountSyncItem) UpstreamAccountSyncSummary {
+	var summary UpstreamAccountSyncSummary
+	for _, item := range items {
+		summary.UpstreamKeyCount++
+		if item.MatchedAccountID != nil {
+			summary.MatchedAccountCount++
+		}
+		switch item.Action {
+		case UpstreamAccountSyncActionCreate:
+			summary.CreateCount++
+		case UpstreamAccountSyncActionUpdate:
+			summary.UpdateCount++
+		case UpstreamAccountSyncActionSkip:
+			summary.SkipCount++
+		case UpstreamAccountSyncActionConflict:
+			summary.ConflictCount++
+		}
+		if item.RateViolation {
+			summary.RateViolationCount++
+		}
+		summary.UnboundGroupCount += len(item.UnboundGroupIDs)
+	}
+	return summary
 }
 
 func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccountSyncRequest) (UpstreamAccountSyncResult, error) {
@@ -513,6 +577,9 @@ func (s *UpstreamAccountSyncService) runMatchedAccountRateGuard(ctx context.Cont
 
 	now := time.Now().UTC()
 	recordStats, recordOrder := newUpstreamAccountSyncRecordStats(result)
+	if err := s.disableAccountsForDisabledProviders(ctx, previewState.accountByID); err != nil {
+		return s.finishSyncWithError(ctx, result, triggerSource, recordStats, recordOrder, "", err)
+	}
 	for index := range result.Items {
 		item := &result.Items[index]
 		if item.MatchedAccountID == nil {
@@ -560,6 +627,60 @@ func (s *UpstreamAccountSyncService) runMatchedAccountRateGuard(ctx context.Cont
 	}
 	result.Records = records
 	return result, nil
+}
+
+func (s *UpstreamAccountSyncService) disableAccountsForDisabledProviders(ctx context.Context, accounts map[int64]Account) error {
+	if len(accounts) == 0 || s == nil || s.accountManager == nil {
+		return nil
+	}
+	disabledProviders := s.disabledAccountSyncProviderSlugs(ctx)
+	if len(disabledProviders) == 0 {
+		return nil
+	}
+	for _, account := range accounts {
+		if !account.Schedulable {
+			continue
+		}
+		providerSlug := strings.TrimSpace(account.GetExtraString("upstream_provider_slug"))
+		if providerSlug == "" {
+			continue
+		}
+		if _, disabled := disabledProviders[providerSlug]; !disabled {
+			continue
+		}
+		if _, err := s.accountManager.SetAccountSchedulable(ctx, account.ID, false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *UpstreamAccountSyncService) disabledAccountSyncProviderSlugs(ctx context.Context) map[string]struct{} {
+	if s == nil {
+		return nil
+	}
+	source, ok := s.providerSource.(interface {
+		ListProviders(context.Context) ([]UpstreamProviderConfig, error)
+	})
+	if !ok {
+		return nil
+	}
+	providers, err := source.ListProviders(ctx)
+	if err != nil {
+		logger.LegacyPrintf("service.upstream_account_sync", "Warning: list disabled upstream providers failed: %v", err)
+		return nil
+	}
+	disabled := map[string]struct{}{}
+	for _, provider := range providers {
+		if provider.Slug == "" || provider.IsDefault || provider.Enabled {
+			continue
+		}
+		disabled[provider.Slug] = struct{}{}
+	}
+	if len(disabled) == 0 {
+		return nil
+	}
+	return disabled
 }
 
 func (s *UpstreamAccountSyncService) ListRecords(ctx context.Context) ([]UpstreamAccountSyncRecord, error) {
@@ -1368,6 +1489,7 @@ func upstreamAccountSyncExtra(provider UpstreamProviderConfig, item UpstreamAcco
 	out["upstream_provider_slug"] = provider.Slug
 	out["upstream_provider_name"] = provider.Name
 	out["upstream_provider_type"] = provider.Type
+	out["upstream_provider_enabled"] = provider.Enabled
 	out["upstream_key_name"] = item.UpstreamKeyName
 	out["upstream_group_name"] = item.UpstreamGroupName
 	out["upstream_rate_multiplier"] = item.UpstreamRateMultiplier

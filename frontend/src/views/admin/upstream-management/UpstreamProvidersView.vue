@@ -300,9 +300,15 @@
           </template>
 
           <template #cell-enabled="{ row }">
-            <span :class="['badge', row.enabled ? 'badge-success' : 'badge-gray']">
-              {{ row.enabled ? t('common.enabled') : t('common.disabled') }}
-            </span>
+            <div class="provider-enabled-cell">
+              <Toggle
+                :model-value="row.enabled"
+                @update:model-value="toggleProviderEnabled(row, $event)"
+              />
+              <span :class="['provider-enabled-text', row.enabled ? 'is-enabled' : 'is-disabled']">
+                {{ row.enabled ? t('common.enabled') : t('common.disabled') }}
+              </span>
+            </div>
           </template>
 
           <template #cell-base_url="{ value }">
@@ -499,8 +505,8 @@
           </div>
           <div>
             <label class="input-label">{{ t('admin.upstreamProviders.enabled') }}</label>
-            <label class="flex h-10 items-center gap-2 rounded-lg border border-gray-200 px-3 dark:border-dark-600">
-              <input v-model="form.enabled" type="checkbox" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+            <label class="flex h-10 items-center gap-3 rounded-lg border border-gray-200 px-3 dark:border-dark-600">
+              <Toggle v-model="form.enabled" />
               <span class="text-sm text-gray-700 dark:text-gray-200">
                 {{ form.enabled ? t('common.enabled') : t('common.disabled') }}
               </span>
@@ -970,6 +976,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
+import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import UpstreamBalanceCharts from '@/components/admin/upstream/UpstreamBalanceCharts.vue'
 
@@ -1070,6 +1077,7 @@ const enabledFilterOptions = computed<SelectOption[]>(() => [
 const baseColumns = computed<Column[]>(() => [
   { key: 'homepage', label: t('admin.upstreamProviders.columns.homepage'), class: 'upstream-homepage-column' },
   { key: 'name', label: t('admin.upstreamProviders.columns.name'), class: 'upstream-name-column' },
+  { key: 'enabled', label: t('admin.upstreamProviders.enabled'), class: 'upstream-enabled-column' },
   { key: 'sort_order', label: t('admin.upstreamProviders.columns.sortOrder'), class: 'upstream-sort-order-column' },
   { key: 'interface', label: t('admin.upstreamProviders.columns.interface'), class: 'upstream-interface-column' },
   { key: 'prefix', label: t('admin.upstreamProviders.columns.prefix'), class: 'upstream-prefix-column' },
@@ -1379,6 +1387,23 @@ async function setDefaultProvider(provider: UpstreamProviderConfig) {
     appStore.showError(extractApiErrorMessage(err, t('admin.upstreamProviders.setDefaultFailed')))
   } finally {
     defaultingSlug.value = null
+  }
+}
+
+async function toggleProviderEnabled(provider: UpstreamProviderConfig, enabled: boolean) {
+  if (provider.enabled === enabled) return
+  const previous = provider.enabled
+  provider.enabled = enabled
+  try {
+    await adminAPI.upstreamProviders.update(provider.slug, {
+      ...provider,
+      enabled,
+    })
+    appStore.showSuccess(t('admin.upstreamProviders.updateSuccess'))
+    await reload()
+  } catch (err) {
+    provider.enabled = previous
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamProviders.saveFailed')))
   }
 }
 
@@ -2059,6 +2084,22 @@ onMounted(reload)
   @apply whitespace-nowrap text-center text-xs text-gray-950 dark:text-white;
 }
 
+.provider-enabled-cell {
+  @apply inline-flex items-center justify-center gap-2;
+}
+
+.provider-enabled-text {
+  @apply text-xs font-medium;
+}
+
+.provider-enabled-text.is-enabled {
+  @apply text-emerald-600 dark:text-emerald-300;
+}
+
+.provider-enabled-text.is-disabled {
+  @apply text-gray-500 dark:text-gray-400;
+}
+
 .interface-switcher {
   @apply mx-auto min-w-[15rem] max-w-[16rem] space-y-2 text-left;
 }
@@ -2173,6 +2214,11 @@ onMounted(reload)
 
 :deep(.upstream-name-column) {
   min-width: 16.25rem;
+}
+
+:deep(.upstream-enabled-column) {
+  width: 7.5rem;
+  min-width: 7.5rem;
 }
 
 :deep(.upstream-sort-order-column) {

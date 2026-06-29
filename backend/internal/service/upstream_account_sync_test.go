@@ -91,14 +91,20 @@ func (s *upstreamAccountSyncProviderSourceStub) fetchCount(slug string) int {
 }
 
 type upstreamAccountSyncAccountManagerStub struct {
-	accounts      []Account
-	createdInputs []CreateAccountInput
-	updateInputs  []upstreamAccountSyncUpdateCall
+	accounts             []Account
+	createdInputs        []CreateAccountInput
+	updateInputs         []upstreamAccountSyncUpdateCall
+	setSchedulableInputs []upstreamAccountSyncSetSchedulableCall
 }
 
 type upstreamAccountSyncUpdateCall struct {
 	id    int64
 	input UpdateAccountInput
+}
+
+type upstreamAccountSyncSetSchedulableCall struct {
+	id          int64
+	schedulable bool
 }
 
 func (s *upstreamAccountSyncAccountManagerStub) ListAccounts(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupID int64, privacyMode string, sortBy, sortOrder string) ([]Account, int64, error) {
@@ -117,6 +123,7 @@ func (s *upstreamAccountSyncAccountManagerStub) CreateAccount(ctx context.Contex
 		Credentials: input.Credentials,
 		Extra:       input.Extra,
 		GroupIDs:    append([]int64(nil), input.GroupIDs...),
+		Schedulable: true,
 	}
 	s.accounts = append(s.accounts, *account)
 	return account, nil
@@ -137,6 +144,18 @@ func (s *upstreamAccountSyncAccountManagerStub) UpdateAccount(ctx context.Contex
 		if input.GroupIDs != nil {
 			s.accounts[i].GroupIDs = append([]int64(nil), (*input.GroupIDs)...)
 		}
+		return &s.accounts[i], nil
+	}
+	return nil, ErrAccountNotFound
+}
+
+func (s *upstreamAccountSyncAccountManagerStub) SetAccountSchedulable(ctx context.Context, id int64, schedulable bool) (*Account, error) {
+	s.setSchedulableInputs = append(s.setSchedulableInputs, upstreamAccountSyncSetSchedulableCall{id: id, schedulable: schedulable})
+	for i := range s.accounts {
+		if s.accounts[i].ID != id {
+			continue
+		}
+		s.accounts[i].Schedulable = schedulable
 		return &s.accounts[i], nil
 	}
 	return nil, ErrAccountNotFound
@@ -225,6 +244,48 @@ func TestUpstreamAccountSyncPreviewReturnsCachedSnapshotWithoutFetchingProviders
 	}
 	if cache.gets != 1 || cache.sets != 0 {
 		t.Fatalf("cache gets/sets = %d/%d, want one get and no set", cache.gets, cache.sets)
+	}
+}
+
+func TestUpstreamAccountSyncPreviewFiltersDisabledProvidersFromCachedSnapshot(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},
+			{Slug: "enabled", Name: "Enabled upstream", Enabled: true},
+			{Slug: "disabled", Name: "Disabled upstream", Enabled: false},
+		},
+	}
+	svc, _ := newUpstreamAccountSyncServiceForTest(provider, nil, nil, newUpstreamManagementSettingRepoStub())
+	cache := &upstreamAccountSyncPreviewCacheStub{
+		found: true,
+		result: UpstreamAccountSyncResult{
+			Providers: []UpstreamProviderConfig{
+				{Slug: "enabled", Name: "Enabled upstream", Enabled: true},
+				{Slug: "disabled", Name: "Disabled upstream", Enabled: false},
+			},
+			Summary: UpstreamAccountSyncSummary{UpstreamKeyCount: 2, CreateCount: 2},
+			Items: []UpstreamAccountSyncItem{
+				{Action: UpstreamAccountSyncActionCreate, ProviderSlug: "enabled", ProviderName: "Enabled upstream", UpstreamKeyName: "sk-enabled"},
+				{Action: UpstreamAccountSyncActionCreate, ProviderSlug: "disabled", ProviderName: "Disabled upstream", UpstreamKeyName: "sk-disabled"},
+			},
+			Records: []UpstreamAccountSyncRecord{},
+		},
+	}
+	svc.SetPreviewCache(cache)
+
+	result, err := svc.Preview(context.Background())
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if len(result.Providers) != 1 || result.Providers[0].Slug != "enabled" {
+		t.Fatalf("providers = %+v, want only enabled provider", result.Providers)
+	}
+	if len(result.Items) != 1 || result.Items[0].ProviderSlug != "enabled" {
+		t.Fatalf("items = %+v, want only enabled provider item", result.Items)
+	}
+	if result.Summary.UpstreamKeyCount != 1 || result.Summary.CreateCount != 1 {
+		t.Fatalf("summary = %+v, want recomputed summary for enabled items", result.Summary)
 	}
 }
 
@@ -1130,6 +1191,50 @@ func TestUpstreamAccountSyncRunHonorsSelectedItems(t *testing.T) {
 	}
 	if accounts.updateInputs[0].input.GroupIDs == nil || len(*accounts.updateInputs[0].input.GroupIDs) != 2 {
 		t.Fatalf("updated group ids = %+v, want existing low group retained and VIP added when rate guard is disabled", accounts.updateInputs[0].input.GroupIDs)
+	}
+}
+
+func TestUpstreamAccountRateGuardDisablesAccountsFromDisabledProviders(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup", AccountNamePrefix: "up-", Enabled: false},
+		},
+	}
+	svc, accounts := newUpstreamAccountSyncServiceForTest(
+		provider,
+		nil,
+		[]Account{{
+			ID:          10,
+			Name:        "up-disabled",
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Status:      StatusActive,
+			Schedulable: true,
+			Extra: map[string]any{
+				"upstream_provider_slug": "backup",
+			},
+		}},
+		newUpstreamManagementSettingRepoStub(),
+	)
+
+	cfg, err := svc.RunScheduledRateGuard(context.Background())
+	if err != nil {
+		t.Fatalf("RunScheduledRateGuard returned error: %v", err)
+	}
+	if cfg.LastRunAt == nil || cfg.LastRunStatus != "success" {
+		t.Fatalf("run config = %+v, want successful last run", cfg)
+	}
+	if len(accounts.setSchedulableInputs) != 1 {
+		t.Fatalf("set schedulable calls = %+v, want one call", accounts.setSchedulableInputs)
+	}
+	call := accounts.setSchedulableInputs[0]
+	if call.id != 10 || call.schedulable {
+		t.Fatalf("set schedulable call = %+v, want account 10 disabled", call)
+	}
+	if accounts.accounts[0].Schedulable {
+		t.Fatalf("account schedulable = true, want false")
 	}
 }
 

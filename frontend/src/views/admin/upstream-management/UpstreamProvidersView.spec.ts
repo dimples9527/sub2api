@@ -30,6 +30,9 @@ const { adminAPIMock } = vi.hoisted(() => ({
       create: vi.fn(),
       update: vi.fn(),
       testConfig: vi.fn(),
+      setDefault: vi.fn(),
+      testSaved: vi.fn(),
+      getKeys: vi.fn(),
     },
     upstreamAccountSync: {
       getBalanceConsumption: vi.fn(),
@@ -79,6 +82,9 @@ describe('UpstreamProvidersView', () => {
     adminAPIMock.upstreamProviders.create.mockResolvedValue({})
     adminAPIMock.upstreamProviders.update.mockResolvedValue({})
     adminAPIMock.upstreamProviders.testConfig.mockResolvedValue({})
+    adminAPIMock.upstreamProviders.setDefault.mockResolvedValue({})
+    adminAPIMock.upstreamProviders.testSaved.mockResolvedValue({})
+    adminAPIMock.upstreamProviders.getKeys.mockResolvedValue({ items: [], warnings: [] })
     adminAPIMock.upstreamAccountSync.getBalanceConsumption.mockResolvedValue({
       config: {
         enabled: false,
@@ -187,7 +193,7 @@ describe('UpstreamProvidersView', () => {
 
     await flushPromises()
 
-    expect(wrapper.find('.columns').text()).toBe('homepage,name,sort_order,interface,prefix,rate_scale,temp_disable_minutes,balance,today_consumption,actions')
+    expect(wrapper.find('.columns').text()).toBe('homepage,name,enabled,sort_order,interface,prefix,rate_scale,temp_disable_minutes,balance,today_consumption,actions')
     expect(wrapper.find('.provider-name-card').exists()).toBe(true)
     expect(wrapper.find('.provider-type-tag').exists()).toBe(true)
     expect(wrapper.find('.provider-enabled-tag').exists()).toBe(true)
@@ -210,6 +216,65 @@ describe('UpstreamProvidersView', () => {
     await balanceButton!.trigger('click')
     await flushPromises()
     expect(adminAPIMock.upstreamProviders.getBalance).toHaveBeenCalledTimes(2)
+  })
+
+  it('toggles provider enabled state from the status column with Toggle', async () => {
+    const provider = {
+      type: 'sub2api',
+      slug: 'sub-main',
+      name: 'Sub Main',
+      enabled: true,
+      is_default: false,
+      base_url: 'https://upstream.example.com',
+      login_url: '/api/v1/auth/login',
+      api_keys_url: '/api/admin/keys',
+      account_rate_multiplier_scale: 1,
+    }
+    adminAPIMock.upstreamProviders.list.mockResolvedValue([provider])
+    adminAPIMock.upstreamProviders.update.mockResolvedValue({ ...provider, enabled: false })
+
+    const wrapper = mount(UpstreamProvidersView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['columns', 'data'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.flatMap((row: any) => [
+                h('div', { class: 'columns' }, props.columns.map((column: any) => column.key).join(',')),
+                h('div', { class: 'enabled-cell' }, slots['cell-enabled']?.({ row })),
+              ]))
+            },
+          },
+          BaseDialog: {
+            props: ['show'],
+            template: '<div v-if="show"><slot /><slot name="footer" /></div>',
+          },
+          ConfirmDialog: true,
+          EmptyState: true,
+          Icon: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('.columns').text()).toContain('enabled')
+    const toggle = wrapper.find('.enabled-cell [role="switch"]')
+    expect(toggle.exists()).toBe(true)
+    expect(toggle.attributes('aria-checked')).toBe('true')
+
+    await toggle.trigger('click')
+    await flushPromises()
+
+    expect(adminAPIMock.upstreamProviders.update).toHaveBeenCalledWith(
+      'sub-main',
+      expect.objectContaining({
+        enabled: false,
+        slug: 'sub-main',
+      })
+    )
   })
 
   it('uses distinct color treatments for balance, today cost, and low balance warnings', () => {
@@ -322,7 +387,7 @@ describe('UpstreamProvidersView', () => {
 
     await flushPromises()
 
-    expect(wrapper.find('.columns').text()).toBe('homepage,name,sort_order,interface,prefix,rate_scale,temp_disable_minutes,balance,today_consumption,actions')
+    expect(wrapper.find('.columns').text()).toBe('homepage,name,enabled,sort_order,interface,prefix,rate_scale,temp_disable_minutes,balance,today_consumption,actions')
     expect(wrapper.find('.details-cell').text()).toBe('')
 
     const expandButton = wrapper.find('.expand-toggle')
