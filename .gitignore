@@ -78,6 +78,7 @@ Desktop.ini
 # 临时文件
 # ===================
 tmp/
+.superpowers/
 temp/
 *.tmp
 *.temp
