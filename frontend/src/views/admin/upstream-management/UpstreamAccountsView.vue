@@ -813,23 +813,15 @@
                       <span>{{ t('admin.upstreamAccounts.batchTestPlatformAccountCount', { count: option.accountCount }) }}</span>
                     </div>
                     <div class="batch-test-model-control">
-                      <input
-                        v-model.trim="batchTestModelByPlatform[option.platform]"
-                        type="text"
-                        class="ui-input"
-                        :list="`batch-test-model-options-${option.platform}`"
+                      <Select
+                        v-model="batchTestModelByPlatform[option.platform]"
+                        class="batch-test-model-select"
+                        :options="batchTestModelSelectOptions(option.platform)"
                         :placeholder="t('admin.upstreamAccounts.batchTestModelPlaceholder')"
+                        :searchable="true"
+                        clearable
                         :data-test="`batch-test-model-${option.platform}`"
                       />
-                      <datalist :id="`batch-test-model-options-${option.platform}`">
-                        <option
-                          v-for="model in batchTestModelOptionsByPlatform[option.platform] || []"
-                          :key="model.id"
-                          :value="model.id"
-                        >
-                          {{ model.display_name || model.id }}
-                        </option>
-                      </datalist>
                       <span v-if="batchTestModelLoadingByPlatform[option.platform]" class="batch-test-model-hint">
                         {{ t('admin.upstreamAccounts.batchTestModelLoading') }}
                       </span>
@@ -1429,6 +1421,20 @@ const batchTestPlatformOptions = computed<BatchTestPlatformOption[]>(() => {
   }
   return Array.from(byPlatform.values()).sort((a, b) => a.platform.localeCompare(b.platform))
 })
+function batchTestModelSelectOptions(platform: string): SelectOption[] {
+  const models = batchTestModelOptionsByPlatform.value[platform] || []
+  const options = models.map(model => ({
+    value: model.id,
+    label: model.display_name && model.display_name !== model.id
+      ? `${model.display_name} (${model.id})`
+      : model.id,
+  }))
+  const selectedModel = batchTestModelByPlatform.value[platform]?.trim()
+  if (selectedModel && !options.some(option => option.value === selectedModel)) {
+    options.unshift({ value: selectedModel, label: selectedModel })
+  }
+  return options
+}
 const batchTestRateByAccountId = computed(() => {
   const byAccountId = new Map<number, number>()
   for (const item of filteredItems.value) {
@@ -4061,9 +4067,26 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 
-.batch-test-model-control .ui-input {
+.batch-test-model-select {
   min-width: 220px;
   flex: 1 1 220px;
+}
+
+@media (max-width: 640px) {
+  .batch-test-config-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .batch-test-model-control {
+    width: 100%;
+  }
+
+  .batch-test-model-select {
+    min-width: 0;
+    width: 100%;
+    flex-basis: 100%;
+  }
 }
 
 .batch-test-model-hint {

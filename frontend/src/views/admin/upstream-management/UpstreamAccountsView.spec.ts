@@ -2200,6 +2200,12 @@ describe('UpstreamAccountsView', () => {
       status: 'active',
       schedulable: true,
     })
+    accountsMock.getAvailableModels.mockImplementation(async (id: number) => {
+      if (id === 12) {
+        return [{ id: 'gpt-4.1-mini', display_name: 'GPT 4.1 Mini' }]
+      }
+      return [{ id: 'gemini-2.5-flash', display_name: 'Gemini 2.5 Flash' }]
+    })
     accountsMock.batchTestAccounts.mockResolvedValue({
       job_id: 'job-1',
       status: 'completed',
@@ -2238,7 +2244,24 @@ describe('UpstreamAccountsView', () => {
           DataTable: true,
           EmptyState: true,
           Icon: true,
-          Select: true,
+          Select: {
+            props: ['modelValue', 'options'],
+            emits: ['update:modelValue', 'change'],
+            setup(props, { emit, attrs }) {
+              return () => h('button', {
+                ...attrs,
+                class: ['framework-select-stub', attrs.class],
+                type: 'button',
+                'data-options': JSON.stringify(props.options || []),
+                onClick: () => {
+                  const firstOption = (props.options || [])[0]
+                  const value = firstOption?.value ?? ''
+                  emit('update:modelValue', value)
+                  emit('change', value, firstOption ?? null)
+                },
+              }, String(props.modelValue || ''))
+            },
+          },
           ConfirmDialog: true,
           AccountStatusIndicator: true,
           AccountTestModal: true,
@@ -2263,8 +2286,13 @@ describe('UpstreamAccountsView', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-test="batch-test-config-dialog"]').exists()).toBe(true)
-    await wrapper.find('[data-test="batch-test-model-openai"]').setValue('gpt-4.1-mini')
-    await wrapper.find('[data-test="batch-test-model-gemini"]').setValue('gemini-2.5-flash')
+    const openAISelect = wrapper.find('[data-test="batch-test-model-openai"]')
+    const geminiSelect = wrapper.find('[data-test="batch-test-model-gemini"]')
+    expect(openAISelect.classes()).toContain('framework-select-stub')
+    expect(geminiSelect.classes()).toContain('framework-select-stub')
+
+    await openAISelect.trigger('click')
+    await geminiSelect.trigger('click')
     await wrapper.find('[data-test="batch-test-config-submit"]').trigger('click')
     await flushPromises()
     await flushPromises()
