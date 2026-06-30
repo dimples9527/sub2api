@@ -70,14 +70,14 @@ describe('imageGeneration helpers', () => {
       buildImageGenerationPayload({
         model: 'gpt-image-2',
         prompt: '  draw a quiet desk  ',
-        size: '1024x1024',
+        size: '1920x1088',
         count: 2,
         quality: 'high',
       }),
     ).toEqual({
       model: 'gpt-image-2',
       prompt: 'draw a quiet desk',
-      size: '1024x1024',
+      size: '1920x1088',
       n: 2,
       quality: 'high',
       response_format: 'b64_json',

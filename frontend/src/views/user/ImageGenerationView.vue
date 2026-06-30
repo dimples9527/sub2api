@@ -4,7 +4,7 @@
       <header class="flex flex-col gap-3 border-b border-gray-200/70 px-4 py-4 dark:border-dark-700/70 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
         <div class="min-w-0">
           <div class="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-gray-400 dark:text-gray-500">
-            <span>MIAOAPI</span>
+            <span>SUNSHINE API</span>
             <span>/</span>
             <span class="text-primary-600 dark:text-primary-400">{{ t('imageGeneration.navCrumb') }}</span>
           </div>
@@ -53,10 +53,16 @@
 
         <section v-else class="mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-6 sm:px-6">
           <div v-if="generating" class="generation-status">
-            <Icon name="sparkles" size="lg" class="animate-pulse text-primary-600 dark:text-primary-300" />
-            <div>
-              <p class="font-semibold text-gray-900 dark:text-white">{{ t('imageGeneration.generating') }}</p>
-              <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('imageGeneration.generatingHint') }}</p>
+            <div class="status-badge">AI</div>
+            <div class="generation-card">
+              <div class="generation-canvas">
+                <Icon name="sparkles" size="xl" class="animate-pulse text-primary-500 dark:text-primary-300" />
+              </div>
+              <div class="generation-progress">
+                <span></span>
+              </div>
+              <p>{{ t('imageGeneration.generating') }} / {{ generationStageLabel }} / {{ t('imageGeneration.elapsed', { seconds: elapsedSeconds }) }}</p>
+              <p class="generation-hint">{{ t('imageGeneration.generatingHint') }}</p>
             </div>
           </div>
 
@@ -65,19 +71,51 @@
               <div class="min-w-0">
                 <p class="truncate text-sm font-semibold text-gray-900 dark:text-white">{{ item.prompt }}</p>
                 <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  {{ item.model }} / {{ item.size }} / {{ item.quality }} / {{ formatTime(item.createdAt) }}
+                  {{ item.model }} / {{ item.size }} / {{ item.quality }} / {{ t('imageGeneration.elapsed', { seconds: item.elapsedSeconds }) }} / {{ formatTime(item.createdAt) }}
                 </p>
               </div>
-              <button class="btn btn-secondary btn-sm" type="button" @click="reusePrompt(item.prompt)">
-                <Icon name="copy" size="sm" />
-                {{ t('imageGeneration.reusePrompt') }}
-              </button>
+              <div class="flex flex-wrap items-center gap-2">
+                <button
+                  class="btn btn-secondary btn-sm"
+                  type="button"
+                  data-testid="continue-edit-image"
+                  @click="continueEdit(item)"
+                >
+                  <Icon name="edit" size="sm" />
+                  {{ t('imageGeneration.continueEdit') }}
+                </button>
+                <button class="btn btn-secondary btn-sm" type="button" @click="reusePrompt(item.prompt)">
+                  <Icon name="copy" size="sm" />
+                  {{ t('imageGeneration.reusePrompt') }}
+                </button>
+                <button
+                  v-if="item.images.length > 1"
+                  class="btn btn-secondary btn-sm"
+                  type="button"
+                  data-testid="download-all-images"
+                  @click="downloadAll(item)"
+                >
+                  <Icon name="download" size="sm" />
+                  {{ t('imageGeneration.downloadAll') }}
+                </button>
+              </div>
             </div>
 
             <div class="grid gap-4 p-4 sm:grid-cols-2 xl:grid-cols-3">
               <div v-for="image in item.images" :key="image.id" class="image-card">
-                <img :src="image.src" :alt="item.prompt" class="h-full w-full object-cover" />
+                <button
+                  class="image-preview-trigger"
+                  type="button"
+                  data-testid="generated-image-button"
+                  :title="t('imageGeneration.viewImage')"
+                  @click="openPreview(item, image)"
+                >
+                  <img :src="image.src" :alt="item.prompt" class="h-full w-full object-cover" />
+                </button>
                 <div class="image-actions">
+                  <button class="icon-action" type="button" :title="t('imageGeneration.viewImage')" @click="openPreview(item, image)">
+                    <Icon name="eye" size="sm" />
+                  </button>
                   <button class="icon-action" type="button" :title="t('imageGeneration.copyImageUrl')" @click="copyImageSource(image.src)">
                     <Icon name="copy" size="sm" />
                   </button>
@@ -96,7 +134,20 @@
 
       <footer class="composer-shell">
         <div v-if="errorMessage" class="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
-          {{ errorMessage }}
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <span>{{ errorMessage }}</span>
+            <button
+              v-if="lastFailedRequest"
+              class="btn btn-secondary btn-sm"
+              type="button"
+              data-testid="retry-image-generation"
+              :disabled="generating"
+              @click="retryLastFailedGeneration"
+            >
+              <Icon name="refresh" size="sm" />
+              {{ t('imageGeneration.retry') }}
+            </button>
+          </div>
         </div>
 
         <div v-if="availableKeys.length === 0" class="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
@@ -115,6 +166,7 @@
           </label>
 
           <label class="control-pill">
+            <Icon name="cpu" size="sm" />
             <span>{{ t('imageGeneration.model') }}</span>
             <select v-model="form.model" :disabled="generating">
               <option v-for="model in modelOptions" :key="model" :value="model">{{ model }}</option>
@@ -122,9 +174,10 @@
           </label>
 
           <label class="control-pill">
+            <Icon name="image" size="sm" />
             <span>{{ t('imageGeneration.size') }}</span>
             <select v-model="form.size" :disabled="generating">
-              <option v-for="size in sizeOptions" :key="size" :value="size">{{ size }}</option>
+              <option v-for="size in displaySizeOptions" :key="size.value" :value="size.value">{{ size.label }}</option>
             </select>
           </label>
 
@@ -164,12 +217,84 @@
         </form>
         <p class="mt-2 text-xs text-gray-400 dark:text-gray-500">{{ t('imageGeneration.submitHint') }}</p>
       </footer>
+
+      <Teleport to="body">
+        <div
+          v-if="previewImage"
+          class="image-preview-backdrop"
+          data-testid="image-preview-dialog"
+          :data-preview-owner="previewDialogId"
+          role="dialog"
+          aria-modal="true"
+          :aria-label="t('imageGeneration.viewImage')"
+          @click.self="closePreview"
+        >
+          <div class="image-preview-panel">
+            <button class="preview-close" type="button" :title="t('imageGeneration.closePreview')" @click="closePreview">
+              <Icon name="x" size="lg" />
+            </button>
+            <button
+              v-if="previewImage.total > 1"
+              class="preview-nav previous"
+              type="button"
+              :title="t('imageGeneration.previousImage')"
+              @click="showPreviousPreviewImage"
+            >
+              <Icon name="chevronLeft" size="lg" />
+            </button>
+            <img :src="previewImage.src" :alt="previewImage.prompt" />
+            <button
+              v-if="previewImage.total > 1"
+              class="preview-nav next"
+              type="button"
+              :title="t('imageGeneration.nextImage')"
+              @click="showNextPreviewImage"
+            >
+              <Icon name="chevronRight" size="lg" />
+            </button>
+            <div class="preview-footer">
+              <div class="preview-summary">
+                <p>
+                  <span v-if="previewImage.total > 1">{{ previewImage.index + 1 }} / {{ previewImage.total }} - </span>
+                  {{ previewImage.prompt }}
+                </p>
+                <dl class="preview-details">
+                  <div>
+                    <dt>{{ t('imageGeneration.previewDetails.model') }}</dt>
+                    <dd>{{ previewImage.model }}</dd>
+                  </div>
+                  <div>
+                    <dt>{{ t('imageGeneration.previewDetails.size') }}</dt>
+                    <dd>{{ previewImage.size }}</dd>
+                  </div>
+                  <div>
+                    <dt>{{ t('imageGeneration.previewDetails.quality') }}</dt>
+                    <dd>{{ previewImage.quality }}</dd>
+                  </div>
+                  <div>
+                    <dt>{{ t('imageGeneration.previewDetails.elapsed') }}</dt>
+                    <dd>{{ t('imageGeneration.elapsed', { seconds: previewImage.elapsedSeconds }) }}</dd>
+                  </div>
+                  <div>
+                    <dt>{{ t('imageGeneration.previewDetails.createdAt') }}</dt>
+                    <dd>{{ formatTime(previewImage.createdAt) }}</dd>
+                  </div>
+                </dl>
+              </div>
+              <a class="preview-download" :href="previewImage.src" :download="previewImage.downloadName">
+                <Icon name="download" size="sm" />
+                {{ t('imageGeneration.download') }}
+              </a>
+            </div>
+          </div>
+        </div>
+      </Teleport>
     </div>
   </AppLayout>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -192,16 +317,43 @@ interface HistoryItem {
   model: string
   size: ImageSize
   quality: ImageQuality
+  elapsedSeconds: string
   createdAt: Date
   images: GeneratedImage[]
+}
+
+interface StoredHistoryItem {
+  id: string
+  prompt: string
+  model: string
+  size: ImageSize
+  quality: ImageQuality
+  elapsedSeconds: string
+  createdAt: string
+  images: GeneratedImage[]
+}
+
+interface GenerationRequestSnapshot {
+  prompt: string
+  model: string
+  size: ImageSize
+  count: number
+  quality: ImageQuality
 }
 
 const { t } = useI18n()
 const appStore = useAppStore()
 const { copyToClipboard } = useClipboard()
 
+const HISTORY_STORAGE_KEY = 'sunshine:image-generation-history'
+const MAX_STORED_HISTORY_ITEMS = 50
 const modelOptions = ['gpt-image-2', 'gpt-image-1']
-const sizeOptions: ImageSize[] = ['1024x1024', '1024x1536', '1536x1024']
+const sizeOptions: ImageSize[] = ['1920x1088', '2560x1440', '3840x2160']
+const displaySizeOptions: Array<{ value: ImageSize; label: string }> = [
+  { value: '1920x1088', label: '1K - 1920x1088' },
+  { value: '2560x1440', label: '2K - 2560x1440' },
+  { value: '3840x2160', label: '4K - 3840x2160' },
+]
 const qualityOptions: ImageQuality[] = ['auto', 'low', 'medium', 'high']
 const promptSamples = computed(() => [
   t('imageGeneration.samples.glass'),
@@ -217,7 +369,13 @@ const generating = ref(false)
 const errorMessage = ref('')
 const history = ref<HistoryItem[]>([])
 const prompt = ref('')
+const elapsedMs = ref(0)
+const previewDialogId = `image-preview-${Math.random().toString(36).slice(2, 10)}`
+const previewState = ref<{ itemId: string; imageIndex: number } | null>(null)
+const lastFailedRequest = ref<GenerationRequestSnapshot | null>(null)
 let generationController: AbortController | null = null
+let generationStartAt = 0
+let elapsedTimer: number | null = null
 
 const form = reactive<{
   model: string
@@ -234,6 +392,37 @@ const form = reactive<{
 const availableKeys = computed(() => getImageCapableOpenAIKeys(keys.value))
 const selectedKey = computed(() => availableKeys.value.find((key) => key.id === selectedKeyId.value) ?? null)
 const canSubmit = computed(() => prompt.value.trim().length > 0 && !!selectedKey.value && !generating.value)
+const elapsedSeconds = computed(() => (elapsedMs.value / 1000).toFixed(1))
+const generationStageLabel = computed(() => {
+  if (elapsedMs.value < 2000) return t('imageGeneration.stage.preparing')
+  if (elapsedMs.value < 8000) return t('imageGeneration.stage.queued')
+  if (elapsedMs.value < 45000) return t('imageGeneration.stage.generating')
+  return t('imageGeneration.stage.finishing')
+})
+const previewItem = computed(() => {
+  if (!previewState.value) return null
+  return history.value.find((item) => item.id === previewState.value?.itemId) ?? null
+})
+const previewImage = computed(() => {
+  if (!previewState.value || !previewItem.value) return null
+
+  const imageIndex = normalizeImageIndex(previewState.value.imageIndex, previewItem.value.images.length)
+  const image = previewItem.value.images[imageIndex]
+  if (!image) return null
+
+  return {
+    src: image.src,
+    prompt: image.revisedPrompt || previewItem.value.prompt,
+    downloadName: downloadName(previewItem.value, image.id),
+    index: imageIndex,
+    total: previewItem.value.images.length,
+    model: previewItem.value.model,
+    size: previewItem.value.size,
+    quality: previewItem.value.quality,
+    elapsedSeconds: previewItem.value.elapsedSeconds,
+    createdAt: previewItem.value.createdAt,
+  }
+})
 
 async function loadKeys() {
   loadingKeys.value = true
@@ -255,19 +444,26 @@ async function loadKeys() {
 async function submit() {
   if (!canSubmit.value || !selectedKey.value) return
 
-  const currentPrompt = prompt.value.trim()
-  const payload = buildImageGenerationPayload({
+  await runGeneration({
+    prompt: prompt.value.trim(),
     model: form.model,
-    prompt: currentPrompt,
     size: form.size,
     count: form.count,
     quality: form.quality,
   })
+}
+
+async function runGeneration(request: GenerationRequestSnapshot) {
+  if (!selectedKey.value) return
+
+  const payload = buildImageGenerationPayload(request)
 
   generationController?.abort()
   generationController = new AbortController()
   generating.value = true
+  startElapsedTimer()
   errorMessage.value = ''
+  lastFailedRequest.value = null
 
   try {
     const images = await generateImages(selectedKey.value.key, payload, {
@@ -276,21 +472,26 @@ async function submit() {
     if (images.length === 0) {
       throw new Error(t('imageGeneration.emptyResponse'))
     }
+    const finalElapsedSeconds = elapsedSeconds.value
     history.value.unshift({
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      prompt: currentPrompt,
-      model: form.model,
-      size: form.size,
-      quality: form.quality,
+      prompt: request.prompt,
+      model: request.model,
+      size: request.size,
+      quality: request.quality,
+      elapsedSeconds: finalElapsedSeconds,
       createdAt: new Date(),
       images,
     })
+    persistHistory()
     appStore.showSuccess(t('imageGeneration.generateSuccess'))
   } catch (error) {
     if (isAbortError(error)) return
     errorMessage.value = extractErrorMessage(error)
+    lastFailedRequest.value = request
   } finally {
     generating.value = false
+    stopElapsedTimer()
     generationController = null
   }
 }
@@ -299,10 +500,41 @@ function cancelGeneration() {
   generationController?.abort()
   generationController = null
   generating.value = false
+  stopElapsedTimer()
+}
+
+function startElapsedTimer() {
+  stopElapsedTimer()
+  generationStartAt = Date.now()
+  elapsedMs.value = 0
+  elapsedTimer = window.setInterval(() => {
+    elapsedMs.value = Date.now() - generationStartAt
+  }, 100)
+}
+
+function stopElapsedTimer() {
+  if (elapsedTimer !== null) {
+    window.clearInterval(elapsedTimer)
+    elapsedTimer = null
+  }
 }
 
 function reusePrompt(value: string) {
   prompt.value = value
+}
+
+function continueEdit(item: HistoryItem) {
+  prompt.value = `${t('imageGeneration.continueEditPrefix')}: ${item.prompt}`
+}
+
+async function retryLastFailedGeneration() {
+  if (!lastFailedRequest.value) return
+  prompt.value = lastFailedRequest.value.prompt
+  form.model = lastFailedRequest.value.model
+  form.size = lastFailedRequest.value.size
+  form.count = lastFailedRequest.value.count
+  form.quality = lastFailedRequest.value.quality
+  await runGeneration(lastFailedRequest.value)
 }
 
 async function copyImageSource(src: string) {
@@ -310,7 +542,129 @@ async function copyImageSource(src: string) {
 }
 
 function downloadName(item: HistoryItem, imageId: string) {
-  return `image-${item.createdAt.getTime()}-${imageId}.png`
+  return `${slugifyPrompt(item.prompt)}-${item.size}-${formatDownloadTimestamp(item.createdAt)}-${imageId}.png`
+}
+
+function openPreview(item: HistoryItem, image: GeneratedImage) {
+  previewState.value = {
+    itemId: item.id,
+    imageIndex: Math.max(item.images.findIndex((current) => current.id === image.id), 0),
+  }
+}
+
+function closePreview() {
+  previewState.value = null
+}
+
+function showNextPreviewImage() {
+  updatePreviewIndex(1)
+}
+
+function showPreviousPreviewImage() {
+  updatePreviewIndex(-1)
+}
+
+function updatePreviewIndex(offset: number) {
+  if (!previewState.value || !previewItem.value) return
+  previewState.value = {
+    ...previewState.value,
+    imageIndex: normalizeImageIndex(previewState.value.imageIndex + offset, previewItem.value.images.length),
+  }
+}
+
+function normalizeImageIndex(index: number, total: number) {
+  if (total <= 0) return 0
+  return ((index % total) + total) % total
+}
+
+function handlePreviewKeydown(event: KeyboardEvent) {
+  if (!previewImage.value) return
+  const activeDialog = document.querySelector(`[data-preview-owner="${previewDialogId}"]`)
+  if (!activeDialog?.isConnected) return
+
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    closePreview()
+  } else if (event.key === 'ArrowRight') {
+    event.preventDefault()
+    showNextPreviewImage()
+  } else if (event.key === 'ArrowLeft') {
+    event.preventDefault()
+    showPreviousPreviewImage()
+  }
+}
+
+function downloadAll(item: HistoryItem) {
+  item.images.forEach((image) => {
+    const link = document.createElement('a')
+    link.href = image.src
+    link.download = downloadName(item, image.id)
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  })
+}
+
+function persistHistory() {
+  const storedItems: StoredHistoryItem[] = history.value.slice(0, MAX_STORED_HISTORY_ITEMS).map((item) => ({
+    ...item,
+    createdAt: item.createdAt.toISOString(),
+  }))
+  localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(storedItems))
+}
+
+function restoreHistory() {
+  const rawHistory = localStorage.getItem(HISTORY_STORAGE_KEY)
+  if (!rawHistory) return
+
+  try {
+    const storedItems = JSON.parse(rawHistory) as StoredHistoryItem[]
+    if (!Array.isArray(storedItems)) return
+
+    history.value = storedItems
+      .filter(isStoredHistoryItem)
+      .slice(0, MAX_STORED_HISTORY_ITEMS)
+      .map((item) => ({
+        ...item,
+        createdAt: new Date(item.createdAt),
+      }))
+  } catch {
+    localStorage.removeItem(HISTORY_STORAGE_KEY)
+  }
+}
+
+function isStoredHistoryItem(item: unknown): item is StoredHistoryItem {
+  if (!item || typeof item !== 'object') return false
+  const candidate = item as Partial<StoredHistoryItem>
+  return (
+    typeof candidate.id === 'string' &&
+    typeof candidate.prompt === 'string' &&
+    typeof candidate.model === 'string' &&
+    sizeOptions.includes(candidate.size as ImageSize) &&
+    qualityOptions.includes(candidate.quality as ImageQuality) &&
+    typeof candidate.elapsedSeconds === 'string' &&
+    typeof candidate.createdAt === 'string' &&
+    Array.isArray(candidate.images)
+  )
+}
+
+function slugifyPrompt(value: string) {
+  const slug = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48)
+  return slug || 'image'
+}
+
+function formatDownloadTimestamp(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hour = String(date.getHours()).padStart(2, '0')
+  const minute = String(date.getMinutes()).padStart(2, '0')
+  const second = String(date.getSeconds()).padStart(2, '0')
+  return `${year}${month}${day}-${hour}${minute}${second}`
 }
 
 function formatTime(date: Date) {
@@ -327,16 +681,49 @@ function isAbortError(error: unknown) {
 }
 
 function extractErrorMessage(error: unknown) {
+  const fallback = t('imageGeneration.generateFailed')
+  const message = getRawErrorMessage(error)
+  const normalizedMessage = message.toLowerCase()
+
+  if (/(401|403|auth|unauthorized|forbidden|api key|token)/.test(normalizedMessage)) {
+    return t('imageGeneration.errors.auth')
+  }
+  if (/(quota|balance|insufficient|billing|credit)/.test(normalizedMessage)) {
+    return t('imageGeneration.errors.quota')
+  }
+  if (/(size|resolution|dimension|invalid_request_error)/.test(normalizedMessage)) {
+    return t('imageGeneration.errors.size')
+  }
+  if (/(timeout|network|fetch|connection)/.test(normalizedMessage)) {
+    return t('imageGeneration.errors.network')
+  }
+  if (/(disabled|group|image generation is not allowed|allow_image_generation)/.test(normalizedMessage)) {
+    return t('imageGeneration.errors.groupDisabled')
+  }
+
+  return message || fallback
+}
+
+function getRawErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
     return error.message
   }
   if (error && typeof error === 'object' && 'message' in error) {
-    return String((error as { message?: unknown }).message || t('imageGeneration.generateFailed'))
+    return String((error as { message?: unknown }).message || '')
   }
-  return t('imageGeneration.generateFailed')
+  return ''
 }
 
-onMounted(loadKeys)
+onMounted(() => {
+  restoreHistory()
+  loadKeys()
+  window.addEventListener('keydown', handlePreviewKeydown)
+})
+onBeforeUnmount(() => {
+  generationController?.abort()
+  stopElapsedTimer()
+  window.removeEventListener('keydown', handlePreviewKeydown)
+})
 </script>
 
 <style scoped>
@@ -427,9 +814,12 @@ onMounted(loadKeys)
 
 .generation-status {
   display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 1rem 1.25rem;
+  align-items: flex-start;
+  gap: 0.875rem;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
 }
 
 .dark .generation-status,
@@ -438,18 +828,120 @@ onMounted(loadKeys)
   background: rgba(31, 41, 55, 0.82);
 }
 
+.dark .generation-status {
+  background: transparent;
+}
+
+.status-badge {
+  display: inline-flex;
+  height: 2rem;
+  width: 2rem;
+  flex: 0 0 2rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.625rem;
+  background: linear-gradient(135deg, rgb(79 70 229), rgb(99 102 241));
+  color: white;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  box-shadow: 0 10px 22px rgba(79, 70, 229, 0.24);
+}
+
+.generation-card {
+  width: min(100%, 390px);
+  border-radius: 1rem;
+  border: 1px solid rgba(209, 213, 219, 0.9);
+  background: rgba(255, 255, 255, 0.72);
+  padding: 0.75rem 0.875rem 0.875rem;
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.08);
+}
+
+.dark .generation-card {
+  border-color: rgba(55, 65, 81, 0.9);
+  background: rgba(31, 41, 55, 0.72);
+}
+
+.generation-canvas {
+  display: flex;
+  aspect-ratio: 16 / 9;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 0.75rem;
+  background:
+    linear-gradient(90deg, rgba(238, 242, 255, 0.86), rgba(255, 255, 255, 0.94), rgba(238, 242, 255, 0.86));
+  background-size: 220% 100%;
+  animation: generation-shimmer 1.7s ease-in-out infinite;
+}
+
+.dark .generation-canvas {
+  background:
+    linear-gradient(90deg, rgba(30, 41, 59, 0.84), rgba(55, 65, 81, 0.88), rgba(30, 41, 59, 0.84));
+  background-size: 220% 100%;
+}
+
+.generation-progress {
+  margin-top: 0.75rem;
+  height: 0.25rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(229 231 235);
+}
+
+.generation-progress span {
+  display: block;
+  height: 100%;
+  width: 68%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgb(99 102 241), rgb(79 70 229));
+  animation: generation-progress 1.3s ease-in-out infinite alternate;
+}
+
+.generation-card p {
+  margin-top: 0.625rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: rgb(107 114 128);
+}
+
+.dark .generation-card p {
+  color: rgb(156 163 175);
+}
+
+.generation-card .generation-hint {
+  margin-top: 0.25rem;
+  font-weight: 500;
+}
+
 .image-card {
   position: relative;
   overflow: hidden;
-  border-radius: 1rem;
+  border-radius: 0.875rem;
   border: 1px solid rgb(229 231 235);
   background: rgb(249 250 251);
-  aspect-ratio: 1 / 1;
+  aspect-ratio: 16 / 9;
 }
 
 .dark .image-card {
   border-color: rgb(55 65 81);
   background: rgb(17 24 39);
+}
+
+.image-preview-trigger {
+  display: block;
+  height: 100%;
+  width: 100%;
+  cursor: zoom-in;
+  background: transparent;
+}
+
+.image-preview-trigger img {
+  transition: transform 0.22s ease, filter 0.22s ease;
+}
+
+.image-card:hover .image-preview-trigger img {
+  transform: scale(1.025);
+  filter: saturate(1.04);
 }
 
 .image-actions {
@@ -496,13 +988,21 @@ onMounted(loadKeys)
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  border-radius: 999px;
-  border: 1px solid rgb(229 231 235);
+  min-height: 2.25rem;
+  border-radius: 0.7rem;
+  border: 1px solid rgb(221 221 255);
   background: white;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.8125rem;
+  padding: 0.375rem 0.625rem;
+  font-size: 0.75rem;
   color: rgb(75 85 99);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.control-pill:hover,
+.control-pill:focus-within {
+  border-color: rgb(99 102 241);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.08);
 }
 
 .dark .control-pill {
@@ -517,6 +1017,7 @@ onMounted(loadKeys)
   border: 0;
   background: transparent;
   color: inherit;
+  font-weight: 700;
   outline: none;
 }
 
@@ -572,6 +1073,165 @@ onMounted(loadKeys)
 .send-button.cancel {
   background: linear-gradient(135deg, rgb(239 68 68), rgb(220 38 38));
   box-shadow: 0 12px 24px rgba(220, 38, 38, 0.24);
+}
+
+.image-preview-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.72);
+  padding: 1.25rem;
+  backdrop-filter: blur(16px);
+}
+
+.image-preview-panel {
+  position: relative;
+  display: flex;
+  max-height: min(92vh, 900px);
+  width: min(96vw, 1120px);
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 1rem;
+  background: rgb(17 24 39);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.38);
+}
+
+.image-preview-panel img {
+  min-height: 0;
+  max-height: calc(92vh - 4.5rem);
+  width: 100%;
+  object-fit: contain;
+  background: rgb(3 7 18);
+}
+
+.preview-close {
+  position: absolute;
+  right: 0.75rem;
+  top: 0.75rem;
+  z-index: 1;
+  display: inline-flex;
+  height: 2.5rem;
+  width: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: rgb(31 41 55);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.24);
+}
+
+.preview-nav {
+  position: absolute;
+  top: 50%;
+  z-index: 1;
+  display: inline-flex;
+  height: 2.75rem;
+  width: 2.75rem;
+  transform: translateY(-50%);
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  color: rgb(31 41 55);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.28);
+  transition: transform 0.16s ease, background 0.16s ease;
+}
+
+.preview-nav:hover {
+  transform: translateY(-50%) scale(1.04);
+  background: white;
+}
+
+.preview-nav.previous {
+  left: 0.875rem;
+}
+
+.preview-nav.next {
+  right: 0.875rem;
+}
+
+.preview-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.875rem 1rem;
+  color: white;
+}
+
+.preview-summary {
+  min-width: 0;
+  flex: 1;
+}
+
+.preview-summary p {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.875rem;
+  color: rgb(229 231 235);
+}
+
+.preview-details {
+  margin-top: 0.625rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.375rem 0.75rem;
+  font-size: 0.72rem;
+}
+
+.preview-details div {
+  min-width: 0;
+}
+
+.preview-details dt {
+  color: rgb(148 163 184);
+}
+
+.preview-details dd {
+  margin-top: 0.125rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+  color: rgb(243 244 246);
+}
+
+.preview-download {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.375rem;
+  border-radius: 0.625rem;
+  background: white;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: rgb(55 65 81);
+}
+
+@keyframes generation-shimmer {
+  0% {
+    background-position: 0% 50%;
+  }
+
+  100% {
+    background-position: 100% 50%;
+  }
+}
+
+@keyframes generation-progress {
+  from {
+    width: 38%;
+  }
+
+  to {
+    width: 82%;
+  }
 }
 
 @media (min-width: 768px) {

@@ -1,7 +1,7 @@
 import type { ApiKey } from '@/types'
 
 export type ImageQuality = 'auto' | 'low' | 'medium' | 'high'
-export type ImageSize = '1024x1024' | '1024x1536' | '1536x1024'
+export type ImageSize = '1920x1088' | '2560x1440' | '3840x2160'
 
 export interface ImageGenerationPayloadInput {
   model: string
