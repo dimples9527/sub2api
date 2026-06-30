@@ -953,7 +953,8 @@ onBeforeUnmount(() => {
 }
 
 .assistant-bubble {
-  flex: 1 1 auto;
+  width: fit-content;
+  max-width: 100%;
   border-radius: 1.125rem 1.125rem 1.125rem 0.375rem;
   background: rgba(255, 255, 255, 0.9);
 }
