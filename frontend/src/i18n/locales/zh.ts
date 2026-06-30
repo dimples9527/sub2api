@@ -434,6 +434,7 @@
     emptyTitle: '描述你想要的画面',
     emptyDescription: '像聊天一样输入提示词即可生成图片。首版支持文生图，当前页面内保留结果，刷新后不保存历史。',
     promptPlaceholder: '描述你想生成的画面...',
+    editPromptPlaceholder: '描述你想在这张图基础上怎么修改...',
     submitHint: 'Enter 发送，Shift+Enter 换行。生成结果仅在当前页面保留。',
     loadingKeys: '正在加载可用 API Key...',
     noKeys: '暂无可用于图片生成的 OpenAI API Key。请先创建或切换到开启图片生成的 OpenAI 分组。',
@@ -461,6 +462,7 @@
     download: '下载图片',
     viewImage: '放大预览',
     closePreview: '关闭预览',
+    removeReferenceImage: '移除参考图',
     previousImage: '上一张图片',
     nextImage: '下一张图片',
     previewDetails: {

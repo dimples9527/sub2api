@@ -51,10 +51,10 @@
           </div>
         </section>
 
-        <section v-else class="mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-6 sm:px-6">
-          <div v-if="generating" class="generation-status">
+        <section v-else class="chat-thread">
+          <div v-if="generating" class="chat-turn assistant-turn generation-status">
             <div class="status-badge">AI</div>
-            <div class="generation-card">
+            <div class="assistant-bubble generation-card">
               <div class="generation-canvas">
                 <Icon name="sparkles" size="xl" class="animate-pulse text-primary-500 dark:text-primary-300" />
               </div>
@@ -67,65 +67,74 @@
           </div>
 
           <article v-for="item in history" :key="item.id" class="result-group">
-            <div class="flex flex-col gap-2 border-b border-gray-100 px-4 py-3 dark:border-dark-700 sm:flex-row sm:items-center sm:justify-between">
-              <div class="min-w-0">
-                <p class="truncate text-sm font-semibold text-gray-900 dark:text-white">{{ item.prompt }}</p>
+            <div class="chat-turn user-turn">
+              <div class="user-bubble">
+                <p>{{ item.prompt }}</p>
                 <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                   {{ item.model }} / {{ item.size }} / {{ item.quality }} / {{ t('imageGeneration.elapsed', { seconds: item.elapsedSeconds }) }} / {{ formatTime(item.createdAt) }}
                 </p>
               </div>
-              <div class="flex flex-wrap items-center gap-2">
-                <button
-                  class="btn btn-secondary btn-sm"
-                  type="button"
-                  data-testid="continue-edit-image"
-                  @click="continueEdit(item)"
-                >
-                  <Icon name="edit" size="sm" />
-                  {{ t('imageGeneration.continueEdit') }}
-                </button>
-                <button class="btn btn-secondary btn-sm" type="button" @click="reusePrompt(item.prompt)">
-                  <Icon name="copy" size="sm" />
-                  {{ t('imageGeneration.reusePrompt') }}
-                </button>
-                <button
-                  v-if="item.images.length > 1"
-                  class="btn btn-secondary btn-sm"
-                  type="button"
-                  data-testid="download-all-images"
-                  @click="downloadAll(item)"
-                >
-                  <Icon name="download" size="sm" />
-                  {{ t('imageGeneration.downloadAll') }}
-                </button>
-              </div>
             </div>
 
-            <div class="grid gap-4 p-4 sm:grid-cols-2 xl:grid-cols-3">
-              <div v-for="image in item.images" :key="image.id" class="image-card">
-                <button
-                  class="image-preview-trigger"
-                  type="button"
-                  data-testid="generated-image-button"
-                  :title="t('imageGeneration.viewImage')"
-                  @click="openPreview(item, image)"
-                >
-                  <img :src="image.src" :alt="item.prompt" class="h-full w-full object-cover" />
-                </button>
-                <div class="image-actions">
-                  <button class="icon-action" type="button" :title="t('imageGeneration.viewImage')" @click="openPreview(item, image)">
-                    <Icon name="eye" size="sm" />
-                  </button>
-                  <button class="icon-action" type="button" :title="t('imageGeneration.copyImageUrl')" @click="copyImageSource(image.src)">
-                    <Icon name="copy" size="sm" />
-                  </button>
-                  <a class="icon-action" :href="image.src" :download="downloadName(item, image.id)" :title="t('imageGeneration.download')">
-                    <Icon name="download" size="sm" />
-                  </a>
+            <div class="chat-turn assistant-turn">
+              <div class="status-badge">AI</div>
+              <div class="assistant-bubble">
+                <div class="assistant-toolbar">
+                  <span>{{ item.model }}</span>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <button
+                      class="btn btn-secondary btn-sm"
+                      type="button"
+                      data-testid="continue-edit-image"
+                      @click="continueEdit(item)"
+                    >
+                      <Icon name="edit" size="sm" />
+                      {{ t('imageGeneration.continueEdit') }}
+                    </button>
+                    <button class="btn btn-secondary btn-sm" type="button" @click="reusePrompt(item.prompt)">
+                      <Icon name="copy" size="sm" />
+                      {{ t('imageGeneration.reusePrompt') }}
+                    </button>
+                    <button
+                      v-if="item.images.length > 1"
+                      class="btn btn-secondary btn-sm"
+                      type="button"
+                      data-testid="download-all-images"
+                      @click="downloadAll(item)"
+                    >
+                      <Icon name="download" size="sm" />
+                      {{ t('imageGeneration.downloadAll') }}
+                    </button>
+                  </div>
                 </div>
-                <p v-if="image.revisedPrompt" class="line-clamp-2 border-t border-gray-100 px-3 py-2 text-xs text-gray-500 dark:border-dark-700 dark:text-gray-400">
-                  {{ image.revisedPrompt }}
-                </p>
+
+                <div class="image-grid">
+                  <div v-for="image in item.images" :key="image.id" class="image-card">
+                    <button
+                      class="image-preview-trigger"
+                      type="button"
+                      data-testid="generated-image-button"
+                      :title="t('imageGeneration.viewImage')"
+                      @click="openPreview(item, image)"
+                    >
+                      <img :src="image.src" :alt="item.prompt" class="h-full w-full object-cover" />
+                    </button>
+                    <div class="image-actions">
+                      <button class="icon-action" type="button" :title="t('imageGeneration.viewImage')" @click="openPreview(item, image)">
+                        <Icon name="eye" size="sm" />
+                      </button>
+                      <button class="icon-action" type="button" :title="t('imageGeneration.copyImageUrl')" @click="copyImageSource(image.src)">
+                        <Icon name="copy" size="sm" />
+                      </button>
+                      <a class="icon-action" :href="image.src" :download="downloadName(item, image.id)" :title="t('imageGeneration.download')">
+                        <Icon name="download" size="sm" />
+                      </a>
+                    </div>
+                    <p v-if="image.revisedPrompt" class="line-clamp-2 border-t border-gray-100 px-3 py-2 text-xs text-gray-500 dark:border-dark-700 dark:text-gray-400">
+                      {{ image.revisedPrompt }}
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
           </article>
@@ -168,7 +177,7 @@
           <label class="control-pill">
             <Icon name="cpu" size="sm" />
             <span>{{ t('imageGeneration.model') }}</span>
-            <select v-model="form.model" :disabled="generating">
+            <select v-model="form.model" :disabled="generating || loadingModels">
               <option v-for="model in modelOptions" :key="model" :value="model">{{ model }}</option>
             </select>
           </label>
@@ -201,9 +210,25 @@
         </div>
 
         <form class="prompt-box" @submit.prevent="submit">
+          <div
+            v-if="referenceImage"
+            class="reference-image-preview"
+            data-testid="reference-image-preview"
+          >
+            <img :src="referenceImage.src" :alt="referenceImage.prompt" />
+            <button
+              class="reference-remove"
+              type="button"
+              :title="t('imageGeneration.removeReferenceImage')"
+              data-testid="remove-reference-image"
+              @click="clearReferenceImage"
+            >
+              <Icon name="x" size="sm" />
+            </button>
+          </div>
           <textarea
             v-model="prompt"
-            :placeholder="t('imageGeneration.promptPlaceholder')"
+            :placeholder="promptPlaceholder"
             :disabled="generating"
             rows="2"
             @keydown.enter.exact.prevent="submit"
@@ -294,7 +319,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -304,6 +329,8 @@ import { useAppStore } from '@/stores/app'
 import { useClipboard } from '@/composables/useClipboard'
 import {
   buildImageGenerationPayload,
+  fetchImageModelOptions,
+  generateImageEdit,
   generateImages,
   getImageCapableOpenAIKeys,
   type GeneratedImage,
@@ -339,6 +366,13 @@ interface GenerationRequestSnapshot {
   size: ImageSize
   count: number
   quality: ImageQuality
+  referenceImage?: ReferenceImage
+}
+
+interface ReferenceImage {
+  src: string
+  prompt: string
+  imageId: string
 }
 
 const { t } = useI18n()
@@ -347,7 +381,7 @@ const { copyToClipboard } = useClipboard()
 
 const HISTORY_STORAGE_KEY = 'sunshine:image-generation-history'
 const MAX_STORED_HISTORY_ITEMS = 50
-const modelOptions = ['gpt-image-2', 'gpt-image-1']
+const defaultModelOptions = ['gpt-image-2', 'gpt-image-1']
 const sizeOptions: ImageSize[] = ['1920x1088', '2560x1440', '3840x2160']
 const displaySizeOptions: Array<{ value: ImageSize; label: string }> = [
   { value: '1920x1088', label: '1K - 1920x1088' },
@@ -365,6 +399,7 @@ const promptSamples = computed(() => [
 const keys = ref<ApiKey[]>([])
 const selectedKeyId = ref(0)
 const loadingKeys = ref(false)
+const loadingModels = ref(false)
 const generating = ref(false)
 const errorMessage = ref('')
 const history = ref<HistoryItem[]>([])
@@ -373,6 +408,7 @@ const elapsedMs = ref(0)
 const previewDialogId = `image-preview-${Math.random().toString(36).slice(2, 10)}`
 const previewState = ref<{ itemId: string; imageIndex: number } | null>(null)
 const lastFailedRequest = ref<GenerationRequestSnapshot | null>(null)
+const referenceImage = ref<ReferenceImage | null>(null)
 let generationController: AbortController | null = null
 let generationStartAt = 0
 let elapsedTimer: number | null = null
@@ -383,7 +419,7 @@ const form = reactive<{
   count: number
   quality: ImageQuality
 }>({
-  model: modelOptions[0],
+  model: defaultModelOptions[0],
   size: sizeOptions[0],
   count: 1,
   quality: 'auto',
@@ -391,7 +427,11 @@ const form = reactive<{
 
 const availableKeys = computed(() => getImageCapableOpenAIKeys(keys.value))
 const selectedKey = computed(() => availableKeys.value.find((key) => key.id === selectedKeyId.value) ?? null)
+const modelOptions = ref([...defaultModelOptions])
 const canSubmit = computed(() => prompt.value.trim().length > 0 && !!selectedKey.value && !generating.value)
+const promptPlaceholder = computed(() =>
+  referenceImage.value ? t('imageGeneration.editPromptPlaceholder') : t('imageGeneration.promptPlaceholder'),
+)
 const elapsedSeconds = computed(() => (elapsedMs.value / 1000).toFixed(1))
 const generationStageLabel = computed(() => {
   if (elapsedMs.value < 2000) return t('imageGeneration.stage.preparing')
@@ -441,6 +481,33 @@ async function loadKeys() {
   }
 }
 
+async function loadModelOptionsForSelectedKey() {
+  const key = selectedKey.value
+  if (!key) {
+    setModelOptions(defaultModelOptions)
+    return
+  }
+
+  loadingModels.value = true
+  try {
+    const models = await fetchImageModelOptions(key.key)
+    setModelOptions(models.length > 0 ? models : defaultModelOptions)
+  } catch (error) {
+    console.error('Failed to load image model options:', error)
+    setModelOptions(defaultModelOptions)
+  } finally {
+    loadingModels.value = false
+  }
+}
+
+function setModelOptions(models: string[]) {
+  const normalizedModels = models.map((model) => model.trim()).filter(Boolean)
+  modelOptions.value = normalizedModels.length > 0 ? normalizedModels : [...defaultModelOptions]
+  if (!modelOptions.value.includes(form.model)) {
+    form.model = modelOptions.value[0]
+  }
+}
+
 async function submit() {
   if (!canSubmit.value || !selectedKey.value) return
 
@@ -450,13 +517,12 @@ async function submit() {
     size: form.size,
     count: form.count,
     quality: form.quality,
+    referenceImage: referenceImage.value ?? undefined,
   })
 }
 
 async function runGeneration(request: GenerationRequestSnapshot) {
   if (!selectedKey.value) return
-
-  const payload = buildImageGenerationPayload(request)
 
   generationController?.abort()
   generationController = new AbortController()
@@ -466,9 +532,18 @@ async function runGeneration(request: GenerationRequestSnapshot) {
   lastFailedRequest.value = null
 
   try {
-    const images = await generateImages(selectedKey.value.key, payload, {
-      signal: generationController.signal,
-    })
+    const images = request.referenceImage
+      ? await generateImageEdit(
+        selectedKey.value.key,
+        {
+          ...request,
+          image: await sourceToImageFile(request.referenceImage.src, request.referenceImage.imageId),
+        },
+        { signal: generationController.signal },
+      )
+      : await generateImages(selectedKey.value.key, buildImageGenerationPayload(request), {
+        signal: generationController.signal,
+      })
     if (images.length === 0) {
       throw new Error(t('imageGeneration.emptyResponse'))
     }
@@ -484,6 +559,9 @@ async function runGeneration(request: GenerationRequestSnapshot) {
       images,
     })
     persistHistory()
+    if (request.referenceImage) {
+      clearReferenceImage()
+    }
     appStore.showSuccess(t('imageGeneration.generateSuccess'))
   } catch (error) {
     if (isAbortError(error)) return
@@ -524,7 +602,14 @@ function reusePrompt(value: string) {
 }
 
 function continueEdit(item: HistoryItem) {
-  prompt.value = `${t('imageGeneration.continueEditPrefix')}: ${item.prompt}`
+  const firstImage = item.images[0]
+  if (!firstImage) return
+  referenceImage.value = {
+    src: firstImage.src,
+    prompt: firstImage.revisedPrompt || item.prompt,
+    imageId: firstImage.id,
+  }
+  prompt.value = ''
 }
 
 async function retryLastFailedGeneration() {
@@ -534,7 +619,12 @@ async function retryLastFailedGeneration() {
   form.size = lastFailedRequest.value.size
   form.count = lastFailedRequest.value.count
   form.quality = lastFailedRequest.value.quality
+  referenceImage.value = lastFailedRequest.value.referenceImage ?? null
   await runGeneration(lastFailedRequest.value)
+}
+
+function clearReferenceImage() {
+  referenceImage.value = null
 }
 
 async function copyImageSource(src: string) {
@@ -667,6 +757,21 @@ function formatDownloadTimestamp(date: Date) {
   return `${year}${month}${day}-${hour}${minute}${second}`
 }
 
+async function sourceToImageFile(src: string, fallbackId: string) {
+  const response = await fetch(src)
+  const blob = await response.blob()
+  const extension = imageExtensionFromType(blob.type)
+  return new File([blob], `reference-${fallbackId}.${extension}`, {
+    type: blob.type || 'image/png',
+  })
+}
+
+function imageExtensionFromType(type: string) {
+  if (type === 'image/jpeg') return 'jpg'
+  if (type === 'image/webp') return 'webp'
+  return 'png'
+}
+
 function formatTime(date: Date) {
   return new Intl.DateTimeFormat(undefined, {
     hour: '2-digit',
@@ -719,6 +824,9 @@ onMounted(() => {
   loadKeys()
   window.addEventListener('keydown', handlePreviewKeydown)
 })
+watch(selectedKeyId, () => {
+  loadModelOptionsForSelectedKey()
+})
 onBeforeUnmount(() => {
   generationController?.abort()
   stopElapsedTimer()
@@ -748,6 +856,16 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: stretch;
   padding-bottom: 20rem;
+}
+
+.chat-thread {
+  margin: 0 auto;
+  display: flex;
+  width: 100%;
+  max-width: 980px;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding: 1.5rem 1rem;
 }
 
 .empty-panel {
@@ -803,33 +921,67 @@ onBeforeUnmount(() => {
   color: rgb(209 213 219);
 }
 
-.generation-status,
 .result-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.chat-turn {
+  display: flex;
+  width: 100%;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+.assistant-turn {
+  justify-content: flex-start;
+  align-items: flex-start;
+}
+
+.user-turn {
+  justify-content: flex-end;
+}
+
+.assistant-bubble,
+.user-bubble {
+  min-width: 0;
+  max-width: min(100%, 780px);
   overflow: hidden;
-  border-radius: 1.25rem;
-  border: 1px solid rgba(229, 231, 235, 0.8);
-  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(229, 231, 235, 0.9);
   box-shadow: 0 18px 45px rgba(15, 23, 42, 0.07);
 }
 
-.generation-status {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.875rem;
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-  padding: 0;
+.assistant-bubble {
+  flex: 1 1 auto;
+  border-radius: 1.125rem 1.125rem 1.125rem 0.375rem;
+  background: rgba(255, 255, 255, 0.9);
 }
 
-.dark .generation-status,
-.dark .result-group {
-  border-color: rgba(55, 65, 81, 0.8);
-  background: rgba(31, 41, 55, 0.82);
+.user-bubble {
+  border-radius: 1.125rem 1.125rem 0.375rem 1.125rem;
+  background: rgb(238 242 255);
+  padding: 0.875rem 1rem;
+  color: rgb(31 41 55);
 }
 
-.dark .generation-status {
-  background: transparent;
+.user-bubble p:first-child {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.925rem;
+  font-weight: 700;
+  line-height: 1.65;
+}
+
+.dark .assistant-bubble {
+  border-color: rgba(55, 65, 81, 0.84);
+  background: rgba(31, 41, 55, 0.86);
+}
+
+.dark .user-bubble {
+  border-color: rgba(55, 65, 81, 0.9);
+  background: rgba(49, 46, 129, 0.42);
+  color: rgb(243 244 246);
 }
 
 .status-badge {
@@ -849,16 +1001,7 @@ onBeforeUnmount(() => {
 
 .generation-card {
   width: min(100%, 390px);
-  border-radius: 1rem;
-  border: 1px solid rgba(209, 213, 219, 0.9);
-  background: rgba(255, 255, 255, 0.72);
   padding: 0.75rem 0.875rem 0.875rem;
-  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.08);
-}
-
-.dark .generation-card {
-  border-color: rgba(55, 65, 81, 0.9);
-  background: rgba(31, 41, 55, 0.72);
 }
 
 .generation-canvas {
@@ -911,6 +1054,35 @@ onBeforeUnmount(() => {
 .generation-card .generation-hint {
   margin-top: 0.25rem;
   font-weight: 500;
+}
+
+.assistant-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border-bottom: 1px solid rgb(243 244 246);
+  padding: 0.875rem 1rem;
+}
+
+.assistant-toolbar > span {
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: rgb(107 114 128);
+}
+
+.dark .assistant-toolbar {
+  border-color: rgb(55 65 81);
+}
+
+.dark .assistant-toolbar > span {
+  color: rgb(156 163 175);
+}
+
+.image-grid {
+  display: grid;
+  gap: 0.875rem;
+  padding: 0.875rem;
 }
 
 .image-card {
@@ -979,6 +1151,12 @@ onBeforeUnmount(() => {
   backdrop-filter: blur(18px);
 }
 
+.composer-shell > * {
+  margin-left: auto;
+  margin-right: auto;
+  max-width: 980px;
+}
+
 .dark .composer-shell {
   border-color: rgba(55, 65, 81, 0.8);
   background: rgba(9, 13, 22, 0.9);
@@ -1032,9 +1210,47 @@ onBeforeUnmount(() => {
   box-shadow: 0 12px 32px rgba(15, 23, 42, 0.1);
 }
 
+.reference-image-preview {
+  position: relative;
+  height: 3.25rem;
+  width: 3.25rem;
+  flex: 0 0 3.25rem;
+  overflow: visible;
+  border-radius: 0.625rem;
+  border: 1px solid rgb(229 231 235);
+  background: rgb(249 250 251);
+}
+
+.reference-image-preview img {
+  height: 100%;
+  width: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
+.reference-remove {
+  position: absolute;
+  right: -0.5rem;
+  top: -0.5rem;
+  display: inline-flex;
+  height: 1.25rem;
+  width: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgb(239 68 68);
+  color: white;
+  box-shadow: 0 6px 14px rgba(185, 28, 28, 0.28);
+}
+
 .dark .prompt-box {
   border-color: rgb(55 65 81);
   background: rgb(31 41 55);
+}
+
+.dark .reference-image-preview {
+  border-color: rgb(55 65 81);
+  background: rgb(17 24 39);
 }
 
 .prompt-box textarea {
@@ -1247,6 +1463,23 @@ onBeforeUnmount(() => {
   .image-workspace {
     padding-bottom: 15rem;
   }
+
+  .chat-thread {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+
+  .assistant-toolbar {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .image-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    padding: 1rem;
+  }
 }
 
 @media (min-width: 1024px) {
@@ -1261,6 +1494,15 @@ onBeforeUnmount(() => {
 
   .image-workspace {
     padding-bottom: 13.5rem;
+  }
+
+  .chat-thread {
+    padding-left: 2rem;
+    padding-right: 2rem;
+  }
+
+  .image-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 </style>

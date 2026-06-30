@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { ApiKey } from '@/types'
 import {
+  buildImageEditFormData,
   buildImageGenerationPayload,
+  fetchImageModelOptions,
+  generateImageEdit,
   getImageCapableOpenAIKeys,
   parseImageGenerationResponse,
 } from './imageGeneration'
@@ -84,6 +87,69 @@ describe('imageGeneration helpers', () => {
     })
   })
 
+  it('builds an OpenAI image edits form data payload', async () => {
+    const file = new File(['image-bytes'], 'reference.png', { type: 'image/png' })
+    const formData = buildImageEditFormData({
+      model: 'gpt-image-2',
+      prompt: '  make it rainy  ',
+      size: '1920x1088',
+      count: 1,
+      quality: 'medium',
+      image: file,
+    })
+
+    expect(formData.get('model')).toBe('gpt-image-2')
+    expect(formData.get('prompt')).toBe('make it rainy')
+    expect(formData.get('size')).toBe('1920x1088')
+    expect(formData.get('n')).toBe('1')
+    expect(formData.get('quality')).toBe('medium')
+    expect(formData.get('response_format')).toBe('b64_json')
+    expect(formData.get('image')).toBe(file)
+  })
+
+  it('submits image edits as multipart form data', async () => {
+    const originalFetch = globalThis.fetch
+    const file = new File(['image-bytes'], 'reference.png', { type: 'image/png' })
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        data: [{ b64_json: 'edited123', revised_prompt: 'edited prompt' }],
+      }),
+    })
+    globalThis.fetch = fetchMock
+
+    try {
+      const images = await generateImageEdit(
+        'sk-test',
+        {
+          model: 'gpt-image-2',
+          prompt: 'make it rainy',
+          size: '1920x1088',
+          count: 1,
+          quality: 'medium',
+          image: file,
+        },
+      )
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/v1/images/edits',
+        expect.objectContaining({
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer sk-test',
+          },
+          body: expect.any(FormData),
+        }),
+      )
+      expect(images[0]).toMatchObject({
+        src: 'data:image/png;base64,edited123',
+        revisedPrompt: 'edited prompt',
+      })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
   it('parses base64 and url image responses', () => {
     const parsed = parseImageGenerationResponse({
       data: [
@@ -128,5 +194,36 @@ describe('imageGeneration helpers', () => {
     ]
 
     expect(getImageCapableOpenAIKeys(keys).map((key) => key.id)).toEqual([1])
+  })
+
+  it('fetches image model options for the selected API key', async () => {
+    const originalFetch = globalThis.fetch
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        data: [
+          { id: 'gpt-5.4' },
+          { id: 'gpt-image-2' },
+          { id: 'gpt-image-1' },
+          { id: 'gpt-image-2' },
+          { id: '  ' },
+        ],
+      }),
+    })
+    globalThis.fetch = fetchMock
+
+    try {
+      await expect(fetchImageModelOptions('sk-test')).resolves.toEqual(['gpt-image-2', 'gpt-image-1'])
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/v1/models',
+        expect.objectContaining({
+          headers: {
+            Authorization: 'Bearer sk-test',
+          },
+        }),
+      )
+    } finally {
+      globalThis.fetch = originalFetch
+    }
   })
 })

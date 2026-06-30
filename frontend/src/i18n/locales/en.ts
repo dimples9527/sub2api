@@ -434,6 +434,7 @@ export default {
     emptyTitle: 'Describe the image you want',
     emptyDescription: 'Enter a prompt like a chat message to generate images. The first version supports text-to-image and keeps results only on this page.',
     promptPlaceholder: 'Describe the image you want to generate...',
+    editPromptPlaceholder: 'Describe how you want to edit this image...',
     submitHint: 'Enter to send, Shift+Enter for a new line. Results stay only on the current page.',
     loadingKeys: 'Loading available API Keys...',
     noKeys: 'No OpenAI API Key is available for image generation. Create one or switch to an OpenAI group with image generation enabled.',
@@ -461,6 +462,7 @@ export default {
     download: 'Download image',
     viewImage: 'Preview image',
     closePreview: 'Close preview',
+    removeReferenceImage: 'Remove reference image',
     previousImage: 'Previous image',
     nextImage: 'Next image',
     previewDetails: {

@@ -6,6 +6,24 @@ const mocks = vi.hoisted(() => ({
   showError: vi.fn(),
   showSuccess: vi.fn(),
   generateImages: vi.fn(),
+  generateImageEdit: vi.fn(),
+  fetchImageModelOptions: vi.fn(),
+}))
+
+const keyList = vi.hoisted(() => ({
+  items: [
+    {
+      id: 7,
+      key: 'sk-test',
+      name: 'OpenAI key',
+      status: 'active',
+      group: {
+        name: 'OpenAI',
+        platform: 'openai',
+        allow_image_generation: true,
+      },
+    },
+  ],
 }))
 
 vi.mock('@/stores/app', () => ({
@@ -23,21 +41,7 @@ vi.mock('@/composables/useClipboard', () => ({
 
 vi.mock('@/api/keys', () => ({
   default: {
-    list: vi.fn().mockResolvedValue({
-      items: [
-        {
-          id: 7,
-          key: 'sk-test',
-          name: 'OpenAI key',
-          status: 'active',
-          group: {
-            name: 'OpenAI',
-            platform: 'openai',
-            allow_image_generation: true,
-          },
-        },
-      ],
-    }),
+    list: vi.fn().mockImplementation(async () => ({ items: keyList.items })),
   },
 }))
 
@@ -46,6 +50,8 @@ vi.mock('@/api/imageGeneration', async () => {
   return {
     ...actual,
     generateImages: mocks.generateImages,
+    generateImageEdit: mocks.generateImageEdit,
+    fetchImageModelOptions: mocks.fetchImageModelOptions,
   }
 })
 
@@ -76,6 +82,8 @@ vi.mock('vue-i18n', async () => {
           'imageGeneration.download': 'Download',
           'imageGeneration.viewImage': 'Preview',
           'imageGeneration.closePreview': 'Close preview',
+          'imageGeneration.removeReferenceImage': 'Remove reference image',
+          'imageGeneration.editPromptPlaceholder': 'Describe how to edit this image',
           'imageGeneration.previewDetails.model': 'Model',
           'imageGeneration.previewDetails.size': 'Size',
           'imageGeneration.previewDetails.quality': 'Quality',
@@ -122,6 +130,14 @@ describe('ImageGenerationView', () => {
         revisedPrompt: '',
       },
     ])
+    mocks.generateImageEdit.mockResolvedValue([
+      {
+        id: 'image-edit-1',
+        src: 'data:image/png;base64,edited123',
+        revisedPrompt: '',
+      },
+    ])
+    mocks.fetchImageModelOptions.mockResolvedValue(['gpt-image-3', 'gpt-image-2'])
   })
 
   afterEach(() => {
@@ -152,6 +168,76 @@ describe('ImageGenerationView', () => {
     const dialog = document.body.querySelector('[data-testid="image-preview-dialog"]')
     expect(dialog).not.toBeNull()
     expect(dialog?.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,abc123')
+  })
+
+  it('renders generated results as a chat-style exchange', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('textarea').setValue('draw a mountain sunrise')
+    await wrapper.find('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(wrapper.find('.chat-turn.user-turn').text()).toContain('draw a mountain sunrise')
+    expect(wrapper.find('.chat-turn.assistant-turn').exists()).toBe(true)
+    expect(wrapper.find('.assistant-bubble [data-testid="generated-image-button"]').exists()).toBe(true)
+  })
+
+  it('loads image models for the selected image-capable key', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(mocks.fetchImageModelOptions).toHaveBeenCalledWith('sk-test')
+    await flushPromises()
+    const selects = wrapper.findAll('select')
+    const imageModelSelect = selects[1].element as HTMLSelectElement
+    expect(Array.from(imageModelSelect.options).map((option) => option.value)).toEqual(['gpt-image-3', 'gpt-image-2'])
+
+    await wrapper.find('textarea').setValue('draw a mountain sunrise')
+    await wrapper.find('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(mocks.generateImages.mock.calls[0][1]).toMatchObject({
+      model: 'gpt-image-2',
+    })
+  })
+
+  it('falls back to default image models when the key is not image capable', async () => {
+    keyList.items = [
+      {
+        id: 8,
+        key: 'sk-no-image',
+        name: 'Text key',
+        status: 'active',
+        group: {
+          name: 'OpenAI',
+          platform: 'openai',
+          allow_image_generation: false,
+        },
+      },
+    ]
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(mocks.fetchImageModelOptions).not.toHaveBeenCalled()
+    const selects = wrapper.findAll('select')
+    const imageModelSelect = selects[1].element as HTMLSelectElement
+    expect(Array.from(imageModelSelect.options).map((option) => option.value)).toEqual(['gpt-image-2', 'gpt-image-1'])
+
+    keyList.items = [
+      {
+        id: 7,
+        key: 'sk-test',
+        name: 'OpenAI key',
+        status: 'active',
+        group: {
+          name: 'OpenAI',
+          platform: 'openai',
+          allow_image_generation: true,
+        },
+      },
+    ]
   })
 
   it('shows elapsed time while generation is still running', async () => {
@@ -255,8 +341,40 @@ describe('ImageGenerationView', () => {
     expect(wrapper.find('[data-testid="download-all-images"]').exists()).toBe(true)
 
     await wrapper.find('[data-testid="continue-edit-image"]').trigger('click')
-    expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toContain('Continue editing')
-    expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toContain('draw a mountain sunrise')
+    expect(wrapper.find('[data-testid="reference-image-preview"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="reference-image-preview"] img').attributes('src')).toBe('data:image/png;base64,abc123')
+    expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe('')
+    expect(wrapper.find('textarea').attributes('placeholder')).toBe('Describe how to edit this image')
+  })
+
+  it('submits edits with the selected reference image and can remove it', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('textarea').setValue('draw a mountain sunrise')
+    await wrapper.find('form').trigger('submit.prevent')
+    await flushPromises()
+
+    await wrapper.find('[data-testid="continue-edit-image"]').trigger('click')
+    await wrapper.find('textarea').setValue('make the sky rainy')
+    await wrapper.find('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(mocks.generateImageEdit).toHaveBeenCalledTimes(1)
+    expect(mocks.generateImageEdit.mock.calls[0][1]).toMatchObject({
+      model: 'gpt-image-2',
+      prompt: 'make the sky rainy',
+      size: '1920x1088',
+      count: 1,
+      quality: 'auto',
+    })
+    expect(mocks.generateImageEdit.mock.calls[0][1].image).toBeInstanceOf(File)
+    expect(wrapper.text()).toContain('make the sky rainy')
+
+    await wrapper.find('[data-testid="continue-edit-image"]').trigger('click')
+    await wrapper.find('[data-testid="remove-reference-image"]').trigger('click')
+    expect(wrapper.find('[data-testid="reference-image-preview"]').exists()).toBe(false)
+    expect(wrapper.find('textarea').attributes('placeholder')).toBe('Describe the image')
   })
 
   it('persists generated history in localStorage and restores it on the next mount', async () => {

@@ -11,6 +11,10 @@ export interface ImageGenerationPayloadInput {
   quality: ImageQuality
 }
 
+export interface ImageEditPayloadInput extends ImageGenerationPayloadInput {
+  image: File
+}
+
 export interface ImageGenerationPayload {
   model: string
   prompt: string
@@ -36,6 +40,14 @@ interface OpenAIImageResponse {
   data?: OpenAIImageResponseItem[]
 }
 
+interface OpenAIModelsResponseItem {
+  id?: string
+}
+
+interface OpenAIModelsResponse {
+  data?: OpenAIModelsResponseItem[]
+}
+
 export function buildImageGenerationPayload(input: ImageGenerationPayloadInput): ImageGenerationPayload {
   return {
     model: input.model.trim(),
@@ -45,6 +57,18 @@ export function buildImageGenerationPayload(input: ImageGenerationPayloadInput):
     quality: input.quality,
     response_format: 'b64_json',
   }
+}
+
+export function buildImageEditFormData(input: ImageEditPayloadInput): FormData {
+  const formData = new FormData()
+  formData.append('model', input.model.trim())
+  formData.append('prompt', input.prompt.trim())
+  formData.append('size', input.size)
+  formData.append('n', String(input.count))
+  formData.append('quality', input.quality)
+  formData.append('response_format', 'b64_json')
+  formData.append('image', input.image)
+  return formData
 }
 
 export function parseImageGenerationResponse(response: OpenAIImageResponse): GeneratedImage[] {
@@ -74,6 +98,46 @@ export function getImageCapableOpenAIKeys(keys: ApiKey[]): ApiKey[] {
   })
 }
 
+export async function fetchImageModelOptions(
+  apiKey: string,
+  options?: { signal?: AbortSignal },
+): Promise<string[]> {
+  const response = await fetch('/v1/models', {
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+    },
+    signal: options?.signal,
+  })
+
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    const message =
+      data?.error?.message ||
+      data?.message ||
+      data?.detail ||
+      `Model list failed with status ${response.status}`
+    throw new Error(message)
+  }
+
+  return parseImageModelOptions(data)
+}
+
+export function parseImageModelOptions(response: OpenAIModelsResponse): string[] {
+  const seen = new Set<string>()
+  const models: string[] = []
+
+  for (const item of response.data ?? []) {
+    const model = item.id?.trim()
+    if (!model || !model.toLowerCase().startsWith('gpt-image-') || seen.has(model)) {
+      continue
+    }
+    seen.add(model)
+    models.push(model)
+  }
+
+  return models
+}
+
 export async function generateImages(
   apiKey: string,
   payload: ImageGenerationPayload,
@@ -96,6 +160,33 @@ export async function generateImages(
       data?.message ||
       data?.detail ||
       `Image generation failed with status ${response.status}`
+    throw new Error(message)
+  }
+
+  return parseImageGenerationResponse(data)
+}
+
+export async function generateImageEdit(
+  apiKey: string,
+  payload: ImageEditPayloadInput,
+  options?: { signal?: AbortSignal },
+): Promise<GeneratedImage[]> {
+  const response = await fetch('/v1/images/edits', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: buildImageEditFormData(payload),
+    signal: options?.signal,
+  })
+
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    const message =
+      data?.error?.message ||
+      data?.message ||
+      data?.detail ||
+      `Image edit failed with status ${response.status}`
     throw new Error(message)
   }
 
