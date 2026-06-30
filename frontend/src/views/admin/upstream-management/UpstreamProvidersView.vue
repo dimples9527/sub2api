@@ -283,15 +283,6 @@
                 <span v-if="row.is_default" class="provider-default-tag">
                   {{ t('admin.upstreamProviders.defaultProvider') }}
                 </span>
-                <label class="provider-inline-toggle" @click.stop>
-                  <Toggle
-                    :model-value="row.enabled"
-                    @update:model-value="toggleProviderEnabled(row, $event)"
-                  />
-                  <span :class="['provider-enabled-text', row.enabled ? 'is-enabled' : 'is-disabled']">
-                    {{ row.enabled ? t('common.enabled') : t('common.disabled') }}
-                  </span>
-                </label>
               </div>
               <button
                 type="button"
@@ -1976,10 +1967,6 @@ onMounted(reload)
 
 .provider-default-tag {
   @apply bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300;
-}
-
-.provider-inline-toggle {
-  @apply inline-flex h-6 items-center gap-1.5 rounded bg-gray-50 px-1.5 dark:bg-dark-700;
 }
 
 .provider-inline-url {

@@ -246,7 +246,7 @@ func (s *UpstreamAccountSyncService) SetPreviewCache(cache UpstreamAccountSyncPr
 func (s *UpstreamAccountSyncService) Preview(ctx context.Context) (UpstreamAccountSyncResult, error) {
 	if s != nil && s.previewCache != nil {
 		if result, ok, err := s.previewCache.Get(ctx); err == nil && ok {
-			result = s.filterCachedResultByEnabledProviders(ctx, result)
+			result = s.applyCachedProviderState(ctx, result)
 			records, err := s.ListRecords(ctx)
 			if err != nil {
 				return UpstreamAccountSyncResult{}, err
@@ -270,7 +270,7 @@ func (s *UpstreamAccountSyncService) Preview(ctx context.Context) (UpstreamAccou
 	return result, nil
 }
 
-func (s *UpstreamAccountSyncService) filterCachedResultByEnabledProviders(ctx context.Context, result UpstreamAccountSyncResult) UpstreamAccountSyncResult {
+func (s *UpstreamAccountSyncService) applyCachedProviderState(ctx context.Context, result UpstreamAccountSyncResult) UpstreamAccountSyncResult {
 	source, ok := s.providerSource.(interface {
 		ListProviders(context.Context) ([]UpstreamProviderConfig, error)
 	})
@@ -279,57 +279,22 @@ func (s *UpstreamAccountSyncService) filterCachedResultByEnabledProviders(ctx co
 	}
 	providers, err := source.ListProviders(ctx)
 	if err != nil {
-		logger.LegacyPrintf("service.upstream_account_sync", "Warning: filter cached preview providers failed: %v", err)
+		logger.LegacyPrintf("service.upstream_account_sync", "Warning: refresh cached preview providers failed: %v", err)
 		return result
 	}
-	enabled := make(map[string]UpstreamProviderConfig, len(providers))
+	current := make(map[string]UpstreamProviderConfig, len(providers))
 	for _, provider := range providers {
-		if provider.Slug == "" || provider.IsDefault || !provider.Enabled {
+		if provider.Slug == "" || provider.IsDefault {
 			continue
 		}
-		enabled[provider.Slug] = provider
+		current[provider.Slug] = provider
 	}
-	filteredProviders := make([]UpstreamProviderConfig, 0, len(result.Providers))
-	for _, provider := range result.Providers {
-		if _, ok := enabled[provider.Slug]; ok {
-			filteredProviders = append(filteredProviders, provider)
+	for index := range result.Providers {
+		if provider, ok := current[result.Providers[index].Slug]; ok {
+			result.Providers[index].Enabled = provider.Enabled
 		}
 	}
-	filteredItems := make([]UpstreamAccountSyncItem, 0, len(result.Items))
-	for _, item := range result.Items {
-		if _, ok := enabled[item.ProviderSlug]; ok {
-			filteredItems = append(filteredItems, item)
-		}
-	}
-	result.Providers = filteredProviders
-	result.Items = filteredItems
-	result.Summary = upstreamAccountSyncSummaryFromItems(filteredItems)
 	return result
-}
-
-func upstreamAccountSyncSummaryFromItems(items []UpstreamAccountSyncItem) UpstreamAccountSyncSummary {
-	var summary UpstreamAccountSyncSummary
-	for _, item := range items {
-		summary.UpstreamKeyCount++
-		if item.MatchedAccountID != nil {
-			summary.MatchedAccountCount++
-		}
-		switch item.Action {
-		case UpstreamAccountSyncActionCreate:
-			summary.CreateCount++
-		case UpstreamAccountSyncActionUpdate:
-			summary.UpdateCount++
-		case UpstreamAccountSyncActionSkip:
-			summary.SkipCount++
-		case UpstreamAccountSyncActionConflict:
-			summary.ConflictCount++
-		}
-		if item.RateViolation {
-			summary.RateViolationCount++
-		}
-		summary.UnboundGroupCount += len(item.UnboundGroupIDs)
-	}
-	return summary
 }
 
 func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccountSyncRequest) (UpstreamAccountSyncResult, error) {
@@ -934,7 +899,7 @@ func (s *UpstreamAccountSyncService) listAccountSyncProviders(ctx context.Contex
 	}
 	out := make([]UpstreamProviderConfig, 0, len(providers))
 	for _, provider := range providers {
-		if provider.Slug == "" || provider.Slug == defaultProvider.Slug || provider.IsDefault || !provider.Enabled {
+		if provider.Slug == "" || provider.Slug == defaultProvider.Slug || provider.IsDefault {
 			continue
 		}
 		provider = s.hydrateStoredProvider(ctx, provider)

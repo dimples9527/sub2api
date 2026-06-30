@@ -340,10 +340,10 @@
                   <button
                     type="button"
                     class="schedulable-toggle"
-                    :disabled="togglingSchedulableId === getMatchedAccount(row)!.id"
+                    :disabled="isSchedulableToggleDisabled(row)"
                     :class="[getMatchedAccount(row)!.schedulable ? 'schedulable-on' : 'schedulable-off']"
-                    :title="getMatchedAccount(row)!.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')"
-                    @click="handleToggleSchedulable(getMatchedAccount(row)!)"
+                    :title="schedulableToggleTitle(row)"
+                    @click="handleToggleSchedulable(getMatchedAccount(row)!, row)"
                   >
                     <span class="schedulable-track">
                       <span
@@ -1111,6 +1111,7 @@ import type {
   UpstreamAccountSyncUnbindDetail,
   UpstreamBalanceConsumptionOverview,
 } from '@/api/admin/upstreamAccountSync'
+import type { UpstreamProviderConfig } from '@/api/admin/upstreamProviders'
 import type {
   Account,
   AdminGroup,
@@ -1253,6 +1254,15 @@ const emptySummary = {
 
 const summary = computed(() => result.value?.summary || emptySummary)
 const syncProviders = computed(() => result.value?.providers || [])
+const syncProviderBySlug = computed(() => {
+  const bySlug = new Map<string, UpstreamProviderConfig>()
+  for (const provider of syncProviders.value) {
+    if (provider.slug) {
+      bySlug.set(provider.slug, provider)
+    }
+  }
+  return bySlug
+})
 const items = computed<UpstreamAccountSyncItem[]>(() => result.value?.items || [])
 const warnings = computed(() => result.value?.warnings || [])
 const records = computed<UpstreamAccountSyncRecord[]>(() => result.value?.records || [])
@@ -1757,6 +1767,25 @@ function getMatchedAccount(row: UpstreamAccountSyncItem) {
   const accountId = Number(row.matched_account_id)
   if (!Number.isFinite(accountId) || accountId <= 0) return null
   return matchedAccountsById.value[accountId] || null
+}
+
+function isProviderDisabled(row: UpstreamAccountSyncItem) {
+  const provider = syncProviderBySlug.value.get(row.provider_slug)
+  return provider?.enabled === false
+}
+
+function isSchedulableToggleDisabled(row: UpstreamAccountSyncItem) {
+  const account = getMatchedAccount(row)
+  if (!account) return true
+  return togglingSchedulableId.value === account.id || isProviderDisabled(row)
+}
+
+function schedulableToggleTitle(row: UpstreamAccountSyncItem) {
+  if (isProviderDisabled(row)) {
+    return `${row.provider_name || row.provider_slug} ${t('common.disabled')}`
+  }
+  const account = getMatchedAccount(row)
+  return account?.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')
 }
 
 function accountRowClass(row: UpstreamAccountSyncItem) {
@@ -2291,7 +2320,8 @@ function updateMatchedAccount(account: Account) {
   }
 }
 
-async function handleToggleSchedulable(account: Account) {
+async function handleToggleSchedulable(account: Account, row?: UpstreamAccountSyncItem) {
+  if (row && isProviderDisabled(row)) return
   togglingSchedulableId.value = account.id
   try {
     const updated = await adminAPI.accounts.setSchedulable(account.id, !account.schedulable)
@@ -3566,6 +3596,11 @@ onBeforeUnmount(() => {
   border: 0;
   background: transparent;
   padding: 0;
+}
+
+.schedulable-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .schedulable-track {

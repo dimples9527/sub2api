@@ -247,7 +247,7 @@ func TestUpstreamAccountSyncPreviewReturnsCachedSnapshotWithoutFetchingProviders
 	}
 }
 
-func TestUpstreamAccountSyncPreviewFiltersDisabledProvidersFromCachedSnapshot(t *testing.T) {
+func TestUpstreamAccountSyncPreviewKeepsDisabledProvidersFromCachedSnapshot(t *testing.T) {
 	provider := &upstreamAccountSyncProviderSourceStub{
 		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},
 		providers: []UpstreamProviderConfig{
@@ -278,14 +278,17 @@ func TestUpstreamAccountSyncPreviewFiltersDisabledProvidersFromCachedSnapshot(t 
 	if err != nil {
 		t.Fatalf("Preview returned error: %v", err)
 	}
-	if len(result.Providers) != 1 || result.Providers[0].Slug != "enabled" {
-		t.Fatalf("providers = %+v, want only enabled provider", result.Providers)
+	if len(result.Providers) != 2 {
+		t.Fatalf("providers = %+v, want enabled and disabled providers", result.Providers)
 	}
-	if len(result.Items) != 1 || result.Items[0].ProviderSlug != "enabled" {
-		t.Fatalf("items = %+v, want only enabled provider item", result.Items)
+	if result.Providers[1].Slug != "disabled" || result.Providers[1].Enabled {
+		t.Fatalf("disabled provider = %+v, want disabled provider retained with enabled=false", result.Providers[1])
 	}
-	if result.Summary.UpstreamKeyCount != 1 || result.Summary.CreateCount != 1 {
-		t.Fatalf("summary = %+v, want recomputed summary for enabled items", result.Summary)
+	if len(result.Items) != 2 || result.Items[1].ProviderSlug != "disabled" {
+		t.Fatalf("items = %+v, want disabled provider item retained", result.Items)
+	}
+	if result.Summary.UpstreamKeyCount != 2 || result.Summary.CreateCount != 2 {
+		t.Fatalf("summary = %+v, want cached summary retained for all items", result.Summary)
 	}
 }
 

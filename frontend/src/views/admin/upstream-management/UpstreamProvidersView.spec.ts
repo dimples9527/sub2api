@@ -174,6 +174,7 @@ describe('UpstreamProvidersView', () => {
                 h('div', { class: 'columns' }, props.columns.map((column: any) => column.key).join(',')),
                 h('div', { class: 'homepage-cell' }, slots['cell-homepage']?.({ row })),
                 h('div', { class: 'name-cell' }, slots['cell-name']?.({ row })),
+                h('div', { class: 'enabled-cell' }, slots['cell-enabled']?.({ row })),
                 h('div', { class: 'balance-cell' }, slots['cell-balance']?.({ row })),
                 h('div', { class: 'today-cost-cell' }, slots['cell-today_consumption']?.({ row })),
                 h('div', { class: 'actions-cell' }, slots['cell-actions']?.({ row })),
@@ -196,7 +197,8 @@ describe('UpstreamProvidersView', () => {
     expect(wrapper.find('.columns').text()).toBe('homepage,name,enabled,sort_order,interface,prefix,rate_scale,temp_disable_minutes,balance,today_consumption,actions')
     expect(wrapper.find('.provider-name-card').exists()).toBe(true)
     expect(wrapper.find('.provider-type-tag').exists()).toBe(true)
-    expect(wrapper.find('.provider-name-card [role="switch"]').exists()).toBe(true)
+    expect(wrapper.find('.provider-name-card [role="switch"]').exists()).toBe(false)
+    expect(wrapper.find('.enabled-cell [role="switch"]').exists()).toBe(true)
 
     const homepage = wrapper.find('a[href="https://upstream.example.com"]')
     expect(homepage.exists()).toBe(true)
