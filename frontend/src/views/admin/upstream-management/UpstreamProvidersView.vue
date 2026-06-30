@@ -283,9 +283,15 @@
                 <span v-if="row.is_default" class="provider-default-tag">
                   {{ t('admin.upstreamProviders.defaultProvider') }}
                 </span>
-                <span :class="['provider-enabled-tag', row.enabled ? 'is-enabled' : 'is-disabled']">
-                  {{ row.enabled ? t('common.enabled') : t('common.disabled') }}
-                </span>
+                <label class="provider-inline-toggle" @click.stop>
+                  <Toggle
+                    :model-value="row.enabled"
+                    @update:model-value="toggleProviderEnabled(row, $event)"
+                  />
+                  <span :class="['provider-enabled-text', row.enabled ? 'is-enabled' : 'is-disabled']">
+                    {{ row.enabled ? t('common.enabled') : t('common.disabled') }}
+                  </span>
+                </label>
               </div>
               <button
                 type="button"
@@ -1956,8 +1962,7 @@ onMounted(reload)
 }
 
 .provider-type-tag,
-.provider-default-tag,
-.provider-enabled-tag {
+.provider-default-tag {
   @apply inline-flex h-6 items-center gap-1 rounded px-1.5 text-xs leading-none;
 }
 
@@ -1973,17 +1978,8 @@ onMounted(reload)
   @apply bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300;
 }
 
-.provider-enabled-tag.is-enabled {
-  @apply bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-300;
-}
-
-.provider-enabled-tag.is-enabled::before {
-  @apply h-2 w-2 rounded-full bg-emerald-500;
-  content: '';
-}
-
-.provider-enabled-tag.is-disabled {
-  @apply bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-gray-300;
+.provider-inline-toggle {
+  @apply inline-flex h-6 items-center gap-1.5 rounded bg-gray-50 px-1.5 dark:bg-dark-700;
 }
 
 .provider-inline-url {

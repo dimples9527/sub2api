@@ -196,7 +196,7 @@ describe('UpstreamProvidersView', () => {
     expect(wrapper.find('.columns').text()).toBe('homepage,name,enabled,sort_order,interface,prefix,rate_scale,temp_disable_minutes,balance,today_consumption,actions')
     expect(wrapper.find('.provider-name-card').exists()).toBe(true)
     expect(wrapper.find('.provider-type-tag').exists()).toBe(true)
-    expect(wrapper.find('.provider-enabled-tag').exists()).toBe(true)
+    expect(wrapper.find('.provider-name-card [role="switch"]').exists()).toBe(true)
 
     const homepage = wrapper.find('a[href="https://upstream.example.com"]')
     expect(homepage.exists()).toBe(true)
