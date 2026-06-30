@@ -542,7 +542,7 @@ func (s *UpstreamAccountSyncService) runMatchedAccountRateGuard(ctx context.Cont
 
 	now := time.Now().UTC()
 	recordStats, recordOrder := newUpstreamAccountSyncRecordStats(result)
-	if err := s.disableAccountsForDisabledProviders(ctx, previewState.accountByID); err != nil {
+	if err := s.disableAccountsForDisabledProviders(ctx, previewState.accountByID, result.Items); err != nil {
 		return s.finishSyncWithError(ctx, result, triggerSource, recordStats, recordOrder, "", err)
 	}
 	for index := range result.Items {
@@ -594,7 +594,7 @@ func (s *UpstreamAccountSyncService) runMatchedAccountRateGuard(ctx context.Cont
 	return result, nil
 }
 
-func (s *UpstreamAccountSyncService) disableAccountsForDisabledProviders(ctx context.Context, accounts map[int64]Account) error {
+func (s *UpstreamAccountSyncService) disableAccountsForDisabledProviders(ctx context.Context, accounts map[int64]Account, items []UpstreamAccountSyncItem) error {
 	if len(accounts) == 0 || s == nil || s.accountManager == nil {
 		return nil
 	}
@@ -602,6 +602,7 @@ func (s *UpstreamAccountSyncService) disableAccountsForDisabledProviders(ctx con
 	if len(disabledProviders) == 0 {
 		return nil
 	}
+	accountIDsToDisable := map[int64]struct{}{}
 	for _, account := range accounts {
 		if !account.Schedulable {
 			continue
@@ -613,7 +614,24 @@ func (s *UpstreamAccountSyncService) disableAccountsForDisabledProviders(ctx con
 		if _, disabled := disabledProviders[providerSlug]; !disabled {
 			continue
 		}
-		if _, err := s.accountManager.SetAccountSchedulable(ctx, account.ID, false); err != nil {
+		accountIDsToDisable[account.ID] = struct{}{}
+	}
+	for _, item := range items {
+		if item.MatchedAccountID == nil {
+			continue
+		}
+		if _, disabled := disabledProviders[item.ProviderSlug]; !disabled {
+			continue
+		}
+		accountID := *item.MatchedAccountID
+		account, ok := accounts[accountID]
+		if !ok || !account.Schedulable {
+			continue
+		}
+		accountIDsToDisable[accountID] = struct{}{}
+	}
+	for accountID := range accountIDsToDisable {
+		if _, err := s.accountManager.SetAccountSchedulable(ctx, accountID, false); err != nil {
 			return err
 		}
 	}

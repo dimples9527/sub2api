@@ -1241,6 +1241,50 @@ func TestUpstreamAccountRateGuardDisablesAccountsFromDisabledProviders(t *testin
 	}
 }
 
+func TestUpstreamAccountRateGuardDisablesMatchedAccountsFromDisabledProvidersWithoutExtraSlug(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup", AccountNamePrefix: "up-", Enabled: false},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {
+				{ProviderSlug: "backup", KeyName: "matched", GroupName: "VIP", RateMultiplier: 1},
+			},
+		},
+	}
+	svc, accounts := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 1, Status: StatusActive}},
+		[]Account{{
+			ID:          10,
+			Name:        "up-matched",
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Status:      StatusActive,
+			Schedulable: true,
+			GroupIDs:    []int64{7},
+		}},
+		newUpstreamManagementSettingRepoStub(),
+	)
+
+	cfg, err := svc.RunScheduledRateGuard(context.Background())
+	if err != nil {
+		t.Fatalf("RunScheduledRateGuard returned error: %v", err)
+	}
+	if cfg.LastRunAt == nil || cfg.LastRunStatus != "success" {
+		t.Fatalf("run config = %+v, want successful last run", cfg)
+	}
+	if len(accounts.setSchedulableInputs) != 1 {
+		t.Fatalf("set schedulable calls = %+v, want one call for matched account without extra slug", accounts.setSchedulableInputs)
+	}
+	call := accounts.setSchedulableInputs[0]
+	if call.id != 10 || call.schedulable {
+		t.Fatalf("set schedulable call = %+v, want account 10 disabled", call)
+	}
+}
+
 func TestUpstreamAccountSyncRunDoesNotPersistRecordsWithoutUnbindDetails(t *testing.T) {
 	provider := &upstreamAccountSyncProviderSourceStub{
 		defaultProvider: UpstreamProviderConfig{
