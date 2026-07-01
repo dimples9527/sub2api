@@ -731,7 +731,7 @@ function finalizeNav(items: NavItem[]): NavItem[] {
 // User navigation items (for regular users)
 const userNavItems = computed((): NavItem[] => finalizeNav(buildSelfNavItems({
   withDashboard: true,
-  includeImageGeneration: false,
+  includeImageGeneration: true,
 })))
 
 // Personal navigation items (for admin's "My Account" section, without Dashboard).

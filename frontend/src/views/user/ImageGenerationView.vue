@@ -1082,6 +1082,7 @@ onBeforeUnmount(() => {
 
 .image-grid {
   display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 0.875rem;
   padding: 0.875rem;
 }
@@ -1093,6 +1094,7 @@ onBeforeUnmount(() => {
   border: 1px solid rgb(229 231 235);
   background: rgb(249 250 251);
   aspect-ratio: 16 / 9;
+  max-width: 100%;
 }
 
 .dark .image-card {
@@ -1477,7 +1479,6 @@ onBeforeUnmount(() => {
   }
 
   .image-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 1rem;
     padding: 1rem;
   }
@@ -1503,7 +1504,7 @@ onBeforeUnmount(() => {
   }
 
   .image-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   }
 }
 </style>

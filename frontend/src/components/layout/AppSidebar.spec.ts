@@ -101,10 +101,10 @@ describe('AppSidebar image generation visibility', () => {
     })
   })
 
-  it('hides image generation from regular user navigation', () => {
+  it('shows image generation for all users', () => {
     const wrapper = mountSidebar('user')
 
-    expect(wrapper.find('a[href="/image"]').exists()).toBe(false)
+    expect(wrapper.find('a[href="/image"]').exists()).toBe(true)
   })
 
   it('keeps image generation visible for admins in the personal navigation', () => {
