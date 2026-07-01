@@ -336,7 +336,7 @@
               </template>
 
               <template #cell-schedulable="{ row }">
-                <div v-if="getMatchedAccount(row)" class="status-cell">
+                <div v-if="getMatchedAccount(row) && !isProviderDisabled(row)" class="status-cell">
                   <button
                     type="button"
                     class="schedulable-toggle"
@@ -1789,6 +1789,7 @@ function schedulableToggleTitle(row: UpstreamAccountSyncItem) {
 }
 
 function accountRowClass(row: UpstreamAccountSyncItem) {
+  if (isProviderDisabled(row)) return 'provider-disabled-row'
   if (row.rate_violation) return 'risk-row'
   return ''
 }
@@ -3201,6 +3202,33 @@ onBeforeUnmount(() => {
 .accounts-table-card :deep(.data-table-row.risk-row:hover),
 .accounts-table-card :deep(.data-table-row.risk-row:hover .sticky-col) {
   background: #fef2f2;
+}
+
+.accounts-table-card :deep(.data-table-row.provider-disabled-row),
+.accounts-table-card :deep(.data-table-row.provider-disabled-row .sticky-col) {
+  background: #f8fafc;
+}
+
+.accounts-table-card :deep(.data-table-row.provider-disabled-row td),
+.accounts-table-card :deep(.data-table-row.provider-disabled-row .main-text),
+.accounts-table-card :deep(.data-table-row.provider-disabled-row .sub-text),
+.accounts-table-card :deep(.data-table-row.provider-disabled-row .source-id),
+.accounts-table-card :deep(.data-table-row.provider-disabled-row .table-tag),
+.accounts-table-card :deep(.data-table-row.provider-disabled-row .dash),
+.accounts-table-card :deep(.data-table-row.provider-disabled-row .consumption-value),
+.accounts-table-card :deep(.data-table-row.provider-disabled-row .test-status-pill),
+.accounts-table-card :deep(.data-table-row.provider-disabled-row .test-time),
+.accounts-table-card :deep(.data-table-row.provider-disabled-row .action-cell),
+.accounts-table-card :deep(.data-table-row.provider-disabled-row .source-warning-icon) {
+  color: #94a3b8;
+}
+
+.accounts-table-card :deep(.data-table-row.provider-disabled-row .source-line) {
+  background: #cbd5e1;
+}
+
+.accounts-table-card :deep(.data-table-row.provider-disabled-row .home-tag) {
+  border-color: #d1d5db;
 }
 
 .source-cell {

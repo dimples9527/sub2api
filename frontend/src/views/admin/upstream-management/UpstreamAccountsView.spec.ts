@@ -462,7 +462,7 @@ describe('UpstreamAccountsView', () => {
     expect(wrapper.find('[data-test="sync-result-dialog"]').text()).toContain('Trial')
   })
 
-  it('keeps disabled provider accounts visible with schedulable toggle disabled', async () => {
+  it('keeps disabled provider accounts visible without rendering the schedulable toggle', async () => {
     upstreamAccountSyncMock.getPreview.mockResolvedValueOnce({
       default_provider: {},
       providers: [{ slug: 'disabled-upstream', name: 'Disabled Upstream', enabled: false }],
@@ -510,9 +510,11 @@ describe('UpstreamAccountsView', () => {
           AppLayout: { template: '<div><slot /></div>' },
           TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
           DataTable: {
-            props: ['columns', 'data'],
+            props: ['columns', 'data', 'rowClass'],
             setup(props, { slots }) {
-              return () => h('div', props.data.map((row: any) => h('div', { class: 'table-row' }, [
+              return () => h('div', props.data.map((row: any, index: number) => h('div', {
+                class: ['table-row', typeof props.rowClass === 'function' ? props.rowClass(row, index) : props.rowClass]
+              }, [
                 h('div', { class: 'source-cell-test' }, slots['cell-source']?.({ row })),
                 h('div', { class: 'schedulable-cell-test' }, slots['cell-schedulable']?.({ row })),
               ])))
@@ -531,11 +533,11 @@ describe('UpstreamAccountsView', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('Disabled Upstream')
+    expect(wrapper.find('.table-row').classes()).toContain('provider-disabled-row')
+    expect(wrapper.find('.source-cell-test .source-cell').exists()).toBe(true)
+    expect(wrapper.find('.source-cell-test').text()).toContain('Disabled Upstream')
     const toggle = wrapper.find('.schedulable-cell-test .schedulable-toggle')
-    expect(toggle.exists()).toBe(true)
-    expect(toggle.attributes('disabled')).toBeDefined()
-
-    await toggle.trigger('click')
+    expect(toggle.exists()).toBe(false)
     expect(accountsMock.setSchedulable).not.toHaveBeenCalled()
   })
 
