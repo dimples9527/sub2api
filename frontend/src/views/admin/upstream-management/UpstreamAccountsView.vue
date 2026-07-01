@@ -3209,6 +3209,21 @@ onBeforeUnmount(() => {
   background: #f8fafc;
 }
 
+.accounts-table-card :deep(.data-table-row.provider-disabled-row:hover),
+.accounts-table-card :deep(.data-table-row.provider-disabled-row:hover .sticky-col) {
+  background: #f3f4f6;
+}
+
+.accounts-table-card :deep(.data-table-row.provider-disabled-row td) {
+  color: #cbd5e1;
+}
+
+.accounts-table-card :deep(.data-table-row.provider-disabled-row td > *),
+.accounts-table-card :deep(.provider-disabled-row > .space-y-3) {
+  filter: grayscale(1);
+  opacity: 0.46;
+}
+
 .accounts-table-card :deep(.data-table-row.provider-disabled-row td),
 .accounts-table-card :deep(.data-table-row.provider-disabled-row .main-text),
 .accounts-table-card :deep(.data-table-row.provider-disabled-row .sub-text),
@@ -3229,6 +3244,16 @@ onBeforeUnmount(() => {
 
 .accounts-table-card :deep(.data-table-row.provider-disabled-row .home-tag) {
   border-color: #d1d5db;
+}
+
+.dark .accounts-table-card :deep(.data-table-row.provider-disabled-row),
+.dark .accounts-table-card :deep(.data-table-row.provider-disabled-row .sticky-col) {
+  background: rgb(17 24 39 / 0.72);
+}
+
+.dark .accounts-table-card :deep(.data-table-row.provider-disabled-row:hover),
+.dark .accounts-table-card :deep(.data-table-row.provider-disabled-row:hover .sticky-col) {
+  background: rgb(31 41 55 / 0.72);
 }
 
 .source-cell {

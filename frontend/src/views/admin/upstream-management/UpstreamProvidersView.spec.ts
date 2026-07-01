@@ -279,6 +279,58 @@ describe('UpstreamProvidersView', () => {
     )
   })
 
+  it('marks disabled provider rows for muted table styling', async () => {
+    adminAPIMock.upstreamProviders.list.mockResolvedValue([
+      {
+        type: 'sub2api',
+        slug: 'disabled-main',
+        name: 'Disabled Main',
+        enabled: false,
+        is_default: false,
+        base_url: 'https://disabled.example.com',
+        login_url: '/api/v1/auth/login',
+        api_keys_url: '/api/admin/keys',
+        account_rate_multiplier_scale: 1,
+      },
+    ])
+
+    const wrapper = mount(UpstreamProvidersView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['columns', 'data', 'rowClass'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any, index: number) => h('div', {
+                class: ['provider-row', typeof props.rowClass === 'function' ? props.rowClass(row, index) : props.rowClass],
+              }, [
+                h('div', { class: 'name-cell' }, slots['cell-name']?.({ row })),
+                h('div', { class: 'enabled-cell' }, slots['cell-enabled']?.({ row })),
+              ])))
+            },
+          },
+          BaseDialog: {
+            props: ['show'],
+            template: '<div v-if="show"><slot /><slot name="footer" /></div>',
+          },
+          ConfirmDialog: true,
+          EmptyState: true,
+          Icon: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('.provider-row').classes()).toContain('provider-disabled-row')
+    expect(wrapper.find('.name-cell').text()).toContain('Disabled Main')
+    expect(wrapper.find('.enabled-cell').text()).toContain('common.disabled')
+    expect(upstreamProvidersSource).toContain(':deep(.provider-disabled-row td > *)')
+    expect(upstreamProvidersSource).toContain('filter: grayscale(1);')
+    expect(upstreamProvidersSource).toContain('opacity: 0.46;')
+  })
+
   it('uses distinct color treatments for balance, today cost, and low balance warnings', () => {
     expect(upstreamProvidersSource).toContain('@apply text-lg font-bold text-teal-600 dark:text-teal-300;')
     expect(upstreamProvidersSource).toContain('@apply text-lg font-bold text-emerald-600 dark:text-emerald-300;')

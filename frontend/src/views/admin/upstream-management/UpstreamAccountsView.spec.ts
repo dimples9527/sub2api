@@ -539,6 +539,9 @@ describe('UpstreamAccountsView', () => {
     const toggle = wrapper.find('.schedulable-cell-test .schedulable-toggle')
     expect(toggle.exists()).toBe(false)
     expect(accountsMock.setSchedulable).not.toHaveBeenCalled()
+    expect(upstreamAccountsSource).toContain('.accounts-table-card :deep(.data-table-row.provider-disabled-row td > *)')
+    expect(upstreamAccountsSource).toContain('filter: grayscale(1);')
+    expect(upstreamAccountsSource).toContain('opacity: 0.46;')
   })
 
   it('does not render persisted sync records without unbind details', async () => {

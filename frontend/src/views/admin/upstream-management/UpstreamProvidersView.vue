@@ -118,6 +118,7 @@
           :data="filteredProviders"
           :loading="loading"
           row-key="slug"
+          :row-class="providerRowClass"
           :is-row-detail-visible="isProviderDetailVisible"
           :estimate-row-height="92"
         >
@@ -1125,6 +1126,10 @@ const filteredProviders = computed(() => {
       .some((value) => String(value).toLowerCase().includes(keyword))
   })
 })
+
+function providerRowClass(provider: UpstreamProviderConfig) {
+  return provider.enabled ? '' : 'provider-disabled-row'
+}
 
 const urlOptions = computed(() => ({
   base_url: uniqueProviderURLs('base_url'),
@@ -2188,6 +2193,36 @@ onMounted(reload)
 
 :deep(.dark .table-body .data-table-row:hover) {
   background-color: rgb(31 41 55);
+}
+
+:deep(.provider-disabled-row),
+:deep(.provider-disabled-row .sticky-col) {
+  background-color: rgb(249 250 251);
+}
+
+:deep(.provider-disabled-row:hover),
+:deep(.provider-disabled-row:hover .sticky-col) {
+  background-color: rgb(243 244 246);
+}
+
+:deep(.provider-disabled-row td) {
+  color: rgb(203 213 225);
+}
+
+:deep(.provider-disabled-row td > *),
+:deep(.provider-disabled-row > .space-y-3) {
+  filter: grayscale(1);
+  opacity: 0.46;
+}
+
+:deep(.dark .provider-disabled-row),
+:deep(.dark .provider-disabled-row .sticky-col) {
+  background-color: rgb(17 24 39 / 0.72);
+}
+
+:deep(.dark .provider-disabled-row:hover),
+:deep(.dark .provider-disabled-row:hover .sticky-col) {
+  background-color: rgb(31 41 55 / 0.72);
 }
 
 :deep(.upstream-homepage-column) {
