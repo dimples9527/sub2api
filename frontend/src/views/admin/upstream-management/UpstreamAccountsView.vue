@@ -2203,12 +2203,15 @@ async function saveAccountGroups() {
   try {
     const updated = await adminAPI.accounts.update(row.matched_account_id, { group_ids: accountGroupIds.value })
     if (updated) updateMatchedAccount(updated)
+    const savedGroupIDs = [...accountGroupIds.value]
+    applyAccountGroupUpdateToPreview(row.matched_account_id, savedGroupIDs, updated || null)
     accountGroupDialogItem.value = null
     accountGroupIds.value = []
     accountGroupPlatform.value = undefined
     appStore.showSuccess(t('admin.upstreamAccounts.boundGroupsSaved'))
     try {
       await refreshPreview()
+      applyAccountGroupUpdateToPreview(row.matched_account_id, savedGroupIDs, updated || null)
     } catch (err) {
       appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.loadFailed')))
     }
@@ -2376,6 +2379,53 @@ function updateMatchedAccount(account: Account) {
     ...matchedAccountsById.value,
     [account.id]: account
   }
+}
+
+function applyAccountGroupUpdateToPreview(accountId: number, groupIDs: number[], account: Account | null = null) {
+  const current = result.value
+  if (!current) return
+  const numericAccountId = Number(accountId)
+  if (!Number.isFinite(numericAccountId) || numericAccountId <= 0) return
+
+  const items = (current.items || []).map(item => {
+    if (Number(item.matched_account_id) !== numericAccountId) return item
+    const boundGroups = buildPreviewBoundGroups(groupIDs, account, item.upstream_rate_multiplier)
+    const rateViolationGroups = boundGroups.filter(group => group.rate_violation)
+    return {
+      ...item,
+      bound_groups: boundGroups,
+      local_group_id: boundGroups[0]?.id,
+      local_group_name: boundGroups[0]?.name || '',
+      local_rate_multiplier: boundGroups[0]?.rate_multiplier,
+      rate_violation: rateViolationGroups.length > 0,
+      unbound_group_ids: rateViolationGroups.map(group => group.id),
+      unbound_group_names: rateViolationGroups.map(group => group.name),
+    }
+  })
+  result.value = {
+    ...current,
+    items
+  }
+}
+
+function buildPreviewBoundGroups(groupIDs: number[], account: Account | null, upstreamRateMultiplier: number | undefined): UpstreamAccountSyncBoundGroup[] {
+  const accountGroups = account?.groups || []
+  const upstreamRate = Number(upstreamRateMultiplier)
+  return groupIDs
+    .map(groupID => {
+      const numericGroupID = Number(groupID)
+      if (!Number.isFinite(numericGroupID) || numericGroupID <= 0) return null
+      const group = accountGroups.find(item => Number(item.id) === numericGroupID)
+        || localGroups.value.find(item => Number(item.id) === numericGroupID)
+      const rateMultiplier = Number(group?.rate_multiplier) || 0
+      return {
+        id: numericGroupID,
+        name: group?.name || `#${numericGroupID}`,
+        rate_multiplier: rateMultiplier,
+        rate_violation: Number.isFinite(upstreamRate) && rateMultiplier < upstreamRate
+      }
+    })
+    .filter((group): group is UpstreamAccountSyncBoundGroup => Boolean(group))
 }
 
 async function handleToggleSchedulable(account: Account, row?: UpstreamAccountSyncItem) {

@@ -1773,6 +1773,87 @@ describe('UpstreamAccountsView', () => {
     expect(wrapper.find('.groups-slot').text()).toContain('Trial')
   })
 
+  it('updates bound groups locally when the refreshed preview is stale after saving', async () => {
+    const previewWithVipOnly = {
+      default_provider: {},
+      providers: [],
+      summary: {
+        upstream_key_count: 1,
+        matched_account_count: 1,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'noop',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-a',
+          local_account_name: 'local-a',
+          matched_account_id: 12,
+          matched_account_name: 'local-a',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 2,
+          rate_violation: false,
+          bound_groups: [
+            { id: 7, name: 'VIP', rate_multiplier: 2, rate_violation: false },
+          ],
+        },
+      ],
+      warnings: [],
+      records: [],
+    }
+    upstreamAccountSyncMock.getPreview
+      .mockResolvedValueOnce(previewWithVipOnly)
+      .mockResolvedValueOnce(previewWithVipOnly)
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any) => h('div', [
+                h('div', { class: 'groups-slot' }, slots['cell-local_group_name']?.({ row })),
+                slots['cell-actions']?.({ row }),
+              ])))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('.groups-slot').text()).toContain('VIP')
+    expect(wrapper.find('.groups-slot').text()).not.toContain('Trial')
+
+    const editButton = wrapper.findAll('button').find(button => button.text().includes('admin.upstreamAccounts.editBoundGroups'))
+    expect(editButton).toBeTruthy()
+    await editButton!.trigger('click')
+    await flushPromises()
+
+    const checkboxes = wrapper.find('.account-group-dialog').findAll('input[type="checkbox"]')
+    await checkboxes[1].setValue(true)
+    const saveButtons = wrapper.findAll('button').filter(button => button.text().includes('common.save'))
+    await saveButtons[saveButtons.length - 1].trigger('click')
+    await flushPromises()
+
+    expect(accountsMock.update).toHaveBeenCalledWith(12, { group_ids: [7, 8] })
+    expect(upstreamAccountSyncMock.getPreview).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('.groups-slot').text()).toContain('VIP')
+    expect(wrapper.find('.groups-slot').text()).toContain('Trial')
+  })
+
   it('shows anthropic groups in the edit bindings dialog for anthropic accounts', async () => {
     upstreamAccountSyncMock.getPreview.mockResolvedValue({
       default_provider: {},
