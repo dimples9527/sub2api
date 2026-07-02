@@ -1120,7 +1120,7 @@ describe('UpstreamAccountsView', () => {
     expect(wrapper.find('.columns').text()).not.toContain('balance_consumption')
   })
 
-  it('marks upstream rate as a sortable account table column', async () => {
+  it('marks account table metric and state columns as sortable', async () => {
     const wrapper = mount(UpstreamAccountsView, {
       global: {
         stubs: {
@@ -1142,6 +1142,127 @@ describe('UpstreamAccountsView', () => {
     await flushPromises()
 
     expect(wrapper.find('.columns').text()).toContain('upstream_rate_multiplier:1')
+    expect(wrapper.find('.columns').text()).toContain('balance:1')
+    expect(wrapper.find('.columns').text()).toContain('status:1')
+    expect(wrapper.find('.columns').text()).toContain('schedulable:1')
+    expect(wrapper.find('.columns').text()).toContain('test_status:1')
+  })
+
+  it('passes derived sortable values to the upstream account table', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValueOnce({
+      default_provider: {},
+      providers: [
+        { slug: 'upstream-a', name: 'Upstream A' },
+        { slug: 'upstream-b', name: 'Upstream B' },
+      ],
+      summary: {
+        upstream_key_count: 2,
+        matched_account_count: 2,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'noop',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-a',
+          local_account_name: 'local-a',
+          matched_account_id: 12,
+          matched_account_name: 'local-a',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 1,
+          rate_violation: false,
+        },
+        {
+          action: 'noop',
+          provider_slug: 'upstream-b',
+          provider_name: 'Upstream B',
+          upstream_key_name: 'key-b',
+          local_account_name: 'local-b',
+          matched_account_id: 13,
+          matched_account_name: 'local-b',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 1,
+          rate_violation: false,
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+    upstreamAccountSyncMock.getBalanceConsumption.mockResolvedValueOnce({
+      config: { enabled: false, interval_seconds: 3600, provider_amount_scales: {} },
+      summaries: {
+        'upstream-a': {
+          provider_slug: 'upstream-a',
+          current_balance: 12.5,
+          today_consumption: 1,
+          amount_scale: 1,
+          complete: true,
+          anomaly: false,
+          snapshot_count: 1,
+        },
+        'upstream-b': {
+          provider_slug: 'upstream-b',
+          current_balance: 5,
+          today_consumption: 2,
+          amount_scale: 1,
+          complete: true,
+          anomaly: false,
+          snapshot_count: 1,
+        },
+      },
+      rows: [],
+    })
+    accountsMock.getById.mockImplementation(async (id: number) => ({
+      id,
+      name: id === 12 ? 'local-a' : 'local-b',
+      platform: 'openai',
+      type: 'apikey',
+      status: id === 12 ? 'active' : 'disabled',
+      schedulable: id === 12,
+      last_test_status: id === 12 ? 'success' : 'failed',
+      group_ids: [],
+      groups: [],
+    }))
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props) {
+              return () => h('div', { class: 'rows' }, props.data.map((row: any) => h('div', { class: 'row-sort-values' }, [
+                row.upstream_key_name,
+                row.balance,
+                row.status,
+                row.schedulable,
+                row.test_status,
+              ].join(':'))))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+          GroupSelector: true,
+          UpstreamBalanceCharts: { template: '<div data-test="balance-charts" />' },
+        },
+      },
+    })
+
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.findAll('.row-sort-values').map(node => node.text())).toEqual([
+      'key-a:12.5:active:1:1',
+      'key-b:5:disabled:0:2',
+    ])
   })
 
   it('adds status, schedulable, and last tested columns to the upstream account table', async () => {

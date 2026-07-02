@@ -201,7 +201,7 @@
           <section class="accounts-table-card">
             <DataTable
               :columns="columns"
-              :data="filteredItems"
+              :data="tableItems"
               :loading="loading"
               :row-class="accountRowClass"
               :estimate-row-height="92"
@@ -1232,6 +1232,8 @@ type UpstreamAccountSyncLogEntry = UpstreamAccountSyncUnbindDetail & {
   key: string
 }
 
+const upstreamAccountSortableColumnKeys = new Set(['balance', 'status', 'schedulable', 'test_status'])
+
 const columns = computed<Column[]>(() => [
   { key: 'source', label: t('admin.upstreamAccounts.columns.source'), class: 'upstream-center-column upstream-source-column' },
   { key: 'upstream_key_name', label: t('admin.upstreamAccounts.columns.upstreamKey'), class: 'upstream-center-column upstream-key-column' },
@@ -1245,7 +1247,7 @@ const columns = computed<Column[]>(() => [
   { key: 'test_status', label: t('admin.upstreamAccounts.columns.testStatus'), class: 'upstream-center-column upstream-test-status-column' },
   { key: 'last_tested_at', label: t('admin.upstreamAccounts.columns.lastTestedAt'), class: 'upstream-center-column upstream-test-time-column' },
   { key: 'actions', label: t('common.actions'), class: 'upstream-center-column upstream-actions-column' }
-])
+].map(column => upstreamAccountSortableColumnKeys.has(column.key) ? { ...column, sortable: true } : column))
 
 const emptySummary = {
   upstream_key_count: 0,
@@ -1426,6 +1428,13 @@ const filteredItems = computed(() => {
     return haystack.includes(keyword)
   })
 })
+const tableItems = computed(() => filteredItems.value.map(item => ({
+  ...item,
+  balance: upstreamAccountBalanceSortValue(item),
+  status: upstreamAccountStatusSortValue(item),
+  schedulable: upstreamAccountSchedulableSortValue(item),
+  test_status: upstreamAccountTestStatusSortValue(item)
+})))
 const batchTestAccountIds = computed(() => Array.from(
   new Set(
     filteredItems.value
@@ -1820,6 +1829,28 @@ function accountTestStatusLabel(status: AccountTestStatus | undefined) {
   if (status === 'failed') return t('admin.upstreamAccounts.testStatusFailed')
   if (status === 'success') return t('admin.upstreamAccounts.testStatusSuccess')
   return '-'
+}
+
+function upstreamAccountBalanceSortValue(row: UpstreamAccountSyncItem) {
+  return getProviderBalance(row.provider_slug)
+}
+
+function upstreamAccountStatusSortValue(row: UpstreamAccountSyncItem) {
+  return getMatchedAccount(row)?.status || ''
+}
+
+function upstreamAccountSchedulableSortValue(row: UpstreamAccountSyncItem) {
+  const account = getMatchedAccount(row)
+  if (!account || isProviderDisabled(row)) return null
+  return account.schedulable ? 1 : 0
+}
+
+function upstreamAccountTestStatusSortValue(row: UpstreamAccountSyncItem) {
+  const status = accountTestStatusById.value[row.matched_account_id || 0]
+  if (status === 'testing') return 0
+  if (status === 'success') return 1
+  if (status === 'failed') return 2
+  return null
 }
 
 function batchTestStatusLabel(status: BatchAccountTestStatus | string) {
