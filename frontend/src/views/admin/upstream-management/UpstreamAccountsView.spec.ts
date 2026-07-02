@@ -1141,6 +1141,7 @@ describe('UpstreamAccountsView', () => {
 
     await flushPromises()
 
+    expect(wrapper.find('.columns').text()).toContain('source:1')
     expect(wrapper.find('.columns').text()).toContain('upstream_rate_multiplier:1')
     expect(wrapper.find('.columns').text()).toContain('balance:1')
     expect(wrapper.find('.columns').text()).toContain('status:1')
@@ -1240,6 +1241,7 @@ describe('UpstreamAccountsView', () => {
             setup(props) {
               return () => h('div', { class: 'rows' }, props.data.map((row: any) => h('div', { class: 'row-sort-values' }, [
                 row.upstream_key_name,
+                row.source,
                 row.balance,
                 row.status,
                 row.schedulable,
@@ -1260,8 +1262,8 @@ describe('UpstreamAccountsView', () => {
     await flushPromises()
 
     expect(wrapper.findAll('.row-sort-values').map(node => node.text())).toEqual([
-      'key-a:12.5:active:1:1',
-      'key-b:5:disabled:0:2',
+      'key-a:Upstream A:12.5:active:1:1',
+      'key-b:Upstream B:5:disabled:0:2',
     ])
   })
 

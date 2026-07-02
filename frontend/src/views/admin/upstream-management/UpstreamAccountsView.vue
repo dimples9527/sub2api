@@ -1232,7 +1232,7 @@ type UpstreamAccountSyncLogEntry = UpstreamAccountSyncUnbindDetail & {
   key: string
 }
 
-const upstreamAccountSortableColumnKeys = new Set(['balance', 'status', 'schedulable', 'test_status'])
+const upstreamAccountSortableColumnKeys = new Set(['source', 'balance', 'status', 'schedulable', 'test_status'])
 
 const columns = computed<Column[]>(() => [
   { key: 'source', label: t('admin.upstreamAccounts.columns.source'), class: 'upstream-center-column upstream-source-column' },
@@ -1430,6 +1430,7 @@ const filteredItems = computed(() => {
 })
 const tableItems = computed(() => filteredItems.value.map(item => ({
   ...item,
+  source: upstreamAccountSourceSortValue(item),
   balance: upstreamAccountBalanceSortValue(item),
   status: upstreamAccountStatusSortValue(item),
   schedulable: upstreamAccountSchedulableSortValue(item),
@@ -1829,6 +1830,10 @@ function accountTestStatusLabel(status: AccountTestStatus | undefined) {
   if (status === 'failed') return t('admin.upstreamAccounts.testStatusFailed')
   if (status === 'success') return t('admin.upstreamAccounts.testStatusSuccess')
   return '-'
+}
+
+function upstreamAccountSourceSortValue(row: UpstreamAccountSyncItem) {
+  return row.provider_name || row.provider_slug || ''
 }
 
 function upstreamAccountBalanceSortValue(row: UpstreamAccountSyncItem) {
