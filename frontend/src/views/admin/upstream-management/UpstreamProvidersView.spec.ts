@@ -220,6 +220,13 @@ describe('UpstreamProvidersView', () => {
     expect(adminAPIMock.upstreamProviders.getBalance).toHaveBeenCalledTimes(2)
   })
 
+  it('enables money sorting for provider balance and today cost headers', () => {
+    expect(upstreamProvidersSource).toContain("{ key: 'balance', label: t('admin.upstreamProviders.columns.balance'), sortable: true")
+    expect(upstreamProvidersSource).toContain("{ key: 'today_consumption', label: t('admin.upstreamProviders.columns.todayCost'), sortable: true")
+    expect(upstreamProvidersSource).toContain('balance: providerBalanceForSort(provider.slug),')
+    expect(upstreamProvidersSource).toContain('today_consumption: todayConsumptionForProvider(provider.slug),')
+  })
+
   it('toggles provider enabled state from the status column with Toggle', async () => {
     const provider = {
       type: 'sub2api',

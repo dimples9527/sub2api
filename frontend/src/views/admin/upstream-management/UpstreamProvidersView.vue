@@ -982,6 +982,11 @@ const { t } = useI18n()
 const appStore = useAppStore()
 const { copyToClipboard } = useClipboard()
 
+type UpstreamProviderTableRow = UpstreamProviderConfig & {
+  balance?: number
+  today_consumption?: number
+}
+
 const providers = ref<UpstreamProviderConfig[]>([])
 const loading = ref(false)
 const searchQuery = ref('')
@@ -1081,8 +1086,8 @@ const baseColumns = computed<Column[]>(() => [
   { key: 'prefix', label: t('admin.upstreamProviders.columns.prefix'), class: 'upstream-prefix-column' },
   { key: 'rate_scale', label: t('admin.upstreamProviders.columns.rateScale'), class: 'upstream-numeric-column' },
   { key: 'temp_disable_minutes', label: t('admin.upstreamProviders.tempDisableMinutes'), class: 'upstream-temp-column' },
-  { key: 'balance', label: t('admin.upstreamProviders.columns.balance'), class: 'upstream-numeric-column' },
-  { key: 'today_consumption', label: t('admin.upstreamProviders.columns.todayCost'), class: 'upstream-numeric-column' },
+  { key: 'balance', label: t('admin.upstreamProviders.columns.balance'), sortable: true, class: 'upstream-numeric-column' },
+  { key: 'today_consumption', label: t('admin.upstreamProviders.columns.todayCost'), sortable: true, class: 'upstream-numeric-column' },
 ])
 
 const optionalColumns = computed<Record<string, Column>>(() => ({
@@ -1103,28 +1108,34 @@ const columns = computed<Column[]>(() => {
   ]
 })
 
-const filteredProviders = computed(() => {
+const filteredProviders = computed<UpstreamProviderTableRow[]>(() => {
   const keyword = searchQuery.value.trim().toLowerCase()
-  return providers.value.filter((provider) => {
-    if (typeFilter.value && provider.type !== typeFilter.value) return false
-    if (enabledFilter.value === 'enabled' && !provider.enabled) return false
-    if (enabledFilter.value === 'disabled' && provider.enabled) return false
-    if (!keyword) return true
-    return [
-      provider.name,
-      provider.slug,
-      provider.type,
-      provider.base_url,
-      provider.api_keys_url,
-      provider.login_url,
-      provider.groups_url,
-      provider.available_groups_url,
-      provider.balance_url,
-      provider.usage_cost_url,
-    ]
-      .filter(Boolean)
-      .some((value) => String(value).toLowerCase().includes(keyword))
-  })
+  return providers.value
+    .filter((provider) => {
+      if (typeFilter.value && provider.type !== typeFilter.value) return false
+      if (enabledFilter.value === 'enabled' && !provider.enabled) return false
+      if (enabledFilter.value === 'disabled' && provider.enabled) return false
+      if (!keyword) return true
+      return [
+        provider.name,
+        provider.slug,
+        provider.type,
+        provider.base_url,
+        provider.api_keys_url,
+        provider.login_url,
+        provider.groups_url,
+        provider.available_groups_url,
+        provider.balance_url,
+        provider.usage_cost_url,
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(keyword))
+    })
+    .map(provider => ({
+      ...provider,
+      balance: providerBalanceForSort(provider.slug),
+      today_consumption: todayConsumptionForProvider(provider.slug),
+    }))
 })
 
 function providerRowClass(provider: UpstreamProviderConfig) {
@@ -1559,6 +1570,13 @@ function todayConsumptionForProvider(providerSlug: string | undefined) {
   const liveCost = Number(providerBalances.value[providerSlug]?.today_cost)
   if (Number.isFinite(liveCost)) return liveCost
   return balanceSummaries.value[providerSlug]?.today_consumption
+}
+
+function providerBalanceForSort(providerSlug: string | undefined) {
+  if (!providerSlug) return undefined
+  const liveBalance = Number(providerBalances.value[providerSlug]?.balance)
+  if (Number.isFinite(liveBalance)) return liveBalance
+  return balanceSummaries.value[providerSlug]?.current_balance
 }
 
 function balanceRowStatus(row: UpstreamBalanceDailyRow) {
