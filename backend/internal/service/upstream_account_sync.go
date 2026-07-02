@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -284,10 +285,16 @@ func (s *UpstreamAccountSyncService) applyCachedProviderState(ctx context.Contex
 	}
 	current := make(map[string]UpstreamProviderConfig, len(providers))
 	for _, provider := range providers {
-		if provider.Slug == "" || provider.IsDefault {
+		if provider.Slug == "" {
 			continue
 		}
 		current[provider.Slug] = provider
+	}
+	if defaultProvider, err := s.providerSource.GetDefaultProvider(ctx); err == nil && defaultProvider.Slug != "" {
+		current[defaultProvider.Slug] = defaultProvider
+		result.DefaultProvider.Enabled = defaultProvider.Enabled
+	} else if err != nil {
+		logger.LegacyPrintf("service.upstream_account_sync", "Warning: refresh cached preview default provider failed: %v", err)
 	}
 	for index := range result.Providers {
 		if provider, ok := current[result.Providers[index].Slug]; ok {
@@ -655,7 +662,7 @@ func (s *UpstreamAccountSyncService) disabledAccountSyncProviderSlugs(ctx contex
 	}
 	disabled := map[string]struct{}{}
 	for _, provider := range providers {
-		if provider.Slug == "" || provider.IsDefault || provider.Enabled {
+		if provider.Slug == "" || provider.Enabled {
 			continue
 		}
 		disabled[provider.Slug] = struct{}{}
@@ -771,6 +778,7 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context, useProviderKey
 	}
 
 	accountsByName := upstreamAccountSyncAccountsByName(accounts)
+	defaultAccountsByName := upstreamAccountSyncAccountsByDefaultName(accounts)
 	accountByID := make(map[int64]Account, len(accounts))
 	for _, account := range accounts {
 		accountByID[account.ID] = account
@@ -816,7 +824,7 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context, useProviderKey
 				UpstreamKeyName:        strings.TrimSpace(key.KeyName),
 				UpstreamAPIKey:         strings.TrimSpace(key.APIKey),
 				UpstreamBaseURL:        provider.BaseURL,
-				LocalAccountName:       upstreamProviderKeyName(provider, key.KeyName),
+				LocalAccountName:       upstreamAccountSyncLocalAccountName(provider, key.KeyName),
 				UpstreamGroupName:      strings.TrimSpace(key.GroupName),
 				UpstreamRateMultiplier: upstreamRateMultiplier,
 			}
@@ -829,6 +837,9 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context, useProviderKey
 			}
 
 			matches := accountsByName[normalizeUpstreamGroupMatchName(item.LocalAccountName)]
+			if provider.IsDefault {
+				matches = defaultAccountsByName[normalizeDefaultUpstreamAccountMatchName(item.LocalAccountName)]
+			}
 			if len(matches) > 1 {
 				item.Action = UpstreamAccountSyncActionConflict
 				item.ConflictAccountIDs = accountIDs(matches)
@@ -905,23 +916,37 @@ func effectiveUpstreamAccountRateMultiplier(rawRate, scale float64) float64 {
 }
 
 func (s *UpstreamAccountSyncService) listAccountSyncProviders(ctx context.Context, defaultProvider UpstreamProviderConfig) ([]UpstreamProviderConfig, error) {
+	out := make([]UpstreamProviderConfig, 0, 1)
+	seen := map[string]struct{}{}
+	if defaultProvider.Slug != "" {
+		defaultProvider = s.hydrateStoredProvider(ctx, defaultProvider)
+		defaultProvider.IsDefault = true
+		out = append(out, defaultProvider)
+		seen[defaultProvider.Slug] = struct{}{}
+	}
 	source, ok := s.providerSource.(interface {
 		ListProviders(context.Context) ([]UpstreamProviderConfig, error)
 	})
 	if !ok {
-		return []UpstreamProviderConfig{}, nil
+		return out, nil
 	}
 	providers, err := source.ListProviders(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list upstream account sync providers: %w", err)
 	}
-	out := make([]UpstreamProviderConfig, 0, len(providers))
 	for _, provider := range providers {
-		if provider.Slug == "" || provider.Slug == defaultProvider.Slug || provider.IsDefault {
+		if provider.Slug == "" || provider.IsDefault {
 			continue
 		}
 		provider = s.hydrateStoredProvider(ctx, provider)
+		if provider.Slug == "" || provider.IsDefault {
+			continue
+		}
+		if _, exists := seen[provider.Slug]; exists {
+			continue
+		}
 		out = append(out, provider)
+		seen[provider.Slug] = struct{}{}
 	}
 	return out, nil
 }
@@ -1237,6 +1262,42 @@ func upstreamAccountSyncAccountsByName(accounts []Account) map[string][]Account 
 		out[key] = append(out[key], account)
 	}
 	return out
+}
+
+func upstreamAccountSyncAccountsByDefaultName(accounts []Account) map[string][]Account {
+	out := make(map[string][]Account, len(accounts))
+	for _, account := range accounts {
+		key := normalizeDefaultUpstreamAccountMatchName(account.Name)
+		if key == "" {
+			continue
+		}
+		out[key] = append(out[key], account)
+	}
+	return out
+}
+
+func upstreamAccountSyncLocalAccountName(provider UpstreamProviderConfig, keyName string) string {
+	keyName = strings.TrimSpace(keyName)
+	if keyName == "" {
+		return ""
+	}
+	if provider.IsDefault {
+		return keyName
+	}
+	return upstreamProviderKeyName(provider, keyName)
+}
+
+func normalizeDefaultUpstreamAccountMatchName(name string) string {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	var b strings.Builder
+	b.Grow(len(normalized))
+	for _, r := range normalized {
+		if unicode.IsSpace(r) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 func hydrateUpstreamAccountSyncAccountGroups(accounts []Account, groups []Group) []Account {

@@ -1259,7 +1259,14 @@ const emptySummary = {
 }
 
 const summary = computed(() => result.value?.summary || emptySummary)
-const syncProviders = computed(() => result.value?.providers || [])
+const syncProviders = computed(() => {
+  const providers = result.value?.providers || []
+  const defaultProvider = result.value?.default_provider
+  if (!defaultProvider?.slug || providers.some(provider => provider.slug === defaultProvider.slug)) {
+    return providers
+  }
+  return [defaultProvider, ...providers]
+})
 const syncProviderBySlug = computed(() => {
   const bySlug = new Map<string, UpstreamProviderConfig>()
   for (const provider of syncProviders.value) {

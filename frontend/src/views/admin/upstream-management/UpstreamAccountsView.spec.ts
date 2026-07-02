@@ -544,6 +544,81 @@ describe('UpstreamAccountsView', () => {
     expect(upstreamAccountsSource).toContain('opacity: 0.46;')
   })
 
+  it('uses disabled default provider state for upstream account rows', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValueOnce({
+      default_provider: { slug: 'main', name: 'Default Upstream', enabled: false, is_default: true },
+      providers: [],
+      summary: {
+        upstream_key_count: 1,
+        matched_account_count: 1,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'noop',
+          provider_slug: 'main',
+          provider_name: 'Default Upstream',
+          upstream_key_name: 'default-key',
+          local_account_name: 'default-key',
+          matched_account_id: 12,
+          matched_account_name: 'default-key',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 1,
+          rate_violation: false,
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+    accountsMock.getById.mockResolvedValueOnce({
+      id: 12,
+      name: 'default-key',
+      platform: 'openai',
+      type: 'apikey',
+      status: 'active',
+      schedulable: true,
+      group_ids: [7],
+      groups: [],
+    })
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data', 'rowClass'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any, index: number) => h('div', {
+                class: ['table-row', typeof props.rowClass === 'function' ? props.rowClass(row, index) : props.rowClass]
+              }, [
+                h('div', { class: 'source-cell-test' }, slots['cell-source']?.({ row })),
+                h('div', { class: 'schedulable-cell-test' }, slots['cell-schedulable']?.({ row })),
+              ])))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+          GroupSelector: true,
+          AccountStatusIndicator: true,
+          UpstreamBalanceCharts: { template: '<div data-test="balance-charts" />' },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('.table-row').classes()).toContain('provider-disabled-row')
+    expect(wrapper.find('.source-cell-test').text()).toContain('Default Upstream')
+    expect(wrapper.find('.schedulable-cell-test .schedulable-toggle').exists()).toBe(false)
+  })
+
   it('does not render persisted sync records without unbind details', async () => {
     upstreamAccountSyncMock.getPreview.mockResolvedValueOnce({
       default_provider: {},

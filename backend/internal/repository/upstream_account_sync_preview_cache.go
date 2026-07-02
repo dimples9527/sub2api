@@ -8,7 +8,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const upstreamAccountSyncPreviewCacheKey = "upstream:accounts:sync-preview:v1"
+const upstreamAccountSyncPreviewCacheKey = "upstream:accounts:sync-preview:v2"
 
 type upstreamAccountSyncPreviewCache struct {
 	rdb *redis.Client

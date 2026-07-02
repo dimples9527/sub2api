@@ -364,7 +364,7 @@ func TestUpstreamAccountSyncSyncStoresFreshSnapshotAfterRealtimeFetch(t *testing
 	}
 }
 
-func TestUpstreamAccountSyncPreviewUsesNonDefaultProvidersAndManualGroupMapping(t *testing.T) {
+func TestUpstreamAccountSyncPreviewIncludesProvidersAndManualGroupMapping(t *testing.T) {
 	provider := &upstreamAccountSyncProviderSourceStub{
 		defaultProvider: UpstreamProviderConfig{
 			Slug:              "main",
@@ -406,14 +406,19 @@ func TestUpstreamAccountSyncPreviewUsesNonDefaultProvidersAndManualGroupMapping(
 	if err != nil {
 		t.Fatalf("Preview returned error: %v", err)
 	}
-	if len(provider.fetchedSlugs) != 1 || provider.fetchedSlugs[0] != "backup" {
-		t.Fatalf("fetched slugs = %+v, want [backup]", provider.fetchedSlugs)
+	if provider.fetchCount("main") != 1 || provider.fetchCount("backup") != 1 || provider.fetchCount("disabled") != 1 {
+		t.Fatalf(
+			"fetch counts main/backup/disabled = %d/%d/%d, want one fetch for each provider",
+			provider.fetchCount("main"),
+			provider.fetchCount("backup"),
+			provider.fetchCount("disabled"),
+		)
 	}
 	if result.Summary.UpstreamKeyCount != 1 || result.Summary.CreateCount != 1 {
 		t.Fatalf("summary = %+v, want one upstream key and one create", result.Summary)
 	}
-	if len(result.Providers) != 1 || result.Providers[0].Slug != "backup" {
-		t.Fatalf("providers = %+v, want only backup", result.Providers)
+	if len(result.Providers) != 3 || result.Providers[0].Slug != "main" || result.Providers[1].Slug != "backup" || result.Providers[2].Slug != "disabled" {
+		t.Fatalf("providers = %+v, want main, backup, disabled", result.Providers)
 	}
 	if len(result.Items) != 1 {
 		t.Fatalf("item count = %d, want 1", len(result.Items))
@@ -433,6 +438,126 @@ func TestUpstreamAccountSyncPreviewUsesNonDefaultProvidersAndManualGroupMapping(
 	}
 	if item.LocalGroupID == nil || *item.LocalGroupID != 9 || item.LocalGroupName != "Mapped VIP" {
 		t.Fatalf("local group match = id %v name %q, want 9 Mapped VIP", item.LocalGroupID, item.LocalGroupName)
+	}
+}
+
+func TestUpstreamAccountSyncPreviewIncludesDefaultProviderWithoutAccountPrefix(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{
+			Slug:              "main",
+			Name:              "Main upstream",
+			Type:              UpstreamProviderTypeSub2API,
+			BaseURL:           "https://main.example.com",
+			AccountNamePrefix: "main-",
+			IsDefault:         true,
+			Enabled:           true,
+		},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main upstream", Type: UpstreamProviderTypeSub2API, BaseURL: "https://main.example.com", AccountNamePrefix: "main-", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup upstream", Type: UpstreamProviderTypeSub2API, BaseURL: "https://backup.example.com", AccountNamePrefix: "backup-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"main": {
+				{ProviderSlug: "main", KeyName: "Codex Pro", GroupName: "VIP", RateMultiplier: 1},
+			},
+			"backup": {
+				{ProviderSlug: "backup", KeyName: "Codex Pro", GroupName: "VIP", RateMultiplier: 1},
+			},
+		},
+	}
+	svc, _ := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 1, Status: StatusActive}},
+		[]Account{{
+			ID:          10,
+			Name:        " codex pro ",
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Credentials: map[string]any{"base_url": "https://main.example.com"},
+			GroupIDs:    []int64{7},
+		}, {
+			ID:          11,
+			Name:        "backup-Codex Pro",
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Credentials: map[string]any{"base_url": "https://backup.example.com"},
+			GroupIDs:    []int64{7},
+		}},
+		nil,
+	)
+
+	result, err := svc.Preview(context.Background())
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if provider.fetchCount("main") != 1 || provider.fetchCount("backup") != 1 {
+		t.Fatalf("fetch counts main/backup = %d/%d, want one fetch for each provider", provider.fetchCount("main"), provider.fetchCount("backup"))
+	}
+	if len(result.Providers) != 2 || result.Providers[0].Slug != "main" || !result.Providers[0].IsDefault || result.Providers[1].Slug != "backup" {
+		t.Fatalf("providers = %+v, want default main followed by backup", result.Providers)
+	}
+	byProvider := map[string]UpstreamAccountSyncItem{}
+	for _, item := range result.Items {
+		byProvider[item.ProviderSlug] = item
+	}
+	main := byProvider["main"]
+	if main.LocalAccountName != "Codex Pro" {
+		t.Fatalf("default local account name = %q, want upstream key without prefix", main.LocalAccountName)
+	}
+	if main.MatchedAccountID == nil || *main.MatchedAccountID != 10 || main.Action != UpstreamAccountSyncActionNoop {
+		t.Fatalf("default item = %+v, want matched noop account 10", main)
+	}
+	backup := byProvider["backup"]
+	if backup.LocalAccountName != "backup-Codex Pro" {
+		t.Fatalf("backup local account name = %q, want prefix applied", backup.LocalAccountName)
+	}
+	if backup.MatchedAccountID == nil || *backup.MatchedAccountID != 11 {
+		t.Fatalf("backup matched account id = %+v, want 11", backup.MatchedAccountID)
+	}
+}
+
+func TestUpstreamAccountSyncPreviewDefaultProviderOnlyIgnoresSpacesAndCase(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{
+			Slug:              "main",
+			Name:              "Main upstream",
+			AccountNamePrefix: "main-",
+			IsDefault:         true,
+			Enabled:           true,
+		},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main upstream", AccountNamePrefix: "main-", IsDefault: true, Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"main": {{ProviderSlug: "main", KeyName: "Codex-Pro", GroupName: "VIP", RateMultiplier: 1}},
+		},
+	}
+	svc, _ := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 1, Status: StatusActive}},
+		[]Account{{
+			ID:       10,
+			Name:     "codex pro",
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeAPIKey,
+			GroupIDs: []int64{7},
+		}},
+		nil,
+	)
+
+	result, err := svc.Preview(context.Background())
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("item count = %d, want 1", len(result.Items))
+	}
+	item := result.Items[0]
+	if item.MatchedAccountID != nil {
+		t.Fatalf("matched account id = %+v, want nil because default matching should not ignore hyphen", item.MatchedAccountID)
+	}
+	if item.Action != UpstreamAccountSyncActionCreate {
+		t.Fatalf("action = %q, want create", item.Action)
 	}
 }
 
@@ -467,7 +592,14 @@ func TestUpstreamAccountSyncPreviewKeepsAvailableProvidersWhenOneProviderKeysFai
 	if result.Summary.UpstreamKeyCount != 1 || len(result.Items) != 1 {
 		t.Fatalf("summary/items = %+v/%+v, want one good provider key", result.Summary, result.Items)
 	}
-	if len(result.Warnings) == 0 || result.Warnings[0] != "Bad upstream: newapi provider keys failed: HTTP 502" {
+	hasBadWarning := false
+	for _, warning := range result.Warnings {
+		if warning == "Bad upstream: newapi provider keys failed: HTTP 502" {
+			hasBadWarning = true
+			break
+		}
+	}
+	if !hasBadWarning {
 		t.Fatalf("warnings = %+v, want failed provider warning", result.Warnings)
 	}
 	if provider.fetchCount("bad") != 1 || provider.fetchCount("good") != 1 {
@@ -538,6 +670,9 @@ func TestUpstreamAccountSyncPreviewCachesProviderKeysForThirtySeconds(t *testing
 	}
 	if count := provider.fetchCount("backup"); count != 1 {
 		t.Fatalf("backup fetch count = %d, want cached second preview", count)
+	}
+	if count := provider.fetchCount("main"); count != 1 {
+		t.Fatalf("main fetch count = %d, want cached second preview", count)
 	}
 }
 
@@ -997,11 +1132,18 @@ func TestUpstreamAccountSyncPreviewUsesStoredProviderAccountNamePrefix(t *testin
 	if err != nil {
 		t.Fatalf("Preview returned error: %v", err)
 	}
-	if len(result.Providers) != 1 {
-		t.Fatalf("providers = %+v, want one sync provider", result.Providers)
+	if len(result.Providers) != 2 {
+		t.Fatalf("providers = %+v, want default provider and one sync provider", result.Providers)
 	}
-	if result.Providers[0].AccountNamePrefix != "北鲲-" {
-		t.Fatalf("provider prefix = %q, want stored prefix", result.Providers[0].AccountNamePrefix)
+	var beikunProvider UpstreamProviderConfig
+	for _, provider := range result.Providers {
+		if provider.Slug == "beikun" {
+			beikunProvider = provider
+			break
+		}
+	}
+	if beikunProvider.AccountNamePrefix != "北鲲-" {
+		t.Fatalf("provider prefix = %q, want stored prefix", beikunProvider.AccountNamePrefix)
 	}
 	if len(result.Items) != 1 {
 		t.Fatalf("item count = %d, want 1", len(result.Items))
