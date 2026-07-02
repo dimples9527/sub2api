@@ -44,6 +44,11 @@
 
         <div class="ug-filter-card">
           <div class="ug-filter-top">
+            <div class="ug-filter-left">
+              <Select v-model="platformFilter" class="ug-filter-select" :options="platformFilterOptions" />
+              <Select v-model="matchFilter" class="ug-filter-select" :options="matchFilterOptions" />
+              <Select v-model="rateFilter" class="ug-filter-select" :options="rateFilterOptions" />
+            </div>
             <div class="ug-search">
               <Icon name="search" size="sm" class="ug-search-icon" />
               <input
@@ -54,8 +59,6 @@
               />
             </div>
             <div class="ug-filter-right">
-              <Select v-model="matchFilter" class="ug-filter-select" :options="matchFilterOptions" />
-              <Select v-model="rateFilter" class="ug-filter-select" :options="rateFilterOptions" />
               <button
                 type="button"
                 class="ug-btn ug-btn-primary"
@@ -682,6 +685,7 @@ const autoFixForm = ref({
   interval_seconds: 3600,
 })
 const searchQuery = ref('')
+const platformFilter = ref('')
 const matchFilter = ref('')
 const rateFilter = ref('')
 const syncDialogItem = ref<UpstreamGroupComparison | null>(null)
@@ -699,6 +703,10 @@ const platformOptions = computed<SelectOption[]>(() => [
   { value: 'openai', label: 'OpenAI' },
   { value: 'gemini', label: 'Gemini' },
   { value: 'antigravity', label: 'Antigravity' },
+])
+const platformFilterOptions = computed<SelectOption[]>(() => [
+  { value: '', label: t('admin.upstreamGroups.allPlatforms', '全部平台') },
+  ...platformOptions.value,
 ])
 const syncPlatformOptions = computed<SelectOption[]>(() => [
   { value: '', label: t('admin.upstreamGroups.selectPlatform') },
@@ -756,6 +764,7 @@ const filteredItems = computed(() => {
       if (matchFilter.value === 'unmatched' && item.matched) return false
       if (rateFilter.value === 'risk' && !item.needs_rate_increase) return false
       if (rateFilter.value === 'ok' && item.needs_rate_increase) return false
+      if (platformFilter.value && !platformValues(item).includes(platformFilter.value)) return false
       if (!keyword) return true
       const haystack = [
         item.upstream_group_name,
@@ -773,6 +782,15 @@ const filteredItems = computed(() => {
       status: statusSortValue(item),
     }))
 })
+
+function platformValues(item: UpstreamGroupComparison) {
+  return [
+    item.local_group_platform,
+    ...boundAccountsFor(item).map(account => account.platform),
+  ]
+    .filter((platform): platform is string => Boolean(platform))
+    .map(platform => platform.toLowerCase())
+}
 
 const summary = computed(() => {
   const list = items.value
@@ -1364,6 +1382,10 @@ onMounted(reload)
 }
 
 .ug-filter-right {
+  @apply flex flex-wrap items-center gap-2;
+}
+
+.ug-filter-left {
   @apply flex flex-wrap items-center gap-2;
 }
 
@@ -2075,6 +2097,7 @@ onMounted(reload)
   }
 
   .ug-search,
+  .ug-filter-left,
   .ug-filter-right,
   .ug-auto-meta,
   .ug-auto-controls {

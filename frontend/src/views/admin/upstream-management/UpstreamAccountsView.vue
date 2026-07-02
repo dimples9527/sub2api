@@ -142,6 +142,11 @@
 
           <section class="filter-row">
             <Select
+              v-model="platformFilter"
+              class="filter-select"
+              :options="platformFilterOptions"
+            />
+            <Select
               v-model="providerFilter"
               class="filter-select"
               :options="providerOptions"
@@ -1185,6 +1190,7 @@ const accountProxies = ref<AccountProxy[]>([])
 const loadError = ref('')
 const searchQuery = ref('')
 const providerFilter = ref('')
+const platformFilter = ref('')
 const sourceFilter = ref('')
 const groupFilter = ref('')
 const rateGuardConfig = ref<UpstreamAccountRateGuardConfig | null>(null)
@@ -1369,6 +1375,13 @@ const sourceOptions = computed<SelectOption[]>(() => [
   { value: 'synced', label: t('admin.upstreamAccounts.sourceSynced') },
   { value: 'unsynced', label: t('admin.upstreamAccounts.sourceUnsynced') }
 ])
+const platformFilterOptions = computed<SelectOption[]>(() => [
+  { value: '', label: t('admin.upstreamAccounts.allPlatforms', '全部平台') },
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'gemini', label: 'Gemini' },
+  { value: 'antigravity', label: 'Antigravity' },
+])
 const groupOptions = computed<SelectOption[]>(() => [
   { value: '', label: t('admin.upstreamAccounts.allGroups') },
   ...localGroups.value.map(group => ({
@@ -1381,6 +1394,7 @@ const filteredItems = computed(() => {
   const selectedGroupID = Number(groupFilter.value)
   return items.value.filter((item) => {
     if (providerFilter.value && item.provider_slug !== providerFilter.value) return false
+    if (platformFilter.value && matchedAccountPlatform(item) !== platformFilter.value) return false
     if (sourceFilter.value === 'synced' && !item.matched_account_id) return false
     if (sourceFilter.value === 'unsynced' && item.matched_account_id) return false
     if (groupFilter.value) {

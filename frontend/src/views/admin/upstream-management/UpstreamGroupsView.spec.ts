@@ -184,6 +184,82 @@ describe('UpstreamGroupsView', () => {
     expect(adminAPIMock.upstreamManagement.getGroups).toHaveBeenCalledTimes(2)
   })
 
+  it('places dropdown filters before search and filters groups by platform', async () => {
+    adminAPIMock.upstreamManagement.getGroups.mockResolvedValue({
+      default_provider: { slug: 'default-upstream', name: 'Default upstream' },
+      items: [
+        {
+          provider_slug: 'default-upstream',
+          provider_name: 'Default upstream',
+          upstream_group_name: 'OpenAI VIP',
+          upstream_group_key: 'openai-vip',
+          upstream_rate: 2.5,
+          upstream_key_count: 3,
+          local_group_id: 7,
+          local_group_name: 'OpenAI local',
+          local_group_platform: 'openai',
+          local_rate: 2.5,
+          matched: true,
+          needs_rate_increase: false,
+        },
+        {
+          provider_slug: 'default-upstream',
+          provider_name: 'Default upstream',
+          upstream_group_name: 'Gemini VIP',
+          upstream_group_key: 'gemini-vip',
+          upstream_rate: 1.5,
+          upstream_key_count: 2,
+          local_group_id: 8,
+          local_group_name: 'Gemini local',
+          local_group_platform: 'gemini',
+          local_rate: 1.5,
+          matched: true,
+          needs_rate_increase: false,
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+
+    const wrapper = mount(UpstreamGroupsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props) {
+              return () => h('div', props.data.map((row: any) => h('div', { class: 'row-name' }, row.upstream_group_name)))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          UpstreamGroupAvailabilityTrend: { template: '<div />' },
+          Select: {
+            props: ['modelValue', 'options'],
+            emits: ['update:modelValue'],
+            template: '<select class="select-stub" :value="modelValue" @change="$emit(\'update:modelValue\', $event.target.value)"><option v-for="option in options" :key="option.value" :value="option.value">{{ option.label }}</option></select>',
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const filterTop = wrapper.find('.ug-filter-top')
+    const selectIndex = filterTop.element.innerHTML.indexOf('select-stub')
+    const groupSearchIndex = filterTop.element.innerHTML.indexOf('admin.upstreamGroups.searchPlaceholder')
+    expect(selectIndex).toBeGreaterThanOrEqual(0)
+    expect(groupSearchIndex).toBeGreaterThan(selectIndex)
+
+    expect(wrapper.findAll('.row-name').map(node => node.text())).toEqual(['OpenAI VIP', 'Gemini VIP'])
+
+    await wrapper.findAll('select.select-stub')[0].setValue('gemini')
+    await flushPromises()
+
+    expect(wrapper.findAll('.row-name').map(node => node.text())).toEqual(['Gemini VIP'])
+  })
+
   it('loads and renders bound accounts, account status, and account actions for matched groups', async () => {
     adminAPIMock.upstreamManagement.getGroups.mockResolvedValue({
       default_provider: { slug: 'default-upstream', name: 'Default upstream' },

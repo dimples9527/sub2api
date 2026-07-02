@@ -915,7 +915,7 @@ describe('UpstreamAccountsView', () => {
     expect(wrapper.text()).toContain('local-a')
     expect(wrapper.text()).toContain('local-b')
 
-    const groupSelect = wrapper.findAll('.select-stub').at(2)
+    const groupSelect = wrapper.findAll('.select-stub').at(3)
     expect(groupSelect).toBeTruthy()
     expect(groupSelect!.text()).toContain('VIP')
     expect(groupSelect!.text()).toContain('Trial')
@@ -923,6 +923,102 @@ describe('UpstreamAccountsView', () => {
 
     expect(wrapper.text()).toContain('local-a')
     expect(wrapper.text()).not.toContain('local-b')
+  })
+
+  it('filters upstream accounts by platform dropdown', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValueOnce({
+      default_provider: {},
+      providers: [{ slug: 'upstream-a', name: 'Upstream A' }],
+      summary: {
+        upstream_key_count: 2,
+        matched_account_count: 2,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'noop',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-openai',
+          local_account_name: 'local-openai',
+          matched_account_id: 12,
+          matched_account_name: 'local-openai',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 1,
+          rate_violation: false,
+        },
+        {
+          action: 'noop',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-claude',
+          local_account_name: 'local-claude',
+          matched_account_id: 13,
+          matched_account_name: 'local-claude',
+          upstream_group_name: 'claude',
+          upstream_rate_multiplier: 1,
+          rate_violation: false,
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+    accountsMock.getById.mockImplementation(async (id: number) => ({
+      id,
+      name: id === 12 ? 'local-openai' : 'local-claude',
+      platform: id === 12 ? 'openai' : 'anthropic',
+      type: 'apikey',
+      status: 'active',
+      schedulable: true,
+      group_ids: [],
+      groups: [],
+    }))
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props) {
+              return () => h('div', props.data.map((row: any) => h('div', { class: 'row-key' }, row.upstream_key_name)))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: {
+            props: ['modelValue', 'options'],
+            emits: ['update:modelValue'],
+            setup(props, { emit }) {
+              return () => h('select', {
+                class: 'select-stub',
+                value: props.modelValue,
+                onChange: (event: Event) => emit('update:modelValue', (event.target as HTMLSelectElement).value),
+              }, (props.options || []).map((option: any) => h('option', { value: option.value }, option.label)))
+            },
+          },
+          GroupSelector: true,
+          AccountStatusIndicator: true,
+          UpstreamBalanceCharts: { template: '<div data-test="balance-charts" />' },
+        },
+      },
+    })
+
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.findAll('.row-key').map(node => node.text())).toEqual(['key-openai', 'key-claude'])
+
+    await wrapper.findAll('select.select-stub')[0].setValue('anthropic')
+    await flushPromises()
+
+    expect(wrapper.findAll('.row-key').map(node => node.text())).toEqual(['key-claude'])
   })
 
   it('does not expose provider balance consumption as an account table column', async () => {
