@@ -3815,6 +3815,10 @@ onBeforeUnmount(() => {
   overflow-y: auto;
 }
 
+.batch-test-result-dialog {
+  overflow: auto;
+}
+
 .sync-confirm-modal {
   display: flex;
   width: min(980px, 100%);
@@ -3843,6 +3847,24 @@ onBeforeUnmount(() => {
 
 .batch-test-result-modal {
   width: min(1280px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
+}
+
+.batch-test-result-modal .sync-confirm-body {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.batch-test-result-modal .sync-confirm-section {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
 }
 
 .sync-confirm-header {
@@ -4164,6 +4186,15 @@ onBeforeUnmount(() => {
 
 .batch-test-table-wrap {
   max-height: 32rem;
+}
+
+.batch-test-result-modal .batch-test-table-wrap {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  max-height: none;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .batch-test-table {
@@ -4500,8 +4531,34 @@ button.sync-log-status-unhandled:hover {
     max-height: 88vh;
   }
 
+  .batch-test-result-dialog {
+    align-items: stretch;
+    padding: 12px;
+  }
+
+  .sync-result-modal.batch-test-result-modal {
+    height: calc(100vh - 24px);
+    height: calc(100dvh - 24px);
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
+  }
+
+  .batch-test-result-modal .sync-confirm-header {
+    align-items: flex-start;
+    padding: 14px 16px;
+  }
+
   .sync-confirm-summary {
     grid-template-columns: 1fr;
+  }
+
+  .batch-test-result-modal .sync-confirm-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 12px;
+  }
+
+  .batch-test-result-modal .sync-confirm-body {
+    padding: 12px;
   }
 
   .sync-confirm-item-main strong {

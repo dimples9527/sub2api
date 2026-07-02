@@ -1334,6 +1334,17 @@ describe('UpstreamAccountsView', () => {
     expect(upstreamAccountsSource).toContain('.records-table-wrap.sync-logs-table-wrap')
   })
 
+  it('keeps the batch test result dialog scrollable on narrow screens', () => {
+    expect(upstreamAccountsSource).toContain('.batch-test-result-dialog {')
+    expect(upstreamAccountsSource).toContain('overflow: auto;')
+    expect(upstreamAccountsSource).toContain('.batch-test-result-modal .sync-confirm-body')
+    expect(upstreamAccountsSource).toContain('.batch-test-result-modal .sync-confirm-section')
+    expect(upstreamAccountsSource).toContain('.batch-test-result-modal .batch-test-table-wrap')
+    expect(upstreamAccountsSource).toContain('-webkit-overflow-scrolling: touch;')
+    expect(upstreamAccountsSource).toContain('.sync-result-modal.batch-test-result-modal')
+    expect(upstreamAccountsSource).toContain('height: calc(100dvh - 24px);')
+  })
+
   it('opens create account modal from upstream account toolbar and refreshes after create', async () => {
     const wrapper = mount(UpstreamAccountsView, {
       global: {
