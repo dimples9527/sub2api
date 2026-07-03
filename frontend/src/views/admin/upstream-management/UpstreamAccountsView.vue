@@ -265,8 +265,32 @@
                 </div>
               </template>
 
-              <template #cell-priority="{ value }">
-                <span v-if="Number.isFinite(Number(value))" class="priority-pill">{{ value }}</span>
+              <template #cell-priority="{ row, value }">
+                <form v-if="isEditingPriority(row)" class="priority-edit-form" @submit.prevent="savePriority(row)">
+                  <input
+                    ref="priorityInputRef"
+                    v-model.number="priorityDraft"
+                    type="number"
+                    min="0"
+                    step="1"
+                    class="priority-input"
+                    :aria-label="t('admin.upstreamAccounts.editPriority')"
+                    :disabled="savingPriorityAccountId === row.matched_account_id"
+                    @blur="savePriority(row)"
+                    @keydown.esc.prevent="cancelPriorityEdit"
+                  />
+                </form>
+                <button
+                  v-else-if="isPriorityEditable(row)"
+                  type="button"
+                  class="priority-pill priority-pill-button"
+                  :disabled="savingPriorityAccountId === row.matched_account_id"
+                  :title="t('admin.upstreamAccounts.editPriority')"
+                  @click="startPriorityEdit(row)"
+                >
+                  <Icon v-if="savingPriorityAccountId === row.matched_account_id" name="cog" size="xs" class="animate-spin" />
+                  <span>{{ Number.isFinite(Number(value)) ? value : '-' }}</span>
+                </button>
                 <span v-else class="dash">-</span>
               </template>
 
@@ -1107,7 +1131,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type {
@@ -1175,6 +1199,10 @@ const loadingRateGuardConfig = ref(false)
 const savingRateGuardConfig = ref(false)
 const runningRateGuardNow = ref(false)
 const savingAccountGroupId = ref<number | null>(null)
+const editingPriorityAccountId = ref<number | null>(null)
+const savingPriorityAccountId = ref<number | null>(null)
+const priorityDraft = ref<number | string | null>(null)
+const priorityInputRef = ref<HTMLInputElement | null>(null)
 const testingAccountId = ref<number | null>(null)
 const togglingSchedulableId = ref<number | null>(null)
 const showTestModal = ref(false)
@@ -1850,6 +1878,66 @@ function upstreamAccountBalanceSortValue(row: UpstreamAccountSyncItem) {
 function upstreamAccountPrioritySortValue(row: UpstreamAccountSyncItem) {
   const priority = getMatchedAccount(row)?.priority
   return Number.isFinite(Number(priority)) ? Number(priority) : null
+}
+
+function isEditingPriority(row: UpstreamAccountSyncItem) {
+  return editingPriorityAccountId.value === Number(row.matched_account_id)
+}
+
+function isPriorityEditable(row: UpstreamAccountSyncItem) {
+  return getMatchedAccount(row) !== null
+}
+
+function startPriorityEdit(row: UpstreamAccountSyncItem) {
+  const account = getMatchedAccount(row)
+  if (!account || savingPriorityAccountId.value === account.id) return
+  editingPriorityAccountId.value = account.id
+  priorityDraft.value = account.priority
+  void nextTick(() => {
+    priorityInputRef.value?.focus()
+    priorityInputRef.value?.select()
+  })
+}
+
+function cancelPriorityEdit() {
+  editingPriorityAccountId.value = null
+  priorityDraft.value = null
+}
+
+async function savePriority(row: UpstreamAccountSyncItem) {
+  if (!isEditingPriority(row)) return
+  const account = getMatchedAccount(row)
+  if (!account) {
+    cancelPriorityEdit()
+    return
+  }
+  if (savingPriorityAccountId.value === account.id) return
+  if (priorityDraft.value === null || priorityDraft.value === '') {
+    appStore.showError(t('admin.upstreamAccounts.priorityInvalid'))
+    return
+  }
+  const nextPriority = Number(priorityDraft.value)
+  if (!Number.isInteger(nextPriority) || nextPriority < 0) {
+    appStore.showError(t('admin.upstreamAccounts.priorityInvalid'))
+    return
+  }
+  const normalizedPriority = nextPriority
+  if (normalizedPriority === account.priority) {
+    cancelPriorityEdit()
+    return
+  }
+
+  savingPriorityAccountId.value = account.id
+  try {
+    const updated = await adminAPI.accounts.update(account.id, { priority: normalizedPriority })
+    updateMatchedAccount(updated)
+    cancelPriorityEdit()
+    appStore.showSuccess(t('admin.upstreamAccounts.prioritySaved'))
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.prioritySaveFailed')))
+  } finally {
+    savingPriorityAccountId.value = null
+  }
 }
 
 function upstreamAccountStatusSortValue(row: UpstreamAccountSyncItem) {
@@ -3539,17 +3627,70 @@ onBeforeUnmount(() => {
   display: inline-flex;
   min-width: 34px;
   justify-content: center;
+  align-items: center;
+  gap: 4px;
   border-radius: 6px;
+  border: 0;
   background: #f1f5f9;
   padding: 2px 8px;
   color: #334155;
+  font-family: inherit;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   font-weight: 650;
   line-height: 18px;
 }
 
+.priority-pill-button {
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.priority-pill-button:hover:not(:disabled) {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.priority-pill-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
 .dark .priority-pill {
   background: rgb(51 65 85 / 0.72);
+  color: #e2e8f0;
+}
+
+.dark .priority-pill-button:hover:not(:disabled) {
+  background: rgb(71 85 105 / 0.86);
+  color: #f8fafc;
+}
+
+.priority-edit-form {
+  display: inline-flex;
+}
+
+.priority-input {
+  width: 64px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  padding: 3px 6px;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  line-height: 18px;
+  outline: none;
+}
+
+.priority-input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgb(37 99 235 / 0.14);
+}
+
+.dark .priority-input {
+  border-color: #475569;
+  background: #0f172a;
   color: #e2e8f0;
 }
 
