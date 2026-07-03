@@ -47,3 +47,10 @@ func (c *upstreamAccountSyncPreviewCache) Set(ctx context.Context, result servic
 	}
 	return c.rdb.Set(ctx, upstreamAccountSyncPreviewCacheKey, raw, 0).Err()
 }
+
+func (c *upstreamAccountSyncPreviewCache) Delete(ctx context.Context) error {
+	if c == nil || c.rdb == nil {
+		return nil
+	}
+	return c.rdb.Del(ctx, upstreamAccountSyncPreviewCacheKey).Err()
+}

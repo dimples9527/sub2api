@@ -196,6 +196,7 @@ type UpstreamAccountSyncService struct {
 type UpstreamAccountSyncPreviewCache interface {
 	Get(ctx context.Context) (UpstreamAccountSyncResult, bool, error)
 	Set(ctx context.Context, result UpstreamAccountSyncResult) error
+	Delete(ctx context.Context) error
 }
 
 type upstreamAccountSyncProviderKeysCacheEntry struct {
@@ -451,7 +452,7 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 		return UpstreamAccountSyncResult{}, err
 	}
 	result.Records = records
-	s.storePreviewCache(ctx, result)
+	s.invalidatePreviewCache(ctx)
 	return result, nil
 }
 
@@ -475,6 +476,15 @@ func (s *UpstreamAccountSyncService) storePreviewCache(ctx context.Context, resu
 	}
 	if err := s.previewCache.Set(ctx, result); err != nil {
 		logger.LegacyPrintf("service.upstream_account_sync", "Warning: store preview cache failed: %v", err)
+	}
+}
+
+func (s *UpstreamAccountSyncService) invalidatePreviewCache(ctx context.Context) {
+	if s == nil || s.previewCache == nil {
+		return
+	}
+	if err := s.previewCache.Delete(ctx); err != nil {
+		logger.LegacyPrintf("service.upstream_account_sync", "Warning: invalidate preview cache failed: %v", err)
 	}
 }
 
@@ -558,7 +568,7 @@ func (s *UpstreamAccountSyncService) runMatchedAccountRateGuard(ctx context.Cont
 			continue
 		}
 		account := previewState.accountByID[*item.MatchedAccountID]
-		if !upstreamAccountSyncAccountCompatible(account) {
+		if !upstreamAccountSyncRateGuardCompatible(account) {
 			continue
 		}
 		lowGroupIDs, lowGroupNames, remainingGroupIDs := upstreamAccountSyncLowRateGroups(account, item.UpstreamRateMultiplier)
@@ -598,6 +608,7 @@ func (s *UpstreamAccountSyncService) runMatchedAccountRateGuard(ctx context.Cont
 		return UpstreamAccountSyncResult{}, err
 	}
 	result.Records = records
+	s.invalidatePreviewCache(ctx)
 	return result, nil
 }
 
@@ -779,6 +790,7 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context, useProviderKey
 
 	accountsByName := upstreamAccountSyncAccountsByName(accounts)
 	defaultAccountsByName := upstreamAccountSyncAccountsByDefaultName(accounts)
+	accountsByProviderKey := upstreamAccountSyncAccountsByProviderKey(accounts)
 	accountByID := make(map[int64]Account, len(accounts))
 	for _, account := range accounts {
 		accountByID[account.ID] = account
@@ -836,9 +848,12 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context, useProviderKey
 				continue
 			}
 
-			matches := accountsByName[normalizeUpstreamGroupMatchName(item.LocalAccountName)]
-			if provider.IsDefault {
-				matches = defaultAccountsByName[normalizeDefaultUpstreamAccountMatchName(item.LocalAccountName)]
+			matches := accountsByProviderKey[upstreamAccountSyncProviderKeyMatchKey(provider.Slug, key.KeyName)]
+			if len(matches) == 0 {
+				matches = accountsByName[normalizeUpstreamGroupMatchName(item.LocalAccountName)]
+				if provider.IsDefault {
+					matches = defaultAccountsByName[normalizeDefaultUpstreamAccountMatchName(item.LocalAccountName)]
+				}
 			}
 			if len(matches) > 1 {
 				item.Action = UpstreamAccountSyncActionConflict
@@ -1276,6 +1291,30 @@ func upstreamAccountSyncAccountsByDefaultName(accounts []Account) map[string][]A
 	return out
 }
 
+func upstreamAccountSyncAccountsByProviderKey(accounts []Account) map[string][]Account {
+	out := make(map[string][]Account, len(accounts))
+	for _, account := range accounts {
+		key := upstreamAccountSyncProviderKeyMatchKey(
+			account.GetExtraString("upstream_provider_slug"),
+			account.GetExtraString("upstream_key_name"),
+		)
+		if key == "" {
+			continue
+		}
+		out[key] = append(out[key], account)
+	}
+	return out
+}
+
+func upstreamAccountSyncProviderKeyMatchKey(providerSlug, keyName string) string {
+	providerSlug = strings.TrimSpace(providerSlug)
+	keyName = normalizeUpstreamGroupMatchName(keyName)
+	if providerSlug == "" || keyName == "" {
+		return ""
+	}
+	return providerSlug + "\x00" + keyName
+}
+
 func upstreamAccountSyncLocalAccountName(provider UpstreamProviderConfig, keyName string) string {
 	keyName = strings.TrimSpace(keyName)
 	if keyName == "" {
@@ -1413,6 +1452,10 @@ func upstreamAccountSyncGroupIDs(groups []*Group) []int64 {
 
 func upstreamAccountSyncAccountCompatible(account Account) bool {
 	return account.Platform == PlatformOpenAI && account.Type == AccountTypeAPIKey
+}
+
+func upstreamAccountSyncRateGuardCompatible(account Account) bool {
+	return account.Type == AccountTypeAPIKey
 }
 
 func upstreamAccountSyncNeedsUpdate(account Account, item UpstreamAccountSyncItem, provider UpstreamProviderConfig) bool {

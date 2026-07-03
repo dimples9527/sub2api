@@ -2020,6 +2020,7 @@ export default {
         upstreamRate: 'Upstream rate',
         balanceConsumption: 'Today cost',
         localAccount: 'Local account',
+        priority: 'Priority',
         localGroup: 'Local group',
         boundGroups: 'Bound groups',
         testStatus: 'Test status',

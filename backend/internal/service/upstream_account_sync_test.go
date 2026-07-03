@@ -142,7 +142,22 @@ func (s *upstreamAccountSyncAccountManagerStub) UpdateAccount(ctx context.Contex
 			s.accounts[i].Extra = input.Extra
 		}
 		if input.GroupIDs != nil {
-			s.accounts[i].GroupIDs = append([]int64(nil), (*input.GroupIDs)...)
+			groupIDs := append([]int64(nil), (*input.GroupIDs)...)
+			s.accounts[i].GroupIDs = groupIDs
+			allowed := make(map[int64]struct{}, len(groupIDs))
+			for _, groupID := range groupIDs {
+				allowed[groupID] = struct{}{}
+			}
+			filteredGroups := make([]*Group, 0, len(s.accounts[i].Groups))
+			for _, group := range s.accounts[i].Groups {
+				if group == nil {
+					continue
+				}
+				if _, ok := allowed[group.ID]; ok {
+					filteredGroups = append(filteredGroups, group)
+				}
+			}
+			s.accounts[i].Groups = filteredGroups
 		}
 		return &s.accounts[i], nil
 	}
@@ -162,10 +177,11 @@ func (s *upstreamAccountSyncAccountManagerStub) SetAccountSchedulable(ctx contex
 }
 
 type upstreamAccountSyncPreviewCacheStub struct {
-	result UpstreamAccountSyncResult
-	found  bool
-	gets   int
-	sets   int
+	result  UpstreamAccountSyncResult
+	found   bool
+	gets    int
+	sets    int
+	deletes int
 }
 
 func (s *upstreamAccountSyncPreviewCacheStub) Get(ctx context.Context) (UpstreamAccountSyncResult, bool, error) {
@@ -177,6 +193,13 @@ func (s *upstreamAccountSyncPreviewCacheStub) Set(ctx context.Context, result Up
 	s.sets++
 	s.result = result
 	s.found = true
+	return nil
+}
+
+func (s *upstreamAccountSyncPreviewCacheStub) Delete(ctx context.Context) error {
+	s.deletes++
+	s.result = UpstreamAccountSyncResult{}
+	s.found = false
 	return nil
 }
 
@@ -327,7 +350,7 @@ func TestUpstreamAccountSyncPreviewRefreshesAndStoresSnapshotOnCacheMiss(t *test
 	}
 }
 
-func TestUpstreamAccountSyncSyncStoresFreshSnapshotAfterRealtimeFetch(t *testing.T) {
+func TestUpstreamAccountSyncSyncInvalidatesStalePreviewCacheAfterRealtimeFetch(t *testing.T) {
 	provider := &upstreamAccountSyncProviderSourceStub{
 		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},
 		providers: []UpstreamProviderConfig{
@@ -359,8 +382,8 @@ func TestUpstreamAccountSyncSyncStoresFreshSnapshotAfterRealtimeFetch(t *testing
 	if len(result.Items) != 1 || result.Items[0].UpstreamKeyName != "fresh" {
 		t.Fatalf("sync items = %+v, want fresh provider data", result.Items)
 	}
-	if cache.sets != 1 || cache.result.Items[0].UpstreamKeyName != "fresh" {
-		t.Fatalf("cache sets/result = %d/%+v, want sync to overwrite snapshot", cache.sets, cache.result.Items)
+	if cache.deletes != 1 || cache.found {
+		t.Fatalf("cache deletes/found = %d/%v, want sync to invalidate stale snapshot", cache.deletes, cache.found)
 	}
 }
 
@@ -791,6 +814,56 @@ func TestUpstreamAccountSyncPreviewMatchesPrefixedKeyNameIgnoringUnicodeSpacesAn
 	}
 	if item.Action != UpstreamAccountSyncActionNoop {
 		t.Fatalf("action = %q, want noop", item.Action)
+	}
+}
+
+func TestUpstreamAccountSyncPreviewMatchesRenamedAccountByStoredUpstreamIdentity(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+			{Slug: "findcg", Name: "findcg", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"findcg": {{ProviderSlug: "findcg", KeyName: "cc官转max", GroupName: "cc官转max", RateMultiplier: 1.1}},
+		},
+	}
+	svc, _ := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{{ID: 7, Name: "cc官转max", Platform: PlatformOpenAI, RateMultiplier: 1.6, Status: StatusActive}},
+		[]Account{{
+			ID:       10,
+			Name:     "cc官转manx",
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeAPIKey,
+			Extra: map[string]any{
+				"upstream_provider_slug": "findcg",
+				"upstream_key_name":      "cc官转max",
+			},
+			GroupIDs: []int64{7},
+			Groups: []*Group{
+				{ID: 7, Name: "cc官转max", RateMultiplier: 1.6},
+			},
+		}},
+		nil,
+	)
+
+	result, err := svc.Preview(context.Background())
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("item count = %d, want 1", len(result.Items))
+	}
+	item := result.Items[0]
+	if item.MatchedAccountID == nil || *item.MatchedAccountID != 10 {
+		t.Fatalf("matched account id = %v, want renamed account 10", item.MatchedAccountID)
+	}
+	if item.MatchedAccountName != "cc官转manx" {
+		t.Fatalf("matched account name = %q, want renamed account", item.MatchedAccountName)
+	}
+	if item.RateViolation || item.Action != UpstreamAccountSyncActionNoop {
+		t.Fatalf("item = %+v, want no rate violation because local 1.6 is above upstream 1.1", item)
 	}
 }
 
@@ -1923,6 +1996,134 @@ func TestUpstreamAccountRateGuardUnbindsLowGroupsForUnschedulableAccounts(t *tes
 	}
 	if len(detail.RemainingGroupIDs) != 0 {
 		t.Fatalf("remaining groups = %+v, want empty", detail.RemainingGroupIDs)
+	}
+}
+
+func TestUpstreamAccountRateGuardInvalidatesPreviewCacheAfterUnbindingAllLowGroups(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+			{Slug: "toltol", Name: "toltol", AccountNamePrefix: "toltol-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"toltol": {
+				{ProviderSlug: "toltol", KeyName: "kiroPro渠道", GroupName: "kiroPro渠道", RateMultiplier: 0.35},
+			},
+		},
+	}
+	settings := newUpstreamManagementSettingRepoStub()
+	svc, accounts := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{
+			{ID: 25, Name: "cc混合渠道", Platform: PlatformOpenAI, RateMultiplier: 0.25, Status: StatusActive},
+			{ID: 16, Name: "claude专属分组", Platform: PlatformOpenAI, RateMultiplier: 0.16, Status: StatusActive},
+		},
+		[]Account{{
+			ID:       202,
+			Name:     "toltol-kiroPro渠道",
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeAPIKey,
+			GroupIDs: []int64{25, 16},
+			Groups: []*Group{
+				{ID: 25, Name: "cc混合渠道", RateMultiplier: 0.25},
+				{ID: 16, Name: "claude专属分组", RateMultiplier: 0.16},
+			},
+		}},
+		settings,
+	)
+	cache := &upstreamAccountSyncPreviewCacheStub{
+		found: true,
+		result: UpstreamAccountSyncResult{
+			Items: []UpstreamAccountSyncItem{{
+				ProviderSlug:           "toltol",
+				UpstreamKeyName:        "kiroPro渠道",
+				MatchedAccountID:       ptrInt64(202),
+				UpstreamRateMultiplier: 0.35,
+				BoundGroups: []UpstreamAccountSyncBoundGroup{
+					{ID: 25, Name: "cc混合渠道", RateMultiplier: 0.25, RateViolation: true},
+					{ID: 16, Name: "claude专属分组", RateMultiplier: 0.16, RateViolation: true},
+				},
+			}},
+		},
+	}
+	svc.SetPreviewCache(cache)
+
+	cfg, err := svc.RunScheduledRateGuard(context.Background())
+	if err != nil {
+		t.Fatalf("RunScheduledRateGuard returned error: %v", err)
+	}
+	if cfg.LastRunStatus != "success" {
+		t.Fatalf("run config = %+v, want success", cfg)
+	}
+	if len(accounts.updateInputs) != 1 {
+		t.Fatalf("update count = %d, want one rate guard update", len(accounts.updateInputs))
+	}
+	if got := accounts.updateInputs[0].input.GroupIDs; got == nil || len(*got) != 0 {
+		t.Fatalf("updated group ids = %+v, want all low-rate groups unbound", got)
+	}
+	if cache.deletes != 1 || cache.found {
+		t.Fatalf("cache deletes/found = %d/%v, want stale preview cache invalidated", cache.deletes, cache.found)
+	}
+
+	preview, err := svc.Preview(context.Background())
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if len(preview.Items) != 1 {
+		t.Fatalf("preview items = %+v, want one item", preview.Items)
+	}
+	if len(preview.Items[0].BoundGroups) != 0 || preview.Items[0].RateViolation {
+		t.Fatalf("preview item = %+v, want no remaining low-rate bound groups after cache invalidation", preview.Items[0])
+	}
+}
+
+func TestUpstreamAccountRateGuardUnbindsLowGroupsForNonOpenAIAPIKeyAccounts(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+			{Slug: "toltol", Name: "toltol", AccountNamePrefix: "toltol-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"toltol": {
+				{ProviderSlug: "toltol", KeyName: "kiroPro渠道", GroupName: "kiroPro渠道", RateMultiplier: 0.35},
+			},
+		},
+	}
+	settings := newUpstreamManagementSettingRepoStub()
+	svc, accounts := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{
+			{ID: 25, Name: "cc混合渠道", Platform: PlatformAnthropic, RateMultiplier: 0.25, Status: StatusActive},
+			{ID: 16, Name: "claude专属分组", Platform: PlatformAnthropic, RateMultiplier: 0.16, Status: StatusActive},
+		},
+		[]Account{{
+			ID:       202,
+			Name:     "toltol-kiroPro渠道",
+			Platform: PlatformAnthropic,
+			Type:     AccountTypeAPIKey,
+			GroupIDs: []int64{25, 16},
+			Groups: []*Group{
+				{ID: 25, Name: "cc混合渠道", Platform: PlatformAnthropic, RateMultiplier: 0.25},
+				{ID: 16, Name: "claude专属分组", Platform: PlatformAnthropic, RateMultiplier: 0.16},
+			},
+		}},
+		settings,
+	)
+
+	cfg, err := svc.RunScheduledRateGuard(context.Background())
+	if err != nil {
+		t.Fatalf("RunScheduledRateGuard returned error: %v", err)
+	}
+	if cfg.LastRunStatus != "success" {
+		t.Fatalf("run config = %+v, want success", cfg)
+	}
+	if len(accounts.updateInputs) != 1 {
+		t.Fatalf("update count = %d, want one rate guard update", len(accounts.updateInputs))
+	}
+	if got := accounts.updateInputs[0].input.GroupIDs; got == nil || len(*got) != 0 {
+		t.Fatalf("updated group ids = %+v, want all low-rate groups unbound", got)
 	}
 }
 

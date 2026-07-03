@@ -2035,6 +2035,7 @@
         upstreamRate: '上游倍率',
         balanceConsumption: '今日成本',
         localAccount: '本地账号',
+        priority: '优先级',
         localGroup: '本地分组',
         boundGroups: '账号绑定分组',
         testStatus: '测试状态',

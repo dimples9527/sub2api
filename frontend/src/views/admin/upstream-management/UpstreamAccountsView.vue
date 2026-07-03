@@ -265,6 +265,11 @@
                 </div>
               </template>
 
+              <template #cell-priority="{ value }">
+                <span v-if="Number.isFinite(Number(value))" class="priority-pill">{{ value }}</span>
+                <span v-else class="dash">-</span>
+              </template>
+
               <template #cell-upstream_rate_multiplier="{ value }">
                 <div class="rate-cell">
                   <span :class="['rate-value', rateToneClass(value)]">{{ formatRate(value) }}</span>
@@ -1232,12 +1237,13 @@ type UpstreamAccountSyncLogEntry = UpstreamAccountSyncUnbindDetail & {
   key: string
 }
 
-const upstreamAccountSortableColumnKeys = new Set(['source', 'balance', 'status', 'schedulable', 'test_status'])
+const upstreamAccountSortableColumnKeys = new Set(['source', 'priority', 'balance', 'status', 'schedulable', 'test_status'])
 
 const columns = computed<Column[]>(() => [
   { key: 'source', label: t('admin.upstreamAccounts.columns.source'), class: 'upstream-center-column upstream-source-column' },
   { key: 'upstream_key_name', label: t('admin.upstreamAccounts.columns.upstreamKey'), class: 'upstream-center-column upstream-key-column' },
   { key: 'local_account_name', label: t('admin.upstreamAccounts.columns.localAccount'), class: 'upstream-center-column upstream-local-account-column' },
+  { key: 'priority', label: t('admin.upstreamAccounts.columns.priority'), class: 'upstream-center-column upstream-priority-column' },
   { key: 'upstream_rate_multiplier', label: t('admin.upstreamAccounts.columns.upstreamRate'), sortable: true, class: 'upstream-center-column upstream-rate-column' },
   { key: 'local_group_name', label: t('admin.upstreamAccounts.columns.boundGroups'), class: 'upstream-center-column upstream-bound-groups-column' },
   { key: 'balance', label: '余额', class: 'upstream-center-column upstream-money-column' },
@@ -1431,6 +1437,7 @@ const filteredItems = computed(() => {
 const tableItems = computed(() => filteredItems.value.map(item => ({
   ...item,
   source: upstreamAccountSourceSortValue(item),
+  priority: upstreamAccountPrioritySortValue(item),
   balance: upstreamAccountBalanceSortValue(item),
   status: upstreamAccountStatusSortValue(item),
   schedulable: upstreamAccountSchedulableSortValue(item),
@@ -1838,6 +1845,11 @@ function upstreamAccountSourceSortValue(row: UpstreamAccountSyncItem) {
 
 function upstreamAccountBalanceSortValue(row: UpstreamAccountSyncItem) {
   return getProviderBalance(row.provider_slug)
+}
+
+function upstreamAccountPrioritySortValue(row: UpstreamAccountSyncItem) {
+  const priority = getMatchedAccount(row)?.priority
+  return Number.isFinite(Number(priority)) ? Number(priority) : null
 }
 
 function upstreamAccountStatusSortValue(row: UpstreamAccountSyncItem) {
@@ -3230,6 +3242,10 @@ onBeforeUnmount(() => {
   width: 190px;
 }
 
+.accounts-table-card :deep(.upstream-priority-column) {
+  width: 88px;
+}
+
 .accounts-table-card :deep(.upstream-rate-column) {
   width: 115px;
 }
@@ -3517,6 +3533,24 @@ onBeforeUnmount(() => {
 
 .account-id-tag {
   margin-top: 6px;
+}
+
+.priority-pill {
+  display: inline-flex;
+  min-width: 34px;
+  justify-content: center;
+  border-radius: 6px;
+  background: #f1f5f9;
+  padding: 2px 8px;
+  color: #334155;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  line-height: 18px;
+}
+
+.dark .priority-pill {
+  background: rgb(51 65 85 / 0.72);
+  color: #e2e8f0;
 }
 
 .balance-cell {
