@@ -26,47 +26,49 @@
                 <strong>{{ syncProviderLabel }}</strong>
                 <code v-if="syncProviderCode">{{ syncProviderCode }}</code>
               </div>
-              <button
-                type="button"
-                class="ui-button ui-button-icon"
-                :disabled="loading || syncing"
-                :title="t('common.refresh')"
-                @click="reload"
-              >
-                <Icon name="refresh" size="md" :stroke-width="2" :class="loading ? 'animate-spin' : ''" />
-              </button>
-              <button
-                type="button"
-                class="ui-button ui-button-primary"
-                :disabled="loading || syncing"
-                @click="() => openCreateAccountDialog()"
-              >
-                <Icon name="plus" size="sm" :stroke-width="2" />
-                {{ t('admin.accounts.createAccount') }}
-              </button>
-              <button
-                type="button"
-                class="ui-button ui-button-primary"
-                :disabled="loading || syncing || !canSync"
-                @click="openSyncConfirmDialog"
-              >
-                <Icon name="sync" size="sm" :stroke-width="2" :class="syncing ? 'animate-spin' : ''" />
-                {{ t('admin.upstreamAccounts.syncNow') }}
-              </button>
-              <button
-                type="button"
-                class="ui-button"
-                :disabled="loading || syncing || batchTesting || batchTestAccountIds.length === 0"
-                data-test="batch-test-accounts"
-                @click="openBatchTestConfigDialog"
-              >
-                <Icon name="play" size="sm" :stroke-width="2" :class="batchTesting ? 'animate-pulse' : ''" />
-                {{ t('admin.upstreamAccounts.testAllConnections') }}
-              </button>
-              <button type="button" class="ui-button" @click="openSyncLogsDialog">
-                <Icon name="document" size="sm" :stroke-width="2" />
-                {{ t('admin.upstreamAccounts.openSyncLogs') }}
-              </button>
+              <div class="accounts-button-group">
+                <button
+                  type="button"
+                  class="ui-button ui-button-icon accounts-action-secondary"
+                  :disabled="loading || syncing"
+                  :title="t('common.refresh')"
+                  @click="reload"
+                >
+                  <Icon name="refresh" size="md" :stroke-width="2" :class="loading ? 'animate-spin' : ''" />
+                </button>
+                <button
+                  type="button"
+                  class="ui-button ui-button-primary accounts-action-primary"
+                  :disabled="loading || syncing"
+                  @click="() => openCreateAccountDialog()"
+                >
+                  <Icon name="plus" size="sm" :stroke-width="2" />
+                  {{ t('admin.accounts.createAccount') }}
+                </button>
+                <button
+                  type="button"
+                  class="ui-button ui-button-primary accounts-action-primary"
+                  :disabled="loading || syncing || !canSync"
+                  @click="openSyncConfirmDialog"
+                >
+                  <Icon name="sync" size="sm" :stroke-width="2" :class="syncing ? 'animate-spin' : ''" />
+                  {{ t('admin.upstreamAccounts.syncNow') }}
+                </button>
+                <button
+                  type="button"
+                  class="ui-button accounts-action-test"
+                  :disabled="loading || syncing || batchTesting || batchTestAccountIds.length === 0"
+                  data-test="batch-test-accounts"
+                  @click="openBatchTestConfigDialog"
+                >
+                  <Icon name="play" size="sm" :stroke-width="2" :class="batchTesting ? 'animate-pulse' : ''" />
+                  {{ t('admin.upstreamAccounts.testAllConnections') }}
+                </button>
+                <button type="button" class="ui-button accounts-action-secondary" @click="openSyncLogsDialog">
+                  <Icon name="document" size="sm" :stroke-width="2" />
+                  {{ t('admin.upstreamAccounts.openSyncLogs') }}
+                </button>
+              </div>
             </div>
           </section>
 
@@ -140,50 +142,67 @@
             </div>
           </section>
 
-          <section class="filter-row">
-            <Select
-              v-model="platformFilter"
-              class="filter-select"
-              :options="platformFilterOptions"
-            />
-            <Select
-              v-model="providerFilter"
-              class="filter-select"
-              :options="providerOptions"
-            />
-            <Select
-              v-model="sourceFilter"
-              class="filter-select"
-              :options="sourceOptions"
-            />
-            <Select
-              v-model="groupFilter"
-              class="filter-select"
-              :options="groupOptions"
-            />
-            <div class="search-wrap">
-              <Icon name="search" size="sm" :stroke-width="2" />
-              <input
-                v-model.trim="searchQuery"
-                type="search"
-                class="ui-input filter-search"
-                :placeholder="t('admin.upstreamAccounts.searchPlaceholder')"
-              />
+          <section class="filter-row" :class="{ 'filters-expanded': showAdvancedFilters }">
+            <div class="filter-sticky-row">
+              <div class="search-wrap">
+                <Icon name="search" size="sm" :stroke-width="2" />
+                <input
+                  v-model.trim="searchQuery"
+                  type="search"
+                  class="ui-input filter-search"
+                  :placeholder="t('admin.upstreamAccounts.searchPlaceholder')"
+                />
+              </div>
+              <button
+                type="button"
+                class="filter-toggle-button"
+                :aria-expanded="showAdvancedFilters"
+                @click="showAdvancedFilters = !showAdvancedFilters"
+              >
+                <Icon name="filter" size="sm" :stroke-width="2" />
+                {{ t('admin.upstreamAccounts.mobileFilterToggle') }}
+                <strong v-if="activeFilterCount">{{ activeFilterCount }}</strong>
+                <Icon :name="showAdvancedFilters ? 'chevronUp' : 'chevronDown'" size="sm" :stroke-width="2" />
+              </button>
+              <div class="filtered-count">
+                <span>{{ t('admin.upstreamAccounts.filteredCount') }}</span>
+                <strong>{{ filteredItems.length }}</strong>
+              </div>
             </div>
-            <div class="filtered-count">
-              <span>{{ t('admin.upstreamAccounts.filteredCount') }}</span>
-              <strong>{{ filteredItems.length }}</strong>
+            <div class="filter-controls" :class="{ 'is-open': showAdvancedFilters }">
+              <Select
+                v-model="platformFilter"
+                class="filter-select"
+                :options="platformFilterOptions"
+              />
+              <Select
+                v-model="providerFilter"
+                class="filter-select"
+                :options="providerOptions"
+              />
+              <Select
+                v-model="sourceFilter"
+                class="filter-select"
+                :options="sourceOptions"
+              />
+              <Select
+                v-model="groupFilter"
+                class="filter-select"
+                :options="groupOptions"
+              />
             </div>
           </section>
 
           <nav class="quick-tags" aria-label="quick filters">
             <button
-              v-for="(tag, index) in quickFilterTags"
-              :key="tag"
+              v-for="option in quickFilterOptions"
+              :key="option.key"
               type="button"
-              :class="['quick-tag', { active: index === 0 }]"
+              :class="['quick-tag', { active: activeQuickFilter === option.key }, option.tone ? `quick-tag-${option.tone}` : '']"
+              @click="activeQuickFilter = option.key"
             >
-              {{ tag }}
+              <span>{{ option.label }}</span>
+              <strong>{{ option.count }}</strong>
             </button>
           </nav>
         </div>
@@ -204,7 +223,7 @@
               :data="tableItems"
               :loading="loading"
               :row-class="accountRowClass"
-              :estimate-row-height="92"
+              :estimate-row-height="78"
             >
               <template #cell-source="{ row }">
                 <div class="source-cell">
@@ -1223,6 +1242,16 @@
         />
       </template>
     </TablePageLayout>
+    <button
+      v-if="showMobileBackToFilters"
+      type="button"
+      class="mobile-back-to-filters"
+      :aria-label="t('admin.upstreamAccounts.mobileBackToFilters')"
+      :title="t('admin.upstreamAccounts.mobileBackToFilters')"
+      @click="scrollToUpstreamFilters"
+    >
+      <Icon name="arrowUp" size="sm" :stroke-width="2.4" />
+    </button>
   </AppLayout>
 </template>
 
@@ -1283,6 +1312,7 @@ type BatchTestPlatformOption = {
 }
 type BatchTestSortKey = 'account' | 'platform' | 'upstream_rate' | 'schedulable' | 'status' | 'latency' | 'finished_at'
 type BatchTestResultFilter = 'all' | 'failed' | 'success' | 'skipped'
+type QuickFilterKey = 'all' | 'update' | 'risk' | 'unbound' | 'failed' | 'disabled'
 type SortOrder = 'asc' | 'desc'
 
 const MAX_BATCH_TEST_ACCOUNTS = 200
@@ -1323,6 +1353,9 @@ const providerFilter = ref('')
 const platformFilter = ref('')
 const sourceFilter = ref('')
 const groupFilter = ref('')
+const activeQuickFilter = ref<QuickFilterKey>('all')
+const showAdvancedFilters = ref(false)
+const showMobileBackToFilters = ref(false)
 const rateGuardConfig = ref<UpstreamAccountRateGuardConfig | null>(null)
 const rateGuardForm = ref({
   enabled: false,
@@ -1344,6 +1377,7 @@ const batchTesting = ref(false)
 const batchTestResult = ref<BatchAccountTestJob | null>(null)
 const batchTestModelByPlatform = ref<Record<string, string>>({})
 const batchTestModelOptionsByPlatform = ref<Record<string, ClaudeModel[]>>({})
+const batchTestModelSourceAccountByPlatform = ref<Record<string, number>>({})
 const batchTestModelLoadingByPlatform = ref<Record<string, boolean>>({})
 const batchTestSortKey = ref<BatchTestSortKey | null>(null)
 const batchTestSortOrder = ref<SortOrder>('asc')
@@ -1443,14 +1477,6 @@ const statCards = computed(() => [
     tone: 'red'
   }
 ])
-const quickFilterTags = computed(() => [
-  '\u5168\u90e8',
-  'Happiness',
-  'NikoAPI',
-  t('admin.upstreamAccounts.toUpdate'),
-  '\u65e0\u7ed1\u5b9a\u5206\u7ec4',
-  '\u500d\u7387\u5f02\u5e38'
-])
 const syncLogEntries = computed<UpstreamAccountSyncLogEntry[]>(() => {
   const entries: UpstreamAccountSyncLogEntry[] = []
   for (const record of records.value) {
@@ -1530,7 +1556,7 @@ const groupOptions = computed<SelectOption[]>(() => [
     label: group.name
   }))
 ])
-const filteredItems = computed(() => {
+const baseFilteredItems = computed(() => {
   const keyword = searchQuery.value.trim().toLowerCase()
   const selectedGroupID = Number(groupFilter.value)
   return items.value.filter((item) => {
@@ -1560,6 +1586,53 @@ const filteredItems = computed(() => {
     return haystack.includes(keyword)
   })
 })
+const quickFilterOptions = computed(() => {
+  const source = baseFilteredItems.value
+  return [
+    {
+      key: 'all' as const,
+      label: t('common.all'),
+      count: source.length
+    },
+    {
+      key: 'update' as const,
+      label: t('admin.upstreamAccounts.toUpdate'),
+      count: source.filter(item => item.action === 'update').length
+    },
+    {
+      key: 'risk' as const,
+      label: t('admin.upstreamAccounts.quickFilterRateRisk'),
+      count: source.filter(item => item.rate_violation).length,
+      tone: 'danger' as const
+    },
+    {
+      key: 'unbound' as const,
+      label: t('admin.upstreamAccounts.quickFilterNoGroups'),
+      count: source.filter(upstreamAccountHasNoGroups).length
+    },
+    {
+      key: 'failed' as const,
+      label: t('admin.upstreamAccounts.quickFilterTestFailed'),
+      count: source.filter(upstreamAccountTestFailed).length,
+      tone: 'danger' as const
+    },
+    {
+      key: 'disabled' as const,
+      label: t('admin.upstreamAccounts.quickFilterDisabledProvider'),
+      count: source.filter(isProviderDisabled).length,
+      tone: 'muted' as const
+    }
+  ]
+})
+const filteredItems = computed(() => baseFilteredItems.value.filter(item => upstreamAccountMatchesQuickFilter(item, activeQuickFilter.value)))
+const activeFilterCount = computed(() => [
+  searchQuery.value.trim(),
+  providerFilter.value,
+  platformFilter.value,
+  sourceFilter.value,
+  groupFilter.value,
+  activeQuickFilter.value !== 'all' ? activeQuickFilter.value : ''
+].filter(Boolean).length)
 const tableItems = computed(() => filteredItems.value.map(item => ({
   ...item,
   source: upstreamAccountSourceSortValue(item),
@@ -1577,24 +1650,54 @@ const batchTestAccountIds = computed(() => Array.from(
   )
 ))
 const batchTestPlatformOptions = computed<BatchTestPlatformOption[]>(() => {
-  const byPlatform = new Map<string, BatchTestPlatformOption>()
+  const byPlatform = new Map<string, { platform: string; accountIds: number[] }>()
   for (const accountId of batchTestAccountIds.value) {
     const account = matchedAccountsById.value[accountId]
     const platform = account?.platform?.trim()
     if (!platform) continue
     const existing = byPlatform.get(platform)
     if (existing) {
-      existing.accountCount += 1
+      existing.accountIds.push(accountId)
     } else {
       byPlatform.set(platform, {
         platform,
-        accountId,
-        accountCount: 1
+        accountIds: [accountId]
       })
     }
   }
-  return Array.from(byPlatform.values()).sort((a, b) => a.platform.localeCompare(b.platform))
+  return Array.from(byPlatform.values())
+    .map(group => ({
+      platform: group.platform,
+      accountId: selectBatchTestModelRepresentativeAccountId(group.accountIds),
+      accountCount: group.accountIds.length
+    }))
+    .sort((a, b) => a.platform.localeCompare(b.platform))
 })
+
+function selectBatchTestModelRepresentativeAccountId(accountIds: number[]) {
+  return accountIds
+    .map((accountId, index) => ({
+      accountId,
+      index,
+      account: matchedAccountsById.value[accountId]
+    }))
+    .sort((a, b) => {
+      const scoreDelta = batchTestModelRepresentativeScore(a.account) - batchTestModelRepresentativeScore(b.account)
+      if (scoreDelta !== 0) return scoreDelta
+      return a.index - b.index
+    })[0]?.accountId || accountIds[0] || 0
+}
+
+function batchTestModelRepresentativeScore(account: Account | undefined) {
+  if (!account) return 100
+  if (account.type === 'upstream') return 0
+  if (account.type === 'apikey') return 1
+  if (account.type === 'bedrock') return 2
+  if (account.type === 'service_account') return 3
+  if (account.type === 'oauth' || account.type === 'setup-token') return 20
+  return 10
+}
+
 function batchTestModelSelectOptions(platform: string): SelectOption[] {
   const models = batchTestModelOptionsByPlatform.value[platform] || []
   const options = models.map(model => ({
@@ -1997,6 +2100,27 @@ function isProviderDisabled(row: UpstreamAccountSyncItem) {
   return provider?.enabled === false
 }
 
+function upstreamAccountHasNoGroups(row: UpstreamAccountSyncItem) {
+  const boundGroups = row.bound_groups || []
+  return !row.local_group_id && boundGroups.length === 0
+}
+
+function upstreamAccountTestFailed(row: UpstreamAccountSyncItem) {
+  const accountId = Number(row.matched_account_id)
+  if (!Number.isFinite(accountId) || accountId <= 0) return false
+  const status = accountTestStatusById.value[accountId] || matchedAccountsById.value[accountId]?.last_test_status
+  return status === 'failed'
+}
+
+function upstreamAccountMatchesQuickFilter(row: UpstreamAccountSyncItem, filter: QuickFilterKey) {
+  if (filter === 'update') return row.action === 'update'
+  if (filter === 'risk') return row.rate_violation
+  if (filter === 'unbound') return upstreamAccountHasNoGroups(row)
+  if (filter === 'failed') return upstreamAccountTestFailed(row)
+  if (filter === 'disabled') return isProviderDisabled(row)
+  return true
+}
+
 function isSchedulableToggleDisabled(row: UpstreamAccountSyncItem) {
   const account = getMatchedAccount(row)
   if (!account) return true
@@ -2012,9 +2136,12 @@ function schedulableToggleTitle(row: UpstreamAccountSyncItem) {
 }
 
 function accountRowClass(row: UpstreamAccountSyncItem) {
-  if (isProviderDisabled(row)) return ['mobile-row-card', 'provider-disabled-row']
-  if (row.rate_violation) return ['mobile-row-card', 'risk-row']
-  return 'mobile-row-card'
+  const classes = ['mobile-row-card']
+  if (isProviderDisabled(row)) classes.push('provider-disabled-row')
+  if (row.rate_violation) classes.push('risk-row')
+  if (upstreamAccountTestFailed(row)) classes.push('test-failed-row')
+  if (upstreamAccountHasNoGroups(row)) classes.push('unbound-row')
+  return classes
 }
 
 function accountTestStatusLabel(status: AccountTestStatus | undefined) {
@@ -2171,7 +2298,12 @@ function closeBatchTestConfigDialog() {
 async function loadBatchTestPlatformModels() {
   const options = batchTestPlatformOptions.value
   await Promise.allSettled(options.map(async option => {
-    if (batchTestModelOptionsByPlatform.value[option.platform]?.length) return
+    if (
+      batchTestModelSourceAccountByPlatform.value[option.platform] === option.accountId &&
+      batchTestModelOptionsByPlatform.value[option.platform]?.length
+    ) {
+      return
+    }
     batchTestModelLoadingByPlatform.value = {
       ...batchTestModelLoadingByPlatform.value,
       [option.platform]: true
@@ -2181,6 +2313,10 @@ async function loadBatchTestPlatformModels() {
       batchTestModelOptionsByPlatform.value = {
         ...batchTestModelOptionsByPlatform.value,
         [option.platform]: models || []
+      }
+      batchTestModelSourceAccountByPlatform.value = {
+        ...batchTestModelSourceAccountByPlatform.value,
+        [option.platform]: option.accountId
       }
     } catch {
       batchTestModelOptionsByPlatform.value = {
@@ -2984,10 +3120,34 @@ function closeTrendModal() {
   showTrendModal.value = false
 }
 
-onMounted(reload)
+function updateMobileBackToFiltersVisibility() {
+  showMobileBackToFilters.value = window.innerWidth <= 768 && window.scrollY > 560
+}
+
+function scrollToUpstreamFilters() {
+  const tableWrapper = document.querySelector<HTMLElement>('.upstream-accounts-page .table-wrapper')
+  if (tableWrapper) {
+    tableWrapper.scrollTop = 0
+  }
+  const target = document.querySelector<HTMLElement>('.upstream-accounts-page .filter-row')
+  const top = target ? target.getBoundingClientRect().top + window.scrollY - 76 : 0
+  window.scrollTo({
+    top: Math.max(0, top),
+    behavior: 'smooth'
+  })
+}
+
+onMounted(() => {
+  void reload()
+  updateMobileBackToFiltersVisibility()
+  window.addEventListener('scroll', updateMobileBackToFiltersVisibility, { passive: true })
+  window.addEventListener('resize', updateMobileBackToFiltersVisibility)
+})
 onBeforeUnmount(() => {
   batchTestPollToken.value += 1
   clearBatchTestPollTimer()
+  window.removeEventListener('scroll', updateMobileBackToFiltersVisibility)
+  window.removeEventListener('resize', updateMobileBackToFiltersVisibility)
 })
 </script>
 
@@ -3025,9 +3185,9 @@ onBeforeUnmount(() => {
 
 .accounts-topbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(460px, 1fr) minmax(360px, 0.8fr);
   gap: 16px;
-  align-items: center;
+  align-items: stretch;
 }
 
 .stats-strip {
@@ -3114,11 +3274,20 @@ onBeforeUnmount(() => {
 }
 
 .accounts-actions {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(0, 1.2fr);
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.accounts-button-group {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
+  min-width: 0;
 }
 
 .provider-summary {
@@ -3196,6 +3365,27 @@ onBeforeUnmount(() => {
 .ui-button-icon {
   width: 38px;
   padding: 0;
+}
+
+.accounts-action-test {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.accounts-action-test:hover:not(:disabled) {
+  border-color: #93c5fd;
+  background: #dbeafe;
+  color: #1d4ed8;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
+}
+
+.accounts-action-secondary {
+  color: #64748b;
+}
+
+.mobile-back-to-filters {
+  display: none;
 }
 
 .rate-guard-panel {
@@ -3359,10 +3549,27 @@ onBeforeUnmount(() => {
 }
 
 .filter-row {
-  display: grid;
-  grid-template-columns: 156px 172px 172px minmax(260px, 1fr) auto;
+  display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   align-items: center;
+}
+
+.filter-sticky-row {
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) auto;
+  flex: 1 1 360px;
+  gap: 12px;
+  align-items: center;
+  min-width: 360px;
+}
+
+.filter-controls {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(142px, 1fr));
+  flex: 2 1 600px;
+  gap: 12px;
+  min-width: 0;
 }
 
 .filter-select {
@@ -3395,6 +3602,10 @@ onBeforeUnmount(() => {
   padding-left: 38px;
 }
 
+.filter-toggle-button {
+  display: none;
+}
+
 .filtered-count {
   display: inline-flex;
   height: 34px;
@@ -3416,10 +3627,16 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  align-items: center;
+  border-top: 1px solid #eef2f7;
+  padding-top: 4px;
 }
 
 .quick-tag {
-  height: 30px;
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 6px;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #fff;
@@ -3427,17 +3644,40 @@ onBeforeUnmount(() => {
   color: #334155;
   font-size: 12px;
   font-weight: 650;
-  transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease, box-shadow 150ms ease;
+}
+
+.quick-tag strong {
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .quick-tag:hover {
   border-color: #059669;
   color: #059669;
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.06);
 }
 
 .quick-tag.active {
   border-color: #059669;
   background: #059669;
+  color: #fff;
+}
+
+.quick-tag.active strong {
+  color: inherit;
+}
+
+.quick-tag-danger.active {
+  border-color: #dc2626;
+  background: #dc2626;
+  color: #fff;
+}
+
+.quick-tag-muted.active {
+  border-color: #64748b;
+  background: #64748b;
   color: #fff;
 }
 
@@ -3560,6 +3800,8 @@ onBeforeUnmount(() => {
 .accounts-table-card :deep(td) {
   border-bottom: 1px solid #eef2f7;
   color: #334155;
+  padding-top: 11px;
+  padding-bottom: 11px;
 }
 
 .accounts-table-card :deep(.data-table-row) {
@@ -3572,22 +3814,37 @@ onBeforeUnmount(() => {
 
 .accounts-table-card :deep(.data-table-row.risk-row),
 .accounts-table-card :deep(.data-table-row.risk-row .sticky-col) {
-  background: #fff7f7;
+  background: #fffafa;
 }
 
 .accounts-table-card :deep(.data-table-row.risk-row:hover),
 .accounts-table-card :deep(.data-table-row.risk-row:hover .sticky-col) {
-  background: #fef2f2;
+  background: #fff4f4;
+}
+
+.accounts-table-card :deep(.data-table-row.test-failed-row),
+.accounts-table-card :deep(.data-table-row.test-failed-row .sticky-col) {
+  background: #fffaf4;
+}
+
+.accounts-table-card :deep(.data-table-row.test-failed-row:hover),
+.accounts-table-card :deep(.data-table-row.test-failed-row:hover .sticky-col) {
+  background: #fff3e4;
+}
+
+.accounts-table-card :deep(.data-table-row.risk-row.test-failed-row),
+.accounts-table-card :deep(.data-table-row.risk-row.test-failed-row .sticky-col) {
+  background: #fff8f4;
 }
 
 .accounts-table-card :deep(.data-table-row.provider-disabled-row),
 .accounts-table-card :deep(.data-table-row.provider-disabled-row .sticky-col) {
-  background: #f8fafc;
+  background: #fbfcfe;
 }
 
 .accounts-table-card :deep(.data-table-row.provider-disabled-row:hover),
 .accounts-table-card :deep(.data-table-row.provider-disabled-row:hover .sticky-col) {
-  background: #f3f4f6;
+  background: #f8fafc;
 }
 
 .accounts-table-card :deep(.data-table-row.provider-disabled-row td) {
@@ -5053,6 +5310,16 @@ button.sync-log-status-unhandled:hover {
   color: #cbd5e1;
 }
 
+@media (max-width: 1280px) {
+  .accounts-topbar {
+    grid-template-columns: 1fr;
+  }
+
+  .accounts-actions {
+    grid-template-columns: minmax(180px, auto) minmax(0, 1fr);
+  }
+}
+
 @media (max-width: 1023px) {
   .upstream-accounts-page :deep(.table-page-layout.mobile-mode) {
     height: auto;
@@ -5077,6 +5344,16 @@ button.sync-log-status-unhandled:hover {
   .accounts-actions,
   .guard-controls {
     justify-content: flex-start;
+  }
+
+  .accounts-actions {
+    grid-template-columns: 1fr;
+    justify-items: flex-start;
+  }
+
+  .accounts-button-group {
+    justify-content: flex-start;
+    width: 100%;
   }
 
   .provider-summary {
@@ -5231,11 +5508,46 @@ button.sync-log-status-unhandled:hover {
 @media (max-width: 768px) {
   .stats-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .stat-card {
+    min-height: 64px;
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .stat-icon {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+  }
+
+  .stat-copy strong {
+    font-size: 18px;
+    font-weight: 800;
+    line-height: 1;
+  }
+
+  .stat-copy span {
+    margin-top: 3px;
+    font-size: 12px;
+  }
+
+  .stat-alert-dot {
+    top: 9px;
+    right: 9px;
+    width: 7px;
+    height: 7px;
   }
 
   .accounts-actions {
     width: 100%;
     align-items: flex-start;
+    gap: 8px;
+  }
+
+  .accounts-button-group {
     gap: 8px;
   }
 
@@ -5294,22 +5606,70 @@ button.sync-log-status-unhandled:hover {
   }
 
   .filter-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: grid;
+    position: sticky;
+    top: 64px;
+    z-index: 20;
+    grid-template-columns: 1fr;
     gap: 8px;
     border: 1px solid #e2e8f0;
     border-radius: 8px;
     background: #fff;
     padding: 10px;
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
   }
 
-  .search-wrap,
-  .filtered-count {
-    grid-column: 1 / -1;
+  .filter-sticky-row {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .filter-toggle-button {
+    display: inline-flex;
+    min-height: 34px;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    border: 1px solid #dbe3ee;
+    border-radius: 8px;
+    background: #f8fafc;
+    padding: 0 9px;
+    color: #334155;
+    font-size: 12px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  .filter-toggle-button strong {
+    display: inline-flex;
+    min-width: 18px;
+    height: 18px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: #dc2626;
+    color: #fff;
+    font-size: 11px;
+    line-height: 1;
+  }
+
+  .filter-controls {
+    display: none;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    border-top: 1px solid #eef2f7;
+    padding-top: 8px;
+  }
+
+  .filter-controls.is-open {
+    display: grid;
   }
 
   .filtered-count {
-    justify-content: space-between;
-    width: 100%;
+    width: auto;
+    justify-content: center;
+    padding: 0 10px;
   }
 
   .records-table {
@@ -5343,6 +5703,19 @@ button.sync-log-status-unhandled:hover {
     background: #ea580c;
   }
 
+  .accounts-table-card :deep(.mobile-row-card.test-failed-row) {
+    border-color: #fed7aa;
+    background: #fffaf5;
+  }
+
+  .accounts-table-card :deep(.mobile-row-card.test-failed-row::before) {
+    background: #dc2626;
+  }
+
+  .accounts-table-card :deep(.mobile-row-card.unbound-row:not(.risk-row):not(.test-failed-row)::before) {
+    background: #2563eb;
+  }
+
   .accounts-table-card :deep(.mobile-row-card.provider-disabled-row) {
     background: #f8fafc;
   }
@@ -5370,13 +5743,68 @@ button.sync-log-status-unhandled:hover {
     color: #0f172a;
     font-size: 13px;
   }
+
+  .accounts-table-card :deep(.mobile-row-card .action-cell) {
+    justify-content: flex-end;
+    gap: 6px;
+  }
+
+  .accounts-table-card :deep(.mobile-row-card .text-action) {
+    min-height: 28px;
+    border: 1px solid #dbe3ee;
+    border-radius: 7px;
+    background: #fff;
+    padding: 0 8px;
+    color: #475569;
+    font-size: 12px;
+    line-height: 1;
+  }
+
+  .accounts-table-card :deep(.mobile-row-card .text-action-primary) {
+    border-color: #bbf7d0;
+    background: #ecfdf5;
+    color: #047857;
+  }
+
+  .accounts-table-card :deep(.mobile-row-card .text-action-danger) {
+    border-color: #fecaca;
+    background: #fef2f2;
+    color: #dc2626;
+  }
+
+  .accounts-action-primary {
+    font-weight: 800;
+  }
+
+  .accounts-action-secondary {
+    border-color: #dbe3ee;
+    background: #f8fafc;
+    color: #64748b;
+  }
+
+  .mobile-back-to-filters {
+    position: fixed;
+    right: max(16px, env(safe-area-inset-right));
+    bottom: calc(18px + env(safe-area-inset-bottom));
+    z-index: 35;
+    display: inline-flex;
+    width: 44px;
+    height: 44px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #bbf7d0;
+    border-radius: 999px;
+    background: #059669;
+    color: #fff;
+    box-shadow: 0 14px 34px rgba(15, 23, 42, 0.18);
+  }
+
+  .mobile-back-to-filters:active {
+    transform: translateY(1px);
+  }
 }
 
 @media (max-width: 520px) {
-  .stats-strip {
-    grid-template-columns: 1fr;
-  }
-
   .accounts-actions .ui-button {
     flex-basis: auto;
   }
@@ -5395,8 +5823,21 @@ button.sync-log-status-unhandled:hover {
 }
 
 @media (max-width: 380px) {
-  .filter-row,
   .guard-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .filter-sticky-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .filter-sticky-row .filtered-count {
+    grid-column: 1 / -1;
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .filter-controls {
     grid-template-columns: 1fr;
   }
 

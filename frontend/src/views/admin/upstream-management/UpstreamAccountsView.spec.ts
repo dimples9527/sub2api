@@ -2811,4 +2811,87 @@ describe('UpstreamAccountsView', () => {
     expect(wrapper.findComponent({ name: 'ConfirmDialog' }).exists()).toBe(true)
     expect(appStoreMock.showWarning).toHaveBeenCalled()
   })
+
+  it('uses an API key account as the Anthropic batch-test model representative', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValue({
+      default_provider: {},
+      providers: [],
+      summary: {
+        upstream_key_count: 2,
+        matched_account_count: 2,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 2,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'noop',
+          provider_slug: 'oauth-provider',
+          provider_name: 'OAuth Provider',
+          upstream_key_name: 'oauth-first',
+          local_account_name: 'oauth-first',
+          matched_account_id: 21,
+          matched_account_name: 'oauth-first',
+          upstream_rate_multiplier: 1,
+          rate_violation: false,
+          bound_groups: [],
+        },
+        {
+          action: 'noop',
+          provider_slug: 'upstream-provider',
+          provider_name: 'Upstream Provider',
+          upstream_key_name: 'apikey-second',
+          local_account_name: 'apikey-second',
+          matched_account_id: 22,
+          matched_account_name: 'apikey-second',
+          upstream_rate_multiplier: 1,
+          rate_violation: false,
+          bound_groups: [],
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+    accountsMock.getById.mockImplementation(async (id: number) => ({
+      id,
+      name: id === 21 ? 'oauth-first' : 'apikey-second',
+      platform: 'anthropic',
+      type: id === 21 ? 'oauth' : 'apikey',
+      status: 'active',
+      schedulable: true,
+    }))
+    accountsMock.getAvailableModels.mockResolvedValue([
+      { id: 'claude-from-apikey', display_name: 'Claude From API Key' },
+    ])
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: true,
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+          ConfirmDialog: true,
+          AccountStatusIndicator: true,
+          AccountTestModal: true,
+          CreateAccountModal: true,
+          EditAccountModal: true,
+          TempUnschedStatusModal: true,
+          UpstreamProviderTrendModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+    await wrapper.find('[data-test="batch-test-accounts"]').trigger('click')
+    await flushPromises()
+
+    expect(accountsMock.getAvailableModels).toHaveBeenCalledWith(22)
+    expect(accountsMock.getAvailableModels).not.toHaveBeenCalledWith(21)
+  })
 })

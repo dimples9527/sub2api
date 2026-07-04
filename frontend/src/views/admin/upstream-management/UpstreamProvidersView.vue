@@ -3,73 +3,103 @@
     <div class="upstream-providers-page">
       <TablePageLayout>
         <template #filters>
-        <div class="upstream-toolbar">
+        <div class="upstream-toolbar" :class="{ 'upstream-filters-expanded': showProviderAdvancedFilters }">
           <div class="upstream-toolbar-left">
             <div class="upstream-toolbar-title">{{ t('admin.upstreamProviders.title') }}</div>
-            <button type="button" class="btn btn-primary upstream-toolbar-action" @click="openCreateDialog">
-              {{ t('admin.upstreamProviders.createProvider') }}
-            </button>
-            <button
-              type="button"
-              class="btn btn-secondary upstream-toolbar-action"
-              :disabled="loading"
-              :title="t('common.refresh')"
-              @click="reload"
-            >
-              {{ t('common.refresh') }}
-            </button>
-            <button
-              type="button"
-              class="btn btn-secondary upstream-toolbar-action upstream-sample-action"
-              :disabled="runningBalanceSampleNow"
-              :title="t('admin.upstreamProviders.balanceSampleNow')"
-              @click="runBalanceSampleNow"
-            >
-              <Icon name="play" size="sm" :class="runningBalanceSampleNow ? 'animate-pulse' : ''" />
-              <span>{{ t('admin.upstreamProviders.balanceSampleNow') }}</span>
-            </button>
-            <button
-              type="button"
-              class="btn btn-secondary upstream-toolbar-action upstream-sampler-settings-action"
-              :title="t('admin.upstreamProviders.balanceSamplerSettings')"
-              @click="openBalanceSamplerDialog"
-            >
-              <Icon name="cog" size="sm" />
-              <span>{{ t('admin.upstreamProviders.balanceSamplerSettings') }}</span>
-            </button>
+            <div class="upstream-toolbar-actions">
+              <button type="button" class="btn btn-primary upstream-toolbar-action" @click="openCreateDialog">
+                {{ t('admin.upstreamProviders.createProvider') }}
+              </button>
+              <button
+                type="button"
+                class="btn btn-secondary upstream-toolbar-action"
+                :disabled="loading"
+                :title="t('common.refresh')"
+                @click="reload"
+              >
+                {{ t('common.refresh') }}
+              </button>
+              <button
+                type="button"
+                class="btn btn-secondary upstream-toolbar-action upstream-sample-action"
+                :disabled="runningBalanceSampleNow"
+                :title="t('admin.upstreamProviders.balanceSampleNow')"
+                @click="runBalanceSampleNow"
+              >
+                <Icon name="play" size="sm" :class="runningBalanceSampleNow ? 'animate-pulse' : ''" />
+                <span>{{ t('admin.upstreamProviders.balanceSampleNow') }}</span>
+              </button>
+              <button
+                type="button"
+                class="btn btn-secondary upstream-toolbar-action upstream-sampler-settings-action"
+                :title="t('admin.upstreamProviders.balanceSamplerSettings')"
+                @click="openBalanceSamplerDialog"
+              >
+                <Icon name="cog" size="sm" />
+                <span>{{ t('admin.upstreamProviders.balanceSamplerSettings') }}</span>
+              </button>
+            </div>
           </div>
 
           <div class="upstream-toolbar-filters">
-            <div class="relative w-full sm:w-64">
-              <Icon
-                name="search"
-                size="sm"
-                class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
-              />
-              <input
-                v-model="searchQuery"
-                type="text"
-                class="input upstream-compact-input pl-9"
-                :placeholder="t('admin.upstreamProviders.searchPlaceholder')"
-              />
+            <div class="upstream-search-row">
+              <div class="relative min-w-0 flex-1 sm:w-64">
+                <Icon
+                  name="search"
+                  size="sm"
+                  class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
+                />
+                <input
+                  v-model="searchQuery"
+                  type="text"
+                  class="input upstream-compact-input pl-9"
+                  :placeholder="t('admin.upstreamProviders.searchPlaceholder')"
+                />
+              </div>
+              <button
+                type="button"
+                class="upstream-filter-toggle"
+                :aria-expanded="showProviderAdvancedFilters"
+                @click="showProviderAdvancedFilters = !showProviderAdvancedFilters"
+              >
+                <Icon name="filter" size="sm" />
+                <span>{{ t('admin.upstreamProviders.mobileFilterToggle') }}</span>
+                <strong v-if="activeProviderFilterCount">{{ activeProviderFilterCount }}</strong>
+                <Icon :name="showProviderAdvancedFilters ? 'chevronUp' : 'chevronDown'" size="sm" />
+              </button>
             </div>
 
-            <Select
-              v-model="typeFilter"
-              class="upstream-filter-select"
-              :options="typeFilterOptions"
-              :searchable="false"
-              :placeholder="t('admin.upstreamProviders.type')"
-            />
+            <div class="upstream-filter-controls" :class="{ 'is-open': showProviderAdvancedFilters }">
+              <Select
+                v-model="typeFilter"
+                class="upstream-filter-select"
+                :options="typeFilterOptions"
+                :searchable="false"
+                :placeholder="t('admin.upstreamProviders.type')"
+              />
 
-            <Select
-              v-model="enabledFilter"
-              class="upstream-filter-select"
-              :options="enabledFilterOptions"
-              :searchable="false"
-              :placeholder="t('common.status')"
-            />
+              <Select
+                v-model="enabledFilter"
+                class="upstream-filter-select"
+                :options="enabledFilterOptions"
+                :searchable="false"
+                :placeholder="t('common.status')"
+              />
+            </div>
           </div>
+
+          <nav class="upstream-quick-tags" aria-label="quick filters">
+            <button
+              v-for="option in quickProviderFilterOptions"
+              :key="option.key"
+              type="button"
+              :class="['upstream-quick-tag', { active: activeQuickProviderFilter === option.key }, option.tone ? `upstream-quick-tag-${option.tone}` : '']"
+              @click="activeQuickProviderFilter = option.key"
+            >
+              <span>{{ option.label }}</span>
+              <strong>{{ option.count }}</strong>
+            </button>
+          </nav>
 
           <div class="upstream-toolbar-right">
             <div class="upstream-total">
@@ -390,6 +420,19 @@
               >
                 <Icon name="trash" size="sm" />
                 <span>{{ t('common.delete') }}</span>
+              </button>
+              <button
+                type="button"
+                class="action-button provider-mobile-detail-toggle"
+                :title="isExpanded(row.slug) ? t('admin.upstreamProviders.hideMobileDetails') : t('admin.upstreamProviders.showMobileDetails')"
+                @click="toggleExpanded(row.slug)"
+              >
+                <Icon :name="isExpanded(row.slug) ? 'chevronUp' : 'chevronDown'" size="sm" />
+                <span>
+                  {{ isExpanded(row.slug)
+                    ? t('admin.upstreamProviders.hideMobileDetails')
+                    : t('admin.upstreamProviders.showMobileDetails') }}
+                </span>
               </button>
             </div>
           </template>
@@ -746,6 +789,31 @@
             {{ t('admin.upstreamProviders.parsedKeys') }}
           </h4>
           <div class="max-h-72 overflow-auto rounded-lg border border-gray-200 dark:border-dark-600">
+            <div class="provider-mobile-record-cards">
+              <article
+                v-for="item in testResult.parsed_keys"
+                :key="`test-card-${item.key_name}-${item.group_name}`"
+                class="provider-mobile-record-card"
+              >
+                <div>
+                  <span>{{ t('admin.upstreamProviders.keyName') }}</span>
+                  <strong>{{ item.key_name || '-' }}</strong>
+                </div>
+                <div>
+                  <span>{{ t('admin.upstreamProviders.groupName') }}</span>
+                  <strong>{{ item.group_name || '-' }}</strong>
+                </div>
+                <div>
+                  <span>{{ t('admin.upstreamProviders.rateMultiplier') }}</span>
+                  <strong>{{ formatRate(item.rate_multiplier) }}</strong>
+                </div>
+                <div>
+                  <span>{{ t('admin.upstreamProviders.rawStatus') }}</span>
+                  <strong>{{ item.raw_status || '-' }}</strong>
+                </div>
+              </article>
+              <div v-if="!testResult.parsed_keys?.length" class="provider-mobile-record-empty">{{ t('common.noData') }}</div>
+            </div>
             <table class="w-full min-w-[720px] divide-y divide-gray-200 text-sm dark:divide-dark-700">
               <thead class="bg-gray-50 dark:bg-dark-800">
                 <tr>
@@ -783,6 +851,35 @@
           <div v-for="warning in keysWarnings" :key="warning">{{ warning }}</div>
         </div>
         <div class="max-h-[60vh] overflow-auto rounded-lg border border-gray-200 dark:border-dark-600">
+          <div class="provider-mobile-record-cards">
+            <article
+              v-for="item in keysItems"
+              :key="`keys-card-${item.key_name}-${item.group_name}-${item.raw_group_id}`"
+              class="provider-mobile-record-card"
+            >
+              <div>
+                <span>{{ t('admin.upstreamProviders.keyName') }}</span>
+                <strong>{{ item.key_name || '-' }}</strong>
+              </div>
+              <div>
+                <span>{{ t('admin.upstreamProviders.groupName') }}</span>
+                <strong>{{ item.group_name || '-' }}</strong>
+              </div>
+              <div>
+                <span>{{ t('admin.upstreamProviders.rateMultiplier') }}</span>
+                <strong>{{ formatRate(item.rate_multiplier) }}</strong>
+              </div>
+              <div>
+                <span>{{ t('admin.upstreamProviders.rawStatus') }}</span>
+                <strong>{{ item.raw_status || '-' }}</strong>
+              </div>
+              <div>
+                <span>{{ t('admin.upstreamProviders.rawGroupId') }}</span>
+                <strong>{{ item.raw_group_id || '-' }}</strong>
+              </div>
+            </article>
+            <div v-if="!keysItems.length" class="provider-mobile-record-empty">{{ t('common.noData') }}</div>
+          </div>
           <table class="w-full min-w-[760px] divide-y divide-gray-200 text-sm dark:divide-dark-700">
             <thead class="bg-gray-50 dark:bg-dark-800">
               <tr>
@@ -865,6 +962,35 @@
           <div>
             <div class="balance-section-title">{{ t('admin.upstreamProviders.balanceSamples') }}</div>
             <div class="mb-5 max-h-72 overflow-auto rounded-lg border border-gray-200 dark:border-dark-600">
+              <div class="provider-mobile-record-cards">
+                <article
+                  v-for="snapshot in selectedBalanceSnapshots"
+                  :key="'snapshot-card-' + (snapshot.id || (snapshot.provider_slug + ':' + snapshot.captured_at))"
+                  class="provider-mobile-record-card"
+                >
+                  <div>
+                    <span>{{ t('admin.upstreamProviders.sampleTime') }}</span>
+                    <strong>{{ formatDateTime(snapshot.captured_at) }}</strong>
+                  </div>
+                  <div>
+                    <span>{{ t('admin.upstreamProviders.currentBalance') }}</span>
+                    <strong>{{ formatMoney(snapshot.balance) }}</strong>
+                  </div>
+                  <div>
+                    <span>{{ t('admin.upstreamProviders.amountScale') }}</span>
+                    <strong>{{ formatScale(snapshot.amount_scale) }}</strong>
+                  </div>
+                  <div>
+                    <span>{{ t('common.status') }}</span>
+                    <strong>{{ snapshot.status === 'success' ? t('admin.upstreamProviders.balanceComplete') : t('admin.upstreamProviders.balanceAnomaly') }}</strong>
+                  </div>
+                  <div>
+                    <span>{{ t('admin.upstreamProviders.sampleError') }}</span>
+                    <strong>{{ snapshot.error || '-' }}</strong>
+                  </div>
+                </article>
+                <div v-if="!selectedBalanceSnapshots.length" class="provider-mobile-record-empty">{{ t('admin.upstreamProviders.noBalanceSamples') }}</div>
+              </div>
               <table class="records-table min-w-[760px]">
                 <thead class="bg-gray-50 dark:bg-dark-800">
                   <tr>
@@ -896,6 +1022,39 @@
 
             <div class="balance-section-title">{{ t('admin.upstreamProviders.balanceHistory') }}</div>
             <div class="max-h-72 overflow-auto rounded-lg border border-gray-200 dark:border-dark-600">
+              <div class="provider-mobile-record-cards">
+                <article
+                  v-for="row in selectedBalanceRows"
+                  :key="`daily-card-${row.provider_slug}-${row.date}`"
+                  class="provider-mobile-record-card"
+                >
+                  <div>
+                    <span>{{ t('admin.upstreamProviders.balanceDate') }}</span>
+                    <strong>{{ row.date }}</strong>
+                  </div>
+                  <div>
+                    <span>{{ t('admin.upstreamProviders.openingBalance') }}</span>
+                    <strong>{{ formatMoney(row.opening_balance) }}</strong>
+                  </div>
+                  <div>
+                    <span>{{ t('admin.upstreamProviders.rechargeAmount') }}</span>
+                    <strong>{{ formatMoney(row.recharge_amount) }}</strong>
+                  </div>
+                  <div>
+                    <span>{{ t('admin.upstreamProviders.closingBalance') }}</span>
+                    <strong>{{ formatMoney(row.closing_balance) }}</strong>
+                  </div>
+                  <div>
+                    <span>{{ t('admin.upstreamProviders.consumptionAmount') }}</span>
+                    <strong>{{ formatMoney(row.consumption_amount) }}</strong>
+                  </div>
+                  <div>
+                    <span>{{ t('common.status') }}</span>
+                    <strong>{{ balanceRowStatus(row) }}</strong>
+                  </div>
+                </article>
+                <div v-if="!selectedBalanceRows.length" class="provider-mobile-record-empty">{{ t('admin.upstreamProviders.noBalanceHistory') }}</div>
+              </div>
               <table class="records-table min-w-[760px]">
                 <thead class="bg-gray-50 dark:bg-dark-800">
                   <tr>
@@ -986,12 +1145,15 @@ type UpstreamProviderTableRow = UpstreamProviderConfig & {
   balance?: number
   today_consumption?: number
 }
+type QuickProviderFilterKey = 'all' | 'enabled' | 'disabled' | 'default' | 'balance_anomaly'
 
 const providers = ref<UpstreamProviderConfig[]>([])
 const loading = ref(false)
 const searchQuery = ref('')
 const typeFilter = ref('')
 const enabledFilter = ref('')
+const showProviderAdvancedFilters = ref(false)
+const activeQuickProviderFilter = ref<QuickProviderFilterKey>('all')
 const defaultingSlug = ref<string | null>(null)
 const showColumnSettings = ref(false)
 const visibleOptionalColumns = ref<string[]>([])
@@ -1076,6 +1238,43 @@ const enabledFilterOptions = computed<SelectOption[]>(() => [
   { value: 'enabled', label: t('common.enabled') },
   { value: 'disabled', label: t('common.disabled') },
 ])
+const activeProviderFilterCount = computed(() => {
+  let count = 0
+  if (typeFilter.value) count += 1
+  if (enabledFilter.value) count += 1
+  if (activeQuickProviderFilter.value !== 'all') count += 1
+  return count
+})
+const quickProviderFilterOptions = computed<Array<{ key: QuickProviderFilterKey; label: string; count: number; tone?: string }>>(() => {
+  const list = providers.value
+  return [
+    { key: 'all', label: t('admin.upstreamProviders.quickFilterAll'), count: list.length },
+    {
+      key: 'enabled',
+      label: t('admin.upstreamProviders.quickFilterEnabled'),
+      count: list.filter(provider => provider.enabled).length,
+      tone: 'success',
+    },
+    {
+      key: 'disabled',
+      label: t('admin.upstreamProviders.quickFilterDisabled'),
+      count: list.filter(provider => !provider.enabled).length,
+      tone: 'muted',
+    },
+    {
+      key: 'default',
+      label: t('admin.upstreamProviders.quickFilterDefault'),
+      count: list.filter(provider => provider.is_default).length,
+      tone: 'info',
+    },
+    {
+      key: 'balance_anomaly',
+      label: t('admin.upstreamProviders.quickFilterBalanceAnomaly'),
+      count: list.filter(provider => providerHasBalanceAnomaly(provider.slug)).length,
+      tone: 'danger',
+    },
+  ]
+})
 
 const baseColumns = computed<Column[]>(() => [
   { key: 'homepage', label: t('admin.upstreamProviders.columns.homepage'), class: 'upstream-homepage-column' },
@@ -1112,6 +1311,10 @@ const filteredProviders = computed<UpstreamProviderTableRow[]>(() => {
   const keyword = searchQuery.value.trim().toLowerCase()
   return providers.value
     .filter((provider) => {
+      if (activeQuickProviderFilter.value === 'enabled' && !provider.enabled) return false
+      if (activeQuickProviderFilter.value === 'disabled' && provider.enabled) return false
+      if (activeQuickProviderFilter.value === 'default' && !provider.is_default) return false
+      if (activeQuickProviderFilter.value === 'balance_anomaly' && !providerHasBalanceAnomaly(provider.slug)) return false
       if (typeFilter.value && provider.type !== typeFilter.value) return false
       if (enabledFilter.value === 'enabled' && !provider.enabled) return false
       if (enabledFilter.value === 'disabled' && provider.enabled) return false
@@ -1139,7 +1342,11 @@ const filteredProviders = computed<UpstreamProviderTableRow[]>(() => {
 })
 
 function providerRowClass(provider: UpstreamProviderConfig) {
-  return provider.enabled ? '' : 'provider-disabled-row'
+  const classes = ['provider-mobile-row-card']
+  if (!provider.enabled) classes.push('provider-disabled-row')
+  if (isExpanded(provider.slug)) classes.push('provider-mobile-row-expanded')
+  if (providerHasBalanceAnomaly(provider.slug)) classes.push('provider-balance-anomaly-row')
+  return classes
 }
 
 const urlOptions = computed(() => ({
@@ -1579,6 +1786,11 @@ function providerBalanceForSort(providerSlug: string | undefined) {
   return balanceSummaries.value[providerSlug]?.current_balance
 }
 
+function providerHasBalanceAnomaly(providerSlug: string | undefined) {
+  if (!providerSlug) return false
+  return Boolean(balanceSummaries.value[providerSlug]?.anomaly)
+}
+
 function balanceRowStatus(row: UpstreamBalanceDailyRow) {
   if (row.anomaly) return t('admin.upstreamProviders.balanceAnomaly')
   if (row.complete) return t('admin.upstreamProviders.balanceComplete')
@@ -1867,6 +2079,10 @@ onMounted(reload)
   @apply flex flex-wrap items-center gap-3;
 }
 
+.upstream-toolbar-actions {
+  @apply flex flex-wrap items-center gap-2;
+}
+
 .upstream-toolbar-title {
   @apply whitespace-nowrap text-sm font-medium text-gray-950 dark:text-white;
 }
@@ -1887,12 +2103,65 @@ onMounted(reload)
   @apply flex flex-1 flex-wrap items-center justify-end gap-3;
 }
 
+.upstream-search-row {
+  @apply flex min-w-0 items-center gap-2;
+}
+
+.upstream-filter-controls {
+  @apply flex flex-wrap items-center gap-3;
+}
+
+.upstream-filter-toggle {
+  display: none;
+}
+
 .upstream-compact-input {
   @apply h-9 rounded-md text-sm;
 }
 
 .upstream-filter-select {
   @apply w-40;
+}
+
+.upstream-quick-tags {
+  @apply flex flex-wrap items-center gap-2;
+}
+
+.upstream-quick-tag {
+  @apply inline-flex h-8 items-center gap-2 rounded-md border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-600 transition-colors hover:border-primary-400 hover:text-primary-600 dark:border-dark-600 dark:bg-dark-800/60 dark:text-gray-300 dark:hover:border-primary-500 dark:hover:text-primary-300;
+}
+
+.upstream-quick-tag strong {
+  @apply inline-flex min-w-5 items-center justify-center rounded-full bg-gray-100 px-1.5 font-mono text-[11px] text-gray-500 dark:bg-dark-700 dark:text-gray-300;
+}
+
+.upstream-quick-tag.active {
+  border-color: #00B42A;
+  background: #E8FFEA;
+  color: #008A22;
+}
+
+.upstream-quick-tag.active strong {
+  background: rgba(0, 180, 42, 0.14);
+  color: #007A1D;
+}
+
+.upstream-quick-tag-danger.active {
+  border-color: #FCA5A5;
+  background: #FEF2F2;
+  color: #DC2626;
+}
+
+.upstream-quick-tag-muted.active {
+  border-color: #CBD5E1;
+  background: #F8FAFC;
+  color: #475569;
+}
+
+.upstream-quick-tag-info.active {
+  border-color: #BFDBFE;
+  background: #EFF6FF;
+  color: #2563EB;
 }
 
 .upstream-toolbar-right {
@@ -1921,6 +2190,10 @@ onMounted(reload)
 
 .action-button-group {
   @apply flex min-w-[18rem] flex-wrap items-center justify-center gap-1.5;
+}
+
+.provider-mobile-detail-toggle {
+  display: none;
 }
 
 .action-danger {
@@ -2191,6 +2464,66 @@ onMounted(reload)
   @apply font-mono text-gray-800 dark:text-gray-100;
 }
 
+.provider-mobile-record-cards {
+  display: none;
+}
+
+.provider-mobile-record-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+}
+
+.provider-mobile-record-card + .provider-mobile-record-card {
+  margin-top: 8px;
+}
+
+.provider-mobile-record-card > div {
+  display: grid;
+  grid-template-columns: minmax(76px, auto) minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+}
+
+.provider-mobile-record-card > div + div {
+  margin-top: 8px;
+}
+
+.provider-mobile-record-card span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.provider-mobile-record-card strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #111827;
+  font-size: 13px;
+  text-align: right;
+}
+
+.provider-mobile-record-empty {
+  padding: 24px 12px;
+  color: #94a3b8;
+  font-size: 13px;
+  text-align: center;
+}
+
+:global(.dark) .provider-mobile-record-card {
+  border-color: #334155;
+  background: #111827;
+}
+
+:global(.dark) .provider-mobile-record-card span {
+  color: #94a3b8;
+}
+
+:global(.dark) .provider-mobile-record-card strong {
+  color: #e5e7eb;
+}
+
 :deep(.table-wrapper table) {
   min-width: 1280px;
   border-collapse: separate;
@@ -2458,7 +2791,8 @@ onMounted(reload)
 
   .upstream-toolbar-left,
   .upstream-toolbar-filters,
-  .upstream-toolbar-right {
+  .upstream-toolbar-right,
+  .upstream-quick-tags {
     @apply w-full justify-start;
   }
 
@@ -2466,21 +2800,100 @@ onMounted(reload)
     @apply gap-2;
   }
 
+  .upstream-toolbar-actions {
+    width: 100%;
+    gap: 8px;
+  }
+
   .upstream-toolbar-title {
     @apply w-full whitespace-normal;
   }
 
   .upstream-toolbar-action {
-    @apply min-w-0 flex-1 justify-center px-3;
+    min-height: 32px;
+    width: auto;
+    min-width: 0;
+    flex: 0 0 auto;
+    justify-content: center;
+    padding: 0 10px;
+    font-size: 12px;
   }
 
   .upstream-sample-action,
   .upstream-sampler-settings-action {
-    @apply w-full;
+    width: auto;
+  }
+
+  .upstream-toolbar-filters {
+    gap: 8px;
+  }
+
+  .upstream-search-row {
+    display: grid;
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+
+  .upstream-filter-toggle {
+    display: inline-flex;
+    min-height: 34px;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    border: 1px solid #dbe3ee;
+    border-radius: 8px;
+    background: #f8fafc;
+    padding: 0 9px;
+    color: #334155;
+    font-size: 12px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  .upstream-filter-toggle strong {
+    display: inline-flex;
+    min-width: 18px;
+    height: 18px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: #dc2626;
+    color: #fff;
+    font-size: 11px;
+    line-height: 1;
+  }
+
+  .upstream-filter-controls {
+    display: none;
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .upstream-filter-controls.is-open {
+    display: grid;
   }
 
   .upstream-filter-select {
     @apply w-full;
+  }
+
+  .upstream-quick-tags {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .upstream-quick-tags::-webkit-scrollbar {
+    display: none;
+  }
+
+  .upstream-quick-tag {
+    flex: 0 0 auto;
+    height: 30px;
+    padding: 0 10px;
   }
 
   .upstream-toolbar-right {
@@ -2522,6 +2935,68 @@ onMounted(reload)
     @apply h-8;
   }
 
+  .provider-mobile-detail-toggle {
+    display: inline-flex;
+  }
+
+  .upstream-providers-page :deep(.provider-mobile-row-card) {
+    position: relative;
+    overflow: hidden;
+    border-color: #e2e8f0;
+    border-radius: 8px;
+    background: #fff;
+    padding: 12px;
+    box-shadow: none;
+  }
+
+  .upstream-providers-page :deep(.provider-mobile-row-card::before) {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background: #00B42A;
+    content: "";
+  }
+
+  .upstream-providers-page :deep(.provider-mobile-row-card.provider-disabled-row::before) {
+    background: #94a3b8;
+  }
+
+  .upstream-providers-page :deep(.provider-mobile-row-card.provider-balance-anomaly-row) {
+    border-color: #fecaca;
+    background: #fffafa;
+  }
+
+  .upstream-providers-page :deep(.provider-mobile-row-card.provider-balance-anomaly-row::before) {
+    background: #F53F3F;
+  }
+
+  .upstream-providers-page :deep(.provider-mobile-row-card > .space-y-3 > .flex) {
+    gap: 10px;
+  }
+
+  .upstream-providers-page :deep(.provider-mobile-row-card > .space-y-3 > .flex > span) {
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  .upstream-providers-page :deep(.provider-mobile-row-card > .space-y-3 > .flex > div) {
+    color: #0f172a;
+    font-size: 13px;
+  }
+
+  .upstream-providers-page :deep(.provider-mobile-row-card:not(.provider-mobile-row-expanded) > .space-y-3 > .flex:nth-child(1)),
+  .upstream-providers-page :deep(.provider-mobile-row-card:not(.provider-mobile-row-expanded) > .space-y-3 > .flex:nth-child(4)),
+  .upstream-providers-page :deep(.provider-mobile-row-card:not(.provider-mobile-row-expanded) > .space-y-3 > .flex:nth-child(5)),
+  .upstream-providers-page :deep(.provider-mobile-row-card:not(.provider-mobile-row-expanded) > .space-y-3 > .flex:nth-child(6)),
+  .upstream-providers-page :deep(.provider-mobile-row-card:not(.provider-mobile-row-expanded) > .space-y-3 > .flex:nth-child(7)),
+  .upstream-providers-page :deep(.provider-mobile-row-card:not(.provider-mobile-row-expanded) > .space-y-3 > .flex:nth-child(8)),
+  .upstream-providers-page :deep(.provider-mobile-row-card:not(.provider-mobile-row-expanded) > .space-y-3 > .flex:nth-child(n + 11)) {
+    display: none;
+  }
+
   .provider-detail-panel {
     @apply grid-cols-1 gap-4 px-4 py-4;
   }
@@ -2545,6 +3020,16 @@ onMounted(reload)
 
   .balance-dialog-body {
     @apply max-h-[calc(92vh-5rem)] p-4;
+  }
+
+  .provider-mobile-record-cards {
+    display: block;
+    padding: 10px;
+  }
+
+  .provider-mobile-record-cards + table,
+  .provider-mobile-record-cards + .records-table {
+    display: none;
   }
 
   .balance-summary-grid,
@@ -2574,6 +3059,16 @@ onMounted(reload)
 
   .balance-sampler-provider-row .input {
     @apply w-full text-left;
+  }
+}
+
+@media (max-width: 380px) {
+  .upstream-filter-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .upstream-toolbar-action {
+    flex: 1 1 calc(50% - 4px);
   }
 }
 </style>

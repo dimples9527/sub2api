@@ -42,21 +42,34 @@
           <span class="ug-provider-count">{{ result?.default_provider?.slug ? 1 : 0 }}</span>
         </div>
 
-        <div class="ug-filter-card">
+        <div class="ug-filter-card" :class="{ 'ug-filters-expanded': showGroupAdvancedFilters }">
           <div class="ug-filter-top">
-            <div class="ug-filter-left">
+            <div class="ug-filter-left" :class="{ 'is-open': showGroupAdvancedFilters }">
               <Select v-model="platformFilter" class="ug-filter-select" :options="platformFilterOptions" />
               <Select v-model="matchFilter" class="ug-filter-select" :options="matchFilterOptions" />
               <Select v-model="rateFilter" class="ug-filter-select" :options="rateFilterOptions" />
             </div>
-            <div class="ug-search">
-              <Icon name="search" size="sm" class="ug-search-icon" />
-              <input
-                v-model.trim="searchQuery"
-                type="search"
-                class="ug-input ug-search-input"
-                :placeholder="t('admin.upstreamGroups.searchPlaceholder')"
-              />
+            <div class="ug-filter-main">
+              <div class="ug-search">
+                <Icon name="search" size="sm" class="ug-search-icon" />
+                <input
+                  v-model.trim="searchQuery"
+                  type="search"
+                  class="ug-input ug-search-input"
+                  :placeholder="t('admin.upstreamGroups.searchPlaceholder')"
+                />
+              </div>
+              <button
+                type="button"
+                class="ug-filter-toggle-button"
+                :aria-expanded="showGroupAdvancedFilters"
+                @click="showGroupAdvancedFilters = !showGroupAdvancedFilters"
+              >
+                <Icon name="filter" size="sm" />
+                <span>{{ t('admin.upstreamGroups.mobileFilterToggle') }}</span>
+                <strong v-if="activeGroupFilterCount">{{ activeGroupFilterCount }}</strong>
+                <Icon :name="showGroupAdvancedFilters ? 'chevronUp' : 'chevronDown'" size="sm" />
+              </button>
             </div>
             <div class="ug-filter-right">
               <button
@@ -138,6 +151,19 @@
             </div>
           </div>
         </div>
+
+        <nav class="ug-quick-tags" aria-label="quick filters">
+          <button
+            v-for="option in quickFilterOptions"
+            :key="option.key"
+            type="button"
+            :class="['ug-quick-tag', { active: activeQuickFilter === option.key }, option.tone ? `ug-quick-tag-${option.tone}` : '']"
+            @click="activeQuickFilter = option.key"
+          >
+            <span>{{ option.label }}</span>
+            <strong>{{ option.count }}</strong>
+          </button>
+        </nav>
       </template>
 
       <template #table>
@@ -312,6 +338,18 @@
                     <span>{{ t('admin.upstreamGroups.manageBoundAccounts', '账号管理') }}</span>
                     <span class="ug-action-count">{{ boundAccountTotal(row) }}</span>
                   </button>
+                  <button
+                    type="button"
+                    class="ug-btn ug-btn-default ug-btn-small ug-btn-cell ug-mobile-detail-toggle"
+                    @click="toggleMobileGroupDetails(row)"
+                  >
+                    <Icon :name="isMobileGroupDetailsExpanded(row) ? 'chevronUp' : 'chevronDown'" size="sm" />
+                    <span>
+                      {{ isMobileGroupDetailsExpanded(row)
+                        ? t('admin.upstreamGroups.hideMobileDetails')
+                        : t('admin.upstreamGroups.showMobileDetails') }}
+                    </span>
+                  </button>
                 </div>
               </template>
 
@@ -353,6 +391,48 @@
               </button>
             </div>
             <div class="ug-records-table-wrapper ug-rate-fix-logs-table-wrapper">
+              <div class="ug-rate-fix-log-cards">
+                <article
+                  v-for="record in sortedRateFixRecords"
+                  :key="`card-${rateFixRecordKey(record)}`"
+                  class="ug-rate-fix-log-card"
+                >
+                  <div class="ug-rate-fix-log-card-head">
+                    <span v-if="record.handled" class="ug-rate-fix-log-status ug-rate-fix-log-status-handled">
+                      {{ t('admin.upstreamGroups.rateFixLogHandled') }}
+                    </span>
+                    <button
+                      v-else
+                      type="button"
+                      class="ug-rate-fix-log-status ug-rate-fix-log-status-unhandled"
+                      :disabled="markingRateFixRecordKey === rateFixRecordKey(record)"
+                      @click="markRateFixLogHandled(record)"
+                    >
+                      {{ t('admin.upstreamGroups.rateFixLogUnhandled') }}
+                    </button>
+                    <time>{{ formatDateTime(record.changed_at) }}</time>
+                  </div>
+                  <div class="ug-rate-fix-log-card-body">
+                    <div>
+                      <span>{{ t('admin.upstreamGroups.localGroup') }}</span>
+                      <strong>{{ record.group_name }}</strong>
+                    </div>
+                    <div>
+                      <span>{{ t('admin.upstreamGroups.upstreamGroup') }}</span>
+                      <strong>{{ record.upstream_group_name }}</strong>
+                    </div>
+                    <div>
+                      <span>{{ t('admin.upstreamGroups.oldRate') }}</span>
+                      <strong class="ug-old-rate">{{ formatRate(record.old_rate) }}</strong>
+                    </div>
+                    <div>
+                      <span>{{ t('admin.upstreamGroups.newRate') }}</span>
+                      <strong class="ug-new-rate">{{ formatRate(record.new_rate) }}</strong>
+                    </div>
+                  </div>
+                </article>
+                <div v-if="!sortedRateFixRecords.length" class="ug-records-empty">{{ t('admin.upstreamGroups.noRecords') }}</div>
+              </div>
               <table class="ug-records-table">
                 <thead>
                   <tr>
@@ -652,6 +732,8 @@ import { AccountStatusIndicator, CreateAccountModal, EditAccountModal, TempUnsch
 const { t } = useI18n()
 const appStore = useAppStore()
 
+type QuickGroupFilterKey = 'all' | 'unmatched' | 'risk' | 'matched'
+
 const result = ref<UpstreamGroupCompareResult | null>(null)
 const loading = ref(false)
 const applying = ref(false)
@@ -688,6 +770,9 @@ const searchQuery = ref('')
 const platformFilter = ref('')
 const matchFilter = ref('')
 const rateFilter = ref('')
+const showGroupAdvancedFilters = ref(false)
+const activeQuickFilter = ref<QuickGroupFilterKey>('all')
+const expandedMobileGroupKeys = ref<Set<string>>(new Set())
 const syncDialogItem = ref<UpstreamGroupComparison | null>(null)
 const syncRateMultiplier = ref(1)
 const syncPlatform = ref('')
@@ -756,10 +841,45 @@ const rateFilterOptions = computed<SelectOption[]>(() => [
   { value: 'risk', label: t('admin.upstreamGroups.rateRiskOnly') },
   { value: 'ok', label: t('admin.upstreamGroups.rateOkOnly') },
 ])
+const activeGroupFilterCount = computed(() => {
+  let count = 0
+  if (platformFilter.value) count += 1
+  if (matchFilter.value) count += 1
+  if (rateFilter.value) count += 1
+  if (activeQuickFilter.value !== 'all') count += 1
+  return count
+})
+const quickFilterOptions = computed<Array<{ key: QuickGroupFilterKey; label: string; count: number; tone?: string }>>(() => {
+  const list = items.value
+  return [
+    { key: 'all', label: t('admin.upstreamGroups.quickFilterAll'), count: list.length },
+    {
+      key: 'unmatched',
+      label: t('admin.upstreamGroups.quickFilterUnmatched'),
+      count: list.filter(item => !item.matched).length,
+      tone: 'warning',
+    },
+    {
+      key: 'risk',
+      label: t('admin.upstreamGroups.quickFilterRateRisk'),
+      count: list.filter(item => item.needs_rate_increase).length,
+      tone: 'danger',
+    },
+    {
+      key: 'matched',
+      label: t('admin.upstreamGroups.quickFilterMatched'),
+      count: list.filter(item => item.matched).length,
+      tone: 'success',
+    },
+  ]
+})
 const filteredItems = computed(() => {
   const keyword = searchQuery.value.trim().toLowerCase()
   return items.value
     .filter((item) => {
+      if (activeQuickFilter.value === 'unmatched' && item.matched) return false
+      if (activeQuickFilter.value === 'risk' && !item.needs_rate_increase) return false
+      if (activeQuickFilter.value === 'matched' && !item.matched) return false
       if (matchFilter.value === 'matched' && !item.matched) return false
       if (matchFilter.value === 'unmatched' && item.matched) return false
       if (rateFilter.value === 'risk' && !item.needs_rate_increase) return false
@@ -1264,10 +1384,32 @@ function matchSourceLabel(row: UpstreamGroupComparison) {
   return t('admin.upstreamGroups.nameMatched')
 }
 
+function mobileGroupKey(row: UpstreamGroupComparison) {
+  return `${row.provider_slug}:${row.upstream_group_key}:${row.local_group_id || 0}`
+}
+
+function isMobileGroupDetailsExpanded(row: UpstreamGroupComparison) {
+  return expandedMobileGroupKeys.value.has(mobileGroupKey(row))
+}
+
+function toggleMobileGroupDetails(row: UpstreamGroupComparison) {
+  const key = mobileGroupKey(row)
+  const nextKeys = new Set(expandedMobileGroupKeys.value)
+  if (nextKeys.has(key)) {
+    nextKeys.delete(key)
+  } else {
+    nextKeys.add(key)
+  }
+  expandedMobileGroupKeys.value = nextKeys
+}
+
 function rowClass(row: UpstreamGroupComparison) {
-  if (!row.matched) return 'ug-row-unmatched'
-  if (row.needs_rate_increase) return 'ug-row-risk'
-  return 'ug-row-ok'
+  const classes = ['ug-mobile-row-card']
+  if (isMobileGroupDetailsExpanded(row)) classes.push('ug-mobile-row-expanded')
+  if (!row.matched) classes.push('ug-row-unmatched')
+  else if (row.needs_rate_increase) classes.push('ug-row-risk')
+  else classes.push('ug-row-ok')
+  return classes
 }
 
 function rateToneClass(value: number | undefined) {
@@ -1365,6 +1507,11 @@ onMounted(reload)
   @apply flex flex-wrap items-center gap-3;
 }
 
+.ug-filter-main {
+  @apply flex min-w-0 flex-1 items-center gap-2;
+  order: 2;
+}
+
 .ug-search {
   @apply relative min-w-0 flex-1;
 }
@@ -1383,14 +1530,61 @@ onMounted(reload)
 
 .ug-filter-right {
   @apply flex flex-wrap items-center gap-2;
+  order: 3;
 }
 
 .ug-filter-left {
   @apply flex flex-wrap items-center gap-2;
+  order: 1;
+}
+
+.ug-filter-toggle-button {
+  display: none;
 }
 
 .ug-filter-select {
   @apply w-32;
+}
+
+.ug-quick-tags {
+  @apply mt-3 flex flex-wrap items-center gap-2;
+}
+
+.ug-quick-tag {
+  @apply inline-flex h-8 items-center gap-2 rounded-md border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-600 transition-colors hover:border-primary-400 hover:text-primary-600 dark:border-dark-600 dark:bg-dark-800/60 dark:text-gray-300 dark:hover:border-primary-500 dark:hover:text-primary-300;
+}
+
+.ug-quick-tag strong {
+  @apply inline-flex min-w-5 items-center justify-center rounded-full bg-gray-100 px-1.5 font-mono text-[11px] text-gray-500 dark:bg-dark-700 dark:text-gray-300;
+}
+
+.ug-quick-tag.active {
+  border-color: #00B42A;
+  background: #E8FFEA;
+  color: #008A22;
+}
+
+.ug-quick-tag.active strong {
+  background: rgba(0, 180, 42, 0.14);
+  color: #007A1D;
+}
+
+.ug-quick-tag-warning.active {
+  border-color: #FFB46B;
+  background: #FFF7E8;
+  color: #B25A00;
+}
+
+.ug-quick-tag-danger.active {
+  border-color: #FCA5A5;
+  background: #FEF2F2;
+  color: #DC2626;
+}
+
+.ug-quick-tag-success.active {
+  border-color: #A7F3D0;
+  background: #ECFDF5;
+  color: #047857;
 }
 
 .ug-btn {
@@ -1432,6 +1626,10 @@ onMounted(reload)
 
 .ug-btn-cell {
   @apply whitespace-nowrap;
+}
+
+.ug-mobile-detail-toggle {
+  display: none;
 }
 
 .ug-btn-text {
@@ -1983,6 +2181,64 @@ onMounted(reload)
   @apply max-h-72 overflow-auto;
 }
 
+.ug-rate-fix-log-cards {
+  display: none;
+}
+
+.ug-rate-fix-log-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+}
+
+.ug-rate-fix-log-card + .ug-rate-fix-log-card {
+  margin-top: 8px;
+}
+
+.ug-rate-fix-log-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid #f1f5f9;
+  padding-bottom: 8px;
+}
+
+.ug-rate-fix-log-card-head time {
+  color: #64748b;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.ug-rate-fix-log-card-body {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+}
+
+.ug-rate-fix-log-card-body > div {
+  display: grid;
+  grid-template-columns: minmax(76px, auto) minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+}
+
+.ug-rate-fix-log-card-body span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ug-rate-fix-log-card-body strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #111827;
+  font-size: 13px;
+  text-align: right;
+}
+
 .ug-records-table {
   @apply w-full min-w-[760px] divide-y divide-gray-100 text-sm dark:divide-dark-700;
 }
@@ -2081,6 +2337,24 @@ onMounted(reload)
   color: #6FE08A;
 }
 
+:global(.dark) .ug-rate-fix-log-card {
+  border-color: #334155;
+  background: #111827;
+}
+
+:global(.dark) .ug-rate-fix-log-card-head {
+  border-color: #1f2937;
+}
+
+:global(.dark) .ug-rate-fix-log-card-head time,
+:global(.dark) .ug-rate-fix-log-card-body span {
+  color: #94a3b8;
+}
+
+:global(.dark) .ug-rate-fix-log-card-body strong {
+  color: #e5e7eb;
+}
+
 @media (max-width: 1023px) {
   .ug-stats-row {
     @apply grid-cols-2;
@@ -2097,11 +2371,15 @@ onMounted(reload)
   }
 
   .ug-search,
+  .ug-filter-main,
   .ug-filter-left,
-  .ug-filter-right,
   .ug-auto-meta,
   .ug-auto-controls {
     @apply w-full;
+  }
+
+  .ug-filter-right {
+    @apply w-full justify-start;
   }
 
   .ug-filter-select {
@@ -2109,7 +2387,8 @@ onMounted(reload)
   }
 
   .ug-filter-right .ug-btn {
-    @apply flex-1 justify-center;
+    flex: 0 0 auto;
+    justify-content: center;
   }
 
   .ug-auto-controls {
@@ -2183,29 +2462,260 @@ onMounted(reload)
   }
 }
 
+@media (max-width: 767px) {
+  .ug-filter-main {
+    order: 1;
+    display: grid;
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+
+  .ug-filter-toggle-button {
+    display: inline-flex;
+    min-height: 34px;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    border: 1px solid #dbe3ee;
+    border-radius: 8px;
+    background: #f8fafc;
+    padding: 0 9px;
+    color: #334155;
+    font-size: 12px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  .ug-filter-toggle-button strong {
+    display: inline-flex;
+    min-width: 18px;
+    height: 18px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: #dc2626;
+    color: #fff;
+    font-size: 11px;
+    line-height: 1;
+  }
+
+  .ug-filter-left {
+    order: 2;
+    display: none;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .ug-filter-left.is-open {
+    display: grid;
+  }
+
+  .ug-filter-right {
+    order: 3;
+  }
+
+  .ug-quick-tags {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .ug-quick-tags::-webkit-scrollbar {
+    display: none;
+  }
+
+  .ug-quick-tag {
+    flex: 0 0 auto;
+    height: 30px;
+    padding: 0 10px;
+  }
+
+  .ug-table-card :deep(.ug-mobile-row-card) {
+    position: relative;
+    overflow: hidden;
+    border-color: #e2e8f0;
+    border-radius: 8px;
+    background: #fff;
+    padding: 12px;
+    box-shadow: none;
+  }
+
+  .ug-table-card :deep(.ug-mobile-row-card::before) {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background: #00B42A;
+    content: "";
+  }
+
+  .ug-table-card :deep(.ug-mobile-row-card.ug-row-unmatched) {
+    border-color: #fed7aa;
+    background: #fffaf5;
+  }
+
+  .ug-table-card :deep(.ug-mobile-row-card.ug-row-unmatched::before) {
+    background: #FF7D00;
+  }
+
+  .ug-table-card :deep(.ug-mobile-row-card.ug-row-risk) {
+    border-color: #fecaca;
+    background: #fffafa;
+  }
+
+  .ug-table-card :deep(.ug-mobile-row-card.ug-row-risk::before) {
+    background: #F53F3F;
+  }
+
+  .ug-table-card :deep(.ug-mobile-row-card > .space-y-3 > .flex) {
+    gap: 10px;
+  }
+
+  .ug-table-card :deep(.ug-mobile-row-card > .space-y-3 > .flex:nth-child(-n + 3)) {
+    border-bottom: 1px solid #f1f5f9;
+    padding-bottom: 8px;
+  }
+
+  .ug-table-card :deep(.ug-mobile-row-card:not(.ug-mobile-row-expanded) > .space-y-3 > .flex:nth-child(3)),
+  .ug-table-card :deep(.ug-mobile-row-card:not(.ug-mobile-row-expanded) > .space-y-3 > .flex:nth-child(7)),
+  .ug-table-card :deep(.ug-mobile-row-card:not(.ug-mobile-row-expanded) > .space-y-3 > .flex:nth-child(8)) {
+    display: none;
+  }
+
+  .ug-table-card :deep(.ug-mobile-row-card > .space-y-3 > .flex > span) {
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  .ug-table-card :deep(.ug-mobile-row-card > .space-y-3 > .flex > div) {
+    color: #0f172a;
+    font-size: 13px;
+  }
+
+  .ug-table-card :deep(.ug-mobile-row-card) .ug-action-stack {
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+
+  .ug-table-card :deep(.ug-mobile-row-card) .ug-btn-small {
+    height: 30px;
+    padding: 0 9px;
+    font-size: 12px;
+  }
+
+  .ug-table-card :deep(.ug-mobile-row-card) .ug-btn-text {
+    min-height: 30px;
+    border: 1px solid #bbf7d0;
+    border-radius: 7px;
+    background: #ecfdf5;
+    padding: 0 9px;
+    color: #047857;
+    font-size: 12px;
+    line-height: 28px;
+  }
+
+  .ug-table-card :deep(.ug-mobile-row-card) .ug-mobile-detail-toggle {
+    display: inline-flex;
+  }
+
+  .ug-records-table {
+    display: none;
+  }
+
+  .ug-rate-fix-log-cards {
+    display: block;
+    padding: 10px;
+  }
+}
+
 @media (max-width: 520px) {
   .ug-stats-row {
-    @apply grid-cols-1;
+    @apply grid-cols-2 gap-2;
+  }
+
+  .ug-stat-card {
+    min-height: 64px;
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .ug-stat-bar {
+    height: 32px;
+  }
+
+  .ug-stat-label {
+    font-size: 11px;
+    line-height: 1.2;
+  }
+
+  .ug-stat-value {
+    margin-top: 4px;
+    font-size: 18px;
+    line-height: 1;
+  }
+
+  .ug-provider-strip,
+  .ug-filter-card {
+    padding: 10px;
   }
 
   .ug-provider-strip {
-    @apply flex-col;
+    gap: 8px;
   }
 
-  .ug-provider-count {
-    @apply self-start;
+  .ug-provider-meta {
+    gap: 6px;
   }
 
-  .ug-filter-right,
+  .ug-filter-top {
+    gap: 8px;
+  }
+
+  .ug-filter-left.is-open {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .ug-filter-select {
+    min-width: 0;
+  }
+
+  .ug-filter-right {
+    gap: 8px;
+  }
+
+  .ug-filter-right .ug-btn {
+    height: 32px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
   .ug-auto-controls {
-    @apply flex-col items-stretch;
+    @apply items-center;
+    gap: 8px;
   }
 
-  .ug-filter-right .ug-btn,
-  .ug-auto-controls .ug-btn,
-  .ug-auto-interval,
+  .ug-auto-controls .ug-btn {
+    width: auto;
+    height: 30px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  .ug-auto-interval {
+    width: auto;
+    flex: 1 1 170px;
+    min-width: 0;
+  }
+
   .ug-auto-input {
-    @apply w-full;
+    width: 78px;
   }
 
   .ug-account-list,
@@ -2223,6 +2733,44 @@ onMounted(reload)
   .ug-bound-accounts-dialog,
   .ug-rate-fix-logs-dialog {
     @apply px-2 py-4;
+  }
+
+  .ug-bound-accounts-modal,
+  .ug-rate-fix-logs-modal {
+    width: 100%;
+    max-height: calc(100vh - 32px);
+  }
+
+  .ug-bound-accounts-list {
+    padding: 8px;
+  }
+
+  .ug-bound-account-row {
+    gap: 10px;
+    padding: 10px 6px;
+  }
+
+  .ug-rate-fix-logs-actions {
+    padding: 10px 12px;
+  }
+}
+
+@media (max-width: 380px) {
+  .ug-filter-left.is-open {
+    grid-template-columns: 1fr;
+  }
+
+  .ug-filter-right .ug-btn {
+    flex: 1 1 calc(50% - 4px);
+  }
+
+  .ug-auto-interval {
+    width: 100%;
+    flex-basis: 100%;
+  }
+
+  .ug-auto-input {
+    flex: 1 1 auto;
   }
 }
 </style>
