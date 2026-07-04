@@ -910,119 +910,215 @@
                   <span>{{ t('admin.upstreamAccounts.batchTestResultSection') }}</span>
                   <strong>{{ batchTestResultItems.length }}</strong>
                 </div>
-                <div v-if="batchTestResultItems.length" class="records-table-wrap batch-test-table-wrap">
-                  <table class="records-table batch-test-table">
-                    <thead>
-                      <tr>
-                        <th>
-                          <button type="button" class="batch-test-sort-button" data-test="batch-test-sort-account" @click="toggleBatchTestSort('account')">
-                            {{ t('admin.upstreamAccounts.batchTestAccount') }}
-                            <span>{{ batchTestSortIndicator('account') }}</span>
-                          </button>
-                        </th>
-                        <th>
-                          <button type="button" class="batch-test-sort-button" data-test="batch-test-sort-platform" @click="toggleBatchTestSort('platform')">
-                            {{ t('admin.upstreamAccounts.batchTestPlatform') }}
-                            <span>{{ batchTestSortIndicator('platform') }}</span>
-                          </button>
-                        </th>
-                        <th>
-                          <button type="button" class="batch-test-sort-button" data-test="batch-test-sort-upstream_rate" @click="toggleBatchTestSort('upstream_rate')">
-                            {{ t('admin.upstreamAccounts.batchTestUpstreamRate') }}
-                            <span>{{ batchTestSortIndicator('upstream_rate') }}</span>
-                          </button>
-                        </th>
-                        <th>
-                          <button type="button" class="batch-test-sort-button" data-test="batch-test-sort-schedulable" @click="toggleBatchTestSort('schedulable')">
-                            {{ t('admin.upstreamAccounts.batchTestSchedulable') }}
-                            <span>{{ batchTestSortIndicator('schedulable') }}</span>
-                          </button>
-                        </th>
-                        <th>
-                          <button type="button" class="batch-test-sort-button" data-test="batch-test-sort-status" @click="toggleBatchTestSort('status')">
-                            {{ t('admin.upstreamAccounts.batchTestStatus') }}
-                            <span>{{ batchTestSortIndicator('status') }}</span>
-                          </button>
-                        </th>
-                        <th>
-                          <button type="button" class="batch-test-sort-button" data-test="batch-test-sort-latency" @click="toggleBatchTestSort('latency')">
-                            {{ t('admin.upstreamAccounts.batchTestLatency') }}
-                            <span>{{ batchTestSortIndicator('latency') }}</span>
-                          </button>
-                        </th>
-                        <th>
-                          <button type="button" class="batch-test-sort-button" data-test="batch-test-sort-finished_at" @click="toggleBatchTestSort('finished_at')">
-                            {{ t('admin.upstreamAccounts.batchTestFinishedAt') }}
-                            <span>{{ batchTestSortIndicator('finished_at') }}</span>
-                          </button>
-                        </th>
-                        <th>{{ t('admin.upstreamAccounts.batchTestError') }}</th>
-                        <th>{{ t('common.actions') }}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="item in batchTestResultItems" :key="`batch-test-${item.account_id}`">
-                        <td>
-                          <div class="two-line-cell">
-                            <span class="main-text">{{ item.account_name || `#${item.account_id}` }}</span>
-                            <code class="source-id">#{{ item.account_id }}</code>
-                          </div>
-                        </td>
-                        <td>
-                          <span :class="['table-tag', platformTagClass(item.platform)]">{{ item.platform || '-' }}</span>
-                        </td>
-                        <td>
-                          <span :class="['rate-value', rateToneClass(batchTestUpstreamRate(item))]">
+                <div v-if="batchTestResultItems.length" class="batch-result-scroll">
+                  <div class="batch-result-toolbar">
+                    <div class="batch-result-tabs" :aria-label="t('admin.upstreamAccounts.batchTestResultSection')">
+                      <button
+                        v-for="option in batchTestFilterOptions"
+                        :key="option.value"
+                        type="button"
+                        :class="['batch-result-tab', { active: batchTestResultFilter === option.value }]"
+                        @click="batchTestResultFilter = option.value"
+                      >
+                        <span>{{ option.label }}</span>
+                        <strong>{{ option.count }}</strong>
+                      </button>
+                    </div>
+                    <div class="batch-result-hint">
+                      <span>{{ t('admin.upstreamAccounts.batchTestFailureFirstHint') }}</span>
+                      <span class="table-tag tag-warning">{{ t('admin.upstreamAccounts.batchTestFailureFirstTag') }}</span>
+                    </div>
+                  </div>
+
+                  <div v-if="batchTestFilteredItems.length" class="batch-result-list">
+                    <article
+                      v-for="item in batchTestFilteredItems"
+                      :key="`batch-test-card-${item.account_id}`"
+                      :class="['batch-result-card', batchTestResultCardTone(item)]"
+                    >
+                      <div class="batch-result-card-head">
+                        <div class="batch-result-account">
+                          <strong>{{ item.account_name || `#${item.account_id}` }}</strong>
+                          <span>#{{ item.account_id }}</span>
+                        </div>
+                        <span :class="['test-status-pill', batchTestStatusClass(item.status)]">
+                          {{ batchTestStatusLabel(item.status) }}
+                        </span>
+                      </div>
+                      <div class="batch-result-grid">
+                        <div class="batch-result-metric">
+                          <span>{{ t('admin.upstreamAccounts.batchTestPlatform') }}</span>
+                          <strong>{{ item.platform || '-' }}</strong>
+                        </div>
+                        <div class="batch-result-metric">
+                          <span>{{ t('admin.upstreamAccounts.batchTestLatency') }}</span>
+                          <strong>{{ formatLatency(item.latency_ms) }}</strong>
+                        </div>
+                        <div class="batch-result-metric">
+                          <span>{{ t('admin.upstreamAccounts.batchTestUpstreamRate') }}</span>
+                          <strong :class="['rate-value', rateToneClass(batchTestUpstreamRate(item))]">
                             {{ formatRate(batchTestUpstreamRate(item)) }}
-                          </span>
-                        </td>
-                        <td>
-                          <div class="batch-test-schedulable-cell">
-                            <span :class="['test-status-pill', batchTestItemSchedulable(item) ? 'test-status-success' : 'test-status-failed']">
-                              {{ batchTestItemSchedulable(item) ? t('admin.upstreamAccounts.batchTestSchedulableEnabled') : t('admin.upstreamAccounts.batchTestSchedulableDisabled') }}
-                            </span>
-                            <button
-                              type="button"
-                              class="ui-button ui-button-xs"
-                              :disabled="togglingSchedulableId === item.account_id"
-                              :data-test="`batch-test-schedulable-toggle-${item.account_id}`"
-                              @click="toggleBatchTestItemSchedulable(item)"
-                            >
-                              {{ batchTestItemSchedulable(item) ? t('admin.upstreamAccounts.batchTestSchedulableDisable') : t('admin.upstreamAccounts.batchTestSchedulableEnable') }}
-                            </button>
-                          </div>
-                        </td>
-                        <td>
-                          <span :class="['test-status-pill', batchTestStatusClass(item.status)]">
-                            {{ batchTestStatusLabel(item.status) }}
-                          </span>
-                        </td>
-                        <td>{{ formatLatency(item.latency_ms) }}</td>
-                        <td>{{ item.finished_at ? formatDateTime(item.finished_at) : '-' }}</td>
-                        <td class="batch-test-error">{{ item.error_message || '-' }}</td>
-                        <td>
-                          <div class="batch-test-actions-cell">
-                            <button
-                              type="button"
-                              class="ui-button ui-button-xs"
-                              :data-test="`batch-test-edit-account-${item.account_id}`"
-                              @click="openBatchTestAccountEditDialog(item)"
-                            >
-                              {{ t('common.edit') }}
-                            </button>
-                            <button
-                              type="button"
-                              class="ui-button ui-button-xs ui-button-danger"
-                              :data-test="`batch-test-delete-account-${item.account_id}`"
-                              @click="openBatchTestAccountDeleteDialog(item)"
-                            >
-                              {{ t('common.delete') }}
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
+                          </strong>
+                        </div>
+                        <div class="batch-result-metric">
+                          <span>{{ t('admin.upstreamAccounts.batchTestSchedulable') }}</span>
+                          <strong>
+                            {{ batchTestItemSchedulable(item) ? t('admin.upstreamAccounts.batchTestSchedulableEnabled') : t('admin.upstreamAccounts.batchTestSchedulableDisabled') }}
+                          </strong>
+                        </div>
+                      </div>
+                      <div v-if="item.error_message" class="batch-result-error">{{ item.error_message }}</div>
+                      <div class="batch-result-card-actions">
+                        <button
+                          type="button"
+                          class="ui-button ui-button-xs"
+                          :disabled="togglingSchedulableId === item.account_id"
+                          :data-test="`batch-test-schedulable-toggle-${item.account_id}`"
+                          @click="toggleBatchTestItemSchedulable(item)"
+                        >
+                          {{ batchTestItemSchedulable(item) ? t('admin.upstreamAccounts.batchTestSchedulableDisable') : t('admin.upstreamAccounts.batchTestSchedulableEnable') }}
+                        </button>
+                        <button
+                          type="button"
+                          class="ui-button ui-button-xs"
+                          :data-test="`batch-test-edit-account-${item.account_id}`"
+                          @click="openBatchTestAccountEditDialog(item)"
+                        >
+                          {{ t('common.edit') }}
+                        </button>
+                        <button
+                          type="button"
+                          class="ui-button ui-button-xs ui-button-danger"
+                          :data-test="`batch-test-delete-account-${item.account_id}`"
+                          @click="openBatchTestAccountDeleteDialog(item)"
+                        >
+                          {{ t('common.delete') }}
+                        </button>
+                      </div>
+                    </article>
+                  </div>
+                  <div v-else class="batch-result-empty">{{ t('admin.upstreamAccounts.batchTestNoFilteredResults') }}</div>
+
+                  <details class="batch-table-details">
+                    <summary>
+                      {{ t('admin.upstreamAccounts.batchTestTableDetails') }}
+                      <span>{{ t('admin.upstreamAccounts.batchTestTableDetailsHint') }}</span>
+                    </summary>
+                    <div class="records-table-wrap batch-test-table-wrap">
+                      <table class="records-table batch-test-table">
+                        <thead>
+                          <tr>
+                            <th>
+                              <button type="button" class="batch-test-sort-button" data-test="batch-test-sort-account" @click="toggleBatchTestSort('account')">
+                                {{ t('admin.upstreamAccounts.batchTestAccount') }}
+                                <span>{{ batchTestSortIndicator('account') }}</span>
+                              </button>
+                            </th>
+                            <th>
+                              <button type="button" class="batch-test-sort-button" data-test="batch-test-sort-platform" @click="toggleBatchTestSort('platform')">
+                                {{ t('admin.upstreamAccounts.batchTestPlatform') }}
+                                <span>{{ batchTestSortIndicator('platform') }}</span>
+                              </button>
+                            </th>
+                            <th>
+                              <button type="button" class="batch-test-sort-button" data-test="batch-test-sort-upstream_rate" @click="toggleBatchTestSort('upstream_rate')">
+                                {{ t('admin.upstreamAccounts.batchTestUpstreamRate') }}
+                                <span>{{ batchTestSortIndicator('upstream_rate') }}</span>
+                              </button>
+                            </th>
+                            <th>
+                              <button type="button" class="batch-test-sort-button" data-test="batch-test-sort-schedulable" @click="toggleBatchTestSort('schedulable')">
+                                {{ t('admin.upstreamAccounts.batchTestSchedulable') }}
+                                <span>{{ batchTestSortIndicator('schedulable') }}</span>
+                              </button>
+                            </th>
+                            <th>
+                              <button type="button" class="batch-test-sort-button" data-test="batch-test-sort-status" @click="toggleBatchTestSort('status')">
+                                {{ t('admin.upstreamAccounts.batchTestStatus') }}
+                                <span>{{ batchTestSortIndicator('status') }}</span>
+                              </button>
+                            </th>
+                            <th>
+                              <button type="button" class="batch-test-sort-button" data-test="batch-test-sort-latency" @click="toggleBatchTestSort('latency')">
+                                {{ t('admin.upstreamAccounts.batchTestLatency') }}
+                                <span>{{ batchTestSortIndicator('latency') }}</span>
+                              </button>
+                            </th>
+                            <th>
+                              <button type="button" class="batch-test-sort-button" data-test="batch-test-sort-finished_at" @click="toggleBatchTestSort('finished_at')">
+                                {{ t('admin.upstreamAccounts.batchTestFinishedAt') }}
+                                <span>{{ batchTestSortIndicator('finished_at') }}</span>
+                              </button>
+                            </th>
+                            <th>{{ t('admin.upstreamAccounts.batchTestError') }}</th>
+                            <th>{{ t('common.actions') }}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr v-for="item in batchTestResultItems" :key="`batch-test-${item.account_id}`">
+                            <td>
+                              <div class="two-line-cell">
+                                <span class="main-text">{{ item.account_name || `#${item.account_id}` }}</span>
+                                <code class="source-id">#{{ item.account_id }}</code>
+                              </div>
+                            </td>
+                            <td>
+                              <span :class="['table-tag', platformTagClass(item.platform)]">{{ item.platform || '-' }}</span>
+                            </td>
+                            <td>
+                              <span :class="['rate-value', rateToneClass(batchTestUpstreamRate(item))]">
+                                {{ formatRate(batchTestUpstreamRate(item)) }}
+                              </span>
+                            </td>
+                            <td>
+                              <div class="batch-test-schedulable-cell">
+                                <span :class="['test-status-pill', batchTestItemSchedulable(item) ? 'test-status-success' : 'test-status-failed']">
+                                  {{ batchTestItemSchedulable(item) ? t('admin.upstreamAccounts.batchTestSchedulableEnabled') : t('admin.upstreamAccounts.batchTestSchedulableDisabled') }}
+                                </span>
+                                <button
+                                  type="button"
+                                  class="ui-button ui-button-xs"
+                                  :disabled="togglingSchedulableId === item.account_id"
+                                  :data-test="`batch-test-table-schedulable-toggle-${item.account_id}`"
+                                  @click="toggleBatchTestItemSchedulable(item)"
+                                >
+                                  {{ batchTestItemSchedulable(item) ? t('admin.upstreamAccounts.batchTestSchedulableDisable') : t('admin.upstreamAccounts.batchTestSchedulableEnable') }}
+                                </button>
+                              </div>
+                            </td>
+                            <td>
+                              <span :class="['test-status-pill', batchTestStatusClass(item.status)]">
+                                {{ batchTestStatusLabel(item.status) }}
+                              </span>
+                            </td>
+                            <td>{{ formatLatency(item.latency_ms) }}</td>
+                            <td>{{ item.finished_at ? formatDateTime(item.finished_at) : '-' }}</td>
+                            <td class="batch-test-error">{{ item.error_message || '-' }}</td>
+                            <td>
+                              <div class="batch-test-actions-cell">
+                                <button
+                                  type="button"
+                                  class="ui-button ui-button-xs"
+                                  :data-test="`batch-test-table-edit-account-${item.account_id}`"
+                                  @click="openBatchTestAccountEditDialog(item)"
+                                >
+                                  {{ t('common.edit') }}
+                                </button>
+                                <button
+                                  type="button"
+                                  class="ui-button ui-button-xs ui-button-danger"
+                                  :data-test="`batch-test-table-delete-account-${item.account_id}`"
+                                  @click="openBatchTestAccountDeleteDialog(item)"
+                                >
+                                  {{ t('common.delete') }}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </details>
                 </div>
                 <div v-else class="sync-confirm-empty">{{ t('admin.upstreamAccounts.batchTestNoResults') }}</div>
               </section>
@@ -1186,6 +1282,7 @@ type BatchTestPlatformOption = {
   accountCount: number
 }
 type BatchTestSortKey = 'account' | 'platform' | 'upstream_rate' | 'schedulable' | 'status' | 'latency' | 'finished_at'
+type BatchTestResultFilter = 'all' | 'failed' | 'success' | 'skipped'
 type SortOrder = 'asc' | 'desc'
 
 const MAX_BATCH_TEST_ACCOUNTS = 200
@@ -1250,6 +1347,7 @@ const batchTestModelOptionsByPlatform = ref<Record<string, ClaudeModel[]>>({})
 const batchTestModelLoadingByPlatform = ref<Record<string, boolean>>({})
 const batchTestSortKey = ref<BatchTestSortKey | null>(null)
 const batchTestSortOrder = ref<SortOrder>('asc')
+const batchTestResultFilter = ref<BatchTestResultFilter>('all')
 const batchTestPollTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 const batchTestPollToken = ref(0)
 const lastSyncResult = ref<UpstreamAccountSyncResult | null>(null)
@@ -1522,8 +1620,12 @@ const batchTestRateByAccountId = computed(() => {
   }
   return byAccountId
 })
-const batchTestResultItems = computed<BatchAccountTestItem[]>(() => {
+const batchTestFailureFirstItems = computed<BatchAccountTestItem[]>(() => {
   const items = batchTestResult.value?.results || []
+  return orderBatchTestItemsFailureFirst(items)
+})
+const batchTestResultItems = computed<BatchAccountTestItem[]>(() => {
+  const items = batchTestFailureFirstItems.value
   if (!batchTestSortKey.value) return items
   const key = batchTestSortKey.value
   const order = batchTestSortOrder.value
@@ -1535,6 +1637,34 @@ const batchTestResultItems = computed<BatchAccountTestItem[]>(() => {
       return a.index - b.index
     })
     .map(entry => entry.item)
+})
+const batchTestResultCounts = computed(() => {
+  const items = batchTestResultItems.value
+  const success = items.filter(item => item.status === 'success').length
+  const skipped = items.filter(batchTestIsSkipped).length
+  const failed = items.filter(batchTestIsFailed).length
+  return {
+    all: items.length,
+    failed,
+    success,
+    skipped
+  }
+})
+const batchTestFilterOptions = computed(() => {
+  const counts = batchTestResultCounts.value
+  return [
+    { value: 'all' as const, label: t('common.all'), count: counts.all },
+    { value: 'failed' as const, label: t('admin.upstreamAccounts.batchTestFailed'), count: counts.failed },
+    { value: 'success' as const, label: t('admin.upstreamAccounts.batchTestSuccess'), count: counts.success },
+    { value: 'skipped' as const, label: t('admin.upstreamAccounts.batchTestSkipped'), count: counts.skipped }
+  ]
+})
+const batchTestFilteredItems = computed<BatchAccountTestItem[]>(() => {
+  const filter = batchTestResultFilter.value
+  if (filter === 'success') return batchTestResultItems.value.filter(item => item.status === 'success')
+  if (filter === 'failed') return batchTestResultItems.value.filter(batchTestIsFailed)
+  if (filter === 'skipped') return batchTestResultItems.value.filter(batchTestIsSkipped)
+  return batchTestResultItems.value
 })
 const batchTestCanCancel = computed(() => {
   const status = batchTestResult.value?.status
@@ -1713,6 +1843,33 @@ function batchTestUpstreamRate(item: BatchAccountTestItem) {
   return batchTestRateByAccountId.value.get(item.account_id)
 }
 
+function orderBatchTestItemsFailureFirst(items: BatchAccountTestItem[]) {
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => {
+      const priorityDelta = batchTestResultPriority(a.item) - batchTestResultPriority(b.item)
+      if (priorityDelta !== 0) return priorityDelta
+      const statusDelta = batchTestStatusSortValue(a.item.status) - batchTestStatusSortValue(b.item.status)
+      if (statusDelta !== 0) return statusDelta
+      return a.index - b.index
+    })
+    .map(entry => entry.item)
+}
+
+function batchTestResultPriority(item: BatchAccountTestItem) {
+  if (batchTestIsFailed(item)) return 0
+  if (batchTestIsSkipped(item)) return 1
+  return 2
+}
+
+function batchTestIsSkipped(item: BatchAccountTestItem) {
+  return item.status === 'cancelled'
+}
+
+function batchTestIsFailed(item: BatchAccountTestItem) {
+  return item.status !== 'success' && !batchTestIsSkipped(item)
+}
+
 function toggleBatchTestSort(key: BatchTestSortKey) {
   if (batchTestSortKey.value === key) {
     batchTestSortOrder.value = batchTestSortOrder.value === 'asc' ? 'desc' : 'asc'
@@ -1855,9 +2012,9 @@ function schedulableToggleTitle(row: UpstreamAccountSyncItem) {
 }
 
 function accountRowClass(row: UpstreamAccountSyncItem) {
-  if (isProviderDisabled(row)) return 'provider-disabled-row'
-  if (row.rate_violation) return 'risk-row'
-  return ''
+  if (isProviderDisabled(row)) return ['mobile-row-card', 'provider-disabled-row']
+  if (row.rate_violation) return ['mobile-row-card', 'risk-row']
+  return 'mobile-row-card'
 }
 
 function accountTestStatusLabel(status: AccountTestStatus | undefined) {
@@ -1968,8 +2125,15 @@ function batchTestStatusLabel(status: BatchAccountTestStatus | string) {
 
 function batchTestStatusClass(status: BatchAccountTestStatus | string) {
   if (status === 'success') return 'test-status-success'
-  if (status === 'timeout' || status === 'cancelled') return 'test-status-testing'
+  if (status === 'cancelled') return 'test-status-skipped'
+  if (status === 'timeout') return 'test-status-testing'
   return 'test-status-failed'
+}
+
+function batchTestResultCardTone(item: BatchAccountTestItem) {
+  if (batchTestIsFailed(item)) return 'failed'
+  if (batchTestIsSkipped(item)) return 'skipped'
+  return ''
 }
 
 function batchTestItemSchedulable(item: BatchAccountTestItem) {
@@ -2058,6 +2222,7 @@ async function runBatchAccountTest() {
 
   batchTesting.value = true
   batchTestResult.value = null
+  batchTestResultFilter.value = 'all'
   showBatchTestResultDialog.value = false
   clearBatchTestPollTimer()
   const pollToken = batchTestPollToken.value + 1
@@ -3918,6 +4083,11 @@ onBeforeUnmount(() => {
   color: #dc2626;
 }
 
+.test-status-skipped {
+  background: #f5f3ff;
+  color: #7c3aed;
+}
+
 .status-cell {
   display: flex;
   align-items: center;
@@ -4432,6 +4602,229 @@ onBeforeUnmount(() => {
   color: #64748b;
 }
 
+.batch-result-scroll {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.batch-result-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: grid;
+  gap: 8px;
+  border-bottom: 1px solid #eef2f7;
+  background: #fff;
+  padding: 10px;
+}
+
+.batch-result-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 1px;
+}
+
+.batch-result-tab {
+  display: inline-flex;
+  min-height: 30px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #dbe3ee;
+  border-radius: 999px;
+  background: #fff;
+  padding: 0 10px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.batch-result-tab strong {
+  color: #0f172a;
+  font-size: 12px;
+}
+
+.batch-result-tab.active {
+  border-color: #bae6fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.batch-result-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.batch-result-hint .table-tag {
+  flex: none;
+}
+
+.batch-result-list {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+.batch-result-card {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+}
+
+.batch-result-card::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: #059669;
+  content: "";
+}
+
+.batch-result-card.failed::before {
+  background: #dc2626;
+}
+
+.batch-result-card.skipped::before {
+  background: #7c3aed;
+}
+
+.batch-result-card-head {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.batch-result-account {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.batch-result-account strong {
+  overflow-wrap: anywhere;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.batch-result-account span {
+  overflow-wrap: anywhere;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.batch-result-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.batch-result-metric {
+  display: grid;
+  gap: 3px;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 8px;
+}
+
+.batch-result-metric span {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.batch-result-metric strong {
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.batch-result-metric .rate-value {
+  display: inline-flex;
+  width: fit-content;
+  min-width: 58px;
+  border-radius: 6px;
+  padding: 2px 8px;
+  line-height: 18px;
+}
+
+.batch-result-error {
+  overflow-wrap: anywhere;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  background: #fff7ed;
+  padding: 8px;
+  color: #9a3412;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.batch-result-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  border-top: 1px solid #eef2f7;
+  padding-top: 8px;
+}
+
+.batch-result-empty {
+  padding: 18px 12px;
+  color: #94a3b8;
+  font-size: 13px;
+  text-align: center;
+}
+
+.batch-table-details {
+  border-top: 1px solid #eef2f7;
+  background: #fff;
+}
+
+.batch-table-details summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  color: #334155;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+  list-style: none;
+}
+
+.batch-table-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.batch-table-details summary span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.batch-table-details .records-table-wrap {
+  max-height: 320px;
+  border-top: 1px solid #eef2f7;
+}
+
 .batch-test-config-list {
   display: grid;
   gap: 12px;
@@ -4677,7 +5070,8 @@ button.sync-log-status-unhandled:hover {
   }
 
   .accounts-shell {
-    padding: 14px;
+    gap: 12px;
+    padding: 12px;
   }
 
   .accounts-actions,
@@ -4803,6 +5197,25 @@ button.sync-log-status-unhandled:hover {
     justify-content: center;
   }
 
+  .batch-test-result-modal .sync-confirm-footer {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .batch-test-result-modal .sync-confirm-footer .ui-button {
+    width: auto;
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  .batch-table-details .records-table-wrap {
+    max-height: 260px;
+  }
+
   .sync-logs-modal-header {
     align-items: flex-start;
     padding: 14px 16px;
@@ -4812,6 +5225,7 @@ button.sync-log-status-unhandled:hover {
     max-width: 100%;
     overflow: auto;
   }
+
 }
 
 @media (max-width: 768px) {
@@ -4821,15 +5235,24 @@ button.sync-log-status-unhandled:hover {
 
   .accounts-actions {
     width: 100%;
+    align-items: flex-start;
+    gap: 8px;
   }
 
   .accounts-actions .ui-button {
-    flex: 1 1 calc(50% - 6px);
-    min-width: 0;
+    flex: 0 0 auto;
+    width: auto;
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 12px;
+    line-height: 1;
+    white-space: nowrap;
   }
 
   .accounts-actions .ui-button-icon {
-    flex: 0 0 38px;
+    flex: 0 0 32px;
+    width: 32px;
+    min-height: 32px;
   }
 
   .guard-left,
@@ -4838,13 +5261,50 @@ button.sync-log-status-unhandled:hover {
     align-items: flex-start;
   }
 
-  .guard-controls .ui-button,
+  .guard-controls {
+    display: grid;
+    grid-template-columns: auto minmax(72px, 92px) minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+  }
+
   .guard-controls .ui-input {
-    width: 100%;
+    width: 92px;
+  }
+
+  .guard-controls .ui-button,
+  .guard-sync-log-warning .ui-button {
+    width: auto;
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .guard-controls .ui-button {
+    justify-self: flex-start;
+  }
+
+  .guard-controls .ui-button.ui-button-primary {
+    grid-column: auto;
   }
 
   .control-label {
     white-space: normal;
+  }
+
+  .filter-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #fff;
+    padding: 10px;
+  }
+
+  .search-wrap,
+  .filtered-count {
+    grid-column: 1 / -1;
   }
 
   .filtered-count {
@@ -4855,6 +5315,61 @@ button.sync-log-status-unhandled:hover {
   .records-table {
     min-width: 900px;
   }
+
+  .accounts-table-card :deep(.mobile-row-card) {
+    position: relative;
+    overflow: hidden;
+    border-color: #e2e8f0;
+    border-radius: 8px;
+    background: #fff;
+    padding: 12px;
+    box-shadow: none;
+  }
+
+  .accounts-table-card :deep(.mobile-row-card::before) {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background: #059669;
+    content: "";
+  }
+
+  .accounts-table-card :deep(.mobile-row-card.risk-row) {
+    border-color: #fed7aa;
+    background: #fffaf5;
+  }
+
+  .accounts-table-card :deep(.mobile-row-card.risk-row::before) {
+    background: #ea580c;
+  }
+
+  .accounts-table-card :deep(.mobile-row-card.provider-disabled-row) {
+    background: #f8fafc;
+  }
+
+  .accounts-table-card :deep(.mobile-row-card.provider-disabled-row::before) {
+    background: #7c3aed;
+  }
+
+  .accounts-table-card :deep(.mobile-row-card > .space-y-3 > .flex:nth-child(1)),
+  .accounts-table-card :deep(.mobile-row-card > .space-y-3 > .flex:nth-child(2)),
+  .accounts-table-card :deep(.mobile-row-card > .space-y-3 > .flex:nth-child(3)) {
+    border-bottom: 1px solid #f1f5f9;
+    padding-bottom: 8px;
+  }
+
+  .accounts-table-card :deep(.mobile-row-card > .space-y-3 > .flex > span) {
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  .accounts-table-card :deep(.mobile-row-card > .space-y-3 > .flex > div) {
+    color: #0f172a;
+    font-size: 13px;
+  }
 }
 
 @media (max-width: 520px) {
@@ -4863,11 +5378,11 @@ button.sync-log-status-unhandled:hover {
   }
 
   .accounts-actions .ui-button {
-    flex-basis: 100%;
+    flex-basis: auto;
   }
 
   .accounts-actions .ui-button-icon {
-    flex-basis: 38px;
+    flex-basis: 32px;
   }
 
   .guard-sync-log-warning {
@@ -4876,6 +5391,17 @@ button.sync-log-status-unhandled:hover {
 
   .guard-warning-icon {
     display: none;
+  }
+}
+
+@media (max-width: 380px) {
+  .filter-row,
+  .guard-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .guard-controls .ui-input {
+    width: 100%;
   }
 }
 </style>
