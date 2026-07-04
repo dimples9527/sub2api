@@ -15,10 +15,17 @@
       </template>
 
       <template #table>
-        <DataTable :columns="columns" :data="monitors" :loading="loading" class="monitor-table">
+        <DataTable
+          :columns="columns"
+          :data="monitors"
+          :loading="loading"
+          row-key="id"
+          :row-class="monitorRowClass"
+          class="monitor-table"
+        >
           <template #cell-name="{ row, value }">
-            <div class="flex min-w-0 flex-wrap items-center justify-end gap-1.5 md:justify-start">
-              <span class="min-w-0 break-all font-medium text-gray-900 dark:text-white">{{ value }}</span>
+            <div class="monitor-name-cell flex min-w-0 flex-wrap items-center justify-end gap-1.5 md:justify-start">
+              <span class="monitor-name-text min-w-0 break-all font-medium text-gray-900 dark:text-white">{{ value }}</span>
               <HelpTooltip v-if="row.api_key_decrypt_failed" :content="t('admin.channelMonitor.apiKeyDecryptFailed')">
                 <Icon name="exclamationTriangle" size="sm" class="text-red-500" />
               </HelpTooltip>
@@ -26,7 +33,7 @@
           </template>
 
           <template #cell-provider="{ row }">
-            <span class="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium" :class="providerBadgeClass(row.provider)">
+            <span class="monitor-provider-badge inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium" :class="providerBadgeClass(row.provider)">
               {{ providerLabel(row.provider) }}
             </span>
           </template>
@@ -36,15 +43,17 @@
           </template>
 
           <template #cell-availability_7d="{ row }">
-            <span class="text-sm text-gray-900 dark:text-gray-100">{{ formatAvailability(row) }}</span>
+            <span class="monitor-metric-text text-sm text-gray-900 dark:text-gray-100">{{ formatAvailability(row) }}</span>
           </template>
 
           <template #cell-latency="{ row }">
-            <span class="text-sm text-gray-900 dark:text-gray-100">{{ formatLatency(row.primary_latency_ms) }}</span>
+            <span class="monitor-metric-text text-sm text-gray-900 dark:text-gray-100">{{ formatLatency(row.primary_latency_ms) }}</span>
           </template>
 
           <template #cell-enabled="{ row }">
-            <Toggle :modelValue="row.enabled" @update:modelValue="toggleEnabled(row)" />
+            <div class="monitor-toggle-cell">
+              <Toggle :modelValue="row.enabled" @update:modelValue="toggleEnabled(row)" />
+            </div>
           </template>
 
           <template #cell-actions="{ row }">
@@ -55,6 +64,69 @@
               @edit="openEditDialog"
               @delete="handleDelete"
             />
+          </template>
+
+          <template #mobile-card="{ row }">
+            <article class="monitor-mobile-card">
+              <div class="monitor-mobile-card-head">
+                <div class="monitor-mobile-title-block">
+                  <div class="monitor-mobile-title-row">
+                    <strong>{{ row.name }}</strong>
+                    <HelpTooltip v-if="row.api_key_decrypt_failed" :content="t('admin.channelMonitor.apiKeyDecryptFailed')">
+                      <Icon name="exclamationTriangle" size="sm" class="text-red-500" />
+                    </HelpTooltip>
+                  </div>
+                  <div class="monitor-mobile-badges">
+                    <span class="monitor-provider-badge inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium" :class="providerBadgeClass(row.provider)">
+                      {{ providerLabel(row.provider) }}
+                    </span>
+                    <span class="monitor-status-badge" :class="statusBadgeClass(row.primary_status)">
+                      {{ statusLabel(row.primary_status) }}
+                    </span>
+                  </div>
+                </div>
+                <Toggle :modelValue="row.enabled" @update:modelValue="toggleEnabled(row)" />
+              </div>
+
+              <div class="monitor-mobile-model">
+                <span>{{ t('admin.channelMonitor.columns.primaryModel') }}</span>
+                <strong>{{ row.primary_model }}</strong>
+              </div>
+
+              <div class="monitor-mobile-metrics">
+                <div class="monitor-mobile-metric">
+                  <span>{{ t('admin.channelMonitor.columns.availability7d') }}</span>
+                  <strong>{{ formatAvailability(row) }}</strong>
+                </div>
+                <div class="monitor-mobile-metric">
+                  <span>{{ t('admin.channelMonitor.columns.latency') }}</span>
+                  <strong>{{ formatLatencyWithUnit(row.primary_latency_ms) }}</strong>
+                </div>
+                <div class="monitor-mobile-metric">
+                  <span>{{ t('admin.channelMonitor.form.intervalSeconds') }}</span>
+                  <strong>{{ row.interval_seconds }}s</strong>
+                </div>
+                <div class="monitor-mobile-metric">
+                  <span>{{ t('monitorCommon.extraModelsHeader') }}</span>
+                  <strong>{{ row.extra_models?.length || 0 }}</strong>
+                </div>
+              </div>
+
+              <div v-if="row.group_name" class="monitor-mobile-group">
+                <span>{{ t('admin.channelMonitor.form.groupName') }}</span>
+                <strong>{{ row.group_name }}</strong>
+              </div>
+
+              <div class="monitor-mobile-actions">
+                <MonitorActionsCell
+                  :row="row"
+                  :running="runningId === row.id"
+                  @run="handleRunNow"
+                  @edit="openEditDialog"
+                  @delete="handleDelete"
+                />
+              </div>
+            </article>
           </template>
 
           <template #empty>
@@ -148,6 +220,8 @@ const appStore = useAppStore()
 const {
   providerLabel,
   providerBadgeClass,
+  statusLabel,
+  statusBadgeClass,
   formatLatency,
   formatAvailability,
 } = useChannelMonitorFormat()
@@ -283,6 +357,18 @@ function handleDelete(row: ChannelMonitor) {
   showDeleteDialog.value = true
 }
 
+function monitorRowClass(row: ChannelMonitor) {
+  const classes = ['monitor-row-card']
+  if (!row.enabled) classes.push('is-disabled')
+  if (row.primary_status) classes.push(`status-${row.primary_status}`)
+  return classes
+}
+
+function formatLatencyWithUnit(ms: number | null | undefined) {
+  if (ms == null) return formatLatency(ms)
+  return `${formatLatency(ms)} ms`
+}
+
 async function confirmDelete() {
   if (!deleting.value) return
   try {
@@ -327,6 +413,186 @@ onUnmounted(() => {
 }
 
 @media (max-width: 767px) {
+  .monitor-table :deep(.monitor-row-card) {
+    position: relative;
+    overflow: hidden;
+    border-radius: 8px;
+    padding: 0;
+    box-shadow: none;
+  }
+
+  .monitor-table :deep(.monitor-row-card::before) {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background: #94a3b8;
+    content: "";
+  }
+
+  .monitor-table :deep(.monitor-row-card.status-operational::before) {
+    background: #059669;
+  }
+
+  .monitor-table :deep(.monitor-row-card.status-degraded::before) {
+    background: #d97706;
+  }
+
+  .monitor-table :deep(.monitor-row-card.status-failed::before),
+  .monitor-table :deep(.monitor-row-card.status-error::before) {
+    background: #dc2626;
+  }
+
+  .monitor-table :deep(.monitor-row-card.is-disabled) {
+    background: #f8fafc;
+    opacity: 0.82;
+  }
+
+  .monitor-table :deep(.monitor-provider-badge) {
+    border-radius: 6px;
+    padding: 2px 8px;
+  }
+
+  .monitor-table :deep(.monitor-metric-text) {
+    display: inline-flex;
+    min-width: 58px;
+    justify-content: center;
+    border-radius: 6px;
+    background: #f1f5f9;
+    padding: 3px 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .monitor-mobile-card {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .monitor-mobile-card-head {
+    display: flex;
+    min-width: 0;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .monitor-mobile-title-block {
+    display: grid;
+    min-width: 0;
+    gap: 6px;
+  }
+
+  .monitor-mobile-title-row {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .monitor-mobile-title-row strong {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: #0f172a;
+    font-size: 14px;
+    font-weight: 800;
+    line-height: 1.25;
+  }
+
+  .monitor-mobile-badges {
+    display: flex;
+    min-width: 0;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .monitor-status-badge {
+    display: inline-flex;
+    max-width: 100%;
+    align-items: center;
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 18px;
+    white-space: nowrap;
+  }
+
+  .monitor-mobile-model,
+  .monitor-mobile-group,
+  .monitor-mobile-metric {
+    display: grid;
+    min-width: 0;
+    gap: 4px;
+    border-radius: 8px;
+    background: #f8fafc;
+    padding: 8px;
+  }
+
+  .monitor-mobile-model span,
+  .monitor-mobile-group span,
+  .monitor-mobile-metric span {
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1.15;
+  }
+
+  .monitor-mobile-model strong,
+  .monitor-mobile-group strong {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: #0f172a;
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1.3;
+  }
+
+  .monitor-mobile-metrics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .monitor-mobile-metric strong {
+    color: #0f172a;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1.2;
+  }
+
+  .monitor-mobile-actions {
+    border-top: 1px solid #eef2f7;
+    padding-top: 8px;
+  }
+
+  :global(.dark) .monitor-table :deep(.monitor-row-card.is-disabled) {
+    background: #111827;
+  }
+
+  :global(.dark) .monitor-table :deep(.monitor-metric-text) {
+    background: #1f2937;
+  }
+
+  :global(.dark) .monitor-mobile-title-row strong,
+  :global(.dark) .monitor-mobile-model strong,
+  :global(.dark) .monitor-mobile-group strong,
+  :global(.dark) .monitor-mobile-metric strong {
+    color: #e5e7eb;
+  }
+
+  :global(.dark) .monitor-mobile-model,
+  :global(.dark) .monitor-mobile-group,
+  :global(.dark) .monitor-mobile-metric {
+    background: #111827;
+  }
+
+  :global(.dark) .monitor-mobile-actions {
+    border-top-color: #1f2937;
+  }
+
   .monitor-table :deep(.monitor-name-column),
   .monitor-table :deep(.monitor-model-column),
   .monitor-table :deep(.monitor-provider-column),

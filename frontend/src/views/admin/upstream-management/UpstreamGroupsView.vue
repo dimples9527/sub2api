@@ -33,15 +33,6 @@
           </div>
         </div>
 
-        <div class="ug-provider-strip">
-          <div class="ug-provider-meta">
-            <span class="ug-meta-label">{{ t('admin.upstreamGroups.defaultProvider') }}</span>
-            <span class="ug-provider-name">{{ result?.default_provider?.name || '-' }}</span>
-            <code v-if="result?.default_provider?.slug" class="ug-provider-slug">{{ result.default_provider.slug }}</code>
-          </div>
-          <span class="ug-provider-count">{{ result?.default_provider?.slug ? 1 : 0 }}</span>
-        </div>
-
         <div class="ug-filter-card" :class="{ 'ug-filters-expanded': showGroupAdvancedFilters }">
           <div class="ug-filter-top">
             <div class="ug-filter-left" :class="{ 'is-open': showGroupAdvancedFilters }">
@@ -1475,30 +1466,6 @@ onMounted(reload)
   @apply mt-1 font-mono text-xl font-semibold text-gray-900 dark:text-white;
 }
 
-.ug-provider-strip {
-  @apply mt-3 flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-dark-600 dark:bg-dark-800/40;
-}
-
-.ug-provider-meta {
-  @apply flex min-w-0 flex-wrap items-center gap-2;
-}
-
-.ug-meta-label {
-  @apply text-xs font-medium text-gray-500 dark:text-gray-400;
-}
-
-.ug-provider-name {
-  @apply truncate text-sm font-semibold text-gray-900 dark:text-white;
-}
-
-.ug-provider-slug {
-  @apply rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300;
-}
-
-.ug-provider-count {
-  @apply flex h-8 min-w-8 shrink-0 items-center justify-center rounded-md bg-gray-100 px-2 font-mono text-sm font-semibold text-gray-700 dark:bg-dark-700 dark:text-gray-200;
-}
-
 .ug-filter-card {
   @apply mt-3 rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-dark-600 dark:bg-dark-800/40;
 }
@@ -2360,11 +2327,6 @@ onMounted(reload)
     @apply grid-cols-2;
   }
 
-  .ug-provider-strip {
-    @apply items-start;
-  }
-
-  .ug-provider-meta,
   .ug-filter-top,
   .ug-auto-row {
     @apply items-stretch;
@@ -2412,8 +2374,6 @@ onMounted(reload)
   }
 
   .ug-group-name,
-  .ug-provider-name,
-  .ug-provider-slug,
   .ug-tag,
   .ug-match-desc-text,
   .ug-account-chip-name {
@@ -2660,17 +2620,8 @@ onMounted(reload)
     line-height: 1;
   }
 
-  .ug-provider-strip,
   .ug-filter-card {
     padding: 10px;
-  }
-
-  .ug-provider-strip {
-    gap: 8px;
-  }
-
-  .ug-provider-meta {
-    gap: 6px;
   }
 
   .ug-filter-top {

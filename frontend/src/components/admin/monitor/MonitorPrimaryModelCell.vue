@@ -69,3 +69,19 @@ defineProps<{
 const { t } = useI18n()
 const { statusLabel, statusBadgeClass, formatLatency } = useChannelMonitorFormat()
 </script>
+
+<style scoped>
+@media (max-width: 767px) {
+  .monitor-primary-model-cell {
+    justify-content: flex-start;
+    gap: 6px;
+  }
+
+  .monitor-primary-model-cell > span:first-child {
+    flex: 1 1 100%;
+    font-size: 13px;
+    line-height: 1.3;
+    text-align: left;
+  }
+}
+</style>

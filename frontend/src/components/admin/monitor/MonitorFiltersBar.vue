@@ -1,8 +1,8 @@
 <template>
   <div class="monitor-filters-bar flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
     <!-- Left: Search + Filters -->
-    <div class="flex flex-1 flex-wrap items-center gap-3">
-      <div class="relative w-full sm:w-64">
+    <div class="monitor-filter-fields flex flex-1 flex-wrap items-center gap-3">
+      <div class="monitor-search-field relative w-full sm:w-64">
         <Icon
           name="search"
           size="md"
@@ -35,11 +35,11 @@
     </div>
 
     <!-- Right: Actions -->
-    <div class="flex w-full flex-shrink-0 flex-wrap items-center justify-end gap-3 lg:w-auto">
+    <div class="monitor-filter-actions flex w-full flex-shrink-0 flex-wrap items-center justify-end gap-3 lg:w-auto">
       <button
         @click="$emit('reload')"
         :disabled="loading"
-        class="btn btn-secondary"
+        class="btn btn-secondary monitor-refresh-button"
         :title="t('common.refresh')"
       >
         <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
@@ -105,14 +105,53 @@ const enabledFilterOptions = computed(() => [
 
 <style scoped>
 @media (max-width: 767px) {
-  .monitor-filters-bar .monitor-filter-select {
+  .monitor-filters-bar {
+    gap: 10px;
+  }
+
+  .monitor-filter-fields {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .monitor-search-field {
+    grid-column: 1 / -1;
     width: 100%;
   }
 
-  .monitor-filters-bar :deep(.btn) {
+  .monitor-filters-bar .monitor-filter-select {
     min-width: 0;
-    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  .monitor-filter-actions {
+    width: 100%;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+
+  .monitor-filter-actions .btn {
+    min-height: 32px;
+    min-width: 0;
+    flex: 0 0 auto;
+    padding: 0 10px;
+    font-size: 12px;
     justify-content: center;
+  }
+
+  .monitor-filter-actions .monitor-refresh-button {
+    width: 32px;
+    padding: 0;
+  }
+
+  .monitor-filter-actions .btn svg {
+    margin-right: 4px;
+  }
+
+  .monitor-filter-actions .monitor-refresh-button svg {
+    margin-right: 0;
   }
 }
 </style>

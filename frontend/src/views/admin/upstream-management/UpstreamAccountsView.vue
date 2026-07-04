@@ -601,6 +601,79 @@
                 </tbody>
               </table>
             </div>
+            <div v-if="syncLogEntries.length" class="sync-log-card-list">
+              <article
+                v-for="entry in syncLogEntries"
+                :key="`mobile-${entry.key}`"
+                :class="['sync-log-card', { 'is-handled': isSyncLogHandled(entry) }]"
+              >
+                <div class="sync-log-card-head">
+                  <div class="sync-log-card-status">
+                    <span v-if="isSyncLogHandled(entry)" class="sync-log-status sync-log-status-handled">
+                      {{ t('admin.upstreamAccounts.syncLogHandled') }}
+                    </span>
+                    <button
+                      v-else
+                      type="button"
+                      class="sync-log-status sync-log-status-unhandled"
+                      @click="markSyncLogHandled(entry)"
+                    >
+                      {{ t('admin.upstreamAccounts.syncLogUnhandled') }}
+                    </button>
+                    <span :class="['trigger-chip', triggerClass(entry.trigger_source)]">
+                      {{ upstreamAccountSyncTriggerSourceLabel(entry.trigger_source) }}
+                    </span>
+                  </div>
+                  <time>{{ formatDateTime(entry.created_at) }}</time>
+                </div>
+
+                <div class="sync-log-card-main">
+                  <div class="sync-log-card-field sync-log-card-field-wide">
+                    <span>{{ t('admin.upstreamAccounts.logAccount') }}</span>
+                    <strong>{{ entry.matched_local_account_name }}</strong>
+                    <code class="table-tag tag-account">#{{ entry.matched_local_account_id }}</code>
+                  </div>
+                  <div class="sync-log-card-field sync-log-card-field-wide">
+                    <span>{{ t('admin.upstreamAccounts.logUpstream') }}</span>
+                    <strong>{{ entry.upstream_key_name }}</strong>
+                    <div class="tag-list">
+                      <span :class="['table-tag', providerToneClass(entry.provider_slug, 'tag')]">{{ entry.provider_name || entry.provider_slug }}</span>
+                      <span class="table-tag tag-gray">{{ entry.upstream_group_name }}</span>
+                    </div>
+                  </div>
+                  <div class="sync-log-card-field">
+                    <span>{{ t('admin.upstreamAccounts.logRateCompare') }}</span>
+                    <div class="rate-compare">
+                      <span class="rate-compare-upstream">{{ formatRate(entry.upstream_rate_multiplier) }}</span>
+                      <span>/</span>
+                      <span class="rate-compare-local">{{ formatRate(entry.local_min_rate_multiplier) }}</span>
+                    </div>
+                  </div>
+                  <div class="sync-log-card-field sync-log-card-field-wide">
+                    <span>{{ t('admin.upstreamAccounts.logUnboundGroups') }}</span>
+                    <div class="tag-list">
+                      <span v-for="group in entry.unbound_group_names" :key="`mobile-${entry.key}-${group}`" class="log-chip log-chip-warning">{{ group }}</span>
+                    </div>
+                  </div>
+                  <div class="sync-log-card-field sync-log-card-field-wide">
+                    <span>{{ t('admin.upstreamAccounts.logRemainingGroups') }}</span>
+                    <div class="tag-list">
+                      <span v-if="!entry.remaining_group_ids.length" class="dash">-</span>
+                      <code v-for="groupID in entry.remaining_group_ids" :key="`mobile-${entry.key}-${groupID}`" class="log-chip">#{{ groupID }}</code>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  v-if="!isSyncLogHandled(entry)"
+                  type="button"
+                  class="text-action sync-log-card-action"
+                  @click="markSyncLogHandled(entry)"
+                >
+                  {{ t('admin.upstreamAccounts.markSyncLogHandled') }}
+                </button>
+              </article>
+            </div>
             <div v-else class="records-empty">
               <Icon name="document" size="xl" :stroke-width="2" />
               <span>{{ t('admin.upstreamAccounts.noSyncLogs') }}</span>
@@ -4822,6 +4895,108 @@ onBeforeUnmount(() => {
   max-height: none;
 }
 
+.sync-log-card-list {
+  display: none;
+}
+
+.sync-log-card {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+}
+
+.sync-log-card::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: #ea580c;
+  content: "";
+}
+
+.sync-log-card.is-handled {
+  background: #f8fafc;
+  opacity: 0.78;
+}
+
+.sync-log-card.is-handled::before {
+  background: #059669;
+}
+
+.sync-log-card-head {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sync-log-card-status {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sync-log-card-head time {
+  flex: 0 0 auto;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.8;
+  white-space: nowrap;
+}
+
+.sync-log-card-main {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.sync-log-card-field {
+  display: grid;
+  min-width: 0;
+  align-content: flex-start;
+  gap: 5px;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 8px;
+}
+
+.sync-log-card-field-wide {
+  grid-column: 1 / -1;
+}
+
+.sync-log-card-field > span:first-child {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.sync-log-card-field strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.sync-log-card-action {
+  justify-self: flex-end;
+  min-height: 30px;
+  border: 1px solid #fed7aa;
+  border-radius: 7px;
+  background: #fff7ed;
+  padding: 0 10px;
+  color: #c2410c;
+  font-size: 12px;
+}
+
 .records-info {
   margin: 14px 18px 0;
   border-radius: 8px;
@@ -5449,8 +5624,27 @@ button.sync-log-status-unhandled:hover {
   }
 
   .batch-test-result-modal .sync-confirm-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    padding: 12px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    padding: 10px 12px;
+  }
+
+  .batch-test-result-modal .sync-result-stat {
+    min-height: 54px;
+    gap: 2px;
+    padding: 8px;
+  }
+
+  .batch-test-result-modal .sync-result-stat span {
+    overflow: hidden;
+    font-size: 11px;
+    line-height: 1.15;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .batch-test-result-modal .sync-result-stat strong {
+    font-size: 18px;
   }
 
   .batch-test-result-modal .sync-confirm-body {
@@ -5567,10 +5761,127 @@ button.sync-log-status-unhandled:hover {
     min-height: 32px;
   }
 
+  .sync-logs-dialog {
+    align-items: stretch;
+    padding: 10px;
+  }
+
+  .sync-logs-modal {
+    height: calc(100vh - 20px);
+    height: calc(100dvh - 20px);
+    max-height: calc(100vh - 20px);
+    max-height: calc(100dvh - 20px);
+  }
+
+  .sync-logs-modal-header {
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+  }
+
+  .sync-logs-modal-header h3 {
+    font-size: 15px;
+  }
+
+  .sync-logs-modal-header p {
+    margin-top: 2px;
+    font-size: 11px;
+  }
+
+  .sync-logs-modal-info {
+    margin: 10px 10px 0;
+    padding: 8px 10px;
+    font-size: 11px;
+    line-height: 1.4;
+  }
+
+  .sync-logs-table-wrap {
+    display: none;
+  }
+
+  .sync-log-card-list {
+    display: grid;
+    flex: 1 1 auto;
+    min-height: 0;
+    align-content: flex-start;
+    gap: 8px;
+    overflow: auto;
+    padding: 10px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .sync-log-card .tag-list {
+    justify-content: flex-start;
+    gap: 5px;
+  }
+
+  .sync-log-card .table-tag,
+  .sync-log-card .log-chip,
+  .sync-log-card .trigger-chip {
+    max-width: 100%;
+    overflow: hidden;
+    padding: 2px 7px;
+    text-overflow: ellipsis;
+  }
+
+  .sync-log-card .rate-compare {
+    width: fit-content;
+    gap: 6px;
+    padding: 3px 7px;
+  }
+
   .guard-left,
   .guard-controls,
   .guard-status-line {
     align-items: flex-start;
+  }
+
+  .rate-guard-panel {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .guard-left {
+    align-items: center;
+    gap: 10px;
+  }
+
+  .guard-switch {
+    width: 36px;
+    height: 20px;
+    margin-top: 0;
+  }
+
+  .guard-switch span {
+    width: 36px;
+    height: 20px;
+  }
+
+  .guard-switch span::after {
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+  }
+
+  .guard-switch.is-on span::after {
+    transform: translateX(16px);
+  }
+
+  .guard-title {
+    font-size: 13px;
+    line-height: 1.2;
+  }
+
+  .guard-description,
+  .guard-hint {
+    display: none;
+  }
+
+  .guard-status-line {
+    gap: 6px;
+    margin-top: 5px;
+    font-size: 11px;
   }
 
   .guard-controls {

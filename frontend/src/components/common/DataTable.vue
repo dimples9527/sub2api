@@ -41,23 +41,28 @@
         ]"
       >
         <div class="space-y-3">
-          <div
-            v-for="column in dataColumns"
-            :key="column.key"
-            class="flex min-w-0 items-start justify-between gap-4"
-          >
-            <span class="shrink-0 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-dark-400">
-              {{ column.label }}
-            </span>
-            <div class="min-w-0 flex-1 break-words text-right text-sm text-gray-900 dark:text-gray-100">
-              <slot :name="`cell-${column.key}`" :row="row" :value="row[column.key]" :expanded="actionsExpanded">
-                {{ column.formatter ? column.formatter(row[column.key], row) : row[column.key] }}
-              </slot>
+          <template v-if="$slots['mobile-card']">
+            <slot name="mobile-card" :row="row" :index="index" :expanded="actionsExpanded" />
+          </template>
+          <template v-else>
+            <div
+              v-for="column in dataColumns"
+              :key="column.key"
+              class="flex min-w-0 items-start justify-between gap-4"
+            >
+              <span class="shrink-0 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-dark-400">
+                {{ column.label }}
+              </span>
+              <div class="min-w-0 flex-1 break-words text-right text-sm text-gray-900 dark:text-gray-100">
+                <slot :name="`cell-${column.key}`" :row="row" :value="row[column.key]" :expanded="actionsExpanded">
+                  {{ column.formatter ? column.formatter(row[column.key], row) : row[column.key] }}
+                </slot>
+              </div>
             </div>
-          </div>
-          <div v-if="hasActionsColumn" class="border-t border-gray-200 pt-3 dark:border-dark-700">
-            <slot name="cell-actions" :row="row" :value="row['actions']" :expanded="actionsExpanded"></slot>
-          </div>
+            <div v-if="hasActionsColumn" class="border-t border-gray-200 pt-3 dark:border-dark-700">
+              <slot name="cell-actions" :row="row" :value="row['actions']" :expanded="actionsExpanded"></slot>
+            </div>
+          </template>
           <slot v-if="isRowDetailVisible(row, index)" name="row-detail" :row="row" :colspan="columns.length" />
         </div>
       </div>

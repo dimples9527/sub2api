@@ -45,14 +45,43 @@ const { t } = useI18n()
 </script>
 
 <style scoped>
-@media (max-width: 420px) {
+@media (max-width: 767px) {
   .monitor-actions-cell {
-    justify-content: stretch;
+    justify-content: flex-start;
+    gap: 6px;
   }
 
   .monitor-actions-cell button {
-    flex: 1 1 calc(50% - 0.25rem);
-    min-width: 4.75rem;
+    min-height: 30px;
+    flex: 0 0 auto;
+    flex-direction: row;
+    gap: 4px;
+    border: 1px solid #e2e8f0;
+    border-radius: 7px;
+    background: #fff;
+    padding: 0 8px;
+    color: #475569;
+  }
+
+  .monitor-actions-cell button span {
+    font-size: 12px;
+    line-height: 1;
+  }
+
+  :global(.dark) .monitor-actions-cell button {
+    border-color: #334155;
+    background: #111827;
+    color: #cbd5e1;
+  }
+}
+
+@media (max-width: 420px) {
+  .monitor-actions-cell {
+    justify-content: flex-start;
+  }
+
+  .monitor-actions-cell button {
+    min-width: 0;
   }
 }
 </style>

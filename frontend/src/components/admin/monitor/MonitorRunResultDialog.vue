@@ -5,17 +5,17 @@
     width="normal"
     @close="$emit('close')"
   >
-    <div class="space-y-2">
+    <div class="run-result-list space-y-2">
       <div
         v-for="r in results"
         :key="r.model"
-        class="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-dark-600"
+        class="run-result-item flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-dark-600"
       >
-        <div class="flex flex-col">
+        <div class="run-result-copy flex flex-col">
           <span class="font-medium text-gray-900 dark:text-white">{{ r.model }}</span>
           <span v-if="r.message" class="text-xs text-gray-500 dark:text-gray-400">{{ r.message }}</span>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="run-result-meta flex items-center gap-2">
           <span
             class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px]"
             :class="statusBadgeClass(r.status)"
@@ -54,3 +54,28 @@ defineEmits<{
 const { t } = useI18n()
 const { statusLabel, statusBadgeClass, formatLatency } = useChannelMonitorFormat()
 </script>
+
+<style scoped>
+@media (max-width: 520px) {
+  .run-result-item {
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .run-result-copy {
+    min-width: 0;
+  }
+
+  .run-result-copy span {
+    overflow-wrap: anywhere;
+  }
+
+  .run-result-meta {
+    flex: 0 0 auto;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+  }
+}
+</style>
