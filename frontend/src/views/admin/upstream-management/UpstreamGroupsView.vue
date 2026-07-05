@@ -1345,7 +1345,7 @@ function boundAccountTotal(row: UpstreamGroupComparison) {
 
 function formatRate(value: number | undefined) {
   const n = Number(value)
-  return Number.isFinite(n) ? `${n.toFixed(2)}x` : '-'
+  return Number.isFinite(n) ? `${formatRateNumber(n)}x` : '-'
 }
 
 function rateProfit(row: UpstreamGroupComparison) {
@@ -1359,7 +1359,14 @@ function formatProfit(value: number | undefined) {
   const n = Number(value)
   if (!Number.isFinite(n)) return '-'
   if (Math.abs(n) <= 0.0000001) return '0.00x'
-  return `${n > 0 ? '+' : ''}${n.toFixed(2)}x`
+  return `${n > 0 ? '+' : ''}${formatRateNumber(n)}x`
+}
+
+function formatRateNumber(value: number) {
+  const normalized = Math.abs(value) <= 0.0000001 ? 0 : value
+  const [integerPart, fractionPart = ''] = normalized.toFixed(6).split('.')
+  const trimmedFraction = fractionPart.replace(/0+$/, '')
+  return `${integerPart}.${trimmedFraction.padEnd(2, '0')}`
 }
 
 function profitClass(value: number | undefined) {
@@ -2423,6 +2430,33 @@ onMounted(reload)
 }
 
 @media (max-width: 767px) {
+  .ug-stats-row {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .ug-stat-card {
+    min-height: 52px;
+    gap: 5px;
+    padding: 8px 6px;
+  }
+
+  .ug-stat-bar {
+    width: 3px;
+    height: 28px;
+  }
+
+  .ug-stat-label {
+    font-size: 10px;
+    line-height: 1.15;
+  }
+
+  .ug-stat-value {
+    margin-top: 2px;
+    font-size: 16px;
+    line-height: 1;
+  }
+
   .ug-filter-main {
     order: 1;
     display: grid;
@@ -2596,27 +2630,29 @@ onMounted(reload)
 
 @media (max-width: 520px) {
   .ug-stats-row {
-    @apply grid-cols-2 gap-2;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 5px;
   }
 
   .ug-stat-card {
-    min-height: 64px;
-    gap: 8px;
-    padding: 10px;
+    min-height: 48px;
+    gap: 4px;
+    padding: 7px 5px;
   }
 
   .ug-stat-bar {
-    height: 32px;
+    width: 3px;
+    height: 24px;
   }
 
   .ug-stat-label {
-    font-size: 11px;
-    line-height: 1.2;
+    font-size: 10px;
+    line-height: 1.1;
   }
 
   .ug-stat-value {
-    margin-top: 4px;
-    font-size: 18px;
+    margin-top: 2px;
+    font-size: 15px;
     line-height: 1;
   }
 

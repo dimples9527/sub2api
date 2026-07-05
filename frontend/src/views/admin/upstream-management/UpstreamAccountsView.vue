@@ -2005,7 +2005,14 @@ async function refreshPreview() {
 
 function formatRate(value: number | undefined) {
   const n = Number(value)
-  return Number.isFinite(n) ? `${n.toFixed(2)}x` : '-'
+  return Number.isFinite(n) ? `${formatRateNumber(n)}x` : '-'
+}
+
+function formatRateNumber(value: number) {
+  const normalized = Math.abs(value) <= 0.0000001 ? 0 : value
+  const [integerPart, fractionPart = ''] = normalized.toFixed(6).split('.')
+  const trimmedFraction = fractionPart.replace(/0+$/, '')
+  return `${integerPart}.${trimmedFraction.padEnd(2, '0')}`
 }
 
 function formatLatency(value: number | undefined) {
@@ -5701,38 +5708,39 @@ button.sync-log-status-unhandled:hover {
 
 @media (max-width: 768px) {
   .stats-strip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
   }
 
   .stat-card {
-    min-height: 64px;
-    gap: 8px;
-    padding: 10px;
+    min-height: 52px;
+    gap: 5px;
+    padding: 8px 6px;
   }
 
   .stat-icon {
-    width: 30px;
-    height: 30px;
-    border-radius: 8px;
+    width: 24px;
+    height: 24px;
+    border-radius: 7px;
   }
 
   .stat-copy strong {
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 800;
     line-height: 1;
   }
 
   .stat-copy span {
-    margin-top: 3px;
-    font-size: 12px;
+    margin-top: 2px;
+    font-size: 10px;
+    line-height: 1.15;
   }
 
   .stat-alert-dot {
-    top: 9px;
-    right: 9px;
-    width: 7px;
-    height: 7px;
+    top: 7px;
+    right: 7px;
+    width: 6px;
+    height: 6px;
   }
 
   .accounts-actions {
