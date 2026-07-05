@@ -2782,6 +2782,7 @@ describe('UpstreamAccountsView', () => {
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('admin.upstreamAccounts.batchTestSchedulableEnabled')
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('admin.upstreamAccounts.batchTestSchedulableDisabled')
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('account test timed out')
+    expect(wrapper.find('[data-test="batch-test-filter-failed_schedulable"]').text()).toContain('0')
     await wrapper.find('[data-test="batch-test-sort-upstream_rate"]').trigger('click')
     await flushPromises()
 
@@ -2798,6 +2799,21 @@ describe('UpstreamAccountsView', () => {
     await flushPromises()
 
     expect(accountsMock.setSchedulable).toHaveBeenCalledWith(13, true)
+    expect(wrapper.find('[data-test="batch-test-filter-failed_schedulable"]').text()).toContain('1')
+    expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('admin.upstreamAccounts.batchTestFailedSchedulableTag')
+    expect(wrapper.find('.batch-result-card.failed-schedulable').exists()).toBe(true)
+    expect(wrapper.find('.batch-test-risk-row').exists()).toBe(true)
+
+    await wrapper.find('[data-test="batch-test-filter-failed_schedulable"]').trigger('click')
+    await flushPromises()
+
+    dialogText = wrapper.find('[data-test="batch-test-result-dialog"]').text()
+    expect(dialogText).toContain('local-b')
+    expect(dialogText).not.toContain('local-a')
+
+    await wrapper.find('[data-test="batch-test-filter-all"]').trigger('click')
+    await flushPromises()
+
     await wrapper.find('[data-test="batch-test-edit-account-12"]').trigger('click')
     await flushPromises()
 

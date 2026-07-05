@@ -2009,6 +2009,8 @@
       batchTestCompleted: '已完成',
       batchTestSuccess: '成功',
       batchTestFailed: '失败',
+      batchTestFailedSchedulable: '失败且调度打开',
+      batchTestFailedSchedulableTag: '失败仍调度',
       batchTestSkipped: '跳过',
       batchTestResultSection: '测试明细',
       batchTestFailureFirstHint: '失败结果已前置，适合大批量时先处理异常。',

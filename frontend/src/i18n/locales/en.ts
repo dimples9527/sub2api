@@ -1994,6 +1994,8 @@ export default {
       batchTestCompleted: 'Completed',
       batchTestSuccess: 'Success',
       batchTestFailed: 'Failed',
+      batchTestFailedSchedulable: 'Failed + scheduling on',
+      batchTestFailedSchedulableTag: 'Failed but scheduling on',
       batchTestSkipped: 'Skipped',
       batchTestResultSection: 'Results',
       batchTestFailureFirstHint: 'Failed results are shown first so large batches can be triaged faster.',

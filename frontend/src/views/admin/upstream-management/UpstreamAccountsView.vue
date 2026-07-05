@@ -1010,6 +1010,7 @@
                         :key="option.value"
                         type="button"
                         :class="['batch-result-tab', { active: batchTestResultFilter === option.value }]"
+                        :data-test="`batch-test-filter-${option.value}`"
                         @click="batchTestResultFilter = option.value"
                       >
                         <span>{{ option.label }}</span>
@@ -1026,16 +1027,21 @@
                     <article
                       v-for="item in batchTestFilteredItems"
                       :key="`batch-test-card-${item.account_id}`"
-                      :class="['batch-result-card', batchTestResultCardTone(item)]"
+                      :class="['batch-result-card', batchTestResultCardTone(item), { 'failed-schedulable': batchTestIsFailedSchedulable(item) }]"
                     >
                       <div class="batch-result-card-head">
                         <div class="batch-result-account">
                           <strong>{{ item.account_name || `#${item.account_id}` }}</strong>
                           <span>#{{ item.account_id }}</span>
                         </div>
-                        <span :class="['test-status-pill', batchTestStatusClass(item.status)]">
-                          {{ batchTestStatusLabel(item.status) }}
-                        </span>
+                        <div class="batch-result-card-status">
+                          <span :class="['test-status-pill', batchTestStatusClass(item.status)]">
+                            {{ batchTestStatusLabel(item.status) }}
+                          </span>
+                          <span v-if="batchTestIsFailedSchedulable(item)" class="table-tag batch-risk-tag">
+                            {{ t('admin.upstreamAccounts.batchTestFailedSchedulableTag') }}
+                          </span>
+                        </div>
                       </div>
                       <div class="batch-result-grid">
                         <div class="batch-result-metric">
@@ -1147,7 +1153,11 @@
                           </tr>
                         </thead>
                         <tbody>
-                          <tr v-for="item in batchTestResultItems" :key="`batch-test-${item.account_id}`">
+                          <tr
+                            v-for="item in batchTestFilteredItems"
+                            :key="`batch-test-${item.account_id}`"
+                            :class="{ 'batch-test-risk-row': batchTestIsFailedSchedulable(item) }"
+                          >
                             <td>
                               <div class="two-line-cell">
                                 <span class="main-text">{{ item.account_name || `#${item.account_id}` }}</span>
@@ -1179,9 +1189,14 @@
                               </div>
                             </td>
                             <td>
-                              <span :class="['test-status-pill', batchTestStatusClass(item.status)]">
-                                {{ batchTestStatusLabel(item.status) }}
-                              </span>
+                              <div class="batch-test-status-cell">
+                                <span :class="['test-status-pill', batchTestStatusClass(item.status)]">
+                                  {{ batchTestStatusLabel(item.status) }}
+                                </span>
+                                <span v-if="batchTestIsFailedSchedulable(item)" class="table-tag batch-risk-tag">
+                                  {{ t('admin.upstreamAccounts.batchTestFailedSchedulableTag') }}
+                                </span>
+                              </div>
                             </td>
                             <td>{{ formatLatency(item.latency_ms) }}</td>
                             <td>{{ item.finished_at ? formatDateTime(item.finished_at) : '-' }}</td>
@@ -1384,7 +1399,7 @@ type BatchTestPlatformOption = {
   accountCount: number
 }
 type BatchTestSortKey = 'account' | 'platform' | 'upstream_rate' | 'schedulable' | 'status' | 'latency' | 'finished_at'
-type BatchTestResultFilter = 'all' | 'failed' | 'success' | 'skipped'
+type BatchTestResultFilter = 'all' | 'failed' | 'failed_schedulable' | 'success' | 'skipped'
 type QuickFilterKey = 'all' | 'update' | 'risk' | 'unbound' | 'failed' | 'disabled'
 type SortOrder = 'asc' | 'desc'
 
@@ -1819,9 +1834,11 @@ const batchTestResultCounts = computed(() => {
   const success = items.filter(item => item.status === 'success').length
   const skipped = items.filter(batchTestIsSkipped).length
   const failed = items.filter(batchTestIsFailed).length
+  const failedSchedulable = items.filter(batchTestIsFailedSchedulable).length
   return {
     all: items.length,
     failed,
+    failedSchedulable,
     success,
     skipped
   }
@@ -1831,6 +1848,7 @@ const batchTestFilterOptions = computed(() => {
   return [
     { value: 'all' as const, label: t('common.all'), count: counts.all },
     { value: 'failed' as const, label: t('admin.upstreamAccounts.batchTestFailed'), count: counts.failed },
+    { value: 'failed_schedulable' as const, label: t('admin.upstreamAccounts.batchTestFailedSchedulable'), count: counts.failedSchedulable },
     { value: 'success' as const, label: t('admin.upstreamAccounts.batchTestSuccess'), count: counts.success },
     { value: 'skipped' as const, label: t('admin.upstreamAccounts.batchTestSkipped'), count: counts.skipped }
   ]
@@ -1839,6 +1857,7 @@ const batchTestFilteredItems = computed<BatchAccountTestItem[]>(() => {
   const filter = batchTestResultFilter.value
   if (filter === 'success') return batchTestResultItems.value.filter(item => item.status === 'success')
   if (filter === 'failed') return batchTestResultItems.value.filter(batchTestIsFailed)
+  if (filter === 'failed_schedulable') return batchTestResultItems.value.filter(batchTestIsFailedSchedulable)
   if (filter === 'skipped') return batchTestResultItems.value.filter(batchTestIsSkipped)
   return batchTestResultItems.value
 })
@@ -2040,9 +2059,10 @@ function orderBatchTestItemsFailureFirst(items: BatchAccountTestItem[]) {
 }
 
 function batchTestResultPriority(item: BatchAccountTestItem) {
-  if (batchTestIsFailed(item)) return 0
-  if (batchTestIsSkipped(item)) return 1
-  return 2
+  if (batchTestIsFailedSchedulable(item)) return 0
+  if (batchTestIsFailed(item)) return 1
+  if (batchTestIsSkipped(item)) return 2
+  return 3
 }
 
 function batchTestIsSkipped(item: BatchAccountTestItem) {
@@ -2051,6 +2071,10 @@ function batchTestIsSkipped(item: BatchAccountTestItem) {
 
 function batchTestIsFailed(item: BatchAccountTestItem) {
   return item.status !== 'success' && !batchTestIsSkipped(item)
+}
+
+function batchTestIsFailedSchedulable(item: BatchAccountTestItem) {
+  return batchTestIsFailed(item) && batchTestItemSchedulable(item)
 }
 
 function toggleBatchTestSort(key: BatchTestSortKey) {
@@ -5141,12 +5165,41 @@ onBeforeUnmount(() => {
   background: #7c3aed;
 }
 
+.batch-result-card.failed-schedulable {
+  border-color: #fdba74;
+  background: #fff7ed;
+}
+
+.batch-result-card.failed-schedulable::before {
+  background: #ea580c;
+}
+
 .batch-result-card-head {
   display: flex;
   min-width: 0;
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
+}
+
+.batch-result-card-status,
+.batch-test-status-cell {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.batch-result-card-status {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+
+.batch-risk-tag {
+  border: 1px solid #fed7aa;
+  background: #fff7ed;
+  color: #c2410c;
 }
 
 .batch-result-account {
@@ -5404,6 +5457,14 @@ onBeforeUnmount(() => {
 
 .records-table tbody tr:hover {
   background: #f8fafc;
+}
+
+.batch-test-table tr.batch-test-risk-row td {
+  background: #fff7ed;
+}
+
+.batch-test-table tr.batch-test-risk-row:hover td {
+  background: #ffedd5;
 }
 
 .records-row-handled {
