@@ -830,7 +830,7 @@
         min-width: 0;
       }
       .view-group {
-        justify-content: flex-start;
+        display: none;
       }
       .select-menu {
         left: 0 !important;
@@ -843,15 +843,27 @@
       .select-options {
         grid-template-columns: 1fr;
       }
+      .panel {
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+        overflow: visible;
+      }
+      .table-shell {
+        display: none;
+      }
       .card-grid {
+        display: grid;
         grid-template-columns: minmax(0, 1fr);
-        gap: 0;
+        gap: 10px;
+        padding: 10px;
       }
       .monitor-card {
         width: 100%;
-        padding: 20px 14px;
-        border-inline: 0;
-        border-radius: 0;
+        min-height: auto;
+        padding: 15px 14px 14px;
+        border-radius: 8px;
       }
       .card-main {
         grid-template-columns: 40px minmax(0, 1fr);
@@ -882,11 +894,11 @@
       .card-trend {
         grid-template-columns: repeat(9, minmax(0, 1fr));
       }
+      .card-trend .trend-bar {
+        height: 28px;
+      }
       .trend-tooltip {
         display: none;
-      }
-      .table-shell {
-        border-radius: 0;
       }
       table,
       body.compact-view table {
@@ -1078,6 +1090,22 @@
       filterSummary: document.getElementById('filterSummary'),
       lastRefresh: document.getElementById('lastRefresh')
     };
+
+    const mobileCardsMediaQuery = window.matchMedia('(max-width: 640px)');
+
+    function effectiveViewMode() {
+      return mobileCardsMediaQuery.matches ? 'grid' : state.view;
+    }
+
+    function syncViewMode() {
+      const view = effectiveViewMode();
+      document.body.classList.toggle('grid-view', view === 'grid');
+      document.querySelectorAll('.view-btn').forEach((btn) => {
+        const active = btn.dataset.view === view;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+    }
 
     function pickValue(source, keys, fallback = undefined) {
       for (const key of keys) {
@@ -2011,10 +2039,8 @@
 
       document.querySelectorAll('.view-btn').forEach((btn) => {
         btn.addEventListener('click', () => {
-          document.querySelectorAll('.view-btn').forEach((el) => el.classList.remove('active'));
-          btn.classList.add('active');
           state.view = btn.dataset.view || 'list';
-          document.body.classList.toggle('grid-view', state.view === 'grid');
+          syncViewMode();
           renderTable();
         });
       });
@@ -2036,6 +2062,11 @@
 
       document.addEventListener('click', () => closeAllSelects());
       window.addEventListener('blur', () => closeAllSelects());
+      if (typeof mobileCardsMediaQuery.addEventListener === 'function') {
+        mobileCardsMediaQuery.addEventListener('change', syncViewMode);
+      } else if (typeof mobileCardsMediaQuery.addListener === 'function') {
+        mobileCardsMediaQuery.addListener(syncViewMode);
+      }
     }
 
     function updateAutoRefresh() {
@@ -2054,6 +2085,7 @@
       bindCustomSelects();
       bindEvents();
       syncAllSelects();
+      syncViewMode();
       loadStatusData();
       updateAutoRefresh();
     }
