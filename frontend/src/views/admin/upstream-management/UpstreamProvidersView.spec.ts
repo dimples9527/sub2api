@@ -39,6 +39,11 @@ const { adminAPIMock } = vi.hoisted(() => ({
       updateBalanceSamplerConfig: vi.fn(),
       addBalanceRecharge: vi.fn(),
       runBalanceSampleNow: vi.fn(),
+      getHealthGuardConfig: vi.fn(),
+      updateHealthGuardConfig: vi.fn(),
+      runHealthGuardNow: vi.fn(),
+      getHealthGuardRecords: vi.fn(),
+      getHealthGuardPollLogs: vi.fn(),
     },
   },
 }))
@@ -105,6 +110,68 @@ describe('UpstreamProvidersView', () => {
       interval_seconds: 3600,
       provider_amount_scales: {},
     })
+    adminAPIMock.upstreamAccountSync.getHealthGuardConfig.mockResolvedValue({
+      enabled: false,
+      interval_seconds: 3600,
+      max_accounts_per_run: 200,
+      concurrency: 3,
+      timeout_per_account_seconds: 90,
+      failure_threshold: 3,
+      slow_threshold: 3,
+      recovery_threshold: 2,
+      healthy_latency_ms: 15000,
+      platform_models: {},
+      platform_latency_ms: {},
+    })
+    adminAPIMock.upstreamAccountSync.updateHealthGuardConfig.mockResolvedValue({
+      enabled: false,
+      interval_seconds: 3600,
+      max_accounts_per_run: 200,
+      concurrency: 3,
+      timeout_per_account_seconds: 90,
+      failure_threshold: 3,
+      slow_threshold: 3,
+      recovery_threshold: 2,
+      healthy_latency_ms: 15000,
+      platform_models: {},
+      platform_latency_ms: {},
+    })
+    adminAPIMock.upstreamAccountSync.runHealthGuardNow.mockResolvedValue({
+      config: {
+        enabled: false,
+        interval_seconds: 3600,
+        max_accounts_per_run: 200,
+        concurrency: 3,
+        timeout_per_account_seconds: 90,
+        failure_threshold: 3,
+        slow_threshold: 3,
+        recovery_threshold: 2,
+        healthy_latency_ms: 15000,
+        platform_models: {},
+        platform_latency_ms: {},
+      },
+      record: {
+        id: 'run-1',
+        trigger: 'manual',
+        status: 'success',
+        started_at: '2026-07-05T00:00:00Z',
+        finished_at: '2026-07-05T00:00:01Z',
+        summary: {
+          total_accounts: 1,
+          checked_count: 1,
+          healthy_count: 1,
+          slow_count: 0,
+          failed_count: 0,
+          skipped_count: 0,
+          disabled_count: 0,
+          recovered_count: 0,
+          unchanged_count: 1,
+        },
+        items: [],
+      },
+    })
+    adminAPIMock.upstreamAccountSync.getHealthGuardRecords.mockResolvedValue([])
+    adminAPIMock.upstreamAccountSync.getHealthGuardPollLogs.mockResolvedValue([])
   })
 
   it('accepts 0.1 as an account rate conversion factor', async () => {
@@ -786,6 +853,90 @@ describe('UpstreamProvidersView', () => {
         'new-main': 1,
       },
     })
+  })
+
+  it('opens health guard settings from the main toolbar and saves platform rules', async () => {
+    adminAPIMock.upstreamAccountSync.getHealthGuardConfig.mockResolvedValueOnce({
+      enabled: true,
+      interval_seconds: 1800,
+      max_accounts_per_run: 120,
+      concurrency: 2,
+      timeout_per_account_seconds: 60,
+      failure_threshold: 3,
+      slow_threshold: 2,
+      recovery_threshold: 2,
+      healthy_latency_ms: 12000,
+      platform_models: { anthropic: 'claude-3-5-haiku-latest' },
+      platform_latency_ms: { anthropic: 16000 },
+    })
+    adminAPIMock.upstreamAccountSync.getHealthGuardRecords.mockResolvedValueOnce([])
+    adminAPIMock.upstreamAccountSync.updateHealthGuardConfig.mockResolvedValueOnce({
+      enabled: false,
+      interval_seconds: 2400,
+      max_accounts_per_run: 120,
+      concurrency: 2,
+      timeout_per_account_seconds: 60,
+      failure_threshold: 3,
+      slow_threshold: 2,
+      recovery_threshold: 2,
+      healthy_latency_ms: 12000,
+      platform_models: { anthropic: 'claude-3-5-haiku-latest' },
+      platform_latency_ms: { anthropic: 16000 },
+    })
+
+    const wrapper = mount(UpstreamProvidersView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: { template: '<div />' },
+          BaseDialog: {
+            props: ['show', 'title'],
+            template: '<div v-if="show" class="dialog"><h2>{{ title }}</h2><slot /><slot name="footer" /></div>',
+          },
+          ConfirmDialog: true,
+          EmptyState: true,
+          Icon: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const settingsButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('admin.upstreamProviders.healthGuardSettings'))
+    expect(settingsButton).toBeTruthy()
+
+    await settingsButton!.trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.find('.health-guard-dialog')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.text()).toContain('admin.upstreamProviders.healthGuardAutoRun')
+    expect(dialog.text()).toContain('Anthropic')
+
+    const autoRun = dialog.find('input[type="checkbox"]')
+    await autoRun.setValue(false)
+    const interval = dialog.findAll('input[type="number"]')[0]
+    await interval.setValue('2400')
+
+    const saveButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('common.save'))
+    expect(saveButton).toBeTruthy()
+
+    await saveButton!.trigger('click')
+    await flushPromises()
+
+    expect(adminAPIMock.upstreamAccountSync.updateHealthGuardConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        enabled: false,
+        interval_seconds: 2400,
+        platform_models: { anthropic: 'claude-3-5-haiku-latest' },
+        platform_latency_ms: { anthropic: 16000 },
+      })
+    )
   })
 
   it('offers existing URLs as datalist choices in provider form', async () => {

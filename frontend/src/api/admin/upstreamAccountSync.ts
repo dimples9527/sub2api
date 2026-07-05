@@ -237,6 +237,83 @@ export interface UpstreamBalanceSamplerPollLog {
   message?: string
 }
 
+export interface UpstreamAccountHealthGuardConfig {
+  enabled: boolean
+  interval_seconds: number
+  max_accounts_per_run: number
+  concurrency: number
+  timeout_per_account_seconds: number
+  failure_threshold: number
+  slow_threshold: number
+  recovery_threshold: number
+  healthy_latency_ms: number
+  platform_models?: Record<string, string>
+  platform_latency_ms?: Record<string, number>
+  last_run_at?: string
+  last_run_status?: string
+  last_run_message?: string
+  cursor_account_id?: number
+  updated_at?: string
+}
+
+export interface UpstreamAccountHealthGuardRunSummary {
+  total_accounts: number
+  checked_count: number
+  healthy_count: number
+  slow_count: number
+  failed_count: number
+  skipped_count: number
+  disabled_count: number
+  recovered_count: number
+  unchanged_count: number
+}
+
+export interface UpstreamAccountHealthGuardRunItem {
+  account_id: number
+  account_name: string
+  platform: string
+  provider_slug: string
+  provider_name: string
+  model_id?: string
+  schedulable_before: boolean
+  schedulable_after: boolean
+  status: 'healthy' | 'slow' | 'failed' | string
+  test_status?: string
+  latency_ms: number
+  latency_limit_ms: number
+  consecutive_failed: number
+  consecutive_slow: number
+  consecutive_healthy: number
+  action: 'none' | 'disabled' | 'recovered' | string
+  reason?: string
+  error_message?: string
+  started_at: string
+  finished_at: string
+}
+
+export interface UpstreamAccountHealthGuardRunRecord {
+  id: string
+  trigger: 'scheduled' | 'manual' | string
+  status: 'success' | 'failed' | string
+  message?: string
+  started_at: string
+  finished_at: string
+  summary: UpstreamAccountHealthGuardRunSummary
+  items: UpstreamAccountHealthGuardRunItem[]
+}
+
+export interface UpstreamAccountHealthGuardRunResponse {
+  config: UpstreamAccountHealthGuardConfig
+  record: UpstreamAccountHealthGuardRunRecord
+}
+
+export interface UpstreamAccountHealthGuardPollLog {
+  checked_at: string
+  trigger: 'scheduled' | 'manual' | string
+  status: 'success' | 'failed' | 'skipped' | string
+  message?: string
+}
+
 export async function getPreview(): Promise<UpstreamAccountSyncResult> {
   const { data } = await apiClient.get<UpstreamAccountSyncResult>(
     '/admin/upstream-management/accounts/sync-preview'
@@ -348,6 +425,44 @@ export async function getBalanceSamplerPollLogs(): Promise<UpstreamBalanceSample
   return data
 }
 
+export async function getHealthGuardConfig(): Promise<UpstreamAccountHealthGuardConfig> {
+  const { data } = await apiClient.get<UpstreamAccountHealthGuardConfig>(
+    '/admin/upstream-management/providers/health-guard/config'
+  )
+  return data
+}
+
+export async function updateHealthGuardConfig(
+  payload: UpstreamAccountHealthGuardConfig
+): Promise<UpstreamAccountHealthGuardConfig> {
+  const { data } = await apiClient.put<UpstreamAccountHealthGuardConfig>(
+    '/admin/upstream-management/providers/health-guard/config',
+    payload
+  )
+  return data
+}
+
+export async function runHealthGuardNow(): Promise<UpstreamAccountHealthGuardRunResponse> {
+  const { data } = await apiClient.post<UpstreamAccountHealthGuardRunResponse>(
+    '/admin/upstream-management/providers/health-guard/runs'
+  )
+  return data
+}
+
+export async function getHealthGuardRecords(): Promise<UpstreamAccountHealthGuardRunRecord[]> {
+  const { data } = await apiClient.get<UpstreamAccountHealthGuardRunRecord[]>(
+    '/admin/upstream-management/providers/health-guard/records'
+  )
+  return data
+}
+
+export async function getHealthGuardPollLogs(): Promise<UpstreamAccountHealthGuardPollLog[]> {
+  const { data } = await apiClient.get<UpstreamAccountHealthGuardPollLog[]>(
+    '/admin/upstream-management/providers/health-guard/poll-logs'
+  )
+  return data
+}
+
 export const upstreamAccountSyncAPI = {
   getPreview,
   runSync,
@@ -362,7 +477,12 @@ export const upstreamAccountSyncAPI = {
   updateBalanceSamplerConfig,
   addBalanceRecharge,
   runBalanceSampleNow,
-  getBalanceSamplerPollLogs
+  getBalanceSamplerPollLogs,
+  getHealthGuardConfig,
+  updateHealthGuardConfig,
+  runHealthGuardNow,
+  getHealthGuardRecords,
+  getHealthGuardPollLogs
 }
 
 export default upstreamAccountSyncAPI

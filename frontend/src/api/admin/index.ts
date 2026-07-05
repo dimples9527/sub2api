@@ -138,6 +138,12 @@ export type {
   UpstreamGroupRateFixRecord
 } from './upstreamManagement'
 export type {
+  UpstreamAccountHealthGuardConfig,
+  UpstreamAccountHealthGuardPollLog,
+  UpstreamAccountHealthGuardRunItem,
+  UpstreamAccountHealthGuardRunRecord,
+  UpstreamAccountHealthGuardRunResponse,
+  UpstreamAccountHealthGuardRunSummary,
   UpstreamAccountRateGuardConfig,
   UpstreamAccountRateGuardPollLog,
   UpstreamAccountSyncConflictAccount,

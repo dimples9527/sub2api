@@ -37,15 +37,42 @@ type upstreamBalanceSamplerScheduler interface {
 	ListPollLogs() []service.UpstreamBalanceSamplerPollLog
 }
 
+type upstreamAccountHealthGuardService interface {
+	GetConfig(ctx context.Context) (service.UpstreamAccountHealthGuardConfig, error)
+	UpdateConfig(ctx context.Context, input service.UpstreamAccountHealthGuardConfig) (service.UpstreamAccountHealthGuardConfig, error)
+	ListRecords(ctx context.Context) ([]service.UpstreamAccountHealthGuardRunRecord, error)
+}
+
+type upstreamAccountHealthGuardScheduler interface {
+	RunNow(ctx context.Context) (service.UpstreamAccountHealthGuardRunResponse, error)
+	ListPollLogs() []service.UpstreamAccountHealthGuardPollLog
+}
+
 type UpstreamAccountSyncHandler struct {
 	service          upstreamAccountSyncService
 	scheduler        upstreamAccountRateGuardScheduler
 	balance          upstreamBalanceConsumptionService
 	balanceScheduler upstreamBalanceSamplerScheduler
+	healthGuard      upstreamAccountHealthGuardService
+	healthScheduler  upstreamAccountHealthGuardScheduler
 }
 
-func NewUpstreamAccountSyncHandler(service *service.UpstreamAccountSyncService, scheduler *service.UpstreamAccountRateGuardScheduler, balance *service.UpstreamBalanceConsumptionService, balanceScheduler *service.UpstreamBalanceSamplerScheduler) *UpstreamAccountSyncHandler {
-	return &UpstreamAccountSyncHandler{service: service, scheduler: scheduler, balance: balance, balanceScheduler: balanceScheduler}
+func NewUpstreamAccountSyncHandler(
+	service *service.UpstreamAccountSyncService,
+	scheduler *service.UpstreamAccountRateGuardScheduler,
+	balance *service.UpstreamBalanceConsumptionService,
+	balanceScheduler *service.UpstreamBalanceSamplerScheduler,
+	healthGuard *service.UpstreamAccountHealthGuardService,
+	healthScheduler *service.UpstreamAccountHealthGuardScheduler,
+) *UpstreamAccountSyncHandler {
+	return &UpstreamAccountSyncHandler{
+		service:          service,
+		scheduler:        scheduler,
+		balance:          balance,
+		balanceScheduler: balanceScheduler,
+		healthGuard:      healthGuard,
+		healthScheduler:  healthScheduler,
+	}
 }
 
 func newUpstreamAccountSyncHandlerWithService(service upstreamAccountSyncService) *UpstreamAccountSyncHandler {
@@ -54,14 +81,18 @@ func newUpstreamAccountSyncHandlerWithService(service upstreamAccountSyncService
 
 func newUpstreamAccountSyncHandlerWithDeps(service upstreamAccountSyncService, scheduler upstreamAccountRateGuardScheduler) *UpstreamAccountSyncHandler {
 	balance, _ := service.(upstreamBalanceConsumptionService)
-	return &UpstreamAccountSyncHandler{service: service, scheduler: scheduler, balance: balance}
+	healthGuard, _ := service.(upstreamAccountHealthGuardService)
+	healthScheduler, _ := service.(upstreamAccountHealthGuardScheduler)
+	return &UpstreamAccountSyncHandler{service: service, scheduler: scheduler, balance: balance, healthGuard: healthGuard, healthScheduler: healthScheduler}
 }
 
 func newUpstreamAccountSyncHandlerWithAllDeps(service upstreamAccountSyncService, scheduler upstreamAccountRateGuardScheduler, balance upstreamBalanceConsumptionService, balanceScheduler upstreamBalanceSamplerScheduler) *UpstreamAccountSyncHandler {
 	if balance == nil {
 		balance, _ = service.(upstreamBalanceConsumptionService)
 	}
-	return &UpstreamAccountSyncHandler{service: service, scheduler: scheduler, balance: balance, balanceScheduler: balanceScheduler}
+	healthGuard, _ := service.(upstreamAccountHealthGuardService)
+	healthScheduler, _ := service.(upstreamAccountHealthGuardScheduler)
+	return &UpstreamAccountSyncHandler{service: service, scheduler: scheduler, balance: balance, balanceScheduler: balanceScheduler, healthGuard: healthGuard, healthScheduler: healthScheduler}
 }
 
 func (h *UpstreamAccountSyncHandler) Preview(c *gin.Context) {
@@ -242,4 +273,69 @@ func (h *UpstreamAccountSyncHandler) BalanceSamplerPollLogs(c *gin.Context) {
 		return
 	}
 	response.Success(c, h.balanceScheduler.ListPollLogs())
+}
+
+func (h *UpstreamAccountSyncHandler) GetHealthGuardConfig(c *gin.Context) {
+	if h.healthGuard == nil {
+		response.ErrorFrom(c, infraerrors.ServiceUnavailable("UPSTREAM_ACCOUNT_HEALTH_GUARD_UNAVAILABLE", "upstream account health guard service is unavailable"))
+		return
+	}
+	result, err := h.healthGuard.GetConfig(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *UpstreamAccountSyncHandler) UpdateHealthGuardConfig(c *gin.Context) {
+	if h.healthGuard == nil {
+		response.ErrorFrom(c, infraerrors.ServiceUnavailable("UPSTREAM_ACCOUNT_HEALTH_GUARD_UNAVAILABLE", "upstream account health guard service is unavailable"))
+		return
+	}
+	var input service.UpstreamAccountHealthGuardConfig
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	result, err := h.healthGuard.UpdateConfig(c.Request.Context(), input)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *UpstreamAccountSyncHandler) RunHealthGuardNow(c *gin.Context) {
+	if h.healthScheduler == nil {
+		response.ErrorFrom(c, infraerrors.ServiceUnavailable("UPSTREAM_ACCOUNT_HEALTH_GUARD_UNAVAILABLE", "upstream account health guard scheduler is unavailable"))
+		return
+	}
+	result, err := h.healthScheduler.RunNow(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *UpstreamAccountSyncHandler) HealthGuardRecords(c *gin.Context) {
+	if h.healthGuard == nil {
+		response.Success(c, []service.UpstreamAccountHealthGuardRunRecord{})
+		return
+	}
+	result, err := h.healthGuard.ListRecords(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *UpstreamAccountSyncHandler) HealthGuardPollLogs(c *gin.Context) {
+	if h.healthScheduler == nil {
+		response.Success(c, []service.UpstreamAccountHealthGuardPollLog{})
+		return
+	}
+	response.Success(c, h.healthScheduler.ListPollLogs())
 }

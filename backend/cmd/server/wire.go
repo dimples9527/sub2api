@@ -105,6 +105,7 @@ func provideCleanup(
 	upstreamAccountSyncPreviewScheduler *service.UpstreamAccountSyncPreviewScheduler,
 	upstreamAccountRateGuardScheduler *service.UpstreamAccountRateGuardScheduler,
 	upstreamBalanceSamplerScheduler *service.UpstreamBalanceSamplerScheduler,
+	upstreamAccountHealthGuardScheduler *service.UpstreamAccountHealthGuardScheduler,
 ) func() {
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -290,6 +291,12 @@ func provideCleanup(
 			{"UpstreamBalanceSamplerScheduler", func() error {
 				if upstreamBalanceSamplerScheduler != nil {
 					upstreamBalanceSamplerScheduler.Stop()
+				}
+				return nil
+			}},
+			{"UpstreamAccountHealthGuardScheduler", func() error {
+				if upstreamAccountHealthGuardScheduler != nil {
+					upstreamAccountHealthGuardScheduler.Stop()
 				}
 				return nil
 			}},

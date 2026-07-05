@@ -38,6 +38,25 @@
                 <Icon name="cog" size="sm" />
                 <span>{{ t('admin.upstreamProviders.balanceSamplerSettings') }}</span>
               </button>
+              <button
+                type="button"
+                class="btn btn-secondary upstream-toolbar-action upstream-health-run-action"
+                :disabled="runningHealthGuardNow"
+                :title="t('admin.upstreamProviders.healthGuardRunNow')"
+                @click="runHealthGuardNow"
+              >
+                <Icon name="shield" size="sm" :class="runningHealthGuardNow ? 'animate-pulse' : ''" />
+                <span>{{ t('admin.upstreamProviders.healthGuardRunNow') }}</span>
+              </button>
+              <button
+                type="button"
+                class="btn btn-secondary upstream-toolbar-action upstream-health-settings-action"
+                :title="t('admin.upstreamProviders.healthGuardSettings')"
+                @click="openHealthGuardDialog"
+              >
+                <Icon name="cog" size="sm" />
+                <span>{{ t('admin.upstreamProviders.healthGuardSettings') }}</span>
+              </button>
             </div>
           </div>
 
@@ -524,6 +543,167 @@
           </button>
           <button type="button" class="btn btn-primary" :disabled="savingBalanceSamplerConfig" @click="saveBalanceSamplerConfig">
             {{ savingBalanceSamplerConfig ? t('common.saving') : t('common.save') }}
+          </button>
+        </div>
+      </template>
+    </BaseDialog>
+
+    <BaseDialog
+      :show="showHealthGuardDialog"
+      :title="t('admin.upstreamProviders.healthGuardSettings')"
+      width="wide"
+      @close="closeHealthGuardDialog"
+    >
+      <div class="health-guard-dialog">
+        <div class="health-guard-status-panel">
+          <label class="health-guard-toggle">
+            <input
+              v-model="healthGuardForm.enabled"
+              type="checkbox"
+              class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+            />
+            <span>
+              <strong>{{ t('admin.upstreamProviders.healthGuardAutoRun') }}</strong>
+              <small>{{ t('admin.upstreamProviders.healthGuardScopeHint') }}</small>
+            </span>
+          </label>
+
+          <div class="health-guard-run-state">
+            <span>{{ t('admin.upstreamProviders.healthGuardLastRun') }}</span>
+            <strong>{{ healthGuardLastRunText }}</strong>
+            <em
+              v-if="healthGuardConfig?.last_run_status"
+              :class="['record-status', healthGuardConfig.last_run_status === 'failed' ? 'record-status-error' : 'record-status-success']"
+            >
+              {{ healthGuardStatusLabel(healthGuardConfig.last_run_status) }}
+            </em>
+          </div>
+
+          <button
+            type="button"
+            class="btn btn-secondary health-guard-run-button"
+            :disabled="runningHealthGuardNow || loadingHealthGuard"
+            @click="runHealthGuardNow"
+          >
+            <Icon name="play" size="sm" :class="runningHealthGuardNow ? 'animate-pulse' : ''" />
+            {{ t('admin.upstreamProviders.healthGuardRunNow') }}
+          </button>
+        </div>
+
+        <div class="health-guard-config-grid">
+          <label class="health-guard-field">
+            <span>{{ t('admin.upstreamProviders.healthGuardIntervalSeconds') }}</span>
+            <input v-model.number="healthGuardForm.interval_seconds" type="number" min="60" step="60" class="input" />
+          </label>
+          <label class="health-guard-field">
+            <span>{{ t('admin.upstreamProviders.healthGuardMaxAccounts') }}</span>
+            <input v-model.number="healthGuardForm.max_accounts_per_run" type="number" min="1" max="1000" step="1" class="input" />
+          </label>
+          <label class="health-guard-field">
+            <span>{{ t('admin.upstreamProviders.healthGuardConcurrency') }}</span>
+            <input v-model.number="healthGuardForm.concurrency" type="number" min="1" max="8" step="1" class="input" />
+          </label>
+          <label class="health-guard-field">
+            <span>{{ t('admin.upstreamProviders.healthGuardTimeout') }}</span>
+            <input v-model.number="healthGuardForm.timeout_per_account_seconds" type="number" min="5" max="300" step="5" class="input" />
+          </label>
+          <label class="health-guard-field">
+            <span>{{ t('admin.upstreamProviders.healthGuardFailureThreshold') }}</span>
+            <input v-model.number="healthGuardForm.failure_threshold" type="number" min="1" step="1" class="input" />
+          </label>
+          <label class="health-guard-field">
+            <span>{{ t('admin.upstreamProviders.healthGuardSlowThreshold') }}</span>
+            <input v-model.number="healthGuardForm.slow_threshold" type="number" min="1" step="1" class="input" />
+          </label>
+          <label class="health-guard-field">
+            <span>{{ t('admin.upstreamProviders.healthGuardRecoveryThreshold') }}</span>
+            <input v-model.number="healthGuardForm.recovery_threshold" type="number" min="1" step="1" class="input" />
+          </label>
+          <label class="health-guard-field">
+            <span>{{ t('admin.upstreamProviders.healthGuardHealthyLatency') }}</span>
+            <input v-model.number="healthGuardForm.healthy_latency_ms" type="number" min="1" step="500" class="input" />
+          </label>
+        </div>
+
+        <div class="health-guard-platform-panel">
+          <div class="balance-section-title">{{ t('admin.upstreamProviders.healthGuardPlatformModels') }}</div>
+          <div class="health-guard-platform-list">
+            <label
+              v-for="platform in healthGuardPlatformOptions"
+              :key="platform.value"
+              class="health-guard-platform-row"
+            >
+              <span class="health-guard-platform-name">
+                <strong>{{ platform.label }}</strong>
+                <small>{{ t('admin.upstreamProviders.healthGuardPlatformHint') }}</small>
+              </span>
+              <input
+                v-model.trim="healthGuardForm.platform_models[platform.value]"
+                type="text"
+                class="input"
+                :placeholder="platform.placeholder"
+              />
+              <input
+                v-model.number="healthGuardForm.platform_latency_ms[platform.value]"
+                type="number"
+                min="1"
+                step="500"
+                class="input"
+                :placeholder="String(healthGuardForm.healthy_latency_ms || 15000)"
+              />
+            </label>
+          </div>
+        </div>
+
+        <div class="health-guard-record-panel">
+          <div class="health-guard-record-header">
+            <div class="balance-section-title">{{ t('admin.upstreamProviders.healthGuardRecentRuns') }}</div>
+            <button type="button" class="btn btn-secondary btn-sm" :disabled="loadingHealthGuard" @click="loadHealthGuardState">
+              {{ t('common.refresh') }}
+            </button>
+          </div>
+
+          <div class="health-guard-summary-grid">
+            <div v-for="card in healthGuardSummaryCards" :key="card.key" class="health-guard-summary-card" :class="card.tone">
+              <span>{{ card.label }}</span>
+              <strong>{{ card.value }}</strong>
+            </div>
+          </div>
+
+          <div class="health-guard-item-list">
+            <article
+              v-for="item in latestHealthGuardItems"
+              :key="`${item.account_id}-${item.finished_at}`"
+              class="health-guard-item-card"
+              :class="healthGuardItemClass(item.status)"
+            >
+              <div class="health-guard-item-main">
+                <strong>{{ item.account_name || `#${item.account_id}` }}</strong>
+                <span>{{ item.provider_name || item.provider_slug }} / {{ healthGuardPlatformLabel(item.platform) }}</span>
+              </div>
+              <div class="health-guard-item-metrics">
+                <span :class="['record-status', healthGuardStatusClass(item.status)]">
+                  {{ healthGuardStatusLabel(item.status) }}
+                </span>
+                <span>{{ formatLatencyMs(item.latency_ms) }} / {{ formatLatencyMs(item.latency_limit_ms) }}</span>
+                <span>{{ healthGuardActionLabel(item.action) }}</span>
+              </div>
+              <p v-if="item.reason || item.error_message">{{ item.reason || item.error_message }}</p>
+            </article>
+            <div v-if="!latestHealthGuardItems.length" class="health-guard-empty">
+              {{ t('admin.upstreamProviders.healthGuardNoRecords') }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <template #footer>
+        <div class="flex justify-end gap-3">
+          <button type="button" class="btn btn-secondary" :disabled="savingHealthGuardConfig" @click="closeHealthGuardDialog">
+            {{ t('common.cancel') }}
+          </button>
+          <button type="button" class="btn btn-primary" :disabled="savingHealthGuardConfig" @click="saveHealthGuardConfig">
+            {{ savingHealthGuardConfig ? t('common.saving') : t('common.save') }}
           </button>
         </div>
       </template>
@@ -1115,6 +1295,9 @@ import type {
   UpstreamProviderTestStage,
 } from '@/api/admin/upstreamProviders'
 import type {
+  UpstreamAccountHealthGuardConfig,
+  UpstreamAccountHealthGuardRunItem,
+  UpstreamAccountHealthGuardRunRecord,
   UpstreamBalanceConsumptionOverview,
   UpstreamBalanceDailyRow,
   UpstreamBalanceProviderSummary,
@@ -1146,6 +1329,10 @@ type UpstreamProviderTableRow = UpstreamProviderConfig & {
   today_consumption?: number
 }
 type QuickProviderFilterKey = 'all' | 'enabled' | 'disabled' | 'default' | 'balance_anomaly'
+type HealthGuardForm = UpstreamAccountHealthGuardConfig & {
+  platform_models: Record<string, string>
+  platform_latency_ms: Record<string, number>
+}
 
 const providers = ref<UpstreamProviderConfig[]>([])
 const loading = ref(false)
@@ -1170,6 +1357,10 @@ const testingDraft = ref(false)
 
 const showBalanceSamplerDialog = ref(false)
 const savingBalanceSamplerConfig = ref(false)
+const showHealthGuardDialog = ref(false)
+const loadingHealthGuard = ref(false)
+const savingHealthGuardConfig = ref(false)
+const runningHealthGuardNow = ref(false)
 
 const showTestDialog = ref(false)
 const testResult = ref<UpstreamProviderTestResult | null>(null)
@@ -1186,6 +1377,9 @@ const balanceSamplerForm = ref({
   interval_seconds: 3600,
   provider_amount_scales: {} as Record<string, number>,
 })
+const healthGuardConfig = ref<UpstreamAccountHealthGuardConfig | null>(null)
+const healthGuardRecords = ref<UpstreamAccountHealthGuardRunRecord[]>([])
+const healthGuardForm = ref<HealthGuardForm>(defaultHealthGuardForm())
 const rechargeForm = ref({
   amount: null as number | null,
   note: '',
@@ -1237,6 +1431,13 @@ const enabledFilterOptions = computed<SelectOption[]>(() => [
   { value: '', label: t('admin.upstreamProviders.allStatus') },
   { value: 'enabled', label: t('common.enabled') },
   { value: 'disabled', label: t('common.disabled') },
+])
+const healthGuardPlatformOptions = computed(() => [
+  { value: 'anthropic', label: 'Anthropic', placeholder: 'claude-3-5-haiku-latest' },
+  { value: 'openai', label: 'OpenAI', placeholder: 'gpt-4o-mini' },
+  { value: 'gemini', label: 'Gemini', placeholder: 'gemini-2.5-flash' },
+  { value: 'antigravity', label: 'Antigravity', placeholder: 'gemini-3-flash' },
+  { value: 'grok', label: 'Grok', placeholder: 'grok-3-mini' },
 ])
 const activeProviderFilterCount = computed(() => {
   let count = 0
@@ -1432,6 +1633,23 @@ const selectedBalanceProviderLabel = computed(() => {
   const summary = selectedBalanceSummary.value
   return provider?.name || summary?.provider_name || slug
 })
+const latestHealthGuardRecord = computed(() => healthGuardRecords.value[0])
+const latestHealthGuardItems = computed<UpstreamAccountHealthGuardRunItem[]>(() => latestHealthGuardRecord.value?.items || [])
+const healthGuardLastRunText = computed(() => {
+  const lastRun = healthGuardConfig.value?.last_run_at
+  return lastRun ? formatDateTime(lastRun) : t('admin.upstreamProviders.healthGuardNeverRun')
+})
+const healthGuardSummaryCards = computed(() => {
+  const summary = latestHealthGuardRecord.value?.summary
+  return [
+    { key: 'checked', label: t('admin.upstreamProviders.healthGuardChecked'), value: summary?.checked_count || 0, tone: '' },
+    { key: 'healthy', label: t('admin.upstreamProviders.healthGuardHealthy'), value: summary?.healthy_count || 0, tone: 'is-success' },
+    { key: 'slow', label: t('admin.upstreamProviders.healthGuardSlow'), value: summary?.slow_count || 0, tone: 'is-warning' },
+    { key: 'failed', label: t('admin.upstreamProviders.healthGuardFailed'), value: summary?.failed_count || 0, tone: 'is-danger' },
+    { key: 'disabled', label: t('admin.upstreamProviders.healthGuardDisabled'), value: summary?.disabled_count || 0, tone: 'is-danger' },
+    { key: 'recovered', label: t('admin.upstreamProviders.healthGuardRecovered'), value: summary?.recovered_count || 0, tone: 'is-success' },
+  ]
+})
 
 function resetForm() {
   Object.assign(form, {
@@ -1547,6 +1765,15 @@ function openBalanceSamplerDialog() {
 
 function closeBalanceSamplerDialog() {
   showBalanceSamplerDialog.value = false
+}
+
+async function openHealthGuardDialog() {
+  showHealthGuardDialog.value = true
+  await loadHealthGuardState()
+}
+
+function closeHealthGuardDialog() {
+  showHealthGuardDialog.value = false
 }
 
 async function submitForm() {
@@ -1682,6 +1909,103 @@ function applyBalanceSamplerConfig(config: UpstreamBalanceSamplerConfig) {
     enabled: Boolean(config.enabled),
     interval_seconds: Number(config.interval_seconds) > 0 ? Number(config.interval_seconds) : 3600,
     provider_amount_scales: { ...(config.provider_amount_scales || {}) },
+  }
+}
+
+function defaultHealthGuardForm(): HealthGuardForm {
+  return {
+    enabled: false,
+    interval_seconds: 3600,
+    max_accounts_per_run: 200,
+    concurrency: 3,
+    timeout_per_account_seconds: 90,
+    failure_threshold: 3,
+    slow_threshold: 3,
+    recovery_threshold: 2,
+    healthy_latency_ms: 15000,
+    platform_models: {},
+    platform_latency_ms: {},
+  }
+}
+
+function applyHealthGuardConfig(config: UpstreamAccountHealthGuardConfig) {
+  healthGuardConfig.value = config
+  healthGuardForm.value = {
+    ...defaultHealthGuardForm(),
+    ...config,
+    platform_models: { ...(config.platform_models || {}) },
+    platform_latency_ms: { ...(config.platform_latency_ms || {}) },
+  }
+}
+
+async function loadHealthGuardState() {
+  loadingHealthGuard.value = true
+  try {
+    const [config, records] = await Promise.all([
+      adminAPI.upstreamAccountSync.getHealthGuardConfig(),
+      adminAPI.upstreamAccountSync.getHealthGuardRecords(),
+    ])
+    applyHealthGuardConfig(config)
+    healthGuardRecords.value = records || []
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamProviders.healthGuardLoadFailed')))
+  } finally {
+    loadingHealthGuard.value = false
+  }
+}
+
+function buildHealthGuardPayload(): UpstreamAccountHealthGuardConfig {
+  const platformModels = Object.fromEntries(
+    Object.entries(healthGuardForm.value.platform_models || {})
+      .map(([platform, model]) => [platform, String(model || '').trim()])
+      .filter(([, model]) => model)
+  ) as Record<string, string>
+  const platformLatency = Object.fromEntries(
+    Object.entries(healthGuardForm.value.platform_latency_ms || {})
+      .map(([platform, latency]) => [platform, Math.floor(Number(latency) || 0)])
+      .filter(([, latency]) => Number(latency) > 0)
+  ) as Record<string, number>
+  return {
+    ...defaultHealthGuardForm(),
+    enabled: Boolean(healthGuardForm.value.enabled),
+    interval_seconds: Math.max(60, Math.floor(Number(healthGuardForm.value.interval_seconds) || 0)),
+    max_accounts_per_run: Math.max(1, Math.min(1000, Math.floor(Number(healthGuardForm.value.max_accounts_per_run) || 0))),
+    concurrency: Math.max(1, Math.min(8, Math.floor(Number(healthGuardForm.value.concurrency) || 0))),
+    timeout_per_account_seconds: Math.max(5, Math.min(300, Math.floor(Number(healthGuardForm.value.timeout_per_account_seconds) || 0))),
+    failure_threshold: Math.max(1, Math.floor(Number(healthGuardForm.value.failure_threshold) || 0)),
+    slow_threshold: Math.max(1, Math.floor(Number(healthGuardForm.value.slow_threshold) || 0)),
+    recovery_threshold: Math.max(1, Math.floor(Number(healthGuardForm.value.recovery_threshold) || 0)),
+    healthy_latency_ms: Math.max(1, Math.floor(Number(healthGuardForm.value.healthy_latency_ms) || 0)),
+    platform_models: platformModels,
+    platform_latency_ms: platformLatency,
+  }
+}
+
+async function saveHealthGuardConfig() {
+  savingHealthGuardConfig.value = true
+  try {
+    const config = await adminAPI.upstreamAccountSync.updateHealthGuardConfig(buildHealthGuardPayload())
+    applyHealthGuardConfig(config)
+    appStore.showSuccess(t('admin.upstreamProviders.healthGuardSaved'))
+    closeHealthGuardDialog()
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamProviders.healthGuardSaveFailed')))
+  } finally {
+    savingHealthGuardConfig.value = false
+  }
+}
+
+async function runHealthGuardNow() {
+  runningHealthGuardNow.value = true
+  try {
+    const response = await adminAPI.upstreamAccountSync.runHealthGuardNow()
+    applyHealthGuardConfig(response.config)
+    healthGuardRecords.value = [response.record, ...healthGuardRecords.value.filter(record => record.id !== response.record.id)].slice(0, 50)
+    appStore.showSuccess(t('admin.upstreamProviders.healthGuardRunSuccess'))
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamProviders.healthGuardRunFailed')))
+  } finally {
+    runningHealthGuardNow.value = false
   }
 }
 
@@ -2039,6 +2363,75 @@ function formatRateScale(value: number | undefined) {
   return Number.isFinite(n) && n > 0 ? `${n.toFixed(4)}x` : '1.0000x'
 }
 
+function formatLatencyMs(value: number | undefined) {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n <= 0) return '-'
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}s`
+  return `${Math.floor(n)}ms`
+}
+
+function healthGuardStatusLabel(status: string | undefined) {
+  switch (status) {
+    case 'success':
+      return t('common.success')
+    case 'healthy':
+      return t('admin.upstreamProviders.healthGuardHealthy')
+    case 'slow':
+      return t('admin.upstreamProviders.healthGuardSlow')
+    case 'failed':
+      return t('admin.upstreamProviders.healthGuardFailed')
+    case 'skipped':
+      return t('admin.upstreamProviders.healthGuardSkipped')
+    default:
+      return status || '-'
+  }
+}
+
+function healthGuardStatusClass(status: string | undefined) {
+  switch (status) {
+    case 'success':
+    case 'healthy':
+      return 'record-status-success'
+    case 'slow':
+      return 'record-status-warning'
+    case 'failed':
+      return 'record-status-error'
+    default:
+      return 'record-status-muted'
+  }
+}
+
+function healthGuardItemClass(status: string | undefined) {
+  switch (status) {
+    case 'healthy':
+      return 'is-healthy'
+    case 'slow':
+      return 'is-slow'
+    case 'failed':
+      return 'is-failed'
+    default:
+      return ''
+  }
+}
+
+function healthGuardActionLabel(action: string | undefined) {
+  switch (action) {
+    case 'disabled':
+      return t('admin.upstreamProviders.healthGuardActionDisabled')
+    case 'recovered':
+      return t('admin.upstreamProviders.healthGuardActionRecovered')
+    case 'none':
+      return t('admin.upstreamProviders.healthGuardActionNone')
+    default:
+      return action || '-'
+  }
+}
+
+function healthGuardPlatformLabel(platform: string | undefined) {
+  const normalized = String(platform || '').toLowerCase()
+  return healthGuardPlatformOptions.value.find(option => option.value === normalized)?.label || platform || '-'
+}
+
 function testStages(result: UpstreamProviderTestResult) {
   const stages: Array<{ key: string; label: string; stage: UpstreamProviderTestStage }> = [
     { key: 'login', label: t('admin.upstreamProviders.stageLogin'), stage: result.login },
@@ -2096,6 +2489,14 @@ onMounted(reload)
 }
 
 .upstream-sampler-settings-action {
+  @apply inline-flex items-center gap-2;
+}
+
+.upstream-health-run-action {
+  @apply inline-flex items-center gap-2 border-sky-200 bg-sky-50 text-sky-700 hover:border-sky-300 hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300 dark:hover:bg-sky-900/50;
+}
+
+.upstream-health-settings-action {
   @apply inline-flex items-center gap-2;
 }
 
@@ -2763,6 +3164,190 @@ onMounted(reload)
   @apply px-4 py-8 text-center text-sm text-gray-400;
 }
 
+.health-guard-dialog {
+  @apply space-y-5;
+}
+
+.health-guard-status-panel {
+  @apply grid gap-3 md:grid-cols-[minmax(0,1fr)_14rem_auto];
+}
+
+.health-guard-toggle,
+.health-guard-run-state {
+  @apply flex min-h-14 items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 dark:border-dark-600 dark:bg-dark-900/40 dark:text-gray-200;
+}
+
+.health-guard-toggle span {
+  @apply min-w-0;
+}
+
+.health-guard-toggle strong,
+.health-guard-run-state strong {
+  @apply block text-sm font-semibold text-gray-950 dark:text-white;
+}
+
+.health-guard-toggle small,
+.health-guard-run-state span {
+  @apply mt-0.5 block text-xs text-gray-500 dark:text-gray-400;
+}
+
+.health-guard-run-state {
+  @apply flex-wrap justify-between;
+}
+
+.health-guard-run-state em {
+  @apply not-italic;
+}
+
+.health-guard-run-button {
+  @apply inline-flex min-h-14 items-center justify-center gap-2 rounded-lg;
+}
+
+.health-guard-config-grid {
+  @apply grid gap-3 md:grid-cols-4;
+}
+
+.health-guard-field {
+  @apply min-w-0 rounded-lg border border-gray-200 bg-white p-3 dark:border-dark-600 dark:bg-dark-800/70;
+}
+
+.health-guard-field span {
+  @apply mb-2 block text-xs font-semibold text-gray-500 dark:text-gray-400;
+}
+
+.health-guard-field .input {
+  @apply h-9 text-right font-mono text-sm;
+}
+
+.health-guard-platform-panel,
+.health-guard-record-panel {
+  @apply rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800/70;
+}
+
+.health-guard-platform-list {
+  @apply mt-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200 dark:divide-dark-700 dark:border-dark-600;
+}
+
+.health-guard-platform-row {
+  @apply grid min-h-16 grid-cols-[minmax(0,1fr)_minmax(10rem,14rem)_8rem] items-center gap-3 bg-white px-3 py-2 dark:bg-dark-800;
+}
+
+.health-guard-platform-name {
+  @apply min-w-0;
+}
+
+.health-guard-platform-name strong {
+  @apply block truncate text-sm font-semibold text-gray-950 dark:text-white;
+}
+
+.health-guard-platform-name small {
+  @apply block truncate text-xs text-gray-500 dark:text-gray-400;
+}
+
+.health-guard-platform-row .input {
+  @apply h-9 text-sm;
+}
+
+.health-guard-platform-row .input:last-child {
+  @apply text-right font-mono;
+}
+
+.health-guard-record-header {
+  @apply mb-3 flex items-center justify-between gap-3;
+}
+
+.health-guard-summary-grid {
+  @apply grid grid-cols-3 gap-2 md:grid-cols-6;
+}
+
+.health-guard-summary-card {
+  @apply rounded-md border border-gray-200 bg-gray-50 px-3 py-2 dark:border-dark-600 dark:bg-dark-900/40;
+}
+
+.health-guard-summary-card span {
+  @apply block truncate text-xs font-medium text-gray-500 dark:text-gray-400;
+}
+
+.health-guard-summary-card strong {
+  @apply mt-1 block font-mono text-lg text-gray-950 dark:text-white;
+}
+
+.health-guard-summary-card.is-success strong {
+  @apply text-emerald-600 dark:text-emerald-300;
+}
+
+.health-guard-summary-card.is-warning strong {
+  @apply text-amber-600 dark:text-amber-300;
+}
+
+.health-guard-summary-card.is-danger strong {
+  @apply text-red-600 dark:text-red-300;
+}
+
+.health-guard-item-list {
+  @apply mt-3 max-h-80 space-y-2 overflow-auto;
+}
+
+.health-guard-item-card {
+  @apply rounded-lg border border-gray-200 bg-white p-3 dark:border-dark-600 dark:bg-dark-800;
+}
+
+.health-guard-item-card.is-healthy {
+  @apply border-emerald-200 bg-emerald-50/40 dark:border-emerald-900/70 dark:bg-emerald-950/20;
+}
+
+.health-guard-item-card.is-slow {
+  @apply border-amber-200 bg-amber-50/50 dark:border-amber-900/70 dark:bg-amber-950/20;
+}
+
+.health-guard-item-card.is-failed {
+  @apply border-red-200 bg-red-50/50 dark:border-red-900/70 dark:bg-red-950/20;
+}
+
+.health-guard-item-main {
+  @apply flex min-w-0 flex-wrap items-baseline justify-between gap-2;
+}
+
+.health-guard-item-main strong {
+  @apply min-w-0 truncate text-sm font-semibold text-gray-950 dark:text-white;
+}
+
+.health-guard-item-main span {
+  @apply min-w-0 truncate text-xs text-gray-500 dark:text-gray-400;
+}
+
+.health-guard-item-metrics {
+  @apply mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-300;
+}
+
+.health-guard-item-card p {
+  @apply mt-2 break-words text-xs text-gray-600 dark:text-gray-300;
+}
+
+.health-guard-empty {
+  @apply rounded-lg border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-gray-400 dark:border-dark-600;
+}
+
+.record-status {
+  @apply inline-flex items-center rounded-md px-2 py-1 text-xs font-semibold ring-1;
+}
+
+.record-status-success {
+  @apply bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-800/60;
+}
+
+.record-status-warning {
+  @apply bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-800/60;
+}
+
+.record-status-error {
+  @apply bg-red-50 text-red-700 ring-red-200 dark:bg-red-950/40 dark:text-red-300 dark:ring-red-800/60;
+}
+
+.record-status-muted {
+  @apply bg-gray-100 text-gray-600 ring-gray-200 dark:bg-dark-700 dark:text-gray-300 dark:ring-dark-600;
+}
+
 .balance-recharge-form {
   @apply mt-3 grid gap-3 md:grid-cols-[12rem_1fr_auto];
 }
@@ -2820,7 +3405,9 @@ onMounted(reload)
   }
 
   .upstream-sample-action,
-  .upstream-sampler-settings-action {
+  .upstream-sampler-settings-action,
+  .upstream-health-run-action,
+  .upstream-health-settings-action {
     width: auto;
   }
 
@@ -3060,6 +3647,36 @@ onMounted(reload)
   .balance-sampler-provider-row .input {
     @apply w-full text-left;
   }
+
+  .health-guard-status-panel,
+  .health-guard-config-grid,
+  .health-guard-platform-row {
+    grid-template-columns: 1fr;
+  }
+
+  .health-guard-run-button {
+    width: fit-content;
+    min-height: 36px;
+    padding: 0 12px;
+  }
+
+  .health-guard-field .input,
+  .health-guard-platform-row .input,
+  .health-guard-platform-row .input:last-child {
+    @apply w-full text-left;
+  }
+
+  .health-guard-summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .health-guard-item-main {
+    @apply block;
+  }
+
+  .health-guard-item-main span {
+    @apply mt-1 block;
+  }
 }
 
 @media (max-width: 380px) {
@@ -3069,6 +3686,10 @@ onMounted(reload)
 
   .upstream-toolbar-action {
     flex: 1 1 calc(50% - 4px);
+  }
+
+  .health-guard-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>

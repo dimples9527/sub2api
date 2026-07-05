@@ -498,6 +498,12 @@ func ProvideUpstreamBalanceSamplerScheduler(service *UpstreamBalanceConsumptionS
 	return svc
 }
 
+func ProvideUpstreamAccountHealthGuardScheduler(service *UpstreamAccountHealthGuardService) *UpstreamAccountHealthGuardScheduler {
+	svc := NewUpstreamAccountHealthGuardScheduler(service)
+	svc.Start()
+	return svc
+}
+
 // ProvideBackupService creates and starts BackupService
 func ProvideBackupService(
 	settingRepo SettingRepository,
@@ -651,6 +657,8 @@ var ProviderSet = wire.NewSet(
 	ProvideUpstreamAccountRateGuardScheduler,
 	ProvideUpstreamBalanceConsumptionService,
 	ProvideUpstreamBalanceSamplerScheduler,
+	NewUpstreamAccountHealthGuardService,
+	ProvideUpstreamAccountHealthGuardScheduler,
 	NewDataManagementService,
 	ProvideBackupService,
 	ProvideOpsSystemLogSink,
