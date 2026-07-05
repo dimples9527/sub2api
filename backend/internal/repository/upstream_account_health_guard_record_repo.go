@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/lib/pq"
 )
 
 type upstreamAccountHealthGuardRecordRepository struct {
@@ -123,7 +122,6 @@ func (r *upstreamAccountHealthGuardRecordRepository) ListRecords(ctx context.Con
 	defer rows.Close()
 
 	records := []service.UpstreamAccountHealthGuardRunRecord{}
-	runIDs := []string{}
 	for rows.Next() {
 		var record service.UpstreamAccountHealthGuardRunRecord
 		if err := rows.Scan(
@@ -147,36 +145,36 @@ func (r *upstreamAccountHealthGuardRecordRepository) ListRecords(ctx context.Con
 		}
 		record.Items = []service.UpstreamAccountHealthGuardRunItem{}
 		records = append(records, record)
-		runIDs = append(runIDs, record.ID)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	if len(runIDs) == 0 {
+	if len(records) == 0 {
 		return records, nil
 	}
 
+	// The list endpoint only needs details for the latest run. Older runs keep
+	// their summaries so the payload stays bounded when a run checks many accounts.
+	latestRunID := records[0].ID
 	itemRows, err := r.db.QueryContext(ctx, `
 		SELECT
-			run_id, account_id, account_name, platform, provider_slug, provider_name,
+			account_id, account_name, platform, provider_slug, provider_name,
 			model_id, schedulable_before, schedulable_after, status, test_status,
 			latency_ms, latency_limit_ms, consecutive_failed, consecutive_slow,
 			consecutive_healthy, action, reason, error_message, started_at, finished_at
 		FROM upstream_account_health_guard_run_items
-		WHERE run_id = ANY($1)
-		ORDER BY run_id, provider_slug, account_id, id
-	`, pq.Array(runIDs))
+		WHERE run_id = $1
+		ORDER BY provider_slug, account_id, id
+	`, latestRunID)
 	if err != nil {
 		return nil, err
 	}
 	defer itemRows.Close()
 
-	itemsByRun := make(map[string][]service.UpstreamAccountHealthGuardRunItem, len(runIDs))
+	items := []service.UpstreamAccountHealthGuardRunItem{}
 	for itemRows.Next() {
-		var runID string
 		var item service.UpstreamAccountHealthGuardRunItem
 		if err := itemRows.Scan(
-			&runID,
 			&item.AccountID,
 			&item.AccountName,
 			&item.Platform,
@@ -200,16 +198,11 @@ func (r *upstreamAccountHealthGuardRecordRepository) ListRecords(ctx context.Con
 		); err != nil {
 			return nil, err
 		}
-		itemsByRun[runID] = append(itemsByRun[runID], item)
+		items = append(items, item)
 	}
 	if err := itemRows.Err(); err != nil {
 		return nil, err
 	}
-
-	for i := range records {
-		if items := itemsByRun[records[i].ID]; len(items) > 0 {
-			records[i].Items = items
-		}
-	}
+	records[0].Items = items
 	return records, nil
 }
