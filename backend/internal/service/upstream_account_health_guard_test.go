@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -85,6 +84,33 @@ func (s *upstreamAccountHealthGuardTesterStub) runTestBackground(_ context.Conte
 	return s.results[accountID], nil
 }
 
+type upstreamAccountHealthGuardRecordStoreStub struct {
+	records []UpstreamAccountHealthGuardRunRecord
+}
+
+func (s *upstreamAccountHealthGuardRecordStoreStub) SaveRecord(_ context.Context, record UpstreamAccountHealthGuardRunRecord, keepLimit int) error {
+	next := []UpstreamAccountHealthGuardRunRecord{record}
+	for _, existing := range s.records {
+		if existing.ID != record.ID {
+			next = append(next, existing)
+		}
+	}
+	if keepLimit > 0 && len(next) > keepLimit {
+		next = next[:keepLimit]
+	}
+	s.records = next
+	return nil
+}
+
+func (s *upstreamAccountHealthGuardRecordStoreStub) ListRecords(_ context.Context, limit int) ([]UpstreamAccountHealthGuardRunRecord, error) {
+	out := make([]UpstreamAccountHealthGuardRunRecord, len(s.records))
+	copy(out, s.records)
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
 type upstreamAccountHealthGuardSettingRepoStub struct {
 	values map[string]string
 }
@@ -153,6 +179,7 @@ func newUpstreamAccountHealthGuardTestService(accounts []Account, tester *upstre
 		&upstreamAccountHealthGuardProviderStub{providers: []UpstreamProviderConfig{{Slug: "main", Name: "Main", Enabled: true}}},
 		settings,
 		tester,
+		&upstreamAccountHealthGuardRecordStoreStub{},
 	)
 	svc.now = func() time.Time { return time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC) }
 	return svc, store, settings
@@ -312,6 +339,7 @@ func TestUpstreamAccountHealthGuardSkipsDisabledProviderAndAccount(t *testing.T)
 		}},
 		settings,
 		tester,
+		&upstreamAccountHealthGuardRecordStoreStub{},
 	)
 	if _, err := svc.UpdateConfig(context.Background(), UpstreamAccountHealthGuardConfig{Concurrency: 1}); err != nil {
 		t.Fatalf("UpdateConfig error: %v", err)
@@ -383,12 +411,14 @@ func TestUpstreamAccountHealthGuardRecordsPersist(t *testing.T) {
 		t.Fatalf("Run error: %v", err)
 	}
 
-	raw := settings.values[SettingKeyUpstreamAccountHealthGuardRecords]
-	var records []UpstreamAccountHealthGuardRunRecord
-	if err := json.Unmarshal([]byte(raw), &records); err != nil {
-		t.Fatalf("records json invalid: %v", err)
+	records, err := svc.ListRecords(context.Background())
+	if err != nil {
+		t.Fatalf("ListRecords error: %v", err)
 	}
 	if len(records) != 1 || records[0].Summary.CheckedCount != 1 {
 		t.Fatalf("records = %+v, want one checked record", records)
+	}
+	if _, ok := settings.values[SettingKeyUpstreamAccountHealthGuardRecords]; ok {
+		t.Fatalf("records should not be persisted in settings")
 	}
 }

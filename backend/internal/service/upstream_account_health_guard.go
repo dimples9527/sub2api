@@ -30,6 +30,7 @@ const (
 	DefaultUpstreamAccountHealthGuardSlowThreshold            = 3
 	DefaultUpstreamAccountHealthGuardRecoveryThreshold        = 2
 	DefaultUpstreamAccountHealthGuardHealthyLatencyMs         = 15000
+	MaxUpstreamAccountHealthGuardRecords                      = 50
 
 	UpstreamAccountHealthGuardTriggerScheduled = "scheduled"
 	UpstreamAccountHealthGuardTriggerManual    = "manual"
@@ -140,11 +141,17 @@ type upstreamAccountHealthGuardTester interface {
 	runTestBackground(ctx context.Context, accountID int64, modelID string) (*ScheduledTestResult, error)
 }
 
+type UpstreamAccountHealthGuardRecordStore interface {
+	SaveRecord(ctx context.Context, record UpstreamAccountHealthGuardRunRecord, keepLimit int) error
+	ListRecords(ctx context.Context, limit int) ([]UpstreamAccountHealthGuardRunRecord, error)
+}
+
 type UpstreamAccountHealthGuardService struct {
 	accountStore   upstreamAccountHealthGuardAccountStore
 	providerSource upstreamAccountHealthGuardProviderSource
 	settingRepo    SettingRepository
 	tester         upstreamAccountHealthGuardTester
+	recordStore    UpstreamAccountHealthGuardRecordStore
 	now            func() time.Time
 }
 
@@ -158,8 +165,9 @@ func NewUpstreamAccountHealthGuardService(
 	providerSource *UpstreamProviderService,
 	settingRepo SettingRepository,
 	tester *AccountTestService,
+	recordStore UpstreamAccountHealthGuardRecordStore,
 ) *UpstreamAccountHealthGuardService {
-	return newUpstreamAccountHealthGuardServiceWithDeps(accountStore, providerSource, settingRepo, tester)
+	return newUpstreamAccountHealthGuardServiceWithDeps(accountStore, providerSource, settingRepo, tester, recordStore)
 }
 
 func newUpstreamAccountHealthGuardServiceWithDeps(
@@ -167,12 +175,14 @@ func newUpstreamAccountHealthGuardServiceWithDeps(
 	providerSource upstreamAccountHealthGuardProviderSource,
 	settingRepo SettingRepository,
 	tester upstreamAccountHealthGuardTester,
+	recordStore UpstreamAccountHealthGuardRecordStore,
 ) *UpstreamAccountHealthGuardService {
 	return &UpstreamAccountHealthGuardService{
 		accountStore:   accountStore,
 		providerSource: providerSource,
 		settingRepo:    settingRepo,
 		tester:         tester,
+		recordStore:    recordStore,
 		now:            func() time.Time { return time.Now().UTC() },
 	}
 }
@@ -296,6 +306,9 @@ func (s *UpstreamAccountHealthGuardService) Run(ctx context.Context, trigger str
 }
 
 func (s *UpstreamAccountHealthGuardService) ListRecords(ctx context.Context) ([]UpstreamAccountHealthGuardRunRecord, error) {
+	if s != nil && s.recordStore != nil {
+		return s.recordStore.ListRecords(ctx, MaxUpstreamAccountHealthGuardRecords)
+	}
 	if s == nil || s.settingRepo == nil {
 		return []UpstreamAccountHealthGuardRunRecord{}, nil
 	}
@@ -624,6 +637,15 @@ func (s *UpstreamAccountHealthGuardService) saveConfig(ctx context.Context, conf
 }
 
 func (s *UpstreamAccountHealthGuardService) saveRecord(ctx context.Context, record UpstreamAccountHealthGuardRunRecord) error {
+	if s != nil && s.recordStore != nil {
+		if err := s.recordStore.SaveRecord(ctx, record, MaxUpstreamAccountHealthGuardRecords); err != nil {
+			return err
+		}
+		if s.settingRepo != nil {
+			_ = s.settingRepo.Delete(ctx, SettingKeyUpstreamAccountHealthGuardRecords)
+		}
+		return nil
+	}
 	if s == nil || s.settingRepo == nil {
 		return nil
 	}

@@ -105,6 +105,14 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	requireColumn(t, tx, "ops_system_logs", "api_key_id", "bigint", 0, true)
 	requireIndex(t, tx, "ops_system_logs", "idx_ops_system_logs_api_key_id_created_at")
 
+	// upstream account health guard stores run records outside settings.
+	requireColumn(t, tx, "upstream_account_health_guard_runs", "id", "text", 0, false)
+	requireColumn(t, tx, "upstream_account_health_guard_runs", "finished_at", "timestamp with time zone", 0, false)
+	requireColumn(t, tx, "upstream_account_health_guard_run_items", "run_id", "text", 0, false)
+	requireColumn(t, tx, "upstream_account_health_guard_run_items", "account_id", "bigint", 0, false)
+	requireIndex(t, tx, "upstream_account_health_guard_runs", "idx_upstream_account_health_guard_runs_finished")
+	requireIndex(t, tx, "upstream_account_health_guard_run_items", "idx_upstream_account_health_guard_items_run")
+
 	// user_allowed_groups table should exist
 	var uagRegclass sql.NullString
 	require.NoError(t, tx.QueryRowContext(context.Background(), "SELECT to_regclass('public.user_allowed_groups')").Scan(&uagRegclass))
