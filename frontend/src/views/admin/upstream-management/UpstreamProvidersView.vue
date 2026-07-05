@@ -1089,11 +1089,12 @@
 
     <div
       v-if="balanceDetailsOpen"
-      class="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
+      class="balance-dialog-overlay fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
       @click.self="closeBalanceDetails"
     >
       <div class="balance-dialog">
         <div class="balance-dialog-header">
+          <span class="balance-dialog-handle" aria-hidden="true"></span>
           <div class="min-w-0">
             <h3 class="truncate text-base font-semibold text-gray-950 dark:text-white">
               {{ selectedBalanceProviderLabel }}
@@ -1102,8 +1103,9 @@
               {{ t('admin.upstreamProviders.balanceDialogDescription') }}
             </p>
           </div>
-          <button type="button" class="btn btn-secondary btn-sm" @click="closeBalanceDetails">
-            {{ t('common.close') }}
+          <button type="button" class="btn btn-secondary btn-sm balance-dialog-close" @click="closeBalanceDetails">
+            <Icon name="x" size="sm" />
+            <span>{{ t('common.close') }}</span>
           </button>
         </div>
 
@@ -1123,11 +1125,21 @@
             </div>
             <div class="balance-metric">
               <span>{{ t('admin.upstreamProviders.lastSnapshot') }}</span>
-              <strong class="text-sm">{{ selectedBalanceSummary?.last_snapshot_at ? formatDateTime(selectedBalanceSummary.last_snapshot_at) : '-' }}</strong>
+              <strong
+                class="balance-last-snapshot text-sm"
+                :title="selectedBalanceSummary?.last_snapshot_at ? formatDateTime(selectedBalanceSummary.last_snapshot_at) : ''"
+              >
+                <span class="balance-last-snapshot-full">
+                  {{ selectedBalanceSummary?.last_snapshot_at ? formatDateTime(selectedBalanceSummary.last_snapshot_at) : '-' }}
+                </span>
+                <span class="balance-last-snapshot-compact">
+                  {{ selectedBalanceSummary?.last_snapshot_at ? formatCompactDateTime(selectedBalanceSummary.last_snapshot_at) : '-' }}
+                </span>
+              </strong>
             </div>
           </div>
 
-          <div class="balance-recharge-panel">
+          <div class="balance-recharge-panel balance-dialog-section">
             <div class="balance-section-title">{{ t('admin.upstreamProviders.addRecharge') }}</div>
             <div class="balance-recharge-form">
               <input v-model.number="rechargeForm.amount" type="number" min="0" step="0.000001" class="input" :placeholder="t('admin.upstreamProviders.rechargeAmount')" />
@@ -1139,14 +1151,39 @@
             </div>
           </div>
 
-          <div>
-            <div class="balance-section-title">{{ t('admin.upstreamProviders.balanceSamples') }}</div>
-            <div class="mb-5 max-h-72 overflow-auto rounded-lg border border-gray-200 dark:border-dark-600">
+          <div class="balance-record-section">
+            <div class="balance-record-tabs" role="tablist">
+              <button
+                type="button"
+                :class="['balance-record-tab', activeBalanceRecordTab === 'samples' && 'is-active']"
+                :aria-selected="activeBalanceRecordTab === 'samples'"
+                @click="activeBalanceRecordTab = 'samples'"
+              >
+                <span>{{ t('admin.upstreamProviders.balanceSamples') }}</span>
+                <strong>{{ selectedBalanceSnapshots.length }}</strong>
+              </button>
+              <button
+                type="button"
+                :class="['balance-record-tab', activeBalanceRecordTab === 'history' && 'is-active']"
+                :aria-selected="activeBalanceRecordTab === 'history'"
+                @click="activeBalanceRecordTab = 'history'"
+              >
+                <span>{{ t('admin.upstreamProviders.balanceHistory') }}</span>
+                <strong>{{ selectedBalanceRows.length }}</strong>
+              </button>
+            </div>
+
+            <section v-show="activeBalanceRecordTab === 'samples'" class="balance-record-pane">
+            <div class="balance-record-header">
+              <div class="balance-section-title">{{ t('admin.upstreamProviders.balanceSamples') }}</div>
+              <span class="balance-record-count">{{ selectedBalanceSnapshots.length }}</span>
+            </div>
+            <div class="balance-record-list max-h-72 overflow-auto rounded-lg border border-gray-200 dark:border-dark-600">
               <div class="provider-mobile-record-cards">
                 <article
                   v-for="snapshot in selectedBalanceSnapshots"
                   :key="'snapshot-card-' + (snapshot.id || (snapshot.provider_slug + ':' + snapshot.captured_at))"
-                  class="provider-mobile-record-card"
+                  :class="['provider-mobile-record-card', 'balance-record-card', snapshot.status === 'success' ? 'is-success' : 'is-error']"
                 >
                   <div>
                     <span>{{ t('admin.upstreamProviders.sampleTime') }}</span>
@@ -1199,14 +1236,19 @@
                 </tbody>
               </table>
             </div>
+            </section>
 
-            <div class="balance-section-title">{{ t('admin.upstreamProviders.balanceHistory') }}</div>
-            <div class="max-h-72 overflow-auto rounded-lg border border-gray-200 dark:border-dark-600">
+            <section v-show="activeBalanceRecordTab === 'history'" class="balance-record-pane">
+            <div class="balance-record-header">
+              <div class="balance-section-title">{{ t('admin.upstreamProviders.balanceHistory') }}</div>
+              <span class="balance-record-count">{{ selectedBalanceRows.length }}</span>
+            </div>
+            <div class="balance-record-list max-h-72 overflow-auto rounded-lg border border-gray-200 dark:border-dark-600">
               <div class="provider-mobile-record-cards">
                 <article
                   v-for="row in selectedBalanceRows"
                   :key="`daily-card-${row.provider_slug}-${row.date}`"
-                  class="provider-mobile-record-card"
+                  :class="['provider-mobile-record-card', 'balance-record-card', row.anomaly ? 'is-error' : row.complete ? 'is-success' : 'is-muted']"
                 >
                   <div>
                     <span>{{ t('admin.upstreamProviders.balanceDate') }}</span>
@@ -1265,6 +1307,7 @@
                 </tbody>
               </table>
             </div>
+            </section>
           </div>
         </div>
       </div>
@@ -1372,6 +1415,7 @@ const addingRecharge = ref(false)
 const balanceOverview = ref<UpstreamBalanceConsumptionOverview | null>(null)
 const balanceDetailsOpen = ref(false)
 const selectedBalanceProviderSlug = ref('')
+const activeBalanceRecordTab = ref<'samples' | 'history'>('samples')
 const balanceSamplerForm = ref({
   enabled: false,
   interval_seconds: 3600,
@@ -2089,6 +2133,7 @@ async function addBalanceRecharge() {
 
 function openBalanceDetails(providerSlug: string) {
   selectedBalanceProviderSlug.value = providerSlug
+  activeBalanceRecordTab.value = 'samples'
   balanceDetailsOpen.value = true
 }
 
@@ -2256,6 +2301,17 @@ function formatMoney(value: number | undefined) {
     minimumFractionDigits: 4,
     maximumFractionDigits: 4,
   })
+}
+
+function formatCompactDateTime(value: string | undefined) {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '-'
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  return `${month}-${day} ${hours}:${minutes}`
 }
 
 function closeKeysDialog() {
@@ -3077,8 +3133,16 @@ onMounted(reload)
   @apply max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-dark-800;
 }
 
+.balance-dialog-handle {
+  display: none;
+}
+
 .balance-dialog-header {
   @apply flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4 dark:border-dark-600;
+}
+
+.balance-dialog-close {
+  @apply shrink-0 gap-1.5;
 }
 
 .balance-dialog-body {
@@ -3104,6 +3168,10 @@ onMounted(reload)
 .balance-config-panel,
 .balance-recharge-panel {
   @apply rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800/70;
+}
+
+.balance-dialog-section {
+  @apply min-w-0;
 }
 
 .balance-config-panel {
@@ -3352,8 +3420,56 @@ onMounted(reload)
   @apply mt-3 grid gap-3 md:grid-cols-[12rem_1fr_auto];
 }
 
+.balance-record-section {
+  @apply min-w-0 space-y-3;
+}
+
+.balance-record-tabs {
+  @apply grid grid-cols-2 gap-2 rounded-lg bg-gray-100 p-1 dark:bg-dark-900/60;
+}
+
+.balance-record-tab {
+  @apply inline-flex h-9 min-w-0 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold text-gray-500 transition-colors hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100;
+}
+
+.balance-record-tab.is-active {
+  @apply bg-white text-primary-600 shadow-sm dark:bg-dark-700 dark:text-primary-300;
+}
+
+.balance-record-tab strong {
+  @apply inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-gray-200 px-1.5 font-mono text-[11px] text-gray-600 dark:bg-dark-600 dark:text-gray-300;
+}
+
+.balance-record-tab.is-active strong {
+  @apply bg-primary-50 text-primary-600 dark:bg-primary-950/60 dark:text-primary-300;
+}
+
+.balance-record-pane {
+  @apply space-y-3;
+}
+
+.balance-record-header {
+  @apply flex items-center justify-between gap-3;
+}
+
 .balance-section-title {
   @apply text-sm font-semibold text-gray-900 dark:text-white;
+}
+
+.balance-record-count {
+  @apply inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-gray-100 px-2 font-mono text-xs font-semibold text-gray-500 ring-1 ring-gray-200 dark:bg-dark-700 dark:text-gray-300 dark:ring-dark-600;
+}
+
+.balance-record-list {
+  @apply bg-white dark:bg-dark-800;
+}
+
+.balance-last-snapshot {
+  @apply min-w-0;
+}
+
+.balance-last-snapshot-compact {
+  display: none;
 }
 
 .balance-pill {
@@ -3597,21 +3713,155 @@ onMounted(reload)
     @apply whitespace-normal break-all;
   }
 
+  .balance-dialog-overlay {
+    padding: 0;
+    align-items: flex-end;
+  }
+
   .balance-dialog {
-    @apply max-h-[92vh] rounded-lg;
+    width: 100%;
+    max-height: min(92dvh, calc(100vh - 0.75rem));
+    border-radius: 14px 14px 0 0;
   }
 
   .balance-dialog-header {
-    @apply items-start;
+    position: relative;
+    align-items: center;
+    gap: 10px;
+    padding: 18px 12px 10px;
+  }
+
+  .balance-dialog-handle {
+    position: absolute;
+    top: 7px;
+    left: 50%;
+    display: block;
+    width: 38px;
+    height: 4px;
+    border-radius: 999px;
+    background: #cbd5e1;
+    transform: translateX(-50%);
+  }
+
+  .balance-dialog-header p {
+    display: none;
+  }
+
+  .balance-dialog-close {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 8px;
+  }
+
+  .balance-dialog-close span {
+    display: none;
   }
 
   .balance-dialog-body {
-    @apply max-h-[calc(92vh-5rem)] p-4;
+    max-height: min(calc(92dvh - 4rem), calc(100vh - 4.75rem));
+    padding: 10px;
+  }
+
+  .balance-summary-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .balance-metric {
+    min-width: 0;
+    padding: 7px 5px;
+    text-align: center;
+  }
+
+  .balance-metric span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+  }
+
+  .balance-metric strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    line-height: 1.25;
+  }
+
+  .balance-last-snapshot-full {
+    display: none;
+  }
+
+  .balance-last-snapshot-compact {
+    display: inline;
+  }
+
+  .balance-recharge-panel {
+    padding: 10px;
+  }
+
+  .balance-recharge-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .balance-recharge-form .input {
+    min-width: 0;
+    height: 34px;
+    font-size: 12px;
+  }
+
+  .balance-recharge-form .btn {
+    grid-column: 1 / -1;
+    width: fit-content;
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  .balance-record-header {
+    margin-top: 2px;
+    padding: 0 2px;
+  }
+
+  .balance-record-tabs {
+    gap: 4px;
+    border-radius: 8px;
+    padding: 4px;
+  }
+
+  .balance-record-tab {
+    height: 32px;
+    gap: 5px;
+    padding: 0 6px;
+    font-size: 12px;
+  }
+
+  .balance-record-tab strong {
+    height: 18px;
+    min-width: 18px;
+    padding: 0 5px;
+    font-size: 10px;
+  }
+
+  .balance-record-count {
+    height: 22px;
+    min-width: 22px;
+    font-size: 11px;
+  }
+
+  .balance-record-list {
+    max-height: min(32vh, 15rem);
+  }
+
+  .balance-record-list.mb-5 {
+    margin-bottom: 10px;
   }
 
   .provider-mobile-record-cards {
     display: block;
-    padding: 10px;
+    padding: 8px;
   }
 
   .provider-mobile-record-cards + table,
@@ -3619,9 +3869,47 @@ onMounted(reload)
     display: none;
   }
 
-  .balance-summary-grid,
-  .balance-sampler-controls,
-  .balance-recharge-form {
+  .balance-record-card {
+    position: relative;
+    padding: 9px 9px 9px 12px;
+  }
+
+  .balance-record-card::before {
+    position: absolute;
+    inset: 9px auto 9px 6px;
+    width: 3px;
+    border-radius: 999px;
+    background: #94a3b8;
+    content: "";
+  }
+
+  .balance-record-card.is-success::before {
+    background: #10b981;
+  }
+
+  .balance-record-card.is-error::before {
+    background: #ef4444;
+  }
+
+  .provider-mobile-record-card > div {
+    grid-template-columns: minmax(70px, auto) minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .provider-mobile-record-card > div + div {
+    margin-top: 6px;
+  }
+
+  .provider-mobile-record-card span {
+    font-size: 11px;
+  }
+
+  .provider-mobile-record-card strong {
+    font-size: 12px;
+    line-height: 1.3;
+  }
+
+  .balance-sampler-controls {
     @apply grid-cols-1;
   }
 
@@ -3690,6 +3978,10 @@ onMounted(reload)
 
   .health-guard-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .balance-recharge-form {
+    grid-template-columns: 1fr;
   }
 }
 </style>
