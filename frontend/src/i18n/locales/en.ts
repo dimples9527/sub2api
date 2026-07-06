@@ -1979,6 +1979,7 @@ export default {
       quickFilterTestFailed: 'Test Failed',
       quickFilterEnabledProvider: 'Provider Enabled',
       quickFilterDisabledProvider: 'Provider Disabled',
+      localSnapshotTag: 'Local Snapshot',
       conflictIds: 'Conflicting accounts: {ids}',
       unbindGroups: 'Will unbind: {groups}',
       syncRecords: 'Sync records',

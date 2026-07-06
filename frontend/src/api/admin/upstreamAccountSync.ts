@@ -22,6 +22,7 @@ export interface UpstreamAccountSyncItem {
   upstream_key_name: string
   upstream_api_key?: string
   upstream_base_url?: string
+  provider_fetch_error?: string
   local_account_name: string
   matched_account_id?: number
   matched_account_name?: string

@@ -618,6 +618,67 @@ describe('UpstreamAccountsView', () => {
     expect(wrapper.findAll('.account-row').map(row => row.text())).toEqual(['key-enabled'])
   })
 
+  it('marks provider fetch fallback rows as local snapshots', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValueOnce({
+      default_provider: {},
+      providers: [{ slug: 'bad-upstream', name: 'Bad Upstream', enabled: true }],
+      summary: {
+        upstream_key_count: 1,
+        matched_account_count: 1,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'noop',
+          provider_slug: 'bad-upstream',
+          provider_name: 'Bad Upstream',
+          upstream_key_name: 'key-local',
+          local_account_name: 'local-account',
+          matched_account_id: 12,
+          matched_account_name: 'local-account',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 1,
+          provider_fetch_error: 'newapi login failed: Turnstile token is empty',
+          rate_violation: false,
+        },
+      ],
+      warnings: ['Bad Upstream: newapi login failed: Turnstile token is empty'],
+      records: [],
+    })
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any) => h('div', { class: 'source-row' }, slots['cell-source']?.({ row }))))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+          GroupSelector: true,
+          UpstreamBalanceCharts: { template: '<div data-test="balance-charts" />' },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('.source-row').text()).toContain('admin.upstreamAccounts.localSnapshotTag')
+    expect(wrapper.find('.tag-local-snapshot').attributes('title')).toBe('newapi login failed: Turnstile token is empty')
+    expect(wrapper.find('.source-line').classes()).toContain('source-line-amber')
+    expect(wrapper.text()).toContain('Bad Upstream: newapi login failed: Turnstile token is empty')
+  })
+
   it('uses disabled default provider state for upstream account rows', async () => {
     upstreamAccountSyncMock.getPreview.mockResolvedValueOnce({
       default_provider: { slug: 'main', name: 'Default Upstream', enabled: false, is_default: true },

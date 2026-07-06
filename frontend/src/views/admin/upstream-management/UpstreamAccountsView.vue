@@ -234,6 +234,13 @@
                       <span :class="['table-tag', providerToneClass(row.provider_slug, 'tag')]">
                         {{ row.provider_name || row.provider_slug }}
                       </span>
+                      <span
+                        v-if="row.provider_fetch_error"
+                        class="table-tag tag-local-snapshot"
+                        :title="row.provider_fetch_error"
+                      >
+                        {{ t('admin.upstreamAccounts.localSnapshotTag') }}
+                      </span>
                     </div>
                     <code class="source-id">{{ row.provider_slug || '-' }}</code>
                   </div>
@@ -2638,6 +2645,7 @@ async function refreshBatchTestAccountsSilently(accountIds: number[]) {
 
 function sourceToneClass(row: UpstreamAccountSyncItem) {
   if (row.rate_violation) return 'source-line-red'
+  if (row.provider_fetch_error) return 'source-line-amber'
   const slug = (row.provider_slug || row.provider_name || '').toLowerCase()
   if (slug.includes('niko')) return 'source-line-blue'
   return 'source-line-emerald'
@@ -4029,6 +4037,10 @@ onBeforeUnmount(() => {
   background: #dc2626;
 }
 
+.source-line-amber {
+  background: #d97706;
+}
+
 .source-title {
   display: flex;
   min-width: 0;
@@ -4150,7 +4162,8 @@ onBeforeUnmount(() => {
 }
 
 .tag-provider-amber,
-.tag-warning {
+.tag-warning,
+.tag-local-snapshot {
   background: #fff7ed;
   color: #c2410c;
 }

@@ -630,6 +630,77 @@ func TestUpstreamAccountSyncPreviewKeepsAvailableProvidersWhenOneProviderKeysFai
 	}
 }
 
+func TestUpstreamAccountSyncPreviewShowsLocalSnapshotWhenProviderKeysFail(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "bad", Name: "Bad upstream", BaseURL: "https://bad.example.com", AccountNamePrefix: "bad-", Enabled: true},
+			{Slug: "good", Name: "Good upstream", BaseURL: "https://good.example.com", AccountNamePrefix: "good-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"good": {{ProviderSlug: "good", KeyName: "alice", GroupName: "VIP", RateMultiplier: 1}},
+		},
+		keysErrBySlug: map[string]error{
+			"bad": errors.New("newapi login failed: Turnstile token is empty"),
+		},
+	}
+	svc, _ := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 1, Status: StatusActive}},
+		[]Account{{
+			ID:          42,
+			Name:        "bad-alice",
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Credentials: map[string]any{"api_key": "sk-local", "base_url": "https://bad.example.com"},
+			Extra: map[string]any{
+				"upstream_provider_slug":   "bad",
+				"upstream_provider_name":   "Bad upstream",
+				"upstream_key_name":        "alice",
+				"upstream_group_name":      "VIP",
+				"upstream_rate_multiplier": 1.5,
+			},
+			GroupIDs: []int64{7},
+			Groups:   []*Group{{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 1, Status: StatusActive}},
+		}},
+		newUpstreamManagementSettingRepoStub(),
+	)
+
+	result, err := svc.Preview(context.Background())
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if result.Summary.UpstreamKeyCount != 2 || result.Summary.MatchedAccountCount != 1 || result.Summary.CreateCount != 1 {
+		t.Fatalf("summary = %+v, want one live key plus one local snapshot", result.Summary)
+	}
+	if len(result.Items) != 2 {
+		t.Fatalf("item count = %d, want 2", len(result.Items))
+	}
+
+	var snapshot UpstreamAccountSyncItem
+	for _, item := range result.Items {
+		if item.ProviderSlug == "bad" {
+			snapshot = item
+			break
+		}
+	}
+	if snapshot.MatchedAccountID == nil || *snapshot.MatchedAccountID != 42 {
+		t.Fatalf("snapshot matched account id = %+v, want 42", snapshot.MatchedAccountID)
+	}
+	if snapshot.Action != UpstreamAccountSyncActionNoop {
+		t.Fatalf("snapshot action = %q, want noop", snapshot.Action)
+	}
+	if snapshot.ProviderFetchError != "newapi login failed: Turnstile token is empty" {
+		t.Fatalf("provider fetch error = %q", snapshot.ProviderFetchError)
+	}
+	if snapshot.UpstreamKeyName != "alice" || snapshot.UpstreamGroupName != "VIP" || snapshot.UpstreamRateMultiplier != 1.5 {
+		t.Fatalf("snapshot item = %+v, want stored upstream metadata", snapshot)
+	}
+	if len(snapshot.BoundGroups) != 1 || snapshot.BoundGroups[0].ID != 7 {
+		t.Fatalf("snapshot bound groups = %+v, want local account bound groups", snapshot.BoundGroups)
+	}
+}
+
 func TestUpstreamAccountSyncPreviewFetchesProviderKeysConcurrently(t *testing.T) {
 	provider := &upstreamAccountSyncProviderSourceStub{
 		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},

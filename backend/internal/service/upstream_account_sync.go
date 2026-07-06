@@ -92,6 +92,7 @@ type UpstreamAccountSyncItem struct {
 	UpstreamKeyName        string                               `json:"upstream_key_name"`
 	UpstreamAPIKey         string                               `json:"upstream_api_key,omitempty"`
 	UpstreamBaseURL        string                               `json:"upstream_base_url,omitempty"`
+	ProviderFetchError     string                               `json:"provider_fetch_error,omitempty"`
 	LocalAccountName       string                               `json:"local_account_name"`
 	MatchedAccountID       *int64                               `json:"matched_account_id,omitempty"`
 	MatchedAccountName     string                               `json:"matched_account_name,omitempty"`
@@ -815,6 +816,10 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context, useProviderKey
 		keyResult := providerKeysBySlug[provider.Slug]
 		if keyResult.err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("%s: %s", provider.Name, keyResult.err.Error()))
+			fallbackItems := upstreamAccountSyncLocalSnapshotItemsForProvider(provider, accounts, keyResult.err)
+			result.Summary.UpstreamKeyCount += len(fallbackItems)
+			result.Summary.MatchedAccountCount += len(fallbackItems)
+			result.Items = append(result.Items, fallbackItems...)
 			continue
 		}
 		for _, warning := range keyResult.warnings {
@@ -921,6 +926,65 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context, useProviderKey
 		}
 	}
 	return result, upstreamAccountSyncPreviewState{accountByID: accountByID, providerBySlug: providerBySlug}, nil
+}
+
+func upstreamAccountSyncLocalSnapshotItemsForProvider(provider UpstreamProviderConfig, accounts []Account, fetchErr error) []UpstreamAccountSyncItem {
+	if provider.Slug == "" || len(accounts) == 0 {
+		return nil
+	}
+	fetchError := ""
+	if fetchErr != nil {
+		fetchError = fetchErr.Error()
+	}
+	providerName := strings.TrimSpace(provider.Name)
+	if providerName == "" {
+		providerName = provider.Slug
+	}
+	providerBaseURL := strings.TrimSpace(provider.BaseURL)
+
+	items := make([]UpstreamAccountSyncItem, 0)
+	for _, account := range accounts {
+		if strings.TrimSpace(account.GetExtraString("upstream_provider_slug")) != provider.Slug {
+			continue
+		}
+		keyName := strings.TrimSpace(account.GetExtraString("upstream_key_name"))
+		if keyName == "" {
+			continue
+		}
+		accountID := account.ID
+		upstreamRate := 0.0
+		if account.Extra != nil {
+			upstreamRate = parseExtraFloat64(account.Extra["upstream_rate_multiplier"])
+		}
+		baseURL := providerBaseURL
+		if baseURL == "" {
+			baseURL = strings.TrimSpace(account.GetCredential("base_url"))
+		}
+
+		items = append(items, UpstreamAccountSyncItem{
+			Action:                 UpstreamAccountSyncActionNoop,
+			ProviderSlug:           provider.Slug,
+			ProviderName:           providerName,
+			ProviderBaseURL:        baseURL,
+			UpstreamKeyName:        keyName,
+			UpstreamBaseURL:        baseURL,
+			ProviderFetchError:     fetchError,
+			LocalAccountName:       account.Name,
+			MatchedAccountID:       &accountID,
+			MatchedAccountName:     account.Name,
+			UpstreamGroupName:      strings.TrimSpace(account.GetExtraString("upstream_group_name")),
+			UpstreamRateMultiplier: upstreamRate,
+			BoundGroups:            upstreamAccountSyncBoundGroups(account, upstreamRate),
+			SkipReason:             "upstream provider keys unavailable; showing local account snapshot",
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].UpstreamKeyName == items[j].UpstreamKeyName {
+			return items[i].MatchedAccountName < items[j].MatchedAccountName
+		}
+		return items[i].UpstreamKeyName < items[j].UpstreamKeyName
+	})
+	return items
 }
 
 func effectiveUpstreamAccountRateMultiplier(rawRate, scale float64) float64 {

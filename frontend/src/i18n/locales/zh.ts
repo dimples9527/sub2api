@@ -1994,6 +1994,7 @@
       quickFilterTestFailed: '测试失败',
       quickFilterEnabledProvider: '供应商启用',
       quickFilterDisabledProvider: '供应商停用',
+      localSnapshotTag: '本地记录',
       conflictIds: '冲突账号：{ids}',
       unbindGroups: '将解绑：{groups}',
       syncRecords: '同步记录',
