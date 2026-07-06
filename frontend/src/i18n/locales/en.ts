@@ -1977,6 +1977,7 @@ export default {
       quickFilterRateRisk: 'Rate Risk',
       quickFilterNoGroups: 'No Groups',
       quickFilterTestFailed: 'Test Failed',
+      quickFilterEnabledProvider: 'Provider Enabled',
       quickFilterDisabledProvider: 'Provider Disabled',
       conflictIds: 'Conflicting accounts: {ids}',
       unbindGroups: 'Will unbind: {groups}',

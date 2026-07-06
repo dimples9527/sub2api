@@ -544,6 +544,80 @@ describe('UpstreamAccountsView', () => {
     expect(upstreamAccountsSource).toContain('opacity: 0.46;')
   })
 
+  it('filters upstream accounts by enabled provider from quick tags', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValueOnce({
+      default_provider: {},
+      providers: [
+        { slug: 'enabled-upstream', name: 'Enabled Upstream', enabled: true },
+        { slug: 'disabled-upstream', name: 'Disabled Upstream', enabled: false },
+      ],
+      summary: {
+        upstream_key_count: 2,
+        matched_account_count: 0,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'noop',
+          provider_slug: 'enabled-upstream',
+          provider_name: 'Enabled Upstream',
+          upstream_key_name: 'key-enabled',
+          local_account_name: 'local-enabled',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 1,
+          rate_violation: false,
+        },
+        {
+          action: 'noop',
+          provider_slug: 'disabled-upstream',
+          provider_name: 'Disabled Upstream',
+          upstream_key_name: 'key-disabled',
+          local_account_name: 'local-disabled',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 1,
+          rate_violation: false,
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name=filters /><slot name=table /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props) {
+              return () => h('div', { class: 'account-rows' }, props.data.map((row: any) => h('div', { class: 'account-row' }, row.upstream_key_name)))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+          GroupSelector: true,
+          UpstreamBalanceCharts: { template: '<div data-test=balance-charts />' },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.findAll('.account-row').map(row => row.text())).toEqual(['key-enabled', 'key-disabled'])
+    const enabledQuickTag = wrapper.findAll('.quick-tag').find(button => button.text().includes('admin.upstreamAccounts.quickFilterEnabledProvider'))
+    expect(enabledQuickTag?.text()).toContain('1')
+
+    await enabledQuickTag?.trigger('click')
+
+    expect(wrapper.findAll('.account-row').map(row => row.text())).toEqual(['key-enabled'])
+  })
+
   it('uses disabled default provider state for upstream account rows', async () => {
     upstreamAccountSyncMock.getPreview.mockResolvedValueOnce({
       default_provider: { slug: 'main', name: 'Default Upstream', enabled: false, is_default: true },

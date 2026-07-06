@@ -1992,6 +1992,7 @@
       quickFilterRateRisk: '倍率异常',
       quickFilterNoGroups: '无绑定分组',
       quickFilterTestFailed: '测试失败',
+      quickFilterEnabledProvider: '供应商启用',
       quickFilterDisabledProvider: '供应商停用',
       conflictIds: '冲突账号：{ids}',
       unbindGroups: '将解绑：{groups}',

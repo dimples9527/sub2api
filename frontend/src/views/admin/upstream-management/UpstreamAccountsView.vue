@@ -1400,7 +1400,7 @@ type BatchTestPlatformOption = {
 }
 type BatchTestSortKey = 'account' | 'platform' | 'upstream_rate' | 'schedulable' | 'status' | 'latency' | 'finished_at'
 type BatchTestResultFilter = 'all' | 'failed' | 'failed_schedulable' | 'success' | 'skipped'
-type QuickFilterKey = 'all' | 'update' | 'risk' | 'unbound' | 'failed' | 'disabled'
+type QuickFilterKey = 'all' | 'update' | 'risk' | 'unbound' | 'failed' | 'enabled' | 'disabled'
 type SortOrder = 'asc' | 'desc'
 
 const MAX_BATCH_TEST_ACCOUNTS = 200
@@ -1703,6 +1703,11 @@ const quickFilterOptions = computed(() => {
       label: t('admin.upstreamAccounts.quickFilterTestFailed'),
       count: source.filter(upstreamAccountTestFailed).length,
       tone: 'danger' as const
+    },
+    {
+      key: 'enabled' as const,
+      label: t('admin.upstreamAccounts.quickFilterEnabledProvider'),
+      count: source.filter(isProviderEnabled).length
     },
     {
       key: 'disabled' as const,
@@ -2204,6 +2209,10 @@ function isProviderDisabled(row: UpstreamAccountSyncItem) {
   return provider?.enabled === false
 }
 
+function isProviderEnabled(row: UpstreamAccountSyncItem) {
+  return !isProviderDisabled(row)
+}
+
 function upstreamAccountHasNoGroups(row: UpstreamAccountSyncItem) {
   const boundGroups = row.bound_groups || []
   return !row.local_group_id && boundGroups.length === 0
@@ -2221,6 +2230,7 @@ function upstreamAccountMatchesQuickFilter(row: UpstreamAccountSyncItem, filter:
   if (filter === 'risk') return row.rate_violation
   if (filter === 'unbound') return upstreamAccountHasNoGroups(row)
   if (filter === 'failed') return upstreamAccountTestFailed(row)
+  if (filter === 'enabled') return isProviderEnabled(row)
   if (filter === 'disabled') return isProviderDisabled(row)
   return true
 }
