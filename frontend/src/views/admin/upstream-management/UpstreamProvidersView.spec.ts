@@ -869,7 +869,36 @@ describe('UpstreamProvidersView', () => {
       platform_models: { anthropic: 'claude-3-5-haiku-latest' },
       platform_latency_ms: { anthropic: 16000 },
     })
-    adminAPIMock.upstreamAccountSync.getHealthGuardRecords.mockResolvedValueOnce([])
+    adminAPIMock.upstreamAccountSync.getHealthGuardRecords.mockResolvedValueOnce([
+      {
+        id: 'run-1',
+        trigger: 'manual',
+        status: 'success',
+        started_at: '2026-07-05T00:00:00Z',
+        finished_at: '2026-07-05T00:00:01Z',
+        summary: {
+          total_accounts: 5,
+          checked_count: 1,
+          healthy_count: 1,
+          slow_count: 0,
+          failed_count: 0,
+          skipped_count: 4,
+          disabled_count: 0,
+          recovered_count: 0,
+          unchanged_count: 1,
+          skip_reasons: [
+            {
+              reason: 'missing_provider_slug',
+              count: 4,
+              sample_accounts: [
+                { account_id: 9, account_name: 'orphan-account', platform: 'openai' },
+              ],
+            },
+          ],
+        },
+        items: [],
+      },
+    ])
     adminAPIMock.upstreamAccountSync.updateHealthGuardConfig.mockResolvedValueOnce({
       enabled: false,
       interval_seconds: 2400,
@@ -915,6 +944,9 @@ describe('UpstreamProvidersView', () => {
     expect(dialog.exists()).toBe(true)
     expect(dialog.text()).toContain('admin.upstreamProviders.healthGuardAutoRun')
     expect(dialog.text()).toContain('Anthropic')
+    expect(dialog.text()).toContain('admin.upstreamProviders.healthGuardSkipReasons')
+    expect(dialog.text()).toContain('admin.upstreamProviders.healthGuardSkipReasonMissingProviderSlug')
+    expect(dialog.text()).toContain('admin.upstreamProviders.healthGuardSkipSampleAccounts')
 
     const autoRun = dialog.find('input[type="checkbox"]')
     await autoRun.setValue(false)

@@ -323,12 +323,14 @@ func TestUpstreamAccountHealthGuardHealthyThresholdRecoversScheduling(t *testing
 
 func TestUpstreamAccountHealthGuardSkipsDisabledProviderAndAccount(t *testing.T) {
 	tester := &upstreamAccountHealthGuardTesterStub{
-		results: map[int64]*ScheduledTestResult{3: upstreamAccountHealthGuardResult("success", 100)},
+		results: map[int64]*ScheduledTestResult{5: upstreamAccountHealthGuardResult("success", 100)},
 	}
 	store := &upstreamAccountHealthGuardAccountStoreStub{accounts: []Account{
 		upstreamAccountHealthGuardAccount(1, true, map[string]any{"upstream_provider_slug": "disabled"}),
 		{ID: 2, Name: "disabled-account", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusDisabled, Schedulable: true, Extra: map[string]any{"upstream_provider_slug": "main"}},
-		upstreamAccountHealthGuardAccount(3, true, map[string]any{"upstream_provider_slug": "main"}),
+		upstreamAccountHealthGuardAccount(3, true, map[string]any{}),
+		upstreamAccountHealthGuardAccount(4, true, map[string]any{"upstream_provider_slug": "missing"}),
+		upstreamAccountHealthGuardAccount(5, true, map[string]any{"upstream_provider_slug": "main"}),
 	}}
 	settings := &upstreamAccountHealthGuardSettingRepoStub{}
 	svc := newUpstreamAccountHealthGuardServiceWithDeps(
@@ -349,11 +351,28 @@ func TestUpstreamAccountHealthGuardSkipsDisabledProviderAndAccount(t *testing.T)
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
-	if response.Record.Summary.CheckedCount != 1 || response.Record.Summary.SkippedCount != 2 {
-		t.Fatalf("summary = %+v, want 1 checked and 2 skipped", response.Record.Summary)
+	if response.Record.Summary.CheckedCount != 1 || response.Record.Summary.SkippedCount != 4 {
+		t.Fatalf("summary = %+v, want 1 checked and 4 skipped", response.Record.Summary)
 	}
-	if len(tester.calls) != 1 || tester.calls[0].accountID != 3 {
-		t.Fatalf("calls = %+v, want only account 3 tested", tester.calls)
+	if len(tester.calls) != 1 || tester.calls[0].accountID != 5 {
+		t.Fatalf("calls = %+v, want only account 5 tested", tester.calls)
+	}
+	reasons := map[string]UpstreamAccountHealthGuardSkipReason{}
+	for _, reason := range response.Record.Summary.SkipReasons {
+		reasons[reason.Reason] = reason
+	}
+	for _, reason := range []string{
+		upstreamAccountHealthGuardSkipProviderDisabled,
+		upstreamAccountHealthGuardSkipAccountDisabled,
+		upstreamAccountHealthGuardSkipMissingProvider,
+		upstreamAccountHealthGuardSkipProviderNotFound,
+	} {
+		if reasons[reason].Count != 1 {
+			t.Fatalf("skip reason %q = %+v, want count 1", reason, reasons[reason])
+		}
+		if len(reasons[reason].SampleAccounts) != 1 {
+			t.Fatalf("skip reason %q samples = %+v, want one sample", reason, reasons[reason].SampleAccounts)
+		}
 	}
 }
 

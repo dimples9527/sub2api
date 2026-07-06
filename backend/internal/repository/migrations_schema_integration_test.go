@@ -108,6 +108,7 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	// upstream account health guard stores run records outside settings.
 	requireColumn(t, tx, "upstream_account_health_guard_runs", "id", "text", 0, false)
 	requireColumn(t, tx, "upstream_account_health_guard_runs", "finished_at", "timestamp with time zone", 0, false)
+	requireColumn(t, tx, "upstream_account_health_guard_runs", "skip_reasons", "jsonb", 0, false)
 	requireColumn(t, tx, "upstream_account_health_guard_run_items", "run_id", "text", 0, false)
 	requireColumn(t, tx, "upstream_account_health_guard_run_items", "account_id", "bigint", 0, false)
 	requireIndex(t, tx, "upstream_account_health_guard_runs", "idx_upstream_account_health_guard_runs_finished")

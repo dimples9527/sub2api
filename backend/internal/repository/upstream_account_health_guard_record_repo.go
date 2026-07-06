@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -30,13 +31,21 @@ func (r *upstreamAccountHealthGuardRecordRepository) SaveRecord(ctx context.Cont
 			_ = tx.Rollback()
 		}
 	}()
+	skipReasons := record.Summary.SkipReasons
+	if skipReasons == nil {
+		skipReasons = []service.UpstreamAccountHealthGuardSkipReason{}
+	}
+	skipReasonsJSON, err := json.Marshal(skipReasons)
+	if err != nil {
+		return fmt.Errorf("marshal health guard skip reasons: %w", err)
+	}
 
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO upstream_account_health_guard_runs (
 			id, trigger, status, message, started_at, finished_at,
 			total_accounts, checked_count, healthy_count, slow_count, failed_count,
-			skipped_count, disabled_count, recovered_count, unchanged_count, created_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NOW())
+			skipped_count, disabled_count, recovered_count, unchanged_count, skip_reasons, created_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,NOW())
 		ON CONFLICT (id) DO UPDATE SET
 			trigger = EXCLUDED.trigger,
 			status = EXCLUDED.status,
@@ -51,11 +60,13 @@ func (r *upstreamAccountHealthGuardRecordRepository) SaveRecord(ctx context.Cont
 			skipped_count = EXCLUDED.skipped_count,
 			disabled_count = EXCLUDED.disabled_count,
 			recovered_count = EXCLUDED.recovered_count,
-			unchanged_count = EXCLUDED.unchanged_count
+			unchanged_count = EXCLUDED.unchanged_count,
+			skip_reasons = EXCLUDED.skip_reasons
 	`, record.ID, record.Trigger, record.Status, record.Message, record.StartedAt, record.FinishedAt,
 		record.Summary.TotalAccounts, record.Summary.CheckedCount, record.Summary.HealthyCount,
 		record.Summary.SlowCount, record.Summary.FailedCount, record.Summary.SkippedCount,
 		record.Summary.DisabledCount, record.Summary.RecoveredCount, record.Summary.UnchangedCount,
+		string(skipReasonsJSON),
 	); err != nil {
 		return fmt.Errorf("save health guard run: %w", err)
 	}
@@ -111,7 +122,7 @@ func (r *upstreamAccountHealthGuardRecordRepository) ListRecords(ctx context.Con
 		SELECT
 			id, trigger, status, message, started_at, finished_at,
 			total_accounts, checked_count, healthy_count, slow_count, failed_count,
-			skipped_count, disabled_count, recovered_count, unchanged_count
+			skipped_count, disabled_count, recovered_count, unchanged_count, skip_reasons
 		FROM upstream_account_health_guard_runs
 		ORDER BY finished_at DESC, created_at DESC, id DESC
 		LIMIT $1
@@ -124,6 +135,7 @@ func (r *upstreamAccountHealthGuardRecordRepository) ListRecords(ctx context.Con
 	records := []service.UpstreamAccountHealthGuardRunRecord{}
 	for rows.Next() {
 		var record service.UpstreamAccountHealthGuardRunRecord
+		var skipReasonsRaw []byte
 		if err := rows.Scan(
 			&record.ID,
 			&record.Trigger,
@@ -140,8 +152,14 @@ func (r *upstreamAccountHealthGuardRecordRepository) ListRecords(ctx context.Con
 			&record.Summary.DisabledCount,
 			&record.Summary.RecoveredCount,
 			&record.Summary.UnchangedCount,
+			&skipReasonsRaw,
 		); err != nil {
 			return nil, err
+		}
+		if len(skipReasonsRaw) > 0 {
+			if err := json.Unmarshal(skipReasonsRaw, &record.Summary.SkipReasons); err != nil {
+				return nil, fmt.Errorf("decode health guard skip reasons: %w", err)
+			}
 		}
 		record.Items = []service.UpstreamAccountHealthGuardRunItem{}
 		records = append(records, record)

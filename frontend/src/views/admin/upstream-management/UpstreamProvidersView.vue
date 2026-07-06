@@ -670,6 +670,21 @@
             </div>
           </div>
 
+          <div v-if="healthGuardSkipReasons.length" class="health-guard-skip-panel">
+            <div class="balance-section-title">{{ t('admin.upstreamProviders.healthGuardSkipReasons') }}</div>
+            <div class="health-guard-skip-list">
+              <article v-for="reason in healthGuardSkipReasons" :key="reason.reason" class="health-guard-skip-item">
+                <div>
+                  <strong>{{ healthGuardSkipReasonLabel(reason.reason) }}</strong>
+                  <span>{{ t('admin.upstreamProviders.healthGuardSkipCount', { count: reason.count }) }}</span>
+                </div>
+                <p v-if="healthGuardSkipReasonSamples(reason)">
+                  {{ t('admin.upstreamProviders.healthGuardSkipSampleAccounts', { accounts: healthGuardSkipReasonSamples(reason) }) }}
+                </p>
+              </article>
+            </div>
+          </div>
+
           <div class="health-guard-item-list">
             <article
               v-for="item in latestHealthGuardItems"
@@ -691,7 +706,7 @@
               <p v-if="item.reason || item.error_message">{{ item.reason || item.error_message }}</p>
             </article>
             <div v-if="!latestHealthGuardItems.length" class="health-guard-empty">
-              {{ t('admin.upstreamProviders.healthGuardNoRecords') }}
+              {{ latestHealthGuardRecord ? t('admin.upstreamProviders.healthGuardNoCheckedItems') : t('admin.upstreamProviders.healthGuardNoRecords') }}
             </div>
           </div>
         </div>
@@ -1341,6 +1356,7 @@ import type {
   UpstreamAccountHealthGuardConfig,
   UpstreamAccountHealthGuardRunItem,
   UpstreamAccountHealthGuardRunRecord,
+  UpstreamAccountHealthGuardSkipReason,
   UpstreamBalanceConsumptionOverview,
   UpstreamBalanceDailyRow,
   UpstreamBalanceProviderSummary,
@@ -1679,6 +1695,7 @@ const selectedBalanceProviderLabel = computed(() => {
 })
 const latestHealthGuardRecord = computed(() => healthGuardRecords.value[0])
 const latestHealthGuardItems = computed<UpstreamAccountHealthGuardRunItem[]>(() => latestHealthGuardRecord.value?.items || [])
+const healthGuardSkipReasons = computed<UpstreamAccountHealthGuardSkipReason[]>(() => latestHealthGuardRecord.value?.summary?.skip_reasons || [])
 const healthGuardLastRunText = computed(() => {
   const lastRun = healthGuardConfig.value?.last_run_at
   return lastRun ? formatDateTime(lastRun) : t('admin.upstreamProviders.healthGuardNeverRun')
@@ -1686,10 +1703,12 @@ const healthGuardLastRunText = computed(() => {
 const healthGuardSummaryCards = computed(() => {
   const summary = latestHealthGuardRecord.value?.summary
   return [
+    { key: 'total', label: t('admin.upstreamProviders.healthGuardTotal'), value: summary?.total_accounts || 0, tone: '' },
     { key: 'checked', label: t('admin.upstreamProviders.healthGuardChecked'), value: summary?.checked_count || 0, tone: '' },
     { key: 'healthy', label: t('admin.upstreamProviders.healthGuardHealthy'), value: summary?.healthy_count || 0, tone: 'is-success' },
     { key: 'slow', label: t('admin.upstreamProviders.healthGuardSlow'), value: summary?.slow_count || 0, tone: 'is-warning' },
     { key: 'failed', label: t('admin.upstreamProviders.healthGuardFailed'), value: summary?.failed_count || 0, tone: 'is-danger' },
+    { key: 'skipped', label: t('admin.upstreamProviders.healthGuardSkipped'), value: summary?.skipped_count || 0, tone: 'is-warning' },
     { key: 'disabled', label: t('admin.upstreamProviders.healthGuardDisabled'), value: summary?.disabled_count || 0, tone: 'is-danger' },
     { key: 'recovered', label: t('admin.upstreamProviders.healthGuardRecovered'), value: summary?.recovered_count || 0, tone: 'is-success' },
   ]
@@ -2486,6 +2505,33 @@ function healthGuardActionLabel(action: string | undefined) {
 function healthGuardPlatformLabel(platform: string | undefined) {
   const normalized = String(platform || '').toLowerCase()
   return healthGuardPlatformOptions.value.find(option => option.value === normalized)?.label || platform || '-'
+}
+
+function healthGuardSkipReasonLabel(reason: string | undefined) {
+  switch (reason) {
+    case 'account_disabled':
+      return t('admin.upstreamProviders.healthGuardSkipReasonAccountDisabled')
+    case 'missing_provider_slug':
+      return t('admin.upstreamProviders.healthGuardSkipReasonMissingProviderSlug')
+    case 'provider_disabled':
+      return t('admin.upstreamProviders.healthGuardSkipReasonProviderDisabled')
+    case 'provider_not_found':
+      return t('admin.upstreamProviders.healthGuardSkipReasonProviderNotFound')
+    default:
+      return t('admin.upstreamProviders.healthGuardSkipReasonUnknown')
+  }
+}
+
+function healthGuardSkipReasonSamples(reason: UpstreamAccountHealthGuardSkipReason) {
+  const samples = reason.sample_accounts || []
+  return samples
+    .map((account) => {
+      const name = account.account_name || `#${account.account_id}`
+      const platform = healthGuardPlatformLabel(account.platform)
+      const provider = account.provider_slug ? ` / ${account.provider_slug}` : ''
+      return `${name} / ${platform}${provider}`
+    })
+    .join(', ')
 }
 
 function testStages(result: UpstreamProviderTestResult) {
@@ -3325,11 +3371,11 @@ onMounted(reload)
 }
 
 .health-guard-summary-grid {
-  @apply grid grid-cols-3 gap-2 md:grid-cols-6;
+  @apply grid grid-cols-4 gap-1.5 md:grid-cols-8;
 }
 
 .health-guard-summary-card {
-  @apply rounded-md border border-gray-200 bg-gray-50 px-3 py-2 dark:border-dark-600 dark:bg-dark-900/40;
+  @apply rounded-md border border-gray-200 bg-gray-50 px-2 py-2 text-center dark:border-dark-600 dark:bg-dark-900/40;
 }
 
 .health-guard-summary-card span {
@@ -3337,7 +3383,7 @@ onMounted(reload)
 }
 
 .health-guard-summary-card strong {
-  @apply mt-1 block font-mono text-lg text-gray-950 dark:text-white;
+  @apply mt-1 block font-mono text-base text-gray-950 dark:text-white;
 }
 
 .health-guard-summary-card.is-success strong {
@@ -3350,6 +3396,34 @@ onMounted(reload)
 
 .health-guard-summary-card.is-danger strong {
   @apply text-red-600 dark:text-red-300;
+}
+
+.health-guard-skip-panel {
+  @apply mt-3 border-t border-gray-100 pt-3 dark:border-dark-700;
+}
+
+.health-guard-skip-list {
+  @apply mt-2 space-y-2;
+}
+
+.health-guard-skip-item {
+  @apply rounded-md bg-amber-50/70 px-3 py-2 text-sm text-gray-700 dark:bg-amber-950/20 dark:text-gray-200;
+}
+
+.health-guard-skip-item div {
+  @apply flex flex-wrap items-center justify-between gap-2;
+}
+
+.health-guard-skip-item strong {
+  @apply text-sm font-semibold text-gray-950 dark:text-white;
+}
+
+.health-guard-skip-item span {
+  @apply font-mono text-xs font-semibold text-amber-700 dark:text-amber-300;
+}
+
+.health-guard-skip-item p {
+  @apply mt-1 break-words text-xs text-gray-500 dark:text-gray-400;
 }
 
 .health-guard-item-list {
@@ -3955,7 +4029,7 @@ onMounted(reload)
   }
 
   .health-guard-summary-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .health-guard-item-main {
@@ -3977,7 +4051,20 @@ onMounted(reload)
   }
 
   .health-guard-summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.25rem;
+  }
+
+  .health-guard-summary-card {
+    padding: 0.375rem 0.25rem;
+  }
+
+  .health-guard-summary-card span {
+    font-size: 0.6875rem;
+  }
+
+  .health-guard-summary-card strong {
+    font-size: 0.875rem;
   }
 
   .balance-recharge-form {

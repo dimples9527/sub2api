@@ -267,6 +267,20 @@ export interface UpstreamAccountHealthGuardRunSummary {
   disabled_count: number
   recovered_count: number
   unchanged_count: number
+  skip_reasons?: UpstreamAccountHealthGuardSkipReason[]
+}
+
+export interface UpstreamAccountHealthGuardSkippedAccount {
+  account_id: number
+  account_name: string
+  platform: string
+  provider_slug?: string
+}
+
+export interface UpstreamAccountHealthGuardSkipReason {
+  reason: string
+  count: number
+  sample_accounts?: UpstreamAccountHealthGuardSkippedAccount[]
 }
 
 export interface UpstreamAccountHealthGuardRunItem {

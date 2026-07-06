@@ -19,10 +19,10 @@ func TestUpstreamAccountHealthGuardRecordRepositoryListRecordsOnlyLoadsLatestIte
 	runRows := sqlmock.NewRows([]string{
 		"id", "trigger", "status", "message", "started_at", "finished_at",
 		"total_accounts", "checked_count", "healthy_count", "slow_count", "failed_count",
-		"skipped_count", "disabled_count", "recovered_count", "unchanged_count",
+		"skipped_count", "disabled_count", "recovered_count", "unchanged_count", "skip_reasons",
 	}).
-		AddRow("run-new", "manual", "success", "checked", now, now.Add(time.Second), 3, 2, 1, 1, 0, 1, 0, 0, 2).
-		AddRow("run-old", "scheduled", "success", "old", now.Add(-time.Hour), now.Add(-time.Hour+time.Second), 3, 3, 3, 0, 0, 0, 0, 0, 3)
+		AddRow("run-new", "manual", "success", "checked", now, now.Add(time.Second), 3, 2, 1, 1, 0, 1, 0, 0, 2, []byte(`[{"reason":"missing_provider_slug","count":1}]`)).
+		AddRow("run-old", "scheduled", "success", "old", now.Add(-time.Hour), now.Add(-time.Hour+time.Second), 3, 3, 3, 0, 0, 0, 0, 0, 3, []byte(`[]`))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM upstream_account_health_guard_runs")).
 		WithArgs(50).
 		WillReturnRows(runRows)
@@ -45,6 +45,9 @@ func TestUpstreamAccountHealthGuardRecordRepositoryListRecordsOnlyLoadsLatestIte
 	require.NoError(t, err)
 	require.Len(t, records, 2)
 	require.Equal(t, "run-new", records[0].ID)
+	require.Len(t, records[0].Summary.SkipReasons, 1)
+	require.Equal(t, "missing_provider_slug", records[0].Summary.SkipReasons[0].Reason)
+	require.Equal(t, 1, records[0].Summary.SkipReasons[0].Count)
 	require.Len(t, records[0].Items, 1)
 	require.Equal(t, int64(1), records[0].Items[0].AccountID)
 	require.Equal(t, "run-old", records[1].ID)

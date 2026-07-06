@@ -57,6 +57,14 @@ const (
 	upstreamHealthGuardLastLatencyLimitExtraKey = "upstream_health_guard_last_latency_limit_ms"
 )
 
+const (
+	upstreamAccountHealthGuardSkipAccountDisabled   = "account_disabled"
+	upstreamAccountHealthGuardSkipMissingProvider   = "missing_provider_slug"
+	upstreamAccountHealthGuardSkipProviderDisabled  = "provider_disabled"
+	upstreamAccountHealthGuardSkipProviderNotFound  = "provider_not_found"
+	upstreamAccountHealthGuardSkipReasonSampleLimit = 5
+)
+
 type UpstreamAccountHealthGuardConfig struct {
 	Enabled                  bool              `json:"enabled"`
 	IntervalSeconds          int               `json:"interval_seconds"`
@@ -82,15 +90,29 @@ type UpstreamAccountHealthGuardRunResponse struct {
 }
 
 type UpstreamAccountHealthGuardRunSummary struct {
-	TotalAccounts  int `json:"total_accounts"`
-	CheckedCount   int `json:"checked_count"`
-	HealthyCount   int `json:"healthy_count"`
-	SlowCount      int `json:"slow_count"`
-	FailedCount    int `json:"failed_count"`
-	SkippedCount   int `json:"skipped_count"`
-	DisabledCount  int `json:"disabled_count"`
-	RecoveredCount int `json:"recovered_count"`
-	UnchangedCount int `json:"unchanged_count"`
+	TotalAccounts  int                                    `json:"total_accounts"`
+	CheckedCount   int                                    `json:"checked_count"`
+	HealthyCount   int                                    `json:"healthy_count"`
+	SlowCount      int                                    `json:"slow_count"`
+	FailedCount    int                                    `json:"failed_count"`
+	SkippedCount   int                                    `json:"skipped_count"`
+	DisabledCount  int                                    `json:"disabled_count"`
+	RecoveredCount int                                    `json:"recovered_count"`
+	UnchangedCount int                                    `json:"unchanged_count"`
+	SkipReasons    []UpstreamAccountHealthGuardSkipReason `json:"skip_reasons,omitempty"`
+}
+
+type UpstreamAccountHealthGuardSkippedAccount struct {
+	AccountID    int64  `json:"account_id"`
+	AccountName  string `json:"account_name"`
+	Platform     string `json:"platform"`
+	ProviderSlug string `json:"provider_slug,omitempty"`
+}
+
+type UpstreamAccountHealthGuardSkipReason struct {
+	Reason         string                                     `json:"reason"`
+	Count          int                                        `json:"count"`
+	SampleAccounts []UpstreamAccountHealthGuardSkippedAccount `json:"sample_accounts,omitempty"`
 }
 
 type UpstreamAccountHealthGuardRunRecord struct {
@@ -158,6 +180,50 @@ type UpstreamAccountHealthGuardService struct {
 type upstreamAccountHealthGuardTarget struct {
 	account  Account
 	provider UpstreamProviderConfig
+}
+
+type upstreamAccountHealthGuardSkipReasonCollector struct {
+	order   []string
+	reasons map[string]*UpstreamAccountHealthGuardSkipReason
+}
+
+func newUpstreamAccountHealthGuardSkipReasonCollector() *upstreamAccountHealthGuardSkipReasonCollector {
+	return &upstreamAccountHealthGuardSkipReasonCollector{reasons: map[string]*UpstreamAccountHealthGuardSkipReason{}}
+}
+
+func (c *upstreamAccountHealthGuardSkipReasonCollector) add(reason string, account Account, providerSlug string) {
+	if c == nil || reason == "" {
+		return
+	}
+	item, ok := c.reasons[reason]
+	if !ok {
+		item = &UpstreamAccountHealthGuardSkipReason{Reason: reason}
+		c.reasons[reason] = item
+		c.order = append(c.order, reason)
+	}
+	item.Count++
+	if len(item.SampleAccounts) >= upstreamAccountHealthGuardSkipReasonSampleLimit {
+		return
+	}
+	item.SampleAccounts = append(item.SampleAccounts, UpstreamAccountHealthGuardSkippedAccount{
+		AccountID:    account.ID,
+		AccountName:  account.Name,
+		Platform:     account.Platform,
+		ProviderSlug: providerSlug,
+	})
+}
+
+func (c *upstreamAccountHealthGuardSkipReasonCollector) list() []UpstreamAccountHealthGuardSkipReason {
+	if c == nil || len(c.order) == 0 {
+		return nil
+	}
+	out := make([]UpstreamAccountHealthGuardSkipReason, 0, len(c.order))
+	for _, reason := range c.order {
+		if item := c.reasons[reason]; item != nil {
+			out = append(out, *item)
+		}
+	}
+	return out
 }
 
 func NewUpstreamAccountHealthGuardService(
@@ -250,12 +316,13 @@ func (s *UpstreamAccountHealthGuardService) Run(ctx context.Context, trigger str
 		return s.finishRunWithError(ctx, config, record, err)
 	}
 
-	targets, totalAccounts, skippedCount, nextCursor, err := s.listTargets(ctx, config)
+	targets, totalAccounts, skipReasons, nextCursor, err := s.listTargets(ctx, config)
 	if err != nil {
 		return s.finishRunWithError(ctx, config, record, err)
 	}
 	record.Summary.TotalAccounts = totalAccounts
-	record.Summary.SkippedCount = skippedCount
+	record.Summary.SkipReasons = skipReasons
+	record.Summary.SkippedCount = upstreamAccountHealthGuardSkipReasonTotal(skipReasons)
 
 	items := s.runTargets(ctx, config, targets)
 	sort.Slice(items, func(i, j int) bool {
@@ -351,18 +418,22 @@ func (s *UpstreamAccountHealthGuardService) finishRunWithError(
 	return UpstreamAccountHealthGuardRunResponse{Config: saved, Record: record}, runErr
 }
 
-func (s *UpstreamAccountHealthGuardService) listTargets(ctx context.Context, config UpstreamAccountHealthGuardConfig) ([]upstreamAccountHealthGuardTarget, int, int, int64, error) {
+func (s *UpstreamAccountHealthGuardService) listTargets(ctx context.Context, config UpstreamAccountHealthGuardConfig) ([]upstreamAccountHealthGuardTarget, int, []UpstreamAccountHealthGuardSkipReason, int64, error) {
 	providers, err := s.providerSource.ListProviders(ctx)
 	if err != nil {
-		return nil, 0, 0, 0, fmt.Errorf("list upstream providers: %w", err)
+		return nil, 0, nil, 0, fmt.Errorf("list upstream providers: %w", err)
 	}
+	allProviders := make(map[string]UpstreamProviderConfig, len(providers))
 	enabledProviders := make(map[string]UpstreamProviderConfig, len(providers))
 	for _, provider := range providers {
 		slug := strings.TrimSpace(provider.Slug)
-		if slug == "" || !provider.Enabled {
+		if slug == "" {
 			continue
 		}
-		enabledProviders[slug] = provider
+		allProviders[slug] = provider
+		if provider.Enabled {
+			enabledProviders[slug] = provider
+		}
 	}
 
 	maxAccounts := config.MaxAccountsPerRun
@@ -373,7 +444,7 @@ func (s *UpstreamAccountHealthGuardService) listTargets(ctx context.Context, con
 	deferredTargets := make([]upstreamAccountHealthGuardTarget, 0)
 	cursor := config.CursorAccountID
 	totalAccounts := 0
-	skippedCount := 0
+	skipReasons := newUpstreamAccountHealthGuardSkipReasonCollector()
 	const pageSize = 500
 	for page := 1; ; page++ {
 		accounts, result, err := s.accountStore.ListWithFilters(ctx, pagination.PaginationParams{
@@ -383,7 +454,7 @@ func (s *UpstreamAccountHealthGuardService) listTargets(ctx context.Context, con
 			SortOrder: "asc",
 		}, "", "", "", "", 0, "")
 		if err != nil {
-			return nil, 0, 0, 0, fmt.Errorf("list accounts: %w", err)
+			return nil, 0, nil, 0, fmt.Errorf("list accounts: %w", err)
 		}
 		if result != nil && result.Total > int64(totalAccounts) {
 			totalAccounts = int(result.Total)
@@ -393,9 +464,21 @@ func (s *UpstreamAccountHealthGuardService) listTargets(ctx context.Context, con
 
 		for _, account := range accounts {
 			providerSlug := upstreamAccountHealthGuardExtraString(account.Extra, "upstream_provider_slug")
+			if account.Status == StatusDisabled {
+				skipReasons.add(upstreamAccountHealthGuardSkipAccountDisabled, account, providerSlug)
+				continue
+			}
+			if providerSlug == "" {
+				skipReasons.add(upstreamAccountHealthGuardSkipMissingProvider, account, providerSlug)
+				continue
+			}
 			provider, providerEnabled := enabledProviders[providerSlug]
-			if account.Status == StatusDisabled || providerSlug == "" || !providerEnabled {
-				skippedCount++
+			if !providerEnabled {
+				if _, exists := allProviders[providerSlug]; exists {
+					skipReasons.add(upstreamAccountHealthGuardSkipProviderDisabled, account, providerSlug)
+				} else {
+					skipReasons.add(upstreamAccountHealthGuardSkipProviderNotFound, account, providerSlug)
+				}
 				continue
 			}
 			target := upstreamAccountHealthGuardTarget{account: account, provider: provider}
@@ -427,7 +510,7 @@ func (s *UpstreamAccountHealthGuardService) listTargets(ctx context.Context, con
 	if len(targets) > 0 {
 		nextCursor = targets[len(targets)-1].account.ID
 	}
-	return targets, totalAccounts, skippedCount, nextCursor, nil
+	return targets, totalAccounts, skipReasons.list(), nextCursor, nil
 }
 
 func (s *UpstreamAccountHealthGuardService) runTargets(ctx context.Context, config UpstreamAccountHealthGuardConfig, targets []upstreamAccountHealthGuardTarget) []UpstreamAccountHealthGuardRunItem {
@@ -795,14 +878,24 @@ func normalizeUpstreamAccountHealthGuardTrigger(trigger string) string {
 
 func upstreamAccountHealthGuardSummaryMessage(summary UpstreamAccountHealthGuardRunSummary) string {
 	return fmt.Sprintf(
-		"checked %d accounts, healthy %d, slow %d, failed %d, disabled %d, recovered %d",
+		"total %d accounts, checked %d, skipped %d, healthy %d, slow %d, failed %d, disabled %d, recovered %d",
+		summary.TotalAccounts,
 		summary.CheckedCount,
+		summary.SkippedCount,
 		summary.HealthyCount,
 		summary.SlowCount,
 		summary.FailedCount,
 		summary.DisabledCount,
 		summary.RecoveredCount,
 	)
+}
+
+func upstreamAccountHealthGuardSkipReasonTotal(reasons []UpstreamAccountHealthGuardSkipReason) int {
+	total := 0
+	for _, reason := range reasons {
+		total += reason.Count
+	}
+	return total
 }
 
 func upstreamAccountHealthGuardAppendMessage(current, next string) string {
