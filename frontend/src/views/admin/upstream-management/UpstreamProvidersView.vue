@@ -1193,7 +1193,7 @@
               <div class="balance-section-title">{{ t('admin.upstreamProviders.balanceSamples') }}</div>
               <span class="balance-record-count">{{ selectedBalanceSnapshots.length }}</span>
             </div>
-            <div class="balance-record-list max-h-72 overflow-auto rounded-lg border border-gray-200 dark:border-dark-600">
+            <div class="balance-record-list overflow-auto rounded-lg border border-gray-200 dark:border-dark-600">
               <div class="provider-mobile-record-cards">
                 <article
                   v-for="snapshot in selectedBalanceSnapshots"
@@ -1258,7 +1258,7 @@
               <div class="balance-section-title">{{ t('admin.upstreamProviders.balanceHistory') }}</div>
               <span class="balance-record-count">{{ selectedBalanceRows.length }}</span>
             </div>
-            <div class="balance-record-list max-h-72 overflow-auto rounded-lg border border-gray-200 dark:border-dark-600">
+            <div class="balance-record-list overflow-auto rounded-lg border border-gray-200 dark:border-dark-600">
               <div class="provider-mobile-record-cards">
                 <article
                   v-for="row in selectedBalanceRows"
@@ -3176,7 +3176,7 @@ onMounted(reload)
 }
 
 .balance-dialog {
-  @apply max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-dark-800;
+  @apply flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-dark-800;
 }
 
 .balance-dialog-handle {
@@ -3192,7 +3192,7 @@ onMounted(reload)
 }
 
 .balance-dialog-body {
-  @apply max-h-[calc(90vh-5rem)] space-y-4 overflow-auto p-5;
+  @apply flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-5;
 }
 
 .balance-summary-grid {
@@ -3495,7 +3495,7 @@ onMounted(reload)
 }
 
 .balance-record-section {
-  @apply min-w-0 space-y-3;
+  @apply flex min-h-0 min-w-0 flex-1 flex-col gap-3;
 }
 
 .balance-record-tabs {
@@ -3519,7 +3519,7 @@ onMounted(reload)
 }
 
 .balance-record-pane {
-  @apply space-y-3;
+  @apply flex min-h-0 flex-1 flex-col gap-3;
 }
 
 .balance-record-header {
@@ -3535,7 +3535,8 @@ onMounted(reload)
 }
 
 .balance-record-list {
-  @apply bg-white dark:bg-dark-800;
+  @apply min-h-[20rem] flex-1 bg-white dark:bg-dark-800;
+  max-height: min(52vh, 34rem);
 }
 
 .balance-last-snapshot {
@@ -3794,6 +3795,7 @@ onMounted(reload)
 
   .balance-dialog {
     width: 100%;
+    height: min(92dvh, calc(100vh - 0.75rem));
     max-height: min(92dvh, calc(100vh - 0.75rem));
     border-radius: 14px 14px 0 0;
   }
@@ -3833,8 +3835,9 @@ onMounted(reload)
   }
 
   .balance-dialog-body {
-    max-height: min(calc(92dvh - 4rem), calc(100vh - 4.75rem));
+    max-height: none;
     padding: 10px;
+    gap: 10px;
   }
 
   .balance-summary-grid {
@@ -3926,7 +3929,8 @@ onMounted(reload)
   }
 
   .balance-record-list {
-    max-height: min(32vh, 15rem);
+    min-height: 18rem;
+    max-height: none;
   }
 
   .balance-record-list.mb-5 {
