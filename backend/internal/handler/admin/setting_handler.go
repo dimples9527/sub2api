@@ -296,34 +296,35 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		OpenAIAdvancedSchedulerEffectiveWeightQuotaHeadroom:    settings.OpenAIAdvancedSchedulerEffectiveWeightQuotaHeadroom,
 		OpenAIAdvancedSchedulerEffectiveWeightPreviousResponse: settings.OpenAIAdvancedSchedulerEffectiveWeightPreviousResponse,
 		OpenAIAdvancedSchedulerEffectiveWeightSessionSticky:    settings.OpenAIAdvancedSchedulerEffectiveWeightSessionSticky,
-		BalanceLowNotifyEnabled:                settings.BalanceLowNotifyEnabled,
-		BalanceLowNotifyThreshold:              settings.BalanceLowNotifyThreshold,
-		BalanceLowNotifyRechargeURL:            settings.BalanceLowNotifyRechargeURL,
-		SubscriptionExpiryNotifyEnabled:        settings.SubscriptionExpiryNotifyEnabled,
-		AccountQuotaNotifyEnabled:              settings.AccountQuotaNotifyEnabled,
-		AccountQuotaNotifyEmails:               dto.NotifyEmailEntriesFromService(settings.AccountQuotaNotifyEmails),
-		PaymentEnabled:                         paymentCfg.Enabled,
-		PaymentMinAmount:                       paymentCfg.MinAmount,
-		PaymentMaxAmount:                       paymentCfg.MaxAmount,
-		PaymentDailyLimit:                      paymentCfg.DailyLimit,
-		PaymentOrderTimeoutMin:                 paymentCfg.OrderTimeoutMin,
-		PaymentMaxPendingOrders:                paymentCfg.MaxPendingOrders,
-		PaymentEnabledTypes:                    paymentCfg.EnabledTypes,
-		PaymentBalanceDisabled:                 paymentCfg.BalanceDisabled,
-		PaymentBalanceRechargeMultiplier:       paymentCfg.BalanceRechargeMultiplier,
-		PaymentRechargeFeeRate:                 paymentCfg.RechargeFeeRate,
-		PaymentRechargeOptions:                 paymentCfg.RechargeOptions,
-		PaymentLoadBalanceStrat:                paymentCfg.LoadBalanceStrategy,
-		PaymentProductNamePrefix:               paymentCfg.ProductNamePrefix,
-		PaymentProductNameSuffix:               paymentCfg.ProductNameSuffix,
-		PaymentHelpImageURL:                    paymentCfg.HelpImageURL,
-		PaymentHelpText:                        paymentCfg.HelpText,
-		PaymentCancelRateLimitEnabled:          paymentCfg.CancelRateLimitEnabled,
-		PaymentCancelRateLimitMax:              paymentCfg.CancelRateLimitMax,
-		PaymentCancelRateLimitWindow:           paymentCfg.CancelRateLimitWindow,
-		PaymentCancelRateLimitUnit:             paymentCfg.CancelRateLimitUnit,
-		PaymentCancelRateLimitMode:             paymentCfg.CancelRateLimitMode,
-		PaymentAlipayForceQRCode:               paymentCfg.AlipayForceQRCode,
+		BalanceLowNotifyEnabled:                                settings.BalanceLowNotifyEnabled,
+		BalanceLowNotifyThreshold:                              settings.BalanceLowNotifyThreshold,
+		BalanceLowNotifyRechargeURL:                            settings.BalanceLowNotifyRechargeURL,
+		SubscriptionExpiryNotifyEnabled:                        settings.SubscriptionExpiryNotifyEnabled,
+		AccountQuotaNotifyEnabled:                              settings.AccountQuotaNotifyEnabled,
+		AccountQuotaNotifyEmails:                               dto.NotifyEmailEntriesFromService(settings.AccountQuotaNotifyEmails),
+		PaymentEnabled:                                         paymentCfg.Enabled,
+		PaymentMinAmount:                                       paymentCfg.MinAmount,
+		PaymentMaxAmount:                                       paymentCfg.MaxAmount,
+		PaymentDailyLimit:                                      paymentCfg.DailyLimit,
+		PaymentOrderTimeoutMin:                                 paymentCfg.OrderTimeoutMin,
+		PaymentMaxPendingOrders:                                paymentCfg.MaxPendingOrders,
+		PaymentEnabledTypes:                                    paymentCfg.EnabledTypes,
+		PaymentBalanceDisabled:                                 paymentCfg.BalanceDisabled,
+		PaymentBalanceRechargeMultiplier:                       paymentCfg.BalanceRechargeMultiplier,
+		PaymentSubscriptionUSDToCNYRate:                        paymentCfg.SubscriptionUSDToCNYRate,
+		PaymentRechargeFeeRate:                                 paymentCfg.RechargeFeeRate,
+		PaymentRechargeOptions:                                 paymentCfg.RechargeOptions,
+		PaymentLoadBalanceStrat:                                paymentCfg.LoadBalanceStrategy,
+		PaymentProductNamePrefix:                               paymentCfg.ProductNamePrefix,
+		PaymentProductNameSuffix:                               paymentCfg.ProductNameSuffix,
+		PaymentHelpImageURL:                                    paymentCfg.HelpImageURL,
+		PaymentHelpText:                                        paymentCfg.HelpText,
+		PaymentCancelRateLimitEnabled:                          paymentCfg.CancelRateLimitEnabled,
+		PaymentCancelRateLimitMax:                              paymentCfg.CancelRateLimitMax,
+		PaymentCancelRateLimitWindow:                           paymentCfg.CancelRateLimitWindow,
+		PaymentCancelRateLimitUnit:                             paymentCfg.CancelRateLimitUnit,
+		PaymentCancelRateLimitMode:                             paymentCfg.CancelRateLimitMode,
+		PaymentAlipayForceQRCode:                               paymentCfg.AlipayForceQRCode,
 
 		ChannelMonitorEnabled:                settings.ChannelMonitorEnabled,
 		ChannelMonitorDefaultIntervalSeconds: settings.ChannelMonitorDefaultIntervalSeconds,
@@ -664,22 +665,23 @@ type UpdateSettingsRequest struct {
 	AccountQuotaNotifyEmails        *[]dto.NotifyEmailEntry `json:"account_quota_notify_emails"`
 
 	// Payment configuration (integrated into settings, full replace)
-	PaymentEnabled                   *bool     `json:"payment_enabled"`
-	PaymentMinAmount                 *float64  `json:"payment_min_amount"`
-	PaymentMaxAmount                 *float64  `json:"payment_max_amount"`
-	PaymentDailyLimit                *float64  `json:"payment_daily_limit"`
-	PaymentOrderTimeoutMin           *int      `json:"payment_order_timeout_minutes"`
-	PaymentMaxPendingOrders          *int      `json:"payment_max_pending_orders"`
-	PaymentEnabledTypes              []string  `json:"payment_enabled_types"`
-	PaymentBalanceDisabled           *bool     `json:"payment_balance_disabled"`
-	PaymentBalanceRechargeMultiplier *float64  `json:"payment_balance_recharge_multiplier"`
-	PaymentRechargeFeeRate           *float64  `json:"payment_recharge_fee_rate"`
+	PaymentEnabled                   *bool    `json:"payment_enabled"`
+	PaymentMinAmount                 *float64 `json:"payment_min_amount"`
+	PaymentMaxAmount                 *float64 `json:"payment_max_amount"`
+	PaymentDailyLimit                *float64 `json:"payment_daily_limit"`
+	PaymentOrderTimeoutMin           *int     `json:"payment_order_timeout_minutes"`
+	PaymentMaxPendingOrders          *int     `json:"payment_max_pending_orders"`
+	PaymentEnabledTypes              []string `json:"payment_enabled_types"`
+	PaymentBalanceDisabled           *bool    `json:"payment_balance_disabled"`
+	PaymentBalanceRechargeMultiplier *float64 `json:"payment_balance_recharge_multiplier"`
+	PaymentSubscriptionUSDToCNYRate  *float64 `json:"payment_subscription_usd_to_cny_rate"`
+	PaymentRechargeFeeRate           *float64 `json:"payment_recharge_fee_rate"`
 	PaymentRechargeOptions           []float64 `json:"payment_recharge_options"`
-	PaymentLoadBalanceStrat          *string   `json:"payment_load_balance_strategy"`
-	PaymentProductNamePrefix         *string   `json:"payment_product_name_prefix"`
-	PaymentProductNameSuffix         *string   `json:"payment_product_name_suffix"`
-	PaymentHelpImageURL              *string   `json:"payment_help_image_url"`
-	PaymentHelpText                  *string   `json:"payment_help_text"`
+	PaymentLoadBalanceStrat          *string  `json:"payment_load_balance_strategy"`
+	PaymentProductNamePrefix         *string  `json:"payment_product_name_prefix"`
+	PaymentProductNameSuffix         *string  `json:"payment_product_name_suffix"`
+	PaymentHelpImageURL              *string  `json:"payment_help_image_url"`
+	PaymentHelpText                  *string  `json:"payment_help_text"`
 
 	// Cancel rate limit
 	PaymentCancelRateLimitEnabled *bool   `json:"payment_cancel_rate_limit_enabled"`
@@ -2017,6 +2019,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			EnabledTypes:              req.PaymentEnabledTypes,
 			BalanceDisabled:           req.PaymentBalanceDisabled,
 			BalanceRechargeMultiplier: req.PaymentBalanceRechargeMultiplier,
+			SubscriptionUSDToCNYRate:  req.PaymentSubscriptionUSDToCNYRate,
 			RechargeFeeRate:           req.PaymentRechargeFeeRate,
 			RechargeOptions:           req.PaymentRechargeOptions,
 			LoadBalanceStrategy:       req.PaymentLoadBalanceStrat,
@@ -2261,6 +2264,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		PaymentEnabledTypes:                                    updatedPaymentCfg.EnabledTypes,
 		PaymentBalanceDisabled:                                 updatedPaymentCfg.BalanceDisabled,
 		PaymentBalanceRechargeMultiplier:                       updatedPaymentCfg.BalanceRechargeMultiplier,
+		PaymentSubscriptionUSDToCNYRate:                        updatedPaymentCfg.SubscriptionUSDToCNYRate,
 		PaymentRechargeFeeRate:                                 updatedPaymentCfg.RechargeFeeRate,
 		PaymentRechargeOptions:                                 updatedPaymentCfg.RechargeOptions,
 		PaymentLoadBalanceStrat:                                updatedPaymentCfg.LoadBalanceStrategy,
@@ -2320,7 +2324,8 @@ func hasPaymentFields(req UpdateSettingsRequest) bool {
 		req.PaymentMaxAmount != nil || req.PaymentDailyLimit != nil ||
 		req.PaymentOrderTimeoutMin != nil || req.PaymentMaxPendingOrders != nil ||
 		req.PaymentEnabledTypes != nil || req.PaymentBalanceDisabled != nil ||
-		req.PaymentBalanceRechargeMultiplier != nil || req.PaymentRechargeFeeRate != nil ||
+		req.PaymentBalanceRechargeMultiplier != nil || req.PaymentSubscriptionUSDToCNYRate != nil ||
+		req.PaymentRechargeFeeRate != nil ||
 		req.PaymentRechargeOptions != nil ||
 		req.PaymentLoadBalanceStrat != nil || req.PaymentProductNamePrefix != nil ||
 		req.PaymentProductNameSuffix != nil || req.PaymentHelpImageURL != nil ||
