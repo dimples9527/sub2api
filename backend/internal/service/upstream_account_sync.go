@@ -389,7 +389,32 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 				continue
 			}
 			account := previewState.accountByID[*item.MatchedAccountID]
-			if !upstreamAccountSyncAccountCompatible(account) {
+			if upstreamAccountSyncItemMetadataOnly(*item) || !upstreamAccountSyncAccountCompatible(account) {
+				if !upstreamAccountSyncMetadataNeedsUpdate(account, *item, provider) {
+					continue
+				}
+				extra := upstreamAccountSyncExtra(provider, *item, now, account.Extra)
+				updated, err := s.accountManager.UpdateAccount(ctx, account.ID, &UpdateAccountInput{
+					Extra:                 extra,
+					SkipMixedChannelCheck: true,
+				})
+				if err != nil {
+					return s.finishSyncWithError(ctx, result, triggerSource, recordStats, recordOrder, item.ProviderSlug, err)
+				}
+				accountName := account.Name
+				if updated != nil && strings.TrimSpace(updated.Name) != "" {
+					accountName = updated.Name
+				}
+				accountID := account.ID
+				item.Execution = UpstreamAccountSyncExecutionResult{
+					Executed:    true,
+					Action:      UpstreamAccountSyncActionUpdate,
+					AccountID:   &accountID,
+					AccountName: accountName,
+				}
+				item.Action = UpstreamAccountSyncActionUpdate
+				result.Summary.UpdateCount++
+				recordStats[item.ProviderSlug].updatedCount++
 				continue
 			}
 			nextGroupIDs := upstreamAccountSyncExistingGroupIDs(account)
@@ -810,6 +835,7 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context, useProviderKey
 		Warnings:        []string{},
 		Records:         []UpstreamAccountSyncRecord{},
 	}
+	accountItemIDs := map[int64]struct{}{}
 	providerKeysBySlug := s.fetchProviderKeysForAccountSync(ctx, syncProviders, useProviderKeysCache)
 	for _, provider := range syncProviders {
 		groupResolver := newUpstreamAccountSyncGroupResolver(provider, localGroups, mappings)
@@ -819,6 +845,7 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context, useProviderKey
 			fallbackItems := upstreamAccountSyncLocalSnapshotItemsForProvider(provider, accounts, keyResult.err)
 			result.Summary.UpstreamKeyCount += len(fallbackItems)
 			result.Summary.MatchedAccountCount += len(fallbackItems)
+			upstreamAccountSyncMarkItemAccountIDs(accountItemIDs, fallbackItems)
 			result.Items = append(result.Items, fallbackItems...)
 			continue
 		}
@@ -861,6 +888,7 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context, useProviderKey
 				}
 			}
 			if len(matches) > 1 {
+				upstreamAccountSyncMarkAccounts(accountItemIDs, matches)
 				item.Action = UpstreamAccountSyncActionConflict
 				item.ConflictAccountIDs = accountIDs(matches)
 				item.ConflictAccounts = upstreamAccountSyncConflictAccounts(matches, item.UpstreamRateMultiplier)
@@ -871,15 +899,20 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context, useProviderKey
 
 			if len(matches) == 1 {
 				account := matches[0]
+				upstreamAccountSyncMarkAccounts(accountItemIDs, matches)
 				accountID := account.ID
 				item.MatchedAccountID = &accountID
 				item.MatchedAccountName = account.Name
 				item.BoundGroups = upstreamAccountSyncBoundGroups(account, item.UpstreamRateMultiplier)
 				result.Summary.MatchedAccountCount++
 				if !upstreamAccountSyncAccountCompatible(account) {
-					item.Action = UpstreamAccountSyncActionSkip
-					item.SkipReason = "matched account is not an OpenAI API key account"
-					result.Summary.SkipCount++
+					if upstreamAccountSyncMetadataNeedsUpdate(account, item, provider) {
+						item.ChangeDetails = upstreamAccountSyncMetadataChangeDetails()
+						item.Action = UpstreamAccountSyncActionUpdate
+						result.Summary.UpdateCount++
+					} else {
+						item.Action = UpstreamAccountSyncActionNoop
+					}
 					result.Items = append(result.Items, item)
 					continue
 				}
@@ -892,6 +925,13 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context, useProviderKey
 				item.LocalGroupName = group.Name
 				item.LocalRateMultiplier = &rate
 			} else {
+				if len(matches) == 1 && upstreamAccountSyncMetadataNeedsUpdate(matches[0], item, provider) {
+					item.ChangeDetails = upstreamAccountSyncMetadataChangeDetails()
+					item.Action = UpstreamAccountSyncActionUpdate
+					result.Summary.UpdateCount++
+					result.Items = append(result.Items, item)
+					continue
+				}
 				item.Action = UpstreamAccountSyncActionSkip
 				item.SkipReason = "upstream group is not matched"
 				result.Summary.SkipCount++
@@ -925,6 +965,7 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context, useProviderKey
 			result.Items = append(result.Items, item)
 		}
 	}
+	upstreamAccountSyncAppendInferredMetadataItems(&result, accounts, syncProviders, accountItemIDs)
 	return result, upstreamAccountSyncPreviewState{accountByID: accountByID, providerBySlug: providerBySlug}, nil
 }
 
@@ -985,6 +1026,202 @@ func upstreamAccountSyncLocalSnapshotItemsForProvider(provider UpstreamProviderC
 		return items[i].UpstreamKeyName < items[j].UpstreamKeyName
 	})
 	return items
+}
+
+func upstreamAccountSyncAppendInferredMetadataItems(result *UpstreamAccountSyncResult, accounts []Account, providers []UpstreamProviderConfig, accountItemIDs map[int64]struct{}) {
+	if result == nil || len(accounts) == 0 || len(providers) == 0 {
+		return
+	}
+	if accountItemIDs == nil {
+		accountItemIDs = map[int64]struct{}{}
+	}
+	for _, account := range accounts {
+		if _, exists := accountItemIDs[account.ID]; exists {
+			continue
+		}
+		if !upstreamAccountSyncMetadataInferenceEligible(account) {
+			continue
+		}
+		provider, keyName, ok := upstreamAccountSyncInferProviderKeyFromAccountName(account, providers)
+		if !ok {
+			continue
+		}
+		item := upstreamAccountSyncInferredMetadataItem(provider, account, keyName)
+		if !upstreamAccountSyncMetadataNeedsUpdate(account, item, provider) {
+			continue
+		}
+		result.Items = append(result.Items, item)
+		result.Summary.MatchedAccountCount++
+		result.Summary.UpdateCount++
+		accountItemIDs[account.ID] = struct{}{}
+	}
+}
+
+func upstreamAccountSyncMetadataInferenceEligible(account Account) bool {
+	if account.ID <= 0 || strings.TrimSpace(account.Name) == "" {
+		return false
+	}
+	if strings.TrimSpace(account.Status) == StatusDisabled {
+		return false
+	}
+	return account.Type == AccountTypeAPIKey
+}
+
+func upstreamAccountSyncInferProviderKeyFromAccountName(account Account, providers []UpstreamProviderConfig) (UpstreamProviderConfig, string, bool) {
+	accountName := strings.TrimSpace(account.Name)
+	if accountName == "" {
+		return UpstreamProviderConfig{}, "", false
+	}
+
+	candidates := upstreamAccountSyncPrefixCandidates(providers)
+	for _, candidate := range candidates {
+		if keyName, ok := upstreamAccountSyncTrimLocalAccountPrefix(accountName, candidate.prefix); ok {
+			keyName = strings.TrimSpace(keyName)
+			if keyName == "" {
+				continue
+			}
+			return candidate.provider, keyName, true
+		}
+	}
+
+	defaultProvider := upstreamAccountSyncDefaultProvider(providers)
+	if defaultProvider.Slug == "" {
+		return UpstreamProviderConfig{}, "", false
+	}
+	if !upstreamAccountSyncDefaultInferenceBaseURLMatches(account, defaultProvider, providers) {
+		return UpstreamProviderConfig{}, "", false
+	}
+	return defaultProvider, accountName, true
+}
+
+type upstreamAccountSyncPrefixCandidate struct {
+	provider UpstreamProviderConfig
+	prefix   string
+}
+
+func upstreamAccountSyncPrefixCandidates(providers []UpstreamProviderConfig) []upstreamAccountSyncPrefixCandidate {
+	candidates := make([]upstreamAccountSyncPrefixCandidate, 0, len(providers))
+	seen := map[string]struct{}{}
+	for _, provider := range providers {
+		if provider.Slug == "" || provider.IsDefault {
+			continue
+		}
+		prefix := upstreamAccountSyncEffectiveAccountNamePrefix(provider)
+		if prefix == "" {
+			continue
+		}
+		key := strings.ToLower(prefix)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		candidates = append(candidates, upstreamAccountSyncPrefixCandidate{
+			provider: provider,
+			prefix:   prefix,
+		})
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return len([]rune(candidates[i].prefix)) > len([]rune(candidates[j].prefix))
+	})
+	return candidates
+}
+
+func upstreamAccountSyncEffectiveAccountNamePrefix(provider UpstreamProviderConfig) string {
+	prefix := strings.TrimSpace(provider.AccountNamePrefix)
+	if prefix == "" {
+		return ""
+	}
+	if strings.HasSuffix(prefix, "-") {
+		return prefix
+	}
+	return prefix + "-"
+}
+
+func upstreamAccountSyncTrimLocalAccountPrefix(accountName, prefix string) (string, bool) {
+	accountName = strings.TrimSpace(accountName)
+	prefix = strings.TrimSpace(prefix)
+	if accountName == "" || prefix == "" {
+		return "", false
+	}
+	if strings.HasPrefix(accountName, prefix) {
+		return accountName[len(prefix):], true
+	}
+	accountRunes := []rune(accountName)
+	prefixRunes := []rune(prefix)
+	if len(accountRunes) < len(prefixRunes) {
+		return "", false
+	}
+	head := string(accountRunes[:len(prefixRunes)])
+	if strings.EqualFold(head, prefix) {
+		return string(accountRunes[len(prefixRunes):]), true
+	}
+	return "", false
+}
+
+func upstreamAccountSyncDefaultProvider(providers []UpstreamProviderConfig) UpstreamProviderConfig {
+	for _, provider := range providers {
+		if provider.Slug != "" && provider.IsDefault {
+			return provider
+		}
+	}
+	if len(providers) > 0 && providers[0].Slug != "" {
+		return providers[0]
+	}
+	return UpstreamProviderConfig{}
+}
+
+func upstreamAccountSyncDefaultInferenceBaseURLMatches(account Account, defaultProvider UpstreamProviderConfig, providers []UpstreamProviderConfig) bool {
+	defaultBaseURL := normalizeUpstreamAccountSyncBaseURL(defaultProvider.BaseURL)
+	accountBaseURL := normalizeUpstreamAccountSyncBaseURL(account.GetCredential("base_url"))
+	if defaultBaseURL == "" {
+		return false
+	}
+	if accountBaseURL == "" {
+		return false
+	}
+	if accountBaseURL == defaultBaseURL {
+		return true
+	}
+	for _, provider := range providers {
+		if provider.Slug == "" || provider.IsDefault {
+			continue
+		}
+		if accountBaseURL != "" && accountBaseURL == normalizeUpstreamAccountSyncBaseURL(provider.BaseURL) {
+			return false
+		}
+	}
+	return false
+}
+
+func upstreamAccountSyncInferredMetadataItem(provider UpstreamProviderConfig, account Account, keyName string) UpstreamAccountSyncItem {
+	providerName := strings.TrimSpace(provider.Name)
+	if providerName == "" {
+		providerName = provider.Slug
+	}
+	baseURL := strings.TrimSpace(provider.BaseURL)
+	if baseURL == "" {
+		baseURL = strings.TrimSpace(account.GetCredential("base_url"))
+	}
+	accountID := account.ID
+	upstreamRate := 0.0
+	if account.Extra != nil {
+		upstreamRate = parseExtraFloat64(account.Extra["upstream_rate_multiplier"])
+	}
+	return UpstreamAccountSyncItem{
+		Action:                 UpstreamAccountSyncActionUpdate,
+		ProviderSlug:           provider.Slug,
+		ProviderName:           providerName,
+		ProviderBaseURL:        baseURL,
+		UpstreamKeyName:        strings.TrimSpace(keyName),
+		UpstreamBaseURL:        baseURL,
+		LocalAccountName:       account.Name,
+		MatchedAccountID:       &accountID,
+		MatchedAccountName:     account.Name,
+		UpstreamGroupName:      strings.TrimSpace(account.GetExtraString("upstream_group_name")),
+		UpstreamRateMultiplier: upstreamRate,
+		BoundGroups:            upstreamAccountSyncBoundGroups(account, upstreamRate),
+		ChangeDetails:          upstreamAccountSyncMetadataChangeDetails(),
+	}
 }
 
 func effectiveUpstreamAccountRateMultiplier(rawRate, scale float64) float64 {
@@ -1370,6 +1607,30 @@ func upstreamAccountSyncAccountsByProviderKey(accounts []Account) map[string][]A
 	return out
 }
 
+func upstreamAccountSyncMarkItemAccountIDs(seen map[int64]struct{}, items []UpstreamAccountSyncItem) {
+	if seen == nil {
+		return
+	}
+	for _, item := range items {
+		if item.MatchedAccountID == nil || *item.MatchedAccountID <= 0 {
+			continue
+		}
+		seen[*item.MatchedAccountID] = struct{}{}
+	}
+}
+
+func upstreamAccountSyncMarkAccounts(seen map[int64]struct{}, accounts []Account) {
+	if seen == nil {
+		return
+	}
+	for _, account := range accounts {
+		if account.ID <= 0 {
+			continue
+		}
+		seen[account.ID] = struct{}{}
+	}
+}
+
 func upstreamAccountSyncProviderKeyMatchKey(providerSlug, keyName string) string {
 	providerSlug = strings.TrimSpace(providerSlug)
 	keyName = normalizeUpstreamGroupMatchName(keyName)
@@ -1530,10 +1791,46 @@ func upstreamAccountSyncNeedsUpdate(account Account, item UpstreamAccountSyncIte
 	if strings.TrimRight(strings.TrimSpace(account.GetCredential("base_url")), "/") != strings.TrimRight(strings.TrimSpace(provider.BaseURL), "/") {
 		return true
 	}
+	if upstreamAccountSyncMetadataNeedsUpdate(account, item, provider) {
+		return true
+	}
 	if item.LocalGroupID != nil && !containsInt64(upstreamAccountSyncExistingGroupIDs(account), *item.LocalGroupID) {
 		return true
 	}
 	return false
+}
+
+func upstreamAccountSyncMetadataNeedsUpdate(account Account, item UpstreamAccountSyncItem, provider UpstreamProviderConfig) bool {
+	if strings.TrimSpace(account.GetExtraString("upstream_provider_slug")) != strings.TrimSpace(provider.Slug) {
+		return true
+	}
+	if strings.TrimSpace(account.GetExtraString("upstream_key_name")) != strings.TrimSpace(item.UpstreamKeyName) {
+		return true
+	}
+	return false
+}
+
+func upstreamAccountSyncMetadataChangeDetails() []UpstreamAccountSyncChangeDetail {
+	return []UpstreamAccountSyncChangeDetail{{
+		Kind:  "metadata",
+		Field: "upstream",
+		Label: "Upstream sync metadata",
+	}}
+}
+
+func upstreamAccountSyncItemMetadataOnly(item UpstreamAccountSyncItem) bool {
+	if item.LocalGroupID != nil || item.RateViolation || len(item.UnboundGroupIDs) > 0 {
+		return false
+	}
+	if len(item.ChangeDetails) == 0 {
+		return false
+	}
+	for _, detail := range item.ChangeDetails {
+		if detail.Kind != "metadata" {
+			return false
+		}
+	}
+	return true
 }
 
 func upstreamAccountSyncSelectedItems(items []UpstreamAccountSyncSelectedItem) (map[string]UpstreamAccountSyncSelectedItem, bool) {
@@ -1586,11 +1883,7 @@ func upstreamAccountSyncChangeDetails(account Account, item UpstreamAccountSyncI
 		})
 	}
 
-	details = append(details, UpstreamAccountSyncChangeDetail{
-		Kind:  "metadata",
-		Field: "upstream",
-		Label: "Upstream sync metadata",
-	})
+	details = append(details, upstreamAccountSyncMetadataChangeDetails()...)
 
 	existingGroupIDs := upstreamAccountSyncExistingGroupIDs(account)
 	if item.LocalGroupID != nil && !containsInt64(existingGroupIDs, *item.LocalGroupID) {

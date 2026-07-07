@@ -521,5 +521,8 @@ func (noopAccountRepo) BulkUpdate(context.Context, []int64, AccountBulkUpdate) (
 func (noopAccountRepo) IncrementQuotaUsed(context.Context, int64, float64) error { return nil }
 func (noopAccountRepo) ResetQuotaUsed(context.Context, int64) error              { return nil }
 func (noopAccountRepo) RevertProxyFallback(context.Context, int64) error         { return nil }
+func (noopAccountRepo) ListShadowsByParent(context.Context, int64) ([]*Account, error) {
+	return nil, nil
+}
 
 var _ AccountRepository = (*batchAccountTestRepo)(nil)

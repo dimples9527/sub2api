@@ -527,8 +527,8 @@ func TestUpstreamAccountSyncPreviewIncludesDefaultProviderWithoutAccountPrefix(t
 	if main.LocalAccountName != "Codex Pro" {
 		t.Fatalf("default local account name = %q, want upstream key without prefix", main.LocalAccountName)
 	}
-	if main.MatchedAccountID == nil || *main.MatchedAccountID != 10 || main.Action != UpstreamAccountSyncActionNoop {
-		t.Fatalf("default item = %+v, want matched noop account 10", main)
+	if main.MatchedAccountID == nil || *main.MatchedAccountID != 10 || main.Action != UpstreamAccountSyncActionUpdate {
+		t.Fatalf("default item = %+v, want matched metadata update account 10", main)
 	}
 	backup := byProvider["backup"]
 	if backup.LocalAccountName != "backup-Codex Pro" {
@@ -847,7 +847,7 @@ func TestUpstreamAccountSyncPreviewDetectsDuplicateLocalAccountNames(t *testing.
 	}
 }
 
-func TestUpstreamAccountSyncPreviewMatchesPrefixedKeyNameIgnoringUnicodeSpacesAndCase(t *testing.T) {
+func TestUpstreamAccountSyncPreviewMatchesPrefixedKeyNameAndQueuesMissingMetadataUpdate(t *testing.T) {
 	provider := &upstreamAccountSyncProviderSourceStub{
 		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
 		providers: []UpstreamProviderConfig{
@@ -883,8 +883,232 @@ func TestUpstreamAccountSyncPreviewMatchesPrefixedKeyNameIgnoringUnicodeSpacesAn
 	if item.MatchedAccountID == nil || *item.MatchedAccountID != 10 {
 		t.Fatalf("matched account id = %v, want 10", item.MatchedAccountID)
 	}
-	if item.Action != UpstreamAccountSyncActionNoop {
-		t.Fatalf("action = %q, want noop", item.Action)
+	if item.Action != UpstreamAccountSyncActionUpdate {
+		t.Fatalf("action = %q, want update", item.Action)
+	}
+	if result.Summary.UpdateCount != 1 {
+		t.Fatalf("update count = %d, want 1", result.Summary.UpdateCount)
+	}
+}
+
+func TestUpstreamAccountSyncUpdatesMetadataForMatchedNonOpenAIAccount(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", Type: UpstreamProviderTypeSub2API, IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", Type: UpstreamProviderTypeSub2API, IsDefault: true, Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"main": {{ProviderSlug: "main", KeyName: "claude福利", GroupName: "Claude VIP", RateMultiplier: 1.2}},
+		},
+	}
+	svc, accounts := newUpstreamAccountSyncServiceForTest(
+		provider,
+		nil,
+		[]Account{{
+			ID:          10,
+			Name:        "claude福利",
+			Platform:    PlatformAnthropic,
+			Type:        AccountTypeOAuth,
+			Credentials: map[string]any{"refresh_token": "refresh"},
+			Extra:       map[string]any{"existing": "kept"},
+			Status:      StatusActive,
+			Schedulable: true,
+		}},
+		nil,
+	)
+
+	preview, err := svc.Preview(context.Background())
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if len(preview.Items) != 1 {
+		t.Fatalf("preview items = %d, want 1", len(preview.Items))
+	}
+	item := preview.Items[0]
+	if item.Action != UpstreamAccountSyncActionUpdate || item.MatchedAccountID == nil || *item.MatchedAccountID != 10 {
+		t.Fatalf("preview item = %+v, want update for matched account 10", item)
+	}
+	if preview.Summary.UpdateCount != 1 || preview.Summary.SkipCount != 0 {
+		t.Fatalf("preview summary = %+v, want one update and no skips", preview.Summary)
+	}
+
+	result, err := svc.Sync(context.Background(), UpstreamAccountSyncRequest{UpdateExisting: true})
+	if err != nil {
+		t.Fatalf("Sync returned error: %v", err)
+	}
+	if result.Summary.UpdateCount != 1 {
+		t.Fatalf("sync update count = %d, want 1", result.Summary.UpdateCount)
+	}
+	if len(accounts.updateInputs) != 1 || accounts.updateInputs[0].id != 10 {
+		t.Fatalf("update inputs = %+v, want account 10", accounts.updateInputs)
+	}
+	input := accounts.updateInputs[0].input
+	if input.Credentials != nil {
+		t.Fatalf("credentials update = %+v, want nil for metadata-only update", input.Credentials)
+	}
+	if input.GroupIDs != nil {
+		t.Fatalf("group ids update = %+v, want nil for metadata-only update", input.GroupIDs)
+	}
+	if input.Extra["existing"] != "kept" ||
+		input.Extra["upstream_provider_slug"] != "main" ||
+		input.Extra["upstream_key_name"] != "claude福利" ||
+		input.Extra["upstream_group_name"] != "Claude VIP" {
+		t.Fatalf("extra update = %+v, want upstream metadata merged", input.Extra)
+	}
+}
+
+func TestUpstreamAccountSyncInfersMissingMetadataFromLocalAccountName(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{
+			Slug:      "findcg",
+			Name:      "FindCG",
+			Type:      UpstreamProviderTypeSub2API,
+			BaseURL:   "https://www.findcg.com",
+			IsDefault: true,
+			Enabled:   true,
+		},
+		providers: []UpstreamProviderConfig{
+			{Slug: "findcg", Name: "FindCG", Type: UpstreamProviderTypeSub2API, BaseURL: "https://www.findcg.com", IsDefault: true, Enabled: true},
+			{Slug: "toltol", Name: "Toltol", Type: UpstreamProviderTypeSub2API, BaseURL: "https://toltol.me", AccountNamePrefix: "toltol-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"findcg": {},
+			"toltol": {},
+		},
+	}
+	svc, accounts := newUpstreamAccountSyncServiceForTest(
+		provider,
+		nil,
+		[]Account{{
+			ID:          10,
+			Name:        "toltol-kiro-pro-channel",
+			Platform:    PlatformAnthropic,
+			Type:        AccountTypeAPIKey,
+			Credentials: map[string]any{"api_key": "anthropic-key", "base_url": "https://toltol.me"},
+			Extra:       map[string]any{"existing": "kept"},
+			Status:      StatusActive,
+		}, {
+			ID:          11,
+			Name:        "codex pro",
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Credentials: map[string]any{"api_key": "openai-key", "base_url": "https://www.findcg.com/"},
+			Status:      StatusActive,
+		}, {
+			ID:          12,
+			Name:        "unknown-prefix-account",
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Credentials: map[string]any{"base_url": "https://unknown.example.com"},
+			Status:      StatusActive,
+		}, {
+			ID:          13,
+			Name:        "disabled account",
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Credentials: map[string]any{"base_url": "https://www.findcg.com"},
+			Status:      StatusDisabled,
+		}},
+		nil,
+	)
+
+	preview, err := svc.Preview(context.Background())
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if preview.Summary.UpdateCount != 2 || preview.Summary.MatchedAccountCount != 2 {
+		t.Fatalf("preview summary = %+v, want two inferred metadata updates", preview.Summary)
+	}
+	byID := map[int64]UpstreamAccountSyncItem{}
+	for _, item := range preview.Items {
+		if item.MatchedAccountID != nil {
+			byID[*item.MatchedAccountID] = item
+		}
+	}
+	toltolItem := byID[10]
+	if toltolItem.Action != UpstreamAccountSyncActionUpdate || toltolItem.ProviderSlug != "toltol" || toltolItem.UpstreamKeyName != "kiro-pro-channel" {
+		t.Fatalf("toltol item = %+v, want inferred toltol metadata update", toltolItem)
+	}
+	defaultItem := byID[11]
+	if defaultItem.Action != UpstreamAccountSyncActionUpdate || defaultItem.ProviderSlug != "findcg" || defaultItem.UpstreamKeyName != "codex pro" {
+		t.Fatalf("default item = %+v, want inferred default metadata update", defaultItem)
+	}
+	if _, exists := byID[12]; exists {
+		t.Fatalf("unknown base url account should not be inferred as default: %+v", byID[12])
+	}
+	if _, exists := byID[13]; exists {
+		t.Fatalf("disabled account should not be inferred: %+v", byID[13])
+	}
+
+	result, err := svc.Sync(context.Background(), UpstreamAccountSyncRequest{UpdateExisting: true})
+	if err != nil {
+		t.Fatalf("Sync returned error: %v", err)
+	}
+	if result.Summary.UpdateCount != 2 {
+		t.Fatalf("sync update count = %d, want 2", result.Summary.UpdateCount)
+	}
+	if len(accounts.updateInputs) != 2 {
+		t.Fatalf("update inputs = %+v, want two metadata-only updates", accounts.updateInputs)
+	}
+	updatesByID := map[int64]UpdateAccountInput{}
+	for _, update := range accounts.updateInputs {
+		updatesByID[update.id] = update.input
+		if update.input.Credentials != nil {
+			t.Fatalf("credentials update for account %d = %+v, want nil", update.id, update.input.Credentials)
+		}
+		if update.input.GroupIDs != nil {
+			t.Fatalf("group update for account %d = %+v, want nil", update.id, update.input.GroupIDs)
+		}
+	}
+	if updatesByID[10].Extra["existing"] != "kept" ||
+		updatesByID[10].Extra["upstream_provider_slug"] != "toltol" ||
+		updatesByID[10].Extra["upstream_key_name"] != "kiro-pro-channel" {
+		t.Fatalf("toltol extra = %+v, want inferred upstream metadata", updatesByID[10].Extra)
+	}
+	if updatesByID[11].Extra["upstream_provider_slug"] != "findcg" ||
+		updatesByID[11].Extra["upstream_key_name"] != "codex pro" {
+		t.Fatalf("default extra = %+v, want inferred default metadata", updatesByID[11].Extra)
+	}
+}
+
+func TestUpstreamAccountSyncInfersMetadataWithLongestPrefixFirst(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", BaseURL: "https://main.example.com", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", BaseURL: "https://main.example.com", IsDefault: true, Enabled: true},
+			{Slug: "short", Name: "Short", BaseURL: "https://short.example.com", AccountNamePrefix: "up-", Enabled: true},
+			{Slug: "long", Name: "Long", BaseURL: "https://long.example.com", AccountNamePrefix: "up-pro-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"main":  {},
+			"short": {},
+			"long":  {},
+		},
+	}
+	svc, _ := newUpstreamAccountSyncServiceForTest(
+		provider,
+		nil,
+		[]Account{{
+			ID:          10,
+			Name:        "up-pro-alice",
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Credentials: map[string]any{"base_url": "https://long.example.com"},
+			Status:      StatusActive,
+		}},
+		nil,
+	)
+
+	preview, err := svc.Preview(context.Background())
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if len(preview.Items) != 1 {
+		t.Fatalf("preview items = %+v, want one inferred item", preview.Items)
+	}
+	item := preview.Items[0]
+	if item.ProviderSlug != "long" || item.UpstreamKeyName != "alice" {
+		t.Fatalf("item = %+v, want longest prefix provider with stripped key alice", item)
 	}
 }
 
@@ -1207,11 +1431,29 @@ func TestUpstreamAccountSyncPreviewShowsMatchedAccountGroupsWhenUpstreamGroupUnm
 	if len(item.BoundGroups) != 1 || item.BoundGroups[0].ID != 7 || item.BoundGroups[0].Name != "VIP" {
 		t.Fatalf("bound groups = %+v, want VIP from matched account", item.BoundGroups)
 	}
-	if item.Action != UpstreamAccountSyncActionSkip || item.SkipReason != "upstream group is not matched" {
-		t.Fatalf("action/skip = %q/%q, want skip because upstream group is not matched", item.Action, item.SkipReason)
+	if item.Action != UpstreamAccountSyncActionUpdate || len(item.ChangeDetails) != 1 || item.ChangeDetails[0].Kind != "metadata" {
+		t.Fatalf("action/details = %q/%+v, want metadata-only update", item.Action, item.ChangeDetails)
 	}
-	if result.Summary.MatchedAccountCount != 1 || result.Summary.SkipCount != 1 {
-		t.Fatalf("summary = %+v, want one matched account and one skip", result.Summary)
+	if result.Summary.MatchedAccountCount != 1 || result.Summary.UpdateCount != 1 || result.Summary.SkipCount != 0 {
+		t.Fatalf("summary = %+v, want one matched account and one metadata update", result.Summary)
+	}
+
+	syncResult, err := svc.Sync(context.Background(), UpstreamAccountSyncRequest{UpdateExisting: true})
+	if err != nil {
+		t.Fatalf("Sync returned error: %v", err)
+	}
+	if syncResult.Summary.UpdateCount != 1 {
+		t.Fatalf("sync update count = %d, want 1", syncResult.Summary.UpdateCount)
+	}
+	if len(accountManager.updateInputs) != 1 {
+		t.Fatalf("update inputs = %+v, want one metadata-only update", accountManager.updateInputs)
+	}
+	update := accountManager.updateInputs[0]
+	if update.input.Credentials != nil || update.input.GroupIDs != nil {
+		t.Fatalf("update input = %+v, want extra-only metadata update", update.input)
+	}
+	if update.input.Extra["upstream_provider_slug"] != "backup" || update.input.Extra["upstream_key_name"] != "Alice Key" {
+		t.Fatalf("update extra = %+v, want backup/Alice Key metadata", update.input.Extra)
 	}
 }
 
@@ -1648,8 +1890,12 @@ func TestUpstreamAccountSyncRunDoesNotUpdateNoopAccount(t *testing.T) {
 			Platform:    PlatformOpenAI,
 			Type:        AccountTypeAPIKey,
 			Credentials: map[string]any{"api_key": "stable", "base_url": "https://upstream.example.com"},
-			GroupIDs:    []int64{7},
-			Groups:      []*Group{{ID: 7, Name: "VIP", RateMultiplier: 2}},
+			Extra: map[string]any{
+				"upstream_provider_slug": "backup",
+				"upstream_key_name":      "stable",
+			},
+			GroupIDs: []int64{7},
+			Groups:   []*Group{{ID: 7, Name: "VIP", RateMultiplier: 2}},
 		}},
 		nil,
 	)
@@ -1810,7 +2056,11 @@ func TestUpstreamAccountRateGuardUsesProviderAccountRateMultiplierScale(t *testi
 			Platform:    PlatformOpenAI,
 			Type:        AccountTypeAPIKey,
 			Credentials: map[string]any{"api_key": "matched", "base_url": "https://backup.example.com"},
-			GroupIDs:    []int64{8},
+			Extra: map[string]any{
+				"upstream_provider_slug": "backup",
+				"upstream_key_name":      "matched",
+			},
+			GroupIDs: []int64{8},
 			Groups: []*Group{
 				{ID: 8, Name: "Trial", RateMultiplier: 0.5},
 			},
