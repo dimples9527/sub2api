@@ -32,6 +32,7 @@ export interface UpstreamAccountSyncItem {
   local_group_name?: string
   local_rate_multiplier?: number
   rate_violation: boolean
+  rate_guard_ignored?: boolean
   unbound_group_ids?: number[]
   unbound_group_names?: string[]
   skip_reason?: string
@@ -132,6 +133,7 @@ export interface UpstreamAccountSyncSelectedItem {
 export interface UpstreamAccountRateGuardConfig {
   enabled: boolean
   interval_seconds: number
+  ignored_account_ids?: number[]
   last_run_at?: string
   last_run_status?: string
   last_run_message?: string

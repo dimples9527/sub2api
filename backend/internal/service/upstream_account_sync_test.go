@@ -1940,6 +1940,36 @@ func TestUpstreamAccountRateGuardConfigDefaultsDisabled(t *testing.T) {
 	}
 }
 
+func TestUpstreamAccountRateGuardConfigNormalizesIgnoredAccountIDs(t *testing.T) {
+	settings := newUpstreamManagementSettingRepoStub()
+	svc, _ := newUpstreamAccountSyncServiceForTest(
+		&upstreamAccountSyncProviderSourceStub{},
+		nil,
+		nil,
+		settings,
+	)
+
+	cfg, err := svc.UpdateRateGuardConfig(context.Background(), UpstreamAccountRateGuardConfig{
+		Enabled:           true,
+		IntervalSeconds:   60,
+		IgnoredAccountIDs: []int64{12, 0, 5, 12, -1},
+	})
+	if err != nil {
+		t.Fatalf("UpdateRateGuardConfig returned error: %v", err)
+	}
+	if len(cfg.IgnoredAccountIDs) != 2 || cfg.IgnoredAccountIDs[0] != 5 || cfg.IgnoredAccountIDs[1] != 12 {
+		t.Fatalf("ignored account ids = %+v, want [5 12]", cfg.IgnoredAccountIDs)
+	}
+
+	loaded, err := svc.GetRateGuardConfig(context.Background())
+	if err != nil {
+		t.Fatalf("GetRateGuardConfig returned error: %v", err)
+	}
+	if len(loaded.IgnoredAccountIDs) != 2 || loaded.IgnoredAccountIDs[0] != 5 || loaded.IgnoredAccountIDs[1] != 12 {
+		t.Fatalf("loaded ignored account ids = %+v, want [5 12]", loaded.IgnoredAccountIDs)
+	}
+}
+
 func TestUpstreamAccountRateGuardRunOnlyAppliesRateGuard(t *testing.T) {
 	provider := &upstreamAccountSyncProviderSourceStub{
 		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
@@ -2021,6 +2051,149 @@ func TestUpstreamAccountRateGuardRunOnlyAppliesRateGuard(t *testing.T) {
 	}
 	if len(records[0].UnbindDetails) != 1 || records[0].UnbindDetails[0].TriggerSource != UpstreamAccountSyncTriggerScheduledRateGuard {
 		t.Fatalf("unbind detail trigger source = %+v, want scheduled rate guard", records[0].UnbindDetails)
+	}
+}
+
+func TestUpstreamAccountRateGuardIgnoresConfiguredAccounts(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup", BaseURL: "https://backup.example.com", AccountNamePrefix: "up-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {
+				{ProviderSlug: "backup", KeyName: "matched", GroupName: "VIP", RateMultiplier: 2},
+			},
+		},
+	}
+	settings := newUpstreamManagementSettingRepoStub()
+	svc, accounts := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{
+			{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 2, Status: StatusActive},
+			{ID: 8, Name: "Trial", Platform: PlatformOpenAI, RateMultiplier: 0.5, Status: StatusActive},
+		},
+		[]Account{{
+			ID:          10,
+			Name:        "up-matched",
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Credentials: map[string]any{"api_key": "matched", "base_url": "https://backup.example.com"},
+			Extra: map[string]any{
+				"upstream_provider_slug": "backup",
+				"upstream_key_name":      "matched",
+			},
+			GroupIDs: []int64{7, 8},
+			Groups: []*Group{
+				{ID: 7, Name: "VIP", RateMultiplier: 2},
+				{ID: 8, Name: "Trial", RateMultiplier: 0.5},
+			},
+		}},
+		settings,
+	)
+	if _, err := svc.UpdateRateGuardConfig(context.Background(), UpstreamAccountRateGuardConfig{
+		Enabled:           true,
+		IntervalSeconds:   5,
+		IgnoredAccountIDs: []int64{10},
+	}); err != nil {
+		t.Fatalf("UpdateRateGuardConfig returned error: %v", err)
+	}
+
+	preview, err := svc.Preview(context.Background())
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if preview.Summary.RateViolationCount != 0 || preview.Summary.UnboundGroupCount != 0 || preview.Summary.UpdateCount != 0 {
+		t.Fatalf("preview summary = %+v, want ignored account excluded from rate guard work", preview.Summary)
+	}
+	if len(preview.Items) != 1 || !preview.Items[0].RateGuardIgnored || preview.Items[0].RateViolation {
+		t.Fatalf("preview items = %+v, want ignored non-violating matched item", preview.Items)
+	}
+
+	cfg, err := svc.RunScheduledRateGuard(context.Background())
+	if err != nil {
+		t.Fatalf("RunScheduledRateGuard returned error: %v", err)
+	}
+	if cfg.LastRunAt == nil || cfg.LastRunStatus != "success" {
+		t.Fatalf("run config = %+v, want successful last run", cfg)
+	}
+	if len(cfg.IgnoredAccountIDs) != 1 || cfg.IgnoredAccountIDs[0] != 10 {
+		t.Fatalf("ignored account ids after run = %+v, want [10]", cfg.IgnoredAccountIDs)
+	}
+	if len(accounts.updateInputs) != 0 {
+		t.Fatalf("update count = %d, want ignored account untouched", len(accounts.updateInputs))
+	}
+	if rawRecords := settings.values[SettingKeyUpstreamAccountSyncRecords]; rawRecords != "" {
+		t.Fatalf("records = %s, want no rate guard record for ignored account", rawRecords)
+	}
+}
+
+func TestUpstreamAccountSyncApplyRateGuardIgnoresConfiguredAccounts(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup", BaseURL: "https://backup.example.com", AccountNamePrefix: "up-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {
+				{ProviderSlug: "backup", KeyName: "matched", GroupName: "VIP", RateMultiplier: 2},
+			},
+		},
+	}
+	settings := newUpstreamManagementSettingRepoStub()
+	svc, accounts := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{
+			{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 2, Status: StatusActive},
+			{ID: 8, Name: "Trial", Platform: PlatformOpenAI, RateMultiplier: 0.5, Status: StatusActive},
+		},
+		[]Account{{
+			ID:          10,
+			Name:        "up-matched",
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Credentials: map[string]any{"api_key": "matched", "base_url": "https://old.example.com"},
+			Extra: map[string]any{
+				"upstream_provider_slug": "backup",
+				"upstream_key_name":      "matched",
+			},
+			GroupIDs: []int64{7, 8},
+			Groups: []*Group{
+				{ID: 7, Name: "VIP", RateMultiplier: 2},
+				{ID: 8, Name: "Trial", RateMultiplier: 0.5},
+			},
+		}},
+		settings,
+	)
+	if _, err := svc.UpdateRateGuardConfig(context.Background(), UpstreamAccountRateGuardConfig{
+		Enabled:           true,
+		IntervalSeconds:   5,
+		IgnoredAccountIDs: []int64{10},
+	}); err != nil {
+		t.Fatalf("UpdateRateGuardConfig returned error: %v", err)
+	}
+
+	result, err := svc.Sync(context.Background(), UpstreamAccountSyncRequest{
+		UpdateExisting: true,
+		ApplyRateGuard: true,
+	})
+	if err != nil {
+		t.Fatalf("Sync returned error: %v", err)
+	}
+	if len(accounts.updateInputs) != 1 {
+		t.Fatalf("update count = %d, want metadata/credential update only", len(accounts.updateInputs))
+	}
+	update := accounts.updateInputs[0]
+	if update.input.GroupIDs == nil || len(*update.input.GroupIDs) != 2 || (*update.input.GroupIDs)[0] != 7 || (*update.input.GroupIDs)[1] != 8 {
+		t.Fatalf("updated group ids = %+v, want low-rate groups preserved", update.input.GroupIDs)
+	}
+	if result.Summary.RateViolationCount != 0 || result.Summary.UnboundGroupCount != 0 {
+		t.Fatalf("summary = %+v, want no ignored rate guard unbinds", result.Summary)
+	}
+	if len(result.Items) != 1 || !result.Items[0].RateGuardIgnored || len(result.Items[0].Execution.UnboundGroupIDs) != 0 {
+		t.Fatalf("result items = %+v, want ignored account without unbound groups", result.Items)
 	}
 }
 

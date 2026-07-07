@@ -260,9 +260,10 @@ func TestUpstreamAccountSyncHandlerMarkRecordHandled(t *testing.T) {
 
 func TestUpstreamAccountSyncHandlerGetRateGuardConfig(t *testing.T) {
 	svc := &upstreamAccountSyncHandlerServiceStub{config: service.UpstreamAccountRateGuardConfig{
-		Enabled:         true,
-		IntervalSeconds: 60,
-		LastRunStatus:   "success",
+		Enabled:           true,
+		IntervalSeconds:   60,
+		IgnoredAccountIDs: []int64{12},
+		LastRunStatus:     "success",
 	}}
 	router := newUpstreamAccountSyncHandlerTestRouter(svc)
 
@@ -273,6 +274,7 @@ func TestUpstreamAccountSyncHandlerGetRateGuardConfig(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), `"enabled":true`)
 	require.Contains(t, rec.Body.String(), `"interval_seconds":60`)
+	require.Contains(t, rec.Body.String(), `"ignored_account_ids":[12]`)
 	require.Contains(t, rec.Body.String(), `"last_run_status":"success"`)
 }
 
@@ -284,7 +286,7 @@ func TestUpstreamAccountSyncHandlerUpdateRateGuardConfig(t *testing.T) {
 	req := httptest.NewRequest(
 		http.MethodPut,
 		"/admin/upstream-management/accounts/rate-guard-config",
-		bytes.NewBufferString(`{"enabled":true,"interval_seconds":120}`),
+		bytes.NewBufferString(`{"enabled":true,"interval_seconds":120,"ignored_account_ids":[12,34]}`),
 	)
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
@@ -292,6 +294,7 @@ func TestUpstreamAccountSyncHandlerUpdateRateGuardConfig(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.True(t, svc.configInput.Enabled)
 	require.Equal(t, 120, svc.configInput.IntervalSeconds)
+	require.Equal(t, []int64{12, 34}, svc.configInput.IgnoredAccountIDs)
 	require.Contains(t, rec.Body.String(), `"interval_seconds":120`)
 }
 

@@ -81,18 +81,14 @@ func newUpstreamAccountSyncHandlerWithService(service upstreamAccountSyncService
 
 func newUpstreamAccountSyncHandlerWithDeps(service upstreamAccountSyncService, scheduler upstreamAccountRateGuardScheduler) *UpstreamAccountSyncHandler {
 	balance, _ := service.(upstreamBalanceConsumptionService)
-	healthGuard, _ := service.(upstreamAccountHealthGuardService)
-	healthScheduler, _ := service.(upstreamAccountHealthGuardScheduler)
-	return &UpstreamAccountSyncHandler{service: service, scheduler: scheduler, balance: balance, healthGuard: healthGuard, healthScheduler: healthScheduler}
+	return &UpstreamAccountSyncHandler{service: service, scheduler: scheduler, balance: balance}
 }
 
 func newUpstreamAccountSyncHandlerWithAllDeps(service upstreamAccountSyncService, scheduler upstreamAccountRateGuardScheduler, balance upstreamBalanceConsumptionService, balanceScheduler upstreamBalanceSamplerScheduler) *UpstreamAccountSyncHandler {
 	if balance == nil {
 		balance, _ = service.(upstreamBalanceConsumptionService)
 	}
-	healthGuard, _ := service.(upstreamAccountHealthGuardService)
-	healthScheduler, _ := service.(upstreamAccountHealthGuardScheduler)
-	return &UpstreamAccountSyncHandler{service: service, scheduler: scheduler, balance: balance, balanceScheduler: balanceScheduler, healthGuard: healthGuard, healthScheduler: healthScheduler}
+	return &UpstreamAccountSyncHandler{service: service, scheduler: scheduler, balance: balance, balanceScheduler: balanceScheduler}
 }
 
 func (h *UpstreamAccountSyncHandler) Preview(c *gin.Context) {

@@ -10,6 +10,7 @@ const { upstreamAccountSyncMock, accountsMock, groupsMock, proxiesMock, appStore
     getPreview: vi.fn(),
     runSync: vi.fn(),
     getRateGuardConfig: vi.fn(),
+    updateRateGuardConfig: vi.fn(),
     runRateGuardNow: vi.fn(),
     getBalanceConsumption: vi.fn(),
     updateBalanceSamplerConfig: vi.fn(),
@@ -125,6 +126,12 @@ describe('UpstreamAccountsView', () => {
     upstreamAccountSyncMock.getRateGuardConfig.mockResolvedValue({
       enabled: false,
       interval_seconds: 3600,
+      ignored_account_ids: [],
+    })
+    upstreamAccountSyncMock.updateRateGuardConfig.mockResolvedValue({
+      enabled: false,
+      interval_seconds: 3600,
+      ignored_account_ids: [],
     })
     upstreamAccountSyncMock.runSync.mockResolvedValue({
       default_provider: {},
@@ -976,6 +983,77 @@ describe('UpstreamAccountsView', () => {
     expect(appStoreMock.showSuccess).not.toHaveBeenCalledWith(
       'admin.upstreamAccounts.rateGuardRunSuccess'
     )
+  })
+
+  it('toggles rate guard ignore for a matched account', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValue({
+      default_provider: {},
+      providers: [],
+      summary: {
+        upstream_key_count: 1,
+        matched_account_count: 1,
+        create_count: 0,
+        update_count: 1,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 1,
+        unbound_group_count: 1,
+      },
+      items: [
+        {
+          action: 'update',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-a',
+          local_account_name: 'local-a',
+          matched_account_id: 12,
+          matched_account_name: 'local-a',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 1,
+          rate_violation: true,
+          unbound_group_ids: [8],
+          bound_groups: [{ id: 8, name: 'low-rate', rate_multiplier: 0.5, rate_violation: true }],
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+    upstreamAccountSyncMock.updateRateGuardConfig.mockResolvedValueOnce({
+      enabled: false,
+      interval_seconds: 3600,
+      ignored_account_ids: [12],
+    })
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            template: '<div><div v-for="row in data" :key="row.upstream_key_name"><slot name="cell-actions" :row="row" /></div></div>',
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+          AccountTestModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+    await wrapper.find('[data-test="rate-guard-ignore-toggle-12"]').trigger('click')
+    await flushPromises()
+
+    expect(upstreamAccountSyncMock.updateRateGuardConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        enabled: false,
+        interval_seconds: 3600,
+        ignored_account_ids: [12],
+      })
+    )
+    expect(upstreamAccountSyncMock.getPreview).toHaveBeenCalledTimes(2)
+    expect(appStoreMock.showSuccess).toHaveBeenCalledWith('admin.upstreamAccounts.rateGuardSaved')
   })
 
   it('renders provider homepage link in source column', async () => {
@@ -2918,10 +2996,22 @@ describe('UpstreamAccountsView', () => {
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('admin.upstreamAccounts.batchTestSchedulableDisabled')
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('account test timed out')
     expect(wrapper.find('[data-test="batch-test-filter-failed_schedulable"]').text()).toContain('0')
-    await wrapper.find('[data-test="batch-test-sort-upstream_rate"]').trigger('click')
+    expect(wrapper.find('[data-test="batch-test-filter-failed_unschedulable"]').text()).toContain('1')
+
+    await wrapper.find('[data-test="batch-test-filter-failed_unschedulable"]').trigger('click')
     await flushPromises()
 
     let dialogText = wrapper.find('[data-test="batch-test-result-dialog"]').text()
+    expect(dialogText).toContain('local-b')
+    expect(dialogText).not.toContain('local-a')
+
+    await wrapper.find('[data-test="batch-test-filter-all"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('[data-test="batch-test-sort-upstream_rate"]').trigger('click')
+    await flushPromises()
+
+    dialogText = wrapper.find('[data-test="batch-test-result-dialog"]').text()
     expect(dialogText.indexOf('local-b')).toBeLessThan(dialogText.indexOf('local-a'))
 
     await wrapper.find('[data-test="batch-test-sort-upstream_rate"]').trigger('click')
@@ -2935,6 +3025,7 @@ describe('UpstreamAccountsView', () => {
 
     expect(accountsMock.setSchedulable).toHaveBeenCalledWith(13, true)
     expect(wrapper.find('[data-test="batch-test-filter-failed_schedulable"]').text()).toContain('1')
+    expect(wrapper.find('[data-test="batch-test-filter-failed_unschedulable"]').text()).toContain('0')
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('admin.upstreamAccounts.batchTestFailedSchedulableTag')
     expect(wrapper.find('.batch-result-card.failed-schedulable').exists()).toBe(true)
     expect(wrapper.find('.batch-test-risk-row').exists()).toBe(true)

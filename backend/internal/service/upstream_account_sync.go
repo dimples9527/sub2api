@@ -65,12 +65,13 @@ type UpstreamAccountSyncSelectedItem struct {
 }
 
 type UpstreamAccountRateGuardConfig struct {
-	Enabled         bool       `json:"enabled"`
-	IntervalSeconds int        `json:"interval_seconds"`
-	LastRunAt       *time.Time `json:"last_run_at,omitempty"`
-	LastRunStatus   string     `json:"last_run_status,omitempty"`
-	LastRunMessage  string     `json:"last_run_message,omitempty"`
-	UpdatedAt       *time.Time `json:"updated_at,omitempty"`
+	Enabled           bool       `json:"enabled"`
+	IntervalSeconds   int        `json:"interval_seconds"`
+	IgnoredAccountIDs []int64    `json:"ignored_account_ids,omitempty"`
+	LastRunAt         *time.Time `json:"last_run_at,omitempty"`
+	LastRunStatus     string     `json:"last_run_status,omitempty"`
+	LastRunMessage    string     `json:"last_run_message,omitempty"`
+	UpdatedAt         *time.Time `json:"updated_at,omitempty"`
 }
 
 type UpstreamAccountSyncSummary struct {
@@ -102,6 +103,7 @@ type UpstreamAccountSyncItem struct {
 	LocalGroupName         string                               `json:"local_group_name,omitempty"`
 	LocalRateMultiplier    *float64                             `json:"local_rate_multiplier,omitempty"`
 	RateViolation          bool                                 `json:"rate_violation"`
+	RateGuardIgnored       bool                                 `json:"rate_guard_ignored,omitempty"`
 	UnboundGroupIDs        []int64                              `json:"unbound_group_ids,omitempty"`
 	UnboundGroupNames      []string                             `json:"unbound_group_names,omitempty"`
 	SkipReason             string                               `json:"skip_reason,omitempty"`
@@ -319,6 +321,7 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 
 	now := time.Now().UTC()
 	recordStats, recordOrder := newUpstreamAccountSyncRecordStats(result)
+	ignoredRateGuardAccountIDs := previewState.rateGuardIgnoredAccountIDs
 	selection, hasSelection := upstreamAccountSyncSelectedItems(req.SelectedItems)
 	for index := range result.Items {
 		item := &result.Items[index]
@@ -421,12 +424,18 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 			if item.LocalGroupID != nil {
 				nextGroupIDs = appendUniqueInt64(nextGroupIDs, *item.LocalGroupID)
 			}
+			rateGuardIgnored := upstreamAccountSyncInt64SetContains(ignoredRateGuardAccountIDs, account.ID)
 			lowGroupIDs, lowGroupNames, remainingGroupIDs := upstreamAccountSyncLowRateGroups(account, item.UpstreamRateMultiplier)
-			if applyRateGuard && len(lowGroupIDs) > 0 {
+			if applyRateGuard && !rateGuardIgnored && len(lowGroupIDs) > 0 {
 				nextGroupIDs = remainingGroupIDs
 				item.RateViolation = true
 				item.UnboundGroupIDs = lowGroupIDs
 				item.UnboundGroupNames = lowGroupNames
+			} else if rateGuardIgnored {
+				item.RateGuardIgnored = true
+				item.RateViolation = false
+				item.UnboundGroupIDs = nil
+				item.UnboundGroupNames = nil
 			}
 			extra := upstreamAccountSyncExtra(provider, *item, now, account.Extra)
 			updated, err := s.accountManager.UpdateAccount(ctx, account.ID, &UpdateAccountInput{
@@ -445,7 +454,7 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 			accountID := account.ID
 			executedUnboundGroupIDs := []int64{}
 			executedUnboundGroupNames := []string{}
-			if applyRateGuard && len(lowGroupIDs) > 0 {
+			if applyRateGuard && !rateGuardIgnored && len(lowGroupIDs) > 0 {
 				executedUnboundGroupIDs = append([]int64(nil), lowGroupIDs...)
 				executedUnboundGroupNames = append([]string(nil), lowGroupNames...)
 			}
@@ -457,7 +466,7 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 				UnboundGroupIDs:   executedUnboundGroupIDs,
 				UnboundGroupNames: executedUnboundGroupNames,
 			}
-			if applyRateGuard && len(lowGroupIDs) > 0 {
+			if applyRateGuard && !rateGuardIgnored && len(lowGroupIDs) > 0 {
 				detail := buildUpstreamAccountSyncUnbindDetail(provider, *item, account, lowGroupIDs, lowGroupNames, remainingGroupIDs, triggerSource)
 				recordStats[item.ProviderSlug].unbindDetails = append(recordStats[item.ProviderSlug].unbindDetails, detail)
 				logUpstreamAccountSyncUnbindAudit(detail)
@@ -543,7 +552,12 @@ func (s *UpstreamAccountSyncService) UpdateRateGuardConfig(ctx context.Context, 
 	}
 	now := time.Now().UTC()
 	config.UpdatedAt = &now
-	return s.saveRateGuardConfig(ctx, config)
+	saved, err := s.saveRateGuardConfig(ctx, config)
+	if err != nil {
+		return UpstreamAccountRateGuardConfig{}, err
+	}
+	s.invalidatePreviewCache(ctx)
+	return saved, nil
 }
 
 func (s *UpstreamAccountSyncService) RunScheduledRateGuard(ctx context.Context) (UpstreamAccountRateGuardConfig, error) {
@@ -557,7 +571,7 @@ func (s *UpstreamAccountSyncService) RunRateGuard(ctx context.Context, triggerSo
 	}
 	now := time.Now().UTC()
 	config.LastRunAt = &now
-	_, runErr := s.runMatchedAccountRateGuard(ctx, normalizeUpstreamAccountRateGuardTriggerSource(triggerSource))
+	_, runErr := s.runMatchedAccountRateGuard(ctx, normalizeUpstreamAccountRateGuardTriggerSource(triggerSource), config.IgnoredAccountIDs)
 	if runErr != nil {
 		config.LastRunStatus = "failed"
 		config.LastRunMessage = runErr.Error()
@@ -573,7 +587,7 @@ func (s *UpstreamAccountSyncService) RunRateGuard(ctx context.Context, triggerSo
 	return saved, runErr
 }
 
-func (s *UpstreamAccountSyncService) runMatchedAccountRateGuard(ctx context.Context, triggerSource string) (UpstreamAccountSyncResult, error) {
+func (s *UpstreamAccountSyncService) runMatchedAccountRateGuard(ctx context.Context, triggerSource string, ignoredAccountIDs []int64) (UpstreamAccountSyncResult, error) {
 	result, previewState, err := s.preview(ctx, false)
 	if err != nil {
 		return UpstreamAccountSyncResult{}, err
@@ -585,12 +599,20 @@ func (s *UpstreamAccountSyncService) runMatchedAccountRateGuard(ctx context.Cont
 
 	now := time.Now().UTC()
 	recordStats, recordOrder := newUpstreamAccountSyncRecordStats(result)
-	if err := s.disableAccountsForDisabledProviders(ctx, previewState.accountByID, result.Items); err != nil {
+	ignoredRateGuardAccountIDs := upstreamAccountSyncInt64Set(ignoredAccountIDs)
+	if err := s.disableAccountsForDisabledProviders(ctx, previewState.accountByID, result.Items, ignoredRateGuardAccountIDs); err != nil {
 		return s.finishSyncWithError(ctx, result, triggerSource, recordStats, recordOrder, "", err)
 	}
 	for index := range result.Items {
 		item := &result.Items[index]
 		if item.MatchedAccountID == nil {
+			continue
+		}
+		if upstreamAccountSyncInt64SetContains(ignoredRateGuardAccountIDs, *item.MatchedAccountID) {
+			item.RateGuardIgnored = true
+			item.RateViolation = false
+			item.UnboundGroupIDs = nil
+			item.UnboundGroupNames = nil
 			continue
 		}
 		account := previewState.accountByID[*item.MatchedAccountID]
@@ -638,7 +660,7 @@ func (s *UpstreamAccountSyncService) runMatchedAccountRateGuard(ctx context.Cont
 	return result, nil
 }
 
-func (s *UpstreamAccountSyncService) disableAccountsForDisabledProviders(ctx context.Context, accounts map[int64]Account, items []UpstreamAccountSyncItem) error {
+func (s *UpstreamAccountSyncService) disableAccountsForDisabledProviders(ctx context.Context, accounts map[int64]Account, items []UpstreamAccountSyncItem, ignoredAccountIDs map[int64]struct{}) error {
 	if len(accounts) == 0 || s == nil || s.accountManager == nil {
 		return nil
 	}
@@ -648,6 +670,9 @@ func (s *UpstreamAccountSyncService) disableAccountsForDisabledProviders(ctx con
 	}
 	accountIDsToDisable := map[int64]struct{}{}
 	for _, account := range accounts {
+		if upstreamAccountSyncInt64SetContains(ignoredAccountIDs, account.ID) {
+			continue
+		}
 		if !account.Schedulable {
 			continue
 		}
@@ -668,6 +693,9 @@ func (s *UpstreamAccountSyncService) disableAccountsForDisabledProviders(ctx con
 			continue
 		}
 		accountID := *item.MatchedAccountID
+		if upstreamAccountSyncInt64SetContains(ignoredAccountIDs, accountID) {
+			continue
+		}
 		account, ok := accounts[accountID]
 		if !ok || !account.Schedulable {
 			continue
@@ -774,8 +802,9 @@ func (s *UpstreamAccountSyncService) MarkRecordHandled(ctx context.Context, key 
 }
 
 type upstreamAccountSyncPreviewState struct {
-	accountByID    map[int64]Account
-	providerBySlug map[string]UpstreamProviderConfig
+	accountByID                map[int64]Account
+	providerBySlug             map[string]UpstreamProviderConfig
+	rateGuardIgnoredAccountIDs map[int64]struct{}
 }
 
 func (s *UpstreamAccountSyncService) preview(ctx context.Context, useProviderKeysCache bool) (UpstreamAccountSyncResult, upstreamAccountSyncPreviewState, error) {
@@ -804,6 +833,11 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context, useProviderKey
 	if err != nil {
 		return UpstreamAccountSyncResult{}, upstreamAccountSyncPreviewState{}, err
 	}
+	rateGuardConfig, err := s.GetRateGuardConfig(ctx)
+	if err != nil {
+		return UpstreamAccountSyncResult{}, upstreamAccountSyncPreviewState{}, err
+	}
+	rateGuardIgnoredAccountIDs := upstreamAccountSyncInt64Set(rateGuardConfig.IgnoredAccountIDs)
 	accounts, err := s.loadAccounts(ctx)
 	if err != nil {
 		return UpstreamAccountSyncResult{}, upstreamAccountSyncPreviewState{}, err
@@ -842,7 +876,7 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context, useProviderKey
 		keyResult := providerKeysBySlug[provider.Slug]
 		if keyResult.err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("%s: %s", provider.Name, keyResult.err.Error()))
-			fallbackItems := upstreamAccountSyncLocalSnapshotItemsForProvider(provider, accounts, keyResult.err)
+			fallbackItems := upstreamAccountSyncLocalSnapshotItemsForProvider(provider, accounts, keyResult.err, rateGuardIgnoredAccountIDs)
 			result.Summary.UpstreamKeyCount += len(fallbackItems)
 			result.Summary.MatchedAccountCount += len(fallbackItems)
 			upstreamAccountSyncMarkItemAccountIDs(accountItemIDs, fallbackItems)
@@ -903,6 +937,7 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context, useProviderKey
 				accountID := account.ID
 				item.MatchedAccountID = &accountID
 				item.MatchedAccountName = account.Name
+				item.RateGuardIgnored = upstreamAccountSyncInt64SetContains(rateGuardIgnoredAccountIDs, account.ID)
 				item.BoundGroups = upstreamAccountSyncBoundGroups(account, item.UpstreamRateMultiplier)
 				result.Summary.MatchedAccountCount++
 				if !upstreamAccountSyncAccountCompatible(account) {
@@ -948,7 +983,7 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context, useProviderKey
 
 			account := matches[0]
 			lowGroupIDs, lowGroupNames, _ := upstreamAccountSyncLowRateGroups(account, item.UpstreamRateMultiplier)
-			if len(lowGroupIDs) > 0 {
+			if len(lowGroupIDs) > 0 && !item.RateGuardIgnored {
 				item.RateViolation = true
 				item.UnboundGroupIDs = lowGroupIDs
 				item.UnboundGroupNames = lowGroupNames
@@ -965,11 +1000,11 @@ func (s *UpstreamAccountSyncService) preview(ctx context.Context, useProviderKey
 			result.Items = append(result.Items, item)
 		}
 	}
-	upstreamAccountSyncAppendInferredMetadataItems(&result, accounts, syncProviders, accountItemIDs)
-	return result, upstreamAccountSyncPreviewState{accountByID: accountByID, providerBySlug: providerBySlug}, nil
+	upstreamAccountSyncAppendInferredMetadataItems(&result, accounts, syncProviders, accountItemIDs, rateGuardIgnoredAccountIDs)
+	return result, upstreamAccountSyncPreviewState{accountByID: accountByID, providerBySlug: providerBySlug, rateGuardIgnoredAccountIDs: rateGuardIgnoredAccountIDs}, nil
 }
 
-func upstreamAccountSyncLocalSnapshotItemsForProvider(provider UpstreamProviderConfig, accounts []Account, fetchErr error) []UpstreamAccountSyncItem {
+func upstreamAccountSyncLocalSnapshotItemsForProvider(provider UpstreamProviderConfig, accounts []Account, fetchErr error, ignoredRateGuardAccountIDs map[int64]struct{}) []UpstreamAccountSyncItem {
 	if provider.Slug == "" || len(accounts) == 0 {
 		return nil
 	}
@@ -1013,6 +1048,7 @@ func upstreamAccountSyncLocalSnapshotItemsForProvider(provider UpstreamProviderC
 			LocalAccountName:       account.Name,
 			MatchedAccountID:       &accountID,
 			MatchedAccountName:     account.Name,
+			RateGuardIgnored:       upstreamAccountSyncInt64SetContains(ignoredRateGuardAccountIDs, account.ID),
 			UpstreamGroupName:      strings.TrimSpace(account.GetExtraString("upstream_group_name")),
 			UpstreamRateMultiplier: upstreamRate,
 			BoundGroups:            upstreamAccountSyncBoundGroups(account, upstreamRate),
@@ -1028,7 +1064,7 @@ func upstreamAccountSyncLocalSnapshotItemsForProvider(provider UpstreamProviderC
 	return items
 }
 
-func upstreamAccountSyncAppendInferredMetadataItems(result *UpstreamAccountSyncResult, accounts []Account, providers []UpstreamProviderConfig, accountItemIDs map[int64]struct{}) {
+func upstreamAccountSyncAppendInferredMetadataItems(result *UpstreamAccountSyncResult, accounts []Account, providers []UpstreamProviderConfig, accountItemIDs map[int64]struct{}, ignoredRateGuardAccountIDs map[int64]struct{}) {
 	if result == nil || len(accounts) == 0 || len(providers) == 0 {
 		return
 	}
@@ -1047,6 +1083,7 @@ func upstreamAccountSyncAppendInferredMetadataItems(result *UpstreamAccountSyncR
 			continue
 		}
 		item := upstreamAccountSyncInferredMetadataItem(provider, account, keyName)
+		item.RateGuardIgnored = upstreamAccountSyncInt64SetContains(ignoredRateGuardAccountIDs, account.ID)
 		if !upstreamAccountSyncMetadataNeedsUpdate(account, item, provider) {
 			continue
 		}
@@ -1897,7 +1934,7 @@ func upstreamAccountSyncChangeDetails(account Account, item UpstreamAccountSyncI
 	}
 
 	lowGroupIDs, lowGroupNames, _ := upstreamAccountSyncLowRateGroups(account, item.UpstreamRateMultiplier)
-	if len(lowGroupIDs) > 0 {
+	if len(lowGroupIDs) > 0 && !item.RateGuardIgnored {
 		details = append(details, UpstreamAccountSyncChangeDetail{
 			Kind:       "group_unbind",
 			Field:      "group_ids",
@@ -2163,7 +2200,45 @@ func normalizeUpstreamAccountRateGuardConfig(config UpstreamAccountRateGuardConf
 	if config.IntervalSeconds <= 0 {
 		config.IntervalSeconds = DefaultUpstreamAccountRateGuardIntervalSeconds
 	}
+	config.IgnoredAccountIDs = normalizeUpstreamAccountRateGuardIgnoredAccountIDs(config.IgnoredAccountIDs)
 	return config
+}
+
+func normalizeUpstreamAccountRateGuardIgnoredAccountIDs(values []int64) []int64 {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]int64, 0, len(values))
+	for _, value := range values {
+		out = appendUniqueInt64(out, value)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+func upstreamAccountSyncInt64Set(values []int64) map[int64]struct{} {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[int64]struct{}, len(values))
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		out[value] = struct{}{}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func upstreamAccountSyncInt64SetContains(set map[int64]struct{}, value int64) bool {
+	if len(set) == 0 || value <= 0 {
+		return false
+	}
+	_, ok := set[value]
+	return ok
 }
 
 func (s *UpstreamAccountSyncService) saveRateGuardConfig(ctx context.Context, config UpstreamAccountRateGuardConfig) (UpstreamAccountRateGuardConfig, error) {

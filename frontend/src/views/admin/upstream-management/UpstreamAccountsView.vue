@@ -98,6 +98,10 @@
                   <span v-if="rateGuardConfig?.last_run_message" class="status-error-message">
                     {{ rateGuardConfig.last_run_message }}
                   </span>
+                  <span v-if="rateGuardIgnoredCount" class="guard-ignore-pill">
+                    <Icon name="shield" size="xs" :stroke-width="2" />
+                    {{ t('admin.upstreamAccounts.rateGuardIgnoredSummary', { count: rateGuardIgnoredCount }) }}
+                  </span>
                 </div>
               </div>
             </div>
@@ -122,6 +126,15 @@
                 class="ui-input interval-input"
               />
               <span class="guard-hint">{{ rateGuardDailyRunsText }}</span>
+              <label class="guard-ignore-control">
+                <span class="control-label">{{ t('admin.upstreamAccounts.rateGuardIgnoredAccounts') }}</span>
+                <input
+                  v-model.trim="rateGuardIgnoredInput"
+                  type="text"
+                  class="ui-input ignored-accounts-input"
+                  :placeholder="t('admin.upstreamAccounts.rateGuardIgnoredAccountsPlaceholder')"
+                />
+              </label>
               <button
                 type="button"
                 class="ui-button"
@@ -288,6 +301,10 @@
                     {{ t('admin.upstreamAccounts.conflictIds', { ids: row.conflict_account_ids.join(', ') }) }}
                   </span>
                   <span v-else class="table-tag tag-account account-id-tag">-</span>
+                  <span v-if="isRateGuardIgnored(row)" class="table-tag tag-rate-guard-ignore">
+                    <Icon name="shield" size="xs" :stroke-width="2" />
+                    {{ t('admin.upstreamAccounts.rateGuardIgnoredAccountTag') }}
+                  </span>
                 </div>
               </template>
 
@@ -466,6 +483,16 @@
                   >
                     <Icon :name="row.rate_violation ? 'exclamationTriangle' : 'edit'" size="sm" :stroke-width="2" :class="savingAccountGroupId === row.matched_account_id ? 'animate-spin' : ''" />
                     {{ row.rate_violation ? '\u5904\u7406\u98ce\u9669' : t('admin.upstreamAccounts.editBoundGroups') }}
+                  </button>
+                  <button
+                    type="button"
+                    :class="['text-action', isRateGuardIgnored(row) ? 'text-action-primary' : 'text-action-muted']"
+                    :disabled="savingAccountGroupId === row.matched_account_id || testingAccountId === row.matched_account_id || togglingRateGuardIgnoreId === row.matched_account_id"
+                    :data-test="`rate-guard-ignore-toggle-${row.matched_account_id}`"
+                    @click="toggleRateGuardIgnored(row)"
+                  >
+                    <Icon name="shield" size="sm" :stroke-width="2" :class="togglingRateGuardIgnoreId === row.matched_account_id ? 'animate-spin' : ''" />
+                    {{ isRateGuardIgnored(row) ? t('admin.upstreamAccounts.rateGuardUnignoreAccount') : t('admin.upstreamAccounts.rateGuardIgnoreAccount') }}
                   </button>
                   <button
                     type="button"
@@ -1406,7 +1433,7 @@ type BatchTestPlatformOption = {
   accountCount: number
 }
 type BatchTestSortKey = 'account' | 'platform' | 'upstream_rate' | 'schedulable' | 'status' | 'latency' | 'finished_at'
-type BatchTestResultFilter = 'all' | 'failed' | 'failed_schedulable' | 'success' | 'skipped'
+type BatchTestResultFilter = 'all' | 'failed' | 'failed_schedulable' | 'failed_unschedulable' | 'success' | 'skipped'
 type QuickFilterKey = 'all' | 'update' | 'risk' | 'unbound' | 'failed' | 'enabled' | 'disabled'
 type SortOrder = 'asc' | 'desc'
 
@@ -1420,6 +1447,7 @@ const syncing = ref(false)
 const loadingRateGuardConfig = ref(false)
 const savingRateGuardConfig = ref(false)
 const runningRateGuardNow = ref(false)
+const togglingRateGuardIgnoreId = ref<number | null>(null)
 const savingAccountGroupId = ref<number | null>(null)
 const editingPriorityAccountId = ref<number | null>(null)
 const savingPriorityAccountId = ref<number | null>(null)
@@ -1454,8 +1482,10 @@ const showMobileBackToFilters = ref(false)
 const rateGuardConfig = ref<UpstreamAccountRateGuardConfig | null>(null)
 const rateGuardForm = ref({
   enabled: false,
-  interval_seconds: 3600
+  interval_seconds: 3600,
+  ignored_account_ids: [] as number[]
 })
+const rateGuardIgnoredInput = ref('')
 const accountGroupDialogItem = ref<UpstreamAccountSyncItem | null>(null)
 const accountGroupIds = ref<number[]>([])
 const accountGroupPlatform = ref<GroupPlatform | undefined>()
@@ -1622,6 +1652,8 @@ const rateGuardDailyRunsText = computed(() => {
   if (!Number.isFinite(seconds) || seconds <= 0) return '\u7ea6\u6bcf\u65e5\u6267\u884c - \u6b21'
   return `\u7ea6\u6bcf\u65e5\u6267\u884c ${Math.floor(86400 / seconds)} \u6b21`
 })
+const rateGuardIgnoredAccountIDs = computed(() => normalizeRateGuardIgnoredAccountIDs(rateGuardForm.value.ignored_account_ids))
+const rateGuardIgnoredCount = computed(() => rateGuardIgnoredAccountIDs.value.length)
 const providerOptions = computed<SelectOption[]>(() => [
   { value: '', label: t('admin.upstreamAccounts.allProviders') },
   ...Array.from(new Map(items.value.map(item => [
@@ -1847,10 +1879,12 @@ const batchTestResultCounts = computed(() => {
   const skipped = items.filter(batchTestIsSkipped).length
   const failed = items.filter(batchTestIsFailed).length
   const failedSchedulable = items.filter(batchTestIsFailedSchedulable).length
+  const failedUnschedulable = items.filter(batchTestIsFailedUnschedulable).length
   return {
     all: items.length,
     failed,
     failedSchedulable,
+    failedUnschedulable,
     success,
     skipped
   }
@@ -1861,6 +1895,7 @@ const batchTestFilterOptions = computed(() => {
     { value: 'all' as const, label: t('common.all'), count: counts.all },
     { value: 'failed' as const, label: t('admin.upstreamAccounts.batchTestFailed'), count: counts.failed },
     { value: 'failed_schedulable' as const, label: t('admin.upstreamAccounts.batchTestFailedSchedulable'), count: counts.failedSchedulable },
+    { value: 'failed_unschedulable' as const, label: t('admin.upstreamAccounts.batchTestFailedUnschedulable'), count: counts.failedUnschedulable },
     { value: 'success' as const, label: t('admin.upstreamAccounts.batchTestSuccess'), count: counts.success },
     { value: 'skipped' as const, label: t('admin.upstreamAccounts.batchTestSkipped'), count: counts.skipped }
   ]
@@ -1870,6 +1905,7 @@ const batchTestFilteredItems = computed<BatchAccountTestItem[]>(() => {
   if (filter === 'success') return batchTestResultItems.value.filter(item => item.status === 'success')
   if (filter === 'failed') return batchTestResultItems.value.filter(batchTestIsFailed)
   if (filter === 'failed_schedulable') return batchTestResultItems.value.filter(batchTestIsFailedSchedulable)
+  if (filter === 'failed_unschedulable') return batchTestResultItems.value.filter(batchTestIsFailedUnschedulable)
   if (filter === 'skipped') return batchTestResultItems.value.filter(batchTestIsSkipped)
   return batchTestResultItems.value
 })
@@ -1976,11 +2012,14 @@ async function submitSyncConfirm() {
 }
 
 function applyRateGuardConfig(config: UpstreamAccountRateGuardConfig) {
+  const ignoredAccountIDs = normalizeRateGuardIgnoredAccountIDs(config.ignored_account_ids)
   rateGuardConfig.value = config
   rateGuardForm.value = {
     enabled: Boolean(config.enabled),
-    interval_seconds: Number(config.interval_seconds) > 0 ? Number(config.interval_seconds) : 3600
+    interval_seconds: Number(config.interval_seconds) > 0 ? Number(config.interval_seconds) : 3600,
+    ignored_account_ids: ignoredAccountIDs
   }
+  rateGuardIgnoredInput.value = ignoredAccountIDs.join(', ')
 }
 
 async function saveRateGuardConfig() {
@@ -1988,23 +2027,71 @@ async function saveRateGuardConfig() {
     appStore.showError(t('admin.upstreamAccounts.invalidRateGuardInterval'))
     return
   }
+  const ignoredAccountIDs = parseRateGuardIgnoredInput(rateGuardIgnoredInput.value)
+  if (!ignoredAccountIDs) {
+    appStore.showError(t('admin.upstreamAccounts.invalidRateGuardIgnoredAccounts'))
+    return
+  }
   savingRateGuardConfig.value = true
   try {
     const base = rateGuardConfig.value || {
       enabled: false,
-      interval_seconds: 3600
+      interval_seconds: 3600,
+      ignored_account_ids: []
     }
     const config = await adminAPI.upstreamAccountSync.updateRateGuardConfig({
       ...base,
       enabled: rateGuardForm.value.enabled,
-      interval_seconds: rateGuardForm.value.interval_seconds
+      interval_seconds: rateGuardForm.value.interval_seconds,
+      ignored_account_ids: ignoredAccountIDs
     })
     applyRateGuardConfig(config)
+    await refreshPreview()
     appStore.showSuccess(t('admin.upstreamAccounts.rateGuardSaved'))
   } catch (err) {
     appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.rateGuardSaveFailed')))
   } finally {
     savingRateGuardConfig.value = false
+  }
+}
+
+async function toggleRateGuardIgnored(row: UpstreamAccountSyncItem) {
+  const accountID = Number(row.matched_account_id)
+  if (!Number.isSafeInteger(accountID) || accountID <= 0) return
+  const parsedIDs = parseRateGuardIgnoredInput(rateGuardIgnoredInput.value)
+  if (!parsedIDs) {
+    appStore.showError(t('admin.upstreamAccounts.invalidRateGuardIgnoredAccounts'))
+    return
+  }
+  const nextSet = new Set(parsedIDs)
+  if (nextSet.has(accountID)) {
+    nextSet.delete(accountID)
+  } else {
+    nextSet.add(accountID)
+  }
+  const nextIgnoredAccountIDs = normalizeRateGuardIgnoredAccountIDs(Array.from(nextSet))
+  togglingRateGuardIgnoreId.value = accountID
+  savingRateGuardConfig.value = true
+  try {
+    const base = rateGuardConfig.value || {
+      enabled: false,
+      interval_seconds: 3600,
+      ignored_account_ids: []
+    }
+    const config = await adminAPI.upstreamAccountSync.updateRateGuardConfig({
+      ...base,
+      enabled: rateGuardForm.value.enabled,
+      interval_seconds: rateGuardForm.value.interval_seconds,
+      ignored_account_ids: nextIgnoredAccountIDs
+    })
+    applyRateGuardConfig(config)
+    await refreshPreview()
+    appStore.showSuccess(t('admin.upstreamAccounts.rateGuardSaved'))
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.rateGuardSaveFailed')))
+  } finally {
+    savingRateGuardConfig.value = false
+    togglingRateGuardIgnoreId.value = null
   }
 }
 
@@ -2087,6 +2174,10 @@ function batchTestIsFailed(item: BatchAccountTestItem) {
 
 function batchTestIsFailedSchedulable(item: BatchAccountTestItem) {
   return batchTestIsFailed(item) && batchTestItemSchedulable(item)
+}
+
+function batchTestIsFailedUnschedulable(item: BatchAccountTestItem) {
+  return batchTestIsFailed(item) && !batchTestItemSchedulable(item)
 }
 
 function toggleBatchTestSort(key: BatchTestSortKey) {
@@ -2209,6 +2300,14 @@ function getMatchedAccount(row: UpstreamAccountSyncItem) {
   const accountId = Number(row.matched_account_id)
   if (!Number.isFinite(accountId) || accountId <= 0) return null
   return matchedAccountsById.value[accountId] || null
+}
+
+function isRateGuardIgnored(row: UpstreamAccountSyncItem) {
+  const accountId = Number(row.matched_account_id)
+  if (!Number.isSafeInteger(accountId) || accountId <= 0) {
+    return Boolean(row.rate_guard_ignored)
+  }
+  return Boolean(row.rate_guard_ignored) || rateGuardIgnoredAccountIDs.value.includes(accountId)
 }
 
 function isProviderDisabled(row: UpstreamAccountSyncItem) {
@@ -3070,6 +3169,31 @@ function numberArray(value: unknown): number[] {
   return Array.isArray(value) ? value.filter((item): item is number => Number.isFinite(Number(item))).map(Number) : []
 }
 
+function normalizeRateGuardIgnoredAccountIDs(value: unknown): number[] {
+  const raw = Array.isArray(value) ? value : []
+  const seen = new Set<number>()
+  for (const item of raw) {
+    const id = Number(item)
+    if (!Number.isSafeInteger(id) || id <= 0) continue
+    seen.add(id)
+  }
+  return Array.from(seen).sort((a, b) => a - b)
+}
+
+function parseRateGuardIgnoredInput(value: string): number[] | null {
+  const text = String(value || '').trim()
+  if (!text) return []
+  const tokens = text.split(/[\s,，、]+/).map(token => token.trim()).filter(Boolean)
+  const ids: number[] = []
+  for (const token of tokens) {
+    if (!/^\d+$/.test(token)) return null
+    const id = Number(token)
+    if (!Number.isSafeInteger(id) || id <= 0) return null
+    ids.push(id)
+  }
+  return normalizeRateGuardIgnoredAccountIDs(ids)
+}
+
 function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String).filter(Boolean) : []
 }
@@ -3591,6 +3715,17 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
+.guard-ignore-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #4338ca;
+  padding: 2px 8px;
+  font-weight: 650;
+}
+
 .guard-sync-log-warning {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -3638,6 +3773,13 @@ onBeforeUnmount(() => {
   gap: 10px;
 }
 
+.guard-ignore-control {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
 .control-label {
   color: #475569;
   font-size: 13px;
@@ -3668,6 +3810,10 @@ onBeforeUnmount(() => {
 
 .interval-input {
   width: 92px;
+}
+
+.ignored-accounts-input {
+  width: 180px;
 }
 
 .filter-row {
@@ -4118,6 +4264,11 @@ onBeforeUnmount(() => {
 .tag-account {
   background: #f1f5f9;
   color: #64748b;
+}
+
+.tag-rate-guard-ignore {
+  background: #eef2ff;
+  color: #4338ca;
 }
 
 .record-status {
@@ -5983,8 +6134,17 @@ button.sync-log-status-unhandled:hover {
     gap: 8px;
   }
 
+  .guard-ignore-control {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
   .guard-controls .ui-input {
     width: 92px;
+  }
+
+  .guard-controls .ignored-accounts-input {
+    width: 100%;
   }
 
   .guard-controls .ui-button,
