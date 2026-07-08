@@ -376,6 +376,135 @@ func TestUpstreamAccountHealthGuardSkipsDisabledProviderAndAccount(t *testing.T)
 	}
 }
 
+func TestUpstreamAccountHealthGuardIgnoresConfiguredAccounts(t *testing.T) {
+	tester := &upstreamAccountHealthGuardTesterStub{
+		results: map[int64]*ScheduledTestResult{
+			1: {Status: "failed", ErrorMessage: "401"},
+			2: upstreamAccountHealthGuardResult("success", 100),
+		},
+		errs: map[int64]error{1: errors.New("401")},
+	}
+	svc, store, _ := newUpstreamAccountHealthGuardTestService([]Account{
+		upstreamAccountHealthGuardAccount(1, true, map[string]any{
+			"upstream_provider_slug":                "main",
+			upstreamHealthGuardFailureCountExtraKey: 2,
+		}),
+		upstreamAccountHealthGuardAccount(2, true, map[string]any{"upstream_provider_slug": "main"}),
+	}, tester)
+	if _, err := svc.UpdateConfig(context.Background(), UpstreamAccountHealthGuardConfig{
+		FailureThreshold:  3,
+		SlowThreshold:     3,
+		RecoveryThreshold: 2,
+		Concurrency:       1,
+		IgnoredAccountIDs: []int64{1, 1, 0, -2},
+	}); err != nil {
+		t.Fatalf("UpdateConfig error: %v", err)
+	}
+
+	response, err := svc.Run(context.Background(), UpstreamAccountHealthGuardTriggerManual)
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if len(store.setCalls) != 0 {
+		t.Fatalf("set calls = %+v, want ignored account unchanged", store.setCalls)
+	}
+	if len(tester.calls) != 1 || tester.calls[0].accountID != 2 {
+		t.Fatalf("calls = %+v, want only account 2 tested", tester.calls)
+	}
+	if response.Config.IgnoredAccountIDs == nil || len(response.Config.IgnoredAccountIDs) != 1 || response.Config.IgnoredAccountIDs[0] != 1 {
+		t.Fatalf("ignored account ids = %+v, want [1]", response.Config.IgnoredAccountIDs)
+	}
+	if response.Record.Summary.CheckedCount != 1 || response.Record.Summary.SkippedCount != 1 {
+		t.Fatalf("summary = %+v, want 1 checked and 1 skipped", response.Record.Summary)
+	}
+	reasons := map[string]UpstreamAccountHealthGuardSkipReason{}
+	for _, reason := range response.Record.Summary.SkipReasons {
+		reasons[reason.Reason] = reason
+	}
+	if reasons[upstreamAccountHealthGuardSkipAccountIgnored].Count != 1 {
+		t.Fatalf("ignored skip reason = %+v, want count 1", reasons[upstreamAccountHealthGuardSkipAccountIgnored])
+	}
+}
+
+func TestUpstreamAccountHealthGuardAccountModelOverridesPlatformModel(t *testing.T) {
+	tester := &upstreamAccountHealthGuardTesterStub{
+		results: map[int64]*ScheduledTestResult{
+			1: upstreamAccountHealthGuardResult("success", 100),
+			2: upstreamAccountHealthGuardResult("success", 100),
+		},
+	}
+	svc, _, _ := newUpstreamAccountHealthGuardTestService([]Account{
+		upstreamAccountHealthGuardAccount(1, true, map[string]any{"upstream_provider_slug": "main"}),
+		upstreamAccountHealthGuardAccount(2, true, map[string]any{"upstream_provider_slug": "main"}),
+	}, tester)
+	if _, err := svc.UpdateConfig(context.Background(), UpstreamAccountHealthGuardConfig{
+		Concurrency:    1,
+		PlatformModels: map[string]string{"openai": "platform-model"},
+		AccountModels:  map[int64]string{2: "account-model", 0: "invalid", 3: ""},
+	}); err != nil {
+		t.Fatalf("UpdateConfig error: %v", err)
+	}
+
+	response, err := svc.Run(context.Background(), UpstreamAccountHealthGuardTriggerManual)
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if got := response.Config.AccountModels; len(got) != 1 || got[2] != "account-model" {
+		t.Fatalf("account models = %+v, want only account 2 override", got)
+	}
+	if len(tester.calls) != 2 {
+		t.Fatalf("calls = %+v, want 2 calls", tester.calls)
+	}
+	if tester.calls[0].accountID != 1 || tester.calls[0].modelID != "platform-model" {
+		t.Fatalf("first call = %+v, want account 1 platform model", tester.calls[0])
+	}
+	if tester.calls[1].accountID != 2 || tester.calls[1].modelID != "account-model" {
+		t.Fatalf("second call = %+v, want account 2 account model", tester.calls[1])
+	}
+}
+
+func TestUpstreamAccountHealthGuardHonorsRateGuardIgnoredAccounts(t *testing.T) {
+	tester := &upstreamAccountHealthGuardTesterStub{
+		results: map[int64]*ScheduledTestResult{
+			1: {Status: "failed", ErrorMessage: "401"},
+			2: upstreamAccountHealthGuardResult("success", 100),
+		},
+		errs: map[int64]error{1: errors.New("401")},
+	}
+	svc, store, settings := newUpstreamAccountHealthGuardTestService([]Account{
+		upstreamAccountHealthGuardAccount(1, true, map[string]any{
+			"upstream_provider_slug":                "main",
+			upstreamHealthGuardFailureCountExtraKey: 2,
+		}),
+		upstreamAccountHealthGuardAccount(2, true, map[string]any{"upstream_provider_slug": "main"}),
+	}, tester)
+	settings.values = map[string]string{
+		SettingKeyUpstreamAccountRateGuardConfig: `{"ignored_account_ids":[1]}`,
+	}
+	if _, err := svc.UpdateConfig(context.Background(), UpstreamAccountHealthGuardConfig{
+		FailureThreshold:  3,
+		SlowThreshold:     3,
+		RecoveryThreshold: 2,
+		Concurrency:       1,
+	}); err != nil {
+		t.Fatalf("UpdateConfig error: %v", err)
+	}
+
+	response, err := svc.Run(context.Background(), UpstreamAccountHealthGuardTriggerManual)
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if len(store.setCalls) != 0 {
+		t.Fatalf("set calls = %+v, want rate-guard ignored account unchanged", store.setCalls)
+	}
+	if len(tester.calls) != 1 || tester.calls[0].accountID != 2 {
+		t.Fatalf("calls = %+v, want only account 2 tested", tester.calls)
+	}
+	if response.Record.Summary.CheckedCount != 1 || response.Record.Summary.SkippedCount != 1 {
+		t.Fatalf("summary = %+v, want 1 checked and 1 skipped", response.Record.Summary)
+	}
+}
+
 func TestUpstreamAccountHealthGuardRotatesWhenRunLimitReached(t *testing.T) {
 	tester := &upstreamAccountHealthGuardTesterStub{
 		results: map[int64]*ScheduledTestResult{

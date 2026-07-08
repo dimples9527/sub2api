@@ -250,6 +250,8 @@ export interface UpstreamAccountHealthGuardConfig {
   slow_threshold: number
   recovery_threshold: number
   healthy_latency_ms: number
+  ignored_account_ids?: number[]
+  account_models?: Record<string, string>
   platform_models?: Record<string, string>
   platform_latency_ms?: Record<string, number>
   last_run_at?: string

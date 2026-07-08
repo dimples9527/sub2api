@@ -59,6 +59,7 @@ const (
 
 const (
 	upstreamAccountHealthGuardSkipAccountDisabled   = "account_disabled"
+	upstreamAccountHealthGuardSkipAccountIgnored    = "account_ignored"
 	upstreamAccountHealthGuardSkipMissingProvider   = "missing_provider_slug"
 	upstreamAccountHealthGuardSkipProviderDisabled  = "provider_disabled"
 	upstreamAccountHealthGuardSkipProviderNotFound  = "provider_not_found"
@@ -75,6 +76,8 @@ type UpstreamAccountHealthGuardConfig struct {
 	SlowThreshold            int               `json:"slow_threshold"`
 	RecoveryThreshold        int               `json:"recovery_threshold"`
 	HealthyLatencyMs         int64             `json:"healthy_latency_ms"`
+	IgnoredAccountIDs        []int64           `json:"ignored_account_ids,omitempty"`
+	AccountModels            map[int64]string  `json:"account_models,omitempty"`
 	PlatformModels           map[string]string `json:"platform_models,omitempty"`
 	PlatformLatencyMs        map[string]int64  `json:"platform_latency_ms,omitempty"`
 	LastRunAt                *time.Time        `json:"last_run_at,omitempty"`
@@ -445,6 +448,7 @@ func (s *UpstreamAccountHealthGuardService) listTargets(ctx context.Context, con
 	cursor := config.CursorAccountID
 	totalAccounts := 0
 	skipReasons := newUpstreamAccountHealthGuardSkipReasonCollector()
+	ignoredAccountIDs := s.ignoredAccountIDSet(ctx, config)
 	const pageSize = 500
 	for page := 1; ; page++ {
 		accounts, result, err := s.accountStore.ListWithFilters(ctx, pagination.PaginationParams{
@@ -464,6 +468,10 @@ func (s *UpstreamAccountHealthGuardService) listTargets(ctx context.Context, con
 
 		for _, account := range accounts {
 			providerSlug := upstreamAccountHealthGuardExtraString(account.Extra, "upstream_provider_slug")
+			if upstreamAccountSyncInt64SetContains(ignoredAccountIDs, account.ID) {
+				skipReasons.add(upstreamAccountHealthGuardSkipAccountIgnored, account, providerSlug)
+				continue
+			}
 			if account.Status == StatusDisabled {
 				skipReasons.add(upstreamAccountHealthGuardSkipAccountDisabled, account, providerSlug)
 				continue
@@ -513,6 +521,28 @@ func (s *UpstreamAccountHealthGuardService) listTargets(ctx context.Context, con
 	return targets, totalAccounts, skipReasons.list(), nextCursor, nil
 }
 
+func (s *UpstreamAccountHealthGuardService) ignoredAccountIDSet(ctx context.Context, config UpstreamAccountHealthGuardConfig) map[int64]struct{} {
+	out := upstreamAccountSyncInt64Set(config.IgnoredAccountIDs)
+	if s == nil || s.settingRepo == nil {
+		return out
+	}
+	raw, err := s.settingRepo.GetValue(ctx, SettingKeyUpstreamAccountRateGuardConfig)
+	if err != nil || strings.TrimSpace(raw) == "" {
+		return out
+	}
+	var rateGuardConfig UpstreamAccountRateGuardConfig
+	if err := json.Unmarshal([]byte(raw), &rateGuardConfig); err != nil {
+		return out
+	}
+	for _, accountID := range normalizeUpstreamAccountRateGuardIgnoredAccountIDs(rateGuardConfig.IgnoredAccountIDs) {
+		if out == nil {
+			out = map[int64]struct{}{}
+		}
+		out[accountID] = struct{}{}
+	}
+	return out
+}
+
 func (s *UpstreamAccountHealthGuardService) runTargets(ctx context.Context, config UpstreamAccountHealthGuardConfig, targets []upstreamAccountHealthGuardTarget) []UpstreamAccountHealthGuardRunItem {
 	if len(targets) == 0 {
 		return []UpstreamAccountHealthGuardRunItem{}
@@ -559,7 +589,7 @@ enqueue:
 func (s *UpstreamAccountHealthGuardService) runTarget(ctx context.Context, config UpstreamAccountHealthGuardConfig, target upstreamAccountHealthGuardTarget) UpstreamAccountHealthGuardRunItem {
 	account := target.account
 	startedAt := s.currentTime()
-	modelID := upstreamAccountHealthGuardModelForPlatform(config, account.Platform)
+	modelID := upstreamAccountHealthGuardModelForAccount(config, account.ID, account.Platform)
 	latencyLimit := upstreamAccountHealthGuardLatencyLimitForPlatform(config, account.Platform)
 	item := UpstreamAccountHealthGuardRunItem{
 		AccountID:         account.ID,
@@ -766,6 +796,7 @@ func defaultUpstreamAccountHealthGuardConfig() UpstreamAccountHealthGuardConfig 
 		SlowThreshold:            DefaultUpstreamAccountHealthGuardSlowThreshold,
 		RecoveryThreshold:        DefaultUpstreamAccountHealthGuardRecoveryThreshold,
 		HealthyLatencyMs:         DefaultUpstreamAccountHealthGuardHealthyLatencyMs,
+		AccountModels:            map[int64]string{},
 		PlatformModels:           map[string]string{},
 		PlatformLatencyMs:        map[string]int64{},
 	}
@@ -807,7 +838,21 @@ func normalizeUpstreamAccountHealthGuardConfig(config UpstreamAccountHealthGuard
 	}
 	config.PlatformModels = normalizeUpstreamAccountHealthGuardPlatformModels(config.PlatformModels)
 	config.PlatformLatencyMs = normalizeUpstreamAccountHealthGuardPlatformLatency(config.PlatformLatencyMs)
+	config.IgnoredAccountIDs = normalizeUpstreamAccountRateGuardIgnoredAccountIDs(config.IgnoredAccountIDs)
+	config.AccountModels = normalizeUpstreamAccountHealthGuardAccountModels(config.AccountModels)
 	return config
+}
+
+func normalizeUpstreamAccountHealthGuardAccountModels(values map[int64]string) map[int64]string {
+	out := map[int64]string{}
+	for accountID, model := range values {
+		model = strings.TrimSpace(model)
+		if accountID <= 0 || model == "" {
+			continue
+		}
+		out[accountID] = model
+	}
+	return out
 }
 
 func normalizeUpstreamAccountHealthGuardPlatformModels(values map[string]string) map[string]string {
@@ -833,6 +878,15 @@ func normalizeUpstreamAccountHealthGuardPlatformLatency(values map[string]int64)
 		out[platform] = latency
 	}
 	return out
+}
+
+func upstreamAccountHealthGuardModelForAccount(config UpstreamAccountHealthGuardConfig, accountID int64, platform string) string {
+	if accountID > 0 && len(config.AccountModels) > 0 {
+		if model := strings.TrimSpace(config.AccountModels[accountID]); model != "" {
+			return model
+		}
+	}
+	return upstreamAccountHealthGuardModelForPlatform(config, platform)
 }
 
 func upstreamAccountHealthGuardModelForPlatform(config UpstreamAccountHealthGuardConfig, platform string) string {

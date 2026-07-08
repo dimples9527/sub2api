@@ -594,6 +594,16 @@
             <span>{{ t('admin.upstreamProviders.healthGuardHealthyLatency') }}</span>
             <input v-model.number="healthGuardForm.healthy_latency_ms" type="number" min="1" step="500" class="input" />
           </label>
+          <label class="health-guard-field health-guard-field-wide">
+            <span>{{ t('admin.upstreamProviders.healthGuardIgnoredAccounts') }}</span>
+            <input
+              v-model.trim="healthGuardIgnoredInput"
+              type="text"
+              class="input health-guard-ignored-input"
+              :placeholder="t('admin.upstreamProviders.healthGuardIgnoredAccountsPlaceholder')"
+            />
+            <small>{{ t('admin.upstreamProviders.healthGuardIgnoredAccountsHint') }}</small>
+          </label>
         </div>
 
         <div class="health-guard-platform-panel">
@@ -624,6 +634,17 @@
               />
             </label>
           </div>
+        </div>
+
+        <div class="health-guard-account-models-panel">
+          <div class="balance-section-title">{{ t('admin.upstreamProviders.healthGuardAccountModels') }}</div>
+          <textarea
+            v-model.trim="healthGuardAccountModelsInput"
+            class="input health-guard-account-models-input"
+            rows="4"
+            :placeholder="t('admin.upstreamProviders.healthGuardAccountModelsPlaceholder')"
+          ></textarea>
+          <p class="health-guard-account-models-hint">{{ t('admin.upstreamProviders.healthGuardAccountModelsHint') }}</p>
         </div>
 
         <div class="health-guard-record-panel">
@@ -1360,6 +1381,7 @@ type UpstreamProviderTableRow = UpstreamProviderConfig & {
 }
 type QuickProviderFilterKey = 'all' | 'enabled' | 'disabled' | 'default' | 'balance_anomaly'
 type HealthGuardForm = UpstreamAccountHealthGuardConfig & {
+  account_models: Record<string, string>
   platform_models: Record<string, string>
   platform_latency_ms: Record<string, number>
 }
@@ -1410,6 +1432,8 @@ const balanceSamplerForm = ref({
 const healthGuardConfig = ref<UpstreamAccountHealthGuardConfig | null>(null)
 const healthGuardRecords = ref<UpstreamAccountHealthGuardRunRecord[]>([])
 const healthGuardForm = ref<HealthGuardForm>(defaultHealthGuardForm())
+const healthGuardIgnoredInput = ref('')
+const healthGuardAccountModelsInput = ref('')
 const rechargeForm = ref({
   amount: null as number | null,
   note: '',
@@ -1953,19 +1977,27 @@ function defaultHealthGuardForm(): HealthGuardForm {
     slow_threshold: 3,
     recovery_threshold: 2,
     healthy_latency_ms: 15000,
+    ignored_account_ids: [],
+    account_models: {},
     platform_models: {},
     platform_latency_ms: {},
   }
 }
 
 function applyHealthGuardConfig(config: UpstreamAccountHealthGuardConfig) {
+  const ignoredAccountIDs = normalizeHealthGuardIgnoredAccountIDs(config.ignored_account_ids)
+  const accountModels = normalizeHealthGuardAccountModels(config.account_models)
   healthGuardConfig.value = config
   healthGuardForm.value = {
     ...defaultHealthGuardForm(),
     ...config,
+    ignored_account_ids: ignoredAccountIDs,
+    account_models: accountModels,
     platform_models: { ...(config.platform_models || {}) },
     platform_latency_ms: { ...(config.platform_latency_ms || {}) },
   }
+  healthGuardIgnoredInput.value = ignoredAccountIDs.join(', ')
+  healthGuardAccountModelsInput.value = formatHealthGuardAccountModelsInput(accountModels)
 }
 
 async function loadHealthGuardState() {
@@ -1984,7 +2016,7 @@ async function loadHealthGuardState() {
   }
 }
 
-function buildHealthGuardPayload(): UpstreamAccountHealthGuardConfig {
+function buildHealthGuardPayload(ignoredAccountIDs: number[], accountModels: Record<string, string>): UpstreamAccountHealthGuardConfig {
   const platformModels = Object.fromEntries(
     Object.entries(healthGuardForm.value.platform_models || {})
       .map(([platform, model]) => [platform, String(model || '').trim()])
@@ -2006,15 +2038,27 @@ function buildHealthGuardPayload(): UpstreamAccountHealthGuardConfig {
     slow_threshold: Math.max(1, Math.floor(Number(healthGuardForm.value.slow_threshold) || 0)),
     recovery_threshold: Math.max(1, Math.floor(Number(healthGuardForm.value.recovery_threshold) || 0)),
     healthy_latency_ms: Math.max(1, Math.floor(Number(healthGuardForm.value.healthy_latency_ms) || 0)),
+    ignored_account_ids: ignoredAccountIDs,
+    account_models: accountModels,
     platform_models: platformModels,
     platform_latency_ms: platformLatency,
   }
 }
 
 async function saveHealthGuardConfig() {
+  const ignoredAccountIDs = parseHealthGuardIgnoredInput(healthGuardIgnoredInput.value)
+  if (!ignoredAccountIDs) {
+    appStore.showError(t('admin.upstreamProviders.invalidHealthGuardIgnoredAccounts'))
+    return
+  }
+  const accountModels = parseHealthGuardAccountModelsInput(healthGuardAccountModelsInput.value)
+  if (!accountModels) {
+    appStore.showError(t('admin.upstreamProviders.invalidHealthGuardAccountModels'))
+    return
+  }
   savingHealthGuardConfig.value = true
   try {
-    const config = await adminAPI.upstreamAccountSync.updateHealthGuardConfig(buildHealthGuardPayload())
+    const config = await adminAPI.upstreamAccountSync.updateHealthGuardConfig(buildHealthGuardPayload(ignoredAccountIDs, accountModels))
     applyHealthGuardConfig(config)
     appStore.showSuccess(t('admin.upstreamProviders.healthGuardSaved'))
     closeHealthGuardDialog()
@@ -2037,6 +2081,64 @@ async function runHealthGuardNow() {
   } finally {
     runningHealthGuardNow.value = false
   }
+}
+
+function normalizeHealthGuardIgnoredAccountIDs(value: unknown): number[] {
+  const raw = Array.isArray(value) ? value : []
+  const seen = new Set<number>()
+  for (const item of raw) {
+    const id = Number(item)
+    if (!Number.isSafeInteger(id) || id <= 0) continue
+    seen.add(id)
+  }
+  return Array.from(seen).sort((a, b) => a - b)
+}
+
+function parseHealthGuardIgnoredInput(value: string): number[] | null {
+  const text = String(value || '').trim()
+  if (!text) return []
+  const tokens = text.split(/[,\s]+/).map(token => token.trim()).filter(Boolean)
+  const ids: number[] = []
+  for (const token of tokens) {
+    if (!/^\d+$/.test(token)) return null
+    const id = Number(token)
+    if (!Number.isSafeInteger(id) || id <= 0) return null
+    ids.push(id)
+  }
+  return normalizeHealthGuardIgnoredAccountIDs(ids)
+}
+
+function normalizeHealthGuardAccountModels(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const out: Record<string, string> = {}
+  for (const [rawID, rawModel] of Object.entries(value as Record<string, unknown>)) {
+    const id = Number(rawID)
+    const model = String(rawModel || '').trim()
+    if (!Number.isSafeInteger(id) || id <= 0 || !model) continue
+    out[String(id)] = model
+  }
+  return Object.fromEntries(Object.entries(out).sort(([a], [b]) => Number(a) - Number(b)))
+}
+
+function formatHealthGuardAccountModelsInput(value: Record<string, string>) {
+  return Object.entries(normalizeHealthGuardAccountModels(value))
+    .map(([accountID, model]) => `${accountID}=${model}`)
+    .join('\n')
+}
+
+function parseHealthGuardAccountModelsInput(value: string): Record<string, string> | null {
+  const text = String(value || '').trim()
+  if (!text) return {}
+  const out: Record<string, string> = {}
+  for (const line of text.split(/\r?\n/).map(item => item.trim()).filter(Boolean)) {
+    const match = line.match(/^(\d+)\s*(?:=|:|\s)\s*(.+)$/)
+    if (!match) return null
+    const id = Number(match[1])
+    const model = String(match[2] || '').trim()
+    if (!Number.isSafeInteger(id) || id <= 0 || !model) return null
+    out[String(id)] = model
+  }
+  return normalizeHealthGuardAccountModels(out)
 }
 
 function defaultBalanceSamplerScaleForProvider(providerSlug: string) {
@@ -2453,6 +2555,8 @@ function healthGuardPlatformLabel(platform: string | undefined) {
 
 function healthGuardSkipReasonLabel(reason: string | undefined) {
   switch (reason) {
+    case 'account_ignored':
+      return t('admin.upstreamProviders.healthGuardSkipReasonAccountIgnored')
     case 'account_disabled':
       return t('admin.upstreamProviders.healthGuardSkipReasonAccountDisabled')
     case 'missing_provider_slug':
@@ -3248,7 +3352,20 @@ onMounted(reload)
   @apply h-9 text-right font-mono text-sm;
 }
 
+.health-guard-field-wide {
+  @apply md:col-span-4;
+}
+
+.health-guard-field small {
+  @apply mt-2 block text-xs text-gray-500 dark:text-gray-400;
+}
+
+.health-guard-field .health-guard-ignored-input {
+  @apply text-left;
+}
+
 .health-guard-platform-panel,
+.health-guard-account-models-panel,
 .health-guard-record-panel {
   @apply rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800/70;
 }
@@ -3610,7 +3727,6 @@ onMounted(reload)
   }
 
   .provider-name-card,
-  .interface-switcher,
   .action-button-group,
   .homepage-control-cell,
   .numeric-cell {

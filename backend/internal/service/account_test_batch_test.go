@@ -461,6 +461,9 @@ func (noopAccountRepo) List(context.Context, pagination.PaginationParams) ([]Acc
 func (noopAccountRepo) ListWithFilters(context.Context, pagination.PaginationParams, string, string, string, string, int64, string) ([]Account, *pagination.PaginationResult, error) {
 	return nil, nil, nil
 }
+func (noopAccountRepo) ListAllWithFilters(context.Context, string, string, string, string, int64, string) ([]Account, error) {
+	return nil, nil
+}
 func (noopAccountRepo) ListByGroup(context.Context, int64) ([]Account, error) { return nil, nil }
 func (noopAccountRepo) ListActive(context.Context) ([]Account, error)         { return nil, nil }
 func (noopAccountRepo) ListOAuthRefreshCandidates(context.Context) ([]Account, error) {
