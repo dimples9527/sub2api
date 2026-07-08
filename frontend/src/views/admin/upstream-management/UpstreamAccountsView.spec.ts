@@ -2980,18 +2980,30 @@ describe('UpstreamAccountsView', () => {
           rate_violation: false,
           bound_groups: [],
         },
+        {
+          action: 'noop',
+          provider_slug: 'upstream-c',
+          provider_name: 'Upstream C',
+          upstream_key_name: 'key-c',
+          local_account_name: 'local-c',
+          matched_account_id: 14,
+          matched_account_name: 'local-c',
+          upstream_rate_multiplier: 1.5,
+          rate_violation: false,
+          bound_groups: [],
+        },
       ],
       warnings: [],
       records: [],
     })
     accountsMock.getById.mockImplementation(async (id: number) => ({
       id,
-      name: id === 12 ? 'local-a' : 'local-b',
-      platform: id === 12 ? 'openai' : 'gemini',
+      name: id === 12 ? 'local-a' : id === 13 ? 'local-b' : 'local-c',
+      platform: id === 13 ? 'gemini' : 'openai',
       type: 'apikey',
       status: 'active',
       schedulable: id === 12,
-      last_test_status: id === 12 ? 'success' : 'failed',
+      last_test_status: id === 13 ? 'failed' : 'success',
       last_tested_at: '2026-06-27T10:00:00Z',
     }))
     accountsMock.setSchedulable.mockResolvedValue({
@@ -3011,9 +3023,9 @@ describe('UpstreamAccountsView', () => {
     accountsMock.batchTestAccounts.mockResolvedValue({
       job_id: 'job-1',
       status: 'completed',
-      total: 2,
-      completed: 2,
-      success: 1,
+      total: 3,
+      completed: 3,
+      success: 2,
       failed: 1,
       results: [
         {
@@ -3034,6 +3046,15 @@ describe('UpstreamAccountsView', () => {
           error_message: 'account test timed out',
           latency_ms: 90000,
           finished_at: '2026-06-27T10:01:30Z',
+        },
+        {
+          account_id: 14,
+          account_name: 'local-c',
+          platform: 'openai',
+          schedulable: false,
+          status: 'success',
+          latency_ms: 84,
+          finished_at: '2026-06-27T10:02:00Z',
         },
       ],
     })
@@ -3100,7 +3121,7 @@ describe('UpstreamAccountsView', () => {
     await flushPromises()
 
     expect(accountsMock.batchTestAccounts).toHaveBeenCalledWith({
-      account_ids: [12, 13],
+      account_ids: [12, 13, 14],
       model_ids_by_platform: {
         openai: 'gpt-4.1-mini',
         gemini: 'gemini-2.5-flash',
@@ -3111,6 +3132,7 @@ describe('UpstreamAccountsView', () => {
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('local-a')
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('local-b')
+    expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('local-c')
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('2.00x')
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('1.00x')
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('admin.upstreamAccounts.batchTestSchedulableEnabled')
@@ -3118,13 +3140,23 @@ describe('UpstreamAccountsView', () => {
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('account test timed out')
     expect(wrapper.find('[data-test="batch-test-filter-failed_schedulable"]').text()).toContain('0')
     expect(wrapper.find('[data-test="batch-test-filter-failed_unschedulable"]').text()).toContain('1')
+    expect(wrapper.find('[data-test="batch-test-filter-success_unschedulable"]').text()).toContain('1')
+
+    await wrapper.find('[data-test="batch-test-filter-success_unschedulable"]').trigger('click')
+    await flushPromises()
+
+    let dialogText = wrapper.find('[data-test="batch-test-result-dialog"]').text()
+    expect(dialogText).toContain('local-c')
+    expect(dialogText).not.toContain('local-a')
+    expect(dialogText).not.toContain('local-b')
 
     await wrapper.find('[data-test="batch-test-filter-failed_unschedulable"]').trigger('click')
     await flushPromises()
 
-    let dialogText = wrapper.find('[data-test="batch-test-result-dialog"]').text()
+    dialogText = wrapper.find('[data-test="batch-test-result-dialog"]').text()
     expect(dialogText).toContain('local-b')
     expect(dialogText).not.toContain('local-a')
+    expect(dialogText).not.toContain('local-c')
 
     await wrapper.find('[data-test="batch-test-filter-all"]').trigger('click')
     await flushPromises()

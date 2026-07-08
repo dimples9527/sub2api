@@ -1557,7 +1557,7 @@ type BatchTestPlatformOption = {
   accountCount: number
 }
 type BatchTestSortKey = 'account' | 'platform' | 'upstream_rate' | 'schedulable' | 'status' | 'latency' | 'finished_at'
-type BatchTestResultFilter = 'all' | 'failed' | 'failed_schedulable' | 'failed_unschedulable' | 'success' | 'skipped'
+type BatchTestResultFilter = 'all' | 'failed' | 'failed_schedulable' | 'failed_unschedulable' | 'success' | 'success_unschedulable' | 'skipped'
 type QuickFilterKey = 'all' | 'update' | 'risk' | 'unbound' | 'failed' | 'enabled' | 'disabled'
 type StatCardKey = 'total' | 'create' | 'update' | 'risk'
 type SortOrder = 'asc' | 'desc'
@@ -2037,11 +2037,13 @@ const batchTestResultCounts = computed(() => {
   const failed = items.filter(batchTestIsFailed).length
   const failedSchedulable = items.filter(batchTestIsFailedSchedulable).length
   const failedUnschedulable = items.filter(batchTestIsFailedUnschedulable).length
+  const successUnschedulable = items.filter(batchTestIsSuccessUnschedulable).length
   return {
     all: items.length,
     failed,
     failedSchedulable,
     failedUnschedulable,
+    successUnschedulable,
     success,
     skipped
   }
@@ -2054,12 +2056,14 @@ const batchTestFilterOptions = computed(() => {
     { value: 'failed_schedulable' as const, label: t('admin.upstreamAccounts.batchTestFailedSchedulable'), count: counts.failedSchedulable },
     { value: 'failed_unschedulable' as const, label: t('admin.upstreamAccounts.batchTestFailedUnschedulable'), count: counts.failedUnschedulable },
     { value: 'success' as const, label: t('admin.upstreamAccounts.batchTestSuccess'), count: counts.success },
+    { value: 'success_unschedulable' as const, label: t('admin.upstreamAccounts.batchTestSuccessUnschedulable'), count: counts.successUnschedulable },
     { value: 'skipped' as const, label: t('admin.upstreamAccounts.batchTestSkipped'), count: counts.skipped }
   ]
 })
 const batchTestFilteredItems = computed<BatchAccountTestItem[]>(() => {
   const filter = batchTestResultFilter.value
   if (filter === 'success') return batchTestResultItems.value.filter(item => item.status === 'success')
+  if (filter === 'success_unschedulable') return batchTestResultItems.value.filter(batchTestIsSuccessUnschedulable)
   if (filter === 'failed') return batchTestResultItems.value.filter(batchTestIsFailed)
   if (filter === 'failed_schedulable') return batchTestResultItems.value.filter(batchTestIsFailedSchedulable)
   if (filter === 'failed_unschedulable') return batchTestResultItems.value.filter(batchTestIsFailedUnschedulable)
@@ -2389,6 +2393,10 @@ function batchTestIsFailedSchedulable(item: BatchAccountTestItem) {
 
 function batchTestIsFailedUnschedulable(item: BatchAccountTestItem) {
   return batchTestIsFailed(item) && !batchTestItemSchedulable(item)
+}
+
+function batchTestIsSuccessUnschedulable(item: BatchAccountTestItem) {
+  return item.status === 'success' && !batchTestItemSchedulable(item)
 }
 
 function toggleBatchTestSort(key: BatchTestSortKey) {

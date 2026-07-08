@@ -2125,6 +2125,7 @@ export default {
       batchTestFailedSchedulable: 'Failed + scheduling on',
       batchTestFailedUnschedulable: 'Failed + scheduling off',
       batchTestFailedSchedulableTag: 'Failed but scheduling on',
+      batchTestSuccessUnschedulable: 'Success + scheduling off',
       batchTestSkipped: 'Skipped',
       batchTestResultSection: 'Results',
       batchTestFailureFirstHint: 'Failed results are shown first so large batches can be triaged faster.',

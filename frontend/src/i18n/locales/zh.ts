@@ -2139,6 +2139,7 @@ export default {
       batchTestFailedSchedulable: '失败且调度打开',
       batchTestFailedUnschedulable: '失败且调度关闭',
       batchTestFailedSchedulableTag: '失败仍调度',
+      batchTestSuccessUnschedulable: '成功且调度关闭',
       batchTestSkipped: '跳过',
       batchTestResultSection: '测试明细',
       batchTestFailureFirstHint: '失败结果已前置，适合大批量时先处理异常。',
