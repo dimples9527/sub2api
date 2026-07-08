@@ -60,7 +60,13 @@ func (s *upstreamAccountSyncProviderSourceStub) getStoredProvider(_ context.Cont
 
 func (s *upstreamAccountSyncProviderSourceStub) FetchProviderKeys(ctx context.Context, slug string) ([]UpstreamProviderKey, []string, error) {
 	if s.keyFetchDelay > 0 {
-		time.Sleep(s.keyFetchDelay)
+		timer := time.NewTimer(s.keyFetchDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, nil, ctx.Err()
+		case <-timer.C:
+		}
 	}
 	s.keyFetchMu.Lock()
 	if s.keyFetchCount == nil {
@@ -177,6 +183,7 @@ func (s *upstreamAccountSyncAccountManagerStub) SetAccountSchedulable(ctx contex
 }
 
 type upstreamAccountSyncPreviewCacheStub struct {
+	mu      sync.Mutex
 	result  UpstreamAccountSyncResult
 	found   bool
 	gets    int
@@ -185,11 +192,15 @@ type upstreamAccountSyncPreviewCacheStub struct {
 }
 
 func (s *upstreamAccountSyncPreviewCacheStub) Get(ctx context.Context) (UpstreamAccountSyncResult, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.gets++
 	return s.result, s.found, nil
 }
 
 func (s *upstreamAccountSyncPreviewCacheStub) Set(ctx context.Context, result UpstreamAccountSyncResult) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.sets++
 	s.result = result
 	s.found = true
@@ -197,10 +208,32 @@ func (s *upstreamAccountSyncPreviewCacheStub) Set(ctx context.Context, result Up
 }
 
 func (s *upstreamAccountSyncPreviewCacheStub) Delete(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.deletes++
 	s.result = UpstreamAccountSyncResult{}
 	s.found = false
 	return nil
+}
+
+func (s *upstreamAccountSyncPreviewCacheStub) stats() (sets int, deletes int, found bool, result UpstreamAccountSyncResult) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sets, s.deletes, s.found, s.result
+}
+
+func waitForPreviewCacheSets(t *testing.T, cache *upstreamAccountSyncPreviewCacheStub, minSets int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		sets, _, _, _ := cache.stats()
+		if sets >= minSets {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	sets, deletes, found, result := cache.stats()
+	t.Fatalf("cache sets/deletes/found/result = %d/%d/%v/%+v, want at least %d sets", sets, deletes, found, result, minSets)
 }
 
 func newUpstreamAccountSyncServiceForTest(
@@ -350,7 +383,7 @@ func TestUpstreamAccountSyncPreviewRefreshesAndStoresSnapshotOnCacheMiss(t *test
 	}
 }
 
-func TestUpstreamAccountSyncSyncInvalidatesStalePreviewCacheAfterRealtimeFetch(t *testing.T) {
+func TestUpstreamAccountSyncSyncRefreshesPreviewCacheAfterRealtimeFetch(t *testing.T) {
 	provider := &upstreamAccountSyncProviderSourceStub{
 		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},
 		providers: []UpstreamProviderConfig{
@@ -382,8 +415,13 @@ func TestUpstreamAccountSyncSyncInvalidatesStalePreviewCacheAfterRealtimeFetch(t
 	if len(result.Items) != 1 || result.Items[0].UpstreamKeyName != "fresh" {
 		t.Fatalf("sync items = %+v, want fresh provider data", result.Items)
 	}
-	if cache.deletes != 1 || cache.found {
-		t.Fatalf("cache deletes/found = %d/%v, want sync to invalidate stale snapshot", cache.deletes, cache.found)
+	waitForPreviewCacheSets(t, cache, 1)
+	sets, deletes, found, refreshed := cache.stats()
+	if deletes != 0 || !found {
+		t.Fatalf("cache sets/deletes/found = %d/%d/%v, want refreshed cache retained", sets, deletes, found)
+	}
+	if len(refreshed.Items) != 1 || refreshed.Items[0].UpstreamKeyName != "fresh" {
+		t.Fatalf("refreshed cache items = %+v, want fresh provider data", refreshed.Items)
 	}
 }
 
@@ -429,9 +467,9 @@ func TestUpstreamAccountSyncPreviewIncludesProvidersAndManualGroupMapping(t *tes
 	if err != nil {
 		t.Fatalf("Preview returned error: %v", err)
 	}
-	if provider.fetchCount("main") != 1 || provider.fetchCount("backup") != 1 || provider.fetchCount("disabled") != 1 {
+	if provider.fetchCount("main") != 1 || provider.fetchCount("backup") != 1 || provider.fetchCount("disabled") != 0 {
 		t.Fatalf(
-			"fetch counts main/backup/disabled = %d/%d/%d, want one fetch for each provider",
+			"fetch counts main/backup/disabled = %d/%d/%d, want disabled provider skipped",
 			provider.fetchCount("main"),
 			provider.fetchCount("backup"),
 			provider.fetchCount("disabled"),
@@ -440,8 +478,8 @@ func TestUpstreamAccountSyncPreviewIncludesProvidersAndManualGroupMapping(t *tes
 	if result.Summary.UpstreamKeyCount != 1 || result.Summary.CreateCount != 1 {
 		t.Fatalf("summary = %+v, want one upstream key and one create", result.Summary)
 	}
-	if len(result.Providers) != 3 || result.Providers[0].Slug != "main" || result.Providers[1].Slug != "backup" || result.Providers[2].Slug != "disabled" {
-		t.Fatalf("providers = %+v, want main, backup, disabled", result.Providers)
+	if len(result.Providers) != 2 || result.Providers[0].Slug != "main" || result.Providers[1].Slug != "backup" {
+		t.Fatalf("providers = %+v, want enabled providers only", result.Providers)
 	}
 	if len(result.Items) != 1 {
 		t.Fatalf("item count = %d, want 1", len(result.Items))
@@ -735,6 +773,38 @@ func TestUpstreamAccountSyncPreviewFetchesProviderKeysConcurrently(t *testing.T)
 	}
 	if elapsed >= 200*time.Millisecond {
 		t.Fatalf("preview elapsed = %s, want concurrent provider fetches under 200ms", elapsed)
+	}
+}
+
+func TestUpstreamAccountSyncPreviewHonorsProviderFetchContextDeadline(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},
+			{Slug: "slow", Name: "Slow upstream", AccountNamePrefix: "slow-", Enabled: true},
+		},
+		keyFetchDelay: 200 * time.Millisecond,
+	}
+	svc, _ := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 1, Status: StatusActive}},
+		nil,
+		newUpstreamManagementSettingRepoStub(),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	result, err := svc.Preview(ctx)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if elapsed >= 150*time.Millisecond {
+		t.Fatalf("preview elapsed = %s, want provider fetch cancellation before full delay", elapsed)
+	}
+	if len(result.Warnings) == 0 {
+		t.Fatalf("warnings = %+v, want provider timeout warning", result.Warnings)
 	}
 }
 
@@ -2556,8 +2626,10 @@ func TestUpstreamAccountRateGuardInvalidatesPreviewCacheAfterUnbindingAllLowGrou
 	if got := accounts.updateInputs[0].input.GroupIDs; got == nil || len(*got) != 0 {
 		t.Fatalf("updated group ids = %+v, want all low-rate groups unbound", got)
 	}
-	if cache.deletes != 1 || cache.found {
-		t.Fatalf("cache deletes/found = %d/%v, want stale preview cache invalidated", cache.deletes, cache.found)
+	waitForPreviewCacheSets(t, cache, 1)
+	sets, deletes, found, _ := cache.stats()
+	if deletes != 0 || !found {
+		t.Fatalf("cache sets/deletes/found = %d/%d/%v, want refreshed cache retained", sets, deletes, found)
 	}
 
 	preview, err := svc.Preview(context.Background())

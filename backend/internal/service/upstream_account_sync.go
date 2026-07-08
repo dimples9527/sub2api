@@ -31,6 +31,8 @@ const (
 	DefaultUpstreamAccountRateGuardIntervalSeconds = 3600
 	MinUpstreamAccountRateGuardIntervalSeconds     = 1
 	upstreamAccountSyncProviderKeysCacheTTL        = 30 * time.Second
+	upstreamAccountSyncProviderKeysFetchTimeout    = 8 * time.Second
+	upstreamAccountSyncProviderKeysSlowLogDuration = 1 * time.Second
 )
 
 type UpstreamAccountSyncAccountManager interface {
@@ -194,6 +196,9 @@ type UpstreamAccountSyncService struct {
 	previewCache   UpstreamAccountSyncPreviewCache
 	keysCacheMu    sync.Mutex
 	keysCache      map[string]upstreamAccountSyncProviderKeysCacheEntry
+
+	previewRefreshMu       sync.Mutex
+	previewRefreshInFlight bool
 }
 
 type UpstreamAccountSyncPreviewCache interface {
@@ -487,7 +492,7 @@ func (s *UpstreamAccountSyncService) Sync(ctx context.Context, req UpstreamAccou
 		return UpstreamAccountSyncResult{}, err
 	}
 	result.Records = records
-	s.invalidatePreviewCache(ctx)
+	s.refreshPreviewCacheAsync()
 	return result, nil
 }
 
@@ -514,13 +519,30 @@ func (s *UpstreamAccountSyncService) storePreviewCache(ctx context.Context, resu
 	}
 }
 
-func (s *UpstreamAccountSyncService) invalidatePreviewCache(ctx context.Context) {
+func (s *UpstreamAccountSyncService) refreshPreviewCacheAsync() {
 	if s == nil || s.previewCache == nil {
 		return
 	}
-	if err := s.previewCache.Delete(ctx); err != nil {
-		logger.LegacyPrintf("service.upstream_account_sync", "Warning: invalidate preview cache failed: %v", err)
+	s.previewRefreshMu.Lock()
+	if s.previewRefreshInFlight {
+		s.previewRefreshMu.Unlock()
+		return
 	}
+	s.previewRefreshInFlight = true
+	s.previewRefreshMu.Unlock()
+
+	go func() {
+		defer func() {
+			s.previewRefreshMu.Lock()
+			s.previewRefreshInFlight = false
+			s.previewRefreshMu.Unlock()
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), upstreamAccountSyncPreviewRefreshTimeout)
+		defer cancel()
+		if _, err := s.RefreshPreviewCache(ctx); err != nil {
+			logger.LegacyPrintf("service.upstream_account_sync", "Warning: refresh preview cache failed: %v", err)
+		}
+	}()
 }
 
 func (s *UpstreamAccountSyncService) GetRateGuardConfig(ctx context.Context) (UpstreamAccountRateGuardConfig, error) {
@@ -556,7 +578,7 @@ func (s *UpstreamAccountSyncService) UpdateRateGuardConfig(ctx context.Context, 
 	if err != nil {
 		return UpstreamAccountRateGuardConfig{}, err
 	}
-	s.invalidatePreviewCache(ctx)
+	s.refreshPreviewCacheAsync()
 	return saved, nil
 }
 
@@ -656,7 +678,7 @@ func (s *UpstreamAccountSyncService) runMatchedAccountRateGuard(ctx context.Cont
 		return UpstreamAccountSyncResult{}, err
 	}
 	result.Records = records
-	s.invalidatePreviewCache(ctx)
+	s.refreshPreviewCacheAsync()
 	return result, nil
 }
 
@@ -664,9 +686,13 @@ func (s *UpstreamAccountSyncService) disableAccountsForDisabledProviders(ctx con
 	if len(accounts) == 0 || s == nil || s.accountManager == nil {
 		return nil
 	}
-	disabledProviders := s.disabledAccountSyncProviderSlugs(ctx)
+	disabledProviders := s.disabledAccountSyncProviders(ctx)
 	if len(disabledProviders) == 0 {
 		return nil
+	}
+	disabledProviderList := make([]UpstreamProviderConfig, 0, len(disabledProviders))
+	for _, provider := range disabledProviders {
+		disabledProviderList = append(disabledProviderList, provider)
 	}
 	accountIDsToDisable := map[int64]struct{}{}
 	for _, account := range accounts {
@@ -678,6 +704,9 @@ func (s *UpstreamAccountSyncService) disableAccountsForDisabledProviders(ctx con
 		}
 		providerSlug := strings.TrimSpace(account.GetExtraString("upstream_provider_slug"))
 		if providerSlug == "" {
+			if provider, _, ok := upstreamAccountSyncInferProviderKeyFromAccountName(account, disabledProviderList); ok && provider.Slug != "" {
+				accountIDsToDisable[account.ID] = struct{}{}
+			}
 			continue
 		}
 		if _, disabled := disabledProviders[providerSlug]; !disabled {
@@ -710,7 +739,7 @@ func (s *UpstreamAccountSyncService) disableAccountsForDisabledProviders(ctx con
 	return nil
 }
 
-func (s *UpstreamAccountSyncService) disabledAccountSyncProviderSlugs(ctx context.Context) map[string]struct{} {
+func (s *UpstreamAccountSyncService) disabledAccountSyncProviders(ctx context.Context) map[string]UpstreamProviderConfig {
 	if s == nil {
 		return nil
 	}
@@ -725,12 +754,12 @@ func (s *UpstreamAccountSyncService) disabledAccountSyncProviderSlugs(ctx contex
 		logger.LegacyPrintf("service.upstream_account_sync", "Warning: list disabled upstream providers failed: %v", err)
 		return nil
 	}
-	disabled := map[string]struct{}{}
+	disabled := map[string]UpstreamProviderConfig{}
 	for _, provider := range providers {
 		if provider.Slug == "" || provider.Enabled {
 			continue
 		}
-		disabled[provider.Slug] = struct{}{}
+		disabled[provider.Slug] = provider
 	}
 	if len(disabled) == 0 {
 		return nil
@@ -1295,6 +1324,9 @@ func (s *UpstreamAccountSyncService) listAccountSyncProviders(ctx context.Contex
 		if provider.Slug == "" || provider.IsDefault {
 			continue
 		}
+		if !provider.Enabled {
+			continue
+		}
 		if _, exists := seen[provider.Slug]; exists {
 			continue
 		}
@@ -1368,7 +1400,16 @@ func (s *UpstreamAccountSyncService) fetchProviderKeysForAccountSync(ctx context
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			keys, warnings, err := s.providerSource.FetchProviderKeys(ctx, provider.Slug)
+			fetchCtx, cancel := context.WithTimeout(ctx, upstreamAccountSyncProviderKeysFetchTimeout)
+			defer cancel()
+			start := time.Now()
+			keys, warnings, err := s.providerSource.FetchProviderKeys(fetchCtx, provider.Slug)
+			elapsed := time.Since(start)
+			if err != nil {
+				logger.LegacyPrintf("service.upstream_account_sync", "Provider keys fetch failed: slug=%s duration=%s error=%v", provider.Slug, elapsed, err)
+			} else if elapsed >= upstreamAccountSyncProviderKeysSlowLogDuration {
+				logger.LegacyPrintf("service.upstream_account_sync", "Warning: provider keys fetch slow: slug=%s duration=%s key_count=%d", provider.Slug, elapsed, len(keys))
+			}
 			resultCh <- providerKeysFetchResult{
 				slug:     provider.Slug,
 				keys:     keys,
