@@ -964,11 +964,26 @@ describe('UpstreamProvidersView', () => {
     expect(dialog.text()).toContain('admin.upstreamProviders.healthGuardAutoRun')
     expect(dialog.text()).toContain('Anthropic')
     expect(dialog.text()).toContain('admin.upstreamProviders.healthGuardAdjustmentLogs')
-    expect(dialog.text()).toContain('unstable-account')
-    expect(dialog.text()).toContain('admin.upstreamProviders.healthGuardActionDisabled')
     expect(dialog.text()).toContain('admin.upstreamProviders.healthGuardSkipReasons')
-    expect(dialog.text()).toContain('admin.upstreamProviders.healthGuardSkipReasonMissingProviderSlug')
-    expect(dialog.text()).toContain('admin.upstreamProviders.healthGuardSkipSampleAccounts')
+    expect(dialog.text()).toContain('admin.upstreamProviders.healthGuardResultList')
+
+    const adjustmentButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('admin.upstreamProviders.healthGuardAdjustmentLogs'))
+    expect(adjustmentButton).toBeTruthy()
+    await adjustmentButton!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('unstable-account')
+    expect(wrapper.text()).toContain('admin.upstreamProviders.healthGuardActionDisabled')
+
+    const skipReasonButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('admin.upstreamProviders.healthGuardSkipReasons'))
+    expect(skipReasonButton).toBeTruthy()
+    await skipReasonButton!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('admin.upstreamProviders.healthGuardSkipReasonMissingProviderSlug')
+    expect(wrapper.text()).toContain('admin.upstreamProviders.healthGuardSkipSampleAccounts')
 
     const autoRun = dialog.find('input[type="checkbox"]')
     await autoRun.setValue(false)

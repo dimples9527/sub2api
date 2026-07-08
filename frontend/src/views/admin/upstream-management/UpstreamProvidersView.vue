@@ -665,75 +665,37 @@
               </div>
             </div>
 
-            <div class="health-guard-adjustment-panel">
-              <div class="health-guard-adjustment-header">
-                <div class="balance-section-title">{{ t('admin.upstreamProviders.healthGuardAdjustmentLogs') }}</div>
-                <span>{{ t('admin.upstreamProviders.healthGuardAdjustmentLogCount', { count: healthGuardAdjustmentLogs.length }) }}</span>
-              </div>
-              <div v-if="healthGuardAdjustmentLogs.length" class="health-guard-adjustment-list">
-                <article
-                  v-for="log in healthGuardAdjustmentLogs"
-                  :key="`${log.record.id}-${log.item.account_id}-${log.item.action}-${log.item.finished_at}`"
-                  class="health-guard-adjustment-item"
-                  :class="`is-${log.item.action}`"
-                >
-                  <div class="health-guard-adjustment-main">
-                    <strong>{{ log.item.account_name || `#${log.item.account_id}` }}</strong>
-                    <span>{{ healthGuardAdjustmentTime(log) }}</span>
-                  </div>
-                  <div class="health-guard-adjustment-metrics">
-                    <span :class="['record-status', healthGuardActionClass(log.item.action)]">
-                      {{ healthGuardActionLabel(log.item.action) }}
-                    </span>
-                    <span>{{ healthGuardSchedulableChange(log.item) }}</span>
-                    <span>{{ log.item.provider_name || log.item.provider_slug }} / {{ healthGuardPlatformLabel(log.item.platform) }}</span>
-                  </div>
-                  <p v-if="log.item.reason || log.item.error_message">{{ log.item.reason || log.item.error_message }}</p>
-                </article>
-              </div>
-              <div v-else class="health-guard-empty">
-                {{ t('admin.upstreamProviders.healthGuardNoAdjustmentLogs') }}
-              </div>
-            </div>
-
-            <div v-if="healthGuardSkipReasons.length" class="health-guard-skip-panel">
-              <div class="balance-section-title">{{ t('admin.upstreamProviders.healthGuardSkipReasons') }}</div>
-              <div class="health-guard-skip-list">
-                <article v-for="reason in healthGuardSkipReasons" :key="reason.reason" class="health-guard-skip-item">
-                  <div>
-                    <strong>{{ healthGuardSkipReasonLabel(reason.reason) }}</strong>
-                    <span>{{ t('admin.upstreamProviders.healthGuardSkipCount', { count: reason.count }) }}</span>
-                  </div>
-                  <p v-if="healthGuardSkipReasonSamples(reason)">
-                    {{ t('admin.upstreamProviders.healthGuardSkipSampleAccounts', { accounts: healthGuardSkipReasonSamples(reason) }) }}
-                  </p>
-                </article>
-              </div>
-            </div>
-
-            <div class="health-guard-item-list">
-              <article
-                v-for="item in latestHealthGuardItems"
-                :key="`${item.account_id}-${item.finished_at}`"
-                class="health-guard-item-card"
-                :class="healthGuardItemClass(item.status)"
+            <div class="health-guard-detail-actions">
+              <button
+                type="button"
+                class="health-guard-detail-action"
+                :disabled="!healthGuardSkipReasons.length"
+                @click="showHealthGuardSkipReasonsDialog = true"
               >
-                <div class="health-guard-item-main">
-                  <strong>{{ item.account_name || `#${item.account_id}` }}</strong>
-                  <span>{{ item.provider_name || item.provider_slug }} / {{ healthGuardPlatformLabel(item.platform) }}</span>
-                </div>
-                <div class="health-guard-item-metrics">
-                  <span :class="['record-status', healthGuardStatusClass(item.status)]">
-                    {{ healthGuardStatusLabel(item.status) }}
-                  </span>
-                  <span>{{ formatLatencyMs(item.latency_ms) }} / {{ formatLatencyMs(item.latency_limit_ms) }}</span>
-                  <span>{{ healthGuardActionLabel(item.action) }}</span>
-                </div>
-                <p v-if="item.reason || item.error_message">{{ item.reason || item.error_message }}</p>
-              </article>
-              <div v-if="!latestHealthGuardItems.length" class="health-guard-empty">
-                {{ latestHealthGuardRecord ? t('admin.upstreamProviders.healthGuardNoCheckedItems') : t('admin.upstreamProviders.healthGuardNoRecords') }}
-              </div>
+                <span>{{ t('admin.upstreamProviders.healthGuardSkipReasons') }}</span>
+                <strong>{{ healthGuardSkippedCount }}</strong>
+                <small>{{ t('admin.upstreamProviders.healthGuardViewDetails') }}</small>
+              </button>
+              <button
+                type="button"
+                class="health-guard-detail-action"
+                :disabled="!healthGuardAdjustmentLogs.length"
+                @click="showHealthGuardAdjustmentDialog = true"
+              >
+                <span>{{ t('admin.upstreamProviders.healthGuardAdjustmentLogs') }}</span>
+                <strong>{{ healthGuardAdjustmentLogs.length }}</strong>
+                <small>{{ t('admin.upstreamProviders.healthGuardViewDetails') }}</small>
+              </button>
+              <button
+                type="button"
+                class="health-guard-detail-action"
+                :disabled="!latestHealthGuardItems.length"
+                @click="showHealthGuardResultsDialog = true"
+              >
+                <span>{{ t('admin.upstreamProviders.healthGuardResultList') }}</span>
+                <strong>{{ latestHealthGuardItems.length }}</strong>
+                <small>{{ t('admin.upstreamProviders.healthGuardViewDetails') }}</small>
+              </button>
             </div>
           </div>
         </div>
@@ -748,6 +710,144 @@
             {{ savingHealthGuardConfig ? t('common.saving') : t('common.save') }}
           </button>
         </div>
+      </template>
+    </BaseDialog>
+
+    <BaseDialog
+      :show="showHealthGuardSkipReasonsDialog"
+      :title="t('admin.upstreamProviders.healthGuardSkipReasonDetails')"
+      width="wide"
+      :z-index="60"
+      @close="showHealthGuardSkipReasonsDialog = false"
+    >
+      <div class="health-guard-detail-dialog">
+        <div v-if="healthGuardSkipReasons.length" class="health-guard-skip-list health-guard-modal-list">
+          <article v-for="reason in healthGuardSkipReasons" :key="reason.reason" class="health-guard-skip-item">
+            <div>
+              <strong>{{ healthGuardSkipReasonLabel(reason.reason) }}</strong>
+              <span>{{ t('admin.upstreamProviders.healthGuardSkipCount', { count: reason.count }) }}</span>
+            </div>
+            <p v-if="healthGuardSkipReasonSamples(reason)">
+              {{ t('admin.upstreamProviders.healthGuardSkipSampleAccounts', { accounts: healthGuardSkipReasonSamples(reason) }) }}
+            </p>
+          </article>
+        </div>
+        <div v-else class="health-guard-empty">
+          {{ t('admin.upstreamProviders.healthGuardNoSkipReasons') }}
+        </div>
+      </div>
+      <template #footer>
+        <button type="button" class="btn btn-secondary" @click="showHealthGuardSkipReasonsDialog = false">
+          {{ t('common.close') }}
+        </button>
+      </template>
+    </BaseDialog>
+
+    <BaseDialog
+      :show="showHealthGuardAdjustmentDialog"
+      :title="t('admin.upstreamProviders.healthGuardAdjustmentLogDetails')"
+      width="wide"
+      :z-index="60"
+      @close="showHealthGuardAdjustmentDialog = false"
+    >
+      <div class="health-guard-detail-dialog">
+        <div class="health-guard-filter-row">
+          <button
+            v-for="option in healthGuardAdjustmentFilterOptions"
+            :key="option.key"
+            type="button"
+            class="health-guard-filter-button"
+            :class="{ 'is-active': activeHealthGuardAdjustmentFilter === option.key }"
+            @click="activeHealthGuardAdjustmentFilter = option.key"
+          >
+            <span>{{ option.label }}</span>
+            <strong>{{ option.count }}</strong>
+          </button>
+        </div>
+
+        <div v-if="filteredHealthGuardAdjustmentLogs.length" class="health-guard-adjustment-list health-guard-modal-list">
+          <article
+            v-for="log in filteredHealthGuardAdjustmentLogs"
+            :key="`${log.record.id}-${log.item.account_id}-${log.item.action}-${log.item.finished_at}`"
+            class="health-guard-adjustment-item"
+            :class="`is-${log.item.action}`"
+          >
+            <div class="health-guard-adjustment-main">
+              <strong>{{ log.item.account_name || `#${log.item.account_id}` }}</strong>
+              <span>{{ healthGuardAdjustmentTime(log) }}</span>
+            </div>
+            <div class="health-guard-adjustment-metrics">
+              <span :class="['record-status', healthGuardActionClass(log.item.action)]">
+                {{ healthGuardActionLabel(log.item.action) }}
+              </span>
+              <span>{{ healthGuardSchedulableChange(log.item) }}</span>
+              <span>{{ log.item.provider_name || log.item.provider_slug }} / {{ healthGuardPlatformLabel(log.item.platform) }}</span>
+            </div>
+            <p v-if="log.item.reason || log.item.error_message">{{ log.item.reason || log.item.error_message }}</p>
+          </article>
+        </div>
+        <div v-else class="health-guard-empty">
+          {{ t('admin.upstreamProviders.healthGuardNoAdjustmentLogs') }}
+        </div>
+      </div>
+      <template #footer>
+        <button type="button" class="btn btn-secondary" @click="showHealthGuardAdjustmentDialog = false">
+          {{ t('common.close') }}
+        </button>
+      </template>
+    </BaseDialog>
+
+    <BaseDialog
+      :show="showHealthGuardResultsDialog"
+      :title="t('admin.upstreamProviders.healthGuardResultDetails')"
+      width="wide"
+      :z-index="60"
+      @close="showHealthGuardResultsDialog = false"
+    >
+      <div class="health-guard-detail-dialog">
+        <div class="health-guard-filter-row">
+          <button
+            v-for="option in healthGuardResultFilterOptions"
+            :key="option.key"
+            type="button"
+            class="health-guard-filter-button"
+            :class="{ 'is-active': activeHealthGuardResultFilter === option.key }"
+            @click="activeHealthGuardResultFilter = option.key"
+          >
+            <span>{{ option.label }}</span>
+            <strong>{{ option.count }}</strong>
+          </button>
+        </div>
+
+        <div v-if="filteredLatestHealthGuardItems.length" class="health-guard-item-list health-guard-modal-list">
+          <article
+            v-for="item in filteredLatestHealthGuardItems"
+            :key="`${item.account_id}-${item.finished_at}`"
+            class="health-guard-item-card"
+            :class="healthGuardItemClass(item.status)"
+          >
+            <div class="health-guard-item-main">
+              <strong>{{ item.account_name || `#${item.account_id}` }}</strong>
+              <span>{{ item.provider_name || item.provider_slug }} / {{ healthGuardPlatformLabel(item.platform) }}</span>
+            </div>
+            <div class="health-guard-item-metrics">
+              <span :class="['record-status', healthGuardStatusClass(item.status)]">
+                {{ healthGuardStatusLabel(item.status) }}
+              </span>
+              <span>{{ formatLatencyMs(item.latency_ms) }} / {{ formatLatencyMs(item.latency_limit_ms) }}</span>
+              <span>{{ healthGuardActionLabel(item.action) }}</span>
+            </div>
+            <p v-if="item.reason || item.error_message">{{ item.reason || item.error_message }}</p>
+          </article>
+        </div>
+        <div v-else class="health-guard-empty">
+          {{ latestHealthGuardRecord ? t('admin.upstreamProviders.healthGuardNoCheckedItems') : t('admin.upstreamProviders.healthGuardNoRecords') }}
+        </div>
+      </div>
+      <template #footer>
+        <button type="button" class="btn btn-secondary" @click="showHealthGuardResultsDialog = false">
+          {{ t('common.close') }}
+        </button>
       </template>
     </BaseDialog>
 
@@ -1424,6 +1524,8 @@ type HealthGuardAdjustmentLogItem = {
   record: UpstreamAccountHealthGuardRunRecord
   item: UpstreamAccountHealthGuardRunItem
 }
+type HealthGuardAdjustmentFilterKey = 'all' | 'disabled' | 'recovered'
+type HealthGuardResultFilterKey = 'all' | 'healthy' | 'slow' | 'failed' | 'changed'
 
 const providers = ref<UpstreamProviderConfig[]>([])
 const loading = ref(false)
@@ -1451,6 +1553,11 @@ const showHealthGuardDialog = ref(false)
 const loadingHealthGuard = ref(false)
 const savingHealthGuardConfig = ref(false)
 const runningHealthGuardNow = ref(false)
+const showHealthGuardSkipReasonsDialog = ref(false)
+const showHealthGuardAdjustmentDialog = ref(false)
+const showHealthGuardResultsDialog = ref(false)
+const activeHealthGuardAdjustmentFilter = ref<HealthGuardAdjustmentFilterKey>('all')
+const activeHealthGuardResultFilter = ref<HealthGuardResultFilterKey>('all')
 
 const showTestDialog = ref(false)
 const testResult = ref<UpstreamProviderTestResult | null>(null)
@@ -1738,6 +1845,36 @@ const healthGuardAdjustmentLogs = computed<HealthGuardAdjustmentLogItem[]>(() =>
     .slice(0, 30)
 })
 const healthGuardSkipReasons = computed<UpstreamAccountHealthGuardSkipReason[]>(() => latestHealthGuardRecord.value?.summary?.skip_reasons || [])
+const healthGuardSkippedCount = computed(() => healthGuardSkipReasons.value.reduce((sum, reason) => sum + Math.max(0, Number(reason.count) || 0), 0))
+const healthGuardAdjustmentFilterOptions = computed<Array<{ key: HealthGuardAdjustmentFilterKey; label: string; count: number }>>(() => {
+  const logs = healthGuardAdjustmentLogs.value
+  return [
+    { key: 'all', label: t('admin.upstreamProviders.healthGuardFilterAll'), count: logs.length },
+    { key: 'disabled', label: t('admin.upstreamProviders.healthGuardDisabled'), count: logs.filter(log => log.item.action === 'disabled').length },
+    { key: 'recovered', label: t('admin.upstreamProviders.healthGuardRecovered'), count: logs.filter(log => log.item.action === 'recovered').length },
+  ]
+})
+const filteredHealthGuardAdjustmentLogs = computed(() => {
+  const filter = activeHealthGuardAdjustmentFilter.value
+  if (filter === 'all') return healthGuardAdjustmentLogs.value
+  return healthGuardAdjustmentLogs.value.filter(log => log.item.action === filter)
+})
+const healthGuardResultFilterOptions = computed<Array<{ key: HealthGuardResultFilterKey; label: string; count: number }>>(() => {
+  const items = latestHealthGuardItems.value
+  return [
+    { key: 'all', label: t('admin.upstreamProviders.healthGuardFilterAll'), count: items.length },
+    { key: 'healthy', label: t('admin.upstreamProviders.healthGuardHealthy'), count: items.filter(item => item.status === 'healthy').length },
+    { key: 'slow', label: t('admin.upstreamProviders.healthGuardSlow'), count: items.filter(item => item.status === 'slow').length },
+    { key: 'failed', label: t('admin.upstreamProviders.healthGuardFailed'), count: items.filter(item => item.status === 'failed').length },
+    { key: 'changed', label: t('admin.upstreamProviders.healthGuardAdjusted'), count: items.filter(item => item.action === 'disabled' || item.action === 'recovered').length },
+  ]
+})
+const filteredLatestHealthGuardItems = computed(() => {
+  const filter = activeHealthGuardResultFilter.value
+  if (filter === 'all') return latestHealthGuardItems.value
+  if (filter === 'changed') return latestHealthGuardItems.value.filter(item => item.action === 'disabled' || item.action === 'recovered')
+  return latestHealthGuardItems.value.filter(item => item.status === filter)
+})
 const healthGuardLastRunText = computed(() => {
   const lastRun = healthGuardConfig.value?.last_run_at
   return lastRun ? formatDateTime(lastRun) : t('admin.upstreamProviders.healthGuardNeverRun')
@@ -1872,6 +2009,12 @@ function closeBalanceSamplerDialog() {
   showBalanceSamplerDialog.value = false
 }
 
+function closeHealthGuardDetailDialogs() {
+  showHealthGuardSkipReasonsDialog.value = false
+  showHealthGuardAdjustmentDialog.value = false
+  showHealthGuardResultsDialog.value = false
+}
+
 async function openHealthGuardDialog() {
   showHealthGuardDialog.value = true
   await loadHealthGuardState()
@@ -1879,6 +2022,7 @@ async function openHealthGuardDialog() {
 
 function closeHealthGuardDialog() {
   showHealthGuardDialog.value = false
+  closeHealthGuardDetailDialogs()
 }
 
 async function submitForm() {
@@ -3535,6 +3679,50 @@ onMounted(reload)
   @apply text-red-600 dark:text-red-300;
 }
 
+.health-guard-detail-actions {
+  @apply mt-3 grid gap-2;
+}
+
+.health-guard-detail-action {
+  @apply grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-left transition-colors hover:border-primary-200 hover:bg-primary-50/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 disabled:cursor-not-allowed disabled:opacity-55 dark:border-dark-600 dark:bg-dark-800 dark:hover:border-primary-900/70 dark:hover:bg-primary-950/20;
+}
+
+.health-guard-detail-action span {
+  @apply min-w-0 truncate text-sm font-semibold text-gray-950 dark:text-white;
+}
+
+.health-guard-detail-action strong {
+  @apply row-span-2 font-mono text-lg text-gray-900 dark:text-gray-100;
+}
+
+.health-guard-detail-action small {
+  @apply min-w-0 truncate text-xs text-gray-500 dark:text-gray-400;
+}
+
+.health-guard-detail-dialog {
+  @apply flex max-h-[70vh] min-h-0 flex-col gap-3 overflow-hidden;
+}
+
+.health-guard-filter-row {
+  @apply flex flex-wrap gap-2;
+}
+
+.health-guard-filter-button {
+  @apply inline-flex min-h-8 items-center gap-2 rounded-md border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-600 transition-colors hover:border-primary-200 hover:text-primary-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-300 dark:hover:border-primary-900/70 dark:hover:text-primary-300;
+}
+
+.health-guard-filter-button strong {
+  @apply font-mono text-xs;
+}
+
+.health-guard-filter-button.is-active {
+  @apply border-primary-200 bg-primary-50 text-primary-700 dark:border-primary-800/70 dark:bg-primary-950/40 dark:text-primary-300;
+}
+
+.health-guard-modal-list {
+  @apply min-h-0 flex-1 overflow-auto pr-1;
+}
+
 .health-guard-adjustment-panel {
   @apply mt-3 border-t border-gray-100 pt-3 dark:border-dark-700;
 }
@@ -4286,6 +4474,20 @@ onMounted(reload)
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
+  .health-guard-detail-action {
+    min-height: 56px;
+  }
+
+  .health-guard-filter-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .health-guard-filter-button {
+    justify-content: space-between;
+    width: 100%;
+  }
+
   .health-guard-adjustment-header {
     @apply items-start;
   }
@@ -4352,6 +4554,10 @@ onMounted(reload)
 
   .health-guard-summary-card strong {
     font-size: 0.875rem;
+  }
+
+  .health-guard-filter-row {
+    grid-template-columns: 1fr;
   }
 
   .balance-recharge-form {
