@@ -344,6 +344,54 @@ func TestAccountTestServiceCancelBatchTestJobCancelsPendingWork(t *testing.T) {
 	}
 }
 
+func TestAccountTestServiceStartBatchTestAccountsTimesOutPendingWork(t *testing.T) {
+	started := make(chan struct{})
+	repo := &batchAccountTestRepo{
+		accounts: map[int64]*Account{
+			1: {ID: 1, Name: "slow", Platform: PlatformOpenAI},
+			2: {ID: 2, Name: "queued", Platform: PlatformOpenAI},
+		},
+	}
+	svc := &AccountTestService{
+		accountRepo: repo,
+		runTestBackgroundFunc: func(ctx context.Context, accountID int64, modelID string) (*ScheduledTestResult, error) {
+			if accountID == 1 {
+				close(started)
+			}
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+	}
+
+	job, err := svc.StartBatchTestAccounts(context.Background(), BatchAccountTestInput{
+		AccountIDs:        []int64{1, 2},
+		Concurrency:       1,
+		TimeoutPerAccount: time.Second,
+		Timeout:           20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("StartBatchTestAccounts returned error: %v", err)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("runner did not start")
+	}
+
+	completed := waitForBatchTestJobStatus(t, svc, job.JobID, "completed")
+	if completed.Completed != 2 || completed.Success != 0 || completed.Failed != 2 {
+		t.Fatalf("completed job = %+v, want all failed/timeouts", completed)
+	}
+	if completed.ErrorMessage != "batch account test timed out" {
+		t.Fatalf("error message = %q, want batch timeout", completed.ErrorMessage)
+	}
+	for _, item := range completed.Results {
+		if item.Status != "timeout" || item.ErrorMessage != "batch account test timed out" {
+			t.Fatalf("result item = %+v, want batch timeout", item)
+		}
+	}
+}
+
 func TestAccountTestServiceStartBatchTestAccountsPrunesExpiredFinishedJobs(t *testing.T) {
 	repo := &batchAccountTestRepo{
 		accounts: map[int64]*Account{

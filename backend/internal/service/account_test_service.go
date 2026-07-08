@@ -59,11 +59,13 @@ const (
 	defaultOpenAIImageTestPrompt       = "Generate a cute orange cat astronaut sticker on a clean pastel background."
 	defaultBatchAccountTestConcurrency = 3
 	defaultBatchAccountTestTimeout     = 90 * time.Second
+	defaultBatchAccountTestJobTimeout  = 10 * time.Minute
 	defaultBatchAccountTestPersistWait = 3 * time.Second
 	batchAccountTestJobRetention       = 30 * time.Minute
 	maxBatchAccountTestAccounts        = 200
 	maxBatchAccountTestConcurrency     = 8
 	maxBatchAccountTestTimeout         = 5 * time.Minute
+	maxBatchAccountTestJobTimeout      = 30 * time.Minute
 	maxBatchAccountTestJobs            = 100
 )
 
@@ -93,6 +95,7 @@ type BatchAccountTestInput struct {
 	ModelIDsByPlatform map[string]string
 	Concurrency        int
 	TimeoutPerAccount  time.Duration
+	Timeout            time.Duration
 }
 
 type normalizedBatchAccountTestInput struct {
@@ -101,6 +104,7 @@ type normalizedBatchAccountTestInput struct {
 	ModelIDsByPlatform map[string]string
 	Concurrency        int
 	TimeoutPerAccount  time.Duration
+	Timeout            time.Duration
 }
 
 type BatchAccountTestJob struct {
@@ -180,7 +184,9 @@ func (s *AccountTestService) BatchTestAccounts(ctx context.Context, input BatchA
 	if err != nil {
 		return nil, err
 	}
-	return s.runBatchTestAccounts(ctx, normalized, nil)
+	runCtx, cancel := context.WithTimeout(ctx, normalized.Timeout)
+	defer cancel()
+	return s.runBatchTestAccounts(runCtx, normalized, nil)
 }
 
 func (s *AccountTestService) StartBatchTestAccounts(ctx context.Context, input BatchAccountTestInput) (*BatchAccountTestJob, error) {
@@ -189,7 +195,7 @@ func (s *AccountTestService) StartBatchTestAccounts(ctx context.Context, input B
 		return nil, err
 	}
 
-	jobCtx, cancel := context.WithCancel(context.Background())
+	jobCtx, cancel := context.WithTimeout(context.Background(), normalized.Timeout)
 	now := time.Now().UTC()
 	job := &BatchAccountTestJob{
 		JobID:         uuid.NewString(),
@@ -253,6 +259,7 @@ func (s *AccountTestService) normalizeBatchAccountTestInput(input BatchAccountTe
 			ModelIDsByPlatform: normalizeBatchAccountTestPlatformModels(input.ModelIDsByPlatform),
 			Concurrency:        defaultBatchAccountTestConcurrency,
 			TimeoutPerAccount:  defaultBatchAccountTestTimeout,
+			Timeout:            defaultBatchAccountTestJobTimeout,
 		}, nil
 	}
 	if len(ids) > maxBatchAccountTestAccounts {
@@ -281,12 +288,21 @@ func (s *AccountTestService) normalizeBatchAccountTestInput(input BatchAccountTe
 		timeout = maxBatchAccountTestTimeout
 	}
 
+	totalTimeout := input.Timeout
+	if totalTimeout <= 0 {
+		totalTimeout = defaultBatchAccountTestJobTimeout
+	}
+	if totalTimeout > maxBatchAccountTestJobTimeout {
+		totalTimeout = maxBatchAccountTestJobTimeout
+	}
+
 	return normalizedBatchAccountTestInput{
 		AccountIDs:         ids,
 		ModelID:            strings.TrimSpace(input.ModelID),
 		ModelIDsByPlatform: normalizeBatchAccountTestPlatformModels(input.ModelIDsByPlatform),
 		Concurrency:        concurrency,
 		TimeoutPerAccount:  timeout,
+		Timeout:            totalTimeout,
 	}, nil
 }
 
@@ -355,14 +371,11 @@ enqueue:
 
 	for i := range result.Results {
 		if result.Results[i].Status == "" {
-			errorMessage := "account test cancelled"
-			if ctx.Err() != nil {
-				errorMessage = ctx.Err().Error()
-			}
+			status, errorMessage := batchAccountTestInterruptedStatus(ctx.Err())
 			account := accountByID[ids[i]]
 			result.Results[i] = BatchAccountTestItem{
 				AccountID:    ids[i],
-				Status:       "cancelled",
+				Status:       status,
 				ErrorMessage: errorMessage,
 			}
 			if account != nil {
@@ -446,6 +459,9 @@ func (s *AccountTestService) finishBatchTestJob(jobID string, ctx context.Contex
 	if err != nil {
 		job.Status = "failed"
 		job.ErrorMessage = err.Error()
+	} else if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		job.Status = "completed"
+		job.ErrorMessage = "batch account test timed out"
 	} else if ctx.Err() != nil {
 		job.Status = "cancelled"
 	} else {
@@ -524,6 +540,16 @@ func (s *AccountTestService) runBatchAccountTestItem(parent context.Context, acc
 		}
 	}
 
+	if errors.Is(parent.Err(), context.DeadlineExceeded) {
+		item.Status = "timeout"
+		item.ErrorMessage = "batch account test timed out"
+		return item
+	}
+	if errors.Is(parent.Err(), context.Canceled) {
+		item.Status = "cancelled"
+		item.ErrorMessage = "account test cancelled"
+		return item
+	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		item.Status = "timeout"
 		item.ErrorMessage = "account test timed out"
@@ -550,6 +576,13 @@ func (s *AccountTestService) runBatchAccountTestItem(parent context.Context, acc
 
 	item.Status = "success"
 	return item
+}
+
+func batchAccountTestInterruptedStatus(err error) (string, string) {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout", "batch account test timed out"
+	}
+	return "cancelled", "account test cancelled"
 }
 
 func (s *AccountTestService) persistBatchAccountTestItemStatus(item BatchAccountTestItem) {
@@ -706,8 +739,8 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 	} else if account.IsGemini() {
 		testErr = s.testGeminiAccountConnection(c, account, modelID, prompt)
 	} else if account.Platform == PlatformGrok {
-     	testErr = s.testGrokAccountConnection(c, account, modelID)
-     } else if account.Platform == PlatformAntigravity {
+		testErr = s.testGrokAccountConnection(c, account, modelID)
+	} else if account.Platform == PlatformAntigravity {
 		testErr = s.routeAntigravityTest(c, account, modelID, prompt)
 	} else {
 		testErr = s.testClaudeAccountConnection(c, account, modelID)

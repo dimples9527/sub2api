@@ -1557,7 +1557,7 @@ type BatchTestPlatformOption = {
   accountCount: number
 }
 type BatchTestSortKey = 'account' | 'platform' | 'upstream_rate' | 'schedulable' | 'status' | 'latency' | 'finished_at'
-type BatchTestResultFilter = 'all' | 'failed' | 'failed_schedulable' | 'failed_unschedulable' | 'success' | 'success_unschedulable' | 'skipped'
+type BatchTestResultFilter = 'all' | 'failed' | 'failed_schedulable' | 'failed_unschedulable' | 'success' | 'success_unschedulable' | 'success_upstream_disabled' | 'skipped'
 type QuickFilterKey = 'all' | 'update' | 'risk' | 'unbound' | 'failed' | 'enabled' | 'disabled'
 type StatCardKey = 'total' | 'create' | 'update' | 'risk'
 type SortOrder = 'asc' | 'desc'
@@ -1565,6 +1565,7 @@ type SortOrder = 'asc' | 'desc'
 const MAX_BATCH_TEST_ACCOUNTS = 200
 const BATCH_TEST_REFRESH_CONCURRENCY = 5
 const BATCH_TEST_POLL_INTERVAL_MS = 1500
+const BATCH_TEST_TOTAL_TIMEOUT_SECONDS = 10 * 60
 
 const result = ref<UpstreamAccountSyncResult | null>(null)
 const loading = ref(false)
@@ -2012,6 +2013,18 @@ const batchTestRateByAccountId = computed(() => {
   }
   return byAccountId
 })
+const batchTestProviderDisabledByAccountId = computed(() => {
+  const byAccountId = new Map<number, boolean>()
+  for (const item of filteredItems.value) {
+    const accountId = Number(item.matched_account_id)
+    if (!Number.isFinite(accountId) || accountId <= 0) continue
+    const disabled = isProviderDisabled(item)
+    if (disabled || !byAccountId.has(accountId)) {
+      byAccountId.set(accountId, disabled)
+    }
+  }
+  return byAccountId
+})
 const batchTestFailureFirstItems = computed<BatchAccountTestItem[]>(() => {
   const items = batchTestResult.value?.results || []
   return orderBatchTestItemsFailureFirst(items)
@@ -2038,12 +2051,14 @@ const batchTestResultCounts = computed(() => {
   const failedSchedulable = items.filter(batchTestIsFailedSchedulable).length
   const failedUnschedulable = items.filter(batchTestIsFailedUnschedulable).length
   const successUnschedulable = items.filter(batchTestIsSuccessUnschedulable).length
+  const successUpstreamDisabled = items.filter(batchTestIsSuccessUpstreamDisabled).length
   return {
     all: items.length,
     failed,
     failedSchedulable,
     failedUnschedulable,
     successUnschedulable,
+    successUpstreamDisabled,
     success,
     skipped
   }
@@ -2057,6 +2072,7 @@ const batchTestFilterOptions = computed(() => {
     { value: 'failed_unschedulable' as const, label: t('admin.upstreamAccounts.batchTestFailedUnschedulable'), count: counts.failedUnschedulable },
     { value: 'success' as const, label: t('admin.upstreamAccounts.batchTestSuccess'), count: counts.success },
     { value: 'success_unschedulable' as const, label: t('admin.upstreamAccounts.batchTestSuccessUnschedulable'), count: counts.successUnschedulable },
+    { value: 'success_upstream_disabled' as const, label: t('admin.upstreamAccounts.batchTestSuccessUpstreamDisabled'), count: counts.successUpstreamDisabled },
     { value: 'skipped' as const, label: t('admin.upstreamAccounts.batchTestSkipped'), count: counts.skipped }
   ]
 })
@@ -2064,6 +2080,7 @@ const batchTestFilteredItems = computed<BatchAccountTestItem[]>(() => {
   const filter = batchTestResultFilter.value
   if (filter === 'success') return batchTestResultItems.value.filter(item => item.status === 'success')
   if (filter === 'success_unschedulable') return batchTestResultItems.value.filter(batchTestIsSuccessUnschedulable)
+  if (filter === 'success_upstream_disabled') return batchTestResultItems.value.filter(batchTestIsSuccessUpstreamDisabled)
   if (filter === 'failed') return batchTestResultItems.value.filter(batchTestIsFailed)
   if (filter === 'failed_schedulable') return batchTestResultItems.value.filter(batchTestIsFailedSchedulable)
   if (filter === 'failed_unschedulable') return batchTestResultItems.value.filter(batchTestIsFailedUnschedulable)
@@ -2396,7 +2413,15 @@ function batchTestIsFailedUnschedulable(item: BatchAccountTestItem) {
 }
 
 function batchTestIsSuccessUnschedulable(item: BatchAccountTestItem) {
-  return item.status === 'success' && !batchTestItemSchedulable(item)
+  return item.status === 'success' && !batchTestItemSchedulable(item) && !batchTestIsProviderDisabled(item)
+}
+
+function batchTestIsSuccessUpstreamDisabled(item: BatchAccountTestItem) {
+  return item.status === 'success' && batchTestIsProviderDisabled(item)
+}
+
+function batchTestIsProviderDisabled(item: BatchAccountTestItem) {
+  return batchTestProviderDisabledByAccountId.value.get(item.account_id) === true
 }
 
 function toggleBatchTestSort(key: BatchTestSortKey) {
@@ -2812,7 +2837,8 @@ async function runBatchAccountTest() {
       account_ids: accountIds,
       ...(Object.keys(modelIDsByPlatform).length > 0 ? { model_ids_by_platform: modelIDsByPlatform } : {}),
       concurrency: 3,
-      timeout_per_account_seconds: 90
+      timeout_per_account_seconds: 90,
+      timeout_seconds: BATCH_TEST_TOTAL_TIMEOUT_SECONDS
     })
     batchTestResult.value = job
     showBatchTestResultDialog.value = true

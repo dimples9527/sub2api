@@ -2944,7 +2944,11 @@ describe('UpstreamAccountsView', () => {
   it('configures platform models before batch tests and toggles schedulable in the result dialog', async () => {
     upstreamAccountSyncMock.getPreview.mockResolvedValue({
       default_provider: {},
-      providers: [],
+      providers: [
+        { slug: 'upstream-a', name: 'Upstream A', enabled: true },
+        { slug: 'upstream-b', name: 'Upstream B', enabled: true },
+        { slug: 'upstream-c', name: 'Upstream C', enabled: false },
+      ],
       summary: {
         upstream_key_count: 2,
         matched_account_count: 2,
@@ -3128,6 +3132,7 @@ describe('UpstreamAccountsView', () => {
       },
       concurrency: 3,
       timeout_per_account_seconds: 90,
+      timeout_seconds: 600,
     })
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('local-a')
@@ -3140,12 +3145,22 @@ describe('UpstreamAccountsView', () => {
     expect(wrapper.find('[data-test="batch-test-result-dialog"]').text()).toContain('account test timed out')
     expect(wrapper.find('[data-test="batch-test-filter-failed_schedulable"]').text()).toContain('0')
     expect(wrapper.find('[data-test="batch-test-filter-failed_unschedulable"]').text()).toContain('1')
-    expect(wrapper.find('[data-test="batch-test-filter-success_unschedulable"]').text()).toContain('1')
+    expect(wrapper.find('[data-test="batch-test-filter-success_unschedulable"]').text()).toContain('0')
+    expect(wrapper.find('[data-test="batch-test-filter-success_upstream_disabled"]').text()).toContain('1')
 
     await wrapper.find('[data-test="batch-test-filter-success_unschedulable"]').trigger('click')
     await flushPromises()
 
     let dialogText = wrapper.find('[data-test="batch-test-result-dialog"]').text()
+    expect(dialogText).toContain('admin.upstreamAccounts.batchTestNoFilteredResults')
+    expect(dialogText).not.toContain('local-c')
+    expect(dialogText).not.toContain('local-a')
+    expect(dialogText).not.toContain('local-b')
+
+    await wrapper.find('[data-test="batch-test-filter-success_upstream_disabled"]').trigger('click')
+    await flushPromises()
+
+    dialogText = wrapper.find('[data-test="batch-test-result-dialog"]').text()
     expect(dialogText).toContain('local-c')
     expect(dialogText).not.toContain('local-a')
     expect(dialogText).not.toContain('local-b')

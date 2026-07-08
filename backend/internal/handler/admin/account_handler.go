@@ -973,6 +973,7 @@ type BatchTestAccountsRequest struct {
 	ModelIDsByPlatform    map[string]string `json:"model_ids_by_platform"`
 	Concurrency           int               `json:"concurrency"`
 	TimeoutPerAccountSecs int               `json:"timeout_per_account_seconds"`
+	TimeoutSecs           int               `json:"timeout_seconds"`
 }
 
 type SyncFromCRSRequest struct {
@@ -1033,12 +1034,14 @@ func (h *AccountHandler) BatchTest(c *gin.Context) {
 	if req.TimeoutPerAccountSecs <= 0 {
 		timeout = defaultBatchAccountTestHTTPTimeout()
 	}
+	totalTimeout := time.Duration(req.TimeoutSecs) * time.Second
 	job, err := h.accountTestService.StartBatchTestAccounts(c.Request.Context(), service.BatchAccountTestInput{
 		AccountIDs:         req.AccountIDs,
 		ModelID:            req.ModelID,
 		ModelIDsByPlatform: req.ModelIDsByPlatform,
 		Concurrency:        req.Concurrency,
 		TimeoutPerAccount:  timeout,
+		Timeout:            totalTimeout,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

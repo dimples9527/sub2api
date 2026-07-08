@@ -204,6 +204,7 @@ export async function batchTestAccounts(payload: {
   model_ids_by_platform?: Record<string, string>
   concurrency?: number
   timeout_per_account_seconds?: number
+  timeout_seconds?: number
 }): Promise<BatchAccountTestJob> {
   const { data } = await apiClient.post<BatchAccountTestJob>('/admin/accounts/batch-test', payload, {
     timeout: BATCH_ACCOUNT_TEST_START_TIMEOUT_MS
