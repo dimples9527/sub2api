@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
@@ -171,8 +172,9 @@ func (r *upstreamAccountHealthGuardRecordRepository) ListRecords(ctx context.Con
 		return records, nil
 	}
 
-	// The list endpoint only needs details for the latest run. Older runs keep
-	// their summaries so the payload stays bounded when a run checks many accounts.
+	// The list endpoint keeps full details for the latest run. Older runs only
+	// include adjusted accounts so the scheduling adjustment log can span recent
+	// runs without returning every checked account.
 	latestRunID := records[0].ID
 	itemRows, err := r.db.QueryContext(ctx, `
 		SELECT
@@ -192,28 +194,7 @@ func (r *upstreamAccountHealthGuardRecordRepository) ListRecords(ctx context.Con
 	items := []service.UpstreamAccountHealthGuardRunItem{}
 	for itemRows.Next() {
 		var item service.UpstreamAccountHealthGuardRunItem
-		if err := itemRows.Scan(
-			&item.AccountID,
-			&item.AccountName,
-			&item.Platform,
-			&item.ProviderSlug,
-			&item.ProviderName,
-			&item.ModelID,
-			&item.SchedulableBefore,
-			&item.SchedulableAfter,
-			&item.Status,
-			&item.TestStatus,
-			&item.LatencyMs,
-			&item.LatencyLimitMs,
-			&item.ConsecutiveFailed,
-			&item.ConsecutiveSlow,
-			&item.ConsecutiveHealthy,
-			&item.Action,
-			&item.Reason,
-			&item.ErrorMessage,
-			&item.StartedAt,
-			&item.FinishedAt,
-		); err != nil {
+		if err := itemRows.Scan(upstreamAccountHealthGuardRunItemScanDest(&item)...); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -222,5 +203,83 @@ func (r *upstreamAccountHealthGuardRecordRepository) ListRecords(ctx context.Con
 		return nil, err
 	}
 	records[0].Items = items
+
+	if len(records) <= 1 {
+		return records, nil
+	}
+	recordIndexByID := make(map[string]int, len(records))
+	olderRunIDs := make([]string, 0, len(records)-1)
+	for index := 1; index < len(records); index++ {
+		recordIndexByID[records[index].ID] = index
+		olderRunIDs = append(olderRunIDs, records[index].ID)
+	}
+	query, args := upstreamAccountHealthGuardAdjustedItemsQuery(olderRunIDs)
+	adjustedRows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer adjustedRows.Close()
+
+	for adjustedRows.Next() {
+		var runID string
+		var item service.UpstreamAccountHealthGuardRunItem
+		dest := append([]any{&runID}, upstreamAccountHealthGuardRunItemScanDest(&item)...)
+		if err := adjustedRows.Scan(dest...); err != nil {
+			return nil, err
+		}
+		index, ok := recordIndexByID[runID]
+		if !ok {
+			continue
+		}
+		records[index].Items = append(records[index].Items, item)
+	}
+	if err := adjustedRows.Err(); err != nil {
+		return nil, err
+	}
 	return records, nil
+}
+
+func upstreamAccountHealthGuardRunItemScanDest(item *service.UpstreamAccountHealthGuardRunItem) []any {
+	return []any{
+		&item.AccountID,
+		&item.AccountName,
+		&item.Platform,
+		&item.ProviderSlug,
+		&item.ProviderName,
+		&item.ModelID,
+		&item.SchedulableBefore,
+		&item.SchedulableAfter,
+		&item.Status,
+		&item.TestStatus,
+		&item.LatencyMs,
+		&item.LatencyLimitMs,
+		&item.ConsecutiveFailed,
+		&item.ConsecutiveSlow,
+		&item.ConsecutiveHealthy,
+		&item.Action,
+		&item.Reason,
+		&item.ErrorMessage,
+		&item.StartedAt,
+		&item.FinishedAt,
+	}
+}
+
+func upstreamAccountHealthGuardAdjustedItemsQuery(runIDs []string) (string, []any) {
+	args := make([]any, 0, len(runIDs))
+	placeholders := make([]string, 0, len(runIDs))
+	for index, runID := range runIDs {
+		args = append(args, runID)
+		placeholders = append(placeholders, fmt.Sprintf("$%d", index+1))
+	}
+	return fmt.Sprintf(`
+		SELECT
+			run_id, account_id, account_name, platform, provider_slug, provider_name,
+			model_id, schedulable_before, schedulable_after, status, test_status,
+			latency_ms, latency_limit_ms, consecutive_failed, consecutive_slow,
+			consecutive_healthy, action, reason, error_message, started_at, finished_at
+		FROM upstream_account_health_guard_run_items
+		WHERE run_id IN (%s)
+			AND action IN ('disabled', 'recovered')
+		ORDER BY run_id, finished_at DESC, id DESC
+	`, strings.Join(placeholders, ",")), args
 }

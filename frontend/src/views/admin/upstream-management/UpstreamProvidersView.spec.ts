@@ -875,13 +875,13 @@ describe('UpstreamProvidersView', () => {
         summary: {
           total_accounts: 5,
           checked_count: 1,
-          healthy_count: 1,
+          healthy_count: 0,
           slow_count: 0,
-          failed_count: 0,
+          failed_count: 1,
           skipped_count: 4,
-          disabled_count: 0,
+          disabled_count: 1,
           recovered_count: 0,
-          unchanged_count: 1,
+          unchanged_count: 0,
           skip_reasons: [
             {
               reason: 'missing_provider_slug',
@@ -892,7 +892,30 @@ describe('UpstreamProvidersView', () => {
             },
           ],
         },
-        items: [],
+        items: [
+          {
+            account_id: 7,
+            account_name: 'unstable-account',
+            platform: 'openai',
+            provider_slug: 'sub-main',
+            provider_name: 'Sub Main',
+            model_id: 'gpt-4o-mini',
+            schedulable_before: true,
+            schedulable_after: false,
+            status: 'failed',
+            test_status: 'failed',
+            latency_ms: 0,
+            latency_limit_ms: 12000,
+            consecutive_failed: 3,
+            consecutive_slow: 0,
+            consecutive_healthy: 0,
+            action: 'disabled',
+            reason: 'failure threshold reached',
+            error_message: '401',
+            started_at: '2026-07-05T00:00:00Z',
+            finished_at: '2026-07-05T00:00:01Z',
+          },
+        ],
       },
     ])
     adminAPIMock.upstreamAccountSync.updateHealthGuardConfig.mockResolvedValueOnce({
@@ -940,6 +963,9 @@ describe('UpstreamProvidersView', () => {
     expect(dialog.exists()).toBe(true)
     expect(dialog.text()).toContain('admin.upstreamProviders.healthGuardAutoRun')
     expect(dialog.text()).toContain('Anthropic')
+    expect(dialog.text()).toContain('admin.upstreamProviders.healthGuardAdjustmentLogs')
+    expect(dialog.text()).toContain('unstable-account')
+    expect(dialog.text()).toContain('admin.upstreamProviders.healthGuardActionDisabled')
     expect(dialog.text()).toContain('admin.upstreamProviders.healthGuardSkipReasons')
     expect(dialog.text()).toContain('admin.upstreamProviders.healthGuardSkipReasonMissingProviderSlug')
     expect(dialog.text()).toContain('admin.upstreamProviders.healthGuardSkipSampleAccounts')
