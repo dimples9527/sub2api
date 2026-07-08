@@ -261,7 +261,7 @@ describe('UpstreamProvidersView', () => {
 
     await flushPromises()
 
-    expect(wrapper.find('.columns').text()).toBe('homepage,name,enabled,sort_order,interface,prefix,rate_scale,temp_disable_minutes,balance,today_consumption,actions')
+    expect(wrapper.find('.columns').text()).toBe('homepage,name,enabled,sort_order,prefix,rate_scale,balance,today_consumption,actions')
     expect(wrapper.find('.provider-name-card').exists()).toBe(true)
     expect(wrapper.find('.provider-type-tag').exists()).toBe(true)
     expect(wrapper.find('.provider-name-card [role="switch"]').exists()).toBe(false)
@@ -495,8 +495,6 @@ describe('UpstreamProvidersView', () => {
                 h('div', { class: 'columns' }, props.columns.map((column: any) => column.key).join(',')),
                 ...props.data.flatMap((row: any) => [
                   h('div', { class: 'homepage-cell' }, slots['cell-homepage']?.({ row })),
-                  h('div', { class: 'interface-cell' }, slots['cell-interface']?.({ row })),
-                  h('div', { class: 'temp-cell' }, slots['cell-temp_disable_minutes']?.({ row })),
                   h('div', { class: 'details-cell' }, slots['row-detail']?.({ row, colspan: props.columns.length })),
                 ]),
               ])
@@ -515,7 +513,7 @@ describe('UpstreamProvidersView', () => {
 
     await flushPromises()
 
-    expect(wrapper.find('.columns').text()).toBe('homepage,name,enabled,sort_order,interface,prefix,rate_scale,temp_disable_minutes,balance,today_consumption,actions')
+    expect(wrapper.find('.columns').text()).toBe('homepage,name,enabled,sort_order,prefix,rate_scale,balance,today_consumption,actions')
     expect(wrapper.find('.details-cell').text()).toBe('')
 
     const expandButton = wrapper.find('.expand-toggle')
@@ -527,8 +525,6 @@ describe('UpstreamProvidersView', () => {
     expect(wrapper.find('.details-cell').text()).toContain('/api/token/')
     expect(wrapper.find('.details-cell').text()).toContain('/api/user/login')
     expect(wrapper.find('.details-cell').text()).toContain('/api/group/')
-
-    expect(wrapper.find('.temp-cell').text()).toContain('15分钟')
   })
 
   it('opens balance maintenance from provider balance column', async () => {

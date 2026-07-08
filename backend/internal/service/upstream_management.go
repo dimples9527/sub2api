@@ -43,6 +43,7 @@ type UpstreamGroupComparison struct {
 	LocalRate          *float64 `json:"local_rate,omitempty"`
 	Matched            bool     `json:"matched"`
 	MatchSource        string   `json:"match_source,omitempty"`
+	MatchIgnored       bool     `json:"match_ignored,omitempty"`
 	NeedsRateIncrease  bool     `json:"needs_rate_increase"`
 }
 
@@ -77,6 +78,7 @@ type UpstreamGroupAutoRateFixConfig struct {
 type UpstreamGroupMappingInput struct {
 	UpstreamGroupName string `json:"upstream_group_name"`
 	LocalGroupID      *int64 `json:"local_group_id"`
+	Ignored           bool   `json:"ignored,omitempty"`
 }
 
 type UpstreamGroupLocalCreateInput struct {
@@ -90,6 +92,7 @@ type UpstreamGroupMappingRecord struct {
 	UpstreamGroupName string    `json:"upstream_group_name"`
 	UpstreamGroupKey  string    `json:"upstream_group_key"`
 	LocalGroupID      int64     `json:"local_group_id"`
+	Ignored           bool      `json:"ignored,omitempty"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }
 
@@ -168,6 +171,7 @@ func (s *UpstreamManagementService) mergeDefaultModelSquareGroups(ctx context.Co
 		return nil, err
 	}
 	mappedLocalGroupIDs := make(map[string]int64, len(mappings))
+	ignoredGroupKeys := make(map[string]struct{}, len(mappings))
 	for _, mapping := range mappings {
 		if mapping.ProviderSlug != provider.Slug {
 			continue
@@ -176,7 +180,14 @@ func (s *UpstreamManagementService) mergeDefaultModelSquareGroups(ctx context.Co
 		if key == "" {
 			key = normalizeUpstreamGroupMatchName(mapping.UpstreamGroupName)
 		}
-		if key != "" && mapping.LocalGroupID > 0 {
+		if key == "" {
+			continue
+		}
+		if mapping.Ignored {
+			ignoredGroupKeys[key] = struct{}{}
+			continue
+		}
+		if mapping.LocalGroupID > 0 {
 			mappedLocalGroupIDs[key] = mapping.LocalGroupID
 		}
 	}
@@ -194,6 +205,9 @@ func (s *UpstreamManagementService) mergeDefaultModelSquareGroups(ctx context.Co
 		}
 		remoteName, _ := groupMap["name"].(string)
 		key := normalizeUpstreamGroupMatchName(remoteName)
+		if _, ignored := ignoredGroupKeys[key]; ignored {
+			continue
+		}
 		localGroup, matched := localByName[key]
 		if mappedID, ok := mappedLocalGroupIDs[key]; ok {
 			if mappedLocal, exists := localByID[mappedID]; exists {
@@ -480,6 +494,14 @@ func (s *UpstreamManagementService) SaveGroupMapping(ctx context.Context, input 
 			LocalGroupID:      group.ID,
 			UpdatedAt:         time.Now().UTC(),
 		})
+	} else if input.Ignored {
+		records = append(records, UpstreamGroupMappingRecord{
+			ProviderSlug:      defaultProvider.Slug,
+			UpstreamGroupName: upstreamGroupName,
+			UpstreamGroupKey:  upstreamGroupKey,
+			Ignored:           true,
+			UpdatedAt:         time.Now().UTC(),
+		})
 	}
 	if err := s.saveGroupMappings(ctx, records); err != nil {
 		return UpstreamGroupCompareResult{}, err
@@ -633,11 +655,13 @@ func (s *UpstreamManagementService) compareGroups(ctx context.Context) (Upstream
 		return UpstreamGroupCompareResult{}, err
 	}
 	groups := []UpstreamProviderGroup{}
+	groupsAuthoritative := false
 	if source, ok := s.providerSource.(upstreamManagementProviderGroupSource); ok {
 		providerGroups, groupWarnings, err := source.FetchProviderGroups(ctx, defaultProvider.Slug)
 		if err == nil {
 			warnings = append(warnings, groupWarnings...)
 			groups = providerGroups
+			groupsAuthoritative = true
 		} else if !isUpstreamProviderGroupsUnsupported(err) {
 			warnings = append(warnings, groupWarnings...)
 			warnings = append(warnings, fmt.Sprintf("fetch upstream groups failed: %v", err))
@@ -651,7 +675,16 @@ func (s *UpstreamManagementService) compareGroups(ctx context.Context) (Upstream
 	if err != nil {
 		return UpstreamGroupCompareResult{}, err
 	}
-	items := compareUpstreamGroups(defaultProvider, keys, groups, localGroups, mappings)
+	if groupsAuthoritative {
+		prunedMappings, changed := pruneMissingUpstreamGroupMappings(mappings, defaultProvider.Slug, groups)
+		if changed {
+			if err := s.saveGroupMappings(ctx, prunedMappings); err != nil {
+				return UpstreamGroupCompareResult{}, err
+			}
+			mappings = prunedMappings
+		}
+	}
+	items := compareUpstreamGroups(defaultProvider, keys, groups, localGroups, mappings, groupsAuthoritative)
 	return UpstreamGroupCompareResult{
 		DefaultProvider: redactUpstreamProvider(defaultProvider),
 		Items:           items,
@@ -664,7 +697,7 @@ func isUpstreamProviderGroupsUnsupported(err error) bool {
 	return infraerrors.Reason(err) == "UPSTREAM_PROVIDER_GROUPS_UNSUPPORTED"
 }
 
-func compareUpstreamGroups(provider UpstreamProviderConfig, keys []UpstreamProviderKey, groups []UpstreamProviderGroup, localGroups []Group, mappings []UpstreamGroupMappingRecord) []UpstreamGroupComparison {
+func compareUpstreamGroups(provider UpstreamProviderConfig, keys []UpstreamProviderKey, groups []UpstreamProviderGroup, localGroups []Group, mappings []UpstreamGroupMappingRecord, groupsAuthoritative bool) []UpstreamGroupComparison {
 	localByName := make(map[string]Group, len(localGroups))
 	localByID := make(map[int64]Group, len(localGroups))
 	for _, group := range localGroups {
@@ -678,6 +711,7 @@ func compareUpstreamGroups(provider UpstreamProviderConfig, keys []UpstreamProvi
 		}
 	}
 	mappedLocalGroupIDs := make(map[string]int64, len(mappings))
+	ignoredGroupKeys := make(map[string]struct{}, len(mappings))
 	for _, mapping := range mappings {
 		if mapping.ProviderSlug != provider.Slug {
 			continue
@@ -686,10 +720,16 @@ func compareUpstreamGroups(provider UpstreamProviderConfig, keys []UpstreamProvi
 		if key == "" {
 			key = normalizeUpstreamGroupMatchName(mapping.UpstreamGroupName)
 		}
-		if key == "" || mapping.LocalGroupID <= 0 {
+		if key == "" {
 			continue
 		}
-		mappedLocalGroupIDs[key] = mapping.LocalGroupID
+		if mapping.Ignored {
+			ignoredGroupKeys[key] = struct{}{}
+			continue
+		}
+		if mapping.LocalGroupID > 0 {
+			mappedLocalGroupIDs[key] = mapping.LocalGroupID
+		}
 	}
 
 	keyCounts := map[string]int{}
@@ -729,7 +769,7 @@ func compareUpstreamGroups(provider UpstreamProviderConfig, keys []UpstreamProvi
 		aggregate.keyCount = keyCounts[normalized]
 		aggregates[normalized] = aggregate
 	}
-	if len(aggregates) == 0 {
+	if len(aggregates) == 0 && !groupsAuthoritative {
 		for _, key := range keys {
 			if key.ProviderSlug != "" && key.ProviderSlug != provider.Slug {
 				continue
@@ -773,6 +813,11 @@ func compareUpstreamGroups(provider UpstreamProviderConfig, keys []UpstreamProvi
 			}
 		}
 		if !item.Matched {
+			if _, ignored := ignoredGroupKeys[normalized]; ignored {
+				item.MatchIgnored = true
+			}
+		}
+		if !item.Matched && !item.MatchIgnored {
 			if local, ok := localByName[normalized]; ok {
 				applyUpstreamGroupLocalMatch(&item, local, "name")
 			}
@@ -841,7 +886,12 @@ func normalizeUpstreamGroupMappings(records []UpstreamGroupMappingRecord) []Upst
 		if record.UpstreamGroupKey == "" {
 			record.UpstreamGroupKey = normalizeUpstreamGroupMatchName(record.UpstreamGroupName)
 		}
-		if record.ProviderSlug == "" || record.UpstreamGroupKey == "" || record.LocalGroupID <= 0 {
+		if record.LocalGroupID > 0 {
+			record.Ignored = false
+		} else if record.Ignored {
+			record.LocalGroupID = 0
+		}
+		if record.ProviderSlug == "" || record.UpstreamGroupKey == "" || (record.LocalGroupID <= 0 && !record.Ignored) {
 			continue
 		}
 		key := record.ProviderSlug + "\x00" + record.UpstreamGroupKey
@@ -872,6 +922,34 @@ func removeUpstreamGroupMapping(records []UpstreamGroupMappingRecord, providerSl
 		out = append(out, record)
 	}
 	return out
+}
+
+func pruneMissingUpstreamGroupMappings(records []UpstreamGroupMappingRecord, providerSlug string, groups []UpstreamProviderGroup) ([]UpstreamGroupMappingRecord, bool) {
+	providerSlug = strings.TrimSpace(providerSlug)
+	validGroupKeys := make(map[string]struct{}, len(groups))
+	for _, group := range groups {
+		if group.ProviderSlug != "" && group.ProviderSlug != providerSlug {
+			continue
+		}
+		key := normalizeUpstreamGroupMatchName(group.GroupName)
+		if key != "" {
+			validGroupKeys[key] = struct{}{}
+		}
+	}
+
+	normalized := normalizeUpstreamGroupMappings(records)
+	out := make([]UpstreamGroupMappingRecord, 0, len(normalized))
+	changed := false
+	for _, record := range normalized {
+		if record.ProviderSlug == providerSlug {
+			if _, ok := validGroupKeys[record.UpstreamGroupKey]; !ok {
+				changed = true
+				continue
+			}
+		}
+		out = append(out, record)
+	}
+	return out, changed
 }
 
 func (s *UpstreamManagementService) loadRateFixRecords(ctx context.Context) ([]UpstreamGroupRateFixRecord, error) {

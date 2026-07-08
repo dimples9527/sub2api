@@ -247,35 +247,6 @@
             </div>
           </template>
 
-          <template #cell-interface="{ row }">
-            <div class="interface-switcher">
-              <div class="interface-tabs">
-                <button
-                  v-for="endpoint in endpointOptions(row)"
-                  :key="endpoint.key"
-                  type="button"
-                  :class="['interface-tab', activeEndpointTab(row.slug) === endpoint.key && 'interface-tab-active']"
-                  @click="setEndpointTab(row.slug, endpoint.key)"
-                >
-                  {{ endpoint.label }}
-                </button>
-              </div>
-              <button
-                type="button"
-                class="copyable-text interface-path"
-                :title="copyTitle(endpointValue(row, activeEndpointTab(row.slug)))"
-                @click="copyValue(endpointValue(row, activeEndpointTab(row.slug)))"
-              >
-                <code>{{ endpointValue(row, activeEndpointTab(row.slug)) || '-' }}</code>
-                <span class="copy-hint">{{ copyHint(endpointValue(row, activeEndpointTab(row.slug))) }}</span>
-              </button>
-            </div>
-          </template>
-
-          <template #cell-temp_disable_minutes="{ row }">
-            <div class="center-cell">{{ formatTempDisable(row.temp_disable_minutes) }}</div>
-          </template>
-
           <template #row-detail="{ row }">
             <div v-if="isExpanded(row.slug)" class="provider-detail-panel">
               <div class="detail-column">
@@ -1404,7 +1375,6 @@ const defaultingSlug = ref<string | null>(null)
 const showColumnSettings = ref(false)
 const visibleOptionalColumns = ref<string[]>([])
 const expandedProviderSlugs = ref(new Set<string>())
-const endpointTabs = ref<Record<string, string>>({})
 const copiedValue = ref('')
 let copiedTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -1542,16 +1512,13 @@ const baseColumns = computed<Column[]>(() => [
   { key: 'name', label: t('admin.upstreamProviders.columns.name'), class: 'upstream-name-column' },
   { key: 'enabled', label: t('admin.upstreamProviders.enabled'), class: 'upstream-enabled-column' },
   { key: 'sort_order', label: t('admin.upstreamProviders.columns.sortOrder'), class: 'upstream-sort-order-column' },
-  { key: 'interface', label: t('admin.upstreamProviders.columns.interface'), class: 'upstream-interface-column' },
   { key: 'prefix', label: t('admin.upstreamProviders.columns.prefix'), class: 'upstream-prefix-column' },
   { key: 'rate_scale', label: t('admin.upstreamProviders.columns.rateScale'), class: 'upstream-numeric-column' },
-  { key: 'temp_disable_minutes', label: t('admin.upstreamProviders.tempDisableMinutes'), class: 'upstream-temp-column' },
   { key: 'balance', label: t('admin.upstreamProviders.columns.balance'), sortable: true, class: 'upstream-numeric-column' },
   { key: 'today_consumption', label: t('admin.upstreamProviders.columns.todayCost'), sortable: true, class: 'upstream-numeric-column' },
 ])
 
 const optionalColumns = computed<Record<string, Column>>(() => ({
-  temp_disable_minutes: { key: 'temp_disable_minutes', label: t('admin.upstreamProviders.tempDisableMinutes'), class: 'upstream-numeric-column' },
   base_url: { key: 'base_url', label: t('admin.upstreamProviders.columns.baseUrl'), class: 'upstream-url-column' },
   auth: { key: 'auth', label: t('admin.upstreamProviders.columns.auth'), class: 'upstream-auth-column' },
 }))
@@ -2265,23 +2232,6 @@ function endpointOptions(provider: UpstreamProviderConfig): EndpointOption[] {
   return options
 }
 
-function activeEndpointTab(providerSlug: string | undefined) {
-  if (!providerSlug) return 'keys'
-  return endpointTabs.value[providerSlug] || 'keys'
-}
-
-function setEndpointTab(providerSlug: string | undefined, tab: string) {
-  if (!providerSlug) return
-  endpointTabs.value = {
-    ...endpointTabs.value,
-    [providerSlug]: tab,
-  }
-}
-
-function endpointValue(provider: UpstreamProviderConfig, tab: string) {
-  return endpointOptions(provider).find(option => option.key === tab)?.value || provider.api_keys_url || ''
-}
-
 function accountIdentity(provider: UpstreamProviderConfig) {
   return provider.username || provider.email || ''
 }
@@ -2415,12 +2365,6 @@ function formatTotalMoney(value: number | undefined) {
   const n = Number(value)
   if (!Number.isFinite(n)) return '0.00'
   return n.toFixed(2)
-}
-
-function formatTempDisable(value: number | undefined) {
-  const n = Number(value)
-  if (!Number.isFinite(n) || n <= 0) return '0分钟'
-  return `${n}分钟`
 }
 
 function formatSortOrder(value: number | undefined) {
@@ -2882,32 +2826,12 @@ onMounted(reload)
   @apply text-gray-500 dark:text-gray-400;
 }
 
-.interface-switcher {
-  @apply mx-auto min-w-[15rem] max-w-[16rem] space-y-2 text-left;
-}
-
-.interface-tabs {
-  @apply inline-flex gap-1;
-}
-
-.interface-tab {
-  @apply h-8 rounded border border-gray-200 bg-white px-2.5 text-xs text-gray-500 transition-colors hover:border-primary-500 hover:text-primary-600 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-400 dark:hover:text-primary-300;
-}
-
-.interface-tab-active {
-  @apply border-primary-600 bg-primary-600 text-white hover:text-white dark:border-primary-500 dark:bg-primary-600 dark:text-white;
-}
-
 .copyable-text {
   @apply relative min-w-0 cursor-pointer border-0 text-left transition-colors;
 }
 
 .copyable-text code {
   @apply min-w-0 truncate;
-}
-
-.interface-path {
-  @apply flex w-full items-center rounded bg-gray-50 px-2.5 py-1.5 font-mono text-xs text-gray-950 hover:bg-gray-100 dark:bg-dark-700 dark:text-gray-100 dark:hover:bg-dark-600;
 }
 
 .copy-hint {
@@ -3105,15 +3029,6 @@ onMounted(reload)
 :deep(th.upstream-numeric-column),
 :deep(td.upstream-numeric-column) {
   min-width: 8.25rem;
-}
-
-:deep(th.upstream-temp-column),
-:deep(td.upstream-temp-column) {
-  min-width: 7.25rem;
-}
-
-:deep(.upstream-interface-column) {
-  min-width: 14.75rem;
 }
 
 :deep(th.upstream-actions-column),
@@ -3364,6 +3279,14 @@ onMounted(reload)
 
 .health-guard-platform-row .input:last-child {
   @apply text-right font-mono;
+}
+
+.health-guard-account-models-input {
+  @apply mt-3 min-h-24 resize-y text-left font-mono text-sm;
+}
+
+.health-guard-account-models-hint {
+  @apply mt-2 text-xs text-gray-500 dark:text-gray-400;
 }
 
 .health-guard-record-header {

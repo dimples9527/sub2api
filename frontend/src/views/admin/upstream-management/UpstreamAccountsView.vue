@@ -5,10 +5,14 @@
         <div class="accounts-shell">
           <section class="accounts-topbar">
             <div class="stats-strip">
-              <article
+              <button
                 v-for="card in statCards"
                 :key="card.key"
+                type="button"
                 :class="['stat-card', `stat-card-${card.tone}`]"
+                :aria-label="t('admin.upstreamAccounts.statDetailsAria', { label: card.label, count: card.value })"
+                :data-test="`upstream-stat-card-${card.key}`"
+                @click="openStatDetailsDialog(card.key)"
               >
                 <span v-if="card.key === 'update' && summary.update_count > 0" class="stat-alert-dot"></span>
                 <span class="stat-icon">
@@ -18,7 +22,7 @@
                   <strong>{{ card.value }}</strong>
                   <span>{{ card.label }}</span>
                 </span>
-              </article>
+              </button>
             </div>
             <div class="accounts-actions">
               <div class="provider-summary">
@@ -537,6 +541,126 @@
             </DataTable>
           </section>
 
+        </div>
+
+        <div
+          v-if="activeStatDetailsKey"
+          class="stat-details-dialog fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6"
+          data-test="stat-details-dialog"
+          @click.self="closeStatDetailsDialog"
+        >
+          <div class="stat-details-modal">
+            <div class="stat-details-header">
+              <div>
+                <h3>{{ activeStatDetailsTitle }}</h3>
+                <p>{{ activeStatDetailsDescription }}</p>
+              </div>
+              <button type="button" class="modal-close-button" :aria-label="t('common.close')" @click="closeStatDetailsDialog">
+                <Icon name="x" size="md" :stroke-width="2" />
+              </button>
+            </div>
+            <div class="stat-details-summary">
+              <span class="stat-details-count">{{ t('admin.upstreamAccounts.statDetailsCount', { count: activeStatDetailsItems.length }) }}</span>
+            </div>
+            <div class="stat-details-body">
+              <div v-if="activeStatDetailsItems.length" class="stat-details-table-wrap">
+                <table class="stat-details-table">
+                  <thead>
+                    <tr>
+                      <th>{{ t('admin.upstreamAccounts.columns.source') }}</th>
+                      <th>{{ t('admin.upstreamAccounts.columns.upstreamKey') }}</th>
+                      <th>{{ t('admin.upstreamAccounts.columns.localAccount') }}</th>
+                      <th>{{ t('admin.upstreamAccounts.columns.action') }}</th>
+                      <th>{{ t('admin.upstreamAccounts.columns.upstreamRate') }}</th>
+                      <th>{{ t('admin.upstreamAccounts.columns.boundGroups') }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in activeStatDetailsItems" :key="statDetailsRowKey(row)">
+                      <td>
+                        <div class="stat-details-source-cell">
+                          <span :class="['table-tag', providerToneClass(row.provider_slug, 'tag')]">
+                            {{ row.provider_name || row.provider_slug || '-' }}
+                          </span>
+                          <code>{{ row.provider_slug || '-' }}</code>
+                          <span
+                            v-if="row.provider_fetch_error"
+                            class="table-tag tag-local-snapshot"
+                            :title="row.provider_fetch_error"
+                          >
+                            {{ t('admin.upstreamAccounts.localSnapshotTag') }}
+                          </span>
+                        </div>
+                      </td>
+                      <td>
+                        <div class="two-line-cell">
+                          <span :class="['main-text', matchedAccountPlatformTextClass(row)]">{{ row.upstream_key_name || '-' }}</span>
+                          <span class="sub-text">{{ row.upstream_group_name || '-' }}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <div class="two-line-cell">
+                          <span :class="['main-text', matchedAccountPlatformTextClass(row)]">{{ row.local_account_name || row.matched_account_name || '-' }}</span>
+                          <span v-if="row.matched_account_id" :class="['table-tag', 'tag-account', 'account-id-tag', matchedAccountPlatformTagClass(row)]">
+                            #{{ row.matched_account_id }} {{ row.matched_account_name || row.local_account_name }}
+                          </span>
+                          <div v-else-if="row.conflict_accounts?.length" class="tag-list">
+                            <span
+                              v-for="account in row.conflict_accounts"
+                              :key="`${statDetailsRowKey(row)}-conflict-${account.id}`"
+                              class="group-chip group-chip-warning"
+                              :title="conflictAccountTitle(account)"
+                            >
+                              #{{ account.id }} {{ account.name }}
+                            </span>
+                          </div>
+                          <span v-else-if="row.conflict_account_ids?.length" class="sub-text sub-text-warning">
+                            {{ t('admin.upstreamAccounts.conflictIds', { ids: row.conflict_account_ids.join(', ') }) }}
+                          </span>
+                          <span v-else class="table-tag tag-account account-id-tag">-</span>
+                        </div>
+                      </td>
+                      <td>
+                        <span :class="['stat-details-action', statDetailsActionClass(row)]">
+                          {{ statDetailsActionLabel(row) }}
+                        </span>
+                      </td>
+                      <td>
+                        <div class="stat-details-rate-cell">
+                          <span :class="['rate-value', rateToneClass(row.upstream_rate_multiplier)]">{{ formatRate(row.upstream_rate_multiplier) }}</span>
+                          <span v-if="row.rate_violation" class="group-chip group-chip-warning">{{ t('admin.upstreamAccounts.rateRisks') }}</span>
+                          <span v-if="row.rate_violation && syncConfirmUnboundGroups(row) !== '-'" class="sub-text sub-text-warning">
+                            {{ t('admin.upstreamAccounts.unbindGroups', { groups: syncConfirmUnboundGroups(row) }) }}
+                          </span>
+                        </div>
+                      </td>
+                      <td>
+                        <div v-if="statDetailsGroupTags(row).length" class="tag-list group-list">
+                          <span
+                            v-for="group in statDetailsGroupTags(row)"
+                            :key="group.key"
+                            :class="['group-chip', matchedAccountPlatformTagClass(row), { 'group-chip-warning': group.rateViolation }]"
+                          >
+                            {{ group.label }}
+                          </span>
+                        </div>
+                        <span v-else class="dash">-</span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div v-else class="stat-details-empty">
+                <Icon name="database" size="md" :stroke-width="2" />
+                <span>{{ t('admin.upstreamAccounts.statDetailsEmpty') }}</span>
+              </div>
+            </div>
+            <div class="stat-details-footer">
+              <button type="button" class="ui-button ui-button-primary" @click="closeStatDetailsDialog">
+                {{ t('common.close') }}
+              </button>
+            </div>
+          </div>
         </div>
 
         <div v-if="showSyncLogsDialog" class="sync-logs-dialog fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6" @click.self="closeSyncLogsDialog">
@@ -1435,6 +1559,7 @@ type BatchTestPlatformOption = {
 type BatchTestSortKey = 'account' | 'platform' | 'upstream_rate' | 'schedulable' | 'status' | 'latency' | 'finished_at'
 type BatchTestResultFilter = 'all' | 'failed' | 'failed_schedulable' | 'failed_unschedulable' | 'success' | 'skipped'
 type QuickFilterKey = 'all' | 'update' | 'risk' | 'unbound' | 'failed' | 'enabled' | 'disabled'
+type StatCardKey = 'total' | 'create' | 'update' | 'risk'
 type SortOrder = 'asc' | 'desc'
 
 const MAX_BATCH_TEST_ACCOUNTS = 200
@@ -1479,6 +1604,7 @@ const groupFilter = ref('')
 const activeQuickFilter = ref<QuickFilterKey>('all')
 const showAdvancedFilters = ref(false)
 const showMobileBackToFilters = ref(false)
+const activeStatDetailsKey = ref<StatCardKey | null>(null)
 const rateGuardConfig = ref<UpstreamAccountRateGuardConfig | null>(null)
 const rateGuardForm = ref({
   enabled: false,
@@ -1572,7 +1698,13 @@ const syncProviderBySlug = computed(() => {
 const items = computed<UpstreamAccountSyncItem[]>(() => result.value?.items || [])
 const warnings = computed(() => result.value?.warnings || [])
 const records = computed<UpstreamAccountSyncRecord[]>(() => result.value?.records || [])
-const statCards = computed(() => [
+const statCards = computed<Array<{
+  key: StatCardKey
+  label: string
+  value: number
+  icon: 'database' | 'plus' | 'refresh' | 'exclamationTriangle'
+  tone: 'emerald' | 'gray' | 'orange' | 'red'
+}>>(() => [
   {
     key: 'total',
     label: t('admin.upstreamAccounts.upstreamKeys'),
@@ -1624,6 +1756,31 @@ const canSync = computed(() => summary.value.create_count > 0 || summary.value.u
 const syncCreateItems = computed(() => items.value.filter(item => item.action === 'create' && item.upstream_api_key))
 const syncUpdateItems = computed(() => items.value.filter(item => item.action === 'update'))
 const syncRateGuardItems = computed(() => items.value.filter(item => item.rate_violation && numberArray(item.unbound_group_ids).length > 0))
+const statDetailsItemsByKey = computed<Record<StatCardKey, UpstreamAccountSyncItem[]>>(() => ({
+  total: items.value,
+  create: syncCreateItems.value,
+  update: syncUpdateItems.value,
+  risk: items.value.filter(item => item.rate_violation)
+}))
+const activeStatDetailsItems = computed(() => {
+  const key = activeStatDetailsKey.value
+  return key ? statDetailsItemsByKey.value[key] : []
+})
+const activeStatDetailsCard = computed(() => {
+  const key = activeStatDetailsKey.value
+  return key ? statCards.value.find(card => card.key === key) : null
+})
+const activeStatDetailsTitle = computed(() => {
+  const label = activeStatDetailsCard.value?.label || ''
+  return label ? t('admin.upstreamAccounts.statDetailsTitle', { label }) : ''
+})
+const activeStatDetailsDescription = computed(() => {
+  if (activeStatDetailsKey.value === 'total') return t('admin.upstreamAccounts.statDetailsTotalDescription')
+  if (activeStatDetailsKey.value === 'create') return t('admin.upstreamAccounts.statDetailsCreateDescription')
+  if (activeStatDetailsKey.value === 'update') return t('admin.upstreamAccounts.statDetailsUpdateDescription')
+  if (activeStatDetailsKey.value === 'risk') return t('admin.upstreamAccounts.statDetailsRiskDescription')
+  return t('admin.upstreamAccounts.statDetailsDescription')
+})
 const syncConfirmCanSubmit = computed(() => (
   (syncConfirmOptions.value.create_missing && syncCreateItems.value.some(syncConfirmItemSelected)) ||
   (syncConfirmOptions.value.update_existing && syncUpdateItems.value.some(syncConfirmItemSelected))
@@ -2124,6 +2281,60 @@ async function refreshPreview() {
 function formatRate(value: number | undefined) {
   const n = Number(value)
   return Number.isFinite(n) ? `${formatRateNumber(n)}x` : '-'
+}
+
+function openStatDetailsDialog(key: StatCardKey) {
+  activeStatDetailsKey.value = key
+}
+
+function closeStatDetailsDialog() {
+  activeStatDetailsKey.value = null
+}
+
+function statDetailsRowKey(item: UpstreamAccountSyncItem) {
+  return [
+    activeStatDetailsKey.value || 'stat',
+    item.provider_slug,
+    item.upstream_key_name,
+    item.matched_account_id || item.local_account_name || ''
+  ].join('-')
+}
+
+function statDetailsActionLabel(item: UpstreamAccountSyncItem) {
+  if (item.action === 'create') return t('admin.upstreamAccounts.actions.create')
+  if (item.action === 'update') return t('admin.upstreamAccounts.actions.update')
+  if (item.action === 'noop') return t('admin.upstreamAccounts.actions.noop')
+  if (item.action === 'skip') return t('admin.upstreamAccounts.actions.skip')
+  if (item.action === 'conflict') return t('admin.upstreamAccounts.actions.conflict')
+  return item.action || '-'
+}
+
+function statDetailsActionClass(item: UpstreamAccountSyncItem) {
+  if (item.action === 'create') return 'stat-details-action-create'
+  if (item.action === 'update') return 'stat-details-action-update'
+  if (item.action === 'conflict') return 'stat-details-action-conflict'
+  if (item.action === 'skip') return 'stat-details-action-skip'
+  return 'stat-details-action-muted'
+}
+
+function statDetailsGroupTags(item: UpstreamAccountSyncItem) {
+  if (item.bound_groups?.length) {
+    return item.bound_groups.map(group => ({
+      key: `bound-${group.id}`,
+      label: `${group.name} ${formatRate(group.rate_multiplier)}`,
+      rateViolation: Boolean(group.rate_violation)
+    }))
+  }
+  if (item.local_group_name || item.local_group_id) {
+    const groupName = item.local_group_name || `#${item.local_group_id}`
+    const hasRate = Number.isFinite(Number(item.local_rate_multiplier))
+    return [{
+      key: `local-${item.local_group_id || groupName}`,
+      label: hasRate ? `${groupName} ${formatRate(item.local_rate_multiplier)}` : groupName,
+      rateViolation: Boolean(item.rate_violation)
+    }]
+  }
+  return []
 }
 
 function formatRateNumber(value: number) {
@@ -3454,10 +3665,28 @@ onBeforeUnmount(() => {
 .stat-card {
   position: relative;
   display: flex;
+  width: 100%;
   min-height: 82px;
   align-items: center;
   gap: 12px;
+  border: 1px solid #e5e7eb;
+  appearance: none;
+  cursor: pointer;
+  font: inherit;
   padding: 16px;
+  text-align: left;
+  transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+.stat-card:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
+}
+
+.stat-card:focus-visible {
+  outline: 2px solid #10b981;
+  outline-offset: 2px;
 }
 
 .stat-alert-dot {
@@ -4733,6 +4962,7 @@ onBeforeUnmount(() => {
   color: #065f46;
 }
 
+.stat-details-dialog,
 .sync-logs-dialog {
   overflow-y: auto;
 }
@@ -4747,6 +4977,17 @@ onBeforeUnmount(() => {
 
 .batch-test-result-dialog {
   overflow: auto;
+}
+
+.stat-details-modal {
+  display: flex;
+  width: min(1040px, 100%);
+  max-height: 86vh;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.28);
 }
 
 .sync-confirm-modal {
@@ -4795,6 +5036,157 @@ onBeforeUnmount(() => {
   min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
+}
+
+.stat-details-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 18px 20px;
+}
+
+.stat-details-header h3 {
+  margin: 0;
+  color: #111827;
+  font-size: 16px;
+  font-weight: 750;
+}
+
+.stat-details-header p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.stat-details-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #eef2f7;
+  padding: 12px 18px;
+  background: #f8fafc;
+}
+
+.stat-details-count {
+  display: inline-flex;
+  border-radius: 999px;
+  background: #ecfdf5;
+  padding: 3px 10px;
+  color: #047857;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.stat-details-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+}
+
+.stat-details-table-wrap {
+  min-width: 0;
+  overflow: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.stat-details-table {
+  width: 100%;
+  min-width: 900px;
+  border-collapse: collapse;
+  background: #fff;
+}
+
+.stat-details-table th,
+.stat-details-table td {
+  border-bottom: 1px solid #eef2f7;
+  padding: 11px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.stat-details-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.stat-details-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.stat-details-source-cell,
+.stat-details-rate-cell {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.stat-details-source-cell code {
+  max-width: 180px;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stat-details-action {
+  display: inline-flex;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.stat-details-action-create {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.stat-details-action-update {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.stat-details-action-conflict,
+.stat-details-action-skip {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.stat-details-action-muted {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.stat-details-empty {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  gap: 10px;
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.stat-details-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  border-top: 1px solid #e5e7eb;
+  padding: 14px 18px;
 }
 
 .sync-confirm-header {
@@ -5844,6 +6236,15 @@ button.sync-log-status-unhandled:hover {
     max-height: 88vh;
   }
 
+  .stat-details-modal {
+    width: 100%;
+    max-height: 88vh;
+  }
+
+  .stat-details-table {
+    min-width: 820px;
+  }
+
   .batch-test-result-dialog {
     align-items: stretch;
     padding: 12px;
@@ -6004,9 +6405,43 @@ button.sync-log-status-unhandled:hover {
     min-height: 32px;
   }
 
+  .stat-details-dialog,
   .sync-logs-dialog {
     align-items: stretch;
     padding: 10px;
+  }
+
+  .stat-details-modal {
+    height: calc(100vh - 20px);
+    height: calc(100dvh - 20px);
+    max-height: calc(100vh - 20px);
+    max-height: calc(100dvh - 20px);
+  }
+
+  .stat-details-header {
+    align-items: flex-start;
+    padding: 12px 14px;
+  }
+
+  .stat-details-header h3 {
+    font-size: 15px;
+  }
+
+  .stat-details-summary {
+    padding: 10px 12px;
+  }
+
+  .stat-details-body {
+    padding: 10px;
+  }
+
+  .stat-details-footer {
+    padding: 10px;
+  }
+
+  .stat-details-footer .ui-button {
+    width: 100%;
+    justify-content: center;
   }
 
   .sync-logs-modal {

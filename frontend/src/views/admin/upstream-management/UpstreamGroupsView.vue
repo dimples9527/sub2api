@@ -221,7 +221,9 @@
                     </div>
                   </template>
                   <template v-else>
-                    <span class="ug-tag ug-tag-warning">{{ t('admin.upstreamGroups.notMatched') }}</span>
+                    <span :class="['ug-tag', row.match_ignored ? 'ug-tag-default' : 'ug-tag-warning']">
+                      {{ row.match_ignored ? t('admin.upstreamGroups.matchIgnored') : t('admin.upstreamGroups.notMatched') }}
+                    </span>
                     <div class="ug-match-desc-text ug-match-desc-muted">{{ row.upstream_group_key }}</div>
                   </template>
                 </div>
@@ -301,7 +303,7 @@
               <template #cell-action="{ row }">
                 <div class="ug-action-stack">
                   <button
-                    v-if="!row.matched"
+                    v-if="!row.matched && !row.match_ignored"
                     type="button"
                     class="ug-btn ug-btn-primary ug-btn-small ug-btn-cell"
                     :disabled="syncingGroupKey === row.upstream_group_key"
@@ -311,6 +313,16 @@
                     <span>{{ t('admin.upstreamGroups.syncLocalGroup') }}</span>
                   </button>
                   <button
+                    v-else-if="row.match_ignored"
+                    type="button"
+                    class="ug-btn ug-btn-primary ug-btn-small ug-btn-cell"
+                    :disabled="rematchingGroupKey === row.upstream_group_key"
+                    @click="rematchGroupMapping(row)"
+                  >
+                    <Icon name="link" size="sm" :class="rematchingGroupKey === row.upstream_group_key ? 'animate-spin' : ''" />
+                    <span>{{ t('admin.upstreamGroups.rematchGroup') }}</span>
+                  </button>
+                  <button
                     v-else
                     type="button"
                     class="ug-btn-text"
@@ -318,6 +330,16 @@
                     @click="openLocalRateDialog(row)"
                   >
                     {{ t('admin.upstreamGroups.editLocalRate') }}
+                  </button>
+                  <button
+                    v-if="row.matched"
+                    type="button"
+                    class="ug-btn ug-btn-danger ug-btn-small ug-btn-cell"
+                    :disabled="unbindingGroupKey === row.upstream_group_key"
+                    @click="unbindGroupMapping(row)"
+                  >
+                    <Icon name="ban" size="sm" :class="unbindingGroupKey === row.upstream_group_key ? 'animate-spin' : ''" />
+                    <span>{{ t('admin.upstreamGroups.unbindGroup') }}</span>
                   </button>
                   <button
                     v-if="boundAccountsFor(row).length"
@@ -731,6 +753,8 @@ const applying = ref(false)
 const loadingRateFixConfig = ref(false)
 const savingRateFixConfig = ref(false)
 const syncingGroupKey = ref<string | null>(null)
+const unbindingGroupKey = ref<string | null>(null)
+const rematchingGroupKey = ref<string | null>(null)
 const savingLocalRateGroupId = ref<number | null>(null)
 const savingAccountGroupId = ref<number | null>(null)
 const editingAccountId = ref<number | null>(null)
@@ -1115,6 +1139,36 @@ async function saveLocalGroupRate() {
   }
 }
 
+async function unbindGroupMapping(row: UpstreamGroupComparison) {
+  unbindingGroupKey.value = row.upstream_group_key
+  try {
+    const requestId = ++reloadRequestId
+    const nextResult = await adminAPI.upstreamManagement.saveGroupMapping(row.upstream_group_name, null, true)
+    result.value = nextResult
+    await syncBoundAccounts(nextResult.items || [], requestId)
+    appStore.showSuccess(t('admin.upstreamGroups.unbindGroupSuccess'))
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamGroups.unbindGroupFailed')))
+  } finally {
+    unbindingGroupKey.value = null
+  }
+}
+
+async function rematchGroupMapping(row: UpstreamGroupComparison) {
+  rematchingGroupKey.value = row.upstream_group_key
+  try {
+    const requestId = ++reloadRequestId
+    const nextResult = await adminAPI.upstreamManagement.saveGroupMapping(row.upstream_group_name, null)
+    result.value = nextResult
+    await syncBoundAccounts(nextResult.items || [], requestId)
+    appStore.showSuccess(t('admin.upstreamGroups.rematchGroupSuccess'))
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamGroups.rematchGroupFailed')))
+  } finally {
+    rematchingGroupKey.value = null
+  }
+}
+
 async function loadAccountEditOptions() {
   const [proxies, groups] = await Promise.all([
     adminAPI.proxies.getAll(),
@@ -1425,6 +1479,7 @@ function statusClass(row: UpstreamGroupComparison) {
 }
 
 function statusLabel(row: UpstreamGroupComparison) {
+  if (row.match_ignored) return t('admin.upstreamGroups.matchIgnored')
   if (!row.matched) return t('admin.upstreamGroups.notMatched')
   if (row.needs_rate_increase) return t('admin.upstreamGroups.rateRiskStatus')
   return t('admin.upstreamGroups.rateOkStatus')
@@ -1592,6 +1647,18 @@ onMounted(reload)
 
 .ug-btn-default:hover:not(:disabled) {
   @apply border-primary-400 text-primary-600 dark:border-primary-500 dark:text-primary-300;
+}
+
+.ug-btn-danger {
+  border: 1px solid #FCA5A5;
+  background: #FEF2F2;
+  color: #DC2626;
+}
+
+.ug-btn-danger:hover:not(:disabled) {
+  border-color: #F87171;
+  background: #FEE2E2;
+  color: #B91C1C;
 }
 
 .ug-btn-small {

@@ -11,6 +11,7 @@ const { adminAPIMock, appStoreMock } = vi.hoisted(() => ({
       getGroups: vi.fn(),
       getRateFixConfig: vi.fn(),
       createLocalGroupFromUpstream: vi.fn(),
+      saveGroupMapping: vi.fn(),
       markRateFixRecordHandled: vi.fn(),
     },
     groups: {
@@ -81,6 +82,12 @@ describe('UpstreamGroupsView', () => {
       interval_seconds: 3600,
     })
     adminAPIMock.upstreamManagement.createLocalGroupFromUpstream.mockResolvedValue({
+      default_provider: { slug: 'default-upstream', name: 'Default upstream' },
+      items: [],
+      warnings: [],
+      records: [],
+    })
+    adminAPIMock.upstreamManagement.saveGroupMapping.mockResolvedValue({
       default_provider: { slug: 'default-upstream', name: 'Default upstream' },
       items: [],
       warnings: [],
@@ -659,6 +666,160 @@ describe('UpstreamGroupsView', () => {
     await flushPromises()
 
     expect(adminAPIMock.groups.update).toHaveBeenCalledWith(42, { rate_multiplier: 2.5 })
+  })
+
+  it('unbinds a matched upstream group and stores an ignored mapping', async () => {
+    adminAPIMock.upstreamManagement.getGroups.mockResolvedValue({
+      default_provider: { slug: 'default-upstream', name: 'Default upstream' },
+      items: [
+        {
+          provider_slug: 'default-upstream',
+          provider_name: 'Default upstream',
+          upstream_group_name: 'VIP',
+          upstream_group_key: 'vip',
+          upstream_rate: 2.5,
+          upstream_key_count: 3,
+          local_group_id: 42,
+          local_group_name: 'VIP',
+          local_rate: 2.5,
+          matched: true,
+          match_source: 'name',
+          needs_rate_increase: false,
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+    adminAPIMock.upstreamManagement.saveGroupMapping.mockResolvedValue({
+      default_provider: { slug: 'default-upstream', name: 'Default upstream' },
+      items: [
+        {
+          provider_slug: 'default-upstream',
+          provider_name: 'Default upstream',
+          upstream_group_name: 'VIP',
+          upstream_group_key: 'vip',
+          upstream_rate: 2.5,
+          upstream_key_count: 3,
+          matched: false,
+          match_ignored: true,
+          needs_rate_increase: false,
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+
+    const wrapper = mount(UpstreamGroupsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any) => h('div', [
+                slots['cell-local_group_name']?.({ row }),
+                slots['cell-action']?.({ row }),
+              ])))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          UpstreamGroupAvailabilityTrend: { template: '<div />' },
+          Select: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const unbindButton = wrapper.findAll('button').find(button => button.text().includes('admin.upstreamGroups.unbindGroup'))
+    expect(unbindButton).toBeTruthy()
+    await unbindButton!.trigger('click')
+    await flushPromises()
+
+    expect(adminAPIMock.upstreamManagement.saveGroupMapping).toHaveBeenCalledWith('VIP', null, true)
+    expect(appStoreMock.showSuccess).toHaveBeenCalledWith('admin.upstreamGroups.unbindGroupSuccess')
+    expect(wrapper.text()).toContain('admin.upstreamGroups.matchIgnored')
+  })
+
+  it('clears an ignored mapping to rematch an upstream group', async () => {
+    adminAPIMock.upstreamManagement.getGroups.mockResolvedValue({
+      default_provider: { slug: 'default-upstream', name: 'Default upstream' },
+      items: [
+        {
+          provider_slug: 'default-upstream',
+          provider_name: 'Default upstream',
+          upstream_group_name: 'VIP',
+          upstream_group_key: 'vip',
+          upstream_rate: 2.5,
+          upstream_key_count: 3,
+          matched: false,
+          match_ignored: true,
+          needs_rate_increase: false,
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+    adminAPIMock.upstreamManagement.saveGroupMapping.mockResolvedValue({
+      default_provider: { slug: 'default-upstream', name: 'Default upstream' },
+      items: [
+        {
+          provider_slug: 'default-upstream',
+          provider_name: 'Default upstream',
+          upstream_group_name: 'VIP',
+          upstream_group_key: 'vip',
+          upstream_rate: 2.5,
+          upstream_key_count: 3,
+          local_group_id: 42,
+          local_group_name: 'VIP',
+          local_rate: 2.5,
+          matched: true,
+          match_source: 'name',
+          needs_rate_increase: false,
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+
+    const wrapper = mount(UpstreamGroupsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any) => h('div', [
+                slots['cell-local_group_name']?.({ row }),
+                slots['cell-action']?.({ row }),
+              ])))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          UpstreamGroupAvailabilityTrend: { template: '<div />' },
+          Select: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('admin.upstreamGroups.matchIgnored')
+    expect(wrapper.text()).toContain('admin.upstreamGroups.rematchGroup')
+    expect(wrapper.text()).not.toContain('admin.upstreamGroups.syncLocalGroup')
+
+    const rematchButton = wrapper.findAll('button').find(button => button.text().includes('admin.upstreamGroups.rematchGroup'))
+    expect(rematchButton).toBeTruthy()
+    await rematchButton!.trigger('click')
+    await flushPromises()
+
+    expect(adminAPIMock.upstreamManagement.saveGroupMapping).toHaveBeenCalledWith('VIP', null)
+    expect(appStoreMock.showSuccess).toHaveBeenCalledWith('admin.upstreamGroups.rematchGroupSuccess')
+    expect(wrapper.text()).toContain('admin.upstreamGroups.nameMatched')
   })
 
   it('opens rate fix logs in a dialog and marks pending records handled', async () => {

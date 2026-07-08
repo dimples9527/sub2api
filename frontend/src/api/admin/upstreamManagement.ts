@@ -14,6 +14,7 @@ export interface UpstreamGroupComparison {
   local_rate?: number
   matched: boolean
   match_source?: 'manual' | 'name' | string
+  match_ignored?: boolean
   needs_rate_increase: boolean
 }
 
@@ -91,14 +92,23 @@ export async function updateRateFixConfig(
 
 export async function saveGroupMapping(
   upstreamGroupName: string,
-  localGroupId: number | null
+  localGroupId: number | null,
+  ignored = false
 ): Promise<UpstreamGroupCompareResult> {
+  const payload: {
+    upstream_group_name: string
+    local_group_id: number | null
+    ignored?: boolean
+  } = {
+    upstream_group_name: upstreamGroupName,
+    local_group_id: localGroupId
+  }
+  if (ignored) {
+    payload.ignored = true
+  }
   const { data } = await apiClient.put<UpstreamGroupCompareResult>(
     '/admin/upstream-management/groups/mappings',
-    {
-      upstream_group_name: upstreamGroupName,
-      local_group_id: localGroupId
-    }
+    payload
   )
   return data
 }

@@ -251,6 +251,127 @@ describe('UpstreamAccountsView', () => {
     expect(wrapper.text()).toContain('-')
   })
 
+  it('opens stat card detail dialogs with matching preview rows', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValueOnce({
+      default_provider: {},
+      providers: [{ slug: 'upstream-a', name: 'Upstream A' }],
+      summary: {
+        upstream_key_count: 4,
+        matched_account_count: 2,
+        create_count: 1,
+        update_count: 2,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 1,
+        unbound_group_count: 1,
+      },
+      items: [
+        {
+          action: 'create',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-new',
+          upstream_api_key: 'sk-key-new',
+          local_account_name: 'local-new',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 1,
+          local_group_id: 7,
+          local_group_name: 'VIP',
+          local_rate_multiplier: 2,
+          rate_violation: false,
+        },
+        {
+          action: 'create',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'display-only',
+          local_account_name: 'local-display-only',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 1,
+          local_group_id: 7,
+          local_group_name: 'VIP',
+          local_rate_multiplier: 2,
+          rate_violation: false,
+        },
+        {
+          action: 'update',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-existing',
+          local_account_name: 'local-existing',
+          matched_account_id: 12,
+          matched_account_name: 'local-existing',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 1,
+          bound_groups: [
+            { id: 7, name: 'VIP', rate_multiplier: 2, rate_violation: false },
+          ],
+          rate_violation: false,
+        },
+        {
+          action: 'update',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-risk',
+          local_account_name: 'local-risk',
+          matched_account_id: 13,
+          matched_account_name: 'local-risk',
+          upstream_group_name: 'basic',
+          upstream_rate_multiplier: 1,
+          bound_groups: [
+            { id: 8, name: 'Trial', rate_multiplier: 0.5, rate_violation: true },
+          ],
+          unbound_group_ids: [8],
+          unbound_group_names: ['Trial'],
+          rate_violation: true,
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: { template: '<div data-test="accounts-table" />' },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+          GroupSelector: true,
+          UpstreamBalanceCharts: { template: '<div data-test="balance-charts" />' },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    await wrapper.find('[data-test="upstream-stat-card-total"]').trigger('click')
+    expect(wrapper.find('[data-test="stat-details-dialog"]').text()).toContain('key-new')
+    expect(wrapper.find('[data-test="stat-details-dialog"]').text()).toContain('display-only')
+    expect(wrapper.find('[data-test="stat-details-dialog"]').text()).toContain('key-existing')
+    expect(wrapper.find('[data-test="stat-details-dialog"]').text()).toContain('key-risk')
+
+    await wrapper.find('.stat-details-dialog .modal-close-button').trigger('click')
+    await wrapper.find('[data-test="upstream-stat-card-create"]').trigger('click')
+    expect(wrapper.find('[data-test="stat-details-dialog"]').text()).toContain('key-new')
+    expect(wrapper.find('[data-test="stat-details-dialog"]').text()).not.toContain('display-only')
+
+    await wrapper.find('.stat-details-dialog .modal-close-button').trigger('click')
+    await wrapper.find('[data-test="upstream-stat-card-update"]').trigger('click')
+    expect(wrapper.find('[data-test="stat-details-dialog"]').text()).toContain('key-existing')
+    expect(wrapper.find('[data-test="stat-details-dialog"]').text()).toContain('key-risk')
+    expect(wrapper.find('[data-test="stat-details-dialog"]').text()).not.toContain('key-new')
+
+    await wrapper.find('.stat-details-dialog .modal-close-button').trigger('click')
+    await wrapper.find('[data-test="upstream-stat-card-risk"]').trigger('click')
+    const riskDialog = wrapper.find('[data-test="stat-details-dialog"]').text()
+    expect(riskDialog).toContain('key-risk')
+    expect(riskDialog).toContain('Trial')
+    expect(riskDialog).not.toContain('key-existing')
+  })
+
   it('shows detailed sync confirmation and submits selected sync categories', async () => {
     upstreamAccountSyncMock.getPreview.mockResolvedValueOnce({
       default_provider: {},
