@@ -563,91 +563,119 @@
 
         <div class="health-guard-content-grid">
           <div class="health-guard-config-column">
-            <div class="health-guard-config-grid">
-              <label class="health-guard-field">
-                <span>{{ t('admin.upstreamProviders.healthGuardIntervalSeconds') }}</span>
-                <input v-model.number="healthGuardForm.interval_seconds" type="number" min="60" step="60" class="input" />
-              </label>
-              <label class="health-guard-field">
-                <span>{{ t('admin.upstreamProviders.healthGuardMaxAccounts') }}</span>
-                <input v-model.number="healthGuardForm.max_accounts_per_run" type="number" min="1" max="1000" step="1" class="input" />
-              </label>
-              <label class="health-guard-field">
-                <span>{{ t('admin.upstreamProviders.healthGuardConcurrency') }}</span>
-                <input v-model.number="healthGuardForm.concurrency" type="number" min="1" max="8" step="1" class="input" />
-              </label>
-              <label class="health-guard-field">
-                <span>{{ t('admin.upstreamProviders.healthGuardTimeout') }}</span>
-                <input v-model.number="healthGuardForm.timeout_per_account_seconds" type="number" min="5" max="300" step="5" class="input" />
-              </label>
-              <label class="health-guard-field">
-                <span>{{ t('admin.upstreamProviders.healthGuardFailureThreshold') }}</span>
-                <input v-model.number="healthGuardForm.failure_threshold" type="number" min="1" step="1" class="input" />
-              </label>
-              <label class="health-guard-field">
-                <span>{{ t('admin.upstreamProviders.healthGuardSlowThreshold') }}</span>
-                <input v-model.number="healthGuardForm.slow_threshold" type="number" min="1" step="1" class="input" />
-              </label>
-              <label class="health-guard-field">
-                <span>{{ t('admin.upstreamProviders.healthGuardRecoveryThreshold') }}</span>
-                <input v-model.number="healthGuardForm.recovery_threshold" type="number" min="1" step="1" class="input" />
-              </label>
-              <label class="health-guard-field">
-                <span>{{ t('admin.upstreamProviders.healthGuardHealthyLatency') }}</span>
-                <input v-model.number="healthGuardForm.healthy_latency_ms" type="number" min="1" step="500" class="input" />
-              </label>
-              <label class="health-guard-field health-guard-field-wide">
-                <span>{{ t('admin.upstreamProviders.healthGuardIgnoredAccounts') }}</span>
-                <input
-                  v-model.trim="healthGuardIgnoredInput"
-                  type="text"
-                  class="input health-guard-ignored-input"
-                  :placeholder="t('admin.upstreamProviders.healthGuardIgnoredAccountsPlaceholder')"
-                />
-                <small>{{ t('admin.upstreamProviders.healthGuardIgnoredAccountsHint') }}</small>
-              </label>
-            </div>
+            <section class="health-guard-config-section" :class="{ 'is-collapsed': !healthGuardConfigExpanded }">
+              <button
+                type="button"
+                class="health-guard-section-toggle"
+                :aria-expanded="healthGuardConfigExpanded"
+                data-test="health-guard-config-toggle"
+                @click="healthGuardConfigExpanded = !healthGuardConfigExpanded"
+              >
+                <span>
+                  <strong>{{ t('admin.upstreamProviders.healthGuardConfigSection') }}</strong>
+                  <small>{{ healthGuardConfigSummary }}</small>
+                </span>
+                <Icon name="chevronDown" size="sm" :class="{ 'rotate-180': healthGuardConfigExpanded }" />
+              </button>
 
-            <div class="health-guard-platform-panel">
-              <div class="balance-section-title">{{ t('admin.upstreamProviders.healthGuardPlatformModels') }}</div>
-              <div class="health-guard-platform-list">
-                <label
-                  v-for="platform in healthGuardPlatformOptions"
-                  :key="platform.value"
-                  class="health-guard-platform-row"
-                >
-                  <span class="health-guard-platform-name">
-                    <strong>{{ platform.label }}</strong>
-                    <small>{{ t('admin.upstreamProviders.healthGuardPlatformHint') }}</small>
-                  </span>
-                  <input
-                    v-model.trim="healthGuardForm.platform_models[platform.value]"
-                    type="text"
-                    class="input"
-                    :placeholder="platform.placeholder"
-                  />
-                  <input
-                    v-model.number="healthGuardForm.platform_latency_ms[platform.value]"
-                    type="number"
-                    min="1"
-                    step="500"
-                    class="input"
-                    :placeholder="String(healthGuardForm.healthy_latency_ms || 15000)"
-                  />
-                </label>
+              <div v-show="healthGuardConfigExpanded" class="health-guard-config-body">
+                <div class="health-guard-config-grid">
+                  <label class="health-guard-field">
+                    <span>{{ t('admin.upstreamProviders.healthGuardIntervalSeconds') }}</span>
+                    <input v-model.number="healthGuardForm.interval_seconds" type="number" min="60" step="60" class="input" />
+                  </label>
+                  <label class="health-guard-field">
+                    <span>{{ t('admin.upstreamProviders.healthGuardMaxAccounts') }}</span>
+                    <input v-model.number="healthGuardForm.max_accounts_per_run" type="number" min="1" max="1000" step="1" class="input" />
+                  </label>
+                  <label class="health-guard-field">
+                    <span>{{ t('admin.upstreamProviders.healthGuardConcurrency') }}</span>
+                    <input v-model.number="healthGuardForm.concurrency" type="number" min="1" max="8" step="1" class="input" />
+                  </label>
+                  <label class="health-guard-field">
+                    <span>{{ t('admin.upstreamProviders.healthGuardTimeout') }}</span>
+                    <input v-model.number="healthGuardForm.timeout_per_account_seconds" type="number" min="5" max="300" step="5" class="input" />
+                  </label>
+                  <label class="health-guard-field">
+                    <span>{{ t('admin.upstreamProviders.healthGuardFailureThreshold') }}</span>
+                    <input v-model.number="healthGuardForm.failure_threshold" type="number" min="1" step="1" class="input" />
+                  </label>
+                  <label class="health-guard-field">
+                    <span>{{ t('admin.upstreamProviders.healthGuardSlowThreshold') }}</span>
+                    <input v-model.number="healthGuardForm.slow_threshold" type="number" min="1" step="1" class="input" />
+                  </label>
+                  <label class="health-guard-field">
+                    <span>{{ t('admin.upstreamProviders.healthGuardRecoveryThreshold') }}</span>
+                    <input v-model.number="healthGuardForm.recovery_threshold" type="number" min="1" step="1" class="input" />
+                  </label>
+                  <label class="health-guard-field">
+                    <span>{{ t('admin.upstreamProviders.healthGuardHealthyLatency') }}</span>
+                    <input v-model.number="healthGuardForm.healthy_latency_ms" type="number" min="1" step="500" class="input" />
+                  </label>
+                  <div class="health-guard-field health-guard-field-wide">
+                    <span>{{ t('admin.upstreamProviders.healthGuardIgnoredAccounts') }}</span>
+                    <div class="health-guard-ignored-summary" :class="{ 'is-invalid': healthGuardIgnoredInputInvalid }">
+                      <div>
+                        <strong>{{ healthGuardIgnoredSummaryText }}</strong>
+                        <small>{{ t('admin.upstreamProviders.healthGuardIgnoredAccountsHint') }}</small>
+                      </div>
+                      <button
+                        type="button"
+                        class="btn btn-secondary btn-sm"
+                        data-test="health-guard-ignored-manage"
+                        @click="openHealthGuardIgnoredDialog"
+                      >
+                        {{ t('admin.upstreamProviders.healthGuardIgnoredManage') }}
+                      </button>
+                    </div>
+                    <div v-if="healthGuardIgnoredInputInvalid" class="health-guard-ignored-list-empty">
+                      {{ t('admin.upstreamProviders.invalidHealthGuardIgnoredAccounts') }}
+                    </div>
+                  </div>
+                </div>
+
+                <div class="health-guard-platform-panel">
+                  <div class="balance-section-title">{{ t('admin.upstreamProviders.healthGuardPlatformModels') }}</div>
+                  <div class="health-guard-platform-list">
+                    <label
+                      v-for="platform in healthGuardPlatformOptions"
+                      :key="platform.value"
+                      class="health-guard-platform-row"
+                    >
+                      <span class="health-guard-platform-name">
+                        <strong>{{ platform.label }}</strong>
+                        <small>{{ t('admin.upstreamProviders.healthGuardPlatformHint') }}</small>
+                      </span>
+                      <input
+                        v-model.trim="healthGuardForm.platform_models[platform.value]"
+                        type="text"
+                        class="input"
+                        :placeholder="platform.placeholder"
+                      />
+                      <input
+                        v-model.number="healthGuardForm.platform_latency_ms[platform.value]"
+                        type="number"
+                        min="1"
+                        step="500"
+                        class="input"
+                        :placeholder="String(healthGuardForm.healthy_latency_ms || 15000)"
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div class="health-guard-account-models-panel">
+                  <div class="balance-section-title">{{ t('admin.upstreamProviders.healthGuardAccountModels') }}</div>
+                  <textarea
+                    v-model.trim="healthGuardAccountModelsInput"
+                    class="input health-guard-account-models-input"
+                    rows="3"
+                    :placeholder="t('admin.upstreamProviders.healthGuardAccountModelsPlaceholder')"
+                  ></textarea>
+                  <p class="health-guard-account-models-hint">{{ t('admin.upstreamProviders.healthGuardAccountModelsHint') }}</p>
+                </div>
               </div>
-            </div>
-
-            <div class="health-guard-account-models-panel">
-              <div class="balance-section-title">{{ t('admin.upstreamProviders.healthGuardAccountModels') }}</div>
-              <textarea
-                v-model.trim="healthGuardAccountModelsInput"
-                class="input health-guard-account-models-input"
-                rows="3"
-                :placeholder="t('admin.upstreamProviders.healthGuardAccountModelsPlaceholder')"
-              ></textarea>
-              <p class="health-guard-account-models-hint">{{ t('admin.upstreamProviders.healthGuardAccountModelsHint') }}</p>
-            </div>
+            </section>
           </div>
 
           <div class="health-guard-record-panel">
@@ -710,6 +738,93 @@
             {{ savingHealthGuardConfig ? t('common.saving') : t('common.save') }}
           </button>
         </div>
+      </template>
+    </BaseDialog>
+
+    <BaseDialog
+      :show="showHealthGuardIgnoredDialog"
+      :title="t('admin.upstreamProviders.healthGuardIgnoredManageTitle')"
+      width="wide"
+      :z-index="60"
+      @close="closeHealthGuardIgnoredDialog"
+    >
+      <div class="health-guard-ignored-dialog">
+        <div class="health-guard-ignored-add">
+          <Select
+            v-model="healthGuardIgnoredAccountToAdd"
+            :options="healthGuardIgnoredAccountOptions"
+            searchable
+            clearable
+            class="health-guard-ignored-select"
+            :placeholder="t('admin.upstreamProviders.healthGuardIgnoredSelectPlaceholder')"
+            :empty-text="t('admin.upstreamProviders.healthGuardIgnoredNoOptions')"
+          >
+            <template #option="{ option }">
+              <span class="health-guard-ignored-option">
+                <strong>{{ option.label }}</strong>
+                <small>{{ option.meta }}</small>
+              </span>
+            </template>
+            <template #selected="{ option }">
+              <span v-if="option" class="health-guard-ignored-option is-selected">
+                <strong>{{ option.label }}</strong>
+                <small>{{ option.meta }}</small>
+              </span>
+              <span v-else>{{ t('admin.upstreamProviders.healthGuardIgnoredSelectPlaceholder') }}</span>
+            </template>
+          </Select>
+          <button
+            type="button"
+            class="btn btn-primary"
+            :disabled="!healthGuardIgnoredAccountToAdd"
+            data-test="health-guard-ignored-add"
+            @click="addHealthGuardIgnoredAccount"
+          >
+            {{ t('common.add') }}
+          </button>
+        </div>
+
+        <div v-if="loadingHealthGuardIgnoredOptions" class="health-guard-ignored-loading">
+          {{ t('common.loading') }}
+        </div>
+
+        <div v-if="healthGuardIgnoredAccountRows.length" class="health-guard-ignored-list">
+          <article
+            v-for="row in healthGuardIgnoredAccountRows"
+            :key="row.id"
+            class="health-guard-ignored-account"
+            :class="{ 'is-missing': row.missing }"
+          >
+            <div class="health-guard-ignored-account-main">
+              <strong>{{ healthGuardIgnoredAccountName(row) }}</strong>
+              <code>#{{ row.id }}</code>
+            </div>
+            <div class="health-guard-ignored-account-meta">
+              <span>{{ healthGuardIgnoredAccountPlatform(row) }}</span>
+              <span :class="['record-status', healthGuardIgnoredAccountStatusClass(row)]">
+                {{ healthGuardIgnoredAccountStatusLabel(row) }}
+              </span>
+            </div>
+            <button
+              type="button"
+              class="health-guard-ignored-remove"
+              :title="t('common.delete')"
+              :aria-label="t('admin.upstreamProviders.healthGuardIgnoredRemoveAccount', { id: row.id })"
+              :data-test="`health-guard-ignored-remove-${row.id}`"
+              @click="removeHealthGuardIgnoredAccount(row.id)"
+            >
+              <Icon name="x" size="xs" />
+            </button>
+          </article>
+        </div>
+        <div v-else class="health-guard-empty">
+          {{ t('admin.upstreamProviders.healthGuardIgnoredEmpty') }}
+        </div>
+      </div>
+      <template #footer>
+        <button type="button" class="btn btn-secondary" @click="closeHealthGuardIgnoredDialog">
+          {{ t('common.close') }}
+        </button>
       </template>
     </BaseDialog>
 
@@ -1469,7 +1584,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type {
@@ -1490,6 +1605,7 @@ import type {
   UpstreamBalanceSamplerConfig,
   UpstreamBalanceSnapshot,
 } from '@/api/admin/upstreamAccountSync'
+import type { Account } from '@/types'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime } from '@/utils/format'
@@ -1524,6 +1640,16 @@ type HealthGuardAdjustmentLogItem = {
   record: UpstreamAccountHealthGuardRunRecord
   item: UpstreamAccountHealthGuardRunItem
 }
+type HealthGuardIgnoredAccountSummary = {
+  id: number
+  account?: Account
+  loading?: boolean
+  missing?: boolean
+}
+type HealthGuardIgnoredAccountOption = SelectOption & {
+  account?: Account
+  meta: string
+}
 type HealthGuardAdjustmentFilterKey = 'all' | 'disabled' | 'recovered'
 type HealthGuardResultFilterKey = 'all' | 'healthy' | 'slow' | 'failed' | 'changed'
 
@@ -1553,6 +1679,15 @@ const showHealthGuardDialog = ref(false)
 const loadingHealthGuard = ref(false)
 const savingHealthGuardConfig = ref(false)
 const runningHealthGuardNow = ref(false)
+const healthGuardConfigExpanded = ref(
+  typeof window === 'undefined' || typeof window.matchMedia !== 'function'
+    ? true
+    : !window.matchMedia('(max-width: 767px)').matches
+)
+const showHealthGuardIgnoredDialog = ref(false)
+const loadingHealthGuardIgnoredOptions = ref(false)
+const healthGuardIgnoredAccountOptionsSource = ref<Account[]>([])
+const healthGuardIgnoredAccountToAdd = ref<number | null>(null)
 const showHealthGuardSkipReasonsDialog = ref(false)
 const showHealthGuardAdjustmentDialog = ref(false)
 const showHealthGuardResultsDialog = ref(false)
@@ -1579,6 +1714,7 @@ const healthGuardConfig = ref<UpstreamAccountHealthGuardConfig | null>(null)
 const healthGuardRecords = ref<UpstreamAccountHealthGuardRunRecord[]>([])
 const healthGuardForm = ref<HealthGuardForm>(defaultHealthGuardForm())
 const healthGuardIgnoredInput = ref('')
+const healthGuardIgnoredAccounts = ref<Record<number, HealthGuardIgnoredAccountSummary>>({})
 const healthGuardAccountModelsInput = ref('')
 const rechargeForm = ref({
   amount: null as number | null,
@@ -1892,6 +2028,34 @@ const healthGuardSummaryCards = computed(() => {
     { key: 'recovered', label: t('admin.upstreamProviders.healthGuardRecovered'), value: summary?.recovered_count || 0, tone: 'is-success' },
   ]
 })
+const healthGuardIgnoredIDs = computed(() => parseHealthGuardIgnoredInput(healthGuardIgnoredInput.value) || [])
+const healthGuardIgnoredAccountRows = computed<HealthGuardIgnoredAccountSummary[]>(() => (
+  healthGuardIgnoredIDs.value.map(id => healthGuardIgnoredAccounts.value[id] || { id, loading: true })
+))
+const healthGuardIgnoredInputInvalid = computed(() => Boolean(healthGuardIgnoredInput.value.trim()) && parseHealthGuardIgnoredInput(healthGuardIgnoredInput.value) === null)
+const healthGuardIgnoredSummaryText = computed(() => {
+  const count = healthGuardIgnoredIDs.value.length
+  if (!count) return t('admin.upstreamProviders.healthGuardIgnoredNone')
+  return t('admin.upstreamProviders.healthGuardIgnoredSummary', { count })
+})
+const healthGuardConfigSummary = computed(() => t('admin.upstreamProviders.healthGuardConfigSummary', {
+  interval: Math.max(60, Math.floor(Number(healthGuardForm.value.interval_seconds) || 0)),
+  concurrency: Math.max(1, Math.min(8, Math.floor(Number(healthGuardForm.value.concurrency) || 0))),
+  ignored: healthGuardIgnoredIDs.value.length,
+}))
+const healthGuardIgnoredAccountOptions = computed<HealthGuardIgnoredAccountOption[]>(() => {
+  const ignored = new Set(healthGuardIgnoredIDs.value)
+  return healthGuardIgnoredAccountOptionsSource.value.map((account) => {
+    const meta = `${healthGuardPlatformLabel(account.platform)} / #${account.id}`
+    return {
+      value: account.id,
+      label: account.name || `#${account.id}`,
+      meta,
+      account,
+      disabled: ignored.has(account.id),
+    }
+  })
+})
 
 function resetForm() {
   Object.assign(form, {
@@ -2022,7 +2186,21 @@ async function openHealthGuardDialog() {
 
 function closeHealthGuardDialog() {
   showHealthGuardDialog.value = false
+  showHealthGuardIgnoredDialog.value = false
   closeHealthGuardDetailDialogs()
+}
+
+async function openHealthGuardIgnoredDialog() {
+  showHealthGuardIgnoredDialog.value = true
+  await Promise.all([
+    refreshHealthGuardIgnoredAccounts(),
+    loadHealthGuardIgnoredAccountOptions(),
+  ])
+}
+
+function closeHealthGuardIgnoredDialog() {
+  showHealthGuardIgnoredDialog.value = false
+  healthGuardIgnoredAccountToAdd.value = null
 }
 
 async function submitForm() {
@@ -2301,6 +2479,120 @@ function parseHealthGuardIgnoredInput(value: string): number[] | null {
     ids.push(id)
   }
   return normalizeHealthGuardIgnoredAccountIDs(ids)
+}
+
+async function refreshHealthGuardIgnoredAccounts(ids: number[] = healthGuardIgnoredIDs.value) {
+  const uniqueIDs = normalizeHealthGuardIgnoredAccountIDs(ids)
+  if (!uniqueIDs.length) {
+    healthGuardIgnoredAccounts.value = {}
+    return
+  }
+
+  const current = healthGuardIgnoredAccounts.value
+  const next: Record<number, HealthGuardIgnoredAccountSummary> = {}
+  const missingIDs: number[] = []
+  for (const id of uniqueIDs) {
+    const cached = current[id]
+    if (cached && !cached.loading) {
+      next[id] = cached
+    } else {
+      next[id] = { id, loading: true }
+      missingIDs.push(id)
+    }
+  }
+  healthGuardIgnoredAccounts.value = next
+  if (!missingIDs.length) return
+
+  const entries = await Promise.allSettled(missingIDs.map(async (id) => {
+    const account = await adminAPI.accounts.getById(id)
+    return { id, account }
+  }))
+  const latestIDs = new Set(healthGuardIgnoredIDs.value)
+  const updated = { ...healthGuardIgnoredAccounts.value }
+  entries.forEach((entry, index) => {
+    const id = missingIDs[index]
+    if (!latestIDs.has(id)) return
+    if (entry.status === 'fulfilled') {
+      updated[id] = { id, account: entry.value.account }
+    } else {
+      updated[id] = { id, missing: true }
+    }
+  })
+  healthGuardIgnoredAccounts.value = updated
+}
+
+async function loadHealthGuardIgnoredAccountOptions() {
+  if (loadingHealthGuardIgnoredOptions.value) return
+  loadingHealthGuardIgnoredOptions.value = true
+  try {
+    const result = await adminAPI.accounts.list(1, 200, {
+      lite: 'true',
+      sort_by: 'name',
+      sort_order: 'asc',
+    })
+    const accounts = result.items || []
+    healthGuardIgnoredAccountOptionsSource.value = accounts
+    const next = { ...healthGuardIgnoredAccounts.value }
+    for (const account of accounts) {
+      if (healthGuardIgnoredIDs.value.includes(account.id)) {
+        next[account.id] = { id: account.id, account }
+      }
+    }
+    healthGuardIgnoredAccounts.value = next
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamProviders.healthGuardIgnoredLoadFailed')))
+  } finally {
+    loadingHealthGuardIgnoredOptions.value = false
+  }
+}
+
+function addHealthGuardIgnoredAccount() {
+  const id = Number(healthGuardIgnoredAccountToAdd.value)
+  if (!Number.isSafeInteger(id) || id <= 0) return
+  const ids = normalizeHealthGuardIgnoredAccountIDs([...healthGuardIgnoredIDs.value, id])
+  healthGuardIgnoredInput.value = ids.join(', ')
+  const account = healthGuardIgnoredAccountOptionsSource.value.find(item => item.id === id)
+  if (account) {
+    healthGuardIgnoredAccounts.value = {
+      ...healthGuardIgnoredAccounts.value,
+      [id]: { id, account },
+    }
+  }
+  healthGuardIgnoredAccountToAdd.value = null
+}
+
+function removeHealthGuardIgnoredAccount(id: number) {
+  const ids = healthGuardIgnoredIDs.value.filter(item => item !== id)
+  healthGuardIgnoredInput.value = ids.join(', ')
+}
+
+function healthGuardIgnoredAccountName(row: HealthGuardIgnoredAccountSummary) {
+  if (row.loading) return t('admin.upstreamProviders.healthGuardIgnoredAccountLoading')
+  if (row.account?.name) return row.account.name
+  return t('admin.upstreamProviders.healthGuardIgnoredAccountMissing')
+}
+
+function healthGuardIgnoredAccountPlatform(row: HealthGuardIgnoredAccountSummary) {
+  if (row.account?.platform) return healthGuardPlatformLabel(row.account.platform)
+  return '-'
+}
+
+function healthGuardIgnoredAccountStatusLabel(row: HealthGuardIgnoredAccountSummary) {
+  if (row.loading) return t('common.loading')
+  if (!row.account) return t('admin.upstreamProviders.healthGuardIgnoredAccountMissingStatus')
+  if (row.account.status === 'active') return t('common.active')
+  if (row.account.status === 'inactive') return t('common.inactive')
+  if (row.account.status === 'error') return t('admin.upstreamProviders.healthGuardFailed')
+  return row.account.status || '-'
+}
+
+function healthGuardIgnoredAccountStatusClass(row: HealthGuardIgnoredAccountSummary) {
+  if (row.loading) return 'record-status-muted'
+  if (!row.account) return 'record-status-error'
+  if (row.account.status === 'active') return 'record-status-success'
+  if (row.account.status === 'inactive') return 'record-status-muted'
+  if (row.account.status === 'error') return 'record-status-error'
+  return 'record-status-muted'
 }
 
 function normalizeHealthGuardAccountModels(value: unknown): Record<string, string> {
@@ -2821,6 +3113,14 @@ function testStages(result: UpstreamProviderTestResult) {
   }
   return stages
 }
+
+watch(
+  [showHealthGuardDialog, () => healthGuardIgnoredIDs.value.join(',')],
+  ([visible]) => {
+    if (!visible) return
+    void refreshHealthGuardIgnoredAccounts()
+  }
+)
 
 onMounted(reload)
 </script>
@@ -3573,6 +3873,34 @@ onMounted(reload)
   @apply flex min-h-0 min-w-0 flex-col gap-3;
 }
 
+.health-guard-config-section {
+  @apply rounded-lg border border-gray-200 bg-white dark:border-dark-600 dark:bg-dark-800/70;
+}
+
+.health-guard-section-toggle {
+  @apply flex min-h-12 w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 dark:hover:bg-dark-700/50;
+}
+
+.health-guard-section-toggle span {
+  @apply min-w-0;
+}
+
+.health-guard-section-toggle strong {
+  @apply block truncate text-sm font-semibold text-gray-950 dark:text-white;
+}
+
+.health-guard-section-toggle small {
+  @apply mt-0.5 block truncate text-xs text-gray-500 dark:text-gray-400;
+}
+
+.health-guard-section-toggle svg {
+  @apply shrink-0 transition-transform;
+}
+
+.health-guard-config-body {
+  @apply space-y-3 border-t border-gray-100 p-3 dark:border-dark-700;
+}
+
 .health-guard-config-grid {
   @apply grid gap-2 md:grid-cols-4;
 }
@@ -3597,14 +3925,104 @@ onMounted(reload)
   @apply mt-2 block text-xs text-gray-500 dark:text-gray-400;
 }
 
-.health-guard-field .health-guard-ignored-input {
-  @apply text-left;
+.health-guard-ignored-summary {
+  @apply flex min-h-12 items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 dark:border-dark-600 dark:bg-dark-900/40;
+}
+
+.health-guard-ignored-summary.is-invalid {
+  @apply border-red-200 bg-red-50 dark:border-red-500/30 dark:bg-red-500/10;
+}
+
+.health-guard-ignored-summary div {
+  @apply min-w-0;
+}
+
+.health-guard-ignored-summary strong {
+  @apply block truncate text-sm font-semibold text-gray-950 dark:text-white;
+}
+
+.health-guard-ignored-summary small {
+  @apply mt-0.5 block text-xs text-gray-500 dark:text-gray-400;
+}
+
+.health-guard-ignored-dialog {
+  @apply flex max-h-[70vh] min-h-0 flex-col gap-3 overflow-hidden;
+}
+
+.health-guard-ignored-add {
+  @apply grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto];
+}
+
+.health-guard-ignored-select {
+  @apply min-w-0;
+}
+
+.health-guard-ignored-option {
+  @apply flex min-w-0 flex-col;
+}
+
+.health-guard-ignored-option strong {
+  @apply truncate text-sm font-semibold text-gray-900 dark:text-white;
+}
+
+.health-guard-ignored-option small {
+  @apply truncate font-mono text-xs text-gray-500 dark:text-gray-400;
+}
+
+.health-guard-ignored-option.is-selected strong,
+.health-guard-ignored-option.is-selected small {
+  @apply truncate;
+}
+
+.health-guard-ignored-loading {
+  @apply rounded-md bg-gray-50 px-3 py-2 text-sm text-gray-500 dark:bg-dark-900/40 dark:text-gray-400;
+}
+
+.health-guard-ignored-list {
+  @apply grid min-h-0 gap-2 overflow-auto pr-1 sm:grid-cols-2;
+}
+
+.health-guard-ignored-account {
+  @apply grid min-h-12 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 dark:border-dark-600 dark:bg-dark-900/40;
+}
+
+.health-guard-ignored-account.is-missing {
+  @apply border-red-200 bg-red-50 dark:border-red-500/30 dark:bg-red-500/10;
+}
+
+.health-guard-ignored-account-main {
+  @apply min-w-0;
+}
+
+.health-guard-ignored-account-main strong {
+  @apply block truncate text-sm font-semibold text-gray-950 dark:text-white;
+}
+
+.health-guard-ignored-account-main code {
+  @apply mt-0.5 block text-xs text-gray-500 dark:text-gray-400;
+}
+
+.health-guard-ignored-account-meta {
+  @apply flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400;
+}
+
+.health-guard-ignored-remove {
+  @apply row-span-2 inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-dark-700 dark:hover:text-gray-200;
+}
+
+.health-guard-ignored-list-empty {
+  @apply mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300;
 }
 
 .health-guard-platform-panel,
 .health-guard-account-models-panel,
 .health-guard-record-panel {
   @apply rounded-lg border border-gray-200 bg-white p-3 dark:border-dark-600 dark:bg-dark-800/70;
+}
+
+.health-guard-config-body .health-guard-platform-panel,
+.health-guard-config-body .health-guard-account-models-panel {
+  @apply bg-gray-50/50 dark:bg-dark-900/20;
 }
 
 .health-guard-record-panel {
@@ -4458,6 +4876,25 @@ onMounted(reload)
   .health-guard-platform-row .input,
   .health-guard-platform-row .input:last-child {
     @apply w-full text-left;
+  }
+
+  .health-guard-section-toggle small,
+  .health-guard-ignored-summary strong {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .health-guard-ignored-summary {
+    @apply flex-col items-stretch;
+  }
+
+  .health-guard-ignored-add {
+    grid-template-columns: 1fr;
+  }
+
+  .health-guard-ignored-add .btn {
+    width: 100%;
   }
 
   .health-guard-platform-row {

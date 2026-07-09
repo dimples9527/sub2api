@@ -45,6 +45,10 @@ const { adminAPIMock } = vi.hoisted(() => ({
       getHealthGuardRecords: vi.fn(),
       getHealthGuardPollLogs: vi.fn(),
     },
+    accounts: {
+      list: vi.fn(),
+      getById: vi.fn(),
+    },
   },
 }))
 
@@ -56,6 +60,7 @@ vi.mock('@/api/admin/index', () => ({
   adminAPI: {
     upstreamProviders: adminAPIMock.upstreamProviders,
     upstreamAccountSync: adminAPIMock.upstreamAccountSync,
+    accounts: adminAPIMock.accounts,
   },
 }))
 
@@ -73,6 +78,23 @@ vi.mock('@/components/admin/upstream/UpstreamBalanceCharts.vue', () => ({
     template: '<div data-test="balance-charts">{{ days }}-{{ Boolean(overview) }}-{{ loading }}</div>',
   },
 }))
+
+const SelectStub = {
+  props: ['modelValue', 'options', 'placeholder'],
+  emits: ['update:modelValue', 'change'],
+  template: `
+    <select
+      data-test="select-stub"
+      :value="modelValue ?? ''"
+      @change="$emit('update:modelValue', $event.target.value ? Number($event.target.value) : null)"
+    >
+      <option value="">{{ placeholder }}</option>
+      <option v-for="option in options" :key="option.value" :value="option.value" :disabled="option.disabled">
+        {{ option.label }} {{ option.meta }}
+      </option>
+    </select>
+  `,
+}
 
 describe('UpstreamProvidersView', () => {
   beforeEach(() => {
@@ -172,6 +194,21 @@ describe('UpstreamProvidersView', () => {
     })
     adminAPIMock.upstreamAccountSync.getHealthGuardRecords.mockResolvedValue([])
     adminAPIMock.upstreamAccountSync.getHealthGuardPollLogs.mockResolvedValue([])
+    adminAPIMock.accounts.list.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 200,
+      pages: 1,
+    })
+    adminAPIMock.accounts.getById.mockImplementation(async (id: number) => ({
+      id,
+      name: `account-${id}`,
+      platform: 'openai',
+      type: 'apikey',
+      status: 'active',
+      schedulable: true,
+    }))
   })
 
   it('accepts 0.1 as an account rate conversion factor', async () => {
@@ -862,8 +899,61 @@ describe('UpstreamProvidersView', () => {
       slow_threshold: 2,
       recovery_threshold: 2,
       healthy_latency_ms: 12000,
+      ignored_account_ids: [7, 9],
       platform_models: { anthropic: 'claude-3-5-haiku-latest' },
       platform_latency_ms: { anthropic: 16000 },
+    })
+    adminAPIMock.accounts.list.mockResolvedValueOnce({
+      items: [
+        {
+          id: 7,
+          name: 'unstable-account',
+          platform: 'openai',
+          type: 'apikey',
+          status: 'error',
+          schedulable: false,
+        },
+        {
+          id: 9,
+          name: 'orphan-account',
+          platform: 'openai',
+          type: 'apikey',
+          status: 'inactive',
+          schedulable: false,
+        },
+        {
+          id: 11,
+          name: 'manual-ignore',
+          platform: 'anthropic',
+          type: 'oauth',
+          status: 'active',
+          schedulable: true,
+        },
+      ],
+      total: 3,
+      page: 1,
+      page_size: 200,
+      pages: 1,
+    })
+    adminAPIMock.accounts.getById.mockImplementation(async (id: number) => {
+      if (id === 7) {
+        return {
+          id,
+          name: 'unstable-account',
+          platform: 'openai',
+          type: 'apikey',
+          status: 'error',
+          schedulable: false,
+        }
+      }
+      return {
+        id,
+        name: 'orphan-account',
+        platform: 'openai',
+        type: 'apikey',
+        status: 'inactive',
+        schedulable: false,
+      }
     })
     adminAPIMock.upstreamAccountSync.getHealthGuardRecords.mockResolvedValueOnce([
       {
@@ -928,6 +1018,7 @@ describe('UpstreamProvidersView', () => {
       slow_threshold: 2,
       recovery_threshold: 2,
       healthy_latency_ms: 12000,
+      ignored_account_ids: [9, 11],
       platform_models: { anthropic: 'claude-3-5-haiku-latest' },
       platform_latency_ms: { anthropic: 16000 },
     })
@@ -945,6 +1036,7 @@ describe('UpstreamProvidersView', () => {
           ConfirmDialog: true,
           EmptyState: true,
           Icon: true,
+          Select: SelectStub,
         },
       },
     })
@@ -963,9 +1055,15 @@ describe('UpstreamProvidersView', () => {
     expect(dialog.exists()).toBe(true)
     expect(dialog.text()).toContain('admin.upstreamProviders.healthGuardAutoRun')
     expect(dialog.text()).toContain('Anthropic')
+    expect(dialog.text()).toContain('admin.upstreamProviders.healthGuardIgnoredSummary')
     expect(dialog.text()).toContain('admin.upstreamProviders.healthGuardAdjustmentLogs')
     expect(dialog.text()).toContain('admin.upstreamProviders.healthGuardSkipReasons')
     expect(dialog.text()).toContain('admin.upstreamProviders.healthGuardResultList')
+
+    const configToggle = wrapper.find('[data-test="health-guard-config-toggle"]')
+    expect(configToggle.exists()).toBe(true)
+    await configToggle.trigger('click')
+    await flushPromises()
 
     const adjustmentButton = wrapper
       .findAll('button')
@@ -989,6 +1087,23 @@ describe('UpstreamProvidersView', () => {
     await autoRun.setValue(false)
     const interval = dialog.findAll('input[type="number"]')[0]
     await interval.setValue('2400')
+    await wrapper.find('[data-test="health-guard-ignored-manage"]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+    expect(adminAPIMock.accounts.list).toHaveBeenCalledWith(1, 200, {
+      lite: 'true',
+      sort_by: 'name',
+      sort_order: 'asc',
+    })
+    expect(wrapper.text()).toContain('unstable-account')
+    expect(wrapper.text()).toContain('orphan-account')
+    expect(wrapper.text()).toContain('manual-ignore')
+    await wrapper.find('.health-guard-ignored-select').setValue('11')
+    await flushPromises()
+    await wrapper.find('[data-test="health-guard-ignored-add"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-test="health-guard-ignored-remove-7"]').trigger('click')
+    await flushPromises()
 
     const saveButton = wrapper
       .findAll('button')
@@ -1002,6 +1117,7 @@ describe('UpstreamProvidersView', () => {
       expect.objectContaining({
         enabled: false,
         interval_seconds: 2400,
+        ignored_account_ids: [9, 11],
         platform_models: { anthropic: 'claude-3-5-haiku-latest' },
         platform_latency_ms: { anthropic: 16000 },
       })
