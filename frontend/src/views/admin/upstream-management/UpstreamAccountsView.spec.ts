@@ -47,7 +47,11 @@ vi.mock('vue-i18n', async (importOriginal) => {
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => key,
+      t: (key: string, params?: any) => {
+        if (key === 'admin.upstreamAccounts.rateGuardIgnoredAccountId') return `ID ${params?.id ?? ''}`.trim()
+        if (key === 'admin.upstreamAccounts.rateGuardUnknownAccount') return `Unknown account ${params?.id ?? ''}`.trim()
+        return key
+      },
     }),
   }
 })
@@ -744,6 +748,102 @@ describe('UpstreamAccountsView', () => {
     await enabledQuickTag?.trigger('click')
 
     expect(wrapper.findAll('.account-row').map(row => row.text())).toEqual(['key-enabled'])
+  })
+
+  it('filters ignored rate guard accounts from quick tags and labels ignored accounts', async () => {
+    upstreamAccountSyncMock.getRateGuardConfig.mockResolvedValueOnce({
+      enabled: false,
+      interval_seconds: 3600,
+      ignored_account_ids: [12],
+    })
+    upstreamAccountSyncMock.getPreview.mockResolvedValueOnce({
+      default_provider: {},
+      providers: [{ slug: 'upstream-a', name: 'Upstream A', enabled: true }],
+      summary: {
+        upstream_key_count: 2,
+        matched_account_count: 2,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'noop',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-a',
+          local_account_name: 'local-a',
+          matched_account_id: 12,
+          matched_account_name: 'local-a',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 1,
+          rate_violation: false,
+          rate_guard_ignored: true,
+        },
+        {
+          action: 'noop',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-b',
+          local_account_name: 'local-b',
+          matched_account_id: 13,
+          matched_account_name: 'local-b',
+          upstream_group_name: 'trial',
+          upstream_rate_multiplier: 1,
+          rate_violation: false,
+          rate_guard_ignored: false,
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+    accountsMock.getById.mockImplementation(async (id: number) => ({
+      id,
+      name: id === 12 ? 'local-a' : 'local-b',
+      platform: 'openai',
+      type: 'apikey',
+      status: 'active',
+      group_ids: [],
+      groups: [],
+    }))
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name=filters /><slot name=table /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props) {
+              return () => h('div', { class: 'account-rows' }, props.data.map((row: any) => h('div', { class: 'account-row' }, row.upstream_key_name)))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+          GroupSelector: true,
+          UpstreamBalanceCharts: { template: '<div data-test=balance-charts />' },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const chips = wrapper.find('[data-test="rate-guard-ignored-account-chips"]')
+    expect(chips.exists()).toBe(true)
+    expect(chips.text()).toContain('local-a')
+    expect(chips.text()).toContain('ID 12')
+    expect(wrapper.findAll('.account-row').map(row => row.text())).toEqual(['key-a', 'key-b'])
+
+    const ignoredQuickTag = wrapper.findAll('.quick-tag').find(button => button.text().includes('admin.upstreamAccounts.quickFilterIgnoredAccounts'))
+    expect(ignoredQuickTag?.text()).toContain('1')
+    await ignoredQuickTag?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.findAll('.account-row').map(row => row.text())).toEqual(['key-a'])
   })
 
   it('marks provider fetch fallback rows as local snapshots', async () => {

@@ -130,15 +130,31 @@
                 class="ui-input interval-input"
               />
               <span class="guard-hint">{{ rateGuardDailyRunsText }}</span>
-              <label class="guard-ignore-control">
-                <span class="control-label">{{ t('admin.upstreamAccounts.rateGuardIgnoredAccounts') }}</span>
+              <div class="guard-ignore-control">
+                <label class="control-label" for="rate-guard-ignored-accounts-input">{{ t('admin.upstreamAccounts.rateGuardIgnoredAccounts') }}</label>
                 <input
+                  id="rate-guard-ignored-accounts-input"
                   v-model.trim="rateGuardIgnoredInput"
                   type="text"
                   class="ui-input ignored-accounts-input"
                   :placeholder="t('admin.upstreamAccounts.rateGuardIgnoredAccountsPlaceholder')"
                 />
-              </label>
+                <div
+                  v-if="rateGuardIgnoredAccountDetails.length"
+                  class="ignored-account-chips"
+                  data-test="rate-guard-ignored-account-chips"
+                >
+                  <span
+                    v-for="account in rateGuardIgnoredAccountDetails"
+                    :key="account.id"
+                    class="ignored-account-chip"
+                    :title="account.title"
+                  >
+                    <span class="ignored-account-chip-name">{{ account.name }}</span>
+                    <small>{{ account.meta }}</small>
+                  </span>
+                </div>
+              </div>
               <button
                 type="button"
                 class="ui-button"
@@ -1558,7 +1574,13 @@ type BatchTestPlatformOption = {
 }
 type BatchTestSortKey = 'account' | 'platform' | 'upstream_rate' | 'schedulable' | 'status' | 'latency' | 'finished_at'
 type BatchTestResultFilter = 'all' | 'failed' | 'failed_schedulable' | 'failed_unschedulable' | 'success' | 'success_unschedulable' | 'success_upstream_disabled' | 'skipped'
-type QuickFilterKey = 'all' | 'update' | 'risk' | 'unbound' | 'failed' | 'enabled' | 'disabled'
+type QuickFilterKey = 'all' | 'update' | 'risk' | 'ignored' | 'unbound' | 'failed' | 'enabled' | 'disabled'
+type RateGuardIgnoredAccountDetail = {
+  id: number
+  name: string
+  meta: string
+  title: string
+}
 type StatCardKey = 'total' | 'create' | 'update' | 'risk'
 type SortOrder = 'asc' | 'desc'
 
@@ -1812,6 +1834,31 @@ const rateGuardDailyRunsText = computed(() => {
 })
 const rateGuardIgnoredAccountIDs = computed(() => normalizeRateGuardIgnoredAccountIDs(rateGuardForm.value.ignored_account_ids))
 const rateGuardIgnoredCount = computed(() => rateGuardIgnoredAccountIDs.value.length)
+const rateGuardIgnoredAccountDetails = computed<RateGuardIgnoredAccountDetail[]>(() => {
+  const itemByAccountID = new Map<number, UpstreamAccountSyncItem>()
+  for (const item of items.value) {
+    const accountID = Number(item.matched_account_id)
+    if (Number.isSafeInteger(accountID) && accountID > 0 && !itemByAccountID.has(accountID)) {
+      itemByAccountID.set(accountID, item)
+    }
+  }
+  return rateGuardIgnoredAccountIDs.value.map((id) => {
+    const account = matchedAccountsById.value[id]
+    const item = itemByAccountID.get(id)
+    const name = account?.name || item?.matched_account_name || item?.local_account_name || t('admin.upstreamAccounts.rateGuardUnknownAccount', { id })
+    const platform = account?.platform || (item ? matchedAccountPlatform(item) : '')
+    const metaParts = [
+      platform,
+      t('admin.upstreamAccounts.rateGuardIgnoredAccountId', { id })
+    ].filter(Boolean)
+    return {
+      id,
+      name,
+      meta: metaParts.join(' · '),
+      title: `${name} · ${metaParts.join(' · ')}`
+    }
+  })
+})
 const providerOptions = computed<SelectOption[]>(() => [
   { value: '', label: t('admin.upstreamAccounts.allProviders') },
   ...Array.from(new Map(items.value.map(item => [
@@ -1889,6 +1936,12 @@ const quickFilterOptions = computed(() => {
       label: t('admin.upstreamAccounts.quickFilterRateRisk'),
       count: source.filter(item => item.rate_violation).length,
       tone: 'danger' as const
+    },
+    {
+      key: 'ignored' as const,
+      label: t('admin.upstreamAccounts.quickFilterIgnoredAccounts'),
+      count: source.filter(isRateGuardIgnored).length,
+      tone: 'muted' as const
     },
     {
       key: 'unbound' as const,
@@ -2131,6 +2184,7 @@ async function reload() {
     result.value = preview
     await syncMatchedAccounts(preview.items || [])
     applyRateGuardConfig(config)
+    await syncRateGuardIgnoredAccounts(config.ignored_account_ids || [])
     balanceOverview.value = balance
     void loadLocalGroups()
   } catch (err) {
@@ -2225,6 +2279,7 @@ async function saveRateGuardConfig() {
     })
     applyRateGuardConfig(config)
     await refreshPreview()
+    await syncRateGuardIgnoredAccounts(ignoredAccountIDs)
     appStore.showSuccess(t('admin.upstreamAccounts.rateGuardSaved'))
   } catch (err) {
     appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.rateGuardSaveFailed')))
@@ -2264,6 +2319,7 @@ async function toggleRateGuardIgnored(row: UpstreamAccountSyncItem) {
     })
     applyRateGuardConfig(config)
     await refreshPreview()
+    await syncRateGuardIgnoredAccounts(nextIgnoredAccountIDs)
     appStore.showSuccess(t('admin.upstreamAccounts.rateGuardSaved'))
   } catch (err) {
     appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.rateGuardSaveFailed')))
@@ -2279,6 +2335,7 @@ async function runRateGuardNow() {
     const config = await adminAPI.upstreamAccountSync.runRateGuardNow()
     applyRateGuardConfig(config)
     const preview = await refreshPreview()
+    await syncRateGuardIgnoredAccounts(config.ignored_account_ids || [])
     const remainingRisks = preview.summary?.rate_violation_count || 0
     if (remainingRisks > 0) {
       appStore.showWarning(t('admin.upstreamAccounts.rateGuardRunCompletedWithRisks', { count: remainingRisks }))
@@ -2522,6 +2579,27 @@ async function syncMatchedAccounts(syncItems: UpstreamAccountSyncItem[]) {
   accountTestStatusById.value = nextTestStatusMap
 }
 
+async function syncRateGuardIgnoredAccounts(accountIDs: unknown) {
+  const ignoredIDs = normalizeRateGuardIgnoredAccountIDs(accountIDs)
+  const missingIDs = ignoredIDs.filter(accountID => !matchedAccountsById.value[accountID])
+  if (!missingIDs.length) return
+
+  const entries = await Promise.allSettled(
+    missingIDs.map(async (accountID) => {
+      const account = await adminAPI.accounts.getById(accountID)
+      return [accountID, account] as const
+    })
+  )
+
+  const nextMap = { ...matchedAccountsById.value }
+  for (const entry of entries) {
+    if (entry.status !== 'fulfilled') continue
+    const [accountID, account] = entry.value
+    nextMap[accountID] = account
+  }
+  matchedAccountsById.value = nextMap
+}
+
 async function ensureMatchedAccount(row: UpstreamAccountSyncItem) {
   const accountId = Number(row.matched_account_id)
   if (!Number.isFinite(accountId) || accountId <= 0) return null
@@ -2578,6 +2656,7 @@ function upstreamAccountTestFailed(row: UpstreamAccountSyncItem) {
 function upstreamAccountMatchesQuickFilter(row: UpstreamAccountSyncItem, filter: QuickFilterKey) {
   if (filter === 'update') return row.action === 'update'
   if (filter === 'risk') return row.rate_violation
+  if (filter === 'ignored') return isRateGuardIgnored(row)
   if (filter === 'unbound') return upstreamAccountHasNoGroups(row)
   if (filter === 'failed') return upstreamAccountTestFailed(row)
   if (filter === 'enabled') return isProviderEnabled(row)
@@ -4039,6 +4118,7 @@ onBeforeUnmount(() => {
 .guard-ignore-control {
   display: inline-flex;
   min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
@@ -4076,7 +4156,43 @@ onBeforeUnmount(() => {
 }
 
 .ignored-accounts-input {
-  width: 180px;
+  width: min(320px, 100%);
+}
+
+.ignored-account-chips {
+  display: flex;
+  max-width: 460px;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ignored-account-chip {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 220px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #eff6ff;
+  padding: 5px 8px;
+  color: #1e40af;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.ignored-account-chip-name {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ignored-account-chip small {
+  flex: 0 0 auto;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .filter-row {
