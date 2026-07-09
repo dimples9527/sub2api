@@ -900,6 +900,7 @@ describe('UpstreamProvidersView', () => {
       recovery_threshold: 2,
       healthy_latency_ms: 12000,
       ignored_account_ids: [7, 9],
+      account_models: {},
       platform_models: { anthropic: 'claude-3-5-haiku-latest' },
       platform_latency_ms: { anthropic: 16000 },
     })
@@ -1019,6 +1020,7 @@ describe('UpstreamProvidersView', () => {
       recovery_threshold: 2,
       healthy_latency_ms: 12000,
       ignored_account_ids: [9, 11],
+      account_models: { '11': 'claude-opus-test' },
       platform_models: { anthropic: 'claude-3-5-haiku-latest' },
       platform_latency_ms: { anthropic: 16000 },
     })
@@ -1087,6 +1089,11 @@ describe('UpstreamProvidersView', () => {
     await autoRun.setValue(false)
     const interval = dialog.findAll('input[type="number"]')[0]
     await interval.setValue('2400')
+    await wrapper.find('.health-guard-account-model-select').setValue('11')
+    await wrapper.find('.health-guard-account-model-input').setValue('claude-opus-test')
+    await wrapper.find('[data-test="health-guard-account-model-add"]').trigger('click')
+    await flushPromises()
+
     await wrapper.find('[data-test="health-guard-ignored-manage"]').trigger('click')
     await flushPromises()
     await flushPromises()
@@ -1118,6 +1125,7 @@ describe('UpstreamProvidersView', () => {
         enabled: false,
         interval_seconds: 2400,
         ignored_account_ids: [9, 11],
+        account_models: { '11': 'claude-opus-test' },
         platform_models: { anthropic: 'claude-3-5-haiku-latest' },
         platform_latency_ms: { anthropic: 16000 },
       })

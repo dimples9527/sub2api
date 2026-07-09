@@ -50,6 +50,7 @@ vi.mock('vue-i18n', async (importOriginal) => {
       t: (key: string, params?: any) => {
         if (key === 'admin.upstreamAccounts.rateGuardIgnoredAccountId') return `ID ${params?.id ?? ''}`.trim()
         if (key === 'admin.upstreamAccounts.rateGuardUnknownAccount') return `Unknown account ${params?.id ?? ''}`.trim()
+        if (key === 'admin.upstreamAccounts.rateGuardIgnoredSummary') return `${params?.count ?? 0} ignored`
         return key
       },
     }),
@@ -830,6 +831,14 @@ describe('UpstreamAccountsView', () => {
       },
     })
 
+    await flushPromises()
+
+    const manageButton = wrapper.find('[data-test="rate-guard-ignored-manage"]')
+    expect(manageButton.exists()).toBe(true)
+    expect(manageButton.text()).toContain('1')
+    expect(wrapper.find('[data-test="rate-guard-ignored-account-chips"]').exists()).toBe(false)
+
+    await manageButton.trigger('click')
     await flushPromises()
 
     const chips = wrapper.find('[data-test="rate-guard-ignored-account-chips"]')

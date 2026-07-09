@@ -131,29 +131,27 @@
               />
               <span class="guard-hint">{{ rateGuardDailyRunsText }}</span>
               <div class="guard-ignore-control">
-                <label class="control-label" for="rate-guard-ignored-accounts-input">{{ t('admin.upstreamAccounts.rateGuardIgnoredAccounts') }}</label>
-                <input
-                  id="rate-guard-ignored-accounts-input"
-                  v-model.trim="rateGuardIgnoredInput"
-                  type="text"
-                  class="ui-input ignored-accounts-input"
-                  :placeholder="t('admin.upstreamAccounts.rateGuardIgnoredAccountsPlaceholder')"
-                />
-                <div
-                  v-if="rateGuardIgnoredAccountDetails.length"
-                  class="ignored-account-chips"
-                  data-test="rate-guard-ignored-account-chips"
+                <span class="control-label">{{ t('admin.upstreamAccounts.rateGuardIgnoredAccounts') }}</span>
+                <button
+                  type="button"
+                  class="guard-ignore-summary"
+                  :class="{ 'is-empty': !rateGuardIgnoredCount, 'is-invalid': rateGuardIgnoredInputInvalid }"
+                  :disabled="loadingRateGuardConfig || savingRateGuardConfig"
+                  data-test="rate-guard-ignored-manage"
+                  @click="openRateGuardIgnoredDialog"
                 >
-                  <span
-                    v-for="account in rateGuardIgnoredAccountDetails"
-                    :key="account.id"
-                    class="ignored-account-chip"
-                    :title="account.title"
-                  >
-                    <span class="ignored-account-chip-name">{{ account.name }}</span>
-                    <small>{{ account.meta }}</small>
-                  </span>
-                </div>
+                  <Icon name="shield" size="xs" :stroke-width="2" />
+                  <span>{{ rateGuardIgnoredSummaryText }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="ui-button ui-button-xs"
+                  :disabled="loadingRateGuardConfig || savingRateGuardConfig"
+                  data-test="rate-guard-ignored-manage-button"
+                  @click="openRateGuardIgnoredDialog"
+                >
+                  {{ t('admin.upstreamAccounts.rateGuardIgnoredManage') }}
+                </button>
               </div>
               <button
                 type="button"
@@ -674,6 +672,90 @@
             <div class="stat-details-footer">
               <button type="button" class="ui-button ui-button-primary" @click="closeStatDetailsDialog">
                 {{ t('common.close') }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div
+          v-if="showRateGuardIgnoredDialog"
+          class="rate-guard-ignored-dialog fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6"
+          data-test="rate-guard-ignored-dialog"
+          @click.self="closeRateGuardIgnoredDialog"
+        >
+          <div class="sync-result-modal rate-guard-ignored-modal">
+            <div class="sync-confirm-header">
+              <div>
+                <h3>{{ t('admin.upstreamAccounts.rateGuardIgnoredManageTitle') }}</h3>
+                <p>{{ t('admin.upstreamAccounts.rateGuardIgnoredManageDescription') }}</p>
+              </div>
+              <button type="button" class="modal-close-button" :aria-label="t('common.close')" @click="closeRateGuardIgnoredDialog">
+                <Icon name="x" size="md" :stroke-width="2" />
+              </button>
+            </div>
+
+            <div class="rate-guard-ignored-body">
+              <label class="rate-guard-ignored-input-row" for="rate-guard-ignored-accounts-input">
+                <span class="control-label">{{ t('admin.upstreamAccounts.rateGuardIgnoredAccounts') }}</span>
+                <input
+                  id="rate-guard-ignored-accounts-input"
+                  v-model.trim="rateGuardIgnoredInput"
+                  type="text"
+                  class="ui-input ignored-accounts-input"
+                  :placeholder="t('admin.upstreamAccounts.rateGuardIgnoredAccountsPlaceholder')"
+                  data-test="rate-guard-ignored-input"
+                />
+              </label>
+              <p v-if="rateGuardIgnoredInputInvalid" class="rate-guard-ignored-error">
+                {{ t('admin.upstreamAccounts.invalidRateGuardIgnoredAccounts') }}
+              </p>
+              <div class="rate-guard-ignored-summary-row">
+                <span class="guard-ignore-summary" :class="{ 'is-empty': !rateGuardIgnoredDialogCount, 'is-invalid': rateGuardIgnoredInputInvalid }">
+                  <Icon name="shield" size="xs" :stroke-width="2" />
+                  <span>{{ rateGuardIgnoredDialogSummaryText }}</span>
+                </span>
+              </div>
+              <div
+                v-if="rateGuardIgnoredAccountDetails.length"
+                class="ignored-account-chips ignored-account-dialog-chips"
+                data-test="rate-guard-ignored-account-chips"
+              >
+                <span
+                  v-for="account in rateGuardIgnoredAccountDetails"
+                  :key="account.id"
+                  class="ignored-account-chip"
+                  :title="account.title"
+                >
+                  <span class="ignored-account-chip-name">{{ account.name }}</span>
+                  <small>{{ account.meta }}</small>
+                  <button
+                    type="button"
+                    class="ignored-account-remove"
+                    :aria-label="t('admin.upstreamAccounts.rateGuardIgnoredRemoveAccount', { id: account.id })"
+                    :data-test="`rate-guard-ignored-remove-${account.id}`"
+                    @click="removeRateGuardIgnoredAccount(account.id)"
+                  >
+                    <Icon name="x" size="xs" :stroke-width="2" />
+                  </button>
+                </span>
+              </div>
+              <div v-else class="rate-guard-ignored-empty">
+                {{ t('admin.upstreamAccounts.rateGuardIgnoredNone') }}
+              </div>
+            </div>
+
+            <div class="sync-confirm-footer">
+              <button type="button" class="ui-button" :disabled="savingRateGuardConfig" @click="closeRateGuardIgnoredDialog">
+                {{ t('common.cancel') }}
+              </button>
+              <button
+                type="button"
+                class="ui-button ui-button-primary"
+                :disabled="loadingRateGuardConfig || savingRateGuardConfig || rateGuardIgnoredInputInvalid"
+                data-test="rate-guard-ignored-save"
+                @click="saveRateGuardConfigAndCloseIgnoredDialog"
+              >
+                {{ t('common.save') }}
               </button>
             </div>
           </div>
@@ -1628,6 +1710,7 @@ const activeQuickFilter = ref<QuickFilterKey>('all')
 const showAdvancedFilters = ref(false)
 const showMobileBackToFilters = ref(false)
 const activeStatDetailsKey = ref<StatCardKey | null>(null)
+const showRateGuardIgnoredDialog = ref(false)
 const rateGuardConfig = ref<UpstreamAccountRateGuardConfig | null>(null)
 const rateGuardForm = ref({
   enabled: false,
@@ -1834,6 +1917,22 @@ const rateGuardDailyRunsText = computed(() => {
 })
 const rateGuardIgnoredAccountIDs = computed(() => normalizeRateGuardIgnoredAccountIDs(rateGuardForm.value.ignored_account_ids))
 const rateGuardIgnoredCount = computed(() => rateGuardIgnoredAccountIDs.value.length)
+const rateGuardIgnoredInputIDs = computed(() => parseRateGuardIgnoredInput(rateGuardIgnoredInput.value))
+const rateGuardIgnoredInputInvalid = computed(() => Boolean(rateGuardIgnoredInput.value.trim()) && rateGuardIgnoredInputIDs.value === null)
+const rateGuardIgnoredDialogIDs = computed(() => rateGuardIgnoredInputIDs.value ?? rateGuardIgnoredAccountIDs.value)
+const rateGuardIgnoredDialogCount = computed(() => rateGuardIgnoredDialogIDs.value.length)
+const rateGuardIgnoredSummaryText = computed(() => {
+  const count = rateGuardIgnoredCount.value
+  return count > 0
+    ? t('admin.upstreamAccounts.rateGuardIgnoredSummary', { count })
+    : t('admin.upstreamAccounts.rateGuardIgnoredNone')
+})
+const rateGuardIgnoredDialogSummaryText = computed(() => {
+  const count = rateGuardIgnoredDialogCount.value
+  return count > 0
+    ? t('admin.upstreamAccounts.rateGuardIgnoredSummary', { count })
+    : t('admin.upstreamAccounts.rateGuardIgnoredNone')
+})
 const rateGuardIgnoredAccountDetails = computed<RateGuardIgnoredAccountDetail[]>(() => {
   const itemByAccountID = new Map<number, UpstreamAccountSyncItem>()
   for (const item of items.value) {
@@ -1842,7 +1941,7 @@ const rateGuardIgnoredAccountDetails = computed<RateGuardIgnoredAccountDetail[]>
       itemByAccountID.set(accountID, item)
     }
   }
-  return rateGuardIgnoredAccountIDs.value.map((id) => {
+  return rateGuardIgnoredDialogIDs.value.map((id) => {
     const account = matchedAccountsById.value[id]
     const item = itemByAccountID.get(id)
     const name = account?.name || item?.matched_account_name || item?.local_account_name || t('admin.upstreamAccounts.rateGuardUnknownAccount', { id })
@@ -2254,15 +2353,39 @@ function applyRateGuardConfig(config: UpstreamAccountRateGuardConfig) {
   rateGuardIgnoredInput.value = ignoredAccountIDs.join(', ')
 }
 
+function openRateGuardIgnoredDialog() {
+  showRateGuardIgnoredDialog.value = true
+  const ids = rateGuardIgnoredInputIDs.value ?? rateGuardIgnoredAccountIDs.value
+  void syncRateGuardIgnoredAccounts(ids)
+}
+
+function closeRateGuardIgnoredDialog() {
+  if (savingRateGuardConfig.value) return
+  showRateGuardIgnoredDialog.value = false
+  rateGuardIgnoredInput.value = rateGuardIgnoredAccountIDs.value.join(', ')
+}
+
+function removeRateGuardIgnoredAccount(id: number) {
+  const ids = rateGuardIgnoredInputIDs.value ?? rateGuardIgnoredAccountIDs.value
+  rateGuardIgnoredInput.value = ids.filter(accountID => accountID !== id).join(', ')
+}
+
+async function saveRateGuardConfigAndCloseIgnoredDialog() {
+  const saved = await saveRateGuardConfig()
+  if (saved) {
+    showRateGuardIgnoredDialog.value = false
+  }
+}
+
 async function saveRateGuardConfig() {
   if (!Number.isInteger(rateGuardForm.value.interval_seconds) || rateGuardForm.value.interval_seconds <= 0) {
     appStore.showError(t('admin.upstreamAccounts.invalidRateGuardInterval'))
-    return
+    return false
   }
   const ignoredAccountIDs = parseRateGuardIgnoredInput(rateGuardIgnoredInput.value)
   if (!ignoredAccountIDs) {
     appStore.showError(t('admin.upstreamAccounts.invalidRateGuardIgnoredAccounts'))
-    return
+    return false
   }
   savingRateGuardConfig.value = true
   try {
@@ -2281,8 +2404,10 @@ async function saveRateGuardConfig() {
     await refreshPreview()
     await syncRateGuardIgnoredAccounts(ignoredAccountIDs)
     appStore.showSuccess(t('admin.upstreamAccounts.rateGuardSaved'))
+    return true
   } catch (err) {
     appStore.showError(extractApiErrorMessage(err, t('admin.upstreamAccounts.rateGuardSaveFailed')))
+    return false
   } finally {
     savingRateGuardConfig.value = false
   }
@@ -4123,6 +4248,58 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 
+.guard-ignore-summary {
+  display: inline-flex;
+  min-height: 28px;
+  max-width: 260px;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #c7d2fe;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #4338ca;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+}
+
+button.guard-ignore-summary {
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease;
+}
+
+button.guard-ignore-summary:hover {
+  border-color: #a5b4fc;
+  background: #e0e7ff;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.08);
+}
+
+button.guard-ignore-summary:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.guard-ignore-summary span {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guard-ignore-summary.is-empty {
+  border-color: #e5e7eb;
+  background: #f8fafc;
+  color: #64748b;
+}
+
+.guard-ignore-summary.is-invalid {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
 .control-label {
   color: #475569;
   font-size: 13px;
@@ -4193,6 +4370,79 @@ onBeforeUnmount(() => {
   color: #64748b;
   font-size: 11px;
   font-weight: 600;
+}
+
+.ignored-account-remove {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(30, 64, 175, 0.08);
+  color: #1e40af;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.ignored-account-remove:hover {
+  background: rgba(185, 28, 28, 0.12);
+  color: #b91c1c;
+}
+
+.rate-guard-ignored-dialog {
+  overflow-y: auto;
+}
+
+.rate-guard-ignored-modal {
+  width: min(680px, 100%);
+}
+
+.rate-guard-ignored-body {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.rate-guard-ignored-input-row {
+  display: grid;
+  gap: 7px;
+}
+
+.rate-guard-ignored-body .ignored-accounts-input {
+  width: 100%;
+}
+
+.rate-guard-ignored-error {
+  margin: 0;
+  border-radius: 6px;
+  background: #fef2f2;
+  padding: 8px 10px;
+  color: #b91c1c;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.rate-guard-ignored-summary-row {
+  display: flex;
+}
+
+.ignored-account-dialog-chips {
+  max-width: none;
+  gap: 8px;
+}
+
+.rate-guard-ignored-empty {
+  display: grid;
+  min-height: 92px;
+  place-items: center;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 650;
 }
 
 .filter-row {

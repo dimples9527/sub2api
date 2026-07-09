@@ -666,12 +666,81 @@
 
                 <div class="health-guard-account-models-panel">
                   <div class="balance-section-title">{{ t('admin.upstreamProviders.healthGuardAccountModels') }}</div>
-                  <textarea
-                    v-model.trim="healthGuardAccountModelsInput"
-                    class="input health-guard-account-models-input"
-                    rows="3"
-                    :placeholder="t('admin.upstreamProviders.healthGuardAccountModelsPlaceholder')"
-                  ></textarea>
+                  <div class="health-guard-account-models-add">
+                    <Select
+                      v-model="healthGuardAccountModelAccountToAdd"
+                      :options="healthGuardAccountModelOptions"
+                      searchable
+                      clearable
+                      class="health-guard-account-model-select"
+                      :placeholder="t('admin.upstreamProviders.healthGuardAccountModelSelectPlaceholder')"
+                      :empty-text="t('admin.upstreamProviders.healthGuardIgnoredNoOptions')"
+                    >
+                      <template #option="{ option }">
+                        <span class="health-guard-ignored-option">
+                          <strong>{{ option.label }}</strong>
+                          <small>{{ option.meta }}</small>
+                        </span>
+                      </template>
+                      <template #selected="{ option }">
+                        <span v-if="option" class="health-guard-ignored-option is-selected">
+                          <strong>{{ option.label }}</strong>
+                          <small>{{ option.meta }}</small>
+                        </span>
+                        <span v-else>{{ t('admin.upstreamProviders.healthGuardAccountModelSelectPlaceholder') }}</span>
+                      </template>
+                    </Select>
+                    <input
+                      v-model.trim="healthGuardAccountModelDraft"
+                      type="text"
+                      class="input health-guard-account-model-input"
+                      :placeholder="t('admin.upstreamProviders.healthGuardAccountModelInputPlaceholder')"
+                      @keydown.enter.prevent="addHealthGuardAccountModel"
+                    />
+                    <button
+                      type="button"
+                      class="btn btn-primary"
+                      :disabled="!healthGuardAccountModelAccountToAdd || !healthGuardAccountModelDraft.trim()"
+                      data-test="health-guard-account-model-add"
+                      @click="addHealthGuardAccountModel"
+                    >
+                      <Icon name="plus" size="xs" />
+                      <span>{{ t('admin.upstreamProviders.healthGuardAccountModelAdd') }}</span>
+                    </button>
+                  </div>
+                  <div v-if="healthGuardAccountModelRows.length" class="health-guard-account-model-list">
+                    <article
+                      v-for="row in healthGuardAccountModelRows"
+                      :key="row.id"
+                      class="health-guard-account-model-row"
+                      :class="{ 'is-missing': row.missing }"
+                    >
+                      <div class="health-guard-account-model-account">
+                        <strong>{{ healthGuardAccountModelName(row) }}</strong>
+                        <small>{{ healthGuardAccountModelMeta(row) }}</small>
+                      </div>
+                      <input
+                        :value="row.model"
+                        type="text"
+                        class="input health-guard-account-model-row-input"
+                        :placeholder="t('admin.upstreamProviders.healthGuardAccountModelInputPlaceholder')"
+                        @input="updateHealthGuardAccountModel(row.id, ($event.target as HTMLInputElement).value)"
+                      />
+                      <button
+                        type="button"
+                        class="health-guard-account-model-remove"
+                        :title="t('common.delete')"
+                        :aria-label="t('admin.upstreamProviders.healthGuardAccountModelRemove', { id: row.id })"
+                        :data-test="`health-guard-account-model-remove-${row.id}`"
+                        @click="removeHealthGuardAccountModel(row.id)"
+                      >
+                        <Icon name="x" size="xs" />
+                      </button>
+                    </article>
+                  </div>
+                  <div v-else class="health-guard-empty health-guard-account-model-empty">
+                    {{ t('admin.upstreamProviders.healthGuardAccountModelEmpty') }}
+                  </div>
                   <p class="health-guard-account-models-hint">{{ t('admin.upstreamProviders.healthGuardAccountModelsHint') }}</p>
                 </div>
               </div>
@@ -861,11 +930,11 @@
     <BaseDialog
       :show="showHealthGuardAdjustmentDialog"
       :title="t('admin.upstreamProviders.healthGuardAdjustmentLogDetails')"
-      width="wide"
+      width="full"
       :z-index="60"
       @close="showHealthGuardAdjustmentDialog = false"
     >
-      <div class="health-guard-detail-dialog">
+      <div class="health-guard-detail-dialog health-guard-detail-dialog-large">
         <div class="health-guard-filter-row">
           <button
             v-for="option in healthGuardAdjustmentFilterOptions"
@@ -915,11 +984,11 @@
     <BaseDialog
       :show="showHealthGuardResultsDialog"
       :title="t('admin.upstreamProviders.healthGuardResultDetails')"
-      width="wide"
+      width="full"
       :z-index="60"
       @close="showHealthGuardResultsDialog = false"
     >
-      <div class="health-guard-detail-dialog">
+      <div class="health-guard-detail-dialog health-guard-detail-dialog-large">
         <div class="health-guard-filter-row">
           <button
             v-for="option in healthGuardResultFilterOptions"
@@ -1646,12 +1715,15 @@ type HealthGuardIgnoredAccountSummary = {
   loading?: boolean
   missing?: boolean
 }
+type HealthGuardAccountModelRow = HealthGuardIgnoredAccountSummary & {
+  model: string
+}
 type HealthGuardIgnoredAccountOption = SelectOption & {
   account?: Account
   meta: string
 }
-type HealthGuardAdjustmentFilterKey = 'all' | 'disabled' | 'recovered'
-type HealthGuardResultFilterKey = 'all' | 'healthy' | 'slow' | 'failed' | 'changed'
+type HealthGuardAdjustmentFilterKey = 'all' | 'latest' | 'disabled' | 'recovered'
+type HealthGuardResultFilterKey = 'all' | 'failed' | 'slow' | 'healthy' | 'changed' | 'disabled' | 'recovered' | 'unchanged' | 'skipped'
 
 const providers = ref<UpstreamProviderConfig[]>([])
 const loading = ref(false)
@@ -1688,6 +1760,8 @@ const showHealthGuardIgnoredDialog = ref(false)
 const loadingHealthGuardIgnoredOptions = ref(false)
 const healthGuardIgnoredAccountOptionsSource = ref<Account[]>([])
 const healthGuardIgnoredAccountToAdd = ref<number | null>(null)
+const healthGuardAccountModelAccountToAdd = ref<number | null>(null)
+const healthGuardAccountModelDraft = ref('')
 const showHealthGuardSkipReasonsDialog = ref(false)
 const showHealthGuardAdjustmentDialog = ref(false)
 const showHealthGuardResultsDialog = ref(false)
@@ -1715,7 +1789,6 @@ const healthGuardRecords = ref<UpstreamAccountHealthGuardRunRecord[]>([])
 const healthGuardForm = ref<HealthGuardForm>(defaultHealthGuardForm())
 const healthGuardIgnoredInput = ref('')
 const healthGuardIgnoredAccounts = ref<Record<number, HealthGuardIgnoredAccountSummary>>({})
-const healthGuardAccountModelsInput = ref('')
 const rechargeForm = ref({
   amount: null as number | null,
   note: '',
@@ -1984,8 +2057,10 @@ const healthGuardSkipReasons = computed<UpstreamAccountHealthGuardSkipReason[]>(
 const healthGuardSkippedCount = computed(() => healthGuardSkipReasons.value.reduce((sum, reason) => sum + Math.max(0, Number(reason.count) || 0), 0))
 const healthGuardAdjustmentFilterOptions = computed<Array<{ key: HealthGuardAdjustmentFilterKey; label: string; count: number }>>(() => {
   const logs = healthGuardAdjustmentLogs.value
+  const latestRecordID = latestHealthGuardRecord.value?.id
   return [
     { key: 'all', label: t('admin.upstreamProviders.healthGuardFilterAll'), count: logs.length },
+    { key: 'latest', label: t('admin.upstreamProviders.healthGuardFilterLatestRun'), count: latestRecordID ? logs.filter(log => log.record.id === latestRecordID).length : 0 },
     { key: 'disabled', label: t('admin.upstreamProviders.healthGuardDisabled'), count: logs.filter(log => log.item.action === 'disabled').length },
     { key: 'recovered', label: t('admin.upstreamProviders.healthGuardRecovered'), count: logs.filter(log => log.item.action === 'recovered').length },
   ]
@@ -1993,22 +2068,32 @@ const healthGuardAdjustmentFilterOptions = computed<Array<{ key: HealthGuardAdju
 const filteredHealthGuardAdjustmentLogs = computed(() => {
   const filter = activeHealthGuardAdjustmentFilter.value
   if (filter === 'all') return healthGuardAdjustmentLogs.value
+  if (filter === 'latest') {
+    const latestRecordID = latestHealthGuardRecord.value?.id
+    return latestRecordID ? healthGuardAdjustmentLogs.value.filter(log => log.record.id === latestRecordID) : []
+  }
   return healthGuardAdjustmentLogs.value.filter(log => log.item.action === filter)
 })
 const healthGuardResultFilterOptions = computed<Array<{ key: HealthGuardResultFilterKey; label: string; count: number }>>(() => {
   const items = latestHealthGuardItems.value
   return [
     { key: 'all', label: t('admin.upstreamProviders.healthGuardFilterAll'), count: items.length },
-    { key: 'healthy', label: t('admin.upstreamProviders.healthGuardHealthy'), count: items.filter(item => item.status === 'healthy').length },
-    { key: 'slow', label: t('admin.upstreamProviders.healthGuardSlow'), count: items.filter(item => item.status === 'slow').length },
     { key: 'failed', label: t('admin.upstreamProviders.healthGuardFailed'), count: items.filter(item => item.status === 'failed').length },
+    { key: 'slow', label: t('admin.upstreamProviders.healthGuardSlow'), count: items.filter(item => item.status === 'slow').length },
+    { key: 'healthy', label: t('admin.upstreamProviders.healthGuardHealthy'), count: items.filter(item => item.status === 'healthy').length },
     { key: 'changed', label: t('admin.upstreamProviders.healthGuardAdjusted'), count: items.filter(item => item.action === 'disabled' || item.action === 'recovered').length },
+    { key: 'disabled', label: t('admin.upstreamProviders.healthGuardActionDisabled'), count: items.filter(item => item.action === 'disabled').length },
+    { key: 'recovered', label: t('admin.upstreamProviders.healthGuardActionRecovered'), count: items.filter(item => item.action === 'recovered').length },
+    { key: 'unchanged', label: t('admin.upstreamProviders.healthGuardActionNone'), count: items.filter(healthGuardItemUnchanged).length },
+    { key: 'skipped', label: t('admin.upstreamProviders.healthGuardSkipped'), count: items.filter(item => item.status === 'skipped').length },
   ]
 })
 const filteredLatestHealthGuardItems = computed(() => {
   const filter = activeHealthGuardResultFilter.value
   if (filter === 'all') return latestHealthGuardItems.value
   if (filter === 'changed') return latestHealthGuardItems.value.filter(item => item.action === 'disabled' || item.action === 'recovered')
+  if (filter === 'disabled' || filter === 'recovered') return latestHealthGuardItems.value.filter(item => item.action === filter)
+  if (filter === 'unchanged') return latestHealthGuardItems.value.filter(healthGuardItemUnchanged)
   return latestHealthGuardItems.value.filter(item => item.status === filter)
 })
 const healthGuardLastRunText = computed(() => {
@@ -2029,8 +2114,28 @@ const healthGuardSummaryCards = computed(() => {
   ]
 })
 const healthGuardIgnoredIDs = computed(() => parseHealthGuardIgnoredInput(healthGuardIgnoredInput.value) || [])
+const healthGuardAccountModelIDs = computed(() => (
+  Object.keys(normalizeHealthGuardAccountModels(healthGuardForm.value.account_models))
+    .map(id => Number(id))
+    .filter(id => Number.isSafeInteger(id) && id > 0)
+))
+const healthGuardVisibleAccountIDs = computed(() => normalizeHealthGuardIgnoredAccountIDs([
+  ...healthGuardIgnoredIDs.value,
+  ...healthGuardAccountModelIDs.value,
+]))
 const healthGuardIgnoredAccountRows = computed<HealthGuardIgnoredAccountSummary[]>(() => (
   healthGuardIgnoredIDs.value.map(id => healthGuardIgnoredAccounts.value[id] || { id, loading: true })
+))
+const healthGuardAccountModelRows = computed<HealthGuardAccountModelRow[]>(() => (
+  Object.entries(normalizeHealthGuardAccountModels(healthGuardForm.value.account_models))
+    .map(([rawID, model]) => {
+      const id = Number(rawID)
+      return {
+        ...(healthGuardIgnoredAccounts.value[id] || { id, loading: true }),
+        id,
+        model,
+      }
+    })
 ))
 const healthGuardIgnoredInputInvalid = computed(() => Boolean(healthGuardIgnoredInput.value.trim()) && parseHealthGuardIgnoredInput(healthGuardIgnoredInput.value) === null)
 const healthGuardIgnoredSummaryText = computed(() => {
@@ -2053,6 +2158,19 @@ const healthGuardIgnoredAccountOptions = computed<HealthGuardIgnoredAccountOptio
       meta,
       account,
       disabled: ignored.has(account.id),
+    }
+  })
+})
+const healthGuardAccountModelOptions = computed<HealthGuardIgnoredAccountOption[]>(() => {
+  const configured = new Set(healthGuardAccountModelIDs.value)
+  return healthGuardIgnoredAccountOptionsSource.value.map((account) => {
+    const meta = `${healthGuardPlatformLabel(account.platform)} / #${account.id}`
+    return {
+      value: account.id,
+      label: account.name || `#${account.id}`,
+      meta,
+      account,
+      disabled: configured.has(account.id),
     }
   })
 })
@@ -2182,11 +2300,14 @@ function closeHealthGuardDetailDialogs() {
 async function openHealthGuardDialog() {
   showHealthGuardDialog.value = true
   await loadHealthGuardState()
+  void loadHealthGuardIgnoredAccountOptions()
 }
 
 function closeHealthGuardDialog() {
   showHealthGuardDialog.value = false
   showHealthGuardIgnoredDialog.value = false
+  healthGuardAccountModelAccountToAdd.value = null
+  healthGuardAccountModelDraft.value = ''
   closeHealthGuardDetailDialogs()
 }
 
@@ -2370,7 +2491,8 @@ function applyHealthGuardConfig(config: UpstreamAccountHealthGuardConfig) {
     platform_latency_ms: { ...(config.platform_latency_ms || {}) },
   }
   healthGuardIgnoredInput.value = ignoredAccountIDs.join(', ')
-  healthGuardAccountModelsInput.value = formatHealthGuardAccountModelsInput(accountModels)
+  healthGuardAccountModelAccountToAdd.value = null
+  healthGuardAccountModelDraft.value = ''
 }
 
 async function loadHealthGuardState() {
@@ -2424,11 +2546,7 @@ async function saveHealthGuardConfig() {
     appStore.showError(t('admin.upstreamProviders.invalidHealthGuardIgnoredAccounts'))
     return
   }
-  const accountModels = parseHealthGuardAccountModelsInput(healthGuardAccountModelsInput.value)
-  if (!accountModels) {
-    appStore.showError(t('admin.upstreamProviders.invalidHealthGuardAccountModels'))
-    return
-  }
+  const accountModels = normalizeHealthGuardAccountModels(healthGuardForm.value.account_models)
   savingHealthGuardConfig.value = true
   try {
     const config = await adminAPI.upstreamAccountSync.updateHealthGuardConfig(buildHealthGuardPayload(ignoredAccountIDs, accountModels))
@@ -2481,7 +2599,7 @@ function parseHealthGuardIgnoredInput(value: string): number[] | null {
   return normalizeHealthGuardIgnoredAccountIDs(ids)
 }
 
-async function refreshHealthGuardIgnoredAccounts(ids: number[] = healthGuardIgnoredIDs.value) {
+async function refreshHealthGuardIgnoredAccounts(ids: number[] = healthGuardVisibleAccountIDs.value) {
   const uniqueIDs = normalizeHealthGuardIgnoredAccountIDs(ids)
   if (!uniqueIDs.length) {
     healthGuardIgnoredAccounts.value = {}
@@ -2507,7 +2625,7 @@ async function refreshHealthGuardIgnoredAccounts(ids: number[] = healthGuardIgno
     const account = await adminAPI.accounts.getById(id)
     return { id, account }
   }))
-  const latestIDs = new Set(healthGuardIgnoredIDs.value)
+  const latestIDs = new Set(healthGuardVisibleAccountIDs.value)
   const updated = { ...healthGuardIgnoredAccounts.value }
   entries.forEach((entry, index) => {
     const id = missingIDs[index]
@@ -2523,6 +2641,7 @@ async function refreshHealthGuardIgnoredAccounts(ids: number[] = healthGuardIgno
 
 async function loadHealthGuardIgnoredAccountOptions() {
   if (loadingHealthGuardIgnoredOptions.value) return
+  if (healthGuardIgnoredAccountOptionsSource.value.length) return
   loadingHealthGuardIgnoredOptions.value = true
   try {
     const result = await adminAPI.accounts.list(1, 200, {
@@ -2533,8 +2652,9 @@ async function loadHealthGuardIgnoredAccountOptions() {
     const accounts = result.items || []
     healthGuardIgnoredAccountOptionsSource.value = accounts
     const next = { ...healthGuardIgnoredAccounts.value }
+    const visibleIDs = new Set(healthGuardVisibleAccountIDs.value)
     for (const account of accounts) {
-      if (healthGuardIgnoredIDs.value.includes(account.id)) {
+      if (visibleIDs.has(account.id)) {
         next[account.id] = { id: account.id, account }
       }
     }
@@ -2566,6 +2686,40 @@ function removeHealthGuardIgnoredAccount(id: number) {
   healthGuardIgnoredInput.value = ids.join(', ')
 }
 
+function addHealthGuardAccountModel() {
+  const id = Number(healthGuardAccountModelAccountToAdd.value)
+  const model = healthGuardAccountModelDraft.value.trim()
+  if (!Number.isSafeInteger(id) || id <= 0 || !model) return
+
+  healthGuardForm.value.account_models = normalizeHealthGuardAccountModels({
+    ...(healthGuardForm.value.account_models || {}),
+    [String(id)]: model,
+  })
+  const account = healthGuardIgnoredAccountOptionsSource.value.find(item => item.id === id)
+  if (account) {
+    healthGuardIgnoredAccounts.value = {
+      ...healthGuardIgnoredAccounts.value,
+      [id]: { id, account },
+    }
+  }
+  healthGuardAccountModelAccountToAdd.value = null
+  healthGuardAccountModelDraft.value = ''
+}
+
+function updateHealthGuardAccountModel(id: number, model: string) {
+  if (!Number.isSafeInteger(id) || id <= 0) return
+  healthGuardForm.value.account_models = normalizeHealthGuardAccountModels({
+    ...(healthGuardForm.value.account_models || {}),
+    [String(id)]: model,
+  })
+}
+
+function removeHealthGuardAccountModel(id: number) {
+  const next = { ...(healthGuardForm.value.account_models || {}) }
+  delete next[String(id)]
+  healthGuardForm.value.account_models = normalizeHealthGuardAccountModels(next)
+}
+
 function healthGuardIgnoredAccountName(row: HealthGuardIgnoredAccountSummary) {
   if (row.loading) return t('admin.upstreamProviders.healthGuardIgnoredAccountLoading')
   if (row.account?.name) return row.account.name
@@ -2575,6 +2729,15 @@ function healthGuardIgnoredAccountName(row: HealthGuardIgnoredAccountSummary) {
 function healthGuardIgnoredAccountPlatform(row: HealthGuardIgnoredAccountSummary) {
   if (row.account?.platform) return healthGuardPlatformLabel(row.account.platform)
   return '-'
+}
+
+function healthGuardAccountModelName(row: HealthGuardAccountModelRow) {
+  return healthGuardIgnoredAccountName(row)
+}
+
+function healthGuardAccountModelMeta(row: HealthGuardAccountModelRow) {
+  if (row.account?.platform) return `${healthGuardPlatformLabel(row.account.platform)} / #${row.id}`
+  return `#${row.id}`
 }
 
 function healthGuardIgnoredAccountStatusLabel(row: HealthGuardIgnoredAccountSummary) {
@@ -2605,27 +2768,6 @@ function normalizeHealthGuardAccountModels(value: unknown): Record<string, strin
     out[String(id)] = model
   }
   return Object.fromEntries(Object.entries(out).sort(([a], [b]) => Number(a) - Number(b)))
-}
-
-function formatHealthGuardAccountModelsInput(value: Record<string, string>) {
-  return Object.entries(normalizeHealthGuardAccountModels(value))
-    .map(([accountID, model]) => `${accountID}=${model}`)
-    .join('\n')
-}
-
-function parseHealthGuardAccountModelsInput(value: string): Record<string, string> | null {
-  const text = String(value || '').trim()
-  if (!text) return {}
-  const out: Record<string, string> = {}
-  for (const line of text.split(/\r?\n/).map(item => item.trim()).filter(Boolean)) {
-    const match = line.match(/^(\d+)\s*(?:=|:|\s)\s*(.+)$/)
-    if (!match) return null
-    const id = Number(match[1])
-    const model = String(match[2] || '').trim()
-    if (!Number.isSafeInteger(id) || id <= 0 || !model) return null
-    out[String(id)] = model
-  }
-  return normalizeHealthGuardAccountModels(out)
 }
 
 function defaultBalanceSamplerScaleForProvider(providerSlug: string) {
@@ -3046,6 +3188,10 @@ function healthGuardActionClass(action: string | undefined) {
   }
 }
 
+function healthGuardItemUnchanged(item: UpstreamAccountHealthGuardRunItem) {
+  return !item.action || item.action === 'none'
+}
+
 function healthGuardAdjustmentTimestamp(log: HealthGuardAdjustmentLogItem) {
   const raw = log.item.finished_at || log.record.finished_at
   const timestamp = raw ? new Date(raw).getTime() : 0
@@ -3115,10 +3261,10 @@ function testStages(result: UpstreamProviderTestResult) {
 }
 
 watch(
-  [showHealthGuardDialog, () => healthGuardIgnoredIDs.value.join(',')],
+  [showHealthGuardDialog, () => healthGuardVisibleAccountIDs.value.join(',')],
   ([visible]) => {
     if (!visible) return
-    void refreshHealthGuardIgnoredAccounts()
+    void refreshHealthGuardIgnoredAccounts(healthGuardVisibleAccountIDs.value)
   }
 )
 
@@ -3979,11 +4125,11 @@ onMounted(reload)
 }
 
 .health-guard-ignored-list {
-  @apply grid min-h-0 gap-2 overflow-auto pr-1 sm:grid-cols-2;
+  @apply grid min-h-0 gap-1.5 overflow-auto pr-1 sm:grid-cols-2 xl:grid-cols-3;
 }
 
 .health-guard-ignored-account {
-  @apply grid min-h-12 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 dark:border-dark-600 dark:bg-dark-900/40;
+  @apply flex min-h-10 flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1.5 dark:border-dark-600 dark:bg-dark-900/40;
 }
 
 .health-guard-ignored-account.is-missing {
@@ -3991,23 +4137,23 @@ onMounted(reload)
 }
 
 .health-guard-ignored-account-main {
-  @apply min-w-0;
+  @apply flex min-w-0 flex-1 items-baseline gap-1.5;
 }
 
 .health-guard-ignored-account-main strong {
-  @apply block truncate text-sm font-semibold text-gray-950 dark:text-white;
+  @apply min-w-0 truncate text-sm font-semibold text-gray-950 dark:text-white;
 }
 
 .health-guard-ignored-account-main code {
-  @apply mt-0.5 block text-xs text-gray-500 dark:text-gray-400;
+  @apply shrink-0 text-xs text-gray-500 dark:text-gray-400;
 }
 
 .health-guard-ignored-account-meta {
-  @apply flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400;
+  @apply flex shrink-0 items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400;
 }
 
 .health-guard-ignored-remove {
-  @apply row-span-2 inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-dark-700 dark:hover:text-gray-200;
+  @apply inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-dark-700 dark:hover:text-gray-200;
 }
 
 .health-guard-ignored-list-empty {
@@ -4057,8 +4203,56 @@ onMounted(reload)
   @apply text-right font-mono;
 }
 
-.health-guard-account-models-input {
-  @apply mt-2 min-h-20 resize-y text-left font-mono text-sm;
+.health-guard-account-models-add {
+  @apply mt-2 grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(12rem,18rem)_auto];
+}
+
+.health-guard-account-model-select {
+  @apply min-w-0;
+}
+
+.health-guard-account-model-input {
+  @apply h-9 text-left font-mono text-sm;
+}
+
+.health-guard-account-models-add .btn {
+  @apply h-9 whitespace-nowrap px-3;
+}
+
+.health-guard-account-model-list {
+  @apply mt-2 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200 dark:divide-dark-700 dark:border-dark-600;
+}
+
+.health-guard-account-model-row {
+  @apply grid min-h-11 grid-cols-[minmax(0,1fr)_minmax(12rem,18rem)_auto] items-center gap-2 bg-white px-2.5 py-1.5 dark:bg-dark-800;
+}
+
+.health-guard-account-model-row.is-missing {
+  @apply bg-red-50 dark:bg-red-500/10;
+}
+
+.health-guard-account-model-account {
+  @apply min-w-0;
+}
+
+.health-guard-account-model-account strong {
+  @apply block truncate text-sm font-semibold text-gray-950 dark:text-white;
+}
+
+.health-guard-account-model-account small {
+  @apply block truncate font-mono text-xs text-gray-500 dark:text-gray-400;
+}
+
+.health-guard-account-model-row-input {
+  @apply h-8 text-left font-mono text-sm;
+}
+
+.health-guard-account-model-remove {
+  @apply inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-dark-700 dark:hover:text-gray-200;
+}
+
+.health-guard-account-model-empty {
+  @apply mt-2 rounded-md py-2 text-xs;
 }
 
 .health-guard-account-models-hint {
@@ -4121,6 +4315,25 @@ onMounted(reload)
   @apply flex max-h-[70vh] min-h-0 flex-col gap-3 overflow-hidden;
 }
 
+.health-guard-detail-dialog-large {
+  @apply min-h-0 flex-1;
+  max-height: none;
+}
+
+:global(.modal-content:has(.health-guard-detail-dialog-large)) {
+  height: min(94vh, 980px);
+  max-height: 94vh;
+  height: min(94dvh, 980px);
+  max-height: 94dvh;
+}
+
+:global(.modal-content:has(.health-guard-detail-dialog-large) .modal-body) {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .health-guard-filter-row {
   @apply flex flex-wrap gap-2;
 }
@@ -4139,6 +4352,8 @@ onMounted(reload)
 
 .health-guard-modal-list {
   @apply min-h-0 flex-1 overflow-auto pr-1;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 .health-guard-adjustment-panel {
@@ -4283,14 +4498,21 @@ onMounted(reload)
   }
 
   .health-guard-adjustment-list {
-    max-height: min(22vh, 13rem);
     overflow-y: auto;
     padding-right: 0.125rem;
   }
 
   .health-guard-item-list {
     min-height: 8rem;
-    max-height: min(30vh, 18rem);
+  }
+}
+
+@media (max-width: 640px) {
+  :global(.modal-content:has(.health-guard-detail-dialog-large)) {
+    height: calc(100vh - 1rem);
+    max-height: calc(100vh - 1rem);
+    height: calc(100dvh - 1rem);
+    max-height: calc(100dvh - 1rem);
   }
 }
 
@@ -4897,6 +5119,22 @@ onMounted(reload)
     width: 100%;
   }
 
+  .health-guard-account-models-add {
+    grid-template-columns: 1fr;
+  }
+
+  .health-guard-account-models-add .btn {
+    width: 100%;
+  }
+
+  .health-guard-account-model-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .health-guard-account-model-row-input {
+    grid-column: 1 / -1;
+  }
+
   .health-guard-platform-row {
     @apply items-start;
   }
@@ -4961,10 +5199,6 @@ onMounted(reload)
     grid-template-columns: 1fr;
   }
 
-  .health-guard-item-list {
-    flex: none;
-    overflow: visible;
-  }
 }
 
 @media (max-width: 380px) {
