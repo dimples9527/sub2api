@@ -144,3 +144,7 @@ aicodex
 output/
 .gomodcache
 __tests__
+/.gomodcache/*
+/frontend/src/__tests__/font-scale.spec.ts
+/frontend/src/api/__tests__/*
+/backend/.gomodcache
