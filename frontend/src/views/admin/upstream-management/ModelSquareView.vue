@@ -116,10 +116,10 @@
               <div class="min-w-0">
                 <div class="provider-title">
                   <span class="provider-dot"></span>
-                  <span class="truncate">{{ section.provider }}</span>
+                  <span class="truncate">{{ providerLabel(section.provider) }}</span>
                 </div>
                 <div class="provider-meta">
-                  {{ section.models.length }} · {{ t('admin.modelSquare.rate') }} {{ formatRate(section.lowestRate) }}
+                  {{ t('admin.modelSquare.providerSummary', { count: section.models.length, rate: formatRate(section.lowestRate) }) }}
                 </div>
               </div>
               <span class="provider-count">{{ section.models.length }}</span>
@@ -140,7 +140,7 @@
                 <div class="model-card-top">
                   <span class="model-provider">
                     <span class="model-provider-dot"></span>
-                    <span class="truncate">{{ model.provider || 'unknown' }}</span>
+                    <span class="truncate">{{ providerLabel(model.provider) }}</span>
                   </span>
                   <span :class="['model-status', isAvailable(model) ? 'model-status-available' : 'model-status-muted']">
                     <span class="status-dot"></span>
@@ -229,7 +229,7 @@
                     {{ copiedModelId === model.id ? t('admin.modelSquare.copied') : availabilityLabel(model) }}
                   </span>
                 </td>
-                <td class="whitespace-nowrap px-4 py-3">{{ model.provider || 'unknown' }}</td>
+                <td class="whitespace-nowrap px-4 py-3">{{ providerLabel(model.provider) }}</td>
                 <td class="max-w-72 px-4 py-3 font-medium text-gray-950 dark:text-white">
                   <span class="break-words">{{ model.id || t('admin.modelSquare.unnamedModel') }}</span>
                 </td>
@@ -352,7 +352,7 @@ const filteredModels = computed(() => {
 const providerSections = computed<ModelSquareProviderSection[]>(() => {
   const sections = new Map<string, ModelSquareModel[]>()
   for (const model of filteredModels.value) {
-    const provider = model.provider || 'unknown'
+    const provider = model.provider || ''
     const list = sections.get(provider) || []
     list.push(model)
     sections.set(provider, list)
@@ -444,11 +444,15 @@ function modelKey(model: ModelSquareModel, index: number) {
   return `${model.provider || 'unknown'}:${model.id || index}`
 }
 
+function providerLabel(value?: string) {
+  return value || t('admin.modelSquare.unknownProvider')
+}
+
 function modeLabel(value?: string) {
-  if (value === 'image_generation') return 'Image'
-  if (value === 'embedding') return 'Embedding'
-  if (value === 'responses') return 'Responses'
-  return value || 'Chat'
+  if (value === 'image_generation') return t('admin.modelSquare.modes.image')
+  if (value === 'embedding') return t('admin.modelSquare.modes.embedding')
+  if (value === 'responses') return t('admin.modelSquare.modes.responses')
+  return value || t('admin.modelSquare.modes.chat')
 }
 
 function formatRate(value?: number) {

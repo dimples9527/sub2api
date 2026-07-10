@@ -20,6 +20,8 @@ vi.mock('vue-i18n', async (importOriginal) => {
           'admin.modelSquare.modelCount': 'Models',
           'admin.modelSquare.availableCount': 'Available',
           'admin.modelSquare.groupCount': 'Groups',
+          'admin.modelSquare.providerSummary': `${params?.count ?? 0} model(s) · Rate ${params?.rate ?? ''}`,
+          'admin.modelSquare.unknownProvider': 'Unknown provider',
           'admin.modelSquare.moreGroups': 'More',
           'admin.modelSquare.inputPrice': 'Input',
           'admin.modelSquare.outputPrice': 'Output',
@@ -31,6 +33,10 @@ vi.mock('vue-i18n', async (importOriginal) => {
           'admin.modelSquare.copied': 'Copied',
           'admin.modelSquare.unnamedModel': 'Unnamed model',
           'admin.modelSquare.groupDialogTitle': `${params?.id ?? ''} groups`,
+          'admin.modelSquare.modes.chat': 'Chat',
+          'admin.modelSquare.modes.image': 'Image',
+          'admin.modelSquare.modes.embedding': 'Embedding',
+          'admin.modelSquare.modes.responses': 'Responses',
           'common.refresh': 'Refresh',
           'common.close': 'Close',
         }
@@ -111,17 +117,13 @@ describe('Upstream ModelSquareView', () => {
     expect(getModelSquareMock).toHaveBeenCalledOnce()
 
     const cardText = wrapper.find('[data-test="model-card"]').text()
-    const proIndex = cardText.indexOf('codex pro')
-    const fallbackIndex = cardText.indexOf('codex fallback')
-    const welfareIndex = cardText.indexOf('codex welfare')
-
-    expect(proIndex).toBeGreaterThanOrEqual(0)
-    expect(fallbackIndex).toBeGreaterThan(proIndex)
-    expect(welfareIndex).toBeGreaterThan(fallbackIndex)
+    expect(cardText).toContain('codex pro')
+    expect(cardText).toContain('0.08x')
+    expect(cardText).toContain('+3')
     expect(cardText).toContain('$0.14')
   })
 
-  it('hides upstream identity text and exposes an explicit more button for extra groups', async () => {
+  it('hides upstream identity text and exposes an overflow count for extra groups', async () => {
     getModelSquareMock.mockResolvedValueOnce({
       provider_slug: 'findcg',
       provider_name: 'FindCG',
@@ -154,6 +156,6 @@ describe('Upstream ModelSquareView', () => {
     const text = wrapper.text()
     expect(text).not.toContain('Default upstream')
     expect(text.toLowerCase()).not.toContain('findcg')
-    expect(wrapper.find('[data-test="model-card"]').text()).toContain('More')
+    expect(wrapper.find('[data-test="model-card"]').text()).toContain('+3')
   })
 })
