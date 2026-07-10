@@ -140,3 +140,7 @@ docs/*
 frontend/coverage/
 aicodex
 output/
+/.gomodcache/*
+/frontend/src/__tests__/font-scale.spec.ts
+/frontend/src/api/__tests__/*
+/backend/.gomodcache
