@@ -766,7 +766,7 @@
             <div class="sync-logs-modal-header">
               <div>
                 <h3>{{ t('admin.upstreamAccounts.syncLogs') }}</h3>
-                <p>{{ t('admin.upstreamAccounts.latestRecords', { count: syncLogEntries.length }) }} {{ syncLogEntries.length }}</p>
+                <p>{{ t('admin.upstreamAccounts.latestRecords', { count: syncLogEntries.length }) }}</p>
               </div>
               <button type="button" class="modal-close-button" :aria-label="t('common.close')" @click="closeSyncLogsDialog">
                 <Icon name="x" size="md" :stroke-width="2" />
@@ -5900,7 +5900,7 @@ button.guard-ignore-summary:disabled {
   position: relative;
   display: grid;
   gap: 10px;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   background: #fff;
@@ -5983,15 +5983,28 @@ button.guard-ignore-summary:disabled {
   line-height: 1.25;
 }
 
+.sync-log-card-field .tag-list {
+  min-width: 0;
+}
+
+.sync-log-card-field .table-tag,
+.sync-log-card-field .log-chip,
+.sync-log-card-field .trigger-chip {
+  min-height: 24px;
+  min-width: 0;
+  line-height: 18px;
+}
+
 .sync-log-card-action {
   justify-self: flex-end;
-  min-height: 30px;
+  min-height: 32px;
   border: 1px solid #fed7aa;
   border-radius: 7px;
   background: #fff7ed;
   padding: 0 10px;
   color: #c2410c;
   font-size: 12px;
+  line-height: 1.2;
 }
 
 .records-info {
@@ -6414,6 +6427,7 @@ button.guard-ignore-summary:disabled {
   border-bottom: 1px solid #eef2f7;
   padding: 12px 16px;
   color: #334155;
+  line-height: 1.45;
   vertical-align: top;
 }
 
@@ -6439,12 +6453,14 @@ button.guard-ignore-summary:disabled {
 
 .sync-log-status {
   display: inline-flex;
+  min-height: 24px;
   align-items: center;
   border: 0;
   border-radius: 999px;
   padding: 3px 8px;
   font-size: 12px;
   font-weight: 700;
+  line-height: 18px;
   white-space: nowrap;
 }
 
@@ -6882,10 +6898,46 @@ button.sync-log-status-unhandled:hover {
     flex: 1 1 auto;
     min-height: 0;
     align-content: flex-start;
+    grid-auto-rows: max-content;
     gap: 8px;
     overflow: auto;
     padding: 10px;
     -webkit-overflow-scrolling: touch;
+  }
+
+  .sync-log-card {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .sync-log-card-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  .sync-log-card-status {
+    gap: 5px;
+  }
+
+  .sync-log-card-head time {
+    justify-self: flex-start;
+    line-height: 1.25;
+    white-space: normal;
+  }
+
+  .sync-log-card-main {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 7px;
+  }
+
+  .sync-log-card-field {
+    gap: 4px;
+    padding: 7px;
+  }
+
+  .sync-log-card-field strong {
+    line-height: 1.2;
   }
 
   .sync-log-card .tag-list {
@@ -6896,16 +6948,34 @@ button.sync-log-status-unhandled:hover {
   .sync-log-card .table-tag,
   .sync-log-card .log-chip,
   .sync-log-card .trigger-chip {
+    min-height: 24px;
+    min-width: 0;
     max-width: 100%;
     overflow: hidden;
-    padding: 2px 7px;
+    padding: 3px 8px;
+    line-height: 18px;
     text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sync-log-card .tag-list {
+    min-width: 0;
   }
 
   .sync-log-card .rate-compare {
     width: fit-content;
+    min-height: 26px;
+    max-width: 100%;
     gap: 6px;
-    padding: 3px 7px;
+    overflow: hidden;
+    padding: 4px 8px;
+    line-height: 18px;
+  }
+
+  .sync-log-card-action {
+    width: 100%;
+    min-height: 34px;
+    justify-content: center;
   }
 
   .guard-left,

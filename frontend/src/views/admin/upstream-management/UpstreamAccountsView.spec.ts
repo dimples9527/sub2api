@@ -256,6 +256,20 @@ describe('UpstreamAccountsView', () => {
     expect(wrapper.text()).toContain('-')
   })
 
+  it('keeps sync log cards constrained for mobile dialogs', () => {
+    expect(upstreamAccountsSource).toContain('.sync-logs-table-wrap {\n    display: none;')
+    expect(upstreamAccountsSource).toContain('.sync-log-card-list {\n    display: grid;')
+    expect(upstreamAccountsSource).toContain('.sync-log-card-head {\n    display: grid;')
+    expect(upstreamAccountsSource).toContain('grid-template-columns: minmax(0, 1fr);')
+    expect(upstreamAccountsSource).toContain('grid-auto-rows: max-content;')
+    expect(upstreamAccountsSource).toContain('overflow: visible;')
+    expect(upstreamAccountsSource).toContain('.sync-log-card .table-tag,\n  .sync-log-card .log-chip,\n  .sync-log-card .trigger-chip')
+    expect(upstreamAccountsSource).toContain('min-height: 24px;')
+    expect(upstreamAccountsSource).toContain('white-space: nowrap;')
+    expect(upstreamAccountsSource).toContain('.sync-log-card-action {\n    width: 100%;')
+    expect(upstreamAccountsSource).toContain('min-height: 34px;')
+  })
+
   it('opens stat card detail dialogs with matching preview rows', async () => {
     upstreamAccountSyncMock.getPreview.mockResolvedValueOnce({
       default_provider: {},
