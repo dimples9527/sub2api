@@ -78,6 +78,7 @@ export default {
       crsBack: 'Back',
       editAccount: 'Edit Account',
       deleteAccount: 'Delete Account',
+      deleteFailed: 'Failed to delete account',
       searchAccounts: 'Search accounts...',
       notes: 'Notes',
       notesPlaceholder: 'Enter notes',
@@ -115,7 +116,9 @@ export default {
         grokOauth: 'Grok OAuth',
         antigravityApikey: 'Connect via Base URL + API Key',
         upstream: 'Upstream',
-        upstreamDesc: 'Connect via Base URL + API Key'
+        upstreamDesc: 'Connect via Base URL + API Key',
+        api_key: 'API Key',
+        cookie: 'Cookie'
       },
       antigravityProjectIdLabel: 'GCP Project ID (optional)',
       antigravityProjectIdPlaceholder: 'your-gcp-project-id',
@@ -515,6 +518,8 @@ export default {
       supportsAllModels: '(supports all models)',
       requestModel: 'Request model',
       actualModel: 'Actual model',
+      fromModel: 'Request model',
+      toModel: 'Target model',
       addMapping: 'Add Mapping',
       mappingExists: 'Mapping for {model} already exists',
       wildcardOnlyAtEnd: 'Wildcard * can only be at the end',
@@ -696,6 +701,9 @@ export default {
       creating: 'Creating...',
       updating: 'Updating...',
       accountCreated: 'Account created successfully',
+      messages: {
+        accountCreated: 'Account created successfully'
+      },
       accountUpdated: 'Account updated successfully',
       failedToCreate: 'Failed to create account',
       failedToUpdate: 'Failed to update account',
@@ -813,6 +821,8 @@ export default {
           },
           // Refresh Token auth
           refreshTokenAuth: 'Manual RT Input',
+          mobileRefreshTokenAuth: 'Mobile RT Input',
+          accessTokenAuth: 'Access Token Input',
           refreshTokenDesc: 'Enter your existing OpenAI Refresh Token(s). Supports batch input (one per line). The system will automatically validate and create accounts.',
           refreshTokenPlaceholder: 'Paste your OpenAI Refresh Token...\nSupports multiple, one per line',
           codexSessionAuth: 'Codex JSON / AT Batch Input',
@@ -1250,7 +1260,43 @@ export default {
       linkCopied: 'Link Copied',
       needsReauth: 'Re-auth Required',
       rateLimited: 'Rate Limited',
-      usageError: 'Fetch Error'
+      usageError: 'Fetch Error',
+      noAccounts: 'No accounts',
+      noAccountsDescription: 'Create your first account to start scheduling requests.',
+      saving: 'Saving...',
+      refreshing: 'Refreshing...',
+      refreshCookie: 'Refresh Cookie',
+      testAccount: 'Test Account',
+      testSuccess: 'Account test succeeded',
+      cookieRefreshedSuccess: 'Cookie refreshed successfully',
+      accountCreatedSuccess: 'Account created successfully',
+      accountUpdatedSuccess: 'Account updated successfully',
+      accountDeletedSuccess: 'Account deleted successfully',
+      failedToSave: 'Failed to save account',
+      deleteConfirmMessage: 'Are you sure you want to delete this account?',
+      filters: {
+        platform: 'Platform',
+        type: 'Type',
+        status: 'Status',
+        allPlatforms: 'All Platforms',
+        allTypes: 'All Types',
+        allStatuses: 'All Statuses'
+      },
+      form: {
+        nameLabel: 'Name',
+        namePlaceholder: 'Enter account name',
+        platformLabel: 'Platform',
+        selectPlatform: 'Select platform',
+        typeLabel: 'Type',
+        selectType: 'Select type',
+        credentialsLabel: 'Credentials',
+        credentialsPlaceholder: 'Enter credentials',
+        statusLabel: 'Status',
+        priorityLabel: 'Priority',
+        priorityHint: 'Lower values have higher priority',
+        weightLabel: 'Weight',
+        weightHint: 'Higher values receive more traffic'
+      }
     },
 
     // Scheduled Tests

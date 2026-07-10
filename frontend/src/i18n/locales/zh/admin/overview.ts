@@ -71,7 +71,13 @@ export default {
       groupPricingDesc: '设置批量折扣和冻结比例',
       systemSettings: '系统设置',
       configureSystem: '配置系统设置',
-      failedToLoad: '加载仪表盘数据失败'
+      failedToLoad: '加载仪表盘数据失败',
+      newUsersToday: '今日新增用户',
+      userUsageTrend: '用户用量趋势',
+      ok: '正常',
+      err: '异常',
+      active: '活跃',
+      create: '创建',
     },
 
     backup: {
@@ -451,6 +457,7 @@ export default {
       leaveEmptyToKeep: '留空则保持原密码不变',
       generatePassword: '生成随机密码',
       copyPassword: '复制密码',
+      passwordCopied: '密码已复制',
       creating: '创建中...',
       updating: '更新中...',
       columns: {
@@ -1025,7 +1032,14 @@ export default {
         geminiText: 'Gemini Text',
         geminiImage: 'Gemini Image',
         hint: '至少选择一个模型系列'
-      }
+      },
+      claudeMaxSimulation: {
+        title: 'Claude Max 用量模拟',
+        enabled: '启用 Claude Max 模拟',
+        disabled: '停用 Claude Max 模拟',
+        hint: '仅调整用量计费日志中的 token 分类，不持久化单次请求映射状态。',
+        tooltip: '启用后，Claude 模型在上游没有缓存写入用量时，会将 token 确定性映射为少量输入和 1 小时缓存创建，同时保持总 token 不变。'
+      },
     },
 
     // Available Channels (aggregated read-only view)

@@ -682,6 +682,10 @@ export default {
         refundEnabled: '允许退款',
         allowUserRefund: '允许用户退款',
         enableConflict: '{method} 已有启用中的服务商实例：{provider}。请先停用现有实例后再启用或切换。',
+        rechargeOptions: '充值金额预设',
+        rechargeOptionsPlaceholder: '2, 5, 10, 20, 50, 100',
+        rechargeOptionsHint: '逗号分隔的金额。数值会去重排序并显示在用户充值页面。',
+        invalidRechargeOptions: '请输入有效的充值金额列表',
       },
       balanceNotify: {
         title: '余额不足提醒',

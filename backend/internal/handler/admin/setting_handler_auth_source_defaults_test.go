@@ -255,6 +255,41 @@ func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedS
 	require.Equal(t, true, data["openai_advanced_scheduler_subscription_priority_enabled"])
 }
 
+func TestSettingHandler_UpdateSettings_PersistsPaymentRechargeOptions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{
+		values: map[string]string{
+			service.SettingKeyPromoCodeEnabled: "true",
+		},
+	}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	paymentConfigSvc := service.NewPaymentConfigService(nil, repo, nil)
+	handler := NewSettingHandler(svc, nil, nil, nil, paymentConfigSvc, nil, nil)
+
+	body := map[string]any{
+		"promo_code_enabled":       true,
+		"payment_recharge_options": []float64{50, 2, 2, 10.129},
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "[2,10.13,50]", repo.values[service.SettingRechargeOptions])
+
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	data, ok := resp.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, []any{float64(2), 10.13, float64(50)}, data["payment_recharge_options"])
+}
+
 func TestSettingHandler_UpdateSettings_PreservesLegacyBlankPaymentVisibleMethodSource(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &settingHandlerRepoStub{

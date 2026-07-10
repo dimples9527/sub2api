@@ -612,6 +612,8 @@ export default {
       supportsAllModels: '（支持所有模型）',
       requestModel: '请求模型',
       actualModel: '实际模型',
+      fromModel: '请求模型',
+      toModel: '目标模型',
       addMapping: '添加映射',
       mappingExists: '模型 {model} 的映射已存在',
       wildcardOnlyAtEnd: '通配符 * 只能放在末尾',
@@ -789,6 +791,9 @@ export default {
       creating: '创建中...',
       updating: '更新中...',
       accountCreated: '账号创建成功',
+      messages: {
+        accountCreated: '账号创建成功'
+      },
       accountUpdated: '账号更新成功',
       failedToCreate: '创建账号失败',
       failedToUpdate: '更新账号失败',
@@ -900,6 +905,8 @@ export default {
           },
           // Refresh Token auth
           refreshTokenAuth: '手动输入 RT',
+          mobileRefreshTokenAuth: '移动端 RT 输入',
+          accessTokenAuth: 'Access Token 输入',
           refreshTokenDesc: '输入您已有的 OpenAI Refresh Token，支持批量输入（每行一个），系统将自动验证并创建账号。',
           refreshTokenPlaceholder: '粘贴您的 OpenAI Refresh Token...\n支持多个，每行一个',
           codexSessionAuth: 'Codex JSON / AT 批量输入',
@@ -1266,7 +1273,10 @@ export default {
         todayCost: '今日费用',
         usageTrend: '30天费用与请求趋势',
         noData: '该账号暂无使用数据'
-      }
+      },
+
+      deleteFailed: '删除账号失败',
+
     },
 
     // Scheduled Tests

@@ -306,6 +306,79 @@ export default {
       }
     }
   },
+  imageGeneration: {
+      navCrumb: 'IMAGE',
+      title: '在线生图',
+      description: '使用你自己的 API Key 在线生成图片，按该 Key 所属分组计费',
+      serviceOnline: '服务在线',
+      emptyTitle: '描述你想要的画面',
+      emptyDescription: '像聊天一样输入提示词即可生成图片。首版支持文生图，当前页面内保留结果，刷新后不保存历史。',
+      promptPlaceholder: '描述你想生成的画面...',
+      editPromptPlaceholder: '描述你想在这张图基础上怎么修改...',
+      submitHint: 'Enter 发送，Shift+Enter 换行。生成结果仅在当前页面保留。',
+      loadingKeys: '正在加载可用 API Key...',
+      noKeys: '暂无可用于图片生成的 OpenAI API Key。请先创建或切换到开启图片生成的 OpenAI 分组。',
+      selectKey: '选择 API Key',
+      model: '模型',
+      size: '分辨率',
+      count: '张数',
+      quality: '质量',
+      generate: '生成图片',
+      generating: '正在生成图片',
+      elapsed: '用时 {seconds}s',
+      stage: {
+        preparing: '准备请求',
+        queued: '排队处理中',
+        generating: '正在绘制',
+        finishing: '即将完成',
+      },
+      generatingHint: '图片生成可能需要几十秒，请保持页面打开。',
+      reusePrompt: '复用提示词',
+      continueEdit: '继续修改',
+      continueEditPrefix: '继续修改',
+      retry: '重试',
+      downloadAll: '全部下载',
+      copyImageUrl: '复制图片地址',
+      download: '下载图片',
+      viewImage: '放大预览',
+      closePreview: '关闭预览',
+      removeReferenceImage: '移除参考图',
+      previousImage: '上一张图片',
+      nextImage: '下一张图片',
+      previewDetails: {
+        model: '模型',
+        size: '分辨率',
+        quality: '质量',
+        elapsed: '用时',
+        createdAt: '生成时间',
+      },
+      copied: '已复制',
+      loadKeysFailed: '加载 API Key 失败',
+      generateSuccess: '图片生成完成',
+      generateFailed: '图片生成失败，请稍后重试',
+      emptyResponse: '生成完成，但没有返回图片',
+      errors: {
+        auth: '图片生成鉴权失败，请检查 API Key 是否有效或是否有权限。',
+        quota: '图片生成额度不足，请检查余额、配额或账单状态。',
+        size: '当前分辨率或请求参数不被支持，请调整后重试。',
+        network: '网络连接或请求超时，请稍后重试。',
+        groupDisabled: '当前 API Key 所属分组未开启图片生成，请切换到已开启的分组。',
+      },
+      qualities: {
+        auto: '自动',
+        low: '低',
+        medium: '中',
+        high: '高',
+      },
+      samples: {
+        glass: '赛博朋克风格的夜晚街道',
+        portrait: '一只戴墨镜的柴犬，扁平插画',
+        sunrise: '雪山日出，超广角风景照',
+        logo: '把这张图改成水彩风格',
+      },
+    },
+
+
 
   // Payment System
   payment: {
@@ -626,7 +699,13 @@ export default {
         expired: '已过期',
         revoked: '已撤销',
       },
+
+      allowUserRefund: '允许用户退款',
+
     },
+
+    rechargePayAmount: '支付金额',
+    rechargeCreditAmount: '到账余额',
   },
 
 }
