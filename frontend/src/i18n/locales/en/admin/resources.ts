@@ -101,21 +101,6 @@ export default {
         protocolLabel: 'Protocol',
         selectProtocol: 'Select protocol',
         hostLabel: 'Host',
-        hostPlaceholder: 'proxy.example.com',
-        portLabel: 'Port',
-        portPlaceholder: '8080',
-        usernameLabel: 'Username',
-        usernamePlaceholder: 'Optional username',
-        passwordLabel: 'Password',
-        passwordPlaceholder: 'Optional password',
-        priorityLabel: 'Priority',
-        statusLabel: 'Status',
-        actions: 'Actions',
-        nameLabel: 'Name',
-        namePlaceholder: 'Enter proxy name',
-        protocolLabel: 'Protocol',
-        selectProtocol: 'Select protocol',
-        hostLabel: 'Host',
         hostPlaceholder: 'Enter host address',
         portLabel: 'Port',
         portPlaceholder: 'Enter port',
@@ -250,24 +235,7 @@ export default {
       fallbackNone: 'No fallback',
       fallbackProxy: 'Backup proxy',
       fallbackDirect: 'Direct connection',
-      backupProxy: 'Backup proxy',
-      noProxies: 'No proxies',
-      noProxiesDescription: 'Create your first proxy to route account traffic.',
-      saving: 'Saving...',
-      testing: 'Testing...',
-      testProxy: 'Test Proxy',
-      testSuccess: 'Proxy test succeeded',
-      proxyCreatedSuccess: 'Proxy created successfully',
-      proxyUpdatedSuccess: 'Proxy updated successfully',
-      proxyDeletedSuccess: 'Proxy deleted successfully',
-      failedToSave: 'Failed to save proxy',
-      deleteConfirmMessage: 'Are you sure you want to delete this proxy?',
-      filters: {
-        protocol: 'Protocol',
-        status: 'Status',
-        allProtocols: 'All Protocols',
-        allStatuses: 'All Statuses'
-      }
+      backupProxy: 'Backup proxy'
     },
 
     // Redeem Codes
@@ -294,8 +262,7 @@ export default {
         usedAt: 'Used At',
         createdAt: 'Created At',
         expiresAt: 'Expires At',
-        actions: 'Actions',
-        createdAt: 'Created At'
+        actions: 'Actions'
       },
       userPrefix: 'User #{id}',
       exportCsv: 'Export CSV',
@@ -329,20 +296,6 @@ export default {
       amount: 'Amount ($)',
       value: 'Value',
       count: 'Count',
-      form: {
-        typeLabel: 'Type',
-        selectType: 'Select type',
-        valueLabel: 'Value',
-        valuePlaceholder: 'Enter value',
-        balanceHint: 'Balance amount in USD',
-        concurrencyHint: 'Additional concurrency granted',
-        countLabel: 'Count',
-        countPlaceholder: 'Enter quantity',
-        countHint: 'Number of redeem codes to generate',
-        prefixLabel: 'Prefix (optional)',
-        prefixPlaceholder: 'For example: GIFT',
-        expiresLabel: 'Expires At (optional)'
-      },
       generating: 'Generating...',
       generate: 'Generate',
       copyAll: 'Copy All',
@@ -415,25 +368,7 @@ export default {
       codeDisabledSuccess: 'Redeem code disabled',
       codeEnabledSuccess: 'Redeem code enabled',
       codeDeletedSuccess: 'Redeem code deleted successfully',
-      failedToUpdate: 'Failed to update redeem code',
-      noCodes: 'No redeem codes',
-      noCodesDescription: 'Generate redeem codes to distribute balance, concurrency, subscriptions, or invitations.',
-      copyCode: 'Copy Code',
-      enableCode: 'Enable Code',
-      disableCode: 'Disable Code',
-      codesGeneratedSuccess: 'Codes generated successfully',
-      codeDeletedSuccess: 'Redeem code deleted successfully',
-      codeEnabledSuccess: 'Redeem code enabled successfully',
-      codeDisabledSuccess: 'Redeem code disabled successfully',
-      failedToUpdate: 'Failed to update redeem code',
-      deleteConfirmMessage: 'Are you sure you want to delete this redeem code?',
-      filters: {
-        search: 'Search',
-        type: 'Type',
-        status: 'Status',
-        allTypes: 'All Types',
-        allStatuses: 'All Statuses'
-      }
+      failedToUpdate: 'Failed to update redeem code'
     },
 
     // Announcements

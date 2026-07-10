@@ -77,29 +77,7 @@ export default {
       groupPricingDesc: 'Configure batch discount and hold ratio',
       systemSettings: 'System Settings',
       configureSystem: 'Configure system settings',
-      failedToLoad: 'Failed to load dashboard statistics',
-      totalApiKeys: 'Total API Keys',
-      activeApiKeys: 'Active API Keys',
-      totalUsers: 'Total Users',
-      totalAccounts: 'Total Accounts',
-      activeAccounts: 'Active Accounts',
-      totalRequests: 'Total Requests',
-      todayCost: 'Today Cost',
-      totalCost: 'Total Cost',
-      input: 'Input',
-      output: 'Output',
-      cache: 'Cache',
-      averageTime: 'Average Time',
-      last7Days: 'Last 7 Days',
-      noUsageRecords: 'No usage records',
-      startUsingApi: 'Usage history will appear here after API requests start.',
-      viewAllUsage: 'View All',
-      manageUsers: 'Manage Users',
-      viewUserAccounts: 'View and manage user accounts',
-      manageAccounts: 'Manage Accounts',
-      configureAiAccounts: 'Configure AI platform accounts',
-      systemSettings: 'System Settings',
-      configureSystem: 'Configure system settings'
+      failedToLoad: 'Failed to load dashboard statistics'
     },
 
     backup: {
@@ -500,21 +478,7 @@ export default {
         selectStatus: 'Select status',
         rpmLimit: 'Requests Per Minute (RPM)',
         rpmLimitPlaceholder: '0 = unlimited',
-        rpmLimitHint: 'Max requests per minute for this user; 0 = unlimited. Acts as a fallback only when the group has no rpm_limit set.',
-        emailLabel: 'Email',
-        emailPlaceholder: 'Enter email',
-        usernameLabel: 'Username',
-        usernamePlaceholder: 'Enter username',
-        passwordLabel: 'Password',
-        passwordPlaceholder: 'Enter password',
-        statusLabel: 'Status',
-        balanceLabel: 'Balance',
-        concurrencyLabel: 'Concurrency',
-        notesLabel: 'Notes',
-        notesPlaceholder: 'Enter notes',
-        notesHint: 'Notes are only visible to administrators',
-        selectRole: 'Select role',
-        selectStatus: 'Select status'
+        rpmLimitHint: 'Max requests per minute for this user; 0 = unlimited. Acts as a fallback only when the group has no rpm_limit set.'
       },
       columns: {
         user: 'User',
@@ -769,27 +733,7 @@ export default {
         cellColumnTooltip: 'Only platforms with a limit are shown',
         subscriptionWarning: 'This user has an active subscription. Platform quotas only apply to balance (standard) mode requests; subscription mode requests are not subject to these limits.',
         invalidNumber: 'The following fields contain invalid numbers. Please fix them before saving: {fields}',
-      },
-      searchPlaceholder: 'Search users...',
-      allStatuses: 'All Statuses',
-      roleFilter: 'Role',
-      statusFilter: 'Status',
-      noUsers: 'No users',
-      noUsersDescription: 'Create your first user to get started.',
-      saving: 'Saving...',
-      userCreatedSuccess: 'User created successfully',
-      userUpdatedSuccess: 'User updated successfully',
-      userDeletedSuccess: 'User deleted successfully',
-      failedToSave: 'Failed to save user',
-      deleteConfirmMessage: 'Are you sure you want to delete this user?',
-      adjustBalance: 'Adjust Balance',
-      adjustConcurrency: 'Adjust Concurrency',
-      adjustmentAmount: 'Adjustment Amount',
-      adjustmentAmountHint: 'Use positive values to add and negative values to subtract.',
-      currentConcurrency: 'Current Concurrency',
-      balanceAdjustedSuccess: 'Balance adjusted successfully',
-      concurrencyAdjustedSuccess: 'Concurrency adjusted successfully',
-      failedToAdjust: 'Failed to adjust user value'
+      }
     },
 
     // Groups
@@ -833,10 +777,7 @@ export default {
         userName: 'Username',
         userEmail: 'Email',
         userNotes: 'Notes',
-        userStatus: 'Status',
-        apiKeys: 'API Keys',
-        exclusive: 'Exclusive',
-        priority: 'Priority'
+        userStatus: 'Status'
       },
       usageToday: 'Today',
       usageTotal: 'Total',
@@ -879,23 +820,7 @@ export default {
         accountsPlaceholder: 'Select accounts (leave empty for no restriction)',
         priorityLabel: 'Priority',
         priorityHint: 'Lower value means higher priority, used for account scheduling',
-        statusLabel: 'Status',
-        rpmLimitHint: 'Max requests per minute for each user in this group; 0 = unlimited. Once set, it takes over per-user rate limiting in this group (overrides the user-level rpm_limit fallback).',
-        nameLabel: 'Name',
-        namePlaceholder: 'Enter group name',
-        descriptionLabel: 'Description',
-        descriptionPlaceholder: 'Enter description',
-        platformLabel: 'Platform',
-        platformPlaceholder: 'Select platform',
-        rateMultiplierLabel: 'Rate Multiplier',
-        rateMultiplierHint: 'Cost multiplier for this group, e.g. 1.5 = 150% of base cost',
-        statusLabel: 'Status',
-        exclusiveLabel: 'Exclusive Group',
-        exclusiveHint: 'Exclusive groups are manually assigned to specific users',
-        priorityLabel: 'Priority',
-        priorityHint: 'Lower values have higher priority',
-        accountsLabel: 'Accounts',
-        accountsPlaceholder: 'Select accounts'
+        statusLabel: 'Status'
       },
       exclusiveObj: {
         yes: 'Yes',
@@ -1116,18 +1041,7 @@ export default {
         geminiText: 'Gemini Text',
         geminiImage: 'Gemini Image',
         hint: 'Select at least one model family'
-      },
-      exclusiveFilter: 'Exclusive',
-      exclusiveObj: {
-        yes: 'Exclusive',
-        no: 'Public'
-      },
-      noGroups: 'No groups',
-      noGroupsDescription: 'Create your first group to organize API keys.',
-      saving: 'Saving...',
-      groupCreatedSuccess: 'Group created successfully',
-      groupUpdatedSuccess: 'Group updated successfully',
-      groupDeletedSuccess: 'Group deleted successfully'
+      }
     },
 
     // Available Channels (aggregated read-only view)
