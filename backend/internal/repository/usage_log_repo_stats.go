@@ -187,11 +187,21 @@ func (r *usageLogRepository) GetModelStatsAggregated(ctx context.Context, modelN
 // GetDailyStatsAggregated 使用 SQL 聚合统计用户的每日使用数据
 // 性能优化：使用 GROUP BY 在数据库层按日期分组聚合，避免应用层循环分组统计
 func (r *usageLogRepository) GetDailyStatsAggregated(ctx context.Context, userID int64, startTime, endTime time.Time) (result []map[string]any, err error) {
+	return r.getDailyStatsAggregated(ctx, "user_id = $1 AND created_at >= $2 AND created_at < $3", []any{userID, startTime, endTime})
+}
+
+// GetGlobalDailyStatsAggregated returns daily usage totals across all users.
+func (r *usageLogRepository) GetGlobalDailyStatsAggregated(ctx context.Context, startTime, endTime time.Time) ([]map[string]any, error) {
+	return r.getDailyStatsAggregated(ctx, "created_at >= $1 AND created_at < $2", []any{startTime, endTime})
+}
+
+func (r *usageLogRepository) getDailyStatsAggregated(ctx context.Context, whereClause string, args []any) (result []map[string]any, err error) {
 	tzName := resolveUsageStatsTimezone()
-	query := `
+	args = append(args, tzName)
+	query := fmt.Sprintf(`
 		SELECT
 			-- 使用应用时区分组，避免数据库会话时区导致日边界偏移。
-			TO_CHAR(created_at AT TIME ZONE $4, 'YYYY-MM-DD') as date,
+			TO_CHAR(created_at AT TIME ZONE $%d, 'YYYY-MM-DD') as date,
 			COUNT(*) as total_requests,
 			COALESCE(SUM(input_tokens), 0) as total_input_tokens,
 			COALESCE(SUM(output_tokens), 0) as total_output_tokens,
@@ -200,12 +210,12 @@ func (r *usageLogRepository) GetDailyStatsAggregated(ctx context.Context, userID
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
 			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms
 		FROM usage_logs
-		WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
+		WHERE %s
 		GROUP BY 1
 		ORDER BY 1
-	`
+	`, len(args), whereClause)
 
-	rows, err := r.sql.QueryContext(ctx, query, userID, startTime, endTime, tzName)
+	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
