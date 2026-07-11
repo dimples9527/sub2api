@@ -26,6 +26,9 @@
         <!-- Announcement Bell -->
         <AnnouncementBell v-if="user" />
 
+        <!-- Admin Version Monitor -->
+        <VersionBadge v-if="authStore.isAdmin" :version="appStore.siteVersion" />
+
         <!-- Model Monitor Link -->
         <a
           v-if="llmMonitorStatusApiUrl"
@@ -260,6 +263,7 @@ import { useAdminSettingsStore } from '@/stores/adminSettings'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import SubscriptionProgressMini from '@/components/common/SubscriptionProgressMini.vue'
 import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
+import VersionBadge from '@/components/common/VersionBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { sanitizeUrl } from '@/utils/url'
 
