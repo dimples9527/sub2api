@@ -143,6 +143,40 @@ describe('UpstreamGroupsView', () => {
     expect(classes).toContain('action:ug-table-action-column')
   })
 
+  it('reports a monitor request failure once instead of repeating it in every trend cell', async () => {
+    adminAPIMock.groups.getUpstreamMonitorStatus.mockRejectedValueOnce({
+      message: 'Request failed with status code 502',
+      error: 'monitor upstream request failed',
+    })
+
+    const wrapper = mount(UpstreamGroupsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any) => slots['cell-monitor_trend']?.({ row })))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          UpstreamGroupAvailabilityTrend: {
+            props: ['error'],
+            template: '<div class="trend-error-prop">{{ error }}</div>',
+          },
+          Select: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('.trend-error-prop').text()).toBe('')
+    expect(appStoreMock.showError).toHaveBeenCalledWith('monitor upstream request failed')
+  })
+
   it('lets the fixed upstream group table fill wide containers', () => {
     expect(upstreamGroupsSource).toContain('table-layout: fixed;')
     expect(upstreamGroupsSource).toContain('width: max(100%, 1560px);')

@@ -136,9 +136,10 @@ export function extractApiErrorMessage(
   // Plain object from API client interceptor (most common case)
   if (typeof err === 'object' && err !== null) {
     const e = err as ApiErrorLike
-    // Interceptor shape: { message, error }
-    if (e.message) return e.message
+    // Interceptor shape: { message, error }. Backend `error` is more specific
+    // than Axios messages such as "Request failed with status code 502".
     if (e.error) return e.error
+    if (e.message) return e.message
     // Legacy axios shape: { response.data.detail }
     if (e.response?.data?.detail) return e.response.data.detail
     if (e.response?.data?.message) return e.response.data.message

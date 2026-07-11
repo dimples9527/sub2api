@@ -196,7 +196,6 @@
                 <UpstreamGroupAvailabilityTrend
                   :row="monitorTrendFor(row)"
                   :loading="monitorLoading"
-                  :error="monitorError"
                   :empty-text="t('admin.upstreamGroups.monitorTrendEmpty')"
                   :loading-text="t('admin.upstreamGroups.monitorTrendLoading')"
                   :label="t('admin.upstreamGroups.columns.monitorTrend')"
@@ -774,7 +773,6 @@ const showTempUnsched = ref(false)
 const tempUnschedAccount = ref<Account | null>(null)
 const monitorTrendIndex = ref<Map<string, UpstreamMonitorTrendRow>>(new Map())
 const monitorLoading = ref(false)
-const monitorError = ref('')
 const loadError = ref('')
 const rateFixConfig = ref<UpstreamGroupAutoRateFixConfig | null>(null)
 const autoFixForm = ref({
@@ -1025,7 +1023,6 @@ async function syncBoundAccounts(groupItems: UpstreamGroupComparison[], requestI
 
 async function loadMonitorTrend(requestId: number) {
   monitorLoading.value = true
-  monitorError.value = ''
   try {
     const payload = await adminAPI.groups.getUpstreamMonitorStatus({ period: '90m', board: 'hot' })
     if (requestId !== reloadRequestId) return
@@ -1033,7 +1030,7 @@ async function loadMonitorTrend(requestId: number) {
   } catch (err) {
     if (requestId !== reloadRequestId) return
     monitorTrendIndex.value = new Map()
-    monitorError.value = extractApiErrorMessage(err, t('admin.upstreamGroups.monitorTrendLoadFailed'))
+    appStore.showError(extractApiErrorMessage(err, t('admin.upstreamGroups.monitorTrendLoadFailed')))
   } finally {
     if (requestId === reloadRequestId) {
       monitorLoading.value = false

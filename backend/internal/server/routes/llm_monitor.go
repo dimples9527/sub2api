@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -69,6 +70,7 @@ func proxyLLMMonitorStatus(
 		return
 	}
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept-Encoding", "gzip")
 	req.Header.Set("User-Agent", "sub2api-llm-monitor/1.0")
 
 	resp, err := http.DefaultClient.Do(req)
@@ -77,17 +79,27 @@ func proxyLLMMonitorStatus(
 		return
 	}
 	defer resp.Body.Close()
+	responseBody := io.Reader(resp.Body)
+	if strings.EqualFold(strings.TrimSpace(resp.Header.Get("Content-Encoding")), "gzip") {
+		gzipReader, gzipErr := gzip.NewReader(resp.Body)
+		if gzipErr != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "failed to decompress monitor upstream response"})
+			return
+		}
+		defer gzipReader.Close()
+		responseBody = gzipReader
+	}
 
 	contentType := resp.Header.Get("Content-Type")
 	if strings.TrimSpace(contentType) == "" {
 		contentType = "application/json"
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		c.DataFromReader(resp.StatusCode, resp.ContentLength, contentType, resp.Body, map[string]string{})
+		c.DataFromReader(resp.StatusCode, -1, contentType, responseBody, map[string]string{})
 		return
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(responseBody)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to read monitor upstream response"})
 		return

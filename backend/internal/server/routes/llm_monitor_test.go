@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"compress/gzip"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -9,7 +10,38 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
 )
+
+func TestAdminLLMMonitorStatusProxySupportsRequiredGzipResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotAcceptable)
+			_, _ = w.Write([]byte(`{"error":{"message":"gzip required"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Encoding", "gzip")
+		writer := gzip.NewWriter(w)
+		_, _ = writer.Write([]byte(`{"groups":[{"provider":"gzip provider"}]}`))
+		require.NoError(t, writer.Close())
+	}))
+	defer upstream.Close()
+
+	router := gin.New()
+	admin := router.Group("/admin")
+	RegisterAdminLLMMonitorRoutes(admin, llmMonitorSettingsStub{statusAPIURL: upstream.URL + "/api/status"})
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/upstream-management/monitor-status", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), "gzip provider")
+}
 
 type llmMonitorSettingsStub struct {
 	statusAPIURL string
