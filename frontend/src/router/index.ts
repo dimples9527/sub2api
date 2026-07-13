@@ -544,6 +544,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/upstream-management',
+    name: 'AdminUpstreamDashboard',
+    component: () => import('@/views/admin/upstream-management/UpstreamDashboardView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Upstream Operations',
+      titleKey: 'admin.upstreamDashboard.title',
+      descriptionKey: 'admin.upstreamDashboard.description'
+    }
+  },
+  {
     path: '/admin/upstream-management/providers',
     name: 'AdminUpstreamProviders',
     component: () => import('@/views/admin/upstream-management/UpstreamProvidersView.vue'),
@@ -553,6 +565,18 @@ const routes: RouteRecordRaw[] = [
       title: 'Upstream Management',
       titleKey: 'admin.upstreamProviders.title',
       descriptionKey: 'admin.upstreamProviders.description'
+    }
+  },
+  {
+    path: '/admin/upstream-management/automations',
+    name: 'AdminUpstreamAutomations',
+    component: () => import('@/views/admin/upstream-management/UpstreamAutomationCenterView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Upstream Automations',
+      titleKey: 'admin.upstreamAutomations.title',
+      descriptionKey: 'admin.upstreamAutomations.description'
     }
   },
   {

@@ -34,6 +34,7 @@ import affiliatesAPI from './affiliates'
 import riskControlAPI from './riskControl'
 import adminComplianceAPI from './compliance'
 import upstreamProvidersAPI from './upstreamProviders'
+import upstreamDashboardAPI from './upstreamDashboard'
 import upstreamManagementAPI from './upstreamManagement'
 import upstreamAccountSyncAPI from './upstreamAccountSync'
 import modelSquareAPI from './modelSquare'
@@ -73,6 +74,7 @@ export const adminAPI = {
   riskControl: riskControlAPI,
   compliance: adminComplianceAPI,
   upstreamProviders: upstreamProvidersAPI,
+  upstreamDashboard: upstreamDashboardAPI,
   upstreamManagement: upstreamManagementAPI,
   upstreamAccountSync: upstreamAccountSyncAPI,
   modelSquare: modelSquareAPI
@@ -110,6 +112,7 @@ export {
   riskControlAPI,
   adminComplianceAPI,
   upstreamProvidersAPI,
+  upstreamDashboardAPI,
   upstreamManagementAPI,
   upstreamAccountSyncAPI,
   modelSquareAPI
@@ -123,6 +126,19 @@ export type { ErrorPassthroughRule, CreateRuleRequest, UpdateRuleRequest } from 
 export type { BackupAgentHealth, DataManagementConfig } from './dataManagement'
 export type { TLSFingerprintProfile, CreateProfileRequest, UpdateProfileRequest } from './tlsFingerprintProfile'
 export type { ContentModerationConfig, ContentModerationLog, ModerationMode } from './riskControl'
+export type {
+  UpstreamDashboardCost,
+  UpstreamDashboardIssue,
+  UpstreamDashboardModelRanking,
+  UpstreamDashboardProviderRanking,
+  UpstreamDashboardRange,
+  UpstreamDashboardResponse,
+  UpstreamDashboardStability,
+  UpstreamDashboardSummary,
+  UpstreamDashboardTask,
+  UpstreamDashboardTrendPoint,
+  UpstreamDashboardWarning
+} from './upstreamDashboard'
 export type {
   UpstreamProviderBalance,
   UpstreamProviderConfig,

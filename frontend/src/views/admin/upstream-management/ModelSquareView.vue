@@ -298,6 +298,7 @@ import { adminAPI } from '@/api/admin'
 import type { AdminModelSquareResult, ModelSquareGroup, ModelSquareModel } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
+import { useRouteQueryFilters } from '@/composables/useRouteQueryFilters'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -321,6 +322,11 @@ const searchQuery = ref('')
 const providerFilter = ref('')
 const modeFilter = ref('')
 const groupFilter = ref('')
+useRouteQueryFilters([
+  { queryKey: 'provider', state: providerFilter },
+  { queryKey: 'group', state: groupFilter },
+  { queryKey: 'model', state: searchQuery },
+])
 const viewMode = ref<'grid' | 'list'>('grid')
 const groupDialogModel = ref<ModelSquareModel | null>(null)
 const copiedModelId = ref('')

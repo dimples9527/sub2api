@@ -86,7 +86,7 @@
                 type="button"
                 class="ug-btn ug-btn-primary"
                 :disabled="loading || applying || summary.rateRisks === 0"
-                @click="applyRateFixes"
+                @click="openRateFixPreview"
               >
                 <Icon name="sync" size="sm" :class="applying ? 'animate-spin' : ''" />
                 <span>{{ t('admin.upstreamGroups.fixRates') }}</span>
@@ -579,6 +579,14 @@
           </div>
         </div>
 
+        <UpstreamRateFixPreviewDialog
+          :show="showRateFixPreview"
+          :items="rateFixPreviewItems"
+          :loading="applying"
+          @cancel="closeRateFixPreview"
+          @confirm="confirmRateFixes"
+        />
+
         <CreateAccountModal
           v-if="showCreateAccountModal"
           :show="showCreateAccountModal"
@@ -723,6 +731,7 @@ import type {
 } from '@/api/admin/upstreamManagement'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
+import { useRouteQueryFilters } from '@/composables/useRouteQueryFilters'
 import { formatDateTime } from '@/utils/format'
 import {
   buildUpstreamMonitorTrendIndex,
@@ -739,6 +748,7 @@ import Select, { type SelectOption } from '@/components/common/Select.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import Icon from '@/components/icons/Icon.vue'
 import UpstreamGroupAvailabilityTrend from '@/components/admin/upstream/UpstreamGroupAvailabilityTrend.vue'
+import UpstreamRateFixPreviewDialog from '@/components/admin/upstream/UpstreamRateFixPreviewDialog.vue'
 import { AccountStatusIndicator, CreateAccountModal, EditAccountModal, TempUnschedStatusModal } from '@/components/account'
 
 const { t } = useI18n()
@@ -749,6 +759,8 @@ type QuickGroupFilterKey = 'all' | 'unmatched' | 'risk' | 'matched'
 const result = ref<UpstreamGroupCompareResult | null>(null)
 const loading = ref(false)
 const applying = ref(false)
+const showRateFixPreview = ref(false)
+const rateFixPreviewItems = ref<UpstreamGroupComparison[]>([])
 const loadingRateFixConfig = ref(false)
 const savingRateFixConfig = ref(false)
 const syncingGroupKey = ref<string | null>(null)
@@ -785,6 +797,10 @@ const matchFilter = ref('')
 const rateFilter = ref('')
 const showGroupAdvancedFilters = ref(false)
 const activeQuickFilter = ref<QuickGroupFilterKey>('all')
+useRouteQueryFilters([
+  { queryKey: 'provider', state: searchQuery },
+  { queryKey: 'rateRisk', state: rateFilter, fromQuery: value => value === 'true' ? 'risk' : '', toQuery: value => value === 'risk' ? 'true' : undefined },
+])
 const expandedMobileGroupKeys = ref<Set<string>>(new Set())
 const syncDialogItem = ref<UpstreamGroupComparison | null>(null)
 const syncRateMultiplier = ref(1)
@@ -1038,10 +1054,30 @@ async function loadMonitorTrend(requestId: number) {
   }
 }
 
-async function applyRateFixes() {
+function openRateFixPreview() {
+  rateFixPreviewItems.value = (result.value?.items || []).filter(item => item.needs_rate_increase)
+  if (!rateFixPreviewItems.value.length) return
+  showRateFixPreview.value = true
+}
+
+function closeRateFixPreview() {
+  if (applying.value) return
+  showRateFixPreview.value = false
+}
+
+async function confirmRateFixes() {
   applying.value = true
   try {
+    const latestResult = await adminAPI.upstreamManagement.getGroups()
+    result.value = latestResult
+    rateFixPreviewItems.value = (latestResult.items || []).filter(item => item.needs_rate_increase)
+    if (!rateFixPreviewItems.value.length) {
+      showRateFixPreview.value = false
+      appStore.showSuccess(t('admin.upstreamGroups.rateFixNoRisks'))
+      return
+    }
     result.value = await adminAPI.upstreamManagement.applyRateFixes()
+    showRateFixPreview.value = false
     appStore.showSuccess(t('admin.upstreamGroups.fixSuccess'))
   } catch (err) {
     appStore.showError(extractApiErrorMessage(err, t('admin.upstreamGroups.fixFailed')))

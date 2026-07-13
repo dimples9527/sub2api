@@ -76,102 +76,27 @@
             </div>
           </section>
 
-          <section class="rate-guard-panel">
-            <div class="guard-left">
-              <label class="guard-switch" :class="{ 'is-on': rateGuardForm.enabled }">
-                <input v-model="rateGuardForm.enabled" type="checkbox" />
-                <span></span>
-              </label>
-              <div class="guard-copy">
-                <div class="guard-title">{{ t('admin.upstreamAccounts.rateGuardTitle') }}</div>
-                <div class="guard-description">{{ t('admin.upstreamAccounts.rateGuardDescription') }}</div>
-                <div class="guard-status-line">
-                  <span :class="['status-pill', rateGuardForm.enabled ? 'status-pill-on' : 'status-pill-muted']">
-                    {{ rateGuardForm.enabled ? t('admin.upstreamAccounts.rateGuardEnabled') : t('admin.upstreamAccounts.rateGuardDisabled') }}
-                  </span>
-                  <span>
-                    {{ t('admin.upstreamAccounts.rateGuardLastRun') }}:
-                    {{ rateGuardLastRunText }}
-                  </span>
-                  <span
-                    v-if="rateGuardConfig?.last_run_status"
-                    :class="['record-status', rateGuardConfig.last_run_status === 'failed' ? 'record-status-error' : 'record-status-success']"
-                  >
-                    {{ rateGuardConfig.last_run_status === 'failed' ? t('admin.upstreamAccounts.rateGuardStatusFailed') : t('admin.upstreamAccounts.rateGuardStatusSuccess') }}
-                  </span>
-                  <span v-if="rateGuardConfig?.last_run_message" class="status-error-message">
-                    {{ rateGuardConfig.last_run_message }}
-                  </span>
-                  <span v-if="rateGuardIgnoredCount" class="guard-ignore-pill">
-                    <Icon name="shield" size="xs" :stroke-width="2" />
-                    {{ t('admin.upstreamAccounts.rateGuardIgnoredSummary', { count: rateGuardIgnoredCount }) }}
-                  </span>
-                </div>
-              </div>
-            </div>
-            <div v-if="unhandledSyncLogEntries.length" class="guard-sync-log-warning">
-              <div class="guard-warning-icon">
-                <Icon name="exclamationTriangle" size="md" :stroke-width="2" />
-              </div>
-              <div class="guard-warning-copy">
-                <strong>{{ t('admin.upstreamAccounts.unhandledSyncLogs', '待处理同步日志') }} {{ unhandledSyncLogEntries.length }}</strong>
-                <span>{{ t('admin.upstreamAccounts.unhandledSyncLogsDescription', '有低倍率分组解绑记录需要确认处理') }}</span>
-              </div>
-              <button type="button" class="ui-button ui-button-warning" @click="openSyncLogsDialog">
-                {{ t('admin.upstreamAccounts.openSyncLogs', '打开同步日志') }}
-              </button>
-            </div>
-            <div class="guard-controls">
-              <span class="control-label">{{ t('admin.upstreamAccounts.rateGuardAutoRun') }} {{ t('admin.upstreamAccounts.rateGuardIntervalSeconds') }}</span>
-              <input
-                v-model.number="rateGuardForm.interval_seconds"
-                type="number"
-                min="1"
-                class="ui-input interval-input"
-              />
-              <span class="guard-hint">{{ rateGuardDailyRunsText }}</span>
-              <div class="guard-ignore-control">
-                <span class="control-label">{{ t('admin.upstreamAccounts.rateGuardIgnoredAccounts') }}</span>
-                <button
-                  type="button"
-                  class="guard-ignore-summary"
-                  :class="{ 'is-empty': !rateGuardIgnoredCount, 'is-invalid': rateGuardIgnoredInputInvalid }"
-                  :disabled="loadingRateGuardConfig || savingRateGuardConfig"
-                  data-test="rate-guard-ignored-manage"
-                  @click="openRateGuardIgnoredDialog"
-                >
-                  <Icon name="shield" size="xs" :stroke-width="2" />
-                  <span>{{ rateGuardIgnoredSummaryText }}</span>
-                </button>
-                <button
-                  type="button"
-                  class="ui-button ui-button-xs"
-                  :disabled="loadingRateGuardConfig || savingRateGuardConfig"
-                  data-test="rate-guard-ignored-manage-button"
-                  @click="openRateGuardIgnoredDialog"
-                >
-                  {{ t('admin.upstreamAccounts.rateGuardIgnoredManage') }}
-                </button>
-              </div>
-              <button
-                type="button"
-                class="ui-button"
-                :disabled="loadingRateGuardConfig || savingRateGuardConfig"
-                @click="saveRateGuardConfig"
-              >
-                {{ t('common.save') }}
-              </button>
-              <button
-                type="button"
-                class="ui-button ui-button-primary"
-                :disabled="loadingRateGuardConfig || savingRateGuardConfig || runningRateGuardNow"
-                @click="runRateGuardNow"
-              >
-                <Icon name="play" size="sm" :stroke-width="2" :class="runningRateGuardNow ? 'animate-pulse' : ''" />
-                {{ t('admin.upstreamAccounts.rateGuardRunNow') }}
-              </button>
-            </div>
-          </section>
+          <UpstreamAccountRateGuardPanel
+            :enabled="rateGuardForm.enabled"
+            :interval-seconds="rateGuardForm.interval_seconds"
+            :config="rateGuardConfig"
+            :last-run-text="rateGuardLastRunText"
+            :daily-runs-text="rateGuardDailyRunsText"
+            :ignored-count="rateGuardIgnoredCount"
+            :ignored-summary-text="rateGuardIgnoredSummaryText"
+            :ignored-input-invalid="rateGuardIgnoredInputInvalid"
+            :loading="loadingRateGuardConfig"
+            :saving="savingRateGuardConfig"
+            :running="runningRateGuardNow"
+            :unhandled-sync-log-count="unhandledSyncLogEntries.length"
+            :automation-target="rateGuardAutomationTarget"
+            @update:enabled="rateGuardForm.enabled = $event"
+            @update:interval-seconds="rateGuardForm.interval_seconds = $event"
+            @manage-ignored="openRateGuardIgnoredDialog"
+            @open-logs="openSyncLogsDialog"
+            @save="saveRateGuardConfig"
+            @run="runRateGuardNow"
+          />
 
           <section class="filter-row" :class="{ 'filters-expanded': showAdvancedFilters }">
             <div class="filter-sticky-row">
@@ -1602,6 +1527,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { adminAPI } from '@/api/admin'
 import type {
   UpstreamAccountRateGuardConfig,
@@ -1629,6 +1555,7 @@ import type {
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime } from '@/utils/format'
+import { useRouteQueryFilters } from '@/composables/useRouteQueryFilters'
 import type { Column } from '@/components/common/types'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -1644,8 +1571,11 @@ import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
 import TempUnschedStatusModal from '@/components/account/TempUnschedStatusModal.vue'
 import UpstreamProviderTrendModal from '@/components/admin/upstream/UpstreamProviderTrendModal.vue'
+import UpstreamAccountRateGuardPanel from '@/components/admin/upstream/UpstreamAccountRateGuardPanel.vue'
 
 const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
 const appStore = useAppStore()
 
 type AccountTestStatus = 'testing' | 'success' | 'failed'
@@ -1656,7 +1586,7 @@ type BatchTestPlatformOption = {
 }
 type BatchTestSortKey = 'account' | 'platform' | 'upstream_rate' | 'schedulable' | 'status' | 'latency' | 'finished_at'
 type BatchTestResultFilter = 'all' | 'failed' | 'failed_schedulable' | 'failed_unschedulable' | 'success' | 'success_unschedulable' | 'success_upstream_disabled' | 'skipped'
-type QuickFilterKey = 'all' | 'update' | 'risk' | 'ignored' | 'unbound' | 'failed' | 'enabled' | 'disabled'
+type QuickFilterKey = 'all' | 'update' | 'conflict' | 'risk' | 'ignored' | 'unbound' | 'failed' | 'enabled' | 'disabled'
 type RateGuardIgnoredAccountDetail = {
   id: number
   name: string
@@ -1707,10 +1637,15 @@ const platformFilter = ref('')
 const sourceFilter = ref('')
 const groupFilter = ref('')
 const activeQuickFilter = ref<QuickFilterKey>('all')
+useRouteQueryFilters([
+  { queryKey: 'provider', state: providerFilter },
+  { queryKey: 'status', state: activeQuickFilter, fromQuery: value => value === 'conflict' ? 'conflict' : 'all', toQuery: value => value === 'conflict' ? 'conflict' : undefined },
+])
 const showAdvancedFilters = ref(false)
 const showMobileBackToFilters = ref(false)
 const activeStatDetailsKey = ref<StatCardKey | null>(null)
 const showRateGuardIgnoredDialog = ref(false)
+const rateGuardAutomationTarget = ref(false)
 const rateGuardConfig = ref<UpstreamAccountRateGuardConfig | null>(null)
 const rateGuardForm = ref({
   enabled: false,
@@ -2029,6 +1964,12 @@ const quickFilterOptions = computed(() => {
       key: 'update' as const,
       label: t('admin.upstreamAccounts.toUpdate'),
       count: source.filter(item => item.action === 'update').length
+    },
+    {
+      key: 'conflict' as const,
+      label: t('admin.upstreamAccounts.quickFilterConflict'),
+      count: source.filter(item => item.action === 'conflict').length,
+      tone: 'danger' as const
     },
     {
       key: 'risk' as const,
@@ -2780,6 +2721,7 @@ function upstreamAccountTestFailed(row: UpstreamAccountSyncItem) {
 
 function upstreamAccountMatchesQuickFilter(row: UpstreamAccountSyncItem, filter: QuickFilterKey) {
   if (filter === 'update') return row.action === 'update'
+  if (filter === 'conflict') return row.action === 'conflict'
   if (filter === 'risk') return row.rate_violation
   if (filter === 'ignored') return isRateGuardIgnored(row)
   if (filter === 'unbound') return upstreamAccountHasNoGroups(row)
@@ -3832,8 +3774,19 @@ function scrollToUpstreamFilters() {
   })
 }
 
-onMounted(() => {
-  void reload()
+async function focusAutomationSettingsFromQuery() {
+  if (route.query.automation !== 'rate-guard') return
+  rateGuardAutomationTarget.value = true
+  await nextTick()
+  document.querySelector<HTMLElement>('[data-test="rate-guard-panel"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  const query = { ...route.query }
+  delete query.automation
+  await router.replace({ query })
+}
+
+onMounted(async () => {
+  await reload()
+  await focusAutomationSettingsFromQuery()
   updateMobileBackToFiltersVisibility()
   window.addEventListener('scroll', updateMobileBackToFiltersVisibility, { passive: true })
   window.addEventListener('resize', updateMobileBackToFiltersVisibility)
@@ -4107,6 +4060,10 @@ onBeforeUnmount(() => {
   gap: 20px;
   align-items: center;
   padding: 18px;
+}
+
+.rate-guard-panel.is-automation-target {
+  @apply ring-2 ring-violet-500 ring-offset-2 dark:ring-offset-gray-950;
 }
 
 .guard-left {

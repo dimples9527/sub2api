@@ -10,6 +10,7 @@ const { adminAPIMock, appStoreMock } = vi.hoisted(() => ({
     upstreamManagement: {
       getGroups: vi.fn(),
       getRateFixConfig: vi.fn(),
+      applyRateFixes: vi.fn(),
       createLocalGroupFromUpstream: vi.fn(),
       saveGroupMapping: vi.fn(),
       markRateFixRecordHandled: vi.fn(),
@@ -80,6 +81,12 @@ describe('UpstreamGroupsView', () => {
     adminAPIMock.upstreamManagement.getRateFixConfig.mockResolvedValue({
       enabled: false,
       interval_seconds: 3600,
+    })
+    adminAPIMock.upstreamManagement.applyRateFixes.mockResolvedValue({
+      default_provider: { slug: 'default-upstream', name: 'Default upstream' },
+      items: [],
+      warnings: [],
+      records: [],
     })
     adminAPIMock.upstreamManagement.createLocalGroupFromUpstream.mockResolvedValue({
       default_provider: { slug: 'default-upstream', name: 'Default upstream' },
@@ -923,5 +930,118 @@ describe('UpstreamGroupsView', () => {
     expect(adminAPIMock.upstreamManagement.markRateFixRecordHandled).toHaveBeenCalledWith('2026-06-20T00:00:00Z-42-default-upstream-VIP')
     expect(wrapper.find('.ug-rate-fix-warning').exists()).toBe(false)
     expect(wrapper.find('.ug-rate-fix-logs-dialog').text()).toContain('admin.upstreamGroups.rateFixLogHandled')
+  })
+
+  it('opens a rate fix preview without applying changes immediately', async () => {
+    adminAPIMock.upstreamManagement.getGroups.mockResolvedValue({
+      default_provider: { slug: 'default-upstream', name: 'Default upstream' },
+      items: [
+        {
+          provider_slug: 'default-upstream',
+          provider_name: 'Default upstream',
+          upstream_group_name: 'VIP',
+          upstream_group_key: 'vip',
+          upstream_rate: 2.5,
+          local_group_id: 7,
+          local_group_name: 'VIP local',
+          local_rate: 1.5,
+          matched: true,
+          needs_rate_increase: true,
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+    const wrapper = mount(UpstreamGroupsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: { template: '<div />' },
+          EmptyState: true,
+          Icon: true,
+          UpstreamGroupAvailabilityTrend: { template: '<div />' },
+          Select: true,
+        },
+      },
+    })
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text().includes('admin.upstreamGroups.fixRates'))!.trigger('click')
+
+    expect(wrapper.find('.ug-rate-fix-preview-dialog').exists()).toBe(true)
+    expect(wrapper.find('.ug-rate-fix-preview-dialog').text()).toContain('VIP local')
+    expect(adminAPIMock.upstreamManagement.applyRateFixes).not.toHaveBeenCalled()
+  })
+
+  it('refreshes risks and applies all rate fixes after confirmation', async () => {
+    const riskResult = {
+      default_provider: { slug: 'default-upstream', name: 'Default upstream' },
+      items: [
+        {
+          provider_slug: 'default-upstream', provider_name: 'Default upstream', upstream_group_name: 'VIP', upstream_group_key: 'vip',
+          upstream_rate: 2.5, local_group_id: 7, local_group_name: 'VIP local', local_rate: 1.5, matched: true, needs_rate_increase: true,
+        },
+      ],
+      warnings: [],
+      records: [],
+    }
+    adminAPIMock.upstreamManagement.getGroups.mockResolvedValue(riskResult)
+    const wrapper = mount(UpstreamGroupsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' }, TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: { template: '<div />' }, EmptyState: true, Icon: true, UpstreamGroupAvailabilityTrend: { template: '<div />' }, Select: true,
+        },
+      },
+    })
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text().includes('admin.upstreamGroups.fixRates'))!.trigger('click')
+    const callsBeforeConfirm = adminAPIMock.upstreamManagement.getGroups.mock.calls.length
+
+    await wrapper.find('.ug-rate-fix-preview-confirm').trigger('click')
+    await flushPromises()
+
+    expect(adminAPIMock.upstreamManagement.getGroups.mock.calls.length).toBeGreaterThan(callsBeforeConfirm)
+    expect(adminAPIMock.upstreamManagement.applyRateFixes).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.ug-rate-fix-preview-dialog').exists()).toBe(false)
+  })
+
+  it('closes the rate fix preview without applying when cancelled', async () => {
+    adminAPIMock.upstreamManagement.getGroups.mockResolvedValue({
+      default_provider: { slug: 'default-upstream', name: 'Default upstream' },
+      items: [{ provider_slug: 'default-upstream', upstream_group_name: 'VIP', upstream_group_key: 'vip', upstream_rate: 2.5, local_group_id: 7, local_group_name: 'VIP local', local_rate: 1.5, matched: true, needs_rate_increase: true }],
+      warnings: [], records: [],
+    })
+    const wrapper = mount(UpstreamGroupsView, {
+      global: { stubs: { AppLayout: { template: '<div><slot /></div>' }, TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' }, DataTable: { template: '<div />' }, EmptyState: true, Icon: true, UpstreamGroupAvailabilityTrend: { template: '<div />' }, Select: true } },
+    })
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text().includes('admin.upstreamGroups.fixRates'))!.trigger('click')
+
+    await wrapper.find('.ug-rate-fix-preview-cancel').trigger('click')
+
+    expect(adminAPIMock.upstreamManagement.applyRateFixes).not.toHaveBeenCalled()
+    expect(wrapper.find('.ug-rate-fix-preview-dialog').exists()).toBe(false)
+  })
+
+  it('keeps the rate fix preview open when applying fails', async () => {
+    adminAPIMock.upstreamManagement.getGroups.mockResolvedValue({
+      default_provider: { slug: 'default-upstream', name: 'Default upstream' },
+      items: [{ provider_slug: 'default-upstream', upstream_group_name: 'VIP', upstream_group_key: 'vip', upstream_rate: 2.5, local_group_id: 7, local_group_name: 'VIP local', local_rate: 1.5, matched: true, needs_rate_increase: true }],
+      warnings: [], records: [],
+    })
+    adminAPIMock.upstreamManagement.applyRateFixes.mockRejectedValue(new Error('apply failed'))
+    const wrapper = mount(UpstreamGroupsView, {
+      global: { stubs: { AppLayout: { template: '<div><slot /></div>' }, TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' }, DataTable: { template: '<div />' }, EmptyState: true, Icon: true, UpstreamGroupAvailabilityTrend: { template: '<div />' }, Select: true } },
+    })
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text().includes('admin.upstreamGroups.fixRates'))!.trigger('click')
+
+    await wrapper.find('.ug-rate-fix-preview-confirm').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.ug-rate-fix-preview-dialog').exists()).toBe(true)
+    expect(appStoreMock.showError).toHaveBeenCalled()
   })
 })

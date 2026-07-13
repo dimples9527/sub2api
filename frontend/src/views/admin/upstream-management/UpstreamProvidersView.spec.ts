@@ -22,7 +22,7 @@ vi.mock('vue-i18n', async (importOriginal) => {
   }
 })
 
-const { adminAPIMock } = vi.hoisted(() => ({
+const { adminAPIMock, routeMock, routerReplaceMock } = vi.hoisted(() => ({
   adminAPIMock: {
     upstreamProviders: {
       list: vi.fn().mockResolvedValue([]),
@@ -50,6 +50,13 @@ const { adminAPIMock } = vi.hoisted(() => ({
       getById: vi.fn(),
     },
   },
+  routeMock: { query: {} as Record<string, string> },
+  routerReplaceMock: vi.fn(),
+}))
+
+vi.mock('vue-router', () => ({
+  useRoute: () => routeMock,
+  useRouter: () => ({ replace: routerReplaceMock }),
 }))
 
 vi.mock('@/api/admin', () => ({
@@ -99,6 +106,7 @@ const SelectStub = {
 describe('UpstreamProvidersView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    routeMock.query = {}
     adminAPIMock.upstreamProviders.list.mockResolvedValue([])
     adminAPIMock.upstreamProviders.getBalance.mockResolvedValue({
       provider_slug: 'sub-main',
@@ -209,6 +217,29 @@ describe('UpstreamProvidersView', () => {
       status: 'active',
       schedulable: true,
     }))
+  })
+
+  it.each([
+    ['balance-sampler', '.balance-sampler-dialog'],
+    ['health-guard', '.health-guard-dialog'],
+  ])('opens the %s settings dialog from the automation query', async (automation, selector) => {
+    routeMock.query = { automation }
+    const wrapper = mount(UpstreamProvidersView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /><slot name="after-table" /></div>' },
+          DataTable: { template: '<div />' },
+          BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' },
+          ConfirmDialog: true, EmptyState: true, Icon: true, Select: true, Toggle: true,
+          UpstreamBalanceCharts: { template: '<div />' },
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.find(selector).exists()).toBe(true)
+    expect(routerReplaceMock).toHaveBeenCalledWith({ query: {} })
   })
 
   it('accepts 0.1 as an account rate conversion factor', async () => {

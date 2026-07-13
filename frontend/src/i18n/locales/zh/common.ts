@@ -200,6 +200,8 @@ export default {
 
     imageGeneration: '图像工坊',
     upstreamManagement: '上游管理',
+    upstreamOverview: '运维总览',
+    upstreamAutomations: '自动任务',
     upstreamProviders: '上游供应商',
     upstreamGroups: '上游分组',
     upstreamAccounts: '上游账号',

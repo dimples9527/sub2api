@@ -448,76 +448,20 @@
       </section>
     </div>
 
-    <BaseDialog
+    <UpstreamBalanceSamplerDialog
       :show="showBalanceSamplerDialog"
-      :title="t('admin.upstreamProviders.balanceSamplerSettings')"
-      width="wide"
+      :enabled="balanceSamplerForm.enabled"
+      :interval-seconds="balanceSamplerForm.interval_seconds"
+      :provider-amount-scales="balanceSamplerForm.provider_amount_scales"
+      :providers="providers"
+      :default-scales="balanceSamplerDefaultScales"
+      :saving="savingBalanceSamplerConfig"
       @close="closeBalanceSamplerDialog"
-    >
-      <div class="balance-sampler-dialog space-y-5">
-        <div class="balance-sampler-controls">
-          <label class="balance-sampler-toggle">
-            <input
-              v-model="balanceSamplerForm.enabled"
-              type="checkbox"
-              class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-            />
-            <span>{{ t('admin.upstreamProviders.balanceSamplerAutoRun') }}</span>
-          </label>
-
-          <label class="balance-sampler-interval">
-            <span>{{ t('admin.upstreamProviders.balanceSamplerIntervalSeconds') }}</span>
-            <input
-              v-model.number="balanceSamplerForm.interval_seconds"
-              data-test="balance-sampler-interval"
-              type="number"
-              min="60"
-              step="60"
-              class="input"
-            />
-          </label>
-        </div>
-
-        <div class="balance-sampler-provider-panel">
-          <div class="balance-section-title">{{ t('admin.upstreamProviders.amountScale') }}</div>
-          <div class="balance-sampler-provider-list">
-            <label
-              v-for="provider in providers"
-              :key="provider.slug"
-              class="balance-sampler-provider-row"
-            >
-              <span class="balance-sampler-provider-name">
-                <strong>{{ provider.name }}</strong>
-                <small>{{ provider.slug }}</small>
-              </span>
-              <input
-                v-model.number="balanceSamplerForm.provider_amount_scales[provider.slug]"
-                :data-test="`balance-sampler-scale-${provider.slug}`"
-                type="number"
-                min="0.000001"
-                step="any"
-                class="input"
-                :placeholder="formatScale(defaultBalanceSamplerScaleForProvider(provider.slug))"
-              />
-            </label>
-            <div v-if="!providers.length" class="balance-sampler-empty">
-              {{ t('common.noData') }}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <template #footer>
-        <div class="flex justify-end gap-3">
-          <button type="button" class="btn btn-secondary" :disabled="savingBalanceSamplerConfig" @click="closeBalanceSamplerDialog">
-            {{ t('common.cancel') }}
-          </button>
-          <button type="button" class="btn btn-primary" :disabled="savingBalanceSamplerConfig" @click="saveBalanceSamplerConfig">
-            {{ savingBalanceSamplerConfig ? t('common.saving') : t('common.save') }}
-          </button>
-        </div>
-      </template>
-    </BaseDialog>
+      @save="saveBalanceSamplerConfig"
+      @update:enabled="balanceSamplerForm.enabled = $event"
+      @update:interval-seconds="balanceSamplerForm.interval_seconds = $event"
+      @update:provider-scale="updateBalanceSamplerProviderScale"
+    />
 
     <BaseDialog
       :show="showHealthGuardDialog"
@@ -579,60 +523,13 @@
               </button>
 
               <div v-show="healthGuardConfigExpanded" class="health-guard-config-body">
-                <div class="health-guard-config-grid">
-                  <label class="health-guard-field">
-                    <span>{{ t('admin.upstreamProviders.healthGuardIntervalSeconds') }}</span>
-                    <input v-model.number="healthGuardForm.interval_seconds" type="number" min="60" step="60" class="input" />
-                  </label>
-                  <label class="health-guard-field">
-                    <span>{{ t('admin.upstreamProviders.healthGuardMaxAccounts') }}</span>
-                    <input v-model.number="healthGuardForm.max_accounts_per_run" type="number" min="1" max="1000" step="1" class="input" />
-                  </label>
-                  <label class="health-guard-field">
-                    <span>{{ t('admin.upstreamProviders.healthGuardConcurrency') }}</span>
-                    <input v-model.number="healthGuardForm.concurrency" type="number" min="1" max="8" step="1" class="input" />
-                  </label>
-                  <label class="health-guard-field">
-                    <span>{{ t('admin.upstreamProviders.healthGuardTimeout') }}</span>
-                    <input v-model.number="healthGuardForm.timeout_per_account_seconds" type="number" min="5" max="300" step="5" class="input" />
-                  </label>
-                  <label class="health-guard-field">
-                    <span>{{ t('admin.upstreamProviders.healthGuardFailureThreshold') }}</span>
-                    <input v-model.number="healthGuardForm.failure_threshold" type="number" min="1" step="1" class="input" />
-                  </label>
-                  <label class="health-guard-field">
-                    <span>{{ t('admin.upstreamProviders.healthGuardSlowThreshold') }}</span>
-                    <input v-model.number="healthGuardForm.slow_threshold" type="number" min="1" step="1" class="input" />
-                  </label>
-                  <label class="health-guard-field">
-                    <span>{{ t('admin.upstreamProviders.healthGuardRecoveryThreshold') }}</span>
-                    <input v-model.number="healthGuardForm.recovery_threshold" type="number" min="1" step="1" class="input" />
-                  </label>
-                  <label class="health-guard-field">
-                    <span>{{ t('admin.upstreamProviders.healthGuardHealthyLatency') }}</span>
-                    <input v-model.number="healthGuardForm.healthy_latency_ms" type="number" min="1" step="500" class="input" />
-                  </label>
-                  <div class="health-guard-field health-guard-field-wide">
-                    <span>{{ t('admin.upstreamProviders.healthGuardIgnoredAccounts') }}</span>
-                    <div class="health-guard-ignored-summary" :class="{ 'is-invalid': healthGuardIgnoredInputInvalid }">
-                      <div>
-                        <strong>{{ healthGuardIgnoredSummaryText }}</strong>
-                        <small>{{ t('admin.upstreamProviders.healthGuardIgnoredAccountsHint') }}</small>
-                      </div>
-                      <button
-                        type="button"
-                        class="btn btn-secondary btn-sm"
-                        data-test="health-guard-ignored-manage"
-                        @click="openHealthGuardIgnoredDialog"
-                      >
-                        {{ t('admin.upstreamProviders.healthGuardIgnoredManage') }}
-                      </button>
-                    </div>
-                    <div v-if="healthGuardIgnoredInputInvalid" class="health-guard-ignored-list-empty">
-                      {{ t('admin.upstreamProviders.invalidHealthGuardIgnoredAccounts') }}
-                    </div>
-                  </div>
-                </div>
+                <UpstreamHealthGuardPolicyFields
+                  :values="healthGuardForm"
+                  :ignored-summary-text="healthGuardIgnoredSummaryText"
+                  :ignored-input-invalid="healthGuardIgnoredInputInvalid"
+                  @update:field="updateHealthGuardPolicyField"
+                  @manage-ignored="openHealthGuardIgnoredDialog"
+                />
 
                 <div class="health-guard-platform-panel">
                   <div class="balance-section-title">{{ t('admin.upstreamProviders.healthGuardPlatformModels') }}</div>
@@ -1655,6 +1552,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { adminAPI } from '@/api/admin'
 import type {
   UpstreamProviderBalance,
@@ -1679,11 +1577,14 @@ import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime } from '@/utils/format'
 import { useClipboard } from '@/composables/useClipboard'
+import { useRouteQueryFilters } from '@/composables/useRouteQueryFilters'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import UpstreamBalanceSamplerDialog from '@/components/admin/upstream/UpstreamBalanceSamplerDialog.vue'
+import UpstreamHealthGuardPolicyFields from '@/components/admin/upstream/UpstreamHealthGuardPolicyFields.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
@@ -1692,6 +1593,8 @@ import Icon from '@/components/icons/Icon.vue'
 import UpstreamBalanceCharts from '@/components/admin/upstream/UpstreamBalanceCharts.vue'
 
 const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
 const appStore = useAppStore()
 const { copyToClipboard } = useClipboard()
 
@@ -1732,6 +1635,10 @@ const typeFilter = ref('')
 const enabledFilter = ref('')
 const showProviderAdvancedFilters = ref(false)
 const activeQuickProviderFilter = ref<QuickProviderFilterKey>('all')
+useRouteQueryFilters([
+  { queryKey: 'provider', state: searchQuery },
+  { queryKey: 'status', state: enabledFilter, fromQuery: value => value === 'disabled' ? 'disabled' : value === 'enabled' ? 'enabled' : '', toQuery: value => value || undefined },
+])
 const defaultingSlug = ref<string | null>(null)
 const showColumnSettings = ref(false)
 const visibleOptionalColumns = ref<string[]>([])
@@ -1784,6 +1691,9 @@ const balanceSamplerForm = ref({
   interval_seconds: 3600,
   provider_amount_scales: {} as Record<string, number>,
 })
+const balanceSamplerDefaultScales = computed(() => Object.fromEntries(
+  providers.value.map(provider => [provider.slug, defaultBalanceSamplerScaleForProvider(provider.slug)])
+))
 const healthGuardConfig = ref<UpstreamAccountHealthGuardConfig | null>(null)
 const healthGuardRecords = ref<UpstreamAccountHealthGuardRunRecord[]>([])
 const healthGuardForm = ref<HealthGuardForm>(defaultHealthGuardForm())
@@ -2291,6 +2201,17 @@ function closeBalanceSamplerDialog() {
   showBalanceSamplerDialog.value = false
 }
 
+function updateBalanceSamplerProviderScale(providerSlug: string, scale: number) {
+  balanceSamplerForm.value.provider_amount_scales[providerSlug] = scale
+}
+
+function updateHealthGuardPolicyField(
+  field: 'interval_seconds' | 'max_accounts_per_run' | 'concurrency' | 'timeout_per_account_seconds' | 'failure_threshold' | 'slow_threshold' | 'recovery_threshold' | 'healthy_latency_ms',
+  value: number,
+) {
+  healthGuardForm.value[field] = value
+}
+
 function closeHealthGuardDetailDialogs() {
   showHealthGuardSkipReasonsDialog.value = false
   showHealthGuardAdjustmentDialog.value = false
@@ -2309,6 +2230,20 @@ function closeHealthGuardDialog() {
   healthGuardAccountModelAccountToAdd.value = null
   healthGuardAccountModelDraft.value = ''
   closeHealthGuardDetailDialogs()
+}
+
+async function openAutomationSettingsFromQuery() {
+  const automation = typeof route.query.automation === 'string' ? route.query.automation : ''
+  if (automation === 'balance-sampler') {
+    openBalanceSamplerDialog()
+  } else if (automation === 'health-guard') {
+    await openHealthGuardDialog()
+  } else {
+    return
+  }
+  const query = { ...route.query }
+  delete query.automation
+  await router.replace({ query })
 }
 
 async function openHealthGuardIgnoredDialog() {
@@ -3268,7 +3203,10 @@ watch(
   }
 )
 
-onMounted(reload)
+onMounted(async () => {
+  await reload()
+  await openAutomationSettingsFromQuery()
+})
 </script>
 
 <style scoped>

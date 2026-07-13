@@ -174,6 +174,8 @@ export default {
     accounts: 'Accounts',
     proxies: 'Proxies',
     upstreamManagement: 'Upstream',
+    upstreamOverview: 'Operations Overview',
+    upstreamAutomations: 'Automations',
     upstreamProviders: 'Upstream Providers',
     upstreamGroups: 'Upstream Groups',
     upstreamAccounts: 'Upstream Accounts',

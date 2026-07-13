@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import upstreamAccountsSource from './UpstreamAccountsView.vue?raw'
 import UpstreamAccountsView from './UpstreamAccountsView.vue'
 
-const { upstreamAccountSyncMock, accountsMock, groupsMock, proxiesMock, appStoreMock } = vi.hoisted(() => ({
+const { upstreamAccountSyncMock, accountsMock, groupsMock, proxiesMock, appStoreMock, routeMock, routerReplaceMock } = vi.hoisted(() => ({
   upstreamAccountSyncMock: {
     getPreview: vi.fn(),
     runSync: vi.fn(),
@@ -40,6 +40,13 @@ const { upstreamAccountSyncMock, accountsMock, groupsMock, proxiesMock, appStore
     showSuccess: vi.fn(),
     showWarning: vi.fn(),
   },
+  routeMock: { query: {} as Record<string, string> },
+  routerReplaceMock: vi.fn(),
+}))
+
+vi.mock('vue-router', () => ({
+  useRoute: () => routeMock,
+  useRouter: () => ({ replace: routerReplaceMock }),
 }))
 
 vi.mock('vue-i18n', async (importOriginal) => {
@@ -82,6 +89,7 @@ vi.mock('@/stores/app', () => ({
 describe('UpstreamAccountsView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    routeMock.query = {}
     window.localStorage.clear()
     upstreamAccountSyncMock.getPreview.mockResolvedValue({
       default_provider: {},
@@ -224,6 +232,24 @@ describe('UpstreamAccountsView', () => {
     accountsMock.delete.mockResolvedValue({})
     accountsMock.setSchedulable.mockResolvedValue({})
     accountsMock.getAvailableModels.mockResolvedValue([])
+  })
+
+  it('focuses the rate guard panel from the automation query and clears it', async () => {
+    routeMock.query = { automation: 'rate-guard' }
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: { template: '<div />' }, EmptyState: true, Icon: true, Select: true, GroupSelector: true,
+          UpstreamBalanceCharts: { template: '<div />' },
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="rate-guard-panel"]').classes()).toContain('is-automation-target')
+    expect(routerReplaceMock).toHaveBeenCalledWith({ query: {} })
   })
 
   it('opens sync log entries in a dialog when legacy remaining group ids are null', async () => {
