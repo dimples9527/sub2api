@@ -502,6 +502,26 @@ func ProvideUpstreamBalanceConsumptionService(
 	return svc
 }
 
+func ProvideUpstreamDashboardService(
+	upstreamProviderService *UpstreamProviderService,
+	upstreamManagementService *UpstreamManagementService,
+	upstreamAccountSyncService *UpstreamAccountSyncService,
+	upstreamBalanceConsumptionService *UpstreamBalanceConsumptionService,
+	upstreamAccountHealthGuardService *UpstreamAccountHealthGuardService,
+	opsService *OpsService,
+	usageService *UsageService,
+) *UpstreamDashboardService {
+	return NewUpstreamDashboardService(
+		upstreamProviderService,
+		upstreamManagementService,
+		upstreamAccountSyncService,
+		upstreamBalanceConsumptionService,
+		upstreamAccountHealthGuardService,
+		opsService,
+		usageService,
+	)
+}
+
 func ProvideUpstreamBalanceSamplerScheduler(service *UpstreamBalanceConsumptionService) *UpstreamBalanceSamplerScheduler {
 	svc := NewUpstreamBalanceSamplerScheduler(service)
 	svc.Start()
@@ -673,6 +693,7 @@ var ProviderSet = wire.NewSet(
 	ProvideUpstreamAccountSyncPreviewScheduler,
 	ProvideUpstreamAccountRateGuardScheduler,
 	ProvideUpstreamBalanceConsumptionService,
+	ProvideUpstreamDashboardService,
 	ProvideUpstreamBalanceSamplerScheduler,
 	NewUpstreamAccountHealthGuardService,
 	ProvideUpstreamAccountHealthGuardScheduler,

@@ -8,6 +8,7 @@ import (
 func registerUpstreamManagementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	upstream := admin.Group("/upstream-management")
 	{
+		upstream.GET("/dashboard", h.Admin.UpstreamDashboard.Get)
 		upstream.GET("/model-square", h.Admin.UpstreamManagement.ModelSquare)
 		providers := upstream.Group("/providers")
 		{

@@ -42,6 +42,7 @@ func ProvideAdminHandlers(
 	affiliateHandler *admin.AffiliateHandler,
 	complianceHandler *admin.ComplianceHandler,
 	upstreamProviderHandler *admin.UpstreamProviderHandler,
+	upstreamDashboardHandler *admin.UpstreamDashboardHandler,
 	upstreamManagementHandler *admin.UpstreamManagementHandler,
 	upstreamAccountSyncHandler *admin.UpstreamAccountSyncHandler,
 ) *AdminHandlers {
@@ -79,6 +80,7 @@ func ProvideAdminHandlers(
 		Affiliate:              affiliateHandler,
 		Compliance:             complianceHandler,
 		UpstreamProvider:       upstreamProviderHandler,
+		UpstreamDashboard:      upstreamDashboardHandler,
 		UpstreamManagement:     upstreamManagementHandler,
 		UpstreamAccountSync:    upstreamAccountSyncHandler,
 	}
@@ -200,6 +202,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewAffiliateHandler,
 	admin.NewComplianceHandler,
 	admin.NewUpstreamProviderHandler,
+	admin.NewUpstreamDashboardHandler,
 	admin.NewUpstreamManagementHandler,
 	admin.NewUpstreamAccountSyncHandler,
 

@@ -39,6 +39,7 @@ type AdminHandlers struct {
 	Affiliate              *admin.AffiliateHandler
 	Compliance             *admin.ComplianceHandler
 	UpstreamProvider       *admin.UpstreamProviderHandler
+	UpstreamDashboard      *admin.UpstreamDashboardHandler
 	UpstreamManagement     *admin.UpstreamManagementHandler
 	UpstreamAccountSync    *admin.UpstreamAccountSyncHandler
 }
