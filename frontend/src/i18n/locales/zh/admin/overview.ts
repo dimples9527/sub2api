@@ -78,12 +78,6 @@ export default {
       systemSettings: '系统设置',
       configureSystem: '配置系统设置',
       failedToLoad: '加载仪表盘数据失败',
-      newUsersToday: '今日新增用户',
-      userUsageTrend: '用户用量趋势',
-      ok: '正常',
-      err: '异常',
-      active: '活跃',
-      create: '创建',
     },
 
     backup: {
