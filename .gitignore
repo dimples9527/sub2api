@@ -112,6 +112,7 @@ backend/data/
 backend/config.yaml
 deploy/config.yaml
 backend/.installed
+tools/local-dev/local.env.ps1
 
 # ===================
 # 其他

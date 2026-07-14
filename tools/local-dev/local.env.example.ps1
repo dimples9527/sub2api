@@ -1,0 +1,20 @@
+$Sub2ApiDev = @{
+    PostgresContainer = 'pgsql-local-5433'
+    RedisContainer = 'redis-local'
+    DatabaseAdminUser = 'postgres'
+    DatabaseHost = '127.0.0.1'
+    DatabasePort = 5433
+    DatabaseName = 'sub2api_dev'
+    DatabaseUser = 'sub2api_dev'
+    DatabasePassword = ''
+    RedisHost = '127.0.0.1'
+    RedisPort = 6379
+    RedisPassword = ''
+    BackendHost = '127.0.0.1'
+    BackendPort = 4000
+    FrontendHost = '127.0.0.1'
+    FrontendPort = 5173
+    AdminEmail = 'admin@sub2api.local'
+    AdminPassword = ''
+    GoExe = ''
+}
