@@ -31,7 +31,6 @@
 
         <!-- Model Monitor Link -->
         <a
-          v-if="llmMonitorStatusApiUrl"
           href="/model-monitor.html"
           target="_blank"
           rel="noopener noreferrer"
@@ -280,7 +279,6 @@ const dropdownOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
 const contactInfo = computed(() => appStore.contactInfo)
 const docUrl = computed(() => sanitizeUrl(appStore.docUrl))
-const llmMonitorStatusApiUrl = computed(() => appStore.cachedPublicSettings?.llm_monitor_status_api_url?.trim() || '')
 const avatarUrl = computed(() => user.value?.avatar_url?.trim() || '')
 const availableBalance = computed(() => Number(user.value?.balance || 0))
 const frozenBalance = computed(() => Number(user.value?.frozen_balance || 0))

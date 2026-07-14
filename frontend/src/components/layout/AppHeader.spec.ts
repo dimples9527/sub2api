@@ -28,6 +28,29 @@ function makeAdmin(): User {
 }
 
 describe('AppHeader admin tools', () => {
+  it('always shows the model monitor entry without an API URL setting', () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const authStore = useAuthStore()
+    authStore.user = makeAdmin()
+    authStore.token = 'test-token'
+    const appStore = useAppStore()
+    appStore.cachedPublicSettings = { custom_menu_items: [] } as typeof appStore.cachedPublicSettings
+
+    const wrapper = mount(AppHeader, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          AnnouncementBell: true, LocaleSwitcher: true, SubscriptionProgressMini: true,
+          RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' },
+          VersionBadge: true,
+        },
+      },
+    })
+
+    expect(wrapper.find('a[href="/model-monitor.html"]').exists()).toBe(true)
+  })
+
   it('keeps version downloads beside the model monitor entry', () => {
     const pinia = createPinia()
     setActivePinia(pinia)
