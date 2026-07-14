@@ -1,0 +1,796 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>上游运维驾驶舱 · 静态原型</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0e11;
+      --panel: #11161b;
+      --panel-2: #161c22;
+      --panel-3: #1b2229;
+      --line: #29323a;
+      --line-soft: #20272d;
+      --text: #edf1f3;
+      --muted: #8f9aa3;
+      --muted-2: #626d75;
+      --cyan: #52d4d8;
+      --green: #73d39c;
+      --amber: #f2b84b;
+      --orange: #ee8750;
+      --red: #f06468;
+      --blue: #70a5ff;
+      --violet: #a791ff;
+      --shadow: 0 18px 55px rgba(0, 0, 0, .32);
+      --radius: 13px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { background: var(--bg); }
+
+    body {
+      margin: 0;
+      min-width: 1180px;
+      color: var(--text);
+      background:
+        linear-gradient(rgba(255,255,255,.017) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.017) 1px, transparent 1px),
+        var(--bg);
+      background-size: 32px 32px;
+      font-family: "Microsoft YaHei UI", "Noto Sans SC", sans-serif;
+      letter-spacing: .01em;
+    }
+
+    button, input, select { font: inherit; }
+    button { color: inherit; }
+
+    .shell {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 230px minmax(0, 1fr);
+    }
+
+    .sidebar {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 22px 16px;
+      border-right: 1px solid var(--line);
+      background: rgba(9, 12, 15, .94);
+      backdrop-filter: blur(18px);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 8px 22px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .brand-mark {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(82, 212, 216, .45);
+      background: rgba(82, 212, 216, .08);
+      color: var(--cyan);
+      font: 800 18px/1 Bahnschrift, sans-serif;
+      transform: rotate(-3deg);
+    }
+
+    .brand strong { display: block; font-size: 15px; }
+    .brand small { color: var(--muted-2); font-size: 10px; text-transform: uppercase; letter-spacing: .18em; }
+
+    .nav-label {
+      padding: 22px 10px 8px;
+      color: var(--muted-2);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .18em;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      margin: 4px 0;
+      padding: 10px 11px;
+      border: 1px solid transparent;
+      color: var(--muted);
+      font-size: 13px;
+      cursor: default;
+    }
+
+    .nav-item.active {
+      color: var(--text);
+      border-color: rgba(82, 212, 216, .25);
+      background: rgba(82, 212, 216, .08);
+      box-shadow: inset 3px 0 0 var(--cyan);
+    }
+
+    .nav-icon {
+      width: 18px;
+      text-align: center;
+      color: var(--muted-2);
+      font-family: Bahnschrift, sans-serif;
+    }
+
+    .active .nav-icon { color: var(--cyan); }
+
+    .side-status {
+      position: absolute;
+      left: 16px;
+      right: 16px;
+      bottom: 18px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    .side-status-top { display: flex; align-items: center; justify-content: space-between; font-size: 11px; }
+    .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 5px rgba(115, 211, 156, .09); }
+    .side-status p { margin: 9px 0 0; color: var(--muted-2); font-size: 10px; line-height: 1.55; }
+
+    .main { min-width: 0; }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      height: 58px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(11, 14, 17, .88);
+      backdrop-filter: blur(18px);
+    }
+
+    .breadcrumbs { color: var(--muted-2); font-size: 12px; }
+    .breadcrumbs b { color: var(--text); font-weight: 600; }
+    .top-actions { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; }
+    .status-chip { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid var(--line); background: var(--panel); }
+
+    .workspace { padding: 24px; }
+
+    .page-head {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      margin-bottom: 18px;
+    }
+
+    .eyebrow { margin-bottom: 7px; color: var(--cyan); font: 700 10px/1 Bahnschrift, sans-serif; letter-spacing: .22em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: 28px; letter-spacing: -.03em; font-weight: 700; }
+    .subtitle { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
+
+    .controls { display: flex; align-items: center; gap: 8px; }
+
+    .segmented {
+      display: flex;
+      padding: 3px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    .segmented button, .btn {
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    .segmented button { padding: 7px 12px; color: var(--muted); font-size: 11px; }
+    .segmented button.active { color: #081012; background: var(--cyan); font-weight: 800; }
+
+    .btn {
+      padding: 9px 13px;
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      font-size: 11px;
+      transition: .18s ease;
+    }
+
+    .btn:hover { border-color: var(--muted-2); transform: translateY(-1px); }
+    .btn.primary { color: #091012; border-color: var(--cyan); background: var(--cyan); font-weight: 800; }
+    .btn.danger { color: var(--red); border-color: rgba(240,100,104,.38); background: rgba(240,100,104,.07); }
+    .btn.ghost { color: var(--muted); background: transparent; }
+
+    .data-note {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 14px;
+      padding: 9px 12px;
+      border-left: 3px solid var(--amber);
+      background: rgba(242,184,75,.065);
+      color: #d8c49d;
+      font-size: 11px;
+    }
+
+    .risk-grid {
+      display: grid;
+      grid-template-columns: repeat(8, minmax(135px, 1fr));
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .risk-card {
+      position: relative;
+      min-height: 106px;
+      padding: 13px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      cursor: pointer;
+      transition: .18s ease;
+    }
+
+    .risk-card::after {
+      content: "";
+      position: absolute;
+      right: -18px;
+      bottom: -24px;
+      width: 62px;
+      height: 62px;
+      border: 1px solid currentColor;
+      border-radius: 50%;
+      opacity: .08;
+    }
+
+    .risk-card:hover, .risk-card.selected { transform: translateY(-2px); border-color: currentColor; background: var(--panel-2); }
+    .risk-card.red { color: var(--red); }
+    .risk-card.orange { color: var(--orange); }
+    .risk-card.amber { color: var(--amber); }
+    .risk-card.blue { color: var(--blue); }
+    .risk-card.violet { color: var(--violet); }
+    .risk-card.muted { color: var(--muted); }
+    .risk-label { color: var(--muted); font-size: 10px; line-height: 1.35; }
+    .risk-value { margin-top: 11px; font: 700 29px/1 Bahnschrift, sans-serif; letter-spacing: -.03em; }
+    .risk-foot { margin-top: 9px; color: var(--muted-2); font-size: 9px; }
+
+    .grid-main {
+      display: grid;
+      grid-template-columns: minmax(0, 1.9fr) minmax(310px, .85fr);
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      background: rgba(17,22,27,.94);
+      box-shadow: var(--shadow);
+    }
+
+    .panel-head {
+      min-height: 54px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 12px 15px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .panel-title { display: flex; align-items: center; gap: 9px; }
+    .panel-title h2 { margin: 0; font-size: 13px; font-weight: 650; }
+    .panel-title span { color: var(--muted-2); font-size: 10px; }
+    .section-index { color: var(--cyan); font: 700 10px/1 Bahnschrift, sans-serif; }
+
+    .table-tools { display: flex; gap: 7px; }
+    .filter-pill { padding: 5px 8px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font-size: 9px; }
+
+    table { width: 100%; border-collapse: collapse; }
+    th { padding: 9px 11px; color: var(--muted-2); background: #0f1418; font-size: 9px; font-weight: 700; text-align: left; letter-spacing: .06em; white-space: nowrap; }
+    td { padding: 11px; border-top: 1px solid var(--line-soft); color: #cfd6da; font-size: 10px; vertical-align: middle; }
+    tbody tr { cursor: pointer; transition: .15s ease; }
+    tbody tr:hover { background: rgba(82,212,216,.035); }
+    .account-name { color: var(--text); font-size: 11px; font-weight: 650; }
+    .subline { margin-top: 4px; color: var(--muted-2); font-size: 9px; }
+
+    .severity { display: inline-flex; align-items: center; gap: 5px; font-weight: 700; }
+    .severity::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 12%, transparent); }
+    .severity.critical { color: var(--red); }
+    .severity.high { color: var(--orange); }
+    .severity.medium { color: var(--amber); }
+
+    .metric-strong { color: var(--text); font: 700 12px/1 Bahnschrift, sans-serif; }
+    .delta-up { color: var(--red); }
+    .delta-down { color: var(--green); }
+    .tag { display: inline-block; padding: 3px 6px; border: 1px solid var(--line); color: var(--muted); font-size: 8px; white-space: nowrap; }
+    .tag.good { color: var(--green); border-color: rgba(115,211,156,.25); background: rgba(115,211,156,.06); }
+    .tag.warn { color: var(--amber); border-color: rgba(242,184,75,.25); background: rgba(242,184,75,.06); }
+    .tag.bad { color: var(--red); border-color: rgba(240,100,104,.25); background: rgba(240,100,104,.06); }
+
+    .health-body { padding: 14px; }
+    .health-score { display: grid; grid-template-columns: 115px 1fr; gap: 15px; align-items: center; padding-bottom: 14px; border-bottom: 1px solid var(--line-soft); }
+    .ring { position: relative; width: 112px; height: 112px; display: grid; place-items: center; }
+    .ring svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+    .ring strong { font: 700 28px/1 Bahnschrift, sans-serif; }
+    .ring small { display: block; margin-top: 5px; color: var(--muted-2); font-size: 9px; text-align: center; }
+    .health-copy h3 { margin: 0 0 7px; font-size: 14px; }
+    .health-copy p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.65; }
+
+    .health-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 13px; }
+    .health-item { padding: 10px; border: 1px solid var(--line-soft); background: var(--panel-2); }
+    .health-item b { display: block; font: 700 19px/1 Bahnschrift, sans-serif; }
+    .health-item span { display: block; margin-top: 5px; color: var(--muted-2); font-size: 9px; }
+
+    .wide-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr); gap: 14px; margin-bottom: 14px; }
+    .tabs { display: flex; gap: 14px; }
+    .tab { position: relative; padding: 6px 0; border: 0; background: transparent; color: var(--muted-2); font-size: 10px; cursor: pointer; }
+    .tab.active { color: var(--text); }
+    .tab.active::after { content: ""; position: absolute; left: 0; right: 0; bottom: -14px; height: 2px; background: var(--cyan); }
+
+    .rate-table td { padding-top: 10px; padding-bottom: 10px; }
+    .rate-cell { display: flex; align-items: center; gap: 8px; }
+    .rate-line { width: 46px; height: 3px; background: var(--line); overflow: hidden; }
+    .rate-line i { display: block; height: 100%; background: var(--amber); }
+
+    .chart-wrap { padding: 14px; }
+    .chart-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px; }
+    .chart-kpi { padding: 9px; border-left: 2px solid var(--line); background: var(--panel-2); }
+    .chart-kpi:nth-child(1) { border-color: var(--cyan); }
+    .chart-kpi:nth-child(2) { border-color: var(--amber); }
+    .chart-kpi:nth-child(3) { border-color: var(--green); }
+    .chart-kpi span { color: var(--muted-2); font-size: 8px; }
+    .chart-kpi b { display: block; margin-top: 5px; font: 700 16px/1 Bahnschrift, sans-serif; }
+    .chart { width: 100%; height: 190px; }
+    .chart-grid line { stroke: #273038; stroke-width: 1; stroke-dasharray: 3 5; }
+    .chart-label { fill: #66717a; font-size: 9px; }
+
+    .provider-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 12px; }
+    .provider-card { padding: 12px; border: 1px solid var(--line-soft); background: var(--panel-2); cursor: pointer; transition: .15s ease; }
+    .provider-card:hover { border-color: var(--muted-2); transform: translateY(-2px); }
+    .provider-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .provider-name { font-size: 11px; font-weight: 700; }
+    .provider-status { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+    .provider-status.warn { background: var(--amber); }
+    .provider-status.bad { background: var(--red); }
+    .provider-main { display: flex; align-items: flex-end; justify-content: space-between; margin: 18px 0 13px; }
+    .provider-main b { font: 700 24px/1 Bahnschrift, sans-serif; }
+    .provider-main span { color: var(--muted-2); font-size: 8px; }
+    .provider-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    .provider-stat { padding-top: 7px; border-top: 1px solid var(--line-soft); }
+    .provider-stat b { display: block; font: 700 12px/1 Bahnschrift, sans-serif; }
+    .provider-stat span { color: var(--muted-2); font-size: 8px; }
+
+    .task-list { padding: 0 13px 13px; }
+    .task-row { display: grid; grid-template-columns: 1.2fr .7fr .7fr .75fr .7fr 90px; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line-soft); font-size: 10px; }
+    .task-row:last-child { border-bottom: 0; }
+    .task-name { color: var(--text); font-weight: 650; }
+    .task-meta { color: var(--muted-2); font-size: 8px; margin-top: 4px; }
+    .progress { height: 4px; background: var(--line); overflow: hidden; }
+    .progress i { display: block; height: 100%; background: var(--cyan); }
+
+    .footer-note { display: flex; justify-content: space-between; padding: 8px 2px 0; color: var(--muted-2); font-size: 9px; }
+
+    .drawer-mask {
+      position: fixed;
+      inset: 0;
+      z-index: 60;
+      display: none;
+      background: rgba(0,0,0,.58);
+      backdrop-filter: blur(4px);
+    }
+
+    .drawer-mask.open { display: block; }
+    .drawer {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: min(560px, 92vw);
+      height: 100%;
+      overflow: auto;
+      border-left: 1px solid var(--line);
+      background: #0e1317;
+      box-shadow: -30px 0 80px rgba(0,0,0,.45);
+      animation: slide .2s ease-out;
+    }
+
+    @keyframes slide { from { transform: translateX(28px); opacity: 0; } }
+
+    .drawer-head { position: sticky; top: 0; z-index: 2; display: flex; justify-content: space-between; align-items: flex-start; padding: 20px; border-bottom: 1px solid var(--line); background: rgba(14,19,23,.94); backdrop-filter: blur(16px); }
+    .drawer-head h3 { margin: 4px 0 0; font-size: 20px; }
+    .close { width: 32px; height: 32px; border: 1px solid var(--line); background: var(--panel-2); cursor: pointer; }
+    .drawer-body { padding: 18px 20px 30px; }
+    .detail-banner { padding: 14px; border-left: 3px solid var(--red); background: rgba(240,100,104,.07); }
+    .detail-banner b { font-size: 12px; }
+    .detail-banner p { margin: 7px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
+    .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 13px 0; }
+    .detail-cell { padding: 11px; border: 1px solid var(--line-soft); background: var(--panel); }
+    .detail-cell span { color: var(--muted-2); font-size: 8px; }
+    .detail-cell b { display: block; margin-top: 6px; font: 700 15px/1 Bahnschrift, sans-serif; }
+    .timeline { margin-top: 18px; }
+    .timeline h4 { font-size: 11px; }
+    .event { position: relative; margin-left: 5px; padding: 0 0 15px 18px; border-left: 1px solid var(--line); }
+    .event::before { content: ""; position: absolute; left: -4px; top: 2px; width: 7px; height: 7px; border-radius: 50%; background: var(--cyan); }
+    .event b { font-size: 10px; }
+    .event p { margin: 5px 0 0; color: var(--muted-2); font-size: 9px; line-height: 1.5; }
+    .drawer-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 15px; }
+
+    .toast {
+      position: fixed;
+      right: 26px;
+      bottom: 24px;
+      z-index: 90;
+      display: none;
+      padding: 12px 15px;
+      border: 1px solid rgba(82,212,216,.35);
+      background: #132025;
+      color: #c8f4f5;
+      box-shadow: var(--shadow);
+      font-size: 11px;
+    }
+
+    .toast.show { display: block; animation: toast .2s ease-out; }
+    @keyframes toast { from { transform: translateY(8px); opacity: 0; } }
+
+    @media (max-width: 1450px) {
+      .risk-grid { grid-template-columns: repeat(4, 1fr); }
+      .provider-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+  <style id=light-theme-overrides>
+    :root {
+      color-scheme: light;
+      --bg:#f3f6f9;
+      --panel:#ffffff;
+      --panel-2:#f7fafc;
+      --panel-3:#edf4f7;
+      --line:#d7e0e7;
+      --line-soft:#e7edf2;
+      --text:#1f2a37;
+      --muted:#64748b;
+      --muted-2:#94a3b8;
+      --cyan:#168e9b;
+      --green:#16865c;
+      --amber:#c98210;
+      --orange:#d8662f;
+      --red:#dc4c58;
+      --blue:#3977d5;
+      --violet:#7657c8;
+      --shadow:0 18px 48px rgba(31,42,55,.10);
+    }
+    html { background:var(--bg); }
+    body {
+      background:
+        linear-gradient(rgba(38,113,132,.045) 1px,transparent 1px),
+        linear-gradient(90deg,rgba(38,113,132,.045) 1px,transparent 1px),
+        var(--bg);
+      background-size:32px 32px;
+    }
+    .sidebar { background:rgba(255,255,255,.96); box-shadow:12px 0 34px rgba(43,67,82,.06); }
+    .brand-mark { border-color:rgba(22,142,155,.35); background:#eaf7f8; }
+    .nav-item.active { color:#15343b; border-color:#b9dde1; background:#eaf7f8; box-shadow:inset 3px 0 0 var(--cyan); }
+    .side-status,.status-chip { background:#ffffff; }
+    .topbar { background:rgba(255,255,255,.90); box-shadow:0 8px 28px rgba(43,67,82,.05); }
+    .page-head { padding:18px 20px; border:1px solid var(--line); background:linear-gradient(135deg,#ffffff 0%,#f1f8fa 100%); box-shadow:0 12px 36px rgba(43,67,82,.07); }
+    .btn { background:#ffffff; box-shadow:0 1px 2px rgba(31,42,55,.04); }
+    .btn:hover { border-color:#9db2bf; background:#f8fbfc; }
+    .btn.primary,.segmented button.active { color:#ffffff; border-color:var(--cyan); background:var(--cyan); }
+    .btn.danger { background:#fff4f4; }
+    .metric-card,.panel,.risk-card,.health-item,.chart-kpi,.provider-card { box-shadow:0 8px 24px rgba(43,67,82,.055); }
+    .risk-card:hover,.risk-card.selected { background:#ffffff; box-shadow:0 14px 30px rgba(43,67,82,.11); }
+    .panel { background:#ffffff; }
+    .panel-head { background:#fbfdfe; }
+    table,thead,tbody { background:#ffffff; }
+    tbody tr { background:#ffffff; }
+    td { background:inherit; }
+    th { color:#526575; background:#edf3f7; }
+    td { color:#334155; }
+    tbody tr:hover,tbody tr.selected,tbody tr:hover td,tbody tr.selected td { background:#f1f9fa; }
+    .drawer-head { background:rgba(255,255,255,.95); }
+    .filter-pill,.tag { background:#f7fafc; }
+    .rate-line,.progress { background:#e3eaf0; }
+    .chart-grid line { stroke:#dbe5eb; }
+    .chart-label { fill:#7a8b98; }
+    .drawer-mask { background:rgba(30,41,59,.32); }
+    .drawer { background:#ffffff; box-shadow:-24px 0 70px rgba(31,42,55,.16); }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">S2</div>
+        <div><strong>SUB2API</strong><small>Operations Console</small></div>
+      </div>
+      <div class="nav-label">上游管理</div>
+      <div class="nav-item active"><span class="nav-icon">01</span>运维驾驶舱</div>
+      <div class="nav-item"><span class="nav-icon">02</span>供应商</div>
+      <div class="nav-item"><span class="nav-icon">03</span>分组管理</div>
+      <div class="nav-item"><span class="nav-icon">04</span>上游账号</div>
+      <div class="nav-item"><span class="nav-icon">05</span>自动化任务中心</div>
+      <div class="nav-label">系统</div>
+      <div class="nav-item"><span class="nav-icon">06</span>运行日志</div>
+      <div class="nav-item"><span class="nav-icon">07</span>系统设置</div>
+      <div class="side-status">
+        <div class="side-status-top"><span>数据采集状态</span><span class="pulse"></span></div>
+        <p>最近聚合于 09:42:18<br>7 / 7 数据源可用</p>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="breadcrumbs">管理后台 / 上游管理 / <b>运维驾驶舱</b></div>
+        <div class="top-actions">
+          <span>环境：生产</span>
+          <span class="status-chip"><i class="pulse"></i>网关运行正常</span>
+          <span>管理员</span>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <section class="page-head">
+          <div>
+            <div class="eyebrow">Upstream Operations / Live</div>
+            <h1>上游运维驾驶舱</h1>
+            <p class="subtitle">先处理影响真实流量的问题，再判断账号池健康与成本变化。</p>
+          </div>
+          <div class="controls">
+            <div class="segmented" id="rangeControl">
+              <button class="active" data-range="24h">24 小时</button>
+              <button data-range="7d">7 天</button>
+            </div>
+            <button class="btn" id="refreshBtn">刷新数据</button>
+            <button class="btn primary" id="scanBtn">执行账号巡检</button>
+          </div>
+        </section>
+
+        <div class="data-note"><b>数据完整</b><span>统计生成于 09:42:18；账号实时状态为当前值，流量与成本按所选时间范围统计。</span></div>
+
+        <section class="risk-grid" id="riskGrid">
+          <article class="risk-card red selected" data-filter="critical"><div class="risk-label">紧急异常账号</div><div class="risk-value">3</div><div class="risk-foot">其中 2 个正在承载流量</div></article>
+          <article class="risk-card red" data-filter="traffic"><div class="risk-label">承载流量的异常账号</div><div class="risk-value">5</div><div class="risk-foot">覆盖近 24h 请求量 38.6%</div></article>
+          <article class="risk-card orange" data-filter="rate-up"><div class="risk-label">本次同步倍率上涨</div><div class="risk-value">4</div><div class="risk-foot">最高上涨 18.2%</div></article>
+          <article class="risk-card amber" data-filter="not-lowest"><div class="risk-label">非最低倍率承载账号</div><div class="risk-value">6</div><div class="risk-foot">预计多支出 ¥86.40 / 日</div></article>
+          <article class="risk-card orange" data-filter="balance"><div class="risk-label">预计余额不足 3 天</div><div class="risk-value">4</div><div class="risk-foot">其中 1 个不足 24 小时</div></article>
+          <article class="risk-card blue" data-filter="sync"><div class="risk-label">账号同步冲突</div><div class="risk-value">2</div><div class="risk-foot">等待人工确认匹配关系</div></article>
+          <article class="risk-card violet" data-filter="task"><div class="risk-label">自动任务异常</div><div class="risk-value">1</div><div class="risk-foot">余额采样连续失败 2 次</div></article>
+          <article class="risk-card muted" data-filter="disabled"><div class="risk-label">已禁用资源</div><div class="risk-value">2 / 11</div><div class="risk-foot">供应商 / 上游账号 · 点击查看</div></article>
+        </section>
+
+        <section class="grid-main">
+          <div class="panel">
+            <div class="panel-head">
+              <div class="panel-title"><span class="section-index">01</span><div><h2>高影响异常账号</h2><span id="tableCaption">优先显示正在承载流量的紧急异常</span></div></div>
+              <div class="table-tools"><span class="filter-pill">影响优先</span><span class="filter-pill">有效账号池</span><button class="btn ghost">查看全部 17</button></div>
+            </div>
+            <table>
+              <thead><tr><th>风险</th><th>供应商 / 账号</th><th>业务影响</th><th>倍率</th><th>余额</th><th>状态</th></tr></thead>
+              <tbody id="issueTable">
+                <tr data-kind="critical traffic" data-account="火山引擎 / prod-cn-02" data-reason="账号测试连续失败 3 次，但近 24 小时仍承载 12,684 次请求。">
+                  <td><span class="severity critical">紧急</span></td>
+                  <td><div class="account-name">prod-cn-02</div><div class="subline">火山引擎 · 企业 A 组</div></td>
+                  <td><span class="metric-strong">12,684</span><div class="subline">请求 · 成功率 71.4%</div></td>
+                  <td><span class="metric-strong">1.25</span><div class="subline delta-up">↑ 13.6% · 非最低</div></td>
+                  <td><span class="metric-strong">¥ 326</span><div class="subline">预计 0.8 天</div></td>
+                  <td><span class="tag bad">测试失败</span></td>
+                </tr>
+                <tr data-kind="critical traffic balance" data-account="New API / gpt-primary" data-reason="余额预计不足 20 小时，账号承担该供应商 64% 的请求流量。">
+                  <td><span class="severity critical">紧急</span></td>
+                  <td><div class="account-name">gpt-primary</div><div class="subline">New API · vip-3</div></td>
+                  <td><span class="metric-strong">9,210</span><div class="subline">请求 · 成功率 98.8%</div></td>
+                  <td><span class="metric-strong">1.10</span><div class="subline delta-down">并列最低</div></td>
+                  <td><span class="metric-strong">$ 48</span><div class="subline delta-up">预计 0.7 天</div></td>
+                  <td><span class="tag bad">余额紧急</span></td>
+                </tr>
+                <tr data-kind="traffic not-lowest rate-up" data-account="OpenRouter / claude-route-01" data-reason="当前承载账号不再是同供应商、同分组最低倍率，预计每日多支出 ¥42.60。">
+                  <td><span class="severity high">高</span></td>
+                  <td><div class="account-name">claude-route-01</div><div class="subline">OpenRouter · Claude 专线</div></td>
+                  <td><span class="metric-strong">6,842</span><div class="subline">请求 · 成功率 99.2%</div></td>
+                  <td><span class="metric-strong">1.18</span><div class="subline delta-up">最低 1.05 · +12.4%</div></td>
+                  <td><span class="metric-strong">$ 1,840</span><div class="subline">预计 16.2 天</div></td>
+                  <td><span class="tag warn">非最低倍率</span></td>
+                </tr>
+                <tr data-kind="traffic sync" data-account="自建中转 / codex-07" data-reason="上游账号已存在，但无法唯一匹配本地账号；当前仍有历史流量。">
+                  <td><span class="severity high">高</span></td>
+                  <td><div class="account-name">codex-07</div><div class="subline">自建中转 · Codex</div></td>
+                  <td><span class="metric-strong">3,105</span><div class="subline">请求 · 成功率 96.7%</div></td>
+                  <td><span class="metric-strong">0.96</span><div class="subline">无法比较</div></td>
+                  <td><span class="metric-strong">¥ 2,301</span><div class="subline">预计 23.8 天</div></td>
+                  <td><span class="tag warn">同步冲突</span></td>
+                </tr>
+                <tr data-kind="balance" data-account="New API / gemini-backup" data-reason="近 7 日平均消耗上升，预计余额将在 2.6 天后耗尽。">
+                  <td><span class="severity medium">提醒</span></td>
+                  <td><div class="account-name">gemini-backup</div><div class="subline">New API · Google</div></td>
+                  <td><span class="metric-strong">881</span><div class="subline">请求 · 成功率 99.6%</div></td>
+                  <td><span class="metric-strong">0.80</span><div class="subline delta-down">唯一最低</div></td>
+                  <td><span class="metric-strong">$ 122</span><div class="subline">预计 2.6 天</div></td>
+                  <td><span class="tag warn">低余额</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head"><div class="panel-title"><span class="section-index">02</span><div><h2>有效账号池健康</h2><span>已排除 2 个禁用供应商和 11 个禁用账号</span></div></div><span class="tag warn">需关注</span></div>
+            <div class="health-body">
+              <div class="health-score">
+                <div class="ring">
+                  <svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="50" fill="none" stroke="#263038" stroke-width="8"/><circle cx="60" cy="60" r="50" fill="none" stroke="#f2b84b" stroke-width="8" stroke-linecap="square" stroke-dasharray="314" stroke-dashoffset="47"/></svg>
+                  <div><strong>85%</strong><small>综合健康度</small></div>
+                </div>
+                <div class="health-copy"><h3>账号池可继续承载流量</h3><p>主要风险集中在火山引擎企业 A 组。5 个异常账号覆盖 38.6% 的近期流量，建议优先完成测试与调度调整。</p></div>
+              </div>
+              <div class="health-list">
+                <div class="health-item"><b>68</b><span>有效账号</span></div>
+                <div class="health-item"><b>54</b><span>当前可调度 · 79.4%</span></div>
+                <div class="health-item"><b>31</b><span>近 24h 有请求</span></div>
+                <div class="health-item"><b>97.2%</b><span>近期测试成功率</span></div>
+                <div class="health-item"><b style="color:var(--red)">5</b><span>承载流量异常</span></div>
+                <div class="health-item"><b style="color:var(--amber)">4</b><span>无本地匹配</span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="wide-grid">
+          <div class="panel">
+            <div class="panel-head">
+              <div class="panel-title"><span class="section-index">03</span><div><h2>倍率与最低倍率分析</h2><span>同供应商、同上游分组比较 · 基于最近一次同步</span></div></div>
+              <div class="tabs" id="rateTabs"><button class="tab active">风险分组</button><button class="tab">最近变化</button><button class="tab">全部分组</button></div>
+            </div>
+            <table class="rate-table">
+              <thead><tr><th>供应商 / 分组</th><th>承载账号</th><th>当前倍率</th><th>同组最低</th><th>倍率差</th><th>预计额外成本</th></tr></thead>
+              <tbody>
+                <tr><td><div class="account-name">OpenRouter</div><div class="subline">Claude 专线 · 4 个有效账号</div></td><td>claude-route-01</td><td><span class="delta-up">1.18 ↑</span></td><td><span class="tag good">1.05 · route-03</span></td><td><div class="rate-cell">+12.4% <span class="rate-line"><i style="width:78%"></i></span></div></td><td><b>¥ 42.60 / 日</b></td></tr>
+                <tr><td><div class="account-name">火山引擎</div><div class="subline">企业 A 组 · 6 个有效账号</div></td><td>prod-cn-02</td><td><span class="delta-up">1.25 ↑</span></td><td><span class="tag good">1.10 · prod-cn-04</span></td><td><div class="rate-cell">+13.6% <span class="rate-line"><i style="width:86%"></i></span></div></td><td><b>¥ 31.20 / 日</b></td></tr>
+                <tr><td><div class="account-name">New API</div><div class="subline">vip-3 · 3 个有效账号</div></td><td>gpt-primary</td><td>1.10</td><td><span class="tag good">1.10 · 并列最低</span></td><td>0%</td><td><span class="subline">无额外成本</span></td></tr>
+                <tr><td><div class="account-name">自建中转</div><div class="subline">Codex · 分组键缺失</div></td><td>codex-07</td><td>0.96</td><td><span class="tag">无法比较</span></td><td>—</td><td>—</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head"><div class="panel-title"><span class="section-index">04</span><div><h2>成本与余额趋势</h2><span>倍率变化以事件标记展示</span></div></div><span class="filter-pill">24 小时</span></div>
+            <div class="chart-wrap">
+              <div class="chart-kpis"><div class="chart-kpi"><span>上游成本</span><b>¥ 6,842</b></div><div class="chart-kpi"><span>余额消耗</span><b>¥ 7,106</b></div><div class="chart-kpi"><span>预计可用</span><b>8.4 天</b></div></div>
+              <svg class="chart" viewBox="0 0 620 190" preserveAspectRatio="none" aria-label="成本趋势图">
+                <g class="chart-grid"><line x1="0" y1="35" x2="620" y2="35"/><line x1="0" y1="80" x2="620" y2="80"/><line x1="0" y1="125" x2="620" y2="125"/><line x1="0" y1="170" x2="620" y2="170"/></g>
+                <path d="M0,152 C40,146 52,122 92,127 S148,142 185,108 S245,100 278,118 S330,91 370,96 S426,72 470,83 S540,43 620,55" fill="none" stroke="#52d4d8" stroke-width="3"/>
+                <path d="M0,166 C55,157 85,154 120,142 S190,133 235,125 S295,119 340,102 S405,98 455,88 S540,79 620,65" fill="none" stroke="#f2b84b" stroke-width="2" stroke-dasharray="5 5"/>
+                <line x1="470" y1="25" x2="470" y2="170" stroke="#f06468" stroke-width="1" stroke-dasharray="3 4"/><circle cx="470" cy="83" r="5" fill="#f06468"/><text x="477" y="24" class="chart-label">倍率上涨 4 项</text>
+                <text x="0" y="186" class="chart-label">00:00</text><text x="145" y="186" class="chart-label">06:00</text><text x="300" y="186" class="chart-label">12:00</text><text x="455" y="186" class="chart-label">18:00</text><text x="585" y="186" class="chart-label">现在</text>
+              </svg>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel" style="margin-bottom:14px">
+          <div class="panel-head"><div class="panel-title"><span class="section-index">05</span><div><h2>供应商运行概览</h2><span>按业务风险排序，而不是固定排序</span></div></div><button class="btn ghost">进入供应商管理</button></div>
+          <div class="provider-grid">
+            <article class="provider-card"><div class="provider-head"><span class="provider-name">火山引擎</span><i class="provider-status bad"></i></div><div class="provider-main"><div><b style="color:var(--red)">高风险</b><span>运行状态</span></div><span>2 个严重异常</span></div><div class="provider-stats"><div class="provider-stat"><b>18 / 24</b><span>可调度账号</span></div><div class="provider-stat"><b>89.1%</b><span>成功率</span></div><div class="provider-stat"><b>¥ 2,408</b><span>24h 成本</span></div><div class="provider-stat"><b>3.2 天</b><span>余额可用</span></div></div></article>
+            <article class="provider-card"><div class="provider-head"><span class="provider-name">New API</span><i class="provider-status warn"></i></div><div class="provider-main"><div><b style="color:var(--amber)">余额风险</b><span>运行状态</span></div><span>1 个账号不足 1 天</span></div><div class="provider-stats"><div class="provider-stat"><b>13 / 15</b><span>可调度账号</span></div><div class="provider-stat"><b>98.9%</b><span>成功率</span></div><div class="provider-stat"><b>¥ 1,926</b><span>24h 成本</span></div><div class="provider-stat"><b>1.8 天</b><span>余额可用</span></div></div></article>
+            <article class="provider-card"><div class="provider-head"><span class="provider-name">OpenRouter</span><i class="provider-status warn"></i></div><div class="provider-main"><div><b style="color:var(--amber)">成本偏高</b><span>运行状态</span></div><span>3 个非最低倍率</span></div><div class="provider-stats"><div class="provider-stat"><b>10 / 11</b><span>可调度账号</span></div><div class="provider-stat"><b>99.2%</b><span>成功率</span></div><div class="provider-stat"><b>¥ 1,554</b><span>24h 成本</span></div><div class="provider-stat"><b>16.2 天</b><span>余额可用</span></div></div></article>
+            <article class="provider-card"><div class="provider-head"><span class="provider-name">自建中转</span><i class="provider-status"></i></div><div class="provider-main"><div><b style="color:var(--green)">稳定</b><span>运行状态</span></div><span>无严重异常</span></div><div class="provider-stats"><div class="provider-stat"><b>13 / 14</b><span>可调度账号</span></div><div class="provider-stat"><b>99.6%</b><span>成功率</span></div><div class="provider-stat"><b>¥ 954</b><span>24h 成本</span></div><div class="provider-stat"><b>23.8 天</b><span>余额可用</span></div></div></article>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head"><div class="panel-title"><span class="section-index">06</span><div><h2>自动化任务摘要</h2><span>只展示异常、运行中和关键任务；完整记录进入任务中心</span></div></div><button class="btn">打开全宽任务中心</button></div>
+          <div class="task-list">
+            <div class="task-row"><div><div class="task-name">上游账号同步</div><div class="task-meta">每 15 分钟 · 下次 09:55</div></div><span class="tag good">正常</span><div><b>248</b><div class="task-meta">检查账号</div></div><div><b>6</b><div class="task-meta">产生变更</div></div><div><b>1m 42s</b><div class="task-meta">上次耗时</div></div><button class="btn ghost">查看</button></div>
+            <div class="task-row"><div><div class="task-name">账号健康巡检</div><div class="task-meta">每 10 分钟 · 正在运行</div></div><span class="tag warn">运行中</span><div><b>146 / 248</b><div class="task-meta">当前进度</div></div><div><div class="progress"><i style="width:59%"></i></div><div class="task-meta">59%</div></div><div><b>58s</b><div class="task-meta">已运行</div></div><button class="btn ghost">详情</button></div>
+            <div class="task-row"><div><div class="task-name">余额采样</div><div class="task-meta">每 30 分钟 · 连续失败 2 次</div></div><span class="tag bad">失败</span><div><b>42</b><div class="task-meta">检查账号</div></div><div><b style="color:var(--red)">7</b><div class="task-meta">采样失败</div></div><div><b>09:21</b><div class="task-meta">上次运行</div></div><button class="btn danger">重试</button></div>
+          </div>
+        </section>
+
+        <div class="footer-note"><span>静态设计原型 · 所有数据均为演示数据</span><span>点击风险卡和异常账号可体验筛选与处置抽屉</span></div>
+      </div>
+    </main>
+  </div>
+
+  <div class="drawer-mask" id="drawerMask">
+    <aside class="drawer">
+      <div class="drawer-head"><div><div class="eyebrow">Incident Detail</div><h3 id="drawerTitle">账号异常详情</h3></div><button class="close" id="closeDrawer">×</button></div>
+      <div class="drawer-body" id="drawerContent"></div>
+    </aside>
+  </div>
+
+  <div class="toast" id="toast">操作已提交</div>
+
+  <script>
+    const drawerMask = document.getElementById('drawerMask');
+    const drawerTitle = document.getElementById('drawerTitle');
+    const drawerContent = document.getElementById('drawerContent');
+    const toast = document.getElementById('toast');
+
+    function showToast(message) {
+      toast.textContent = message;
+      toast.classList.add('show');
+      window.clearTimeout(window.toastTimer);
+      window.toastTimer = window.setTimeout(() => toast.classList.remove('show'), 1800);
+    }
+
+    function openIssueDrawer(row) {
+      const account = row.dataset.account;
+      const reason = row.dataset.reason;
+      drawerTitle.textContent = account;
+      drawerContent.innerHTML = `
+        <div class="detail-banner"><b>当前异常正在影响真实流量</b><p>${reason}</p></div>
+        <div class="detail-grid">
+          <div class="detail-cell"><span>近 24h 请求量</span><b>12,684</b></div>
+          <div class="detail-cell"><span>近 24h 上游成本</span><b>¥ 1,284.20</b></div>
+          <div class="detail-cell"><span>当前 / 上次倍率</span><b>1.25 / 1.10</b></div>
+          <div class="detail-cell"><span>同组最低倍率</span><b>1.10</b></div>
+          <div class="detail-cell"><span>余额预计可用</span><b style="color:var(--red)">0.8 天</b></div>
+          <div class="detail-cell"><span>当前调度状态</span><b>可调度</b></div>
+        </div>
+        <div class="drawer-actions">
+          <button class="btn primary" data-action="test">立即测试</button>
+          <button class="btn" data-action="sync">重新同步</button>
+          <button class="btn" data-action="compare">查看同组账号</button>
+          <button class="btn danger" data-action="pause">暂停调度</button>
+        </div>
+        <div class="timeline"><h4>最近变化</h4>
+          <div class="event"><b>09:38 · 第三次账号测试失败</b><p>HTTP 429，平均响应时间 3.8 秒。账号仍有近期请求。</p></div>
+          <div class="event"><b>09:31 · 倍率由 1.10 调整为 1.25</b><p>失去同组最低倍率状态，当前最低账号为 prod-cn-04。</p></div>
+          <div class="event"><b>09:15 · 自动同步完成</b><p>同步账号、余额、分组与倍率信息，共更新 2 个字段。</p></div>
+        </div>`;
+      drawerMask.classList.add('open');
+    }
+
+    function openDisabledDrawer() {
+      drawerTitle.textContent = '已禁用上游与账号';
+      drawerContent.innerHTML = `
+        <div class="detail-banner" style="border-color:var(--muted-2);background:rgba(143,154,163,.06)"><b>禁用资源不参与健康统计</b><p>当前共有 2 个禁用供应商、11 个禁用账号，仅作为资源状态记录展示。</p></div>
+        <div class="timeline"><h4>禁用供应商</h4>
+          <div class="event"><b>旧版中转服务 · 7 个账号</b><p>2026-07-09 禁用 · 备注：供应商服务迁移，保留历史账单数据。</p></div>
+          <div class="event"><b>测试供应商 · 2 个账号</b><p>2026-07-12 禁用 · 备注：验收环境临时资源。</p></div>
+        </div>
+        <div class="timeline"><h4>单独禁用账号</h4>
+          <div class="event"><b>OpenRouter / legacy-02</b><p>最后同步 2026-07-13 18:20 · 余额 $12.40 · 原因未记录。</p></div>
+          <div class="event"><b>New API / temp-gpt-01</b><p>最后同步 2026-07-10 11:08 · 余额 $0 · 备注：临时测试账号。</p></div>
+        </div>
+        <div class="drawer-actions"><button class="btn primary" data-action="manage">前往账号管理</button></div>`;
+      drawerMask.classList.add('open');
+    }
+
+    document.getElementById('closeDrawer').addEventListener('click', () => drawerMask.classList.remove('open'));
+    drawerMask.addEventListener('click', event => { if (event.target === drawerMask) drawerMask.classList.remove('open'); });
+    drawerContent.addEventListener('click', event => {
+      const button = event.target.closest('[data-action]');
+      if (!button) return;
+      const labels = { test: '账号测试任务已提交', sync: '账号重新同步已提交', compare: '已打开同组账号对比', pause: '演示：暂停调度需要二次确认', manage: '演示：将跳转上游账号管理页' };
+      showToast(labels[button.dataset.action]);
+    });
+
+    document.querySelectorAll('#issueTable tr').forEach(row => row.addEventListener('click', () => openIssueDrawer(row)));
+
+    document.querySelectorAll('.risk-card').forEach(card => card.addEventListener('click', () => {
+      document.querySelectorAll('.risk-card').forEach(item => item.classList.remove('selected'));
+      card.classList.add('selected');
+      const filter = card.dataset.filter;
+      if (filter === 'disabled') { openDisabledDrawer(); return; }
+      const rows = [...document.querySelectorAll('#issueTable tr')];
+      rows.forEach(row => row.style.display = (filter === 'critical' ? row.dataset.kind.includes('critical') : row.dataset.kind.includes(filter)) ? '' : 'none');
+      const label = card.querySelector('.risk-label').textContent;
+      document.getElementById('tableCaption').textContent = `已按“${label}”筛选演示数据`;
+    }));
+
+    document.querySelectorAll('#rangeControl button').forEach(button => button.addEventListener('click', () => {
+      document.querySelectorAll('#rangeControl button').forEach(item => item.classList.remove('active'));
+      button.classList.add('active');
+      showToast(`已切换到${button.textContent}统计范围`);
+    }));
+
+    document.querySelectorAll('#rateTabs .tab').forEach(button => button.addEventListener('click', () => {
+      document.querySelectorAll('#rateTabs .tab').forEach(item => item.classList.remove('active'));
+      button.classList.add('active');
+    }));
+
+    document.getElementById('refreshBtn').addEventListener('click', event => {
+      event.currentTarget.textContent = '刷新中…';
+      window.setTimeout(() => { event.currentTarget.textContent = '刷新数据'; showToast('驾驶舱数据已刷新'); }, 700);
+    });
+    document.getElementById('scanBtn').addEventListener('click', () => showToast('账号巡检预览已生成'));
+  </script>
+</body>
+</html>
