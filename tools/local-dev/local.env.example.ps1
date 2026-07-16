@@ -16,5 +16,7 @@ $Sub2ApiDev = @{
     FrontendPort = 5173
     AdminEmail = 'admin@sub2api.local'
     AdminPassword = ''
+    # 固定 AES-256-GCM 加密密钥，64 位 hex。请在本机 local.env.ps1 中设置，避免重启后已保存凭据无法解密。
+    TotpEncryptionKey = ''
     GoExe = ''
 }

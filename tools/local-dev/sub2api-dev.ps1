@@ -1,7 +1,7 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('start', 'stop', 'status', 'logs', 'help')]
+    [ValidateSet('menu', 'start', 'restart', 'restart-backend', 'restart-frontend', 'stop', 'status', 'logs', 'help')]
     [string]$Action = 'status',
     [switch]$Json,
     [switch]$SkipBuild,
@@ -39,6 +39,7 @@ $Settings = [ordered]@{
     FrontendPort = 5173
     AdminEmail = 'admin@sub2api.local'
     AdminPassword = ''
+    TotpEncryptionKey = ''
     GoExe = ''
 }
 
@@ -187,12 +188,13 @@ function Wait-Endpoint {
 }
 
 function Start-Backend {
+    param([switch]$ForceBuild)
     $healthUrl = "http://$($Settings.BackendHost):$($Settings.BackendPort)/health"
     if (Test-HttpEndpoint $healthUrl) { Write-Host "Backend already available: $healthUrl" -ForegroundColor DarkGray; return }
     if (Get-ListenerProcessId ([int]$Settings.BackendPort)) { throw "Backend port is already occupied: $($Settings.BackendPort)" }
     New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
     $backendExe = Join-Path $StateDir 'sub2api.exe'
-    if (-not $SkipBuild -or -not (Test-Path -LiteralPath $backendExe)) {
+    if ($ForceBuild -or -not $SkipBuild -or -not (Test-Path -LiteralPath $backendExe)) {
         Write-Host 'Building backend...' -ForegroundColor Cyan
         Push-Location (Join-Path $RepoRoot 'backend')
         try {
@@ -217,6 +219,11 @@ function Start-Backend {
     $env:REDIS_DB = '0'
     $env:ADMIN_EMAIL = [string]$Settings.AdminEmail
     $env:ADMIN_PASSWORD = [string]$Settings.AdminPassword
+    if (-not [string]::IsNullOrWhiteSpace([string]$Settings.TotpEncryptionKey)) {
+        $env:TOTP_ENCRYPTION_KEY = [string]$Settings.TotpEncryptionKey
+    } else {
+        Remove-Item Env:TOTP_ENCRYPTION_KEY -ErrorAction SilentlyContinue
+    }
     $process = Start-Process -FilePath $backendExe -WorkingDirectory (Join-Path $RepoRoot 'backend') -WindowStyle Hidden -RedirectStandardOutput $BackendLog -RedirectStandardError $BackendErrorLog -PassThru
     Set-Content -LiteralPath $BackendPidFile -Value $process.Id -Encoding ascii
     Wait-Endpoint $healthUrl 120
@@ -245,14 +252,54 @@ function Stop-PidFileProcess {
     Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
 }
 
-function Stop-LocalDevelopment {
-    Stop-PidFileProcess $FrontendPidFile
+function Stop-Backend {
     Stop-PidFileProcess $BackendPidFile
-    foreach ($port in @([int]$Settings.FrontendPort, [int]$Settings.BackendPort)) {
-        $processId = Get-ListenerProcessId $port
-        if ($processId) { Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue }
-    }
+    $processId = Get-ListenerProcessId ([int]$Settings.BackendPort)
+    if ($processId) { Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue }
+    Write-Host 'Backend stopped.' -ForegroundColor Green
+}
+
+function Stop-Frontend {
+    Stop-PidFileProcess $FrontendPidFile
+    $processId = Get-ListenerProcessId ([int]$Settings.FrontendPort)
+    if ($processId) { Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue }
+    Write-Host 'Frontend stopped.' -ForegroundColor Green
+}
+
+function Stop-LocalDevelopment {
+    Stop-Frontend
+    Stop-Backend
     Write-Host 'Local frontend and backend processes stopped.' -ForegroundColor Green
+}
+
+function Initialize-LocalDependencies {
+    Assert-StartConfiguration
+    Ensure-ContainerRunning $Settings.PostgresContainer
+    Ensure-ContainerRunning $Settings.RedisContainer
+    Ensure-Database
+}
+
+function Restart-Backend {
+    Initialize-LocalDependencies
+    Stop-Backend
+    Start-Backend -ForceBuild
+    Show-Status
+}
+
+function Restart-Frontend {
+    Assert-StartConfiguration
+    Stop-Frontend
+    Start-Frontend
+    Show-Status
+}
+
+function Restart-LocalDevelopment {
+    Initialize-LocalDependencies
+    Stop-Frontend
+    Stop-Backend
+    Start-Backend -ForceBuild
+    Start-Frontend
+    Show-Status
 }
 
 function Show-Logs {
@@ -268,21 +315,81 @@ function Show-Logs {
     }
 }
 
+function Show-InteractiveMenu {
+    while ($true) {
+        Clear-Host
+        Write-Host '==================================================' -ForegroundColor Cyan
+        Write-Host '              Sub2API 本地开发' -ForegroundColor Cyan
+        Write-Host '==================================================' -ForegroundColor Cyan
+        Write-Host ''
+        Write-Host '  1. 启动全部服务'
+        Write-Host '  2. 重新编译并重启后端'
+        Write-Host '  3. 重启前端'
+        Write-Host '  4. 重新编译并重启前后端'
+        Write-Host '  5. 查看服务状态'
+        Write-Host '  6. 查看最近错误日志'
+        Write-Host '  7. 停止前端和后端'
+        Write-Host '  0. 退出'
+        Write-Host ''
+
+        $choice = Read-Host '请选择操作 [0-7]'
+        if ($choice -eq '0') {
+            return
+        }
+
+        try {
+            switch ($choice) {
+                '1' {
+                    Initialize-LocalDependencies
+                    Start-Backend
+                    Start-Frontend
+                    Show-Status
+                }
+                '2' { Restart-Backend }
+                '3' { Restart-Frontend }
+                '4' { Restart-LocalDevelopment }
+                '5' { Show-Status }
+                '6' { Show-Logs }
+                '7' { Stop-LocalDevelopment }
+                default {
+                    Write-Host '输入无效，请输入 0 到 7。' -ForegroundColor Yellow
+                    [void](Read-Host '按回车键返回菜单')
+                    continue
+                }
+            }
+            Write-Host ''
+            Write-Host '操作执行成功。' -ForegroundColor Green
+        }
+        catch {
+            Write-Host ''
+            Write-Host "操作执行失败：$($_.Exception.Message)" -ForegroundColor Red
+        }
+
+        [void](Read-Host '按回车键返回菜单')
+    }
+}
+
 function Show-Help {
     @"
 Sub2API local development helper
 
 Usage:
   .\tools\local-dev\sub2api-dev.ps1 start [-SkipBuild]
+  .\tools\local-dev\sub2api-dev.ps1 restart
+  .\tools\local-dev\sub2api-dev.ps1 restart-backend
+  .\tools\local-dev\sub2api-dev.ps1 restart-frontend
   .\tools\local-dev\sub2api-dev.ps1 stop
   .\tools\local-dev\sub2api-dev.ps1 status [-Json]
   .\tools\local-dev\sub2api-dev.ps1 logs
 
 Commands:
-  start   Start Docker dependencies, create the development database, then start backend and frontend.
-  stop    Stop frontend and backend processes started for local development.
-  status  Show container, process, port, and health status.
-  logs    Show log paths and recent error output.
+  start             Start Docker dependencies, create the development database, then start backend and frontend.
+  restart           Rebuild the backend and restart both backend and frontend.
+  restart-backend   Rebuild and restart only the Go backend. Use this after changing Go code.
+  restart-frontend  Restart only the Vite frontend. Vue changes normally hot-reload without this.
+  stop              Stop frontend and backend processes started for local development.
+  status            Show container, process, port, and health status.
+  logs              Show log paths and recent error output.
 
 Local configuration:
   Copy tools\local-dev\local.env.example.ps1 to tools\local-dev\local.env.ps1.
@@ -291,15 +398,16 @@ Local configuration:
 }
 
 switch ($Action) {
+    'menu' { Show-InteractiveMenu }
     'start' {
-        Assert-StartConfiguration
-        Ensure-ContainerRunning $Settings.PostgresContainer
-        Ensure-ContainerRunning $Settings.RedisContainer
-        Ensure-Database
+        Initialize-LocalDependencies
         Start-Backend
         Start-Frontend
         Show-Status
     }
+    'restart' { Restart-LocalDevelopment }
+    'restart-backend' { Restart-Backend }
+    'restart-frontend' { Restart-Frontend }
     'stop' { Stop-LocalDevelopment }
     'status' { Show-Status }
     'logs' { Show-Logs }

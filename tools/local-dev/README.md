@@ -1,69 +1,100 @@
-# Sub2API 本地联调脚本
+# Sub2API 本地开发启动工具
 
-该目录用于复用当前 Windows + Docker Desktop 本地联调环境，避免每次重新查找 PostgreSQL、Redis、Go 路径和启动参数。
+该工具用于 Windows + Docker Desktop 开发环境，可以统一启动 PostgreSQL、Redis、Go 后端和 Vite 前端。
 
-## 当前环境
+## 最简单的使用方式
 
-- PostgreSQL 容器：`pgsql-local-5433`
-- PostgreSQL 地址：`127.0.0.1:5433`
-- 开发数据库：`sub2api_dev`
-- 开发数据库用户：`sub2api_dev`
-- Redis 容器：`redis-local`
-- Redis 地址：`127.0.0.1:6379`
-- 后端地址：`http://127.0.0.1:4000`
-- 前端地址：`http://127.0.0.1:5173`
-- 默认管理员邮箱：`admin@sub2api.local`
+在仓库根目录双击：
 
-密码和本机 Go 路径保存在 `local.env.ps1`。该文件已被 Git 忽略，不得提交。
-
-## 使用方式
-
-在仓库根目录执行：
-
-```powershell
-# 启动或复用 Docker 依赖，幂等创建数据库，然后启动前后端
-.\tools\local-dev\sub2api-dev.ps1 start
-
-# 后端已构建且只想快速重启时
-.\tools\local-dev\sub2api-dev.ps1 start -SkipBuild
-
-# 查看容器、端口、进程和健康状态
-.\tools\local-dev\sub2api-dev.ps1 status
-
-# 输出机器可读状态
-.\tools\local-dev\sub2api-dev.ps1 status -Json
-
-# 查看日志路径和最近错误
-.\tools\local-dev\sub2api-dev.ps1 logs
-
-# 停止本地前后端，不停止 PostgreSQL 和 Redis
-.\tools\local-dev\sub2api-dev.ps1 stop
+```text
+dev.bat
 ```
+
+在菜单中按数字选择操作，不需要输入 PowerShell 命令。
+
+常用选择：
+
+- `1`：首次启动或全部服务未运行时使用。
+- `2`：修改 Go 后端代码后使用，会重新执行 `go build` 并重启后端。
+- `3`：重启 Vite 前端。通常修改 Vue、TypeScript 或 CSS 后会自动热更新，不需要选择此项。
+- `4`：重新编译后端并重启前后端。
+- `5`：查看 PostgreSQL、Redis、后端和前端状态。
+- `6`：查看最近的前后端错误日志。
+- `7`：停止前端和后端，PostgreSQL 与 Redis 容器会继续保留。
+
+## 开发代码如何生效
+
+### 前端
+
+前端使用 Vite 开发服务器：
+
+- 修改 `.vue`、`.ts`、`.css` 后通常会自动热更新。
+- 页面没有更新时，可以在 `dev.bat` 中选择 `3` 重启前端。
+
+### 后端
+
+后端运行的是编译后的 `.dev/sub2api-local/sub2api.exe`：
+
+- 修改 Go 代码后不会自动生效。
+- 在 `dev.bat` 中选择 `2`，脚本会停止旧进程、重新编译并启动新后端。
+- 不要在需要更新 Go 代码时使用 `-SkipBuild`。
 
 ## 首次配置
 
-如果 `local.env.ps1` 不存在：
+如果 `tools/local-dev/local.env.ps1` 不存在，复制示例文件：
 
 ```powershell
 Copy-Item .\tools\local-dev\local.env.example.ps1 .\tools\local-dev\local.env.ps1
 ```
 
-然后填写：
+至少填写：
 
 - `DatabasePassword`
 - `AdminPassword`
-- `GoExe`，仓库需要指定兼容版本的 Go 可执行文件
+- `GoExe`
 
-脚本会自动完成：
+`GoExe` 示例：
 
-1. 检查并启动现有 PostgreSQL、Redis 容器。
-2. 幂等创建 PostgreSQL 角色和 `sub2api_dev` 数据库。
-3. 将运行数据、配置、PID 和日志写入 `.dev/sub2api-local`。
-4. 构建并启动 Go 后端。
-5. 启动 Vite 前端。
-6. 等待后端 `/health` 和前端首页可访问。
+```powershell
+GoExe = 'C:\Program Files\Go\bin\go.exe'
+```
 
-首次登录新数据库后，后台会要求管理员确认合规声明。该确认必须在浏览器中由使用者完成。
+`local.env.ps1` 已被 Git 忽略，里面可以保存本机开发密码，但不要手动提交该文件。
+
+## 默认地址
+
+- 前端：`http://127.0.0.1:5173`
+- 后端：`http://127.0.0.1:4000`
+- PostgreSQL：`127.0.0.1:5433`
+- Redis：`127.0.0.1:6379`
+- 开发数据库：`sub2api_dev`
+
+运行状态、PID、生成的后端程序和日志保存在：
+
+```text
+.dev/sub2api-local/
+```
+
+## 命令行方式
+
+双击 `dev.bat` 之外，也可以直接使用：
+
+```powershell
+.\dev.bat start
+.\dev.bat restart-backend
+.\dev.bat restart-frontend
+.\dev.bat restart
+.\dev.bat status
+.\dev.bat logs
+.\dev.bat stop
+```
+
+底层 PowerShell 命令仍然可用：
+
+```powershell
+.\tools\local-dev\sub2api-dev.ps1 start
+.\tools\local-dev\sub2api-dev.ps1 restart-backend
+```
 
 ## 验证脚本
 
