@@ -616,6 +616,56 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/supplier-management',
+    name: 'AdminSupplierDashboard',
+    component: () => import('@/views/admin/supplier-management/SupplierDashboardView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: '供应商运维驾驶舱'
+    }
+  },
+  {
+    path: '/admin/supplier-management/automations',
+    name: 'AdminSupplierAutomations',
+    component: () => import('@/views/admin/supplier-management/SupplierAutomationView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: '供应商自动化任务中心'
+    }
+  },
+  {
+    path: '/admin/supplier-management/providers',
+    name: 'AdminSupplierProviders',
+    component: () => import('@/views/admin/supplier-management/SupplierProvidersView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: '供应商管理'
+    }
+  },
+  {
+    path: '/admin/supplier-management/groups',
+    name: 'AdminSupplierGroups',
+    component: () => import('@/views/admin/supplier-management/SupplierGroupsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: '供应商分组管理'
+    }
+  },
+  {
+    path: '/admin/supplier-management/accounts',
+    name: 'AdminSupplierAccounts',
+    component: () => import('@/views/admin/supplier-management/SupplierAccountsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: '供应商上游账号'
+    }
+  },
+  {
     path: '/admin/announcements',
     name: 'AdminAnnouncements',
     component: () => import('@/views/admin/AnnouncementsView.vue'),

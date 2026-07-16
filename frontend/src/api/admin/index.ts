@@ -34,6 +34,10 @@ import affiliatesAPI from './affiliates'
 import riskControlAPI from './riskControl'
 import adminComplianceAPI from './compliance'
 import upstreamProvidersAPI from './upstreamProviders'
+import supplierProvidersAPI from './supplierProviders'
+import supplierProviderTypesAPI from './supplierProviderTypes'
+import supplierProviderDataAPI from './supplierProviderData'
+import supplierAutomationAPI from './supplierAutomation'
 import upstreamDashboardAPI from './upstreamDashboard'
 import upstreamManagementAPI from './upstreamManagement'
 import upstreamAccountSyncAPI from './upstreamAccountSync'
@@ -74,6 +78,10 @@ export const adminAPI = {
   riskControl: riskControlAPI,
   compliance: adminComplianceAPI,
   upstreamProviders: upstreamProvidersAPI,
+  supplierProviders: supplierProvidersAPI,
+  supplierProviderTypes: supplierProviderTypesAPI,
+  supplierProviderData: supplierProviderDataAPI,
+  supplierAutomation: supplierAutomationAPI,
   upstreamDashboard: upstreamDashboardAPI,
   upstreamManagement: upstreamManagementAPI,
   upstreamAccountSync: upstreamAccountSyncAPI,
@@ -112,6 +120,10 @@ export {
   riskControlAPI,
   adminComplianceAPI,
   upstreamProvidersAPI,
+  supplierProvidersAPI,
+  supplierProviderTypesAPI,
+  supplierProviderDataAPI,
+  supplierAutomationAPI,
   upstreamDashboardAPI,
   upstreamManagementAPI,
   upstreamAccountSyncAPI,
@@ -139,6 +151,35 @@ export type {
   UpstreamDashboardTrendPoint,
   UpstreamDashboardWarning
 } from './upstreamDashboard'
+export type {
+  SupplierProvider,
+  SupplierProviderListParams,
+  SupplierProviderListResult,
+  SupplierProviderSummary,
+  SupplierProviderUpsertPayload
+} from './supplierProviders'
+export type {
+  SupplierProviderType,
+  SupplierProviderTypeUpsertPayload
+} from './supplierProviderTypes'
+export type {
+  SupplierProviderAccount,
+  SupplierProviderAccountListResult,
+  SupplierProviderDataListParams,
+  SupplierProviderGroup,
+  SupplierProviderGroupListResult,
+  SupplierProviderSyncResult,
+  SupplierSyncCounts,
+  SupplierSyncScope,
+  SupplierSyncStatus
+} from './supplierProviderData'
+export type {
+  SupplierAutomationConfig,
+  SupplierAutomationRun,
+  SupplierAutomationRunListParams,
+  SupplierAutomationRunListResult,
+  SupplierAutomationTask
+} from './supplierAutomation'
 export type {
   UpstreamProviderBalance,
   UpstreamProviderConfig,
