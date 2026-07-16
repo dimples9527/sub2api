@@ -229,6 +229,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 
 		SettingKeyAllowUserViewErrorRequests: "false",
 	}
+	addLLMMonitorDefaultSettings(defaults)
 
 	return s.settingRepo.SetMultiple(ctx, defaults)
 }

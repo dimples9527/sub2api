@@ -47,8 +47,8 @@ type llmMonitorSettingsStub struct {
 	statusAPIURL string
 }
 
-func (s llmMonitorSettingsStub) GetPublicSettings(context.Context) (*service.PublicSettings, error) {
-	return &service.PublicSettings{LLMMonitorStatusAPIURL: s.statusAPIURL}, nil
+func (s llmMonitorSettingsStub) GetLLMMonitorSettings(context.Context) (*service.LLMMonitorSettings, error) {
+	return &service.LLMMonitorSettings{StatusAPIURL: s.statusAPIURL}, nil
 }
 
 type llmMonitorGroupStub struct {

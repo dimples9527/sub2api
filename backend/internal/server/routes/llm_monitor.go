@@ -23,7 +23,7 @@ var llmMonitorScrubbedValues = map[string]struct{}{
 }
 
 type llmMonitorSettingsProvider interface {
-	GetPublicSettings(ctx context.Context) (*service.PublicSettings, error)
+	GetLLMMonitorSettings(ctx context.Context) (*service.LLMMonitorSettings, error)
 }
 
 type llmMonitorGroupProvider interface {
@@ -50,13 +50,13 @@ func proxyLLMMonitorStatus(
 	transform func(context.Context, []byte) ([]byte, error),
 	standardResponse bool,
 ) {
-	settings, err := settingsProvider.GetPublicSettings(c.Request.Context())
+	settings, err := settingsProvider.GetLLMMonitorSettings(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load monitor settings"})
 		return
 	}
 
-	targetURL, err := llmMonitorTargetURL(settings.LLMMonitorStatusAPIURL, c.Query("period"), c.Query("board"))
+	targetURL, err := llmMonitorTargetURL(settings.StatusAPIURL, c.Query("period"), c.Query("board"))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid monitor upstream url"})
 		return
