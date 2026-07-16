@@ -87,6 +87,8 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		nil, // upstreamAccountSyncPreviewScheduler
 		nil, // upstreamAccountRateGuardScheduler
 		nil, // upstreamBalanceSamplerScheduler
+		nil, // upstreamAccountHealthGuardScheduler
+		nil, // supplierAutomationScheduler
 	)
 
 	require.NotPanics(t, func() {

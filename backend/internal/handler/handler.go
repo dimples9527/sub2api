@@ -38,6 +38,10 @@ type AdminHandlers struct {
 	Payment                *admin.PaymentHandler
 	Affiliate              *admin.AffiliateHandler
 	Compliance             *admin.ComplianceHandler
+	SupplierProvider       *admin.SupplierProviderHandler
+	SupplierProviderType   *admin.SupplierProviderTypeHandler
+	SupplierProviderSync   *admin.SupplierProviderSyncHandler
+	SupplierAutomation     *admin.SupplierAutomationHandler
 	UpstreamProvider       *admin.UpstreamProviderHandler
 	UpstreamDashboard      *admin.UpstreamDashboardHandler
 	UpstreamManagement     *admin.UpstreamManagementHandler

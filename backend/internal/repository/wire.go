@@ -96,6 +96,10 @@ var ProviderSet = wire.NewSet(
 	NewAffiliateRepository,
 	NewUpstreamBalanceRepository,
 	NewUpstreamAccountHealthGuardRecordRepository,
+	NewSupplierProviderRepository,
+	NewSupplierProviderTypeRepository,
+	NewSupplierProviderDataRepository,
+	NewSupplierAutomationRepository,
 	NewUserPlatformQuotaRepository,     // T14: user × platform quota
 	NewUserPlatformQuotaServiceAdapter, // T14: adapter → service.UserPlatformQuotaRepository
 
@@ -130,6 +134,11 @@ var ProviderSet = wire.NewSet(
 	NewTLSFingerprintProfileCache,
 	NewContentModerationHashCache,
 	NewUpstreamAccountSyncPreviewCache,
+	NewSupplierProviderTokenCache,
+	NewSupplierAutomationLock,
+	wire.Bind(new(service.SupplierProviderTokenCache), new(*SupplierProviderTokenRedisCache)),
+	wire.Bind(new(service.SupplierProviderSyncLock), new(*SupplierProviderTokenRedisCache)),
+	wire.Bind(new(service.SupplierAutomationLock), new(*supplierAutomationRedisLock)),
 
 	// Encryptors
 	NewAESEncryptor,

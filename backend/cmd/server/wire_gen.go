@@ -89,6 +89,18 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	if err != nil {
 		return nil, err
 	}
+	supplierProviderRepository := repository.NewSupplierProviderRepository(db)
+	supplierProviderTypeRepository := repository.NewSupplierProviderTypeRepository(db)
+	supplierProviderTokenCache := repository.NewSupplierProviderTokenCache(redisClient)
+	supplierProviderDataRepository := repository.NewSupplierProviderDataRepository(db)
+	supplierAutomationRepository := repository.NewSupplierAutomationRepository(db)
+	supplierAutomationLock := repository.NewSupplierAutomationLock(redisClient)
+	supplierProviderService := service.ProvideSupplierProviderService(supplierProviderRepository, secretEncryptor, supplierProviderTypeRepository, supplierProviderTokenCache)
+	supplierProviderTypeService := service.NewSupplierProviderTypeService(supplierProviderTypeRepository)
+	supplierSub2APIClient := service.ProvideSupplierSub2APIClient(supplierProviderTokenCache)
+	supplierProviderSyncService := service.NewSupplierProviderSyncService(supplierProviderRepository, supplierProviderDataRepository, supplierSub2APIClient, secretEncryptor, supplierProviderTokenCache)
+	supplierAutomationService := service.NewSupplierAutomationService(supplierAutomationRepository, supplierAutomationLock, supplierProviderSyncService, supplierProviderDataRepository)
+	supplierAutomationScheduler := service.ProvideSupplierAutomationScheduler(supplierAutomationRepository, supplierAutomationService)
 	totpCache := repository.NewTotpCache(redisClient)
 	totpService := service.NewTotpService(userRepository, secretEncryptor, totpCache, settingService, emailService, emailQueueService)
 	userAttributeDefinitionRepository := repository.NewUserAttributeDefinitionRepository(client)
@@ -266,6 +278,10 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	paymentHandler := admin.NewPaymentHandler(paymentService, paymentConfigService)
 	affiliateHandler := admin.NewAffiliateHandler(affiliateService, adminService)
 	complianceHandler := admin.NewComplianceHandler(settingService)
+	supplierProviderHandler := admin.NewSupplierProviderHandler(supplierProviderService)
+	supplierProviderTypeHandler := admin.NewSupplierProviderTypeHandler(supplierProviderTypeService)
+	supplierProviderSyncHandler := handler.ProvideSupplierProviderSyncHandler(supplierProviderSyncService, supplierProviderDataRepository)
+	supplierAutomationHandler := handler.ProvideSupplierAutomationHandler(supplierAutomationService)
 	upstreamProviderHandler := admin.NewUpstreamProviderHandler(upstreamProviderService)
 	upstreamManagementHandler := admin.NewUpstreamManagementHandler(upstreamManagementService)
 	upstreamAccountHealthGuardService := service.NewUpstreamAccountHealthGuardService(accountRepository, upstreamProviderService, settingRepository, accountTestService, upstreamAccountHealthGuardRecordRepository)
@@ -273,7 +289,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	upstreamDashboardService := service.ProvideUpstreamDashboardService(upstreamProviderService, upstreamManagementService, upstreamAccountSyncService, upstreamBalanceConsumptionService, upstreamAccountHealthGuardService, opsService, usageService)
 	upstreamDashboardHandler := admin.NewUpstreamDashboardHandler(upstreamDashboardService)
 	upstreamAccountSyncHandler := admin.NewUpstreamAccountSyncHandler(upstreamAccountSyncService, upstreamAccountRateGuardScheduler, upstreamBalanceConsumptionService, upstreamBalanceSamplerScheduler, upstreamAccountHealthGuardService, upstreamAccountHealthGuardScheduler)
-	adminHandlers := handler.ProvideAdminHandlers(dashboardHandler, adminUserHandler, groupHandler, accountHandler, adminAnnouncementHandler, dataManagementHandler, backupHandler, oAuthHandler, openAIOAuthHandler, geminiOAuthHandler, antigravityOAuthHandler, grokOAuthHandler, proxyHandler, adminRedeemHandler, promoHandler, settingHandler, opsHandler, systemHandler, adminSubscriptionHandler, adminUsageHandler, userAttributeHandler, errorPassthroughHandler, tlsFingerprintProfileHandler, adminAPIKeyHandler, scheduledTestHandler, channelHandler, channelMonitorHandler, channelMonitorRequestTemplateHandler, contentModerationHandler, paymentHandler, affiliateHandler, complianceHandler, upstreamProviderHandler, upstreamDashboardHandler, upstreamManagementHandler, upstreamAccountSyncHandler)
+	adminHandlers := handler.ProvideAdminHandlers(dashboardHandler, adminUserHandler, groupHandler, accountHandler, adminAnnouncementHandler, dataManagementHandler, backupHandler, oAuthHandler, openAIOAuthHandler, geminiOAuthHandler, antigravityOAuthHandler, grokOAuthHandler, proxyHandler, adminRedeemHandler, promoHandler, settingHandler, opsHandler, systemHandler, adminSubscriptionHandler, adminUsageHandler, userAttributeHandler, errorPassthroughHandler, tlsFingerprintProfileHandler, adminAPIKeyHandler, scheduledTestHandler, channelHandler, channelMonitorHandler, channelMonitorRequestTemplateHandler, contentModerationHandler, paymentHandler, affiliateHandler, complianceHandler, supplierProviderHandler, supplierProviderTypeHandler, supplierProviderSyncHandler, supplierAutomationHandler, upstreamProviderHandler, upstreamDashboardHandler, upstreamManagementHandler, upstreamAccountSyncHandler)
 	usageRecordWorkerPool := service.NewUsageRecordWorkerPool(configConfig)
 	userMsgQueueCache := repository.NewUserMsgQueueCache(redisClient)
 	userMessageQueueService := service.ProvideUserMessageQueueService(userMsgQueueCache, rpmCache, configConfig)
@@ -307,7 +323,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	channelMonitorRunner := service.ProvideChannelMonitorRunner(channelMonitorService, settingService)
 	userPlatformQuotaUsageFlusher := service.ProvideUserPlatformQuotaUsageFlusher(configConfig, billingCache, serviceUserPlatformQuotaRepository, timingWheelService)
 	upstreamGroupRateFixScheduler := service.ProvideUpstreamGroupRateFixScheduler(upstreamManagementService)
-	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, batchImageCleanupService, batchImageWorkerRuntime, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, userPlatformQuotaUsageFlusher, upstreamGroupRateFixScheduler, upstreamAccountSyncPreviewScheduler, upstreamAccountRateGuardScheduler, upstreamBalanceSamplerScheduler, upstreamAccountHealthGuardScheduler)
+	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, batchImageCleanupService, batchImageWorkerRuntime, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, userPlatformQuotaUsageFlusher, upstreamGroupRateFixScheduler, upstreamAccountSyncPreviewScheduler, upstreamAccountRateGuardScheduler, upstreamBalanceSamplerScheduler, upstreamAccountHealthGuardScheduler, supplierAutomationScheduler)
 	application := &Application{
 		Server:  httpServer,
 		Cleanup: v,
@@ -372,6 +388,7 @@ func provideCleanup(
 	upstreamAccountRateGuardScheduler *service.UpstreamAccountRateGuardScheduler,
 	upstreamBalanceSamplerScheduler *service.UpstreamBalanceSamplerScheduler,
 	upstreamAccountHealthGuardScheduler *service.UpstreamAccountHealthGuardScheduler,
+	supplierAutomationScheduler *service.SupplierAutomationScheduler,
 ) func() {
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -574,6 +591,12 @@ func provideCleanup(
 			{"UpstreamAccountHealthGuardScheduler", func() error {
 				if upstreamAccountHealthGuardScheduler != nil {
 					upstreamAccountHealthGuardScheduler.Stop()
+				}
+				return nil
+			}},
+			{"SupplierAutomationScheduler", func() error {
+				if supplierAutomationScheduler != nil {
+					supplierAutomationScheduler.Stop()
 				}
 				return nil
 			}},

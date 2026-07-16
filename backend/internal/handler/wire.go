@@ -41,6 +41,10 @@ func ProvideAdminHandlers(
 	paymentHandler *admin.PaymentHandler,
 	affiliateHandler *admin.AffiliateHandler,
 	complianceHandler *admin.ComplianceHandler,
+	supplierProviderHandler *admin.SupplierProviderHandler,
+	supplierProviderTypeHandler *admin.SupplierProviderTypeHandler,
+	supplierProviderSyncHandler *admin.SupplierProviderSyncHandler,
+	supplierAutomationHandler *admin.SupplierAutomationHandler,
 	upstreamProviderHandler *admin.UpstreamProviderHandler,
 	upstreamDashboardHandler *admin.UpstreamDashboardHandler,
 	upstreamManagementHandler *admin.UpstreamManagementHandler,
@@ -79,6 +83,10 @@ func ProvideAdminHandlers(
 		Payment:                paymentHandler,
 		Affiliate:              affiliateHandler,
 		Compliance:             complianceHandler,
+		SupplierProvider:       supplierProviderHandler,
+		SupplierProviderType:   supplierProviderTypeHandler,
+		SupplierProviderSync:   supplierProviderSyncHandler,
+		SupplierAutomation:     supplierAutomationHandler,
 		UpstreamProvider:       upstreamProviderHandler,
 		UpstreamDashboard:      upstreamDashboardHandler,
 		UpstreamManagement:     upstreamManagementHandler,
@@ -103,6 +111,14 @@ func ProvideAdminSettingHandler(settingService *service.SettingService, emailSer
 	h := admin.NewSettingHandler(settingService, emailService, turnstileService, opsService, paymentConfigService, paymentService, userAttributeService)
 	h.SetNotificationEmailService(notificationEmailService)
 	return h
+}
+
+func ProvideSupplierProviderSyncHandler(syncService *service.SupplierProviderSyncService, dataRepo service.SupplierProviderDataRepository) *admin.SupplierProviderSyncHandler {
+	return admin.NewSupplierProviderSyncHandler(syncService, dataRepo)
+}
+
+func ProvideSupplierAutomationHandler(svc *service.SupplierAutomationService) *admin.SupplierAutomationHandler {
+	return admin.NewSupplierAutomationHandler(svc)
 }
 
 // ProvideHandlers creates the Handlers struct
@@ -201,6 +217,10 @@ var ProviderSet = wire.NewSet(
 	admin.NewPaymentHandler,
 	admin.NewAffiliateHandler,
 	admin.NewComplianceHandler,
+	admin.NewSupplierProviderHandler,
+	admin.NewSupplierProviderTypeHandler,
+	ProvideSupplierProviderSyncHandler,
+	ProvideSupplierAutomationHandler,
 	admin.NewUpstreamProviderHandler,
 	admin.NewUpstreamDashboardHandler,
 	admin.NewUpstreamManagementHandler,

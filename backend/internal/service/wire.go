@@ -462,6 +462,28 @@ func ProvideUpstreamManagementService(
 	return NewUpstreamManagementService(upstreamProviderService, groupRepo, settingRepo, authCacheInvalidator)
 }
 
+func ProvideSupplierProviderService(
+	repo SupplierProviderRepository,
+	encryptor SecretEncryptor,
+	typeRepo SupplierProviderTypeRepository,
+	tokenCache SupplierProviderTokenCache,
+) *SupplierProviderService {
+	svc := NewSupplierProviderService(repo, encryptor, typeRepo)
+	svc.SetTokenCache(tokenCache)
+	return svc
+}
+
+func ProvideSupplierSub2APIClient(tokenCache SupplierProviderTokenCache) *SupplierSub2APIClient {
+	return NewSupplierSub2APIClient(nil, tokenCache)
+}
+
+func ProvideSupplierAutomationScheduler(repo SupplierAutomationRepository, svc *SupplierAutomationService) *SupplierAutomationScheduler {
+	scheduler := NewSupplierAutomationScheduler(repo, svc)
+	svc.SetSchedulerReloader(scheduler)
+	scheduler.Start()
+	return scheduler
+}
+
 func ProvideUpstreamGroupRateFixScheduler(upstreamManagementService *UpstreamManagementService) *UpstreamGroupRateFixScheduler {
 	svc := NewUpstreamGroupRateFixScheduler(upstreamManagementService)
 	svc.Start()
@@ -687,6 +709,14 @@ var ProviderSet = wire.NewSet(
 	NewAccountUsageService,
 	NewAccountTestService,
 	ProvideSettingService,
+	ProvideSupplierProviderService,
+	NewSupplierProviderTypeService,
+	ProvideSupplierSub2APIClient,
+	wire.Bind(new(SupplierProviderRemoteClient), new(*SupplierSub2APIClient)),
+	NewSupplierProviderSyncService,
+	wire.Bind(new(SupplierProviderBatchSyncer), new(*SupplierProviderSyncService)),
+	NewSupplierAutomationService,
+	ProvideSupplierAutomationScheduler,
 	NewUpstreamProviderService,
 	ProvideUpstreamManagementService,
 	ProvideUpstreamGroupRateFixScheduler,
