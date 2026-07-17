@@ -510,6 +510,10 @@ func supplierNewAPIGroupIndexes(payload []byte) ([]supplierNewAPIGroupInfo, map[
 		if strings.TrimSpace(name) == "" || !item.Ratio.valid || item.Ratio.value < 0 {
 			continue
 		}
+		rawStatus := jsonString(item.Status)
+		if !supplierProviderGroupIsActive(rawStatus) {
+			continue
+		}
 		key := jsonString(item.ID)
 		if key == "" {
 			key = normalizeSupplierNewAPIGroupName(name)
@@ -518,7 +522,7 @@ func supplierNewAPIGroupIndexes(payload []byte) ([]supplierNewAPIGroupInfo, map[
 			Key:            key,
 			Name:           strings.TrimSpace(name),
 			RateMultiplier: item.Ratio.value,
-			RawStatus:      jsonString(item.Status),
+			RawStatus:      rawStatus,
 		}
 		groups = append(groups, group)
 		byName[group.Name] = group

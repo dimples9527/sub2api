@@ -103,3 +103,14 @@ func normalizeSupplierProviderType(providerType string) string {
 		return strings.ToLower(strings.TrimSpace(providerType))
 	}
 }
+
+func supplierProviderGroupIsActive(rawStatus string) bool {
+	switch strings.ToLower(strings.TrimSpace(rawStatus)) {
+	case "", "active", "enabled", "enable", "valid", "available", "ok", "success", "true":
+		return true
+	case "inactive", "disabled", "disable", "invalid", "false", "deleted", "archived", "removed":
+		return false
+	default:
+		return true
+	}
+}

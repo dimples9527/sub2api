@@ -560,6 +560,9 @@ func parseSupplierSub2APIGroups(raw []byte) ([]SupplierProviderRemoteGroup, erro
 			continue
 		}
 		status := jsonString(item["status"])
+		if !supplierProviderGroupIsActive(status) {
+			continue
+		}
 		out = append(out, SupplierProviderRemoteGroup{
 			Key:            strings.TrimSpace(key),
 			Name:           name,

@@ -645,12 +645,7 @@ func TestSupplierSub2APIClientParsesAccountsGroupsBalanceAndCost(t *testing.T) {
 	provider.AvailableGroupsURL = "/groups-items"
 	groups, err = client.FetchGroups(context.Background(), provider, "secret")
 	require.NoError(t, err)
-	require.Equal(t, []SupplierProviderRemoteGroup{{
-		Key:            "group-2",
-		Name:           "Trial",
-		RateMultiplier: 0.75,
-		RawStatus:      "disabled",
-	}}, groups)
+	require.Empty(t, groups)
 
 	balance, err := client.FetchBalance(context.Background(), provider, "secret")
 	require.NoError(t, err)

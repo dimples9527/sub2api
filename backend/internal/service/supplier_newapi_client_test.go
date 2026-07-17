@@ -40,7 +40,8 @@ func TestSupplierNewAPIClientFetchesAndParsesProviderData(t *testing.T) {
 			require.Contains(t, r.Header.Get("Cookie"), "session=abc")
 			_, _ = w.Write([]byte(`{"success":true,"data":{
 				"VIP":{"id":7,"ratio":"3.25"},
-				"Trial":{"id":8,"ratio":0.75}
+				"Trial":{"id":8,"ratio":0.75},
+				"Archive":{"id":9,"ratio":1.0,"status":"disabled"}
 			}}`))
 		case "/api/user/self":
 			balanceCalls++
