@@ -10,6 +10,7 @@
         <Select v-model="providerID" class="sp-search" :options="providerOptions" :searchable="false" />
         <Select v-model="activeFilter" class="sp-search" :options="activeFilterOptions" :searchable="false" />
         <Input v-model="search" class="sp-search" placeholder="搜索分组或上游 Key" />
+        <button class="sp-button small" type="button" :disabled="loading || !canResetFilters" @click="resetGroupFilters">重置筛选</button>
         <button class="sp-button" type="button" :disabled="loading" @click="loadGroups">刷新</button>
       </div>
     </header>
@@ -21,46 +22,52 @@
         <header class="sp-panel-head">
           <div class="sp-panel-title"><span class="sp-section-index">01</span><div><h2>本地分组表</h2><span>共 {{ total }} 条同步记录</span></div></div>
         </header>
-        <DataTable
-          :columns="groupColumns"
-          :data="items"
-          :loading="loading"
-          row-key="id"
-          clickable-rows
-          @row-click="selected = $event"
-        >
-          <template #cell-provider_name="{ row: group }">
-            <div class="sp-entity">{{ group.provider_name }}</div>
-            <div class="sp-sub">ID {{ group.provider_id }}</div>
-          </template>
-          <template #cell-name="{ row: group }">
-            <div class="sp-entity">{{ group.name || '未命名分组' }}</div>
-            <div class="sp-sub">{{ group.upstream_group_key }}</div>
-          </template>
-          <template #cell-rate_multiplier="{ row: group }">
-            <span class="sp-num">{{ group.rate_multiplier || 0 }}</span>
-          </template>
-          <template #cell-raw_status="{ row: group }">
-            {{ group.raw_status || 'unknown' }}
-          </template>
-          <template #cell-active="{ row: group }">
-            <span class="sp-status" :class="group.active ? 'good' : ''">{{ group.active ? '有效' : '已失效' }}</span>
-          </template>
-          <template #cell-last_seen_at="{ row: group }">
-            {{ formatTime(group.last_seen_at) }}
-          </template>
-          <template #empty>
-            暂无本地分组数据，请先在供应商列表执行同步。
-          </template>
-        </DataTable>
+        <div class="sp-groups-table-shell">
+          <DataTable
+            :columns="groupColumns"
+            :data="items"
+            :loading="loading"
+            row-key="id"
+            clickable-rows
+            @row-click="selected = $event"
+          >
+            <template #cell-provider_name="{ row: group }">
+              <div class="sp-entity">{{ group.provider_name }}</div>
+              <div class="sp-sub">ID {{ group.provider_id }}</div>
+            </template>
+            <template #cell-name="{ row: group }">
+              <div class="sp-entity">{{ group.name || '未命名分组' }}</div>
+              <div class="sp-sub">{{ group.upstream_group_key }}</div>
+            </template>
+            <template #cell-account_count="{ row: group }">
+              <span class="sp-num">{{ group.account_count }}</span>
+            </template>
+            <template #cell-rate_multiplier="{ row: group }">
+              <span class="sp-num">{{ group.rate_multiplier || 0 }}</span>
+            </template>
+            <template #cell-raw_status="{ row: group }">
+              {{ group.raw_status || 'unknown' }}
+            </template>
+            <template #cell-active="{ row: group }">
+              <span class="sp-status" :class="group.active ? 'good' : ''">{{ group.active ? '有效' : '已失效' }}</span>
+            </template>
+            <template #cell-last_seen_at="{ row: group }">
+              {{ formatTime(group.last_seen_at) }}
+            </template>
+            <template #empty>
+              暂无本地分组数据，请先在供应商列表执行同步。
+            </template>
+          </DataTable>
+        </div>
         <Pagination
           v-if="total > 0"
           class="sp-data-pagination"
           :page="page"
           :total="total"
           :page-size="pageSize"
-          :show-page-size-selector="false"
-          @update:page="page = $event"
+          :show-page-size-selector="true"
+          @update:page="handleGroupPageChange"
+          @update:pageSize="handleGroupPageSizeChange"
         />
       </div>
 
@@ -68,9 +75,12 @@
         <header class="sp-panel-head"><div class="sp-panel-title"><span class="sp-section-index">02</span><div><h2>分组摘要</h2><span>来自供应商本地同步表</span></div></div></header>
         <div class="sp-panel-body">
           <div class="sp-stat-list">
-            <div class="sp-stat-box"><span>当前筛选记录</span><b>{{ items.length }}</b></div>
-            <div class="sp-stat-box"><span>总记录</span><b>{{ total }}</b></div>
-            <div class="sp-stat-box"><span>页大小</span><b>{{ pageSize }}</b></div>
+            <div class="sp-stat-box"><span>有效分组</span><b>{{ activeGroupCount }}</b></div>
+            <div class="sp-stat-box"><span>已失效</span><b>{{ inactiveGroupCount }}</b></div>
+            <div class="sp-stat-box"><span>有账号分组</span><b>{{ groupsWithAccountsCount }}</b></div>
+            <div class="sp-stat-box"><span>空分组</span><b>{{ emptyGroupCount }}</b></div>
+            <div class="sp-stat-box"><span>未命名</span><b>{{ unnamedGroupCount }}</b></div>
+            <div class="sp-stat-box"><span>当前页 / 总记录</span><b>{{ items.length }} / {{ total }}</b></div>
           </div>
         </div>
       </aside>
@@ -94,7 +104,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, nextTick, ref, watch } from 'vue'
 import { SupplierDrawer, SupplierModuleLayout } from '@/components/admin/supplier-management'
 import DataTable from '@/components/common/DataTable.vue'
 import Input from '@/components/common/Input.vue'
@@ -111,12 +121,15 @@ const total = ref(0)
 const loading = ref(false)
 const error = ref('')
 const page = ref(1)
-const pageSize = ref(50)
+const pageSize = ref(20)
 const providerID = ref(0)
 const activeFilter = ref('true')
 const search = ref('')
 let searchTimer: number | undefined
+let suppressFilterWatch = false
 
+const DEFAULT_PROVIDER_ID = 0
+const DEFAULT_ACTIVE_FILTER = 'true'
 const providerOptions = computed<SelectOption[]>(() => [
   { value: 0, label: '全部供应商' },
   ...providers.value.map(provider => ({ value: provider.id, label: provider.name })),
@@ -128,13 +141,23 @@ const activeFilterOptions: SelectOption[] = [
 ]
 const groupColumns: Column[] = [
   { key: 'provider_name', label: '供应商', class: 'min-w-[150px]' },
+  { key: 'active', label: '本地状态' },
+  { key: 'account_count', label: '账号数' },
   { key: 'name', label: '上游分组', class: 'min-w-[180px]' },
   { key: 'rate_multiplier', label: '倍率' },
-  { key: 'account_count', label: '账号数' },
-  { key: 'raw_status', label: '上游状态' },
-  { key: 'active', label: '本地状态' },
   { key: 'last_seen_at', label: '最近同步', class: 'min-w-[150px]' },
+  { key: 'raw_status', label: '上游状态' },
 ]
+const canResetFilters = computed(() =>
+  providerID.value !== DEFAULT_PROVIDER_ID
+  || activeFilter.value !== DEFAULT_ACTIVE_FILTER
+  || search.value.trim() !== ''
+)
+const activeGroupCount = computed(() => items.value.filter(group => group.active).length)
+const inactiveGroupCount = computed(() => items.value.filter(group => !group.active).length)
+const groupsWithAccountsCount = computed(() => items.value.filter(group => group.account_count > 0).length)
+const emptyGroupCount = computed(() => items.value.filter(group => group.account_count <= 0).length)
+const unnamedGroupCount = computed(() => items.value.filter(group => !group.name?.trim()).length)
 
 onMounted(async () => {
   await loadProviders()
@@ -142,19 +165,45 @@ onMounted(async () => {
 })
 
 watch([providerID, activeFilter], () => {
+  if (suppressFilterWatch) return
   page.value = 1
   void loadGroups()
 })
 
-watch(page, () => { void loadGroups() })
-
 watch(search, () => {
+  if (suppressFilterWatch) return
   window.clearTimeout(searchTimer)
   searchTimer = window.setTimeout(() => {
     page.value = 1
     void loadGroups()
   }, 350)
 })
+
+function resetGroupFilters() {
+  window.clearTimeout(searchTimer)
+  suppressFilterWatch = true
+  providerID.value = DEFAULT_PROVIDER_ID
+  activeFilter.value = DEFAULT_ACTIVE_FILTER
+  search.value = ''
+  page.value = 1
+  void nextTick(() => {
+    suppressFilterWatch = false
+    void loadGroups()
+  })
+}
+
+function handleGroupPageChange(nextPage: number) {
+  if (nextPage === page.value) return
+  page.value = nextPage
+  void loadGroups()
+}
+
+function handleGroupPageSizeChange(nextPageSize: number) {
+  if (nextPageSize === pageSize.value) return
+  pageSize.value = nextPageSize
+  page.value = 1
+  void loadGroups()
+}
 
 async function loadProviders() {
   const result = await supplierProvidersAPI.list({ page: 1, page_size: 200 })
@@ -190,3 +239,22 @@ function formatTime(value?: string): string {
   return date.toLocaleString('zh-CN')
 }
 </script>
+
+<style scoped>
+.sp-groups-table-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: min(68vh, 720px);
+  overflow: hidden;
+}
+
+.sp-groups-table-shell :deep(.table-wrapper) {
+  min-height: 0;
+  flex: 1;
+}
+
+.sp-data-pagination {
+  flex-shrink: 0;
+}
+</style>
