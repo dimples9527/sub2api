@@ -32,54 +32,58 @@
             </div>
           </div>
         </header>
-        <div class="sp-table-wrap">
-          <table class="sp-table">
-            <thead>
-              <tr>
-                <th>任务</th>
-                <th>启用</th>
-                <th>执行间隔</th>
-                <th>超时</th>
-                <th>上次运行</th>
-                <th>最近结果</th>
-                <th>下次运行</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-if="loading"><td colspan="8">正在加载任务数据...</td></tr>
-              <tr v-for="task in tasks" :key="task.task_code" class="clickable" :class="{ selected: selectedCode === task.task_code }" @click="selectedCode = task.task_code">
-                <td><div class="sp-entity">{{ task.name }}</div><div class="sp-sub">{{ task.task_code }}</div></td>
-                <td><span class="sp-status" :class="task.enabled ? 'good' : ''">{{ task.enabled ? '已启用' : '已停用' }}</span></td>
-                <td><span class="sp-status info">{{ formatInterval(task.cron_expression) }}</span><div class="sp-sub">{{ task.cron_expression }}</div></td>
-                <td>{{ task.timeout_seconds }}s</td>
-                <td>{{ formatTime(task.last_run_at) }}</td>
-                <td>
-                  <span class="sp-status" :class="statusTone(task.last_status)">{{ statusText(task.last_status) }}</span>
-                  <div class="sp-result-cell">
-                    <span class="sp-sub sp-message-preview">{{ taskResultSummary(task) }}</span>
-                    <button
-                      v-if="task.last_message || latestRunByTask[task.task_code]"
-                      class="sp-link-button"
-                      type="button"
-                      @click.stop="openTaskLatestResult(task)"
-                    >
-                      查看详情
-                    </button>
-                  </div>
-                </td>
-                <td>{{ formatTime(task.next_run_at) }}</td>
-                <td>
-                  <div class="sp-inline">
-                    <button class="sp-button small" type="button" :disabled="savingCode === task.task_code" @click.stop="openEdit(task)">{{ savingCode === task.task_code ? '保存中' : '编辑' }}</button>
-                    <button class="sp-button small" type="button" :disabled="runningCode === task.task_code" @click.stop="runNow(task.task_code)">{{ runningCode === task.task_code ? '运行中' : '立即运行' }}</button>
-                  </div>
-                </td>
-              </tr>
-              <tr v-if="!loading && !tasks.length"><td colspan="8">暂无自动化任务。</td></tr>
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          :columns="taskColumns"
+          :data="tasks"
+          :loading="loading"
+          row-key="task_code"
+          clickable-rows
+          @row-click="selectedCode = $event.task_code"
+        >
+          <template #cell-task="{ row: task }">
+            <div class="sp-entity">{{ task.name }}</div>
+            <div class="sp-sub">{{ task.task_code }}</div>
+          </template>
+          <template #cell-enabled="{ row: task }">
+            <span class="sp-status" :class="task.enabled ? 'good' : ''">{{ task.enabled ? '已启用' : '已停用' }}</span>
+          </template>
+          <template #cell-cron_expression="{ row: task }">
+            <span class="sp-status info">{{ formatInterval(task.cron_expression) }}</span>
+            <div class="sp-sub">{{ task.cron_expression }}</div>
+          </template>
+          <template #cell-timeout_seconds="{ row: task }">
+            {{ task.timeout_seconds }}s
+          </template>
+          <template #cell-last_run_at="{ row: task }">
+            {{ formatTime(task.last_run_at) }}
+          </template>
+          <template #cell-last_status="{ row: task }">
+            <span class="sp-status" :class="statusTone(task.last_status)">{{ statusText(task.last_status) }}</span>
+            <div class="sp-result-cell">
+              <span class="sp-sub sp-message-preview">{{ taskResultSummary(task) }}</span>
+              <button
+                v-if="task.last_message || latestRunByTask[task.task_code]"
+                class="sp-link-button"
+                type="button"
+                @click.stop="openTaskLatestResult(task)"
+              >
+                查看详情
+              </button>
+            </div>
+          </template>
+          <template #cell-next_run_at="{ row: task }">
+            {{ formatTime(task.next_run_at) }}
+          </template>
+          <template #cell-actions="{ row: task }">
+            <div class="sp-inline">
+              <button class="sp-button small" type="button" :disabled="savingCode === task.task_code" @click.stop="openEdit(task)">{{ savingCode === task.task_code ? '保存中' : '编辑' }}</button>
+              <button class="sp-button small" type="button" :disabled="runningCode === task.task_code" @click.stop="runNow(task.task_code)">{{ runningCode === task.task_code ? '运行中' : '立即运行' }}</button>
+            </div>
+          </template>
+          <template #empty>
+            暂无自动化任务。
+          </template>
+        </DataTable>
       </div>
 
       <aside class="sp-panel">
@@ -93,76 +97,98 @@
           </div>
         </header>
         <div class="sp-panel-body">
-          <div class="sp-table-wrap">
-            <table class="sp-table">
-              <thead>
-                <tr>
-                  <th>任务</th>
-                  <th>触发</th>
-                  <th>状态</th>
-                  <th>处理 / 成功 / 失败</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-if="loading"><td colspan="4">正在加载运行记录...</td></tr>
-                <tr v-for="run in runs" :key="run.id">
-                  <td>{{ run.task_code }}</td>
-                  <td>{{ triggerText(run.trigger_source) }}</td>
-                  <td>
-                    <span class="sp-status" :class="statusTone(run.status)">{{ statusText(run.status) }}</span>
-                    <button class="sp-link-button sp-message-preview" type="button" @click="openRunDetail(run)">
-                      {{ compactMessage(run.message || '查看详情') }}
-                    </button>
-                  </td>
-                  <td>{{ run.processed_count }} / {{ run.success_count }} / {{ run.failed_count }}</td>
-                </tr>
-                <tr v-if="!loading && !runs.length"><td colspan="4">暂无运行历史。</td></tr>
-              </tbody>
-            </table>
+          <div class="sp-run-filters">
+            <div class="sp-select-field">
+              <span>任务</span>
+              <Select
+                v-model="runTaskFilter"
+                data-test="run-task-filter"
+                :options="runTaskFilterOptions"
+                :disabled="loading"
+                :searchable="false"
+                @change="applyRunFilters"
+              />
+            </div>
+            <div class="sp-select-field">
+              <span>状态</span>
+              <Select
+                v-model="runStatusFilter"
+                data-test="run-status-filter"
+                :options="runStatusFilterOptions"
+                :disabled="loading"
+                :searchable="false"
+                @change="applyRunFilters"
+              />
+            </div>
+            <button class="sp-button small" type="button" :disabled="loading || (!runTaskFilter && !runStatusFilter)" @click="resetRunFilters">重置</button>
           </div>
-          <div class="sp-run-pager">
-            <button class="sp-button small" type="button" :disabled="runPage <= 1 || loading" @click="changeRunPage(runPage - 1)">上一页</button>
-            <span>第 {{ runPage }} / {{ runTotalPages }} 页，共 {{ runTotal }} 条</span>
-            <button class="sp-button small" type="button" :disabled="runPage >= runTotalPages || loading" @click="changeRunPage(runPage + 1)">下一页</button>
-          </div>
+          <DataTable
+            :columns="runColumns"
+            :data="runs"
+            :loading="loading"
+            row-key="id"
+            :sticky-actions-column="false"
+          >
+            <template #cell-started_at="{ row: run }">
+              {{ formatTime(run.started_at) }}
+            </template>
+            <template #cell-trigger_source="{ row: run }">
+              {{ triggerText(run.trigger_source) }}
+            </template>
+            <template #cell-status="{ row: run }">
+              <span class="sp-status" :class="statusTone(run.status)">{{ statusText(run.status) }}</span>
+              <button class="sp-link-button sp-message-preview" type="button" @click="openRunDetail(run)">
+                {{ compactMessage(run.message || '查看详情') }}
+              </button>
+            </template>
+            <template #cell-counts="{ row: run }">
+              {{ run.processed_count }} / {{ run.success_count }} / {{ run.failed_count }}
+            </template>
+            <template #empty>
+              暂无运行历史。
+            </template>
+          </DataTable>
+          <Pagination
+            v-if="runTotal > 0"
+            class="sp-run-pagination"
+            :page="runPage"
+            :total="runTotal"
+            :page-size="runPageSize"
+            :show-page-size-selector="false"
+            @update:page="changeRunPage"
+          />
         </div>
       </aside>
     </section>
 
-    <SupplierModal :show="editVisible" :title="editingTask?.name || '编辑任务'" confirm-text="保存任务" @close="closeEdit" @confirm="saveTask">
+    <BaseDialog :show="editVisible" :title="editingTask?.name || '编辑任务'" width="wide" @close="closeEdit">
       <form class="sp-form" @submit.prevent="saveTask">
-        <label class="sp-switch-field">
+        <label class="sp-toggle-field">
           <span>启用</span>
-          <button
-            class="sp-switch"
-            type="button"
-            role="switch"
-            :aria-checked="editForm.enabled"
-            :class="{ active: editForm.enabled }"
-            @click="editForm.enabled = !editForm.enabled"
-          >
-            <span class="sp-switch-track"><span class="sp-switch-thumb"></span></span>
+          <div class="sp-toggle-row">
+            <Toggle v-model="editForm.enabled" />
             <em>{{ editForm.enabled ? '已启用' : '已停用' }}</em>
-          </button>
+          </div>
         </label>
-        <label>
-          <span>执行间隔（秒）</span>
-          <input v-model.number="editIntervalSeconds" type="number" min="60" step="60" />
-        </label>
-        <label><span>超时秒数</span><input v-model.number="editForm.timeout_seconds" type="number" min="1" /></label>
+        <Input :model-value="editIntervalSeconds" type="number" label="执行间隔（秒）" @update:model-value="editIntervalSeconds = toNumber($event, editIntervalSeconds)" />
+        <Input :model-value="editForm.timeout_seconds" type="number" label="超时秒数" @update:model-value="editForm.timeout_seconds = toNumber($event, editForm.timeout_seconds)" />
         <div class="sp-form-note">当前调度器按分钟执行，执行间隔必须不少于 60 秒，并且是 60 秒的整数倍。</div>
         <template v-if="editForm.task_code === 'supplier_data_cleanup'">
-          <label><span>自动化运行保留天数</span><input v-model.number="editForm.config.automation_run_retention_days" type="number" min="0" /></label>
-          <label><span>同步记录保留天数</span><input v-model.number="editForm.config.sync_run_retention_days" type="number" min="0" /></label>
-          <label><span>快照保留天数</span><input v-model.number="editForm.config.metric_snapshot_retention_days" type="number" min="0" /></label>
-          <label><span>每日统计保留天数</span><input v-model.number="editForm.config.daily_stat_retention_days" type="number" min="0" /></label>
-          <label><span>失效账号保留天数</span><input v-model.number="editForm.config.inactive_account_retention_days" type="number" min="0" /></label>
-          <label><span>失效分组保留天数</span><input v-model.number="editForm.config.inactive_group_retention_days" type="number" min="0" /></label>
+          <Input :model-value="editForm.config.automation_run_retention_days" type="number" label="自动化运行保留天数" @update:model-value="editForm.config.automation_run_retention_days = toNumber($event, editForm.config.automation_run_retention_days)" />
+          <Input :model-value="editForm.config.sync_run_retention_days" type="number" label="同步记录保留天数" @update:model-value="editForm.config.sync_run_retention_days = toNumber($event, editForm.config.sync_run_retention_days)" />
+          <Input :model-value="editForm.config.metric_snapshot_retention_days" type="number" label="快照保留天数" @update:model-value="editForm.config.metric_snapshot_retention_days = toNumber($event, editForm.config.metric_snapshot_retention_days)" />
+          <Input :model-value="editForm.config.daily_stat_retention_days" type="number" label="每日统计保留天数" @update:model-value="editForm.config.daily_stat_retention_days = toNumber($event, editForm.config.daily_stat_retention_days)" />
+          <Input :model-value="editForm.config.inactive_account_retention_days" type="number" label="失效账号保留天数" @update:model-value="editForm.config.inactive_account_retention_days = toNumber($event, editForm.config.inactive_account_retention_days)" />
+          <Input :model-value="editForm.config.inactive_group_retention_days" type="number" label="失效分组保留天数" @update:model-value="editForm.config.inactive_group_retention_days = toNumber($event, editForm.config.inactive_group_retention_days)" />
         </template>
       </form>
-    </SupplierModal>
+      <template #footer>
+        <button class="sp-button ghost" type="button" @click="closeEdit">取消</button>
+        <button class="sp-button primary" type="button" @click="saveTask">保存任务</button>
+      </template>
+    </BaseDialog>
 
-    <SupplierModal :show="detailVisible" :title="detailTitle || '结果详情'" confirm-text="关闭" modal-class="sp-modal-wide" @close="closeResultDetail" @confirm="closeResultDetail">
+    <BaseDialog :show="detailVisible" :title="detailTitle || '结果详情'" width="extra-wide" @close="closeResultDetail">
       <div v-if="detailRun" class="sp-run-detail">
         <section class="sp-run-detail-summary">
           <div>
@@ -193,27 +219,44 @@
 
         <div v-if="detailRun.message" class="sp-run-message">{{ detailRun.message }}</div>
 
-        <section v-if="detailRun.result_detail?.providers?.length" class="sp-provider-list">
-          <article v-for="provider in detailRun.result_detail.providers" :key="provider.provider_id" class="sp-provider-card">
+        <section v-if="detailRun.result_detail?.providers?.length" class="sp-provider-detail-layout">
+          <aside class="sp-provider-index" aria-label="供应商结果">
+            <button
+              v-for="provider in detailRun.result_detail.providers"
+              :key="provider.provider_id"
+              type="button"
+              class="sp-provider-index-item"
+              :class="[statusTone(provider.status), { active: selectedDetailProvider?.provider_id === provider.provider_id }]"
+              @click="selectDetailProvider(provider.provider_id)"
+            >
+              <span class="sp-provider-index-name">{{ provider.provider_name || `供应商 ${provider.provider_id}` }}</span>
+              <span class="sp-status" :class="statusTone(provider.status)">{{ statusText(provider.status) }}</span>
+              <span class="sp-provider-index-meta">
+                {{ provider.counts.checked_count }} / {{ provider.counts.updated_count }} / {{ provider.counts.skipped_count }}
+              </span>
+            </button>
+          </aside>
+
+          <article v-if="selectedDetailProvider" class="sp-provider-card sp-provider-detail-card">
             <header class="sp-provider-head">
               <div>
-                <span class="sp-detail-label">供应商 {{ provider.provider_id }}</span>
-                <h3>{{ provider.provider_name || `供应商 ${provider.provider_id}` }}</h3>
+                <span class="sp-detail-label">供应商 {{ selectedDetailProvider.provider_id }}</span>
+                <h3>{{ selectedDetailProvider.provider_name || `供应商 ${selectedDetailProvider.provider_id}` }}</h3>
               </div>
-              <span class="sp-status" :class="statusTone(provider.status)">{{ statusText(provider.status) }}</span>
+              <span class="sp-status" :class="statusTone(selectedDetailProvider.status)">{{ statusText(selectedDetailProvider.status) }}</span>
             </header>
             <div class="sp-provider-stats">
-              <span>处理 {{ provider.counts.checked_count }}</span>
-              <span>新增 {{ provider.counts.created_count }}</span>
-              <span>更新 {{ provider.counts.updated_count }}</span>
-              <span>跳过 {{ provider.counts.skipped_count }}</span>
+              <span>处理 {{ selectedDetailProvider.counts.checked_count }}</span>
+              <span>新增 {{ selectedDetailProvider.counts.created_count }}</span>
+              <span>更新 {{ selectedDetailProvider.counts.updated_count }}</span>
+              <span>跳过 {{ selectedDetailProvider.counts.skipped_count }}</span>
             </div>
-            <p v-if="provider.message" class="sp-provider-message">{{ provider.message }}</p>
+            <p v-if="selectedDetailProvider.message" class="sp-provider-message">{{ selectedDetailProvider.message }}</p>
 
             <div class="sp-stage-groups">
-              <section v-for="category in providerStagesByCategory(provider)" :key="category.key" class="sp-stage-category">
+              <section v-for="category in providerStagesByCategory(selectedDetailProvider)" :key="category.key" class="sp-stage-category">
                 <h4>{{ category.title }}</h4>
-                <article v-for="stage in category.stages" :key="`${provider.provider_id}-${stage.scope}`" class="sp-stage-card" :class="statusTone(stage.status)">
+                <article v-for="stage in category.stages" :key="`${selectedDetailProvider.provider_id}-${stage.scope}`" class="sp-stage-card" :class="statusTone(stage.status)">
                   <div class="sp-stage-head">
                     <strong>{{ scopeText(stage.scope) }}</strong>
                     <span class="sp-status" :class="statusTone(stage.status)">{{ statusText(stage.status) }}</span>
@@ -259,7 +302,10 @@
         <pre v-else class="sp-message-detail">{{ detailMessage }}</pre>
       </div>
       <pre v-else class="sp-message-detail">{{ detailMessage }}</pre>
-    </SupplierModal>
+      <template #footer>
+        <button class="sp-button primary" type="button" @click="closeResultDetail">关闭</button>
+      </template>
+    </BaseDialog>
 
     <Transition name="sp-fade"><div v-if="toast" class="sp-toast">{{ toast }}</div></Transition>
   </SupplierModuleLayout>
@@ -267,7 +313,14 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { SupplierModal, SupplierModuleLayout } from '@/components/admin/supplier-management'
+import { SupplierModuleLayout } from '@/components/admin/supplier-management'
+import BaseDialog from '@/components/common/BaseDialog.vue'
+import DataTable from '@/components/common/DataTable.vue'
+import Input from '@/components/common/Input.vue'
+import Pagination from '@/components/common/Pagination.vue'
+import Select, { type SelectOption } from '@/components/common/Select.vue'
+import Toggle from '@/components/common/Toggle.vue'
+import type { Column } from '@/components/common/types'
 import {
   listRuns,
   listTasks,
@@ -292,11 +345,14 @@ const detailVisible = ref(false)
 const detailTitle = ref('')
 const detailMessage = ref('')
 const detailRun = ref<SupplierAutomationRun | null>(null)
+const selectedDetailProviderID = ref<number | null>(null)
 const error = ref('')
 const toast = ref('')
 const runPage = ref(1)
 const runPageSize = ref(10)
 const runTotal = ref(0)
+const runTaskFilter = ref('')
+const runStatusFilter = ref('')
 let toastTimer: number | undefined
 
 const editForm = reactive<SupplierAutomationTask>({
@@ -326,7 +382,39 @@ const latestRunByTask = computed<Record<string, SupplierAutomationRun>>(() => {
   }
   return latest
 })
+const detailProviders = computed(() => detailRun.value?.result_detail?.providers || [])
+const selectedDetailProvider = computed(() => {
+  return detailProviders.value.find(provider => provider.provider_id === selectedDetailProviderID.value) || detailProviders.value[0] || null
+})
 const runTotalPages = computed(() => Math.max(1, Math.ceil(runTotal.value / runPageSize.value)))
+const runTaskFilterOptions = computed<SelectOption[]>(() => [
+  { value: '', label: '全部任务' },
+  ...tasks.value.map(task => ({ value: task.task_code, label: task.name })),
+])
+const runStatusFilterOptions: SelectOption[] = [
+  { value: '', label: '全部状态' },
+  { value: 'success', label: '成功' },
+  { value: 'partial', label: '部分成功' },
+  { value: 'failed', label: '失败' },
+  { value: 'running', label: '运行中' },
+]
+const taskColumns: Column[] = [
+  { key: 'task', label: '任务', class: 'min-w-[180px]' },
+  { key: 'enabled', label: '启用' },
+  { key: 'cron_expression', label: '执行间隔', class: 'min-w-[140px]' },
+  { key: 'timeout_seconds', label: '超时' },
+  { key: 'last_run_at', label: '上次运行', class: 'min-w-[150px]' },
+  { key: 'last_status', label: '最近结果', class: 'min-w-[180px]' },
+  { key: 'next_run_at', label: '下次运行', class: 'min-w-[150px]' },
+  { key: 'actions', label: '操作', class: 'min-w-[150px]' },
+]
+const runColumns: Column[] = [
+  { key: 'task_code', label: '任务', class: 'min-w-[140px]' },
+  { key: 'started_at', label: '运行时间', class: 'min-w-[150px]' },
+  { key: 'trigger_source', label: '触发' },
+  { key: 'status', label: '状态', class: 'min-w-[170px]' },
+  { key: 'counts', label: '处理 / 成功 / 失败', class: 'min-w-[150px]' },
+]
 const metrics = computed(() => [
   { tone: 'green', label: '启用任务', value: String(tasks.value.filter(task => task.enabled).length), foot: '当前可自动执行的任务' },
   { tone: 'blue', label: '最近成功', value: String(runs.value.filter(run => run.status === 'success').length), foot: '最近加载的运行历史' },
@@ -353,7 +441,12 @@ async function loadData() {
 }
 
 async function loadRuns() {
-  const result = await listRuns({ page: runPage.value, page_size: runPageSize.value })
+  const result = await listRuns({
+    task_code: runTaskFilter.value || undefined,
+    status: runStatusFilter.value || undefined,
+    page: runPage.value,
+    page_size: runPageSize.value,
+  })
   runs.value = result.items
   runTotal.value = result.total
 }
@@ -407,6 +500,7 @@ async function runNow(taskCode: string) {
 
 function openResultDetail(title: string, message: string) {
   detailRun.value = null
+  selectedDetailProviderID.value = null
   detailTitle.value = title || '结果详情'
   detailMessage.value = message || '暂无结果'
   detailVisible.value = true
@@ -423,9 +517,22 @@ function openTaskLatestResult(task: SupplierAutomationTask) {
 
 function openRunDetail(run: SupplierAutomationRun) {
   detailRun.value = run
+  selectInitialDetailProvider(run)
   detailTitle.value = `${run.task_code} 运行详情：${statusText(run.status)}`
   detailMessage.value = formatRunDetail(run)
   detailVisible.value = true
+}
+
+function selectInitialDetailProvider(run: SupplierAutomationRun) {
+  const providers = run.result_detail?.providers || []
+  const failedProvider = providers.find(provider => provider.status === 'failed')
+    || providers.find(provider => (provider.stages || []).some(stage => stage.status === 'failed'))
+    || providers[0]
+  selectedDetailProviderID.value = failedProvider?.provider_id ?? null
+}
+
+function selectDetailProvider(providerID: number) {
+  selectedDetailProviderID.value = providerID
 }
 
 function formatRunDetail(run: SupplierAutomationRun): string {
@@ -513,6 +620,7 @@ function providerStagesByCategory(provider: SupplierAutomationProviderRunDetail)
 function closeResultDetail() {
   detailVisible.value = false
   detailRun.value = null
+  selectedDetailProviderID.value = null
 }
 
 function taskResultSummary(task: SupplierAutomationTask): string {
@@ -528,8 +636,29 @@ function runSummary(run: SupplierAutomationRun): string {
   return `${run.processed_count} 个对象，${run.success_count} 成功，${run.failed_count} 失败`
 }
 
+function toNumber(value: string | number, fallback: number): number {
+  const next = Number(value)
+  return Number.isFinite(next) ? next : fallback
+}
+
 async function changeRunPage(page: number) {
   runPage.value = Math.min(Math.max(1, page), runTotalPages.value)
+  await refreshRuns()
+}
+
+async function applyRunFilters() {
+  runPage.value = 1
+  await refreshRuns()
+}
+
+async function resetRunFilters() {
+  runTaskFilter.value = ''
+  runStatusFilter.value = ''
+  runPage.value = 1
+  await refreshRuns()
+}
+
+async function refreshRuns() {
   loading.value = true
   error.value = ''
   try {
@@ -639,14 +768,41 @@ function showToast(message: string) {
   max-width: 220px;
 }
 
-.sp-run-pager {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+.sp-run-pagination {
   margin-top: 12px;
-  color: rgba(148, 163, 184, 0.95);
+  overflow: hidden;
+  border: 1px solid var(--sp-soft);
+  border-radius: 12px;
+}
+
+.sp-run-filters {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(130px, 0.8fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+.sp-select-field {
+  display: grid;
+  gap: 5px;
+  color: var(--sp-muted);
   font-size: 12px;
+  font-weight: 600;
+}
+
+.sp-toggle-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  color: var(--sp-muted);
+}
+
+.sp-toggle-row em {
+  font-style: normal;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .sp-message-detail {
@@ -660,10 +816,13 @@ function showToast(message: string) {
 .sp-run-detail {
   display: grid;
   gap: 20px;
-  max-width: min(920px, 82vw);
+  max-width: min(1120px, 86vw);
   max-height: 72vh;
   overflow: auto;
-  padding-right: 4px;
+  border: 1px solid var(--sp-soft);
+  border-radius: 18px;
+  background: var(--sp-panel-2);
+  padding: 16px;
 }
 
 .sp-run-detail-summary {
@@ -702,6 +861,74 @@ function showToast(message: string) {
   gap: 18px;
 }
 
+.sp-provider-detail-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.36fr) minmax(0, 1fr);
+  gap: 16px;
+  min-height: 420px;
+}
+
+.sp-provider-index {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  max-height: min(58vh, 620px);
+  overflow: auto;
+  border: 1px solid var(--sp-soft);
+  border-radius: 16px;
+  background: var(--sp-panel);
+  padding: 10px;
+}
+
+.sp-provider-index-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 10px;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  padding: 10px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+}
+
+.sp-provider-index-item:hover,
+.sp-provider-index-item.active {
+  border-color: var(--sp-line);
+  background: var(--sp-panel-2);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+}
+
+.sp-provider-index-item.bad {
+  border-left: 3px solid var(--sp-red);
+}
+
+.sp-provider-index-item.warn {
+  border-left: 3px solid var(--sp-amber);
+}
+
+.sp-provider-index-item.good {
+  border-left: 3px solid var(--sp-green);
+}
+
+.sp-provider-index-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--sp-text);
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-provider-index-meta {
+  grid-column: 1 / -1;
+  color: var(--sp-muted);
+  font-size: 12px;
+}
+
 .sp-provider-card {
   display: grid;
   gap: 16px;
@@ -710,6 +937,13 @@ function showToast(message: string) {
   background: var(--sp-panel);
   box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
   padding: 18px;
+}
+
+.sp-provider-detail-card {
+  align-content: start;
+  min-width: 0;
+  max-height: min(58vh, 620px);
+  overflow: auto;
 }
 
 .sp-provider-head,
@@ -876,10 +1110,17 @@ function showToast(message: string) {
 }
 
 @media (max-width: 760px) {
+  .sp-run-filters,
   .sp-run-detail-summary,
+  .sp-provider-detail-layout,
   .sp-cleanup-grid,
   .sp-stage-body {
     grid-template-columns: 1fr;
+  }
+
+  .sp-provider-index,
+  .sp-provider-detail-card {
+    max-height: none;
   }
 }
 </style>

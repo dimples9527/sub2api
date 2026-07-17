@@ -303,7 +303,6 @@
       </div>
     </SupplierModal>
 
-    <Transition name="sp-fade"><div v-if="toast" class="sp-toast">{{ toast }}</div></Transition>
   </SupplierModuleLayout>
 </template>
 
@@ -313,6 +312,7 @@ import { SupplierDrawer, SupplierModal, SupplierModuleLayout } from '@/component
 import supplierProvidersAPI, { type SupplierProvider, type SupplierProviderSummary, type SupplierProviderUpsertPayload } from '@/api/admin/supplierProviders'
 import supplierProviderTypesAPI, { type SupplierProviderType, type SupplierProviderTypeUpsertPayload } from '@/api/admin/supplierProviderTypes'
 import { syncProvider, testProviderEndpoint, type SupplierProviderEndpointTestResult, type SupplierSyncScope } from '@/api/admin/supplierProviderData'
+import { useAppStore } from '@/stores/app'
 
 type Tone = 'good' | 'warn' | 'bad' | 'info' | ''
 type SupplierDiagnosticScope = Exclude<SupplierSyncScope, 'all'>
@@ -376,13 +376,12 @@ const modalVisible = ref(false)
 const typeManagerVisible = ref(false)
 const form = reactive<SupplierProviderUpsertPayload>(emptyForm())
 const typeForm = reactive<SupplierProviderTypeUpsertPayload>(emptyTypeForm())
-const toast = ref('')
 const syncingKeys = ref<Set<string>>(new Set())
 const testingKeys = ref<Set<string>>(new Set())
 const testResultVisible = ref(false)
 const testResult = ref<SupplierProviderEndpointTestResult | null>(null)
-let toastTimer: number | undefined
 let searchTimer: number | undefined
+const appStore = useAppStore()
 
 const sorts = ['风险优先', '成本效率', '最近同步']
 const enabledProviderTypes = computed(() => providerTypes.value.filter(type => type.enabled))
@@ -531,16 +530,16 @@ async function submitProviderType() {
   try {
     if (editingProviderType.value) {
       await supplierProviderTypesAPI.update(editingProviderType.value.id, payload)
-      showToast('供应商类型已更新')
+      appStore.showSuccess('供应商类型已更新')
     } else {
       await supplierProviderTypesAPI.create(payload)
-      showToast('供应商类型已创建')
+      appStore.showSuccess('供应商类型已创建')
     }
     await loadProviderTypes()
     const refreshed = providerTypes.value.find(type => type.code === payload.code) || null
     if (refreshed) editProviderType(refreshed)
   } catch (err) {
-    error.value = errorMessage(err, '保存供应商类型失败')
+    appStore.showError(errorMessage(err, '保存供应商类型失败'))
   }
 }
 
@@ -548,12 +547,12 @@ async function removeProviderType(providerType: SupplierProviderType) {
   if (!window.confirm(`确认删除供应商类型「${providerType.name}」？`)) return
   try {
     await supplierProviderTypesAPI.delete(providerType.id)
-    showToast('供应商类型已删除')
+    appStore.showSuccess('供应商类型已删除')
     await loadProviderTypes()
     if (providerTypes.value.length) editProviderType(providerTypes.value[0])
     else newProviderType()
   } catch (err) {
-    error.value = errorMessage(err, '删除供应商类型失败')
+    appStore.showError(errorMessage(err, '删除供应商类型失败'))
   }
 }
 
@@ -562,25 +561,25 @@ async function submitProvider() {
   try {
     if (editingProvider.value) {
       await supplierProvidersAPI.update(editingProvider.value.id, payload)
-      showToast('供应商已更新')
+      appStore.showSuccess('供应商已更新')
     } else {
       await supplierProvidersAPI.create(payload)
-      showToast('供应商已创建')
+      appStore.showSuccess('供应商已创建')
     }
     modalVisible.value = false
     await loadProviders()
   } catch (err) {
-    error.value = errorMessage(err, '保存供应商失败')
+    appStore.showError(errorMessage(err, '保存供应商失败'))
   }
 }
 
 async function makeDefault(provider: SupplierProvider) {
   try {
     await supplierProvidersAPI.setDefault(provider.id)
-    showToast('默认供应商已更新')
+    appStore.showSuccess('默认供应商已更新')
     await loadProviders()
   } catch (err) {
-    error.value = errorMessage(err, '设置默认供应商失败')
+    appStore.showError(errorMessage(err, '设置默认供应商失败'))
   }
 }
 
@@ -588,11 +587,11 @@ async function removeProvider(provider: SupplierProvider) {
   if (!window.confirm(`确认删除供应商「${provider.name}」？`)) return
   try {
     await supplierProvidersAPI.delete(provider.id)
-    showToast('供应商已删除')
+    appStore.showSuccess('供应商已删除')
     if (selectedProvider.value?.id === provider.id) selectedProvider.value = null
     await loadProviders()
   } catch (err) {
-    error.value = errorMessage(err, '删除供应商失败')
+    appStore.showError(errorMessage(err, '删除供应商失败'))
   }
 }
 
@@ -602,10 +601,10 @@ async function syncProviderData(provider: SupplierProvider, scope: SupplierSyncS
   syncingKeys.value = new Set(syncingKeys.value).add(key)
   try {
     const result = await syncProvider(provider.id, scope)
-    showToast(syncResultText(result.status, scope))
+    showSyncResultFeedback(result.status, scope)
     await loadProviders()
   } catch (err) {
-    error.value = errorMessage(err, '同步供应商失败')
+    appStore.showError(errorMessage(err, '同步供应商失败'))
   } finally {
     const next = new Set(syncingKeys.value)
     next.delete(key)
@@ -625,7 +624,7 @@ async function testProviderEndpointData(provider: SupplierProvider, scope: Suppl
     testResult.value = await testProviderEndpoint(provider.id, scope)
     testResultVisible.value = true
   } catch (err) {
-    error.value = errorMessage(err, '测试供应商接口失败')
+    appStore.showError(errorMessage(err, '测试供应商接口失败'))
   } finally {
     const next = new Set(testingKeys.value)
     next.delete(key)
@@ -793,15 +792,27 @@ function currency(value: number): string {
   return `¥ ${Number(value || 0).toLocaleString('zh-CN', { maximumFractionDigits: 2 })}`
 }
 
-function showToast(message: string) {
-  toast.value = message
-  window.clearTimeout(toastTimer)
-  toastTimer = window.setTimeout(() => { toast.value = '' }, 1800)
+function showSyncResultFeedback(status: string, scope: SupplierSyncScope) {
+  const message = syncResultText(status, scope)
+  if (status === 'failed') {
+    appStore.showError(message)
+    return
+  }
+  if (status === 'partial') {
+    appStore.showWarning(message)
+    return
+  }
+  appStore.showSuccess(message)
 }
 
 function errorMessage(err: unknown, fallback: string): string {
   if (typeof err === 'object' && err && 'message' in err) {
-    const message = String((err as { message?: unknown }).message || '')
+    const apiErr = err as { message?: unknown; reason?: unknown; code?: unknown }
+    const reason = String(apiErr.reason || '')
+    const message = String(apiErr.message || '')
+    if (reason === 'SUPPLIER_PROVIDER_INVALID' || message === 'invalid supplier provider configuration') {
+      return '供应商配置无效：请检查基础地址是否为完整 http/https 地址，接口路径是否以 / 开头，排序和倍率等数值是否有效。'
+    }
     return message || fallback
   }
   return fallback

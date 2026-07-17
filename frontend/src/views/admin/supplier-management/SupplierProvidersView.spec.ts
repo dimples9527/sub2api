@@ -24,4 +24,12 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(supplierProvidersSource).toContain('接口测试结果')
     expect(supplierProvidersSource).toContain('testResultVisible')
   })
+
+  it('uses the global app toast store for provider operation feedback', () => {
+    expect(supplierProvidersSource).toContain("import { useAppStore } from '@/stores/app'")
+    expect(supplierProvidersSource).toContain('const appStore = useAppStore()')
+    expect(supplierProvidersSource).toContain('appStore.showError(')
+    expect(supplierProvidersSource).toContain('appStore.showSuccess(')
+    expect(supplierProvidersSource).not.toContain('class="sp-toast"')
+  })
 })
