@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"hash/fnv"
+	"log/slog"
+	"net/url"
 	"reflect"
 	"sort"
 	"strconv"
@@ -13,19 +15,22 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
 
 type Account struct {
-	ID          int64
-	Name        string
-	Notes       *string
-	Platform    string
-	Type        string
-	Credentials map[string]any
-	Extra       map[string]any
-	ProxyID     *int64
-	Concurrency int
-	Priority    int
+	ID                      int64
+	Name                    string
+	Notes                   *string
+	Platform                string
+	Type                    string
+	Credentials             map[string]any
+	Extra                   map[string]any
+	ProxyID                 *int64
+	ProxyFallbackOriginID   *int64
+	ProxyFallbackOriginName *string // 仅展示用
+	Concurrency             int
+	Priority                int
 	// RateMultiplier 账号计费倍率（>=0，允许 0 表示该账号计费为 0）。
 	// 使用指针用于兼容旧版本调度缓存（Redis）中缺字段的情况：nil 表示按 1.0 处理。
 	RateMultiplier     *float64
@@ -51,6 +56,9 @@ type Account struct {
 	SessionWindowEnd    *time.Time
 	SessionWindowStatus string
 
+	ParentAccountID *int64 // non-nil → 影子账号（不持凭据，透传母账号凭据）
+	QuotaDimension  string // 用量维度："" / "global" / "spark"
+
 	Proxy         *Proxy
 	AccountGroups []AccountGroup
 	GroupIDs      []int64
@@ -63,6 +71,40 @@ type Account struct {
 	modelMappingCacheRawPtr         uintptr
 	modelMappingCacheRawLen         int
 	modelMappingCacheRawSig         uint64
+
+	// header_overrides 热路径缓存（非持久化字段，同 model_mapping 缓存先例）
+	headerOverrideCache               map[string]string
+	headerOverrideCacheReady          bool
+	headerOverrideCacheCredentialsPtr uintptr
+	headerOverrideCacheRawPtr         uintptr
+	headerOverrideCacheRawLen         int
+	headerOverrideCacheRawSig         uint64
+}
+
+type OpenAIEndpointCapability string
+
+const openAILongContextBillingEnabledKey = "openai_long_context_billing_enabled"
+
+const (
+	OpenAIEndpointCapabilityChatCompletions OpenAIEndpointCapability = "chat_completions"
+	OpenAIEndpointCapabilityEmbeddings      OpenAIEndpointCapability = "embeddings"
+)
+
+const openAIEndpointCapabilitiesCredentialKey = "openai_capabilities"
+
+const (
+	OpenAIAuthModePersonalAccessToken = "personalAccessToken"
+	openAIAuthModeCredentialKey       = "auth_mode"
+	openAIAuthModeLegacyCredentialKey = "openai_auth_mode"
+)
+
+func isOpenAIPersonalAccessTokenAuthMode(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "personalaccesstoken", "personal_access_token":
+		return true
+	default:
+		return false
+	}
 }
 
 type TempUnschedulableRule struct {
@@ -120,6 +162,35 @@ func (a *Account) IsSchedulable() bool {
 	if a.TempUnschedulableUntil != nil && now.Before(*a.TempUnschedulableUntil) {
 		return false
 	}
+	if a.IsAPIKeyOrBedrock() && a.IsQuotaExceeded() {
+		return false
+	}
+	return true
+}
+
+// IsCredentialUsableForShadow 报告本账号(作为某 spark 影子的母账号)的凭据/传输是否可被影子透传使用。
+//
+// 检查「凭据/账号/传输可用性」:
+//   - 账号 active(非禁用/删除);
+//   - OAuth token 未过期(AutoPauseOnExpired+ExpiresAt);
+//   - 未处于 TempUnschedulableUntil 冷却期 —— 对 OpenAI 账号该字段由 401 鉴权失败 /
+//     token 刷新耗尽 / transport·proxy 故障写入(ratelimit/token_refresh/upstream_transport),
+//     都代表**共享凭据或传输通道坏死**;影子共享母 token+proxy,故母处于该冷却期时影子也不可用。
+//
+// **刻意排除** global 维度的限流/过载窗口(RateLimitResetAt / OverloadUntil)与母账号自身的
+// 手动 Schedulable 开关:spark 影子拥有独立 spark 配额窗口,母账号 global 429(走 RateLimitResetAt)
+// 不应连坐 spark(否则重新耦合影子架构本应解耦的两条 429 道)。nil receiver 返回 false。
+func (a *Account) IsCredentialUsableForShadow() bool {
+	if a == nil || !a.IsActive() {
+		return false
+	}
+	now := time.Now()
+	if a.AutoPauseOnExpired && a.ExpiresAt != nil && !now.Before(*a.ExpiresAt) {
+		return false
+	}
+	if a.TempUnschedulableUntil != nil && now.Before(*a.TempUnschedulableUntil) {
+		return false
+	}
 	return true
 }
 
@@ -158,6 +229,18 @@ func (a *Account) IsPrivacySet() bool {
 
 func (a *Account) IsGemini() bool {
 	return a.Platform == PlatformGemini
+}
+
+func (a *Account) IsGrok() bool {
+	return a.Platform == PlatformGrok
+}
+
+func (a *Account) IsGrokOAuth() bool {
+	return a.IsGrok() && a.Type == AccountTypeOAuth
+}
+
+func (a *Account) IsOpenAICompatible() bool {
+	return a != nil && (a.Platform == PlatformOpenAI || a.Platform == PlatformGrok)
 }
 
 func (a *Account) GeminiOAuthType() string {
@@ -389,6 +472,56 @@ func parseTempUnschedInt(value any) int {
 	return 0
 }
 
+const (
+	// OpenAICompactModeAuto follows compact-probe results when deciding compact eligibility.
+	OpenAICompactModeAuto = "auto"
+	// OpenAICompactModeForceOn always treats the account as compact-supported.
+	OpenAICompactModeForceOn = "force_on"
+	// OpenAICompactModeForceOff always treats the account as compact-unsupported.
+	OpenAICompactModeForceOff = "force_off"
+)
+
+func normalizeOpenAICompactMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case OpenAICompactModeForceOn:
+		return OpenAICompactModeForceOn
+	case OpenAICompactModeForceOff:
+		return OpenAICompactModeForceOff
+	default:
+		return OpenAICompactModeAuto
+	}
+}
+
+func stringMappingFromRaw(raw any) map[string]string {
+	switch mapping := raw.(type) {
+	case map[string]any:
+		if len(mapping) == 0 {
+			return nil
+		}
+		result := make(map[string]string, len(mapping))
+		for key, value := range mapping {
+			if str, ok := value.(string); ok {
+				result[key] = str
+			}
+		}
+		if len(result) == 0 {
+			return nil
+		}
+		return result
+	case map[string]string:
+		if len(mapping) == 0 {
+			return nil
+		}
+		result := make(map[string]string, len(mapping))
+		for key, value := range mapping {
+			result[key] = value
+		}
+		return result
+	default:
+		return nil
+	}
+}
+
 func (a *Account) GetModelMapping() map[string]string {
 	credentialsPtr := mapPtr(a.Credentials)
 	rawMapping, _ := a.Credentials["model_mapping"].(map[string]any)
@@ -428,6 +561,9 @@ func (a *Account) resolveModelMapping(rawMapping map[string]any) map[string]stri
 		if a.Platform == domain.PlatformAntigravity {
 			return domain.DefaultAntigravityModelMapping
 		}
+		if a.Platform == domain.PlatformGrok {
+			return xai.DefaultModelMapping()
+		}
 		// Bedrock 默认映射由 forwardBedrock 统一处理（需配合 region prefix 调整）
 		return nil
 	}
@@ -435,6 +571,9 @@ func (a *Account) resolveModelMapping(rawMapping map[string]any) map[string]stri
 		// Antigravity 平台使用默认映射
 		if a.Platform == domain.PlatformAntigravity {
 			return domain.DefaultAntigravityModelMapping
+		}
+		if a.Platform == domain.PlatformGrok {
+			return xai.DefaultModelMapping()
 		}
 		return nil
 	}
@@ -452,6 +591,7 @@ func (a *Account) resolveModelMapping(rawMapping map[string]any) map[string]stri
 				"gemini-3.1-pro-high",
 				"gemini-3.1-pro-low",
 			})
+			applyAntigravityGemini31ProAliases(result)
 		}
 		return result
 	}
@@ -459,6 +599,9 @@ func (a *Account) resolveModelMapping(rawMapping map[string]any) map[string]stri
 	// Antigravity 平台使用默认映射
 	if a.Platform == domain.PlatformAntigravity {
 		return domain.DefaultAntigravityModelMapping
+	}
+	if a.Platform == domain.PlatformGrok {
+		return xai.DefaultModelMapping()
 	}
 	return nil
 }
@@ -515,6 +658,61 @@ func ensureAntigravityDefaultPassthroughs(mapping map[string]string, models []st
 	}
 }
 
+func applyAntigravityGemini31ProAliases(mapping map[string]string) {
+	target := strings.TrimSpace(mapping[domain.AntigravityGemini31ProAgentModel])
+	if target == "" {
+		return
+	}
+
+	aliases := []struct {
+		model         string
+		legacyTargets map[string]struct{}
+	}{
+		{
+			model: "gemini-3.1-pro",
+			legacyTargets: map[string]struct{}{
+				"gemini-3.1-pro": {},
+			},
+		},
+		{
+			model: "gemini-3.1-pro-high",
+			legacyTargets: map[string]struct{}{
+				"gemini-3.1-pro-high": {},
+			},
+		},
+		{
+			model: "gemini-3.1-pro-preview",
+			legacyTargets: map[string]struct{}{
+				"gemini-3.1-pro-preview": {},
+				"gemini-3.1-pro-high":    {},
+			},
+		},
+	}
+
+	for _, alias := range aliases {
+		current, exists := mapping[alias.model]
+		if exists {
+			if _, legacy := alias.legacyTargets[current]; legacy {
+				mapping[alias.model] = target
+			}
+			continue
+		}
+		if mappingHasWildcardForModel(mapping, alias.model) {
+			continue
+		}
+		mapping[alias.model] = target
+	}
+}
+
+func mappingHasWildcardForModel(mapping map[string]string, model string) bool {
+	for pattern := range mapping {
+		if matchWildcard(pattern, model) {
+			return true
+		}
+	}
+	return false
+}
+
 func normalizeRequestedModelForLookup(platform, requestedModel string) string {
 	trimmed := strings.TrimSpace(requestedModel)
 	if trimmed == "" {
@@ -555,10 +753,19 @@ func resolveRequestedModelInMapping(mapping map[string]string, requestedModel st
 }
 
 // IsModelSupported 检查模型是否在 model_mapping 中（支持通配符）
-// 如果未配置 mapping，返回 true（允许所有模型）
+// 如果未配置 mapping，返回 true（允许所有模型）。
+//
+// 例外：OpenAI OAuth 账号（Codex 上游）的空映射会排除明确属于其他厂商
+// 家族的模型（deepseek-*/glm-* 等）——转发阶段 normalizeOpenAIModelForUpstream
+// 会把未知模型原样透传，Codex 上游对这类模型必然返回不可重试的 400，导致
+// 请求卡死在该账号上、无法 failover 到真正支持该模型的 API Key 账号（#3662）。
+// 未知/自定义别名仍保持允许（兼容渠道级映射），见 isOpenAIOAuthServableModel。
 func (a *Account) IsModelSupported(requestedModel string) bool {
 	mapping := a.GetModelMapping()
 	if len(mapping) == 0 {
+		if a.IsOpenAIOAuth() && !a.IsOpenAIPassthroughEnabled() {
+			return isOpenAIOAuthServableModel(requestedModel)
+		}
 		return true // 无映射 = 允许所有
 	}
 	if mappingSupportsRequestedModel(mapping, requestedModel) {
@@ -590,6 +797,77 @@ func (a *Account) ResolveMappedModel(requestedModel string) (mappedModel string,
 		if mappedModel, matched := resolveRequestedModelInMapping(mapping, normalized); matched {
 			return mappedModel, true
 		}
+	}
+	return requestedModel, false
+}
+
+// GetOpenAICompactMode returns the compact routing mode for an OpenAI account.
+// Missing or invalid values fall back to "auto".
+func (a *Account) GetOpenAICompactMode() string {
+	if a == nil || !a.IsOpenAI() || a.Extra == nil {
+		return OpenAICompactModeAuto
+	}
+	mode, _ := a.Extra["openai_compact_mode"].(string)
+	return normalizeOpenAICompactMode(mode)
+}
+
+// OpenAICompactSupportKnown reports whether compact capability is known for this
+// account and, when known, whether it is supported.
+func (a *Account) OpenAICompactSupportKnown() (supported bool, known bool) {
+	if a == nil || !a.IsOpenAI() {
+		return false, false
+	}
+
+	switch a.GetOpenAICompactMode() {
+	case OpenAICompactModeForceOn:
+		return true, true
+	case OpenAICompactModeForceOff:
+		return false, true
+	}
+
+	if a.Extra == nil {
+		return false, false
+	}
+	supported, ok := a.Extra["openai_compact_supported"].(bool)
+	if !ok {
+		return false, false
+	}
+	return supported, true
+}
+
+// AllowsOpenAICompact reports whether the account may be considered for compact
+// requests. Unknown capability remains allowed to avoid breaking older accounts
+// before an explicit probe has been run.
+func (a *Account) AllowsOpenAICompact() bool {
+	if a == nil || !a.IsOpenAI() {
+		return false
+	}
+	supported, known := a.OpenAICompactSupportKnown()
+	if !known {
+		return true
+	}
+	return supported
+}
+
+// GetCompactModelMapping returns compact-only model remapping configuration.
+// This mapping is intended for /responses/compact only and does not affect
+// normal /responses traffic.
+func (a *Account) GetCompactModelMapping() map[string]string {
+	if a == nil || a.Credentials == nil {
+		return nil
+	}
+	return stringMappingFromRaw(a.Credentials["compact_model_mapping"])
+}
+
+// ResolveCompactMappedModel resolves compact-only model remapping and reports
+// whether a compact-specific mapping rule matched.
+func (a *Account) ResolveCompactMappedModel(requestedModel string) (mappedModel string, matched bool) {
+	mapping := a.GetCompactModelMapping()
+	if len(mapping) == 0 {
+		return requestedModel, false
+	}
+	if mappedModel, matched := resolveRequestedModelInMapping(mapping, requestedModel); matched {
+		return mappedModel, true
 	}
 	return requestedModel, false
 }
@@ -765,14 +1043,90 @@ func parsePoolModeRetryCount(value any) int {
 	return defaultPoolModeRetryCount
 }
 
-// isPoolModeRetryableStatus 池模式下应触发同账号重试的状态码
+// defaultPoolModeRetryableStatusCodes 池模式下默认触发同账号重试的状态码。
+// 未在 Account.Credentials 中显式配置 pool_mode_retry_status_codes 时使用。
+var defaultPoolModeRetryableStatusCodes = []int{401, 403, 429}
+
+// isPoolModeRetryableStatus 池模式下应触发同账号重试的状态码（默认列表）。
 func isPoolModeRetryableStatus(statusCode int) bool {
-	switch statusCode {
-	case 401, 403, 429, 500, 502, 503, 504:
-		return true
-	default:
-		return false
+	for _, c := range defaultPoolModeRetryableStatusCodes {
+		if c == statusCode {
+			return true
+		}
 	}
+	return false
+}
+
+// GetPoolModeRetryStatusCodes 返回账号自定义的池模式同账号重试状态码列表。
+//
+// 返回值语义：
+//   - nil：未配置 → 调用方应回退到默认值 [401, 403, 429]
+//   - 长度为 0 的切片：管理员显式置空 → 关闭按状态码触发的同账号重试
+//   - 非空切片：去重、过滤为合法 HTTP 状态码（100-599）后的覆盖列表
+func (a *Account) GetPoolModeRetryStatusCodes() []int {
+	if a == nil || a.Credentials == nil {
+		return nil
+	}
+	raw, ok := a.Credentials["pool_mode_retry_status_codes"]
+	if !ok || raw == nil {
+		return nil
+	}
+	arr, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	seen := make(map[int]struct{}, len(arr))
+	codes := make([]int, 0, len(arr))
+	for _, v := range arr {
+		var code int
+		switch n := v.(type) {
+		case float64:
+			code = int(n)
+		case int:
+			code = n
+		case int64:
+			code = int(n)
+		case json.Number:
+			i, err := n.Int64()
+			if err != nil {
+				continue
+			}
+			code = int(i)
+		case string:
+			i, err := strconv.Atoi(strings.TrimSpace(n))
+			if err != nil {
+				continue
+			}
+			code = i
+		default:
+			continue
+		}
+		if code < 100 || code > 599 {
+			continue
+		}
+		if _, exists := seen[code]; exists {
+			continue
+		}
+		seen[code] = struct{}{}
+		codes = append(codes, code)
+	}
+	sort.Ints(codes)
+	return codes
+}
+
+// IsPoolModeRetryableStatus 在账号上下文中判断给定状态码是否应触发同账号重试。
+// 若账号未配置 pool_mode_retry_status_codes，则回退到默认列表。
+func (a *Account) IsPoolModeRetryableStatus(statusCode int) bool {
+	codes := a.GetPoolModeRetryStatusCodes()
+	if codes == nil {
+		return isPoolModeRetryableStatus(statusCode)
+	}
+	for _, c := range codes {
+		if c == statusCode {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Account) GetCustomErrorCodes() []int {
@@ -840,12 +1194,40 @@ func (a *Account) IsOpenAI() bool {
 	return a.Platform == PlatformOpenAI
 }
 
+func (a *Account) IsOpenAILongContextBillingEnabled() bool {
+	if a == nil || !a.IsOpenAI() || a.Extra == nil {
+		return false
+	}
+	enabled, ok := a.Extra[openAILongContextBillingEnabledKey].(bool)
+	return ok && enabled
+}
+
 func (a *Account) IsAnthropic() bool {
 	return a.Platform == PlatformAnthropic
 }
 
 func (a *Account) IsOpenAIOAuth() bool {
 	return a.IsOpenAI() && a.Type == AccountTypeOAuth
+}
+
+func (a *Account) IsOpenAIChatGPTSubscription() bool {
+	if !a.IsOpenAIOAuth() {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(a.GetCredential("plan_type"))) {
+	case "", "free", "abnormal":
+		return false
+	default:
+		return true
+	}
+}
+
+func (a *Account) IsOpenAIPersonalAccessToken() bool {
+	if !a.IsOpenAIOAuth() {
+		return false
+	}
+	return isOpenAIPersonalAccessTokenAuthMode(a.GetCredential(openAIAuthModeCredentialKey)) ||
+		isOpenAIPersonalAccessTokenAuthMode(a.GetCredential(openAIAuthModeLegacyCredentialKey))
 }
 
 func (a *Account) IsOpenAIApiKey() bool {
@@ -879,6 +1261,98 @@ func (a *Account) GetOpenAIRefreshToken() string {
 	return a.GetCredential("refresh_token")
 }
 
+// GetGrokBaseURL selects the upstream used by Grok text and Responses traffic.
+// Grok media traffic has a different transport contract and must use
+// GetGrokMediaBaseURL instead.
+func (a *Account) GetGrokBaseURL() string {
+	if !a.IsGrok() {
+		return ""
+	}
+	baseURL := a.GetCredential("base_url")
+	if a.IsGrokOAuth() {
+		if strings.TrimSpace(baseURL) == "" || isOfficialGrokAPIBaseURL(baseURL) {
+			return xai.DefaultCLIBaseURL
+		}
+		if _, err := xai.ValidateTrustedBaseURL(baseURL); err == nil {
+			return baseURL
+		}
+		return xai.DefaultCLIBaseURL
+	}
+	if baseURL != "" {
+		return baseURL
+	}
+	return xai.DefaultBaseURL
+}
+
+// GetGrokMediaBaseURL selects the upstream used by Grok Imagine APIs.
+//
+// OAuth text requests need the CLI subscription proxy, but that proxy has a
+// smaller request-body limit than the official Imagine API. Media requests can
+// contain large base64 inputs, so default OAuth accounts must use api.x.ai.
+// API-key accounts and explicit unsafe development overrides retain their
+// configured base URL.
+func (a *Account) GetGrokMediaBaseURL() string {
+	if !a.IsGrok() {
+		return ""
+	}
+	if !a.IsGrokOAuth() {
+		return a.GetGrokBaseURL()
+	}
+
+	baseURL := a.GetCredential("base_url")
+	if strings.TrimSpace(baseURL) == "" || isOfficialGrokAPIBaseURL(baseURL) || isOfficialGrokCLIBaseURL(baseURL) {
+		return xai.DefaultBaseURL
+	}
+	if _, err := xai.ValidateTrustedBaseURL(baseURL); err == nil {
+		return baseURL
+	}
+	return xai.DefaultBaseURL
+}
+
+func isOfficialGrokAPIBaseURL(raw string) bool {
+	return isOfficialGrokBaseURL(raw, xai.DefaultBaseURL)
+}
+
+func isOfficialGrokCLIBaseURL(raw string) bool {
+	return isOfficialGrokBaseURL(raw, xai.DefaultCLIBaseURL)
+}
+
+func isOfficialGrokBaseURL(raw, expected string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed == nil || parsed.Opaque != "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return false
+	}
+	defaultURL, err := url.Parse(expected)
+	if err != nil {
+		return false
+	}
+	if !strings.EqualFold(parsed.Scheme, defaultURL.Scheme) || !strings.EqualFold(parsed.Hostname(), defaultURL.Hostname()) {
+		return false
+	}
+	if port := parsed.Port(); port != "" {
+		portNumber, err := strconv.Atoi(port)
+		if err != nil || portNumber != 443 {
+			return false
+		}
+	}
+	path := strings.TrimRight(parsed.Path, "/")
+	return path == "" || path == strings.TrimRight(defaultURL.Path, "/")
+}
+
+func (a *Account) GetGrokAccessToken() string {
+	if !a.IsGrok() {
+		return ""
+	}
+	return a.GetCredential("access_token")
+}
+
+func (a *Account) GetGrokRefreshToken() string {
+	if !a.IsGrokOAuth() {
+		return ""
+	}
+	return a.GetCredential("refresh_token")
+}
+
 func (a *Account) GetOpenAIIDToken() string {
 	if !a.IsOpenAIOAuth() {
 		return ""
@@ -905,6 +1379,140 @@ func (a *Account) GetChatGPTAccountID() string {
 		return ""
 	}
 	return a.GetCredential("chatgpt_account_id")
+}
+
+func (a *Account) IsChatGPTAccountFedRAMP() bool {
+	if !a.IsOpenAIOAuth() || a.Credentials == nil {
+		return false
+	}
+	v, ok := a.Credentials["chatgpt_account_is_fedramp"]
+	if !ok || v == nil {
+		return false
+	}
+	switch value := v.(type) {
+	case bool:
+		return value
+	case string:
+		parsed, err := strconv.ParseBool(strings.TrimSpace(value))
+		return err == nil && parsed
+	case json.Number:
+		parsed, err := strconv.ParseBool(value.String())
+		return err == nil && parsed
+	case float64:
+		return value != 0
+	case int:
+		return value != 0
+	case int64:
+		return value != 0
+	default:
+		return false
+	}
+}
+
+func (a *Account) GetOpenAIDeviceID() string {
+	if !a.IsOpenAIOAuth() {
+		return ""
+	}
+	return strings.TrimSpace(a.GetExtraString("openai_device_id"))
+}
+
+func (a *Account) GetOpenAISessionID() string {
+	if !a.IsOpenAIOAuth() {
+		return ""
+	}
+	return strings.TrimSpace(a.GetExtraString("openai_session_id"))
+}
+
+func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapability) bool {
+	if a == nil {
+		return false
+	}
+	if capability == "" {
+		return true
+	}
+	if !a.IsOpenAICompatible() {
+		return false
+	}
+	if a.IsGrok() {
+		return capability == OpenAIEndpointCapabilityChatCompletions
+	}
+	switch capability {
+	case OpenAIEndpointCapabilityChatCompletions:
+	case OpenAIEndpointCapabilityEmbeddings:
+		if a.Type != AccountTypeAPIKey {
+			return false
+		}
+	default:
+		return false
+	}
+
+	configured, found := a.openAIEndpointCapabilitySet()
+	if !found {
+		return true
+	}
+	return configured[string(capability)]
+}
+
+func (a *Account) openAIEndpointCapabilitySet() (map[string]bool, bool) {
+	if a == nil || a.Credentials == nil {
+		return nil, false
+	}
+	raw, found := a.Credentials[openAIEndpointCapabilitiesCredentialKey]
+	if !found || raw == nil {
+		return nil, false
+	}
+
+	result := make(map[string]bool)
+	add := func(value string) {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value == "" {
+			return
+		}
+		result[value] = true
+	}
+
+	switch capabilities := raw.(type) {
+	case []any:
+		for _, item := range capabilities {
+			if value, ok := item.(string); ok {
+				add(value)
+			}
+		}
+	case []string:
+		for _, value := range capabilities {
+			add(value)
+		}
+	case map[string]any:
+		for key, value := range capabilities {
+			enabled, ok := value.(bool)
+			if ok && enabled {
+				add(key)
+			}
+		}
+	case map[string]bool:
+		for key, enabled := range capabilities {
+			if enabled {
+				add(key)
+			}
+		}
+	}
+
+	return result, true
+}
+
+func (a *Account) SupportsOpenAIImageCapability(capability OpenAIImagesCapability) bool {
+	if capability == "" {
+		return true
+	}
+	if !a.IsOpenAI() {
+		return false
+	}
+	switch capability {
+	case OpenAIImagesCapabilityBasic, OpenAIImagesCapabilityNative:
+		return a.Type == AccountTypeOAuth || a.Type == AccountTypeAPIKey
+	default:
+		return true
+	}
 }
 
 func (a *Account) GetChatGPTUserID() string {
@@ -969,7 +1577,7 @@ func (a *Account) IsOveragesEnabled() bool {
 	return false
 }
 
-// IsOpenAIPassthroughEnabled 返回 OpenAI 账号是否启用“自动透传（仅替换认证）”。
+// IsOpenAIPassthroughEnabled 返回 OpenAI 账号是否启用"自动透传（仅替换认证）"。
 //
 // 新字段：accounts.extra.openai_passthrough。
 // 兼容字段：accounts.extra.openai_oauth_passthrough（历史 OAuth 开关）。
@@ -1029,6 +1637,7 @@ const (
 	OpenAIWSIngressModeDedicated   = "dedicated"
 	OpenAIWSIngressModeCtxPool     = "ctx_pool"
 	OpenAIWSIngressModePassthrough = "passthrough"
+	OpenAIWSIngressModeHTTPBridge  = "http_bridge"
 )
 
 func normalizeOpenAIWSIngressMode(mode string) string {
@@ -1039,6 +1648,8 @@ func normalizeOpenAIWSIngressMode(mode string) string {
 		return OpenAIWSIngressModeCtxPool
 	case OpenAIWSIngressModePassthrough:
 		return OpenAIWSIngressModePassthrough
+	case OpenAIWSIngressModeHTTPBridge:
+		return OpenAIWSIngressModeHTTPBridge
 	case OpenAIWSIngressModeShared:
 		return OpenAIWSIngressModeShared
 	case OpenAIWSIngressModeDedicated:
@@ -1133,7 +1744,7 @@ func (a *Account) ResolveOpenAIResponsesWebSocketV2Mode(defaultMode string) stri
 	return resolvedDefault
 }
 
-// IsOpenAIWSForceHTTPEnabled 返回账号级“强制 HTTP”开关。
+// IsOpenAIWSForceHTTPEnabled 返回账号级"强制 HTTP"开关。
 // 字段：accounts.extra.openai_ws_force_http。
 func (a *Account) IsOpenAIWSForceHTTPEnabled() bool {
 	if a == nil || !a.IsOpenAI() || a.Extra == nil {
@@ -1158,7 +1769,7 @@ func (a *Account) IsOpenAIOAuthPassthroughEnabled() bool {
 	return a != nil && a.IsOpenAIOAuth() && a.IsOpenAIPassthroughEnabled()
 }
 
-// IsAnthropicAPIKeyPassthroughEnabled 返回 Anthropic API Key 账号是否启用“自动透传（仅替换认证）”。
+// IsAnthropicAPIKeyPassthroughEnabled 返回 Anthropic API Key 账号是否启用"自动透传（仅替换认证）"。
 // 字段：accounts.extra.anthropic_passthrough。
 // 字段缺失或类型不正确时，按 false（关闭）处理。
 func (a *Account) IsAnthropicAPIKeyPassthroughEnabled() bool {
@@ -1169,7 +1780,42 @@ func (a *Account) IsAnthropicAPIKeyPassthroughEnabled() bool {
 	return ok && enabled
 }
 
-// IsCodexCLIOnlyEnabled 返回 OpenAI OAuth 账号是否启用“仅允许 Codex 官方客户端”。
+// WebSearch 模拟三态常量
+const (
+	WebSearchModeDefault  = "default"  // 跟随渠道配置
+	WebSearchModeEnabled  = "enabled"  // 强制开启
+	WebSearchModeDisabled = "disabled" // 强制关闭
+)
+
+// GetWebSearchEmulationMode 返回账号的 WebSearch 模拟模式。
+// 三态：default（跟随渠道）/ enabled（强制开启）/ disabled（强制关闭）。
+// 兼容旧 bool 值：true→enabled, false→default（并记录 debug 日志）。
+func (a *Account) GetWebSearchEmulationMode() string {
+	if a == nil || a.Platform != PlatformAnthropic || a.Type != AccountTypeAPIKey || a.Extra == nil {
+		return WebSearchModeDefault
+	}
+	raw := a.Extra[featureKeyWebSearchEmulation]
+	// Tolerant: legacy bool values (pre-migration or stale writes)
+	if b, ok := raw.(bool); ok {
+		slog.Debug("legacy bool web_search_emulation value", "account_id", a.ID, "value", b)
+		if b {
+			return WebSearchModeEnabled
+		}
+		return WebSearchModeDefault
+	}
+	mode, ok := raw.(string)
+	if !ok {
+		return WebSearchModeDefault
+	}
+	switch mode {
+	case WebSearchModeEnabled, WebSearchModeDisabled:
+		return mode
+	default:
+		return WebSearchModeDefault
+	}
+}
+
+// IsCodexCLIOnlyEnabled 返回 OpenAI OAuth 账号是否启用"仅允许 Codex 官方客户端"。
 // 字段：accounts.extra.codex_cli_only。
 // 字段缺失或类型不正确时，按 false（关闭）处理。
 func (a *Account) IsCodexCLIOnlyEnabled() bool {
@@ -1178,6 +1824,17 @@ func (a *Account) IsCodexCLIOnlyEnabled() bool {
 	}
 	enabled, ok := a.Extra["codex_cli_only"].(bool)
 	return ok && enabled
+}
+
+// IsCodexCLIOnlyAppServerAllowed 返回 codex_cli_only 账号是否额外放行 Codex app-server
+// 第三方客户端（运行时与全局 app_server 开关 OR）。字段：accounts.extra.codex_cli_only_allow_app_server。
+// 仅在 codex_cli_only 已启用时有意义；字段缺失或类型不符按 false（不放行）处理。
+func (a *Account) IsCodexCLIOnlyAppServerAllowed() bool {
+	if !a.IsCodexCLIOnlyEnabled() {
+		return false
+	}
+	v, ok := a.Extra["codex_cli_only_allow_app_server"].(bool)
+	return ok && v
 }
 
 // WindowCostSchedulability 窗口费用调度状态
@@ -1395,6 +2052,19 @@ func (a *Account) getExtraTime(key string) time.Time {
 	return time.Time{}
 }
 
+// getExtraBool 从 Extra 中读取指定 key 的 bool 值
+func (a *Account) getExtraBool(key string) bool {
+	if a.Extra == nil {
+		return false
+	}
+	if v, ok := a.Extra[key]; ok {
+		if b, ok := v.(bool); ok {
+			return b
+		}
+	}
+	return false
+}
+
 // getExtraString 从 Extra 中读取指定 key 的字符串值
 func (a *Account) getExtraString(key string) string {
 	if a.Extra == nil {
@@ -1406,6 +2076,14 @@ func (a *Account) getExtraString(key string) string {
 		}
 	}
 	return ""
+}
+
+// getExtraStringDefault 从 Extra 中读取指定 key 的字符串值，不存在时返回 defaultVal
+func (a *Account) getExtraStringDefault(key, defaultVal string) string {
+	if v := a.getExtraString(key); v != "" {
+		return v
+	}
+	return defaultVal
 }
 
 // getExtraInt 从 Extra 中读取指定 key 的 int 值
@@ -1462,6 +2140,62 @@ func (a *Account) GetQuotaResetTimezone() string {
 		return tz
 	}
 	return "UTC"
+}
+
+// --- Quota Notification Getters ---
+
+// QuotaNotifyConfig returns the notify configuration for a given quota dimension.
+// dim must be one of quotaDimDaily, quotaDimWeekly, quotaDimTotal.
+func (a *Account) QuotaNotifyConfig(dim string) (enabled bool, threshold float64, thresholdType string) {
+	enabled = a.getExtraBool("quota_notify_" + dim + "_enabled")
+	threshold = a.getExtraFloat64("quota_notify_" + dim + "_threshold")
+	thresholdType = a.getExtraStringDefault("quota_notify_"+dim+"_threshold_type", thresholdTypeFixed)
+	return
+}
+
+func (a *Account) GetQuotaNotifyDailyEnabled() bool {
+	e, _, _ := a.QuotaNotifyConfig(quotaDimDaily)
+	return e
+}
+
+func (a *Account) GetQuotaNotifyDailyThreshold() float64 {
+	_, t, _ := a.QuotaNotifyConfig(quotaDimDaily)
+	return t
+}
+
+func (a *Account) GetQuotaNotifyDailyThresholdType() string {
+	_, _, tt := a.QuotaNotifyConfig(quotaDimDaily)
+	return tt
+}
+
+func (a *Account) GetQuotaNotifyWeeklyEnabled() bool {
+	e, _, _ := a.QuotaNotifyConfig(quotaDimWeekly)
+	return e
+}
+
+func (a *Account) GetQuotaNotifyWeeklyThreshold() float64 {
+	_, t, _ := a.QuotaNotifyConfig(quotaDimWeekly)
+	return t
+}
+
+func (a *Account) GetQuotaNotifyWeeklyThresholdType() string {
+	_, _, tt := a.QuotaNotifyConfig(quotaDimWeekly)
+	return tt
+}
+
+func (a *Account) GetQuotaNotifyTotalEnabled() bool {
+	e, _, _ := a.QuotaNotifyConfig(quotaDimTotal)
+	return e
+}
+
+func (a *Account) GetQuotaNotifyTotalThreshold() float64 {
+	_, t, _ := a.QuotaNotifyConfig(quotaDimTotal)
+	return t
+}
+
+func (a *Account) GetQuotaNotifyTotalThresholdType() string {
+	_, _, tt := a.QuotaNotifyConfig(quotaDimTotal)
+	return tt
 }
 
 // nextFixedDailyReset 计算在 after 之后的下一个每日固定重置时间点
@@ -1579,6 +2313,60 @@ func ComputeQuotaResetAt(extra map[string]any) {
 		extra["quota_weekly_reset_at"] = resetAt.UTC().Format(time.RFC3339)
 	} else {
 		delete(extra, "quota_weekly_reset_at")
+	}
+}
+
+// NormalizeFixedQuotaWindows aligns preserved quota usage with the active fixed reset window.
+//
+// Editing an existing account can switch a daily/weekly quota from rolling to fixed reset
+// while preserving quota_*_used and quota_*_start. If the preserved start belongs to the
+// old rolling window, response mapping treats the usage as expired and the dashboard shows
+// 0 until the next reset. Normalize those stale starts before persisting the edited account.
+func NormalizeFixedQuotaWindows(extra map[string]any) {
+	if extra == nil {
+		return
+	}
+	now := time.Now()
+	tzName, _ := extra["quota_reset_timezone"].(string)
+	if tzName == "" {
+		tzName = "UTC"
+	}
+	tz, err := time.LoadLocation(tzName)
+	if err != nil {
+		tz = time.UTC
+	}
+
+	if mode, _ := extra["quota_daily_reset_mode"].(string); mode == "fixed" && parseExtraFloat64(extra["quota_daily_limit"]) > 0 {
+		hour := int(parseExtraFloat64(extra["quota_daily_reset_hour"]))
+		if hour < 0 || hour > 23 {
+			hour = 0
+		}
+		lastReset := lastFixedDailyReset(hour, tz, now)
+		start := parseExtraTime(extra["quota_daily_start"])
+		if start.IsZero() || start.Before(lastReset) {
+			extra["quota_daily_used"] = 0.0
+			extra["quota_daily_start"] = lastReset.UTC().Format(time.RFC3339)
+		}
+	}
+
+	if mode, _ := extra["quota_weekly_reset_mode"].(string); mode == "fixed" && parseExtraFloat64(extra["quota_weekly_limit"]) > 0 {
+		day := 1
+		if rawDay, ok := extra["quota_weekly_reset_day"]; ok {
+			day = int(parseExtraFloat64(rawDay))
+		}
+		if day < 0 || day > 6 {
+			day = 1
+		}
+		hour := int(parseExtraFloat64(extra["quota_weekly_reset_hour"]))
+		if hour < 0 || hour > 23 {
+			hour = 0
+		}
+		lastReset := lastFixedWeeklyReset(day, hour, tz, now)
+		start := parseExtraTime(extra["quota_weekly_start"])
+		if start.IsZero() || start.Before(lastReset) {
+			extra["quota_weekly_used"] = 0.0
+			extra["quota_weekly_start"] = lastReset.UTC().Format(time.RFC3339)
+		}
 	}
 }
 
@@ -1910,6 +2698,18 @@ func parseExtraFloat64(value any) float64 {
 	return 0
 }
 
+func parseExtraTime(value any) time.Time {
+	if s, ok := value.(string); ok {
+		if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+			return t
+		}
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
+}
+
 // parseExtraInt 从 extra 字段解析 int 值
 // ParseExtraInt 从 extra 字段的 any 值解析为 int。
 // 支持 int, int64, float64, json.Number, string 类型，无法解析时返回 0。
@@ -1935,4 +2735,18 @@ func parseExtraInt(value any) int {
 		}
 	}
 	return 0
+}
+
+// IsShadow 报告账号是否为影子账号（parent_account_id 非空；当前唯一预设是 spark 维度）。
+func (a *Account) IsShadow() bool { return a != nil && a.ParentAccountID != nil }
+
+// IsCredentialShadow 语义别名，供「凭据消费者跳过影子」处使用（管理/后台 OAuth 路径）。
+func (a *Account) IsCredentialShadow() bool { return a.IsShadow() }
+
+// QuotaDimensionOrDefault 返回账号的用量维度，未设置时回退 "global"。
+func (a *Account) QuotaDimensionOrDefault() string {
+	if a == nil || strings.TrimSpace(a.QuotaDimension) == "" {
+		return QuotaDimensionGlobal
+	}
+	return a.QuotaDimension
 }

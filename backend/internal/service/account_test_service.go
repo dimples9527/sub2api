@@ -15,12 +15,16 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -50,24 +54,104 @@ type TestEvent struct {
 }
 
 const (
-	defaultGeminiTextTestPrompt  = "hi"
-	defaultGeminiImageTestPrompt = "Generate a cute orange cat astronaut sticker on a clean pastel background."
+	defaultGeminiTextTestPrompt        = "hi"
+	defaultGeminiImageTestPrompt       = "Generate a cute orange cat astronaut sticker on a clean pastel background."
+	defaultOpenAIImageTestPrompt       = "Generate a cute orange cat astronaut sticker on a clean pastel background."
+	defaultBatchAccountTestConcurrency = 3
+	defaultBatchAccountTestTimeout     = 90 * time.Second
+	defaultBatchAccountTestJobTimeout  = 10 * time.Minute
+	defaultBatchAccountTestPersistWait = 3 * time.Second
+	batchAccountTestJobRetention       = 30 * time.Minute
+	maxBatchAccountTestAccounts        = 200
+	maxBatchAccountTestConcurrency     = 8
+	maxBatchAccountTestTimeout         = 5 * time.Minute
+	maxBatchAccountTestJobTimeout      = 30 * time.Minute
+	maxBatchAccountTestJobs            = 100
 )
+
+// isOpenAIImageModel checks if the model is an OpenAI image generation model (e.g. gpt-image-2).
+func isOpenAIImageModel(model string) bool {
+	return strings.HasPrefix(strings.ToLower(model), "gpt-image-")
+}
 
 // AccountTestService handles account testing operations
 type AccountTestService struct {
 	accountRepo               AccountRepository
 	geminiTokenProvider       *GeminiTokenProvider
+	claudeTokenProvider       *ClaudeTokenProvider
+	grokTokenProvider         *GrokTokenProvider
 	antigravityGatewayService *AntigravityGatewayService
 	httpUpstream              HTTPUpstream
 	cfg                       *config.Config
 	tlsFPProfileService       *TLSFingerprintProfileService
+	runTestBackgroundFunc     func(ctx context.Context, accountID int64, modelID string) (*ScheduledTestResult, error)
+	batchTestJobsMu           sync.RWMutex
+	batchTestJobs             map[string]*BatchAccountTestJob
+}
+
+type BatchAccountTestInput struct {
+	AccountIDs         []int64
+	ModelID            string
+	ModelIDsByPlatform map[string]string
+	Concurrency        int
+	TimeoutPerAccount  time.Duration
+	Timeout            time.Duration
+}
+
+type normalizedBatchAccountTestInput struct {
+	AccountIDs         []int64
+	ModelID            string
+	ModelIDsByPlatform map[string]string
+	Concurrency        int
+	TimeoutPerAccount  time.Duration
+	Timeout            time.Duration
+}
+
+type BatchAccountTestJob struct {
+	JobID        string                 `json:"job_id"`
+	Status       string                 `json:"status"`
+	Total        int                    `json:"total"`
+	Completed    int                    `json:"completed"`
+	Success      int                    `json:"success"`
+	Failed       int                    `json:"failed"`
+	Results      []BatchAccountTestItem `json:"results"`
+	ErrorMessage string                 `json:"error_message,omitempty"`
+	CreatedAt    string                 `json:"created_at,omitempty"`
+	StartedAt    string                 `json:"started_at,omitempty"`
+	FinishedAt   string                 `json:"finished_at,omitempty"`
+
+	cancel         context.CancelFunc
+	resultSlots    []BatchAccountTestItem
+	createdAtTime  time.Time
+	finishedAtTime time.Time
+}
+
+type BatchAccountTestResult struct {
+	Total      int                    `json:"total"`
+	Success    int                    `json:"success"`
+	Failed     int                    `json:"failed"`
+	Results    []BatchAccountTestItem `json:"results"`
+	SkippedIDs []int64                `json:"skipped_ids,omitempty"`
+}
+
+type BatchAccountTestItem struct {
+	AccountID    int64  `json:"account_id"`
+	AccountName  string `json:"account_name,omitempty"`
+	Platform     string `json:"platform,omitempty"`
+	Schedulable  bool   `json:"schedulable"`
+	Status       string `json:"status"`
+	ErrorMessage string `json:"error_message,omitempty"`
+	LatencyMs    int64  `json:"latency_ms"`
+	StartedAt    string `json:"started_at,omitempty"`
+	FinishedAt   string `json:"finished_at,omitempty"`
 }
 
 // NewAccountTestService creates a new AccountTestService
 func NewAccountTestService(
 	accountRepo AccountRepository,
 	geminiTokenProvider *GeminiTokenProvider,
+	claudeTokenProvider *ClaudeTokenProvider,
+	grokTokenProvider *GrokTokenProvider,
 	antigravityGatewayService *AntigravityGatewayService,
 	httpUpstream HTTPUpstream,
 	cfg *config.Config,
@@ -76,11 +160,490 @@ func NewAccountTestService(
 	return &AccountTestService{
 		accountRepo:               accountRepo,
 		geminiTokenProvider:       geminiTokenProvider,
+		claudeTokenProvider:       claudeTokenProvider,
+		grokTokenProvider:         grokTokenProvider,
 		antigravityGatewayService: antigravityGatewayService,
 		httpUpstream:              httpUpstream,
 		cfg:                       cfg,
 		tlsFPProfileService:       tlsFPProfileService,
 	}
+}
+
+func NewAccountTestServiceWithRunner(
+	accountRepo AccountRepository,
+	run func(ctx context.Context, accountID int64, modelID string) (*ScheduledTestResult, error),
+) *AccountTestService {
+	return &AccountTestService{
+		accountRepo:           accountRepo,
+		runTestBackgroundFunc: run,
+	}
+}
+
+func (s *AccountTestService) BatchTestAccounts(ctx context.Context, input BatchAccountTestInput) (*BatchAccountTestResult, error) {
+	normalized, err := s.normalizeBatchAccountTestInput(input)
+	if err != nil {
+		return nil, err
+	}
+	runCtx, cancel := context.WithTimeout(ctx, normalized.Timeout)
+	defer cancel()
+	return s.runBatchTestAccounts(runCtx, normalized, nil)
+}
+
+func (s *AccountTestService) StartBatchTestAccounts(ctx context.Context, input BatchAccountTestInput) (*BatchAccountTestJob, error) {
+	normalized, err := s.normalizeBatchAccountTestInput(input)
+	if err != nil {
+		return nil, err
+	}
+
+	jobCtx, cancel := context.WithTimeout(context.Background(), normalized.Timeout)
+	now := time.Now().UTC()
+	job := &BatchAccountTestJob{
+		JobID:         uuid.NewString(),
+		Status:        "queued",
+		Total:         len(normalized.AccountIDs),
+		CreatedAt:     now.Format(time.RFC3339Nano),
+		cancel:        cancel,
+		resultSlots:   make([]BatchAccountTestItem, len(normalized.AccountIDs)),
+		createdAtTime: now,
+	}
+
+	if err := s.storeBatchTestJob(job); err != nil {
+		cancel()
+		return nil, err
+	}
+	go s.runBatchTestJob(jobCtx, job.JobID, normalized)
+
+	return s.GetBatchTestJob(ctx, job.JobID)
+}
+
+func (s *AccountTestService) GetBatchTestJob(_ context.Context, jobID string) (*BatchAccountTestJob, error) {
+	if strings.TrimSpace(jobID) == "" {
+		return nil, infraerrors.BadRequest("BATCH_ACCOUNT_TEST_JOB_ID_REQUIRED", "job_id is required")
+	}
+	s.batchTestJobsMu.RLock()
+	defer s.batchTestJobsMu.RUnlock()
+	job := s.batchTestJobs[jobID]
+	if job == nil {
+		return nil, infraerrors.NotFound("BATCH_ACCOUNT_TEST_JOB_NOT_FOUND", "batch account test job not found")
+	}
+	return snapshotBatchAccountTestJob(job), nil
+}
+
+func (s *AccountTestService) CancelBatchTestJob(ctx context.Context, jobID string) (*BatchAccountTestJob, error) {
+	if strings.TrimSpace(jobID) == "" {
+		return nil, infraerrors.BadRequest("BATCH_ACCOUNT_TEST_JOB_ID_REQUIRED", "job_id is required")
+	}
+
+	s.batchTestJobsMu.Lock()
+	job := s.batchTestJobs[jobID]
+	if job == nil {
+		s.batchTestJobsMu.Unlock()
+		return nil, infraerrors.NotFound("BATCH_ACCOUNT_TEST_JOB_NOT_FOUND", "batch account test job not found")
+	}
+	if job.Status == "queued" || job.Status == "running" {
+		job.Status = "cancelling"
+		if job.cancel != nil {
+			job.cancel()
+		}
+	}
+	s.batchTestJobsMu.Unlock()
+	return s.GetBatchTestJob(ctx, jobID)
+}
+
+func (s *AccountTestService) normalizeBatchAccountTestInput(input BatchAccountTestInput) (normalizedBatchAccountTestInput, error) {
+	ids := normalizeBatchAccountTestIDs(input.AccountIDs)
+	if len(ids) == 0 {
+		return normalizedBatchAccountTestInput{
+			AccountIDs:         []int64{},
+			ModelID:            strings.TrimSpace(input.ModelID),
+			ModelIDsByPlatform: normalizeBatchAccountTestPlatformModels(input.ModelIDsByPlatform),
+			Concurrency:        defaultBatchAccountTestConcurrency,
+			TimeoutPerAccount:  defaultBatchAccountTestTimeout,
+			Timeout:            defaultBatchAccountTestJobTimeout,
+		}, nil
+	}
+	if len(ids) > maxBatchAccountTestAccounts {
+		return normalizedBatchAccountTestInput{}, infraerrors.BadRequest("BATCH_ACCOUNT_TEST_TOO_MANY_ACCOUNTS", fmt.Sprintf("too many accounts: max %d", maxBatchAccountTestAccounts))
+	}
+	if s == nil || s.accountRepo == nil {
+		return normalizedBatchAccountTestInput{}, fmt.Errorf("account repository is not configured")
+	}
+
+	concurrency := input.Concurrency
+	if concurrency <= 0 {
+		concurrency = defaultBatchAccountTestConcurrency
+	}
+	if concurrency > maxBatchAccountTestConcurrency {
+		concurrency = maxBatchAccountTestConcurrency
+	}
+	if concurrency > len(ids) {
+		concurrency = len(ids)
+	}
+
+	timeout := input.TimeoutPerAccount
+	if timeout <= 0 {
+		timeout = defaultBatchAccountTestTimeout
+	}
+	if timeout > maxBatchAccountTestTimeout {
+		timeout = maxBatchAccountTestTimeout
+	}
+
+	totalTimeout := input.Timeout
+	if totalTimeout <= 0 {
+		totalTimeout = defaultBatchAccountTestJobTimeout
+	}
+	if totalTimeout > maxBatchAccountTestJobTimeout {
+		totalTimeout = maxBatchAccountTestJobTimeout
+	}
+
+	return normalizedBatchAccountTestInput{
+		AccountIDs:         ids,
+		ModelID:            strings.TrimSpace(input.ModelID),
+		ModelIDsByPlatform: normalizeBatchAccountTestPlatformModels(input.ModelIDsByPlatform),
+		Concurrency:        concurrency,
+		TimeoutPerAccount:  timeout,
+		Timeout:            totalTimeout,
+	}, nil
+}
+
+func (s *AccountTestService) runBatchTestAccounts(
+	ctx context.Context,
+	input normalizedBatchAccountTestInput,
+	onItem func(index int, item BatchAccountTestItem),
+) (*BatchAccountTestResult, error) {
+	ids := input.AccountIDs
+	if len(ids) == 0 {
+		return &BatchAccountTestResult{Results: []BatchAccountTestItem{}}, nil
+	}
+
+	accounts, err := s.accountRepo.GetByIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("load accounts: %w", err)
+	}
+	accountByID := make(map[int64]*Account, len(accounts))
+	for _, account := range accounts {
+		if account != nil {
+			accountByID[account.ID] = account
+		}
+	}
+
+	result := &BatchAccountTestResult{
+		Total:   len(ids),
+		Results: make([]BatchAccountTestItem, len(ids)),
+	}
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for worker := 0; worker < input.Concurrency; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for index := range jobs {
+				accountID := ids[index]
+				account := accountByID[accountID]
+				if account == nil {
+					result.Results[index] = BatchAccountTestItem{
+						AccountID:    accountID,
+						Status:       "not_found",
+						ErrorMessage: "account not found",
+					}
+					if onItem != nil {
+						onItem(index, result.Results[index])
+					}
+					continue
+				}
+				result.Results[index] = s.runBatchAccountTestItem(ctx, account, input.modelIDForPlatform(account.Platform), input.TimeoutPerAccount)
+				if onItem != nil {
+					onItem(index, result.Results[index])
+				}
+			}
+		}()
+	}
+enqueue:
+	for index := range ids {
+		select {
+		case <-ctx.Done():
+			break enqueue
+		case jobs <- index:
+		}
+	}
+	close(jobs)
+	wg.Wait()
+
+	for i := range result.Results {
+		if result.Results[i].Status == "" {
+			status, errorMessage := batchAccountTestInterruptedStatus(ctx.Err())
+			account := accountByID[ids[i]]
+			result.Results[i] = BatchAccountTestItem{
+				AccountID:    ids[i],
+				Status:       status,
+				ErrorMessage: errorMessage,
+			}
+			if account != nil {
+				result.Results[i].AccountName = account.Name
+				result.Results[i].Platform = account.Platform
+				result.Results[i].Schedulable = account.Schedulable
+			}
+			if onItem != nil {
+				onItem(i, result.Results[i])
+			}
+		}
+		if result.Results[i].Status == "success" {
+			result.Success++
+		} else {
+			result.Failed++
+		}
+	}
+	return result, nil
+}
+
+func (s *AccountTestService) storeBatchTestJob(job *BatchAccountTestJob) error {
+	s.batchTestJobsMu.Lock()
+	defer s.batchTestJobsMu.Unlock()
+	if s.batchTestJobs == nil {
+		s.batchTestJobs = make(map[string]*BatchAccountTestJob)
+	}
+	s.pruneBatchTestJobsLocked(time.Now())
+	if len(s.batchTestJobs) >= maxBatchAccountTestJobs {
+		return infraerrors.TooManyRequests("BATCH_ACCOUNT_TEST_JOBS_FULL", "too many batch account test jobs are running or retained")
+	}
+	s.batchTestJobs[job.JobID] = job
+	return nil
+}
+
+func (s *AccountTestService) runBatchTestJob(ctx context.Context, jobID string, input normalizedBatchAccountTestInput) {
+	s.updateBatchTestJobStarted(jobID)
+	_, err := s.runBatchTestAccounts(ctx, input, func(index int, item BatchAccountTestItem) {
+		s.updateBatchTestJobItem(jobID, index, item)
+	})
+	s.finishBatchTestJob(jobID, ctx, err)
+}
+
+func (s *AccountTestService) updateBatchTestJobStarted(jobID string) {
+	s.batchTestJobsMu.Lock()
+	defer s.batchTestJobsMu.Unlock()
+	job := s.batchTestJobs[jobID]
+	if job == nil {
+		return
+	}
+	if job.Status == "queued" {
+		job.Status = "running"
+	}
+	job.StartedAt = time.Now().UTC().Format(time.RFC3339Nano)
+}
+
+func (s *AccountTestService) updateBatchTestJobItem(jobID string, index int, item BatchAccountTestItem) {
+	s.batchTestJobsMu.Lock()
+	defer s.batchTestJobsMu.Unlock()
+	job := s.batchTestJobs[jobID]
+	if job == nil || index < 0 || index >= len(job.resultSlots) {
+		return
+	}
+	if job.resultSlots[index].Status == "" {
+		job.Completed++
+		if item.Status == "success" {
+			job.Success++
+		} else {
+			job.Failed++
+		}
+	}
+	job.resultSlots[index] = item
+}
+
+func (s *AccountTestService) finishBatchTestJob(jobID string, ctx context.Context, err error) {
+	s.batchTestJobsMu.Lock()
+	defer s.batchTestJobsMu.Unlock()
+	job := s.batchTestJobs[jobID]
+	if job == nil {
+		return
+	}
+	if err != nil {
+		job.Status = "failed"
+		job.ErrorMessage = err.Error()
+	} else if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		job.Status = "completed"
+		job.ErrorMessage = "batch account test timed out"
+	} else if ctx.Err() != nil {
+		job.Status = "cancelled"
+	} else {
+		job.Status = "completed"
+	}
+	now := time.Now().UTC()
+	job.FinishedAt = now.Format(time.RFC3339Nano)
+	job.finishedAtTime = now
+	job.cancel = nil
+}
+
+func (s *AccountTestService) pruneBatchTestJobsLocked(now time.Time) {
+	for jobID, job := range s.batchTestJobs {
+		if !isBatchAccountTestJobTerminal(job.Status) || job.finishedAtTime.IsZero() {
+			continue
+		}
+		if now.Sub(job.finishedAtTime) > batchAccountTestJobRetention {
+			delete(s.batchTestJobs, jobID)
+		}
+	}
+}
+
+func isBatchAccountTestJobTerminal(status string) bool {
+	return status == "completed" || status == "cancelled" || status == "failed"
+}
+
+func snapshotBatchAccountTestJob(job *BatchAccountTestJob) *BatchAccountTestJob {
+	out := &BatchAccountTestJob{
+		JobID:        job.JobID,
+		Status:       job.Status,
+		Total:        job.Total,
+		Completed:    job.Completed,
+		Success:      job.Success,
+		Failed:       job.Failed,
+		ErrorMessage: job.ErrorMessage,
+		CreatedAt:    job.CreatedAt,
+		StartedAt:    job.StartedAt,
+		FinishedAt:   job.FinishedAt,
+	}
+	out.Results = make([]BatchAccountTestItem, 0, len(job.resultSlots))
+	for _, item := range job.resultSlots {
+		if item.Status != "" {
+			out.Results = append(out.Results, item)
+		}
+	}
+	return out
+}
+
+func (s *AccountTestService) runBatchAccountTestItem(parent context.Context, account *Account, modelID string, timeout time.Duration) (item BatchAccountTestItem) {
+	startedAt := time.Now().UTC()
+	item = BatchAccountTestItem{
+		AccountID:   account.ID,
+		AccountName: account.Name,
+		Platform:    account.Platform,
+		Schedulable: account.Schedulable,
+		StartedAt:   startedAt.Format(time.RFC3339Nano),
+	}
+	defer func() {
+		s.persistBatchAccountTestItemStatus(item)
+	}()
+
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+
+	result, err := s.runTestBackground(ctx, account.ID, modelID)
+	finishedAt := time.Now().UTC()
+	item.FinishedAt = finishedAt.Format(time.RFC3339Nano)
+	item.LatencyMs = finishedAt.Sub(startedAt).Milliseconds()
+	if result != nil {
+		item.LatencyMs = result.LatencyMs
+		if !result.StartedAt.IsZero() {
+			item.StartedAt = result.StartedAt.UTC().Format(time.RFC3339Nano)
+		}
+		if !result.FinishedAt.IsZero() {
+			item.FinishedAt = result.FinishedAt.UTC().Format(time.RFC3339Nano)
+		}
+	}
+
+	if errors.Is(parent.Err(), context.DeadlineExceeded) {
+		item.Status = "timeout"
+		item.ErrorMessage = "batch account test timed out"
+		return item
+	}
+	if errors.Is(parent.Err(), context.Canceled) {
+		item.Status = "cancelled"
+		item.ErrorMessage = "account test cancelled"
+		return item
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		item.Status = "timeout"
+		item.ErrorMessage = "account test timed out"
+		return item
+	}
+	if errors.Is(ctx.Err(), context.Canceled) {
+		item.Status = "cancelled"
+		item.ErrorMessage = "account test cancelled"
+		return item
+	}
+	if err != nil {
+		item.Status = "failed"
+		item.ErrorMessage = err.Error()
+		if result != nil && result.ErrorMessage != "" {
+			item.ErrorMessage = result.ErrorMessage
+		}
+		return item
+	}
+	if result != nil && result.Status == "failed" {
+		item.Status = "failed"
+		item.ErrorMessage = result.ErrorMessage
+		return item
+	}
+
+	item.Status = "success"
+	return item
+}
+
+func batchAccountTestInterruptedStatus(err error) (string, string) {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout", "batch account test timed out"
+	}
+	return "cancelled", "account test cancelled"
+}
+
+func (s *AccountTestService) persistBatchAccountTestItemStatus(item BatchAccountTestItem) {
+	if item.AccountID <= 0 || (item.Status != "timeout" && item.Status != "cancelled") {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultBatchAccountTestPersistWait)
+	defer cancel()
+	s.persistLastAccountTestStatus(ctx, item.AccountID, errors.New(item.ErrorMessage))
+}
+
+func (s *AccountTestService) runTestBackground(ctx context.Context, accountID int64, modelID string) (*ScheduledTestResult, error) {
+	if s.runTestBackgroundFunc != nil {
+		return s.runTestBackgroundFunc(ctx, accountID, modelID)
+	}
+	return s.RunTestBackground(ctx, accountID, modelID)
+}
+
+func normalizeBatchAccountTestIDs(ids []int64) []int64 {
+	out := make([]int64, 0, len(ids))
+	seen := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func normalizeBatchAccountTestPlatformModels(models map[string]string) map[string]string {
+	if len(models) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(models))
+	for platform, modelID := range models {
+		platform = strings.ToLower(strings.TrimSpace(platform))
+		modelID = strings.TrimSpace(modelID)
+		if platform == "" || modelID == "" {
+			continue
+		}
+		out[platform] = modelID
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func (input normalizedBatchAccountTestInput) modelIDForPlatform(platform string) string {
+	if len(input.ModelIDsByPlatform) > 0 {
+		if modelID := strings.TrimSpace(input.ModelIDsByPlatform[strings.ToLower(strings.TrimSpace(platform))]); modelID != "" {
+			return modelID
+		}
+	}
+	return input.ModelID
 }
 
 func (s *AccountTestService) validateUpstreamBaseURL(raw string) (string, error) {
@@ -159,7 +722,8 @@ func createTestPayload(modelID string) (map[string]any, error) {
 // TestAccountConnection tests an account's connection by sending a test request
 // All account types use full Claude Code client characteristics, only auth header differs
 // modelID is optional - if empty, defaults to claude.DefaultTestModel
-func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int64, modelID string, prompt string) error {
+// mode is optional - "compact" routes OpenAI accounts to the /responses/compact probe path
+func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int64, modelID string, prompt string, mode string) error {
 	ctx := c.Request.Context()
 
 	// Get account
@@ -168,20 +732,41 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		return s.sendErrorAndEnd(c, "Account not found")
 	}
 
+	var testErr error
 	// Route to platform-specific test method
 	if account.IsOpenAI() {
-		return s.testOpenAIAccountConnection(c, account, modelID)
+		testErr = s.testOpenAIAccountConnection(c, account, modelID, prompt, normalizeAccountTestMode(mode))
+	} else if account.IsGemini() {
+		testErr = s.testGeminiAccountConnection(c, account, modelID, prompt)
+	} else if account.Platform == PlatformGrok {
+		testErr = s.testGrokAccountConnection(c, account, modelID)
+	} else if account.Platform == PlatformAntigravity {
+		testErr = s.routeAntigravityTest(c, account, modelID, prompt)
+	} else {
+		testErr = s.testClaudeAccountConnection(c, account, modelID)
 	}
 
-	if account.IsGemini() {
-		return s.testGeminiAccountConnection(c, account, modelID, prompt)
-	}
+	s.persistLastAccountTestStatus(ctx, account.ID, testErr)
+	return testErr
+}
 
-	if account.Platform == PlatformAntigravity {
-		return s.routeAntigravityTest(c, account, modelID, prompt)
+func (s *AccountTestService) persistLastAccountTestStatus(ctx context.Context, accountID int64, testErr error) {
+	if s == nil || s.accountRepo == nil || accountID <= 0 {
+		return
 	}
-
-	return s.testClaudeAccountConnection(c, account, modelID)
+	status := "success"
+	errorMsg := ""
+	if testErr != nil {
+		status = "failed"
+		errorMsg = testErr.Error()
+	}
+	if err := s.accountRepo.UpdateExtra(ctx, accountID, map[string]any{
+		"last_test_status": status,
+		"last_tested_at":   time.Now().UTC().Format(time.RFC3339Nano),
+		"last_test_error":  errorMsg,
+	}); err != nil {
+		log.Printf("failed to persist account test status: account=%d err=%v", accountID, err)
+	}
 }
 
 // testClaudeAccountConnection tests an Anthropic Claude account's connection
@@ -203,23 +788,21 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	if account.IsBedrock() {
 		return s.testBedrockAccountConnection(c, ctx, account, testModelID)
 	}
+	if account.Type == AccountTypeServiceAccount {
+		return s.testClaudeVertexServiceAccountConnection(c, ctx, account, testModelID)
+	}
 
 	// Determine authentication method and API URL
 	var authToken string
-	var useBearer bool
 	var apiURL string
 
 	if account.IsOAuth() {
-		// OAuth or Setup Token - use Bearer token
-		useBearer = true
 		apiURL = testClaudeAPIURL
 		authToken = account.GetCredential("access_token")
 		if authToken == "" {
 			return s.sendErrorAndEnd(c, "No access token available")
 		}
 	} else if account.Type == "apikey" {
-		// API Key - use x-api-key header
-		useBearer = false
 		authToken = account.GetCredential("api_key")
 		if authToken == "" {
 			return s.sendErrorAndEnd(c, "No API key available")
@@ -270,13 +853,16 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	}
 
 	// Set authentication header
-	if useBearer {
+	if account.IsOAuth() {
 		req.Header.Set("anthropic-beta", claude.DefaultBetaHeader)
 		req.Header.Set("Authorization", "Bearer "+authToken)
 	} else {
 		req.Header.Set("anthropic-beta", claude.APIKeyBetaHeader)
-		req.Header.Set("x-api-key", authToken)
+		setAnthropicAPIKeyAuthHeader(req.Header, account, authToken)
 	}
+
+	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
+	account.ApplyHeaderOverrides(req.Header)
 
 	// Get proxy URL
 	proxyURL := ""
@@ -303,6 +889,74 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	}
 
 	// Process SSE stream
+	return s.processClaudeStream(c, resp.Body)
+}
+
+func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Context, ctx context.Context, account *Account, testModelID string) error {
+	if mappedModel, matched := account.ResolveMappedModel(testModelID); matched {
+		testModelID = mappedModel
+	} else {
+		testModelID = normalizeVertexAnthropicModelID(claude.NormalizeModelID(testModelID))
+	}
+
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.Flush()
+
+	payload, err := createTestPayload(testModelID)
+	if err != nil {
+		return s.sendErrorAndEnd(c, "Failed to create test payload")
+	}
+	payloadBytes, _ := json.Marshal(payload)
+	vertexBody, err := buildVertexAnthropicRequestBody(payloadBytes)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to create Vertex request body: %s", err.Error()))
+	}
+
+	if s.claudeTokenProvider == nil {
+		return s.sendErrorAndEnd(c, "Claude token provider not configured")
+	}
+	accessToken, err := s.claudeTokenProvider.GetAccessToken(ctx, account)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to get service account access token: %s", err.Error()))
+	}
+
+	fullURL, err := buildVertexAnthropicURL(account.VertexProjectID(), account.VertexLocation(testModelID), testModelID, true)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to build Vertex URL: %s", err.Error()))
+	}
+
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(vertexBody))
+	if err != nil {
+		return s.sendErrorAndEnd(c, "Failed to create request")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	proxyURL := ""
+	if account.ProxyID != nil && account.Proxy != nil {
+		proxyURL = account.Proxy.URL()
+	}
+
+	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		errMsg := fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body))
+		if resp.StatusCode == http.StatusForbidden {
+			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
+		}
+		return s.sendErrorAndEnd(c, errMsg)
+	}
+
 	return s.processClaudeStream(c, resp.Body)
 }
 
@@ -410,8 +1064,9 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 }
 
 // testOpenAIAccountConnection tests an OpenAI account's connection
-func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account *Account, modelID string) error {
+func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account *Account, modelID string, prompt string, mode string) error {
 	ctx := c.Request.Context()
+	mode = normalizeAccountTestMode(mode)
 
 	// Default to openai.DefaultTestModel for OpenAI testing
 	testModelID := modelID
@@ -419,41 +1074,58 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		testModelID = openai.DefaultTestModel
 	}
 
-	// For API Key accounts with model mapping, map the model
-	if account.Type == "apikey" {
-		mapping := account.GetModelMapping()
-		if len(mapping) > 0 {
-			if mappedModel, exists := mapping[testModelID]; exists {
-				testModelID = mappedModel
-			}
+	// Align test routing with gateway behavior: OpenAI accounts apply normal
+	// account model mapping, and compact mode applies compact-only mapping on top.
+	testModelID = account.GetMappedModel(testModelID)
+	if mode == AccountTestModeCompact {
+		testModelID = resolveOpenAICompactForwardModel(account, testModelID)
+		return s.testOpenAICompactConnection(c, account, testModelID)
+	}
+
+	// Route to image generation test if an image model is selected
+	if isOpenAIImageModel(testModelID) {
+		imagePrompt := strings.TrimSpace(prompt)
+		if imagePrompt == "" {
+			imagePrompt = defaultOpenAIImageTestPrompt
 		}
+		if account.Type == "apikey" {
+			return s.testOpenAIImageAPIKey(c, ctx, account, testModelID, imagePrompt)
+		}
+		return s.testOpenAIImageOAuth(c, ctx, account, testModelID, imagePrompt)
+	}
+
+	credentialAccount := account
+	if account.IsCredentialShadow() {
+		resolved, err := resolveCredentialAccount(ctx, s.accountRepo, account)
+		if err != nil {
+			return s.sendErrorAndEnd(c, err.Error())
+		}
+		credentialAccount = resolved
 	}
 
 	// Determine authentication method and API URL
 	var authToken string
 	var apiURL string
 	var isOAuth bool
-	var chatgptAccountID string
 
-	if account.IsOAuth() {
+	if credentialAccount.IsOAuth() {
 		isOAuth = true
 		// OAuth - use Bearer token with ChatGPT internal API
-		authToken = account.GetOpenAIAccessToken()
+		authToken = credentialAccount.GetOpenAIAccessToken()
 		if authToken == "" {
 			return s.sendErrorAndEnd(c, "No access token available")
 		}
 
 		// OAuth uses ChatGPT internal API
 		apiURL = chatgptCodexAPIURL
-		chatgptAccountID = account.GetChatGPTAccountID()
-	} else if account.Type == "apikey" {
+	} else if credentialAccount.Type == "apikey" {
 		// API Key - use Platform API
-		authToken = account.GetOpenAIApiKey()
+		authToken = credentialAccount.GetOpenAIApiKey()
 		if authToken == "" {
 			return s.sendErrorAndEnd(c, "No API key available")
 		}
 
-		baseURL := account.GetOpenAIBaseURL()
+		baseURL := credentialAccount.GetOpenAIBaseURL()
 		if baseURL == "" {
 			baseURL = "https://api.openai.com"
 		}
@@ -461,7 +1133,10 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		if err != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid base URL: %s", err.Error()))
 		}
-		apiURL = strings.TrimSuffix(normalizedBaseURL, "/") + "/responses"
+		if !openai_compat.ShouldUseResponsesAPI(account.Extra) {
+			return s.testOpenAIChatCompletionsConnection(c, account, testModelID, prompt, normalizedBaseURL, authToken)
+		}
+		apiURL = buildOpenAIResponsesURL(normalizedBaseURL)
 	} else {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported account type: %s", account.Type))
 	}
@@ -473,8 +1148,13 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	c.Writer.Flush()
 
-	// Create OpenAI Responses API payload
-	payload := createOpenAITestPayload(testModelID, isOAuth)
+	// Create OpenAI Responses API payload. OAuth accounts use ChatGPT Codex
+	// upstream and must apply the same model normalization as real forwarding.
+	upstreamTestModelID := testModelID
+	if isOAuth {
+		upstreamTestModelID = normalizeOpenAIModelForUpstream(credentialAccount, testModelID)
+	}
+	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth)
 	payloadBytes, _ := json.Marshal(payload)
 
 	// Send test_start event
@@ -484,6 +1164,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create request")
 	}
+	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
 
 	// Set common headers
 	req.Header.Set("Content-Type", "application/json")
@@ -493,10 +1174,20 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	if isOAuth {
 		req.Host = "chatgpt.com"
 		req.Header.Set("accept", "text/event-stream")
-		if chatgptAccountID != "" {
-			req.Header.Set("chatgpt-account-id", chatgptAccountID)
+		req.Header.Set("OpenAI-Beta", "responses=experimental")
+		req.Header.Set("Originator", "codex_cli_rs")
+		if customUA := strings.TrimSpace(credentialAccount.GetOpenAIUserAgent()); customUA != "" {
+			req.Header.Set("User-Agent", customUA)
+		} else {
+			req.Header.Set("User-Agent", codexCLIUserAgent)
 		}
+		setOpenAIChatGPTAccountHeaders(req.Header, credentialAccount)
+		// 与真实转发一致：originator 与最终 User-Agent 首段配套，否则上游 404（issue #3901）。
+		enforceCodexIdentityHeaders(req.Header)
 	}
+
+	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
+	credentialAccount.ApplyHeaderOverrides(req.Header)
 
 	// Get proxy URL
 	proxyURL := ""
@@ -515,21 +1206,12 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 			_ = s.accountRepo.UpdateExtra(ctx, account.ID, updates)
 			mergeAccountExtra(account, updates)
 		}
-		if snapshot := ParseCodexRateLimitHeaders(resp.Header); snapshot != nil {
-			if resetAt := codexRateLimitResetAtFromSnapshot(snapshot, time.Now()); resetAt != nil {
-				_ = s.accountRepo.SetRateLimited(ctx, account.ID, *resetAt)
-				account.RateLimitResetAt = resetAt
-			}
-		}
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		if isOAuth && s.accountRepo != nil {
-			if resetAt := (&RateLimitService{}).calculateOpenAI429ResetTime(resp.Header); resetAt != nil {
-				_ = s.accountRepo.SetRateLimited(ctx, account.ID, *resetAt)
-				account.RateLimitResetAt = resetAt
-			}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
 		}
 		// 401 Unauthorized: 标记账号为永久错误
 		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
@@ -543,6 +1225,320 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	return s.processOpenAIStream(c, resp.Body)
 }
 
+// testGrokAccountConnection tests a Grok OAuth or API-key account through xAI's Responses API.
+func (s *AccountTestService) testGrokAccountConnection(c *gin.Context, account *Account, modelID string) error {
+	ctx := c.Request.Context()
+
+	if s.httpUpstream == nil {
+		return s.sendErrorAndEnd(c, "HTTP upstream not configured")
+	}
+
+	testModelID := strings.TrimSpace(modelID)
+	if testModelID == "" {
+		testModelID = grokDefaultResponsesModel
+	}
+	if mapped := strings.TrimSpace(account.GetMappedModel(testModelID)); mapped != "" {
+		testModelID = mapped
+	}
+
+	var authToken string
+	switch account.Type {
+	case AccountTypeOAuth:
+		if s.grokTokenProvider == nil {
+			return s.sendErrorAndEnd(c, "Grok token provider not configured")
+		}
+		var err error
+		authToken, err = s.grokTokenProvider.GetAccessToken(ctx, account)
+		if err != nil {
+			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to get Grok access token: %s", err.Error()))
+		}
+	case AccountTypeAPIKey:
+		authToken = strings.TrimSpace(account.GetCredential("api_key"))
+		if authToken == "" {
+			return s.sendErrorAndEnd(c, "Grok API key is missing")
+		}
+	default:
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported Grok account type: %s", account.Type))
+	}
+
+	apiURL, err := xai.BuildResponsesURL(account.GetGrokBaseURL())
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid Grok base URL: %s", err.Error()))
+	}
+
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.Flush()
+
+	payloadBytes, err := json.Marshal(map[string]any{
+		"model":  testModelID,
+		"input":  "hi",
+		"stream": true,
+	})
+	if err != nil {
+		return s.sendErrorAndEnd(c, "Failed to create Grok test payload")
+	}
+
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+	if err != nil {
+		return s.sendErrorAndEnd(c, "Failed to create Grok request")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("Authorization", "Bearer "+authToken)
+	applyGrokCLIHeaders(req.Header)
+
+	proxyURL := ""
+	if account.ProxyID != nil && account.Proxy != nil {
+		proxyURL = account.Proxy.URL()
+	}
+
+	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Grok Responses API request failed: %s", err.Error()))
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	now := time.Now()
+	snapshot := parseGrokQuotaSnapshot(resp.Header, resp.StatusCode, now)
+	if snapshot != nil && s.accountRepo != nil {
+		resetAt, limited := grokRateLimitResetAt(snapshot, now)
+		if limited {
+			normalizeGrokExhaustedWindowResets(snapshot, resetAt, now)
+		}
+		_ = s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{
+			grokQuotaSnapshotExtraKey: snapshot,
+		})
+		if limited {
+			persistGrokRateLimit(ctx, s.accountRepo, account, resetAt)
+		}
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Grok Responses API returned %d: %s", resp.StatusCode, string(body)))
+	}
+
+	return s.processOpenAIStream(c, resp.Body)
+}
+
+// testOpenAIChatCompletionsConnection tests an OpenAI-compatible APIKey account
+// through the raw /v1/chat/completions endpoint.
+func (s *AccountTestService) testOpenAIChatCompletionsConnection(
+	c *gin.Context,
+	account *Account,
+	testModelID string,
+	prompt string,
+	normalizedBaseURL string,
+	authToken string,
+) error {
+	ctx := c.Request.Context()
+	apiURL := buildOpenAIChatCompletionsURL(normalizedBaseURL)
+
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.Flush()
+
+	payload := createOpenAIChatCompletionsTestPayload(testModelID, prompt)
+	payloadBytes, _ := json.Marshal(payload)
+
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
+	s.sendEvent(c, TestEvent{Type: "status", Text: "正在通过 /v1/chat/completions 测试连接"})
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+	if err != nil {
+		return s.sendErrorAndEnd(c, "Failed to create Chat Completions request")
+	}
+	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Authorization", "Bearer "+authToken)
+
+	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
+	account.ApplyHeaderOverrides(req.Header)
+
+	proxyURL := ""
+	if account.ProxyID != nil && account.Proxy != nil {
+		proxyURL = account.Proxy.URL()
+	}
+
+	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Chat Completions API (/v1/chat/completions) request failed: %s", err.Error()))
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode == http.StatusTooManyRequests {
+			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
+		}
+		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
+			errMsg := fmt.Sprintf("Chat Completions authentication failed (401): %s", string(body))
+			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
+		}
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Chat Completions API (/v1/chat/completions) returned %d: %s", resp.StatusCode, string(body)))
+	}
+
+	return s.processOpenAIChatCompletionsStream(c, resp.Body)
+}
+
+// testOpenAICompactConnection probes /responses/compact and persists the
+// resulting capability state on the account.
+func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account *Account, testModelID string) error {
+	ctx := c.Request.Context()
+
+	authToken := ""
+	apiURL := ""
+	isOAuth := false
+
+	switch {
+	case account.IsOAuth():
+		isOAuth = true
+		authToken = account.GetOpenAIAccessToken()
+		if authToken == "" {
+			return s.sendErrorAndEnd(c, "No access token available")
+		}
+		apiURL = chatgptCodexAPIURL + "/compact"
+	case account.Type == AccountTypeAPIKey:
+		authToken = account.GetOpenAIApiKey()
+		if authToken == "" {
+			return s.sendErrorAndEnd(c, "No API key available")
+		}
+		baseURL := account.GetOpenAIBaseURL()
+		if baseURL == "" {
+			baseURL = "https://api.openai.com"
+		}
+		normalizedBaseURL, err := s.validateUpstreamBaseURL(baseURL)
+		if err != nil {
+			return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid base URL: %s", err.Error()))
+		}
+		apiURL = appendOpenAIResponsesRequestPathSuffix(buildOpenAIResponsesURL(normalizedBaseURL), "/compact")
+	default:
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported account type: %s", account.Type))
+	}
+
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.Flush()
+
+	payloadBytes, _ := json.Marshal(createOpenAICompactProbePayload(testModelID))
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
+
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
+	if err != nil {
+		return s.sendErrorAndEnd(c, "Failed to create request")
+	}
+	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+authToken)
+	req.Header.Set("OpenAI-Beta", "responses=experimental")
+	req.Header.Set("Originator", "codex_cli_rs")
+	req.Header.Set("User-Agent", codexCLIUserAgent)
+	req.Header.Set("Version", codexCLIVersion)
+	probeSessionID := compactProbeSessionID(account.ID)
+	req.Header.Set("Session_ID", probeSessionID)
+	req.Header.Set("Conversation_ID", probeSessionID)
+
+	if isOAuth {
+		req.Host = "chatgpt.com"
+		setOpenAIChatGPTAccountHeaders(req.Header, account)
+	}
+
+	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
+	account.ApplyHeaderOverrides(req.Header)
+
+	proxyURL := ""
+	if account.ProxyID != nil && account.Proxy != nil {
+		proxyURL = account.Proxy.URL()
+	}
+
+	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	if err != nil {
+		if s.accountRepo != nil {
+			updates := buildOpenAICompactProbeExtraUpdates(nil, nil, err, time.Now())
+			_ = s.accountRepo.UpdateExtra(ctx, account.ID, updates)
+			mergeAccountExtra(account, updates)
+		}
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+
+	if s.accountRepo != nil {
+		updates := buildOpenAICompactProbeExtraUpdates(resp, body, nil, time.Now())
+		if codexUpdates, err := extractOpenAICodexProbeUpdates(resp); err == nil && len(codexUpdates) > 0 {
+			updates = mergeExtraUpdates(updates, codexUpdates)
+		}
+		if len(updates) > 0 {
+			_ = s.accountRepo.UpdateExtra(ctx, account.ID, updates)
+			mergeAccountExtra(account, updates)
+		}
+		// 探测如返回 429,主动同步限流状态,避免后续短时间内继续选中。
+		if resp.StatusCode == http.StatusTooManyRequests {
+			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
+		}
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
+			errMsg := fmt.Sprintf("Authentication failed (401): %s", string(body))
+			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
+		}
+		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
+	}
+
+	s.sendEvent(c, TestEvent{Type: "content", Text: "Compact probe succeeded"})
+	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+	return nil
+}
+
+func (s *AccountTestService) reconcileOpenAI429State(ctx context.Context, account *Account, headers http.Header, body []byte) {
+	if s == nil || s.accountRepo == nil || account == nil {
+		return
+	}
+
+	persistOpenAI429PlanType(ctx, s.accountRepo, account, body)
+
+	var resetAt *time.Time
+	if calculated := calculateOpenAI429ResetTime(headers); calculated != nil {
+		resetAt = calculated
+	} else if unixTs := parseOpenAIRateLimitResetTime(body); unixTs != nil {
+		t := time.Unix(*unixTs, 0)
+		resetAt = &t
+	}
+	if resetAt == nil {
+		return
+	}
+
+	if err := s.accountRepo.SetRateLimited(ctx, account.ID, *resetAt); err != nil {
+		return
+	}
+
+	now := time.Now()
+	account.RateLimitedAt = &now
+	account.RateLimitResetAt = resetAt
+
+	if account.Status == StatusError {
+		if err := s.accountRepo.ClearError(ctx, account.ID); err != nil {
+			return
+		}
+		account.Status = StatusActive
+		account.ErrorMessage = ""
+	}
+}
+
 // testGeminiAccountConnection tests a Gemini account's connection
 func (s *AccountTestService) testGeminiAccountConnection(c *gin.Context, account *Account, modelID string, prompt string) error {
 	ctx := c.Request.Context()
@@ -553,8 +1549,8 @@ func (s *AccountTestService) testGeminiAccountConnection(c *gin.Context, account
 		testModelID = geminicli.DefaultTestModel
 	}
 
-	// For API Key accounts with model mapping, map the model
-	if account.Type == AccountTypeAPIKey {
+	// For static upstream credentials with model mapping, map the model
+	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
 		mapping := account.GetModelMapping()
 		if len(mapping) > 0 {
 			if mappedModel, exists := mapping[testModelID]; exists {
@@ -582,6 +1578,8 @@ func (s *AccountTestService) testGeminiAccountConnection(c *gin.Context, account
 		req, err = s.buildGeminiAPIKeyRequest(ctx, account, testModelID, payload)
 	case AccountTypeOAuth:
 		req, err = s.buildGeminiOAuthRequest(ctx, account, testModelID, payload)
+	case AccountTypeServiceAccount:
+		req, err = s.buildGeminiServiceAccountRequest(ctx, account, testModelID, payload)
 	default:
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported account type: %s", account.Type))
 	}
@@ -733,6 +1731,27 @@ func (s *AccountTestService) buildGeminiOAuthRequest(ctx context.Context, accoun
 
 	// Code Assist mode (with project_id)
 	return s.buildCodeAssistRequest(ctx, accessToken, projectID, modelID, payload)
+}
+
+func (s *AccountTestService) buildGeminiServiceAccountRequest(ctx context.Context, account *Account, modelID string, payload []byte) (*http.Request, error) {
+	if s.geminiTokenProvider == nil {
+		return nil, fmt.Errorf("gemini token provider not configured")
+	}
+	accessToken, err := s.geminiTokenProvider.GetAccessToken(ctx, account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get service account access token: %w", err)
+	}
+	fullURL, err := buildVertexGeminiURL(account.VertexProjectID(), account.VertexLocation(modelID), modelID, "streamGenerateContent", true)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	return req, nil
 }
 
 // buildCodeAssistRequest builds request for Google Code Assist API (used by Gemini CLI and Antigravity)
@@ -930,6 +1949,24 @@ func createOpenAITestPayload(modelID string, isOAuth bool) map[string]any {
 	return payload
 }
 
+func createOpenAIChatCompletionsTestPayload(modelID string, prompt string) map[string]any {
+	testPrompt := strings.TrimSpace(prompt)
+	if testPrompt == "" {
+		testPrompt = "hi"
+	}
+
+	return map[string]any{
+		"model": modelID,
+		"messages": []map[string]any{
+			{
+				"role":    "user",
+				"content": testPrompt,
+			},
+		},
+		"stream": true,
+	}
+}
+
 // processClaudeStream processes the SSE stream from Claude API
 func (s *AccountTestService) processClaudeStream(c *gin.Context, body io.Reader) error {
 	reader := bufio.NewReader(body)
@@ -984,16 +2021,96 @@ func (s *AccountTestService) processClaudeStream(c *gin.Context, body io.Reader)
 	}
 }
 
-// processOpenAIStream processes the SSE stream from OpenAI Responses API
-func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader) error {
+// processOpenAIChatCompletionsStream processes SSE chunks from the
+// OpenAI-compatible Chat Completions API.
+func (s *AccountTestService) processOpenAIChatCompletionsStream(c *gin.Context, body io.Reader) error {
 	reader := bufio.NewReader(body)
+	seenJSON := false
+	seenFinish := false
 
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
-				s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
-				return nil
+				if seenFinish {
+					s.sendEvent(c, TestEvent{Type: "status", Text: "已通过 /v1/chat/completions 验证"})
+					s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+					return nil
+				}
+				if seenJSON {
+					return s.sendErrorAndEnd(c, "Chat Completions stream from /v1/chat/completions ended before [DONE]")
+				}
+				return s.sendErrorAndEnd(c, "Invalid Chat Completions response from /v1/chat/completions: expected SSE JSON data")
+			}
+			return s.sendErrorAndEnd(c, fmt.Sprintf("Chat Completions stream read error from /v1/chat/completions: %s", err.Error()))
+		}
+
+		line = strings.TrimSpace(line)
+		if line == "" || !sseDataPrefix.MatchString(line) {
+			continue
+		}
+
+		jsonStr := sseDataPrefix.ReplaceAllString(line, "")
+		if jsonStr == "[DONE]" {
+			s.sendEvent(c, TestEvent{Type: "status", Text: "已通过 /v1/chat/completions 验证"})
+			s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+			return nil
+		}
+
+		var data map[string]any
+		if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
+			return s.sendErrorAndEnd(c, "Invalid Chat Completions response from /v1/chat/completions: expected JSON data")
+		}
+		seenJSON = true
+
+		if errData, ok := data["error"].(map[string]any); ok {
+			errorMsg := "Chat Completions API (/v1/chat/completions) returned an error"
+			if msg, ok := errData["message"].(string); ok && msg != "" {
+				errorMsg = msg
+			}
+			return s.sendErrorAndEnd(c, fmt.Sprintf("Chat Completions API (/v1/chat/completions) error: %s", errorMsg))
+		}
+
+		choices, ok := data["choices"].([]any)
+		if !ok {
+			continue
+		}
+		for _, choiceValue := range choices {
+			choice, ok := choiceValue.(map[string]any)
+			if !ok {
+				continue
+			}
+			if delta, ok := choice["delta"].(map[string]any); ok {
+				if text, ok := delta["content"].(string); ok && text != "" {
+					s.sendEvent(c, TestEvent{Type: "content", Text: text})
+				}
+			}
+			if message, ok := choice["message"].(map[string]any); ok {
+				if text, ok := message["content"].(string); ok && text != "" {
+					s.sendEvent(c, TestEvent{Type: "content", Text: text})
+				}
+			}
+			if finishReason, ok := choice["finish_reason"].(string); ok && finishReason != "" {
+				seenFinish = true
+			}
+		}
+	}
+}
+
+// processOpenAIStream processes the SSE stream from OpenAI Responses API
+func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader) error {
+	reader := bufio.NewReader(body)
+	seenCompleted := false
+
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				if seenCompleted {
+					s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+					return nil
+				}
+				return s.sendErrorAndEnd(c, "Stream ended before response.completed")
 			}
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Stream read error: %s", err.Error()))
 		}
@@ -1005,8 +2122,11 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 
 		jsonStr := sseDataPrefix.ReplaceAllString(line, "")
 		if jsonStr == "[DONE]" {
-			s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
-			return nil
+			if seenCompleted {
+				s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+				return nil
+			}
+			return s.sendErrorAndEnd(c, "Stream ended before response.completed")
 		}
 
 		var data map[string]any
@@ -1022,9 +2142,19 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 			if delta, ok := data["delta"].(string); ok && delta != "" {
 				s.sendEvent(c, TestEvent{Type: "content", Text: delta})
 			}
-		case "response.completed":
+		case "response.completed", "response.done":
 			s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 			return nil
+		case "response.failed":
+			errorMsg := "OpenAI response failed"
+			if responseData, ok := data["response"].(map[string]any); ok {
+				if errData, ok := responseData["error"].(map[string]any); ok {
+					if msg, ok := errData["message"].(string); ok && msg != "" {
+						errorMsg = msg
+					}
+				}
+			}
+			return s.sendErrorAndEnd(c, errorMsg)
 		case "error":
 			errorMsg := "Unknown error"
 			if errData, ok := data["error"].(map[string]any); ok {
@@ -1037,7 +2167,203 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 	}
 }
 
-// sendEvent sends a SSE event to the client
+// testOpenAIImageAPIKey tests OpenAI image generation using an API Key account.
+func (s *AccountTestService) testOpenAIImageAPIKey(c *gin.Context, ctx context.Context, account *Account, modelID, prompt string) error {
+	authToken := account.GetOpenAIApiKey()
+	if authToken == "" {
+		return s.sendErrorAndEnd(c, "No API key available")
+	}
+
+	baseURL := account.GetOpenAIBaseURL()
+	if baseURL == "" {
+		baseURL = "https://api.openai.com"
+	}
+	normalizedBaseURL, err := s.validateUpstreamBaseURL(baseURL)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid base URL: %s", err.Error()))
+	}
+	apiURL := buildOpenAIImagesURL(normalizedBaseURL, openAIImagesGenerationsEndpoint)
+
+	// Set SSE headers
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.Flush()
+
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: modelID})
+
+	payload := map[string]any{
+		"model":           modelID,
+		"prompt":          prompt,
+		"n":               1,
+		"response_format": "b64_json",
+	}
+	payloadBytes, _ := json.Marshal(payload)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
+	if err != nil {
+		return s.sendErrorAndEnd(c, "Failed to create request")
+	}
+	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+authToken)
+
+	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
+	account.ApplyHeaderOverrides(req.Header)
+
+	proxyURL := ""
+	if account.ProxyID != nil && account.Proxy != nil {
+		proxyURL = account.Proxy.URL()
+	}
+
+	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to read response: %s", err.Error()))
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
+	}
+
+	// Parse {"data": [{"b64_json": "...", "revised_prompt": "..."}]}
+	var result struct {
+		Data []struct {
+			B64JSON       string `json:"b64_json"`
+			RevisedPrompt string `json:"revised_prompt"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to parse response: %s", err.Error()))
+	}
+
+	if len(result.Data) == 0 {
+		return s.sendErrorAndEnd(c, "No images returned from API")
+	}
+
+	for _, item := range result.Data {
+		if item.RevisedPrompt != "" {
+			s.sendEvent(c, TestEvent{Type: "content", Text: item.RevisedPrompt})
+		}
+		if item.B64JSON != "" {
+			s.sendEvent(c, TestEvent{
+				Type:     "image",
+				ImageURL: "data:image/png;base64," + item.B64JSON,
+				MimeType: "image/png",
+			})
+		}
+	}
+
+	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+	return nil
+}
+
+// testOpenAIImageOAuth tests OpenAI image generation using an OAuth account via Codex /responses API.
+func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Context, account *Account, modelID, prompt string) error {
+	authToken := account.GetOpenAIAccessToken()
+	if authToken == "" {
+		return s.sendErrorAndEnd(c, "No access token available")
+	}
+
+	// Set SSE headers
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.Flush()
+
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: modelID})
+	s.sendEvent(c, TestEvent{Type: "content", Text: "Calling Codex /responses image tool...\n"})
+
+	parsed := &OpenAIImagesRequest{
+		Endpoint: openAIImagesGenerationsEndpoint,
+		Model:    strings.TrimSpace(modelID),
+		Prompt:   prompt,
+	}
+	applyOpenAIImagesDefaults(parsed)
+
+	responsesBody, err := buildOpenAIImagesResponsesRequest(parsed, parsed.Model)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to build image request: %s", err.Error()))
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, chatgptCodexAPIURL, bytes.NewReader(responsesBody))
+	if err != nil {
+		return s.sendErrorAndEnd(c, "Failed to create request")
+	}
+	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
+	req.Host = "chatgpt.com"
+	req.Header.Set("Authorization", "Bearer "+authToken)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("OpenAI-Beta", "responses=experimental")
+	req.Header.Set("originator", "codex_cli_rs")
+	if customUA := strings.TrimSpace(account.GetOpenAIUserAgent()); customUA != "" {
+		req.Header.Set("User-Agent", customUA)
+	} else {
+		req.Header.Set("User-Agent", codexCLIUserAgent)
+	}
+	setOpenAIChatGPTAccountHeaders(req.Header, account)
+	// 与真实转发一致：originator 与最终 User-Agent 首段配套（原 opencode 与 Codex UA 错配会 404，issue #3901）。
+	enforceCodexIdentityHeaders(req.Header)
+
+	proxyURL := ""
+	if account.ProxyID != nil && account.Proxy != nil {
+		proxyURL = account.Proxy.URL()
+	}
+	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Responses API request failed: %s", err.Error()))
+	}
+	defer func() {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+	}()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+		message := strings.TrimSpace(extractUpstreamErrorMessage(body))
+		if message == "" {
+			message = fmt.Sprintf("Responses API returned %d", resp.StatusCode)
+		}
+		return s.sendErrorAndEnd(c, message)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to read image response: %s", err.Error()))
+	}
+
+	results, _, _, _, _, err := collectOpenAIImagesFromResponsesBody(body)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to parse image response: %s", err.Error()))
+	}
+	if len(results) == 0 {
+		return s.sendErrorAndEnd(c, "No images returned from responses API")
+	}
+
+	for _, item := range results {
+		if item.RevisedPrompt != "" {
+			s.sendEvent(c, TestEvent{Type: "content", Text: item.RevisedPrompt})
+		}
+		mimeType := openAIImageOutputMIMEType(item.OutputFormat)
+		s.sendEvent(c, TestEvent{
+			Type:     "image",
+			ImageURL: "data:" + mimeType + ";base64," + item.Result,
+			MimeType: mimeType,
+		})
+	}
+
+	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+	return nil
+}
+
 func (s *AccountTestService) sendEvent(c *gin.Context, event TestEvent) {
 	eventJSON, _ := json.Marshal(event)
 	if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", eventJSON); err != nil {
@@ -1063,7 +2389,7 @@ func (s *AccountTestService) RunTestBackground(ctx context.Context, accountID in
 	ginCtx, _ := gin.CreateTestContext(w)
 	ginCtx.Request = (&http.Request{}).WithContext(ctx)
 
-	testErr := s.TestAccountConnection(ginCtx, accountID, modelID, "")
+	testErr := s.TestAccountConnection(ginCtx, accountID, modelID, "", AccountTestModeDefault)
 
 	finishedAt := time.Now()
 	body := w.Body.String()

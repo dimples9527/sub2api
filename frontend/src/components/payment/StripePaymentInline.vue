@@ -14,16 +14,20 @@
           <div class="flex h-16 w-16 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30">
             <Icon name="check" size="lg" class="text-green-500" />
           </div>
-          <p class="text-xl font-bold tracking-tight text-gray-900 dark:text-white">{{ t('payment.result.success') }}</p>
+          <p class="text-lg font-bold text-gray-900 dark:text-white">{{ t('payment.result.success') }}</p>
           <div class="w-full rounded-xl bg-gray-50 p-4 dark:bg-dark-800">
-            <div class="space-y-2.5 text-sm">
+            <div class="space-y-2 text-sm">
               <div class="flex justify-between">
-                <span class="text-[13px] text-gray-500 dark:text-gray-400">{{ t('payment.orders.orderId') }}</span>
+                <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.orderId') }}</span>
                 <span class="font-medium text-gray-900 dark:text-white">#{{ orderId }}</span>
               </div>
+              <div v-if="amount > 0" class="flex justify-between">
+                <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.amount') }}</span>
+                <span class="font-medium text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ amount.toFixed(2) }}</span>
+              </div>
               <div class="flex justify-between">
-                <span class="text-[13px] text-gray-500 dark:text-gray-400">{{ t('payment.orders.amount') }}</span>
-                <span class="font-medium text-gray-900 dark:text-white">￥{{ payAmount.toFixed(2) }}</span>
+                <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.payAmount') }}</span>
+                <span class="font-medium text-gray-900 dark:text-white">{{ paymentAmountSymbol }}{{ payAmount.toFixed(2) }}</span>
               </div>
             </div>
           </div>
@@ -36,7 +40,7 @@
       <div class="card overflow-hidden">
         <div class="bg-gradient-to-br from-[#635bff] to-[#4f46e5] px-6 py-5 text-center">
           <p class="text-sm font-medium text-indigo-200">{{ t('payment.actualPay') }}</p>
-          <p class="mt-1 text-3xl font-bold text-white">￥{{ payAmount.toFixed(2) }}</p>
+          <p class="mt-1 text-3xl font-bold text-white">{{ paymentAmountSymbol }}{{ payAmount.toFixed(2) }}</p>
         </div>
       </div>
       <!-- Stripe Payment Element -->
@@ -60,13 +64,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from 'vue'
+import { computed, ref, onMounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { extractApiErrorMessage } from '@/utils/apiError'
+import { extractI18nErrorMessage } from '@/utils/apiError'
 import { paymentAPI } from '@/api/payment'
 import { useAppStore } from '@/stores'
-import { STRIPE_POPUP_WINDOW_FEATURES } from '@/components/payment/providerConfig'
+import { getPaymentPopupFeatures } from '@/components/payment/providerConfig'
+import { currencySymbol } from '@/components/payment/currency'
 import type { Stripe, StripeElements } from '@stripe/stripe-js'
 import Icon from '@/components/icons/Icon.vue'
 
@@ -75,9 +80,12 @@ const POPUP_METHODS = new Set(['alipay', 'wechat_pay'])
 
 const props = defineProps<{
   orderId: number
+  amount: number
   clientSecret: string
+  orderType?: 'balance' | 'subscription'
   publishableKey: string
   payAmount: number
+  currency?: string
 }>()
 
 const emit = defineEmits<{ success: []; done: []; back: []; redirect: [orderId: number, payUrl: string] }>()
@@ -95,6 +103,8 @@ const cancelling = ref(false)
 const success = ref(false)
 const ready = ref(false)
 const selectedType = ref('')
+const creditedAmountSymbol = currencySymbol('USD')
+const paymentAmountSymbol = computed(() => currencySymbol(props.currency))
 
 let stripeInstance: Stripe | null = null
 let elementsInstance: StripeElements | null = null
@@ -126,7 +136,7 @@ onMounted(async () => {
       selectedType.value = event.value.type
     })
   } catch (err: unknown) {
-    initError.value = extractApiErrorMessage(err, t('payment.stripeLoadFailed'))
+    initError.value = extractI18nErrorMessage(err, t, 'payment.errors', t('payment.stripeLoadFailed'))
   } finally {
     loading.value = false
   }
@@ -145,7 +155,7 @@ async function handlePay() {
         amount: String(props.payAmount),
       },
     }).href
-    const popup = window.open(popupUrl, 'paymentPopup', STRIPE_POPUP_WINDOW_FEATURES)
+    const popup = window.open(popupUrl, 'paymentPopup', getPaymentPopupFeatures())
 
     const onReady = (event: MessageEvent) => {
       if (event.source !== popup || event.data?.type !== 'STRIPE_POPUP_READY') return
@@ -180,7 +190,7 @@ async function handlePay() {
       emit('success')
     }
   } catch (err: unknown) {
-    error.value = extractApiErrorMessage(err, t('payment.result.failed'))
+    error.value = extractI18nErrorMessage(err, t, 'payment.errors', t('payment.result.failed'))
   } finally {
     submitting.value = false
   }
@@ -193,7 +203,7 @@ async function handleCancel() {
     await paymentAPI.cancelOrder(props.orderId)
     emit('back')
   } catch (err: unknown) {
-    appStore.showError(extractApiErrorMessage(err, t('common.error')))
+    appStore.showError(extractI18nErrorMessage(err, t, 'payment.errors', t('common.error')))
   } finally {
     cancelling.value = false
   }

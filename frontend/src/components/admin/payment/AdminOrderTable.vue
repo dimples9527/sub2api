@@ -51,12 +51,15 @@
         <span class="text-sm text-gray-600 dark:text-gray-400">#{{ value }}</span>
       </template>
 
-      <template #cell-amount="{ value, row }">
+      <template #cell-pay_amount="{ value, row }">
         <div class="text-sm">
-          <span class="font-medium text-gray-900 dark:text-white">${{ value.toFixed(2) }}</span>
-          <span v-if="row.pay_amount !== value" class="ml-1 text-xs text-gray-500">
-            ({{ t('payment.orders.payAmount') }}: ${{ row.pay_amount.toFixed(2) }})
+          <span class="font-medium text-gray-900 dark:text-white">{{ paymentAmountSymbol(row) }}{{ value.toFixed(2) }}</span>
+          <span v-if="row.fee_rate > 0" class="ml-1 text-xs text-gray-400" :title="t('payment.orders.fee') + ': ' + row.fee_rate + '%'">
+            ({{ row.fee_rate }}%)
           </span>
+          <div v-if="row.amount !== row.pay_amount" class="text-xs text-gray-500">
+            {{ t('payment.orders.creditedAmount') }}: {{ creditedAmountSymbol }}{{ row.amount.toFixed(2) }}
+          </div>
         </div>
       </template>
 
@@ -140,6 +143,7 @@ import Pagination from '@/components/common/Pagination.vue'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { statusBadgeClass, canRefund, formatOrderDateTime } from '@/components/payment/orderUtils'
+import { currencySymbol } from '@/components/payment/currency'
 
 const { t } = useI18n()
 
@@ -164,6 +168,11 @@ const emit = defineEmits<{
 
 const searchQuery = ref('')
 const filters = reactive({ status: '', payment_type: '', order_type: '' })
+const creditedAmountSymbol = currencySymbol('USD')
+
+function paymentAmountSymbol(order: PaymentOrder): string {
+  return currencySymbol(order.currency)
+}
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 function handleSearch() {
@@ -183,7 +192,7 @@ function emitFiltersChanged() {
 const columns = computed<Column[]>(() => [
   { key: 'id', label: t('payment.orders.orderId') },
   { key: 'user_id', label: t('payment.orders.userId') },
-  { key: 'amount', label: t('payment.orders.amount') },
+  { key: 'pay_amount', label: t('payment.orders.payAmount') },
   { key: 'payment_type', label: t('payment.orders.paymentMethod') },
   { key: 'status', label: t('payment.orders.status') },
   { key: 'order_type', label: t('payment.orders.orderType') },
@@ -201,6 +210,7 @@ const statusFilterOptions = computed(() => [
   { value: 'FAILED', label: t('payment.status.failed') },
   { value: 'REFUNDED', label: t('payment.status.refunded') },
   { value: 'REFUND_REQUESTED', label: t('payment.status.refund_requested') },
+  { value: 'REFUND_PENDING', label: t('payment.status.refund_pending') },
   { value: 'REFUND_FAILED', label: t('payment.status.refund_failed') },
 ])
 
@@ -209,6 +219,7 @@ const paymentTypeFilterOptions = computed(() => [
   { value: 'alipay', label: t('payment.methods.alipay') },
   { value: 'wxpay', label: t('payment.methods.wxpay') },
   { value: 'stripe', label: t('payment.methods.stripe') },
+  { value: 'airwallex', label: t('payment.methods.airwallex') },
 ])
 
 const orderTypeFilterOptions = computed(() => [

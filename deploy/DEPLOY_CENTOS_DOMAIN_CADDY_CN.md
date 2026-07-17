@@ -290,7 +290,205 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 
 你的域名层不需要每次重配。
 
-## 十、建议继续优化的点
+## 十、迁移服务器时的无感切换方式
+
+如果你已经在旧服务器上用 Caddy 跑着域名，现在要切换到新服务器，不要只改 DNS 后等待解析。DNS 有缓存，部分用户会继续访问旧 IP，时间从几分钟到数小时不等，取决于 TTL、运营商缓存和客户端缓存。
+
+更稳的切换拓扑是：
+
+```text
+DNS 还缓存旧 IP 的用户
+  -> 旧服务器 Caddy
+  -> 新服务器:8080
+  -> 新服务器应用和数据库
+
+DNS 已解析到新 IP 的用户
+  -> 新服务器 Caddy
+  -> 127.0.0.1:8080
+  -> 新服务器应用和数据库
+```
+
+也就是说，切换期间旧服务器只保留 Caddy，旧应用停止写入；所有请求最终都打到新服务器。
+
+### 10.1 新服务器先启动应用
+
+先按 `deploy/DEPLOY_CENTOS_NO_DOMAIN_CN.md` 完成新服务器部署和数据迁移，并确保新服务器本机正常：
+
+```bash
+curl http://127.0.0.1:8080/health
+```
+
+迁移期间，如果旧服务器 Caddy 要通过公网访问新服务器的 `8080`，新服务器 `.env` 需要临时允许外部访问：
+
+```env
+BIND_HOST=0.0.0.0
+SERVER_PORT=8080
+```
+
+然后只放行旧服务器访问新服务器的 `8080`，不要对全网开放：
+
+```bash
+sudo firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="OLD_IP/32" port port="8080" protocol="tcp" accept'
+sudo firewall-cmd --reload
+```
+
+云厂商安全组也要同步放行：仅允许 `OLD_IP` 访问新服务器 `8080/tcp`。
+
+### 10.2 新服务器配置正式 Caddy
+
+新服务器的 `/etc/caddy/Caddyfile` 仍然使用正式域名：
+
+```caddyfile
+YOUR_DOMAIN {
+    reverse_proxy localhost:8080
+
+    log {
+        output stdout
+        format json
+        level INFO
+    }
+}
+```
+
+把 `YOUR_DOMAIN` 替换成你的域名，例如 `api.sunshinefastlink.top`。
+
+校验并启动：
+
+```bash
+sudo caddy fmt --overwrite /etc/caddy/Caddyfile
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl enable --now caddy
+sudo systemctl reload caddy
+```
+
+如果 DNS 此时还指向旧服务器，新服务器 Caddy 可能暂时申请不到证书，这是正常现象。等 DNS A 记录切到新 IP，并且新服务器 `80/443` 已放行后，Caddy 才能通过 ACME 验证并签发证书。不要在短时间内反复删除 Caddy 证书存储目录重试，以免触发签发频率限制。
+
+### 10.3 停止旧服务器应用，只保留旧 Caddy
+
+在旧服务器停止应用和数据库容器，避免旧数据库继续被写入：
+
+```bash
+cd /opt/sub2api/runtime
+docker compose -f docker-compose.yml -f docker-compose.build.yml down
+```
+
+如果你还有最终增量数据要同步，必须在旧应用停止后再做最后一次同步。同步完成后，不要再启动旧应用。
+
+### 10.4 把旧服务器 Caddy 临时反代到新服务器
+
+在旧服务器编辑 `/etc/caddy/Caddyfile`，把同一个域名的反代目标改为新服务器 IP：
+
+```caddyfile
+YOUR_DOMAIN {
+    reverse_proxy http://NEW_IP:8080 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Forwarded-Host {host}
+    }
+
+    log {
+        output stdout
+        format json
+        level INFO
+    }
+}
+```
+
+注意不要写成：
+
+```caddyfile
+reverse_proxy https://YOUR_DOMAIN
+```
+
+因为旧服务器自己解析 `YOUR_DOMAIN` 时，可能仍然解析回旧 IP，导致 Caddy 反代到自己，形成循环。
+
+重载旧服务器 Caddy：
+
+```bash
+sudo caddy fmt --overwrite /etc/caddy/Caddyfile
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+```
+
+验证旧服务器能把请求转到新服务器：
+
+```bash
+curl -H 'Host: YOUR_DOMAIN' http://127.0.0.1/health
+```
+
+### 10.5 修改 DNS 到新服务器 IP
+
+确认新服务器和旧服务器 Caddy 都能访问后，再把 DNS A 记录从旧 IP 改到新 IP。
+
+切换前确认新服务器已经放行：
+
+```bash
+sudo firewall-cmd --permanent --add-service=http
+sudo firewall-cmd --permanent --add-service=https
+sudo firewall-cmd --reload
+```
+
+建议：
+
+- 切换前提前把 DNS TTL 调低，例如 `60` 或 `120` 秒
+- 切换当天保留旧服务器 Caddy 至少 24 小时
+- 观察旧服务器 Caddy 日志，如果仍有访问，说明仍有用户或解析器命中旧 IP
+
+查看旧服务器 Caddy 日志：
+
+```bash
+sudo journalctl -u caddy -f
+```
+
+### 10.6 两台服务器配置同一个 Caddy 域名会不会有问题
+
+两台服务器的 Caddy 可以同时配置同一个域名。真正决定请求进哪台服务器的是 DNS 解析结果和客户端缓存：
+
+- 解析到旧 IP 的用户会进旧 Caddy，再被转发到新服务器
+- 解析到新 IP 的用户会进新 Caddy，直接访问新服务器本机应用
+- 两边都配置同一个域名，不会让请求自动分叉，也不会让 Caddy 彼此抢流量
+
+需要注意的是证书签发。Caddy 会按域名自动申请证书，如果你反复重装、清空 Caddy 存储目录并重复申请，可能触发 CA 频率限制。迁移时尽量保留 Caddy 存储，避免短时间重复删证书、重申请。
+
+### 10.7 观察期结束后的收尾
+
+确认 DNS 已基本收敛、旧服务器 Caddy 日志没有正常用户请求后，再做收尾：
+
+1. 新服务器把 `.env` 改回只监听本机：
+
+```env
+BIND_HOST=127.0.0.1
+SERVER_PORT=8080
+```
+
+2. 重启新服务器应用：
+
+```bash
+cd /opt/sub2api/runtime
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d
+```
+
+3. 删除新服务器上临时放行旧服务器访问 `8080` 的防火墙和安全组规则。
+
+4. 旧服务器可以停掉 Caddy，或保留一段时间只做兜底代理。
+
+### 10.8 回滚方式
+
+如果新服务器出现问题，回滚思路是把入口重新指回旧服务器，但前提是旧服务器数据仍然可用且没有被新旧两边同时写乱。
+
+推荐回滚步骤：
+
+1. 停止新服务器应用，防止继续写新数据库。
+2. 如果旧服务器数据库仍是切换前的完整数据，启动旧服务器应用。
+3. 把旧服务器 Caddy 从 `reverse_proxy http://NEW_IP:8080` 改回 `reverse_proxy localhost:8080`。
+4. 把 DNS A 记录改回旧 IP。
+5. 检查旧服务器 `/health`、登录后台和关键业务数据。
+
+如果新服务器已经产生了新的有效数据，不能简单回滚到旧数据库，否则会丢数据。此时应先导出或合并新数据，再决定恢复方案。
+
+## 十一、建议继续优化的点
 
 如果你准备长期跑生产，建议再补这几项：
 

@@ -1,33 +1,31 @@
 <template>
   <div>
-    <label class="mb-2.5 block text-[13px] font-semibold text-gray-700 dark:text-gray-300">
+    <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
       {{ t('payment.paymentMethod') }}
     </label>
-    <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:flex">
+    <div class="grid grid-cols-2 gap-3 sm:flex">
       <button
         v-for="method in sortedMethods"
         :key="method.type"
         type="button"
         :disabled="!method.available"
         :class="[
-          'relative flex min-h-[58px] items-center justify-start rounded-xl border px-3 py-2.5 text-left transition-all sm:flex-1',
+          'relative flex h-[60px] flex-col items-center justify-center rounded-lg border px-3 transition-all sm:flex-1',
           !method.available
             ? 'cursor-not-allowed border-gray-200 bg-gray-50 opacity-50 dark:border-dark-700 dark:bg-dark-800/50'
             : selected === method.type
               ? methodSelectedClass(method.type)
-              : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50 dark:border-dark-700 dark:bg-dark-800 dark:text-gray-200 dark:hover:border-dark-500 dark:hover:bg-dark-700/70',
+              : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200 dark:hover:border-dark-500',
         ]"
         @click="method.available && emit('select', method.type)"
       >
-        <span class="flex min-w-0 items-center gap-2.5">
-          <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gray-50 dark:bg-dark-700/70">
-            <img :src="methodIcon(method.type)" :alt="t(`payment.methods.${method.type}`)" class="h-6 w-6" />
-          </span>
-          <span class="flex flex-col items-start gap-1 leading-none">
-            <span class="text-[14px] font-semibold tracking-tight">{{ t(`payment.methods.${method.type}`) }}</span>
+        <span class="flex items-center gap-2">
+          <img :src="methodIcon(method.type)" :alt="methodLabel(method)" class="h-7 w-7 object-contain" />
+          <span class="flex flex-col items-start leading-none">
+            <span class="text-base font-semibold">{{ methodLabel(method) }}</span>
             <span
               v-if="method.fee_rate > 0"
-              class="text-[11px] font-medium text-gray-500 dark:text-dark-400"
+              class="text-[10px] tracking-wide text-gray-500 dark:text-dark-400"
             >
               {{ t('payment.fee') }} {{ method.fee_rate }}%
             </span>
@@ -41,13 +39,16 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { METHOD_ORDER } from './providerConfig'
+import { METHOD_ORDER, isBuiltInAlipayMethod, isBuiltInWxpayMethod } from './providerConfig'
 import alipayIcon from '@/assets/icons/alipay.svg'
 import wxpayIcon from '@/assets/icons/wxpay.svg'
 import stripeIcon from '@/assets/icons/stripe.svg'
+import airwallexIcon from '@/assets/icons/airwallex.svg'
+import paymentIcon from '@/assets/icons/payment.svg'
 
 export interface PaymentMethodOption {
   type: string
+  display_name?: string
   fee_rate: number
   available: boolean
 }
@@ -67,6 +68,8 @@ const METHOD_ICONS: Record<string, string> = {
   alipay: alipayIcon,
   wxpay: wxpayIcon,
   stripe: stripeIcon,
+  airwallex: airwallexIcon,
+  credit_card: paymentIcon,
 }
 
 const sortedMethods = computed(() => {
@@ -79,15 +82,21 @@ const sortedMethods = computed(() => {
 })
 
 function methodIcon(type: string): string {
-  if (type.includes('alipay')) return METHOD_ICONS.alipay
-  if (type.includes('wxpay')) return METHOD_ICONS.wxpay
-  return METHOD_ICONS[type] || alipayIcon
+  if (isBuiltInAlipayMethod(type)) return METHOD_ICONS.alipay
+  if (isBuiltInWxpayMethod(type)) return METHOD_ICONS.wxpay
+  if (type === 'airwallex') return METHOD_ICONS.airwallex
+  return METHOD_ICONS[type] || paymentIcon
+}
+
+function methodLabel(method: PaymentMethodOption): string {
+  return method.display_name || t(`payment.methods.${method.type}`, method.type)
 }
 
 function methodSelectedClass(type: string): string {
-  if (type.includes('alipay')) return 'border-[#02A9F1] bg-blue-50 text-gray-900 shadow-sm ring-1 ring-[#02A9F1]/15 dark:bg-blue-950/60 dark:text-gray-100'
-  if (type.includes('wxpay')) return 'border-[#09BB07] bg-green-50 text-gray-900 shadow-sm ring-1 ring-[#09BB07]/15 dark:bg-green-950/60 dark:text-gray-100'
-  if (type === 'stripe') return 'border-[#676BE5] bg-indigo-50 text-gray-900 shadow-sm ring-1 ring-[#676BE5]/15 dark:bg-indigo-950/60 dark:text-gray-100'
-  return 'border-primary-500 bg-primary-50 text-gray-900 shadow-sm ring-1 ring-primary-500/15 dark:bg-primary-950/60 dark:text-gray-100'
+  if (isBuiltInAlipayMethod(type)) return 'border-[#02A9F1] bg-blue-50 text-gray-900 shadow-sm dark:bg-blue-950 dark:text-gray-100'
+  if (isBuiltInWxpayMethod(type)) return 'border-[#09BB07] bg-green-50 text-gray-900 shadow-sm dark:bg-green-950 dark:text-gray-100'
+  if (type === 'stripe') return 'border-[#676BE5] bg-indigo-50 text-gray-900 shadow-sm dark:bg-indigo-950 dark:text-gray-100'
+  if (type === 'airwallex') return 'border-[#FF6B3D] bg-orange-50 text-gray-900 shadow-sm dark:border-[#FF8E3C] dark:bg-orange-950 dark:text-gray-100'
+  return 'border-primary-500 bg-primary-50 text-gray-900 shadow-sm dark:bg-primary-950 dark:text-gray-100'
 }
 </script>

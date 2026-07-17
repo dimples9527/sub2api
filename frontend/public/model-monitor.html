@@ -805,19 +805,120 @@
         border-inline: 0;
         border-top: 0;
         border-radius: 0;
+        padding: 10px;
+      }
+      .toolbar-left,
+      .toolbar-right,
+      .filter-group,
+      .window-group,
+      .view-group {
+        width: 100%;
+        min-width: 0;
+      }
+      .toolbar .search,
+      .custom-select,
+      .custom-select.provider-select {
+        flex: 1 1 100%;
+        min-width: 0;
+        max-width: none;
+      }
+      .window-group {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      .window-btn {
+        min-width: 0;
+      }
+      .view-group {
+        display: none;
       }
       .select-menu {
-        width: min(520px, 100vw);
+        left: 0 !important;
+        right: auto;
+        width: calc(100vw - 20px);
+        min-width: 0;
+        max-height: min(68vh, 420px);
+        overflow: auto;
+      }
+      .select-options {
+        grid-template-columns: 1fr;
+      }
+      .panel {
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+        overflow: visible;
+      }
+      .table-shell {
+        display: none;
       }
       .card-grid {
+        display: grid;
         grid-template-columns: minmax(0, 1fr);
-        gap: 0;
+        gap: 10px;
+        padding: 10px;
       }
       .monitor-card {
         width: 100%;
-        padding: 20px 14px;
-        border-inline: 0;
-        border-radius: 0;
+        min-height: auto;
+        padding: 15px 14px 14px;
+        border-radius: 8px;
+      }
+      .card-main {
+        grid-template-columns: 40px minmax(0, 1fr);
+        gap: 12px;
+      }
+      .provider-avatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 9px;
+        font-size: 22px;
+      }
+      .card-status-dot {
+        display: none;
+      }
+      .card-title-row,
+      .model-card-footer,
+      .card-meta {
+        flex-wrap: wrap;
+      }
+      .provider-link,
+      .card-title-link,
+      .provider-name span,
+      .provider-meta,
+      .model {
+        white-space: normal;
+        overflow-wrap: anywhere;
+      }
+      .card-trend {
+        grid-template-columns: repeat(9, minmax(0, 1fr));
+      }
+      .card-trend .trend-bar {
+        height: 28px;
+      }
+      .trend-tooltip {
+        display: none;
+      }
+      table,
+      body.compact-view table {
+        min-width: 760px;
+      }
+      thead th,
+      td {
+        padding-inline: 9px;
+      }
+    }
+
+    @media (max-width: 380px) {
+      .window-group {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .refresh-btn {
+        width: 100%;
+      }
+      .card-meta {
+        gap: 6px;
       }
     }
   </style>
@@ -954,10 +1055,135 @@
   <script nonce="__CSP_NONCE_VALUE__">
     const STATUS_API_URL = '/api/llm-monitor/status';
     const GROUPS_API_URL = '/api/llm-monitor/groups';
-    const DEFAULT_MONITOR_TITLE = '蛋云AI - Claude Code 监控面板';
     const DEFAULT_PROVIDER_URL = 'https://api.sunshinelink.online/';
+
+    function detectLocale() {
+      const saved = localStorage.getItem('sub2api_locale');
+      if (saved === 'zh' || saved === 'en') return saved;
+      return navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en';
+    }
+
+    const locale = detectLocale();
+    const messages = {
+      en: {
+        title: 'Danyun AI - Claude Code Monitor',
+        toolbar: 'Filter toolbar',
+        allCategories: 'All categories',
+        commercial: 'Commercial',
+        allProviders: 'All providers',
+        searchProviders: 'Search providers',
+        search: 'Search',
+        searchPlaceholder: 'Search provider or model',
+        searchSelectPlaceholder: 'Search...',
+        allServices: 'All services',
+        allChannels: 'All channels',
+        selfOperated: 'Self-run',
+        windowGroup: 'Time window',
+        viewGroup: 'View switcher',
+        window90m: 'Last 90 minutes',
+        window24h: 'Last 24 hours',
+        window7d: 'Last 7 days',
+        window30d: 'Last 30 days',
+        windowAll: 'All day',
+        listView: 'List view',
+        gridView: 'Card view',
+        manualRefresh: 'Refresh',
+        refreshInterval: 'Auto refresh interval (seconds)',
+        annotations: 'Marks',
+        provider: 'Provider',
+        service: 'Service',
+        model: 'Model',
+        rate: 'Rate',
+        availability: 'Availability',
+        lastCheck: 'Last check',
+        availabilityTrend: 'Availability trend',
+        currentFilter: 'Current filter:',
+        lastRefresh: 'Last refresh:',
+        available: 'Available',
+        degraded: 'Degraded',
+        unavailable: 'Unavailable',
+        unknown: 'Unknown',
+        providerFallback: 'Provider {n}',
+        noMatchedGroupRecords: 'No monitor records match the API group names',
+        groupHttpError: 'Group API HTTP {status}',
+        loadFailed: 'Load failed: {message}',
+        all: 'All',
+        filterSearch: 'Search: {query}',
+        noAnnotation: 'No mark',
+        latency: 'Latency',
+        now: 'Now',
+        noMatchingData: 'No matching data',
+        loading: 'Loading',
+        loadingData: 'Loading data from API...',
+        apiError: 'API error',
+        multiplier: 'Rate:',
+        cardAvailability: 'Availability:'
+      },
+      zh: {
+        title: '蛋云AI - Claude Code 监控面板',
+        toolbar: '筛选工具栏',
+        allCategories: '全部分类',
+        commercial: '商业',
+        allProviders: '全部服务商',
+        searchProviders: '搜索服务商',
+        search: '搜索',
+        searchPlaceholder: '搜索服务商或模型',
+        searchSelectPlaceholder: '搜索...',
+        allServices: '全部服务',
+        allChannels: '全部通道',
+        selfOperated: '自营',
+        windowGroup: '时间窗口',
+        viewGroup: '视图切换',
+        window90m: '近90分钟',
+        window24h: '近24小时',
+        window7d: '近7天',
+        window30d: '近30天',
+        windowAll: '全天',
+        listView: '列表视图',
+        gridView: '卡片视图',
+        manualRefresh: '手动刷新',
+        refreshInterval: '自动刷新间隔（秒）',
+        annotations: '标注',
+        provider: '服务商',
+        service: '服务',
+        model: '模型',
+        rate: '倍率',
+        availability: '可用率',
+        lastCheck: '最后监测',
+        availabilityTrend: '可用率趋势',
+        currentFilter: '当前筛选：',
+        lastRefresh: '最后刷新：',
+        available: '可用',
+        degraded: '降级',
+        unavailable: '不可用',
+        unknown: '未知',
+        providerFallback: '服务商 {n}',
+        noMatchedGroupRecords: '没有匹配 API 分组名称的监控记录',
+        groupHttpError: '分组接口 HTTP {status}',
+        loadFailed: '加载失败：{message}',
+        all: '全部',
+        filterSearch: '搜索: {query}',
+        noAnnotation: '无标注',
+        latency: '延迟',
+        now: '现在',
+        noMatchingData: '没有匹配的数据',
+        loading: '加载中',
+        loadingData: '正在从接口加载数据...',
+        apiError: '接口错误',
+        multiplier: '倍率：',
+        cardAvailability: '可用率：'
+      }
+    };
+
+    function t(key, params = {}) {
+      const template = messages[locale]?.[key] || messages.en[key] || key;
+      return template.replace(/\{(\w+)\}/g, (_, name) => params[name] ?? '');
+    }
+
+    const DEFAULT_MONITOR_TITLE = t('title');
     const injectedMonitorTitle = window.__APP_CONFIG__?.llm_monitor_title?.trim();
     const injectedProviderUrl = window.__APP_CONFIG__?.llm_monitor_provider_url?.trim();
+    document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en';
     document.title = injectedMonitorTitle || DEFAULT_MONITOR_TITLE;
 
     let rows = [];
@@ -989,6 +1215,72 @@
       filterSummary: document.getElementById('filterSummary'),
       lastRefresh: document.getElementById('lastRefresh')
     };
+
+    function setSelectInitial(filter, labelKey, optionValueLabels = {}) {
+      const select = document.querySelector(`.custom-select[data-filter="${filter}"]`);
+      if (!select) return;
+      const label = select.querySelector('.select-label');
+      if (label) label.textContent = t(labelKey);
+      select.querySelectorAll('.select-option').forEach((option) => {
+        const key = optionValueLabels[option.dataset.value];
+        if (key) option.textContent = t(key);
+      });
+    }
+
+    function applyStaticText() {
+      document.querySelector('.toolbar')?.setAttribute('aria-label', t('toolbar'));
+      setSelectInitial('category', 'allCategories', { all: 'allCategories', commercial: 'commercial' });
+      setSelectInitial('provider', 'allProviders', { all: 'allProviders' });
+      setSelectInitial('service', 'allServices', { all: 'allServices' });
+      setSelectInitial('channel', 'allChannels', { all: 'allChannels', '自营': 'selfOperated' });
+
+      document.querySelector('.provider-select .select-search')?.setAttribute('placeholder', t('searchSelectPlaceholder'));
+      document.querySelector('.provider-select .select-search')?.setAttribute('aria-label', t('searchProviders'));
+      els.search.placeholder = t('searchPlaceholder');
+      els.search.setAttribute('aria-label', t('search'));
+      document.querySelector('.window-group')?.setAttribute('aria-label', t('windowGroup'));
+      document.querySelector('.view-group')?.setAttribute('aria-label', t('viewGroup'));
+      document.querySelector('[data-window="90m"]').textContent = t('window90m');
+      document.querySelector('[data-window="24h"]').textContent = t('window24h');
+      document.querySelector('[data-window="7d"]').textContent = t('window7d');
+      document.querySelector('[data-window="30d"]').textContent = t('window30d');
+      document.querySelector('[data-window="all"]').textContent = t('windowAll');
+      document.querySelector('[data-view="list"]')?.setAttribute('title', t('listView'));
+      document.querySelector('[data-view="grid"]')?.setAttribute('title', t('gridView'));
+      els.refreshBtn.setAttribute('title', t('manualRefresh'));
+      els.refreshSeconds.setAttribute('aria-label', t('refreshInterval'));
+      const sortIcon = '<span class="sort-icon">↕</span>';
+      document.querySelector('.col-mark').textContent = t('annotations');
+      document.querySelector('.col-provider').innerHTML = `${t('provider')} ${sortIcon}`;
+      document.querySelector('.col-service').innerHTML = `${t('service')} ${sortIcon}`;
+      document.querySelector('.col-model').innerHTML = `${t('model')} ${sortIcon}`;
+      document.querySelector('.col-rate').innerHTML = `${t('rate')} ${sortIcon}`;
+      document.querySelector('.col-availability').innerHTML = `${t('availability')} ${sortIcon}`;
+      document.querySelector('.col-latency').innerHTML = `${t('lastCheck')} ${sortIcon}`;
+      document.querySelector('.trend-head').innerHTML = `${t('availabilityTrend')} <span id="windowLabel">${windowLabel(state.window)}</span>`;
+      els.windowLabel = document.getElementById('windowLabel');
+      els.cardGrid.setAttribute('aria-label', t('gridView'));
+      const footerItems = document.querySelectorAll('.footer > div');
+      if (footerItems[0]) footerItems[0].firstChild.textContent = t('currentFilter');
+      if (footerItems[1]) footerItems[1].firstChild.textContent = t('lastRefresh');
+      els.filterSummary.textContent = t('all');
+    }
+
+    const mobileCardsMediaQuery = window.matchMedia('(max-width: 640px)');
+
+    function effectiveViewMode() {
+      return mobileCardsMediaQuery.matches ? 'grid' : state.view;
+    }
+
+    function syncViewMode() {
+      const view = effectiveViewMode();
+      document.body.classList.toggle('grid-view', view === 'grid');
+      document.querySelectorAll('.view-btn').forEach((btn) => {
+        const active = btn.dataset.view === view;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+    }
 
     function pickValue(source, keys, fallback = undefined) {
       for (const key of keys) {
@@ -1064,7 +1356,7 @@
         cache: 'no-store',
         headers: { 'Accept': 'application/json' }
       });
-      if (!response.ok) throw new Error(`分组 HTTP ${response.status}`);
+      if (!response.ok) throw new Error(t('groupHttpError', { status: response.status }));
 
       const payload = await response.json();
       const groups = normalizeGroupPayload(payload);
@@ -1096,10 +1388,10 @@
 
     function statusText(status) {
       switch (Number(status)) {
-        case 1: return '可用';
-        case 2: return '降级';
-        case 0: return '不可用';
-        default: return '未知';
+        case 1: return t('available');
+        case 2: return t('degraded');
+        case 0: return t('unavailable');
+        default: return t('unknown');
       }
     }
 
@@ -1297,7 +1589,7 @@
       const numeric = asNumber(value, 0);
       if (numeric > 0) {
         const milliseconds = numeric < 10000000000 ? numeric * 1000 : numeric;
-        return new Date(milliseconds).toLocaleTimeString('zh-CN', {
+        return new Date(milliseconds).toLocaleTimeString(locale === 'zh' ? 'zh-CN' : 'en-US', {
           hour: '2-digit',
           minute: '2-digit'
         });
@@ -1335,7 +1627,7 @@
       const current = layer.current_status || {};
       const timeline = Array.isArray(layer.timeline) ? layer.timeline : [];
       const latestPoint = timeline.length ? timeline[timeline.length - 1] : {};
-      const provider = String(pickValue(item, ['provider', 'provider_name', 'providerName', 'name', 'title', 'service_provider'], `服务商 ${index + 1}`));
+      const provider = String(pickValue(item, ['provider', 'provider_name', 'providerName', 'name', 'title', 'service_provider'], t('providerFallback', { n: index + 1 })));
       const service = serviceCode(pickValue(item, ['service', 'service_type', 'serviceType', 'type'], 'CC'));
       const category = String(pickValue(item, ['category'], ''));
       const model = String(pickValue(layer, ['model', 'request_model'], pickValue(item, ['model', 'model_name', 'modelName'], '')));
@@ -1346,7 +1638,7 @@
         : asNumber(pickValue(item, ['availability', 'available_rate', 'availableRate', 'success_rate', 'successRate', 'rate_percent', 'uptime'], statusAvailability(pickValue(current, ['status'], item.current_status))), 0);
       const latency = asNumber(pickValue(current, ['latency'], pickValue(latestPoint, ['latency'], pickValue(item, ['latency', 'latency_ms', 'latencyMs', 'response_time', 'responseTime', 'last_latency'], 0))));
       const time = formatCheckedTime(pickValue(current, ['timestamp'], pickValue(latestPoint, ['time', 'timestamp'], pickValue(item, ['time', 'checked_at', 'checkedAt', 'last_check', 'lastCheck', 'last_monitor', 'lastMonitor'], ''))));
-      const note = String(pickValue(item, ['sponsor', 'channel', 'note', 'tag', 'owner', 'source'], '自营'));
+      const note = String(pickValue(item, ['sponsor', 'channel', 'note', 'tag', 'owner', 'source'], t('selfOperated')));
       let trendSource = timeline.length
         ? [...timeline].sort((a, b) => pointTimestamp(a) - pointTimestamp(b)).slice(-18)
         : normalizeTrend(item, availability, index);
@@ -1426,7 +1718,7 @@
         const matched = applyGroupFilter(normalizeApiPayload(payload));
         rows = matched.map(({ item, group }, index) => normalizeStatusItem(item, index, group));
         if (!rows.length) {
-          throw new Error('没有匹配 API 分组名称的监控记录');
+          throw new Error(t('noMatchedGroupRecords'));
         }
 
         state.loading = false;
@@ -1449,7 +1741,7 @@
       } catch (error) {
         rows = [];
         state.loading = false;
-        state.error = `加载失败：${error.message}`;
+        state.error = t('loadFailed', { message: error.message });
         populateFilterOptions();
         syncAllSelects();
         renderTable();
@@ -1514,11 +1806,11 @@
 
     function windowLabel(windowKey) {
       switch (windowKey) {
-        case '24h': return '近24小时';
-        case '7d': return '近7天';
-        case '30d': return '近30天';
-        case 'all': return '全天';
-        default: return '近90分钟';
+        case '24h': return t('window24h');
+        case '7d': return t('window7d');
+        case '30d': return t('window30d');
+        case 'all': return t('windowAll');
+        default: return t('window90m');
       }
     }
 
@@ -1528,8 +1820,8 @@
       if (state.service !== 'all') parts.push(formatServiceOption(state.service));
       if (state.provider !== 'all') parts.push(state.provider);
       if (state.channel !== 'all') parts.push(state.channel);
-      if (state.query) parts.push(`搜索: ${state.query}`);
-      return parts.length ? parts.join(' · ') : '全部';
+      if (state.query) parts.push(t('filterSearch', { query: state.query }));
+      return parts.length ? parts.join(' · ') : t('all');
     }
 
     function searchText(row) {
@@ -1599,7 +1891,7 @@
     }
 
     function renderAnnotations(row) {
-      const annotations = row.annotations.length ? row.annotations.slice(0, 4) : [{ label: '无标注', icon: 'empty' }];
+      const annotations = row.annotations.length ? row.annotations.slice(0, 4) : [{ label: t('noAnnotation'), icon: 'empty' }];
       return annotations.map((annotation) => (
         `<span class="${annotationClass(annotation)}" title="${escapeHtml(annotation.tooltip || annotation.label || '')}">${escapeHtml(annotationGlyph(annotation))}</span>`
       )).join('');
@@ -1620,7 +1912,7 @@
             <span class="trend-tooltip-status ${escapeHtml(point.tone)}">
               <span></span>${escapeHtml(point.statusText)}
             </span>
-            <span class="trend-tooltip-line">延迟: <strong>${escapeHtml(String(point.latency))}ms</strong></span>
+            <span class="trend-tooltip-line">${t('latency')}: <strong>${escapeHtml(String(point.latency))}ms</strong></span>
           </span>
         </span>
       `).join('');
@@ -1680,34 +1972,34 @@
               </div>
               <div class="card-meta">
                 ${serviceBadge(row.service, 'card-service')}
-                <span>倍率：<span class="card-rate">${escapeHtml(formatRate(row.rateMultiplier))}</span></span>
-                <span>⌁ 可用率：<span class="card-availability">${row.availability.toFixed(row.availability % 1 ? 2 : 0)}%</span></span>
+                <span>${t('multiplier')}<span class="card-rate">${escapeHtml(formatRate(row.rateMultiplier))}</span></span>
+                <span>⌁ ${t('cardAvailability')}<span class="card-availability">${row.availability.toFixed(row.availability % 1 ? 2 : 0)}%</span></span>
               </div>
             </div>
             <span class="card-status-dot" aria-hidden="true"></span>
           </div>
           <div class="card-trend-head">
             <span>◷ ${escapeHtml(windowLabel(state.window))}</span>
-            <span>现在</span>
+            <span>${t('now')}</span>
           </div>
-          <div class="card-trend" aria-label="可用率趋势">${renderTrendBars(row, index)}</div>
+          <div class="card-trend" aria-label="${t('availabilityTrend')}">${renderTrendBars(row, index)}</div>
         </article>
-      `).join('') || '<div class="empty-card">没有匹配的数据</div>';
+      `).join('') || `<div class="empty-card">${t('noMatchingData')}</div>`;
     }
 
     function renderTable() {
       if (state.loading) {
         els.windowLabel.textContent = windowLabel(state.window);
-        els.filterSummary.textContent = '加载中';
+        els.filterSummary.textContent = t('loading');
         els.lastRefresh.textContent = '--:--:--';
-        renderStatusMessage('正在从接口加载数据...');
+        renderStatusMessage(t('loadingData'));
         updateSortIndicators();
         return;
       }
 
       if (state.error) {
         els.windowLabel.textContent = windowLabel(state.window);
-        els.filterSummary.textContent = '接口错误';
+        els.filterSummary.textContent = t('apiError');
         els.lastRefresh.textContent = '--:--:--';
         renderStatusMessage(state.error, 'error');
         updateSortIndicators();
@@ -1719,7 +2011,7 @@
       els.filterSummary.textContent = filterSummaryText();
       document.getElementById('windowLabel').textContent = windowLabel(state.window);
       document.getElementById('filterSummary').textContent = filterSummaryText();
-      els.lastRefresh.textContent = new Date().toLocaleTimeString('zh-CN', {
+      els.lastRefresh.textContent = new Date().toLocaleTimeString(locale === 'zh' ? 'zh-CN' : 'en-US', {
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit'
@@ -1766,14 +2058,14 @@
               </div>
             </td>
             <td class="col-trend">
-              <div class="trend-row" aria-label="可用率趋势">
+              <div class="trend-row" aria-label="${t('availabilityTrend')}">
                 ${renderTrendBars(row, index)}
               </div>
             </td>
           </tr>
         `;
       }).join('') || `
-        <tr><td colspan="8" style="padding:30px 12px;color:#7f8da6;text-align:center;">没有匹配的数据</td></tr>
+        <tr><td colspan="8" style="padding:30px 12px;color:#7f8da6;text-align:center;">${t('noMatchingData')}</td></tr>
       `;
       renderCards(filtered);
 
@@ -1819,10 +2111,10 @@
     }
 
     function populateFilterOptions() {
-      replaceOptions('category', '全部分类', uniqueValues(rows.map((row) => row.category)), state.category, (value) => value === 'commercial' ? '商业' : value);
-      replaceOptions('provider', '全部服务商', uniqueValues(rows.map((row) => row.provider)), state.provider);
-      replaceOptions('service', '全部服务', uniqueValues(rows.map((row) => row.service)), state.service, formatServiceOption);
-      replaceOptions('channel', '全部通道', uniqueValues(rows.map((row) => row.channel || row.note)), state.channel);
+      replaceOptions('category', t('allCategories'), uniqueValues(rows.map((row) => row.category)), state.category, (value) => value === 'commercial' ? t('commercial') : value);
+      replaceOptions('provider', t('allProviders'), uniqueValues(rows.map((row) => row.provider)), state.provider);
+      replaceOptions('service', t('allServices'), uniqueValues(rows.map((row) => row.service)), state.service, formatServiceOption);
+      replaceOptions('channel', t('allChannels'), uniqueValues(rows.map((row) => row.channel || row.note)), state.channel);
     }
 
     function syncAllSelects() {
@@ -1922,10 +2214,8 @@
 
       document.querySelectorAll('.view-btn').forEach((btn) => {
         btn.addEventListener('click', () => {
-          document.querySelectorAll('.view-btn').forEach((el) => el.classList.remove('active'));
-          btn.classList.add('active');
           state.view = btn.dataset.view || 'list';
-          document.body.classList.toggle('grid-view', state.view === 'grid');
+          syncViewMode();
           renderTable();
         });
       });
@@ -1947,6 +2237,11 @@
 
       document.addEventListener('click', () => closeAllSelects());
       window.addEventListener('blur', () => closeAllSelects());
+      if (typeof mobileCardsMediaQuery.addEventListener === 'function') {
+        mobileCardsMediaQuery.addEventListener('change', syncViewMode);
+      } else if (typeof mobileCardsMediaQuery.addListener === 'function') {
+        mobileCardsMediaQuery.addListener(syncViewMode);
+      }
     }
 
     function updateAutoRefresh() {
@@ -1962,9 +2257,11 @@
     }
 
     function init() {
+      applyStaticText();
       bindCustomSelects();
       bindEvents();
       syncAllSelects();
+      syncViewMode();
       loadStatusData();
       updateAutoRefresh();
     }

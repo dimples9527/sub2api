@@ -26,10 +26,10 @@ func (r *announcementReadRepository) MarkRead(ctx context.Context, announcementI
 		OnConflictColumns(announcementread.FieldAnnouncementID, announcementread.FieldUserID).
 		DoNothing().
 		Exec(ctx)
-	if err != nil && !isSQLNoRowsError(err) {
-		return err
+	if isSQLNoRowsError(err) {
+		return nil
 	}
-	return nil
+	return err
 }
 
 func (r *announcementReadRepository) GetReadMapByUser(ctx context.Context, userID int64, announcementIDs []int64) (map[int64]time.Time, error) {

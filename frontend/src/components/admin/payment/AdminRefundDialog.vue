@@ -34,12 +34,16 @@
           <span class="font-mono text-gray-900 dark:text-white">#{{ order?.id }}</span>
         </div>
         <div class="mt-1 flex justify-between text-sm">
-          <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.amount') }}</span>
-          <span class="font-medium text-gray-900 dark:text-white">${{ order?.pay_amount?.toFixed(2) }}</span>
+          <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.creditedAmount') }}</span>
+          <span class="font-medium text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ order?.amount?.toFixed(2) }}</span>
+        </div>
+        <div class="mt-1 flex justify-between text-sm">
+          <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.payAmount') }}</span>
+          <span class="font-medium text-gray-900 dark:text-white">{{ paymentAmountSymbol }}{{ order?.pay_amount?.toFixed(2) }}</span>
         </div>
         <div v-if="actuallyRefunded > 0" class="mt-1 flex justify-between text-sm">
           <span class="text-gray-500 dark:text-gray-400">{{ t('payment.admin.alreadyRefunded') }}</span>
-          <span class="font-medium text-red-600 dark:text-red-400">${{ actuallyRefunded.toFixed(2) }}</span>
+          <span class="font-medium text-red-600 dark:text-red-400">{{ creditedAmountSymbol }}{{ actuallyRefunded.toFixed(2) }}</span>
         </div>
       </div>
 
@@ -62,11 +66,11 @@
         <div v-if="form.deduct_balance && userBalance != null" class="mt-3 grid grid-cols-2 gap-3">
           <div class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-700">
             <div class="text-gray-500 dark:text-gray-400">{{ t('payment.admin.userBalance') }}</div>
-            <div class="mt-1 font-semibold text-gray-900 dark:text-white">${{ userBalance.toFixed(2) }}</div>
+            <div class="mt-1 font-semibold text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ userBalance.toFixed(2) }}</div>
           </div>
           <div class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-700">
             <div class="text-gray-500 dark:text-gray-400">{{ t('payment.admin.orderAmount') }}</div>
-            <div class="mt-1 font-semibold text-gray-900 dark:text-white">${{ order?.pay_amount?.toFixed(2) }}</div>
+            <div class="mt-1 font-semibold text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ order?.amount?.toFixed(2) }}</div>
           </div>
         </div>
 
@@ -91,7 +95,7 @@
       <div>
         <label class="input-label">{{ t('payment.admin.refundAmount') }}</label>
         <div class="relative">
-          <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+          <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">{{ creditedAmountSymbol }}</span>
           <input
             v-model.number="form.amount"
             type="number"
@@ -103,7 +107,7 @@
           />
         </div>
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          {{ t('payment.admin.maxRefundable') }}: ${{ maxRefundable.toFixed(2) }}
+          {{ t('payment.admin.maxRefundable') }}: {{ creditedAmountSymbol }}{{ maxRefundable.toFixed(2) }}
         </p>
       </div>
 
@@ -165,6 +169,7 @@ import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import type { PaymentOrder } from '@/types/payment'
 import { formatOrderDateTime } from '@/components/payment/orderUtils'
+import { currencySymbol } from '@/components/payment/currency'
 
 const { t } = useI18n()
 
@@ -182,6 +187,10 @@ const emit = defineEmits<{
   (e: 'cancel'): void
 }>()
 
+const creditedAmountSymbol = currencySymbol('USD')
+
+const paymentAmountSymbol = computed(() => currencySymbol(props.order?.currency))
+
 const form = reactive({
   amount: 0,
   reason: '',
@@ -189,7 +198,7 @@ const form = reactive({
   force: false,
 })
 
-// In REFUND_REQUESTED status, refund_amount is the REQUESTED amount, not actually refunded.
+// In REFUND_REQUESTED / REFUND_PENDING status, refund_amount is requested/pending, not actually refunded.
 // Only PARTIALLY_REFUNDED / REFUNDED have real refund amounts.
 const actuallyRefunded = computed(() => {
   if (!props.order) return 0
@@ -200,12 +209,12 @@ const actuallyRefunded = computed(() => {
 
 const maxRefundable = computed(() => {
   if (!props.order) return 0
-  return props.order.pay_amount - actuallyRefunded.value
+  return props.order.amount - actuallyRefunded.value
 })
 
 const balanceInsufficient = computed(() => {
   if (props.userBalance == null || !props.order) return false
-  return props.userBalance < props.order.pay_amount
+  return props.userBalance < props.order.amount
 })
 
 watch(() => props.show, (val) => {

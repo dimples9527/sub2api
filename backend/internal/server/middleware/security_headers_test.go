@@ -194,6 +194,44 @@ func TestSecurityHeaders(t *testing.T) {
 		assert.Contains(t, csp, "default-src 'self'")
 	})
 
+	t.Run("help_route_allows_same_origin_iframe_source", func(t *testing.T) {
+		cfg := config.CSPConfig{
+			Enabled: true,
+			Policy:  config.DefaultCSPPolicy,
+		}
+		middleware := SecurityHeaders(cfg, nil)
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodGet, "/help", nil)
+
+		middleware(c)
+
+		csp := w.Header().Get("Content-Security-Policy")
+		assert.Equal(t, "DENY", w.Header().Get("X-Frame-Options"))
+		assert.Equal(t, 1, countDirectiveValue(csp, "frame-src", "'self'"))
+		assert.Equal(t, 1, countDirectiveValue(csp, "frame-ancestors", "'none'"))
+	})
+
+	t.Run("help_html_allows_same_origin_frame_ancestors", func(t *testing.T) {
+		cfg := config.CSPConfig{
+			Enabled: true,
+			Policy:  config.DefaultCSPPolicy,
+		}
+		middleware := SecurityHeaders(cfg, nil)
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodGet, "/help.html", nil)
+
+		middleware(c)
+
+		csp := w.Header().Get("Content-Security-Policy")
+		assert.Equal(t, "SAMEORIGIN", w.Header().Get("X-Frame-Options"))
+		assert.Equal(t, 1, countDirectiveValue(csp, "frame-ancestors", "'self'"))
+		assert.Equal(t, 0, countDirectiveValue(csp, "frame-ancestors", "'none'"))
+	})
+
 	t.Run("uses_default_policy_when_whitespace_only", func(t *testing.T) {
 		cfg := config.CSPConfig{
 			Enabled: true,
@@ -330,6 +368,52 @@ func TestEnhanceCSPPolicy(t *testing.T) {
 		assert.NotContains(t, enhanced, NonceTemplate)
 		assert.Contains(t, enhanced, "'nonce-existing'")
 	})
+
+	t.Run("adds_airwallex_domains_for_payment_sdk", func(t *testing.T) {
+		policy := "default-src 'self'; script-src 'self' __CSP_NONCE__; style-src 'self'; frame-src 'self'"
+		enhanced := enhanceCSPPolicy(policy)
+
+		assert.Contains(t, enhanced, "script-src 'self' __CSP_NONCE__")
+		assert.Contains(t, enhanced, AirwallexStaticDomain)
+		assert.Contains(t, enhanced, AirwallexCheckoutDomain)
+		assert.Contains(t, enhanced, AirwallexDemoStaticDomain)
+		assert.Contains(t, enhanced, AirwallexDemoCheckoutDomain)
+		assert.Contains(t, enhanced, "style-src 'self'")
+		assert.Contains(t, enhanced, "frame-src 'self'")
+	})
+
+	t.Run("does_not_duplicate_airwallex_domains", func(t *testing.T) {
+		policy := "default-src 'self'; script-src 'self' https://static.airwallex.com https://static-demo.airwallex.com; frame-src https://checkout.airwallex.com https://checkout-demo.airwallex.com"
+		enhanced := enhanceCSPPolicy(policy)
+
+		assert.Equal(t, 1, countDirectiveValue(enhanced, "script-src", AirwallexStaticDomain))
+		assert.Equal(t, 1, countDirectiveValue(enhanced, "script-src", AirwallexCheckoutDomain))
+		assert.Equal(t, 1, countDirectiveValue(enhanced, "style-src", AirwallexStaticDomain))
+		assert.Equal(t, 1, countDirectiveValue(enhanced, "style-src", AirwallexCheckoutDomain))
+		assert.Equal(t, 1, countDirectiveValue(enhanced, "frame-src", AirwallexCheckoutDomain))
+		assert.Equal(t, 1, countDirectiveValue(enhanced, "script-src", AirwallexDemoStaticDomain))
+		assert.Equal(t, 1, countDirectiveValue(enhanced, "script-src", AirwallexDemoCheckoutDomain))
+		assert.Equal(t, 1, countDirectiveValue(enhanced, "style-src", AirwallexDemoStaticDomain))
+		assert.Equal(t, 1, countDirectiveValue(enhanced, "style-src", AirwallexDemoCheckoutDomain))
+		assert.Equal(t, 1, countDirectiveValue(enhanced, "frame-src", AirwallexDemoCheckoutDomain))
+	})
+}
+
+func countDirectiveValue(policy, directive, value string) int {
+	for _, rawDirective := range strings.Split(policy, ";") {
+		fields := strings.Fields(strings.TrimSpace(rawDirective))
+		if len(fields) == 0 || fields[0] != directive {
+			continue
+		}
+		count := 0
+		for _, field := range fields[1:] {
+			if field == value {
+				count++
+			}
+		}
+		return count
+	}
+	return 0
 }
 
 func TestAddToDirective(t *testing.T) {

@@ -13,7 +13,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
-	"github.com/Wei-Shaw/sub2api/internal/handler/admin"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/server"
@@ -37,18 +36,12 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 		// Business layer ProviderSets
 		repository.ProviderSet,
 		service.ProviderSet,
+		payment.ProviderSet,
 		middleware.ProviderSet,
 		handler.ProviderSet,
 
 		// Server layer ProviderSet
 		server.ProviderSet,
-
-		// Payment providers
-		payment.ProvideRegistry,
-		payment.ProvideEncryptionKey,
-		payment.ProvideDefaultLoadBalancer,
-		service.ProvidePaymentConfigService,
-		service.ProvidePaymentOrderExpiryService,
 
 		// Privacy client factory for OpenAI training opt-out
 		providePrivacyClientFactory,
@@ -88,9 +81,12 @@ func provideCleanup(
 	schedulerSnapshot *service.SchedulerSnapshotService,
 	tokenRefresh *service.TokenRefreshService,
 	accountExpiry *service.AccountExpiryService,
+	proxyExpiry *service.ProxyExpiryService,
 	subscriptionExpiry *service.SubscriptionExpiryService,
 	usageCleanup *service.UsageCleanupService,
 	idempotencyCleanup *service.IdempotencyCleanupService,
+	batchImageCleanup *service.BatchImageCleanupService,
+	batchImageWorker *service.BatchImageWorkerRuntime,
 	pricing *service.PricingService,
 	emailQueue *service.EmailQueueService,
 	billingCache *service.BillingCacheService,
@@ -100,11 +96,19 @@ func provideCleanup(
 	openaiOAuth *service.OpenAIOAuthService,
 	geminiOAuth *service.GeminiOAuthService,
 	antigravityOAuth *service.AntigravityOAuthService,
+	grokOAuth *service.GrokOAuthService,
 	openAIGateway *service.OpenAIGatewayService,
 	scheduledTestRunner *service.ScheduledTestRunnerService,
 	backupSvc *service.BackupService,
 	paymentOrderExpiry *service.PaymentOrderExpiryService,
-	modelSquareHandler *admin.ModelSquareHandler,
+	channelMonitorRunner *service.ChannelMonitorRunner,
+	quotaFlusher *service.UserPlatformQuotaUsageFlusher,
+	upstreamGroupRateFixScheduler *service.UpstreamGroupRateFixScheduler,
+	upstreamAccountSyncPreviewScheduler *service.UpstreamAccountSyncPreviewScheduler,
+	upstreamAccountRateGuardScheduler *service.UpstreamAccountRateGuardScheduler,
+	upstreamBalanceSamplerScheduler *service.UpstreamBalanceSamplerScheduler,
+	upstreamAccountHealthGuardScheduler *service.UpstreamAccountHealthGuardScheduler,
+	supplierAutomationScheduler *service.SupplierAutomationScheduler,
 ) func() {
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -171,12 +175,28 @@ func provideCleanup(
 				}
 				return nil
 			}},
+			{"BatchImageCleanupService", func() error {
+				if batchImageCleanup != nil {
+					batchImageCleanup.Stop()
+				}
+				return nil
+			}},
+			{"BatchImageWorkerRuntime", func() error {
+				if batchImageWorker != nil {
+					batchImageWorker.Stop()
+				}
+				return nil
+			}},
 			{"TokenRefreshService", func() error {
 				tokenRefresh.Stop()
 				return nil
 			}},
 			{"AccountExpiryService", func() error {
 				accountExpiry.Stop()
+				return nil
+			}},
+			{"ProxyExpiryService", func() error {
+				proxyExpiry.Stop()
 				return nil
 			}},
 			{"SubscriptionExpiryService", func() error {
@@ -223,6 +243,12 @@ func provideCleanup(
 				antigravityOAuth.Stop()
 				return nil
 			}},
+			{"GrokOAuthService", func() error {
+				if grokOAuth != nil {
+					grokOAuth.Stop()
+				}
+				return nil
+			}},
 			{"OpenAIWSPool", func() error {
 				if openAIGateway != nil {
 					openAIGateway.CloseOpenAIWSPool()
@@ -247,9 +273,51 @@ func provideCleanup(
 				}
 				return nil
 			}},
-			{"ModelSquareHandler", func() error {
-				if modelSquareHandler != nil {
-					modelSquareHandler.StopBackgroundSync()
+			{"ChannelMonitorRunner", func() error {
+				if channelMonitorRunner != nil {
+					channelMonitorRunner.Stop()
+				}
+				return nil
+			}},
+			{"UserPlatformQuotaUsageFlusher", func() error {
+				if quotaFlusher != nil {
+					quotaFlusher.Stop()
+				}
+				return nil
+			}},
+			{"UpstreamGroupRateFixScheduler", func() error {
+				if upstreamGroupRateFixScheduler != nil {
+					upstreamGroupRateFixScheduler.Stop()
+				}
+				return nil
+			}},
+			{"UpstreamAccountSyncPreviewScheduler", func() error {
+				if upstreamAccountSyncPreviewScheduler != nil {
+					upstreamAccountSyncPreviewScheduler.Stop()
+				}
+				return nil
+			}},
+			{"UpstreamAccountRateGuardScheduler", func() error {
+				if upstreamAccountRateGuardScheduler != nil {
+					upstreamAccountRateGuardScheduler.Stop()
+				}
+				return nil
+			}},
+			{"UpstreamBalanceSamplerScheduler", func() error {
+				if upstreamBalanceSamplerScheduler != nil {
+					upstreamBalanceSamplerScheduler.Stop()
+				}
+				return nil
+			}},
+			{"UpstreamAccountHealthGuardScheduler", func() error {
+				if upstreamAccountHealthGuardScheduler != nil {
+					upstreamAccountHealthGuardScheduler.Stop()
+				}
+				return nil
+			}},
+			{"SupplierAutomationScheduler", func() error {
+				if supplierAutomationScheduler != nil {
+					supplierAutomationScheduler.Stop()
 				}
 				return nil
 			}},

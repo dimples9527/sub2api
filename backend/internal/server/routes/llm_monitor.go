@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -22,7 +23,7 @@ var llmMonitorScrubbedValues = map[string]struct{}{
 }
 
 type llmMonitorSettingsProvider interface {
-	GetPublicSettings(ctx context.Context) (*service.PublicSettings, error)
+	GetLLMMonitorSettings(ctx context.Context) (*service.LLMMonitorSettings, error)
 }
 
 type llmMonitorGroupProvider interface {
@@ -31,56 +32,95 @@ type llmMonitorGroupProvider interface {
 
 func RegisterLLMMonitorRoutes(r gin.IRouter, settingsProvider llmMonitorSettingsProvider, groupProvider llmMonitorGroupProvider) {
 	r.GET("/api/llm-monitor/status", func(c *gin.Context) {
-		settings, err := settingsProvider.GetPublicSettings(c.Request.Context())
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load monitor settings"})
-			return
-		}
+		proxyLLMMonitorStatus(c, settingsProvider, func(ctx context.Context, body []byte) ([]byte, error) {
+			return filterLLMMonitorStatusPayload(ctx, body, groupProvider)
+		}, false)
+	})
+}
 
-		targetURL, err := llmMonitorTargetURL(settings.LLMMonitorStatusAPIURL, c.Query("period"), c.Query("board"))
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid monitor upstream url"})
-			return
-		}
+func RegisterAdminLLMMonitorRoutes(r gin.IRouter, settingsProvider llmMonitorSettingsProvider) {
+	r.GET("/upstream-management/monitor-status", func(c *gin.Context) {
+		proxyLLMMonitorStatus(c, settingsProvider, nil, true)
+	})
+}
 
-		ctx, cancel := context.WithTimeout(c.Request.Context(), llmMonitorProxyTimeout)
-		defer cancel()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create upstream request"})
-			return
-		}
-		req.Header.Set("Accept", "application/json")
-		req.Header.Set("User-Agent", "sub2api-llm-monitor/1.0")
+func proxyLLMMonitorStatus(
+	c *gin.Context,
+	settingsProvider llmMonitorSettingsProvider,
+	transform func(context.Context, []byte) ([]byte, error),
+	standardResponse bool,
+) {
+	settings, err := settingsProvider.GetLLMMonitorSettings(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load monitor settings"})
+		return
+	}
 
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": "monitor upstream request failed"})
-			return
-		}
-		defer resp.Body.Close()
+	targetURL, err := llmMonitorTargetURL(settings.StatusAPIURL, c.Query("period"), c.Query("board"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid monitor upstream url"})
+		return
+	}
 
-		contentType := resp.Header.Get("Content-Type")
-		if strings.TrimSpace(contentType) == "" {
-			contentType = "application/json"
-		}
-		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-			c.DataFromReader(resp.StatusCode, resp.ContentLength, contentType, resp.Body, map[string]string{})
-			return
-		}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), llmMonitorProxyTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create upstream request"})
+		return
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept-Encoding", "gzip")
+	req.Header.Set("User-Agent", "sub2api-llm-monitor/1.0")
 
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": "failed to read monitor upstream response"})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "monitor upstream request failed"})
+		return
+	}
+	defer resp.Body.Close()
+	responseBody := io.Reader(resp.Body)
+	if strings.EqualFold(strings.TrimSpace(resp.Header.Get("Content-Encoding")), "gzip") {
+		gzipReader, gzipErr := gzip.NewReader(resp.Body)
+		if gzipErr != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "failed to decompress monitor upstream response"})
 			return
 		}
-		filtered, err := filterLLMMonitorStatusPayload(c.Request.Context(), body, groupProvider)
+		defer gzipReader.Close()
+		responseBody = gzipReader
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	if strings.TrimSpace(contentType) == "" {
+		contentType = "application/json"
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		c.DataFromReader(resp.StatusCode, -1, contentType, responseBody, map[string]string{})
+		return
+	}
+
+	body, err := io.ReadAll(responseBody)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to read monitor upstream response"})
+		return
+	}
+	if transform != nil {
+		body, err = transform(c.Request.Context(), body)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to filter monitor response"})
 			return
 		}
-		c.Data(resp.StatusCode, contentType, filtered)
-	})
+	}
+	if standardResponse {
+		var payload json.RawMessage = body
+		c.JSON(resp.StatusCode, gin.H{
+			"code":    0,
+			"message": "success",
+			"data":    payload,
+		})
+		return
+	}
+	c.Data(resp.StatusCode, contentType, body)
 }
 
 func filterLLMMonitorStatusPayload(ctx context.Context, body []byte, groupProvider llmMonitorGroupProvider) ([]byte, error) {

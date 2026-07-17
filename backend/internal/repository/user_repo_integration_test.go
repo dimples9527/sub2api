@@ -4,10 +4,13 @@ package repository
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/ent/authidentity"
+	"github.com/Wei-Shaw/sub2api/ent/authidentitychannel"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/suite"
@@ -26,6 +29,8 @@ func (s *UserRepoSuite) SetupTest() {
 	s.repo = newUserRepositoryWithSQL(s.client, integrationDB)
 
 	// 清理测试数据，确保每个测试从干净状态开始
+	_, _ = integrationDB.ExecContext(s.ctx, "DELETE FROM auth_identity_channels")
+	_, _ = integrationDB.ExecContext(s.ctx, "DELETE FROM auth_identities")
 	_, _ = integrationDB.ExecContext(s.ctx, "DELETE FROM user_subscriptions")
 	_, _ = integrationDB.ExecContext(s.ctx, "DELETE FROM user_allowed_groups")
 	_, _ = integrationDB.ExecContext(s.ctx, "DELETE FROM users")
@@ -122,9 +127,25 @@ func (s *UserRepoSuite) TestGetByEmail() {
 	s.Require().Equal(user.ID, got.ID)
 }
 
+func (s *UserRepoSuite) TestGetByEmail_NormalizesSpacingAndCaseOnPostgres() {
+	user := s.mustCreateUser(&service.User{Email: " Legacy@Example.com "})
+
+	got, err := s.repo.GetByEmail(s.ctx, "  legacy@example.com  ")
+	s.Require().NoError(err, "GetByEmail normalized lookup")
+	s.Require().Equal(user.ID, got.ID)
+}
+
 func (s *UserRepoSuite) TestGetByEmail_NotFound() {
 	_, err := s.repo.GetByEmail(s.ctx, "nonexistent@test.com")
 	s.Require().Error(err, "expected error for non-existent email")
+}
+
+func (s *UserRepoSuite) TestExistsByEmail_NormalizesSpacingAndCaseOnPostgres() {
+	s.mustCreateUser(&service.User{Email: " Legacy@Example.com "})
+
+	exists, err := s.repo.ExistsByEmail(s.ctx, "  LEGACY@example.com  ")
+	s.Require().NoError(err, "ExistsByEmail normalized lookup")
+	s.Require().True(exists)
 }
 
 func (s *UserRepoSuite) TestUpdate() {
@@ -140,6 +161,30 @@ func (s *UserRepoSuite) TestUpdate() {
 	s.Require().Equal("updated", updated.Username)
 }
 
+func (s *UserRepoSuite) TestUpdateIgnoresNoRowsFromConflictingEmailIdentityUpsert() {
+	user := s.mustCreateUser(&service.User{Email: "update-existing-identity@test.com", Username: "original"})
+
+	identityCount, err := s.client.AuthIdentity.Query().
+		Where(
+			authidentity.UserIDEQ(user.ID),
+			authidentity.ProviderTypeEQ("email"),
+			authidentity.ProviderKeyEQ("email"),
+			authidentity.ProviderSubjectEQ("update-existing-identity@test.com"),
+		).
+		Count(s.ctx)
+	s.Require().NoError(err)
+	s.Require().Equal(1, identityCount)
+
+	got, err := s.repo.GetByID(s.ctx, user.ID)
+	s.Require().NoError(err)
+	got.Username = "updated"
+	s.Require().NoError(s.repo.Update(s.ctx, got), "Update should tolerate ON CONFLICT DO NOTHING returning no rows")
+
+	updated, err := s.repo.GetByID(s.ctx, user.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("updated", updated.Username)
+}
+
 func (s *UserRepoSuite) TestDelete() {
 	user := s.mustCreateUser(&service.User{Email: "delete@test.com"})
 
@@ -148,6 +193,39 @@ func (s *UserRepoSuite) TestDelete() {
 
 	_, err = s.repo.GetByID(s.ctx, user.ID)
 	s.Require().Error(err, "expected error after delete")
+}
+
+func (s *UserRepoSuite) TestDeleteRemovesAuthIdentitiesAndChannels() {
+	user := s.mustCreateUser(&service.User{Email: "delete-oauth@test.com"})
+
+	identity, err := s.client.AuthIdentity.Create().
+		SetUserID(user.ID).
+		SetProviderType("linuxdo").
+		SetProviderKey("linuxdo").
+		SetProviderSubject("delete-oauth-subject").
+		Save(s.ctx)
+	s.Require().NoError(err)
+
+	_, err = s.client.AuthIdentityChannel.Create().
+		SetIdentityID(identity.ID).
+		SetProviderType("wechat").
+		SetProviderKey("wechat").
+		SetChannel("open").
+		SetChannelAppID("app-id").
+		SetChannelSubject("openid-123").
+		Save(s.ctx)
+	s.Require().NoError(err)
+
+	err = s.repo.Delete(s.ctx, user.ID)
+	s.Require().NoError(err)
+
+	identityCount, err := s.client.AuthIdentity.Query().Where(authidentity.UserIDEQ(user.ID)).Count(s.ctx)
+	s.Require().NoError(err)
+	s.Require().Zero(identityCount)
+
+	channelCount, err := s.client.AuthIdentityChannel.Query().Where(authidentitychannel.IdentityIDEQ(identity.ID)).Count(s.ctx)
+	s.Require().NoError(err)
+	s.Require().Zero(channelCount)
 }
 
 // --- List / ListWithFilters ---
@@ -276,6 +354,29 @@ func (s *UserRepoSuite) TestUpdateBalance_Negative() {
 	s.Require().InDelta(7.0, got.Balance, 1e-6)
 }
 
+func (s *UserRepoSuite) TestApplyRedeemBalanceAdjustment_ConcurrentNeverNegative() {
+	user := s.mustCreateUser(&service.User{Email: "redeem-bal-concurrent@test.com", Balance: 10})
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- s.repo.ApplyRedeemBalanceAdjustment(context.Background(), user.ID, -7)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		s.Require().NoError(err)
+	}
+
+	got, err := s.repo.GetByID(s.ctx, user.ID)
+	s.Require().NoError(err)
+	s.Require().InDelta(0, got.Balance, 1e-6)
+}
+
 func (s *UserRepoSuite) TestDeductBalance() {
 	user := s.mustCreateUser(&service.User{Email: "deduct@test.com", Balance: 10})
 
@@ -346,6 +447,29 @@ func (s *UserRepoSuite) TestUpdateConcurrency_Negative() {
 	got, err := s.repo.GetByID(s.ctx, user.ID)
 	s.Require().NoError(err)
 	s.Require().Equal(3, got.Concurrency)
+}
+
+func (s *UserRepoSuite) TestApplyRedeemConcurrencyAdjustment_ConcurrentNeverNegative() {
+	user := s.mustCreateUser(&service.User{Email: "redeem-concurrency-concurrent@test.com", Concurrency: 10})
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- s.repo.ApplyRedeemConcurrencyAdjustment(context.Background(), user.ID, -7)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		s.Require().NoError(err)
+	}
+
+	got, err := s.repo.GetByID(s.ctx, user.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(0, got.Concurrency)
 }
 
 // --- ExistsByEmail ---

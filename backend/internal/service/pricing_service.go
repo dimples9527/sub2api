@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -33,6 +34,57 @@ var (
 		LiteLLMProvider:                 "openai",
 		Mode:                            "chat",
 		SupportsPromptCaching:           true,
+	}
+	openAIGPT56SolFallbackPricing = &LiteLLMModelPricing{
+		InputCostPerToken:                   5e-06,
+		InputCostPerTokenPriority:           1e-05,
+		OutputCostPerToken:                  3e-05,
+		OutputCostPerTokenPriority:          6e-05,
+		CacheCreationInputTokenCost:         6.25e-06,
+		CacheCreationInputTokenCostPriority: 1.25e-05,
+		CacheReadInputTokenCost:             5e-07,
+		CacheReadInputTokenCostPriority:     1e-06,
+		LongContextInputTokenThreshold:      openAIGPT54LongContextInputThreshold,
+		LongContextInputCostMultiplier:      openAIGPT54LongContextInputMultiplier,
+		LongContextOutputCostMultiplier:     openAIGPT54LongContextOutputMultiplier,
+		SupportsServiceTier:                 true,
+		LiteLLMProvider:                     "openai",
+		Mode:                                "chat",
+		SupportsPromptCaching:               true,
+	}
+	openAIGPT56TerraFallbackPricing = &LiteLLMModelPricing{
+		InputCostPerToken:                   2.5e-06,
+		InputCostPerTokenPriority:           5e-06,
+		OutputCostPerToken:                  1.5e-05,
+		OutputCostPerTokenPriority:          3e-05,
+		CacheCreationInputTokenCost:         3.125e-06,
+		CacheCreationInputTokenCostPriority: 6.25e-06,
+		CacheReadInputTokenCost:             2.5e-07,
+		CacheReadInputTokenCostPriority:     5e-07,
+		LongContextInputTokenThreshold:      openAIGPT54LongContextInputThreshold,
+		LongContextInputCostMultiplier:      openAIGPT54LongContextInputMultiplier,
+		LongContextOutputCostMultiplier:     openAIGPT54LongContextOutputMultiplier,
+		SupportsServiceTier:                 true,
+		LiteLLMProvider:                     "openai",
+		Mode:                                "chat",
+		SupportsPromptCaching:               true,
+	}
+	openAIGPT56LunaFallbackPricing = &LiteLLMModelPricing{
+		InputCostPerToken:                   1e-06,
+		InputCostPerTokenPriority:           2e-06,
+		OutputCostPerToken:                  6e-06,
+		OutputCostPerTokenPriority:          1.2e-05,
+		CacheCreationInputTokenCost:         1.25e-06,
+		CacheCreationInputTokenCostPriority: 2.5e-06,
+		CacheReadInputTokenCost:             1e-07,
+		CacheReadInputTokenCostPriority:     2e-07,
+		LongContextInputTokenThreshold:      openAIGPT54LongContextInputThreshold,
+		LongContextInputCostMultiplier:      openAIGPT54LongContextInputMultiplier,
+		LongContextOutputCostMultiplier:     openAIGPT54LongContextOutputMultiplier,
+		SupportsServiceTier:                 true,
+		LiteLLMProvider:                     "openai",
+		Mode:                                "chat",
+		SupportsPromptCaching:               true,
 	}
 	openAIGPT54MiniFallbackPricing = &LiteLLMModelPricing{
 		InputCostPerToken:       7.5e-07,
@@ -60,6 +112,7 @@ type LiteLLMModelPricing struct {
 	OutputCostPerToken                  float64 `json:"output_cost_per_token"`
 	OutputCostPerTokenPriority          float64 `json:"output_cost_per_token_priority"`
 	CacheCreationInputTokenCost         float64 `json:"cache_creation_input_token_cost"`
+	CacheCreationInputTokenCostPriority float64 `json:"cache_creation_input_token_cost_priority"`
 	CacheCreationInputTokenCostAbove1hr float64 `json:"cache_creation_input_token_cost_above_1hr"`
 	CacheReadInputTokenCost             float64 `json:"cache_read_input_token_cost"`
 	CacheReadInputTokenCostPriority     float64 `json:"cache_read_input_token_cost_priority"`
@@ -72,6 +125,11 @@ type LiteLLMModelPricing struct {
 	SupportsPromptCaching               bool    `json:"supports_prompt_caching"`
 	OutputCostPerImage                  float64 `json:"output_cost_per_image"`       // 图片生成模型每张图片价格
 	OutputCostPerImageToken             float64 `json:"output_cost_per_image_token"` // 图片输出 token 价格
+
+	// TokenPricingAbsent 表示源数据中 input/output token 价格均缺失（仅有图片价）。
+	// 此类条目只可用于图片计费，token 计费必须回退到 fallback 或 fail-closed，
+	// 否则 token 流量会被按 $0 计费。零值（false）表示条目具备 token 价格。
+	TokenPricingAbsent bool `json:"-"`
 }
 
 // PricingRemoteClient 远程价格数据获取接口
@@ -87,9 +145,13 @@ type LiteLLMRawEntry struct {
 	OutputCostPerToken                  *float64 `json:"output_cost_per_token"`
 	OutputCostPerTokenPriority          *float64 `json:"output_cost_per_token_priority"`
 	CacheCreationInputTokenCost         *float64 `json:"cache_creation_input_token_cost"`
+	CacheCreationInputTokenCostPriority *float64 `json:"cache_creation_input_token_cost_priority"`
 	CacheCreationInputTokenCostAbove1hr *float64 `json:"cache_creation_input_token_cost_above_1hr"`
 	CacheReadInputTokenCost             *float64 `json:"cache_read_input_token_cost"`
 	CacheReadInputTokenCostPriority     *float64 `json:"cache_read_input_token_cost_priority"`
+	LongContextInputTokenThreshold      *int     `json:"long_context_input_token_threshold"`
+	LongContextInputCostMultiplier      *float64 `json:"long_context_input_cost_multiplier"`
+	LongContextOutputCostMultiplier     *float64 `json:"long_context_output_cost_multiplier"`
 	SupportsServiceTier                 bool     `json:"supports_service_tier"`
 	LiteLLMProvider                     string   `json:"litellm_provider"`
 	Mode                                string   `json:"mode"`
@@ -318,6 +380,7 @@ func (s *PricingService) downloadPricingData() error {
 	if err != nil {
 		return fmt.Errorf("parse pricing data: %w", err)
 	}
+	data = s.mergeFallbackPricingData(data)
 
 	// 保存到本地文件
 	pricingFile := s.getPricingFilePath()
@@ -372,7 +435,7 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 		}
 
 		// 只保留有有效价格的条目
-		if entry.InputCostPerToken == nil && entry.OutputCostPerToken == nil {
+		if entry.InputCostPerToken == nil && entry.OutputCostPerToken == nil && entry.OutputCostPerImage == nil && entry.OutputCostPerImageToken == nil {
 			continue
 		}
 
@@ -381,6 +444,7 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 			Mode:                  entry.Mode,
 			SupportsPromptCaching: entry.SupportsPromptCaching,
 			SupportsServiceTier:   entry.SupportsServiceTier,
+			TokenPricingAbsent:    entry.InputCostPerToken == nil && entry.OutputCostPerToken == nil,
 		}
 
 		if entry.InputCostPerToken != nil {
@@ -398,6 +462,9 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 		if entry.CacheCreationInputTokenCost != nil {
 			pricing.CacheCreationInputTokenCost = *entry.CacheCreationInputTokenCost
 		}
+		if entry.CacheCreationInputTokenCostPriority != nil {
+			pricing.CacheCreationInputTokenCostPriority = *entry.CacheCreationInputTokenCostPriority
+		}
 		if entry.CacheCreationInputTokenCostAbove1hr != nil {
 			pricing.CacheCreationInputTokenCostAbove1hr = *entry.CacheCreationInputTokenCostAbove1hr
 		}
@@ -406,6 +473,15 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 		}
 		if entry.CacheReadInputTokenCostPriority != nil {
 			pricing.CacheReadInputTokenCostPriority = *entry.CacheReadInputTokenCostPriority
+		}
+		if entry.LongContextInputTokenThreshold != nil {
+			pricing.LongContextInputTokenThreshold = *entry.LongContextInputTokenThreshold
+		}
+		if entry.LongContextInputCostMultiplier != nil {
+			pricing.LongContextInputCostMultiplier = *entry.LongContextInputCostMultiplier
+		}
+		if entry.LongContextOutputCostMultiplier != nil {
+			pricing.LongContextOutputCostMultiplier = *entry.LongContextOutputCostMultiplier
 		}
 		if entry.OutputCostPerImage != nil {
 			pricing.OutputCostPerImage = *entry.OutputCostPerImage
@@ -440,6 +516,7 @@ func (s *PricingService) loadPricingData(filePath string) error {
 	if err != nil {
 		return fmt.Errorf("parse pricing data: %w", err)
 	}
+	pricingData = s.mergeFallbackPricingData(pricingData)
 
 	// 计算哈希
 	hash := sha256.Sum256(data)
@@ -459,6 +536,37 @@ func (s *PricingService) loadPricingData(filePath string) error {
 
 	logger.LegacyPrintf("service.pricing", "[Pricing] Loaded %d models from %s", len(pricingData), filePath)
 	return nil
+}
+
+func (s *PricingService) mergeFallbackPricingData(data map[string]*LiteLLMModelPricing) map[string]*LiteLLMModelPricing {
+	if data == nil {
+		data = make(map[string]*LiteLLMModelPricing)
+	}
+	if s == nil || s.cfg == nil || strings.TrimSpace(s.cfg.Pricing.FallbackFile) == "" {
+		return data
+	}
+	fallbackBody, err := os.ReadFile(s.cfg.Pricing.FallbackFile)
+	if err != nil {
+		logger.LegacyPrintf("service.pricing", "[Pricing] Fallback merge skipped: %v", err)
+		return data
+	}
+	fallbackData, err := s.parsePricingData(fallbackBody)
+	if err != nil {
+		logger.LegacyPrintf("service.pricing", "[Pricing] Fallback merge parse skipped: %v", err)
+		return data
+	}
+	merged := 0
+	for modelName, pricing := range fallbackData {
+		if _, ok := data[modelName]; ok {
+			continue
+		}
+		data[modelName] = pricing
+		merged++
+	}
+	if merged > 0 {
+		logger.LegacyPrintf("service.pricing", "[Pricing] Merged %d fallback-only models", merged)
+	}
+	return data
 }
 
 // useFallbackPricing 使用回退价格文件
@@ -625,6 +733,15 @@ func normalizeModelNameForPricing(model string) string {
 	}
 
 	model = strings.TrimLeft(model, "/")
+	if canonical := canonicalizeOpenAIModelAliasSpelling(model); canonical != "" {
+		if canonical == "gpt-5.6" {
+			return "gpt-5.6-sol"
+		}
+		if suffix, ok := strings.CutPrefix(canonical, "gpt-5.6-"); ok && (suffix == "max" || isKnownCodexModelSuffix(suffix)) {
+			return "gpt-5.6-sol"
+		}
+		return canonical
+	}
 	return model
 }
 
@@ -656,65 +773,95 @@ func (s *PricingService) extractBaseName(model string) string {
 
 // matchByModelFamily 基于模型系列匹配
 func (s *PricingService) matchByModelFamily(model string) *LiteLLMModelPricing {
-	// Claude模型系列匹配规则
-	familyPatterns := map[string][]string{
-		"opus-4.6":   {"claude-opus-4.6", "claude-opus-4-6"},
-		"opus-4.5":   {"claude-opus-4.5", "claude-opus-4-5"},
-		"opus-4":     {"claude-opus-4", "claude-3-opus"},
-		"sonnet-4.5": {"claude-sonnet-4.5", "claude-sonnet-4-5"},
-		"sonnet-4":   {"claude-sonnet-4", "claude-3-5-sonnet"},
-		"sonnet-3.5": {"claude-3-5-sonnet", "claude-3.5-sonnet"},
-		"sonnet-3":   {"claude-3-sonnet"},
-		"haiku-3.5":  {"claude-3-5-haiku", "claude-3.5-haiku"},
-		"haiku-3":    {"claude-3-haiku"},
+	// modelFamily 定义一个模型系列的匹配和定价查找规则。
+	type modelFamily struct {
+		name    string   // 系列名称
+		match   []string // 用于将模型归类到此系列的模式（strings.Contains 匹配）
+		pricing []string // 用于在定价数据中查找价格的模式（nil 则复用 match；可包含低版本 fallback）
 	}
 
-	// 确定模型属于哪个系列
-	var matchedFamily string
-	for family, patterns := range familyPatterns {
-		for _, pattern := range patterns {
+	// 按特异性降序排列：高版本号在前，避免 "claude-opus-4"（opus-4 系列）
+	// 因子串关系误匹配 "claude-opus-4-7"（opus-4.7 系列）。
+	// 注意：原 map 实现存在 Go map 迭代随机性导致的同类 bug，此处改为有序切片修复。
+	families := []modelFamily{
+		{name: "opus-4.7", match: []string{"claude-opus-4-7", "claude-opus-4.7"}, pricing: []string{"claude-opus-4-7", "claude-opus-4.7", "claude-opus-4-6"}},
+		{name: "opus-4.6", match: []string{"claude-opus-4-6", "claude-opus-4.6"}},
+		{name: "opus-4.5", match: []string{"claude-opus-4-5", "claude-opus-4.5"}},
+		{name: "opus-4", match: []string{"claude-opus-4", "claude-3-opus"}},
+		{name: "sonnet-4.5", match: []string{"claude-sonnet-4-5", "claude-sonnet-4.5"}},
+		{name: "sonnet-4", match: []string{"claude-sonnet-4", "claude-3-5-sonnet"}},
+		{name: "sonnet-3.5", match: []string{"claude-3-5-sonnet", "claude-3.5-sonnet"}},
+		{name: "sonnet-3", match: []string{"claude-3-sonnet"}},
+		{name: "haiku-3.5", match: []string{"claude-3-5-haiku", "claude-3.5-haiku"}},
+		{name: "haiku-3", match: []string{"claude-3-haiku"}},
+	}
+
+	// Phase 1: 按有序切片归类（最具体的系列优先匹配）
+	var matched *modelFamily
+	for i := range families {
+		for _, pattern := range families[i].match {
 			if strings.Contains(model, pattern) || strings.Contains(model, strings.ReplaceAll(pattern, "-", "")) {
-				matchedFamily = family
+				matched = &families[i]
 				break
 			}
 		}
-		if matchedFamily != "" {
+		if matched != nil {
 			break
 		}
 	}
 
-	if matchedFamily == "" {
-		// 简单的系列匹配
-		if strings.Contains(model, "opus") {
-			if strings.Contains(model, "4.5") || strings.Contains(model, "4-5") {
-				matchedFamily = "opus-4.5"
-			} else {
-				matchedFamily = "opus-4"
+	// Phase 2: 二次兜底——当模型 ID 不含已知模式串时，按关键字粗分
+	if matched == nil {
+		var fallbackName string
+		switch {
+		case strings.Contains(model, "opus"):
+			switch {
+			case strings.Contains(model, "4.7") || strings.Contains(model, "4-7"):
+				fallbackName = "opus-4.7"
+			case strings.Contains(model, "4.6") || strings.Contains(model, "4-6"):
+				fallbackName = "opus-4.6"
+			case strings.Contains(model, "4.5") || strings.Contains(model, "4-5"):
+				fallbackName = "opus-4.5"
+			default:
+				fallbackName = "opus-4"
 			}
-		} else if strings.Contains(model, "sonnet") {
-			if strings.Contains(model, "4.5") || strings.Contains(model, "4-5") {
-				matchedFamily = "sonnet-4.5"
-			} else if strings.Contains(model, "3-5") || strings.Contains(model, "3.5") {
-				matchedFamily = "sonnet-3.5"
-			} else {
-				matchedFamily = "sonnet-4"
+		case strings.Contains(model, "sonnet"):
+			switch {
+			case strings.Contains(model, "4.5") || strings.Contains(model, "4-5"):
+				fallbackName = "sonnet-4.5"
+			case strings.Contains(model, "3-5") || strings.Contains(model, "3.5"):
+				fallbackName = "sonnet-3.5"
+			default:
+				fallbackName = "sonnet-4"
 			}
-		} else if strings.Contains(model, "haiku") {
-			if strings.Contains(model, "3-5") || strings.Contains(model, "3.5") {
-				matchedFamily = "haiku-3.5"
-			} else {
-				matchedFamily = "haiku-3"
+		case strings.Contains(model, "haiku"):
+			switch {
+			case strings.Contains(model, "3-5") || strings.Contains(model, "3.5"):
+				fallbackName = "haiku-3.5"
+			default:
+				fallbackName = "haiku-3"
+			}
+		}
+		if fallbackName != "" {
+			for i := range families {
+				if families[i].name == fallbackName {
+					matched = &families[i]
+					break
+				}
 			}
 		}
 	}
 
-	if matchedFamily == "" {
+	if matched == nil {
 		return nil
 	}
 
-	// 在价格数据中查找该系列的模型
-	patterns := familyPatterns[matchedFamily]
-	for _, pattern := range patterns {
+	// Phase 3: 在定价数据中查找该系列的价格
+	lookups := matched.pricing
+	if lookups == nil {
+		lookups = matched.match
+	}
+	for _, pattern := range lookups {
 		for key, pricing := range s.pricingData {
 			keyLower := strings.ToLower(key)
 			if strings.Contains(keyLower, pattern) {
@@ -764,6 +911,29 @@ func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
 		}
 	}
 
+	if strings.HasPrefix(model, "gpt-5.6-sol") {
+		logger.With(zap.String("component", "service.pricing")).
+			Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-5.6-sol(static)"))
+		return openAIGPT56SolFallbackPricing
+	}
+	if strings.HasPrefix(model, "gpt-5.6-terra") {
+		logger.With(zap.String("component", "service.pricing")).
+			Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-5.6-terra(static)"))
+		return openAIGPT56TerraFallbackPricing
+	}
+	if strings.HasPrefix(model, "gpt-5.6-luna") {
+		logger.With(zap.String("component", "service.pricing")).
+			Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-5.6-luna(static)"))
+		return openAIGPT56LunaFallbackPricing
+	}
+
+	// GPT-5.5 回退到 GPT-5.4 定价
+	if strings.HasPrefix(model, "gpt-5.5") {
+		logger.With(zap.String("component", "service.pricing")).
+			Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-5.4(static)"))
+		return openAIGPT54FallbackPricing
+	}
+
 	if strings.HasPrefix(model, "gpt-5.4-mini") {
 		logger.With(zap.String("component", "service.pricing")).
 			Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-5.4-mini(static)"))
@@ -780,6 +950,16 @@ func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
 		logger.With(zap.String("component", "service.pricing")).
 			Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-5.4(static)"))
 		return openAIGPT54FallbackPricing
+	}
+
+	if isOpenAIImageGenerationModel(model) {
+		for _, candidate := range []string{"gpt-image-2", "gpt-image-1.5", "gpt-image-1"} {
+			if pricing, ok := s.pricingData[candidate]; ok {
+				logger.LegacyPrintf("service.pricing", "[Pricing] OpenAI image fallback matched %s -> %s", model, candidate)
+				return pricing
+			}
+		}
+		return nil
 	}
 
 	// 最终回退到 DefaultTestModel
@@ -851,6 +1031,24 @@ func (s *PricingService) getPricingFilePath() string {
 // getHashFilePath 获取哈希文件路径
 func (s *PricingService) getHashFilePath() string {
 	return filepath.Join(s.cfg.Pricing.DataDir, "model_pricing.sha256")
+}
+
+// ListModelNamesByProvider returns all model names in the catalog whose
+// LiteLLMProvider matches the given provider string (case-insensitive).
+// The returned slice is sorted alphabetically.
+func (s *PricingService) ListModelNamesByProvider(provider string) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	names := make([]string, 0)
+	for name, p := range s.pricingData {
+		if strings.ToLower(p.LiteLLMProvider) == provider {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 // isNumeric 检查字符串是否为纯数字

@@ -150,6 +150,17 @@ export function formatDateTime(
 }
 
 /**
+ * 格式化为 date 控件值（YYYY-MM-DD，使用本地时间）
+ */
+export function formatDateLocalInput(date: Date): string {
+  if (isNaN(date.getTime())) return ''
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+/**
  * 格式化为 datetime-local 控件值（YYYY-MM-DDTHH:mm，使用本地时间）
  */
 export function formatDateTimeLocalInput(timestampSeconds: number | null): string {
@@ -193,7 +204,9 @@ export function formatReasoningEffort(effort: string | null | undefined): string
       return 'High'
     case 'xhigh':
     case 'extrahigh':
-      return 'Xhigh'
+      return 'XHigh'
+    case 'max':
+      return 'Max'
     case 'none':
     case 'minimal':
       return '-'

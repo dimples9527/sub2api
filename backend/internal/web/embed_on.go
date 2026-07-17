@@ -7,9 +7,12 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	htmlpkg "html"
 	"io"
 	"io/fs"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -32,11 +35,12 @@ type PublicSettingsProvider interface {
 
 // FrontendServer serves the embedded frontend with settings injection
 type FrontendServer struct {
-	distFS     fs.FS
-	fileServer http.Handler
-	baseHTML   []byte
-	cache      *HTMLCache
-	settings   PublicSettingsProvider
+	distFS      fs.FS
+	fileServer  http.Handler
+	baseHTML    []byte
+	cache       *HTMLCache
+	settings    PublicSettingsProvider
+	overrideDir string // local file override directory
 }
 
 // NewFrontendServer creates a new frontend server with settings injection
@@ -62,11 +66,12 @@ func NewFrontendServer(settingsProvider PublicSettingsProvider) (*FrontendServer
 	cache.SetBaseHTML(baseHTML)
 
 	return &FrontendServer{
-		distFS:     distFS,
-		fileServer: http.FileServer(http.FS(distFS)),
-		baseHTML:   baseHTML,
-		cache:      cache,
-		settings:   settingsProvider,
+		distFS:      distFS,
+		fileServer:  http.FileServer(http.FS(distFS)),
+		baseHTML:    baseHTML,
+		cache:       cache,
+		settings:    settingsProvider,
+		overrideDir: filepath.Join("data", "public"),
 	}, nil
 }
 
@@ -92,14 +97,22 @@ func (s *FrontendServer) Middleware() gin.HandlerFunc {
 		if cleanPath == "" {
 			cleanPath = "index.html"
 		}
-		if cleanPath == "model-monitor.html" {
-			s.serveStaticHTMLWithNonce(c, cleanPath)
-			return
-		}
 
 		// For index.html or SPA routes, serve with injected settings
 		if cleanPath == "index.html" || !s.fileExists(cleanPath) {
 			s.serveIndexHTML(c)
+			return
+		}
+
+		// Try local override first
+		if s.tryServeOverride(c, cleanPath) {
+			return
+		}
+
+		// Serve static files normally (hashed assets get long-lived cache headers)
+		applyStaticAssetCacheHeaders(c.Writer.Header(), cleanPath)
+		if isStaticHTMLPage(cleanPath) {
+			s.serveStaticHTMLWithNonce(c, cleanPath)
 			return
 		}
 
@@ -149,6 +162,23 @@ func (s *FrontendServer) fileExists(path string) bool {
 		return false
 	}
 	_ = file.Close()
+	return true
+}
+
+// tryServeOverride checks if a local override file exists and serves it.
+// Files in overrideDir take precedence over embedded files.
+func (s *FrontendServer) tryServeOverride(c *gin.Context, cleanPath string) bool {
+	if s.overrideDir == "" {
+		return false
+	}
+	filePath := filepath.Join(s.overrideDir, filepath.Clean("/"+cleanPath))
+	info, err := os.Stat(filePath)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	applyStaticAssetCacheHeaders(c.Writer.Header(), cleanPath)
+	c.File(filePath)
+	c.Abort()
 	return true
 }
 
@@ -221,10 +251,8 @@ func (s *FrontendServer) injectSettings(settingsJSON []byte) []byte {
 }
 
 func injectSettingsIntoHTML(html, settingsJSON []byte) []byte {
-	// Create the script tag to inject with nonce placeholder.
-	// The placeholder will be replaced with actual nonce at request time.
+	// The nonce placeholder is replaced with the request nonce before serving.
 	script := []byte(`<script nonce="` + NonceHTMLPlaceholder + `">window.__APP_CONFIG__=` + string(settingsJSON) + `;</script>`)
-
 	headClose := []byte("</head>")
 	return bytes.Replace(html, headClose, append(script, headClose...), 1)
 }
@@ -246,7 +274,7 @@ func injectSiteTitle(html, settingsJSON []byte) []byte {
 		return html
 	}
 
-	newTitle := []byte("<title>" + cfg.SiteName + " - AI API Gateway</title>")
+	newTitle := []byte("<title>" + htmlpkg.EscapeString(cfg.SiteName) + " - AI API Gateway</title>")
 	var buf bytes.Buffer
 	buf.Write(html[:titleStart])
 	buf.Write(newTitle)
@@ -267,6 +295,7 @@ func ServeEmbeddedFrontend() gin.HandlerFunc {
 		panic("failed to get dist subdirectory: " + err.Error())
 	}
 	fileServer := http.FileServer(http.FS(distFS))
+	overrideDir := filepath.Join("data", "public")
 
 	return func(c *gin.Context) {
 		path := c.Request.URL.Path
@@ -281,13 +310,17 @@ func ServeEmbeddedFrontend() gin.HandlerFunc {
 			cleanPath = "index.html"
 		}
 
-		if cleanPath == "model-monitor.html" {
-			serveStaticHTML(c, distFS, cleanPath)
-			return
-		}
-
 		if file, err := distFS.Open(cleanPath); err == nil {
 			_ = file.Close()
+			// Try local override first
+			if tryServeOverrideFile(c, overrideDir, cleanPath) {
+				return
+			}
+			if isStaticHTMLPage(cleanPath) {
+				serveStaticHTMLWithNonce(c, distFS, cleanPath)
+				return
+			}
+			applyStaticAssetCacheHeaders(c.Writer.Header(), cleanPath)
 			fileServer.ServeHTTP(c.Writer, c.Request)
 			c.Abort()
 			return
@@ -297,7 +330,48 @@ func ServeEmbeddedFrontend() gin.HandlerFunc {
 	}
 }
 
-func serveStaticHTML(c *gin.Context, fsys fs.FS, path string) {
+// tryServeOverrideFile is a standalone version of tryServeOverride for legacy usage.
+func tryServeOverrideFile(c *gin.Context, overrideDir, cleanPath string) bool {
+	if overrideDir == "" {
+		return false
+	}
+	filePath := filepath.Join(overrideDir, filepath.Clean("/"+cleanPath))
+	info, err := os.Stat(filePath)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	applyStaticAssetCacheHeaders(c.Writer.Header(), cleanPath)
+	c.File(filePath)
+	c.Abort()
+	return true
+}
+
+func shouldBypassEmbeddedFrontend(path string) bool {
+	trimmed := strings.TrimSpace(path)
+	return strings.HasPrefix(trimmed, "/api/") ||
+		strings.HasPrefix(trimmed, "/v1/") ||
+		strings.HasPrefix(trimmed, "/v1beta/") ||
+		strings.HasPrefix(trimmed, "/backend-api/") ||
+		strings.HasPrefix(trimmed, "/antigravity/") ||
+		strings.HasPrefix(trimmed, "/setup/") ||
+		trimmed == "/health" ||
+		trimmed == "/responses" ||
+		strings.HasPrefix(trimmed, "/responses/") ||
+		trimmed == "/alpha/search" ||
+		strings.HasPrefix(trimmed, "/images/") ||
+		strings.HasPrefix(trimmed, "/videos/")
+}
+
+func isStaticHTMLPage(path string) bool {
+	switch path {
+	case "model-monitor.html", "help.html":
+		return true
+	default:
+		return false
+	}
+}
+
+func serveStaticHTMLWithNonce(c *gin.Context, fsys fs.FS, path string) {
 	file, err := fsys.Open(path)
 	if err != nil {
 		c.String(http.StatusNotFound, "Frontend page not found")
@@ -315,21 +389,8 @@ func serveStaticHTML(c *gin.Context, fsys fs.FS, path string) {
 
 	nonce := middleware.GetNonceFromContext(c)
 	content = replaceNoncePlaceholder(content, nonce)
-	c.Header("Cache-Control", "no-cache")
 	c.Data(http.StatusOK, "text/html; charset=utf-8", content)
 	c.Abort()
-}
-
-func shouldBypassEmbeddedFrontend(path string) bool {
-	trimmed := strings.TrimSpace(path)
-	return strings.HasPrefix(trimmed, "/api/") ||
-		strings.HasPrefix(trimmed, "/v1/") ||
-		strings.HasPrefix(trimmed, "/v1beta/") ||
-		strings.HasPrefix(trimmed, "/antigravity/") ||
-		strings.HasPrefix(trimmed, "/setup/") ||
-		trimmed == "/health" ||
-		trimmed == "/responses" ||
-		strings.HasPrefix(trimmed, "/responses/")
 }
 
 func serveIndexHTML(c *gin.Context, fsys fs.FS) {
