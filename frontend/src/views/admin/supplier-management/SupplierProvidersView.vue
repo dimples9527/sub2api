@@ -7,7 +7,7 @@
         <p class="sp-subtitle">用运行风险、账号健康和成本效率决定优先处理顺序。</p>
       </div>
       <div class="sp-controls">
-        <input v-model="search" class="sp-search" placeholder="搜索供应商" @keyup.enter="loadProviders" />
+        <Input v-model="search" class="sp-search" placeholder="搜索供应商" @enter="loadProviders" />
         <button class="sp-button" type="button" :disabled="loading" @click="loadProviders">刷新数据</button>
         <button class="sp-button" type="button" @click="openTypeManager">类型维护</button>
         <button class="sp-button primary" type="button" @click="openCreate">新增供应商</button>
@@ -54,60 +54,54 @@
           </div>
         </header>
 
-        <div class="sp-table-wrap">
-          <table class="sp-table">
-            <thead>
-              <tr>
-                <th>供应商</th>
-                <th>运行状态</th>
-                <th>有效 / 可调度账号</th>
-                <th>成功率</th>
-                <th>今日成本</th>
-                <th>余额可用</th>
-                <th>倍率风险</th>
-                <th>凭据</th>
-                <th>最近同步</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-if="loading">
-                <td colspan="10">正在加载供应商数据...</td>
-              </tr>
-              <tr
-                v-for="provider in sortedProviders"
-                :key="provider.id"
-                class="clickable"
-                :class="{ selected: selectedProvider?.id === provider.id }"
-                @click="selectedProvider = provider"
-              >
-                <td>
-                  <div class="sp-entity">{{ provider.name }}</div>
-                  <div class="sp-sub">{{ provider.code }} · {{ provider.provider_type }} · {{ provider.base_url }}</div>
-                </td>
-                <td><span class="sp-status" :class="statusTone(provider)">{{ statusText(provider) }}</span></td>
-                <td><span class="sp-num">{{ provider.valid_account_count }} / {{ provider.schedulable_account_count }}</span></td>
-                <td :class="{ 'sp-up': provider.success_rate > 0 && provider.success_rate < 95 }">{{ percent(provider.success_rate) }}</td>
-                <td><span class="sp-num">{{ currency(provider.today_cost) }}</span></td>
-                <td :class="{ 'sp-up': isLowBalance(provider) }">{{ balanceText(provider) }}</td>
-                <td><span class="sp-status" :class="rateTone(provider)">{{ rateRiskText(provider) }}</span></td>
-                <td><span class="sp-status" :class="provider.credential_configured ? 'good' : 'warn'">{{ provider.credential_configured ? '已配置' : '未配置' }}</span></td>
-                <td>{{ syncText(provider) }}</td>
-                <td>
-                  <div class="sp-inline" @click.stop>
-                    <button class="sp-button small" type="button" @click="openEdit(provider)">编辑</button>
-                    <button class="sp-button small" type="button" :disabled="isSyncing(provider, 'all')" @click="syncProviderData(provider, 'all')">{{ isSyncing(provider, 'all') ? '同步中' : '同步全部' }}</button>
-                    <button class="sp-button small" type="button" :disabled="provider.is_default" @click="makeDefault(provider)">默认</button>
-                    <button class="sp-button small danger" type="button" @click="removeProvider(provider)">删除</button>
-                  </div>
-                </td>
-              </tr>
-              <tr v-if="!loading && !sortedProviders.length">
-                <td colspan="10">没有符合条件的供应商</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          :columns="providerColumns"
+          :data="sortedProviders"
+          :loading="loading"
+          row-key="id"
+          clickable-rows
+          @row-click="selectedProvider = $event"
+        >
+          <template #cell-name="{ row: provider }">
+            <div class="sp-entity">{{ provider.name }}</div>
+            <div class="sp-sub">{{ provider.code }} · {{ provider.provider_type }} · {{ provider.base_url }}</div>
+          </template>
+          <template #cell-status="{ row: provider }">
+            <span class="sp-status" :class="statusTone(provider)">{{ statusText(provider) }}</span>
+          </template>
+          <template #cell-account_counts="{ row: provider }">
+            <span class="sp-num">{{ provider.valid_account_count }} / {{ provider.schedulable_account_count }}</span>
+          </template>
+          <template #cell-success_rate="{ row: provider }">
+            <span :class="{ 'sp-up': provider.success_rate > 0 && provider.success_rate < 95 }">{{ percent(provider.success_rate) }}</span>
+          </template>
+          <template #cell-today_cost="{ row: provider }">
+            <span class="sp-num">{{ currency(provider.today_cost) }}</span>
+          </template>
+          <template #cell-current_balance="{ row: provider }">
+            <span :class="{ 'sp-up': isLowBalance(provider) }">{{ balanceText(provider) }}</span>
+          </template>
+          <template #cell-rate_risk_count="{ row: provider }">
+            <span class="sp-status" :class="rateTone(provider)">{{ rateRiskText(provider) }}</span>
+          </template>
+          <template #cell-credential_configured="{ row: provider }">
+            <span class="sp-status" :class="provider.credential_configured ? 'good' : 'warn'">{{ provider.credential_configured ? '已配置' : '未配置' }}</span>
+          </template>
+          <template #cell-last_sync_at="{ row: provider }">
+            {{ syncText(provider) }}
+          </template>
+          <template #cell-actions="{ row: provider }">
+            <div class="sp-inline" @click.stop>
+              <button class="sp-button small" type="button" @click="openEdit(provider)">编辑</button>
+              <button class="sp-button small" type="button" :disabled="isSyncing(provider, 'all')" @click="syncProviderData(provider, 'all')">{{ isSyncing(provider, 'all') ? '同步中' : '同步全部' }}</button>
+              <button class="sp-button small" type="button" :disabled="provider.is_default" @click="makeDefault(provider)">默认</button>
+              <button class="sp-button small danger" type="button" @click="removeProvider(provider)">删除</button>
+            </div>
+          </template>
+          <template #empty>
+            没有符合条件的供应商
+          </template>
+        </DataTable>
       </div>
 
       <aside class="sp-panel">
@@ -192,48 +186,65 @@
       </template>
     </SupplierDrawer>
 
-    <SupplierModal
+    <BaseDialog
       :show="modalVisible"
       :title="editingProvider ? '编辑供应商' : '新增供应商'"
-      confirm-text="保存供应商"
+      width="wide"
       @close="closeModal"
-      @confirm="submitProvider"
     >
       <form class="sp-form" @submit.prevent="submitProvider">
-        <label><span>供应商名称</span><input v-model="form.name" required /></label>
-        <label><span>供应商编码</span><input v-model="form.code" required :disabled="Boolean(editingProvider)" /></label>
-        <label>
+        <Input v-model="form.name" label="供应商名称" required />
+        <Input v-model="form.code" label="供应商编码" required :disabled="Boolean(editingProvider)" />
+        <label class="sp-select-field">
           <span>供应商类型</span>
-          <select v-model="form.provider_type" required @change="applySelectedTypeTemplate(true)">
-            <option value="" disabled>请选择供应商类型</option>
-            <option v-for="type in enabledProviderTypes" :key="type.code" :value="type.code">{{ type.name }}（{{ type.code }}）</option>
-          </select>
+          <Select
+            v-model="form.provider_type"
+            :options="providerTypeOptions"
+            placeholder="请选择供应商类型"
+            :searchable="false"
+            @change="applySelectedTypeTemplate(true)"
+          />
         </label>
-        <label><span>基础地址</span><input v-model="form.base_url" required placeholder="https://supplier.example.com" /></label>
-        <label><span>登录接口</span><input v-model="form.login_url" placeholder="https://supplier.example.com/api/v1/auth/login" /></label>
-        <label><span>API Key 接口</span><input v-model="form.api_keys_url" placeholder="https://supplier.example.com/api/admin/keys" /></label>
-        <label><span>分组接口</span><input v-model="form.groups_url" /></label>
-        <label><span>余额接口</span><input v-model="form.balance_url" /></label>
-        <label><span>成本接口</span><input v-model="form.usage_cost_url" /></label>
-        <label v-if="form.provider_type === 'sub2api'"><span>登录邮箱</span><input v-model="form.email" /></label>
-        <label v-else><span>登录用户名</span><input v-model="form.username" /></label>
-        <label><span>登录密码</span><input v-model="form.password" type="password" :placeholder="editingProvider ? '留空则保留原密码' : ''" /></label>
-        <label><span>账号名前缀</span><input v-model="form.account_name_prefix" /></label>
-        <label><span>临时禁用分钟</span><input v-model.number="form.temp_disable_minutes" min="0" type="number" /></label>
-        <label><span>倍率缩放</span><input v-model.number="form.account_rate_multiplier_scale" min="0.000001" step="0.000001" type="number" /></label>
-        <label><span>排序</span><input v-model.number="form.sort_order" type="number" /></label>
-        <label class="sp-check"><input v-model="form.enabled" type="checkbox" />启用供应商</label>
-        <label class="sp-check"><input v-model="form.is_default" type="checkbox" />设为默认供应商</label>
+        <Input v-model="form.base_url" label="基础地址" required placeholder="https://supplier.example.com" />
+        <Input v-model="form.login_url" label="登录接口" placeholder="https://supplier.example.com/api/v1/auth/login" />
+        <Input v-model="form.api_keys_url" label="API Key 接口" placeholder="https://supplier.example.com/api/admin/keys" />
+        <Input v-model="form.groups_url" label="分组接口" />
+        <Input v-model="form.balance_url" label="余额接口" />
+        <Input v-model="form.usage_cost_url" label="成本接口" />
+        <Input v-if="form.provider_type === 'sub2api'" v-model="form.email" label="登录邮箱" />
+        <Input v-else v-model="form.username" label="登录用户名" />
+        <Input v-model="form.password" type="password" label="登录密码" :placeholder="editingProvider ? '留空则保留原密码' : ''" />
+        <Input v-model="form.account_name_prefix" label="账号名前缀" />
+        <Input :model-value="form.temp_disable_minutes" type="number" label="临时禁用分钟" @update:model-value="form.temp_disable_minutes = toNumber($event, form.temp_disable_minutes ?? 0)" />
+        <Input :model-value="form.account_rate_multiplier_scale" type="number" label="倍率缩放" @update:model-value="form.account_rate_multiplier_scale = toNumber($event, form.account_rate_multiplier_scale)" />
+        <Input :model-value="form.sort_order" type="number" label="排序" @update:model-value="form.sort_order = toNumber($event, form.sort_order ?? 0)" />
+        <label class="sp-toggle-field">
+          <span>启用供应商</span>
+          <div class="sp-toggle-row">
+            <Toggle v-model="form.enabled" />
+            <em>{{ form.enabled ? '已启用' : '已停用' }}</em>
+          </div>
+        </label>
+        <label class="sp-toggle-field">
+          <span>设为默认供应商</span>
+          <div class="sp-toggle-row">
+            <Toggle :model-value="Boolean(form.is_default)" @update:model-value="form.is_default = $event" />
+            <em>{{ form.is_default ? '默认' : '非默认' }}</em>
+          </div>
+        </label>
         <div class="sp-form-note">切换类型会用类型模板覆盖接口字段；覆盖后仍可继续手动编辑。</div>
       </form>
-    </SupplierModal>
+      <template #footer>
+        <button class="sp-button ghost" type="button" @click="closeModal">取消</button>
+        <button class="sp-button primary" type="button" @click="submitProvider">保存供应商</button>
+      </template>
+    </BaseDialog>
 
-    <SupplierModal
+    <BaseDialog
       :show="typeManagerVisible"
       title="供应商类型维护"
-      confirm-text="保存类型"
+      width="wide"
       @close="closeTypeManager"
-      @confirm="submitProviderType"
     >
       <div class="sp-type-manager">
         <div class="sp-type-list">
@@ -251,27 +262,36 @@
           <button class="sp-button" type="button" @click="newProviderType">新增类型</button>
         </div>
         <form class="sp-form" @submit.prevent="submitProviderType">
-          <label><span>供应商类型</span><input v-model="typeForm.name" required placeholder="Sub2API" /></label>
-          <label><span>类型编码</span><input v-model="typeForm.code" required placeholder="sub2api" /></label>
-          <label><span>登录接口</span><input v-model="typeForm.login_url" placeholder="https://supplier.example.com/api/v1/auth/login" /></label>
-          <label><span>API Key 接口</span><input v-model="typeForm.api_keys_url" /></label>
-          <label><span>分组接口</span><input v-model="typeForm.groups_url" /></label>
-          <label><span>余额接口</span><input v-model="typeForm.balance_url" /></label>
-          <label><span>成本接口</span><input v-model="typeForm.usage_cost_url" /></label>
-          <label><span>排序</span><input v-model.number="typeForm.sort_order" type="number" /></label>
-          <label class="sp-check"><input v-model="typeForm.enabled" type="checkbox" />启用类型</label>
+          <Input v-model="typeForm.name" label="供应商类型" required placeholder="Sub2API" />
+          <Input v-model="typeForm.code" label="类型编码" required placeholder="sub2api" />
+          <Input v-model="typeForm.login_url" label="登录接口" placeholder="https://supplier.example.com/api/v1/auth/login" />
+          <Input v-model="typeForm.api_keys_url" label="API Key 接口" />
+          <Input v-model="typeForm.groups_url" label="分组接口" />
+          <Input v-model="typeForm.balance_url" label="余额接口" />
+          <Input v-model="typeForm.usage_cost_url" label="成本接口" />
+          <Input :model-value="typeForm.sort_order" type="number" label="排序" @update:model-value="typeForm.sort_order = toNumber($event, typeForm.sort_order ?? 0)" />
+          <label class="sp-toggle-field">
+            <span>启用类型</span>
+            <div class="sp-toggle-row">
+              <Toggle v-model="typeForm.enabled" />
+              <em>{{ typeForm.enabled ? '启用' : '停用' }}</em>
+            </div>
+          </label>
           <div class="sp-form-note">这些接口作为供应商模板使用；供应商自身字段为空时后台会使用这里的配置。</div>
           <button v-if="editingProviderType" class="sp-button danger" type="button" @click="removeProviderType(editingProviderType)">删除当前类型</button>
         </form>
       </div>
-    </SupplierModal>
+      <template #footer>
+        <button class="sp-button ghost" type="button" @click="closeTypeManager">关闭</button>
+        <button class="sp-button primary" type="button" @click="submitProviderType">保存类型</button>
+      </template>
+    </BaseDialog>
 
-    <SupplierModal
+    <BaseDialog
       :show="testResultVisible"
       title="接口测试结果"
-      confirm-text="关闭"
+      width="extra-wide"
       @close="closeTestResult"
-      @confirm="closeTestResult"
     >
       <div v-if="testResult" class="sp-test-result">
         <div class="sp-detail-grid">
@@ -301,18 +321,27 @@
         </div>
         <div class="sp-form-note">敏感字段已脱敏；该测试只调用接口，不会写入同步记录或本地数据表。</div>
       </div>
-    </SupplierModal>
+      <template #footer>
+        <button class="sp-button primary" type="button" @click="closeTestResult">关闭</button>
+      </template>
+    </BaseDialog>
 
   </SupplierModuleLayout>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { SupplierDrawer, SupplierModal, SupplierModuleLayout } from '@/components/admin/supplier-management'
+import { SupplierDrawer, SupplierModuleLayout } from '@/components/admin/supplier-management'
+import BaseDialog from '@/components/common/BaseDialog.vue'
+import DataTable from '@/components/common/DataTable.vue'
+import Input from '@/components/common/Input.vue'
+import Select, { type SelectOption } from '@/components/common/Select.vue'
+import Toggle from '@/components/common/Toggle.vue'
 import supplierProvidersAPI, { type SupplierProvider, type SupplierProviderSummary, type SupplierProviderUpsertPayload } from '@/api/admin/supplierProviders'
 import supplierProviderTypesAPI, { type SupplierProviderType, type SupplierProviderTypeUpsertPayload } from '@/api/admin/supplierProviderTypes'
 import { syncProvider, testProviderEndpoint, type SupplierProviderEndpointTestResult, type SupplierSyncScope } from '@/api/admin/supplierProviderData'
 import { useAppStore } from '@/stores/app'
+import type { Column } from '@/components/common/types'
 
 type Tone = 'good' | 'warn' | 'bad' | 'info' | ''
 type SupplierDiagnosticScope = Exclude<SupplierSyncScope, 'all'>
@@ -385,6 +414,21 @@ const appStore = useAppStore()
 
 const sorts = ['风险优先', '成本效率', '最近同步']
 const enabledProviderTypes = computed(() => providerTypes.value.filter(type => type.enabled))
+const providerTypeOptions = computed<SelectOption[]>(() =>
+  enabledProviderTypes.value.map(type => ({ value: type.code, label: `${type.name}（${type.code}）` }))
+)
+const providerColumns: Column[] = [
+  { key: 'name', label: '供应商', class: 'min-w-[220px]' },
+  { key: 'status', label: '运行状态' },
+  { key: 'account_counts', label: '有效 / 可调度账号', class: 'min-w-[150px]' },
+  { key: 'success_rate', label: '成功率' },
+  { key: 'today_cost', label: '今日成本' },
+  { key: 'current_balance', label: '余额可用' },
+  { key: 'rate_risk_count', label: '倍率风险' },
+  { key: 'credential_configured', label: '凭据' },
+  { key: 'last_sync_at', label: '最近同步', class: 'min-w-[110px]' },
+  { key: 'actions', label: '操作', class: 'min-w-[260px]' },
+]
 
 const metrics = computed(() => [
   { key: 'all', tone: 'green', label: '启用供应商', value: String(summary.value.enabled_count), foot: `共管理 ${summary.value.total_count} 个供应商` },
@@ -673,6 +717,11 @@ function formatDiagnosticJSON(value: unknown): string {
   }
 }
 
+function toNumber(value: string | number, fallback: number): number {
+  const next = Number(value)
+  return Number.isFinite(next) ? next : fallback
+}
+
 function normalizePayload(payload: SupplierProviderUpsertPayload): SupplierProviderUpsertPayload {
   const normalizedProviderType = payload.provider_type.trim()
   return {
@@ -818,3 +867,27 @@ function errorMessage(err: unknown, fallback: string): string {
   return fallback
 }
 </script>
+
+<style scoped>
+.sp-select-field {
+  display: grid;
+  gap: 0.375rem;
+  color: var(--sp-text);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.sp-toggle-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  color: var(--sp-muted);
+}
+
+.sp-toggle-row em {
+  font-style: normal;
+  font-size: 13px;
+  font-weight: 600;
+}
+</style>

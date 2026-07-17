@@ -7,16 +7,9 @@
         <p class="sp-subtitle">展示供应商分组同步后的本地结果、账号数量和失效状态。</p>
       </div>
       <div class="sp-controls">
-        <select v-model.number="providerID" class="sp-search">
-          <option :value="0">全部供应商</option>
-          <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name }}</option>
-        </select>
-        <select v-model="activeFilter" class="sp-search">
-          <option value="true">仅有效</option>
-          <option value="">全部状态</option>
-          <option value="false">已失效</option>
-        </select>
-        <input v-model="search" class="sp-search" placeholder="搜索分组或上游 Key" />
+        <Select v-model="providerID" class="sp-search" :options="providerOptions" :searchable="false" />
+        <Select v-model="activeFilter" class="sp-search" :options="activeFilterOptions" :searchable="false" />
+        <Input v-model="search" class="sp-search" placeholder="搜索分组或上游 Key" />
         <button class="sp-button" type="button" :disabled="loading" @click="loadGroups">刷新</button>
       </div>
     </header>
@@ -28,29 +21,47 @@
         <header class="sp-panel-head">
           <div class="sp-panel-title"><span class="sp-section-index">01</span><div><h2>本地分组表</h2><span>共 {{ total }} 条同步记录</span></div></div>
         </header>
-        <div class="sp-table-wrap">
-          <table class="sp-table">
-            <thead><tr><th>供应商</th><th>上游分组</th><th>倍率</th><th>账号数</th><th>上游状态</th><th>本地状态</th><th>最近同步</th></tr></thead>
-            <tbody>
-              <tr v-if="loading"><td colspan="7">正在加载分组数据...</td></tr>
-              <tr v-for="group in items" :key="group.id" class="clickable" @click="selected = group">
-                <td><div class="sp-entity">{{ group.provider_name }}</div><div class="sp-sub">ID {{ group.provider_id }}</div></td>
-                <td><div class="sp-entity">{{ group.name || '未命名分组' }}</div><div class="sp-sub">{{ group.upstream_group_key }}</div></td>
-                <td><span class="sp-num">{{ group.rate_multiplier || 0 }}</span></td>
-                <td>{{ group.account_count }}</td>
-                <td>{{ group.raw_status || 'unknown' }}</td>
-                <td><span class="sp-status" :class="group.active ? 'good' : ''">{{ group.active ? '有效' : '已失效' }}</span></td>
-                <td>{{ formatTime(group.last_seen_at) }}</td>
-              </tr>
-              <tr v-if="!loading && !items.length"><td colspan="7">暂无本地分组数据，请先在供应商列表执行同步。</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="sp-footer-note">
-          <button class="sp-button small" type="button" :disabled="page <= 1 || loading" @click="page--">上一页</button>
-          <span>第 {{ page }} 页 / {{ totalPages }} 页</span>
-          <button class="sp-button small" type="button" :disabled="page >= totalPages || loading" @click="page++">下一页</button>
-        </div>
+        <DataTable
+          :columns="groupColumns"
+          :data="items"
+          :loading="loading"
+          row-key="id"
+          clickable-rows
+          @row-click="selected = $event"
+        >
+          <template #cell-provider_name="{ row: group }">
+            <div class="sp-entity">{{ group.provider_name }}</div>
+            <div class="sp-sub">ID {{ group.provider_id }}</div>
+          </template>
+          <template #cell-name="{ row: group }">
+            <div class="sp-entity">{{ group.name || '未命名分组' }}</div>
+            <div class="sp-sub">{{ group.upstream_group_key }}</div>
+          </template>
+          <template #cell-rate_multiplier="{ row: group }">
+            <span class="sp-num">{{ group.rate_multiplier || 0 }}</span>
+          </template>
+          <template #cell-raw_status="{ row: group }">
+            {{ group.raw_status || 'unknown' }}
+          </template>
+          <template #cell-active="{ row: group }">
+            <span class="sp-status" :class="group.active ? 'good' : ''">{{ group.active ? '有效' : '已失效' }}</span>
+          </template>
+          <template #cell-last_seen_at="{ row: group }">
+            {{ formatTime(group.last_seen_at) }}
+          </template>
+          <template #empty>
+            暂无本地分组数据，请先在供应商列表执行同步。
+          </template>
+        </DataTable>
+        <Pagination
+          v-if="total > 0"
+          class="sp-data-pagination"
+          :page="page"
+          :total="total"
+          :page-size="pageSize"
+          :show-page-size-selector="false"
+          @update:page="page = $event"
+        />
       </div>
 
       <aside class="sp-panel">
@@ -85,8 +96,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { SupplierDrawer, SupplierModuleLayout } from '@/components/admin/supplier-management'
+import DataTable from '@/components/common/DataTable.vue'
+import Input from '@/components/common/Input.vue'
+import Pagination from '@/components/common/Pagination.vue'
+import Select, { type SelectOption } from '@/components/common/Select.vue'
 import supplierProvidersAPI, { type SupplierProvider } from '@/api/admin/supplierProviders'
 import { listSupplierGroups, type SupplierProviderGroup } from '@/api/admin/supplierProviderData'
+import type { Column } from '@/components/common/types'
 
 const providers = ref<SupplierProvider[]>([])
 const items = ref<SupplierProviderGroup[]>([])
@@ -101,7 +117,24 @@ const activeFilter = ref('true')
 const search = ref('')
 let searchTimer: number | undefined
 
-const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
+const providerOptions = computed<SelectOption[]>(() => [
+  { value: 0, label: '全部供应商' },
+  ...providers.value.map(provider => ({ value: provider.id, label: provider.name })),
+])
+const activeFilterOptions: SelectOption[] = [
+  { value: 'true', label: '仅有效' },
+  { value: '', label: '全部状态' },
+  { value: 'false', label: '已失效' },
+]
+const groupColumns: Column[] = [
+  { key: 'provider_name', label: '供应商', class: 'min-w-[150px]' },
+  { key: 'name', label: '上游分组', class: 'min-w-[180px]' },
+  { key: 'rate_multiplier', label: '倍率' },
+  { key: 'account_count', label: '账号数' },
+  { key: 'raw_status', label: '上游状态' },
+  { key: 'active', label: '本地状态' },
+  { key: 'last_seen_at', label: '最近同步', class: 'min-w-[150px]' },
+]
 
 onMounted(async () => {
   await loadProviders()
