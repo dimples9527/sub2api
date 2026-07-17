@@ -123,7 +123,9 @@
                 <MonitorActionsCell
                   :row="row"
                   :running="runningId === row.id"
+                  :duplicating="duplicatingIds.has(row.id)"
                   @run="handleRunNow"
+                  @duplicate="handleDuplicate"
                   @edit="openEditDialog"
                   @delete="handleDelete"
                 />
