@@ -32,9 +32,58 @@ export interface SupplierAutomationRun {
   processed_count: number
   success_count: number
   failed_count: number
+  result_detail?: SupplierAutomationRunDetail
   started_at: string
   finished_at?: string
   created_at: string
+}
+
+export interface SupplierAutomationRunDetail {
+  providers?: SupplierAutomationProviderRunDetail[]
+  cleanup?: SupplierAutomationCleanupRunDetail
+}
+
+export interface SupplierAutomationProviderRunDetail {
+  provider_id: number
+  provider_name: string
+  scope: string
+  status: string
+  message: string
+  counts: SupplierSyncCounts
+  stages?: SupplierAutomationStageRunDetail[]
+  started_at: string
+  finished_at: string
+}
+
+export interface SupplierAutomationStageRunDetail {
+  scope: string
+  status: string
+  message: string
+  counts: SupplierSyncCounts
+  endpoint?: string
+  http_status?: number
+  duration_ms?: number
+  response_bytes?: number
+  response_summary?: string
+  parsed_summary?: string
+  parse_error?: string
+  error?: string
+}
+
+export interface SupplierAutomationCleanupRunDetail {
+  automation_runs: number
+  sync_runs: number
+  metric_snapshots: number
+  daily_stats: number
+  accounts: number
+  groups: number
+}
+
+export interface SupplierSyncCounts {
+  checked_count: number
+  created_count: number
+  updated_count: number
+  skipped_count: number
 }
 
 export interface SupplierAutomationRunListParams {

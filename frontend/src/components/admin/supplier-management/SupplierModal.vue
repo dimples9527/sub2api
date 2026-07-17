@@ -2,7 +2,7 @@
   <Teleport to="body">
     <Transition name="sp-fade">
       <div v-if="show" class="supplier-management-page sp-overlay" @click.self="$emit('close')">
-        <section class="sp-modal" role="dialog" aria-modal="true" :aria-label="title">
+        <section class="sp-modal" :class="modalClass" role="dialog" aria-modal="true" :aria-label="title">
           <header class="sp-modal-head">
             <div><div class="sp-eyebrow">供应商管理</div><h3>{{ title }}</h3></div>
             <button class="sp-close" type="button" aria-label="关闭" title="关闭" @click="$emit('close')">×</button>
@@ -21,8 +21,9 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted } from 'vue'
 
-const props = withDefaults(defineProps<{ show: boolean; title: string; confirmText?: string }>(), {
+const props = withDefaults(defineProps<{ show: boolean; title: string; confirmText?: string; modalClass?: string }>(), {
   confirmText: '仅演示，不执行修改',
+  modalClass: '',
 })
 const emit = defineEmits<{ close: []; confirm: [] }>()
 const onKeydown = (event: KeyboardEvent) => {
