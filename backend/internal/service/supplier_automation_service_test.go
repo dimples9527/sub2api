@@ -141,6 +141,52 @@ func TestSupplierAutomationServiceIncludesFailedSupplierDetailsInPartialMessage(
 	require.Equal(t, run.Message, repo.tasks[SupplierAutomationTaskSync].LastMessage)
 }
 
+func TestSupplierAutomationServiceStoresStructuredProviderStageDetails(t *testing.T) {
+	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
+		SupplierAutomationTaskSync: {TaskCode: SupplierAutomationTaskSync, Name: "同步", Enabled: true, CronExpression: "*/15 * * * *", TimeoutSeconds: 600},
+	}}
+	syncSvc := &supplierAutomationSyncStub{result: SupplierProviderBatchSyncResult{
+		ProcessedCount: 1,
+		FailedCount:    1,
+		Results: []SupplierProviderSyncResult{{
+			ProviderID:   12,
+			ProviderName: "供应商 A",
+			Scope:        SupplierSyncScopeAll,
+			Status:       SupplierSyncStatusPartial,
+			Message:      "部分同步失败",
+			Stages: []SupplierProviderSyncStage{{
+				Scope:   SupplierSyncScopeAccounts,
+				Status:  SupplierSyncStatusFailed,
+				Message: "账号接口 404",
+				Counts:  SupplierSyncCounts{CheckedCount: 1},
+				EndpointResult: &SupplierProviderEndpointResult{
+					Endpoint:        "/accounts",
+					HTTPStatus:      404,
+					DurationMS:      35,
+					ResponseBytes:   18,
+					ResponseSummary: "404 page not found",
+					Error:           "supplier sub2api accounts failed with HTTP 404",
+				},
+			}},
+		}},
+	}}
+	service := NewSupplierAutomationService(repo, &supplierAutomationLockStub{acquired: true}, syncSvc, &supplierProviderDataRepoStub{})
+
+	run, err := service.Run(context.Background(), SupplierAutomationTaskSync, SupplierSyncTriggerManual)
+
+	require.NoError(t, err)
+	require.NotNil(t, run.ResultDetail)
+	require.Len(t, run.ResultDetail.Providers, 1)
+	provider := run.ResultDetail.Providers[0]
+	require.Equal(t, int64(12), provider.ProviderID)
+	require.Equal(t, "供应商 A", provider.ProviderName)
+	require.Len(t, provider.Stages, 1)
+	require.Equal(t, SupplierSyncScopeAccounts, provider.Stages[0].Scope)
+	require.Equal(t, 404, provider.Stages[0].HTTPStatus)
+	require.Equal(t, "404 page not found", provider.Stages[0].ResponseSummary)
+	require.NotNil(t, repo.runs[len(repo.runs)-1].ResultDetail)
+}
+
 func TestSupplierAutomationServiceRunsCleanupTask(t *testing.T) {
 	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
 		SupplierAutomationTaskCleanup: {

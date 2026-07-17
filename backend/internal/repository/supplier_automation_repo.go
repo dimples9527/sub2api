@@ -75,19 +75,19 @@ func (r *supplierAutomationRepository) CreateRun(ctx context.Context, run *servi
 	return r.db.QueryRowContext(ctx, `
 INSERT INTO supplier_automation_runs (
   task_code, trigger_source, status, message, processed_count,
-  success_count, failed_count, started_at
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+  success_count, failed_count, result_detail, started_at
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 RETURNING id, created_at`, run.TaskCode, run.TriggerSource, run.Status, run.Message,
-		run.ProcessedCount, run.SuccessCount, run.FailedCount, run.StartedAt).Scan(&run.ID, &run.CreatedAt)
+		run.ProcessedCount, run.SuccessCount, run.FailedCount, supplierAutomationRunDetailJSON(run.ResultDetail), run.StartedAt).Scan(&run.ID, &run.CreatedAt)
 }
 
 func (r *supplierAutomationRepository) FinishRun(ctx context.Context, run *service.SupplierAutomationRun) error {
 	_, err := r.db.ExecContext(ctx, `
 UPDATE supplier_automation_runs
 SET status=$2, message=$3, processed_count=$4, success_count=$5,
-    failed_count=$6, finished_at=$7
+    failed_count=$6, finished_at=$7, result_detail=$8
 WHERE id=$1`, run.ID, run.Status, run.Message, run.ProcessedCount,
-		run.SuccessCount, run.FailedCount, run.FinishedAt)
+		run.SuccessCount, run.FailedCount, run.FinishedAt, supplierAutomationRunDetailJSON(run.ResultDetail))
 	return err
 }
 
@@ -101,7 +101,7 @@ func (r *supplierAutomationRepository) ListRuns(ctx context.Context, params serv
 	queryArgs := append(append([]any{}, args...), params.PageSize, (params.Page-1)*params.PageSize)
 	rows, err := r.db.QueryContext(ctx, `
 SELECT id, task_code, trigger_source, status, message, processed_count,
-       success_count, failed_count, started_at, finished_at, created_at
+       success_count, failed_count, result_detail, started_at, finished_at, created_at
 FROM supplier_automation_runs
 WHERE `+where+fmt.Sprintf(" ORDER BY started_at DESC, id DESC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2), queryArgs...)
 	if err != nil {
@@ -120,6 +120,17 @@ WHERE `+where+fmt.Sprintf(" ORDER BY started_at DESC, id DESC LIMIT $%d OFFSET $
 		return service.SupplierAutomationRunListResult{}, err
 	}
 	return service.SupplierAutomationRunListResult{Items: items, Total: total, Page: params.Page, PageSize: params.PageSize}, nil
+}
+
+func supplierAutomationRunDetailJSON(detail *service.SupplierAutomationRunDetail) any {
+	if detail == nil {
+		return nil
+	}
+	raw, err := json.Marshal(detail)
+	if err != nil {
+		return nil
+	}
+	return string(raw)
 }
 
 func (r *supplierAutomationRepository) RecoverRunning(ctx context.Context, message string) error {
@@ -183,10 +194,17 @@ type supplierAutomationRunScanner interface{ Scan(dest ...any) error }
 func scanSupplierAutomationRun(scanner supplierAutomationRunScanner) (service.SupplierAutomationRun, error) {
 	var item service.SupplierAutomationRun
 	var finishedAt sql.NullTime
+	var detailRaw sql.NullString
 	if err := scanner.Scan(&item.ID, &item.TaskCode, &item.TriggerSource, &item.Status,
 		&item.Message, &item.ProcessedCount, &item.SuccessCount, &item.FailedCount,
-		&item.StartedAt, &finishedAt, &item.CreatedAt); err != nil {
+		&detailRaw, &item.StartedAt, &finishedAt, &item.CreatedAt); err != nil {
 		return service.SupplierAutomationRun{}, err
+	}
+	if detailRaw.Valid && strings.TrimSpace(detailRaw.String) != "" {
+		var detail service.SupplierAutomationRunDetail
+		if err := json.Unmarshal([]byte(detailRaw.String), &detail); err == nil {
+			item.ResultDetail = &detail
+		}
 	}
 	if finishedAt.Valid {
 		item.FinishedAt = &finishedAt.Time

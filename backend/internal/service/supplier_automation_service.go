@@ -38,17 +38,59 @@ type SupplierAutomationConfig struct {
 }
 
 type SupplierAutomationRun struct {
-	ID             int64      `json:"id"`
-	TaskCode       string     `json:"task_code"`
-	TriggerSource  string     `json:"trigger_source"`
-	Status         string     `json:"status"`
-	Message        string     `json:"message"`
-	ProcessedCount int        `json:"processed_count"`
-	SuccessCount   int        `json:"success_count"`
-	FailedCount    int        `json:"failed_count"`
-	StartedAt      time.Time  `json:"started_at"`
-	FinishedAt     *time.Time `json:"finished_at,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
+	ID             int64                        `json:"id"`
+	TaskCode       string                       `json:"task_code"`
+	TriggerSource  string                       `json:"trigger_source"`
+	Status         string                       `json:"status"`
+	Message        string                       `json:"message"`
+	ProcessedCount int                          `json:"processed_count"`
+	SuccessCount   int                          `json:"success_count"`
+	FailedCount    int                          `json:"failed_count"`
+	ResultDetail   *SupplierAutomationRunDetail `json:"result_detail,omitempty"`
+	StartedAt      time.Time                    `json:"started_at"`
+	FinishedAt     *time.Time                   `json:"finished_at,omitempty"`
+	CreatedAt      time.Time                    `json:"created_at"`
+}
+
+type SupplierAutomationRunDetail struct {
+	Providers []SupplierAutomationProviderRunDetail `json:"providers,omitempty"`
+	Cleanup   *SupplierAutomationCleanupRunDetail   `json:"cleanup,omitempty"`
+}
+
+type SupplierAutomationProviderRunDetail struct {
+	ProviderID   int64                              `json:"provider_id"`
+	ProviderName string                             `json:"provider_name"`
+	Scope        string                             `json:"scope"`
+	Status       string                             `json:"status"`
+	Message      string                             `json:"message"`
+	Counts       SupplierSyncCounts                 `json:"counts"`
+	Stages       []SupplierAutomationStageRunDetail `json:"stages,omitempty"`
+	StartedAt    time.Time                          `json:"started_at"`
+	FinishedAt   time.Time                          `json:"finished_at"`
+}
+
+type SupplierAutomationStageRunDetail struct {
+	Scope           string             `json:"scope"`
+	Status          string             `json:"status"`
+	Message         string             `json:"message"`
+	Counts          SupplierSyncCounts `json:"counts"`
+	Endpoint        string             `json:"endpoint,omitempty"`
+	HTTPStatus      int                `json:"http_status,omitempty"`
+	DurationMS      int64              `json:"duration_ms,omitempty"`
+	ResponseBytes   int                `json:"response_bytes,omitempty"`
+	ResponseSummary string             `json:"response_summary,omitempty"`
+	ParsedSummary   string             `json:"parsed_summary,omitempty"`
+	ParseError      string             `json:"parse_error,omitempty"`
+	Error           string             `json:"error,omitempty"`
+}
+
+type SupplierAutomationCleanupRunDetail struct {
+	AutomationRuns  int `json:"automation_runs"`
+	SyncRuns        int `json:"sync_runs"`
+	MetricSnapshots int `json:"metric_snapshots"`
+	DailyStats      int `json:"daily_stats"`
+	Accounts        int `json:"accounts"`
+	Groups          int `json:"groups"`
 }
 
 type SupplierAutomationRunListParams struct {
@@ -208,6 +250,7 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 		run.ProcessedCount = result.ProcessedCount
 		run.SuccessCount = result.SuccessCount
 		run.FailedCount = result.FailedCount
+		run.ResultDetail = supplierAutomationRunDetailFromBatch(result)
 		if err != nil {
 			return err
 		}
@@ -229,10 +272,59 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 			return err
 		}
 		run.ProcessedCount = counts.AutomationRuns + counts.SyncRuns + counts.MetricSnapshots + counts.DailyStats + counts.Accounts + counts.Groups
+		run.ResultDetail = &SupplierAutomationRunDetail{Cleanup: &SupplierAutomationCleanupRunDetail{
+			AutomationRuns:  counts.AutomationRuns,
+			SyncRuns:        counts.SyncRuns,
+			MetricSnapshots: counts.MetricSnapshots,
+			DailyStats:      counts.DailyStats,
+			Accounts:        counts.Accounts,
+			Groups:          counts.Groups,
+		}}
 		return nil
 	default:
 		return ErrSupplierProviderInvalid
 	}
+}
+
+func supplierAutomationRunDetailFromBatch(result SupplierProviderBatchSyncResult) *SupplierAutomationRunDetail {
+	detail := &SupplierAutomationRunDetail{Providers: make([]SupplierAutomationProviderRunDetail, 0, len(result.Results))}
+	for _, item := range result.Results {
+		provider := SupplierAutomationProviderRunDetail{
+			ProviderID:   item.ProviderID,
+			ProviderName: item.ProviderName,
+			Scope:        item.Scope,
+			Status:       item.Status,
+			Message:      item.Message,
+			Counts:       item.Counts,
+			StartedAt:    item.StartedAt,
+			FinishedAt:   item.FinishedAt,
+			Stages:       make([]SupplierAutomationStageRunDetail, 0, len(item.Stages)),
+		}
+		for _, stage := range item.Stages {
+			stageDetail := SupplierAutomationStageRunDetail{
+				Scope:   stage.Scope,
+				Status:  stage.Status,
+				Message: stage.Message,
+				Counts:  stage.Counts,
+			}
+			if stage.EndpointResult != nil {
+				stageDetail.Endpoint = stage.EndpointResult.Endpoint
+				stageDetail.HTTPStatus = stage.EndpointResult.HTTPStatus
+				stageDetail.DurationMS = stage.EndpointResult.DurationMS
+				stageDetail.ResponseBytes = stage.EndpointResult.ResponseBytes
+				stageDetail.ResponseSummary = stage.EndpointResult.ResponseSummary
+				stageDetail.ParsedSummary = stage.EndpointResult.ParsedSummary
+				stageDetail.ParseError = stage.EndpointResult.ParseError
+				stageDetail.Error = stage.EndpointResult.Error
+			}
+			provider.Stages = append(provider.Stages, stageDetail)
+		}
+		detail.Providers = append(detail.Providers, provider)
+	}
+	if len(detail.Providers) == 0 {
+		return nil
+	}
+	return detail
 }
 
 func supplierAutomationBatchFailureMessage(result SupplierProviderBatchSyncResult) string {
