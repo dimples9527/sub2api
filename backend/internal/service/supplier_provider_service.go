@@ -275,10 +275,7 @@ func (s *SupplierProviderService) Create(ctx context.Context, params SupplierPro
 		return nil, err
 	}
 	if strings.TrimSpace(params.Password) != "" {
-		provider.PasswordEncrypted, err = s.encryptor.Encrypt(strings.TrimSpace(params.Password))
-		if err != nil {
-			return nil, fmt.Errorf("encrypt supplier credential: %w", err)
-		}
+		provider.PasswordEncrypted = strings.TrimSpace(params.Password)
 	}
 	if err := s.repo.Create(ctx, provider); err != nil {
 		return nil, fmt.Errorf("create supplier provider: %w", err)
@@ -302,10 +299,7 @@ func (s *SupplierProviderService) Update(ctx context.Context, id int64, params S
 	provider.CreatedAt = existing.CreatedAt
 	provider.PasswordEncrypted = existing.PasswordEncrypted
 	if strings.TrimSpace(params.Password) != "" {
-		provider.PasswordEncrypted, err = s.encryptor.Encrypt(strings.TrimSpace(params.Password))
-		if err != nil {
-			return nil, fmt.Errorf("encrypt supplier credential: %w", err)
-		}
+		provider.PasswordEncrypted = strings.TrimSpace(params.Password)
 	}
 	if s.authConfigurationChanged(existing, provider) {
 		if err := s.deleteToken(ctx, id); err != nil {

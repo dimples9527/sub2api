@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -57,9 +58,15 @@ type SupplierProviderRemoteTester interface {
 	TestEndpoint(ctx context.Context, provider *SupplierProvider, password string, scope string) (SupplierProviderEndpointTestResult, error)
 }
 
+type SupplierProviderRemoteDiagnostics interface {
+	LastEndpointResult(providerID int64, scope string) *SupplierProviderEndpointResult
+}
+
 type SupplierSub2APIClient struct {
-	httpClient *http.Client
-	tokenCache SupplierProviderTokenCache
+	httpClient       *http.Client
+	tokenCache       SupplierProviderTokenCache
+	endpointResultMu sync.Mutex
+	endpointResults  map[string]SupplierProviderEndpointResult
 }
 
 type supplierSub2APILoginResult struct {
@@ -71,7 +78,7 @@ func NewSupplierSub2APIClient(httpClient *http.Client, tokenCache SupplierProvid
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: defaultSupplierSub2APIHTTPTimeout}
 	}
-	return &SupplierSub2APIClient{httpClient: httpClient, tokenCache: tokenCache}
+	return &SupplierSub2APIClient{httpClient: httpClient, tokenCache: tokenCache, endpointResults: make(map[string]SupplierProviderEndpointResult)}
 }
 
 func (c *SupplierSub2APIClient) FetchAccounts(ctx context.Context, provider *SupplierProvider, password string) ([]SupplierProviderRemoteAccount, error) {
@@ -80,6 +87,7 @@ func (c *SupplierSub2APIClient) FetchAccounts(ctx context.Context, provider *Sup
 		raw, err := c.authenticatedGet(ctx, provider, password, endpoint, "accounts")
 		if err == nil {
 			accounts, parseErr := parseSupplierSub2APIAccounts(raw)
+			c.annotateEndpointParse(provider.ID, "accounts", "accounts", raw, parseErr)
 			return accounts, parseErr
 		}
 		lastErr = err
@@ -103,6 +111,7 @@ func (c *SupplierSub2APIClient) FetchGroups(ctx context.Context, provider *Suppl
 		return nil, err
 	}
 	groups, parseErr := parseSupplierSub2APIGroups(raw)
+	c.annotateEndpointParse(provider.ID, "groups", "groups", raw, parseErr)
 	return groups, parseErr
 }
 
@@ -112,6 +121,7 @@ func (c *SupplierSub2APIClient) FetchBalance(ctx context.Context, provider *Supp
 		return 0, err
 	}
 	balance, parseErr := parseSupplierSub2APINumberField(raw, "balance")
+	c.annotateEndpointParse(provider.ID, "balance", "balance", raw, parseErr)
 	return balance, parseErr
 }
 
@@ -121,6 +131,7 @@ func (c *SupplierSub2APIClient) FetchCost(ctx context.Context, provider *Supplie
 		return 0, err
 	}
 	cost, parseErr := parseSupplierSub2APINumberField(raw, "today_actual_cost")
+	c.annotateEndpointParse(provider.ID, "cost", "cost", raw, parseErr)
 	return cost, parseErr
 }
 
@@ -193,12 +204,22 @@ func (c *SupplierSub2APIClient) authenticatedGet(ctx context.Context, provider *
 		if err != nil {
 			return nil, err
 		}
+		startedAt := time.Now()
 		raw, status, err := c.doJSON(ctx, http.MethodGet, provider, path, label, token, nil)
+		c.recordEndpointResult(provider.ID, label, SupplierProviderEndpointResult{
+			Endpoint:        path,
+			HTTPStatus:      status,
+			DurationMS:      time.Since(startedAt).Milliseconds(),
+			ResponseBytes:   len(raw),
+			ResponseSummary: supplierSub2APISafeResponseText(raw, supplierSub2APITestResponseSummaryLimit),
+			Error:           supplierSub2APIErrorText(err),
+		})
 		if err != nil {
 			return nil, fmt.Errorf("supplier sub2api %s request failed: %w", label, err)
 		}
 		if status >= 200 && status < 300 && !supplierSub2APIBusinessAuthFailure(raw) {
 			if err := supplierSub2APIEnvelopeOK(raw); err != nil {
+				c.updateEndpointError(provider.ID, label, err)
 				if attempt == 0 && supplierSub2APIErrorLooksAuth(err) {
 					c.deleteToken(ctx, provider)
 					lastErr = err
@@ -209,6 +230,7 @@ func (c *SupplierSub2APIClient) authenticatedGet(ctx context.Context, provider *
 			return raw, nil
 		}
 		err = supplierSub2APIHTTPError(label, status, raw)
+		c.updateEndpointError(provider.ID, label, err)
 		if attempt == 0 && supplierSub2APIAuthFailure(status, raw, err) {
 			c.deleteToken(ctx, provider)
 			lastErr = err
@@ -218,6 +240,50 @@ func (c *SupplierSub2APIClient) authenticatedGet(ctx context.Context, provider *
 		return nil, err
 	}
 	return nil, fmt.Errorf("supplier sub2api %s failed after auth retry: %w", label, lastErr)
+}
+
+func (c *SupplierSub2APIClient) LastEndpointResult(providerID int64, scope string) *SupplierProviderEndpointResult {
+	c.endpointResultMu.Lock()
+	defer c.endpointResultMu.Unlock()
+	if c.endpointResults == nil {
+		return nil
+	}
+	result, ok := c.endpointResults[supplierSub2APIEndpointResultKey(providerID, scope)]
+	if !ok {
+		return nil
+	}
+	return &result
+}
+
+func (c *SupplierSub2APIClient) recordEndpointResult(providerID int64, scope string, result SupplierProviderEndpointResult) {
+	c.endpointResultMu.Lock()
+	defer c.endpointResultMu.Unlock()
+	if c.endpointResults == nil {
+		c.endpointResults = make(map[string]SupplierProviderEndpointResult)
+	}
+	c.endpointResults[supplierSub2APIEndpointResultKey(providerID, scope)] = result
+}
+
+func (c *SupplierSub2APIClient) updateEndpointError(providerID int64, scope string, err error) {
+	c.endpointResultMu.Lock()
+	defer c.endpointResultMu.Unlock()
+	key := supplierSub2APIEndpointResultKey(providerID, scope)
+	result := c.endpointResults[key]
+	result.Error = supplierSub2APIErrorText(err)
+	c.endpointResults[key] = result
+}
+
+func (c *SupplierSub2APIClient) annotateEndpointParse(providerID int64, scope, parseScope string, raw []byte, parseErr error) {
+	c.endpointResultMu.Lock()
+	defer c.endpointResultMu.Unlock()
+	key := supplierSub2APIEndpointResultKey(providerID, scope)
+	result := c.endpointResults[key]
+	result.ParsedSummary, result.ParseError = supplierSub2APIParsedSummary(parseScope, raw, parseErr)
+	c.endpointResults[key] = result
+}
+
+func supplierSub2APIEndpointResultKey(providerID int64, scope string) string {
+	return fmt.Sprintf("%d:%s", providerID, strings.TrimSpace(scope))
 }
 
 func (c *SupplierSub2APIClient) ensureToken(ctx context.Context, provider *SupplierProvider, password string) (SupplierProviderAuthToken, error) {
@@ -795,6 +861,40 @@ func supplierSub2APIParsedDiagnostic(scope string, raw []byte) (any, string) {
 		return map[string]any{"today_actual_cost": value}, ""
 	default:
 		return nil, "unsupported scope"
+	}
+}
+
+func supplierSub2APIParsedSummary(scope string, raw []byte, parseErr error) (string, string) {
+	if parseErr != nil {
+		return "", parseErr.Error()
+	}
+	switch scope {
+	case SupplierSyncScopeAccounts:
+		items, err := parseSupplierSub2APIAccounts(raw)
+		if err != nil {
+			return "", err.Error()
+		}
+		return fmt.Sprintf("账号 %d 个", len(items)), ""
+	case SupplierSyncScopeGroups:
+		items, err := parseSupplierSub2APIGroups(raw)
+		if err != nil {
+			return "", err.Error()
+		}
+		return fmt.Sprintf("分组 %d 个", len(items)), ""
+	case SupplierSyncScopeBalance:
+		value, err := parseSupplierSub2APINumberField(raw, "balance")
+		if err != nil {
+			return "", err.Error()
+		}
+		return fmt.Sprintf("余额 %.6f", value), ""
+	case SupplierSyncScopeCost:
+		value, err := parseSupplierSub2APINumberField(raw, "today_actual_cost")
+		if err != nil {
+			return "", err.Error()
+		}
+		return fmt.Sprintf("今日成本 %.6f", value), ""
+	default:
+		return "", "unsupported scope"
 	}
 }
 

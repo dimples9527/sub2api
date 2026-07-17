@@ -203,14 +203,26 @@ func validSupplierProviderParams() SupplierProviderUpsertParams {
 	}
 }
 
-func TestSupplierProviderServiceCreateEncryptsAndRedactsCredential(t *testing.T) {
+func TestSupplierProviderServiceCreateStoresPlainAndRedactsCredential(t *testing.T) {
 	repo := &supplierProviderRepoStub{}
 	service := NewSupplierProviderService(repo, supplierEncryptorStub{})
 	created, err := service.Create(context.Background(), validSupplierProviderParams())
 	require.NoError(t, err)
 	require.True(t, created.CredentialConfigured)
 	require.Empty(t, created.PasswordEncrypted)
-	require.Equal(t, "encrypted:secret", repo.items[0].PasswordEncrypted)
+	require.Equal(t, "secret", repo.items[0].PasswordEncrypted)
+}
+
+func TestSupplierProviderServiceUpdateStoresPlainCredential(t *testing.T) {
+	repo := &supplierProviderRepoStub{next: 1, items: []*SupplierProvider{{ID: 1, Code: "primary", PasswordEncrypted: "old-secret"}}}
+	service := NewSupplierProviderService(repo, supplierEncryptorStub{})
+	params := validSupplierProviderParams()
+	params.Password = "new-secret"
+
+	_, err := service.Update(context.Background(), 1, params)
+
+	require.NoError(t, err)
+	require.Equal(t, "new-secret", repo.items[0].PasswordEncrypted)
 }
 
 func TestSupplierProviderServiceCreateSub2APIClearsUsername(t *testing.T) {

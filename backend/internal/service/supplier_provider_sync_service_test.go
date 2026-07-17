@@ -138,6 +138,13 @@ func (l *supplierSyncLockStub) ReleaseSyncLock(context.Context, int64, string) e
 	return nil
 }
 
+type supplierDecryptFailureEncryptor struct{}
+
+func (supplierDecryptFailureEncryptor) Encrypt(value string) (string, error) { return value, nil }
+func (supplierDecryptFailureEncryptor) Decrypt(string) (string, error) {
+	return "", errors.New("cipher: message authentication failed")
+}
+
 func TestSupplierProviderSyncServiceSyncAccountsDecryptsPasswordAndPersists(t *testing.T) {
 	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
 		ID:                42,
@@ -161,6 +168,26 @@ func TestSupplierProviderSyncServiceSyncAccountsDecryptsPasswordAndPersists(t *t
 	require.Len(t, dataRepo.createdRuns, 1)
 	require.Len(t, dataRepo.finishedRuns, 1)
 	require.Equal(t, 1, lock.released)
+}
+
+func TestSupplierProviderSyncServiceUsesStoredCredentialWhenDecryptFails(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID:                42,
+		Code:              "supplier-a",
+		ProviderType:      "sub2api",
+		Enabled:           true,
+		PasswordEncrypted: "plain-secret",
+	}}}
+	dataRepo := &supplierProviderDataRepoStub{}
+	remote := &supplierRemoteClientStub{}
+	service := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierDecryptFailureEncryptor{}, &supplierSyncLockStub{acquired: true})
+
+	result, err := service.SyncAccounts(context.Background(), 42, SupplierSyncTriggerManual)
+
+	require.NoError(t, err)
+	require.Equal(t, SupplierSyncStatusSuccess, result.Status)
+	require.Equal(t, []string{"plain-secret"}, remote.passwords)
+	require.Equal(t, 1, dataRepo.accountsCalls)
 }
 
 func TestSupplierProviderSyncServiceRejectsUnsupportedProviderType(t *testing.T) {

@@ -115,21 +115,34 @@ type SupplierProviderDataRepository interface {
 }
 
 type SupplierProviderSyncResult struct {
-	ProviderID int64                       `json:"provider_id"`
-	Scope      string                      `json:"scope"`
-	Status     string                      `json:"status"`
-	Message    string                      `json:"message"`
-	Counts     SupplierSyncCounts          `json:"counts"`
-	Stages     []SupplierProviderSyncStage `json:"stages,omitempty"`
-	StartedAt  time.Time                   `json:"started_at"`
-	FinishedAt time.Time                   `json:"finished_at"`
+	ProviderID   int64                       `json:"provider_id"`
+	ProviderName string                      `json:"provider_name"`
+	Scope        string                      `json:"scope"`
+	Status       string                      `json:"status"`
+	Message      string                      `json:"message"`
+	Counts       SupplierSyncCounts          `json:"counts"`
+	Stages       []SupplierProviderSyncStage `json:"stages,omitempty"`
+	StartedAt    time.Time                   `json:"started_at"`
+	FinishedAt   time.Time                   `json:"finished_at"`
 }
 
 type SupplierProviderSyncStage struct {
-	Scope   string             `json:"scope"`
-	Status  string             `json:"status"`
-	Message string             `json:"message"`
-	Counts  SupplierSyncCounts `json:"counts"`
+	Scope          string                          `json:"scope"`
+	Status         string                          `json:"status"`
+	Message        string                          `json:"message"`
+	Counts         SupplierSyncCounts              `json:"counts"`
+	EndpointResult *SupplierProviderEndpointResult `json:"endpoint_result,omitempty"`
+}
+
+type SupplierProviderEndpointResult struct {
+	Endpoint        string `json:"endpoint"`
+	HTTPStatus      int    `json:"http_status"`
+	DurationMS      int64  `json:"duration_ms"`
+	ResponseBytes   int    `json:"response_bytes"`
+	ResponseSummary string `json:"response_summary"`
+	ParsedSummary   string `json:"parsed_summary,omitempty"`
+	ParseError      string `json:"parse_error,omitempty"`
+	Error           string `json:"error,omitempty"`
 }
 
 type SupplierProviderBatchSyncResult struct {
@@ -198,42 +211,42 @@ func NewSupplierProviderSyncService(providerRepo SupplierProviderRepository, dat
 	}
 }
 
+func (s *SupplierProviderSyncService) providerPassword(provider *SupplierProvider) string {
+	stored := strings.TrimSpace(provider.PasswordEncrypted)
+	if stored == "" || s.encryptor == nil {
+		return stored
+	}
+	password, err := s.encryptor.Decrypt(stored)
+	if err != nil {
+		return stored
+	}
+	return password
+}
+
 func (s *SupplierProviderSyncService) SyncAccounts(ctx context.Context, providerID int64, trigger string) (SupplierProviderSyncResult, error) {
 	return s.syncWithLock(ctx, providerID, func(provider *SupplierProvider) (SupplierProviderSyncResult, error) {
-		password, err := s.encryptor.Decrypt(provider.PasswordEncrypted)
-		if err != nil {
-			return SupplierProviderSyncResult{}, fmt.Errorf("decrypt supplier provider credential: %w", err)
-		}
+		password := s.providerPassword(provider)
 		return s.syncStage(ctx, provider, password, SupplierSyncScopeAccounts, trigger, true)
 	})
 }
 
 func (s *SupplierProviderSyncService) SyncGroups(ctx context.Context, providerID int64, trigger string) (SupplierProviderSyncResult, error) {
 	return s.syncWithLock(ctx, providerID, func(provider *SupplierProvider) (SupplierProviderSyncResult, error) {
-		password, err := s.encryptor.Decrypt(provider.PasswordEncrypted)
-		if err != nil {
-			return SupplierProviderSyncResult{}, fmt.Errorf("decrypt supplier provider credential: %w", err)
-		}
+		password := s.providerPassword(provider)
 		return s.syncStage(ctx, provider, password, SupplierSyncScopeGroups, trigger, true)
 	})
 }
 
 func (s *SupplierProviderSyncService) SyncBalance(ctx context.Context, providerID int64, trigger string) (SupplierProviderSyncResult, error) {
 	return s.syncWithLock(ctx, providerID, func(provider *SupplierProvider) (SupplierProviderSyncResult, error) {
-		password, err := s.encryptor.Decrypt(provider.PasswordEncrypted)
-		if err != nil {
-			return SupplierProviderSyncResult{}, fmt.Errorf("decrypt supplier provider credential: %w", err)
-		}
+		password := s.providerPassword(provider)
 		return s.syncStage(ctx, provider, password, SupplierSyncScopeBalance, trigger, true)
 	})
 }
 
 func (s *SupplierProviderSyncService) SyncCost(ctx context.Context, providerID int64, day time.Time, trigger string) (SupplierProviderSyncResult, error) {
 	return s.syncWithLock(ctx, providerID, func(provider *SupplierProvider) (SupplierProviderSyncResult, error) {
-		password, err := s.encryptor.Decrypt(provider.PasswordEncrypted)
-		if err != nil {
-			return SupplierProviderSyncResult{}, fmt.Errorf("decrypt supplier provider credential: %w", err)
-		}
+		password := s.providerPassword(provider)
 		return s.syncCostStage(ctx, provider, password, day, trigger, true)
 	})
 }
@@ -243,10 +256,7 @@ func (s *SupplierProviderSyncService) TestEndpoint(ctx context.Context, provider
 	if err != nil {
 		return SupplierProviderEndpointTestResult{}, err
 	}
-	password, err := s.encryptor.Decrypt(provider.PasswordEncrypted)
-	if err != nil {
-		return SupplierProviderEndpointTestResult{}, fmt.Errorf("decrypt supplier provider credential: %w", err)
-	}
+	password := s.providerPassword(provider)
 	tester, ok := s.remote.(SupplierProviderRemoteTester)
 	if !ok {
 		return SupplierProviderEndpointTestResult{}, fmt.Errorf("supplier provider remote client does not support endpoint test")
@@ -263,16 +273,13 @@ func (s *SupplierProviderSyncService) TestEndpoint(ctx context.Context, provider
 
 func (s *SupplierProviderSyncService) SyncAll(ctx context.Context, providerID int64, trigger string) (SupplierProviderSyncResult, error) {
 	return s.syncWithLock(ctx, providerID, func(provider *SupplierProvider) (SupplierProviderSyncResult, error) {
-		password, err := s.encryptor.Decrypt(provider.PasswordEncrypted)
-		if err != nil {
-			return SupplierProviderSyncResult{}, fmt.Errorf("decrypt supplier provider credential: %w", err)
-		}
+		password := s.providerPassword(provider)
 		startedAt := time.Now()
 		run := &SupplierProviderSyncRun{ProviderID: provider.ID, SyncScope: SupplierSyncScopeAll, TriggerSource: normalizeSupplierSyncTrigger(trigger), Status: SupplierSyncStatusRunning, StartedAt: startedAt}
 		if err := s.dataRepo.CreateSyncRun(ctx, run); err != nil {
 			return SupplierProviderSyncResult{}, fmt.Errorf("create supplier sync run: %w", err)
 		}
-		result := SupplierProviderSyncResult{ProviderID: provider.ID, Scope: SupplierSyncScopeAll, Status: SupplierSyncStatusSuccess, StartedAt: startedAt}
+		result := SupplierProviderSyncResult{ProviderID: provider.ID, ProviderName: provider.Name, Scope: SupplierSyncScopeAll, Status: SupplierSyncStatusSuccess, StartedAt: startedAt}
 		for _, stageFn := range []func() SupplierProviderSyncStage{
 			func() SupplierProviderSyncStage {
 				return s.syncStageAsSummary(ctx, provider, password, SupplierSyncScopeAccounts)
@@ -323,7 +330,7 @@ func (s *SupplierProviderSyncService) SyncAllEnabled(ctx context.Context, trigge
 	for _, provider := range providers {
 		item, err := s.SyncAll(ctx, provider.ID, trigger)
 		if err != nil {
-			item = SupplierProviderSyncResult{ProviderID: provider.ID, Scope: SupplierSyncScopeAll, Status: SupplierSyncStatusFailed, Message: err.Error(), StartedAt: time.Now(), FinishedAt: time.Now()}
+			item = SupplierProviderSyncResult{ProviderID: provider.ID, ProviderName: provider.Name, Scope: SupplierSyncScopeAll, Status: SupplierSyncStatusFailed, Message: err.Error(), StartedAt: time.Now(), FinishedAt: time.Now()}
 		}
 		if item.Status == SupplierSyncStatusSuccess {
 			result.SuccessCount++
@@ -370,7 +377,7 @@ func (s *SupplierProviderSyncService) syncStage(ctx context.Context, provider *S
 		return s.syncCostStage(ctx, provider, password, time.Now(), trigger, createRun)
 	}
 	startedAt := time.Now()
-	result := SupplierProviderSyncResult{ProviderID: provider.ID, Scope: scope, Status: SupplierSyncStatusRunning, StartedAt: startedAt}
+	result := SupplierProviderSyncResult{ProviderID: provider.ID, ProviderName: provider.Name, Scope: scope, Status: SupplierSyncStatusRunning, StartedAt: startedAt}
 	run := &SupplierProviderSyncRun{ProviderID: provider.ID, SyncScope: scope, TriggerSource: normalizeSupplierSyncTrigger(trigger), Status: SupplierSyncStatusRunning, StartedAt: startedAt}
 	if createRun {
 		if err := s.dataRepo.CreateSyncRun(ctx, run); err != nil {
@@ -403,7 +410,7 @@ func (s *SupplierProviderSyncService) syncStage(ctx context.Context, provider *S
 
 func (s *SupplierProviderSyncService) syncCostStage(ctx context.Context, provider *SupplierProvider, password string, day time.Time, trigger string, createRun bool) (SupplierProviderSyncResult, error) {
 	startedAt := time.Now()
-	result := SupplierProviderSyncResult{ProviderID: provider.ID, Scope: SupplierSyncScopeCost, Status: SupplierSyncStatusRunning, StartedAt: startedAt}
+	result := SupplierProviderSyncResult{ProviderID: provider.ID, ProviderName: provider.Name, Scope: SupplierSyncScopeCost, Status: SupplierSyncStatusRunning, StartedAt: startedAt}
 	run := &SupplierProviderSyncRun{ProviderID: provider.ID, SyncScope: SupplierSyncScopeCost, TriggerSource: normalizeSupplierSyncTrigger(trigger), Status: SupplierSyncStatusRunning, StartedAt: startedAt}
 	if createRun {
 		if err := s.dataRepo.CreateSyncRun(ctx, run); err != nil {
@@ -471,7 +478,7 @@ func (s *SupplierProviderSyncService) syncStageAsSummary(ctx context.Context, pr
 		result.Status = SupplierSyncStatusFailed
 		result.Message = err.Error()
 	}
-	return SupplierProviderSyncStage{Scope: scope, Status: result.Status, Message: result.Message, Counts: result.Counts}
+	return SupplierProviderSyncStage{Scope: scope, Status: result.Status, Message: result.Message, Counts: result.Counts, EndpointResult: s.lastEndpointResult(provider.ID, scope)}
 }
 
 func (s *SupplierProviderSyncService) syncCostStageAsSummary(ctx context.Context, provider *SupplierProvider, password string, day time.Time) SupplierProviderSyncStage {
@@ -480,7 +487,15 @@ func (s *SupplierProviderSyncService) syncCostStageAsSummary(ctx context.Context
 		result.Status = SupplierSyncStatusFailed
 		result.Message = err.Error()
 	}
-	return SupplierProviderSyncStage{Scope: SupplierSyncScopeCost, Status: result.Status, Message: result.Message, Counts: result.Counts}
+	return SupplierProviderSyncStage{Scope: SupplierSyncScopeCost, Status: result.Status, Message: result.Message, Counts: result.Counts, EndpointResult: s.lastEndpointResult(provider.ID, SupplierSyncScopeCost)}
+}
+
+func (s *SupplierProviderSyncService) lastEndpointResult(providerID int64, scope string) *SupplierProviderEndpointResult {
+	diagnostics, ok := s.remote.(SupplierProviderRemoteDiagnostics)
+	if !ok {
+		return nil
+	}
+	return diagnostics.LastEndpointResult(providerID, scope)
 }
 
 func allStagesFailed(stages []SupplierProviderSyncStage) bool {
