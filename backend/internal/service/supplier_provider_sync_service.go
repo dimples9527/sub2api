@@ -57,11 +57,19 @@ type SupplierProviderAccountListResult struct {
 	PageSize int                       `json:"page_size"`
 }
 
+type SupplierProviderGroupSummary struct {
+	GroupCount         int64 `json:"group_count"`
+	AccountCount       int64 `json:"account_count"`
+	LinkedGroupCount   int64 `json:"linked_group_count"`
+	UnlinkedGroupCount int64 `json:"unlinked_group_count"`
+}
+
 type SupplierProviderGroupListResult struct {
-	Items    []SupplierProviderGroup `json:"items"`
-	Total    int64                   `json:"total"`
-	Page     int                     `json:"page"`
-	PageSize int                     `json:"page_size"`
+	Items    []SupplierProviderGroup      `json:"items"`
+	Total    int64                        `json:"total"`
+	Page     int                          `json:"page"`
+	PageSize int                          `json:"page_size"`
+	Summary  SupplierProviderGroupSummary `json:"summary"`
 }
 
 type SupplierSyncCounts struct {

@@ -59,9 +59,26 @@ func (r *supplierProviderDataRepository) ListGroups(ctx context.Context, params 
 	params = normalizeSupplierProviderDataListParams(params)
 	where, args := supplierProviderDataWhere("g", params)
 
-	var total int64
-	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM supplier_provider_groups g JOIN supplier_providers p ON p.id = g.provider_id WHERE "+where, args...).Scan(&total); err != nil {
-		return service.SupplierProviderGroupListResult{}, fmt.Errorf("count supplier provider groups: %w", err)
+	var summary service.SupplierProviderGroupSummary
+	if err := r.db.QueryRowContext(ctx, `
+SELECT COUNT(*) AS group_count,
+       COALESCE(SUM(account_count), 0) AS account_count,
+       COUNT(*) FILTER (WHERE account_count > 0) AS linked_group_count,
+       COUNT(*) FILTER (WHERE account_count = 0) AS unlinked_group_count
+FROM (
+  SELECT g.id, COUNT(a.id) FILTER (WHERE a.active = TRUE) AS account_count
+  FROM supplier_provider_groups g
+  JOIN supplier_providers p ON p.id = g.provider_id
+  LEFT JOIN supplier_provider_accounts a ON a.provider_id = g.provider_id AND a.group_key = g.upstream_group_key
+  WHERE `+where+`
+  GROUP BY g.id
+) matched_groups`, args...).Scan(
+		&summary.GroupCount,
+		&summary.AccountCount,
+		&summary.LinkedGroupCount,
+		&summary.UnlinkedGroupCount,
+	); err != nil {
+		return service.SupplierProviderGroupListResult{}, fmt.Errorf("summarize supplier provider groups: %w", err)
 	}
 
 	queryArgs := append(append([]any{}, args...), params.PageSize, (params.Page-1)*params.PageSize)
@@ -90,7 +107,13 @@ WHERE `+where+fmt.Sprintf(" GROUP BY g.id, p.name ORDER BY g.active DESC, g.last
 	if err := rows.Err(); err != nil {
 		return service.SupplierProviderGroupListResult{}, fmt.Errorf("iterate supplier provider groups: %w", err)
 	}
-	return service.SupplierProviderGroupListResult{Items: items, Total: total, Page: params.Page, PageSize: params.PageSize}, nil
+	return service.SupplierProviderGroupListResult{
+		Items:    items,
+		Total:    summary.GroupCount,
+		Page:     params.Page,
+		PageSize: params.PageSize,
+		Summary:  summary,
+	}, nil
 }
 
 func (r *supplierProviderDataRepository) ReplaceAccounts(ctx context.Context, providerID int64, items []service.SupplierProviderRemoteAccount, seenAt time.Time) (service.SupplierSyncCounts, error) {

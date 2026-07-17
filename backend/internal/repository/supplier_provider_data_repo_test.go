@@ -145,6 +145,41 @@ func TestSupplierProviderDataRepositoryListAccountsPaginates(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestSupplierProviderDataRepositoryListGroupsIncludesFilteredSummary(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	active := true
+	now := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) AS group_count")).
+		WithArgs(int64(42), active, "%vip%").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"group_count", "account_count", "linked_group_count", "unlinked_group_count",
+		}).AddRow(int64(4), int64(9), int64(3), int64(1)))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM supplier_provider_groups g")).
+		WithArgs(int64(42), active, "%vip%", 20, 20).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "provider_id", "provider_name", "upstream_group_key", "name",
+			"rate_multiplier", "raw_status", "active", "account_count", "last_seen_at", "inactive_at",
+		}).AddRow(int64(7), int64(42), "Supplier A", "group-1", "VIP", 2.5, "active", true, 5, now, nil))
+
+	result, err := repo.ListGroups(context.Background(), service.SupplierProviderDataListParams{
+		ProviderID: 42,
+		Active:     &active,
+		Search:     "vip",
+		Page:       2,
+		PageSize:   20,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, int64(4), result.Total)
+	require.Equal(t, int64(4), result.Summary.GroupCount)
+	require.Equal(t, int64(9), result.Summary.AccountCount)
+	require.Equal(t, int64(3), result.Summary.LinkedGroupCount)
+	require.Equal(t, int64(1), result.Summary.UnlinkedGroupCount)
+	require.Len(t, result.Items, 1)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestSupplierProviderDataRepositoryCleanupUsesBatchLimit(t *testing.T) {
 	repo, mock := newSupplierProviderDataRepoMock(t)
 	now := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)

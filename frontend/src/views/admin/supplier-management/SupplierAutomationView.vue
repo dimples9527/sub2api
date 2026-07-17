@@ -189,29 +189,29 @@
     </BaseDialog>
 
     <BaseDialog :show="detailVisible" :title="detailTitle || '结果详情'" width="extra-wide" @close="closeResultDetail">
-      <div v-if="detailRun" class="sp-run-detail">
+      <div v-if="detailRun" :class="['sp-run-detail', statusTone(detailRun.status)]">
         <section class="sp-run-detail-summary">
-          <div>
+          <div class="sp-summary-item sp-summary-task">
             <span class="sp-detail-label">任务</span>
             <strong>{{ detailRun.task_code }}</strong>
           </div>
-          <div>
+          <div class="sp-summary-item sp-summary-trigger">
             <span class="sp-detail-label">触发</span>
             <strong>{{ triggerText(detailRun.trigger_source) }}</strong>
           </div>
-          <div>
+          <div class="sp-summary-item sp-summary-status" :class="statusTone(detailRun.status)">
             <span class="sp-detail-label">状态</span>
             <span class="sp-status" :class="statusTone(detailRun.status)">{{ statusText(detailRun.status) }}</span>
           </div>
-          <div>
+          <div class="sp-summary-item sp-summary-counts">
             <span class="sp-detail-label">处理 / 成功 / 失败</span>
             <strong>{{ detailRun.processed_count }} / {{ detailRun.success_count }} / {{ detailRun.failed_count }}</strong>
           </div>
-          <div>
+          <div class="sp-summary-item sp-summary-start">
             <span class="sp-detail-label">开始</span>
             <strong>{{ formatTime(detailRun.started_at) }}</strong>
           </div>
-          <div>
+          <div class="sp-summary-item sp-summary-end">
             <span class="sp-detail-label">结束</span>
             <strong>{{ formatTime(detailRun.finished_at) }}</strong>
           </div>
@@ -237,7 +237,7 @@
             </button>
           </aside>
 
-          <article v-if="selectedDetailProvider" class="sp-provider-card sp-provider-detail-card">
+          <article v-if="selectedDetailProvider" :class="['sp-provider-card', 'sp-provider-detail-card', statusTone(selectedDetailProvider.status)]">
             <header class="sp-provider-head">
               <div>
                 <span class="sp-detail-label">供应商 {{ selectedDetailProvider.provider_id }}</span>
@@ -246,15 +246,15 @@
               <span class="sp-status" :class="statusTone(selectedDetailProvider.status)">{{ statusText(selectedDetailProvider.status) }}</span>
             </header>
             <div class="sp-provider-stats">
-              <span>处理 {{ selectedDetailProvider.counts.checked_count }}</span>
-              <span>新增 {{ selectedDetailProvider.counts.created_count }}</span>
-              <span>更新 {{ selectedDetailProvider.counts.updated_count }}</span>
-              <span>跳过 {{ selectedDetailProvider.counts.skipped_count }}</span>
+              <span class="sp-tag neutral">处理 {{ selectedDetailProvider.counts.checked_count }}</span>
+              <span class="sp-tag success">新增 {{ selectedDetailProvider.counts.created_count }}</span>
+              <span class="sp-tag primary">更新 {{ selectedDetailProvider.counts.updated_count }}</span>
+              <span class="sp-tag warning">跳过 {{ selectedDetailProvider.counts.skipped_count }}</span>
             </div>
             <p v-if="selectedDetailProvider.message" class="sp-provider-message">{{ selectedDetailProvider.message }}</p>
 
             <div class="sp-stage-groups">
-              <section v-for="category in providerStagesByCategory(selectedDetailProvider)" :key="category.key" class="sp-stage-category">
+              <section v-for="category in providerStagesByCategory(selectedDetailProvider)" :key="category.key" class="sp-stage-category" :class="category.key">
                 <h4>{{ category.title }}</h4>
                 <article v-for="stage in category.stages" :key="`${selectedDetailProvider.provider_id}-${stage.scope}`" class="sp-stage-card" :class="statusTone(stage.status)">
                   <div class="sp-stage-head">
@@ -262,11 +262,11 @@
                     <span class="sp-status" :class="statusTone(stage.status)">{{ statusText(stage.status) }}</span>
                   </div>
                   <div class="sp-stage-metrics">
-                    <span v-if="stage.http_status">HTTP {{ stage.http_status }}</span>
-                    <span v-if="stage.duration_ms !== undefined">{{ stage.duration_ms }}ms</span>
-                    <span v-if="stage.response_bytes !== undefined">{{ stage.response_bytes }} bytes</span>
-                    <span>处理 {{ stage.counts.checked_count }}</span>
-                    <span>更新 {{ stage.counts.updated_count }}</span>
+                    <span v-if="stage.http_status" class="sp-tag http">HTTP {{ stage.http_status }}</span>
+                    <span v-if="stage.duration_ms !== undefined" class="sp-tag timing">{{ stage.duration_ms }}ms</span>
+                    <span v-if="stage.response_bytes !== undefined" class="sp-tag neutral">{{ stage.response_bytes }} bytes</span>
+                    <span class="sp-tag neutral">处理 {{ stage.counts.checked_count }}</span>
+                    <span class="sp-tag success">更新 {{ stage.counts.updated_count }}</span>
                   </div>
                   <div class="sp-stage-body">
                     <div class="sp-stage-main">
@@ -813,30 +813,180 @@ function showToast(message: string) {
   overflow: auto;
 }
 
+:global(.modal-content:has(.sp-run-detail)) {
+  --sp-panel: #ffffff;
+  --sp-panel-2: #f8fafc;
+  --sp-panel-3: #eef2f7;
+  --sp-line: #d7e0ea;
+  --sp-soft: #e8eef5;
+  --sp-text: #172033;
+  --sp-muted: #607089;
+  --sp-cyan: #0284c7;
+  --sp-green: #16835d;
+  --sp-amber: #c56a0a;
+  --sp-orange: #dd5f16;
+  --sp-red: #d14343;
+  --sp-blue: #2563eb;
+  --sp-violet: #6d5bd0;
+  --sp-result-blue-soft: #eaf2ff;
+  --sp-result-cyan-soft: #e6f6fb;
+  --sp-result-green-soft: #e8f7ef;
+  --sp-result-amber-soft: #fff3dc;
+  --sp-result-red-soft: #fff0f0;
+  --sp-result-violet-soft: #f1efff;
+  --sp-result-neutral-soft: #f3f6fa;
+  overflow: hidden;
+  border-color: #cbd7e5;
+  background: var(--sp-panel);
+  color: var(--sp-text);
+}
+
+:global(.dark .modal-content:has(.sp-run-detail)) {
+  --sp-panel: #172033;
+  --sp-panel-2: #1d293d;
+  --sp-panel-3: #243249;
+  --sp-line: #35445c;
+  --sp-soft: #2c3a51;
+  --sp-text: #edf3fb;
+  --sp-muted: #a8b6ca;
+  --sp-result-blue-soft: #1b3155;
+  --sp-result-cyan-soft: #153947;
+  --sp-result-green-soft: #173a31;
+  --sp-result-amber-soft: #432f1d;
+  --sp-result-red-soft: #48272d;
+  --sp-result-violet-soft: #302b51;
+  --sp-result-neutral-soft: #202d42;
+  border-color: #3b4b64;
+}
+
+:global(.modal-content:has(.sp-run-detail) .modal-header) {
+  border-bottom-color: var(--sp-line);
+  background: var(--sp-panel);
+}
+
+:global(.modal-content:has(.sp-run-detail) .modal-title) {
+  color: var(--sp-text);
+}
+
+:global(.modal-content:has(.sp-run-detail) .modal-body) {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--sp-panel);
+}
+
+:global(.modal-content:has(.sp-run-detail) .modal-footer) {
+  border-top-color: var(--sp-line);
+  background: var(--sp-panel);
+}
+
 .sp-run-detail {
+  --sp-result-accent: var(--sp-cyan);
   display: grid;
-  gap: 20px;
   max-width: min(1120px, 86vw);
   max-height: 72vh;
   overflow: auto;
-  border: 1px solid var(--sp-soft);
-  border-radius: 18px;
-  background: var(--sp-panel-2);
-  padding: 16px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 4px 2px 12px;
+}
+
+.sp-run-detail.good {
+  --sp-result-accent: var(--sp-green);
+}
+
+.sp-run-detail.warn {
+  --sp-result-accent: var(--sp-amber);
+}
+
+.sp-run-detail.bad {
+  --sp-result-accent: var(--sp-red);
+}
+
+.sp-run-detail .sp-status {
+  border-width: 1px;
+  border-style: solid;
+  font-weight: 700;
+}
+
+.sp-run-detail .sp-status.good {
+  border-color: color-mix(in srgb, var(--sp-green) 38%, var(--sp-line));
+  background: var(--sp-result-green-soft);
+  color: var(--sp-green);
+}
+
+.sp-run-detail .sp-status.warn {
+  border-color: color-mix(in srgb, var(--sp-amber) 42%, var(--sp-line));
+  background: var(--sp-result-amber-soft);
+  color: var(--sp-amber);
+}
+
+.sp-run-detail .sp-status.bad {
+  border-color: color-mix(in srgb, var(--sp-red) 44%, var(--sp-line));
+  background: var(--sp-result-red-soft);
+  color: var(--sp-red);
 }
 
 .sp-run-detail-summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
+  row-gap: 18px;
+  border-bottom: 1px solid var(--sp-line);
+  padding: 4px 0 18px;
 }
 
-.sp-run-detail-summary > div,
-.sp-cleanup-grid > article {
-  border: 1px solid var(--sp-soft);
-  border-radius: 14px;
-  background: var(--sp-panel-2);
-  padding: 12px;
+.sp-summary-item {
+  min-width: 0;
+  border-left: 1px solid var(--sp-line);
+  padding: 2px 18px 4px;
+}
+
+.sp-summary-item:nth-child(3n + 1) {
+  border-left: 0;
+  padding-left: 0;
+}
+
+.sp-summary-task {
+  --sp-summary-accent: var(--sp-blue);
+}
+
+.sp-summary-trigger {
+  --sp-summary-accent: var(--sp-violet);
+}
+
+.sp-summary-status {
+  --sp-summary-accent: var(--sp-amber);
+}
+
+.sp-summary-status.good {
+  --sp-summary-accent: var(--sp-green);
+}
+
+.sp-summary-status.warn {
+  --sp-summary-accent: var(--sp-amber);
+}
+
+.sp-summary-status.bad {
+  --sp-summary-accent: var(--sp-red);
+}
+
+.sp-summary-counts {
+  --sp-summary-accent: var(--sp-cyan);
+}
+
+.sp-summary-start {
+  --sp-summary-accent: var(--sp-green);
+}
+
+.sp-summary-end {
+  --sp-summary-accent: var(--sp-amber);
+}
+
+.sp-run-detail-summary strong {
+  color: color-mix(in srgb, var(--sp-summary-accent, var(--sp-text)) 38%, var(--sp-text));
+  font-weight: 800;
 }
 
 .sp-detail-label {
@@ -844,16 +994,24 @@ function showToast(message: string) {
   margin-bottom: 5px;
   color: var(--sp-muted);
   font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
 }
 
 .sp-run-message,
 .sp-provider-message {
-  border-left: 3px solid var(--sp-cyan);
+  margin: 16px 0 0;
+  border: 0;
+  border-left: 4px solid var(--sp-result-accent, var(--sp-cyan));
   color: var(--sp-text);
-  background: color-mix(in srgb, var(--sp-cyan) 7%, var(--sp-panel));
-  border-radius: 12px;
+  background: color-mix(in srgb, var(--sp-result-accent, var(--sp-cyan)) 7%, var(--sp-panel));
+  border-radius: 0;
   padding: 10px 12px;
   line-height: 1.65;
+}
+
+.sp-provider-message {
+  margin: 0;
 }
 
 .sp-provider-list {
@@ -866,18 +1024,20 @@ function showToast(message: string) {
   grid-template-columns: minmax(220px, 0.36fr) minmax(0, 1fr);
   gap: 16px;
   min-height: 420px;
+  margin-top: 18px;
 }
 
 .sp-provider-index {
   display: grid;
   align-content: start;
-  gap: 10px;
+  gap: 0;
   max-height: min(58vh, 620px);
   overflow: auto;
-  border: 1px solid var(--sp-soft);
-  border-radius: 16px;
-  background: var(--sp-panel);
-  padding: 10px;
+  border: 0;
+  border-right: 1px solid var(--sp-line);
+  border-radius: 0;
+  background: transparent;
+  padding: 0 16px 0 0;
 }
 
 .sp-provider-index-item {
@@ -885,32 +1045,31 @@ function showToast(message: string) {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px 10px;
   width: 100%;
-  border: 1px solid transparent;
-  border-radius: 12px;
+  border: 0;
+  border-bottom: 1px solid var(--sp-line);
+  border-left: 3px solid transparent;
+  border-radius: 0;
   background: transparent;
-  padding: 10px;
+  padding: 12px 10px;
   text-align: left;
   cursor: pointer;
-  transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+  transition: border-left-color 0.16s ease, background-color 0.16s ease;
 }
 
 .sp-provider-index-item:hover,
 .sp-provider-index-item.active {
-  border-color: var(--sp-line);
-  background: var(--sp-panel-2);
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+  border-left-color: var(--sp-blue);
+  background: var(--sp-result-blue-soft);
 }
 
-.sp-provider-index-item.bad {
-  border-left: 3px solid var(--sp-red);
+.sp-provider-index-item.bad:not(.active) {
+  border-left-color: var(--sp-red);
+  background: var(--sp-result-red-soft);
 }
 
-.sp-provider-index-item.warn {
-  border-left: 3px solid var(--sp-amber);
-}
-
-.sp-provider-index-item.good {
-  border-left: 3px solid var(--sp-green);
+.sp-provider-index-item.warn:not(.active) {
+  border-left-color: var(--sp-amber);
+  background: var(--sp-result-amber-soft);
 }
 
 .sp-provider-index-name {
@@ -927,23 +1086,37 @@ function showToast(message: string) {
   grid-column: 1 / -1;
   color: var(--sp-muted);
   font-size: 12px;
+  font-weight: 600;
 }
 
 .sp-provider-card {
   display: grid;
   gap: 16px;
-  border: 1px solid var(--sp-line);
-  border-radius: 18px;
-  background: var(--sp-panel);
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
-  padding: 18px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0 0 0 4px;
 }
 
 .sp-provider-detail-card {
+  --sp-result-accent: var(--sp-cyan);
   align-content: start;
   min-width: 0;
   max-height: min(58vh, 620px);
   overflow: auto;
+}
+
+.sp-provider-detail-card.good {
+  --sp-result-accent: var(--sp-green);
+}
+
+.sp-provider-detail-card.warn {
+  --sp-result-accent: var(--sp-amber);
+}
+
+.sp-provider-detail-card.bad {
+  --sp-result-accent: var(--sp-red);
 }
 
 .sp-provider-head,
@@ -954,10 +1127,52 @@ function showToast(message: string) {
   gap: 12px;
 }
 
-.sp-provider-head h3 {
+.sp-provider-head {
+  border-bottom: 1px solid var(--sp-line);
+  padding: 0 0 16px;
+}
+
+.sp-provider-head h3,
+.sp-stage-head strong {
   margin: 0;
-  color: var(--sp-text);
+  color: color-mix(in srgb, var(--sp-result-accent, var(--sp-cyan)) 34%, var(--sp-text));
   font-size: 16px;
+  font-weight: 800;
+}
+
+.sp-tag {
+  --sp-tag-accent: var(--sp-blue);
+  --sp-tag-surface: var(--sp-result-blue-soft);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid color-mix(in srgb, var(--sp-tag-accent) 34%, var(--sp-line));
+  border-radius: 999px;
+  background: var(--sp-tag-surface);
+  color: color-mix(in srgb, var(--sp-tag-accent) 72%, var(--sp-text));
+  padding: 4px 9px;
+}
+
+.sp-tag.success {
+  --sp-tag-accent: var(--sp-green);
+  --sp-tag-surface: var(--sp-result-green-soft);
+}
+
+.sp-tag.primary,
+.sp-tag.http {
+  --sp-tag-accent: var(--sp-blue);
+  --sp-tag-surface: var(--sp-result-blue-soft);
+}
+
+.sp-tag.warning,
+.sp-tag.timing {
+  --sp-tag-accent: var(--sp-amber);
+  --sp-tag-surface: var(--sp-result-amber-soft);
+}
+
+.sp-tag.neutral {
+  --sp-tag-accent: var(--sp-muted);
+  --sp-tag-surface: var(--sp-result-neutral-soft);
 }
 
 .sp-provider-stats,
@@ -968,47 +1183,86 @@ function showToast(message: string) {
   margin-top: 0;
 }
 
-.sp-provider-stats span,
-.sp-stage-metrics span {
-  border: 1px solid var(--sp-line);
-  border-radius: 999px;
-  color: var(--sp-muted);
-  background: var(--sp-panel-2);
-  padding: 4px 9px;
+.sp-provider-stats .sp-tag,
+.sp-stage-metrics .sp-tag {
   font-size: 12px;
+  font-weight: 700;
 }
 
 .sp-stage-groups {
   display: grid;
-  gap: 18px;
+  gap: 0;
   margin-top: 0;
 }
 
+.sp-stage-category {
+  border-top: 1px solid var(--sp-line);
+  padding: 18px 0 0;
+}
+
+.sp-stage-category:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
 .sp-stage-category h4 {
-  margin: 0 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--sp-text);
   font-size: 13px;
+  font-weight: 800;
+  padding: 0 0 12px;
+}
+
+.sp-stage-category h4::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--sp-stage-accent, var(--sp-cyan));
 }
 
 .sp-stage-card {
   display: grid;
   gap: 14px;
-  border: 1px solid var(--sp-soft);
-  border-radius: 14px;
-  background: var(--sp-panel-2);
-  padding: 16px;
+  border: 0;
+  border-top: 1px solid var(--sp-line);
+  border-radius: 0;
+  background: transparent;
+  padding: 16px 0;
+}
+
+.sp-stage-card + .sp-stage-card {
+  border-top-color: color-mix(in srgb, var(--sp-line) 78%, transparent);
+}
+
+.sp-stage-category.identity {
+  --sp-stage-accent: var(--sp-blue);
+}
+
+.sp-stage-category.metrics {
+  --sp-stage-accent: var(--sp-amber);
+}
+
+.sp-stage-category.other {
+  --sp-stage-accent: var(--sp-violet);
 }
 
 .sp-stage-card.good {
-  border-color: color-mix(in srgb, var(--sp-green) 28%, var(--sp-line));
+  --sp-stage-accent: var(--sp-green);
 }
 
 .sp-stage-card.warn {
-  border-color: color-mix(in srgb, var(--sp-amber) 32%, var(--sp-line));
+  --sp-stage-accent: var(--sp-amber);
 }
 
 .sp-stage-card.bad {
-  border-color: color-mix(in srgb, var(--sp-red) 32%, var(--sp-line));
+  --sp-stage-accent: var(--sp-red);
 }
 
 .sp-stage-body {
@@ -1028,28 +1282,49 @@ function showToast(message: string) {
   display: grid;
   grid-template-columns: 76px minmax(0, 1fr);
   gap: 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
   color: var(--sp-text);
   font-size: 12px;
   line-height: 1.55;
+  padding: 5px 0;
 }
 
 .sp-stage-row em {
   color: var(--sp-muted);
   font-style: normal;
+  font-weight: 700;
+}
+
+.sp-stage-row span {
+  min-width: 0;
+  word-break: break-word;
+}
+
+.sp-stage-row.bad {
+  border-color: color-mix(in srgb, var(--sp-red) 34%, var(--sp-line));
+  background: var(--sp-result-red-soft);
+  padding: 8px 10px;
+}
+
+.sp-stage-row.bad em {
+  color: var(--sp-red);
 }
 
 .sp-stage-row.bad span {
   color: var(--sp-red);
+  font-weight: 700;
 }
 
 .sp-response-panel {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
-  border: 1px solid var(--sp-soft);
-  border-radius: 12px;
-  background: var(--sp-panel);
-  overflow: hidden;
+  border: 0;
+  border-left: 1px solid var(--sp-line);
+  border-radius: 0;
+  background: transparent;
+  padding-left: 16px;
 }
 
 .sp-response-panel-head {
@@ -1057,9 +1332,9 @@ function showToast(message: string) {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  border-bottom: 1px solid var(--sp-soft);
-  background: var(--sp-panel-2);
-  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  padding: 0 0 8px;
 }
 
 .sp-response-panel-head span {
@@ -1081,8 +1356,8 @@ function showToast(message: string) {
   white-space: pre-wrap;
   word-break: break-word;
   border: 0;
-  border-radius: 0;
-  background: var(--sp-panel);
+  border-radius: 4px;
+  background: var(--sp-panel-2);
   color: var(--sp-text);
   padding: 10px;
   font-size: 12px;
@@ -1092,8 +1367,23 @@ function showToast(message: string) {
 .sp-cleanup-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  gap: 0;
+  border-top: 1px solid var(--sp-line);
+  border-bottom: 1px solid var(--sp-line);
   margin-top: 16px;
+}
+
+.sp-cleanup-grid > article {
+  border-left: 1px solid var(--sp-line);
+  padding: 14px 16px;
+}
+
+.sp-cleanup-grid > article:nth-child(3n + 1) {
+  border-left: 0;
+}
+
+.sp-cleanup-grid > article:nth-child(n + 4) {
+  border-top: 1px solid var(--sp-line);
 }
 
 .sp-cleanup-grid span {
@@ -1121,6 +1411,50 @@ function showToast(message: string) {
   .sp-provider-index,
   .sp-provider-detail-card {
     max-height: none;
+  }
+
+  .sp-run-detail-summary {
+    row-gap: 0;
+  }
+
+  .sp-summary-item,
+  .sp-summary-item:nth-child(3n + 1) {
+    border-top: 1px solid var(--sp-line);
+    border-left: 0;
+    padding: 12px 0;
+  }
+
+  .sp-summary-item:first-child {
+    border-top: 0;
+  }
+
+  .sp-provider-index {
+    border-right: 0;
+    border-bottom: 1px solid var(--sp-line);
+    padding: 0 0 12px;
+  }
+
+  .sp-provider-card {
+    padding: 4px 0 0;
+  }
+
+  .sp-response-panel {
+    border-top: 1px solid var(--sp-line);
+    border-left: 0;
+    padding-top: 14px;
+    padding-left: 0;
+  }
+
+  .sp-cleanup-grid > article,
+  .sp-cleanup-grid > article:nth-child(3n + 1) {
+    border-top: 1px solid var(--sp-line);
+    border-left: 0;
+    padding-right: 0;
+    padding-left: 0;
+  }
+
+  .sp-cleanup-grid > article:first-child {
+    border-top: 0;
   }
 }
 </style>

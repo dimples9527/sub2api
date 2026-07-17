@@ -91,11 +91,19 @@ export interface SupplierProviderAccountListResult {
   page_size: number
 }
 
+export interface SupplierProviderGroupSummary {
+  group_count: number
+  account_count: number
+  linked_group_count: number
+  unlinked_group_count: number
+}
+
 export interface SupplierProviderGroupListResult {
   items: SupplierProviderGroup[]
   total: number
   page: number
   page_size: number
+  summary: SupplierProviderGroupSummary
 }
 
 export async function syncProvider(id: number, scope: SupplierSyncScope): Promise<SupplierProviderSyncResult> {

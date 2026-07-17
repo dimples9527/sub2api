@@ -61,6 +61,60 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).not.toContain('linear-gradient(145deg, rgba(15, 23, 42, 0.82)')
   })
 
+  it('adds status-aware visual hierarchy to the structured result dialog', () => {
+    expect(supplierAutomationSource).toContain(":class=\"['sp-run-detail', statusTone(detailRun.status)]\"")
+    expect(supplierAutomationSource).toContain(":class=\"['sp-provider-card', 'sp-provider-detail-card', statusTone(selectedDetailProvider.status)]\"")
+    expect(supplierAutomationSource).toContain('.sp-run-detail.bad')
+    expect(supplierAutomationSource).toContain('.sp-provider-detail-card.bad')
+    expect(supplierAutomationSource).toContain('.sp-run-detail .sp-status.bad')
+    expect(supplierAutomationSource).toContain('.sp-tag {')
+    expect(supplierAutomationSource).toContain('<span class="sp-tag neutral">处理 {{ selectedDetailProvider.counts.checked_count }}</span>')
+    expect(supplierAutomationSource).toContain('<span v-if="stage.http_status" class="sp-tag http">HTTP {{ stage.http_status }}</span>')
+  })
+
+  it('keeps the result modal palette while flattening the outer detail surface', () => {
+    expect(supplierAutomationSource).toContain(':global(.modal-content:has(.sp-run-detail)) {')
+    expect(supplierAutomationSource).toContain('--sp-panel: #ffffff;')
+    expect(supplierAutomationSource).toContain('--sp-result-blue-soft: #eaf2ff;')
+    expect(supplierAutomationSource).toContain(':global(.modal-content:has(.sp-run-detail) .modal-body) {')
+    expect(supplierAutomationSource).toContain('.sp-run-detail {')
+    expect(supplierAutomationSource).toContain('padding: 4px 2px 12px;')
+    expect(supplierAutomationSource).not.toContain('.sp-run-detail::before {')
+    expect(supplierAutomationSource).not.toContain('box-shadow: 0 18px 42px rgba(15, 23, 42, 0.08);')
+  })
+
+  it('uses restrained color accents across summary, provider, and stage content', () => {
+    expect(supplierAutomationSource).toContain('sp-summary-task')
+    expect(supplierAutomationSource).toContain('sp-summary-trigger')
+    expect(supplierAutomationSource).toContain('sp-summary-status')
+    expect(supplierAutomationSource).toContain('sp-summary-counts')
+    expect(supplierAutomationSource).toContain('sp-summary-start')
+    expect(supplierAutomationSource).toContain('sp-summary-end')
+    expect(supplierAutomationSource).toContain('.sp-provider-detail-card.good')
+    expect(supplierAutomationSource).toContain('.sp-provider-detail-card.warn')
+    expect(supplierAutomationSource).toContain('.sp-provider-detail-card.bad')
+    expect(supplierAutomationSource).toContain('.sp-stage-category.identity')
+    expect(supplierAutomationSource).toContain('.sp-stage-category.metrics')
+    expect(supplierAutomationSource).toContain('.sp-stage-category.other')
+    expect(supplierAutomationSource).toContain('.sp-provider-index-item.bad:not(.active)')
+    expect(supplierAutomationSource).toContain('.sp-stage-card.bad')
+    expect(supplierAutomationSource).toContain('class="sp-tag success">新增')
+    expect(supplierAutomationSource).toContain('class="sp-tag primary">更新')
+    expect(supplierAutomationSource).toContain('class="sp-tag warning">跳过')
+    expect(supplierAutomationSource).toContain('class="sp-tag http">HTTP')
+    expect(supplierAutomationSource).toContain('.sp-tag.success')
+    expect(supplierAutomationSource).toContain('.sp-tag.warning')
+  })
+
+  it('uses separators and flat rows instead of nested cards in the result detail', () => {
+    expect(supplierAutomationSource).toContain('class="sp-summary-item sp-summary-task"')
+    expect(supplierAutomationSource).toContain('.sp-summary-item {')
+    expect(supplierAutomationSource).toContain('border-right: 1px solid var(--sp-line);')
+    expect(supplierAutomationSource).toContain('.sp-stage-card + .sp-stage-card {')
+    expect(supplierAutomationSource).toContain('.sp-response-summary {')
+    expect(supplierAutomationSource).not.toContain('sp-summary-card')
+  })
+
   it('shows raw response summaries in a wider dialog with a split stage layout', () => {
     expect(supplierAutomationSource).toContain('sp-stage-body')
     expect(supplierAutomationSource).toContain('sp-stage-main')
@@ -74,10 +128,9 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('<BaseDialog :show="detailVisible"')
   })
 
-  it('adds clear spacing between result detail sections', () => {
-    expect(supplierAutomationSource).toContain('gap: 20px')
-    expect(supplierAutomationSource).toContain('gap: 18px')
-    expect(supplierAutomationSource).toContain('padding: 18px')
+  it('adds clear spacing between flat result detail sections', () => {
+    expect(supplierAutomationSource).toContain('padding: 18px 0')
+    expect(supplierAutomationSource).toContain('padding: 16px 0')
     expect(supplierAutomationSource).toContain('gap: 16px')
     expect(supplierAutomationSource).toContain('margin-top: 16px')
   })
