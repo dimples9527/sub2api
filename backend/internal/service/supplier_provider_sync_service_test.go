@@ -191,12 +191,32 @@ func TestSupplierProviderSyncServiceUsesStoredCredentialWhenDecryptFails(t *test
 }
 
 func TestSupplierProviderSyncServiceRejectsUnsupportedProviderType(t *testing.T) {
-	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{ID: 42, ProviderType: "newapi", Enabled: true}}}
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{ID: 42, ProviderType: "custom", Enabled: true}}}
 	service := NewSupplierProviderSyncService(providerRepo, &supplierProviderDataRepoStub{}, &supplierRemoteClientStub{}, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
 
 	_, err := service.SyncAccounts(context.Background(), 42, SupplierSyncTriggerManual)
 
 	require.Error(t, err)
+}
+
+func TestSupplierProviderSyncServiceAllowsNewAPIProviderType(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID:                42,
+		Code:              "supplier-newapi",
+		ProviderType:      "newapi",
+		Enabled:           true,
+		PasswordEncrypted: "secret",
+	}}}
+	dataRepo := &supplierProviderDataRepoStub{}
+	remote := &supplierRemoteClientStub{}
+	service := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	result, err := service.SyncAccounts(context.Background(), 42, SupplierSyncTriggerManual)
+
+	require.NoError(t, err)
+	require.Equal(t, SupplierSyncStatusSuccess, result.Status)
+	require.Equal(t, []string{"secret"}, remote.passwords)
+	require.Equal(t, 1, dataRepo.accountsCalls)
 }
 
 func TestSupplierProviderSyncServiceSyncAllReturnsPartialWhenOneStageFails(t *testing.T) {
@@ -227,8 +247,8 @@ func TestSupplierProviderSyncServiceSyncAllEnabledContinuesAfterProviderFailure(
 
 	require.NoError(t, err)
 	require.Equal(t, 2, result.ProcessedCount)
-	require.Equal(t, 1, result.SuccessCount)
-	require.Equal(t, 1, result.FailedCount)
+	require.Equal(t, 2, result.SuccessCount)
+	require.Equal(t, 0, result.FailedCount)
 	require.Len(t, result.Results, 2)
 }
 

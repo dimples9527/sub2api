@@ -366,7 +366,12 @@ func (s *SupplierProviderSyncService) validSyncProvider(ctx context.Context, pro
 	if err != nil {
 		return nil, err
 	}
-	if !provider.Enabled || !strings.EqualFold(provider.ProviderType, "sub2api") {
+	switch normalizeSupplierProviderType(provider.ProviderType) {
+	case SupplierProviderTypeSub2API, SupplierProviderTypeNewAPI:
+	default:
+		return nil, ErrSupplierProviderInvalid
+	}
+	if !provider.Enabled {
 		return nil, ErrSupplierProviderInvalid
 	}
 	return provider, nil

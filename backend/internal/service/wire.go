@@ -557,8 +557,8 @@ func ProvideSupplierProviderService(
 	return svc
 }
 
-func ProvideSupplierSub2APIClient(tokenCache SupplierProviderTokenCache) *SupplierSub2APIClient {
-	return NewSupplierSub2APIClient(nil, tokenCache)
+func ProvideSupplierProviderRemoteClient(tokenCache SupplierProviderTokenCache) *SupplierProviderRemoteRegistry {
+	return NewSupplierProviderRemoteRegistry(nil, tokenCache)
 }
 
 func ProvideSupplierAutomationScheduler(repo SupplierAutomationRepository, svc *SupplierAutomationService) *SupplierAutomationScheduler {
@@ -798,8 +798,8 @@ var ProviderSet = wire.NewSet(
 	ProvideSettingService,
 	ProvideSupplierProviderService,
 	NewSupplierProviderTypeService,
-	ProvideSupplierSub2APIClient,
-	wire.Bind(new(SupplierProviderRemoteClient), new(*SupplierSub2APIClient)),
+	ProvideSupplierProviderRemoteClient,
+	wire.Bind(new(SupplierProviderRemoteClient), new(*SupplierProviderRemoteRegistry)),
 	NewSupplierProviderSyncService,
 	wire.Bind(new(SupplierProviderBatchSyncer), new(*SupplierProviderSyncService)),
 	NewSupplierAutomationService,
