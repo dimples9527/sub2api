@@ -35,6 +35,7 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 
 		supplier.GET("/accounts", h.Admin.SupplierProviderSync.ListAccounts)
 		supplier.GET("/groups", h.Admin.SupplierProviderSync.ListGroups)
+		supplier.PUT("/groups/:id/mapping", h.Admin.SupplierProviderSync.UpdateGroupMapping)
 
 		automation := supplier.Group("/automation")
 		{

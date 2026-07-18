@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -47,23 +48,33 @@ func supplierProviderSyncHandlerResult(scope string) service.SupplierProviderSyn
 	return service.SupplierProviderSyncResult{ProviderID: 42, Scope: scope, Status: service.SupplierSyncStatusSuccess, StartedAt: now, FinishedAt: now}
 }
 
-type supplierProviderSyncHandlerDataStub struct{}
+type supplierProviderSyncHandlerDataStub struct {
+	mappedGroupID      int64
+	mappedLocalGroupID *int64
+}
 
-func (supplierProviderSyncHandlerDataStub) ListAccounts(context.Context, service.SupplierProviderDataListParams) (service.SupplierProviderAccountListResult, error) {
+func (*supplierProviderSyncHandlerDataStub) ListAccounts(context.Context, service.SupplierProviderDataListParams) (service.SupplierProviderAccountListResult, error) {
 	return service.SupplierProviderAccountListResult{Items: []service.SupplierProviderAccount{{ID: 1, ProviderID: 42, Name: "Primary"}}, Total: 1, Page: 1, PageSize: 20}, nil
 }
-func (supplierProviderSyncHandlerDataStub) ListGroups(context.Context, service.SupplierProviderDataListParams) (service.SupplierProviderGroupListResult, error) {
+func (*supplierProviderSyncHandlerDataStub) ListGroups(context.Context, service.SupplierProviderDataListParams) (service.SupplierProviderGroupListResult, error) {
 	return service.SupplierProviderGroupListResult{Items: []service.SupplierProviderGroup{{ID: 1, ProviderID: 42, Name: "VIP"}}, Total: 1, Page: 1, PageSize: 20}, nil
+}
+func (s *supplierProviderSyncHandlerDataStub) UpdateGroupMapping(_ context.Context, groupID int64, localGroupID *int64) error {
+	s.mappedGroupID = groupID
+	s.mappedLocalGroupID = localGroupID
+	return nil
 }
 
 func TestSupplierProviderSyncHandlerRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	syncStub := &supplierProviderSyncHandlerSyncStub{}
-	handler := NewSupplierProviderSyncHandler(syncStub, supplierProviderSyncHandlerDataStub{})
+	dataStub := &supplierProviderSyncHandlerDataStub{}
+	handler := NewSupplierProviderSyncHandler(syncStub, dataStub)
 	router := gin.New()
 	router.POST("/providers/:id/sync/all", handler.SyncAll)
 	router.POST("/providers/:id/test/:scope", handler.TestEndpoint)
 	router.GET("/accounts", handler.ListAccounts)
+	router.PUT("/groups/:id/mapping", handler.UpdateGroupMapping)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/providers/42/sync/all", nil)
@@ -81,11 +92,28 @@ func TestSupplierProviderSyncHandlerRoutes(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "/accounts?provider_id=42&active=true&page=1&page_size=20", nil)
 	router.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPut, "/groups/7/mapping", bytes.NewBufferString(`{"local_group_id":12}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(7), dataStub.mappedGroupID)
+	require.NotNil(t, dataStub.mappedLocalGroupID)
+	require.Equal(t, int64(12), *dataStub.mappedLocalGroupID)
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPut, "/groups/7/mapping", bytes.NewBufferString(`{"local_group_id":null}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(7), dataStub.mappedGroupID)
+	require.Nil(t, dataStub.mappedLocalGroupID)
 }
 
 func TestSupplierProviderSyncHandlerRejectsInvalidProviderID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, supplierProviderSyncHandlerDataStub{})
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, &supplierProviderSyncHandlerDataStub{})
 	router := gin.New()
 	router.POST("/providers/:id/sync/all", handler.SyncAll)
 

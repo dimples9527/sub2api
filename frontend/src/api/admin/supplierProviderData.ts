@@ -71,6 +71,11 @@ export interface SupplierProviderGroup {
   rate_multiplier: number
   raw_status: string
   active: boolean
+  local_group_id?: number
+  local_group_name?: string
+  local_group_platform?: string
+  local_rate_multiplier?: number
+  local_group_status?: string
   account_count: number
   last_seen_at: string
   inactive_at?: string
@@ -96,6 +101,7 @@ export interface SupplierProviderGroupSummary {
   account_count: number
   linked_group_count: number
   unlinked_group_count: number
+  rate_risk_count: number
 }
 
 export interface SupplierProviderGroupListResult {
@@ -136,11 +142,23 @@ export async function listSupplierGroups(params: SupplierProviderDataListParams 
   return data
 }
 
+export async function updateSupplierGroupMapping(
+  id: number,
+  localGroupId: number | null
+): Promise<{ group_id: number; local_group_id: number | null }> {
+  const { data } = await apiClient.put<{ group_id: number; local_group_id: number | null }>(
+    `/admin/supplier-management/groups/${id}/mapping`,
+    { local_group_id: localGroupId }
+  )
+  return data
+}
+
 export const supplierProviderDataAPI = {
   syncProvider,
   testProviderEndpoint,
   listSupplierAccounts,
   listSupplierGroups,
+  updateSupplierGroupMapping,
 }
 
 export default supplierProviderDataAPI

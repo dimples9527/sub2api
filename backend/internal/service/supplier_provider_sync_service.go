@@ -11,6 +11,8 @@ import (
 )
 
 var ErrSupplierProviderSyncConflict = infraerrors.Conflict("SUPPLIER_PROVIDER_SYNC_CONFLICT", "supplier provider sync already running")
+var ErrSupplierProviderGroupNotFound = infraerrors.NotFound("SUPPLIER_PROVIDER_GROUP_NOT_FOUND", "supplier provider group not found")
+var ErrSupplierLocalGroupNotFound = infraerrors.NotFound("SUPPLIER_LOCAL_GROUP_NOT_FOUND", "active local group not found")
 
 type SupplierProviderAccount struct {
 	ID             int64      `json:"id"`
@@ -29,17 +31,22 @@ type SupplierProviderAccount struct {
 }
 
 type SupplierProviderGroup struct {
-	ID             int64      `json:"id"`
-	ProviderID     int64      `json:"provider_id"`
-	ProviderName   string     `json:"provider_name"`
-	UpstreamKey    string     `json:"upstream_group_key"`
-	Name           string     `json:"name"`
-	RateMultiplier float64    `json:"rate_multiplier"`
-	RawStatus      string     `json:"raw_status"`
-	Active         bool       `json:"active"`
-	AccountCount   int        `json:"account_count"`
-	LastSeenAt     time.Time  `json:"last_seen_at"`
-	InactiveAt     *time.Time `json:"inactive_at,omitempty"`
+	ID                  int64      `json:"id"`
+	ProviderID          int64      `json:"provider_id"`
+	ProviderName        string     `json:"provider_name"`
+	UpstreamKey         string     `json:"upstream_group_key"`
+	Name                string     `json:"name"`
+	RateMultiplier      float64    `json:"rate_multiplier"`
+	RawStatus           string     `json:"raw_status"`
+	Active              bool       `json:"active"`
+	LocalGroupID        *int64     `json:"local_group_id,omitempty"`
+	LocalGroupName      string     `json:"local_group_name,omitempty"`
+	LocalGroupPlatform  string     `json:"local_group_platform,omitempty"`
+	LocalRateMultiplier *float64   `json:"local_rate_multiplier,omitempty"`
+	LocalGroupStatus    string     `json:"local_group_status,omitempty"`
+	AccountCount        int        `json:"account_count"`
+	LastSeenAt          time.Time  `json:"last_seen_at"`
+	InactiveAt          *time.Time `json:"inactive_at,omitempty"`
 }
 
 type SupplierProviderDataListParams struct {
@@ -62,6 +69,7 @@ type SupplierProviderGroupSummary struct {
 	AccountCount       int64 `json:"account_count"`
 	LinkedGroupCount   int64 `json:"linked_group_count"`
 	UnlinkedGroupCount int64 `json:"unlinked_group_count"`
+	RateRiskCount      int64 `json:"rate_risk_count"`
 }
 
 type SupplierProviderGroupListResult struct {
@@ -112,6 +120,7 @@ type SupplierCleanupCounts struct {
 type SupplierProviderDataRepository interface {
 	ListAccounts(ctx context.Context, params SupplierProviderDataListParams) (SupplierProviderAccountListResult, error)
 	ListGroups(ctx context.Context, params SupplierProviderDataListParams) (SupplierProviderGroupListResult, error)
+	UpdateGroupMapping(ctx context.Context, groupID int64, localGroupID *int64) error
 	ReplaceAccounts(ctx context.Context, providerID int64, items []SupplierProviderRemoteAccount, seenAt time.Time) (SupplierSyncCounts, error)
 	ReplaceGroups(ctx context.Context, providerID int64, items []SupplierProviderRemoteGroup, seenAt time.Time) (SupplierSyncCounts, error)
 	UpdateBalance(ctx context.Context, providerID int64, balance float64, seenAt time.Time) error

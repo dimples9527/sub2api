@@ -150,17 +150,22 @@ func TestSupplierProviderDataRepositoryListGroupsIncludesFilteredSummary(t *test
 	active := true
 	now := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
 
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) AS group_count")).
+	mock.ExpectQuery(`COUNT\(\*\) FILTER \(WHERE local_group_id IS NOT NULL\) AS linked_group_count`).
 		WithArgs(int64(42), active, "%vip%").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"group_count", "account_count", "linked_group_count", "unlinked_group_count",
-		}).AddRow(int64(4), int64(9), int64(3), int64(1)))
-	mock.ExpectQuery(regexp.QuoteMeta("FROM supplier_provider_groups g")).
+			"group_count", "account_count", "linked_group_count", "unlinked_group_count", "rate_risk_count",
+		}).AddRow(int64(4), int64(9), int64(3), int64(1), int64(2)))
+	mock.ExpectQuery(regexp.QuoteMeta("LEFT JOIN groups lg ON lg.id = g.local_group_id")).
 		WithArgs(int64(42), active, "%vip%", 20, 20).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "provider_id", "provider_name", "upstream_group_key", "name",
-			"rate_multiplier", "raw_status", "active", "account_count", "last_seen_at", "inactive_at",
-		}).AddRow(int64(7), int64(42), "Supplier A", "group-1", "VIP", 2.5, "active", true, 5, now, nil))
+			"rate_multiplier", "raw_status", "active", "local_group_id", "local_group_name",
+			"local_group_platform", "local_rate_multiplier", "local_group_status", "account_count",
+			"last_seen_at", "inactive_at",
+		}).AddRow(
+			int64(7), int64(42), "Supplier A", "group-1", "VIP", 2.5, "active", true,
+			int64(12), "VIP 本地", "openai", 3.0, "active", 5, now, nil,
+		))
 
 	result, err := repo.ListGroups(context.Background(), service.SupplierProviderDataListParams{
 		ProviderID: 42,
@@ -176,7 +181,34 @@ func TestSupplierProviderDataRepositoryListGroupsIncludesFilteredSummary(t *test
 	require.Equal(t, int64(9), result.Summary.AccountCount)
 	require.Equal(t, int64(3), result.Summary.LinkedGroupCount)
 	require.Equal(t, int64(1), result.Summary.UnlinkedGroupCount)
+	require.Equal(t, int64(2), result.Summary.RateRiskCount)
 	require.Len(t, result.Items, 1)
+	require.Equal(t, int64(12), *result.Items[0].LocalGroupID)
+	require.Equal(t, "VIP 本地", result.Items[0].LocalGroupName)
+	require.Equal(t, "openai", result.Items[0].LocalGroupPlatform)
+	require.Equal(t, 3.0, *result.Items[0].LocalRateMultiplier)
+	require.Equal(t, "active", result.Items[0].LocalGroupStatus)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryUpdateGroupMappingSetsAndClearsLocalGroup(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	localGroupID := int64(12)
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS(SELECT 1 FROM groups WHERE id = $1 AND status = 'active')")).
+		WithArgs(localGroupID).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET local_group_id = $2, updated_at = NOW() WHERE id = $1")).
+		WithArgs(int64(7), localGroupID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	require.NoError(t, repo.UpdateGroupMapping(context.Background(), 7, &localGroupID))
+
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET local_group_id = $2, updated_at = NOW() WHERE id = $1")).
+		WithArgs(int64(7), nil).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	require.NoError(t, repo.UpdateGroupMapping(context.Background(), 7, nil))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

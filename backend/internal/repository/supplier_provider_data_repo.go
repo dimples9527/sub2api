@@ -63,20 +63,31 @@ func (r *supplierProviderDataRepository) ListGroups(ctx context.Context, params 
 	if err := r.db.QueryRowContext(ctx, `
 SELECT COUNT(*) AS group_count,
        COALESCE(SUM(account_count), 0) AS account_count,
-       COUNT(*) FILTER (WHERE account_count > 0) AS linked_group_count,
-       COUNT(*) FILTER (WHERE account_count = 0) AS unlinked_group_count
+       COUNT(*) FILTER (WHERE local_group_id IS NOT NULL) AS linked_group_count,
+       COUNT(*) FILTER (WHERE local_group_id IS NULL) AS unlinked_group_count,
+       COUNT(*) FILTER (
+         WHERE local_group_id IS NOT NULL
+           AND local_group_status = 'active'
+           AND local_rate_multiplier < upstream_rate_multiplier
+       ) AS rate_risk_count
 FROM (
-  SELECT g.id, COUNT(a.id) FILTER (WHERE a.active = TRUE) AS account_count
+  SELECT g.id, g.local_group_id,
+         g.rate_multiplier AS upstream_rate_multiplier,
+         lg.rate_multiplier AS local_rate_multiplier,
+         COALESCE(lg.status, '') AS local_group_status,
+         COUNT(a.id) FILTER (WHERE a.active = TRUE) AS account_count
   FROM supplier_provider_groups g
   JOIN supplier_providers p ON p.id = g.provider_id
+  LEFT JOIN groups lg ON lg.id = g.local_group_id
   LEFT JOIN supplier_provider_accounts a ON a.provider_id = g.provider_id AND a.group_key = g.upstream_group_key
   WHERE `+where+`
-  GROUP BY g.id
+  GROUP BY g.id, g.local_group_id, lg.id
 ) matched_groups`, args...).Scan(
 		&summary.GroupCount,
 		&summary.AccountCount,
 		&summary.LinkedGroupCount,
 		&summary.UnlinkedGroupCount,
+		&summary.RateRiskCount,
 	); err != nil {
 		return service.SupplierProviderGroupListResult{}, fmt.Errorf("summarize supplier provider groups: %w", err)
 	}
@@ -85,12 +96,17 @@ FROM (
 	rows, err := r.db.QueryContext(ctx, `
 SELECT g.id, g.provider_id, p.name AS provider_name, g.upstream_group_key, g.name,
        g.rate_multiplier, g.raw_status, g.active,
+       lg.id AS local_group_id, COALESCE(lg.name, '') AS local_group_name,
+       COALESCE(lg.platform, '') AS local_group_platform,
+       lg.rate_multiplier AS local_rate_multiplier,
+       COALESCE(lg.status, '') AS local_group_status,
        COALESCE(COUNT(a.id) FILTER (WHERE a.active = TRUE), 0) AS account_count,
        g.last_seen_at, g.inactive_at
 FROM supplier_provider_groups g
 JOIN supplier_providers p ON p.id = g.provider_id
+LEFT JOIN groups lg ON lg.id = g.local_group_id
 LEFT JOIN supplier_provider_accounts a ON a.provider_id = g.provider_id AND a.group_key = g.upstream_group_key
-WHERE `+where+fmt.Sprintf(" GROUP BY g.id, p.name ORDER BY g.active DESC, g.last_seen_at DESC, g.id ASC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2), queryArgs...)
+WHERE `+where+fmt.Sprintf(" GROUP BY g.id, p.name, lg.id ORDER BY g.active DESC, g.last_seen_at DESC, g.id ASC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2), queryArgs...)
 	if err != nil {
 		return service.SupplierProviderGroupListResult{}, fmt.Errorf("query supplier provider groups: %w", err)
 	}
@@ -114,6 +130,31 @@ WHERE `+where+fmt.Sprintf(" GROUP BY g.id, p.name ORDER BY g.active DESC, g.last
 		PageSize: params.PageSize,
 		Summary:  summary,
 	}, nil
+}
+
+func (r *supplierProviderDataRepository) UpdateGroupMapping(ctx context.Context, groupID int64, localGroupID *int64) error {
+	if localGroupID != nil {
+		var exists bool
+		if err := r.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM groups WHERE id = $1 AND status = 'active')", *localGroupID).Scan(&exists); err != nil {
+			return fmt.Errorf("check supplier local group: %w", err)
+		}
+		if !exists {
+			return service.ErrSupplierLocalGroupNotFound
+		}
+	}
+
+	result, err := r.db.ExecContext(ctx, "UPDATE supplier_provider_groups SET local_group_id = $2, updated_at = NOW() WHERE id = $1", groupID, localGroupID)
+	if err != nil {
+		return fmt.Errorf("update supplier provider group mapping: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read supplier provider group mapping result: %w", err)
+	}
+	if affected == 0 {
+		return service.ErrSupplierProviderGroupNotFound
+	}
+	return nil
 }
 
 func (r *supplierProviderDataRepository) ReplaceAccounts(ctx context.Context, providerID int64, items []service.SupplierProviderRemoteAccount, seenAt time.Time) (service.SupplierSyncCounts, error) {
@@ -415,6 +456,8 @@ func scanSupplierProviderGroup(scanner supplierProviderGroupScanner) (service.Su
 	var inactiveAt sql.NullTime
 	err := scanner.Scan(&item.ID, &item.ProviderID, &item.ProviderName, &item.UpstreamKey,
 		&item.Name, &item.RateMultiplier, &item.RawStatus, &item.Active,
+		&item.LocalGroupID, &item.LocalGroupName, &item.LocalGroupPlatform,
+		&item.LocalRateMultiplier, &item.LocalGroupStatus,
 		&item.AccountCount, &item.LastSeenAt, &inactiveAt)
 	if err != nil {
 		return service.SupplierProviderGroup{}, err

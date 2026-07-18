@@ -30,6 +30,9 @@ func (r *supplierProviderDataRepoStub) ListAccounts(context.Context, SupplierPro
 func (r *supplierProviderDataRepoStub) ListGroups(context.Context, SupplierProviderDataListParams) (SupplierProviderGroupListResult, error) {
 	return SupplierProviderGroupListResult{}, nil
 }
+func (r *supplierProviderDataRepoStub) UpdateGroupMapping(context.Context, int64, *int64) error {
+	return nil
+}
 func (r *supplierProviderDataRepoStub) ReplaceAccounts(_ context.Context, _ int64, items []SupplierProviderRemoteAccount, _ time.Time) (SupplierSyncCounts, error) {
 	r.accountsCalls++
 	if r.accountsErr != nil {

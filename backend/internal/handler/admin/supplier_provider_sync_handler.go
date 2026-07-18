@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +25,7 @@ type SupplierProviderSyncServicePort interface {
 type SupplierProviderDataRepositoryPort interface {
 	ListAccounts(ctx context.Context, params service.SupplierProviderDataListParams) (service.SupplierProviderAccountListResult, error)
 	ListGroups(ctx context.Context, params service.SupplierProviderDataListParams) (service.SupplierProviderGroupListResult, error)
+	UpdateGroupMapping(ctx context.Context, groupID int64, localGroupID *int64) error
 }
 
 type SupplierProviderSyncHandler struct {
@@ -132,6 +134,41 @@ func (h *SupplierProviderSyncHandler) ListGroups(c *gin.Context) {
 		return
 	}
 	response.Success(c, result)
+}
+
+func (h *SupplierProviderSyncHandler) UpdateGroupMapping(c *gin.Context) {
+	groupID, err := strconv.ParseInt(strings.TrimSpace(c.Param("id")), 10, 64)
+	if err != nil || groupID <= 0 {
+		response.ErrorFrom(c, badRequest("供应商分组 ID 无效"))
+		return
+	}
+
+	var payload map[string]json.RawMessage
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		response.ErrorFrom(c, badRequest("映射参数格式无效"))
+		return
+	}
+	rawLocalGroupID, ok := payload["local_group_id"]
+	if !ok {
+		response.ErrorFrom(c, badRequest("缺少本地分组 ID"))
+		return
+	}
+
+	var localGroupID *int64
+	if string(rawLocalGroupID) != "null" {
+		var value int64
+		if err := json.Unmarshal(rawLocalGroupID, &value); err != nil || value <= 0 {
+			response.ErrorFrom(c, badRequest("本地分组 ID 无效"))
+			return
+		}
+		localGroupID = &value
+	}
+
+	if err := h.dataRepo.UpdateGroupMapping(c.Request.Context(), groupID, localGroupID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"group_id": groupID, "local_group_id": localGroupID})
 }
 
 func parseOptionalInt64(raw string) int64 {
