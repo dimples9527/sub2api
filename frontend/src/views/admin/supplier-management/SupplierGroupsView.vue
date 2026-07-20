@@ -128,6 +128,21 @@
               <span>共 {{ total }} 条，当前页 {{ items.length }} 条</span>
             </div>
           </div>
+          <div class="sp-provider-shortcuts" aria-label="供应商快捷过滤">
+            <button
+              v-for="option in quickProviderOptions"
+              :key="String(option.value)"
+              type="button"
+              class="sp-provider-shortcut"
+              :class="{ active: providerID === option.value }"
+              :aria-pressed="providerID === option.value"
+              :disabled="loading"
+              :title="String(option.label)"
+              @click="selectProviderShortcut(option.value)"
+            >
+              <span>{{ option.label }}</span>
+            </button>
+          </div>
           <div class="sp-panel-signals" aria-label="当前页状态">
             <span><i class="good"></i>{{ currentPageMatchedCount }} 已匹配</span>
             <span><i class="warn"></i>{{ currentPageAttentionCount }} 待处理</span>
@@ -619,6 +634,7 @@ const providerOptions = computed<SelectOption[]>(() => [
   { value: 0, label: '全部供应商' },
   ...providers.value.map(provider => ({ value: provider.id, label: provider.name })),
 ])
+const quickProviderOptions = computed<SelectOption[]>(() => providerOptions.value)
 const platformFilterOptions: SelectOption[] = [
   { value: '', label: '全部平台' },
   { value: 'anthropic', label: 'Anthropic' },
@@ -726,6 +742,11 @@ function resetGroupFilters() {
     suppressFilterWatch = false
     void loadGroups()
   })
+}
+
+function selectProviderShortcut(value: SelectOption['value']) {
+  if (typeof value !== 'number' || providerID.value === value) return
+  providerID.value = value
 }
 
 function isSummaryFilterActive(filter: SummaryFilter): boolean {
@@ -1251,6 +1272,60 @@ function errorMessage(err: unknown, fallback: string): string {
   margin-bottom: 0;
 }
 
+.sp-provider-shortcuts {
+  display: flex;
+  min-width: 10rem;
+  max-width: min(44vw, 38rem);
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding: 0.15rem 0.25rem;
+  scrollbar-width: thin;
+}
+
+.sp-provider-shortcut {
+  display: inline-flex;
+  max-width: 8.5rem;
+  min-height: 2rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.375rem;
+  background: var(--sp-panel-2);
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+.sp-provider-shortcut span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-provider-shortcut:hover {
+  border-color: color-mix(in srgb, var(--sp-cyan) 36%, var(--sp-line));
+  color: var(--sp-cyan);
+}
+
+.sp-provider-shortcut.active {
+  border-color: color-mix(in srgb, var(--sp-cyan) 58%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-cyan) 8%, var(--sp-panel));
+  color: var(--sp-cyan);
+}
+
+.sp-provider-shortcut:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
 .sp-panel-signals {
   display: flex;
   align-items: center;
@@ -1715,6 +1790,15 @@ function errorMessage(err: unknown, fallback: string): string {
   .sp-summary-grid :deep(.stat-trend) { display: none; }
   .sp-summary-grid :deep(.stat-label) { font-size: 0.67rem; }
   .sp-summary-grid :deep(.stat-value) { margin-top: 0.3rem; font-size: 1.25rem; }
+  .sp-provider-shortcuts {
+    width: 100%;
+    max-width: 100%;
+    justify-content: flex-start;
+    padding-inline: 0;
+  }
+  .sp-provider-shortcut {
+    max-width: 7.5rem;
+  }
   .sp-table-shell { height: auto; min-height: 0; overflow: visible; }
   .sp-panel-signals { width: 100%; justify-content: space-between; }
   .sp-row-actions { flex-wrap: wrap; justify-content: flex-end; }

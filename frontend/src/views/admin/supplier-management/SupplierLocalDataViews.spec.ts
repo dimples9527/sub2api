@@ -134,4 +134,12 @@ describe('supplier local data views component usage', () => {
     expect(groupsSource).toContain('sp-provider-type')
     expect(groupsSource).toContain('【{{ upstreamPlatformLabel(group) }}】')
   })
+
+  it('adds supplier quick filters to the group table header', () => {
+    expect(groupsSource).toContain('sp-provider-shortcuts')
+    expect(groupsSource).toContain('quickProviderOptions')
+    expect(groupsSource).toContain('selectProviderShortcut')
+    expect(groupsSource).toContain(':aria-pressed="providerID === option.value"')
+    expect(groupsSource).toContain('@click="selectProviderShortcut(option.value)"')
+  })
 })
