@@ -27,6 +27,16 @@ describe('supplier local data views component usage', () => {
   })
 
   it('uses full-filter summary cards and keeps group controls easy to scan', () => {
+		expect(groupsSource).not.toContain('Supplier Group Matching')
+		expect(groupsSource).not.toContain('<h1>分组管理</h1>')
+		expect(groupsSource).not.toContain('对照最近一次采集到的上游分组与本地分组')
+		expect(groupsSource).toContain('sp-filter-toolbar')
+		expect(groupsSource).toContain('sp-filter-fields')
+		expect(groupsSource).toContain('sp-filter-actions')
+		expect(groupsSource).toContain('v-model="platformFilter"')
+		expect(groupsSource).toContain('v-model="matchStatusFilter"')
+		expect(groupsSource).toContain('v-model="rateStatusFilter"')
+		expect(groupsSource).toContain(':searchable="true"')
     expect(groupsSource).toContain('resetGroupFilters')
     expect(groupsSource).toContain('canResetFilters')
     expect(groupsSource).toContain('handleGroupPageSizeChange')
@@ -53,22 +63,32 @@ describe('supplier local data views component usage', () => {
       "{ key: 'raw_status', label: '上游状态'",
       "{ key: 'local_group_name', label: '匹配本地分组'",
       "{ key: 'local_rate_multiplier', label: '本地分组倍率'",
-      "{ key: 'profit_rate', label: '收益倍率'",
+      "{ key: 'rate_delta', label: '价差'",
       "{ key: 'account_count', label: '绑定账号'",
       "{ key: 'rate_status', label: '倍率状态'",
       "{ key: 'actions', label: '操作'",
     ]
     columns.forEach(column => expect(groupsSource).toContain(column))
+    expect(groupsSource).toContain('修改后价差')
+    expect(groupsSource).not.toContain('收益倍率')
+    expect(groupsSource).not.toContain('formatProfitRate')
     columns.slice(1).forEach((column, index) => {
       expect(groupsSource.indexOf(columns[index])).toBeLessThan(groupsSource.indexOf(column))
     })
     expect(groupsSource).toContain('sp-console-shell')
     expect(groupsSource).toContain('sp-summary-grid')
+		expect(groupsSource).toContain('sp-summary-filter')
+		expect(groupsSource).toContain('applySummaryFilter')
+		expect(groupsSource).toContain(':aria-pressed="isSummaryFilterActive')
     expect(groupsSource).toContain('sp-console-panel')
     expect(groupsSource).toContain('sp-table-shell')
     expect(groupsSource).toContain('height: min(64vh, 680px)')
     const mobileMediaIndex = groupsSource.indexOf('@media (max-width: 760px)')
     expect(groupsSource.indexOf('.sp-table-shell { height: auto;', mobileMediaIndex)).toBeGreaterThan(mobileMediaIndex)
+		const reducedMotionIndex = groupsSource.indexOf('@media (prefers-reduced-motion: reduce)')
+		const mobileStyles = groupsSource.slice(mobileMediaIndex, reducedMotionIndex)
+		expect(mobileStyles).toContain('.sp-summary-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }')
+		expect(mobileStyles).not.toContain('.sp-summary-grid { grid-template-columns: 1fr; }')
   })
 
   it('shows only groups available in the latest collection', () => {

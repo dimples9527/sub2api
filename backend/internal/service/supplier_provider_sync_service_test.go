@@ -30,7 +30,25 @@ func (r *supplierProviderDataRepoStub) ListAccounts(context.Context, SupplierPro
 func (r *supplierProviderDataRepoStub) ListGroups(context.Context, SupplierProviderDataListParams) (SupplierProviderGroupListResult, error) {
 	return SupplierProviderGroupListResult{}, nil
 }
+func (r *supplierProviderDataRepoStub) ListGroupsForAutoMatch(context.Context, int64) ([]SupplierProviderGroup, error) {
+	return []SupplierProviderGroup{}, nil
+}
+func (r *supplierProviderDataRepoStub) GetGroupForAutoMatch(context.Context, int64) (SupplierProviderGroup, error) {
+	return SupplierProviderGroup{}, nil
+}
 func (r *supplierProviderDataRepoStub) UpdateGroupMapping(context.Context, int64, *int64) error {
+	return nil
+}
+func (r *supplierProviderDataRepoStub) ApplyAutoMatch(context.Context, int64, int64, string) (bool, error) {
+	return false, nil
+}
+func (r *supplierProviderDataRepoStub) UpdateAutoMatchState(context.Context, int64, string, bool) error {
+	return nil
+}
+func (r *supplierProviderDataRepoStub) UpdateAutoMatchIgnored(context.Context, int64, bool) error {
+	return nil
+}
+func (r *supplierProviderDataRepoStub) AcknowledgeNameChange(context.Context, int64, string) error {
 	return nil
 }
 func (r *supplierProviderDataRepoStub) ReplaceAccounts(_ context.Context, _ int64, items []SupplierProviderRemoteAccount, _ time.Time) (SupplierSyncCounts, error) {
@@ -133,6 +151,16 @@ type supplierSyncLockStub struct {
 	released int
 }
 
+type supplierGroupAutoMatcherStub struct {
+	calls []int64
+	err   error
+}
+
+func (s *supplierGroupAutoMatcherStub) AutoMatch(_ context.Context, providerID int64) (SupplierGroupAutoMatchResult, error) {
+	s.calls = append(s.calls, providerID)
+	return SupplierGroupAutoMatchResult{ProviderID: providerID}, s.err
+}
+
 func (l *supplierSyncLockStub) TryAcquireSyncLock(context.Context, int64, string, time.Duration) (bool, error) {
 	return l.acquired, nil
 }
@@ -171,6 +199,23 @@ func TestSupplierProviderSyncServiceSyncAccountsDecryptsPasswordAndPersists(t *t
 	require.Len(t, dataRepo.createdRuns, 1)
 	require.Len(t, dataRepo.finishedRuns, 1)
 	require.Equal(t, 1, lock.released)
+}
+
+func TestSupplierProviderSyncServiceSyncGroupsRunsAutoMatcherAfterPersisting(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID: 42, ProviderType: SupplierProviderTypeSub2API, Enabled: true, PasswordEncrypted: "secret",
+	}}}
+	dataRepo := &supplierProviderDataRepoStub{}
+	matcher := &supplierGroupAutoMatcherStub{}
+	service := NewSupplierProviderSyncService(providerRepo, dataRepo, &supplierRemoteClientStub{}, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+	service.SetGroupMatcher(matcher)
+
+	result, err := service.SyncGroups(context.Background(), 42, SupplierSyncTriggerManual)
+
+	require.NoError(t, err)
+	require.Equal(t, SupplierSyncStatusSuccess, result.Status)
+	require.Equal(t, 1, dataRepo.groupsCalls)
+	require.Equal(t, []int64{42}, matcher.calls)
 }
 
 func TestSupplierProviderSyncServiceUsesStoredCredentialWhenDecryptFails(t *testing.T) {

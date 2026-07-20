@@ -160,11 +160,12 @@ func TestSupplierProviderDataRepositoryListGroupsIncludesFilteredSummary(t *test
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "provider_id", "provider_name", "upstream_group_key", "name",
 			"rate_multiplier", "raw_status", "active", "local_group_id", "local_group_name",
-			"local_group_platform", "local_rate_multiplier", "local_group_status", "account_count",
+			"local_group_platform", "local_rate_multiplier", "local_group_status", "auto_match_ignored",
+			"auto_match_status", "matched_upstream_name", "name_change_pending", "account_count",
 			"last_seen_at", "inactive_at",
 		}).AddRow(
 			int64(7), int64(42), "Supplier A", "group-1", "VIP", 2.5, "active", true,
-			int64(12), "VIP 本地", "openai", 3.0, "active", 5, now, nil,
+			int64(12), "VIP 本地", "openai", 3.0, "active", false, "manual", "VIP", false, 5, now, nil,
 		))
 
 	result, err := repo.ListGroups(context.Background(), service.SupplierProviderDataListParams{
@@ -188,6 +189,113 @@ func TestSupplierProviderDataRepositoryListGroupsIncludesFilteredSummary(t *test
 	require.Equal(t, "openai", result.Items[0].LocalGroupPlatform)
 	require.Equal(t, 3.0, *result.Items[0].LocalRateMultiplier)
 	require.Equal(t, "active", result.Items[0].LocalGroupStatus)
+	require.False(t, result.Items[0].AutoMatchIgnored)
+	require.Equal(t, service.AutoMatchStatusManual, result.Items[0].AutoMatchStatus)
+	require.Equal(t, "VIP", result.Items[0].MatchedUpstreamName)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderGroupBaseWhereIncludesPlatform(t *testing.T) {
+	active := true
+	where, args := supplierProviderGroupBaseWhere(service.SupplierProviderDataListParams{
+		ProviderID: 42,
+		Active:     &active,
+		Search:     "vip",
+		Platform:   "openai",
+	})
+
+	require.Contains(t, where, "g.provider_id = $1")
+	require.Contains(t, where, "g.active = $2")
+	require.Contains(t, where, "(g.name ILIKE $3 OR g.upstream_group_key ILIKE $3)")
+	require.Contains(t, where, "lg.platform = $4")
+	require.Equal(t, []any{int64(42), active, "%vip%", "openai"}, args)
+}
+
+func TestSupplierProviderGroupListWhereAddsMatchStatusFilters(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    string
+		condition string
+	}{
+		{name: "linked", status: "linked", condition: "g.local_group_id IS NOT NULL"},
+		{name: "unlinked", status: "unlinked", condition: "g.local_group_id IS NULL"},
+		{name: "automatic", status: "auto_matched", condition: "g.local_group_id IS NOT NULL AND g.auto_match_status = 'auto_matched'"},
+		{name: "manual", status: "manual", condition: "g.local_group_id IS NOT NULL AND g.auto_match_status = 'manual'"},
+		{name: "ambiguous", status: "ambiguous", condition: "g.local_group_id IS NULL AND g.auto_match_status = 'ambiguous'"},
+		{name: "ignored", status: "ignored", condition: "g.auto_match_ignored = TRUE"},
+		{name: "name changed", status: "name_changed", condition: "g.name_change_pending = TRUE"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			where, _ := supplierProviderGroupListWhere(service.SupplierProviderDataListParams{MatchStatus: tt.status})
+			require.Contains(t, where, tt.condition)
+		})
+	}
+}
+
+func TestSupplierProviderGroupListWhereAddsRateStatusFilters(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    string
+		condition string
+	}{
+		{name: "normal", status: "normal", condition: "lg.rate_multiplier >= g.rate_multiplier * 1.1"},
+		{name: "low", status: "low", condition: "lg.rate_multiplier > g.rate_multiplier + 0.000000001 AND lg.rate_multiplier < g.rate_multiplier * 1.1"},
+		{name: "equal", status: "equal", condition: "ABS(lg.rate_multiplier - g.rate_multiplier) <= 0.000000001"},
+		{name: "inverted", status: "inverted", condition: "lg.rate_multiplier < g.rate_multiplier - 0.000000001"},
+		{name: "inactive", status: "inactive", condition: "COALESCE(lg.status, '') = 'inactive'"},
+		{name: "invalid", status: "invalid", condition: "(g.rate_multiplier <= 0 OR lg.rate_multiplier IS NULL OR lg.rate_multiplier <= 0)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			where, _ := supplierProviderGroupListWhere(service.SupplierProviderDataListParams{RateStatus: tt.status})
+			require.Contains(t, where, tt.condition)
+		})
+	}
+}
+
+func TestSupplierProviderDataRepositoryListGroupsKeepsSummaryOutsideStatusFilters(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	active := true
+	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(`(?s)COUNT\(\*\) AS group_count.*WHERE .*lg\.platform = \$3`).
+		WithArgs(int64(42), active, "openai").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"group_count", "account_count", "linked_group_count", "unlinked_group_count", "rate_risk_count",
+		}).AddRow(int64(4), int64(9), int64(3), int64(1), int64(2)))
+	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\) FROM supplier_provider_groups g.*g\.auto_match_status = 'manual'.*lg\.rate_multiplier > g\.rate_multiplier \+ 0\.000000001`).
+		WithArgs(int64(42), active, "openai").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
+	mock.ExpectQuery(`(?s)FROM supplier_provider_groups g.*g\.auto_match_status = 'manual'.*lg\.rate_multiplier > g\.rate_multiplier \+ 0\.000000001`).
+		WithArgs(int64(42), active, "openai", 20, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "provider_id", "provider_name", "upstream_group_key", "name",
+			"rate_multiplier", "raw_status", "active", "local_group_id", "local_group_name",
+			"local_group_platform", "local_rate_multiplier", "local_group_status", "auto_match_ignored",
+			"auto_match_status", "matched_upstream_name", "name_change_pending", "account_count",
+			"last_seen_at", "inactive_at",
+		}).AddRow(
+			int64(7), int64(42), "Supplier A", "group-1", "VIP", 2.5, "active", true,
+			int64(12), "VIP 本地", "openai", 2.6, "active", false, "manual", "VIP", false, 5, now, nil,
+		))
+
+	result, err := repo.ListGroups(context.Background(), service.SupplierProviderDataListParams{
+		ProviderID:  42,
+		Active:      &active,
+		Platform:    "openai",
+		MatchStatus: "manual",
+		RateStatus:  "low",
+		Page:        1,
+		PageSize:    20,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, int64(4), result.Summary.GroupCount)
+	require.Equal(t, int64(1), result.Total)
+	require.Len(t, result.Items, 1)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -198,17 +306,76 @@ func TestSupplierProviderDataRepositoryUpdateGroupMappingSetsAndClearsLocalGroup
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS(SELECT 1 FROM groups WHERE id = $1 AND status = 'active')")).
 		WithArgs(localGroupID).
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET local_group_id = $2, updated_at = NOW() WHERE id = $1")).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET local_group_id = $2, auto_match_status = CASE WHEN $2 IS NULL THEN 'unmatched' ELSE 'manual' END, matched_upstream_name = CASE WHEN $2 IS NULL THEN NULL ELSE name END, name_change_pending = FALSE, updated_at = NOW() WHERE id = $1")).
 		WithArgs(int64(7), localGroupID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	require.NoError(t, repo.UpdateGroupMapping(context.Background(), 7, &localGroupID))
 
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET local_group_id = $2, updated_at = NOW() WHERE id = $1")).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET local_group_id = $2, auto_match_status = CASE WHEN $2 IS NULL THEN 'unmatched' ELSE 'manual' END, matched_upstream_name = CASE WHEN $2 IS NULL THEN NULL ELSE name END, name_change_pending = FALSE, updated_at = NOW() WHERE id = $1")).
 		WithArgs(int64(7), nil).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	require.NoError(t, repo.UpdateGroupMapping(context.Background(), 7, nil))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryAutoMatchStateOperations(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	now := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(`FROM supplier_provider_groups g\s+JOIN supplier_providers p ON p.id = g.provider_id\s+WHERE g.active = TRUE AND g.provider_id = \$1`).
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "provider_id", "provider_name", "upstream_group_key", "name", "rate_multiplier", "raw_status", "active",
+			"local_group_id", "auto_match_ignored", "auto_match_status", "matched_upstream_name", "name_change_pending", "last_seen_at", "inactive_at",
+		}).AddRow(int64(7), int64(42), "Supplier A", "group-1", "VIP", 2.5, "active", true, nil, false, service.AutoMatchStatusUnmatched, "", false, now, nil))
+
+	groups, err := repo.ListGroupsForAutoMatch(context.Background(), 42)
+	require.NoError(t, err)
+	require.Len(t, groups, 1)
+	require.Nil(t, groups[0].LocalGroupID)
+
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET local_group_id = $2, auto_match_status = 'auto_matched', matched_upstream_name = $3, name_change_pending = FALSE, updated_at = NOW() WHERE id = $1 AND active = TRUE AND local_group_id IS NULL AND auto_match_ignored = FALSE")).
+		WithArgs(int64(7), int64(12), "VIP").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	updated, err := repo.ApplyAutoMatch(context.Background(), 7, 12, "VIP")
+	require.NoError(t, err)
+	require.True(t, updated)
+
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET auto_match_status = $2, name_change_pending = $3, updated_at = NOW() WHERE id = $1")).
+		WithArgs(int64(7), service.AutoMatchStatusAmbiguous, true).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	require.NoError(t, repo.UpdateAutoMatchState(context.Background(), 7, service.AutoMatchStatusAmbiguous, true))
+
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET auto_match_ignored = $2, updated_at = NOW() WHERE id = $1")).
+		WithArgs(int64(7), true).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	require.NoError(t, repo.UpdateAutoMatchIgnored(context.Background(), 7, true))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryLoadsAndAcknowledgesNameChange(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	now := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(`WHERE g.id = \$1`).
+		WithArgs(int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "provider_id", "provider_name", "upstream_group_key", "name", "rate_multiplier", "raw_status", "active",
+			"local_group_id", "auto_match_ignored", "auto_match_status", "matched_upstream_name", "name_change_pending", "last_seen_at", "inactive_at",
+		}).AddRow(int64(7), int64(42), "Supplier A", "group-1", "VIP New", 2.5, "active", true, int64(12), false, service.AutoMatchStatusManual, "VIP Old", true, now, nil))
+
+	group, err := repo.GetGroupForAutoMatch(context.Background(), 7)
+	require.NoError(t, err)
+	require.Equal(t, "VIP Old", group.MatchedUpstreamName)
+	require.True(t, group.NameChangePending)
+
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET matched_upstream_name = $2, name_change_pending = FALSE, updated_at = NOW() WHERE id = $1 AND local_group_id IS NOT NULL")).
+		WithArgs(int64(7), "VIP New").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	require.NoError(t, repo.AcknowledgeNameChange(context.Background(), 7, "VIP New"))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

@@ -35,7 +35,10 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 
 		supplier.GET("/accounts", h.Admin.SupplierProviderSync.ListAccounts)
 		supplier.GET("/groups", h.Admin.SupplierProviderSync.ListGroups)
+		supplier.POST("/groups/auto-match", h.Admin.SupplierProviderSync.AutoMatchGroups)
 		supplier.PUT("/groups/:id/mapping", h.Admin.SupplierProviderSync.UpdateGroupMapping)
+		supplier.PUT("/groups/:id/auto-match-policy", h.Admin.SupplierProviderSync.UpdateAutoMatchPolicy)
+		supplier.POST("/groups/:id/name-change/resolve", h.Admin.SupplierProviderSync.ResolveGroupNameChange)
 
 		automation := supplier.Group("/automation")
 		{

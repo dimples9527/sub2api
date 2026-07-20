@@ -117,10 +117,6 @@ func ProvideAdminSettingHandler(settingService *service.SettingService, emailSer
 	return h
 }
 
-func ProvideSupplierProviderSyncHandler(syncService *service.SupplierProviderSyncService, dataRepo service.SupplierProviderDataRepository) *admin.SupplierProviderSyncHandler {
-	return admin.NewSupplierProviderSyncHandler(syncService, dataRepo)
-}
-
 func ProvideSupplierAutomationHandler(svc *service.SupplierAutomationService) *admin.SupplierAutomationHandler {
 	return admin.NewSupplierAutomationHandler(svc)
 }
@@ -227,7 +223,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewAuditLogHandler,
 	admin.NewSupplierProviderHandler,
 	admin.NewSupplierProviderTypeHandler,
-	ProvideSupplierProviderSyncHandler,
+	SupplierProviderWiringSet,
 	ProvideSupplierAutomationHandler,
 	admin.NewUpstreamProviderHandler,
 	admin.NewUpstreamDashboardHandler,

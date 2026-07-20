@@ -28,9 +28,23 @@ type SupplierProviderDataRepositoryPort interface {
 	UpdateGroupMapping(ctx context.Context, groupID int64, localGroupID *int64) error
 }
 
+type SupplierProviderGroupMatcherPort interface {
+	AutoMatch(ctx context.Context, providerID int64) (service.SupplierGroupAutoMatchResult, error)
+	UpdateMapping(ctx context.Context, groupID int64, localGroupID *int64) error
+	SetIgnored(ctx context.Context, groupID int64, ignored bool) (service.SupplierGroupAutoMatchResult, error)
+	ResolveNameChange(ctx context.Context, groupID int64, action string) error
+}
+
 type SupplierProviderSyncHandler struct {
-	syncService SupplierProviderSyncServicePort
-	dataRepo    SupplierProviderDataRepositoryPort
+	syncService  SupplierProviderSyncServicePort
+	dataRepo     SupplierProviderDataRepositoryPort
+	groupMatcher SupplierProviderGroupMatcherPort
+}
+
+func (h *SupplierProviderSyncHandler) SetGroupMatcher(matcher SupplierProviderGroupMatcherPort) {
+	if h != nil {
+		h.groupMatcher = matcher
+	}
 }
 
 func NewSupplierProviderSyncHandler(syncService SupplierProviderSyncServicePort, dataRepo SupplierProviderDataRepositoryPort) *SupplierProviderSyncHandler {
@@ -123,11 +137,14 @@ func (h *SupplierProviderSyncHandler) ListGroups(c *gin.Context) {
 		pageSize = supplierProviderMaxPageSize
 	}
 	result, err := h.dataRepo.ListGroups(c.Request.Context(), service.SupplierProviderDataListParams{
-		ProviderID: parseOptionalInt64(c.Query("provider_id")),
-		Active:     parseSupplierProviderEnabled(c.Query("active")),
-		Search:     strings.TrimSpace(c.Query("search")),
-		Page:       page,
-		PageSize:   pageSize,
+		ProviderID:  parseOptionalInt64(c.Query("provider_id")),
+		Active:      parseSupplierProviderEnabled(c.Query("active")),
+		Search:      strings.TrimSpace(c.Query("search")),
+		Platform:    strings.TrimSpace(c.Query("platform")),
+		MatchStatus: strings.TrimSpace(c.Query("match_status")),
+		RateStatus:  strings.TrimSpace(c.Query("rate_status")),
+		Page:        page,
+		PageSize:    pageSize,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -137,9 +154,8 @@ func (h *SupplierProviderSyncHandler) ListGroups(c *gin.Context) {
 }
 
 func (h *SupplierProviderSyncHandler) UpdateGroupMapping(c *gin.Context) {
-	groupID, err := strconv.ParseInt(strings.TrimSpace(c.Param("id")), 10, 64)
-	if err != nil || groupID <= 0 {
-		response.ErrorFrom(c, badRequest("供应商分组 ID 无效"))
+	groupID, ok := parseSupplierGroupID(c)
+	if !ok {
 		return
 	}
 
@@ -164,11 +180,83 @@ func (h *SupplierProviderSyncHandler) UpdateGroupMapping(c *gin.Context) {
 		localGroupID = &value
 	}
 
-	if err := h.dataRepo.UpdateGroupMapping(c.Request.Context(), groupID, localGroupID); err != nil {
+	var err error
+	if h.groupMatcher != nil {
+		err = h.groupMatcher.UpdateMapping(c.Request.Context(), groupID, localGroupID)
+	} else {
+		err = h.dataRepo.UpdateGroupMapping(c.Request.Context(), groupID, localGroupID)
+	}
+	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 	response.Success(c, gin.H{"group_id": groupID, "local_group_id": localGroupID})
+}
+
+func (h *SupplierProviderSyncHandler) AutoMatchGroups(c *gin.Context) {
+	if h.groupMatcher == nil {
+		response.ErrorFrom(c, infraerrors.InternalServer("SUPPLIER_GROUP_MATCHER_UNAVAILABLE", "supplier group matcher unavailable"))
+		return
+	}
+	result, err := h.groupMatcher.AutoMatch(c.Request.Context(), parseOptionalInt64(c.Query("provider_id")))
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *SupplierProviderSyncHandler) UpdateAutoMatchPolicy(c *gin.Context) {
+	groupID, ok := parseSupplierGroupID(c)
+	if !ok {
+		return
+	}
+	var input struct {
+		Ignored *bool `json:"ignored"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil || input.Ignored == nil {
+		response.ErrorFrom(c, badRequest("忽略自动匹配参数无效"))
+		return
+	}
+	result, err := h.groupMatcher.SetIgnored(c.Request.Context(), groupID, *input.Ignored)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *SupplierProviderSyncHandler) ResolveGroupNameChange(c *gin.Context) {
+	groupID, ok := parseSupplierGroupID(c)
+	if !ok {
+		return
+	}
+	var input struct {
+		Action string `json:"action"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.ErrorFrom(c, badRequest("名称变化处理参数无效"))
+		return
+	}
+	input.Action = strings.TrimSpace(input.Action)
+	if input.Action != service.NameChangeActionKeepLocal && input.Action != service.NameChangeActionSyncLocal {
+		response.ErrorFrom(c, badRequest("不支持的名称变化处理方式"))
+		return
+	}
+	if err := h.groupMatcher.ResolveNameChange(c.Request.Context(), groupID, input.Action); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"group_id": groupID, "action": input.Action})
+}
+
+func parseSupplierGroupID(c *gin.Context) (int64, bool) {
+	groupID, err := strconv.ParseInt(strings.TrimSpace(c.Param("id")), 10, 64)
+	if err != nil || groupID <= 0 {
+		response.ErrorFrom(c, badRequest("供应商分组 ID 无效"))
+		return 0, false
+	}
+	return groupID, true
 }
 
 func parseOptionalInt64(raw string) int64 {

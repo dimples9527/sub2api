@@ -51,12 +51,43 @@ func supplierProviderSyncHandlerResult(scope string) service.SupplierProviderSyn
 type supplierProviderSyncHandlerDataStub struct {
 	mappedGroupID      int64
 	mappedLocalGroupID *int64
+	groupListParams    service.SupplierProviderDataListParams
+}
+
+type supplierProviderGroupMatcherHandlerStub struct {
+	autoProviderID  int64
+	ignoredGroupID  int64
+	ignored         bool
+	resolvedGroupID int64
+	resolvedAction  string
+}
+
+func (s *supplierProviderGroupMatcherHandlerStub) AutoMatch(_ context.Context, providerID int64) (service.SupplierGroupAutoMatchResult, error) {
+	s.autoProviderID = providerID
+	return service.SupplierGroupAutoMatchResult{ProviderID: providerID, Scanned: 3, AutoMatched: 1, Ambiguous: 1}, nil
+}
+
+func (*supplierProviderGroupMatcherHandlerStub) UpdateMapping(context.Context, int64, *int64) error {
+	return nil
+}
+
+func (s *supplierProviderGroupMatcherHandlerStub) SetIgnored(_ context.Context, groupID int64, ignored bool) (service.SupplierGroupAutoMatchResult, error) {
+	s.ignoredGroupID = groupID
+	s.ignored = ignored
+	return service.SupplierGroupAutoMatchResult{}, nil
+}
+
+func (s *supplierProviderGroupMatcherHandlerStub) ResolveNameChange(_ context.Context, groupID int64, action string) error {
+	s.resolvedGroupID = groupID
+	s.resolvedAction = action
+	return nil
 }
 
 func (*supplierProviderSyncHandlerDataStub) ListAccounts(context.Context, service.SupplierProviderDataListParams) (service.SupplierProviderAccountListResult, error) {
 	return service.SupplierProviderAccountListResult{Items: []service.SupplierProviderAccount{{ID: 1, ProviderID: 42, Name: "Primary"}}, Total: 1, Page: 1, PageSize: 20}, nil
 }
-func (*supplierProviderSyncHandlerDataStub) ListGroups(context.Context, service.SupplierProviderDataListParams) (service.SupplierProviderGroupListResult, error) {
+func (s *supplierProviderSyncHandlerDataStub) ListGroups(_ context.Context, params service.SupplierProviderDataListParams) (service.SupplierProviderGroupListResult, error) {
+	s.groupListParams = params
 	return service.SupplierProviderGroupListResult{Items: []service.SupplierProviderGroup{{ID: 1, ProviderID: 42, Name: "VIP"}}, Total: 1, Page: 1, PageSize: 20}, nil
 }
 func (s *supplierProviderSyncHandlerDataStub) UpdateGroupMapping(_ context.Context, groupID int64, localGroupID *int64) error {
@@ -122,4 +153,63 @@ func TestSupplierProviderSyncHandlerRejectsInvalidProviderID(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestSupplierProviderSyncHandlerListGroupsPassesGroupFilters(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dataStub := &supplierProviderSyncHandlerDataStub{}
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, dataStub)
+	router := gin.New()
+	router.GET("/groups", handler.ListGroups)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/groups?provider_id=42&active=true&search=vip&platform=openai&match_status=manual&rate_status=low&page=2&page_size=20",
+		nil,
+	)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(42), dataStub.groupListParams.ProviderID)
+	require.Equal(t, "vip", dataStub.groupListParams.Search)
+	require.Equal(t, "openai", dataStub.groupListParams.Platform)
+	require.Equal(t, "manual", dataStub.groupListParams.MatchStatus)
+	require.Equal(t, "low", dataStub.groupListParams.RateStatus)
+	require.Equal(t, 2, dataStub.groupListParams.Page)
+	require.Equal(t, 20, dataStub.groupListParams.PageSize)
+}
+
+func TestSupplierProviderSyncHandlerGroupAutoMatchRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	matcher := &supplierProviderGroupMatcherHandlerStub{}
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, &supplierProviderSyncHandlerDataStub{})
+	handler.SetGroupMatcher(matcher)
+	router := gin.New()
+	router.POST("/groups/auto-match", handler.AutoMatchGroups)
+	router.PUT("/groups/:id/auto-match-policy", handler.UpdateAutoMatchPolicy)
+	router.POST("/groups/:id/name-change/resolve", handler.ResolveGroupNameChange)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/groups/auto-match?provider_id=42", nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(42), matcher.autoProviderID)
+	require.Contains(t, rec.Body.String(), `"auto_matched":1`)
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPut, "/groups/7/auto-match-policy", bytes.NewBufferString(`{"ignored":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(7), matcher.ignoredGroupID)
+	require.True(t, matcher.ignored)
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/groups/7/name-change/resolve", bytes.NewBufferString(`{"action":"keep_local"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(7), matcher.resolvedGroupID)
+	require.Equal(t, service.NameChangeActionKeepLocal, matcher.resolvedAction)
 }

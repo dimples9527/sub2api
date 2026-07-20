@@ -57,7 +57,8 @@ WHERE `+where+fmt.Sprintf(" ORDER BY a.active DESC, a.last_seen_at DESC, a.id AS
 
 func (r *supplierProviderDataRepository) ListGroups(ctx context.Context, params service.SupplierProviderDataListParams) (service.SupplierProviderGroupListResult, error) {
 	params = normalizeSupplierProviderDataListParams(params)
-	where, args := supplierProviderDataWhere("g", params)
+	baseWhere, baseArgs := supplierProviderGroupBaseWhere(params)
+	where, args := supplierProviderGroupListWhere(params)
 
 	var summary service.SupplierProviderGroupSummary
 	if err := r.db.QueryRowContext(ctx, `
@@ -80,9 +81,9 @@ FROM (
   JOIN supplier_providers p ON p.id = g.provider_id
   LEFT JOIN groups lg ON lg.id = g.local_group_id
   LEFT JOIN supplier_provider_accounts a ON a.provider_id = g.provider_id AND a.group_key = g.upstream_group_key
-  WHERE `+where+`
+  WHERE `+baseWhere+`
   GROUP BY g.id, g.local_group_id, lg.id
-) matched_groups`, args...).Scan(
+) matched_groups`, baseArgs...).Scan(
 		&summary.GroupCount,
 		&summary.AccountCount,
 		&summary.LinkedGroupCount,
@@ -90,6 +91,17 @@ FROM (
 		&summary.RateRiskCount,
 	); err != nil {
 		return service.SupplierProviderGroupListResult{}, fmt.Errorf("summarize supplier provider groups: %w", err)
+	}
+
+	total := summary.GroupCount
+	if supplierProviderGroupHasListFilters(params) {
+		if err := r.db.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM supplier_provider_groups g
+JOIN supplier_providers p ON p.id = g.provider_id
+LEFT JOIN groups lg ON lg.id = g.local_group_id
+WHERE `+where, args...).Scan(&total); err != nil {
+			return service.SupplierProviderGroupListResult{}, fmt.Errorf("count filtered supplier provider groups: %w", err)
+		}
 	}
 
 	queryArgs := append(append([]any{}, args...), params.PageSize, (params.Page-1)*params.PageSize)
@@ -100,6 +112,9 @@ SELECT g.id, g.provider_id, p.name AS provider_name, g.upstream_group_key, g.nam
        COALESCE(lg.platform, '') AS local_group_platform,
        lg.rate_multiplier AS local_rate_multiplier,
        COALESCE(lg.status, '') AS local_group_status,
+       g.auto_match_ignored, g.auto_match_status,
+       COALESCE(g.matched_upstream_name, '') AS matched_upstream_name,
+       g.name_change_pending,
        COALESCE(COUNT(a.id) FILTER (WHERE a.active = TRUE), 0) AS account_count,
        g.last_seen_at, g.inactive_at
 FROM supplier_provider_groups g
@@ -125,7 +140,7 @@ WHERE `+where+fmt.Sprintf(" GROUP BY g.id, p.name, lg.id ORDER BY g.active DESC,
 	}
 	return service.SupplierProviderGroupListResult{
 		Items:    items,
-		Total:    summary.GroupCount,
+		Total:    total,
 		Page:     params.Page,
 		PageSize: params.PageSize,
 		Summary:  summary,
@@ -143,13 +158,117 @@ func (r *supplierProviderDataRepository) UpdateGroupMapping(ctx context.Context,
 		}
 	}
 
-	result, err := r.db.ExecContext(ctx, "UPDATE supplier_provider_groups SET local_group_id = $2, updated_at = NOW() WHERE id = $1", groupID, localGroupID)
+	result, err := r.db.ExecContext(ctx, "UPDATE supplier_provider_groups SET local_group_id = $2, auto_match_status = CASE WHEN $2 IS NULL THEN 'unmatched' ELSE 'manual' END, matched_upstream_name = CASE WHEN $2 IS NULL THEN NULL ELSE name END, name_change_pending = FALSE, updated_at = NOW() WHERE id = $1", groupID, localGroupID)
 	if err != nil {
 		return fmt.Errorf("update supplier provider group mapping: %w", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("read supplier provider group mapping result: %w", err)
+	}
+	if affected == 0 {
+		return service.ErrSupplierProviderGroupNotFound
+	}
+	return nil
+}
+
+func (r *supplierProviderDataRepository) ListGroupsForAutoMatch(ctx context.Context, providerID int64) ([]service.SupplierProviderGroup, error) {
+	query := `
+SELECT g.id, g.provider_id, p.name AS provider_name, g.upstream_group_key, g.name,
+       g.rate_multiplier, g.raw_status, g.active, g.local_group_id,
+       g.auto_match_ignored, g.auto_match_status,
+       COALESCE(g.matched_upstream_name, '') AS matched_upstream_name,
+       g.name_change_pending, g.last_seen_at, g.inactive_at
+FROM supplier_provider_groups g
+JOIN supplier_providers p ON p.id = g.provider_id
+WHERE g.active = TRUE`
+	args := make([]any, 0, 1)
+	if providerID > 0 {
+		query += " AND g.provider_id = $1"
+		args = append(args, providerID)
+	}
+	query += " ORDER BY g.provider_id ASC, g.id ASC"
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query supplier groups for auto match: %w", err)
+	}
+	defer rows.Close()
+
+	groups := make([]service.SupplierProviderGroup, 0)
+	for rows.Next() {
+		group, err := scanSupplierProviderGroupAutoMatch(rows)
+		if err != nil {
+			return nil, err
+		}
+		groups = append(groups, group)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate supplier groups for auto match: %w", err)
+	}
+	return groups, nil
+}
+
+func (r *supplierProviderDataRepository) GetGroupForAutoMatch(ctx context.Context, groupID int64) (service.SupplierProviderGroup, error) {
+	row := r.db.QueryRowContext(ctx, `
+SELECT g.id, g.provider_id, p.name AS provider_name, g.upstream_group_key, g.name,
+       g.rate_multiplier, g.raw_status, g.active, g.local_group_id,
+       g.auto_match_ignored, g.auto_match_status,
+       COALESCE(g.matched_upstream_name, '') AS matched_upstream_name,
+       g.name_change_pending, g.last_seen_at, g.inactive_at
+FROM supplier_provider_groups g
+JOIN supplier_providers p ON p.id = g.provider_id
+WHERE g.id = $1`, groupID)
+	group, err := scanSupplierProviderGroupAutoMatch(row)
+	if err == sql.ErrNoRows {
+		return service.SupplierProviderGroup{}, service.ErrSupplierProviderGroupNotFound
+	}
+	if err != nil {
+		return service.SupplierProviderGroup{}, err
+	}
+	return group, nil
+}
+
+func (r *supplierProviderDataRepository) ApplyAutoMatch(ctx context.Context, groupID, localGroupID int64, matchedUpstreamName string) (bool, error) {
+	result, err := r.db.ExecContext(ctx, "UPDATE supplier_provider_groups SET local_group_id = $2, auto_match_status = 'auto_matched', matched_upstream_name = $3, name_change_pending = FALSE, updated_at = NOW() WHERE id = $1 AND active = TRUE AND local_group_id IS NULL AND auto_match_ignored = FALSE", groupID, localGroupID, matchedUpstreamName)
+	if err != nil {
+		return false, fmt.Errorf("apply supplier group auto match: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read supplier group auto match result: %w", err)
+	}
+	return affected > 0, nil
+}
+
+func (r *supplierProviderDataRepository) UpdateAutoMatchState(ctx context.Context, groupID int64, status string, nameChangePending bool) error {
+	result, err := r.db.ExecContext(ctx, "UPDATE supplier_provider_groups SET auto_match_status = $2, name_change_pending = $3, updated_at = NOW() WHERE id = $1", groupID, status, nameChangePending)
+	if err != nil {
+		return fmt.Errorf("update supplier group auto match state: %w", err)
+	}
+	return supplierGroupUpdateFound(result)
+}
+
+func (r *supplierProviderDataRepository) UpdateAutoMatchIgnored(ctx context.Context, groupID int64, ignored bool) error {
+	result, err := r.db.ExecContext(ctx, "UPDATE supplier_provider_groups SET auto_match_ignored = $2, updated_at = NOW() WHERE id = $1", groupID, ignored)
+	if err != nil {
+		return fmt.Errorf("update supplier group auto match policy: %w", err)
+	}
+	return supplierGroupUpdateFound(result)
+}
+
+func (r *supplierProviderDataRepository) AcknowledgeNameChange(ctx context.Context, groupID int64, matchedUpstreamName string) error {
+	result, err := r.db.ExecContext(ctx, "UPDATE supplier_provider_groups SET matched_upstream_name = $2, name_change_pending = FALSE, updated_at = NOW() WHERE id = $1 AND local_group_id IS NOT NULL", groupID, matchedUpstreamName)
+	if err != nil {
+		return fmt.Errorf("acknowledge supplier group name change: %w", err)
+	}
+	return supplierGroupUpdateFound(result)
+}
+
+func supplierGroupUpdateFound(result sql.Result) error {
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read supplier group update result: %w", err)
 	}
 	if affected == 0 {
 		return service.ErrSupplierProviderGroupNotFound
@@ -406,6 +525,60 @@ func supplierProviderDataWhere(alias string, params service.SupplierProviderData
 	return strings.Join(conditions, " AND "), args
 }
 
+func supplierProviderGroupBaseWhere(params service.SupplierProviderDataListParams) (string, []any) {
+	where, args := supplierProviderDataWhere("g", params)
+	conditions := []string{where}
+	if platform := strings.TrimSpace(params.Platform); platform != "" {
+		args = append(args, platform)
+		conditions = append(conditions, fmt.Sprintf("lg.platform = $%d", len(args)))
+	}
+	return strings.Join(conditions, " AND "), args
+}
+
+func supplierProviderGroupListWhere(params service.SupplierProviderDataListParams) (string, []any) {
+	where, args := supplierProviderGroupBaseWhere(params)
+	conditions := []string{where}
+
+	switch strings.TrimSpace(params.MatchStatus) {
+	case "linked":
+		conditions = append(conditions, "g.local_group_id IS NOT NULL")
+	case "unlinked":
+		conditions = append(conditions, "g.local_group_id IS NULL")
+	case service.AutoMatchStatusAutoMatched:
+		conditions = append(conditions, "g.local_group_id IS NOT NULL AND g.auto_match_status = 'auto_matched'")
+	case service.AutoMatchStatusManual:
+		conditions = append(conditions, "g.local_group_id IS NOT NULL AND g.auto_match_status = 'manual'")
+	case service.AutoMatchStatusAmbiguous:
+		conditions = append(conditions, "g.local_group_id IS NULL AND g.auto_match_status = 'ambiguous'")
+	case "ignored":
+		conditions = append(conditions, "g.auto_match_ignored = TRUE")
+	case "name_changed":
+		conditions = append(conditions, "g.name_change_pending = TRUE")
+	}
+
+	validRateCondition := "g.local_group_id IS NOT NULL AND COALESCE(lg.status, '') <> 'inactive' AND g.rate_multiplier > 0 AND lg.rate_multiplier > 0"
+	switch strings.TrimSpace(params.RateStatus) {
+	case "normal":
+		conditions = append(conditions, validRateCondition+" AND lg.rate_multiplier >= g.rate_multiplier * 1.1")
+	case "low":
+		conditions = append(conditions, validRateCondition+" AND lg.rate_multiplier > g.rate_multiplier + 0.000000001 AND lg.rate_multiplier < g.rate_multiplier * 1.1")
+	case "equal":
+		conditions = append(conditions, validRateCondition+" AND ABS(lg.rate_multiplier - g.rate_multiplier) <= 0.000000001")
+	case "inverted":
+		conditions = append(conditions, validRateCondition+" AND lg.rate_multiplier < g.rate_multiplier - 0.000000001")
+	case "inactive":
+		conditions = append(conditions, "g.local_group_id IS NOT NULL AND COALESCE(lg.status, '') = 'inactive'")
+	case "invalid":
+		conditions = append(conditions, "g.local_group_id IS NOT NULL AND COALESCE(lg.status, '') <> 'inactive' AND (g.rate_multiplier <= 0 OR lg.rate_multiplier IS NULL OR lg.rate_multiplier <= 0)")
+	}
+
+	return strings.Join(conditions, " AND "), args
+}
+
+func supplierProviderGroupHasListFilters(params service.SupplierProviderDataListParams) bool {
+	return strings.TrimSpace(params.MatchStatus) != "" || strings.TrimSpace(params.RateStatus) != ""
+}
+
 func supplierProviderDataKeyName(alias string) string {
 	if alias == "g" {
 		return "group"
@@ -458,7 +631,27 @@ func scanSupplierProviderGroup(scanner supplierProviderGroupScanner) (service.Su
 		&item.Name, &item.RateMultiplier, &item.RawStatus, &item.Active,
 		&item.LocalGroupID, &item.LocalGroupName, &item.LocalGroupPlatform,
 		&item.LocalRateMultiplier, &item.LocalGroupStatus,
+		&item.AutoMatchIgnored, &item.AutoMatchStatus, &item.MatchedUpstreamName,
+		&item.NameChangePending,
 		&item.AccountCount, &item.LastSeenAt, &inactiveAt)
+	if err != nil {
+		return service.SupplierProviderGroup{}, err
+	}
+	if inactiveAt.Valid {
+		item.InactiveAt = &inactiveAt.Time
+	}
+	return item, nil
+}
+
+func scanSupplierProviderGroupAutoMatch(scanner supplierProviderGroupScanner) (service.SupplierProviderGroup, error) {
+	var item service.SupplierProviderGroup
+	var inactiveAt sql.NullTime
+	err := scanner.Scan(
+		&item.ID, &item.ProviderID, &item.ProviderName, &item.UpstreamKey, &item.Name,
+		&item.RateMultiplier, &item.RawStatus, &item.Active, &item.LocalGroupID,
+		&item.AutoMatchIgnored, &item.AutoMatchStatus, &item.MatchedUpstreamName,
+		&item.NameChangePending, &item.LastSeenAt, &inactiveAt,
+	)
 	if err != nil {
 		return service.SupplierProviderGroup{}, err
 	}

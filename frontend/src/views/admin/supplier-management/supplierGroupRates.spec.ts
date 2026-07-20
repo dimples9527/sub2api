@@ -1,17 +1,38 @@
 import { describe, expect, it } from 'vitest'
-import { getSupplierGroupRateInsight, getSupplierUpstreamRateBand } from './supplierGroupRates'
+import {
+  formatSupplierGroupRateDelta,
+  getSupplierGroupRateInsight,
+  getSupplierUpstreamRateBand,
+} from './supplierGroupRates'
 
 describe('supplier group rate insight', () => {
   it.each([
     [{ localGroupID: undefined, upstreamRate: 2, localRate: undefined, localStatus: '' }, 'unmatched', '未匹配', null],
-    [{ localGroupID: 7, upstreamRate: 2, localRate: 3, localStatus: 'inactive' }, 'inactive', '本地已停用', 1.5],
+    [{ localGroupID: 7, upstreamRate: 2, localRate: 3, localStatus: 'inactive' }, 'inactive', '本地已停用', 1],
     [{ localGroupID: 7, upstreamRate: 0, localRate: 3, localStatus: 'active' }, 'invalid', '数据异常', null],
-    [{ localGroupID: 7, upstreamRate: 2, localRate: 1.8, localStatus: 'active' }, 'inverted', '倒挂风险', 0.9],
-    [{ localGroupID: 7, upstreamRate: 2, localRate: 2, localStatus: 'active' }, 'equal', '倍率持平', 1],
-    [{ localGroupID: 7, upstreamRate: 2, localRate: 2.1, localStatus: 'active' }, 'low', '收益偏低', 1.05],
-    [{ localGroupID: 7, upstreamRate: 2, localRate: 2.2, localStatus: 'active' }, 'normal', '正常', 1.1],
-  ])('classifies %o as %s', (input, code, label, ratio) => {
-    expect(getSupplierGroupRateInsight(input)).toEqual({ code, label, ratio })
+    [{ localGroupID: 7, upstreamRate: 2, localRate: 1.8, localStatus: 'active' }, 'inverted', '倒挂风险', -0.2],
+    [{ localGroupID: 7, upstreamRate: 2, localRate: 2, localStatus: 'active' }, 'equal', '倍率持平', 0],
+    [{ localGroupID: 7, upstreamRate: 2, localRate: 2.1, localStatus: 'active' }, 'low', '收益偏低', 0.1],
+    [{ localGroupID: 7, upstreamRate: 2, localRate: 2.2, localStatus: 'active' }, 'normal', '正常', 0.2],
+  ])('classifies %o as %s', (input, code, label, delta) => {
+    const result = getSupplierGroupRateInsight(input)
+    expect(result).toMatchObject({ code, label })
+    if (delta === null) {
+      expect(result.delta).toBeNull()
+    } else {
+      expect(result.delta).toBeCloseTo(delta, 12)
+    }
+  })
+
+  it.each([
+    [1.2, 1, '+0.2'],
+    [1.23456789, 1.2, '+0.03456789'],
+    [0.1, 0.3, '-0.2'],
+    [2, 2, '0'],
+    ['1.0000001', '1', '+0.0000001'],
+    [Number.NaN, 1, '-'],
+  ])('formats exact rate delta for %s - %s', (localRate, upstreamRate, expected) => {
+    expect(formatSupplierGroupRateDelta(localRate, upstreamRate)).toBe(expected)
   })
 
   it.each([

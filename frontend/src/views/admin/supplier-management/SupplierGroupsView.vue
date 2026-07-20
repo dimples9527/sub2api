@@ -1,57 +1,122 @@
 <template>
   <SupplierModuleLayout>
-    <header class="sp-page-head">
-      <div>
-        <div class="sp-eyebrow">Supplier Group Matching</div>
-        <h1>分组管理</h1>
-        <p class="sp-subtitle">对照最近一次采集到的上游分组与本地分组，集中处理倍率和匹配关系。</p>
+    <section class="sp-filter-toolbar" aria-label="分组筛选与操作">
+      <div class="sp-filter-fields">
+        <Input v-model="search" class="sp-search sp-filter-search-input" placeholder="搜索上游分组或 Key" />
+        <Select
+          v-model="providerID"
+          class="sp-search sp-filter-select"
+          :options="providerOptions"
+          :searchable="true"
+          search-placeholder="搜索供应商"
+        />
+        <Select
+          v-model="platformFilter"
+          class="sp-search sp-filter-select"
+          :options="platformFilterOptions"
+          :searchable="false"
+        />
+        <Select
+          v-model="matchStatusFilter"
+          class="sp-search sp-filter-select"
+          :options="matchStatusFilterOptions"
+          :searchable="false"
+        />
+        <Select
+          v-model="rateStatusFilter"
+          class="sp-search sp-filter-select"
+          :options="rateStatusFilterOptions"
+          :searchable="false"
+        />
       </div>
-      <div class="sp-controls">
-        <Select v-model="providerID" class="sp-search" :options="providerOptions" :searchable="false" />
-        <Input v-model="search" class="sp-search" placeholder="搜索上游分组或 Key" />
+      <div class="sp-filter-actions">
         <button class="sp-button small sp-control-button" type="button" :disabled="loading || !canResetFilters" @click="resetGroupFilters">
           <Icon name="x" size="sm" />
           <span>重置筛选</span>
+        </button>
+        <button class="sp-button sp-control-button" type="button" :disabled="loading || autoMatching" @click="runAutoMatch">
+          <Icon name="sync" size="sm" :class="autoMatching ? 'sp-spin' : ''" />
+          <span>{{ autoMatching ? '匹配中' : '自动匹配' }}</span>
         </button>
         <button class="sp-button sp-control-button" type="button" :disabled="loading" @click="refreshAll">
           <Icon name="refresh" size="sm" :class="loading ? 'sp-spin' : ''" />
           <span>刷新</span>
         </button>
       </div>
-    </header>
+    </section>
 
     <div v-if="error" class="sp-alert sp-error-line">{{ error }}</div>
 
     <div class="sp-console-shell">
       <div class="sp-summary-grid" aria-label="分组匹配汇总">
-        <StatCard
-          title="上游分组"
-          :value="groupSummary.group_count"
-          :icon="UpstreamGroupsIcon"
-          icon-variant="primary"
-        />
-        <StatCard
-          title="已匹配"
-          :value="groupSummary.linked_group_count"
-          :icon="MatchedGroupsIcon"
-          icon-variant="success"
-          :change="matchedGroupRate"
-          change-type="neutral"
-        />
-        <StatCard
-          title="待匹配"
-          :value="groupSummary.unlinked_group_count"
-          :icon="UnmatchedGroupsIcon"
-          :icon-variant="groupSummary.unlinked_group_count > 0 ? 'warning' : 'primary'"
-          :change="unmatchedGroupRate"
-          change-type="neutral"
-        />
-        <StatCard
-          title="倒挂风险"
-          :value="groupSummary.rate_risk_count"
-          :icon="RateRiskIcon"
-          :icon-variant="groupSummary.rate_risk_count > 0 ? 'danger' : 'success'"
-        />
+        <button
+          type="button"
+          class="sp-summary-filter"
+          :class="{ active: isSummaryFilterActive('all') }"
+          :aria-pressed="isSummaryFilterActive('all')"
+          :disabled="loading"
+          aria-label="显示全部上游分组"
+          @click="applySummaryFilter('all')"
+        >
+          <StatCard
+            title="上游分组"
+            :value="groupSummary.group_count"
+            :icon="UpstreamGroupsIcon"
+            icon-variant="primary"
+          />
+        </button>
+        <button
+          type="button"
+          class="sp-summary-filter"
+          :class="{ active: isSummaryFilterActive('linked') }"
+          :aria-pressed="isSummaryFilterActive('linked')"
+          :disabled="loading"
+          aria-label="过滤已匹配分组"
+          @click="applySummaryFilter('linked')"
+        >
+          <StatCard
+            title="已匹配"
+            :value="groupSummary.linked_group_count"
+            :icon="MatchedGroupsIcon"
+            icon-variant="success"
+            :change="matchedGroupRate"
+            change-type="neutral"
+          />
+        </button>
+        <button
+          type="button"
+          class="sp-summary-filter"
+          :class="{ active: isSummaryFilterActive('unlinked') }"
+          :aria-pressed="isSummaryFilterActive('unlinked')"
+          :disabled="loading"
+          aria-label="过滤待匹配分组"
+          @click="applySummaryFilter('unlinked')"
+        >
+          <StatCard
+            title="待匹配"
+            :value="groupSummary.unlinked_group_count"
+            :icon="UnmatchedGroupsIcon"
+            :icon-variant="groupSummary.unlinked_group_count > 0 ? 'warning' : 'primary'"
+            :change="unmatchedGroupRate"
+            change-type="neutral"
+          />
+        </button>
+        <button
+          type="button"
+          class="sp-summary-filter"
+          :class="{ active: isSummaryFilterActive('inverted') }"
+          :aria-pressed="isSummaryFilterActive('inverted')"
+          :disabled="loading"
+          aria-label="过滤倒挂风险分组"
+          @click="applySummaryFilter('inverted')"
+        >
+          <StatCard
+            title="倒挂风险"
+            :value="groupSummary.rate_risk_count"
+            :icon="RateRiskIcon"
+            :icon-variant="groupSummary.rate_risk_count > 0 ? 'danger' : 'success'"
+          />
+        </button>
       </div>
 
       <div class="sp-console-panel sp-panel sp-groups-panel">
@@ -148,10 +213,23 @@
               <span v-else class="sp-empty-value">-</span>
             </template>
 
-            <template #cell-profit_rate="{ row: group }">
-              <div v-if="rateInsight(group).ratio != null" class="sp-profit-cell" :class="rateInsight(group).code">
-                <strong>{{ formatProfitRate(rateInsight(group).ratio) }}</strong>
-                <span>{{ formatRateDelta(group) }}</span>
+            <template #cell-auto_match_status="{ row: group }">
+              <div class="sp-match-state-stack">
+                <span class="sp-match-state" :class="matchStatusTone(group)">
+                  <i></i>{{ matchStatusLabel(group) }}
+                </span>
+                <button
+                  v-if="group.name_change_pending"
+                  type="button"
+                  class="sp-name-change-link"
+                  @click.stop="selected = group"
+                >名称已变化</button>
+              </div>
+            </template>
+
+            <template #cell-rate_delta="{ row: group }">
+              <div v-if="rateInsight(group).delta != null" class="sp-rate-delta-cell" :class="rateInsight(group).code">
+                <strong>{{ formatSupplierGroupRateDelta(group.local_rate_multiplier, group.rate_multiplier) }}</strong>
               </div>
               <span v-else class="sp-empty-value">-</span>
             </template>
@@ -200,6 +278,17 @@
                     <span>解除匹配</span>
                   </button>
                 </template>
+                <button
+                  type="button"
+                  class="sp-row-action"
+                  :class="{ active: group.auto_match_ignored }"
+                  :disabled="policyUpdatingGroupID === group.id"
+                  :title="group.auto_match_ignored ? '重新允许自动匹配' : '忽略该分组的自动匹配'"
+                  @click="toggleAutoMatchIgnored(group)"
+                >
+                  <Icon :name="group.auto_match_ignored ? 'refresh' : 'x'" size="sm" />
+                  <span>{{ group.auto_match_ignored ? '允许自动' : '忽略自动' }}</span>
+                </button>
               </div>
             </template>
 
@@ -233,8 +322,29 @@
           <span class="sp-rate-status" :class="rateInsight(selected).code">
             <i></i>{{ rateInsight(selected).label }}
           </span>
-          <strong>{{ rateInsight(selected).ratio == null ? '-' : formatProfitRate(rateInsight(selected).ratio) }}</strong>
-          <small>收益倍率</small>
+          <strong>{{ formatSupplierGroupRateDelta(selected.local_rate_multiplier, selected.rate_multiplier) }}</strong>
+          <small>价差</small>
+        </div>
+        <div v-if="selected.name_change_pending" class="sp-name-change-alert">
+          <div>
+            <span>上游名称已变化</span>
+            <strong>{{ selected.matched_upstream_name || '未记录' }} → {{ selected.name || selected.upstream_group_key }}</strong>
+            <small>当前本地名称：{{ selected.local_group_name || '未匹配' }}</small>
+          </div>
+          <div class="sp-name-change-actions">
+            <button
+              type="button"
+              class="sp-row-action"
+              :disabled="resolvingNameGroupID === selected.id"
+              @click="resolveNameChange(selected, 'keep_local')"
+            >保持本地名称</button>
+            <button
+              type="button"
+              class="sp-row-action primary"
+              :disabled="resolvingNameGroupID === selected.id"
+              @click="resolveNameChange(selected, 'sync_local_name')"
+            >同步本地名称</button>
+          </div>
         </div>
         <div class="sp-detail-grid">
           <div class="sp-detail-cell"><span>供应商</span><b>{{ selected.provider_name }}</b></div>
@@ -280,7 +390,7 @@
         <div v-if="mappingPreview" class="sp-match-preview">
           <div><span>平台</span><strong :class="platformTextClass(mappingPreview.platform)">{{ platformLabel(mappingPreview.platform) }}</strong></div>
           <div><span>当前倍率</span><strong>{{ formatRate(mappingPreview.rate_multiplier) }}</strong></div>
-          <div><span>收益倍率</span><strong>{{ mappingProfitPreview }}</strong></div>
+          <div><span>价差</span><strong>{{ mappingRateDeltaPreview }}</strong></div>
         </div>
       </template>
       <template #footer>
@@ -335,8 +445,8 @@
         </div>
         <Input v-model="localRateInput" type="number" label="新倍率" placeholder="输入大于 0 的倍率" @enter="saveLocalRate" />
         <div class="sp-rate-recommendation">
-          <span>修改后收益倍率</span>
-          <strong>{{ localRatePreview }}</strong>
+          <span>修改后价差</span>
+          <strong>{{ localRateDeltaPreview }}</strong>
         </div>
       </template>
       <template #footer>
@@ -367,7 +477,10 @@
 import { computed, h, nextTick, onMounted, ref, watch } from 'vue'
 import { adminAPI } from '@/api/admin'
 import {
+  autoMatchSupplierGroups,
   listSupplierGroups,
+  resolveSupplierGroupNameChange,
+  updateSupplierGroupAutoMatchPolicy,
   updateSupplierGroupMapping,
   type SupplierProviderGroup,
   type SupplierProviderGroupSummary,
@@ -388,6 +501,7 @@ import { useAppStore } from '@/stores/app'
 import type { AdminGroup, GroupPlatform } from '@/types'
 import { platformTextClass } from '@/utils/platformColors'
 import {
+  formatSupplierGroupRateDelta,
   getSupplierGroupRateInsight,
   getSupplierUpstreamRateBand,
   type SupplierGroupRateInsight,
@@ -401,6 +515,8 @@ const EMPTY_GROUP_SUMMARY: SupplierProviderGroupSummary = {
   unlinked_group_count: 0,
   rate_risk_count: 0,
 }
+
+type SummaryFilter = 'all' | 'linked' | 'unlinked' | 'inverted'
 
 const PLATFORM_LABELS: Record<string, string> = {
   anthropic: 'Anthropic',
@@ -484,11 +600,17 @@ const loading = ref(false)
 const savingMapping = ref(false)
 const creatingLocalGroup = ref(false)
 const savingLocalRate = ref(false)
+const autoMatching = ref(false)
+const policyUpdatingGroupID = ref<number | null>(null)
+const resolvingNameGroupID = ref<number | null>(null)
 const error = ref('')
 const page = ref(1)
 const pageSize = ref(20)
 const providerID = ref(0)
 const search = ref('')
+const platformFilter = ref('')
+const matchStatusFilter = ref('')
+const rateStatusFilter = ref('')
 let searchTimer: number | undefined
 let suppressFilterWatch = false
 
@@ -497,6 +619,33 @@ const providerOptions = computed<SelectOption[]>(() => [
   { value: 0, label: '全部供应商' },
   ...providers.value.map(provider => ({ value: provider.id, label: provider.name })),
 ])
+const platformFilterOptions: SelectOption[] = [
+  { value: '', label: '全部平台' },
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'gemini', label: 'Gemini' },
+  { value: 'antigravity', label: 'Antigravity' },
+  { value: 'grok', label: 'Grok' },
+]
+const matchStatusFilterOptions: SelectOption[] = [
+  { value: '', label: '全部匹配状态' },
+  { value: 'linked', label: '已匹配' },
+  { value: 'unlinked', label: '待匹配' },
+  { value: 'auto_matched', label: '自动匹配' },
+  { value: 'manual', label: '人工匹配' },
+  { value: 'ambiguous', label: '名称冲突' },
+  { value: 'ignored', label: '已忽略' },
+  { value: 'name_changed', label: '名称变化' },
+]
+const rateStatusFilterOptions: SelectOption[] = [
+  { value: '', label: '全部倍率状态' },
+  { value: 'normal', label: '正常' },
+  { value: 'low', label: '收益偏低' },
+  { value: 'equal', label: '倍率持平' },
+  { value: 'inverted', label: '倒挂风险' },
+  { value: 'inactive', label: '本地停用' },
+  { value: 'invalid', label: '数据异常' },
+]
 const supplierIDs = computed(() => [...new Set(providers.value.map(provider => provider.id))].sort((left, right) => left - right))
 const localGroupOptions = computed<SelectOption[]>(() => localGroups.value.map(group => ({
   value: group.id,
@@ -509,13 +658,20 @@ const groupColumns: Column[] = [
   { key: 'rate_multiplier', label: '上游倍率', class: 'min-w-[96px]' },
   { key: 'raw_status', label: '上游状态', class: 'min-w-[105px]' },
   { key: 'local_group_name', label: '匹配本地分组', class: 'min-w-[190px]' },
+  { key: 'auto_match_status', label: '匹配状态', class: 'min-w-[120px]' },
   { key: 'local_rate_multiplier', label: '本地分组倍率', class: 'min-w-[110px]' },
-  { key: 'profit_rate', label: '收益倍率', class: 'min-w-[110px]' },
+  { key: 'rate_delta', label: '价差', class: 'min-w-[110px]' },
   { key: 'account_count', label: '绑定账号', class: 'min-w-[90px]' },
   { key: 'rate_status', label: '倍率状态', class: 'min-w-[110px]' },
   { key: 'actions', label: '操作', class: 'min-w-[270px]' },
 ]
-const canResetFilters = computed(() => providerID.value !== DEFAULT_PROVIDER_ID || search.value.trim() !== '')
+const canResetFilters = computed(() => (
+  providerID.value !== DEFAULT_PROVIDER_ID
+  || search.value.trim() !== ''
+  || platformFilter.value !== ''
+  || matchStatusFilter.value !== ''
+  || rateStatusFilter.value !== ''
+))
 const matchedGroupRate = computed(() => percentage(groupSummary.value.linked_group_count, groupSummary.value.group_count))
 const unmatchedGroupRate = computed(() => percentage(groupSummary.value.unlinked_group_count, groupSummary.value.group_count))
 const currentPageMatchedCount = computed(() => items.value.filter(group => group.local_group_id).length)
@@ -524,18 +680,13 @@ const currentPageAttentionCount = computed(() => items.value.filter(group => {
   return code !== 'normal'
 }).length)
 const mappingPreview = computed(() => localGroups.value.find(group => group.id === Number(mappingLocalGroupID.value)) ?? null)
-const mappingProfitPreview = computed(() => {
+const mappingRateDeltaPreview = computed(() => {
   if (!mappingTarget.value || !mappingPreview.value) return '-'
-  const upstreamRate = Number(mappingTarget.value.rate_multiplier)
-  if (!Number.isFinite(upstreamRate) || upstreamRate <= 0) return '-'
-  return formatProfitRate(mappingPreview.value.rate_multiplier / upstreamRate)
+  return formatSupplierGroupRateDelta(mappingPreview.value.rate_multiplier, mappingTarget.value.rate_multiplier)
 })
-const localRatePreview = computed(() => {
+const localRateDeltaPreview = computed(() => {
   if (!rateTarget.value) return '-'
-  const upstreamRate = Number(rateTarget.value.rate_multiplier)
-  const localRate = Number(localRateInput.value)
-  if (!Number.isFinite(upstreamRate) || upstreamRate <= 0 || !Number.isFinite(localRate) || localRate <= 0) return '-'
-  return formatProfitRate(localRate / upstreamRate)
+  return formatSupplierGroupRateDelta(localRateInput.value, rateTarget.value.rate_multiplier)
 })
 
 onMounted(async () => {
@@ -547,7 +698,7 @@ onMounted(async () => {
   await loadGroups()
 })
 
-watch(providerID, () => {
+watch([providerID, platformFilter, matchStatusFilter, rateStatusFilter], () => {
   if (suppressFilterWatch) return
   page.value = 1
   void loadGroups()
@@ -567,6 +718,39 @@ function resetGroupFilters() {
   suppressFilterWatch = true
   providerID.value = DEFAULT_PROVIDER_ID
   search.value = ''
+  platformFilter.value = ''
+  matchStatusFilter.value = ''
+  rateStatusFilter.value = ''
+  page.value = 1
+  void nextTick(() => {
+    suppressFilterWatch = false
+    void loadGroups()
+  })
+}
+
+function isSummaryFilterActive(filter: SummaryFilter): boolean {
+  switch (filter) {
+    case 'linked':
+      return matchStatusFilter.value === 'linked' && rateStatusFilter.value === ''
+    case 'unlinked':
+      return matchStatusFilter.value === 'unlinked' && rateStatusFilter.value === ''
+    case 'inverted':
+      return matchStatusFilter.value === '' && rateStatusFilter.value === 'inverted'
+    default:
+      return matchStatusFilter.value === '' && rateStatusFilter.value === ''
+  }
+}
+
+function applySummaryFilter(filter: SummaryFilter) {
+  const nextFilter = filter !== 'all' && isSummaryFilterActive(filter) ? 'all' : filter
+  suppressFilterWatch = true
+  matchStatusFilter.value = ''
+  rateStatusFilter.value = ''
+  if (nextFilter === 'linked' || nextFilter === 'unlinked') {
+    matchStatusFilter.value = nextFilter
+  } else if (nextFilter === 'inverted') {
+    rateStatusFilter.value = nextFilter
+  }
   page.value = 1
   void nextTick(() => {
     suppressFilterWatch = false
@@ -604,6 +788,19 @@ async function refreshAll() {
   }
 }
 
+async function runAutoMatch() {
+  autoMatching.value = true
+  try {
+    const result = await autoMatchSupplierGroups(providerID.value || undefined)
+    await loadGroups()
+    appStore.showSuccess(`自动匹配完成：匹配 ${result.auto_matched} 个，冲突 ${result.ambiguous} 个`)
+  } catch (err) {
+    appStore.showError(errorMessage(err, '自动匹配失败'))
+  } finally {
+    autoMatching.value = false
+  }
+}
+
 async function loadGroups() {
   loading.value = true
   error.value = ''
@@ -612,6 +809,9 @@ async function loadGroups() {
       provider_id: providerID.value || undefined,
       active: true,
       search: search.value.trim() || undefined,
+      platform: platformFilter.value || undefined,
+      match_status: matchStatusFilter.value || undefined,
+      rate_status: rateStatusFilter.value || undefined,
       page: page.value,
       page_size: pageSize.value,
     })
@@ -759,6 +959,35 @@ async function removeMapping() {
   }
 }
 
+async function toggleAutoMatchIgnored(group: SupplierProviderGroup) {
+  policyUpdatingGroupID.value = group.id
+  try {
+    await updateSupplierGroupAutoMatchPolicy(group.id, !group.auto_match_ignored)
+    await loadGroups()
+    appStore.showSuccess(group.auto_match_ignored ? '已重新允许自动匹配' : '已忽略该分组的自动匹配')
+  } catch (err) {
+    appStore.showError(errorMessage(err, '更新自动匹配策略失败'))
+  } finally {
+    policyUpdatingGroupID.value = null
+  }
+}
+
+async function resolveNameChange(group: SupplierProviderGroup, action: 'keep_local' | 'sync_local_name') {
+  resolvingNameGroupID.value = group.id
+  try {
+    await resolveSupplierGroupNameChange(group.id, action)
+    if (action === 'sync_local_name') {
+      await loadLocalGroups()
+    }
+    await loadGroups()
+    appStore.showSuccess(action === 'sync_local_name' ? '本地分组名称已同步' : '已保留本地分组名称')
+  } catch (err) {
+    appStore.showError(errorMessage(err, '处理名称变化失败'))
+  } finally {
+    resolvingNameGroupID.value = null
+  }
+}
+
 function rateInsight(group: SupplierProviderGroup): SupplierGroupRateInsight {
   return getSupplierGroupRateInsight({
     localGroupID: group.local_group_id,
@@ -817,6 +1046,22 @@ function upstreamStatusTone(group: SupplierProviderGroup): string {
   return 'info'
 }
 
+function matchStatusLabel(group: SupplierProviderGroup): string {
+	if (group.local_group_id && group.auto_match_status === 'manual') return '人工匹配'
+	if (group.local_group_id && group.auto_match_status === 'auto_matched') return '自动匹配'
+	if (group.auto_match_ignored) return '已忽略'
+	if (group.auto_match_status === 'ambiguous') return '名称冲突'
+	return '待匹配'
+}
+
+function matchStatusTone(group: SupplierProviderGroup): string {
+	if (group.name_change_pending || group.auto_match_status === 'ambiguous') return 'warn'
+	if (group.local_group_id && group.auto_match_status === 'auto_matched') return 'auto'
+	if (group.local_group_id && group.auto_match_status === 'manual') return 'manual'
+	if (group.auto_match_ignored) return 'muted'
+	return 'pending'
+}
+
 function suggestedLocalRate(group: SupplierProviderGroup): number {
   const upstreamRate = Number(group.rate_multiplier)
   if (!Number.isFinite(upstreamRate) || upstreamRate <= 0) return 1
@@ -827,19 +1072,6 @@ function formatRate(value?: number): string {
   const rate = Number(value)
   if (!Number.isFinite(rate)) return '-'
   return `${rate.toFixed(4).replace(/\.?0+$/, '')}x`
-}
-
-function formatProfitRate(value: number | null): string {
-  if (value == null || !Number.isFinite(value)) return '-'
-  return `${value.toFixed(2)}x`
-}
-
-function formatRateDelta(group: SupplierProviderGroup): string {
-  const upstreamRate = Number(group.rate_multiplier)
-  const localRate = Number(group.local_rate_multiplier)
-  if (!Number.isFinite(upstreamRate) || !Number.isFinite(localRate)) return ''
-  const delta = localRate - upstreamRate
-  return `价差 ${delta > 0 ? '+' : ''}${delta.toFixed(2)}`
 }
 
 function platformLabel(platform?: string): string {
@@ -873,6 +1105,37 @@ function errorMessage(err: unknown, fallback: string): string {
   gap: 1rem;
 }
 
+.sp-filter-toolbar {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--sp-line);
+}
+
+.sp-filter-fields {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(15rem, 1fr) repeat(4, minmax(9rem, 0.55fr));
+  gap: 0.5rem;
+}
+
+.sp-filter-toolbar .sp-search {
+  width: 100%;
+  min-width: 0;
+}
+
+.sp-filter-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
 .sp-control-button,
 .sp-dialog-actions .sp-button {
   display: inline-flex;
@@ -885,6 +1148,32 @@ function errorMessage(err: unknown, fallback: string): string {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.75rem;
+}
+
+.sp-summary-filter {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sp-summary-filter:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.sp-summary-filter:focus-visible :deep(.stat-card) {
+  border-color: var(--sp-cyan);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sp-cyan) 16%, transparent);
+}
+
+.sp-summary-filter.active :deep(.stat-card) {
+  border-color: color-mix(in srgb, var(--sp-cyan) 58%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-cyan) 6%, var(--sp-panel));
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.1), inset 0 0 0 1px color-mix(in srgb, var(--sp-cyan) 10%, transparent);
 }
 
 .sp-summary-grid :deep(.stat-card) {
@@ -909,15 +1198,15 @@ function errorMessage(err: unknown, fallback: string): string {
   content: '';
 }
 
-.sp-summary-grid :deep(.stat-card:nth-child(2))::before {
+.sp-summary-filter:nth-child(2) :deep(.stat-card)::before {
   background: var(--sp-green);
 }
 
-.sp-summary-grid :deep(.stat-card:nth-child(3))::before {
+.sp-summary-filter:nth-child(3) :deep(.stat-card)::before {
   background: var(--sp-amber);
 }
 
-.sp-summary-grid :deep(.stat-card:nth-child(4))::before {
+.sp-summary-filter:nth-child(4) :deep(.stat-card)::before {
   background: var(--sp-red);
 }
 
@@ -953,9 +1242,9 @@ function errorMessage(err: unknown, fallback: string): string {
   font-weight: 600;
 }
 
-.sp-summary-grid :deep(.stat-card:nth-child(2)) { animation-delay: 30ms; }
-.sp-summary-grid :deep(.stat-card:nth-child(3)) { animation-delay: 60ms; }
-.sp-summary-grid :deep(.stat-card:nth-child(4)) { animation-delay: 90ms; }
+.sp-summary-filter:nth-child(2) :deep(.stat-card) { animation-delay: 30ms; }
+.sp-summary-filter:nth-child(3) :deep(.stat-card) { animation-delay: 60ms; }
+.sp-summary-filter:nth-child(4) :deep(.stat-card) { animation-delay: 90ms; }
 
 .sp-groups-panel {
   min-width: 0;
@@ -978,7 +1267,8 @@ function errorMessage(err: unknown, fallback: string): string {
 
 .sp-panel-signals i,
 .sp-status i,
-.sp-rate-status i {
+.sp-rate-status i,
+.sp-match-state i {
   width: 0.42rem;
   height: 0.42rem;
   flex: 0 0 auto;
@@ -1138,6 +1428,39 @@ function errorMessage(err: unknown, fallback: string): string {
 .sp-rate-status.inactive,
 .sp-rate-status.invalid { color: var(--sp-muted); }
 
+.sp-match-state-stack {
+  display: grid;
+  justify-items: start;
+  gap: 0.3rem;
+}
+
+.sp-match-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.sp-match-state.auto { color: var(--sp-green); }
+.sp-match-state.manual { color: var(--sp-blue); }
+.sp-match-state.warn { color: var(--sp-amber); }
+.sp-match-state.pending,
+.sp-match-state.muted { color: var(--sp-muted); }
+
+.sp-name-change-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--sp-amber);
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.sp-name-change-link:hover { text-decoration: underline; }
+
 .sp-local-group .sp-sub {
   display: flex;
   align-items: center;
@@ -1168,26 +1491,21 @@ function errorMessage(err: unknown, fallback: string): string {
 .sp-inline-empty:hover { color: var(--sp-cyan); }
 .sp-empty-value { color: var(--sp-dim); }
 
-.sp-profit-cell {
+.sp-rate-delta-cell {
   display: grid;
   gap: 0.15rem;
   font-variant-numeric: tabular-nums;
 }
 
-.sp-profit-cell strong {
+.sp-rate-delta-cell strong {
   color: var(--sp-text);
   font-size: 0.9rem;
 }
 
-.sp-profit-cell span {
-  color: var(--sp-muted);
-  font-size: 0.7rem;
-}
-
-.sp-profit-cell.normal strong { color: var(--sp-green); }
-.sp-profit-cell.inverted strong { color: var(--sp-red); }
-.sp-profit-cell.low strong,
-.sp-profit-cell.equal strong { color: var(--sp-amber); }
+.sp-rate-delta-cell.normal strong { color: var(--sp-green); }
+.sp-rate-delta-cell.inverted strong { color: var(--sp-red); }
+.sp-rate-delta-cell.low strong,
+.sp-rate-delta-cell.equal strong { color: var(--sp-amber); }
 
 .sp-account-count {
   display: inline-flex;
@@ -1242,6 +1560,16 @@ function errorMessage(err: unknown, fallback: string): string {
   color: var(--sp-cyan);
 }
 
+.sp-row-action.active {
+  border-color: color-mix(in srgb, var(--sp-amber) 42%, var(--sp-line));
+  color: var(--sp-amber);
+}
+
+.sp-row-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .sp-row-action.danger:hover {
   border-color: var(--sp-red);
   color: var(--sp-red);
@@ -1260,6 +1588,31 @@ function errorMessage(err: unknown, fallback: string): string {
 .sp-drawer-summary strong { font-size: 2rem; line-height: 1; }
 .sp-drawer-summary small { grid-column: 2; color: var(--sp-muted); text-align: right; }
 .sp-detail-wide { grid-column: 1 / -1; }
+
+.sp-name-change-alert {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0;
+  padding: 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--sp-amber) 45%, var(--sp-line));
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--sp-amber) 7%, var(--sp-panel));
+}
+
+.sp-name-change-alert > div:first-child {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.sp-name-change-alert span,
+.sp-name-change-alert small { color: var(--sp-muted); font-size: 0.75rem; }
+.sp-name-change-alert strong { color: var(--sp-text); font-size: 0.9rem; overflow-wrap: anywhere; }
+
+.sp-name-change-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
 
 .sp-dialog-context {
   display: grid;
@@ -1337,23 +1690,42 @@ function errorMessage(err: unknown, fallback: string): string {
 .sp-spin { animation: sp-spin 800ms linear infinite; }
 
 @media (hover: hover) {
-  .sp-summary-grid :deep(.stat-card:hover) {
+  .sp-summary-filter:not(:disabled):hover :deep(.stat-card) {
     border-color: color-mix(in srgb, var(--sp-cyan) 34%, var(--sp-line));
     box-shadow: 0 10px 24px rgba(15, 23, 42, 0.1);
     transform: translateY(-2px);
   }
 }
 
-@media (max-width: 1050px) {
-  .sp-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 1280px) {
+  .sp-filter-toolbar { align-items: stretch; flex-direction: column; }
+  .sp-filter-actions { width: 100%; }
 }
 
 @media (max-width: 760px) {
-  .sp-summary-grid { grid-template-columns: 1fr; }
+  .sp-filter-toolbar { padding-top: 0; }
+  .sp-filter-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sp-filter-search-input { grid-column: 1 / -1; }
+  .sp-filter-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .sp-filter-actions .sp-button { width: 100%; min-width: 0; padding-inline: 0.45rem; }
+  .sp-summary-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .sp-summary-grid { gap: 0.35rem; }
+  .sp-summary-grid :deep(.stat-card) { min-height: 4.75rem; padding: 0.55rem; }
+  .sp-summary-grid :deep(.stat-icon),
+  .sp-summary-grid :deep(.stat-trend) { display: none; }
+  .sp-summary-grid :deep(.stat-label) { font-size: 0.67rem; }
+  .sp-summary-grid :deep(.stat-value) { margin-top: 0.3rem; font-size: 1.25rem; }
   .sp-table-shell { height: auto; min-height: 0; overflow: visible; }
   .sp-panel-signals { width: 100%; justify-content: space-between; }
   .sp-row-actions { flex-wrap: wrap; justify-content: flex-end; }
   .sp-match-preview { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 390px) {
+  .sp-summary-grid { gap: 0.25rem; }
+  .sp-summary-grid :deep(.stat-card) { min-height: 4.25rem; padding: 0.45rem; }
+  .sp-summary-grid :deep(.stat-label) { font-size: 0.625rem; }
+  .sp-summary-grid :deep(.stat-value) { font-size: 1.1rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

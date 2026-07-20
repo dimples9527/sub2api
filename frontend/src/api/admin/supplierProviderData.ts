@@ -76,15 +76,32 @@ export interface SupplierProviderGroup {
   local_group_platform?: string
   local_rate_multiplier?: number
   local_group_status?: string
+  auto_match_ignored: boolean
+  auto_match_status: 'unmatched' | 'auto_matched' | 'manual' | 'ambiguous'
+  matched_upstream_name?: string
+  name_change_pending: boolean
   account_count: number
   last_seen_at: string
   inactive_at?: string
+}
+
+export interface SupplierGroupAutoMatchResult {
+  provider_id: number
+  scanned: number
+  auto_matched: number
+  ambiguous: number
+  ignored: number
+  no_candidate: number
+  already_mapped: number
 }
 
 export interface SupplierProviderDataListParams {
   provider_id?: number
   active?: boolean
   search?: string
+  platform?: string
+  match_status?: string
+  rate_status?: string
   page?: number
   page_size?: number
 }
@@ -153,12 +170,46 @@ export async function updateSupplierGroupMapping(
   return data
 }
 
+export async function autoMatchSupplierGroups(providerId?: number): Promise<SupplierGroupAutoMatchResult> {
+  const { data } = await apiClient.post<SupplierGroupAutoMatchResult>(
+    '/admin/supplier-management/groups/auto-match',
+    undefined,
+    { params: providerId ? { provider_id: providerId } : undefined }
+  )
+  return data
+}
+
+export async function updateSupplierGroupAutoMatchPolicy(
+  id: number,
+  ignored: boolean
+): Promise<SupplierGroupAutoMatchResult> {
+  const { data } = await apiClient.put<SupplierGroupAutoMatchResult>(
+    `/admin/supplier-management/groups/${id}/auto-match-policy`,
+    { ignored }
+  )
+  return data
+}
+
+export async function resolveSupplierGroupNameChange(
+  id: number,
+  action: 'keep_local' | 'sync_local_name'
+): Promise<{ group_id: number; action: string }> {
+  const { data } = await apiClient.post<{ group_id: number; action: string }>(
+    `/admin/supplier-management/groups/${id}/name-change/resolve`,
+    { action }
+  )
+  return data
+}
+
 export const supplierProviderDataAPI = {
   syncProvider,
   testProviderEndpoint,
   listSupplierAccounts,
   listSupplierGroups,
   updateSupplierGroupMapping,
+  autoMatchSupplierGroups,
+  updateSupplierGroupAutoMatchPolicy,
+  resolveSupplierGroupNameChange,
 }
 
 export default supplierProviderDataAPI

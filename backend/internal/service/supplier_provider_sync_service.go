@@ -44,17 +44,24 @@ type SupplierProviderGroup struct {
 	LocalGroupPlatform  string     `json:"local_group_platform,omitempty"`
 	LocalRateMultiplier *float64   `json:"local_rate_multiplier,omitempty"`
 	LocalGroupStatus    string     `json:"local_group_status,omitempty"`
+	AutoMatchIgnored    bool       `json:"auto_match_ignored"`
+	AutoMatchStatus     string     `json:"auto_match_status"`
+	MatchedUpstreamName string     `json:"matched_upstream_name,omitempty"`
+	NameChangePending   bool       `json:"name_change_pending"`
 	AccountCount        int        `json:"account_count"`
 	LastSeenAt          time.Time  `json:"last_seen_at"`
 	InactiveAt          *time.Time `json:"inactive_at,omitempty"`
 }
 
 type SupplierProviderDataListParams struct {
-	ProviderID int64
-	Active     *bool
-	Search     string
-	Page       int
-	PageSize   int
+	ProviderID  int64
+	Active      *bool
+	Search      string
+	Platform    string
+	MatchStatus string
+	RateStatus  string
+	Page        int
+	PageSize    int
 }
 
 type SupplierProviderAccountListResult struct {
@@ -120,7 +127,13 @@ type SupplierCleanupCounts struct {
 type SupplierProviderDataRepository interface {
 	ListAccounts(ctx context.Context, params SupplierProviderDataListParams) (SupplierProviderAccountListResult, error)
 	ListGroups(ctx context.Context, params SupplierProviderDataListParams) (SupplierProviderGroupListResult, error)
+	ListGroupsForAutoMatch(ctx context.Context, providerID int64) ([]SupplierProviderGroup, error)
+	GetGroupForAutoMatch(ctx context.Context, groupID int64) (SupplierProviderGroup, error)
 	UpdateGroupMapping(ctx context.Context, groupID int64, localGroupID *int64) error
+	ApplyAutoMatch(ctx context.Context, groupID, localGroupID int64, matchedUpstreamName string) (bool, error)
+	UpdateAutoMatchState(ctx context.Context, groupID int64, status string, nameChangePending bool) error
+	UpdateAutoMatchIgnored(ctx context.Context, groupID int64, ignored bool) error
+	AcknowledgeNameChange(ctx context.Context, groupID int64, matchedUpstreamName string) error
 	ReplaceAccounts(ctx context.Context, providerID int64, items []SupplierProviderRemoteAccount, seenAt time.Time) (SupplierSyncCounts, error)
 	ReplaceGroups(ctx context.Context, providerID int64, items []SupplierProviderRemoteGroup, seenAt time.Time) (SupplierSyncCounts, error)
 	UpdateBalance(ctx context.Context, providerID int64, balance float64, seenAt time.Time) error
@@ -129,6 +142,10 @@ type SupplierProviderDataRepository interface {
 	FinishSyncRun(ctx context.Context, run *SupplierProviderSyncRun) error
 	UpdateSyncStatus(ctx context.Context, providerID int64, status, message string, syncedAt time.Time) error
 	Cleanup(ctx context.Context, policy SupplierCleanupPolicy, now time.Time, batchSize int) (SupplierCleanupCounts, error)
+}
+
+type SupplierProviderGroupAutoMatcher interface {
+	AutoMatch(ctx context.Context, providerID int64) (SupplierGroupAutoMatchResult, error)
 }
 
 type SupplierProviderSyncResult struct {
@@ -216,6 +233,13 @@ type SupplierProviderSyncService struct {
 	remote       SupplierProviderRemoteClient
 	encryptor    SecretEncryptor
 	syncLock     SupplierProviderSyncLock
+	groupMatcher SupplierProviderGroupAutoMatcher
+}
+
+func (s *SupplierProviderSyncService) SetGroupMatcher(matcher SupplierProviderGroupAutoMatcher) {
+	if s != nil {
+		s.groupMatcher = matcher
+	}
 }
 
 func NewSupplierProviderSyncService(providerRepo SupplierProviderRepository, dataRepo SupplierProviderDataRepository, remote SupplierProviderRemoteClient, encryptor SecretEncryptor, syncLock SupplierProviderSyncLock) *SupplierProviderSyncService {
@@ -479,7 +503,16 @@ func (s *SupplierProviderSyncService) executeStage(ctx context.Context, provider
 		if err != nil {
 			return SupplierSyncCounts{}, err
 		}
-		return s.dataRepo.ReplaceGroups(ctx, provider.ID, items, seenAt)
+		counts, err := s.dataRepo.ReplaceGroups(ctx, provider.ID, items, seenAt)
+		if err != nil {
+			return counts, err
+		}
+		if s.groupMatcher != nil {
+			if _, err := s.groupMatcher.AutoMatch(ctx, provider.ID); err != nil {
+				return counts, fmt.Errorf("auto match supplier groups: %w", err)
+			}
+		}
+		return counts, nil
 	case SupplierSyncScopeBalance:
 		balance, err := s.remote.FetchBalance(ctx, provider, password)
 		if err != nil {
