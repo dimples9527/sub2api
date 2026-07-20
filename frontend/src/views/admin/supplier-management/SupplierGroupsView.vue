@@ -305,13 +305,13 @@
                     <Icon name="edit" size="sm" />
                     <span>调倍率</span>
                   </button>
-                  <button type="button" class="sp-row-action" title="重新匹配本地分组" @click="openMappingDialog(group)">
+                  <button type="button" class="sp-row-action" title="更换关联的本地分组" @click="openMappingDialog(group)">
                     <Icon name="refresh" size="sm" />
-                    <span>重新匹配</span>
+                    <span>更换本地分组</span>
                   </button>
-                  <button type="button" class="sp-row-action danger" title="解除匹配" @click="unmatchTarget = group">
+                  <button type="button" class="sp-row-action danger" title="取消本地分组关联" @click="unmatchTarget = group">
                     <Icon name="x" size="sm" />
-                    <span>解除匹配</span>
+                    <span>取消关联</span>
                   </button>
                 </template>
                 <button
@@ -503,9 +503,9 @@
 
     <ConfirmDialog
       :show="Boolean(unmatchTarget)"
-      title="解除本地分组匹配"
-      :message="`解除后，${unmatchTarget?.name || unmatchTarget?.upstream_group_key || '该上游分组'} 将回到待匹配状态。`"
-      confirm-text="解除匹配"
+      title="取消本地分组关联"
+      :message="`取消后，${unmatchTarget?.name || unmatchTarget?.upstream_group_key || '该上游分组'} 将保持未匹配，不再参与自动匹配。`"
+      confirm-text="取消关联"
       cancel-text="取消"
       danger
       @confirm="removeMapping"
@@ -958,7 +958,7 @@ async function createLocalGroup() {
     try {
       await updateSupplierGroupMapping(target.id, created.id)
     } catch (err) {
-      appStore.showError(errorMessage(err, '本地分组已创建，但自动匹配失败，请使用重新匹配'))
+      appStore.showError(errorMessage(err, '本地分组已创建，但自动匹配失败，请使用更换本地分组'))
       createTarget.value = null
       await loadGroups()
       return
@@ -1014,9 +1014,9 @@ async function removeMapping() {
   try {
     await updateSupplierGroupMapping(target.id, null)
     await loadGroups()
-    appStore.showSuccess('本地分组匹配已解除')
+    appStore.showSuccess('本地分组关联已取消')
   } catch (err) {
-    appStore.showError(errorMessage(err, '解除分组匹配失败'))
+    appStore.showError(errorMessage(err, '取消分组关联失败'))
   }
 }
 

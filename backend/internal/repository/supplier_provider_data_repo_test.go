@@ -363,13 +363,13 @@ func TestSupplierProviderDataRepositoryUpdateGroupMappingSetsAndClearsLocalGroup
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS(SELECT 1 FROM groups WHERE id = $1 AND status = 'active')")).
 		WithArgs(localGroupID).
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET local_group_id = $2, auto_match_status = CASE WHEN $2 IS NULL THEN 'unmatched' ELSE 'manual' END, matched_upstream_name = CASE WHEN $2 IS NULL THEN NULL ELSE name END, name_change_pending = FALSE, updated_at = NOW() WHERE id = $1")).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET local_group_id = $2, auto_match_status = CASE WHEN $2 IS NULL THEN 'unmatched' ELSE 'manual' END, auto_match_ignored = CASE WHEN $2 IS NULL THEN TRUE ELSE auto_match_ignored END, matched_upstream_name = CASE WHEN $2 IS NULL THEN NULL ELSE name END, name_change_pending = FALSE, updated_at = NOW() WHERE id = $1")).
 		WithArgs(int64(7), localGroupID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	require.NoError(t, repo.UpdateGroupMapping(context.Background(), 7, &localGroupID))
 
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET local_group_id = $2, auto_match_status = CASE WHEN $2 IS NULL THEN 'unmatched' ELSE 'manual' END, matched_upstream_name = CASE WHEN $2 IS NULL THEN NULL ELSE name END, name_change_pending = FALSE, updated_at = NOW() WHERE id = $1")).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET local_group_id = $2, auto_match_status = CASE WHEN $2 IS NULL THEN 'unmatched' ELSE 'manual' END, auto_match_ignored = CASE WHEN $2 IS NULL THEN TRUE ELSE auto_match_ignored END, matched_upstream_name = CASE WHEN $2 IS NULL THEN NULL ELSE name END, name_change_pending = FALSE, updated_at = NOW() WHERE id = $1")).
 		WithArgs(int64(7), nil).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 

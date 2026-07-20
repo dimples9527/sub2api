@@ -173,7 +173,7 @@ func (r *supplierProviderDataRepository) UpdateGroupMapping(ctx context.Context,
 		}
 	}
 
-	result, err := r.db.ExecContext(ctx, "UPDATE supplier_provider_groups SET local_group_id = $2, auto_match_status = CASE WHEN $2 IS NULL THEN 'unmatched' ELSE 'manual' END, matched_upstream_name = CASE WHEN $2 IS NULL THEN NULL ELSE name END, name_change_pending = FALSE, updated_at = NOW() WHERE id = $1", groupID, localGroupID)
+	result, err := r.db.ExecContext(ctx, "UPDATE supplier_provider_groups SET local_group_id = $2, auto_match_status = CASE WHEN $2 IS NULL THEN 'unmatched' ELSE 'manual' END, auto_match_ignored = CASE WHEN $2 IS NULL THEN TRUE ELSE auto_match_ignored END, matched_upstream_name = CASE WHEN $2 IS NULL THEN NULL ELSE name END, name_change_pending = FALSE, updated_at = NOW() WHERE id = $1", groupID, localGroupID)
 	if err != nil {
 		return fmt.Errorf("update supplier provider group mapping: %w", err)
 	}

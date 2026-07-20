@@ -44,6 +44,10 @@ describe('supplier group automatic matching workflow', () => {
 		expect(viewSource).toContain('group.local_group_active_mapping_count > 1')
 		expect(viewSource).not.toContain('items.value.some(item =>')
 		expect(viewSource).toContain('!group.rate_guard_selected && !rateGuardEligible(group)')
+		expect(viewSource).toContain('更换本地分组')
+		expect(viewSource).toContain('取消关联')
+		expect(viewSource).not.toContain('重新匹配')
+		expect(viewSource).not.toContain('解除匹配')
   })
 
 	it('provides server-backed platform, match and rate filters through clickable summary cards', () => {
