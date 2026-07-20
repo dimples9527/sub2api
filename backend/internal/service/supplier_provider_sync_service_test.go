@@ -10,13 +10,14 @@ import (
 )
 
 type supplierProviderDataRepoStub struct {
-	accountsCalls int
-	groupsCalls   int
-	balanceCalls  int
-	costCalls     int
-	createdRuns   []SupplierProviderSyncRun
-	finishedRuns  []SupplierProviderSyncRun
-	statusUpdates []string
+	accountsCalls      int
+	groupsCalls        int
+	balanceCalls       int
+	costCalls          int
+	createdRuns        []SupplierProviderSyncRun
+	finishedRuns       []SupplierProviderSyncRun
+	statusUpdates      []string
+	groupStatusUpdates []string
 
 	accountsErr error
 	groupsErr   error
@@ -49,6 +50,27 @@ func (r *supplierProviderDataRepoStub) UpdateAutoMatchIgnored(context.Context, i
 	return nil
 }
 func (r *supplierProviderDataRepoStub) AcknowledgeNameChange(context.Context, int64, string) error {
+	return nil
+}
+func (r *supplierProviderDataRepoStub) ListMappingsByLocalGroup(context.Context, []int64) ([]SupplierProviderGroup, error) {
+	return nil, nil
+}
+func (r *supplierProviderDataRepoStub) GetGroupForRateGuard(context.Context, int64) (SupplierProviderGroup, error) {
+	return SupplierProviderGroup{}, nil
+}
+func (r *supplierProviderDataRepoStub) SelectRateGuard(context.Context, int64, string) error {
+	return nil
+}
+func (r *supplierProviderDataRepoStub) ClearRateGuard(context.Context, int64, string) error {
+	return nil
+}
+func (r *supplierProviderDataRepoStub) ListRateGuardCandidates(context.Context) ([]SupplierRateGuardCandidate, error) {
+	return nil, nil
+}
+func (r *supplierProviderDataRepoStub) ApplyRateGuard(context.Context, SupplierRateGuardApplyInput) (SupplierRateGuardApplyResult, error) {
+	return SupplierRateGuardApplyResult{}, nil
+}
+func (r *supplierProviderDataRepoStub) MarkRateGuardChecked(context.Context, int64, time.Time) error {
 	return nil
 }
 func (r *supplierProviderDataRepoStub) ReplaceAccounts(_ context.Context, _ int64, items []SupplierProviderRemoteAccount, _ time.Time) (SupplierSyncCounts, error) {
@@ -84,6 +106,10 @@ func (r *supplierProviderDataRepoStub) FinishSyncRun(_ context.Context, run *Sup
 }
 func (r *supplierProviderDataRepoStub) UpdateSyncStatus(_ context.Context, _ int64, status, _ string, _ time.Time) error {
 	r.statusUpdates = append(r.statusUpdates, status)
+	return nil
+}
+func (r *supplierProviderDataRepoStub) UpdateGroupSyncStatus(_ context.Context, _ int64, status, _ string, _ time.Time) error {
+	r.groupStatusUpdates = append(r.groupStatusUpdates, status)
 	return nil
 }
 func (r *supplierProviderDataRepoStub) Cleanup(context.Context, SupplierCleanupPolicy, time.Time, int) (SupplierCleanupCounts, error) {
@@ -282,6 +308,19 @@ func TestSupplierProviderSyncServiceSyncAllReturnsPartialWhenOneStageFails(t *te
 	require.Equal(t, 1, dataRepo.balanceCalls)
 	require.Equal(t, 1, dataRepo.costCalls)
 	require.Len(t, dataRepo.createdRuns, 1)
+	require.Equal(t, []string{SupplierSyncStatusRunning, SupplierSyncStatusFailed}, dataRepo.groupStatusUpdates)
+}
+
+func TestSupplierProviderSyncServiceRecordsSuccessfulGroupStageIndependently(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{ID: 42, ProviderType: "sub2api", Enabled: true, PasswordEncrypted: "secret"}}}
+	dataRepo := &supplierProviderDataRepoStub{}
+	service := NewSupplierProviderSyncService(providerRepo, dataRepo, &supplierRemoteClientStub{}, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	result, err := service.SyncGroups(context.Background(), 42, SupplierSyncTriggerManual)
+
+	require.NoError(t, err)
+	require.Equal(t, SupplierSyncStatusSuccess, result.Status)
+	require.Equal(t, []string{SupplierSyncStatusRunning, SupplierSyncStatusSuccess}, dataRepo.groupStatusUpdates)
 }
 
 func TestSupplierProviderSyncServiceSyncAllEnabledContinuesAfterProviderFailure(t *testing.T) {

@@ -165,6 +165,37 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).not.toContain('<input')
   })
 
+  it('shows rate guard settings only for the rate guard task', () => {
+    expect(supplierAutomationSource).toContain("editForm.task_code === 'supplier_rate_guard'")
+    expect(supplierAutomationSource).toContain('editForm.config.rate_guard_safety_multiplier')
+    expect(supplierAutomationSource).toContain('label="安全倍率"')
+    expect(supplierAutomationSource).toContain('editForm.config.rate_guard_max_snapshot_age_seconds')
+    expect(supplierAutomationSource).toContain('label="快照最大有效期（秒）"')
+  })
+
+  it('validates rate guard settings before saving the task', () => {
+    expect(supplierAutomationSource).toContain('editForm.config.rate_guard_safety_multiplier <= 0')
+    expect(supplierAutomationSource).toContain("error.value = '安全倍率必须大于 0'")
+    expect(supplierAutomationSource).toContain('editForm.config.rate_guard_max_snapshot_age_seconds < 60')
+    expect(supplierAutomationSource).toContain("error.value = '快照最大有效期不能少于 60 秒'")
+  })
+
+  it('renders rate guard summary counters and item details', () => {
+    expect(supplierAutomationSource).toContain('detailRun.result_detail?.rate_guard')
+    expect(supplierAutomationSource).toContain('rateGuardResult.checked')
+    expect(supplierAutomationSource).toContain('rateGuardResult.raised')
+    expect(supplierAutomationSource).toContain('rateGuardResult.unchanged')
+    expect(supplierAutomationSource).toContain('rateGuardResult.duplicate')
+    expect(supplierAutomationSource).toContain('rateGuardResult.stale')
+    expect(supplierAutomationSource).toContain('rateGuardResult.invalid')
+    expect(supplierAutomationSource).toContain('rateGuardResult.failed')
+    expect(supplierAutomationSource).toContain('rateGuardResult.items')
+    expect(supplierAutomationSource).toContain('item.old_rate')
+    expect(supplierAutomationSource).toContain('item.target_rate')
+    expect(supplierAutomationSource).toContain('rateGuardActionText(item.action)')
+    expect(supplierAutomationSource).toContain('rateGuardReasonText(item.reason)')
+  })
+
   it('uses common framework table and dialog components instead of local table and modal markup', () => {
     expect(supplierAutomationSource).toContain("import DataTable from '@/components/common/DataTable.vue'")
     expect(supplierAutomationSource).toContain("import BaseDialog from '@/components/common/BaseDialog.vue'")

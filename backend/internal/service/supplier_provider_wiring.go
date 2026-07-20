@@ -2,8 +2,30 @@ package service
 
 import "github.com/google/wire"
 
-func ProvideSupplierProviderGroupMatcher(dataRepo SupplierProviderDataRepository, groupRepo GroupRepository) *SupplierProviderGroupMatcher {
-	return NewSupplierProviderGroupMatcher(dataRepo, groupRepo)
+func ProvideSupplierGroupGuardReconciler(dataRepo SupplierProviderDataRepository) *SupplierGroupGuardReconciler {
+	return NewSupplierGroupGuardReconciler(dataRepo)
+}
+
+func ProvideSupplierRateGuardService(dataRepo SupplierProviderDataRepository) *SupplierRateGuardService {
+	return NewSupplierRateGuardService(dataRepo)
+}
+
+func ProvideSupplierAutomationService(
+	repo SupplierAutomationRepository,
+	lock SupplierAutomationLock,
+	syncer SupplierProviderBatchSyncer,
+	dataRepo SupplierProviderDataRepository,
+	rateGuard *SupplierRateGuardService,
+) *SupplierAutomationService {
+	svc := NewSupplierAutomationService(repo, lock, syncer, dataRepo)
+	svc.SetRateGuardService(rateGuard)
+	return svc
+}
+
+func ProvideSupplierProviderGroupMatcher(dataRepo SupplierProviderDataRepository, groupRepo GroupRepository, guard *SupplierGroupGuardReconciler) *SupplierProviderGroupMatcher {
+	matcher := NewSupplierProviderGroupMatcher(dataRepo, groupRepo)
+	matcher.SetGuardReconciler(guard)
+	return matcher
 }
 
 func ProvideSupplierProviderSyncService(
@@ -20,6 +42,9 @@ func ProvideSupplierProviderSyncService(
 }
 
 var SupplierProviderWiringSet = wire.NewSet(
+	ProvideSupplierGroupGuardReconciler,
+	ProvideSupplierRateGuardService,
 	ProvideSupplierProviderGroupMatcher,
 	ProvideSupplierProviderSyncService,
+	ProvideSupplierAutomationService,
 )

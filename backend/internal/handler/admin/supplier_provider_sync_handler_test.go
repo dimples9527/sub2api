@@ -3,6 +3,7 @@ package admin
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -60,6 +61,18 @@ type supplierProviderGroupMatcherHandlerStub struct {
 	ignored         bool
 	resolvedGroupID int64
 	resolvedAction  string
+}
+
+type supplierGroupGuardHandlerStub struct {
+	groupID  int64
+	selected bool
+	err      error
+}
+
+func (s *supplierGroupGuardHandlerStub) SetManualGuard(_ context.Context, groupID int64, selected bool) error {
+	s.groupID = groupID
+	s.selected = selected
+	return s.err
 }
 
 func (s *supplierProviderGroupMatcherHandlerStub) AutoMatch(_ context.Context, providerID int64) (service.SupplierGroupAutoMatchResult, error) {
@@ -212,4 +225,67 @@ func TestSupplierProviderSyncHandlerGroupAutoMatchRoutes(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, int64(7), matcher.resolvedGroupID)
 	require.Equal(t, service.NameChangeActionKeepLocal, matcher.resolvedAction)
+}
+
+func TestSupplierProviderSyncHandlerGroupRateGuardSelectsAndClears(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	guard := &supplierGroupGuardHandlerStub{}
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, &supplierProviderSyncHandlerDataStub{})
+	handler.SetGroupGuard(guard)
+	router := gin.New()
+	router.PUT("/groups/:id/rate-guard", handler.UpdateGroupRateGuard)
+
+	for _, selected := range []bool{true, false} {
+		rec := httptest.NewRecorder()
+		body := `{"selected":false}`
+		if selected {
+			body = `{"selected":true}`
+		}
+		req := httptest.NewRequest(http.MethodPut, "/groups/7/rate-guard", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Equal(t, int64(7), guard.groupID)
+		require.Equal(t, selected, guard.selected)
+		require.Contains(t, rec.Body.String(), `"selected":`)
+	}
+}
+
+func TestSupplierProviderSyncHandlerGroupRateGuardRejectsInvalidInput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, &supplierProviderSyncHandlerDataStub{})
+	handler.SetGroupGuard(&supplierGroupGuardHandlerStub{})
+	router := gin.New()
+	router.PUT("/groups/:id/rate-guard", handler.UpdateGroupRateGuard)
+
+	for _, request := range []struct {
+		path string
+		body string
+	}{
+		{path: "/groups/bad/rate-guard", body: `{"selected":true}`},
+		{path: "/groups/7/rate-guard", body: `{}`},
+		{path: "/groups/7/rate-guard", body: `{"selected":"yes"}`},
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPut, request.path, bytes.NewBufferString(request.body))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+	}
+}
+
+func TestSupplierProviderSyncHandlerGroupRateGuardReturnsServiceError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, &supplierProviderSyncHandlerDataStub{})
+	handler.SetGroupGuard(&supplierGroupGuardHandlerStub{err: errors.New("selection failed")})
+	router := gin.New()
+	router.PUT("/groups/:id/rate-guard", handler.UpdateGroupRateGuard)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/groups/7/rate-guard", bytes.NewBufferString(`{"selected":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
 }

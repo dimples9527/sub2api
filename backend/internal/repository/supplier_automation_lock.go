@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -22,7 +21,7 @@ type supplierAutomationRedisLock struct {
 	rdb *redis.Client
 }
 
-func NewSupplierAutomationLock(rdb *redis.Client) service.SupplierAutomationLock {
+func NewSupplierAutomationLock(rdb *redis.Client) *supplierAutomationRedisLock {
 	return &supplierAutomationRedisLock{rdb: rdb}
 }
 

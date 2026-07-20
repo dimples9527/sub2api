@@ -173,6 +173,10 @@
         <Input :model-value="editIntervalSeconds" type="number" label="执行间隔（秒）" @update:model-value="editIntervalSeconds = toNumber($event, editIntervalSeconds)" />
         <Input :model-value="editForm.timeout_seconds" type="number" label="超时秒数" @update:model-value="editForm.timeout_seconds = toNumber($event, editForm.timeout_seconds)" />
         <div class="sp-form-note">当前调度器按分钟执行，执行间隔必须不少于 60 秒，并且是 60 秒的整数倍。</div>
+        <template v-if="editForm.task_code === 'supplier_rate_guard'">
+          <Input :model-value="editForm.config.rate_guard_safety_multiplier" type="number" label="安全倍率" @update:model-value="editForm.config.rate_guard_safety_multiplier = toNumber($event, editForm.config.rate_guard_safety_multiplier)" />
+          <Input :model-value="editForm.config.rate_guard_max_snapshot_age_seconds" type="number" label="快照最大有效期（秒）" @update:model-value="editForm.config.rate_guard_max_snapshot_age_seconds = toNumber($event, editForm.config.rate_guard_max_snapshot_age_seconds)" />
+        </template>
         <template v-if="editForm.task_code === 'supplier_data_cleanup'">
           <Input :model-value="editForm.config.automation_run_retention_days" type="number" label="自动化运行保留天数" @update:model-value="editForm.config.automation_run_retention_days = toNumber($event, editForm.config.automation_run_retention_days)" />
           <Input :model-value="editForm.config.sync_run_retention_days" type="number" label="同步记录保留天数" @update:model-value="editForm.config.sync_run_retention_days = toNumber($event, editForm.config.sync_run_retention_days)" />
@@ -219,7 +223,47 @@
 
         <div v-if="detailRun.message" class="sp-run-message">{{ detailRun.message }}</div>
 
-        <section v-if="detailRun.result_detail?.providers?.length" class="sp-provider-detail-layout">
+        <section v-if="detailRun.result_detail?.rate_guard && rateGuardResult" class="sp-rate-guard-detail">
+          <div class="sp-rate-guard-summary">
+            <div><span>检查</span><strong>{{ rateGuardResult.checked }}</strong></div>
+            <div><span>调高</span><strong>{{ rateGuardResult.raised }}</strong></div>
+            <div><span>无需调整</span><strong>{{ rateGuardResult.unchanged }}</strong></div>
+            <div><span>重复快照</span><strong>{{ rateGuardResult.duplicate }}</strong></div>
+            <div><span>快照过期</span><strong>{{ rateGuardResult.stale }}</strong></div>
+            <div><span>无效</span><strong>{{ rateGuardResult.invalid }}</strong></div>
+            <div><span>失败</span><strong>{{ rateGuardResult.failed }}</strong></div>
+          </div>
+          <div v-if="rateGuardResult.items.length" class="sp-rate-guard-items">
+            <div class="sp-rate-guard-row sp-rate-guard-row-head" aria-hidden="true">
+              <span>供应商 / 上游分组</span>
+              <span>本地分组</span>
+              <span>原倍率</span>
+              <span>目标倍率</span>
+              <span>结果</span>
+              <span>快照时间</span>
+            </div>
+            <div v-for="item in rateGuardResult.items" :key="item.mapping_id" class="sp-rate-guard-row">
+              <span>
+                <strong>{{ item.provider_name || `供应商 ${item.provider_id}` }}</strong>
+                <small>{{ item.upstream_group_name || item.upstream_group_key }}</small>
+              </span>
+              <span>
+                <strong>{{ item.local_group_name || `本地分组 ${item.local_group_id}` }}</strong>
+                <small>#{{ item.local_group_id }}</small>
+              </span>
+              <span>{{ formatRate(item.old_rate) }}</span>
+              <span>{{ formatRate(item.target_rate) }}</span>
+              <span>
+                <strong>{{ rateGuardActionText(item.action) }}</strong>
+                <small v-if="item.reason">{{ rateGuardReasonText(item.reason) }}</small>
+              </span>
+              <span>{{ formatTime(item.snapshot_at) }}</span>
+            </div>
+          </div>
+          <div v-else class="sp-rate-guard-empty">本次没有可检查的守护分组。</div>
+        </section>
+
+        <section v-else-if="detailRun.result_detail?.providers?.length" class="sp-provider-detail-layout">
           <aside class="sp-provider-index" aria-label="供应商结果">
             <button
               v-for="provider in detailRun.result_detail.providers"
@@ -363,6 +407,8 @@ const editForm = reactive<SupplierAutomationTask>({
   cron_expression: '',
   timeout_seconds: 600,
   config: {
+    rate_guard_safety_multiplier: 1.1,
+    rate_guard_max_snapshot_age_seconds: 1800,
     automation_run_retention_days: 30,
     sync_run_retention_days: 30,
     metric_snapshot_retention_days: 30,
@@ -386,6 +432,7 @@ const detailProviders = computed(() => detailRun.value?.result_detail?.providers
 const selectedDetailProvider = computed(() => {
   return detailProviders.value.find(provider => provider.provider_id === selectedDetailProviderID.value) || detailProviders.value[0] || null
 })
+const rateGuardResult = computed(() => detailRun.value?.result_detail?.rate_guard || null)
 const runTotalPages = computed(() => Math.max(1, Math.ceil(runTotal.value / runPageSize.value)))
 const runTaskFilterOptions = computed<SelectOption[]>(() => [
   { value: '', label: '全部任务' },
@@ -469,6 +516,16 @@ async function saveTask() {
   if (!cronExpression) {
     error.value = '执行间隔必须不少于 60 秒，并且是 60 秒的整数倍'
     return
+  }
+  if (editForm.task_code === 'supplier_rate_guard') {
+    if (editForm.config.rate_guard_safety_multiplier <= 0) {
+      error.value = '安全倍率必须大于 0'
+      return
+    }
+    if (editForm.config.rate_guard_max_snapshot_age_seconds < 60) {
+      error.value = '快照最大有效期不能少于 60 秒'
+      return
+    }
   }
   editForm.cron_expression = cronExpression
   savingCode.value = editingTask.value.task_code
@@ -597,6 +654,38 @@ function formatStageRunDetail(stage: SupplierAutomationStageRunDetail): string[]
   if (stage.response_summary) lines.push(`    响应摘要：${stage.response_summary}`)
   if (stage.message && stage.message !== '同步成功') lines.push(`    结果：${stage.message}`)
   return lines
+}
+
+function formatRate(rate: number): string {
+  return Number.isFinite(rate) && rate > 0 ? rate.toFixed(2) : '-'
+}
+
+function rateGuardActionText(action: string): string {
+  const labels: Record<string, string> = {
+    raised: '已调高',
+    unchanged: '无需调整',
+    duplicate: '重复快照',
+    stale: '快照过期',
+    invalid: '已冻结',
+    failed: '执行失败',
+  }
+  return labels[action] || action || '-'
+}
+
+function rateGuardReasonText(reason?: string): string {
+  if (!reason) return ''
+  const labels: Record<string, string> = {
+    provider_inactive: '供应商已停用',
+    guardian_inactive: '守护上游分组已失活',
+    local_group_inactive: '本地分组已失活',
+    group_sync_not_success: '最近一次分组同步未成功',
+    snapshot_stale: '上游倍率快照已过期',
+    snapshot_duplicate: '该倍率快照已处理',
+    rate_invalid: '倍率数据无效',
+    selection_changed: '守护分组已变更',
+    snapshot_changed: '倍率快照已更新',
+  }
+  return labels[reason] || reason
 }
 
 function providerStagesByCategory(provider: SupplierAutomationProviderRunDetail) {
@@ -1399,11 +1488,92 @@ function showToast(message: string) {
   font-size: 20px;
 }
 
+.sp-rate-guard-detail {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.sp-rate-guard-summary {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  border-top: 1px solid var(--sp-line);
+  border-bottom: 1px solid var(--sp-line);
+}
+
+.sp-rate-guard-summary > div {
+  min-width: 0;
+  border-left: 1px solid var(--sp-line);
+  padding: 12px;
+}
+
+.sp-rate-guard-summary > div:first-child {
+  border-left: 0;
+}
+
+.sp-rate-guard-summary span,
+.sp-rate-guard-row small {
+  display: block;
+  color: var(--sp-muted);
+  font-size: 11px;
+}
+
+.sp-rate-guard-summary strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--sp-text);
+  font-size: 18px;
+}
+
+.sp-rate-guard-items {
+  min-width: 0;
+  overflow-x: auto;
+  border-top: 1px solid var(--sp-line);
+}
+
+.sp-rate-guard-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.3fr) minmax(160px, 1fr) 90px 90px minmax(130px, 0.8fr) 150px;
+  min-width: 880px;
+  border-bottom: 1px solid var(--sp-line);
+}
+
+.sp-rate-guard-row > span {
+  min-width: 0;
+  padding: 11px 12px;
+  color: var(--sp-text);
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.sp-rate-guard-row strong {
+  display: block;
+  font-size: 12px;
+}
+
+.sp-rate-guard-row small {
+  margin-top: 3px;
+}
+
+.sp-rate-guard-row-head > span {
+  color: var(--sp-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.sp-rate-guard-empty {
+  border-top: 1px solid var(--sp-line);
+  border-bottom: 1px solid var(--sp-line);
+  color: var(--sp-muted);
+  padding: 16px 0;
+}
+
 @media (max-width: 760px) {
   .sp-run-filters,
   .sp-run-detail-summary,
   .sp-provider-detail-layout,
   .sp-cleanup-grid,
+  .sp-rate-guard-summary,
   .sp-stage-body {
     grid-template-columns: 1fr;
   }
@@ -1454,6 +1624,16 @@ function showToast(message: string) {
   }
 
   .sp-cleanup-grid > article:first-child {
+    border-top: 0;
+  }
+
+  .sp-rate-guard-summary > div,
+  .sp-rate-guard-summary > div:first-child {
+    border-top: 1px solid var(--sp-line);
+    border-left: 0;
+  }
+
+  .sp-rate-guard-summary > div:first-child {
     border-top: 0;
   }
 }

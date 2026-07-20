@@ -35,10 +35,21 @@ type SupplierProviderGroupMatcherPort interface {
 	ResolveNameChange(ctx context.Context, groupID int64, action string) error
 }
 
+type SupplierGroupGuardPort interface {
+	SetManualGuard(ctx context.Context, groupID int64, selected bool) error
+}
+
 type SupplierProviderSyncHandler struct {
 	syncService  SupplierProviderSyncServicePort
 	dataRepo     SupplierProviderDataRepositoryPort
 	groupMatcher SupplierProviderGroupMatcherPort
+	groupGuard   SupplierGroupGuardPort
+}
+
+func (h *SupplierProviderSyncHandler) SetGroupGuard(guard SupplierGroupGuardPort) {
+	if h != nil {
+		h.groupGuard = guard
+	}
 }
 
 func (h *SupplierProviderSyncHandler) SetGroupMatcher(matcher SupplierProviderGroupMatcherPort) {
@@ -248,6 +259,29 @@ func (h *SupplierProviderSyncHandler) ResolveGroupNameChange(c *gin.Context) {
 		return
 	}
 	response.Success(c, gin.H{"group_id": groupID, "action": input.Action})
+}
+
+func (h *SupplierProviderSyncHandler) UpdateGroupRateGuard(c *gin.Context) {
+	groupID, ok := parseSupplierGroupID(c)
+	if !ok {
+		return
+	}
+	var input struct {
+		Selected *bool `json:"selected"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil || input.Selected == nil {
+		response.ErrorFrom(c, badRequest("倍率守护参数无效"))
+		return
+	}
+	if h.groupGuard == nil {
+		response.ErrorFrom(c, infraerrors.InternalServer("SUPPLIER_GROUP_GUARD_UNAVAILABLE", "supplier group guard unavailable"))
+		return
+	}
+	if err := h.groupGuard.SetManualGuard(c.Request.Context(), groupID, *input.Selected); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"group_id": groupID, "selected": *input.Selected})
 }
 
 func parseSupplierGroupID(c *gin.Context) (int64, bool) {

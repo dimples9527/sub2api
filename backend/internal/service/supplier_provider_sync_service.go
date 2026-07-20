@@ -31,26 +31,34 @@ type SupplierProviderAccount struct {
 }
 
 type SupplierProviderGroup struct {
-	ID                  int64      `json:"id"`
-	ProviderID          int64      `json:"provider_id"`
-	ProviderName        string     `json:"provider_name"`
-	UpstreamKey         string     `json:"upstream_group_key"`
-	Name                string     `json:"name"`
-	RateMultiplier      float64    `json:"rate_multiplier"`
-	RawStatus           string     `json:"raw_status"`
-	Active              bool       `json:"active"`
-	LocalGroupID        *int64     `json:"local_group_id,omitempty"`
-	LocalGroupName      string     `json:"local_group_name,omitempty"`
-	LocalGroupPlatform  string     `json:"local_group_platform,omitempty"`
-	LocalRateMultiplier *float64   `json:"local_rate_multiplier,omitempty"`
-	LocalGroupStatus    string     `json:"local_group_status,omitempty"`
-	AutoMatchIgnored    bool       `json:"auto_match_ignored"`
-	AutoMatchStatus     string     `json:"auto_match_status"`
-	MatchedUpstreamName string     `json:"matched_upstream_name,omitempty"`
-	NameChangePending   bool       `json:"name_change_pending"`
-	AccountCount        int        `json:"account_count"`
-	LastSeenAt          time.Time  `json:"last_seen_at"`
-	InactiveAt          *time.Time `json:"inactive_at,omitempty"`
+	ID                           int64      `json:"id"`
+	ProviderID                   int64      `json:"provider_id"`
+	ProviderName                 string     `json:"provider_name"`
+	UpstreamKey                  string     `json:"upstream_group_key"`
+	Name                         string     `json:"name"`
+	RateMultiplier               float64    `json:"rate_multiplier"`
+	RawStatus                    string     `json:"raw_status"`
+	Active                       bool       `json:"active"`
+	LocalGroupID                 *int64     `json:"local_group_id,omitempty"`
+	LocalGroupName               string     `json:"local_group_name,omitempty"`
+	LocalGroupPlatform           string     `json:"local_group_platform,omitempty"`
+	LocalRateMultiplier          *float64   `json:"local_rate_multiplier,omitempty"`
+	LocalGroupStatus             string     `json:"local_group_status,omitempty"`
+	AutoMatchIgnored             bool       `json:"auto_match_ignored"`
+	AutoMatchStatus              string     `json:"auto_match_status"`
+	MatchedUpstreamName          string     `json:"matched_upstream_name,omitempty"`
+	NameChangePending            bool       `json:"name_change_pending"`
+	RateGuardSelected            bool       `json:"rate_guard_selected"`
+	RateGuardSelectionMode       string     `json:"rate_guard_selection_mode"`
+	RateGuardLastSnapshotAt      *time.Time `json:"rate_guard_last_snapshot_at,omitempty"`
+	RateGuardLastCheckedAt       *time.Time `json:"rate_guard_last_checked_at,omitempty"`
+	LocalGroupActiveMappingCount int        `json:"local_group_active_mapping_count"`
+	LocalGroupRateGuardGroupID   *int64     `json:"local_group_rate_guard_group_id,omitempty"`
+	GroupSyncStatus              string     `json:"group_sync_status"`
+	LastGroupSyncAt              *time.Time `json:"last_group_sync_at,omitempty"`
+	AccountCount                 int        `json:"account_count"`
+	LastSeenAt                   time.Time  `json:"last_seen_at"`
+	InactiveAt                   *time.Time `json:"inactive_at,omitempty"`
 }
 
 type SupplierProviderDataListParams struct {
@@ -134,6 +142,13 @@ type SupplierProviderDataRepository interface {
 	UpdateAutoMatchState(ctx context.Context, groupID int64, status string, nameChangePending bool) error
 	UpdateAutoMatchIgnored(ctx context.Context, groupID int64, ignored bool) error
 	AcknowledgeNameChange(ctx context.Context, groupID int64, matchedUpstreamName string) error
+	ListMappingsByLocalGroup(ctx context.Context, localGroupIDs []int64) ([]SupplierProviderGroup, error)
+	GetGroupForRateGuard(ctx context.Context, groupID int64) (SupplierProviderGroup, error)
+	SelectRateGuard(ctx context.Context, groupID int64, mode string) error
+	ClearRateGuard(ctx context.Context, groupID int64, mode string) error
+	ListRateGuardCandidates(ctx context.Context) ([]SupplierRateGuardCandidate, error)
+	ApplyRateGuard(ctx context.Context, input SupplierRateGuardApplyInput) (SupplierRateGuardApplyResult, error)
+	MarkRateGuardChecked(ctx context.Context, mappingID int64, checkedAt time.Time) error
 	ReplaceAccounts(ctx context.Context, providerID int64, items []SupplierProviderRemoteAccount, seenAt time.Time) (SupplierSyncCounts, error)
 	ReplaceGroups(ctx context.Context, providerID int64, items []SupplierProviderRemoteGroup, seenAt time.Time) (SupplierSyncCounts, error)
 	UpdateBalance(ctx context.Context, providerID int64, balance float64, seenAt time.Time) error
@@ -141,6 +156,7 @@ type SupplierProviderDataRepository interface {
 	CreateSyncRun(ctx context.Context, run *SupplierProviderSyncRun) error
 	FinishSyncRun(ctx context.Context, run *SupplierProviderSyncRun) error
 	UpdateSyncStatus(ctx context.Context, providerID int64, status, message string, syncedAt time.Time) error
+	UpdateGroupSyncStatus(ctx context.Context, providerID int64, status, message string, syncedAt time.Time) error
 	Cleanup(ctx context.Context, policy SupplierCleanupPolicy, now time.Time, batchSize int) (SupplierCleanupCounts, error)
 }
 
@@ -430,7 +446,14 @@ func (s *SupplierProviderSyncService) syncStage(ctx context.Context, provider *S
 			return result, fmt.Errorf("create supplier sync run: %w", err)
 		}
 	}
-	counts, err := s.executeStage(ctx, provider, password, scope, startedAt)
+	var counts SupplierSyncCounts
+	var err error
+	if scope == SupplierSyncScopeGroups {
+		err = s.dataRepo.UpdateGroupSyncStatus(ctx, provider.ID, SupplierSyncStatusRunning, "", startedAt)
+	}
+	if err == nil {
+		counts, err = s.executeStage(ctx, provider, password, scope, startedAt)
+	}
 	result.Counts = counts
 	result.FinishedAt = time.Now()
 	if err != nil {
@@ -439,6 +462,13 @@ func (s *SupplierProviderSyncService) syncStage(ctx context.Context, provider *S
 	} else {
 		result.Status = SupplierSyncStatusSuccess
 		result.Message = supplierSyncMessage(result.Status)
+	}
+	if scope == SupplierSyncScopeGroups {
+		if statusErr := s.dataRepo.UpdateGroupSyncStatus(ctx, provider.ID, result.Status, result.Message, result.FinishedAt); statusErr != nil && err == nil {
+			err = fmt.Errorf("update supplier group sync status: %w", statusErr)
+			result.Status = SupplierSyncStatusFailed
+			result.Message = err.Error()
+		}
 	}
 	if createRun {
 		finishedAt := result.FinishedAt

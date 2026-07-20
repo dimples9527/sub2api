@@ -104,6 +104,7 @@ describe('supplier local data views component usage', () => {
     expect(groupsSource).toContain("import BaseDialog from '@/components/common/BaseDialog.vue'")
     expect(groupsSource).toContain("import ConfirmDialog from '@/components/common/ConfirmDialog.vue'")
     expect(groupsSource).toContain('updateSupplierGroupMapping')
+		expect(groupsSource).toContain('updateSupplierGroupRateGuard')
     expect(groupsSource).toContain('adminAPI.groups.create')
     expect(groupsSource).toContain('adminAPI.groups.update')
     expect(groupsSource).toContain('匹配分组')
@@ -111,6 +112,9 @@ describe('supplier local data views component usage', () => {
     expect(groupsSource).toContain('调倍率')
     expect(groupsSource).toContain('重新匹配')
     expect(groupsSource).toContain('解除匹配')
+		expect(groupsSource).toContain("{ key: 'rate_guard_status', label: '倍率守护'")
+		expect(groupsSource).toContain('toggleRateGuard')
+		expect(groupsSource).toContain('设为守护')
   })
 
   it('uses distinct supplier tones and the existing group platform palette', () => {

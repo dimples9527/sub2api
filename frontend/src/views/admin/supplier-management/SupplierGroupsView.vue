@@ -242,6 +242,13 @@
               </div>
             </template>
 
+			<template #cell-rate_guard_status="{ row: group }">
+				<span class="sp-guard-state" :class="rateGuardStatus(group).tone">
+					<Icon name="shield" size="xs" />
+					{{ rateGuardStatus(group).label }}
+				</span>
+			</template>
+
             <template #cell-rate_delta="{ row: group }">
               <div v-if="rateInsight(group).delta != null" class="sp-rate-delta-cell" :class="rateInsight(group).code">
                 <strong>{{ formatSupplierGroupRateDelta(group.local_rate_multiplier, group.rate_multiplier) }}</strong>
@@ -280,6 +287,18 @@
                   </button>
                 </template>
                 <template v-else>
+					<button
+						v-if="canManageManualRateGuard(group)"
+						type="button"
+						class="sp-row-action guard"
+						:class="{ active: group.rate_guard_selected }"
+						:disabled="guardUpdatingGroupID === group.id || (!group.rate_guard_selected && !rateGuardEligible(group))"
+						:title="group.rate_guard_selected ? '取消人工倍率守护' : '设为该本地分组的倍率守护来源'"
+						@click="toggleRateGuard(group)"
+					>
+						<Icon name="shield" size="sm" />
+						<span>{{ group.rate_guard_selected ? '取消守护' : '设为守护' }}</span>
+					</button>
                   <button type="button" class="sp-row-action primary" title="修改本地分组倍率" @click="openRateDialog(group)">
                     <Icon name="edit" size="sm" />
                     <span>调倍率</span>
@@ -380,6 +399,11 @@
             <b v-else>未匹配</b>
           </div>
           <div class="sp-detail-cell"><span>本地倍率</span><b>{{ formatRate(selected.local_rate_multiplier) }}</b></div>
+			<div class="sp-detail-cell">
+				<span>倍率守护</span>
+				<b class="sp-guard-state" :class="rateGuardStatus(selected).tone">{{ rateGuardStatus(selected).label }}</b>
+			</div>
+			<div class="sp-detail-cell"><span>分组同步</span><b>{{ selected.group_sync_status || 'never' }}</b></div>
           <div class="sp-detail-cell sp-detail-wide"><span>最近同步</span><b>{{ formatTime(selected.last_seen_at) }}</b></div>
         </div>
       </template>
@@ -496,6 +520,7 @@ import {
   listSupplierGroups,
   resolveSupplierGroupNameChange,
   updateSupplierGroupAutoMatchPolicy,
+	updateSupplierGroupRateGuard,
   updateSupplierGroupMapping,
   type SupplierProviderGroup,
   type SupplierProviderGroupSummary,
@@ -617,6 +642,7 @@ const creatingLocalGroup = ref(false)
 const savingLocalRate = ref(false)
 const autoMatching = ref(false)
 const policyUpdatingGroupID = ref<number | null>(null)
+const guardUpdatingGroupID = ref<number | null>(null)
 const resolvingNameGroupID = ref<number | null>(null)
 const error = ref('')
 const page = ref(1)
@@ -675,6 +701,7 @@ const groupColumns: Column[] = [
   { key: 'raw_status', label: '上游状态', class: 'min-w-[105px]' },
   { key: 'local_group_name', label: '匹配本地分组', class: 'min-w-[190px]' },
   { key: 'auto_match_status', label: '匹配状态', class: 'min-w-[120px]' },
+	{ key: 'rate_guard_status', label: '倍率守护', class: 'min-w-[120px]' },
   { key: 'local_rate_multiplier', label: '本地分组倍率', class: 'min-w-[110px]' },
   { key: 'rate_delta', label: '价差', class: 'min-w-[110px]' },
   { key: 'account_count', label: '绑定账号', class: 'min-w-[90px]' },
@@ -991,6 +1018,58 @@ async function toggleAutoMatchIgnored(group: SupplierProviderGroup) {
   } finally {
     policyUpdatingGroupID.value = null
   }
+}
+
+async function toggleRateGuard(group: SupplierProviderGroup) {
+	if (!group.rate_guard_selected && !rateGuardEligible(group)) return
+	guardUpdatingGroupID.value = group.id
+	const selected = !group.rate_guard_selected
+	try {
+		await updateSupplierGroupRateGuard(group.id, selected)
+		await loadGroups()
+		appStore.showSuccess(selected ? '已设为人工守护分组' : '已取消人工守护')
+	} catch (err) {
+		appStore.showError(errorMessage(err, '更新倍率守护失败'))
+	} finally {
+		guardUpdatingGroupID.value = null
+	}
+}
+
+function rateGuardEligible(group: SupplierProviderGroup): boolean {
+	return Boolean(group.local_group_id && group.active && group.local_group_status === 'active')
+}
+
+function canManageManualRateGuard(group: SupplierProviderGroup): boolean {
+	if (group.rate_guard_selected && group.rate_guard_selection_mode === 'manual') {
+		return !group.active || group.local_group_active_mapping_count > 1
+	}
+	return !group.rate_guard_selected && group.local_group_active_mapping_count > 1
+}
+
+function rateGuardStatus(group: SupplierProviderGroup): { label: string; tone: string } {
+	if (group.rate_guard_selected && (
+		!group.active
+		|| group.local_group_status !== 'active'
+		|| group.group_sync_status !== 'success'
+	)) {
+		return { label: '守护异常', tone: 'danger' }
+	}
+	if (group.rate_guard_selected && group.rate_guard_selection_mode === 'auto') {
+		return { label: '自动守护', tone: 'auto' }
+	}
+	if (group.rate_guard_selected && group.rate_guard_selection_mode === 'manual') {
+		return { label: '人工守护', tone: 'manual' }
+	}
+	if (!group.local_group_id) {
+		return { label: '未匹配', tone: 'muted' }
+	}
+	if (group.local_group_rate_guard_group_id && group.local_group_rate_guard_group_id !== group.id) {
+		return { label: '非守护源', tone: 'muted' }
+	}
+	if (group.local_group_active_mapping_count > 1) {
+		return { label: '可设守护', tone: 'pending' }
+	}
+	return { label: '非守护源', tone: 'muted' }
 }
 
 async function resolveNameChange(group: SupplierProviderGroup, action: 'keep_local' | 'sync_local_name') {
@@ -1525,6 +1604,25 @@ function errorMessage(err: unknown, fallback: string): string {
 .sp-match-state.pending,
 .sp-match-state.muted { color: var(--sp-muted); }
 
+.sp-guard-state {
+	display: inline-flex;
+	width: fit-content;
+	align-items: center;
+	gap: 0.35rem;
+	padding: 0.25rem 0.45rem;
+	border: 1px solid currentColor;
+	border-radius: 0.375rem;
+	font-size: 0.72rem;
+	font-weight: 650;
+	white-space: nowrap;
+}
+
+.sp-guard-state.auto { color: var(--sp-green); }
+.sp-guard-state.manual { color: var(--sp-blue); }
+.sp-guard-state.pending { color: var(--sp-amber); }
+.sp-guard-state.danger { color: var(--sp-red); }
+.sp-guard-state.muted { color: var(--sp-muted); }
+
 .sp-name-change-link {
   padding: 0;
   border: 0;
@@ -1638,6 +1736,16 @@ function errorMessage(err: unknown, fallback: string): string {
 .sp-row-action.active {
   border-color: color-mix(in srgb, var(--sp-amber) 42%, var(--sp-line));
   color: var(--sp-amber);
+}
+
+.sp-row-action.guard {
+	border-color: color-mix(in srgb, var(--sp-green) 34%, var(--sp-line));
+	color: var(--sp-green);
+}
+
+.sp-row-action.guard.active {
+	border-color: color-mix(in srgb, var(--sp-amber) 42%, var(--sp-line));
+	color: var(--sp-amber);
 }
 
 .sp-row-action:disabled {

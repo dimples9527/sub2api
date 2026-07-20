@@ -29,12 +29,14 @@ type SupplierAutomationTask struct {
 }
 
 type SupplierAutomationConfig struct {
-	AutomationRunRetentionDays int `json:"automation_run_retention_days"`
-	SyncRunRetentionDays       int `json:"sync_run_retention_days"`
-	MetricRetentionDays        int `json:"metric_snapshot_retention_days"`
-	DailyStatRetentionDays     int `json:"daily_stat_retention_days"`
-	InactiveAccountDays        int `json:"inactive_account_retention_days"`
-	InactiveGroupDays          int `json:"inactive_group_retention_days"`
+	AutomationRunRetentionDays     int     `json:"automation_run_retention_days"`
+	SyncRunRetentionDays           int     `json:"sync_run_retention_days"`
+	MetricRetentionDays            int     `json:"metric_snapshot_retention_days"`
+	DailyStatRetentionDays         int     `json:"daily_stat_retention_days"`
+	InactiveAccountDays            int     `json:"inactive_account_retention_days"`
+	InactiveGroupDays              int     `json:"inactive_group_retention_days"`
+	RateGuardSafetyMultiplier      float64 `json:"rate_guard_safety_multiplier"`
+	RateGuardMaxSnapshotAgeSeconds int     `json:"rate_guard_max_snapshot_age_seconds"`
 }
 
 type SupplierAutomationRun struct {
@@ -55,6 +57,7 @@ type SupplierAutomationRun struct {
 type SupplierAutomationRunDetail struct {
 	Providers []SupplierAutomationProviderRunDetail `json:"providers,omitempty"`
 	Cleanup   *SupplierAutomationCleanupRunDetail   `json:"cleanup,omitempty"`
+	RateGuard *SupplierRateGuardResult              `json:"rate_guard,omitempty"`
 }
 
 type SupplierAutomationProviderRunDetail struct {
@@ -130,9 +133,14 @@ type SupplierProviderBatchSyncer interface {
 	SyncAllEnabled(ctx context.Context, trigger string) (SupplierProviderBatchSyncResult, error)
 }
 
+type SupplierRateGuardRunner interface {
+	Run(ctx context.Context, config SupplierRateGuardConfig, now time.Time) (SupplierRateGuardResult, error)
+}
+
 const (
-	SupplierAutomationTaskSync    = "supplier_data_sync"
-	SupplierAutomationTaskCleanup = "supplier_data_cleanup"
+	SupplierAutomationTaskSync      = "supplier_data_sync"
+	SupplierAutomationTaskCleanup   = "supplier_data_cleanup"
+	SupplierAutomationTaskRateGuard = "supplier_rate_guard"
 
 	SupplierAutomationStatusRunning = "running"
 	SupplierAutomationStatusSuccess = "success"
@@ -146,11 +154,12 @@ func supplierAutomationConfigJSON(config SupplierAutomationConfig) string {
 }
 
 type SupplierAutomationService struct {
-	repo     SupplierAutomationRepository
-	lock     SupplierAutomationLock
-	syncer   SupplierProviderBatchSyncer
-	dataRepo SupplierProviderDataRepository
-	reloader SupplierAutomationSchedulerReloader
+	repo      SupplierAutomationRepository
+	lock      SupplierAutomationLock
+	syncer    SupplierProviderBatchSyncer
+	dataRepo  SupplierProviderDataRepository
+	rateGuard SupplierRateGuardRunner
+	reloader  SupplierAutomationSchedulerReloader
 }
 
 func NewSupplierAutomationService(repo SupplierAutomationRepository, lock SupplierAutomationLock, syncer SupplierProviderBatchSyncer, dataRepo SupplierProviderDataRepository) *SupplierAutomationService {
@@ -159,6 +168,12 @@ func NewSupplierAutomationService(repo SupplierAutomationRepository, lock Suppli
 
 func (s *SupplierAutomationService) SetSchedulerReloader(reloader SupplierAutomationSchedulerReloader) {
 	s.reloader = reloader
+}
+
+func (s *SupplierAutomationService) SetRateGuardService(rateGuard SupplierRateGuardRunner) {
+	if s != nil {
+		s.rateGuard = rateGuard
+	}
 }
 
 func (s *SupplierAutomationService) ListTasks(ctx context.Context) ([]SupplierAutomationTask, error) {
@@ -281,6 +296,26 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 			Groups:          counts.Groups,
 		}}
 		return nil
+	case SupplierAutomationTaskRateGuard:
+		if s.rateGuard == nil {
+			return fmt.Errorf("supplier rate guard service is required")
+		}
+		result, err := s.rateGuard.Run(ctx, SupplierRateGuardConfig{
+			SafetyMultiplier: task.Config.RateGuardSafetyMultiplier,
+			MaxSnapshotAge:   time.Duration(task.Config.RateGuardMaxSnapshotAgeSeconds) * time.Second,
+		}, time.Now())
+		run.ProcessedCount = result.Checked
+		run.FailedCount = result.Failed + result.Stale + result.Invalid
+		run.SuccessCount = result.Checked - run.FailedCount
+		run.ResultDetail = &SupplierAutomationRunDetail{RateGuard: &result}
+		if err != nil {
+			return err
+		}
+		if run.FailedCount > 0 {
+			run.Status = SupplierAutomationStatusPartial
+			run.Message = fmt.Sprintf("倍率守护存在 %d 项告警", run.FailedCount)
+		}
+		return nil
 	default:
 		return ErrSupplierProviderInvalid
 	}
@@ -381,6 +416,11 @@ func validateSupplierAutomationTask(task SupplierAutomationTask) error {
 	}
 	if _, err := supplierAutomationCronParser.Parse(strings.TrimSpace(task.CronExpression)); err != nil {
 		return fmt.Errorf("invalid supplier automation cron: %w", err)
+	}
+	if task.TaskCode == SupplierAutomationTaskRateGuard {
+		if task.Config.RateGuardSafetyMultiplier <= 0 || task.Config.RateGuardMaxSnapshotAgeSeconds < 60 {
+			return ErrSupplierProviderInvalid
+		}
 	}
 	return nil
 }

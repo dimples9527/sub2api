@@ -1,6 +1,8 @@
 import { apiClient } from '../client'
 
 export interface SupplierAutomationConfig {
+  rate_guard_safety_multiplier: number
+  rate_guard_max_snapshot_age_seconds: number
   automation_run_retention_days: number
   sync_run_retention_days: number
   metric_snapshot_retention_days: number
@@ -40,7 +42,34 @@ export interface SupplierAutomationRun {
 
 export interface SupplierAutomationRunDetail {
   providers?: SupplierAutomationProviderRunDetail[]
+  rate_guard?: SupplierRateGuardResult
   cleanup?: SupplierAutomationCleanupRunDetail
+}
+
+export interface SupplierRateGuardResult {
+  checked: number
+  raised: number
+  unchanged: number
+  duplicate: number
+  stale: number
+  invalid: number
+  failed: number
+  items: SupplierRateGuardItemResult[]
+}
+
+export interface SupplierRateGuardItemResult {
+  mapping_id: number
+  provider_id: number
+  provider_name: string
+  upstream_group_key: string
+  upstream_group_name: string
+  local_group_id: number
+  local_group_name: string
+  snapshot_at: string
+  old_rate: number
+  target_rate: number
+  action: string
+  reason?: string
 }
 
 export interface SupplierAutomationProviderRunDetail {

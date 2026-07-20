@@ -9,6 +9,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 	"github.com/stretchr/testify/require"
 )
 
@@ -161,11 +162,14 @@ func TestSupplierProviderDataRepositoryListGroupsIncludesFilteredSummary(t *test
 			"id", "provider_id", "provider_name", "upstream_group_key", "name",
 			"rate_multiplier", "raw_status", "active", "local_group_id", "local_group_name",
 			"local_group_platform", "local_rate_multiplier", "local_group_status", "auto_match_ignored",
-			"auto_match_status", "matched_upstream_name", "name_change_pending", "account_count",
+			"auto_match_status", "matched_upstream_name", "name_change_pending",
+			"rate_guard_selected", "rate_guard_selection_mode", "rate_guard_last_snapshot_at", "rate_guard_last_checked_at",
+			"group_sync_status", "last_group_sync_at", "local_group_active_mapping_count", "local_group_rate_guard_group_id", "account_count",
 			"last_seen_at", "inactive_at",
 		}).AddRow(
 			int64(7), int64(42), "Supplier A", "group-1", "VIP", 2.5, "active", true,
-			int64(12), "VIP 本地", "openai", 3.0, "active", false, "manual", "VIP", false, 5, now, nil,
+			int64(12), "VIP 本地", "openai", 3.0, "active", false, "manual", "VIP", false,
+			true, "manual", now.Add(-time.Minute), now, "success", now.Add(-time.Minute), 2, int64(7), 5, now, nil,
 		))
 
 	result, err := repo.ListGroups(context.Background(), service.SupplierProviderDataListParams{
@@ -192,6 +196,24 @@ func TestSupplierProviderDataRepositoryListGroupsIncludesFilteredSummary(t *test
 	require.False(t, result.Items[0].AutoMatchIgnored)
 	require.Equal(t, service.AutoMatchStatusManual, result.Items[0].AutoMatchStatus)
 	require.Equal(t, "VIP", result.Items[0].MatchedUpstreamName)
+	require.True(t, result.Items[0].RateGuardSelected)
+	require.Equal(t, "manual", result.Items[0].RateGuardSelectionMode)
+	require.Equal(t, "success", result.Items[0].GroupSyncStatus)
+	require.NotNil(t, result.Items[0].LastGroupSyncAt)
+	require.Equal(t, 2, result.Items[0].LocalGroupActiveMappingCount)
+	require.Equal(t, int64(7), *result.Items[0].LocalGroupRateGuardGroupID)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryUpdatesGroupSyncStatus(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	syncedAt := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_runtime_stats SET group_sync_status=$2, group_sync_message=$3, last_group_sync_at=$4, updated_at=$4 WHERE provider_id=$1")).
+		WithArgs(int64(42), service.SupplierSyncStatusFailed, "upstream unavailable", syncedAt).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	require.NoError(t, repo.UpdateGroupSyncStatus(context.Background(), 42, service.SupplierSyncStatusFailed, "upstream unavailable", syncedAt))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -275,11 +297,14 @@ func TestSupplierProviderDataRepositoryListGroupsKeepsSummaryOutsideStatusFilter
 			"id", "provider_id", "provider_name", "upstream_group_key", "name",
 			"rate_multiplier", "raw_status", "active", "local_group_id", "local_group_name",
 			"local_group_platform", "local_rate_multiplier", "local_group_status", "auto_match_ignored",
-			"auto_match_status", "matched_upstream_name", "name_change_pending", "account_count",
+			"auto_match_status", "matched_upstream_name", "name_change_pending",
+			"rate_guard_selected", "rate_guard_selection_mode", "rate_guard_last_snapshot_at", "rate_guard_last_checked_at",
+			"group_sync_status", "last_group_sync_at", "local_group_active_mapping_count", "local_group_rate_guard_group_id", "account_count",
 			"last_seen_at", "inactive_at",
 		}).AddRow(
 			int64(7), int64(42), "Supplier A", "group-1", "VIP", 2.5, "active", true,
-			int64(12), "VIP 本地", "openai", 2.6, "active", false, "manual", "VIP", false, 5, now, nil,
+			int64(12), "VIP 本地", "openai", 2.6, "active", false, "manual", "VIP", false,
+			false, "", nil, nil, "never", nil, 2, nil, 5, now, nil,
 		))
 
 	result, err := repo.ListGroups(context.Background(), service.SupplierProviderDataListParams{
@@ -353,6 +378,183 @@ func TestSupplierProviderDataRepositoryAutoMatchStateOperations(t *testing.T) {
 		WithArgs(int64(7), true).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	require.NoError(t, repo.UpdateAutoMatchIgnored(context.Background(), 7, true))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryListsMappingsForGuardReconciliation(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(`FROM supplier_provider_groups g.*g\.local_group_id = ANY\(\$1\)`).
+		WithArgs(pq.Array([]int64{7})).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "provider_id", "provider_name", "upstream_group_key", "name", "rate_multiplier", "raw_status", "active",
+			"local_group_id", "auto_match_ignored", "auto_match_status", "matched_upstream_name", "name_change_pending",
+			"rate_guard_selected", "rate_guard_selection_mode", "last_seen_at", "inactive_at",
+		}).AddRow(
+			int64(10), int64(42), "Supplier A", "vip", "VIP", 2.5, "active", true,
+			int64(7), false, service.AutoMatchStatusAutoMatched, "VIP", false,
+			true, service.RateGuardSelectionModeAuto, now, nil,
+		))
+
+	groups, err := repo.ListMappingsByLocalGroup(context.Background(), []int64{7})
+
+	require.NoError(t, err)
+	require.Len(t, groups, 1)
+	require.True(t, groups[0].RateGuardSelected)
+	require.Equal(t, service.RateGuardSelectionModeAuto, groups[0].RateGuardSelectionMode)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositorySelectsRateGuardAtomically(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT local_group_id, active FROM supplier_provider_groups WHERE id=$1 FOR UPDATE")).
+		WithArgs(int64(10)).
+		WillReturnRows(sqlmock.NewRows([]string{"local_group_id", "active"}).AddRow(int64(7), true))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT pg_advisory_xact_lock($1)")).
+		WithArgs(int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{"pg_advisory_xact_lock"}).AddRow(nil))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET rate_guard_selected=FALSE, rate_guard_selection_mode='', updated_at=NOW() WHERE local_group_id=$1 AND rate_guard_selected=TRUE")).
+		WithArgs(int64(7)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET rate_guard_selected=TRUE, rate_guard_selection_mode=$2, updated_at=NOW() WHERE id=$1")).
+		WithArgs(int64(10), service.RateGuardSelectionModeManual).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	require.NoError(t, repo.SelectRateGuard(context.Background(), 10, service.RateGuardSelectionModeManual))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryClearsOnlyMatchingGuardMode(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET rate_guard_selected=FALSE, rate_guard_selection_mode='', updated_at=NOW() WHERE id=$1 AND rate_guard_selection_mode=$2")).
+		WithArgs(int64(10), service.RateGuardSelectionModeAuto).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	require.NoError(t, repo.ClearRateGuard(context.Background(), 10, service.RateGuardSelectionModeAuto))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryListsSelectedRateGuardCandidates(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(`WHERE g\.rate_guard_selected = TRUE`).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"mapping_id", "provider_id", "provider_name", "provider_enabled",
+			"upstream_group_key", "upstream_group_name", "upstream_rate_multiplier", "guardian_active",
+			"local_group_id", "local_group_name", "local_group_status", "local_rate_multiplier",
+			"snapshot_at", "last_snapshot_at", "group_sync_status", "last_group_sync_at",
+		}).AddRow(
+			int64(10), int64(42), "Supplier A", true,
+			"vip", "VIP", 2.5, true,
+			int64(7), "VIP Local", "active", 2.6,
+			now.Add(-time.Minute), nil, "success", now.Add(-time.Minute),
+		))
+
+	candidates, err := repo.ListRateGuardCandidates(context.Background())
+
+	require.NoError(t, err)
+	require.Len(t, candidates, 1)
+	require.Equal(t, int64(10), candidates[0].MappingID)
+	require.Equal(t, int64(7), candidates[0].LocalGroupID)
+	require.InDelta(t, 2.6, candidates[0].LocalRateMultiplier, 0.000000001)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryRateGuardRechecksLocalRateBeforeRaise(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
+	snapshotAt := now.Add(-time.Minute)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`FOR UPDATE OF g, lg`).
+		WithArgs(int64(10)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"rate_guard_selected", "guardian_active", "snapshot_at", "last_snapshot_at",
+			"provider_enabled", "local_group_id", "local_rate_multiplier", "local_group_status",
+			"group_sync_status", "last_group_sync_at",
+		}).AddRow(true, true, snapshotAt, nil, true, int64(7), 3.0, "active", "success", snapshotAt))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET rate_guard_last_snapshot_at=$2, rate_guard_last_checked_at=$3, updated_at=NOW() WHERE id=$1")).
+		WithArgs(int64(10), snapshotAt, now).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	result, err := repo.ApplyRateGuard(context.Background(), service.SupplierRateGuardApplyInput{
+		MappingID: 10, ExpectedSnapshotAt: snapshotAt, CheckedAt: now,
+		TargetRate: 2.75, MaxSnapshotAge: 30 * time.Minute,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, service.SupplierRateGuardActionUnchanged, result.Action)
+	require.InDelta(t, 3.0, result.OldRate, 0.000000001)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryRateGuardRaisesAndEnqueuesGroupChange(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
+	snapshotAt := now.Add(-time.Minute)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`FOR UPDATE OF g, lg`).
+		WithArgs(int64(10)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"rate_guard_selected", "guardian_active", "snapshot_at", "last_snapshot_at",
+			"provider_enabled", "local_group_id", "local_rate_multiplier", "local_group_status",
+			"group_sync_status", "last_group_sync_at",
+		}).AddRow(true, true, snapshotAt, nil, true, int64(7), 2.6, "active", "success", snapshotAt))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE groups SET rate_multiplier=$2, updated_at=NOW() WHERE id=$1 AND rate_multiplier < $2")).
+		WithArgs(int64(7), 2.75).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).
+		WithArgs(service.SchedulerOutboxEventGroupChanged, nil, int64(7), nil, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET rate_guard_last_snapshot_at=$2, rate_guard_last_checked_at=$3, updated_at=NOW() WHERE id=$1")).
+		WithArgs(int64(10), snapshotAt, now).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	result, err := repo.ApplyRateGuard(context.Background(), service.SupplierRateGuardApplyInput{
+		MappingID: 10, ExpectedSnapshotAt: snapshotAt, CheckedAt: now,
+		TargetRate: 2.75, MaxSnapshotAge: 30 * time.Minute,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, service.SupplierRateGuardActionRaised, result.Action)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryRateGuardDoesNotConsumeSnapshotWhenSyncFailsDuringLock(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
+	snapshotAt := now.Add(-time.Minute)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`FOR UPDATE OF g, lg`).
+		WithArgs(int64(10)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"rate_guard_selected", "guardian_active", "snapshot_at", "last_snapshot_at",
+			"provider_enabled", "local_group_id", "local_rate_multiplier", "local_group_status",
+			"group_sync_status", "last_group_sync_at",
+		}).AddRow(true, true, snapshotAt, nil, true, int64(7), 2.6, "active", "failed", snapshotAt))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET rate_guard_last_checked_at=$2, updated_at=NOW() WHERE id=$1")).
+		WithArgs(int64(10), now).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	result, err := repo.ApplyRateGuard(context.Background(), service.SupplierRateGuardApplyInput{
+		MappingID: 10, ExpectedSnapshotAt: snapshotAt, CheckedAt: now,
+		TargetRate: 2.75, MaxSnapshotAge: 30 * time.Minute,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, service.SupplierRateGuardActionInvalid, result.Action)
+	require.Equal(t, service.SupplierRateGuardReasonGroupSyncFailed, result.Reason)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

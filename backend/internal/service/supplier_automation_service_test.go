@@ -68,6 +68,19 @@ type supplierAutomationSyncStub struct {
 	result SupplierProviderBatchSyncResult
 }
 
+type supplierAutomationRateGuardStub struct {
+	called int
+	config SupplierRateGuardConfig
+	result SupplierRateGuardResult
+	err    error
+}
+
+func (s *supplierAutomationRateGuardStub) Run(_ context.Context, config SupplierRateGuardConfig, _ time.Time) (SupplierRateGuardResult, error) {
+	s.called++
+	s.config = config
+	return s.result, s.err
+}
+
 func (s *supplierAutomationSyncStub) SyncAllEnabled(context.Context, string) (SupplierProviderBatchSyncResult, error) {
 	s.called++
 	if s.err != nil {
@@ -77,6 +90,50 @@ func (s *supplierAutomationSyncStub) SyncAllEnabled(context.Context, string) (Su
 		return s.result, nil
 	}
 	return SupplierProviderBatchSyncResult{ProcessedCount: 2, SuccessCount: 1, FailedCount: 1}, nil
+}
+
+func TestSupplierAutomationServiceRunsRateGuardWithStructuredPartialResult(t *testing.T) {
+	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
+		SupplierAutomationTaskRateGuard: {
+			TaskCode: SupplierAutomationTaskRateGuard, Name: "倍率守护", Enabled: true,
+			CronExpression: "2-59/5 * * * *", TimeoutSeconds: 300,
+			Config: SupplierAutomationConfig{RateGuardSafetyMultiplier: 1.1, RateGuardMaxSnapshotAgeSeconds: 1800},
+		},
+	}}
+	rateGuard := &supplierAutomationRateGuardStub{result: SupplierRateGuardResult{
+		Checked: 3, Raised: 1, Unchanged: 1, Failed: 1,
+		Items: []SupplierRateGuardItemResult{{MappingID: 10, Action: SupplierRateGuardActionRaised}},
+	}}
+	service := NewSupplierAutomationService(repo, &supplierAutomationLockStub{acquired: true}, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
+	service.SetRateGuardService(rateGuard)
+
+	run, err := service.Run(context.Background(), SupplierAutomationTaskRateGuard, SupplierSyncTriggerManual)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, rateGuard.called)
+	require.Equal(t, 1.1, rateGuard.config.SafetyMultiplier)
+	require.Equal(t, 30*time.Minute, rateGuard.config.MaxSnapshotAge)
+	require.Equal(t, 3, run.ProcessedCount)
+	require.Equal(t, 2, run.SuccessCount)
+	require.Equal(t, 1, run.FailedCount)
+	require.Equal(t, SupplierAutomationStatusPartial, run.Status)
+	require.NotNil(t, run.ResultDetail)
+	require.NotNil(t, run.ResultDetail.RateGuard)
+	require.Equal(t, 1, run.ResultDetail.RateGuard.Raised)
+}
+
+func TestSupplierAutomationServiceValidatesRateGuardConfig(t *testing.T) {
+	tests := []SupplierAutomationConfig{
+		{RateGuardSafetyMultiplier: 0, RateGuardMaxSnapshotAgeSeconds: 1800},
+		{RateGuardSafetyMultiplier: 1.1, RateGuardMaxSnapshotAgeSeconds: 59},
+	}
+	for _, config := range tests {
+		task := SupplierAutomationTask{
+			TaskCode: SupplierAutomationTaskRateGuard, CronExpression: "2-59/5 * * * *",
+			TimeoutSeconds: 300, Config: config,
+		}
+		require.Error(t, validateSupplierAutomationTask(task))
+	}
 }
 
 func TestSupplierAutomationServiceRejectsInvalidCron(t *testing.T) {

@@ -115,13 +115,28 @@ SELECT g.id, g.provider_id, p.name AS provider_name, g.upstream_group_key, g.nam
        g.auto_match_ignored, g.auto_match_status,
        COALESCE(g.matched_upstream_name, '') AS matched_upstream_name,
        g.name_change_pending,
+	   g.rate_guard_selected, g.rate_guard_selection_mode,
+	   g.rate_guard_last_snapshot_at, g.rate_guard_last_checked_at,
+	   COALESCE(s.group_sync_status, 'never') AS group_sync_status,
+	   s.last_group_sync_at,
+	   COALESCE(guard_state.active_mapping_count, 0) AS local_group_active_mapping_count,
+	   guard_state.rate_guard_group_id AS local_group_rate_guard_group_id,
        COALESCE(COUNT(a.id) FILTER (WHERE a.active = TRUE), 0) AS account_count,
        g.last_seen_at, g.inactive_at
 FROM supplier_provider_groups g
 JOIN supplier_providers p ON p.id = g.provider_id
 LEFT JOIN groups lg ON lg.id = g.local_group_id
+LEFT JOIN supplier_provider_runtime_stats s ON s.provider_id = g.provider_id
+LEFT JOIN (
+  SELECT local_group_id,
+         COUNT(*) FILTER (WHERE active = TRUE) AS active_mapping_count,
+         MAX(id) FILTER (WHERE rate_guard_selected = TRUE) AS rate_guard_group_id
+  FROM supplier_provider_groups
+  WHERE local_group_id IS NOT NULL
+  GROUP BY local_group_id
+) guard_state ON guard_state.local_group_id = g.local_group_id
 LEFT JOIN supplier_provider_accounts a ON a.provider_id = g.provider_id AND a.group_key = g.upstream_group_key
-WHERE `+where+fmt.Sprintf(" GROUP BY g.id, p.name, lg.id ORDER BY g.active DESC, g.last_seen_at DESC, g.id ASC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2), queryArgs...)
+WHERE `+where+fmt.Sprintf(" GROUP BY g.id, p.name, lg.id, s.group_sync_status, s.last_group_sync_at, guard_state.active_mapping_count, guard_state.rate_guard_group_id ORDER BY g.active DESC, g.last_seen_at DESC, g.id ASC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2), queryArgs...)
 	if err != nil {
 		return service.SupplierProviderGroupListResult{}, fmt.Errorf("query supplier provider groups: %w", err)
 	}
@@ -263,6 +278,255 @@ func (r *supplierProviderDataRepository) AcknowledgeNameChange(ctx context.Conte
 		return fmt.Errorf("acknowledge supplier group name change: %w", err)
 	}
 	return supplierGroupUpdateFound(result)
+}
+
+func (r *supplierProviderDataRepository) ListMappingsByLocalGroup(ctx context.Context, localGroupIDs []int64) ([]service.SupplierProviderGroup, error) {
+	if len(localGroupIDs) == 0 {
+		return []service.SupplierProviderGroup{}, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `
+SELECT g.id, g.provider_id, p.name AS provider_name, g.upstream_group_key, g.name,
+       g.rate_multiplier, g.raw_status, g.active, g.local_group_id,
+       g.auto_match_ignored, g.auto_match_status,
+       COALESCE(g.matched_upstream_name, ''), g.name_change_pending,
+       g.rate_guard_selected, g.rate_guard_selection_mode,
+       g.last_seen_at, g.inactive_at
+FROM supplier_provider_groups g
+JOIN supplier_providers p ON p.id = g.provider_id
+WHERE g.local_group_id = ANY($1)
+  AND (g.active = TRUE OR g.rate_guard_selected = TRUE)
+ORDER BY g.local_group_id, g.id`, pq.Array(localGroupIDs))
+	if err != nil {
+		return nil, fmt.Errorf("query supplier group guard mappings: %w", err)
+	}
+	defer rows.Close()
+
+	result := make([]service.SupplierProviderGroup, 0)
+	for rows.Next() {
+		group, err := scanSupplierProviderGroupGuard(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, group)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate supplier group guard mappings: %w", err)
+	}
+	return result, nil
+}
+
+func (r *supplierProviderDataRepository) GetGroupForRateGuard(ctx context.Context, groupID int64) (service.SupplierProviderGroup, error) {
+	row := r.db.QueryRowContext(ctx, `
+SELECT g.id, g.provider_id, p.name AS provider_name, g.upstream_group_key, g.name,
+       g.rate_multiplier, g.raw_status, g.active, g.local_group_id,
+       g.auto_match_ignored, g.auto_match_status,
+       COALESCE(g.matched_upstream_name, ''), g.name_change_pending,
+       g.rate_guard_selected, g.rate_guard_selection_mode,
+       g.last_seen_at, g.inactive_at
+FROM supplier_provider_groups g
+JOIN supplier_providers p ON p.id = g.provider_id
+WHERE g.id = $1`, groupID)
+	group, err := scanSupplierProviderGroupGuard(row)
+	if err == sql.ErrNoRows {
+		return service.SupplierProviderGroup{}, service.ErrSupplierProviderGroupNotFound
+	}
+	if err != nil {
+		return service.SupplierProviderGroup{}, fmt.Errorf("get supplier group for rate guard: %w", err)
+	}
+	return group, nil
+}
+
+func (r *supplierProviderDataRepository) SelectRateGuard(ctx context.Context, groupID int64, mode string) error {
+	if mode != service.RateGuardSelectionModeAuto && mode != service.RateGuardSelectionModeManual {
+		return service.ErrSupplierRateGuardSelectionInvalid
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin supplier rate guard selection: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var localGroupID sql.NullInt64
+	var active bool
+	if err := tx.QueryRowContext(ctx, "SELECT local_group_id, active FROM supplier_provider_groups WHERE id=$1 FOR UPDATE", groupID).Scan(&localGroupID, &active); err != nil {
+		if err == sql.ErrNoRows {
+			return service.ErrSupplierProviderGroupNotFound
+		}
+		return fmt.Errorf("lock supplier rate guard mapping: %w", err)
+	}
+	if !localGroupID.Valid || !active {
+		return service.ErrSupplierRateGuardSelectionInvalid
+	}
+	var lockValue any
+	if err := tx.QueryRowContext(ctx, "SELECT pg_advisory_xact_lock($1)", localGroupID.Int64).Scan(&lockValue); err != nil {
+		return fmt.Errorf("lock supplier rate guard local group: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE supplier_provider_groups SET rate_guard_selected=FALSE, rate_guard_selection_mode='', updated_at=NOW() WHERE local_group_id=$1 AND rate_guard_selected=TRUE", localGroupID.Int64); err != nil {
+		return fmt.Errorf("clear existing supplier rate guard: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE supplier_provider_groups SET rate_guard_selected=TRUE, rate_guard_selection_mode=$2, updated_at=NOW() WHERE id=$1", groupID, mode); err != nil {
+		return fmt.Errorf("select supplier rate guard: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit supplier rate guard selection: %w", err)
+	}
+	return nil
+}
+
+func (r *supplierProviderDataRepository) ClearRateGuard(ctx context.Context, groupID int64, mode string) error {
+	query := "UPDATE supplier_provider_groups SET rate_guard_selected=FALSE, rate_guard_selection_mode='', updated_at=NOW() WHERE id=$1"
+	args := []any{groupID}
+	if mode != "" {
+		query += " AND rate_guard_selection_mode=$2"
+		args = append(args, mode)
+	}
+	if _, err := r.db.ExecContext(ctx, query, args...); err != nil {
+		return fmt.Errorf("clear supplier rate guard: %w", err)
+	}
+	return nil
+}
+
+func (r *supplierProviderDataRepository) ListRateGuardCandidates(ctx context.Context) ([]service.SupplierRateGuardCandidate, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT g.id AS mapping_id, g.provider_id, p.name AS provider_name, p.enabled AS provider_enabled,
+       g.upstream_group_key, g.name AS upstream_group_name, g.rate_multiplier AS upstream_rate_multiplier,
+       g.active AS guardian_active,
+       COALESCE(lg.id, 0) AS local_group_id, COALESCE(lg.name, '') AS local_group_name,
+       COALESCE(lg.status, '') AS local_group_status, COALESCE(lg.rate_multiplier, 0) AS local_rate_multiplier,
+       g.last_seen_at AS snapshot_at, g.rate_guard_last_snapshot_at AS last_snapshot_at,
+       COALESCE(s.group_sync_status, 'never') AS group_sync_status, s.last_group_sync_at
+FROM supplier_provider_groups g
+JOIN supplier_providers p ON p.id = g.provider_id
+LEFT JOIN groups lg ON lg.id = g.local_group_id AND lg.deleted_at IS NULL
+LEFT JOIN supplier_provider_runtime_stats s ON s.provider_id = g.provider_id
+WHERE g.rate_guard_selected = TRUE
+ORDER BY g.provider_id, g.id`)
+	if err != nil {
+		return nil, fmt.Errorf("query supplier rate guard candidates: %w", err)
+	}
+	defer rows.Close()
+
+	result := make([]service.SupplierRateGuardCandidate, 0)
+	for rows.Next() {
+		var candidate service.SupplierRateGuardCandidate
+		var lastSnapshotAt, lastGroupSyncAt sql.NullTime
+		if err := rows.Scan(
+			&candidate.MappingID, &candidate.ProviderID, &candidate.ProviderName, &candidate.ProviderEnabled,
+			&candidate.UpstreamGroupKey, &candidate.UpstreamGroupName, &candidate.UpstreamRateMultiplier,
+			&candidate.GuardianActive, &candidate.LocalGroupID, &candidate.LocalGroupName,
+			&candidate.LocalGroupStatus, &candidate.LocalRateMultiplier, &candidate.SnapshotAt,
+			&lastSnapshotAt, &candidate.GroupSyncStatus, &lastGroupSyncAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan supplier rate guard candidate: %w", err)
+		}
+		if lastSnapshotAt.Valid {
+			candidate.LastSnapshotAt = &lastSnapshotAt.Time
+		}
+		if lastGroupSyncAt.Valid {
+			candidate.LastGroupSyncAt = &lastGroupSyncAt.Time
+		}
+		result = append(result, candidate)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate supplier rate guard candidates: %w", err)
+	}
+	return result, nil
+}
+
+func (r *supplierProviderDataRepository) ApplyRateGuard(ctx context.Context, input service.SupplierRateGuardApplyInput) (service.SupplierRateGuardApplyResult, error) {
+	result := service.SupplierRateGuardApplyResult{TargetRate: input.TargetRate}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return result, fmt.Errorf("begin supplier rate guard update: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var selected, guardianActive, providerEnabled bool
+	var snapshotAt time.Time
+	var lastSnapshotAt, lastGroupSyncAt sql.NullTime
+	var localGroupID int64
+	var localRate float64
+	var localStatus, groupSyncStatus string
+	err = tx.QueryRowContext(ctx, `
+SELECT g.rate_guard_selected, g.active AS guardian_active, g.last_seen_at AS snapshot_at,
+       g.rate_guard_last_snapshot_at AS last_snapshot_at, p.enabled AS provider_enabled,
+       lg.id AS local_group_id, lg.rate_multiplier AS local_rate_multiplier, lg.status AS local_group_status,
+       COALESCE(s.group_sync_status, 'never') AS group_sync_status, s.last_group_sync_at
+FROM supplier_provider_groups g
+JOIN supplier_providers p ON p.id = g.provider_id
+JOIN groups lg ON lg.id = g.local_group_id AND lg.deleted_at IS NULL
+LEFT JOIN supplier_provider_runtime_stats s ON s.provider_id = g.provider_id
+WHERE g.id = $1
+FOR UPDATE OF g, lg`, input.MappingID).Scan(
+		&selected, &guardianActive, &snapshotAt, &lastSnapshotAt, &providerEnabled,
+		&localGroupID, &localRate, &localStatus, &groupSyncStatus, &lastGroupSyncAt,
+	)
+	if err == sql.ErrNoRows {
+		return service.SupplierRateGuardApplyResult{TargetRate: input.TargetRate, Action: service.SupplierRateGuardActionInvalid, Reason: service.SupplierRateGuardReasonSelectionChanged}, nil
+	}
+	if err != nil {
+		return result, fmt.Errorf("lock supplier rate guard candidate: %w", err)
+	}
+	result.OldRate = localRate
+
+	switch {
+	case !selected:
+		result.Action, result.Reason = service.SupplierRateGuardActionInvalid, service.SupplierRateGuardReasonSelectionChanged
+	case !snapshotAt.Equal(input.ExpectedSnapshotAt):
+		result.Action, result.Reason = service.SupplierRateGuardActionInvalid, service.SupplierRateGuardReasonSnapshotChanged
+	case !providerEnabled:
+		result.Action, result.Reason = service.SupplierRateGuardActionInvalid, service.SupplierRateGuardReasonProviderInactive
+	case !guardianActive:
+		result.Action, result.Reason = service.SupplierRateGuardActionInvalid, service.SupplierRateGuardReasonGuardianInactive
+	case localStatus != service.StatusActive:
+		result.Action, result.Reason = service.SupplierRateGuardActionInvalid, service.SupplierRateGuardReasonLocalGroupInactive
+	case groupSyncStatus != service.SupplierSyncStatusSuccess:
+		result.Action, result.Reason = service.SupplierRateGuardActionInvalid, service.SupplierRateGuardReasonGroupSyncFailed
+	case snapshotAt.IsZero() || input.CheckedAt.Sub(snapshotAt) > input.MaxSnapshotAge:
+		result.Action, result.Reason = service.SupplierRateGuardActionStale, service.SupplierRateGuardReasonSnapshotStale
+	case lastSnapshotAt.Valid && !snapshotAt.After(lastSnapshotAt.Time):
+		result.Action, result.Reason = service.SupplierRateGuardActionDuplicate, service.SupplierRateGuardReasonSnapshotDuplicate
+	case localRate <= 0 || input.TargetRate <= 0:
+		result.Action, result.Reason = service.SupplierRateGuardActionInvalid, service.SupplierRateGuardReasonRateInvalid
+	case localRate >= input.TargetRate:
+		result.Action = service.SupplierRateGuardActionUnchanged
+	default:
+		updateResult, err := tx.ExecContext(ctx, "UPDATE groups SET rate_multiplier=$2, updated_at=NOW() WHERE id=$1 AND rate_multiplier < $2", localGroupID, input.TargetRate)
+		if err != nil {
+			return result, fmt.Errorf("raise local group rate: %w", err)
+		}
+		affected, err := updateResult.RowsAffected()
+		if err != nil {
+			return result, fmt.Errorf("read local group rate update result: %w", err)
+		}
+		if affected > 0 {
+			result.Action = service.SupplierRateGuardActionRaised
+			if err := enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventGroupChanged, nil, &localGroupID, nil); err != nil {
+				return result, fmt.Errorf("enqueue guarded group rate change: %w", err)
+			}
+		} else {
+			result.Action = service.SupplierRateGuardActionUnchanged
+		}
+	}
+
+	if result.Action == service.SupplierRateGuardActionRaised || result.Action == service.SupplierRateGuardActionUnchanged {
+		if _, err := tx.ExecContext(ctx, "UPDATE supplier_provider_groups SET rate_guard_last_snapshot_at=$2, rate_guard_last_checked_at=$3, updated_at=NOW() WHERE id=$1", input.MappingID, snapshotAt, input.CheckedAt); err != nil {
+			return result, fmt.Errorf("mark supplier rate guard snapshot: %w", err)
+		}
+	} else if _, err := tx.ExecContext(ctx, "UPDATE supplier_provider_groups SET rate_guard_last_checked_at=$2, updated_at=NOW() WHERE id=$1", input.MappingID, input.CheckedAt); err != nil {
+		return result, fmt.Errorf("mark supplier rate guard checked: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return result, fmt.Errorf("commit supplier rate guard update: %w", err)
+	}
+	return result, nil
+}
+
+func (r *supplierProviderDataRepository) MarkRateGuardChecked(ctx context.Context, mappingID int64, checkedAt time.Time) error {
+	if _, err := r.db.ExecContext(ctx, "UPDATE supplier_provider_groups SET rate_guard_last_checked_at=$2, updated_at=NOW() WHERE id=$1 AND rate_guard_selected=TRUE", mappingID, checkedAt); err != nil {
+		return fmt.Errorf("mark supplier rate guard checked: %w", err)
+	}
+	return nil
 }
 
 func supplierGroupUpdateFound(result sql.Result) error {
@@ -465,6 +729,14 @@ WHERE provider_id=$1`, providerID, status, message, syncedAt)
 	return err
 }
 
+func (r *supplierProviderDataRepository) UpdateGroupSyncStatus(ctx context.Context, providerID int64, status, message string, syncedAt time.Time) error {
+	_, err := r.db.ExecContext(ctx, "UPDATE supplier_provider_runtime_stats SET group_sync_status=$2, group_sync_message=$3, last_group_sync_at=$4, updated_at=$4 WHERE provider_id=$1", providerID, status, message, syncedAt)
+	if err != nil {
+		return fmt.Errorf("update supplier provider group sync status: %w", err)
+	}
+	return nil
+}
+
 func (r *supplierProviderDataRepository) Cleanup(ctx context.Context, policy service.SupplierCleanupPolicy, now time.Time, batchSize int) (service.SupplierCleanupCounts, error) {
 	if batchSize <= 0 {
 		batchSize = 1000
@@ -626,19 +898,36 @@ type supplierProviderGroupScanner interface{ Scan(dest ...any) error }
 
 func scanSupplierProviderGroup(scanner supplierProviderGroupScanner) (service.SupplierProviderGroup, error) {
 	var item service.SupplierProviderGroup
-	var inactiveAt sql.NullTime
+	var localGroupRateGuardGroupID sql.NullInt64
+	var rateGuardLastSnapshotAt, rateGuardLastCheckedAt, lastGroupSyncAt, inactiveAt sql.NullTime
 	err := scanner.Scan(&item.ID, &item.ProviderID, &item.ProviderName, &item.UpstreamKey,
 		&item.Name, &item.RateMultiplier, &item.RawStatus, &item.Active,
 		&item.LocalGroupID, &item.LocalGroupName, &item.LocalGroupPlatform,
 		&item.LocalRateMultiplier, &item.LocalGroupStatus,
 		&item.AutoMatchIgnored, &item.AutoMatchStatus, &item.MatchedUpstreamName,
 		&item.NameChangePending,
+		&item.RateGuardSelected, &item.RateGuardSelectionMode,
+		&rateGuardLastSnapshotAt, &rateGuardLastCheckedAt,
+		&item.GroupSyncStatus, &lastGroupSyncAt,
+		&item.LocalGroupActiveMappingCount, &localGroupRateGuardGroupID,
 		&item.AccountCount, &item.LastSeenAt, &inactiveAt)
 	if err != nil {
 		return service.SupplierProviderGroup{}, err
 	}
 	if inactiveAt.Valid {
 		item.InactiveAt = &inactiveAt.Time
+	}
+	if rateGuardLastSnapshotAt.Valid {
+		item.RateGuardLastSnapshotAt = &rateGuardLastSnapshotAt.Time
+	}
+	if rateGuardLastCheckedAt.Valid {
+		item.RateGuardLastCheckedAt = &rateGuardLastCheckedAt.Time
+	}
+	if lastGroupSyncAt.Valid {
+		item.LastGroupSyncAt = &lastGroupSyncAt.Time
+	}
+	if localGroupRateGuardGroupID.Valid {
+		item.LocalGroupRateGuardGroupID = &localGroupRateGuardGroupID.Int64
 	}
 	return item, nil
 }
@@ -651,6 +940,25 @@ func scanSupplierProviderGroupAutoMatch(scanner supplierProviderGroupScanner) (s
 		&item.RateMultiplier, &item.RawStatus, &item.Active, &item.LocalGroupID,
 		&item.AutoMatchIgnored, &item.AutoMatchStatus, &item.MatchedUpstreamName,
 		&item.NameChangePending, &item.LastSeenAt, &inactiveAt,
+	)
+	if err != nil {
+		return service.SupplierProviderGroup{}, err
+	}
+	if inactiveAt.Valid {
+		item.InactiveAt = &inactiveAt.Time
+	}
+	return item, nil
+}
+
+func scanSupplierProviderGroupGuard(scanner supplierProviderGroupScanner) (service.SupplierProviderGroup, error) {
+	var item service.SupplierProviderGroup
+	var inactiveAt sql.NullTime
+	err := scanner.Scan(
+		&item.ID, &item.ProviderID, &item.ProviderName, &item.UpstreamKey, &item.Name,
+		&item.RateMultiplier, &item.RawStatus, &item.Active, &item.LocalGroupID,
+		&item.AutoMatchIgnored, &item.AutoMatchStatus, &item.MatchedUpstreamName,
+		&item.NameChangePending, &item.RateGuardSelected, &item.RateGuardSelectionMode,
+		&item.LastSeenAt, &inactiveAt,
 	)
 	if err != nil {
 		return service.SupplierProviderGroup{}, err

@@ -802,7 +802,6 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(SupplierProviderRemoteClient), new(*SupplierProviderRemoteRegistry)),
 	SupplierProviderWiringSet,
 	wire.Bind(new(SupplierProviderBatchSyncer), new(*SupplierProviderSyncService)),
-	NewSupplierAutomationService,
 	ProvideSupplierAutomationScheduler,
 	NewUpstreamProviderService,
 	ProvideUpstreamManagementService,

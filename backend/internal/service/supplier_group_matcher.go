@@ -46,10 +46,17 @@ type SupplierGroupAutoMatchResult struct {
 type SupplierProviderGroupMatcher struct {
 	dataRepo  SupplierProviderGroupMatcherDataRepository
 	localRepo SupplierProviderGroupMatcherLocalRepository
+	guard     *SupplierGroupGuardReconciler
 }
 
 func NewSupplierProviderGroupMatcher(dataRepo SupplierProviderGroupMatcherDataRepository, localRepo SupplierProviderGroupMatcherLocalRepository) *SupplierProviderGroupMatcher {
 	return &SupplierProviderGroupMatcher{dataRepo: dataRepo, localRepo: localRepo}
+}
+
+func (m *SupplierProviderGroupMatcher) SetGuardReconciler(guard *SupplierGroupGuardReconciler) {
+	if m != nil {
+		m.guard = guard
+	}
 }
 
 func (m *SupplierProviderGroupMatcher) AutoMatch(ctx context.Context, providerID int64) (SupplierGroupAutoMatchResult, error) {
@@ -66,6 +73,7 @@ func (m *SupplierProviderGroupMatcher) AutoMatch(ctx context.Context, providerID
 
 func (m *SupplierProviderGroupMatcher) autoMatchGroups(ctx context.Context, providerID int64, upstreamGroups []SupplierProviderGroup) (SupplierGroupAutoMatchResult, error) {
 	result := SupplierGroupAutoMatchResult{ProviderID: providerID}
+	affectedLocalGroupIDs := make([]int64, 0, len(upstreamGroups))
 	localGroups, err := m.localRepo.ListActive(ctx)
 	if err != nil {
 		return result, err
@@ -84,6 +92,7 @@ func (m *SupplierProviderGroupMatcher) autoMatchGroups(ctx context.Context, prov
 	for _, upstreamGroup := range upstreamGroups {
 		result.Scanned++
 		if upstreamGroup.LocalGroupID != nil {
+			affectedLocalGroupIDs = append(affectedLocalGroupIDs, *upstreamGroup.LocalGroupID)
 			status := upstreamGroup.AutoMatchStatus
 			if status == "" {
 				status = AutoMatchStatusManual
@@ -117,6 +126,7 @@ func (m *SupplierProviderGroupMatcher) autoMatchGroups(ctx context.Context, prov
 			}
 			if updated {
 				result.AutoMatched++
+				affectedLocalGroupIDs = append(affectedLocalGroupIDs, matches[0].ID)
 			}
 		case 0:
 			if err := m.dataRepo.UpdateAutoMatchState(ctx, upstreamGroup.ID, AutoMatchStatusUnmatched, false); err != nil {
@@ -130,11 +140,33 @@ func (m *SupplierProviderGroupMatcher) autoMatchGroups(ctx context.Context, prov
 			result.Ambiguous++
 		}
 	}
+	if m.guard != nil {
+		if err := m.guard.ReconcileLocalGroups(ctx, affectedLocalGroupIDs); err != nil {
+			return result, err
+		}
+	}
 	return result, nil
 }
 
 func (m *SupplierProviderGroupMatcher) UpdateMapping(ctx context.Context, groupID int64, localGroupID *int64) error {
-	return m.dataRepo.UpdateGroupMapping(ctx, groupID, localGroupID)
+	group, err := m.dataRepo.GetGroupForAutoMatch(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	if err := m.dataRepo.UpdateGroupMapping(ctx, groupID, localGroupID); err != nil {
+		return err
+	}
+	if m.guard == nil {
+		return nil
+	}
+	affected := make([]int64, 0, 2)
+	if group.LocalGroupID != nil {
+		affected = append(affected, *group.LocalGroupID)
+	}
+	if localGroupID != nil {
+		affected = append(affected, *localGroupID)
+	}
+	return m.guard.ReconcileLocalGroups(ctx, affected)
 }
 
 func (m *SupplierProviderGroupMatcher) SetIgnored(ctx context.Context, groupID int64, ignored bool) (SupplierGroupAutoMatchResult, error) {

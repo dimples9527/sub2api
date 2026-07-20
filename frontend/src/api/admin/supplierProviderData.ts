@@ -80,6 +80,14 @@ export interface SupplierProviderGroup {
   auto_match_status: 'unmatched' | 'auto_matched' | 'manual' | 'ambiguous'
   matched_upstream_name?: string
   name_change_pending: boolean
+	 rate_guard_selected: boolean
+	 rate_guard_selection_mode: '' | 'auto' | 'manual'
+	 rate_guard_last_snapshot_at?: string
+	 rate_guard_last_checked_at?: string
+	 local_group_active_mapping_count: number
+	 local_group_rate_guard_group_id?: number
+	 group_sync_status: 'never' | 'running' | 'success' | 'failed'
+	 last_group_sync_at?: string
   account_count: number
   last_seen_at: string
   inactive_at?: string
@@ -190,6 +198,17 @@ export async function updateSupplierGroupAutoMatchPolicy(
   return data
 }
 
+export async function updateSupplierGroupRateGuard(
+	id: number,
+	selected: boolean
+): Promise<{ group_id: number; selected: boolean }> {
+	const { data } = await apiClient.put<{ group_id: number; selected: boolean }>(
+		`/admin/supplier-management/groups/${id}/rate-guard`,
+		{ selected }
+	)
+	return data
+}
+
 export async function resolveSupplierGroupNameChange(
   id: number,
   action: 'keep_local' | 'sync_local_name'
@@ -209,6 +228,7 @@ export const supplierProviderDataAPI = {
   updateSupplierGroupMapping,
   autoMatchSupplierGroups,
   updateSupplierGroupAutoMatchPolicy,
+	updateSupplierGroupRateGuard,
   resolveSupplierGroupNameChange,
 }
 
