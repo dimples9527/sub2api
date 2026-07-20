@@ -155,7 +155,9 @@
             :data="items"
             :loading="loading"
             row-key="id"
+            server-side-sort
             clickable-rows
+            @sort="handleGroupSort"
             @row-click="selected = $event"
           >
             <template #cell-provider_name="{ row: group }">
@@ -647,6 +649,8 @@ const resolvingNameGroupID = ref<number | null>(null)
 const error = ref('')
 const page = ref(1)
 const pageSize = ref(20)
+const sortBy = ref('')
+const sortOrder = ref<'asc' | 'desc'>('asc')
 const providerID = ref(0)
 const search = ref('')
 const platformFilter = ref('')
@@ -695,16 +699,16 @@ const localGroupOptions = computed<SelectOption[]>(() => localGroups.value.map(g
 })))
 const platformOptions: SelectOption[] = Object.entries(PLATFORM_LABELS).map(([value, label]) => ({ value, label }))
 const groupColumns: Column[] = [
-  { key: 'provider_name', label: '供应商', class: 'min-w-[150px]' },
-  { key: 'name', label: '上游分组', class: 'min-w-[190px]' },
-  { key: 'rate_multiplier', label: '上游倍率', class: 'min-w-[96px]' },
+  { key: 'provider_name', label: '供应商', sortable: true, class: 'min-w-[150px]' },
+  { key: 'name', label: '上游分组', sortable: true, class: 'min-w-[190px]' },
+  { key: 'rate_multiplier', label: '上游倍率', sortable: true, class: 'min-w-[96px]' },
   { key: 'raw_status', label: '上游状态', class: 'min-w-[105px]' },
-  { key: 'local_group_name', label: '匹配本地分组', class: 'min-w-[190px]' },
+  { key: 'local_group_name', label: '匹配本地分组', sortable: true, class: 'min-w-[190px]' },
   { key: 'auto_match_status', label: '匹配状态', class: 'min-w-[120px]' },
 	{ key: 'rate_guard_status', label: '倍率守护', class: 'min-w-[120px]' },
-  { key: 'local_rate_multiplier', label: '本地分组倍率', class: 'min-w-[110px]' },
+  { key: 'local_rate_multiplier', label: '本地分组倍率', sortable: true, class: 'min-w-[110px]' },
   { key: 'rate_delta', label: '价差', class: 'min-w-[110px]' },
-  { key: 'account_count', label: '绑定账号', class: 'min-w-[90px]' },
+  { key: 'account_count', label: '绑定账号', sortable: true, class: 'min-w-[90px]' },
   { key: 'rate_status', label: '倍率状态', class: 'min-w-[110px]' },
   { key: 'actions', label: '操作', class: 'min-w-[270px]' },
 ]
@@ -819,6 +823,13 @@ function handleGroupPageSizeChange(nextPageSize: number) {
   void loadGroups()
 }
 
+function handleGroupSort(key: string, order: 'asc' | 'desc') {
+  sortBy.value = key
+  sortOrder.value = order
+  page.value = 1
+  void loadGroups()
+}
+
 async function loadProviders() {
   const result = await supplierProvidersAPI.list({ page: 1, page_size: 200 })
   providers.value = result.items
@@ -860,6 +871,8 @@ async function loadGroups() {
       platform: platformFilter.value || undefined,
       match_status: matchStatusFilter.value || undefined,
       rate_status: rateStatusFilter.value || undefined,
+      sort_by: sortBy.value || undefined,
+      sort_order: sortBy.value ? sortOrder.value : undefined,
       page: page.value,
       page_size: pageSize.value,
     })

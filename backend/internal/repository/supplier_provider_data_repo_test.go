@@ -156,7 +156,7 @@ func TestSupplierProviderDataRepositoryListGroupsIncludesFilteredSummary(t *test
 		WillReturnRows(sqlmock.NewRows([]string{
 			"group_count", "account_count", "linked_group_count", "unlinked_group_count", "rate_risk_count",
 		}).AddRow(int64(4), int64(9), int64(3), int64(1), int64(2)))
-	mock.ExpectQuery(regexp.QuoteMeta("LEFT JOIN groups lg ON lg.id = g.local_group_id")).
+	mock.ExpectQuery(`(?s)LEFT JOIN groups lg ON lg\.id = g\.local_group_id.*ORDER BY LOWER\(lg\.name\) DESC NULLS LAST, g\.id ASC`).
 		WithArgs(int64(42), active, "%vip%", 20, 20).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "provider_id", "provider_name", "upstream_group_key", "name",
@@ -176,6 +176,8 @@ func TestSupplierProviderDataRepositoryListGroupsIncludesFilteredSummary(t *test
 		ProviderID: 42,
 		Active:     &active,
 		Search:     "vip",
+		SortBy:     "local_group_name",
+		SortOrder:  "desc",
 		Page:       2,
 		PageSize:   20,
 	})
@@ -274,6 +276,36 @@ func TestSupplierProviderGroupListWhereAddsRateStatusFilters(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			where, _ := supplierProviderGroupListWhere(service.SupplierProviderDataListParams{RateStatus: tt.status})
 			require.Contains(t, where, tt.condition)
+		})
+	}
+}
+
+func TestSupplierProviderGroupOrderBy(t *testing.T) {
+	tests := []struct {
+		name     string
+		sortBy   string
+		order    string
+		expected string
+	}{
+		{name: "default", expected: "g.active DESC, g.last_seen_at DESC, g.id ASC"},
+		{name: "invalid field", sortBy: "updated_at", order: "asc", expected: "g.active DESC, g.last_seen_at DESC, g.id ASC"},
+		{name: "provider name ascending", sortBy: "provider_name", order: "asc", expected: "LOWER(p.name) ASC, g.id ASC"},
+		{name: "upstream group name descending", sortBy: "name", order: "desc", expected: "LOWER(g.name) DESC, g.id ASC"},
+		{name: "upstream rate ascending", sortBy: "rate_multiplier", order: "asc", expected: "g.rate_multiplier ASC, g.id ASC"},
+		{name: "local group name ascending", sortBy: "local_group_name", order: "asc", expected: "LOWER(lg.name) ASC NULLS LAST, g.id ASC"},
+		{name: "trimmed local group name", sortBy: " local_group_name ", order: " asc ", expected: "LOWER(lg.name) ASC NULLS LAST, g.id ASC"},
+		{name: "local rate descending", sortBy: "local_rate_multiplier", order: "desc", expected: "lg.rate_multiplier DESC NULLS LAST, g.id ASC"},
+		{name: "account count ascending", sortBy: "account_count", order: "asc", expected: "COALESCE(COUNT(a.id) FILTER (WHERE a.active = TRUE), 0) ASC, g.id ASC"},
+		{name: "invalid direction defaults ascending", sortBy: "name", order: "sideways", expected: "LOWER(g.name) ASC, g.id ASC"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual := supplierProviderGroupOrderBy(service.SupplierProviderDataListParams{
+				SortBy:    tt.sortBy,
+				SortOrder: tt.order,
+			})
+			require.Equal(t, tt.expected, actual)
 		})
 	}
 }

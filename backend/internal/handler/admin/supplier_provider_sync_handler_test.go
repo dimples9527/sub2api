@@ -178,7 +178,7 @@ func TestSupplierProviderSyncHandlerListGroupsPassesGroupFilters(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(
 		http.MethodGet,
-		"/groups?provider_id=42&active=true&search=vip&platform=openai&match_status=manual&rate_status=low&page=2&page_size=20",
+		"/groups?provider_id=42&active=true&search=vip&platform=openai&match_status=manual&rate_status=low&sort_by=rate_multiplier&sort_order=desc&page=2&page_size=20",
 		nil,
 	)
 	router.ServeHTTP(rec, req)
@@ -189,6 +189,8 @@ func TestSupplierProviderSyncHandlerListGroupsPassesGroupFilters(t *testing.T) {
 	require.Equal(t, "openai", dataStub.groupListParams.Platform)
 	require.Equal(t, "manual", dataStub.groupListParams.MatchStatus)
 	require.Equal(t, "low", dataStub.groupListParams.RateStatus)
+	require.Equal(t, "rate_multiplier", dataStub.groupListParams.SortBy)
+	require.Equal(t, "desc", dataStub.groupListParams.SortOrder)
 	require.Equal(t, 2, dataStub.groupListParams.Page)
 	require.Equal(t, 20, dataStub.groupListParams.PageSize)
 }

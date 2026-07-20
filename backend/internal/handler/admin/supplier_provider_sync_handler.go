@@ -154,6 +154,8 @@ func (h *SupplierProviderSyncHandler) ListGroups(c *gin.Context) {
 		Platform:    strings.TrimSpace(c.Query("platform")),
 		MatchStatus: strings.TrimSpace(c.Query("match_status")),
 		RateStatus:  strings.TrimSpace(c.Query("rate_status")),
+		SortBy:      strings.TrimSpace(c.Query("sort_by")),
+		SortOrder:   strings.TrimSpace(c.Query("sort_order")),
 		Page:        page,
 		PageSize:    pageSize,
 	})

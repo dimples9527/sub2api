@@ -136,7 +136,7 @@ LEFT JOIN (
   GROUP BY local_group_id
 ) guard_state ON guard_state.local_group_id = g.local_group_id
 LEFT JOIN supplier_provider_accounts a ON a.provider_id = g.provider_id AND a.group_key = g.upstream_group_key
-WHERE `+where+fmt.Sprintf(" GROUP BY g.id, p.name, lg.id, s.group_sync_status, s.last_group_sync_at, guard_state.active_mapping_count, guard_state.rate_guard_group_id ORDER BY g.active DESC, g.last_seen_at DESC, g.id ASC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2), queryArgs...)
+WHERE `+where+fmt.Sprintf(" GROUP BY g.id, p.name, lg.id, s.group_sync_status, s.last_group_sync_at, guard_state.active_mapping_count, guard_state.rate_guard_group_id ORDER BY %s LIMIT $%d OFFSET $%d", supplierProviderGroupOrderBy(params), len(args)+1, len(args)+2), queryArgs...)
 	if err != nil {
 		return service.SupplierProviderGroupListResult{}, fmt.Errorf("query supplier provider groups: %w", err)
 	}
@@ -849,6 +849,37 @@ func supplierProviderGroupListWhere(params service.SupplierProviderDataListParam
 
 func supplierProviderGroupHasListFilters(params service.SupplierProviderDataListParams) bool {
 	return strings.TrimSpace(params.MatchStatus) != "" || strings.TrimSpace(params.RateStatus) != ""
+}
+
+func supplierProviderGroupOrderBy(params service.SupplierProviderDataListParams) string {
+	sortBy := strings.TrimSpace(params.SortBy)
+	direction := "ASC"
+	if strings.EqualFold(strings.TrimSpace(params.SortOrder), "desc") {
+		direction = "DESC"
+	}
+
+	var expression string
+	switch sortBy {
+	case "provider_name":
+		expression = "LOWER(p.name)"
+	case "name":
+		expression = "LOWER(g.name)"
+	case "rate_multiplier":
+		expression = "g.rate_multiplier"
+	case "local_group_name":
+		expression = "LOWER(lg.name)"
+	case "local_rate_multiplier":
+		expression = "lg.rate_multiplier"
+	case "account_count":
+		expression = "COALESCE(COUNT(a.id) FILTER (WHERE a.active = TRUE), 0)"
+	default:
+		return "g.active DESC, g.last_seen_at DESC, g.id ASC"
+	}
+
+	if sortBy == "local_group_name" || sortBy == "local_rate_multiplier" {
+		return fmt.Sprintf("%s %s NULLS LAST, g.id ASC", expression, direction)
+	}
+	return fmt.Sprintf("%s %s, g.id ASC", expression, direction)
 }
 
 func supplierProviderDataKeyName(alias string) string {

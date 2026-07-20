@@ -57,4 +57,31 @@ describe('supplier group automatic matching workflow', () => {
 		expect(viewSource).toContain("applySummaryFilter('unlinked')")
 		expect(viewSource).toContain("applySummaryFilter('inverted')")
 	})
+
+	it('sorts the six core group columns through the server', () => {
+		expect(apiSource).toContain('sort_by?: string')
+		expect(apiSource).toContain("sort_order?: 'asc' | 'desc'")
+		expect(viewSource).toContain('server-side-sort')
+		expect(viewSource).toContain('@sort="handleGroupSort"')
+		expect(viewSource).toContain('sort_by: sortBy.value || undefined')
+		expect(viewSource).toContain('sort_order: sortBy.value ? sortOrder.value : undefined')
+		expect(viewSource).toContain("function handleGroupSort(key: string, order: 'asc' | 'desc')")
+
+		const columnsStart = viewSource.indexOf('const groupColumns: Column[] = [')
+		const columnsEnd = viewSource.indexOf('\n]', columnsStart)
+		const columnsSource = viewSource.slice(columnsStart, columnsEnd)
+		const sortableColumns = [
+			'provider_name',
+			'name',
+			'rate_multiplier',
+			'local_group_name',
+			'local_rate_multiplier',
+			'account_count',
+		]
+		for (const key of sortableColumns) {
+			expect(columnsSource).toContain(`{ key: '${key}',`)
+			expect(columnsSource).toMatch(new RegExp(`key: '${key}'[^\\n]+sortable: true`))
+		}
+		expect(columnsSource.match(/sortable: true/g)).toHaveLength(sortableColumns.length)
+	})
 })

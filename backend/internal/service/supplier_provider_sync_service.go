@@ -68,6 +68,8 @@ type SupplierProviderDataListParams struct {
 	Platform    string
 	MatchStatus string
 	RateStatus  string
+	SortBy      string
+	SortOrder   string
 	Page        int
 	PageSize    int
 }
