@@ -147,6 +147,14 @@
                 </template>
                 <template #cell-counts="{ row: run }">
                   {{ run.processed_count }} / {{ run.success_count }} / {{ run.failed_count }}
+                  <div v-if="run.result_detail?.rate_guard" class="sp-run-rate-summary">
+                    <span v-if="run.result_detail.rate_guard.raised > 0" class="good">
+                      调高 {{ run.result_detail.rate_guard.raised }}
+                    </span>
+                    <span v-if="rateGuardWarningCount(run) > 0" class="warn">
+                      告警 {{ rateGuardWarningCount(run) }}
+                    </span>
+                  </div>
                 </template>
                 <template #empty>
                   暂无运行历史。
@@ -291,34 +299,116 @@
                 <div><span>无效</span><strong>{{ rateGuardResult.invalid }}</strong></div>
                 <div><span>失败</span><strong>{{ rateGuardResult.failed }}</strong></div>
               </div>
-              <div v-if="rateGuardResult.items.length" class="sp-rate-guard-items">
-                <div class="sp-rate-guard-row sp-rate-guard-row-head" aria-hidden="true">
-                  <span>供应商 / 上游分组</span>
-                  <span>本地分组</span>
-                  <span>原倍率</span>
-                  <span>目标倍率</span>
-                  <span>结果</span>
-                  <span>快照时间</span>
+
+              <section v-if="rateGuardAlertItems.length" class="sp-rate-guard-alerts">
+                <header class="sp-rate-guard-section-head">
+                  <div>
+                    <span>Warnings</span>
+                    <h4>告警记录</h4>
+                  </div>
+                  <strong>{{ rateGuardAlertItems.length }} 项</strong>
+                </header>
+                <div class="sp-rate-guard-items sp-rate-guard-alert-items">
+                  <div class="sp-rate-guard-row sp-rate-guard-row-head" aria-hidden="true">
+                    <span>供应商 / 上游分组</span>
+                    <span>本地分组</span>
+                    <span>原倍率</span>
+                    <span>目标倍率</span>
+                    <span>告警原因</span>
+                    <span>快照时间</span>
+                  </div>
+                  <div v-for="item in rateGuardAlertItems" :key="`alert-${item.mapping_id}`" class="sp-rate-guard-row">
+                    <span>
+                      <strong>{{ item.provider_name || `供应商 ${item.provider_id}` }}</strong>
+                      <small>{{ item.upstream_group_name || item.upstream_group_key }}</small>
+                    </span>
+                    <span>
+                      <strong>{{ item.local_group_name || (item.local_group_id > 0 ? `本地分组 ${item.local_group_id}` : '未关联本地分组') }}</strong>
+                      <small v-if="item.local_group_id > 0">#{{ item.local_group_id }}</small>
+                    </span>
+                    <span>{{ formatRate(item.old_rate) }}</span>
+                    <span>{{ formatRate(item.target_rate) }}</span>
+                    <span>
+                      <strong>{{ rateGuardActionText(item.action) }}</strong>
+                      <small>{{ rateGuardReasonText(item.reason) }}</small>
+                    </span>
+                    <span>{{ formatTime(item.snapshot_at) }}</span>
+                  </div>
                 </div>
-                <div v-for="item in rateGuardResult.items" :key="item.mapping_id" class="sp-rate-guard-row">
-                  <span>
-                    <strong>{{ item.provider_name || `供应商 ${item.provider_id}` }}</strong>
-                    <small>{{ item.upstream_group_name || item.upstream_group_key }}</small>
-                  </span>
-                  <span>
-                    <strong>{{ item.local_group_name || `本地分组 ${item.local_group_id}` }}</strong>
-                    <small>#{{ item.local_group_id }}</small>
-                  </span>
-                  <span>{{ formatRate(item.old_rate) }}</span>
-                  <span>{{ formatRate(item.target_rate) }}</span>
-                  <span>
-                    <strong>{{ rateGuardActionText(item.action) }}</strong>
-                    <small v-if="item.reason">{{ rateGuardReasonText(item.reason) }}</small>
-                  </span>
-                  <span>{{ formatTime(item.snapshot_at) }}</span>
+              </section>
+
+              <section class="sp-rate-guard-changes">
+                <header class="sp-rate-guard-section-head">
+                  <div>
+                    <span>Rate Changes</span>
+                    <h4>倍率变更记录</h4>
+                  </div>
+                  <strong>{{ rateGuardRaisedItems.length }} 项</strong>
+                </header>
+                <div v-if="rateGuardRaisedItems.length" class="sp-rate-guard-items sp-rate-guard-change-items">
+                  <div class="sp-rate-guard-row sp-rate-guard-row-head" aria-hidden="true">
+                    <span>供应商 / 上游分组</span>
+                    <span>本地分组</span>
+                    <span>原倍率</span>
+                    <span>调整后倍率</span>
+                    <span>结果</span>
+                    <span>快照时间</span>
+                  </div>
+                  <div v-for="item in rateGuardRaisedItems" :key="`change-${item.mapping_id}`" class="sp-rate-guard-row">
+                    <span>
+                      <strong>{{ item.provider_name || `供应商 ${item.provider_id}` }}</strong>
+                      <small>{{ item.upstream_group_name || item.upstream_group_key }}</small>
+                    </span>
+                    <span>
+                      <strong>{{ item.local_group_name || `本地分组 ${item.local_group_id}` }}</strong>
+                      <small>#{{ item.local_group_id }}</small>
+                    </span>
+                    <span>{{ formatRate(item.old_rate) }}</span>
+                    <span>{{ formatRate(item.target_rate) }}</span>
+                    <span><strong>{{ rateGuardActionText(item.action) }}</strong></span>
+                    <span>{{ formatTime(item.snapshot_at) }}</span>
+                  </div>
                 </div>
-              </div>
-              <div v-else class="sp-rate-guard-empty">本次没有可检查的守护分组。</div>
+                <div v-else class="sp-rate-guard-empty">本次未调整本地分组倍率。</div>
+              </section>
+
+              <section class="sp-rate-guard-inspections">
+                <header class="sp-rate-guard-section-head">
+                  <div>
+                    <span>Inspection Results</span>
+                    <h4>全部检查结果</h4>
+                  </div>
+                  <strong>{{ rateGuardResult.items.length }} 项</strong>
+                </header>
+                <div v-if="rateGuardResult.items.length" class="sp-rate-guard-items">
+                  <div class="sp-rate-guard-row sp-rate-guard-row-head" aria-hidden="true">
+                    <span>供应商 / 上游分组</span>
+                    <span>本地分组</span>
+                    <span>原倍率</span>
+                    <span>目标倍率</span>
+                    <span>结果</span>
+                    <span>快照时间</span>
+                  </div>
+                  <div v-for="item in rateGuardResult.items" :key="item.mapping_id" class="sp-rate-guard-row">
+                    <span>
+                      <strong>{{ item.provider_name || `供应商 ${item.provider_id}` }}</strong>
+                      <small>{{ item.upstream_group_name || item.upstream_group_key }}</small>
+                    </span>
+                    <span>
+                      <strong>{{ item.local_group_name || `本地分组 ${item.local_group_id}` }}</strong>
+                      <small>#{{ item.local_group_id }}</small>
+                    </span>
+                    <span>{{ formatRate(item.old_rate) }}</span>
+                    <span>{{ formatRate(item.target_rate) }}</span>
+                    <span>
+                      <strong>{{ rateGuardActionText(item.action) }}</strong>
+                      <small v-if="item.reason">{{ rateGuardReasonText(item.reason) }}</small>
+                    </span>
+                    <span>{{ formatTime(item.snapshot_at) }}</span>
+                  </div>
+                </div>
+                <div v-else class="sp-rate-guard-empty">本次没有可检查的守护分组。</div>
+              </section>
             </section>
 
             <section v-else-if="detailRun.result_detail?.providers?.length" class="sp-provider-detail-layout">
@@ -495,7 +585,14 @@ const detailProviders = computed(() => detailRun.value?.result_detail?.providers
 const selectedDetailProvider = computed(() => {
   return detailProviders.value.find(provider => provider.provider_id === selectedDetailProviderID.value) || detailProviders.value[0] || null
 })
+const rateGuardAlertActions = new Set(['invalid', 'stale', 'failed'])
 const rateGuardResult = computed(() => detailRun.value?.result_detail?.rate_guard || null)
+const rateGuardAlertItems = computed(() => (
+  rateGuardResult.value?.items.filter(item => rateGuardAlertActions.has(item.action)) || []
+))
+const rateGuardRaisedItems = computed(() => (
+  rateGuardResult.value?.items.filter(item => item.action === 'raised') || []
+))
 const runTotalPages = computed(() => Math.max(1, Math.ceil(runTotal.value / runPageSize.value)))
 const runTaskFilterOptions = computed<SelectOption[]>(() => [
   { value: '', label: '全部任务' },
@@ -756,7 +853,12 @@ function formatStageRunDetail(stage: SupplierAutomationStageRunDetail): string[]
 }
 
 function formatRate(rate: number): string {
-  return Number.isFinite(rate) && rate > 0 ? rate.toFixed(2) : '-'
+  return Number.isFinite(rate) && rate > 0 ? rate.toFixed(4).replace(/\.?0+$/, '') : '-'
+}
+
+function rateGuardWarningCount(run: SupplierAutomationRun): number {
+  const result = run.result_detail?.rate_guard
+  return result ? result.invalid + result.stale + result.failed : 0
 }
 
 function rateGuardActionText(action: string): string {
@@ -1155,6 +1257,23 @@ function showToast(message: string) {
   display: grid;
   gap: 6px;
   max-width: 220px;
+}
+
+.sp-run-rate-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.sp-run-rate-summary .good {
+  color: var(--sp-green);
+}
+
+.sp-run-rate-summary .warn {
+  color: var(--sp-amber);
 }
 
 .sp-run-pagination {
@@ -1967,10 +2086,73 @@ function showToast(message: string) {
   font-size: 18px;
 }
 
+.sp-rate-guard-alerts,
+.sp-rate-guard-changes,
+.sp-rate-guard-inspections {
+  min-width: 0;
+}
+
+.sp-rate-guard-inspections {
+  border-top: 1px solid var(--sp-line);
+  padding-top: 16px;
+}
+
+.sp-rate-guard-section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+}
+
+.sp-rate-guard-section-head span {
+  display: block;
+  color: var(--sp-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.sp-rate-guard-section-head h4 {
+  margin: 3px 0 0;
+  color: var(--sp-text);
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.sp-rate-guard-section-head > strong {
+  color: var(--sp-muted);
+  font-size: 12px;
+}
+
 .sp-rate-guard-items {
   min-width: 0;
   overflow-x: auto;
   border-top: 1px solid var(--sp-line);
+}
+
+.sp-rate-guard-change-items {
+  border-left: 3px solid var(--sp-green);
+  background: color-mix(in srgb, var(--sp-green) 4%, transparent);
+}
+
+.sp-rate-guard-alert-items {
+  border-left: 3px solid var(--sp-amber);
+  background: color-mix(in srgb, var(--sp-amber) 5%, transparent);
+}
+
+.sp-rate-guard-alert-items .sp-rate-guard-row:not(.sp-rate-guard-row-head) > span:nth-child(5) {
+  color: var(--sp-amber);
+  font-weight: 700;
+}
+
+.sp-rate-guard-change-items .sp-rate-guard-row:not(.sp-rate-guard-row-head) > span:nth-child(3),
+.sp-rate-guard-change-items .sp-rate-guard-row:not(.sp-rate-guard-row-head) > span:nth-child(4),
+.sp-rate-guard-change-items .sp-rate-guard-row:not(.sp-rate-guard-row-head) > span:nth-child(5) {
+  color: var(--sp-green);
+  font-weight: 700;
 }
 
 .sp-rate-guard-row {

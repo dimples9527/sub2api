@@ -306,6 +306,50 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('rateGuardReasonText(item.reason)')
   })
 
+  it('surfaces rate guard warnings before the complete inspection list', () => {
+    expect(supplierAutomationSource).toContain(
+      "const rateGuardAlertActions = new Set(['invalid', 'stale', 'failed'])"
+    )
+    expect(supplierAutomationSource).toContain(
+      'rateGuardResult.value?.items.filter(item => rateGuardAlertActions.has(item.action)) || []'
+    )
+    expect(supplierAutomationSource).toContain('<h4>告警记录</h4>')
+    expect(supplierAutomationSource).toContain('v-for="item in rateGuardAlertItems"')
+    expect(supplierAutomationSource).toContain('rateGuardReasonText(item.reason)')
+    expect(supplierAutomationSource).toContain("'未关联本地分组'")
+
+    const alertsIndex = supplierAutomationSource.indexOf('<section v-if="rateGuardAlertItems.length" class="sp-rate-guard-alerts">')
+    const changesIndex = supplierAutomationSource.indexOf('<section class="sp-rate-guard-changes">')
+    expect(alertsIndex).toBeGreaterThanOrEqual(0)
+    expect(changesIndex).toBeGreaterThan(alertsIndex)
+  })
+
+  it('shows rate guard raised and warning counts in run history', () => {
+    expect(supplierAutomationSource).toContain('rateGuardWarningCount(run)')
+    expect(supplierAutomationSource).toContain('调高 {{ run.result_detail.rate_guard.raised }}')
+    expect(supplierAutomationSource).toContain('告警 {{ rateGuardWarningCount(run) }}')
+  })
+
+  it('preserves meaningful rate precision in result details', () => {
+    expect(supplierAutomationSource).toContain("rate.toFixed(4).replace(/\\.?0+$/, '')")
+    expect(supplierAutomationSource).not.toContain('rate.toFixed(2)')
+  })
+
+  it('shows actual rate changes before the complete rate guard inspection results', () => {
+    expect(supplierAutomationSource).toContain(
+      "rateGuardResult.value?.items.filter(item => item.action === 'raised') || []"
+    )
+    expect(supplierAutomationSource).toContain('<h4>倍率变更记录</h4>')
+    expect(supplierAutomationSource).toContain('v-for="item in rateGuardRaisedItems"')
+    expect(supplierAutomationSource).toContain('本次未调整本地分组倍率。')
+    expect(supplierAutomationSource).toContain('<h4>全部检查结果</h4>')
+
+    const changesIndex = supplierAutomationSource.indexOf('<section class="sp-rate-guard-changes">')
+    const allItemsIndex = supplierAutomationSource.indexOf('<section class="sp-rate-guard-inspections">')
+    expect(changesIndex).toBeGreaterThanOrEqual(0)
+    expect(allItemsIndex).toBeGreaterThan(changesIndex)
+  })
+
   it('uses common framework table and dialog components instead of local table and modal markup', () => {
     expect(supplierAutomationSource).toContain("import DataTable from '@/components/common/DataTable.vue'")
     expect(supplierAutomationSource).toContain("import BaseDialog from '@/components/common/BaseDialog.vue'")
@@ -504,7 +548,7 @@ describe('SupplierAutomationView Task 5 visual system', () => {
     expect(summaryResetIndex).toBeGreaterThanOrEqual(0)
     expect(oddSummaryIndex).toBeGreaterThan(summaryResetIndex)
     expect(tabletStyles).toMatch(
-      /\.sp-summary-item,\n  \.sp-summary-item:nth-child\(3n \+ 1\)\s*\{[^}]*border-left:\s*1px solid var\(--sp-line\);[^}]*padding-left:\s*18px;/s
+      /\.sp-summary-item,\n {2}\.sp-summary-item:nth-child\(3n \+ 1\)\s*\{[^}]*border-left:\s*1px solid var\(--sp-line\);[^}]*padding-left:\s*18px;/s
     )
     expect(tabletStyles).toMatch(
       /\.sp-summary-item:nth-child\(odd\)\s*\{[^}]*border-left:\s*0;[^}]*padding-left:\s*0;/s
