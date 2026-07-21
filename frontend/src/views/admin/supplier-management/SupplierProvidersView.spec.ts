@@ -9,6 +9,30 @@ const supplierProvidersSource = readFileSync(
 )
 
 describe('SupplierProvidersView payload normalization', () => {
+  it('provides a direct create-provider-type action and dedicated dialog', () => {
+    expect(supplierProvidersSource).toContain('@click="openCreateProviderType"')
+    expect(supplierProvidersSource).toContain('新增供应商类型')
+    expect(supplierProvidersSource).toContain(':show="createTypeVisible"')
+    expect(supplierProvidersSource).toContain('class="sp-type-create-dialog"')
+    expect(supplierProvidersSource).toContain('@submit.prevent="submitNewProviderType"')
+    expect(supplierProvidersSource).toContain('const createTypeVisible = ref(false)')
+    expect(supplierProvidersSource).toContain('function openCreateProviderType()')
+    expect(supplierProvidersSource).toContain('function closeCreateProviderType()')
+    expect(supplierProvidersSource).toContain('async function submitNewProviderType()')
+  })
+
+  it('uses structured page-level styling for all supplier dialogs', () => {
+    expect(supplierProvidersSource).toContain('class="sp-provider-dialog"')
+    expect(supplierProvidersSource).toContain('class="sp-dialog-summary"')
+    expect(supplierProvidersSource).toContain('class="sp-type-manager-dialog"')
+    expect(supplierProvidersSource).toContain('class="sp-test-dialog"')
+    expect(supplierProvidersSource).toContain('class="sp-dialog-section-head"')
+    expect(supplierProvidersSource).toContain('.sp-dialog-section {')
+    expect(supplierProvidersSource).toContain('.sp-type-manager-dialog {')
+    expect(supplierProvidersSource).toContain('.sp-test-dialog {')
+    expect(supplierProvidersSource).toContain('@media (max-width: 760px)')
+    expect(supplierProvidersSource).toContain(':global(.dark .modal-content:has(.sp-provider-dialog))')
+  })
   it('submits Sub2API credentials as email only and clears stale username', () => {
     expect(supplierProvidersSource).toContain('const normalizedProviderType = payload.provider_type.trim()')
     expect(supplierProvidersSource).toContain("email: normalizedProviderType === 'sub2api' ? payload.email?.trim() || '' : ''")

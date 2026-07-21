@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -7,8 +8,43 @@ const supplierAutomationSource = readFileSync(
   resolve(dirname(fileURLToPath(import.meta.url)), 'SupplierAutomationView.vue'),
   'utf-8'
 )
+const testRequire = createRequire(import.meta.url)
+const compilerSfcPath = testRequire.resolve('@vue/compiler-sfc', {
+  paths: [dirname(testRequire.resolve('@vitejs/plugin-vue'))],
+})
+const { compileStyle } = testRequire(compilerSfcPath) as {
+  compileStyle: (options: {
+    id: string
+    source: string
+    scoped: boolean
+    filename: string
+  }) => { code: string; errors: unknown[] }
+}
 
 describe('SupplierAutomationView edit dialog', () => {
+  it('shows the task name and code in each run history row', () => {
+    expect(supplierAutomationSource).toContain('<template #cell-task_code="{ row: run }">')
+    expect(supplierAutomationSource).toContain('{{ taskName(run.task_code) }}')
+    expect(supplierAutomationSource).toContain('<div class="sp-sub">{{ run.task_code }}</div>')
+    expect(supplierAutomationSource).toContain('const taskNameByCode = computed<Record<string, string>>')
+    expect(supplierAutomationSource).toContain('function taskName(taskCode: string): string')
+  })
+
+  it('assigns every task code a stable generated name color in tasks and run history', () => {
+    expect(supplierAutomationSource).toContain(
+      'class="sp-entity sp-task-name" :style="taskColorStyle(task.task_code)"'
+    )
+    expect(supplierAutomationSource).toContain(
+      'class="sp-entity sp-task-name" :style="taskColorStyle(run.task_code)"'
+    )
+    expect(supplierAutomationSource).toContain('function stableTaskColorHash(value: string): number')
+    expect(supplierAutomationSource).toContain('function taskColorStyle(taskCode: string): Record<string, string>')
+    expect(supplierAutomationSource).toContain("'--sp-task-hue'")
+    expect(supplierAutomationSource).toContain("'--sp-task-saturation'")
+    expect(supplierAutomationSource).toContain('.sp-task-name {')
+    expect(supplierAutomationSource).toContain(':global(.dark .sp-automation-console .sp-task-name) {')
+  })
+
   it('uses a switch control for the enabled state instead of a raw checkbox', () => {
     expect(supplierAutomationSource).toContain("import Toggle from '@/components/common/Toggle.vue'")
     expect(supplierAutomationSource).toContain('<Toggle v-model="editForm.enabled"')
@@ -128,6 +164,80 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('<BaseDialog :show="detailVisible"')
   })
 
+  it('separates execution outcome from result detail while preserving every detail branch', () => {
+    const detailDialogSource = supplierAutomationSource.match(
+      /<BaseDialog :show="detailVisible"[\s\S]*?<\/BaseDialog>/
+    )?.[0] || ''
+
+    expect(detailDialogSource).toContain('<section class="sp-detail-outcome">')
+    expect(detailDialogSource).toContain('<section class="sp-detail-content">')
+    expect(detailDialogSource.match(/class="sp-detail-section-head"/g)).toHaveLength(2)
+    expect(detailDialogSource).toContain('Execution Outcome')
+    expect(detailDialogSource).toContain('执行结论')
+    expect(detailDialogSource).toContain('Result Detail')
+    expect(detailDialogSource).toContain('结果明细')
+    expect(detailDialogSource).toContain(
+      '<span class="sp-status" :class="statusTone(detailRun.status)">{{ statusText(detailRun.status) }}</span>'
+    )
+
+    const outcomeIndex = detailDialogSource.indexOf('<section class="sp-detail-outcome">')
+    const summaryIndex = detailDialogSource.indexOf('<section class="sp-run-detail-summary">')
+    const messageIndex = detailDialogSource.indexOf(
+      '<div v-if="detailRun.message" class="sp-run-message">{{ detailRun.message }}</div>'
+    )
+    const contentIndex = detailDialogSource.indexOf('<section class="sp-detail-content">')
+    const rateGuardIndex = detailDialogSource.indexOf(
+      '<section v-if="detailRun.result_detail?.rate_guard && rateGuardResult" class="sp-rate-guard-detail">'
+    )
+    const providersIndex = detailDialogSource.indexOf(
+      '<section v-else-if="detailRun.result_detail?.providers?.length" class="sp-provider-detail-layout">'
+    )
+    const cleanupIndex = detailDialogSource.indexOf(
+      '<section v-else-if="detailRun.result_detail?.cleanup" class="sp-cleanup-grid">'
+    )
+    const textFallbackIndex = detailDialogSource.indexOf(
+      '<pre v-else class="sp-message-detail">{{ detailMessage }}</pre>'
+    )
+
+    expect(outcomeIndex).toBeGreaterThanOrEqual(0)
+    expect(summaryIndex).toBeGreaterThan(outcomeIndex)
+    expect(messageIndex).toBeGreaterThan(summaryIndex)
+    expect(contentIndex).toBeGreaterThan(messageIndex)
+    expect(rateGuardIndex).toBeGreaterThan(contentIndex)
+    expect(providersIndex).toBeGreaterThan(rateGuardIndex)
+    expect(cleanupIndex).toBeGreaterThan(providersIndex)
+    expect(textFallbackIndex).toBeGreaterThan(cleanupIndex)
+    expect(detailDialogSource).toContain(
+      '</div>\n        <pre v-else class="sp-message-detail">{{ detailMessage }}</pre>'
+    )
+  })
+
+  it('uses restrained outcome emphasis, bounded response scrolling, and edge-only failure states', () => {
+    expect(supplierAutomationSource).toMatch(
+      /\.sp-detail-outcome,\r?\n\.sp-detail-content \{\r?\n\s+display: grid;\r?\n\s+gap: 14px;\r?\n\}/
+    )
+    expect(supplierAutomationSource).toContain('.sp-detail-section-head {')
+    expect(supplierAutomationSource).toContain('.sp-detail-section-head h3 {')
+    expect(supplierAutomationSource).toContain('text-transform: uppercase;')
+    expect(supplierAutomationSource).toContain('border-left: 3px solid var(--sp-result-accent);')
+
+    expect(supplierAutomationSource).toMatch(
+      /\.sp-detail-content \{\r?\n\s+border-top: 1px solid var\(--sp-line\);\r?\n\s+margin-top: [^;]+;\r?\n\s+padding-top: [^;]+;\r?\n\}/
+    )
+
+    const responseSummaryStyles = supplierAutomationSource.match(
+      /\.sp-response-summary \{[\s\S]*?\n\}/
+    )?.[0] || ''
+    expect(responseSummaryStyles).toContain('max-height: 240px;')
+    expect(responseSummaryStyles).toContain('overflow: auto;')
+
+    const failedStageCardStyles = supplierAutomationSource.match(
+      /\.sp-stage-card\.bad \{[\s\S]*?\n\}/
+    )?.[0] || ''
+    expect(failedStageCardStyles).toContain('border-left: 3px solid var(--sp-red);')
+    expect(failedStageCardStyles).not.toContain('background: var(--sp-result-red-soft);')
+    expect(failedStageCardStyles).not.toContain('padding: 8px 10px;')
+  })
   it('adds clear spacing between flat result detail sections', () => {
     expect(supplierAutomationSource).toContain('padding: 18px 0')
     expect(supplierAutomationSource).toContain('padding: 16px 0')
@@ -223,5 +333,399 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain("if (trigger === 'scheduled') return '定时执行'")
     expect(supplierAutomationSource).toContain("if (trigger === 'manual') return '手动执行'")
     expect(supplierAutomationSource).toContain('statusText(run.status)')
+  })
+})
+
+describe('SupplierAutomationView operations console composition', () => {
+  it('uses a vertical overview, task control, and run history hierarchy', () => {
+    expect(supplierAutomationSource).toContain('class="sp-automation-console"')
+    expect(supplierAutomationSource).toContain('class="sp-overview-strip"')
+    expect(supplierAutomationSource).toContain('class="sp-console-stack"')
+    expect(supplierAutomationSource).toContain('class="sp-console-panel sp-task-panel"')
+    expect(supplierAutomationSource).toContain('class="sp-console-panel sp-history-panel"')
+    expect(supplierAutomationSource).not.toContain('class="sp-grid-2"')
+
+    expect(supplierAutomationSource).toMatch(
+      /<div\b[^>]*class\s*=\s*["'][^"']*\bsp-console-stack\b[^"']*["'][^>]*>[\s\S]*?<section\b[^>]*class\s*=\s*["'][^"']*\bsp-task-panel\b[^"']*["'][^>]*>[\s\S]*?<\/section>[\s\S]*?<section\b[^>]*class\s*=\s*["'][^"']*\bsp-history-panel\b[^"']*["'][^>]*>[\s\S]*?<\/section>\s*<\/div>/
+    )
+
+    const classTokens = [...supplierAutomationSource.matchAll(/\sclass\s*=\s*["']([^"']*)["']/g)]
+      .flatMap(([, classNames]) => classNames.trim().split(/\s+/))
+    expect(classTokens).not.toContain('sp-grid-2')
+  })
+
+  it('shows operational metrics and refresh context without row-selection metrics', () => {
+    expect(supplierAutomationSource).toContain("label: '任务总数'")
+    expect(supplierAutomationSource).toContain("label: '已启用'")
+    expect(supplierAutomationSource).toContain("label: '最近异常'")
+    expect(supplierAutomationSource).toContain("label: '正在运行'")
+    expect(supplierAutomationSource).toContain('lastRefreshLabel')
+    expect(supplierAutomationSource).not.toContain("label: '当前选中'")
+  })
+
+  it('removes task row-selection state and interactions', () => {
+    expect(supplierAutomationSource).not.toContain('const selectedCode')
+    expect(supplierAutomationSource).not.toContain('const selectedTask')
+    expect(supplierAutomationSource).not.toContain('clickable-rows')
+    expect(supplierAutomationSource).not.toContain('@row-click')
+  })
+
+  it('records the refresh time only after run history is loaded', () => {
+    const loadDataIndex = supplierAutomationSource.indexOf('async function loadData()')
+    const loadRunsIndex = supplierAutomationSource.indexOf('await loadRuns()', loadDataIndex)
+    const refreshedAtIndex = supplierAutomationSource.indexOf(
+      'lastRefreshedAt.value = new Date().toISOString()',
+      loadDataIndex
+    )
+
+    expect(loadDataIndex).toBeGreaterThanOrEqual(0)
+    expect(loadRunsIndex).toBeGreaterThan(loadDataIndex)
+    expect(refreshedAtIndex).toBeGreaterThan(loadRunsIndex)
+  })
+
+  it('keeps new console children visually nested in the source', () => {
+    expect(supplierAutomationSource).toMatch(
+      /^ {8}<section\b[^>]*class="[^"]*\bsp-task-panel\b[^"]*">\n {10}<header/m
+    )
+    expect(supplierAutomationSource).toMatch(
+      /^ {8}<section\b[^>]*class="[^"]*\bsp-history-panel\b[^"]*">\n {10}<header/m
+    )
+    expect(supplierAutomationSource.match(/^ {6}<BaseDialog\b/gm)).toHaveLength(2)
+    expect(supplierAutomationSource).toMatch(/^ {6}<Transition name="sp-fade">/m)
+  })
+
+  it('keeps shared table and dialog components unchanged', () => {
+    expect(supplierAutomationSource).toContain('<DataTable')
+    expect(supplierAutomationSource).toContain('<BaseDialog')
+    expect(supplierAutomationSource).not.toContain('<table')
+  })
+})
+describe('SupplierAutomationView task and history panels', () => {
+  it('presents task signals and a primary run action', () => {
+    expect(supplierAutomationSource).toContain('class="sp-panel-signals"')
+    expect(supplierAutomationSource).toContain('已启用 {{ enabledTaskCount }} / {{ tasks.length }}')
+    expect(supplierAutomationSource).toContain('class="sp-button small primary sp-task-primary"')
+    expect(supplierAutomationSource).toContain("{ key: 'actions', label: '操作'")
+  })
+
+  it('uses a full-width history toolbar with a visible result count', () => {
+    expect(supplierAutomationSource).toContain('class="sp-history-toolbar"')
+    expect(supplierAutomationSource).toContain('class="sp-history-count"')
+    expect(supplierAutomationSource).toContain('{{ runTotal }} 条记录')
+    expect(supplierAutomationSource).toContain('data-test="run-task-filter"')
+    expect(supplierAutomationSource).toContain('data-test="run-status-filter"')
+  })
+
+  it('removes secondary task columns that belong in the edit dialog', () => {
+    expect(supplierAutomationSource).not.toContain("{ key: 'timeout_seconds', label: '超时' }")
+    expect(supplierAutomationSource).not.toContain("{ key: 'next_run_at', label: '下次运行'")
+  })
+})
+describe('SupplierAutomationView Task 5 visual system', () => {
+  const styleSource = (supplierAutomationSource.match(/<style scoped>([\s\S]*?)<\/style>/)?.[1] || '').replace(/\r\n/g, '\n')
+  const tabletBreakpoint = styleSource.indexOf('@media (max-width: 1024px)')
+  const mobileBreakpoint = styleSource.indexOf('@media (max-width: 760px)')
+  const tableCardBreakpoint = styleSource.indexOf('@media (max-width: 767px)')
+  const darkOverrideIndex = styleSource.indexOf(':global(.dark', Math.max(tableCardBreakpoint, 0))
+  const tabletStyles = tabletBreakpoint >= 0 && mobileBreakpoint > tabletBreakpoint
+    ? styleSource.slice(tabletBreakpoint, mobileBreakpoint)
+    : ''
+  const mobileStyles = mobileBreakpoint >= 0
+    ? styleSource.slice(mobileBreakpoint, tableCardBreakpoint > mobileBreakpoint ? tableCardBreakpoint : undefined)
+    : ''
+  const tableCardStyles = tableCardBreakpoint >= 0
+    ? styleSource.slice(tableCardBreakpoint, darkOverrideIndex > tableCardBreakpoint ? darkOverrideIndex : undefined)
+    : ''
+  const compiledStyle = compileStyle({
+    id: 'data-v-supplier-automation-task-5',
+    source: styleSource,
+    scoped: true,
+    filename: 'SupplierAutomationView.vue',
+  })
+
+  it('defines the compact operations console hierarchy with page-private selectors', () => {
+    const selectors = [
+      '.sp-automation-console {',
+      '.sp-console-head {',
+      '.sp-overview-strip {',
+      '.sp-overview-item {',
+      '.sp-console-stack {',
+      '.sp-console-panel {',
+      '.sp-panel-head {',
+      '.sp-panel-kicker {',
+      '.sp-panel-title h2 {',
+      '.sp-panel-title p {',
+      '.sp-panel-signals,\n.sp-history-count {',
+      '.sp-panel-signals span {',
+      '.sp-panel-signals .bad {',
+      '.sp-history-toolbar {',
+      '.sp-task-primary {',
+    ]
+
+    for (const selector of selectors) {
+      expect(styleSource).toContain(selector)
+    }
+
+    expect(styleSource).toMatch(/\.sp-automation-console\s*\{[^}]*display:\s*grid;[^}]*gap:\s*18px;[^}]*min-width:\s*0;/s)
+    expect(styleSource).toMatch(/\.sp-overview-strip\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);[^}]*overflow:\s*hidden;/s)
+    expect(styleSource).toMatch(/\.sp-console-panel\s*\{[^}]*border:\s*1px solid var\(--sp-soft\);[^}]*border-radius:\s*14px;[^}]*background:\s*var\(--sp-panel\);/s)
+    expect(styleSource).toMatch(/\.sp-task-primary\s*\{[^}]*min-width:\s*76px;/s)
+  })
+
+  it('keeps overview tones restrained and removes superseded private layout rules', () => {
+    for (const token of ['sp-metric-grid', 'sp-metric-card', 'sp-grid-2', 'sp-section-index']) {
+      expect(supplierAutomationSource).not.toContain(token)
+    }
+
+    expect(styleSource).toContain('.sp-overview-item.sp-red {')
+    expect(styleSource).not.toMatch(/\.sp-overview-item\.sp-(?:red|green|blue|amber|orange|violet)\s*\{[^}]*background:/s)
+    expect(supplierAutomationSource).not.toMatch(/<table\b/i)
+  })
+
+  it('keeps history filters compact inside the toolbar without changing shared components', () => {
+    expect(styleSource).toMatch(/\.sp-history-panel \.sp-panel-body\s*\{[^}]*padding:\s*0;/s)
+    expect(styleSource).toMatch(/\.sp-history-toolbar \.sp-run-filters\s*\{[^}]*margin-bottom:\s*0;/s)
+    expect(supplierAutomationSource).toContain('<DataTable')
+    expect(supplierAutomationSource).toContain('<Pagination')
+    expect(supplierAutomationSource).toContain('<BaseDialog')
+  })
+
+  it('adapts overview and detail summaries at the 1024px breakpoint', () => {
+    expect(tabletBreakpoint).toBeGreaterThanOrEqual(0)
+    expect(tabletStyles).toContain('grid-template-columns: repeat(2, minmax(0, 1fr));')
+    expect(tabletStyles).toContain('.sp-overview-item:nth-child(odd) {')
+    expect(tabletStyles).toContain('border-left: 0;')
+    expect(tabletStyles).toContain('.sp-overview-item:nth-child(n + 3) {')
+    expect(tabletStyles).toContain('border-top: 1px solid var(--sp-soft);')
+    expect(tabletStyles).toContain('.sp-retention-grid,\n  .sp-run-detail-summary {')
+
+    const summaryResetIndex = tabletStyles.indexOf('.sp-summary-item,\n  .sp-summary-item:nth-child(3n + 1) {')
+    const oddSummaryIndex = tabletStyles.indexOf('.sp-summary-item:nth-child(odd) {')
+    expect(summaryResetIndex).toBeGreaterThanOrEqual(0)
+    expect(oddSummaryIndex).toBeGreaterThan(summaryResetIndex)
+    expect(tabletStyles).toMatch(
+      /\.sp-summary-item,\n  \.sp-summary-item:nth-child\(3n \+ 1\)\s*\{[^}]*border-left:\s*1px solid var\(--sp-line\);[^}]*padding-left:\s*18px;/s
+    )
+    expect(tabletStyles).toMatch(
+      /\.sp-summary-item:nth-child\(odd\)\s*\{[^}]*border-left:\s*0;[^}]*padding-left:\s*0;/s
+    )
+  })
+
+  it('uses one 760px breakpoint for single-column 390px layouts', () => {
+    expect(styleSource.match(/@media \(max-width: 760px\)/g)).toHaveLength(1)
+    expect(mobileStyles).toContain('.sp-console-head,\n  .sp-panel-head,\n  .sp-detail-section-head {')
+    expect(mobileStyles).toContain('align-items: stretch;')
+    expect(mobileStyles).toContain('flex-direction: column;')
+    expect(mobileStyles).toContain('.sp-head-actions,\n  .sp-run-filters {')
+    expect(mobileStyles).toContain('width: 100%;')
+    expect(mobileStyles).toContain('.sp-overview-strip,\n  .sp-edit-summary,\n  .sp-form-grid,\n  .sp-retention-grid,\n  .sp-run-detail-summary,\n  .sp-provider-detail-layout,\n  .sp-cleanup-grid,\n  .sp-rate-guard-summary,\n  .sp-stage-body {')
+    expect(mobileStyles).toContain('grid-template-columns: 1fr;')
+    expect(mobileStyles).toContain('.sp-overview-item:first-child {\n    border-top: 0;')
+    expect(mobileStyles).toMatch(/\.sp-head-actions \.sp-button\s*\{[^}]*min-width:\s*96px;/s)
+    expect(mobileStyles).not.toContain('.sp-task-actions')
+  })
+
+  it('wraps both DataTable regions without adding desktop table padding', () => {
+    const tableRegions = supplierAutomationSource.match(
+      /class="sp-table-region sp-(?:task|history)-table-region"/g
+    ) || []
+    const taskPanelSource = supplierAutomationSource.match(
+      /<section class="sp-console-panel sp-task-panel">[\s\S]*?<\/section>/
+    )?.[0] || ''
+    const historyPanelSource = supplierAutomationSource.match(
+      /<section class="sp-console-panel sp-history-panel">[\s\S]*?<\/section>/
+    )?.[0] || ''
+    const baseTableRegionRule = styleSource.match(/\.sp-table-region\s*\{([^}]*)\}/)?.[1] || ''
+
+    expect(tableRegions).toHaveLength(2)
+    expect(taskPanelSource).toMatch(
+      /<div class="sp-table-region sp-task-table-region">\s*<DataTable[\s\S]*?<\/DataTable>\s*<\/div>/
+    )
+    expect(historyPanelSource.indexOf('class="sp-history-toolbar"')).toBeLessThan(
+      historyPanelSource.indexOf('class="sp-table-region sp-history-table-region"')
+    )
+    expect(historyPanelSource).toMatch(
+      /<div class="sp-table-region sp-history-table-region">\s*<DataTable[\s\S]*?<\/DataTable>\s*<Pagination[\s\S]*?<\/div>/
+    )
+    expect(baseTableRegionRule).toContain('min-width: 0;')
+    expect(baseTableRegionRule).not.toContain('padding:')
+  })
+
+  it('aligns table card spacing and task actions with the DataTable 767px breakpoint', () => {
+    expect(styleSource.match(/@media \(max-width: 767px\)/g)).toHaveLength(1)
+    expect(tableCardStyles).toMatch(/\.sp-table-region\s*\{[^}]*padding:\s*12px;/s)
+    expect(tableCardStyles).toMatch(/\.sp-task-actions\s*\{[^}]*width:\s*100%;/s)
+    expect(tableCardStyles).toMatch(
+      /\.sp-task-actions \.sp-button\s*\{[^}]*flex:\s*1 1 0;[^}]*min-height:\s*40px;/s
+    )
+  })
+
+  it('compiles the complete dark modal descendant selector for edit-section numbers', () => {
+    expect(compiledStyle.errors).toEqual([])
+    expect(styleSource).toContain(
+      ':global(.dark .modal-content:has(.sp-edit-dialog) .sp-form-section-head > span) {'
+    )
+    expect(compiledStyle.code).toContain(
+      '.dark .modal-content:has(.sp-edit-dialog) .sp-form-section-head > span'
+    )
+    expect(compiledStyle.code).not.toMatch(/(^|})\s*\.dark\s*\{/m)
+  })
+})
+
+describe('SupplierAutomationView edit dialog composition', () => {
+  const editDialogSource = supplierAutomationSource.match(
+    /<BaseDialog :show="editVisible"[\s\S]*?<\/BaseDialog>/
+  )?.[0] || ''
+  const saveTaskSource = supplierAutomationSource.match(
+    /async function saveTask\(\) \{[\s\S]*?\n\}\n\nasync function runNow/
+  )?.[0] || ''
+
+  it('keeps the wide BaseDialog and separates task identity, state, and scheduling', () => {
+    expect(editDialogSource).toContain(
+      '<BaseDialog :show="editVisible" :title="editingTask?.name || \'编辑任务\'" width="wide" @close="closeEdit">'
+    )
+    expect(editDialogSource).toContain('<form class="sp-edit-dialog" @submit.prevent="saveTask">')
+    expect(editDialogSource).toContain('class="sp-form-section sp-state-section"')
+    expect(editDialogSource).toContain('class="sp-form-section sp-schedule-section"')
+    expect(editDialogSource).toContain('<Toggle v-model="editForm.enabled" />')
+  })
+
+  it('shows task code, enabled state, and formatted interval in the summary', () => {
+    const summarySource = editDialogSource.match(
+      /<section class="sp-edit-summary"[\s\S]*?<\/section>/
+    )?.[0] || ''
+
+    expect(summarySource).toContain('<span>任务编码</span><strong>{{ editForm.task_code }}</strong>')
+    expect(summarySource).toContain(
+      "<span>当前状态</span><strong>{{ editForm.enabled ? '已启用' : '已停用' }}</strong>"
+    )
+    expect(summarySource).toContain(
+      '<span>当前周期</span><strong>{{ formatInterval(editForm.cron_expression) }}</strong>'
+    )
+  })
+
+  it('uses two independent conditional policy sections without an unconditional fallback', () => {
+    const policyConditions = [...editDialogSource.matchAll(
+      /<section v-if="editForm\.task_code === '(supplier_rate_guard|supplier_data_cleanup)'" class="sp-form-section sp-policy-section">/g
+    )].map(([, taskCode]) => taskCode)
+    const policySectionCount = editDialogSource.match(
+      /class="sp-form-section sp-policy-section"/g
+    )?.length || 0
+
+    expect(policyConditions).toEqual(['supplier_rate_guard', 'supplier_data_cleanup'])
+    expect(policySectionCount).toBe(2)
+    expect(editDialogSource).not.toMatch(
+      /<section(?![^>]*v-if=)[^>]*class="sp-form-section sp-policy-section"/
+    )
+    expect(editDialogSource).not.toContain('<section v-else class="sp-form-section sp-policy-section">')
+  })
+
+  it('keeps every scheduling, rate guard, and retention input binding', () => {
+    const bindings = [
+      ['editIntervalSeconds', 'editIntervalSeconds = toNumber($event, editIntervalSeconds)'],
+      ['editForm.timeout_seconds', 'editForm.timeout_seconds = toNumber($event, editForm.timeout_seconds)'],
+      [
+        'editForm.config.rate_guard_safety_multiplier',
+        'editForm.config.rate_guard_safety_multiplier = toNumber($event, editForm.config.rate_guard_safety_multiplier)',
+      ],
+      [
+        'editForm.config.rate_guard_max_snapshot_age_seconds',
+        'editForm.config.rate_guard_max_snapshot_age_seconds = toNumber($event, editForm.config.rate_guard_max_snapshot_age_seconds)',
+      ],
+      [
+        'editForm.config.automation_run_retention_days',
+        'editForm.config.automation_run_retention_days = toNumber($event, editForm.config.automation_run_retention_days)',
+      ],
+      [
+        'editForm.config.sync_run_retention_days',
+        'editForm.config.sync_run_retention_days = toNumber($event, editForm.config.sync_run_retention_days)',
+      ],
+      [
+        'editForm.config.metric_snapshot_retention_days',
+        'editForm.config.metric_snapshot_retention_days = toNumber($event, editForm.config.metric_snapshot_retention_days)',
+      ],
+      [
+        'editForm.config.daily_stat_retention_days',
+        'editForm.config.daily_stat_retention_days = toNumber($event, editForm.config.daily_stat_retention_days)',
+      ],
+      [
+        'editForm.config.inactive_account_retention_days',
+        'editForm.config.inactive_account_retention_days = toNumber($event, editForm.config.inactive_account_retention_days)',
+      ],
+      [
+        'editForm.config.inactive_group_retention_days',
+        'editForm.config.inactive_group_retention_days = toNumber($event, editForm.config.inactive_group_retention_days)',
+      ],
+    ]
+
+    for (const [modelValue, updateBinding] of bindings) {
+      expect(editDialogSource).toContain(`:model-value="${modelValue}"`)
+      expect(editDialogSource).toContain(`@update:model-value="${updateBinding}"`)
+    }
+  })
+
+  it('keeps cancel and save footer actions disabled while saving', () => {
+    expect(editDialogSource).toContain('<template #footer>')
+    expect(editDialogSource).toContain(
+      '<button class="sp-button ghost" type="button" :disabled="Boolean(savingCode)" @click="closeEdit">取消</button>'
+    )
+    expect(editDialogSource).toContain(
+      '<button class="sp-button primary" type="button" :disabled="Boolean(savingCode)" @click="saveTask">{{ savingCode ? \'保存中\' : \'保存任务\' }}</button>'
+    )
+  })
+
+  it('keeps closeEdit and the existing saveTask validation branches and error assignments', () => {
+    expect(supplierAutomationSource).toMatch(
+      /function closeEdit\(\) \{\r?\n\s+editVisible\.value = false\r?\n\}/
+    )
+    expect(saveTaskSource).toContain('async function saveTask()')
+    expect(saveTaskSource).toContain(
+      'const cronExpression = intervalSecondsToCron(editIntervalSeconds.value)'
+    )
+    expect(saveTaskSource).toContain('if (!cronExpression) {')
+    expect(saveTaskSource).toContain(
+      "error.value = '执行间隔必须不少于 60 秒，并且是 60 秒的整数倍'"
+    )
+    expect(saveTaskSource).toContain("if (editForm.task_code === 'supplier_rate_guard') {")
+    expect(saveTaskSource).toContain('if (editForm.config.rate_guard_safety_multiplier <= 0) {')
+    expect(saveTaskSource).toContain("error.value = '安全倍率必须大于 0'")
+    expect(saveTaskSource).toContain(
+      'if (editForm.config.rate_guard_max_snapshot_age_seconds < 60) {'
+    )
+    expect(saveTaskSource).toContain("error.value = '快照最大有效期不能少于 60 秒'")
+    expect(saveTaskSource).toContain('editForm.cron_expression = cronExpression')
+  })
+
+  it('extends every result-dialog modal surface selector to the edit dialog', () => {
+    const selectorPairs = [
+      [
+        ':global(.modal-content:has(.sp-edit-dialog)),',
+        ':global(.modal-content:has(.sp-run-detail)) {',
+      ],
+      [
+        ':global(.dark .modal-content:has(.sp-edit-dialog)),',
+        ':global(.dark .modal-content:has(.sp-run-detail)) {',
+      ],
+      [
+        ':global(.modal-content:has(.sp-edit-dialog) .modal-header),',
+        ':global(.modal-content:has(.sp-run-detail) .modal-header) {',
+      ],
+      [
+        ':global(.modal-content:has(.sp-edit-dialog) .modal-title),',
+        ':global(.modal-content:has(.sp-run-detail) .modal-title) {',
+      ],
+      [
+        ':global(.modal-content:has(.sp-edit-dialog) .modal-body),',
+        ':global(.modal-content:has(.sp-run-detail) .modal-body) {',
+      ],
+      [
+        ':global(.modal-content:has(.sp-edit-dialog) .modal-footer),',
+        ':global(.modal-content:has(.sp-run-detail) .modal-footer) {',
+      ],
+    ]
+
+    for (const [editSelector, detailSelector] of selectorPairs) {
+      expect(supplierAutomationSource).toContain(`${editSelector}\n${detailSelector}`)
+    }
   })
 })

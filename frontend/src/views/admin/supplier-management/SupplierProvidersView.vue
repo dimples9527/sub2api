@@ -10,6 +10,7 @@
         <Input v-model="search" class="sp-search" placeholder="搜索供应商" @enter="loadProviders" />
         <button class="sp-button" type="button" :disabled="loading" @click="loadProviders">刷新数据</button>
         <button class="sp-button" type="button" @click="openTypeManager">类型维护</button>
+        <button class="sp-button" type="button" @click="openCreateProviderType">新增供应商类型</button>
         <button class="sp-button primary" type="button" @click="openCreate">新增供应商</button>
       </div>
     </header>
@@ -192,51 +193,136 @@
       width="wide"
       @close="closeModal"
     >
-      <form class="sp-form" @submit.prevent="submitProvider">
-        <Input v-model="form.name" label="供应商名称" required />
-        <Input v-model="form.code" label="供应商编码" required :disabled="Boolean(editingProvider)" />
-        <label class="sp-select-field">
-          <span>供应商类型</span>
-          <Select
-            v-model="form.provider_type"
-            :options="providerTypeOptions"
-            placeholder="请选择供应商类型"
-            :searchable="false"
-            @change="applySelectedTypeTemplate(true)"
-          />
-        </label>
-        <Input v-model="form.base_url" label="基础地址" required placeholder="https://supplier.example.com" />
-        <Input v-model="form.login_url" label="登录接口" placeholder="https://supplier.example.com/api/v1/auth/login" />
-        <Input v-model="form.api_keys_url" label="API Key 接口" placeholder="https://supplier.example.com/api/admin/keys" />
-        <Input v-model="form.groups_url" label="分组接口" />
-        <Input v-model="form.balance_url" label="余额接口" />
-        <Input v-model="form.usage_cost_url" label="成本接口" />
-        <Input v-if="form.provider_type === 'sub2api'" v-model="form.email" label="登录邮箱" />
-        <Input v-else v-model="form.username" label="登录用户名" />
-        <Input v-model="form.password" type="password" label="登录密码" :placeholder="editingProvider ? '留空则保留原密码' : ''" />
-        <Input v-model="form.account_name_prefix" label="账号名前缀" />
-        <Input :model-value="form.temp_disable_minutes" type="number" label="临时禁用分钟" @update:model-value="form.temp_disable_minutes = toNumber($event, form.temp_disable_minutes ?? 0)" />
-        <Input :model-value="form.account_rate_multiplier_scale" type="number" label="倍率缩放" @update:model-value="form.account_rate_multiplier_scale = toNumber($event, form.account_rate_multiplier_scale)" />
-        <Input :model-value="form.sort_order" type="number" label="排序" @update:model-value="form.sort_order = toNumber($event, form.sort_order ?? 0)" />
-        <label class="sp-toggle-field">
-          <span>启用供应商</span>
-          <div class="sp-toggle-row">
-            <Toggle v-model="form.enabled" />
-            <em>{{ form.enabled ? '已启用' : '已停用' }}</em>
+      <form class="sp-provider-dialog" @submit.prevent="submitProvider">
+        <div class="sp-dialog-summary" aria-label="供应商配置摘要">
+          <div><span>操作类型</span><strong>{{ editingProvider ? '编辑配置' : '新增配置' }}</strong></div>
+          <div><span>供应商类型</span><strong>{{ form.provider_type || '待选择' }}</strong></div>
+          <div><span>运行状态</span><strong>{{ form.enabled ? '已启用' : '已停用' }}</strong></div>
+        </div>
+
+        <section class="sp-dialog-section">
+          <div class="sp-dialog-section-head">
+            <span>01</span>
+            <div><h4>基础身份</h4><p>定义供应商名称、唯一编码和接口模板类型。</p></div>
           </div>
-        </label>
-        <label class="sp-toggle-field">
-          <span>设为默认供应商</span>
-          <div class="sp-toggle-row">
-            <Toggle :model-value="Boolean(form.is_default)" @update:model-value="form.is_default = $event" />
-            <em>{{ form.is_default ? '默认' : '非默认' }}</em>
+          <div class="sp-dialog-grid sp-dialog-grid-3">
+            <Input v-model="form.name" label="供应商名称" required />
+            <Input v-model="form.code" label="供应商编码" required :disabled="Boolean(editingProvider)" />
+            <label class="sp-select-field">
+              <span>供应商类型</span>
+              <Select
+                v-model="form.provider_type"
+                :options="providerTypeOptions"
+                placeholder="请选择供应商类型"
+                :searchable="false"
+                @change="applySelectedTypeTemplate(true)"
+              />
+            </label>
           </div>
-        </label>
-        <div class="sp-form-note">切换类型会用类型模板覆盖接口字段；覆盖后仍可继续手动编辑。</div>
+        </section>
+
+        <section class="sp-dialog-section">
+          <div class="sp-dialog-section-head">
+            <span>02</span>
+            <div><h4>接口模板</h4><p>配置登录、账号、分组、余额和成本数据的访问地址。</p></div>
+          </div>
+          <div class="sp-dialog-grid sp-dialog-grid-2">
+            <Input v-model="form.base_url" label="基础地址" required placeholder="https://supplier.example.com" />
+            <Input v-model="form.login_url" label="登录接口" placeholder="https://supplier.example.com/api/v1/auth/login" />
+            <Input v-model="form.api_keys_url" label="API Key 接口" placeholder="https://supplier.example.com/api/admin/keys" />
+            <Input v-model="form.groups_url" label="分组接口" />
+            <Input v-model="form.balance_url" label="余额接口" />
+            <Input v-model="form.usage_cost_url" label="成本接口" />
+          </div>
+          <div class="sp-dialog-note">切换类型会用类型模板覆盖接口字段；覆盖后仍可继续手动编辑。</div>
+        </section>
+
+        <section class="sp-dialog-section">
+          <div class="sp-dialog-section-head">
+            <span>03</span>
+            <div><h4>认证与运行策略</h4><p>补充登录凭据、账号命名和调度保护参数。</p></div>
+          </div>
+          <div class="sp-dialog-grid sp-dialog-grid-3">
+            <Input v-if="form.provider_type === 'sub2api'" v-model="form.email" label="登录邮箱" />
+            <Input v-else v-model="form.username" label="登录用户名" />
+            <Input v-model="form.password" type="password" label="登录密码" :placeholder="editingProvider ? '留空则保留原密码' : ''" />
+            <Input v-model="form.account_name_prefix" label="账号名前缀" />
+            <Input :model-value="form.temp_disable_minutes" type="number" label="临时禁用分钟" @update:model-value="form.temp_disable_minutes = toNumber($event, form.temp_disable_minutes ?? 0)" />
+            <Input :model-value="form.account_rate_multiplier_scale" type="number" label="倍率缩放" @update:model-value="form.account_rate_multiplier_scale = toNumber($event, form.account_rate_multiplier_scale)" />
+            <Input :model-value="form.sort_order" type="number" label="排序" @update:model-value="form.sort_order = toNumber($event, form.sort_order ?? 0)" />
+            <label class="sp-toggle-field sp-dialog-toggle-card">
+              <span>启用供应商</span>
+              <div class="sp-toggle-row">
+                <Toggle v-model="form.enabled" />
+                <em>{{ form.enabled ? '已启用' : '已停用' }}</em>
+              </div>
+            </label>
+            <label class="sp-toggle-field sp-dialog-toggle-card">
+              <span>设为默认供应商</span>
+              <div class="sp-toggle-row">
+                <Toggle :model-value="Boolean(form.is_default)" @update:model-value="form.is_default = $event" />
+                <em>{{ form.is_default ? '默认' : '非默认' }}</em>
+              </div>
+            </label>
+          </div>
+        </section>
       </form>
       <template #footer>
         <button class="sp-button ghost" type="button" @click="closeModal">取消</button>
         <button class="sp-button primary" type="button" @click="submitProvider">保存供应商</button>
+      </template>
+    </BaseDialog>
+
+    <BaseDialog
+      :show="createTypeVisible"
+      title="新增供应商类型"
+      width="wide"
+      @close="closeCreateProviderType"
+    >
+      <form class="sp-type-create-dialog" @submit.prevent="submitNewProviderType">
+        <div class="sp-dialog-summary" aria-label="新增供应商类型摘要">
+          <div><span>配置用途</span><strong>接口模板</strong></div>
+          <div><span>类型编码</span><strong>{{ typeForm.code || '待填写' }}</strong></div>
+          <div><span>默认状态</span><strong>{{ typeForm.enabled ? '启用' : '停用' }}</strong></div>
+        </div>
+
+        <section class="sp-dialog-section">
+          <div class="sp-dialog-section-head">
+            <span>01</span>
+            <div><h4>类型信息</h4><p>名称用于界面识别，编码用于供应商配置关联。</p></div>
+          </div>
+          <div class="sp-dialog-grid sp-dialog-grid-3">
+            <Input v-model="typeForm.name" label="供应商类型" required placeholder="Sub2API" />
+            <Input v-model="typeForm.code" label="类型编码" required placeholder="sub2api" />
+            <Input :model-value="typeForm.sort_order" type="number" label="排序" @update:model-value="typeForm.sort_order = toNumber($event, typeForm.sort_order ?? 0)" />
+          </div>
+        </section>
+
+        <section class="sp-dialog-section">
+          <div class="sp-dialog-section-head">
+            <span>02</span>
+            <div><h4>接口模板</h4><p>新增供应商选择该类型时，可自动带入这些接口地址。</p></div>
+          </div>
+          <div class="sp-dialog-grid sp-dialog-grid-2">
+            <Input v-model="typeForm.login_url" label="登录接口" placeholder="https://supplier.example.com/api/v1/auth/login" />
+            <Input v-model="typeForm.api_keys_url" label="API Key 接口" />
+            <Input v-model="typeForm.groups_url" label="分组接口" />
+            <Input v-model="typeForm.balance_url" label="余额接口" />
+            <Input v-model="typeForm.usage_cost_url" label="成本接口" />
+            <label class="sp-toggle-field sp-dialog-toggle-card">
+              <span>启用类型</span>
+              <div class="sp-toggle-row">
+                <Toggle v-model="typeForm.enabled" />
+                <em>{{ typeForm.enabled ? '启用' : '停用' }}</em>
+              </div>
+            </label>
+          </div>
+          <div class="sp-dialog-note">供应商自身接口字段为空时，后台会使用这里的类型模板。</div>
+        </section>
+      </form>
+      <template #footer>
+        <button class="sp-button ghost" type="button" @click="closeCreateProviderType">取消</button>
+        <button class="sp-button primary" type="button" @click="submitNewProviderType">创建类型</button>
       </template>
     </BaseDialog>
 
@@ -246,44 +332,74 @@
       width="wide"
       @close="closeTypeManager"
     >
-      <div class="sp-type-manager">
-        <div class="sp-type-list">
+      <div class="sp-type-manager-dialog">
+        <aside class="sp-type-list" aria-label="供应商类型列表">
+          <div class="sp-type-list-head">
+            <div><span>Type Index</span><strong>已有类型</strong></div>
+            <em>{{ providerTypes.length }} 项</em>
+          </div>
           <button
             v-for="type in providerTypes"
             :key="type.id"
             class="sp-type-row"
             :class="{ active: editingProviderType?.id === type.id }"
             type="button"
+            :aria-pressed="editingProviderType?.id === type.id"
             @click="editProviderType(type)"
           >
             <span><b>{{ type.name }}</b><small>{{ type.code }}</small></span>
             <em :class="type.enabled ? 'good' : 'warn'">{{ type.enabled ? '启用' : '停用' }}</em>
           </button>
-          <button class="sp-button" type="button" @click="newProviderType">新增类型</button>
-        </div>
-        <form class="sp-form" @submit.prevent="submitProviderType">
-          <Input v-model="typeForm.name" label="供应商类型" required placeholder="Sub2API" />
-          <Input v-model="typeForm.code" label="类型编码" required placeholder="sub2api" />
-          <Input v-model="typeForm.login_url" label="登录接口" placeholder="https://supplier.example.com/api/v1/auth/login" />
-          <Input v-model="typeForm.api_keys_url" label="API Key 接口" />
-          <Input v-model="typeForm.groups_url" label="分组接口" />
-          <Input v-model="typeForm.balance_url" label="余额接口" />
-          <Input v-model="typeForm.usage_cost_url" label="成本接口" />
-          <Input :model-value="typeForm.sort_order" type="number" label="排序" @update:model-value="typeForm.sort_order = toNumber($event, typeForm.sort_order ?? 0)" />
-          <label class="sp-toggle-field">
-            <span>启用类型</span>
-            <div class="sp-toggle-row">
-              <Toggle v-model="typeForm.enabled" />
-              <em>{{ typeForm.enabled ? '启用' : '停用' }}</em>
+          <div v-if="!providerTypes.length" class="sp-type-empty">暂无供应商类型，请从页面顶部新增。</div>
+        </aside>
+
+        <form class="sp-type-editor" @submit.prevent="submitProviderType">
+          <div class="sp-dialog-summary" aria-label="当前类型摘要">
+            <div><span>当前类型</span><strong>{{ editingProviderType?.name || '新类型' }}</strong></div>
+            <div><span>类型编码</span><strong>{{ typeForm.code || '待填写' }}</strong></div>
+            <div><span>当前状态</span><strong>{{ typeForm.enabled ? '启用' : '停用' }}</strong></div>
+          </div>
+          <section class="sp-dialog-section">
+            <div class="sp-dialog-section-head">
+              <span>01</span>
+              <div><h4>基础配置</h4><p>维护类型名称、编码、排序和启用状态。</p></div>
             </div>
-          </label>
-          <div class="sp-form-note">这些接口作为供应商模板使用；供应商自身字段为空时后台会使用这里的配置。</div>
-          <button v-if="editingProviderType" class="sp-button danger" type="button" @click="removeProviderType(editingProviderType)">删除当前类型</button>
+            <div class="sp-dialog-grid sp-dialog-grid-3">
+              <Input v-model="typeForm.name" label="供应商类型" required placeholder="Sub2API" />
+              <Input v-model="typeForm.code" label="类型编码" required placeholder="sub2api" :disabled="Boolean(editingProviderType)" />
+              <Input :model-value="typeForm.sort_order" type="number" label="排序" @update:model-value="typeForm.sort_order = toNumber($event, typeForm.sort_order ?? 0)" />
+            </div>
+          </section>
+          <section class="sp-dialog-section">
+            <div class="sp-dialog-section-head">
+              <span>02</span>
+              <div><h4>接口模板</h4><p>供应商未单独配置接口时使用该模板。</p></div>
+            </div>
+            <div class="sp-dialog-grid sp-dialog-grid-2">
+              <Input v-model="typeForm.login_url" label="登录接口" placeholder="https://supplier.example.com/api/v1/auth/login" />
+              <Input v-model="typeForm.api_keys_url" label="API Key 接口" />
+              <Input v-model="typeForm.groups_url" label="分组接口" />
+              <Input v-model="typeForm.balance_url" label="余额接口" />
+              <Input v-model="typeForm.usage_cost_url" label="成本接口" />
+              <label class="sp-toggle-field sp-dialog-toggle-card">
+                <span>启用类型</span>
+                <div class="sp-toggle-row">
+                  <Toggle v-model="typeForm.enabled" />
+                  <em>{{ typeForm.enabled ? '启用' : '停用' }}</em>
+                </div>
+              </label>
+            </div>
+            <div class="sp-dialog-note">这些接口作为供应商模板使用；供应商自身字段为空时后台会使用这里的配置。</div>
+          </section>
+          <div class="sp-dialog-danger-zone">
+            <div><strong>删除供应商类型</strong><span>删除前请确认没有供应商继续引用该类型。</span></div>
+            <button v-if="editingProviderType" class="sp-button danger" type="button" @click="removeProviderType(editingProviderType)">删除当前类型</button>
+          </div>
         </form>
       </div>
       <template #footer>
         <button class="sp-button ghost" type="button" @click="closeTypeManager">关闭</button>
-        <button class="sp-button primary" type="button" @click="submitProviderType">保存类型</button>
+        <button class="sp-button primary" type="button" :disabled="!editingProviderType" @click="submitProviderType">保存修改</button>
       </template>
     </BaseDialog>
 
@@ -293,33 +409,50 @@
       width="extra-wide"
       @close="closeTestResult"
     >
-      <div v-if="testResult" class="sp-test-result">
-        <div class="sp-detail-grid">
-          <div class="sp-detail-cell"><span>测试接口</span><b>{{ scopeLabel(testResult.scope) }}</b></div>
-          <div class="sp-detail-cell"><span>HTTP 状态</span><b>{{ testResult.http_status || '无' }}</b></div>
-          <div class="sp-detail-cell"><span>耗时</span><b>{{ testResult.duration_ms }} ms</b></div>
-          <div class="sp-detail-cell"><span>响应大小</span><b>{{ testResult.response_bytes }} bytes</b></div>
-        </div>
-        <div v-if="testResult.error" class="sp-alert sp-error-line">请求错误：{{ testResult.error }}</div>
-        <div v-if="testResult.parse_error" class="sp-alert sp-error-line">解析错误：{{ testResult.parse_error }}</div>
-        <div class="sp-timeline">
-          <h4>调用尝试</h4>
-          <div v-for="(attempt, index) in testResult.attempts" :key="`${attempt.endpoint}:${index}`" class="sp-event">
-            <b>{{ index + 1 }}. {{ attempt.endpoint }}</b>
-            <p>HTTP {{ attempt.http_status || '无' }} · {{ attempt.duration_ms }} ms · {{ attempt.response_bytes }} bytes</p>
-            <p v-if="attempt.error">请求错误：{{ attempt.error }}</p>
-            <p v-if="attempt.parse_error">解析错误：{{ attempt.parse_error }}</p>
+      <div class="sp-test-dialog">
+        <div v-if="testResult" class="sp-test-result" :class="{ bad: Boolean(testResult.error || testResult.parse_error) }">
+          <div class="sp-dialog-summary" aria-label="接口测试摘要">
+            <div><span>测试接口</span><strong>{{ scopeLabel(testResult.scope) }}</strong></div>
+            <div><span>HTTP 状态</span><strong>{{ testResult.http_status || '无' }}</strong></div>
+            <div><span>响应耗时</span><strong>{{ testResult.duration_ms }} ms</strong></div>
+            <div><span>响应大小</span><strong>{{ testResult.response_bytes }} bytes</strong></div>
           </div>
+          <div v-if="testResult.error" class="sp-alert sp-error-line">请求错误：{{ testResult.error }}</div>
+          <div v-if="testResult.parse_error" class="sp-alert sp-error-line">解析错误：{{ testResult.parse_error }}</div>
+
+          <section class="sp-dialog-section">
+            <div class="sp-dialog-section-head">
+              <span>01</span>
+              <div><h4>调用尝试</h4><p>按照实际请求顺序展示端点、状态和耗时。</p></div>
+            </div>
+            <div class="sp-test-attempts">
+              <article v-for="(attempt, index) in testResult.attempts" :key="`${attempt.endpoint}:${index}`" class="sp-test-attempt">
+                <div><span>{{ String(index + 1).padStart(2, '0') }}</span><strong>{{ attempt.endpoint }}</strong></div>
+                <p>HTTP {{ attempt.http_status || '无' }} · {{ attempt.duration_ms }} ms · {{ attempt.response_bytes }} bytes</p>
+                <p v-if="attempt.error" class="bad">请求错误：{{ attempt.error }}</p>
+                <p v-if="attempt.parse_error" class="bad">解析错误：{{ attempt.parse_error }}</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="sp-dialog-section">
+            <div class="sp-dialog-section-head">
+              <span>02</span>
+              <div><h4>响应内容</h4><p>对照脱敏原始返回与前端解析结果。</p></div>
+            </div>
+            <div class="sp-test-response-grid">
+              <div class="sp-response-panel">
+                <div class="sp-response-panel-head"><strong>脱敏原始返回</strong><span>Raw Response</span></div>
+                <pre class="sp-message-detail">{{ testResult.response_summary || '无返回内容' }}</pre>
+              </div>
+              <div class="sp-response-panel">
+                <div class="sp-response-panel-head"><strong>解析结果</strong><span>Parsed Data</span></div>
+                <pre class="sp-message-detail">{{ formatDiagnosticJSON(testResult.parsed_data) }}</pre>
+              </div>
+            </div>
+          </section>
+          <div class="sp-dialog-note">敏感字段已脱敏；该测试只调用接口，不会写入同步记录或本地数据表。</div>
         </div>
-        <div class="sp-timeline">
-          <h4>脱敏原始返回</h4>
-          <pre class="sp-message-detail">{{ testResult.response_summary || '无返回内容' }}</pre>
-        </div>
-        <div class="sp-timeline">
-          <h4>解析结果</h4>
-          <pre class="sp-message-detail">{{ formatDiagnosticJSON(testResult.parsed_data) }}</pre>
-        </div>
-        <div class="sp-form-note">敏感字段已脱敏；该测试只调用接口，不会写入同步记录或本地数据表。</div>
       </div>
       <template #footer>
         <button class="sp-button primary" type="button" @click="closeTestResult">关闭</button>
@@ -403,6 +536,7 @@ const editingProvider = ref<SupplierProvider | null>(null)
 const editingProviderType = ref<SupplierProviderType | null>(null)
 const modalVisible = ref(false)
 const typeManagerVisible = ref(false)
+const createTypeVisible = ref(false)
 const form = reactive<SupplierProviderUpsertPayload>(emptyForm())
 const typeForm = reactive<SupplierProviderTypeUpsertPayload>(emptyTypeForm())
 const syncingKeys = ref<Set<string>>(new Set())
@@ -538,6 +672,15 @@ function closeModal() {
   modalVisible.value = false
 }
 
+function openCreateProviderType() {
+  newProviderType()
+  createTypeVisible.value = true
+}
+
+function closeCreateProviderType() {
+  createTypeVisible.value = false
+}
+
 function openTypeManager() {
   typeManagerVisible.value = true
   if (providerTypes.value.length) editProviderType(providerTypes.value[0])
@@ -567,6 +710,18 @@ function editProviderType(providerType: SupplierProviderType) {
     enabled: providerType.enabled,
     sort_order: providerType.sort_order,
   })
+}
+
+async function submitNewProviderType() {
+  const payload = normalizeTypePayload(typeForm)
+  try {
+    await supplierProviderTypesAPI.create(payload)
+    appStore.showSuccess('供应商类型已创建')
+    await loadProviderTypes()
+    createTypeVisible.value = false
+  } catch (err) {
+    appStore.showError(errorMessage(err, '创建供应商类型失败'))
+  }
 }
 
 async function submitProviderType() {
@@ -869,12 +1024,144 @@ function errorMessage(err: unknown, fallback: string): string {
 </script>
 
 <style scoped>
-.sp-select-field {
+.sp-provider-dialog,
+.sp-type-create-dialog,
+.sp-type-editor,
+.sp-test-dialog {
   display: grid;
+  gap: 16px;
+  min-width: 0;
+  color: var(--sp-text);
+}
+
+.sp-provider-dialog,
+.sp-type-create-dialog,
+.sp-type-editor {
+  max-height: min(70vh, 720px);
+  overflow: auto;
+  padding: 2px 4px 12px 2px;
+}
+
+.sp-dialog-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--sp-line);
+  border-radius: 12px;
+  background: var(--sp-panel-2);
+}
+
+.sp-test-dialog .sp-dialog-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.sp-dialog-summary > div {
+  min-width: 0;
+  padding: 13px 15px;
+  border-right: 1px solid var(--sp-line);
+}
+
+.sp-dialog-summary > div:last-child {
+  border-right: 0;
+}
+
+.sp-dialog-summary span,
+.sp-dialog-summary strong {
+  display: block;
+}
+
+.sp-dialog-summary span {
+  color: var(--sp-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.sp-dialog-summary strong {
+  margin-top: 6px;
+  overflow: hidden;
+  color: var(--sp-text);
+  font-size: 14px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-dialog-section {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--sp-line);
+  border-radius: 12px;
+  background: var(--sp-panel);
+}
+
+.sp-dialog-section-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+}
+
+.sp-dialog-section-head > span {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--sp-cyan) 30%, var(--sp-line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--sp-cyan) 7%, var(--sp-panel));
+  color: var(--sp-cyan);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.sp-dialog-section-head h4 {
+  margin: 0;
+  color: var(--sp-text);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.sp-dialog-section-head p {
+  margin: 3px 0 0;
+  color: var(--sp-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sp-dialog-grid {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.sp-dialog-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.sp-dialog-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.sp-select-field,
+.sp-toggle-field {
+  display: grid;
+  align-content: start;
   gap: 0.375rem;
   color: var(--sp-text);
   font-size: 0.875rem;
   font-weight: 500;
+}
+
+.sp-dialog-toggle-card {
+  min-height: 70px;
+  padding: 10px 12px;
+  border: 1px solid var(--sp-line);
+  border-radius: 9px;
+  background: var(--sp-panel-2);
 }
 
 .sp-toggle-row {
@@ -889,5 +1176,417 @@ function errorMessage(err: unknown, fallback: string): string {
   font-style: normal;
   font-size: 13px;
   font-weight: 600;
+}
+
+.sp-dialog-note {
+  padding: 10px 12px;
+  border-left: 3px solid var(--sp-cyan);
+  border-radius: 4px 8px 8px 4px;
+  background: color-mix(in srgb, var(--sp-cyan) 6%, var(--sp-panel-2));
+  color: var(--sp-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.sp-type-manager-dialog {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.65fr) minmax(0, 2fr);
+  gap: 16px;
+  min-width: 0;
+  max-height: min(70vh, 720px);
+  color: var(--sp-text);
+}
+
+.sp-type-list {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--sp-line);
+  border-radius: 12px;
+  background: var(--sp-panel-2);
+}
+
+.sp-type-list-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 2px 8px;
+  border-bottom: 1px solid var(--sp-line);
+}
+
+.sp-type-list-head span,
+.sp-type-list-head strong {
+  display: block;
+}
+
+.sp-type-list-head span {
+  color: var(--sp-cyan);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.sp-type-list-head strong {
+  margin-top: 3px;
+  color: var(--sp-text);
+  font-size: 13px;
+}
+
+.sp-type-list-head em {
+  color: var(--sp-muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.sp-type-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--sp-line);
+  border-left: 3px solid transparent;
+  border-radius: 9px;
+  background: var(--sp-panel);
+  color: var(--sp-text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+
+.sp-type-row:hover {
+  border-color: color-mix(in srgb, var(--sp-cyan) 36%, var(--sp-line));
+  transform: translateY(-1px);
+}
+
+.sp-type-row.active {
+  border-color: color-mix(in srgb, var(--sp-cyan) 36%, var(--sp-line));
+  border-left-color: var(--sp-cyan);
+  background: color-mix(in srgb, var(--sp-cyan) 7%, var(--sp-panel));
+}
+
+.sp-type-row b,
+.sp-type-row small {
+  display: block;
+}
+
+.sp-type-row b {
+  font-size: 13px;
+}
+
+.sp-type-row small {
+  margin-top: 4px;
+  color: var(--sp-muted);
+  font-size: 11px;
+}
+
+.sp-type-row em {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 1px solid var(--sp-line);
+  border-radius: 999px;
+  color: var(--sp-muted);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.sp-type-row em.good {
+  border-color: color-mix(in srgb, var(--sp-green) 32%, var(--sp-line));
+  color: var(--sp-green);
+}
+
+.sp-type-row em.warn {
+  border-color: color-mix(in srgb, var(--sp-amber) 32%, var(--sp-line));
+  color: var(--sp-amber);
+}
+
+.sp-type-empty {
+  padding: 18px 10px;
+  color: var(--sp-muted);
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.sp-type-editor {
+  min-height: 0;
+}
+
+.sp-dialog-danger-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 14px;
+  border: 1px solid color-mix(in srgb, var(--sp-red) 25%, var(--sp-line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--sp-red) 4%, var(--sp-panel));
+}
+
+.sp-dialog-danger-zone strong,
+.sp-dialog-danger-zone span {
+  display: block;
+}
+
+.sp-dialog-danger-zone strong {
+  color: var(--sp-text);
+  font-size: 12px;
+}
+
+.sp-dialog-danger-zone span {
+  margin-top: 3px;
+  color: var(--sp-muted);
+  font-size: 11px;
+}
+
+.sp-test-dialog {
+  max-height: 72vh;
+  overflow: auto;
+  padding: 2px 4px 12px 2px;
+}
+
+.sp-test-result {
+  --sp-test-accent: var(--sp-green);
+  display: grid;
+  gap: 16px;
+}
+
+.sp-test-result.bad {
+  --sp-test-accent: var(--sp-red);
+}
+
+.sp-test-result .sp-dialog-summary {
+  border-top: 3px solid var(--sp-test-accent);
+}
+
+.sp-test-attempts {
+  display: grid;
+  gap: 8px;
+}
+
+.sp-test-attempt {
+  padding: 12px 14px;
+  border: 1px solid var(--sp-line);
+  border-radius: 9px;
+  background: var(--sp-panel-2);
+}
+
+.sp-test-attempt > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sp-test-attempt > div > span {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 7px;
+  background: var(--sp-panel-3);
+  color: var(--sp-muted);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.sp-test-attempt strong {
+  overflow: hidden;
+  color: var(--sp-text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-test-attempt p {
+  margin: 7px 0 0 34px;
+  color: var(--sp-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.sp-test-attempt p.bad {
+  color: var(--sp-red);
+}
+
+.sp-test-response-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.sp-response-panel {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--sp-line);
+  border-radius: 10px;
+  background: var(--sp-panel-2);
+}
+
+.sp-response-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--sp-line);
+}
+
+.sp-response-panel-head strong {
+  color: var(--sp-text);
+  font-size: 12px;
+}
+
+.sp-response-panel-head span {
+  color: var(--sp-muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sp-response-panel .sp-message-detail {
+  max-height: 300px;
+  margin: 0;
+  overflow: auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+:global(.modal-content:has(.sp-provider-dialog)),
+:global(.modal-content:has(.sp-type-create-dialog)),
+:global(.modal-content:has(.sp-type-manager-dialog)),
+:global(.modal-content:has(.sp-test-dialog)) {
+  --sp-panel: #ffffff;
+  --sp-panel-2: #f8fafc;
+  --sp-panel-3: #eef2f7;
+  --sp-line: #d7e0ea;
+  --sp-soft: #e8eef5;
+  --sp-text: #172033;
+  --sp-muted: #607089;
+  --sp-cyan: #0284c7;
+  --sp-green: #16835d;
+  --sp-amber: #c56a0a;
+  --sp-red: #d14343;
+  overflow: hidden;
+  border-color: #cbd7e5;
+  background: var(--sp-panel);
+  color: var(--sp-text);
+}
+
+:global(.dark .modal-content:has(.sp-provider-dialog)),
+:global(.dark .modal-content:has(.sp-type-create-dialog)),
+:global(.dark .modal-content:has(.sp-type-manager-dialog)),
+:global(.dark .modal-content:has(.sp-test-dialog)) {
+  --sp-panel: #172033;
+  --sp-panel-2: #1d293d;
+  --sp-panel-3: #243249;
+  --sp-line: #35445c;
+  --sp-soft: #2c3a51;
+  --sp-text: #edf3fb;
+  --sp-muted: #a8b6ca;
+  border-color: #3b4b64;
+}
+
+:global(.modal-content:has(.sp-provider-dialog) .modal-header),
+:global(.modal-content:has(.sp-type-create-dialog) .modal-header),
+:global(.modal-content:has(.sp-type-manager-dialog) .modal-header),
+:global(.modal-content:has(.sp-test-dialog) .modal-header),
+:global(.modal-content:has(.sp-provider-dialog) .modal-footer),
+:global(.modal-content:has(.sp-type-create-dialog) .modal-footer),
+:global(.modal-content:has(.sp-type-manager-dialog) .modal-footer),
+:global(.modal-content:has(.sp-test-dialog) .modal-footer) {
+  border-color: var(--sp-line);
+  background: var(--sp-panel);
+}
+
+:global(.modal-content:has(.sp-provider-dialog) .modal-title),
+:global(.modal-content:has(.sp-type-create-dialog) .modal-title),
+:global(.modal-content:has(.sp-type-manager-dialog) .modal-title),
+:global(.modal-content:has(.sp-test-dialog) .modal-title) {
+  color: var(--sp-text);
+}
+
+:global(.modal-content:has(.sp-provider-dialog) .modal-body),
+:global(.modal-content:has(.sp-type-create-dialog) .modal-body),
+:global(.modal-content:has(.sp-type-manager-dialog) .modal-body),
+:global(.modal-content:has(.sp-test-dialog) .modal-body) {
+  min-height: 0;
+  overflow: hidden;
+  background: var(--sp-panel);
+}
+
+@media (max-width: 920px) {
+  .sp-dialog-grid-3,
+  .sp-test-dialog .sp-dialog-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sp-type-manager-dialog {
+    grid-template-columns: minmax(170px, 0.55fr) minmax(0, 1.45fr);
+  }
+}
+
+@media (max-width: 760px) {
+  .sp-provider-dialog,
+  .sp-type-create-dialog,
+  .sp-type-editor,
+  .sp-test-dialog,
+  .sp-type-manager-dialog {
+    max-height: 68vh;
+  }
+
+  .sp-dialog-summary,
+  .sp-test-dialog .sp-dialog-summary,
+  .sp-dialog-grid-2,
+  .sp-dialog-grid-3,
+  .sp-test-response-grid,
+  .sp-type-manager-dialog {
+    grid-template-columns: 1fr;
+  }
+
+  .sp-dialog-summary > div {
+    border-right: 0;
+    border-bottom: 1px solid var(--sp-line);
+  }
+
+  .sp-dialog-summary > div:last-child {
+    border-bottom: 0;
+  }
+
+  .sp-dialog-section {
+    padding: 14px;
+  }
+
+  .sp-type-list {
+    max-height: 210px;
+  }
+
+  .sp-dialog-danger-zone,
+  .sp-response-panel-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .sp-dialog-danger-zone .sp-button {
+    width: 100%;
+    min-height: 40px;
+  }
+
+  .sp-test-attempt strong {
+    white-space: normal;
+    word-break: break-all;
+  }
 }
 </style>
