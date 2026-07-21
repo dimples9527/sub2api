@@ -144,10 +144,25 @@
             </button>
           </div>
           <div class="sp-panel-signals" aria-label="当前页状态">
-            <span><i class="good"></i>{{ currentPageMatchedCount }} 已匹配</span>
-            <span><i class="warn"></i>{{ currentPageAttentionCount }} 待处理</span>
+            <span><i class="good"></i>{{ currentPageMatchedCount }} 本页已关联</span>
+            <span><i class="warn"></i>{{ currentPageAttentionCount }} 本页需关注</span>
           </div>
         </header>
+
+        <div class="sp-attention-shortcuts" aria-label="待处理快捷过滤">
+          <button
+            v-for="shortcut in attentionShortcuts"
+            :key="shortcut.label"
+            type="button"
+            class="sp-attention-shortcut"
+            :class="{ active: isAttentionShortcutActive(shortcut) }"
+            :aria-pressed="isAttentionShortcutActive(shortcut)"
+            :disabled="loading"
+            @click="applyAttentionShortcut(shortcut)"
+          >
+            {{ shortcut.label }}
+          </button>
+        </div>
 
         <div class="sp-table-shell">
           <DataTable
@@ -245,10 +260,13 @@
             </template>
 
 			<template #cell-rate_guard_status="{ row: group }">
-				<span class="sp-guard-state" :class="rateGuardStatus(group).tone">
-					<Icon name="shield" size="xs" />
-					{{ rateGuardStatus(group).label }}
-				</span>
+				<div class="sp-guard-state-stack" :title="rateGuardStatus(group).title">
+					<span class="sp-guard-state" :class="rateGuardStatus(group).tone">
+						<Icon name="shield" size="xs" />
+						{{ rateGuardStatus(group).label }}
+					</span>
+					<small v-if="rateGuardStatus(group).detail">{{ rateGuardStatus(group).detail }}</small>
+				</div>
 			</template>
 
             <template #cell-rate_delta="{ row: group }">
@@ -295,11 +313,11 @@
 						class="sp-row-action guard"
 						:class="{ active: group.rate_guard_selected }"
 						:disabled="guardUpdatingGroupID === group.id || (!group.rate_guard_selected && !rateGuardEligible(group))"
-						:title="group.rate_guard_selected ? '取消人工倍率守护' : '设为该本地分组的倍率守护来源'"
+						:title="group.rate_guard_selected ? '取消人工倍率守护' : (hasOtherRateGuard(group) ? '切换为该本地分组的倍率守护来源' : '设为该本地分组的倍率守护来源')"
 						@click="toggleRateGuard(group)"
 					>
 						<Icon name="shield" size="sm" />
-						<span>{{ group.rate_guard_selected ? '取消守护' : '设为守护' }}</span>
+						<span>{{ group.rate_guard_selected ? '取消守护' : (hasOtherRateGuard(group) ? '切换为守护' : '设为守护') }}</span>
 					</button>
                   <button type="button" class="sp-row-action primary" title="修改本地分组倍率" @click="openRateDialog(group)">
                     <Icon name="edit" size="sm" />
@@ -403,7 +421,10 @@
           <div class="sp-detail-cell"><span>本地倍率</span><b>{{ formatRate(selected.local_rate_multiplier) }}</b></div>
 			<div class="sp-detail-cell">
 				<span>倍率守护</span>
-				<b class="sp-guard-state" :class="rateGuardStatus(selected).tone">{{ rateGuardStatus(selected).label }}</b>
+				<div class="sp-guard-detail" :title="rateGuardStatus(selected).title">
+					<b class="sp-guard-state" :class="rateGuardStatus(selected).tone">{{ rateGuardStatus(selected).label }}</b>
+					<small v-if="rateGuardStatus(selected).detail">{{ rateGuardStatus(selected).detail }}</small>
+				</div>
 			</div>
 			<div class="sp-detail-cell"><span>分组同步</span><b>{{ selected.group_sync_status || 'never' }}</b></div>
           <div class="sp-detail-cell sp-detail-wide"><span>最近同步</span><b>{{ formatTime(selected.last_seen_at) }}</b></div>
@@ -560,6 +581,12 @@ const EMPTY_GROUP_SUMMARY: SupplierProviderGroupSummary = {
 
 type SummaryFilter = 'all' | 'linked' | 'unlinked' | 'inverted'
 
+interface AttentionShortcut {
+  label: string
+  matchStatus: string
+  rateStatus: string
+}
+
 const PLATFORM_LABELS: Record<string, string> = {
   anthropic: 'Anthropic',
   openai: 'OpenAI',
@@ -692,6 +719,13 @@ const rateStatusFilterOptions: SelectOption[] = [
   { value: 'inactive', label: '本地停用' },
   { value: 'invalid', label: '数据异常' },
 ]
+const attentionShortcuts: AttentionShortcut[] = [
+  { label: '名称冲突', matchStatus: 'ambiguous', rateStatus: '' },
+  { label: '名称变化', matchStatus: 'name_changed', rateStatus: '' },
+  { label: '已忽略', matchStatus: 'ignored', rateStatus: '' },
+  { label: '收益偏低', matchStatus: '', rateStatus: 'low' },
+  { label: '倒挂风险', matchStatus: '', rateStatus: 'inverted' },
+]
 const supplierIDs = computed(() => [...new Set(providers.value.map(provider => provider.id))].sort((left, right) => left - right))
 const localGroupOptions = computed<SelectOption[]>(() => localGroups.value.map(group => ({
   value: group.id,
@@ -705,7 +739,7 @@ const groupColumns: Column[] = [
   { key: 'raw_status', label: '上游状态', class: 'min-w-[105px]' },
   { key: 'local_group_name', label: '匹配本地分组', sortable: true, class: 'min-w-[190px]' },
   { key: 'auto_match_status', label: '匹配状态', class: 'min-w-[120px]' },
-	{ key: 'rate_guard_status', label: '倍率守护', class: 'min-w-[120px]' },
+	{ key: 'rate_guard_status', label: '倍率守护', class: 'min-w-[180px]' },
   { key: 'local_rate_multiplier', label: '本地分组倍率', sortable: true, class: 'min-w-[110px]' },
   { key: 'rate_delta', label: '价差', class: 'min-w-[110px]' },
   { key: 'account_count', label: '绑定账号', sortable: true, class: 'min-w-[90px]' },
@@ -803,6 +837,23 @@ function applySummaryFilter(filter: SummaryFilter) {
   } else if (nextFilter === 'inverted') {
     rateStatusFilter.value = nextFilter
   }
+  page.value = 1
+  void nextTick(() => {
+    suppressFilterWatch = false
+    void loadGroups()
+  })
+}
+
+function isAttentionShortcutActive(shortcut: AttentionShortcut): boolean {
+  return matchStatusFilter.value === shortcut.matchStatus
+    && rateStatusFilter.value === shortcut.rateStatus
+}
+
+function applyAttentionShortcut(shortcut: AttentionShortcut) {
+  const active = isAttentionShortcutActive(shortcut)
+  suppressFilterWatch = true
+  matchStatusFilter.value = active ? '' : shortcut.matchStatus
+  rateStatusFilter.value = active ? '' : shortcut.rateStatus
   page.value = 1
   void nextTick(() => {
     suppressFilterWatch = false
@@ -1059,13 +1110,34 @@ function canManageManualRateGuard(group: SupplierProviderGroup): boolean {
 	return !group.rate_guard_selected && group.local_group_active_mapping_count > 1
 }
 
-function rateGuardStatus(group: SupplierProviderGroup): { label: string; tone: string } {
-	if (group.rate_guard_selected && (
-		!group.active
-		|| group.local_group_status !== 'active'
-		|| group.group_sync_status !== 'success'
-	)) {
-		return { label: '守护异常', tone: 'danger' }
+function hasOtherRateGuard(group: SupplierProviderGroup): boolean {
+	return Boolean(group.local_group_rate_guard_group_id && group.local_group_rate_guard_group_id !== group.id)
+}
+
+function rateGuardStatus(group: SupplierProviderGroup): { label: string; tone: string; detail?: string; title?: string } {
+	if (group.rate_guard_selected && !group.active) {
+		const detail = '最近同步未返回该分组，或上游已停用'
+		return { label: '上游分组不可用', tone: 'danger', detail, title: detail }
+	}
+	if (group.rate_guard_selected && group.local_group_status !== 'active') {
+		const detail = '匹配的本地分组当前未启用'
+		return { label: '本地分组不可用', tone: 'danger', detail, title: detail }
+	}
+	if (group.rate_guard_selected && group.group_sync_status === 'never') {
+		const detail = '供应商尚未完成首次分组同步'
+		return { label: '等待首次同步', tone: 'pending', detail, title: detail }
+	}
+	if (group.rate_guard_selected && group.group_sync_status === 'running') {
+		const detail = '供应商分组数据正在同步'
+		return { label: '分组同步中', tone: 'pending', detail, title: detail }
+	}
+	if (group.rate_guard_selected && group.group_sync_status === 'failed') {
+		const detail = '供应商最近一次分组同步失败'
+		return { label: '分组同步失败', tone: 'danger', detail, title: detail }
+	}
+	if (group.rate_guard_selected && group.group_sync_status !== 'success') {
+		const detail = `未知的分组同步状态：${group.group_sync_status || '空'}`
+		return { label: '同步状态异常', tone: 'danger', detail, title: detail }
 	}
 	if (group.rate_guard_selected && group.rate_guard_selection_mode === 'auto') {
 		return { label: '自动守护', tone: 'auto' }
@@ -1076,8 +1148,17 @@ function rateGuardStatus(group: SupplierProviderGroup): { label: string; tone: s
 	if (!group.local_group_id) {
 		return { label: '未匹配', tone: 'muted' }
 	}
-	if (group.local_group_rate_guard_group_id && group.local_group_rate_guard_group_id !== group.id) {
-		return { label: '非守护源', tone: 'muted' }
+	if (hasOtherRateGuard(group)) {
+		const detail = [
+			group.local_group_rate_guard_provider_name,
+			group.local_group_rate_guard_group_name,
+		].filter(Boolean).join(' / ')
+		return {
+			label: '已由其它分组守护',
+			tone: 'muted',
+			detail: detail || '其它上游分组',
+			title: '当前本地分组由该上游分组执行倍率守护，本分组不会参与守护',
+		}
 	}
 	if (group.local_group_active_mapping_count > 1) {
 		return { label: '可设守护', tone: 'pending' }
@@ -1446,6 +1527,59 @@ function errorMessage(err: unknown, fallback: string): string {
 .sp-panel-signals .good { color: var(--sp-green); }
 .sp-panel-signals .warn { color: var(--sp-amber); }
 
+.sp-attention-shortcuts {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding: 0.55rem 0.75rem;
+  border-top: 1px solid var(--sp-soft);
+  border-bottom: 1px solid var(--sp-soft);
+  background: color-mix(in srgb, var(--sp-panel-2) 72%, var(--sp-panel));
+  scrollbar-width: thin;
+}
+
+.sp-attention-shortcut {
+  display: inline-flex;
+  min-width: 4.75rem;
+  min-height: 2rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.375rem;
+  background: var(--sp-panel);
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+  white-space: nowrap;
+}
+
+.sp-attention-shortcut:hover {
+  border-color: color-mix(in srgb, var(--sp-amber) 42%, var(--sp-line));
+  color: var(--sp-amber);
+}
+
+.sp-attention-shortcut:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--sp-cyan) 60%, transparent);
+  outline-offset: 2px;
+}
+
+.sp-attention-shortcut.active {
+  border-color: color-mix(in srgb, var(--sp-amber) 58%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-amber) 9%, var(--sp-panel));
+  color: var(--sp-amber);
+}
+
+.sp-attention-shortcut:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
 .sp-table-shell {
   display: flex;
   height: min(64vh, 680px);
@@ -1627,6 +1761,24 @@ function errorMessage(err: unknown, fallback: string): string {
 	border-radius: 0.375rem;
 	font-size: 0.72rem;
 	font-weight: 650;
+	white-space: nowrap;
+}
+
+.sp-guard-state-stack,
+.sp-guard-detail {
+	display: grid;
+	justify-items: start;
+	gap: 0.3rem;
+}
+
+.sp-guard-state-stack small,
+.sp-guard-detail small {
+	max-width: 11rem;
+	overflow: hidden;
+	color: var(--sp-muted);
+	font-size: 0.68rem;
+	line-height: 1.3;
+	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
@@ -1920,6 +2072,7 @@ function errorMessage(err: unknown, fallback: string): string {
   .sp-provider-shortcut {
     max-width: 7.5rem;
   }
+  .sp-attention-shortcuts { padding-inline: 0.55rem; }
   .sp-table-shell { height: auto; min-height: 0; overflow: visible; }
   .sp-panel-signals { width: 100%; justify-content: space-between; }
   .sp-row-actions { flex-wrap: wrap; justify-content: flex-end; }

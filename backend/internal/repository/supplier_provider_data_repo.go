@@ -121,6 +121,8 @@ SELECT g.id, g.provider_id, p.name AS provider_name, g.upstream_group_key, g.nam
 	   s.last_group_sync_at,
 	   COALESCE(guard_state.active_mapping_count, 0) AS local_group_active_mapping_count,
 	   guard_state.rate_guard_group_id AS local_group_rate_guard_group_id,
+	   COALESCE(guardian_group.name, '') AS local_group_rate_guard_group_name,
+	   COALESCE(guardian_provider.name, '') AS local_group_rate_guard_provider_name,
        COALESCE(COUNT(a.id) FILTER (WHERE a.active = TRUE), 0) AS account_count,
        g.last_seen_at, g.inactive_at
 FROM supplier_provider_groups g
@@ -135,8 +137,10 @@ LEFT JOIN (
   WHERE local_group_id IS NOT NULL
   GROUP BY local_group_id
 ) guard_state ON guard_state.local_group_id = g.local_group_id
+LEFT JOIN supplier_provider_groups guardian_group ON guardian_group.id = guard_state.rate_guard_group_id
+LEFT JOIN supplier_providers guardian_provider ON guardian_provider.id = guardian_group.provider_id
 LEFT JOIN supplier_provider_accounts a ON a.provider_id = g.provider_id AND a.group_key = g.upstream_group_key
-WHERE `+where+fmt.Sprintf(" GROUP BY g.id, p.name, lg.id, s.group_sync_status, s.last_group_sync_at, guard_state.active_mapping_count, guard_state.rate_guard_group_id ORDER BY %s LIMIT $%d OFFSET $%d", supplierProviderGroupOrderBy(params), len(args)+1, len(args)+2), queryArgs...)
+WHERE `+where+fmt.Sprintf(" GROUP BY g.id, p.name, lg.id, s.group_sync_status, s.last_group_sync_at, guard_state.active_mapping_count, guard_state.rate_guard_group_id, guardian_group.id, guardian_provider.id ORDER BY %s LIMIT $%d OFFSET $%d", supplierProviderGroupOrderBy(params), len(args)+1, len(args)+2), queryArgs...)
 	if err != nil {
 		return service.SupplierProviderGroupListResult{}, fmt.Errorf("query supplier provider groups: %w", err)
 	}
@@ -941,6 +945,7 @@ func scanSupplierProviderGroup(scanner supplierProviderGroupScanner) (service.Su
 		&rateGuardLastSnapshotAt, &rateGuardLastCheckedAt,
 		&item.GroupSyncStatus, &lastGroupSyncAt,
 		&item.LocalGroupActiveMappingCount, &localGroupRateGuardGroupID,
+		&item.LocalGroupRateGuardGroupName, &item.LocalGroupRateGuardProviderName,
 		&item.AccountCount, &item.LastSeenAt, &inactiveAt)
 	if err != nil {
 		return service.SupplierProviderGroup{}, err

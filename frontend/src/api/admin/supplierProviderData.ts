@@ -86,6 +86,8 @@ export interface SupplierProviderGroup {
 	 rate_guard_last_checked_at?: string
 	 local_group_active_mapping_count: number
 	 local_group_rate_guard_group_id?: number
+	 local_group_rate_guard_group_name?: string
+	 local_group_rate_guard_provider_name?: string
 	 group_sync_status: 'never' | 'running' | 'success' | 'failed'
 	 last_group_sync_at?: string
   account_count: number

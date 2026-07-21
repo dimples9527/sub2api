@@ -156,7 +156,7 @@ func TestSupplierProviderDataRepositoryListGroupsIncludesFilteredSummary(t *test
 		WillReturnRows(sqlmock.NewRows([]string{
 			"group_count", "account_count", "linked_group_count", "unlinked_group_count", "rate_risk_count",
 		}).AddRow(int64(4), int64(9), int64(3), int64(1), int64(2)))
-	mock.ExpectQuery(`(?s)LEFT JOIN groups lg ON lg\.id = g\.local_group_id.*ORDER BY LOWER\(lg\.name\) DESC NULLS LAST, g\.id ASC`).
+	mock.ExpectQuery(`(?s)LEFT JOIN groups lg ON lg\.id = g\.local_group_id.*LEFT JOIN supplier_provider_groups guardian_group ON guardian_group\.id = guard_state\.rate_guard_group_id.*LEFT JOIN supplier_providers guardian_provider ON guardian_provider\.id = guardian_group\.provider_id.*ORDER BY LOWER\(lg\.name\) DESC NULLS LAST, g\.id ASC`).
 		WithArgs(int64(42), active, "%vip%", 20, 20).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "provider_id", "provider_name", "upstream_group_key", "name",
@@ -164,12 +164,12 @@ func TestSupplierProviderDataRepositoryListGroupsIncludesFilteredSummary(t *test
 			"local_group_platform", "local_rate_multiplier", "local_group_status", "auto_match_ignored",
 			"auto_match_status", "matched_upstream_name", "name_change_pending",
 			"rate_guard_selected", "rate_guard_selection_mode", "rate_guard_last_snapshot_at", "rate_guard_last_checked_at",
-			"group_sync_status", "last_group_sync_at", "local_group_active_mapping_count", "local_group_rate_guard_group_id", "account_count",
+			"group_sync_status", "last_group_sync_at", "local_group_active_mapping_count", "local_group_rate_guard_group_id", "local_group_rate_guard_group_name", "local_group_rate_guard_provider_name", "account_count",
 			"last_seen_at", "inactive_at",
 		}).AddRow(
 			int64(7), int64(42), "Supplier A", "group-1", "VIP", 2.5, "active", true,
 			int64(12), "VIP 本地", "openai", 3.0, "active", false, "manual", "VIP", false,
-			true, "manual", now.Add(-time.Minute), now, "success", now.Add(-time.Minute), 2, int64(7), 5, now, nil,
+			true, "manual", now.Add(-time.Minute), now, "success", now.Add(-time.Minute), 2, int64(7), "VIP Guardian", "Supplier B", 5, now, nil,
 		))
 
 	result, err := repo.ListGroups(context.Background(), service.SupplierProviderDataListParams{
@@ -204,6 +204,8 @@ func TestSupplierProviderDataRepositoryListGroupsIncludesFilteredSummary(t *test
 	require.NotNil(t, result.Items[0].LastGroupSyncAt)
 	require.Equal(t, 2, result.Items[0].LocalGroupActiveMappingCount)
 	require.Equal(t, int64(7), *result.Items[0].LocalGroupRateGuardGroupID)
+	require.Equal(t, "VIP Guardian", result.Items[0].LocalGroupRateGuardGroupName)
+	require.Equal(t, "Supplier B", result.Items[0].LocalGroupRateGuardProviderName)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -331,12 +333,12 @@ func TestSupplierProviderDataRepositoryListGroupsKeepsSummaryOutsideStatusFilter
 			"local_group_platform", "local_rate_multiplier", "local_group_status", "auto_match_ignored",
 			"auto_match_status", "matched_upstream_name", "name_change_pending",
 			"rate_guard_selected", "rate_guard_selection_mode", "rate_guard_last_snapshot_at", "rate_guard_last_checked_at",
-			"group_sync_status", "last_group_sync_at", "local_group_active_mapping_count", "local_group_rate_guard_group_id", "account_count",
+			"group_sync_status", "last_group_sync_at", "local_group_active_mapping_count", "local_group_rate_guard_group_id", "local_group_rate_guard_group_name", "local_group_rate_guard_provider_name", "account_count",
 			"last_seen_at", "inactive_at",
 		}).AddRow(
 			int64(7), int64(42), "Supplier A", "group-1", "VIP", 2.5, "active", true,
 			int64(12), "VIP 本地", "openai", 2.6, "active", false, "manual", "VIP", false,
-			false, "", nil, nil, "never", nil, 2, nil, 5, now, nil,
+			false, "", nil, nil, "never", nil, 2, nil, "", "", 5, now, nil,
 		))
 
 	result, err := repo.ListGroups(context.Background(), service.SupplierProviderDataListParams{
