@@ -15,20 +15,32 @@ var ErrSupplierProviderGroupNotFound = infraerrors.NotFound("SUPPLIER_PROVIDER_G
 var ErrSupplierLocalGroupNotFound = infraerrors.NotFound("SUPPLIER_LOCAL_GROUP_NOT_FOUND", "active local group not found")
 
 type SupplierProviderAccount struct {
-	ID             int64      `json:"id"`
-	ProviderID     int64      `json:"provider_id"`
-	ProviderName   string     `json:"provider_name"`
-	UpstreamKey    string     `json:"upstream_account_key"`
-	Name           string     `json:"name"`
-	Status         string     `json:"status"`
-	GroupKey       string     `json:"group_key"`
-	GroupName      string     `json:"group_name"`
-	Platform       string     `json:"platform,omitempty"`
-	RateMultiplier float64    `json:"rate_multiplier"`
-	RawStatus      string     `json:"raw_status"`
-	Active         bool       `json:"active"`
-	LastSeenAt     time.Time  `json:"last_seen_at"`
-	InactiveAt     *time.Time `json:"inactive_at,omitempty"`
+	ID                         int64      `json:"id"`
+	ProviderID                 int64      `json:"provider_id"`
+	ProviderName               string     `json:"provider_name"`
+	UpstreamKey                string     `json:"upstream_account_key"`
+	Name                       string     `json:"name"`
+	Status                     string     `json:"status"`
+	GroupKey                   string     `json:"group_key"`
+	GroupName                  string     `json:"group_name"`
+	Platform                   string     `json:"platform,omitempty"`
+	RateMultiplier             float64    `json:"rate_multiplier"`
+	RawStatus                  string     `json:"raw_status"`
+	Active                     bool       `json:"active"`
+	LastSeenAt                 time.Time  `json:"last_seen_at"`
+	InactiveAt                 *time.Time `json:"inactive_at,omitempty"`
+	LocalAccountMatchStatus    string     `json:"local_account_match_status"`
+	LocalAccountMatchCount     int        `json:"local_account_match_count"`
+	LocalAccountID             *int64     `json:"local_account_id,omitempty"`
+	LocalAccountName           string     `json:"local_account_name,omitempty"`
+	LocalAccountPriority       *int       `json:"local_account_priority,omitempty"`
+	LocalAccountStatus         string     `json:"local_account_status,omitempty"`
+	LocalAccountSchedulable    *bool      `json:"local_account_schedulable,omitempty"`
+	LocalAccountLastTestStatus string     `json:"local_account_last_test_status,omitempty"`
+	LocalAccountLastTestedAt   string     `json:"local_account_last_tested_at,omitempty"`
+	LocalAccountLastTestError  string     `json:"local_account_last_test_error,omitempty"`
+	SupplierCurrentBalance     float64    `json:"supplier_current_balance"`
+	SupplierTodayCost          float64    `json:"supplier_today_cost"`
 }
 
 type SupplierProviderGroup struct {

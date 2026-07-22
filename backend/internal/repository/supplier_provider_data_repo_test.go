@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,6 +26,73 @@ type supplierProviderNonNilArg struct{}
 
 func (supplierProviderNonNilArg) Match(value driver.Value) bool {
 	return value != nil
+}
+
+var supplierProviderAccountListColumns = []string{
+	"id", "provider_id", "provider_name", "upstream_account_key", "name", "status",
+	"group_key", "group_name", "platform", "rate_multiplier", "raw_status", "active",
+	"last_seen_at", "inactive_at",
+	"local_account_match_status", "local_account_match_count",
+	"local_account_id", "local_account_name", "local_account_priority",
+	"local_account_status", "local_account_schedulable",
+	"local_account_last_test_status", "local_account_last_tested_at", "local_account_last_test_error",
+	"supplier_current_balance", "supplier_today_cost",
+}
+
+// supplierProviderAccountListQueryContractPattern 约束列表查询的字段顺序与匹配关联，不能替代真实 PostgreSQL 行为测试。
+func supplierProviderAccountListQueryContractPattern(whereSQL, limitPlaceholder, offsetPlaceholder string) string {
+	querySQL := `
+SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.name, a.status,
+       a.group_key, a.group_name,
+       COALESCE((
+         SELECT local_group.platform
+         FROM supplier_provider_groups mapped_group
+         JOIN groups local_group ON local_group.id = mapped_group.local_group_id AND local_group.deleted_at IS NULL
+         WHERE mapped_group.provider_id = a.provider_id
+           AND mapped_group.upstream_group_key = a.group_key
+         LIMIT 1
+       ), '') AS platform,
+       a.rate_multiplier, a.raw_status, a.active,
+       a.last_seen_at, a.inactive_at,
+       CASE
+         WHEN local_match.match_count = 0 THEN 'unmatched'
+         WHEN local_match.match_count = 1 THEN 'matched'
+         ELSE 'conflict'
+       END AS local_account_match_status,
+       local_match.match_count AS local_account_match_count,
+       matched_account.id AS local_account_id,
+       COALESCE(matched_account.name, '') AS local_account_name,
+       matched_account.priority AS local_account_priority,
+       COALESCE(matched_account.status, '') AS local_account_status,
+       matched_account.schedulable AS local_account_schedulable,
+       COALESCE(matched_account.extra->>'last_test_status', '') AS local_account_last_test_status,
+       COALESCE(matched_account.extra->>'last_tested_at', '') AS local_account_last_tested_at,
+       COALESCE(matched_account.extra->>'last_test_error', '') AS local_account_last_test_error,
+       COALESCE(runtime.current_balance, 0) AS supplier_current_balance,
+       COALESCE(runtime.today_cost, 0) AS supplier_today_cost
+FROM supplier_provider_accounts a
+JOIN supplier_providers p ON p.id = a.provider_id
+LEFT JOIN supplier_provider_runtime_stats runtime ON runtime.provider_id = p.id
+LEFT JOIN LATERAL (
+  SELECT COUNT(*) AS match_count,
+         MIN(local_account.id) AS local_account_id
+  FROM accounts local_account
+  WHERE local_account.deleted_at IS NULL
+    AND regexp_replace(lower(local_account.name), '[^[:alnum:]]', '', 'g')
+        = regexp_replace(
+            lower(p.account_name_prefix || a.name),
+            '[^[:alnum:]]',
+            '',
+            'g'
+          )
+) local_match ON TRUE
+LEFT JOIN accounts matched_account
+  ON matched_account.id = local_match.local_account_id
+ AND local_match.match_count = 1
+WHERE ` + whereSQL + `
+ORDER BY a.active DESC, a.last_seen_at DESC, a.id ASC LIMIT ` + limitPlaceholder + ` OFFSET ` + offsetPlaceholder
+
+	return "^" + regexp.QuoteMeta(strings.Join(strings.Fields(querySQL), " ")) + "$"
 }
 
 func TestSupplierProviderDataRepositoryReplaceAccountsUpsertsAndDeactivatesMissing(t *testing.T) {
@@ -122,12 +190,16 @@ func TestSupplierProviderDataRepositoryListAccountsPaginates(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM supplier_provider_accounts a")).
 		WithArgs(int64(42), active, "%pri%").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
-	mock.ExpectQuery(regexp.QuoteMeta("FROM supplier_provider_accounts a")).
+	mock.ExpectQuery(supplierProviderAccountListQueryContractPattern(
+		"p.deleted_at IS NULL AND a.provider_id = $1 AND a.active = $2 AND (a.name ILIKE $3 OR a.upstream_account_key ILIKE $3)",
+		"$4",
+		"$5",
+	)).
 		WithArgs(int64(42), active, "%pri%", 20, 20).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "provider_id", "provider_name", "upstream_account_key", "name", "status",
-			"group_key", "group_name", "platform", "rate_multiplier", "raw_status", "active", "last_seen_at", "inactive_at",
-		}).AddRow(int64(7), int64(42), "Supplier A", "account-1", "Primary", "active", "group-1", "VIP", "openai", 2.5, "active", true, now, nil))
+		WillReturnRows(sqlmock.NewRows(supplierProviderAccountListColumns).AddRow(
+			int64(7), int64(42), "Supplier A", "account-1", "Primary", "active", "group-1", "VIP", "openai", 2.5, "active", true, now, nil,
+			"matched", 1, int64(101), "prefix-key-1", 80, "active", true, "success", "2026-07-16T09:30:00Z", "upstream authentication failed", 12.5, 3.25,
+		))
 
 	result, err := repo.ListAccounts(context.Background(), service.SupplierProviderDataListParams{
 		ProviderID: 42,
@@ -144,6 +216,80 @@ func TestSupplierProviderDataRepositoryListAccountsPaginates(t *testing.T) {
 	require.Len(t, result.Items, 1)
 	require.Equal(t, "Primary", result.Items[0].Name)
 	require.Equal(t, "openai", result.Items[0].Platform)
+	require.Equal(t, "matched", result.Items[0].LocalAccountMatchStatus)
+	require.Equal(t, 1, result.Items[0].LocalAccountMatchCount)
+	require.NotNil(t, result.Items[0].LocalAccountID)
+	require.Equal(t, int64(101), *result.Items[0].LocalAccountID)
+	require.Equal(t, "prefix-key-1", result.Items[0].LocalAccountName)
+	require.NotNil(t, result.Items[0].LocalAccountPriority)
+	require.Equal(t, 80, *result.Items[0].LocalAccountPriority)
+	require.Equal(t, "active", result.Items[0].LocalAccountStatus)
+	require.NotNil(t, result.Items[0].LocalAccountSchedulable)
+	require.True(t, *result.Items[0].LocalAccountSchedulable)
+	require.Equal(t, "success", result.Items[0].LocalAccountLastTestStatus)
+	require.Equal(t, "2026-07-16T09:30:00Z", result.Items[0].LocalAccountLastTestedAt)
+	require.Equal(t, "upstream authentication failed", result.Items[0].LocalAccountLastTestError)
+	require.Equal(t, 12.5, result.Items[0].SupplierCurrentBalance)
+	require.Equal(t, 3.25, result.Items[0].SupplierTodayCost)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryListAccountsSQLContractMapsUnmatchedAndConflictRows(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	now := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM supplier_provider_accounts a")).
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(2)))
+	mock.ExpectQuery(supplierProviderAccountListQueryContractPattern(
+		"p.deleted_at IS NULL AND a.provider_id = $1",
+		"$2",
+		"$3",
+	)).
+		WithArgs(int64(42), 20, 0).
+		WillReturnRows(sqlmock.NewRows(supplierProviderAccountListColumns).
+			AddRow(
+				int64(7), int64(42), "Supplier A", "missing-key", "Missing", "active", "group-1", "VIP", "openai", 2.5, "active", true, now, nil,
+				"unmatched", 0, nil, "", nil, "", nil, "", "", "", 12.5, 3.25,
+			).
+			AddRow(
+				int64(8), int64(42), "Supplier A", "duplicate-key", "Duplicate", "active", "group-2", "Standard", "openai", 1.5, "active", true, now, nil,
+				"conflict", 2, nil, "", nil, "", nil, "", "", "", 12.5, 3.25,
+			))
+
+	result, err := repo.ListAccounts(context.Background(), service.SupplierProviderDataListParams{
+		ProviderID: 42,
+		Page:       1,
+		PageSize:   20,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, int64(2), result.Total)
+	require.Len(t, result.Items, 2)
+
+	unmatched := result.Items[0]
+	require.Equal(t, "unmatched", unmatched.LocalAccountMatchStatus)
+	require.Zero(t, unmatched.LocalAccountMatchCount)
+	require.Nil(t, unmatched.LocalAccountID)
+	require.Empty(t, unmatched.LocalAccountName)
+	require.Nil(t, unmatched.LocalAccountPriority)
+	require.Empty(t, unmatched.LocalAccountStatus)
+	require.Nil(t, unmatched.LocalAccountSchedulable)
+	require.Empty(t, unmatched.LocalAccountLastTestStatus)
+	require.Empty(t, unmatched.LocalAccountLastTestedAt)
+	require.Empty(t, unmatched.LocalAccountLastTestError)
+
+	conflict := result.Items[1]
+	require.Equal(t, "conflict", conflict.LocalAccountMatchStatus)
+	require.Equal(t, 2, conflict.LocalAccountMatchCount)
+	require.Nil(t, conflict.LocalAccountID)
+	require.Empty(t, conflict.LocalAccountName)
+	require.Nil(t, conflict.LocalAccountPriority)
+	require.Empty(t, conflict.LocalAccountStatus)
+	require.Nil(t, conflict.LocalAccountSchedulable)
+	require.Empty(t, conflict.LocalAccountLastTestStatus)
+	require.Empty(t, conflict.LocalAccountLastTestedAt)
+	require.Empty(t, conflict.LocalAccountLastTestError)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

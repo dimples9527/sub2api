@@ -41,9 +41,42 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
          LIMIT 1
        ), '') AS platform,
        a.rate_multiplier, a.raw_status, a.active,
-       a.last_seen_at, a.inactive_at
+       a.last_seen_at, a.inactive_at,
+       CASE
+         WHEN local_match.match_count = 0 THEN 'unmatched'
+         WHEN local_match.match_count = 1 THEN 'matched'
+         ELSE 'conflict'
+       END AS local_account_match_status,
+       local_match.match_count AS local_account_match_count,
+       matched_account.id AS local_account_id,
+       COALESCE(matched_account.name, '') AS local_account_name,
+       matched_account.priority AS local_account_priority,
+       COALESCE(matched_account.status, '') AS local_account_status,
+       matched_account.schedulable AS local_account_schedulable,
+       COALESCE(matched_account.extra->>'last_test_status', '') AS local_account_last_test_status,
+       COALESCE(matched_account.extra->>'last_tested_at', '') AS local_account_last_tested_at,
+       COALESCE(matched_account.extra->>'last_test_error', '') AS local_account_last_test_error,
+       COALESCE(runtime.current_balance, 0) AS supplier_current_balance,
+       COALESCE(runtime.today_cost, 0) AS supplier_today_cost
 FROM supplier_provider_accounts a
 JOIN supplier_providers p ON p.id = a.provider_id
+LEFT JOIN supplier_provider_runtime_stats runtime ON runtime.provider_id = p.id
+LEFT JOIN LATERAL (
+  SELECT COUNT(*) AS match_count,
+         MIN(local_account.id) AS local_account_id
+  FROM accounts local_account
+  WHERE local_account.deleted_at IS NULL
+    AND regexp_replace(lower(local_account.name), '[^[:alnum:]]', '', 'g')
+        = regexp_replace(
+            lower(p.account_name_prefix || a.name),
+            '[^[:alnum:]]',
+            '',
+            'g'
+          )
+) local_match ON TRUE
+LEFT JOIN accounts matched_account
+  ON matched_account.id = local_match.local_account_id
+ AND local_match.match_count = 1
 WHERE `+where+fmt.Sprintf(" ORDER BY a.active DESC, a.last_seen_at DESC, a.id ASC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2), queryArgs...)
 	if err != nil {
 		return service.SupplierProviderAccountListResult{}, fmt.Errorf("query supplier provider accounts: %w", err)
@@ -1032,14 +1065,34 @@ type supplierProviderAccountScanner interface{ Scan(dest ...any) error }
 func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (service.SupplierProviderAccount, error) {
 	var item service.SupplierProviderAccount
 	var inactiveAt sql.NullTime
+	var localAccountID sql.NullInt64
+	var localAccountPriority sql.NullInt64
+	var localAccountSchedulable sql.NullBool
 	err := scanner.Scan(&item.ID, &item.ProviderID, &item.ProviderName, &item.UpstreamKey,
 		&item.Name, &item.Status, &item.GroupKey, &item.GroupName, &item.Platform, &item.RateMultiplier,
-		&item.RawStatus, &item.Active, &item.LastSeenAt, &inactiveAt)
+		&item.RawStatus, &item.Active, &item.LastSeenAt, &inactiveAt,
+		&item.LocalAccountMatchStatus, &item.LocalAccountMatchCount,
+		&localAccountID, &item.LocalAccountName, &localAccountPriority,
+		&item.LocalAccountStatus, &localAccountSchedulable,
+		&item.LocalAccountLastTestStatus, &item.LocalAccountLastTestedAt, &item.LocalAccountLastTestError,
+		&item.SupplierCurrentBalance, &item.SupplierTodayCost)
 	if err != nil {
 		return service.SupplierProviderAccount{}, err
 	}
 	if inactiveAt.Valid {
 		item.InactiveAt = &inactiveAt.Time
+	}
+	if localAccountID.Valid {
+		value := localAccountID.Int64
+		item.LocalAccountID = &value
+	}
+	if localAccountPriority.Valid {
+		value := int(localAccountPriority.Int64)
+		item.LocalAccountPriority = &value
+	}
+	if localAccountSchedulable.Valid {
+		value := localAccountSchedulable.Bool
+		item.LocalAccountSchedulable = &value
 	}
 	return item, nil
 }

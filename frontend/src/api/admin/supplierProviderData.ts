@@ -61,6 +61,18 @@ export interface SupplierProviderAccount {
   active: boolean
   last_seen_at: string
   inactive_at?: string
+  local_account_match_status: 'unmatched' | 'matched' | 'conflict'
+  local_account_match_count: number
+  local_account_id?: number
+  local_account_name?: string
+  local_account_priority?: number
+  local_account_status?: string
+  local_account_schedulable?: boolean
+  local_account_last_test_status?: string
+  local_account_last_tested_at?: string
+  local_account_last_test_error?: string
+  supplier_current_balance: number
+  supplier_today_cost: number
 }
 
 export interface SupplierProviderGroup {

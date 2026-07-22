@@ -1,14 +1,475 @@
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import { defineComponent, h } from 'vue'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import SupplierAccountsView from './SupplierAccountsView.vue'
+
+const supplierAccountMocks = vi.hoisted(() => ({
+  listProviders: vi.fn(),
+  listAccounts: vi.fn(),
+  setSchedulable: vi.fn(),
+  showError: vi.fn(),
+}))
+
+vi.mock('@/api/admin', () => ({
+  adminAPI: {
+    accounts: {
+      setSchedulable: supplierAccountMocks.setSchedulable,
+    },
+  },
+}))
+
+vi.mock('@/stores/app', () => ({
+  useAppStore: () => ({
+    showError: supplierAccountMocks.showError,
+  }),
+}))
+
+vi.mock('@/api/admin/supplierProviders', () => ({
+  default: {
+    list: supplierAccountMocks.listProviders,
+  },
+}))
+
+vi.mock('@/api/admin/supplierProviderData', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/api/admin/supplierProviderData')>()
+  return {
+    ...actual,
+    listSupplierAccounts: supplierAccountMocks.listAccounts,
+    default: {
+      ...actual.default,
+      listSupplierAccounts: supplierAccountMocks.listAccounts,
+    },
+  }
+})
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
 
 const groupsSource = readFileSync(resolve(currentDir, 'SupplierGroupsView.vue'), 'utf-8')
 const accountsSource = readFileSync(resolve(currentDir, 'SupplierAccountsView.vue'), 'utf-8')
+const supplierProviderDataSource = readFileSync(
+  resolve(currentDir, '../../../api/admin/supplierProviderData.ts'),
+  'utf-8'
+)
+
+const runtimeCellKeys = [
+  'provider_name',
+  'local_account_name',
+  'local_account_priority',
+  'rate_multiplier',
+  'local_account_status',
+  'local_account_schedulable',
+  'local_account_last_test_status',
+  'supplier_current_balance',
+  'supplier_today_cost',
+  'actions',
+]
+
+const DataTableStub = defineComponent({
+  props: {
+    data: {
+      type: Array,
+      default: () => [],
+    },
+  },
+  emits: ['row-click'],
+  setup(props, { emit, slots }) {
+    return () => h('div', { class: 'data-table-stub' }, props.data.flatMap((row, index) => [
+      h('button', {
+        class: 'account-row-trigger',
+        type: 'button',
+        onClick: () => emit('row-click', row),
+      }, `账号行 ${index + 1}`),
+      ...runtimeCellKeys.map(key => h(
+        'div',
+        { class: `runtime-cell runtime-cell-${key}`, 'data-row-index': index },
+        slots[`cell-${key}`]?.({ row })
+      )),
+    ]))
+  },
+})
+
+const SupplierDrawerStub = defineComponent({
+  props: {
+    show: Boolean,
+    title: String,
+  },
+  setup(props, { slots }) {
+    return () => props.show
+      ? h('aside', { class: 'supplier-drawer-stub' }, [
+          h('h2', props.title),
+          slots.default?.(),
+        ])
+      : null
+  },
+})
+
+const BaseDialogStub = defineComponent({
+  props: {
+    show: Boolean,
+    title: String,
+  },
+  emits: ['close'],
+  setup(props, { slots }) {
+    return () => props.show
+      ? h('section', { class: 'base-dialog-stub' }, [
+          h('h2', props.title),
+          slots.default?.(),
+        ])
+      : null
+  },
+})
+
+const SupplierModuleLayoutStub = defineComponent({
+  setup(_props, { slots }) {
+    return () => h('main', slots.default?.())
+  },
+})
+
+const InputStub = defineComponent({
+  inheritAttrs: false,
+  setup(_props, { attrs }) {
+    return () => h('input', { ...attrs, type: 'text' })
+  },
+})
+
+const SelectStub = defineComponent({
+  inheritAttrs: false,
+  setup(_props, { attrs }) {
+    return () => h('button', {
+      ...attrs,
+      class: ['select-trigger', attrs.class],
+      type: 'button',
+      'aria-label': 'Select option',
+    }, '筛选控件')
+  },
+})
+
+const PaginationStub = defineComponent({
+  setup() {
+    return () => h('div')
+  },
+})
+
+const testAccounts = [
+  {
+    id: 1,
+    provider_id: 11,
+    provider_name: '供应商 A',
+    upstream_account_key: 'key-a',
+    name: '上游账号 A',
+    status: 'active',
+    group_key: 'group-a',
+    group_name: '分组 A',
+    platform: 'openai',
+    rate_multiplier: 1,
+    raw_status: 'active',
+    active: true,
+    last_seen_at: '2026-07-22T01:00:00Z',
+    local_account_match_status: 'matched',
+    local_account_match_count: 1,
+    local_account_id: 101,
+    local_account_name: '本地账号 A',
+    local_account_priority: 0,
+    local_account_status: 'active',
+    local_account_schedulable: false,
+    local_account_last_test_status: 'success',
+    local_account_last_tested_at: '2026-07-22T02:00:00Z',
+    local_account_last_test_error: '',
+    supplier_current_balance: 0,
+    supplier_today_cost: 0,
+  },
+  {
+    id: 2,
+    provider_id: 11,
+    provider_name: '供应商 A',
+    upstream_account_key: 'key-b',
+    name: '上游账号 B',
+    status: 'active',
+    group_key: 'group-a',
+    group_name: '分组 A',
+    rate_multiplier: 1,
+    raw_status: 'active',
+    active: true,
+    last_seen_at: '2026-07-22T01:00:00Z',
+    local_account_match_status: 'unmatched',
+    local_account_match_count: 0,
+    local_account_name: '不应展示的本地账号',
+    local_account_priority: 99,
+    local_account_schedulable: true,
+    supplier_current_balance: 12.34,
+    supplier_today_cost: 1.23,
+  },
+  {
+    id: 3,
+    provider_id: 11,
+    provider_name: '供应商 A',
+    upstream_account_key: 'key-c',
+    name: '上游账号 C',
+    status: 'active',
+    group_key: 'group-a',
+    group_name: '分组 A',
+    rate_multiplier: 1,
+    raw_status: 'active',
+    active: true,
+    last_seen_at: '2026-07-22T01:00:00Z',
+    local_account_match_status: 'conflict',
+    local_account_match_count: 2,
+    supplier_current_balance: 12.34,
+    supplier_today_cost: 1.23,
+  },
+  {
+    id: 4,
+    provider_id: 11,
+    provider_name: '供应商 A',
+    upstream_account_key: 'key-d',
+    name: '上游账号 D',
+    status: 'active',
+    group_key: 'group-a',
+    group_name: '分组 A',
+    rate_multiplier: 1,
+    raw_status: 'active',
+    active: true,
+    last_seen_at: '2026-07-22T01:00:00Z',
+    local_account_match_status: 'unexpected',
+    local_account_match_count: 0,
+    local_account_name: '异常状态不应展示',
+    local_account_priority: 88,
+    supplier_current_balance: 12.34,
+    supplier_today_cost: 1.23,
+  },
+  {
+    id: 5,
+    provider_id: 12,
+    provider_name: '供应商 B',
+    upstream_account_key: 'key-e',
+    name: '上游账号 E',
+    status: 'active',
+    group_key: 'group-b',
+    group_name: '分组 B',
+    platform: 'anthropic',
+    rate_multiplier: 1.5,
+    raw_status: 'active',
+    active: true,
+    last_seen_at: '2026-07-22T01:00:00Z',
+    local_account_match_status: 'matched',
+    local_account_match_count: 1,
+    local_account_id: 105,
+    local_account_name: '本地账号 E',
+    local_account_priority: 10,
+    local_account_status: 'error',
+    local_account_schedulable: true,
+    local_account_last_test_status: 'failed',
+    local_account_last_tested_at: '2026-07-22T03:00:00Z',
+    local_account_last_test_error: '上游鉴权失败：invalid key',
+    supplier_current_balance: 20,
+    supplier_today_cost: 2,
+  },
+]
+
+async function mountSupplierAccounts() {
+  const wrapper = mount(SupplierAccountsView, {
+    global: {
+      stubs: {
+        SupplierModuleLayout: SupplierModuleLayoutStub,
+        SupplierDrawer: SupplierDrawerStub,
+        BaseDialog: BaseDialogStub,
+        DataTable: DataTableStub,
+        Input: InputStub,
+        Select: SelectStub,
+        Pagination: PaginationStub,
+      },
+    },
+  })
+  await flushPromises()
+  return wrapper
+}
 
 describe('supplier local data views component usage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    supplierAccountMocks.listProviders.mockResolvedValue({ items: [] })
+    supplierAccountMocks.listAccounts.mockResolvedValue({
+      items: testAccounts,
+      total: testAccounts.length,
+      page: 1,
+      page_size: 20,
+    })
+    supplierAccountMocks.setSchedulable.mockImplementation(async (_id, schedulable) => ({
+      schedulable,
+    }))
+  })
+
+  it('renders matching states, false, and zero values from API data', async () => {
+    const wrapper = await mountSupplierAccounts()
+
+    expect(wrapper.get('.runtime-cell-local_account_name[data-row-index="0"]').text())
+      .toContain('本地账号 A')
+    expect(wrapper.get('.runtime-cell-local_account_priority[data-row-index="0"]').text()).toBe('0')
+    expect(wrapper.get('.runtime-cell-local_account_schedulable[data-row-index="0"] button').attributes('title'))
+      .toBe('当前不参与调度，点击启用')
+    expect(wrapper.get('.runtime-cell-supplier_current_balance[data-row-index="0"]').text())
+      .toContain('0.00')
+    expect(wrapper.get('.runtime-cell-supplier_today_cost[data-row-index="0"]').text())
+      .toContain('0.00')
+
+    expect(wrapper.get('.runtime-cell-local_account_name[data-row-index="1"]').text()).toBe('未匹配')
+    expect(wrapper.get('.runtime-cell-local_account_priority[data-row-index="1"]').text()).toBe('—')
+    expect(wrapper.get('.runtime-cell-local_account_schedulable[data-row-index="1"]').text()).toBe('—')
+
+    expect(wrapper.get('.runtime-cell-local_account_name[data-row-index="2"]').text())
+      .toBe('匹配冲突（2）')
+    expect(wrapper.get('.runtime-cell-local_account_name[data-row-index="3"]').text()).toBe('—')
+    expect(wrapper.get('.runtime-cell-local_account_priority[data-row-index="3"]').text()).toBe('—')
+
+    wrapper.unmount()
+  })
+
+  it('uses stable supplier colors, hides the supplier platform subtitle, and colors rates by platform', async () => {
+    const wrapper = await mountSupplierAccounts()
+    const providerCells = wrapper.findAll('.sp-provider-cell')
+
+    expect(providerCells[0].classes()).not.toEqual(providerCells[4].classes())
+    expect(providerCells[0].text()).not.toContain('OpenAI')
+    expect(providerCells[4].text()).not.toContain('Anthropic')
+    expect(wrapper.get('.runtime-cell-rate_multiplier[data-row-index="0"] .sp-account-rate').classes())
+      .toContain('text-emerald-600')
+    expect(wrapper.get('.runtime-cell-rate_multiplier[data-row-index="4"] .sp-account-rate').classes())
+      .toContain('text-orange-600')
+
+    wrapper.unmount()
+  })
+
+  it('shows local account status and test results in Chinese with distinct states', async () => {
+    const wrapper = await mountSupplierAccounts()
+
+    expect(wrapper.get('.runtime-cell-local_account_status[data-row-index="0"]').text()).toBe('正常')
+    expect(wrapper.get('.runtime-cell-local_account_status[data-row-index="4"]').text()).toBe('异常')
+    expect(wrapper.get('.runtime-cell-local_account_last_test_status[data-row-index="0"]').text())
+      .toBe('成功')
+    expect(wrapper.get('.runtime-cell-local_account_last_test_status[data-row-index="0"] .sp-test-status').classes())
+      .toContain('success')
+    expect(wrapper.get('.runtime-cell-local_account_last_test_status[data-row-index="4"]').text())
+      .toBe('失败')
+    expect(wrapper.get('.runtime-cell-local_account_last_test_status[data-row-index="4"] .sp-test-status').classes())
+      .toContain('failed')
+
+    wrapper.unmount()
+  })
+
+  it('toggles the matched local account with the existing account API without opening the drawer', async () => {
+    const wrapper = await mountSupplierAccounts()
+    const toggle = wrapper.get('.runtime-cell-local_account_schedulable[data-row-index="0"] button')
+
+    await toggle.trigger('click')
+    await flushPromises()
+
+    expect(supplierAccountMocks.setSchedulable).toHaveBeenCalledWith(101, true)
+    expect(wrapper.find('.supplier-drawer-stub').exists()).toBe(false)
+    expect(toggle.attributes('title')).toBe('当前参与调度，点击停用')
+    expect(wrapper.find('.runtime-cell-local_account_schedulable[data-row-index="1"] button').exists())
+      .toBe(false)
+    expect(wrapper.find('.runtime-cell-local_account_schedulable[data-row-index="2"] button').exists())
+      .toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('keeps the original schedulable state and reports the API error when toggling fails', async () => {
+    supplierAccountMocks.setSchedulable.mockRejectedValueOnce(new Error('切换失败'))
+    const wrapper = await mountSupplierAccounts()
+    const toggle = wrapper.get('.runtime-cell-local_account_schedulable[data-row-index="0"] button')
+
+    await toggle.trigger('click')
+    await flushPromises()
+
+    expect(toggle.attributes('title')).toBe('当前不参与调度，点击启用')
+    expect(supplierAccountMocks.showError).toHaveBeenCalledWith('切换失败')
+
+    wrapper.unmount()
+  })
+
+  it('opens an existing dialog with the failed test error details', async () => {
+    const wrapper = await mountSupplierAccounts()
+
+    expect(wrapper.find('.base-dialog-stub').exists()).toBe(false)
+    await wrapper.get('.runtime-cell-local_account_last_test_status[data-row-index="4"] button').trigger('click')
+
+    expect(wrapper.get('.base-dialog-stub').text()).toContain('测试失败详情')
+    expect(wrapper.get('.base-dialog-stub').text()).toContain('本地账号 E')
+    expect(wrapper.get('.base-dialog-stub').text()).toContain('上游鉴权失败：invalid key')
+
+    wrapper.unmount()
+  })
+
+  it('opens the account drawer from row clicks and the view action', async () => {
+    const rowClickWrapper = await mountSupplierAccounts()
+    expect(rowClickWrapper.find('.supplier-drawer-stub').exists()).toBe(false)
+    await rowClickWrapper.get('.account-row-trigger').trigger('click')
+    expect(rowClickWrapper.get('.supplier-drawer-stub').text()).toContain('上游账号 A')
+    expect(rowClickWrapper.get('.supplier-drawer-stub').text()).toContain('本地账号 A')
+    rowClickWrapper.unmount()
+
+    const actionWrapper = await mountSupplierAccounts()
+    expect(actionWrapper.find('.supplier-drawer-stub').exists()).toBe(false)
+    await actionWrapper.get('.sp-account-view-button').trigger('click')
+    expect(actionWrapper.get('.supplier-drawer-stub').text()).toContain('上游账号 A')
+    actionWrapper.unmount()
+  })
+
+  it('gives every account filter a visible and distinguishable accessible name', async () => {
+    const wrapper = await mountSupplierAccounts()
+    const filterGroups = wrapper.findAll('.sp-account-filter-control[role="group"]')
+
+    expect(filterGroups).toHaveLength(4)
+    expect(filterGroups.map(group => group.attributes('aria-labelledby'))).toEqual([
+      'supplier-account-search-label',
+      'supplier-account-provider-label',
+      'supplier-account-platform-label',
+      'supplier-account-active-label',
+    ])
+    expect(filterGroups.map(group => group.get('.sp-account-filter-label').text())).toEqual([
+      '账号搜索',
+      '供应商',
+      '平台',
+      '账号状态',
+    ])
+    expect(filterGroups.map(group => {
+      const control = group.find('input, button')
+      return control.attributes('aria-labelledby')
+    })).toEqual([
+      'supplier-account-search-label',
+      'supplier-account-provider-label',
+      'supplier-account-platform-label',
+      'supplier-account-active-label',
+    ])
+
+    wrapper.unmount()
+  })
+
+  it('defines the local-account matching and supplier-summary account API contract', () => {
+    const accountInterface = supplierProviderDataSource.match(
+      /export interface SupplierProviderAccount \{([\s\S]*?)\n\}/
+    )?.[1]
+
+    expect(accountInterface).toBeDefined()
+    ;[
+      "local_account_match_status: 'unmatched' | 'matched' | 'conflict'",
+      'local_account_match_count: number',
+      'local_account_id?: number',
+      'local_account_name?: string',
+      'local_account_priority?: number',
+      'local_account_status?: string',
+      'local_account_schedulable?: boolean',
+      'local_account_last_test_status?: string',
+      'local_account_last_tested_at?: string',
+      'local_account_last_test_error?: string',
+      'supplier_current_balance: number',
+      'supplier_today_cost: number',
+    ].forEach(field => expect(accountInterface).toContain(field))
+  })
   it.each([
     ['SupplierGroupsView', groupsSource],
     ['SupplierAccountsView', accountsSource],
@@ -26,7 +487,30 @@ describe('supplier local data views component usage', () => {
     expect(source).not.toContain('<input')
   })
 
-  it('uses a compact account workbench with standard pagination', () => {
+  it('uses a compact account workbench with the required 13-column order', () => {
+    const accountColumnsSource = accountsSource.match(
+      /const accountColumns: Column\[\] = \[([\s\S]*?)\n\]/
+    )?.[1]
+    const accountColumns = [
+      ...accountColumnsSource!.matchAll(/\{ key: '([^']+)', label: '([^']+)'/g),
+    ].map(([, key, label]) => ({ key, label }))
+
+    expect(accountColumns).toEqual([
+      { key: 'provider_name', label: '供应商' },
+      { key: 'upstream_account_key', label: '上游账号' },
+      { key: 'local_account_name', label: '本地账号' },
+      { key: 'local_account_priority', label: '优先级' },
+      { key: 'rate_multiplier', label: '上游倍率' },
+      { key: 'group_name', label: '账号绑定的分组' },
+      { key: 'local_account_status', label: '本地账号状态' },
+      { key: 'local_account_schedulable', label: '是否调度' },
+      { key: 'local_account_last_test_status', label: '测试结果' },
+      { key: 'local_account_last_tested_at', label: '上次测试时间' },
+      { key: 'supplier_current_balance', label: '余额' },
+      { key: 'supplier_today_cost', label: '今日消费' },
+      { key: 'actions', label: '操作' },
+    ])
+    expect(accountColumnsSource).not.toContain("{ key: 'platform'")
     expect(accountsSource).not.toContain('Local Supplier Accounts')
     expect(accountsSource).not.toContain('<h1>上游账号</h1>')
     expect(accountsSource).not.toContain('只展示已同步到本地数据库的供应商账号')
@@ -38,15 +522,74 @@ describe('supplier local data views component usage', () => {
     expect(accountsSource).toContain('v-model="platformFilter"')
     expect(accountsSource).toContain(':options="platformFilterOptions"')
     expect(accountsSource).toContain('platform: platformFilter.value || undefined')
-    expect(accountsSource).toContain("import { platformBadgeClass, platformLabel } from '@/utils/platformColors'")
-    expect(accountsSource).toContain("{ key: 'platform', label:")
-    expect(accountsSource).toContain('platformBadgeClass(account.platform)')
-    expect(accountsSource).toContain('platformLabel(account.platform)')
+    expect(accountsSource).toContain("import { platformBadgeClass, platformLabel, platformTextClass } from '@/utils/platformColors'")
     expect(accountsSource).toContain('handlePageSizeChange')
     expect(accountsSource).toContain(':show-page-size-selector="false"')
     expect(accountsSource).toContain('@update:page="handlePageChange"')
+    expect(accountsSource).toContain('.sp-account-table-shell :deep(.table-wrapper)')
+    expect(accountsSource).toContain('overflow-x: auto')
+    expect(accountsSource).toContain('@media (max-width: 760px)')
     expect(accountsSource).not.toContain('查询说明')
     expect(accountsSource).not.toContain('sp-grid-2')
+  })
+
+  it('keeps platform labels only in upstream-account secondary information', () => {
+    const providerCellSource = accountsSource.match(
+      /<template #cell-provider_name[\s\S]*?<\/template>/
+    )?.[0]
+    const upstreamAccountCellSource = accountsSource.match(
+      /<template #cell-upstream_account_key[\s\S]*?<\/template>/
+    )?.[0]
+
+    expect(providerCellSource).not.toContain('platformBadgeClass(account.platform)')
+    expect(providerCellSource).not.toContain('platformLabel(account.platform)')
+    expect(providerCellSource).toContain('supplierTone(account.provider_id).chip')
+    expect(upstreamAccountCellSource).toContain('platformBadgeClass(account.platform)')
+    expect(upstreamAccountCellSource).toContain('platformLabel(account.platform)')
+    expect(upstreamAccountCellSource).toContain("account.name || '—'")
+    expect(upstreamAccountCellSource).toContain("account.upstream_account_key || '—'")
+    expect(accountsSource).not.toContain('<template #cell-platform')
+  })
+
+  it('shows local-account matching states, supplier summaries, and explicit missing values', () => {
+    expect(accountsSource).toContain("account.local_account_match_status === 'unmatched'")
+    expect(accountsSource).toContain("account.local_account_match_status === 'conflict'")
+    expect(accountsSource).toContain("v-else-if=\"account.local_account_match_status === 'matched'\"")
+    expect(accountsSource).toContain('未匹配')
+    expect(accountsSource).toContain('匹配冲突（{{ account.local_account_match_count }}）')
+    expect(accountsSource).toContain('isMatchedLocalAccount(account)')
+    expect(accountsSource).toContain('handleToggleSchedulable(account)')
+    expect(accountsSource).toContain('adminAPI.accounts.setSchedulable')
+    expect(accountsSource).toContain('formatCNY(account.supplier_current_balance)')
+    expect(accountsSource).toContain('formatCNY(account.supplier_today_cost)')
+    expect(accountsSource).toContain("currency: 'CNY'")
+    expect(accountsSource.match(/供应商汇总/g)?.length).toBeGreaterThanOrEqual(2)
+    expect(accountsSource).toContain("if (value === null || value === undefined || value === '') return '—'")
+    expect(accountsSource).toContain("if (account.local_account_match_status === 'matched') return '已匹配'")
+    expect(accountsSource).toContain("return '—'")
+  })
+
+  it('opens the existing drawer from both row clicks and the small view button', () => {
+    expect(accountsSource).toContain('@row-click="openDrawer"')
+    expect(accountsSource).toContain('<template #cell-actions="{ row: account }">')
+    expect(accountsSource).toContain('class="sp-button small')
+    expect(accountsSource).toContain('@click.stop="openDrawer(account)"')
+    expect(accountsSource).toContain('>查看</button>')
+    expect(accountsSource).toContain('function openDrawer(account: SupplierProviderAccount)')
+    expect(accountsSource).toContain(':show="Boolean(selected)"')
+    expect(accountsSource).toContain('<SupplierDrawer')
+    expect(accountsSource).toContain('本地账号状态')
+    expect(accountsSource).toContain('是否调度')
+    expect(accountsSource).toContain('测试结果')
+    expect(accountsSource).toContain('上次测试时间')
+    expect(accountsSource).toContain('余额（供应商汇总）')
+    expect(accountsSource).toContain('今日消费（供应商汇总）')
+  })
+
+  it('uses upstream-account semantics for the empty state', () => {
+    expect(accountsSource).toContain('暂无上游账号数据')
+    expect(accountsSource).toContain('请先同步供应商上游账号，或调整当前筛选条件。')
+    expect(accountsSource).not.toContain('暂无本地账号数据')
   })
   it('uses full-filter summary cards and keeps group controls easy to scan', () => {
 		expect(groupsSource).not.toContain('Supplier Group Matching')
