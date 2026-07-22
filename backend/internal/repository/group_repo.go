@@ -832,7 +832,12 @@ func (r *groupRepository) DeleteCascade(ctx context.Context, id int64) ([]int64,
 		return nil, err
 	}
 
-	// 4. Soft-delete group itself.
+	// 4. 解除供应商分组映射，避免保留指向已删除分组的倍率守护状态。
+	if err := clearSupplierProviderGroupLocalMapping(ctx, exec, id); err != nil {
+		return nil, err
+	}
+
+	// 5. 软删除分组本身。
 	if _, err := txClient.Group.Delete().Where(group.IDEQ(id)).Exec(ctx); err != nil {
 		return nil, err
 	}
