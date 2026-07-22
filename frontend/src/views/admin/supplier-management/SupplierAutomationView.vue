@@ -19,7 +19,10 @@
 
       <section class="sp-overview-strip" aria-label="自动化任务运行概览">
         <article v-for="metric in metrics" :key="metric.label" class="sp-overview-item" :class="`sp-${metric.tone}`">
-          <div class="sp-metric-label">{{ metric.label }}</div>
+          <div class="sp-metric-head">
+            <div class="sp-metric-label">{{ metric.label }}</div>
+            <span class="sp-metric-signal" aria-hidden="true"></span>
+          </div>
           <div class="sp-metric-value">{{ metric.value }}</div>
           <div class="sp-metric-foot">{{ metric.foot }}</div>
         </article>
@@ -1243,52 +1246,115 @@ function showToast(message: string) {
 .sp-overview-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  overflow: hidden;
-  border: 1px solid var(--sp-soft);
-  border-radius: 14px;
-  background: var(--sp-panel);
+  gap: 12px;
+  background: transparent;
 }
 
 .sp-overview-item {
+  --sp-metric-accent: var(--sp-muted);
+
+  position: relative;
+  isolation: isolate;
   min-width: 0;
-  border-left: 1px solid var(--sp-soft);
-  padding: 16px 18px;
+  min-height: 132px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--sp-metric-accent) 18%, var(--sp-soft));
+  border-radius: 14px;
+  padding: 18px 18px 16px;
+  background:
+    radial-gradient(circle at 92% 8%, color-mix(in srgb, var(--sp-metric-accent) 12%, transparent) 0, transparent 44%),
+    linear-gradient(145deg, color-mix(in srgb, var(--sp-metric-accent) 5%, transparent), transparent 55%),
+    var(--sp-panel);
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--sp-text) 5%, transparent),
+    0 8px 22px color-mix(in srgb, var(--sp-metric-accent) 7%, transparent);
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
 }
 
-.sp-overview-item:first-child {
-  border-left: 0;
+.sp-overview-item::before {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  left: 18px;
+  width: 46px;
+  height: 3px;
+  border-radius: 0 0 999px 999px;
+  background: var(--sp-metric-accent);
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--sp-metric-accent) 32%, transparent);
+  content: '';
+}
+
+.sp-overview-item:hover {
+  border-color: color-mix(in srgb, var(--sp-metric-accent) 34%, var(--sp-soft));
+  box-shadow:
+    0 2px 4px color-mix(in srgb, var(--sp-text) 6%, transparent),
+    0 14px 30px color-mix(in srgb, var(--sp-metric-accent) 12%, transparent);
+  transform: translateY(-2px);
 }
 
 .sp-overview-item.sp-neutral {
-  box-shadow: inset 0 2px 0 color-mix(in srgb, var(--sp-muted) 32%, transparent);
+  --sp-metric-accent: var(--sp-muted);
 }
 
 .sp-overview-item.sp-green {
-  box-shadow: inset 0 2px 0 color-mix(in srgb, var(--sp-green) 48%, transparent);
+  --sp-metric-accent: var(--sp-green);
 }
 
 .sp-overview-item.sp-red {
-  box-shadow: inset 0 2px 0 color-mix(in srgb, var(--sp-red) 48%, transparent);
+  --sp-metric-accent: var(--sp-red);
 }
 
 .sp-overview-item.sp-blue {
-  box-shadow: inset 0 2px 0 color-mix(in srgb, var(--sp-blue) 48%, transparent);
+  --sp-metric-accent: var(--sp-blue);
 }
 
-.sp-overview-item .sp-metric-label,
-.sp-overview-item .sp-metric-foot {
+.sp-metric-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sp-metric-label {
   color: var(--sp-muted);
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+}
+
+.sp-metric-signal {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--sp-metric-accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--sp-metric-accent) 12%, transparent);
 }
 
 .sp-overview-item .sp-metric-value {
-  margin-top: 6px;
-  font-size: clamp(24px, 2vw, 30px);
-  line-height: 1.15;
+  margin-top: 10px;
+  color: var(--sp-text);
+  font-size: clamp(28px, 2.3vw, 34px);
+  font-variant-numeric: tabular-nums;
+  font-weight: 760;
+  letter-spacing: -0.035em;
+  line-height: 1;
 }
 
 .sp-overview-item .sp-metric-foot {
-  margin-top: 6px;
+  margin-top: 13px;
+  border-top: 1px solid color-mix(in srgb, var(--sp-metric-accent) 10%, var(--sp-soft));
+  padding-top: 10px;
+  color: var(--sp-muted);
+  font-size: 12px;
   line-height: 1.45;
+}
+
+:global(.dark .sp-automation-console .sp-overview-item) {
+  border-color: color-mix(in srgb, var(--sp-metric-accent) 24%, var(--sp-soft));
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 16%),
+    0 10px 26px color-mix(in srgb, var(--sp-metric-accent) 9%, transparent);
 }
 
 .sp-console-stack {
@@ -2417,18 +2483,21 @@ function showToast(message: string) {
   padding: 16px 0;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .sp-overview-item {
+    transition: none;
+  }
+
+  .sp-overview-item:hover {
+    transform: none;
+  }
+}
 @media (max-width: 1024px) {
   .sp-overview-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .sp-overview-item:nth-child(odd) {
-    border-left: 0;
-  }
 
-  .sp-overview-item:nth-child(n + 3) {
-    border-top: 1px solid var(--sp-soft);
-  }
 
   .sp-retention-grid,
   .sp-run-detail-summary {
@@ -2492,16 +2561,7 @@ function showToast(message: string) {
     grid-template-columns: 1fr;
   }
 
-  .sp-overview-item,
-  .sp-overview-item:first-child,
-  .sp-overview-item:nth-child(odd) {
-    border-top: 1px solid var(--sp-soft);
-    border-left: 0;
-  }
 
-  .sp-overview-item:first-child {
-    border-top: 0;
-  }
 
   .sp-panel-head {
     gap: 12px;

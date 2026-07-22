@@ -525,17 +525,28 @@ describe('SupplierAutomationView Task 5 visual system', () => {
     }
 
     expect(styleSource).toMatch(/\.sp-automation-console\s*\{[^}]*display:\s*grid;[^}]*gap:\s*18px;[^}]*min-width:\s*0;/s)
-    expect(styleSource).toMatch(/\.sp-overview-strip\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);[^}]*overflow:\s*hidden;/s)
+    expect(styleSource).toMatch(/\.sp-overview-strip\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);[^}]*gap:\s*12px;[^}]*background:\s*transparent;/s)
+    expect(styleSource).toMatch(/\.sp-overview-item\s*\{[^}]*position:\s*relative;[^}]*overflow:\s*hidden;[^}]*border:\s*1px solid color-mix\(in srgb, var\(--sp-metric-accent\) 18%, var\(--sp-soft\)\);[^}]*border-radius:\s*14px;/s)
     expect(styleSource).toMatch(/\.sp-console-panel\s*\{[^}]*border:\s*1px solid var\(--sp-soft\);[^}]*border-radius:\s*14px;[^}]*background:\s*var\(--sp-panel\);/s)
     expect(styleSource).toMatch(/\.sp-task-primary\s*\{[^}]*min-width:\s*76px;/s)
   })
 
-  it('keeps overview tones restrained and removes superseded private layout rules', () => {
+  it('uses restrained semantic accents on independent overview cards', () => {
     for (const token of ['sp-metric-grid', 'sp-metric-card', 'sp-grid-2', 'sp-section-index']) {
       expect(supplierAutomationSource).not.toContain(token)
     }
 
-    expect(styleSource).toContain('.sp-overview-item.sp-red {')
+    expect(supplierAutomationSource).toContain('class="sp-metric-head"')
+    expect(supplierAutomationSource).toContain('class="sp-metric-signal" aria-hidden="true"')
+    expect(styleSource).toMatch(/\.sp-overview-item::before\s*\{[^}]*background:\s*var\(--sp-metric-accent\);/s)
+    expect(styleSource).toMatch(/\.sp-metric-signal\s*\{[^}]*background:\s*var\(--sp-metric-accent\);/s)
+    expect(styleSource).toMatch(/\.sp-overview-item:hover\s*\{[^}]*transform:\s*translateY\(-2px\);/s)
+    expect(styleSource).toMatch(/\.sp-overview-item\.sp-neutral\s*\{[^}]*--sp-metric-accent:\s*var\(--sp-muted\);/s)
+    expect(styleSource).toMatch(/\.sp-overview-item\.sp-green\s*\{[^}]*--sp-metric-accent:\s*var\(--sp-green\);/s)
+    expect(styleSource).toMatch(/\.sp-overview-item\.sp-red\s*\{[^}]*--sp-metric-accent:\s*var\(--sp-red\);/s)
+    expect(styleSource).toMatch(/\.sp-overview-item\.sp-blue\s*\{[^}]*--sp-metric-accent:\s*var\(--sp-blue\);/s)
+    expect(styleSource).toContain(':global(.dark .sp-automation-console .sp-overview-item) {')
+    expect(styleSource).toMatch(/@media \(prefers-reduced-motion: reduce\)\s*\{[^}]*\.sp-overview-item\s*\{[^}]*transition:\s*none;/s)
     expect(styleSource).not.toMatch(/\.sp-overview-item\.sp-(?:red|green|blue|amber|orange|violet)\s*\{[^}]*background:/s)
     expect(supplierAutomationSource).not.toMatch(/<table\b/i)
   })
@@ -551,10 +562,8 @@ describe('SupplierAutomationView Task 5 visual system', () => {
   it('adapts overview and detail summaries at the 1024px breakpoint', () => {
     expect(tabletBreakpoint).toBeGreaterThanOrEqual(0)
     expect(tabletStyles).toContain('grid-template-columns: repeat(2, minmax(0, 1fr));')
-    expect(tabletStyles).toContain('.sp-overview-item:nth-child(odd) {')
-    expect(tabletStyles).toContain('border-left: 0;')
-    expect(tabletStyles).toContain('.sp-overview-item:nth-child(n + 3) {')
-    expect(tabletStyles).toContain('border-top: 1px solid var(--sp-soft);')
+    expect(tabletStyles).not.toContain('.sp-overview-item:nth-child(odd) {')
+    expect(tabletStyles).not.toContain('.sp-overview-item:nth-child(n + 3) {')
     expect(tabletStyles).toContain('.sp-retention-grid,\n  .sp-run-detail-summary {')
 
     const summaryResetIndex = tabletStyles.indexOf('.sp-summary-item,\n  .sp-summary-item:nth-child(3n + 1) {')
@@ -578,7 +587,7 @@ describe('SupplierAutomationView Task 5 visual system', () => {
     expect(mobileStyles).toContain('width: 100%;')
     expect(mobileStyles).toContain('.sp-overview-strip,\n  .sp-edit-summary,\n  .sp-form-grid,\n  .sp-retention-grid,\n  .sp-run-detail-summary,\n  .sp-provider-detail-layout,\n  .sp-cleanup-grid,\n  .sp-rate-guard-summary,\n  .sp-stage-body {')
     expect(mobileStyles).toContain('grid-template-columns: 1fr;')
-    expect(mobileStyles).toContain('.sp-overview-item:first-child {\n    border-top: 0;')
+    expect(mobileStyles).not.toContain('.sp-overview-item:first-child {')
     expect(mobileStyles).toMatch(/\.sp-head-actions \.sp-button\s*\{[^}]*min-width:\s*96px;/s)
     expect(mobileStyles).not.toContain('.sp-task-actions')
   })
