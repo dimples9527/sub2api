@@ -52,6 +52,7 @@ func supplierProviderSyncHandlerResult(scope string) service.SupplierProviderSyn
 type supplierProviderSyncHandlerDataStub struct {
 	mappedGroupID      int64
 	mappedLocalGroupID *int64
+	accountListParams  service.SupplierProviderDataListParams
 	groupListParams    service.SupplierProviderDataListParams
 }
 
@@ -96,7 +97,8 @@ func (s *supplierProviderGroupMatcherHandlerStub) ResolveNameChange(_ context.Co
 	return nil
 }
 
-func (*supplierProviderSyncHandlerDataStub) ListAccounts(context.Context, service.SupplierProviderDataListParams) (service.SupplierProviderAccountListResult, error) {
+func (s *supplierProviderSyncHandlerDataStub) ListAccounts(_ context.Context, params service.SupplierProviderDataListParams) (service.SupplierProviderAccountListResult, error) {
+	s.accountListParams = params
 	return service.SupplierProviderAccountListResult{Items: []service.SupplierProviderAccount{{ID: 1, ProviderID: 42, Name: "Primary"}}, Total: 1, Page: 1, PageSize: 20}, nil
 }
 func (s *supplierProviderSyncHandlerDataStub) ListGroups(_ context.Context, params service.SupplierProviderDataListParams) (service.SupplierProviderGroupListResult, error) {
@@ -133,9 +135,10 @@ func TestSupplierProviderSyncHandlerRoutes(t *testing.T) {
 	require.Equal(t, service.SupplierSyncScopeBalance, syncStub.testScope)
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/accounts?provider_id=42&active=true&page=1&page_size=20", nil)
+	req = httptest.NewRequest(http.MethodGet, "/accounts?provider_id=42&active=true&platform=openai&page=1&page_size=20", nil)
 	router.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "openai", dataStub.accountListParams.Platform)
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPut, "/groups/7/mapping", bytes.NewBufferString(`{"local_group_id":12}`))

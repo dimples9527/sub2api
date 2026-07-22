@@ -23,6 +23,7 @@ type SupplierProviderAccount struct {
 	Status         string     `json:"status"`
 	GroupKey       string     `json:"group_key"`
 	GroupName      string     `json:"group_name"`
+	Platform       string     `json:"platform,omitempty"`
 	RateMultiplier float64    `json:"rate_multiplier"`
 	RawStatus      string     `json:"raw_status"`
 	Active         bool       `json:"active"`

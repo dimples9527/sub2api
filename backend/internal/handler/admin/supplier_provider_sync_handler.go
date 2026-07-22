@@ -132,6 +132,7 @@ func (h *SupplierProviderSyncHandler) ListAccounts(c *gin.Context) {
 		ProviderID: parseOptionalInt64(c.Query("provider_id")),
 		Active:     parseSupplierProviderEnabled(c.Query("active")),
 		Search:     strings.TrimSpace(c.Query("search")),
+		Platform:   strings.TrimSpace(c.Query("platform")),
 		Page:       page,
 		PageSize:   pageSize,
 	})

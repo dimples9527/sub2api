@@ -83,6 +83,15 @@
             </span>
             <span v-else class="sp-account-muted">未分组</span>
           </template>
+          <template #cell-platform="{ row: account }">
+            <span
+              v-if="account.platform"
+              :class="['inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold', platformBadgeClass(account.platform)]"
+            >
+              {{ platformLabel(account.platform) }}
+            </span>
+            <span v-else class="sp-account-muted">--</span>
+          </template>
           <template #cell-rate_multiplier="{ row: account }">
             <span class="sp-account-rate">× {{ formatRate(account.rate_multiplier) }}</span>
           </template>
@@ -164,6 +173,7 @@ import Select, { type SelectOption } from '@/components/common/Select.vue'
 import supplierProvidersAPI, { type SupplierProvider } from '@/api/admin/supplierProviders'
 import { listSupplierAccounts, type SupplierProviderAccount } from '@/api/admin/supplierProviderData'
 import type { Column } from '@/components/common/types'
+import { platformBadgeClass, platformLabel } from '@/utils/platformColors'
 
 const providers = ref<SupplierProvider[]>([])
 const items = ref<SupplierProviderAccount[]>([])
@@ -205,6 +215,7 @@ const accountColumns: Column[] = [
   { key: 'name', label: '账号 / 上游 Key', class: 'min-w-[240px]' },
   { key: 'provider_name', label: '供应商', class: 'min-w-[170px]' },
   { key: 'group_name', label: '分组', class: 'min-w-[140px]' },
+  { key: 'platform', label: '平台', class: 'min-w-[112px]' },
   { key: 'rate_multiplier', label: '倍率', class: 'min-w-[96px]' },
   { key: 'raw_status', label: '上游状态', class: 'min-w-[120px]' },
   { key: 'active', label: '本地状态', class: 'min-w-[112px]' },

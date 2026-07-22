@@ -126,8 +126,8 @@ func TestSupplierProviderDataRepositoryListAccountsPaginates(t *testing.T) {
 		WithArgs(int64(42), active, "%pri%", 20, 20).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "provider_id", "provider_name", "upstream_account_key", "name", "status",
-			"group_key", "group_name", "rate_multiplier", "raw_status", "active", "last_seen_at", "inactive_at",
-		}).AddRow(int64(7), int64(42), "Supplier A", "account-1", "Primary", "active", "group-1", "VIP", 2.5, "active", true, now, nil))
+			"group_key", "group_name", "platform", "rate_multiplier", "raw_status", "active", "last_seen_at", "inactive_at",
+		}).AddRow(int64(7), int64(42), "Supplier A", "account-1", "Primary", "active", "group-1", "VIP", "openai", 2.5, "active", true, now, nil))
 
 	result, err := repo.ListAccounts(context.Background(), service.SupplierProviderDataListParams{
 		ProviderID: 42,
@@ -143,6 +143,7 @@ func TestSupplierProviderDataRepositoryListAccountsPaginates(t *testing.T) {
 	require.Equal(t, 20, result.PageSize)
 	require.Len(t, result.Items, 1)
 	require.Equal(t, "Primary", result.Items[0].Name)
+	require.Equal(t, "openai", result.Items[0].Platform)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -235,6 +236,23 @@ func TestSupplierProviderGroupBaseWhereIncludesPlatform(t *testing.T) {
 	require.Contains(t, where, "(g.name ILIKE $3 OR g.upstream_group_key ILIKE $3)")
 	require.Contains(t, where, "lg.platform = $4")
 	require.Equal(t, []any{int64(42), active, "%vip%", "openai"}, args)
+}
+
+func TestSupplierProviderAccountWhereIncludesMappedGroupPlatform(t *testing.T) {
+	active := true
+	where, args := supplierProviderAccountWhere(service.SupplierProviderDataListParams{
+		ProviderID: 42,
+		Active:     &active,
+		Search:     "primary",
+		Platform:   "openai",
+	})
+
+	require.Contains(t, where, "a.provider_id = $1")
+	require.Contains(t, where, "a.active = $2")
+	require.Contains(t, where, "(a.name ILIKE $3 OR a.upstream_account_key ILIKE $3)")
+	require.Contains(t, where, "mapped_group.upstream_group_key = a.group_key")
+	require.Contains(t, where, "local_group.platform = $4")
+	require.Equal(t, []any{int64(42), active, "%primary%", "openai"}, args)
 }
 
 func TestSupplierProviderGroupListWhereAddsMatchStatusFilters(t *testing.T) {

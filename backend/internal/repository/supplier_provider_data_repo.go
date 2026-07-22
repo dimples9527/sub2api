@@ -21,7 +21,7 @@ func NewSupplierProviderDataRepository(db *sql.DB) service.SupplierProviderDataR
 
 func (r *supplierProviderDataRepository) ListAccounts(ctx context.Context, params service.SupplierProviderDataListParams) (service.SupplierProviderAccountListResult, error) {
 	params = normalizeSupplierProviderDataListParams(params)
-	where, args := supplierProviderDataWhere("a", params)
+	where, args := supplierProviderAccountWhere(params)
 
 	var total int64
 	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM supplier_provider_accounts a JOIN supplier_providers p ON p.id = a.provider_id WHERE "+where, args...).Scan(&total); err != nil {
@@ -31,7 +31,16 @@ func (r *supplierProviderDataRepository) ListAccounts(ctx context.Context, param
 	queryArgs := append(append([]any{}, args...), params.PageSize, (params.Page-1)*params.PageSize)
 	rows, err := r.db.QueryContext(ctx, `
 SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.name, a.status,
-       a.group_key, a.group_name, a.rate_multiplier, a.raw_status, a.active,
+       a.group_key, a.group_name,
+       COALESCE((
+         SELECT local_group.platform
+         FROM supplier_provider_groups mapped_group
+         JOIN groups local_group ON local_group.id = mapped_group.local_group_id AND local_group.deleted_at IS NULL
+         WHERE mapped_group.provider_id = a.provider_id
+           AND mapped_group.upstream_group_key = a.group_key
+         LIMIT 1
+       ), '') AS platform,
+       a.rate_multiplier, a.raw_status, a.active,
        a.last_seen_at, a.inactive_at
 FROM supplier_provider_accounts a
 JOIN supplier_providers p ON p.id = a.provider_id
@@ -890,6 +899,23 @@ func supplierProviderDataWhere(alias string, params service.SupplierProviderData
 	return strings.Join(conditions, " AND "), args
 }
 
+func supplierProviderAccountWhere(params service.SupplierProviderDataListParams) (string, []any) {
+	where, args := supplierProviderDataWhere("a", params)
+	conditions := []string{where}
+	if platform := strings.TrimSpace(params.Platform); platform != "" {
+		args = append(args, platform)
+		conditions = append(conditions, fmt.Sprintf(`EXISTS (
+SELECT 1
+FROM supplier_provider_groups mapped_group
+JOIN groups local_group ON local_group.id = mapped_group.local_group_id AND local_group.deleted_at IS NULL
+WHERE mapped_group.provider_id = a.provider_id
+  AND mapped_group.upstream_group_key = a.group_key
+  AND local_group.platform = $%d
+)`, len(args)))
+	}
+	return strings.Join(conditions, " AND "), args
+}
+
 func supplierProviderGroupBaseWhere(params service.SupplierProviderDataListParams) (string, []any) {
 	where, args := supplierProviderDataWhere("g", params)
 	conditions := []string{where}
@@ -1007,7 +1033,7 @@ func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (servic
 	var item service.SupplierProviderAccount
 	var inactiveAt sql.NullTime
 	err := scanner.Scan(&item.ID, &item.ProviderID, &item.ProviderName, &item.UpstreamKey,
-		&item.Name, &item.Status, &item.GroupKey, &item.GroupName, &item.RateMultiplier,
+		&item.Name, &item.Status, &item.GroupKey, &item.GroupName, &item.Platform, &item.RateMultiplier,
 		&item.RawStatus, &item.Active, &item.LastSeenAt, &inactiveAt)
 	if err != nil {
 		return service.SupplierProviderAccount{}, err

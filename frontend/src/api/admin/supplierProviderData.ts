@@ -55,6 +55,7 @@ export interface SupplierProviderAccount {
   status: string
   group_key: string
   group_name: string
+  platform?: string
   rate_multiplier: number
   raw_status: string
   active: boolean
