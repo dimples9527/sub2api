@@ -272,11 +272,33 @@
           </template>
 
           <template #cell-actions="{ row: account }">
-            <button
-              class="sp-button small ghost sp-account-view-button"
-              type="button"
-              @click.stop="openDrawer(account)"
-            >查看</button>
+            <div class="sp-account-row-actions" @click.stop>
+              <button
+                class="sp-button small ghost sp-account-view-button"
+                type="button"
+                @click.stop="openDrawer(account)"
+              >查看</button>
+              <template v-if="canManageLocalAccount(account)">
+                <button
+                  class="sp-button small"
+                  type="button"
+                  :disabled="accountActionLoadingID === account.local_account_id"
+                  @click.stop="openLocalAccountEditor(account)"
+                >编辑</button>
+                <button
+                  class="sp-button small"
+                  type="button"
+                  :disabled="accountActionLoadingID === account.local_account_id"
+                  @click.stop="openAccountBindingEditor(account)"
+                >编辑绑定</button>
+                <button
+                  class="sp-button small danger"
+                  type="button"
+                  :disabled="deletingAccountID === account.local_account_id"
+                  @click.stop="deleteLocalAccount(account)"
+                >{{ deletingAccountID === account.local_account_id ? '删除中' : '删除' }}</button>
+              </template>
+            </div>
           </template>
 
           <template #empty>
@@ -362,13 +384,59 @@
       </div>
     </BaseDialog>
 
+    <EditAccountModal
+      v-if="showEditAccountModal"
+      :show="showEditAccountModal"
+      :account="editingAccount"
+      :proxies="accountProxies"
+      :groups="accountEditGroups"
+      @close="closeLocalAccountEditor"
+      @updated="handleLocalAccountUpdated"
+    />
+
+    <BaseDialog
+      :show="Boolean(bindingAccount)"
+      title="编辑账号绑定"
+      width="wide"
+      @close="closeAccountBindingEditor"
+    >
+      <div v-if="bindingAccount" class="sp-account-binding-dialog">
+        <div class="sp-account-binding-summary">
+          <span>本地账号</span>
+          <strong>{{ bindingAccount.name }}</strong>
+          <small>请选择该账号允许参与调度的分组。</small>
+        </div>
+        <GroupSelector
+          v-model="selectedBindingGroupIDs"
+          :groups="accountEditGroups"
+          :platform="bindingPlatform"
+          searchable
+        />
+      </div>
+      <template #footer>
+        <button
+          class="sp-button ghost"
+          type="button"
+          :disabled="savingBindingAccountID !== null"
+          @click="closeAccountBindingEditor"
+        >取消</button>
+        <button
+          class="sp-button primary"
+          type="button"
+          :disabled="savingBindingAccountID !== null"
+          @click="saveAccountBinding"
+        >{{ savingBindingAccountID !== null ? '保存中' : '保存绑定' }}</button>
+      </template>
+    </BaseDialog>
   </SupplierModuleLayout>
 </template>
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { SupplierDrawer, SupplierModuleLayout } from '@/components/admin/supplier-management'
+import { EditAccountModal } from '@/components/account'
 import DataTable from '@/components/common/DataTable.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import GroupSelector from '@/components/common/GroupSelector.vue'
 import Input from '@/components/common/Input.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
@@ -377,6 +445,7 @@ import { listSupplierAccounts, type SupplierProviderAccount } from '@/api/admin/
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import type { Column } from '@/components/common/types'
+import type { Account, AdminGroup, GroupPlatform, Proxy as AccountProxy } from '@/types'
 import { platformBadgeClass, platformLabel, platformTextClass } from '@/utils/platformColors'
 import { extractApiErrorMessage } from '@/utils/apiError'
 
@@ -389,6 +458,16 @@ const testErrorAccount = ref<SupplierProviderAccount | null>(null)
 const togglingSchedulableID = ref<number | null>(null)
 const editingPriorityAccountID = ref<number | null>(null)
 const savingPriorityAccountID = ref<number | null>(null)
+const accountActionLoadingID = ref<number | null>(null)
+const deletingAccountID = ref<number | null>(null)
+const editingAccount = ref<Account | null>(null)
+const showEditAccountModal = ref(false)
+const accountEditGroups = ref<AdminGroup[]>([])
+const accountProxies = ref<AccountProxy[]>([])
+const bindingAccount = ref<Account | null>(null)
+const selectedBindingGroupIDs = ref<number[]>([])
+const bindingPlatform = ref<GroupPlatform | undefined>()
+const savingBindingAccountID = ref<number | null>(null)
 const priorityDraft = ref('')
 const priorityInput = ref<InstanceType<typeof Input> | null>(null)
 const total = ref(0)
@@ -466,7 +545,7 @@ const accountColumns: Column[] = [
   { key: 'local_account_last_tested_at', label: '上次测试时间', class: 'min-w-[172px]' },
   { key: 'supplier_current_balance', label: '余额', class: 'min-w-[142px]' },
   { key: 'supplier_today_cost', label: '今日消费', class: 'min-w-[142px]' },
-  { key: 'actions', label: '操作', class: 'min-w-[88px]' },
+  { key: 'actions', label: '操作', class: 'min-w-[300px]' },
 ]
 
 onMounted(async () => {
@@ -537,6 +616,123 @@ function handlePageSizeChange(value: string | number | boolean | null) {
 
 function openDrawer(account: SupplierProviderAccount) {
   selected.value = account
+}
+
+function manageableLocalAccountID(account: SupplierProviderAccount): number | null {
+  if (!isMatchedLocalAccount(account)) return null
+  const localAccountID = Number(account.local_account_id)
+  return Number.isInteger(localAccountID) && localAccountID > 0 ? localAccountID : null
+}
+
+function canManageLocalAccount(account: SupplierProviderAccount): boolean {
+  return manageableLocalAccountID(account) !== null
+}
+
+async function loadAccountEditorOptions() {
+  const [groups, proxies] = await Promise.all([
+    adminAPI.groups.getAll(),
+    adminAPI.proxies.getAll(),
+  ])
+  accountEditGroups.value = groups
+  accountProxies.value = proxies
+}
+
+async function openLocalAccountEditor(account: SupplierProviderAccount) {
+  const localAccountID = manageableLocalAccountID(account)
+  if (localAccountID === null || accountActionLoadingID.value !== null) return
+  accountActionLoadingID.value = localAccountID
+  try {
+    const [localAccount] = await Promise.all([
+      adminAPI.accounts.getById(localAccountID),
+      loadAccountEditorOptions(),
+    ])
+    editingAccount.value = localAccount
+    showEditAccountModal.value = true
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '加载账号编辑信息失败'))
+  } finally {
+    accountActionLoadingID.value = null
+  }
+}
+
+function closeLocalAccountEditor() {
+  showEditAccountModal.value = false
+  editingAccount.value = null
+}
+
+function handleLocalAccountUpdated(updatedAccount: Account) {
+  if (editingAccount.value?.id === updatedAccount.id) {
+    editingAccount.value = updatedAccount
+  }
+  void loadAccounts()
+}
+
+async function openAccountBindingEditor(account: SupplierProviderAccount) {
+  const localAccountID = manageableLocalAccountID(account)
+  if (localAccountID === null || accountActionLoadingID.value !== null) return
+  accountActionLoadingID.value = localAccountID
+  try {
+    const [localAccount, groups] = await Promise.all([
+      adminAPI.accounts.getById(localAccountID),
+      adminAPI.groups.getAll(),
+    ])
+    accountEditGroups.value = groups
+    bindingAccount.value = localAccount
+    selectedBindingGroupIDs.value = [
+      ...(localAccount.group_ids || localAccount.groups?.map(group => group.id) || []),
+    ]
+    bindingPlatform.value = localAccount.platform
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '加载账号绑定信息失败'))
+  } finally {
+    accountActionLoadingID.value = null
+  }
+}
+
+function closeAccountBindingEditor() {
+  if (savingBindingAccountID.value !== null) return
+  bindingAccount.value = null
+  selectedBindingGroupIDs.value = []
+  bindingPlatform.value = undefined
+}
+
+async function saveAccountBinding() {
+  const account = bindingAccount.value
+  if (!account || savingBindingAccountID.value !== null) return
+  const bindingGroupIDs = [...selectedBindingGroupIDs.value]
+  savingBindingAccountID.value = account.id
+  try {
+    const updated = await adminAPI.accounts.update(account.id, { group_ids: bindingGroupIDs })
+    bindingAccount.value = updated
+    selectedBindingGroupIDs.value = [...(updated.group_ids || bindingGroupIDs)]
+    appStore.showSuccess('账号绑定已保存')
+    bindingAccount.value = null
+    selectedBindingGroupIDs.value = []
+    bindingPlatform.value = undefined
+    await loadAccounts()
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '保存账号绑定失败'))
+  } finally {
+    savingBindingAccountID.value = null
+  }
+}
+
+async function deleteLocalAccount(account: SupplierProviderAccount) {
+  const localAccountID = manageableLocalAccountID(account)
+  if (localAccountID === null || deletingAccountID.value !== null) return
+  const accountName = account.local_account_name || account.name || account.upstream_account_key
+  if (!window.confirm('确认删除本地账号「' + accountName + '」？')) return
+  deletingAccountID.value = localAccountID
+  try {
+    await adminAPI.accounts.delete(localAccountID)
+    if (selected.value?.local_account_id === localAccountID) selected.value = null
+    appStore.showSuccess('账号已删除')
+    await loadAccounts()
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '删除账号失败'))
+  } finally {
+    deletingAccountID.value = null
+  }
 }
 
 function applyFilterControlLabels() {
@@ -1244,6 +1440,42 @@ button.sp-test-status.failed:hover {
 .sp-account-view-button {
   min-width: 3.5rem;
 }
+.sp-account-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.sp-account-row-actions .sp-button {
+  flex: 0 0 auto;
+}
+
+.sp-account-binding-dialog {
+  display: grid;
+  gap: 1rem;
+}
+
+.sp-account-binding-summary {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.65rem;
+  background: var(--sp-panel-2);
+}
+
+.sp-account-binding-summary span,
+.sp-account-binding-summary small {
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+}
+
+.sp-account-binding-summary strong {
+  color: var(--sp-text);
+  font-size: 0.9375rem;
+}
+
 .sp-account-empty {
   display: flex;
   flex-direction: column;

@@ -602,6 +602,21 @@ describe('supplier local data views component usage', () => {
     expect(accountsSource).toContain('今日消费（供应商汇总）')
   })
 
+  it('provides edit, binding, and delete actions for matched local accounts', () => {
+    expect(accountsSource).toContain("import { EditAccountModal } from '@/components/account'")
+    expect(accountsSource).toContain("import GroupSelector from '@/components/common/GroupSelector.vue'")
+    expect(accountsSource).toContain('@click.stop="openLocalAccountEditor(account)"')
+    expect(accountsSource).toContain('@click.stop="openAccountBindingEditor(account)"')
+    expect(accountsSource).toContain('@click.stop="deleteLocalAccount(account)"')
+    expect(accountsSource).toContain('<EditAccountModal')
+    expect(accountsSource).toContain('<GroupSelector')
+    expect(accountsSource).toContain('adminAPI.accounts.getById(localAccountID)')
+    expect(accountsSource).toContain('adminAPI.accounts.update(account.id, { group_ids: bindingGroupIDs })')
+    expect(accountsSource).toContain('adminAPI.accounts.delete(localAccountID)')
+    expect(accountsSource).toContain('window.confirm')
+    expect(accountsSource).toContain('账号已删除')
+  })
+
   it('uses upstream-account semantics for the empty state', () => {
     expect(accountsSource).toContain('暂无上游账号数据')
     expect(accountsSource).toContain('请先同步供应商上游账号，或调整当前筛选条件。')
