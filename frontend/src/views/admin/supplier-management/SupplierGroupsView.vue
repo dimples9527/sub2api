@@ -1,50 +1,74 @@
 <template>
   <SupplierModuleLayout>
     <section class="sp-filter-toolbar" aria-label="分组筛选与操作">
-      <div class="sp-filter-fields">
-        <Input v-model="search" class="sp-search sp-filter-search-input" placeholder="搜索上游分组或 Key" />
-        <Select
-          v-model="providerID"
-          class="sp-search sp-filter-select"
-          :options="providerOptions"
-          :searchable="true"
-          search-placeholder="搜索供应商"
-        />
-        <Select
-          v-model="platformFilter"
-          class="sp-search sp-filter-select"
-          :options="platformFilterOptions"
-          :searchable="false"
-        />
-        <Select
-          v-model="matchStatusFilter"
-          class="sp-search sp-filter-select"
-          :options="matchStatusFilterOptions"
-          :searchable="false"
-        />
-        <Select
-          v-model="rateStatusFilter"
-          class="sp-search sp-filter-select"
-          :options="rateStatusFilterOptions"
-          :searchable="false"
-        />
-      </div>
-      <div class="sp-filter-actions">
-        <button class="sp-button small sp-control-button" type="button" :disabled="loading || !canResetFilters" @click="resetGroupFilters">
-          <Icon name="x" size="sm" />
-          <span>重置筛选</span>
-        </button>
-        <button class="sp-button sp-control-button" type="button" :disabled="loading || autoMatching" @click="runAutoMatch">
-          <Icon name="sync" size="sm" :class="autoMatching ? 'sp-spin' : ''" />
-          <span>{{ autoMatching ? '匹配中' : '自动匹配' }}</span>
-        </button>
-        <button class="sp-button sp-control-button" type="button" :disabled="loading" @click="refreshAll">
-          <Icon name="refresh" size="sm" :class="loading ? 'sp-spin' : ''" />
-          <span>刷新</span>
-        </button>
+      <header class="sp-filter-card-head">
+        <div>
+          <span class="sp-filter-card-kicker">筛选条件</span>
+          <h2>筛选分组</h2>
+          <p>按供应商、平台、匹配状态和倍率状态定位上游分组。</p>
+        </div>
+      </header>
+
+      <div class="sp-filter-card-body">
+        <div class="sp-filter-fields">
+          <div class="sp-filter-control sp-filter-search-control">
+            <span class="sp-filter-label">分组搜索</span>
+            <Input v-model="search" class="sp-search sp-filter-search-input" placeholder="搜索上游分组或 Key" />
+          </div>
+          <div class="sp-filter-control">
+            <span class="sp-filter-label">供应商</span>
+            <Select
+              v-model="providerID"
+              class="sp-search sp-filter-select"
+              :options="providerOptions"
+              :searchable="true"
+              search-placeholder="搜索供应商"
+            />
+          </div>
+          <div class="sp-filter-control">
+            <span class="sp-filter-label">平台</span>
+            <Select
+              v-model="platformFilter"
+              class="sp-search sp-filter-select"
+              :options="platformFilterOptions"
+              :searchable="false"
+            />
+          </div>
+          <div class="sp-filter-control">
+            <span class="sp-filter-label">匹配状态</span>
+            <Select
+              v-model="matchStatusFilter"
+              class="sp-search sp-filter-select"
+              :options="matchStatusFilterOptions"
+              :searchable="false"
+            />
+          </div>
+          <div class="sp-filter-control">
+            <span class="sp-filter-label">倍率状态</span>
+            <Select
+              v-model="rateStatusFilter"
+              class="sp-search sp-filter-select"
+              :options="rateStatusFilterOptions"
+              :searchable="false"
+            />
+          </div>
+        </div>
+        <div class="sp-filter-actions">
+          <button class="sp-button small sp-control-button" type="button" :disabled="loading || !canResetFilters" @click="resetGroupFilters">
+            <Icon name="x" size="sm" />
+            <span>重置筛选</span>
+          </button>
+          <button class="sp-button sp-control-button" type="button" :disabled="loading || autoMatching" @click="runAutoMatch">
+            <Icon name="sync" size="sm" :class="autoMatching ? 'sp-spin' : ''" />
+            <span>{{ autoMatching ? '匹配中' : '自动匹配' }}</span>
+          </button>
+          <button class="sp-button sp-control-button" type="button" :disabled="loading" @click="refreshAll">
+            <Icon name="refresh" size="sm" :class="loading ? 'sp-spin' : ''" />
+            <span>刷新</span>
+          </button>
+        </div>
       </div>
     </section>
-
     <div v-if="error" class="sp-alert sp-error-line">{{ error }}</div>
 
     <div class="sp-console-shell">
@@ -1300,13 +1324,54 @@ function errorMessage(err: unknown, fallback: string): string {
 }
 
 .sp-filter-toolbar {
-  display: flex;
   width: 100%;
-  align-items: center;
-  gap: 0.75rem;
   margin-bottom: 1rem;
-  padding: 0.75rem 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--sp-cyan) 18%, var(--sp-line));
+  border-radius: 0.875rem;
+  background: var(--sp-panel);
+  box-shadow: var(--sp-shadow);
+}
+
+.sp-filter-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.875rem 1rem 0.75rem;
   border-bottom: 1px solid var(--sp-line);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--sp-cyan) 6%, transparent), transparent 38%);
+}
+
+.sp-filter-card-kicker {
+  display: block;
+  margin-bottom: 0.2rem;
+  color: var(--sp-cyan);
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+}
+
+.sp-filter-card-head h2 {
+  margin: 0;
+  color: var(--sp-text);
+  font-size: 0.9375rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.sp-filter-card-head p {
+  margin: 0.2rem 0 0;
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.sp-filter-card-body {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.875rem;
+  padding: 0.875rem 1rem 1rem;
 }
 
 .sp-filter-fields {
@@ -1314,7 +1379,22 @@ function errorMessage(err: unknown, fallback: string): string {
   min-width: 0;
   flex: 1 1 auto;
   grid-template-columns: minmax(15rem, 1fr) repeat(4, minmax(9rem, 0.55fr));
-  gap: 0.5rem;
+  gap: 0.625rem;
+}
+
+.sp-filter-control {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.sp-filter-label {
+  color: var(--sp-muted);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1rem;
 }
 
 .sp-filter-toolbar .sp-search {
@@ -1326,8 +1406,11 @@ function errorMessage(err: unknown, fallback: string): string {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
+  align-self: stretch;
   justify-content: flex-end;
   gap: 0.5rem;
+  padding-left: 0.875rem;
+  border-left: 1px solid var(--sp-line);
 }
 
 .sp-control-button,
@@ -2046,14 +2129,25 @@ function errorMessage(err: unknown, fallback: string): string {
 }
 
 @media (max-width: 1280px) {
-  .sp-filter-toolbar { align-items: stretch; flex-direction: column; }
-  .sp-filter-actions { width: 100%; }
+  .sp-filter-card-body {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .sp-filter-actions {
+    width: 100%;
+    padding-top: 0.75rem;
+    padding-left: 0;
+    border-top: 1px solid var(--sp-line);
+    border-left: 0;
+  }
 }
 
 @media (max-width: 760px) {
-  .sp-filter-toolbar { padding-top: 0; }
+  .sp-filter-card-head,
+  .sp-filter-card-body { padding-inline: 0.75rem; }
   .sp-filter-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .sp-filter-search-input { grid-column: 1 / -1; }
+  .sp-filter-search-control { grid-column: 1 / -1; }
   .sp-filter-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .sp-filter-actions .sp-button { width: 100%; min-width: 0; padding-inline: 0.45rem; }
   .sp-summary-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -2077,6 +2171,11 @@ function errorMessage(err: unknown, fallback: string): string {
   .sp-panel-signals { width: 100%; justify-content: space-between; }
   .sp-row-actions { flex-wrap: wrap; justify-content: flex-end; }
   .sp-match-preview { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 520px) {
+  .sp-filter-fields { grid-template-columns: 1fr; }
+  .sp-filter-search-control { grid-column: auto; }
 }
 
 @media (max-width: 390px) {

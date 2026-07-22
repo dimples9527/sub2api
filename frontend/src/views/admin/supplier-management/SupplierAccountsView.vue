@@ -1,68 +1,80 @@
 <template>
   <SupplierModuleLayout>
     <section class="sp-account-toolbar" aria-label="账号筛选与操作">
-      <div class="sp-account-filter-fields">
-        <div
-          ref="searchFilterControl"
-          class="sp-account-filter-control sp-account-search"
-          role="group"
-          aria-labelledby="supplier-account-search-label"
-        >
-          <span id="supplier-account-search-label" class="sp-account-filter-label">账号搜索</span>
-          <Input
-            v-model="search"
-            class="sp-search"
-            placeholder="搜索账号名称或上游 Key"
-          />
+      <header class="sp-filter-card-head">
+        <div>
+          <span class="sp-filter-card-kicker">筛选条件</span>
+          <h2>筛选账号</h2>
+          <p>按供应商、平台和账号状态快速定位上游账号。</p>
         </div>
-        <div
-          ref="providerFilterControl"
-          class="sp-account-filter-control"
-          role="group"
-          aria-labelledby="supplier-account-provider-label"
-        >
-          <span id="supplier-account-provider-label" class="sp-account-filter-label">供应商</span>
-          <Select
-            v-model="providerID"
-            class="sp-search sp-account-select"
-            :options="providerOptions"
-            :searchable="false"
-          />
+        <span class="sp-filter-card-count">{{ total }} 个账号</span>
+      </header>
+
+      <div class="sp-account-filter-body">
+        <div class="sp-account-filter-fields">
+          <div
+            ref="searchFilterControl"
+            class="sp-account-filter-control sp-account-search"
+            role="group"
+            aria-labelledby="supplier-account-search-label"
+          >
+            <span id="supplier-account-search-label" class="sp-account-filter-label">账号搜索</span>
+            <Input
+              v-model="search"
+              class="sp-search"
+              placeholder="搜索账号名称或上游 Key"
+            />
+          </div>
+          <div
+            ref="providerFilterControl"
+            class="sp-account-filter-control"
+            role="group"
+            aria-labelledby="supplier-account-provider-label"
+          >
+            <span id="supplier-account-provider-label" class="sp-account-filter-label">供应商</span>
+            <Select
+              v-model="providerID"
+              class="sp-search sp-account-select"
+              :options="providerOptions"
+              :searchable="false"
+            />
+          </div>
+          <div
+            ref="platformFilterControl"
+            class="sp-account-filter-control"
+            role="group"
+            aria-labelledby="supplier-account-platform-label"
+          >
+            <span id="supplier-account-platform-label" class="sp-account-filter-label">平台</span>
+            <Select
+              v-model="platformFilter"
+              class="sp-search sp-account-select"
+              :options="platformFilterOptions"
+              :searchable="false"
+            />
+          </div>
+          <div
+            ref="activeFilterControl"
+            class="sp-account-filter-control"
+            role="group"
+            aria-labelledby="supplier-account-active-label"
+          >
+            <span id="supplier-account-active-label" class="sp-account-filter-label">账号状态</span>
+            <Select
+              v-model="activeFilter"
+              class="sp-search sp-account-select"
+              :options="activeFilterOptions"
+              :searchable="false"
+            />
+          </div>
         </div>
-        <div
-          ref="platformFilterControl"
-          class="sp-account-filter-control"
-          role="group"
-          aria-labelledby="supplier-account-platform-label"
-        >
-          <span id="supplier-account-platform-label" class="sp-account-filter-label">平台</span>
-          <Select
-            v-model="platformFilter"
-            class="sp-search sp-account-select"
-            :options="platformFilterOptions"
-            :searchable="false"
-          />
-        </div>
-        <div
-          ref="activeFilterControl"
-          class="sp-account-filter-control"
-          role="group"
-          aria-labelledby="supplier-account-active-label"
-        >
-          <span id="supplier-account-active-label" class="sp-account-filter-label">账号状态</span>
-          <Select
-            v-model="activeFilter"
-            class="sp-search sp-account-select"
-            :options="activeFilterOptions"
-            :searchable="false"
-          />
+        <div class="sp-account-filter-actions">
+          <button class="sp-button sp-account-refresh" type="button" :disabled="loading" @click="loadAccounts">
+            {{ loading ? '刷新中…' : '刷新' }}
+          </button>
         </div>
       </div>
-      <button class="sp-button sp-account-refresh" type="button" :disabled="loading" @click="loadAccounts">
-        {{ loading ? '刷新中…' : '刷新' }}
-      </button>
     </section>
-
     <div v-if="error" class="sp-alert sp-error-line">{{ error }}</div>
 
     <section class="sp-panel sp-account-workbench">
@@ -349,6 +361,7 @@
         </div>
       </div>
     </BaseDialog>
+
   </SupplierModuleLayout>
 </template>
 <script setup lang="ts">
@@ -743,15 +756,68 @@ function formatTime(value?: string): string {
 </script>
 <style scoped>
 .sp-account-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
   margin-bottom: 1rem;
-  padding: 0.875rem;
-  border: 1px solid var(--sp-line);
-  border-radius: 0.75rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--sp-cyan) 18%, var(--sp-line));
+  border-radius: 0.875rem;
   background: var(--sp-panel);
   box-shadow: var(--sp-shadow);
+}
+
+.sp-filter-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.875rem 1rem 0.75rem;
+  border-bottom: 1px solid var(--sp-line);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--sp-cyan) 6%, transparent), transparent 38%);
+}
+
+.sp-filter-card-head > div {
+  min-width: 0;
+}
+
+.sp-filter-card-kicker {
+  display: block;
+  margin-bottom: 0.2rem;
+  color: var(--sp-cyan);
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+}
+
+.sp-filter-card-head h2 {
+  margin: 0;
+  color: var(--sp-text);
+  font-size: 0.9375rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.sp-filter-card-head p {
+  margin: 0.2rem 0 0;
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.sp-filter-card-count {
+  flex: 0 0 auto;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--sp-cyan) 20%, var(--sp-line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sp-cyan) 6%, var(--sp-panel));
+  color: var(--sp-cyan);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.sp-account-filter-body {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.875rem;
+  padding: 0.875rem 1rem 1rem;
 }
 
 .sp-account-filter-fields {
@@ -780,6 +846,15 @@ function formatTime(value?: string): string {
 .sp-account-toolbar .sp-search {
   width: 100%;
   min-width: 0;
+}
+
+.sp-account-filter-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  align-self: stretch;
+  padding-left: 0.875rem;
+  border-left: 1px solid var(--sp-line);
 }
 
 .sp-account-refresh {
@@ -1222,7 +1297,7 @@ button.sp-test-status.failed:hover {
 }
 
 @media (max-width: 900px) {
-  .sp-account-toolbar {
+  .sp-account-filter-body {
     align-items: stretch;
     flex-direction: column;
   }
@@ -1235,8 +1310,13 @@ button.sp-test-status.failed:hover {
     grid-column: 1 / -1;
   }
 
-  .sp-account-refresh {
+  .sp-account-filter-actions {
     width: 100%;
+    justify-content: flex-end;
+    padding-top: 0.75rem;
+    padding-left: 0;
+    border-top: 1px solid var(--sp-line);
+    border-left: 0;
   }
 
   .sp-account-pagination {
@@ -1254,7 +1334,11 @@ button.sp-test-status.failed:hover {
 @media (max-width: 760px) {
   .sp-account-toolbar {
     margin-bottom: 0.75rem;
-    padding: 0.75rem;
+  }
+
+  .sp-filter-card-head,
+  .sp-account-filter-body {
+    padding-inline: 0.75rem;
   }
 
   .sp-account-panel-head {
@@ -1277,12 +1361,21 @@ button.sp-test-status.failed:hover {
 }
 
 @media (max-width: 520px) {
+  .sp-filter-card-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .sp-account-filter-fields {
     grid-template-columns: 1fr;
   }
 
   .sp-account-search {
     grid-column: auto;
+  }
+
+  .sp-account-refresh {
+    width: 100%;
   }
 }
 

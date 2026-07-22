@@ -6,15 +6,37 @@
         <h1>供应商管理</h1>
         <p class="sp-subtitle">用运行风险、账号健康和成本效率决定优先处理顺序。</p>
       </div>
-      <div class="sp-controls">
-        <Input v-model="search" class="sp-search" placeholder="搜索供应商" @enter="loadProviders" />
-        <button class="sp-button" type="button" :disabled="loading" @click="loadProviders">刷新数据</button>
-        <button class="sp-button" type="button" @click="openTypeManager">类型维护</button>
-        <button class="sp-button" type="button" @click="openCreateProviderType">新增供应商类型</button>
-        <button class="sp-button primary" type="button" @click="openCreate">新增供应商</button>
-      </div>
     </header>
 
+    <section class="sp-provider-filter-card" aria-label="供应商筛选与操作">
+      <header class="sp-filter-card-head">
+        <div>
+          <span class="sp-filter-card-kicker">筛选条件</span>
+          <h2>筛选供应商</h2>
+          <p>集中搜索供应商，并在同一区域完成数据刷新和维护操作。</p>
+        </div>
+        <span class="sp-filter-card-count">{{ sortedProviders.length }} 个结果</span>
+      </header>
+
+      <div class="sp-provider-filter-body">
+        <div class="sp-provider-filter-fields">
+          <div
+            class="sp-provider-filter-control"
+            role="group"
+            aria-labelledby="supplier-provider-search-label"
+          >
+            <span id="supplier-provider-search-label" class="sp-provider-filter-label">供应商搜索</span>
+            <Input v-model="search" class="sp-search" placeholder="搜索供应商" @enter="loadProviders" />
+          </div>
+        </div>
+        <div class="sp-provider-filter-actions">
+          <button class="sp-button" type="button" :disabled="loading" @click="loadProviders">刷新数据</button>
+          <button class="sp-button" type="button" @click="openTypeManager">类型维护</button>
+          <button class="sp-button" type="button" @click="openCreateProviderType">新增供应商类型</button>
+          <button class="sp-button primary" type="button" @click="openCreate">新增供应商</button>
+        </div>
+      </div>
+    </section>
     <div v-if="error" class="sp-alert sp-error-line">{{ error }}</div>
 
     <section class="sp-metric-grid">
@@ -1024,6 +1046,149 @@ function errorMessage(err: unknown, fallback: string): string {
 </script>
 
 <style scoped>
+.sp-provider-filter-card {
+  margin-bottom: 1rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--sp-cyan) 18%, var(--sp-line));
+  border-radius: 0.875rem;
+  background: var(--sp-panel);
+  box-shadow: var(--sp-shadow);
+}
+
+.sp-filter-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.875rem 1rem 0.75rem;
+  border-bottom: 1px solid var(--sp-line);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--sp-cyan) 6%, transparent), transparent 38%);
+}
+
+.sp-filter-card-head > div {
+  min-width: 0;
+}
+
+.sp-filter-card-kicker {
+  display: block;
+  margin-bottom: 0.2rem;
+  color: var(--sp-cyan);
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+}
+
+.sp-filter-card-head h2 {
+  margin: 0;
+  color: var(--sp-text);
+  font-size: 0.9375rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.sp-filter-card-head p {
+  margin: 0.2rem 0 0;
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.sp-filter-card-count {
+  flex: 0 0 auto;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--sp-cyan) 20%, var(--sp-line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sp-cyan) 6%, var(--sp-panel));
+  color: var(--sp-cyan);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.sp-provider-filter-body {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.875rem;
+  padding: 0.875rem 1rem 1rem;
+}
+
+.sp-provider-filter-fields {
+  min-width: min(22rem, 100%);
+  flex: 1 1 24rem;
+}
+
+.sp-provider-filter-control {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.sp-provider-filter-label {
+  color: var(--sp-muted);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1rem;
+}
+
+.sp-provider-filter-card .sp-search {
+  width: 100%;
+  min-width: 0;
+}
+
+.sp-provider-filter-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  align-self: stretch;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding-left: 0.875rem;
+  border-left: 1px solid var(--sp-line);
+}
+
+@media (max-width: 900px) {
+  .sp-provider-filter-body {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .sp-provider-filter-fields {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .sp-provider-filter-actions {
+    width: 100%;
+    padding-top: 0.75rem;
+    padding-left: 0;
+    border-top: 1px solid var(--sp-line);
+    border-left: 0;
+  }
+}
+
+@media (max-width: 520px) {
+  .sp-filter-card-head {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 0.75rem;
+  }
+
+  .sp-provider-filter-body {
+    padding: 0.75rem;
+  }
+
+  .sp-provider-filter-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .sp-provider-filter-actions .sp-button {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
 .sp-provider-dialog,
 .sp-type-create-dialog,
 .sp-type-editor,

@@ -9,6 +9,21 @@ const supplierProvidersSource = readFileSync(
 )
 
 describe('SupplierProvidersView payload normalization', () => {
+  it('separates the page heading from one unified provider filter card', () => {
+    const pageHeadSource = supplierProvidersSource.match(/<header class="sp-page-head">[\s\S]*?<\/header>/)?.[0]
+
+    expect(pageHeadSource).not.toContain('sp-controls')
+    expect(pageHeadSource).not.toContain('v-model="search"')
+    expect(supplierProvidersSource).toContain('class="sp-provider-filter-card"')
+    expect(supplierProvidersSource).toContain('class="sp-filter-card-head"')
+    expect(supplierProvidersSource).toContain('class="sp-provider-filter-body"')
+    expect(supplierProvidersSource).toContain('class="sp-provider-filter-fields"')
+    expect(supplierProvidersSource).toContain('class="sp-provider-filter-actions"')
+    expect(supplierProvidersSource).toContain('筛选供应商')
+    expect(supplierProvidersSource).toContain('@media (max-width: 900px)')
+    expect(supplierProvidersSource).toContain('@media (max-width: 520px)')
+  })
+
   it('provides a direct create-provider-type action and dedicated dialog', () => {
     expect(supplierProvidersSource).toContain('@click="openCreateProviderType"')
     expect(supplierProvidersSource).toContain('新增供应商类型')
