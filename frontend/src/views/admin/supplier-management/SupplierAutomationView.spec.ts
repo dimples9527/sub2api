@@ -79,6 +79,19 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('响应摘要')
   })
 
+  it('renders latest-result details in a separate task table column', () => {
+    const latestResultCell = supplierAutomationSource.match(
+      /<template #cell-last_status="\{ row: task \}">[\s\S]*?<\/template>/
+    )?.[0] || ''
+    const detailsCell = supplierAutomationSource.match(
+      /<template #cell-details="\{ row: task \}">[\s\S]*?<\/template>/
+    )?.[0] || ''
+
+    expect(supplierAutomationSource).toContain("{ key: 'details',")
+    expect(detailsCell).toContain('@click.stop="openTaskLatestResult(task)"')
+    expect(latestResultCell).not.toContain('openTaskLatestResult(task)')
+  })
+
   it('uses an indexed provider detail layout and defaults to the first failed provider', () => {
     expect(supplierAutomationSource).toContain('sp-provider-detail-layout')
     expect(supplierAutomationSource).toContain('sp-provider-index')
@@ -434,7 +447,8 @@ describe('SupplierAutomationView operations console composition', () => {
     expect(supplierAutomationSource).toMatch(
       /^ {8}<section\b[^>]*class="[^"]*\bsp-history-panel\b[^"]*">\n {10}<header/m
     )
-    expect(supplierAutomationSource.match(/^ {6}<BaseDialog\b/gm)).toHaveLength(2)
+    expect(supplierAutomationSource.match(/^ {6}<BaseDialog\b/gm)).toHaveLength(3)
+    expect(supplierAutomationSource).toMatch(/^ {6}<BaseDialog :show="rateGuardChangeLogsVisible"/m)
     expect(supplierAutomationSource).toMatch(/^ {6}<Transition name="sp-fade">/m)
   })
 

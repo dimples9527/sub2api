@@ -129,6 +129,34 @@ export interface SupplierAutomationRunListResult {
   page_size: number
 }
 
+export interface SupplierRateGuardChangeLog {
+  id: number
+  mapping_id: number
+  local_group_id: number
+  local_group_name: string
+  upstream_group_key: string
+  upstream_group_name: string
+  old_rate: number
+  new_rate: number
+  status: 'pending' | 'handled'
+  changed_at: string
+  handled_at?: string
+  created_at: string
+}
+
+export interface SupplierRateGuardChangeLogListParams {
+  page?: number
+  page_size?: number
+}
+
+export interface SupplierRateGuardChangeLogListResult {
+  items: SupplierRateGuardChangeLog[]
+  total: number
+  pending_count: number
+  page: number
+  page_size: number
+}
+
 export async function listTasks(): Promise<SupplierAutomationTask[]> {
   const { data } = await apiClient.get<SupplierAutomationTask[]>(
     '/admin/supplier-management/automation/tasks'
@@ -159,11 +187,30 @@ export async function listRuns(params: SupplierAutomationRunListParams = {}): Pr
   return data
 }
 
+export async function listRateGuardChangeLogs(
+  params: SupplierRateGuardChangeLogListParams = {}
+): Promise<SupplierRateGuardChangeLogListResult> {
+  const { data } = await apiClient.get<SupplierRateGuardChangeLogListResult>(
+    '/admin/supplier-management/automation/rate-guard-change-logs',
+    { params }
+  )
+  return data
+}
+
+export async function markRateGuardChangeLogHandled(id: number): Promise<SupplierRateGuardChangeLog> {
+  const { data } = await apiClient.post<SupplierRateGuardChangeLog>(
+    `/admin/supplier-management/automation/rate-guard-change-logs/${id}/handled`
+  )
+  return data
+}
+
 export const supplierAutomationAPI = {
   listTasks,
   updateTask,
   runTask,
   listRuns,
+  listRateGuardChangeLogs,
+  markRateGuardChangeLogHandled,
 }
 
 export default supplierAutomationAPI

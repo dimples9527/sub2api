@@ -38,6 +38,10 @@
             <div class="sp-panel-signals" aria-label="任务状态摘要">
               <span>已启用 {{ enabledTaskCount }} / {{ tasks.length }}</span>
               <span :class="{ bad: recentExceptionCount > 0 }">异常 {{ recentExceptionCount }}</span>
+              <button class="sp-button small ghost sp-change-log-button" type="button" @click="openRateGuardChangeLogs">
+                变更日志
+                <em v-if="pendingRateGuardChangeLogCount > 0" class="sp-pending-count">{{ pendingRateGuardChangeLogCount }}</em>
+              </button>
             </div>
           </header>
           <div class="sp-table-region sp-task-table-region">
@@ -66,15 +70,18 @@
                 <span class="sp-status" :class="statusTone(task.last_status)">{{ statusText(task.last_status) }}</span>
                 <div class="sp-result-cell">
                   <span class="sp-sub sp-message-preview">{{ taskResultSummary(task) }}</span>
-                  <button
-                    v-if="task.last_message || latestRunByTask[task.task_code]"
-                    class="sp-link-button"
-                    type="button"
-                    @click.stop="openTaskLatestResult(task)"
-                  >
-                    查看详情
-                  </button>
                 </div>
+              </template>
+
+              <template #cell-details="{ row: task }">
+                <button
+                  v-if="task.last_message || latestRunByTask[task.task_code]"
+                  class="sp-link-button"
+                  type="button"
+                  @click.stop="openTaskLatestResult(task)"
+                >
+                  查看详情
+                </button>
               </template>
 
               <template #cell-actions="{ row: task }">
@@ -500,6 +507,67 @@
         </template>
       </BaseDialog>
 
+      <BaseDialog :show="rateGuardChangeLogsVisible" title="倍率守护变更日志" width="extra-wide" @close="closeRateGuardChangeLogs">
+        <div class="sp-change-log-dialog">
+          <header class="sp-change-log-head">
+            <div>
+              <span>Rate Guard Todo</span>
+              <h3>倍率变更待办</h3>
+              <p>调高本地分组倍率后自动生成记录；点击“待处理”即可确认已处理。</p>
+            </div>
+            <strong class="sp-status" :class="{ warn: pendingRateGuardChangeLogCount > 0, good: pendingRateGuardChangeLogCount === 0 }">
+              待处理 {{ pendingRateGuardChangeLogCount }}
+            </strong>
+          </header>
+
+          <div class="sp-table-region sp-change-log-table-region">
+            <DataTable
+              :columns="rateGuardChangeLogColumns"
+              :data="rateGuardChangeLogs"
+              :loading="rateGuardChangeLogsLoading"
+              row-key="id"
+              :sticky-actions-column="false"
+            >
+              <template #cell-status="{ row: changeLog }">
+                <button
+                  v-if="changeLog.status === 'pending'"
+                  class="sp-link-button sp-change-log-status-action"
+                  type="button"
+                  :disabled="handlingRateGuardChangeLogID === changeLog.id"
+                  @click="handleRateGuardChangeLog(changeLog)"
+                >
+                  {{ handlingRateGuardChangeLogID === changeLog.id ? '确认中' : '待处理' }}
+                </button>
+                <span v-else class="sp-status good">已处理</span>
+              </template>
+              <template #cell-local_group_name="{ row: changeLog }">
+                <strong>{{ changeLog.local_group_name || `本地分组 ${changeLog.local_group_id}` }}</strong>
+              </template>
+              <template #cell-upstream_group_name="{ row: changeLog }">
+                <strong>{{ changeLog.upstream_group_name || changeLog.upstream_group_key }}</strong>
+                <div v-if="changeLog.upstream_group_key" class="sp-sub">{{ changeLog.upstream_group_key }}</div>
+              </template>
+              <template #cell-old_rate="{ row: changeLog }">{{ formatRate(changeLog.old_rate) }}</template>
+              <template #cell-new_rate="{ row: changeLog }">{{ formatRate(changeLog.new_rate) }}</template>
+              <template #cell-changed_at="{ row: changeLog }">{{ formatTime(changeLog.changed_at) }}</template>
+              <template #empty>暂无倍率守护变更记录。</template>
+            </DataTable>
+            <Pagination
+              v-if="rateGuardChangeLogTotal > 0"
+              class="sp-change-log-pagination"
+              :page="rateGuardChangeLogPage"
+              :total="rateGuardChangeLogTotal"
+              :page-size="rateGuardChangeLogPageSize"
+              :show-page-size-selector="false"
+              @update:page="changeRateGuardChangeLogPage"
+            />
+          </div>
+        </div>
+        <template #footer>
+          <button class="sp-button primary" type="button" @click="closeRateGuardChangeLogs">关闭</button>
+        </template>
+      </BaseDialog>
+
       <Transition name="sp-fade"><div v-if="toast" class="sp-toast">{{ toast }}</div></Transition>
     </div>
   </SupplierModuleLayout>
@@ -516,14 +584,17 @@ import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import type { Column } from '@/components/common/types'
 import {
+  listRateGuardChangeLogs,
   listRuns,
   listTasks,
+  markRateGuardChangeLogHandled,
   runTask,
   updateTask,
   type SupplierAutomationProviderRunDetail,
   type SupplierAutomationRun,
   type SupplierAutomationStageRunDetail,
   type SupplierAutomationTask,
+  type SupplierRateGuardChangeLog,
 } from '@/api/admin/supplierAutomation'
 
 const tasks = ref<SupplierAutomationTask[]>([])
@@ -547,6 +618,14 @@ const runPageSize = ref(10)
 const runTotal = ref(0)
 const runTaskFilter = ref('')
 const runStatusFilter = ref('')
+const rateGuardChangeLogsVisible = ref(false)
+const rateGuardChangeLogsLoading = ref(false)
+const rateGuardChangeLogs = ref<SupplierRateGuardChangeLog[]>([])
+const rateGuardChangeLogTotal = ref(0)
+const pendingRateGuardChangeLogCount = ref(0)
+const rateGuardChangeLogPage = ref(1)
+const rateGuardChangeLogPageSize = ref(20)
+const handlingRateGuardChangeLogID = ref<number | null>(null)
 let toastTimer: number | undefined
 
 const editForm = reactive<SupplierAutomationTask>({
@@ -594,6 +673,9 @@ const rateGuardRaisedItems = computed(() => (
   rateGuardResult.value?.items.filter(item => item.action === 'raised') || []
 ))
 const runTotalPages = computed(() => Math.max(1, Math.ceil(runTotal.value / runPageSize.value)))
+const rateGuardChangeLogTotalPages = computed(() => (
+  Math.max(1, Math.ceil(rateGuardChangeLogTotal.value / rateGuardChangeLogPageSize.value))
+))
 const runTaskFilterOptions = computed<SelectOption[]>(() => [
   { value: '', label: '全部任务' },
   ...tasks.value.map(task => ({ value: task.task_code, label: task.name })),
@@ -610,7 +692,8 @@ const taskColumns: Column[] = [
   { key: 'enabled', label: '状态', class: 'min-w-[90px]' },
   { key: 'cron_expression', label: '执行周期', class: 'min-w-[140px]' },
   { key: 'last_run_at', label: '最近运行', class: 'min-w-[160px]' },
-  { key: 'last_status', label: '最近结果', class: 'min-w-[260px]' },
+  { key: 'last_status', label: '最近结果', class: 'min-w-[220px]' },
+  { key: 'details', label: '详情', class: 'min-w-[90px]' },
   { key: 'actions', label: '操作', class: 'min-w-[170px]' },
 ]
 const runColumns: Column[] = [
@@ -619,6 +702,14 @@ const runColumns: Column[] = [
   { key: 'trigger_source', label: '触发' },
   { key: 'status', label: '状态', class: 'min-w-[170px]' },
   { key: 'counts', label: '处理 / 成功 / 失败', class: 'min-w-[150px]' },
+]
+const rateGuardChangeLogColumns: Column[] = [
+  { key: 'status', label: '处理状态', class: 'min-w-[100px]' },
+  { key: 'local_group_name', label: '本地分组', class: 'min-w-[150px]' },
+  { key: 'upstream_group_name', label: '上游分组', class: 'min-w-[170px]' },
+  { key: 'old_rate', label: '原倍率', class: 'min-w-[90px]' },
+  { key: 'new_rate', label: '新倍率', class: 'min-w-[90px]' },
+  { key: 'changed_at', label: '修改时间', class: 'min-w-[170px]' },
 ]
 const lastRefreshLabel = computed(() => (
   lastRefreshedAt.value ? formatTime(lastRefreshedAt.value) : '尚未刷新'
@@ -655,6 +746,7 @@ async function loadData() {
   try {
     tasks.value = await listTasks()
     await loadRuns()
+    await loadRateGuardChangeLogs()
     lastRefreshedAt.value = new Date().toISOString()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载自动化任务失败'
@@ -693,6 +785,62 @@ async function loadRuns() {
   })
   runs.value = result.items
   runTotal.value = result.total
+}
+
+async function loadRateGuardChangeLogs() {
+  const result = await listRateGuardChangeLogs({
+    page: rateGuardChangeLogPage.value,
+    page_size: rateGuardChangeLogPageSize.value,
+  })
+  rateGuardChangeLogs.value = result.items
+  rateGuardChangeLogTotal.value = result.total
+  pendingRateGuardChangeLogCount.value = result.pending_count
+  rateGuardChangeLogPage.value = result.page
+  rateGuardChangeLogPageSize.value = result.page_size
+}
+
+async function openRateGuardChangeLogs() {
+  rateGuardChangeLogsVisible.value = true
+  await refreshRateGuardChangeLogs()
+}
+
+function closeRateGuardChangeLogs() {
+  rateGuardChangeLogsVisible.value = false
+}
+
+async function changeRateGuardChangeLogPage(page: number) {
+  rateGuardChangeLogPage.value = Math.min(Math.max(1, page), rateGuardChangeLogTotalPages.value)
+  await refreshRateGuardChangeLogs()
+}
+
+async function refreshRateGuardChangeLogs() {
+  rateGuardChangeLogsLoading.value = true
+  error.value = ''
+  try {
+    await loadRateGuardChangeLogs()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '加载倍率守护变更日志失败'
+  } finally {
+    rateGuardChangeLogsLoading.value = false
+  }
+}
+
+async function handleRateGuardChangeLog(changeLog: SupplierRateGuardChangeLog) {
+  if (changeLog.status !== 'pending') return
+  handlingRateGuardChangeLogID.value = changeLog.id
+  try {
+    await markRateGuardChangeLogHandled(changeLog.id)
+    showToast('已确认处理')
+    await loadRateGuardChangeLogs()
+    if (!rateGuardChangeLogs.value.length && rateGuardChangeLogPage.value > 1) {
+      rateGuardChangeLogPage.value -= 1
+      await loadRateGuardChangeLogs()
+    }
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '确认倍率守护变更日志失败'
+  } finally {
+    handlingRateGuardChangeLogID.value = null
+  }
 }
 
 function openEdit(task: SupplierAutomationTask) {
@@ -1217,6 +1365,83 @@ function showToast(message: string) {
 .sp-panel-signals .bad {
   border-color: color-mix(in srgb, var(--sp-red) 36%, var(--sp-soft));
   color: var(--sp-red);
+}
+
+.sp-change-log-button {
+  position: relative;
+  gap: 6px;
+}
+
+.sp-pending-count {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 999px;
+  padding: 0 5px;
+  background: var(--sp-red);
+  color: white;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.sp-change-log-dialog {
+  display: grid;
+  gap: 14px;
+}
+
+.sp-change-log-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid var(--sp-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--sp-panel-2) 78%, transparent);
+  padding: 14px 16px;
+}
+
+.sp-change-log-head > div > span {
+  color: var(--sp-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.sp-change-log-head h3 {
+  margin: 3px 0 0;
+  color: var(--sp-text);
+  font-size: 16px;
+}
+
+.sp-change-log-head p {
+  margin: 5px 0 0;
+  color: var(--sp-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.sp-change-log-table-region {
+  overflow: hidden;
+  border: 1px solid var(--sp-soft);
+  border-radius: 10px;
+}
+
+.sp-change-log-status-action {
+  color: var(--sp-amber);
+  font-weight: 750;
+}
+
+.sp-change-log-status-action:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.sp-change-log-pagination {
+  border-top: 1px solid var(--sp-soft);
 }
 
 .sp-history-count::before {
