@@ -150,9 +150,30 @@
           </template>
 
           <template #cell-local_account_priority="{ row: account }">
-            <span v-if="isMatchedLocalAccount(account)" class="sp-account-number">
-              {{ displayValue(account.local_account_priority) }}
-            </span>
+            <div v-if="canEditPriority(account)" class="sp-priority-cell" @click.stop>
+              <Input
+                v-if="editingPriorityAccountID === account.local_account_id"
+                ref="priorityInput"
+                v-model="priorityDraft"
+                type="number"
+                class="sp-priority-input"
+                :disabled="savingPriorityAccountID === account.local_account_id"
+                @click.stop
+                @enter="savePriority(account)"
+                @keydown.esc="cancelPriorityEdit"
+                @blur="savePriority(account)"
+              />
+              <button
+                v-else
+                type="button"
+                class="sp-account-number sp-priority-trigger"
+                :disabled="savingPriorityAccountID === account.local_account_id"
+                title="点击编辑账号优先级"
+                @click.stop="startPriorityEdit(account)"
+              >
+                {{ displayValue(account.local_account_priority) }}
+              </button>
+            </div>
             <span v-else class="sp-account-muted">—</span>
           </template>
 
@@ -331,7 +352,7 @@
   </SupplierModuleLayout>
 </template>
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { SupplierDrawer, SupplierModuleLayout } from '@/components/admin/supplier-management'
 import DataTable from '@/components/common/DataTable.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -353,6 +374,10 @@ const items = ref<SupplierProviderAccount[]>([])
 const selected = ref<SupplierProviderAccount | null>(null)
 const testErrorAccount = ref<SupplierProviderAccount | null>(null)
 const togglingSchedulableID = ref<number | null>(null)
+const editingPriorityAccountID = ref<number | null>(null)
+const savingPriorityAccountID = ref<number | null>(null)
+const priorityDraft = ref('')
+const priorityInput = ref<InstanceType<typeof Input> | null>(null)
 const total = ref(0)
 const loading = ref(false)
 const error = ref('')
@@ -533,6 +558,67 @@ function localAccountStatusTone(status?: string): string {
   if (status === 'active') return 'good'
   if (status === 'error') return 'bad'
   return 'neutral'
+}
+
+function canEditPriority(account: SupplierProviderAccount): boolean {
+  return isMatchedLocalAccount(account)
+    && Number.isInteger(account.local_account_id)
+    && Number(account.local_account_id) > 0
+    && typeof account.local_account_priority === 'number'
+}
+
+function startPriorityEdit(account: SupplierProviderAccount) {
+  if (!canEditPriority(account)) return
+  const localAccountID = Number(account.local_account_id)
+  if (savingPriorityAccountID.value === localAccountID) return
+
+  editingPriorityAccountID.value = localAccountID
+  priorityDraft.value = String(account.local_account_priority)
+  void nextTick(() => {
+    priorityInput.value?.focus()
+    priorityInput.value?.select()
+  })
+}
+
+function cancelPriorityEdit() {
+  editingPriorityAccountID.value = null
+  priorityDraft.value = ''
+}
+
+async function savePriority(account: SupplierProviderAccount) {
+  if (!canEditPriority(account)) return
+  const localAccountID = Number(account.local_account_id)
+  if (editingPriorityAccountID.value !== localAccountID) return
+  if (savingPriorityAccountID.value === localAccountID) return
+
+  const draft = priorityDraft.value.trim()
+  const nextPriority = Number(draft)
+  if (draft === '' || !Number.isInteger(nextPriority) || nextPriority < 0) {
+    appStore.showError('请输入有效的整数优先级')
+    return
+  }
+  if (nextPriority === account.local_account_priority) {
+    cancelPriorityEdit()
+    return
+  }
+
+  savingPriorityAccountID.value = localAccountID
+  try {
+    const updated = await adminAPI.accounts.update(localAccountID, { priority: nextPriority })
+    const priority = typeof updated?.priority === 'number' ? updated.priority : nextPriority
+    items.value = items.value.map(item => item.local_account_id === localAccountID
+      ? { ...item, local_account_priority: priority }
+      : item)
+    if (selected.value?.local_account_id === localAccountID) {
+      selected.value = { ...selected.value, local_account_priority: priority }
+    }
+    cancelPriorityEdit()
+    appStore.showSuccess('账号优先级已保存')
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '修改账号优先级失败'))
+  } finally {
+    savingPriorityAccountID.value = null
+  }
 }
 
 function canToggleSchedulable(account: SupplierProviderAccount): boolean {
@@ -931,6 +1017,49 @@ function formatTime(value?: string): string {
 
 .sp-account-number {
   color: var(--sp-text);
+}
+
+.sp-priority-cell {
+  display: inline-flex;
+  min-width: 3.75rem;
+  align-items: center;
+}
+
+.sp-priority-trigger {
+  min-width: 2.75rem;
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+  padding: 0.25rem 0.45rem;
+  background: transparent;
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+.sp-priority-trigger:hover,
+.sp-priority-trigger:focus-visible {
+  border-color: color-mix(in srgb, var(--sp-green) 32%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-green) 8%, var(--sp-panel));
+  color: var(--sp-green);
+  outline: none;
+}
+
+.sp-priority-trigger:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.sp-priority-input {
+  width: 4.5rem;
+}
+
+.sp-priority-input :deep(.input) {
+  min-height: 2rem;
+  padding: 0.3rem 0.45rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  text-align: center;
 }
 
 .sp-local-status.good {

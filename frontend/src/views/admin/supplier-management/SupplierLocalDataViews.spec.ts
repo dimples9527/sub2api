@@ -569,6 +569,18 @@ describe('supplier local data views component usage', () => {
     expect(accountsSource).toContain("return '—'")
   })
 
+  it('edits a matched local-account priority inline through the account API', () => {
+    expect(accountsSource).toContain('@click.stop="startPriorityEdit(account)"')
+    expect(accountsSource).toContain('v-model="priorityDraft"')
+    expect(accountsSource).toContain('@enter="savePriority(account)"')
+    expect(accountsSource).toContain('@keydown.esc="cancelPriorityEdit"')
+    expect(accountsSource).toContain('@blur="savePriority(account)"')
+    expect(accountsSource).toContain('adminAPI.accounts.update(localAccountID, { priority: nextPriority })')
+    expect(accountsSource).toContain('local_account_priority: priority')
+    expect(accountsSource).toContain('请输入有效的整数优先级')
+    expect(accountsSource).toContain('修改账号优先级失败')
+  })
+
   it('opens the existing drawer from both row clicks and the small view button', () => {
     expect(accountsSource).toContain('@row-click="openDrawer"')
     expect(accountsSource).toContain('<template #cell-actions="{ row: account }">')
