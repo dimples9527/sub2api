@@ -177,7 +177,7 @@ func (r *supplierProviderDataRepository) UpdateGroupMapping(ctx context.Context,
 		}
 	}
 
-	result, err := r.db.ExecContext(ctx, "UPDATE supplier_provider_groups SET local_group_id = $2, auto_match_status = CASE WHEN $2 IS NULL THEN 'unmatched' ELSE 'manual' END, auto_match_ignored = CASE WHEN $2 IS NULL THEN TRUE ELSE auto_match_ignored END, matched_upstream_name = CASE WHEN $2 IS NULL THEN NULL ELSE name END, name_change_pending = FALSE, updated_at = NOW() WHERE id = $1", groupID, localGroupID)
+	result, err := r.db.ExecContext(ctx, "UPDATE supplier_provider_groups SET local_group_id = $2, auto_match_status = CASE WHEN $2 IS NULL THEN 'unmatched' ELSE 'manual' END, auto_match_ignored = CASE WHEN $2 IS NULL THEN TRUE ELSE auto_match_ignored END, matched_upstream_name = CASE WHEN $2 IS NULL THEN NULL ELSE name END, name_change_pending = FALSE, rate_guard_selected = CASE WHEN local_group_id IS DISTINCT FROM $2 THEN FALSE ELSE rate_guard_selected END, rate_guard_selection_mode = CASE WHEN local_group_id IS DISTINCT FROM $2 THEN '' ELSE rate_guard_selection_mode END, updated_at = NOW() WHERE id = $1", groupID, localGroupID)
 	if err != nil {
 		return fmt.Errorf("update supplier provider group mapping: %w", err)
 	}
@@ -508,6 +508,17 @@ FOR UPDATE OF g, lg`, input.MappingID).Scan(
 			if err := enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventGroupChanged, nil, &localGroupID, nil); err != nil {
 				return result, fmt.Errorf("enqueue guarded group rate change: %w", err)
 			}
+			if _, err := tx.ExecContext(ctx, `
+INSERT INTO supplier_rate_guard_change_logs (
+    mapping_id, local_group_id, local_group_name, upstream_group_key, upstream_group_name,
+    old_rate, new_rate, status, changed_at
+)
+SELECT g.id, lg.id, lg.name, g.upstream_group_key, g.name, $2, $3, $4, $5
+FROM supplier_provider_groups g
+JOIN groups lg ON lg.id = g.local_group_id AND lg.deleted_at IS NULL
+WHERE g.id = $1`, input.MappingID, localRate, input.TargetRate, service.SupplierRateGuardChangeLogStatusPending, input.CheckedAt); err != nil {
+				return result, fmt.Errorf("create supplier rate guard change log: %w", err)
+			}
 		} else {
 			result.Action = service.SupplierRateGuardActionUnchanged
 		}
@@ -524,6 +535,84 @@ FOR UPDATE OF g, lg`, input.MappingID).Scan(
 		return result, fmt.Errorf("commit supplier rate guard update: %w", err)
 	}
 	return result, nil
+}
+
+func (r *supplierProviderDataRepository) ListRateGuardChangeLogs(ctx context.Context, params service.SupplierRateGuardChangeLogListParams) (service.SupplierRateGuardChangeLogListResult, error) {
+	params = normalizeSupplierRateGuardChangeLogListParams(params)
+	var total, pendingCount int64
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM supplier_rate_guard_change_logs").Scan(&total); err != nil {
+		return service.SupplierRateGuardChangeLogListResult{}, fmt.Errorf("count supplier rate guard change logs: %w", err)
+	}
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM supplier_rate_guard_change_logs WHERE status = $1", service.SupplierRateGuardChangeLogStatusPending).Scan(&pendingCount); err != nil {
+		return service.SupplierRateGuardChangeLogListResult{}, fmt.Errorf("count pending supplier rate guard change logs: %w", err)
+	}
+	rows, err := r.db.QueryContext(ctx, `
+SELECT id, mapping_id, local_group_id, local_group_name, upstream_group_key, upstream_group_name,
+       old_rate, new_rate, status, changed_at, handled_at, created_at
+FROM supplier_rate_guard_change_logs
+ORDER BY changed_at DESC, id DESC
+LIMIT $1 OFFSET $2`, params.PageSize, (params.Page-1)*params.PageSize)
+	if err != nil {
+		return service.SupplierRateGuardChangeLogListResult{}, fmt.Errorf("query supplier rate guard change logs: %w", err)
+	}
+	defer rows.Close()
+	items := make([]service.SupplierRateGuardChangeLog, 0)
+	for rows.Next() {
+		item, err := scanSupplierRateGuardChangeLog(rows)
+		if err != nil {
+			return service.SupplierRateGuardChangeLogListResult{}, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return service.SupplierRateGuardChangeLogListResult{}, err
+	}
+	return service.SupplierRateGuardChangeLogListResult{
+		Items: items, Total: total, PendingCount: pendingCount, Page: params.Page, PageSize: params.PageSize,
+	}, nil
+}
+
+func (r *supplierProviderDataRepository) MarkRateGuardChangeLogHandled(ctx context.Context, id int64) (service.SupplierRateGuardChangeLog, error) {
+	item, err := scanSupplierRateGuardChangeLog(r.db.QueryRowContext(ctx, `
+UPDATE supplier_rate_guard_change_logs
+SET status = $2, handled_at = COALESCE(handled_at, NOW())
+WHERE id = $1
+RETURNING id, mapping_id, local_group_id, local_group_name, upstream_group_key, upstream_group_name,
+          old_rate, new_rate, status, changed_at, handled_at, created_at`, id, service.SupplierRateGuardChangeLogStatusHandled))
+	if err == sql.ErrNoRows {
+		return service.SupplierRateGuardChangeLog{}, service.ErrSupplierProviderInvalid
+	}
+	if err != nil {
+		return service.SupplierRateGuardChangeLog{}, fmt.Errorf("mark supplier rate guard change log handled: %w", err)
+	}
+	return item, nil
+}
+
+func normalizeSupplierRateGuardChangeLogListParams(params service.SupplierRateGuardChangeLogListParams) service.SupplierRateGuardChangeLogListParams {
+	if params.Page < 1 {
+		params.Page = 1
+	}
+	if params.PageSize < 1 || params.PageSize > 200 {
+		params.PageSize = 20
+	}
+	return params
+}
+
+type supplierRateGuardChangeLogScanner interface{ Scan(dest ...any) error }
+
+func scanSupplierRateGuardChangeLog(scanner supplierRateGuardChangeLogScanner) (service.SupplierRateGuardChangeLog, error) {
+	var item service.SupplierRateGuardChangeLog
+	var handledAt sql.NullTime
+	if err := scanner.Scan(
+		&item.ID, &item.MappingID, &item.LocalGroupID, &item.LocalGroupName, &item.UpstreamGroupKey, &item.UpstreamGroupName,
+		&item.OldRate, &item.NewRate, &item.Status, &item.ChangedAt, &handledAt, &item.CreatedAt,
+	); err != nil {
+		return service.SupplierRateGuardChangeLog{}, err
+	}
+	if handledAt.Valid {
+		item.HandledAt = &handledAt.Time
+	}
+	return item, nil
 }
 
 func (r *supplierProviderDataRepository) MarkRateGuardChecked(ctx context.Context, mappingID int64, checkedAt time.Time) error {

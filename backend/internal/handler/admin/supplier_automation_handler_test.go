@@ -14,8 +14,9 @@ import (
 )
 
 type supplierAutomationHandlerServiceStub struct {
-	updated bool
-	ranCode string
+	updated   bool
+	ranCode   string
+	handledID int64
 }
 
 func (s *supplierAutomationHandlerServiceStub) ListTasks(context.Context) ([]service.SupplierAutomationTask, error) {
@@ -33,6 +34,16 @@ func (s *supplierAutomationHandlerServiceStub) Run(_ context.Context, taskCode, 
 func (s *supplierAutomationHandlerServiceStub) ListRuns(context.Context, service.SupplierAutomationRunListParams) (service.SupplierAutomationRunListResult, error) {
 	return service.SupplierAutomationRunListResult{Items: []service.SupplierAutomationRun{{ID: 1, TaskCode: service.SupplierAutomationTaskSync, Status: service.SupplierAutomationStatusSuccess}}, Total: 1, Page: 1, PageSize: 20}, nil
 }
+func (s *supplierAutomationHandlerServiceStub) ListRateGuardChangeLogs(context.Context, service.SupplierRateGuardChangeLogListParams) (service.SupplierRateGuardChangeLogListResult, error) {
+	return service.SupplierRateGuardChangeLogListResult{
+		Items: []service.SupplierRateGuardChangeLog{{ID: 9, Status: service.SupplierRateGuardChangeLogStatusPending}},
+		Total: 1, PendingCount: 1, Page: 1, PageSize: 20,
+	}, nil
+}
+func (s *supplierAutomationHandlerServiceStub) MarkRateGuardChangeLogHandled(_ context.Context, id int64) (service.SupplierRateGuardChangeLog, error) {
+	s.handledID = id
+	return service.SupplierRateGuardChangeLog{ID: id, Status: service.SupplierRateGuardChangeLogStatusHandled}, nil
+}
 
 func TestSupplierAutomationHandlerRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -43,6 +54,8 @@ func TestSupplierAutomationHandlerRoutes(t *testing.T) {
 	router.PUT("/automation/tasks/:task_code", handler.UpdateTask)
 	router.POST("/automation/tasks/:task_code/run", handler.RunTask)
 	router.GET("/automation/runs", handler.ListRuns)
+	router.GET("/automation/rate-guard-change-logs", handler.ListRateGuardChangeLogs)
+	router.POST("/automation/rate-guard-change-logs/:id/handled", handler.MarkRateGuardChangeLogHandled)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/automation/tasks", nil)
@@ -66,6 +79,17 @@ func TestSupplierAutomationHandlerRoutes(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "/automation/runs?task_code=supplier_data_sync", nil)
 	router.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/automation/rate-guard-change-logs?page=1&page_size=20", nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/automation/rate-guard-change-logs/9/handled", nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(9), stub.handledID)
 }
 
 func TestSupplierAutomationHandlerRejectsBadJSON(t *testing.T) {

@@ -200,6 +200,22 @@ func (s *SupplierAutomationService) ListRuns(ctx context.Context, params Supplie
 	return s.repo.ListRuns(ctx, params)
 }
 
+func (s *SupplierAutomationService) ListRateGuardChangeLogs(ctx context.Context, params SupplierRateGuardChangeLogListParams) (SupplierRateGuardChangeLogListResult, error) {
+	store, ok := s.dataRepo.(SupplierRateGuardChangeLogStore)
+	if !ok {
+		return SupplierRateGuardChangeLogListResult{}, fmt.Errorf("supplier rate guard change log store is required")
+	}
+	return store.ListRateGuardChangeLogs(ctx, params)
+}
+
+func (s *SupplierAutomationService) MarkRateGuardChangeLogHandled(ctx context.Context, id int64) (SupplierRateGuardChangeLog, error) {
+	store, ok := s.dataRepo.(SupplierRateGuardChangeLogStore)
+	if !ok {
+		return SupplierRateGuardChangeLog{}, fmt.Errorf("supplier rate guard change log store is required")
+	}
+	return store.MarkRateGuardChangeLogHandled(ctx, id)
+}
+
 func (s *SupplierAutomationService) Run(ctx context.Context, taskCode, trigger string) (SupplierAutomationRun, error) {
 	task, err := s.repo.GetTask(ctx, strings.TrimSpace(taskCode))
 	if err != nil {

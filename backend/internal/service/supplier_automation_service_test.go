@@ -75,6 +75,24 @@ type supplierAutomationRateGuardStub struct {
 	err    error
 }
 
+type supplierRateGuardChangeLogDataRepoStub struct {
+	*supplierProviderDataRepoStub
+	listParams SupplierRateGuardChangeLogListParams
+	handledID  int64
+	listResult SupplierRateGuardChangeLogListResult
+	handled    SupplierRateGuardChangeLog
+}
+
+func (r *supplierRateGuardChangeLogDataRepoStub) ListRateGuardChangeLogs(_ context.Context, params SupplierRateGuardChangeLogListParams) (SupplierRateGuardChangeLogListResult, error) {
+	r.listParams = params
+	return r.listResult, nil
+}
+
+func (r *supplierRateGuardChangeLogDataRepoStub) MarkRateGuardChangeLogHandled(_ context.Context, id int64) (SupplierRateGuardChangeLog, error) {
+	r.handledID = id
+	return r.handled, nil
+}
+
 func (s *supplierAutomationRateGuardStub) Run(_ context.Context, config SupplierRateGuardConfig, _ time.Time) (SupplierRateGuardResult, error) {
 	s.called++
 	s.config = config
@@ -90,6 +108,42 @@ func (s *supplierAutomationSyncStub) SyncAllEnabled(context.Context, string) (Su
 		return s.result, nil
 	}
 	return SupplierProviderBatchSyncResult{ProcessedCount: 2, SuccessCount: 1, FailedCount: 1}, nil
+}
+
+func TestSupplierAutomationServiceListsAndHandlesRateGuardChangeLogs(t *testing.T) {
+	dataRepo := &supplierRateGuardChangeLogDataRepoStub{
+		supplierProviderDataRepoStub: &supplierProviderDataRepoStub{},
+		listResult: SupplierRateGuardChangeLogListResult{
+			Items:        []SupplierRateGuardChangeLog{{ID: 8, Status: SupplierRateGuardChangeLogStatusPending}},
+			Total:        1,
+			PendingCount: 1,
+			Page:         2,
+			PageSize:     20,
+		},
+		handled: SupplierRateGuardChangeLog{ID: 8, Status: SupplierRateGuardChangeLogStatusHandled},
+	}
+	service := NewSupplierAutomationService(&supplierAutomationRepoStub{}, &supplierAutomationLockStub{}, &supplierAutomationSyncStub{}, dataRepo)
+
+	result, err := service.ListRateGuardChangeLogs(context.Background(), SupplierRateGuardChangeLogListParams{Page: 2, PageSize: 20})
+
+	require.NoError(t, err)
+	require.Equal(t, int64(1), result.Total)
+	require.Equal(t, 2, dataRepo.listParams.Page)
+	require.Equal(t, 20, dataRepo.listParams.PageSize)
+
+	item, err := service.MarkRateGuardChangeLogHandled(context.Background(), 8)
+
+	require.NoError(t, err)
+	require.Equal(t, SupplierRateGuardChangeLogStatusHandled, item.Status)
+	require.Equal(t, int64(8), dataRepo.handledID)
+}
+
+func TestSupplierAutomationServiceRequiresRateGuardChangeLogStore(t *testing.T) {
+	service := NewSupplierAutomationService(&supplierAutomationRepoStub{}, &supplierAutomationLockStub{}, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
+
+	_, err := service.ListRateGuardChangeLogs(context.Background(), SupplierRateGuardChangeLogListParams{})
+
+	require.EqualError(t, err, "supplier rate guard change log store is required")
 }
 
 func TestSupplierAutomationServiceRunsRateGuardWithStructuredPartialResult(t *testing.T) {

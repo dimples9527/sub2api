@@ -17,6 +17,11 @@ const (
 )
 
 const (
+	SupplierRateGuardChangeLogStatusPending = "pending"
+	SupplierRateGuardChangeLogStatusHandled = "handled"
+)
+
+const (
 	SupplierRateGuardReasonProviderInactive   = "provider_inactive"
 	SupplierRateGuardReasonGuardianInactive   = "guardian_inactive"
 	SupplierRateGuardReasonLocalGroupInactive = "local_group_inactive"
@@ -91,6 +96,39 @@ type SupplierRateGuardResult struct {
 	Invalid   int                           `json:"invalid"`
 	Failed    int                           `json:"failed"`
 	Items     []SupplierRateGuardItemResult `json:"items"`
+}
+
+type SupplierRateGuardChangeLog struct {
+	ID                int64      `json:"id"`
+	MappingID         int64      `json:"mapping_id"`
+	LocalGroupID      int64      `json:"local_group_id"`
+	LocalGroupName    string     `json:"local_group_name"`
+	UpstreamGroupKey  string     `json:"upstream_group_key"`
+	UpstreamGroupName string     `json:"upstream_group_name"`
+	OldRate           float64    `json:"old_rate"`
+	NewRate           float64    `json:"new_rate"`
+	Status            string     `json:"status"`
+	ChangedAt         time.Time  `json:"changed_at"`
+	HandledAt         *time.Time `json:"handled_at,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+}
+
+type SupplierRateGuardChangeLogListParams struct {
+	Page     int
+	PageSize int
+}
+
+type SupplierRateGuardChangeLogListResult struct {
+	Items        []SupplierRateGuardChangeLog `json:"items"`
+	Total        int64                        `json:"total"`
+	PendingCount int64                        `json:"pending_count"`
+	Page         int                          `json:"page"`
+	PageSize     int                          `json:"page_size"`
+}
+
+type SupplierRateGuardChangeLogStore interface {
+	ListRateGuardChangeLogs(ctx context.Context, params SupplierRateGuardChangeLogListParams) (SupplierRateGuardChangeLogListResult, error)
+	MarkRateGuardChangeLogHandled(ctx context.Context, id int64) (SupplierRateGuardChangeLog, error)
 }
 
 type SupplierRateGuardRepository interface {

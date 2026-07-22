@@ -47,6 +47,8 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 			automation.PUT("/tasks/:task_code", h.Admin.SupplierAutomation.UpdateTask)
 			automation.POST("/tasks/:task_code/run", h.Admin.SupplierAutomation.RunTask)
 			automation.GET("/runs", h.Admin.SupplierAutomation.ListRuns)
+			automation.GET("/rate-guard-change-logs", h.Admin.SupplierAutomation.ListRateGuardChangeLogs)
+			automation.POST("/rate-guard-change-logs/:id/handled", h.Admin.SupplierAutomation.MarkRateGuardChangeLogHandled)
 		}
 	}
 }

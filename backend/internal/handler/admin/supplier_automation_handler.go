@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -14,6 +15,8 @@ type SupplierAutomationServicePort interface {
 	UpdateTask(ctx context.Context, task *service.SupplierAutomationTask) error
 	Run(ctx context.Context, taskCode, trigger string) (service.SupplierAutomationRun, error)
 	ListRuns(ctx context.Context, params service.SupplierAutomationRunListParams) (service.SupplierAutomationRunListResult, error)
+	ListRateGuardChangeLogs(ctx context.Context, params service.SupplierRateGuardChangeLogListParams) (service.SupplierRateGuardChangeLogListResult, error)
+	MarkRateGuardChangeLogHandled(ctx context.Context, id int64) (service.SupplierRateGuardChangeLog, error)
 }
 
 type SupplierAutomationHandler struct {
@@ -85,4 +88,33 @@ func (h *SupplierAutomationHandler) ListRuns(c *gin.Context) {
 		return
 	}
 	response.Success(c, result)
+}
+
+func (h *SupplierAutomationHandler) ListRateGuardChangeLogs(c *gin.Context) {
+	page, pageSize := response.ParsePagination(c)
+	if pageSize > supplierProviderMaxPageSize {
+		pageSize = supplierProviderMaxPageSize
+	}
+	result, err := h.service.ListRateGuardChangeLogs(c.Request.Context(), service.SupplierRateGuardChangeLogListParams{
+		Page: page, PageSize: pageSize,
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *SupplierAutomationHandler) MarkRateGuardChangeLogHandled(c *gin.Context) {
+	id, err := strconv.ParseInt(strings.TrimSpace(c.Param("id")), 10, 64)
+	if err != nil || id <= 0 {
+		response.ErrorFrom(c, badRequest("日志编号无效"))
+		return
+	}
+	item, err := h.service.MarkRateGuardChangeLogHandled(c.Request.Context(), id)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
 }
