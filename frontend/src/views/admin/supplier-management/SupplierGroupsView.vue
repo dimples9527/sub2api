@@ -54,15 +54,25 @@
           </div>
         </div>
         <div class="sp-filter-actions">
-          <button class="sp-button small sp-control-button" type="button" :disabled="loading || !canResetFilters" @click="resetGroupFilters">
+          <button class="sp-button small sp-control-button sp-control-button-reset" type="button" :disabled="loading || !canResetFilters" @click="resetGroupFilters">
             <Icon name="x" size="sm" />
             <span>重置筛选</span>
           </button>
-          <button class="sp-button sp-control-button" type="button" :disabled="loading || autoMatching" @click="runAutoMatch">
+          <button class="sp-button sp-control-button sp-control-button-match" type="button" :disabled="loading || autoMatching" @click="runAutoMatch">
             <Icon name="sync" size="sm" :class="autoMatching ? 'sp-spin' : ''" />
             <span>{{ autoMatching ? '匹配中' : '自动匹配' }}</span>
           </button>
-          <button class="sp-button sp-control-button" type="button" :disabled="loading" @click="refreshAll">
+          <button
+            class="sp-button sp-control-button sp-control-button-log"
+            type="button"
+            :disabled="rateGuardChangeLogsLoading"
+            @click="openRateGuardChangeLogs"
+          >
+            <Icon name="clock" size="sm" />
+            <span>分组倍率变更日志</span>
+            <em v-if="pendingRateGuardChangeLogCount > 0" class="sp-pending-count">{{ pendingRateGuardChangeLogCount }}</em>
+          </button>
+          <button class="sp-button sp-control-button sp-control-button-refresh" type="button" :disabled="loading" @click="refreshAll">
             <Icon name="refresh" size="sm" :class="loading ? 'sp-spin' : ''" />
             <span>刷新</span>
           </button>
@@ -546,6 +556,66 @@
       </template>
     </BaseDialog>
 
+    <BaseDialog :show="rateGuardChangeLogsVisible" title="分组倍率变更日志" width="extra-wide" @close="closeRateGuardChangeLogs">
+      <div class="sp-change-log-dialog">
+        <div class="sp-table-region sp-change-log-table-region">
+          <DataTable
+            :columns="rateGuardChangeLogColumns"
+            :data="rateGuardChangeLogs"
+            :loading="rateGuardChangeLogsLoading"
+            row-key="id"
+            :sticky-actions-column="false"
+          >
+            <template #cell-status="{ row: changeLog }">
+              <button
+                v-if="changeLog.status === 'pending'"
+                class="sp-link-button sp-change-log-status-action"
+                type="button"
+                :disabled="handlingRateGuardChangeLogID === changeLog.id"
+                @click="handleRateGuardChangeLog(changeLog)"
+              >
+                {{ handlingRateGuardChangeLogID === changeLog.id ? '确认中' : '待处理' }}
+              </button>
+              <span v-else class="sp-status good">已处理</span>
+            </template>
+            <template #cell-local_group_name="{ row: changeLog }">
+              <strong class="sp-change-log-local-group">
+                {{ changeLog.local_group_name || `本地分组 ${changeLog.local_group_id}` }}
+              </strong>
+            </template>
+            <template #cell-upstream_group_name="{ row: changeLog }">
+              <strong class="sp-change-log-upstream-group">
+                {{ changeLog.upstream_group_name || '未命名分组' }}
+                <span v-if="changeLog.upstream_group_key" class="sp-change-log-key">#{{ changeLog.upstream_group_key }}</span>
+              </strong>
+            </template>
+            <template #cell-old_rate="{ row: changeLog }">
+              <span class="sp-change-log-rate sp-change-log-old-rate">{{ formatRate(changeLog.old_rate) }}</span>
+            </template>
+            <template #cell-new_rate="{ row: changeLog }">
+              <span class="sp-change-log-rate sp-change-log-new-rate">{{ formatRate(changeLog.new_rate) }}</span>
+            </template>
+            <template #cell-changed_at="{ row: changeLog }">
+              <span class="sp-change-log-time">{{ formatTime(changeLog.changed_at) }}</span>
+            </template>
+            <template #empty>暂无分组倍率变更记录。</template>
+          </DataTable>
+          <Pagination
+            v-if="rateGuardChangeLogTotal > 0"
+            class="sp-change-log-pagination"
+            :page="rateGuardChangeLogPage"
+            :total="rateGuardChangeLogTotal"
+            :page-size="rateGuardChangeLogPageSize"
+            :show-page-size-selector="false"
+            @update:page="changeRateGuardChangeLogPage"
+          />
+        </div>
+      </div>
+      <template #footer>
+        <button class="sp-button primary" type="button" @click="closeRateGuardChangeLogs">关闭</button>
+      </template>
+    </BaseDialog>
+
     <ConfirmDialog
       :show="Boolean(unmatchTarget)"
       title="取消本地分组关联"
@@ -562,6 +632,11 @@
 <script setup lang="ts">
 import { computed, h, nextTick, onMounted, ref, watch } from 'vue'
 import { adminAPI } from '@/api/admin'
+import {
+  listRateGuardChangeLogs,
+  markRateGuardChangeLogHandled,
+  type SupplierRateGuardChangeLog,
+} from '@/api/admin/supplierAutomation'
 import {
   autoMatchSupplierGroups,
   listSupplierGroups,
@@ -697,6 +772,14 @@ const autoMatching = ref(false)
 const policyUpdatingGroupID = ref<number | null>(null)
 const guardUpdatingGroupID = ref<number | null>(null)
 const resolvingNameGroupID = ref<number | null>(null)
+const rateGuardChangeLogsVisible = ref(false)
+const rateGuardChangeLogsLoading = ref(false)
+const rateGuardChangeLogs = ref<SupplierRateGuardChangeLog[]>([])
+const rateGuardChangeLogTotal = ref(0)
+const pendingRateGuardChangeLogCount = ref(0)
+const rateGuardChangeLogPage = ref(1)
+const rateGuardChangeLogPageSize = ref(20)
+const handlingRateGuardChangeLogID = ref<number | null>(null)
 const error = ref('')
 const page = ref(1)
 const pageSize = ref(20)
@@ -770,6 +853,14 @@ const groupColumns: Column[] = [
   { key: 'rate_status', label: '倍率状态', class: 'min-w-[110px]' },
   { key: 'actions', label: '操作', class: 'min-w-[270px]' },
 ]
+const rateGuardChangeLogColumns: Column[] = [
+  { key: 'status', label: '处理状态', class: 'min-w-[100px]' },
+  { key: 'local_group_name', label: '本地分组', class: 'min-w-[150px]' },
+  { key: 'upstream_group_name', label: '上游分组', class: 'min-w-[170px]' },
+  { key: 'old_rate', label: '原倍率', class: 'min-w-[90px]' },
+  { key: 'new_rate', label: '新倍率', class: 'min-w-[90px]' },
+  { key: 'changed_at', label: '修改时间', class: 'min-w-[170px]' },
+]
 const canResetFilters = computed(() => (
   providerID.value !== DEFAULT_PROVIDER_ID
   || search.value.trim() !== ''
@@ -793,6 +884,9 @@ const localRateDeltaPreview = computed(() => {
   if (!rateTarget.value) return '-'
   return formatSupplierGroupRateDelta(localRateInput.value, rateTarget.value.rate_multiplier)
 })
+const rateGuardChangeLogTotalPages = computed(() => (
+  Math.max(1, Math.ceil(rateGuardChangeLogTotal.value / rateGuardChangeLogPageSize.value))
+))
 
 onMounted(async () => {
   try {
@@ -801,6 +895,7 @@ onMounted(async () => {
     appStore.showError(errorMessage(err, '加载筛选选项失败'))
   }
   await loadGroups()
+  await refreshRateGuardChangeLogs()
 })
 
 watch([providerID, platformFilter, matchStatusFilter, rateStatusFilter], () => {
@@ -916,9 +1011,64 @@ async function loadLocalGroups() {
 
 async function refreshAll() {
   try {
-    await Promise.all([loadLocalGroups(), loadGroups()])
+    await Promise.all([loadLocalGroups(), loadGroups(), loadRateGuardChangeLogs()])
   } catch (err) {
     appStore.showError(errorMessage(err, '刷新分组数据失败'))
+  }
+}
+
+async function loadRateGuardChangeLogs() {
+  const result = await listRateGuardChangeLogs({
+    page: rateGuardChangeLogPage.value,
+    page_size: rateGuardChangeLogPageSize.value,
+  })
+  rateGuardChangeLogs.value = result.items
+  rateGuardChangeLogTotal.value = result.total
+  pendingRateGuardChangeLogCount.value = result.pending_count
+  rateGuardChangeLogPage.value = result.page
+  rateGuardChangeLogPageSize.value = result.page_size
+}
+
+async function openRateGuardChangeLogs() {
+  rateGuardChangeLogsVisible.value = true
+  await refreshRateGuardChangeLogs()
+}
+
+function closeRateGuardChangeLogs() {
+  rateGuardChangeLogsVisible.value = false
+}
+
+async function changeRateGuardChangeLogPage(page: number) {
+  rateGuardChangeLogPage.value = Math.min(Math.max(1, page), rateGuardChangeLogTotalPages.value)
+  await refreshRateGuardChangeLogs()
+}
+
+async function refreshRateGuardChangeLogs() {
+  rateGuardChangeLogsLoading.value = true
+  try {
+    await loadRateGuardChangeLogs()
+  } catch (err) {
+    appStore.showError(errorMessage(err, '加载倍率守护变更日志失败'))
+  } finally {
+    rateGuardChangeLogsLoading.value = false
+  }
+}
+
+async function handleRateGuardChangeLog(changeLog: SupplierRateGuardChangeLog) {
+  if (changeLog.status !== 'pending') return
+  handlingRateGuardChangeLogID.value = changeLog.id
+  try {
+    await markRateGuardChangeLogHandled(changeLog.id)
+    appStore.showSuccess('变更日志已标记为已处理')
+    await loadRateGuardChangeLogs()
+    if (!rateGuardChangeLogs.value.length && rateGuardChangeLogPage.value > 1) {
+      rateGuardChangeLogPage.value -= 1
+      await loadRateGuardChangeLogs()
+    }
+  } catch (err) {
+    appStore.showError(errorMessage(err, '确认倍率守护变更日志失败'))
+  } finally {
+    handlingRateGuardChangeLogID.value = null
   }
 }
 
@@ -1407,6 +1557,148 @@ function errorMessage(err: unknown, fallback: string): string {
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
+}
+
+.sp-control-button-reset {
+  border-color: color-mix(in srgb, var(--sp-muted) 30%, var(--sp-line));
+  background: var(--sp-panel);
+  color: var(--sp-muted);
+}
+
+.sp-control-button-match {
+  border-color: color-mix(in srgb, var(--sp-cyan) 38%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-cyan) 9%, var(--sp-panel));
+  color: var(--sp-cyan);
+}
+
+.sp-control-button-log {
+  position: relative;
+  border-color: color-mix(in srgb, var(--sp-amber) 42%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-amber) 10%, var(--sp-panel));
+  color: var(--sp-amber);
+}
+
+.sp-control-button-refresh {
+  border-color: color-mix(in srgb, var(--sp-green) 38%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-green) 9%, var(--sp-panel));
+  color: var(--sp-green);
+}
+
+.sp-pending-count {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 999px;
+  padding: 0 5px;
+  background: var(--sp-red);
+  color: white;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.sp-change-log-dialog {
+  --sp-change-log-local: #0891b2;
+  --sp-change-log-upstream: #8b5cf6;
+  --sp-change-log-old-rate: #d97706;
+  --sp-change-log-new-rate: #16a34a;
+  --sp-change-log-time: #2563eb;
+  --sp-change-log-muted: #64748b;
+  --sp-change-log-line: #e5e7eb;
+  --sp-change-log-panel: #ffffff;
+  --sp-change-log-soft: #f1f5f9;
+  display: grid;
+  gap: 14px;
+}
+
+:global(.dark) .sp-change-log-dialog {
+  --sp-change-log-local: #22d3ee;
+  --sp-change-log-upstream: #a78bfa;
+  --sp-change-log-old-rate: #fbbf24;
+  --sp-change-log-new-rate: #4ade80;
+  --sp-change-log-time: #60a5fa;
+  --sp-change-log-muted: #94a3b8;
+  --sp-change-log-line: #374151;
+  --sp-change-log-panel: #1f2937;
+  --sp-change-log-soft: #374151;
+}
+
+.sp-change-log-table-region {
+  overflow: hidden;
+  border: 1px solid var(--sp-change-log-soft);
+  border-radius: 10px;
+}
+
+.sp-change-log-local-group,
+.sp-change-log-upstream-group {
+  font-weight: 750;
+}
+
+.sp-change-log-local-group {
+  color: var(--sp-change-log-local);
+}
+
+.sp-change-log-upstream-group {
+  color: var(--sp-change-log-upstream);
+}
+
+.sp-change-log-key {
+  margin-left: 6px;
+  color: var(--sp-change-log-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.sp-change-log-rate {
+  display: inline-flex;
+  min-width: 54px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-change-log-old-rate {
+  border-color: color-mix(in srgb, var(--sp-change-log-old-rate) 38%, var(--sp-change-log-line));
+  background: color-mix(in srgb, var(--sp-change-log-old-rate) 14%, var(--sp-change-log-panel));
+  color: var(--sp-change-log-old-rate);
+}
+
+.sp-change-log-new-rate {
+  border-color: color-mix(in srgb, var(--sp-change-log-new-rate) 38%, var(--sp-change-log-line));
+  background: color-mix(in srgb, var(--sp-change-log-new-rate) 14%, var(--sp-change-log-panel));
+  color: var(--sp-change-log-new-rate);
+}
+
+.sp-change-log-time {
+  color: var(--sp-change-log-time);
+  font-size: 12px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.sp-change-log-status-action {
+  color: var(--sp-change-log-old-rate);
+  font-weight: 750;
+}
+
+.sp-change-log-status-action:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.sp-change-log-pagination {
+  border-top: 1px solid var(--sp-change-log-soft);
 }
 
 .sp-summary-grid {
@@ -2109,6 +2401,27 @@ function errorMessage(err: unknown, fallback: string): string {
 .sp-spin { animation: sp-spin 800ms linear infinite; }
 
 @media (hover: hover) {
+  .sp-control-button-reset:not(:disabled):hover {
+    border-color: color-mix(in srgb, var(--sp-text) 28%, var(--sp-line));
+    background: color-mix(in srgb, var(--sp-muted) 8%, var(--sp-panel));
+    color: var(--sp-text);
+  }
+
+  .sp-control-button-match:not(:disabled):hover {
+    border-color: color-mix(in srgb, var(--sp-cyan) 58%, var(--sp-line));
+    background: color-mix(in srgb, var(--sp-cyan) 15%, var(--sp-panel));
+  }
+
+  .sp-control-button-log:not(:disabled):hover {
+    border-color: color-mix(in srgb, var(--sp-amber) 62%, var(--sp-line));
+    background: color-mix(in srgb, var(--sp-amber) 16%, var(--sp-panel));
+  }
+
+  .sp-control-button-refresh:not(:disabled):hover {
+    border-color: color-mix(in srgb, var(--sp-green) 58%, var(--sp-line));
+    background: color-mix(in srgb, var(--sp-green) 15%, var(--sp-panel));
+  }
+
   .sp-summary-filter:not(:disabled):hover :deep(.stat-card) {
     border-color: color-mix(in srgb, var(--sp-cyan) 34%, var(--sp-line));
     box-shadow: 0 10px 24px rgba(15, 23, 42, 0.1);
@@ -2136,7 +2449,7 @@ function errorMessage(err: unknown, fallback: string): string {
   .sp-filter-card-body { padding-inline: 0.75rem; }
   .sp-filter-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sp-filter-search-control { grid-column: 1 / -1; }
-  .sp-filter-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .sp-filter-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sp-filter-actions .sp-button { width: 100%; min-width: 0; padding-inline: 0.45rem; }
   .sp-summary-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .sp-summary-grid { gap: 0.35rem; }
