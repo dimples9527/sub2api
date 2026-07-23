@@ -70,6 +70,7 @@ var supplierProviderAccountListColumns = []string{
 	"local_account_id", "local_account_name", "local_account_priority",
 	"local_account_status", "local_account_schedulable",
 	"local_account_last_test_status", "local_account_last_tested_at", "local_account_last_test_error",
+	"binding_groups",
 	"supplier_current_balance", "supplier_today_cost",
 }
 
@@ -102,6 +103,23 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
        COALESCE(matched_account.extra->>'last_test_status', '') AS local_account_last_test_status,
        COALESCE(matched_account.extra->>'last_tested_at', '') AS local_account_last_tested_at,
        COALESCE(matched_account.extra->>'last_test_error', '') AS local_account_last_test_error,
+       COALESCE((
+         SELECT jsonb_agg(
+           jsonb_build_object(
+             'id', local_group.id,
+             'name', local_group.name,
+             'platform', local_group.platform,
+             'rate_multiplier', local_group.rate_multiplier,
+             'subscription_type', local_group.subscription_type
+           )
+           ORDER BY LOWER(local_group.name), local_group.id
+         )
+         FROM account_groups account_group
+         JOIN groups local_group
+           ON local_group.id = account_group.group_id
+          AND local_group.deleted_at IS NULL
+         WHERE account_group.account_id = matched_account.id
+       ), '[]'::jsonb) AS binding_groups,
        COALESCE(runtime.current_balance, 0) AS supplier_current_balance,
        COALESCE(runtime.today_cost, 0) AS supplier_today_cost
 FROM supplier_provider_accounts a
@@ -232,7 +250,9 @@ func TestSupplierProviderDataRepositoryListAccountsPaginates(t *testing.T) {
 		WithArgs(int64(42), active, "%pri%", 20, 20).
 		WillReturnRows(sqlmock.NewRows(supplierProviderAccountListColumns).AddRow(
 			int64(7), int64(42), "Supplier A", "account-1", "Primary", "active", "group-1", "VIP", "openai", 2.5, "active", true, now, nil,
-			"matched", 1, int64(101), "prefix-key-1", 80, "active", true, "success", "2026-07-16T09:30:00Z", "upstream authentication failed", 12.5, 3.25,
+			"matched", 1, int64(101), "prefix-key-1", 80, "active", true, "success", "2026-07-16T09:30:00Z", "upstream authentication failed",
+			`[{"id":202,"name":"Claude 订阅","platform":"anthropic","rate_multiplier":2,"subscription_type":"subscription"},{"id":201,"name":"OpenAI 专线","platform":"openai","rate_multiplier":1.5,"subscription_type":"standard"}]`,
+			12.5, 3.25,
 		))
 
 	result, err := repo.ListAccounts(context.Background(), service.SupplierProviderDataListParams{
@@ -263,6 +283,10 @@ func TestSupplierProviderDataRepositoryListAccountsPaginates(t *testing.T) {
 	require.Equal(t, "success", result.Items[0].LocalAccountLastTestStatus)
 	require.Equal(t, "2026-07-16T09:30:00Z", result.Items[0].LocalAccountLastTestedAt)
 	require.Equal(t, "upstream authentication failed", result.Items[0].LocalAccountLastTestError)
+	require.Equal(t, []service.SupplierProviderAccountBindingGroup{
+		{ID: 202, Name: "Claude 订阅", Platform: "anthropic", RateMultiplier: 2, SubscriptionType: "subscription"},
+		{ID: 201, Name: "OpenAI 专线", Platform: "openai", RateMultiplier: 1.5, SubscriptionType: "standard"},
+	}, result.Items[0].BindingGroups)
 	require.Equal(t, 12.5, result.Items[0].SupplierCurrentBalance)
 	require.Equal(t, 3.25, result.Items[0].SupplierTodayCost)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -284,11 +308,11 @@ func TestSupplierProviderDataRepositoryListAccountsSQLContractMapsUnmatchedAndCo
 		WillReturnRows(sqlmock.NewRows(supplierProviderAccountListColumns).
 			AddRow(
 				int64(7), int64(42), "Supplier A", "missing-key", "Missing", "active", "group-1", "VIP", "openai", 2.5, "active", true, now, nil,
-				"unmatched", 0, nil, "", nil, "", nil, "", "", "", 12.5, 3.25,
+				"unmatched", 0, nil, "", nil, "", nil, "", "", "", `[]`, 12.5, 3.25,
 			).
 			AddRow(
 				int64(8), int64(42), "Supplier A", "duplicate-key", "Duplicate", "active", "group-2", "Standard", "openai", 1.5, "active", true, now, nil,
-				"conflict", 2, nil, "", nil, "", nil, "", "", "", 12.5, 3.25,
+				"conflict", 2, nil, "", nil, "", nil, "", "", "", `[]`, 12.5, 3.25,
 			))
 
 	result, err := repo.ListAccounts(context.Background(), service.SupplierProviderDataListParams{

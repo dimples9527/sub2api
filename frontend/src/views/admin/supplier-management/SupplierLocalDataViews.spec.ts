@@ -63,6 +63,7 @@ const runtimeCellKeys = [
   'local_account_name',
   'local_account_priority',
   'rate_multiplier',
+  'group_name',
   'local_account_status',
   'local_account_schedulable',
   'local_account_last_test_status',
@@ -175,6 +176,23 @@ const PaginationStub = defineComponent({
   },
 })
 
+const GroupBadgeStub = defineComponent({
+  props: {
+    name: { type: String, required: true },
+    platform: { type: String, default: '' },
+    rateMultiplier: { type: Number, default: undefined },
+  },
+  setup(props) {
+    return () => h('span', {
+      class: [
+        'group-badge-stub',
+        props.platform === 'openai' ? 'text-green-700' : '',
+        props.platform === 'anthropic' ? 'text-orange-700' : '',
+      ],
+    }, `${props.name} ${props.rateMultiplier}x`)
+  },
+})
+
 const testAccounts = [
   {
     id: 1,
@@ -187,6 +205,22 @@ const testAccounts = [
     group_name: '分组 A',
     platform: 'openai',
     rate_multiplier: 1,
+    binding_groups: [
+      {
+        id: 201,
+        name: 'OpenAI 专线',
+        platform: 'openai',
+        rate_multiplier: 1.5,
+        subscription_type: 'standard',
+      },
+      {
+        id: 202,
+        name: 'Claude 订阅',
+        platform: 'anthropic',
+        rate_multiplier: 2,
+        subscription_type: 'subscription',
+      },
+    ],
     raw_status: 'active',
     active: true,
     last_seen_at: '2026-07-22T01:00:00Z',
@@ -213,6 +247,7 @@ const testAccounts = [
     group_key: 'group-a',
     group_name: '分组 A',
     rate_multiplier: 1,
+    binding_groups: [],
     raw_status: 'active',
     active: true,
     last_seen_at: '2026-07-22T01:00:00Z',
@@ -234,6 +269,7 @@ const testAccounts = [
     group_key: 'group-a',
     group_name: '分组 A',
     rate_multiplier: 1,
+    binding_groups: [],
     raw_status: 'active',
     active: true,
     last_seen_at: '2026-07-22T01:00:00Z',
@@ -252,6 +288,7 @@ const testAccounts = [
     group_key: 'group-a',
     group_name: '分组 A',
     rate_multiplier: 1,
+    binding_groups: [],
     raw_status: 'active',
     active: true,
     last_seen_at: '2026-07-22T01:00:00Z',
@@ -273,6 +310,7 @@ const testAccounts = [
     group_name: '分组 B',
     platform: 'anthropic',
     rate_multiplier: 1.5,
+    binding_groups: [],
     raw_status: 'active',
     active: true,
     last_seen_at: '2026-07-22T01:00:00Z',
@@ -302,6 +340,7 @@ async function mountSupplierAccounts() {
         Input: InputStub,
         Select: SelectStub,
         Pagination: PaginationStub,
+        GroupBadge: GroupBadgeStub,
       },
     },
   })
@@ -364,6 +403,25 @@ describe('supplier local data views component usage', () => {
       .toContain('text-emerald-600')
     expect(wrapper.get('.runtime-cell-rate_multiplier[data-row-index="4"] .sp-account-rate').classes())
       .toContain('text-orange-600')
+
+    wrapper.unmount()
+  })
+
+  it('shows every bound group with its rate and platform color without collapsing', async () => {
+    const wrapper = await mountSupplierAccounts()
+    const groupCell = wrapper.get('.runtime-cell-group_name[data-row-index="0"]')
+    const badges = groupCell.findAll('.sp-account-groups > span')
+
+    expect(groupCell.text()).toContain('OpenAI 专线')
+    expect(groupCell.text()).toContain('1.5x')
+    expect(groupCell.text()).toContain('Claude 订阅')
+    expect(groupCell.text()).toContain('2x')
+    expect(badges).toHaveLength(2)
+    expect(badges[0].classes()).toContain('text-green-700')
+    expect(badges[1].classes()).toContain('text-orange-700')
+    expect(accountsSource).toContain('class="sp-account-groups"')
+    expect(accountsSource).not.toContain('max-h-')
+    expect(accountsSource).not.toContain('overflow-hidden')
 
     wrapper.unmount()
   })

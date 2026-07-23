@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -73,6 +74,23 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
        COALESCE(matched_account.extra->>'last_test_status', '') AS local_account_last_test_status,
        COALESCE(matched_account.extra->>'last_tested_at', '') AS local_account_last_tested_at,
        COALESCE(matched_account.extra->>'last_test_error', '') AS local_account_last_test_error,
+       COALESCE((
+         SELECT jsonb_agg(
+           jsonb_build_object(
+             'id', local_group.id,
+             'name', local_group.name,
+             'platform', local_group.platform,
+             'rate_multiplier', local_group.rate_multiplier,
+             'subscription_type', local_group.subscription_type
+           )
+           ORDER BY LOWER(local_group.name), local_group.id
+         )
+         FROM account_groups account_group
+         JOIN groups local_group
+           ON local_group.id = account_group.group_id
+          AND local_group.deleted_at IS NULL
+         WHERE account_group.account_id = matched_account.id
+       ), '[]'::jsonb) AS binding_groups,
        COALESCE(runtime.current_balance, 0) AS supplier_current_balance,
        COALESCE(runtime.today_cost, 0) AS supplier_today_cost
 FROM supplier_provider_accounts a
@@ -1096,6 +1114,7 @@ func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (servic
 	var localAccountID sql.NullInt64
 	var localAccountPriority sql.NullInt64
 	var localAccountSchedulable sql.NullBool
+	var bindingGroupsJSON []byte
 	err := scanner.Scan(&item.ID, &item.ProviderID, &item.ProviderName, &item.UpstreamKey,
 		&item.Name, &item.Status, &item.GroupKey, &item.GroupName, &item.Platform, &item.RateMultiplier,
 		&item.RawStatus, &item.Active, &item.LastSeenAt, &inactiveAt,
@@ -1103,6 +1122,7 @@ func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (servic
 		&localAccountID, &item.LocalAccountName, &localAccountPriority,
 		&item.LocalAccountStatus, &localAccountSchedulable,
 		&item.LocalAccountLastTestStatus, &item.LocalAccountLastTestedAt, &item.LocalAccountLastTestError,
+		&bindingGroupsJSON,
 		&item.SupplierCurrentBalance, &item.SupplierTodayCost)
 	if err != nil {
 		return service.SupplierProviderAccount{}, err
@@ -1121,6 +1141,9 @@ func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (servic
 	if localAccountSchedulable.Valid {
 		value := localAccountSchedulable.Bool
 		item.LocalAccountSchedulable = &value
+	}
+	if err := json.Unmarshal(bindingGroupsJSON, &item.BindingGroups); err != nil {
+		return service.SupplierProviderAccount{}, fmt.Errorf("decode supplier provider account binding groups: %w", err)
 	}
 	return item, nil
 }

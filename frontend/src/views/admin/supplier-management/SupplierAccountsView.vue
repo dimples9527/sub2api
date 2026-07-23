@@ -221,9 +221,18 @@
           </template>
 
           <template #cell-group_name="{ row: account }">
-            <span v-if="account.group_name || account.group_key" class="sp-account-group">
-              {{ account.group_name || account.group_key }}
-            </span>
+            <div v-if="account.binding_groups?.length" class="sp-account-groups">
+              <GroupBadge
+                v-for="group in account.binding_groups"
+                :key="group.id"
+                :name="group.name"
+                :platform="group.platform"
+                :subscription-type="group.subscription_type"
+                :rate-multiplier="group.rate_multiplier"
+                :show-rate="true"
+                :always-show-rate="true"
+              />
+            </div>
             <span v-else class="sp-account-muted">—</span>
           </template>
 
@@ -621,6 +630,7 @@ import { SupplierDrawer, SupplierModuleLayout } from '@/components/admin/supplie
 import { CreateAccountModal, EditAccountModal } from '@/components/account'
 import DataTable from '@/components/common/DataTable.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import Input from '@/components/common/Input.vue'
 import Pagination from '@/components/common/Pagination.vue'
@@ -892,7 +902,7 @@ const accountColumns: Column[] = [
   { key: 'local_account_name', label: '本地账号', class: 'min-w-[190px]' },
   { key: 'local_account_priority', label: '优先级', class: 'min-w-[88px]' },
   { key: 'rate_multiplier', label: '上游倍率', class: 'min-w-[104px]' },
-  { key: 'group_name', label: '账号绑定的分组', class: 'min-w-[160px]' },
+  { key: 'group_name', label: '账号绑定的分组', class: 'min-w-[260px]' },
   { key: 'local_account_status', label: '本地账号状态', class: 'min-w-[136px]' },
   { key: 'local_account_schedulable', label: '是否调度', class: 'min-w-[104px]' },
   { key: 'local_account_last_test_status', label: '测试结果', class: 'min-w-[120px]' },
@@ -1862,7 +1872,6 @@ function formatTime(value?: string): string {
   box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 10%, transparent);
 }
 
-.sp-account-group,
 .sp-account-code,
 .sp-local-status,
 .sp-test-status,
@@ -1876,6 +1885,13 @@ function formatTime(value?: string): string {
   color: var(--sp-muted);
   font-size: 0.75rem;
   line-height: 1.2;
+}
+
+.sp-account-groups {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
 }
 
 .sp-account-code,

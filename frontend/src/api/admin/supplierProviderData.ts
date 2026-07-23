@@ -1,5 +1,5 @@
 import { apiClient } from '../client'
-import type { BatchAccountTestJob } from '@/types'
+import type { BatchAccountTestJob, GroupPlatform, SubscriptionType } from '@/types'
 
 export type SupplierSyncScope = 'accounts' | 'groups' | 'balance' | 'cost' | 'all'
 export type SupplierSyncStatus = 'success' | 'partial' | 'failed'
@@ -47,6 +47,14 @@ export interface SupplierProviderEndpointTestResult extends SupplierProviderEndp
   sensitive_redacted: boolean
 }
 
+export interface SupplierProviderAccountBindingGroup {
+  id: number
+  name: string
+  platform: GroupPlatform
+  rate_multiplier: number
+  subscription_type: SubscriptionType
+}
+
 export interface SupplierProviderAccount {
   id: number
   provider_id: number
@@ -58,6 +66,7 @@ export interface SupplierProviderAccount {
   group_name: string
   platform?: string
   rate_multiplier: number
+  binding_groups: SupplierProviderAccountBindingGroup[]
   raw_status: string
   active: boolean
   last_seen_at: string
