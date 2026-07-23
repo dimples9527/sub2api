@@ -242,7 +242,7 @@
             </template>
 
             <template #cell-rate_multiplier="{ row: group }">
-              <span :class="['sp-rate-value', upstreamRateTone(group.rate_multiplier)]">{{ formatRate(group.rate_multiplier) }}</span>
+              <span :class="['sp-rate-value', platformTextClass(group.local_group_platform || '')]">{{ formatRate(group.rate_multiplier) }}</span>
             </template>
 
             <template #cell-raw_status="{ row: group }">
@@ -273,7 +273,7 @@
             </template>
 
             <template #cell-local_rate_multiplier="{ row: group }">
-              <span v-if="group.local_rate_multiplier != null" class="sp-rate-value local">
+              <span v-if="group.local_rate_multiplier != null" class="sp-rate-value" :class="platformTextClass(group.local_group_platform || '')">
                 {{ formatRate(group.local_rate_multiplier) }}
               </span>
               <span v-else class="sp-empty-value">-</span>
@@ -468,7 +468,7 @@
 
     <BaseDialog :show="Boolean(mappingTarget)" title="匹配本地分组" width="normal" @close="closeMappingDialog">
       <template v-if="mappingTarget">
-        <div class="sp-dialog-context">
+        <div class="sp-dialog-context match">
           <span>{{ mappingTarget.provider_name }}</span>
           <strong>{{ mappingTarget.name || mappingTarget.upstream_group_key }}</strong>
           <small>上游倍率 {{ formatRate(mappingTarget.rate_multiplier) }}</small>
@@ -484,15 +484,15 @@
           />
         </div>
         <div v-if="mappingPreview" class="sp-match-preview">
-          <div><span>平台</span><strong :class="platformTextClass(mappingPreview.platform)">{{ platformLabel(mappingPreview.platform) }}</strong></div>
-          <div><span>当前倍率</span><strong>{{ formatRate(mappingPreview.rate_multiplier) }}</strong></div>
-          <div><span>价差</span><strong>{{ mappingRateDeltaPreview }}</strong></div>
+          <div class="sp-match-preview-card platform"><span>平台</span><strong :class="platformTextClass(mappingPreview.platform)">{{ platformLabel(mappingPreview.platform) }}</strong></div>
+          <div class="sp-match-preview-card rate"><span>当前倍率</span><strong>{{ formatRate(mappingPreview.rate_multiplier) }}</strong></div>
+          <div class="sp-match-preview-card delta"><span>价差</span><strong>{{ mappingRateDeltaPreview }}</strong></div>
         </div>
       </template>
       <template #footer>
         <div class="sp-dialog-actions">
           <button type="button" class="sp-button secondary" :disabled="savingMapping" @click="closeMappingDialog">取消</button>
-          <button type="button" class="sp-button" :disabled="savingMapping || !mappingLocalGroupID" @click="saveMapping">
+          <button type="button" class="sp-button sp-dialog-primary match" :disabled="savingMapping || !mappingLocalGroupID" @click="saveMapping">
             <Icon name="link" size="sm" />
             <span>{{ savingMapping ? '保存中' : '保存匹配' }}</span>
           </button>
@@ -502,7 +502,7 @@
 
     <BaseDialog :show="Boolean(createTarget)" title="新建本地分组" width="normal" @close="closeCreateDialog">
       <template v-if="createTarget">
-        <div class="sp-dialog-context">
+        <div class="sp-dialog-context create">
           <span>{{ createTarget.provider_name }}</span>
           <strong>{{ createTarget.name || createTarget.upstream_group_key }}</strong>
           <small>创建成功后将自动完成匹配</small>
@@ -515,7 +515,7 @@
           </div>
           <Input v-model="newGroupRate" type="number" label="本地分组倍率" placeholder="输入大于 0 的倍率" />
         </div>
-        <div class="sp-rate-recommendation">
+        <div class="sp-rate-recommendation create">
           <span>上游 {{ formatRate(createTarget.rate_multiplier) }}</span>
           <Icon name="chevronRight" size="sm" />
           <strong>建议不低于 {{ formatRate(suggestedLocalRate(createTarget)) }}</strong>
@@ -524,7 +524,7 @@
       <template #footer>
         <div class="sp-dialog-actions">
           <button type="button" class="sp-button secondary" :disabled="creatingLocalGroup" @click="closeCreateDialog">取消</button>
-          <button type="button" class="sp-button" :disabled="creatingLocalGroup" @click="createLocalGroup">
+          <button type="button" class="sp-button sp-dialog-primary create" :disabled="creatingLocalGroup" @click="createLocalGroup">
             <Icon name="plus" size="sm" />
             <span>{{ creatingLocalGroup ? '创建中' : '创建并匹配' }}</span>
           </button>
@@ -534,13 +534,13 @@
 
     <BaseDialog :show="Boolean(rateTarget)" title="修改本地分组倍率" width="narrow" @close="closeRateDialog">
       <template v-if="rateTarget">
-        <div class="sp-dialog-context">
+        <div class="sp-dialog-context rate">
           <span>{{ rateTarget.local_group_name }}</span>
           <strong>当前 {{ formatRate(rateTarget.local_rate_multiplier) }}</strong>
           <small>对应上游倍率 {{ formatRate(rateTarget.rate_multiplier) }}</small>
         </div>
         <Input v-model="localRateInput" type="number" label="新倍率" placeholder="输入大于 0 的倍率" @enter="saveLocalRate" />
-        <div class="sp-rate-recommendation">
+        <div :class="['sp-rate-recommendation', 'rate', localRateDeltaTone]">
           <span>修改后价差</span>
           <strong>{{ localRateDeltaPreview }}</strong>
         </div>
@@ -548,7 +548,7 @@
       <template #footer>
         <div class="sp-dialog-actions">
           <button type="button" class="sp-button secondary" :disabled="savingLocalRate" @click="closeRateDialog">取消</button>
-          <button type="button" class="sp-button" :disabled="savingLocalRate" @click="saveLocalRate">
+          <button type="button" class="sp-button sp-dialog-primary rate" :disabled="savingLocalRate" @click="saveLocalRate">
             <Icon name="edit" size="sm" />
             <span>{{ savingLocalRate ? '保存中' : '保存倍率' }}</span>
           </button>
@@ -557,7 +557,7 @@
     </BaseDialog>
 
     <BaseDialog :show="rateGuardChangeLogsVisible" title="分组倍率变更日志" width="extra-wide" @close="closeRateGuardChangeLogs">
-      <div class="sp-change-log-dialog">
+      <div class="sp-change-log-dialog log">
         <div class="sp-table-region sp-change-log-table-region">
           <DataTable
             :columns="rateGuardChangeLogColumns"
@@ -612,7 +612,7 @@
         </div>
       </div>
       <template #footer>
-        <button class="sp-button primary" type="button" @click="closeRateGuardChangeLogs">关闭</button>
+        <button class="sp-button primary sp-dialog-primary log" type="button" @click="closeRateGuardChangeLogs">关闭</button>
       </template>
     </BaseDialog>
 
@@ -665,9 +665,7 @@ import { platformTextClass } from '@/utils/platformColors'
 import {
   formatSupplierGroupRateDelta,
   getSupplierGroupRateInsight,
-  getSupplierUpstreamRateBand,
   type SupplierGroupRateInsight,
-  type SupplierUpstreamRateBand,
 } from './supplierGroupRates'
 
 const EMPTY_GROUP_SUMMARY: SupplierProviderGroupSummary = {
@@ -734,14 +732,6 @@ const UPSTREAM_GROUP_TONES = [
   { chip: 'bg-teal-500/10 text-teal-800 dark:text-teal-200', accent: 'bg-teal-500', meta: 'text-teal-600 dark:text-teal-400' },
   { chip: 'bg-red-500/10 text-red-800 dark:text-red-200', accent: 'bg-red-500', meta: 'text-red-600 dark:text-red-400' },
 ] as const
-
-const UPSTREAM_RATE_TONES: Record<SupplierUpstreamRateBand, string> = {
-  invalid: 'text-slate-500 dark:text-slate-400',
-  low: 'text-emerald-600 dark:text-emerald-400',
-  standard: 'text-sky-600 dark:text-sky-400',
-  elevated: 'text-amber-600 dark:text-amber-400',
-  high: 'text-rose-600 dark:text-rose-400',
-}
 
 const UpstreamGroupsIcon = () => h(Icon, { name: 'filter', size: 'lg' })
 const MatchedGroupsIcon = () => h(Icon, { name: 'link', size: 'lg' })
@@ -883,6 +873,15 @@ const mappingRateDeltaPreview = computed(() => {
 const localRateDeltaPreview = computed(() => {
   if (!rateTarget.value) return '-'
   return formatSupplierGroupRateDelta(localRateInput.value, rateTarget.value.rate_multiplier)
+})
+const localRateDeltaTone = computed<'neutral' | 'danger' | 'warning' | 'success'>(() => {
+  if (!rateTarget.value) return 'neutral'
+  const localRate = Number(localRateInput.value)
+  const upstreamRate = Number(rateTarget.value.rate_multiplier)
+  if (!Number.isFinite(localRate) || localRate <= 0 || !Number.isFinite(upstreamRate)) return 'neutral'
+  if (localRate < upstreamRate) return 'danger'
+  if (localRate === upstreamRate) return 'warning'
+  return 'success'
 })
 const rateGuardChangeLogTotalPages = computed(() => (
   Math.max(1, Math.ceil(rateGuardChangeLogTotal.value / rateGuardChangeLogPageSize.value))
@@ -1379,10 +1378,6 @@ function upstreamGroupTone(groupKey: string) {
   return UPSTREAM_GROUP_TONES[(hash >>> 0) % UPSTREAM_GROUP_TONES.length]
 }
 
-function upstreamRateTone(rate: number): string {
-  return UPSTREAM_RATE_TONES[getSupplierUpstreamRateBand(rate)]
-}
-
 function supplierTypeLabel(providerID: number): string {
   const providerType = providers.value.find(provider => provider.id === providerID)?.provider_type?.trim()
   if (!providerType) return '未知类型'
@@ -1601,6 +1596,7 @@ function errorMessage(err: unknown, fallback: string): string {
 }
 
 .sp-change-log-dialog {
+  --sp-change-log-accent: #7c3aed;
   --sp-change-log-local: #0891b2;
   --sp-change-log-upstream: #8b5cf6;
   --sp-change-log-old-rate: #d97706;
@@ -1612,6 +1608,13 @@ function errorMessage(err: unknown, fallback: string): string {
   --sp-change-log-soft: #f1f5f9;
   display: grid;
   gap: 14px;
+}
+
+.sp-change-log-dialog.log {
+  padding: 0.2rem;
+  border: 1px solid color-mix(in srgb, var(--sp-change-log-accent) 22%, var(--sp-change-log-line));
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--sp-change-log-accent) 3%, var(--sp-change-log-panel));
 }
 
 :global(.dark) .sp-change-log-dialog {
@@ -1628,7 +1631,7 @@ function errorMessage(err: unknown, fallback: string): string {
 
 .sp-change-log-table-region {
   overflow: hidden;
-  border: 1px solid var(--sp-change-log-soft);
+  border: 1px solid color-mix(in srgb, var(--sp-change-log-accent) 18%, var(--sp-change-log-soft));
   border-radius: 10px;
 }
 
@@ -1688,7 +1691,7 @@ function errorMessage(err: unknown, fallback: string): string {
 }
 
 .sp-change-log-status-action {
-  color: var(--sp-change-log-old-rate);
+  color: var(--sp-change-log-accent);
   font-weight: 750;
 }
 
@@ -2065,8 +2068,6 @@ function errorMessage(err: unknown, fallback: string): string {
   font-weight: 750;
 }
 
-.sp-rate-value.local { color: var(--sp-text); }
-
 .sp-status,
 .sp-rate-status {
   display: inline-flex;
@@ -2325,21 +2326,102 @@ function errorMessage(err: unknown, fallback: string): string {
   gap: 0.5rem;
 }
 
+:global(.modal-content:has(.sp-dialog-context)),
+:global(.modal-content:has(.sp-change-log-dialog)) {
+  --sp-panel: #ffffff;
+  --sp-panel-2: #f9fafb;
+  --sp-panel-3: #f3f4f6;
+  --sp-line: #e5e7eb;
+  --sp-soft: #f1f5f9;
+  --sp-text: #111827;
+  --sp-muted: #64748b;
+  --sp-dim: #94a3b8;
+  --sp-cyan: #3b82f6;
+  --sp-green: #16a34a;
+  --sp-amber: #d97706;
+  --sp-orange: #ea580c;
+  --sp-red: #dc2626;
+  --sp-blue: #2563eb;
+  --sp-violet: #7c3aed;
+  color: var(--sp-text);
+  background: var(--sp-panel);
+}
+
+:global(.dark .modal-content:has(.sp-dialog-context)),
+:global(.dark .modal-content:has(.sp-change-log-dialog)) {
+  --sp-panel: #1f2937;
+  --sp-panel-2: #111827;
+  --sp-panel-3: #374151;
+  --sp-line: #374151;
+  --sp-soft: #374151;
+  --sp-text: #f9fafb;
+  --sp-muted: #9ca3af;
+  --sp-dim: #6b7280;
+  background: var(--sp-panel);
+}
+
+:global(.modal-content:has(.sp-dialog-context.match)) {
+  --sp-dialog-shell-accent: var(--sp-cyan);
+}
+
+:global(.modal-content:has(.sp-dialog-context.create)) {
+  --sp-dialog-shell-accent: var(--sp-green);
+}
+
+:global(.modal-content:has(.sp-dialog-context.rate)) {
+  --sp-dialog-shell-accent: var(--sp-amber);
+}
+
+:global(.modal-content:has(.sp-change-log-dialog)) {
+  --sp-dialog-shell-accent: var(--sp-violet);
+}
+
+:global(.modal-content:has(.sp-dialog-context)),
+:global(.modal-content:has(.sp-change-log-dialog)) {
+  border-top: 3px solid var(--sp-dialog-shell-accent);
+  box-shadow: 0 16px 36px color-mix(in srgb, var(--sp-dialog-shell-accent) 18%, rgba(15, 23, 42, 0.18));
+}
+
+:global(.modal-content:has(.sp-dialog-context) .modal-header),
+:global(.modal-content:has(.sp-change-log-dialog) .modal-header) {
+  border-bottom-color: color-mix(in srgb, var(--sp-dialog-shell-accent) 24%, var(--sp-line));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--sp-dialog-shell-accent) 9%, transparent), transparent 72%);
+}
+
+:global(.modal-content:has(.sp-dialog-context) .modal-title),
+:global(.modal-content:has(.sp-change-log-dialog) .modal-title) {
+  color: var(--sp-dialog-shell-accent);
+}
+
 .sp-dialog-context {
+  --sp-dialog-accent: var(--sp-cyan);
   display: grid;
   gap: 0.25rem;
   margin-bottom: 1rem;
-  padding: 0 0 1rem;
-  border-bottom: 1px solid var(--sp-soft);
+  padding: 0.85rem 0.95rem;
+  border: 1px solid color-mix(in srgb, var(--sp-dialog-accent) 30%, var(--sp-line));
+  border-left-width: 4px;
+  border-radius: 0.625rem;
+  background: color-mix(in srgb, var(--sp-dialog-accent) 7%, var(--sp-panel));
 }
+
+.sp-dialog-context.match { --sp-dialog-accent: var(--sp-cyan); }
+.sp-dialog-context.create { --sp-dialog-accent: var(--sp-green); }
+.sp-dialog-context.rate { --sp-dialog-accent: var(--sp-amber); }
+
+.sp-dialog-context > span { color: var(--sp-dialog-accent); font-weight: 700; }
 
 .sp-dialog-context span,
 .sp-dialog-context small {
-  color: var(--sp-muted);
   font-size: 0.78rem;
 }
 
+.sp-dialog-context small { color: var(--sp-muted); }
 .sp-dialog-context strong { color: var(--sp-text); font-size: 1rem; }
+
+:global(.dark) .sp-dialog-context {
+  background: color-mix(in srgb, var(--sp-dialog-accent) 12%, var(--sp-panel));
+}
 
 .sp-field {
   display: grid;
@@ -2359,32 +2441,70 @@ function errorMessage(err: unknown, fallback: string): string {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.75rem;
   margin-top: 1rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--sp-soft);
 }
 
-.sp-match-preview div {
+.sp-match-preview-card {
+  --sp-preview-accent: var(--sp-blue);
   display: grid;
   gap: 0.25rem;
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--sp-preview-accent) 24%, var(--sp-line));
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--sp-preview-accent) 6%, var(--sp-panel));
 }
 
-.sp-match-preview span { color: var(--sp-muted); font-size: 0.75rem; }
-.sp-match-preview strong { color: var(--sp-text); font-size: 0.9rem; }
+.sp-match-preview-card.platform { --sp-preview-accent: var(--sp-blue); }
+.sp-match-preview-card.rate { --sp-preview-accent: var(--sp-amber); }
+.sp-match-preview-card.delta { --sp-preview-accent: var(--sp-green); }
+
+.sp-match-preview-card span { color: var(--sp-muted); font-size: 0.75rem; }
+.sp-match-preview-card strong { color: var(--sp-preview-accent); font-size: 0.9rem; }
+
+:global(.dark) .sp-match-preview-card {
+  background: color-mix(in srgb, var(--sp-preview-accent) 11%, var(--sp-panel));
+}
 
 .sp-rate-recommendation {
+  --sp-recommendation-accent: var(--sp-green);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
   margin-top: 1rem;
-  padding: 0.75rem 0;
-  border-top: 1px solid var(--sp-soft);
-  border-bottom: 1px solid var(--sp-soft);
+  padding: 0.75rem 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--sp-recommendation-accent) 26%, var(--sp-line));
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--sp-recommendation-accent) 6%, var(--sp-panel));
   color: var(--sp-muted);
   font-size: 0.8rem;
 }
 
-.sp-rate-recommendation strong { color: var(--sp-green); }
+.sp-rate-recommendation.create,
+.sp-rate-recommendation.success { --sp-recommendation-accent: var(--sp-green); }
+.sp-rate-recommendation.rate,
+.sp-rate-recommendation.warning { --sp-recommendation-accent: var(--sp-amber); }
+.sp-rate-recommendation.danger { --sp-recommendation-accent: var(--sp-red); }
+.sp-rate-recommendation.neutral { --sp-recommendation-accent: var(--sp-muted); }
+.sp-rate-recommendation strong { color: var(--sp-recommendation-accent); }
+
+:global(.dark) .sp-rate-recommendation {
+  background: color-mix(in srgb, var(--sp-recommendation-accent) 11%, var(--sp-panel));
+}
+
+.sp-dialog-primary {
+  --sp-dialog-button: var(--sp-cyan);
+  border-color: color-mix(in srgb, var(--sp-dialog-button) 72%, var(--sp-line));
+  background: var(--sp-dialog-button);
+  color: white;
+  box-shadow: 0 7px 16px color-mix(in srgb, var(--sp-dialog-button) 20%, transparent);
+}
+
+.sp-dialog-primary.match { --sp-dialog-button: var(--sp-cyan); }
+.sp-dialog-primary.create { --sp-dialog-button: var(--sp-green); }
+.sp-dialog-primary.rate { --sp-dialog-button: var(--sp-amber); }
+.sp-dialog-primary.log { --sp-dialog-button: #7c3aed; }
+.sp-dialog-primary:disabled { box-shadow: none; }
 
 .sp-dialog-actions {
   display: flex;
@@ -2472,6 +2592,8 @@ function errorMessage(err: unknown, fallback: string): string {
   .sp-panel-signals { width: 100%; justify-content: space-between; }
   .sp-row-actions { flex-wrap: wrap; justify-content: flex-end; }
   .sp-match-preview { grid-template-columns: 1fr; }
+  .sp-dialog-actions { width: 100%; }
+  .sp-dialog-actions .sp-button { flex: 1 1 0; }
 }
 
 @media (max-width: 520px) {

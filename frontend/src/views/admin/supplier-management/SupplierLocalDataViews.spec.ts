@@ -903,8 +903,15 @@ describe('supplier local data views component usage', () => {
     expect(groupsSource).toContain('UPSTREAM_GROUP_TONES')
     expect(groupsSource).toContain('upstreamGroupTone(group.upstream_group_key)')
     expect(groupsSource).toContain('sp-upstream-group-chip')
-    expect(groupsSource).toContain(`<span :class="['sp-rate-value', upstreamRateTone(group.rate_multiplier)]">`)
-    expect(groupsSource).toContain('UPSTREAM_RATE_TONES')
+    expect(groupsSource).toContain(
+      `<span :class="['sp-rate-value', platformTextClass(group.local_group_platform || '')]">`
+    )
+    expect(groupsSource).toContain(
+      `class="sp-rate-value" :class="platformTextClass(group.local_group_platform || '')"`
+    )
+    expect(groupsSource).not.toContain('upstreamRateTone')
+    expect(groupsSource).not.toContain('UPSTREAM_RATE_TONES')
+    expect(groupsSource).not.toContain('getSupplierUpstreamRateBand')
     expect(groupsSource).not.toContain('.sp-rate-value.upstream')
     expect(groupsSource).toContain('{{ supplierTypeLabel(group.provider_id) }}</span>')
     expect(groupsSource).toContain('<span>#{{ group.provider_id }}</span>')
@@ -913,6 +920,31 @@ describe('supplier local data views component usage', () => {
     expect(groupsSource).toContain('supplierTypeTone(group.provider_id)')
     expect(groupsSource).toContain('sp-provider-type')
     expect(groupsSource).toContain('【{{ upstreamPlatformLabel(group) }}】')
+  })
+
+  it('uses semantic themes for supplier group dialogs', () => {
+    expect(groupsSource).toContain('sp-dialog-context match')
+    expect(groupsSource).toContain('sp-dialog-context create')
+    expect(groupsSource).toContain('sp-dialog-context rate')
+    expect(groupsSource).toContain('sp-dialog-primary match')
+    expect(groupsSource).toContain('sp-dialog-primary create')
+    expect(groupsSource).toContain('sp-dialog-primary rate')
+    expect(groupsSource).toContain('sp-dialog-primary log')
+    expect(groupsSource).toContain('localRateDeltaTone')
+    expect(groupsSource).toContain('.sp-match-preview-card.platform')
+    expect(groupsSource).toContain('.sp-rate-recommendation.create')
+    expect(groupsSource).toContain('.sp-rate-recommendation.danger')
+    expect(groupsSource).toContain(':global(.dark) .sp-dialog-context')
+  })
+
+  it('keeps supplier group dialog theme variables after teleport', () => {
+    expect(groupsSource).toContain(':global(.modal-content:has(.sp-dialog-context))')
+    expect(groupsSource).toContain('--sp-panel: #ffffff')
+    expect(groupsSource).toContain('--sp-cyan: #3b82f6')
+    expect(groupsSource).toContain('--sp-amber: #d97706')
+    expect(groupsSource).toContain(':global(.modal-content:has(.sp-dialog-context.match))')
+    expect(groupsSource).toContain(':global(.modal-content:has(.sp-dialog-context.rate))')
+    expect(groupsSource).toContain('--sp-dialog-shell-accent')
   })
 
   it('adds supplier quick filters to the group table header', () => {
