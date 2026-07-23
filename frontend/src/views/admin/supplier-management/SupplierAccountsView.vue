@@ -69,6 +69,17 @@
           </div>
         </div>
         <div class="sp-account-filter-actions">
+          <button class="sp-button primary" type="button" @click="openCreateAccountDialog">
+            添加账号
+          </button>
+          <button
+            class="sp-button ghost"
+            type="button"
+            :disabled="!batchTesting && (loading || batchTestPreparing || total === 0)"
+            @click="handleSupplierBatchTestButton"
+          >
+            {{ batchTesting ? '查看测试进度' : batchTestPreparing ? '准备测试中…' : '测试当前筛选' }}
+          </button>
           <button class="sp-button sp-account-refresh" type="button" :disabled="loading" @click="loadAccounts">
             {{ loading ? '刷新中…' : '刷新' }}
           </button>
@@ -384,6 +395,166 @@
       </div>
     </BaseDialog>
 
+    <CreateAccountModal
+      v-if="showCreateAccountModal"
+      :show="showCreateAccountModal"
+      :proxies="accountProxies"
+      :groups="accountEditGroups"
+      @close="closeCreateAccountDialog"
+      @created="handleAccountCreated"
+    />
+
+    <BaseDialog
+      :show="showBatchTestConfigDialog"
+      title="供应商账号批量测试"
+      width="wide"
+      @close="closeBatchTestConfigDialog"
+    >
+      <div class="sp-batch-test-dialog">
+        <div class="sp-batch-test-summary">
+          <div>
+            <span>待测试本地账号</span>
+            <strong>{{ batchTestTargets.length }}</strong>
+          </div>
+          <div>
+            <span>涉及平台</span>
+            <strong>{{ batchTestPlatformSummaries.length }}</strong>
+          </div>
+          <p>{{ batchTestFilterSummary }}</p>
+        </div>
+
+        <section class="sp-batch-test-section">
+          <header>
+            <div>
+              <strong>平台测试模型</strong>
+              <span>未选择时由账号测试接口自动使用默认模型。</span>
+            </div>
+          </header>
+          <div class="sp-batch-test-platform-list">
+            <div
+              v-for="summary in batchTestPlatformSummaries"
+              :key="summary.platform"
+              class="sp-batch-test-platform-row"
+            >
+              <div>
+                <span :class="['sp-platform-badge', platformBadgeClass(summary.platform)]">
+                  {{ batchPlatformLabel(summary.platform) }}
+                </span>
+                <small>{{ summary.count }} 个账号</small>
+              </div>
+              <Select
+                v-model="batchTestModelByPlatform[summary.platform]"
+                :options="batchTestModelSelectOptions(summary.platform)"
+                :disabled="batchTestModelLoadingByPlatform[summary.platform]"
+                :searchable="true"
+              />
+            </div>
+          </div>
+        </section>
+
+        <section class="sp-batch-test-section">
+          <header>
+            <div>
+              <strong>执行参数</strong>
+              <span>批量任务会在后台执行，可以随时取消。</span>
+            </div>
+          </header>
+          <div class="sp-batch-test-settings">
+            <label>
+              <span>并发数</span>
+              <Select
+                v-model="batchTestConcurrency"
+                :options="batchTestConcurrencyOptions"
+                :searchable="false"
+              />
+            </label>
+            <label>
+              <span>单账号超时</span>
+              <Select
+                v-model="batchTestTimeoutSeconds"
+                :options="batchTestTimeoutOptions"
+                :searchable="false"
+              />
+            </label>
+          </div>
+        </section>
+      </div>
+      <template #footer>
+        <button class="sp-button ghost" type="button" :disabled="batchTesting" @click="closeBatchTestConfigDialog">
+          取消
+        </button>
+        <button class="sp-button primary" type="button" :disabled="batchTesting || batchTestTargets.length === 0" @click="startSupplierBatchTest">
+          {{ batchTesting ? '启动中…' : `开始测试 ${batchTestTargets.length} 个账号` }}
+        </button>
+      </template>
+    </BaseDialog>
+
+    <BaseDialog
+      :show="showBatchTestResultDialog"
+      title="批量测试结果"
+      width="wide"
+      @close="closeBatchTestResultDialog"
+    >
+      <div class="sp-batch-result-dialog">
+        <div class="sp-batch-result-head">
+          <div>
+            <span :class="['sp-batch-job-status', batchTestJobStatusTone]">
+              {{ batchTestJobStatusLabel }}
+            </span>
+            <p>{{ batchTestProgressDescription }}</p>
+          </div>
+          <strong>{{ batchTestProgressPercent }}%</strong>
+        </div>
+        <div class="sp-batch-progress-track" aria-hidden="true">
+          <span :style="{ width: `${batchTestProgressPercent}%` }"></span>
+        </div>
+        <div class="sp-batch-result-stats">
+          <div><span>总数</span><strong>{{ batchTestResult?.total || 0 }}</strong></div>
+          <div><span>已完成</span><strong>{{ batchTestResult?.completed || 0 }}</strong></div>
+          <div class="success"><span>成功</span><strong>{{ batchTestResult?.success || 0 }}</strong></div>
+          <div class="failed"><span>失败</span><strong>{{ batchTestResult?.failed || 0 }}</strong></div>
+        </div>
+        <div v-if="batchTestResult?.error_message" class="sp-alert sp-error-line">
+          {{ batchTestResult.error_message }}
+        </div>
+        <div v-if="batchTestResultItems.length" class="sp-batch-result-list">
+          <article
+            v-for="item in batchTestResultItems"
+            :key="item.account_id"
+            :class="['sp-batch-result-item', batchTestItemTone(item.status)]"
+          >
+            <div class="sp-batch-result-item-head">
+              <div>
+                <strong>{{ item.account_name || batchTestTargetName(item.account_id) }}</strong>
+                <span>#{{ item.account_id }}</span>
+              </div>
+              <span :class="['sp-test-status', batchTestItemTone(item.status)]">
+                {{ batchTestItemStatusLabel(item.status) }}
+              </span>
+            </div>
+            <div class="sp-batch-result-item-meta">
+              <span>{{ batchPlatformLabel(item.platform || batchTestTargetPlatform(item.account_id)) }}</span>
+              <span v-if="item.latency_ms > 0">{{ item.latency_ms }} ms</span>
+            </div>
+            <p v-if="item.error_message" class="sp-batch-result-error">{{ item.error_message }}</p>
+          </article>
+        </div>
+        <div v-else class="sp-batch-result-empty">
+          {{ batchTesting ? '测试任务正在排队，请稍候…' : '暂无测试结果' }}
+        </div>
+      </div>
+      <template #footer>
+        <button
+          v-if="batchTestCanCancel"
+          class="sp-button danger"
+          type="button"
+          :disabled="batchTestCancelling"
+          @click="cancelSupplierBatchTest"
+        >{{ batchTestCancelling ? '取消中…' : '取消测试' }}</button>
+        <button class="sp-button ghost" type="button" @click="closeBatchTestResultDialog">关闭</button>
+      </template>
+    </BaseDialog>
+
     <EditAccountModal
       v-if="showEditAccountModal"
       :show="showEditAccountModal"
@@ -433,7 +604,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { SupplierDrawer, SupplierModuleLayout } from '@/components/admin/supplier-management'
-import { EditAccountModal } from '@/components/account'
+import { CreateAccountModal, EditAccountModal } from '@/components/account'
 import DataTable from '@/components/common/DataTable.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
@@ -441,15 +612,49 @@ import Input from '@/components/common/Input.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import supplierProvidersAPI, { type SupplierProvider } from '@/api/admin/supplierProviders'
-import { listSupplierAccounts, type SupplierProviderAccount } from '@/api/admin/supplierProviderData'
+import {
+  cancelSupplierAccountBatchTestJob,
+  getSupplierAccountBatchTestJob,
+  listSupplierAccounts,
+  startSupplierAccountBatchTest,
+  type SupplierProviderAccount,
+} from '@/api/admin/supplierProviderData'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import type { Column } from '@/components/common/types'
-import type { Account, AdminGroup, GroupPlatform, Proxy as AccountProxy } from '@/types'
+import type {
+  Account,
+  AdminGroup,
+  BatchAccountTestJob,
+  BatchAccountTestStatus,
+  ClaudeModel,
+  GroupPlatform,
+  Proxy as AccountProxy,
+} from '@/types'
 import { platformBadgeClass, platformLabel, platformTextClass } from '@/utils/platformColors'
 import { extractApiErrorMessage } from '@/utils/apiError'
 
 const appStore = useAppStore()
+
+type SupplierBatchTestTarget = {
+  accountID: number
+  accountName: string
+  platform: string
+}
+
+type SupplierBatchTestPlatformSummary = {
+  platform: string
+  count: number
+  representativeAccountID: number
+}
+
+type SupplierAccountFilterSnapshot = {
+  providerID: number
+  platform: string
+  active?: boolean
+  search?: string
+  summary: string
+}
 
 const providers = ref<SupplierProvider[]>([])
 const items = ref<SupplierProviderAccount[]>([])
@@ -462,6 +667,20 @@ const accountActionLoadingID = ref<number | null>(null)
 const deletingAccountID = ref<number | null>(null)
 const editingAccount = ref<Account | null>(null)
 const showEditAccountModal = ref(false)
+const showCreateAccountModal = ref(false)
+const showBatchTestConfigDialog = ref(false)
+const showBatchTestResultDialog = ref(false)
+const batchTestPreparing = ref(false)
+const batchTesting = ref(false)
+const batchTestCancelling = ref(false)
+const batchTestTargets = ref<SupplierBatchTestTarget[]>([])
+const batchTestResult = ref<BatchAccountTestJob | null>(null)
+const batchTestFilterSummary = ref('')
+const batchTestModelByPlatform = ref<Record<string, string>>({})
+const batchTestModelOptionsByPlatform = ref<Record<string, ClaudeModel[]>>({})
+const batchTestModelLoadingByPlatform = ref<Record<string, boolean>>({})
+const batchTestConcurrency = ref(3)
+const batchTestTimeoutSeconds = ref(90)
 const accountEditGroups = ref<AdminGroup[]>([])
 const accountProxies = ref<AccountProxy[]>([])
 const bindingAccount = ref<Account | null>(null)
@@ -484,6 +703,8 @@ const providerFilterControl = ref<HTMLElement | null>(null)
 const platformFilterControl = ref<HTMLElement | null>(null)
 const activeFilterControl = ref<HTMLElement | null>(null)
 let searchTimer: number | undefined
+let batchTestPollTimer: ReturnType<typeof setTimeout> | null = null
+let batchTestPollToken = 0
 
 const cnyFormatter = new Intl.NumberFormat('zh-CN', {
   style: 'currency',
@@ -518,6 +739,22 @@ const pageSizeOptions: SelectOption[] = [
   { value: 50, label: '50' },
   { value: 100, label: '100' },
 ]
+const batchTestConcurrencyOptions: SelectOption[] = [
+  { value: 1, label: '1 个' },
+  { value: 3, label: '3 个' },
+  { value: 5, label: '5 个' },
+  { value: 8, label: '8 个' },
+]
+const batchTestTimeoutOptions: SelectOption[] = [
+  { value: 30, label: '30 秒' },
+  { value: 60, label: '60 秒' },
+  { value: 90, label: '90 秒' },
+  { value: 120, label: '120 秒' },
+]
+const SUPPLIER_BATCH_TEST_PAGE_SIZE = 200
+const MAX_SUPPLIER_BATCH_TEST_ACCOUNTS = 200
+const SUPPLIER_BATCH_TEST_POLL_INTERVAL_MS = 1000
+const SUPPLIER_BATCH_TEST_TOTAL_TIMEOUT_SECONDS = 600
 const SUPPLIER_TONES = [
   { chip: 'border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300', dot: 'bg-sky-500' },
   { chip: 'border-orange-500/30 bg-orange-500/10 text-orange-700 dark:text-orange-300', dot: 'bg-orange-500' },
@@ -532,6 +769,92 @@ const SUPPLIER_TONES = [
   { chip: 'border-teal-500/30 bg-teal-500/10 text-teal-700 dark:text-teal-300', dot: 'bg-teal-500' },
   { chip: 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300', dot: 'bg-red-500' },
 ]
+const batchTestPlatformSummaries = computed<SupplierBatchTestPlatformSummary[]>(() => {
+  const summaries = new Map<string, SupplierBatchTestPlatformSummary>()
+  for (const target of batchTestTargets.value) {
+    const platform = target.platform || 'unknown'
+    const current = summaries.get(platform)
+    if (current) {
+      current.count += 1
+      continue
+    }
+    summaries.set(platform, {
+      platform,
+      count: 1,
+      representativeAccountID: target.accountID,
+    })
+  }
+  return [...summaries.values()].sort((left, right) => left.platform.localeCompare(right.platform))
+})
+
+function buildSupplierFilterSummary(snapshot: Omit<SupplierAccountFilterSnapshot, 'summary'>): string {
+  const provider = snapshot.providerID
+    ? providers.value.find(item => item.id === snapshot.providerID)?.name || `供应商 #${snapshot.providerID}`
+    : '全部供应商'
+  const platform = snapshot.platform ? platformLabel(snapshot.platform) : '全部平台'
+  const active = snapshot.active === undefined
+    ? '全部状态'
+    : activeFilterOptions.find(option => option.value === String(snapshot.active))?.label || '全部状态'
+  const keyword = snapshot.search?.trim() || ''
+  return [provider, platform, active, keyword ? `关键词：${keyword}` : '无搜索关键词'].join(' · ')
+}
+
+function createSupplierAccountFilterSnapshot(): SupplierAccountFilterSnapshot {
+  const snapshot = {
+    providerID: providerID.value || 0,
+    platform: platformFilter.value || '',
+    active: activeFilter.value === '' ? undefined : activeFilter.value === 'true',
+    search: search.value.trim() || undefined,
+  }
+  return {
+    ...snapshot,
+    summary: buildSupplierFilterSummary(snapshot),
+  }
+}
+
+const batchTestResultItems = computed(() => [...(batchTestResult.value?.results || [])].sort((left, right) => {
+  const leftFailed = left.status === 'success' ? 1 : 0
+  const rightFailed = right.status === 'success' ? 1 : 0
+  return leftFailed - rightFailed || left.account_id - right.account_id
+}))
+
+const batchTestCanCancel = computed(() => {
+  const status = batchTestResult.value?.status
+  return status === 'queued' || status === 'running'
+})
+
+const batchTestProgressPercent = computed(() => {
+  const job = batchTestResult.value
+  if (!job || job.total <= 0) return 0
+  return Math.min(100, Math.round((job.completed / job.total) * 100))
+})
+
+const batchTestJobStatusLabel = computed(() => {
+  switch (batchTestResult.value?.status) {
+    case 'queued': return '排队中'
+    case 'running': return '测试中'
+    case 'cancelling': return '取消中'
+    case 'completed': return '已完成'
+    case 'cancelled': return '已取消'
+    case 'failed': return '任务失败'
+    default: return '准备中'
+  }
+})
+
+const batchTestJobStatusTone = computed(() => {
+  const status = batchTestResult.value?.status
+  if (status === 'completed') return batchTestResult.value?.failed ? 'warning' : 'success'
+  if (status === 'failed') return 'failed'
+  if (status === 'cancelled') return 'neutral'
+  return 'testing'
+})
+
+const batchTestProgressDescription = computed(() => {
+  const job = batchTestResult.value
+  if (!job) return '正在创建批量测试任务…'
+  return `已完成 ${job.completed} / ${job.total}，成功 ${job.success}，失败 ${job.failed}`
+})
+
 const accountColumns: Column[] = [
   { key: 'provider_name', label: '供应商', class: 'min-w-[190px]' },
   { key: 'upstream_account_key', label: '上游账号', class: 'min-w-[260px]' },
@@ -556,6 +879,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.clearTimeout(searchTimer)
+  batchTestPollToken += 1
+  clearBatchTestPollTimer()
 })
 
 watch([providerID, platformFilter, activeFilter], () => {
@@ -593,6 +918,268 @@ async function loadAccounts() {
   } finally {
     loading.value = false
   }
+}
+
+async function loadFilteredTestAccounts(snapshot: SupplierAccountFilterSnapshot): Promise<SupplierProviderAccount[]> {
+  const filteredAccounts: SupplierProviderAccount[] = []
+  let nextPage = 1
+
+  while (true) {
+    const result = await listSupplierAccounts({
+      provider_id: snapshot.providerID || undefined,
+      platform: snapshot.platform || undefined,
+      active: snapshot.active,
+      search: snapshot.search,
+      page: nextPage,
+      page_size: SUPPLIER_BATCH_TEST_PAGE_SIZE,
+    })
+    filteredAccounts.push(...result.items)
+    if (filteredAccounts.length >= result.total || result.items.length === 0) break
+    nextPage += 1
+  }
+
+  return filteredAccounts
+}
+
+function handleSupplierBatchTestButton() {
+  if (batchTesting.value) {
+    showBatchTestResultDialog.value = true
+    return
+  }
+  void openSupplierBatchTestDialog(createSupplierAccountFilterSnapshot())
+}
+
+async function openSupplierBatchTestDialog(snapshot: SupplierAccountFilterSnapshot) {
+  if (batchTestPreparing.value || batchTesting.value) return
+  batchTestPreparing.value = true
+  try {
+    const filteredAccounts = await loadFilteredTestAccounts(snapshot)
+    const uniqueTargets = new Map<number, SupplierBatchTestTarget>()
+    for (const account of filteredAccounts) {
+      if (account.local_account_match_status !== 'matched') continue
+      const localAccountID = Number(account.local_account_id)
+      if (!Number.isInteger(localAccountID) || localAccountID <= 0 || uniqueTargets.has(localAccountID)) continue
+      uniqueTargets.set(localAccountID, {
+        accountID: localAccountID,
+        accountName: account.local_account_name || account.name || `账号 #${localAccountID}`,
+        platform: account.platform?.trim().toLowerCase() || 'unknown',
+      })
+    }
+
+    const targets = [...uniqueTargets.values()]
+    if (targets.length === 0) {
+      appStore.showWarning('当前筛选条件下没有唯一匹配的本地账号可测试')
+      return
+    }
+    if (targets.length > MAX_SUPPLIER_BATCH_TEST_ACCOUNTS) {
+      appStore.showWarning(`当前筛选匹配账号超过 ${MAX_SUPPLIER_BATCH_TEST_ACCOUNTS} 个，请缩小筛选范围后重试`)
+      return
+    }
+
+    batchTestTargets.value = targets
+    batchTestModelByPlatform.value = {}
+    batchTestModelOptionsByPlatform.value = {}
+    batchTestModelLoadingByPlatform.value = {}
+    batchTestResult.value = null
+    batchTestFilterSummary.value = snapshot.summary
+    showBatchTestConfigDialog.value = true
+    await loadSupplierBatchTestModels()
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '加载当前筛选账号失败'))
+  } finally {
+    batchTestPreparing.value = false
+  }
+}
+
+async function loadSupplierBatchTestModels() {
+  await Promise.all(batchTestPlatformSummaries.value.map(async summary => {
+    batchTestModelByPlatform.value = {
+      ...batchTestModelByPlatform.value,
+      [summary.platform]: '',
+    }
+    if (summary.platform === 'unknown') return
+
+    batchTestModelLoadingByPlatform.value = {
+      ...batchTestModelLoadingByPlatform.value,
+      [summary.platform]: true,
+    }
+    try {
+      const models = await adminAPI.accounts.getAvailableModels(summary.representativeAccountID)
+      batchTestModelOptionsByPlatform.value = {
+        ...batchTestModelOptionsByPlatform.value,
+        [summary.platform]: models,
+      }
+    } catch {
+      batchTestModelOptionsByPlatform.value = {
+        ...batchTestModelOptionsByPlatform.value,
+        [summary.platform]: [],
+      }
+    } finally {
+      batchTestModelLoadingByPlatform.value = {
+        ...batchTestModelLoadingByPlatform.value,
+        [summary.platform]: false,
+      }
+    }
+  }))
+}
+
+function batchTestModelSelectOptions(platform: string): SelectOption[] {
+  const loadingModels = batchTestModelLoadingByPlatform.value[platform]
+  const models = batchTestModelOptionsByPlatform.value[platform] || []
+  return [
+    { value: '', label: loadingModels ? '加载模型中…' : '自动选择默认模型' },
+    ...models.map(model => ({
+      value: model.id,
+      label: model.display_name || model.id,
+    })),
+  ]
+}
+
+function selectedBatchTestModelsByPlatform(): Record<string, string> {
+  const result: Record<string, string> = {}
+  for (const summary of batchTestPlatformSummaries.value) {
+    const modelID = batchTestModelByPlatform.value[summary.platform]?.trim()
+    if (modelID) result[summary.platform] = modelID
+  }
+  return result
+}
+
+async function startSupplierBatchTest() {
+  if (batchTesting.value || batchTestTargets.value.length === 0) return
+  batchTesting.value = true
+  batchTestCancelling.value = false
+  batchTestResult.value = null
+  showBatchTestConfigDialog.value = false
+  showBatchTestResultDialog.value = true
+  clearBatchTestPollTimer()
+  const pollToken = ++batchTestPollToken
+
+  try {
+    const modelIDsByPlatform = selectedBatchTestModelsByPlatform()
+    const job = await startSupplierAccountBatchTest({
+      account_ids: batchTestTargets.value.map(target => target.accountID),
+      ...(Object.keys(modelIDsByPlatform).length ? { model_ids_by_platform: modelIDsByPlatform } : {}),
+      concurrency: batchTestConcurrency.value,
+      timeout_per_account_seconds: batchTestTimeoutSeconds.value,
+      timeout_seconds: SUPPLIER_BATCH_TEST_TOTAL_TIMEOUT_SECONDS,
+    })
+    batchTestResult.value = job
+    showBatchTestResultDialog.value = true
+    if (isSupplierBatchTestTerminal(job.status)) {
+      await finishSupplierBatchTest(job, pollToken)
+    } else {
+      scheduleSupplierBatchTestPoll(job.job_id, pollToken)
+    }
+  } catch (err) {
+    batchTesting.value = false
+    showBatchTestResultDialog.value = false
+    appStore.showError(extractApiErrorMessage(err, '启动供应商账号批量测试失败'))
+  }
+}
+
+function scheduleSupplierBatchTestPoll(jobID: string, pollToken: number) {
+  clearBatchTestPollTimer()
+  batchTestPollTimer = setTimeout(async () => {
+    if (pollToken !== batchTestPollToken) return
+    try {
+      const job = await getSupplierAccountBatchTestJob(jobID)
+      if (pollToken !== batchTestPollToken) return
+      batchTestResult.value = job
+      if (isSupplierBatchTestTerminal(job.status)) {
+        await finishSupplierBatchTest(job, pollToken)
+      } else {
+        scheduleSupplierBatchTestPoll(jobID, pollToken)
+      }
+    } catch (err) {
+      if (pollToken !== batchTestPollToken) return
+      batchTesting.value = false
+      clearBatchTestPollTimer()
+      appStore.showError(extractApiErrorMessage(err, '查询供应商账号批量测试进度失败'))
+    }
+  }, SUPPLIER_BATCH_TEST_POLL_INTERVAL_MS)
+}
+
+async function cancelSupplierBatchTest() {
+  const jobID = batchTestResult.value?.job_id
+  if (!jobID || !batchTestCanCancel.value || batchTestCancelling.value) return
+  batchTestCancelling.value = true
+  try {
+    const job = await cancelSupplierAccountBatchTestJob(jobID)
+    batchTestResult.value = job
+    if (isSupplierBatchTestTerminal(job.status)) {
+      await finishSupplierBatchTest(job, batchTestPollToken)
+    }
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '取消供应商账号批量测试失败'))
+  } finally {
+    batchTestCancelling.value = false
+  }
+}
+
+async function finishSupplierBatchTest(job: BatchAccountTestJob, pollToken: number) {
+  if (pollToken !== batchTestPollToken) return
+  clearBatchTestPollTimer()
+  batchTesting.value = false
+  batchTestCancelling.value = false
+  batchTestResult.value = job
+  await loadAccounts()
+
+  if (job.status === 'cancelled') {
+    appStore.showWarning('供应商账号批量测试已取消')
+  } else if (job.status === 'failed') {
+    appStore.showError(job.error_message || '供应商账号批量测试失败')
+  } else if (job.failed > 0) {
+    appStore.showWarning(`批量测试完成：${job.success} 个成功，${job.failed} 个失败`)
+  } else {
+    appStore.showSuccess(`批量测试完成：${job.success} 个账号全部成功`)
+  }
+}
+
+function clearBatchTestPollTimer() {
+  if (batchTestPollTimer) {
+    clearTimeout(batchTestPollTimer)
+    batchTestPollTimer = null
+  }
+}
+
+function closeBatchTestConfigDialog() {
+  if (batchTesting.value) return
+  showBatchTestConfigDialog.value = false
+}
+
+function closeBatchTestResultDialog() {
+  showBatchTestResultDialog.value = false
+}
+
+function isSupplierBatchTestTerminal(status: BatchAccountTestJob['status']): boolean {
+  return status === 'completed' || status === 'cancelled' || status === 'failed'
+}
+
+function batchPlatformLabel(platform?: string): string {
+  return !platform || platform === 'unknown' ? '未知平台' : platformLabel(platform)
+}
+
+function batchTestItemStatusLabel(status: BatchAccountTestStatus): string {
+  if (status === 'success') return '成功'
+  if (status === 'failed') return '失败'
+  if (status === 'timeout') return '超时'
+  if (status === 'not_found') return '账号不存在'
+  return '已取消'
+}
+
+function batchTestItemTone(status: BatchAccountTestStatus): string {
+  if (status === 'success') return 'success'
+  if (status === 'cancelled') return 'neutral'
+  if (status === 'timeout') return 'warning'
+  return 'failed'
+}
+
+function batchTestTargetName(accountID: number): string {
+  return batchTestTargets.value.find(target => target.accountID === accountID)?.accountName || `账号 #${accountID}`
+}
+
+function batchTestTargetPlatform(accountID: number): string {
+  return batchTestTargets.value.find(target => target.accountID === accountID)?.platform || 'unknown'
 }
 
 function resetPageAndLoad() {
@@ -635,6 +1222,24 @@ async function loadAccountEditorOptions() {
   ])
   accountEditGroups.value = groups
   accountProxies.value = proxies
+}
+
+async function openCreateAccountDialog() {
+  try {
+    await loadAccountEditorOptions()
+    showCreateAccountModal.value = true
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '加载新增账号配置失败'))
+  }
+}
+
+function closeCreateAccountDialog() {
+  showCreateAccountModal.value = false
+}
+
+async function handleAccountCreated() {
+  showCreateAccountModal.value = false
+  await loadAccounts()
 }
 
 async function openLocalAccountEditor(account: SupplierProviderAccount) {
@@ -1526,6 +2131,285 @@ button.sp-test-status.failed:hover {
 .sp-account-pagination :deep(> div) {
   border-top: 0;
   background: transparent;
+}
+
+.sp-batch-test-dialog,
+.sp-batch-result-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.sp-batch-test-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.sp-batch-test-summary > div,
+.sp-batch-result-stats > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.65rem;
+  padding: 0.75rem 0.875rem;
+  background: var(--sp-panel-2);
+}
+
+.sp-batch-test-summary span,
+.sp-batch-result-stats span {
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.sp-batch-test-summary strong,
+.sp-batch-result-stats strong {
+  color: var(--sp-text);
+  font-size: 1rem;
+}
+
+.sp-batch-test-summary p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--sp-muted);
+  font-size: 0.8125rem;
+}
+
+.sp-batch-test-section {
+  overflow: hidden;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.75rem;
+  background: var(--sp-panel);
+}
+
+.sp-batch-test-section > header {
+  padding: 0.75rem 0.875rem;
+  border-bottom: 1px solid var(--sp-line);
+  background: color-mix(in srgb, var(--sp-cyan) 5%, var(--sp-panel));
+}
+
+.sp-batch-test-section > header div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.sp-batch-test-section > header strong {
+  color: var(--sp-text);
+  font-size: 0.875rem;
+}
+
+.sp-batch-test-section > header span,
+.sp-batch-test-platform-row small,
+.sp-batch-result-item-meta,
+.sp-batch-result-empty {
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+}
+
+.sp-batch-test-platform-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.sp-batch-test-platform-row {
+  display: grid;
+  grid-template-columns: minmax(10rem, 0.8fr) minmax(15rem, 1.2fr);
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 0.875rem;
+  border-bottom: 1px solid var(--sp-line);
+}
+
+.sp-batch-test-platform-row:last-child {
+  border-bottom: 0;
+}
+
+.sp-batch-test-platform-row > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.sp-batch-test-settings {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.875rem;
+  padding: 0.875rem;
+}
+
+.sp-batch-test-settings label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.sp-batch-test-settings label > span {
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.sp-batch-result-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.sp-batch-result-head > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.sp-batch-result-head p {
+  margin: 0;
+  color: var(--sp-muted);
+  font-size: 0.8125rem;
+}
+
+.sp-batch-result-head > strong {
+  color: var(--sp-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 1.25rem;
+}
+
+.sp-batch-job-status {
+  display: inline-flex;
+  width: fit-content;
+  border: 1px solid var(--sp-line);
+  border-radius: 999px;
+  padding: 0.22rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.sp-batch-job-status.testing {
+  border-color: color-mix(in srgb, #2563eb 28%, var(--sp-line));
+  background: color-mix(in srgb, #2563eb 8%, var(--sp-panel));
+  color: #2563eb;
+}
+
+.sp-batch-job-status.success,
+.sp-batch-result-stats .success strong {
+  color: var(--sp-green);
+}
+
+.sp-batch-job-status.warning,
+.sp-batch-result-stats .failed strong {
+  color: var(--sp-amber);
+}
+
+.sp-batch-job-status.failed {
+  color: var(--sp-red);
+}
+
+.sp-batch-job-status.neutral {
+  color: var(--sp-muted);
+}
+
+.sp-batch-progress-track {
+  overflow: hidden;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sp-muted) 16%, transparent);
+}
+
+.sp-batch-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--sp-cyan), var(--sp-green));
+  transition: width 200ms ease;
+}
+
+.sp-batch-result-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.625rem;
+}
+
+.sp-batch-result-list {
+  display: grid;
+  max-height: 26rem;
+  overflow-y: auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.625rem;
+  padding-right: 0.2rem;
+}
+
+.sp-batch-result-item {
+  border: 1px solid var(--sp-line);
+  border-left-width: 3px;
+  border-radius: 0.65rem;
+  padding: 0.75rem;
+  background: var(--sp-panel-2);
+}
+
+.sp-batch-result-item.success {
+  border-left-color: var(--sp-green);
+}
+
+.sp-batch-result-item.failed {
+  border-left-color: var(--sp-red);
+}
+
+.sp-batch-result-item.warning {
+  border-left-color: var(--sp-amber);
+}
+
+.sp-batch-result-item.neutral {
+  border-left-color: var(--sp-muted);
+}
+
+.sp-batch-result-item-head,
+.sp-batch-result-item-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.sp-batch-result-item-head > div {
+  min-width: 0;
+}
+
+.sp-batch-result-item-head strong {
+  display: block;
+  overflow: hidden;
+  color: var(--sp-text);
+  font-size: 0.8125rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-batch-result-item-head > div > span {
+  color: var(--sp-muted);
+  font-size: 0.6875rem;
+}
+
+.sp-batch-result-item-meta {
+  margin-top: 0.45rem;
+}
+
+.sp-batch-result-error {
+  margin: 0.55rem 0 0;
+  border-radius: 0.45rem;
+  padding: 0.5rem 0.6rem;
+  background: color-mix(in srgb, var(--sp-red) 7%, var(--sp-panel));
+  color: var(--sp-red);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.sp-batch-result-empty {
+  padding: 2rem 1rem;
+  text-align: center;
 }
 
 @media (max-width: 900px) {

@@ -603,7 +603,7 @@ describe('supplier local data views component usage', () => {
   })
 
   it('provides edit, binding, and delete actions for matched local accounts', () => {
-    expect(accountsSource).toContain("import { EditAccountModal } from '@/components/account'")
+    expect(accountsSource).toContain("import { CreateAccountModal, EditAccountModal } from '@/components/account'")
     expect(accountsSource).toContain("import GroupSelector from '@/components/common/GroupSelector.vue'")
     expect(accountsSource).toContain('@click.stop="openLocalAccountEditor(account)"')
     expect(accountsSource).toContain('@click.stop="openAccountBindingEditor(account)"')
@@ -615,6 +615,43 @@ describe('supplier local data views component usage', () => {
     expect(accountsSource).toContain('adminAPI.accounts.delete(localAccountID)')
     expect(accountsSource).toContain('window.confirm')
     expect(accountsSource).toContain('账号已删除')
+  })
+
+  it('opens the existing create-account modal from the supplier account toolbar', () => {
+    expect(accountsSource).toContain('@click="openCreateAccountDialog"')
+    expect(accountsSource).toContain('<CreateAccountModal')
+    expect(accountsSource).toContain('@created="handleAccountCreated"')
+    expect(accountsSource).toContain('await loadAccountEditorOptions()')
+    expect(accountsSource).toContain('添加账号')
+  })
+
+  it('runs an independently implemented batch test for all filtered matched accounts', () => {
+    expect(accountsSource).toContain('测试当前筛选')
+    expect(accountsSource).toContain('type SupplierAccountFilterSnapshot = {')
+    expect(accountsSource).toContain('loadFilteredTestAccounts(snapshot: SupplierAccountFilterSnapshot)')
+    expect(accountsSource).toContain('loadFilteredTestAccounts(snapshot)')
+    expect(accountsSource).toContain('batchTestFilterSummary.value = snapshot.summary')
+    expect(accountsSource).toContain('{{ batchTestFilterSummary }}')
+    expect(accountsSource).toContain('page_size: SUPPLIER_BATCH_TEST_PAGE_SIZE')
+    expect(accountsSource).toContain("account.local_account_match_status === 'matched'")
+    expect(accountsSource).toContain('const uniqueTargets = new Map<number, SupplierBatchTestTarget>()')
+    expect(accountsSource).toContain('uniqueTargets.has(localAccountID)')
+    expect(accountsSource).toContain('startSupplierAccountBatchTest')
+    expect(accountsSource).toContain('getSupplierAccountBatchTestJob')
+    expect(accountsSource).toContain('cancelSupplierAccountBatchTestJob')
+    expect(accountsSource).toContain('title="供应商账号批量测试"')
+    expect(accountsSource).toContain('title="批量测试结果"')
+    expect(accountsSource).toContain(':disabled="!batchTesting && (loading || batchTestPreparing || total === 0)"')
+    expect(accountsSource).toContain("return status === 'queued' || status === 'running'")
+  })
+
+  it('declares supplier-account-specific batch-test API functions', () => {
+    expect(supplierProviderDataSource).toContain('export async function startSupplierAccountBatchTest')
+    expect(supplierProviderDataSource).toContain('export async function getSupplierAccountBatchTestJob')
+    expect(supplierProviderDataSource).toContain('export async function cancelSupplierAccountBatchTestJob')
+    expect(supplierProviderDataSource).toContain("'/admin/supplier-management/accounts/batch-test'")
+    expect(supplierProviderDataSource).toContain('`/admin/supplier-management/accounts/batch-test/${jobID}`')
+    expect(supplierProviderDataSource).toContain('`/admin/supplier-management/accounts/batch-test/${jobID}/cancel`')
   })
 
   it('uses upstream-account semantics for the empty state', () => {

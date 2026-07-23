@@ -1,4 +1,5 @@
 import { apiClient } from '../client'
+import type { BatchAccountTestJob } from '@/types'
 
 export type SupplierSyncScope = 'accounts' | 'groups' | 'balance' | 'cost' | 'all'
 export type SupplierSyncStatus = 'success' | 'partial' | 'failed'
@@ -138,6 +139,14 @@ export interface SupplierProviderAccountListResult {
   page_size: number
 }
 
+export interface SupplierAccountBatchTestRequest {
+  account_ids: number[]
+  model_ids_by_platform?: Record<string, string>
+  concurrency?: number
+  timeout_per_account_seconds?: number
+  timeout_seconds?: number
+}
+
 export interface SupplierProviderGroupSummary {
   group_count: number
   account_count: number
@@ -172,6 +181,31 @@ export async function listSupplierAccounts(params: SupplierProviderDataListParam
   const { data } = await apiClient.get<SupplierProviderAccountListResult>(
     '/admin/supplier-management/accounts',
     { params }
+  )
+  return data
+}
+
+export async function startSupplierAccountBatchTest(
+  payload: SupplierAccountBatchTestRequest
+): Promise<BatchAccountTestJob> {
+  const { data } = await apiClient.post<BatchAccountTestJob>(
+    '/admin/supplier-management/accounts/batch-test',
+    payload,
+    { timeout: 30 * 1000 }
+  )
+  return data
+}
+
+export async function getSupplierAccountBatchTestJob(jobID: string): Promise<BatchAccountTestJob> {
+  const { data } = await apiClient.get<BatchAccountTestJob>(
+    `/admin/supplier-management/accounts/batch-test/${jobID}`
+  )
+  return data
+}
+
+export async function cancelSupplierAccountBatchTestJob(jobID: string): Promise<BatchAccountTestJob> {
+  const { data } = await apiClient.post<BatchAccountTestJob>(
+    `/admin/supplier-management/accounts/batch-test/${jobID}/cancel`
   )
   return data
 }
@@ -241,6 +275,9 @@ export const supplierProviderDataAPI = {
   syncProvider,
   testProviderEndpoint,
   listSupplierAccounts,
+  startSupplierAccountBatchTest,
+  getSupplierAccountBatchTestJob,
+  cancelSupplierAccountBatchTestJob,
   listSupplierGroups,
   updateSupplierGroupMapping,
   autoMatchSupplierGroups,

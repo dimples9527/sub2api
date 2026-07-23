@@ -46,6 +46,7 @@ func TestAccountHandlerBatchTestStartsJobAndPollsResult(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 		testSvc,
 		nil,
 		nil,
@@ -134,6 +135,7 @@ func TestAccountHandlerBatchTestRejectsTooManyAccounts(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 		testSvc,
 		nil,
 		nil,
@@ -157,6 +159,68 @@ func TestAccountHandlerBatchTestRejectsTooManyAccounts(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, body = %s, want 400", w.Code, w.Body.String())
+	}
+}
+
+func TestAccountHandlerSupplierBatchTestUsesDedicatedRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	testSvc := service.NewAccountTestServiceWithRunner(
+		&batchTestHandlerAccountRepo{accounts: map[int64]*service.Account{
+			7: {ID: 7, Name: "supplier-account", Platform: service.PlatformOpenAI},
+		}},
+		func(ctx context.Context, accountID int64, modelID string) (*service.ScheduledTestResult, error) {
+			return &service.ScheduledTestResult{
+				Status:     "success",
+				LatencyMs:  3,
+				StartedAt:  time.Now().UTC(),
+				FinishedAt: time.Now().UTC(),
+			}, nil
+		},
+	)
+	handler := NewAccountHandler(
+		newStubAdminService(),
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		testSvc,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	router := gin.New()
+	router.POST("/api/v1/admin/supplier-management/accounts/batch-test", handler.SupplierBatchTest)
+	router.GET("/api/v1/admin/supplier-management/accounts/batch-test/:job_id", handler.GetSupplierBatchTest)
+
+	body, _ := json.Marshal(SupplierBatchTestAccountsRequest{AccountIDs: []int64{7}})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/supplier-management/accounts/batch-test", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+
+	var payload struct {
+		Data service.BatchAccountTestJob `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if payload.Data.JobID == "" || payload.Data.Total != 1 {
+		t.Fatalf("data = %+v, want dedicated supplier batch-test job", payload.Data)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/supplier-management/accounts/batch-test/"+payload.Data.JobID, nil)
+	getW := httptest.NewRecorder()
+	router.ServeHTTP(getW, getReq)
+	if getW.Code != http.StatusOK {
+		t.Fatalf("poll status = %d, body = %s", getW.Code, getW.Body.String())
 	}
 }
 

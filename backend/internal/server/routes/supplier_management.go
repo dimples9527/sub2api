@@ -34,6 +34,9 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 		}
 
 		supplier.GET("/accounts", h.Admin.SupplierProviderSync.ListAccounts)
+		supplier.POST("/accounts/batch-test", h.Admin.Account.SupplierBatchTest)
+		supplier.GET("/accounts/batch-test/:job_id", h.Admin.Account.GetSupplierBatchTest)
+		supplier.POST("/accounts/batch-test/:job_id/cancel", h.Admin.Account.CancelSupplierBatchTest)
 		supplier.GET("/groups", h.Admin.SupplierProviderSync.ListGroups)
 		supplier.POST("/groups/auto-match", h.Admin.SupplierProviderSync.AutoMatchGroups)
 		supplier.PUT("/groups/:id/mapping", h.Admin.SupplierProviderSync.UpdateGroupMapping)
