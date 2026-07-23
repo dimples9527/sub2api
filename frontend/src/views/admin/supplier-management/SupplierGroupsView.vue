@@ -12,42 +12,42 @@
       <div class="sp-filter-card-body">
         <div class="sp-filter-fields">
           <div class="sp-filter-control sp-filter-search-control">
-            <span class="sp-filter-label">分组搜索</span>
-            <Input v-model="search" class="sp-search sp-filter-search-input" placeholder="搜索上游分组或 Key" />
+            <span class="sr-only">分组搜索</span>
+            <Input v-model="search" class="w-full" placeholder="搜索上游分组或 Key" />
           </div>
           <div class="sp-filter-control">
-            <span class="sp-filter-label">供应商</span>
+            <span class="sr-only">供应商</span>
             <Select
               v-model="providerID"
-              class="sp-search sp-filter-select"
+              class="w-full"
               :options="providerOptions"
               :searchable="true"
               search-placeholder="搜索供应商"
             />
           </div>
           <div class="sp-filter-control">
-            <span class="sp-filter-label">平台</span>
+            <span class="sr-only">平台</span>
             <Select
               v-model="platformFilter"
-              class="sp-search sp-filter-select"
+              class="w-full"
               :options="platformFilterOptions"
               :searchable="false"
             />
           </div>
           <div class="sp-filter-control">
-            <span class="sp-filter-label">匹配状态</span>
+            <span class="sr-only">匹配状态</span>
             <Select
               v-model="matchStatusFilter"
-              class="sp-search sp-filter-select"
+              class="w-full"
               :options="matchStatusFilterOptions"
               :searchable="false"
             />
           </div>
           <div class="sp-filter-control">
-            <span class="sp-filter-label">倍率状态</span>
+            <span class="sr-only">倍率状态</span>
             <Select
               v-model="rateStatusFilter"
-              class="sp-search sp-filter-select"
+              class="w-full"
               :options="rateStatusFilterOptions"
               :searchable="false"
             />
@@ -1389,18 +1389,6 @@ function errorMessage(err: unknown, fallback: string): string {
   gap: 0.3rem;
 }
 
-.sp-filter-label {
-  color: var(--sp-muted);
-  font-size: 0.6875rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  line-height: 1rem;
-}
-
-.sp-filter-toolbar .sp-search {
-  width: 100%;
-  min-width: 0;
-}
 
 .sp-filter-actions {
   display: flex;

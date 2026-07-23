@@ -1,13 +1,5 @@
 <template>
   <SupplierModuleLayout>
-    <header class="sp-page-head">
-      <div>
-        <div class="sp-eyebrow">Provider Operations</div>
-        <h1>供应商管理</h1>
-        <p class="sp-subtitle">用运行风险、账号健康和成本效率决定优先处理顺序。</p>
-      </div>
-    </header>
-
     <section class="sp-provider-filter-card" aria-label="供应商筛选与操作">
       <header class="sp-filter-card-head">
         <div>
@@ -25,8 +17,8 @@
             role="group"
             aria-labelledby="supplier-provider-search-label"
           >
-            <span id="supplier-provider-search-label" class="sp-provider-filter-label">供应商搜索</span>
-            <Input v-model="search" class="sp-search" placeholder="搜索供应商" @enter="loadProviders" />
+            <span id="supplier-provider-search-label" class="sr-only">供应商搜索</span>
+            <Input v-model="search" class="w-full" placeholder="搜索供应商" @enter="loadProviders" />
           </div>
         </div>
         <div class="sp-provider-filter-actions">
@@ -1123,18 +1115,6 @@ function errorMessage(err: unknown, fallback: string): string {
   gap: 0.3rem;
 }
 
-.sp-provider-filter-label {
-  color: var(--sp-muted);
-  font-size: 0.6875rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  line-height: 1rem;
-}
-
-.sp-provider-filter-card .sp-search {
-  width: 100%;
-  min-width: 0;
-}
 
 .sp-provider-filter-actions {
   display: flex;

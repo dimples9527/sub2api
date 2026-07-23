@@ -18,10 +18,10 @@
             role="group"
             aria-labelledby="supplier-account-search-label"
           >
-            <span id="supplier-account-search-label" class="sp-account-filter-label">账号搜索</span>
+            <span id="supplier-account-search-label" class="sr-only">账号搜索</span>
             <Input
               v-model="search"
-              class="sp-search"
+              class="w-full"
               placeholder="搜索账号名称或上游 Key"
             />
           </div>
@@ -31,10 +31,10 @@
             role="group"
             aria-labelledby="supplier-account-provider-label"
           >
-            <span id="supplier-account-provider-label" class="sp-account-filter-label">供应商</span>
+            <span id="supplier-account-provider-label" class="sr-only">供应商</span>
             <Select
               v-model="providerID"
-              class="sp-search sp-account-select"
+              class="w-full"
               :options="providerOptions"
               :searchable="false"
             />
@@ -45,10 +45,10 @@
             role="group"
             aria-labelledby="supplier-account-platform-label"
           >
-            <span id="supplier-account-platform-label" class="sp-account-filter-label">平台</span>
+            <span id="supplier-account-platform-label" class="sr-only">平台</span>
             <Select
               v-model="platformFilter"
-              class="sp-search sp-account-select"
+              class="w-full"
               :options="platformFilterOptions"
               :searchable="false"
             />
@@ -59,10 +59,10 @@
             role="group"
             aria-labelledby="supplier-account-active-label"
           >
-            <span id="supplier-account-active-label" class="sp-account-filter-label">账号状态</span>
+            <span id="supplier-account-active-label" class="sr-only">账号状态</span>
             <Select
               v-model="activeFilter"
-              class="sp-search sp-account-select"
+              class="w-full"
               :options="activeFilterOptions"
               :searchable="false"
             />
@@ -1636,18 +1636,6 @@ function formatTime(value?: string): string {
   gap: 0.3rem;
 }
 
-.sp-account-filter-label {
-  color: var(--sp-muted);
-  font-size: 0.6875rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  line-height: 1rem;
-}
-
-.sp-account-toolbar .sp-search {
-  width: 100%;
-  min-width: 0;
-}
 
 .sp-account-filter-actions {
   display: flex;
