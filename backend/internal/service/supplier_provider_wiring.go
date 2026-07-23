@@ -10,15 +10,23 @@ func ProvideSupplierRateGuardService(dataRepo SupplierProviderDataRepository) *S
 	return NewSupplierRateGuardService(dataRepo)
 }
 
+func ProvideSupplierAccountRateGuardRateSyncer(syncer *SupplierProviderSyncService) SupplierAccountRateGuardRateSyncer {
+	return syncer
+}
+
 func ProvideSupplierAutomationService(
 	repo SupplierAutomationRepository,
 	lock SupplierAutomationLock,
 	syncer SupplierProviderBatchSyncer,
 	dataRepo SupplierProviderDataRepository,
 	rateGuard *SupplierRateGuardService,
+	accountRateGuard *SupplierAccountRateGuardService,
+	accountRateGuardRepo SupplierAccountRateGuardRepository,
 ) *SupplierAutomationService {
 	svc := NewSupplierAutomationService(repo, lock, syncer, dataRepo)
 	svc.SetRateGuardService(rateGuard)
+	svc.SetAccountRateGuardService(accountRateGuard)
+	svc.SetAccountRateGuardRepository(accountRateGuardRepo)
 	return svc
 }
 
@@ -46,5 +54,7 @@ var SupplierProviderWiringSet = wire.NewSet(
 	ProvideSupplierRateGuardService,
 	ProvideSupplierProviderGroupMatcher,
 	ProvideSupplierProviderSyncService,
+	ProvideSupplierAccountRateGuardRateSyncer,
+	NewSupplierAccountRateGuardService,
 	ProvideSupplierAutomationService,
 )

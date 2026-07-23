@@ -12,4 +12,13 @@ describe('supplierAutomation 倍率守护变更日志接口', () => {
     expect(apiSource).toContain('function markRateGuardChangeLogHandled')
     expect(apiSource).toContain('rate-guard-change-logs/${id}/handled')
   })
+
+  it('支持账号倍率守护运行模式和独立解绑日志', () => {
+    expect(apiSource).toContain("export type SupplierAccountRateGuardRunMode = 'preview' | 'execute'")
+    expect(apiSource).toContain('mode: SupplierAccountRateGuardRunMode = \'execute\'')
+    expect(apiSource).toContain('{ mode }')
+    expect(apiSource).toContain('export interface SupplierAccountRateGuardUnbindLog')
+    expect(apiSource).toContain('function listAccountRateGuardUnbindLogs')
+    expect(apiSource).toContain("'/admin/supplier-management/automation/account-rate-guard-unbind-logs'")
+  })
 })

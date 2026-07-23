@@ -12,7 +12,33 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
-var supplierAutomationCronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+type supplierAutomationScheduleParser struct {
+	parser cron.Parser
+}
+
+func (p supplierAutomationScheduleParser) Parse(expression string) (cron.Schedule, error) {
+	expression = strings.TrimSpace(expression)
+	if expression == "" {
+		return nil, fmt.Errorf("cron expression is required")
+	}
+	if strings.HasPrefix(expression, "@every ") {
+		duration, err := time.ParseDuration(strings.TrimSpace(strings.TrimPrefix(expression, "@every ")))
+		if err != nil || duration <= 0 {
+			return nil, fmt.Errorf("invalid fixed interval: %s", expression)
+		}
+	}
+	return p.parser.Parse(expression)
+}
+
+var supplierAutomationCronParser = supplierAutomationScheduleParser{parser: cron.NewParser(
+	cron.SecondOptional |
+		cron.Minute |
+		cron.Hour |
+		cron.Dom |
+		cron.Month |
+		cron.Dow |
+		cron.Descriptor,
+)}
 
 type SupplierAutomationTask struct {
 	ID             int64                    `json:"id"`
@@ -55,9 +81,10 @@ type SupplierAutomationRun struct {
 }
 
 type SupplierAutomationRunDetail struct {
-	Providers []SupplierAutomationProviderRunDetail `json:"providers,omitempty"`
-	Cleanup   *SupplierAutomationCleanupRunDetail   `json:"cleanup,omitempty"`
-	RateGuard *SupplierRateGuardResult              `json:"rate_guard,omitempty"`
+	Providers        []SupplierAutomationProviderRunDetail `json:"providers,omitempty"`
+	Cleanup          *SupplierAutomationCleanupRunDetail   `json:"cleanup,omitempty"`
+	RateGuard        *SupplierRateGuardResult              `json:"rate_guard,omitempty"`
+	AccountRateGuard *SupplierAccountRateGuardResult       `json:"account_rate_guard,omitempty"`
 }
 
 type SupplierAutomationProviderRunDetail struct {
@@ -137,10 +164,18 @@ type SupplierRateGuardRunner interface {
 	Run(ctx context.Context, config SupplierRateGuardConfig, now time.Time) (SupplierRateGuardResult, error)
 }
 
+type SupplierAccountRateGuardRunner interface {
+	Run(ctx context.Context, runID int64, mode SupplierAccountRateGuardMode, now time.Time) (SupplierAccountRateGuardResult, error)
+}
+
 const (
-	SupplierAutomationTaskSync      = "supplier_data_sync"
-	SupplierAutomationTaskCleanup   = "supplier_data_cleanup"
-	SupplierAutomationTaskRateGuard = "supplier_rate_guard"
+	SupplierAutomationRunModePreview = "preview"
+	SupplierAutomationRunModeExecute = "execute"
+
+	SupplierAutomationTaskSync             = "supplier_data_sync"
+	SupplierAutomationTaskCleanup          = "supplier_data_cleanup"
+	SupplierAutomationTaskRateGuard        = "supplier_rate_guard"
+	SupplierAutomationTaskAccountRateGuard = "supplier_account_rate_guard"
 
 	SupplierAutomationStatusRunning = "running"
 	SupplierAutomationStatusSuccess = "success"
@@ -154,12 +189,14 @@ func supplierAutomationConfigJSON(config SupplierAutomationConfig) string {
 }
 
 type SupplierAutomationService struct {
-	repo      SupplierAutomationRepository
-	lock      SupplierAutomationLock
-	syncer    SupplierProviderBatchSyncer
-	dataRepo  SupplierProviderDataRepository
-	rateGuard SupplierRateGuardRunner
-	reloader  SupplierAutomationSchedulerReloader
+	repo             SupplierAutomationRepository
+	lock             SupplierAutomationLock
+	syncer           SupplierProviderBatchSyncer
+	dataRepo         SupplierProviderDataRepository
+	rateGuard        SupplierRateGuardRunner
+	accountRateGuard SupplierAccountRateGuardRunner
+	accountRateLogs  SupplierAccountRateGuardRepository
+	reloader         SupplierAutomationSchedulerReloader
 }
 
 func NewSupplierAutomationService(repo SupplierAutomationRepository, lock SupplierAutomationLock, syncer SupplierProviderBatchSyncer, dataRepo SupplierProviderDataRepository) *SupplierAutomationService {
@@ -173,6 +210,18 @@ func (s *SupplierAutomationService) SetSchedulerReloader(reloader SupplierAutoma
 func (s *SupplierAutomationService) SetRateGuardService(rateGuard SupplierRateGuardRunner) {
 	if s != nil {
 		s.rateGuard = rateGuard
+	}
+}
+
+func (s *SupplierAutomationService) SetAccountRateGuardService(rateGuard SupplierAccountRateGuardRunner) {
+	if s != nil {
+		s.accountRateGuard = rateGuard
+	}
+}
+
+func (s *SupplierAutomationService) SetAccountRateGuardRepository(repository SupplierAccountRateGuardRepository) {
+	if s != nil {
+		s.accountRateLogs = repository
 	}
 }
 
@@ -208,6 +257,13 @@ func (s *SupplierAutomationService) ListRateGuardChangeLogs(ctx context.Context,
 	return store.ListRateGuardChangeLogs(ctx, params)
 }
 
+func (s *SupplierAutomationService) ListAccountRateGuardUnbindLogs(ctx context.Context, params SupplierAccountRateGuardUnbindLogListParams) (SupplierAccountRateGuardUnbindLogListResult, error) {
+	if s.accountRateLogs == nil {
+		return SupplierAccountRateGuardUnbindLogListResult{}, fmt.Errorf("supplier account rate guard log repository is required")
+	}
+	return s.accountRateLogs.ListAccountRateGuardUnbindLogs(ctx, params)
+}
+
 func (s *SupplierAutomationService) MarkRateGuardChangeLogHandled(ctx context.Context, id int64) (SupplierRateGuardChangeLog, error) {
 	store, ok := s.dataRepo.(SupplierRateGuardChangeLogStore)
 	if !ok {
@@ -217,12 +273,26 @@ func (s *SupplierAutomationService) MarkRateGuardChangeLogHandled(ctx context.Co
 }
 
 func (s *SupplierAutomationService) Run(ctx context.Context, taskCode, trigger string) (SupplierAutomationRun, error) {
+	return s.RunWithMode(ctx, taskCode, trigger, SupplierAutomationRunModeExecute)
+}
+
+func (s *SupplierAutomationService) RunWithMode(ctx context.Context, taskCode, trigger, mode string) (SupplierAutomationRun, error) {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" {
+		mode = SupplierAutomationRunModeExecute
+	}
+	if mode != SupplierAutomationRunModePreview && mode != SupplierAutomationRunModeExecute {
+		return SupplierAutomationRun{}, ErrSupplierProviderInvalid
+	}
 	task, err := s.repo.GetTask(ctx, strings.TrimSpace(taskCode))
 	if err != nil {
 		return SupplierAutomationRun{}, err
 	}
 	if err := validateSupplierAutomationTask(*task); err != nil {
 		return SupplierAutomationRun{}, err
+	}
+	if mode == SupplierAutomationRunModePreview && task.TaskCode != SupplierAutomationTaskAccountRateGuard {
+		return SupplierAutomationRun{}, ErrSupplierProviderInvalid
 	}
 	owner := uuid.NewString()
 	if s.lock != nil {
@@ -254,7 +324,7 @@ func (s *SupplierAutomationService) Run(ctx context.Context, taskCode, trigger s
 		return run, err
 	}
 
-	execErr := s.executeTask(runCtx, task, &run)
+	execErr := s.executeTask(runCtx, task, &run, mode)
 	finishedAt := time.Now()
 	run.FinishedAt = &finishedAt
 	if execErr != nil {
@@ -274,7 +344,7 @@ func (s *SupplierAutomationService) Run(ctx context.Context, taskCode, trigger s
 	return run, execErr
 }
 
-func (s *SupplierAutomationService) executeTask(ctx context.Context, task *SupplierAutomationTask, run *SupplierAutomationRun) error {
+func (s *SupplierAutomationService) executeTask(ctx context.Context, task *SupplierAutomationTask, run *SupplierAutomationRun, mode string) error {
 	switch task.TaskCode {
 	case SupplierAutomationTaskSync:
 		result, err := s.syncer.SyncAllEnabled(ctx, SupplierSyncTriggerScheduled)
@@ -330,6 +400,34 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 		if run.FailedCount > 0 {
 			run.Status = SupplierAutomationStatusPartial
 			run.Message = fmt.Sprintf("倍率守护存在 %d 项告警", run.FailedCount)
+		}
+		return nil
+	case SupplierAutomationTaskAccountRateGuard:
+		if s.accountRateGuard == nil {
+			return fmt.Errorf("supplier account rate guard service is required")
+		}
+		guardMode := SupplierAccountRateGuardModeExecute
+		if mode == SupplierAutomationRunModePreview {
+			guardMode = SupplierAccountRateGuardModePreview
+		}
+		result, err := s.accountRateGuard.Run(ctx, run.ID, guardMode, time.Now())
+		run.ProcessedCount = result.CheckedAccounts
+		run.FailedCount = result.Failed + result.RateSyncFailedProviders
+		run.SuccessCount = run.ProcessedCount - result.Failed
+		if run.SuccessCount < 0 {
+			run.SuccessCount = 0
+		}
+		run.ResultDetail = &SupplierAutomationRunDetail{AccountRateGuard: &result}
+		if err != nil {
+			return err
+		}
+		if run.FailedCount > 0 {
+			run.Status = SupplierAutomationStatusPartial
+			run.Message = fmt.Sprintf("账号倍率守护存在 %d 项失败", run.FailedCount)
+		} else if guardMode == SupplierAccountRateGuardModePreview {
+			run.Message = fmt.Sprintf("检测完成，发现 %d 个风险分组", result.RiskGroups)
+		} else {
+			run.Message = fmt.Sprintf("执行完成，解除 %d 个分组绑定", result.UnboundGroups)
 		}
 		return nil
 	default:

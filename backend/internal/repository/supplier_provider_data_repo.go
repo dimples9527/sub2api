@@ -19,6 +19,23 @@ func NewSupplierProviderDataRepository(db *sql.DB) service.SupplierProviderDataR
 	return &supplierProviderDataRepository{db: db}
 }
 
+func (r *supplierProviderDataRepository) UpdateAccountRateSnapshot(ctx context.Context, providerID int64, upstreamKey string, rate float64, syncedAt time.Time) (bool, error) {
+	var accountID int64
+	err := r.db.QueryRowContext(ctx, `
+UPDATE supplier_provider_accounts
+SET rate_multiplier=$3, rate_sync_status='success', rate_sync_message='',
+    last_rate_sync_at=$4, updated_at=$4
+WHERE provider_id=$1 AND upstream_account_key=$2
+RETURNING id`, providerID, strings.TrimSpace(upstreamKey), rate, syncedAt).Scan(&accountID)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("update supplier account rate snapshot: %w", err)
+	}
+	return true, nil
+}
+
 func (r *supplierProviderDataRepository) ListAccounts(ctx context.Context, params service.SupplierProviderDataListParams) (service.SupplierProviderAccountListResult, error) {
 	params = normalizeSupplierProviderDataListParams(params)
 	where, args := supplierProviderAccountWhere(params)

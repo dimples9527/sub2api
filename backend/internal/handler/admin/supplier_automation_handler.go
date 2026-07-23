@@ -13,9 +13,10 @@ import (
 type SupplierAutomationServicePort interface {
 	ListTasks(ctx context.Context) ([]service.SupplierAutomationTask, error)
 	UpdateTask(ctx context.Context, task *service.SupplierAutomationTask) error
-	Run(ctx context.Context, taskCode, trigger string) (service.SupplierAutomationRun, error)
+	RunWithMode(ctx context.Context, taskCode, trigger, mode string) (service.SupplierAutomationRun, error)
 	ListRuns(ctx context.Context, params service.SupplierAutomationRunListParams) (service.SupplierAutomationRunListResult, error)
 	ListRateGuardChangeLogs(ctx context.Context, params service.SupplierRateGuardChangeLogListParams) (service.SupplierRateGuardChangeLogListResult, error)
+	ListAccountRateGuardUnbindLogs(ctx context.Context, params service.SupplierAccountRateGuardUnbindLogListParams) (service.SupplierAccountRateGuardUnbindLogListResult, error)
 	MarkRateGuardChangeLogHandled(ctx context.Context, id int64) (service.SupplierRateGuardChangeLog, error)
 }
 
@@ -58,13 +59,32 @@ func (h *SupplierAutomationHandler) UpdateTask(c *gin.Context) {
 	response.Success(c, req)
 }
 
+type supplierAutomationRunRequest struct {
+	Mode string `json:"mode"`
+}
+
 func (h *SupplierAutomationHandler) RunTask(c *gin.Context) {
 	taskCode := strings.TrimSpace(c.Param("task_code"))
 	if taskCode == "" {
 		response.ErrorFrom(c, badRequest("任务编码不能为空"))
 		return
 	}
-	run, err := h.service.Run(c.Request.Context(), taskCode, service.SupplierSyncTriggerManual)
+	req := supplierAutomationRunRequest{Mode: service.SupplierAutomationRunModeExecute}
+	if c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			response.ErrorFrom(c, badRequest(err.Error()))
+			return
+		}
+	}
+	req.Mode = strings.ToLower(strings.TrimSpace(req.Mode))
+	if req.Mode == "" {
+		req.Mode = service.SupplierAutomationRunModeExecute
+	}
+	if req.Mode != service.SupplierAutomationRunModePreview && req.Mode != service.SupplierAutomationRunModeExecute {
+		response.ErrorFrom(c, badRequest("运行模式无效"))
+		return
+	}
+	run, err := h.service.RunWithMode(c.Request.Context(), taskCode, service.SupplierSyncTriggerManual, req.Mode)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -97,6 +117,27 @@ func (h *SupplierAutomationHandler) ListRateGuardChangeLogs(c *gin.Context) {
 	}
 	result, err := h.service.ListRateGuardChangeLogs(c.Request.Context(), service.SupplierRateGuardChangeLogListParams{
 		Page: page, PageSize: pageSize,
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *SupplierAutomationHandler) ListAccountRateGuardUnbindLogs(c *gin.Context) {
+	page, pageSize := response.ParsePagination(c)
+	if pageSize > supplierProviderMaxPageSize {
+		pageSize = supplierProviderMaxPageSize
+	}
+	result, err := h.service.ListAccountRateGuardUnbindLogs(c.Request.Context(), service.SupplierAccountRateGuardUnbindLogListParams{
+		RunID:          parseOptionalInt64(c.Query("run_id")),
+		ProviderID:     parseOptionalInt64(c.Query("provider_id")),
+		LocalAccountID: parseOptionalInt64(c.Query("local_account_id")),
+		Search:         strings.TrimSpace(c.Query("search")),
+		Result:         strings.TrimSpace(c.Query("result")),
+		Page:           page,
+		PageSize:       pageSize,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
