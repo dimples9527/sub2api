@@ -9,11 +9,10 @@ const supplierProvidersSource = readFileSync(
 )
 
 describe('SupplierProvidersView payload normalization', () => {
-  it('separates the page heading from one unified provider filter card', () => {
-    const pageHeadSource = supplierProvidersSource.match(/<header class="sp-page-head">[\s\S]*?<\/header>/)?.[0]
-
-    expect(pageHeadSource).not.toContain('sp-controls')
-    expect(pageHeadSource).not.toContain('v-model="search"')
+  it('uses one unified provider filter card without a repeated page heading', () => {
+    expect(supplierProvidersSource).not.toContain('class="sp-page-head"')
+    expect(supplierProvidersSource).not.toContain('Provider Operations')
+    expect(supplierProvidersSource).not.toContain('class="sp-subtitle"')
     expect(supplierProvidersSource).toContain('class="sp-provider-filter-card"')
     expect(supplierProvidersSource).toContain('class="sp-filter-card-head"')
     expect(supplierProvidersSource).toContain('class="sp-provider-filter-body"')

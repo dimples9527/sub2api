@@ -419,7 +419,7 @@ describe('supplier local data views component usage', () => {
     actionWrapper.unmount()
   })
 
-  it('gives every account filter a visible and distinguishable accessible name', async () => {
+  it('gives every account filter a screen-reader-only accessible name', async () => {
     const wrapper = await mountSupplierAccounts()
     const filterGroups = wrapper.findAll('.sp-account-filter-control[role="group"]')
 
@@ -430,7 +430,7 @@ describe('supplier local data views component usage', () => {
       'supplier-account-platform-label',
       'supplier-account-active-label',
     ])
-    expect(filterGroups.map(group => group.get('.sp-account-filter-label').text())).toEqual([
+    expect(filterGroups.map(group => group.get('.sr-only').text())).toEqual([
       '账号搜索',
       '供应商',
       '平台',
