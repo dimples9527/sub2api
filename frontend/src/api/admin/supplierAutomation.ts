@@ -43,7 +43,23 @@ export interface SupplierAutomationRun {
 export interface SupplierAutomationRunDetail {
   providers?: SupplierAutomationProviderRunDetail[]
   rate_guard?: SupplierRateGuardResult
+  account_rate_guard?: SupplierAccountRateGuardResult
   cleanup?: SupplierAutomationCleanupRunDetail
+}
+
+export type SupplierAccountRateGuardRunMode = 'preview' | 'execute'
+
+export interface SupplierAccountRateGuardResult {
+  mode: SupplierAccountRateGuardRunMode
+  checked_providers: number
+  rate_sync_success_providers: number
+  rate_sync_failed_providers: number
+  checked_accounts: number
+  risk_groups: number
+  unbound_groups: number
+  disabled_accounts: number
+  skipped: number
+  failed: number
 }
 
 export interface SupplierRateGuardResult {
@@ -157,6 +173,49 @@ export interface SupplierRateGuardChangeLogListResult {
   page_size: number
 }
 
+export interface SupplierAccountRateGuardUnbindLog {
+  id: number
+  run_id: number
+  provider_id: number
+  provider_name: string
+  supplier_provider_account_id: number
+  upstream_account_key: string
+  upstream_account_name: string
+  local_account_id: number
+  local_account_name: string
+  local_group_id: number
+  local_group_name: string
+  raw_upstream_rate: number
+  rate_scale: number
+  effective_upstream_rate: number
+  local_group_rate: number
+  mode: SupplierAccountRateGuardRunMode
+  result: 'planned' | 'unbound' | 'failed' | 'skipped'
+  before_bound: boolean
+  after_bound: boolean
+  before_schedulable?: boolean
+  after_schedulable?: boolean
+  error_message: string
+  created_at: string
+}
+
+export interface SupplierAccountRateGuardUnbindLogListParams {
+  run_id?: number
+  provider_id?: number
+  local_account_id?: number
+  search?: string
+  result?: string
+  page?: number
+  page_size?: number
+}
+
+export interface SupplierAccountRateGuardUnbindLogListResult {
+  items: SupplierAccountRateGuardUnbindLog[]
+  total: number
+  page: number
+  page_size: number
+}
+
 export async function listTasks(): Promise<SupplierAutomationTask[]> {
   const { data } = await apiClient.get<SupplierAutomationTask[]>(
     '/admin/supplier-management/automation/tasks'
@@ -172,9 +231,13 @@ export async function updateTask(taskCode: string, payload: SupplierAutomationTa
   return data
 }
 
-export async function runTask(taskCode: string): Promise<SupplierAutomationRun> {
+export async function runTask(
+  taskCode: string,
+  mode: SupplierAccountRateGuardRunMode = 'execute'
+): Promise<SupplierAutomationRun> {
   const { data } = await apiClient.post<SupplierAutomationRun>(
-    `/admin/supplier-management/automation/tasks/${taskCode}/run`
+    `/admin/supplier-management/automation/tasks/${taskCode}/run`,
+    { mode }
   )
   return data
 }
@@ -204,6 +267,16 @@ export async function markRateGuardChangeLogHandled(id: number): Promise<Supplie
   return data
 }
 
+export async function listAccountRateGuardUnbindLogs(
+  params: SupplierAccountRateGuardUnbindLogListParams = {}
+): Promise<SupplierAccountRateGuardUnbindLogListResult> {
+  const { data } = await apiClient.get<SupplierAccountRateGuardUnbindLogListResult>(
+    '/admin/supplier-management/automation/account-rate-guard-unbind-logs',
+    { params }
+  )
+  return data
+}
+
 export const supplierAutomationAPI = {
   listTasks,
   updateTask,
@@ -211,6 +284,7 @@ export const supplierAutomationAPI = {
   listRuns,
   listRateGuardChangeLogs,
   markRateGuardChangeLogHandled,
+  listAccountRateGuardUnbindLogs,
 }
 
 export default supplierAutomationAPI

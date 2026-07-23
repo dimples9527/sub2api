@@ -92,7 +92,18 @@
                   <button class="sp-button small ghost" type="button" :disabled="savingCode === task.task_code" @click.stop="openEdit(task)">
                     {{ savingCode === task.task_code ? '保存中' : '编辑' }}
                   </button>
-                  <button class="sp-button small primary sp-task-primary" type="button" :disabled="runningCode === task.task_code" @click.stop="runNow(task.task_code)">
+                  <template v-if="task.task_code === 'supplier_account_rate_guard'">
+                    <button class="sp-button small ghost sp-preview-action" type="button" :disabled="runningCode === task.task_code" @click.stop="runPreview(task.task_code)">
+                      {{ runningCode === task.task_code && runningMode === 'preview' ? '检测中' : '检测预览' }}
+                    </button>
+                    <button class="sp-button small primary sp-task-primary" type="button" :disabled="runningCode === task.task_code" @click.stop="openAccountRateGuardExecute(task)">
+                      {{ runningCode === task.task_code && runningMode === 'execute' ? '执行中' : '立即执行' }}
+                    </button>
+                    <button class="sp-link-button sp-unbind-log-action" type="button" @click.stop="openAccountRateGuardLogs">
+                      解除绑定日志
+                    </button>
+                  </template>
+                  <button v-else class="sp-button small primary sp-task-primary" type="button" :disabled="runningCode === task.task_code" @click.stop="runNow(task.task_code)">
                     {{ runningCode === task.task_code ? '运行中' : '立即运行' }}
                   </button>
                 </div>
@@ -215,7 +226,7 @@
               <Input :model-value="editIntervalSeconds" type="number" label="执行间隔（秒）" @update:model-value="editIntervalSeconds = toNumber($event, editIntervalSeconds)" />
               <Input :model-value="editForm.timeout_seconds" type="number" label="超时秒数" @update:model-value="editForm.timeout_seconds = toNumber($event, editForm.timeout_seconds)" />
             </div>
-            <div class="sp-form-note">当前调度器按分钟执行，执行间隔必须不少于 60 秒，并且是 60 秒的整数倍。</div>
+            <div class="sp-form-note">执行间隔最小为 1 秒，可按正整数秒配置。</div>
           </section>
 
           <section v-if="editForm.task_code === 'supplier_rate_guard'" class="sp-form-section sp-policy-section">
@@ -421,6 +432,23 @@
               </section>
             </section>
 
+            <section v-else-if="detailRun.result_detail?.account_rate_guard && accountRateGuardResult" class="sp-rate-guard-detail">
+              <div class="sp-rate-guard-summary sp-account-rate-guard-summary">
+                <div><span>运行模式</span><strong>{{ accountRateGuardModeText(accountRateGuardResult.mode) }}</strong></div>
+                <div><span>检查供应商</span><strong>{{ accountRateGuardResult.checked_providers }}</strong></div>
+                <div><span>同步失败</span><strong>{{ accountRateGuardResult.rate_sync_failed_providers }}</strong></div>
+                <div><span>检查账号</span><strong>{{ accountRateGuardResult.checked_accounts }}</strong></div>
+                <div><span>风险分组</span><strong>{{ accountRateGuardResult.risk_groups }}</strong></div>
+                <div><span>解除绑定</span><strong>{{ accountRateGuardResult.unbound_groups }}</strong></div>
+                <div><span>关闭调度</span><strong>{{ accountRateGuardResult.disabled_accounts }}</strong></div>
+                <div><span>跳过</span><strong>{{ accountRateGuardResult.skipped }}</strong></div>
+                <div><span>失败</span><strong>{{ accountRateGuardResult.failed }}</strong></div>
+              </div>
+              <div class="sp-run-message">
+                {{ accountRateGuardResult.mode === 'preview' ? '预览仅记录计划，不会修改账号分组绑定。' : '实际执行结果已写入独立解除绑定日志。' }}
+              </div>
+            </section>
+
             <section v-else-if="detailRun.result_detail?.providers?.length" class="sp-provider-detail-layout">
               <aside class="sp-provider-index" aria-label="供应商结果">
                 <button
@@ -571,6 +599,100 @@
         </template>
       </BaseDialog>
 
+      <BaseDialog :show="accountRateGuardExecuteVisible" title="确认执行账号倍率守护" width="wide" @close="closeAccountRateGuardExecute">
+        <div class="sp-guard-confirm">
+          <span class="sp-guard-confirm-mark" aria-hidden="true">!</span>
+          <div>
+            <h3>本次操作会修改账号分组绑定</h3>
+            <p>执行前会重新同步账号倍率，并解除所有不合格的账号与分组绑定；账号没有剩余分组时会同时关闭调度。</p>
+            <p class="sp-guard-confirm-note">该任务不会自动恢复绑定。建议先使用“检测预览”核对计划。</p>
+          </div>
+        </div>
+        <template #footer>
+          <button class="sp-button ghost" type="button" :disabled="Boolean(runningCode)" @click="closeAccountRateGuardExecute">取消</button>
+          <button class="sp-button primary" type="button" :disabled="Boolean(runningCode)" @click="executeAccountRateGuard">
+            {{ runningCode ? '执行中' : '确认解除绑定' }}
+          </button>
+        </template>
+      </BaseDialog>
+
+      <BaseDialog :show="accountRateGuardLogsVisible" title="账号倍率守护解除绑定日志" width="extra-wide" @close="closeAccountRateGuardLogs">
+        <div class="sp-change-log-dialog sp-unbind-log-dialog">
+          <header class="sp-change-log-head">
+            <div>
+              <span>Account Rate Guard Audit</span>
+              <h3>账号与分组解绑轨迹</h3>
+              <p>预览计划、实际解绑、跳过和失败记录均独立保留，便于核对每次守护结果。</p>
+            </div>
+            <strong class="sp-status info">共 {{ accountRateGuardLogTotal }} 条</strong>
+          </header>
+
+          <div class="sp-table-region sp-change-log-table-region">
+            <DataTable
+              :columns="accountRateGuardLogColumns"
+              :data="accountRateGuardLogs"
+              :loading="accountRateGuardLogsLoading"
+              row-key="id"
+              :sticky-actions-column="false"
+            >
+              <template #cell-provider_name="{ row: log }">
+                <strong>{{ log.provider_name || `供应商 ${log.provider_id}` }}</strong>
+              </template>
+              <template #cell-upstream_account_name="{ row: log }">
+                <strong>{{ log.upstream_account_name || log.upstream_account_key || '-' }}</strong>
+                <div v-if="log.upstream_account_key" class="sp-sub">{{ log.upstream_account_key }}</div>
+              </template>
+              <template #cell-local_account_name="{ row: log }">
+                <strong>{{ log.local_account_name || '-' }}</strong>
+              </template>
+              <template #cell-local_group_name="{ row: log }">
+                <strong>{{ log.local_group_name || '-' }}</strong>
+              </template>
+              <template #cell-effective_upstream_rate="{ row: log }">{{ formatAccountRate(log.effective_upstream_rate) }}</template>
+              <template #cell-local_group_rate="{ row: log }">{{ formatAccountRate(log.local_group_rate) }}</template>
+              <template #cell-mode="{ row: log }">
+                <span class="sp-status info">{{ accountRateGuardModeText(log.mode) }}</span>
+              </template>
+              <template #cell-result="{ row: log }">
+                <button
+                  v-if="log.error_message"
+                  class="sp-link-button sp-log-result-action"
+                  type="button"
+                  @click="openAccountRateGuardLogError(log)"
+                >
+                  <span class="sp-status" :class="accountRateGuardResultTone(log.result)">{{ accountRateGuardResultText(log.result) }}</span>
+                </button>
+                <span v-else class="sp-status" :class="accountRateGuardResultTone(log.result)">{{ accountRateGuardResultText(log.result) }}</span>
+              </template>
+              <template #cell-created_at="{ row: log }">{{ formatTime(log.created_at) }}</template>
+              <template #empty>暂无账号倍率守护解除绑定日志。</template>
+            </DataTable>
+            <Pagination
+              v-if="accountRateGuardLogTotal > 0"
+              class="sp-change-log-pagination"
+              :page="accountRateGuardLogPage"
+              :total="accountRateGuardLogTotal"
+              :page-size="accountRateGuardLogPageSize"
+              :show-page-size-selector="false"
+              @update:page="changeAccountRateGuardLogPage"
+            />
+          </div>
+        </div>
+        <template #footer>
+          <button class="sp-button primary" type="button" @click="closeAccountRateGuardLogs">关闭</button>
+        </template>
+      </BaseDialog>
+
+      <BaseDialog :show="accountRateGuardLogErrorVisible" title="账号倍率守护错误详情" width="wide" @close="closeAccountRateGuardLogError">
+        <div class="sp-log-error-detail">
+          <span>处理失败或跳过原因</span>
+          <pre>{{ accountRateGuardLogErrorMessage }}</pre>
+        </div>
+        <template #footer>
+          <button class="sp-button primary" type="button" @click="closeAccountRateGuardLogError">关闭</button>
+        </template>
+      </BaseDialog>
+
       <Transition name="sp-fade"><div v-if="toast" class="sp-toast">{{ toast }}</div></Transition>
     </div>
   </SupplierModuleLayout>
@@ -587,6 +709,7 @@ import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import type { Column } from '@/components/common/types'
 import {
+  listAccountRateGuardUnbindLogs,
   listRateGuardChangeLogs,
   listRuns,
   listTasks,
@@ -597,6 +720,7 @@ import {
   type SupplierAutomationRun,
   type SupplierAutomationStageRunDetail,
   type SupplierAutomationTask,
+  type SupplierAccountRateGuardUnbindLog,
   type SupplierRateGuardChangeLog,
 } from '@/api/admin/supplierAutomation'
 
@@ -606,6 +730,7 @@ const lastRefreshedAt = ref('')
 const loading = ref(false)
 const savingCode = ref('')
 const runningCode = ref('')
+const runningMode = ref<'preview' | 'execute'>('execute')
 const editVisible = ref(false)
 const editingTask = ref<SupplierAutomationTask | null>(null)
 const editIntervalSeconds = ref(900)
@@ -629,6 +754,16 @@ const pendingRateGuardChangeLogCount = ref(0)
 const rateGuardChangeLogPage = ref(1)
 const rateGuardChangeLogPageSize = ref(20)
 const handlingRateGuardChangeLogID = ref<number | null>(null)
+const accountRateGuardExecuteVisible = ref(false)
+const pendingExecuteTask = ref<SupplierAutomationTask | null>(null)
+const accountRateGuardLogsVisible = ref(false)
+const accountRateGuardLogsLoading = ref(false)
+const accountRateGuardLogs = ref<SupplierAccountRateGuardUnbindLog[]>([])
+const accountRateGuardLogTotal = ref(0)
+const accountRateGuardLogPage = ref(1)
+const accountRateGuardLogPageSize = ref(20)
+const accountRateGuardLogErrorVisible = ref(false)
+const accountRateGuardLogErrorMessage = ref('')
 let toastTimer: number | undefined
 
 const editForm = reactive<SupplierAutomationTask>({
@@ -669,6 +804,7 @@ const selectedDetailProvider = computed(() => {
 })
 const rateGuardAlertActions = new Set(['invalid', 'stale', 'failed'])
 const rateGuardResult = computed(() => detailRun.value?.result_detail?.rate_guard || null)
+const accountRateGuardResult = computed(() => detailRun.value?.result_detail?.account_rate_guard || null)
 const rateGuardAlertItems = computed(() => (
   rateGuardResult.value?.items.filter(item => rateGuardAlertActions.has(item.action)) || []
 ))
@@ -678,6 +814,9 @@ const rateGuardRaisedItems = computed(() => (
 const runTotalPages = computed(() => Math.max(1, Math.ceil(runTotal.value / runPageSize.value)))
 const rateGuardChangeLogTotalPages = computed(() => (
   Math.max(1, Math.ceil(rateGuardChangeLogTotal.value / rateGuardChangeLogPageSize.value))
+))
+const accountRateGuardLogTotalPages = computed(() => (
+  Math.max(1, Math.ceil(accountRateGuardLogTotal.value / accountRateGuardLogPageSize.value))
 ))
 const runTaskFilterOptions = computed<SelectOption[]>(() => [
   { value: '', label: '全部任务' },
@@ -697,7 +836,7 @@ const taskColumns: Column[] = [
   { key: 'last_run_at', label: '最近运行', class: 'min-w-[160px]' },
   { key: 'last_status', label: '最近结果', class: 'min-w-[220px]' },
   { key: 'details', label: '详情', class: 'min-w-[90px]' },
-  { key: 'actions', label: '操作', class: 'min-w-[170px]' },
+  { key: 'actions', label: '操作', class: 'min-w-[310px]' },
 ]
 const runColumns: Column[] = [
   { key: 'task_code', label: '任务', class: 'min-w-[140px]' },
@@ -713,6 +852,17 @@ const rateGuardChangeLogColumns: Column[] = [
   { key: 'old_rate', label: '原倍率', class: 'min-w-[90px]' },
   { key: 'new_rate', label: '新倍率', class: 'min-w-[90px]' },
   { key: 'changed_at', label: '修改时间', class: 'min-w-[170px]' },
+]
+const accountRateGuardLogColumns: Column[] = [
+  { key: 'provider_name', label: '供应商', class: 'min-w-[130px]' },
+  { key: 'upstream_account_name', label: '上游账号', class: 'min-w-[180px]' },
+  { key: 'local_account_name', label: '本地账号', class: 'min-w-[150px]' },
+  { key: 'local_group_name', label: '解绑分组', class: 'min-w-[150px]' },
+  { key: 'effective_upstream_rate', label: '有效倍率', class: 'min-w-[90px]' },
+  { key: 'local_group_rate', label: '分组倍率', class: 'min-w-[90px]' },
+  { key: 'mode', label: '模式', class: 'min-w-[80px]' },
+  { key: 'result', label: '处理结果', class: 'min-w-[100px]' },
+  { key: 'created_at', label: '时间', class: 'min-w-[170px]' },
 ]
 const lastRefreshLabel = computed(() => (
   lastRefreshedAt.value ? formatTime(lastRefreshedAt.value) : '尚未刷新'
@@ -846,10 +996,75 @@ async function handleRateGuardChangeLog(changeLog: SupplierRateGuardChangeLog) {
   }
 }
 
+async function loadAccountRateGuardLogs() {
+  const result = await listAccountRateGuardUnbindLogs({
+    page: accountRateGuardLogPage.value,
+    page_size: accountRateGuardLogPageSize.value,
+  })
+  accountRateGuardLogs.value = result.items
+  accountRateGuardLogTotal.value = result.total
+  accountRateGuardLogPage.value = result.page
+  accountRateGuardLogPageSize.value = result.page_size
+}
+
+async function openAccountRateGuardLogs() {
+  accountRateGuardLogPage.value = 1
+  accountRateGuardLogsVisible.value = true
+  accountRateGuardLogsLoading.value = true
+  error.value = ''
+  try {
+    await loadAccountRateGuardLogs()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '加载账号倍率守护解除绑定日志失败'
+  } finally {
+    accountRateGuardLogsLoading.value = false
+  }
+}
+
+function closeAccountRateGuardLogs() {
+  accountRateGuardLogsVisible.value = false
+}
+
+async function changeAccountRateGuardLogPage(page: number) {
+  accountRateGuardLogPage.value = Math.min(Math.max(1, page), accountRateGuardLogTotalPages.value)
+  accountRateGuardLogsLoading.value = true
+  try {
+    await loadAccountRateGuardLogs()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '加载账号倍率守护解除绑定日志失败'
+  } finally {
+    accountRateGuardLogsLoading.value = false
+  }
+}
+
+function openAccountRateGuardLogError(log: SupplierAccountRateGuardUnbindLog) {
+  accountRateGuardLogErrorMessage.value = log.error_message || '暂无错误信息'
+  accountRateGuardLogErrorVisible.value = true
+}
+
+function closeAccountRateGuardLogError() {
+  accountRateGuardLogErrorVisible.value = false
+}
+
+function accountRateGuardModeText(mode: string): string {
+  return mode === 'preview' ? '预览' : '执行'
+}
+
+function accountRateGuardResultText(result: string): string {
+  return ({ planned: '计划解绑', unbound: '已解绑', failed: '失败', skipped: '已跳过' } as Record<string, string>)[result] || result
+}
+
+function accountRateGuardResultTone(result: string): string {
+  if (result === 'unbound') return 'good'
+  if (result === 'planned') return 'info'
+  if (result === 'failed') return 'bad'
+  return 'warn'
+}
+
 function openEdit(task: SupplierAutomationTask) {
   editingTask.value = task
   Object.assign(editForm, JSON.parse(JSON.stringify(task)))
-  editIntervalSeconds.value = cronToIntervalSeconds(task.cron_expression) || 900
+  editIntervalSeconds.value = cronToIntervalSeconds(task.cron_expression) || 300
   editVisible.value = true
 }
 
@@ -861,7 +1076,7 @@ async function saveTask() {
   if (!editingTask.value) return
   const cronExpression = intervalSecondsToCron(editIntervalSeconds.value)
   if (!cronExpression) {
-    error.value = '执行间隔必须不少于 60 秒，并且是 60 秒的整数倍'
+    error.value = '执行间隔必须是正整数秒'
     return
   }
   if (editForm.task_code === 'supplier_rate_guard') {
@@ -890,6 +1105,7 @@ async function saveTask() {
 
 async function runNow(taskCode: string) {
   runningCode.value = taskCode
+  runningMode.value = 'execute'
   try {
     const run = await runTask(taskCode)
     showToast(`任务执行完成：${statusText(run.status)}`)
@@ -897,6 +1113,52 @@ async function runNow(taskCode: string) {
     await loadData()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '运行任务失败'
+  } finally {
+    runningCode.value = ''
+  }
+}
+
+async function runPreview(taskCode: string) {
+  runningCode.value = taskCode
+  runningMode.value = 'preview'
+  try {
+    const run = await runTask(taskCode, 'preview')
+    showToast(`检测预览完成：发现 ${run.result_detail?.account_rate_guard?.risk_groups || 0} 个风险分组`)
+    runPage.value = 1
+    await loadData()
+    openRunDetail(run)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '账号倍率守护检测预览失败'
+  } finally {
+    runningCode.value = ''
+  }
+}
+
+function openAccountRateGuardExecute(task: SupplierAutomationTask) {
+  pendingExecuteTask.value = task
+  accountRateGuardExecuteVisible.value = true
+}
+
+function closeAccountRateGuardExecute() {
+  if (runningCode.value) return
+  accountRateGuardExecuteVisible.value = false
+  pendingExecuteTask.value = null
+}
+
+async function executeAccountRateGuard() {
+  if (!pendingExecuteTask.value) return
+  runningCode.value = pendingExecuteTask.value.task_code
+  runningMode.value = 'execute'
+  try {
+    const run = await runTask(pendingExecuteTask.value.task_code, 'execute')
+    showToast(`账号倍率守护执行完成：解除 ${run.result_detail?.account_rate_guard?.unbound_groups || 0} 个分组绑定`)
+    accountRateGuardExecuteVisible.value = false
+    pendingExecuteTask.value = null
+    runPage.value = 1
+    await loadData()
+    openRunDetail(run)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '执行账号倍率守护失败'
   } finally {
     runningCode.value = ''
   }
@@ -956,6 +1218,19 @@ function formatRunDetail(run: SupplierAutomationRun): string {
     for (const provider of providers) {
       lines.push(...formatProviderRunDetail(provider))
     }
+  } else if (run.result_detail?.account_rate_guard) {
+    const guard = run.result_detail.account_rate_guard
+    lines.push(
+      '',
+      '账号倍率守护明细：',
+      `- 模式：${accountRateGuardModeText(guard.mode)}`,
+      `- 检查供应商：${guard.checked_providers}`,
+      `- 检查账号：${guard.checked_accounts}`,
+      `- 风险分组：${guard.risk_groups}`,
+      `- 解除绑定：${guard.unbound_groups}`,
+      `- 关闭调度：${guard.disabled_accounts}`,
+      `- 跳过 / 失败：${guard.skipped} / ${guard.failed}`
+    )
   } else if (run.result_detail?.cleanup) {
     const cleanup = run.result_detail.cleanup
     lines.push(
@@ -1005,6 +1280,12 @@ function formatStageRunDetail(stage: SupplierAutomationStageRunDetail): string[]
 
 function formatRate(rate: number): string {
   return Number.isFinite(rate) && rate > 0 ? rate.toFixed(4).replace(/\.?0+$/, '') : '-'
+}
+
+function formatAccountRate(rate: number): string {
+  if (!Number.isFinite(rate) || rate < 0) return '-'
+  if (rate === 0) return '0'
+  return rate.toFixed(4).replace(/\.?0+$/, '')
 }
 
 function rateGuardWarningCount(run: SupplierAutomationRun): number {
@@ -1164,6 +1445,9 @@ function formatInterval(cronExpression: string): string {
 }
 
 function cronToIntervalSeconds(cronExpression: string): number | null {
+  const everyMatch = cronExpression.match(/^@every\s+(\d+)s$/)
+  if (everyMatch) return Number(everyMatch[1])
+
   const parts = cronExpression.trim().split(/\s+/)
   if (parts.length !== 5) return null
   const [minute, hour, dayOfMonth, month, dayOfWeek] = parts
@@ -1184,15 +1468,8 @@ function cronToIntervalSeconds(cronExpression: string): number | null {
 }
 
 function intervalSecondsToCron(seconds: number): string | null {
-  if (!Number.isFinite(seconds) || seconds < 60 || seconds % 60 !== 0) return null
-  if (seconds === 86400) return '0 0 * * *'
-  if (seconds % 3600 === 0) {
-    const hours = seconds / 3600
-    if (hours >= 1 && hours < 24) return `0 */${hours} * * *`
-  }
-  const minutes = seconds / 60
-  if (minutes >= 1 && minutes < 60) return `*/${minutes} * * * *`
-  return null
+  if (!Number.isInteger(seconds) || seconds < 1) return null
+  return `@every ${seconds}s`
 }
 
 function showToast(message: string) {
@@ -1510,6 +1787,82 @@ function showToast(message: string) {
   border-top: 1px solid var(--sp-soft);
 }
 
+.sp-unbind-log-dialog .sp-change-log-head {
+  border-left: 3px solid var(--sp-blue);
+}
+
+.sp-log-result-action {
+  padding: 0;
+}
+
+.sp-guard-confirm {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  border: 1px solid color-mix(in srgb, var(--sp-amber) 36%, var(--sp-soft));
+  border-left: 3px solid var(--sp-amber);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--sp-amber) 6%, var(--sp-panel));
+  padding: 18px;
+}
+
+.sp-guard-confirm-mark {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--sp-amber);
+  color: white;
+  font-size: 22px;
+  font-weight: 850;
+}
+
+.sp-guard-confirm h3 {
+  margin: 0;
+  color: var(--sp-text);
+  font-size: 17px;
+}
+
+.sp-guard-confirm p {
+  margin: 8px 0 0;
+  color: var(--sp-muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.sp-guard-confirm .sp-guard-confirm-note {
+  color: var(--sp-amber);
+  font-weight: 700;
+}
+
+.sp-log-error-detail {
+  display: grid;
+  gap: 10px;
+}
+
+.sp-log-error-detail > span {
+  color: var(--sp-muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.sp-log-error-detail pre {
+  max-height: 360px;
+  margin: 0;
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--sp-red) 30%, var(--sp-soft));
+  border-left: 3px solid var(--sp-red);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--sp-red) 5%, var(--sp-panel));
+  padding: 16px;
+  color: var(--sp-text);
+  font: 12px/1.7 ui-monospace, SFMono-Regular, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .sp-history-count::before {
   width: 6px;
   height: 6px;
@@ -1537,11 +1890,24 @@ function showToast(message: string) {
 }
 
 .sp-task-actions {
-  flex-wrap: nowrap;
+  max-width: 300px;
+  flex-wrap: wrap;
 }
 
 .sp-task-primary {
   min-width: 76px;
+}
+
+.sp-preview-action {
+  border-color: color-mix(in srgb, var(--sp-blue) 32%, var(--sp-soft));
+  color: var(--sp-blue);
+}
+
+.sp-unbind-log-action {
+  flex: 1 0 100%;
+  justify-content: flex-start;
+  color: var(--sp-muted);
+  font-size: 11px;
 }
 
 .sp-result-cell {

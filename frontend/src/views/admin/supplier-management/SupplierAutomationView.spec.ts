@@ -21,6 +21,22 @@ const { compileStyle } = testRequire(compilerSfcPath) as {
   }) => { code: string; errors: unknown[] }
 }
 
+describe('SupplierAutomationView second-level intervals', () => {
+  it('stores positive integer seconds as @every descriptors', () => {
+    expect(supplierAutomationSource).toContain('if (!Number.isInteger(seconds) || seconds < 1) return null')
+    expect(supplierAutomationSource).toContain('return `@every ${seconds}s`')
+    expect(supplierAutomationSource).toContain("error.value = '执行间隔必须是正整数秒'")
+    expect(supplierAutomationSource).toContain('执行间隔最小为 1 秒，可按正整数秒配置。')
+  })
+
+  it('reads @every seconds and keeps legacy five-field cron compatibility', () => {
+    expect(supplierAutomationSource).toContain("cronExpression.match(/^@every\\s+(\\d+)s$/)")
+    expect(supplierAutomationSource).toContain('if (everyMatch) return Number(everyMatch[1])')
+    expect(supplierAutomationSource).toContain('if (parts.length !== 5) return null')
+    expect(supplierAutomationSource).toContain('editIntervalSeconds.value = cronToIntervalSeconds(task.cron_expression) || 300')
+  })
+})
+
 describe('SupplierAutomationView edit dialog', () => {
   it('shows the task name and code in each run history row', () => {
     expect(supplierAutomationSource).toContain('<template #cell-task_code="{ row: run }">')
@@ -303,6 +319,29 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain("error.value = '快照最大有效期不能少于 60 秒'")
   })
 
+  it('provides dedicated preview, execute confirmation, and unbind log actions for account rate guard', () => {
+    expect(supplierAutomationSource).toContain("task.task_code === 'supplier_account_rate_guard'")
+    expect(supplierAutomationSource).toContain('检测预览')
+    expect(supplierAutomationSource).toContain('立即执行')
+    expect(supplierAutomationSource).toContain('解除绑定日志')
+    expect(supplierAutomationSource).toContain("await runTask(taskCode, 'preview')")
+    expect(supplierAutomationSource).toContain("await runTask(pendingExecuteTask.value.task_code, 'execute')")
+    expect(supplierAutomationSource).toContain('accountRateGuardExecuteVisible')
+    expect(supplierAutomationSource).toContain('执行前会重新同步账号倍率，并解除所有不合格的账号与分组绑定')
+  })
+
+  it('opens a paginated account rate guard unbind log dialog with error details', () => {
+    expect(supplierAutomationSource).toContain('listAccountRateGuardUnbindLogs')
+    expect(supplierAutomationSource).toContain('accountRateGuardLogsVisible')
+    expect(supplierAutomationSource).toContain('accountRateGuardLogColumns')
+    expect(supplierAutomationSource).toContain('openAccountRateGuardLogError')
+    expect(supplierAutomationSource).toContain('账号倍率守护解除绑定日志')
+    expect(supplierAutomationSource).toContain('@update:page="changeAccountRateGuardLogPage"')
+    expect(supplierAutomationSource).toContain('formatAccountRate(log.effective_upstream_rate)')
+    expect(supplierAutomationSource).toContain("if (rate === 0) return '0'")
+    expect(supplierAutomationSource).toContain('return rate.toFixed(4).replace(/\\.?0+$/, \'\')')
+  })
+
   it('renders rate guard summary counters and item details', () => {
     expect(supplierAutomationSource).toContain('detailRun.result_detail?.rate_guard')
     expect(supplierAutomationSource).toContain('rateGuardResult.checked')
@@ -447,7 +486,7 @@ describe('SupplierAutomationView operations console composition', () => {
     expect(supplierAutomationSource).toMatch(
       /^ {8}<section\b[^>]*class="[^"]*\bsp-history-panel\b[^"]*">\n {10}<header/m
     )
-    expect(supplierAutomationSource.match(/^ {6}<BaseDialog\b/gm)).toHaveLength(3)
+    expect(supplierAutomationSource.match(/^ {6}<BaseDialog\b/gm)).toHaveLength(6)
     expect(supplierAutomationSource).toMatch(/^ {6}<BaseDialog :show="rateGuardChangeLogsVisible"/m)
     expect(supplierAutomationSource).toMatch(/^ {6}<Transition name="sp-fade">/m)
   })
@@ -751,7 +790,7 @@ describe('SupplierAutomationView edit dialog composition', () => {
     )
     expect(saveTaskSource).toContain('if (!cronExpression) {')
     expect(saveTaskSource).toContain(
-      "error.value = '执行间隔必须不少于 60 秒，并且是 60 秒的整数倍'"
+      "error.value = '执行间隔必须是正整数秒'"
     )
     expect(saveTaskSource).toContain("if (editForm.task_code === 'supplier_rate_guard') {")
     expect(saveTaskSource).toContain('if (editForm.config.rate_guard_safety_multiplier <= 0) {')

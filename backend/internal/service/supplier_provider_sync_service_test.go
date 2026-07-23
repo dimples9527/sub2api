@@ -118,6 +118,7 @@ func (r *supplierProviderDataRepoStub) Cleanup(context.Context, SupplierCleanupP
 
 type supplierRemoteClientStub struct {
 	passwords []string
+	accounts  []SupplierProviderRemoteAccount
 
 	accountsErr error
 	groupsErr   error
@@ -132,6 +133,9 @@ func (c *supplierRemoteClientStub) FetchAccounts(_ context.Context, _ *SupplierP
 	c.passwords = append(c.passwords, password)
 	if c.accountsErr != nil {
 		return nil, c.accountsErr
+	}
+	if c.accounts != nil {
+		return c.accounts, nil
 	}
 	return []SupplierProviderRemoteAccount{{Key: "account-1", Name: "Primary", Status: "active"}}, nil
 }
@@ -200,6 +204,70 @@ type supplierDecryptFailureEncryptor struct{}
 func (supplierDecryptFailureEncryptor) Encrypt(value string) (string, error) { return value, nil }
 func (supplierDecryptFailureEncryptor) Decrypt(string) (string, error) {
 	return "", errors.New("cipher: message authentication failed")
+}
+
+type supplierProviderRateDataRepoStub struct {
+	*supplierProviderDataRepoStub
+	knownKeys map[string]bool
+	updates   map[string]float64
+}
+
+func (r *supplierProviderRateDataRepoStub) UpdateAccountRateSnapshot(_ context.Context, _ int64, upstreamKey string, rate float64, _ time.Time) (bool, error) {
+	if !r.knownKeys[upstreamKey] {
+		return false, nil
+	}
+	if r.updates == nil {
+		r.updates = make(map[string]float64)
+	}
+	r.updates[upstreamKey] = rate
+	return true, nil
+}
+
+func TestSupplierProviderSyncServiceSyncAccountRatesOnlyUpdatesKnownValidRates(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID: 42, Name: "供应商甲", ProviderType: SupplierProviderTypeSub2API, Enabled: true, PasswordEncrypted: "secret",
+	}}}
+	dataRepo := &supplierProviderRateDataRepoStub{
+		supplierProviderDataRepoStub: &supplierProviderDataRepoStub{},
+		knownKeys:                    map[string]bool{"known": true, "zero": true},
+	}
+	remote := &supplierRemoteClientStub{accounts: []SupplierProviderRemoteAccount{
+		{Key: "known", Name: "已知账号", RateMultiplier: 1.25},
+		{Key: "missing", Name: "未知账号", RateMultiplier: 2},
+		{Key: "invalid", Name: "无效账号", RateMultiplier: -1},
+		{Key: "zero", Name: "零倍率账号", RateMultiplier: 0},
+	}}
+	service := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	result, err := service.SyncAccountRates(context.Background(), 42, SupplierSyncTriggerManual)
+
+	require.NoError(t, err)
+	require.Equal(t, SupplierSyncStatusPartial, result.Status)
+	require.Equal(t, 4, result.CheckedCount)
+	require.Equal(t, 2, result.UpdatedCount)
+	require.Equal(t, 2, result.SkippedCount)
+	require.ElementsMatch(t, []string{"known", "zero"}, result.UpdatedKeys)
+	require.Equal(t, map[string]float64{"known": 1.25, "zero": 0}, dataRepo.updates)
+	require.Zero(t, dataRepo.accountsCalls)
+}
+
+func TestSupplierProviderSyncServiceSyncAccountRatesDoesNotPersistWhenRemoteFails(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID: 42, ProviderType: SupplierProviderTypeSub2API, Enabled: true, PasswordEncrypted: "secret",
+	}}}
+	dataRepo := &supplierProviderRateDataRepoStub{
+		supplierProviderDataRepoStub: &supplierProviderDataRepoStub{},
+		knownKeys:                    map[string]bool{"known": true},
+	}
+	remote := &supplierRemoteClientStub{accountsErr: errors.New("upstream unavailable")}
+	service := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	result, err := service.SyncAccountRates(context.Background(), 42, SupplierSyncTriggerScheduled)
+
+	require.Error(t, err)
+	require.Equal(t, SupplierSyncStatusFailed, result.Status)
+	require.Empty(t, dataRepo.updates)
+	require.Zero(t, dataRepo.accountsCalls)
 }
 
 func TestSupplierProviderSyncServiceSyncAccountsDecryptsPasswordAndPersists(t *testing.T) {

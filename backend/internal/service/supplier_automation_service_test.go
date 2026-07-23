@@ -75,6 +75,21 @@ type supplierAutomationRateGuardStub struct {
 	err    error
 }
 
+type supplierAutomationAccountRateGuardStub struct {
+	called int
+	runID  int64
+	mode   SupplierAccountRateGuardMode
+	result SupplierAccountRateGuardResult
+	err    error
+}
+
+func (s *supplierAutomationAccountRateGuardStub) Run(_ context.Context, runID int64, mode SupplierAccountRateGuardMode, _ time.Time) (SupplierAccountRateGuardResult, error) {
+	s.called++
+	s.runID = runID
+	s.mode = mode
+	return s.result, s.err
+}
+
 type supplierRateGuardChangeLogDataRepoStub struct {
 	*supplierProviderDataRepoStub
 	listParams SupplierRateGuardChangeLogListParams
@@ -108,6 +123,27 @@ func (s *supplierAutomationSyncStub) SyncAllEnabled(context.Context, string) (Su
 		return s.result, nil
 	}
 	return SupplierProviderBatchSyncResult{ProcessedCount: 2, SuccessCount: 1, FailedCount: 1}, nil
+}
+
+func TestSupplierAutomationCronParserSupportsLegacySecondsAndEvery(t *testing.T) {
+	cases := []string{
+		"*/5 * * * *",
+		"*/5 * * * * *",
+		"@every 1s",
+		"@every 90s",
+		"@every 300s",
+	}
+	for _, expression := range cases {
+		_, err := supplierAutomationCronParser.Parse(expression)
+		require.NoError(t, err, expression)
+	}
+}
+
+func TestSupplierAutomationCronParserRejectsInvalidExpressions(t *testing.T) {
+	for _, expression := range []string{"", "@every 0s", "@every -1s", "not-a-cron"} {
+		_, err := supplierAutomationCronParser.Parse(expression)
+		require.Error(t, err, expression)
+	}
 }
 
 func TestSupplierAutomationServiceListsAndHandlesRateGuardChangeLogs(t *testing.T) {
@@ -174,6 +210,64 @@ func TestSupplierAutomationServiceRunsRateGuardWithStructuredPartialResult(t *te
 	require.NotNil(t, run.ResultDetail)
 	require.NotNil(t, run.ResultDetail.RateGuard)
 	require.Equal(t, 1, run.ResultDetail.RateGuard.Raised)
+}
+
+func TestSupplierAutomationServiceRunsSupplierAccountRateGuardInPreviewMode(t *testing.T) {
+	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
+		SupplierAutomationTaskAccountRateGuard: {
+			TaskCode: SupplierAutomationTaskAccountRateGuard, Name: "供应商账号倍率守护", Enabled: true,
+			CronExpression: "@every 300s", TimeoutSeconds: 600,
+		},
+	}}
+	runner := &supplierAutomationAccountRateGuardStub{result: SupplierAccountRateGuardResult{
+		CheckedAccounts: 3, RiskGroups: 2, Skipped: 1,
+	}}
+	service := NewSupplierAutomationService(repo, &supplierAutomationLockStub{acquired: true}, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
+	service.SetAccountRateGuardService(runner)
+
+	run, err := service.RunWithMode(context.Background(), SupplierAutomationTaskAccountRateGuard, SupplierSyncTriggerManual, SupplierAutomationRunModePreview)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, runner.called)
+	require.Equal(t, run.ID, runner.runID)
+	require.Equal(t, SupplierAccountRateGuardModePreview, runner.mode)
+	require.Equal(t, 3, run.ProcessedCount)
+	require.Equal(t, 3, run.SuccessCount)
+	require.NotNil(t, run.ResultDetail)
+	require.Equal(t, 2, run.ResultDetail.AccountRateGuard.RiskGroups)
+}
+
+func TestSupplierAutomationServiceRejectsPreviewModeForOtherTasks(t *testing.T) {
+	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
+		SupplierAutomationTaskSync: {
+			TaskCode: SupplierAutomationTaskSync, Name: "同步", Enabled: true,
+			CronExpression: "*/15 * * * *", TimeoutSeconds: 600,
+		},
+	}}
+	syncer := &supplierAutomationSyncStub{}
+	service := NewSupplierAutomationService(repo, &supplierAutomationLockStub{acquired: true}, syncer, &supplierProviderDataRepoStub{})
+
+	_, err := service.RunWithMode(context.Background(), SupplierAutomationTaskSync, SupplierSyncTriggerManual, SupplierAutomationRunModePreview)
+
+	require.Error(t, err)
+	require.Zero(t, syncer.called)
+}
+
+func TestSupplierAutomationServiceListsAccountRateGuardUnbindLogs(t *testing.T) {
+	logRepo := &supplierAccountRateGuardRepoStub{listResult: SupplierAccountRateGuardUnbindLogListResult{
+		Items: []SupplierAccountRateGuardUnbindLog{{ID: 21, Result: SupplierAccountRateGuardLogResultFailed}},
+		Total: 1, Page: 2, PageSize: 30,
+	}}
+	service := NewSupplierAutomationService(&supplierAutomationRepoStub{}, &supplierAutomationLockStub{}, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
+	service.SetAccountRateGuardRepository(logRepo)
+	params := SupplierAccountRateGuardUnbindLogListParams{RunID: 8, Result: SupplierAccountRateGuardLogResultFailed, Page: 2, PageSize: 30}
+
+	result, err := service.ListAccountRateGuardUnbindLogs(context.Background(), params)
+
+	require.NoError(t, err)
+	require.Equal(t, params, logRepo.listParams)
+	require.Equal(t, int64(1), result.Total)
+	require.Equal(t, int64(21), result.Items[0].ID)
 }
 
 func TestSupplierAutomationServiceValidatesRateGuardConfig(t *testing.T) {

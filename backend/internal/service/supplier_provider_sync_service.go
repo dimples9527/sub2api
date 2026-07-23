@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -177,6 +178,23 @@ type SupplierProviderDataRepository interface {
 	Cleanup(ctx context.Context, policy SupplierCleanupPolicy, now time.Time, batchSize int) (SupplierCleanupCounts, error)
 }
 
+// SupplierProviderRateSnapshotRepository 只负责更新上游账号倍率快照，避免守护任务覆盖完整同步字段。
+type SupplierProviderRateSnapshotRepository interface {
+	UpdateAccountRateSnapshot(ctx context.Context, providerID int64, upstreamKey string, rate float64, syncedAt time.Time) (bool, error)
+}
+
+type SupplierProviderRateSyncResult struct {
+	ProviderID   int64     `json:"provider_id"`
+	ProviderName string    `json:"provider_name"`
+	CheckedCount int       `json:"checked_count"`
+	UpdatedCount int       `json:"updated_count"`
+	SkippedCount int       `json:"skipped_count"`
+	Status       string    `json:"status"`
+	Message      string    `json:"message"`
+	UpdatedKeys  []string  `json:"updated_keys,omitempty"`
+	SyncedAt     time.Time `json:"synced_at"`
+}
+
 type SupplierProviderGroupAutoMatcher interface {
 	AutoMatch(ctx context.Context, providerID int64) (SupplierGroupAutoMatchResult, error)
 }
@@ -302,6 +320,80 @@ func (s *SupplierProviderSyncService) SyncAccounts(ctx context.Context, provider
 		password := s.providerPassword(provider)
 		return s.syncStage(ctx, provider, password, SupplierSyncScopeAccounts, trigger, true)
 	})
+}
+
+// SyncAccountRates 仅刷新已存在上游账号的倍率快照，不修改名称、状态、分组或 active 状态。
+func (s *SupplierProviderSyncService) SyncAccountRates(ctx context.Context, providerID int64, trigger string) (SupplierProviderRateSyncResult, error) {
+	_ = trigger
+	provider, err := s.validSyncProvider(ctx, providerID)
+	if err != nil {
+		return SupplierProviderRateSyncResult{ProviderID: providerID, Status: SupplierSyncStatusFailed, Message: err.Error()}, err
+	}
+	rateRepo, ok := s.dataRepo.(SupplierProviderRateSnapshotRepository)
+	if !ok {
+		err := fmt.Errorf("supplier provider rate snapshot repository is required")
+		return SupplierProviderRateSyncResult{ProviderID: provider.ID, ProviderName: provider.Name, Status: SupplierSyncStatusFailed, Message: err.Error()}, err
+	}
+
+	owner := uuid.NewString()
+	if s.syncLock != nil {
+		acquired, lockErr := s.syncLock.TryAcquireSyncLock(ctx, providerID, owner, 15*time.Minute)
+		if lockErr != nil {
+			err = fmt.Errorf("acquire supplier sync lock: %w", lockErr)
+			return SupplierProviderRateSyncResult{ProviderID: provider.ID, ProviderName: provider.Name, Status: SupplierSyncStatusFailed, Message: err.Error()}, err
+		}
+		if !acquired {
+			return SupplierProviderRateSyncResult{ProviderID: provider.ID, ProviderName: provider.Name, Status: SupplierSyncStatusFailed, Message: ErrSupplierProviderSyncConflict.Error()}, ErrSupplierProviderSyncConflict
+		}
+		defer func() { _ = s.syncLock.ReleaseSyncLock(context.Background(), providerID, owner) }()
+	}
+
+	syncedAt := time.Now()
+	result := SupplierProviderRateSyncResult{
+		ProviderID: provider.ID, ProviderName: provider.Name, Status: SupplierSyncStatusSuccess, SyncedAt: syncedAt,
+		UpdatedKeys: make([]string, 0),
+	}
+	items, err := s.remote.FetchAccounts(ctx, provider, s.providerPassword(provider))
+	if err != nil {
+		result.Status = SupplierSyncStatusFailed
+		result.Message = err.Error()
+		return result, err
+	}
+	result.CheckedCount = len(items)
+	for _, item := range items {
+		key := supplierProviderRemoteAccountKey(item)
+		if key == "" || math.IsNaN(item.RateMultiplier) || math.IsInf(item.RateMultiplier, 0) || item.RateMultiplier < 0 {
+			result.SkippedCount++
+			continue
+		}
+		updated, updateErr := rateRepo.UpdateAccountRateSnapshot(ctx, provider.ID, key, item.RateMultiplier, syncedAt)
+		if updateErr != nil {
+			result.Status = SupplierSyncStatusFailed
+			result.Message = updateErr.Error()
+			return result, updateErr
+		}
+		if !updated {
+			result.SkippedCount++
+			continue
+		}
+		result.UpdatedCount++
+		result.UpdatedKeys = append(result.UpdatedKeys, key)
+	}
+	if result.SkippedCount > 0 {
+		result.Status = SupplierSyncStatusPartial
+		result.Message = fmt.Sprintf("倍率刷新完成，更新 %d 个，跳过 %d 个", result.UpdatedCount, result.SkippedCount)
+	} else {
+		result.Message = fmt.Sprintf("倍率刷新完成，更新 %d 个", result.UpdatedCount)
+	}
+	return result, nil
+}
+
+func supplierProviderRemoteAccountKey(item SupplierProviderRemoteAccount) string {
+	key := strings.TrimSpace(item.Key)
+	if key == "" {
+		key = strings.ToLower(strings.Join(strings.Fields(item.Name), " "))
+	}
+	return key
 }
 
 func (s *SupplierProviderSyncService) SyncGroups(ctx context.Context, providerID int64, trigger string) (SupplierProviderSyncResult, error) {

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"database/sql/driver"
 	"regexp"
 	"strings"
@@ -20,6 +21,39 @@ func newSupplierProviderDataRepoMock(t *testing.T) (*supplierProviderDataReposit
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	return NewSupplierProviderDataRepository(db).(*supplierProviderDataRepository), mock
+}
+
+func TestSupplierProviderDataRepositoryUpdateAccountRateSnapshotOnlyTouchesRateFields(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(regexp.QuoteMeta(`
+UPDATE supplier_provider_accounts
+SET rate_multiplier=$3, rate_sync_status='success', rate_sync_message='',
+    last_rate_sync_at=$4, updated_at=$4
+WHERE provider_id=$1 AND upstream_account_key=$2
+RETURNING id`)).
+		WithArgs(int64(7), "upstream-key", 1.25, now).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(99)))
+
+	updated, err := repo.UpdateAccountRateSnapshot(context.Background(), 7, "upstream-key", 1.25, now)
+
+	require.NoError(t, err)
+	require.True(t, updated)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryUpdateAccountRateSnapshotSkipsUnknownKey(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	mock.ExpectQuery("UPDATE supplier_provider_accounts").
+		WithArgs(int64(7), "missing", 2.0, now).
+		WillReturnError(sql.ErrNoRows)
+
+	updated, err := repo.UpdateAccountRateSnapshot(context.Background(), 7, "missing", 2, now)
+
+	require.NoError(t, err)
+	require.False(t, updated)
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 type supplierProviderNonNilArg struct{}
