@@ -112,4 +112,16 @@ describe('AppSidebar image generation visibility', () => {
 
     expect(wrapper.find('a[href="/image"]').exists()).toBe(true)
   })
+
+  it('uses explicit supplier prefixes for supplier group and account entries', async () => {
+    const wrapper = mountSidebar('admin')
+
+    const supplierMenu = wrapper.findAll('button').find((button) => button.text().includes('供应商管理'))
+    expect(supplierMenu).toBeDefined()
+
+    await supplierMenu!.trigger('click')
+
+    expect(wrapper.text()).toContain('供应商分组管理')
+    expect(wrapper.text()).toContain('供应商账号管理')
+  })
 })
