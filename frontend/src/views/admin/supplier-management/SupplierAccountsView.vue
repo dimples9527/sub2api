@@ -5,7 +5,7 @@
         <div>
           <span class="sp-filter-card-kicker">筛选条件</span>
           <h2>筛选账号</h2>
-          <p>按供应商、平台和账号状态快速定位上游账号。</p>
+          <p>按供应商、平台、本地分组和账号状态快速定位上游账号。</p>
         </div>
         <span class="sp-filter-card-count">{{ total }} 个账号</span>
       </header>
@@ -50,6 +50,20 @@
               v-model="platformFilter"
               class="w-full"
               :options="platformFilterOptions"
+              :searchable="false"
+            />
+          </div>
+          <div
+            ref="groupFilterControl"
+            class="sp-account-filter-control"
+            role="group"
+            aria-labelledby="supplier-account-group-label"
+          >
+            <span id="supplier-account-group-label" class="sr-only">本地分组</span>
+            <Select
+              v-model="groupID"
+              class="w-full"
+              :options="localGroupOptions"
               :searchable="false"
             />
           </div>
@@ -650,6 +664,7 @@ type SupplierBatchTestPlatformSummary = {
 
 type SupplierAccountFilterSnapshot = {
   providerID: number
+  groupID: number
   platform: string
   active?: boolean
   search?: string
@@ -657,6 +672,7 @@ type SupplierAccountFilterSnapshot = {
 }
 
 const providers = ref<SupplierProvider[]>([])
+const localGroups = ref<AdminGroup[]>([])
 const items = ref<SupplierProviderAccount[]>([])
 const selected = ref<SupplierProviderAccount | null>(null)
 const testErrorAccount = ref<SupplierProviderAccount | null>(null)
@@ -695,11 +711,13 @@ const error = ref('')
 const page = ref(1)
 const pageSize = ref(20)
 const providerID = ref(0)
+const groupID = ref(0)
 const platformFilter = ref('')
 const activeFilter = ref('true')
 const search = ref('')
 const searchFilterControl = ref<HTMLElement | null>(null)
 const providerFilterControl = ref<HTMLElement | null>(null)
+const groupFilterControl = ref<HTMLElement | null>(null)
 const platformFilterControl = ref<HTMLElement | null>(null)
 const activeFilterControl = ref<HTMLElement | null>(null)
 let searchTimer: number | undefined
@@ -716,6 +734,15 @@ const cnyFormatter = new Intl.NumberFormat('zh-CN', {
 const providerOptions = computed<SelectOption[]>(() => [
   { value: 0, label: '全部供应商' },
   ...providers.value.map(provider => ({ value: provider.id, label: provider.name })),
+])
+const localGroupOptions = computed<SelectOption[]>(() => [
+  { value: 0, label: '全部本地分组' },
+  ...localGroups.value
+    .filter(group => !platformFilter.value || group.platform === platformFilter.value)
+    .map(group => ({
+      value: group.id,
+      label: `${group.name} #${group.id}`,
+    })),
 ])
 const supplierIDs = computed(() => [...new Set([
   ...providers.value.map(provider => provider.id),
@@ -791,17 +818,21 @@ function buildSupplierFilterSummary(snapshot: Omit<SupplierAccountFilterSnapshot
   const provider = snapshot.providerID
     ? providers.value.find(item => item.id === snapshot.providerID)?.name || `供应商 #${snapshot.providerID}`
     : '全部供应商'
+  const group = snapshot.groupID
+    ? localGroups.value.find(item => item.id === snapshot.groupID)?.name || `本地分组 #${snapshot.groupID}`
+    : '全部本地分组'
   const platform = snapshot.platform ? platformLabel(snapshot.platform) : '全部平台'
   const active = snapshot.active === undefined
     ? '全部状态'
     : activeFilterOptions.find(option => option.value === String(snapshot.active))?.label || '全部状态'
   const keyword = snapshot.search?.trim() || ''
-  return [provider, platform, active, keyword ? `关键词：${keyword}` : '无搜索关键词'].join(' · ')
+  return [provider, group, platform, active, keyword ? `关键词：${keyword}` : '无搜索关键词'].join(' · ')
 }
 
 function createSupplierAccountFilterSnapshot(): SupplierAccountFilterSnapshot {
   const snapshot = {
     providerID: providerID.value || 0,
+    groupID: groupID.value || 0,
     platform: platformFilter.value || '',
     active: activeFilter.value === '' ? undefined : activeFilter.value === 'true',
     search: search.value.trim() || undefined,
@@ -873,7 +904,7 @@ const accountColumns: Column[] = [
 
 onMounted(async () => {
   applyFilterControlLabels()
-  await loadProviders()
+  await Promise.all([loadProviders(), loadLocalGroups()])
   await loadAccounts()
 })
 
@@ -883,7 +914,18 @@ onBeforeUnmount(() => {
   clearBatchTestPollTimer()
 })
 
-watch([providerID, platformFilter, activeFilter], () => {
+watch([providerID, groupID, activeFilter], () => {
+  resetPageAndLoad()
+})
+
+watch(platformFilter, platform => {
+  if (groupID.value && platform) {
+    const selectedGroup = localGroups.value.find(group => group.id === groupID.value)
+    if (selectedGroup?.platform !== platform) {
+      groupID.value = 0
+      return
+    }
+  }
   resetPageAndLoad()
 })
 
@@ -897,12 +939,17 @@ async function loadProviders() {
   providers.value = result.items
 }
 
+async function loadLocalGroups() {
+  localGroups.value = await adminAPI.groups.getAll()
+}
+
 async function loadAccounts() {
   loading.value = true
   error.value = ''
   try {
     const result = await listSupplierAccounts({
       provider_id: providerID.value || undefined,
+      group_id: groupID.value || undefined,
       platform: platformFilter.value || undefined,
       active: activeFilter.value === '' ? undefined : activeFilter.value === 'true',
       search: search.value.trim() || undefined,
@@ -927,6 +974,7 @@ async function loadFilteredTestAccounts(snapshot: SupplierAccountFilterSnapshot)
   while (true) {
     const result = await listSupplierAccounts({
       provider_id: snapshot.providerID || undefined,
+      group_id: snapshot.groupID || undefined,
       platform: snapshot.platform || undefined,
       active: snapshot.active,
       search: snapshot.search,
@@ -1343,6 +1391,7 @@ async function deleteLocalAccount(account: SupplierProviderAccount) {
 function applyFilterControlLabels() {
   setFilterControlLabel(searchFilterControl.value, 'input', 'supplier-account-search-label')
   setFilterControlLabel(providerFilterControl.value, '.select-trigger', 'supplier-account-provider-label')
+  setFilterControlLabel(groupFilterControl.value, '.select-trigger', 'supplier-account-group-label')
   setFilterControlLabel(platformFilterControl.value, '.select-trigger', 'supplier-account-platform-label')
   setFilterControlLabel(activeFilterControl.value, '.select-trigger', 'supplier-account-active-label')
 }
@@ -1625,7 +1674,7 @@ function formatTime(value?: string): string {
   display: grid;
   min-width: 0;
   flex: 1 1 auto;
-  grid-template-columns: minmax(16rem, 1fr) minmax(10rem, 0.36fr) minmax(9rem, 0.3fr) minmax(9rem, 0.3fr);
+  grid-template-columns: minmax(15rem, 1fr) minmax(9rem, 0.34fr) minmax(10rem, 0.38fr) minmax(8rem, 0.28fr) minmax(8rem, 0.28fr);
   gap: 0.625rem;
 }
 

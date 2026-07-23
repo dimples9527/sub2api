@@ -435,6 +435,19 @@ func TestSupplierProviderAccountWhereIncludesMappedGroupPlatform(t *testing.T) {
 	require.Equal(t, []any{int64(42), active, "%primary%", "openai"}, args)
 }
 
+func TestSupplierProviderAccountWhereIncludesLocalGroup(t *testing.T) {
+	where, args := supplierProviderAccountWhere(service.SupplierProviderDataListParams{
+		ProviderID: 42,
+		GroupID:    201,
+	})
+
+	require.Contains(t, where, "a.provider_id = $1")
+	require.Contains(t, where, "mapped_group.provider_id = a.provider_id")
+	require.Contains(t, where, "mapped_group.upstream_group_key = a.group_key")
+	require.Contains(t, where, "mapped_group.local_group_id = $2")
+	require.Equal(t, []any{int64(42), int64(201)}, args)
+}
+
 func TestSupplierProviderGroupListWhereAddsMatchStatusFilters(t *testing.T) {
 	tests := []struct {
 		name      string

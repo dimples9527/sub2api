@@ -130,6 +130,7 @@ func (h *SupplierProviderSyncHandler) ListAccounts(c *gin.Context) {
 	}
 	result, err := h.dataRepo.ListAccounts(c.Request.Context(), service.SupplierProviderDataListParams{
 		ProviderID: parseOptionalInt64(c.Query("provider_id")),
+		GroupID:    parseOptionalInt64(c.Query("group_id")),
 		Active:     parseSupplierProviderEnabled(c.Query("active")),
 		Search:     strings.TrimSpace(c.Query("search")),
 		Platform:   strings.TrimSpace(c.Query("platform")),

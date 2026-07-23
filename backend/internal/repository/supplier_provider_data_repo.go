@@ -952,6 +952,17 @@ func supplierProviderDataWhere(alias string, params service.SupplierProviderData
 func supplierProviderAccountWhere(params service.SupplierProviderDataListParams) (string, []any) {
 	where, args := supplierProviderDataWhere("a", params)
 	conditions := []string{where}
+	if params.GroupID > 0 {
+		args = append(args, params.GroupID)
+		conditions = append(conditions, fmt.Sprintf(`EXISTS (
+SELECT 1
+FROM supplier_provider_groups mapped_group
+JOIN groups local_group ON local_group.id = mapped_group.local_group_id AND local_group.deleted_at IS NULL
+WHERE mapped_group.provider_id = a.provider_id
+  AND mapped_group.upstream_group_key = a.group_key
+  AND mapped_group.local_group_id = $%d
+)`, len(args)))
+	}
 	if platform := strings.TrimSpace(params.Platform); platform != "" {
 		args = append(args, platform)
 		conditions = append(conditions, fmt.Sprintf(`EXISTS (

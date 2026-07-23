@@ -8,6 +8,7 @@ import SupplierAccountsView from './SupplierAccountsView.vue'
 
 const supplierAccountMocks = vi.hoisted(() => ({
   listProviders: vi.fn(),
+  listGroups: vi.fn(),
   listAccounts: vi.fn(),
   setSchedulable: vi.fn(),
   showError: vi.fn(),
@@ -17,6 +18,9 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       setSchedulable: supplierAccountMocks.setSchedulable,
+    },
+    groups: {
+      getAll: supplierAccountMocks.listGroups,
     },
   },
 }))
@@ -137,12 +141,30 @@ const InputStub = defineComponent({
 
 const SelectStub = defineComponent({
   inheritAttrs: false,
-  setup(_props, { attrs }) {
+  props: {
+    modelValue: {
+      type: [String, Number, Boolean],
+      default: undefined,
+    },
+    options: {
+      type: Array,
+      default: () => [],
+    },
+  },
+  emits: ['update:modelValue'],
+  setup(props, { attrs, emit }) {
     return () => h('button', {
       ...attrs,
       class: ['select-trigger', attrs.class],
       type: 'button',
       'aria-label': 'Select option',
+      'data-option-labels': props.options.map(option => option.label).join('|'),
+      onClick: () => {
+        const nextOption = props.options.find(option => (
+          option.value !== props.modelValue && option.value !== '' && option.value !== 0
+        ))
+        if (nextOption) emit('update:modelValue', nextOption.value)
+      },
     }, '筛选控件')
   },
 })
@@ -291,6 +313,10 @@ describe('supplier local data views component usage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     supplierAccountMocks.listProviders.mockResolvedValue({ items: [] })
+    supplierAccountMocks.listGroups.mockResolvedValue([
+      { id: 201, name: '本地分组 A', platform: 'openai' },
+      { id: 202, name: '本地分组 B', platform: 'anthropic' },
+    ])
     supplierAccountMocks.listAccounts.mockResolvedValue({
       items: testAccounts,
       total: testAccounts.length,
@@ -423,17 +449,19 @@ describe('supplier local data views component usage', () => {
     const wrapper = await mountSupplierAccounts()
     const filterGroups = wrapper.findAll('.sp-account-filter-control[role="group"]')
 
-    expect(filterGroups).toHaveLength(4)
+    expect(filterGroups).toHaveLength(5)
     expect(filterGroups.map(group => group.attributes('aria-labelledby'))).toEqual([
       'supplier-account-search-label',
       'supplier-account-provider-label',
       'supplier-account-platform-label',
+      'supplier-account-group-label',
       'supplier-account-active-label',
     ])
     expect(filterGroups.map(group => group.get('.sr-only').text())).toEqual([
       '账号搜索',
       '供应商',
       '平台',
+      '本地分组',
       '账号状态',
     ])
     expect(filterGroups.map(group => {
@@ -443,8 +471,61 @@ describe('supplier local data views component usage', () => {
       'supplier-account-search-label',
       'supplier-account-provider-label',
       'supplier-account-platform-label',
+      'supplier-account-group-label',
       'supplier-account-active-label',
     ])
+
+    wrapper.unmount()
+  })
+
+  it('loads local groups and sends the selected local group to the paged account query', async () => {
+    const wrapper = await mountSupplierAccounts()
+
+    expect(supplierAccountMocks.listGroups).toHaveBeenCalledTimes(1)
+    expect(supplierAccountMocks.listAccounts).toHaveBeenLastCalledWith(expect.objectContaining({
+      group_id: undefined,
+    }))
+
+    await wrapper.findAll('.select-trigger')[2].trigger('click')
+    await flushPromises()
+
+    expect(supplierAccountMocks.listAccounts).toHaveBeenLastCalledWith(expect.objectContaining({
+      group_id: 201,
+      page: 1,
+    }))
+
+    wrapper.unmount()
+  })
+
+  it('includes the local group in the batch-test query contract', () => {
+    expect(accountsSource).toContain('group_id: snapshot.groupID || undefined')
+  })
+
+  it('filters local-group options by platform and clears an incompatible selection', async () => {
+    const wrapper = await mountSupplierAccounts()
+    const selectTriggers = wrapper.findAll('.select-trigger')
+
+    expect(selectTriggers[2].attributes('data-option-labels')).toContain('本地分组 A #201')
+    expect(selectTriggers[2].attributes('data-option-labels')).toContain('本地分组 B #202')
+
+    await selectTriggers[2].trigger('click')
+    await flushPromises()
+    expect(supplierAccountMocks.listAccounts).toHaveBeenLastCalledWith(expect.objectContaining({
+      group_id: 201,
+    }))
+
+    await selectTriggers[1].trigger('click')
+    await flushPromises()
+
+    expect(wrapper.findAll('.select-trigger')[2].attributes('data-option-labels'))
+      .not.toContain('本地分组 A #201')
+    expect(wrapper.findAll('.select-trigger')[2].attributes('data-option-labels'))
+      .toContain('本地分组 B #202')
+    expect(supplierAccountMocks.listAccounts).toHaveBeenLastCalledWith(expect.objectContaining({
+      platform: 'anthropic',
+      group_id: undefined,
+      page: 1,
+    }))
 
     wrapper.unmount()
   })

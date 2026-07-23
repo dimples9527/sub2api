@@ -121,6 +121,7 @@ export interface SupplierGroupAutoMatchResult {
 
 export interface SupplierProviderDataListParams {
   provider_id?: number
+  group_id?: number
   active?: boolean
   search?: string
   platform?: string

@@ -79,6 +79,7 @@ type SupplierProviderGroup struct {
 
 type SupplierProviderDataListParams struct {
 	ProviderID  int64
+	GroupID     int64
 	Active      *bool
 	Search      string
 	Platform    string
