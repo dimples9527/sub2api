@@ -452,19 +452,20 @@
     >
       <div class="sp-batch-test-dialog">
         <div class="sp-batch-test-summary">
-          <div>
+          <div class="sp-batch-summary-metric accounts">
             <span>待测试本地账号</span>
-            <strong>{{ batchTestTargets.length }}</strong>
+            <div><strong>{{ batchTestTargets.length }}</strong><small>个</small></div>
           </div>
-          <div>
+          <div class="sp-batch-summary-metric platforms">
             <span>涉及平台</span>
-            <strong>{{ batchTestPlatformSummaries.length }}</strong>
+            <div><strong>{{ batchTestPlatformSummaries.length }}</strong><small>个平台</small></div>
           </div>
-          <p>{{ batchTestFilterSummary }}</p>
+          <p><span aria-hidden="true"></span>{{ batchTestFilterSummary }}</p>
         </div>
 
-        <section class="sp-batch-test-section">
+        <section class="sp-batch-test-section model-section">
           <header>
+            <span class="sp-batch-section-index">01</span>
             <div>
               <strong>平台测试模型</strong>
               <span>未选择时由账号测试接口自动使用默认模型。</span>
@@ -476,32 +477,38 @@
               :key="summary.platform"
               class="sp-batch-test-platform-row"
             >
-              <div>
+              <span :class="['sp-batch-test-platform-accent', platformAccentBarClass(summary.platform)]"></span>
+              <div class="sp-batch-test-platform-info">
                 <span :class="['sp-platform-badge', platformBadgeClass(summary.platform)]">
                   {{ batchPlatformLabel(summary.platform) }}
                 </span>
                 <small>{{ summary.count }} 个账号</small>
               </div>
-              <Select
-                v-model="batchTestModelByPlatform[summary.platform]"
-                :options="batchTestModelSelectOptions(summary.platform)"
-                :disabled="batchTestModelLoadingByPlatform[summary.platform]"
-                :searchable="true"
-              />
+              <div class="sp-batch-test-model-select">
+                <span>测试模型</span>
+                <Select
+                  v-model="batchTestModelByPlatform[summary.platform]"
+                  :options="batchTestModelSelectOptions(summary.platform)"
+                  :disabled="batchTestModelLoadingByPlatform[summary.platform]"
+                  :searchable="true"
+                />
+              </div>
             </div>
           </div>
         </section>
 
-        <section class="sp-batch-test-section">
+        <section class="sp-batch-test-section settings-section">
           <header>
+            <span class="sp-batch-section-index">02</span>
             <div>
               <strong>执行参数</strong>
-              <span>批量任务会在后台执行，可以随时取消。</span>
+              <span>批量任务会在后台执行，可以随时查看进度或取消。</span>
             </div>
           </header>
           <div class="sp-batch-test-settings">
             <label>
               <span>并发数</span>
+              <small>同时测试的账号数量</small>
               <Select
                 v-model="batchTestConcurrency"
                 :options="batchTestConcurrencyOptions"
@@ -510,6 +517,7 @@
             </label>
             <label>
               <span>单账号超时</span>
+              <small>超过时限后记为超时</small>
               <Select
                 v-model="batchTestTimeoutSeconds"
                 :options="batchTestTimeoutOptions"
@@ -520,10 +528,11 @@
         </section>
       </div>
       <template #footer>
-        <button class="sp-button ghost" type="button" :disabled="batchTesting" @click="closeBatchTestConfigDialog">
+        <button class="sp-button ghost sp-batch-secondary-button" type="button" :disabled="batchTesting" @click="closeBatchTestConfigDialog">
           取消
         </button>
-        <button class="sp-button primary" type="button" :disabled="batchTesting || batchTestTargets.length === 0" @click="startSupplierBatchTest">
+        <button class="sp-button sp-batch-start-button" type="button" :disabled="batchTesting || batchTestTargets.length === 0" @click="startSupplierBatchTest">
+          <span aria-hidden="true">{{ batchTesting ? '◌' : '▶' }}</span>
           {{ batchTesting ? '启动中…' : `开始测试 ${batchTestTargets.length} 个账号` }}
         </button>
       </template>
@@ -535,86 +544,158 @@
       width="full"
       @close="closeBatchTestResultDialog"
     >
-      <div class="sp-batch-result-dialog">
-        <div class="sp-batch-result-head">
-          <div>
-            <span :class="['sp-batch-job-status', batchTestJobStatusTone]">
-              {{ batchTestJobStatusLabel }}
-            </span>
-            <p>{{ batchTestProgressDescription }}</p>
+      <div class="sp-batch-result-dialog batch-test-result-modal">
+        <p class="batch-result-progress-description">
+          {{ batchTestProgressDescription }}
+        </p>
+        <div class="sync-confirm-summary">
+          <div class="sync-result-stat total">
+            <span>总数</span>
+            <strong>{{ batchTestResult?.total || 0 }}</strong>
           </div>
-          <strong>{{ batchTestProgressPercent }}%</strong>
+          <div class="sync-result-stat completed">
+            <span>已完成</span>
+            <strong>{{ batchTestResult?.completed || 0 }}</strong>
+          </div>
+          <div class="sync-result-stat success">
+            <span>成功</span>
+            <strong>{{ batchTestResult?.success || 0 }}</strong>
+          </div>
+          <div class="sync-result-stat failed">
+            <span>失败</span>
+            <strong>{{ batchTestResult?.failed || 0 }}</strong>
+          </div>
         </div>
-        <div class="sp-batch-progress-track" aria-hidden="true">
-          <span :style="{ width: `${batchTestProgressPercent}%` }"></span>
-        </div>
-        <div class="sp-batch-result-stats">
-          <div><span>总数</span><strong>{{ batchTestResult?.total || 0 }}</strong></div>
-          <div><span>已完成</span><strong>{{ batchTestResult?.completed || 0 }}</strong></div>
-          <div class="success"><span>成功</span><strong>{{ batchTestResult?.success || 0 }}</strong></div>
-          <div class="failed"><span>失败</span><strong>{{ batchTestResult?.failed || 0 }}</strong></div>
-        </div>
-        <div class="sp-batch-result-filters" role="group" aria-label="批量测试结果筛选">
-          <button
-            data-test="supplier-batch-result-filter-all"
-            :class="{ active: batchTestResultFilter === 'all' }"
-            type="button"
-            @click="batchTestResultFilter = 'all'"
-          >全部<strong>{{ batchTestResultFilterOptions[0].count }}</strong></button>
-          <button
-            data-test="supplier-batch-result-filter-success"
-            :class="{ active: batchTestResultFilter === 'success' }"
-            type="button"
-            @click="batchTestResultFilter = 'success'"
-          >成功<strong>{{ batchTestResultFilterOptions[1].count }}</strong></button>
-          <button
-            data-test="supplier-batch-result-filter-failed"
-            :class="{ active: batchTestResultFilter === 'failed' }"
-            type="button"
-            @click="batchTestResultFilter = 'failed'"
-          >失败<strong>{{ batchTestResultFilterOptions[2].count }}</strong></button>
-          <span class="sp-batch-result-filter-hint">异常结果优先展示</span>
-        </div>
-        <div v-if="batchTestResult?.error_message" class="sp-alert sp-error-line">
-          {{ batchTestResult.error_message }}
-        </div>
-        <div v-if="filteredBatchTestResultItems.length" class="sp-batch-result-list">
-          <article
-            v-for="item in filteredBatchTestResultItems"
-            :key="item.account_id"
-            :class="['sp-batch-result-item', batchTestItemTone(item.status)]"
-          >
-            <div class="sp-batch-result-item-head">
-              <div>
-                <strong>{{ item.account_name || batchTestTargetName(item.account_id) }}</strong>
-                <span>#{{ item.account_id }}</span>
+        <div class="sync-confirm-body">
+          <section class="sync-confirm-section">
+            <div class="sync-confirm-section-title">
+              <span>测试结果</span>
+              <strong>{{ batchTestResultItems.length }}</strong>
+            </div>
+            <div v-if="batchTestResult?.error_message" class="sp-alert sp-error-line">
+              {{ batchTestResult.error_message }}
+            </div>
+            <div v-if="batchTestResultItems.length" class="batch-result-scroll">
+              <div class="batch-result-toolbar">
+                <div class="batch-result-tabs" aria-label="批量测试结果筛选">
+                  <button
+                    v-for="option in batchTestResultFilterOptions"
+                    :key="option.key"
+                    :data-test="`supplier-batch-result-filter-${option.key}`"
+                    :class="[
+                      'batch-result-tab',
+                      `batch-result-tab-${option.key}`,
+                      { active: batchTestResultFilter === option.key },
+                    ]"
+                    type="button"
+                    @click="batchTestResultFilter = option.key"
+                  >
+                    <span>{{ option.label }}</span>
+                    <strong>{{ option.count }}</strong>
+                  </button>
+                </div>
+                <div class="batch-result-hint">
+                  <span>异常结果优先展示</span>
+                  <span class="batch-result-hint-tag">失败优先</span>
+                </div>
               </div>
-              <span :class="['sp-test-status', batchTestItemTone(item.status)]">
-                {{ batchTestItemStatusLabel(item.status) }}
-              </span>
+              <div v-if="filteredBatchTestResultItems.length" class="batch-result-list">
+                <article
+                  v-for="item in filteredBatchTestResultItems"
+                  :key="item.account_id"
+                  :class="[
+                    'batch-result-card',
+                    batchTestItemTone(item.status),
+                    { 'failed-schedulable': batchTestIsFailedSchedulable(item) },
+                  ]"
+                >
+                  <div class="batch-result-card-head">
+                    <div class="batch-result-account">
+                      <strong>{{ item.account_name || batchTestTargetName(item.account_id) }}</strong>
+                      <span>#{{ item.account_id }}</span>
+                    </div>
+                    <div class="batch-result-card-status">
+                      <span :class="['sp-test-status', batchTestItemTone(item.status)]">
+                        {{ batchTestItemStatusLabel(item.status) }}
+                      </span>
+                      <span v-if="batchTestIsFailedSchedulable(item)" class="batch-result-risk-tag">
+                        失败但仍在调度
+                      </span>
+                    </div>
+                  </div>
+                  <div class="batch-result-grid">
+                    <div class="batch-result-metric">
+                      <span>平台</span>
+                      <strong>
+                        <span
+                          :class="['sp-platform-badge', platformBadgeClass(item.platform || batchTestTargetPlatform(item.account_id))]"
+                        >{{ batchPlatformLabel(item.platform || batchTestTargetPlatform(item.account_id)) }}</span>
+                      </strong>
+                    </div>
+                    <div class="batch-result-metric">
+                      <span>延迟</span>
+                      <strong>{{ item.latency_ms > 0 ? `${item.latency_ms} ms` : '—' }}</strong>
+                    </div>
+                    <div class="batch-result-metric">
+                      <span>账号 ID</span>
+                      <strong>{{ item.account_id }}</strong>
+                    </div>
+                    <div class="batch-result-metric">
+                      <span>是否调度</span>
+                      <strong
+                        :class="[
+                          'batch-result-schedule-status',
+                          batchTestItemSchedulable(item) ? 'enabled' : 'disabled',
+                        ]"
+                      >
+                        {{ batchTestItemSchedulable(item) ? '调度打开' : '调度关闭' }}
+                      </strong>
+                    </div>
+                    <div class="batch-result-metric">
+                      <span>完成时间</span>
+                      <strong>{{ item.finished_at ? formatTime(item.finished_at) : '—' }}</strong>
+                    </div>
+                  </div>
+                  <div v-if="item.error_message" class="batch-result-error">{{ item.error_message }}</div>
+                  <div class="batch-result-card-actions">
+                    <button
+                      type="button"
+                      :class="[
+                        'batch-result-schedule-button',
+                        batchTestItemSchedulable(item) ? 'disable-action' : 'enable-action',
+                      ]"
+                      :disabled="togglingSchedulableID !== null"
+                      :data-test="`supplier-batch-result-schedulable-toggle-${item.account_id}`"
+                      @click="toggleBatchTestItemSchedulable(item)"
+                    >
+                      {{ togglingSchedulableID === item.account_id
+                        ? '处理中…'
+                        : batchTestItemSchedulable(item) ? '关闭调度' : '打开调度' }}
+                    </button>
+                  </div>
+                </article>
+              </div>
+              <div v-else class="batch-result-empty">当前筛选下暂无测试结果</div>
             </div>
-            <div class="sp-batch-result-item-meta">
-              <span
-                :class="['sp-platform-badge', platformBadgeClass(item.platform || batchTestTargetPlatform(item.account_id))]"
-              >{{ batchPlatformLabel(item.platform || batchTestTargetPlatform(item.account_id)) }}</span>
-              <span v-if="item.latency_ms > 0">{{ item.latency_ms }} ms</span>
+            <div v-else class="batch-result-empty">
+              {{ batchTesting ? '测试任务正在排队，请稍候…' : '暂无测试结果' }}
             </div>
-            <p v-if="item.error_message" class="sp-batch-result-error">{{ item.error_message }}</p>
-          </article>
-        </div>
-        <div v-else class="sp-batch-result-empty">
-          {{ batchTestResultItems.length ? '当前筛选下暂无测试结果' : batchTesting ? '测试任务正在排队，请稍候…' : '暂无测试结果' }}
+          </section>
         </div>
       </div>
       <template #footer>
         <button
           v-if="batchTestCanCancel"
-          class="sp-button danger"
+          class="batch-result-button"
           type="button"
           :disabled="batchTestCancelling"
           @click="cancelSupplierBatchTest"
         >{{ batchTestCancelling ? '取消中…' : '取消测试' }}</button>
-        <button class="sp-button ghost" type="button" @click="closeBatchTestResultDialog">关闭</button>
+        <button
+          class="batch-result-button batch-result-button-primary"
+          type="button"
+          @click="closeBatchTestResultDialog"
+        >关闭</button>
       </template>
     </BaseDialog>
 
@@ -718,6 +799,7 @@ import type { Column } from '@/components/common/types'
 import type {
   Account,
   AdminGroup,
+  BatchAccountTestItem,
   BatchAccountTestJob,
   BatchAccountTestStatus,
   ClaudeModel,
@@ -739,6 +821,8 @@ type SupplierBatchTestTarget = {
   accountID: number
   accountName: string
   platform: string
+  schedulable: boolean
+  providerEnabled: boolean
 }
 
 type SupplierBatchTestPlatformSummary = {
@@ -753,6 +837,7 @@ type SupplierAccountFilterSnapshot = {
   platform: string
   active?: boolean
   search?: string
+  quickFilter: AccountQuickFilterKey
   summary: string
 }
 
@@ -764,7 +849,15 @@ type AccountQuickFilterOption = {
   count: number
 }
 
-type SupplierBatchResultFilter = 'all' | 'success' | 'failed'
+type SupplierBatchResultFilter =
+  | 'all'
+  | 'failed'
+  | 'failed_schedulable'
+  | 'failed_unschedulable'
+  | 'success'
+  | 'success_unschedulable'
+  | 'success_upstream_disabled'
+  | 'skipped'
 
 const providers = ref<SupplierProvider[]>([])
 const localGroups = ref<AdminGroup[]>([])
@@ -960,7 +1053,15 @@ function buildSupplierFilterSummary(snapshot: Omit<SupplierAccountFilterSnapshot
     ? '全部状态'
     : activeFilterOptions.find(option => option.value === String(snapshot.active))?.label || '全部状态'
   const keyword = snapshot.search?.trim() || ''
-  return [provider, group, platform, active, keyword ? `关键词：${keyword}` : '无搜索关键词'].join(' · ')
+  const quickFilter = accountQuickFilterOptions.value.find(option => option.key === snapshot.quickFilter)?.label || '全部'
+  return [
+    provider,
+    group,
+    platform,
+    active,
+    `快捷过滤：${quickFilter}`,
+    keyword ? `关键词：${keyword}` : '无搜索关键词',
+  ].join(' · ')
 }
 
 function createSupplierAccountFilterSnapshot(): SupplierAccountFilterSnapshot {
@@ -970,6 +1071,7 @@ function createSupplierAccountFilterSnapshot(): SupplierAccountFilterSnapshot {
     platform: platformFilter.value || '',
     active: activeFilter.value === '' ? undefined : activeFilter.value === 'true',
     search: search.value.trim() || undefined,
+    quickFilter: accountQuickFilter.value,
   }
   return {
     ...snapshot,
@@ -977,65 +1079,57 @@ function createSupplierAccountFilterSnapshot(): SupplierAccountFilterSnapshot {
   }
 }
 
-const batchTestResultItems = computed(() => (batchTestResult.value?.results || [])
+const batchTestResultItems = computed<BatchAccountTestItem[]>(() => (batchTestResult.value?.results || [])
   .map((item, index) => ({ item, index }))
   .sort((left, right) => {
-    const priorityDifference = batchTestResultPriority(left.item.status) - batchTestResultPriority(right.item.status)
+    const priorityDifference = batchTestResultPriority(left.item) - batchTestResultPriority(right.item)
     return priorityDifference || left.index - right.index
   })
   .map(entry => entry.item))
 
-const batchTestResultFilterOptions = computed(() => [
-  { key: 'all' as const, label: '全部', count: batchTestResultItems.value.length },
-  {
-    key: 'success' as const,
-    label: '成功',
-    count: batchTestResultItems.value.filter(item => item.status === 'success').length,
-  },
-  {
-    key: 'failed' as const,
-    label: '失败',
-    count: batchTestResultItems.value.filter(item => isBatchTestFailureStatus(item.status)).length,
-  },
-])
-
-const filteredBatchTestResultItems = computed(() => {
-  if (batchTestResultFilter.value === 'all') return batchTestResultItems.value
-  if (batchTestResultFilter.value === 'success') {
-    return batchTestResultItems.value.filter(item => item.status === 'success')
+const batchTestResultCounts = computed(() => {
+  const resultItems = batchTestResultItems.value
+  return {
+    all: resultItems.length,
+    failed: resultItems.filter(batchTestIsFailed).length,
+    failedSchedulable: resultItems.filter(batchTestIsFailedSchedulable).length,
+    failedUnschedulable: resultItems.filter(batchTestIsFailedUnschedulable).length,
+    success: resultItems.filter(item => item.status === 'success').length,
+    successUnschedulable: resultItems.filter(batchTestIsSuccessUnschedulable).length,
+    successUpstreamDisabled: resultItems.filter(batchTestIsSuccessUpstreamDisabled).length,
+    skipped: resultItems.filter(batchTestIsSkipped).length,
   }
-  return batchTestResultItems.value.filter(item => isBatchTestFailureStatus(item.status))
+})
+
+const batchTestResultFilterOptions = computed(() => {
+  const counts = batchTestResultCounts.value
+  return [
+    { key: 'all' as const, label: '全部', count: counts.all },
+    { key: 'failed' as const, label: '失败', count: counts.failed },
+    { key: 'failed_schedulable' as const, label: '失败且调度打开', count: counts.failedSchedulable },
+    { key: 'failed_unschedulable' as const, label: '失败且调度关闭', count: counts.failedUnschedulable },
+    { key: 'success' as const, label: '成功', count: counts.success },
+    { key: 'success_unschedulable' as const, label: '成功且调度关闭', count: counts.successUnschedulable },
+    { key: 'success_upstream_disabled' as const, label: '成功且上游禁用', count: counts.successUpstreamDisabled },
+    { key: 'skipped' as const, label: '跳过', count: counts.skipped },
+  ]
+})
+
+const filteredBatchTestResultItems = computed<BatchAccountTestItem[]>(() => {
+  const resultItems = batchTestResultItems.value
+  if (batchTestResultFilter.value === 'failed') return resultItems.filter(batchTestIsFailed)
+  if (batchTestResultFilter.value === 'failed_schedulable') return resultItems.filter(batchTestIsFailedSchedulable)
+  if (batchTestResultFilter.value === 'failed_unschedulable') return resultItems.filter(batchTestIsFailedUnschedulable)
+  if (batchTestResultFilter.value === 'success') return resultItems.filter(item => item.status === 'success')
+  if (batchTestResultFilter.value === 'success_unschedulable') return resultItems.filter(batchTestIsSuccessUnschedulable)
+  if (batchTestResultFilter.value === 'success_upstream_disabled') return resultItems.filter(batchTestIsSuccessUpstreamDisabled)
+  if (batchTestResultFilter.value === 'skipped') return resultItems.filter(batchTestIsSkipped)
+  return resultItems
 })
 
 const batchTestCanCancel = computed(() => {
   const status = batchTestResult.value?.status
   return status === 'queued' || status === 'running'
-})
-
-const batchTestProgressPercent = computed(() => {
-  const job = batchTestResult.value
-  if (!job || job.total <= 0) return 0
-  return Math.min(100, Math.round((job.completed / job.total) * 100))
-})
-
-const batchTestJobStatusLabel = computed(() => {
-  switch (batchTestResult.value?.status) {
-    case 'queued': return '排队中'
-    case 'running': return '测试中'
-    case 'cancelling': return '取消中'
-    case 'completed': return '已完成'
-    case 'cancelled': return '已取消'
-    case 'failed': return '任务失败'
-    default: return '准备中'
-  }
-})
-
-const batchTestJobStatusTone = computed(() => {
-  const status = batchTestResult.value?.status
-  if (status === 'completed') return batchTestResult.value?.failed ? 'warning' : 'success'
-  if (status === 'failed') return 'failed'
-  if (status === 'cancelled') return 'neutral'
-  return 'testing'
 })
 
 const batchTestProgressDescription = computed(() => {
@@ -1184,7 +1278,7 @@ async function loadFilteredTestAccounts(snapshot: SupplierAccountFilterSnapshot)
     nextPage += 1
   }
 
-  return filteredAccounts
+  return filteredAccounts.filter(account => accountMatchesQuickFilter(account, snapshot.quickFilter))
 }
 
 function handleSupplierBatchTestButton() {
@@ -1209,6 +1303,8 @@ async function openSupplierBatchTestDialog(snapshot: SupplierAccountFilterSnapsh
         accountID: localAccountID,
         accountName: account.local_account_name || account.name || `账号 #${localAccountID}`,
         platform: account.platform?.trim().toLowerCase() || 'unknown',
+        schedulable: account.local_account_schedulable === true,
+        providerEnabled: providers.value.find(provider => provider.id === account.provider_id)?.enabled !== false,
       })
     }
 
@@ -1415,14 +1511,45 @@ function batchTestItemStatusLabel(status: BatchAccountTestStatus): string {
   return '已取消'
 }
 
-function isBatchTestFailureStatus(status: BatchAccountTestStatus): boolean {
-  return status === 'failed' || status === 'timeout' || status === 'not_found'
+function batchTestIsSkipped(item: BatchAccountTestItem): boolean {
+  return item.status === 'cancelled'
 }
 
-function batchTestResultPriority(status: BatchAccountTestStatus): number {
-  if (isBatchTestFailureStatus(status)) return 0
-  if (status === 'cancelled') return 1
-  return 2
+function batchTestIsFailed(item: BatchAccountTestItem): boolean {
+  return item.status !== 'success' && !batchTestIsSkipped(item)
+}
+
+function batchTestItemSchedulable(item: BatchAccountTestItem): boolean {
+  if (typeof item.schedulable === 'boolean') return item.schedulable
+  return batchTestTargets.value.find(target => target.accountID === item.account_id)?.schedulable === true
+}
+
+function batchTestIsProviderDisabled(item: BatchAccountTestItem): boolean {
+  return batchTestTargets.value.find(target => target.accountID === item.account_id)?.providerEnabled === false
+}
+
+function batchTestIsFailedSchedulable(item: BatchAccountTestItem): boolean {
+  return batchTestIsFailed(item) && batchTestItemSchedulable(item)
+}
+
+function batchTestIsFailedUnschedulable(item: BatchAccountTestItem): boolean {
+  return batchTestIsFailed(item) && !batchTestItemSchedulable(item)
+}
+
+function batchTestIsSuccessUnschedulable(item: BatchAccountTestItem): boolean {
+  return item.status === 'success' && !batchTestItemSchedulable(item) && !batchTestIsProviderDisabled(item)
+}
+
+function batchTestIsSuccessUpstreamDisabled(item: BatchAccountTestItem): boolean {
+  return item.status === 'success' && batchTestIsProviderDisabled(item)
+}
+
+
+function batchTestResultPriority(item: BatchAccountTestItem): number {
+  if (batchTestIsFailedSchedulable(item)) return 0
+  if (batchTestIsFailed(item)) return 1
+  if (batchTestIsSkipped(item)) return 2
+  return 3
 }
 
 function batchTestItemTone(status: BatchAccountTestStatus): string {
@@ -1438,6 +1565,41 @@ function batchTestTargetName(accountID: number): string {
 
 function batchTestTargetPlatform(accountID: number): string {
   return batchTestTargets.value.find(target => target.accountID === accountID)?.platform || 'unknown'
+}
+
+async function toggleBatchTestItemSchedulable(item: BatchAccountTestItem) {
+  const accountID = item.account_id
+  if (!Number.isInteger(accountID) || accountID <= 0 || togglingSchedulableID.value !== null) return
+
+  const nextSchedulable = !batchTestItemSchedulable(item)
+  togglingSchedulableID.value = accountID
+  try {
+    const updated = await adminAPI.accounts.setSchedulable(accountID, nextSchedulable)
+    const schedulable = updated?.schedulable ?? nextSchedulable
+    if (batchTestResult.value) {
+      batchTestResult.value = {
+        ...batchTestResult.value,
+        results: batchTestResult.value.results.map(resultItem => resultItem.account_id === accountID
+          ? { ...resultItem, schedulable }
+          : resultItem),
+      }
+    }
+    batchTestTargets.value = batchTestTargets.value.map(target => target.accountID === accountID
+      ? { ...target, schedulable }
+      : target)
+    accountSourceItems.value = accountSourceItems.value.map(account => account.local_account_id === accountID
+      ? { ...account, local_account_schedulable: schedulable }
+      : account)
+    applyAccountQuickFilterPage()
+    if (selected.value?.local_account_id === accountID) {
+      selected.value = { ...selected.value, local_account_schedulable: schedulable }
+    }
+    appStore.showSuccess(schedulable ? '账号调度已打开' : '账号调度已关闭')
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '修改账号调度状态失败'))
+  } finally {
+    togglingSchedulableID.value = null
+  }
 }
 
 function resetPageAndLoad() {
@@ -1951,8 +2113,7 @@ function formatTime(value?: string): string {
   gap: 0.4rem;
 }
 
-.sp-account-quick-filter,
-.sp-batch-result-filters button {
+.sp-account-quick-filter {
   display: inline-flex;
   min-height: 2rem;
   align-items: center;
@@ -1969,15 +2130,13 @@ function formatTime(value?: string): string {
   transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease, transform 150ms ease;
 }
 
-.sp-account-quick-filter:hover,
-.sp-batch-result-filters button:hover {
+.sp-account-quick-filter:hover {
   border-color: color-mix(in srgb, var(--sp-cyan) 42%, var(--sp-line));
   color: var(--sp-text);
   transform: translateY(-1px);
 }
 
-.sp-account-quick-filter strong,
-.sp-batch-result-filters button strong {
+.sp-account-quick-filter strong {
   min-width: 1.25rem;
   border-radius: 999px;
   padding: 0.05rem 0.28rem;
@@ -2545,67 +2704,229 @@ button.sp-test-status.failed:hover {
   background: transparent;
 }
 
+:global(.modal-content:has(.sp-batch-test-dialog)),
+:global(.modal-content:has(.sp-batch-result-dialog)) {
+  --sp-panel: #ffffff;
+  --sp-panel-2: #f8fafc;
+  --sp-panel-3: #eef2f7;
+  --sp-line: #d7e0ea;
+  --sp-soft: #e8eef5;
+  --sp-text: #172033;
+  --sp-muted: #607089;
+  --sp-dim: #8a99ad;
+  --sp-cyan: #0284c7;
+  --sp-green: #16835d;
+  --sp-amber: #c56a0a;
+  --sp-orange: #ea580c;
+  --sp-red: #d14343;
+  --sp-blue: #2563eb;
+  --sp-violet: #7c3aed;
+  --sp-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  border-color: #cbd7e5;
+  background: var(--sp-panel);
+  color: var(--sp-text);
+}
+
+:global(.dark .modal-content:has(.sp-batch-test-dialog)),
+:global(.dark .modal-content:has(.sp-batch-result-dialog)) {
+  --sp-panel: #172033;
+  --sp-panel-2: #1d293d;
+  --sp-panel-3: #243249;
+  --sp-line: #35445c;
+  --sp-soft: #2c3a51;
+  --sp-text: #edf3fb;
+  --sp-muted: #a8b6ca;
+  --sp-dim: #75849a;
+  --sp-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  border-color: #3b4b64;
+}
+
 .sp-batch-test-dialog,
 .sp-batch-result-dialog {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.875rem;
+  overflow: hidden;
+  border-radius: 1rem;
+  padding: 0.9rem;
+}
+
+.sp-batch-test-dialog {
+  border: 1px solid color-mix(in srgb, var(--sp-cyan) 18%, var(--sp-line));
+  background:
+    radial-gradient(circle at 8% 0%, color-mix(in srgb, var(--sp-blue) 11%, transparent), transparent 34%),
+    radial-gradient(circle at 94% 8%, color-mix(in srgb, var(--sp-green) 11%, transparent), transparent 32%),
+    color-mix(in srgb, var(--sp-cyan) 5%, var(--sp-panel));
+}
+
+.sp-batch-result-dialog {
+  border: 1px solid color-mix(in srgb, var(--sp-blue) 18%, var(--sp-line));
+  background:
+    radial-gradient(circle at 5% 0%, color-mix(in srgb, var(--sp-blue) 10%, transparent), transparent 30%),
+    radial-gradient(circle at 95% 4%, color-mix(in srgb, var(--sp-green) 10%, transparent), transparent 30%),
+    radial-gradient(circle at 70% 100%, color-mix(in srgb, var(--sp-amber) 6%, transparent), transparent 32%),
+    color-mix(in srgb, var(--sp-blue) 4%, var(--sp-panel));
 }
 
 .sp-batch-test-summary {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--sp-cyan) 18%, var(--sp-line));
+  border-radius: 0.85rem;
+  padding: 0.875rem;
+  background:
+    radial-gradient(circle at 92% 12%, color-mix(in srgb, var(--sp-green) 9%, transparent), transparent 34%),
+    color-mix(in srgb, var(--sp-cyan) 4%, var(--sp-panel));
 }
 
-.sp-batch-test-summary > div,
-.sp-batch-result-stats > div {
+.sp-batch-summary-metric {
+  position: relative;
   display: flex;
+  min-height: 4.25rem;
   align-items: center;
   justify-content: space-between;
+  overflow: hidden;
   border: 1px solid var(--sp-line);
-  border-radius: 0.65rem;
-  padding: 0.75rem 0.875rem;
-  background: var(--sp-panel-2);
+  border-radius: 0.7rem;
+  padding: 0.75rem 0.875rem 0.75rem 1rem;
+  background: color-mix(in srgb, var(--sp-panel-2) 92%, transparent);
+  box-shadow: 0 0.55rem 1.25rem color-mix(in srgb, #0f172a 5%, transparent);
 }
 
-.sp-batch-test-summary span,
-.sp-batch-result-stats span {
+.sp-batch-summary-metric.accounts {
+  border-color: color-mix(in srgb, var(--sp-cyan) 28%, var(--sp-line));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--sp-cyan) 13%, var(--sp-panel)), var(--sp-panel));
+}
+
+.sp-batch-summary-metric.platforms {
+  border-color: color-mix(in srgb, var(--sp-amber) 30%, var(--sp-line));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--sp-amber) 13%, var(--sp-panel)), var(--sp-panel));
+}
+
+.sp-batch-summary-metric::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0.25rem;
+  content: '';
+}
+
+.sp-batch-summary-metric.accounts::before {
+  background: linear-gradient(180deg, var(--sp-cyan), #2563eb);
+}
+
+.sp-batch-summary-metric.platforms::before {
+  background: linear-gradient(180deg, var(--sp-amber), #ea580c);
+}
+
+.sp-batch-summary-metric > span {
   color: var(--sp-muted);
   font-size: 0.75rem;
-  font-weight: 700;
+  font-weight: 800;
+  letter-spacing: 0.02em;
 }
 
-.sp-batch-test-summary strong,
-.sp-batch-result-stats strong {
+.sp-batch-summary-metric > div {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+}
+
+.sp-batch-summary-metric strong {
   color: var(--sp-text);
-  font-size: 1rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 1.65rem;
+  line-height: 1;
+}
+
+.sp-batch-summary-metric.accounts strong {
+  color: var(--sp-cyan);
+}
+
+.sp-batch-summary-metric.platforms strong {
+  color: var(--sp-amber);
+}
+
+.sp-batch-summary-metric small {
+  color: var(--sp-muted);
+  font-size: 0.7rem;
 }
 
 .sp-batch-test-summary p {
+  display: flex;
   grid-column: 1 / -1;
+  align-items: flex-start;
+  gap: 0.5rem;
   margin: 0;
+  border-top: 1px solid color-mix(in srgb, var(--sp-line) 80%, transparent);
+  padding: 0.75rem 0.2rem 0;
   color: var(--sp-muted);
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.sp-batch-test-summary p > span {
+  width: 0.45rem;
+  height: 0.45rem;
+  flex: 0 0 auto;
+  margin-top: 0.35rem;
+  border-radius: 999px;
+  background: var(--sp-cyan);
+  box-shadow: 0 0 0 0.2rem color-mix(in srgb, var(--sp-cyan) 12%, transparent);
 }
 
 .sp-batch-test-section {
   overflow: hidden;
-  border: 1px solid var(--sp-line);
-  border-radius: 0.75rem;
-  background: var(--sp-panel);
+  border: 1px solid color-mix(in srgb, var(--sp-cyan) 16%, var(--sp-line));
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, var(--sp-panel) 96%, transparent);
+  box-shadow: 0 0.7rem 1.8rem color-mix(in srgb, #0f172a 6%, transparent);
+}
+
+.sp-batch-test-section.settings-section {
+  border-color: color-mix(in srgb, var(--sp-amber) 20%, var(--sp-line));
 }
 
 .sp-batch-test-section > header {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
   padding: 0.75rem 0.875rem;
   border-bottom: 1px solid var(--sp-line);
-  background: color-mix(in srgb, var(--sp-cyan) 5%, var(--sp-panel));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--sp-cyan) 15%, var(--sp-panel)), color-mix(in srgb, var(--sp-blue) 7%, var(--sp-panel)) 58%, var(--sp-panel));
+}
+
+.sp-batch-test-section.settings-section > header {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--sp-amber) 16%, var(--sp-panel)), color-mix(in srgb, var(--sp-amber) 6%, var(--sp-panel)) 62%, var(--sp-panel));
+}
+
+.sp-batch-section-index {
+  display: inline-flex;
+  width: 1.8rem;
+  height: 1.8rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--sp-cyan) 24%, var(--sp-line));
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--sp-cyan) 9%, var(--sp-panel));
+  color: var(--sp-cyan);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.7rem;
+  font-weight: 900;
+}
+
+.settings-section .sp-batch-section-index {
+  border-color: color-mix(in srgb, var(--sp-amber) 26%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-amber) 9%, var(--sp-panel));
+  color: var(--sp-amber);
 }
 
 .sp-batch-test-section > header div {
   display: flex;
+  min-width: 0;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.16rem;
 }
 
 .sp-batch-test-section > header strong {
@@ -2613,12 +2934,11 @@ button.sp-test-status.failed:hover {
   font-size: 0.875rem;
 }
 
-.sp-batch-test-section > header span,
+.sp-batch-test-section > header span:not(.sp-batch-section-index),
 .sp-batch-test-platform-row small,
-.sp-batch-result-item-meta,
 .sp-batch-result-empty {
   color: var(--sp-muted);
-  font-size: 0.75rem;
+  font-size: 0.72rem;
 }
 
 .sp-batch-test-platform-list {
@@ -2627,236 +2947,652 @@ button.sp-test-status.failed:hover {
 }
 
 .sp-batch-test-platform-row {
+  position: relative;
   display: grid;
-  grid-template-columns: minmax(10rem, 0.8fr) minmax(15rem, 1.2fr);
+  grid-template-columns: minmax(10rem, 0.75fr) minmax(15rem, 1.25fr);
   align-items: center;
   gap: 1rem;
-  padding: 0.75rem 0.875rem;
+  padding: 0.8rem 0.875rem 0.8rem 1.15rem;
   border-bottom: 1px solid var(--sp-line);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--sp-blue) 5%, var(--sp-panel)), var(--sp-panel));
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.sp-batch-test-platform-row:hover {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--sp-cyan) 10%, var(--sp-panel)), color-mix(in srgb, var(--sp-blue) 4%, var(--sp-panel)));
+  transform: translateY(-1px);
 }
 
 .sp-batch-test-platform-row:last-child {
   border-bottom: 0;
 }
 
-.sp-batch-test-platform-row > div:first-child {
+.sp-batch-test-platform-accent {
+  position: absolute;
+  inset: 0.65rem auto 0.65rem 0;
+  width: 0.22rem;
+  border-radius: 0 999px 999px 0;
+}
+
+.sp-batch-test-platform-info {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 0.6rem;
+}
+
+.sp-batch-test-model-select {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.sp-batch-test-model-select > span {
+  color: var(--sp-muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .sp-batch-test-settings {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.875rem;
+  gap: 0.75rem;
   padding: 0.875rem;
 }
 
 .sp-batch-test-settings label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.18rem 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--sp-amber) 22%, var(--sp-line));
+  border-radius: 0.7rem;
+  padding: 0.75rem;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--sp-amber) 9%, var(--sp-panel)), var(--sp-panel));
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sp-amber) 55%, transparent);
 }
 
 .sp-batch-test-settings label > span {
+  color: var(--sp-text);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.sp-batch-test-settings label > small {
+  grid-column: 1;
   color: var(--sp-muted);
-  font-size: 0.75rem;
-  font-weight: 700;
+  font-size: 0.68rem;
 }
 
-.sp-batch-result-head {
-  display: flex;
+.sp-batch-test-settings label > :last-child {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  min-width: 9.5rem;
+}
+
+.sp-batch-secondary-button {
+  border-color: color-mix(in srgb, var(--sp-muted) 32%, var(--sp-line));
+}
+
+.sp-batch-start-button,
+.sp-batch-close-button {
+  border-color: #059669;
+  background: linear-gradient(135deg, #059669, #0d9488 58%, #0891b2);
+  color: #fff;
+  box-shadow: 0 0.45rem 1rem color-mix(in srgb, var(--sp-green) 24%, transparent);
+}
+
+.sp-batch-start-button {
+  display: inline-flex;
+  min-width: 12.5rem;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.sp-batch-result-head > div {
-  display: flex;
-  flex-direction: column;
+  justify-content: center;
   gap: 0.45rem;
 }
 
-.sp-batch-result-head p {
-  margin: 0;
-  color: var(--sp-muted);
-  font-size: 0.8125rem;
+.sp-batch-start-button:hover,
+.sp-batch-close-button:hover {
+  border-color: #047857;
+  background: linear-gradient(135deg, #047857, #0f766e 58%, #0e7490);
+  color: #fff;
 }
 
-.sp-batch-result-head > strong {
+.sp-batch-start-button:disabled {
+  border-color: color-mix(in srgb, var(--sp-cyan) 18%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-cyan) 12%, var(--sp-panel-2));
+  color: color-mix(in srgb, var(--sp-cyan) 55%, var(--sp-muted));
+  box-shadow: none;
+}
+
+.batch-result-progress-description {
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--sp-blue) 20%, var(--sp-line));
+  border-radius: 0.7rem;
+  padding: 0.75rem 1rem;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--sp-blue) 10%, var(--sp-panel)), color-mix(in srgb, var(--sp-cyan) 6%, var(--sp-panel)));
+  color: var(--sp-muted);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.sync-confirm-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  padding: 0;
+  background: transparent;
+}
+
+.sync-result-stat {
+  display: grid;
+  gap: 0.25rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.7rem;
+  padding: 0.7rem 0.8rem;
+  background: color-mix(in srgb, var(--sp-panel-2) 94%, transparent);
+  box-shadow: 0 0.5rem 1.2rem color-mix(in srgb, #0f172a 5%, transparent);
+}
+
+.sync-result-stat.total {
+  border-color: color-mix(in srgb, var(--sp-blue) 30%, var(--sp-line));
+  background: linear-gradient(145deg, color-mix(in srgb, var(--sp-blue) 13%, var(--sp-panel)), var(--sp-panel));
+}
+
+.sync-result-stat.completed {
+  border-color: color-mix(in srgb, var(--sp-cyan) 30%, var(--sp-line));
+  background: linear-gradient(145deg, color-mix(in srgb, var(--sp-cyan) 13%, var(--sp-panel)), var(--sp-panel));
+}
+
+.sync-result-stat.success {
+  border-color: color-mix(in srgb, var(--sp-green) 30%, var(--sp-line));
+  background: linear-gradient(145deg, color-mix(in srgb, var(--sp-green) 13%, var(--sp-panel)), var(--sp-panel));
+}
+
+.sync-result-stat.failed {
+  border-color: color-mix(in srgb, var(--sp-red) 30%, var(--sp-line));
+  background: linear-gradient(145deg, color-mix(in srgb, var(--sp-red) 12%, var(--sp-panel)), var(--sp-panel));
+}
+
+.sync-result-stat span {
+  color: var(--sp-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.sync-result-stat strong {
   color: var(--sp-text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 1.25rem;
 }
 
-.sp-batch-job-status {
-  display: inline-flex;
-  width: fit-content;
-  border: 1px solid var(--sp-line);
-  border-radius: 999px;
-  padding: 0.22rem 0.55rem;
-  font-size: 0.75rem;
-  font-weight: 800;
+.sync-result-stat.total strong {
+  color: var(--sp-blue);
 }
 
-.sp-batch-job-status.testing {
-  border-color: color-mix(in srgb, #2563eb 28%, var(--sp-line));
-  background: color-mix(in srgb, #2563eb 8%, var(--sp-panel));
-  color: #2563eb;
-}
-
-.sp-batch-job-status.success,
-.sp-batch-result-stats .success strong {
-  color: var(--sp-green);
-}
-
-.sp-batch-job-status.warning,
-.sp-batch-result-stats .failed strong {
-  color: var(--sp-amber);
-}
-
-.sp-batch-job-status.failed {
-  color: var(--sp-red);
-}
-
-.sp-batch-job-status.neutral {
-  color: var(--sp-muted);
-}
-
-.sp-batch-progress-track {
-  overflow: hidden;
-  height: 0.5rem;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--sp-muted) 16%, transparent);
-}
-
-.sp-batch-progress-track span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, var(--sp-cyan), var(--sp-green));
-  transition: width 200ms ease;
-}
-
-.sp-batch-result-stats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.625rem;
-}
-
-.sp-batch-result-filters {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.15rem 0;
-}
-
-.sp-batch-result-filter-hint {
-  margin-left: auto;
-  color: var(--sp-muted);
-  font-size: 0.72rem;
-}
-
-.sp-batch-result-filters button.active {
-  border-color: color-mix(in srgb, var(--sp-cyan) 55%, var(--sp-line));
-  background: color-mix(in srgb, var(--sp-cyan) 10%, var(--sp-panel));
+.sync-result-stat.completed strong {
   color: var(--sp-cyan);
 }
 
-.sp-batch-result-filters button:nth-child(2).active {
-  border-color: color-mix(in srgb, var(--sp-green) 50%, var(--sp-line));
-  background: color-mix(in srgb, var(--sp-green) 9%, var(--sp-panel));
+.sync-result-stat.success strong {
   color: var(--sp-green);
 }
 
-.sp-batch-result-filters button:nth-child(3).active {
-  border-color: color-mix(in srgb, var(--sp-red) 50%, var(--sp-line));
-  background: color-mix(in srgb, var(--sp-red) 8%, var(--sp-panel));
+.sync-result-stat.failed strong {
   color: var(--sp-red);
 }
 
-.sp-batch-result-list {
+.sync-confirm-body {
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.sync-confirm-section {
   display: grid;
-  max-height: min(52vh, 34rem);
-  overflow-y: auto;
-  overflow-x: hidden;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.625rem;
-  padding-right: 0.2rem;
+  min-height: 0;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--sp-blue) 18%, var(--sp-line));
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--sp-panel) 96%, transparent);
+  box-shadow: 0 0.8rem 1.9rem color-mix(in srgb, #0f172a 6%, transparent);
 }
 
-.sp-batch-result-item {
-  border: 1px solid var(--sp-line);
-  border-left-width: 3px;
-  border-radius: 0.65rem;
-  padding: 0.75rem;
-  background: var(--sp-panel-2);
-}
-
-.sp-batch-result-item.success {
-  border-left-color: var(--sp-green);
-  background: color-mix(in srgb, var(--sp-green) 4%, var(--sp-panel-2));
-}
-
-.sp-batch-result-item.failed {
-  border-left-color: var(--sp-red);
-  background: color-mix(in srgb, var(--sp-red) 4%, var(--sp-panel-2));
-}
-
-.sp-batch-result-item.warning {
-  border-left-color: var(--sp-amber);
-  background: color-mix(in srgb, var(--sp-amber) 5%, var(--sp-panel-2));
-}
-
-.sp-batch-result-item.neutral {
-  border-left-color: var(--sp-muted);
-}
-
-.sp-batch-result-item-head,
-.sp-batch-result-item-meta {
+.sync-confirm-section-title {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-}
-
-.sp-batch-result-item-head > div {
-  min-width: 0;
-}
-
-.sp-batch-result-item-head strong {
-  display: block;
-  overflow: hidden;
+  border-bottom: 1px solid color-mix(in srgb, var(--sp-blue) 18%, var(--sp-line));
+  padding: 0.7rem 0.9rem;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--sp-blue) 12%, var(--sp-panel)), color-mix(in srgb, var(--sp-cyan) 6%, var(--sp-panel)) 62%, var(--sp-panel));
   color: var(--sp-text);
-  font-size: 0.8125rem;
-  text-overflow: ellipsis;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.sync-confirm-section-title strong {
+  display: inline-flex;
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--sp-panel-3);
+  color: var(--sp-muted);
+  font-size: 0.7rem;
+}
+
+.batch-result-scroll {
+  display: flex;
+  min-height: 0;
+  max-height: min(58vh, 42rem);
+  flex-direction: column;
+  overflow: auto;
+}
+
+.batch-result-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: grid;
+  gap: 0.5rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--sp-blue) 18%, var(--sp-line));
+  padding: 0.65rem;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--sp-blue) 9%, var(--sp-panel)), color-mix(in srgb, var(--sp-cyan) 5%, var(--sp-panel)));
+  backdrop-filter: blur(10px);
+}
+
+.batch-result-tabs {
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding-bottom: 1px;
+}
+
+.batch-result-tab {
+  display: inline-flex;
+  min-height: 1.9rem;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 999px;
+  padding: 0 0.65rem;
+  background: var(--sp-panel);
+  color: var(--sp-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  white-space: nowrap;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+}
+
+.batch-result-tab:hover {
+  border-color: color-mix(in srgb, var(--sp-blue) 35%, var(--sp-line));
+  background: var(--sp-panel-2);
+  color: var(--sp-text);
+}
+
+.batch-result-tab strong {
+  color: var(--sp-text);
+  font-size: 0.72rem;
+}
+
+.batch-result-tab-all.active {
+  border-color: color-mix(in srgb, var(--sp-blue) 55%, var(--sp-line));
+  background: var(--sp-blue);
+  color: #fff;
+}
+
+.batch-result-tab-success.active,
+.batch-result-tab-success_unschedulable.active {
+  border-color: color-mix(in srgb, var(--sp-green) 55%, var(--sp-line));
+  background: var(--sp-green);
+  color: #fff;
+}
+
+.batch-result-tab-failed.active,
+.batch-result-tab-failed_schedulable.active,
+.batch-result-tab-failed_unschedulable.active {
+  border-color: color-mix(in srgb, var(--sp-red) 55%, var(--sp-line));
+  background: var(--sp-red);
+  color: #fff;
+}
+
+.batch-result-tab-success_upstream_disabled.active {
+  border-color: color-mix(in srgb, #7c3aed 58%, var(--sp-line));
+  background: #7c3aed;
+  color: #fff;
+}
+
+.batch-result-tab-skipped.active {
+  border-color: color-mix(in srgb, var(--sp-muted) 65%, var(--sp-line));
+  background: var(--sp-muted);
+  color: #fff;
+}
+
+.batch-result-tab.active strong {
+  color: inherit;
+}
+
+.batch-result-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: var(--sp-muted);
+  font-size: 0.72rem;
+}
+
+.batch-result-hint-tag {
+  flex: none;
+  border: 1px solid color-mix(in srgb, var(--sp-amber) 35%, var(--sp-line));
+  border-radius: 999px;
+  padding: 0.18rem 0.5rem;
+  background: color-mix(in srgb, var(--sp-amber) 8%, var(--sp-panel));
+  color: var(--sp-amber);
+  font-size: 0.65rem;
+  font-weight: 800;
+}
+
+.batch-result-list {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.65rem;
+}
+
+.batch-result-card {
+  position: relative;
+  display: grid;
+  gap: 0.65rem;
+  overflow: hidden;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.6rem;
+  padding: 0.75rem;
+  background: var(--sp-panel);
+  box-shadow: 0 0.45rem 1.1rem color-mix(in srgb, #0f172a 4%, transparent);
+  transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+.batch-result-card:hover {
+  box-shadow: 0 0.75rem 1.5rem color-mix(in srgb, #0f172a 8%, transparent);
+  transform: translateY(-1px);
+}
+
+.batch-result-card.success {
+  border-color: color-mix(in srgb, var(--sp-green) 28%, var(--sp-line));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--sp-green) 10%, var(--sp-panel)), var(--sp-panel));
+}
+
+.batch-result-card.failed {
+  border-color: color-mix(in srgb, var(--sp-red) 28%, var(--sp-line));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--sp-red) 10%, var(--sp-panel)), var(--sp-panel));
+}
+
+.batch-result-card.failed-schedulable {
+  border-color: color-mix(in srgb, var(--sp-red) 50%, var(--sp-line));
+  box-shadow: 0 0.6rem 1.35rem color-mix(in srgb, var(--sp-red) 10%, transparent);
+}
+
+.batch-result-card.warning {
+  border-color: color-mix(in srgb, var(--sp-amber) 30%, var(--sp-line));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--sp-amber) 11%, var(--sp-panel)), var(--sp-panel));
+}
+
+.batch-result-card.neutral {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--sp-muted) 6%, var(--sp-panel)), var(--sp-panel));
+}
+
+.batch-result-card::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--sp-green);
+  content: '';
+}
+
+.batch-result-card.failed::before {
+  background: var(--sp-red);
+}
+
+.batch-result-card.warning::before {
+  background: var(--sp-amber);
+}
+
+.batch-result-card.neutral::before {
+  background: var(--sp-muted);
+}
+
+.batch-result-card-head {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.batch-result-account {
+  display: grid;
+  min-width: 0;
+  gap: 0.2rem;
+}
+
+.batch-result-account strong {
+  overflow-wrap: anywhere;
+  color: var(--sp-text);
+  font-size: 0.875rem;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.batch-result-account span {
+  color: var(--sp-muted);
+  font-size: 0.72rem;
+}
+
+.batch-result-card-status {
+  display: flex;
+  flex: none;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.batch-result-risk-tag {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--sp-red) 42%, var(--sp-line));
+  border-radius: 999px;
+  padding: 0.16rem 0.48rem;
+  background: color-mix(in srgb, var(--sp-red) 12%, var(--sp-panel));
+  color: var(--sp-red);
+  font-size: 0.64rem;
+  font-weight: 850;
   white-space: nowrap;
 }
 
-.sp-batch-result-item-head > div > span {
+.batch-result-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.batch-result-metric {
+  display: grid;
+  min-width: 0;
+  gap: 0.25rem;
+  border: 1px solid color-mix(in srgb, var(--sp-line) 82%, transparent);
+  border-radius: 0.5rem;
+  padding: 0.55rem;
+  background: color-mix(in srgb, var(--sp-panel-2) 88%, transparent);
+}
+
+.batch-result-card.success .batch-result-metric {
+  border-color: color-mix(in srgb, var(--sp-green) 16%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-green) 6%, var(--sp-panel));
+}
+
+.batch-result-card.failed .batch-result-metric {
+  border-color: color-mix(in srgb, var(--sp-red) 16%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-red) 6%, var(--sp-panel));
+}
+
+.batch-result-card.warning .batch-result-metric {
+  border-color: color-mix(in srgb, var(--sp-amber) 18%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-amber) 7%, var(--sp-panel));
+}
+
+.batch-result-metric > span {
   color: var(--sp-muted);
-  font-size: 0.6875rem;
+  font-size: 0.66rem;
+  font-weight: 800;
 }
 
-.sp-batch-result-item-meta {
-  margin-top: 0.45rem;
-}
-
-.sp-batch-result-error {
-  margin: 0.55rem 0 0;
-  border-radius: 0.45rem;
-  padding: 0.5rem 0.6rem;
-  background: color-mix(in srgb, var(--sp-red) 7%, var(--sp-panel));
-  color: var(--sp-red);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.6875rem;
-  line-height: 1.5;
+.batch-result-metric > strong {
+  min-width: 0;
   overflow-wrap: anywhere;
+  color: var(--sp-text);
+  font-size: 0.76rem;
+  font-weight: 800;
 }
 
-.sp-batch-result-empty {
+.batch-result-schedule-status {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.batch-result-schedule-status::before {
+  width: 0.42rem;
+  height: 0.42rem;
+  flex: none;
+  border-radius: 999px;
+  background: currentColor;
+  content: '';
+}
+
+.batch-result-schedule-status.enabled {
+  color: var(--sp-green);
+}
+
+.batch-result-schedule-status.disabled {
+  color: var(--sp-amber);
+}
+
+.batch-result-error {
+  overflow-wrap: anywhere;
+  border: 1px solid color-mix(in srgb, var(--sp-red) 34%, var(--sp-line));
+  border-radius: 0.5rem;
+  padding: 0.55rem;
+  background: color-mix(in srgb, var(--sp-red) 12%, var(--sp-panel));
+  color: color-mix(in srgb, var(--sp-red) 82%, var(--sp-text));
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.batch-result-empty {
   padding: 2rem 1rem;
+  color: var(--sp-muted);
+  font-size: 0.8rem;
   text-align: center;
+}
+
+.batch-result-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px solid color-mix(in srgb, var(--sp-line) 78%, transparent);
+  padding-top: 0.6rem;
+}
+
+.batch-result-schedule-button {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid;
+  border-radius: 0.5rem;
+  padding: 0 0.7rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease, box-shadow 150ms ease;
+}
+
+.batch-result-schedule-button.enable-action {
+  border-color: color-mix(in srgb, var(--sp-green) 48%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-green) 12%, var(--sp-panel));
+  color: var(--sp-green);
+}
+
+.batch-result-schedule-button.disable-action {
+  border-color: color-mix(in srgb, var(--sp-amber) 48%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-amber) 12%, var(--sp-panel));
+  color: var(--sp-amber);
+}
+
+.batch-result-schedule-button:hover:not(:disabled) {
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.batch-result-schedule-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.batch-result-button {
+  display: inline-flex;
+  min-height: 2.375rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.5rem;
+  padding: 0 0.875rem;
+  background: var(--sp-panel);
+  color: var(--sp-text);
+  font-weight: 600;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease, box-shadow 150ms ease;
+}
+
+.batch-result-button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--sp-green) 45%, var(--sp-line));
+  color: var(--sp-green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sp-green) 8%, transparent);
+}
+
+.batch-result-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.batch-result-button-primary {
+  border-color: #059669;
+  background: #059669;
+  color: #fff;
+}
+
+.batch-result-button-primary:hover:not(:disabled) {
+  border-color: #047857;
+  background: #047857;
+  color: #fff;
+}
+:global(.modal-content:has(.sp-batch-test-dialog) .modal-footer) {
+  border-top-color: color-mix(in srgb, var(--sp-green) 18%, var(--sp-line));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--sp-green) 7%, var(--sp-panel)), color-mix(in srgb, var(--sp-cyan) 4%, var(--sp-panel)));
+}
+
+:global(.modal-content:has(.sp-batch-result-dialog) .modal-footer) {
+  border-top-color: color-mix(in srgb, var(--sp-green) 22%, var(--sp-line));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--sp-green) 9%, var(--sp-panel)), color-mix(in srgb, var(--sp-cyan) 5%, var(--sp-panel)));
+}
+
+:global(.modal-content:has(.sp-batch-test-dialog)) {
+  width: min(1040px, calc(100vw - 32px));
+  max-width: none;
+  overflow-x: hidden;
 }
 
 :global(.modal-content:has(.sp-batch-result-dialog)) {
@@ -2880,7 +3616,21 @@ button.sp-test-status.failed:hover {
 }
 
 @media (max-width: 900px) {
-  .sp-batch-result-list {
+  .sp-batch-test-platform-row {
+    grid-template-columns: 1fr;
+    gap: 0.65rem;
+  }
+
+  .sp-batch-test-model-select {
+    grid-template-columns: minmax(5rem, auto) minmax(0, 1fr);
+  }
+
+  .sync-confirm-summary,
+  .batch-result-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .batch-result-list {
     grid-template-columns: 1fr;
   }
 
@@ -2954,6 +3704,41 @@ button.sp-test-status.failed:hover {
 }
 
 @media (max-width: 520px) {
+  .sp-batch-test-summary,
+  .sp-batch-test-settings {
+    grid-template-columns: 1fr;
+  }
+
+  .sp-batch-test-model-select {
+    grid-template-columns: 1fr;
+  }
+
+  .sp-batch-test-settings label {
+    grid-template-columns: 1fr;
+  }
+
+  .sp-batch-test-settings label > :last-child {
+    grid-column: 1;
+    grid-row: auto;
+    margin-top: 0.35rem;
+  }
+
+  .sync-confirm-summary,
+  .batch-result-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .batch-result-hint {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .sp-batch-start-button,
+  .batch-result-button {
+    width: 100%;
+    min-width: 0;
+  }
+
   .sp-filter-card-head {
     align-items: flex-start;
     flex-direction: column;

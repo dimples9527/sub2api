@@ -12,6 +12,7 @@ const supplierAccountMocks = vi.hoisted(() => ({
   listAccounts: vi.fn(),
   setSchedulable: vi.fn(),
   showError: vi.fn(),
+  showSuccess: vi.fn(),
 }))
 
 vi.mock('@/api/admin', () => ({
@@ -28,6 +29,7 @@ vi.mock('@/api/admin', () => ({
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
     showError: supplierAccountMocks.showError,
+    showSuccess: supplierAccountMocks.showSuccess,
   }),
 }))
 
@@ -862,7 +864,10 @@ describe('supplier local data views component usage', () => {
   it('runs an independently implemented batch test for all filtered matched accounts', () => {
     expect(accountsSource).toContain('测试当前筛选')
     expect(accountsSource).toContain('type SupplierAccountFilterSnapshot = {')
+    expect(accountsSource).toContain('quickFilter: AccountQuickFilterKey')
+    expect(accountsSource).toContain('quickFilter: accountQuickFilter.value')
     expect(accountsSource).toContain('loadFilteredTestAccounts(snapshot: SupplierAccountFilterSnapshot)')
+    expect(accountsSource).toContain('accountMatchesQuickFilter(account, snapshot.quickFilter)')
     expect(accountsSource).toContain('loadFilteredTestAccounts(snapshot)')
     expect(accountsSource).toContain('batchTestFilterSummary.value = snapshot.summary')
     expect(accountsSource).toContain('{{ batchTestFilterSummary }}')
@@ -880,18 +885,152 @@ describe('supplier local data views component usage', () => {
   })
 
   it('uses a wide filtered batch-result view with failure-first ordering and platform colors', () => {
-    expect(accountsSource).toContain("type SupplierBatchResultFilter = 'all' | 'success' | 'failed'")
+    expect(accountsSource).toContain("| 'failed_schedulable'")
+    expect(accountsSource).toContain("| 'failed_unschedulable'")
+    expect(accountsSource).toContain("| 'success_unschedulable'")
+    expect(accountsSource).toContain("| 'success_upstream_disabled'")
+    expect(accountsSource).toContain("| 'skipped'")
     expect(accountsSource).toContain("const batchTestResultFilter = ref<SupplierBatchResultFilter>('all')")
     expect(accountsSource).toContain('const batchTestResultFilterOptions = computed')
     expect(accountsSource).toContain('const filteredBatchTestResultItems = computed')
-    expect(accountsSource).toContain('data-test="supplier-batch-result-filter-all"')
-    expect(accountsSource).toContain('data-test="supplier-batch-result-filter-success"')
-    expect(accountsSource).toContain('data-test="supplier-batch-result-filter-failed"')
+    expect(accountsSource).toContain('function batchTestIsSkipped(item: BatchAccountTestItem)')
+    expect(accountsSource).toContain('function batchTestIsFailedSchedulable(item: BatchAccountTestItem)')
+    expect(accountsSource).toContain('function batchTestIsFailedUnschedulable(item: BatchAccountTestItem)')
+    expect(accountsSource).toContain('function batchTestIsSuccessUnschedulable(item: BatchAccountTestItem)')
+    expect(accountsSource).toContain('function batchTestIsSuccessUpstreamDisabled(item: BatchAccountTestItem)')
+    expect(accountsSource).toContain(':data-test="`supplier-batch-result-filter-${option.key}`"')
+    expect(accountsSource).toContain('`batch-result-tab-${option.key}`')
     expect(accountsSource).toContain('v-for="item in filteredBatchTestResultItems"')
     expect(accountsSource).toContain("['sp-platform-badge', platformBadgeClass(")
     expect(accountsSource).toContain('width="full"')
     expect(accountsSource).toContain(':global(.modal-content:has(.sp-batch-result-dialog))')
     expect(accountsSource).toContain('width: min(1600px, calc(100vw - 32px))')
+  })
+
+  it('shows and switches schedulable state inside supplier batch-test results', () => {
+    expect(accountsSource).toContain('schedulable: boolean')
+    expect(accountsSource).toContain('providerEnabled: boolean')
+    expect(accountsSource).toContain('batchTestItemSchedulable(item)')
+    expect(accountsSource).toContain('失败但仍在调度')
+    expect(accountsSource).toContain(':data-test="`supplier-batch-result-schedulable-toggle-${item.account_id}`"')
+    expect(accountsSource).toContain('@click="toggleBatchTestItemSchedulable(item)"')
+    expect(accountsSource).toContain('async function toggleBatchTestItemSchedulable(item: BatchAccountTestItem)')
+    expect(accountsSource).toContain('adminAPI.accounts.setSchedulable(accountID, nextSchedulable)')
+    expect(accountsSource).toContain('local_account_schedulable: schedulable')
+    expect(accountsSource).toContain('.batch-result-schedule-status')
+    expect(accountsSource).toContain('.batch-result-card-actions')
+    expect(accountsSource).toContain('.batch-result-schedule-button')
+    expect(accountsSource).toContain('.batch-result-risk-tag')
+  })
+
+  it('filters supplier batch results and updates schedulable state after switching', async () => {
+    const wrapper = await mountSupplierAccounts()
+    const view = wrapper.vm as unknown as {
+      showBatchTestResultDialog: boolean
+      batchTestTargets: Array<{
+        accountID: number
+        accountName: string
+        platform: string
+        schedulable: boolean
+        providerEnabled: boolean
+      }>
+      batchTestResult: {
+        job_id: string
+        status: string
+        total: number
+        completed: number
+        success: number
+        failed: number
+        results: Array<Record<string, unknown>>
+      }
+    }
+
+    view.batchTestTargets = [
+      {
+        accountID: 101,
+        accountName: '失败账号',
+        platform: 'openai',
+        schedulable: false,
+        providerEnabled: true,
+      },
+      {
+        accountID: 105,
+        accountName: '禁用供应商成功账号',
+        platform: 'anthropic',
+        schedulable: true,
+        providerEnabled: false,
+      },
+    ]
+    view.batchTestResult = {
+      job_id: 'supplier-batch-test',
+      status: 'completed',
+      total: 2,
+      completed: 2,
+      success: 1,
+      failed: 1,
+      results: [
+        { account_id: 101, status: 'failed', latency_ms: 120, schedulable: false },
+        { account_id: 105, status: 'success', latency_ms: 80, schedulable: true },
+      ],
+    }
+    view.showBatchTestResultDialog = true
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.get('[data-test="supplier-batch-result-filter-failed_unschedulable"]').text())
+      .toContain('失败且调度关闭1')
+    expect(wrapper.get('[data-test="supplier-batch-result-filter-success_upstream_disabled"]').text())
+      .toContain('成功且上游禁用1')
+
+    await wrapper.get('[data-test="supplier-batch-result-filter-failed_unschedulable"]').trigger('click')
+    expect(wrapper.findAll('.batch-result-card')).toHaveLength(1)
+    expect(wrapper.get('.batch-result-schedule-status').text()).toBe('调度关闭')
+
+    await wrapper.get('[data-test="supplier-batch-result-schedulable-toggle-101"]').trigger('click')
+    await flushPromises()
+
+    expect(supplierAccountMocks.setSchedulable).toHaveBeenCalledWith(101, true)
+    expect(supplierAccountMocks.showSuccess).toHaveBeenCalledWith('账号调度已打开')
+    expect(wrapper.get('[data-test="supplier-batch-result-filter-failed_unschedulable"]').text())
+      .toContain('失败且调度关闭0')
+    expect(wrapper.find('.batch-result-card').exists()).toBe(false)
+  })
+  it('matches the upstream batch-test result structure and button hierarchy', () => {
+    expect(accountsSource).toContain('class="sp-batch-summary-metric accounts"')
+    expect(accountsSource).toContain('class="sp-batch-summary-metric platforms"')
+    expect(accountsSource).toContain("['sp-batch-test-platform-accent', platformAccentBarClass(summary.platform)]")
+    expect(accountsSource).toContain('class="sp-button sp-batch-start-button"')
+    expect(accountsSource).toContain('class="sync-confirm-summary"')
+    expect(accountsSource).toContain('class="sync-confirm-body"')
+    expect(accountsSource).toContain('class="sync-confirm-section"')
+    expect(accountsSource).toContain('class="batch-result-toolbar"')
+    expect(accountsSource).toContain('class="batch-result-list"')
+    expect(accountsSource).toContain('batchTestItemTone(item.status),')
+    expect(accountsSource).toContain("{ 'failed-schedulable': batchTestIsFailedSchedulable(item) }")
+    expect(accountsSource).toContain('class="batch-result-button"')
+    expect(accountsSource).toContain('class="batch-result-button batch-result-button-primary"')
+    expect(accountsSource).toContain('.batch-result-button-primary')
+    expect(accountsSource).toContain('background: #059669')
+    expect(accountsSource).toContain('color: #fff')
+  })
+
+  it('uses semantic color layers for both supplier batch-test dialogs', () => {
+    expect(accountsSource).toContain('class="sync-result-stat total"')
+    expect(accountsSource).toContain('class="sync-result-stat completed"')
+    expect(accountsSource).toContain('`batch-result-tab-${option.key}`')
+    expect(accountsSource).toContain(':global(.modal-content:has(.sp-batch-test-dialog)),')
+    expect(accountsSource).toContain(':global(.modal-content:has(.sp-batch-result-dialog)) {')
+    expect(accountsSource).toContain('--sp-panel: #ffffff;')
+    expect(accountsSource).toContain(':global(.dark .modal-content:has(.sp-batch-test-dialog)),')
+    expect(accountsSource).toContain('--sp-panel: #172033;')
+    expect(accountsSource).toContain('.sp-batch-test-dialog {')
+    expect(accountsSource).toContain('.sp-batch-result-dialog {')
+    expect(accountsSource).toContain('.sync-result-stat.total')
+    expect(accountsSource).toContain('.sync-result-stat.completed')
+    expect(accountsSource).toContain('.batch-result-card.success')
+    expect(accountsSource).toContain('.batch-result-card.failed')
+    expect(accountsSource).toContain('.batch-result-tab-failed.active')
+    expect(accountsSource).toContain('color-mix(in srgb, var(--sp-green)')
+    expect(accountsSource).toContain('color-mix(in srgb, var(--sp-red)')
   })
 
   it('declares supplier-account-specific batch-test API functions', () => {
