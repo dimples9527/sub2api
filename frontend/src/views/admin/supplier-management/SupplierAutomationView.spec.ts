@@ -8,6 +8,10 @@ const supplierAutomationSource = readFileSync(
   resolve(dirname(fileURLToPath(import.meta.url)), 'SupplierAutomationView.vue'),
   'utf-8'
 )
+const supplierAutomationAPISource = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), '../../../api/admin/supplierAutomation.ts'),
+  'utf-8'
+)
 const testRequire = createRequire(import.meta.url)
 const compilerSfcPath = testRequire.resolve('@vue/compiler-sfc', {
   paths: [dirname(testRequire.resolve('@vitejs/plugin-vue'))],
@@ -325,6 +329,63 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain("error.value = '快照最大有效期不能少于 60 秒'")
   })
 
+  it('declares supplier account health guard configuration and result types', () => {
+    const configFields = [
+      'account_health_guard_max_accounts_per_run',
+      'account_health_guard_concurrency',
+      'account_health_guard_timeout_per_account_seconds',
+      'account_health_guard_failure_threshold',
+      'account_health_guard_slow_threshold',
+      'account_health_guard_recovery_threshold',
+      'account_health_guard_healthy_latency_ms',
+      'account_health_guard_ignored_account_ids',
+      'account_health_guard_account_models',
+      'account_health_guard_platform_models',
+      'account_health_guard_platform_latency_ms',
+      'account_health_guard_cursor_account_id',
+    ]
+
+    for (const field of configFields) {
+      expect(supplierAutomationAPISource).toContain(field)
+    }
+    expect(supplierAutomationAPISource).toContain('export interface SupplierAccountHealthGuardResult')
+    expect(supplierAutomationAPISource).toContain('export interface SupplierAccountHealthGuardItem')
+    expect(supplierAutomationAPISource).toContain('export interface SupplierAccountHealthGuardSource')
+    expect(supplierAutomationAPISource).toContain('export interface SupplierAccountHealthGuardSkipReason')
+    expect(supplierAutomationAPISource).toContain('account_health_guard?: SupplierAccountHealthGuardResult')
+  })
+
+  it('uses the ordinary immediate run action for account health guard', () => {
+    expect(supplierAutomationSource).toContain("task.task_code === 'supplier_account_rate_guard'")
+    expect(supplierAutomationSource).toContain('v-else class="sp-button small primary sp-task-primary"')
+    expect(supplierAutomationSource).toContain('@click.stop="runNow(task.task_code)"')
+    expect(supplierAutomationSource).not.toContain("runPreview('supplier_account_health_guard')")
+    expect(supplierAutomationSource).not.toContain("openAccountRateGuardExecute('supplier_account_health_guard')")
+  })
+
+  it('renders and validates the account health guard policy form', () => {
+    expect(supplierAutomationSource).toContain("editForm.task_code === 'supplier_account_health_guard'")
+    expect(supplierAutomationSource).toContain('健康守护策略')
+    expect(supplierAutomationSource).toContain('单次检查账号数')
+    expect(supplierAutomationSource).toContain('并发数')
+    expect(supplierAutomationSource).toContain('单账号超时（秒）')
+    expect(supplierAutomationSource).toContain('连续失败暂停阈值')
+    expect(supplierAutomationSource).toContain('连续慢响应暂停阈值')
+    expect(supplierAutomationSource).toContain('连续健康恢复阈值')
+    expect(supplierAutomationSource).toContain('默认健康延迟（毫秒）')
+    expect(supplierAutomationSource).toContain('validateAccountHealthGuardConfig')
+  })
+
+  it('manages ignored matched supplier accounts by local account id', () => {
+    expect(supplierAutomationSource).toContain("import { listSupplierAccounts")
+    expect(supplierAutomationSource).toContain("match_status: 'matched'")
+    expect(supplierAutomationSource).toContain('page_size: 200')
+    expect(supplierAutomationSource).toContain('account_health_guard_ignored_account_ids')
+    expect(supplierAutomationSource).toContain('openHealthGuardIgnoredAccounts')
+    expect(supplierAutomationSource).toContain('healthGuardIgnoredAccountsVisible')
+    expect(supplierAutomationSource).toContain('供应商账号 → 本地账号')
+    expect(supplierAutomationSource).toContain('normalizePositiveAccountIDs')
+  })
   it('provides dedicated preview, execute confirmation, and unbind log actions for account rate guard', () => {
     expect(supplierAutomationSource).toContain("task.task_code === 'supplier_account_rate_guard'")
     expect(supplierAutomationSource).toContain('检测预览')
@@ -336,6 +397,35 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('执行前会重新同步账号倍率，并解除所有不合格的账号与分组绑定')
   })
 
+  it('renders account health guard summaries, filters, and account-level details', () => {
+    expect(supplierAutomationSource).toContain('const accountHealthGuardResult = computed')
+    expect(supplierAutomationSource).toContain('const healthGuardStatusFilter = ref')
+    expect(supplierAutomationSource).toContain("value: 'healthy'")
+    expect(supplierAutomationSource).toContain("value: 'slow'")
+    expect(supplierAutomationSource).toContain("value: 'failed'")
+    expect(supplierAutomationSource).toContain("value: 'skipped'")
+    expect(supplierAutomationSource).toContain('健康守护明细')
+    for (const label of ['健康', '慢响应', '失败', '跳过', '暂停', '恢复']) {
+      expect(supplierAutomationSource).toContain(label)
+    }
+    for (const field of [
+      'item.local_account_name',
+      'item.sources',
+      'item.platform',
+      'item.model_id',
+      'item.latency_ms',
+      'item.consecutive_failed',
+      'item.consecutive_slow',
+      'item.consecutive_healthy',
+      'item.schedulable_before',
+      'item.schedulable_after',
+      'item.action',
+      'item.reason',
+      'item.error_message',
+    ]) {
+      expect(supplierAutomationSource).toContain(field)
+    }
+  })
   it('opens the shared account rate guard log dialog', () => {
     expect(supplierAutomationSource).toContain('SupplierAccountRateGuardLogDialog')
     expect(supplierAutomationSource).toContain('accountRateGuardLogsVisible')
@@ -502,7 +592,7 @@ describe('SupplierAutomationView operations console composition', () => {
     expect(supplierAutomationSource).toMatch(
       /^ {8}<section\b[^>]*class="[^"]*\bsp-history-panel\b[^"]*">\n {10}<header/m
     )
-    expect(supplierAutomationSource.match(/^ {6}<BaseDialog\b/gm)).toHaveLength(3)
+    expect(supplierAutomationSource.match(/^ {6}<BaseDialog\b/gm)).toHaveLength(4)
     expect(supplierAutomationSource).toMatch(/^ {6}<SupplierAccountRateGuardLogDialog\b/m)
     expect(supplierAutomationSource).toMatch(/^ {6}<Transition name="sp-fade">/m)
   })
@@ -726,16 +816,20 @@ describe('SupplierAutomationView edit dialog composition', () => {
     )
   })
 
-  it('uses two independent conditional policy sections without an unconditional fallback', () => {
+  it('uses independent conditional policy sections without an unconditional fallback', () => {
     const policyConditions = [...editDialogSource.matchAll(
-      /<section v-if="editForm\.task_code === '(supplier_rate_guard|supplier_data_cleanup)'" class="sp-form-section sp-policy-section">/g
+      /<section v-if="editForm\.task_code === '(supplier_rate_guard|supplier_account_health_guard|supplier_data_cleanup)'" class="sp-form-section sp-policy-section">/g
     )].map(([, taskCode]) => taskCode)
     const policySectionCount = editDialogSource.match(
       /class="sp-form-section sp-policy-section"/g
     )?.length || 0
 
-    expect(policyConditions).toEqual(['supplier_rate_guard', 'supplier_data_cleanup'])
-    expect(policySectionCount).toBe(2)
+    expect(policyConditions).toEqual([
+      'supplier_rate_guard',
+      'supplier_account_health_guard',
+      'supplier_data_cleanup',
+    ])
+    expect(policySectionCount).toBe(3)
     expect(editDialogSource).not.toMatch(
       /<section(?![^>]*v-if=)[^>]*class="sp-form-section sp-policy-section"/
     )

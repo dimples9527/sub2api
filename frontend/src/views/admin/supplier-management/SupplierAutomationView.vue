@@ -242,6 +242,29 @@
             </div>
           </section>
 
+          <section v-if="editForm.task_code === 'supplier_account_health_guard'" class="sp-form-section sp-policy-section">
+            <div class="sp-form-section-head">
+              <span>03</span>
+              <div><h3>健康守护策略</h3><p>控制每轮检测规模、单账号测试压力以及暂停和恢复调度的连续次数。</p></div>
+            </div>
+            <div class="sp-form-grid sp-health-guard-policy-grid">
+              <Input :model-value="editForm.config.account_health_guard_max_accounts_per_run" type="number" label="单次检查账号数" @update:model-value="editForm.config.account_health_guard_max_accounts_per_run = toNumber($event, editForm.config.account_health_guard_max_accounts_per_run)" />
+              <Input :model-value="editForm.config.account_health_guard_concurrency" type="number" label="并发数" @update:model-value="editForm.config.account_health_guard_concurrency = toNumber($event, editForm.config.account_health_guard_concurrency)" />
+              <Input :model-value="editForm.config.account_health_guard_timeout_per_account_seconds" type="number" label="单账号超时（秒）" @update:model-value="editForm.config.account_health_guard_timeout_per_account_seconds = toNumber($event, editForm.config.account_health_guard_timeout_per_account_seconds)" />
+              <Input :model-value="editForm.config.account_health_guard_failure_threshold" type="number" label="连续失败暂停阈值" @update:model-value="editForm.config.account_health_guard_failure_threshold = toNumber($event, editForm.config.account_health_guard_failure_threshold)" />
+              <Input :model-value="editForm.config.account_health_guard_slow_threshold" type="number" label="连续慢响应暂停阈值" @update:model-value="editForm.config.account_health_guard_slow_threshold = toNumber($event, editForm.config.account_health_guard_slow_threshold)" />
+              <Input :model-value="editForm.config.account_health_guard_recovery_threshold" type="number" label="连续健康恢复阈值" @update:model-value="editForm.config.account_health_guard_recovery_threshold = toNumber($event, editForm.config.account_health_guard_recovery_threshold)" />
+              <Input :model-value="editForm.config.account_health_guard_healthy_latency_ms" type="number" label="默认健康延迟（毫秒）" @update:model-value="editForm.config.account_health_guard_healthy_latency_ms = toNumber($event, editForm.config.account_health_guard_healthy_latency_ms)" />
+            </div>
+            <div class="sp-health-guard-ignore-card">
+              <div>
+                <strong>忽略账号</strong>
+                <span>当前已忽略 {{ healthGuardIgnoredAccountIDs.length }} 个本地账号，检测时按本地账号 ID 排除。</span>
+              </div>
+              <button class="sp-button small ghost" type="button" @click="openHealthGuardIgnoredAccounts">管理忽略账号</button>
+            </div>
+          </section>
+
           <section v-if="editForm.task_code === 'supplier_data_cleanup'" class="sp-form-section sp-policy-section">
             <div class="sp-form-section-head">
               <span>03</span>
@@ -451,6 +474,78 @@
               </div>
             </section>
 
+            <section v-else-if="detailRun.result_detail?.account_health_guard && accountHealthGuardResult" class="sp-rate-guard-detail sp-account-health-guard-detail">
+              <div class="sp-rate-guard-summary sp-account-health-guard-summary">
+                <div><span>候选账号</span><strong>{{ accountHealthGuardResult.total_accounts }}</strong></div>
+                <div><span>检查</span><strong>{{ accountHealthGuardResult.checked_count }}</strong></div>
+                <div><span>健康</span><strong>{{ accountHealthGuardResult.healthy_count }}</strong></div>
+                <div><span>慢响应</span><strong>{{ accountHealthGuardResult.slow_count }}</strong></div>
+                <div><span>失败</span><strong>{{ accountHealthGuardResult.failed_count }}</strong></div>
+                <div><span>跳过</span><strong>{{ accountHealthGuardResult.skipped_count }}</strong></div>
+                <div><span>暂停</span><strong>{{ accountHealthGuardResult.disabled_count }}</strong></div>
+                <div><span>恢复</span><strong>{{ accountHealthGuardResult.recovered_count }}</strong></div>
+                <div><span>无变更</span><strong>{{ accountHealthGuardResult.unchanged_count }}</strong></div>
+              </div>
+
+              <section v-if="accountHealthGuardResult.skip_reasons?.length" class="sp-health-guard-skip-reasons">
+                <div class="sp-rate-guard-section-head">
+                  <div><span>Skip Reasons</span><h4>跳过原因</h4></div>
+                  <strong>{{ accountHealthGuardResult.skipped_count }} 项</strong>
+                </div>
+                <div class="sp-health-guard-reason-list">
+                  <article v-for="reason in accountHealthGuardResult.skip_reasons" :key="reason.reason">
+                    <strong>{{ reason.reason }}</strong>
+                    <span>{{ reason.count }}</span>
+                    <small v-if="reason.sample_accounts?.length">
+                      {{ reason.sample_accounts.map(account => account.local_account_name || account.upstream_account_name || `账号 ${account.local_account_id || account.supplier_provider_account_id}`).join('、') }}
+                    </small>
+                  </article>
+                </div>
+              </section>
+
+              <section class="sp-health-guard-inspections">
+                <div class="sp-rate-guard-section-head sp-health-guard-list-head">
+                  <div><span>Account Results</span><h4>健康守护明细</h4></div>
+                  <div class="sp-health-guard-filter">
+                    <Select v-model="healthGuardStatusFilter" :options="healthGuardStatusFilterOptions" :searchable="false" />
+                    <strong>{{ filteredAccountHealthGuardItems.length }} 项</strong>
+                  </div>
+                </div>
+
+                <div v-if="filteredAccountHealthGuardItems.length" class="sp-health-guard-items">
+                  <article v-for="item in filteredAccountHealthGuardItems" :key="`${item.local_account_id}-${item.started_at}`" class="sp-health-guard-item">
+                    <header>
+                      <div>
+                        <span class="sp-detail-label">本地账号 #{{ item.local_account_id }}</span>
+                        <h4>{{ item.local_account_name || `本地账号 ${item.local_account_id}` }}</h4>
+                      </div>
+                      <span class="sp-status" :class="accountHealthGuardStatusTone(item.status)">{{ accountHealthGuardStatusText(item.status) }}</span>
+                    </header>
+                    <div class="sp-health-guard-item-grid">
+                      <div class="sp-health-guard-sources">
+                        <span>供应商来源</span>
+                        <template v-if="item.sources?.length">
+                          <small v-for="source in item.sources" :key="source.supplier_provider_account_id">
+                            {{ source.provider_name || `供应商 ${source.provider_id}` }} · {{ source.upstream_account_name || source.upstream_account_key }}
+                          </small>
+                        </template>
+                        <small v-else>无来源信息</small>
+                      </div>
+                      <div><span>平台 / 模型</span><strong>{{ item.platform || '-' }}</strong><small>{{ item.model_id || '默认模型' }}</small></div>
+                      <div><span>延迟</span><strong>{{ item.latency_ms }}ms</strong><small>阈值 {{ item.latency_limit_ms }}ms</small></div>
+                      <div><span>连续计数</span><strong>失败 {{ item.consecutive_failed }} / 慢 {{ item.consecutive_slow }}</strong><small>健康 {{ item.consecutive_healthy }}</small></div>
+                      <div><span>调度状态</span><strong>{{ schedulableText(item.schedulable_before) }} → {{ schedulableText(item.schedulable_after) }}</strong><small>{{ accountHealthGuardActionText(item.action) }}</small></div>
+                    </div>
+                    <div v-if="item.reason || item.error_message" class="sp-health-guard-message" :class="{ bad: Boolean(item.error_message) }">
+                      <span v-if="item.reason">原因：{{ item.reason }}</span>
+                      <span v-if="item.error_message">错误：{{ item.error_message }}</span>
+                    </div>
+                  </article>
+                </div>
+                <div v-else class="sp-rate-guard-empty">当前筛选条件下没有账号明细。</div>
+              </section>
+            </section>
+
             <section v-else-if="detailRun.result_detail?.providers?.length" class="sp-provider-detail-layout">
               <aside class="sp-provider-index" aria-label="供应商结果">
                 <button
@@ -540,6 +635,51 @@
         </template>
       </BaseDialog>
 
+      <BaseDialog
+        :show="healthGuardIgnoredAccountsVisible"
+        title="管理健康守护忽略账号"
+        width="wide"
+        :z-index="60"
+        @close="closeHealthGuardIgnoredAccounts"
+      >
+        <div class="sp-health-guard-ignore-dialog">
+          <p>从唯一匹配记录中选择“供应商账号 → 本地账号”，保存时仅记录本地账号 ID。</p>
+          <div class="sp-health-guard-ignore-add">
+            <Select
+              v-model="healthGuardIgnoredAccountToAdd"
+              :options="healthGuardIgnoredAccountOptions"
+              searchable
+              clearable
+              placeholder="选择要忽略的账号映射"
+              empty-text="没有可添加的唯一匹配账号"
+            >
+              <template #option="{ option }">
+                <span class="sp-health-guard-ignore-option"><strong>{{ option.label }}</strong><small>{{ option.meta }}</small></span>
+              </template>
+              <template #selected="{ option }">
+                <span v-if="option" class="sp-health-guard-ignore-option"><strong>{{ option.label }}</strong><small>{{ option.meta }}</small></span>
+                <span v-else>选择要忽略的账号映射</span>
+              </template>
+            </Select>
+            <button class="sp-button primary" type="button" :disabled="!healthGuardIgnoredAccountToAdd" @click="addHealthGuardIgnoredAccount">添加</button>
+          </div>
+          <div v-if="loadingHealthGuardSupplierAccounts" class="sp-rate-guard-empty">正在加载唯一匹配账号...</div>
+          <div v-else-if="healthGuardIgnoredAccountRows.length" class="sp-health-guard-ignore-list">
+            <article v-for="mapping in healthGuardIgnoredAccountRows" :key="mapping.localAccountID">
+              <div>
+                <strong>{{ mapping.sources[0]?.name || '供应商账号记录不可用' }} → {{ mapping.localAccountName }}</strong>
+                <span>{{ mapping.sources.map(source => source.provider_name).filter(Boolean).join('、') || '供应商来源不可用' }} · {{ mapping.platform }} · 本地 #{{ mapping.localAccountID }}</span>
+              </div>
+              <button class="sp-button small ghost" type="button" @click="removeHealthGuardIgnoredAccount(mapping.localAccountID)">移除</button>
+            </article>
+          </div>
+          <div v-else class="sp-rate-guard-empty">当前没有忽略账号。</div>
+        </div>
+        <template #footer>
+          <button class="sp-button primary" type="button" @click="closeHealthGuardIgnoredAccounts">完成</button>
+        </template>
+      </BaseDialog>
+
       <BaseDialog :show="accountRateGuardExecuteVisible" title="确认执行账号倍率守护" width="wide" @close="closeAccountRateGuardExecute">
         <div class="sp-guard-confirm">
           <span class="sp-guard-confirm-mark" aria-hidden="true">!</span>
@@ -578,6 +718,7 @@ import Pagination from '@/components/common/Pagination.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import type { Column } from '@/components/common/types'
+import { listSupplierAccounts, type SupplierProviderAccount } from '@/api/admin/supplierProviderData'
 import {
   listAccountRateGuardUnbindLogs,
   listRuns,
@@ -616,6 +757,11 @@ const accountRateGuardExecuteVisible = ref(false)
 const pendingExecuteTask = ref<SupplierAutomationTask | null>(null)
 const accountRateGuardLogsVisible = ref(false)
 const accountRateGuardPendingCount = ref(0)
+const healthGuardIgnoredAccountsVisible = ref(false)
+const healthGuardIgnoredAccountToAdd = ref('')
+const healthGuardSupplierAccounts = ref<SupplierProviderAccount[]>([])
+const loadingHealthGuardSupplierAccounts = ref(false)
+const healthGuardStatusFilter = ref('all')
 
 let toastTimer: number | undefined
 
@@ -635,6 +781,18 @@ const editForm = reactive<SupplierAutomationTask>({
     daily_stat_retention_days: 365,
     inactive_account_retention_days: 90,
     inactive_group_retention_days: 90,
+    account_health_guard_max_accounts_per_run: 200,
+    account_health_guard_concurrency: 3,
+    account_health_guard_timeout_per_account_seconds: 90,
+    account_health_guard_failure_threshold: 3,
+    account_health_guard_slow_threshold: 3,
+    account_health_guard_recovery_threshold: 2,
+    account_health_guard_healthy_latency_ms: 15000,
+    account_health_guard_ignored_account_ids: [],
+    account_health_guard_account_models: {},
+    account_health_guard_platform_models: {},
+    account_health_guard_platform_latency_ms: {},
+    account_health_guard_cursor_account_id: 0,
   },
   last_status: '',
   last_message: '',
@@ -658,6 +816,12 @@ const selectedDetailProvider = computed(() => {
 const rateGuardAlertActions = new Set(['invalid', 'stale', 'failed'])
 const rateGuardResult = computed(() => detailRun.value?.result_detail?.rate_guard || null)
 const accountRateGuardResult = computed(() => detailRun.value?.result_detail?.account_rate_guard || null)
+const accountHealthGuardResult = computed(() => detailRun.value?.result_detail?.account_health_guard || null)
+const filteredAccountHealthGuardItems = computed(() => {
+  const items = accountHealthGuardResult.value?.items || []
+  if (healthGuardStatusFilter.value === 'all') return items
+  return items.filter(item => item.status === healthGuardStatusFilter.value)
+})
 const rateGuardAlertItems = computed(() => (
   rateGuardResult.value?.items.filter(item => rateGuardAlertActions.has(item.action)) || []
 ))
@@ -676,6 +840,13 @@ const runStatusFilterOptions: SelectOption[] = [
   { value: 'partial', label: '部分成功' },
   { value: 'failed', label: '失败' },
   { value: 'running', label: '运行中' },
+]
+const healthGuardStatusFilterOptions: SelectOption[] = [
+  { value: 'all', label: '全部状态' },
+  { value: 'healthy', label: '健康' },
+  { value: 'slow', label: '慢响应' },
+  { value: 'failed', label: '失败' },
+  { value: 'skipped', label: '跳过' },
 ]
 const taskColumns: Column[] = [
   { key: 'task', label: '任务', class: 'min-w-[210px]' },
@@ -794,6 +965,7 @@ async function loadRuns() {
 function openEdit(task: SupplierAutomationTask) {
   editingTask.value = task
   Object.assign(editForm, JSON.parse(JSON.stringify(task)))
+  applyAccountHealthGuardDefaults()
   editIntervalSeconds.value = cronToIntervalSeconds(task.cron_expression) || 300
   editVisible.value = true
 }
@@ -816,6 +988,13 @@ async function saveTask() {
     }
     if (editForm.config.rate_guard_max_snapshot_age_seconds < 60) {
       error.value = '快照最大有效期不能少于 60 秒'
+      return
+    }
+  }
+  if (editForm.task_code === 'supplier_account_health_guard') {
+    const validationMessage = validateAccountHealthGuardConfig()
+    if (validationMessage) {
+      error.value = validationMessage
       return
     }
   }
@@ -913,6 +1092,7 @@ function openTaskLatestResult(task: SupplierAutomationTask) {
 
 function openRunDetail(run: SupplierAutomationRun) {
   detailRun.value = run
+  healthGuardStatusFilter.value = 'all'
   selectInitialDetailProvider(run)
   detailTitle.value = `${run.task_code} 运行详情：${statusText(run.status)}`
   detailMessage.value = formatRunDetail(run)
@@ -933,6 +1113,36 @@ function selectDetailProvider(providerID: number) {
 
 function accountRateGuardModeText(mode: string): string {
   return mode === 'preview' ? '预览' : '执行'
+}
+
+function accountHealthGuardStatusText(status: string): string {
+  const labels: Record<string, string> = {
+    healthy: '健康',
+    slow: '慢响应',
+    failed: '失败',
+    skipped: '跳过',
+  }
+  return labels[status] || status || '-'
+}
+
+function accountHealthGuardActionText(action: string): string {
+  const labels: Record<string, string> = {
+    none: '无变更',
+    disabled: '暂停调度',
+    recovered: '恢复调度',
+  }
+  return labels[action] || action || '-'
+}
+
+function accountHealthGuardStatusTone(status: string): string {
+  if (status === 'healthy') return 'good'
+  if (status === 'slow' || status === 'skipped') return 'warn'
+  if (status === 'failed') return 'bad'
+  return ''
+}
+
+function schedulableText(value: boolean): string {
+  return value ? '可调度' : '已暂停'
 }
 
 function formatRunDetail(run: SupplierAutomationRun): string {
@@ -964,6 +1174,19 @@ function formatRunDetail(run: SupplierAutomationRun): string {
       `- 解除绑定：${guard.unbound_groups}`,
       `- 关闭调度：${guard.disabled_accounts}`,
       `- 跳过 / 失败：${guard.skipped} / ${guard.failed}`
+    )
+  } else if (run.result_detail?.account_health_guard) {
+    const guard = run.result_detail.account_health_guard
+    lines.push(
+      '',
+      '健康守护明细：',
+      `- 检查：${guard.checked_count}`,
+      `- 健康：${guard.healthy_count}`,
+      `- 慢响应：${guard.slow_count}`,
+      `- 失败：${guard.failed_count}`,
+      `- 跳过：${guard.skipped_count}`,
+      `- 暂停：${guard.disabled_count}`,
+      `- 恢复：${guard.recovered_count}`
     )
   } else if (run.result_detail?.cleanup) {
     const cleanup = run.result_detail.cleanup
@@ -1081,10 +1304,174 @@ function taskResultSummary(task: SupplierAutomationTask): string {
 }
 
 function runSummary(run: SupplierAutomationRun): string {
+  const healthGuard = run.result_detail?.account_health_guard
+  if (healthGuard) {
+    return `检查 ${healthGuard.checked_count}，健康 ${healthGuard.healthy_count}，慢响应 ${healthGuard.slow_count}，失败 ${healthGuard.failed_count}，跳过 ${healthGuard.skipped_count}，暂停 ${healthGuard.disabled_count}，恢复 ${healthGuard.recovered_count}`
+  }
   if (!run.processed_count && !run.success_count && !run.failed_count) {
     return compactMessage(run.message || '暂无结果')
   }
   return `${run.processed_count} 个对象，${run.success_count} 成功，${run.failed_count} 失败`
+}
+
+interface HealthGuardAccountMapping {
+  localAccountID: number
+  localAccountName: string
+  platform: string
+  sources: SupplierProviderAccount[]
+}
+
+const healthGuardAccountMappings = computed<HealthGuardAccountMapping[]>(() => {
+  const grouped = new Map<number, HealthGuardAccountMapping>()
+  for (const account of healthGuardSupplierAccounts.value) {
+    const localAccountID = Number(account.local_account_id)
+    if (!Number.isSafeInteger(localAccountID) || localAccountID <= 0) continue
+    const current = grouped.get(localAccountID)
+    if (current) {
+      current.sources.push(account)
+      continue
+    }
+    grouped.set(localAccountID, {
+      localAccountID,
+      localAccountName: account.local_account_name || `本地账号 ${localAccountID}`,
+      platform: account.platform || '-',
+      sources: [account],
+    })
+  }
+  return Array.from(grouped.values()).sort((a, b) => a.localAccountName.localeCompare(b.localAccountName, 'zh-CN'))
+})
+
+const healthGuardIgnoredAccountIDs = computed(() =>
+  normalizePositiveAccountIDs(editForm.config.account_health_guard_ignored_account_ids)
+)
+
+const healthGuardIgnoredAccountOptions = computed<SelectOption[]>(() => {
+  const ignored = new Set(healthGuardIgnoredAccountIDs.value)
+  return healthGuardAccountMappings.value
+    .filter(mapping => !ignored.has(mapping.localAccountID))
+    .map(mapping => ({
+      value: String(mapping.localAccountID),
+      label: `${mapping.sources[0]?.name || '供应商账号'} → ${mapping.localAccountName}`,
+      meta: `${mapping.sources.map(source => source.provider_name).filter(Boolean).join('、') || '供应商'} · 本地 #${mapping.localAccountID}`,
+    }))
+})
+
+const healthGuardIgnoredAccountRows = computed(() => {
+  const mappings = new Map(healthGuardAccountMappings.value.map(mapping => [mapping.localAccountID, mapping]))
+  return healthGuardIgnoredAccountIDs.value.map(id => mappings.get(id) || {
+    localAccountID: id,
+    localAccountName: `本地账号 ${id}`,
+    platform: '-',
+    sources: [],
+  })
+})
+
+function applyAccountHealthGuardDefaults() {
+  const config = editForm.config
+  config.account_health_guard_max_accounts_per_run = positiveIntegerOr(config.account_health_guard_max_accounts_per_run, 200)
+  config.account_health_guard_concurrency = positiveIntegerOr(config.account_health_guard_concurrency, 3)
+  config.account_health_guard_timeout_per_account_seconds = positiveIntegerOr(config.account_health_guard_timeout_per_account_seconds, 90)
+  config.account_health_guard_failure_threshold = positiveIntegerOr(config.account_health_guard_failure_threshold, 3)
+  config.account_health_guard_slow_threshold = positiveIntegerOr(config.account_health_guard_slow_threshold, 3)
+  config.account_health_guard_recovery_threshold = positiveIntegerOr(config.account_health_guard_recovery_threshold, 2)
+  config.account_health_guard_healthy_latency_ms = positiveIntegerOr(config.account_health_guard_healthy_latency_ms, 15000)
+  config.account_health_guard_ignored_account_ids = normalizePositiveAccountIDs(config.account_health_guard_ignored_account_ids)
+  config.account_health_guard_account_models = normalizeStringMap(config.account_health_guard_account_models)
+  config.account_health_guard_platform_models = normalizeStringMap(config.account_health_guard_platform_models)
+  config.account_health_guard_platform_latency_ms = normalizePositiveNumberMap(config.account_health_guard_platform_latency_ms)
+  const cursorAccountID = Number(config.account_health_guard_cursor_account_id)
+  config.account_health_guard_cursor_account_id = Number.isSafeInteger(cursorAccountID) && cursorAccountID > 0 ? cursorAccountID : 0
+}
+
+function validateAccountHealthGuardConfig(): string {
+  const config = editForm.config
+  const rules: Array<[number, number, number, string]> = [
+    [config.account_health_guard_max_accounts_per_run, 1, 1000, '单次检查账号数必须在 1 到 1000 之间'],
+    [config.account_health_guard_concurrency, 1, 8, '并发数必须在 1 到 8 之间'],
+    [config.account_health_guard_timeout_per_account_seconds, 5, 300, '单账号超时必须在 5 到 300 秒之间'],
+    [config.account_health_guard_failure_threshold, 1, Number.MAX_SAFE_INTEGER, '连续失败暂停阈值必须是正整数'],
+    [config.account_health_guard_slow_threshold, 1, Number.MAX_SAFE_INTEGER, '连续慢响应暂停阈值必须是正整数'],
+    [config.account_health_guard_recovery_threshold, 1, Number.MAX_SAFE_INTEGER, '连续健康恢复阈值必须是正整数'],
+    [config.account_health_guard_healthy_latency_ms, 1, Number.MAX_SAFE_INTEGER, '默认健康延迟必须是正整数毫秒'],
+  ]
+  for (const [value, min, max, message] of rules) {
+    if (!Number.isInteger(value) || value < min || value > max) return message
+  }
+  config.account_health_guard_ignored_account_ids = normalizePositiveAccountIDs(config.account_health_guard_ignored_account_ids)
+  config.account_health_guard_account_models = normalizeStringMap(config.account_health_guard_account_models)
+  config.account_health_guard_platform_models = normalizeStringMap(config.account_health_guard_platform_models)
+  config.account_health_guard_platform_latency_ms = normalizePositiveNumberMap(config.account_health_guard_platform_latency_ms)
+  return ''
+}
+
+async function openHealthGuardIgnoredAccounts() {
+  healthGuardIgnoredAccountsVisible.value = true
+  healthGuardIgnoredAccountToAdd.value = ''
+  loadingHealthGuardSupplierAccounts.value = true
+  try {
+    const result = await listSupplierAccounts({
+      active: true,
+      match_status: 'matched',
+      page: 1,
+      page_size: 200,
+    })
+    healthGuardSupplierAccounts.value = result.items || []
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '加载可忽略账号失败'
+  } finally {
+    loadingHealthGuardSupplierAccounts.value = false
+  }
+}
+
+function closeHealthGuardIgnoredAccounts() {
+  healthGuardIgnoredAccountsVisible.value = false
+  healthGuardIgnoredAccountToAdd.value = ''
+}
+
+function addHealthGuardIgnoredAccount() {
+  const id = Number(healthGuardIgnoredAccountToAdd.value)
+  if (!Number.isSafeInteger(id) || id <= 0) return
+  editForm.config.account_health_guard_ignored_account_ids = normalizePositiveAccountIDs([
+    ...healthGuardIgnoredAccountIDs.value,
+    id,
+  ])
+  healthGuardIgnoredAccountToAdd.value = ''
+}
+
+function removeHealthGuardIgnoredAccount(id: number) {
+  editForm.config.account_health_guard_ignored_account_ids = healthGuardIgnoredAccountIDs.value.filter(item => item !== id)
+}
+
+function normalizePositiveAccountIDs(value: unknown): number[] {
+  if (!Array.isArray(value)) return []
+  return Array.from(new Set(
+    value
+      .map(item => Number(item))
+      .filter(item => Number.isSafeInteger(item) && item > 0)
+  )).sort((a, b) => a - b)
+}
+
+function normalizeStringMap(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .map(([key, item]) => [key.trim(), String(item || '').trim()])
+      .filter(([key, item]) => key && item)
+  )
+}
+
+function normalizePositiveNumberMap(value: unknown): Record<string, number> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .map(([key, item]) => [key.trim(), Math.floor(Number(item))])
+      .filter(([key, item]) => Boolean(key) && Number.isFinite(item) && Number(item) > 0)
+  ) as Record<string, number>
+}
+
+function positiveIntegerOr(value: unknown, fallback: number): number {
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback
 }
 
 function toNumber(value: string | number, fallback: number): number {
@@ -2427,6 +2814,226 @@ function showToast(message: string) {
   font-size: 20px;
 }
 
+.sp-health-guard-ignore-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--sp-soft);
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: color-mix(in srgb, var(--sp-blue) 4%, var(--sp-panel));
+}
+
+.sp-health-guard-ignore-card > div {
+  display: grid;
+  gap: 4px;
+}
+
+.sp-health-guard-ignore-card strong {
+  color: var(--sp-text);
+  font-size: 13px;
+}
+
+.sp-health-guard-ignore-card span,
+.sp-health-guard-ignore-dialog > p,
+.sp-health-guard-ignore-list span,
+.sp-health-guard-ignore-option small {
+  color: var(--sp-muted);
+  font-size: 12px;
+}
+
+.sp-health-guard-ignore-dialog {
+  display: grid;
+  gap: 14px;
+}
+
+.sp-health-guard-ignore-dialog > p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.sp-health-guard-ignore-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.sp-health-guard-ignore-option {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  text-align: left;
+}
+
+.sp-health-guard-ignore-option strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-health-guard-ignore-list {
+  display: grid;
+  max-height: 380px;
+  overflow: auto;
+  border-top: 1px solid var(--sp-line);
+}
+
+.sp-health-guard-ignore-list article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid var(--sp-line);
+  padding: 12px 0;
+}
+
+.sp-health-guard-ignore-list article > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.sp-health-guard-ignore-list strong {
+  color: var(--sp-text);
+  font-size: 13px;
+}
+
+.sp-account-health-guard-summary {
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+}
+
+.sp-health-guard-skip-reasons,
+.sp-health-guard-inspections {
+  min-width: 0;
+  border-top: 1px solid var(--sp-line);
+  padding-top: 16px;
+}
+
+.sp-health-guard-reason-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.sp-health-guard-reason-list article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 10px;
+  border: 1px solid var(--sp-line);
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--sp-panel-2);
+}
+
+.sp-health-guard-reason-list strong,
+.sp-health-guard-reason-list span {
+  color: var(--sp-text);
+  font-size: 12px;
+}
+
+.sp-health-guard-reason-list small {
+  grid-column: 1 / -1;
+  color: var(--sp-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.sp-health-guard-list-head {
+  align-items: center;
+}
+
+.sp-health-guard-filter {
+  display: grid;
+  grid-template-columns: minmax(150px, 190px) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.sp-health-guard-filter > strong {
+  color: var(--sp-muted);
+  font-size: 12px;
+}
+
+.sp-health-guard-items {
+  display: grid;
+  gap: 12px;
+}
+
+.sp-health-guard-item {
+  overflow: hidden;
+  border: 1px solid var(--sp-line);
+  border-radius: 12px;
+  background: var(--sp-panel-2);
+}
+
+.sp-health-guard-item > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--sp-line);
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--sp-blue) 3%, var(--sp-panel));
+}
+
+.sp-health-guard-item h4 {
+  margin: 2px 0 0;
+  color: var(--sp-text);
+  font-size: 14px;
+}
+
+.sp-health-guard-item-grid {
+  display: grid;
+  grid-template-columns: minmax(190px, 1.4fr) repeat(4, minmax(130px, 1fr));
+}
+
+.sp-health-guard-item-grid > div {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-width: 0;
+  border-left: 1px solid var(--sp-line);
+  padding: 12px;
+}
+
+.sp-health-guard-item-grid > div:first-child {
+  border-left: 0;
+}
+
+.sp-health-guard-item-grid span,
+.sp-health-guard-item-grid small {
+  color: var(--sp-muted);
+  font-size: 11px;
+}
+
+.sp-health-guard-item-grid strong {
+  color: var(--sp-text);
+  font-size: 12px;
+}
+
+.sp-health-guard-sources small {
+  overflow: hidden;
+  color: var(--sp-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-health-guard-message {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  border-top: 1px solid var(--sp-line);
+  padding: 10px 14px;
+  color: var(--sp-amber);
+  font-size: 12px;
+}
+
+.sp-health-guard-message.bad {
+  color: var(--sp-red);
+}
+
 .sp-rate-guard-detail {
   display: grid;
   gap: 16px;
@@ -2672,6 +3279,37 @@ function showToast(message: string) {
   }
 
   .sp-edit-summary > div:first-child {
+    border-top: 0;
+  }
+
+  .sp-health-guard-ignore-card,
+  .sp-health-guard-ignore-list article,
+  .sp-health-guard-item > header,
+  .sp-health-guard-list-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .sp-health-guard-ignore-add,
+  .sp-health-guard-filter,
+  .sp-health-guard-reason-list,
+  .sp-health-guard-item-grid,
+  .sp-account-health-guard-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .sp-health-guard-ignore-card .sp-button,
+  .sp-health-guard-ignore-add .sp-button {
+    width: 100%;
+  }
+
+  .sp-health-guard-item-grid > div,
+  .sp-health-guard-item-grid > div:first-child {
+    border-top: 1px solid var(--sp-line);
+    border-left: 0;
+  }
+
+  .sp-health-guard-item-grid > div:first-child {
     border-top: 0;
   }
 

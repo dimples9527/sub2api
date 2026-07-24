@@ -1,0 +1,634 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+)
+
+const (
+	DefaultSupplierAccountHealthGuardMaxAccountsPerRun        = 200
+	MaxSupplierAccountHealthGuardMaxAccountsPerRun            = 1000
+	DefaultSupplierAccountHealthGuardConcurrency              = 3
+	MaxSupplierAccountHealthGuardConcurrency                  = 8
+	DefaultSupplierAccountHealthGuardTimeoutPerAccountSeconds = 90
+	MinSupplierAccountHealthGuardTimeoutPerAccountSeconds     = 5
+	MaxSupplierAccountHealthGuardTimeoutPerAccountSeconds     = 300
+	DefaultSupplierAccountHealthGuardFailureThreshold         = 3
+	DefaultSupplierAccountHealthGuardSlowThreshold            = 3
+	DefaultSupplierAccountHealthGuardRecoveryThreshold        = 2
+	DefaultSupplierAccountHealthGuardHealthyLatencyMs         = 15000
+
+	SupplierAccountHealthGuardStatusHealthy = "healthy"
+	SupplierAccountHealthGuardStatusSlow    = "slow"
+	SupplierAccountHealthGuardStatusFailed  = "failed"
+	SupplierAccountHealthGuardStatusSkipped = "skipped"
+
+	SupplierAccountHealthGuardActionNone      = "none"
+	SupplierAccountHealthGuardActionDisabled  = "disabled"
+	SupplierAccountHealthGuardActionRecovered = "recovered"
+
+	SupplierAccountHealthGuardMatchMatched   = "matched"
+	SupplierAccountHealthGuardMatchConflict  = "conflict"
+	SupplierAccountHealthGuardMatchUnmatched = "unmatched"
+)
+
+const (
+	supplierHealthGuardFailureCountExtraKey     = "supplier_health_guard_failure_count"
+	supplierHealthGuardSlowCountExtraKey        = "supplier_health_guard_slow_count"
+	supplierHealthGuardHealthyCountExtraKey     = "supplier_health_guard_healthy_count"
+	supplierHealthGuardLastStatusExtraKey       = "supplier_health_guard_last_status"
+	supplierHealthGuardLastLatencyMsExtraKey    = "supplier_health_guard_last_latency_ms"
+	supplierHealthGuardLastCheckedAtExtraKey    = "supplier_health_guard_last_checked_at"
+	supplierHealthGuardLastActionExtraKey       = "supplier_health_guard_last_action"
+	supplierHealthGuardLastMessageExtraKey      = "supplier_health_guard_last_message"
+	supplierHealthGuardLastTestModelExtraKey    = "supplier_health_guard_last_test_model"
+	supplierHealthGuardLastLatencyLimitExtraKey = "supplier_health_guard_last_latency_limit_ms"
+)
+
+const (
+	supplierAccountHealthGuardSkipUnmatched           = "unmatched"
+	supplierAccountHealthGuardSkipConflict            = "conflict"
+	supplierAccountHealthGuardSkipLocalAccountMissing = "local_account_missing"
+	supplierAccountHealthGuardSkipAccountIgnored      = "account_ignored"
+	supplierAccountHealthGuardSkipAccountDisabled     = "account_disabled"
+	supplierAccountHealthGuardSkipTestModelMissing    = "test_model_missing"
+	supplierAccountHealthGuardSkipReasonSampleLimit   = 5
+)
+
+type SupplierAccountHealthGuardConfig struct {
+	MaxAccountsPerRun        int               `json:"account_health_guard_max_accounts_per_run"`
+	Concurrency              int               `json:"account_health_guard_concurrency"`
+	TimeoutPerAccountSeconds int               `json:"account_health_guard_timeout_per_account_seconds"`
+	FailureThreshold         int               `json:"account_health_guard_failure_threshold"`
+	SlowThreshold            int               `json:"account_health_guard_slow_threshold"`
+	RecoveryThreshold        int               `json:"account_health_guard_recovery_threshold"`
+	HealthyLatencyMs         int64             `json:"account_health_guard_healthy_latency_ms"`
+	IgnoredAccountIDs        []int64           `json:"account_health_guard_ignored_account_ids"`
+	AccountModels            map[int64]string  `json:"account_health_guard_account_models"`
+	PlatformModels           map[string]string `json:"account_health_guard_platform_models"`
+	PlatformLatencyMs        map[string]int64  `json:"account_health_guard_platform_latency_ms"`
+	CursorAccountID          int64             `json:"account_health_guard_cursor_account_id"`
+}
+
+type SupplierAccountHealthGuardSource struct {
+	ProviderID          int64  `json:"provider_id"`
+	ProviderName        string `json:"provider_name"`
+	ProviderAccountID   int64  `json:"supplier_provider_account_id"`
+	UpstreamAccountKey  string `json:"upstream_account_key"`
+	UpstreamAccountName string `json:"upstream_account_name"`
+}
+
+type SupplierAccountHealthGuardCandidate struct {
+	Source         SupplierAccountHealthGuardSource `json:"source"`
+	MatchStatus    string                           `json:"match_status"`
+	MatchCount     int                              `json:"match_count"`
+	LocalAccountID int64                            `json:"local_account_id"`
+	LocalAccount   *Account                         `json:"-"`
+}
+
+type SupplierAccountHealthGuardSkippedAccount struct {
+	LocalAccountID      int64  `json:"local_account_id,omitempty"`
+	LocalAccountName    string `json:"local_account_name,omitempty"`
+	ProviderAccountID   int64  `json:"supplier_provider_account_id,omitempty"`
+	UpstreamAccountName string `json:"upstream_account_name,omitempty"`
+}
+
+type SupplierAccountHealthGuardSkipReason struct {
+	Reason         string                                     `json:"reason"`
+	Count          int                                        `json:"count"`
+	SampleAccounts []SupplierAccountHealthGuardSkippedAccount `json:"sample_accounts,omitempty"`
+}
+
+type SupplierAccountHealthGuardRunItem struct {
+	LocalAccountID     int64                              `json:"local_account_id"`
+	LocalAccountName   string                             `json:"local_account_name"`
+	Platform           string                             `json:"platform"`
+	Sources            []SupplierAccountHealthGuardSource `json:"sources,omitempty"`
+	MatchStatus        string                             `json:"match_status,omitempty"`
+	ModelID            string                             `json:"model_id,omitempty"`
+	SchedulableBefore  bool                               `json:"schedulable_before"`
+	SchedulableAfter   bool                               `json:"schedulable_after"`
+	Status             string                             `json:"status"`
+	TestStatus         string                             `json:"test_status,omitempty"`
+	LatencyMs          int64                              `json:"latency_ms"`
+	LatencyLimitMs     int64                              `json:"latency_limit_ms"`
+	ConsecutiveFailed  int                                `json:"consecutive_failed"`
+	ConsecutiveSlow    int                                `json:"consecutive_slow"`
+	ConsecutiveHealthy int                                `json:"consecutive_healthy"`
+	Action             string                             `json:"action"`
+	Reason             string                             `json:"reason,omitempty"`
+	ErrorMessage       string                             `json:"error_message,omitempty"`
+	StartedAt          time.Time                          `json:"started_at"`
+	FinishedAt         time.Time                          `json:"finished_at"`
+}
+
+type SupplierAccountHealthGuardResult struct {
+	TotalAccounts   int                                    `json:"total_accounts"`
+	CheckedCount    int                                    `json:"checked_count"`
+	HealthyCount    int                                    `json:"healthy_count"`
+	SlowCount       int                                    `json:"slow_count"`
+	FailedCount     int                                    `json:"failed_count"`
+	SkippedCount    int                                    `json:"skipped_count"`
+	DisabledCount   int                                    `json:"disabled_count"`
+	RecoveredCount  int                                    `json:"recovered_count"`
+	UnchangedCount  int                                    `json:"unchanged_count"`
+	CursorAccountID int64                                  `json:"cursor_account_id"`
+	SkipReasons     []SupplierAccountHealthGuardSkipReason `json:"skip_reasons,omitempty"`
+	Items           []SupplierAccountHealthGuardRunItem    `json:"items"`
+}
+
+type SupplierAccountHealthGuardRepository interface {
+	ListAccountHealthGuardCandidates(ctx context.Context) ([]SupplierAccountHealthGuardCandidate, error)
+}
+
+type supplierAccountHealthGuardAccountStore interface {
+	UpdateExtra(ctx context.Context, id int64, updates map[string]any) error
+	SetSchedulable(ctx context.Context, id int64, schedulable bool) error
+}
+
+type supplierAccountHealthGuardTester interface {
+	runTestBackground(ctx context.Context, accountID int64, modelID string) (*ScheduledTestResult, error)
+}
+
+type SupplierAccountHealthGuardRunner interface {
+	Run(ctx context.Context, config SupplierAccountHealthGuardConfig, now time.Time) (SupplierAccountHealthGuardResult, error)
+}
+
+type SupplierAccountHealthGuardService struct {
+	repository   SupplierAccountHealthGuardRepository
+	accountStore supplierAccountHealthGuardAccountStore
+	tester       supplierAccountHealthGuardTester
+}
+
+type supplierAccountHealthGuardTarget struct {
+	account Account
+	sources []SupplierAccountHealthGuardSource
+	modelID string
+}
+
+type supplierAccountHealthGuardSkipCollector struct {
+	order   []string
+	reasons map[string]*SupplierAccountHealthGuardSkipReason
+}
+
+func NewSupplierAccountHealthGuardService(repository SupplierAccountHealthGuardRepository, accountStore supplierAccountHealthGuardAccountStore, tester supplierAccountHealthGuardTester) *SupplierAccountHealthGuardService {
+	return &SupplierAccountHealthGuardService{repository: repository, accountStore: accountStore, tester: tester}
+}
+
+func (s *SupplierAccountHealthGuardService) Run(ctx context.Context, config SupplierAccountHealthGuardConfig, now time.Time) (SupplierAccountHealthGuardResult, error) {
+	config = normalizeSupplierAccountHealthGuardConfig(config)
+	if s == nil || s.repository == nil || s.accountStore == nil || s.tester == nil {
+		return SupplierAccountHealthGuardResult{}, errors.New("供应商账号健康守护依赖未初始化")
+	}
+	candidates, err := s.repository.ListAccountHealthGuardCandidates(ctx)
+	if err != nil {
+		return SupplierAccountHealthGuardResult{}, err
+	}
+	result := SupplierAccountHealthGuardResult{TotalAccounts: len(candidates), Items: make([]SupplierAccountHealthGuardRunItem, 0, len(candidates))}
+	collector := newSupplierAccountHealthGuardSkipCollector()
+	ignored := make(map[int64]struct{}, len(config.IgnoredAccountIDs))
+	for _, accountID := range config.IgnoredAccountIDs {
+		ignored[accountID] = struct{}{}
+	}
+
+	targetsByID := make(map[int64]*supplierAccountHealthGuardTarget)
+	for _, candidate := range candidates {
+		reason := ""
+		switch candidate.MatchStatus {
+		case SupplierAccountHealthGuardMatchUnmatched:
+			reason = supplierAccountHealthGuardSkipUnmatched
+		case SupplierAccountHealthGuardMatchConflict:
+			reason = supplierAccountHealthGuardSkipConflict
+		case SupplierAccountHealthGuardMatchMatched:
+			if candidate.LocalAccountID <= 0 || candidate.LocalAccount == nil {
+				reason = supplierAccountHealthGuardSkipLocalAccountMissing
+			}
+		default:
+			reason = supplierAccountHealthGuardSkipConflict
+		}
+		if reason == "" {
+			if _, exists := ignored[candidate.LocalAccountID]; exists {
+				reason = supplierAccountHealthGuardSkipAccountIgnored
+			} else if strings.TrimSpace(candidate.LocalAccount.Status) != StatusActive {
+				reason = supplierAccountHealthGuardSkipAccountDisabled
+			} else if supplierAccountHealthGuardModelForAccount(config, candidate.LocalAccountID, candidate.LocalAccount.Platform) == "" {
+				reason = supplierAccountHealthGuardSkipTestModelMissing
+			}
+		}
+		if reason != "" {
+			item := supplierAccountHealthGuardSkippedItem(candidate, reason, now)
+			result.Items = append(result.Items, item)
+			collector.Add(reason, candidate)
+			continue
+		}
+		target := targetsByID[candidate.LocalAccountID]
+		if target == nil {
+			account := *candidate.LocalAccount
+			target = &supplierAccountHealthGuardTarget{
+				account: account,
+				modelID: supplierAccountHealthGuardModelForAccount(config, account.ID, account.Platform),
+			}
+			targetsByID[account.ID] = target
+		}
+		target.sources = append(target.sources, candidate.Source)
+	}
+
+	targets := make([]supplierAccountHealthGuardTarget, 0, len(targetsByID))
+	for _, target := range targetsByID {
+		targets = append(targets, *target)
+	}
+	sort.Slice(targets, func(i, j int) bool { return targets[i].account.ID < targets[j].account.ID })
+	selected := supplierAccountHealthGuardSelectTargets(targets, config.CursorAccountID, config.MaxAccountsPerRun)
+	if len(selected) > 0 {
+		result.CursorAccountID = selected[len(selected)-1].account.ID
+	} else {
+		result.CursorAccountID = config.CursorAccountID
+	}
+	checkedItems := s.runTargets(ctx, config, now, selected)
+	result.Items = append(result.Items, checkedItems...)
+	result.SkipReasons = collector.List()
+	for _, item := range result.Items {
+		switch item.Status {
+		case SupplierAccountHealthGuardStatusHealthy:
+			result.CheckedCount++
+			result.HealthyCount++
+		case SupplierAccountHealthGuardStatusSlow:
+			result.CheckedCount++
+			result.SlowCount++
+		case SupplierAccountHealthGuardStatusFailed:
+			result.CheckedCount++
+			result.FailedCount++
+		case SupplierAccountHealthGuardStatusSkipped:
+			result.SkippedCount++
+		}
+		switch item.Action {
+		case SupplierAccountHealthGuardActionDisabled:
+			result.DisabledCount++
+		case SupplierAccountHealthGuardActionRecovered:
+			result.RecoveredCount++
+		case SupplierAccountHealthGuardActionNone:
+			if item.Status != SupplierAccountHealthGuardStatusSkipped {
+				result.UnchangedCount++
+			}
+		}
+	}
+	return result, nil
+}
+
+func (s *SupplierAccountHealthGuardService) runTargets(ctx context.Context, config SupplierAccountHealthGuardConfig, now time.Time, targets []supplierAccountHealthGuardTarget) []SupplierAccountHealthGuardRunItem {
+	if len(targets) == 0 {
+		return nil
+	}
+	workers := config.Concurrency
+	if workers > len(targets) {
+		workers = len(targets)
+	}
+	type job struct {
+		index  int
+		target supplierAccountHealthGuardTarget
+	}
+	jobs := make(chan job)
+	items := make([]SupplierAccountHealthGuardRunItem, len(targets))
+	var wait sync.WaitGroup
+	for worker := 0; worker < workers; worker++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			for current := range jobs {
+				items[current.index] = s.runTarget(ctx, config, now, current.target)
+			}
+		}()
+	}
+	for index, target := range targets {
+		jobs <- job{index: index, target: target}
+	}
+	close(jobs)
+	wait.Wait()
+	return items
+}
+
+func (s *SupplierAccountHealthGuardService) runTarget(ctx context.Context, config SupplierAccountHealthGuardConfig, now time.Time, target supplierAccountHealthGuardTarget) SupplierAccountHealthGuardRunItem {
+	startedAt := now
+	if startedAt.IsZero() {
+		startedAt = time.Now()
+	}
+	item := SupplierAccountHealthGuardRunItem{
+		LocalAccountID: target.account.ID, LocalAccountName: target.account.Name, Platform: target.account.Platform,
+		Sources: append([]SupplierAccountHealthGuardSource(nil), target.sources...), ModelID: target.modelID,
+		SchedulableBefore: target.account.Schedulable, SchedulableAfter: target.account.Schedulable,
+		Action: SupplierAccountHealthGuardActionNone, StartedAt: startedAt,
+		ConsecutiveFailed:  supplierAccountHealthGuardExtraInt(target.account.Extra, supplierHealthGuardFailureCountExtraKey),
+		ConsecutiveSlow:    supplierAccountHealthGuardExtraInt(target.account.Extra, supplierHealthGuardSlowCountExtraKey),
+		ConsecutiveHealthy: supplierAccountHealthGuardExtraInt(target.account.Extra, supplierHealthGuardHealthyCountExtraKey),
+	}
+	originalFailureCount := item.ConsecutiveFailed
+	item.LatencyLimitMs = supplierAccountHealthGuardLatencyLimitForPlatform(config, target.account.Platform)
+	testCtx, cancel := context.WithTimeout(ctx, time.Duration(config.TimeoutPerAccountSeconds)*time.Second)
+	result, runErr := s.tester.runTestBackground(testCtx, target.account.ID, target.modelID)
+	contextErr := testCtx.Err()
+	cancel()
+	item.FinishedAt = time.Now()
+	if result != nil {
+		item.TestStatus = result.Status
+		item.LatencyMs = result.LatencyMs
+		if !result.StartedAt.IsZero() {
+			item.StartedAt = result.StartedAt
+		}
+		if !result.FinishedAt.IsZero() {
+			item.FinishedAt = result.FinishedAt
+		}
+	}
+	item.Status, item.Reason = supplierAccountHealthGuardEvaluateResult(contextErr, runErr, result, item.LatencyMs, item.LatencyLimitMs)
+	if item.Status == SupplierAccountHealthGuardStatusFailed && runErr != nil {
+		item.ErrorMessage = runErr.Error()
+	} else if item.Status == SupplierAccountHealthGuardStatusFailed && result != nil {
+		item.ErrorMessage = strings.TrimSpace(result.ErrorMessage)
+	}
+	switch item.Status {
+	case SupplierAccountHealthGuardStatusHealthy:
+		item.ConsecutiveHealthy++
+		item.ConsecutiveFailed = 0
+		item.ConsecutiveSlow = 0
+	case SupplierAccountHealthGuardStatusSlow:
+		item.ConsecutiveSlow++
+		item.ConsecutiveHealthy = 0
+		item.ConsecutiveFailed = 0
+	default:
+		item.ConsecutiveFailed++
+		item.ConsecutiveHealthy = 0
+		item.ConsecutiveSlow = 0
+	}
+	item.SchedulableAfter, item.Action, item.Reason = supplierAccountHealthGuardNextSchedulingState(config, item)
+	if item.SchedulableAfter != item.SchedulableBefore {
+		if err := s.accountStore.SetSchedulable(ctx, item.LocalAccountID, item.SchedulableAfter); err != nil {
+			item.SchedulableAfter = item.SchedulableBefore
+			item.Action = SupplierAccountHealthGuardActionNone
+			supplierAccountHealthGuardMarkWriteFailure(&item, originalFailureCount, "更新调度状态失败", err)
+		}
+	}
+	if err := s.accountStore.UpdateExtra(ctx, item.LocalAccountID, map[string]any{
+		supplierHealthGuardFailureCountExtraKey:     item.ConsecutiveFailed,
+		supplierHealthGuardSlowCountExtraKey:        item.ConsecutiveSlow,
+		supplierHealthGuardHealthyCountExtraKey:     item.ConsecutiveHealthy,
+		supplierHealthGuardLastStatusExtraKey:       item.Status,
+		supplierHealthGuardLastLatencyMsExtraKey:    item.LatencyMs,
+		supplierHealthGuardLastCheckedAtExtraKey:    item.FinishedAt.UTC().Format(time.RFC3339),
+		supplierHealthGuardLastActionExtraKey:       item.Action,
+		supplierHealthGuardLastMessageExtraKey:      item.Reason,
+		supplierHealthGuardLastTestModelExtraKey:    item.ModelID,
+		supplierHealthGuardLastLatencyLimitExtraKey: item.LatencyLimitMs,
+	}); err != nil {
+		supplierAccountHealthGuardMarkWriteFailure(&item, originalFailureCount, "更新健康守护状态失败", err)
+	}
+	return item
+}
+
+func supplierAccountHealthGuardMarkWriteFailure(item *SupplierAccountHealthGuardRunItem, originalFailureCount int, reason string, err error) {
+	item.Status = SupplierAccountHealthGuardStatusFailed
+	item.ConsecutiveFailed = originalFailureCount + 1
+	item.ConsecutiveSlow = 0
+	item.ConsecutiveHealthy = 0
+	item.Reason = reason
+	item.ErrorMessage = supplierAccountHealthGuardAppendMessage(item.ErrorMessage, fmt.Sprintf("%s: %v", reason, err))
+}
+
+func supplierAccountHealthGuardSelectTargets(targets []supplierAccountHealthGuardTarget, cursor int64, limit int) []supplierAccountHealthGuardTarget {
+	if len(targets) == 0 || limit <= 0 {
+		return nil
+	}
+	if limit > len(targets) {
+		limit = len(targets)
+	}
+	start := 0
+	for index, target := range targets {
+		if target.account.ID > cursor {
+			start = index
+			break
+		}
+		if index == len(targets)-1 {
+			start = 0
+		}
+	}
+	selected := make([]supplierAccountHealthGuardTarget, 0, limit)
+	for offset := 0; offset < limit; offset++ {
+		selected = append(selected, targets[(start+offset)%len(targets)])
+	}
+	return selected
+}
+
+func supplierAccountHealthGuardSkippedItem(candidate SupplierAccountHealthGuardCandidate, reason string, now time.Time) SupplierAccountHealthGuardRunItem {
+	item := SupplierAccountHealthGuardRunItem{
+		LocalAccountID: candidate.LocalAccountID, Sources: []SupplierAccountHealthGuardSource{candidate.Source},
+		MatchStatus: candidate.MatchStatus, Status: SupplierAccountHealthGuardStatusSkipped,
+		Action: SupplierAccountHealthGuardActionNone, Reason: reason, StartedAt: now, FinishedAt: now,
+	}
+	if candidate.LocalAccount != nil {
+		item.LocalAccountName = candidate.LocalAccount.Name
+		item.Platform = candidate.LocalAccount.Platform
+		item.SchedulableBefore = candidate.LocalAccount.Schedulable
+		item.SchedulableAfter = candidate.LocalAccount.Schedulable
+	}
+	return item
+}
+
+func newSupplierAccountHealthGuardSkipCollector() *supplierAccountHealthGuardSkipCollector {
+	return &supplierAccountHealthGuardSkipCollector{reasons: make(map[string]*SupplierAccountHealthGuardSkipReason)}
+}
+
+func (c *supplierAccountHealthGuardSkipCollector) Add(reason string, candidate SupplierAccountHealthGuardCandidate) {
+	entry := c.reasons[reason]
+	if entry == nil {
+		entry = &SupplierAccountHealthGuardSkipReason{Reason: reason}
+		c.reasons[reason] = entry
+		c.order = append(c.order, reason)
+	}
+	entry.Count++
+	if len(entry.SampleAccounts) < supplierAccountHealthGuardSkipReasonSampleLimit {
+		sample := SupplierAccountHealthGuardSkippedAccount{
+			LocalAccountID: candidate.LocalAccountID, ProviderAccountID: candidate.Source.ProviderAccountID,
+			UpstreamAccountName: candidate.Source.UpstreamAccountName,
+		}
+		if candidate.LocalAccount != nil {
+			sample.LocalAccountName = candidate.LocalAccount.Name
+		}
+		entry.SampleAccounts = append(entry.SampleAccounts, sample)
+	}
+}
+
+func (c *supplierAccountHealthGuardSkipCollector) List() []SupplierAccountHealthGuardSkipReason {
+	out := make([]SupplierAccountHealthGuardSkipReason, 0, len(c.order))
+	for _, reason := range c.order {
+		out = append(out, *c.reasons[reason])
+	}
+	return out
+}
+
+func normalizeSupplierAccountHealthGuardConfig(config SupplierAccountHealthGuardConfig) SupplierAccountHealthGuardConfig {
+	if config.MaxAccountsPerRun <= 0 {
+		config.MaxAccountsPerRun = DefaultSupplierAccountHealthGuardMaxAccountsPerRun
+	}
+	if config.MaxAccountsPerRun > MaxSupplierAccountHealthGuardMaxAccountsPerRun {
+		config.MaxAccountsPerRun = MaxSupplierAccountHealthGuardMaxAccountsPerRun
+	}
+	if config.Concurrency <= 0 {
+		config.Concurrency = DefaultSupplierAccountHealthGuardConcurrency
+	}
+	if config.Concurrency > MaxSupplierAccountHealthGuardConcurrency {
+		config.Concurrency = MaxSupplierAccountHealthGuardConcurrency
+	}
+	if config.TimeoutPerAccountSeconds <= 0 {
+		config.TimeoutPerAccountSeconds = DefaultSupplierAccountHealthGuardTimeoutPerAccountSeconds
+	}
+	if config.TimeoutPerAccountSeconds > MaxSupplierAccountHealthGuardTimeoutPerAccountSeconds {
+		config.TimeoutPerAccountSeconds = MaxSupplierAccountHealthGuardTimeoutPerAccountSeconds
+	}
+	if config.FailureThreshold <= 0 {
+		config.FailureThreshold = DefaultSupplierAccountHealthGuardFailureThreshold
+	}
+	if config.SlowThreshold <= 0 {
+		config.SlowThreshold = DefaultSupplierAccountHealthGuardSlowThreshold
+	}
+	if config.RecoveryThreshold <= 0 {
+		config.RecoveryThreshold = DefaultSupplierAccountHealthGuardRecoveryThreshold
+	}
+	if config.HealthyLatencyMs <= 0 {
+		config.HealthyLatencyMs = DefaultSupplierAccountHealthGuardHealthyLatencyMs
+	}
+	config.IgnoredAccountIDs = normalizeSupplierAccountHealthGuardIgnoredAccountIDs(config.IgnoredAccountIDs)
+	config.AccountModels = normalizeSupplierAccountHealthGuardAccountModels(config.AccountModels)
+	config.PlatformModels = normalizeSupplierAccountHealthGuardPlatformModels(config.PlatformModels)
+	config.PlatformLatencyMs = normalizeSupplierAccountHealthGuardPlatformLatency(config.PlatformLatencyMs)
+	return config
+}
+
+func normalizeSupplierAccountHealthGuardIgnoredAccountIDs(values []int64) []int64 {
+	seen := make(map[int64]struct{}, len(values))
+	out := make([]int64, 0, len(values))
+	for _, accountID := range values {
+		if accountID <= 0 {
+			continue
+		}
+		if _, exists := seen[accountID]; exists {
+			continue
+		}
+		seen[accountID] = struct{}{}
+		out = append(out, accountID)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+func normalizeSupplierAccountHealthGuardAccountModels(values map[int64]string) map[int64]string {
+	out := make(map[int64]string)
+	for accountID, model := range values {
+		model = strings.TrimSpace(model)
+		if accountID > 0 && model != "" {
+			out[accountID] = model
+		}
+	}
+	return out
+}
+
+func normalizeSupplierAccountHealthGuardPlatformModels(values map[string]string) map[string]string {
+	out := make(map[string]string)
+	for platform, model := range values {
+		platform = strings.ToLower(strings.TrimSpace(platform))
+		model = strings.TrimSpace(model)
+		if platform != "" && model != "" {
+			out[platform] = model
+		}
+	}
+	return out
+}
+
+func normalizeSupplierAccountHealthGuardPlatformLatency(values map[string]int64) map[string]int64 {
+	out := make(map[string]int64)
+	for platform, latency := range values {
+		platform = strings.ToLower(strings.TrimSpace(platform))
+		if platform != "" && latency > 0 {
+			out[platform] = latency
+		}
+	}
+	return out
+}
+
+func supplierAccountHealthGuardModelForAccount(config SupplierAccountHealthGuardConfig, accountID int64, platform string) string {
+	if model := strings.TrimSpace(config.AccountModels[accountID]); model != "" {
+		return model
+	}
+	return strings.TrimSpace(config.PlatformModels[strings.ToLower(strings.TrimSpace(platform))])
+}
+
+func supplierAccountHealthGuardLatencyLimitForPlatform(config SupplierAccountHealthGuardConfig, platform string) int64 {
+	if latency := config.PlatformLatencyMs[strings.ToLower(strings.TrimSpace(platform))]; latency > 0 {
+		return latency
+	}
+	return config.HealthyLatencyMs
+}
+
+func supplierAccountHealthGuardEvaluateResult(contextErr error, runErr error, result *ScheduledTestResult, latencyMs, latencyLimitMs int64) (string, string) {
+	if errors.Is(contextErr, context.DeadlineExceeded) {
+		return SupplierAccountHealthGuardStatusFailed, "测试超时"
+	}
+	if errors.Is(contextErr, context.Canceled) {
+		return SupplierAccountHealthGuardStatusFailed, "测试已取消"
+	}
+	if runErr != nil {
+		return SupplierAccountHealthGuardStatusFailed, runErr.Error()
+	}
+	if result == nil {
+		return SupplierAccountHealthGuardStatusFailed, "测试结果为空"
+	}
+	if strings.TrimSpace(result.Status) != "success" {
+		if message := strings.TrimSpace(result.ErrorMessage); message != "" {
+			return SupplierAccountHealthGuardStatusFailed, message
+		}
+		return SupplierAccountHealthGuardStatusFailed, "测试失败"
+	}
+	if latencyLimitMs > 0 && latencyMs > latencyLimitMs {
+		return SupplierAccountHealthGuardStatusSlow, fmt.Sprintf("响应耗时 %dms 超过阈值 %dms", latencyMs, latencyLimitMs)
+	}
+	return SupplierAccountHealthGuardStatusHealthy, "测试通过"
+}
+
+func supplierAccountHealthGuardNextSchedulingState(config SupplierAccountHealthGuardConfig, item SupplierAccountHealthGuardRunItem) (bool, string, string) {
+	switch item.Status {
+	case SupplierAccountHealthGuardStatusHealthy:
+		if !item.SchedulableBefore && item.ConsecutiveHealthy >= config.RecoveryThreshold {
+			return true, SupplierAccountHealthGuardActionRecovered, fmt.Sprintf("连续健康 %d 次", item.ConsecutiveHealthy)
+		}
+	case SupplierAccountHealthGuardStatusSlow:
+		if item.SchedulableBefore && item.ConsecutiveSlow >= config.SlowThreshold {
+			return false, SupplierAccountHealthGuardActionDisabled, fmt.Sprintf("连续慢响应 %d 次", item.ConsecutiveSlow)
+		}
+	case SupplierAccountHealthGuardStatusFailed:
+		if item.SchedulableBefore && item.ConsecutiveFailed >= config.FailureThreshold {
+			return false, SupplierAccountHealthGuardActionDisabled, fmt.Sprintf("连续失败 %d 次", item.ConsecutiveFailed)
+		}
+	}
+	return item.SchedulableBefore, SupplierAccountHealthGuardActionNone, item.Reason
+}
+
+func supplierAccountHealthGuardExtraInt(extra map[string]any, key string) int {
+	if extra == nil {
+		return 0
+	}
+	return parseExtraInt(extra[key])
+}
+
+func supplierAccountHealthGuardAppendMessage(current, next string) string {
+	current = strings.TrimSpace(current)
+	next = strings.TrimSpace(next)
+	if current == "" {
+		return next
+	}
+	if next == "" {
+		return current
+	}
+	return current + "; " + next
+}

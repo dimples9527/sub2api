@@ -63,6 +63,19 @@ type SupplierAutomationConfig struct {
 	InactiveGroupDays              int     `json:"inactive_group_retention_days"`
 	RateGuardSafetyMultiplier      float64 `json:"rate_guard_safety_multiplier"`
 	RateGuardMaxSnapshotAgeSeconds int     `json:"rate_guard_max_snapshot_age_seconds"`
+
+	AccountHealthGuardMaxAccountsPerRun        int               `json:"account_health_guard_max_accounts_per_run"`
+	AccountHealthGuardConcurrency              int               `json:"account_health_guard_concurrency"`
+	AccountHealthGuardTimeoutPerAccountSeconds int               `json:"account_health_guard_timeout_per_account_seconds"`
+	AccountHealthGuardFailureThreshold         int               `json:"account_health_guard_failure_threshold"`
+	AccountHealthGuardSlowThreshold            int               `json:"account_health_guard_slow_threshold"`
+	AccountHealthGuardRecoveryThreshold        int               `json:"account_health_guard_recovery_threshold"`
+	AccountHealthGuardHealthyLatencyMs         int64             `json:"account_health_guard_healthy_latency_ms"`
+	AccountHealthGuardIgnoredAccountIDs        []int64           `json:"account_health_guard_ignored_account_ids"`
+	AccountHealthGuardAccountModels            map[int64]string  `json:"account_health_guard_account_models"`
+	AccountHealthGuardPlatformModels           map[string]string `json:"account_health_guard_platform_models"`
+	AccountHealthGuardPlatformLatencyMs        map[string]int64  `json:"account_health_guard_platform_latency_ms"`
+	AccountHealthGuardCursorAccountID          int64             `json:"account_health_guard_cursor_account_id"`
 }
 
 type SupplierAutomationRun struct {
@@ -81,10 +94,11 @@ type SupplierAutomationRun struct {
 }
 
 type SupplierAutomationRunDetail struct {
-	Providers        []SupplierAutomationProviderRunDetail `json:"providers,omitempty"`
-	Cleanup          *SupplierAutomationCleanupRunDetail   `json:"cleanup,omitempty"`
-	RateGuard        *SupplierRateGuardResult              `json:"rate_guard,omitempty"`
-	AccountRateGuard *SupplierAccountRateGuardResult       `json:"account_rate_guard,omitempty"`
+	Providers          []SupplierAutomationProviderRunDetail `json:"providers,omitempty"`
+	Cleanup            *SupplierAutomationCleanupRunDetail   `json:"cleanup,omitempty"`
+	RateGuard          *SupplierRateGuardResult              `json:"rate_guard,omitempty"`
+	AccountRateGuard   *SupplierAccountRateGuardResult       `json:"account_rate_guard,omitempty"`
+	AccountHealthGuard *SupplierAccountHealthGuardResult     `json:"account_health_guard,omitempty"`
 }
 
 type SupplierAutomationProviderRunDetail struct {
@@ -172,10 +186,11 @@ const (
 	SupplierAutomationRunModePreview = "preview"
 	SupplierAutomationRunModeExecute = "execute"
 
-	SupplierAutomationTaskSync             = "supplier_data_sync"
-	SupplierAutomationTaskCleanup          = "supplier_data_cleanup"
-	SupplierAutomationTaskRateGuard        = "supplier_rate_guard"
-	SupplierAutomationTaskAccountRateGuard = "supplier_account_rate_guard"
+	SupplierAutomationTaskSync               = "supplier_data_sync"
+	SupplierAutomationTaskCleanup            = "supplier_data_cleanup"
+	SupplierAutomationTaskRateGuard          = "supplier_rate_guard"
+	SupplierAutomationTaskAccountRateGuard   = "supplier_account_rate_guard"
+	SupplierAutomationTaskAccountHealthGuard = "supplier_account_health_guard"
 
 	SupplierAutomationStatusRunning = "running"
 	SupplierAutomationStatusSuccess = "success"
@@ -189,14 +204,15 @@ func supplierAutomationConfigJSON(config SupplierAutomationConfig) string {
 }
 
 type SupplierAutomationService struct {
-	repo             SupplierAutomationRepository
-	lock             SupplierAutomationLock
-	syncer           SupplierProviderBatchSyncer
-	dataRepo         SupplierProviderDataRepository
-	rateGuard        SupplierRateGuardRunner
-	accountRateGuard SupplierAccountRateGuardRunner
-	accountRateLogs  SupplierAccountRateGuardRepository
-	reloader         SupplierAutomationSchedulerReloader
+	repo               SupplierAutomationRepository
+	lock               SupplierAutomationLock
+	syncer             SupplierProviderBatchSyncer
+	dataRepo           SupplierProviderDataRepository
+	rateGuard          SupplierRateGuardRunner
+	accountRateGuard   SupplierAccountRateGuardRunner
+	accountHealthGuard SupplierAccountHealthGuardRunner
+	accountRateLogs    SupplierAccountRateGuardRepository
+	reloader           SupplierAutomationSchedulerReloader
 }
 
 func NewSupplierAutomationService(repo SupplierAutomationRepository, lock SupplierAutomationLock, syncer SupplierProviderBatchSyncer, dataRepo SupplierProviderDataRepository) *SupplierAutomationService {
@@ -216,6 +232,12 @@ func (s *SupplierAutomationService) SetRateGuardService(rateGuard SupplierRateGu
 func (s *SupplierAutomationService) SetAccountRateGuardService(rateGuard SupplierAccountRateGuardRunner) {
 	if s != nil {
 		s.accountRateGuard = rateGuard
+	}
+}
+
+func (s *SupplierAutomationService) SetAccountHealthGuardService(guard SupplierAccountHealthGuardRunner) {
+	if s != nil {
+		s.accountHealthGuard = guard
 	}
 }
 
@@ -409,6 +431,40 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 			run.Message = fmt.Sprintf("倍率守护存在 %d 项告警", run.FailedCount)
 		}
 		return nil
+	case SupplierAutomationTaskAccountHealthGuard:
+		if s.accountHealthGuard == nil {
+			return fmt.Errorf("supplier account health guard service is required")
+		}
+		result, err := s.accountHealthGuard.Run(ctx, SupplierAccountHealthGuardConfig{
+			MaxAccountsPerRun:        task.Config.AccountHealthGuardMaxAccountsPerRun,
+			Concurrency:              task.Config.AccountHealthGuardConcurrency,
+			TimeoutPerAccountSeconds: task.Config.AccountHealthGuardTimeoutPerAccountSeconds,
+			FailureThreshold:         task.Config.AccountHealthGuardFailureThreshold,
+			SlowThreshold:            task.Config.AccountHealthGuardSlowThreshold,
+			RecoveryThreshold:        task.Config.AccountHealthGuardRecoveryThreshold,
+			HealthyLatencyMs:         task.Config.AccountHealthGuardHealthyLatencyMs,
+			IgnoredAccountIDs:        task.Config.AccountHealthGuardIgnoredAccountIDs,
+			AccountModels:            task.Config.AccountHealthGuardAccountModels,
+			PlatformModels:           task.Config.AccountHealthGuardPlatformModels,
+			PlatformLatencyMs:        task.Config.AccountHealthGuardPlatformLatencyMs,
+			CursorAccountID:          task.Config.AccountHealthGuardCursorAccountID,
+		}, time.Now())
+		run.ProcessedCount = result.CheckedCount
+		run.SuccessCount = result.HealthyCount + result.SlowCount
+		run.FailedCount = result.FailedCount
+		run.ResultDetail = &SupplierAutomationRunDetail{AccountHealthGuard: &result}
+		task.Config.AccountHealthGuardCursorAccountID = result.CursorAccountID
+		if err != nil {
+			return err
+		}
+		if result.FailedCount > 0 {
+			run.Status = SupplierAutomationStatusPartial
+			run.Message = fmt.Sprintf("健康守护发现 %d 个失败账号", result.FailedCount)
+		} else {
+			run.Status = SupplierAutomationStatusSuccess
+			run.Message = fmt.Sprintf("健康守护检查 %d 个账号，跳过 %d 个", result.CheckedCount, result.SkippedCount)
+		}
+		return nil
 	case SupplierAutomationTaskAccountRateGuard:
 		if s.accountRateGuard == nil {
 			return fmt.Errorf("supplier account rate guard service is required")
@@ -540,6 +596,21 @@ func validateSupplierAutomationTask(task SupplierAutomationTask) error {
 	}
 	if task.TaskCode == SupplierAutomationTaskRateGuard {
 		if task.Config.RateGuardSafetyMultiplier <= 0 || task.Config.RateGuardMaxSnapshotAgeSeconds < 60 {
+			return ErrSupplierProviderInvalid
+		}
+	}
+	if task.TaskCode == SupplierAutomationTaskAccountHealthGuard {
+		config := task.Config
+		if config.AccountHealthGuardMaxAccountsPerRun <= 0 ||
+			config.AccountHealthGuardMaxAccountsPerRun > MaxSupplierAccountHealthGuardMaxAccountsPerRun ||
+			config.AccountHealthGuardConcurrency <= 0 ||
+			config.AccountHealthGuardConcurrency > MaxSupplierAccountHealthGuardConcurrency ||
+			config.AccountHealthGuardTimeoutPerAccountSeconds < MinSupplierAccountHealthGuardTimeoutPerAccountSeconds ||
+			config.AccountHealthGuardTimeoutPerAccountSeconds > MaxSupplierAccountHealthGuardTimeoutPerAccountSeconds ||
+			config.AccountHealthGuardFailureThreshold <= 0 ||
+			config.AccountHealthGuardSlowThreshold <= 0 ||
+			config.AccountHealthGuardRecoveryThreshold <= 0 ||
+			config.AccountHealthGuardHealthyLatencyMs <= 0 {
 			return ErrSupplierProviderInvalid
 		}
 	}

@@ -9,6 +9,18 @@ export interface SupplierAutomationConfig {
   daily_stat_retention_days: number
   inactive_account_retention_days: number
   inactive_group_retention_days: number
+  account_health_guard_max_accounts_per_run: number
+  account_health_guard_concurrency: number
+  account_health_guard_timeout_per_account_seconds: number
+  account_health_guard_failure_threshold: number
+  account_health_guard_slow_threshold: number
+  account_health_guard_recovery_threshold: number
+  account_health_guard_healthy_latency_ms: number
+  account_health_guard_ignored_account_ids: number[]
+  account_health_guard_account_models: Record<string, string>
+  account_health_guard_platform_models: Record<string, string>
+  account_health_guard_platform_latency_ms: Record<string, number>
+  account_health_guard_cursor_account_id: number
 }
 
 export interface SupplierAutomationTask {
@@ -44,6 +56,7 @@ export interface SupplierAutomationRunDetail {
   providers?: SupplierAutomationProviderRunDetail[]
   rate_guard?: SupplierRateGuardResult
   account_rate_guard?: SupplierAccountRateGuardResult
+  account_health_guard?: SupplierAccountHealthGuardResult
   cleanup?: SupplierAutomationCleanupRunDetail
 }
 
@@ -60,6 +73,65 @@ export interface SupplierAccountRateGuardResult {
   disabled_accounts: number
   skipped: number
   failed: number
+}
+
+export interface SupplierAccountHealthGuardSource {
+  provider_id: number
+  provider_name: string
+  supplier_provider_account_id: number
+  upstream_account_key: string
+  upstream_account_name: string
+}
+
+export interface SupplierAccountHealthGuardSkippedAccount {
+  local_account_id?: number
+  local_account_name?: string
+  supplier_provider_account_id?: number
+  upstream_account_name?: string
+}
+
+export interface SupplierAccountHealthGuardSkipReason {
+  reason: string
+  count: number
+  sample_accounts?: SupplierAccountHealthGuardSkippedAccount[]
+}
+
+export interface SupplierAccountHealthGuardItem {
+  local_account_id: number
+  local_account_name: string
+  platform: string
+  sources?: SupplierAccountHealthGuardSource[]
+  match_status?: string
+  model_id?: string
+  schedulable_before: boolean
+  schedulable_after: boolean
+  status: 'healthy' | 'slow' | 'failed' | 'skipped' | string
+  test_status?: string
+  latency_ms: number
+  latency_limit_ms: number
+  consecutive_failed: number
+  consecutive_slow: number
+  consecutive_healthy: number
+  action: 'none' | 'disabled' | 'recovered' | string
+  reason?: string
+  error_message?: string
+  started_at: string
+  finished_at: string
+}
+
+export interface SupplierAccountHealthGuardResult {
+  total_accounts: number
+  checked_count: number
+  healthy_count: number
+  slow_count: number
+  failed_count: number
+  skipped_count: number
+  disabled_count: number
+  recovered_count: number
+  unchanged_count: number
+  cursor_account_id: number
+  skip_reasons?: SupplierAccountHealthGuardSkipReason[]
+  items: SupplierAccountHealthGuardItem[]
 }
 
 export interface SupplierRateGuardResult {

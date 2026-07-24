@@ -14,22 +14,6 @@ func ProvideSupplierAccountRateGuardRateSyncer(syncer *SupplierProviderSyncServi
 	return syncer
 }
 
-func ProvideSupplierAutomationService(
-	repo SupplierAutomationRepository,
-	lock SupplierAutomationLock,
-	syncer SupplierProviderBatchSyncer,
-	dataRepo SupplierProviderDataRepository,
-	rateGuard *SupplierRateGuardService,
-	accountRateGuard *SupplierAccountRateGuardService,
-	accountRateGuardRepo SupplierAccountRateGuardRepository,
-) *SupplierAutomationService {
-	svc := NewSupplierAutomationService(repo, lock, syncer, dataRepo)
-	svc.SetRateGuardService(rateGuard)
-	svc.SetAccountRateGuardService(accountRateGuard)
-	svc.SetAccountRateGuardRepository(accountRateGuardRepo)
-	return svc
-}
-
 func ProvideSupplierProviderGroupMatcher(dataRepo SupplierProviderDataRepository, groupRepo GroupRepository, guard *SupplierGroupGuardReconciler) *SupplierProviderGroupMatcher {
 	matcher := NewSupplierProviderGroupMatcher(dataRepo, groupRepo)
 	matcher.SetGuardReconciler(guard)
@@ -56,5 +40,4 @@ var SupplierProviderWiringSet = wire.NewSet(
 	ProvideSupplierProviderSyncService,
 	ProvideSupplierAccountRateGuardRateSyncer,
 	NewSupplierAccountRateGuardService,
-	ProvideSupplierAutomationService,
 )

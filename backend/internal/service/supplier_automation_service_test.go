@@ -465,3 +465,111 @@ func TestSupplierAutomationServiceFinishesFailedRun(t *testing.T) {
 	require.Equal(t, SupplierAutomationStatusFailed, run.Status)
 	require.NotNil(t, run.FinishedAt)
 }
+
+type supplierAutomationAccountHealthGuardStub struct {
+	called int
+	config SupplierAccountHealthGuardConfig
+	result SupplierAccountHealthGuardResult
+	err    error
+}
+
+func (s *supplierAutomationAccountHealthGuardStub) Run(_ context.Context, config SupplierAccountHealthGuardConfig, _ time.Time) (SupplierAccountHealthGuardResult, error) {
+	s.called++
+	s.config = config
+	return s.result, s.err
+}
+
+func TestSupplierAutomationServiceRunsAccountHealthGuardTask(t *testing.T) {
+	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
+		SupplierAutomationTaskAccountHealthGuard: {
+			TaskCode: SupplierAutomationTaskAccountHealthGuard, Name: "供应商账号健康守护", Enabled: true,
+			CronExpression: "@every 3600s", TimeoutSeconds: 1800,
+			Config: validSupplierAccountHealthGuardAutomationConfig(),
+		},
+	}}
+	runner := &supplierAutomationAccountHealthGuardStub{result: SupplierAccountHealthGuardResult{
+		TotalAccounts: 5, CheckedCount: 3, HealthyCount: 1, SlowCount: 1, FailedCount: 1,
+		SkippedCount: 2, DisabledCount: 1, CursorAccountID: 20,
+	}}
+	service := NewSupplierAutomationService(repo, &supplierAutomationLockStub{acquired: true}, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
+	service.SetAccountHealthGuardService(runner)
+
+	run, err := service.Run(context.Background(), SupplierAutomationTaskAccountHealthGuard, SupplierSyncTriggerManual)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, runner.called)
+	require.Equal(t, 3, run.ProcessedCount)
+	require.Equal(t, 2, run.SuccessCount)
+	require.Equal(t, 1, run.FailedCount)
+	require.Equal(t, SupplierAutomationStatusPartial, run.Status)
+	require.Equal(t, "健康守护发现 1 个失败账号", run.Message)
+	require.NotNil(t, run.ResultDetail)
+	require.Equal(t, int64(20), run.ResultDetail.AccountHealthGuard.CursorAccountID)
+	require.Equal(t, int64(20), repo.tasks[SupplierAutomationTaskAccountHealthGuard].Config.AccountHealthGuardCursorAccountID)
+}
+
+func TestSupplierAutomationServiceBuildsAccountHealthGuardSuccessMessage(t *testing.T) {
+	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
+		SupplierAutomationTaskAccountHealthGuard: {
+			TaskCode: SupplierAutomationTaskAccountHealthGuard, Name: "供应商账号健康守护", Enabled: true,
+			CronExpression: "@every 3600s", TimeoutSeconds: 1800,
+			Config: validSupplierAccountHealthGuardAutomationConfig(),
+		},
+	}}
+	runner := &supplierAutomationAccountHealthGuardStub{result: SupplierAccountHealthGuardResult{
+		TotalAccounts: 4, CheckedCount: 3, HealthyCount: 2, SlowCount: 1, SkippedCount: 1,
+	}}
+	service := NewSupplierAutomationService(repo, &supplierAutomationLockStub{acquired: true}, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
+	service.SetAccountHealthGuardService(runner)
+
+	run, err := service.Run(context.Background(), SupplierAutomationTaskAccountHealthGuard, SupplierSyncTriggerManual)
+
+	require.NoError(t, err)
+	require.Equal(t, SupplierAutomationStatusSuccess, run.Status)
+	require.Equal(t, "健康守护检查 3 个账号，跳过 1 个", run.Message)
+}
+func TestSupplierAutomationServiceRejectsInvalidAccountHealthGuardConfig(t *testing.T) {
+	valid := validSupplierAccountHealthGuardAutomationConfig()
+	tests := []struct {
+		name   string
+		mutate func(*SupplierAutomationConfig)
+	}{
+		{name: "单次上限", mutate: func(c *SupplierAutomationConfig) { c.AccountHealthGuardMaxAccountsPerRun = 0 }},
+		{name: "max accounts above limit", mutate: func(c *SupplierAutomationConfig) { c.AccountHealthGuardMaxAccountsPerRun = 1001 }},
+		{name: "并发数", mutate: func(c *SupplierAutomationConfig) { c.AccountHealthGuardConcurrency = 0 }},
+		{name: "concurrency above limit", mutate: func(c *SupplierAutomationConfig) { c.AccountHealthGuardConcurrency = 9 }},
+		{name: "单账号超时", mutate: func(c *SupplierAutomationConfig) { c.AccountHealthGuardTimeoutPerAccountSeconds = 0 }},
+		{name: "timeout below limit", mutate: func(c *SupplierAutomationConfig) { c.AccountHealthGuardTimeoutPerAccountSeconds = 4 }},
+		{name: "timeout above limit", mutate: func(c *SupplierAutomationConfig) { c.AccountHealthGuardTimeoutPerAccountSeconds = 301 }},
+		{name: "失败阈值", mutate: func(c *SupplierAutomationConfig) { c.AccountHealthGuardFailureThreshold = 0 }},
+		{name: "慢响应阈值", mutate: func(c *SupplierAutomationConfig) { c.AccountHealthGuardSlowThreshold = 0 }},
+		{name: "恢复阈值", mutate: func(c *SupplierAutomationConfig) { c.AccountHealthGuardRecoveryThreshold = 0 }},
+		{name: "健康延迟", mutate: func(c *SupplierAutomationConfig) { c.AccountHealthGuardHealthyLatencyMs = 0 }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := valid
+			tt.mutate(&config)
+			err := validateSupplierAutomationTask(SupplierAutomationTask{
+				TaskCode: SupplierAutomationTaskAccountHealthGuard, CronExpression: "@every 3600s", TimeoutSeconds: 1800, Config: config,
+			})
+			require.Error(t, err)
+		})
+	}
+}
+
+func validSupplierAccountHealthGuardAutomationConfig() SupplierAutomationConfig {
+	return SupplierAutomationConfig{
+		AccountHealthGuardMaxAccountsPerRun:        200,
+		AccountHealthGuardConcurrency:              3,
+		AccountHealthGuardTimeoutPerAccountSeconds: 90,
+		AccountHealthGuardFailureThreshold:         3,
+		AccountHealthGuardSlowThreshold:            3,
+		AccountHealthGuardRecoveryThreshold:        2,
+		AccountHealthGuardHealthyLatencyMs:         15000,
+		AccountHealthGuardIgnoredAccountIDs:        []int64{},
+		AccountHealthGuardAccountModels:            map[int64]string{},
+		AccountHealthGuardPlatformModels:           map[string]string{},
+		AccountHealthGuardPlatformLatencyMs:        map[string]int64{},
+	}
+}
