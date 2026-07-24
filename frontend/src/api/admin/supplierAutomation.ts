@@ -191,6 +191,8 @@ export interface SupplierAccountRateGuardUnbindLog {
   local_group_rate: number
   mode: SupplierAccountRateGuardRunMode
   result: 'planned' | 'unbound' | 'failed' | 'skipped'
+  status: 'pending' | 'handled'
+  handled_at?: string
   before_bound: boolean
   after_bound: boolean
   before_schedulable?: boolean
@@ -205,6 +207,9 @@ export interface SupplierAccountRateGuardUnbindLogListParams {
   local_account_id?: number
   search?: string
   result?: string
+  mode?: string
+  status?: string
+  only_unbound?: boolean
   page?: number
   page_size?: number
 }
@@ -212,6 +217,7 @@ export interface SupplierAccountRateGuardUnbindLogListParams {
 export interface SupplierAccountRateGuardUnbindLogListResult {
   items: SupplierAccountRateGuardUnbindLog[]
   total: number
+  pending_count: number
   page: number
   page_size: number
 }
@@ -277,6 +283,13 @@ export async function listAccountRateGuardUnbindLogs(
   return data
 }
 
+export async function markAccountRateGuardUnbindLogHandled(id: number): Promise<SupplierAccountRateGuardUnbindLog> {
+  const { data } = await apiClient.post<SupplierAccountRateGuardUnbindLog>(
+    `/admin/supplier-management/automation/account-rate-guard-unbind-logs/${id}/handled`
+  )
+  return data
+}
+
 export const supplierAutomationAPI = {
   listTasks,
   updateTask,
@@ -285,6 +298,7 @@ export const supplierAutomationAPI = {
   listRateGuardChangeLogs,
   markRateGuardChangeLogHandled,
   listAccountRateGuardUnbindLogs,
+  markAccountRateGuardUnbindLogHandled,
 }
 
 export default supplierAutomationAPI

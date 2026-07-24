@@ -94,6 +94,9 @@
           >
             {{ batchTesting ? '查看测试进度' : batchTestPreparing ? '准备测试中…' : '测试当前筛选' }}
           </button>
+          <button class="sp-button ghost" type="button" @click="openAccountRateGuardLogs">
+            倍率守护日志
+          </button>
           <button class="sp-button sp-account-refresh" type="button" :disabled="loading" @click="loadAccounts">
             {{ loading ? '刷新中…' : '刷新' }}
           </button>
@@ -622,11 +625,16 @@
         >{{ savingBindingAccountID !== null ? '保存中' : '保存绑定' }}</button>
       </template>
     </BaseDialog>
+
+    <SupplierAccountRateGuardLogDialog
+      :show="accountRateGuardLogsVisible"
+      @close="closeAccountRateGuardLogs"
+    />
   </SupplierModuleLayout>
 </template>
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { SupplierDrawer, SupplierModuleLayout } from '@/components/admin/supplier-management'
+import { SupplierAccountRateGuardLogDialog, SupplierDrawer, SupplierModuleLayout } from '@/components/admin/supplier-management'
 import { CreateAccountModal, EditAccountModal } from '@/components/account'
 import DataTable from '@/components/common/DataTable.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -696,6 +704,7 @@ const showEditAccountModal = ref(false)
 const showCreateAccountModal = ref(false)
 const showBatchTestConfigDialog = ref(false)
 const showBatchTestResultDialog = ref(false)
+const accountRateGuardLogsVisible = ref(false)
 const batchTestPreparing = ref(false)
 const batchTesting = ref(false)
 const batchTestCancelling = ref(false)
@@ -1594,6 +1603,14 @@ function accountInitial(account: SupplierProviderAccount): string {
 function formatRate(value?: number | null): string {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return '—'
   return `× ${Number(value).toFixed(2)}`
+}
+
+function openAccountRateGuardLogs() {
+  accountRateGuardLogsVisible.value = true
+}
+
+function closeAccountRateGuardLogs() {
+  accountRateGuardLogsVisible.value = false
 }
 
 function formatCNY(value?: number | null): string {

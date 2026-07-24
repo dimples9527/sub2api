@@ -22,6 +22,12 @@ const { compileStyle } = testRequire(compilerSfcPath) as {
 }
 
 describe('SupplierAutomationView second-level intervals', () => {
+  it('reuses the shared account rate guard log dialog without duplicate headings', () => {
+    expect(supplierAutomationSource).toContain('<SupplierAccountRateGuardLogDialog')
+    expect(supplierAutomationSource).not.toContain('Account Rate Guard Audit')
+    expect(supplierAutomationSource).not.toContain('账号与分组解绑轨迹')
+  })
+
   it('stores positive integer seconds as @every descriptors', () => {
     expect(supplierAutomationSource).toContain('if (!Number.isInteger(seconds) || seconds < 1) return null')
     expect(supplierAutomationSource).toContain('return `@every ${seconds}s`')
@@ -330,16 +336,26 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('执行前会重新同步账号倍率，并解除所有不合格的账号与分组绑定')
   })
 
-  it('opens a paginated account rate guard unbind log dialog with error details', () => {
-    expect(supplierAutomationSource).toContain('listAccountRateGuardUnbindLogs')
+  it('opens the shared account rate guard log dialog', () => {
+    expect(supplierAutomationSource).toContain('SupplierAccountRateGuardLogDialog')
     expect(supplierAutomationSource).toContain('accountRateGuardLogsVisible')
-    expect(supplierAutomationSource).toContain('accountRateGuardLogColumns')
-    expect(supplierAutomationSource).toContain('openAccountRateGuardLogError')
-    expect(supplierAutomationSource).toContain('账号倍率守护解除绑定日志')
-    expect(supplierAutomationSource).toContain('@update:page="changeAccountRateGuardLogPage"')
-    expect(supplierAutomationSource).toContain('formatAccountRate(log.effective_upstream_rate)')
-    expect(supplierAutomationSource).toContain("if (rate === 0) return '0'")
-    expect(supplierAutomationSource).toContain('return rate.toFixed(4).replace(/\\.?0+$/, \'\')')
+    expect(supplierAutomationSource).toContain('@close="closeAccountRateGuardLogs"')
+    expect(supplierAutomationSource).toContain('@pending-count-change="updateAccountRateGuardPendingCount"')
+    expect(supplierAutomationSource).not.toContain('accountRateGuardLogColumns')
+    expect(supplierAutomationSource).not.toContain('openAccountRateGuardLogError')
+  })
+
+  it('shows the current pending account rate guard log count on the action button', () => {
+    expect(supplierAutomationSource).toContain('listAccountRateGuardUnbindLogs')
+    expect(supplierAutomationSource).toContain('const accountRateGuardPendingCount = ref(0)')
+    expect(supplierAutomationSource).toContain('await loadAccountRateGuardPendingCount()')
+    expect(supplierAutomationSource).toContain("status: 'pending'")
+    expect(supplierAutomationSource).toContain('accountRateGuardPendingCount.value = result.pending_count')
+    expect(supplierAutomationSource).toContain('v-if="accountRateGuardPendingCount > 0"')
+    expect(supplierAutomationSource).toContain('class="sp-unbind-log-count"')
+    expect(supplierAutomationSource).toContain(
+      'async function updateAccountRateGuardPendingCount() {\n  await loadAccountRateGuardPendingCount()\n}'
+    )
   })
 
   it('renders rate guard summary counters and item details', () => {
@@ -486,7 +502,8 @@ describe('SupplierAutomationView operations console composition', () => {
     expect(supplierAutomationSource).toMatch(
       /^ {8}<section\b[^>]*class="[^"]*\bsp-history-panel\b[^"]*">\n {10}<header/m
     )
-    expect(supplierAutomationSource.match(/^ {6}<BaseDialog\b/gm)).toHaveLength(5)
+    expect(supplierAutomationSource.match(/^ {6}<BaseDialog\b/gm)).toHaveLength(3)
+    expect(supplierAutomationSource).toMatch(/^ {6}<SupplierAccountRateGuardLogDialog\b/m)
     expect(supplierAutomationSource).toMatch(/^ {6}<Transition name="sp-fade">/m)
   })
 

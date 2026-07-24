@@ -95,8 +95,14 @@
                     <button class="sp-button small primary sp-task-primary" type="button" :disabled="runningCode === task.task_code" @click.stop="openAccountRateGuardExecute(task)">
                       {{ runningCode === task.task_code && runningMode === 'execute' ? '执行中' : '立即执行' }}
                     </button>
-                    <button class="sp-link-button sp-unbind-log-action" type="button" @click.stop="openAccountRateGuardLogs">
-                      解除绑定日志
+                    <button
+                      class="sp-link-button sp-unbind-log-action"
+                      :class="{ 'has-pending': accountRateGuardPendingCount > 0 }"
+                      type="button"
+                      @click.stop="openAccountRateGuardLogs"
+                    >
+                      <span>解除绑定日志</span>
+                      <span v-if="accountRateGuardPendingCount > 0" class="sp-unbind-log-count">{{ accountRateGuardPendingCount }}</span>
                     </button>
                   </template>
                   <button v-else class="sp-button small primary sp-task-primary" type="button" :disabled="runningCode === task.task_code" @click.stop="runNow(task.task_code)">
@@ -551,82 +557,11 @@
         </template>
       </BaseDialog>
 
-      <BaseDialog :show="accountRateGuardLogsVisible" title="账号倍率守护解除绑定日志" width="extra-wide" @close="closeAccountRateGuardLogs">
-        <div class="sp-change-log-dialog sp-unbind-log-dialog">
-          <header class="sp-change-log-head">
-            <div>
-              <span>Account Rate Guard Audit</span>
-              <h3>账号与分组解绑轨迹</h3>
-              <p>预览计划、实际解绑、跳过和失败记录均独立保留，便于核对每次守护结果。</p>
-            </div>
-            <strong class="sp-status info">共 {{ accountRateGuardLogTotal }} 条</strong>
-          </header>
-
-          <div class="sp-table-region sp-change-log-table-region">
-            <DataTable
-              :columns="accountRateGuardLogColumns"
-              :data="accountRateGuardLogs"
-              :loading="accountRateGuardLogsLoading"
-              row-key="id"
-              :sticky-actions-column="false"
-            >
-              <template #cell-provider_name="{ row: log }">
-                <strong>{{ log.provider_name || `供应商 ${log.provider_id}` }}</strong>
-              </template>
-              <template #cell-upstream_account_name="{ row: log }">
-                <strong>{{ log.upstream_account_name || log.upstream_account_key || '-' }}</strong>
-                <div v-if="log.upstream_account_key" class="sp-sub">{{ log.upstream_account_key }}</div>
-              </template>
-              <template #cell-local_account_name="{ row: log }">
-                <strong>{{ log.local_account_name || '-' }}</strong>
-              </template>
-              <template #cell-local_group_name="{ row: log }">
-                <strong>{{ log.local_group_name || '-' }}</strong>
-              </template>
-              <template #cell-effective_upstream_rate="{ row: log }">{{ formatAccountRate(log.effective_upstream_rate) }}</template>
-              <template #cell-local_group_rate="{ row: log }">{{ formatAccountRate(log.local_group_rate) }}</template>
-              <template #cell-mode="{ row: log }">
-                <span class="sp-status info">{{ accountRateGuardModeText(log.mode) }}</span>
-              </template>
-              <template #cell-result="{ row: log }">
-                <button
-                  v-if="log.error_message"
-                  class="sp-link-button sp-log-result-action"
-                  type="button"
-                  @click="openAccountRateGuardLogError(log)"
-                >
-                  <span class="sp-status" :class="accountRateGuardResultTone(log.result)">{{ accountRateGuardResultText(log.result) }}</span>
-                </button>
-                <span v-else class="sp-status" :class="accountRateGuardResultTone(log.result)">{{ accountRateGuardResultText(log.result) }}</span>
-              </template>
-              <template #cell-created_at="{ row: log }">{{ formatTime(log.created_at) }}</template>
-              <template #empty>暂无账号倍率守护解除绑定日志。</template>
-            </DataTable>
-            <Pagination
-              v-if="accountRateGuardLogTotal > 0"
-              class="sp-change-log-pagination"
-              :page="accountRateGuardLogPage"
-              :total="accountRateGuardLogTotal"
-              :page-size="accountRateGuardLogPageSize"
-              :show-page-size-selector="false"
-              @update:page="changeAccountRateGuardLogPage"
-            />
-          </div>
-        </div>
-        <template #footer>
-          <button class="sp-button primary" type="button" @click="closeAccountRateGuardLogs">关闭</button>
-        </template>
-      </BaseDialog>
-
-      <BaseDialog :show="accountRateGuardLogErrorVisible" title="账号倍率守护错误详情" width="wide" @close="closeAccountRateGuardLogError">
-        <div class="sp-log-error-detail">
-          <span>处理失败或跳过原因</span>
-          <pre>{{ accountRateGuardLogErrorMessage }}</pre>
-        </div>
-        <template #footer>
-          <button class="sp-button primary" type="button" @click="closeAccountRateGuardLogError">关闭</button>
-        </template>
-      </BaseDialog>
+      <SupplierAccountRateGuardLogDialog
+        :show="accountRateGuardLogsVisible"
+        @close="closeAccountRateGuardLogs"
+        @pending-count-change="updateAccountRateGuardPendingCount"
+      />
 
       <Transition name="sp-fade"><div v-if="toast" class="sp-toast">{{ toast }}</div></Transition>
     </div>
@@ -635,7 +570,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { SupplierModuleLayout } from '@/components/admin/supplier-management'
+import { SupplierAccountRateGuardLogDialog, SupplierModuleLayout } from '@/components/admin/supplier-management'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Input from '@/components/common/Input.vue'
@@ -653,7 +588,6 @@ import {
   type SupplierAutomationRun,
   type SupplierAutomationStageRunDetail,
   type SupplierAutomationTask,
-  type SupplierAccountRateGuardUnbindLog,
 } from '@/api/admin/supplierAutomation'
 
 const tasks = ref<SupplierAutomationTask[]>([])
@@ -681,13 +615,8 @@ const runStatusFilter = ref('')
 const accountRateGuardExecuteVisible = ref(false)
 const pendingExecuteTask = ref<SupplierAutomationTask | null>(null)
 const accountRateGuardLogsVisible = ref(false)
-const accountRateGuardLogsLoading = ref(false)
-const accountRateGuardLogs = ref<SupplierAccountRateGuardUnbindLog[]>([])
-const accountRateGuardLogTotal = ref(0)
-const accountRateGuardLogPage = ref(1)
-const accountRateGuardLogPageSize = ref(20)
-const accountRateGuardLogErrorVisible = ref(false)
-const accountRateGuardLogErrorMessage = ref('')
+const accountRateGuardPendingCount = ref(0)
+
 let toastTimer: number | undefined
 
 const editForm = reactive<SupplierAutomationTask>({
@@ -736,9 +665,7 @@ const rateGuardRaisedItems = computed(() => (
   rateGuardResult.value?.items.filter(item => item.action === 'raised') || []
 ))
 const runTotalPages = computed(() => Math.max(1, Math.ceil(runTotal.value / runPageSize.value)))
-const accountRateGuardLogTotalPages = computed(() => (
-  Math.max(1, Math.ceil(accountRateGuardLogTotal.value / accountRateGuardLogPageSize.value))
-))
+
 const runTaskFilterOptions = computed<SelectOption[]>(() => [
   { value: '', label: '全部任务' },
   ...tasks.value.map(task => ({ value: task.task_code, label: task.name })),
@@ -765,17 +692,6 @@ const runColumns: Column[] = [
   { key: 'trigger_source', label: '触发' },
   { key: 'status', label: '状态', class: 'min-w-[170px]' },
   { key: 'counts', label: '处理 / 成功 / 失败', class: 'min-w-[150px]' },
-]
-const accountRateGuardLogColumns: Column[] = [
-  { key: 'provider_name', label: '供应商', class: 'min-w-[130px]' },
-  { key: 'upstream_account_name', label: '上游账号', class: 'min-w-[180px]' },
-  { key: 'local_account_name', label: '本地账号', class: 'min-w-[150px]' },
-  { key: 'local_group_name', label: '解绑分组', class: 'min-w-[150px]' },
-  { key: 'effective_upstream_rate', label: '有效倍率', class: 'min-w-[90px]' },
-  { key: 'local_group_rate', label: '分组倍率', class: 'min-w-[90px]' },
-  { key: 'mode', label: '模式', class: 'min-w-[80px]' },
-  { key: 'result', label: '处理结果', class: 'min-w-[100px]' },
-  { key: 'created_at', label: '时间', class: 'min-w-[170px]' },
 ]
 const lastRefreshLabel = computed(() => (
   lastRefreshedAt.value ? formatTime(lastRefreshedAt.value) : '尚未刷新'
@@ -812,12 +728,35 @@ async function loadData() {
   try {
     tasks.value = await listTasks()
     await loadRuns()
+    await loadAccountRateGuardPendingCount()
     lastRefreshedAt.value = new Date().toISOString()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载自动化任务失败'
   } finally {
     loading.value = false
   }
+}
+
+function openAccountRateGuardLogs() {
+  accountRateGuardLogsVisible.value = true
+}
+
+function closeAccountRateGuardLogs() {
+  accountRateGuardLogsVisible.value = false
+}
+
+async function loadAccountRateGuardPendingCount() {
+  const result = await listAccountRateGuardUnbindLogs({
+    result: 'unbound',
+    status: 'pending',
+    page: 1,
+    page_size: 1,
+  })
+  accountRateGuardPendingCount.value = result.pending_count
+}
+
+async function updateAccountRateGuardPendingCount() {
+  await loadAccountRateGuardPendingCount()
 }
 
 function taskName(taskCode: string): string {
@@ -850,71 +789,6 @@ async function loadRuns() {
   })
   runs.value = result.items
   runTotal.value = result.total
-}
-
-async function loadAccountRateGuardLogs() {
-  const result = await listAccountRateGuardUnbindLogs({
-    page: accountRateGuardLogPage.value,
-    page_size: accountRateGuardLogPageSize.value,
-  })
-  accountRateGuardLogs.value = result.items
-  accountRateGuardLogTotal.value = result.total
-  accountRateGuardLogPage.value = result.page
-  accountRateGuardLogPageSize.value = result.page_size
-}
-
-async function openAccountRateGuardLogs() {
-  accountRateGuardLogPage.value = 1
-  accountRateGuardLogsVisible.value = true
-  accountRateGuardLogsLoading.value = true
-  error.value = ''
-  try {
-    await loadAccountRateGuardLogs()
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载账号倍率守护解除绑定日志失败'
-  } finally {
-    accountRateGuardLogsLoading.value = false
-  }
-}
-
-function closeAccountRateGuardLogs() {
-  accountRateGuardLogsVisible.value = false
-}
-
-async function changeAccountRateGuardLogPage(page: number) {
-  accountRateGuardLogPage.value = Math.min(Math.max(1, page), accountRateGuardLogTotalPages.value)
-  accountRateGuardLogsLoading.value = true
-  try {
-    await loadAccountRateGuardLogs()
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载账号倍率守护解除绑定日志失败'
-  } finally {
-    accountRateGuardLogsLoading.value = false
-  }
-}
-
-function openAccountRateGuardLogError(log: SupplierAccountRateGuardUnbindLog) {
-  accountRateGuardLogErrorMessage.value = log.error_message || '暂无错误信息'
-  accountRateGuardLogErrorVisible.value = true
-}
-
-function closeAccountRateGuardLogError() {
-  accountRateGuardLogErrorVisible.value = false
-}
-
-function accountRateGuardModeText(mode: string): string {
-  return mode === 'preview' ? '预览' : '执行'
-}
-
-function accountRateGuardResultText(result: string): string {
-  return ({ planned: '计划解绑', unbound: '已解绑', failed: '失败', skipped: '已跳过' } as Record<string, string>)[result] || result
-}
-
-function accountRateGuardResultTone(result: string): string {
-  if (result === 'unbound') return 'good'
-  if (result === 'planned') return 'info'
-  if (result === 'failed') return 'bad'
-  return 'warn'
 }
 
 function openEdit(task: SupplierAutomationTask) {
@@ -1057,6 +931,10 @@ function selectDetailProvider(providerID: number) {
   selectedDetailProviderID.value = providerID
 }
 
+function accountRateGuardModeText(mode: string): string {
+  return mode === 'preview' ? '预览' : '执行'
+}
+
 function formatRunDetail(run: SupplierAutomationRun): string {
   const lines = [
     `任务：${run.task_code}`,
@@ -1138,11 +1016,6 @@ function formatRate(rate: number): string {
   return Number.isFinite(rate) && rate > 0 ? rate.toFixed(4).replace(/\.?0+$/, '') : '-'
 }
 
-function formatAccountRate(rate: number): string {
-  if (!Number.isFinite(rate) || rate < 0) return '-'
-  if (rate === 0) return '0'
-  return rate.toFixed(4).replace(/\.?0+$/, '')
-}
 
 function rateGuardWarningCount(run: SupplierAutomationRun): number {
   const result = run.result_detail?.rate_guard
@@ -1732,8 +1605,30 @@ function showToast(message: string) {
 .sp-unbind-log-action {
   flex: 1 0 100%;
   justify-content: flex-start;
+  gap: 6px;
   color: var(--sp-muted);
   font-size: 11px;
+}
+
+.sp-unbind-log-action.has-pending {
+  color: var(--sp-amber);
+  font-weight: 700;
+}
+
+.sp-unbind-log-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--sp-amber) 36%, var(--sp-line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sp-amber) 10%, var(--sp-panel));
+  color: var(--sp-amber);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
 }
 
 .sp-result-cell {

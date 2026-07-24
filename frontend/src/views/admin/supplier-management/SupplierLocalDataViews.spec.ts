@@ -764,6 +764,13 @@ describe('supplier local data views component usage', () => {
     expect(accountsSource).toContain('添加账号')
   })
 
+  it('opens the shared account rate guard log dialog from the account toolbar', () => {
+    expect(accountsSource).toContain('倍率守护日志')
+    expect(accountsSource).toContain('<SupplierAccountRateGuardLogDialog')
+    expect(accountsSource).toContain('@click="openAccountRateGuardLogs"')
+    expect(accountsSource).not.toContain('@click.stop="openAccountRateGuardLogs(account)"')
+  })
+
   it('runs an independently implemented batch test for all filtered matched accounts', () => {
     expect(accountsSource).toContain('测试当前筛选')
     expect(accountsSource).toContain('type SupplierAccountFilterSnapshot = {')
