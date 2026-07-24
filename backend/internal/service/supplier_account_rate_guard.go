@@ -28,6 +28,9 @@ const (
 	SupplierAccountRateGuardLogResultUnbound = "unbound"
 	SupplierAccountRateGuardLogResultFailed  = "failed"
 	SupplierAccountRateGuardLogResultSkipped = "skipped"
+
+	SupplierAccountRateGuardLogStatusPending = "pending"
+	SupplierAccountRateGuardLogStatusHandled = "handled"
 )
 
 type SupplierAccountRateGuardGroup struct {
@@ -54,29 +57,31 @@ type SupplierAccountRateGuardCandidate struct {
 }
 
 type SupplierAccountRateGuardUnbindLog struct {
-	ID                    int64     `json:"id"`
-	RunID                 int64     `json:"run_id"`
-	ProviderID            int64     `json:"provider_id"`
-	ProviderName          string    `json:"provider_name"`
-	ProviderAccountID     int64     `json:"supplier_provider_account_id"`
-	UpstreamAccountKey    string    `json:"upstream_account_key"`
-	UpstreamAccountName   string    `json:"upstream_account_name"`
-	LocalAccountID        int64     `json:"local_account_id"`
-	LocalAccountName      string    `json:"local_account_name"`
-	LocalGroupID          int64     `json:"local_group_id"`
-	LocalGroupName        string    `json:"local_group_name"`
-	RawUpstreamRate       float64   `json:"raw_upstream_rate"`
-	RateScale             float64   `json:"rate_scale"`
-	EffectiveUpstreamRate float64   `json:"effective_upstream_rate"`
-	LocalGroupRate        float64   `json:"local_group_rate"`
-	Mode                  string    `json:"mode"`
-	Result                string    `json:"result"`
-	BeforeBound           bool      `json:"before_bound"`
-	AfterBound            bool      `json:"after_bound"`
-	BeforeSchedulable     *bool     `json:"before_schedulable,omitempty"`
-	AfterSchedulable      *bool     `json:"after_schedulable,omitempty"`
-	ErrorMessage          string    `json:"error_message"`
-	CreatedAt             time.Time `json:"created_at"`
+	ID                    int64      `json:"id"`
+	RunID                 int64      `json:"run_id"`
+	ProviderID            int64      `json:"provider_id"`
+	ProviderName          string     `json:"provider_name"`
+	ProviderAccountID     int64      `json:"supplier_provider_account_id"`
+	UpstreamAccountKey    string     `json:"upstream_account_key"`
+	UpstreamAccountName   string     `json:"upstream_account_name"`
+	LocalAccountID        int64      `json:"local_account_id"`
+	LocalAccountName      string     `json:"local_account_name"`
+	LocalGroupID          int64      `json:"local_group_id"`
+	LocalGroupName        string     `json:"local_group_name"`
+	RawUpstreamRate       float64    `json:"raw_upstream_rate"`
+	RateScale             float64    `json:"rate_scale"`
+	EffectiveUpstreamRate float64    `json:"effective_upstream_rate"`
+	LocalGroupRate        float64    `json:"local_group_rate"`
+	Mode                  string     `json:"mode"`
+	Result                string     `json:"result"`
+	Status                string     `json:"status"`
+	HandledAt             *time.Time `json:"handled_at,omitempty"`
+	BeforeBound           bool       `json:"before_bound"`
+	AfterBound            bool       `json:"after_bound"`
+	BeforeSchedulable     *bool      `json:"before_schedulable,omitempty"`
+	AfterSchedulable      *bool      `json:"after_schedulable,omitempty"`
+	ErrorMessage          string     `json:"error_message"`
+	CreatedAt             time.Time  `json:"created_at"`
 }
 
 type SupplierAccountRateGuardUnbindLogListParams struct {
@@ -85,15 +90,19 @@ type SupplierAccountRateGuardUnbindLogListParams struct {
 	LocalAccountID int64
 	Search         string
 	Result         string
+	Mode           string
+	Status         string
+	OnlyUnbound    bool
 	Page           int
 	PageSize       int
 }
 
 type SupplierAccountRateGuardUnbindLogListResult struct {
-	Items    []SupplierAccountRateGuardUnbindLog `json:"items"`
-	Total    int64                               `json:"total"`
-	Page     int                                 `json:"page"`
-	PageSize int                                 `json:"page_size"`
+	Items        []SupplierAccountRateGuardUnbindLog `json:"items"`
+	Total        int64                               `json:"total"`
+	PendingCount int64                               `json:"pending_count"`
+	Page         int                                 `json:"page"`
+	PageSize     int                                 `json:"page_size"`
 }
 
 type SupplierAccountRateGuardResult struct {
@@ -117,6 +126,7 @@ type SupplierAccountRateGuardRepository interface {
 	ListAccountRateGuardCandidates(ctx context.Context, providerID int64, upstreamKeys []string) ([]SupplierAccountRateGuardCandidate, error)
 	CreateAccountRateGuardUnbindLogs(ctx context.Context, logs []SupplierAccountRateGuardUnbindLog) error
 	ListAccountRateGuardUnbindLogs(ctx context.Context, params SupplierAccountRateGuardUnbindLogListParams) (SupplierAccountRateGuardUnbindLogListResult, error)
+	MarkAccountRateGuardUnbindLogHandled(ctx context.Context, id int64) (SupplierAccountRateGuardUnbindLog, error)
 }
 
 type AccountRateGuardGroupRemovalResult struct {
@@ -268,6 +278,7 @@ func (s *SupplierAccountRateGuardService) processCandidate(ctx context.Context, 
 		logItem.AfterSchedulable = &after
 		if _, ok := removed[group.ID]; ok {
 			logItem.Result = SupplierAccountRateGuardLogResultUnbound
+			logItem.Status = SupplierAccountRateGuardLogStatusPending
 			logItem.AfterBound = false
 			result.UnboundGroups++
 		} else {
@@ -283,7 +294,8 @@ func (s *SupplierAccountRateGuardService) processCandidate(ctx context.Context, 
 func supplierAccountRateGuardLogBase(runID int64, mode SupplierAccountRateGuardMode, now time.Time, candidate SupplierAccountRateGuardCandidate) SupplierAccountRateGuardUnbindLog {
 	beforeSchedulable := candidate.Schedulable
 	return SupplierAccountRateGuardUnbindLog{
-		RunID: runID, ProviderID: candidate.ProviderID, ProviderName: candidate.ProviderName,
+		Status: SupplierAccountRateGuardLogStatusHandled,
+		RunID:  runID, ProviderID: candidate.ProviderID, ProviderName: candidate.ProviderName,
 		ProviderAccountID: candidate.ProviderAccountID, UpstreamAccountKey: candidate.UpstreamAccountKey,
 		UpstreamAccountName: candidate.UpstreamAccountName, LocalAccountID: candidate.LocalAccountID,
 		LocalAccountName: candidate.LocalAccountName, RawUpstreamRate: candidate.RawRate,

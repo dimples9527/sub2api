@@ -264,6 +264,13 @@ func (s *SupplierAutomationService) ListAccountRateGuardUnbindLogs(ctx context.C
 	return s.accountRateLogs.ListAccountRateGuardUnbindLogs(ctx, params)
 }
 
+func (s *SupplierAutomationService) MarkAccountRateGuardUnbindLogHandled(ctx context.Context, id int64) (SupplierAccountRateGuardUnbindLog, error) {
+	if s.accountRateLogs == nil {
+		return SupplierAccountRateGuardUnbindLog{}, fmt.Errorf("supplier account rate guard log repository is required")
+	}
+	return s.accountRateLogs.MarkAccountRateGuardUnbindLogHandled(ctx, id)
+}
+
 func (s *SupplierAutomationService) MarkRateGuardChangeLogHandled(ctx context.Context, id int64) (SupplierRateGuardChangeLog, error) {
 	store, ok := s.dataRepo.(SupplierRateGuardChangeLogStore)
 	if !ok {

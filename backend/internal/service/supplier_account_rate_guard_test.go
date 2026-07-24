@@ -45,6 +45,15 @@ func (r *supplierAccountRateGuardRepoStub) ListAccountRateGuardUnbindLogs(_ cont
 	r.listParams = params
 	return r.listResult, r.listErr
 }
+func (r *supplierAccountRateGuardRepoStub) MarkAccountRateGuardUnbindLogHandled(_ context.Context, id int64) (SupplierAccountRateGuardUnbindLog, error) {
+	for index, logItem := range r.logs {
+		if logItem.ID == id {
+			r.logs[index].Status = SupplierAccountRateGuardLogStatusHandled
+			return r.logs[index], nil
+		}
+	}
+	return SupplierAccountRateGuardUnbindLog{}, errors.New("未找到解绑日志")
+}
 
 type accountRateGuardRemoverStub struct {
 	calls   []accountRateGuardRemovalCall
@@ -102,6 +111,7 @@ func TestSupplierAccountRateGuardPreviewOnlyPlansRiskGroups(t *testing.T) {
 	require.Empty(t, remover.calls)
 	require.Len(t, repo.logs, 1)
 	require.Equal(t, SupplierAccountRateGuardLogResultPlanned, repo.logs[0].Result)
+	require.Equal(t, SupplierAccountRateGuardLogStatusHandled, repo.logs[0].Status)
 	require.Equal(t, int64(32), repo.logs[0].LocalGroupID)
 	require.InDelta(t, 1.2, repo.logs[0].EffectiveUpstreamRate, 1e-9)
 }
@@ -133,6 +143,7 @@ func TestSupplierAccountRateGuardExecuteRemovesOnlyRiskGroupsAndKeepsScheduling(
 	require.Equal(t, []accountRateGuardRemovalCall{{accountID: 21, groupIDs: []int64{32}}}, remover.calls)
 	require.Len(t, repo.logs, 1)
 	require.Equal(t, SupplierAccountRateGuardLogResultUnbound, repo.logs[0].Result)
+	require.Equal(t, SupplierAccountRateGuardLogStatusPending, repo.logs[0].Status)
 	require.False(t, repo.logs[0].AfterBound)
 	require.True(t, *repo.logs[0].AfterSchedulable)
 }
@@ -161,6 +172,7 @@ func TestSupplierAccountRateGuardRemovalFailureKeepsObservedSchedulingState(t *t
 	require.Zero(t, result.DisabledAccounts)
 	require.Len(t, repo.logs, 1)
 	require.Equal(t, SupplierAccountRateGuardLogResultFailed, repo.logs[0].Result)
+	require.Equal(t, SupplierAccountRateGuardLogStatusHandled, repo.logs[0].Status)
 	require.True(t, *repo.logs[0].BeforeSchedulable)
 	require.True(t, *repo.logs[0].AfterSchedulable)
 }
@@ -185,4 +197,5 @@ func TestSupplierAccountRateGuardSkipsConflictsAndContinuesAfterProviderFailure(
 	require.Empty(t, remover.calls)
 	require.Len(t, repo.logs, 1)
 	require.Equal(t, SupplierAccountRateGuardLogResultSkipped, repo.logs[0].Result)
+	require.Equal(t, SupplierAccountRateGuardLogStatusHandled, repo.logs[0].Status)
 }

@@ -270,6 +270,19 @@ func TestSupplierAutomationServiceListsAccountRateGuardUnbindLogs(t *testing.T) 
 	require.Equal(t, int64(21), result.Items[0].ID)
 }
 
+func TestSupplierAutomationServiceMarksAccountRateGuardUnbindLogHandled(t *testing.T) {
+	logRepo := &supplierAccountRateGuardRepoStub{logs: []SupplierAccountRateGuardUnbindLog{{ID: 22, Status: SupplierAccountRateGuardLogStatusPending}}}
+	service := NewSupplierAutomationService(&supplierAutomationRepoStub{}, &supplierAutomationLockStub{}, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
+	service.SetAccountRateGuardRepository(logRepo)
+
+	item, err := service.MarkAccountRateGuardUnbindLogHandled(context.Background(), 22)
+
+	require.NoError(t, err)
+	require.Equal(t, int64(22), item.ID)
+	require.Equal(t, SupplierAccountRateGuardLogStatusHandled, item.Status)
+	require.Equal(t, SupplierAccountRateGuardLogStatusHandled, logRepo.logs[0].Status)
+}
+
 func TestSupplierAutomationServiceValidatesRateGuardConfig(t *testing.T) {
 	tests := []SupplierAutomationConfig{
 		{RateGuardSafetyMultiplier: 0, RateGuardMaxSnapshotAgeSeconds: 1800},

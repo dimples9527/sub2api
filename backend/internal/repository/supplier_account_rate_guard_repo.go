@@ -139,6 +139,15 @@ func (r *supplierAccountRateGuardRepository) CreateAccountRateGuardUnbindLogs(ct
 		if createdAt.IsZero() {
 			createdAt = time.Now()
 		}
+		status := normalizeAccountRateGuardLogStatus(item)
+		var handledAt any
+		if status == service.SupplierAccountRateGuardLogStatusHandled {
+			if item.HandledAt != nil {
+				handledAt = *item.HandledAt
+			} else {
+				handledAt = createdAt
+			}
+		}
 		_, err := tx.ExecContext(ctx, `
 INSERT INTO supplier_account_rate_guard_unbind_logs (
   run_id, provider_id, provider_name, supplier_provider_account_id,
@@ -146,14 +155,14 @@ INSERT INTO supplier_account_rate_guard_unbind_logs (
   local_group_id, local_group_name, raw_upstream_rate, rate_scale,
   effective_upstream_rate, local_group_rate, mode, result,
   before_bound, after_bound, before_schedulable, after_schedulable,
-  error_message, created_at
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
+  error_message, status, handled_at, created_at
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)`,
 			item.RunID, item.ProviderID, item.ProviderName, nullablePositiveInt64(item.ProviderAccountID),
 			item.UpstreamAccountKey, item.UpstreamAccountName, nullablePositiveInt64(item.LocalAccountID), item.LocalAccountName,
 			nullablePositiveInt64(item.LocalGroupID), item.LocalGroupName, item.RawUpstreamRate, item.RateScale,
 			item.EffectiveUpstreamRate, item.LocalGroupRate, item.Mode, item.Result,
 			item.BeforeBound, item.AfterBound, item.BeforeSchedulable, item.AfterSchedulable,
-			item.ErrorMessage, createdAt)
+			item.ErrorMessage, status, handledAt, createdAt)
 		if err != nil {
 			return fmt.Errorf("保存倍率守护解绑日志失败: %w", err)
 		}
@@ -171,14 +180,21 @@ func (r *supplierAccountRateGuardRepository) ListAccountRateGuardUnbindLogs(ctx 
 	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM supplier_account_rate_guard_unbind_logs WHERE "+where, args...).Scan(&total); err != nil {
 		return service.SupplierAccountRateGuardUnbindLogListResult{}, fmt.Errorf("统计倍率守护解绑日志失败: %w", err)
 	}
+	pendingParams := params
+	pendingParams.Status = service.SupplierAccountRateGuardLogStatusPending
+	pendingWhere, pendingArgs := supplierAccountRateGuardLogWhere(pendingParams)
+	var pendingCount int64
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM supplier_account_rate_guard_unbind_logs WHERE "+pendingWhere, pendingArgs...).Scan(&pendingCount); err != nil {
+		return service.SupplierAccountRateGuardUnbindLogListResult{}, fmt.Errorf("统计待处理倍率守护解绑日志失败: %w", err)
+	}
 	queryArgs := append(append([]any{}, args...), params.PageSize, (params.Page-1)*params.PageSize)
 	rows, err := r.db.QueryContext(ctx, `
 SELECT id, run_id, provider_id, provider_name, supplier_provider_account_id,
        upstream_account_key, upstream_account_name, local_account_id, local_account_name,
        local_group_id, local_group_name, raw_upstream_rate, rate_scale,
-       effective_upstream_rate, local_group_rate, mode, result,
+       effective_upstream_rate, local_group_rate, mode, result, status,
        before_bound, after_bound, before_schedulable, after_schedulable,
-       error_message, created_at
+       error_message, handled_at, created_at
 FROM supplier_account_rate_guard_unbind_logs
 WHERE `+where+fmt.Sprintf(" ORDER BY created_at DESC, id DESC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2), queryArgs...)
 	if err != nil {
@@ -187,42 +203,42 @@ WHERE `+where+fmt.Sprintf(" ORDER BY created_at DESC, id DESC LIMIT $%d OFFSET $
 	defer rows.Close()
 	items := make([]service.SupplierAccountRateGuardUnbindLog, 0)
 	for rows.Next() {
-		var item service.SupplierAccountRateGuardUnbindLog
-		var providerAccountID, localAccountID, localGroupID sql.NullInt64
-		var beforeSchedulable, afterSchedulable sql.NullBool
-		if err := rows.Scan(
-			&item.ID, &item.RunID, &item.ProviderID, &item.ProviderName, &providerAccountID,
-			&item.UpstreamAccountKey, &item.UpstreamAccountName, &localAccountID, &item.LocalAccountName,
-			&localGroupID, &item.LocalGroupName, &item.RawUpstreamRate, &item.RateScale,
-			&item.EffectiveUpstreamRate, &item.LocalGroupRate, &item.Mode, &item.Result,
-			&item.BeforeBound, &item.AfterBound, &beforeSchedulable, &afterSchedulable,
-			&item.ErrorMessage, &item.CreatedAt,
-		); err != nil {
+		item, err := scanSupplierAccountRateGuardUnbindLog(rows)
+		if err != nil {
 			return service.SupplierAccountRateGuardUnbindLogListResult{}, fmt.Errorf("扫描倍率守护解绑日志失败: %w", err)
-		}
-		if providerAccountID.Valid {
-			item.ProviderAccountID = providerAccountID.Int64
-		}
-		if localAccountID.Valid {
-			item.LocalAccountID = localAccountID.Int64
-		}
-		if localGroupID.Valid {
-			item.LocalGroupID = localGroupID.Int64
-		}
-		if beforeSchedulable.Valid {
-			value := beforeSchedulable.Bool
-			item.BeforeSchedulable = &value
-		}
-		if afterSchedulable.Valid {
-			value := afterSchedulable.Bool
-			item.AfterSchedulable = &value
 		}
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
 		return service.SupplierAccountRateGuardUnbindLogListResult{}, fmt.Errorf("遍历倍率守护解绑日志失败: %w", err)
 	}
-	return service.SupplierAccountRateGuardUnbindLogListResult{Items: items, Total: total, Page: params.Page, PageSize: params.PageSize}, nil
+	return service.SupplierAccountRateGuardUnbindLogListResult{
+		Items: items, Total: total, PendingCount: pendingCount, Page: params.Page, PageSize: params.PageSize,
+	}, nil
+}
+
+func (r *supplierAccountRateGuardRepository) MarkAccountRateGuardUnbindLogHandled(ctx context.Context, id int64) (service.SupplierAccountRateGuardUnbindLog, error) {
+	row := r.db.QueryRowContext(ctx, `
+UPDATE supplier_account_rate_guard_unbind_logs
+SET status = $2,
+    handled_at = COALESCE(handled_at, NOW())
+WHERE id = $1
+  AND result = 'unbound'
+  AND status = 'pending'
+RETURNING id, run_id, provider_id, provider_name, supplier_provider_account_id,
+          upstream_account_key, upstream_account_name, local_account_id, local_account_name,
+          local_group_id, local_group_name, raw_upstream_rate, rate_scale,
+          effective_upstream_rate, local_group_rate, mode, result, status,
+          before_bound, after_bound, before_schedulable, after_schedulable,
+          error_message, handled_at, created_at`, id, service.SupplierAccountRateGuardLogStatusHandled)
+	item, err := scanSupplierAccountRateGuardUnbindLog(row)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return service.SupplierAccountRateGuardUnbindLog{}, fmt.Errorf("账号倍率守护解绑日志不存在或无需处理")
+		}
+		return service.SupplierAccountRateGuardUnbindLog{}, fmt.Errorf("标记账号倍率守护解绑日志已处理失败: %w", err)
+	}
+	return item, nil
 }
 
 func normalizeSupplierAccountRateGuardLogParams(params service.SupplierAccountRateGuardUnbindLogListParams) service.SupplierAccountRateGuardUnbindLogListParams {
@@ -237,12 +253,14 @@ func normalizeSupplierAccountRateGuardLogParams(params service.SupplierAccountRa
 	}
 	params.Search = strings.TrimSpace(params.Search)
 	params.Result = strings.TrimSpace(params.Result)
+	params.Mode = strings.TrimSpace(params.Mode)
+	params.Status = strings.TrimSpace(params.Status)
 	return params
 }
 
 func supplierAccountRateGuardLogWhere(params service.SupplierAccountRateGuardUnbindLogListParams) (string, []any) {
 	conditions := []string{"1=1"}
-	args := make([]any, 0, 5)
+	args := make([]any, 0, 8)
 	if params.RunID > 0 {
 		args = append(args, params.RunID)
 		conditions = append(conditions, fmt.Sprintf("run_id = $%d", len(args)))
@@ -255,9 +273,20 @@ func supplierAccountRateGuardLogWhere(params service.SupplierAccountRateGuardUnb
 		args = append(args, params.LocalAccountID)
 		conditions = append(conditions, fmt.Sprintf("local_account_id = $%d", len(args)))
 	}
-	if params.Result != "" {
+	if params.Mode != "" {
+		args = append(args, params.Mode)
+		conditions = append(conditions, fmt.Sprintf("mode = $%d", len(args)))
+	}
+	if params.OnlyUnbound {
+		args = append(args, service.SupplierAccountRateGuardLogResultUnbound)
+		conditions = append(conditions, fmt.Sprintf("result = $%d", len(args)))
+	} else if params.Result != "" {
 		args = append(args, params.Result)
 		conditions = append(conditions, fmt.Sprintf("result = $%d", len(args)))
+	}
+	if params.Status != "" {
+		args = append(args, params.Status)
+		conditions = append(conditions, fmt.Sprintf("status = $%d", len(args)))
 	}
 	if params.Search != "" {
 		args = append(args, "%"+params.Search+"%")
@@ -267,6 +296,59 @@ func supplierAccountRateGuardLogWhere(params service.SupplierAccountRateGuardUnb
 	return strings.Join(conditions, " AND "), args
 }
 
+type supplierAccountRateGuardLogScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanSupplierAccountRateGuardUnbindLog(scanner supplierAccountRateGuardLogScanner) (service.SupplierAccountRateGuardUnbindLog, error) {
+	var item service.SupplierAccountRateGuardUnbindLog
+	var providerAccountID, localAccountID, localGroupID sql.NullInt64
+	var beforeSchedulable, afterSchedulable sql.NullBool
+	var handledAt sql.NullTime
+	if err := scanner.Scan(
+		&item.ID, &item.RunID, &item.ProviderID, &item.ProviderName, &providerAccountID,
+		&item.UpstreamAccountKey, &item.UpstreamAccountName, &localAccountID, &item.LocalAccountName,
+		&localGroupID, &item.LocalGroupName, &item.RawUpstreamRate, &item.RateScale,
+		&item.EffectiveUpstreamRate, &item.LocalGroupRate, &item.Mode, &item.Result, &item.Status,
+		&item.BeforeBound, &item.AfterBound, &beforeSchedulable, &afterSchedulable,
+		&item.ErrorMessage, &handledAt, &item.CreatedAt,
+	); err != nil {
+		return service.SupplierAccountRateGuardUnbindLog{}, err
+	}
+	if providerAccountID.Valid {
+		item.ProviderAccountID = providerAccountID.Int64
+	}
+	if localAccountID.Valid {
+		item.LocalAccountID = localAccountID.Int64
+	}
+	if localGroupID.Valid {
+		item.LocalGroupID = localGroupID.Int64
+	}
+	if beforeSchedulable.Valid {
+		value := beforeSchedulable.Bool
+		item.BeforeSchedulable = &value
+	}
+	if afterSchedulable.Valid {
+		value := afterSchedulable.Bool
+		item.AfterSchedulable = &value
+	}
+	if handledAt.Valid {
+		value := handledAt.Time
+		item.HandledAt = &value
+	}
+	return item, nil
+}
+
+func normalizeAccountRateGuardLogStatus(item service.SupplierAccountRateGuardUnbindLog) string {
+	status := strings.TrimSpace(item.Status)
+	if status != "" {
+		return status
+	}
+	if item.Result == service.SupplierAccountRateGuardLogResultUnbound {
+		return service.SupplierAccountRateGuardLogStatusPending
+	}
+	return service.SupplierAccountRateGuardLogStatusHandled
+}
 func nullablePositiveInt64(value int64) any {
 	if value <= 0 {
 		return nil

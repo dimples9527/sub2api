@@ -18,6 +18,7 @@ type SupplierAutomationServicePort interface {
 	ListRateGuardChangeLogs(ctx context.Context, params service.SupplierRateGuardChangeLogListParams) (service.SupplierRateGuardChangeLogListResult, error)
 	ListAccountRateGuardUnbindLogs(ctx context.Context, params service.SupplierAccountRateGuardUnbindLogListParams) (service.SupplierAccountRateGuardUnbindLogListResult, error)
 	MarkRateGuardChangeLogHandled(ctx context.Context, id int64) (service.SupplierRateGuardChangeLog, error)
+	MarkAccountRateGuardUnbindLogHandled(ctx context.Context, id int64) (service.SupplierAccountRateGuardUnbindLog, error)
 }
 
 type SupplierAutomationHandler struct {
@@ -136,6 +137,9 @@ func (h *SupplierAutomationHandler) ListAccountRateGuardUnbindLogs(c *gin.Contex
 		LocalAccountID: parseOptionalInt64(c.Query("local_account_id")),
 		Search:         strings.TrimSpace(c.Query("search")),
 		Result:         strings.TrimSpace(c.Query("result")),
+		Mode:           strings.TrimSpace(c.Query("mode")),
+		Status:         strings.TrimSpace(c.Query("status")),
+		OnlyUnbound:    parseOptionalBool(c.Query("only_unbound")),
 		Page:           page,
 		PageSize:       pageSize,
 	})
@@ -144,6 +148,20 @@ func (h *SupplierAutomationHandler) ListAccountRateGuardUnbindLogs(c *gin.Contex
 		return
 	}
 	response.Success(c, result)
+}
+
+func (h *SupplierAutomationHandler) MarkAccountRateGuardUnbindLogHandled(c *gin.Context) {
+	id, err := strconv.ParseInt(strings.TrimSpace(c.Param("id")), 10, 64)
+	if err != nil || id <= 0 {
+		response.ErrorFrom(c, badRequest("日志编号无效"))
+		return
+	}
+	item, err := h.service.MarkAccountRateGuardUnbindLogHandled(c.Request.Context(), id)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
 }
 
 func (h *SupplierAutomationHandler) MarkRateGuardChangeLogHandled(c *gin.Context) {
@@ -158,4 +176,9 @@ func (h *SupplierAutomationHandler) MarkRateGuardChangeLogHandled(c *gin.Context
 		return
 	}
 	response.Success(c, item)
+}
+
+func parseOptionalBool(raw string) bool {
+	value, err := strconv.ParseBool(strings.TrimSpace(raw))
+	return err == nil && value
 }

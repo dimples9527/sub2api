@@ -18,6 +18,7 @@ type supplierAutomationHandlerServiceStub struct {
 	ranCode                   string
 	ranMode                   string
 	handledID                 int64
+	accountRateGuardHandledID int64
 	accountRateGuardLogParams service.SupplierAccountRateGuardUnbindLogListParams
 }
 
@@ -58,6 +59,10 @@ func (s *supplierAutomationHandlerServiceStub) MarkRateGuardChangeLogHandled(_ c
 	s.handledID = id
 	return service.SupplierRateGuardChangeLog{ID: id, Status: service.SupplierRateGuardChangeLogStatusHandled}, nil
 }
+func (s *supplierAutomationHandlerServiceStub) MarkAccountRateGuardUnbindLogHandled(_ context.Context, id int64) (service.SupplierAccountRateGuardUnbindLog, error) {
+	s.accountRateGuardHandledID = id
+	return service.SupplierAccountRateGuardUnbindLog{ID: id, Status: service.SupplierAccountRateGuardLogStatusHandled}, nil
+}
 
 func TestSupplierAutomationHandlerRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -70,6 +75,7 @@ func TestSupplierAutomationHandlerRoutes(t *testing.T) {
 	router.GET("/automation/runs", handler.ListRuns)
 	router.GET("/automation/rate-guard-change-logs", handler.ListRateGuardChangeLogs)
 	router.GET("/automation/account-rate-guard-unbind-logs", handler.ListAccountRateGuardUnbindLogs)
+	router.POST("/automation/account-rate-guard-unbind-logs/:id/handled", handler.MarkAccountRateGuardUnbindLogHandled)
 	router.POST("/automation/rate-guard-change-logs/:id/handled", handler.MarkRateGuardChangeLogHandled)
 
 	rec := httptest.NewRecorder()
@@ -78,12 +84,19 @@ func TestSupplierAutomationHandlerRoutes(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/automation/account-rate-guard-unbind-logs?run_id=3&provider_id=4&local_account_id=5&search=alpha&result=failed&page=2&page_size=30", nil)
+	req = httptest.NewRequest(http.MethodGet, "/automation/account-rate-guard-unbind-logs?run_id=3&provider_id=4&local_account_id=5&search=alpha&mode=execute&result=failed&status=pending&only_unbound=true&page=2&page_size=30", nil)
 	router.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, service.SupplierAccountRateGuardUnbindLogListParams{
-		RunID: 3, ProviderID: 4, LocalAccountID: 5, Search: "alpha", Result: "failed", Page: 2, PageSize: 30,
+		RunID: 3, ProviderID: 4, LocalAccountID: 5, Search: "alpha", Mode: "execute", Result: "failed",
+		Status: "pending", OnlyUnbound: true, Page: 2, PageSize: 30,
 	}, stub.accountRateGuardLogParams)
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/automation/account-rate-guard-unbind-logs/11/handled", nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(11), stub.accountRateGuardHandledID)
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPut, "/automation/tasks/supplier_data_sync", bytes.NewBufferString(`{"enabled":true,"cron_expression":"*/30 * * * *","timeout_seconds":600}`))

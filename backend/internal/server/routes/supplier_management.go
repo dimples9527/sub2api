@@ -53,6 +53,7 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 			automation.GET("/rate-guard-change-logs", h.Admin.SupplierAutomation.ListRateGuardChangeLogs)
 			automation.GET("/account-rate-guard-unbind-logs", h.Admin.SupplierAutomation.ListAccountRateGuardUnbindLogs)
 			automation.POST("/rate-guard-change-logs/:id/handled", h.Admin.SupplierAutomation.MarkRateGuardChangeLogHandled)
+			automation.POST("/account-rate-guard-unbind-logs/:id/handled", h.Admin.SupplierAutomation.MarkAccountRateGuardUnbindLogHandled)
 		}
 	}
 }
