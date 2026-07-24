@@ -66,8 +66,8 @@ func TestSupplierAccountRateGuardRepositoryCreatesAndListsLogs(t *testing.T) {
 			"id", "run_id", "provider_id", "provider_name", "supplier_provider_account_id", "upstream_account_key", "upstream_account_name",
 			"local_account_id", "local_account_name", "local_group_id", "local_group_name", "raw_upstream_rate", "rate_scale",
 			"effective_upstream_rate", "local_group_rate", "mode", "result", "status", "before_bound", "after_bound",
-			"before_schedulable", "after_schedulable", "error_message", "handled_at", "created_at",
-		}).AddRow(int64(1), int64(9), int64(1), "供应商甲", nil, "key-1", "上游账号", nil, "", nil, "", 1.0, 1.0, 1.0, 1.2, "execute", "failed", "handled", true, true, nil, nil, "解绑失败", handledAt, now))
+			"before_schedulable", "after_schedulable", "error_message", "handled_at", "created_at", "platform",
+		}).AddRow(int64(1), int64(9), int64(1), "供应商甲", nil, "key-1", "上游账号", nil, "", nil, "", 1.0, 1.0, 1.0, 1.2, "execute", "failed", "handled", true, true, nil, nil, "解绑失败", handledAt, now, "openai"))
 
 	result, err := repo.ListAccountRateGuardUnbindLogs(context.Background(), service.SupplierAccountRateGuardUnbindLogListParams{
 		RunID: 9, Mode: string(service.SupplierAccountRateGuardModeExecute), Result: service.SupplierAccountRateGuardLogResultFailed,
@@ -81,6 +81,7 @@ func TestSupplierAccountRateGuardRepositoryCreatesAndListsLogs(t *testing.T) {
 	require.Equal(t, service.SupplierAccountRateGuardLogStatusHandled, result.Items[0].Status)
 	require.Equal(t, handledAt, *result.Items[0].HandledAt)
 	require.Equal(t, "解绑失败", result.Items[0].ErrorMessage)
+	require.Equal(t, "openai", result.Items[0].Platform)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -103,8 +104,8 @@ func TestSupplierAccountRateGuardRepositoryOnlyUnboundAndMarksHandled(t *testing
 			"id", "run_id", "provider_id", "provider_name", "supplier_provider_account_id", "upstream_account_key", "upstream_account_name",
 			"local_account_id", "local_account_name", "local_group_id", "local_group_name", "raw_upstream_rate", "rate_scale",
 			"effective_upstream_rate", "local_group_rate", "mode", "result", "status", "before_bound", "after_bound",
-			"before_schedulable", "after_schedulable", "error_message", "handled_at", "created_at",
-		}).AddRow(int64(2), int64(10), int64(1), "供应商甲", nil, "key-2", "上游账号", int64(21), "本地账号", int64(31), "风险组", 1.0, 1.0, 1.0, 1.2, "execute", "unbound", "pending", true, false, true, false, "", nil, now))
+			"before_schedulable", "after_schedulable", "error_message", "handled_at", "created_at", "platform",
+		}).AddRow(int64(2), int64(10), int64(1), "供应商甲", nil, "key-2", "上游账号", int64(21), "本地账号", int64(31), "风险组", 1.0, 1.0, 1.0, 1.2, "execute", "unbound", "pending", true, false, true, false, "", nil, now, "openai"))
 
 	result, err := repo.ListAccountRateGuardUnbindLogs(context.Background(), service.SupplierAccountRateGuardUnbindLogListParams{OnlyUnbound: true, Page: 1, PageSize: 20})
 	require.NoError(t, err)
@@ -116,8 +117,8 @@ func TestSupplierAccountRateGuardRepositoryOnlyUnboundAndMarksHandled(t *testing
 			"id", "run_id", "provider_id", "provider_name", "supplier_provider_account_id", "upstream_account_key", "upstream_account_name",
 			"local_account_id", "local_account_name", "local_group_id", "local_group_name", "raw_upstream_rate", "rate_scale",
 			"effective_upstream_rate", "local_group_rate", "mode", "result", "status", "before_bound", "after_bound",
-			"before_schedulable", "after_schedulable", "error_message", "handled_at", "created_at",
-		}).AddRow(int64(2), int64(10), int64(1), "供应商甲", nil, "key-2", "上游账号", int64(21), "本地账号", int64(31), "风险组", 1.0, 1.0, 1.0, 1.2, "execute", "unbound", "handled", true, false, true, false, "", now, now))
+			"before_schedulable", "after_schedulable", "error_message", "handled_at", "created_at", "platform",
+		}).AddRow(int64(2), int64(10), int64(1), "供应商甲", nil, "key-2", "上游账号", int64(21), "本地账号", int64(31), "风险组", 1.0, 1.0, 1.0, 1.2, "execute", "unbound", "handled", true, false, true, false, "", now, now, ""))
 
 	item, err := repo.MarkAccountRateGuardUnbindLogHandled(context.Background(), 2)
 	require.NoError(t, err)

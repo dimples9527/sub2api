@@ -194,7 +194,12 @@ SELECT id, run_id, provider_id, provider_name, supplier_provider_account_id,
        local_group_id, local_group_name, raw_upstream_rate, rate_scale,
        effective_upstream_rate, local_group_rate, mode, result, status,
        before_bound, after_bound, before_schedulable, after_schedulable,
-       error_message, handled_at, created_at
+       error_message, handled_at, created_at,
+       COALESCE((
+         SELECT local_account.platform
+         FROM accounts local_account
+         WHERE local_account.id = supplier_account_rate_guard_unbind_logs.local_account_id
+       ), '') AS platform
 FROM supplier_account_rate_guard_unbind_logs
 WHERE `+where+fmt.Sprintf(" ORDER BY created_at DESC, id DESC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2), queryArgs...)
 	if err != nil {
@@ -230,7 +235,7 @@ RETURNING id, run_id, provider_id, provider_name, supplier_provider_account_id,
           local_group_id, local_group_name, raw_upstream_rate, rate_scale,
           effective_upstream_rate, local_group_rate, mode, result, status,
           before_bound, after_bound, before_schedulable, after_schedulable,
-          error_message, handled_at, created_at`, id, service.SupplierAccountRateGuardLogStatusHandled)
+          error_message, handled_at, created_at, '' AS platform`, id, service.SupplierAccountRateGuardLogStatusHandled)
 	item, err := scanSupplierAccountRateGuardUnbindLog(row)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -311,7 +316,7 @@ func scanSupplierAccountRateGuardUnbindLog(scanner supplierAccountRateGuardLogSc
 		&localGroupID, &item.LocalGroupName, &item.RawUpstreamRate, &item.RateScale,
 		&item.EffectiveUpstreamRate, &item.LocalGroupRate, &item.Mode, &item.Result, &item.Status,
 		&item.BeforeBound, &item.AfterBound, &beforeSchedulable, &afterSchedulable,
-		&item.ErrorMessage, &handledAt, &item.CreatedAt,
+		&item.ErrorMessage, &handledAt, &item.CreatedAt, &item.Platform,
 	); err != nil {
 		return service.SupplierAccountRateGuardUnbindLog{}, err
 	}

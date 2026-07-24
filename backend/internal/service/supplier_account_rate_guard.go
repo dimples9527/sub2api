@@ -68,6 +68,7 @@ type SupplierAccountRateGuardUnbindLog struct {
 	LocalAccountName      string     `json:"local_account_name"`
 	LocalGroupID          int64      `json:"local_group_id"`
 	LocalGroupName        string     `json:"local_group_name"`
+	Platform              string     `json:"platform"`
 	RawUpstreamRate       float64    `json:"raw_upstream_rate"`
 	RateScale             float64    `json:"rate_scale"`
 	EffectiveUpstreamRate float64    `json:"effective_upstream_rate"`

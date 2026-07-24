@@ -185,6 +185,7 @@ export interface SupplierAccountRateGuardUnbindLog {
   local_account_name: string
   local_group_id: number
   local_group_name: string
+  platform: string
   raw_upstream_rate: number
   rate_scale: number
   effective_upstream_rate: number
