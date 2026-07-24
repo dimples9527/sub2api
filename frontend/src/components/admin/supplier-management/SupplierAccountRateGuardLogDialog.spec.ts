@@ -24,6 +24,8 @@ describe('SupplierAccountRateGuardLogDialog', () => {
 
   it('使用更宽弹窗并在桌面端隐藏表格横向滚动', () => {
     expect(source).toContain('width="full"')
+    expect(source).toContain(':global(.modal-content:has(.account-rate-log-dialog))')
+    expect(source).toContain('width: min(1800px, calc(100vw - 32px))')
     expect(source).toContain('overflow-x: hidden')
     expect(source).toContain('table-layout: fixed')
     expect(source).toContain('white-space: normal')

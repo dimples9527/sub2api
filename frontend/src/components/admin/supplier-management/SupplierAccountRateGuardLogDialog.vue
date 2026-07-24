@@ -346,6 +346,11 @@ function schedulableText(value?: boolean): string {
 </script>
 
 <style scoped>
+:global(.modal-content:has(.account-rate-log-dialog)) {
+  width: min(1800px, calc(100vw - 32px));
+  max-width: none;
+}
+
 .account-rate-log-dialog {
   --sp-panel: #ffffff;
   --sp-panel-2: #f9fafb;
