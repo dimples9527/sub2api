@@ -61,7 +61,13 @@
           </template>
 
           <template #cell-account="{ row: log }">
-            <div :class="['account-rate-log-account-card', platformBadgeLightClass(log.platform), platformBorderClass(log.platform)]">
+            <div
+              :class="[
+                'account-rate-log-account-card',
+                platformBadgeLightClass(log.platform),
+                platformBorderClass(log.platform),
+              ]"
+            >
               <strong class="account-rate-log-account">{{ log.upstream_account_name || log.upstream_account_key || '-' }}</strong>
               <div v-if="log.upstream_account_key" class="sp-sub">{{ log.upstream_account_key }}</div>
               <div class="account-rate-log-local">本地：{{ log.local_account_name || '-' }}</div>
@@ -69,7 +75,15 @@
           </template>
 
           <template #cell-local_group_name="{ row: log }">
-            <strong :class="['account-rate-log-group', platformBadgeLightClass(log.platform), platformBorderClass(log.platform)]">{{ log.local_group_name || (log.local_group_id ? `分组 ${log.local_group_id}` : '-') }}</strong>
+            <strong
+              :class="[
+                'account-rate-log-group',
+                platformBadgeLightClass(log.platform),
+                platformBorderClass(log.platform),
+              ]"
+            >
+              {{ log.local_group_name || (log.local_group_id ? `分组 ${log.local_group_id}` : '-') }}
+            </strong>
           </template>
 
           <template #cell-rates="{ row: log }">
@@ -91,7 +105,13 @@
           </template>
 
           <template #cell-scheduling="{ row: log }">
-            <div :class="['account-rate-log-scheduling', platformBadgeLightClass(log.platform), platformBorderClass(log.platform)]">
+            <div
+              :class="[
+                'account-rate-log-scheduling',
+                platformBadgeLightClass(log.platform),
+                platformBorderClass(log.platform),
+              ]"
+            >
               <span>{{ boundText(log.before_bound) }} → {{ boundText(log.after_bound) }}</span>
               <div v-if="log.before_schedulable !== undefined || log.after_schedulable !== undefined" class="sp-sub">
                 调度：{{ schedulableText(log.before_schedulable) }} → {{ schedulableText(log.after_schedulable) }}
@@ -549,13 +569,6 @@ function schedulableText(value?: boolean): string {
 .account-rate-log-group {
   border-width: 1px;
   border-style: solid;
-}
-
-.account-rate-log-scheduling {
-  padding: 5px 7px;
-  border-left: 2px solid color-mix(in srgb, var(--sp-cyan) 58%, var(--sp-line));
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--sp-cyan) 5%, var(--sp-panel));
 }
 
 .account-rate-log-rate-compare {
