@@ -78,8 +78,12 @@ const DataTableStub = defineComponent({
       type: Array,
       default: () => [],
     },
+    columns: {
+      type: Array,
+      default: () => [],
+    },
   },
-  emits: ['row-click'],
+  emits: ['row-click', 'sort'],
   setup(props, { emit, slots }) {
     return () => h('div', { class: 'data-table-stub' }, props.data.flatMap((row, index) => [
       h('button', {
@@ -426,6 +430,88 @@ describe('supplier local data views component usage', () => {
     wrapper.unmount()
   })
 
+  it('adds counted quick filters and filters accounts by their real binding relationship', async () => {
+    const wrapper = await mountSupplierAccounts()
+    const quickFilters = wrapper.findAll('[data-test^="supplier-account-quick-filter-"]')
+
+    expect(quickFilters.map(button => button.text())).toEqual([
+      '全部5',
+      '已绑定分组1',
+      '未绑定分组4',
+      '可参与调度1',
+      '暂停调度1',
+      '测试失败1',
+    ])
+
+    await wrapper.get('[data-test="supplier-account-quick-filter-bound"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.runtime-cell-group_name')).toHaveLength(1)
+    expect(wrapper.get('.runtime-cell-group_name').text()).toContain('OpenAI 专线')
+
+    await wrapper.get('[data-test="supplier-account-quick-filter-unbound"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.runtime-cell-group_name')).toHaveLength(4)
+    expect(wrapper.findAll('.runtime-cell-group_name').every(cell => cell.text() === '—')).toBe(true)
+    expect(accountsSource).toContain('function accountMatchesQuickFilter(')
+    expect(accountsSource).toContain('page.value = 1')
+
+    wrapper.unmount()
+  })
+
+  it('uses server-side sorting for unambiguous account columns', async () => {
+    const wrapper = await mountSupplierAccounts()
+
+    expect(accountsSource).toContain('server-side-sort')
+    expect(accountsSource).toContain('@sort="handleAccountSort"')
+    for (const key of [
+      'provider_name',
+      'upstream_account_key',
+      'local_account_name',
+      'local_account_priority',
+      'rate_multiplier',
+      'local_account_status',
+      'local_account_schedulable',
+      'local_account_last_test_status',
+      'local_account_last_tested_at',
+      'supplier_current_balance',
+      'supplier_today_cost',
+    ]) {
+      expect(accountsSource).toMatch(
+        new RegExp(`\\{ key: '${key}', label: '[^']+', sortable: true`)
+      )
+    }
+    expect(accountsSource).toContain("{ key: 'provider_name', label: '供应商', sortable: true")
+    expect(accountsSource).toContain("{ key: 'supplier_today_cost', label: '今日消费', sortable: true")
+    expect(accountsSource).not.toContain("{ key: 'group_name', label: '账号绑定的分组', sortable: true")
+    expect(accountsSource).not.toContain("{ key: 'actions', label: '操作', sortable: true")
+
+    const table = wrapper.findComponent(DataTableStub)
+    table.vm.$emit('sort', 'supplier_today_cost', 'desc')
+    await flushPromises()
+
+    expect(supplierAccountMocks.listAccounts).toHaveBeenLastCalledWith(expect.objectContaining({
+      sort_by: 'supplier_today_cost',
+      sort_order: 'desc',
+      page: 1,
+    }))
+
+    wrapper.unmount()
+  })
+
+  it('uses platform-aware colors and selection summary in the binding dialog', () => {
+    expect(accountsSource).toContain('platformButtonClass')
+    expect(accountsSource).toContain('platformAccentBarClass')
+    expect(accountsSource).toContain("['sp-account-binding-primary', platformButtonClass(bindingPlatform || '')]")
+    expect(accountsSource).toContain('sp-account-binding-primary')
+    expect(accountsSource).toContain('const selectedBindingGroups = computed')
+    expect(accountsSource).toContain('v-for="group in selectedBindingGroups"')
+    expect(accountsSource).toContain(':rate-multiplier="group.rate_multiplier"')
+    expect(accountsSource).toContain('sp-account-binding-selected-groups')
+    expect(accountsSource).toContain('selectedBindingGroupIDs.length')
+    expect(accountsSource).toContain('sp-account-binding-empty')
+    expect(accountsSource).not.toContain('选择该账号允许参与调度的分组')
+  })
+
   it('shows local account status and test results in Chinese with distinct states', async () => {
     const wrapper = await mountSupplierAccounts()
 
@@ -665,7 +751,9 @@ describe('supplier local data views component usage', () => {
     expect(accountsSource).toContain('v-model="platformFilter"')
     expect(accountsSource).toContain(':options="platformFilterOptions"')
     expect(accountsSource).toContain('platform: platformFilter.value || undefined')
-    expect(accountsSource).toContain("import { platformBadgeClass, platformLabel, platformTextClass } from '@/utils/platformColors'")
+    expect(accountsSource).toContain('platformBadgeClass')
+    expect(accountsSource).toContain('platformLabel')
+    expect(accountsSource).toContain('platformTextClass')
     expect(accountsSource).toContain('handlePageSizeChange')
     expect(accountsSource).toContain(':show-page-size-selector="false"')
     expect(accountsSource).toContain('@update:page="handlePageChange"')
@@ -789,6 +877,21 @@ describe('supplier local data views component usage', () => {
     expect(accountsSource).toContain('title="批量测试结果"')
     expect(accountsSource).toContain(':disabled="!batchTesting && (loading || batchTestPreparing || total === 0)"')
     expect(accountsSource).toContain("return status === 'queued' || status === 'running'")
+  })
+
+  it('uses a wide filtered batch-result view with failure-first ordering and platform colors', () => {
+    expect(accountsSource).toContain("type SupplierBatchResultFilter = 'all' | 'success' | 'failed'")
+    expect(accountsSource).toContain("const batchTestResultFilter = ref<SupplierBatchResultFilter>('all')")
+    expect(accountsSource).toContain('const batchTestResultFilterOptions = computed')
+    expect(accountsSource).toContain('const filteredBatchTestResultItems = computed')
+    expect(accountsSource).toContain('data-test="supplier-batch-result-filter-all"')
+    expect(accountsSource).toContain('data-test="supplier-batch-result-filter-success"')
+    expect(accountsSource).toContain('data-test="supplier-batch-result-filter-failed"')
+    expect(accountsSource).toContain('v-for="item in filteredBatchTestResultItems"')
+    expect(accountsSource).toContain("['sp-platform-badge', platformBadgeClass(")
+    expect(accountsSource).toContain('width="full"')
+    expect(accountsSource).toContain(':global(.modal-content:has(.sp-batch-result-dialog))')
+    expect(accountsSource).toContain('width: min(1600px, calc(100vw - 32px))')
   })
 
   it('declares supplier-account-specific batch-test API functions', () => {

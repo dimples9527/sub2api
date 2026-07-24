@@ -114,6 +114,18 @@
             <span>当前筛选共 {{ total }} 个上游账号</span>
           </div>
         </div>
+        <div class="sp-account-quick-filters" role="group" aria-label="账号快捷过滤">
+          <button
+            v-for="option in accountQuickFilterOptions"
+            :key="option.key"
+            :data-test="`supplier-account-quick-filter-${option.key}`"
+            :class="['sp-account-quick-filter', { active: accountQuickFilter === option.key }]"
+            type="button"
+            @click="selectAccountQuickFilter(option.key)"
+          >
+            <span>{{ option.label }}</span><strong>{{ option.count }}</strong>
+          </button>
+        </div>
         <div class="sp-account-legend" aria-label="本地账号匹配状态图例">
           <span><i class="matched"></i>已匹配</span>
           <span><i class="unmatched"></i>未匹配</span>
@@ -127,7 +139,9 @@
           :data="items"
           :loading="loading"
           row-key="id"
+          server-side-sort
           clickable-rows
+          @sort="handleAccountSort"
           @row-click="openDrawer"
         >
           <template #cell-provider_name="{ row: account }">
@@ -518,7 +532,7 @@
     <BaseDialog
       :show="showBatchTestResultDialog"
       title="批量测试结果"
-      width="wide"
+      width="full"
       @close="closeBatchTestResultDialog"
     >
       <div class="sp-batch-result-dialog">
@@ -540,12 +554,33 @@
           <div class="success"><span>成功</span><strong>{{ batchTestResult?.success || 0 }}</strong></div>
           <div class="failed"><span>失败</span><strong>{{ batchTestResult?.failed || 0 }}</strong></div>
         </div>
+        <div class="sp-batch-result-filters" role="group" aria-label="批量测试结果筛选">
+          <button
+            data-test="supplier-batch-result-filter-all"
+            :class="{ active: batchTestResultFilter === 'all' }"
+            type="button"
+            @click="batchTestResultFilter = 'all'"
+          >全部<strong>{{ batchTestResultFilterOptions[0].count }}</strong></button>
+          <button
+            data-test="supplier-batch-result-filter-success"
+            :class="{ active: batchTestResultFilter === 'success' }"
+            type="button"
+            @click="batchTestResultFilter = 'success'"
+          >成功<strong>{{ batchTestResultFilterOptions[1].count }}</strong></button>
+          <button
+            data-test="supplier-batch-result-filter-failed"
+            :class="{ active: batchTestResultFilter === 'failed' }"
+            type="button"
+            @click="batchTestResultFilter = 'failed'"
+          >失败<strong>{{ batchTestResultFilterOptions[2].count }}</strong></button>
+          <span class="sp-batch-result-filter-hint">异常结果优先展示</span>
+        </div>
         <div v-if="batchTestResult?.error_message" class="sp-alert sp-error-line">
           {{ batchTestResult.error_message }}
         </div>
-        <div v-if="batchTestResultItems.length" class="sp-batch-result-list">
+        <div v-if="filteredBatchTestResultItems.length" class="sp-batch-result-list">
           <article
-            v-for="item in batchTestResultItems"
+            v-for="item in filteredBatchTestResultItems"
             :key="item.account_id"
             :class="['sp-batch-result-item', batchTestItemTone(item.status)]"
           >
@@ -559,14 +594,16 @@
               </span>
             </div>
             <div class="sp-batch-result-item-meta">
-              <span>{{ batchPlatformLabel(item.platform || batchTestTargetPlatform(item.account_id)) }}</span>
+              <span
+                :class="['sp-platform-badge', platformBadgeClass(item.platform || batchTestTargetPlatform(item.account_id))]"
+              >{{ batchPlatformLabel(item.platform || batchTestTargetPlatform(item.account_id)) }}</span>
               <span v-if="item.latency_ms > 0">{{ item.latency_ms }} ms</span>
             </div>
             <p v-if="item.error_message" class="sp-batch-result-error">{{ item.error_message }}</p>
           </article>
         </div>
         <div v-else class="sp-batch-result-empty">
-          {{ batchTesting ? '测试任务正在排队，请稍候…' : '暂无测试结果' }}
+          {{ batchTestResultItems.length ? '当前筛选下暂无测试结果' : batchTesting ? '测试任务正在排队，请稍候…' : '暂无测试结果' }}
         </div>
       </div>
       <template #footer>
@@ -597,11 +634,35 @@
       width="wide"
       @close="closeAccountBindingEditor"
     >
-      <div v-if="bindingAccount" class="sp-account-binding-dialog">
+      <div
+        v-if="bindingAccount"
+        class="sp-account-binding-dialog"
+      >
         <div class="sp-account-binding-summary">
-          <span>本地账号</span>
-          <strong>{{ bindingAccount.name }}</strong>
-          <small>请选择该账号允许参与调度的分组。</small>
+          <span class="sp-account-binding-accent" :class="platformAccentBarClass(bindingPlatform || '')"></span>
+          <div class="sp-account-binding-selected-head">
+            <span>已选分组</span>
+            <strong :class="platformTextClass(bindingPlatform || '')">
+              {{ selectedBindingGroupIDs.length }} 个分组
+            </strong>
+          </div>
+          <div
+            v-if="selectedBindingGroups.length > 0"
+            class="sp-account-binding-selected-groups"
+          >
+            <GroupBadge
+              v-for="group in selectedBindingGroups"
+              :key="group.id"
+              :name="group.name"
+              :platform="group.platform"
+              :subscription-type="group.subscription_type"
+              :rate-multiplier="group.rate_multiplier"
+              show-rate
+            />
+          </div>
+          <div v-else class="sp-account-binding-empty">
+            当前未绑定任何分组，保存后该账号将不会参与分组调度。
+          </div>
         </div>
         <GroupSelector
           v-model="selectedBindingGroupIDs"
@@ -618,7 +679,7 @@
           @click="closeAccountBindingEditor"
         >取消</button>
         <button
-          class="sp-button primary"
+          :class="['sp-account-binding-primary', platformButtonClass(bindingPlatform || '')]"
           type="button"
           :disabled="savingBindingAccountID !== null"
           @click="saveAccountBinding"
@@ -663,7 +724,13 @@ import type {
   GroupPlatform,
   Proxy as AccountProxy,
 } from '@/types'
-import { platformBadgeClass, platformLabel, platformTextClass } from '@/utils/platformColors'
+import {
+  platformAccentBarClass,
+  platformBadgeClass,
+  platformButtonClass,
+  platformLabel,
+  platformTextClass,
+} from '@/utils/platformColors'
 import { extractApiErrorMessage } from '@/utils/apiError'
 
 const appStore = useAppStore()
@@ -689,8 +756,19 @@ type SupplierAccountFilterSnapshot = {
   summary: string
 }
 
+type AccountQuickFilterKey = 'all' | 'bound' | 'unbound' | 'schedulable' | 'paused' | 'failed'
+
+type AccountQuickFilterOption = {
+  key: AccountQuickFilterKey
+  label: string
+  count: number
+}
+
+type SupplierBatchResultFilter = 'all' | 'success' | 'failed'
+
 const providers = ref<SupplierProvider[]>([])
 const localGroups = ref<AdminGroup[]>([])
+const accountSourceItems = ref<SupplierProviderAccount[]>([])
 const items = ref<SupplierProviderAccount[]>([])
 const selected = ref<SupplierProviderAccount | null>(null)
 const testErrorAccount = ref<SupplierProviderAccount | null>(null)
@@ -710,6 +788,7 @@ const batchTesting = ref(false)
 const batchTestCancelling = ref(false)
 const batchTestTargets = ref<SupplierBatchTestTarget[]>([])
 const batchTestResult = ref<BatchAccountTestJob | null>(null)
+const batchTestResultFilter = ref<SupplierBatchResultFilter>('all')
 const batchTestFilterSummary = ref('')
 const batchTestModelByPlatform = ref<Record<string, string>>({})
 const batchTestModelOptionsByPlatform = ref<Record<string, ClaudeModel[]>>({})
@@ -721,6 +800,13 @@ const accountProxies = ref<AccountProxy[]>([])
 const bindingAccount = ref<Account | null>(null)
 const selectedBindingGroupIDs = ref<number[]>([])
 const bindingPlatform = ref<GroupPlatform | undefined>()
+const selectedBindingGroups = computed(() => {
+  const selectedIDs = new Set(selectedBindingGroupIDs.value)
+  return accountEditGroups.value.filter(group => selectedIDs.has(group.id))
+})
+const sortBy = ref('')
+const sortOrder = ref<'asc' | 'desc'>('asc')
+const accountQuickFilter = ref<AccountQuickFilterKey>('all')
 const savingBindingAccountID = ref<number | null>(null)
 const priorityDraft = ref('')
 const priorityInput = ref<InstanceType<typeof Input> | null>(null)
@@ -763,9 +849,37 @@ const localGroupOptions = computed<SelectOption[]>(() => [
       label: `${group.name} #${group.id}`,
     })),
 ])
+const accountQuickFilterOptions = computed<AccountQuickFilterOption[]>(() => [
+  { key: 'all', label: '全部', count: accountSourceItems.value.length },
+  {
+    key: 'bound',
+    label: '已绑定分组',
+    count: accountSourceItems.value.filter(account => accountMatchesQuickFilter(account, 'bound')).length,
+  },
+  {
+    key: 'unbound',
+    label: '未绑定分组',
+    count: accountSourceItems.value.filter(account => accountMatchesQuickFilter(account, 'unbound')).length,
+  },
+  {
+    key: 'schedulable',
+    label: '可参与调度',
+    count: accountSourceItems.value.filter(account => accountMatchesQuickFilter(account, 'schedulable')).length,
+  },
+  {
+    key: 'paused',
+    label: '暂停调度',
+    count: accountSourceItems.value.filter(account => accountMatchesQuickFilter(account, 'paused')).length,
+  },
+  {
+    key: 'failed',
+    label: '测试失败',
+    count: accountSourceItems.value.filter(account => accountMatchesQuickFilter(account, 'failed')).length,
+  },
+])
 const supplierIDs = computed(() => [...new Set([
   ...providers.value.map(provider => provider.id),
-  ...items.value.map(account => account.provider_id),
+  ...accountSourceItems.value.map(account => account.provider_id),
 ])].sort((left, right) => left - right))
 const activeFilterOptions: SelectOption[] = [
   { value: 'true', label: '仅有效' },
@@ -797,6 +911,7 @@ const batchTestTimeoutOptions: SelectOption[] = [
   { value: 90, label: '90 秒' },
   { value: 120, label: '120 秒' },
 ]
+const SUPPLIER_ACCOUNT_FILTER_PAGE_SIZE = 200
 const SUPPLIER_BATCH_TEST_PAGE_SIZE = 200
 const MAX_SUPPLIER_BATCH_TEST_ACCOUNTS = 200
 const SUPPLIER_BATCH_TEST_POLL_INTERVAL_MS = 1000
@@ -862,11 +977,35 @@ function createSupplierAccountFilterSnapshot(): SupplierAccountFilterSnapshot {
   }
 }
 
-const batchTestResultItems = computed(() => [...(batchTestResult.value?.results || [])].sort((left, right) => {
-  const leftFailed = left.status === 'success' ? 1 : 0
-  const rightFailed = right.status === 'success' ? 1 : 0
-  return leftFailed - rightFailed || left.account_id - right.account_id
-}))
+const batchTestResultItems = computed(() => (batchTestResult.value?.results || [])
+  .map((item, index) => ({ item, index }))
+  .sort((left, right) => {
+    const priorityDifference = batchTestResultPriority(left.item.status) - batchTestResultPriority(right.item.status)
+    return priorityDifference || left.index - right.index
+  })
+  .map(entry => entry.item))
+
+const batchTestResultFilterOptions = computed(() => [
+  { key: 'all' as const, label: '全部', count: batchTestResultItems.value.length },
+  {
+    key: 'success' as const,
+    label: '成功',
+    count: batchTestResultItems.value.filter(item => item.status === 'success').length,
+  },
+  {
+    key: 'failed' as const,
+    label: '失败',
+    count: batchTestResultItems.value.filter(item => isBatchTestFailureStatus(item.status)).length,
+  },
+])
+
+const filteredBatchTestResultItems = computed(() => {
+  if (batchTestResultFilter.value === 'all') return batchTestResultItems.value
+  if (batchTestResultFilter.value === 'success') {
+    return batchTestResultItems.value.filter(item => item.status === 'success')
+  }
+  return batchTestResultItems.value.filter(item => isBatchTestFailureStatus(item.status))
+})
 
 const batchTestCanCancel = computed(() => {
   const status = batchTestResult.value?.status
@@ -906,18 +1045,18 @@ const batchTestProgressDescription = computed(() => {
 })
 
 const accountColumns: Column[] = [
-  { key: 'provider_name', label: '供应商', class: 'min-w-[190px]' },
-  { key: 'upstream_account_key', label: '上游账号', class: 'min-w-[260px]' },
-  { key: 'local_account_name', label: '本地账号', class: 'min-w-[190px]' },
-  { key: 'local_account_priority', label: '优先级', class: 'min-w-[88px]' },
-  { key: 'rate_multiplier', label: '上游倍率', class: 'min-w-[104px]' },
+  { key: 'provider_name', label: '供应商', sortable: true, class: 'min-w-[190px]' },
+  { key: 'upstream_account_key', label: '上游账号', sortable: true, class: 'min-w-[260px]' },
+  { key: 'local_account_name', label: '本地账号', sortable: true, class: 'min-w-[190px]' },
+  { key: 'local_account_priority', label: '优先级', sortable: true, class: 'min-w-[88px]' },
+  { key: 'rate_multiplier', label: '上游倍率', sortable: true, class: 'min-w-[104px]' },
   { key: 'group_name', label: '账号绑定的分组', class: 'min-w-[260px]' },
-  { key: 'local_account_status', label: '本地账号状态', class: 'min-w-[136px]' },
-  { key: 'local_account_schedulable', label: '是否调度', class: 'min-w-[104px]' },
-  { key: 'local_account_last_test_status', label: '测试结果', class: 'min-w-[120px]' },
-  { key: 'local_account_last_tested_at', label: '上次测试时间', class: 'min-w-[172px]' },
-  { key: 'supplier_current_balance', label: '余额', class: 'min-w-[142px]' },
-  { key: 'supplier_today_cost', label: '今日消费', class: 'min-w-[142px]' },
+  { key: 'local_account_status', label: '本地账号状态', sortable: true, class: 'min-w-[136px]' },
+  { key: 'local_account_schedulable', label: '是否调度', sortable: true, class: 'min-w-[104px]' },
+  { key: 'local_account_last_test_status', label: '测试结果', sortable: true, class: 'min-w-[120px]' },
+  { key: 'local_account_last_tested_at', label: '上次测试时间', sortable: true, class: 'min-w-[172px]' },
+  { key: 'supplier_current_balance', label: '余额', sortable: true, class: 'min-w-[142px]' },
+  { key: 'supplier_today_cost', label: '今日消费', sortable: true, class: 'min-w-[142px]' },
   { key: 'actions', label: '操作', class: 'min-w-[300px]' },
 ]
 
@@ -962,23 +1101,63 @@ async function loadLocalGroups() {
   localGroups.value = await adminAPI.groups.getAll()
 }
 
+function accountMatchesQuickFilter(
+  account: SupplierProviderAccount,
+  filter: AccountQuickFilterKey
+): boolean {
+  if (filter === 'all') return true
+  if (filter === 'bound') return account.binding_groups.length > 0
+  if (filter === 'unbound') return account.binding_groups.length === 0
+  if (filter === 'failed') return account.local_account_last_test_status === 'failed'
+  if (account.local_account_match_status !== 'matched') return false
+  if (filter === 'schedulable') return account.local_account_schedulable === true
+  return account.local_account_schedulable === false
+}
+
+function applyAccountQuickFilterPage() {
+  const filteredAccounts = accountSourceItems.value.filter(account => (
+    accountMatchesQuickFilter(account, accountQuickFilter.value)
+  ))
+  total.value = filteredAccounts.length
+  const lastPage = Math.max(1, Math.ceil(total.value / pageSize.value))
+  if (page.value > lastPage) page.value = lastPage
+  const start = (page.value - 1) * pageSize.value
+  items.value = filteredAccounts.slice(start, start + pageSize.value)
+}
+
+function selectAccountQuickFilter(filter: AccountQuickFilterKey) {
+  if (accountQuickFilter.value === filter) return
+  accountQuickFilter.value = filter
+  page.value = 1
+  applyAccountQuickFilterPage()
+}
+
 async function loadAccounts() {
   loading.value = true
   error.value = ''
   try {
-    const result = await listSupplierAccounts({
-      provider_id: providerID.value || undefined,
-      group_id: groupID.value || undefined,
-      platform: platformFilter.value || undefined,
-      active: activeFilter.value === '' ? undefined : activeFilter.value === 'true',
-      search: search.value.trim() || undefined,
-      page: page.value,
-      page_size: pageSize.value,
-    })
-    items.value = result.items
-    total.value = result.total
-    page.value = result.page
-    pageSize.value = result.page_size
+    const loadedAccounts: SupplierProviderAccount[] = []
+    let nextPage = 1
+
+    while (true) {
+      const result = await listSupplierAccounts({
+        provider_id: providerID.value || undefined,
+        group_id: groupID.value || undefined,
+        platform: platformFilter.value || undefined,
+        active: activeFilter.value === '' ? undefined : activeFilter.value === 'true',
+        search: search.value.trim() || undefined,
+        sort_by: sortBy.value || undefined,
+        sort_order: sortBy.value ? sortOrder.value : undefined,
+        page: nextPage,
+        page_size: SUPPLIER_ACCOUNT_FILTER_PAGE_SIZE,
+      })
+      loadedAccounts.push(...result.items)
+      if (loadedAccounts.length >= result.total || result.items.length === 0) break
+      nextPage += 1
+    }
+
+    accountSourceItems.value = loadedAccounts
+    applyAccountQuickFilterPage()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载账号数据失败'
   } finally {
@@ -1048,6 +1227,7 @@ async function openSupplierBatchTestDialog(snapshot: SupplierAccountFilterSnapsh
     batchTestModelOptionsByPlatform.value = {}
     batchTestModelLoadingByPlatform.value = {}
     batchTestResult.value = null
+    batchTestResultFilter.value = 'all'
     batchTestFilterSummary.value = snapshot.summary
     showBatchTestConfigDialog.value = true
     await loadSupplierBatchTestModels()
@@ -1116,6 +1296,7 @@ async function startSupplierBatchTest() {
   batchTesting.value = true
   batchTestCancelling.value = false
   batchTestResult.value = null
+  batchTestResultFilter.value = 'all'
   showBatchTestConfigDialog.value = false
   showBatchTestResultDialog.value = true
   clearBatchTestPollTimer()
@@ -1234,6 +1415,16 @@ function batchTestItemStatusLabel(status: BatchAccountTestStatus): string {
   return '已取消'
 }
 
+function isBatchTestFailureStatus(status: BatchAccountTestStatus): boolean {
+  return status === 'failed' || status === 'timeout' || status === 'not_found'
+}
+
+function batchTestResultPriority(status: BatchAccountTestStatus): number {
+  if (isBatchTestFailureStatus(status)) return 0
+  if (status === 'cancelled') return 1
+  return 2
+}
+
 function batchTestItemTone(status: BatchAccountTestStatus): string {
   if (status === 'success') return 'success'
   if (status === 'cancelled') return 'neutral'
@@ -1257,7 +1448,7 @@ function resetPageAndLoad() {
 function handlePageChange(nextPage: number) {
   if (nextPage === page.value) return
   page.value = nextPage
-  void loadAccounts()
+  applyAccountQuickFilterPage()
 }
 
 function handlePageSizeChange(value: string | number | boolean | null) {
@@ -1265,7 +1456,8 @@ function handlePageSizeChange(value: string | number | boolean | null) {
   const nextPageSize = Number(value)
   if (![20, 50, 100].includes(nextPageSize) || nextPageSize === pageSize.value) return
   pageSize.value = nextPageSize
-  resetPageAndLoad()
+  page.value = 1
+  applyAccountQuickFilterPage()
 }
 
 function openDrawer(account: SupplierProviderAccount) {
@@ -1488,9 +1680,10 @@ async function savePriority(account: SupplierProviderAccount) {
   try {
     const updated = await adminAPI.accounts.update(localAccountID, { priority: nextPriority })
     const priority = typeof updated?.priority === 'number' ? updated.priority : nextPriority
-    items.value = items.value.map(item => item.local_account_id === localAccountID
+    accountSourceItems.value = accountSourceItems.value.map(item => item.local_account_id === localAccountID
       ? { ...item, local_account_priority: priority }
       : item)
+    applyAccountQuickFilterPage()
     if (selected.value?.local_account_id === localAccountID) {
       selected.value = { ...selected.value, local_account_priority: priority }
     }
@@ -1526,9 +1719,10 @@ async function handleToggleSchedulable(account: SupplierProviderAccount) {
   try {
     const updated = await adminAPI.accounts.setSchedulable(localAccountID, nextSchedulable)
     const schedulable = updated?.schedulable ?? nextSchedulable
-    items.value = items.value.map(item => item.local_account_id === localAccountID
+    accountSourceItems.value = accountSourceItems.value.map(item => item.local_account_id === localAccountID
       ? { ...item, local_account_schedulable: schedulable }
       : item)
+    applyAccountQuickFilterPage()
     if (selected.value?.local_account_id === localAccountID) {
       selected.value = { ...selected.value, local_account_schedulable: schedulable }
     }
@@ -1611,6 +1805,13 @@ function openAccountRateGuardLogs() {
 
 function closeAccountRateGuardLogs() {
   accountRateGuardLogsVisible.value = false
+}
+
+function handleAccountSort(key: string, order: 'asc' | 'desc') {
+  sortBy.value = key
+  sortOrder.value = order
+  page.value = 1
+  void loadAccounts()
 }
 
 function formatCNY(value?: number | null): string {
@@ -1732,10 +1933,105 @@ function formatTime(value?: string): string {
 }
 
 .sp-account-panel-head {
+  display: grid;
+  grid-template-columns: minmax(13rem, auto) minmax(28rem, 1fr) auto;
+  align-items: center;
+  gap: 1rem;
   min-height: 4.5rem;
   background:
     linear-gradient(90deg, color-mix(in srgb, var(--sp-cyan) 5%, transparent), transparent 34%),
     var(--sp-panel);
+}
+
+.sp-account-quick-filters {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
+.sp-account-quick-filter,
+.sp-batch-result-filters button {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.38rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 999px;
+  padding: 0.3rem 0.62rem;
+  background: color-mix(in srgb, var(--sp-panel-2) 88%, transparent);
+  color: var(--sp-muted);
+  font-size: 0.72rem;
+  font-weight: 750;
+  white-space: nowrap;
+  transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.sp-account-quick-filter:hover,
+.sp-batch-result-filters button:hover {
+  border-color: color-mix(in srgb, var(--sp-cyan) 42%, var(--sp-line));
+  color: var(--sp-text);
+  transform: translateY(-1px);
+}
+
+.sp-account-quick-filter strong,
+.sp-batch-result-filters button strong {
+  min-width: 1.25rem;
+  border-radius: 999px;
+  padding: 0.05rem 0.28rem;
+  background: color-mix(in srgb, var(--sp-muted) 12%, transparent);
+  color: var(--sp-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.68rem;
+  line-height: 1.1rem;
+  text-align: center;
+}
+
+.sp-account-quick-filter.active {
+  border-color: color-mix(in srgb, var(--sp-cyan) 55%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-cyan) 11%, var(--sp-panel));
+  color: var(--sp-cyan);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--sp-cyan) 8%, transparent);
+}
+
+.sp-account-quick-filter:nth-child(2).active,
+.sp-account-quick-filter:nth-child(4).active {
+  border-color: color-mix(in srgb, var(--sp-green) 52%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-green) 9%, var(--sp-panel));
+  color: var(--sp-green);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--sp-green) 7%, transparent);
+}
+
+.sp-account-quick-filter:nth-child(5).active {
+  border-color: color-mix(in srgb, var(--sp-amber) 55%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-amber) 9%, var(--sp-panel));
+  color: var(--sp-amber);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--sp-amber) 7%, transparent);
+}
+
+.sp-account-quick-filter:nth-child(6).active {
+  border-color: color-mix(in srgb, var(--sp-red) 52%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-red) 8%, var(--sp-panel));
+  color: var(--sp-red);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--sp-red) 6%, transparent);
+}
+
+.sp-account-quick-filter:nth-child(2) strong,
+.sp-account-quick-filter:nth-child(4) strong {
+  background: color-mix(in srgb, var(--sp-green) 13%, transparent);
+  color: var(--sp-green);
+}
+
+.sp-account-quick-filter:nth-child(5) strong {
+  background: color-mix(in srgb, var(--sp-amber) 14%, transparent);
+  color: var(--sp-amber);
+}
+
+.sp-account-quick-filter:nth-child(6) strong {
+  background: color-mix(in srgb, var(--sp-red) 12%, transparent);
+  color: var(--sp-red);
 }
 
 .sp-account-legend {
@@ -2132,23 +2428,69 @@ button.sp-test-status.failed:hover {
 }
 
 .sp-account-binding-summary {
+  position: relative;
+  overflow: hidden;
   display: grid;
-  gap: 0.25rem;
-  padding: 0.75rem;
+  gap: 0.75rem;
+  padding: 1rem;
   border: 1px solid var(--sp-line);
   border-radius: 0.65rem;
   background: var(--sp-panel-2);
 }
 
-.sp-account-binding-summary span,
-.sp-account-binding-summary small {
+.sp-account-binding-accent {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 0.2rem;
+}
+
+.sp-account-binding-selected-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.sp-account-binding-selected-head > span {
   color: var(--sp-muted);
   font-size: 0.75rem;
 }
 
-.sp-account-binding-summary strong {
-  color: var(--sp-text);
-  font-size: 0.9375rem;
+.sp-account-binding-selected-groups {
+  display: flex;
+  min-height: 2rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sp-account-binding-primary {
+  display: inline-flex;
+  min-width: 7rem;
+  min-height: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.875rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.sp-account-binding-primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.sp-account-binding-empty {
+  border: 1px dashed var(--sp-line);
+  border-radius: 0.6rem;
+  padding: 0.7rem 0.8rem;
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
 }
 
 .sp-account-empty {
@@ -2402,10 +2744,42 @@ button.sp-test-status.failed:hover {
   gap: 0.625rem;
 }
 
+.sp-batch-result-filters {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.15rem 0;
+}
+
+.sp-batch-result-filter-hint {
+  margin-left: auto;
+  color: var(--sp-muted);
+  font-size: 0.72rem;
+}
+
+.sp-batch-result-filters button.active {
+  border-color: color-mix(in srgb, var(--sp-cyan) 55%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-cyan) 10%, var(--sp-panel));
+  color: var(--sp-cyan);
+}
+
+.sp-batch-result-filters button:nth-child(2).active {
+  border-color: color-mix(in srgb, var(--sp-green) 50%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-green) 9%, var(--sp-panel));
+  color: var(--sp-green);
+}
+
+.sp-batch-result-filters button:nth-child(3).active {
+  border-color: color-mix(in srgb, var(--sp-red) 50%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-red) 8%, var(--sp-panel));
+  color: var(--sp-red);
+}
+
 .sp-batch-result-list {
   display: grid;
-  max-height: 26rem;
+  max-height: min(52vh, 34rem);
   overflow-y: auto;
+  overflow-x: hidden;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.625rem;
   padding-right: 0.2rem;
@@ -2421,14 +2795,17 @@ button.sp-test-status.failed:hover {
 
 .sp-batch-result-item.success {
   border-left-color: var(--sp-green);
+  background: color-mix(in srgb, var(--sp-green) 4%, var(--sp-panel-2));
 }
 
 .sp-batch-result-item.failed {
   border-left-color: var(--sp-red);
+  background: color-mix(in srgb, var(--sp-red) 4%, var(--sp-panel-2));
 }
 
 .sp-batch-result-item.warning {
   border-left-color: var(--sp-amber);
+  background: color-mix(in srgb, var(--sp-amber) 5%, var(--sp-panel-2));
 }
 
 .sp-batch-result-item.neutral {
@@ -2482,7 +2859,31 @@ button.sp-test-status.failed:hover {
   text-align: center;
 }
 
+:global(.modal-content:has(.sp-batch-result-dialog)) {
+  width: min(1600px, calc(100vw - 32px));
+  max-width: none;
+  overflow-x: hidden;
+}
+
+@media (max-width: 1280px) {
+  .sp-account-panel-head {
+    grid-template-columns: minmax(13rem, 1fr) auto;
+  }
+
+  .sp-account-quick-filters {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+}
+
 @media (max-width: 900px) {
+  .sp-batch-result-list {
+    grid-template-columns: 1fr;
+  }
+
   .sp-account-filter-body {
     align-items: stretch;
     flex-direction: column;
@@ -2528,7 +2929,13 @@ button.sp-test-status.failed:hover {
   }
 
   .sp-account-panel-head {
+    grid-template-columns: 1fr;
     min-height: auto;
+  }
+
+  .sp-account-quick-filters {
+    grid-column: auto;
+    grid-row: auto;
   }
 
   .sp-account-legend {
@@ -2562,6 +2969,12 @@ button.sp-test-status.failed:hover {
 
   .sp-account-refresh {
     width: 100%;
+  }
+
+  .sp-account-binding-selected-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.5rem;
   }
 }
 
