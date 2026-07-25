@@ -305,13 +305,17 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('resetRunFilters')
   })
 
-  it('uses common framework form controls instead of native select and input elements', () => {
+  it('uses common framework controls for form fields and reserves native input for account checkboxes', () => {
+    const nativeInputs = supplierAutomationSource.match(/<input\b[\s\S]*?\/>/g) || []
+
     expect(supplierAutomationSource).toContain("import Select, { type SelectOption } from '@/components/common/Select.vue'")
     expect(supplierAutomationSource).toContain("import Input from '@/components/common/Input.vue'")
     expect(supplierAutomationSource).toContain('<Select')
     expect(supplierAutomationSource).toContain('<Input')
     expect(supplierAutomationSource).not.toContain('<select')
-    expect(supplierAutomationSource).not.toContain('<input')
+    expect(nativeInputs).toHaveLength(1)
+    expect(nativeInputs[0]).toContain('type="checkbox"')
+    expect(nativeInputs[0]).toContain('@change="toggleHealthGuardAccount(mapping.localAccountID)"')
   })
 
   it('shows rate guard settings only for the rate guard task', () => {
@@ -338,7 +342,7 @@ describe('SupplierAutomationView edit dialog', () => {
       'account_health_guard_slow_threshold',
       'account_health_guard_recovery_threshold',
       'account_health_guard_healthy_latency_ms',
-      'account_health_guard_ignored_account_ids',
+      'account_health_guard_account_ids',
       'account_health_guard_account_models',
       'account_health_guard_platform_models',
       'account_health_guard_platform_latency_ms',
@@ -353,6 +357,10 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationAPISource).toContain('export interface SupplierAccountHealthGuardSource')
     expect(supplierAutomationAPISource).toContain('export interface SupplierAccountHealthGuardSkipReason')
     expect(supplierAutomationAPISource).toContain('account_health_guard?: SupplierAccountHealthGuardResult')
+    expect(supplierAutomationAPISource).toContain('selected_count: number')
+    expect(supplierAutomationAPISource).toContain('unavailable_count: number')
+    expect(supplierAutomationAPISource).toContain('pending_count: number')
+    expect(supplierAutomationAPISource).toContain("status: 'healthy' | 'slow' | 'failed' | 'skipped' | 'unavailable' | string")
   })
 
   it('uses the ordinary immediate run action for account health guard', () => {
@@ -376,15 +384,59 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('validateAccountHealthGuardConfig')
   })
 
-  it('manages ignored matched supplier accounts by local account id', () => {
+  it('configures checked accounts with platform filters and searchable model overrides', () => {
     expect(supplierAutomationSource).toContain("import { listSupplierAccounts")
+    expect(supplierAutomationSource).toContain("import { adminAPI } from '@/api/admin'")
     expect(supplierAutomationSource).toContain("match_status: 'matched'")
     expect(supplierAutomationSource).toContain('page_size: 200')
-    expect(supplierAutomationSource).toContain('account_health_guard_ignored_account_ids')
-    expect(supplierAutomationSource).toContain('openHealthGuardIgnoredAccounts')
-    expect(supplierAutomationSource).toContain('healthGuardIgnoredAccountsVisible')
-    expect(supplierAutomationSource).toContain('供应商账号 → 本地账号')
+    expect(supplierAutomationSource).toContain('while (items.length < result.total && result.items.length > 0)')
+    expect(supplierAutomationSource).toContain('account_health_guard_account_ids')
+    expect(supplierAutomationSource).not.toContain('account_health_guard_ignored_account_ids')
+    expect(supplierAutomationSource).toContain('openHealthGuardAccounts')
+    expect(supplierAutomationSource).toContain('healthGuardAccountsVisible')
+    expect(supplierAutomationSource).toContain('healthGuardAccountPlatformFilter')
+    expect(supplierAutomationSource).toContain('healthGuardAccountProviderFilter')
+    expect(supplierAutomationSource).toContain('healthGuardProviderFilterOptions')
+    expect(supplierAutomationSource).toContain('healthGuardAccountSearch')
+    expect(supplierAutomationSource).toContain('供应商过滤')
+    expect(supplierAutomationSource).toContain('平台默认测试模型')
+    expect(supplierAutomationSource).toContain('需要检查的账号')
+    expect(supplierAutomationSource).toContain('当前不可用')
+    expect(supplierAutomationSource).toContain('adminAPI.accounts.getAvailableModels')
+    expect(supplierAutomationSource).toContain('searchable')
     expect(supplierAutomationSource).toContain('normalizePositiveAccountIDs')
+    expect(supplierAutomationSource).toContain('type="checkbox"')
+    expect(supplierAutomationSource).toContain(':checked="healthGuardAccountIDs.includes(mapping.localAccountID)"')
+    expect(supplierAutomationSource).toContain('@change="toggleHealthGuardAccount(mapping.localAccountID)"')
+  })
+
+  it('renders health guard accounts as a unified selectable workspace', () => {
+    expect(supplierAutomationSource).toContain('healthGuardSelectedOnly')
+    expect(supplierAutomationSource).toContain('healthGuardWorkspaceAccounts')
+    expect(supplierAutomationSource).toContain('healthGuardSelectionSummary')
+    expect(supplierAutomationSource).toContain('仅看已选')
+    expect(supplierAutomationSource).toContain('使用平台默认')
+    expect(supplierAutomationSource).toContain('账号覆盖')
+    expect(supplierAutomationSource).toContain('.sp-health-guard-account-row.selected')
+    expect(supplierAutomationSource).toContain('.sp-health-guard-account-row.missing-model')
+    expect(supplierAutomationSource).toContain('color: var(--sp-green)')
+    expect(supplierAutomationSource).not.toContain('--sp-good')
+    expect(supplierAutomationSource).not.toContain('sp-health-guard-account-columns')
+  })
+
+  it('applies the automation dialog palette to the teleported health guard workspace', () => {
+    expect(supplierAutomationSource).toContain(':global(.modal-content:has(.sp-health-guard-account-dialog))')
+    expect(supplierAutomationSource).toContain(':global(.dark .modal-content:has(.sp-health-guard-account-dialog))')
+    expect(supplierAutomationSource).toContain(':global(.modal-content:has(.sp-health-guard-account-dialog) .modal-body)')
+    expect(supplierAutomationSource).toContain(':global(.modal-content:has(.sp-health-guard-account-dialog) .modal-footer)')
+  })
+
+  it('validates checked accounts and effective models before saving or running', () => {
+    expect(supplierAutomationSource).toContain('请至少选择一个需要检查的账号')
+    expect(supplierAutomationSource).toContain('以下账号尚未配置测试模型：')
+    expect(supplierAutomationSource).toContain('supplierAccountHealthGuardModelForMapping')
+    expect(supplierAutomationSource).toContain("if (taskCode === 'supplier_account_health_guard')")
+    expect(supplierAutomationSource).toContain('await ensureHealthGuardAccountCandidatesLoaded()')
   })
   it('provides dedicated preview, execute confirmation, and unbind log actions for account rate guard', () => {
     expect(supplierAutomationSource).toContain("task.task_code === 'supplier_account_rate_guard'")
@@ -404,8 +456,9 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain("value: 'slow'")
     expect(supplierAutomationSource).toContain("value: 'failed'")
     expect(supplierAutomationSource).toContain("value: 'skipped'")
+    expect(supplierAutomationSource).toContain("value: 'unavailable'")
     expect(supplierAutomationSource).toContain('健康守护明细')
-    for (const label of ['健康', '慢响应', '失败', '跳过', '暂停', '恢复']) {
+    for (const label of ['健康', '慢响应', '失败', '不可用', '待下轮', '暂停', '恢复']) {
       expect(supplierAutomationSource).toContain(label)
     }
     for (const field of [

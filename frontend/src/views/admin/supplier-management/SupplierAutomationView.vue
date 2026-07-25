@@ -256,12 +256,12 @@
               <Input :model-value="editForm.config.account_health_guard_recovery_threshold" type="number" label="连续健康恢复阈值" @update:model-value="editForm.config.account_health_guard_recovery_threshold = toNumber($event, editForm.config.account_health_guard_recovery_threshold)" />
               <Input :model-value="editForm.config.account_health_guard_healthy_latency_ms" type="number" label="默认健康延迟（毫秒）" @update:model-value="editForm.config.account_health_guard_healthy_latency_ms = toNumber($event, editForm.config.account_health_guard_healthy_latency_ms)" />
             </div>
-            <div class="sp-health-guard-ignore-card">
+            <div class="sp-health-guard-account-card">
               <div>
-                <strong>忽略账号</strong>
-                <span>当前已忽略 {{ healthGuardIgnoredAccountIDs.length }} 个本地账号，检测时按本地账号 ID 排除。</span>
+                <strong>需要检查的账号</strong>
+                <span>已选择 {{ healthGuardAccountIDs.length }} 个本地账号，可按平台设置默认测试模型并为账号单独覆盖。</span>
               </div>
-              <button class="sp-button small ghost" type="button" @click="openHealthGuardIgnoredAccounts">管理忽略账号</button>
+              <button class="sp-button small ghost" type="button" @click="openHealthGuardAccounts">配置检查账号</button>
             </div>
           </section>
 
@@ -476,15 +476,16 @@
 
             <section v-else-if="detailRun.result_detail?.account_health_guard && accountHealthGuardResult" class="sp-rate-guard-detail sp-account-health-guard-detail">
               <div class="sp-rate-guard-summary sp-account-health-guard-summary">
-                <div><span>候选账号</span><strong>{{ accountHealthGuardResult.total_accounts }}</strong></div>
+                <div><span>白名单账号</span><strong>{{ accountHealthGuardResult.total_accounts }}</strong></div>
+                <div><span>本轮选择</span><strong>{{ accountHealthGuardResult.selected_count }}</strong></div>
                 <div><span>检查</span><strong>{{ accountHealthGuardResult.checked_count }}</strong></div>
                 <div><span>健康</span><strong>{{ accountHealthGuardResult.healthy_count }}</strong></div>
                 <div><span>慢响应</span><strong>{{ accountHealthGuardResult.slow_count }}</strong></div>
                 <div><span>失败</span><strong>{{ accountHealthGuardResult.failed_count }}</strong></div>
-                <div><span>跳过</span><strong>{{ accountHealthGuardResult.skipped_count }}</strong></div>
+                <div><span>不可用</span><strong>{{ accountHealthGuardResult.unavailable_count }}</strong></div>
+                <div><span>待下轮</span><strong>{{ accountHealthGuardResult.pending_count }}</strong></div>
                 <div><span>暂停</span><strong>{{ accountHealthGuardResult.disabled_count }}</strong></div>
                 <div><span>恢复</span><strong>{{ accountHealthGuardResult.recovered_count }}</strong></div>
-                <div><span>无变更</span><strong>{{ accountHealthGuardResult.unchanged_count }}</strong></div>
               </div>
 
               <section v-if="accountHealthGuardResult.skip_reasons?.length" class="sp-health-guard-skip-reasons">
@@ -636,47 +637,162 @@
       </BaseDialog>
 
       <BaseDialog
-        :show="healthGuardIgnoredAccountsVisible"
-        title="管理健康守护忽略账号"
+        :show="healthGuardAccountsVisible"
+        title="配置健康守护账号"
         width="wide"
         :z-index="60"
-        @close="closeHealthGuardIgnoredAccounts"
+        @close="closeHealthGuardAccounts"
       >
-        <div class="sp-health-guard-ignore-dialog">
-          <p>从唯一匹配记录中选择“供应商账号 → 本地账号”，保存时仅记录本地账号 ID。</p>
-          <div class="sp-health-guard-ignore-add">
-            <Select
-              v-model="healthGuardIgnoredAccountToAdd"
-              :options="healthGuardIgnoredAccountOptions"
-              searchable
-              clearable
-              placeholder="选择要忽略的账号映射"
-              empty-text="没有可添加的唯一匹配账号"
-            >
-              <template #option="{ option }">
-                <span class="sp-health-guard-ignore-option"><strong>{{ option.label }}</strong><small>{{ option.meta }}</small></span>
-              </template>
-              <template #selected="{ option }">
-                <span v-if="option" class="sp-health-guard-ignore-option"><strong>{{ option.label }}</strong><small>{{ option.meta }}</small></span>
-                <span v-else>选择要忽略的账号映射</span>
-              </template>
-            </Select>
-            <button class="sp-button primary" type="button" :disabled="!healthGuardIgnoredAccountToAdd" @click="addHealthGuardIgnoredAccount">添加</button>
-          </div>
-          <div v-if="loadingHealthGuardSupplierAccounts" class="sp-rate-guard-empty">正在加载唯一匹配账号...</div>
-          <div v-else-if="healthGuardIgnoredAccountRows.length" class="sp-health-guard-ignore-list">
-            <article v-for="mapping in healthGuardIgnoredAccountRows" :key="mapping.localAccountID">
-              <div>
-                <strong>{{ mapping.sources[0]?.name || '供应商账号记录不可用' }} → {{ mapping.localAccountName }}</strong>
-                <span>{{ mapping.sources.map(source => source.provider_name).filter(Boolean).join('、') || '供应商来源不可用' }} · {{ mapping.platform }} · 本地 #{{ mapping.localAccountID }}</span>
+        <div class="sp-health-guard-account-dialog">
+          <section class="sp-health-guard-platform-models">
+            <div class="sp-health-guard-dialog-section-head">
+              <strong>平台默认测试模型</strong>
+              <span>账号未单独设置模型时使用对应平台的默认值。</span>
+            </div>
+            <div v-if="healthGuardPlatformSummaries.length" class="sp-health-guard-platform-model-grid">
+              <article v-for="summary in healthGuardPlatformSummaries" :key="summary.platform">
+                <div>
+                  <strong>{{ platformLabel(summary.platform) }}</strong>
+                  <span>{{ summary.accountCount }} 个可选账号</span>
+                </div>
+                <Select
+                  v-model="editForm.config.account_health_guard_platform_models[summary.platform]"
+                  :options="healthGuardModelSelectOptions(summary.platform, editForm.config.account_health_guard_platform_models[summary.platform])"
+                  searchable
+                  clearable
+                  :placeholder="healthGuardModelLoadingByPlatform[summary.platform] ? '加载模型中…' : '选择平台默认模型'"
+                  empty-text="暂无可用模型"
+                />
+              </article>
+            </div>
+            <div v-else class="sp-rate-guard-empty">当前没有可配置默认模型的平台。</div>
+          </section>
+
+          <section class="sp-health-guard-account-workspace">
+            <div class="sp-health-guard-selection-summary" aria-label="健康守护账号配置摘要">
+              <article>
+                <span>已选账号</span>
+                <strong>{{ healthGuardSelectionSummary.selected }}</strong>
+              </article>
+              <article>
+                <span>使用平台默认模型</span>
+                <strong>{{ healthGuardSelectionSummary.platformDefault }}</strong>
+              </article>
+              <article>
+                <span>账号模型覆盖</span>
+                <strong>{{ healthGuardSelectionSummary.overridden }}</strong>
+              </article>
+              <article :class="{ warning: healthGuardSelectionSummary.missingModel > 0 }">
+                <span>缺少有效模型</span>
+                <strong>{{ healthGuardSelectionSummary.missingModel }}</strong>
+              </article>
+            </div>
+
+            <div class="sp-health-guard-account-toolbar">
+              <div class="sp-health-guard-account-filters">
+                <Select
+                  v-model="healthGuardAccountPlatformFilter"
+                  :options="healthGuardPlatformFilterOptions"
+                  :searchable="false"
+                />
+                <Select
+                  v-model="healthGuardAccountProviderFilter"
+                  :options="healthGuardProviderFilterOptions"
+                  searchable
+                  placeholder="供应商过滤"
+                  empty-text="暂无供应商"
+                />
+                <Input v-model="healthGuardAccountSearch" placeholder="搜索账号名称或供应商来源" />
+                <button
+                  class="sp-health-guard-selected-toggle"
+                  :class="{ active: healthGuardSelectedOnly }"
+                  type="button"
+                  :aria-pressed="healthGuardSelectedOnly"
+                  @click="healthGuardSelectedOnly = !healthGuardSelectedOnly"
+                >
+                  <span class="sp-health-guard-selected-toggle-mark" aria-hidden="true"></span>
+                  仅看已选
+                  <strong>{{ healthGuardSelectionSummary.selected }}</strong>
+                </button>
               </div>
-              <button class="sp-button small ghost" type="button" @click="removeHealthGuardIgnoredAccount(mapping.localAccountID)">移除</button>
-            </article>
-          </div>
-          <div v-else class="sp-rate-guard-empty">当前没有忽略账号。</div>
+              <span class="sp-health-guard-filter-result">筛选结果 {{ healthGuardWorkspaceAccounts.length }} 个</span>
+            </div>
+
+            <div v-if="loadingHealthGuardSupplierAccounts" class="sp-rate-guard-empty">正在加载账号...</div>
+            <div v-else-if="healthGuardWorkspaceAccounts.length" class="sp-health-guard-account-list">
+              <article
+                v-for="mapping in healthGuardWorkspaceAccounts"
+                :key="mapping.localAccountID"
+                class="sp-health-guard-account-row"
+                :class="{
+                  selected: healthGuardAccountIsSelected(mapping.localAccountID),
+                  unavailable: !mapping.available,
+                  'missing-model': healthGuardAccountIsSelected(mapping.localAccountID)
+                    && mapping.available
+                    && !supplierAccountHealthGuardModelForMapping(editForm.config, mapping),
+                }"
+              >
+                <div class="sp-health-guard-account-row-main">
+                  <label class="sp-health-guard-account-choice">
+                    <input
+                      type="checkbox"
+                      :checked="healthGuardAccountIDs.includes(mapping.localAccountID)"
+                      :aria-label="`${healthGuardAccountIsSelected(mapping.localAccountID) ? '取消选择' : '选择'}账号 ${mapping.localAccountName}`"
+                      @change="toggleHealthGuardAccount(mapping.localAccountID)"
+                    />
+                    <span class="sp-health-guard-account-choice-copy">
+                      <strong>{{ mapping.localAccountName }}</strong>
+                      <span v-if="mapping.available">{{ platformLabel(mapping.platform) }} · 本地 #{{ mapping.localAccountID }}</span>
+                      <span v-else class="sp-health-guard-unavailable">当前不可用 · 本地 #{{ mapping.localAccountID }}</span>
+                      <small>{{ healthGuardSourceSummary(mapping) }}</small>
+                    </span>
+                  </label>
+                  <span
+                    v-if="healthGuardAccountIsSelected(mapping.localAccountID) && !mapping.available"
+                    class="sp-health-guard-model-status unavailable"
+                  >当前不可用</span>
+                  <span
+                    v-else-if="healthGuardAccountIsSelected(mapping.localAccountID) && healthGuardAccountOverrideModel(mapping.localAccountID)"
+                    class="sp-health-guard-model-status override"
+                  >账号覆盖</span>
+                  <span
+                    v-else-if="healthGuardAccountIsSelected(mapping.localAccountID) && healthGuardPlatformDefaultModel(mapping.platform)"
+                    class="sp-health-guard-model-status"
+                  >平台默认</span>
+                  <span
+                    v-else-if="healthGuardAccountIsSelected(mapping.localAccountID)"
+                    class="sp-health-guard-model-status missing"
+                  >缺少模型</span>
+                </div>
+
+                <div v-if="healthGuardAccountIsSelected(mapping.localAccountID)" class="sp-health-guard-account-model-editor">
+                  <Select
+                    v-if="mapping.available"
+                    v-model="editForm.config.account_health_guard_account_models[String(mapping.localAccountID)]"
+                    :options="healthGuardModelSelectOptions(mapping.platform, editForm.config.account_health_guard_account_models[String(mapping.localAccountID)])"
+                    searchable
+                    clearable
+                    placeholder="使用平台默认模型"
+                    empty-text="暂无可用模型"
+                  />
+                  <small v-if="mapping.available && healthGuardAccountOverrideModel(mapping.localAccountID)" class="sp-health-guard-effective-model">
+                    账号覆盖：{{ healthGuardAccountOverrideModel(mapping.localAccountID) }}
+                  </small>
+                  <small v-else-if="mapping.available && healthGuardPlatformDefaultModel(mapping.platform)" class="sp-health-guard-effective-model">
+                    使用平台默认：{{ healthGuardPlatformDefaultModel(mapping.platform) }}
+                  </small>
+                  <small v-else-if="mapping.available" class="sp-health-guard-missing-model">尚未配置有效测试模型</small>
+                  <small v-else>账号已停用、删除或匹配失效，运行时将记录为不可用；取消勾选即可移除。</small>
+                </div>
+              </article>
+            </div>
+            <div v-else class="sp-rate-guard-empty">
+              {{ healthGuardSelectedOnly ? '当前筛选条件下没有已选账号。' : '当前筛选条件下没有可配置账号。' }}
+            </div>
+          </section>
         </div>
         <template #footer>
-          <button class="sp-button primary" type="button" @click="closeHealthGuardIgnoredAccounts">完成</button>
+          <button class="sp-button primary" type="button" @click="closeHealthGuardAccounts">完成</button>
         </template>
       </BaseDialog>
 
@@ -718,6 +834,7 @@ import Pagination from '@/components/common/Pagination.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import type { Column } from '@/components/common/types'
+import { adminAPI } from '@/api/admin'
 import { listSupplierAccounts, type SupplierProviderAccount } from '@/api/admin/supplierProviderData'
 import {
   listAccountRateGuardUnbindLogs,
@@ -728,8 +845,11 @@ import {
   type SupplierAutomationProviderRunDetail,
   type SupplierAutomationRun,
   type SupplierAutomationStageRunDetail,
+  type SupplierAutomationConfig,
   type SupplierAutomationTask,
 } from '@/api/admin/supplierAutomation'
+import type { ClaudeModel } from '@/types'
+import { platformLabel } from '@/utils/platformColors'
 
 const tasks = ref<SupplierAutomationTask[]>([])
 const runs = ref<SupplierAutomationRun[]>([])
@@ -757,10 +877,15 @@ const accountRateGuardExecuteVisible = ref(false)
 const pendingExecuteTask = ref<SupplierAutomationTask | null>(null)
 const accountRateGuardLogsVisible = ref(false)
 const accountRateGuardPendingCount = ref(0)
-const healthGuardIgnoredAccountsVisible = ref(false)
-const healthGuardIgnoredAccountToAdd = ref('')
+const healthGuardAccountsVisible = ref(false)
+const healthGuardAccountPlatformFilter = ref('')
+const healthGuardAccountProviderFilter = ref('')
+const healthGuardAccountSearch = ref('')
+const healthGuardSelectedOnly = ref(false)
 const healthGuardSupplierAccounts = ref<SupplierProviderAccount[]>([])
 const loadingHealthGuardSupplierAccounts = ref(false)
+const healthGuardModelOptionsByPlatform = ref<Record<string, ClaudeModel[]>>({})
+const healthGuardModelLoadingByPlatform = ref<Record<string, boolean>>({})
 const healthGuardStatusFilter = ref('all')
 
 let toastTimer: number | undefined
@@ -788,7 +913,7 @@ const editForm = reactive<SupplierAutomationTask>({
     account_health_guard_slow_threshold: 3,
     account_health_guard_recovery_threshold: 2,
     account_health_guard_healthy_latency_ms: 15000,
-    account_health_guard_ignored_account_ids: [],
+    account_health_guard_account_ids: [],
     account_health_guard_account_models: {},
     account_health_guard_platform_models: {},
     account_health_guard_platform_latency_ms: {},
@@ -847,6 +972,7 @@ const healthGuardStatusFilterOptions: SelectOption[] = [
   { value: 'slow', label: '慢响应' },
   { value: 'failed', label: '失败' },
   { value: 'skipped', label: '跳过' },
+  { value: 'unavailable', label: '不可用' },
 ]
 const taskColumns: Column[] = [
   { key: 'task', label: '任务', class: 'min-w-[210px]' },
@@ -992,6 +1118,12 @@ async function saveTask() {
     }
   }
   if (editForm.task_code === 'supplier_account_health_guard') {
+    try {
+      await ensureHealthGuardAccountCandidatesLoaded()
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : '加载健康守护账号失败'
+      return
+    }
     const validationMessage = validateAccountHealthGuardConfig()
     if (validationMessage) {
       error.value = validationMessage
@@ -1013,6 +1145,22 @@ async function saveTask() {
 }
 
 async function runNow(taskCode: string) {
+  if (taskCode === 'supplier_account_health_guard') {
+    try {
+      await ensureHealthGuardAccountCandidatesLoaded()
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : '加载健康守护账号失败'
+      return
+    }
+    const task = tasks.value.find(item => item.task_code === taskCode)
+    const validationMessage = task
+      ? validateAccountHealthGuardSelection(task.config)
+      : '请至少选择一个需要检查的账号'
+    if (validationMessage) {
+      error.value = validationMessage
+      return
+    }
+  }
   runningCode.value = taskCode
   runningMode.value = 'execute'
   try {
@@ -1121,6 +1269,7 @@ function accountHealthGuardStatusText(status: string): string {
     slow: '慢响应',
     failed: '失败',
     skipped: '跳过',
+    unavailable: '不可用',
   }
   return labels[status] || status || '-'
 }
@@ -1136,7 +1285,7 @@ function accountHealthGuardActionText(action: string): string {
 
 function accountHealthGuardStatusTone(status: string): string {
   if (status === 'healthy') return 'good'
-  if (status === 'slow' || status === 'skipped') return 'warn'
+  if (status === 'slow' || status === 'skipped' || status === 'unavailable') return 'warn'
   if (status === 'failed') return 'bad'
   return ''
 }
@@ -1306,7 +1455,7 @@ function taskResultSummary(task: SupplierAutomationTask): string {
 function runSummary(run: SupplierAutomationRun): string {
   const healthGuard = run.result_detail?.account_health_guard
   if (healthGuard) {
-    return `检查 ${healthGuard.checked_count}，健康 ${healthGuard.healthy_count}，慢响应 ${healthGuard.slow_count}，失败 ${healthGuard.failed_count}，跳过 ${healthGuard.skipped_count}，暂停 ${healthGuard.disabled_count}，恢复 ${healthGuard.recovered_count}`
+    return `检查 ${healthGuard.checked_count}，健康 ${healthGuard.healthy_count}，慢响应 ${healthGuard.slow_count}，失败 ${healthGuard.failed_count}，不可用 ${healthGuard.unavailable_count}，待下轮 ${healthGuard.pending_count}，暂停 ${healthGuard.disabled_count}，恢复 ${healthGuard.recovered_count}`
   }
   if (!run.processed_count && !run.success_count && !run.failed_count) {
     return compactMessage(run.message || '暂无结果')
@@ -1318,7 +1467,24 @@ interface HealthGuardAccountMapping {
   localAccountID: number
   localAccountName: string
   platform: string
+  available: boolean
   sources: SupplierProviderAccount[]
+}
+
+interface HealthGuardPlatformSummary {
+  platform: string
+  accountCount: number
+  representativeAccountID: number
+}
+
+function normalizeHealthGuardPlatform(platform?: string): string {
+  return platform?.trim().toLowerCase() || 'unknown'
+}
+
+function isHealthGuardAccountAvailable(account: SupplierProviderAccount): boolean {
+  return account.active
+    && account.local_account_match_status === 'matched'
+    && account.local_account_status === 'active'
 }
 
 const healthGuardAccountMappings = computed<HealthGuardAccountMapping[]>(() => {
@@ -1326,45 +1492,266 @@ const healthGuardAccountMappings = computed<HealthGuardAccountMapping[]>(() => {
   for (const account of healthGuardSupplierAccounts.value) {
     const localAccountID = Number(account.local_account_id)
     if (!Number.isSafeInteger(localAccountID) || localAccountID <= 0) continue
+
+    const available = isHealthGuardAccountAvailable(account)
     const current = grouped.get(localAccountID)
     if (current) {
       current.sources.push(account)
+      if (available) {
+        current.available = true
+        current.platform = normalizeHealthGuardPlatform(account.platform)
+        current.localAccountName = account.local_account_name || current.localAccountName
+      }
       continue
     }
+
     grouped.set(localAccountID, {
       localAccountID,
-      localAccountName: account.local_account_name || `本地账号 ${localAccountID}`,
-      platform: account.platform || '-',
+      localAccountName: account.local_account_name || `账号 #${localAccountID}`,
+      platform: normalizeHealthGuardPlatform(account.platform),
+      available,
       sources: [account],
     })
   }
   return Array.from(grouped.values()).sort((a, b) => a.localAccountName.localeCompare(b.localAccountName, 'zh-CN'))
 })
 
-const healthGuardIgnoredAccountIDs = computed(() =>
-  normalizePositiveAccountIDs(editForm.config.account_health_guard_ignored_account_ids)
+const healthGuardAccountIDs = computed(() =>
+  normalizePositiveAccountIDs(editForm.config.account_health_guard_account_ids)
 )
 
-const healthGuardIgnoredAccountOptions = computed<SelectOption[]>(() => {
-  const ignored = new Set(healthGuardIgnoredAccountIDs.value)
-  return healthGuardAccountMappings.value
-    .filter(mapping => !ignored.has(mapping.localAccountID))
-    .map(mapping => ({
-      value: String(mapping.localAccountID),
-      label: `${mapping.sources[0]?.name || '供应商账号'} → ${mapping.localAccountName}`,
-      meta: `${mapping.sources.map(source => source.provider_name).filter(Boolean).join('、') || '供应商'} · 本地 #${mapping.localAccountID}`,
-    }))
+const healthGuardAvailableAccountMappings = computed(() =>
+  healthGuardAccountMappings.value.filter(mapping => mapping.available)
+)
+
+const healthGuardSelectedAccountRows = computed(() =>
+  healthGuardSelectedRowsForConfig(editForm.config)
+)
+
+const healthGuardPlatformSummaries = computed<HealthGuardPlatformSummary[]>(() => {
+  const summaries = new Map<string, HealthGuardPlatformSummary>()
+  for (const mapping of healthGuardAvailableAccountMappings.value) {
+    const current = summaries.get(mapping.platform)
+    if (current) {
+      current.accountCount += 1
+      continue
+    }
+    summaries.set(mapping.platform, {
+      platform: mapping.platform,
+      accountCount: 1,
+      representativeAccountID: mapping.localAccountID,
+    })
+  }
+  return Array.from(summaries.values()).sort((a, b) => platformLabel(a.platform).localeCompare(platformLabel(b.platform), 'zh-CN'))
 })
 
-const healthGuardIgnoredAccountRows = computed(() => {
-  const mappings = new Map(healthGuardAccountMappings.value.map(mapping => [mapping.localAccountID, mapping]))
-  return healthGuardIgnoredAccountIDs.value.map(id => mappings.get(id) || {
-    localAccountID: id,
-    localAccountName: `本地账号 ${id}`,
-    platform: '-',
-    sources: [],
+const healthGuardPlatformFilterOptions = computed<SelectOption[]>(() => [
+  { value: '', label: '全部平台' },
+  ...healthGuardPlatformSummaries.value.map(summary => ({
+    value: summary.platform,
+    label: `${platformLabel(summary.platform)}（${summary.accountCount}）`,
+  })),
+])
+
+const healthGuardProviderFilterOptions = computed<SelectOption[]>(() => {
+  const providers = new Map<number, { name: string; accountIDs: Set<number> }>()
+  for (const mapping of healthGuardAvailableAccountMappings.value) {
+    for (const source of mapping.sources) {
+      const providerID = Number(source.provider_id)
+      if (!Number.isSafeInteger(providerID) || providerID <= 0) continue
+      const current = providers.get(providerID)
+      if (current) {
+        current.accountIDs.add(mapping.localAccountID)
+        if (!current.name && source.provider_name) current.name = source.provider_name
+        continue
+      }
+      providers.set(providerID, {
+        name: source.provider_name || `供应商 ${providerID}`,
+        accountIDs: new Set([mapping.localAccountID]),
+      })
+    }
+  }
+
+  return [
+    { value: '', label: '全部供应商' },
+    ...Array.from(providers.entries())
+      .sort(([, a], [, b]) => a.name.localeCompare(b.name, 'zh-CN'))
+      .map(([providerID, provider]) => ({
+        value: String(providerID),
+        label: `${provider.name}（${provider.accountIDs.size}）`,
+      })),
+  ]
+})
+
+const healthGuardWorkspaceAccounts = computed(() => {
+  const accounts = [...healthGuardAvailableAccountMappings.value]
+  const includedAccountIDs = new Set(accounts.map(mapping => mapping.localAccountID))
+  for (const mapping of healthGuardSelectedAccountRows.value) {
+    if (includedAccountIDs.has(mapping.localAccountID)) continue
+    accounts.push(mapping)
+    includedAccountIDs.add(mapping.localAccountID)
+  }
+
+  const platform = healthGuardAccountPlatformFilter.value
+  const providerID = healthGuardAccountProviderFilter.value
+  const keyword = healthGuardAccountSearch.value.trim().toLowerCase()
+  return accounts.filter(mapping => {
+    if (healthGuardSelectedOnly.value && !healthGuardAccountIDs.value.includes(mapping.localAccountID)) return false
+    if (platform && mapping.platform !== platform) return false
+    if (providerID && !mapping.sources.some(source => String(source.provider_id) === providerID)) return false
+    if (!keyword) return true
+    const searchableText = [
+      mapping.localAccountName,
+      String(mapping.localAccountID),
+      mapping.platform,
+      ...mapping.sources.flatMap(source => [source.name, source.provider_name, source.upstream_account_key]),
+    ].filter(Boolean).join(' ').toLowerCase()
+    return searchableText.includes(keyword)
   })
 })
+
+const healthGuardSelectionSummary = computed(() => {
+  const accountModels = normalizeStringMap(editForm.config.account_health_guard_account_models)
+  const platformModels = normalizeStringMap(editForm.config.account_health_guard_platform_models)
+  let platformDefault = 0
+  let overridden = 0
+  let missingModel = 0
+
+  for (const mapping of healthGuardSelectedAccountRows.value) {
+    if (!mapping.available) continue
+    if (accountModels[String(mapping.localAccountID)]?.trim()) {
+      overridden += 1
+    } else if (platformModels[mapping.platform]?.trim()) {
+      platformDefault += 1
+    } else {
+      missingModel += 1
+    }
+  }
+
+  return {
+    selected: healthGuardAccountIDs.value.length,
+    platformDefault,
+    overridden,
+    missingModel,
+  }
+})
+function healthGuardSelectedRowsForConfig(config: SupplierAutomationConfig): HealthGuardAccountMapping[] {
+  const mappings = new Map(healthGuardAccountMappings.value.map(mapping => [mapping.localAccountID, mapping]))
+  return normalizePositiveAccountIDs(config.account_health_guard_account_ids).map(id => mappings.get(id) || {
+    localAccountID: id,
+    localAccountName: `账号 #${id}`,
+    platform: 'unknown',
+    available: false,
+    sources: [],
+  })
+}
+
+function healthGuardSourceSummary(mapping: HealthGuardAccountMapping): string {
+  const sources = mapping.sources
+    .map(source => `${source.provider_name || `供应商 ${source.provider_id}`} · ${source.name || source.upstream_account_key}`)
+    .filter(Boolean)
+  return sources.length ? sources.join('；') : '供应商来源不可用'
+}
+
+function healthGuardModelSelectOptions(platform: string, currentModel = ''): SelectOption[] {
+  const models = healthGuardModelOptionsByPlatform.value[platform] || []
+  const options: SelectOption[] = [
+    {
+      value: '',
+      label: healthGuardModelLoadingByPlatform.value[platform] ? '加载模型中…' : '未配置',
+    },
+    ...models.map(model => ({
+      value: model.id,
+      label: model.display_name || model.id,
+    })),
+  ]
+  const normalizedCurrentModel = currentModel?.trim()
+  if (normalizedCurrentModel && !models.some(model => model.id === normalizedCurrentModel)) {
+    options.splice(1, 0, {
+      value: normalizedCurrentModel,
+      label: `${normalizedCurrentModel}（当前配置）`,
+    })
+  }
+  return options
+}
+
+function healthGuardAccountIsSelected(accountID: number): boolean {
+  return healthGuardAccountIDs.value.includes(accountID)
+}
+
+function healthGuardAccountOverrideModel(accountID: number): string {
+  return normalizeStringMap(editForm.config.account_health_guard_account_models)[String(accountID)]?.trim() || ''
+}
+
+function healthGuardPlatformDefaultModel(platform: string): string {
+  return normalizeStringMap(editForm.config.account_health_guard_platform_models)[platform]?.trim() || ''
+}
+
+function supplierAccountHealthGuardModelForMapping(
+  config: SupplierAutomationConfig,
+  mapping: HealthGuardAccountMapping
+): string {
+  const accountModels = normalizeStringMap(config.account_health_guard_account_models)
+  const platformModels = normalizeStringMap(config.account_health_guard_platform_models)
+  return accountModels[String(mapping.localAccountID)]?.trim()
+    || platformModels[mapping.platform]?.trim()
+    || ''
+}
+
+async function ensureHealthGuardAccountCandidatesLoaded() {
+  loadingHealthGuardSupplierAccounts.value = true
+  try {
+    const items: SupplierProviderAccount[] = []
+    let page = 1
+    let result = await listSupplierAccounts({
+      active: true,
+      match_status: 'matched',
+      page,
+      page_size: 200,
+    })
+    items.push(...(result.items || []))
+
+    while (items.length < result.total && result.items.length > 0) {
+      page += 1
+      result = await listSupplierAccounts({
+        active: true,
+        match_status: 'matched',
+        page,
+        page_size: 200,
+      })
+      items.push(...(result.items || []))
+    }
+    healthGuardSupplierAccounts.value = items
+  } finally {
+    loadingHealthGuardSupplierAccounts.value = false
+  }
+}
+
+async function loadHealthGuardModels() {
+  healthGuardModelOptionsByPlatform.value = {}
+  healthGuardModelLoadingByPlatform.value = Object.fromEntries(
+    healthGuardPlatformSummaries.value.map(summary => [summary.platform, true])
+  )
+  await Promise.all(healthGuardPlatformSummaries.value.map(async summary => {
+    try {
+      const models = await adminAPI.accounts.getAvailableModels(summary.representativeAccountID)
+      healthGuardModelOptionsByPlatform.value = {
+        ...healthGuardModelOptionsByPlatform.value,
+        [summary.platform]: models,
+      }
+    } catch {
+      healthGuardModelOptionsByPlatform.value = {
+        ...healthGuardModelOptionsByPlatform.value,
+        [summary.platform]: [],
+      }
+    } finally {
+      healthGuardModelLoadingByPlatform.value = {
+        ...healthGuardModelLoadingByPlatform.value,
+        [summary.platform]: false,
+      }
+    }
+  }))
+}
 
 function applyAccountHealthGuardDefaults() {
   const config = editForm.config
@@ -1375,7 +1762,7 @@ function applyAccountHealthGuardDefaults() {
   config.account_health_guard_slow_threshold = positiveIntegerOr(config.account_health_guard_slow_threshold, 3)
   config.account_health_guard_recovery_threshold = positiveIntegerOr(config.account_health_guard_recovery_threshold, 2)
   config.account_health_guard_healthy_latency_ms = positiveIntegerOr(config.account_health_guard_healthy_latency_ms, 15000)
-  config.account_health_guard_ignored_account_ids = normalizePositiveAccountIDs(config.account_health_guard_ignored_account_ids)
+  config.account_health_guard_account_ids = normalizePositiveAccountIDs(config.account_health_guard_account_ids)
   config.account_health_guard_account_models = normalizeStringMap(config.account_health_guard_account_models)
   config.account_health_guard_platform_models = normalizeStringMap(config.account_health_guard_platform_models)
   config.account_health_guard_platform_latency_ms = normalizePositiveNumberMap(config.account_health_guard_platform_latency_ms)
@@ -1383,8 +1770,20 @@ function applyAccountHealthGuardDefaults() {
   config.account_health_guard_cursor_account_id = Number.isSafeInteger(cursorAccountID) && cursorAccountID > 0 ? cursorAccountID : 0
 }
 
-function validateAccountHealthGuardConfig(): string {
-  const config = editForm.config
+function validateAccountHealthGuardSelection(config: SupplierAutomationConfig): string {
+  const accountIDs = normalizePositiveAccountIDs(config.account_health_guard_account_ids)
+  if (!accountIDs.length) return '请至少选择一个需要检查的账号'
+
+  const missingModelAccounts = healthGuardSelectedRowsForConfig(config)
+    .filter(mapping => mapping.available && !supplierAccountHealthGuardModelForMapping(config, mapping))
+    .map(mapping => mapping.localAccountName)
+  if (missingModelAccounts.length) {
+    return `以下账号尚未配置测试模型：${missingModelAccounts.join('、')}`
+  }
+  return ''
+}
+
+function validateAccountHealthGuardConfig(config: SupplierAutomationConfig = editForm.config): string {
   const rules: Array<[number, number, number, string]> = [
     [config.account_health_guard_max_accounts_per_run, 1, 1000, '单次检查账号数必须在 1 到 1000 之间'],
     [config.account_health_guard_concurrency, 1, 8, '并发数必须在 1 到 8 之间'],
@@ -1397,51 +1796,51 @@ function validateAccountHealthGuardConfig(): string {
   for (const [value, min, max, message] of rules) {
     if (!Number.isInteger(value) || value < min || value > max) return message
   }
-  config.account_health_guard_ignored_account_ids = normalizePositiveAccountIDs(config.account_health_guard_ignored_account_ids)
+  config.account_health_guard_account_ids = normalizePositiveAccountIDs(config.account_health_guard_account_ids)
   config.account_health_guard_account_models = normalizeStringMap(config.account_health_guard_account_models)
   config.account_health_guard_platform_models = normalizeStringMap(config.account_health_guard_platform_models)
   config.account_health_guard_platform_latency_ms = normalizePositiveNumberMap(config.account_health_guard_platform_latency_ms)
-  return ''
+  return validateAccountHealthGuardSelection(config)
 }
 
-async function openHealthGuardIgnoredAccounts() {
-  healthGuardIgnoredAccountsVisible.value = true
-  healthGuardIgnoredAccountToAdd.value = ''
-  loadingHealthGuardSupplierAccounts.value = true
+async function openHealthGuardAccounts() {
+  healthGuardAccountsVisible.value = true
+  healthGuardAccountPlatformFilter.value = ''
+  healthGuardAccountProviderFilter.value = ''
+  healthGuardAccountSearch.value = ''
+  healthGuardSelectedOnly.value = false
   try {
-    const result = await listSupplierAccounts({
-      active: true,
-      match_status: 'matched',
-      page: 1,
-      page_size: 200,
-    })
-    healthGuardSupplierAccounts.value = result.items || []
+    await ensureHealthGuardAccountCandidatesLoaded()
+    await loadHealthGuardModels()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载可忽略账号失败'
-  } finally {
-    loadingHealthGuardSupplierAccounts.value = false
+    error.value = err instanceof Error ? err.message : '加载健康守护账号失败'
   }
 }
 
-function closeHealthGuardIgnoredAccounts() {
-  healthGuardIgnoredAccountsVisible.value = false
-  healthGuardIgnoredAccountToAdd.value = ''
+function closeHealthGuardAccounts() {
+  healthGuardAccountsVisible.value = false
 }
 
-function addHealthGuardIgnoredAccount() {
-  const id = Number(healthGuardIgnoredAccountToAdd.value)
-  if (!Number.isSafeInteger(id) || id <= 0) return
-  editForm.config.account_health_guard_ignored_account_ids = normalizePositiveAccountIDs([
-    ...healthGuardIgnoredAccountIDs.value,
+function addHealthGuardAccount(id: number) {
+  editForm.config.account_health_guard_account_ids = normalizePositiveAccountIDs([
+    ...healthGuardAccountIDs.value,
     id,
   ])
-  healthGuardIgnoredAccountToAdd.value = ''
+}
+function toggleHealthGuardAccount(id: number) {
+  if (healthGuardAccountIDs.value.includes(id)) {
+    removeHealthGuardAccount(id)
+    return
+  }
+  addHealthGuardAccount(id)
 }
 
-function removeHealthGuardIgnoredAccount(id: number) {
-  editForm.config.account_health_guard_ignored_account_ids = healthGuardIgnoredAccountIDs.value.filter(item => item !== id)
+function removeHealthGuardAccount(id: number) {
+  editForm.config.account_health_guard_account_ids = healthGuardAccountIDs.value.filter(item => item !== id)
+  const accountModels = { ...editForm.config.account_health_guard_account_models }
+  delete accountModels[String(id)]
+  editForm.config.account_health_guard_account_models = accountModels
 }
-
 function normalizePositiveAccountIDs(value: unknown): number[] {
   if (!Array.isArray(value)) return []
   return Array.from(new Set(
@@ -2180,6 +2579,7 @@ function showToast(message: string) {
   overflow: auto;
 }
 
+:global(.modal-content:has(.sp-health-guard-account-dialog)),
 :global(.modal-content:has(.sp-edit-dialog)),
 :global(.modal-content:has(.sp-run-detail)) {
   --sp-panel: #ffffff;
@@ -2209,6 +2609,7 @@ function showToast(message: string) {
   color: var(--sp-text);
 }
 
+:global(.dark .modal-content:has(.sp-health-guard-account-dialog)),
 :global(.dark .modal-content:has(.sp-edit-dialog)),
 :global(.dark .modal-content:has(.sp-run-detail)) {
   --sp-panel: #172033;
@@ -2228,17 +2629,20 @@ function showToast(message: string) {
   border-color: #3b4b64;
 }
 
+:global(.modal-content:has(.sp-health-guard-account-dialog) .modal-header),
 :global(.modal-content:has(.sp-edit-dialog) .modal-header),
 :global(.modal-content:has(.sp-run-detail) .modal-header) {
   border-bottom-color: var(--sp-line);
   background: var(--sp-panel);
 }
 
+:global(.modal-content:has(.sp-health-guard-account-dialog) .modal-title),
 :global(.modal-content:has(.sp-edit-dialog) .modal-title),
 :global(.modal-content:has(.sp-run-detail) .modal-title) {
   color: var(--sp-text);
 }
 
+:global(.modal-content:has(.sp-health-guard-account-dialog) .modal-body),
 :global(.modal-content:has(.sp-edit-dialog) .modal-body),
 :global(.modal-content:has(.sp-run-detail) .modal-body) {
   display: flex;
@@ -2248,6 +2652,7 @@ function showToast(message: string) {
   background: var(--sp-panel);
 }
 
+:global(.modal-content:has(.sp-health-guard-account-dialog) .modal-footer),
 :global(.modal-content:has(.sp-edit-dialog) .modal-footer),
 :global(.modal-content:has(.sp-run-detail) .modal-footer) {
   border-top-color: var(--sp-line);
@@ -2814,7 +3219,7 @@ function showToast(message: string) {
   font-size: 20px;
 }
 
-.sp-health-guard-ignore-card {
+.sp-health-guard-account-card {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2825,85 +3230,339 @@ function showToast(message: string) {
   background: color-mix(in srgb, var(--sp-blue) 4%, var(--sp-panel));
 }
 
-.sp-health-guard-ignore-card > div {
+.sp-health-guard-account-card > div {
   display: grid;
   gap: 4px;
 }
 
-.sp-health-guard-ignore-card strong {
+.sp-health-guard-account-card strong,
+.sp-health-guard-dialog-section-head strong,
+.sp-health-guard-platform-model-grid strong,
+.sp-health-guard-account-list strong {
   color: var(--sp-text);
   font-size: 13px;
 }
 
-.sp-health-guard-ignore-card span,
-.sp-health-guard-ignore-dialog > p,
-.sp-health-guard-ignore-list span,
-.sp-health-guard-ignore-option small {
+.sp-health-guard-account-card span,
+.sp-health-guard-dialog-section-head span,
+.sp-health-guard-platform-model-grid span,
+.sp-health-guard-account-list span,
+.sp-health-guard-account-list small {
   color: var(--sp-muted);
   font-size: 12px;
 }
 
-.sp-health-guard-ignore-dialog {
+.sp-health-guard-account-dialog {
   display: grid;
   gap: 14px;
 }
 
-.sp-health-guard-ignore-dialog > p {
-  margin: 0;
-  line-height: 1.6;
+.sp-health-guard-platform-models,
+.sp-health-guard-account-workspace {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--sp-line);
+  border-radius: 12px;
+  background: var(--sp-panel);
 }
 
-.sp-health-guard-ignore-add {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
+.sp-health-guard-platform-models {
+  padding: 14px 16px;
+  background: color-mix(in srgb, var(--sp-blue) 3%, var(--sp-panel));
+}
+
+.sp-health-guard-dialog-section-head {
+  display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
-.sp-health-guard-ignore-option {
+.sp-health-guard-platform-model-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+  margin-top: 10px;
+}
+
+.sp-health-guard-platform-model-grid article {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.62fr) minmax(180px, 1.38fr);
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid var(--sp-line);
+  padding-top: 10px;
+}
+
+.sp-health-guard-platform-model-grid article > div {
   display: grid;
   min-width: 0;
   gap: 2px;
-  text-align: left;
 }
 
-.sp-health-guard-ignore-option strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
+.sp-health-guard-selection-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-bottom: 1px solid var(--sp-line);
+  background: color-mix(in srgb, var(--sp-soft) 26%, transparent);
+}
+
+.sp-health-guard-selection-summary article {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 10px;
+  border-left: 1px solid var(--sp-line);
+  padding: 11px 14px;
+}
+
+.sp-health-guard-selection-summary article:first-child {
+  border-left: 0;
+}
+
+.sp-health-guard-selection-summary article span {
+  color: var(--sp-muted);
+  font-size: 12px;
+}
+
+.sp-health-guard-selection-summary article strong {
+  color: var(--sp-text);
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-health-guard-selection-summary article.warning {
+  background: color-mix(in srgb, var(--sp-amber) 8%, transparent);
+}
+
+.sp-health-guard-selection-summary article.warning strong {
+  color: var(--sp-amber);
+}
+
+.sp-health-guard-account-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.sp-health-guard-account-filters {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(130px, 0.3fr) minmax(160px, 0.42fr) minmax(220px, 1fr) auto;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sp-health-guard-selected-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 38px;
+  border: 1px solid var(--sp-line);
+  border-radius: 9px;
+  padding: 0 12px;
+  color: var(--sp-muted);
+  background: var(--sp-panel);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
+}
+
+.sp-health-guard-selected-toggle:hover,
+.sp-health-guard-selected-toggle:focus-visible {
+  border-color: color-mix(in srgb, var(--sp-blue) 45%, var(--sp-line));
+  color: var(--sp-blue);
+}
+
+.sp-health-guard-selected-toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--sp-blue) 28%, transparent);
+  outline-offset: 2px;
+}
+
+.sp-health-guard-selected-toggle.active {
+  border-color: color-mix(in srgb, var(--sp-blue) 45%, var(--sp-line));
+  color: var(--sp-blue);
+  background: color-mix(in srgb, var(--sp-blue) 8%, var(--sp-panel));
+}
+
+.sp-health-guard-selected-toggle-mark {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--sp-muted);
+}
+
+.sp-health-guard-selected-toggle.active .sp-health-guard-selected-toggle-mark {
+  background: var(--sp-blue);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sp-blue) 15%, transparent);
+}
+
+.sp-health-guard-selected-toggle strong {
+  min-width: 20px;
+  border-radius: 999px;
+  padding: 1px 6px;
+  color: inherit;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-health-guard-filter-result {
+  flex: 0 0 auto;
+  color: var(--sp-muted);
+  font-size: 12px;
   white-space: nowrap;
 }
 
-.sp-health-guard-ignore-list {
+.sp-health-guard-account-list {
   display: grid;
-  max-height: 380px;
+  max-height: 480px;
   overflow: auto;
   border-top: 1px solid var(--sp-line);
 }
 
-.sp-health-guard-ignore-list article {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  border-bottom: 1px solid var(--sp-line);
-  padding: 12px 0;
-}
-
-.sp-health-guard-ignore-list article > div {
+.sp-health-guard-account-row {
+  position: relative;
   display: grid;
   min-width: 0;
-  gap: 4px;
+  gap: 11px;
+  border-bottom: 1px solid var(--sp-line);
+  padding: 13px 16px;
+  background: var(--sp-panel);
+  transition: background-color 160ms ease, box-shadow 160ms ease;
 }
 
-.sp-health-guard-ignore-list strong {
+.sp-health-guard-account-row:last-child {
+  border-bottom: 0;
+}
+
+.sp-health-guard-account-row:hover {
+  background: color-mix(in srgb, var(--sp-blue) 3%, var(--sp-panel));
+}
+
+.sp-health-guard-account-row.selected {
+  background: color-mix(in srgb, var(--sp-blue) 7%, var(--sp-panel));
+  box-shadow: inset 3px 0 0 var(--sp-blue);
+}
+
+.sp-health-guard-account-row.missing-model {
+  background: color-mix(in srgb, var(--sp-amber) 6%, var(--sp-panel));
+  box-shadow: inset 3px 0 0 var(--sp-amber);
+}
+
+.sp-health-guard-account-row.unavailable {
+  background: color-mix(in srgb, var(--sp-amber) 9%, var(--sp-panel));
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sp-amber) 72%, var(--sp-line));
+}
+
+.sp-health-guard-account-row-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 14px;
+}
+
+.sp-health-guard-account-choice {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: start;
+  gap: 11px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.sp-health-guard-account-choice input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0;
+  cursor: pointer;
+  accent-color: var(--sp-blue);
+}
+
+.sp-health-guard-account-choice input[type='checkbox']:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--sp-blue) 55%, transparent);
+  outline-offset: 2px;
+}
+
+.sp-health-guard-account-choice-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.sp-health-guard-account-choice-copy strong {
   color: var(--sp-text);
   font-size: 13px;
 }
 
-.sp-account-health-guard-summary {
-  grid-template-columns: repeat(9, minmax(0, 1fr));
+.sp-health-guard-account-choice-copy span,
+.sp-health-guard-account-choice-copy small,
+.sp-health-guard-account-model-editor small {
+  color: var(--sp-muted);
+  font-size: 12px;
 }
 
+.sp-health-guard-account-choice-copy small,
+.sp-health-guard-account-model-editor small {
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+.sp-health-guard-model-status {
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--sp-blue) 24%, var(--sp-line));
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: var(--sp-blue);
+  background: color-mix(in srgb, var(--sp-blue) 6%, var(--sp-panel));
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.sp-health-guard-model-status.override {
+  color: var(--sp-green);
+  border-color: color-mix(in srgb, var(--sp-green) 26%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-green) 7%, var(--sp-panel));
+}
+
+.sp-health-guard-model-status.missing,
+.sp-health-guard-model-status.unavailable {
+  color: var(--sp-amber);
+  border-color: color-mix(in srgb, var(--sp-amber) 30%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-amber) 8%, var(--sp-panel));
+}
+
+.sp-health-guard-account-model-editor {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.72fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px 14px;
+  margin-left: 31px;
+  border-top: 1px dashed color-mix(in srgb, var(--sp-blue) 22%, var(--sp-line));
+  padding-top: 11px;
+}
+
+.sp-health-guard-unavailable,
+.sp-health-guard-missing-model {
+  color: var(--sp-amber) !important;
+  font-weight: 700;
+}
+
+.sp-health-guard-effective-model {
+  color: var(--sp-blue) !important;
+}
+.sp-account-health-guard-summary {
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+}
 .sp-health-guard-skip-reasons,
 .sp-health-guard-inspections {
   min-width: 0;
@@ -3282,15 +3941,19 @@ function showToast(message: string) {
     border-top: 0;
   }
 
-  .sp-health-guard-ignore-card,
-  .sp-health-guard-ignore-list article,
+  .sp-health-guard-account-card,
+  .sp-health-guard-account-row-main,
   .sp-health-guard-item > header,
-  .sp-health-guard-list-head {
+  .sp-health-guard-list-head,
+  .sp-health-guard-account-toolbar {
     align-items: stretch;
     flex-direction: column;
   }
 
-  .sp-health-guard-ignore-add,
+  .sp-health-guard-platform-model-grid,
+  .sp-health-guard-platform-model-grid article,
+  .sp-health-guard-account-filters,
+  .sp-health-guard-account-model-editor,
   .sp-health-guard-filter,
   .sp-health-guard-reason-list,
   .sp-health-guard-item-grid,
@@ -3298,8 +3961,28 @@ function showToast(message: string) {
     grid-template-columns: 1fr;
   }
 
-  .sp-health-guard-ignore-card .sp-button,
-  .sp-health-guard-ignore-add .sp-button {
+  .sp-health-guard-selection-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sp-health-guard-selection-summary article:nth-child(odd) {
+    border-left: 0;
+  }
+
+  .sp-health-guard-selection-summary article:nth-child(n + 3) {
+    border-top: 1px solid var(--sp-line);
+  }
+
+  .sp-health-guard-account-model-editor {
+    margin-left: 31px;
+  }
+
+  .sp-health-guard-model-status,
+  .sp-health-guard-filter-result {
+    align-self: flex-start;
+  }
+
+  .sp-health-guard-account-card .sp-button {
     width: 100%;
   }
 
