@@ -229,7 +229,7 @@ func (s *SupplierAccountRateGuardService) processCandidate(ctx context.Context, 
 	base.EffectiveUpstreamRate = effectiveRate
 	riskGroups := make([]SupplierAccountRateGuardGroup, 0)
 	for _, group := range candidate.Groups {
-		if group.RateMultiplier > effectiveRate+1e-9 {
+		if effectiveRate-group.RateMultiplier > 0.0000001 {
 			riskGroups = append(riskGroups, group)
 		}
 	}

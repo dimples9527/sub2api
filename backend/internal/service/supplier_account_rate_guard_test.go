@@ -45,6 +45,7 @@ func (r *supplierAccountRateGuardRepoStub) ListAccountRateGuardUnbindLogs(_ cont
 	r.listParams = params
 	return r.listResult, r.listErr
 }
+
 func (r *supplierAccountRateGuardRepoStub) MarkAccountRateGuardUnbindLogHandled(_ context.Context, id int64) (SupplierAccountRateGuardUnbindLog, error) {
 	for index, logItem := range r.logs {
 		if logItem.ID == id {
@@ -93,10 +94,15 @@ func TestSupplierAccountRateGuardPreviewOnlyPlansRiskGroups(t *testing.T) {
 	repo := &supplierAccountRateGuardRepoStub{candidates: map[int64][]SupplierAccountRateGuardCandidate{
 		1: {{
 			ProviderID: 1, ProviderName: "供应商甲", ProviderAccountID: 11,
-			UpstreamAccountKey: "key-1", UpstreamAccountName: "上游账号", RawRate: 1, RateScale: 1.2,
+			UpstreamAccountKey: "key-1", UpstreamAccountName: "上游账号", RawRate: 0.12, RateScale: 1,
 			LocalAccountID: 21, LocalAccountName: "本地账号", MatchStatus: SupplierAccountRateGuardMatchMatched,
 			Schedulable: true,
-			Groups:      []SupplierAccountRateGuardGroup{{ID: 31, Name: "正常组", RateMultiplier: 1.2}, {ID: 32, Name: "风险组", RateMultiplier: 1.5}},
+			Groups: []SupplierAccountRateGuardGroup{
+				{ID: 31, Name: "低倍率风险组", RateMultiplier: 0.11},
+				{ID: 32, Name: "同倍率正常组", RateMultiplier: 0.12},
+				{ID: 33, Name: "高倍率正常组", RateMultiplier: 0.17},
+				{ID: 34, Name: "更高倍率正常组", RateMultiplier: 0.28},
+			},
 		}},
 	}}
 	remover := &accountRateGuardRemoverStub{}
@@ -112,8 +118,33 @@ func TestSupplierAccountRateGuardPreviewOnlyPlansRiskGroups(t *testing.T) {
 	require.Len(t, repo.logs, 1)
 	require.Equal(t, SupplierAccountRateGuardLogResultPlanned, repo.logs[0].Result)
 	require.Equal(t, SupplierAccountRateGuardLogStatusHandled, repo.logs[0].Status)
+	require.Equal(t, int64(31), repo.logs[0].LocalGroupID)
+	require.InDelta(t, 0.12, repo.logs[0].EffectiveUpstreamRate, 1e-9)
+}
+
+func TestSupplierAccountRateGuardUsesSameToleranceAsUpstreamAccountGuard(t *testing.T) {
+	providers := &supplierProviderRepoStub{items: []*SupplierProvider{{ID: 1, Name: "供应商甲", Enabled: true}}}
+	syncer := &supplierAccountRateGuardSyncerStub{results: map[int64]SupplierProviderRateSyncResult{
+		1: {ProviderID: 1, Status: SupplierSyncStatusSuccess, UpdatedKeys: []string{"key-1"}},
+	}, errs: map[int64]error{}}
+	repo := &supplierAccountRateGuardRepoStub{candidates: map[int64][]SupplierAccountRateGuardCandidate{
+		1: {{
+			ProviderID: 1, ProviderAccountID: 11, UpstreamAccountKey: "key-1", RawRate: 1, RateScale: 1,
+			LocalAccountID: 21, MatchStatus: SupplierAccountRateGuardMatchMatched, Schedulable: true,
+			Groups: []SupplierAccountRateGuardGroup{
+				{ID: 31, Name: "容差内正常组", RateMultiplier: 1 - 0.00000005},
+				{ID: 32, Name: "超过容差风险组", RateMultiplier: 1 - 0.0000002},
+			},
+		}},
+	}}
+	guard := NewSupplierAccountRateGuardService(providers, syncer, repo, &accountRateGuardRemoverStub{})
+
+	result, err := guard.Run(context.Background(), 103, SupplierAccountRateGuardModePreview, time.Now())
+
+	require.NoError(t, err)
+	require.Equal(t, 1, result.RiskGroups)
+	require.Len(t, repo.logs, 1)
 	require.Equal(t, int64(32), repo.logs[0].LocalGroupID)
-	require.InDelta(t, 1.2, repo.logs[0].EffectiveUpstreamRate, 1e-9)
 }
 
 func TestSupplierAccountRateGuardExecuteRemovesOnlyRiskGroupsAndKeepsScheduling(t *testing.T) {
@@ -127,7 +158,7 @@ func TestSupplierAccountRateGuardExecuteRemovesOnlyRiskGroupsAndKeepsScheduling(
 			UpstreamAccountKey: "key-1", UpstreamAccountName: "上游账号", RawRate: 1, RateScale: 1,
 			LocalAccountID: 21, LocalAccountName: "本地账号", MatchStatus: SupplierAccountRateGuardMatchMatched,
 			Schedulable: true,
-			Groups:      []SupplierAccountRateGuardGroup{{ID: 31, Name: "正常组", RateMultiplier: 1}, {ID: 32, Name: "风险组", RateMultiplier: 1.1}},
+			Groups:      []SupplierAccountRateGuardGroup{{ID: 31, Name: "正常组", RateMultiplier: 1}, {ID: 32, Name: "风险组", RateMultiplier: 0.9}},
 		}},
 	}}
 	remover := &accountRateGuardRemoverStub{results: map[int64]AccountRateGuardGroupRemovalResult{
@@ -159,7 +190,7 @@ func TestSupplierAccountRateGuardRemovalFailureKeepsObservedSchedulingState(t *t
 			UpstreamAccountKey: "key-1", UpstreamAccountName: "上游账号", RawRate: 1, RateScale: 1,
 			LocalAccountID: 21, LocalAccountName: "本地账号", MatchStatus: SupplierAccountRateGuardMatchMatched,
 			Schedulable: true,
-			Groups:      []SupplierAccountRateGuardGroup{{ID: 32, Name: "风险组", RateMultiplier: 1.1}},
+			Groups:      []SupplierAccountRateGuardGroup{{ID: 32, Name: "风险组", RateMultiplier: 0.9}},
 		}},
 	}}
 	remover := &accountRateGuardRemoverStub{err: errors.New("数据库写入失败")}
