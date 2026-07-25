@@ -812,6 +812,7 @@ var ProviderSet = wire.NewSet(
 	ProvideUpstreamAccountRateGuardScheduler,
 	ProvideUpstreamBalanceConsumptionService,
 	ProvideUpstreamDashboardService,
+	SupplierDashboardWiringSet,
 	ProvideUpstreamBalanceSamplerScheduler,
 	NewUpstreamAccountHealthGuardService,
 	ProvideUpstreamAccountHealthGuardScheduler,

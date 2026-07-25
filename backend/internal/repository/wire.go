@@ -103,6 +103,7 @@ var ProviderSet = wire.NewSet(
 	NewSupplierProviderRepository,
 	NewSupplierProviderTypeRepository,
 	NewSupplierProviderDataRepository,
+	SupplierDashboardWiringSet,
 	NewSupplierAutomationRepository,
 	NewSupplierAccountRateGuardRepository,
 	NewSupplierAccountHealthGuardRepository,
