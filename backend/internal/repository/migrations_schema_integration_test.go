@@ -5,10 +5,31 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestMigrationsRunner_ConcurrentInstancesSerializeOnSessionLock(t *testing.T) {
+	const instances = 2
+	errorsByInstance := make([]error, instances)
+	var wg sync.WaitGroup
+	for i := 0; i < instances; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			errorsByInstance[index] = ApplyMigrations(ctx, integrationDB)
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errorsByInstance {
+		require.NoErrorf(t, err, "migration instance %d", i)
+	}
+}
 
 func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	tx := testTx(t)
@@ -33,6 +54,9 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	requireColumn(t, tx, "accounts", "overload_until", "timestamp with time zone", 0, true)
 	requireColumn(t, tx, "accounts", "session_window_status", "character varying", 20, true)
 	requireIndex(t, tx, "accounts", "idx_accounts_autopause_expiry_due")
+
+	// groups: OpenAI Live 默认关闭，管理员显式开启后才可访问。
+	requireColumn(t, tx, "groups", "allow_live", "boolean", 0, false)
 
 	// api_keys: key length should be 128
 	requireColumn(t, tx, "api_keys", "key", "character varying", 128, false)
@@ -119,6 +143,13 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	requireColumn(t, tx, "upstream_account_health_guard_run_items", "account_id", "bigint", 0, false)
 	requireIndex(t, tx, "upstream_account_health_guard_runs", "idx_upstream_account_health_guard_runs_finished")
 	requireIndex(t, tx, "upstream_account_health_guard_run_items", "idx_upstream_account_health_guard_items_run")
+
+	// Bounded ingress rejection security aggregates.
+	requireColumn(t, tx, "ops_ingress_reject_aggregates", "bucket_start", "timestamp with time zone", 0, false)
+	requireColumn(t, tx, "ops_ingress_reject_aggregates", "client_ip", "inet", 0, false)
+	requireColumn(t, tx, "ops_ingress_reject_aggregates", "request_count", "bigint", 0, false)
+	requireIndex(t, tx, "ops_ingress_reject_aggregates", "idx_ops_ingress_reject_aggregates_bucket")
+	requireIndex(t, tx, "ops_ingress_reject_aggregates", "idx_ops_ingress_reject_aggregates_ip_bucket")
 
 	// user_allowed_groups table should exist
 	var uagRegclass sql.NullString
