@@ -132,7 +132,7 @@ func TestSupplierGroupGuardReconcilerSelectsSoleAutomaticMappingAfterConflictRem
 	require.Equal(t, RateGuardSelectionModeAuto, repo.mappings[1].RateGuardSelectionMode)
 }
 
-func TestSupplierGroupGuardReconcilerKeepsInactiveSelectedGuardian(t *testing.T) {
+func TestSupplierGroupGuardReconcilerReplacesInactiveSelectedGuardianWithSoleActiveMapping(t *testing.T) {
 	repo := &supplierGroupGuardRepoFake{mappings: []SupplierProviderGroup{
 		{ID: 10, LocalGroupID: int64PtrForMatcher(7), AutoMatchStatus: AutoMatchStatusAutoMatched, Active: false, RateGuardSelected: true, RateGuardSelectionMode: RateGuardSelectionModeAuto},
 		{ID: 11, LocalGroupID: int64PtrForMatcher(7), AutoMatchStatus: AutoMatchStatusAutoMatched, Active: true},
@@ -141,8 +141,22 @@ func TestSupplierGroupGuardReconcilerKeepsInactiveSelectedGuardian(t *testing.T)
 	err := NewSupplierGroupGuardReconciler(repo).ReconcileLocalGroups(context.Background(), []int64{7})
 
 	require.NoError(t, err)
-	require.True(t, repo.mappings[0].RateGuardSelected)
-	require.False(t, repo.mappings[1].RateGuardSelected)
+	require.False(t, repo.mappings[0].RateGuardSelected)
+	require.True(t, repo.mappings[1].RateGuardSelected)
+	require.Equal(t, RateGuardSelectionModeAuto, repo.mappings[1].RateGuardSelectionMode)
+}
+
+func TestSupplierGroupGuardReconcilerClearsInactiveSelectedGuardianWithoutActiveReplacement(t *testing.T) {
+	repo := &supplierGroupGuardRepoFake{mappings: []SupplierProviderGroup{{
+		ID: 10, LocalGroupID: int64PtrForMatcher(7), AutoMatchStatus: AutoMatchStatusAutoMatched,
+		Active: false, RateGuardSelected: true, RateGuardSelectionMode: RateGuardSelectionModeManual,
+	}}}
+
+	err := NewSupplierGroupGuardReconciler(repo).ReconcileLocalGroups(context.Background(), []int64{7})
+
+	require.NoError(t, err)
+	require.False(t, repo.mappings[0].RateGuardSelected)
+	require.Empty(t, repo.mappings[0].RateGuardSelectionMode)
 }
 
 func TestSupplierGroupGuardReconcilerRejectsInvalidManualSelection(t *testing.T) {

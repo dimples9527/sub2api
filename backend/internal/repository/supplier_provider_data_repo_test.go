@@ -618,17 +618,21 @@ func TestSupplierProviderDataRepositoryAutoMatchStateOperations(t *testing.T) {
 	repo, mock := newSupplierProviderDataRepoMock(t)
 	now := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
 
-	mock.ExpectQuery(`FROM supplier_provider_groups g\s+JOIN supplier_providers p ON p.id = g.provider_id\s+WHERE g.active = TRUE AND g.provider_id = \$1`).
+	mock.ExpectQuery(`FROM supplier_provider_groups g\s+JOIN supplier_providers p ON p.id = g.provider_id\s+WHERE \(g.active = TRUE OR g.rate_guard_selected = TRUE\) AND g.provider_id = \$1`).
 		WithArgs(int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "provider_id", "provider_name", "upstream_group_key", "name", "rate_multiplier", "raw_status", "active",
 			"local_group_id", "auto_match_ignored", "auto_match_status", "matched_upstream_name", "name_change_pending", "last_seen_at", "inactive_at",
-		}).AddRow(int64(7), int64(42), "Supplier A", "group-1", "VIP", 2.5, "active", true, nil, false, service.AutoMatchStatusUnmatched, "", false, now, nil))
+		}).
+			AddRow(int64(7), int64(42), "Supplier A", "group-1", "VIP", 2.5, "active", true, nil, false, service.AutoMatchStatusUnmatched, "", false, now, nil).
+			AddRow(int64(8), int64(42), "Supplier A", "group-old", "VIP Old", 2.5, "inactive", false, int64(12), false, service.AutoMatchStatusAutoMatched, "VIP Old", false, now.Add(-time.Hour), now))
 
 	groups, err := repo.ListGroupsForAutoMatch(context.Background(), 42)
 	require.NoError(t, err)
-	require.Len(t, groups, 1)
+	require.Len(t, groups, 2)
 	require.Nil(t, groups[0].LocalGroupID)
+	require.False(t, groups[1].Active)
+	require.Equal(t, int64(12), *groups[1].LocalGroupID)
 
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET local_group_id = $2, auto_match_status = 'auto_matched', matched_upstream_name = $3, name_change_pending = FALSE, updated_at = NOW() WHERE id = $1 AND active = TRUE AND local_group_id IS NULL AND auto_match_ignored = FALSE")).
 		WithArgs(int64(7), int64(12), "VIP").

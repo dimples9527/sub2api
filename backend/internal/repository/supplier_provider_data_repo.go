@@ -277,7 +277,7 @@ SELECT g.id, g.provider_id, p.name AS provider_name, g.upstream_group_key, g.nam
        g.name_change_pending, g.last_seen_at, g.inactive_at
 FROM supplier_provider_groups g
 JOIN supplier_providers p ON p.id = g.provider_id
-WHERE g.active = TRUE`
+WHERE (g.active = TRUE OR g.rate_guard_selected = TRUE)`
 	args := make([]any, 0, 1)
 	if providerID > 0 {
 		query += " AND g.provider_id = $1"

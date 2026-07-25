@@ -62,7 +62,10 @@ func (r *SupplierGroupGuardReconciler) ReconcileLocalGroups(ctx context.Context,
 		}
 
 		if selected != nil && !selected.Active {
-			continue
+			if err := r.repo.ClearRateGuard(ctx, selected.ID, ""); err != nil {
+				return err
+			}
+			selected = nil
 		}
 		if len(active) == 1 {
 			if selected == nil || selected.ID != active[0].ID || selected.RateGuardSelectionMode != RateGuardSelectionModeAuto {
