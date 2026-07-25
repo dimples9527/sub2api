@@ -547,6 +547,39 @@ func TestSupplierProviderGroupOrderBy(t *testing.T) {
 	}
 }
 
+func TestSupplierProviderAccountOrderBy(t *testing.T) {
+	tests := []struct {
+		name     string
+		sortBy   string
+		order    string
+		expected string
+	}{
+		{name: "default", expected: "a.active DESC, a.last_seen_at DESC, a.id ASC"},
+		{name: "provider name ascending", sortBy: "provider_name", order: "asc", expected: "LOWER(p.name) ASC, a.id ASC"},
+		{name: "upstream account descending", sortBy: "upstream_account_key", order: "desc", expected: "LOWER(a.name) DESC, LOWER(a.upstream_account_key) DESC, a.id ASC"},
+		{name: "local account name ascending", sortBy: "local_account_name", order: "asc", expected: "LOWER(matched_account.name) ASC NULLS LAST, a.id ASC"},
+		{name: "local account priority descending", sortBy: "local_account_priority", order: "desc", expected: "matched_account.priority DESC NULLS LAST, a.id ASC"},
+		{name: "upstream rate ascending", sortBy: "rate_multiplier", order: "asc", expected: "a.rate_multiplier ASC, a.id ASC"},
+		{name: "local account status ascending", sortBy: "local_account_status", order: "asc", expected: "LOWER(matched_account.status) ASC NULLS LAST, a.id ASC"},
+		{name: "schedulable descending", sortBy: "local_account_schedulable", order: "desc", expected: "matched_account.schedulable DESC NULLS LAST, a.id ASC"},
+		{name: "last test status ascending", sortBy: "local_account_last_test_status", order: "asc", expected: "LOWER(NULLIF(matched_account.extra->>'last_test_status', '')) ASC NULLS LAST, a.id ASC"},
+		{name: "last tested time descending", sortBy: "local_account_last_tested_at", order: "desc", expected: "NULLIF(matched_account.extra->>'last_tested_at', '') DESC NULLS LAST, a.id ASC"},
+		{name: "current balance ascending", sortBy: "supplier_current_balance", order: "asc", expected: "COALESCE(runtime.current_balance, 0) ASC, a.id ASC"},
+		{name: "today cost descending", sortBy: "supplier_today_cost", order: "desc", expected: "COALESCE(runtime.today_cost, 0) DESC, a.id ASC"},
+		{name: "invalid field", sortBy: "binding_groups", order: "asc", expected: "a.active DESC, a.last_seen_at DESC, a.id ASC"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual := supplierProviderAccountOrderBy(service.SupplierProviderDataListParams{
+				SortBy:    tt.sortBy,
+				SortOrder: tt.order,
+			})
+			require.Equal(t, tt.expected, actual)
+		})
+	}
+}
+
 func TestSupplierProviderDataRepositoryListGroupsKeepsSummaryOutsideStatusFilters(t *testing.T) {
 	repo, mock := newSupplierProviderDataRepoMock(t)
 	active := true

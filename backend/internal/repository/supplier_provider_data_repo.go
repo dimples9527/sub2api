@@ -112,7 +112,7 @@ LEFT JOIN LATERAL (
 LEFT JOIN accounts matched_account
   ON matched_account.id = local_match.local_account_id
  AND local_match.match_count = 1
-WHERE `+where+fmt.Sprintf(" ORDER BY a.active DESC, a.last_seen_at DESC, a.id ASC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2), queryArgs...)
+WHERE `+where+fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", supplierProviderAccountOrderBy(params), len(args)+1, len(args)+2), queryArgs...)
 	if err != nil {
 		return service.SupplierProviderAccountListResult{}, fmt.Errorf("query supplier provider accounts: %w", err)
 	}
@@ -1047,6 +1047,55 @@ func supplierProviderGroupListWhere(params service.SupplierProviderDataListParam
 
 func supplierProviderGroupHasListFilters(params service.SupplierProviderDataListParams) bool {
 	return strings.TrimSpace(params.MatchStatus) != "" || strings.TrimSpace(params.RateStatus) != ""
+}
+
+func supplierProviderAccountOrderBy(params service.SupplierProviderDataListParams) string {
+	sortBy := strings.TrimSpace(params.SortBy)
+	direction := "ASC"
+	if strings.EqualFold(strings.TrimSpace(params.SortOrder), "desc") {
+		direction = "DESC"
+	}
+
+	var expression string
+	var nullsLast bool
+	switch sortBy {
+	case "provider_name":
+		expression = "LOWER(p.name)"
+	case "upstream_account_key":
+		return fmt.Sprintf("LOWER(a.name) %s, LOWER(a.upstream_account_key) %s, a.id ASC", direction, direction)
+	case "local_account_name":
+		expression = "LOWER(matched_account.name)"
+		nullsLast = true
+	case "local_account_priority":
+		expression = "matched_account.priority"
+		nullsLast = true
+	case "rate_multiplier":
+		expression = "a.rate_multiplier"
+	case "local_account_status":
+		expression = "LOWER(matched_account.status)"
+		nullsLast = true
+	case "local_account_schedulable":
+		expression = "matched_account.schedulable"
+		nullsLast = true
+	case "local_account_last_test_status":
+		expression = "LOWER(NULLIF(matched_account.extra->>'last_test_status', ''))"
+		nullsLast = true
+	case "local_account_last_tested_at":
+		expression = "NULLIF(matched_account.extra->>'last_tested_at', '')"
+		nullsLast = true
+	case "supplier_current_balance":
+		expression = "COALESCE(runtime.current_balance, 0)"
+	case "supplier_today_cost":
+		expression = "COALESCE(runtime.today_cost, 0)"
+	default:
+		return "a.active DESC, a.last_seen_at DESC, a.id ASC"
+	}
+
+	nulls := ""
+	if nullsLast {
+		nulls = " NULLS LAST"
+	}
+	return fmt.Sprintf("%s %s%s, a.id ASC", expression, direction, nulls)
 }
 
 func supplierProviderGroupOrderBy(params service.SupplierProviderDataListParams) string {
