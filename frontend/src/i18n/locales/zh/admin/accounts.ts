@@ -982,8 +982,6 @@ export default {
           },
           // Refresh Token auth
           refreshTokenAuth: '手动输入 RT',
-          mobileRefreshTokenAuth: '移动端 RT 输入',
-          accessTokenAuth: 'Access Token 输入',
           refreshTokenDesc: '输入您已有的 OpenAI Refresh Token，支持批量输入（每行一个），系统将自动验证并创建账号。',
           refreshTokenPlaceholder: '粘贴您的 OpenAI Refresh Token...\n支持多个，每行一个',
           mobileRefreshTokenAuth: '手动输入 Mobile RT',
