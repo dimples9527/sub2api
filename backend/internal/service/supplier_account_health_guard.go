@@ -23,10 +23,11 @@ const (
 	DefaultSupplierAccountHealthGuardRecoveryThreshold        = 2
 	DefaultSupplierAccountHealthGuardHealthyLatencyMs         = 15000
 
-	SupplierAccountHealthGuardStatusHealthy = "healthy"
-	SupplierAccountHealthGuardStatusSlow    = "slow"
-	SupplierAccountHealthGuardStatusFailed  = "failed"
-	SupplierAccountHealthGuardStatusSkipped = "skipped"
+	SupplierAccountHealthGuardStatusHealthy     = "healthy"
+	SupplierAccountHealthGuardStatusSlow        = "slow"
+	SupplierAccountHealthGuardStatusFailed      = "failed"
+	SupplierAccountHealthGuardStatusSkipped     = "skipped"
+	SupplierAccountHealthGuardStatusUnavailable = "unavailable"
 
 	SupplierAccountHealthGuardActionNone      = "none"
 	SupplierAccountHealthGuardActionDisabled  = "disabled"
@@ -68,7 +69,7 @@ type SupplierAccountHealthGuardConfig struct {
 	SlowThreshold            int               `json:"account_health_guard_slow_threshold"`
 	RecoveryThreshold        int               `json:"account_health_guard_recovery_threshold"`
 	HealthyLatencyMs         int64             `json:"account_health_guard_healthy_latency_ms"`
-	IgnoredAccountIDs        []int64           `json:"account_health_guard_ignored_account_ids"`
+	AccountIDs               []int64           `json:"account_health_guard_account_ids"`
 	AccountModels            map[int64]string  `json:"account_health_guard_account_models"`
 	PlatformModels           map[string]string `json:"account_health_guard_platform_models"`
 	PlatformLatencyMs        map[string]int64  `json:"account_health_guard_platform_latency_ms"`
@@ -128,18 +129,21 @@ type SupplierAccountHealthGuardRunItem struct {
 }
 
 type SupplierAccountHealthGuardResult struct {
-	TotalAccounts   int                                    `json:"total_accounts"`
-	CheckedCount    int                                    `json:"checked_count"`
-	HealthyCount    int                                    `json:"healthy_count"`
-	SlowCount       int                                    `json:"slow_count"`
-	FailedCount     int                                    `json:"failed_count"`
-	SkippedCount    int                                    `json:"skipped_count"`
-	DisabledCount   int                                    `json:"disabled_count"`
-	RecoveredCount  int                                    `json:"recovered_count"`
-	UnchangedCount  int                                    `json:"unchanged_count"`
-	CursorAccountID int64                                  `json:"cursor_account_id"`
-	SkipReasons     []SupplierAccountHealthGuardSkipReason `json:"skip_reasons,omitempty"`
-	Items           []SupplierAccountHealthGuardRunItem    `json:"items"`
+	TotalAccounts    int                                    `json:"total_accounts"`
+	SelectedCount    int                                    `json:"selected_count"`
+	CheckedCount     int                                    `json:"checked_count"`
+	HealthyCount     int                                    `json:"healthy_count"`
+	SlowCount        int                                    `json:"slow_count"`
+	FailedCount      int                                    `json:"failed_count"`
+	SkippedCount     int                                    `json:"skipped_count"`
+	UnavailableCount int                                    `json:"unavailable_count"`
+	PendingCount     int                                    `json:"pending_count"`
+	DisabledCount    int                                    `json:"disabled_count"`
+	RecoveredCount   int                                    `json:"recovered_count"`
+	UnchangedCount   int                                    `json:"unchanged_count"`
+	CursorAccountID  int64                                  `json:"cursor_account_id"`
+	SkipReasons      []SupplierAccountHealthGuardSkipReason `json:"skip_reasons,omitempty"`
+	Items            []SupplierAccountHealthGuardRunItem    `json:"items"`
 }
 
 type SupplierAccountHealthGuardRepository interface {
@@ -182,6 +186,9 @@ func NewSupplierAccountHealthGuardService(repository SupplierAccountHealthGuardR
 
 func (s *SupplierAccountHealthGuardService) Run(ctx context.Context, config SupplierAccountHealthGuardConfig, now time.Time) (SupplierAccountHealthGuardResult, error) {
 	config = normalizeSupplierAccountHealthGuardConfig(config)
+	if len(config.AccountIDs) == 0 {
+		return SupplierAccountHealthGuardResult{}, errors.New("请至少选择一个需要检查的账号")
+	}
 	if s == nil || s.repository == nil || s.accountStore == nil || s.tester == nil {
 		return SupplierAccountHealthGuardResult{}, errors.New("供应商账号健康守护依赖未初始化")
 	}
@@ -189,69 +196,57 @@ func (s *SupplierAccountHealthGuardService) Run(ctx context.Context, config Supp
 	if err != nil {
 		return SupplierAccountHealthGuardResult{}, err
 	}
-	result := SupplierAccountHealthGuardResult{TotalAccounts: len(candidates), Items: make([]SupplierAccountHealthGuardRunItem, 0, len(candidates))}
-	collector := newSupplierAccountHealthGuardSkipCollector()
-	ignored := make(map[int64]struct{}, len(config.IgnoredAccountIDs))
-	for _, accountID := range config.IgnoredAccountIDs {
-		ignored[accountID] = struct{}{}
-	}
 
-	targetsByID := make(map[int64]*supplierAccountHealthGuardTarget)
+	selectedIDs := make(map[int64]struct{}, len(config.AccountIDs))
+	candidatesByID := make(map[int64][]SupplierAccountHealthGuardCandidate, len(config.AccountIDs))
+	for _, accountID := range config.AccountIDs {
+		selectedIDs[accountID] = struct{}{}
+	}
 	for _, candidate := range candidates {
-		reason := ""
-		switch candidate.MatchStatus {
-		case SupplierAccountHealthGuardMatchUnmatched:
-			reason = supplierAccountHealthGuardSkipUnmatched
-		case SupplierAccountHealthGuardMatchConflict:
-			reason = supplierAccountHealthGuardSkipConflict
-		case SupplierAccountHealthGuardMatchMatched:
-			if candidate.LocalAccountID <= 0 || candidate.LocalAccount == nil {
-				reason = supplierAccountHealthGuardSkipLocalAccountMissing
-			}
-		default:
-			reason = supplierAccountHealthGuardSkipConflict
-		}
-		if reason == "" {
-			if _, exists := ignored[candidate.LocalAccountID]; exists {
-				reason = supplierAccountHealthGuardSkipAccountIgnored
-			} else if strings.TrimSpace(candidate.LocalAccount.Status) != StatusActive {
-				reason = supplierAccountHealthGuardSkipAccountDisabled
-			} else if supplierAccountHealthGuardModelForAccount(config, candidate.LocalAccountID, candidate.LocalAccount.Platform) == "" {
-				reason = supplierAccountHealthGuardSkipTestModelMissing
-			}
-		}
-		if reason != "" {
-			item := supplierAccountHealthGuardSkippedItem(candidate, reason, now)
-			result.Items = append(result.Items, item)
-			collector.Add(reason, candidate)
+		if _, selected := selectedIDs[candidate.LocalAccountID]; !selected {
 			continue
 		}
-		target := targetsByID[candidate.LocalAccountID]
-		if target == nil {
-			account := *candidate.LocalAccount
-			target = &supplierAccountHealthGuardTarget{
-				account: account,
-				modelID: supplierAccountHealthGuardModelForAccount(config, account.ID, account.Platform),
-			}
-			targetsByID[account.ID] = target
-		}
-		target.sources = append(target.sources, candidate.Source)
+		candidatesByID[candidate.LocalAccountID] = append(candidatesByID[candidate.LocalAccountID], candidate)
 	}
 
-	targets := make([]supplierAccountHealthGuardTarget, 0, len(targetsByID))
-	for _, target := range targetsByID {
-		targets = append(targets, *target)
+	result := SupplierAccountHealthGuardResult{
+		TotalAccounts: len(config.AccountIDs),
+		Items:         make([]SupplierAccountHealthGuardRunItem, 0, len(config.AccountIDs)),
 	}
-	sort.Slice(targets, func(i, j int) bool { return targets[i].account.ID < targets[j].account.ID })
+	targets := make([]supplierAccountHealthGuardTarget, 0, len(config.AccountIDs))
+	missingModels := make([]string, 0)
+	for _, accountID := range config.AccountIDs {
+		accountCandidates := candidatesByID[accountID]
+		target, available := supplierAccountHealthGuardBuildTarget(accountID, accountCandidates, config)
+		if !available {
+			result.Items = append(result.Items, supplierAccountHealthGuardUnavailableItem(accountID, accountCandidates, now))
+			continue
+		}
+		if target.modelID == "" {
+			accountName := strings.TrimSpace(target.account.Name)
+			if accountName == "" {
+				accountName = fmt.Sprintf("账号 #%d", accountID)
+			}
+			missingModels = append(missingModels, accountName)
+		}
+		targets = append(targets, target)
+	}
+	if len(missingModels) > 0 {
+		return SupplierAccountHealthGuardResult{}, fmt.Errorf("以下账号尚未配置测试模型：%s", strings.Join(missingModels, "、"))
+	}
+
 	selected := supplierAccountHealthGuardSelectTargets(targets, config.CursorAccountID, config.MaxAccountsPerRun)
+	result.SelectedCount = len(selected)
+	result.PendingCount = len(targets) - len(selected)
 	if len(selected) > 0 {
 		result.CursorAccountID = selected[len(selected)-1].account.ID
 	} else {
 		result.CursorAccountID = config.CursorAccountID
 	}
-	checkedItems := s.runTargets(ctx, config, now, selected)
-	result.Items = append(result.Items, checkedItems...)
-	result.SkipReasons = collector.List()
+	result.Items = append(result.Items, s.runTargets(ctx, config, now, selected)...)
+	sort.SliceStable(result.Items, func(i, j int) bool {
+		return result.Items[i].LocalAccountID < result.Items[j].LocalAccountID
+	})
 	for _, item := range result.Items {
 		switch item.Status {
 		case SupplierAccountHealthGuardStatusHealthy:
@@ -265,6 +260,8 @@ func (s *SupplierAccountHealthGuardService) Run(ctx context.Context, config Supp
 			result.FailedCount++
 		case SupplierAccountHealthGuardStatusSkipped:
 			result.SkippedCount++
+		case SupplierAccountHealthGuardStatusUnavailable:
+			result.UnavailableCount++
 		}
 		switch item.Action {
 		case SupplierAccountHealthGuardActionDisabled:
@@ -272,12 +269,59 @@ func (s *SupplierAccountHealthGuardService) Run(ctx context.Context, config Supp
 		case SupplierAccountHealthGuardActionRecovered:
 			result.RecoveredCount++
 		case SupplierAccountHealthGuardActionNone:
-			if item.Status != SupplierAccountHealthGuardStatusSkipped {
+			if item.Status == SupplierAccountHealthGuardStatusHealthy || item.Status == SupplierAccountHealthGuardStatusSlow || item.Status == SupplierAccountHealthGuardStatusFailed {
 				result.UnchangedCount++
 			}
 		}
 	}
 	return result, nil
+}
+
+func supplierAccountHealthGuardBuildTarget(accountID int64, candidates []SupplierAccountHealthGuardCandidate, config SupplierAccountHealthGuardConfig) (supplierAccountHealthGuardTarget, bool) {
+	var target supplierAccountHealthGuardTarget
+	for _, candidate := range candidates {
+		if candidate.MatchStatus != SupplierAccountHealthGuardMatchMatched || candidate.LocalAccountID != accountID || candidate.LocalAccount == nil || candidate.LocalAccount.ID != accountID {
+			continue
+		}
+		if strings.TrimSpace(candidate.LocalAccount.Status) != StatusActive {
+			continue
+		}
+		if target.account.ID == 0 {
+			target.account = *candidate.LocalAccount
+			target.modelID = supplierAccountHealthGuardModelForAccount(config, accountID, candidate.LocalAccount.Platform)
+		}
+		target.sources = append(target.sources, candidate.Source)
+	}
+	return target, target.account.ID > 0
+}
+
+func supplierAccountHealthGuardUnavailableItem(accountID int64, candidates []SupplierAccountHealthGuardCandidate, now time.Time) SupplierAccountHealthGuardRunItem {
+	item := SupplierAccountHealthGuardRunItem{
+		LocalAccountID: accountID,
+		Status:         SupplierAccountHealthGuardStatusUnavailable,
+		Action:         SupplierAccountHealthGuardActionNone,
+		Reason:         "账号当前不可用",
+		StartedAt:      now,
+		FinishedAt:     now,
+	}
+	if len(candidates) > 0 {
+		item.MatchStatus = candidates[0].MatchStatus
+		item.Reason = "账号匹配已失效"
+	}
+	for _, candidate := range candidates {
+		item.Sources = append(item.Sources, candidate.Source)
+		if candidate.LocalAccount == nil {
+			continue
+		}
+		item.LocalAccountName = candidate.LocalAccount.Name
+		item.Platform = candidate.LocalAccount.Platform
+		item.SchedulableBefore = candidate.LocalAccount.Schedulable
+		item.SchedulableAfter = candidate.LocalAccount.Schedulable
+		if strings.TrimSpace(candidate.LocalAccount.Status) != StatusActive {
+			item.Reason = "账号已停用"
+		}
+	}
+	return item
 }
 
 func (s *SupplierAccountHealthGuardService) runTargets(ctx context.Context, config SupplierAccountHealthGuardConfig, now time.Time, targets []supplierAccountHealthGuardTarget) []SupplierAccountHealthGuardRunItem {
@@ -499,14 +543,14 @@ func normalizeSupplierAccountHealthGuardConfig(config SupplierAccountHealthGuard
 	if config.HealthyLatencyMs <= 0 {
 		config.HealthyLatencyMs = DefaultSupplierAccountHealthGuardHealthyLatencyMs
 	}
-	config.IgnoredAccountIDs = normalizeSupplierAccountHealthGuardIgnoredAccountIDs(config.IgnoredAccountIDs)
+	config.AccountIDs = normalizeSupplierAccountHealthGuardAccountIDs(config.AccountIDs)
 	config.AccountModels = normalizeSupplierAccountHealthGuardAccountModels(config.AccountModels)
 	config.PlatformModels = normalizeSupplierAccountHealthGuardPlatformModels(config.PlatformModels)
 	config.PlatformLatencyMs = normalizeSupplierAccountHealthGuardPlatformLatency(config.PlatformLatencyMs)
 	return config
 }
 
-func normalizeSupplierAccountHealthGuardIgnoredAccountIDs(values []int64) []int64 {
+func normalizeSupplierAccountHealthGuardAccountIDs(values []int64) []int64 {
 	seen := make(map[int64]struct{}, len(values))
 	out := make([]int64, 0, len(values))
 	for _, accountID := range values {

@@ -489,7 +489,7 @@ func TestSupplierAutomationServiceRunsAccountHealthGuardTask(t *testing.T) {
 	}}
 	runner := &supplierAutomationAccountHealthGuardStub{result: SupplierAccountHealthGuardResult{
 		TotalAccounts: 5, CheckedCount: 3, HealthyCount: 1, SlowCount: 1, FailedCount: 1,
-		SkippedCount: 2, DisabledCount: 1, CursorAccountID: 20,
+		UnavailableCount: 2, DisabledCount: 1, CursorAccountID: 20,
 	}}
 	service := NewSupplierAutomationService(repo, &supplierAutomationLockStub{acquired: true}, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
 	service.SetAccountHealthGuardService(runner)
@@ -498,12 +498,13 @@ func TestSupplierAutomationServiceRunsAccountHealthGuardTask(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, 1, runner.called)
-	require.Equal(t, 3, run.ProcessedCount)
+	require.Equal(t, 5, run.ProcessedCount)
 	require.Equal(t, 2, run.SuccessCount)
-	require.Equal(t, 1, run.FailedCount)
+	require.Equal(t, 3, run.FailedCount)
 	require.Equal(t, SupplierAutomationStatusPartial, run.Status)
-	require.Equal(t, "健康守护发现 1 个失败账号", run.Message)
+	require.Equal(t, "健康守护发现 3 个异常账号", run.Message)
 	require.NotNil(t, run.ResultDetail)
+	require.Equal(t, []int64{1}, runner.config.AccountIDs)
 	require.Equal(t, int64(20), run.ResultDetail.AccountHealthGuard.CursorAccountID)
 	require.Equal(t, int64(20), repo.tasks[SupplierAutomationTaskAccountHealthGuard].Config.AccountHealthGuardCursorAccountID)
 }
@@ -517,7 +518,7 @@ func TestSupplierAutomationServiceBuildsAccountHealthGuardSuccessMessage(t *test
 		},
 	}}
 	runner := &supplierAutomationAccountHealthGuardStub{result: SupplierAccountHealthGuardResult{
-		TotalAccounts: 4, CheckedCount: 3, HealthyCount: 2, SlowCount: 1, SkippedCount: 1,
+		TotalAccounts: 4, CheckedCount: 3, HealthyCount: 2, SlowCount: 1, PendingCount: 1,
 	}}
 	service := NewSupplierAutomationService(repo, &supplierAutomationLockStub{acquired: true}, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
 	service.SetAccountHealthGuardService(runner)
@@ -526,8 +527,73 @@ func TestSupplierAutomationServiceBuildsAccountHealthGuardSuccessMessage(t *test
 
 	require.NoError(t, err)
 	require.Equal(t, SupplierAutomationStatusSuccess, run.Status)
-	require.Equal(t, "健康守护检查 3 个账号，跳过 1 个", run.Message)
+	require.Equal(t, "健康守护检查 3 个账号，待下轮 1 个", run.Message)
 }
+
+func TestSupplierAutomationServiceRejectsSavingEmptyAccountHealthGuardWhitelist(t *testing.T) {
+	config := validSupplierAccountHealthGuardAutomationConfig()
+	config.AccountHealthGuardAccountIDs = nil
+	task := SupplierAutomationTask{
+		TaskCode: SupplierAutomationTaskAccountHealthGuard, CronExpression: "@every 3600s", TimeoutSeconds: 1800, Config: config,
+	}
+	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{}}
+	service := NewSupplierAutomationService(repo, &supplierAutomationLockStub{acquired: true}, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
+
+	err := service.UpdateTask(context.Background(), &task)
+
+	require.EqualError(t, err, "请至少选择一个需要检查的账号")
+	require.Empty(t, repo.updatedTasks)
+}
+
+func TestSupplierAutomationServiceRejectsRunningEmptyAccountHealthGuardWhitelist(t *testing.T) {
+	config := validSupplierAccountHealthGuardAutomationConfig()
+	config.AccountHealthGuardAccountIDs = nil
+	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
+		SupplierAutomationTaskAccountHealthGuard: {
+			TaskCode: SupplierAutomationTaskAccountHealthGuard, Enabled: true,
+			CronExpression: "@every 3600s", TimeoutSeconds: 1800, Config: config,
+		},
+	}}
+	runner := &supplierAutomationAccountHealthGuardStub{}
+	service := NewSupplierAutomationService(repo, &supplierAutomationLockStub{acquired: true}, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
+	service.SetAccountHealthGuardService(runner)
+
+	_, err := service.Run(context.Background(), SupplierAutomationTaskAccountHealthGuard, SupplierSyncTriggerManual)
+
+	require.EqualError(t, err, "请至少选择一个需要检查的账号")
+	require.Zero(t, runner.called)
+}
+
+func TestSupplierAutomationSchedulerAllowsDisabledEmptyAccountHealthGuardWhitelist(t *testing.T) {
+	config := validSupplierAccountHealthGuardAutomationConfig()
+	config.AccountHealthGuardAccountIDs = nil
+	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
+		SupplierAutomationTaskAccountHealthGuard: {
+			TaskCode: SupplierAutomationTaskAccountHealthGuard, Enabled: false,
+			CronExpression: "@every 3600s", TimeoutSeconds: 1800, Config: config,
+		},
+	}}
+	service := NewSupplierAutomationService(repo, &supplierAutomationLockStub{acquired: true}, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
+	scheduler := NewSupplierAutomationScheduler(repo, service)
+
+	require.NoError(t, scheduler.Reload(context.Background()))
+}
+
+func TestSupplierAutomationSchedulerRejectsEnabledEmptyAccountHealthGuardWhitelist(t *testing.T) {
+	config := validSupplierAccountHealthGuardAutomationConfig()
+	config.AccountHealthGuardAccountIDs = nil
+	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
+		SupplierAutomationTaskAccountHealthGuard: {
+			TaskCode: SupplierAutomationTaskAccountHealthGuard, Enabled: true,
+			CronExpression: "@every 3600s", TimeoutSeconds: 1800, Config: config,
+		},
+	}}
+	service := NewSupplierAutomationService(repo, &supplierAutomationLockStub{acquired: true}, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
+	scheduler := NewSupplierAutomationScheduler(repo, service)
+
+	require.EqualError(t, scheduler.Reload(context.Background()), "请至少选择一个需要检查的账号")
+}
+
 func TestSupplierAutomationServiceRejectsInvalidAccountHealthGuardConfig(t *testing.T) {
 	valid := validSupplierAccountHealthGuardAutomationConfig()
 	tests := []struct {
@@ -567,7 +633,7 @@ func validSupplierAccountHealthGuardAutomationConfig() SupplierAutomationConfig 
 		AccountHealthGuardSlowThreshold:            3,
 		AccountHealthGuardRecoveryThreshold:        2,
 		AccountHealthGuardHealthyLatencyMs:         15000,
-		AccountHealthGuardIgnoredAccountIDs:        []int64{},
+		AccountHealthGuardAccountIDs:               []int64{1},
 		AccountHealthGuardAccountModels:            map[int64]string{},
 		AccountHealthGuardPlatformModels:           map[string]string{},
 		AccountHealthGuardPlatformLatencyMs:        map[string]int64{},

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -71,7 +72,7 @@ type SupplierAutomationConfig struct {
 	AccountHealthGuardSlowThreshold            int               `json:"account_health_guard_slow_threshold"`
 	AccountHealthGuardRecoveryThreshold        int               `json:"account_health_guard_recovery_threshold"`
 	AccountHealthGuardHealthyLatencyMs         int64             `json:"account_health_guard_healthy_latency_ms"`
-	AccountHealthGuardIgnoredAccountIDs        []int64           `json:"account_health_guard_ignored_account_ids"`
+	AccountHealthGuardAccountIDs               []int64           `json:"account_health_guard_account_ids"`
 	AccountHealthGuardAccountModels            map[int64]string  `json:"account_health_guard_account_models"`
 	AccountHealthGuardPlatformModels           map[string]string `json:"account_health_guard_platform_models"`
 	AccountHealthGuardPlatformLatencyMs        map[string]int64  `json:"account_health_guard_platform_latency_ms"`
@@ -258,6 +259,9 @@ func (s *SupplierAutomationService) UpdateTask(ctx context.Context, task *Suppli
 	if err := validateSupplierAutomationTask(*task); err != nil {
 		return err
 	}
+	if err := validateSupplierAccountHealthGuardSelection(*task); err != nil {
+		return err
+	}
 	if err := s.repo.UpdateTask(ctx, task); err != nil {
 		return err
 	}
@@ -318,6 +322,9 @@ func (s *SupplierAutomationService) RunWithMode(ctx context.Context, taskCode, t
 		return SupplierAutomationRun{}, err
 	}
 	if err := validateSupplierAutomationTask(*task); err != nil {
+		return SupplierAutomationRun{}, err
+	}
+	if err := validateSupplierAccountHealthGuardSelection(*task); err != nil {
 		return SupplierAutomationRun{}, err
 	}
 	if mode == SupplierAutomationRunModePreview && task.TaskCode != SupplierAutomationTaskAccountRateGuard {
@@ -443,26 +450,26 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 			SlowThreshold:            task.Config.AccountHealthGuardSlowThreshold,
 			RecoveryThreshold:        task.Config.AccountHealthGuardRecoveryThreshold,
 			HealthyLatencyMs:         task.Config.AccountHealthGuardHealthyLatencyMs,
-			IgnoredAccountIDs:        task.Config.AccountHealthGuardIgnoredAccountIDs,
+			AccountIDs:               task.Config.AccountHealthGuardAccountIDs,
 			AccountModels:            task.Config.AccountHealthGuardAccountModels,
 			PlatformModels:           task.Config.AccountHealthGuardPlatformModels,
 			PlatformLatencyMs:        task.Config.AccountHealthGuardPlatformLatencyMs,
 			CursorAccountID:          task.Config.AccountHealthGuardCursorAccountID,
 		}, time.Now())
-		run.ProcessedCount = result.CheckedCount
+		run.ProcessedCount = result.CheckedCount + result.UnavailableCount
 		run.SuccessCount = result.HealthyCount + result.SlowCount
-		run.FailedCount = result.FailedCount
+		run.FailedCount = result.FailedCount + result.UnavailableCount
 		run.ResultDetail = &SupplierAutomationRunDetail{AccountHealthGuard: &result}
 		task.Config.AccountHealthGuardCursorAccountID = result.CursorAccountID
 		if err != nil {
 			return err
 		}
-		if result.FailedCount > 0 {
+		if run.FailedCount > 0 {
 			run.Status = SupplierAutomationStatusPartial
-			run.Message = fmt.Sprintf("健康守护发现 %d 个失败账号", result.FailedCount)
+			run.Message = fmt.Sprintf("健康守护发现 %d 个异常账号", run.FailedCount)
 		} else {
 			run.Status = SupplierAutomationStatusSuccess
-			run.Message = fmt.Sprintf("健康守护检查 %d 个账号，跳过 %d 个", result.CheckedCount, result.SkippedCount)
+			run.Message = fmt.Sprintf("健康守护检查 %d 个账号，待下轮 %d 个", result.CheckedCount, result.PendingCount)
 		}
 		return nil
 	case SupplierAutomationTaskAccountRateGuard:
@@ -617,6 +624,16 @@ func validateSupplierAutomationTask(task SupplierAutomationTask) error {
 	return nil
 }
 
+func validateSupplierAccountHealthGuardSelection(task SupplierAutomationTask) error {
+	if task.TaskCode != SupplierAutomationTaskAccountHealthGuard {
+		return nil
+	}
+	if len(normalizeSupplierAccountHealthGuardAccountIDs(task.Config.AccountHealthGuardAccountIDs)) == 0 {
+		return errors.New("请至少选择一个需要检查的账号")
+	}
+	return nil
+}
+
 type SupplierAutomationScheduler struct {
 	repo    SupplierAutomationRepository
 	service *SupplierAutomationService
@@ -673,6 +690,11 @@ func (s *SupplierAutomationScheduler) Reload(ctx context.Context) error {
 	for _, task := range tasks {
 		if err := validateSupplierAutomationTask(task); err != nil {
 			return err
+		}
+		if task.Enabled {
+			if err := validateSupplierAccountHealthGuardSelection(task); err != nil {
+				return err
+			}
 		}
 		schedule, err := supplierAutomationCronParser.Parse(task.CronExpression)
 		if err != nil {

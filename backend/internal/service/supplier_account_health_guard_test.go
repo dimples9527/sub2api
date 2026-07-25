@@ -14,7 +14,7 @@ import (
 
 func TestNormalizeSupplierAccountHealthGuardConfigUsesDefaultsAndCleansValues(t *testing.T) {
 	config := normalizeSupplierAccountHealthGuardConfig(SupplierAccountHealthGuardConfig{
-		IgnoredAccountIDs: []int64{3, 0, -1, 3, 2},
+		AccountIDs: []int64{3, 0, -1, 3, 2},
 		AccountModels: map[int64]string{
 			0: "invalid",
 			2: "  gpt-account  ",
@@ -37,7 +37,7 @@ func TestNormalizeSupplierAccountHealthGuardConfigUsesDefaultsAndCleansValues(t 
 	require.Equal(t, 3, config.SlowThreshold)
 	require.Equal(t, 2, config.RecoveryThreshold)
 	require.Equal(t, int64(15000), config.HealthyLatencyMs)
-	require.Equal(t, []int64{2, 3}, config.IgnoredAccountIDs)
+	require.Equal(t, []int64{2, 3}, config.AccountIDs)
 	require.Equal(t, map[int64]string{2: "gpt-account"}, config.AccountModels)
 	require.Equal(t, map[string]string{"openai": "gpt-platform"}, config.PlatformModels)
 	require.Equal(t, map[string]int64{"openai": 1200}, config.PlatformLatencyMs)
@@ -161,28 +161,91 @@ func (s *supplierAccountHealthGuardTesterStub) runTestBackground(ctx context.Con
 	return s.results[accountID], s.errs[accountID]
 }
 
-func TestSupplierAccountHealthGuardRunRecordsSkippedCandidates(t *testing.T) {
+func TestSupplierAccountHealthGuardRunRejectsEmptyAccountWhitelist(t *testing.T) {
+	tester := &supplierAccountHealthGuardTesterStub{results: map[int64]*ScheduledTestResult{}, errs: map[int64]error{}}
+	guard := NewSupplierAccountHealthGuardService(
+		&supplierAccountHealthGuardRepoStub{},
+		&supplierAccountHealthGuardAccountStoreStub{},
+		tester,
+	)
+
+	_, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{}, time.Now())
+
+	require.EqualError(t, err, "请至少选择一个需要检查的账号")
+	require.Empty(t, tester.calls)
+}
+
+func TestSupplierAccountHealthGuardRunOnlyChecksSelectedAccounts(t *testing.T) {
 	repo := &supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{
 		{Source: SupplierAccountHealthGuardSource{ProviderAccountID: 1, UpstreamAccountName: "未匹配"}, MatchStatus: SupplierAccountHealthGuardMatchUnmatched},
 		{Source: SupplierAccountHealthGuardSource{ProviderAccountID: 2, UpstreamAccountName: "冲突"}, MatchStatus: SupplierAccountHealthGuardMatchConflict, MatchCount: 2},
-		{Source: SupplierAccountHealthGuardSource{ProviderAccountID: 3, UpstreamAccountName: "本地缺失"}, MatchStatus: SupplierAccountHealthGuardMatchMatched, MatchCount: 1, LocalAccountID: 30},
-		newSupplierAccountHealthGuardCandidate(40, "忽略账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 4}),
-		newSupplierAccountHealthGuardCandidate(50, "缺少模型", "claude", true, SupplierAccountHealthGuardSource{ProviderAccountID: 5}),
+		newSupplierAccountHealthGuardCandidate(40, "未选择账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 4}),
+		newSupplierAccountHealthGuardCandidate(50, "已选择账号", "claude", true, SupplierAccountHealthGuardSource{ProviderAccountID: 5}),
+	}}
+	tester := &supplierAccountHealthGuardTesterStub{
+		results: map[int64]*ScheduledTestResult{50: {Status: "success", LatencyMs: 20}},
+		errs:    map[int64]error{},
+	}
+	guard := NewSupplierAccountHealthGuardService(repo, &supplierAccountHealthGuardAccountStoreStub{}, tester)
+
+	result, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{
+		AccountIDs:     []int64{50},
+		PlatformModels: map[string]string{"claude": "claude-sonnet"},
+	}, time.Date(2026, 7, 24, 10, 0, 0, 0, time.UTC))
+
+	require.NoError(t, err)
+	require.Equal(t, []supplierAccountHealthGuardTestCall{{accountID: 50, modelID: "claude-sonnet"}}, tester.calls)
+	require.Equal(t, 1, result.TotalAccounts)
+	require.Equal(t, 1, result.SelectedCount)
+	require.Equal(t, 1, result.CheckedCount)
+	require.Zero(t, result.SkippedCount)
+	require.Len(t, result.Items, 1)
+}
+
+func TestSupplierAccountHealthGuardRunRejectsMissingModelsBeforeTesting(t *testing.T) {
+	repo := &supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{
+		newSupplierAccountHealthGuardCandidate(51, "账号甲", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 51}),
+		newSupplierAccountHealthGuardCandidate(52, "账号乙", "claude", true, SupplierAccountHealthGuardSource{ProviderAccountID: 52}),
 	}}
 	tester := &supplierAccountHealthGuardTesterStub{results: map[int64]*ScheduledTestResult{}, errs: map[int64]error{}}
 	guard := NewSupplierAccountHealthGuardService(repo, &supplierAccountHealthGuardAccountStoreStub{}, tester)
 
+	_, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{
+		AccountIDs:     []int64{51, 52},
+		PlatformModels: map[string]string{"openai": "gpt-4o-mini"},
+	}, time.Now())
+
+	require.EqualError(t, err, "以下账号尚未配置测试模型：账号乙")
+	require.Empty(t, tester.calls)
+}
+
+func TestSupplierAccountHealthGuardRunRecordsUnavailableSelectedAccountsAndContinues(t *testing.T) {
+	disabled := newSupplierAccountHealthGuardCandidate(61, "已停用账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 61})
+	disabled.LocalAccount.Status = StatusDisabled
+	repo := &supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{
+		disabled,
+		newSupplierAccountHealthGuardCandidate(62, "可用账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 62}),
+	}}
+	tester := &supplierAccountHealthGuardTesterStub{
+		results: map[int64]*ScheduledTestResult{62: {Status: "success", LatencyMs: 20}},
+		errs:    map[int64]error{},
+	}
+	guard := NewSupplierAccountHealthGuardService(repo, &supplierAccountHealthGuardAccountStoreStub{}, tester)
+
 	result, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{
-		IgnoredAccountIDs: []int64{40},
-		PlatformModels:    map[string]string{"openai": "gpt-4o-mini"},
-	}, time.Date(2026, 7, 24, 10, 0, 0, 0, time.UTC))
+		AccountIDs:     []int64{61, 62, 63},
+		PlatformModels: map[string]string{"openai": "gpt-4o-mini"},
+	}, time.Now())
 
 	require.NoError(t, err)
-	require.Empty(t, tester.calls)
-	require.Equal(t, 5, result.TotalAccounts)
-	require.Equal(t, 5, result.SkippedCount)
-	require.Len(t, result.Items, 5)
-	require.ElementsMatch(t, []string{"unmatched", "conflict", "local_account_missing", "account_ignored", "test_model_missing"}, supplierAccountHealthGuardReasonNames(result.SkipReasons))
+	require.Equal(t, []supplierAccountHealthGuardTestCall{{accountID: 62, modelID: "gpt-4o-mini"}}, tester.calls)
+	require.Equal(t, 3, result.TotalAccounts)
+	require.Equal(t, 1, result.CheckedCount)
+	require.Equal(t, 2, result.UnavailableCount)
+	require.Len(t, result.Items, 3)
+	require.Equal(t, SupplierAccountHealthGuardStatusUnavailable, result.Items[0].Status)
+	require.Equal(t, SupplierAccountHealthGuardStatusHealthy, result.Items[1].Status)
+	require.Equal(t, SupplierAccountHealthGuardStatusUnavailable, result.Items[2].Status)
 }
 
 func TestSupplierAccountHealthGuardRunDeduplicatesLocalAccountSourcesAndRotatesCursor(t *testing.T) {
@@ -198,13 +261,14 @@ func TestSupplierAccountHealthGuardRunDeduplicatesLocalAccountSourcesAndRotatesC
 		30: {Status: "success", LatencyMs: 30},
 	}, errs: map[int64]error{}}
 	guard := NewSupplierAccountHealthGuardService(repo, &supplierAccountHealthGuardAccountStoreStub{}, tester)
-	config := SupplierAccountHealthGuardConfig{MaxAccountsPerRun: 2, Concurrency: 1, PlatformModels: map[string]string{"openai": "gpt-4o-mini"}}
+	config := SupplierAccountHealthGuardConfig{AccountIDs: []int64{10, 20, 30}, MaxAccountsPerRun: 2, Concurrency: 1, PlatformModels: map[string]string{"openai": "gpt-4o-mini"}}
 
 	first, err := guard.Run(context.Background(), config, time.Now())
 	require.NoError(t, err)
 	require.Equal(t, []supplierAccountHealthGuardTestCall{{accountID: 10, modelID: "gpt-4o-mini"}, {accountID: 20, modelID: "gpt-4o-mini"}}, tester.calls)
 	require.Len(t, first.Items[0].Sources, 2)
 	require.Equal(t, int64(20), first.CursorAccountID)
+	require.Equal(t, 1, first.PendingCount)
 
 	tester.calls = nil
 	config.CursorAccountID = first.CursorAccountID
@@ -222,6 +286,7 @@ func TestSupplierAccountHealthGuardRunDisablesAfterFailureThresholdAndWritesSupp
 	guard := NewSupplierAccountHealthGuardService(&supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{candidate}}, store, tester)
 
 	result, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{
+		AccountIDs:       []int64{21},
 		FailureThreshold: 3, SlowThreshold: 3, RecoveryThreshold: 2,
 		PlatformModels: map[string]string{"openai": "gpt-4o-mini"},
 	}, time.Now())
@@ -245,6 +310,7 @@ func TestSupplierAccountHealthGuardRunRecoversAndUsesOverrides(t *testing.T) {
 	guard := NewSupplierAccountHealthGuardService(&supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{candidate}}, store, tester)
 
 	result, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{
+		AccountIDs:        []int64{22},
 		RecoveryThreshold: 2,
 		HealthyLatencyMs:  500,
 		AccountModels:     map[int64]string{22: "account-model"},
@@ -271,6 +337,7 @@ func TestSupplierAccountHealthGuardRunMarksSchedulableWriteFailureAsFailed(t *te
 	guard := NewSupplierAccountHealthGuardService(&supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{candidate}}, store, tester)
 
 	result, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{
+		AccountIDs:       []int64{41},
 		SlowThreshold:    2,
 		HealthyLatencyMs: 1500,
 		PlatformModels:   map[string]string{"openai": "gpt-4o-mini"},
@@ -295,6 +362,7 @@ func TestSupplierAccountHealthGuardRunMarksExtraWriteFailureAsFailed(t *testing.
 	guard := NewSupplierAccountHealthGuardService(&supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{candidate}}, store, tester)
 
 	result, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{
+		AccountIDs:     []int64{42},
 		PlatformModels: map[string]string{"openai": "gpt-4o-mini"},
 	}, time.Now())
 
@@ -358,6 +426,7 @@ func TestSupplierAccountHealthGuardRunRespectsConcurrencyLimit(t *testing.T) {
 	outcome := make(chan runOutcome, 1)
 	go func() {
 		result, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{
+			AccountIDs:     []int64{1, 2, 3, 4},
 			Concurrency:    2,
 			PlatformModels: map[string]string{"openai": "gpt-4o-mini"},
 		}, time.Now())
@@ -403,6 +472,7 @@ func TestSupplierAccountHealthGuardRunContinuesAfterSingleAccountTimeout(t *test
 	guard := NewSupplierAccountHealthGuardService(repo, &supplierAccountHealthGuardAccountStoreStub{}, tester)
 
 	result, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{
+		AccountIDs:               []int64{1, 2},
 		Concurrency:              1,
 		TimeoutPerAccountSeconds: 1,
 		PlatformModels:           map[string]string{"openai": "gpt-4o-mini"},
@@ -428,6 +498,7 @@ func TestSupplierAccountHealthGuardRunDisablesAfterSlowThreshold(t *testing.T) {
 	guard := NewSupplierAccountHealthGuardService(&supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{candidate}}, store, tester)
 
 	result, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{
+		AccountIDs:       []int64{31},
 		SlowThreshold:    2,
 		HealthyLatencyMs: 1500,
 		PlatformModels:   map[string]string{"openai": "gpt-4o-mini"},
@@ -450,6 +521,7 @@ func TestSupplierAccountHealthGuardRunKeepsSchedulingBeforeThreshold(t *testing.
 	guard := NewSupplierAccountHealthGuardService(&supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{candidate}}, store, tester)
 
 	result, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{
+		AccountIDs:       []int64{32},
 		FailureThreshold: 2,
 		PlatformModels:   map[string]string{"openai": "gpt-4o-mini"},
 	}, time.Now())

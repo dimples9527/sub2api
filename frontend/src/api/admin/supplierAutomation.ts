@@ -16,7 +16,7 @@ export interface SupplierAutomationConfig {
   account_health_guard_slow_threshold: number
   account_health_guard_recovery_threshold: number
   account_health_guard_healthy_latency_ms: number
-  account_health_guard_ignored_account_ids: number[]
+  account_health_guard_account_ids: number[]
   account_health_guard_account_models: Record<string, string>
   account_health_guard_platform_models: Record<string, string>
   account_health_guard_platform_latency_ms: Record<string, number>
@@ -105,7 +105,7 @@ export interface SupplierAccountHealthGuardItem {
   model_id?: string
   schedulable_before: boolean
   schedulable_after: boolean
-  status: 'healthy' | 'slow' | 'failed' | 'skipped' | string
+  status: 'healthy' | 'slow' | 'failed' | 'skipped' | 'unavailable' | string
   test_status?: string
   latency_ms: number
   latency_limit_ms: number
@@ -121,11 +121,14 @@ export interface SupplierAccountHealthGuardItem {
 
 export interface SupplierAccountHealthGuardResult {
   total_accounts: number
+  selected_count: number
   checked_count: number
   healthy_count: number
   slow_count: number
   failed_count: number
   skipped_count: number
+  unavailable_count: number
+  pending_count: number
   disabled_count: number
   recovered_count: number
   unchanged_count: number
