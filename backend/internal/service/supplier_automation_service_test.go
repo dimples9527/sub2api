@@ -187,7 +187,7 @@ func TestSupplierAutomationServiceRunsRateGuardWithStructuredPartialResult(t *te
 		SupplierAutomationTaskRateGuard: {
 			TaskCode: SupplierAutomationTaskRateGuard, Name: "倍率守护", Enabled: true,
 			CronExpression: "2-59/5 * * * *", TimeoutSeconds: 300,
-			Config: SupplierAutomationConfig{RateGuardSafetyMultiplier: 1.1, RateGuardMaxSnapshotAgeSeconds: 1800},
+			Config: SupplierAutomationConfig{RateGuardMaxSnapshotAgeSeconds: 1800},
 		},
 	}}
 	rateGuard := &supplierAutomationRateGuardStub{result: SupplierRateGuardResult{
@@ -201,7 +201,6 @@ func TestSupplierAutomationServiceRunsRateGuardWithStructuredPartialResult(t *te
 
 	require.NoError(t, err)
 	require.Equal(t, 1, rateGuard.called)
-	require.Equal(t, 1.1, rateGuard.config.SafetyMultiplier)
 	require.Equal(t, 30*time.Minute, rateGuard.config.MaxSnapshotAge)
 	require.Equal(t, 3, run.ProcessedCount)
 	require.Equal(t, 2, run.SuccessCount)
@@ -285,8 +284,7 @@ func TestSupplierAutomationServiceMarksAccountRateGuardUnbindLogHandled(t *testi
 
 func TestSupplierAutomationServiceValidatesRateGuardConfig(t *testing.T) {
 	tests := []SupplierAutomationConfig{
-		{RateGuardSafetyMultiplier: 0, RateGuardMaxSnapshotAgeSeconds: 1800},
-		{RateGuardSafetyMultiplier: 1.1, RateGuardMaxSnapshotAgeSeconds: 59},
+		{RateGuardMaxSnapshotAgeSeconds: 59},
 	}
 	for _, config := range tests {
 		task := SupplierAutomationTask{

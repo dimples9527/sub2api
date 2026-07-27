@@ -56,14 +56,13 @@ type SupplierAutomationTask struct {
 }
 
 type SupplierAutomationConfig struct {
-	AutomationRunRetentionDays     int     `json:"automation_run_retention_days"`
-	SyncRunRetentionDays           int     `json:"sync_run_retention_days"`
-	MetricRetentionDays            int     `json:"metric_snapshot_retention_days"`
-	DailyStatRetentionDays         int     `json:"daily_stat_retention_days"`
-	InactiveAccountDays            int     `json:"inactive_account_retention_days"`
-	InactiveGroupDays              int     `json:"inactive_group_retention_days"`
-	RateGuardSafetyMultiplier      float64 `json:"rate_guard_safety_multiplier"`
-	RateGuardMaxSnapshotAgeSeconds int     `json:"rate_guard_max_snapshot_age_seconds"`
+	AutomationRunRetentionDays     int `json:"automation_run_retention_days"`
+	SyncRunRetentionDays           int `json:"sync_run_retention_days"`
+	MetricRetentionDays            int `json:"metric_snapshot_retention_days"`
+	DailyStatRetentionDays         int `json:"daily_stat_retention_days"`
+	InactiveAccountDays            int `json:"inactive_account_retention_days"`
+	InactiveGroupDays              int `json:"inactive_group_retention_days"`
+	RateGuardMaxSnapshotAgeSeconds int `json:"rate_guard_max_snapshot_age_seconds"`
 
 	AccountHealthGuardMaxAccountsPerRun        int               `json:"account_health_guard_max_accounts_per_run"`
 	AccountHealthGuardConcurrency              int               `json:"account_health_guard_concurrency"`
@@ -423,8 +422,7 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 			return fmt.Errorf("supplier rate guard service is required")
 		}
 		result, err := s.rateGuard.Run(ctx, SupplierRateGuardConfig{
-			SafetyMultiplier: task.Config.RateGuardSafetyMultiplier,
-			MaxSnapshotAge:   time.Duration(task.Config.RateGuardMaxSnapshotAgeSeconds) * time.Second,
+			MaxSnapshotAge: time.Duration(task.Config.RateGuardMaxSnapshotAgeSeconds) * time.Second,
 		}, time.Now())
 		run.ProcessedCount = result.Checked
 		run.FailedCount = result.Failed + result.Stale + result.Invalid
@@ -602,7 +600,7 @@ func validateSupplierAutomationTask(task SupplierAutomationTask) error {
 		return fmt.Errorf("invalid supplier automation cron: %w", err)
 	}
 	if task.TaskCode == SupplierAutomationTaskRateGuard {
-		if task.Config.RateGuardSafetyMultiplier <= 0 || task.Config.RateGuardMaxSnapshotAgeSeconds < 60 {
+		if task.Config.RateGuardMaxSnapshotAgeSeconds < 60 {
 			return ErrSupplierProviderInvalid
 		}
 	}

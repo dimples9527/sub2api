@@ -320,15 +320,13 @@ describe('SupplierAutomationView edit dialog', () => {
 
   it('shows rate guard settings only for the rate guard task', () => {
     expect(supplierAutomationSource).toContain("editForm.task_code === 'supplier_rate_guard'")
-    expect(supplierAutomationSource).toContain('editForm.config.rate_guard_safety_multiplier')
-    expect(supplierAutomationSource).toContain('label="安全倍率"')
+    expect(supplierAutomationSource).not.toContain('rate_guard_safety_multiplier')
     expect(supplierAutomationSource).toContain('editForm.config.rate_guard_max_snapshot_age_seconds')
     expect(supplierAutomationSource).toContain('label="快照最大有效期（秒）"')
   })
 
   it('validates rate guard settings before saving the task', () => {
-    expect(supplierAutomationSource).toContain('editForm.config.rate_guard_safety_multiplier <= 0')
-    expect(supplierAutomationSource).toContain("error.value = '安全倍率必须大于 0'")
+    expect(supplierAutomationSource).not.toContain('rate_guard_safety_multiplier')
     expect(supplierAutomationSource).toContain('editForm.config.rate_guard_max_snapshot_age_seconds < 60')
     expect(supplierAutomationSource).toContain("error.value = '快照最大有效期不能少于 60 秒'")
   })
@@ -905,10 +903,6 @@ describe('SupplierAutomationView edit dialog composition', () => {
       ['editIntervalSeconds', 'editIntervalSeconds = toNumber($event, editIntervalSeconds)'],
       ['editForm.timeout_seconds', 'editForm.timeout_seconds = toNumber($event, editForm.timeout_seconds)'],
       [
-        'editForm.config.rate_guard_safety_multiplier',
-        'editForm.config.rate_guard_safety_multiplier = toNumber($event, editForm.config.rate_guard_safety_multiplier)',
-      ],
-      [
         'editForm.config.rate_guard_max_snapshot_age_seconds',
         'editForm.config.rate_guard_max_snapshot_age_seconds = toNumber($event, editForm.config.rate_guard_max_snapshot_age_seconds)',
       ],
@@ -967,8 +961,7 @@ describe('SupplierAutomationView edit dialog composition', () => {
       "error.value = '执行间隔必须是正整数秒'"
     )
     expect(saveTaskSource).toContain("if (editForm.task_code === 'supplier_rate_guard') {")
-    expect(saveTaskSource).toContain('if (editForm.config.rate_guard_safety_multiplier <= 0) {')
-    expect(saveTaskSource).toContain("error.value = '安全倍率必须大于 0'")
+    expect(saveTaskSource).not.toContain('rate_guard_safety_multiplier')
     expect(saveTaskSource).toContain(
       'if (editForm.config.rate_guard_max_snapshot_age_seconds < 60) {'
     )

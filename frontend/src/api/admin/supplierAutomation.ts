@@ -1,7 +1,6 @@
 import { apiClient } from '../client'
 
 export interface SupplierAutomationConfig {
-  rate_guard_safety_multiplier: number
   rate_guard_max_snapshot_age_seconds: number
   automation_run_retention_days: number
   sync_run_retention_days: number

@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"math"
 	"time"
 )
 
@@ -34,8 +33,7 @@ const (
 )
 
 type SupplierRateGuardConfig struct {
-	SafetyMultiplier float64
-	MaxSnapshotAge   time.Duration
+	MaxSnapshotAge time.Duration
 }
 
 type SupplierRateGuardCandidate struct {
@@ -150,9 +148,6 @@ func (s *SupplierRateGuardService) Run(ctx context.Context, config SupplierRateG
 	if s == nil || s.repo == nil {
 		return result, fmt.Errorf("supplier rate guard repository is required")
 	}
-	if config.SafetyMultiplier <= 0 {
-		return result, fmt.Errorf("supplier rate guard safety multiplier must be greater than zero")
-	}
 	if config.MaxSnapshotAge <= 0 {
 		return result, fmt.Errorf("supplier rate guard max snapshot age must be greater than zero")
 	}
@@ -177,7 +172,7 @@ func (s *SupplierRateGuardService) Run(ctx context.Context, config SupplierRateG
 			result.addItem(item)
 			continue
 		}
-		item.TargetRate = supplierRateGuardTarget(candidate.UpstreamRateMultiplier, config.SafetyMultiplier)
+		item.TargetRate = supplierRateGuardTarget(candidate.UpstreamRateMultiplier)
 		applied, err := s.repo.ApplyRateGuard(ctx, SupplierRateGuardApplyInput{
 			MappingID: candidate.MappingID, ExpectedSnapshotAt: candidate.SnapshotAt,
 			CheckedAt: now, TargetRate: item.TargetRate, MaxSnapshotAge: config.MaxSnapshotAge,
@@ -216,8 +211,8 @@ func supplierRateGuardSkip(candidate SupplierRateGuardCandidate, config Supplier
 	}
 }
 
-func supplierRateGuardTarget(upstream, safety float64) float64 {
-	return math.Ceil(upstream*safety*100-1e-9) / 100
+func supplierRateGuardTarget(upstream float64) float64 {
+	return upstream
 }
 
 func (r *SupplierRateGuardResult) addItem(item SupplierRateGuardItemResult) {

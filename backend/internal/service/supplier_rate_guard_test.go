@@ -45,26 +45,43 @@ func (f *supplierRateGuardRepoFake) MarkRateGuardChecked(_ context.Context, mapp
 	return nil
 }
 
-func TestSupplierRateGuardRaisesOnlyBelowRoundedTarget(t *testing.T) {
+func TestSupplierRateGuardRaisesOnlyBelowUpstreamRate(t *testing.T) {
 	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
 	repo := &supplierRateGuardRepoFake{candidates: []SupplierRateGuardCandidate{{
 		MappingID: 10, ProviderID: 42, ProviderName: "Supplier A", ProviderEnabled: true,
 		UpstreamGroupKey: "vip", UpstreamGroupName: "VIP", UpstreamRateMultiplier: 2.5,
 		GuardianActive: true, LocalGroupID: 7, LocalGroupName: "VIP Local", LocalGroupStatus: StatusActive,
-		LocalRateMultiplier: 2.6, SnapshotAt: now.Add(-time.Minute), GroupSyncStatus: SupplierSyncStatusSuccess,
+		LocalRateMultiplier: 2, SnapshotAt: now.Add(-time.Minute), GroupSyncStatus: SupplierSyncStatusSuccess,
 	}}}
 	guard := NewSupplierRateGuardService(repo)
 
-	result, err := guard.Run(context.Background(), SupplierRateGuardConfig{SafetyMultiplier: 1.1, MaxSnapshotAge: 30 * time.Minute}, now)
+	result, err := guard.Run(context.Background(), SupplierRateGuardConfig{MaxSnapshotAge: 30 * time.Minute}, now)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, result.Checked)
 	require.Equal(t, 1, result.Raised)
 	require.Len(t, repo.applied, 1)
-	require.InDelta(t, 2.75, repo.applied[0].TargetRate, 0.000000001)
+	require.InDelta(t, 2.5, repo.applied[0].TargetRate, 0.000000001)
 	require.Equal(t, SupplierRateGuardActionRaised, result.Items[0].Action)
 }
 
+func TestSupplierRateGuardKeepsHigherLocalRateWithoutSafetyMarkup(t *testing.T) {
+	now := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
+	repo := &supplierRateGuardRepoFake{candidates: []SupplierRateGuardCandidate{
+		validSupplierRateGuardCandidate(10, 0.25, 0.26, now),
+	}}
+
+	result, err := NewSupplierRateGuardService(repo).Run(context.Background(), SupplierRateGuardConfig{
+		MaxSnapshotAge: 30 * time.Minute,
+	}, now)
+
+	require.NoError(t, err)
+	require.Zero(t, result.Raised)
+	require.Equal(t, 1, result.Unchanged)
+	require.Len(t, repo.applied, 1)
+	require.InDelta(t, 0.25, repo.applied[0].TargetRate, 0.000000001)
+	require.Equal(t, SupplierRateGuardActionUnchanged, result.Items[0].Action)
+}
 func TestSupplierRateGuardDoesNotLowerEqualOrHigherLocalRate(t *testing.T) {
 	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
 	repo := &supplierRateGuardRepoFake{candidates: []SupplierRateGuardCandidate{
@@ -72,7 +89,7 @@ func TestSupplierRateGuardDoesNotLowerEqualOrHigherLocalRate(t *testing.T) {
 		validSupplierRateGuardCandidate(11, 2.5, 3.0, now),
 	}}
 
-	result, err := NewSupplierRateGuardService(repo).Run(context.Background(), SupplierRateGuardConfig{SafetyMultiplier: 1.1, MaxSnapshotAge: 30 * time.Minute}, now)
+	result, err := NewSupplierRateGuardService(repo).Run(context.Background(), SupplierRateGuardConfig{MaxSnapshotAge: 30 * time.Minute}, now)
 
 	require.NoError(t, err)
 	require.Zero(t, result.Raised)
@@ -93,7 +110,7 @@ func TestSupplierRateGuardSkipsStaleFailedInactiveAndDuplicateSnapshots(t *testi
 	duplicate.LastSnapshotAt = &duplicate.SnapshotAt
 	repo := &supplierRateGuardRepoFake{candidates: []SupplierRateGuardCandidate{stale, failedSync, inactiveGuardian, inactiveProvider, duplicate}}
 
-	result, err := NewSupplierRateGuardService(repo).Run(context.Background(), SupplierRateGuardConfig{SafetyMultiplier: 1.1, MaxSnapshotAge: 30 * time.Minute}, now)
+	result, err := NewSupplierRateGuardService(repo).Run(context.Background(), SupplierRateGuardConfig{MaxSnapshotAge: 30 * time.Minute}, now)
 
 	require.NoError(t, err)
 	require.Equal(t, 5, result.Checked)
@@ -104,9 +121,9 @@ func TestSupplierRateGuardSkipsStaleFailedInactiveAndDuplicateSnapshots(t *testi
 	require.Len(t, repo.checked, 5)
 }
 
-func TestSupplierRateGuardRoundsUpToHundredth(t *testing.T) {
-	require.InDelta(t, 1.11, supplierRateGuardTarget(1.001, 1.1), 0.000000001)
-	require.InDelta(t, 2.75, supplierRateGuardTarget(2.5, 1.1), 0.000000001)
+func TestSupplierRateGuardPreservesUpstreamPrecision(t *testing.T) {
+	require.InDelta(t, 1.001, supplierRateGuardTarget(1.001), 0.000000001)
+	require.InDelta(t, 0.25, supplierRateGuardTarget(0.25), 0.000000001)
 }
 
 func TestSupplierRateGuardContinuesAfterOneItemFails(t *testing.T) {
@@ -119,7 +136,7 @@ func TestSupplierRateGuardContinuesAfterOneItemFails(t *testing.T) {
 		applyErr: map[int64]error{10: errors.New("write failed")},
 	}
 
-	result, err := NewSupplierRateGuardService(repo).Run(context.Background(), SupplierRateGuardConfig{SafetyMultiplier: 1.1, MaxSnapshotAge: 30 * time.Minute}, now)
+	result, err := NewSupplierRateGuardService(repo).Run(context.Background(), SupplierRateGuardConfig{MaxSnapshotAge: 30 * time.Minute}, now)
 
 	require.NoError(t, err)
 	require.Equal(t, 2, result.Checked)

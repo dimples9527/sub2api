@@ -234,10 +234,9 @@
           <section v-if="editForm.task_code === 'supplier_rate_guard'" class="sp-form-section sp-policy-section">
             <div class="sp-form-section-head">
               <span>03</span>
-              <div><h3>倍率守护策略</h3><p>控制安全倍率以及允许参与计算的快照有效期。</p></div>
+              <div><h3>倍率守护策略</h3><p>控制允许参与倍率比较的上游快照有效期。</p></div>
             </div>
             <div class="sp-form-grid">
-              <Input :model-value="editForm.config.rate_guard_safety_multiplier" type="number" label="安全倍率" @update:model-value="editForm.config.rate_guard_safety_multiplier = toNumber($event, editForm.config.rate_guard_safety_multiplier)" />
               <Input :model-value="editForm.config.rate_guard_max_snapshot_age_seconds" type="number" label="快照最大有效期（秒）" @update:model-value="editForm.config.rate_guard_max_snapshot_age_seconds = toNumber($event, editForm.config.rate_guard_max_snapshot_age_seconds)" />
             </div>
           </section>
@@ -898,7 +897,6 @@ const editForm = reactive<SupplierAutomationTask>({
   cron_expression: '',
   timeout_seconds: 600,
   config: {
-    rate_guard_safety_multiplier: 1.1,
     rate_guard_max_snapshot_age_seconds: 1800,
     automation_run_retention_days: 30,
     sync_run_retention_days: 30,
@@ -1108,10 +1106,6 @@ async function saveTask() {
     return
   }
   if (editForm.task_code === 'supplier_rate_guard') {
-    if (editForm.config.rate_guard_safety_multiplier <= 0) {
-      error.value = '安全倍率必须大于 0'
-      return
-    }
     if (editForm.config.rate_guard_max_snapshot_age_seconds < 60) {
       error.value = '快照最大有效期不能少于 60 秒'
       return
