@@ -251,6 +251,16 @@
               </span>
             </template>
 
+            <template #cell-monitor_trend="{ row: group }">
+              <SupplierGroupAvailabilityTrend
+                :row="monitorTrendFor(group)"
+                :loading="monitorLoading"
+                empty-text="-"
+                loading-text="加载中"
+                label="可用率趋势"
+              />
+            </template>
+
             <template #cell-local_group_name="{ row: group }">
               <div v-if="group.local_group_id" class="sp-local-group">
                 <GroupBadge
@@ -673,6 +683,7 @@ import {
 } from '@/api/admin/supplierProviderData'
 import supplierProvidersAPI, { type SupplierProvider } from '@/api/admin/supplierProviders'
 import { SupplierDrawer, SupplierModuleLayout } from '@/components/admin/supplier-management'
+import SupplierGroupAvailabilityTrend from '@/components/admin/supplier-management/SupplierGroupAvailabilityTrend.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import DataTable from '@/components/common/DataTable.vue'
@@ -686,6 +697,11 @@ import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores/app'
 import type { AdminGroup, GroupPlatform } from '@/types'
 import { platformTextClass } from '@/utils/platformColors'
+import {
+  buildSupplierGroupMonitorTrendIndex,
+  normalizeSupplierGroupMonitorKey,
+  type SupplierGroupMonitorTrendRow,
+} from '@/utils/supplierGroupMonitorTrend'
 import {
   formatSupplierGroupRateDelta,
   getSupplierGroupRateInsight,
@@ -780,6 +796,8 @@ const newGroupRate = ref('')
 const localRateInput = ref('')
 const total = ref(0)
 const loading = ref(false)
+const monitorTrendIndex = ref<Map<string, SupplierGroupMonitorTrendRow>>(new Map())
+const monitorLoading = ref(false)
 const savingMapping = ref(false)
 const creatingLocalGroup = ref(false)
 const savingLocalRate = ref(false)
@@ -807,6 +825,7 @@ const platformFilter = ref('')
 const matchStatusFilter = ref('')
 const rateStatusFilter = ref('')
 let searchTimer: number | undefined
+let monitorTrendRequestID = 0
 let suppressFilterWatch = false
 
 const DEFAULT_PROVIDER_ID = 0
@@ -860,6 +879,7 @@ const groupColumns: Column[] = [
   { key: 'name', label: '上游分组', sortable: true, class: 'min-w-[190px]' },
   { key: 'rate_multiplier', label: '上游倍率', sortable: true, class: 'min-w-[96px]' },
   { key: 'raw_status', label: '上游状态', class: 'min-w-[105px]' },
+  { key: 'monitor_trend', label: '可用率趋势', class: 'min-w-[160px]' },
   { key: 'local_group_name', label: '匹配本地分组', sortable: true, class: 'min-w-[190px]' },
   { key: 'auto_match_status', label: '匹配状态', class: 'min-w-[120px]' },
 	{ key: 'rate_guard_status', label: '倍率守护', class: 'min-w-[180px]' },
@@ -919,6 +939,7 @@ onMounted(async () => {
   } catch (err) {
     appStore.showError(errorMessage(err, '加载筛选选项失败'))
   }
+  void loadMonitorTrend()
   await loadGroups()
   await refreshRateGuardChangeLogs()
 })
@@ -1036,12 +1057,37 @@ async function loadLocalGroups() {
 
 async function refreshAll() {
   try {
-    await Promise.all([loadLocalGroups(), loadGroups(), loadRateGuardChangeLogs()])
+    await Promise.all([loadLocalGroups(), loadGroups(), loadRateGuardChangeLogs(), loadMonitorTrend()])
   } catch (err) {
     appStore.showError(errorMessage(err, '刷新分组数据失败'))
   }
 }
 
+function monitorTrendFor(group: SupplierProviderGroup) {
+  const keys = [group.name, group.upstream_group_key, group.local_group_name]
+  for (const key of keys) {
+    const trend = monitorTrendIndex.value.get(normalizeSupplierGroupMonitorKey(key))
+    if (trend) return trend
+  }
+  return undefined
+}
+
+async function loadMonitorTrend(requestID = ++monitorTrendRequestID) {
+  monitorLoading.value = true
+  try {
+    const payload = await adminAPI.groups.getUpstreamMonitorStatus({ period: '90m', board: 'hot' })
+    if (requestID !== monitorTrendRequestID) return
+    monitorTrendIndex.value = buildSupplierGroupMonitorTrendIndex(payload)
+  } catch (err) {
+    if (requestID !== monitorTrendRequestID) return
+    monitorTrendIndex.value = new Map()
+    appStore.showError(errorMessage(err, '加载可用率趋势失败'))
+  } finally {
+    if (requestID === monitorTrendRequestID) {
+      monitorLoading.value = false
+    }
+  }
+}
 async function loadRateGuardChangeLogs() {
   const result = await listRateGuardChangeLogs({
     page: rateGuardChangeLogPage.value,
