@@ -1,14 +1,121 @@
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import { createI18n } from 'vue-i18n'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import SupplierProvidersView from './SupplierProvidersView.vue'
+
+const providerViewMocks = vi.hoisted(() => ({
+  listProviders: vi.fn(),
+  listProviderTypes: vi.fn(),
+  showError: vi.fn(),
+  showSuccess: vi.fn(),
+}))
+
+vi.mock('@/api/admin/supplierProviders', () => ({
+  default: { list: providerViewMocks.listProviders },
+}))
+
+vi.mock('@/api/admin/supplierProviderTypes', () => ({
+  default: { list: providerViewMocks.listProviderTypes },
+}))
+
+vi.mock('@/stores/app', () => ({
+  useAppStore: () => ({
+    showError: providerViewMocks.showError,
+    showSuccess: providerViewMocks.showSuccess,
+  }),
+}))
 
 const supplierProvidersSource = readFileSync(
   resolve(dirname(fileURLToPath(import.meta.url)), 'SupplierProvidersView.vue'),
   'utf-8'
 )
 
+const providerRows = [
+  createProviderRow(1, 'Alpha', 30, 100, 1),
+  createProviderRow(2, 'Beta', 10, 20, 2),
+  createProviderRow(3, 'Gamma', 20, 50, 3),
+]
+
+function createProviderRow(id: number, name: string, todayCost: number, balance: number, sortOrder: number) {
+  return {
+    id,
+    code: name.toLowerCase(),
+    name,
+    provider_type: 'sub2api',
+    base_url: `https://${name.toLowerCase()}.example.com`,
+    enabled: true,
+    is_default: false,
+    credential_configured: true,
+    status: 'ready',
+    risk_level: 'low',
+    valid_account_count: id,
+    schedulable_account_count: id,
+    success_rate: 100 - id,
+    current_balance: balance,
+    today_cost: todayCost,
+    rate_risk_count: 0,
+    sync_status: 'success',
+    sort_order: sortOrder,
+    last_sync_at: `2026-07-${26 - id}T08:00:00Z`,
+  }
+}
+
+async function mountSupplierProviders() {
+  const wrapper = mount(SupplierProvidersView, {
+    global: {
+      plugins: [createI18n({ legacy: false, locale: 'en-US', messages: { 'en-US': {} } })],
+      stubs: {
+        SupplierModuleLayout: { template: '<div><slot /></div>' },
+        SupplierDrawer: true,
+        BaseDialog: true,
+        Input: true,
+        Select: true,
+        Toggle: true,
+        Icon: true,
+      },
+    },
+  })
+  await flushPromises()
+  return wrapper
+}
 describe('SupplierProvidersView payload normalization', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    providerViewMocks.listProviderTypes.mockResolvedValue([])
+    providerViewMocks.listProviders.mockResolvedValue({
+      items: providerRows,
+      summary: {
+        total_count: providerRows.length,
+        enabled_count: providerRows.length,
+        high_risk_count: 0,
+        low_balance_count: 0,
+        sync_failure_count: 0,
+        rate_risk_count: 0,
+      },
+      total: providerRows.length,
+      page: 1,
+      page_size: 100,
+    })
+  })
+
+  it('sorts provider rows when a sortable table header is clicked', async () => {
+    const wrapper = await mountSupplierProviders()
+    const rowIds = () => wrapper.findAll('tbody tr[data-row-id]').map(row => row.attributes('data-row-id'))
+
+    expect(rowIds()).toEqual(['1', '2', '3'])
+
+    const todayCostHeader = wrapper.findAll('thead th').at(5)
+    await todayCostHeader.trigger('click')
+    await flushPromises()
+    expect(rowIds()).toEqual(['2', '3', '1'])
+
+    await todayCostHeader.trigger('click')
+    await flushPromises()
+    expect(rowIds()).toEqual(['1', '3', '2'])
+  })
   it('uses one unified provider filter card without a repeated page heading', () => {
     expect(supplierProvidersSource).not.toContain('class="sp-page-head"')
     expect(supplierProvidersSource).not.toContain('Provider Operations')
@@ -87,5 +194,53 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(supplierProvidersSource).not.toContain('<select')
     expect(supplierProvidersSource).not.toContain('<input')
     expect(supplierProvidersSource).not.toContain('type="checkbox"')
+  })
+
+  it('places a homepage shortcut first and opens the supplier base URL in a new tab', () => {
+    expect(supplierProvidersSource).toContain("import Icon from '@/components/icons/Icon.vue'")
+    expect(supplierProvidersSource).toContain("{ key: 'homepage', label: '主页'")
+    expect(supplierProvidersSource.indexOf("{ key: 'homepage'")).toBeLessThan(
+      supplierProvidersSource.indexOf("{ key: 'name'")
+    )
+    expect(supplierProvidersSource).toContain('<template #cell-homepage="{ row: provider }">')
+    expect(supplierProvidersSource).toContain(':data-test="`supplier-provider-home-${provider.id}`"')
+    expect(supplierProvidersSource).toContain('@click.stop="openProviderHomepage(provider)"')
+    expect(supplierProvidersSource).toContain("window.open(url, '_blank', 'noopener,noreferrer')")
+  })
+
+  it('sorts all primary data columns from their table headers', () => {
+    for (const key of [
+      'name',
+      'status',
+      'account_counts',
+      'success_rate',
+      'today_cost',
+      'current_balance',
+      'rate_risk_count',
+      'credential_configured',
+      'last_sync_at',
+    ]) {
+      expect(supplierProvidersSource).toContain(`{ key: '${key}',`)
+      expect(supplierProvidersSource).toMatch(
+        new RegExp(`\\{ key: '${key}',[^}]*sortable: true`)
+      )
+    }
+    expect(supplierProvidersSource).toContain('server-side-sort')
+    expect(supplierProvidersSource).toContain('@sort="handleProviderSort"')
+    expect(supplierProvidersSource).toContain("const providerSortKey = ref('')")
+    expect(supplierProvidersSource).toContain("const providerSortOrder = ref<'asc' | 'desc'>('asc')")
+    expect(supplierProvidersSource).not.toContain("const sorts = ['风险优先', '成本效率', '最近同步']")
+  })
+
+  it('uses dedicated cost and balance colors with a strict ten-yuan warning threshold', () => {
+    expect(supplierProvidersSource).toContain('class="sp-provider-today-cost"')
+    expect(supplierProvidersSource).toContain("'sp-provider-balance-warning'")
+    expect(supplierProvidersSource).toContain("'sp-provider-balance-normal'")
+    expect(supplierProvidersSource).toContain('function isBalanceWarning(provider: SupplierProvider): boolean')
+    expect(supplierProvidersSource).toContain('return numericValue(provider.current_balance) < 10')
+    expect(supplierProvidersSource).toContain('return currency(provider.current_balance)')
+    expect(supplierProvidersSource).toContain('.sp-provider-today-cost {')
+    expect(supplierProvidersSource).toContain('.sp-provider-balance-normal {')
+    expect(supplierProvidersSource).toContain('.sp-provider-balance-warning {')
   })
 })

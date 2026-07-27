@@ -55,18 +55,6 @@
               <span>默认按真实业务风险排序</span>
             </div>
           </div>
-          <div class="sp-tools">
-            <button
-              v-for="sort in sorts"
-              :key="sort"
-              class="sp-pill"
-              :class="{ active: activeSort === sort }"
-              type="button"
-              @click="activeSort = sort"
-            >
-              {{ sort }}
-            </button>
-          </div>
         </header>
 
         <DataTable
@@ -74,9 +62,24 @@
           :data="sortedProviders"
           :loading="loading"
           row-key="id"
+          server-side-sort
           clickable-rows
+          @sort="handleProviderSort"
           @row-click="selectedProvider = $event"
         >
+          <template #cell-homepage="{ row: provider }">
+            <button
+              class="sp-provider-home-button"
+              type="button"
+              :disabled="!provider.base_url?.trim()"
+              :title="`打开${provider.name}主页`"
+              :aria-label="`打开${provider.name}主页`"
+              :data-test="`supplier-provider-home-${provider.id}`"
+              @click.stop="openProviderHomepage(provider)"
+            >
+              <Icon name="home" size="sm" />
+            </button>
+          </template>
           <template #cell-name="{ row: provider }">
             <div class="sp-entity">{{ provider.name }}</div>
             <div class="sp-sub">{{ provider.code }} · {{ provider.provider_type }} · {{ provider.base_url }}</div>
@@ -91,10 +94,12 @@
             <span :class="{ 'sp-up': provider.success_rate > 0 && provider.success_rate < 95 }">{{ percent(provider.success_rate) }}</span>
           </template>
           <template #cell-today_cost="{ row: provider }">
-            <span class="sp-num">{{ currency(provider.today_cost) }}</span>
+            <span class="sp-provider-today-cost">{{ currency(provider.today_cost) }}</span>
           </template>
           <template #cell-current_balance="{ row: provider }">
-            <span :class="{ 'sp-up': isLowBalance(provider) }">{{ balanceText(provider) }}</span>
+            <span :class="isBalanceWarning(provider) ? 'sp-provider-balance-warning' : 'sp-provider-balance-normal'">
+              {{ balanceText(provider) }}
+            </span>
           </template>
           <template #cell-rate_risk_count="{ row: provider }">
             <span class="sp-status" :class="rateTone(provider)">{{ rateRiskText(provider) }}</span>
@@ -481,6 +486,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { SupplierDrawer, SupplierModuleLayout } from '@/components/admin/supplier-management'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import DataTable from '@/components/common/DataTable.vue'
+import Icon from '@/components/icons/Icon.vue'
 import Input from '@/components/common/Input.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
@@ -542,7 +548,8 @@ const providerTypes = ref<SupplierProviderType[]>([])
 const summary = ref<SupplierProviderSummary>(emptySummary())
 const search = ref('')
 const filter = ref('all')
-const activeSort = ref('风险优先')
+const providerSortKey = ref('')
+const providerSortOrder = ref<'asc' | 'desc'>('asc')
 const loading = ref(false)
 const error = ref('')
 const selectedProvider = ref<SupplierProvider | null>(null)
@@ -560,21 +567,21 @@ const testResult = ref<SupplierProviderEndpointTestResult | null>(null)
 let searchTimer: number | undefined
 const appStore = useAppStore()
 
-const sorts = ['风险优先', '成本效率', '最近同步']
 const enabledProviderTypes = computed(() => providerTypes.value.filter(type => type.enabled))
 const providerTypeOptions = computed<SelectOption[]>(() =>
   enabledProviderTypes.value.map(type => ({ value: type.code, label: `${type.name}（${type.code}）` }))
 )
 const providerColumns: Column[] = [
-  { key: 'name', label: '供应商', class: 'min-w-[220px]' },
-  { key: 'status', label: '运行状态' },
-  { key: 'account_counts', label: '有效 / 可调度账号', class: 'min-w-[150px]' },
-  { key: 'success_rate', label: '成功率' },
-  { key: 'today_cost', label: '今日成本' },
-  { key: 'current_balance', label: '余额可用' },
-  { key: 'rate_risk_count', label: '倍率风险' },
-  { key: 'credential_configured', label: '凭据' },
-  { key: 'last_sync_at', label: '最近同步', class: 'min-w-[110px]' },
+  { key: 'homepage', label: '主页', class: 'w-[64px]' },
+  { key: 'name', label: '供应商', sortable: true, class: 'min-w-[220px]' },
+  { key: 'status', label: '运行状态', sortable: true },
+  { key: 'account_counts', label: '有效 / 可调度账号', sortable: true, class: 'min-w-[150px]' },
+  { key: 'success_rate', label: '成功率', sortable: true },
+  { key: 'today_cost', label: '今日成本', sortable: true },
+  { key: 'current_balance', label: '余额可用', sortable: true },
+  { key: 'rate_risk_count', label: '倍率风险', sortable: true },
+  { key: 'credential_configured', label: '凭据', sortable: true },
+  { key: 'last_sync_at', label: '最近同步', sortable: true, class: 'min-w-[110px]' },
   { key: 'actions', label: '操作', class: 'min-w-[260px]' },
 ]
 
@@ -596,9 +603,11 @@ const filteredProviders = computed(() => providers.value.filter(provider => {
 
 const sortedProviders = computed(() => {
   const rows = [...filteredProviders.value]
-  if (activeSort.value === '成本效率') return rows.sort((left, right) => left.today_cost - right.today_cost)
-  if (activeSort.value === '最近同步') return rows.sort((left, right) => new Date(right.last_sync_at || 0).getTime() - new Date(left.last_sync_at || 0).getTime())
-  return rows.sort((left, right) => riskWeight(right) - riskWeight(left) || left.sort_order - right.sort_order || left.id - right.id)
+  if (!providerSortKey.value) {
+    return rows.sort((left, right) => riskWeight(right) - riskWeight(left) || left.sort_order - right.sort_order || left.id - right.id)
+  }
+
+  return rows.sort((left, right) => compareProviders(left, right, providerSortKey.value, providerSortOrder.value))
 })
 
 const defaultProvider = computed(() => providers.value.find(provider => provider.is_default) || null)
@@ -954,6 +963,69 @@ function riskWeight(provider: SupplierProvider): number {
   return risk + balance + sync + provider.rate_risk_count
 }
 
+function handleProviderSort(key: string, order: 'asc' | 'desc') {
+  providerSortKey.value = key
+  providerSortOrder.value = order
+}
+
+function compareProviders(left: SupplierProvider, right: SupplierProvider, key: string, order: 'asc' | 'desc'): number {
+  if (key === 'last_sync_at') {
+    const leftTimestamp = timestampValue(left.last_sync_at)
+    const rightTimestamp = timestampValue(right.last_sync_at)
+    if (leftTimestamp === null && rightTimestamp === null) return left.id - right.id
+    if (leftTimestamp === null) return 1
+    if (rightTimestamp === null) return -1
+    const comparison = leftTimestamp - rightTimestamp
+    return comparison === 0 ? left.id - right.id : comparison * sortDirection(order)
+  }
+
+  let comparison = 0
+  switch (key) {
+    case 'name':
+      comparison = left.name.localeCompare(right.name, 'zh-CN')
+      break
+    case 'status':
+      comparison = riskWeight(left) - riskWeight(right)
+      break
+    case 'account_counts':
+      comparison = numericValue(left.valid_account_count) - numericValue(right.valid_account_count)
+        || numericValue(left.schedulable_account_count) - numericValue(right.schedulable_account_count)
+      break
+    case 'success_rate':
+      comparison = numericValue(left.success_rate) - numericValue(right.success_rate)
+      break
+    case 'today_cost':
+      comparison = numericValue(left.today_cost) - numericValue(right.today_cost)
+      break
+    case 'current_balance':
+      comparison = numericValue(left.current_balance) - numericValue(right.current_balance)
+      break
+    case 'rate_risk_count':
+      comparison = numericValue(left.rate_risk_count) - numericValue(right.rate_risk_count)
+      break
+    case 'credential_configured':
+      comparison = Number(left.credential_configured) - Number(right.credential_configured)
+      break
+  }
+  return comparison === 0 ? left.id - right.id : comparison * sortDirection(order)
+}
+
+function sortDirection(order: 'asc' | 'desc'): number {
+  return order === 'asc' ? 1 : -1
+}
+
+function timestampValue(value?: string): number | null {
+  if (!value) return null
+  const timestamp = new Date(value).getTime()
+  return Number.isNaN(timestamp) ? null : timestamp
+}
+
+function openProviderHomepage(provider: SupplierProvider) {
+  const url = provider.base_url?.trim()
+  if (!url) return
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
 function statusTone(provider: SupplierProvider): Tone {
   if (!provider.enabled) return ''
   if (['critical', 'high'].includes(provider.risk_level)) return 'bad'
@@ -980,12 +1052,15 @@ function rateRiskText(provider: SupplierProvider): string {
 }
 
 function balanceText(provider: SupplierProvider): string {
-  if (typeof provider.estimated_days === 'number') return `${provider.estimated_days.toFixed(1)} 天`
   return currency(provider.current_balance)
 }
 
 function isLowBalance(provider: SupplierProvider): boolean {
   return typeof provider.estimated_days === 'number' && provider.estimated_days < 3
+}
+
+function isBalanceWarning(provider: SupplierProvider): boolean {
+  return numericValue(provider.current_balance) < 10
 }
 
 function syncText(provider: SupplierProvider): string {
@@ -1007,7 +1082,12 @@ function percent(value: number): string {
 }
 
 function currency(value: number): string {
-  return `¥ ${Number(value || 0).toLocaleString('zh-CN', { maximumFractionDigits: 2 })}`
+  return `¥ ${numericValue(value).toLocaleString('zh-CN', { maximumFractionDigits: 2 })}`
+}
+
+function numericValue(value: unknown): number {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : 0
 }
 
 function showSyncResultFeedback(status: string, scope: SupplierSyncScope) {
@@ -1038,6 +1118,45 @@ function errorMessage(err: unknown, fallback: string): string {
 </script>
 
 <style scoped>
+.sp-provider-home-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid color-mix(in srgb, var(--sp-cyan) 30%, var(--sp-line));
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--sp-cyan) 8%, var(--sp-panel));
+  color: var(--sp-cyan);
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.sp-provider-home-button:hover:not(:disabled) {
+  border-color: var(--sp-cyan);
+  background: var(--sp-cyan);
+  color: #fff;
+}
+
+.sp-provider-home-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.sp-provider-today-cost {
+  color: var(--sp-amber);
+  font-weight: 700;
+}
+
+.sp-provider-balance-normal {
+  color: var(--sp-cyan);
+  font-weight: 700;
+}
+
+.sp-provider-balance-warning {
+  color: var(--sp-red);
+  font-weight: 800;
+}
+
 .sp-provider-filter-card {
   margin-bottom: 1rem;
   overflow: hidden;
