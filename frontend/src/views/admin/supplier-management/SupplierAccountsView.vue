@@ -2016,7 +2016,7 @@ function accountInitial(account: SupplierProviderAccount): string {
 
 function formatRate(value?: number | null): string {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return '—'
-  return `× ${Number(value).toFixed(2)}`
+  return `× ${String(value)}`
 }
 
 function openAccountRateGuardLogs() {

@@ -232,7 +232,7 @@ const testAccounts = [
     group_name: '分组 A',
     platform: 'openai',
     local_account_platform: 'anthropic',
-    rate_multiplier: 1,
+    rate_multiplier: 1.23456,
     binding_groups: [
       {
         id: 201,
@@ -415,6 +415,8 @@ describe('supplier local data views component usage', () => {
       .toContain('0.00')
     expect(wrapper.get('.runtime-cell-supplier_today_cost[data-row-index="0"]').text())
       .toContain('0.00')
+    expect(wrapper.get('.runtime-cell-rate_multiplier[data-row-index="0"]').text())
+      .toBe('× 1.23456')
 
     expect(wrapper.get('.runtime-cell-local_account_name[data-row-index="1"]').text()).toBe('未匹配')
     expect(wrapper.get('.runtime-cell-local_account_priority[data-row-index="1"]').text()).toBe('—')
