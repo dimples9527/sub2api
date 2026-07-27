@@ -20,6 +20,19 @@
             <span id="supplier-provider-search-label" class="sr-only">供应商搜索</span>
             <Input v-model="search" class="w-full" placeholder="搜索供应商" @enter="loadProviders" />
           </div>
+          <div class="sp-provider-quick-filters" role="group" aria-label="供应商快捷筛选">
+            <button
+              v-for="quickFilter in providerQuickFilters"
+              :key="quickFilter.key"
+              class="sp-button small ghost"
+              :class="{ active: providerQuickFilter === quickFilter.key }"
+              :data-test="`supplier-provider-filter-${quickFilter.key}`"
+              type="button"
+              @click="providerQuickFilter = quickFilter.key"
+            >
+              {{ quickFilter.label }}
+            </button>
+          </div>
         </div>
         <div class="sp-provider-filter-actions">
           <button class="sp-button" type="button" :disabled="loading" @click="loadProviders">刷新数据</button>
@@ -85,7 +98,17 @@
             <div class="sp-sub">{{ provider.code }} · {{ provider.provider_type }} · {{ provider.base_url }}</div>
           </template>
           <template #cell-status="{ row: provider }">
-            <span class="sp-status" :class="statusTone(provider)">{{ statusText(provider) }}</span>
+            <div class="sp-provider-status-toggle">
+              <Toggle
+                :model-value="provider.enabled"
+                :disabled="updatingProviderIDs.has(provider.id)"
+                :aria-label="`${provider.name}运行状态：${provider.enabled ? '已启用' : '已停用'}`"
+                :data-test="`supplier-provider-enabled-${provider.id}`"
+                @click.stop
+                @update:model-value="updateProviderEnabled(provider, $event)"
+              />
+              <span class="sp-status" :class="statusTone(provider)">{{ statusText(provider) }}</span>
+            </div>
           </template>
           <template #cell-account_counts="{ row: provider }">
             <span class="sp-num">{{ provider.valid_account_count }} / {{ provider.schedulable_account_count }}</span>
@@ -497,6 +520,14 @@ import { useAppStore } from '@/stores/app'
 import type { Column } from '@/components/common/types'
 
 type Tone = 'good' | 'warn' | 'bad' | 'info' | ''
+type ProviderQuickFilter = 'all' | 'enabled' | 'disabled' | 'default'
+
+const providerQuickFilters: Array<{ key: ProviderQuickFilter; label: string }> = [
+  { key: 'all', label: '全部' },
+  { key: 'enabled', label: '已启用' },
+  { key: 'disabled', label: '已停用' },
+  { key: 'default', label: '默认' },
+]
 type SupplierDiagnosticScope = Exclude<SupplierSyncScope, 'all'>
 
 const emptySummary = (): SupplierProviderSummary => ({
@@ -547,6 +578,7 @@ const providers = ref<SupplierProvider[]>([])
 const providerTypes = ref<SupplierProviderType[]>([])
 const summary = ref<SupplierProviderSummary>(emptySummary())
 const search = ref('')
+const providerQuickFilter = ref<ProviderQuickFilter>('all')
 const filter = ref('all')
 const providerSortKey = ref('')
 const providerSortOrder = ref<'asc' | 'desc'>('asc')
@@ -562,6 +594,7 @@ const form = reactive<SupplierProviderUpsertPayload>(emptyForm())
 const typeForm = reactive<SupplierProviderTypeUpsertPayload>(emptyTypeForm())
 const syncingKeys = ref<Set<string>>(new Set())
 const testingKeys = ref<Set<string>>(new Set())
+const updatingProviderIDs = ref<Set<number>>(new Set())
 const testResultVisible = ref(false)
 const testResult = ref<SupplierProviderEndpointTestResult | null>(null)
 let searchTimer: number | undefined
@@ -594,6 +627,9 @@ const metrics = computed(() => [
 ])
 
 const filteredProviders = computed(() => providers.value.filter(provider => {
+  if (providerQuickFilter.value === 'enabled' && !provider.enabled) return false
+  if (providerQuickFilter.value === 'disabled' && provider.enabled) return false
+  if (providerQuickFilter.value === 'default' && !provider.is_default) return false
   if (filter.value === 'risk' && !['high', 'critical'].includes(provider.risk_level)) return false
   if (filter.value === 'balance' && !isLowBalance(provider)) return false
   if (filter.value === 'sync' && provider.sync_status !== 'failed') return false
@@ -775,6 +811,50 @@ async function removeProviderType(providerType: SupplierProviderType) {
     else newProviderType()
   } catch (err) {
     appStore.showError(errorMessage(err, '删除供应商类型失败'))
+  }
+}
+
+function providerUpdatePayload(provider: SupplierProvider, enabled: boolean): SupplierProviderUpsertPayload {
+  return normalizePayload({
+    code: provider.code,
+    name: provider.name,
+    provider_type: provider.provider_type,
+    base_url: provider.base_url,
+    login_url: provider.login_url,
+    api_keys_url: provider.api_keys_url,
+    groups_url: provider.groups_url,
+    available_groups_url: provider.available_groups_url,
+    balance_url: provider.balance_url,
+    usage_cost_url: provider.usage_cost_url,
+    email: provider.email,
+    username: provider.username,
+    password: '',
+    account_name_prefix: provider.account_name_prefix,
+    temp_disable_minutes: provider.temp_disable_minutes,
+    account_rate_multiplier_scale: provider.account_rate_multiplier_scale || 1,
+    sort_order: provider.sort_order,
+    enabled,
+    is_default: provider.is_default,
+  })
+}
+
+async function updateProviderEnabled(provider: SupplierProvider, enabled: boolean) {
+  if (updatingProviderIDs.value.has(provider.id) || provider.enabled === enabled) return
+
+  const previousEnabled = provider.enabled
+  provider.enabled = enabled
+  updatingProviderIDs.value = new Set(updatingProviderIDs.value).add(provider.id)
+  try {
+    await supplierProvidersAPI.update(provider.id, providerUpdatePayload(provider, enabled))
+    appStore.showSuccess(enabled ? '供应商已启用' : '供应商已停用')
+    await loadProviders()
+  } catch (err) {
+    provider.enabled = previousEnabled
+    appStore.showError(errorMessage(err, '更新供应商运行状态失败'))
+  } finally {
+    const next = new Set(updatingProviderIDs.value)
+    next.delete(provider.id)
+    updatingProviderIDs.value = next
   }
 }
 
@@ -1235,6 +1315,25 @@ function errorMessage(err: unknown, fallback: string): string {
 }
 
 
+.sp-provider-quick-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.sp-provider-quick-filters .sp-button.active {
+  border-color: var(--sp-cyan);
+  background: color-mix(in srgb, var(--sp-cyan) 14%, var(--sp-panel));
+  color: var(--sp-cyan);
+}
+
+.sp-provider-status-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .sp-provider-filter-actions {
   display: flex;
   flex: 0 0 auto;
@@ -1257,7 +1356,8 @@ function errorMessage(err: unknown, fallback: string): string {
     min-width: 0;
   }
 
-  .sp-provider-filter-actions {
+
+.sp-provider-filter-actions {
     width: 100%;
     padding-top: 0.75rem;
     padding-left: 0;
@@ -1277,7 +1377,8 @@ function errorMessage(err: unknown, fallback: string): string {
     padding: 0.75rem;
   }
 
-  .sp-provider-filter-actions {
+
+.sp-provider-filter-actions {
     display: grid;
     grid-template-columns: 1fr 1fr;
   }
