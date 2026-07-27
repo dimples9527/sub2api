@@ -166,6 +166,7 @@ type SupplierCleanupCounts struct {
 type SupplierProviderDataRepository interface {
 	ListAccounts(ctx context.Context, params SupplierProviderDataListParams) (SupplierProviderAccountListResult, error)
 	ListGroups(ctx context.Context, params SupplierProviderDataListParams) (SupplierProviderGroupListResult, error)
+	ListGroupHealthTrends(ctx context.Context, params SupplierProviderGroupHealthTrendParams) ([]SupplierProviderGroupHealthTrend, error)
 	ListGroupsForAutoMatch(ctx context.Context, providerID int64) ([]SupplierProviderGroup, error)
 	GetGroupForAutoMatch(ctx context.Context, groupID int64) (SupplierProviderGroup, error)
 	UpdateGroupMapping(ctx context.Context, groupID int64, localGroupID *int64) error

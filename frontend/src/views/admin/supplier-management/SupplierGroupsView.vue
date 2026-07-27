@@ -253,8 +253,9 @@
 
             <template #cell-monitor_trend="{ row: group }">
               <SupplierGroupAvailabilityTrend
-                :row="monitorTrendFor(group)"
-                :loading="monitorLoading"
+                :row="availabilityTrendFor(group)"
+                :loading="availabilityTrendLoading(group)"
+                :source-label="availabilityTrendSourceLabel(group)"
                 empty-text="-"
                 loading-text="加载中"
                 label="可用率趋势"
@@ -672,6 +673,7 @@ import {
 } from '@/api/admin/supplierAutomation'
 import {
   autoMatchSupplierGroups,
+  listSupplierGroupHealthTrends,
   listSupplierGroups,
   resolveSupplierGroupNameChange,
   updateSupplierGroupAutoMatchPolicy,
@@ -702,6 +704,7 @@ import {
   normalizeSupplierGroupMonitorKey,
   type SupplierGroupMonitorTrendRow,
 } from '@/utils/supplierGroupMonitorTrend'
+import { buildSupplierGroupHealthTrendIndex } from '@/utils/supplierGroupHealthTrend'
 import {
   formatSupplierGroupRateDelta,
   getSupplierGroupRateInsight,
@@ -798,6 +801,8 @@ const total = ref(0)
 const loading = ref(false)
 const monitorTrendIndex = ref<Map<string, SupplierGroupMonitorTrendRow>>(new Map())
 const monitorLoading = ref(false)
+const healthTrendIndex = ref<Map<number, SupplierGroupMonitorTrendRow>>(new Map())
+const healthTrendLoading = ref(false)
 const savingMapping = ref(false)
 const creatingLocalGroup = ref(false)
 const savingLocalRate = ref(false)
@@ -826,6 +831,7 @@ const matchStatusFilter = ref('')
 const rateStatusFilter = ref('')
 let searchTimer: number | undefined
 let monitorTrendRequestID = 0
+let healthTrendRequestID = 0
 let suppressFilterWatch = false
 
 const DEFAULT_PROVIDER_ID = 0
@@ -1063,13 +1069,47 @@ async function refreshAll() {
   }
 }
 
-function monitorTrendFor(group: SupplierProviderGroup) {
+function unifiedMonitorTrendFor(group: SupplierProviderGroup) {
   const keys = [group.name, group.upstream_group_key, group.local_group_name]
   for (const key of keys) {
     const trend = monitorTrendIndex.value.get(normalizeSupplierGroupMonitorKey(key))
     if (trend) return trend
   }
   return undefined
+}
+
+function availabilityTrendFor(group: SupplierProviderGroup) {
+  return unifiedMonitorTrendFor(group) ?? healthTrendIndex.value.get(group.id)
+}
+
+function availabilityTrendLoading(group: SupplierProviderGroup) {
+  return monitorLoading.value || (!unifiedMonitorTrendFor(group) && healthTrendLoading.value)
+}
+
+function availabilityTrendSourceLabel(group: SupplierProviderGroup) {
+  if (unifiedMonitorTrendFor(group)) return '统一监控'
+  return healthTrendIndex.value.has(group.id) ? '供应商账号健康守护' : ''
+}
+
+async function loadHealthTrend(groupIDs: number[], requestID = ++healthTrendRequestID) {
+  const uniqueIDs = [...new Set(groupIDs.filter(id => Number.isInteger(id) && id > 0))]
+  healthTrendIndex.value = new Map()
+  if (!uniqueIDs.length) {
+    healthTrendLoading.value = false
+    return
+  }
+
+  healthTrendLoading.value = true
+  try {
+    const trends = await listSupplierGroupHealthTrends(uniqueIDs, '90m')
+    if (requestID !== healthTrendRequestID) return
+    healthTrendIndex.value = buildSupplierGroupHealthTrendIndex(trends)
+  } catch {
+    if (requestID !== healthTrendRequestID) return
+    healthTrendIndex.value = new Map()
+  } finally {
+    if (requestID === healthTrendRequestID) healthTrendLoading.value = false
+  }
 }
 
 async function loadMonitorTrend(requestID = ++monitorTrendRequestID) {
@@ -1177,6 +1217,7 @@ async function loadGroups() {
     page.value = result.page
     pageSize.value = result.page_size
     groupSummary.value = result.summary
+    void loadHealthTrend(result.items.map(group => group.id))
     if (selected.value) {
       selected.value = result.items.find(group => group.id === selected.value?.id) ?? selected.value
     }

@@ -1,4 +1,4 @@
-export type SupplierGroupMonitorTone = 'green' | 'yellow' | 'red'
+export type SupplierGroupMonitorTone = 'green' | 'yellow' | 'red' | 'gray'
 
 export interface SupplierGroupMonitorTrendPoint {
   tone: SupplierGroupMonitorTone

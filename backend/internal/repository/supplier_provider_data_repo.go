@@ -244,6 +244,86 @@ WHERE `+where+fmt.Sprintf(" GROUP BY g.id, p.name, lg.id, s.group_sync_status, s
 	}, nil
 }
 
+func (r *supplierProviderDataRepository) ListGroupHealthTrends(ctx context.Context, params service.SupplierProviderGroupHealthTrendParams) ([]service.SupplierProviderGroupHealthTrend, error) {
+	if params.Period <= 0 {
+		params.Period = 90 * time.Minute
+	}
+	if params.BucketCount <= 0 {
+		params.BucketCount = 18
+	}
+	if params.Now.IsZero() {
+		params.Now = time.Now().UTC()
+	} else {
+		params.Now = params.Now.UTC()
+	}
+
+	groupIDs := make([]int64, 0, len(params.GroupIDs))
+	seen := make(map[int64]struct{}, len(params.GroupIDs))
+	for _, groupID := range params.GroupIDs {
+		if groupID <= 0 {
+			continue
+		}
+		if _, exists := seen[groupID]; exists {
+			continue
+		}
+		seen[groupID] = struct{}{}
+		groupIDs = append(groupIDs, groupID)
+	}
+	if len(groupIDs) == 0 {
+		return []service.SupplierProviderGroupHealthTrend{}, nil
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+SELECT g.id AS group_id,
+       (source->>'supplier_provider_account_id')::bigint AS account_id,
+       COALESCE(item->>'status', '') AS status,
+       COALESCE((item->>'latency_ms')::bigint, 0) AS latency_ms,
+       run.finished_at
+FROM supplier_automation_runs run
+CROSS JOIN LATERAL jsonb_array_elements(
+  COALESCE(run.result_detail->'account_health_guard'->'items', '[]'::jsonb)
+) AS item
+CROSS JOIN LATERAL jsonb_array_elements(
+  COALESCE(item->'sources', '[]'::jsonb)
+) AS source
+JOIN supplier_provider_accounts account
+  ON account.id = (source->>'supplier_provider_account_id')::bigint
+ AND account.active = TRUE
+JOIN supplier_provider_groups g
+  ON g.provider_id = account.provider_id
+ AND g.upstream_group_key = account.group_key
+WHERE run.task_code = $1
+  AND run.finished_at IS NOT NULL
+  AND run.finished_at >= $2
+  AND run.finished_at <= $3
+  AND g.id = ANY($4)
+`, service.SupplierAutomationTaskAccountHealthGuard, params.Now.Add(-params.Period), params.Now, pq.Array(groupIDs))
+	if err != nil {
+		return nil, fmt.Errorf("query supplier provider group health trends: %w", err)
+	}
+	defer rows.Close()
+
+	samples := make([]service.SupplierProviderGroupHealthSample, 0)
+	for rows.Next() {
+		var sample service.SupplierProviderGroupHealthSample
+		if err := rows.Scan(&sample.GroupID, &sample.AccountID, &sample.Status, &sample.Latency, &sample.FinishedAt); err != nil {
+			return nil, fmt.Errorf("scan supplier provider group health trend: %w", err)
+		}
+		samples = append(samples, sample)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate supplier provider group health trends: %w", err)
+	}
+
+	trendIndex := service.BuildSupplierProviderGroupHealthTrends(samples, params)
+	trends := make([]service.SupplierProviderGroupHealthTrend, 0, len(trendIndex))
+	for _, groupID := range groupIDs {
+		if trend, ok := trendIndex[groupID]; ok {
+			trends = append(trends, trend)
+		}
+	}
+	return trends, nil
+}
 func (r *supplierProviderDataRepository) UpdateGroupMapping(ctx context.Context, groupID int64, localGroupID *int64) error {
 	if localGroupID != nil {
 		var exists bool

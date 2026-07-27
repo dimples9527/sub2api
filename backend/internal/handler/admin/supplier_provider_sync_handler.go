@@ -25,6 +25,7 @@ type SupplierProviderSyncServicePort interface {
 type SupplierProviderDataRepositoryPort interface {
 	ListAccounts(ctx context.Context, params service.SupplierProviderDataListParams) (service.SupplierProviderAccountListResult, error)
 	ListGroups(ctx context.Context, params service.SupplierProviderDataListParams) (service.SupplierProviderGroupListResult, error)
+	ListGroupHealthTrends(ctx context.Context, params service.SupplierProviderGroupHealthTrendParams) ([]service.SupplierProviderGroupHealthTrend, error)
 	UpdateGroupMapping(ctx context.Context, groupID int64, localGroupID *int64) error
 }
 
@@ -171,6 +172,51 @@ func (h *SupplierProviderSyncHandler) ListGroups(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *SupplierProviderSyncHandler) ListGroupHealthTrends(c *gin.Context) {
+	groupIDs, ok := parseSupplierProviderGroupHealthTrendIDs(c.Query("group_ids"))
+	if !ok {
+		response.ErrorFrom(c, badRequest("分组 ID 参数无效"))
+		return
+	}
+	period := strings.TrimSpace(c.Query("period"))
+	if period != "" && period != "90m" {
+		response.ErrorFrom(c, badRequest("趋势时间范围无效"))
+		return
+	}
+
+	result, err := h.dataRepo.ListGroupHealthTrends(c.Request.Context(), service.SupplierProviderGroupHealthTrendParams{
+		GroupIDs:    groupIDs,
+		Period:      90 * time.Minute,
+		BucketCount: 18,
+		Now:         time.Now().UTC(),
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func parseSupplierProviderGroupHealthTrendIDs(raw string) ([]int64, bool) {
+	seen := make(map[int64]struct{})
+	parts := strings.Split(raw, ",")
+	groupIDs := make([]int64, 0, len(parts))
+	for _, part := range parts {
+		value, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
+		if err != nil || value <= 0 {
+			return nil, false
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		groupIDs = append(groupIDs, value)
+		if len(groupIDs) > 200 {
+			return nil, false
+		}
+	}
+	return groupIDs, len(groupIDs) > 0
+}
 func (h *SupplierProviderSyncHandler) UpdateGroupMapping(c *gin.Context) {
 	groupID, ok := parseSupplierGroupID(c)
 	if !ok {

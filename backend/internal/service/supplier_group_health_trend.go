@@ -1,0 +1,199 @@
+package service
+
+import "time"
+
+const SupplierProviderGroupHealthTrendSource = "supplier_account_health_guard"
+
+const (
+	supplierProviderGroupHealthTrendToneGreen  = "green"
+	supplierProviderGroupHealthTrendToneYellow = "yellow"
+	supplierProviderGroupHealthTrendToneRed    = "red"
+	supplierProviderGroupHealthTrendToneGray   = "gray"
+)
+
+type SupplierProviderGroupHealthTrendParams struct {
+	GroupIDs    []int64
+	Period      time.Duration
+	BucketCount int
+	Now         time.Time
+}
+
+type SupplierProviderGroupHealthSample struct {
+	GroupID    int64
+	AccountID  int64
+	Status     string
+	Latency    int64
+	FinishedAt time.Time
+}
+
+type SupplierProviderGroupHealthTrendPoint struct {
+	Time               time.Time `json:"time"`
+	Availability       float64   `json:"availability"`
+	Latency            int64     `json:"latency"`
+	TestedAccountCount int       `json:"tested_account_count"`
+	Tone               string    `json:"tone"`
+}
+
+type SupplierProviderGroupHealthTrend struct {
+	GroupID      int64                                   `json:"group_id"`
+	Source       string                                  `json:"source"`
+	Availability float64                                 `json:"availability"`
+	Latency      int64                                   `json:"latency"`
+	Time         time.Time                               `json:"time"`
+	Trend        []SupplierProviderGroupHealthTrendPoint `json:"trend"`
+}
+
+type supplierProviderGroupHealthSampleKey struct {
+	groupID     int64
+	accountID   int64
+	bucketIndex int
+}
+
+func BuildSupplierProviderGroupHealthTrends(samples []SupplierProviderGroupHealthSample, params SupplierProviderGroupHealthTrendParams) map[int64]SupplierProviderGroupHealthTrend {
+	params = normalizeSupplierProviderGroupHealthTrendParams(params)
+	requestedGroups := make(map[int64]struct{}, len(params.GroupIDs))
+	for _, groupID := range params.GroupIDs {
+		if groupID > 0 {
+			requestedGroups[groupID] = struct{}{}
+		}
+	}
+	if len(requestedGroups) == 0 {
+		return map[int64]SupplierProviderGroupHealthTrend{}
+	}
+
+	windowStart := params.Now.Add(-params.Period)
+	bucketDuration := params.Period / time.Duration(params.BucketCount)
+	latestSamples := make(map[supplierProviderGroupHealthSampleKey]SupplierProviderGroupHealthSample)
+	for _, sample := range samples {
+		if _, ok := requestedGroups[sample.GroupID]; !ok || !supplierProviderGroupHealthSampleUsable(sample) {
+			continue
+		}
+		bucketIndex, ok := supplierProviderGroupHealthTrendBucketIndex(sample.FinishedAt, windowStart, params.Now, bucketDuration, params.BucketCount)
+		if !ok {
+			continue
+		}
+		key := supplierProviderGroupHealthSampleKey{groupID: sample.GroupID, accountID: sample.AccountID, bucketIndex: bucketIndex}
+		if current, exists := latestSamples[key]; !exists || sample.FinishedAt.After(current.FinishedAt) {
+			latestSamples[key] = sample
+		}
+	}
+
+	bucketsByGroup := make(map[int64]map[int][]SupplierProviderGroupHealthSample)
+	for key, sample := range latestSamples {
+		if bucketsByGroup[key.groupID] == nil {
+			bucketsByGroup[key.groupID] = make(map[int][]SupplierProviderGroupHealthSample)
+		}
+		bucketsByGroup[key.groupID][key.bucketIndex] = append(bucketsByGroup[key.groupID][key.bucketIndex], sample)
+	}
+
+	trends := make(map[int64]SupplierProviderGroupHealthTrend, len(bucketsByGroup))
+	for groupID, buckets := range bucketsByGroup {
+		trend := SupplierProviderGroupHealthTrend{
+			GroupID: groupID,
+			Source:  SupplierProviderGroupHealthTrendSource,
+			Trend:   make([]SupplierProviderGroupHealthTrendPoint, 0, params.BucketCount),
+		}
+		var latestPoint *SupplierProviderGroupHealthTrendPoint
+		for bucketIndex := 0; bucketIndex < params.BucketCount; bucketIndex++ {
+			pointTime := windowStart.Add(time.Duration(bucketIndex+1) * bucketDuration)
+			point := buildSupplierProviderGroupHealthTrendPoint(pointTime, buckets[bucketIndex])
+			trend.Trend = append(trend.Trend, point)
+			if point.TestedAccountCount > 0 {
+				pointCopy := point
+				latestPoint = &pointCopy
+			}
+		}
+		if latestPoint == nil {
+			continue
+		}
+		trend.Availability = latestPoint.Availability
+		trend.Latency = latestPoint.Latency
+		trend.Time = latestPoint.Time
+		trends[groupID] = trend
+	}
+	return trends
+}
+
+func normalizeSupplierProviderGroupHealthTrendParams(params SupplierProviderGroupHealthTrendParams) SupplierProviderGroupHealthTrendParams {
+	if params.Period <= 0 {
+		params.Period = 90 * time.Minute
+	}
+	if params.BucketCount <= 0 {
+		params.BucketCount = 18
+	}
+	if params.Now.IsZero() {
+		params.Now = time.Now().UTC()
+	} else {
+		params.Now = params.Now.UTC()
+	}
+	return params
+}
+
+func supplierProviderGroupHealthSampleUsable(sample SupplierProviderGroupHealthSample) bool {
+	if sample.GroupID <= 0 || sample.AccountID <= 0 || sample.FinishedAt.IsZero() {
+		return false
+	}
+	switch sample.Status {
+	case SupplierAccountHealthGuardStatusHealthy, SupplierAccountHealthGuardStatusSlow, SupplierAccountHealthGuardStatusFailed, SupplierAccountHealthGuardStatusUnavailable:
+		return true
+	default:
+		return false
+	}
+}
+
+func supplierProviderGroupHealthTrendBucketIndex(finishedAt, windowStart, now time.Time, bucketDuration time.Duration, bucketCount int) (int, bool) {
+	finishedAt = finishedAt.UTC()
+	if finishedAt.Before(windowStart) || finishedAt.After(now) {
+		return 0, false
+	}
+	if finishedAt.Equal(now) {
+		return bucketCount - 1, true
+	}
+	bucketIndex := int(finishedAt.Sub(windowStart) / bucketDuration)
+	if bucketIndex < 0 || bucketIndex >= bucketCount {
+		return 0, false
+	}
+	return bucketIndex, true
+}
+
+func buildSupplierProviderGroupHealthTrendPoint(timeValue time.Time, samples []SupplierProviderGroupHealthSample) SupplierProviderGroupHealthTrendPoint {
+	if len(samples) == 0 {
+		return SupplierProviderGroupHealthTrendPoint{Time: timeValue, Tone: supplierProviderGroupHealthTrendToneGray}
+	}
+
+	availableCount := 0
+	latencyTotal := int64(0)
+	latencyCount := 0
+	for _, sample := range samples {
+		if sample.Status == SupplierAccountHealthGuardStatusHealthy || sample.Status == SupplierAccountHealthGuardStatusSlow {
+			availableCount++
+		}
+		if sample.Latency > 0 {
+			latencyTotal += sample.Latency
+			latencyCount++
+		}
+	}
+	availability := float64(availableCount) * 100 / float64(len(samples))
+	latency := int64(0)
+	if latencyCount > 0 {
+		latency = latencyTotal / int64(latencyCount)
+	}
+	return SupplierProviderGroupHealthTrendPoint{
+		Time:               timeValue,
+		Availability:       availability,
+		Latency:            latency,
+		TestedAccountCount: len(samples),
+		Tone:               supplierProviderGroupHealthTrendTone(availability),
+	}
+}
+
+func supplierProviderGroupHealthTrendTone(availability float64) string {
+	switch {
+	case availability >= 100:
+		return supplierProviderGroupHealthTrendToneGreen
+	case availability <= 0:
+		return supplierProviderGroupHealthTrendToneRed
+	default:
+		return supplierProviderGroupHealthTrendToneYellow
+	}
+}

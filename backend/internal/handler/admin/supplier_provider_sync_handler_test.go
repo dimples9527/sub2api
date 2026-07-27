@@ -54,6 +54,8 @@ type supplierProviderSyncHandlerDataStub struct {
 	mappedLocalGroupID *int64
 	accountListParams  service.SupplierProviderDataListParams
 	groupListParams    service.SupplierProviderDataListParams
+	healthTrendParams  service.SupplierProviderGroupHealthTrendParams
+	healthTrends       []service.SupplierProviderGroupHealthTrend
 }
 
 type supplierProviderGroupMatcherHandlerStub struct {
@@ -111,6 +113,10 @@ func (s *supplierProviderSyncHandlerDataStub) ListAccounts(_ context.Context, pa
 func (s *supplierProviderSyncHandlerDataStub) ListGroups(_ context.Context, params service.SupplierProviderDataListParams) (service.SupplierProviderGroupListResult, error) {
 	s.groupListParams = params
 	return service.SupplierProviderGroupListResult{Items: []service.SupplierProviderGroup{{ID: 1, ProviderID: 42, Name: "VIP"}}, Total: 1, Page: 1, PageSize: 20}, nil
+}
+func (s *supplierProviderSyncHandlerDataStub) ListGroupHealthTrends(_ context.Context, params service.SupplierProviderGroupHealthTrendParams) ([]service.SupplierProviderGroupHealthTrend, error) {
+	s.healthTrendParams = params
+	return s.healthTrends, nil
 }
 func (s *supplierProviderSyncHandlerDataStub) UpdateGroupMapping(_ context.Context, groupID int64, localGroupID *int64) error {
 	s.mappedGroupID = groupID
@@ -180,6 +186,49 @@ func TestSupplierProviderSyncHandlerRejectsInvalidProviderID(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+func TestSupplierProviderSyncHandlerListsGroupHealthTrends(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dataStub := &supplierProviderSyncHandlerDataStub{
+		healthTrends: []service.SupplierProviderGroupHealthTrend{{
+			GroupID:      12,
+			Source:       service.SupplierProviderGroupHealthTrendSource,
+			Availability: 100,
+		}},
+	}
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, dataStub)
+	router := gin.New()
+	router.GET("/groups/health-trends", handler.ListGroupHealthTrends)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/groups/health-trends?group_ids=12,12,37&period=90m", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, []int64{12, 37}, dataStub.healthTrendParams.GroupIDs)
+	require.Equal(t, 90*time.Minute, dataStub.healthTrendParams.Period)
+	require.Equal(t, 18, dataStub.healthTrendParams.BucketCount)
+	require.False(t, dataStub.healthTrendParams.Now.IsZero())
+	require.Contains(t, rec.Body.String(), `"group_id":12`)
+	require.Contains(t, rec.Body.String(), `"source":"supplier_account_health_guard"`)
+}
+
+func TestSupplierProviderSyncHandlerRejectsInvalidGroupHealthTrendQuery(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, &supplierProviderSyncHandlerDataStub{})
+	router := gin.New()
+	router.GET("/groups/health-trends", handler.ListGroupHealthTrends)
+
+	for _, target := range []string{
+		"/groups/health-trends",
+		"/groups/health-trends?group_ids=1,broken",
+		"/groups/health-trends?group_ids=1&period=1h",
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		router.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusBadRequest, rec.Code, target)
+	}
+}
 func TestSupplierProviderSyncHandlerListGroupsPassesGroupFilters(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	dataStub := &supplierProviderSyncHandlerDataStub{}

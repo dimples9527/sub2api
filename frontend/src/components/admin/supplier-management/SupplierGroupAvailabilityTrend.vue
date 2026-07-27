@@ -39,13 +39,15 @@ const props = withDefaults(defineProps<{
   emptyText?: string
   loadingText?: string
   label?: string
+  sourceLabel?: string
 }>(), {
   row: undefined,
   loading: false,
   error: '',
   emptyText: '-',
   loadingText: '加载中',
-  label: '可用率趋势'
+  label: '可用率趋势',
+  sourceLabel: ''
 })
 
 const visibleTrend = computed(() => props.row?.trend?.slice(-BAR_COUNT) || [])
@@ -62,11 +64,11 @@ const containerTitle = computed(() => {
   if (props.loading) return props.loadingText
   if (props.error && !props.row) return props.error
   if (!props.row) return props.emptyText
-  return `${props.row.provider} ${formatPercent(props.row.availability)}% ${props.row.latency || 0}ms ${props.row.time}`
+  return `${props.sourceLabel ? `数据来源：${props.sourceLabel} ` : ''}${props.row.provider} ${formatPercent(props.row.availability)}% ${props.row.latency || 0}ms ${props.row.time}`
 })
 
 function pointTitle(point: SupplierGroupMonitorTrendPoint) {
-  return `${point.time} ${point.statusText} ${formatPercent(point.availability)}% ${point.latency || 0}ms`
+  return `${props.sourceLabel ? `数据来源：${props.sourceLabel} ` : ''}${point.time} ${point.statusText} ${formatPercent(point.availability)}% ${point.latency || 0}ms`
 }
 
 function formatPercent(value: number) {
@@ -111,6 +113,10 @@ function formatPercent(value: number) {
 
 .supplier-group-trend__bar--red {
   background: #de4b52;
+}
+
+.supplier-group-trend__bar--gray {
+  background: #9ca3af;
 }
 
 .supplier-group-trend__bar--loading {

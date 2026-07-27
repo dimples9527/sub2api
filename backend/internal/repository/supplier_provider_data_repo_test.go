@@ -23,6 +23,34 @@ func newSupplierProviderDataRepoMock(t *testing.T) (*supplierProviderDataReposit
 	return NewSupplierProviderDataRepository(db).(*supplierProviderDataRepository), mock
 }
 
+func TestSupplierProviderDataRepositoryListGroupHealthTrendsUsesHealthGuardHistory(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(`(?s)SELECT g\.id AS group_id,.*FROM supplier_automation_runs run.*g\.id = ANY\(\$4\)`).
+		WithArgs(
+			service.SupplierAutomationTaskAccountHealthGuard,
+			now.Add(-90*time.Minute),
+			now,
+			"{12}",
+		).
+		WillReturnRows(sqlmock.NewRows([]string{"group_id", "account_id", "status", "latency_ms", "finished_at"}).
+			AddRow(int64(12), int64(98), service.SupplierAccountHealthGuardStatusHealthy, int64(140), now.Add(-time.Minute)))
+
+	trends, err := repo.ListGroupHealthTrends(context.Background(), service.SupplierProviderGroupHealthTrendParams{
+		GroupIDs:    []int64{12},
+		Period:      90 * time.Minute,
+		BucketCount: 18,
+		Now:         now,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, trends, 1)
+	require.Equal(t, int64(12), trends[0].GroupID)
+	require.Equal(t, service.SupplierProviderGroupHealthTrendSource, trends[0].Source)
+	require.Equal(t, 100.0, trends[0].Availability)
+	require.Len(t, trends[0].Trend, 18)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
 func TestSupplierProviderDataRepositoryUpdateAccountRateSnapshotOnlyTouchesRateFields(t *testing.T) {
 	repo, mock := newSupplierProviderDataRepoMock(t)
 	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)

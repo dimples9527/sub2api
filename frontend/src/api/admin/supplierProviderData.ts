@@ -222,6 +222,33 @@ export async function cancelSupplierAccountBatchTestJob(jobID: string): Promise<
   return data
 }
 
+export interface SupplierProviderGroupHealthTrendPoint {
+  time: string
+  availability: number
+  latency: number
+  tested_account_count: number
+  tone: 'green' | 'yellow' | 'red' | 'gray'
+}
+
+export interface SupplierProviderGroupHealthTrend {
+  group_id: number
+  source: 'supplier_account_health_guard' | string
+  availability: number
+  latency: number
+  time: string
+  trend: SupplierProviderGroupHealthTrendPoint[]
+}
+
+export async function listSupplierGroupHealthTrends(
+  groupIds: number[],
+  period = '90m'
+): Promise<SupplierProviderGroupHealthTrend[]> {
+  const { data } = await apiClient.get<SupplierProviderGroupHealthTrend[]>(
+    '/admin/supplier-management/groups/health-trends',
+    { params: { group_ids: groupIds.join(','), period } }
+  )
+  return data
+}
 export async function listSupplierGroups(params: SupplierProviderDataListParams = {}): Promise<SupplierProviderGroupListResult> {
   const { data } = await apiClient.get<SupplierProviderGroupListResult>(
     '/admin/supplier-management/groups',
