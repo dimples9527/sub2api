@@ -9,12 +9,16 @@ import SupplierProvidersView from './SupplierProvidersView.vue'
 const providerViewMocks = vi.hoisted(() => ({
   listProviders: vi.fn(),
   listProviderTypes: vi.fn(),
+  updateProvider: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
 }))
 
 vi.mock('@/api/admin/supplierProviders', () => ({
-  default: { list: providerViewMocks.listProviders },
+  default: {
+    list: providerViewMocks.listProviders,
+    update: providerViewMocks.updateProvider,
+  },
 }))
 
 vi.mock('@/api/admin/supplierProviderTypes', () => ({
@@ -33,11 +37,13 @@ const supplierProvidersSource = readFileSync(
   'utf-8'
 )
 
-const providerRows = [
-  createProviderRow(1, 'Alpha', 30, 100, 1),
-  createProviderRow(2, 'Beta', 10, 20, 2),
-  createProviderRow(3, 'Gamma', 20, 50, 3),
-]
+function createProviderRows() {
+  return [
+    createProviderRow(1, 'Alpha', 30, 100, 1),
+    { ...createProviderRow(2, 'Beta', 10, 20, 2), enabled: false },
+    { ...createProviderRow(3, 'Gamma', 20, 50, 3), is_default: true },
+  ]
+}
 
 function createProviderRow(id: number, name: string, todayCost: number, balance: number, sortOrder: number) {
   return {
@@ -73,7 +79,11 @@ async function mountSupplierProviders() {
         BaseDialog: true,
         Input: true,
         Select: true,
-        Toggle: true,
+        Toggle: {
+          props: ['modelValue'],
+          emits: ['update:modelValue'],
+          template: '<button type="button" v-bind="$attrs" :data-enabled="String(modelValue)" @click="$emit(\'update:modelValue\', !modelValue)"></button>',
+        },
         Icon: true,
       },
     },
@@ -82,9 +92,13 @@ async function mountSupplierProviders() {
   return wrapper
 }
 describe('SupplierProvidersView payload normalization', () => {
+  let providerRows: ReturnType<typeof createProviderRows>
+
   beforeEach(() => {
     vi.clearAllMocks()
+    providerRows = createProviderRows()
     providerViewMocks.listProviderTypes.mockResolvedValue([])
+    providerViewMocks.updateProvider.mockResolvedValue({})
     providerViewMocks.listProviders.mockResolvedValue({
       items: providerRows,
       summary: {
@@ -115,6 +129,49 @@ describe('SupplierProvidersView payload normalization', () => {
     await todayCostHeader.trigger('click')
     await flushPromises()
     expect(rowIds()).toEqual(['1', '3', '2'])
+  })
+  it('filters provider rows by the selected quick filter', async () => {
+    const wrapper = await mountSupplierProviders()
+    const rowIds = () => wrapper.findAll('tbody tr[data-row-id]').map(row => row.attributes('data-row-id'))
+
+    expect(rowIds()).toEqual(['1', '2', '3'])
+
+    await wrapper.get('[data-test="supplier-provider-filter-enabled"]').trigger('click')
+    expect(rowIds()).toEqual(['1', '3'])
+
+    await wrapper.get('[data-test="supplier-provider-filter-disabled"]').trigger('click')
+    expect(rowIds()).toEqual(['2'])
+
+    await wrapper.get('[data-test="supplier-provider-filter-default"]').trigger('click')
+    expect(rowIds()).toEqual(['3'])
+
+    await wrapper.get('[data-test="supplier-provider-filter-all"]').trigger('click')
+    expect(rowIds()).toEqual(['1', '2', '3'])
+  })
+
+  it('updates a provider enabled state from the table switch', async () => {
+    const wrapper = await mountSupplierProviders()
+
+    await wrapper.get('[data-test="supplier-provider-enabled-1"]').trigger('click')
+    await flushPromises()
+
+    expect(providerViewMocks.updateProvider).toHaveBeenCalledWith(1, expect.objectContaining({
+      code: 'alpha',
+      enabled: false,
+      is_default: false,
+    }))
+  })
+
+  it('restores the table switch when updating a provider enabled state fails', async () => {
+    providerViewMocks.updateProvider.mockRejectedValueOnce(new Error('更新失败'))
+    const wrapper = await mountSupplierProviders()
+    const toggle = wrapper.get('[data-test="supplier-provider-enabled-1"]')
+
+    await toggle.trigger('click')
+    await flushPromises()
+
+    expect(providerViewMocks.showError).toHaveBeenCalledWith('更新失败')
+    expect(wrapper.get('[data-test="supplier-provider-enabled-1"]').attributes('data-enabled')).toBe('true')
   })
   it('uses one unified provider filter card without a repeated page heading', () => {
     expect(supplierProvidersSource).not.toContain('class="sp-page-head"')
