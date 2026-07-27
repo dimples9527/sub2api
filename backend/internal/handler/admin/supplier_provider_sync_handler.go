@@ -134,6 +134,8 @@ func (h *SupplierProviderSyncHandler) ListAccounts(c *gin.Context) {
 		Active:     parseSupplierProviderEnabled(c.Query("active")),
 		Search:     strings.TrimSpace(c.Query("search")),
 		Platform:   strings.TrimSpace(c.Query("platform")),
+		SortBy:     strings.TrimSpace(c.Query("sort_by")),
+		SortOrder:  strings.TrimSpace(c.Query("sort_order")),
 		Page:       page,
 		PageSize:   pageSize,
 	})

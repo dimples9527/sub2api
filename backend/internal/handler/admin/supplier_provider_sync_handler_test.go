@@ -135,10 +135,12 @@ func TestSupplierProviderSyncHandlerRoutes(t *testing.T) {
 	require.Equal(t, service.SupplierSyncScopeBalance, syncStub.testScope)
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/accounts?provider_id=42&active=true&platform=openai&page=1&page_size=20", nil)
+	req = httptest.NewRequest(http.MethodGet, "/accounts?provider_id=42&active=true&platform=openai&sort_by=supplier_today_cost&sort_order=desc&page=1&page_size=20", nil)
 	router.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "openai", dataStub.accountListParams.Platform)
+	require.Equal(t, "supplier_today_cost", dataStub.accountListParams.SortBy)
+	require.Equal(t, "desc", dataStub.accountListParams.SortOrder)
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPut, "/groups/7/mapping", bytes.NewBufferString(`{"local_group_id":12}`))
