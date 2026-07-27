@@ -44,6 +44,15 @@ foreach ($text in @('TotpEncryptionKey', 'TOTP_ENCRYPTION_KEY')) {
     }
 }
 
+if ($scriptSource -notmatch 'ALTER ROLE\s+\$user\s+WITH LOGIN PASSWORD') {
+    throw 'Local development script must synchronize the configured PostgreSQL role password on startup.'
+}
+
+foreach ($text in @('$Process.HasExited', 'Backend process exited before becoming healthy', '$BackendErrorLog')) {
+    if ($scriptSource -notmatch [regex]::Escape($text)) {
+        throw "Backend startup must fail fast with its error log when the process exits early: $text"
+    }
+}
 $exampleConfig = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'local.env.example.ps1') -Raw -Encoding UTF8
 if ($exampleConfig -notmatch 'TotpEncryptionKey') {
     throw 'Example local configuration does not document TotpEncryptionKey.'

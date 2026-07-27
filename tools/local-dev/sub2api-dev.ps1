@@ -169,6 +169,9 @@ function Ensure-Database {
     if (($roleExists -join '').Trim() -ne '1') {
         & docker exec $container psql -U $admin -d postgres -v ON_ERROR_STOP=1 -c "CREATE ROLE $user LOGIN PASSWORD '$password';" | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Failed to create PostgreSQL role: $user" }
+    } else {
+        & docker exec $container psql -U $admin -d postgres -v ON_ERROR_STOP=1 -c "ALTER ROLE $user WITH LOGIN PASSWORD '$password';" | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Failed to synchronize PostgreSQL role password: $user" }
     }
     $databaseExists = & docker exec $container psql -U $admin -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$database';"
     if (($databaseExists -join '').Trim() -ne '1') {
@@ -178,10 +181,29 @@ function Ensure-Database {
 }
 
 function Wait-Endpoint {
-    param([string]$Url, [int]$TimeoutSeconds = 90)
+    param(
+        [string]$Url,
+        [int]$TimeoutSeconds = 90,
+        [System.Diagnostics.Process]$Process,
+        [string]$EarlyExitMessage = 'Process exited before becoming healthy',
+        [string]$ErrorLog = ''
+    )
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
         if (Test-HttpEndpoint $Url) { return }
+        if ($null -ne $Process) {
+            $Process.Refresh()
+            if ($Process.HasExited) {
+                $message = "$EarlyExitMessage (exit code $($Process.ExitCode)): $Url"
+                if (-not [string]::IsNullOrWhiteSpace($ErrorLog) -and (Test-Path -LiteralPath $ErrorLog)) {
+                    $errorTail = Get-Content -LiteralPath $ErrorLog -Tail 20
+                    if ($errorTail) {
+                        $message += "`n--- $(Split-Path $ErrorLog -Leaf) ---`n$($errorTail -join [Environment]::NewLine)"
+                    }
+                }
+                throw $message
+            }
+        }
         Start-Sleep -Seconds 1
     } while ((Get-Date) -lt $deadline)
     throw "Timed out waiting for endpoint: $Url"
@@ -226,7 +248,7 @@ function Start-Backend {
     }
     $process = Start-Process -FilePath $backendExe -WorkingDirectory (Join-Path $RepoRoot 'backend') -WindowStyle Hidden -RedirectStandardOutput $BackendLog -RedirectStandardError $BackendErrorLog -PassThru
     Set-Content -LiteralPath $BackendPidFile -Value $process.Id -Encoding ascii
-    Wait-Endpoint $healthUrl 120
+    Wait-Endpoint -Url $healthUrl -TimeoutSeconds 120 -Process $process -EarlyExitMessage 'Backend process exited before becoming healthy' -ErrorLog $BackendErrorLog
     Write-Host "Backend started: $healthUrl" -ForegroundColor Green
 }
 
@@ -238,7 +260,7 @@ function Start-Frontend {
     $arguments = "/c pnpm.cmd dev --host $($Settings.FrontendHost)"
     $launcher = Start-Process -FilePath 'cmd.exe' -ArgumentList $arguments -WorkingDirectory (Join-Path $RepoRoot 'frontend') -WindowStyle Hidden -RedirectStandardOutput $FrontendLog -RedirectStandardError $FrontendErrorLog -PassThru
     Set-Content -LiteralPath $FrontendPidFile -Value $launcher.Id -Encoding ascii
-    Wait-Endpoint $frontendUrl 90
+    Wait-Endpoint -Url $frontendUrl -TimeoutSeconds 90 -Process $launcher -EarlyExitMessage 'Frontend process exited before becoming healthy' -ErrorLog $FrontendErrorLog
     $listenerPid = Get-ListenerProcessId ([int]$Settings.FrontendPort)
     if ($listenerPid) { Set-Content -LiteralPath $FrontendPidFile -Value $listenerPid -Encoding ascii }
     Write-Host "Frontend started: $frontendUrl" -ForegroundColor Green
