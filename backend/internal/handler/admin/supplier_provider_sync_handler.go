@@ -37,6 +37,7 @@ type SupplierProviderGroupMatcherPort interface {
 
 type SupplierGroupGuardPort interface {
 	SetManualGuard(ctx context.Context, groupID int64, selected bool) error
+	SetRateGuardIgnored(ctx context.Context, groupID int64, ignored bool) error
 }
 
 type SupplierProviderSyncHandler struct {
@@ -318,4 +319,27 @@ func supplierProviderTestScopeAllowed(scope string) bool {
 	default:
 		return false
 	}
+}
+
+func (h *SupplierProviderSyncHandler) UpdateGroupRateGuardIgnored(c *gin.Context) {
+	groupID, ok := parseSupplierGroupID(c)
+	if !ok {
+		return
+	}
+	var input struct {
+		Ignored *bool `json:"ignored"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil || input.Ignored == nil {
+		response.ErrorFrom(c, badRequest("倍率守护忽略参数无效"))
+		return
+	}
+	if h.groupGuard == nil {
+		response.ErrorFrom(c, infraerrors.InternalServer("SUPPLIER_GROUP_GUARD_UNAVAILABLE", "supplier group guard unavailable"))
+		return
+	}
+	if err := h.groupGuard.SetRateGuardIgnored(c.Request.Context(), groupID, *input.Ignored); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"group_id": groupID, "ignored": *input.Ignored})
 }

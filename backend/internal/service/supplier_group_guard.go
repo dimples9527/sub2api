@@ -21,6 +21,7 @@ type SupplierGroupGuardRepository interface {
 	GetGroupForRateGuard(ctx context.Context, groupID int64) (SupplierProviderGroup, error)
 	SelectRateGuard(ctx context.Context, groupID int64, mode string) error
 	ClearRateGuard(ctx context.Context, groupID int64, mode string) error
+	SetRateGuardIgnored(ctx context.Context, groupID int64, ignored bool) error
 }
 
 type SupplierGroupGuardReconciler struct {
@@ -131,4 +132,18 @@ func uniquePositiveInt64s(values []int64) []int64 {
 		result = append(result, value)
 	}
 	return result
+}
+
+func (r *SupplierGroupGuardReconciler) SetRateGuardIgnored(ctx context.Context, groupID int64, ignored bool) error {
+	if r == nil || r.repo == nil {
+		return ErrSupplierRateGuardSelectionInvalid
+	}
+	group, err := r.repo.GetGroupForRateGuard(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	if !group.RateGuardSelected {
+		return ErrSupplierRateGuardSelectionInvalid
+	}
+	return r.repo.SetRateGuardIgnored(ctx, groupID, ignored)
 }

@@ -353,6 +353,18 @@
 						<Icon name="shield" size="sm" />
 						<span>{{ group.rate_guard_selected ? '取消守护' : (hasOtherRateGuard(group) ? '切换为守护' : '设为守护') }}</span>
 					</button>
+					<button
+						v-if="group.rate_guard_selected"
+						type="button"
+						class="sp-row-action"
+						:class="{ active: group.rate_guard_ignored }"
+						:disabled="guardIgnoreUpdatingGroupID === group.id"
+						:title="group.rate_guard_ignored ? '恢复该分组的自动倍率守护' : '忽略该分组的自动倍率守护'"
+						@click="group.rate_guard_ignored ? toggleRateGuardIgnored(group) : (rateGuardIgnoreTarget = group)"
+					>
+						<Icon :name="group.rate_guard_ignored ? 'refresh' : 'x'" size="sm" />
+						<span>{{ group.rate_guard_ignored ? '恢复守护' : '忽略守护' }}</span>
+					</button>
                   <button type="button" class="sp-row-action primary" title="修改本地分组倍率" @click="openRateDialog(group)">
                     <Icon name="edit" size="sm" />
                     <span>调倍率</span>
@@ -617,6 +629,17 @@
     </BaseDialog>
 
     <ConfirmDialog
+      :show="Boolean(rateGuardIgnoreTarget)"
+      title="忽略自动倍率守护"
+      :message="`忽略后，${rateGuardIgnoreTarget?.name || rateGuardIgnoreTarget?.upstream_group_key || '该上游分组'} 将保留守护来源，仅暂停自动倍率调整。`"
+      confirm-text="忽略守护"
+      cancel-text="取消"
+      danger
+      @confirm="confirmRateGuardIgnore"
+      @cancel="rateGuardIgnoreTarget = null"
+    />
+
+    <ConfirmDialog
       :show="Boolean(unmatchTarget)"
       title="取消本地分组关联"
       :message="`取消后，${unmatchTarget?.name || unmatchTarget?.upstream_group_key || '该上游分组'} 将保持未匹配，不再参与自动匹配。`"
@@ -643,6 +666,7 @@ import {
   resolveSupplierGroupNameChange,
   updateSupplierGroupAutoMatchPolicy,
 	updateSupplierGroupRateGuard,
+	updateSupplierGroupRateGuardIgnore,
   updateSupplierGroupMapping,
   type SupplierProviderGroup,
   type SupplierProviderGroupSummary,
@@ -748,6 +772,7 @@ const mappingTarget = ref<SupplierProviderGroup | null>(null)
 const createTarget = ref<SupplierProviderGroup | null>(null)
 const rateTarget = ref<SupplierProviderGroup | null>(null)
 const unmatchTarget = ref<SupplierProviderGroup | null>(null)
+const rateGuardIgnoreTarget = ref<SupplierProviderGroup | null>(null)
 const mappingLocalGroupID = ref<number | null>(null)
 const newGroupName = ref('')
 const newGroupPlatform = ref<string>('openai')
@@ -761,6 +786,7 @@ const savingLocalRate = ref(false)
 const autoMatching = ref(false)
 const policyUpdatingGroupID = ref<number | null>(null)
 const guardUpdatingGroupID = ref<number | null>(null)
+const guardIgnoreUpdatingGroupID = ref<number | null>(null)
 const resolvingNameGroupID = ref<number | null>(null)
 const rateGuardChangeLogsVisible = ref(false)
 const rateGuardChangeLogsLoading = ref(false)
@@ -1272,6 +1298,27 @@ async function toggleRateGuard(group: SupplierProviderGroup) {
 	}
 }
 
+async function toggleRateGuardIgnored(group: SupplierProviderGroup) {
+	guardIgnoreUpdatingGroupID.value = group.id
+	const ignored = !group.rate_guard_ignored
+	try {
+		await updateSupplierGroupRateGuardIgnore(group.id, ignored)
+		await loadGroups()
+		appStore.showSuccess(ignored ? '已忽略该分组的自动倍率守护' : '已恢复该分组的自动倍率守护')
+	} catch (err) {
+		appStore.showError(errorMessage(err, '更新自动倍率守护忽略状态失败'))
+	} finally {
+		guardIgnoreUpdatingGroupID.value = null
+	}
+}
+
+async function confirmRateGuardIgnore() {
+	const target = rateGuardIgnoreTarget.value
+	if (!target) return
+	rateGuardIgnoreTarget.value = null
+	await toggleRateGuardIgnored(target)
+}
+
 function rateGuardEligible(group: SupplierProviderGroup): boolean {
 	return Boolean(group.local_group_id && group.active && group.local_group_status === 'active')
 }
@@ -1288,6 +1335,10 @@ function hasOtherRateGuard(group: SupplierProviderGroup): boolean {
 }
 
 function rateGuardStatus(group: SupplierProviderGroup): { label: string; tone: string; detail?: string; title?: string } {
+	if (group.rate_guard_selected && group.rate_guard_ignored) {
+		const detail = '保留守护来源，已暂停自动倍率调整'
+		return { label: '已忽略自动守护', tone: 'muted', detail, title: detail }
+	}
 	if (group.rate_guard_selected && !group.active) {
 		const detail = '最近同步未返回该分组，或上游已停用'
 		return { label: '上游分组不可用', tone: 'danger', detail, title: detail }

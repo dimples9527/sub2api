@@ -67,12 +67,19 @@ type supplierProviderGroupMatcherHandlerStub struct {
 type supplierGroupGuardHandlerStub struct {
 	groupID  int64
 	selected bool
+	ignored  bool
 	err      error
 }
 
 func (s *supplierGroupGuardHandlerStub) SetManualGuard(_ context.Context, groupID int64, selected bool) error {
 	s.groupID = groupID
 	s.selected = selected
+	return s.err
+}
+
+func (s *supplierGroupGuardHandlerStub) SetRateGuardIgnored(_ context.Context, groupID int64, ignored bool) error {
+	s.groupID = groupID
+	s.ignored = ignored
 	return s.err
 }
 
@@ -295,4 +302,29 @@ func TestSupplierProviderSyncHandlerGroupRateGuardReturnsServiceError(t *testing
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+func TestSupplierProviderSyncHandlerGroupRateGuardIgnoreUpdatesPolicy(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	guard := &supplierGroupGuardHandlerStub{}
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, &supplierProviderSyncHandlerDataStub{})
+	handler.SetGroupGuard(guard)
+	router := gin.New()
+	router.PUT("/groups/:id/rate-guard-ignore", handler.UpdateGroupRateGuardIgnored)
+
+	for _, ignored := range []bool{true, false} {
+		rec := httptest.NewRecorder()
+		body := `{"ignored":false}`
+		if ignored {
+			body = `{"ignored":true}`
+		}
+		req := httptest.NewRequest(http.MethodPut, "/groups/7/rate-guard-ignore", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Equal(t, int64(7), guard.groupID)
+		require.Equal(t, ignored, guard.ignored)
+		require.Contains(t, rec.Body.String(), `"ignored":`)
+	}
 }

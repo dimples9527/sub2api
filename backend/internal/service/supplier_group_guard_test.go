@@ -11,6 +11,16 @@ type supplierGroupGuardRepoFake struct {
 	mappings []SupplierProviderGroup
 }
 
+func (f *supplierGroupGuardRepoFake) SetRateGuardIgnored(_ context.Context, groupID int64, ignored bool) error {
+	for index := range f.mappings {
+		if f.mappings[index].ID == groupID {
+			f.mappings[index].RateGuardIgnored = ignored
+			return nil
+		}
+	}
+	return ErrSupplierProviderGroupNotFound
+}
+
 func (f *supplierGroupGuardRepoFake) ListMappingsByLocalGroup(_ context.Context, localGroupIDs []int64) ([]SupplierProviderGroup, error) {
 	wanted := make(map[int64]struct{}, len(localGroupIDs))
 	for _, id := range localGroupIDs {
@@ -204,4 +214,29 @@ func TestSupplierGroupGuardReconcilerClearsInactiveManualGuard(t *testing.T) {
 
 	require.NoError(t, err)
 	require.False(t, repo.mappings[0].RateGuardSelected)
+}
+
+func TestSupplierGroupGuardReconcilerSetsIgnoreWithoutChangingGuardSelection(t *testing.T) {
+	repo := &supplierGroupGuardRepoFake{mappings: []SupplierProviderGroup{{
+		ID: 10, LocalGroupID: int64PtrForMatcher(7), Active: true,
+		RateGuardSelected: true, RateGuardSelectionMode: RateGuardSelectionModeManual,
+	}}}
+
+	err := NewSupplierGroupGuardReconciler(repo).SetRateGuardIgnored(context.Background(), 10, true)
+
+	require.NoError(t, err)
+	require.True(t, repo.mappings[0].RateGuardIgnored)
+	require.True(t, repo.mappings[0].RateGuardSelected)
+	require.Equal(t, RateGuardSelectionModeManual, repo.mappings[0].RateGuardSelectionMode)
+}
+
+func TestSupplierGroupGuardReconcilerRejectsIgnoreForUnselectedGroup(t *testing.T) {
+	repo := &supplierGroupGuardRepoFake{mappings: []SupplierProviderGroup{{
+		ID: 10, LocalGroupID: int64PtrForMatcher(7), Active: true,
+	}}}
+
+	err := NewSupplierGroupGuardReconciler(repo).SetRateGuardIgnored(context.Background(), 10, true)
+
+	require.ErrorIs(t, err, ErrSupplierRateGuardSelectionInvalid)
+	require.False(t, repo.mappings[0].RateGuardIgnored)
 }

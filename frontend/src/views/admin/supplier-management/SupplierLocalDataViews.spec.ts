@@ -1292,4 +1292,16 @@ describe('supplier local data views component usage', () => {
     expect(groupsSource).toContain(':aria-pressed="providerID === option.value"')
     expect(groupsSource).toContain('@click="selectProviderShortcut(option.value)"')
   })
+
+  it('supports ignoring automatic rate guard for a selected supplier group', () => {
+    expect(groupsSource).toContain('updateSupplierGroupRateGuardIgnore')
+    expect(groupsSource).toContain('toggleRateGuardIgnored')
+    expect(groupsSource).toContain('忽略守护')
+    expect(groupsSource).toContain('恢复守护')
+    expect(groupsSource).toContain('已忽略自动守护')
+    expect(groupsSource).toContain('保留守护来源，仅暂停自动倍率调整')
+    expect(supplierProviderDataSource).toContain('rate_guard_ignored')
+    expect(supplierProviderDataSource).toContain('updateSupplierGroupRateGuardIgnore')
+  })
+
 })

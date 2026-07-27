@@ -105,6 +105,7 @@ export interface SupplierProviderGroup {
   matched_upstream_name?: string
   name_change_pending: boolean
 	 rate_guard_selected: boolean
+	 rate_guard_ignored: boolean
 	 rate_guard_selection_mode: '' | 'auto' | 'manual'
 	 rate_guard_last_snapshot_at?: string
 	 rate_guard_last_checked_at?: string
@@ -271,6 +272,17 @@ export async function updateSupplierGroupRateGuard(
 	return data
 }
 
+export async function updateSupplierGroupRateGuardIgnore(
+	id: number,
+	ignored: boolean
+): Promise<{ group_id: number; ignored: boolean }> {
+	const { data } = await apiClient.put<{ group_id: number; ignored: boolean }>(
+		`/admin/supplier-management/groups/${id}/rate-guard-ignore`,
+		{ ignored }
+	)
+	return data
+}
+
 export async function resolveSupplierGroupNameChange(
   id: number,
   action: 'keep_local' | 'sync_local_name'
@@ -294,6 +306,7 @@ export const supplierProviderDataAPI = {
   autoMatchSupplierGroups,
   updateSupplierGroupAutoMatchPolicy,
 	updateSupplierGroupRateGuard,
+	updateSupplierGroupRateGuardIgnore,
   resolveSupplierGroupNameChange,
 }
 
