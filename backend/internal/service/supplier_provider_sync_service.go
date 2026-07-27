@@ -42,6 +42,7 @@ type SupplierProviderAccount struct {
 	LocalAccountMatchCount     int                                   `json:"local_account_match_count"`
 	LocalAccountID             *int64                                `json:"local_account_id,omitempty"`
 	LocalAccountName           string                                `json:"local_account_name,omitempty"`
+	LocalAccountPlatform       string                                `json:"local_account_platform,omitempty"`
 	LocalAccountPriority       *int                                  `json:"local_account_priority,omitempty"`
 	LocalAccountStatus         string                                `json:"local_account_status,omitempty"`
 	LocalAccountSchedulable    *bool                                 `json:"local_account_schedulable,omitempty"`

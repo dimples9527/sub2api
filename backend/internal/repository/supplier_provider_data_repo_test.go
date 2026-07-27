@@ -67,7 +67,7 @@ var supplierProviderAccountListColumns = []string{
 	"group_key", "group_name", "platform", "rate_multiplier", "raw_status", "active",
 	"last_seen_at", "inactive_at",
 	"local_account_match_status", "local_account_match_count",
-	"local_account_id", "local_account_name", "local_account_priority",
+	"local_account_id", "local_account_name", "local_account_platform", "local_account_priority",
 	"local_account_status", "local_account_schedulable",
 	"local_account_last_test_status", "local_account_last_tested_at", "local_account_last_test_error",
 	"binding_groups",
@@ -97,6 +97,7 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
        local_match.match_count AS local_account_match_count,
        matched_account.id AS local_account_id,
        COALESCE(matched_account.name, '') AS local_account_name,
+       COALESCE(matched_account.platform, '') AS local_account_platform,
        matched_account.priority AS local_account_priority,
        COALESCE(matched_account.status, '') AS local_account_status,
        matched_account.schedulable AS local_account_schedulable,
@@ -250,7 +251,7 @@ func TestSupplierProviderDataRepositoryListAccountsPaginates(t *testing.T) {
 		WithArgs(int64(42), active, "%pri%", 20, 20).
 		WillReturnRows(sqlmock.NewRows(supplierProviderAccountListColumns).AddRow(
 			int64(7), int64(42), "Supplier A", "account-1", "Primary", "active", "group-1", "VIP", "openai", 2.5, "active", true, now, nil,
-			"matched", 1, int64(101), "prefix-key-1", 80, "active", true, "success", "2026-07-16T09:30:00Z", "upstream authentication failed",
+			"matched", 1, int64(101), "prefix-key-1", "anthropic", 80, "active", true, "success", "2026-07-16T09:30:00Z", "upstream authentication failed",
 			`[{"id":202,"name":"Claude 订阅","platform":"anthropic","rate_multiplier":2,"subscription_type":"subscription"},{"id":201,"name":"OpenAI 专线","platform":"openai","rate_multiplier":1.5,"subscription_type":"standard"}]`,
 			12.5, 3.25,
 		))
@@ -275,6 +276,7 @@ func TestSupplierProviderDataRepositoryListAccountsPaginates(t *testing.T) {
 	require.NotNil(t, result.Items[0].LocalAccountID)
 	require.Equal(t, int64(101), *result.Items[0].LocalAccountID)
 	require.Equal(t, "prefix-key-1", result.Items[0].LocalAccountName)
+	require.Equal(t, "anthropic", result.Items[0].LocalAccountPlatform)
 	require.NotNil(t, result.Items[0].LocalAccountPriority)
 	require.Equal(t, 80, *result.Items[0].LocalAccountPriority)
 	require.Equal(t, "active", result.Items[0].LocalAccountStatus)
@@ -308,11 +310,11 @@ func TestSupplierProviderDataRepositoryListAccountsSQLContractMapsUnmatchedAndCo
 		WillReturnRows(sqlmock.NewRows(supplierProviderAccountListColumns).
 			AddRow(
 				int64(7), int64(42), "Supplier A", "missing-key", "Missing", "active", "group-1", "VIP", "openai", 2.5, "active", true, now, nil,
-				"unmatched", 0, nil, "", nil, "", nil, "", "", "", `[]`, 12.5, 3.25,
+				"unmatched", 0, nil, "", "", nil, "", nil, "", "", "", `[]`, 12.5, 3.25,
 			).
 			AddRow(
 				int64(8), int64(42), "Supplier A", "duplicate-key", "Duplicate", "active", "group-2", "Standard", "openai", 1.5, "active", true, now, nil,
-				"conflict", 2, nil, "", nil, "", nil, "", "", "", `[]`, 12.5, 3.25,
+				"conflict", 2, nil, "", "", nil, "", nil, "", "", "", `[]`, 12.5, 3.25,
 			))
 
 	result, err := repo.ListAccounts(context.Background(), service.SupplierProviderDataListParams{
@@ -456,6 +458,10 @@ func TestSupplierProviderAccountWhereIncludesMappedGroupPlatform(t *testing.T) {
 	require.Contains(t, where, "(a.name ILIKE $3 OR a.upstream_account_key ILIKE $3)")
 	require.Contains(t, where, "mapped_group.upstream_group_key = a.group_key")
 	require.Contains(t, where, "local_group.platform = $4")
+	require.Contains(t, where, "FROM accounts local_account")
+	require.Contains(t, where, "COUNT(*) = 1")
+	require.Contains(t, where, "MIN(local_account.platform) = $4")
+	require.Contains(t, where, "lower(p.account_name_prefix || a.name)")
 	require.Equal(t, []any{int64(42), active, "%primary%", "openai"}, args)
 }
 

@@ -166,10 +166,10 @@
                 <div class="sp-entity">{{ account.name || '—' }}</div>
                 <div class="sp-sub sp-account-meta">
                   <span
-                    v-if="account.platform"
-                    :class="['sp-platform-badge', platformBadgeClass(account.platform)]"
+                    v-if="effectivePlatform(account) !== 'unknown'"
+                    :class="['sp-platform-badge', platformBadgeClass(effectivePlatform(account))]"
                   >
-                    {{ platformLabel(account.platform) }}
+                    {{ platformLabel(effectivePlatform(account)) }}
                   </span>
                   <span v-else class="sp-account-muted">—</span>
                   <span class="sp-account-key" :title="account.upstream_account_key || '—'">
@@ -232,7 +232,7 @@
           </template>
 
           <template #cell-rate_multiplier="{ row: account }">
-            <span :class="['sp-account-rate', platformTextClass(account.platform || '')]">
+            <span :class="['sp-account-rate', platformTextClass(effectivePlatform(account))]">
               {{ formatRate(account.rate_multiplier) }}
             </span>
           </template>
@@ -333,19 +333,26 @@
                 <button
                   class="sp-button small"
                   type="button"
-                  :disabled="accountActionLoadingID === account.local_account_id"
+                  :disabled="testingAccountID === account.local_account_id || accountActionLoadingID === account.local_account_id"
+                  :data-test="`supplier-account-test-${account.local_account_id}`"
+                  @click.stop="openLocalAccountTest(account)"
+                >{{ testingAccountID === account.local_account_id ? '加载中…' : '测试账号' }}</button>
+                <button
+                  class="sp-button small"
+                  type="button"
+                  :disabled="accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id"
                   @click.stop="openLocalAccountEditor(account)"
                 >编辑</button>
                 <button
                   class="sp-button small"
                   type="button"
-                  :disabled="accountActionLoadingID === account.local_account_id"
+                  :disabled="accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id"
                   @click.stop="openAccountBindingEditor(account)"
                 >编辑绑定</button>
                 <button
                   class="sp-button small danger"
                   type="button"
-                  :disabled="deletingAccountID === account.local_account_id"
+                  :disabled="deletingAccountID === account.local_account_id || testingAccountID === account.local_account_id"
                   @click.stop="deleteLocalAccount(account)"
                 >{{ deletingAccountID === account.local_account_id ? '删除中' : '删除' }}</button>
               </template>
@@ -393,7 +400,7 @@
       <template v-if="selected">
         <div class="sp-detail-grid">
           <div class="sp-detail-cell"><span>供应商</span><b>{{ displayValue(selected.provider_name) }}</b></div>
-          <div class="sp-detail-cell"><span>平台</span><b>{{ selected.platform ? platformLabel(selected.platform) : '—' }}</b></div>
+          <div class="sp-detail-cell"><span>平台</span><b>{{ effectivePlatform(selected) !== 'unknown' ? platformLabel(effectivePlatform(selected)) : '—' }}</b></div>
           <div class="sp-detail-cell"><span>上游账号名称</span><b>{{ displayValue(selected.name) }}</b></div>
           <div class="sp-detail-cell"><span>上游 Key</span><b>{{ displayValue(selected.upstream_account_key) }}</b></div>
           <div class="sp-detail-cell"><span>匹配状态</span><b>{{ localAccountMatchLabel(selected) }}</b></div>
@@ -709,6 +716,13 @@
       @updated="handleLocalAccountUpdated"
     />
 
+    <AccountTestModal
+      :show="showAccountTestModal"
+      :account="testingAccount"
+      @close="closeAccountTestModal"
+      @test-result="handleAccountTestResult"
+    />
+
     <BaseDialog
       :show="Boolean(bindingAccount)"
       title="编辑账号绑定"
@@ -776,6 +790,7 @@
 </template>
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 import { SupplierAccountRateGuardLogDialog, SupplierDrawer, SupplierModuleLayout } from '@/components/admin/supplier-management'
 import { CreateAccountModal, EditAccountModal } from '@/components/account'
 import DataTable from '@/components/common/DataTable.vue'
@@ -870,8 +885,11 @@ const editingPriorityAccountID = ref<number | null>(null)
 const savingPriorityAccountID = ref<number | null>(null)
 const accountActionLoadingID = ref<number | null>(null)
 const deletingAccountID = ref<number | null>(null)
+const testingAccountID = ref<number | null>(null)
+const testingAccount = ref<Account | null>(null)
 const editingAccount = ref<Account | null>(null)
 const showEditAccountModal = ref(false)
+const showAccountTestModal = ref(false)
 const showCreateAccountModal = ref(false)
 const showBatchTestConfigDialog = ref(false)
 const showBatchTestResultDialog = ref(false)
@@ -1302,7 +1320,7 @@ async function openSupplierBatchTestDialog(snapshot: SupplierAccountFilterSnapsh
       uniqueTargets.set(localAccountID, {
         accountID: localAccountID,
         accountName: account.local_account_name || account.name || `账号 #${localAccountID}`,
-        platform: account.platform?.trim().toLowerCase() || 'unknown',
+        platform: effectivePlatform(account),
         schedulable: account.local_account_schedulable === true,
         providerEnabled: providers.value.find(provider => provider.id === account.provider_id)?.enabled !== false,
       })
@@ -1503,6 +1521,16 @@ function batchPlatformLabel(platform?: string): string {
   return !platform || platform === 'unknown' ? '未知平台' : platformLabel(platform)
 }
 
+function normalizePlatform(platform?: string): string {
+  return platform?.trim().toLowerCase() || ''
+}
+
+function effectivePlatform(account: SupplierProviderAccount): string {
+  return normalizePlatform(account.platform)
+    || normalizePlatform(account.local_account_platform)
+    || 'unknown'
+}
+
 function batchTestItemStatusLabel(status: BatchAccountTestStatus): string {
   if (status === 'success') return '成功'
   if (status === 'failed') return '失败'
@@ -1634,6 +1662,36 @@ function manageableLocalAccountID(account: SupplierProviderAccount): number | nu
 
 function canManageLocalAccount(account: SupplierProviderAccount): boolean {
   return manageableLocalAccountID(account) !== null
+}
+
+async function openLocalAccountTest(account: SupplierProviderAccount) {
+  const localAccountID = manageableLocalAccountID(account)
+  if (localAccountID === null || testingAccountID.value !== null || accountActionLoadingID.value !== null) return
+
+  testingAccountID.value = localAccountID
+  try {
+    testingAccount.value = await adminAPI.accounts.getById(localAccountID)
+    showAccountTestModal.value = true
+  } catch (err) {
+    testingAccount.value = null
+    appStore.showError(extractApiErrorMessage(err, '加载测试账号失败'))
+  } finally {
+    testingAccountID.value = null
+  }
+}
+
+function closeAccountTestModal() {
+  showAccountTestModal.value = false
+  testingAccount.value = null
+}
+
+async function handleAccountTestResult(payload: {
+  accountId: number
+  status: 'testing' | 'success' | 'failed'
+}) {
+  if (payload.status === 'success' || payload.status === 'failed') {
+    await loadAccounts()
+  }
 }
 
 async function loadAccountEditorOptions() {

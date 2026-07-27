@@ -75,6 +75,7 @@ export interface SupplierProviderAccount {
   local_account_match_count: number
   local_account_id?: number
   local_account_name?: string
+  local_account_platform?: string
   local_account_priority?: number
   local_account_status?: string
   local_account_schedulable?: boolean

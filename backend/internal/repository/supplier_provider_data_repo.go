@@ -68,6 +68,7 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
        local_match.match_count AS local_account_match_count,
        matched_account.id AS local_account_id,
        COALESCE(matched_account.name, '') AS local_account_name,
+       COALESCE(matched_account.platform, '') AS local_account_platform,
        matched_account.priority AS local_account_priority,
        COALESCE(matched_account.status, '') AS local_account_status,
        matched_account.schedulable AS local_account_schedulable,
@@ -983,14 +984,29 @@ WHERE mapped_group.provider_id = a.provider_id
 	}
 	if platform := strings.TrimSpace(params.Platform); platform != "" {
 		args = append(args, platform)
-		conditions = append(conditions, fmt.Sprintf(`EXISTS (
+		conditions = append(conditions, fmt.Sprintf(`(
+EXISTS (
 SELECT 1
 FROM supplier_provider_groups mapped_group
 JOIN groups local_group ON local_group.id = mapped_group.local_group_id AND local_group.deleted_at IS NULL
 WHERE mapped_group.provider_id = a.provider_id
   AND mapped_group.upstream_group_key = a.group_key
   AND local_group.platform = $%d
-)`, len(args)))
+)
+OR (
+  SELECT COUNT(*) = 1
+     AND MIN(local_account.platform) = $%d
+  FROM accounts local_account
+  WHERE local_account.deleted_at IS NULL
+    AND regexp_replace(lower(local_account.name), '[^[:alnum:]]', '', 'g')
+        = regexp_replace(
+            lower(p.account_name_prefix || a.name),
+            '[^[:alnum:]]',
+            '',
+            'g'
+          )
+)
+)`, len(args), len(args)))
 	}
 	return strings.Join(conditions, " AND "), args
 }
@@ -1168,7 +1184,7 @@ func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (servic
 		&item.Name, &item.Status, &item.GroupKey, &item.GroupName, &item.Platform, &item.RateMultiplier,
 		&item.RawStatus, &item.Active, &item.LastSeenAt, &inactiveAt,
 		&item.LocalAccountMatchStatus, &item.LocalAccountMatchCount,
-		&localAccountID, &item.LocalAccountName, &localAccountPriority,
+		&localAccountID, &item.LocalAccountName, &item.LocalAccountPlatform, &localAccountPriority,
 		&item.LocalAccountStatus, &localAccountSchedulable,
 		&item.LocalAccountLastTestStatus, &item.LocalAccountLastTestedAt, &item.LocalAccountLastTestError,
 		&bindingGroupsJSON,

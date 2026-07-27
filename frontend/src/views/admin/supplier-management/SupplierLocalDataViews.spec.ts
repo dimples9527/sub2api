@@ -10,6 +10,8 @@ const supplierAccountMocks = vi.hoisted(() => ({
   listProviders: vi.fn(),
   listGroups: vi.fn(),
   listAccounts: vi.fn(),
+  getAccountById: vi.fn(),
+  getAvailableModels: vi.fn(),
   setSchedulable: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
@@ -18,6 +20,8 @@ const supplierAccountMocks = vi.hoisted(() => ({
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
+      getById: supplierAccountMocks.getAccountById,
+      getAvailableModels: supplierAccountMocks.getAvailableModels,
       setSchedulable: supplierAccountMocks.setSchedulable,
     },
     groups: {
@@ -62,6 +66,7 @@ const supplierProviderDataSource = readFileSync(
 
 const runtimeCellKeys = [
   'provider_name',
+  'upstream_account_key',
   'local_account_name',
   'local_account_priority',
   'rate_multiplier',
@@ -129,6 +134,22 @@ const BaseDialogStub = defineComponent({
           h('h2', props.title),
           slots.default?.(),
         ])
+      : null
+  },
+})
+
+const AccountTestModalStub = defineComponent({
+  props: {
+    show: Boolean,
+    account: {
+      type: Object,
+      default: null,
+    },
+  },
+  emits: ['close', 'test-result'],
+  setup(props) {
+    return () => props.show
+      ? h('section', { class: 'account-test-modal-stub' }, String(props.account?.name || ''))
       : null
   },
 })
@@ -210,6 +231,7 @@ const testAccounts = [
     group_key: 'group-a',
     group_name: '分组 A',
     platform: 'openai',
+    local_account_platform: 'anthropic',
     rate_multiplier: 1,
     binding_groups: [
       {
@@ -314,7 +336,7 @@ const testAccounts = [
     status: 'active',
     group_key: 'group-b',
     group_name: '分组 B',
-    platform: 'anthropic',
+    local_account_platform: 'anthropic',
     rate_multiplier: 1.5,
     binding_groups: [],
     raw_status: 'active',
@@ -342,6 +364,7 @@ async function mountSupplierAccounts() {
         SupplierModuleLayout: SupplierModuleLayoutStub,
         SupplierDrawer: SupplierDrawerStub,
         BaseDialog: BaseDialogStub,
+        AccountTestModal: AccountTestModalStub,
         DataTable: DataTableStub,
         Input: InputStub,
         Select: SelectStub,
@@ -368,6 +391,13 @@ describe('supplier local data views component usage', () => {
       page: 1,
       page_size: 20,
     })
+    supplierAccountMocks.getAccountById.mockResolvedValue({
+      id: 101,
+      name: '本地账号 A',
+      platform: 'openai',
+      status: 'active',
+    })
+    supplierAccountMocks.getAvailableModels.mockResolvedValue([])
     supplierAccountMocks.setSchedulable.mockImplementation(async (_id, schedulable) => ({
       schedulable,
     }))
@@ -777,11 +807,43 @@ describe('supplier local data views component usage', () => {
     expect(providerCellSource).not.toContain('platformBadgeClass(account.platform)')
     expect(providerCellSource).not.toContain('platformLabel(account.platform)')
     expect(providerCellSource).toContain('supplierTone(account.provider_id).chip')
-    expect(upstreamAccountCellSource).toContain('platformBadgeClass(account.platform)')
-    expect(upstreamAccountCellSource).toContain('platformLabel(account.platform)')
+    expect(upstreamAccountCellSource).toContain('platformBadgeClass(effectivePlatform(account))')
+    expect(upstreamAccountCellSource).toContain('platformLabel(effectivePlatform(account))')
     expect(upstreamAccountCellSource).toContain("account.name || '—'")
     expect(upstreamAccountCellSource).toContain("account.upstream_account_key || '—'")
     expect(accountsSource).not.toContain('<template #cell-platform')
+  })
+
+  it('falls back to the uniquely matched local-account platform and keeps the upstream platform authoritative', async () => {
+    const wrapper = await mountSupplierAccounts()
+
+    expect(wrapper.get('.runtime-cell-upstream_account_key[data-row-index="0"]').text()).toContain('OpenAI')
+    expect(wrapper.get('.runtime-cell-upstream_account_key[data-row-index="0"]').text()).not.toContain('Anthropic')
+    expect(wrapper.get('.runtime-cell-upstream_account_key[data-row-index="4"]').text()).toContain('Anthropic')
+    expect(accountsSource).toContain('function effectivePlatform(account: SupplierProviderAccount): string')
+    expect(accountsSource).toContain('normalizePlatform(account.platform)')
+    expect(accountsSource).toContain('normalizePlatform(account.local_account_platform)')
+    expect(supplierProviderDataSource).toContain('local_account_platform?: string')
+
+    const view = wrapper.vm as unknown as {
+      openSupplierBatchTestDialog: (snapshot: Record<string, unknown>) => Promise<void>
+      batchTestTargets: Array<{ accountID: number; platform: string }>
+    }
+    await view.openSupplierBatchTestDialog({
+      providerID: 0,
+      groupID: 0,
+      platform: '',
+      quickFilter: 'all',
+      summary: '全部账号',
+    })
+
+    expect(view.batchTestTargets).toEqual(expect.arrayContaining([
+      expect.objectContaining({ accountID: 101, platform: 'openai' }),
+      expect.objectContaining({ accountID: 105, platform: 'anthropic' }),
+    ]))
+    expect(view.batchTestTargets.some(target => target.platform === 'unknown')).toBe(false)
+
+    wrapper.unmount()
   })
 
   it('shows local-account matching states, supplier summaries, and explicit missing values', () => {
@@ -844,6 +906,31 @@ describe('supplier local data views component usage', () => {
     expect(accountsSource).toContain('adminAPI.accounts.delete(localAccountID)')
     expect(accountsSource).toContain('window.confirm')
     expect(accountsSource).toContain('账号已删除')
+  })
+
+  it('tests a uniquely matched local account through the shared account test modal', async () => {
+    const wrapper = await mountSupplierAccounts()
+
+    expect(wrapper.find('[data-test="supplier-account-test-101"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="supplier-account-test-105"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="supplier-account-test-2"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="supplier-account-test-3"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="supplier-account-test-101"]').trigger('click')
+    await flushPromises()
+
+    expect(supplierAccountMocks.getAccountById).toHaveBeenCalledWith(101)
+    expect(wrapper.get('.account-test-modal-stub').text()).toBe('本地账号 A')
+
+    const testModal = wrapper.findComponent(AccountTestModalStub)
+    testModal.vm.$emit('test-result', { accountId: 101, status: 'success' })
+    await flushPromises()
+
+    expect(supplierAccountMocks.listAccounts).toHaveBeenCalledTimes(2)
+    expect(accountsSource).toContain("import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'")
+    expect(accountsSource).toContain('@test-result="handleAccountTestResult"')
+
+    wrapper.unmount()
   })
 
   it('opens the existing create-account modal from the supplier account toolbar', () => {
