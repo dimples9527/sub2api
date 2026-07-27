@@ -31,6 +31,9 @@ func (r *supplierProviderDataRepoStub) ListAccounts(context.Context, SupplierPro
 func (r *supplierProviderDataRepoStub) ListGroups(context.Context, SupplierProviderDataListParams) (SupplierProviderGroupListResult, error) {
 	return SupplierProviderGroupListResult{}, nil
 }
+func (r *supplierProviderDataRepoStub) ListGroupHealthTrends(context.Context, SupplierProviderGroupHealthTrendParams) ([]SupplierProviderGroupHealthTrend, error) {
+	return []SupplierProviderGroupHealthTrend{}, nil
+}
 func (r *supplierProviderDataRepoStub) ListGroupsForAutoMatch(context.Context, int64) ([]SupplierProviderGroup, error) {
 	return []SupplierProviderGroup{}, nil
 }
@@ -62,6 +65,9 @@ func (r *supplierProviderDataRepoStub) SelectRateGuard(context.Context, int64, s
 	return nil
 }
 func (r *supplierProviderDataRepoStub) ClearRateGuard(context.Context, int64, string) error {
+	return nil
+}
+func (r *supplierProviderDataRepoStub) SetRateGuardIgnored(context.Context, int64, bool) error {
 	return nil
 }
 func (r *supplierProviderDataRepoStub) ListRateGuardCandidates(context.Context) ([]SupplierRateGuardCandidate, error) {

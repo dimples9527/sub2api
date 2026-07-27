@@ -549,6 +549,9 @@ func (noopAccountRepo) ListSchedulableUngroupedByPlatform(context.Context, strin
 func (noopAccountRepo) ListSchedulableUngroupedByPlatforms(context.Context, []string) ([]Account, error) {
 	return nil, nil
 }
+func (noopAccountRepo) ListModelAvailabilityCandidates(context.Context, *int64, []string, bool) ([]Account, error) {
+	panic("unexpected ListModelAvailabilityCandidates call")
+}
 func (noopAccountRepo) SetRateLimited(context.Context, int64, time.Time) error { return nil }
 func (noopAccountRepo) SetModelRateLimit(context.Context, int64, string, time.Time, ...string) error {
 	return nil
