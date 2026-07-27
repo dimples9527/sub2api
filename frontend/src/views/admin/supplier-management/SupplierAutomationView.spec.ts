@@ -410,6 +410,17 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('@change="toggleHealthGuardAccount(mapping.localAccountID)"')
   })
 
+  it('uses the matched local account platform for health guard account grouping', () => {
+    expect(supplierAutomationSource).toContain(
+      'function effectiveHealthGuardPlatform(account: SupplierProviderAccount): string {'
+    )
+    expect(supplierAutomationSource).toContain(
+      'return normalizeHealthGuardPlatform(account.local_account_platform || account.platform)'
+    )
+    expect(supplierAutomationSource).toContain('current.platform = effectiveHealthGuardPlatform(account)')
+    expect(supplierAutomationSource).toContain('platform: effectiveHealthGuardPlatform(account)')
+  })
+
   it('renders health guard accounts as a unified selectable workspace', () => {
     expect(supplierAutomationSource).toContain('healthGuardSelectedOnly')
     expect(supplierAutomationSource).toContain('healthGuardWorkspaceAccounts')

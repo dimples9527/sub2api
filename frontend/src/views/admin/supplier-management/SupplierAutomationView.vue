@@ -1481,6 +1481,10 @@ function normalizeHealthGuardPlatform(platform?: string): string {
   return platform?.trim().toLowerCase() || 'unknown'
 }
 
+function effectiveHealthGuardPlatform(account: SupplierProviderAccount): string {
+  return normalizeHealthGuardPlatform(account.local_account_platform || account.platform)
+}
+
 function isHealthGuardAccountAvailable(account: SupplierProviderAccount): boolean {
   return account.active
     && account.local_account_match_status === 'matched'
@@ -1499,7 +1503,7 @@ const healthGuardAccountMappings = computed<HealthGuardAccountMapping[]>(() => {
       current.sources.push(account)
       if (available) {
         current.available = true
-        current.platform = normalizeHealthGuardPlatform(account.platform)
+        current.platform = effectiveHealthGuardPlatform(account)
         current.localAccountName = account.local_account_name || current.localAccountName
       }
       continue
@@ -1508,7 +1512,7 @@ const healthGuardAccountMappings = computed<HealthGuardAccountMapping[]>(() => {
     grouped.set(localAccountID, {
       localAccountID,
       localAccountName: account.local_account_name || `账号 #${localAccountID}`,
-      platform: normalizeHealthGuardPlatform(account.platform),
+      platform: effectiveHealthGuardPlatform(account),
       available,
       sources: [account],
     })
