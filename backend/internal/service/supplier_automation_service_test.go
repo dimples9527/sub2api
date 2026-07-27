@@ -50,11 +50,21 @@ func (r *supplierAutomationRepoStub) ListRuns(context.Context, SupplierAutomatio
 func (r *supplierAutomationRepoStub) RecoverRunning(context.Context, string) error { return nil }
 
 type supplierAutomationLockStub struct {
-	acquired bool
-	released int
+	acquired       bool
+	released       int
+	acquireCalls   []string
+	acquireTTLs    []time.Duration
+	acquireResults map[string][]bool
 }
 
-func (l *supplierAutomationLockStub) TryAcquireAutomationLock(context.Context, string, string, time.Duration) (bool, error) {
+func (l *supplierAutomationLockStub) TryAcquireAutomationLock(_ context.Context, taskCode string, _ string, ttl time.Duration) (bool, error) {
+	l.acquireCalls = append(l.acquireCalls, taskCode)
+	l.acquireTTLs = append(l.acquireTTLs, ttl)
+	if results, ok := l.acquireResults[taskCode]; ok && len(results) > 0 {
+		acquired := results[0]
+		l.acquireResults[taskCode] = results[1:]
+		return acquired, nil
+	}
 	return l.acquired, nil
 }
 func (l *supplierAutomationLockStub) ReleaseAutomationLock(context.Context, string, string) error {
@@ -236,6 +246,61 @@ func TestSupplierAutomationServiceRunsSupplierAccountRateGuardInPreviewMode(t *t
 	require.Equal(t, 2, run.ResultDetail.AccountRateGuard.RiskGroups)
 }
 
+func TestSupplierAutomationServiceWaitsForUpstreamFetchLockBeforeRunningAccountRateGuard(t *testing.T) {
+	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
+		SupplierAutomationTaskAccountRateGuard: {
+			TaskCode: SupplierAutomationTaskAccountRateGuard, Name: "供应商账号倍率守护", Enabled: true,
+			CronExpression: "@every 300s", TimeoutSeconds: 600,
+		},
+	}}
+	lock := &supplierAutomationLockStub{
+		acquired: true,
+		acquireResults: map[string][]bool{
+			SupplierAutomationTaskAccountRateGuard: {true},
+			"supplier_upstream_fetch":              {false, true},
+		},
+	}
+	runner := &supplierAutomationAccountRateGuardStub{}
+	service := NewSupplierAutomationService(repo, lock, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
+	service.SetAccountRateGuardService(runner)
+
+	_, err := service.Run(context.Background(), SupplierAutomationTaskAccountRateGuard, SupplierSyncTriggerScheduled)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, runner.called)
+	require.Equal(t, []string{
+		SupplierAutomationTaskAccountRateGuard,
+		"supplier_upstream_fetch",
+		"supplier_upstream_fetch",
+	}, lock.acquireCalls)
+	require.Equal(t, 21*time.Minute, lock.acquireTTLs[0])
+	require.Equal(t, 11*time.Minute, lock.acquireTTLs[1])
+	require.Equal(t, 2, lock.released)
+}
+func TestSupplierAutomationServiceUsesUpstreamFetchLockForDataSync(t *testing.T) {
+	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
+		SupplierAutomationTaskSync: {
+			TaskCode: SupplierAutomationTaskSync, Name: "供应商数据同步", Enabled: true,
+			CronExpression: "*/15 * * * *", TimeoutSeconds: 600,
+		},
+	}}
+	lock := &supplierAutomationLockStub{
+		acquired: true,
+		acquireResults: map[string][]bool{
+			SupplierAutomationTaskSync: {true},
+			"supplier_upstream_fetch":  {true},
+		},
+	}
+	syncer := &supplierAutomationSyncStub{result: SupplierProviderBatchSyncResult{ProcessedCount: 1, SuccessCount: 1}}
+	service := NewSupplierAutomationService(repo, lock, syncer, &supplierProviderDataRepoStub{})
+
+	_, err := service.Run(context.Background(), SupplierAutomationTaskSync, SupplierSyncTriggerScheduled)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, syncer.called)
+	require.Equal(t, []string{SupplierAutomationTaskSync, "supplier_upstream_fetch"}, lock.acquireCalls)
+	require.Equal(t, 2, lock.released)
+}
 func TestSupplierAutomationServiceRejectsPreviewModeForOtherTasks(t *testing.T) {
 	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
 		SupplierAutomationTaskSync: {
@@ -357,6 +422,33 @@ func TestSupplierAutomationServiceIncludesFailedSupplierDetailsInPartialMessage(
 	require.Equal(t, run.Message, repo.tasks[SupplierAutomationTaskSync].LastMessage)
 }
 
+func TestSupplierAutomationServiceOmitsSkippedProviderFromFailureMessage(t *testing.T) {
+	result := SupplierProviderBatchSyncResult{
+		ProcessedCount: 2,
+		FailedCount:    1,
+		SkippedCount:   1,
+		Results: []SupplierProviderSyncResult{
+			{
+				ProviderID: 1,
+				Scope:      SupplierSyncScopeAll,
+				Status:     SupplierSyncStatusSkipped,
+				Message:    ErrSupplierProviderSyncConflict.Error(),
+			},
+			{
+				ProviderID: 2,
+				Scope:      SupplierSyncScopeAll,
+				Status:     SupplierSyncStatusFailed,
+				Message:    "账号接口超时",
+			},
+		},
+	}
+
+	message := supplierAutomationBatchFailureMessage(result)
+
+	require.Contains(t, message, "供应商 2")
+	require.Contains(t, message, "账号接口超时")
+	require.NotContains(t, message, ErrSupplierProviderSyncConflict.Error())
+}
 func TestSupplierAutomationServiceStoresStructuredProviderStageDetails(t *testing.T) {
 	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
 		SupplierAutomationTaskSync: {TaskCode: SupplierAutomationTaskSync, Name: "同步", Enabled: true, CronExpression: "*/15 * * * *", TimeoutSeconds: 600},

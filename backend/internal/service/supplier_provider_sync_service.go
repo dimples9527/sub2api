@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -247,6 +248,7 @@ type SupplierProviderBatchSyncResult struct {
 	ProcessedCount int                          `json:"processed_count"`
 	SuccessCount   int                          `json:"success_count"`
 	FailedCount    int                          `json:"failed_count"`
+	SkippedCount   int                          `json:"skipped_count"`
 	Results        []SupplierProviderSyncResult `json:"results"`
 }
 
@@ -283,6 +285,7 @@ const (
 	SupplierSyncStatusSuccess    = "success"
 	SupplierSyncStatusPartial    = "partial"
 	SupplierSyncStatusFailed     = "failed"
+	SupplierSyncStatusSkipped    = "skipped"
 
 	SupplierSyncScopeAccounts = "accounts"
 	SupplierSyncScopeGroups   = "groups"
@@ -509,11 +512,27 @@ func (s *SupplierProviderSyncService) SyncAllEnabled(ctx context.Context, trigge
 	for _, provider := range providers {
 		item, err := s.SyncAll(ctx, provider.ID, trigger)
 		if err != nil {
-			item = SupplierProviderSyncResult{ProviderID: provider.ID, ProviderName: provider.Name, Scope: SupplierSyncScopeAll, Status: SupplierSyncStatusFailed, Message: err.Error(), StartedAt: time.Now(), FinishedAt: time.Now()}
+			now := time.Now()
+			if errors.Is(err, ErrSupplierProviderSyncConflict) {
+				item = SupplierProviderSyncResult{
+					ProviderID:   provider.ID,
+					ProviderName: provider.Name,
+					Scope:        SupplierSyncScopeAll,
+					Status:       SupplierSyncStatusSkipped,
+					Message:      "供应商同步正在执行，已跳过，将在下次自动任务重试",
+					StartedAt:    now,
+					FinishedAt:   now,
+				}
+			} else {
+				item = SupplierProviderSyncResult{ProviderID: provider.ID, ProviderName: provider.Name, Scope: SupplierSyncScopeAll, Status: SupplierSyncStatusFailed, Message: err.Error(), StartedAt: now, FinishedAt: now}
+			}
 		}
-		if item.Status == SupplierSyncStatusSuccess {
+		switch item.Status {
+		case SupplierSyncStatusSuccess:
 			result.SuccessCount++
-		} else {
+		case SupplierSyncStatusSkipped:
+			result.SkippedCount++
+		default:
 			result.FailedCount++
 		}
 		result.Results = append(result.Results, item)

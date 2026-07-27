@@ -597,6 +597,7 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain("if (trigger === 'scheduled') return '定时执行'")
     expect(supplierAutomationSource).toContain("if (trigger === 'manual') return '手动执行'")
     expect(supplierAutomationSource).toContain('statusText(run.status)')
+    expect(supplierAutomationSource).toContain("if (status === 'skipped') return '已跳过'")
   })
 })
 

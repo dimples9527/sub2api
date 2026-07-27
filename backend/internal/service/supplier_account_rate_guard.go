@@ -180,6 +180,9 @@ func (s *SupplierAccountRateGuardService) Run(ctx context.Context, runID int64, 
 		}
 		syncResult, syncErr := s.rateSyncer.SyncAccountRates(ctx, provider.ID, SupplierSyncTriggerScheduled)
 		if syncErr != nil {
+			if errors.Is(syncErr, ErrSupplierProviderSyncConflict) {
+				continue
+			}
 			result.RateSyncFailedProviders++
 			continue
 		}

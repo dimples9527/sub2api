@@ -208,7 +208,7 @@ func TestSupplierAccountRateGuardRemovalFailureKeepsObservedSchedulingState(t *t
 	require.True(t, *repo.logs[0].AfterSchedulable)
 }
 
-func TestSupplierAccountRateGuardSkipsConflictsAndContinuesAfterProviderFailure(t *testing.T) {
+func TestSupplierAccountRateGuardContinuesAfterProviderFailure(t *testing.T) {
 	providers := &supplierProviderRepoStub{items: []*SupplierProvider{{ID: 1, Name: "失败供应商", Enabled: true}, {ID: 2, Name: "正常供应商", Enabled: true}}}
 	syncer := &supplierAccountRateGuardSyncerStub{
 		results: map[int64]SupplierProviderRateSyncResult{2: {ProviderID: 2, Status: SupplierSyncStatusSuccess, UpdatedKeys: []string{"key-2"}}},
@@ -229,4 +229,18 @@ func TestSupplierAccountRateGuardSkipsConflictsAndContinuesAfterProviderFailure(
 	require.Len(t, repo.logs, 1)
 	require.Equal(t, SupplierAccountRateGuardLogResultSkipped, repo.logs[0].Result)
 	require.Equal(t, SupplierAccountRateGuardLogStatusHandled, repo.logs[0].Status)
+}
+
+func TestSupplierAccountRateGuardDoesNotCountSyncConflictAsFailure(t *testing.T) {
+	providers := &supplierProviderRepoStub{items: []*SupplierProvider{{ID: 1, Name: "正在同步的供应商", Enabled: true}}}
+	syncer := &supplierAccountRateGuardSyncerStub{
+		errs: map[int64]error{1: ErrSupplierProviderSyncConflict},
+	}
+	guard := NewSupplierAccountRateGuardService(providers, syncer, &supplierAccountRateGuardRepoStub{}, &accountRateGuardRemoverStub{})
+
+	result, err := guard.Run(context.Background(), 102, SupplierAccountRateGuardModeExecute, time.Now())
+
+	require.NoError(t, err)
+	require.Equal(t, 1, result.CheckedProviders)
+	require.Zero(t, result.RateSyncFailedProviders)
 }

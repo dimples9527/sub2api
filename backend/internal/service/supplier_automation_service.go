@@ -196,6 +196,9 @@ const (
 	SupplierAutomationStatusSuccess = "success"
 	SupplierAutomationStatusPartial = "partial"
 	SupplierAutomationStatusFailed  = "failed"
+
+	supplierAutomationUpstreamFetchLock              = "supplier_upstream_fetch"
+	supplierAutomationUpstreamFetchLockRetryInterval = time.Second
 )
 
 func supplierAutomationConfigJSON(config SupplierAutomationConfig) string {
@@ -330,8 +333,13 @@ func (s *SupplierAutomationService) RunWithMode(ctx context.Context, taskCode, t
 		return SupplierAutomationRun{}, ErrSupplierProviderInvalid
 	}
 	owner := uuid.NewString()
+	taskLockTTL := time.Duration(task.TimeoutSeconds+60) * time.Second
+	if supplierAutomationTaskRequiresUpstreamFetchLock(task.TaskCode) {
+		// 同类任务锁需覆盖等待共享锁和实际执行两个阶段，避免等待期间锁过期导致同任务重叠。
+		taskLockTTL += time.Duration(task.TimeoutSeconds) * time.Second
+	}
 	if s.lock != nil {
-		acquired, err := s.lock.TryAcquireAutomationLock(ctx, task.TaskCode, owner, time.Duration(task.TimeoutSeconds+60)*time.Second)
+		acquired, err := s.lock.TryAcquireAutomationLock(ctx, task.TaskCode, owner, taskLockTTL)
 		if err != nil {
 			return SupplierAutomationRun{}, err
 		}
@@ -340,6 +348,16 @@ func (s *SupplierAutomationService) RunWithMode(ctx context.Context, taskCode, t
 		}
 		defer func() { _ = s.lock.ReleaseAutomationLock(context.Background(), task.TaskCode, owner) }()
 	}
+	if s.lock != nil && supplierAutomationTaskRequiresUpstreamFetchLock(task.TaskCode) {
+		waitCtx, waitCancel := context.WithTimeout(ctx, time.Duration(task.TimeoutSeconds)*time.Second)
+		releaseUpstreamFetchLock, err := s.acquireUpstreamFetchLock(waitCtx, owner, time.Duration(task.TimeoutSeconds+60)*time.Second)
+		waitCancel()
+		if err != nil {
+			return SupplierAutomationRun{}, err
+		}
+		defer releaseUpstreamFetchLock()
+	}
+
 	runCtx := ctx
 	cancel := func() {}
 	if task.TimeoutSeconds > 0 {
@@ -379,6 +397,40 @@ func (s *SupplierAutomationService) RunWithMode(ctx context.Context, taskCode, t
 	return run, execErr
 }
 
+// supplierAutomationTaskRequiresUpstreamFetchLock 标记会读取上游供应商数据的自动化任务。
+func supplierAutomationTaskRequiresUpstreamFetchLock(taskCode string) bool {
+	switch taskCode {
+	case SupplierAutomationTaskSync, SupplierAutomationTaskAccountRateGuard:
+		return true
+	default:
+		return false
+	}
+}
+
+// acquireUpstreamFetchLock 让供应商数据同步和账号倍率守护串行拉取上游数据。
+func (s *SupplierAutomationService) acquireUpstreamFetchLock(ctx context.Context, owner string, ttl time.Duration) (func(), error) {
+	for {
+		acquired, err := s.lock.TryAcquireAutomationLock(ctx, supplierAutomationUpstreamFetchLock, owner, ttl)
+		if err != nil {
+			return nil, fmt.Errorf("获取供应商上游拉取协调锁: %w", err)
+		}
+		if acquired {
+			return func() {
+				_ = s.lock.ReleaseAutomationLock(context.Background(), supplierAutomationUpstreamFetchLock, owner)
+			}, nil
+		}
+
+		timer := time.NewTimer(supplierAutomationUpstreamFetchLockRetryInterval)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return nil, fmt.Errorf("等待供应商上游拉取任务完成: %w", ctx.Err())
+		case <-timer.C:
+		}
+	}
+}
 func (s *SupplierAutomationService) executeTask(ctx context.Context, task *SupplierAutomationTask, run *SupplierAutomationRun, mode string) error {
 	switch task.TaskCode {
 	case SupplierAutomationTaskSync:
@@ -549,7 +601,7 @@ func supplierAutomationBatchFailureMessage(result SupplierProviderBatchSyncResul
 	details := make([]string, 0, maxDetails)
 	remaining := 0
 	for _, item := range result.Results {
-		if item.Status == SupplierSyncStatusSuccess {
+		if item.Status == SupplierSyncStatusSuccess || item.Status == SupplierSyncStatusSkipped {
 			continue
 		}
 		itemDetails := supplierProviderSyncFailureDetails(item)

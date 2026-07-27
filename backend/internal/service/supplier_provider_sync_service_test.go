@@ -177,8 +177,9 @@ func (c *supplierRemoteClientStub) TestEndpoint(_ context.Context, _ *SupplierPr
 }
 
 type supplierSyncLockStub struct {
-	acquired bool
-	released int
+	acquired           bool
+	acquiredByProvider map[int64]bool
+	released           int
 }
 
 type supplierGroupAutoMatcherStub struct {
@@ -191,7 +192,10 @@ func (s *supplierGroupAutoMatcherStub) AutoMatch(_ context.Context, providerID i
 	return SupplierGroupAutoMatchResult{ProviderID: providerID}, s.err
 }
 
-func (l *supplierSyncLockStub) TryAcquireSyncLock(context.Context, int64, string, time.Duration) (bool, error) {
+func (l *supplierSyncLockStub) TryAcquireSyncLock(_ context.Context, providerID int64, _ string, _ time.Duration) (bool, error) {
+	if l.acquiredByProvider != nil {
+		return l.acquiredByProvider[providerID], nil
+	}
 	return l.acquired, nil
 }
 func (l *supplierSyncLockStub) ReleaseSyncLock(context.Context, int64, string) error {
@@ -405,6 +409,32 @@ func TestSupplierProviderSyncServiceSyncAllEnabledContinuesAfterProviderFailure(
 	require.Equal(t, 2, result.SuccessCount)
 	require.Equal(t, 0, result.FailedCount)
 	require.Len(t, result.Results, 2)
+}
+
+func TestSupplierProviderSyncServiceSyncAllEnabledSkipsLockedProvider(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{
+		{ID: 1, Name: "正在同步的供应商", ProviderType: "sub2api", Enabled: true, PasswordEncrypted: "secret"},
+		{ID: 2, Name: "待同步的供应商", ProviderType: "newapi", Enabled: true, PasswordEncrypted: "secret"},
+	}}
+	service := NewSupplierProviderSyncService(
+		providerRepo,
+		&supplierProviderDataRepoStub{},
+		&supplierRemoteClientStub{},
+		supplierEncryptorStub{},
+		&supplierSyncLockStub{acquiredByProvider: map[int64]bool{1: false, 2: true}},
+	)
+
+	result, err := service.SyncAllEnabled(context.Background(), SupplierSyncTriggerScheduled)
+
+	require.NoError(t, err)
+	require.Equal(t, 2, result.ProcessedCount)
+	require.Equal(t, 1, result.SuccessCount)
+	require.Zero(t, result.FailedCount)
+	require.Equal(t, 1, result.SkippedCount)
+	require.Len(t, result.Results, 2)
+	require.Equal(t, SupplierSyncStatusSkipped, result.Results[0].Status)
+	require.Contains(t, result.Results[0].Message, "下次")
+	require.Equal(t, SupplierSyncStatusSuccess, result.Results[1].Status)
 }
 
 func TestSupplierProviderSyncServiceRejectsConcurrentProviderSync(t *testing.T) {

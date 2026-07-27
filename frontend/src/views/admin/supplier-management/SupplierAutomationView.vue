@@ -1922,6 +1922,7 @@ function statusText(status?: string): string {
   if (status === 'failed') return '失败'
   if (status === 'partial') return '部分成功'
   if (status === 'success') return '成功'
+  if (status === 'skipped') return '已跳过'
   if (status === 'running') return '运行中'
   return '未运行'
 }
