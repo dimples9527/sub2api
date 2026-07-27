@@ -1865,7 +1865,7 @@ function errorMessage(err: unknown, fallback: string): string {
 .sp-provider-shortcuts {
   display: flex;
   min-width: 10rem;
-  max-width: min(44vw, 38rem);
+  max-width: min(58vw, 52rem);
   flex: 1 1 auto;
   align-items: center;
   justify-content: center;

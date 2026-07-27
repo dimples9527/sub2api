@@ -1293,6 +1293,10 @@ describe('supplier local data views component usage', () => {
     expect(groupsSource).toContain('@click="selectProviderShortcut(option.value)"')
   })
 
+  it('widens desktop supplier quick filters in the group table header', () => {
+    expect(groupsSource).toContain('max-width: min(58vw, 52rem);')
+  })
+
   it('supports ignoring automatic rate guard for a selected supplier group', () => {
     expect(groupsSource).toContain('updateSupplierGroupRateGuardIgnore')
     expect(groupsSource).toContain('toggleRateGuardIgnored')
