@@ -741,7 +741,12 @@
                     />
                     <span class="sp-health-guard-account-choice-copy">
                       <strong>{{ mapping.localAccountName }}</strong>
-                      <span v-if="mapping.available">{{ platformLabel(mapping.platform) }} · 本地 #{{ mapping.localAccountID }}</span>
+                      <span v-if="mapping.available" class="sp-health-guard-account-meta">
+                        <span :class="['sp-health-guard-account-platform', platformBadgeClass(mapping.platform)]">
+                          {{ platformLabel(mapping.platform) }}
+                        </span>
+                        <span>本地 #{{ mapping.localAccountID }}</span>
+                      </span>
                       <span v-else class="sp-health-guard-unavailable">当前不可用 · 本地 #{{ mapping.localAccountID }}</span>
                       <small>{{ healthGuardSourceSummary(mapping) }}</small>
                     </span>
@@ -848,7 +853,7 @@ import {
   type SupplierAutomationTask,
 } from '@/api/admin/supplierAutomation'
 import type { ClaudeModel } from '@/types'
-import { platformLabel } from '@/utils/platformColors'
+import { platformBadgeClass, platformLabel } from '@/utils/platformColors'
 
 const tasks = ref<SupplierAutomationTask[]>([])
 const runs = ref<SupplierAutomationRun[]>([])
@@ -3341,6 +3346,7 @@ function showToast(message: string) {
 
 .sp-health-guard-account-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -3349,7 +3355,7 @@ function showToast(message: string) {
 
 .sp-health-guard-account-filters {
   display: grid;
-  flex: 1 1 auto;
+  flex: 1 1 640px;
   grid-template-columns: minmax(130px, 0.3fr) minmax(160px, 0.42fr) minmax(220px, 1fr) auto;
   gap: 10px;
   min-width: 0;
@@ -3502,7 +3508,7 @@ function showToast(message: string) {
   font-size: 13px;
 }
 
-.sp-health-guard-account-choice-copy span,
+.sp-health-guard-account-choice-copy span:not(.sp-health-guard-account-platform),
 .sp-health-guard-account-choice-copy small,
 .sp-health-guard-account-model-editor small {
   color: var(--sp-muted);
@@ -3513,6 +3519,25 @@ function showToast(message: string) {
 .sp-health-guard-account-model-editor small {
   overflow-wrap: anywhere;
   line-height: 1.45;
+}
+
+.sp-health-guard-account-meta {
+  display: inline-flex !important;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.sp-health-guard-account-platform {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  border-width: 1px;
+  border-radius: 5px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
 }
 
 .sp-health-guard-model-status {

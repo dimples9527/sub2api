@@ -433,6 +433,15 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).not.toContain('sp-health-guard-account-columns')
   })
 
+  it('keeps the selected-account filter from overlapping its result and colors account platforms', () => {
+    expect(supplierAutomationSource).toContain("import { platformBadgeClass, platformLabel } from '@/utils/platformColors'")
+    expect(supplierAutomationSource).toContain(":class=\"['sp-health-guard-account-platform', platformBadgeClass(mapping.platform)]\"")
+    expect(supplierAutomationSource).toContain('.sp-health-guard-account-toolbar')
+    expect(supplierAutomationSource).toContain('flex-wrap: wrap')
+    expect(supplierAutomationSource).toContain('flex: 1 1 640px')
+    expect(supplierAutomationSource).toContain('span:not(.sp-health-guard-account-platform)')
+  })
+
   it('applies the automation dialog palette to the teleported health guard workspace', () => {
     expect(supplierAutomationSource).toContain(':global(.modal-content:has(.sp-health-guard-account-dialog))')
     expect(supplierAutomationSource).toContain(':global(.dark .modal-content:has(.sp-health-guard-account-dialog))')
