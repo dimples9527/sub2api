@@ -71,6 +71,10 @@ func (l *supplierAutomationLockStub) ReleaseAutomationLock(context.Context, stri
 	l.released++
 	return nil
 }
+func (l *supplierAutomationLockStub) ForceReleaseAutomationLock(context.Context, string) error {
+	l.released++
+	return nil
+}
 
 type supplierAutomationSyncStub struct {
 	called int
@@ -681,7 +685,9 @@ func TestSupplierAutomationSchedulerRejectsEnabledEmptyAccountHealthGuardWhiteli
 	service := NewSupplierAutomationService(repo, &supplierAutomationLockStub{acquired: true}, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
 	scheduler := NewSupplierAutomationScheduler(repo, service)
 
-	require.EqualError(t, scheduler.Reload(context.Background()), "请至少选择一个需要检查的账号")
+	// 启用但白名单为空时只跳过该任务，不再阻断整个调度器加载。
+	require.NoError(t, scheduler.Reload(context.Background()))
+	scheduler.Stop()
 }
 
 func TestSupplierAutomationServiceRejectsInvalidAccountHealthGuardConfig(t *testing.T) {
@@ -729,3 +735,58 @@ func validSupplierAccountHealthGuardAutomationConfig() SupplierAutomationConfig 
 		AccountHealthGuardPlatformLatencyMs:        map[string]int64{},
 	}
 }
+
+func TestSupplierAutomationServiceRecordsConflictWhenLockBusy(t *testing.T) {
+	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
+		SupplierAutomationTaskAccountHealthGuard: {
+			TaskCode: SupplierAutomationTaskAccountHealthGuard, Enabled: true,
+			CronExpression: "@every 120s", TimeoutSeconds: 1800,
+			Config: validSupplierAccountHealthGuardAutomationConfig(),
+		},
+	}}
+	service := NewSupplierAutomationService(repo, &supplierAutomationLockStub{acquired: false}, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
+	service.SetAccountHealthGuardService(&supplierAutomationAccountHealthGuardStub{})
+
+	run, err := service.Run(context.Background(), SupplierAutomationTaskAccountHealthGuard, SupplierSyncTriggerScheduled)
+
+	require.Error(t, err)
+	require.Equal(t, ErrSupplierProviderSyncConflict, err)
+	require.Len(t, repo.runs, 2)
+	require.Equal(t, SupplierAutomationStatusFailed, repo.runs[1].Status)
+	require.Equal(t, "任务锁占用中，跳过本次执行", repo.runs[1].Message)
+	require.Equal(t, SupplierSyncTriggerScheduled, run.TriggerSource)
+}
+
+func TestSupplierAutomationSchedulerSkipsInvalidTaskWithoutBlockingOthers(t *testing.T) {
+	badConfig := validSupplierAccountHealthGuardAutomationConfig()
+	badConfig.AccountHealthGuardAccountIDs = nil
+	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
+		SupplierAutomationTaskAccountHealthGuard: {
+			TaskCode: SupplierAutomationTaskAccountHealthGuard, Enabled: true,
+			CronExpression: "@every 1s", TimeoutSeconds: 1800, Config: badConfig,
+		},
+		SupplierAutomationTaskCleanup: {
+			TaskCode: SupplierAutomationTaskCleanup, Enabled: true,
+			CronExpression: "@every 1s", TimeoutSeconds: 5,
+			Config: SupplierAutomationConfig{
+				AutomationRunRetentionDays: 1, SyncRunRetentionDays: 1, MetricRetentionDays: 1,
+				DailyStatRetentionDays: 1, InactiveAccountDays: 1, InactiveGroupDays: 1,
+			},
+		},
+	}}
+	service := NewSupplierAutomationService(repo, &supplierAutomationLockStub{acquired: true}, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
+	scheduler := NewSupplierAutomationScheduler(repo, service)
+
+	require.NoError(t, scheduler.Reload(context.Background()))
+	defer scheduler.Stop()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(repo.runs) > 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	require.Greater(t, len(repo.runs), 0, "valid cleanup task should still be scheduled when health guard config is invalid")
+}
+

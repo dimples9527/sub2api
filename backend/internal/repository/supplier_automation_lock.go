@@ -33,6 +33,10 @@ func (l *supplierAutomationRedisLock) ReleaseAutomationLock(ctx context.Context,
 	return supplierAutomationReleaseScript.Run(ctx, l.rdb, []string{supplierAutomationLockKey(taskCode)}, owner).Err()
 }
 
+func (l *supplierAutomationRedisLock) ForceReleaseAutomationLock(ctx context.Context, taskCode string) error {
+	return l.rdb.Del(ctx, supplierAutomationLockKey(taskCode)).Err()
+}
+
 func supplierAutomationLockKey(taskCode string) string {
 	return supplierAutomationLockKeyPrefix + strings.TrimSpace(taskCode)
 }

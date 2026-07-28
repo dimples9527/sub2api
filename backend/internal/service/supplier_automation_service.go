@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -164,6 +165,8 @@ type SupplierAutomationRepository interface {
 type SupplierAutomationLock interface {
 	TryAcquireAutomationLock(ctx context.Context, taskCode, owner string, ttl time.Duration) (bool, error)
 	ReleaseAutomationLock(ctx context.Context, taskCode, owner string) error
+	// ForceReleaseAutomationLock 用于服务启动恢复：清理可能因进程中断残留的任务锁。
+	ForceReleaseAutomationLock(ctx context.Context, taskCode string) error
 }
 
 type SupplierAutomationSchedulerReloader interface {
@@ -344,7 +347,25 @@ func (s *SupplierAutomationService) RunWithMode(ctx context.Context, taskCode, t
 			return SupplierAutomationRun{}, err
 		}
 		if !acquired {
-			return SupplierAutomationRun{}, ErrSupplierProviderSyncConflict
+			// 定时触发冲突时写一条可见记录，避免“配置了间隔却完全没有执行痕迹”。
+			run := SupplierAutomationRun{
+				TaskCode:      task.TaskCode,
+				TriggerSource: normalizeSupplierSyncTrigger(trigger),
+				Status:        SupplierAutomationStatusFailed,
+				Message:       "任务锁占用中，跳过本次执行",
+				StartedAt:     time.Now(),
+				CreatedAt:     time.Now(),
+			}
+			finishedAt := time.Now()
+			run.FinishedAt = &finishedAt
+			if createErr := s.repo.CreateRun(ctx, &run); createErr == nil {
+				_ = s.repo.FinishRun(ctx, &run)
+				task.LastStatus = run.Status
+				task.LastMessage = run.Message
+				task.LastRunAt = &finishedAt
+				_ = s.repo.UpdateTask(ctx, task)
+			}
+			return run, ErrSupplierProviderSyncConflict
 		}
 		defer func() { _ = s.lock.ReleaseAutomationLock(context.Background(), task.TaskCode, owner) }()
 	}
@@ -709,8 +730,28 @@ func (s *SupplierAutomationScheduler) Start() {
 	}
 	s.started = true
 	s.mu.Unlock()
-	_ = s.repo.RecoverRunning(context.Background(), "服务重启后恢复任务状态")
-	_ = s.Reload(context.Background())
+	ctx := context.Background()
+	if err := s.repo.RecoverRunning(ctx, "服务重启后恢复任务状态"); err != nil {
+		slog.Error("supplier_automation.recover_running_failed", "error", err)
+	}
+	// 进程异常退出时 Redis 锁可能残留；启动时强制清理，避免定时触发长期静默冲突。
+	if s.service != nil && s.service.lock != nil {
+		for _, taskCode := range []string{
+			SupplierAutomationTaskSync,
+			SupplierAutomationTaskCleanup,
+			SupplierAutomationTaskRateGuard,
+			SupplierAutomationTaskAccountRateGuard,
+			SupplierAutomationTaskAccountHealthGuard,
+			supplierAutomationUpstreamFetchLock,
+		} {
+			if err := s.service.lock.ForceReleaseAutomationLock(ctx, taskCode); err != nil {
+				slog.Warn("supplier_automation.force_release_lock_failed", "task_code", taskCode, "error", err)
+			}
+		}
+	}
+	if err := s.Reload(ctx); err != nil {
+		slog.Error("supplier_automation.scheduler_start_reload_failed", "error", err)
+	}
 }
 
 func (s *SupplierAutomationScheduler) Stop() {
@@ -739,16 +780,20 @@ func (s *SupplierAutomationScheduler) Reload(ctx context.Context) error {
 	now := time.Now().In(loc)
 	for _, task := range tasks {
 		if err := validateSupplierAutomationTask(task); err != nil {
-			return err
+			// 单个任务配置异常不应拖垮全部自动化调度。
+			slog.Error("supplier_automation.task_invalid", "task_code", task.TaskCode, "error", err)
+			continue
 		}
 		if task.Enabled {
 			if err := validateSupplierAccountHealthGuardSelection(task); err != nil {
-				return err
+				slog.Error("supplier_automation.task_selection_invalid", "task_code", task.TaskCode, "error", err)
+				continue
 			}
 		}
 		schedule, err := supplierAutomationCronParser.Parse(task.CronExpression)
 		if err != nil {
-			return err
+			slog.Error("supplier_automation.task_cron_invalid", "task_code", task.TaskCode, "error", err)
+			continue
 		}
 		next := schedule.Next(now)
 		task.NextRunAt = &next
@@ -758,9 +803,12 @@ func (s *SupplierAutomationScheduler) Reload(ctx context.Context) error {
 		if task.Enabled {
 			taskCode := task.TaskCode
 			if _, err := nextCron.AddFunc(task.CronExpression, func() {
-				_, _ = s.service.Run(context.Background(), taskCode, SupplierSyncTriggerScheduled)
+				if _, err := s.service.Run(context.Background(), taskCode, SupplierSyncTriggerScheduled); err != nil {
+					slog.Warn("supplier_automation.scheduled_run_failed", "task_code", taskCode, "error", err)
+				}
 			}); err != nil {
-				return err
+				slog.Error("supplier_automation.add_cron_failed", "task_code", task.TaskCode, "error", err)
+				continue
 			}
 		}
 	}

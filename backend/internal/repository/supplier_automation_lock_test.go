@@ -32,3 +32,22 @@ func TestSupplierAutomationLockReleasesOnlyOwner(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, acquired)
 }
+
+
+func TestSupplierAutomationLockForceRelease(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	lock := NewSupplierAutomationLock(redis.NewClient(&redis.Options{Addr: mr.Addr()}))
+	ctx := context.Background()
+
+	acquired, err := lock.TryAcquireAutomationLock(ctx, "supplier_account_health_guard", "owner-a", time.Minute)
+	require.NoError(t, err)
+	require.True(t, acquired)
+
+	require.NoError(t, lock.ForceReleaseAutomationLock(ctx, "supplier_account_health_guard"))
+	acquired, err = lock.TryAcquireAutomationLock(ctx, "supplier_account_health_guard", "owner-b", time.Minute)
+	require.NoError(t, err)
+	require.True(t, acquired)
+}
