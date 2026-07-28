@@ -50,12 +50,17 @@ func supplierProviderSyncHandlerResult(scope string) service.SupplierProviderSyn
 }
 
 type supplierProviderSyncHandlerDataStub struct {
-	mappedGroupID      int64
-	mappedLocalGroupID *int64
-	accountListParams  service.SupplierProviderDataListParams
-	groupListParams    service.SupplierProviderDataListParams
-	healthTrendParams  service.SupplierProviderGroupHealthTrendParams
-	healthTrends       []service.SupplierProviderGroupHealthTrend
+	mappedGroupID           int64
+	mappedLocalGroupID      *int64
+	accountListParams       service.SupplierProviderDataListParams
+	groupListParams         service.SupplierProviderDataListParams
+	healthTrendParams       service.SupplierProviderGroupHealthTrendParams
+	healthTrends            []service.SupplierProviderGroupHealthTrend
+	uniqueLocalAccount      bool
+	effectivePlatform       string
+	platformOverrideAccount int64
+	platformOverride        string
+	clearedOverrideAccount  int64
 }
 
 type supplierProviderGroupMatcherHandlerStub struct {
@@ -118,6 +123,25 @@ func (s *supplierProviderSyncHandlerDataStub) ListGroupHealthTrends(_ context.Co
 	s.healthTrendParams = params
 	return s.healthTrends, nil
 }
+func (s *supplierProviderSyncHandlerDataStub) IsUniqueMatchedLocalAccount(context.Context, int64) (bool, error) {
+	return s.uniqueLocalAccount, nil
+}
+
+func (s *supplierProviderSyncHandlerDataStub) GetLocalAccountEffectivePlatform(context.Context, int64) (string, error) {
+	return s.effectivePlatform, nil
+}
+
+func (s *supplierProviderSyncHandlerDataStub) SetLocalAccountPlatformOverride(_ context.Context, localAccountID int64, platform string) error {
+	s.platformOverrideAccount = localAccountID
+	s.platformOverride = platform
+	return nil
+}
+
+func (s *supplierProviderSyncHandlerDataStub) ClearLocalAccountPlatformOverride(_ context.Context, localAccountID int64) error {
+	s.clearedOverrideAccount = localAccountID
+	return nil
+}
+
 func (s *supplierProviderSyncHandlerDataStub) UpdateGroupMapping(_ context.Context, groupID int64, localGroupID *int64) error {
 	s.mappedGroupID = groupID
 	s.mappedLocalGroupID = localGroupID
@@ -376,4 +400,58 @@ func TestSupplierProviderSyncHandlerGroupRateGuardIgnoreUpdatesPolicy(t *testing
 		require.Equal(t, ignored, guard.ignored)
 		require.Contains(t, rec.Body.String(), `"ignored":`)
 	}
+}
+
+func TestSupplierProviderSyncHandlerUpdatesLocalAccountBusinessPlatform(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dataStub := &supplierProviderSyncHandlerDataStub{uniqueLocalAccount: true}
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, dataStub)
+	router := gin.New()
+	router.PUT("/accounts/:local_account_id/platform-override", handler.SetLocalAccountPlatformOverride)
+	router.DELETE("/accounts/:local_account_id/platform-override", handler.ClearLocalAccountPlatformOverride)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/accounts/101/platform-override", bytes.NewBufferString(`{"platform":" GrOk "}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(101), dataStub.platformOverrideAccount)
+	require.Equal(t, "grok", dataStub.platformOverride)
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodDelete, "/accounts/101/platform-override", nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(101), dataStub.clearedOverrideAccount)
+}
+
+func TestSupplierProviderSyncHandlerRejectsPlatformOverrideForNonSupplierAccount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dataStub := &supplierProviderSyncHandlerDataStub{}
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, dataStub)
+	router := gin.New()
+	router.PUT("/accounts/:local_account_id/platform-override", handler.SetLocalAccountPlatformOverride)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/accounts/101/platform-override", bytes.NewBufferString(`{"platform":"grok"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Zero(t, dataStub.platformOverrideAccount)
+}
+
+func TestSupplierProviderSyncHandlerListsHealthGuardModelsByBusinessPlatform(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dataStub := &supplierProviderSyncHandlerDataStub{uniqueLocalAccount: true, effectivePlatform: service.PlatformGrok}
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, dataStub)
+	router := gin.New()
+	router.GET("/accounts/:local_account_id/health-guard-models", handler.ListLocalAccountHealthGuardModels)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/accounts/101/health-guard-models", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"grok-4.5"`)
+	require.NotContains(t, rec.Body.String(), `"gpt-5.6-sol"`)
 }

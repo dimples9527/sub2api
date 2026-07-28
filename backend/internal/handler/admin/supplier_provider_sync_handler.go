@@ -7,8 +7,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -24,6 +29,10 @@ type SupplierProviderSyncServicePort interface {
 
 type SupplierProviderDataRepositoryPort interface {
 	ListAccounts(ctx context.Context, params service.SupplierProviderDataListParams) (service.SupplierProviderAccountListResult, error)
+	IsUniqueMatchedLocalAccount(ctx context.Context, localAccountID int64) (bool, error)
+	GetLocalAccountEffectivePlatform(ctx context.Context, localAccountID int64) (string, error)
+	SetLocalAccountPlatformOverride(ctx context.Context, localAccountID int64, platform string) error
+	ClearLocalAccountPlatformOverride(ctx context.Context, localAccountID int64) error
 	ListGroups(ctx context.Context, params service.SupplierProviderDataListParams) (service.SupplierProviderGroupListResult, error)
 	ListGroupHealthTrends(ctx context.Context, params service.SupplierProviderGroupHealthTrendParams) ([]service.SupplierProviderGroupHealthTrend, error)
 	UpdateGroupMapping(ctx context.Context, groupID int64, localGroupID *int64) error
@@ -146,6 +155,132 @@ func (h *SupplierProviderSyncHandler) ListAccounts(c *gin.Context) {
 		return
 	}
 	response.Success(c, result)
+}
+
+type supplierLocalAccountPlatformOverrideRequest struct {
+	Platform string `json:"platform"`
+}
+
+type supplierLocalAccountHealthGuardModel struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name"`
+}
+
+func (h *SupplierProviderSyncHandler) ListLocalAccountHealthGuardModels(c *gin.Context) {
+	localAccountID, ok := parseSupplierLocalAccountID(c)
+	if !ok {
+		return
+	}
+	matched, err := h.dataRepo.IsUniqueMatchedLocalAccount(c.Request.Context(), localAccountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if !matched {
+		response.ErrorFrom(c, badRequest("本地账号不属于供应商模块的唯一匹配账号"))
+		return
+	}
+	platform, err := h.dataRepo.GetLocalAccountEffectivePlatform(c.Request.Context(), localAccountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	models, supported := supplierLocalAccountHealthGuardModels(platform)
+	if !supported {
+		response.ErrorFrom(c, badRequest("业务平台无效"))
+		return
+	}
+	response.Success(c, models)
+}
+
+func supplierLocalAccountHealthGuardModels(platform string) ([]supplierLocalAccountHealthGuardModel, bool) {
+	models := make([]supplierLocalAccountHealthGuardModel, 0)
+	switch strings.ToLower(strings.TrimSpace(platform)) {
+	case service.PlatformOpenAI:
+		for _, model := range openai.DefaultModels {
+			models = append(models, supplierLocalAccountHealthGuardModel{ID: model.ID, DisplayName: model.DisplayName})
+		}
+	case service.PlatformAnthropic:
+		for _, model := range claude.DefaultModels {
+			models = append(models, supplierLocalAccountHealthGuardModel{ID: model.ID, DisplayName: model.DisplayName})
+		}
+	case service.PlatformGemini:
+		for _, model := range geminicli.DefaultModels {
+			models = append(models, supplierLocalAccountHealthGuardModel{ID: model.ID, DisplayName: model.DisplayName})
+		}
+	case service.PlatformAntigravity:
+		for _, model := range antigravity.DefaultModels() {
+			models = append(models, supplierLocalAccountHealthGuardModel{ID: model.ID, DisplayName: model.DisplayName})
+		}
+	case service.PlatformGrok:
+		for _, model := range xai.DefaultModels() {
+			models = append(models, supplierLocalAccountHealthGuardModel{ID: model.ID, DisplayName: model.DisplayName})
+		}
+	default:
+		return nil, false
+	}
+	return models, true
+}
+
+func (h *SupplierProviderSyncHandler) SetLocalAccountPlatformOverride(c *gin.Context) {
+	localAccountID, ok := parseSupplierLocalAccountID(c)
+	if !ok {
+		return
+	}
+	var req supplierLocalAccountPlatformOverrideRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.ErrorFrom(c, badRequest("业务平台参数无效"))
+		return
+	}
+	platform := strings.ToLower(strings.TrimSpace(req.Platform))
+	if !service.IsAllowedQuotaPlatform(platform) {
+		response.ErrorFrom(c, badRequest("业务平台无效"))
+		return
+	}
+	matched, err := h.dataRepo.IsUniqueMatchedLocalAccount(c.Request.Context(), localAccountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if !matched {
+		response.ErrorFrom(c, badRequest("本地账号不属于供应商模块的唯一匹配账号"))
+		return
+	}
+	if err := h.dataRepo.SetLocalAccountPlatformOverride(c.Request.Context(), localAccountID, platform); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"local_account_id": localAccountID, "platform_override": platform})
+}
+
+func (h *SupplierProviderSyncHandler) ClearLocalAccountPlatformOverride(c *gin.Context) {
+	localAccountID, ok := parseSupplierLocalAccountID(c)
+	if !ok {
+		return
+	}
+	matched, err := h.dataRepo.IsUniqueMatchedLocalAccount(c.Request.Context(), localAccountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if !matched {
+		response.ErrorFrom(c, badRequest("本地账号不属于供应商模块的唯一匹配账号"))
+		return
+	}
+	if err := h.dataRepo.ClearLocalAccountPlatformOverride(c.Request.Context(), localAccountID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"local_account_id": localAccountID, "platform_override": ""})
+}
+
+func parseSupplierLocalAccountID(c *gin.Context) (int64, bool) {
+	localAccountID, err := strconv.ParseInt(strings.TrimSpace(c.Param("local_account_id")), 10, 64)
+	if err != nil || localAccountID <= 0 {
+		response.ErrorFrom(c, badRequest("本地账号 ID 无效"))
+		return 0, false
+	}
+	return localAccountID, true
 }
 
 func (h *SupplierProviderSyncHandler) ListGroups(c *gin.Context) {

@@ -76,6 +76,8 @@ export interface SupplierProviderAccount {
   local_account_id?: number
   local_account_name?: string
   local_account_platform?: string
+  platform_override?: string
+  effective_platform?: string
   local_account_priority?: number
   local_account_status?: string
   local_account_schedulable?: boolean
@@ -193,6 +195,40 @@ export async function listSupplierAccounts(params: SupplierProviderDataListParam
   const { data } = await apiClient.get<SupplierProviderAccountListResult>(
     '/admin/supplier-management/accounts',
     { params }
+  )
+  return data
+}
+
+export interface SupplierHealthGuardModel {
+  id: string
+  display_name: string
+}
+
+export async function setSupplierLocalAccountPlatformOverride(
+  localAccountID: number,
+  platform: string
+): Promise<{ local_account_id: number; platform_override: string }> {
+  const { data } = await apiClient.put<{ local_account_id: number; platform_override: string }>(
+    `/admin/supplier-management/accounts/${localAccountID}/platform-override`,
+    { platform }
+  )
+  return data
+}
+
+export async function clearSupplierLocalAccountPlatformOverride(
+  localAccountID: number
+): Promise<{ local_account_id: number; platform_override: string }> {
+  const { data } = await apiClient.delete<{ local_account_id: number; platform_override: string }>(
+    `/admin/supplier-management/accounts/${localAccountID}/platform-override`
+  )
+  return data
+}
+
+export async function getSupplierHealthGuardModels(
+  localAccountID: number
+): Promise<SupplierHealthGuardModel[]> {
+  const { data } = await apiClient.get<SupplierHealthGuardModel[]>(
+    `/admin/supplier-management/accounts/${localAccountID}/health-guard-models`
   )
   return data
 }
@@ -325,6 +361,9 @@ export const supplierProviderDataAPI = {
   syncProvider,
   testProviderEndpoint,
   listSupplierAccounts,
+  setSupplierLocalAccountPlatformOverride,
+  clearSupplierLocalAccountPlatformOverride,
+  getSupplierHealthGuardModels,
   startSupplierAccountBatchTest,
   getSupplierAccountBatchTestJob,
   cancelSupplierAccountBatchTestJob,

@@ -44,6 +44,8 @@ type SupplierProviderAccount struct {
 	LocalAccountID             *int64                                `json:"local_account_id,omitempty"`
 	LocalAccountName           string                                `json:"local_account_name,omitempty"`
 	LocalAccountPlatform       string                                `json:"local_account_platform,omitempty"`
+	PlatformOverride           string                                `json:"platform_override,omitempty"`
+	EffectivePlatform          string                                `json:"effective_platform,omitempty"`
 	LocalAccountPriority       *int                                  `json:"local_account_priority,omitempty"`
 	LocalAccountStatus         string                                `json:"local_account_status,omitempty"`
 	LocalAccountSchedulable    *bool                                 `json:"local_account_schedulable,omitempty"`
@@ -165,6 +167,11 @@ type SupplierCleanupCounts struct {
 
 type SupplierProviderDataRepository interface {
 	ListAccounts(ctx context.Context, params SupplierProviderDataListParams) (SupplierProviderAccountListResult, error)
+	IsUniqueMatchedLocalAccount(ctx context.Context, localAccountID int64) (bool, error)
+	GetLocalAccountEffectivePlatform(ctx context.Context, localAccountID int64) (string, error)
+	GetLocalAccountPlatformOverride(ctx context.Context, localAccountID int64) (string, error)
+	SetLocalAccountPlatformOverride(ctx context.Context, localAccountID int64, platform string) error
+	ClearLocalAccountPlatformOverride(ctx context.Context, localAccountID int64) error
 	ListGroups(ctx context.Context, params SupplierProviderDataListParams) (SupplierProviderGroupListResult, error)
 	ListGroupHealthTrends(ctx context.Context, params SupplierProviderGroupHealthTrendParams) ([]SupplierProviderGroupHealthTrend, error)
 	ListGroupsForAutoMatch(ctx context.Context, providerID int64) ([]SupplierProviderGroup, error)

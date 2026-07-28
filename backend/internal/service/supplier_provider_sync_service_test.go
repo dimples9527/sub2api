@@ -34,6 +34,22 @@ func (r *supplierProviderDataRepoStub) ListGroups(context.Context, SupplierProvi
 func (r *supplierProviderDataRepoStub) ListGroupHealthTrends(context.Context, SupplierProviderGroupHealthTrendParams) ([]SupplierProviderGroupHealthTrend, error) {
 	return []SupplierProviderGroupHealthTrend{}, nil
 }
+func (*supplierProviderDataRepoStub) IsUniqueMatchedLocalAccount(context.Context, int64) (bool, error) {
+	return false, nil
+}
+func (*supplierProviderDataRepoStub) GetLocalAccountEffectivePlatform(context.Context, int64) (string, error) {
+	return "", nil
+}
+func (*supplierProviderDataRepoStub) GetLocalAccountPlatformOverride(context.Context, int64) (string, error) {
+	return "", nil
+}
+func (*supplierProviderDataRepoStub) SetLocalAccountPlatformOverride(context.Context, int64, string) error {
+	return nil
+}
+func (*supplierProviderDataRepoStub) ClearLocalAccountPlatformOverride(context.Context, int64) error {
+	return nil
+}
+
 func (r *supplierProviderDataRepoStub) ListGroupsForAutoMatch(context.Context, int64) ([]SupplierProviderGroup, error) {
 	return []SupplierProviderGroup{}, nil
 }

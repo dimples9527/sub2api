@@ -438,7 +438,7 @@ describe('supplier local data views component usage', () => {
     expect(providerCells[0].text()).not.toContain('OpenAI')
     expect(providerCells[4].text()).not.toContain('Anthropic')
     expect(wrapper.get('.runtime-cell-rate_multiplier[data-row-index="0"] .sp-account-rate').classes())
-      .toContain('text-emerald-600')
+      .toContain('text-orange-600')
     expect(wrapper.get('.runtime-cell-rate_multiplier[data-row-index="4"] .sp-account-rate').classes())
       .toContain('text-orange-600')
 
@@ -816,15 +816,17 @@ describe('supplier local data views component usage', () => {
     expect(accountsSource).not.toContain('<template #cell-platform')
   })
 
-  it('falls back to the uniquely matched local-account platform and keeps the upstream platform authoritative', async () => {
+  it('uses the supplier business-platform override before the matched local account platform', async () => {
     const wrapper = await mountSupplierAccounts()
 
-    expect(wrapper.get('.runtime-cell-upstream_account_key[data-row-index="0"]').text()).toContain('OpenAI')
-    expect(wrapper.get('.runtime-cell-upstream_account_key[data-row-index="0"]').text()).not.toContain('Anthropic')
+    expect(wrapper.get('.runtime-cell-upstream_account_key[data-row-index="0"]').text()).toContain('Anthropic')
+    expect(wrapper.get('.runtime-cell-upstream_account_key[data-row-index="0"]').text()).not.toContain('OpenAI')
     expect(wrapper.get('.runtime-cell-upstream_account_key[data-row-index="4"]').text()).toContain('Anthropic')
     expect(accountsSource).toContain('function effectivePlatform(account: SupplierProviderAccount): string')
-    expect(accountsSource).toContain('normalizePlatform(account.platform)')
+    expect(accountsSource).toContain('normalizePlatform(account.effective_platform)')
     expect(accountsSource).toContain('normalizePlatform(account.local_account_platform)')
+    expect(supplierProviderDataSource).toContain('platform_override?: string')
+    expect(supplierProviderDataSource).toContain('effective_platform?: string')
     expect(supplierProviderDataSource).toContain('local_account_platform?: string')
 
     const view = wrapper.vm as unknown as {
@@ -840,12 +842,25 @@ describe('supplier local data views component usage', () => {
     })
 
     expect(view.batchTestTargets).toEqual(expect.arrayContaining([
-      expect.objectContaining({ accountID: 101, platform: 'openai' }),
+      expect.objectContaining({ accountID: 101, platform: 'anthropic' }),
       expect.objectContaining({ accountID: 105, platform: 'anthropic' }),
     ]))
     expect(view.batchTestTargets.some(target => target.platform === 'unknown')).toBe(false)
 
     wrapper.unmount()
+  })
+
+  it('provides a separate supplier-only business platform configuration action', () => {
+    expect(accountsSource).toContain('配置业务平台')
+    expect(accountsSource).toContain('@click.stop="openBusinessPlatformDialog(account)"')
+    expect(accountsSource).toContain('title="配置业务平台"')
+    expect(accountsSource).toContain('业务平台跟随接入平台')
+    expect(accountsSource).toContain('setSupplierLocalAccountPlatformOverride')
+    expect(accountsSource).toContain('clearSupplierLocalAccountPlatformOverride')
+    expect(accountsSource).toContain('openLocalAccountEditor(account)')
+    expect(supplierProviderDataSource).toContain('export async function setSupplierLocalAccountPlatformOverride')
+    expect(supplierProviderDataSource).toContain('export async function clearSupplierLocalAccountPlatformOverride')
+    expect(supplierProviderDataSource).toContain('`/admin/supplier-management/accounts/${localAccountID}/platform-override`')
   })
 
   it('shows local-account matching states, supplier summaries, and explicit missing values', () => {

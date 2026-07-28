@@ -383,8 +383,8 @@ describe('SupplierAutomationView edit dialog', () => {
   })
 
   it('configures checked accounts with platform filters and searchable model overrides', () => {
-    expect(supplierAutomationSource).toContain("import { listSupplierAccounts")
-    expect(supplierAutomationSource).toContain("import { adminAPI } from '@/api/admin'")
+    expect(supplierAutomationSource).toContain('listSupplierAccounts,')
+    expect(supplierAutomationSource).toContain("from '@/api/admin/supplierProviderData'")
     expect(supplierAutomationSource).toContain("match_status: 'matched'")
     expect(supplierAutomationSource).toContain('page_size: 200')
     expect(supplierAutomationSource).toContain('while (items.length < result.total && result.items.length > 0)')
@@ -400,7 +400,8 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('平台默认测试模型')
     expect(supplierAutomationSource).toContain('需要检查的账号')
     expect(supplierAutomationSource).toContain('当前不可用')
-    expect(supplierAutomationSource).toContain('adminAPI.accounts.getAvailableModels')
+    expect(supplierAutomationSource).toContain('getSupplierHealthGuardModels')
+    expect(supplierAutomationSource).not.toContain('adminAPI.accounts.getAvailableModels')
     expect(supplierAutomationSource).toContain('searchable')
     expect(supplierAutomationSource).toContain('normalizePositiveAccountIDs')
     expect(supplierAutomationSource).toContain('type="checkbox"')
@@ -408,13 +409,15 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('@change="toggleHealthGuardAccount(mapping.localAccountID)"')
   })
 
-  it('uses the matched local account platform for health guard account grouping', () => {
+  it('uses the supplier effective business platform for health guard account grouping', () => {
     expect(supplierAutomationSource).toContain(
       'function effectiveHealthGuardPlatform(account: SupplierProviderAccount): string {'
     )
     expect(supplierAutomationSource).toContain(
-      'return normalizeHealthGuardPlatform(account.local_account_platform || account.platform)'
+      'account.effective_platform || account.local_account_platform || account.platform'
     )
+    expect(supplierAutomationSource).toContain('getSupplierHealthGuardModels,')
+    expect(supplierAutomationSource).toContain('await getSupplierHealthGuardModels(summary.representativeAccountID)')
     expect(supplierAutomationSource).toContain('current.platform = effectiveHealthGuardPlatform(account)')
     expect(supplierAutomationSource).toContain('platform: effectiveHealthGuardPlatform(account)')
   })

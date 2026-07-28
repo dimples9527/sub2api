@@ -69,6 +69,15 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
        matched_account.id AS local_account_id,
        COALESCE(matched_account.name, '') AS local_account_name,
        COALESCE(matched_account.platform, '') AS local_account_platform,
+       COALESCE(platform_override.platform, '') AS platform_override,
+       COALESCE(NULLIF(platform_override.platform, ''), NULLIF(matched_account.platform, ''), COALESCE((
+         SELECT local_group.platform
+         FROM supplier_provider_groups mapped_group
+         JOIN groups local_group ON local_group.id = mapped_group.local_group_id AND local_group.deleted_at IS NULL
+         WHERE mapped_group.provider_id = a.provider_id
+           AND mapped_group.upstream_group_key = a.group_key
+         LIMIT 1
+       ), '')) AS effective_platform,
        matched_account.priority AS local_account_priority,
        COALESCE(matched_account.status, '') AS local_account_status,
        matched_account.schedulable AS local_account_schedulable,
@@ -113,6 +122,8 @@ LEFT JOIN LATERAL (
 LEFT JOIN accounts matched_account
   ON matched_account.id = local_match.local_account_id
  AND local_match.match_count = 1
+LEFT JOIN supplier_local_account_platform_overrides platform_override
+  ON platform_override.local_account_id = matched_account.id
 WHERE `+where+fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", supplierProviderAccountOrderBy(params), len(args)+1, len(args)+2), queryArgs...)
 	if err != nil {
 		return service.SupplierProviderAccountListResult{}, fmt.Errorf("query supplier provider accounts: %w", err)
@@ -1080,19 +1091,14 @@ WHERE mapped_group.provider_id = a.provider_id
 	}
 	if platform := strings.TrimSpace(params.Platform); platform != "" {
 		args = append(args, platform)
-		conditions = append(conditions, fmt.Sprintf(`(
-EXISTS (
-SELECT 1
-FROM supplier_provider_groups mapped_group
-JOIN groups local_group ON local_group.id = mapped_group.local_group_id AND local_group.deleted_at IS NULL
-WHERE mapped_group.provider_id = a.provider_id
-  AND mapped_group.upstream_group_key = a.group_key
-  AND local_group.platform = $%d
-)
-OR (
-  SELECT COUNT(*) = 1
-     AND MIN(local_account.platform) = $%d
+		conditions = append(conditions, fmt.Sprintf(`COALESCE(
+(
+  SELECT CASE
+    WHEN COUNT(*) = 1 THEN MAX(COALESCE(NULLIF(platform_override.platform, ''), local_account.platform))
+  END
   FROM accounts local_account
+  LEFT JOIN supplier_local_account_platform_overrides platform_override
+    ON platform_override.local_account_id = local_account.id
   WHERE local_account.deleted_at IS NULL
     AND regexp_replace(lower(local_account.name), '[^[:alnum:]]', '', 'g')
         = regexp_replace(
@@ -1101,8 +1107,14 @@ OR (
             '',
             'g'
           )
-)
-)`, len(args), len(args)))
+), (
+  SELECT local_group.platform
+  FROM supplier_provider_groups mapped_group
+  JOIN groups local_group ON local_group.id = mapped_group.local_group_id AND local_group.deleted_at IS NULL
+  WHERE mapped_group.provider_id = a.provider_id
+    AND mapped_group.upstream_group_key = a.group_key
+  LIMIT 1
+), '') = $%d`, len(args)))
 	}
 	return strings.Join(conditions, " AND "), args
 }
@@ -1280,7 +1292,7 @@ func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (servic
 		&item.Name, &item.Status, &item.GroupKey, &item.GroupName, &item.Platform, &item.RateMultiplier,
 		&item.RawStatus, &item.Active, &item.LastSeenAt, &inactiveAt,
 		&item.LocalAccountMatchStatus, &item.LocalAccountMatchCount,
-		&localAccountID, &item.LocalAccountName, &item.LocalAccountPlatform, &localAccountPriority,
+		&localAccountID, &item.LocalAccountName, &item.LocalAccountPlatform, &item.PlatformOverride, &item.EffectivePlatform, &localAccountPriority,
 		&item.LocalAccountStatus, &localAccountSchedulable,
 		&item.LocalAccountLastTestStatus, &item.LocalAccountLastTestedAt, &item.LocalAccountLastTestError,
 		&bindingGroupsJSON,
@@ -1383,4 +1395,103 @@ func scanSupplierProviderGroupGuard(scanner supplierProviderGroupScanner) (servi
 		item.InactiveAt = &inactiveAt.Time
 	}
 	return item, nil
+}
+
+func (r *supplierProviderDataRepository) IsUniqueMatchedLocalAccount(ctx context.Context, localAccountID int64) (bool, error) {
+	if localAccountID <= 0 {
+		return false, fmt.Errorf("local account id must be positive")
+	}
+	var matched bool
+	err := r.db.QueryRowContext(ctx, `
+SELECT EXISTS (
+  SELECT 1
+  FROM supplier_provider_accounts a
+  JOIN supplier_providers p ON p.id = a.provider_id
+  WHERE p.deleted_at IS NULL
+    AND (
+      SELECT COUNT(*)
+      FROM accounts local_account
+      WHERE local_account.deleted_at IS NULL
+        AND regexp_replace(lower(local_account.name), '[^[:alnum:]]', '', 'g')
+            = regexp_replace(lower(p.account_name_prefix || a.name), '[^[:alnum:]]', '', 'g')
+    ) = 1
+    AND (
+      SELECT MIN(local_account.id)
+      FROM accounts local_account
+      WHERE local_account.deleted_at IS NULL
+        AND regexp_replace(lower(local_account.name), '[^[:alnum:]]', '', 'g')
+            = regexp_replace(lower(p.account_name_prefix || a.name), '[^[:alnum:]]', '', 'g')
+    ) = $1
+)`, localAccountID).Scan(&matched)
+	if err != nil {
+		return false, fmt.Errorf("check supplier local account match: %w", err)
+	}
+	return matched, nil
+}
+
+func (r *supplierProviderDataRepository) GetLocalAccountEffectivePlatform(ctx context.Context, localAccountID int64) (string, error) {
+	if localAccountID <= 0 {
+		return "", fmt.Errorf("local account id must be positive")
+	}
+	var platform string
+	err := r.db.QueryRowContext(ctx, `
+SELECT COALESCE(
+  NULLIF(platform_override.platform, ''),
+  NULLIF(local_account.platform, ''),
+  ''
+)
+FROM accounts local_account
+LEFT JOIN supplier_local_account_platform_overrides platform_override
+  ON platform_override.local_account_id = local_account.id
+WHERE local_account.id = $1
+  AND local_account.deleted_at IS NULL`, localAccountID).Scan(&platform)
+	if err != nil {
+		return "", fmt.Errorf("get supplier local account effective platform: %w", err)
+	}
+	return strings.ToLower(strings.TrimSpace(platform)), nil
+}
+
+func (r *supplierProviderDataRepository) GetLocalAccountPlatformOverride(ctx context.Context, localAccountID int64) (string, error) {
+	if localAccountID <= 0 {
+		return "", fmt.Errorf("local account id must be positive")
+	}
+	var platform string
+	err := r.db.QueryRowContext(ctx, `SELECT platform FROM supplier_local_account_platform_overrides WHERE local_account_id = $1`, localAccountID).Scan(&platform)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get supplier local account platform override: %w", err)
+	}
+	return strings.ToLower(strings.TrimSpace(platform)), nil
+}
+
+func (r *supplierProviderDataRepository) SetLocalAccountPlatformOverride(ctx context.Context, localAccountID int64, platform string) error {
+	if localAccountID <= 0 {
+		return fmt.Errorf("local account id must be positive")
+	}
+	platform = strings.ToLower(strings.TrimSpace(platform))
+	if platform == "" {
+		return fmt.Errorf("platform must not be empty")
+	}
+	_, err := r.db.ExecContext(ctx, `
+INSERT INTO supplier_local_account_platform_overrides (local_account_id, platform)
+VALUES ($1, $2)
+ON CONFLICT (local_account_id) DO UPDATE
+SET platform = EXCLUDED.platform, updated_at = NOW()`, localAccountID, platform)
+	if err != nil {
+		return fmt.Errorf("set supplier local account platform override: %w", err)
+	}
+	return nil
+}
+
+func (r *supplierProviderDataRepository) ClearLocalAccountPlatformOverride(ctx context.Context, localAccountID int64) error {
+	if localAccountID <= 0 {
+		return fmt.Errorf("local account id must be positive")
+	}
+	_, err := r.db.ExecContext(ctx, `DELETE FROM supplier_local_account_platform_overrides WHERE local_account_id = $1`, localAccountID)
+	if err != nil {
+		return fmt.Errorf("clear supplier local account platform override: %w", err)
+	}
+	return nil
 }

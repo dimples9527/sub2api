@@ -85,11 +85,13 @@ type SupplierAccountHealthGuardSource struct {
 }
 
 type SupplierAccountHealthGuardCandidate struct {
-	Source         SupplierAccountHealthGuardSource `json:"source"`
-	MatchStatus    string                           `json:"match_status"`
-	MatchCount     int                              `json:"match_count"`
-	LocalAccountID int64                            `json:"local_account_id"`
-	LocalAccount   *Account                         `json:"-"`
+	Source            SupplierAccountHealthGuardSource `json:"source"`
+	MatchStatus       string                           `json:"match_status"`
+	MatchCount        int                              `json:"match_count"`
+	LocalAccountID    int64                            `json:"local_account_id"`
+	PlatformOverride  string                           `json:"platform_override,omitempty"`
+	EffectivePlatform string                           `json:"effective_platform"`
+	LocalAccount      *Account                         `json:"-"`
 }
 
 type SupplierAccountHealthGuardSkippedAccount struct {

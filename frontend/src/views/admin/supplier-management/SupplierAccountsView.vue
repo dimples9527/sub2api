@@ -346,6 +346,12 @@
                 <button
                   class="sp-button small"
                   type="button"
+                  :disabled="savingBusinessPlatform || accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id"
+                  @click.stop="openBusinessPlatformDialog(account)"
+                >配置业务平台</button>
+                <button
+                  class="sp-button small"
+                  type="button"
                   :disabled="accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id"
                   @click.stop="openAccountBindingEditor(account)"
                 >编辑绑定</button>
@@ -420,6 +426,51 @@
         </div>
       </template>
     </SupplierDrawer>
+
+    <BaseDialog
+      :show="Boolean(businessPlatformAccount)"
+      title="配置业务平台"
+      @close="closeBusinessPlatformDialog"
+    >
+      <div v-if="businessPlatformAccount" class="sp-business-platform-dialog">
+        <dl class="sp-business-platform-summary">
+          <div>
+            <dt>本地账号</dt>
+            <dd>{{ businessPlatformAccount.local_account_name || businessPlatformAccount.name || `账号 #${businessPlatformAccount.local_account_id}` }}</dd>
+          </div>
+          <div>
+            <dt>接入平台</dt>
+            <dd>{{ platformLabel(normalizePlatform(businessPlatformAccount.local_account_platform) || 'unknown') }}</dd>
+          </div>
+        </dl>
+        <label class="sp-business-platform-field">
+          <span>业务平台</span>
+          <Select
+            v-model="businessPlatformDraft"
+            class="w-full"
+            :options="businessPlatformOptions"
+            :searchable="false"
+          />
+        </label>
+        <p class="sp-business-platform-hint">
+          仅影响供应商模块中的平台归类和健康守护模型，不会修改账号接入协议或原始平台。
+        </p>
+      </div>
+      <template #footer>
+        <button
+          class="sp-button ghost"
+          type="button"
+          :disabled="savingBusinessPlatform"
+          @click="closeBusinessPlatformDialog"
+        >取消</button>
+        <button
+          class="sp-button primary"
+          type="button"
+          :disabled="savingBusinessPlatform"
+          @click="saveBusinessPlatform"
+        >{{ savingBusinessPlatform ? '保存中' : '保存' }}</button>
+      </template>
+    </BaseDialog>
 
     <BaseDialog
       :show="Boolean(testErrorAccount)"
@@ -803,8 +854,10 @@ import Select, { type SelectOption } from '@/components/common/Select.vue'
 import supplierProvidersAPI, { type SupplierProvider } from '@/api/admin/supplierProviders'
 import {
   cancelSupplierAccountBatchTestJob,
+  clearSupplierLocalAccountPlatformOverride,
   getSupplierAccountBatchTestJob,
   listSupplierAccounts,
+  setSupplierLocalAccountPlatformOverride,
   startSupplierAccountBatchTest,
   type SupplierProviderAccount,
 } from '@/api/admin/supplierProviderData'
@@ -894,6 +947,9 @@ const showCreateAccountModal = ref(false)
 const showBatchTestConfigDialog = ref(false)
 const showBatchTestResultDialog = ref(false)
 const accountRateGuardLogsVisible = ref(false)
+const businessPlatformAccount = ref<SupplierProviderAccount | null>(null)
+const businessPlatformDraft = ref('')
+const savingBusinessPlatform = ref(false)
 const batchTestPreparing = ref(false)
 const batchTesting = ref(false)
 const batchTestCancelling = ref(false)
@@ -999,6 +1055,14 @@ const activeFilterOptions: SelectOption[] = [
 ]
 const platformFilterOptions: SelectOption[] = [
   { value: '', label: '全部平台' },
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'gemini', label: 'Gemini' },
+  { value: 'antigravity', label: 'Antigravity' },
+  { value: 'grok', label: 'Grok' },
+]
+const businessPlatformOptions: SelectOption[] = [
+  { value: '', label: '业务平台跟随接入平台' },
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'openai', label: 'OpenAI' },
   { value: 'gemini', label: 'Gemini' },
@@ -1526,8 +1590,9 @@ function normalizePlatform(platform?: string): string {
 }
 
 function effectivePlatform(account: SupplierProviderAccount): string {
-  return normalizePlatform(account.platform)
+  return normalizePlatform(account.effective_platform)
     || normalizePlatform(account.local_account_platform)
+    || normalizePlatform(account.platform)
     || 'unknown'
 }
 
@@ -1662,6 +1727,42 @@ function manageableLocalAccountID(account: SupplierProviderAccount): number | nu
 
 function canManageLocalAccount(account: SupplierProviderAccount): boolean {
   return manageableLocalAccountID(account) !== null
+}
+
+function openBusinessPlatformDialog(account: SupplierProviderAccount) {
+  if (manageableLocalAccountID(account) === null || savingBusinessPlatform.value) return
+  businessPlatformAccount.value = account
+  businessPlatformDraft.value = normalizePlatform(account.platform_override)
+}
+
+function closeBusinessPlatformDialog() {
+  if (savingBusinessPlatform.value) return
+  businessPlatformAccount.value = null
+  businessPlatformDraft.value = ''
+}
+
+async function saveBusinessPlatform() {
+  const account = businessPlatformAccount.value
+  const localAccountID = account ? manageableLocalAccountID(account) : null
+  if (localAccountID === null || savingBusinessPlatform.value) return
+
+  const platform = normalizePlatform(businessPlatformDraft.value)
+  savingBusinessPlatform.value = true
+  try {
+    if (platform) {
+      await setSupplierLocalAccountPlatformOverride(localAccountID, platform)
+    } else {
+      await clearSupplierLocalAccountPlatformOverride(localAccountID)
+    }
+    appStore.showSuccess(platform ? '业务平台已保存' : '业务平台已恢复为跟随接入平台')
+    businessPlatformAccount.value = null
+    businessPlatformDraft.value = ''
+    await loadAccounts()
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '保存业务平台失败'))
+  } finally {
+    savingBusinessPlatform.value = false
+  }
 }
 
 async function openLocalAccountTest(account: SupplierProviderAccount) {
@@ -2637,6 +2738,54 @@ button.sp-test-status.failed:hover {
 
 .sp-account-row-actions .sp-button {
   flex: 0 0 auto;
+}
+
+.sp-business-platform-dialog {
+  display: grid;
+  gap: 1rem;
+}
+
+.sp-business-platform-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.sp-business-platform-summary > div,
+.sp-business-platform-field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.sp-business-platform-summary > div {
+  min-width: 0;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.65rem;
+  padding: 0.75rem;
+  background: var(--sp-panel-2);
+}
+
+.sp-business-platform-summary dt,
+.sp-business-platform-field > span {
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+}
+
+.sp-business-platform-summary dd {
+  overflow: hidden;
+  margin: 0;
+  color: var(--sp-text);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-business-platform-hint {
+  margin: 0;
+  color: var(--sp-muted);
+  font-size: 0.8rem;
+  line-height: 1.55;
 }
 
 .sp-account-binding-dialog {

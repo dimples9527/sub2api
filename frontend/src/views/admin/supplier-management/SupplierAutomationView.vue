@@ -838,8 +838,12 @@ import Pagination from '@/components/common/Pagination.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import type { Column } from '@/components/common/types'
-import { adminAPI } from '@/api/admin'
-import { listSupplierAccounts, type SupplierProviderAccount } from '@/api/admin/supplierProviderData'
+import {
+  getSupplierHealthGuardModels,
+  listSupplierAccounts,
+  type SupplierHealthGuardModel,
+  type SupplierProviderAccount,
+} from '@/api/admin/supplierProviderData'
 import {
   listAccountRateGuardUnbindLogs,
   listRuns,
@@ -852,7 +856,6 @@ import {
   type SupplierAutomationConfig,
   type SupplierAutomationTask,
 } from '@/api/admin/supplierAutomation'
-import type { ClaudeModel } from '@/types'
 import { platformBadgeClass, platformLabel } from '@/utils/platformColors'
 
 const tasks = ref<SupplierAutomationTask[]>([])
@@ -888,7 +891,7 @@ const healthGuardAccountSearch = ref('')
 const healthGuardSelectedOnly = ref(false)
 const healthGuardSupplierAccounts = ref<SupplierProviderAccount[]>([])
 const loadingHealthGuardSupplierAccounts = ref(false)
-const healthGuardModelOptionsByPlatform = ref<Record<string, ClaudeModel[]>>({})
+const healthGuardModelOptionsByPlatform = ref<Record<string, SupplierHealthGuardModel[]>>({})
 const healthGuardModelLoadingByPlatform = ref<Record<string, boolean>>({})
 const healthGuardStatusFilter = ref('all')
 
@@ -1481,7 +1484,9 @@ function normalizeHealthGuardPlatform(platform?: string): string {
 }
 
 function effectiveHealthGuardPlatform(account: SupplierProviderAccount): string {
-  return normalizeHealthGuardPlatform(account.local_account_platform || account.platform)
+  return normalizeHealthGuardPlatform(
+    account.effective_platform || account.local_account_platform || account.platform
+  )
 }
 
 function isHealthGuardAccountAvailable(account: SupplierProviderAccount): boolean {
@@ -1737,7 +1742,7 @@ async function loadHealthGuardModels() {
   )
   await Promise.all(healthGuardPlatformSummaries.value.map(async summary => {
     try {
-      const models = await adminAPI.accounts.getAvailableModels(summary.representativeAccountID)
+      const models = await getSupplierHealthGuardModels(summary.representativeAccountID)
       healthGuardModelOptionsByPlatform.value = {
         ...healthGuardModelOptionsByPlatform.value,
         [summary.platform]: models,

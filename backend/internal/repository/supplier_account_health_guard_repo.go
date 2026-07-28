@@ -28,6 +28,12 @@ SELECT a.id AS provider_account_id,
        matched_account.id AS local_account_id,
        COALESCE(matched_account.name, '') AS local_account_name,
        COALESCE(matched_account.platform, '') AS local_account_platform,
+       COALESCE(platform_override.platform, '') AS platform_override,
+       COALESCE(
+         NULLIF(platform_override.platform, ''),
+         NULLIF(matched_account.platform, ''),
+         ''
+       ) AS effective_platform,
        COALESCE(matched_account.status, '') AS local_account_status,
        COALESCE(matched_account.schedulable, FALSE) AS local_account_schedulable,
        COALESCE(matched_account.extra, '{}'::jsonb) AS local_account_extra
@@ -44,6 +50,8 @@ LEFT JOIN LATERAL (
 LEFT JOIN accounts matched_account
   ON matched_account.id = local_match.local_account_id
  AND local_match.match_count = 1
+LEFT JOIN supplier_local_account_platform_overrides platform_override
+  ON platform_override.local_account_id = matched_account.id
 WHERE a.active = TRUE
   AND p.enabled = TRUE
 ORDER BY a.id ASC`)
@@ -58,6 +66,8 @@ ORDER BY a.id ASC`)
 		var localAccountID sql.NullInt64
 		var localAccountName string
 		var localAccountPlatform string
+		var platformOverride string
+		var effectivePlatform string
 		var localAccountStatus string
 		var localAccountSchedulable bool
 		var localAccountExtra []byte
@@ -71,6 +81,8 @@ ORDER BY a.id ASC`)
 			&localAccountID,
 			&localAccountName,
 			&localAccountPlatform,
+			&platformOverride,
+			&effectivePlatform,
 			&localAccountStatus,
 			&localAccountSchedulable,
 			&localAccountExtra,
@@ -85,6 +97,8 @@ ORDER BY a.id ASC`)
 		default:
 			item.MatchStatus = service.SupplierAccountHealthGuardMatchConflict
 		}
+		item.PlatformOverride = platformOverride
+		item.EffectivePlatform = effectivePlatform
 		if localAccountID.Valid && item.MatchCount == 1 {
 			extra := map[string]any{}
 			if len(localAccountExtra) > 0 {

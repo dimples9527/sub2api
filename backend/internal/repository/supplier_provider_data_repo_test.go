@@ -95,7 +95,7 @@ var supplierProviderAccountListColumns = []string{
 	"group_key", "group_name", "platform", "rate_multiplier", "raw_status", "active",
 	"last_seen_at", "inactive_at",
 	"local_account_match_status", "local_account_match_count",
-	"local_account_id", "local_account_name", "local_account_platform", "local_account_priority",
+	"local_account_id", "local_account_name", "local_account_platform", "platform_override", "effective_platform", "local_account_priority",
 	"local_account_status", "local_account_schedulable",
 	"local_account_last_test_status", "local_account_last_tested_at", "local_account_last_test_error",
 	"binding_groups",
@@ -126,6 +126,15 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
        matched_account.id AS local_account_id,
        COALESCE(matched_account.name, '') AS local_account_name,
        COALESCE(matched_account.platform, '') AS local_account_platform,
+       COALESCE(platform_override.platform, '') AS platform_override,
+       COALESCE(NULLIF(platform_override.platform, ''), NULLIF(matched_account.platform, ''), COALESCE((
+         SELECT local_group.platform
+         FROM supplier_provider_groups mapped_group
+         JOIN groups local_group ON local_group.id = mapped_group.local_group_id AND local_group.deleted_at IS NULL
+         WHERE mapped_group.provider_id = a.provider_id
+           AND mapped_group.upstream_group_key = a.group_key
+         LIMIT 1
+       ), '')) AS effective_platform,
        matched_account.priority AS local_account_priority,
        COALESCE(matched_account.status, '') AS local_account_status,
        matched_account.schedulable AS local_account_schedulable,
@@ -170,6 +179,8 @@ LEFT JOIN LATERAL (
 LEFT JOIN accounts matched_account
   ON matched_account.id = local_match.local_account_id
  AND local_match.match_count = 1
+LEFT JOIN supplier_local_account_platform_overrides platform_override
+  ON platform_override.local_account_id = matched_account.id
 WHERE ` + whereSQL + `
 ORDER BY a.active DESC, a.last_seen_at DESC, a.id ASC LIMIT ` + limitPlaceholder + ` OFFSET ` + offsetPlaceholder
 
@@ -279,7 +290,7 @@ func TestSupplierProviderDataRepositoryListAccountsPaginates(t *testing.T) {
 		WithArgs(int64(42), active, "%pri%", 20, 20).
 		WillReturnRows(sqlmock.NewRows(supplierProviderAccountListColumns).AddRow(
 			int64(7), int64(42), "Supplier A", "account-1", "Primary", "active", "group-1", "VIP", "openai", 2.5, "active", true, now, nil,
-			"matched", 1, int64(101), "prefix-key-1", "anthropic", 80, "active", true, "success", "2026-07-16T09:30:00Z", "upstream authentication failed",
+			"matched", 1, int64(101), "prefix-key-1", "anthropic", "", "anthropic", 80, "active", true, "success", "2026-07-16T09:30:00Z", "upstream authentication failed",
 			`[{"id":202,"name":"Claude 订阅","platform":"anthropic","rate_multiplier":2,"subscription_type":"subscription"},{"id":201,"name":"OpenAI 专线","platform":"openai","rate_multiplier":1.5,"subscription_type":"standard"}]`,
 			12.5, 3.25,
 		))
@@ -338,11 +349,11 @@ func TestSupplierProviderDataRepositoryListAccountsSQLContractMapsUnmatchedAndCo
 		WillReturnRows(sqlmock.NewRows(supplierProviderAccountListColumns).
 			AddRow(
 				int64(7), int64(42), "Supplier A", "missing-key", "Missing", "active", "group-1", "VIP", "openai", 2.5, "active", true, now, nil,
-				"unmatched", 0, nil, "", "", nil, "", nil, "", "", "", `[]`, 12.5, 3.25,
+				"unmatched", 0, nil, "", "", "", "", nil, "", nil, "", "", "", `[]`, 12.5, 3.25,
 			).
 			AddRow(
 				int64(8), int64(42), "Supplier A", "duplicate-key", "Duplicate", "active", "group-2", "Standard", "openai", 1.5, "active", true, now, nil,
-				"conflict", 2, nil, "", "", nil, "", nil, "", "", "", `[]`, 12.5, 3.25,
+				"conflict", 2, nil, "", "", "", "", nil, "", nil, "", "", "", `[]`, 12.5, 3.25,
 			))
 
 	result, err := repo.ListAccounts(context.Background(), service.SupplierProviderDataListParams{
@@ -381,6 +392,35 @@ func TestSupplierProviderDataRepositoryListAccountsSQLContractMapsUnmatchedAndCo
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestSupplierProviderDataRepositoryListAccountsUsesBusinessPlatformOverride(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	columns := supplierProviderAccountListColumns
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM supplier_provider_accounts a")).
+		WithArgs(int64(42), "grok").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
+	mock.ExpectQuery(`(?s)COALESCE\(NULLIF\(platform_override\.platform, ''\), NULLIF\(matched_account\.platform, ''\).*AS effective_platform.*LEFT JOIN supplier_local_account_platform_overrides platform_override ON platform_override\.local_account_id = matched_account\.id`).
+		WithArgs(int64(42), "grok", 20, 0).
+		WillReturnRows(sqlmock.NewRows(columns).AddRow(
+			int64(7), int64(42), "Supplier A", "upstream-key", "Primary", "active", "group-1", "VIP", "openai", 1.5, "active", true, now, nil,
+			"matched", 1, int64(101), "local-account", "openai", "grok", "grok", 80, "active", true, "success", "2026-07-27T11:30:00Z", "", `[]`, 12.5, 3.25,
+		))
+
+	result, err := repo.ListAccounts(context.Background(), service.SupplierProviderDataListParams{
+		ProviderID: 42,
+		Platform:   "grok",
+		Page:       1,
+		PageSize:   20,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, "openai", result.Items[0].LocalAccountPlatform)
+	require.Equal(t, "grok", result.Items[0].PlatformOverride)
+	require.Equal(t, "grok", result.Items[0].EffectivePlatform)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
 func TestSupplierProviderDataRepositoryListGroupsIncludesFilteredSummary(t *testing.T) {
 	repo, mock := newSupplierProviderDataRepoMock(t)
 	active := true
@@ -485,10 +525,12 @@ func TestSupplierProviderAccountWhereIncludesMappedGroupPlatform(t *testing.T) {
 	require.Contains(t, where, "a.active = $2")
 	require.Contains(t, where, "(a.name ILIKE $3 OR a.upstream_account_key ILIKE $3)")
 	require.Contains(t, where, "mapped_group.upstream_group_key = a.group_key")
-	require.Contains(t, where, "local_group.platform = $4")
 	require.Contains(t, where, "FROM accounts local_account")
 	require.Contains(t, where, "COUNT(*) = 1")
-	require.Contains(t, where, "MIN(local_account.platform) = $4")
+	require.Contains(t, where, "LEFT JOIN supplier_local_account_platform_overrides platform_override")
+	require.Contains(t, where, "COALESCE(NULLIF(platform_override.platform, ''), local_account.platform)")
+	require.Contains(t, where, "COALESCE(")
+	require.Contains(t, where, ") = $4")
 	require.Contains(t, where, "lower(p.account_name_prefix || a.name)")
 	require.Equal(t, []any{int64(42), active, "%primary%", "openai"}, args)
 }
@@ -1023,5 +1065,47 @@ func TestSupplierProviderDataRepositoryCleanupUsesCapturedAtForMetricSnapshots(t
 	_, err := repo.Cleanup(context.Background(), policy, now, 1000)
 
 	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryGetsEffectiveLocalAccountPlatform(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	mock.ExpectQuery(`(?s)SELECT COALESCE\(.*supplier_local_account_platform_overrides.*local_account\.deleted_at IS NULL`).
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"effective_platform"}).AddRow("grok"))
+
+	platform, err := repo.GetLocalAccountEffectivePlatform(context.Background(), 42)
+
+	require.NoError(t, err)
+	require.Equal(t, service.PlatformGrok, platform)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryLocalAccountPlatformOverrideLifecycle(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+
+	mock.ExpectExec(`INSERT INTO supplier_local_account_platform_overrides`).
+		WithArgs(int64(42), "grok").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	require.NoError(t, repo.SetLocalAccountPlatformOverride(context.Background(), 42, " GROK "))
+
+	mock.ExpectQuery(`SELECT platform FROM supplier_local_account_platform_overrides WHERE local_account_id = \$1`).
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"platform"}).AddRow("grok"))
+	platform, err := repo.GetLocalAccountPlatformOverride(context.Background(), 42)
+	require.NoError(t, err)
+	require.Equal(t, "grok", platform)
+
+	mock.ExpectExec(`DELETE FROM supplier_local_account_platform_overrides WHERE local_account_id = \$1`).
+		WithArgs(int64(42)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	require.NoError(t, repo.ClearLocalAccountPlatformOverride(context.Background(), 42))
+
+	mock.ExpectQuery(`SELECT platform FROM supplier_local_account_platform_overrides WHERE local_account_id = \$1`).
+		WithArgs(int64(42)).
+		WillReturnError(sql.ErrNoRows)
+	platform, err = repo.GetLocalAccountPlatformOverride(context.Background(), 42)
+	require.NoError(t, err)
+	require.Empty(t, platform)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
