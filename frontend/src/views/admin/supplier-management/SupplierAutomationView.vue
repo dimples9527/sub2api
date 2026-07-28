@@ -474,17 +474,34 @@
             </section>
 
             <section v-else-if="detailRun.result_detail?.account_health_guard && accountHealthGuardResult" class="sp-rate-guard-detail sp-account-health-guard-detail">
-              <div class="sp-rate-guard-summary sp-account-health-guard-summary">
-                <div><span>白名单账号</span><strong>{{ accountHealthGuardResult.total_accounts }}</strong></div>
-                <div><span>本轮选择</span><strong>{{ accountHealthGuardResult.selected_count }}</strong></div>
-                <div><span>检查</span><strong>{{ accountHealthGuardResult.checked_count }}</strong></div>
-                <div><span>健康</span><strong>{{ accountHealthGuardResult.healthy_count }}</strong></div>
-                <div><span>慢响应</span><strong>{{ accountHealthGuardResult.slow_count }}</strong></div>
-                <div><span>失败</span><strong>{{ accountHealthGuardResult.failed_count }}</strong></div>
-                <div><span>不可用</span><strong>{{ accountHealthGuardResult.unavailable_count }}</strong></div>
-                <div><span>待下轮</span><strong>{{ accountHealthGuardResult.pending_count }}</strong></div>
-                <div><span>暂停</span><strong>{{ accountHealthGuardResult.disabled_count }}</strong></div>
-                <div><span>恢复</span><strong>{{ accountHealthGuardResult.recovered_count }}</strong></div>
+              <div class="sp-rate-guard-summary sp-account-health-guard-summary" aria-label="结果明细统计筛选">
+                <div
+                  v-for="metric in accountHealthGuardSummaryMetrics"
+                  :key="metric.key"
+                  class="sp-health-guard-metric"
+                  :class="[
+                    metric.filter ? 'is-filterable' : 'is-static',
+                    metric.tone,
+                    { active: metric.filter && healthGuardStatusFilter === metric.filter },
+                  ]"
+                >
+                  <button
+                    v-if="metric.filter"
+                    type="button"
+                    class="sp-health-guard-metric-button"
+                    :data-test="`health-guard-summary-filter-${metric.filter}`"
+                    :aria-pressed="healthGuardStatusFilter === metric.filter"
+                    :title="metric.filter === healthGuardStatusFilter ? '取消筛选' : `筛选${metric.label}明细`"
+                    @click="setHealthGuardStatusFilter(metric.filter)"
+                  >
+                    <span>{{ metric.label }}</span>
+                    <strong>{{ metric.count }}</strong>
+                  </button>
+                  <template v-else>
+                    <span>{{ metric.label }}</span>
+                    <strong>{{ metric.count }}</strong>
+                  </template>
+                </div>
               </div>
 
               <section v-if="accountHealthGuardResult.skip_reasons?.length" class="sp-health-guard-skip-reasons">
@@ -949,10 +966,33 @@ const rateGuardAlertActions = new Set(['invalid', 'stale', 'failed'])
 const rateGuardResult = computed(() => detailRun.value?.result_detail?.rate_guard || null)
 const accountRateGuardResult = computed(() => detailRun.value?.result_detail?.account_rate_guard || null)
 const accountHealthGuardResult = computed(() => detailRun.value?.result_detail?.account_health_guard || null)
+const accountHealthGuardSummaryMetrics = computed(() => {
+  const result = accountHealthGuardResult.value
+  if (!result) return []
+  return [
+    { key: 'total', label: '白名单账号', count: result.total_accounts, filter: '', tone: '' },
+    { key: 'selected', label: '本轮选择', count: result.selected_count, filter: '', tone: '' },
+    { key: 'checked', label: '检查', count: result.checked_count, filter: 'checked', tone: 'neutral' },
+    { key: 'healthy', label: '健康', count: result.healthy_count, filter: 'healthy', tone: 'good' },
+    { key: 'slow', label: '慢响应', count: result.slow_count, filter: 'slow', tone: 'warn' },
+    { key: 'failed', label: '失败', count: result.failed_count, filter: 'failed', tone: 'bad' },
+    { key: 'unavailable', label: '不可用', count: result.unavailable_count, filter: 'unavailable', tone: 'warn' },
+    { key: 'pending', label: '待下轮', count: result.pending_count, filter: '', tone: '' },
+    { key: 'disabled', label: '暂停', count: result.disabled_count, filter: 'disabled', tone: 'bad' },
+    { key: 'recovered', label: '恢复', count: result.recovered_count, filter: 'recovered', tone: 'good' },
+  ]
+})
 const filteredAccountHealthGuardItems = computed(() => {
   const items = accountHealthGuardResult.value?.items || []
-  if (healthGuardStatusFilter.value === 'all') return items
-  return items.filter(item => item.status === healthGuardStatusFilter.value)
+  const filter = healthGuardStatusFilter.value
+  if (filter === 'all') return items
+  if (filter === 'checked') {
+    return items.filter(item => item.status === 'healthy' || item.status === 'slow' || item.status === 'failed')
+  }
+  if (filter === 'disabled' || filter === 'recovered') {
+    return items.filter(item => item.action === filter)
+  }
+  return items.filter(item => item.status === filter)
 })
 const rateGuardAlertItems = computed(() => (
   rateGuardResult.value?.items.filter(item => rateGuardAlertActions.has(item.action)) || []
@@ -975,11 +1015,14 @@ const runStatusFilterOptions: SelectOption[] = [
 ]
 const healthGuardStatusFilterOptions: SelectOption[] = [
   { value: 'all', label: '全部状态' },
+  { value: 'checked', label: '检查' },
   { value: 'healthy', label: '健康' },
   { value: 'slow', label: '慢响应' },
   { value: 'failed', label: '失败' },
   { value: 'skipped', label: '跳过' },
   { value: 'unavailable', label: '不可用' },
+  { value: 'disabled', label: '暂停' },
+  { value: 'recovered', label: '恢复' },
 ]
 const taskColumns: Column[] = [
   { key: 'task', label: '任务', class: 'min-w-[210px]' },
@@ -1287,6 +1330,10 @@ function selectDetailProvider(providerID: number) {
 
 function accountRateGuardModeText(mode: string): string {
   return mode === 'preview' ? '预览' : '执行'
+}
+
+function setHealthGuardStatusFilter(filter: string) {
+  healthGuardStatusFilter.value = healthGuardStatusFilter.value === filter ? 'all' : filter
 }
 
 function accountHealthGuardStatusText(status: string): string {
@@ -3616,6 +3663,103 @@ function showToast(message: string) {
 .sp-account-health-guard-summary {
   grid-template-columns: repeat(10, minmax(0, 1fr));
 }
+.sp-health-guard-metric {
+  min-width: 0;
+}
+
+.sp-health-guard-metric-button {
+  display: block;
+  width: 100%;
+  margin: -12px;
+  padding: 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.sp-health-guard-metric-button:hover {
+  background: color-mix(in srgb, var(--sp-primary, #3b82f6) 8%, transparent);
+}
+
+.sp-health-guard-metric-button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--sp-primary, #3b82f6) 55%, transparent);
+  outline-offset: -2px;
+}
+
+.sp-health-guard-metric.is-filterable {
+  position: relative;
+}
+
+.sp-health-guard-metric.is-filterable::after {
+  content: '';
+  position: absolute;
+  inset: auto 10px 8px 10px;
+  height: 2px;
+  border-radius: 999px;
+  background: transparent;
+  transition: background-color 0.15s ease;
+}
+
+.sp-health-guard-metric.is-filterable.good.active,
+.sp-health-guard-metric.is-filterable.good:hover {
+  background: color-mix(in srgb, #16a34a 8%, transparent);
+}
+
+.sp-health-guard-metric.is-filterable.warn.active,
+.sp-health-guard-metric.is-filterable.warn:hover {
+  background: color-mix(in srgb, #d97706 8%, transparent);
+}
+
+.sp-health-guard-metric.is-filterable.bad.active,
+.sp-health-guard-metric.is-filterable.bad:hover {
+  background: color-mix(in srgb, #dc2626 8%, transparent);
+}
+
+.sp-health-guard-metric.is-filterable.neutral.active,
+.sp-health-guard-metric.is-filterable.neutral:hover {
+  background: color-mix(in srgb, var(--sp-primary, #3b82f6) 8%, transparent);
+}
+
+.sp-health-guard-metric.active .sp-health-guard-metric-button strong {
+  color: color-mix(in srgb, var(--sp-primary, #3b82f6) 45%, var(--sp-text));
+}
+
+.sp-health-guard-metric.good.active .sp-health-guard-metric-button strong {
+  color: #15803d;
+}
+
+.sp-health-guard-metric.warn.active .sp-health-guard-metric-button strong {
+  color: #b45309;
+}
+
+.sp-health-guard-metric.bad.active .sp-health-guard-metric-button strong {
+  color: #b91c1c;
+}
+
+.sp-health-guard-metric.active::after {
+  background: currentColor;
+  color: color-mix(in srgb, var(--sp-primary, #3b82f6) 70%, var(--sp-line));
+}
+
+.sp-health-guard-metric.good.active::after {
+  color: #16a34a;
+}
+
+.sp-health-guard-metric.warn.active::after {
+  color: #d97706;
+}
+
+.sp-health-guard-metric.bad.active::after {
+  color: #dc2626;
+}
+
+.sp-health-guard-metric.neutral.active::after {
+  color: var(--sp-primary, #3b82f6);
+}
+
 .sp-health-guard-skip-reasons,
 .sp-health-guard-inspections {
   min-width: 0;
