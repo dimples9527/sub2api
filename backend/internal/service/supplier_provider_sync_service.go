@@ -44,6 +44,7 @@ type SupplierProviderAccount struct {
 	LocalAccountID             *int64                                `json:"local_account_id,omitempty"`
 	LocalAccountName           string                                `json:"local_account_name,omitempty"`
 	LocalAccountPlatform       string                                `json:"local_account_platform,omitempty"`
+	LocalAccountType           string                                `json:"local_account_type,omitempty"`
 	PlatformOverride           string                                `json:"platform_override,omitempty"`
 	EffectivePlatform          string                                `json:"effective_platform,omitempty"`
 	LocalAccountPriority       *int                                  `json:"local_account_priority,omitempty"`

@@ -12,6 +12,7 @@ const supplierAccountMocks = vi.hoisted(() => ({
   listAccounts: vi.fn(),
   getAccountById: vi.fn(),
   getAvailableModels: vi.fn(),
+  duplicate: vi.fn(),
   setSchedulable: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock('@/api/admin', () => ({
     accounts: {
       getById: supplierAccountMocks.getAccountById,
       getAvailableModels: supplierAccountMocks.getAvailableModels,
+      duplicate: supplierAccountMocks.duplicate,
       setSchedulable: supplierAccountMocks.setSchedulable,
     },
     groups: {
@@ -232,6 +234,7 @@ const testAccounts = [
     group_name: '分组 A',
     platform: 'openai',
     local_account_platform: 'anthropic',
+    local_account_type: 'apikey',
     rate_multiplier: 1.23456,
     binding_groups: [
       {
@@ -398,6 +401,7 @@ describe('supplier local data views component usage', () => {
       status: 'active',
     })
     supplierAccountMocks.getAvailableModels.mockResolvedValue([])
+    supplierAccountMocks.duplicate.mockResolvedValue({ id: 1001, name: '\u672c\u5730\u8d26\u53f7 A \u526f\u672c' })
     supplierAccountMocks.setSchedulable.mockImplementation(async (_id, schedulable) => ({
       schedulable,
     }))
@@ -861,6 +865,40 @@ describe('supplier local data views component usage', () => {
     expect(supplierProviderDataSource).toContain('export async function setSupplierLocalAccountPlatformOverride')
     expect(supplierProviderDataSource).toContain('export async function clearSupplierLocalAccountPlatformOverride')
     expect(supplierProviderDataSource).toContain('`/admin/supplier-management/accounts/${localAccountID}/platform-override`')
+  })
+
+  it('reuses account duplication and assigns semantic colors to supplier account actions', () => {
+    expect(supplierProviderDataSource).toContain('local_account_type?: string')
+    expect(accountsSource).toContain('function canDuplicateLocalAccount(account: SupplierProviderAccount): boolean')
+    expect(accountsSource).toContain('@click.stop="duplicateLocalAccount(account)"')
+    expect(accountsSource).toContain("'复制账号'")
+    expect(accountsSource).toContain('adminAPI.accounts.duplicate(localAccountID)')
+    expect(accountsSource).toContain('sp-account-action-view')
+    expect(accountsSource).toContain('sp-account-action-test')
+    expect(accountsSource).toContain('sp-account-action-edit')
+    expect(accountsSource).toContain('sp-account-action-copy')
+    expect(accountsSource).toContain('sp-account-action-platform')
+    expect(accountsSource).toContain('sp-account-action-binding')
+    expect(accountsSource).toContain('sp-account-action-delete')
+  })
+
+  it('duplicates a uniquely matched supported local account through the shared account API', async () => {
+    const wrapper = await mountSupplierAccounts()
+    const copyButton = wrapper
+      .findAll('.runtime-cell-actions[data-row-index="0"] button')
+      .find(button => button.text().includes('\u590d\u5236\u8d26\u53f7'))
+
+    expect(copyButton).toBeDefined()
+    await copyButton!.trigger('click')
+    await flushPromises()
+
+    expect(supplierAccountMocks.duplicate).toHaveBeenCalledWith(101)
+    expect(supplierAccountMocks.showSuccess).toHaveBeenCalledWith(
+      '\u8d26\u53f7\u5df2\u590d\u5236\u4e3a\u300c\u672c\u5730\u8d26\u53f7 A \u526f\u672c\u300d\uff0c\u5df2\u6682\u505c\u8c03\u5ea6\uff0c\u8bf7\u786e\u8ba4\u51ed\u636e\u540e\u518d\u542f\u7528'
+    )
+    expect(supplierAccountMocks.listAccounts).toHaveBeenCalledTimes(2)
+
+    wrapper.unmount()
   })
 
   it('shows local-account matching states, supplier summaries, and explicit missing values', () => {

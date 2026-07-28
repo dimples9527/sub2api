@@ -76,6 +76,7 @@ export interface SupplierProviderAccount {
   local_account_id?: number
   local_account_name?: string
   local_account_platform?: string
+  local_account_type?: string
   platform_override?: string
   effective_platform?: string
   local_account_priority?: number

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/json"
 	"regexp"
 	"strings"
 	"testing"
@@ -95,7 +96,7 @@ var supplierProviderAccountListColumns = []string{
 	"group_key", "group_name", "platform", "rate_multiplier", "raw_status", "active",
 	"last_seen_at", "inactive_at",
 	"local_account_match_status", "local_account_match_count",
-	"local_account_id", "local_account_name", "local_account_platform", "platform_override", "effective_platform", "local_account_priority",
+	"local_account_id", "local_account_name", "local_account_platform", "local_account_type", "platform_override", "effective_platform", "local_account_priority",
 	"local_account_status", "local_account_schedulable",
 	"local_account_last_test_status", "local_account_last_tested_at", "local_account_last_test_error",
 	"binding_groups",
@@ -126,6 +127,7 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
        matched_account.id AS local_account_id,
        COALESCE(matched_account.name, '') AS local_account_name,
        COALESCE(matched_account.platform, '') AS local_account_platform,
+       COALESCE(matched_account.type, '') AS local_account_type,
        COALESCE(platform_override.platform, '') AS platform_override,
        COALESCE(NULLIF(platform_override.platform, ''), NULLIF(matched_account.platform, ''), COALESCE((
          SELECT local_group.platform
@@ -290,7 +292,7 @@ func TestSupplierProviderDataRepositoryListAccountsPaginates(t *testing.T) {
 		WithArgs(int64(42), active, "%pri%", 20, 20).
 		WillReturnRows(sqlmock.NewRows(supplierProviderAccountListColumns).AddRow(
 			int64(7), int64(42), "Supplier A", "account-1", "Primary", "active", "group-1", "VIP", "openai", 2.5, "active", true, now, nil,
-			"matched", 1, int64(101), "prefix-key-1", "anthropic", "", "anthropic", 80, "active", true, "success", "2026-07-16T09:30:00Z", "upstream authentication failed",
+			"matched", 1, int64(101), "prefix-key-1", "anthropic", "apikey", "", "anthropic", 80, "active", true, "success", "2026-07-16T09:30:00Z", "upstream authentication failed",
 			`[{"id":202,"name":"Claude 订阅","platform":"anthropic","rate_multiplier":2,"subscription_type":"subscription"},{"id":201,"name":"OpenAI 专线","platform":"openai","rate_multiplier":1.5,"subscription_type":"standard"}]`,
 			12.5, 3.25,
 		))
@@ -349,11 +351,11 @@ func TestSupplierProviderDataRepositoryListAccountsSQLContractMapsUnmatchedAndCo
 		WillReturnRows(sqlmock.NewRows(supplierProviderAccountListColumns).
 			AddRow(
 				int64(7), int64(42), "Supplier A", "missing-key", "Missing", "active", "group-1", "VIP", "openai", 2.5, "active", true, now, nil,
-				"unmatched", 0, nil, "", "", "", "", nil, "", nil, "", "", "", `[]`, 12.5, 3.25,
+				"unmatched", 0, nil, "", "", "", "", "", nil, "", nil, "", "", "", `[]`, 12.5, 3.25,
 			).
 			AddRow(
 				int64(8), int64(42), "Supplier A", "duplicate-key", "Duplicate", "active", "group-2", "Standard", "openai", 1.5, "active", true, now, nil,
-				"conflict", 2, nil, "", "", "", "", nil, "", nil, "", "", "", `[]`, 12.5, 3.25,
+				"conflict", 2, nil, "", "", "", "", "", nil, "", nil, "", "", "", `[]`, 12.5, 3.25,
 			))
 
 	result, err := repo.ListAccounts(context.Background(), service.SupplierProviderDataListParams{
@@ -392,6 +394,47 @@ func TestSupplierProviderDataRepositoryListAccountsSQLContractMapsUnmatchedAndCo
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestSupplierProviderDataRepositoryListAccountsExposesLocalAccountTypeForDuplication(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	now := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
+	columns := []string{
+		"id", "provider_id", "provider_name", "upstream_account_key", "name", "status",
+		"group_key", "group_name", "platform", "rate_multiplier", "raw_status", "active",
+		"last_seen_at", "inactive_at",
+		"local_account_match_status", "local_account_match_count",
+		"local_account_id", "local_account_name", "local_account_platform", "local_account_type", "platform_override", "effective_platform", "local_account_priority",
+		"local_account_status", "local_account_schedulable",
+		"local_account_last_test_status", "local_account_last_tested_at", "local_account_last_test_error",
+		"binding_groups",
+		"supplier_current_balance", "supplier_today_cost",
+	}
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM supplier_provider_accounts a")).
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
+	mock.ExpectQuery(`(?s)COALESCE\(matched_account\.type, ''\) AS local_account_type`).
+		WithArgs(int64(42), 20, 0).
+		WillReturnRows(sqlmock.NewRows(columns).AddRow(
+			int64(7), int64(42), "Supplier A", "upstream-key", "Primary", "active", "group-1", "VIP", "openai", 1.5, "active", true, now, nil,
+			"matched", 1, int64(101), "local-account", "openai", "apikey", "", "openai", 80, "active", true, "success", "2026-07-28T09:30:00Z", "", `[]`, 12.5, 3.25,
+		))
+
+	result, err := repo.ListAccounts(context.Background(), service.SupplierProviderDataListParams{
+		ProviderID: 42,
+		Page:       1,
+		PageSize:   20,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, result.Items, 1)
+	payload, err := json.Marshal(result.Items[0])
+	require.NoError(t, err)
+	var account map[string]any
+	require.NoError(t, json.Unmarshal(payload, &account))
+	require.Equal(t, "apikey", account["local_account_type"])
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestSupplierProviderDataRepositoryListAccountsUsesBusinessPlatformOverride(t *testing.T) {
 	repo, mock := newSupplierProviderDataRepoMock(t)
 	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
@@ -404,7 +447,7 @@ func TestSupplierProviderDataRepositoryListAccountsUsesBusinessPlatformOverride(
 		WithArgs(int64(42), "grok", 20, 0).
 		WillReturnRows(sqlmock.NewRows(columns).AddRow(
 			int64(7), int64(42), "Supplier A", "upstream-key", "Primary", "active", "group-1", "VIP", "openai", 1.5, "active", true, now, nil,
-			"matched", 1, int64(101), "local-account", "openai", "grok", "grok", 80, "active", true, "success", "2026-07-27T11:30:00Z", "", `[]`, 12.5, 3.25,
+			"matched", 1, int64(101), "local-account", "openai", "apikey", "grok", "grok", 80, "active", true, "success", "2026-07-27T11:30:00Z", "", `[]`, 12.5, 3.25,
 		))
 
 	result, err := repo.ListAccounts(context.Background(), service.SupplierProviderDataListParams{

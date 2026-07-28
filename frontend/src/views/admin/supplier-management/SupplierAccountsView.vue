@@ -325,40 +325,47 @@
           <template #cell-actions="{ row: account }">
             <div class="sp-account-row-actions" @click.stop>
               <button
-                class="sp-button small ghost sp-account-view-button"
+                class="sp-button small ghost sp-account-view-button sp-account-action-view"
                 type="button"
                 @click.stop="openDrawer(account)"
               >查看</button>
               <template v-if="canManageLocalAccount(account)">
                 <button
-                  class="sp-button small"
+                  class="sp-button small sp-account-action-test"
                   type="button"
-                  :disabled="testingAccountID === account.local_account_id || accountActionLoadingID === account.local_account_id"
+                  :disabled="testingAccountID === account.local_account_id || accountActionLoadingID === account.local_account_id || duplicatingAccountID === account.local_account_id"
                   :data-test="`supplier-account-test-${account.local_account_id}`"
                   @click.stop="openLocalAccountTest(account)"
                 >{{ testingAccountID === account.local_account_id ? '加载中…' : '测试账号' }}</button>
                 <button
-                  class="sp-button small"
+                  class="sp-button small sp-account-action-edit"
                   type="button"
-                  :disabled="accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id"
+                  :disabled="accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
                   @click.stop="openLocalAccountEditor(account)"
                 >编辑</button>
                 <button
-                  class="sp-button small"
+                  v-if="canDuplicateLocalAccount(account)"
+                  class="sp-button small sp-account-action-copy"
                   type="button"
-                  :disabled="savingBusinessPlatform || accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id"
+                  :disabled="duplicatingAccountID === account.local_account_id || accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || deletingAccountID === account.local_account_id"
+                  @click.stop="duplicateLocalAccount(account)"
+                >{{ duplicatingAccountID === account.local_account_id ? '复制中' : '复制账号' }}</button>
+                <button
+                  class="sp-button small sp-account-action-platform"
+                  type="button"
+                  :disabled="savingBusinessPlatform || accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
                   @click.stop="openBusinessPlatformDialog(account)"
                 >配置业务平台</button>
                 <button
-                  class="sp-button small"
+                  class="sp-button small sp-account-action-binding"
                   type="button"
-                  :disabled="accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id"
+                  :disabled="accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
                   @click.stop="openAccountBindingEditor(account)"
                 >编辑绑定</button>
                 <button
-                  class="sp-button small danger"
+                  class="sp-button small danger sp-account-action-delete"
                   type="button"
-                  :disabled="deletingAccountID === account.local_account_id || testingAccountID === account.local_account_id"
+                  :disabled="deletingAccountID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
                   @click.stop="deleteLocalAccount(account)"
                 >{{ deletingAccountID === account.local_account_id ? '删除中' : '删除' }}</button>
               </template>
@@ -938,6 +945,7 @@ const editingPriorityAccountID = ref<number | null>(null)
 const savingPriorityAccountID = ref<number | null>(null)
 const accountActionLoadingID = ref<number | null>(null)
 const deletingAccountID = ref<number | null>(null)
+const duplicatingAccountID = ref<number | null>(null)
 const testingAccountID = ref<number | null>(null)
 const testingAccount = ref<Account | null>(null)
 const editingAccount = ref<Account | null>(null)
@@ -1727,6 +1735,29 @@ function manageableLocalAccountID(account: SupplierProviderAccount): number | nu
 
 function canManageLocalAccount(account: SupplierProviderAccount): boolean {
   return manageableLocalAccountID(account) !== null
+}
+
+function canDuplicateLocalAccount(account: SupplierProviderAccount): boolean {
+  if (manageableLocalAccountID(account) === null) return false
+  return ['apikey', 'upstream', 'bedrock', 'service_account'].includes(
+    (account.local_account_type || '').trim().toLowerCase()
+  )
+}
+
+async function duplicateLocalAccount(account: SupplierProviderAccount) {
+  const localAccountID = manageableLocalAccountID(account)
+  if (localAccountID === null || duplicatingAccountID.value !== null) return
+
+  duplicatingAccountID.value = localAccountID
+  try {
+    const duplicate = await adminAPI.accounts.duplicate(localAccountID)
+    appStore.showSuccess(`账号已复制为「${duplicate.name}」，已暂停调度，请确认凭据后再启用`)
+    await loadAccounts()
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '复制账号失败'))
+  } finally {
+    duplicatingAccountID.value = null
+  }
 }
 
 function openBusinessPlatformDialog(account: SupplierProviderAccount) {
@@ -2738,6 +2769,56 @@ button.sp-test-status.failed:hover {
 
 .sp-account-row-actions .sp-button {
   flex: 0 0 auto;
+}
+
+.sp-account-row-actions .sp-account-action-view {
+  border-color: var(--sp-line);
+  color: var(--sp-muted);
+}
+
+.sp-account-row-actions .sp-account-action-test {
+  border-color: color-mix(in srgb, var(--sp-blue) 42%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-blue) 9%, var(--sp-panel));
+  color: var(--sp-blue);
+}
+
+.sp-account-row-actions .sp-account-action-edit {
+  border-color: color-mix(in srgb, var(--sp-amber) 42%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-amber) 9%, var(--sp-panel));
+  color: var(--sp-amber);
+}
+
+.sp-account-row-actions .sp-account-action-copy {
+  border-color: color-mix(in srgb, var(--sp-violet) 42%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-violet) 9%, var(--sp-panel));
+  color: var(--sp-violet);
+}
+
+.sp-account-row-actions .sp-account-action-platform {
+  border-color: color-mix(in srgb, #4f46e5 42%, var(--sp-line));
+  background: color-mix(in srgb, #4f46e5 9%, var(--sp-panel));
+  color: #4f46e5;
+}
+
+.sp-account-row-actions .sp-account-action-binding {
+  border-color: color-mix(in srgb, var(--sp-green) 42%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-green) 9%, var(--sp-panel));
+  color: var(--sp-green);
+}
+
+.sp-account-row-actions .sp-account-action-delete {
+  border-color: color-mix(in srgb, var(--sp-red) 42%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-red) 9%, var(--sp-panel));
+  color: var(--sp-red);
+}
+
+.sp-account-row-actions .sp-account-action-test:hover,
+.sp-account-row-actions .sp-account-action-edit:hover,
+.sp-account-row-actions .sp-account-action-copy:hover,
+.sp-account-row-actions .sp-account-action-platform:hover,
+.sp-account-row-actions .sp-account-action-binding:hover,
+.sp-account-row-actions .sp-account-action-delete:hover {
+  background: color-mix(in srgb, currentColor 14%, var(--sp-panel));
 }
 
 .sp-business-platform-dialog {

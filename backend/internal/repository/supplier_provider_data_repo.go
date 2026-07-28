@@ -69,6 +69,7 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
        matched_account.id AS local_account_id,
        COALESCE(matched_account.name, '') AS local_account_name,
        COALESCE(matched_account.platform, '') AS local_account_platform,
+       COALESCE(matched_account.type, '') AS local_account_type,
        COALESCE(platform_override.platform, '') AS platform_override,
        COALESCE(NULLIF(platform_override.platform, ''), NULLIF(matched_account.platform, ''), COALESCE((
          SELECT local_group.platform
@@ -1292,7 +1293,7 @@ func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (servic
 		&item.Name, &item.Status, &item.GroupKey, &item.GroupName, &item.Platform, &item.RateMultiplier,
 		&item.RawStatus, &item.Active, &item.LastSeenAt, &inactiveAt,
 		&item.LocalAccountMatchStatus, &item.LocalAccountMatchCount,
-		&localAccountID, &item.LocalAccountName, &item.LocalAccountPlatform, &item.PlatformOverride, &item.EffectivePlatform, &localAccountPriority,
+		&localAccountID, &item.LocalAccountName, &item.LocalAccountPlatform, &item.LocalAccountType, &item.PlatformOverride, &item.EffectivePlatform, &localAccountPriority,
 		&item.LocalAccountStatus, &localAccountSchedulable,
 		&item.LocalAccountLastTestStatus, &item.LocalAccountLastTestedAt, &item.LocalAccountLastTestError,
 		&bindingGroupsJSON,
