@@ -748,62 +748,62 @@
                     && !supplierAccountHealthGuardModelForMapping(editForm.config, mapping),
                 }"
               >
-                <div class="sp-health-guard-account-row-main">
-                  <label class="sp-health-guard-account-choice">
-                    <input
-                      type="checkbox"
-                      :checked="healthGuardAccountIDs.includes(mapping.localAccountID)"
-                      :aria-label="`${healthGuardAccountIsSelected(mapping.localAccountID) ? '取消选择' : '选择'}账号 ${mapping.localAccountName}`"
-                      @change="toggleHealthGuardAccount(mapping.localAccountID)"
-                    />
-                    <span class="sp-health-guard-account-choice-copy">
-                      <strong>{{ mapping.localAccountName }}</strong>
-                      <span v-if="mapping.available" class="sp-health-guard-account-meta">
-                        <span :class="['sp-health-guard-account-platform', platformBadgeClass(mapping.platform)]">
-                          {{ platformLabel(mapping.platform) }}
-                        </span>
-                        <span>本地 #{{ mapping.localAccountID }}</span>
-                      </span>
-                      <span v-else class="sp-health-guard-unavailable">当前不可用 · 本地 #{{ mapping.localAccountID }}</span>
-                      <small>{{ healthGuardSourceSummary(mapping) }}</small>
+                <label
+                  class="sp-health-guard-account-choice"
+                  :title="mapping.available ? healthGuardSourceSummary(mapping) : '账号已停用、删除或匹配失效，运行时将记录为不可用'"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="healthGuardAccountIDs.includes(mapping.localAccountID)"
+                    :aria-label="`${healthGuardAccountIsSelected(mapping.localAccountID) ? '取消选择' : '选择'}账号 ${mapping.localAccountName}`"
+                    @change="toggleHealthGuardAccount(mapping.localAccountID)"
+                  />
+                  <span class="sp-health-guard-account-choice-copy">
+                    <strong :class="platformTextClass(mapping.platform)">{{ mapping.localAccountName }}</strong>
+                    <span
+                      v-if="mapping.available"
+                      :class="['sp-health-guard-account-platform', platformBadgeClass(mapping.platform)]"
+                    >
+                      {{ platformLabel(mapping.platform) }}
                     </span>
-                  </label>
-                  <span
-                    v-if="healthGuardAccountIsSelected(mapping.localAccountID) && !mapping.available"
-                    class="sp-health-guard-model-status unavailable"
-                  >当前不可用</span>
-                  <span
-                    v-else-if="healthGuardAccountIsSelected(mapping.localAccountID) && healthGuardAccountOverrideModel(mapping.localAccountID)"
-                    class="sp-health-guard-model-status override"
-                  >账号覆盖</span>
-                  <span
-                    v-else-if="healthGuardAccountIsSelected(mapping.localAccountID) && healthGuardPlatformDefaultModel(mapping.platform)"
-                    class="sp-health-guard-model-status"
-                  >平台默认</span>
-                  <span
-                    v-else-if="healthGuardAccountIsSelected(mapping.localAccountID)"
-                    class="sp-health-guard-model-status missing"
-                  >缺少模型</span>
-                </div>
+                    <span class="sp-health-guard-account-id">#{{ mapping.localAccountID }}</span>
+                    <span
+                      class="sp-health-guard-account-source"
+                      :class="{ unavailable: !mapping.available }"
+                    >
+                      {{ mapping.available ? healthGuardSourceSummary(mapping) : '当前不可用' }}
+                    </span>
+                    <span
+                      v-if="healthGuardAccountIsSelected(mapping.localAccountID) && !mapping.available"
+                      class="sp-health-guard-model-status unavailable"
+                    >不可用</span>
+                    <span
+                      v-else-if="healthGuardAccountIsSelected(mapping.localAccountID) && healthGuardAccountOverrideModel(mapping.localAccountID)"
+                      class="sp-health-guard-model-status override"
+                    >覆盖</span>
+                    <span
+                      v-else-if="healthGuardAccountIsSelected(mapping.localAccountID) && healthGuardPlatformDefaultModel(mapping.platform)"
+                      class="sp-health-guard-model-status"
+                    >默认</span>
+                    <span
+                      v-else-if="healthGuardAccountIsSelected(mapping.localAccountID)"
+                      class="sp-health-guard-model-status missing"
+                    >缺模型</span>
+                  </span>
+                </label>
 
-                <div v-if="healthGuardAccountIsSelected(mapping.localAccountID)" class="sp-health-guard-account-model-editor">
+                <div
+                  v-if="healthGuardAccountIsSelected(mapping.localAccountID) && mapping.available"
+                  class="sp-health-guard-account-model-editor"
+                >
                   <Select
-                    v-if="mapping.available"
                     v-model="editForm.config.account_health_guard_account_models[String(mapping.localAccountID)]"
                     :options="healthGuardModelSelectOptions(mapping.platform, editForm.config.account_health_guard_account_models[String(mapping.localAccountID)])"
                     searchable
                     clearable
-                    placeholder="使用平台默认模型"
+                    placeholder="平台默认模型"
                     empty-text="暂无可用模型"
                   />
-                  <small v-if="mapping.available && healthGuardAccountOverrideModel(mapping.localAccountID)" class="sp-health-guard-effective-model">
-                    账号覆盖：{{ healthGuardAccountOverrideModel(mapping.localAccountID) }}
-                  </small>
-                  <small v-else-if="mapping.available && healthGuardPlatformDefaultModel(mapping.platform)" class="sp-health-guard-effective-model">
-                    使用平台默认：{{ healthGuardPlatformDefaultModel(mapping.platform) }}
-                  </small>
-                  <small v-else-if="mapping.available" class="sp-health-guard-missing-model">尚未配置有效测试模型</small>
-                  <small v-else>账号已停用、删除或匹配失效，运行时将记录为不可用；取消勾选即可移除。</small>
                 </div>
               </article>
             </div>
@@ -873,7 +873,7 @@ import {
   type SupplierAutomationConfig,
   type SupplierAutomationTask,
 } from '@/api/admin/supplierAutomation'
-import { platformBadgeClass, platformLabel } from '@/utils/platformColors'
+import { platformBadgeClass, platformLabel, platformTextClass } from '@/utils/platformColors'
 import { extractApiErrorMessage } from '@/utils/apiError'
 
 const tasks = ref<SupplierAutomationTask[]>([])
@@ -2722,14 +2722,25 @@ function showToast(message: string) {
   color: var(--sp-text);
 }
 
+:global(.modal-content:has(.sp-health-guard-account-dialog)),
+:global(.modal-content:has(.sp-edit-dialog)),
+:global(.modal-content:has(.sp-run-detail)) {
+  max-height: min(95vh, calc(100dvh - 16px));
+}
+
 :global(.modal-content:has(.sp-health-guard-account-dialog) .modal-body),
 :global(.modal-content:has(.sp-edit-dialog) .modal-body),
 :global(.modal-content:has(.sp-run-detail) .modal-body) {
   display: flex;
   min-height: 0;
+  flex: 1 1 auto;
   flex-direction: column;
   overflow: hidden;
   background: var(--sp-panel);
+}
+
+:global(.modal-content:has(.sp-health-guard-account-dialog) .modal-body) {
+  overflow: hidden;
 }
 
 :global(.modal-content:has(.sp-health-guard-account-dialog) .modal-footer),
@@ -3317,24 +3328,27 @@ function showToast(message: string) {
 
 .sp-health-guard-account-card strong,
 .sp-health-guard-dialog-section-head strong,
-.sp-health-guard-platform-model-grid strong,
-.sp-health-guard-account-list strong {
+.sp-health-guard-platform-model-grid strong {
   color: var(--sp-text);
   font-size: 13px;
 }
 
 .sp-health-guard-account-card span,
 .sp-health-guard-dialog-section-head span,
-.sp-health-guard-platform-model-grid span,
-.sp-health-guard-account-list span,
-.sp-health-guard-account-list small {
+.sp-health-guard-platform-model-grid span {
   color: var(--sp-muted);
   font-size: 12px;
 }
 
 .sp-health-guard-account-dialog {
-  display: grid;
-  gap: 14px;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  height: 100%;
+  max-height: min(78vh, calc(100dvh - 148px));
+  overflow: hidden;
 }
 
 .sp-health-guard-platform-models,
@@ -3347,8 +3361,16 @@ function showToast(message: string) {
 }
 
 .sp-health-guard-platform-models {
-  padding: 14px 16px;
+  flex: 0 0 auto;
+  padding: 12px 14px;
   background: color-mix(in srgb, var(--sp-blue) 3%, var(--sp-panel));
+}
+
+.sp-health-guard-account-workspace {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .sp-health-guard-dialog-section-head {
@@ -3382,6 +3404,7 @@ function showToast(message: string) {
 
 .sp-health-guard-selection-summary {
   display: grid;
+  flex: 0 0 auto;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   border-bottom: 1px solid var(--sp-line);
   background: color-mix(in srgb, var(--sp-soft) 26%, transparent);
@@ -3422,6 +3445,7 @@ function showToast(message: string) {
 
 .sp-health-guard-account-toolbar {
   display: flex;
+  flex: 0 0 auto;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
@@ -3502,19 +3526,25 @@ function showToast(message: string) {
 }
 
 .sp-health-guard-account-list {
-  display: grid;
-  max-height: 480px;
+  flex: 1 1 auto;
+  min-height: 180px;
+  max-height: none;
   overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   border-top: 1px solid var(--sp-line);
+  background: color-mix(in srgb, var(--sp-soft) 10%, var(--sp-panel));
 }
 
 .sp-health-guard-account-row {
   position: relative;
   display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.42fr);
+  align-items: center;
   min-width: 0;
-  gap: 11px;
+  gap: 8px 12px;
   border-bottom: 1px solid var(--sp-line);
-  padding: 13px 16px;
+  padding: 7px 14px;
   background: var(--sp-panel);
   transition: background-color 160ms ease, box-shadow 160ms ease;
 }
@@ -3542,28 +3572,23 @@ function showToast(message: string) {
   box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sp-amber) 72%, var(--sp-line));
 }
 
-.sp-health-guard-account-row-main {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  min-width: 0;
-  gap: 14px;
+.sp-health-guard-account-row:not(:has(.sp-health-guard-account-model-editor)) {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .sp-health-guard-account-choice {
   display: grid;
-  flex: 1 1 auto;
-  grid-template-columns: 20px minmax(0, 1fr);
-  align-items: start;
-  gap: 11px;
   min-width: 0;
+  grid-template-columns: 15px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
   cursor: pointer;
 }
 
 .sp-health-guard-account-choice input[type='checkbox'] {
-  width: 18px;
-  height: 18px;
-  margin: 2px 0 0;
+  width: 14px;
+  height: 14px;
+  margin: 0;
   cursor: pointer;
   accent-color: var(--sp-blue);
 }
@@ -3574,34 +3599,47 @@ function showToast(message: string) {
 }
 
 .sp-health-guard-account-choice-copy {
-  display: grid;
+  display: flex;
+  align-items: center;
   min-width: 0;
-  gap: 3px;
-}
-
-.sp-health-guard-account-choice-copy strong {
-  color: var(--sp-text);
-  font-size: 13px;
-}
-
-.sp-health-guard-account-choice-copy span:not(.sp-health-guard-account-platform),
-.sp-health-guard-account-choice-copy small,
-.sp-health-guard-account-model-editor small {
+  gap: 6px;
   color: var(--sp-muted);
   font-size: 12px;
 }
 
-.sp-health-guard-account-choice-copy small,
-.sp-health-guard-account-model-editor small {
-  overflow-wrap: anywhere;
-  line-height: 1.45;
+.sp-health-guard-account-choice-copy strong {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.sp-health-guard-account-meta {
-  display: inline-flex !important;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 5px;
+.sp-health-guard-account-id {
+  flex: 0 0 auto;
+  color: var(--sp-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.sp-health-guard-account-source {
+  flex: 1 1 auto;
+  min-width: 48px;
+  overflow: hidden;
+  color: var(--sp-muted);
+  font-size: 11px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-health-guard-account-source.unavailable {
+  color: var(--sp-amber);
+  font-weight: 650;
 }
 
 .sp-health-guard-account-platform {
@@ -3609,22 +3647,24 @@ function showToast(message: string) {
   flex: 0 0 auto;
   align-items: center;
   border-width: 1px;
-  border-radius: 5px;
-  padding: 1px 6px;
-  font-size: 11px;
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 10px;
   font-weight: 700;
-  line-height: 1.35;
+  line-height: 1.4;
+  white-space: nowrap;
 }
 
 .sp-health-guard-model-status {
   flex: 0 0 auto;
   border: 1px solid color-mix(in srgb, var(--sp-blue) 24%, var(--sp-line));
   border-radius: 999px;
-  padding: 3px 8px;
+  padding: 1px 6px;
   color: var(--sp-blue);
   background: color-mix(in srgb, var(--sp-blue) 6%, var(--sp-panel));
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
+  line-height: 1.35;
   white-space: nowrap;
 }
 
@@ -3643,23 +3683,18 @@ function showToast(message: string) {
 
 .sp-health-guard-account-model-editor {
   display: grid;
-  grid-template-columns: minmax(240px, 0.72fr) minmax(0, 1fr);
+  min-width: 0;
   align-items: center;
-  gap: 10px 14px;
-  margin-left: 31px;
-  border-top: 1px dashed color-mix(in srgb, var(--sp-blue) 22%, var(--sp-line));
-  padding-top: 11px;
 }
 
-.sp-health-guard-unavailable,
-.sp-health-guard-missing-model {
-  color: var(--sp-amber) !important;
-  font-weight: 700;
+.sp-health-guard-account-model-editor :deep(.select-trigger) {
+  min-height: 32px;
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+  line-height: 1.25;
 }
 
-.sp-health-guard-effective-model {
-  color: var(--sp-blue) !important;
-}
 .sp-account-health-guard-summary {
   grid-template-columns: repeat(10, minmax(0, 1fr));
 }
@@ -4139,7 +4174,6 @@ function showToast(message: string) {
   }
 
   .sp-health-guard-account-card,
-  .sp-health-guard-account-row-main,
   .sp-health-guard-item > header,
   .sp-health-guard-list-head,
   .sp-health-guard-account-toolbar {
@@ -4147,10 +4181,21 @@ function showToast(message: string) {
     flex-direction: column;
   }
 
+  .sp-health-guard-account-dialog {
+    max-height: min(82vh, calc(100dvh - 120px));
+  }
+
+  .sp-health-guard-platform-models {
+    max-height: min(28vh, 220px);
+    overflow: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
   .sp-health-guard-platform-model-grid,
   .sp-health-guard-platform-model-grid article,
   .sp-health-guard-account-filters,
-  .sp-health-guard-account-model-editor,
+  .sp-health-guard-account-row,
   .sp-health-guard-filter,
   .sp-health-guard-reason-list,
   .sp-health-guard-item-grid,
@@ -4162,6 +4207,14 @@ function showToast(message: string) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .sp-health-guard-selection-summary article {
+    padding: 8px 10px;
+  }
+
+  .sp-health-guard-selection-summary article strong {
+    font-size: 15px;
+  }
+
   .sp-health-guard-selection-summary article:nth-child(odd) {
     border-left: 0;
   }
@@ -4170,11 +4223,19 @@ function showToast(message: string) {
     border-top: 1px solid var(--sp-line);
   }
 
-  .sp-health-guard-account-model-editor {
-    margin-left: 31px;
+  .sp-health-guard-account-toolbar {
+    gap: 8px;
+    padding: 10px 12px;
   }
 
-  .sp-health-guard-model-status,
+  .sp-health-guard-account-list {
+    min-height: 220px;
+  }
+
+  .sp-health-guard-account-model-editor {
+    min-width: 0;
+  }
+
   .sp-health-guard-filter-result {
     align-self: flex-start;
   }
