@@ -585,9 +585,13 @@ func TestSupplierProviderAccountWhereIncludesLocalGroup(t *testing.T) {
 	})
 
 	require.Contains(t, where, "a.provider_id = $1")
-	require.Contains(t, where, "mapped_group.provider_id = a.provider_id")
-	require.Contains(t, where, "mapped_group.upstream_group_key = a.group_key")
-	require.Contains(t, where, "mapped_group.local_group_id = $2")
+	require.Contains(t, where, "FROM accounts local_account")
+	require.Contains(t, where, "JOIN account_groups account_group")
+	require.Contains(t, where, "account_group.group_id = $2")
+	require.Contains(t, where, "local_group.deleted_at IS NULL")
+	require.Contains(t, where, "lower(p.account_name_prefix || a.name)")
+	require.Contains(t, where, ") = 1")
+	require.NotContains(t, where, "mapped_group.local_group_id = $2")
 	require.Equal(t, []any{int64(42), int64(201)}, args)
 }
 

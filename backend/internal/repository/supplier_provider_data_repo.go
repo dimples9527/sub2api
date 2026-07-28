@@ -1081,13 +1081,36 @@ func supplierProviderAccountWhere(params service.SupplierProviderDataListParams)
 	conditions := []string{where}
 	if params.GroupID > 0 {
 		args = append(args, params.GroupID)
+		// 按本地账号绑定分组过滤：唯一匹配到的本地账号在 account_groups 中包含所选分组。
 		conditions = append(conditions, fmt.Sprintf(`EXISTS (
 SELECT 1
-FROM supplier_provider_groups mapped_group
-JOIN groups local_group ON local_group.id = mapped_group.local_group_id AND local_group.deleted_at IS NULL
-WHERE mapped_group.provider_id = a.provider_id
-  AND mapped_group.upstream_group_key = a.group_key
-  AND mapped_group.local_group_id = $%d
+FROM accounts local_account
+JOIN account_groups account_group
+  ON account_group.account_id = local_account.id
+ AND account_group.group_id = $%d
+JOIN groups local_group
+  ON local_group.id = account_group.group_id
+ AND local_group.deleted_at IS NULL
+WHERE local_account.deleted_at IS NULL
+  AND regexp_replace(lower(local_account.name), '[^[:alnum:]]', '', 'g')
+      = regexp_replace(
+          lower(p.account_name_prefix || a.name),
+          '[^[:alnum:]]',
+          '',
+          'g'
+        )
+  AND (
+    SELECT COUNT(*)
+    FROM accounts candidate
+    WHERE candidate.deleted_at IS NULL
+      AND regexp_replace(lower(candidate.name), '[^[:alnum:]]', '', 'g')
+          = regexp_replace(
+              lower(p.account_name_prefix || a.name),
+              '[^[:alnum:]]',
+              '',
+              'g'
+            )
+  ) = 1
 )`, len(args)))
 	}
 	if platform := strings.TrimSpace(params.Platform); platform != "" {
