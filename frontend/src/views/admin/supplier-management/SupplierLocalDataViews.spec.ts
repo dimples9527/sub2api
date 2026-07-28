@@ -32,6 +32,12 @@ vi.mock('@/api/admin', () => ({
   },
 }))
 
+vi.mock('vue-router', () => ({
+  useRouter: () => ({
+    push: vi.fn(),
+  }),
+}))
+
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
     showError: supplierAccountMocks.showError,
@@ -135,6 +141,34 @@ const BaseDialogStub = defineComponent({
       ? h('section', { class: 'base-dialog-stub' }, [
           h('h2', props.title),
           slots.default?.(),
+          slots.footer?.(),
+        ])
+      : null
+  },
+})
+
+const ConfirmDialogStub = defineComponent({
+  props: {
+    show: Boolean,
+    title: String,
+    message: String,
+    confirmText: String,
+    cancelText: String,
+  },
+  emits: ['confirm', 'cancel'],
+  setup(props, { emit }) {
+    return () => props.show
+      ? h('section', { class: 'confirm-dialog-stub' }, [
+          h('h2', props.title),
+          h('p', props.message),
+          h('button', {
+            type: 'button',
+            onClick: () => emit('cancel'),
+          }, props.cancelText || '取消'),
+          h('button', {
+            type: 'button',
+            onClick: () => emit('confirm'),
+          }, props.confirmText || '确认'),
         ])
       : null
   },
@@ -367,6 +401,7 @@ async function mountSupplierAccounts() {
         SupplierModuleLayout: SupplierModuleLayoutStub,
         SupplierDrawer: SupplierDrawerStub,
         BaseDialog: BaseDialogStub,
+        ConfirmDialog: ConfirmDialogStub,
         AccountTestModal: AccountTestModalStub,
         DataTable: DataTableStub,
         Input: InputStub,
@@ -401,7 +436,7 @@ describe('supplier local data views component usage', () => {
       status: 'active',
     })
     supplierAccountMocks.getAvailableModels.mockResolvedValue([])
-    supplierAccountMocks.duplicate.mockResolvedValue({ id: 1001, name: '\u672c\u5730\u8d26\u53f7 A \u526f\u672c' })
+    supplierAccountMocks.duplicate.mockResolvedValue({ id: 1001, name: '本地账号 A (Copy)' })
     supplierAccountMocks.setSchedulable.mockImplementation(async (_id, schedulable) => ({
       schedulable,
     }))
@@ -870,7 +905,9 @@ describe('supplier local data views component usage', () => {
   it('reuses account duplication and assigns semantic colors to supplier account actions', () => {
     expect(supplierProviderDataSource).toContain('local_account_type?: string')
     expect(accountsSource).toContain('function canDuplicateLocalAccount(account: SupplierProviderAccount): boolean')
-    expect(accountsSource).toContain('@click.stop="duplicateLocalAccount(account)"')
+    expect(accountsSource).toContain('@click.stop="requestDuplicateLocalAccount(account)"')
+    expect(accountsSource).toContain('function confirmDuplicateLocalAccount()')
+    expect(accountsSource).toContain('ConfirmDialog')
     expect(accountsSource).toContain("'复制账号'")
     expect(accountsSource).toContain('adminAPI.accounts.duplicate(localAccountID)')
     expect(accountsSource).toContain('sp-account-action-view')
@@ -892,11 +929,24 @@ describe('supplier local data views component usage', () => {
     await copyButton!.trigger('click')
     await flushPromises()
 
+    // 点击后先弹出确认，不立即调用复制接口
+    expect(supplierAccountMocks.duplicate).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('\u786e\u8ba4\u590d\u5236\u672c\u5730\u8d26\u53f7')
+
+    const confirmButton = wrapper
+      .findAll('button')
+      .find(button => button.text().includes('\u786e\u8ba4\u590d\u5236') && !button.text().includes('\u786e\u8ba4\u590d\u5236\u672c\u5730\u8d26\u53f7'))
+    expect(confirmButton).toBeDefined()
+    await confirmButton!.trigger('click')
+    await flushPromises()
+
     expect(supplierAccountMocks.duplicate).toHaveBeenCalledWith(101)
     expect(supplierAccountMocks.showSuccess).toHaveBeenCalledWith(
-      '\u8d26\u53f7\u5df2\u590d\u5236\u4e3a\u300c\u672c\u5730\u8d26\u53f7 A \u526f\u672c\u300d\uff0c\u5df2\u6682\u505c\u8c03\u5ea6\uff0c\u8bf7\u786e\u8ba4\u51ed\u636e\u540e\u518d\u542f\u7528'
+      '账号已复制为「本地账号 A (Copy)」，已暂停调度，请确认凭据后再启用'
     )
     expect(supplierAccountMocks.listAccounts).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('\u8d26\u53f7\u5df2\u590d\u5236')
+    expect(wrapper.text()).toContain('(Copy)')
 
     wrapper.unmount()
   })

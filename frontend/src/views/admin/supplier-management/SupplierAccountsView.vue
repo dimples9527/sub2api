@@ -348,7 +348,8 @@
                   class="sp-button small sp-account-action-copy"
                   type="button"
                   :disabled="duplicatingAccountID === account.local_account_id || accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || deletingAccountID === account.local_account_id"
-                  @click.stop="duplicateLocalAccount(account)"
+                  @click.stop="requestDuplicateLocalAccount(account)"
+                  data-test="supplier-account-duplicate"
                 >{{ duplicatingAccountID === account.local_account_id ? '复制中' : '复制账号' }}</button>
                 <button
                   class="sp-button small sp-account-action-platform"
@@ -844,15 +845,51 @@
       :show="accountRateGuardLogsVisible"
       @close="closeAccountRateGuardLogs"
     />
+
+    <ConfirmDialog
+      :show="Boolean(duplicateConfirmAccount)"
+      title="确认复制本地账号"
+      :message="duplicateConfirmMessage"
+      confirm-text="确认复制"
+      cancel-text="取消"
+      @confirm="confirmDuplicateLocalAccount"
+      @cancel="closeDuplicateConfirm"
+    />
+
+    <BaseDialog
+      :show="Boolean(duplicateResultAccount)"
+      title="账号已复制"
+      width="normal"
+      @close="closeDuplicateResult"
+    >
+      <div v-if="duplicateResultAccount" class="space-y-3 text-sm text-gray-600 dark:text-gray-300">
+        <p>
+          已创建本地账号「<strong class="text-gray-900 dark:text-gray-100">{{ duplicateResultAccount.name }}</strong>」，并已暂停调度，请确认凭据后再启用。
+        </p>
+        <p>
+          供应商上游账号页按「上游账号」列出，并通过本地账号名自动匹配；副本名称带有 (Copy) 后缀，不会作为新的上游行出现在本页。
+        </p>
+        <p>
+          可在账号管理中按名称搜索查看，或直接编辑刚复制的账号。
+        </p>
+      </div>
+      <template #footer>
+        <button class="sp-button ghost" type="button" @click="closeDuplicateResult">关闭</button>
+        <button class="sp-button" type="button" @click="openDuplicatedAccountEditor">编辑新账号</button>
+        <button class="sp-button" type="button" @click="goToAccountManagement">去账号管理</button>
+      </template>
+    </BaseDialog>
   </SupplierModuleLayout>
 </template>
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 import { SupplierAccountRateGuardLogDialog, SupplierDrawer, SupplierModuleLayout } from '@/components/admin/supplier-management'
 import { CreateAccountModal, EditAccountModal } from '@/components/account'
 import DataTable from '@/components/common/DataTable.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import Input from '@/components/common/Input.vue'
@@ -891,6 +928,7 @@ import {
 import { extractApiErrorMessage } from '@/utils/apiError'
 
 const appStore = useAppStore()
+const router = useRouter()
 
 type SupplierBatchTestTarget = {
   accountID: number
@@ -946,6 +984,8 @@ const savingPriorityAccountID = ref<number | null>(null)
 const accountActionLoadingID = ref<number | null>(null)
 const deletingAccountID = ref<number | null>(null)
 const duplicatingAccountID = ref<number | null>(null)
+const duplicateConfirmAccount = ref<SupplierProviderAccount | null>(null)
+const duplicateResultAccount = ref<Account | null>(null)
 const testingAccountID = ref<number | null>(null)
 const testingAccount = ref<Account | null>(null)
 const editingAccount = ref<Account | null>(null)
@@ -1744,13 +1784,60 @@ function canDuplicateLocalAccount(account: SupplierProviderAccount): boolean {
   )
 }
 
-async function duplicateLocalAccount(account: SupplierProviderAccount) {
-  const localAccountID = manageableLocalAccountID(account)
+const duplicateConfirmMessage = computed(() => {
+  const account = duplicateConfirmAccount.value
+  if (!account) return ''
+  const accountName = account.local_account_name || account.name || account.upstream_account_key || `账号 #${account.local_account_id}`
+  return `确认复制本地账号「${accountName}」？将创建暂停调度的本地副本，名称通常会追加 (Copy) 后缀。供应商上游账号页按上游账号匹配本地名，副本不会作为新的上游行出现在本页，可在账号管理中查看。`
+})
+
+function requestDuplicateLocalAccount(account: SupplierProviderAccount) {
+  if (!canDuplicateLocalAccount(account) || duplicatingAccountID.value !== null) return
+  duplicateConfirmAccount.value = account
+}
+
+function closeDuplicateConfirm() {
+  if (duplicatingAccountID.value !== null) return
+  duplicateConfirmAccount.value = null
+}
+
+function closeDuplicateResult() {
+  duplicateResultAccount.value = null
+}
+
+async function openDuplicatedAccountEditor() {
+  const account = duplicateResultAccount.value
+  if (!account) return
+  duplicateResultAccount.value = null
+  try {
+    await loadAccountEditorOptions()
+    editingAccount.value = account
+    showEditAccountModal.value = true
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '加载账号编辑信息失败'))
+  }
+}
+
+function goToAccountManagement() {
+  const account = duplicateResultAccount.value
+  const keyword = account?.name?.trim() || ''
+  duplicateResultAccount.value = null
+  void router.push({
+    path: '/admin/accounts',
+    query: keyword ? { search: keyword } : undefined,
+  })
+}
+
+async function confirmDuplicateLocalAccount() {
+  const account = duplicateConfirmAccount.value
+  const localAccountID = account ? manageableLocalAccountID(account) : null
   if (localAccountID === null || duplicatingAccountID.value !== null) return
 
   duplicatingAccountID.value = localAccountID
   try {
     const duplicate = await adminAPI.accounts.duplicate(localAccountID)
+    duplicateConfirmAccount.value = null
+    duplicateResultAccount.value = duplicate
     appStore.showSuccess(`账号已复制为「${duplicate.name}」，已暂停调度，请确认凭据后再启用`)
     await loadAccounts()
   } catch (err) {
