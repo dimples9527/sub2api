@@ -534,10 +534,36 @@ func TestSupplierAccountHealthGuardRunKeepsSchedulingBeforeThreshold(t *testing.
 	require.Empty(t, store.setCalls)
 }
 
+func TestSupplierAccountHealthGuardRunUsesEffectivePlatformForDefaults(t *testing.T) {
+	candidate := newSupplierAccountHealthGuardCandidate(23, "覆盖平台账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 13})
+	candidate.PlatformOverride = "grok"
+	candidate.EffectivePlatform = "grok"
+	store := &supplierAccountHealthGuardAccountStoreStub{}
+	tester := &supplierAccountHealthGuardTesterStub{
+		results: map[int64]*ScheduledTestResult{23: {Status: "success", LatencyMs: 800}},
+		errs:    map[int64]error{},
+	}
+	guard := NewSupplierAccountHealthGuardService(&supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{candidate}}, store, tester)
+
+	result, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{
+		AccountIDs:        []int64{23},
+		HealthyLatencyMs:  5000,
+		PlatformModels:    map[string]string{"openai": "gpt-platform", "grok": "grok-platform"},
+		PlatformLatencyMs: map[string]int64{"openai": 2000, "grok": 1200},
+	}, time.Now())
+
+	require.NoError(t, err)
+	require.Equal(t, 1, result.HealthyCount)
+	require.Equal(t, "grok-platform", tester.calls[0].modelID)
+	require.Equal(t, "grok", result.Items[0].Platform)
+	require.Equal(t, int64(1200), result.Items[0].LatencyLimitMs)
+}
+
 func newSupplierAccountHealthGuardCandidate(accountID int64, name, platform string, schedulable bool, source SupplierAccountHealthGuardSource) SupplierAccountHealthGuardCandidate {
 	return SupplierAccountHealthGuardCandidate{
 		Source: source, MatchStatus: SupplierAccountHealthGuardMatchMatched, MatchCount: 1, LocalAccountID: accountID,
-		LocalAccount: &Account{ID: accountID, Name: name, Platform: platform, Status: StatusActive, Schedulable: schedulable, Extra: map[string]any{}},
+		EffectivePlatform: platform,
+		LocalAccount:      &Account{ID: accountID, Name: name, Platform: platform, Status: StatusActive, Schedulable: schedulable, Extra: map[string]any{}},
 	}
 }
 

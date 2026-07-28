@@ -172,9 +172,10 @@ type SupplierAccountHealthGuardService struct {
 }
 
 type supplierAccountHealthGuardTarget struct {
-	account Account
-	sources []SupplierAccountHealthGuardSource
-	modelID string
+	account  Account
+	sources  []SupplierAccountHealthGuardSource
+	platform string
+	modelID  string
 }
 
 type supplierAccountHealthGuardSkipCollector struct {
@@ -290,7 +291,8 @@ func supplierAccountHealthGuardBuildTarget(accountID int64, candidates []Supplie
 		}
 		if target.account.ID == 0 {
 			target.account = *candidate.LocalAccount
-			target.modelID = supplierAccountHealthGuardModelForAccount(config, accountID, candidate.LocalAccount.Platform)
+			target.platform = supplierAccountHealthGuardPlatformForCandidate(candidate)
+			target.modelID = supplierAccountHealthGuardModelForAccount(config, accountID, target.platform)
 		}
 		target.sources = append(target.sources, candidate.Source)
 	}
@@ -316,7 +318,7 @@ func supplierAccountHealthGuardUnavailableItem(accountID int64, candidates []Sup
 			continue
 		}
 		item.LocalAccountName = candidate.LocalAccount.Name
-		item.Platform = candidate.LocalAccount.Platform
+		item.Platform = supplierAccountHealthGuardPlatformForCandidate(candidate)
 		item.SchedulableBefore = candidate.LocalAccount.Schedulable
 		item.SchedulableAfter = candidate.LocalAccount.Schedulable
 		if strings.TrimSpace(candidate.LocalAccount.Status) != StatusActive {
@@ -364,7 +366,7 @@ func (s *SupplierAccountHealthGuardService) runTarget(ctx context.Context, confi
 		startedAt = time.Now()
 	}
 	item := SupplierAccountHealthGuardRunItem{
-		LocalAccountID: target.account.ID, LocalAccountName: target.account.Name, Platform: target.account.Platform,
+		LocalAccountID: target.account.ID, LocalAccountName: target.account.Name, Platform: target.platform,
 		Sources: append([]SupplierAccountHealthGuardSource(nil), target.sources...), ModelID: target.modelID,
 		SchedulableBefore: target.account.Schedulable, SchedulableAfter: target.account.Schedulable,
 		Action: SupplierAccountHealthGuardActionNone, StartedAt: startedAt,
@@ -373,7 +375,7 @@ func (s *SupplierAccountHealthGuardService) runTarget(ctx context.Context, confi
 		ConsecutiveHealthy: supplierAccountHealthGuardExtraInt(target.account.Extra, supplierHealthGuardHealthyCountExtraKey),
 	}
 	originalFailureCount := item.ConsecutiveFailed
-	item.LatencyLimitMs = supplierAccountHealthGuardLatencyLimitForPlatform(config, target.account.Platform)
+	item.LatencyLimitMs = supplierAccountHealthGuardLatencyLimitForPlatform(config, target.platform)
 	testCtx, cancel := context.WithTimeout(ctx, time.Duration(config.TimeoutPerAccountSeconds)*time.Second)
 	result, runErr := s.tester.runTestBackground(testCtx, target.account.ID, target.modelID)
 	contextErr := testCtx.Err()
@@ -475,7 +477,7 @@ func supplierAccountHealthGuardSkippedItem(candidate SupplierAccountHealthGuardC
 	}
 	if candidate.LocalAccount != nil {
 		item.LocalAccountName = candidate.LocalAccount.Name
-		item.Platform = candidate.LocalAccount.Platform
+		item.Platform = supplierAccountHealthGuardPlatformForCandidate(candidate)
 		item.SchedulableBefore = candidate.LocalAccount.Schedulable
 		item.SchedulableAfter = candidate.LocalAccount.Schedulable
 	}
@@ -601,6 +603,19 @@ func normalizeSupplierAccountHealthGuardPlatformLatency(values map[string]int64)
 		}
 	}
 	return out
+}
+
+func supplierAccountHealthGuardPlatformForCandidate(candidate SupplierAccountHealthGuardCandidate) string {
+	if platform := strings.TrimSpace(candidate.EffectivePlatform); platform != "" {
+		return platform
+	}
+	if platform := strings.TrimSpace(candidate.PlatformOverride); platform != "" {
+		return platform
+	}
+	if candidate.LocalAccount != nil {
+		return strings.TrimSpace(candidate.LocalAccount.Platform)
+	}
+	return ""
 }
 
 func supplierAccountHealthGuardModelForAccount(config SupplierAccountHealthGuardConfig, accountID int64, platform string) string {
