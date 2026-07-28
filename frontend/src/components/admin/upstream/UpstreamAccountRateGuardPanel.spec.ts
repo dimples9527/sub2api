@@ -74,4 +74,16 @@ describe('UpstreamAccountRateGuardPanel', () => {
     expect(wrapper.emitted('save')).toHaveLength(1)
     expect(wrapper.emitted('run')).toHaveLength(1)
   })
+
+  it('在有待处理同步日志时在打开日志按钮显示红色数量徽标', () => {
+    const wrapper = mountPanel()
+
+    expect(wrapper.get('[data-test=rate-guard-open-logs-badge]').text()).toBe('3')
+  })
+
+  it('没有待处理同步日志时不显示打开日志按钮的数量徽标', () => {
+    const wrapper = mountPanel({ unhandledSyncLogCount: 0 })
+
+    expect(wrapper.find('[data-test=rate-guard-open-logs-badge]').exists()).toBe(false)
+  })
 })
