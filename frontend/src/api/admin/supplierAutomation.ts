@@ -316,9 +316,14 @@ export async function runTask(
   taskCode: string,
   mode: SupplierAccountRateGuardRunMode = 'execute'
 ): Promise<SupplierAutomationRun> {
+  // 健康守护可能按账号串行探测，默认 30s 会把仍在执行中的请求误判为失败。
+  const timeout = taskCode === 'supplier_account_health_guard'
+    ? 35 * 60 * 1000
+    : undefined
   const { data } = await apiClient.post<SupplierAutomationRun>(
     `/admin/supplier-management/automation/tasks/${taskCode}/run`,
-    { mode }
+    { mode },
+    timeout ? { timeout } : undefined
   )
   return data
 }

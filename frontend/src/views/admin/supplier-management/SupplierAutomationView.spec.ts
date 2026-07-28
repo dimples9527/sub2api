@@ -86,14 +86,20 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('结果详情')
   })
 
-  it('refreshes data without auto-opening a dialog after executing a task', () => {
+  it('opens structured run detail after executing a task and surfaces API error messages', () => {
     expect(supplierAutomationSource).toContain('const run = await runTask(taskCode)')
     expect(supplierAutomationSource).toContain('showToast(`任务执行完成：${statusText(run.status)}`)')
+    expect(supplierAutomationSource).toContain('openRunDetail(run)')
+    expect(supplierAutomationSource).toContain("import { extractApiErrorMessage } from '@/utils/apiError'")
+    expect(supplierAutomationSource).toContain("extractApiErrorMessage(err, '运行任务失败')")
+    expect(supplierAutomationSource).toContain('await openTaskLatestResult(task)')
     expect(supplierAutomationSource).not.toContain('openResultDetail(`${taskCode} 执行结果')
   })
 
   it('opens structured run details from latest result and run history rows', () => {
-    expect(supplierAutomationSource).toContain('latestRunByTask.value[task.task_code]')
+    expect(supplierAutomationSource).toContain('async function openTaskLatestResult')
+    expect(supplierAutomationSource).toContain('task_code: task.task_code')
+    expect(supplierAutomationSource).toContain('page_size: 1')
     expect(supplierAutomationSource).toContain('@click.stop="openTaskLatestResult(task)"')
     expect(supplierAutomationSource).toContain('@click="openRunDetail(run)"')
     expect(supplierAutomationSource).toContain('const detailRun = ref<SupplierAutomationRun | null>(null)')
@@ -359,6 +365,9 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationAPISource).toContain('unavailable_count: number')
     expect(supplierAutomationAPISource).toContain('pending_count: number')
     expect(supplierAutomationAPISource).toContain("status: 'healthy' | 'slow' | 'failed' | 'skipped' | 'unavailable' | string")
+    expect(supplierAutomationAPISource).toContain("taskCode === 'supplier_account_health_guard'")
+    expect(supplierAutomationAPISource).toContain('35 * 60 * 1000')
+    expect(supplierAutomationAPISource).toContain('timeout ? { timeout } : undefined')
   })
 
   it('uses the ordinary immediate run action for account health guard', () => {

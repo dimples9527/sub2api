@@ -857,6 +857,7 @@ import {
   type SupplierAutomationTask,
 } from '@/api/admin/supplierAutomation'
 import { platformBadgeClass, platformLabel } from '@/utils/platformColors'
+import { extractApiErrorMessage } from '@/utils/apiError'
 
 const tasks = ref<SupplierAutomationTask[]>([])
 const runs = ref<SupplierAutomationRun[]>([])
@@ -1034,7 +1035,7 @@ async function loadData() {
     await loadAccountRateGuardPendingCount()
     lastRefreshedAt.value = new Date().toISOString()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载自动化任务失败'
+    error.value = extractApiErrorMessage(err, '加载自动化任务失败')
   } finally {
     loading.value = false
   }
@@ -1123,7 +1124,7 @@ async function saveTask() {
     try {
       await ensureHealthGuardAccountCandidatesLoaded()
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '加载健康守护账号失败'
+      error.value = extractApiErrorMessage(err, '加载健康守护账号失败')
       return
     }
     const validationMessage = validateAccountHealthGuardConfig()
@@ -1140,7 +1141,7 @@ async function saveTask() {
     editVisible.value = false
     await loadData()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '保存任务失败'
+    error.value = extractApiErrorMessage(err, '保存任务失败')
   } finally {
     savingCode.value = ''
   }
@@ -1151,7 +1152,7 @@ async function runNow(taskCode: string) {
     try {
       await ensureHealthGuardAccountCandidatesLoaded()
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '加载健康守护账号失败'
+      error.value = extractApiErrorMessage(err, '加载健康守护账号失败')
       return
     }
     const task = tasks.value.find(item => item.task_code === taskCode)
@@ -1170,8 +1171,20 @@ async function runNow(taskCode: string) {
     showToast(`任务执行完成：${statusText(run.status)}`)
     runPage.value = 1
     await loadData()
+    openRunDetail(run)
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '运行任务失败'
+    error.value = extractApiErrorMessage(err, '运行任务失败')
+    runPage.value = 1
+    try {
+      await loadData()
+      // 后端可能已落库 run（超时/执行失败），尽量展示最近一次结构化结果
+      const task = tasks.value.find(item => item.task_code === taskCode)
+      if (task) {
+        await openTaskLatestResult(task)
+      }
+    } catch {
+      // 忽略刷新失败，保留上方错误提示
+    }
   } finally {
     runningCode.value = ''
   }
@@ -1187,7 +1200,7 @@ async function runPreview(taskCode: string) {
     await loadData()
     openRunDetail(run)
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '账号倍率守护检测预览失败'
+    error.value = extractApiErrorMessage(err, '账号倍率守护检测预览失败')
   } finally {
     runningCode.value = ''
   }
@@ -1217,7 +1230,7 @@ async function executeAccountRateGuard() {
     await loadData()
     openRunDetail(run)
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '执行账号倍率守护失败'
+    error.value = extractApiErrorMessage(err, '执行账号倍率守护失败')
   } finally {
     runningCode.value = ''
   }
@@ -1231,10 +1244,21 @@ function openResultDetail(title: string, message: string) {
   detailVisible.value = true
 }
 
-function openTaskLatestResult(task: SupplierAutomationTask) {
-  const run = latestRunByTask.value[task.task_code]
-  if (run) {
-    openRunDetail(run)
+async function openTaskLatestResult(task: SupplierAutomationTask) {
+  // 不依赖当前历史分页/筛选，按任务拉取最近一次完整运行记录
+  try {
+    const result = await listRuns({
+      task_code: task.task_code,
+      page: 1,
+      page_size: 1,
+    })
+    const latest = result.items[0]
+    if (latest) {
+      openRunDetail(latest)
+      return
+    }
+  } catch (err) {
+    error.value = extractApiErrorMessage(err, '加载最近结果失败')
     return
   }
   openResultDetail(`${task.name} 最近结果`, task.last_message)
@@ -1821,7 +1845,7 @@ async function openHealthGuardAccounts() {
     await ensureHealthGuardAccountCandidatesLoaded()
     await loadHealthGuardModels()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载健康守护账号失败'
+    error.value = extractApiErrorMessage(err, '加载健康守护账号失败')
   }
 }
 
@@ -1909,7 +1933,7 @@ async function refreshRuns() {
   try {
     await loadRuns()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载运行历史失败'
+    error.value = extractApiErrorMessage(err, '加载运行历史失败')
   } finally {
     loading.value = false
   }
