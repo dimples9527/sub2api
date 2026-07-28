@@ -1,0 +1,257 @@
+﻿package admin
+
+import (
+	"context"
+	"strconv"
+	"strings"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
+	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
+)
+
+// 供应商运维驾驶舱只读查询服务端口。
+type supplierDashboardService interface {
+	GetAccounts(ctx context.Context, q service.SupplierDashboardAccountsQuery) (service.SupplierDashboardAccountsResponse, error)
+	GetRates(ctx context.Context, q service.SupplierDashboardRatesQuery) (service.SupplierDashboardRatesResponse, error)
+	GetProviders(ctx context.Context, q service.SupplierDashboardProvidersQuery) (service.SupplierDashboardProvidersResponse, error)
+}
+
+// SupplierDashboardHandler 提供供应商运维驾驶舱只读接口。
+type SupplierDashboardHandler struct {
+	service supplierDashboardService
+}
+
+// NewSupplierDashboardHandler 创建供应商运维驾驶舱 Handler。
+func NewSupplierDashboardHandler(svc *service.SupplierDashboardService) *SupplierDashboardHandler {
+	return newSupplierDashboardHandlerWithService(svc)
+}
+
+func newSupplierDashboardHandlerWithService(svc supplierDashboardService) *SupplierDashboardHandler {
+	return &SupplierDashboardHandler{service: svc}
+}
+
+// GetAccounts 查询异常账号列表。
+func (h *SupplierDashboardHandler) GetAccounts(c *gin.Context) {
+	query, ok := parseSupplierDashboardAccountsQuery(c)
+	if !ok {
+		return
+	}
+	result, err := h.service.GetAccounts(c.Request.Context(), query)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+// GetRates 查询 Provider + Group 倍率分析。
+func (h *SupplierDashboardHandler) GetRates(c *gin.Context) {
+	query, ok := parseSupplierDashboardRatesQuery(c)
+	if !ok {
+		return
+	}
+	result, err := h.service.GetRates(c.Request.Context(), query)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+// GetProviders 查询供应商运行概览。
+func (h *SupplierDashboardHandler) GetProviders(c *gin.Context) {
+	query, ok := parseSupplierDashboardProvidersQuery(c)
+	if !ok {
+		return
+	}
+	result, err := h.service.GetProviders(c.Request.Context(), query)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func parseSupplierDashboardAccountsQuery(c *gin.Context) (service.SupplierDashboardAccountsQuery, bool) {
+	rangeValue, ok := parseSupplierDashboardRange(c)
+	if !ok {
+		return service.SupplierDashboardAccountsQuery{}, false
+	}
+	riskType, ok := parseSupplierDashboardRiskType(c)
+	if !ok {
+		return service.SupplierDashboardAccountsQuery{}, false
+	}
+	page, pageSize, ok := parseSupplierDashboardPagination(c)
+	if !ok {
+		return service.SupplierDashboardAccountsQuery{}, false
+	}
+	return service.SupplierDashboardAccountsQuery{
+		Range:        rangeValue,
+		RiskType:     riskType,
+		ProviderSlug: strings.TrimSpace(c.Query("provider_slug")),
+		GroupKey:     strings.TrimSpace(c.Query("group_key")),
+		Page:         page,
+		PageSize:     pageSize,
+	}, true
+}
+
+func parseSupplierDashboardRatesQuery(c *gin.Context) (service.SupplierDashboardRatesQuery, bool) {
+	rangeValue, ok := parseSupplierDashboardRange(c)
+	if !ok {
+		return service.SupplierDashboardRatesQuery{}, false
+	}
+	view, ok := parseSupplierDashboardRateView(c)
+	if !ok {
+		return service.SupplierDashboardRatesQuery{}, false
+	}
+	comparisonStatus, ok := parseSupplierDashboardComparisonStatus(c)
+	if !ok {
+		return service.SupplierDashboardRatesQuery{}, false
+	}
+	page, pageSize, ok := parseSupplierDashboardPagination(c)
+	if !ok {
+		return service.SupplierDashboardRatesQuery{}, false
+	}
+	return service.SupplierDashboardRatesQuery{
+		Range:            rangeValue,
+		View:             view,
+		ComparisonStatus: comparisonStatus,
+		ProviderSlug:     strings.TrimSpace(c.Query("provider_slug")),
+		GroupKey:         strings.TrimSpace(c.Query("group_key")),
+		Page:             page,
+		PageSize:         pageSize,
+	}, true
+}
+
+func parseSupplierDashboardProvidersQuery(c *gin.Context) (service.SupplierDashboardProvidersQuery, bool) {
+	rangeValue, ok := parseSupplierDashboardRange(c)
+	if !ok {
+		return service.SupplierDashboardProvidersQuery{}, false
+	}
+	status, ok := parseSupplierDashboardProviderStatus(c)
+	if !ok {
+		return service.SupplierDashboardProvidersQuery{}, false
+	}
+	page, pageSize, ok := parseSupplierDashboardPagination(c)
+	if !ok {
+		return service.SupplierDashboardProvidersQuery{}, false
+	}
+	return service.SupplierDashboardProvidersQuery{
+		Range:    rangeValue,
+		Status:   status,
+		Page:     page,
+		PageSize: pageSize,
+	}, true
+}
+
+func parseSupplierDashboardRange(c *gin.Context) (service.SupplierDashboardRange, bool) {
+	raw := strings.TrimSpace(c.DefaultQuery("range", string(service.SupplierDashboardRange24Hours)))
+	rangeValue := service.SupplierDashboardRange(raw)
+	if rangeValue != service.SupplierDashboardRange24Hours && rangeValue != service.SupplierDashboardRange7Days {
+		response.BadRequest(c, "range must be 24h or 7d")
+		return "", false
+	}
+	return rangeValue, true
+}
+
+func parseSupplierDashboardRiskType(c *gin.Context) (service.SupplierDashboardRiskType, bool) {
+	raw := strings.TrimSpace(c.DefaultQuery("risk_type", string(service.SupplierDashboardRiskTypeAll)))
+	riskType := service.SupplierDashboardRiskType(raw)
+	switch riskType {
+	case service.SupplierDashboardRiskTypeAll,
+		service.SupplierDashboardRiskTypeCritical,
+		service.SupplierDashboardRiskTypeTraffic,
+		service.SupplierDashboardRiskTypeRateUp,
+		service.SupplierDashboardRiskTypeNotLowest,
+		service.SupplierDashboardRiskTypeBalance,
+		service.SupplierDashboardRiskTypeSync,
+		service.SupplierDashboardRiskTypeTask:
+		return riskType, true
+	default:
+		response.BadRequest(c, "invalid risk_type")
+		return "", false
+	}
+}
+
+func parseSupplierDashboardRateView(c *gin.Context) (service.SupplierDashboardRateView, bool) {
+	raw := strings.TrimSpace(c.DefaultQuery("view", string(service.SupplierDashboardRateViewRisk)))
+	view := service.SupplierDashboardRateView(raw)
+	switch view {
+	case service.SupplierDashboardRateViewRisk,
+		service.SupplierDashboardRateViewChanged,
+		service.SupplierDashboardRateViewAll:
+		return view, true
+	default:
+		response.BadRequest(c, "invalid view")
+		return "", false
+	}
+}
+
+func parseSupplierDashboardComparisonStatus(c *gin.Context) (service.SupplierDashboardComparisonStatus, bool) {
+	raw := strings.TrimSpace(c.Query("comparison_status"))
+	if raw == "" {
+		return "", true
+	}
+	status := service.SupplierDashboardComparisonStatus(raw)
+	switch status {
+	case service.SupplierDashboardComparisonStatusLowest,
+		service.SupplierDashboardComparisonStatusTiedLowest,
+		service.SupplierDashboardComparisonStatusNotLowest,
+		service.SupplierDashboardComparisonStatusMissingGroup,
+		service.SupplierDashboardComparisonStatusInsufficientAccounts,
+		service.SupplierDashboardComparisonStatusUnknown:
+		return status, true
+	default:
+		response.BadRequest(c, "invalid comparison_status")
+		return "", false
+	}
+}
+
+func parseSupplierDashboardProviderStatus(c *gin.Context) (service.SupplierDashboardProviderStatus, bool) {
+	raw := strings.TrimSpace(c.Query("status"))
+	if raw == "" {
+		return "", true
+	}
+	status := service.SupplierDashboardProviderStatus(raw)
+	switch status {
+	case service.SupplierDashboardProviderStatusHealthy,
+		service.SupplierDashboardProviderStatusWarning,
+		service.SupplierDashboardProviderStatusHighRisk,
+		service.SupplierDashboardProviderStatusDisabled,
+		service.SupplierDashboardProviderStatusUnknown:
+		return status, true
+	default:
+		response.BadRequest(c, "invalid status")
+		return "", false
+	}
+}
+
+func parseSupplierDashboardPagination(c *gin.Context) (int, int, bool) {
+	page, ok := parseSupplierDashboardPositiveInt(c, "page", 1)
+	if !ok {
+		return 0, 0, false
+	}
+	pageSize, ok := parseSupplierDashboardPositiveInt(c, "page_size", 20)
+	if !ok {
+		return 0, 0, false
+	}
+	if pageSize > 100 {
+		response.BadRequest(c, "page_size must be between 1 and 100")
+		return 0, 0, false
+	}
+	return page, pageSize, true
+}
+
+func parseSupplierDashboardPositiveInt(c *gin.Context, key string, defaultValue int) (int, bool) {
+	raw := strings.TrimSpace(c.Query(key))
+	if raw == "" {
+		return defaultValue, true
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 1 {
+		response.BadRequest(c, key+" must be a positive integer")
+		return 0, false
+	}
+	return value, true
+}

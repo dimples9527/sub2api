@@ -110,6 +110,7 @@ func RegisterAdminRoutes(
 
 		// 上游管理
 		registerSupplierManagementRoutes(admin, h)
+		registerSupplierDashboardRoutes(admin, h)
 		registerUpstreamManagementRoutes(admin, h)
 		RegisterAdminLLMMonitorRoutes(admin, settingService)
 
