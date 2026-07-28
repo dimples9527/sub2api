@@ -466,13 +466,13 @@
       </div>
       <template #footer>
         <button
-          class="sp-button ghost"
+          class="sp-business-platform-cancel"
           type="button"
           :disabled="savingBusinessPlatform"
           @click="closeBusinessPlatformDialog"
         >取消</button>
         <button
-          class="sp-button primary"
+          class="sp-business-platform-save"
           type="button"
           :disabled="savingBusinessPlatform"
           @click="saveBusinessPlatform"
@@ -2908,9 +2908,74 @@ button.sp-test-status.failed:hover {
   background: color-mix(in srgb, currentColor 14%, var(--sp-panel));
 }
 
+:global(.modal-content:has(.sp-business-platform-dialog)) {
+  --sp-panel: #ffffff;
+  --sp-panel-2: #f5f8fc;
+  --sp-panel-3: #eef3f9;
+  --sp-line: #d7e2ef;
+  --sp-soft: #e8eef6;
+  --sp-text: #152238;
+  --sp-muted: #5f7088;
+  --sp-dim: #8a99ad;
+  --sp-cyan: #2563eb;
+  --sp-green: #16835d;
+  --sp-amber: #c56a0a;
+  --sp-orange: #ea580c;
+  --sp-red: #d14343;
+  --sp-blue: #1d4ed8;
+  --sp-violet: #7c3aed;
+  --sp-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  border-color: #c9d7e8;
+  background:
+    radial-gradient(circle at 12% 0%, color-mix(in srgb, #2563eb 10%, transparent), transparent 36%),
+    radial-gradient(circle at 96% 8%, color-mix(in srgb, #0ea5e9 8%, transparent), transparent 30%),
+    #ffffff;
+  color: var(--sp-text);
+}
+
+:global(.dark .modal-content:has(.sp-business-platform-dialog)) {
+  --sp-panel: #172033;
+  --sp-panel-2: #1d293d;
+  --sp-panel-3: #243249;
+  --sp-line: #35445c;
+  --sp-soft: #2c3a51;
+  --sp-text: #edf3fb;
+  --sp-muted: #a8b6ca;
+  --sp-dim: #75849a;
+  --sp-cyan: #3b82f6;
+  --sp-blue: #60a5fa;
+  --sp-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  border-color: #3b4b64;
+  background:
+    radial-gradient(circle at 10% 0%, color-mix(in srgb, #3b82f6 16%, transparent), transparent 34%),
+    radial-gradient(circle at 94% 10%, color-mix(in srgb, #0ea5e9 12%, transparent), transparent 30%),
+    #172033;
+  color: var(--sp-text);
+}
+
+:global(.modal-content:has(.sp-business-platform-dialog) .modal-footer) {
+  gap: 0.75rem;
+  border-top-color: color-mix(in srgb, #2563eb 16%, var(--sp-line));
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, #2563eb 7%, var(--sp-panel)),
+    color-mix(in srgb, #0ea5e9 5%, var(--sp-panel))
+  );
+}
+
+:global(.dark .modal-content:has(.sp-business-platform-dialog) .modal-footer) {
+  border-top-color: color-mix(in srgb, #60a5fa 18%, var(--sp-line));
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, #3b82f6 12%, var(--sp-panel)),
+    color-mix(in srgb, #0ea5e9 8%, var(--sp-panel))
+  );
+}
+
 .sp-business-platform-dialog {
   display: grid;
   gap: 1rem;
+  padding: 0.15rem 0.05rem 0.25rem;
 }
 
 .sp-business-platform-summary {
@@ -2928,32 +2993,107 @@ button.sp-test-status.failed:hover {
 
 .sp-business-platform-summary > div {
   min-width: 0;
-  border: 1px solid var(--sp-line);
-  border-radius: 0.65rem;
-  padding: 0.75rem;
-  background: var(--sp-panel-2);
+  border: 1px solid color-mix(in srgb, #2563eb 14%, var(--sp-line));
+  border-radius: 0.75rem;
+  padding: 0.8rem 0.9rem;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #2563eb 6%, var(--sp-panel)), var(--sp-panel-2));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
 }
 
 .sp-business-platform-summary dt,
 .sp-business-platform-field > span {
   color: var(--sp-muted);
   font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 .sp-business-platform-summary dd {
   overflow: hidden;
   margin: 0;
   color: var(--sp-text);
-  font-weight: 600;
+  font-size: 0.92rem;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .sp-business-platform-hint {
   margin: 0;
+  border: 1px solid color-mix(in srgb, #0ea5e9 16%, var(--sp-line));
+  border-radius: 0.7rem;
+  padding: 0.7rem 0.85rem;
+  background: color-mix(in srgb, #0ea5e9 7%, var(--sp-panel));
   color: var(--sp-muted);
   font-size: 0.8rem;
   line-height: 1.55;
+}
+
+.sp-business-platform-cancel,
+.sp-business-platform-save {
+  display: inline-flex;
+  min-height: 2.5rem;
+  min-width: 5.5rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.55rem;
+  padding: 0.5rem 0.95rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+}
+
+.sp-business-platform-cancel {
+  border: 1px solid #c5d0de;
+  background: #f8fafc;
+  color: #334155;
+}
+
+.sp-business-platform-cancel:hover:not(:disabled) {
+  border-color: #94a3b8;
+  background: #eef2f7;
+  color: #0f172a;
+}
+
+.sp-business-platform-save {
+  border: 1px solid #1d4ed8;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8 58%, #0f766e);
+  color: #ffffff;
+  box-shadow: 0 0.4rem 0.9rem rgba(37, 99, 235, 0.28);
+}
+
+.sp-business-platform-save:hover:not(:disabled) {
+  border-color: #1e40af;
+  background: linear-gradient(135deg, #1d4ed8, #1e40af 58%, #0f766e);
+  color: #ffffff;
+  box-shadow: 0 0.45rem 1rem rgba(29, 78, 216, 0.34);
+}
+
+.sp-business-platform-cancel:disabled,
+.sp-business-platform-save:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  box-shadow: none;
+}
+
+:global(.dark .modal-content:has(.sp-business-platform-dialog) .sp-business-platform-cancel) {
+  border-color: #46576f;
+  background: #243249;
+  color: #dbe7f5;
+}
+
+:global(.dark .modal-content:has(.sp-business-platform-dialog) .sp-business-platform-cancel:hover:not(:disabled)) {
+  border-color: #64748b;
+  background: #2c3a51;
+  color: #ffffff;
+}
+
+:global(.dark .modal-content:has(.sp-business-platform-dialog) .sp-business-platform-save) {
+  border-color: #3b82f6;
+  background: linear-gradient(135deg, #3b82f6, #2563eb 58%, #0e7490);
+  color: #ffffff;
 }
 
 .sp-account-binding-dialog {
