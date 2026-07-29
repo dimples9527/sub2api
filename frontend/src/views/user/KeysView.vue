@@ -587,7 +587,7 @@ import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 	import type { KeyGroupSelectorPosition } from '@/components/keys/KeyGroupSelectorPopover.vue'
 	import KeyFormModal from '@/components/keys/KeyFormModal.vue'
 	import GroupBadge from '@/components/common/GroupBadge.vue'
-	import type { ApiKey, Group, PublicSettings, SubscriptionType, GroupPlatform } from '@/types'
+	import type { ApiKey, Group, PublicSettings } from '@/types'
 import type { Column } from '@/components/common/types'
 import type { BatchApiKeyUsageStats } from '@/api/usage'
 import { formatDateTime } from '@/utils/format'
@@ -596,20 +596,6 @@ import {
   buildCcSwitchImportDeeplink,
   type CcSwitchClientType
 } from '@/utils/ccswitchImport'
-
-interface GroupOption {
-  value: number
-  label: string
-  description: string | null
-  rate: number
-  userRate: number | null
-  peakRateEnabled: boolean
-  peakStart: string
-  peakEnd: string
-  peakRateMultiplier: number
-  subscriptionType: SubscriptionType
-  platform: GroupPlatform
-}
 
 const appStore = useAppStore()
 const { copyToClipboard: clipboardCopy } = useClipboard()

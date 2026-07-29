@@ -550,6 +550,8 @@ export interface KeyFormGroupOption {
   peakRateMultiplier: number
   subscriptionType: SubscriptionType
   platform: GroupPlatform
+  // 兼容 common/Select.vue 的 SelectOption（含索引签名）
+  [key: string]: unknown
 }
 
 const props = defineProps<{
