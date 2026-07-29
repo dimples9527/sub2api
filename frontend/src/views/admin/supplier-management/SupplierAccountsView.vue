@@ -82,22 +82,39 @@
             />
           </div>
         </div>
-        <div class="sp-account-filter-actions">
-          <button class="sp-button primary" type="button" @click="openCreateAccountDialog">
+        <div class="sp-account-filter-actions" data-test="supplier-account-filter-actions">
+          <button
+            class="sp-button sp-account-toolbar-btn sp-account-toolbar-create"
+            type="button"
+            data-test="supplier-account-create"
+            @click="openCreateAccountDialog"
+          >
             添加账号
           </button>
           <button
-            class="sp-button ghost"
+            class="sp-button sp-account-toolbar-btn sp-account-toolbar-test"
             type="button"
+            data-test="supplier-account-batch-test"
             :disabled="!batchTesting && (loading || batchTestPreparing || total === 0)"
             @click="handleSupplierBatchTestButton"
           >
             {{ batchTesting ? '查看测试进度' : batchTestPreparing ? '准备测试中…' : '测试当前筛选' }}
           </button>
-          <button class="sp-button ghost" type="button" @click="openAccountRateGuardLogs">
+          <button
+            class="sp-button sp-account-toolbar-btn sp-account-toolbar-logs"
+            type="button"
+            data-test="supplier-account-rate-guard-logs"
+            @click="openAccountRateGuardLogs"
+          >
             倍率守护日志
           </button>
-          <button class="sp-button sp-account-refresh" type="button" :disabled="loading" @click="loadAccounts">
+          <button
+            class="sp-button sp-account-toolbar-btn sp-account-toolbar-refresh sp-account-refresh"
+            type="button"
+            data-test="supplier-account-refresh"
+            :disabled="loading"
+            @click="loadAccounts"
+          >
             {{ loading ? '刷新中…' : '刷新' }}
           </button>
         </div>
@@ -1517,6 +1534,17 @@ function selectedBatchTestModelsByPlatform(): Record<string, string> {
   return result
 }
 
+// 将业务平台选中的模型展开到每个账号，避免本地账号原始 platform 与业务平台不一致时模型丢失。
+function selectedBatchTestModelsByAccount(): Record<number, string> {
+  const modelsByPlatform = selectedBatchTestModelsByPlatform()
+  const result: Record<number, string> = {}
+  for (const target of batchTestTargets.value) {
+    const modelID = modelsByPlatform[target.platform]?.trim()
+    if (modelID) result[target.accountID] = modelID
+  }
+  return result
+}
+
 async function startSupplierBatchTest() {
   if (batchTesting.value || batchTestTargets.value.length === 0) return
   batchTesting.value = true
@@ -1530,9 +1558,11 @@ async function startSupplierBatchTest() {
 
   try {
     const modelIDsByPlatform = selectedBatchTestModelsByPlatform()
+    const modelIDsByAccount = selectedBatchTestModelsByAccount()
     const job = await startSupplierAccountBatchTest({
       account_ids: batchTestTargets.value.map(target => target.accountID),
       ...(Object.keys(modelIDsByPlatform).length ? { model_ids_by_platform: modelIDsByPlatform } : {}),
+      ...(Object.keys(modelIDsByAccount).length ? { model_ids_by_account: modelIDsByAccount } : {}),
       concurrency: batchTestConcurrency.value,
       timeout_per_account_seconds: batchTestTimeoutSeconds.value,
       timeout_seconds: SUPPLIER_BATCH_TEST_TOTAL_TIMEOUT_SECONDS,
@@ -2356,15 +2386,73 @@ function formatTime(value?: string): string {
 .sp-account-filter-actions {
   display: flex;
   flex: 0 0 auto;
+  flex-wrap: wrap;
   align-items: center;
-  align-self: stretch;
-  padding-left: 0.875rem;
+  align-self: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding-left: 1rem;
   border-left: 1px solid var(--sp-line);
 }
 
-.sp-account-refresh {
-  min-width: 5.5rem;
+.sp-account-toolbar-btn {
   min-height: 2.625rem;
+  padding-inline: 0.95rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.sp-account-toolbar-create {
+  border-color: color-mix(in srgb, var(--sp-green) 55%, var(--sp-line));
+  background: var(--sp-green);
+  color: #fff;
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--sp-green) 22%, transparent);
+}
+
+.sp-account-toolbar-create:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--sp-green) 70%, #14532d);
+  background: color-mix(in srgb, var(--sp-green) 88%, #14532d);
+  color: #fff;
+}
+
+.sp-account-toolbar-test {
+  border-color: color-mix(in srgb, var(--sp-blue) 42%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-blue) 10%, var(--sp-panel));
+  color: var(--sp-blue);
+}
+
+.sp-account-toolbar-test:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--sp-blue) 58%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-blue) 16%, var(--sp-panel));
+  color: color-mix(in srgb, var(--sp-blue) 85%, #0f172a);
+}
+
+.sp-account-toolbar-logs {
+  border-color: color-mix(in srgb, var(--sp-amber) 45%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-amber) 12%, var(--sp-panel));
+  color: var(--sp-amber);
+}
+
+.sp-account-toolbar-logs:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--sp-amber) 62%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-amber) 18%, var(--sp-panel));
+  color: color-mix(in srgb, var(--sp-amber) 88%, #7c2d12);
+}
+
+.sp-account-toolbar-refresh,
+.sp-account-refresh {
+  min-width: 5.25rem;
+  min-height: 2.625rem;
+  border-color: color-mix(in srgb, var(--sp-violet) 28%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-violet) 8%, var(--sp-panel));
+  color: var(--sp-violet);
+}
+
+.sp-account-toolbar-refresh:hover:not(:disabled),
+.sp-account-refresh:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--sp-violet) 48%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-violet) 14%, var(--sp-panel));
+  color: color-mix(in srgb, var(--sp-violet) 90%, #1e1b4b);
 }
 
 .sp-account-workbench {
@@ -3260,63 +3348,62 @@ button.sp-test-status.failed:hover {
 .sp-batch-result-dialog {
   display: flex;
   flex-direction: column;
-  gap: 0.875rem;
+  gap: 1rem;
   overflow: hidden;
-  border-radius: 1rem;
-  padding: 0.9rem;
-}
-
-.sp-batch-test-dialog {
-  border: 1px solid color-mix(in srgb, var(--sp-cyan) 18%, var(--sp-line));
-  background:
-    radial-gradient(circle at 8% 0%, color-mix(in srgb, var(--sp-blue) 11%, transparent), transparent 34%),
-    radial-gradient(circle at 94% 8%, color-mix(in srgb, var(--sp-green) 11%, transparent), transparent 32%),
-    color-mix(in srgb, var(--sp-cyan) 5%, var(--sp-panel));
+  border: 0;
+  border-radius: 0;
+  padding: 0.15rem 0.1rem 0.35rem;
+  background: transparent;
+  box-shadow: none;
 }
 
 .sp-batch-result-dialog {
-  border: 1px solid color-mix(in srgb, var(--sp-blue) 18%, var(--sp-line));
-  background:
-    radial-gradient(circle at 5% 0%, color-mix(in srgb, var(--sp-blue) 10%, transparent), transparent 30%),
-    radial-gradient(circle at 95% 4%, color-mix(in srgb, var(--sp-green) 10%, transparent), transparent 30%),
-    radial-gradient(circle at 70% 100%, color-mix(in srgb, var(--sp-amber) 6%, transparent), transparent 32%),
-    color-mix(in srgb, var(--sp-blue) 4%, var(--sp-panel));
+  min-height: 0;
+  flex: 1 1 auto;
+  height: 100%;
+  overflow: hidden;
+}
+
+.sp-batch-test-dialog {
+  /* 弹窗外层已有 BaseDialog 边框，这里不再套一层卡片 */
+  background: transparent;
+}
+
+.sp-batch-result-dialog {
+  background: transparent;
 }
 
 .sp-batch-test-summary {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
-  border: 1px solid color-mix(in srgb, var(--sp-cyan) 18%, var(--sp-line));
-  border-radius: 0.85rem;
-  padding: 0.875rem;
-  background:
-    radial-gradient(circle at 92% 12%, color-mix(in srgb, var(--sp-green) 9%, transparent), transparent 34%),
-    color-mix(in srgb, var(--sp-cyan) 4%, var(--sp-panel));
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .sp-batch-summary-metric {
   position: relative;
   display: flex;
-  min-height: 4.25rem;
+  min-height: 3.75rem;
   align-items: center;
   justify-content: space-between;
   overflow: hidden;
-  border: 1px solid var(--sp-line);
-  border-radius: 0.7rem;
+  border: 0;
+  border-radius: 0.75rem;
   padding: 0.75rem 0.875rem 0.75rem 1rem;
-  background: color-mix(in srgb, var(--sp-panel-2) 92%, transparent);
-  box-shadow: 0 0.55rem 1.25rem color-mix(in srgb, #0f172a 5%, transparent);
+  background: color-mix(in srgb, var(--sp-panel-2) 88%, transparent);
+  box-shadow: none;
 }
 
 .sp-batch-summary-metric.accounts {
-  border-color: color-mix(in srgb, var(--sp-cyan) 28%, var(--sp-line));
-  background: linear-gradient(135deg, color-mix(in srgb, var(--sp-cyan) 13%, var(--sp-panel)), var(--sp-panel));
+  background: color-mix(in srgb, var(--sp-cyan) 10%, var(--sp-panel-2));
 }
 
 .sp-batch-summary-metric.platforms {
-  border-color: color-mix(in srgb, var(--sp-amber) 30%, var(--sp-line));
-  background: linear-gradient(135deg, color-mix(in srgb, var(--sp-amber) 13%, var(--sp-panel)), var(--sp-panel));
+  background: color-mix(in srgb, var(--sp-amber) 10%, var(--sp-panel-2));
 }
 
 .sp-batch-summary-metric::before {
@@ -3373,8 +3460,8 @@ button.sp-test-status.failed:hover {
   align-items: flex-start;
   gap: 0.5rem;
   margin: 0;
-  border-top: 1px solid color-mix(in srgb, var(--sp-line) 80%, transparent);
-  padding: 0.75rem 0.2rem 0;
+  border-top: 0;
+  padding: 0.15rem 0.1rem 0;
   color: var(--sp-muted);
   font-size: 0.75rem;
   line-height: 1.55;
@@ -3392,27 +3479,27 @@ button.sp-test-status.failed:hover {
 
 .sp-batch-test-section {
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--sp-cyan) 16%, var(--sp-line));
-  border-radius: 0.8rem;
-  background: color-mix(in srgb, var(--sp-panel) 96%, transparent);
-  box-shadow: 0 0.7rem 1.8rem color-mix(in srgb, #0f172a 6%, transparent);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .sp-batch-test-section.settings-section {
-  border-color: color-mix(in srgb, var(--sp-amber) 20%, var(--sp-line));
+  border-color: transparent;
 }
 
 .sp-batch-test-section > header {
   display: flex;
   align-items: center;
   gap: 0.7rem;
-  padding: 0.75rem 0.875rem;
-  border-bottom: 1px solid var(--sp-line);
-  background: linear-gradient(90deg, color-mix(in srgb, var(--sp-cyan) 15%, var(--sp-panel)), color-mix(in srgb, var(--sp-blue) 7%, var(--sp-panel)) 58%, var(--sp-panel));
+  padding: 0.15rem 0.1rem 0.7rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--sp-line) 88%, transparent);
+  background: transparent;
 }
 
 .sp-batch-test-section.settings-section > header {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--sp-amber) 16%, var(--sp-panel)), color-mix(in srgb, var(--sp-amber) 6%, var(--sp-panel)) 62%, var(--sp-panel));
+  background: transparent;
 }
 
 .sp-batch-section-index {
@@ -3459,6 +3546,8 @@ button.sp-test-status.failed:hover {
 .sp-batch-test-platform-list {
   display: flex;
   flex-direction: column;
+  border: 0;
+  background: transparent;
 }
 
 .sp-batch-test-platform-row {
@@ -3467,15 +3556,15 @@ button.sp-test-status.failed:hover {
   grid-template-columns: minmax(10rem, 0.75fr) minmax(15rem, 1.25fr);
   align-items: center;
   gap: 1rem;
-  padding: 0.8rem 0.875rem 0.8rem 1.15rem;
-  border-bottom: 1px solid var(--sp-line);
-  background: linear-gradient(90deg, color-mix(in srgb, var(--sp-blue) 5%, var(--sp-panel)), var(--sp-panel));
-  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+  padding: 0.85rem 0.25rem 0.85rem 0.95rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--sp-line) 90%, transparent);
+  background: transparent;
+  transition: background 150ms ease;
 }
 
 .sp-batch-test-platform-row:hover {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--sp-cyan) 10%, var(--sp-panel)), color-mix(in srgb, var(--sp-blue) 4%, var(--sp-panel)));
-  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--sp-panel-2) 80%, transparent);
+  transform: none;
 }
 
 .sp-batch-test-platform-row:last-child {
@@ -3514,7 +3603,7 @@ button.sp-test-status.failed:hover {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
-  padding: 0.875rem;
+  padding: 0.85rem 0.1rem 0.15rem;
 }
 
 .sp-batch-test-settings label {
@@ -3522,10 +3611,10 @@ button.sp-test-status.failed:hover {
   grid-template-columns: 1fr auto;
   align-items: center;
   gap: 0.18rem 0.75rem;
-  border: 1px solid color-mix(in srgb, var(--sp-amber) 22%, var(--sp-line));
+  border: 0;
   border-radius: 0.7rem;
-  padding: 0.75rem;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--sp-amber) 9%, var(--sp-panel)), var(--sp-panel));
+  padding: 0.75rem 0.8rem;
+  background: color-mix(in srgb, var(--sp-amber) 8%, var(--sp-panel-2));
   box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sp-amber) 55%, transparent);
 }
 
@@ -3583,10 +3672,10 @@ button.sp-test-status.failed:hover {
 
 .batch-result-progress-description {
   margin: 0;
-  border: 1px solid color-mix(in srgb, var(--sp-blue) 20%, var(--sp-line));
-  border-radius: 0.7rem;
-  padding: 0.75rem 1rem;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--sp-blue) 10%, var(--sp-panel)), color-mix(in srgb, var(--sp-cyan) 6%, var(--sp-panel)));
+  border: 0;
+  border-radius: 0;
+  padding: 0.15rem 0.1rem 0.35rem;
+  background: transparent;
   color: var(--sp-muted);
   font-size: 0.8rem;
   line-height: 1.5;
@@ -3603,31 +3692,27 @@ button.sp-test-status.failed:hover {
 .sync-result-stat {
   display: grid;
   gap: 0.25rem;
-  border: 1px solid var(--sp-line);
+  border: 0;
   border-radius: 0.7rem;
   padding: 0.7rem 0.8rem;
-  background: color-mix(in srgb, var(--sp-panel-2) 94%, transparent);
-  box-shadow: 0 0.5rem 1.2rem color-mix(in srgb, #0f172a 5%, transparent);
+  background: color-mix(in srgb, var(--sp-panel-2) 92%, transparent);
+  box-shadow: none;
 }
 
 .sync-result-stat.total {
-  border-color: color-mix(in srgb, var(--sp-blue) 30%, var(--sp-line));
-  background: linear-gradient(145deg, color-mix(in srgb, var(--sp-blue) 13%, var(--sp-panel)), var(--sp-panel));
+  background: color-mix(in srgb, var(--sp-blue) 10%, var(--sp-panel-2));
 }
 
 .sync-result-stat.completed {
-  border-color: color-mix(in srgb, var(--sp-cyan) 30%, var(--sp-line));
-  background: linear-gradient(145deg, color-mix(in srgb, var(--sp-cyan) 13%, var(--sp-panel)), var(--sp-panel));
+  background: color-mix(in srgb, var(--sp-cyan) 10%, var(--sp-panel-2));
 }
 
 .sync-result-stat.success {
-  border-color: color-mix(in srgb, var(--sp-green) 30%, var(--sp-line));
-  background: linear-gradient(145deg, color-mix(in srgb, var(--sp-green) 13%, var(--sp-panel)), var(--sp-panel));
+  background: color-mix(in srgb, var(--sp-green) 10%, var(--sp-panel-2));
 }
 
 .sync-result-stat.failed {
-  border-color: color-mix(in srgb, var(--sp-red) 30%, var(--sp-line));
-  background: linear-gradient(145deg, color-mix(in srgb, var(--sp-red) 12%, var(--sp-panel)), var(--sp-panel));
+  background: color-mix(in srgb, var(--sp-red) 10%, var(--sp-panel-2));
 }
 
 .sync-result-stat span {
@@ -3659,20 +3744,25 @@ button.sp-test-status.failed:hover {
 }
 
 .sync-confirm-body {
+  display: flex;
   min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
   padding: 0;
   background: transparent;
 }
 
 .sync-confirm-section {
-  display: grid;
+  display: flex;
   min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
   gap: 0;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--sp-blue) 18%, var(--sp-line));
-  border-radius: 0.75rem;
-  background: color-mix(in srgb, var(--sp-panel) 96%, transparent);
-  box-shadow: 0 0.8rem 1.9rem color-mix(in srgb, #0f172a 6%, transparent);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .sync-confirm-section-title {
@@ -3680,9 +3770,9 @@ button.sp-test-status.failed:hover {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--sp-blue) 18%, var(--sp-line));
-  padding: 0.7rem 0.9rem;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--sp-blue) 12%, var(--sp-panel)), color-mix(in srgb, var(--sp-cyan) 6%, var(--sp-panel)) 62%, var(--sp-panel));
+  border-bottom: 1px solid color-mix(in srgb, var(--sp-line) 90%, transparent);
+  padding: 0.2rem 0.1rem 0.7rem;
+  background: transparent;
   color: var(--sp-text);
   font-size: 0.8rem;
   font-weight: 800;
@@ -3703,9 +3793,18 @@ button.sp-test-status.failed:hover {
 .batch-result-scroll {
   display: flex;
   min-height: 0;
-  max-height: min(58vh, 42rem);
+  max-height: none;
+  flex: 1 1 auto;
   flex-direction: column;
   overflow: auto;
+  overscroll-behavior: contain;
+  scroll-padding-bottom: 1.5rem;
+  -webkit-overflow-scrolling: touch;
+}
+
+.batch-result-list {
+  flex: 0 0 auto;
+  padding-bottom: 1.5rem;
 }
 
 .batch-result-toolbar {
@@ -3714,9 +3813,9 @@ button.sp-test-status.failed:hover {
   z-index: 3;
   display: grid;
   gap: 0.5rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--sp-blue) 18%, var(--sp-line));
-  padding: 0.65rem;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--sp-blue) 9%, var(--sp-panel)), color-mix(in srgb, var(--sp-cyan) 5%, var(--sp-panel)));
+  border-bottom: 1px solid color-mix(in srgb, var(--sp-line) 90%, transparent);
+  padding: 0.55rem 0.1rem 0.65rem;
+  background: color-mix(in srgb, var(--sp-panel) 92%, transparent);
   backdrop-filter: blur(10px);
 }
 
@@ -3814,8 +3913,8 @@ button.sp-test-status.failed:hover {
 
 .batch-result-list {
   display: grid;
-  gap: 0.65rem;
-  padding: 0.65rem;
+  gap: 0.55rem;
+  padding: 0.55rem 0.1rem 1.5rem;
 }
 
 .batch-result-card {
@@ -3823,41 +3922,47 @@ button.sp-test-status.failed:hover {
   display: grid;
   gap: 0.65rem;
   overflow: hidden;
-  border: 1px solid var(--sp-line);
-  border-radius: 0.6rem;
-  padding: 0.75rem;
-  background: var(--sp-panel);
-  box-shadow: 0 0.45rem 1.1rem color-mix(in srgb, #0f172a 4%, transparent);
-  transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+  border: 0;
+  border-radius: 0.7rem;
+  padding: 0.8rem 0.85rem 0.8rem 0.95rem;
+  background: color-mix(in srgb, var(--sp-panel-2) 90%, transparent);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sp-line) 90%, transparent);
+  transition: background 150ms ease, box-shadow 150ms ease;
 }
 
 .batch-result-card:hover {
-  box-shadow: 0 0.75rem 1.5rem color-mix(in srgb, #0f172a 8%, transparent);
-  transform: translateY(-1px);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sp-blue) 45%, var(--sp-line));
+  transform: none;
+  background: color-mix(in srgb, var(--sp-panel-2) 98%, transparent);
 }
 
 .batch-result-card.success {
-  border-color: color-mix(in srgb, var(--sp-green) 28%, var(--sp-line));
-  background: linear-gradient(135deg, color-mix(in srgb, var(--sp-green) 10%, var(--sp-panel)), var(--sp-panel));
+  border-color: transparent;
+  background: color-mix(in srgb, var(--sp-green) 9%, var(--sp-panel-2));
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sp-green) 70%, transparent);
 }
 
 .batch-result-card.failed {
-  border-color: color-mix(in srgb, var(--sp-red) 28%, var(--sp-line));
-  background: linear-gradient(135deg, color-mix(in srgb, var(--sp-red) 10%, var(--sp-panel)), var(--sp-panel));
+  border-color: transparent;
+  background: color-mix(in srgb, var(--sp-red) 9%, var(--sp-panel-2));
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sp-red) 70%, transparent);
 }
 
 .batch-result-card.failed-schedulable {
-  border-color: color-mix(in srgb, var(--sp-red) 50%, var(--sp-line));
-  box-shadow: 0 0.6rem 1.35rem color-mix(in srgb, var(--sp-red) 10%, transparent);
+  border-color: transparent;
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sp-red) 85%, transparent);
+  background: color-mix(in srgb, var(--sp-red) 12%, var(--sp-panel-2));
 }
 
 .batch-result-card.warning {
-  border-color: color-mix(in srgb, var(--sp-amber) 30%, var(--sp-line));
-  background: linear-gradient(135deg, color-mix(in srgb, var(--sp-amber) 11%, var(--sp-panel)), var(--sp-panel));
+  border-color: transparent;
+  background: color-mix(in srgb, var(--sp-amber) 10%, var(--sp-panel-2));
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sp-amber) 70%, transparent);
 }
 
 .batch-result-card.neutral {
-  background: linear-gradient(135deg, color-mix(in srgb, var(--sp-muted) 6%, var(--sp-panel)), var(--sp-panel));
+  background: color-mix(in srgb, var(--sp-muted) 6%, var(--sp-panel-2));
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sp-muted) 45%, transparent);
 }
 
 .batch-result-card::before {
@@ -3937,26 +4042,18 @@ button.sp-test-status.failed:hover {
 .batch-result-metric {
   display: grid;
   min-width: 0;
-  gap: 0.25rem;
-  border: 1px solid color-mix(in srgb, var(--sp-line) 82%, transparent);
-  border-radius: 0.5rem;
-  padding: 0.55rem;
-  background: color-mix(in srgb, var(--sp-panel-2) 88%, transparent);
+  gap: 0.2rem;
+  border: 0;
+  border-radius: 0;
+  padding: 0.15rem 0.1rem;
+  background: transparent;
 }
 
-.batch-result-card.success .batch-result-metric {
-  border-color: color-mix(in srgb, var(--sp-green) 16%, var(--sp-line));
-  background: color-mix(in srgb, var(--sp-green) 6%, var(--sp-panel));
-}
-
-.batch-result-card.failed .batch-result-metric {
-  border-color: color-mix(in srgb, var(--sp-red) 16%, var(--sp-line));
-  background: color-mix(in srgb, var(--sp-red) 6%, var(--sp-panel));
-}
-
+.batch-result-card.success .batch-result-metric,
+.batch-result-card.failed .batch-result-metric,
 .batch-result-card.warning .batch-result-metric {
-  border-color: color-mix(in srgb, var(--sp-amber) 18%, var(--sp-line));
-  background: color-mix(in srgb, var(--sp-amber) 7%, var(--sp-panel));
+  border-color: transparent;
+  background: transparent;
 }
 
 .batch-result-metric > span {
@@ -3999,14 +4096,15 @@ button.sp-test-status.failed:hover {
 
 .batch-result-error {
   overflow-wrap: anywhere;
-  border: 1px solid color-mix(in srgb, var(--sp-red) 34%, var(--sp-line));
+  border: 0;
   border-radius: 0.5rem;
-  padding: 0.55rem;
-  background: color-mix(in srgb, var(--sp-red) 12%, var(--sp-panel));
+  padding: 0.55rem 0.65rem;
+  background: color-mix(in srgb, var(--sp-red) 10%, var(--sp-panel-2));
   color: color-mix(in srgb, var(--sp-red) 82%, var(--sp-text));
   font-size: 0.72rem;
   font-weight: 650;
   line-height: 1.45;
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sp-red) 70%, transparent);
 }
 
 .batch-result-empty {
@@ -4113,7 +4211,22 @@ button.sp-test-status.failed:hover {
 :global(.modal-content:has(.sp-batch-result-dialog)) {
   width: min(1600px, calc(100vw - 32px));
   max-width: none;
+  max-height: min(92vh, 92dvh);
   overflow-x: hidden;
+  overflow-y: hidden;
+}
+
+:global(.modal-content:has(.sp-batch-result-dialog) .modal-body) {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow: hidden;
+  padding-bottom: 0.75rem;
+}
+
+:global(.modal-content:has(.sp-batch-result-dialog) .modal-footer) {
+  flex: 0 0 auto;
 }
 
 @media (max-width: 1280px) {
@@ -4164,11 +4277,17 @@ button.sp-test-status.failed:hover {
 
   .sp-account-filter-actions {
     width: 100%;
-    justify-content: flex-end;
+    justify-content: flex-start;
+    gap: 0.625rem;
     padding-top: 0.75rem;
     padding-left: 0;
     border-top: 1px solid var(--sp-line);
     border-left: 0;
+  }
+
+  .sp-account-toolbar-btn {
+    flex: 1 1 calc(50% - 0.625rem);
+    justify-content: center;
   }
 
   .sp-account-pagination {
@@ -4259,16 +4378,33 @@ button.sp-test-status.failed:hover {
     flex-direction: column;
   }
 
+  /* 手机端筛选区保持紧凑：搜索通栏，下拉与按钮 2 列，避免全部整行占高 */
   .sp-account-filter-fields {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.625rem;
   }
 
   .sp-account-search {
-    grid-column: auto;
+    grid-column: 1 / -1;
   }
 
+  .sp-account-filter-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .sp-account-toolbar-btn,
   .sp-account-refresh {
+    flex: initial;
     width: 100%;
+    min-width: 0;
+    min-height: 2.5rem;
+    padding-inline: 0.55rem;
+    font-size: 0.8125rem;
+    white-space: normal;
+    line-height: 1.25;
+    text-align: center;
   }
 
   .sp-account-binding-selected-head {
@@ -4283,4 +4419,159 @@ button.sp-test-status.failed:hover {
     transition: none;
   }
 }
+
+
+/* 手机端结果弹窗：压缩顶部统计区，列表独立滚动，避免底部账号被裁切 */
+@media (max-width: 640px) {
+  :global(.modal-overlay:has(.sp-batch-result-dialog)) {
+    align-items: stretch;
+    justify-content: stretch;
+    padding: 0.375rem;
+    padding-bottom: max(0.375rem, env(safe-area-inset-bottom, 0px));
+  }
+
+  :global(.modal-content:has(.sp-batch-result-dialog)) {
+    width: 100%;
+    max-width: none;
+    max-height: none;
+    height: 100%;
+    margin: 0;
+    border-radius: 1rem;
+  }
+
+  :global(.modal-content:has(.sp-batch-result-dialog) .modal-header) {
+    flex: 0 0 auto;
+    padding: 0.65rem 0.85rem;
+  }
+
+  :global(.modal-content:has(.sp-batch-result-dialog) .modal-body) {
+    display: flex;
+    min-height: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 0.55rem 0.7rem 0.35rem;
+  }
+
+  :global(.modal-content:has(.sp-batch-result-dialog) .modal-footer) {
+    flex: 0 0 auto;
+    padding: 0.55rem 0.7rem;
+    padding-bottom: max(0.55rem, env(safe-area-inset-bottom, 0px));
+  }
+
+  .sp-batch-result-dialog {
+    display: flex;
+    min-height: 0;
+    height: 100%;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 0.55rem;
+    overflow: hidden;
+    padding: 0.1rem 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .batch-result-progress-description {
+    flex: 0 0 auto;
+    padding: 0.5rem 0.7rem;
+    font-size: 0.72rem;
+    line-height: 1.4;
+  }
+
+  .sp-batch-result-dialog .sync-confirm-summary {
+    flex: 0 0 auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem;
+  }
+
+  .sp-batch-result-dialog .sync-result-stat {
+    gap: 0.1rem;
+    padding: 0.45rem 0.55rem;
+  }
+
+  .sp-batch-result-dialog .sync-result-stat span {
+    font-size: 0.62rem;
+  }
+
+  .sp-batch-result-dialog .sync-result-stat strong {
+    font-size: 1rem;
+  }
+
+  .sp-batch-result-dialog .sync-confirm-body,
+  .sp-batch-result-dialog .sync-confirm-section {
+    display: flex;
+    min-height: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .sp-batch-result-dialog .sync-confirm-section-title {
+    flex: 0 0 auto;
+    padding: 0.2rem 0.1rem 0.55rem;
+    font-size: 0.75rem;
+  }
+
+  .sp-batch-result-dialog .batch-result-scroll {
+    display: flex;
+    min-height: 0;
+    max-height: none;
+    flex: 1 1 auto;
+    flex-direction: column;
+    overflow: auto;
+    overscroll-behavior: contain;
+    scroll-padding-bottom: 2rem;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .sp-batch-result-dialog .batch-result-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    flex: 0 0 auto;
+    gap: 0.35rem;
+    padding: 0.45rem;
+  }
+
+  .sp-batch-result-dialog .batch-result-hint {
+    display: none;
+  }
+
+  .sp-batch-result-dialog .batch-result-list {
+    display: grid;
+    min-height: auto;
+    flex: 0 0 auto;
+    gap: 0.5rem;
+    overflow: visible;
+    padding: 0.5rem 0.5rem 2rem;
+  }
+
+  .sp-batch-result-dialog .batch-result-card {
+    gap: 0.45rem;
+    padding: 0.6rem;
+  }
+
+  .sp-batch-result-dialog .batch-result-card:last-child {
+    margin-bottom: 0.25rem;
+  }
+
+  .sp-batch-result-dialog .batch-result-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.35rem 0.5rem;
+  }
+
+  .sp-batch-result-dialog .batch-result-metric span {
+    font-size: 0.62rem;
+  }
+
+  .sp-batch-result-dialog .batch-result-metric strong {
+    font-size: 0.75rem;
+  }
+
+  .sp-batch-result-dialog .batch-result-empty {
+    padding-bottom: 1.5rem;
+  }
+}
+
 </style>

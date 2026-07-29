@@ -1228,6 +1228,22 @@ describe('supplier local data views component usage', () => {
     expect(accountsSource).toContain('color-mix(in srgb, var(--sp-red)')
   })
 
+  it('compresses supplier batch-test result summary on mobile', () => {
+    expect(accountsSource).toContain('@media (max-width: 640px)')
+    expect(accountsSource).toContain(':global(.modal-overlay:has(.sp-batch-result-dialog))')
+    expect(accountsSource).toContain(':global(.modal-content:has(.sp-batch-result-dialog))')
+    expect(accountsSource).toContain('height: 100%')
+    expect(accountsSource).toContain('.sp-batch-result-dialog .batch-result-scroll')
+    expect(accountsSource).toContain('overflow: auto')
+    expect(accountsSource).toContain('scroll-padding-bottom: 2rem')
+    expect(accountsSource).toContain('.sp-batch-result-dialog .batch-result-list')
+    expect(accountsSource).toContain('padding: 0.5rem 0.5rem 2rem')
+    expect(accountsSource).toContain('.sp-batch-result-dialog .batch-result-hint')
+    expect(accountsSource).toContain('display: none')
+    expect(accountsSource).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))')
+    expect(accountsSource).toContain('env(safe-area-inset-bottom, 0px)')
+  })
+
   it('declares supplier-account-specific batch-test API functions', () => {
     expect(supplierProviderDataSource).toContain('export async function startSupplierAccountBatchTest')
     expect(supplierProviderDataSource).toContain('export async function getSupplierAccountBatchTestJob')
@@ -1235,6 +1251,9 @@ describe('supplier local data views component usage', () => {
     expect(supplierProviderDataSource).toContain("'/admin/supplier-management/accounts/batch-test'")
     expect(supplierProviderDataSource).toContain('`/admin/supplier-management/accounts/batch-test/${jobID}`')
     expect(supplierProviderDataSource).toContain('`/admin/supplier-management/accounts/batch-test/${jobID}/cancel`')
+    expect(supplierProviderDataSource).toContain('model_ids_by_account?: Record<number, string>')
+    expect(accountsSource).toContain('selectedBatchTestModelsByAccount')
+    expect(accountsSource).toContain('model_ids_by_account: modelIDsByAccount')
   })
 
   it('uses upstream-account semantics for the empty state', () => {
