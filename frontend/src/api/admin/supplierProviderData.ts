@@ -157,6 +157,7 @@ export interface SupplierProviderAccountListResult {
 export interface SupplierAccountBatchTestRequest {
   account_ids: number[]
   model_ids_by_platform?: Record<string, string>
+  model_ids_by_account?: Record<number, string>
   concurrency?: number
   timeout_per_account_seconds?: number
   timeout_seconds?: number

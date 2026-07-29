@@ -95,6 +95,7 @@ type BatchAccountTestInput struct {
 	AccountIDs         []int64
 	ModelID            string
 	ModelIDsByPlatform map[string]string
+	ModelIDsByAccount  map[int64]string
 	Concurrency        int
 	TimeoutPerAccount  time.Duration
 	Timeout            time.Duration
@@ -104,6 +105,7 @@ type normalizedBatchAccountTestInput struct {
 	AccountIDs         []int64
 	ModelID            string
 	ModelIDsByPlatform map[string]string
+	ModelIDsByAccount  map[int64]string
 	Concurrency        int
 	TimeoutPerAccount  time.Duration
 	Timeout            time.Duration
@@ -259,6 +261,7 @@ func (s *AccountTestService) normalizeBatchAccountTestInput(input BatchAccountTe
 			AccountIDs:         []int64{},
 			ModelID:            strings.TrimSpace(input.ModelID),
 			ModelIDsByPlatform: normalizeBatchAccountTestPlatformModels(input.ModelIDsByPlatform),
+			ModelIDsByAccount:  normalizeBatchAccountTestAccountModels(input.ModelIDsByAccount),
 			Concurrency:        defaultBatchAccountTestConcurrency,
 			TimeoutPerAccount:  defaultBatchAccountTestTimeout,
 			Timeout:            defaultBatchAccountTestJobTimeout,
@@ -302,6 +305,7 @@ func (s *AccountTestService) normalizeBatchAccountTestInput(input BatchAccountTe
 		AccountIDs:         ids,
 		ModelID:            strings.TrimSpace(input.ModelID),
 		ModelIDsByPlatform: normalizeBatchAccountTestPlatformModels(input.ModelIDsByPlatform),
+		ModelIDsByAccount:  normalizeBatchAccountTestAccountModels(input.ModelIDsByAccount),
 		Concurrency:        concurrency,
 		TimeoutPerAccount:  timeout,
 		Timeout:            totalTimeout,
@@ -353,7 +357,7 @@ func (s *AccountTestService) runBatchTestAccounts(
 					}
 					continue
 				}
-				result.Results[index] = s.runBatchAccountTestItem(ctx, account, input.modelIDForPlatform(account.Platform), input.TimeoutPerAccount)
+				result.Results[index] = s.runBatchAccountTestItem(ctx, account, input.modelIDForAccount(account.ID, account.Platform), input.TimeoutPerAccount)
 				if onItem != nil {
 					onItem(index, result.Results[index])
 				}
@@ -637,6 +641,39 @@ func normalizeBatchAccountTestPlatformModels(models map[string]string) map[strin
 		return nil
 	}
 	return out
+}
+
+func normalizeBatchAccountTestAccountModels(models map[int64]string) map[int64]string {
+	if len(models) == 0 {
+		return nil
+	}
+	out := make(map[int64]string, len(models))
+	for accountID, modelID := range models {
+		if accountID <= 0 {
+			continue
+		}
+		modelID = strings.TrimSpace(modelID)
+		if modelID == "" {
+			continue
+		}
+		out[accountID] = modelID
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// modelIDForAccount 优先使用账号级模型，其次平台级模型，最后回退到全局模型。
+// 供应商页会按业务平台（含 platform_override）选模型，但本地账号原始 platform 可能仍是 openai，
+// 因此必须支持按 account_id 精确指定，避免 grok 业务账号落到 openai 默认模型。
+func (input normalizedBatchAccountTestInput) modelIDForAccount(accountID int64, platform string) string {
+	if len(input.ModelIDsByAccount) > 0 {
+		if modelID := strings.TrimSpace(input.ModelIDsByAccount[accountID]); modelID != "" {
+			return modelID
+		}
+	}
+	return input.modelIDForPlatform(platform)
 }
 
 func (input normalizedBatchAccountTestInput) modelIDForPlatform(platform string) string {

@@ -580,3 +580,61 @@ func (noopAccountRepo) ListShadowsByParent(context.Context, int64) ([]*Account, 
 }
 
 var _ AccountRepository = (*batchAccountTestRepo)(nil)
+
+
+func TestAccountTestServiceBatchTestAccountsUsesAccountModelsOverPlatform(t *testing.T) {
+	repo := &batchAccountTestRepo{
+		accounts: map[int64]*Account{
+			// 本地接入平台仍是 openai，但供应商页业务平台被覆盖为 grok
+			1: {ID: 1, Name: "openai-as-grok", Platform: PlatformOpenAI, Schedulable: true},
+			2: {ID: 2, Name: "native-openai", Platform: PlatformOpenAI, Schedulable: true},
+		},
+	}
+	var seenMu sync.Mutex
+	seenModels := make(map[int64]string)
+	svc := &AccountTestService{
+		accountRepo: repo,
+		runTestBackgroundFunc: func(ctx context.Context, accountID int64, modelID string) (*ScheduledTestResult, error) {
+			seenMu.Lock()
+			seenModels[accountID] = modelID
+			seenMu.Unlock()
+			return &ScheduledTestResult{
+				Status:     "success",
+				LatencyMs:  3,
+				StartedAt:  time.Now().UTC(),
+				FinishedAt: time.Now().UTC(),
+			}, nil
+		},
+	}
+
+	result, err := svc.BatchTestAccounts(context.Background(), BatchAccountTestInput{
+		AccountIDs: []int64{1, 2},
+		ModelID:    "fallback-model",
+		ModelIDsByPlatform: map[string]string{
+			PlatformOpenAI: "gpt-4.1-mini",
+			PlatformGrok:   "grok-4",
+		},
+		ModelIDsByAccount: map[int64]string{
+			1: "grok-4",
+		},
+		Concurrency:       2,
+		TimeoutPerAccount: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("BatchTestAccounts returned error: %v", err)
+	}
+	if result.Success != 2 {
+		t.Fatalf("success = %d, want 2", result.Success)
+	}
+
+	seenMu.Lock()
+	grokBusinessModel := seenModels[1]
+	openAIModel := seenModels[2]
+	seenMu.Unlock()
+	if grokBusinessModel != "grok-4" {
+		t.Fatalf("account 1 model = %q, want account-level grok model", grokBusinessModel)
+	}
+	if openAIModel != "gpt-4.1-mini" {
+		t.Fatalf("account 2 model = %q, want platform openai model", openAIModel)
+	}
+}

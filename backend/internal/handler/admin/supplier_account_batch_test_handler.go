@@ -14,6 +14,7 @@ type SupplierBatchTestAccountsRequest struct {
 	AccountIDs            []int64           `json:"account_ids" binding:"required"`
 	ModelID               string            `json:"model_id"`
 	ModelIDsByPlatform    map[string]string `json:"model_ids_by_platform"`
+	ModelIDsByAccount     map[int64]string  `json:"model_ids_by_account"`
 	Concurrency           int               `json:"concurrency"`
 	TimeoutPerAccountSecs int               `json:"timeout_per_account_seconds"`
 	TimeoutSecs           int               `json:"timeout_seconds"`
@@ -41,6 +42,7 @@ func (h *AccountHandler) SupplierBatchTest(c *gin.Context) {
 		AccountIDs:         req.AccountIDs,
 		ModelID:            req.ModelID,
 		ModelIDsByPlatform: req.ModelIDsByPlatform,
+		ModelIDsByAccount:  req.ModelIDsByAccount,
 		Concurrency:        req.Concurrency,
 		TimeoutPerAccount:  timeout,
 		Timeout:            time.Duration(req.TimeoutSecs) * time.Second,
