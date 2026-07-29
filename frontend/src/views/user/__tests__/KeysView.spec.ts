@@ -231,6 +231,8 @@ const mountView = async () => {
         Icon: IconStub,
         UseKeyModal: true,
         EndpointPopover: true,
+        KeyFormModal: true,
+        KeyGroupSelectorPopover: true,
         GroupBadge: true,
         GroupOptionItem: true,
         Teleport: true,
