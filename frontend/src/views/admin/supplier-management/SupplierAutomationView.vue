@@ -4126,11 +4126,13 @@ function showToast(message: string) {
     min-width: 96px;
   }
 
+  /* 手机端筛选保持紧凑：任务/状态下拉 2 列，重置按钮通栏 */
   .sp-run-filters {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .sp-run-filters .sp-button {
+    grid-column: 1 / -1;
     width: 100%;
   }
 
@@ -4194,13 +4196,21 @@ function showToast(message: string) {
 
   .sp-health-guard-platform-model-grid,
   .sp-health-guard-platform-model-grid article,
-  .sp-health-guard-account-filters,
   .sp-health-guard-account-row,
   .sp-health-guard-filter,
   .sp-health-guard-reason-list,
   .sp-health-guard-item-grid,
   .sp-account-health-guard-summary {
     grid-template-columns: 1fr;
+  }
+
+  /* 健康守护账号筛选：平台/供应商 2 列，搜索与仅看已选通栏 */
+  .sp-health-guard-account-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sp-health-guard-account-filters > :nth-child(n + 3) {
+    grid-column: 1 / -1;
   }
 
   .sp-health-guard-selection-summary {

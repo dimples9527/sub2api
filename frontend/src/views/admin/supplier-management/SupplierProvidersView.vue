@@ -1377,15 +1377,34 @@ function errorMessage(err: unknown, fallback: string): string {
     padding: 0.75rem;
   }
 
-
-.sp-provider-filter-actions {
+  /* 手机端筛选区保持紧凑：搜索通栏，快捷筛选与操作按钮 2 列 */
+  .sp-provider-quick-filters {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .sp-provider-quick-filters .sp-button {
+    width: 100%;
+    min-width: 0;
+    justify-content: center;
+  }
+
+  .sp-provider-filter-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
   }
 
   .sp-provider-filter-actions .sp-button {
     width: 100%;
     min-width: 0;
+    min-height: 2.5rem;
+    padding-inline: 0.55rem;
+    font-size: 0.8125rem;
+    white-space: normal;
+    line-height: 1.25;
+    text-align: center;
   }
 }
 

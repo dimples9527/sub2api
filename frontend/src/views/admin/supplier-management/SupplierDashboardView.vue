@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <SupplierModuleLayout>
     <header class="sp-page-head">
       <div>
@@ -1022,3 +1022,36 @@ function taskMeta(task: OverviewTask): string {
   return [task.enabled === false ? '已停用' : '已启用', task.last_run_message || ''].filter(Boolean).join(' · ')
 }
 </script>
+<style scoped>
+/* 手机端顶部操作区：时间范围通栏，刷新/自动任务 2 列，避免按钮逐个整行 */
+@media (max-width: 760px) {
+  .sp-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    gap: 0.5rem;
+  }
+
+  .sp-segmented {
+    grid-column: 1 / -1;
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .sp-segmented button {
+    flex: 1 1 0;
+    text-align: center;
+  }
+
+  .sp-controls > .sp-button {
+    width: 100%;
+    min-width: 0;
+    min-height: 2.5rem;
+    padding-inline: 0.55rem;
+    font-size: 0.8125rem;
+    white-space: normal;
+    line-height: 1.25;
+    text-align: center;
+  }
+}
+</style>

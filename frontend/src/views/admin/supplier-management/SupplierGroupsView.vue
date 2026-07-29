@@ -2735,8 +2735,28 @@ function errorMessage(err: unknown, fallback: string): string {
 }
 
 @media (max-width: 520px) {
-  .sp-filter-fields { grid-template-columns: 1fr; }
-  .sp-filter-search-control { grid-column: auto; }
+  /* 手机端筛选区保持紧凑：搜索通栏，下拉与按钮 2 列，避免全部整行占高 */
+  .sp-filter-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.625rem;
+  }
+
+  .sp-filter-search-control {
+    grid-column: 1 / -1;
+  }
+
+  .sp-filter-actions {
+    gap: 0.5rem;
+  }
+
+  .sp-filter-actions .sp-button {
+    min-height: 2.5rem;
+    padding-inline: 0.55rem;
+    font-size: 0.8125rem;
+    white-space: normal;
+    line-height: 1.25;
+    text-align: center;
+  }
 }
 
 @media (max-width: 390px) {
