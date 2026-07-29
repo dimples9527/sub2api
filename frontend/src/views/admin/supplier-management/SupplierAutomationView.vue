@@ -4136,7 +4136,55 @@ function showToast(message: string) {
     width: 100%;
   }
 
-  .sp-overview-strip,
+  /* 顶部统计卡：手机端保持 2x2，并压缩高度，避免四张卡各占一整行 */
+  .sp-overview-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .sp-overview-item {
+    min-height: 0;
+    border-radius: 12px;
+    padding: 0.65rem 0.75rem 0.7rem;
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--sp-text) 4%, transparent);
+  }
+
+  .sp-overview-item::before {
+    left: 0.75rem;
+    width: 1.75rem;
+    height: 2px;
+  }
+
+  .sp-overview-item .sp-metric-value {
+    margin-top: 0.35rem;
+    font-size: clamp(1.25rem, 5.5vw, 1.5rem);
+  }
+
+  .sp-overview-item .sp-metric-foot {
+    margin-top: 0.45rem;
+    padding-top: 0.4rem;
+    font-size: 0.6875rem;
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .sp-metric-head {
+    gap: 0.35rem;
+  }
+
+  .sp-metric-label {
+    font-size: 0.6875rem;
+  }
+
+  .sp-metric-signal {
+    width: 6px;
+    height: 6px;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--sp-metric-accent) 12%, transparent);
+  }
+
   .sp-edit-summary,
   .sp-form-grid,
   .sp-retention-grid,
