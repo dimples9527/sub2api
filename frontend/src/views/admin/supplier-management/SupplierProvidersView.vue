@@ -1295,31 +1295,35 @@ function errorMessage(err: unknown, fallback: string): string {
   font-weight: 700;
 }
 
+/* 筛选区：搜索与操作同一行紧挨排列，快捷筛选单独通栏，消除中间大块留白 */
 .sp-provider-filter-body {
   display: flex;
-  align-items: flex-end;
-  gap: 0.875rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.625rem 0.75rem;
   padding: 0.875rem 1rem 1rem;
 }
 
 .sp-provider-filter-fields {
-  min-width: min(22rem, 100%);
-  flex: 1 1 24rem;
+  display: contents;
 }
 
 .sp-provider-filter-control {
   display: flex;
-  min-width: 0;
+  flex: 1 1 16rem;
+  min-width: min(14rem, 100%);
+  max-width: 24rem;
   flex-direction: column;
   gap: 0.3rem;
 }
 
-
 .sp-provider-quick-filters {
   display: flex;
+  flex: 1 1 100%;
   flex-wrap: wrap;
+  order: 3;
   gap: 0.5rem;
-  margin-top: 0.75rem;
+  margin-top: 0;
 }
 
 .sp-provider-quick-filters .sp-button.active {
@@ -1336,33 +1340,74 @@ function errorMessage(err: unknown, fallback: string): string {
 
 .sp-provider-filter-actions {
   display: flex;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
   align-items: center;
-  align-self: stretch;
   justify-content: flex-end;
+  order: 2;
   gap: 0.5rem;
-  padding-left: 0.875rem;
-  border-left: 1px solid var(--sp-line);
+}
+
+/* 统计卡：页面层压缩窄屏高度，并保持 2 列（覆盖共享样式在 460px 的单列） */
+.sp-metric-grid {
+  gap: 0.75rem;
 }
 
 @media (max-width: 900px) {
-  .sp-provider-filter-body {
-    align-items: stretch;
-    flex-direction: column;
+  .sp-provider-filter-control {
+    flex: 1 1 100%;
+    max-width: none;
   }
 
-  .sp-provider-filter-fields {
+  .sp-provider-filter-actions {
     width: 100%;
+    justify-content: stretch;
+    order: 3;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--sp-line);
+  }
+
+  .sp-provider-quick-filters {
+    order: 2;
+  }
+
+  .sp-provider-filter-actions .sp-button {
+    flex: 1 1 calc(50% - 0.5rem);
     min-width: 0;
   }
+}
 
+@media (max-width: 760px) {
+  .sp-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+  }
 
-.sp-provider-filter-actions {
-    width: 100%;
-    padding-top: 0.75rem;
-    padding-left: 0;
-    border-top: 1px solid var(--sp-line);
-    border-left: 0;
+  .sp-metric-card {
+    min-height: 0;
+    padding: 0.65rem 0.75rem;
+    border-radius: 0.65rem;
+  }
+
+  .sp-metric-label {
+    font-size: 0.6875rem;
+  }
+
+  .sp-metric-value {
+    margin-top: 0.3rem;
+    font-size: 1.35rem;
+    line-height: 1.2;
+  }
+
+  .sp-metric-foot {
+    margin-top: 0.35rem;
+    font-size: 0.6875rem;
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 }
 
@@ -1398,6 +1443,7 @@ function errorMessage(err: unknown, fallback: string): string {
 
   .sp-provider-filter-actions .sp-button {
     width: 100%;
+    flex: initial;
     min-width: 0;
     min-height: 2.5rem;
     padding-inline: 0.55rem;
@@ -1405,6 +1451,17 @@ function errorMessage(err: unknown, fallback: string): string {
     white-space: normal;
     line-height: 1.25;
     text-align: center;
+  }
+
+  .sp-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 460px) {
+  /* 覆盖共享样式把统计卡打成单列的行为 */
+  .sp-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
