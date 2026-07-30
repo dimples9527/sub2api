@@ -1,4 +1,4 @@
-package service
+﻿package service
 
 import (
 	"context"
@@ -598,7 +598,7 @@ func TestUpstreamManagementServiceSaveGroupMappingStoresMapping(t *testing.T) {
 
 	result, err := svc.SaveGroupMapping(context.Background(), UpstreamGroupMappingInput{
 		UpstreamGroupName: " VIP ",
-		LocalGroupID:      ptrInt64(9),
+		LocalGroupID:      ptrInt64Value(9),
 	})
 	if err != nil {
 		t.Fatalf("SaveGroupMapping returned error: %v", err)
@@ -999,7 +999,7 @@ func TestUpstreamManagementServiceRunScheduledRateFixStoresFailureStatus(t *test
 	}
 }
 
-func ptrInt64(value int64) *int64 {
+func ptrInt64Value(value int64) *int64 {
 	return &value
 }
 

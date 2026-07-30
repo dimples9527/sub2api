@@ -73,7 +73,7 @@ func TestSupplierNewAPIClientFetchesAndParsesProviderData(t *testing.T) {
 		Username:          "root",
 		AccountNamePrefix: "ignored-prefix",
 	}
-	client := NewSupplierNewAPIClient(server.Client())
+	client := NewSupplierNewAPIClient(server.Client(), nil)
 
 	accounts, err := client.FetchAccounts(context.Background(), provider, "secret")
 	require.NoError(t, err)
@@ -153,7 +153,7 @@ func TestSupplierNewAPIClientTestEndpointCountsAccountsWithoutGroupsPayload(t *t
 		APIKeysURL:   "/api/token/",
 		Username:     "root",
 	}
-	client := NewSupplierNewAPIClient(server.Client())
+	client := NewSupplierNewAPIClient(server.Client(), nil)
 
 	result, err := client.TestEndpoint(context.Background(), provider, "secret", SupplierSyncScopeAccounts)
 

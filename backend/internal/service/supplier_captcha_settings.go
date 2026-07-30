@@ -1,0 +1,118 @@
+package service
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/captcha"
+)
+
+// 供应商上游打码 settings key（独立维护，避免侵入通用 SystemSettings）。
+const (
+	SettingKeySupplierCaptchaProvider = "supplier_captcha_provider" // 打码平台，当前仅 2captcha
+	SettingKeySupplierCaptchaAPIKey   = "supplier_captcha_api_key"  // 2Captcha API Key（敏感）
+	SettingKeySupplierCaptchaEndpoint = "supplier_captcha_endpoint" // 可选自定义 endpoint
+)
+
+// SupplierCaptchaSettings 供应商上游打码全局配置（对外只暴露是否已配置 API Key）。
+type SupplierCaptchaSettings struct {
+	Provider         string `json:"provider"`
+	APIKeyConfigured bool   `json:"api_key_configured"`
+	Endpoint         string `json:"endpoint"`
+}
+
+// supplierCaptchaRuntimeConfig 内部运行时配置，包含 API Key。
+type supplierCaptchaRuntimeConfig struct {
+	Provider string
+	APIKey   string
+	Endpoint string
+}
+
+// UpdateSupplierCaptchaSettingsInput 更新请求。
+// APIKey 留空表示保留原值；ClearAPIKey=true 时清空。
+type UpdateSupplierCaptchaSettingsInput struct {
+	Provider    string `json:"provider"`
+	APIKey      string `json:"api_key"`
+	Endpoint    string `json:"endpoint"`
+	ClearAPIKey bool   `json:"clear_api_key"`
+}
+
+func normalizeSupplierCaptchaProvider(provider string) string {
+	provider = strings.TrimSpace(provider)
+	if provider == "" {
+		return captcha.ProviderTwoCaptcha
+	}
+	return provider
+}
+
+func (s *SettingService) loadSupplierCaptchaRuntimeConfig(ctx context.Context) (*supplierCaptchaRuntimeConfig, error) {
+	if s == nil || s.settingRepo == nil {
+		return nil, fmt.Errorf("setting service is not configured")
+	}
+	values, err := s.settingRepo.GetMultiple(ctx, []string{
+		SettingKeySupplierCaptchaProvider,
+		SettingKeySupplierCaptchaAPIKey,
+		SettingKeySupplierCaptchaEndpoint,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("load supplier captcha settings: %w", err)
+	}
+	if values == nil {
+		values = map[string]string{}
+	}
+	return &supplierCaptchaRuntimeConfig{
+		Provider: normalizeSupplierCaptchaProvider(values[SettingKeySupplierCaptchaProvider]),
+		APIKey:   strings.TrimSpace(values[SettingKeySupplierCaptchaAPIKey]),
+		Endpoint: strings.TrimSpace(values[SettingKeySupplierCaptchaEndpoint]),
+	}, nil
+}
+
+// GetSupplierCaptchaSettings 读取供应商上游打码全局配置。
+func (s *SettingService) GetSupplierCaptchaSettings(ctx context.Context) (*SupplierCaptchaSettings, error) {
+	cfg, err := s.loadSupplierCaptchaRuntimeConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &SupplierCaptchaSettings{
+		Provider:         cfg.Provider,
+		APIKeyConfigured: cfg.APIKey != "",
+		Endpoint:         cfg.Endpoint,
+	}, nil
+}
+
+// UpdateSupplierCaptchaSettings 更新供应商上游打码全局配置。
+func (s *SettingService) UpdateSupplierCaptchaSettings(ctx context.Context, input *UpdateSupplierCaptchaSettingsInput) (*SupplierCaptchaSettings, error) {
+	if input == nil {
+		return nil, fmt.Errorf("settings cannot be nil")
+	}
+	if s == nil || s.settingRepo == nil {
+		return nil, fmt.Errorf("setting service is not configured")
+	}
+
+	provider := normalizeSupplierCaptchaProvider(input.Provider)
+	if provider != captcha.ProviderTwoCaptcha {
+		return nil, fmt.Errorf("unsupported captcha provider: %s", provider)
+	}
+
+	endpoint := strings.TrimSpace(input.Endpoint)
+	apiKey := strings.TrimSpace(input.APIKey)
+
+	updates := map[string]string{
+		SettingKeySupplierCaptchaProvider: provider,
+		SettingKeySupplierCaptchaEndpoint: endpoint,
+	}
+	if input.ClearAPIKey {
+		updates[SettingKeySupplierCaptchaAPIKey] = ""
+	} else if apiKey != "" {
+		updates[SettingKeySupplierCaptchaAPIKey] = apiKey
+	}
+
+	if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {
+		return nil, fmt.Errorf("update supplier captcha settings: %w", err)
+	}
+	if s.onUpdate != nil {
+		s.onUpdate()
+	}
+	return s.GetSupplierCaptchaSettings(ctx)
+}

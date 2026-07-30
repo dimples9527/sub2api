@@ -18,10 +18,10 @@ type SupplierProviderRemoteRegistry struct {
 	newapi  *SupplierNewAPIClient
 }
 
-func NewSupplierProviderRemoteRegistry(httpClient *http.Client, tokenCache SupplierProviderTokenCache) *SupplierProviderRemoteRegistry {
+func NewSupplierProviderRemoteRegistry(httpClient *http.Client, tokenCache SupplierProviderTokenCache, turnstileSolver SupplierTurnstileSolver) *SupplierProviderRemoteRegistry {
 	return &SupplierProviderRemoteRegistry{
-		sub2api: NewSupplierSub2APIClient(httpClient, tokenCache),
-		newapi:  NewSupplierNewAPIClient(httpClient),
+		sub2api: NewSupplierSub2APIClient(httpClient, tokenCache, turnstileSolver),
+		newapi:  NewSupplierNewAPIClient(httpClient, turnstileSolver),
 	}
 }
 

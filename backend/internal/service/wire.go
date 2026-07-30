@@ -571,10 +571,6 @@ func ProvideSupplierProviderService(
 	return svc
 }
 
-func ProvideSupplierProviderRemoteClient(tokenCache SupplierProviderTokenCache) *SupplierProviderRemoteRegistry {
-	return NewSupplierProviderRemoteRegistry(nil, tokenCache)
-}
-
 func ProvideSupplierAutomationScheduler(repo SupplierAutomationRepository, svc *SupplierAutomationService) *SupplierAutomationScheduler {
 	scheduler := NewSupplierAutomationScheduler(repo, svc)
 	svc.SetSchedulerReloader(scheduler)

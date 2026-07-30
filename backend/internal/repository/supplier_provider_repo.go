@@ -31,7 +31,7 @@ const supplierProviderSelect = `
 SELECT p.id, p.code, p.name, p.provider_type, p.base_url, p.login_url,
        p.api_keys_url, p.groups_url, p.available_groups_url, p.balance_url,
        p.usage_cost_url, p.account_name_prefix, p.temp_disable_minutes,
-       p.account_rate_multiplier_scale, p.sort_order, p.enabled, p.is_default,
+       p.account_rate_multiplier_scale, p.sort_order, p.enabled, p.turnstile_enabled, p.is_default,
        p.created_at, p.updated_at,
        COALESCE(c.email, ''), COALESCE(c.username, ''), COALESCE(c.password_encrypted, ''),
        COALESCE(s.status, 'unknown'), COALESCE(s.risk_level, 'normal'),
@@ -147,13 +147,13 @@ func (r *supplierProviderRepository) Create(ctx context.Context, provider *servi
 INSERT INTO supplier_providers (
   code, name, provider_type, base_url, login_url, api_keys_url, groups_url,
   available_groups_url, balance_url, usage_cost_url, account_name_prefix,
-  temp_disable_minutes, account_rate_multiplier_scale, sort_order, enabled, is_default
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+  temp_disable_minutes, account_rate_multiplier_scale, sort_order, enabled, turnstile_enabled, is_default
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
 RETURNING id, created_at, updated_at`, provider.Code, provider.Name, provider.ProviderType,
 		provider.BaseURL, provider.LoginURL, provider.APIKeysURL, provider.GroupsURL,
 		provider.AvailableGroupsURL, provider.BalanceURL, provider.UsageCostURL,
 		provider.AccountNamePrefix, provider.TempDisableMinutes, provider.AccountRateMultiplierScale,
-		provider.SortOrder, provider.Enabled, provider.IsDefault).Scan(&provider.ID, &provider.CreatedAt, &provider.UpdatedAt)
+		provider.SortOrder, provider.Enabled, provider.TurnstileEnabled, provider.IsDefault).Scan(&provider.ID, &provider.CreatedAt, &provider.UpdatedAt)
 	if err != nil {
 		return mapSupplierProviderError(err)
 	}
@@ -186,12 +186,13 @@ UPDATE supplier_providers SET
   api_keys_url=$7, groups_url=$8, available_groups_url=$9, balance_url=$10,
   usage_cost_url=$11, account_name_prefix=$12, temp_disable_minutes=$13,
   account_rate_multiplier_scale=$14, sort_order=$15, enabled=$16,
-  is_default=$17, updated_at=NOW()
+  turnstile_enabled=$17, is_default=$18, updated_at=NOW()
 WHERE id=$1 AND deleted_at IS NULL`, provider.ID, provider.Code, provider.Name,
 		provider.ProviderType, provider.BaseURL, provider.LoginURL, provider.APIKeysURL,
 		provider.GroupsURL, provider.AvailableGroupsURL, provider.BalanceURL,
 		provider.UsageCostURL, provider.AccountNamePrefix, provider.TempDisableMinutes,
-		provider.AccountRateMultiplierScale, provider.SortOrder, provider.Enabled, provider.IsDefault)
+		provider.AccountRateMultiplierScale, provider.SortOrder, provider.Enabled,
+		provider.TurnstileEnabled, provider.IsDefault)
 	if err != nil {
 		return mapSupplierProviderError(err)
 	}
@@ -271,7 +272,7 @@ func scanSupplierProvider(scanner supplierProviderScanner) (*service.SupplierPro
 		&provider.AvailableGroupsURL, &provider.BalanceURL, &provider.UsageCostURL,
 		&provider.AccountNamePrefix, &provider.TempDisableMinutes,
 		&provider.AccountRateMultiplierScale, &provider.SortOrder, &provider.Enabled,
-		&provider.IsDefault, &provider.CreatedAt, &provider.UpdatedAt, &provider.Email,
+		&provider.TurnstileEnabled, &provider.IsDefault, &provider.CreatedAt, &provider.UpdatedAt, &provider.Email,
 		&provider.Username, &provider.PasswordEncrypted, &provider.Status, &provider.RiskLevel,
 		&provider.ValidAccountCount, &provider.SchedulableAccountCount, &provider.RequestCount,
 		&provider.SuccessRate, &provider.PeriodCost, &provider.CurrentBalance, &provider.TodayCost,

@@ -284,7 +284,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	supplierProviderTypeService := service.NewSupplierProviderTypeService(supplierProviderTypeRepository)
 	supplierProviderTypeHandler := admin.NewSupplierProviderTypeHandler(supplierProviderTypeService)
 	supplierProviderDataRepository := repository.NewSupplierProviderDataRepository(db)
-	supplierProviderRemoteRegistry := service.ProvideSupplierProviderRemoteClient(supplierProviderTokenRedisCache)
+	supplierProviderRemoteRegistry := service.ProvideSupplierProviderRemoteClient(supplierProviderTokenRedisCache, settingService)
 	supplierGroupGuardReconciler := service.ProvideSupplierGroupGuardReconciler(supplierProviderDataRepository)
 	supplierProviderGroupMatcher := service.ProvideSupplierProviderGroupMatcher(supplierProviderDataRepository, groupRepository, supplierGroupGuardReconciler)
 	supplierProviderSyncService := service.ProvideSupplierProviderSyncService(supplierProviderRepository, supplierProviderDataRepository, supplierProviderRemoteRegistry, secretEncryptor, supplierProviderTokenRedisCache, supplierProviderGroupMatcher)

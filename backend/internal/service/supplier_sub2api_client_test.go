@@ -151,7 +151,7 @@ func supplierSub2APIWriteJSON(w http.ResponseWriter, status int, payload string)
 }
 
 func TestSupplierSub2APIClientUsesThirtySecondDefaultTimeout(t *testing.T) {
-	client := NewSupplierSub2APIClient(nil, newSupplierSub2APIFakeTokenCache())
+	client := NewSupplierSub2APIClient(nil, newSupplierSub2APIFakeTokenCache(), nil)
 
 	require.Equal(t, 30*time.Second, client.httpClient.Timeout)
 }
@@ -175,7 +175,7 @@ func TestSupplierSub2APIClientLoginUsesEmailAndCachesToken(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewSupplierSub2APIClient(nil, cache)
+	client := NewSupplierSub2APIClient(nil, cache, nil)
 	_, err := client.FetchAccounts(context.Background(), supplierSub2APITestProvider(server.URL), "secret")
 
 	require.NoError(t, err)
@@ -189,7 +189,7 @@ func TestSupplierSub2APIClientLoginUsesEmailAndCachesToken(t *testing.T) {
 	defer cache.mu.Unlock()
 	require.Equal(t, 1, cache.setCalls)
 	require.Equal(t, []time.Duration{59 * time.Minute}, cache.setTTLs)
-	require.Equal(t, []time.Duration{15 * time.Second}, cache.lockTTLs)
+	require.Equal(t, []time.Duration{supplierSub2APILoginLockTTL}, cache.lockTTLs)
 	require.Len(t, cache.acquiredOwners, 1)
 	require.Equal(t, cache.acquiredOwners, cache.releasedOwners)
 	require.Equal(t, "fresh-token", cache.tokens[42].AccessToken)
@@ -247,7 +247,7 @@ func TestSupplierSub2APIClientExtractsSupportedLoginTokenShapes(t *testing.T) {
 
 			provider := supplierSub2APITestProvider(server.URL)
 			provider.LoginURL = "/login"
-			client := NewSupplierSub2APIClient(nil, cache)
+			client := NewSupplierSub2APIClient(nil, cache, nil)
 			balance, err := client.FetchBalance(context.Background(), provider, "secret")
 
 			require.NoError(t, err)
@@ -278,7 +278,7 @@ func TestSupplierSub2APIClientReusesCachedToken(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewSupplierSub2APIClient(nil, cache)
+	client := NewSupplierSub2APIClient(nil, cache, nil)
 	_, err := client.FetchAccounts(context.Background(), supplierSub2APITestProvider(server.URL), "secret")
 
 	require.NoError(t, err)
@@ -312,7 +312,7 @@ func TestSupplierSub2APIClientConcurrentRequestsLoginOnce(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewSupplierSub2APIClient(nil, cache)
+	client := NewSupplierSub2APIClient(nil, cache, nil)
 	provider := supplierSub2APITestProvider(server.URL)
 	const requestCount = 8
 	start := make(chan struct{})
@@ -350,7 +350,7 @@ func TestSupplierSub2APIClientDoesNotLoginWhileAnotherOwnerHoldsLock(t *testing.
 	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()
 
-	client := NewSupplierSub2APIClient(nil, cache)
+	client := NewSupplierSub2APIClient(nil, cache, nil)
 	_, err := client.FetchBalance(ctx, supplierSub2APITestProvider(server.URL), "secret")
 
 	require.ErrorIs(t, err, context.DeadlineExceeded)
@@ -382,7 +382,7 @@ func TestSupplierSub2APIClientRetriesOnceAfterUnauthorized(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewSupplierSub2APIClient(nil, cache)
+	client := NewSupplierSub2APIClient(nil, cache, nil)
 	_, err := client.FetchAccounts(context.Background(), supplierSub2APITestProvider(server.URL), "secret")
 
 	require.NoError(t, err)
@@ -417,7 +417,7 @@ func TestSupplierSub2APIClientFallsBackWhenConfiguredAccountsEndpoint404s(t *tes
 
 	provider := supplierSub2APITestProvider(server.URL)
 	provider.APIKeysURL = "/api/token/"
-	client := NewSupplierSub2APIClient(nil, cache)
+	client := NewSupplierSub2APIClient(nil, cache, nil)
 	accounts, err := client.FetchAccounts(context.Background(), provider, "secret")
 
 	require.NoError(t, err)
@@ -449,7 +449,7 @@ func TestSupplierSub2APIClientStopsAfterSecondUnauthorized(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewSupplierSub2APIClient(nil, cache)
+	client := NewSupplierSub2APIClient(nil, cache, nil)
 	_, err := client.FetchAccounts(context.Background(), supplierSub2APITestProvider(server.URL), "secret")
 
 	require.Error(t, err)
@@ -484,7 +484,7 @@ func TestSupplierSub2APIClientRetriesBusinessTokenFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewSupplierSub2APIClient(nil, cache)
+	client := NewSupplierSub2APIClient(nil, cache, nil)
 	groups, err := client.FetchGroups(context.Background(), supplierSub2APITestProvider(server.URL), "secret")
 
 	require.NoError(t, err)
@@ -542,7 +542,7 @@ func TestSupplierSub2APIClientContinuesWhenRedisIsUnavailable(t *testing.T) {
 			}))
 			defer server.Close()
 
-			client := NewSupplierSub2APIClient(nil, cache)
+			client := NewSupplierSub2APIClient(nil, cache, nil)
 			balance, err := client.FetchBalance(context.Background(), supplierSub2APITestProvider(server.URL), "secret")
 
 			require.NoError(t, err)
@@ -602,7 +602,7 @@ func TestSupplierSub2APIClientParsesAccountsGroupsBalanceAndCost(t *testing.T) {
 	defer server.Close()
 
 	provider := supplierSub2APITestProvider(server.URL)
-	client := NewSupplierSub2APIClient(nil, cache)
+	client := NewSupplierSub2APIClient(nil, cache, nil)
 
 	accounts, err := client.FetchAccounts(context.Background(), provider, "secret")
 	require.NoError(t, err)
@@ -679,7 +679,7 @@ func TestSupplierSub2APIClientUsesNormalizedNameWhenAccountKeyMissing(t *testing
 	}))
 	defer server.Close()
 
-	client := NewSupplierSub2APIClient(nil, cache)
+	client := NewSupplierSub2APIClient(nil, cache, nil)
 	accounts, err := client.FetchAccounts(context.Background(), supplierSub2APITestProvider(server.URL), "secret")
 
 	require.NoError(t, err)
@@ -705,7 +705,7 @@ func TestSupplierSub2APIClientRejectsMalformedEnvelope(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewSupplierSub2APIClient(nil, cache)
+	client := NewSupplierSub2APIClient(nil, cache, nil)
 	_, err := client.FetchAccounts(context.Background(), supplierSub2APITestProvider(server.URL), "secret")
 
 	require.ErrorContains(t, err, "data.items")
@@ -728,7 +728,7 @@ func TestSupplierSub2APIClientRejectsOversizedResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewSupplierSub2APIClient(nil, cache)
+	client := NewSupplierSub2APIClient(nil, cache, nil)
 	_, err := client.FetchAccounts(context.Background(), supplierSub2APITestProvider(server.URL), "secret")
 
 	require.ErrorContains(t, err, "4 MiB")
@@ -756,7 +756,7 @@ func TestSupplierSub2APIClientRejectsCrossHostRedirect(t *testing.T) {
 	}))
 	defer sourceServer.Close()
 
-	client := NewSupplierSub2APIClient(nil, cache)
+	client := NewSupplierSub2APIClient(nil, cache, nil)
 	_, err := client.FetchBalance(context.Background(), supplierSub2APITestProvider(sourceServer.URL), "secret")
 
 	require.ErrorContains(t, err, "redirect")
@@ -764,7 +764,7 @@ func TestSupplierSub2APIClientRejectsCrossHostRedirect(t *testing.T) {
 }
 
 func TestSupplierSub2APIClientRejectsUnsupportedURLScheme(t *testing.T) {
-	client := NewSupplierSub2APIClient(nil, newSupplierSub2APIFakeTokenCache())
+	client := NewSupplierSub2APIClient(nil, newSupplierSub2APIFakeTokenCache(), nil)
 	provider := supplierSub2APITestProvider("file:///tmp/sub2api")
 
 	_, err := client.FetchBalance(context.Background(), provider, "secret")
@@ -782,7 +782,7 @@ func TestSupplierSub2APIClientNormalizesAuthorizationTokenType(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewSupplierSub2APIClient(nil, cache)
+	client := NewSupplierSub2APIClient(nil, cache, nil)
 	_, err := client.FetchBalance(context.Background(), supplierSub2APITestProvider(server.URL), "secret")
 
 	require.NoError(t, err)
@@ -809,7 +809,7 @@ func TestSupplierSub2APIClientUsesNetURLComposition(t *testing.T) {
 	provider.LoginURL = "auth/login"
 	provider.BalanceURL = "stats/balance?timezone=Asia%2FShanghai"
 
-	client := NewSupplierSub2APIClient(nil, cache)
+	client := NewSupplierSub2APIClient(nil, cache, nil)
 	balance, err := client.FetchBalance(context.Background(), provider, "secret")
 
 	require.NoError(t, err)

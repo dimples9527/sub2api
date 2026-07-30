@@ -33,6 +33,12 @@ func ProvideSupplierProviderSyncService(
 	return svc
 }
 
+// ProvideSupplierProviderRemoteClient 构造供应商远程客户端，并注入上游 Turnstile 打码求解器。
+func ProvideSupplierProviderRemoteClient(tokenCache SupplierProviderTokenCache, settingService *SettingService) *SupplierProviderRemoteRegistry {
+	solver := NewSettingBackedSupplierTurnstileSolver(settingService, nil)
+	return NewSupplierProviderRemoteRegistry(nil, tokenCache, solver)
+}
+
 var SupplierProviderWiringSet = wire.NewSet(
 	ProvideSupplierGroupGuardReconciler,
 	ProvideSupplierRateGuardService,

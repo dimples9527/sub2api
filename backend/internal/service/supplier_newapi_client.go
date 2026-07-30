@@ -25,7 +25,8 @@ const (
 )
 
 type SupplierNewAPIClient struct {
-	httpClient *http.Client
+	httpClient      *http.Client
+	turnstileSolver SupplierTurnstileSolver
 
 	sessionMu sync.Mutex
 	sessions  map[string]supplierNewAPISession
@@ -51,12 +52,16 @@ type supplierNewAPIGroupInfo struct {
 	RawStatus      string
 }
 
-func NewSupplierNewAPIClient(httpClient *http.Client) *SupplierNewAPIClient {
+func NewSupplierNewAPIClient(httpClient *http.Client, turnstileSolver SupplierTurnstileSolver) *SupplierNewAPIClient {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: defaultSupplierSub2APIHTTPTimeout}
 	}
+	if turnstileSolver == nil {
+		turnstileSolver = noopSupplierTurnstileSolver{}
+	}
 	return &SupplierNewAPIClient{
 		httpClient:      httpClient,
+		turnstileSolver: turnstileSolver,
 		sessions:        make(map[string]supplierNewAPISession),
 		endpointResults: make(map[string]SupplierProviderEndpointResult),
 	}
@@ -323,6 +328,17 @@ func (c *SupplierNewAPIClient) login(ctx context.Context, provider *SupplierProv
 	username := strings.TrimSpace(provider.Username)
 	if username == "" {
 		username = strings.TrimSpace(provider.Email)
+	}
+	if c.turnstileSolver != nil {
+		token, err := c.turnstileSolver.PrepareToken(ctx, provider, strings.TrimRight(strings.TrimSpace(provider.BaseURL), "/"), func(fetchCtx context.Context) (string, error) {
+			return fetchSupplierNewAPITurnstileSiteKey(fetchCtx, c.httpClient, provider)
+		})
+		if err != nil {
+			return supplierNewAPISession{}, err
+		}
+		if token != "" {
+			loginPath = supplierNewAPIAppendQuery(loginPath, "turnstile", token)
+		}
 	}
 	body, err := json.Marshal(map[string]string{"username": username, "password": password})
 	if err != nil {
@@ -742,4 +758,17 @@ func parseSupplierNewAPIAccountDiagnostic(payload []byte) ([]map[string]string, 
 		items = append(items, map[string]string{"name": name, "group": group})
 	}
 	return items, nil
+}
+
+
+func supplierNewAPIAppendQuery(path, key, value string) string {
+	path = strings.TrimSpace(path)
+	if path == "" || strings.TrimSpace(key) == "" {
+		return path
+	}
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	return path + sep + url.QueryEscape(key) + "=" + url.QueryEscape(value)
 }

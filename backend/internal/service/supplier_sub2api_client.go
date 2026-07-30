@@ -22,8 +22,8 @@ const (
 	defaultSupplierSub2APILoginPath               = "/api/v1/auth/login"
 	defaultSupplierSub2APIHTTPTimeout             = 30 * time.Second
 	supplierSub2APIMaxResponseBytes         int64 = 4 << 20
-	supplierSub2APILoginLockTTL                   = 15 * time.Second
-	supplierSub2APILoginLockWait                  = 20 * time.Second
+	supplierSub2APILoginLockTTL                   = 120 * time.Second
+	supplierSub2APILoginLockWait                  = 130 * time.Second
 	supplierSub2APILoginLockPoll                  = 100 * time.Millisecond
 	supplierSub2APILogResponseSummaryLimit        = 512
 	supplierSub2APITestResponseSummaryLimit       = 8192
@@ -65,6 +65,7 @@ type SupplierProviderRemoteDiagnostics interface {
 type SupplierSub2APIClient struct {
 	httpClient       *http.Client
 	tokenCache       SupplierProviderTokenCache
+	turnstileSolver  SupplierTurnstileSolver
 	endpointResultMu sync.Mutex
 	endpointResults  map[string]SupplierProviderEndpointResult
 }
@@ -74,11 +75,19 @@ type supplierSub2APILoginResult struct {
 	ttl   time.Duration
 }
 
-func NewSupplierSub2APIClient(httpClient *http.Client, tokenCache SupplierProviderTokenCache) *SupplierSub2APIClient {
+func NewSupplierSub2APIClient(httpClient *http.Client, tokenCache SupplierProviderTokenCache, turnstileSolver SupplierTurnstileSolver) *SupplierSub2APIClient {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: defaultSupplierSub2APIHTTPTimeout}
 	}
-	return &SupplierSub2APIClient{httpClient: httpClient, tokenCache: tokenCache, endpointResults: make(map[string]SupplierProviderEndpointResult)}
+	if turnstileSolver == nil {
+		turnstileSolver = noopSupplierTurnstileSolver{}
+	}
+	return &SupplierSub2APIClient{
+		httpClient:      httpClient,
+		tokenCache:      tokenCache,
+		turnstileSolver: turnstileSolver,
+		endpointResults: make(map[string]SupplierProviderEndpointResult),
+	}
 }
 
 func (c *SupplierSub2APIClient) FetchAccounts(ctx context.Context, provider *SupplierProvider, password string) ([]SupplierProviderRemoteAccount, error) {
@@ -361,10 +370,22 @@ func (c *SupplierSub2APIClient) login(ctx context.Context, provider *SupplierPro
 	if loginPath == "" {
 		loginPath = defaultSupplierSub2APILoginPath
 	}
-	body, err := json.Marshal(map[string]string{
+	payload := map[string]string{
 		"email":    strings.TrimSpace(provider.Email),
 		"password": password,
-	})
+	}
+	if c.turnstileSolver != nil {
+		token, err := c.turnstileSolver.PrepareToken(ctx, provider, strings.TrimRight(strings.TrimSpace(provider.BaseURL), "/"), func(fetchCtx context.Context) (string, error) {
+			return fetchSupplierSub2APITurnstileSiteKey(fetchCtx, c.httpClient, provider)
+		})
+		if err != nil {
+			return supplierSub2APILoginResult{}, err
+		}
+		if token != "" {
+			payload["turnstile_token"] = token
+		}
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return supplierSub2APILoginResult{}, fmt.Errorf("marshal supplier sub2api login: %w", err)
 	}

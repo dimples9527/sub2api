@@ -41,6 +41,7 @@ type SupplierProvider struct {
 	AccountRateMultiplierScale float64    `json:"account_rate_multiplier_scale"`
 	SortOrder                  int        `json:"sort_order"`
 	Enabled                    bool       `json:"enabled"`
+	TurnstileEnabled           bool       `json:"turnstile_enabled"`
 	IsDefault                  bool       `json:"is_default"`
 	Email                      string     `json:"email"`
 	Username                   string     `json:"username"`
@@ -90,6 +91,7 @@ type SupplierProviderUpsertParams struct {
 	AccountRateMultiplierScale float64 `json:"account_rate_multiplier_scale"`
 	SortOrder                  int     `json:"sort_order"`
 	Enabled                    bool    `json:"enabled"`
+	TurnstileEnabled           bool    `json:"turnstile_enabled"`
 	IsDefault                  bool    `json:"is_default"`
 }
 
@@ -356,7 +358,7 @@ func (s *SupplierProviderService) buildProvider(params SupplierProviderUpsertPar
 	if strings.EqualFold(params.ProviderType, "sub2api") {
 		username = ""
 	}
-	return &SupplierProvider{Code: params.Code, Name: params.Name, ProviderType: params.ProviderType, BaseURL: params.BaseURL, LoginURL: strings.TrimSpace(params.LoginURL), APIKeysURL: strings.TrimSpace(params.APIKeysURL), GroupsURL: strings.TrimSpace(params.GroupsURL), AvailableGroupsURL: strings.TrimSpace(params.AvailableGroupsURL), BalanceURL: strings.TrimSpace(params.BalanceURL), UsageCostURL: strings.TrimSpace(params.UsageCostURL), Email: email, Username: username, AccountNamePrefix: strings.TrimSpace(params.AccountNamePrefix), TempDisableMinutes: params.TempDisableMinutes, AccountRateMultiplierScale: params.AccountRateMultiplierScale, SortOrder: params.SortOrder, Enabled: params.Enabled, IsDefault: params.IsDefault}, nil
+	return &SupplierProvider{Code: params.Code, Name: params.Name, ProviderType: params.ProviderType, BaseURL: params.BaseURL, LoginURL: strings.TrimSpace(params.LoginURL), APIKeysURL: strings.TrimSpace(params.APIKeysURL), GroupsURL: strings.TrimSpace(params.GroupsURL), AvailableGroupsURL: strings.TrimSpace(params.AvailableGroupsURL), BalanceURL: strings.TrimSpace(params.BalanceURL), UsageCostURL: strings.TrimSpace(params.UsageCostURL), Email: email, Username: username, AccountNamePrefix: strings.TrimSpace(params.AccountNamePrefix), TempDisableMinutes: params.TempDisableMinutes, AccountRateMultiplierScale: params.AccountRateMultiplierScale, SortOrder: params.SortOrder, Enabled: params.Enabled, TurnstileEnabled: params.TurnstileEnabled, IsDefault: params.IsDefault}, nil
 }
 
 func validSupplierURL(value string, required bool) bool {
