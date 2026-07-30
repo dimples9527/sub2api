@@ -124,4 +124,19 @@ describe('AppSidebar image generation visibility', () => {
     expect(wrapper.text()).toContain('供应商分组管理')
     expect(wrapper.text()).toContain('供应商账号管理')
   })
+
+  it('opens upstream ops as an external link under supplier management', async () => {
+    const wrapper = mountSidebar('admin')
+
+    const supplierMenu = wrapper.findAll('button').find((button) => button.text().includes('供应商管理'))
+    expect(supplierMenu).toBeDefined()
+
+    await supplierMenu!.trigger('click')
+
+    const externalLink = wrapper.find('a[href="https://ops.sunshinefastlink.top/"]')
+    expect(externalLink.exists()).toBe(true)
+    expect(externalLink.attributes('target')).toBe('_blank')
+    expect(externalLink.attributes('rel')).toContain('noopener')
+    expect(externalLink.text()).toContain('上游运维平台')
+  })
 })
