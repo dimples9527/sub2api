@@ -58,16 +58,24 @@ WHERE task_code=$1`, strings.TrimSpace(code)))
 }
 
 func (r *supplierAutomationRepository) UpdateTask(ctx context.Context, task *service.SupplierAutomationTask) error {
+	// 仅更新任务配置，避免运行中的状态回写覆盖用户刚保存的周期/开关/策略。
 	configRaw, err := json.Marshal(task.Config)
 	if err != nil {
 		return err
 	}
 	_, err = r.db.ExecContext(ctx, `
 UPDATE supplier_automation_tasks
-SET enabled=$2, cron_expression=$3, timeout_seconds=$4, config_json=$5,
-    last_status=$6, last_message=$7, last_run_at=$8, next_run_at=$9, updated_at=NOW()
-WHERE task_code=$1`, task.TaskCode, task.Enabled, task.CronExpression, task.TimeoutSeconds,
-		string(configRaw), task.LastStatus, task.LastMessage, task.LastRunAt, task.NextRunAt)
+SET enabled=$2, cron_expression=$3, timeout_seconds=$4, config_json=$5, updated_at=NOW()
+WHERE task_code=$1`, task.TaskCode, task.Enabled, task.CronExpression, task.TimeoutSeconds, string(configRaw))
+	return err
+}
+
+func (r *supplierAutomationRepository) UpdateTaskRuntime(ctx context.Context, task *service.SupplierAutomationTask) error {
+	// 仅更新最近执行状态与调度时间，不触碰 enabled/cron/timeout/config。
+	_, err := r.db.ExecContext(ctx, `
+UPDATE supplier_automation_tasks
+SET last_status=$2, last_message=$3, last_run_at=$4, next_run_at=$5, updated_at=NOW()
+WHERE task_code=$1`, task.TaskCode, task.LastStatus, task.LastMessage, task.LastRunAt, task.NextRunAt)
 	return err
 }
 

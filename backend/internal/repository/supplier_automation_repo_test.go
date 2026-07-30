@@ -81,3 +81,59 @@ func TestSupplierAutomationRepositoryPersistsRunResultDetail(t *testing.T) {
 	require.NoError(t, repo.FinishRun(context.Background(), run))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestSupplierAutomationRepositoryUpdateTaskOnlyWritesSettings(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := NewSupplierAutomationRepository(db)
+	task := &service.SupplierAutomationTask{
+		TaskCode:       "supplier_account_rate_guard",
+		Enabled:        true,
+		CronExpression: "@every 300s",
+		TimeoutSeconds: 600,
+		Config:         service.SupplierAutomationConfig{},
+		LastStatus:     "should-not-be-written",
+		LastMessage:    "should-not-be-written",
+	}
+
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE supplier_automation_tasks
+SET enabled=$2, cron_expression=$3, timeout_seconds=$4, config_json=$5, updated_at=NOW()
+WHERE task_code=$1`)).
+		WithArgs(task.TaskCode, task.Enabled, task.CronExpression, task.TimeoutSeconds, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	require.NoError(t, repo.UpdateTask(context.Background(), task))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierAutomationRepositoryUpdateTaskRuntimeOnlyWritesStatus(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := NewSupplierAutomationRepository(db)
+	now := time.Now()
+	next := now.Add(time.Minute)
+	task := &service.SupplierAutomationTask{
+		TaskCode:       "supplier_account_rate_guard",
+		Enabled:        false,
+		CronExpression: "@every 20s",
+		TimeoutSeconds: 1,
+		LastStatus:     service.SupplierAutomationStatusSuccess,
+		LastMessage:    "执行成功",
+		LastRunAt:      &now,
+		NextRunAt:      &next,
+	}
+
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE supplier_automation_tasks
+SET last_status=$2, last_message=$3, last_run_at=$4, next_run_at=$5, updated_at=NOW()
+WHERE task_code=$1`)).
+		WithArgs(task.TaskCode, task.LastStatus, task.LastMessage, task.LastRunAt, task.NextRunAt).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	require.NoError(t, repo.UpdateTaskRuntime(context.Background(), task))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+

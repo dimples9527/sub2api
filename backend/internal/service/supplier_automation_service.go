@@ -155,7 +155,10 @@ type SupplierAutomationRunListResult struct {
 type SupplierAutomationRepository interface {
 	ListTasks(ctx context.Context) ([]SupplierAutomationTask, error)
 	GetTask(ctx context.Context, code string) (*SupplierAutomationTask, error)
+	// UpdateTask 仅更新任务配置（开关/周期/超时/策略），不覆盖运行时状态。
 	UpdateTask(ctx context.Context, task *SupplierAutomationTask) error
+	// UpdateTaskRuntime 仅更新最近执行状态与调度时间，不覆盖任务配置。
+	UpdateTaskRuntime(ctx context.Context, task *SupplierAutomationTask) error
 	CreateRun(ctx context.Context, run *SupplierAutomationRun) error
 	FinishRun(ctx context.Context, run *SupplierAutomationRun) error
 	ListRuns(ctx context.Context, params SupplierAutomationRunListParams) (SupplierAutomationRunListResult, error)
@@ -363,7 +366,7 @@ func (s *SupplierAutomationService) RunWithMode(ctx context.Context, taskCode, t
 				task.LastStatus = run.Status
 				task.LastMessage = run.Message
 				task.LastRunAt = &finishedAt
-				_ = s.repo.UpdateTask(ctx, task)
+				_ = s.repo.UpdateTaskRuntime(ctx, task)
 			}
 			return run, ErrSupplierProviderSyncConflict
 		}
@@ -414,9 +417,38 @@ func (s *SupplierAutomationService) RunWithMode(ctx context.Context, taskCode, t
 	task.LastStatus = run.Status
 	task.LastMessage = run.Message
 	task.LastRunAt = &finishedAt
-	_ = s.repo.UpdateTask(ctx, task)
+	// 运行结束只回写状态；健康守护游标基于最新配置合并，避免覆盖用户刚改的周期。
+	_ = s.persistTaskRuntimeAfterRun(ctx, task)
 	return run, execErr
 }
+
+// persistTaskRuntimeAfterRun 在任务执行结束后回写运行状态；健康守护还需安全合并游标。
+func (s *SupplierAutomationService) persistTaskRuntimeAfterRun(ctx context.Context, task *SupplierAutomationTask) error {
+	if task == nil {
+		return nil
+	}
+	if task.TaskCode == SupplierAutomationTaskAccountHealthGuard {
+		if err := s.persistAccountHealthGuardCursor(ctx, task.TaskCode, task.Config.AccountHealthGuardCursorAccountID); err != nil {
+			return err
+		}
+	}
+	return s.repo.UpdateTaskRuntime(ctx, task)
+}
+
+// persistAccountHealthGuardCursor 基于数据库中的最新配置只更新游标，避免用执行开始时的旧配置覆盖用户改动。
+func (s *SupplierAutomationService) persistAccountHealthGuardCursor(ctx context.Context, taskCode string, cursorAccountID int64) error {
+	current, err := s.repo.GetTask(ctx, taskCode)
+	if err != nil {
+		return err
+	}
+	if current.Config.AccountHealthGuardCursorAccountID == cursorAccountID {
+		return nil
+	}
+	current.Config.AccountHealthGuardCursorAccountID = cursorAccountID
+	return s.repo.UpdateTask(ctx, current)
+}
+
+
 
 // supplierAutomationTaskRequiresUpstreamFetchLock 标记会读取上游供应商数据的自动化任务。
 func supplierAutomationTaskRequiresUpstreamFetchLock(taskCode string) bool {
@@ -797,7 +829,7 @@ func (s *SupplierAutomationScheduler) Reload(ctx context.Context) error {
 		}
 		next := schedule.Next(now)
 		task.NextRunAt = &next
-		if err := s.repo.UpdateTask(ctx, &task); err != nil {
+		if err := s.repo.UpdateTaskRuntime(ctx, &task); err != nil {
 			return err
 		}
 		if task.Enabled {

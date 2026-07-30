@@ -30,8 +30,40 @@ func (r *supplierAutomationRepoStub) GetTask(_ context.Context, code string) (*S
 	return nil, ErrSupplierProviderInvalid
 }
 func (r *supplierAutomationRepoStub) UpdateTask(_ context.Context, task *SupplierAutomationTask) error {
-	clone := *task
-	r.tasks[task.TaskCode] = &clone
+	// 模拟仓储只更新配置字段，保留已有运行时状态。
+	existing, ok := r.tasks[task.TaskCode]
+	if !ok || existing == nil {
+		clone := *task
+		r.tasks[task.TaskCode] = &clone
+		r.updatedTasks = append(r.updatedTasks, clone)
+		return nil
+	}
+	existing.Enabled = task.Enabled
+	existing.CronExpression = task.CronExpression
+	existing.TimeoutSeconds = task.TimeoutSeconds
+	existing.Config = task.Config
+	if task.Name != "" {
+		existing.Name = task.Name
+	}
+	clone := *existing
+	r.updatedTasks = append(r.updatedTasks, clone)
+	return nil
+}
+
+func (r *supplierAutomationRepoStub) UpdateTaskRuntime(_ context.Context, task *SupplierAutomationTask) error {
+	// 模拟仓储只更新运行时状态，绝不覆盖 cron/config 等配置项。
+	existing, ok := r.tasks[task.TaskCode]
+	if !ok || existing == nil {
+		clone := *task
+		r.tasks[task.TaskCode] = &clone
+		r.updatedTasks = append(r.updatedTasks, clone)
+		return nil
+	}
+	existing.LastStatus = task.LastStatus
+	existing.LastMessage = task.LastMessage
+	existing.LastRunAt = task.LastRunAt
+	existing.NextRunAt = task.NextRunAt
+	clone := *existing
 	r.updatedTasks = append(r.updatedTasks, clone)
 	return nil
 }
@@ -391,7 +423,8 @@ func TestSupplierAutomationServiceRunsSyncTask(t *testing.T) {
 	require.Equal(t, SupplierAutomationStatusPartial, run.Status)
 	require.Equal(t, 2, run.ProcessedCount)
 	require.Equal(t, 1, syncSvc.called)
-	require.Equal(t, 1, lock.released)
+	// 同步任务会同时持有任务锁与上游拉取协调锁，结束时各释放一次。
+	require.Equal(t, 2, lock.released)
 }
 
 func TestSupplierAutomationServiceIncludesFailedSupplierDetailsInPartialMessage(t *testing.T) {
@@ -756,6 +789,116 @@ func TestSupplierAutomationServiceRecordsConflictWhenLockBusy(t *testing.T) {
 	require.Equal(t, "任务锁占用中，跳过本次执行", repo.runs[1].Message)
 	require.Equal(t, SupplierSyncTriggerScheduled, run.TriggerSource)
 }
+
+
+func TestSupplierAutomationRunDoesNotOverwriteCronExpression(t *testing.T) {
+	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
+		SupplierAutomationTaskAccountRateGuard: {
+			TaskCode: SupplierAutomationTaskAccountRateGuard, Name: "账号倍率守护", Enabled: true,
+			CronExpression: "@every 20s", TimeoutSeconds: 600,
+		},
+	}}
+	mutating := &supplierAutomationAccountRateGuardMutatingStub{
+		repo:     repo,
+		taskCode: SupplierAutomationTaskAccountRateGuard,
+		newCron:  "@every 300s",
+		result:   SupplierAccountRateGuardResult{CheckedAccounts: 2, UnboundGroups: 1},
+	}
+	service := NewSupplierAutomationService(repo, &supplierAutomationLockStub{acquired: true}, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
+	service.SetAccountRateGuardService(mutating)
+
+	run, err := service.Run(context.Background(), SupplierAutomationTaskAccountRateGuard, SupplierSyncTriggerScheduled)
+	require.NoError(t, err)
+	require.Equal(t, SupplierAutomationStatusSuccess, run.Status)
+	require.Equal(t, "@every 300s", repo.tasks[SupplierAutomationTaskAccountRateGuard].CronExpression)
+	require.Equal(t, run.Status, repo.tasks[SupplierAutomationTaskAccountRateGuard].LastStatus)
+	require.Equal(t, 1, mutating.called)
+}
+
+type supplierAutomationAccountRateGuardMutatingStub struct {
+	repo     *supplierAutomationRepoStub
+	taskCode string
+	newCron  string
+	result   SupplierAccountRateGuardResult
+	err      error
+	called   int
+}
+
+func (s *supplierAutomationAccountRateGuardMutatingStub) Run(_ context.Context, runID int64, mode SupplierAccountRateGuardMode, _ time.Time) (SupplierAccountRateGuardResult, error) {
+	s.called++
+	if task := s.repo.tasks[s.taskCode]; task != nil {
+		task.CronExpression = s.newCron
+	}
+	return s.result, s.err
+}
+
+func TestSupplierAutomationUpdateTaskPreservesRuntimeStatus(t *testing.T) {
+	now := time.Now()
+	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
+		SupplierAutomationTaskAccountRateGuard: {
+			TaskCode: SupplierAutomationTaskAccountRateGuard, Name: "账号倍率守护", Enabled: true,
+			CronExpression: "@every 20s", TimeoutSeconds: 600,
+			LastStatus: SupplierAutomationStatusPartial, LastMessage: "存在告警", LastRunAt: &now,
+		},
+	}}
+	service := NewSupplierAutomationService(repo, &supplierAutomationLockStub{acquired: true}, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
+	err := service.UpdateTask(context.Background(), &SupplierAutomationTask{
+		TaskCode: SupplierAutomationTaskAccountRateGuard, Name: "账号倍率守护", Enabled: true,
+		CronExpression: "@every 300s", TimeoutSeconds: 600,
+		LastStatus: "", LastMessage: "",
+	})
+	require.NoError(t, err)
+	saved := repo.tasks[SupplierAutomationTaskAccountRateGuard]
+	require.Equal(t, "@every 300s", saved.CronExpression)
+	require.Equal(t, SupplierAutomationStatusPartial, saved.LastStatus)
+	require.Equal(t, "存在告警", saved.LastMessage)
+	require.NotNil(t, saved.LastRunAt)
+}
+
+func TestSupplierAutomationHealthGuardRunPreservesConcurrentConfig(t *testing.T) {
+	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
+		SupplierAutomationTaskAccountHealthGuard: {
+			TaskCode: SupplierAutomationTaskAccountHealthGuard, Enabled: true,
+			CronExpression: "@every 120s", TimeoutSeconds: 1800,
+			Config: validSupplierAccountHealthGuardAutomationConfig(),
+		},
+	}}
+	guard := &supplierAutomationAccountHealthGuardMutatingStub{
+		repo: repo,
+		result: SupplierAccountHealthGuardResult{
+			CheckedCount: 1, HealthyCount: 1, CursorAccountID: 99,
+		},
+	}
+	service := NewSupplierAutomationService(repo, &supplierAutomationLockStub{acquired: true}, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
+	service.SetAccountHealthGuardService(guard)
+
+	run, err := service.Run(context.Background(), SupplierAutomationTaskAccountHealthGuard, SupplierSyncTriggerScheduled)
+	require.NoError(t, err)
+	require.Equal(t, SupplierAutomationStatusSuccess, run.Status)
+
+	saved := repo.tasks[SupplierAutomationTaskAccountHealthGuard]
+	require.Equal(t, "@every 600s", saved.CronExpression)
+	require.Equal(t, []int64{1, 2, 3}, saved.Config.AccountHealthGuardAccountIDs)
+	require.Equal(t, int64(99), saved.Config.AccountHealthGuardCursorAccountID)
+	require.Equal(t, run.Status, saved.LastStatus)
+}
+
+type supplierAutomationAccountHealthGuardMutatingStub struct {
+	repo   *supplierAutomationRepoStub
+	result SupplierAccountHealthGuardResult
+	err    error
+	called int
+}
+
+func (s *supplierAutomationAccountHealthGuardMutatingStub) Run(_ context.Context, config SupplierAccountHealthGuardConfig, _ time.Time) (SupplierAccountHealthGuardResult, error) {
+	s.called++
+	if task := s.repo.tasks[SupplierAutomationTaskAccountHealthGuard]; task != nil {
+		task.CronExpression = "@every 600s"
+		task.Config.AccountHealthGuardAccountIDs = []int64{1, 2, 3}
+	}
+	return s.result, s.err
+}
+
 
 func TestSupplierAutomationSchedulerSkipsInvalidTaskWithoutBlockingOthers(t *testing.T) {
 	badConfig := validSupplierAccountHealthGuardAutomationConfig()
