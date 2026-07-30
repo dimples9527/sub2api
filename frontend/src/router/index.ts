@@ -687,6 +687,17 @@ const routes: RouteRecordRaw[] = [
       title: '供应商上游账号'
     }
   },
+
+  {
+    path: '/admin/supplier-management/captcha-settings',
+    name: 'AdminSupplierCaptchaSettings',
+    component: () => import('@/views/admin/supplier-management/SupplierCaptchaSettingsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: '上游打码设置'
+    }
+  },
   {
     path: '/admin/announcements',
     name: 'AdminAnnouncements',

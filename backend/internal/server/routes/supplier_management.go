@@ -33,6 +33,9 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 			providers.POST("/:id/test/:scope", h.Admin.SupplierProviderSync.TestEndpoint)
 		}
 
+		supplier.GET("/captcha-settings", h.Admin.Setting.GetSupplierCaptchaSettings)
+		supplier.PUT("/captcha-settings", h.Admin.Setting.UpdateSupplierCaptchaSettings)
+
 		supplier.GET("/accounts", h.Admin.SupplierProviderSync.ListAccounts)
 		supplier.GET("/accounts/:local_account_id/health-guard-models", h.Admin.SupplierProviderSync.ListLocalAccountHealthGuardModels)
 		supplier.PUT("/accounts/:local_account_id/platform-override", h.Admin.SupplierProviderSync.SetLocalAccountPlatformOverride)
