@@ -17,6 +17,7 @@ export interface SupplierProvider {
   account_rate_multiplier_scale: number
   sort_order: number
   enabled: boolean
+  turnstile_enabled: boolean
   is_default: boolean
   email: string
   username: string
@@ -75,6 +76,7 @@ export interface SupplierProviderUpsertPayload {
   account_rate_multiplier_scale: number
   sort_order?: number
   enabled: boolean
+  turnstile_enabled: boolean
   is_default?: boolean
 }
 

@@ -300,6 +300,14 @@
               </div>
             </label>
             <label class="sp-toggle-field sp-dialog-toggle-card">
+              <span>启用 Turnstile 人机校验</span>
+              <div class="sp-toggle-row">
+                <Toggle v-model="form.turnstile_enabled" />
+                <em>{{ form.turnstile_enabled ? '开启' : '关闭' }}</em>
+              </div>
+              <p class="sp-toggle-hint">开启后，登录该上游前会调用 2Captcha 自动求解验证码；失败将导致登录失败</p>
+            </label>
+            <label class="sp-toggle-field sp-dialog-toggle-card">
               <span>设为默认供应商</span>
               <div class="sp-toggle-row">
                 <Toggle :model-value="Boolean(form.is_default)" @update:model-value="form.is_default = $event" />
@@ -558,6 +566,7 @@ const emptyForm = (): SupplierProviderUpsertPayload => ({
   account_rate_multiplier_scale: 1,
   sort_order: 0,
   enabled: true,
+  turnstile_enabled: false,
   is_default: false,
 })
 
@@ -722,6 +731,7 @@ function openEdit(provider: SupplierProvider) {
     account_rate_multiplier_scale: provider.account_rate_multiplier_scale || 1,
     sort_order: provider.sort_order,
     enabled: provider.enabled,
+    turnstile_enabled: Boolean(provider.turnstile_enabled),
     is_default: provider.is_default,
   })
   modalVisible.value = true
@@ -834,6 +844,7 @@ function providerUpdatePayload(provider: SupplierProvider, enabled: boolean): Su
     account_rate_multiplier_scale: provider.account_rate_multiplier_scale || 1,
     sort_order: provider.sort_order,
     enabled,
+    turnstile_enabled: Boolean(provider.turnstile_enabled),
     is_default: provider.is_default,
   })
 }
@@ -1002,6 +1013,7 @@ function normalizePayload(payload: SupplierProviderUpsertPayload): SupplierProvi
     account_rate_multiplier_scale: Number(payload.account_rate_multiplier_scale || 1),
     sort_order: Number(payload.sort_order || 0),
     enabled: Boolean(payload.enabled),
+    turnstile_enabled: Boolean(payload.turnstile_enabled),
     is_default: Boolean(payload.is_default),
   }
 }
@@ -1617,6 +1629,14 @@ function errorMessage(err: unknown, fallback: string): string {
   font-style: normal;
   font-size: 13px;
   font-weight: 600;
+}
+
+.sp-toggle-hint {
+  margin: 0;
+  color: var(--sp-muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
 }
 
 .sp-dialog-note {
