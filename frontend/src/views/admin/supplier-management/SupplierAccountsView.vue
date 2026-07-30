@@ -104,16 +104,22 @@
             class="sp-button sp-account-toolbar-btn sp-account-toolbar-logs"
             type="button"
             data-test="supplier-account-rate-guard-logs"
+            :class="{ 'has-pending': accountRateGuardPendingCount > 0 }"
             @click="openAccountRateGuardLogs"
           >
             倍率守护日志
+            <span
+              v-if="accountRateGuardPendingCount > 0"
+              class="sp-account-rate-guard-pending-count"
+              data-test="supplier-account-rate-guard-pending-count"
+            >{{ accountRateGuardPendingCount }}</span>
           </button>
           <button
             class="sp-button sp-account-toolbar-btn sp-account-toolbar-refresh sp-account-refresh"
             type="button"
             data-test="supplier-account-refresh"
             :disabled="loading"
-            @click="loadAccounts"
+            @click="refreshAccountsWorkbench"
           >
             {{ loading ? '刷新中…' : '刷新' }}
           </button>
@@ -861,6 +867,7 @@
     <SupplierAccountRateGuardLogDialog
       :show="accountRateGuardLogsVisible"
       @close="closeAccountRateGuardLogs"
+      @pending-count-change="updateAccountRateGuardPendingCount"
     />
 
     <ConfirmDialog
@@ -922,6 +929,7 @@ import {
   startSupplierAccountBatchTest,
   type SupplierProviderAccount,
 } from '@/api/admin/supplierProviderData'
+import { listAccountRateGuardUnbindLogs } from '@/api/admin/supplierAutomation'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import type { Column } from '@/components/common/types'
@@ -1012,6 +1020,7 @@ const showCreateAccountModal = ref(false)
 const showBatchTestConfigDialog = ref(false)
 const showBatchTestResultDialog = ref(false)
 const accountRateGuardLogsVisible = ref(false)
+const accountRateGuardPendingCount = ref(0)
 const businessPlatformAccount = ref<SupplierProviderAccount | null>(null)
 const businessPlatformDraft = ref('')
 const savingBusinessPlatform = ref(false)
@@ -1303,7 +1312,7 @@ const accountColumns: Column[] = [
 
 onMounted(async () => {
   applyFilterControlLabels()
-  await Promise.all([loadProviders(), loadLocalGroups()])
+  await Promise.all([loadProviders(), loadLocalGroups(), loadAccountRateGuardPendingCount()])
   await loadAccounts()
 })
 
@@ -2276,6 +2285,28 @@ function closeAccountRateGuardLogs() {
   accountRateGuardLogsVisible.value = false
 }
 
+async function loadAccountRateGuardPendingCount() {
+  try {
+    const result = await listAccountRateGuardUnbindLogs({
+      result: 'unbound',
+      status: 'pending',
+      page: 1,
+      page_size: 1,
+    })
+    accountRateGuardPendingCount.value = Number(result.pending_count) || 0
+  } catch {
+    // 角标加载失败不阻断页面主流程，保留上一次数量。
+  }
+}
+
+async function updateAccountRateGuardPendingCount() {
+  await loadAccountRateGuardPendingCount()
+}
+
+async function refreshAccountsWorkbench() {
+  await Promise.all([loadAccounts(), loadAccountRateGuardPendingCount()])
+}
+
 function handleAccountSort(key: string, order: 'asc' | 'desc') {
   sortBy.value = key
   sortOrder.value = order
@@ -2428,9 +2459,35 @@ function formatTime(value?: string): string {
 }
 
 .sp-account-toolbar-logs {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
   border-color: color-mix(in srgb, var(--sp-amber) 45%, var(--sp-line));
   background: color-mix(in srgb, var(--sp-amber) 12%, var(--sp-panel));
   color: var(--sp-amber);
+}
+
+.sp-account-toolbar-logs.has-pending {
+  border-color: color-mix(in srgb, var(--sp-amber) 68%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-amber) 18%, var(--sp-panel));
+  font-weight: 700;
+}
+
+.sp-account-rate-guard-pending-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.375rem;
+  border: 1px solid color-mix(in srgb, var(--sp-amber) 36%, var(--sp-line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sp-amber) 14%, var(--sp-panel));
+  color: var(--sp-amber);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .sp-account-toolbar-logs:hover:not(:disabled) {

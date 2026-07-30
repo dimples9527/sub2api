@@ -1056,6 +1056,21 @@ describe('supplier local data views component usage', () => {
     expect(accountsSource).not.toContain('@click.stop="openAccountRateGuardLogs(account)"')
   })
 
+  it('shows pending account rate guard log count on the toolbar button', () => {
+    expect(accountsSource).toContain("import { listAccountRateGuardUnbindLogs } from '@/api/admin/supplierAutomation'")
+    expect(accountsSource).toContain('const accountRateGuardPendingCount = ref(0)')
+    expect(accountsSource).toContain('await loadAccountRateGuardPendingCount()')
+    expect(accountsSource).toContain("result: 'unbound'")
+    expect(accountsSource).toContain("status: 'pending'")
+    expect(accountsSource).toContain('accountRateGuardPendingCount.value = Number(result.pending_count) || 0')
+    expect(accountsSource).toContain('v-if="accountRateGuardPendingCount > 0"')
+    expect(accountsSource).toContain('class="sp-account-rate-guard-pending-count"')
+    expect(accountsSource).toContain('@pending-count-change="updateAccountRateGuardPendingCount"')
+    expect(accountsSource).toContain('data-test="supplier-account-rate-guard-pending-count"')
+    expect(accountsSource).toContain('@click="refreshAccountsWorkbench"')
+    expect(accountsSource).toContain('async function refreshAccountsWorkbench()')
+  })
+
   it('runs an independently implemented batch test for all filtered matched accounts', () => {
     expect(accountsSource).toContain('测试当前筛选')
     expect(accountsSource).toContain('type SupplierAccountFilterSnapshot = {')
