@@ -58,6 +58,21 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
            AND mapped_group.upstream_group_key = a.group_key
          LIMIT 1
        ), '') AS platform,
+       CASE
+         WHEN NULLIF(TRIM(a.group_key), '') IS NULL THEN ''
+         WHEN EXISTS (
+           SELECT 1 FROM supplier_provider_groups g
+           WHERE g.provider_id = a.provider_id
+             AND g.upstream_group_key = a.group_key
+             AND g.active = TRUE
+         ) THEN 'active'
+         WHEN EXISTS (
+           SELECT 1 FROM supplier_provider_groups g
+           WHERE g.provider_id = a.provider_id
+             AND g.upstream_group_key = a.group_key
+         ) THEN 'inactive'
+         ELSE 'missing'
+       END AS group_status,
        a.rate_multiplier, a.raw_status, a.active,
        a.last_seen_at, a.inactive_at,
        CASE
@@ -1076,9 +1091,23 @@ func supplierProviderDataWhere(alias string, params service.SupplierProviderData
 	return strings.Join(conditions, " AND "), args
 }
 
+// normalizeSupplierAccountStatusFilter 仅允许统一后的上游密钥状态，非法值视为不筛选。
+func normalizeSupplierAccountStatusFilter(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "active", "disabled", "expired", "quota_exhausted", "unknown":
+		return strings.ToLower(strings.TrimSpace(status))
+	default:
+		return ""
+	}
+}
+
 func supplierProviderAccountWhere(params service.SupplierProviderDataListParams) (string, []any) {
 	where, args := supplierProviderDataWhere("a", params)
 	conditions := []string{where}
+	if status := normalizeSupplierAccountStatusFilter(params.Status); status != "" {
+		args = append(args, status)
+		conditions = append(conditions, fmt.Sprintf("LOWER(a.status) = $%d", len(args)))
+	}
 	if params.GroupID > 0 {
 		args = append(args, params.GroupID)
 		// 按本地账号绑定分组过滤：唯一匹配到的本地账号在 account_groups 中包含所选分组。
@@ -1211,6 +1240,8 @@ func supplierProviderAccountOrderBy(params service.SupplierProviderDataListParam
 		expression = "LOWER(p.name)"
 	case "upstream_account_key":
 		return fmt.Sprintf("LOWER(a.name) %s, LOWER(a.upstream_account_key) %s, a.id ASC", direction, direction)
+	case "upstream_account_status":
+		expression = "LOWER(a.status)"
 	case "local_account_name":
 		expression = "LOWER(matched_account.name)"
 		nullsLast = true
@@ -1313,7 +1344,7 @@ func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (servic
 	var localAccountSchedulable sql.NullBool
 	var bindingGroupsJSON []byte
 	err := scanner.Scan(&item.ID, &item.ProviderID, &item.ProviderName, &item.UpstreamKey,
-		&item.Name, &item.Status, &item.GroupKey, &item.GroupName, &item.Platform, &item.RateMultiplier,
+		&item.Name, &item.Status, &item.GroupKey, &item.GroupName, &item.Platform, &item.GroupStatus, &item.RateMultiplier,
 		&item.RawStatus, &item.Active, &item.LastSeenAt, &inactiveAt,
 		&item.LocalAccountMatchStatus, &item.LocalAccountMatchCount,
 		&localAccountID, &item.LocalAccountName, &item.LocalAccountPlatform, &item.LocalAccountType, &item.PlatformOverride, &item.EffectivePlatform, &localAccountPriority,

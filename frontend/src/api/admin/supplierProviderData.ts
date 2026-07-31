@@ -65,6 +65,7 @@ export interface SupplierProviderAccount {
   group_key: string
   group_name: string
   platform?: string
+  group_status?: 'active' | 'inactive' | 'missing' | ''
   rate_multiplier: number
   binding_groups: SupplierProviderAccountBindingGroup[]
   raw_status: string
@@ -137,6 +138,8 @@ export interface SupplierProviderDataListParams {
   provider_id?: number
   group_id?: number
   active?: boolean
+  /** 上游密钥业务状态：active/disabled/expired/quota_exhausted/unknown */
+  status?: string
   search?: string
   platform?: string
   match_status?: string

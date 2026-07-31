@@ -53,6 +53,7 @@ type SupplierProviderAccount struct {
 	LocalAccountLastTestStatus string                                `json:"local_account_last_test_status,omitempty"`
 	LocalAccountLastTestedAt   string                                `json:"local_account_last_tested_at,omitempty"`
 	LocalAccountLastTestError  string                                `json:"local_account_last_test_error,omitempty"`
+	GroupStatus                string                                `json:"group_status,omitempty"`
 	BindingGroups              []SupplierProviderAccountBindingGroup `json:"binding_groups"`
 	SupplierCurrentBalance     float64                               `json:"supplier_current_balance"`
 	SupplierTodayCost          float64                               `json:"supplier_today_cost"`
@@ -92,10 +93,13 @@ type SupplierProviderGroup struct {
 	InactiveAt                      *time.Time `json:"inactive_at,omitempty"`
 }
 
+// SupplierProviderDataListParams 供应商上游数据列表查询参数。
+// Status 为上游密钥业务状态：active/disabled/expired/quota_exhausted/unknown。
 type SupplierProviderDataListParams struct {
 	ProviderID  int64
 	GroupID     int64
 	Active      *bool
+	Status      string
 	Search      string
 	Platform    string
 	MatchStatus string

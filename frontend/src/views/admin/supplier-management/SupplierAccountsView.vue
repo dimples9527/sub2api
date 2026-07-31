@@ -5,7 +5,7 @@
         <div>
           <span class="sp-filter-card-kicker">筛选条件</span>
           <h2>筛选账号</h2>
-          <p>按供应商、平台、本地分组和账号状态快速定位上游账号。</p>
+          <p>按供应商、平台、本地分组、同步有效性和上游状态快速定位账号。</p>
         </div>
         <span class="sp-filter-card-count">{{ total }} 个账号</span>
       </header>
@@ -73,11 +73,25 @@
             role="group"
             aria-labelledby="supplier-account-active-label"
           >
-            <span id="supplier-account-active-label" class="sr-only">账号状态</span>
+            <span id="supplier-account-active-label" class="sr-only">同步有效性</span>
             <Select
               v-model="activeFilter"
               class="w-full"
               :options="activeFilterOptions"
+              :searchable="false"
+            />
+          </div>
+          <div
+            ref="upstreamStatusFilterControl"
+            class="sp-account-filter-control"
+            role="group"
+            aria-labelledby="supplier-account-upstream-status-label"
+          >
+            <span id="supplier-account-upstream-status-label" class="sr-only">上游状态</span>
+            <Select
+              v-model="upstreamStatusFilter"
+              class="w-full"
+              :options="upstreamStatusFilterOptions"
               :searchable="false"
             />
           </div>
@@ -261,19 +275,29 @@
           </template>
 
           <template #cell-group_name="{ row: account }">
-            <div v-if="account.binding_groups?.length" class="sp-account-groups">
-              <GroupBadge
-                v-for="group in account.binding_groups"
-                :key="group.id"
-                :name="group.name"
-                :platform="group.platform"
-                :subscription-type="group.subscription_type"
-                :rate-multiplier="group.rate_multiplier"
-                :show-rate="true"
-                :always-show-rate="true"
-              />
+            <div class="sp-account-group-stack">
+              <div v-if="account.binding_groups?.length" class="sp-account-groups">
+                <GroupBadge
+                  v-for="group in account.binding_groups"
+                  :key="group.id"
+                  :name="group.name"
+                  :platform="group.platform"
+                  :subscription-type="group.subscription_type"
+                  :rate-multiplier="group.rate_multiplier"
+                  :show-rate="true"
+                  :always-show-rate="true"
+                />
+              </div>
+              <span v-else class="sp-account-muted">—</span>
+              <span
+                v-if="account.group_status === 'inactive' || account.group_status === 'missing'"
+                class="sp-upstream-group-deleted"
+                :title="account.group_status === 'inactive' ? '上游分组已失效' : '上游分组已删除'"
+              >
+                上游分组已{{ account.group_status === 'inactive' ? '失效' : '删除' }}
+                <template v-if="account.group_name">（{{ account.group_name }}）</template>
+              </span>
             </div>
-            <span v-else class="sp-account-muted">—</span>
           </template>
 
           <template #cell-local_account_status="{ row: account }">
@@ -282,6 +306,17 @@
               :class="['sp-local-status', localAccountStatusTone(account.local_account_status)]"
             >
               {{ localAccountStatusLabel(account.local_account_status) }}
+            </span>
+            <span v-else class="sp-account-muted">—</span>
+          </template>
+
+          <template #cell-upstream_account_status="{ row: account }">
+            <span
+              v-if="account.status || account.raw_status"
+              :class="['sp-local-status', upstreamStatusTone(account.status || account.raw_status)]"
+              :title="account.raw_status && account.raw_status !== account.status ? ('原始: ' + account.raw_status) : undefined"
+            >
+              {{ upstreamStatusLabel(account.status || account.raw_status) }}
             </span>
             <span v-else class="sp-account-muted">—</span>
           </template>
@@ -444,14 +479,21 @@
           <div class="sp-detail-cell"><span>本地账号</span><b>{{ localAccountDisplayName(selected) }}</b></div>
           <div class="sp-detail-cell"><span>优先级</span><b>{{ localDetailValue(selected, selected.local_account_priority) }}</b></div>
           <div class="sp-detail-cell"><span>上游倍率</span><b>{{ formatRate(selected.rate_multiplier) }}</b></div>
-          <div class="sp-detail-cell"><span>账号绑定的分组</span><b>{{ selected.group_name || selected.group_key || '—' }}</b></div>
+          <div class="sp-detail-cell">
+            <span>上游分组</span>
+            <b>
+              {{ selected.group_name || selected.group_key || '—' }}
+              <template v-if="selected.group_status === 'inactive'">（已失效）</template>
+              <template v-else-if="selected.group_status === 'missing'">（已删除）</template>
+            </b>
+          </div>
           <div class="sp-detail-cell"><span>本地账号状态</span><b>{{ isMatchedLocalAccount(selected) ? localAccountStatusLabel(selected.local_account_status) : '—' }}</b></div>
           <div class="sp-detail-cell"><span>是否调度</span><b>{{ localSchedulableLabel(selected) }}</b></div>
           <div class="sp-detail-cell"><span>测试结果</span><b>{{ isMatchedLocalAccount(selected) ? accountTestStatusLabel(selected.local_account_last_test_status) : '—' }}</b></div>
           <div class="sp-detail-cell"><span>上次测试时间</span><b>{{ isMatchedLocalAccount(selected) ? formatTime(selected.local_account_last_tested_at) : '—' }}</b></div>
           <div class="sp-detail-cell"><span>余额（供应商汇总）</span><b>{{ formatCNY(selected.supplier_current_balance) }}</b></div>
           <div class="sp-detail-cell"><span>今日消费（供应商汇总）</span><b>{{ formatCNY(selected.supplier_today_cost) }}</b></div>
-          <div class="sp-detail-cell"><span>上游状态</span><b>{{ displayValue(selected.raw_status || selected.status) }}</b></div>
+          <div class="sp-detail-cell"><span>上游状态</span><b>{{ upstreamStatusLabel(selected.status || selected.raw_status) }}</b></div>
           <div class="sp-detail-cell"><span>最近同步</span><b>{{ formatTime(selected.last_seen_at) }}</b></div>
           <div class="sp-detail-cell"><span>失效时间</span><b>{{ formatTime(selected.inactive_at) }}</b></div>
         </div>
@@ -974,12 +1016,13 @@ type SupplierAccountFilterSnapshot = {
   groupID: number
   platform: string
   active?: boolean
+  status?: string
   search?: string
   quickFilter: AccountQuickFilterKey
   summary: string
 }
 
-type AccountQuickFilterKey = 'all' | 'bound' | 'unbound' | 'schedulable' | 'paused' | 'failed'
+type AccountQuickFilterKey = 'all' | 'bound' | 'unbound' | 'schedulable' | 'paused' | 'failed' | 'group_deleted'
 
 type AccountQuickFilterOption = {
   key: AccountQuickFilterKey
@@ -1060,12 +1103,14 @@ const providerID = ref(0)
 const groupID = ref(0)
 const platformFilter = ref('')
 const activeFilter = ref('true')
+const upstreamStatusFilter = ref('')
 const search = ref('')
 const searchFilterControl = ref<HTMLElement | null>(null)
 const providerFilterControl = ref<HTMLElement | null>(null)
 const groupFilterControl = ref<HTMLElement | null>(null)
 const platformFilterControl = ref<HTMLElement | null>(null)
 const activeFilterControl = ref<HTMLElement | null>(null)
+const upstreamStatusFilterControl = ref<HTMLElement | null>(null)
 let searchTimer: number | undefined
 let batchTestPollTimer: ReturnType<typeof setTimeout> | null = null
 let batchTestPollToken = 0
@@ -1117,6 +1162,13 @@ const accountQuickFilterOptions = computed<AccountQuickFilterOption[]>(() => [
     label: '测试失败',
     count: accountSourceItems.value.filter(account => accountMatchesQuickFilter(account, 'failed')).length,
   },
+  {
+    key: 'group_deleted',
+    label: '上游分组已删除',
+    count: accountSourceItems.value.filter(account => 
+      account.group_status === 'inactive' || account.group_status === 'missing'
+    ).length,
+  },
 ])
 const supplierIDs = computed(() => [...new Set([
   ...providers.value.map(provider => provider.id),
@@ -1124,8 +1176,16 @@ const supplierIDs = computed(() => [...new Set([
 ])].sort((left, right) => left - right))
 const activeFilterOptions: SelectOption[] = [
   { value: 'true', label: '仅有效' },
-  { value: '', label: '全部状态' },
+  { value: '', label: '全部有效性' },
   { value: 'false', label: '已失效' },
+]
+const upstreamStatusFilterOptions: SelectOption[] = [
+  { value: '', label: '全部上游状态' },
+  { value: 'active', label: '正常' },
+  { value: 'disabled', label: '停用' },
+  { value: 'expired', label: '已过期' },
+  { value: 'quota_exhausted', label: '额度耗尽' },
+  { value: 'unknown', label: '未知' },
 ]
 const platformFilterOptions: SelectOption[] = [
   { value: '', label: '全部平台' },
@@ -1206,8 +1266,11 @@ function buildSupplierFilterSummary(snapshot: Omit<SupplierAccountFilterSnapshot
     : '全部本地分组'
   const platform = snapshot.platform ? platformLabel(snapshot.platform) : '全部平台'
   const active = snapshot.active === undefined
-    ? '全部状态'
-    : activeFilterOptions.find(option => option.value === String(snapshot.active))?.label || '全部状态'
+    ? '全部有效性'
+    : activeFilterOptions.find(option => option.value === String(snapshot.active))?.label || '全部有效性'
+  const status = snapshot.status
+    ? upstreamStatusFilterOptions.find(option => option.value === snapshot.status)?.label || snapshot.status
+    : '全部上游状态'
   const keyword = snapshot.search?.trim() || ''
   const quickFilter = accountQuickFilterOptions.value.find(option => option.key === snapshot.quickFilter)?.label || '全部'
   return [
@@ -1215,6 +1278,7 @@ function buildSupplierFilterSummary(snapshot: Omit<SupplierAccountFilterSnapshot
     group,
     platform,
     active,
+    status,
     `快捷过滤：${quickFilter}`,
     keyword ? `关键词：${keyword}` : '无搜索关键词',
   ].join(' · ')
@@ -1226,6 +1290,7 @@ function createSupplierAccountFilterSnapshot(): SupplierAccountFilterSnapshot {
     groupID: groupID.value || 0,
     platform: platformFilter.value || '',
     active: activeFilter.value === '' ? undefined : activeFilter.value === 'true',
+    status: upstreamStatusFilter.value || undefined,
     search: search.value.trim() || undefined,
     quickFilter: accountQuickFilter.value,
   }
@@ -1297,6 +1362,7 @@ const batchTestProgressDescription = computed(() => {
 const accountColumns: Column[] = [
   { key: 'provider_name', label: '供应商', sortable: true, class: 'min-w-[190px]' },
   { key: 'upstream_account_key', label: '上游账号', sortable: true, class: 'min-w-[260px]' },
+  { key: 'upstream_account_status', label: '上游状态', sortable: true, class: 'min-w-[110px]' },
   { key: 'local_account_name', label: '本地账号', sortable: true, class: 'min-w-[190px]' },
   { key: 'local_account_priority', label: '优先级', sortable: true, class: 'min-w-[88px]' },
   { key: 'rate_multiplier', label: '上游倍率', sortable: true, class: 'min-w-[104px]' },
@@ -1322,7 +1388,7 @@ onBeforeUnmount(() => {
   clearBatchTestPollTimer()
 })
 
-watch([providerID, groupID, activeFilter], () => {
+watch([providerID, groupID, activeFilter, upstreamStatusFilter], () => {
   resetPageAndLoad()
 })
 
@@ -1359,6 +1425,9 @@ function accountMatchesQuickFilter(
   if (filter === 'bound') return account.binding_groups.length > 0
   if (filter === 'unbound') return account.binding_groups.length === 0
   if (filter === 'failed') return account.local_account_last_test_status === 'failed'
+  if (filter === 'group_deleted') {
+    return account.group_status === 'inactive' || account.group_status === 'missing'
+  }
   if (account.local_account_match_status !== 'matched') return false
   if (filter === 'schedulable') return account.local_account_schedulable === true
   return account.local_account_schedulable === false
@@ -1395,6 +1464,7 @@ async function loadAccounts() {
         group_id: groupID.value || undefined,
         platform: platformFilter.value || undefined,
         active: activeFilter.value === '' ? undefined : activeFilter.value === 'true',
+        status: upstreamStatusFilter.value || undefined,
         search: search.value.trim() || undefined,
         sort_by: sortBy.value || undefined,
         sort_order: sortBy.value ? sortOrder.value : undefined,
@@ -1425,6 +1495,7 @@ async function loadFilteredTestAccounts(snapshot: SupplierAccountFilterSnapshot)
       group_id: snapshot.groupID || undefined,
       platform: snapshot.platform || undefined,
       active: snapshot.active,
+      status: snapshot.status,
       search: snapshot.search,
       page: nextPage,
       page_size: SUPPLIER_BATCH_TEST_PAGE_SIZE,
@@ -2083,6 +2154,7 @@ function applyFilterControlLabels() {
   setFilterControlLabel(groupFilterControl.value, '.select-trigger', 'supplier-account-group-label')
   setFilterControlLabel(platformFilterControl.value, '.select-trigger', 'supplier-account-platform-label')
   setFilterControlLabel(activeFilterControl.value, '.select-trigger', 'supplier-account-active-label')
+  setFilterControlLabel(upstreamStatusFilterControl.value, '.select-trigger', 'supplier-account-upstream-status-label')
 }
 
 function setFilterControlLabel(container: HTMLElement | null, selector: string, labelID: string) {
@@ -2097,6 +2169,25 @@ function supplierTone(providerID: number) {
   const providerIndex = supplierIDs.value.indexOf(providerID)
   const toneIndex = providerIndex >= 0 ? providerIndex : Math.abs(Math.trunc(providerID || 0))
   return SUPPLIER_TONES[toneIndex % SUPPLIER_TONES.length]
+}
+
+function upstreamStatusLabel(status?: string): string {
+  if (!status) return '—'
+  const s = String(status).trim().toLowerCase()
+  if (s === 'active' || s === '1') return '正常'
+  if (s === 'disabled' || s === 'inactive' || s === '2') return '停用'
+  if (s === 'expired' || s === '3') return '已过期'
+  if (s === 'quota_exhausted' || s === '4') return '额度耗尽'
+  if (s === 'unknown') return '未知'
+  return displayValue(status)
+}
+
+function upstreamStatusTone(status?: string): string {
+  const s = String(status ?? '').trim().toLowerCase()
+  if (s === 'active' || s === '1') return 'good'
+  if (s === 'disabled' || s === 'inactive' || s === '2') return 'neutral'
+  if (s === 'expired' || s === '3' || s === 'quota_exhausted' || s === '4') return 'bad'
+  return 'neutral'
 }
 
 function localAccountStatusLabel(status?: string): string {
@@ -2402,7 +2493,7 @@ function formatTime(value?: string): string {
   display: grid;
   min-width: 0;
   flex: 1 1 auto;
-  grid-template-columns: minmax(15rem, 1fr) minmax(9rem, 0.34fr) minmax(10rem, 0.38fr) minmax(8rem, 0.28fr) minmax(8rem, 0.28fr);
+  grid-template-columns: minmax(14rem, 1fr) minmax(8.5rem, 0.32fr) minmax(9rem, 0.34fr) minmax(7.5rem, 0.26fr) minmax(7.5rem, 0.26fr) minmax(8rem, 0.28fr);
   gap: 0.625rem;
 }
 
@@ -2786,6 +2877,28 @@ function formatTime(value?: string): string {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.375rem;
+}
+
+.sp-account-group-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.sp-upstream-group-deleted {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  color: var(--sp-red);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 0.18rem 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--sp-red) 28%, var(--sp-line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sp-red) 8%, var(--sp-panel));
 }
 
 .sp-account-code,

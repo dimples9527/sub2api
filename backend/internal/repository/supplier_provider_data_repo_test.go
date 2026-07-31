@@ -93,7 +93,7 @@ func (supplierProviderNonNilArg) Match(value driver.Value) bool {
 
 var supplierProviderAccountListColumns = []string{
 	"id", "provider_id", "provider_name", "upstream_account_key", "name", "status",
-	"group_key", "group_name", "platform", "rate_multiplier", "raw_status", "active",
+	"group_key", "group_name", "platform", "group_status", "rate_multiplier", "raw_status", "active",
 	"last_seen_at", "inactive_at",
 	"local_account_match_status", "local_account_match_count",
 	"local_account_id", "local_account_name", "local_account_platform", "local_account_type", "platform_override", "effective_platform", "local_account_priority",
@@ -116,6 +116,21 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
            AND mapped_group.upstream_group_key = a.group_key
          LIMIT 1
        ), '') AS platform,
+       CASE
+         WHEN NULLIF(TRIM(a.group_key), '') IS NULL THEN ''
+         WHEN EXISTS (
+           SELECT 1 FROM supplier_provider_groups g
+           WHERE g.provider_id = a.provider_id
+             AND g.upstream_group_key = a.group_key
+             AND g.active = TRUE
+         ) THEN 'active'
+         WHEN EXISTS (
+           SELECT 1 FROM supplier_provider_groups g
+           WHERE g.provider_id = a.provider_id
+             AND g.upstream_group_key = a.group_key
+         ) THEN 'inactive'
+         ELSE 'missing'
+       END AS group_status,
        a.rate_multiplier, a.raw_status, a.active,
        a.last_seen_at, a.inactive_at,
        CASE
@@ -291,7 +306,7 @@ func TestSupplierProviderDataRepositoryListAccountsPaginates(t *testing.T) {
 	)).
 		WithArgs(int64(42), active, "%pri%", 20, 20).
 		WillReturnRows(sqlmock.NewRows(supplierProviderAccountListColumns).AddRow(
-			int64(7), int64(42), "Supplier A", "account-1", "Primary", "active", "group-1", "VIP", "openai", 2.5, "active", true, now, nil,
+			int64(7), int64(42), "Supplier A", "account-1", "Primary", "active", "group-1", "VIP", "openai", "active", 2.5, "active", true, now, nil,
 			"matched", 1, int64(101), "prefix-key-1", "anthropic", "apikey", "", "anthropic", 80, "active", true, "success", "2026-07-16T09:30:00Z", "upstream authentication failed",
 			`[{"id":202,"name":"Claude 订阅","platform":"anthropic","rate_multiplier":2,"subscription_type":"subscription"},{"id":201,"name":"OpenAI 专线","platform":"openai","rate_multiplier":1.5,"subscription_type":"standard"}]`,
 			12.5, 3.25,
@@ -312,6 +327,7 @@ func TestSupplierProviderDataRepositoryListAccountsPaginates(t *testing.T) {
 	require.Len(t, result.Items, 1)
 	require.Equal(t, "Primary", result.Items[0].Name)
 	require.Equal(t, "openai", result.Items[0].Platform)
+	require.Equal(t, "active", result.Items[0].GroupStatus)
 	require.Equal(t, "matched", result.Items[0].LocalAccountMatchStatus)
 	require.Equal(t, 1, result.Items[0].LocalAccountMatchCount)
 	require.NotNil(t, result.Items[0].LocalAccountID)
@@ -350,11 +366,11 @@ func TestSupplierProviderDataRepositoryListAccountsSQLContractMapsUnmatchedAndCo
 		WithArgs(int64(42), 20, 0).
 		WillReturnRows(sqlmock.NewRows(supplierProviderAccountListColumns).
 			AddRow(
-				int64(7), int64(42), "Supplier A", "missing-key", "Missing", "active", "group-1", "VIP", "openai", 2.5, "active", true, now, nil,
+				int64(7), int64(42), "Supplier A", "missing-key", "Missing", "active", "group-1", "VIP", "openai", "active", 2.5, "active", true, now, nil,
 				"unmatched", 0, nil, "", "", "", "", "", nil, "", nil, "", "", "", `[]`, 12.5, 3.25,
 			).
 			AddRow(
-				int64(8), int64(42), "Supplier A", "duplicate-key", "Duplicate", "active", "group-2", "Standard", "openai", 1.5, "active", true, now, nil,
+				int64(8), int64(42), "Supplier A", "duplicate-key", "Duplicate", "active", "group-2", "Standard", "openai", "active", 1.5, "active", true, now, nil,
 				"conflict", 2, nil, "", "", "", "", "", nil, "", nil, "", "", "", `[]`, 12.5, 3.25,
 			))
 
@@ -379,6 +395,7 @@ func TestSupplierProviderDataRepositoryListAccountsSQLContractMapsUnmatchedAndCo
 	require.Empty(t, unmatched.LocalAccountLastTestStatus)
 	require.Empty(t, unmatched.LocalAccountLastTestedAt)
 	require.Empty(t, unmatched.LocalAccountLastTestError)
+	require.Equal(t, "active", unmatched.GroupStatus)
 
 	conflict := result.Items[1]
 	require.Equal(t, "conflict", conflict.LocalAccountMatchStatus)
@@ -391,6 +408,7 @@ func TestSupplierProviderDataRepositoryListAccountsSQLContractMapsUnmatchedAndCo
 	require.Empty(t, conflict.LocalAccountLastTestStatus)
 	require.Empty(t, conflict.LocalAccountLastTestedAt)
 	require.Empty(t, conflict.LocalAccountLastTestError)
+	require.Equal(t, "active", conflict.GroupStatus)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -399,7 +417,7 @@ func TestSupplierProviderDataRepositoryListAccountsExposesLocalAccountTypeForDup
 	now := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
 	columns := []string{
 		"id", "provider_id", "provider_name", "upstream_account_key", "name", "status",
-		"group_key", "group_name", "platform", "rate_multiplier", "raw_status", "active",
+		"group_key", "group_name", "platform", "group_status", "rate_multiplier", "raw_status", "active",
 		"last_seen_at", "inactive_at",
 		"local_account_match_status", "local_account_match_count",
 		"local_account_id", "local_account_name", "local_account_platform", "local_account_type", "platform_override", "effective_platform", "local_account_priority",
@@ -415,7 +433,7 @@ func TestSupplierProviderDataRepositoryListAccountsExposesLocalAccountTypeForDup
 	mock.ExpectQuery(`(?s)COALESCE\(matched_account\.type, ''\) AS local_account_type`).
 		WithArgs(int64(42), 20, 0).
 		WillReturnRows(sqlmock.NewRows(columns).AddRow(
-			int64(7), int64(42), "Supplier A", "upstream-key", "Primary", "active", "group-1", "VIP", "openai", 1.5, "active", true, now, nil,
+			int64(7), int64(42), "Supplier A", "upstream-key", "Primary", "active", "group-1", "VIP", "openai", "active", 1.5, "active", true, now, nil,
 			"matched", 1, int64(101), "local-account", "openai", "apikey", "", "openai", 80, "active", true, "success", "2026-07-28T09:30:00Z", "", `[]`, 12.5, 3.25,
 		))
 
@@ -446,7 +464,7 @@ func TestSupplierProviderDataRepositoryListAccountsUsesBusinessPlatformOverride(
 	mock.ExpectQuery(`(?s)COALESCE\(NULLIF\(platform_override\.platform, ''\), NULLIF\(matched_account\.platform, ''\).*AS effective_platform.*LEFT JOIN supplier_local_account_platform_overrides platform_override ON platform_override\.local_account_id = matched_account\.id`).
 		WithArgs(int64(42), "grok", 20, 0).
 		WillReturnRows(sqlmock.NewRows(columns).AddRow(
-			int64(7), int64(42), "Supplier A", "upstream-key", "Primary", "active", "group-1", "VIP", "openai", 1.5, "active", true, now, nil,
+			int64(7), int64(42), "Supplier A", "upstream-key", "Primary", "active", "group-1", "VIP", "openai", "active", 1.5, "active", true, now, nil,
 			"matched", 1, int64(101), "local-account", "openai", "apikey", "grok", "grok", 80, "active", true, "success", "2026-07-27T11:30:00Z", "", `[]`, 12.5, 3.25,
 		))
 
@@ -1155,4 +1173,55 @@ func TestSupplierProviderDataRepositoryLocalAccountPlatformOverrideLifecycle(t *
 	require.NoError(t, err)
 	require.Empty(t, platform)
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestNormalizeSupplierAccountStatusFilter(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"active", "active"},
+		{" Disabled ", "disabled"},
+		{"EXPIRED", "expired"},
+		{"quota_exhausted", "quota_exhausted"},
+		{"unknown", "unknown"},
+		{"inactive", ""},
+		{"", ""},
+		{"deleted", ""},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.in, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, normalizeSupplierAccountStatusFilter(tc.in))
+		})
+	}
+}
+
+func TestSupplierProviderAccountWhereFiltersNormalizedStatus(t *testing.T) {
+	t.Parallel()
+
+	where, args := supplierProviderAccountWhere(service.SupplierProviderDataListParams{
+		Status: " Active ",
+	})
+	require.Contains(t, where, "LOWER(a.status) = $")
+	require.Equal(t, []any{"active"}, args[len(args)-1:])
+
+	where, args = supplierProviderAccountWhere(service.SupplierProviderDataListParams{
+		Status: "deleted",
+	})
+	require.NotContains(t, where, "a.status")
+	require.Empty(t, args)
+}
+
+func TestSupplierProviderAccountOrderByUpstreamStatus(t *testing.T) {
+	t.Parallel()
+
+	got := supplierProviderAccountOrderBy(service.SupplierProviderDataListParams{
+		SortBy:    "upstream_account_status",
+		SortOrder: "desc",
+	})
+	require.Equal(t, "LOWER(a.status) DESC, a.id ASC", got)
 }
