@@ -80,7 +80,7 @@ func TestSupplierNewAPIClientFetchesAndParsesProviderData(t *testing.T) {
 	require.Equal(t, []SupplierProviderRemoteAccount{{
 		Key:            "key-1",
 		Name:           "key-1",
-		Status:         "1",
+		Status:         "active",
 		GroupKey:       "7",
 		GroupName:      "VIP",
 		RateMultiplier: 3.25,
@@ -88,7 +88,7 @@ func TestSupplierNewAPIClientFetchesAndParsesProviderData(t *testing.T) {
 	}, {
 		Key:            "key-2",
 		Name:           "key-2",
-		Status:         "2",
+		Status:         "disabled",
 		GroupKey:       "8",
 		GroupName:      "trial",
 		RateMultiplier: 0.75,

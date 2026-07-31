@@ -114,3 +114,64 @@ func supplierProviderGroupIsActive(rawStatus string) bool {
 		return true
 	}
 }
+
+// normalizeSupplierNewAPIKeyStatus 将 NewAPI 上游 token 的 int/string status 归一到本系统统一状态。
+// 映射：1→active, 2→disabled, 3→expired, 4→quota_exhausted，其他→unknown。
+func normalizeSupplierNewAPIKeyStatus(status any) string {
+	if status == nil {
+		return "unknown"
+	}
+	switch v := status.(type) {
+	case float64:
+		// JSON 数字默认解码为 float64
+		return normalizeSupplierNewAPIKeyStatusInt(int(v))
+	case int:
+		return normalizeSupplierNewAPIKeyStatusInt(v)
+	case int64:
+		return normalizeSupplierNewAPIKeyStatusInt(int(v))
+	case string:
+		s := strings.ToLower(strings.TrimSpace(v))
+		switch s {
+		case "active", "1":
+			return "active"
+		case "disabled", "2":
+			return "disabled"
+		case "expired", "3":
+			return "expired"
+		case "quota_exhausted", "4":
+			return "quota_exhausted"
+		default:
+			return "unknown"
+		}
+	default:
+		return "unknown"
+	}
+}
+
+func normalizeSupplierNewAPIKeyStatusInt(status int) string {
+	switch status {
+	case 1:
+		return "active"
+	case 2:
+		return "disabled"
+	case 3:
+		return "expired"
+	case 4:
+		return "quota_exhausted"
+	default:
+		return "unknown"
+	}
+}
+
+// normalizeSupplierSub2APIKeyStatus 将 Sub2API 上游 key 的字符串 status 归一到本系统统一状态。
+// 重点：上游停用叫 inactive，本系统统一成 disabled。
+func normalizeSupplierSub2APIKeyStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "inactive":
+		return "disabled"
+	case "active", "disabled", "expired", "quota_exhausted":
+		return strings.ToLower(strings.TrimSpace(status))
+	default:
+		return "unknown"
+	}
+}

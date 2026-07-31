@@ -554,15 +554,16 @@ func parseSupplierSub2APIAccounts(raw []byte) ([]SupplierProviderRemoteAccount, 
 				rate = groupRate
 			}
 		}
-		status := jsonString(item["status"])
+		rawStatus := strings.TrimSpace(jsonString(item["status"]))
+		status := normalizeSupplierSub2APIKeyStatus(rawStatus)
 		out = append(out, SupplierProviderRemoteAccount{
 			Key:            strings.TrimSpace(key),
 			Name:           name,
-			Status:         strings.TrimSpace(status),
+			Status:         status,
 			GroupKey:       strings.TrimSpace(groupKey),
 			GroupName:      strings.TrimSpace(groupName),
 			RateMultiplier: rate,
-			RawStatus:      strings.TrimSpace(status),
+			RawStatus:      rawStatus,
 		})
 	}
 	return out, nil

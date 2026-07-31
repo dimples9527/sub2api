@@ -2602,7 +2602,7 @@ func TestUpstreamAccountRateGuardInvalidatesPreviewCacheAfterUnbindingAllLowGrou
 			Items: []UpstreamAccountSyncItem{{
 				ProviderSlug:           "toltol",
 				UpstreamKeyName:        "kiroPro渠道",
-				MatchedAccountID:       ptrInt64(202),
+				MatchedAccountID:       ptrInt64Value(202),
 				UpstreamRateMultiplier: 0.35,
 				BoundGroups: []UpstreamAccountSyncBoundGroup{
 					{ID: 25, Name: "cc混合渠道", RateMultiplier: 0.25, RateViolation: true},

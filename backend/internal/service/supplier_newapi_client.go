@@ -467,7 +467,8 @@ func parseSupplierNewAPIAccounts(keysPayload, groupsPayload []byte) ([]SupplierP
 		if !ok {
 			continue
 		}
-		status := jsonString(item.Status)
+		rawStatus := jsonString(item.Status)
+		status := normalizeSupplierNewAPIKeyStatus(item.Status)
 		out = append(out, SupplierProviderRemoteAccount{
 			Key:            name,
 			Name:           name,
@@ -475,7 +476,7 @@ func parseSupplierNewAPIAccounts(keysPayload, groupsPayload []byte) ([]SupplierP
 			GroupKey:       group.Key,
 			GroupName:      groupName,
 			RateMultiplier: group.RateMultiplier,
-			RawStatus:      status,
+			RawStatus:      rawStatus,
 		})
 	}
 	return out, nil
