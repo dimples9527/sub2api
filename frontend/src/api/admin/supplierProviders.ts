@@ -89,7 +89,17 @@ export interface SupplierProviderCostTrendPoint {
 
 export interface SupplierProviderCostTrendResult {
   days: number
+  start_date?: string
+  end_date?: string
+  provider_id?: number
   points: SupplierProviderCostTrendPoint[]
+}
+
+export interface SupplierProviderCostTrendParams {
+  days?: number
+  start_date?: string
+  end_date?: string
+  provider_id?: number
 }
 
 export interface SupplierProviderListParams {
@@ -141,10 +151,27 @@ export async function deleteProvider(id: number): Promise<{ message: string }> {
 }
 
 
-export async function listCostTrends(days = 14): Promise<SupplierProviderCostTrendResult> {
+export async function listCostTrends(
+  params: number | SupplierProviderCostTrendParams = 14
+): Promise<SupplierProviderCostTrendResult> {
+  let query: Record<string, string | number>
+  if (typeof params === 'number') {
+    query = { days: params }
+  } else if (params.start_date && params.end_date) {
+    query = {
+      start_date: params.start_date,
+      end_date: params.end_date,
+      ...(params.provider_id && params.provider_id > 0 ? { provider_id: params.provider_id } : {}),
+    }
+  } else {
+    query = {
+      days: params.days ?? 14,
+      ...(params.provider_id && params.provider_id > 0 ? { provider_id: params.provider_id } : {}),
+    }
+  }
   const { data } = await apiClient.get<SupplierProviderCostTrendResult>(
     '/admin/supplier-management/providers/cost-trends',
-    { params: { days } }
+    { params: query }
   )
   return data
 }

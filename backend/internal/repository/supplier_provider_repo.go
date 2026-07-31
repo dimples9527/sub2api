@@ -108,19 +108,27 @@ WHERE `+where, args...).Scan(
 	return summary, nil
 }
 
-func (r *supplierProviderRepository) ListCostTrends(ctx context.Context, start, end time.Time) ([]service.SupplierProviderCostTrendPoint, error) {
+func (r *supplierProviderRepository) ListCostTrends(ctx context.Context, start, end time.Time, providerID int64) ([]service.SupplierProviderCostTrendPoint, error) {
 	byDate := make(map[string]*service.SupplierProviderCostTrendPoint)
 
-	upstreamRows, err := r.db.QueryContext(ctx, `
+	upstreamQuery := `
 SELECT TO_CHAR(d.stat_date, 'YYYY-MM-DD') AS date,
        COALESCE(SUM(d.today_cost), 0) AS upstream_cost
 FROM supplier_provider_daily_stats d
 JOIN supplier_providers p ON p.id = d.provider_id AND p.deleted_at IS NULL
 WHERE d.stat_date >= $1::date
-  AND d.stat_date < $2::date
+  AND d.stat_date < $2::date`
+	upstreamArgs := []any{start, end}
+	if providerID > 0 {
+		upstreamQuery += `
+  AND d.provider_id = $3`
+		upstreamArgs = append(upstreamArgs, providerID)
+	}
+	upstreamQuery += `
 GROUP BY d.stat_date
-ORDER BY d.stat_date
-`, start, end)
+ORDER BY d.stat_date`
+
+	upstreamRows, err := r.db.QueryContext(ctx, upstreamQuery, upstreamArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("query supplier upstream cost trends: %w", err)
 	}
@@ -148,7 +156,7 @@ ORDER BY d.stat_date
 		tzName = "Asia/Shanghai"
 	}
 
-	localRows, err := r.db.QueryContext(ctx, `
+	localQuery := `
 WITH matched_accounts AS (
   SELECT local_account.id AS local_account_id
   FROM supplier_providers p
@@ -159,7 +167,14 @@ WITH matched_accounts AS (
     ON local_account.deleted_at IS NULL
    AND regexp_replace(lower(local_account.name), '[^[:alnum:]]', '', 'g')
      = regexp_replace(lower(p.account_name_prefix || spa.name), '[^[:alnum:]]', '', 'g')
-  WHERE p.deleted_at IS NULL
+  WHERE p.deleted_at IS NULL`
+	localArgs := []any{start, end, tzName}
+	if providerID > 0 {
+		localQuery += `
+    AND p.id = $4`
+		localArgs = append(localArgs, providerID)
+	}
+	localQuery += `
   GROUP BY local_account.id
   HAVING COUNT(*) = 1
 )
@@ -170,8 +185,9 @@ JOIN matched_accounts matched ON matched.local_account_id = ul.account_id
 WHERE ul.created_at >= $1
   AND ul.created_at < $2
 GROUP BY 1
-ORDER BY 1
-`, start, end, tzName)
+ORDER BY 1`
+
+	localRows, err := r.db.QueryContext(ctx, localQuery, localArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("query supplier local cost trends: %w", err)
 	}

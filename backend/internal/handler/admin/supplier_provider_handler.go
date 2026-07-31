@@ -47,19 +47,41 @@ func (h *SupplierProviderHandler) List(c *gin.Context) {
 	response.Success(c, result)
 }
 
-
 func (h *SupplierProviderHandler) ListCostTrends(c *gin.Context) {
-	days := 14
-	if raw := strings.TrimSpace(c.Query("days")); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed < 1 {
-			response.ErrorFrom(c, infraerrors.BadRequest("INVALID_COST_TREND_DAYS", "days must be a positive integer"))
+	var providerID int64
+	if raw := strings.TrimSpace(c.Query("provider_id")); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed < 0 {
+			response.ErrorFrom(c, infraerrors.BadRequest("INVALID_COST_TREND_PROVIDER", "provider_id must be a non-negative integer"))
 			return
 		}
-		days = parsed
+		providerID = parsed
 	}
 
-	result, err := h.service.ListCostTrends(c.Request.Context(), days)
+	startDate := strings.TrimSpace(c.Query("start_date"))
+	endDate := strings.TrimSpace(c.Query("end_date"))
+	var (
+		result service.SupplierProviderCostTrendResult
+		err    error
+	)
+	if startDate != "" || endDate != "" {
+		if startDate == "" || endDate == "" {
+			response.ErrorFrom(c, infraerrors.BadRequest("INVALID_COST_TREND_RANGE", "start_date and end_date are both required"))
+			return
+		}
+		result, err = h.service.ListCostTrendsByDateRange(c.Request.Context(), startDate, endDate, providerID)
+	} else {
+		days := 14
+		if raw := strings.TrimSpace(c.Query("days")); raw != "" {
+			parsed, parseErr := strconv.Atoi(raw)
+			if parseErr != nil || parsed < 1 {
+				response.ErrorFrom(c, infraerrors.BadRequest("INVALID_COST_TREND_DAYS", "days must be a positive integer"))
+				return
+			}
+			days = parsed
+		}
+		result, err = h.service.ListCostTrends(c.Request.Context(), days, providerID)
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

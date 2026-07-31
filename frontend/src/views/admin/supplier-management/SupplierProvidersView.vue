@@ -78,7 +78,7 @@
           server-side-sort
           clickable-rows
           @sort="handleProviderSort"
-          @row-click="selectedProvider = $event"
+          @row-click="selectProviderForDetail"
         >
           <template #cell-homepage="{ row: provider }">
             <button
@@ -162,7 +162,7 @@
               type="button"
               :disabled="costTrendLoading"
               data-test="supplier-cost-refresh"
-              title="重新拉取近 14 天上游/本地成本"
+              title="按当前时间范围重新读取本地成本对比"
               @click="refreshCostTrends"
             >
               {{ costTrendLoading ? '刷新中…' : '重新获取' }}
@@ -240,8 +240,29 @@
           <section class="sp-health-section sp-health-chart-section" data-test="supplier-cost-trend">
             <div class="sp-health-section-head">
               <span>成本对比</span>
-              <small>近 {{ costTrendDays }} 天 · 上游成本 vs 本地成本</small>
+              <small>{{ costTrendRangeLabel }} · {{ costTrendScopeLabel }} · 上游 vs 本地</small>
             </div>
+
+            <div class="sp-health-chart-controls" data-test="supplier-cost-controls">
+              <div class="sp-health-date-range" data-test="supplier-cost-date-range">
+                <DateRangePicker
+                  v-model:start-date="costTrendStartDate"
+                  v-model:end-date="costTrendEndDate"
+                  @change="onCostTrendDateRangeChange"
+                />
+              </div>
+              <div class="sp-health-provider-filter w-full sm:w-44">
+                <Select
+                  v-model="costTrendProviderId"
+                  class="w-full"
+                  :options="costTrendProviderOptions"
+                  aria-label="成本对比供应商"
+                  data-test="supplier-cost-provider"
+                  @update:model-value="onCostTrendProviderChange"
+                />
+              </div>
+            </div>
+
             <div class="sp-health-chart-meta">
               <div class="sp-health-chart-legend">
                 <span class="sp-health-legend-item upstream"><i></i>上游成本</span>
@@ -259,7 +280,7 @@
                 :options="costTrendChartOptions"
               />
               <div v-else-if="costTrendLoading" class="sp-health-chart-empty">成本曲线加载中…</div>
-              <div v-else class="sp-health-chart-empty">暂无按天成本数据，可点右上角「重新获取」</div>
+              <div v-else class="sp-health-chart-empty">暂无按天成本数据，可调整时间范围或供应商后点「重新获取」</div>
             </div>
           </section>
         </div>
@@ -612,6 +633,7 @@ import { Line } from 'vue-chartjs'
 import { SupplierDrawer, SupplierModuleLayout } from '@/components/admin/supplier-management'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import DataTable from '@/components/common/DataTable.vue'
+import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import Icon from '@/components/icons/Icon.vue'
 import Input from '@/components/common/Input.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
@@ -690,10 +712,32 @@ const emptyTypeForm = (): SupplierProviderTypeUpsertPayload => ({
   sort_order: 0,
 })
 
+
+function formatLocalDate(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function createDefaultCostTrendRange() {
+  const end = new Date()
+  const start = new Date()
+  // 默认近 14 天（含今天）
+  start.setDate(end.getDate() - 13)
+  return {
+    start: formatLocalDate(start),
+    end: formatLocalDate(end),
+  }
+}
+
 const providers = ref<SupplierProvider[]>([])
 const providerTypes = ref<SupplierProviderType[]>([])
 const summary = ref<SupplierProviderSummary>(emptySummary())
-const costTrendDays = 14
+const costTrendDefaultRange = createDefaultCostTrendRange()
+const costTrendStartDate = ref(costTrendDefaultRange.start)
+const costTrendEndDate = ref(costTrendDefaultRange.end)
+const costTrendProviderId = ref<number | ''>('')
 const costTrendLoading = ref(false)
 const costTrendPoints = ref<SupplierProviderCostTrendPoint[]>([])
 const search = ref('')
@@ -869,6 +913,28 @@ const priorityTodos = computed<HealthTodo[]>(() => {
   return todos.slice(0, 3)
 })
 
+const costTrendProviderOptions = computed<SelectOption[]>(() => [
+  { value: '', label: '全部供应商' },
+  ...providers.value.map(provider => ({
+    value: provider.id,
+    label: provider.name,
+  })),
+])
+
+const costTrendScopeLabel = computed(() => {
+  if (!costTrendProviderId.value) return '全部供应商'
+  const matched = providers.value.find(provider => provider.id === costTrendProviderId.value)
+  return matched ? matched.name : '指定供应商'
+})
+
+const costTrendRangeLabel = computed(() => {
+  const start = costTrendStartDate.value
+  const end = costTrendEndDate.value
+  if (!start || !end) return '未选择时间'
+  if (start === end) return start
+  return `${start} ~ ${end}`
+})
+
 const costTrendTotals = computed(() =>
   costTrendPoints.value.reduce((acc, point) => {
     acc.upstream += Number(point.upstream_cost || 0)
@@ -986,7 +1052,12 @@ async function loadProviders() {
 async function loadCostTrends() {
   costTrendLoading.value = true
   try {
-    const result = await supplierProvidersAPI.listCostTrends(costTrendDays)
+    const providerId = typeof costTrendProviderId.value === 'number' ? costTrendProviderId.value : 0
+    const result = await supplierProvidersAPI.listCostTrends({
+      start_date: costTrendStartDate.value,
+      end_date: costTrendEndDate.value,
+      provider_id: providerId || undefined,
+    })
     costTrendPoints.value = Array.isArray(result?.points) ? result.points : []
   } catch {
     costTrendPoints.value = []
@@ -995,8 +1066,28 @@ async function loadCostTrends() {
   }
 }
 
+async function onCostTrendDateRangeChange(range: { startDate: string; endDate: string; preset: string | null }) {
+  costTrendStartDate.value = range.startDate
+  costTrendEndDate.value = range.endDate
+  await loadCostTrends()
+}
+
+async function onCostTrendProviderChange() {
+  await loadCostTrends()
+}
+
 async function refreshCostTrends() {
   await loadCostTrends()
+}
+
+
+function selectProviderForDetail(provider: SupplierProvider) {
+  selectedProvider.value = provider
+  // 点击列表行时同步成本对比范围，便于按供应商查看
+  if (costTrendProviderId.value !== provider.id) {
+    costTrendProviderId.value = provider.id
+    void loadCostTrends()
+  }
 }
 
 async function refreshProvidersView() {
@@ -2576,6 +2667,50 @@ function errorMessage(err: unknown, fallback: string): string {
   font-size: 0.8125rem;
   text-align: center;
   padding: 0.75rem;
+}
+
+
+.sp-health-chart-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.625rem;
+  flex-wrap: wrap;
+}
+
+.sp-health-date-range {
+  min-width: 12rem;
+  max-width: 18rem;
+  flex: 1 1 12rem;
+}
+
+.sp-health-date-range :deep(.date-picker-root) {
+  width: 100%;
+}
+
+.sp-health-date-range :deep(.date-picker-trigger) {
+  width: 100%;
+  min-height: 2rem;
+  border-color: var(--sp-line);
+  background: color-mix(in srgb, var(--sp-panel) 88%, #000);
+  color: var(--sp-text);
+  box-shadow: none;
+}
+
+.sp-health-date-range :deep(.date-picker-trigger-open),
+.sp-health-date-range :deep(.date-picker-trigger:hover) {
+  border-color: color-mix(in srgb, var(--sp-cyan) 42%, var(--sp-line));
+}
+
+.sp-health-date-range :deep(.date-picker-dropdown) {
+  z-index: 40;
+  border-color: var(--sp-line);
+  background: var(--sp-panel);
+}
+
+.sp-health-provider-filter {
+  min-width: 10rem;
+  max-width: 14rem;
 }
 
 </style>

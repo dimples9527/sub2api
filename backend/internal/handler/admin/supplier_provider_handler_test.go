@@ -36,7 +36,7 @@ func (r *supplierProviderHandlerRepoStub) List(_ context.Context, params service
 	return items, int64(len(items)), nil
 }
 
-func (r *supplierProviderHandlerRepoStub) ListCostTrends(_ context.Context, start, end time.Time) ([]service.SupplierProviderCostTrendPoint, error) {
+func (r *supplierProviderHandlerRepoStub) ListCostTrends(_ context.Context, start, end time.Time, providerID int64) ([]service.SupplierProviderCostTrendPoint, error) {
 	return []service.SupplierProviderCostTrendPoint{}, nil
 }
 

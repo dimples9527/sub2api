@@ -89,6 +89,12 @@ async function mountSupplierProviders() {
         BaseDialog: true,
         Input: true,
         Select: true,
+        DateRangePicker: {
+          name: 'DateRangePicker',
+          props: ['startDate', 'endDate'],
+          emits: ['update:startDate', 'update:endDate', 'change'],
+          template: '<button type="button" data-test="supplier-cost-date-range-trigger" @click="$emit(\'change\', { startDate: \'2026-07-01\', endDate: \'2026-07-10\', preset: null })">date-range</button>',
+        },
         Toggle: {
           props: ['modelValue'],
           emits: ['update:modelValue'],
@@ -309,7 +315,15 @@ describe('SupplierProvidersView payload normalization', () => {
   it('renders redesigned supplier health panel with cost trend chart', async () => {
     const wrapper = await mountSupplierProviders()
 
-    expect(providerViewMocks.listCostTrends).toHaveBeenCalledWith(14)
+    const defaultEnd = new Date()
+    const defaultStart = new Date()
+    defaultStart.setDate(defaultEnd.getDate() - 13)
+    const pad = (value: number) => String(value).padStart(2, '0')
+    const formatDate = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+    expect(providerViewMocks.listCostTrends).toHaveBeenCalledWith({
+      start_date: formatDate(defaultStart),
+      end_date: formatDate(defaultEnd),
+    })
     expect(wrapper.get('[data-test="supplier-health-panel"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="supplier-health-tone"]').text()).toContain('稳定')
     expect(wrapper.get('[data-test="supplier-cost-trend"]').text()).toContain('成本对比')
@@ -353,6 +367,52 @@ describe('SupplierProvidersView payload normalization', () => {
 
     const rowIds = wrapper.findAll('tbody tr[data-row-id]').map(row => row.attributes('data-row-id'))
     expect(rowIds).toEqual(['1'])
+  })
+
+
+  it('switches cost trend date range and provider filter', async () => {
+    const wrapper = await mountSupplierProviders()
+    providerViewMocks.listCostTrends.mockClear()
+
+    await wrapper.get('[data-test="supplier-cost-date-range-trigger"]').trigger('click')
+    await flushPromises()
+    expect(providerViewMocks.listCostTrends).toHaveBeenCalledWith({
+      start_date: '2026-07-01',
+      end_date: '2026-07-10',
+    })
+
+    // 通过源码契约确认时间范围与供应商筛选控件存在
+    expect(supplierProvidersSource).toContain('DateRangePicker')
+    expect(supplierProvidersSource).toContain('costTrendStartDate')
+    expect(supplierProvidersSource).toContain('costTrendEndDate')
+    expect(supplierProvidersSource).toContain('onCostTrendDateRangeChange')
+    expect(supplierProvidersSource).toContain('costTrendProviderOptions')
+    expect(supplierProvidersSource).toContain('onCostTrendProviderChange')
+    expect(wrapper.get('[data-test="supplier-cost-controls"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="supplier-cost-provider"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="supplier-cost-date-range"]').exists()).toBe(true)
+  })
+
+  it('syncs cost trend provider when a table row is selected', async () => {
+    const wrapper = await mountSupplierProviders()
+    providerViewMocks.listCostTrends.mockClear()
+
+    const row = wrapper.find('tbody tr[data-row-id="1"]')
+    expect(row.exists()).toBe(true)
+    await row.trigger('click')
+    await flushPromises()
+
+    const defaultEnd = new Date()
+    const defaultStart = new Date()
+    defaultStart.setDate(defaultEnd.getDate() - 13)
+    const pad = (value: number) => String(value).padStart(2, '0')
+    const formatDate = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+    expect(providerViewMocks.listCostTrends).toHaveBeenCalledWith({
+      start_date: formatDate(defaultStart),
+      end_date: formatDate(defaultEnd),
+      provider_id: 1,
+    })
+    expect(supplierProvidersSource).toContain('selectProviderForDetail')
   })
 
   it('uses dedicated cost and balance colors with a strict ten-yuan warning threshold', () => {

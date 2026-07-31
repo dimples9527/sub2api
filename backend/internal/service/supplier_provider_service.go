@@ -151,14 +151,17 @@ type SupplierProviderCostTrendPoint struct {
 
 // SupplierProviderCostTrendResult 是供应商组合成本趋势响应。
 type SupplierProviderCostTrendResult struct {
-	Days   int                              `json:"days"`
-	Points []SupplierProviderCostTrendPoint `json:"points"`
+	Days       int                              `json:"days"`
+	StartDate  string                           `json:"start_date,omitempty"`
+	EndDate    string                           `json:"end_date,omitempty"`
+	ProviderID int64                            `json:"provider_id,omitempty"`
+	Points     []SupplierProviderCostTrendPoint `json:"points"`
 }
 
 type SupplierProviderRepository interface {
 	List(ctx context.Context, params SupplierProviderListParams) ([]*SupplierProvider, int64, error)
 	Summary(ctx context.Context, params SupplierProviderListParams) (SupplierProviderSummary, error)
-	ListCostTrends(ctx context.Context, start, end time.Time) ([]SupplierProviderCostTrendPoint, error)
+	ListCostTrends(ctx context.Context, start, end time.Time, providerID int64) ([]SupplierProviderCostTrendPoint, error)
 	GetByID(ctx context.Context, id int64) (*SupplierProvider, error)
 	Create(ctx context.Context, provider *SupplierProvider) error
 	Update(ctx context.Context, provider *SupplierProvider) error
@@ -274,7 +277,7 @@ func (s *SupplierProviderService) List(ctx context.Context, params SupplierProvi
 	return result, nil
 }
 
-func (s *SupplierProviderService) ListCostTrends(ctx context.Context, days int) (SupplierProviderCostTrendResult, error) {
+func (s *SupplierProviderService) ListCostTrends(ctx context.Context, days int, providerID int64) (SupplierProviderCostTrendResult, error) {
 	if days < 1 {
 		days = 14
 	}
@@ -282,15 +285,66 @@ func (s *SupplierProviderService) ListCostTrends(ctx context.Context, days int) 
 		days = 90
 	}
 
+	today := timezone.Today()
+	start := today.AddDate(0, 0, -(days - 1))
+	return s.listCostTrendsBetween(ctx, start, today, providerID)
+}
+
+// ListCostTrendsByDateRange 按闭区间 [startDate, endDate] 返回成本趋势，日期格式为 YYYY-MM-DD。
+func (s *SupplierProviderService) ListCostTrendsByDateRange(ctx context.Context, startDate, endDate string, providerID int64) (SupplierProviderCostTrendResult, error) {
 	loc := timezone.Location()
 	if loc == nil {
 		loc = time.Local
 	}
-	today := timezone.Today()
-	start := today.AddDate(0, 0, -(days - 1))
-	end := today.AddDate(0, 0, 1)
 
-	rawPoints, err := s.repo.ListCostTrends(ctx, start, end)
+	start, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(startDate), loc)
+	if err != nil {
+		return SupplierProviderCostTrendResult{}, infraerrors.BadRequest("INVALID_COST_TREND_START_DATE", "start_date must be YYYY-MM-DD")
+	}
+	end, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(endDate), loc)
+	if err != nil {
+		return SupplierProviderCostTrendResult{}, infraerrors.BadRequest("INVALID_COST_TREND_END_DATE", "end_date must be YYYY-MM-DD")
+	}
+	if end.Before(start) {
+		return SupplierProviderCostTrendResult{}, infraerrors.BadRequest("INVALID_COST_TREND_RANGE", "end_date must be on or after start_date")
+	}
+
+	today := timezone.Today()
+	if end.After(today) {
+		end = today
+	}
+	if start.After(end) {
+		start = end
+	}
+
+	// 与 days 上限保持一致，最长 90 天。
+	maxSpan := 89
+	if int(end.Sub(start).Hours()/24) > maxSpan {
+		start = end.AddDate(0, 0, -maxSpan)
+	}
+
+	return s.listCostTrendsBetween(ctx, start, end, providerID)
+}
+
+func (s *SupplierProviderService) listCostTrendsBetween(ctx context.Context, start, endInclusive time.Time, providerID int64) (SupplierProviderCostTrendResult, error) {
+	if providerID < 0 {
+		providerID = 0
+	}
+
+	loc := timezone.Location()
+	if loc == nil {
+		loc = time.Local
+	}
+
+	start = time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, loc)
+	endInclusive = time.Date(endInclusive.Year(), endInclusive.Month(), endInclusive.Day(), 0, 0, 0, 0, loc)
+	endExclusive := endInclusive.AddDate(0, 0, 1)
+	days := int(endInclusive.Sub(start).Hours()/24) + 1
+	if days < 1 {
+		days = 1
+	}
+
+	rawPoints, err := s.repo.ListCostTrends(ctx, start, endExclusive, providerID)
 	if err != nil {
 		return SupplierProviderCostTrendResult{}, fmt.Errorf("list supplier provider cost trends: %w", err)
 	}
@@ -301,7 +355,7 @@ func (s *SupplierProviderService) ListCostTrends(ctx context.Context, days int) 
 	}
 
 	points := make([]SupplierProviderCostTrendPoint, 0, days)
-	for cursor := start; cursor.Before(end); cursor = cursor.AddDate(0, 0, 1) {
+	for cursor := start; cursor.Before(endExclusive); cursor = cursor.AddDate(0, 0, 1) {
 		date := cursor.In(loc).Format("2006-01-02")
 		if point, ok := byDate[date]; ok {
 			points = append(points, point)
@@ -310,7 +364,13 @@ func (s *SupplierProviderService) ListCostTrends(ctx context.Context, days int) 
 		points = append(points, SupplierProviderCostTrendPoint{Date: date})
 	}
 
-	return SupplierProviderCostTrendResult{Days: days, Points: points}, nil
+	return SupplierProviderCostTrendResult{
+		Days:       days,
+		StartDate:  start.In(loc).Format("2006-01-02"),
+		EndDate:    endInclusive.In(loc).Format("2006-01-02"),
+		ProviderID: providerID,
+		Points:     points,
+	}, nil
 }
 
 func (s *SupplierProviderService) Get(ctx context.Context, id int64) (*SupplierProvider, error) {

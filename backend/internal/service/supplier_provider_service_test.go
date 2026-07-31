@@ -40,7 +40,7 @@ func (r *supplierProviderRepoStub) List(_ context.Context, params SupplierProvid
 	return out, int64(len(matched)), nil
 }
 
-func (r *supplierProviderRepoStub) ListCostTrends(_ context.Context, start, end time.Time) ([]SupplierProviderCostTrendPoint, error) {
+func (r *supplierProviderRepoStub) ListCostTrends(_ context.Context, start, end time.Time, providerID int64) ([]SupplierProviderCostTrendPoint, error) {
 	if r.costTrends != nil {
 		return r.costTrends, nil
 	}
@@ -444,7 +444,6 @@ func TestSupplierProviderServiceUsesGroupsURLForAvailableGroups(t *testing.T) {
 	require.Equal(t, "/api/admin/groups", created.AvailableGroupsURL)
 }
 
-
 func TestSupplierProviderServiceListCostTrendsFillsMissingDays(t *testing.T) {
 	repo := &supplierProviderRepoStub{costTrends: []SupplierProviderCostTrendPoint{
 		{Date: "2026-07-28", UpstreamCost: 12.5, LocalCost: 10},
@@ -453,11 +452,45 @@ func TestSupplierProviderServiceListCostTrendsFillsMissingDays(t *testing.T) {
 	svc := NewSupplierProviderService(repo, supplierEncryptorStub{})
 
 	// 依赖运行时 Today，只校验返回长度与日期非空。
-	result, err := svc.ListCostTrends(context.Background(), 3)
+	result, err := svc.ListCostTrends(context.Background(), 3, 0)
 	require.NoError(t, err)
 	require.Equal(t, 3, result.Days)
 	require.Len(t, result.Points, 3)
+	require.NotEmpty(t, result.StartDate)
+	require.NotEmpty(t, result.EndDate)
 	for _, point := range result.Points {
 		require.NotEmpty(t, point.Date)
 	}
+}
+
+func TestSupplierProviderServiceListCostTrendsByDateRange(t *testing.T) {
+	repo := &supplierProviderRepoStub{costTrends: []SupplierProviderCostTrendPoint{
+		{Date: "2026-07-10", UpstreamCost: 1, LocalCost: 2},
+		{Date: "2026-07-12", UpstreamCost: 3, LocalCost: 4},
+	}}
+	svc := NewSupplierProviderService(repo, supplierEncryptorStub{})
+
+	result, err := svc.ListCostTrendsByDateRange(context.Background(), "2026-07-10", "2026-07-12", 7)
+	require.NoError(t, err)
+	require.Equal(t, 3, result.Days)
+	require.Equal(t, "2026-07-10", result.StartDate)
+	require.Equal(t, "2026-07-12", result.EndDate)
+	require.Equal(t, int64(7), result.ProviderID)
+	require.Len(t, result.Points, 3)
+	require.Equal(t, "2026-07-10", result.Points[0].Date)
+	require.Equal(t, 1.0, result.Points[0].UpstreamCost)
+	require.Equal(t, "2026-07-11", result.Points[1].Date)
+	require.Equal(t, 0.0, result.Points[1].UpstreamCost)
+	require.Equal(t, "2026-07-12", result.Points[2].Date)
+	require.Equal(t, 3.0, result.Points[2].UpstreamCost)
+}
+
+func TestSupplierProviderServiceListCostTrendsByDateRangeRejectsInvalid(t *testing.T) {
+	svc := NewSupplierProviderService(&supplierProviderRepoStub{}, supplierEncryptorStub{})
+
+	_, err := svc.ListCostTrendsByDateRange(context.Background(), "bad", "2026-07-12", 0)
+	require.Error(t, err)
+
+	_, err = svc.ListCostTrendsByDateRange(context.Background(), "2026-07-12", "2026-07-10", 0)
+	require.Error(t, err)
 }

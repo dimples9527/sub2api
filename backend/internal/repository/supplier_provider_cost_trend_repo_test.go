@@ -38,7 +38,7 @@ ORDER BY d.stat_date`)).
 			AddRow("2026-07-28", 10.0).
 			AddRow("2026-07-30", 4.5))
 
-	points, err := repo.ListCostTrends(context.Background(), start, end)
+	points, err := repo.ListCostTrends(context.Background(), start, end, 0)
 	require.NoError(t, err)
 	require.Len(t, points, 3)
 	require.Equal(t, "2026-07-28", points[0].Date)
@@ -50,5 +50,35 @@ ORDER BY d.stat_date`)).
 	require.Equal(t, "2026-07-30", points[2].Date)
 	require.Equal(t, 0.0, points[2].UpstreamCost)
 	require.Equal(t, 4.5, points[2].LocalCost)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+
+func TestSupplierProviderRepositoryListCostTrendsFiltersByProvider(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := NewSupplierProviderRepository(db)
+	start := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)
+	providerID := int64(9)
+
+	mock.ExpectQuery("supplier_provider_daily_stats").
+		WithArgs(start, end, providerID).
+		WillReturnRows(sqlmock.NewRows([]string{"date", "upstream_cost"}).
+			AddRow("2026-07-28", 3.5))
+
+	mock.ExpectQuery("matched_accounts").
+		WithArgs(start, end, sqlmock.AnyArg(), providerID).
+		WillReturnRows(sqlmock.NewRows([]string{"date", "local_cost"}).
+			AddRow("2026-07-28", 2.0))
+
+	points, err := repo.ListCostTrends(context.Background(), start, end, providerID)
+	require.NoError(t, err)
+	require.Len(t, points, 1)
+	require.Equal(t, "2026-07-28", points[0].Date)
+	require.Equal(t, 3.5, points[0].UpstreamCost)
+	require.Equal(t, 2.0, points[0].LocalCost)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
