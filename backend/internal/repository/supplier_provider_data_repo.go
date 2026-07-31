@@ -878,7 +878,8 @@ ON CONFLICT (provider_id, upstream_account_key) DO UPDATE SET
 	}
 
 	result, err := tx.ExecContext(ctx, `
-UPDATE supplier_provider_accounts SET active = FALSE, inactive_at = $3, updated_at = $3
+UPDATE supplier_provider_accounts
+SET active = FALSE, status = 'deleted', raw_status = 'deleted', inactive_at = $3, updated_at = $3
 WHERE provider_id = $1 AND active = TRUE AND NOT (upstream_account_key = ANY($2))`, providerID, pq.Array(keys), seenAt)
 	if err != nil {
 		return service.SupplierSyncCounts{}, fmt.Errorf("deactivate missing supplier accounts: %w", err)

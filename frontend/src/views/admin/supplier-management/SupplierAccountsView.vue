@@ -5,7 +5,7 @@
         <div>
           <span class="sp-filter-card-kicker">筛选条件</span>
           <h2>筛选账号</h2>
-          <p>按供应商、平台、本地分组、同步有效性和上游状态快速定位账号。</p>
+          <p>按供应商、平台、本地分组、同步有效性和上游状态 / 已删除快速定位账号。</p>
         </div>
         <span class="sp-filter-card-count">{{ total }} 个账号</span>
       </header>
@@ -1102,7 +1102,7 @@ const pageSize = ref(20)
 const providerID = ref(0)
 const groupID = ref(0)
 const platformFilter = ref('')
-const activeFilter = ref('true')
+const activeFilter = ref('')
 const upstreamStatusFilter = ref('')
 const search = ref('')
 const searchFilterControl = ref<HTMLElement | null>(null)
@@ -1169,12 +1169,21 @@ const accountQuickFilterOptions = computed<AccountQuickFilterOption[]>(() => [
       account.group_status === 'inactive' || account.group_status === 'missing'
     ).length,
   },
+  {
+    key: 'upstream_deleted',
+    label: '上游密钥已删除',
+    count: accountSourceItems.value.filter(account => account.status === 'deleted').length,
+  },
 ])
 const supplierIDs = computed(() => [...new Set([
   ...providers.value.map(provider => provider.id),
   ...accountSourceItems.value.map(account => account.provider_id),
 ])].sort((left, right) => left - right))
 const activeFilterOptions: SelectOption[] = [
+  { value: 'true', label: '仅有效' },
+  { value: '', label: '全部有效性' },
+  { value: 'false', label: '已失效' },
+
   { value: 'true', label: '仅有效' },
   { value: '', label: '全部有效性' },
   { value: 'false', label: '已失效' },
@@ -1186,6 +1195,7 @@ const upstreamStatusFilterOptions: SelectOption[] = [
   { value: 'expired', label: '已过期' },
   { value: 'quota_exhausted', label: '额度耗尽' },
   { value: 'unknown', label: '未知' },
+  { value: 'deleted', label: '已删除' },
 ]
 const platformFilterOptions: SelectOption[] = [
   { value: '', label: '全部平台' },
@@ -1293,6 +1303,7 @@ function createSupplierAccountFilterSnapshot(): SupplierAccountFilterSnapshot {
     status: upstreamStatusFilter.value || undefined,
     search: search.value.trim() || undefined,
     quickFilter: accountQuickFilter.value,
+    status: upstreamStatusFilter.value || undefined,
   }
   return {
     ...snapshot,
@@ -1434,6 +1445,10 @@ function accountMatchesQuickFilter(
 }
 
 function applyAccountQuickFilterPage() {
+  const filteredAccounts = accountSourceItems.value.filter(account => (
+    accountMatchesQuickFilter(account, accountQuickFilter.value)
+  ))
+
   const filteredAccounts = accountSourceItems.value.filter(account => (
     accountMatchesQuickFilter(account, accountQuickFilter.value)
   ))
@@ -2179,6 +2194,7 @@ function upstreamStatusLabel(status?: string): string {
   if (s === 'expired' || s === '3') return '已过期'
   if (s === 'quota_exhausted' || s === '4') return '额度耗尽'
   if (s === 'unknown') return '未知'
+  if (s === 'deleted') return '已删除'
   return displayValue(status)
 }
 
@@ -2187,6 +2203,7 @@ function upstreamStatusTone(status?: string): string {
   if (s === 'active' || s === '1') return 'good'
   if (s === 'disabled' || s === 'inactive' || s === '2') return 'neutral'
   if (s === 'expired' || s === '3' || s === 'quota_exhausted' || s === '4') return 'bad'
+  if (s === 'deleted') return 'bad'
   return 'neutral'
 }
 

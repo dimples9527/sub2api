@@ -215,7 +215,7 @@ func TestSupplierProviderDataRepositoryReplaceAccountsUpsertsAndDeactivatesMissi
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO supplier_provider_accounts")).
 		WithArgs(int64(42), "account-2", "Second", "disabled", "", "", 0.0, "disabled", seenAt).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_accounts SET active = FALSE")).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_accounts SET active = FALSE, status = 'deleted', raw_status = 'deleted'")).
 		WithArgs(int64(42), sqlmock.AnyArg(), seenAt).
 		WillReturnResult(sqlmock.NewResult(0, 3))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_runtime_stats")).
