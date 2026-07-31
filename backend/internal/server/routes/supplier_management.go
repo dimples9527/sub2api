@@ -21,6 +21,7 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 		{
 			providers.GET("", h.Admin.SupplierProvider.List)
 			providers.GET("/cost-trends", h.Admin.SupplierProvider.ListCostTrends)
+			providers.POST("/cost-trends/backfill", h.Admin.SupplierProviderSync.BackfillCosts)
 			providers.GET("/:id", h.Admin.SupplierProvider.Get)
 			providers.POST("", h.Admin.SupplierProvider.Create)
 			providers.PUT("/:id", h.Admin.SupplierProvider.Update)

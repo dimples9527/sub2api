@@ -275,19 +275,32 @@ func TestSupplierProviderDataRepositoryUpdateBalanceAndCostUpsertsDailyStats(t *
 
 	require.NoError(t, repo.UpdateBalance(context.Background(), 42, 321.5, seenAt))
 
+	// 历史日期：只写入快照与 daily_stats，不覆盖 runtime.today_cost
+	historicalDay := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	mock.ExpectBegin()
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_runtime_stats SET today_cost")).
-		WithArgs(int64(42), 45.625, seenAt).
-		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO supplier_provider_metric_snapshots (provider_id, current_balance, today_cost, captured_at)")).
-		WithArgs(int64(42), supplierProviderNonNilArg{}, 45.625, seenAt).
+		WithArgs(int64(42), supplierProviderNonNilArg{}, 45.625, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO supplier_provider_daily_stats")).
 		WithArgs(int64(42), sqlmock.AnyArg(), 45.625).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
+	require.NoError(t, repo.UpdateCost(context.Background(), 42, 45.625, historicalDay))
 
-	require.NoError(t, repo.UpdateCost(context.Background(), 42, 45.625, seenAt))
+	// 今天：同步更新 runtime.today_cost
+	today := time.Now()
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_runtime_stats SET today_cost")).
+		WithArgs(int64(42), 12.5, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO supplier_provider_metric_snapshots (provider_id, current_balance, today_cost, captured_at)")).
+		WithArgs(int64(42), supplierProviderNonNilArg{}, 12.5, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO supplier_provider_daily_stats")).
+		WithArgs(int64(42), sqlmock.AnyArg(), 12.5).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	require.NoError(t, repo.UpdateCost(context.Background(), 42, 12.5, today))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

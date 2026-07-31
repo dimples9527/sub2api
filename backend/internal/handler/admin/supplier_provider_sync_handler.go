@@ -23,6 +23,7 @@ type SupplierProviderSyncServicePort interface {
 	SyncGroups(ctx context.Context, providerID int64, trigger string) (service.SupplierProviderSyncResult, error)
 	SyncBalance(ctx context.Context, providerID int64, trigger string) (service.SupplierProviderSyncResult, error)
 	SyncCost(ctx context.Context, providerID int64, day time.Time, trigger string) (service.SupplierProviderSyncResult, error)
+	BackfillCosts(ctx context.Context, startDate, endDate string, providerID int64, trigger string) (service.SupplierProviderCostBackfillResult, error)
 	SyncAll(ctx context.Context, providerID int64, trigger string) (service.SupplierProviderSyncResult, error)
 	TestEndpoint(ctx context.Context, providerID int64, scope string) (service.SupplierProviderEndpointTestResult, error)
 }
@@ -95,6 +96,43 @@ func (h *SupplierProviderSyncHandler) SyncCost(c *gin.Context) {
 	h.sync(c, func(ctx context.Context, id int64) (service.SupplierProviderSyncResult, error) {
 		return h.syncService.SyncCost(ctx, id, time.Now(), service.SupplierSyncTriggerManual)
 	})
+}
+
+func (h *SupplierProviderSyncHandler) BackfillCosts(c *gin.Context) {
+	var body struct {
+		StartDate  string `json:"start_date"`
+		EndDate    string `json:"end_date"`
+		ProviderID int64  `json:"provider_id"`
+	}
+	// 同时支持 JSON body 与 query，便于前端简单调用。
+	_ = c.ShouldBindJSON(&body)
+	if strings.TrimSpace(body.StartDate) == "" {
+		body.StartDate = strings.TrimSpace(c.Query("start_date"))
+	}
+	if strings.TrimSpace(body.EndDate) == "" {
+		body.EndDate = strings.TrimSpace(c.Query("end_date"))
+	}
+	if body.ProviderID == 0 {
+		if raw := strings.TrimSpace(c.Query("provider_id")); raw != "" {
+			parsed, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil || parsed < 0 {
+				response.ErrorFrom(c, infraerrors.BadRequest("INVALID_COST_BACKFILL_PROVIDER", "provider_id must be a non-negative integer"))
+				return
+			}
+			body.ProviderID = parsed
+		}
+	}
+	if strings.TrimSpace(body.StartDate) == "" || strings.TrimSpace(body.EndDate) == "" {
+		response.ErrorFrom(c, infraerrors.BadRequest("INVALID_COST_BACKFILL_RANGE", "start_date and end_date are both required"))
+		return
+	}
+
+	result, err := h.syncService.BackfillCosts(c.Request.Context(), body.StartDate, body.EndDate, body.ProviderID, service.SupplierSyncTriggerManual)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
 }
 
 func (h *SupplierProviderSyncHandler) SyncAll(c *gin.Context) {

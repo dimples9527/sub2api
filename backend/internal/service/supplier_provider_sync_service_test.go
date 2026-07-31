@@ -14,6 +14,8 @@ type supplierProviderDataRepoStub struct {
 	groupsCalls        int
 	balanceCalls       int
 	costCalls          int
+	costDays           []time.Time
+	costValues         []float64
 	createdRuns        []SupplierProviderSyncRun
 	finishedRuns       []SupplierProviderSyncRun
 	statusUpdates      []string
@@ -113,8 +115,10 @@ func (r *supplierProviderDataRepoStub) UpdateBalance(context.Context, int64, flo
 	r.balanceCalls++
 	return r.balanceErr
 }
-func (r *supplierProviderDataRepoStub) UpdateCost(context.Context, int64, float64, time.Time) error {
+func (r *supplierProviderDataRepoStub) UpdateCost(_ context.Context, _ int64, cost float64, seenAt time.Time) error {
 	r.costCalls++
+	r.costDays = append(r.costDays, seenAt)
+	r.costValues = append(r.costValues, cost)
 	return r.costErr
 }
 func (r *supplierProviderDataRepoStub) CreateSyncRun(_ context.Context, run *SupplierProviderSyncRun) error {
@@ -141,11 +145,13 @@ func (r *supplierProviderDataRepoStub) Cleanup(context.Context, SupplierCleanupP
 type supplierRemoteClientStub struct {
 	passwords []string
 	accounts  []SupplierProviderRemoteAccount
+	costDays  []time.Time
 
 	accountsErr error
 	groupsErr   error
 	balanceErr  error
 	costErr     error
+	costFn      func(day time.Time) (float64, error)
 
 	testCalls []string
 	testErr   error
@@ -175,10 +181,14 @@ func (c *supplierRemoteClientStub) FetchBalance(_ context.Context, _ *SupplierPr
 	}
 	return 123.5, nil
 }
-func (c *supplierRemoteClientStub) FetchCost(_ context.Context, _ *SupplierProvider, password string, _ time.Time) (float64, error) {
+func (c *supplierRemoteClientStub) FetchCost(_ context.Context, _ *SupplierProvider, password string, day time.Time) (float64, error) {
 	c.passwords = append(c.passwords, password)
+	c.costDays = append(c.costDays, day)
 	if c.costErr != nil {
 		return 0, c.costErr
+	}
+	if c.costFn != nil {
+		return c.costFn(day)
 	}
 	return 45.6, nil
 }
@@ -486,6 +496,105 @@ func TestSupplierProviderSyncServiceTestsEndpointWithoutPersisting(t *testing.T)
 	require.Empty(t, dataRepo.createdRuns)
 	require.Empty(t, dataRepo.finishedRuns)
 	require.Zero(t, dataRepo.balanceCalls)
+}
+
+
+func TestSupplierProviderSyncServiceBackfillCostsNewAPIPullsEachDay(t *testing.T) {
+	today := supplierCostBackfillToday()
+	start := today.AddDate(0, 0, -2)
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID: 7, Name: "NewAPI-A", ProviderType: SupplierProviderTypeNewAPI, Enabled: true, PasswordEncrypted: "secret",
+	}}}
+	dataRepo := &supplierProviderDataRepoStub{}
+	remote := &supplierRemoteClientStub{
+		costFn: func(day time.Time) (float64, error) {
+			return float64(day.Day()) + 0.5, nil
+		},
+	}
+	svc := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	result, err := svc.BackfillCosts(context.Background(), start.Format("2006-01-02"), today.Format("2006-01-02"), 7, SupplierSyncTriggerManual)
+	require.NoError(t, err)
+	require.Equal(t, 3, result.DayCount)
+	require.Equal(t, 1, result.ProviderCount)
+	require.Equal(t, 3, result.SuccessCount)
+	require.Zero(t, result.FailedCount)
+	require.Zero(t, result.SkippedCount)
+	require.Len(t, remote.costDays, 3)
+	require.Len(t, dataRepo.costDays, 3)
+	require.Equal(t, start.Format("2006-01-02"), dataRepo.costDays[0].Format("2006-01-02"))
+	require.Equal(t, today.Format("2006-01-02"), dataRepo.costDays[2].Format("2006-01-02"))
+	require.Equal(t, float64(start.Day())+0.5, dataRepo.costValues[0])
+	require.Len(t, dataRepo.createdRuns, 1)
+	require.Len(t, dataRepo.finishedRuns, 1)
+	require.Equal(t, SupplierSyncScopeCost, dataRepo.finishedRuns[0].SyncScope)
+	require.Equal(t, SupplierSyncStatusSuccess, dataRepo.finishedRuns[0].Status)
+}
+
+func TestSupplierProviderSyncServiceBackfillCostsSub2APISkipsHistoryOnlyToday(t *testing.T) {
+	today := supplierCostBackfillToday()
+	start := today.AddDate(0, 0, -1)
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID: 9, Name: "Sub2API-B", ProviderType: SupplierProviderTypeSub2API, Enabled: true, PasswordEncrypted: "secret",
+	}}}
+	dataRepo := &supplierProviderDataRepoStub{}
+	remote := &supplierRemoteClientStub{}
+	svc := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	result, err := svc.BackfillCosts(context.Background(), start.Format("2006-01-02"), today.Format("2006-01-02"), 9, SupplierSyncTriggerManual)
+	require.NoError(t, err)
+	require.Equal(t, 2, result.DayCount)
+	require.Equal(t, 1, result.SuccessCount)
+	require.Equal(t, 1, result.SkippedCount)
+	require.Zero(t, result.FailedCount)
+	require.Len(t, remote.costDays, 1)
+	require.Equal(t, today.Format("2006-01-02"), remote.costDays[0].Format("2006-01-02"))
+	require.Len(t, dataRepo.costDays, 1)
+	require.Equal(t, today.Format("2006-01-02"), dataRepo.costDays[0].Format("2006-01-02"))
+
+	var skipped, success int
+	for _, item := range result.Items {
+		switch item.Status {
+		case SupplierSyncStatusSkipped:
+			skipped++
+			require.Contains(t, item.Message, "仅支持回补当天")
+			require.Equal(t, start.Format("2006-01-02"), item.Date)
+		case SupplierSyncStatusSuccess:
+			success++
+			require.Equal(t, today.Format("2006-01-02"), item.Date)
+		}
+	}
+	require.Equal(t, 1, skipped)
+	require.Equal(t, 1, success)
+}
+
+func TestSupplierProviderSyncServiceBackfillCostsRejectsInvalidRange(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID: 1, ProviderType: SupplierProviderTypeNewAPI, Enabled: true, PasswordEncrypted: "secret",
+	}}}
+	svc := NewSupplierProviderSyncService(providerRepo, &supplierProviderDataRepoStub{}, &supplierRemoteClientStub{}, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	_, err := svc.BackfillCosts(context.Background(), "2026-07-20", "2026-07-10", 1, SupplierSyncTriggerManual)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "end_date")
+}
+
+func TestSupplierProviderSyncServiceBackfillCostsMarksLockedProviderAsSkipped(t *testing.T) {
+	today := supplierCostBackfillToday()
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID: 11, Name: "Locked", ProviderType: SupplierProviderTypeNewAPI, Enabled: true, PasswordEncrypted: "secret",
+	}}}
+	dataRepo := &supplierProviderDataRepoStub{}
+	remote := &supplierRemoteClientStub{}
+	svc := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: false})
+
+	result, err := svc.BackfillCosts(context.Background(), today.Format("2006-01-02"), today.Format("2006-01-02"), 11, SupplierSyncTriggerManual)
+	require.NoError(t, err)
+	require.Equal(t, 1, result.SkippedCount)
+	require.Zero(t, result.SuccessCount)
+	require.Empty(t, remote.costDays)
+	require.Empty(t, dataRepo.costDays)
+	require.Equal(t, SupplierSyncStatusSkipped, result.Items[0].Status)
 }
 
 func TestSupplierProviderServiceUpdateClearsTokenWhenAuthConfigurationChanges(t *testing.T) {

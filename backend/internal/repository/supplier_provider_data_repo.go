@@ -977,16 +977,21 @@ ON CONFLICT (provider_id, stat_date) DO UPDATE SET current_balance=EXCLUDED.curr
 		}
 	}
 	if cost != nil {
-		if _, err := tx.ExecContext(ctx, "UPDATE supplier_provider_runtime_stats SET today_cost=$2, updated_at=$3 WHERE provider_id=$1", providerID, *cost, seenAt); err != nil {
-			return fmt.Errorf("update supplier cost: %w", err)
+		// seenAt 表示成本归属统计日；runtime.today_cost 仅在统计日为今天时更新。
+		statDay := supplierStatDate(seenAt)
+		capturedAt := time.Now()
+		if supplierStatDate(capturedAt).Equal(statDay) {
+			if _, err := tx.ExecContext(ctx, "UPDATE supplier_provider_runtime_stats SET today_cost=$2, updated_at=$3 WHERE provider_id=$1", providerID, *cost, capturedAt); err != nil {
+				return fmt.Errorf("update supplier cost: %w", err)
+			}
 		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO supplier_provider_metric_snapshots (provider_id, current_balance, today_cost, captured_at) VALUES ($1,$2,$3,$4)", providerID, 0.0, *cost, seenAt); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO supplier_provider_metric_snapshots (provider_id, current_balance, today_cost, captured_at) VALUES ($1,$2,$3,$4)", providerID, 0.0, *cost, capturedAt); err != nil {
 			return fmt.Errorf("insert supplier cost snapshot: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO supplier_provider_daily_stats (provider_id, stat_date, today_cost)
 VALUES ($1,$2,$3)
-ON CONFLICT (provider_id, stat_date) DO UPDATE SET today_cost=EXCLUDED.today_cost, updated_at=NOW()`, providerID, supplierStatDate(seenAt), *cost); err != nil {
+ON CONFLICT (provider_id, stat_date) DO UPDATE SET today_cost=EXCLUDED.today_cost, updated_at=NOW()`, providerID, statDay, *cost); err != nil {
 			return fmt.Errorf("upsert supplier daily cost: %w", err)
 		}
 	}

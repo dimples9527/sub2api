@@ -35,6 +35,24 @@ func (s *supplierProviderSyncHandlerSyncStub) SyncCost(context.Context, int64, t
 	s.calledScope = service.SupplierSyncScopeCost
 	return supplierProviderSyncHandlerResult(service.SupplierSyncScopeCost), nil
 }
+
+func (s *supplierProviderSyncHandlerSyncStub) BackfillCosts(_ context.Context, startDate, endDate string, providerID int64, _ string) (service.SupplierProviderCostBackfillResult, error) {
+	s.calledScope = service.SupplierSyncScopeCost
+	return service.SupplierProviderCostBackfillResult{
+		StartDate:     startDate,
+		EndDate:       endDate,
+		ProviderID:    providerID,
+		ProviderCount: 1,
+		DayCount:      1,
+		SuccessCount:  1,
+		Items: []service.SupplierProviderCostBackfillItem{{
+			ProviderID: providerID,
+			Date:       startDate,
+			Status:     service.SupplierSyncStatusSuccess,
+			Cost:       1.23,
+		}},
+	}, nil
+}
 func (s *supplierProviderSyncHandlerSyncStub) SyncAll(context.Context, int64, string) (service.SupplierProviderSyncResult, error) {
 	s.calledScope = service.SupplierSyncScopeAll
 	return supplierProviderSyncHandlerResult(service.SupplierSyncScopeAll), nil

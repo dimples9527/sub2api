@@ -439,6 +439,275 @@ func (s *SupplierProviderSyncService) SyncBalance(ctx context.Context, providerI
 	})
 }
 
+// SupplierProviderCostBackfillItem 表示单日回补结果。
+type SupplierProviderCostBackfillItem struct {
+	ProviderID   int64   `json:"provider_id"`
+	ProviderName string  `json:"provider_name"`
+	ProviderType string  `json:"provider_type"`
+	Date         string  `json:"date"`
+	Status       string  `json:"status"`
+	Cost         float64 `json:"cost,omitempty"`
+	Message      string  `json:"message,omitempty"`
+}
+
+// SupplierProviderCostBackfillResult 是按时间范围回补上游成本的汇总。
+type SupplierProviderCostBackfillResult struct {
+	StartDate     string                            `json:"start_date"`
+	EndDate       string                            `json:"end_date"`
+	ProviderID    int64                             `json:"provider_id,omitempty"`
+	ProviderCount int                               `json:"provider_count"`
+	DayCount      int                               `json:"day_count"`
+	SuccessCount  int                               `json:"success_count"`
+	FailedCount   int                               `json:"failed_count"`
+	SkippedCount  int                               `json:"skipped_count"`
+	Items         []SupplierProviderCostBackfillItem `json:"items"`
+	StartedAt     time.Time                         `json:"started_at"`
+	FinishedAt    time.Time                         `json:"finished_at"`
+}
+
+// BackfillCosts 按闭区间日期从上游拉取成本并写入本地 daily_stats。
+// Sub2API 仅支持当天；NewAPI 支持按天历史。
+func (s *SupplierProviderSyncService) BackfillCosts(ctx context.Context, startDate, endDate string, providerID int64, trigger string) (SupplierProviderCostBackfillResult, error) {
+	startedAt := time.Now()
+	result := SupplierProviderCostBackfillResult{
+		StartDate:  strings.TrimSpace(startDate),
+		EndDate:    strings.TrimSpace(endDate),
+		ProviderID: providerID,
+		Items:      make([]SupplierProviderCostBackfillItem, 0),
+		StartedAt:  startedAt,
+	}
+
+	start, end, err := parseSupplierCostBackfillRange(startDate, endDate)
+	if err != nil {
+		return result, err
+	}
+	result.StartDate = start.Format("2006-01-02")
+	result.EndDate = end.Format("2006-01-02")
+	result.DayCount = int(end.Sub(start).Hours()/24) + 1
+
+	providers, err := s.resolveCostBackfillProviders(ctx, providerID)
+	if err != nil {
+		return result, err
+	}
+	result.ProviderCount = len(providers)
+	trigger = normalizeSupplierSyncTrigger(trigger)
+
+	for _, provider := range providers {
+		itemResult, syncErr := s.backfillProviderCosts(ctx, provider, start, end, trigger)
+		if syncErr != nil && errors.Is(syncErr, ErrSupplierProviderSyncConflict) {
+			// 整段被锁占用时，按天记为跳过，便于前端提示。
+			for cursor := start; !cursor.After(end); cursor = cursor.AddDate(0, 0, 1) {
+				result.SkippedCount++
+				result.Items = append(result.Items, SupplierProviderCostBackfillItem{
+					ProviderID:   provider.ID,
+					ProviderName: provider.Name,
+					ProviderType: provider.ProviderType,
+					Date:         cursor.Format("2006-01-02"),
+					Status:       SupplierSyncStatusSkipped,
+					Message:      syncErr.Error(),
+				})
+			}
+			continue
+		}
+		if syncErr != nil {
+			return result, syncErr
+		}
+		result.SuccessCount += itemResult.SuccessCount
+		result.FailedCount += itemResult.FailedCount
+		result.SkippedCount += itemResult.SkippedCount
+		result.Items = append(result.Items, itemResult.Items...)
+	}
+
+	result.FinishedAt = time.Now()
+	return result, nil
+}
+
+type supplierCostBackfillPartial struct {
+	SuccessCount int
+	FailedCount  int
+	SkippedCount int
+	Items        []SupplierProviderCostBackfillItem
+}
+
+func (s *SupplierProviderSyncService) backfillProviderCosts(ctx context.Context, provider *SupplierProvider, start, end time.Time, trigger string) (supplierCostBackfillPartial, error) {
+	partial := supplierCostBackfillPartial{Items: make([]SupplierProviderCostBackfillItem, 0)}
+	_, err := s.syncWithLock(ctx, provider.ID, func(locked *SupplierProvider) (SupplierProviderSyncResult, error) {
+		password := s.providerPassword(locked)
+		runStarted := time.Now()
+		run := &SupplierProviderSyncRun{
+			ProviderID:    locked.ID,
+			SyncScope:     SupplierSyncScopeCost,
+			TriggerSource: trigger,
+			Status:        SupplierSyncStatusRunning,
+			StartedAt:     runStarted,
+		}
+		if err := s.dataRepo.CreateSyncRun(ctx, run); err != nil {
+			return SupplierProviderSyncResult{}, fmt.Errorf("create supplier cost backfill run: %w", err)
+		}
+
+		supportsHistory := supplierProviderSupportsHistoricalCost(locked)
+		today := supplierCostBackfillToday()
+		var firstErr error
+		for cursor := start; !cursor.After(end); cursor = cursor.AddDate(0, 0, 1) {
+			dateText := cursor.Format("2006-01-02")
+			item := SupplierProviderCostBackfillItem{
+				ProviderID:   locked.ID,
+				ProviderName: locked.Name,
+				ProviderType: locked.ProviderType,
+				Date:         dateText,
+			}
+
+			if !supportsHistory && !sameSupplierCostStatDay(cursor, today) {
+				item.Status = SupplierSyncStatusSkipped
+				item.Message = "当前供应商类型仅支持回补当天上游成本"
+				partial.SkippedCount++
+				partial.Items = append(partial.Items, item)
+				run.Counts.SkippedCount++
+				continue
+			}
+
+			cost, fetchErr := s.remote.FetchCost(ctx, locked, password, cursor)
+			if fetchErr != nil {
+				item.Status = SupplierSyncStatusFailed
+				item.Message = fetchErr.Error()
+				partial.FailedCount++
+				partial.Items = append(partial.Items, item)
+				run.Counts.CheckedCount++
+				if firstErr == nil {
+					firstErr = fetchErr
+				}
+				continue
+			}
+			if updateErr := s.dataRepo.UpdateCost(ctx, locked.ID, cost, cursor); updateErr != nil {
+				item.Status = SupplierSyncStatusFailed
+				item.Message = updateErr.Error()
+				partial.FailedCount++
+				partial.Items = append(partial.Items, item)
+				run.Counts.CheckedCount++
+				if firstErr == nil {
+					firstErr = updateErr
+				}
+				continue
+			}
+
+			item.Status = SupplierSyncStatusSuccess
+			item.Cost = cost
+			partial.SuccessCount++
+			partial.Items = append(partial.Items, item)
+			run.Counts.CheckedCount++
+			run.Counts.UpdatedCount++
+		}
+
+		finishedAt := time.Now()
+		run.FinishedAt = &finishedAt
+		switch {
+		case partial.FailedCount == 0 && partial.SuccessCount > 0:
+			run.Status = SupplierSyncStatusSuccess
+		case partial.SuccessCount > 0 && partial.FailedCount > 0:
+			run.Status = SupplierSyncStatusPartial
+		case partial.SuccessCount == 0 && partial.FailedCount > 0:
+			run.Status = SupplierSyncStatusFailed
+		default:
+			run.Status = SupplierSyncStatusSuccess
+		}
+		if firstErr != nil {
+			run.ErrorMessage = firstErr.Error()
+		} else {
+			run.ErrorMessage = supplierSyncMessage(run.Status)
+		}
+		if finishErr := s.dataRepo.FinishSyncRun(ctx, run); finishErr != nil {
+			return SupplierProviderSyncResult{}, fmt.Errorf("finish supplier cost backfill run: %w", finishErr)
+		}
+		_ = s.dataRepo.UpdateSyncStatus(ctx, locked.ID, run.Status, run.ErrorMessage, finishedAt)
+		return SupplierProviderSyncResult{
+			ProviderID:   locked.ID,
+			ProviderName: locked.Name,
+			Scope:        SupplierSyncScopeCost,
+			Status:       run.Status,
+			Message:      run.ErrorMessage,
+			Counts:       run.Counts,
+			StartedAt:    runStarted,
+			FinishedAt:   finishedAt,
+		}, nil
+	})
+	if err != nil {
+		return partial, err
+	}
+	return partial, nil
+}
+
+func (s *SupplierProviderSyncService) resolveCostBackfillProviders(ctx context.Context, providerID int64) ([]*SupplierProvider, error) {
+	if providerID > 0 {
+		provider, err := s.validSyncProvider(ctx, providerID)
+		if err != nil {
+			return nil, err
+		}
+		return []*SupplierProvider{provider}, nil
+	}
+	enabled := true
+	providers, _, err := s.providerRepo.List(ctx, SupplierProviderListParams{Enabled: &enabled, Page: 1, PageSize: 1000})
+	if err != nil {
+		return nil, fmt.Errorf("list enabled supplier providers: %w", err)
+	}
+	return providers, nil
+}
+
+func parseSupplierCostBackfillRange(startDate, endDate string) (time.Time, time.Time, error) {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		loc = time.FixedZone("Asia/Shanghai", 8*60*60)
+	}
+	start, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(startDate), loc)
+	if err != nil {
+		return time.Time{}, time.Time{}, infraerrors.BadRequest("INVALID_COST_BACKFILL_START_DATE", "start_date must be YYYY-MM-DD")
+	}
+	end, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(endDate), loc)
+	if err != nil {
+		return time.Time{}, time.Time{}, infraerrors.BadRequest("INVALID_COST_BACKFILL_END_DATE", "end_date must be YYYY-MM-DD")
+	}
+	if end.Before(start) {
+		return time.Time{}, time.Time{}, infraerrors.BadRequest("INVALID_COST_BACKFILL_RANGE", "end_date must be on or after start_date")
+	}
+	today := supplierCostBackfillToday()
+	if end.After(today) {
+		end = today
+	}
+	if start.After(end) {
+		start = end
+	}
+	if int(end.Sub(start).Hours()/24) > 89 {
+		start = end.AddDate(0, 0, -89)
+	}
+	return start, end, nil
+}
+
+func supplierCostBackfillToday() time.Time {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		loc = time.FixedZone("Asia/Shanghai", 8*60*60)
+	}
+	now := time.Now().In(loc)
+	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+}
+
+func sameSupplierCostStatDay(a, b time.Time) bool {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		loc = time.FixedZone("Asia/Shanghai", 8*60*60)
+	}
+	aa := a.In(loc)
+	bb := b.In(loc)
+	return aa.Year() == bb.Year() && aa.Month() == bb.Month() && aa.Day() == bb.Day()
+}
+
+func supplierProviderSupportsHistoricalCost(provider *SupplierProvider) bool {
+	if provider == nil {
+		return false
+	}
+	// NewAPI 成本 URL 支持按 start/end timestamp 查历史；Sub2API 目前仅 today_actual_cost。
+	return normalizeSupplierProviderType(provider.ProviderType) == SupplierProviderTypeNewAPI
+}
+
 func (s *SupplierProviderSyncService) SyncCost(ctx context.Context, providerID int64, day time.Time, trigger string) (SupplierProviderSyncResult, error) {
 	return s.syncWithLock(ctx, providerID, func(provider *SupplierProvider) (SupplierProviderSyncResult, error) {
 		password := s.providerPassword(provider)
@@ -647,9 +916,14 @@ func (s *SupplierProviderSyncService) syncCostStage(ctx context.Context, provide
 			return result, fmt.Errorf("create supplier sync run: %w", err)
 		}
 	}
-	cost, err := s.remote.FetchCost(ctx, provider, password, day)
+	statDay := day
+	if statDay.IsZero() {
+		statDay = startedAt
+	}
+	cost, err := s.remote.FetchCost(ctx, provider, password, statDay)
 	if err == nil {
-		err = s.dataRepo.UpdateCost(ctx, provider.ID, cost, startedAt)
+		// 按成本归属日写入 daily_stats，避免历史回补落到当天。
+		err = s.dataRepo.UpdateCost(ctx, provider.ID, cost, statDay)
 	}
 	result.Counts = SupplierSyncCounts{CheckedCount: 1, UpdatedCount: boolToInt(err == nil)}
 	result.FinishedAt = time.Now()

@@ -102,6 +102,36 @@ export interface SupplierProviderCostTrendParams {
   provider_id?: number
 }
 
+export interface SupplierProviderCostBackfillParams {
+  start_date: string
+  end_date: string
+  provider_id?: number
+}
+
+export interface SupplierProviderCostBackfillItem {
+  provider_id: number
+  provider_name: string
+  provider_type: string
+  date: string
+  status: string
+  cost?: number
+  message?: string
+}
+
+export interface SupplierProviderCostBackfillResult {
+  start_date: string
+  end_date: string
+  provider_id?: number
+  provider_count: number
+  day_count: number
+  success_count: number
+  failed_count: number
+  skipped_count: number
+  items: SupplierProviderCostBackfillItem[]
+  started_at: string
+  finished_at?: string
+}
+
 export interface SupplierProviderListParams {
   search?: string
   enabled?: boolean
@@ -176,6 +206,24 @@ export async function listCostTrends(
   return data
 }
 
+/** ??????????????? daily_stats?????????? */
+export async function backfillCostTrends(
+  params: SupplierProviderCostBackfillParams
+): Promise<SupplierProviderCostBackfillResult> {
+  const body: Record<string, string | number> = {
+    start_date: params.start_date,
+    end_date: params.end_date,
+  }
+  if (params.provider_id && params.provider_id > 0) {
+    body.provider_id = params.provider_id
+  }
+  const { data } = await apiClient.post<SupplierProviderCostBackfillResult>(
+    '/admin/supplier-management/providers/cost-trends/backfill',
+    body
+  )
+  return data
+}
+
 export async function setDefault(id: number): Promise<SupplierProvider> {
   const { data } = await apiClient.put<SupplierProvider>(
     `/admin/supplier-management/providers/${id}/default`
@@ -186,6 +234,7 @@ export async function setDefault(id: number): Promise<SupplierProvider> {
 export const supplierProvidersAPI = {
   list,
   listCostTrends,
+  backfillCostTrends,
   get,
   create,
   update,

@@ -9,10 +9,12 @@ import SupplierProvidersView from './SupplierProvidersView.vue'
 const providerViewMocks = vi.hoisted(() => ({
   listProviders: vi.fn(),
   listCostTrends: vi.fn(),
+  backfillCostTrends: vi.fn(),
   listProviderTypes: vi.fn(),
   updateProvider: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
+  showWarning: vi.fn(),
 }))
 
 vi.mock('vue-chartjs', () => ({
@@ -27,6 +29,7 @@ vi.mock('@/api/admin/supplierProviders', () => ({
   default: {
     list: providerViewMocks.listProviders,
     listCostTrends: providerViewMocks.listCostTrends,
+    backfillCostTrends: providerViewMocks.backfillCostTrends,
     update: providerViewMocks.updateProvider,
   },
 }))
@@ -39,6 +42,7 @@ vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
     showError: providerViewMocks.showError,
     showSuccess: providerViewMocks.showSuccess,
+    showWarning: providerViewMocks.showWarning,
   }),
 }))
 
@@ -121,6 +125,17 @@ describe('SupplierProvidersView payload normalization', () => {
         { date: '2026-07-16', upstream_cost: 12, local_cost: 10 },
         { date: '2026-07-17', upstream_cost: 15, local_cost: 14 },
       ],
+    })
+    providerViewMocks.backfillCostTrends.mockResolvedValue({
+      start_date: '2026-07-16',
+      end_date: '2026-07-17',
+      provider_count: 1,
+      day_count: 2,
+      success_count: 2,
+      failed_count: 0,
+      skipped_count: 0,
+      items: [],
+      started_at: '2026-07-31T00:00:00Z',
     })
     providerViewMocks.listProviders.mockResolvedValue({
       items: providerRows,
@@ -413,6 +428,33 @@ describe('SupplierProvidersView payload normalization', () => {
       provider_id: 1,
     })
     expect(supplierProvidersSource).toContain('selectProviderForDetail')
+  })
+
+  it('backfills upstream costs for the selected range before reloading trends', async () => {
+    const wrapper = await mountSupplierProviders()
+    providerViewMocks.listCostTrends.mockClear()
+    providerViewMocks.backfillCostTrends.mockClear()
+    providerViewMocks.showSuccess.mockClear()
+
+    await wrapper.get('[data-test="supplier-cost-refresh"]').trigger('click')
+    await flushPromises()
+
+    const defaultEnd = new Date()
+    const defaultStart = new Date()
+    defaultStart.setDate(defaultEnd.getDate() - 13)
+    const pad = (value: number) => String(value).padStart(2, '0')
+    const formatDate = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+    const expectedRange = {
+      start_date: formatDate(defaultStart),
+      end_date: formatDate(defaultEnd),
+    }
+
+    expect(providerViewMocks.backfillCostTrends).toHaveBeenCalledWith(expectedRange)
+    expect(providerViewMocks.listCostTrends).toHaveBeenCalledWith(expectedRange)
+    expect(providerViewMocks.showSuccess).toHaveBeenCalled()
+    expect(String(providerViewMocks.showSuccess.mock.calls[0][0])).toContain('上游成本回补完成')
+    expect(supplierProvidersSource).toContain('backfillCostTrends')
+    expect(supplierProvidersSource).toContain('notifyCostBackfillResult')
   })
 
   it('uses dedicated cost and balance colors with a strict ten-yuan warning threshold', () => {

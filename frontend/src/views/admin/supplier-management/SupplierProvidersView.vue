@@ -162,10 +162,10 @@
               type="button"
               :disabled="costTrendLoading"
               data-test="supplier-cost-refresh"
-              title="按当前时间范围重新读取本地成本对比"
+              title="按当前时间范围向上游回补成本并刷新曲线（NewAPI 支持历史，Sub2API 仅当天）"
               @click="refreshCostTrends"
             >
-              {{ costTrendLoading ? '刷新中…' : '重新获取' }}
+              {{ costTrendLoading ? '回补中…' : '重新获取' }}
             </button>
             <span class="sp-status" :class="healthTone" data-test="supplier-health-tone">{{ healthLabel }}</span>
           </div>
@@ -280,7 +280,7 @@
                 :options="costTrendChartOptions"
               />
               <div v-else-if="costTrendLoading" class="sp-health-chart-empty">成本曲线加载中…</div>
-              <div v-else class="sp-health-chart-empty">暂无按天成本数据，可调整时间范围或供应商后点「重新获取」</div>
+              <div v-else class="sp-health-chart-empty">暂无按天成本数据，可调整时间范围或供应商后点「重新获取」向上游回补</div>
             </div>
           </section>
         </div>
@@ -638,7 +638,7 @@ import Icon from '@/components/icons/Icon.vue'
 import Input from '@/components/common/Input.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
-import supplierProvidersAPI, { type SupplierProvider, type SupplierProviderSummary, type SupplierProviderUpsertPayload, type SupplierProviderCostTrendPoint } from '@/api/admin/supplierProviders'
+import supplierProvidersAPI, { type SupplierProvider, type SupplierProviderSummary, type SupplierProviderUpsertPayload, type SupplierProviderCostTrendPoint, type SupplierProviderCostBackfillResult } from '@/api/admin/supplierProviders'
 import supplierProviderTypesAPI, { type SupplierProviderType, type SupplierProviderTypeUpsertPayload } from '@/api/admin/supplierProviderTypes'
 import { syncProvider, testProviderEndpoint, type SupplierProviderEndpointTestResult, type SupplierSyncScope } from '@/api/admin/supplierProviderData'
 import { useAppStore } from '@/stores/app'
@@ -1077,7 +1077,46 @@ async function onCostTrendProviderChange() {
 }
 
 async function refreshCostTrends() {
-  await loadCostTrends()
+  if (costTrendLoading.value) return
+  costTrendLoading.value = true
+  try {
+    const providerId = typeof costTrendProviderId.value === 'number' ? costTrendProviderId.value : 0
+    const backfill = await supplierProvidersAPI.backfillCostTrends({
+      start_date: costTrendStartDate.value,
+      end_date: costTrendEndDate.value,
+      provider_id: providerId || undefined,
+    })
+    const result = await supplierProvidersAPI.listCostTrends({
+      start_date: costTrendStartDate.value,
+      end_date: costTrendEndDate.value,
+      provider_id: providerId || undefined,
+    })
+    costTrendPoints.value = Array.isArray(result?.points) ? result.points : []
+    notifyCostBackfillResult(backfill)
+  } catch (err) {
+    appStore.showError(errorMessage(err, '回补上游成本失败'))
+  } finally {
+    costTrendLoading.value = false
+  }
+}
+
+function notifyCostBackfillResult(result: SupplierProviderCostBackfillResult) {
+  const success = Number(result?.success_count || 0)
+  const failed = Number(result?.failed_count || 0)
+  const skipped = Number(result?.skipped_count || 0)
+  const providers = Number(result?.provider_count || 0)
+  const days = Number(result?.day_count || 0)
+  const rangeText = `${result?.start_date || costTrendStartDate.value} ~ ${result?.end_date || costTrendEndDate.value}`
+  const message = `上游成本回补完成（${rangeText}，${providers} 个供应商 × ${days} 天）：成功 ${success}，跳过 ${skipped}，失败 ${failed}`
+  if (failed > 0 && success === 0) {
+    appStore.showError(message)
+    return
+  }
+  if (failed > 0 || skipped > 0) {
+    appStore.showWarning(message)
+    return
+  }
+  appStore.showSuccess(message)
 }
 
 
