@@ -1022,7 +1022,7 @@ type SupplierAccountFilterSnapshot = {
   summary: string
 }
 
-type AccountQuickFilterKey = 'all' | 'bound' | 'unbound' | 'schedulable' | 'paused' | 'failed' | 'group_deleted'
+type AccountQuickFilterKey = 'all' | 'bound' | 'unbound' | 'schedulable' | 'paused' | 'failed' | 'group_deleted' | 'upstream_deleted'
 
 type AccountQuickFilterOption = {
   key: AccountQuickFilterKey
@@ -1165,14 +1165,12 @@ const accountQuickFilterOptions = computed<AccountQuickFilterOption[]>(() => [
   {
     key: 'group_deleted',
     label: '上游分组已删除',
-    count: accountSourceItems.value.filter(account => 
-      account.group_status === 'inactive' || account.group_status === 'missing'
-    ).length,
+    count: accountSourceItems.value.filter(account => accountMatchesQuickFilter(account, 'group_deleted')).length,
   },
   {
     key: 'upstream_deleted',
     label: '上游密钥已删除',
-    count: accountSourceItems.value.filter(account => account.status === 'deleted').length,
+    count: accountSourceItems.value.filter(account => accountMatchesQuickFilter(account, 'upstream_deleted')).length,
   },
 ])
 const supplierIDs = computed(() => [...new Set([
@@ -1180,10 +1178,6 @@ const supplierIDs = computed(() => [...new Set([
   ...accountSourceItems.value.map(account => account.provider_id),
 ])].sort((left, right) => left - right))
 const activeFilterOptions: SelectOption[] = [
-  { value: 'true', label: '仅有效' },
-  { value: '', label: '全部有效性' },
-  { value: 'false', label: '已失效' },
-
   { value: 'true', label: '仅有效' },
   { value: '', label: '全部有效性' },
   { value: 'false', label: '已失效' },
@@ -1303,7 +1297,6 @@ function createSupplierAccountFilterSnapshot(): SupplierAccountFilterSnapshot {
     status: upstreamStatusFilter.value || undefined,
     search: search.value.trim() || undefined,
     quickFilter: accountQuickFilter.value,
-    status: upstreamStatusFilter.value || undefined,
   }
   return {
     ...snapshot,
@@ -1439,16 +1432,15 @@ function accountMatchesQuickFilter(
   if (filter === 'group_deleted') {
     return account.group_status === 'inactive' || account.group_status === 'missing'
   }
+  if (filter === 'upstream_deleted') {
+    return account.status === 'deleted'
+  }
   if (account.local_account_match_status !== 'matched') return false
   if (filter === 'schedulable') return account.local_account_schedulable === true
   return account.local_account_schedulable === false
 }
 
 function applyAccountQuickFilterPage() {
-  const filteredAccounts = accountSourceItems.value.filter(account => (
-    accountMatchesQuickFilter(account, accountQuickFilter.value)
-  ))
-
   const filteredAccounts = accountSourceItems.value.filter(account => (
     accountMatchesQuickFilter(account, accountQuickFilter.value)
   ))
