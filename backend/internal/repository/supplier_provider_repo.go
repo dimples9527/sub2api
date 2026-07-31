@@ -5,8 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
 )
@@ -103,6 +106,102 @@ WHERE `+where, args...).Scan(
 		return service.SupplierProviderSummary{}, fmt.Errorf("summarize supplier providers: %w", err)
 	}
 	return summary, nil
+}
+
+func (r *supplierProviderRepository) ListCostTrends(ctx context.Context, start, end time.Time) ([]service.SupplierProviderCostTrendPoint, error) {
+	byDate := make(map[string]*service.SupplierProviderCostTrendPoint)
+
+	upstreamRows, err := r.db.QueryContext(ctx, `
+SELECT TO_CHAR(d.stat_date, 'YYYY-MM-DD') AS date,
+       COALESCE(SUM(d.today_cost), 0) AS upstream_cost
+FROM supplier_provider_daily_stats d
+JOIN supplier_providers p ON p.id = d.provider_id AND p.deleted_at IS NULL
+WHERE d.stat_date >= $1::date
+  AND d.stat_date < $2::date
+GROUP BY d.stat_date
+ORDER BY d.stat_date
+`, start, end)
+	if err != nil {
+		return nil, fmt.Errorf("query supplier upstream cost trends: %w", err)
+	}
+	defer upstreamRows.Close()
+
+	for upstreamRows.Next() {
+		var date string
+		var upstreamCost float64
+		if scanErr := upstreamRows.Scan(&date, &upstreamCost); scanErr != nil {
+			return nil, fmt.Errorf("scan supplier upstream cost trend: %w", scanErr)
+		}
+		point := byDate[date]
+		if point == nil {
+			point = &service.SupplierProviderCostTrendPoint{Date: date}
+			byDate[date] = point
+		}
+		point.UpstreamCost = upstreamCost
+	}
+	if err := upstreamRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate supplier upstream cost trends: %w", err)
+	}
+
+	tzName := timezone.Name()
+	if strings.TrimSpace(tzName) == "" {
+		tzName = "Asia/Shanghai"
+	}
+
+	localRows, err := r.db.QueryContext(ctx, `
+WITH matched_accounts AS (
+  SELECT local_account.id AS local_account_id
+  FROM supplier_providers p
+  JOIN supplier_provider_accounts spa
+    ON spa.provider_id = p.id
+   AND spa.active = TRUE
+  JOIN accounts local_account
+    ON local_account.deleted_at IS NULL
+   AND regexp_replace(lower(local_account.name), '[^[:alnum:]]', '', 'g')
+     = regexp_replace(lower(p.account_name_prefix || spa.name), '[^[:alnum:]]', '', 'g')
+  WHERE p.deleted_at IS NULL
+  GROUP BY local_account.id
+  HAVING COUNT(*) = 1
+)
+SELECT TO_CHAR(ul.created_at AT TIME ZONE $3, 'YYYY-MM-DD') AS date,
+       COALESCE(SUM(ul.actual_cost), 0) AS local_cost
+FROM usage_logs ul
+JOIN matched_accounts matched ON matched.local_account_id = ul.account_id
+WHERE ul.created_at >= $1
+  AND ul.created_at < $2
+GROUP BY 1
+ORDER BY 1
+`, start, end, tzName)
+	if err != nil {
+		return nil, fmt.Errorf("query supplier local cost trends: %w", err)
+	}
+	defer localRows.Close()
+
+	for localRows.Next() {
+		var date string
+		var localCost float64
+		if scanErr := localRows.Scan(&date, &localCost); scanErr != nil {
+			return nil, fmt.Errorf("scan supplier local cost trend: %w", scanErr)
+		}
+		point := byDate[date]
+		if point == nil {
+			point = &service.SupplierProviderCostTrendPoint{Date: date}
+			byDate[date] = point
+		}
+		point.LocalCost = localCost
+	}
+	if err := localRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate supplier local cost trends: %w", err)
+	}
+
+	points := make([]service.SupplierProviderCostTrendPoint, 0, len(byDate))
+	for _, point := range byDate {
+		points = append(points, *point)
+	}
+	sort.Slice(points, func(i, j int) bool {
+		return points[i].Date < points[j].Date
+	})
+	return points, nil
 }
 
 func supplierProviderWhere(params service.SupplierProviderListParams) (string, []any) {

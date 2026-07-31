@@ -10,6 +10,7 @@ import (
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 )
 
 var (
@@ -141,9 +142,23 @@ type SupplierProviderListResult struct {
 	PageSize int                     `json:"page_size"`
 }
 
+// SupplierProviderCostTrendPoint 表示某一天的上游成本与本地成本对比。
+type SupplierProviderCostTrendPoint struct {
+	Date         string  `json:"date"`
+	UpstreamCost float64 `json:"upstream_cost"`
+	LocalCost    float64 `json:"local_cost"`
+}
+
+// SupplierProviderCostTrendResult 是供应商组合成本趋势响应。
+type SupplierProviderCostTrendResult struct {
+	Days   int                              `json:"days"`
+	Points []SupplierProviderCostTrendPoint `json:"points"`
+}
+
 type SupplierProviderRepository interface {
 	List(ctx context.Context, params SupplierProviderListParams) ([]*SupplierProvider, int64, error)
 	Summary(ctx context.Context, params SupplierProviderListParams) (SupplierProviderSummary, error)
+	ListCostTrends(ctx context.Context, start, end time.Time) ([]SupplierProviderCostTrendPoint, error)
 	GetByID(ctx context.Context, id int64) (*SupplierProvider, error)
 	Create(ctx context.Context, provider *SupplierProvider) error
 	Update(ctx context.Context, provider *SupplierProvider) error
@@ -257,6 +272,45 @@ func (s *SupplierProviderService) List(ctx context.Context, params SupplierProvi
 		redactSupplierProvider(item)
 	}
 	return result, nil
+}
+
+func (s *SupplierProviderService) ListCostTrends(ctx context.Context, days int) (SupplierProviderCostTrendResult, error) {
+	if days < 1 {
+		days = 14
+	}
+	if days > 90 {
+		days = 90
+	}
+
+	loc := timezone.Location()
+	if loc == nil {
+		loc = time.Local
+	}
+	today := timezone.Today()
+	start := today.AddDate(0, 0, -(days - 1))
+	end := today.AddDate(0, 0, 1)
+
+	rawPoints, err := s.repo.ListCostTrends(ctx, start, end)
+	if err != nil {
+		return SupplierProviderCostTrendResult{}, fmt.Errorf("list supplier provider cost trends: %w", err)
+	}
+
+	byDate := make(map[string]SupplierProviderCostTrendPoint, len(rawPoints))
+	for _, point := range rawPoints {
+		byDate[point.Date] = point
+	}
+
+	points := make([]SupplierProviderCostTrendPoint, 0, days)
+	for cursor := start; cursor.Before(end); cursor = cursor.AddDate(0, 0, 1) {
+		date := cursor.In(loc).Format("2006-01-02")
+		if point, ok := byDate[date]; ok {
+			points = append(points, point)
+			continue
+		}
+		points = append(points, SupplierProviderCostTrendPoint{Date: date})
+	}
+
+	return SupplierProviderCostTrendResult{Days: days, Points: points}, nil
 }
 
 func (s *SupplierProviderService) Get(ctx context.Context, id int64) (*SupplierProvider, error) {

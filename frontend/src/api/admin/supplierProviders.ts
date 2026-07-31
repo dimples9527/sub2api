@@ -80,6 +80,18 @@ export interface SupplierProviderUpsertPayload {
   is_default?: boolean
 }
 
+
+export interface SupplierProviderCostTrendPoint {
+  date: string
+  upstream_cost: number
+  local_cost: number
+}
+
+export interface SupplierProviderCostTrendResult {
+  days: number
+  points: SupplierProviderCostTrendPoint[]
+}
+
 export interface SupplierProviderListParams {
   search?: string
   enabled?: boolean
@@ -128,6 +140,15 @@ export async function deleteProvider(id: number): Promise<{ message: string }> {
   return data
 }
 
+
+export async function listCostTrends(days = 14): Promise<SupplierProviderCostTrendResult> {
+  const { data } = await apiClient.get<SupplierProviderCostTrendResult>(
+    '/admin/supplier-management/providers/cost-trends',
+    { params: { days } }
+  )
+  return data
+}
+
 export async function setDefault(id: number): Promise<SupplierProvider> {
   const { data } = await apiClient.put<SupplierProvider>(
     `/admin/supplier-management/providers/${id}/default`
@@ -137,6 +158,7 @@ export async function setDefault(id: number): Promise<SupplierProvider> {
 
 export const supplierProvidersAPI = {
   list,
+  listCostTrends,
   get,
   create,
   update,

@@ -47,6 +47,26 @@ func (h *SupplierProviderHandler) List(c *gin.Context) {
 	response.Success(c, result)
 }
 
+
+func (h *SupplierProviderHandler) ListCostTrends(c *gin.Context) {
+	days := 14
+	if raw := strings.TrimSpace(c.Query("days")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 {
+			response.ErrorFrom(c, infraerrors.BadRequest("INVALID_COST_TREND_DAYS", "days must be a positive integer"))
+			return
+		}
+		days = parsed
+	}
+
+	result, err := h.service.ListCostTrends(c.Request.Context(), days)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
 func (h *SupplierProviderHandler) Get(c *gin.Context) {
 	id, ok := parseSupplierProviderID(c)
 	if !ok {

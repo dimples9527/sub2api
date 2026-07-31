@@ -35,7 +35,7 @@
           </div>
         </div>
         <div class="sp-provider-filter-actions">
-          <button class="sp-button" type="button" :disabled="loading" @click="loadProviders">刷新数据</button>
+          <button class="sp-button" type="button" :disabled="loading || costTrendLoading" @click="refreshProvidersView">刷新数据</button>
           <button class="sp-button" type="button" @click="openTypeManager">类型维护</button>
           <button class="sp-button" type="button" @click="openCreateProviderType">新增供应商类型</button>
           <button class="sp-button primary" type="button" @click="openCreate">新增供应商</button>
@@ -147,39 +147,121 @@
         </DataTable>
       </div>
 
-      <aside class="sp-panel">
+            <aside class="sp-panel sp-health-panel" data-test="supplier-health-panel">
         <header class="sp-panel-head">
           <div class="sp-panel-title">
             <span class="sp-section-index">02</span>
             <div>
               <h2>供应商组合健康</h2>
-              <span>来自供应商独立数据表</span>
+              <span>综合状态 · 优先待办 · 成本对比</span>
             </div>
           </div>
-          <span class="sp-status" :class="healthTone">{{ healthLabel }}</span>
+          <div class="sp-health-head-right">
+            <button
+              class="sp-button small ghost"
+              type="button"
+              :disabled="costTrendLoading"
+              data-test="supplier-cost-refresh"
+              title="重新拉取近 14 天上游/本地成本"
+              @click="refreshCostTrends"
+            >
+              {{ costTrendLoading ? '刷新中…' : '重新获取' }}
+            </button>
+            <span class="sp-status" :class="healthTone" data-test="supplier-health-tone">{{ healthLabel }}</span>
+          </div>
         </header>
-        <div class="sp-panel-body">
-          <div class="sp-alert">{{ healthMessage }}</div>
-          <div class="sp-stat-list" style="margin-top: 12px">
-            <div class="sp-stat-box"><span>启用供应商</span><b>{{ summary.enabled_count }}</b></div>
-            <div class="sp-stat-box"><span>高风险供应商</span><b>{{ summary.high_risk_count }}</b></div>
-            <div class="sp-stat-box"><span>余额不足 3 天</span><b>{{ summary.low_balance_count }}</b></div>
-            <div class="sp-stat-box"><span>同步异常</span><b>{{ summary.sync_failure_count }}</b></div>
+        <div class="sp-panel-body sp-health-body">
+          <div class="sp-health-summary" :class="healthTone" data-test="supplier-health-summary">
+            <strong>{{ healthLabel }}</strong>
+            <p>{{ healthMessage }}</p>
           </div>
-          <div class="sp-list">
-            <div class="sp-list-item">
-              <div><strong>默认供应商</strong><small>{{ defaultProvider ? `${defaultProvider.name} · ${defaultProvider.code}` : '尚未配置' }}</small></div>
-              <span class="sp-status" :class="defaultProvider ? 'good' : 'warn'">{{ defaultProvider ? '已设置' : '缺失' }}</span>
+
+          <section v-if="priorityTodos.length" class="sp-health-section" data-test="supplier-health-todos">
+            <div class="sp-health-section-head">
+              <span>优先待办</span>
+              <small>最多展示 3 项，点击可联动筛选</small>
             </div>
-            <div class="sp-list-item">
-              <div><strong>凭据覆盖</strong><small>{{ credentialCoverage }}</small></div>
-              <span class="sp-status" :class="credentialMissingCount ? 'warn' : 'good'">{{ credentialMissingCount ? '需补充' : '完整' }}</span>
+            <div class="sp-health-todo-list">
+              <button
+                v-for="todo in priorityTodos"
+                :key="todo.key"
+                class="sp-health-todo"
+                :class="todo.tone"
+                type="button"
+                :data-test="`supplier-health-todo-${todo.key}`"
+                @click="applyHealthTodo(todo)"
+              >
+                <div class="sp-health-todo-main">
+                  <strong>{{ todo.title }}</strong>
+                  <small>{{ todo.detail }}</small>
+                </div>
+                <span class="sp-health-todo-action">处理</span>
+              </button>
             </div>
-            <div class="sp-list-item">
-              <div><strong>倍率风险</strong><small>当前累计 {{ summary.rate_risk_count }} 个风险项</small></div>
-              <span class="sp-status" :class="summary.rate_risk_count ? 'warn' : 'good'">{{ summary.rate_risk_count ? '关注' : '正常' }}</span>
+          </section>
+
+          <section class="sp-health-section" data-test="supplier-health-completeness">
+            <div class="sp-health-section-head">
+              <span>配置完整性</span>
+              <small>基础配置与调度就绪度</small>
             </div>
-          </div>
+            <div class="sp-list sp-health-completeness-list">
+              <div class="sp-list-item">
+                <div>
+                  <strong>默认供应商</strong>
+                  <small>{{ defaultProvider ? `${defaultProvider.name} · ${defaultProvider.code}` : '尚未配置' }}</small>
+                </div>
+                <span class="sp-status" :class="defaultProvider ? 'good' : 'warn'">{{ defaultProvider ? '已设置' : '缺失' }}</span>
+              </div>
+              <div class="sp-list-item">
+                <div>
+                  <strong>凭据覆盖</strong>
+                  <small>{{ credentialCoverage }}</small>
+                </div>
+                <span class="sp-status" :class="credentialMissingCount ? 'warn' : 'good'">{{ credentialMissingCount ? '需补充' : '完整' }}</span>
+              </div>
+              <div class="sp-list-item">
+                <div>
+                  <strong>倍率风险</strong>
+                  <small>当前累计 {{ summary.rate_risk_count }} 个风险项</small>
+                </div>
+                <span class="sp-status" :class="summary.rate_risk_count ? 'warn' : 'good'">{{ summary.rate_risk_count ? '关注' : '正常' }}</span>
+              </div>
+              <div class="sp-list-item">
+                <div>
+                  <strong>零可调度</strong>
+                  <small>启用中但无可调度账号 {{ zeroSchedulableCount }} 个</small>
+                </div>
+                <span class="sp-status" :class="zeroSchedulableCount ? 'warn' : 'good'">{{ zeroSchedulableCount ? '关注' : '正常' }}</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="sp-health-section sp-health-chart-section" data-test="supplier-cost-trend">
+            <div class="sp-health-section-head">
+              <span>成本对比</span>
+              <small>近 {{ costTrendDays }} 天 · 上游成本 vs 本地成本</small>
+            </div>
+            <div class="sp-health-chart-meta">
+              <div class="sp-health-chart-legend">
+                <span class="sp-health-legend-item upstream"><i></i>上游成本</span>
+                <span class="sp-health-legend-item local"><i></i>本地成本</span>
+              </div>
+              <div class="sp-health-chart-totals">
+                <span>上游合计 <b>{{ currency(costTrendTotals.upstream) }}</b></span>
+                <span>本地合计 <b>{{ currency(costTrendTotals.local) }}</b></span>
+              </div>
+            </div>
+            <div class="sp-health-chart-canvas">
+              <Line
+                v-if="costTrendChartData"
+                :data="costTrendChartData"
+                :options="costTrendChartOptions"
+              />
+              <div v-else-if="costTrendLoading" class="sp-health-chart-empty">成本曲线加载中…</div>
+              <div v-else class="sp-health-chart-empty">暂无按天成本数据，可点右上角「重新获取」</div>
+            </div>
+          </section>
         </div>
       </aside>
     </section>
@@ -514,6 +596,19 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Filler,
+  Tooltip,
+  Legend,
+  type ChartOptions,
+  type TooltipItem,
+} from 'chart.js'
+import { Line } from 'vue-chartjs'
 import { SupplierDrawer, SupplierModuleLayout } from '@/components/admin/supplier-management'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import DataTable from '@/components/common/DataTable.vue'
@@ -521,14 +616,26 @@ import Icon from '@/components/icons/Icon.vue'
 import Input from '@/components/common/Input.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
-import supplierProvidersAPI, { type SupplierProvider, type SupplierProviderSummary, type SupplierProviderUpsertPayload } from '@/api/admin/supplierProviders'
+import supplierProvidersAPI, { type SupplierProvider, type SupplierProviderSummary, type SupplierProviderUpsertPayload, type SupplierProviderCostTrendPoint } from '@/api/admin/supplierProviders'
 import supplierProviderTypesAPI, { type SupplierProviderType, type SupplierProviderTypeUpsertPayload } from '@/api/admin/supplierProviderTypes'
 import { syncProvider, testProviderEndpoint, type SupplierProviderEndpointTestResult, type SupplierSyncScope } from '@/api/admin/supplierProviderData'
 import { useAppStore } from '@/stores/app'
 import type { Column } from '@/components/common/types'
 
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Filler, Tooltip, Legend)
+
 type Tone = 'good' | 'warn' | 'bad' | 'info' | ''
 type ProviderQuickFilter = 'all' | 'enabled' | 'disabled' | 'default'
+
+type HealthTodo = {
+  key: string
+  title: string
+  detail: string
+  tone: Tone
+  filter?: string
+  quickFilter?: ProviderQuickFilter
+  selectId?: number
+}
 
 const providerQuickFilters: Array<{ key: ProviderQuickFilter; label: string }> = [
   { key: 'all', label: '全部' },
@@ -586,6 +693,9 @@ const emptyTypeForm = (): SupplierProviderTypeUpsertPayload => ({
 const providers = ref<SupplierProvider[]>([])
 const providerTypes = ref<SupplierProviderType[]>([])
 const summary = ref<SupplierProviderSummary>(emptySummary())
+const costTrendDays = 14
+const costTrendLoading = ref(false)
+const costTrendPoints = ref<SupplierProviderCostTrendPoint[]>([])
 const search = ref('')
 const providerQuickFilter = ref<ProviderQuickFilter>('all')
 const filter = ref('all')
@@ -658,13 +768,184 @@ const sortedProviders = computed(() => {
 const defaultProvider = computed(() => providers.value.find(provider => provider.is_default) || null)
 const credentialMissingCount = computed(() => providers.value.filter(provider => !provider.credential_configured).length)
 const credentialCoverage = computed(() => `${providers.value.length - credentialMissingCount.value} / ${providers.value.length} 个供应商已配置凭据`)
-const healthTone = computed<Tone>(() => summary.value.high_risk_count || summary.value.sync_failure_count ? 'warn' : 'good')
-const healthLabel = computed(() => healthTone.value === 'good' ? '稳定' : '需关注')
+const zeroSchedulableCount = computed(() => providers.value.filter(provider => provider.enabled && Number(provider.schedulable_account_count || 0) <= 0).length)
+
+const healthTone = computed<Tone>(() => {
+  if (!providers.value.length) return 'warn'
+  if (summary.value.high_risk_count > 0) return 'bad'
+  if (
+    summary.value.sync_failure_count > 0
+    || summary.value.low_balance_count > 0
+    || !defaultProvider.value
+    || credentialMissingCount.value
+    || summary.value.rate_risk_count
+    || zeroSchedulableCount.value
+  ) return 'warn'
+  return 'good'
+})
+
+const healthLabel = computed(() => {
+  if (healthTone.value === 'bad') return '告警'
+  if (healthTone.value === 'warn') return '需关注'
+  return '稳定'
+})
+
 const healthMessage = computed(() => {
   if (!providers.value.length) return '还没有供应商数据，请先新增供应商配置。'
   if (summary.value.high_risk_count) return `当前有 ${summary.value.high_risk_count} 个高风险供应商，应优先检查凭据、余额和同步结果。`
   if (summary.value.sync_failure_count) return `当前有 ${summary.value.sync_failure_count} 个供应商同步异常，需要查看同步日志。`
-  return '当前供应商组合没有高风险或同步失败记录。'
+  if (summary.value.low_balance_count) return `有 ${summary.value.low_balance_count} 个供应商预计可用不足 3 天，建议及时补充余额。`
+  if (!defaultProvider.value) return '尚未设置默认供应商，新建账号时缺少兜底来源。'
+  if (credentialMissingCount.value) return `还有 ${credentialMissingCount.value} 个供应商未配置登录凭据，同步与测试会受影响。`
+  if (zeroSchedulableCount.value) return `有 ${zeroSchedulableCount.value} 个已启用供应商当前 0 可调度账号，实际无法承接流量。`
+  if (summary.value.rate_risk_count) return `累计 ${summary.value.rate_risk_count} 个倍率风险项，建议核对账号倍率配置。`
+  return '供应商组合运行平稳，配置完整，暂无高优先级风险。'
+})
+
+const priorityTodos = computed<HealthTodo[]>(() => {
+  const todos: HealthTodo[] = []
+  if (summary.value.high_risk_count > 0) {
+    todos.push({
+      key: 'high-risk',
+      title: '高风险供应商',
+      detail: `当前有 ${summary.value.high_risk_count} 个高风险供应商，应优先检查凭据、余额和同步结果。`,
+      tone: 'bad',
+      filter: 'risk',
+    })
+  }
+  if (summary.value.sync_failure_count > 0) {
+    todos.push({
+      key: 'sync-failed',
+      title: '同步异常',
+      detail: `当前有 ${summary.value.sync_failure_count} 个供应商同步异常，需要查看同步日志。`,
+      tone: 'warn',
+      filter: 'sync',
+    })
+  }
+  if (summary.value.low_balance_count > 0) {
+    todos.push({
+      key: 'low-balance',
+      title: '余额不足 3 天',
+      detail: `有 ${summary.value.low_balance_count} 个供应商预计可用不足 3 天，建议及时补充余额。`,
+      tone: 'warn',
+      filter: 'balance',
+    })
+  }
+  if (!defaultProvider.value) {
+    todos.push({
+      key: 'no-default',
+      title: '缺少默认供应商',
+      detail: '尚未设置默认供应商，新建账号时缺少兜底来源。',
+      tone: 'warn',
+      quickFilter: 'default',
+    })
+  }
+  if (credentialMissingCount.value > 0) {
+    todos.push({
+      key: 'missing-credential',
+      title: '凭据未配置',
+      detail: `还有 ${credentialMissingCount.value} 个供应商未配置登录凭据。`,
+      tone: 'warn',
+    })
+  }
+  if (zeroSchedulableCount.value > 0) {
+    todos.push({
+      key: 'zero-schedulable',
+      title: '零可调度账号',
+      detail: `有 ${zeroSchedulableCount.value} 个已启用供应商当前 0 可调度账号。`,
+      tone: 'warn',
+      quickFilter: 'enabled',
+    })
+  }
+  if (summary.value.rate_risk_count > 0) {
+    todos.push({
+      key: 'rate-risk',
+      title: '倍率风险',
+      detail: `累计 ${summary.value.rate_risk_count} 个倍率风险项，建议核对账号倍率配置。`,
+      tone: 'warn',
+      filter: 'rate',
+    })
+  }
+  return todos.slice(0, 3)
+})
+
+const costTrendTotals = computed(() =>
+  costTrendPoints.value.reduce((acc, point) => {
+    acc.upstream += Number(point.upstream_cost || 0)
+    acc.local += Number(point.local_cost || 0)
+    return acc
+  }, { upstream: 0, local: 0 }),
+)
+
+const costTrendChartData = computed(() => {
+  if (!costTrendPoints.value.length) return null
+  const hasValue = costTrendPoints.value.some(point => Number(point.upstream_cost || 0) > 0 || Number(point.local_cost || 0) > 0)
+  if (!hasValue) return null
+  return {
+    labels: costTrendPoints.value.map(point => formatCostTrendLabel(point.date)),
+    datasets: [
+      {
+        label: '上游成本',
+        data: costTrendPoints.value.map(point => Number(point.upstream_cost || 0)),
+        borderColor: '#3b82f6',
+        backgroundColor: 'rgba(59, 130, 246, 0.12)',
+        fill: true,
+        tension: 0.35,
+      },
+      {
+        label: '本地成本',
+        data: costTrendPoints.value.map(point => Number(point.local_cost || 0)),
+        borderColor: '#d97706',
+        backgroundColor: 'rgba(217, 119, 6, 0.10)',
+        fill: true,
+        tension: 0.35,
+      },
+    ],
+  }
+})
+
+const costTrendChartOptions = computed<ChartOptions<'line'>>(() => {
+  const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: 'index' as const, intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: isDark ? '#1f2937' : '#ffffff',
+        titleColor: isDark ? '#f9fafb' : '#111827',
+        bodyColor: isDark ? '#d1d5db' : '#334155',
+        borderColor: isDark ? '#374151' : '#e2e8f0',
+        borderWidth: 1,
+        callbacks: {
+          label(context: TooltipItem<'line'>) {
+            const label = context.dataset.label || ''
+            const value = Number(context.parsed.y ?? 0)
+            return `${label}: ${currency(value)}`
+          },
+        },
+      },
+    },
+    scales: {
+      x: {
+        ticks: { color: isDark ? '#9ca3af' : '#64748b' },
+        grid: { display: false },
+      },
+      y: {
+        beginAtZero: true,
+        ticks: {
+          color: isDark ? '#9ca3af' : '#64748b',
+          callback(value: string | number) {
+            const num = Number(value)
+            if (Math.abs(num) >= 1000) return `¥${(num / 1000).toFixed(1)}k`
+            return `¥${num}`
+          },
+        },
+        grid: { display: false },
+      },
+    },
+  }
 })
 
 watch(search, () => {
@@ -674,7 +955,7 @@ watch(search, () => {
 
 onMounted(async () => {
   await loadProviderTypes()
-  await loadProviders()
+  await Promise.all([loadProviders(), loadCostTrends()])
 })
 
 async function loadProviderTypes() {
@@ -700,6 +981,40 @@ async function loadProviders() {
   } finally {
     loading.value = false
   }
+}
+
+async function loadCostTrends() {
+  costTrendLoading.value = true
+  try {
+    const result = await supplierProvidersAPI.listCostTrends(costTrendDays)
+    costTrendPoints.value = Array.isArray(result?.points) ? result.points : []
+  } catch {
+    costTrendPoints.value = []
+  } finally {
+    costTrendLoading.value = false
+  }
+}
+
+async function refreshCostTrends() {
+  await loadCostTrends()
+}
+
+async function refreshProvidersView() {
+  await Promise.all([loadProviders(), loadCostTrends()])
+}
+
+function applyHealthTodo(todo: HealthTodo) {
+  if (todo.filter) filter.value = todo.filter
+  if (todo.quickFilter) providerQuickFilter.value = todo.quickFilter
+  if (todo.selectId) {
+    selectedProvider.value = providers.value.find(provider => provider.id === todo.selectId) || null
+  }
+}
+
+function formatCostTrendLabel(date: string) {
+  const parts = String(date || '').split('-')
+  if (parts.length >= 3) return `${Number(parts[1])}/${Number(parts[2])}`
+  return date
 }
 
 function openCreate() {
@@ -2050,4 +2365,217 @@ function errorMessage(err: unknown, fallback: string): string {
     word-break: break-all;
   }
 }
+
+.sp-health-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sp-health-head-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.sp-health-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.sp-health-summary {
+  padding: 0.75rem 0.875rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--sp-panel) 92%, var(--sp-cyan));
+}
+
+.sp-health-summary.good {
+  border-color: color-mix(in srgb, var(--sp-green) 28%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-green) 8%, var(--sp-panel));
+}
+
+.sp-health-summary.warn {
+  border-color: color-mix(in srgb, var(--sp-amber) 28%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-amber) 8%, var(--sp-panel));
+}
+
+.sp-health-summary.bad {
+  border-color: color-mix(in srgb, var(--sp-red) 28%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-red) 8%, var(--sp-panel));
+}
+
+.sp-health-summary strong {
+  display: block;
+  color: var(--sp-text);
+  font-size: 0.9375rem;
+  font-weight: 800;
+}
+
+.sp-health-summary p {
+  margin: 0.35rem 0 0;
+  color: var(--sp-muted);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.sp-health-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+.sp-health-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.sp-health-section-head span {
+  color: var(--sp-text);
+  font-size: 0.8125rem;
+  font-weight: 800;
+}
+
+.sp-health-section-head small {
+  color: var(--sp-muted);
+  font-size: 0.72rem;
+}
+
+.sp-health-todo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sp-health-todo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.75rem;
+  background: var(--sp-panel);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.sp-health-todo:hover {
+  border-color: color-mix(in srgb, var(--sp-cyan) 35%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-cyan) 6%, var(--sp-panel));
+}
+
+.sp-health-todo.bad {
+  border-color: color-mix(in srgb, var(--sp-red) 28%, var(--sp-line));
+}
+
+.sp-health-todo.warn {
+  border-color: color-mix(in srgb, var(--sp-amber) 28%, var(--sp-line));
+}
+
+.sp-health-todo-main {
+  min-width: 0;
+}
+
+.sp-health-todo-main strong {
+  display: block;
+  color: var(--sp-text);
+  font-size: 0.8125rem;
+  font-weight: 800;
+}
+
+.sp-health-todo-main small {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--sp-muted);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.sp-health-todo-action {
+  flex-shrink: 0;
+  color: var(--sp-cyan);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.sp-health-completeness-list {
+  gap: 0.5rem;
+}
+
+.sp-health-chart-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.sp-health-chart-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.sp-health-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--sp-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.sp-health-legend-item i {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+}
+
+.sp-health-legend-item.upstream i {
+  background: #3b82f6;
+}
+
+.sp-health-legend-item.local i {
+  background: #d97706;
+}
+
+.sp-health-chart-totals {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--sp-muted);
+  font-size: 0.72rem;
+}
+
+.sp-health-chart-totals b {
+  color: var(--sp-text);
+  font-weight: 800;
+}
+
+.sp-health-chart-canvas {
+  height: 180px;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.75rem;
+  padding: 0.5rem 0.35rem 0.25rem;
+  background: color-mix(in srgb, var(--sp-panel) 94%, #94a3b8);
+}
+
+.sp-health-chart-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--sp-muted);
+  font-size: 0.8125rem;
+  text-align: center;
+  padding: 0.75rem;
+}
+
 </style>

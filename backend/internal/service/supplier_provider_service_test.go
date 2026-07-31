@@ -3,13 +3,15 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
 type supplierProviderRepoStub struct {
-	items []*SupplierProvider
-	next  int64
+	items      []*SupplierProvider
+	next       int64
+	costTrends []SupplierProviderCostTrendPoint
 }
 
 type supplierProviderTypeRepoStub struct {
@@ -36,6 +38,13 @@ func (r *supplierProviderRepoStub) List(_ context.Context, params SupplierProvid
 		out = append(out, &clone)
 	}
 	return out, int64(len(matched)), nil
+}
+
+func (r *supplierProviderRepoStub) ListCostTrends(_ context.Context, start, end time.Time) ([]SupplierProviderCostTrendPoint, error) {
+	if r.costTrends != nil {
+		return r.costTrends, nil
+	}
+	return []SupplierProviderCostTrendPoint{}, nil
 }
 
 func (r *supplierProviderRepoStub) Summary(_ context.Context, params SupplierProviderListParams) (SupplierProviderSummary, error) {
@@ -433,4 +442,22 @@ func TestSupplierProviderServiceUsesGroupsURLForAvailableGroups(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "/api/admin/groups", created.GroupsURL)
 	require.Equal(t, "/api/admin/groups", created.AvailableGroupsURL)
+}
+
+
+func TestSupplierProviderServiceListCostTrendsFillsMissingDays(t *testing.T) {
+	repo := &supplierProviderRepoStub{costTrends: []SupplierProviderCostTrendPoint{
+		{Date: "2026-07-28", UpstreamCost: 12.5, LocalCost: 10},
+		{Date: "2026-07-30", UpstreamCost: 8, LocalCost: 9.5},
+	}}
+	svc := NewSupplierProviderService(repo, supplierEncryptorStub{})
+
+	// 依赖运行时 Today，只校验返回长度与日期非空。
+	result, err := svc.ListCostTrends(context.Background(), 3)
+	require.NoError(t, err)
+	require.Equal(t, 3, result.Days)
+	require.Len(t, result.Points, 3)
+	for _, point := range result.Points {
+		require.NotEmpty(t, point.Date)
+	}
 }

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -33,6 +34,10 @@ func (r *supplierProviderHandlerRepoStub) List(_ context.Context, params service
 		items = append(items, &clone)
 	}
 	return items, int64(len(items)), nil
+}
+
+func (r *supplierProviderHandlerRepoStub) ListCostTrends(_ context.Context, start, end time.Time) ([]service.SupplierProviderCostTrendPoint, error) {
+	return []service.SupplierProviderCostTrendPoint{}, nil
 }
 
 func (r *supplierProviderHandlerRepoStub) Summary(_ context.Context, params service.SupplierProviderListParams) (service.SupplierProviderSummary, error) {

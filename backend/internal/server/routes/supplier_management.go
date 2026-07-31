@@ -20,6 +20,7 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 		providers := supplier.Group("/providers")
 		{
 			providers.GET("", h.Admin.SupplierProvider.List)
+			providers.GET("/cost-trends", h.Admin.SupplierProvider.ListCostTrends)
 			providers.GET("/:id", h.Admin.SupplierProvider.Get)
 			providers.POST("", h.Admin.SupplierProvider.Create)
 			providers.PUT("/:id", h.Admin.SupplierProvider.Update)

@@ -8,15 +8,25 @@ import SupplierProvidersView from './SupplierProvidersView.vue'
 
 const providerViewMocks = vi.hoisted(() => ({
   listProviders: vi.fn(),
+  listCostTrends: vi.fn(),
   listProviderTypes: vi.fn(),
   updateProvider: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
 }))
 
+vi.mock('vue-chartjs', () => ({
+  Line: {
+    name: 'Line',
+    props: ['data', 'options'],
+    template: '<div class="supplier-cost-trend-chart" data-test="supplier-cost-trend-chart" />',
+  },
+}))
+
 vi.mock('@/api/admin/supplierProviders', () => ({
   default: {
     list: providerViewMocks.listProviders,
+    listCostTrends: providerViewMocks.listCostTrends,
     update: providerViewMocks.updateProvider,
   },
 }))
@@ -99,6 +109,13 @@ describe('SupplierProvidersView payload normalization', () => {
     providerRows = createProviderRows()
     providerViewMocks.listProviderTypes.mockResolvedValue([])
     providerViewMocks.updateProvider.mockResolvedValue({})
+    providerViewMocks.listCostTrends.mockResolvedValue({
+      days: 14,
+      points: [
+        { date: '2026-07-16', upstream_cost: 12, local_cost: 10 },
+        { date: '2026-07-17', upstream_cost: 15, local_cost: 14 },
+      ],
+    })
     providerViewMocks.listProviders.mockResolvedValue({
       items: providerRows,
       summary: {
@@ -287,6 +304,55 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(supplierProvidersSource).toContain("const providerSortKey = ref('')")
     expect(supplierProvidersSource).toContain("const providerSortOrder = ref<'asc' | 'desc'>('asc')")
     expect(supplierProvidersSource).not.toContain("const sorts = ['风险优先', '成本效率', '最近同步']")
+  })
+
+  it('renders redesigned supplier health panel with cost trend chart', async () => {
+    const wrapper = await mountSupplierProviders()
+
+    expect(providerViewMocks.listCostTrends).toHaveBeenCalledWith(14)
+    expect(wrapper.get('[data-test="supplier-health-panel"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="supplier-health-tone"]').text()).toContain('稳定')
+    expect(wrapper.get('[data-test="supplier-cost-trend"]').text()).toContain('成本对比')
+    expect(wrapper.get('[data-test="supplier-cost-trend"]').text()).toContain('上游成本')
+    expect(wrapper.get('[data-test="supplier-cost-trend"]').text()).toContain('本地成本')
+    expect(supplierProvidersSource).toContain('priorityTodos')
+    expect(supplierProvidersSource).toContain('costTrendChartData')
+    expect(supplierProvidersSource).not.toContain('class="sp-stat-list"')
+  })
+
+  it('shows priority todos and filters high-risk providers when a health todo is clicked', async () => {
+    providerViewMocks.listProviders.mockResolvedValueOnce({
+      items: [
+        {
+          ...createProviderRow(1, 'Alpha', 30, 100, 1),
+          risk_level: 'high',
+          sync_status: 'failed',
+        },
+        createProviderRow(2, 'Beta', 10, 20, 2),
+        { ...createProviderRow(3, 'Gamma', 20, 50, 3), is_default: true },
+      ],
+      summary: {
+        total_count: 3,
+        enabled_count: 3,
+        high_risk_count: 1,
+        low_balance_count: 0,
+        sync_failure_count: 1,
+        rate_risk_count: 0,
+      },
+      total: 3,
+      page: 1,
+      page_size: 100,
+    })
+
+    const wrapper = await mountSupplierProviders()
+    expect(wrapper.get('[data-test="supplier-health-tone"]').text()).toContain('告警')
+    expect(wrapper.get('[data-test="supplier-health-todo-high-risk"]').exists()).toBe(true)
+
+    await wrapper.get('[data-test="supplier-health-todo-high-risk"]').trigger('click')
+    await flushPromises()
+
+    const rowIds = wrapper.findAll('tbody tr[data-row-id]').map(row => row.attributes('data-row-id'))
+    expect(rowIds).toEqual(['1'])
   })
 
   it('uses dedicated cost and balance colors with a strict ten-yuan warning threshold', () => {
