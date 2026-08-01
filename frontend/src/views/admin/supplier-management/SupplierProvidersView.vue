@@ -297,7 +297,7 @@
               <small>{{ costTrendRangeLabel }} · {{ costTrendScopeLabel }} · 上游 vs 本地</small>
             </div>
 
-            <div class="            <div class="sp-health-chart-controls" data-test="supplier-cost-controls">
+            <div class="sp-health-chart-controls" data-test="supplier-cost-controls">
               <div class="sp-health-date-range" data-test="supplier-cost-date-range">
                 <DateRangePicker
                   v-model:start-date="costTrendStartDate"
@@ -310,11 +310,11 @@
                   v-model="costTrendProviderId"
                   class="w-full"
                   :options="costTrendProviderOptions"
-                  aria-label="???????"
+                  aria-label="成本对比供应商"
                   data-test="supplier-cost-provider"
                   @update:model-value="onCostTrendProviderChange"
                 />
-                <span class="text-xs text-gray-500 whitespace-nowrap">?????</span>
+                <span class="text-xs text-gray-500 whitespace-nowrap">偏差阈值</span>
                 <input
                   type="range"
                   min="0"
@@ -324,17 +324,6 @@
                   class="w-24 accent-blue-500 cursor-pointer"
                 />
                 <span class="text-xs font-mono w-12 text-blue-600">{{ (deviationThreshold * 100).toFixed(0) }}%</span>
-              </div>
-            </div>/div>
-              <div class="sp-health-provider-filter w-full sm:w-44">
-                <Select
-                  v-model="costTrendProviderId"
-                  class="w-full"
-                  :options="costTrendProviderOptions"
-                  aria-label="成本对比供应�?
-                  data-test="supplier-cost-provider"
-                  @update:model-value="onCostTrendProviderChange"
-                />
               </div>
             </div>
 
