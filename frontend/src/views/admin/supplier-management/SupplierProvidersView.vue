@@ -41,7 +41,61 @@
           <button class="sp-button primary" type="button" @click="openCreate">新增供应商</button>
         </div>
       </div>
-    </section>
+    
+          <section class="sp-health-section" data-test="supplier-cost-breakdown">
+            <div class="sp-health-section-head">
+              <span>????????</span>
+              <small>??????</small>
+            </div>
+            <div class="sp-list">
+              <div v-for="item in costBreakdown" :key="item.id" class="sp-list-item">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-3">
+                    <div class="w-3 h-3 rounded-full" 
+                         :style="{ backgroundColor: getProviderColor(item.provider_type) }"></div>
+                    <span class="font-medium">{{ item.name }}</span>
+                  </div>
+                  <div class="text-right">
+                    <div class="font-mono text-sm">{{ currency(item.upstreamCost) }}</div>
+                    <div class="text-xs text-gray-500">{{ currency(item.localCost) }}</div>
+                    <div class="text-xs text-gray-400">{{ (item.ratio * 100).toFixed(0) }}%</div>
+                  </div>
+                </div>
+                <div class="h-1.5 bg-gray-100 rounded mt-2 overflow-hidden">
+                  <div class="h-full bg-blue-500 rounded" 
+                       :style="{ width: (item.ratio * 100) + '%' }"></div>
+                </div>
+              </div>
+            </div>
+          
+          <section class="sp-health-section" data-test="supplier-cost-breakdown">
+            <div class="sp-health-section-head">
+              <span>????????</span>
+              <small>??????</small>
+            </div>
+            <div class="sp-list">
+              <div v-for="item in costBreakdown" :key="item.id" class="sp-list-item">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-3">
+                    <div class="w-3 h-3 rounded-full" 
+                         :style="{ backgroundColor: getProviderColor(item.provider_type) }"></div>
+                    <span class="font-medium">{{ item.name }}</span>
+                  </div>
+                  <div class="text-right">
+                    <div class="font-mono text-sm">{{ currency(item.upstreamCost) }}</div>
+                    <div class="text-xs text-gray-500">{{ currency(item.localCost) }}</div>
+                    <div class="text-xs text-gray-400">{{ (item.ratio * 100).toFixed(0) }}%</div>
+                  </div>
+                </div>
+                <div class="h-1.5 bg-gray-100 rounded mt-2 overflow-hidden">
+                  <div class="h-full bg-blue-500 rounded" 
+                       :style="{ width: (item.ratio * 100) + '%' }"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+</section>
+</section>
     <div v-if="error" class="sp-alert sp-error-line">{{ error }}</div>
 
     <section class="sp-metric-grid">
@@ -300,7 +354,35 @@
                 :data="costTrendChartData"
                 :options="costTrendChartOptions"
               />
-              <div v-else-if="costTrendLoading" class="sp-health-chart-empty">成本曲线加载中…</div>
+              <div v-else-if="costTrendLoading" class="
+          <section class="sp-health-section" data-test="supplier-cost-breakdown">
+            <div class="sp-health-section-head">
+              <span>????????</span>
+              <small>??????</small>
+            </div>
+            <div class="sp-list">
+              <div v-for="provider in providers" :key="provider.id" class="sp-list-item">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-3">
+                    <div class="w-3 h-3 rounded-full" 
+                         :style="{ backgroundColor: getProviderColor(provider.provider_type) }">
+                    </div>
+                    <span class="font-medium">{{ provider.name }}</span>
+                  </div>
+                  <div class="text-right">
+                    <div class="font-mono text-sm">{{ currency(provider.upstreamCost) }}</div>
+                    <div class="text-xs text-gray-500">{{ provider.localCost ? currency(provider.localCost) : '0' }}</div>
+                    <div class="text-xs text-gray-400">{{ provider.ratio ? (provider.ratio * 100).toFixed(0) : '0' }}%</div>
+                  </div>
+                </div>
+                <div class="h-1.5 bg-gray-100 rounded mt-2 overflow-hidden">
+                  <div class="h-full bg-blue-500 rounded" 
+                       :style="{ width: provider.ratio ? (provider.ratio * 100) + '%' : '0%' }"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+sp-health-chart-empty">成本曲线加载中…</div>
               <div v-else class="sp-health-chart-empty">暂无按天成本数据，可调整时间范围或供应商后点「重新获取」向上游回补</div>
             </div>
           </section>
