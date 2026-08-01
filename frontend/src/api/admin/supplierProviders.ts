@@ -85,6 +85,8 @@ export interface SupplierProviderCostTrendPoint {
   date: string
   upstream_cost: number
   local_cost: number
+  deviation?: number   // upstream - local
+  deviationPercent?: number
 }
 
 export interface SupplierProviderCostTrendResult {

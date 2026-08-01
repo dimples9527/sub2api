@@ -243,7 +243,7 @@
               <small>{{ costTrendRangeLabel }} · {{ costTrendScopeLabel }} · 上游 vs 本地</small>
             </div>
 
-            <div class="sp-health-chart-controls" data-test="supplier-cost-controls">
+            <div class="            <div class="sp-health-chart-controls" data-test="supplier-cost-controls">
               <div class="sp-health-date-range" data-test="supplier-cost-date-range">
                 <DateRangePicker
                   v-model:start-date="costTrendStartDate"
@@ -251,6 +251,27 @@
                   @change="onCostTrendDateRangeChange"
                 />
               </div>
+              <div class="sp-health-provider-filter w-full sm:w-44 flex items-center gap-2">
+                <Select
+                  v-model="costTrendProviderId"
+                  class="w-full"
+                  :options="costTrendProviderOptions"
+                  aria-label="???????"
+                  data-test="supplier-cost-provider"
+                  @update:model-value="onCostTrendProviderChange"
+                />
+                <span class="text-xs text-gray-500 whitespace-nowrap">?????</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="0.3"
+                  step="0.01"
+                  v-model="deviationThreshold"
+                  class="w-24 accent-blue-500 cursor-pointer"
+                />
+                <span class="text-xs font-mono w-12 text-blue-600">{{ (deviationThreshold * 100).toFixed(0) }}%</span>
+              </div>
+            </div>/div>
               <div class="sp-health-provider-filter w-full sm:w-44">
                 <Select
                   v-model="costTrendProviderId"
@@ -740,6 +761,7 @@ const costTrendEndDate = ref(costTrendDefaultRange.end)
 const costTrendProviderId = ref<number | ''>('')
 const costTrendLoading = ref(false)
 const costTrendPoints = ref<SupplierProviderCostTrendPoint[]>([])
+const deviationThreshold = ref(0.15) // 15%
 const search = ref('')
 const providerQuickFilter = ref<ProviderQuickFilter>('all')
 const filter = ref('all')
