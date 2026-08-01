@@ -38,6 +38,9 @@ export interface SupplierProvider {
   last_sync_at?: string
   created_at: string
   updated_at: string
+  upstreamCost?: number
+  localCost?: number
+  ratio?: number
 }
 
 export interface SupplierProviderSummary {
