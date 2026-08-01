@@ -3,11 +3,11 @@
     <section class="sp-provider-filter-card" aria-label="供应商筛选与操作">
       <header class="sp-filter-card-head">
         <div>
-          <span class="sp-filter-card-kicker">筛选条�?/span>
+          <span class="sp-filter-card-kicker">筛选条件</span>
           <h2>筛选供应商</h2>
-          <p>集中搜索供应商，并在同一区域完成数据刷新和维护操作�?/p>
+          <p>集中搜索供应商，并在同一区域完成数据刷新和维护操作。</p>
         </div>
-        <span class="sp-filter-card-count">{{ sortedProviders.length }} 个结�?/span>
+        <span class="sp-filter-card-count">{{ sortedProviders.length }} 个结果</span>
       </header>
 
       <div class="sp-provider-filter-body">
@@ -17,10 +17,10 @@
             role="group"
             aria-labelledby="supplier-provider-search-label"
           >
-            <span id="supplier-provider-search-label" class="sr-only">供应商搜�?/span>
-            <Input v-model="search" class="w-full" placeholder="搜索供应�? @enter="loadProviders" />
+            <span id="supplier-provider-search-label" class="sr-only">供应商搜索</span>
+            <Input v-model="search" class="w-full" placeholder="搜索供应商" @enter="loadProviders" />
           </div>
-          <div class="sp-provider-quick-filters" role="group" aria-label="供应商快捷筛�?>
+          <div class="sp-provider-quick-filters" role="group" aria-label="供应商快捷筛选">
             <button
               v-for="quickFilter in providerQuickFilters"
               :key="quickFilter.key"
@@ -37,65 +37,11 @@
         <div class="sp-provider-filter-actions">
           <button class="sp-button" type="button" :disabled="loading || costTrendLoading" @click="refreshProvidersView">刷新数据</button>
           <button class="sp-button" type="button" @click="openTypeManager">类型维护</button>
-          <button class="sp-button" type="button" @click="openCreateProviderType">新增供应商类�?/button>
-          <button class="sp-button primary" type="button" @click="openCreate">新增供应�?/button>
+          <button class="sp-button" type="button" @click="openCreateProviderType">新增供应商类型</button>
+          <button class="sp-button primary" type="button" @click="openCreate">新增供应商</button>
         </div>
       </div>
-    
-          <section class="sp-health-section" data-test="supplier-cost-breakdown">
-            <div class="sp-health-section-head">
-              <span>????????</span>
-              <small>??????</small>
-            </div>
-            <div class="sp-list">
-              <div v-for="item in costBreakdown" :key="item.id" class="sp-list-item">
-                <div class="flex items-center justify-between">
-                  <div class="flex items-center gap-3">
-                    <div class="w-3 h-3 rounded-full" 
-                         :style="{ backgroundColor: getProviderColor(item.provider_type) }"></div>
-                    <span class="font-medium">{{ item.name }}</span>
-                  </div>
-                  <div class="text-right">
-                    <div class="font-mono text-sm">{{ currency(item.upstreamCost) }}</div>
-                    <div class="text-xs text-gray-500">{{ currency(item.localCost) }}</div>
-                    <div class="text-xs text-gray-400">{{ (item.ratio * 100).toFixed(0) }}%</div>
-                  </div>
-                </div>
-                <div class="h-1.5 bg-gray-100 rounded mt-2 overflow-hidden">
-                  <div class="h-full bg-blue-500 rounded" 
-                       :style="{ width: (item.ratio * 100) + '%' }"></div>
-                </div>
-              </div>
-            </div>
-          
-          <section class="sp-health-section" data-test="supplier-cost-breakdown">
-            <div class="sp-health-section-head">
-              <span>????????</span>
-              <small>??????</small>
-            </div>
-            <div class="sp-list">
-              <div v-for="item in costBreakdown" :key="item.id" class="sp-list-item">
-                <div class="flex items-center justify-between">
-                  <div class="flex items-center gap-3">
-                    <div class="w-3 h-3 rounded-full" 
-                         :style="{ backgroundColor: getProviderColor(item.provider_type) }"></div>
-                    <span class="font-medium">{{ item.name }}</span>
-                  </div>
-                  <div class="text-right">
-                    <div class="font-mono text-sm">{{ currency(item.upstreamCost) }}</div>
-                    <div class="text-xs text-gray-500">{{ currency(item.localCost) }}</div>
-                    <div class="text-xs text-gray-400">{{ (item.ratio * 100).toFixed(0) }}%</div>
-                  </div>
-                </div>
-                <div class="h-1.5 bg-gray-100 rounded mt-2 overflow-hidden">
-                  <div class="h-full bg-blue-500 rounded" 
-                       :style="{ width: (item.ratio * 100) + '%' }"></div>
-                </div>
-              </div>
-            </div>
-          </section>
-</section>
-</section>
+    </section>
     <div v-if="error" class="sp-alert sp-error-line">{{ error }}</div>
 
     <section class="sp-metric-grid">
@@ -118,8 +64,8 @@
           <div class="sp-panel-title">
             <span class="sp-section-index">01</span>
             <div>
-              <h2>供应商运行列�?/h2>
-              <span>默认按真实业务风险排�?/span>
+              <h2>供应商运行列表</h2>
+              <span>默认按真实业务风险排序</span>
             </div>
           </div>
         </header>
@@ -156,7 +102,7 @@
               <Toggle
                 :model-value="provider.enabled"
                 :disabled="updatingProviderIDs.has(provider.id)"
-                :aria-label="`${provider.name}运行状态：${provider.enabled ? '已启�? : '已停�?}`"
+                :aria-label="`${provider.name}运行状态：${provider.enabled ? '已启用' : '已停用'}`"
                 :data-test="`supplier-provider-enabled-${provider.id}`"
                 @click.stop
                 @update:model-value="updateProviderEnabled(provider, $event)"
@@ -182,7 +128,7 @@
             <span class="sp-status" :class="rateTone(provider)">{{ rateRiskText(provider) }}</span>
           </template>
           <template #cell-credential_configured="{ row: provider }">
-            <span class="sp-status" :class="provider.credential_configured ? 'good' : 'warn'">{{ provider.credential_configured ? '已配�? : '未配�? }}</span>
+            <span class="sp-status" :class="provider.credential_configured ? 'good' : 'warn'">{{ provider.credential_configured ? '已配置' : '未配置' }}</span>
           </template>
           <template #cell-last_sync_at="{ row: provider }">
             {{ syncText(provider) }}
@@ -190,7 +136,7 @@
           <template #cell-actions="{ row: provider }">
             <div class="sp-inline" @click.stop>
               <button class="sp-button small" type="button" @click="openEdit(provider)">编辑</button>
-              <button class="sp-button small" type="button" :disabled="isSyncing(provider, 'all')" @click="syncProviderData(provider, 'all')">{{ isSyncing(provider, 'all') ? '同步�? : '同步全部' }}</button>
+              <button class="sp-button small" type="button" :disabled="isSyncing(provider, 'all')" @click="syncProviderData(provider, 'all')">{{ isSyncing(provider, 'all') ? '同步中' : '同步全部' }}</button>
               <button class="sp-button small" type="button" :disabled="provider.is_default" @click="makeDefault(provider)">默认</button>
               <button class="sp-button small danger" type="button" @click="removeProvider(provider)">删除</button>
             </div>
@@ -206,8 +152,8 @@
           <div class="sp-panel-title">
             <span class="sp-section-index">02</span>
             <div>
-              <h2>供应商组合健�?/h2>
-              <span>综合状�?· 优先待办 · 成本对比</span>
+              <h2>供应商组合健康</h2>
+              <span>综合状态 · 优先待办 · 成本对比</span>
             </div>
           </div>
           <div class="sp-health-head-right">
@@ -219,7 +165,7 @@
               title="按当前时间范围向上游回补成本并刷新曲线（NewAPI 支持历史，Sub2API 仅当天）"
               @click="refreshCostTrends"
             >
-              {{ costTrendLoading ? '回补中�? : '重新获取' }}
+              {{ costTrendLoading ? '回补中…' : '重新获取' }}
             </button>
             <span class="sp-status" :class="healthTone" data-test="supplier-health-tone">{{ healthLabel }}</span>
           </div>
@@ -233,7 +179,7 @@
           <section v-if="priorityTodos.length" class="sp-health-section" data-test="supplier-health-todos">
             <div class="sp-health-section-head">
               <span>优先待办</span>
-              <small>最多展�?3 项，点击可联动筛�?/small>
+              <small>最多展示 3 项，点击可联动筛选</small>
             </div>
             <div class="sp-health-todo-list">
               <button
@@ -256,16 +202,16 @@
 
           <section class="sp-health-section" data-test="supplier-health-completeness">
             <div class="sp-health-section-head">
-              <span>配置完整�?/span>
+              <span>配置完整性</span>
               <small>基础配置与调度就绪度</small>
             </div>
             <div class="sp-list sp-health-completeness-list">
               <div class="sp-list-item">
                 <div>
-                  <strong>默认供应�?/strong>
+                  <strong>默认供应商</strong>
                   <small>{{ defaultProvider ? `${defaultProvider.name} · ${defaultProvider.code}` : '尚未配置' }}</small>
                 </div>
-                <span class="sp-status" :class="defaultProvider ? 'good' : 'warn'">{{ defaultProvider ? '已设�? : '缺失' }}</span>
+                <span class="sp-status" :class="defaultProvider ? 'good' : 'warn'">{{ defaultProvider ? '已设置' : '缺失' }}</span>
               </div>
               <div class="sp-list-item">
                 <div>
@@ -284,7 +230,7 @@
               <div class="sp-list-item">
                 <div>
                   <strong>零可调度</strong>
-                  <small>启用中但无可调度账号 {{ zeroSchedulableCount }} �?/small>
+                  <small>启用中但无可调度账号 {{ zeroSchedulableCount }} 个</small>
                 </div>
                 <span class="sp-status" :class="zeroSchedulableCount ? 'warn' : 'good'">{{ zeroSchedulableCount ? '关注' : '正常' }}</span>
               </div>
@@ -343,36 +289,34 @@
                 :data="costTrendChartData"
                 :options="costTrendChartOptions"
               />
-              <div v-else-if="costTrendLoading" class="
-          <section class="sp-health-section" data-test="supplier-cost-breakdown">
-            <div class="sp-health-section-head">
-              <span>????????</span>
-              <small>??????</small>
-            </div>
-            <div class="sp-list">
-              <div v-for="provider in providers" :key="provider.id" class="sp-list-item">
-                <div class="flex items-center justify-between">
-                  <div class="flex items-center gap-3">
-                    <div class="w-3 h-3 rounded-full" 
-                         :style="{ backgroundColor: getProviderColor(provider.provider_type) }">
-                    </div>
-                    <span class="font-medium">{{ provider.name }}</span>
-                  </div>
-                  <div class="text-right">
-                    <div class="font-mono text-sm">{{ currency(provider.upstreamCost) }}</div>
-                    <div class="text-xs text-gray-500">{{ provider.localCost ? currency(provider.localCost) : '0' }}</div>
-                    <div class="text-xs text-gray-400">{{ provider.ratio ? (provider.ratio * 100).toFixed(0) : '0' }}%</div>
-                  </div>
-                </div>
-                <div class="h-1.5 bg-gray-100 rounded mt-2 overflow-hidden">
-                  <div class="h-full bg-blue-500 rounded" 
-                       :style="{ width: provider.ratio ? (provider.ratio * 100) + '%' : '0%' }"></div>
-                </div>
-              </div>
+              <div v-else-if="costTrendLoading" class="sp-health-chart-empty">成本曲线加载中…</div>
+              <div v-else class="sp-health-chart-empty">暂无按天成本数据，可调整时间范围或供应商后点「重新获取」向上游回补</div>
             </div>
           </section>
-sp-health-chart-empty">成本曲线加载中�?/div>
-              <div v-else class="sp-health-chart-empty">暂无按天成本数据，可调整时间范围或供应商后点「重新获取」向上游回补</div>
+
+          <section class="sp-health-section" data-test="supplier-cost-breakdown">
+            <div class="sp-health-section-head">
+              <span>按供应商拆分成本</span>
+              <small>上游 vs 本地 · 占比</small>
+            </div>
+            <div class="sp-health-breakdown-list">
+              <div v-for="item in costBreakdown" :key="item.id" class="sp-health-breakdown-item">
+                <div class="sp-health-breakdown-row">
+                  <div class="sp-health-breakdown-name">
+                    <span class="sp-health-breakdown-dot" :style="{ backgroundColor: getProviderColor(item.provider_type) }"></span>
+                    <span>{{ item.name }}</span>
+                  </div>
+                  <div class="sp-health-breakdown-values">
+                    <b>{{ currency(item.upstreamCost) }}</b>
+                    <span>{{ currency(item.localCost) }}</span>
+                    <em>{{ (item.ratio * 100).toFixed(0) }}%</em>
+                  </div>
+                </div>
+                <div class="sp-health-breakdown-bar">
+                  <div class="sp-health-breakdown-bar-fill" :style="{ width: (item.ratio * 100) + '%' }"></div>
+                </div>
+              </div>
+              <div v-if="!costBreakdown.length" class="sp-health-chart-empty">暂无供应商成本数据</div>
             </div>
           </section>
         </div>
@@ -380,8 +324,8 @@ sp-health-chart-empty">成本曲线加载中�?/div>
     </section>
 
     <div class="sp-footer-note">
-      <span>数据来源：新供应商管理接�?/span>
-      <span>编辑时密码留空会保留原凭�?/span>
+      <span>数据来源：新供应商管理接口</span>
+      <span>编辑时密码留空会保留原凭据</span>
     </div>
 
     <SupplierDrawer
@@ -391,16 +335,16 @@ sp-health-chart-empty">成本曲线加载中�?/div>
       @close="selectedProvider = null"
     >
       <template v-if="selectedProvider">
-        <div class="sp-alert">{{ selectedProvider.name }} 当前运行统计来自独立供应商数据表，后续同步任务写入后会自动更新�?/div>
+        <div class="sp-alert">{{ selectedProvider.name }} 当前运行统计来自独立供应商数据表，后续同步任务写入后会自动更新。</div>
         <div class="sp-detail-grid">
-          <div class="sp-detail-cell"><span>供应商编�?/span><b>{{ selectedProvider.code }}</b></div>
-          <div class="sp-detail-cell"><span>供应商类�?/span><b>{{ selectedProvider.provider_type }}</b></div>
-          <div class="sp-detail-cell"><span>有效 / 可调度账�?/span><b>{{ selectedProvider.valid_account_count }} / {{ selectedProvider.schedulable_account_count }}</b></div>
-          <div class="sp-detail-cell"><span>成功�?/span><b>{{ percent(selectedProvider.success_rate) }}</b></div>
+          <div class="sp-detail-cell"><span>供应商编码</span><b>{{ selectedProvider.code }}</b></div>
+          <div class="sp-detail-cell"><span>供应商类型</span><b>{{ selectedProvider.provider_type }}</b></div>
+          <div class="sp-detail-cell"><span>有效 / 可调度账号</span><b>{{ selectedProvider.valid_account_count }} / {{ selectedProvider.schedulable_account_count }}</b></div>
+          <div class="sp-detail-cell"><span>成功率</span><b>{{ percent(selectedProvider.success_rate) }}</b></div>
           <div class="sp-detail-cell"><span>今日成本</span><b>{{ currency(selectedProvider.today_cost) }}</b></div>
           <div class="sp-detail-cell"><span>当前余额</span><b>{{ currency(selectedProvider.current_balance) }}</b></div>
           <div class="sp-detail-cell"><span>预计可用</span><b :class="{ 'sp-up': isLowBalance(selectedProvider) }">{{ balanceText(selectedProvider) }}</b></div>
-          <div class="sp-detail-cell"><span>最近同�?/span><b>{{ syncText(selectedProvider) }}</b></div>
+          <div class="sp-detail-cell"><span>最近同步</span><b>{{ syncText(selectedProvider) }}</b></div>
         </div>
         <div class="sp-drawer-actions">
           <button class="sp-button primary" type="button" @click="openEdit(selectedProvider)">编辑配置</button>
@@ -408,49 +352,49 @@ sp-health-chart-empty">成本曲线加载中�?/div>
           <button class="sp-button" type="button" :disabled="isSyncing(selectedProvider, 'groups')" @click="syncProviderData(selectedProvider, 'groups')">同步分组</button>
           <button class="sp-button" type="button" :disabled="isSyncing(selectedProvider, 'balance')" @click="syncProviderData(selectedProvider, 'balance')">刷新余额</button>
           <button class="sp-button" type="button" :disabled="isSyncing(selectedProvider, 'cost')" @click="syncProviderData(selectedProvider, 'cost')">刷新成本</button>
-          <button class="sp-button" type="button" :disabled="isTesting(selectedProvider, 'accounts')" @click="testProviderEndpointData(selectedProvider, 'accounts')">{{ isTesting(selectedProvider, 'accounts') ? '测试�? : '测试 API Key' }}</button>
-          <button class="sp-button" type="button" :disabled="isTesting(selectedProvider, 'groups')" @click="testProviderEndpointData(selectedProvider, 'groups')">{{ isTesting(selectedProvider, 'groups') ? '测试�? : '测试分组' }}</button>
-          <button class="sp-button" type="button" :disabled="isTesting(selectedProvider, 'balance')" @click="testProviderEndpointData(selectedProvider, 'balance')">{{ isTesting(selectedProvider, 'balance') ? '测试�? : '测试余额' }}</button>
-          <button class="sp-button" type="button" :disabled="isTesting(selectedProvider, 'cost')" @click="testProviderEndpointData(selectedProvider, 'cost')">{{ isTesting(selectedProvider, 'cost') ? '测试�? : '测试成本' }}</button>
+          <button class="sp-button" type="button" :disabled="isTesting(selectedProvider, 'accounts')" @click="testProviderEndpointData(selectedProvider, 'accounts')">{{ isTesting(selectedProvider, 'accounts') ? '测试中' : '测试 API Key' }}</button>
+          <button class="sp-button" type="button" :disabled="isTesting(selectedProvider, 'groups')" @click="testProviderEndpointData(selectedProvider, 'groups')">{{ isTesting(selectedProvider, 'groups') ? '测试中' : '测试分组' }}</button>
+          <button class="sp-button" type="button" :disabled="isTesting(selectedProvider, 'balance')" @click="testProviderEndpointData(selectedProvider, 'balance')">{{ isTesting(selectedProvider, 'balance') ? '测试中' : '测试余额' }}</button>
+          <button class="sp-button" type="button" :disabled="isTesting(selectedProvider, 'cost')" @click="testProviderEndpointData(selectedProvider, 'cost')">{{ isTesting(selectedProvider, 'cost') ? '测试中' : '测试成本' }}</button>
           <button class="sp-button" type="button" :disabled="selectedProvider.is_default" @click="makeDefault(selectedProvider)">设为默认</button>
         </div>
         <div class="sp-timeline">
           <h4>接口配置</h4>
           <div class="sp-event"><b>基础地址</b><p>{{ selectedProvider.base_url }}</p></div>
-          <div class="sp-event"><b>登录接口</b><p>{{ selectedProvider.login_url || '未配�? }}</p></div>
-          <div class="sp-event"><b>API Key 接口</b><p>{{ selectedProvider.api_keys_url || '未配�? }}</p></div>
-          <div class="sp-event"><b>同步状�?/b><p>{{ selectedProvider.sync_message || syncText(selectedProvider) }}</p></div>
+          <div class="sp-event"><b>登录接口</b><p>{{ selectedProvider.login_url || '未配置' }}</p></div>
+          <div class="sp-event"><b>API Key 接口</b><p>{{ selectedProvider.api_keys_url || '未配置' }}</p></div>
+          <div class="sp-event"><b>同步状态</b><p>{{ selectedProvider.sync_message || syncText(selectedProvider) }}</p></div>
         </div>
       </template>
     </SupplierDrawer>
 
     <BaseDialog
       :show="modalVisible"
-      :title="editingProvider ? '编辑供应�? : '新增供应�?"
+      :title="editingProvider ? '编辑供应商' : '新增供应商'"
       width="wide"
       @close="closeModal"
     >
       <form class="sp-provider-dialog" @submit.prevent="submitProvider">
-        <div class="sp-dialog-summary" aria-label="供应商配置摘�?>
+        <div class="sp-dialog-summary" aria-label="供应商配置摘要">
           <div><span>操作类型</span><strong>{{ editingProvider ? '编辑配置' : '新增配置' }}</strong></div>
-          <div><span>供应商类�?/span><strong>{{ form.provider_type || '待选择' }}</strong></div>
-          <div><span>运行状�?/span><strong>{{ form.enabled ? '已启�? : '已停�? }}</strong></div>
+          <div><span>供应商类型</span><strong>{{ form.provider_type || '待选择' }}</strong></div>
+          <div><span>运行状态</span><strong>{{ form.enabled ? '已启用' : '已停用' }}</strong></div>
         </div>
 
         <section class="sp-dialog-section">
           <div class="sp-dialog-section-head">
             <span>01</span>
-            <div><h4>基础身份</h4><p>定义供应商名称、唯一编码和接口模板类型�?/p></div>
+            <div><h4>基础身份</h4><p>定义供应商名称、唯一编码和接口模板类型。</p></div>
           </div>
           <div class="sp-dialog-grid sp-dialog-grid-3">
-            <Input v-model="form.name" label="供应商名�? required />
-            <Input v-model="form.code" label="供应商编�? required :disabled="Boolean(editingProvider)" />
+            <Input v-model="form.name" label="供应商名称" required />
+            <Input v-model="form.code" label="供应商编码" required :disabled="Boolean(editingProvider)" />
             <label class="sp-select-field">
-              <span>供应商类�?/span>
+              <span>供应商类型</span>
               <Select
                 v-model="form.provider_type"
                 :options="providerTypeOptions"
-                placeholder="请选择供应商类�?
+                placeholder="请选择供应商类型"
                 :searchable="false"
                 @change="applySelectedTypeTemplate(true)"
               />
@@ -461,7 +405,7 @@ sp-health-chart-empty">成本曲线加载中�?/div>
         <section class="sp-dialog-section">
           <div class="sp-dialog-section-head">
             <span>02</span>
-            <div><h4>接口模板</h4><p>配置登录、账号、分组、余额和成本数据的访问地址�?/p></div>
+            <div><h4>接口模板</h4><p>配置登录、账号、分组、余额和成本数据的访问地址。</p></div>
           </div>
           <div class="sp-dialog-grid sp-dialog-grid-2">
             <Input v-model="form.base_url" label="基础地址" required placeholder="https://supplier.example.com" />
@@ -471,42 +415,42 @@ sp-health-chart-empty">成本曲线加载中�?/div>
             <Input v-model="form.balance_url" label="余额接口" />
             <Input v-model="form.usage_cost_url" label="成本接口" />
           </div>
-          <div class="sp-dialog-note">切换类型会用类型模板覆盖接口字段；覆盖后仍可继续手动编辑�?/div>
+          <div class="sp-dialog-note">切换类型会用类型模板覆盖接口字段；覆盖后仍可继续手动编辑。</div>
         </section>
 
         <section class="sp-dialog-section">
           <div class="sp-dialog-section-head">
             <span>03</span>
-            <div><h4>认证与运行策�?/h4><p>补充登录凭据、账号命名和调度保护参数�?/p></div>
+            <div><h4>认证与运行策略</h4><p>补充登录凭据、账号命名和调度保护参数。</p></div>
           </div>
           <div class="sp-dialog-grid sp-dialog-grid-3">
             <Input v-if="form.provider_type === 'sub2api'" v-model="form.email" label="登录邮箱" />
-            <Input v-else v-model="form.username" label="登录用户�? />
+            <Input v-else v-model="form.username" label="登录用户名" />
             <Input v-model="form.password" type="password" label="登录密码" :placeholder="editingProvider ? '留空则保留原密码' : ''" />
             <Input v-model="form.account_name_prefix" label="账号名前缀" />
             <Input :model-value="form.temp_disable_minutes" type="number" label="临时禁用分钟" @update:model-value="form.temp_disable_minutes = toNumber($event, form.temp_disable_minutes ?? 0)" />
             <Input :model-value="form.account_rate_multiplier_scale" type="number" label="倍率缩放" @update:model-value="form.account_rate_multiplier_scale = toNumber($event, form.account_rate_multiplier_scale)" />
             <Input :model-value="form.sort_order" type="number" label="排序" @update:model-value="form.sort_order = toNumber($event, form.sort_order ?? 0)" />
             <label class="sp-toggle-field sp-dialog-toggle-card">
-              <span>启用供应�?/span>
+              <span>启用供应商</span>
               <div class="sp-toggle-row">
                 <Toggle v-model="form.enabled" />
-                <em>{{ form.enabled ? '已启�? : '已停�? }}</em>
+                <em>{{ form.enabled ? '已启用' : '已停用' }}</em>
               </div>
             </label>
             <label class="sp-toggle-field sp-dialog-toggle-card">
               <span>启用 Turnstile 人机校验</span>
               <div class="sp-toggle-row">
                 <Toggle v-model="form.turnstile_enabled" />
-                <em>{{ form.turnstile_enabled ? '开�? : '关闭' }}</em>
+                <em>{{ form.turnstile_enabled ? '开启' : '关闭' }}</em>
               </div>
-              <p class="sp-toggle-hint">开启后，登录该上游前会调用 2Captcha 自动求解验证码；失败将导致登录失�?/p>
+              <p class="sp-toggle-hint">开启后，登录该上游前会调用 2Captcha 自动求解验证码；失败将导致登录失败</p>
             </label>
             <label class="sp-toggle-field sp-dialog-toggle-card">
-              <span>设为默认供应�?/span>
+              <span>设为默认供应商</span>
               <div class="sp-toggle-row">
                 <Toggle :model-value="Boolean(form.is_default)" @update:model-value="form.is_default = $event" />
-                <em>{{ form.is_default ? '默认' : '非默�? }}</em>
+                <em>{{ form.is_default ? '默认' : '非默认' }}</em>
               </div>
             </label>
           </div>
@@ -514,30 +458,30 @@ sp-health-chart-empty">成本曲线加载中�?/div>
       </form>
       <template #footer>
         <button class="sp-button ghost" type="button" @click="closeModal">取消</button>
-        <button class="sp-button primary" type="button" @click="submitProvider">保存供应�?/button>
+        <button class="sp-button primary" type="button" @click="submitProvider">保存供应商</button>
       </template>
     </BaseDialog>
 
     <BaseDialog
       :show="createTypeVisible"
-      title="新增供应商类�?
+      title="新增供应商类型"
       width="wide"
       @close="closeCreateProviderType"
     >
       <form class="sp-type-create-dialog" @submit.prevent="submitNewProviderType">
-        <div class="sp-dialog-summary" aria-label="新增供应商类型摘�?>
-          <div><span>配置用�?/span><strong>接口模板</strong></div>
-          <div><span>类型编码</span><strong>{{ typeForm.code || '待填�? }}</strong></div>
-          <div><span>默认状�?/span><strong>{{ typeForm.enabled ? '启用' : '停用' }}</strong></div>
+        <div class="sp-dialog-summary" aria-label="新增供应商类型摘要">
+          <div><span>配置用途</span><strong>接口模板</strong></div>
+          <div><span>类型编码</span><strong>{{ typeForm.code || '待填写' }}</strong></div>
+          <div><span>默认状态</span><strong>{{ typeForm.enabled ? '启用' : '停用' }}</strong></div>
         </div>
 
         <section class="sp-dialog-section">
           <div class="sp-dialog-section-head">
             <span>01</span>
-            <div><h4>类型信息</h4><p>名称用于界面识别，编码用于供应商配置关联�?/p></div>
+            <div><h4>类型信息</h4><p>名称用于界面识别，编码用于供应商配置关联。</p></div>
           </div>
           <div class="sp-dialog-grid sp-dialog-grid-3">
-            <Input v-model="typeForm.name" label="供应商类�? required placeholder="Sub2API" />
+            <Input v-model="typeForm.name" label="供应商类型" required placeholder="Sub2API" />
             <Input v-model="typeForm.code" label="类型编码" required placeholder="sub2api" />
             <Input :model-value="typeForm.sort_order" type="number" label="排序" @update:model-value="typeForm.sort_order = toNumber($event, typeForm.sort_order ?? 0)" />
           </div>
@@ -546,7 +490,7 @@ sp-health-chart-empty">成本曲线加载中�?/div>
         <section class="sp-dialog-section">
           <div class="sp-dialog-section-head">
             <span>02</span>
-            <div><h4>接口模板</h4><p>新增供应商选择该类型时，可自动带入这些接口地址�?/p></div>
+            <div><h4>接口模板</h4><p>新增供应商选择该类型时，可自动带入这些接口地址。</p></div>
           </div>
           <div class="sp-dialog-grid sp-dialog-grid-2">
             <Input v-model="typeForm.login_url" label="登录接口" placeholder="https://supplier.example.com/api/v1/auth/login" />
@@ -562,7 +506,7 @@ sp-health-chart-empty">成本曲线加载中�?/div>
               </div>
             </label>
           </div>
-          <div class="sp-dialog-note">供应商自身接口字段为空时，后台会使用这里的类型模板�?/div>
+          <div class="sp-dialog-note">供应商自身接口字段为空时，后台会使用这里的类型模板。</div>
         </section>
       </form>
       <template #footer>
@@ -573,15 +517,15 @@ sp-health-chart-empty">成本曲线加载中�?/div>
 
     <BaseDialog
       :show="typeManagerVisible"
-      title="供应商类型维�?
+      title="供应商类型维护"
       width="wide"
       @close="closeTypeManager"
     >
       <div class="sp-type-manager-dialog">
-        <aside class="sp-type-list" aria-label="供应商类型列�?>
+        <aside class="sp-type-list" aria-label="供应商类型列表">
           <div class="sp-type-list-head">
             <div><span>Type Index</span><strong>已有类型</strong></div>
-            <em>{{ providerTypes.length }} �?/em>
+            <em>{{ providerTypes.length }} 项</em>
           </div>
           <button
             v-for="type in providerTypes"
@@ -595,22 +539,22 @@ sp-health-chart-empty">成本曲线加载中�?/div>
             <span><b>{{ type.name }}</b><small>{{ type.code }}</small></span>
             <em :class="type.enabled ? 'good' : 'warn'">{{ type.enabled ? '启用' : '停用' }}</em>
           </button>
-          <div v-if="!providerTypes.length" class="sp-type-empty">暂无供应商类型，请从页面顶部新增�?/div>
+          <div v-if="!providerTypes.length" class="sp-type-empty">暂无供应商类型，请从页面顶部新增。</div>
         </aside>
 
         <form class="sp-type-editor" @submit.prevent="submitProviderType">
           <div class="sp-dialog-summary" aria-label="当前类型摘要">
-            <div><span>当前类型</span><strong>{{ editingProviderType?.name || '新类�? }}</strong></div>
-            <div><span>类型编码</span><strong>{{ typeForm.code || '待填�? }}</strong></div>
-            <div><span>当前状�?/span><strong>{{ typeForm.enabled ? '启用' : '停用' }}</strong></div>
+            <div><span>当前类型</span><strong>{{ editingProviderType?.name || '新类型' }}</strong></div>
+            <div><span>类型编码</span><strong>{{ typeForm.code || '待填写' }}</strong></div>
+            <div><span>当前状态</span><strong>{{ typeForm.enabled ? '启用' : '停用' }}</strong></div>
           </div>
           <section class="sp-dialog-section">
             <div class="sp-dialog-section-head">
               <span>01</span>
-              <div><h4>基础配置</h4><p>维护类型名称、编码、排序和启用状态�?/p></div>
+              <div><h4>基础配置</h4><p>维护类型名称、编码、排序和启用状态。</p></div>
             </div>
             <div class="sp-dialog-grid sp-dialog-grid-3">
-              <Input v-model="typeForm.name" label="供应商类�? required placeholder="Sub2API" />
+              <Input v-model="typeForm.name" label="供应商类型" required placeholder="Sub2API" />
               <Input v-model="typeForm.code" label="类型编码" required placeholder="sub2api" :disabled="Boolean(editingProviderType)" />
               <Input :model-value="typeForm.sort_order" type="number" label="排序" @update:model-value="typeForm.sort_order = toNumber($event, typeForm.sort_order ?? 0)" />
             </div>
@@ -618,7 +562,7 @@ sp-health-chart-empty">成本曲线加载中�?/div>
           <section class="sp-dialog-section">
             <div class="sp-dialog-section-head">
               <span>02</span>
-              <div><h4>接口模板</h4><p>供应商未单独配置接口时使用该模板�?/p></div>
+              <div><h4>接口模板</h4><p>供应商未单独配置接口时使用该模板。</p></div>
             </div>
             <div class="sp-dialog-grid sp-dialog-grid-2">
               <Input v-model="typeForm.login_url" label="登录接口" placeholder="https://supplier.example.com/api/v1/auth/login" />
@@ -634,10 +578,10 @@ sp-health-chart-empty">成本曲线加载中�?/div>
                 </div>
               </label>
             </div>
-            <div class="sp-dialog-note">这些接口作为供应商模板使用；供应商自身字段为空时后台会使用这里的配置�?/div>
+            <div class="sp-dialog-note">这些接口作为供应商模板使用；供应商自身字段为空时后台会使用这里的配置。</div>
           </section>
           <div class="sp-dialog-danger-zone">
-            <div><strong>删除供应商类�?/strong><span>删除前请确认没有供应商继续引用该类型�?/span></div>
+            <div><strong>删除供应商类型</strong><span>删除前请确认没有供应商继续引用该类型。</span></div>
             <button v-if="editingProviderType" class="sp-button danger" type="button" @click="removeProviderType(editingProviderType)">删除当前类型</button>
           </div>
         </form>
@@ -658,7 +602,7 @@ sp-health-chart-empty">成本曲线加载中�?/div>
         <div v-if="testResult" class="sp-test-result" :class="{ bad: Boolean(testResult.error || testResult.parse_error) }">
           <div class="sp-dialog-summary" aria-label="接口测试摘要">
             <div><span>测试接口</span><strong>{{ scopeLabel(testResult.scope) }}</strong></div>
-            <div><span>HTTP 状�?/span><strong>{{ testResult.http_status || '�? }}</strong></div>
+            <div><span>HTTP 状态</span><strong>{{ testResult.http_status || '无' }}</strong></div>
             <div><span>响应耗时</span><strong>{{ testResult.duration_ms }} ms</strong></div>
             <div><span>响应大小</span><strong>{{ testResult.response_bytes }} bytes</strong></div>
           </div>
@@ -668,12 +612,12 @@ sp-health-chart-empty">成本曲线加载中�?/div>
           <section class="sp-dialog-section">
             <div class="sp-dialog-section-head">
               <span>01</span>
-              <div><h4>调用尝试</h4><p>按照实际请求顺序展示端点、状态和耗时�?/p></div>
+              <div><h4>调用尝试</h4><p>按照实际请求顺序展示端点、状态和耗时。</p></div>
             </div>
             <div class="sp-test-attempts">
               <article v-for="(attempt, index) in testResult.attempts" :key="`${attempt.endpoint}:${index}`" class="sp-test-attempt">
                 <div><span>{{ String(index + 1).padStart(2, '0') }}</span><strong>{{ attempt.endpoint }}</strong></div>
-                <p>HTTP {{ attempt.http_status || '�? }} · {{ attempt.duration_ms }} ms · {{ attempt.response_bytes }} bytes</p>
+                <p>HTTP {{ attempt.http_status || '无' }} · {{ attempt.duration_ms }} ms · {{ attempt.response_bytes }} bytes</p>
                 <p v-if="attempt.error" class="bad">请求错误：{{ attempt.error }}</p>
                 <p v-if="attempt.parse_error" class="bad">解析错误：{{ attempt.parse_error }}</p>
               </article>
@@ -683,12 +627,12 @@ sp-health-chart-empty">成本曲线加载中�?/div>
           <section class="sp-dialog-section">
             <div class="sp-dialog-section-head">
               <span>02</span>
-              <div><h4>响应内容</h4><p>对照脱敏原始返回与前端解析结果�?/p></div>
+              <div><h4>响应内容</h4><p>对照脱敏原始返回与前端解析结果。</p></div>
             </div>
             <div class="sp-test-response-grid">
               <div class="sp-response-panel">
                 <div class="sp-response-panel-head"><strong>脱敏原始返回</strong><span>Raw Response</span></div>
-                <pre class="sp-message-detail">{{ testResult.response_summary || '无返回内�? }}</pre>
+                <pre class="sp-message-detail">{{ testResult.response_summary || '无返回内容' }}</pre>
               </div>
               <div class="sp-response-panel">
                 <div class="sp-response-panel-head"><strong>解析结果</strong><span>Parsed Data</span></div>
@@ -696,7 +640,7 @@ sp-health-chart-empty">成本曲线加载中�?/div>
               </div>
             </div>
           </section>
-          <div class="sp-dialog-note">敏感字段已脱敏；该测试只调用接口，不会写入同步记录或本地数据表�?/div>
+          <div class="sp-dialog-note">敏感字段已脱敏；该测试只调用接口，不会写入同步记录或本地数据表。</div>
         </div>
       </div>
       <template #footer>
@@ -753,8 +697,8 @@ type HealthTodo = {
 
 const providerQuickFilters: Array<{ key: ProviderQuickFilter; label: string }> = [
   { key: 'all', label: '全部' },
-  { key: 'enabled', label: '已启�? },
-  { key: 'disabled', label: '已停�? },
+  { key: 'enabled', label: '已启用' },
+  { key: 'disabled', label: '已停用' },
   { key: 'default', label: '默认' },
 ]
 type SupplierDiagnosticScope = Exclude<SupplierSyncScope, 'all'>
@@ -815,7 +759,7 @@ function formatLocalDate(date: Date): string {
 function createDefaultCostTrendRange() {
   const end = new Date()
   const start = new Date()
-  // 默认�?14 天（含今天）
+  // 默认近 14 天（含今天）
   start.setDate(end.getDate() - 13)
   return {
     start: formatLocalDate(start),
@@ -858,28 +802,28 @@ const appStore = useAppStore()
 
 const enabledProviderTypes = computed(() => providerTypes.value.filter(type => type.enabled))
 const providerTypeOptions = computed<SelectOption[]>(() =>
-  enabledProviderTypes.value.map(type => ({ value: type.code, label: `${type.name}�?{type.code}）` }))
+  enabledProviderTypes.value.map(type => ({ value: type.code, label: `${type.name}（${type.code}）` }))
 )
 const providerColumns: Column[] = [
   { key: 'homepage', label: '主页', class: 'w-[64px]' },
-  { key: 'name', label: '供应�?, sortable: true, class: 'min-w-[220px]' },
-  { key: 'status', label: '运行状�?, sortable: true },
-  { key: 'account_counts', label: '有效 / 可调度账�?, sortable: true, class: 'min-w-[150px]' },
-  { key: 'success_rate', label: '成功�?, sortable: true },
+  { key: 'name', label: '供应商', sortable: true, class: 'min-w-[220px]' },
+  { key: 'status', label: '运行状态', sortable: true },
+  { key: 'account_counts', label: '有效 / 可调度账号', sortable: true, class: 'min-w-[150px]' },
+  { key: 'success_rate', label: '成功率', sortable: true },
   { key: 'today_cost', label: '今日成本', sortable: true },
   { key: 'current_balance', label: '余额可用', sortable: true },
   { key: 'rate_risk_count', label: '倍率风险', sortable: true },
   { key: 'credential_configured', label: '凭据', sortable: true },
-  { key: 'last_sync_at', label: '最近同�?, sortable: true, class: 'min-w-[110px]' },
+  { key: 'last_sync_at', label: '最近同步', sortable: true, class: 'min-w-[110px]' },
   { key: 'actions', label: '操作', class: 'min-w-[260px]' },
 ]
 
 const metrics = computed(() => [
-  { key: 'all', tone: 'green', label: '启用供应�?, value: String(summary.value.enabled_count), foot: `共管�?${summary.value.total_count} 个供应商` },
-  { key: 'risk', tone: 'red', label: '高风险供应商', value: String(summary.value.high_risk_count), foot: '风险等级�?high �?critical' },
-  { key: 'balance', tone: 'orange', label: '余额不足 3 �?, value: String(summary.value.low_balance_count), foot: '按预计可用天数判�? },
-  { key: 'sync', tone: 'blue', label: '同步异常', value: String(summary.value.sync_failure_count), foot: '最近同步状态失�? },
-  { key: 'rate', tone: 'amber', label: '倍率风险�?, value: String(summary.value.rate_risk_count), foot: '供应商账号倍率风险累计' },
+  { key: 'all', tone: 'green', label: '启用供应商', value: String(summary.value.enabled_count), foot: `共管理 ${summary.value.total_count} 个供应商` },
+  { key: 'risk', tone: 'red', label: '高风险供应商', value: String(summary.value.high_risk_count), foot: '风险等级为 high 或 critical' },
+  { key: 'balance', tone: 'orange', label: '余额不足 3 天', value: String(summary.value.low_balance_count), foot: '按预计可用天数判断' },
+  { key: 'sync', tone: 'blue', label: '同步异常', value: String(summary.value.sync_failure_count), foot: '最近同步状态失败' },
+  { key: 'rate', tone: 'amber', label: '倍率风险项', value: String(summary.value.rate_risk_count), foot: '供应商账号倍率风险累计' },
 ])
 
 const filteredProviders = computed(() => providers.value.filter(provider => {
@@ -928,15 +872,15 @@ const healthLabel = computed(() => {
 })
 
 const healthMessage = computed(() => {
-  if (!providers.value.length) return '还没有供应商数据，请先新增供应商配置�?
-  if (summary.value.high_risk_count) return `当前�?${summary.value.high_risk_count} 个高风险供应商，应优先检查凭据、余额和同步结果。`
-  if (summary.value.sync_failure_count) return `当前�?${summary.value.sync_failure_count} 个供应商同步异常，需要查看同步日志。`
-  if (summary.value.low_balance_count) return `�?${summary.value.low_balance_count} 个供应商预计可用不足 3 天，建议及时补充余额。`
-  if (!defaultProvider.value) return '尚未设置默认供应商，新建账号时缺少兜底来源�?
+  if (!providers.value.length) return '还没有供应商数据，请先新增供应商配置。'
+  if (summary.value.high_risk_count) return `当前有 ${summary.value.high_risk_count} 个高风险供应商，应优先检查凭据、余额和同步结果。`
+  if (summary.value.sync_failure_count) return `当前有 ${summary.value.sync_failure_count} 个供应商同步异常，需要查看同步日志。`
+  if (summary.value.low_balance_count) return `有 ${summary.value.low_balance_count} 个供应商预计可用不足 3 天，建议及时补充余额。`
+  if (!defaultProvider.value) return '尚未设置默认供应商，新建账号时缺少兜底来源。'
   if (credentialMissingCount.value) return `还有 ${credentialMissingCount.value} 个供应商未配置登录凭据，同步与测试会受影响。`
-  if (zeroSchedulableCount.value) return `�?${zeroSchedulableCount.value} 个已启用供应商当�?0 可调度账号，实际无法承接流量。`
+  if (zeroSchedulableCount.value) return `有 ${zeroSchedulableCount.value} 个已启用供应商当前 0 可调度账号，实际无法承接流量。`
   if (summary.value.rate_risk_count) return `累计 ${summary.value.rate_risk_count} 个倍率风险项，建议核对账号倍率配置。`
-  return '供应商组合运行平稳，配置完整，暂无高优先级风险�?
+  return '供应商组合运行平稳，配置完整，暂无高优先级风险。'
 })
 
 const priorityTodos = computed<HealthTodo[]>(() => {
@@ -945,7 +889,7 @@ const priorityTodos = computed<HealthTodo[]>(() => {
     todos.push({
       key: 'high-risk',
       title: '高风险供应商',
-      detail: `当前�?${summary.value.high_risk_count} 个高风险供应商，应优先检查凭据、余额和同步结果。`,
+      detail: `当前有 ${summary.value.high_risk_count} 个高风险供应商，应优先检查凭据、余额和同步结果。`,
       tone: 'bad',
       filter: 'risk',
     })
@@ -954,7 +898,7 @@ const priorityTodos = computed<HealthTodo[]>(() => {
     todos.push({
       key: 'sync-failed',
       title: '同步异常',
-      detail: `当前�?${summary.value.sync_failure_count} 个供应商同步异常，需要查看同步日志。`,
+      detail: `当前有 ${summary.value.sync_failure_count} 个供应商同步异常，需要查看同步日志。`,
       tone: 'warn',
       filter: 'sync',
     })
@@ -962,8 +906,8 @@ const priorityTodos = computed<HealthTodo[]>(() => {
   if (summary.value.low_balance_count > 0) {
     todos.push({
       key: 'low-balance',
-      title: '余额不足 3 �?,
-      detail: `�?${summary.value.low_balance_count} 个供应商预计可用不足 3 天，建议及时补充余额。`,
+      title: '余额不足 3 天',
+      detail: `有 ${summary.value.low_balance_count} 个供应商预计可用不足 3 天，建议及时补充余额。`,
       tone: 'warn',
       filter: 'balance',
     })
@@ -971,8 +915,8 @@ const priorityTodos = computed<HealthTodo[]>(() => {
   if (!defaultProvider.value) {
     todos.push({
       key: 'no-default',
-      title: '缺少默认供应�?,
-      detail: '尚未设置默认供应商，新建账号时缺少兜底来源�?,
+      title: '缺少默认供应商',
+      detail: '尚未设置默认供应商，新建账号时缺少兜底来源。',
       tone: 'warn',
       quickFilter: 'default',
     })
@@ -980,7 +924,7 @@ const priorityTodos = computed<HealthTodo[]>(() => {
   if (credentialMissingCount.value > 0) {
     todos.push({
       key: 'missing-credential',
-      title: '凭据未配�?,
+      title: '凭据未配置',
       detail: `还有 ${credentialMissingCount.value} 个供应商未配置登录凭据。`,
       tone: 'warn',
     })
@@ -989,7 +933,7 @@ const priorityTodos = computed<HealthTodo[]>(() => {
     todos.push({
       key: 'zero-schedulable',
       title: '零可调度账号',
-      detail: `�?${zeroSchedulableCount.value} 个已启用供应商当�?0 可调度账号。`,
+      detail: `有 ${zeroSchedulableCount.value} 个已启用供应商当前 0 可调度账号。`,
       tone: 'warn',
       quickFilter: 'enabled',
     })
@@ -1007,7 +951,7 @@ const priorityTodos = computed<HealthTodo[]>(() => {
 })
 
 const costTrendProviderOptions = computed<SelectOption[]>(() => [
-  { value: '', label: '全部供应�? },
+  { value: '', label: '全部供应商' },
   ...providers.value.map(provider => ({
     value: provider.id,
     label: provider.name,
@@ -1015,9 +959,9 @@ const costTrendProviderOptions = computed<SelectOption[]>(() => [
 ])
 
 const costTrendScopeLabel = computed(() => {
-  if (!costTrendProviderId.value) return '全部供应�?
+  if (!costTrendProviderId.value) return '全部供应商'
   const matched = providers.value.find(provider => provider.id === costTrendProviderId.value)
-  return matched ? matched.name : '指定供应�?
+  return matched ? matched.name : '指定供应商'
 })
 
 const costTrendRangeLabel = computed(() => {
@@ -1121,7 +1065,7 @@ async function loadProviderTypes() {
   try {
     providerTypes.value = await supplierProviderTypesAPI.list()
   } catch (err) {
-    error.value = errorMessage(err, '加载供应商类型失�?)
+    error.value = errorMessage(err, '加载供应商类型失败')
   }
 }
 
@@ -1136,7 +1080,7 @@ async function loadProviders() {
       selectedProvider.value = result.items.find(provider => provider.id === selectedProvider.value?.id) || null
     }
   } catch (err) {
-    error.value = errorMessage(err, '加载供应商失�?)
+    error.value = errorMessage(err, '加载供应商失败')
   } finally {
     loading.value = false
   }
@@ -1200,7 +1144,7 @@ function notifyCostBackfillResult(result: SupplierProviderCostBackfillResult) {
   const providers = Number(result?.provider_count || 0)
   const days = Number(result?.day_count || 0)
   const rangeText = `${result?.start_date || costTrendStartDate.value} ~ ${result?.end_date || costTrendEndDate.value}`
-  const message = `上游成本回补完成�?{rangeText}�?{providers} 个供应商 × ${days} 天）：成�?${success}，跳�?${skipped}，失�?${failed}`
+  const message = `上游成本回补完成（${rangeText}，${providers} 个供应商 × ${days} 天）：成功 ${success}，跳过 ${skipped}，失败 ${failed}`
   if (failed > 0 && success === 0) {
     appStore.showError(message)
     return
@@ -1215,7 +1159,7 @@ function notifyCostBackfillResult(result: SupplierProviderCostBackfillResult) {
 
 function selectProviderForDetail(provider: SupplierProvider) {
   selectedProvider.value = provider
-  // 点击列表行时同步成本对比范围，便于按供应商查�?
+  // 点击列表行时同步成本对比范围，便于按供应商查看
   if (costTrendProviderId.value !== provider.id) {
     costTrendProviderId.value = provider.id
     void loadCostTrends()
@@ -1327,7 +1271,7 @@ async function submitNewProviderType() {
     await loadProviderTypes()
     createTypeVisible.value = false
   } catch (err) {
-    appStore.showError(errorMessage(err, '创建供应商类型失�?))
+    appStore.showError(errorMessage(err, '创建供应商类型失败'))
   }
 }
 
@@ -1345,12 +1289,12 @@ async function submitProviderType() {
     const refreshed = providerTypes.value.find(type => type.code === payload.code) || null
     if (refreshed) editProviderType(refreshed)
   } catch (err) {
-    appStore.showError(errorMessage(err, '保存供应商类型失�?))
+    appStore.showError(errorMessage(err, '保存供应商类型失败'))
   }
 }
 
 async function removeProviderType(providerType: SupplierProviderType) {
-  if (!window.confirm(`确认删除供应商类型�?{providerType.name}」？`)) return
+  if (!window.confirm(`确认删除供应商类型「${providerType.name}」？`)) return
   try {
     await supplierProviderTypesAPI.delete(providerType.id)
     appStore.showSuccess('供应商类型已删除')
@@ -1358,7 +1302,7 @@ async function removeProviderType(providerType: SupplierProviderType) {
     if (providerTypes.value.length) editProviderType(providerTypes.value[0])
     else newProviderType()
   } catch (err) {
-    appStore.showError(errorMessage(err, '删除供应商类型失�?))
+    appStore.showError(errorMessage(err, '删除供应商类型失败'))
   }
 }
 
@@ -1399,7 +1343,7 @@ async function updateProviderEnabled(provider: SupplierProvider, enabled: boolea
     await loadProviders()
   } catch (err) {
     provider.enabled = previousEnabled
-    appStore.showError(errorMessage(err, '更新供应商运行状态失�?))
+    appStore.showError(errorMessage(err, '更新供应商运行状态失败'))
   } finally {
     const next = new Set(updatingProviderIDs.value)
     next.delete(provider.id)
@@ -1420,7 +1364,7 @@ async function submitProvider() {
     modalVisible.value = false
     await loadProviders()
   } catch (err) {
-    appStore.showError(errorMessage(err, '保存供应商失�?))
+    appStore.showError(errorMessage(err, '保存供应商失败'))
   }
 }
 
@@ -1430,19 +1374,19 @@ async function makeDefault(provider: SupplierProvider) {
     appStore.showSuccess('默认供应商已更新')
     await loadProviders()
   } catch (err) {
-    appStore.showError(errorMessage(err, '设置默认供应商失�?))
+    appStore.showError(errorMessage(err, '设置默认供应商失败'))
   }
 }
 
 async function removeProvider(provider: SupplierProvider) {
-  if (!window.confirm(`确认删除供应商�?{provider.name}」？`)) return
+  if (!window.confirm(`确认删除供应商「${provider.name}」？`)) return
   try {
     await supplierProvidersAPI.delete(provider.id)
     appStore.showSuccess('供应商已删除')
     if (selectedProvider.value?.id === provider.id) selectedProvider.value = null
     await loadProviders()
   } catch (err) {
-    appStore.showError(errorMessage(err, '删除供应商失�?))
+    appStore.showError(errorMessage(err, '删除供应商失败'))
   }
 }
 
@@ -1455,7 +1399,7 @@ async function syncProviderData(provider: SupplierProvider, scope: SupplierSyncS
     showSyncResultFeedback(result.status, scope)
     await loadProviders()
   } catch (err) {
-    appStore.showError(errorMessage(err, '同步供应商失�?))
+    appStore.showError(errorMessage(err, '同步供应商失败'))
   } finally {
     const next = new Set(syncingKeys.value)
     next.delete(key)
@@ -1475,7 +1419,7 @@ async function testProviderEndpointData(provider: SupplierProvider, scope: Suppl
     testResult.value = await testProviderEndpoint(provider.id, scope)
     testResultVisible.value = true
   } catch (err) {
-    appStore.showError(errorMessage(err, '测试供应商接口失�?))
+    appStore.showError(errorMessage(err, '测试供应商接口失败'))
   } finally {
     const next = new Set(testingKeys.value)
     next.delete(key)
@@ -1516,7 +1460,7 @@ function scopeLabel(scope: string): string {
 }
 
 function formatDiagnosticJSON(value: unknown): string {
-  if (value === undefined || value === null || value === '') return '无解析结�?
+  if (value === undefined || value === null || value === '') return '无解析结果'
   try {
     return JSON.stringify(value, null, 2)
   } catch {
@@ -1665,9 +1609,9 @@ function statusTone(provider: SupplierProvider): Tone {
 }
 
 function statusText(provider: SupplierProvider): string {
-  if (!provider.enabled) return '已停�?
+  if (!provider.enabled) return '已停用'
   if (provider.risk_level === 'critical') return '严重风险'
-  if (provider.risk_level === 'high') return '高风�?
+  if (provider.risk_level === 'high') return '高风险'
   if (provider.risk_level === 'medium') return '需关注'
   if (provider.status && provider.status !== 'unknown') return provider.status
   return provider.is_default ? '默认启用' : '启用'
@@ -1678,7 +1622,7 @@ function rateTone(provider: SupplierProvider): Tone {
 }
 
 function rateRiskText(provider: SupplierProvider): string {
-  return provider.rate_risk_count > 0 ? `${provider.rate_risk_count} 个风险` : '无风�?
+  return provider.rate_risk_count > 0 ? `${provider.rate_risk_count} 个风险` : '无风险'
 }
 
 function balanceText(provider: SupplierProvider): string {
@@ -1695,7 +1639,7 @@ function isBalanceWarning(provider: SupplierProvider): boolean {
 
 function syncText(provider: SupplierProvider): string {
   if (provider.sync_status === 'failed') return '同步失败'
-  if (!provider.last_sync_at) return '未同�?
+  if (!provider.last_sync_at) return '未同步'
   const timestamp = new Date(provider.last_sync_at).getTime()
   if (Number.isNaN(timestamp)) return '时间异常'
   const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60000))
@@ -1733,19 +1677,45 @@ function showSyncResultFeedback(status: string, scope: SupplierSyncScope) {
   appStore.showSuccess(message)
 }
 
-const costBreakdown = computed(() => {\n  return providers.value.map((provider) => ({\n    id: provider.id,\n    name: provider.name,\n    provider_type: provider.provider_type,\n    upstreamCost: provider.period_cost || 0,\n    localCost: provider.today_cost || 0,\n    ratio: provider.period_cost ? (provider.period_cost / (provider.period_cost + (provider.today_cost || 0))) : 0.5,\n  }))\n})\n\nfunction errorMessage(err: unknown, fallback: string): string {
+function errorMessage(err: unknown, fallback: string): string {
   if (typeof err === 'object' && err && 'message' in err) {
     const apiErr = err as { message?: unknown; reason?: unknown; code?: unknown }
     const reason = String(apiErr.reason || '')
     const message = String(apiErr.message || '')
     if (reason === 'SUPPLIER_PROVIDER_INVALID' || message === 'invalid supplier provider configuration') {
-      return '供应商配置无效：请检查基础地址是否为完�?http/https 地址，接口路径是否以 / 开头，排序和倍率等数值是否有效�?
+      return '供应商配置无效：请检查基础地址是否为完整 http/https 地址，接口路径是否以 / 开头，排序和倍率等数值是否有效。'
     }
     return message || fallback
   }
   return fallback
 }
-function getProviderColor(providerType: string): string {\n  const type = providerType.toLowerCase()\n  if (type.includes("sub2api")) return "#3b82f6"\n  if (type.includes("openai")) return "#10b981"\n  if (type.includes("anthropic")) return "#8b5cf6"\n  if (type.includes("claude")) return "#8b5cf6"\n  if (type.includes("gemini")) return "#f59e0b"\n  if (type.includes("local")) return "#6b7280"\n  return "#6b7280"\n}\n</script>
+
+const costBreakdown = computed(() =>
+  providers.value.map(provider => {
+    const upstream = provider.period_cost || 0
+    const local = provider.today_cost || 0
+    const total = upstream + local
+    return {
+      id: provider.id,
+      name: provider.name,
+      provider_type: provider.provider_type,
+      upstreamCost: upstream,
+      localCost: local,
+      ratio: total > 0 ? upstream / total : 0,
+    }
+  }),
+)
+
+function getProviderColor(providerType: string): string {
+  const type = (providerType || '').toLowerCase()
+  if (type.includes('sub2api')) return '#3b82f6'
+  if (type.includes('openai')) return '#10b981'
+  if (type.includes('anthropic') || type.includes('claude')) return '#8b5cf6'
+  if (type.includes('gemini')) return '#f59e0b'
+  if (type.includes('local')) return '#6b7280'
+  return '#94a3b8'
+}
+</script>
 
 <style scoped>
 .sp-provider-home-button {
@@ -1845,7 +1815,7 @@ function getProviderColor(providerType: string): string {\n  const type = provid
   font-weight: 700;
 }
 
-/* 筛选区：搜索与操作同一行紧挨排列，快捷筛选单独通栏，消除中间大块留�?*/
+/* 筛选区：搜索与操作同一行紧挨排列，快捷筛选单独通栏，消除中间大块留白 */
 .sp-provider-filter-body {
   display: flex;
   flex-wrap: wrap;
@@ -1898,7 +1868,7 @@ function getProviderColor(providerType: string): string {\n  const type = provid
   gap: 0.5rem;
 }
 
-/* 统计卡：页面层压缩窄屏高度，并保�?2 列（覆盖共享样式�?460px 的单列） */
+/* 统计卡：页面层压缩窄屏高度，并保持 2 列（覆盖共享样式在 460px 的单列） */
 .sp-metric-grid {
   gap: 0.75rem;
 }
@@ -1972,7 +1942,7 @@ function getProviderColor(providerType: string): string {\n  const type = provid
     padding: 0.75rem;
   }
 
-  /* 手机端筛选区保持紧凑：搜索通栏，快捷筛选与操作按钮 2 �?*/
+  /* 手机端筛选区保持紧凑：搜索通栏，快捷筛选与操作按钮 2 列 */
   .sp-provider-quick-filters {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2009,7 +1979,7 @@ function getProviderColor(providerType: string): string {\n  const type = provid
 }
 
 @media (max-width: 460px) {
-  /* 覆盖共享样式把统计卡打成单列的行�?*/
+  /* 覆盖共享样式把统计卡打成单列的行为 */
   .sp-metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2799,6 +2769,82 @@ function getProviderColor(providerType: string): string {\n  const type = provid
   font-size: 0.8125rem;
   text-align: center;
   padding: 0.75rem;
+}
+
+.sp-health-breakdown-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sp-health-breakdown-item {
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.625rem;
+  background: color-mix(in srgb, var(--sp-panel) 96%, #94a3b8);
+}
+
+.sp-health-breakdown-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.sp-health-breakdown-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--sp-text);
+  min-width: 0;
+}
+
+.sp-health-breakdown-name span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-health-breakdown-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.sp-health-breakdown-values {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--sp-muted);
+}
+
+.sp-health-breakdown-values b {
+  font-size: 0.8125rem;
+  color: var(--sp-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-health-breakdown-values em {
+  font-style: normal;
+  color: var(--sp-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-health-breakdown-bar {
+  margin-top: 0.375rem;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sp-line) 60%, transparent);
+  overflow: hidden;
+}
+
+.sp-health-breakdown-bar-fill {
+  height: 100%;
+  background: var(--sp-cyan);
+  border-radius: 999px;
 }
 
 
