@@ -48,7 +48,7 @@ describe('AppHeader admin tools', () => {
       },
     })
 
-    expect(wrapper.find('a[href="/model-monitor.html"]').exists()).toBe(true)
+    expect(wrapper.find('a[href="/model-monitor-local.html"]').exists()).toBe(true)
   })
 
   it('keeps version downloads beside the model monitor entry', () => {
@@ -72,7 +72,7 @@ describe('AppHeader admin tools', () => {
         },
       },
     })
-    expect(wrapper.find('a[href="/model-monitor.html"]').exists()).toBe(true)
+    expect(wrapper.find('a[href="/model-monitor-local.html"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="header-version-badge"]').text()).toBe('0.1.151')
   })
 })

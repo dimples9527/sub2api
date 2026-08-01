@@ -36,6 +36,8 @@ type SupplierProviderDataRepositoryPort interface {
 	ClearLocalAccountPlatformOverride(ctx context.Context, localAccountID int64) error
 	ListGroups(ctx context.Context, params service.SupplierProviderDataListParams) (service.SupplierProviderGroupListResult, error)
 	ListGroupHealthTrends(ctx context.Context, params service.SupplierProviderGroupHealthTrendParams) ([]service.SupplierProviderGroupHealthTrend, error)
+	ListLocalGroupHealthTrends(ctx context.Context, params service.SupplierProviderGroupHealthTrendParams) ([]service.SupplierProviderGroupHealthTrend, error)
+	ListMappingsByLocalGroup(ctx context.Context, localGroupIDs []int64) ([]service.SupplierProviderGroup, error)
 	UpdateGroupMapping(ctx context.Context, groupID int64, localGroupID *int64) error
 }
 
@@ -369,6 +371,16 @@ func (h *SupplierProviderSyncHandler) ListGroupHealthTrends(c *gin.Context) {
 		return
 	}
 	response.Success(c, result)
+}
+
+// ListLocalGroupHealthTrends 返回按本地分组归属的账号健康守护趋势。
+func (h *SupplierProviderSyncHandler) ListLocalGroupHealthTrends(ctx context.Context, params service.SupplierProviderGroupHealthTrendParams) ([]service.SupplierProviderGroupHealthTrend, error) {
+	return h.dataRepo.ListLocalGroupHealthTrends(ctx, params)
+}
+
+// ListMappingsByLocalGroup 返回本地分组关联的供应商分组映射。
+func (h *SupplierProviderSyncHandler) ListMappingsByLocalGroup(ctx context.Context, localGroupIDs []int64) ([]service.SupplierProviderGroup, error) {
+	return h.dataRepo.ListMappingsByLocalGroup(ctx, localGroupIDs)
 }
 
 func parseSupplierProviderGroupHealthTrendIDs(raw string) ([]int64, bool) {

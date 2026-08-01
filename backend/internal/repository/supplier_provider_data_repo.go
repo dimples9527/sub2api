@@ -272,6 +272,14 @@ WHERE `+where+fmt.Sprintf(" GROUP BY g.id, p.name, lg.id, s.group_sync_status, s
 }
 
 func (r *supplierProviderDataRepository) ListGroupHealthTrends(ctx context.Context, params service.SupplierProviderGroupHealthTrendParams) ([]service.SupplierProviderGroupHealthTrend, error) {
+	return r.listHealthTrends(ctx, params, false)
+}
+
+func (r *supplierProviderDataRepository) ListLocalGroupHealthTrends(ctx context.Context, params service.SupplierProviderGroupHealthTrendParams) ([]service.SupplierProviderGroupHealthTrend, error) {
+	return r.listHealthTrends(ctx, params, true)
+}
+
+func (r *supplierProviderDataRepository) listHealthTrends(ctx context.Context, params service.SupplierProviderGroupHealthTrendParams, byLocalGroup bool) ([]service.SupplierProviderGroupHealthTrend, error) {
 	if params.Period <= 0 {
 		params.Period = 90 * time.Minute
 	}
@@ -300,8 +308,40 @@ func (r *supplierProviderDataRepository) ListGroupHealthTrends(ctx context.Conte
 		return []service.SupplierProviderGroupHealthTrend{}, nil
 	}
 
-	rows, err := r.db.QueryContext(ctx, `
-SELECT g.id AS group_id,
+	groupColumn := "g.id"
+	if byLocalGroup {
+		groupColumn = "g.local_group_id"
+	}
+	whereSQL := fmt.Sprintf(`
+WHERE run.task_code = $1
+  AND run.finished_at IS NOT NULL
+  AND run.finished_at <= $2
+  AND %s IS NOT NULL
+  AND %s = ANY($3)
+`, groupColumn, groupColumn)
+	args := []any{
+		service.SupplierAutomationTaskAccountHealthGuard,
+		params.Now,
+		pq.Array(groupIDs),
+	}
+	if !params.AllHistory {
+		whereSQL = fmt.Sprintf(`
+WHERE run.task_code = $1
+  AND run.finished_at IS NOT NULL
+  AND run.finished_at >= $2
+  AND run.finished_at <= $3
+  AND %s IS NOT NULL
+  AND %s = ANY($4)
+`, groupColumn, groupColumn)
+		args = []any{
+			service.SupplierAutomationTaskAccountHealthGuard,
+			params.Now.Add(-params.Period),
+			params.Now,
+			pq.Array(groupIDs),
+		}
+	}
+	query := fmt.Sprintf(`
+SELECT %s AS group_id,
        (source->>'supplier_provider_account_id')::bigint AS account_id,
        COALESCE(item->>'status', '') AS status,
        COALESCE((item->>'latency_ms')::bigint, 0) AS latency_ms,
@@ -319,12 +359,9 @@ JOIN supplier_provider_accounts account
 JOIN supplier_provider_groups g
   ON g.provider_id = account.provider_id
  AND g.upstream_group_key = account.group_key
-WHERE run.task_code = $1
-  AND run.finished_at IS NOT NULL
-  AND run.finished_at >= $2
-  AND run.finished_at <= $3
-  AND g.id = ANY($4)
-`, service.SupplierAutomationTaskAccountHealthGuard, params.Now.Add(-params.Period), params.Now, pq.Array(groupIDs))
+
+%s`, groupColumn, whereSQL)
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query supplier provider group health trends: %w", err)
 	}

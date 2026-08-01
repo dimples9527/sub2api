@@ -138,5 +138,11 @@ describe('AppSidebar image generation visibility', () => {
     expect(externalLink.attributes('target')).toBe('_blank')
     expect(externalLink.attributes('rel')).toContain('noopener')
     expect(externalLink.text()).toContain('上游运维平台')
+
+    const localMonitorLink = wrapper.find('a[href="/model-monitor-local.html"]')
+    expect(localMonitorLink.exists()).toBe(true)
+    expect(localMonitorLink.attributes('target')).toBe('_blank')
+    expect(localMonitorLink.attributes('rel')).toContain('noopener')
+    expect(localMonitorLink.text()).toContain('本地模型监控')
   })
 })

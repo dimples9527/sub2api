@@ -36,6 +36,9 @@ func (r *supplierProviderDataRepoStub) ListGroups(context.Context, SupplierProvi
 func (r *supplierProviderDataRepoStub) ListGroupHealthTrends(context.Context, SupplierProviderGroupHealthTrendParams) ([]SupplierProviderGroupHealthTrend, error) {
 	return []SupplierProviderGroupHealthTrend{}, nil
 }
+func (r *supplierProviderDataRepoStub) ListLocalGroupHealthTrends(context.Context, SupplierProviderGroupHealthTrendParams) ([]SupplierProviderGroupHealthTrend, error) {
+	return []SupplierProviderGroupHealthTrend{}, nil
+}
 func (*supplierProviderDataRepoStub) IsUniqueMatchedLocalAccount(context.Context, int64) (bool, error) {
 	return false, nil
 }

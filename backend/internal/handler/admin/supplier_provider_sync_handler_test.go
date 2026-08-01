@@ -74,6 +74,8 @@ type supplierProviderSyncHandlerDataStub struct {
 	groupListParams         service.SupplierProviderDataListParams
 	healthTrendParams       service.SupplierProviderGroupHealthTrendParams
 	healthTrends            []service.SupplierProviderGroupHealthTrend
+	mappingLocalGroupIDs    []int64
+	mappings                []service.SupplierProviderGroup
 	uniqueLocalAccount      bool
 	effectivePlatform       string
 	platformOverrideAccount int64
@@ -140,6 +142,14 @@ func (s *supplierProviderSyncHandlerDataStub) ListGroups(_ context.Context, para
 func (s *supplierProviderSyncHandlerDataStub) ListGroupHealthTrends(_ context.Context, params service.SupplierProviderGroupHealthTrendParams) ([]service.SupplierProviderGroupHealthTrend, error) {
 	s.healthTrendParams = params
 	return s.healthTrends, nil
+}
+func (s *supplierProviderSyncHandlerDataStub) ListLocalGroupHealthTrends(_ context.Context, params service.SupplierProviderGroupHealthTrendParams) ([]service.SupplierProviderGroupHealthTrend, error) {
+	s.healthTrendParams = params
+	return s.healthTrends, nil
+}
+func (s *supplierProviderSyncHandlerDataStub) ListMappingsByLocalGroup(_ context.Context, localGroupIDs []int64) ([]service.SupplierProviderGroup, error) {
+	s.mappingLocalGroupIDs = append([]int64(nil), localGroupIDs...)
+	return s.mappings, nil
 }
 func (s *supplierProviderSyncHandlerDataStub) IsUniqueMatchedLocalAccount(context.Context, int64) (bool, error) {
 	return s.uniqueLocalAccount, nil
@@ -252,6 +262,19 @@ func TestSupplierProviderSyncHandlerListsGroupHealthTrends(t *testing.T) {
 	require.False(t, dataStub.healthTrendParams.Now.IsZero())
 	require.Contains(t, rec.Body.String(), `"group_id":12`)
 	require.Contains(t, rec.Body.String(), `"source":"supplier_account_health_guard"`)
+}
+
+func TestSupplierProviderSyncHandlerListsMappingsByLocalGroup(t *testing.T) {
+	dataStub := &supplierProviderSyncHandlerDataStub{
+		mappings: []service.SupplierProviderGroup{{ID: 8}},
+	}
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, dataStub)
+
+	mappings, err := handler.ListMappingsByLocalGroup(context.Background(), []int64{12, 37})
+
+	require.NoError(t, err)
+	require.Equal(t, []int64{12, 37}, dataStub.mappingLocalGroupIDs)
+	require.Equal(t, dataStub.mappings, mappings)
 }
 
 func TestSupplierProviderSyncHandlerRejectsInvalidGroupHealthTrendQuery(t *testing.T) {

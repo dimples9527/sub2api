@@ -31,7 +31,7 @@
 
         <!-- Model Monitor Link -->
         <a
-          href="/model-monitor.html"
+          href="/model-monitor-local.html"
           target="_blank"
           rel="noopener noreferrer"
           class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"

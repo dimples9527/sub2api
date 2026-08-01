@@ -416,7 +416,7 @@ func shouldBypassEmbeddedFrontend(path string) bool {
 
 func isStaticHTMLPage(path string) bool {
 	switch path {
-	case "model-monitor.html", "help.html":
+	case "model-monitor.html", "model-monitor-local.html", "help.html":
 		return true
 	default:
 		return false

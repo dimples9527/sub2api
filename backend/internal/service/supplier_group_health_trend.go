@@ -16,6 +16,7 @@ type SupplierProviderGroupHealthTrendParams struct {
 	Period      time.Duration
 	BucketCount int
 	Now         time.Time
+	AllHistory  bool
 }
 
 type SupplierProviderGroupHealthSample struct {
@@ -62,7 +63,33 @@ func BuildSupplierProviderGroupHealthTrends(samples []SupplierProviderGroupHealt
 	}
 
 	windowStart := params.Now.Add(-params.Period)
+	if params.AllHistory {
+		var earliestSample time.Time
+		for _, sample := range samples {
+			if _, ok := requestedGroups[sample.GroupID]; !ok || !supplierProviderGroupHealthSampleUsable(sample) {
+				continue
+			}
+			finishedAt := sample.FinishedAt.UTC()
+			if finishedAt.After(params.Now) {
+				continue
+			}
+			if earliestSample.IsZero() || finishedAt.Before(earliestSample) {
+				earliestSample = finishedAt
+			}
+		}
+		if !earliestSample.IsZero() {
+			windowStart = earliestSample
+		}
+		params.Period = params.Now.Sub(windowStart)
+		if params.Period <= 0 {
+			params.Period = time.Minute
+			windowStart = params.Now.Add(-params.Period)
+		}
+	}
 	bucketDuration := params.Period / time.Duration(params.BucketCount)
+	if bucketDuration <= 0 {
+		bucketDuration = time.Nanosecond
+	}
 	latestSamples := make(map[supplierProviderGroupHealthSampleKey]SupplierProviderGroupHealthSample)
 	for _, sample := range samples {
 		if _, ok := requestedGroups[sample.GroupID]; !ok || !supplierProviderGroupHealthSampleUsable(sample) {
