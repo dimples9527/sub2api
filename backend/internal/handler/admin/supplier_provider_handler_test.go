@@ -40,6 +40,10 @@ func (r *supplierProviderHandlerRepoStub) ListCostTrends(_ context.Context, star
 	return []service.SupplierProviderCostTrendPoint{}, nil
 }
 
+func (r *supplierProviderHandlerRepoStub) ListCostBreakdowns(_ context.Context, start, end time.Time, providerID int64) ([]service.SupplierProviderCostBreakdown, error) {
+	return []service.SupplierProviderCostBreakdown{}, nil
+}
+
 func (r *supplierProviderHandlerRepoStub) Summary(_ context.Context, params service.SupplierProviderListParams) (service.SupplierProviderSummary, error) {
 	var summary service.SupplierProviderSummary
 	for _, item := range r.items {

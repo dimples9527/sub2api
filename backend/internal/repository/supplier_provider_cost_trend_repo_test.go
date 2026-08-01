@@ -53,7 +53,6 @@ ORDER BY d.stat_date`)).
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-
 func TestSupplierProviderRepositoryListCostTrendsFiltersByProvider(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
@@ -80,5 +79,31 @@ func TestSupplierProviderRepositoryListCostTrendsFiltersByProvider(t *testing.T)
 	require.Equal(t, "2026-07-28", points[0].Date)
 	require.Equal(t, 3.5, points[0].UpstreamCost)
 	require.Equal(t, 2.0, points[0].LocalCost)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderRepositoryListCostBreakdownsAggregatesByProvider(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := NewSupplierProviderRepository(db)
+	start := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery("WITH provider_account_matches").
+		WithArgs(start, end).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "provider_type", "upstream_cost", "local_cost"}).
+			AddRow(int64(7), "主供应商", "sub2api", 42.5, 17.25).
+			AddRow(int64(9), "备用供应商", "newapi", 8.0, 3.5))
+
+	breakdowns, err := repo.ListCostBreakdowns(context.Background(), start, end, 0)
+	require.NoError(t, err)
+	require.Len(t, breakdowns, 2)
+	require.Equal(t, int64(7), breakdowns[0].ProviderID)
+	require.Equal(t, "主供应商", breakdowns[0].ProviderName)
+	require.Equal(t, 42.5, breakdowns[0].UpstreamCost)
+	require.Equal(t, 17.25, breakdowns[0].LocalCost)
+	require.Equal(t, int64(9), breakdowns[1].ProviderID)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

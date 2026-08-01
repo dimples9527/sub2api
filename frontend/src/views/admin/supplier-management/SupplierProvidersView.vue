@@ -240,7 +240,7 @@
           <section class="sp-health-section sp-health-chart-section" data-test="supplier-cost-trend">
             <div class="sp-health-section-head">
               <span>成本对比</span>
-              <small>{{ costTrendRangeLabel }} · {{ costTrendScopeLabel }} · 上游 vs 本地</small>
+              <small>{{ costTrendRangeLabel }} · {{ costTrendScopeLabel }} · 上游成本 / 本地成本</small>
             </div>
 
             <div class="sp-health-chart-controls" data-test="supplier-cost-controls">
@@ -674,7 +674,7 @@ import Icon from '@/components/icons/Icon.vue'
 import Input from '@/components/common/Input.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
-import supplierProvidersAPI, { type SupplierProvider, type SupplierProviderSummary, type SupplierProviderUpsertPayload, type SupplierProviderCostTrendPoint, type SupplierProviderCostBackfillResult } from '@/api/admin/supplierProviders'
+import supplierProvidersAPI, { type SupplierProvider, type SupplierProviderSummary, type SupplierProviderUpsertPayload, type SupplierProviderCostTrendPoint, type SupplierProviderCostBreakdown, type SupplierProviderCostBackfillResult } from '@/api/admin/supplierProviders'
 import supplierProviderTypesAPI, { type SupplierProviderType, type SupplierProviderTypeUpsertPayload } from '@/api/admin/supplierProviderTypes'
 import { syncProvider, testProviderEndpoint, type SupplierProviderEndpointTestResult, type SupplierSyncScope } from '@/api/admin/supplierProviderData'
 import { useAppStore } from '@/stores/app'
@@ -776,6 +776,7 @@ const costTrendEndDate = ref(costTrendDefaultRange.end)
 const costTrendProviderId = ref<number | ''>('')
 const costTrendLoading = ref(false)
 const costTrendPoints = ref<SupplierProviderCostTrendPoint[]>([])
+const costTrendBreakdown = ref<SupplierProviderCostBreakdown[]>([])
 const deviationThreshold = ref(0.15) // 15%
 const search = ref('')
 const providerQuickFilter = ref<ProviderQuickFilter>('all')
@@ -1096,8 +1097,10 @@ async function loadCostTrends() {
       provider_id: providerId || undefined,
     })
     costTrendPoints.value = Array.isArray(result?.points) ? result.points : []
+    costTrendBreakdown.value = Array.isArray(result?.breakdown) ? result.breakdown : []
   } catch {
     costTrendPoints.value = []
+    costTrendBreakdown.value = []
   } finally {
     costTrendLoading.value = false
   }
@@ -1691,13 +1694,13 @@ function errorMessage(err: unknown, fallback: string): string {
 }
 
 const costBreakdown = computed(() =>
-  providers.value.map(provider => {
-    const upstream = provider.period_cost || 0
-    const local = provider.today_cost || 0
+  costTrendBreakdown.value.map(provider => {
+    const upstream = Number(provider.upstream_cost || 0)
+    const local = Number(provider.local_cost || 0)
     const total = upstream + local
     return {
-      id: provider.id,
-      name: provider.name,
+      id: provider.provider_id,
+      name: provider.provider_name,
       provider_type: provider.provider_type,
       upstreamCost: upstream,
       localCost: local,

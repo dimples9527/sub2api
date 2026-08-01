@@ -220,6 +220,84 @@ ORDER BY 1`
 	return points, nil
 }
 
+func (r *supplierProviderRepository) ListCostBreakdowns(ctx context.Context, start, end time.Time, providerID int64) ([]service.SupplierProviderCostBreakdown, error) {
+	query := `
+WITH provider_account_matches AS (
+  SELECT p.id AS provider_id, local_account.id AS local_account_id
+  FROM supplier_providers p
+  JOIN supplier_provider_accounts spa
+    ON spa.provider_id = p.id
+   AND spa.active = TRUE
+  JOIN accounts local_account
+    ON local_account.deleted_at IS NULL
+   AND regexp_replace(lower(local_account.name), '[^[:alnum:]]', '', 'g')
+     = regexp_replace(lower(p.account_name_prefix || spa.name), '[^[:alnum:]]', '', 'g')
+  WHERE p.deleted_at IS NULL
+  GROUP BY p.id, local_account.id
+),
+unique_account_matches AS (
+  SELECT MIN(provider_id) AS provider_id, local_account_id
+  FROM provider_account_matches
+  GROUP BY local_account_id
+  HAVING COUNT(*) = 1
+),
+upstream_costs AS (
+  SELECT d.provider_id, COALESCE(SUM(d.today_cost), 0) AS upstream_cost
+  FROM supplier_provider_daily_stats d
+  WHERE d.stat_date >= $1::date
+    AND d.stat_date < $2::date
+  GROUP BY d.provider_id
+),
+local_costs AS (
+  SELECT matches.provider_id, COALESCE(SUM(ul.actual_cost), 0) AS local_cost
+  FROM unique_account_matches matches
+  JOIN usage_logs ul ON ul.account_id = matches.local_account_id
+  WHERE ul.created_at >= $1
+    AND ul.created_at < $2
+  GROUP BY matches.provider_id
+)
+SELECT p.id, p.name, p.provider_type,
+       COALESCE(upstream.upstream_cost, 0) AS upstream_cost,
+       COALESCE(local_agg.local_cost, 0) AS local_cost
+FROM supplier_providers p
+LEFT JOIN upstream_costs upstream ON upstream.provider_id = p.id
+LEFT JOIN local_costs local_agg ON local_agg.provider_id = p.id
+WHERE p.deleted_at IS NULL`
+	args := []any{start, end}
+	if providerID > 0 {
+		query += `
+  AND p.id = $3`
+		args = append(args, providerID)
+	}
+	query += `
+ORDER BY p.sort_order ASC, p.id ASC`
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query supplier provider cost breakdowns: %w", err)
+	}
+	defer rows.Close()
+
+	breakdowns := make([]service.SupplierProviderCostBreakdown, 0)
+	for rows.Next() {
+		var breakdown service.SupplierProviderCostBreakdown
+		if scanErr := rows.Scan(
+			&breakdown.ProviderID,
+			&breakdown.ProviderName,
+			&breakdown.ProviderType,
+			&breakdown.UpstreamCost,
+			&breakdown.LocalCost,
+		); scanErr != nil {
+			return nil, fmt.Errorf("scan supplier provider cost breakdown: %w", scanErr)
+		}
+		breakdowns = append(breakdowns, breakdown)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate supplier provider cost breakdowns: %w", err)
+	}
+	return breakdowns, nil
+}
+
 func supplierProviderWhere(params service.SupplierProviderListParams) (string, []any) {
 	conditions := []string{"p.deleted_at IS NULL"}
 	args := make([]any, 0, 2)

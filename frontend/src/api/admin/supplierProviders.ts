@@ -38,9 +38,6 @@ export interface SupplierProvider {
   last_sync_at?: string
   created_at: string
   updated_at: string
-  upstreamCost?: number
-  localCost?: number
-  ratio?: number
 }
 
 export interface SupplierProviderSummary {
@@ -92,12 +89,21 @@ export interface SupplierProviderCostTrendPoint {
   deviationPercent?: number
 }
 
+export interface SupplierProviderCostBreakdown {
+  provider_id: number
+  provider_name: string
+  provider_type: string
+  upstream_cost: number
+  local_cost: number
+}
+
 export interface SupplierProviderCostTrendResult {
   days: number
   start_date?: string
   end_date?: string
   provider_id?: number
   points: SupplierProviderCostTrendPoint[]
+  breakdown: SupplierProviderCostBreakdown[]
 }
 
 export interface SupplierProviderCostTrendParams {

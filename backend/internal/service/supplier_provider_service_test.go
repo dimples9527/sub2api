@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -9,9 +10,10 @@ import (
 )
 
 type supplierProviderRepoStub struct {
-	items      []*SupplierProvider
-	next       int64
-	costTrends []SupplierProviderCostTrendPoint
+	items          []*SupplierProvider
+	next           int64
+	costTrends     []SupplierProviderCostTrendPoint
+	costBreakdowns []SupplierProviderCostBreakdown
 }
 
 type supplierProviderTypeRepoStub struct {
@@ -45,6 +47,13 @@ func (r *supplierProviderRepoStub) ListCostTrends(_ context.Context, start, end 
 		return r.costTrends, nil
 	}
 	return []SupplierProviderCostTrendPoint{}, nil
+}
+
+func (r *supplierProviderRepoStub) ListCostBreakdowns(_ context.Context, start, end time.Time, providerID int64) ([]SupplierProviderCostBreakdown, error) {
+	if r.costBreakdowns != nil {
+		return r.costBreakdowns, nil
+	}
+	return []SupplierProviderCostBreakdown{}, nil
 }
 
 func (r *supplierProviderRepoStub) Summary(_ context.Context, params SupplierProviderListParams) (SupplierProviderSummary, error) {
@@ -483,6 +492,31 @@ func TestSupplierProviderServiceListCostTrendsByDateRange(t *testing.T) {
 	require.Equal(t, 0.0, result.Points[1].UpstreamCost)
 	require.Equal(t, "2026-07-12", result.Points[2].Date)
 	require.Equal(t, 3.0, result.Points[2].UpstreamCost)
+}
+
+func TestSupplierProviderServiceListCostTrendsIncludesCostBreakdown(t *testing.T) {
+	repo := &supplierProviderRepoStub{costBreakdowns: []SupplierProviderCostBreakdown{{
+		ProviderID:   7,
+		ProviderName: "主供应商",
+		ProviderType: "sub2api",
+		UpstreamCost: 42.5,
+		LocalCost:    17.25,
+	}}}
+	svc := NewSupplierProviderService(repo, supplierEncryptorStub{})
+
+	result, err := svc.ListCostTrendsByDateRange(context.Background(), "2026-07-10", "2026-07-12", 0)
+	require.NoError(t, err)
+	require.Len(t, result.Breakdown, 1)
+	require.Equal(t, int64(7), result.Breakdown[0].ProviderID)
+	require.Equal(t, "主供应商", result.Breakdown[0].ProviderName)
+	require.Equal(t, 42.5, result.Breakdown[0].UpstreamCost)
+	require.Equal(t, 17.25, result.Breakdown[0].LocalCost)
+
+	payload, err := json.Marshal(result)
+	require.NoError(t, err)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(payload, &body))
+	require.Contains(t, body, "breakdown")
 }
 
 func TestSupplierProviderServiceListCostTrendsByDateRangeRejectsInvalid(t *testing.T) {

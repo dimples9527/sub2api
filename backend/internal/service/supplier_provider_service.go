@@ -149,6 +149,15 @@ type SupplierProviderCostTrendPoint struct {
 	LocalCost    float64 `json:"local_cost"`
 }
 
+// SupplierProviderCostBreakdown 表示指定日期范围内单个供应商的成本拆分。
+type SupplierProviderCostBreakdown struct {
+	ProviderID   int64   `json:"provider_id"`
+	ProviderName string  `json:"provider_name"`
+	ProviderType string  `json:"provider_type"`
+	UpstreamCost float64 `json:"upstream_cost"`
+	LocalCost    float64 `json:"local_cost"`
+}
+
 // SupplierProviderCostTrendResult 是供应商组合成本趋势响应。
 type SupplierProviderCostTrendResult struct {
 	Days       int                              `json:"days"`
@@ -156,12 +165,14 @@ type SupplierProviderCostTrendResult struct {
 	EndDate    string                           `json:"end_date,omitempty"`
 	ProviderID int64                            `json:"provider_id,omitempty"`
 	Points     []SupplierProviderCostTrendPoint `json:"points"`
+	Breakdown  []SupplierProviderCostBreakdown  `json:"breakdown"`
 }
 
 type SupplierProviderRepository interface {
 	List(ctx context.Context, params SupplierProviderListParams) ([]*SupplierProvider, int64, error)
 	Summary(ctx context.Context, params SupplierProviderListParams) (SupplierProviderSummary, error)
 	ListCostTrends(ctx context.Context, start, end time.Time, providerID int64) ([]SupplierProviderCostTrendPoint, error)
+	ListCostBreakdowns(ctx context.Context, start, end time.Time, providerID int64) ([]SupplierProviderCostBreakdown, error)
 	GetByID(ctx context.Context, id int64) (*SupplierProvider, error)
 	Create(ctx context.Context, provider *SupplierProvider) error
 	Update(ctx context.Context, provider *SupplierProvider) error
@@ -348,6 +359,13 @@ func (s *SupplierProviderService) listCostTrendsBetween(ctx context.Context, sta
 	if err != nil {
 		return SupplierProviderCostTrendResult{}, fmt.Errorf("list supplier provider cost trends: %w", err)
 	}
+	rawBreakdown, err := s.repo.ListCostBreakdowns(ctx, start, endExclusive, providerID)
+	if err != nil {
+		return SupplierProviderCostTrendResult{}, fmt.Errorf("list supplier provider cost breakdowns: %w", err)
+	}
+	if rawBreakdown == nil {
+		rawBreakdown = []SupplierProviderCostBreakdown{}
+	}
 
 	byDate := make(map[string]SupplierProviderCostTrendPoint, len(rawPoints))
 	for _, point := range rawPoints {
@@ -370,6 +388,7 @@ func (s *SupplierProviderService) listCostTrendsBetween(ctx context.Context, sta
 		EndDate:    endInclusive.In(loc).Format("2006-01-02"),
 		ProviderID: providerID,
 		Points:     points,
+		Breakdown:  rawBreakdown,
 	}, nil
 }
 
