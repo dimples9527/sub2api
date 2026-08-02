@@ -358,7 +358,7 @@
 
     .col-mark { width: 86px; }
     .col-provider { width: 204px; }
-    .col-service { width: 88px; }
+    .col-platform { width: 112px; }
     .col-model { width: 112px; }
     .col-rate { width: 86px; }
     .col-availability { width: 98px; }
@@ -438,6 +438,21 @@
       border: 1px solid rgba(148, 163, 184, 0.28);
       background: rgba(148, 163, 184, 0.08);
       color: #c3d0df;
+    }
+    .platform-badge {
+      display: inline-flex;
+      align-items: center;
+      max-width: 100%;
+      padding: 4px 8px;
+      border: 1px solid rgba(83, 215, 245, 0.28);
+      border-radius: 7px;
+      background: linear-gradient(180deg, rgba(83, 215, 245, 0.12), rgba(83, 215, 245, 0.05));
+      color: #8ee7f8;
+      font-size: 12px;
+      line-height: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .model { color: #c0ccdb; }
     .rate {
@@ -711,7 +726,7 @@
       font-family: var(--font-metric);
       font-size: 13px;
     }
-    .card-service {
+    .card-platform {
       display: inline-flex;
       align-items: center;
       height: 22px;
@@ -958,17 +973,14 @@
               </div>
             </div>
           </div>
-          <div class="custom-select" data-filter="service" data-value="all">
+          <div class="custom-select" data-filter="platform" data-value="all">
             <button class="select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
-              <span class="select-label">全部服务</span>
+              <span class="select-label">全部平台</span>
               <span class="select-caret" aria-hidden="true"></span>
             </button>
             <div class="select-menu" role="listbox">
               <div class="select-options">
-                <button class="select-option selected" type="button" role="option" data-value="all">全部服务</button>
-                <button class="select-option" type="button" role="option" data-value="CC">Claude Code (CC)</button>
-                <button class="select-option" type="button" role="option" data-value="CX">Codex (CX)</button>
-                <button class="select-option" type="button" role="option" data-value="GM">Gemini (GM)</button>
+                <button class="select-option selected" type="button" role="option" data-value="all">全部平台</button>
               </div>
             </div>
           </div>
@@ -1032,7 +1044,7 @@
             <tr>
               <th class="col-mark">标注</th>
               <th class="col-provider sortable" data-sort="provider">服务商 <span class="sort-icon">↕</span></th>
-              <th class="col-service sortable" data-sort="service">服务 <span class="sort-icon">↕</span></th>
+              <th class="col-platform sortable" data-sort="groupPlatform">平台 <span class="sort-icon">↕</span></th>
               <th class="col-model sortable" data-sort="model">模型 <span class="sort-icon">↕</span></th>
               <th class="col-rate sortable" data-sort="rate">倍率 <span class="sort-icon">↕</span></th>
               <th class="col-availability sortable" data-sort="availability">可用率 <span class="sort-icon">↕</span></th>
@@ -1075,7 +1087,7 @@
         search: 'Search',
         searchPlaceholder: 'Search provider or model',
         searchSelectPlaceholder: 'Search...',
-        allServices: 'All services',
+        allPlatforms: 'All platforms',
         allChannels: 'All channels',
         selfOperated: 'Self-run',
         windowGroup: 'Time window',
@@ -1091,6 +1103,7 @@
         refreshInterval: 'Auto refresh interval (seconds)',
         annotations: 'Marks',
         provider: 'Provider',
+        platform: 'Platform',
         service: 'Service',
         model: 'Model',
         rate: 'Rate',
@@ -1129,7 +1142,7 @@
         search: '搜索',
         searchPlaceholder: '搜索服务商或模型',
         searchSelectPlaceholder: '搜索...',
-        allServices: '全部服务',
+        allPlatforms: '全部平台',
         allChannels: '全部通道',
         selfOperated: '自营',
         windowGroup: '时间窗口',
@@ -1145,6 +1158,7 @@
         refreshInterval: '自动刷新间隔（秒）',
         annotations: '标注',
         provider: '服务商',
+        platform: '平台',
         service: '服务',
         model: '模型',
         rate: '倍率',
@@ -1193,7 +1207,7 @@
       query: '',
       category: 'all',
       provider: 'all',
-      service: 'all',
+      platform: 'all',
       channel: 'all',
       window: '90m',
       view: 'list',
@@ -1231,7 +1245,7 @@
       document.querySelector('.toolbar')?.setAttribute('aria-label', t('toolbar'));
       setSelectInitial('category', 'allCategories', { all: 'allCategories', commercial: 'commercial' });
       setSelectInitial('provider', 'allProviders', { all: 'allProviders' });
-      setSelectInitial('service', 'allServices', { all: 'allServices' });
+      setSelectInitial('platform', 'allPlatforms', { all: 'allPlatforms' });
       setSelectInitial('channel', 'allChannels', { all: 'allChannels', '自营': 'selfOperated' });
 
       document.querySelector('.provider-select .select-search')?.setAttribute('placeholder', t('searchSelectPlaceholder'));
@@ -1252,7 +1266,7 @@
       const sortIcon = '<span class="sort-icon">↕</span>';
       document.querySelector('.col-mark').textContent = t('annotations');
       document.querySelector('.col-provider').innerHTML = `${t('provider')} ${sortIcon}`;
-      document.querySelector('.col-service').innerHTML = `${t('service')} ${sortIcon}`;
+      document.querySelector('.col-platform').innerHTML = `${t('platform')} ${sortIcon}`;
       document.querySelector('.col-model').innerHTML = `${t('model')} ${sortIcon}`;
       document.querySelector('.col-rate').innerHTML = `${t('rate')} ${sortIcon}`;
       document.querySelector('.col-availability').innerHTML = `${t('availability')} ${sortIcon}`;
@@ -1532,6 +1546,19 @@
       }
     }
 
+    function formatPlatformOption(platform) {
+      const normalized = String(platform || '').trim().toLowerCase();
+      const labels = {
+        anthropic: 'Anthropic',
+        openai: 'OpenAI',
+        gemini: 'Gemini',
+        antigravity: 'Antigravity',
+        grok: 'Grok',
+        composite: 'Composite'
+      };
+      return labels[normalized] || String(platform || '').trim();
+    }
+
     function serviceTone(code) {
       switch (String(code || '').toUpperCase()) {
         case 'CX': return 'cx';
@@ -1583,6 +1610,11 @@
           ${escapeHtml(normalized || 'N/A')}
         </span>
       `;
+    }
+
+    function platformBadge(value, extraClass = '') {
+      const platform = String(value || '').trim();
+      return `<span class="platform-badge ${extraClass}">${escapeHtml(platform || '—')}</span>`;
     }
 
     function formatCheckedTime(value, fallback = '--:--') {
@@ -1727,8 +1759,12 @@
         if (state.provider !== 'all' && !rows.some((row) => row.provider === state.provider)) {
           state.provider = 'all';
         }
-        if (state.service !== 'all' && !rows.some((row) => row.service === state.service)) {
-          state.service = 'all';
+        const availablePlatforms = uniqueValues([
+          ...rows.map((row) => row.groupPlatform),
+          ...Array.from(groupIndex.values()).map((group) => group.platform)
+        ]);
+        if (state.platform !== 'all' && !availablePlatforms.includes(state.platform)) {
+          state.platform = 'all';
         }
         if (state.channel !== 'all' && !rows.some((row) => row.channel === state.channel || row.note === state.channel)) {
           state.channel = 'all';
@@ -1817,7 +1853,7 @@
     function filterSummaryText() {
       const parts = [];
       if (state.category !== 'all') parts.push(state.category);
-      if (state.service !== 'all') parts.push(formatServiceOption(state.service));
+      if (state.platform !== 'all') parts.push(formatPlatformOption(state.platform));
       if (state.provider !== 'all') parts.push(state.provider);
       if (state.channel !== 'all') parts.push(state.channel);
       if (state.query) parts.push(t('filterSearch', { query: state.query }));
@@ -1825,7 +1861,7 @@
     }
 
     function searchText(row) {
-      return [row.provider, row.groupName, row.service, row.model, row.note, row.channel, row.category, row.rateMultiplier, row.availability, row.latency, row.time]
+      return [row.provider, row.groupName, row.groupPlatform, row.service, row.model, row.note, row.channel, row.category, row.rateMultiplier, row.availability, row.latency, row.time]
         .join(' ')
         .toLowerCase();
     }
@@ -1835,7 +1871,7 @@
       return rowsToFilter.filter((row) => {
         if (state.category !== 'all' && row.category !== state.category) return false;
         if (state.provider !== 'all' && row.provider !== state.provider) return false;
-        if (state.service !== 'all' && row.service !== state.service) return false;
+        if (state.platform !== 'all' && row.groupPlatform !== state.platform) return false;
         if (state.channel !== 'all' && row.channel !== state.channel && row.note !== state.channel) return false;
         if (query && !searchText(row).includes(query)) return false;
         return true;
@@ -1845,7 +1881,7 @@
     function compareBy(key, dir, a, b) {
       const av = a[key];
       const bv = b[key];
-      if (key === 'provider' || key === 'service' || key === 'model') {
+      if (key === 'provider' || key === 'groupPlatform' || key === 'service' || key === 'model') {
         return dir * String(av).localeCompare(String(bv), 'zh-Hans-CN');
       }
       if (key === 'rate' || key === 'availability' || key === 'latency') {
@@ -1971,7 +2007,7 @@
                 </span>
               </div>
               <div class="card-meta">
-                ${serviceBadge(row.service, 'card-service')}
+                ${platformBadge(row.groupPlatform, 'card-platform')}
                 <span>${t('multiplier')}<span class="card-rate">${escapeHtml(formatRate(row.rateMultiplier))}</span></span>
                 <span>⌁ ${t('cardAvailability')}<span class="card-availability">${row.availability.toFixed(row.availability % 1 ? 2 : 0)}%</span></span>
               </div>
@@ -2042,8 +2078,8 @@
                 <div class="provider-meta">${escapeHtml(row.note)}</div>
               </div>
             </td>
-            <td class="col-service">
-              ${serviceBadge(row.service)}
+            <td class="col-platform">
+              ${platformBadge(row.groupPlatform)}
             </td>
             <td class="col-model model">${escapeHtml(row.model)}</td>
             <td class="col-rate rate">${escapeHtml(formatRate(row.rateMultiplier))}</td>
@@ -2113,14 +2149,18 @@
     function populateFilterOptions() {
       replaceOptions('category', t('allCategories'), uniqueValues(rows.map((row) => row.category)), state.category, (value) => value === 'commercial' ? t('commercial') : value);
       replaceOptions('provider', t('allProviders'), uniqueValues(rows.map((row) => row.provider)), state.provider);
-      replaceOptions('service', t('allServices'), uniqueValues(rows.map((row) => row.service)), state.service, formatServiceOption);
+      const platforms = uniqueValues([
+        ...rows.map((row) => row.groupPlatform),
+        ...Array.from(groupIndex.values()).map((group) => group.platform)
+      ]);
+      replaceOptions('platform', t('allPlatforms'), platforms, state.platform, formatPlatformOption);
       replaceOptions('channel', t('allChannels'), uniqueValues(rows.map((row) => row.channel || row.note)), state.channel);
     }
 
     function syncAllSelects() {
       syncSelect(document.querySelector('.custom-select[data-filter="category"]'), state.category);
       syncSelect(document.querySelector('.custom-select[data-filter="provider"]'), state.provider);
-      syncSelect(document.querySelector('.custom-select[data-filter="service"]'), state.service);
+      syncSelect(document.querySelector('.custom-select[data-filter="platform"]'), state.platform);
       syncSelect(document.querySelector('.custom-select[data-filter="channel"]'), state.channel);
     }
 
@@ -2154,7 +2194,7 @@
           switch (select.dataset.filter) {
             case 'category': state.category = value; break;
             case 'provider': state.provider = value; break;
-            case 'service': state.service = value; break;
+            case 'platform': state.platform = value; break;
             case 'channel': state.channel = value; break;
           }
           renderTable();
