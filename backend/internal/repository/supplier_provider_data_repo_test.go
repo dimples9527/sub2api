@@ -53,37 +53,40 @@ func TestSupplierProviderDataRepositoryListGroupHealthTrendsUsesHealthGuardHisto
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestSupplierProviderDataRepositoryListLocalGroupHealthTrendsResolvesAccountGroupToLocalGroup(t *testing.T) {
+func TestSupplierProviderDataRepositoryListLocalGroupHealthTrendsResolvesAccountToEveryBoundLocalGroup(t *testing.T) {
 	repo, mock := newSupplierProviderDataRepoMock(t)
 	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
-	mock.ExpectQuery(`(?s)SELECT g\.local_group_id AS group_id,.*FROM supplier_automation_runs run.*JOIN supplier_provider_accounts account.*JOIN supplier_provider_groups g.*g\.local_group_id = ANY\(\$4\)`).
+	mock.ExpectQuery(`(?s)SELECT account_group\.group_id AS group_id,.*\(item->>'local_account_id'\)::bigint AS account_id,.*FROM supplier_automation_runs run.*JOIN supplier_provider_accounts account.*JOIN account_groups account_group.*account_group\.group_id = ANY\(\$4\)`).
 		WithArgs(
 			service.SupplierAutomationTaskAccountHealthGuard,
 			now.Add(-24*time.Hour),
 			now,
-			"{101}",
+			"{101,202}",
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"group_id", "account_id", "status", "latency_ms", "finished_at"}).
-			AddRow(int64(101), int64(98), service.SupplierAccountHealthGuardStatusHealthy, int64(140), now.Add(-time.Minute)))
+			AddRow(int64(101), int64(98), service.SupplierAccountHealthGuardStatusHealthy, int64(140), now.Add(-time.Minute)).
+			AddRow(int64(202), int64(98), service.SupplierAccountHealthGuardStatusHealthy, int64(140), now.Add(-time.Minute)))
 
 	trends, err := repo.ListLocalGroupHealthTrends(context.Background(), service.SupplierProviderGroupHealthTrendParams{
-		GroupIDs:    []int64{101},
+		GroupIDs:    []int64{101, 202},
 		Period:      24 * time.Hour,
 		BucketCount: 18,
 		Now:         now,
 	})
 
 	require.NoError(t, err)
-	require.Len(t, trends, 1)
+	require.Len(t, trends, 2)
 	require.Equal(t, int64(101), trends[0].GroupID)
+	require.Equal(t, int64(202), trends[1].GroupID)
 	require.Equal(t, 100.0, trends[0].Availability)
+	require.Equal(t, 100.0, trends[1].Availability)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestSupplierProviderDataRepositoryListLocalGroupHealthTrendsAllHistoryOmitsLowerBound(t *testing.T) {
 	repo, mock := newSupplierProviderDataRepoMock(t)
 	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
-	mock.ExpectQuery(`(?s)SELECT g\.local_group_id AS group_id,.*WHERE run\.task_code = \$1\s+AND run\.finished_at IS NOT NULL\s+AND run\.finished_at <= \$2\s+AND g\.local_group_id IS NOT NULL\s+AND g\.local_group_id = ANY\(\$3\)`).
+	mock.ExpectQuery(`(?s)SELECT account_group\.group_id AS group_id,.*\(item->>'local_account_id'\)::bigint AS account_id,.*JOIN account_groups account_group.*WHERE run\.task_code = \$1\s+AND run\.finished_at IS NOT NULL\s+AND run\.finished_at <= \$2\s+AND account_group\.group_id IS NOT NULL\s+AND account_group\.group_id = ANY\(\$3\)`).
 		WithArgs(
 			service.SupplierAutomationTaskAccountHealthGuard,
 			now,

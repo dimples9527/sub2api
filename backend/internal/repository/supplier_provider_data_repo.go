@@ -309,8 +309,19 @@ func (r *supplierProviderDataRepository) listHealthTrends(ctx context.Context, p
 	}
 
 	groupColumn := "g.id"
+	accountIDColumn := "(source->>'supplier_provider_account_id')::bigint"
+	groupJoinSQL := `
+JOIN supplier_provider_groups g
+  ON g.provider_id = account.provider_id
+ AND g.upstream_group_key = account.group_key
+`
 	if byLocalGroup {
-		groupColumn = "g.local_group_id"
+		groupColumn = "account_group.group_id"
+		accountIDColumn = "(item->>'local_account_id')::bigint"
+		groupJoinSQL = `
+JOIN account_groups account_group
+  ON account_group.account_id = (item->>'local_account_id')::bigint
+`
 	}
 	whereSQL := fmt.Sprintf(`
 WHERE run.task_code = $1
@@ -342,7 +353,7 @@ WHERE run.task_code = $1
 	}
 	query := fmt.Sprintf(`
 SELECT %s AS group_id,
-       (source->>'supplier_provider_account_id')::bigint AS account_id,
+       %s AS account_id,
        COALESCE(item->>'status', '') AS status,
        COALESCE((item->>'latency_ms')::bigint, 0) AS latency_ms,
        run.finished_at
@@ -356,11 +367,9 @@ CROSS JOIN LATERAL jsonb_array_elements(
 JOIN supplier_provider_accounts account
   ON account.id = (source->>'supplier_provider_account_id')::bigint
  AND account.active = TRUE
-JOIN supplier_provider_groups g
-  ON g.provider_id = account.provider_id
- AND g.upstream_group_key = account.group_key
+%s
 
-%s`, groupColumn, whereSQL)
+%s`, groupColumn, accountIDColumn, groupJoinSQL, whereSQL)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query supplier provider group health trends: %w", err)
