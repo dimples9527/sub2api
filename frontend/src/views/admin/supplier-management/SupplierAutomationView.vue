@@ -1540,6 +1540,7 @@ interface HealthGuardAccountMapping {
   localAccountID: number
   localAccountName: string
   platform: string
+  localGroupPlatforms: string[]
   available: boolean
   sources: SupplierProviderAccount[]
 }
@@ -1560,6 +1561,14 @@ function effectiveHealthGuardPlatform(account: SupplierProviderAccount): string 
   )
 }
 
+function healthGuardLocalGroupPlatforms(account: SupplierProviderAccount): string[] {
+  const platforms = Array.from(new Set(
+    account.binding_groups.map(group => normalizeHealthGuardPlatform(group.platform))
+      .filter(platform => platform !== 'unknown')
+  ))
+  return platforms.length ? platforms : [effectiveHealthGuardPlatform(account)]
+}
+
 function isHealthGuardAccountAvailable(account: SupplierProviderAccount): boolean {
   return account.active
     && account.local_account_match_status === 'matched'
@@ -1576,6 +1585,10 @@ const healthGuardAccountMappings = computed<HealthGuardAccountMapping[]>(() => {
     const current = grouped.get(localAccountID)
     if (current) {
       current.sources.push(account)
+      current.localGroupPlatforms = Array.from(new Set([
+        ...current.localGroupPlatforms,
+        ...healthGuardLocalGroupPlatforms(account),
+      ]))
       if (available) {
         current.available = true
         current.platform = effectiveHealthGuardPlatform(account)
@@ -1588,6 +1601,7 @@ const healthGuardAccountMappings = computed<HealthGuardAccountMapping[]>(() => {
       localAccountID,
       localAccountName: account.local_account_name || `账号 #${localAccountID}`,
       platform: effectiveHealthGuardPlatform(account),
+      localGroupPlatforms: healthGuardLocalGroupPlatforms(account),
       available,
       sources: [account],
     })
@@ -1610,16 +1624,18 @@ const healthGuardSelectedAccountRows = computed(() =>
 const healthGuardPlatformSummaries = computed<HealthGuardPlatformSummary[]>(() => {
   const summaries = new Map<string, HealthGuardPlatformSummary>()
   for (const mapping of healthGuardAvailableAccountMappings.value) {
-    const current = summaries.get(mapping.platform)
-    if (current) {
-      current.accountCount += 1
-      continue
+    for (const platform of mapping.localGroupPlatforms) {
+      const current = summaries.get(platform)
+      if (current) {
+        current.accountCount += 1
+        continue
+      }
+      summaries.set(platform, {
+        platform,
+        accountCount: 1,
+        representativeAccountID: mapping.localAccountID,
+      })
     }
-    summaries.set(mapping.platform, {
-      platform: mapping.platform,
-      accountCount: 1,
-      representativeAccountID: mapping.localAccountID,
-    })
   }
   return Array.from(summaries.values()).sort((a, b) => platformLabel(a.platform).localeCompare(platformLabel(b.platform), 'zh-CN'))
 })
@@ -1676,13 +1692,14 @@ const healthGuardWorkspaceAccounts = computed(() => {
   const keyword = healthGuardAccountSearch.value.trim().toLowerCase()
   return accounts.filter(mapping => {
     if (healthGuardSelectedOnly.value && !healthGuardAccountIDs.value.includes(mapping.localAccountID)) return false
-    if (platform && mapping.platform !== platform) return false
+    if (platform && !mapping.localGroupPlatforms.includes(platform)) return false
     if (providerID && !mapping.sources.some(source => String(source.provider_id) === providerID)) return false
     if (!keyword) return true
     const searchableText = [
       mapping.localAccountName,
       String(mapping.localAccountID),
       mapping.platform,
+      ...mapping.localGroupPlatforms,
       ...mapping.sources.flatMap(source => [source.name, source.provider_name, source.upstream_account_key]),
     ].filter(Boolean).join(' ').toLowerCase()
     return searchableText.includes(keyword)
@@ -1720,6 +1737,7 @@ function healthGuardSelectedRowsForConfig(config: SupplierAutomationConfig): Hea
     localAccountID: id,
     localAccountName: `账号 #${id}`,
     platform: 'unknown',
+    localGroupPlatforms: ['unknown'],
     available: false,
     sources: [],
   })

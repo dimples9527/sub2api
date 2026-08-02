@@ -431,13 +431,25 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('platform: effectiveHealthGuardPlatform(account)')
   })
 
+  it('filters health guard accounts by their bound local group platforms', () => {
+    expect(supplierAutomationSource).toContain(
+      'function healthGuardLocalGroupPlatforms(account: SupplierProviderAccount): string[] {'
+    )
+    expect(supplierAutomationSource).toContain(
+      'account.binding_groups.map(group => normalizeHealthGuardPlatform(group.platform))'
+    )
+    expect(supplierAutomationSource).toContain('localGroupPlatforms: string[]')
+    expect(supplierAutomationSource).toContain('mapping.localGroupPlatforms.includes(platform)')
+    expect(supplierAutomationSource).toContain('for (const platform of mapping.localGroupPlatforms)')
+  })
+
   it('renders health guard accounts as a unified selectable workspace', () => {
     expect(supplierAutomationSource).toContain('healthGuardSelectedOnly')
     expect(supplierAutomationSource).toContain('healthGuardWorkspaceAccounts')
     expect(supplierAutomationSource).toContain('healthGuardSelectionSummary')
     expect(supplierAutomationSource).toContain('仅看已选')
     expect(supplierAutomationSource).toContain('使用平台默认')
-    expect(supplierAutomationSource).toContain('账号覆盖')
+    expect(supplierAutomationSource).toContain('>覆盖</span>')
     expect(supplierAutomationSource).toContain('.sp-health-guard-account-row.selected')
     expect(supplierAutomationSource).toContain('.sp-health-guard-account-row.missing-model')
     expect(supplierAutomationSource).toContain('color: var(--sp-green)')
@@ -446,12 +458,12 @@ describe('SupplierAutomationView edit dialog', () => {
   })
 
   it('keeps the selected-account filter from overlapping its result and colors account platforms', () => {
-    expect(supplierAutomationSource).toContain("import { platformBadgeClass, platformLabel } from '@/utils/platformColors'")
+    expect(supplierAutomationSource).toContain("import { platformBadgeClass, platformLabel, platformTextClass } from '@/utils/platformColors'")
     expect(supplierAutomationSource).toContain(":class=\"['sp-health-guard-account-platform', platformBadgeClass(mapping.platform)]\"")
     expect(supplierAutomationSource).toContain('.sp-health-guard-account-toolbar')
     expect(supplierAutomationSource).toContain('flex-wrap: wrap')
     expect(supplierAutomationSource).toContain('flex: 1 1 640px')
-    expect(supplierAutomationSource).toContain('span:not(.sp-health-guard-account-platform)')
+    expect(supplierAutomationSource).toContain('.sp-health-guard-account-source')
   })
 
   it('applies the automation dialog palette to the teleported health guard workspace', () => {
