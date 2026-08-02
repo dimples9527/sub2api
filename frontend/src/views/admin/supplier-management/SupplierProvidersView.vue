@@ -237,27 +237,22 @@
             </div>
           </section>
 
-          <div class="sp-health-cost-controls" data-test="supplier-cost-controls">
-            <div class="sp-health-cost-controls-copy">
-              <strong>成本日期范围</strong>
-              <small>同时应用于下方两个成本图表</small>
-            </div>
-            <div class="sp-health-date-range-control">
-              <span class="sp-health-control-label">日期范围</span>
-              <div class="sp-health-date-range" data-test="supplier-cost-date-range">
-                <DateRangePicker
-                  v-model:start-date="costTrendStartDate"
-                  v-model:end-date="costTrendEndDate"
-                  @change="onCostTrendDateRangeChange"
-                />
-              </div>
-            </div>
-          </div>
-
           <section class="sp-health-section sp-health-chart-section" data-test="supplier-cost-trend">
-            <div class="sp-health-section-head">
-              <span>成本对比</span>
-              <small>{{ costTrendRangeLabel }} · {{ costTrendScopeLabel }} · 上游成本 / 本地成本</small>
+            <div class="sp-health-section-head sp-health-cost-section-head">
+              <div class="sp-health-section-title">
+                <span>成本对比</span>
+                <small>{{ costTrendRangeLabel }} · {{ costTrendScopeLabel }} · 上游成本 / 本地成本</small>
+              </div>
+              <div class="sp-health-date-range-control" data-test="supplier-cost-controls">
+                <span class="sp-health-control-label">日期范围</span>
+                <div class="sp-health-date-range" data-test="supplier-cost-date-range">
+                  <DateRangePicker
+                    v-model:start-date="costTrendStartDate"
+                    v-model:end-date="costTrendEndDate"
+                    @change="onCostTrendDateRangeChange"
+                  />
+                </div>
+              </div>
             </div>
 
             <div class="sp-health-chart-controls">
@@ -2718,29 +2713,42 @@ function errorMessage(err: unknown, fallback: string): string {
   gap: 0.75rem;
 }
 
-.sp-health-section-head span {
+.sp-health-section-title {
+  min-width: 0;
+}
+
+.sp-health-section-head > span,
+.sp-health-section-title > span {
   color: var(--sp-text);
   font-size: 0.8125rem;
   font-weight: 800;
 }
 
-.sp-health-section-head small {
+.sp-health-section-head > small {
   color: var(--sp-muted);
   font-size: 0.72rem;
 }
 
+.sp-health-section-title > small {
+  color: var(--sp-muted);
+  font-size: 0.72rem;
+  display: block;
+  margin-top: 0.2rem;
+}
+
 .sp-health-todo-list {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.5rem;
 }
 
 .sp-health-todo {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
   width: 100%;
+  min-width: 0;
   padding: 0.7rem 0.8rem;
   border: 1px solid var(--sp-line);
   border-radius: 0.75rem;
@@ -2784,13 +2792,27 @@ function errorMessage(err: unknown, fallback: string): string {
 
 .sp-health-todo-action {
   flex-shrink: 0;
+  margin-top: 0.1rem;
   color: var(--sp-cyan);
   font-size: 0.72rem;
   font-weight: 800;
 }
 
 .sp-health-completeness-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.5rem;
+  margin-top: 0;
+}
+
+.sp-health-completeness-list .sp-list-item {
+  align-items: flex-start;
+  min-width: 0;
+  height: 100%;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.75rem;
+  background: var(--sp-panel);
 }
 
 .sp-health-chart-meta {
@@ -2889,34 +2911,13 @@ function errorMessage(err: unknown, fallback: string): string {
   flex-wrap: wrap;
 }
 
-.sp-health-cost-controls {
-  display: flex;
+.sp-health-cost-section-head {
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
   flex-wrap: wrap;
-  padding: 0.7rem 0.8rem;
-  border: 1px solid color-mix(in srgb, var(--sp-cyan) 22%, var(--sp-line));
-  border-radius: 0.75rem;
-  background: color-mix(in srgb, var(--sp-cyan) 5%, var(--sp-panel));
 }
 
-.sp-health-cost-controls-copy {
-  min-width: 0;
-}
-
-.sp-health-cost-controls-copy strong {
-  display: block;
-  color: var(--sp-text);
-  font-size: 0.8125rem;
-  font-weight: 800;
-}
-
-.sp-health-cost-controls-copy small {
-  display: block;
-  margin-top: 0.2rem;
-  color: var(--sp-muted);
-  font-size: 0.72rem;
+.sp-health-cost-section-head .sp-health-date-range-control {
+  flex: 0 1 auto;
 }
 
 .sp-health-date-range-control {
@@ -2970,7 +2971,15 @@ function errorMessage(err: unknown, fallback: string): string {
 }
 
 @media (max-width: 640px) {
-  .sp-health-date-range-control {
+  .sp-health-todo-list {
+    grid-template-columns: 1fr;
+  }
+
+  .sp-health-completeness-list {
+    grid-template-columns: 1fr;
+  }
+
+  .sp-health-cost-section-head .sp-health-date-range-control {
     width: 100%;
     flex-basis: 100%;
     justify-content: flex-start;

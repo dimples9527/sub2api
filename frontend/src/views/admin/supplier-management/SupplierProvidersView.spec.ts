@@ -358,6 +358,16 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(supplierProvidersSource).not.toContain('class="sp-stat-list"')
   })
 
+  it('lays out the health detail list below priority todos as a compact full-width grid', () => {
+    const listStyle = supplierProvidersSource.match(
+      /\.sp-health-completeness-list\s*\{[\s\S]*?\n\}/,
+    )?.[0] ?? ''
+
+    expect(listStyle).toContain('display: grid')
+    expect(listStyle).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))')
+    expect(supplierProvidersSource).toContain('.sp-health-completeness-list .sp-list-item')
+  })
+
   it('renders grouped upstream and local cost bars for each supplier', async () => {
     const wrapper = await mountSupplierProviders()
 
@@ -437,12 +447,12 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(wrapper.get('[data-test="supplier-cost-date-range"]').exists()).toBe(true)
   })
 
-  it('places the shared cost date range control above both cost charts', async () => {
+  it('places the shared cost date range control in the cost chart heading', async () => {
     const wrapper = await mountSupplierProviders()
 
-    const controls = wrapper.get('[data-test="supplier-cost-controls"]')
+    const trend = wrapper.get('[data-test="supplier-cost-trend"]')
+    const controls = trend.get('[data-test="supplier-cost-controls"]')
     expect(controls.get('[data-test="supplier-cost-date-range"]').exists()).toBe(true)
-    expect(wrapper.get('[data-test="supplier-cost-trend"]').find('[data-test="supplier-cost-controls"]').exists()).toBe(false)
     expect(wrapper.get('[data-test="supplier-cost-breakdown"]').find('[data-test="supplier-cost-controls"]').exists()).toBe(false)
   })
 
