@@ -23,6 +23,11 @@ vi.mock('vue-chartjs', () => ({
     props: ['data', 'options'],
     template: '<div class="supplier-cost-trend-chart" data-test="supplier-cost-trend-chart" />',
   },
+  Bar: {
+    name: 'Bar',
+    props: ['data', 'options'],
+    template: '<div class="supplier-cost-breakdown-chart" data-test="supplier-cost-breakdown-chart" />',
+  },
 }))
 
 vi.mock('@/api/admin/supplierProviders', () => ({
@@ -124,6 +129,10 @@ describe('SupplierProvidersView payload normalization', () => {
       points: [
         { date: '2026-07-16', upstream_cost: 12, local_cost: 10 },
         { date: '2026-07-17', upstream_cost: 15, local_cost: 14 },
+      ],
+      breakdown: [
+        { provider_id: 1, provider_name: 'Alpha', provider_type: 'sub2api', upstream_cost: 120, local_cost: 80 },
+        { provider_id: 2, provider_name: 'Beta', provider_type: 'sub2api', upstream_cost: 90, local_cost: 45 },
       ],
     })
     providerViewMocks.backfillCostTrends.mockResolvedValue({
@@ -349,6 +358,26 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(supplierProvidersSource).not.toContain('class="sp-stat-list"')
   })
 
+  it('renders grouped upstream and local cost bars for each supplier', async () => {
+    const wrapper = await mountSupplierProviders()
+
+    const chart = wrapper.get('[data-test="supplier-cost-breakdown-chart"]')
+    expect(chart.exists()).toBe(true)
+
+    const bar = wrapper.findComponent({ name: 'Bar' })
+    expect(bar.exists()).toBe(true)
+    expect(bar.props('data')).toMatchObject({
+      labels: ['Alpha', 'Beta'],
+      datasets: [
+        { label: '上游成本', data: [120, 90] },
+        { label: '本地成本', data: [80, 45] },
+      ],
+    })
+    expect(supplierProvidersSource).toContain('costBreakdownChartData')
+    expect(supplierProvidersSource).toContain('costBreakdownChartOptions')
+    expect(supplierProvidersSource).toContain('Bar')
+  })
+
   it('shows priority todos and filters high-risk providers when a health todo is clicked', async () => {
     providerViewMocks.listProviders.mockResolvedValueOnce({
       items: [
@@ -406,6 +435,15 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(wrapper.get('[data-test="supplier-cost-controls"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="supplier-cost-provider"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="supplier-cost-date-range"]').exists()).toBe(true)
+  })
+
+  it('places the shared cost date range control above both cost charts', async () => {
+    const wrapper = await mountSupplierProviders()
+
+    const controls = wrapper.get('[data-test="supplier-cost-controls"]')
+    expect(controls.get('[data-test="supplier-cost-date-range"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="supplier-cost-trend"]').find('[data-test="supplier-cost-controls"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="supplier-cost-breakdown"]').find('[data-test="supplier-cost-controls"]').exists()).toBe(false)
   })
 
   it('syncs cost trend provider when a table row is selected', async () => {

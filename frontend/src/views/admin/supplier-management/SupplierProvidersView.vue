@@ -237,13 +237,13 @@
             </div>
           </section>
 
-          <section class="sp-health-section sp-health-chart-section" data-test="supplier-cost-trend">
-            <div class="sp-health-section-head">
-              <span>成本对比</span>
-              <small>{{ costTrendRangeLabel }} · {{ costTrendScopeLabel }} · 上游成本 / 本地成本</small>
+          <div class="sp-health-cost-controls" data-test="supplier-cost-controls">
+            <div class="sp-health-cost-controls-copy">
+              <strong>成本日期范围</strong>
+              <small>同时应用于下方两个成本图表</small>
             </div>
-
-            <div class="sp-health-chart-controls" data-test="supplier-cost-controls">
+            <div class="sp-health-date-range-control">
+              <span class="sp-health-control-label">日期范围</span>
               <div class="sp-health-date-range" data-test="supplier-cost-date-range">
                 <DateRangePicker
                   v-model:start-date="costTrendStartDate"
@@ -251,6 +251,16 @@
                   @change="onCostTrendDateRangeChange"
                 />
               </div>
+            </div>
+          </div>
+
+          <section class="sp-health-section sp-health-chart-section" data-test="supplier-cost-trend">
+            <div class="sp-health-section-head">
+              <span>成本对比</span>
+              <small>{{ costTrendRangeLabel }} · {{ costTrendScopeLabel }} · 上游成本 / 本地成本</small>
+            </div>
+
+            <div class="sp-health-chart-controls">
               <div class="sp-health-provider-filter w-full sm:w-44 flex items-center gap-2">
                 <Select
                   v-model="costTrendProviderId"
@@ -297,26 +307,28 @@
           <section class="sp-health-section" data-test="supplier-cost-breakdown">
             <div class="sp-health-section-head">
               <span>按供应商拆分成本</span>
-              <small>上游 vs 本地 · 占比</small>
+              <small>{{ costTrendRangeLabel }} · 每个供应商并排比较上游成本和本地成本</small>
             </div>
-            <div class="sp-health-breakdown-list">
-              <div v-for="item in costBreakdown" :key="item.id" class="sp-health-breakdown-item">
-                <div class="sp-health-breakdown-row">
-                  <div class="sp-health-breakdown-name">
-                    <span class="sp-health-breakdown-dot" :style="{ backgroundColor: getProviderColor(item.provider_type) }"></span>
-                    <span>{{ item.name }}</span>
-                  </div>
-                  <div class="sp-health-breakdown-values">
-                    <b>{{ currency(item.upstreamCost) }}</b>
-                    <span>{{ currency(item.localCost) }}</span>
-                    <em>{{ (item.ratio * 100).toFixed(0) }}%</em>
-                  </div>
-                </div>
-                <div class="sp-health-breakdown-bar">
-                  <div class="sp-health-breakdown-bar-fill" :style="{ width: (item.ratio * 100) + '%' }"></div>
-                </div>
+            <div class="sp-health-chart-meta">
+              <div class="sp-health-chart-legend">
+                <span class="sp-health-legend-item upstream"><i></i>上游成本</span>
+                <span class="sp-health-legend-item local"><i></i>本地成本</span>
               </div>
-              <div v-if="!costBreakdown.length" class="sp-health-chart-empty">暂无供应商成本数据</div>
+              <div class="sp-health-chart-totals">
+                <span>供应商 <b>{{ costBreakdown.length }}</b> 个</span>
+              </div>
+            </div>
+            <div class="sp-health-breakdown-chart-scroll" data-test="supplier-cost-breakdown-chart-container">
+              <div class="sp-health-breakdown-chart" :style="{ minWidth: costBreakdownChartMinWidth }">
+                <Bar
+                  v-if="costBreakdownChartData"
+                  :data="costBreakdownChartData"
+                  :options="costBreakdownChartOptions"
+                  data-test="supplier-cost-breakdown-chart"
+                />
+                <div v-else-if="costTrendLoading" class="sp-health-chart-empty">供应商成本加载中…</div>
+                <div v-else class="sp-health-chart-empty">暂无供应商成本数据，可调整时间范围后重试</div>
+              </div>
             </div>
           </section>
         </div>
@@ -659,13 +671,14 @@ import {
   LinearScale,
   PointElement,
   LineElement,
+  BarElement,
   Filler,
   Tooltip,
   Legend,
   type ChartOptions,
   type TooltipItem,
 } from 'chart.js'
-import { Line } from 'vue-chartjs'
+import { Bar, Line } from 'vue-chartjs'
 import { SupplierDrawer, SupplierModuleLayout } from '@/components/admin/supplier-management'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import DataTable from '@/components/common/DataTable.vue'
@@ -680,7 +693,7 @@ import { syncProvider, testProviderEndpoint, type SupplierProviderEndpointTestRe
 import { useAppStore } from '@/stores/app'
 import type { Column } from '@/components/common/types'
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Filler, Tooltip, Legend)
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Filler, Tooltip, Legend)
 
 type Tone = 'good' | 'warn' | 'bad' | 'info' | ''
 type ProviderQuickFilter = 'all' | 'enabled' | 'disabled' | 'default'
@@ -981,6 +994,15 @@ const costTrendTotals = computed(() =>
   }, { upstream: 0, local: 0 }),
 )
 
+const costBreakdown = computed(() =>
+  costTrendBreakdown.value.map(provider => ({
+    id: provider.provider_id,
+    name: provider.provider_name,
+    upstreamCost: Number(provider.upstream_cost || 0),
+    localCost: Number(provider.local_cost || 0),
+  })),
+)
+
 const costTrendChartData = computed(() => {
   if (!costTrendPoints.value.length) return null
   const hasValue = costTrendPoints.value.some(point => Number(point.upstream_cost || 0) > 0 || Number(point.local_cost || 0) > 0)
@@ -1047,6 +1069,97 @@ const costTrendChartOptions = computed<ChartOptions<'line'>>(() => {
           },
         },
         grid: { display: false },
+      },
+    },
+  }
+})
+
+const costBreakdownChartData = computed(() => {
+  if (!costBreakdown.value.length) return null
+  const hasValue = costBreakdown.value.some(item => item.upstreamCost > 0 || item.localCost > 0)
+  if (!hasValue) return null
+
+  return {
+    labels: costBreakdown.value.map(item => item.name),
+    datasets: [
+      {
+        label: '上游成本',
+        data: costBreakdown.value.map(item => item.upstreamCost),
+        backgroundColor: '#3b82f6',
+        borderColor: '#2563eb',
+        borderWidth: 1,
+        borderRadius: 4,
+        borderSkipped: false,
+        barPercentage: 0.42,
+        categoryPercentage: 0.72,
+        maxBarThickness: 36,
+      },
+      {
+        label: '本地成本',
+        data: costBreakdown.value.map(item => item.localCost),
+        backgroundColor: '#d97706',
+        borderColor: '#b45309',
+        borderWidth: 1,
+        borderRadius: 4,
+        borderSkipped: false,
+        barPercentage: 0.42,
+        categoryPercentage: 0.72,
+        maxBarThickness: 36,
+      },
+    ],
+  }
+})
+
+const costBreakdownChartMinWidth = computed(() => `${Math.max(100, costBreakdown.value.length * 120)}px`)
+
+const costBreakdownChartOptions = computed<ChartOptions<'bar'>>(() => {
+  const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: 'index' as const, intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: isDark ? '#1f2937' : '#ffffff',
+        titleColor: isDark ? '#f9fafb' : '#111827',
+        bodyColor: isDark ? '#d1d5db' : '#334155',
+        borderColor: isDark ? '#374151' : '#e2e8f0',
+        borderWidth: 1,
+        callbacks: {
+          label(context: TooltipItem<'bar'>) {
+            const label = context.dataset.label || ''
+            const value = Number(context.parsed.y ?? 0)
+            return `${label}: ${currency(value)}`
+          },
+        },
+      },
+    },
+    scales: {
+      x: {
+        ticks: {
+          color: isDark ? '#9ca3af' : '#64748b',
+          maxRotation: 0,
+          minRotation: 0,
+          autoSkip: false,
+          callback(value: string | number) {
+            const label = costBreakdown.value[Number(value)]?.name || ''
+            return label.length > 12 ? `${label.slice(0, 12)}…` : label
+          },
+        },
+        grid: { display: false },
+      },
+      y: {
+        beginAtZero: true,
+        ticks: {
+          color: isDark ? '#9ca3af' : '#64748b',
+          callback(value: string | number) {
+            const num = Number(value)
+            if (Math.abs(num) >= 1000) return `¥${(num / 1000).toFixed(1)}k`
+            return `¥${num}`
+          },
+        },
+        grid: { color: isDark ? 'rgba(148, 163, 184, 0.16)' : 'rgba(148, 163, 184, 0.22)' },
       },
     },
   }
@@ -1693,31 +1806,6 @@ function errorMessage(err: unknown, fallback: string): string {
   return fallback
 }
 
-const costBreakdown = computed(() =>
-  costTrendBreakdown.value.map(provider => {
-    const upstream = Number(provider.upstream_cost || 0)
-    const local = Number(provider.local_cost || 0)
-    const total = upstream + local
-    return {
-      id: provider.provider_id,
-      name: provider.provider_name,
-      provider_type: provider.provider_type,
-      upstreamCost: upstream,
-      localCost: local,
-      ratio: total > 0 ? upstream / total : 0,
-    }
-  }),
-)
-
-function getProviderColor(providerType: string): string {
-  const type = (providerType || '').toLowerCase()
-  if (type.includes('sub2api')) return '#3b82f6'
-  if (type.includes('openai')) return '#10b981'
-  if (type.includes('anthropic') || type.includes('claude')) return '#8b5cf6'
-  if (type.includes('gemini')) return '#f59e0b'
-  if (type.includes('local')) return '#6b7280'
-  return '#94a3b8'
-}
 </script>
 
 <style scoped>
@@ -2774,80 +2862,22 @@ function getProviderColor(providerType: string): string {
   padding: 0.75rem;
 }
 
-.sp-health-breakdown-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.sp-health-breakdown-item {
-  padding: 0.5rem 0.625rem;
+.sp-health-breakdown-chart-scroll {
+  overflow-x: auto;
   border: 1px solid var(--sp-line);
-  border-radius: 0.625rem;
-  background: color-mix(in srgb, var(--sp-panel) 96%, #94a3b8);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--sp-panel) 94%, #94a3b8);
 }
 
-.sp-health-breakdown-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
+.sp-health-breakdown-chart {
+  position: relative;
+  height: 270px;
+  min-width: 100%;
+  padding: 0.75rem 0.5rem 0.5rem;
 }
 
-.sp-health-breakdown-name {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.8125rem;
-  color: var(--sp-text);
-  min-width: 0;
-}
-
-.sp-health-breakdown-name span:last-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sp-health-breakdown-dot {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 999px;
-  flex-shrink: 0;
-}
-
-.sp-health-breakdown-values {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  font-size: 0.75rem;
-  color: var(--sp-muted);
-}
-
-.sp-health-breakdown-values b {
-  font-size: 0.8125rem;
-  color: var(--sp-text);
-  font-variant-numeric: tabular-nums;
-}
-
-.sp-health-breakdown-values em {
-  font-style: normal;
-  color: var(--sp-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.sp-health-breakdown-bar {
-  margin-top: 0.375rem;
-  height: 4px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--sp-line) 60%, transparent);
-  overflow: hidden;
-}
-
-.sp-health-breakdown-bar-fill {
-  height: 100%;
-  background: var(--sp-cyan);
-  border-radius: 999px;
+.sp-health-breakdown-chart :deep(canvas) {
+  display: block;
 }
 
 
@@ -2857,6 +2887,51 @@ function getProviderColor(providerType: string): string {
   justify-content: space-between;
   gap: 0.625rem;
   flex-wrap: wrap;
+}
+
+.sp-health-cost-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--sp-cyan) 22%, var(--sp-line));
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--sp-cyan) 5%, var(--sp-panel));
+}
+
+.sp-health-cost-controls-copy {
+  min-width: 0;
+}
+
+.sp-health-cost-controls-copy strong {
+  display: block;
+  color: var(--sp-text);
+  font-size: 0.8125rem;
+  font-weight: 800;
+}
+
+.sp-health-cost-controls-copy small {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--sp-muted);
+  font-size: 0.72rem;
+}
+
+.sp-health-date-range-control {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1 1 18rem;
+  justify-content: flex-end;
+}
+
+.sp-health-control-label {
+  flex-shrink: 0;
+  color: var(--sp-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
 }
 
 .sp-health-date-range {
@@ -2892,6 +2967,18 @@ function getProviderColor(providerType: string): string {
 .sp-health-provider-filter {
   min-width: 10rem;
   max-width: 14rem;
+}
+
+@media (max-width: 640px) {
+  .sp-health-date-range-control {
+    width: 100%;
+    flex-basis: 100%;
+    justify-content: flex-start;
+  }
+
+  .sp-health-date-range {
+    max-width: none;
+  }
 }
 
 </style>
