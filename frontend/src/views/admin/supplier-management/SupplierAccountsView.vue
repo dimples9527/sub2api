@@ -387,6 +387,16 @@
                 type="button"
                 @click.stop="openDrawer(account)"
               >查看</button>
+              <template v-if="account.group_status === 'inactive'">
+                <button
+                  v-if="account.group_record_id"
+                  class="sp-button small danger sp-account-action-delete"
+                  type="button"
+                  :disabled="deletingGroupRecordID === account.group_record_id || !account.group_record_delete_eligible"
+                  :title="account.group_record_delete_eligible ? '删除失效分组记录' : '该失效分组记录当前不可删除'"
+                  @click.stop="requestDeleteGroupRecord(account)"
+                >{{ deletingGroupRecordID === account.group_record_id ? '删除中' : '删除失效分组记录' }}</button>
+              </template>
               <template v-if="canManageLocalAccount(account)">
                 <button
                   class="sp-button small sp-account-action-test"
@@ -922,6 +932,17 @@
       @cancel="closeDuplicateConfirm"
     />
 
+    <ConfirmDialog
+      :show="Boolean(deleteGroupRecordTarget)"
+      title="删除失效上游分组记录"
+      :message="deleteGroupRecordMessage"
+      confirm-text="删除记录"
+      cancel-text="取消"
+      danger
+      @confirm="confirmDeleteGroupRecord"
+      @cancel="deleteGroupRecordTarget = null"
+    />
+
     <BaseDialog
       :show="Boolean(duplicateResultAccount)"
       title="账号已复制"
@@ -965,6 +986,7 @@ import supplierProvidersAPI, { type SupplierProvider } from '@/api/admin/supplie
 import {
   cancelSupplierAccountBatchTestJob,
   clearSupplierLocalAccountPlatformOverride,
+  deleteSupplierGroup,
   getSupplierAccountBatchTestJob,
   listSupplierAccounts,
   setSupplierLocalAccountPlatformOverride,
@@ -1051,8 +1073,10 @@ const editingPriorityAccountID = ref<number | null>(null)
 const savingPriorityAccountID = ref<number | null>(null)
 const accountActionLoadingID = ref<number | null>(null)
 const deletingAccountID = ref<number | null>(null)
+const deletingGroupRecordID = ref<number | null>(null)
 const duplicatingAccountID = ref<number | null>(null)
 const duplicateConfirmAccount = ref<SupplierProviderAccount | null>(null)
+const deleteGroupRecordTarget = ref<SupplierProviderAccount | null>(null)
 const duplicateResultAccount = ref<Account | null>(null)
 const testingAccountID = ref<number | null>(null)
 const testingAccount = ref<Account | null>(null)
@@ -1907,6 +1931,43 @@ const duplicateConfirmMessage = computed(() => {
   const accountName = account.local_account_name || account.name || account.upstream_account_key || `账号 #${account.local_account_id}`
   return `确认复制本地账号「${accountName}」？将创建暂停调度的本地副本，名称通常会追加 (Copy) 后缀。供应商上游账号页按上游账号匹配本地名，副本不会作为新的上游行出现在本页，可在账号管理中查看。`
 })
+
+const deleteGroupRecordMessage = computed(() => {
+  const account = deleteGroupRecordTarget.value
+  if (!account) return ''
+  const groupName = account.group_name || account.group_key || '该分组'
+  return `仅删除本地保存的失效上游分组记录“${groupName}”，不会删除上游系统数据。删除后账号列表中的失效提示将消失，且无法恢复。`
+})
+
+function requestDeleteGroupRecord(account: SupplierProviderAccount) {
+  if (
+    account.group_status !== 'inactive'
+    || !account.group_record_id
+    || !account.group_record_delete_eligible
+    || deletingGroupRecordID.value !== null
+  ) return
+
+  deleteGroupRecordTarget.value = account
+}
+
+async function confirmDeleteGroupRecord() {
+  const target = deleteGroupRecordTarget.value
+  if (!target || !target.group_record_id || deletingGroupRecordID.value !== null) return
+
+  deletingGroupRecordID.value = target.group_record_id
+  deleteGroupRecordTarget.value = null
+
+  try {
+    await deleteSupplierGroup(target.group_record_id)
+    if (selected.value?.group_record_id === target.group_record_id) selected.value = null
+    await loadAccounts()
+    appStore.showSuccess('失效分组记录已删除')
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '删除失效分组记录失败'))
+  } finally {
+    deletingGroupRecordID.value = null
+  }
+}
 
 function requestDuplicateLocalAccount(account: SupplierProviderAccount) {
   if (!canDuplicateLocalAccount(account) || duplicatingAccountID.value !== null) return

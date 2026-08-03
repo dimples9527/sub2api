@@ -66,6 +66,8 @@ export interface SupplierProviderAccount {
   group_name: string
   platform?: string
   group_status?: 'active' | 'inactive' | 'missing' | ''
+  group_record_id?: number
+  group_record_delete_eligible: boolean
   rate_multiplier: number
   binding_groups: SupplierProviderAccountBindingGroup[]
   raw_status: string

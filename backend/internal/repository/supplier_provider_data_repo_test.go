@@ -157,7 +157,7 @@ var supplierProviderAccountListColumns = []string{
 	"local_account_status", "local_account_schedulable",
 	"local_account_last_test_status", "local_account_last_tested_at", "local_account_last_test_error",
 	"binding_groups",
-	"supplier_current_balance", "supplier_today_cost",
+	"supplier_current_balance", "supplier_today_cost", "group_record_id", "group_record_delete_eligible",
 }
 
 // supplierProviderAccountListQueryContractPattern 约束列表查询的字段顺序与匹配关联，不能替代真实 PostgreSQL 行为测试。
@@ -175,6 +175,7 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
        ), '') AS platform,
        CASE
          WHEN NULLIF(TRIM(a.group_key), '') IS NULL THEN ''
+         WHEN a.active = FALSE AND LOWER(a.status) = 'deleted' THEN ''
          WHEN EXISTS (
            SELECT 1 FROM supplier_provider_groups g
            WHERE g.provider_id = a.provider_id
@@ -233,10 +234,33 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
          WHERE account_group.account_id = matched_account.id
        ), '[]'::jsonb) AS binding_groups,
        COALESCE(runtime.current_balance, 0) AS supplier_current_balance,
-       COALESCE(runtime.today_cost, 0) AS supplier_today_cost
+       COALESCE(runtime.today_cost, 0) AS supplier_today_cost,
+       inactive_group_record.id AS group_record_id,
+       COALESCE(
+         inactive_group_record.id IS NOT NULL
+         AND inactive_group_record.local_group_id IS NULL
+         AND inactive_group_record.rate_guard_selected = FALSE
+         AND NOT EXISTS (
+           SELECT 1
+           FROM supplier_provider_accounts a2
+           WHERE a2.provider_id = inactive_group_record.provider_id
+             AND a2.group_key = inactive_group_record.upstream_group_key
+             AND a2.active = TRUE
+         ),
+         FALSE
+       ) AS group_record_delete_eligible
 FROM supplier_provider_accounts a
 JOIN supplier_providers p ON p.id = a.provider_id
 LEFT JOIN supplier_provider_runtime_stats runtime ON runtime.provider_id = p.id
+LEFT JOIN LATERAL (
+  SELECT g.id, g.provider_id, g.upstream_group_key, g.local_group_id, g.rate_guard_selected
+  FROM supplier_provider_groups g
+  WHERE g.provider_id = a.provider_id
+    AND g.upstream_group_key = a.group_key
+    AND g.active = FALSE
+  ORDER BY g.id DESC
+  LIMIT 1
+) inactive_group_record ON TRUE
 LEFT JOIN LATERAL (
   SELECT COUNT(*) AS match_count,
          MIN(local_account.id) AS local_account_id
@@ -379,7 +403,7 @@ func TestSupplierProviderDataRepositoryListAccountsPaginates(t *testing.T) {
 			int64(7), int64(42), "Supplier A", "account-1", "Primary", "active", "group-1", "VIP", "openai", "active", 2.5, "active", true, now, nil,
 			"matched", 1, int64(101), "prefix-key-1", "anthropic", "apikey", "", "anthropic", 80, "active", true, "success", "2026-07-16T09:30:00Z", "upstream authentication failed",
 			`[{"id":202,"name":"Claude 订阅","platform":"anthropic","rate_multiplier":2,"subscription_type":"subscription"},{"id":201,"name":"OpenAI 专线","platform":"openai","rate_multiplier":1.5,"subscription_type":"standard"}]`,
-			12.5, 3.25,
+			12.5, 3.25, nil, false,
 		))
 
 	result, err := repo.ListAccounts(context.Background(), service.SupplierProviderDataListParams{
@@ -421,6 +445,37 @@ func TestSupplierProviderDataRepositoryListAccountsPaginates(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestSupplierProviderDataRepositoryListAccountsExposesInactiveGroupDeleteMetadata(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	now := time.Date(2026, 8, 3, 10, 0, 0, 0, time.UTC)
+	columns := append([]string{}, supplierProviderAccountListColumns...)
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM supplier_provider_accounts a")).
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
+	mock.ExpectQuery(`(?s)inactive_group_record\.id AS group_record_id.*group_record_delete_eligible`).
+		WithArgs(int64(42), 20, 0).
+		WillReturnRows(sqlmock.NewRows(columns).AddRow(
+			int64(7), int64(42), "Supplier A", "account-1", "Primary", "active", "group-1", "VIP", "", "inactive",
+			2.5, "active", true, now, nil,
+			"unmatched", 0, nil, "", "", "", "", "", nil, "", nil, "", "", "", `[]`, 12.5, 3.25,
+			int64(88), true,
+		))
+
+	result, err := repo.ListAccounts(context.Background(), service.SupplierProviderDataListParams{
+		ProviderID: 42,
+		Page:       1,
+		PageSize:   20,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, result.Items, 1)
+	require.NotNil(t, result.Items[0].GroupRecordID)
+	require.Equal(t, int64(88), *result.Items[0].GroupRecordID)
+	require.True(t, result.Items[0].GroupRecordDeleteEligible)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestSupplierProviderDataRepositoryListAccountsSQLContractMapsUnmatchedAndConflictRows(t *testing.T) {
 	repo, mock := newSupplierProviderDataRepoMock(t)
 	now := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
@@ -437,11 +492,11 @@ func TestSupplierProviderDataRepositoryListAccountsSQLContractMapsUnmatchedAndCo
 		WillReturnRows(sqlmock.NewRows(supplierProviderAccountListColumns).
 			AddRow(
 				int64(7), int64(42), "Supplier A", "missing-key", "Missing", "active", "group-1", "VIP", "openai", "active", 2.5, "active", true, now, nil,
-				"unmatched", 0, nil, "", "", "", "", "", nil, "", nil, "", "", "", `[]`, 12.5, 3.25,
+				"unmatched", 0, nil, "", "", "", "", "", nil, "", nil, "", "", "", `[]`, 12.5, 3.25, nil, false,
 			).
 			AddRow(
 				int64(8), int64(42), "Supplier A", "duplicate-key", "Duplicate", "active", "group-2", "Standard", "openai", "active", 1.5, "active", true, now, nil,
-				"conflict", 2, nil, "", "", "", "", "", nil, "", nil, "", "", "", `[]`, 12.5, 3.25,
+				"conflict", 2, nil, "", "", "", "", "", nil, "", nil, "", "", "", `[]`, 12.5, 3.25, nil, false,
 			))
 
 	result, err := repo.ListAccounts(context.Background(), service.SupplierProviderDataListParams{
@@ -494,7 +549,7 @@ func TestSupplierProviderDataRepositoryListAccountsExposesLocalAccountTypeForDup
 		"local_account_status", "local_account_schedulable",
 		"local_account_last_test_status", "local_account_last_tested_at", "local_account_last_test_error",
 		"binding_groups",
-		"supplier_current_balance", "supplier_today_cost",
+		"supplier_current_balance", "supplier_today_cost", "group_record_id", "group_record_delete_eligible",
 	}
 
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM supplier_provider_accounts a")).
@@ -504,7 +559,7 @@ func TestSupplierProviderDataRepositoryListAccountsExposesLocalAccountTypeForDup
 		WithArgs(int64(42), 20, 0).
 		WillReturnRows(sqlmock.NewRows(columns).AddRow(
 			int64(7), int64(42), "Supplier A", "upstream-key", "Primary", "active", "group-1", "VIP", "openai", "active", 1.5, "active", true, now, nil,
-			"matched", 1, int64(101), "local-account", "openai", "apikey", "", "openai", 80, "active", true, "success", "2026-07-28T09:30:00Z", "", `[]`, 12.5, 3.25,
+			"matched", 1, int64(101), "local-account", "openai", "apikey", "", "openai", 80, "active", true, "success", "2026-07-28T09:30:00Z", "", `[]`, 12.5, 3.25, nil, false,
 		))
 
 	result, err := repo.ListAccounts(context.Background(), service.SupplierProviderDataListParams{
@@ -535,7 +590,7 @@ func TestSupplierProviderDataRepositoryListAccountsUsesBusinessPlatformOverride(
 		WithArgs(int64(42), "grok", 20, 0).
 		WillReturnRows(sqlmock.NewRows(columns).AddRow(
 			int64(7), int64(42), "Supplier A", "upstream-key", "Primary", "active", "group-1", "VIP", "openai", "active", 1.5, "active", true, now, nil,
-			"matched", 1, int64(101), "local-account", "openai", "apikey", "grok", "grok", 80, "active", true, "success", "2026-07-27T11:30:00Z", "", `[]`, 12.5, 3.25,
+			"matched", 1, int64(101), "local-account", "openai", "apikey", "grok", "grok", 80, "active", true, "success", "2026-07-27T11:30:00Z", "", `[]`, 12.5, 3.25, nil, false,
 		))
 
 	result, err := repo.ListAccounts(context.Background(), service.SupplierProviderDataListParams{

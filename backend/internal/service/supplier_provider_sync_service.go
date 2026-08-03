@@ -58,6 +58,8 @@ type SupplierProviderAccount struct {
 	BindingGroups              []SupplierProviderAccountBindingGroup `json:"binding_groups"`
 	SupplierCurrentBalance     float64                               `json:"supplier_current_balance"`
 	SupplierTodayCost          float64                               `json:"supplier_today_cost"`
+	GroupRecordID              *int64                                `json:"group_record_id,omitempty"`
+	GroupRecordDeleteEligible  bool                                  `json:"group_record_delete_eligible"`
 }
 
 type SupplierProviderGroup struct {

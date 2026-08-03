@@ -60,6 +60,7 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
        ), '') AS platform,
        CASE
          WHEN NULLIF(TRIM(a.group_key), '') IS NULL THEN ''
+         WHEN a.active = FALSE AND LOWER(a.status) = 'deleted' THEN ''
          WHEN EXISTS (
            SELECT 1 FROM supplier_provider_groups g
            WHERE g.provider_id = a.provider_id
@@ -118,10 +119,33 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
          WHERE account_group.account_id = matched_account.id
        ), '[]'::jsonb) AS binding_groups,
        COALESCE(runtime.current_balance, 0) AS supplier_current_balance,
-       COALESCE(runtime.today_cost, 0) AS supplier_today_cost
+       COALESCE(runtime.today_cost, 0) AS supplier_today_cost,
+       inactive_group_record.id AS group_record_id,
+       COALESCE(
+         inactive_group_record.id IS NOT NULL
+         AND inactive_group_record.local_group_id IS NULL
+         AND inactive_group_record.rate_guard_selected = FALSE
+         AND NOT EXISTS (
+           SELECT 1
+           FROM supplier_provider_accounts a2
+           WHERE a2.provider_id = inactive_group_record.provider_id
+             AND a2.group_key = inactive_group_record.upstream_group_key
+             AND a2.active = TRUE
+         ),
+         FALSE
+       ) AS group_record_delete_eligible
 FROM supplier_provider_accounts a
 JOIN supplier_providers p ON p.id = a.provider_id
 LEFT JOIN supplier_provider_runtime_stats runtime ON runtime.provider_id = p.id
+LEFT JOIN LATERAL (
+  SELECT g.id, g.provider_id, g.upstream_group_key, g.local_group_id, g.rate_guard_selected
+  FROM supplier_provider_groups g
+  WHERE g.provider_id = a.provider_id
+    AND g.upstream_group_key = a.group_key
+    AND g.active = FALSE
+  ORDER BY g.id DESC
+  LIMIT 1
+) inactive_group_record ON TRUE
 LEFT JOIN LATERAL (
   SELECT COUNT(*) AS match_count,
          MIN(local_account.id) AS local_account_id
@@ -423,7 +447,15 @@ func (r *supplierProviderDataRepository) UpdateGroupMapping(ctx context.Context,
 }
 
 func (r *supplierProviderDataRepository) DeleteGroup(ctx context.Context, groupID int64) error {
-	result, err := r.db.ExecContext(ctx, `
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin supplier provider group delete: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var providerID int64
+	var upstreamGroupKey string
+	err = tx.QueryRowContext(ctx, `
 DELETE FROM supplier_provider_groups g
 WHERE g.id = $1
   AND g.active = FALSE
@@ -435,16 +467,26 @@ WHERE g.id = $1
     WHERE a.provider_id = g.provider_id
       AND a.group_key = g.upstream_group_key
       AND a.active = TRUE
-  )`, groupID)
+	  )
+RETURNING g.provider_id, g.upstream_group_key`, groupID).Scan(&providerID, &upstreamGroupKey)
+	if err == sql.ErrNoRows {
+		return service.ErrSupplierProviderGroupDeleteConflict
+	}
 	if err != nil {
 		return fmt.Errorf("delete supplier provider group record: %w", err)
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("read supplier provider group delete result: %w", err)
+
+	if _, err := tx.ExecContext(ctx, `
+UPDATE supplier_provider_accounts AS a
+SET group_key = '', group_name = '', updated_at = NOW()
+WHERE a.provider_id = $1
+  AND a.group_key = $2
+  AND a.active = FALSE`, providerID, upstreamGroupKey); err != nil {
+		return fmt.Errorf("clear inactive supplier account group reference: %w", err)
 	}
-	if affected == 0 {
-		return service.ErrSupplierProviderGroupDeleteConflict
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit supplier provider group delete: %w", err)
 	}
 	return nil
 }
@@ -1422,6 +1464,7 @@ func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (servic
 	var localAccountPriority sql.NullInt64
 	var localAccountSchedulable sql.NullBool
 	var bindingGroupsJSON []byte
+	var groupRecordID sql.NullInt64
 	err := scanner.Scan(&item.ID, &item.ProviderID, &item.ProviderName, &item.UpstreamKey,
 		&item.Name, &item.Status, &item.GroupKey, &item.GroupName, &item.Platform, &item.GroupStatus, &item.RateMultiplier,
 		&item.RawStatus, &item.Active, &item.LastSeenAt, &inactiveAt,
@@ -1430,7 +1473,8 @@ func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (servic
 		&item.LocalAccountStatus, &localAccountSchedulable,
 		&item.LocalAccountLastTestStatus, &item.LocalAccountLastTestedAt, &item.LocalAccountLastTestError,
 		&bindingGroupsJSON,
-		&item.SupplierCurrentBalance, &item.SupplierTodayCost)
+		&item.SupplierCurrentBalance, &item.SupplierTodayCost,
+		&groupRecordID, &item.GroupRecordDeleteEligible)
 	if err != nil {
 		return service.SupplierProviderAccount{}, err
 	}
@@ -1448,6 +1492,10 @@ func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (servic
 	if localAccountSchedulable.Valid {
 		value := localAccountSchedulable.Bool
 		item.LocalAccountSchedulable = &value
+	}
+	if groupRecordID.Valid {
+		value := groupRecordID.Int64
+		item.GroupRecordID = &value
 	}
 	if err := json.Unmarshal(bindingGroupsJSON, &item.BindingGroups); err != nil {
 		return service.SupplierProviderAccount{}, fmt.Errorf("decode supplier provider account binding groups: %w", err)
