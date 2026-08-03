@@ -309,6 +309,13 @@ export async function updateSupplierGroupMapping(
   return data
 }
 
+export async function deleteSupplierGroup(id: number): Promise<{ group_id: number }> {
+  const { data } = await apiClient.delete<{ group_id: number }>(
+    `/admin/supplier-management/groups/${id}`
+  )
+  return data
+}
+
 export async function autoMatchSupplierGroups(providerId?: number): Promise<SupplierGroupAutoMatchResult> {
   const { data } = await apiClient.post<SupplierGroupAutoMatchResult>(
     '/admin/supplier-management/groups/auto-match',
@@ -374,6 +381,7 @@ export const supplierProviderDataAPI = {
   cancelSupplierAccountBatchTestJob,
   listSupplierGroups,
   updateSupplierGroupMapping,
+  deleteSupplierGroup,
   autoMatchSupplierGroups,
   updateSupplierGroupAutoMatchPolicy,
 	updateSupplierGroupRateGuard,

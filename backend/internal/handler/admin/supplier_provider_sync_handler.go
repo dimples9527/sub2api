@@ -39,6 +39,7 @@ type SupplierProviderDataRepositoryPort interface {
 	ListLocalGroupHealthTrends(ctx context.Context, params service.SupplierProviderGroupHealthTrendParams) ([]service.SupplierProviderGroupHealthTrend, error)
 	ListMappingsByLocalGroup(ctx context.Context, localGroupIDs []int64) ([]service.SupplierProviderGroup, error)
 	UpdateGroupMapping(ctx context.Context, groupID int64, localGroupID *int64) error
+	DeleteGroup(ctx context.Context, groupID int64) error
 }
 
 type SupplierProviderGroupMatcherPort interface {
@@ -441,6 +442,18 @@ func (h *SupplierProviderSyncHandler) UpdateGroupMapping(c *gin.Context) {
 		return
 	}
 	response.Success(c, gin.H{"group_id": groupID, "local_group_id": localGroupID})
+}
+
+func (h *SupplierProviderSyncHandler) DeleteGroup(c *gin.Context) {
+	groupID, ok := parseSupplierGroupID(c)
+	if !ok {
+		return
+	}
+	if err := h.dataRepo.DeleteGroup(c.Request.Context(), groupID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"group_id": groupID})
 }
 
 func (h *SupplierProviderSyncHandler) AutoMatchGroups(c *gin.Context) {

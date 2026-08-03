@@ -48,6 +48,7 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 		supplier.GET("/groups", h.Admin.SupplierProviderSync.ListGroups)
 		supplier.GET("/groups/health-trends", h.Admin.SupplierProviderSync.ListGroupHealthTrends)
 		supplier.POST("/groups/auto-match", h.Admin.SupplierProviderSync.AutoMatchGroups)
+		supplier.DELETE("/groups/:id", h.Admin.SupplierProviderSync.DeleteGroup)
 		supplier.PUT("/groups/:id/mapping", h.Admin.SupplierProviderSync.UpdateGroupMapping)
 		supplier.PUT("/groups/:id/auto-match-policy", h.Admin.SupplierProviderSync.UpdateAutoMatchPolicy)
 		supplier.PUT("/groups/:id/rate-guard", h.Admin.SupplierProviderSync.UpdateGroupRateGuard)

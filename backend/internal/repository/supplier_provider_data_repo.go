@@ -422,6 +422,33 @@ func (r *supplierProviderDataRepository) UpdateGroupMapping(ctx context.Context,
 	return nil
 }
 
+func (r *supplierProviderDataRepository) DeleteGroup(ctx context.Context, groupID int64) error {
+	result, err := r.db.ExecContext(ctx, `
+DELETE FROM supplier_provider_groups g
+WHERE g.id = $1
+  AND g.active = FALSE
+  AND g.local_group_id IS NULL
+  AND g.rate_guard_selected = FALSE
+  AND NOT EXISTS (
+    SELECT 1
+    FROM supplier_provider_accounts a
+    WHERE a.provider_id = g.provider_id
+      AND a.group_key = g.upstream_group_key
+      AND a.active = TRUE
+  )`, groupID)
+	if err != nil {
+		return fmt.Errorf("delete supplier provider group record: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read supplier provider group delete result: %w", err)
+	}
+	if affected == 0 {
+		return service.ErrSupplierProviderGroupDeleteConflict
+	}
+	return nil
+}
+
 func (r *supplierProviderDataRepository) ListGroupsForAutoMatch(ctx context.Context, providerID int64) ([]service.SupplierProviderGroup, error) {
 	query := `
 SELECT g.id, g.provider_id, p.name AS provider_name, g.upstream_group_key, g.name,

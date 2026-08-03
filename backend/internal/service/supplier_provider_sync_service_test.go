@@ -64,6 +64,9 @@ func (r *supplierProviderDataRepoStub) GetGroupForAutoMatch(context.Context, int
 func (r *supplierProviderDataRepoStub) UpdateGroupMapping(context.Context, int64, *int64) error {
 	return nil
 }
+func (r *supplierProviderDataRepoStub) DeleteGroup(context.Context, int64) error {
+	return nil
+}
 func (r *supplierProviderDataRepoStub) ApplyAutoMatch(context.Context, int64, int64, string) (bool, error) {
 	return false, nil
 }

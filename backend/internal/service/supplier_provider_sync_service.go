@@ -15,6 +15,7 @@ import (
 var ErrSupplierProviderSyncConflict = infraerrors.Conflict("SUPPLIER_PROVIDER_SYNC_CONFLICT", "supplier provider sync already running")
 var ErrSupplierProviderGroupNotFound = infraerrors.NotFound("SUPPLIER_PROVIDER_GROUP_NOT_FOUND", "supplier provider group not found")
 var ErrSupplierLocalGroupNotFound = infraerrors.NotFound("SUPPLIER_LOCAL_GROUP_NOT_FOUND", "active local group not found")
+var ErrSupplierProviderGroupDeleteConflict = infraerrors.Conflict("SUPPLIER_PROVIDER_GROUP_DELETE_CONFLICT", "仅可删除已失效、未关联本地分组、未参与倍率守护且没有有效上游账号的分组记录")
 
 type SupplierProviderAccountBindingGroup struct {
 	ID               int64   `json:"id"`
@@ -183,6 +184,7 @@ type SupplierProviderDataRepository interface {
 	ListGroupsForAutoMatch(ctx context.Context, providerID int64) ([]SupplierProviderGroup, error)
 	GetGroupForAutoMatch(ctx context.Context, groupID int64) (SupplierProviderGroup, error)
 	UpdateGroupMapping(ctx context.Context, groupID int64, localGroupID *int64) error
+	DeleteGroup(ctx context.Context, groupID int64) error
 	ApplyAutoMatch(ctx context.Context, groupID, localGroupID int64, matchedUpstreamName string) (bool, error)
 	UpdateAutoMatchState(ctx context.Context, groupID int64, status string, nameChangePending bool) error
 	UpdateAutoMatchIgnored(ctx context.Context, groupID int64, ignored bool) error

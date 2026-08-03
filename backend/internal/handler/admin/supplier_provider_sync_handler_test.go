@@ -81,6 +81,8 @@ type supplierProviderSyncHandlerDataStub struct {
 	platformOverrideAccount int64
 	platformOverride        string
 	clearedOverrideAccount  int64
+	deletedGroupID          int64
+	deleteGroupErr          error
 }
 
 type supplierProviderGroupMatcherHandlerStub struct {
@@ -176,6 +178,11 @@ func (s *supplierProviderSyncHandlerDataStub) UpdateGroupMapping(_ context.Conte
 	return nil
 }
 
+func (s *supplierProviderSyncHandlerDataStub) DeleteGroup(_ context.Context, groupID int64) error {
+	s.deletedGroupID = groupID
+	return s.deleteGroupErr
+}
+
 func TestSupplierProviderSyncHandlerRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	syncStub := &supplierProviderSyncHandlerSyncStub{}
@@ -223,6 +230,52 @@ func TestSupplierProviderSyncHandlerRoutes(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, int64(7), dataStub.mappedGroupID)
 	require.Nil(t, dataStub.mappedLocalGroupID)
+}
+
+func TestSupplierProviderSyncHandlerDeletesGroupRecord(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dataStub := &supplierProviderSyncHandlerDataStub{}
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, dataStub)
+	router := gin.New()
+	router.DELETE("/groups/:id", handler.DeleteGroup)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/groups/7", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(7), dataStub.deletedGroupID)
+	require.Contains(t, rec.Body.String(), `"group_id":7`)
+}
+
+func TestSupplierProviderSyncHandlerRejectsInvalidDeleteGroupID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dataStub := &supplierProviderSyncHandlerDataStub{}
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, dataStub)
+	router := gin.New()
+	router.DELETE("/groups/:id", handler.DeleteGroup)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/groups/not-a-number", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Zero(t, dataStub.deletedGroupID)
+}
+
+func TestSupplierProviderSyncHandlerReturnsDeleteGroupConflict(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dataStub := &supplierProviderSyncHandlerDataStub{deleteGroupErr: service.ErrSupplierProviderGroupDeleteConflict}
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, dataStub)
+	router := gin.New()
+	router.DELETE("/groups/:id", handler.DeleteGroup)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/groups/7", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusConflict, rec.Code)
+	require.Equal(t, int64(7), dataStub.deletedGroupID)
 }
 
 func TestSupplierProviderSyncHandlerRejectsInvalidProviderID(t *testing.T) {
