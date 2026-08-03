@@ -461,6 +461,37 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(wrapper.get('[data-test="supplier-cost-date-range"]').exists()).toBe(true)
   })
 
+  it('switches supplier cost breakdown date range independently', async () => {
+    const wrapper = await mountSupplierProviders()
+    providerViewMocks.listCostTrends.mockClear()
+
+    const breakdownDateRange = wrapper.get('[data-test="supplier-cost-breakdown-date-range"]')
+    await breakdownDateRange.get('[data-test="supplier-cost-date-range-trigger"]').trigger('click')
+    await flushPromises()
+
+    expect(providerViewMocks.listCostTrends).toHaveBeenLastCalledWith({
+      start_date: '2026-07-01',
+      end_date: '2026-07-10',
+    })
+    expect(supplierProvidersSource).toContain('costBreakdownStartDate')
+    expect(supplierProvidersSource).toContain('costBreakdownEndDate')
+    expect(supplierProvidersSource).toContain('onCostBreakdownDateRangeChange')
+    expect(supplierProvidersSource).toContain('costBreakdownLoading')
+    expect(wrapper.get('[data-test="supplier-cost-controls"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="supplier-cost-breakdown-controls"]').exists()).toBe(true)
+  })
+
+  it('keeps the supplier cost breakdown date control in the left heading group', async () => {
+    const wrapper = await mountSupplierProviders()
+
+    const header = wrapper.get('[data-test="supplier-cost-breakdown-panel"] .sp-panel-head')
+    const leftGroup = header.get('[data-test="supplier-cost-breakdown-head-left"]')
+
+    expect(leftGroup.get('.sp-panel-title').exists()).toBe(true)
+    expect(leftGroup.get('[data-test="supplier-cost-breakdown-controls"]').exists()).toBe(true)
+    expect(header.get('.sp-cost-breakdown-count').exists()).toBe(true)
+  })
+
   it('places the shared cost date range control in the cost chart heading', async () => {
     const wrapper = await mountSupplierProviders()
 

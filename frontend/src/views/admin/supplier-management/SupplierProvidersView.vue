@@ -305,11 +305,23 @@
 
     <section class="sp-panel sp-cost-breakdown-panel" data-test="supplier-cost-breakdown-panel">
       <header class="sp-panel-head">
-        <div class="sp-panel-title">
-          <span class="sp-section-index">03</span>
-          <div>
-            <h2>按供应商拆分成本</h2>
-            <span>{{ costTrendRangeLabel }} · 每个供应商并排比较上游成本和本地成本</span>
+        <div class="sp-cost-breakdown-head-left" data-test="supplier-cost-breakdown-head-left">
+          <div class="sp-health-date-range-control" data-test="supplier-cost-breakdown-controls">
+            <span class="sp-health-control-label">日期范围</span>
+            <div class="sp-health-date-range" data-test="supplier-cost-breakdown-date-range">
+              <DateRangePicker
+                v-model:start-date="costBreakdownStartDate"
+                v-model:end-date="costBreakdownEndDate"
+                @change="onCostBreakdownDateRangeChange"
+              />
+            </div>
+          </div>
+          <div class="sp-panel-title">
+            <span class="sp-section-index">03</span>
+            <div>
+              <h2>按供应商拆分成本</h2>
+              <span>{{ costBreakdownRangeLabel }} · 每个供应商并排比较上游成本和本地成本</span>
+            </div>
           </div>
         </div>
         <span class="sp-cost-breakdown-count">供应商 <b>{{ costBreakdown.length }}</b> 个</span>
@@ -328,7 +340,7 @@
             :options="costBreakdownChartOptions"
             data-test="supplier-cost-breakdown-chart"
           />
-          <div v-else-if="costTrendLoading" class="sp-health-chart-empty">供应商成本加载中…</div>
+          <div v-else-if="costBreakdownLoading" class="sp-health-chart-empty">供应商成本加载中…</div>
           <div v-else class="sp-health-chart-empty">暂无供应商成本数据，可调整时间范围后重试</div>
         </div>
       </div>
@@ -785,8 +797,12 @@ const summary = ref<SupplierProviderSummary>(emptySummary())
 const costTrendDefaultRange = createDefaultCostTrendRange()
 const costTrendStartDate = ref(costTrendDefaultRange.start)
 const costTrendEndDate = ref(costTrendDefaultRange.end)
+const costBreakdownDefaultRange = createDefaultCostTrendRange()
+const costBreakdownStartDate = ref(costBreakdownDefaultRange.start)
+const costBreakdownEndDate = ref(costBreakdownDefaultRange.end)
 const costTrendProviderId = ref<number | ''>('')
 const costTrendLoading = ref(false)
+const costBreakdownLoading = ref(false)
 const costTrendPoints = ref<SupplierProviderCostTrendPoint[]>([])
 const costTrendBreakdown = ref<SupplierProviderCostBreakdown[]>([])
 const deviationThreshold = ref(0.15) // 15%
@@ -985,6 +1001,14 @@ const costTrendRangeLabel = computed(() => {
   return `${start} ~ ${end}`
 })
 
+const costBreakdownRangeLabel = computed(() => {
+  const start = costBreakdownStartDate.value
+  const end = costBreakdownEndDate.value
+  if (!start || !end) return '未选择时间'
+  if (start === end) return start
+  return `${start} ~ ${end}`
+})
+
 const costTrendTotals = computed(() =>
   costTrendPoints.value.reduce((acc, point) => {
     acc.upstream += Number(point.upstream_cost || 0)
@@ -1169,7 +1193,7 @@ watch(search, () => {
 
 onMounted(async () => {
   await loadProviderTypes()
-  await Promise.all([loadProviders(), loadCostTrends()])
+  await Promise.all([loadProviders(), loadCostTrends(), loadCostBreakdown()])
 })
 
 async function loadProviderTypes() {
@@ -1207,12 +1231,26 @@ async function loadCostTrends() {
       provider_id: providerId || undefined,
     })
     costTrendPoints.value = Array.isArray(result?.points) ? result.points : []
-    costTrendBreakdown.value = Array.isArray(result?.breakdown) ? result.breakdown : []
   } catch {
     costTrendPoints.value = []
-    costTrendBreakdown.value = []
   } finally {
     costTrendLoading.value = false
+  }
+}
+
+async function loadCostBreakdown() {
+  if (costBreakdownLoading.value) return
+  costBreakdownLoading.value = true
+  try {
+    const result = await supplierProvidersAPI.listCostTrends({
+      start_date: costBreakdownStartDate.value,
+      end_date: costBreakdownEndDate.value,
+    })
+    costTrendBreakdown.value = Array.isArray(result?.breakdown) ? result.breakdown : []
+  } catch {
+    costTrendBreakdown.value = []
+  } finally {
+    costBreakdownLoading.value = false
   }
 }
 
@@ -1224,6 +1262,12 @@ async function onCostTrendDateRangeChange(range: { startDate: string; endDate: s
 
 async function onCostTrendProviderChange() {
   await loadCostTrends()
+}
+
+async function onCostBreakdownDateRangeChange(range: { startDate: string; endDate: string; preset: string | null }) {
+  costBreakdownStartDate.value = range.startDate
+  costBreakdownEndDate.value = range.endDate
+  await loadCostBreakdown()
 }
 
 async function refreshCostTrends() {
@@ -1280,7 +1324,7 @@ function selectProviderForDetail(provider: SupplierProvider) {
 }
 
 async function refreshProvidersView() {
-  await Promise.all([loadProviders(), loadCostTrends()])
+  await Promise.all([loadProviders(), loadCostTrends(), loadCostBreakdown()])
 }
 
 function applyHealthTodo(todo: HealthTodo) {
@@ -2890,6 +2934,25 @@ function errorMessage(err: unknown, fallback: string): string {
   margin-bottom: 1rem;
 }
 
+.sp-cost-breakdown-head-left {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex: 1 1 auto;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.sp-cost-breakdown-head-left .sp-health-date-range-control {
+  flex: 0 1 auto;
+  justify-content: flex-start;
+}
+
+.sp-cost-breakdown-head-left .sp-panel-title {
+  min-width: 12rem;
+  flex: 1 1 18rem;
+}
+
 .sp-cost-breakdown-body {
   display: flex;
   flex-direction: column;
@@ -3008,6 +3071,22 @@ function errorMessage(err: unknown, fallback: string): string {
   }
 
   .sp-health-date-range {
+    max-width: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .sp-cost-breakdown-head-left {
+    width: 100%;
+    align-items: flex-start;
+  }
+
+  .sp-cost-breakdown-head-left .sp-health-date-range-control {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+  }
+
+  .sp-cost-breakdown-head-left .sp-health-date-range {
     max-width: none;
   }
 }
