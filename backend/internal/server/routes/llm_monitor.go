@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -30,17 +31,26 @@ type llmMonitorGroupProvider interface {
 	GetAllGroups(ctx context.Context) ([]service.Group, error)
 }
 
-func RegisterLLMMonitorRoutes(r gin.IRouter, settingsProvider llmMonitorSettingsProvider, groupProvider llmMonitorGroupProvider) {
+func RegisterLLMMonitorRoutes(
+	r gin.IRouter,
+	settingsProvider llmMonitorSettingsProvider,
+	groupProvider llmMonitorGroupProvider,
+	historyStores ...service.LLMMonitorHistoryStore,
+) {
+	var historyStore service.LLMMonitorHistoryStore
+	if len(historyStores) > 0 {
+		historyStore = historyStores[0]
+	}
 	r.GET("/api/llm-monitor/status", func(c *gin.Context) {
 		proxyLLMMonitorStatus(c, settingsProvider, func(ctx context.Context, body []byte) ([]byte, error) {
 			return filterLLMMonitorStatusPayload(ctx, body, groupProvider)
-		}, false)
+		}, false, historyStore)
 	})
 }
 
 func RegisterAdminLLMMonitorRoutes(r gin.IRouter, settingsProvider llmMonitorSettingsProvider) {
 	r.GET("/upstream-management/monitor-status", func(c *gin.Context) {
-		proxyLLMMonitorStatus(c, settingsProvider, nil, true)
+		proxyLLMMonitorStatus(c, settingsProvider, nil, true, nil)
 	})
 }
 
@@ -49,9 +59,10 @@ func proxyLLMMonitorStatus(
 	settingsProvider llmMonitorSettingsProvider,
 	transform func(context.Context, []byte) ([]byte, error),
 	standardResponse bool,
+	historyStore service.LLMMonitorHistoryStore,
 ) {
 	settings, err := settingsProvider.GetLLMMonitorSettings(c.Request.Context())
-	if err != nil {
+	if err != nil || settings == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load monitor settings"})
 		return
 	}
@@ -62,47 +73,41 @@ func proxyLLMMonitorStatus(
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), llmMonitorProxyTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create upstream request"})
-		return
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Accept-Encoding", "gzip")
-	req.Header.Set("User-Agent", "sub2api-llm-monitor/1.0")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "monitor upstream request failed"})
-		return
-	}
-	defer resp.Body.Close()
-	responseBody := io.Reader(resp.Body)
-	if strings.EqualFold(strings.TrimSpace(resp.Header.Get("Content-Encoding")), "gzip") {
-		gzipReader, gzipErr := gzip.NewReader(resp.Body)
-		if gzipErr != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": "failed to decompress monitor upstream response"})
+	body, contentType, statusCode, fetchErr := fetchLLMMonitorStatus(c.Request.Context(), targetURL, "sub2api-llm-monitor/1.0")
+	sourceKey, period, board, historyKeyOK := llmMonitorHistoryRequestKey(settings.StatusAPIURL, c.Query("period"), c.Query("board"))
+	if fetchErr != nil {
+		if recovered, ok := loadLLMMonitorHistory(c.Request.Context(), historyStore, sourceKey, period, board, historyKeyOK); ok {
+			body = recovered
+			contentType = "application/json"
+			statusCode = http.StatusOK
+		} else {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "monitor upstream request failed"})
 			return
 		}
-		defer gzipReader.Close()
-		responseBody = gzipReader
 	}
 
-	contentType := resp.Header.Get("Content-Type")
-	if strings.TrimSpace(contentType) == "" {
-		contentType = "application/json"
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		c.DataFromReader(resp.StatusCode, -1, contentType, responseBody, map[string]string{})
-		return
+	if statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices {
+		if recovered, ok := loadLLMMonitorHistory(c.Request.Context(), historyStore, sourceKey, period, board, historyKeyOK); ok {
+			body = recovered
+			contentType = "application/json"
+			statusCode = http.StatusOK
+		} else {
+			c.Data(statusCode, contentType, body)
+			return
+		}
 	}
 
-	body, err := io.ReadAll(responseBody)
-	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to read monitor upstream response"})
-		return
+	freshSnapshot := llmMonitorPayloadHasTimeline(body)
+	if !freshSnapshot {
+		if recovered, ok := loadLLMMonitorHistory(c.Request.Context(), historyStore, sourceKey, period, board, historyKeyOK); ok {
+			body = recovered
+			contentType = "application/json"
+			statusCode = http.StatusOK
+		}
+	}
+	if historyStore != nil && freshSnapshot {
+		// 保存未过滤的上游快照，供本地监控按供应商映射恢复；页面响应再单独过滤。
+		persistLLMMonitorHistory(c.Request.Context(), historyStore, sourceKey, period, board, body)
 	}
 	if transform != nil {
 		body, err = transform(c.Request.Context(), body)
@@ -113,14 +118,138 @@ func proxyLLMMonitorStatus(
 	}
 	if standardResponse {
 		var payload json.RawMessage = body
-		c.JSON(resp.StatusCode, gin.H{
+		c.JSON(statusCode, gin.H{
 			"code":    0,
 			"message": "success",
 			"data":    payload,
 		})
 		return
 	}
-	c.Data(resp.StatusCode, contentType, body)
+	c.Data(statusCode, contentType, body)
+}
+
+func fetchLLMMonitorStatus(ctx context.Context, targetURL, userAgent string) ([]byte, string, int, error) {
+	requestCtx, cancel := context.WithTimeout(ctx, llmMonitorProxyTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, targetURL, nil)
+	if err != nil {
+		return nil, "application/json", 0, fmt.Errorf("创建模型监控上游请求失败: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept-Encoding", "gzip")
+	req.Header.Set("User-Agent", userAgent)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, "application/json", 0, err
+	}
+	defer resp.Body.Close()
+	responseBody := io.Reader(resp.Body)
+	if strings.EqualFold(strings.TrimSpace(resp.Header.Get("Content-Encoding")), "gzip") {
+		gzipReader, gzipErr := gzip.NewReader(resp.Body)
+		if gzipErr != nil {
+			return nil, "application/json", 0, fmt.Errorf("解压模型监控上游响应失败: %w", gzipErr)
+		}
+		defer gzipReader.Close()
+		responseBody = gzipReader
+	}
+	body, err := io.ReadAll(responseBody)
+	if err != nil {
+		return nil, "application/json", 0, fmt.Errorf("读取模型监控上游响应失败: %w", err)
+	}
+	contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
+	if contentType == "" {
+		contentType = "application/json"
+	}
+	return body, contentType, resp.StatusCode, nil
+}
+
+func llmMonitorHistoryRequestKey(rawURL, period, board string) (string, string, string, bool) {
+	targetURL, err := llmMonitorTargetURL(rawURL, period, board)
+	if err != nil {
+		return "", "", "", false
+	}
+	u, err := url.Parse(targetURL)
+	if err != nil {
+		return "", "", "", false
+	}
+	query := u.Query()
+	return service.LLMMonitorHistorySourceKey(rawURL), query.Get("period"), query.Get("board"), true
+}
+
+func loadLLMMonitorHistory(
+	ctx context.Context,
+	historyStore service.LLMMonitorHistoryStore,
+	sourceKey, period, board string,
+	keyOK bool,
+) ([]byte, bool) {
+	if historyStore == nil || !keyOK {
+		return nil, false
+	}
+	snapshot, err := historyStore.LoadLatestSnapshot(ctx, sourceKey, period, board)
+	if err != nil {
+		slog.Warn("读取模型监控历史快照失败", "error", err)
+		return nil, false
+	}
+	if snapshot == nil || !json.Valid(snapshot.Payload) || !llmMonitorPayloadHasTimeline(snapshot.Payload) {
+		return nil, false
+	}
+	return append([]byte(nil), snapshot.Payload...), true
+}
+
+func persistLLMMonitorHistory(
+	ctx context.Context,
+	historyStore service.LLMMonitorHistoryStore,
+	sourceKey, period, board string,
+	body []byte,
+) {
+	if historyStore == nil || sourceKey == "" || period == "" || board == "" || !llmMonitorPayloadHasTimeline(body) {
+		return
+	}
+	sanitized, err := scrubLLMMonitorPayload(body)
+	if err != nil || !llmMonitorPayloadHasTimeline(sanitized) {
+		return
+	}
+	if err := historyStore.SaveSnapshot(ctx, service.LLMMonitorHistorySnapshot{
+		SourceKey:  sourceKey,
+		Period:     period,
+		Board:      board,
+		Payload:    sanitized,
+		CapturedAt: time.Now().UTC(),
+	}); err != nil {
+		slog.Warn("保存模型监控历史快照失败", "error", err)
+	}
+}
+
+func llmMonitorPayloadHasTimeline(body []byte) bool {
+	var payload any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return false
+	}
+	return llmMonitorValueHasTimeline(payload)
+}
+
+func llmMonitorValueHasTimeline(value any) bool {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			if key == "timeline" {
+				if timeline, ok := child.([]any); ok && len(timeline) > 0 {
+					return true
+				}
+			}
+			if llmMonitorValueHasTimeline(child) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range typed {
+			if llmMonitorValueHasTimeline(child) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func filterLLMMonitorStatusPayload(ctx context.Context, body []byte, groupProvider llmMonitorGroupProvider) ([]byte, error) {

@@ -40,7 +40,7 @@ return 0
 // - Multi-instance: best-effort Redis leader lock so only one node runs cleanup.
 // - Safety: deletes in batches to avoid long transactions.
 //
-// 附带：在 runCleanupOnce 末尾调用 ChannelMonitorService.RunDailyMaintenance，
+// 附带：在 runCleanupOnce 末尾调用渠道监控和模型监控历史维护，
 // 统一共享 cron schedule + leader lock + heartbeat，避免再引一套调度。
 type OpsCleanupService struct {
 	opsRepo           OpsRepository
@@ -48,6 +48,7 @@ type OpsCleanupService struct {
 	redisClient       *redis.Client
 	cfg               *config.Config
 	channelMonitorSvc *ChannelMonitorService
+	llmMonitorHistory LLMMonitorHistoryMaintainer
 	settingRepo       SettingRepository
 
 	instanceID string
@@ -70,6 +71,7 @@ func NewOpsCleanupService(
 	redisClient *redis.Client,
 	cfg *config.Config,
 	channelMonitorSvc *ChannelMonitorService,
+	llmMonitorHistory LLMMonitorHistoryMaintainer,
 	settingRepo SettingRepository,
 ) *OpsCleanupService {
 	return &OpsCleanupService{
@@ -78,6 +80,7 @@ func NewOpsCleanupService(
 		redisClient:       redisClient,
 		cfg:               cfg,
 		channelMonitorSvc: channelMonitorSvc,
+		llmMonitorHistory: llmMonitorHistory,
 		settingRepo:       settingRepo,
 		instanceID:        uuid.NewString(),
 	}
@@ -330,6 +333,11 @@ func (s *OpsCleanupService) runCleanupOnce(ctx context.Context) (opsCleanupDelet
 	if s.channelMonitorSvc != nil {
 		if err := s.channelMonitorSvc.RunDailyMaintenance(ctx); err != nil {
 			logger.LegacyPrintf("service.ops_cleanup", "[OpsCleanup] channel monitor maintenance failed: %v", err)
+		}
+	}
+	if s.llmMonitorHistory != nil {
+		if err := s.llmMonitorHistory.RunDailyMaintenance(ctx); err != nil {
+			logger.LegacyPrintf("service.ops_cleanup", "[OpsCleanup] 模型监控历史维护失败: %v", err)
 		}
 	}
 

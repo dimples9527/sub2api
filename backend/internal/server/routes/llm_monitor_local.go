@@ -1,11 +1,9 @@
 package routes
 
 import (
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -40,7 +38,12 @@ func RegisterLocalLLMMonitorRoutes(
 	settingsProvider llmMonitorSettingsProvider,
 	groupProvider llmMonitorGroupProvider,
 	dataProvider llmMonitorLocalDataProvider,
+	historyStores ...service.LLMMonitorHistoryStore,
 ) {
+	var historyStore service.LLMMonitorHistoryStore
+	if len(historyStores) > 0 {
+		historyStore = historyStores[0]
+	}
 	r.GET("/api/llm-monitor/local-status", func(c *gin.Context) {
 		period, ok := parseLocalLLMMonitorPeriod(c.Query("period"))
 		if !ok {
@@ -83,7 +86,7 @@ func RegisterLocalLLMMonitorRoutes(
 			return
 		}
 
-		upstreamGroups := loadLocalLLMMonitorUpstream(ctx, settingsProvider, c.Query("period"), c.Query("board"))
+		upstreamGroups := loadLocalLLMMonitorUpstream(ctx, settingsProvider, c.Query("period"), c.Query("board"), historyStore)
 		payload := buildLocalLLMMonitorPayload(activeGroups, mappings, healthTrends, upstreamGroups)
 		c.JSON(http.StatusOK, gin.H{"groups": payload})
 	})
@@ -117,7 +120,12 @@ func activeLocalMonitorGroups(groups []service.Group) []service.Group {
 	return active
 }
 
-func loadLocalLLMMonitorUpstream(ctx context.Context, settingsProvider llmMonitorSettingsProvider, period, board string) []map[string]any {
+func loadLocalLLMMonitorUpstream(
+	ctx context.Context,
+	settingsProvider llmMonitorSettingsProvider,
+	period, board string,
+	historyStore service.LLMMonitorHistoryStore,
+) []map[string]any {
 	if settingsProvider == nil {
 		return nil
 	}
@@ -130,36 +138,17 @@ func loadLocalLLMMonitorUpstream(ctx context.Context, settingsProvider llmMonito
 		return nil
 	}
 
-	requestCtx, cancel := context.WithTimeout(ctx, llmMonitorProxyTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, targetURL, nil)
-	if err != nil {
-		return nil
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Accept-Encoding", "gzip")
-	req.Header.Set("User-Agent", "sub2api-llm-monitor-local/1.0")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil
-	}
-
-	bodyReader := io.Reader(resp.Body)
-	if strings.EqualFold(strings.TrimSpace(resp.Header.Get("Content-Encoding")), "gzip") {
-		gzipReader, gzipErr := gzip.NewReader(resp.Body)
-		if gzipErr != nil {
+	sourceKey, historyPeriod, historyBoard, historyKeyOK := llmMonitorHistoryRequestKey(settings.StatusAPIURL, period, board)
+	body, _, statusCode, fetchErr := fetchLLMMonitorStatus(ctx, targetURL, "sub2api-llm-monitor-local/1.0")
+	freshSnapshot := fetchErr == nil && statusCode >= http.StatusOK && statusCode < http.StatusMultipleChoices && llmMonitorPayloadHasTimeline(body)
+	if !freshSnapshot {
+		if recovered, ok := loadLLMMonitorHistory(ctx, historyStore, sourceKey, historyPeriod, historyBoard, historyKeyOK); ok {
+			body = recovered
+		} else {
 			return nil
 		}
-		defer gzipReader.Close()
-		bodyReader = gzipReader
-	}
-	body, err := io.ReadAll(bodyReader)
-	if err != nil {
-		return nil
+	} else {
+		persistLLMMonitorHistory(ctx, historyStore, sourceKey, historyPeriod, historyBoard, body)
 	}
 	var payload any
 	if err := json.Unmarshal(body, &payload); err != nil {
