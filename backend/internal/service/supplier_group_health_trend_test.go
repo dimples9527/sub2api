@@ -42,11 +42,17 @@ func TestBuildSupplierProviderGroupHealthTrendsSkipsSkippedSamplesAndLeavesEmpty
 
 	require.Contains(t, trends, int64(101))
 	require.Equal(t, 50.0, trends[101].Availability)
-	require.Equal(t, "yellow", trends[101].Trend[15].Tone)
+	require.Equal(t, "green", trends[101].Trend[15].Tone)
 	require.Equal(t, 2, trends[101].Trend[15].TestedAccountCount)
 	require.Len(t, trends[101].Trend, 18)
 	require.Equal(t, "gray", trends[101].Trend[0].Tone)
 	require.Zero(t, trends[101].Trend[0].TestedAccountCount)
+}
+
+func TestSupplierProviderGroupHealthTrendToneUsesFortyPercentGreenThreshold(t *testing.T) {
+	require.Equal(t, "green", supplierProviderGroupHealthTrendTone(40))
+	require.Equal(t, "yellow", supplierProviderGroupHealthTrendTone(39.99))
+	require.Equal(t, "red", supplierProviderGroupHealthTrendTone(0))
 }
 
 func TestBuildSupplierProviderGroupHealthTrendsOmitsGroupsWithoutUsableSamples(t *testing.T) {

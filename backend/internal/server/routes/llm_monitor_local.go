@@ -523,10 +523,10 @@ func localLLMMonitorStatus(availability float64, trend []service.LocalModelMonit
 			break
 		}
 	}
-	if availability >= 75 {
+	if availability >= 40 {
 		return 1
 	}
-	if availability >= 30 {
+	if availability > 0 {
 		return 2
 	}
 	return 0
@@ -542,10 +542,10 @@ func localLLMMonitorTone(value any, availability float64) string {
 	case "red", "failed", "failure", "unavailable", "error", "0", "false":
 		return "red"
 	}
-	if availability >= 75 {
+	if availability >= 40 {
 		return "green"
 	}
-	if availability >= 30 {
+	if availability > 0 {
 		return "yellow"
 	}
 	return "red"

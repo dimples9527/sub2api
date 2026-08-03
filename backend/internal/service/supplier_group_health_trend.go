@@ -216,10 +216,10 @@ func buildSupplierProviderGroupHealthTrendPoint(timeValue time.Time, samples []S
 
 func supplierProviderGroupHealthTrendTone(availability float64) string {
 	switch {
-	case availability >= 100:
-		return supplierProviderGroupHealthTrendToneGreen
 	case availability <= 0:
 		return supplierProviderGroupHealthTrendToneRed
+	case availability >= 40:
+		return supplierProviderGroupHealthTrendToneGreen
 	default:
 		return supplierProviderGroupHealthTrendToneYellow
 	}

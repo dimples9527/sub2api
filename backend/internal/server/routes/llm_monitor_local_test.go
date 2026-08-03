@@ -104,3 +104,9 @@ func TestLocalLLMMonitorStatusMergesActiveLocalGroupsAndHidesSources(t *testing.
 	upstreamLayer := upstreamOnly["layers"].([]any)[0].(map[string]any)
 	require.Equal(t, 88.0, upstreamLayer["timeline"].([]any)[0].(map[string]any)["availability"])
 }
+
+func TestLocalLLMMonitorToneUsesFortyPercentGreenThreshold(t *testing.T) {
+	require.Equal(t, "green", localLLMMonitorTone(nil, 40))
+	require.Equal(t, "yellow", localLLMMonitorTone(nil, 39.99))
+	require.Equal(t, "red", localLLMMonitorTone(nil, 0))
+}
