@@ -1,10 +1,38 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { JSDOM } from 'jsdom'
 
 const monitorPages = [
   resolve(process.cwd(), 'public/model-monitor.html'),
   resolve(process.cwd(), 'public/model-monitor-local.html')
 ]
+
+function mountMonitorPage(pageUrl: string) {
+  const html = readFileSync(pageUrl, 'utf8')
+  const dom = new JSDOM(html, {
+    runScripts: 'dangerously',
+    url: 'http://localhost/',
+    beforeParse: (window) => {
+      const runtimeWindow = window as typeof window & {
+        __APP_CONFIG__?: Record<string, string>
+        fetch: typeof fetch
+      }
+      runtimeWindow.__APP_CONFIG__ = {}
+      runtimeWindow.matchMedia = () => ({
+        matches: false,
+        addEventListener: () => undefined,
+        addListener: () => undefined,
+        removeEventListener: () => undefined,
+        removeListener: () => undefined,
+        onchange: null,
+        media: '',
+        dispatchEvent: () => false
+      }) as MediaQueryList
+      runtimeWindow.fetch = () => new Promise<Response>(() => undefined)
+    }
+  })
+  return dom
+}
 
 describe('模型监控平台展示', () => {
   it.each(monitorPages)('页面 %s 使用分组平台字段展示平台', (pageUrl) => {
@@ -38,5 +66,45 @@ describe('模型监控平台展示', () => {
     expect(html).toContain("if (value > 0) return 'mid';")
     expect(html).toContain("if (value >= 40) return 'green';")
     expect(html).toContain("if (value > 0) return 'yellow';")
+  })
+
+  it.each(monitorPages)('页面 %s 没有监控样本时使用灰色趋势占位', (pageUrl) => {
+    const html = readFileSync(pageUrl, 'utf8')
+
+    expect(html).toContain('function emptyTrendBars()')
+    expect(html).toMatch(/function\s+normalizeTrend\(item, availability, index\)[\s\S]*?if\s*\(!hasMonitorData\(item\)\)\s*return emptyTrendBars\(\);/)
+    expect(html).toContain("if (point.tone === 'empty')")
+    expect(html).toContain('.trend-bar.empty { background: #3a465b; }')
+  })
+
+  it.each(monitorPages)('页面 %s 区分无数据和真实不可用趋势', (pageUrl) => {
+    const dom = mountMonitorPage(pageUrl)
+    try {
+      const runtimeWindow = dom.window as typeof dom.window & {
+        normalizeStatusItem: (item: unknown, index: number, group: unknown) => { trend: Array<{ tone: string }> }
+        renderTrendBars: (row: unknown, index: number) => string
+      }
+      const normalizeStatusItem = runtimeWindow.normalizeStatusItem
+      const renderTrendBars = runtimeWindow.renderTrendBars
+      const emptyRow = normalizeStatusItem({
+        provider: 'empty',
+        service: 'CC',
+        layers: [{ timeline: [] }]
+      }, 0, { rateMultiplier: 1 })
+      const redRow = normalizeStatusItem({
+        provider: 'red',
+        service: 'CC',
+        layers: [{ timeline: [{ status: 0, availability: 0, timestamp: 1_784_604_000 }] }]
+      }, 0, { rateMultiplier: 1 })
+
+      expect(emptyRow.trend).toHaveLength(18)
+      expect(emptyRow.trend.every((point) => point.tone === 'empty')).toBe(true)
+      expect(renderTrendBars(emptyRow, 0)).toContain('trend-bar empty')
+      expect(renderTrendBars(emptyRow, 0)).not.toContain('trend-bar red')
+      expect(redRow.trend.every((point) => point.tone === 'red')).toBe(true)
+      expect(renderTrendBars(redRow, 0)).toContain('trend-bar red')
+    } finally {
+      dom.window.close()
+    }
   })
 })

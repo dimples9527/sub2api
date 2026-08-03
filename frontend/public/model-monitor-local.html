@@ -518,6 +518,7 @@
     .trend-bar.red { background: #de4b52; }
     .trend-bar.yellow { background: #caa51d; }
     .trend-bar.green { background: #2fa84f; }
+    .trend-bar.empty { background: #3a465b; }
     .trend-tooltip {
       position: absolute;
       left: 50%;
@@ -610,6 +611,7 @@
     .trend-tooltip-status.green span { background: #2fca75; box-shadow: 0 0 12px rgba(47, 202, 117, 0.45); }
     .trend-tooltip-status.yellow span { background: #d5b438; box-shadow: 0 0 12px rgba(213, 180, 56, 0.35); }
     .trend-tooltip-status.red span { background: #ee5259; box-shadow: 0 0 12px rgba(238, 82, 89, 0.35); }
+    .trend-tooltip-status.empty span { background: #66758f; box-shadow: 0 0 12px rgba(102, 117, 143, 0.3); }
 
     .card-grid {
       display: none;
@@ -1479,6 +1481,16 @@
 
     function normalizeTrendPoint(point, row, fallbackIndex) {
       if (point && typeof point === 'object') {
+        if (point.tone === 'empty') {
+          return {
+            tone: 'empty',
+            status: undefined,
+            statusText: t('unknown'),
+            time: pointTime(point, row?.time || '--:--'),
+            latency: row?.latency || 0,
+            availability: row?.availability || 0
+          };
+        }
         if ('tone' in point && !('status' in point) && !('availability' in point)) {
           const tone = String(point.tone || 'red');
           const status = tone === 'green' ? 1 : (tone === 'yellow' ? 2 : 0);
@@ -1503,7 +1515,7 @@
         };
       }
       const tone = String(point || 'red');
-      const status = tone === 'green' ? 1 : (tone === 'yellow' ? 2 : 0);
+      const status = tone === 'green' ? 1 : (tone === 'yellow' ? 2 : (tone === 'red' ? 0 : undefined));
       return {
         tone,
         status,
@@ -1637,7 +1649,34 @@
           return 'red';
         }).slice(-18);
       }
-      return [];
+      if (!hasMonitorData(item)) return emptyTrendBars();
+      return trendBars(availability, index);
+    }
+
+    function emptyTrendBars() {
+      return Array.from({ length: 18 }, () => 'empty');
+    }
+
+    function hasMonitorData(item) {
+      const layer = Array.isArray(item?.layers) && item.layers.length ? item.layers[0] : {};
+      const current = layer?.current_status || {};
+      const timeline = Array.isArray(layer?.timeline)
+        ? layer.timeline
+        : (Array.isArray(item?.timeline) ? item.timeline : []);
+      if (timeline.length) return true;
+
+      const rawTrend = pickValue(item, ['trend', 'history', 'availability_trend', 'availabilityTrend', 'status_history', 'statusHistory'], null);
+      if (Array.isArray(rawTrend) && rawTrend.length) return true;
+
+      const dataKeys = [
+        'status', 'availability', 'available_rate', 'availableRate', 'success_rate', 'successRate',
+        'rate_percent', 'uptime', 'timestamp', 'time', 'checked_at', 'checkedAt', 'latency',
+        'latency_ms', 'latencyMs', 'response_time', 'responseTime'
+      ];
+      return [item, layer, current].some((source) => dataKeys.some((key) => {
+        const value = pickValue(source, [key], undefined);
+        return value !== undefined && value !== '';
+      }));
     }
 
     function normalizeStatusItem(item, index, group) {
