@@ -11,6 +11,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type supplierTurnstileSolverStub struct {
+	token string
+}
+
+func (s supplierTurnstileSolverStub) PrepareToken(context.Context, *SupplierProvider, string, func(context.Context) (string, error)) (string, error) {
+	return s.token, nil
+}
+
 func TestSupplierNewAPIClientFetchesAndParsesProviderData(t *testing.T) {
 	var loginCalls int
 	var accountCalls int
@@ -166,4 +174,82 @@ func TestSupplierNewAPIClientTestEndpointCountsAccountsWithoutGroupsPayload(t *t
 			{"name": "key-2", "group": "Trial"},
 		},
 	}, result.ParsedData)
+}
+
+func TestSupplierNewAPIClientAcceptsNestedUserIDFromTurnstileLogin(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			require.Equal(t, "turnstile-token", r.URL.Query().Get("turnstile"))
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "abc"})
+			_, _ = w.Write([]byte(`{"success":true,"data":{"user":{"id":42}}}`))
+		case "/api/user/self":
+			require.Equal(t, "42", r.Header.Get("New-Api-User"))
+			require.Contains(t, r.Header.Get("Cookie"), "session=abc")
+			_, _ = w.Write([]byte(`{"success":true,"data":{"quota":500000}}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	provider := &SupplierProvider{
+		ID:               42,
+		Code:             "supplier-newapi-turnstile",
+		ProviderType:     "newapi",
+		BaseURL:          server.URL,
+		LoginURL:         "/api/user/login",
+		BalanceURL:       "/api/user/self",
+		Username:         "root",
+		TurnstileEnabled: true,
+	}
+	client := NewSupplierNewAPIClient(server.Client(), supplierTurnstileSolverStub{token: "turnstile-token"})
+
+	balance, err := client.FetchBalance(context.Background(), provider, "secret")
+
+	require.NoError(t, err)
+	require.Equal(t, float64(1), balance)
+}
+
+func TestSupplierNewAPIClientUsesAccessTokenFromTurnstileLogin(t *testing.T) {
+	var loginCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			loginCalls++
+			require.Equal(t, "turnstile-token", r.URL.Query().Get("turnstile"))
+			http.SetCookie(w, &http.Cookie{Name: "new_api_refresh", Value: "refresh-token"})
+			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"jwt-token","access_expires_at":1800000000,"session":{"sid":"sess-1"},"user":{"id":42}}}`))
+		case "/api/user/self":
+			require.Equal(t, "Bearer jwt-token", r.Header.Get("Authorization"))
+			require.Empty(t, r.Header.Get("Cookie"))
+			require.Equal(t, "42", r.Header.Get("New-Api-User"))
+			_, _ = w.Write([]byte(`{"success":true,"data":{"quota":500000}}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	provider := &SupplierProvider{
+		ID:               42,
+		Code:             "supplier-newapi-access-token",
+		ProviderType:     "newapi",
+		BaseURL:          server.URL,
+		LoginURL:         "/api/user/login",
+		BalanceURL:       "/api/user/self",
+		Username:         "root",
+		TurnstileEnabled: true,
+	}
+	client := NewSupplierNewAPIClient(server.Client(), supplierTurnstileSolverStub{token: "turnstile-token"})
+
+	firstBalance, err := client.FetchBalance(context.Background(), provider, "secret")
+	require.NoError(t, err)
+	require.Equal(t, float64(1), firstBalance)
+	secondBalance, err := client.FetchBalance(context.Background(), provider, "secret")
+	require.NoError(t, err)
+	require.Equal(t, float64(1), secondBalance)
+	require.Equal(t, 1, loginCalls)
 }

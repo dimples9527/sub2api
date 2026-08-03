@@ -37,6 +37,7 @@ type SupplierNewAPIClient struct {
 
 type supplierNewAPISession struct {
 	UserID       int64
+	AccessToken  string
 	CookieHeader string
 }
 
@@ -299,14 +300,14 @@ func (c *SupplierNewAPIClient) cachedSession(provider *SupplierProvider) (suppli
 	c.sessionMu.Lock()
 	defer c.sessionMu.Unlock()
 	session, ok := c.sessions[supplierNewAPISessionKey(provider)]
-	if !ok || session.UserID <= 0 || strings.TrimSpace(session.CookieHeader) == "" {
+	if !ok || session.UserID <= 0 || !supplierNewAPIHasSessionAuth(session) {
 		return supplierNewAPISession{}, false
 	}
 	return session, true
 }
 
 func (c *SupplierNewAPIClient) storeSession(provider *SupplierProvider, session supplierNewAPISession) {
-	if session.UserID <= 0 || strings.TrimSpace(session.CookieHeader) == "" {
+	if session.UserID <= 0 || !supplierNewAPIHasSessionAuth(session) {
 		return
 	}
 	c.sessionMu.Lock()
@@ -355,7 +356,11 @@ func (c *SupplierNewAPIClient) login(ctx context.Context, provider *SupplierProv
 		Success bool   `json:"success"`
 		Message string `json:"message"`
 		Data    struct {
-			ID int64 `json:"id"`
+			ID          int64  `json:"id"`
+			AccessToken string `json:"access_token"`
+			User        struct {
+				ID int64 `json:"id"`
+			} `json:"user"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
@@ -364,14 +369,24 @@ func (c *SupplierNewAPIClient) login(ctx context.Context, provider *SupplierProv
 	if !resp.Success {
 		return supplierNewAPISession{}, fmt.Errorf("supplier newapi login failed: %s", firstSupplierSub2APIString(resp.Message, "unknown error"))
 	}
-	if resp.Data.ID <= 0 {
+	if accessToken := strings.TrimSpace(resp.Data.AccessToken); accessToken != "" {
+		if resp.Data.User.ID <= 0 {
+			return supplierNewAPISession{}, fmt.Errorf("supplier newapi login failed: missing user id")
+		}
+		return supplierNewAPISession{UserID: resp.Data.User.ID, AccessToken: accessToken}, nil
+	}
+	userID := resp.Data.User.ID
+	if userID <= 0 {
+		userID = resp.Data.ID
+	}
+	if userID <= 0 {
 		return supplierNewAPISession{}, fmt.Errorf("supplier newapi login failed: missing user id")
 	}
 	cookieHeader := supplierNewAPICookiesHeader(cookies)
 	if cookieHeader == "" {
 		return supplierNewAPISession{}, fmt.Errorf("supplier newapi login failed: missing cookie")
 	}
-	return supplierNewAPISession{UserID: resp.Data.ID, CookieHeader: cookieHeader}, nil
+	return supplierNewAPISession{UserID: userID, CookieHeader: cookieHeader}, nil
 }
 
 func (c *SupplierNewAPIClient) doLogin(ctx context.Context, provider *SupplierProvider, path string, body io.Reader) ([]byte, int, []*http.Cookie, error) {
@@ -408,8 +423,10 @@ func (c *SupplierNewAPIClient) doJSON(ctx context.Context, method string, provid
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("New-Api-User", strconv.FormatInt(session.UserID, 10))
-	if session.CookieHeader != "" {
-		req.Header.Set("Cookie", session.CookieHeader)
+	if accessToken := strings.TrimSpace(session.AccessToken); accessToken != "" {
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+	} else if cookieHeader := strings.TrimSpace(session.CookieHeader); cookieHeader != "" {
+		req.Header.Set("Cookie", cookieHeader)
 	}
 	httpClient := *c.httpClient
 	originHost := target.Host
@@ -670,6 +687,10 @@ func supplierNewAPICookiesHeader(cookies []*http.Cookie) string {
 		parts = append(parts, cookie.Name+"="+cookie.Value)
 	}
 	return strings.Join(parts, "; ")
+}
+
+func supplierNewAPIHasSessionAuth(session supplierNewAPISession) bool {
+	return strings.TrimSpace(session.AccessToken) != "" || strings.TrimSpace(session.CookieHeader) != ""
 }
 
 func (c *SupplierNewAPIClient) recordEndpointResult(providerID int64, scope string, result SupplierProviderEndpointResult) {
