@@ -299,35 +299,39 @@
             </div>
           </section>
 
-          <section class="sp-health-section" data-test="supplier-cost-breakdown">
-            <div class="sp-health-section-head">
-              <span>按供应商拆分成本</span>
-              <small>{{ costTrendRangeLabel }} · 每个供应商并排比较上游成本和本地成本</small>
-            </div>
-            <div class="sp-health-chart-meta">
-              <div class="sp-health-chart-legend">
-                <span class="sp-health-legend-item upstream"><i></i>上游成本</span>
-                <span class="sp-health-legend-item local"><i></i>本地成本</span>
-              </div>
-              <div class="sp-health-chart-totals">
-                <span>供应商 <b>{{ costBreakdown.length }}</b> 个</span>
-              </div>
-            </div>
-            <div class="sp-health-breakdown-chart-scroll" data-test="supplier-cost-breakdown-chart-container">
-              <div class="sp-health-breakdown-chart" :style="{ minWidth: costBreakdownChartMinWidth }">
-                <Bar
-                  v-if="costBreakdownChartData"
-                  :data="costBreakdownChartData"
-                  :options="costBreakdownChartOptions"
-                  data-test="supplier-cost-breakdown-chart"
-                />
-                <div v-else-if="costTrendLoading" class="sp-health-chart-empty">供应商成本加载中…</div>
-                <div v-else class="sp-health-chart-empty">暂无供应商成本数据，可调整时间范围后重试</div>
-              </div>
-            </div>
-          </section>
         </div>
       </aside>
+    </section>
+
+    <section class="sp-panel sp-cost-breakdown-panel" data-test="supplier-cost-breakdown-panel">
+      <header class="sp-panel-head">
+        <div class="sp-panel-title">
+          <span class="sp-section-index">03</span>
+          <div>
+            <h2>按供应商拆分成本</h2>
+            <span>{{ costTrendRangeLabel }} · 每个供应商并排比较上游成本和本地成本</span>
+          </div>
+        </div>
+        <span class="sp-cost-breakdown-count">供应商 <b>{{ costBreakdown.length }}</b> 个</span>
+      </header>
+      <div class="sp-panel-body sp-cost-breakdown-body" data-test="supplier-cost-breakdown">
+        <div class="sp-health-chart-meta">
+          <div class="sp-health-chart-legend">
+            <span class="sp-health-legend-item upstream"><i></i>上游成本</span>
+            <span class="sp-health-legend-item local"><i></i>本地成本</span>
+          </div>
+        </div>
+        <div class="sp-health-breakdown-chart" data-test="supplier-cost-breakdown-chart-container">
+          <Bar
+            v-if="costBreakdownChartData"
+            :data="costBreakdownChartData"
+            :options="costBreakdownChartOptions"
+            data-test="supplier-cost-breakdown-chart"
+          />
+          <div v-else-if="costTrendLoading" class="sp-health-chart-empty">供应商成本加载中…</div>
+          <div v-else class="sp-health-chart-empty">暂无供应商成本数据，可调整时间范围后重试</div>
+        </div>
+      </div>
     </section>
 
     <div class="sp-footer-note">
@@ -1085,9 +1089,9 @@ const costBreakdownChartData = computed(() => {
         borderWidth: 1,
         borderRadius: 4,
         borderSkipped: false,
-        barPercentage: 0.42,
-        categoryPercentage: 0.72,
-        maxBarThickness: 36,
+        barPercentage: 0.36,
+        categoryPercentage: 0.76,
+        maxBarThickness: 24,
       },
       {
         label: '本地成本',
@@ -1097,15 +1101,13 @@ const costBreakdownChartData = computed(() => {
         borderWidth: 1,
         borderRadius: 4,
         borderSkipped: false,
-        barPercentage: 0.42,
-        categoryPercentage: 0.72,
-        maxBarThickness: 36,
+        barPercentage: 0.36,
+        categoryPercentage: 0.76,
+        maxBarThickness: 24,
       },
     ],
   }
 })
-
-const costBreakdownChartMinWidth = computed(() => `${Math.max(100, costBreakdown.value.length * 120)}px`)
 
 const costBreakdownChartOptions = computed<ChartOptions<'bar'>>(() => {
   const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
@@ -1134,7 +1136,7 @@ const costBreakdownChartOptions = computed<ChartOptions<'bar'>>(() => {
       x: {
         ticks: {
           color: isDark ? '#9ca3af' : '#64748b',
-          maxRotation: 0,
+          maxRotation: 45,
           minRotation: 0,
           autoSkip: false,
           callback(value: string | number) {
@@ -2884,22 +2886,42 @@ function errorMessage(err: unknown, fallback: string): string {
   padding: 0.75rem;
 }
 
-.sp-health-breakdown-chart-scroll {
-  overflow-x: auto;
+.sp-cost-breakdown-panel {
+  margin-bottom: 1rem;
+}
+
+.sp-cost-breakdown-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.sp-cost-breakdown-count {
+  flex-shrink: 0;
+  color: var(--sp-muted);
+  font-size: 0.72rem;
+}
+
+.sp-cost-breakdown-count b {
+  color: var(--sp-text);
+  font-weight: 800;
+}
+
+.sp-health-breakdown-chart {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  height: 300px;
+  padding: 0.75rem 0.5rem 0.5rem;
+  overflow: hidden;
   border: 1px solid var(--sp-line);
   border-radius: 0.75rem;
   background: color-mix(in srgb, var(--sp-panel) 94%, #94a3b8);
 }
 
-.sp-health-breakdown-chart {
-  position: relative;
-  height: 270px;
-  min-width: 100%;
-  padding: 0.75rem 0.5rem 0.5rem;
-}
-
 .sp-health-breakdown-chart :deep(canvas) {
   display: block;
+  max-width: 100%;
 }
 
 

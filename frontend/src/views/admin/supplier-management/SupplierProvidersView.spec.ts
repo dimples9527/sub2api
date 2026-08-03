@@ -388,6 +388,20 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(supplierProvidersSource).toContain('Bar')
   })
 
+  it('places the supplier cost breakdown in a full-width panel without horizontal scrolling', async () => {
+    const wrapper = await mountSupplierProviders()
+
+    const breakdownPanel = wrapper.get('[data-test="supplier-cost-breakdown-panel"]')
+    expect(breakdownPanel.classes()).toContain('sp-panel')
+    expect(breakdownPanel.classes()).toContain('sp-cost-breakdown-panel')
+    expect(wrapper.get('[data-test="supplier-health-panel"]').find('[data-test="supplier-cost-breakdown"]').exists()).toBe(false)
+    expect(supplierProvidersSource).not.toContain('sp-health-breakdown-chart-scroll')
+    expect(supplierProvidersSource).not.toContain('costBreakdownChartMinWidth')
+    expect(supplierProvidersSource).toMatch(
+      /\.sp-health-breakdown-chart\s*\{[\s\S]*?width:\s*100%;[\s\S]*?min-width:\s*0;/,
+    )
+  })
+
   it('shows priority todos and filters high-risk providers when a health todo is clicked', async () => {
     providerViewMocks.listProviders.mockResolvedValueOnce({
       items: [
