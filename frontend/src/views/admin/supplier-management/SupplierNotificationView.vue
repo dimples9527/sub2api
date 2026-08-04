@@ -3,7 +3,7 @@
     <header class="sp-page-head">
       <div>
         <div class="sp-eyebrow">Supplier Operations / Notification Desk</div>
-        <h1>通知配置</h1>
+        <h1>供应商通知配置</h1>
         <p class="sp-subtitle">独立管理飞书与邮件渠道、余额事件订阅，以及每一次通知投递的重试记录。</p>
       </div>
       <div class="sp-controls">
@@ -88,7 +88,7 @@
     </section>
 
     <BaseDialog :show="channelDialogVisible" :title="channelDialogTitle" width="wide" @close="closeChannelDialog">
-      <form v-if="channelForm" class="sp-dialog-form" @submit.prevent="saveChannel">
+      <form v-if="channelForm" class="sp-dialog-form sp-notification-channel-dialog" @submit.prevent="saveChannel">
         <section class="sp-form-section"><div class="sp-form-section-head"><span>01</span><div><h3>基础信息</h3><p>渠道名称用于订阅和投递记录中的识别。</p></div></div><div class="sp-form-grid"><Input v-model="channelForm.name" label="渠道名称" placeholder="例如：供应商余额飞书群" required /><div class="sp-form-control"><label class="sp-form-label" for="supplier-notification-channel-type">渠道类型</label><Select id="supplier-notification-channel-type" v-model="channelForm.channel_type" :options="channelTypeOptions" :disabled="channelForm.id !== null" :searchable="false" aria-label="渠道类型" /><p v-if="channelForm.id !== null" class="sp-form-hint">编辑已有渠道时不能切换类型，避免误覆盖另一类配置。</p></div></div><label class="sp-switch-field"><span>启用通知渠道</span><span class="sp-inline"><Toggle v-model="channelForm.enabled" /><em>{{ channelForm.enabled ? '已启用' : '已停用' }}</em></span></label></section>
 
         <section v-if="channelForm.channel_type === 'feishu'" class="sp-form-section"><div class="sp-form-section-head"><span>02</span><div><h3>飞书 Webhook</h3><p>Webhook 和签名 Secret 不会从后端回显；编辑时留空表示保留原值。</p></div></div><div class="sp-form-grid"><Input v-model="channelForm.feishu.webhook_url" label="Webhook 地址" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..." hint="新增渠道必须填写；编辑时可以重新填写，留空保留原地址。" autocomplete="url" /><Input v-model="channelForm.feishu.secret" type="password" label="签名 Secret" placeholder="留空表示保留已配置 Secret" hint="Secret 只用于服务端签名，页面不会显示已保存的值。" autocomplete="new-password" /></div></section>
@@ -101,7 +101,7 @@
     </BaseDialog>
 
     <BaseDialog :show="subscriptionDialogVisible" :title="subscriptionDialogTitle" width="normal" @close="closeSubscriptionDialog">
-      <form v-if="subscriptionForm" class="sp-dialog-form" @submit.prevent="saveSubscription">
+      <form v-if="subscriptionForm" class="sp-dialog-form sp-notification-subscription-dialog" @submit.prevent="saveSubscription">
         <div class="sp-form-grid"><div class="sp-form-control"><label class="sp-form-label" for="supplier-notification-subscription-channel">通知渠道</label><Select id="supplier-notification-subscription-channel" v-model="subscriptionForm.channel_id" :options="channelOptions" :searchable="false" aria-label="通知渠道" /></div><div class="sp-form-control"><label class="sp-form-label" for="supplier-notification-subscription-event">事件类型</label><Select id="supplier-notification-subscription-event" v-model="subscriptionForm.event_type" :options="eventTypeOptions" :searchable="false" aria-label="事件类型" /></div><div class="sp-form-control sp-form-control-wide"><label class="sp-form-label" for="supplier-notification-subscription-provider">供应商范围</label><Select id="supplier-notification-subscription-provider" v-model="subscriptionForm.provider_id" :options="providerOptions" searchable clearable aria-label="供应商范围" /><p class="sp-form-hint">选择“全部供应商”时，任何供应商的对应事件都会投递到该渠道。</p></div></div>
         <label class="sp-switch-field"><span>启用事件订阅</span><span class="sp-inline"><Toggle v-model="subscriptionForm.enabled" /><em>{{ subscriptionForm.enabled ? '已启用' : '已停用' }}</em></span></label>
       </form>
@@ -109,13 +109,13 @@
     </BaseDialog>
 
     <BaseDialog :show="deliveryDetailVisible" title="通知投递详情" width="extra-wide" @close="closeDeliveryDetail">
-      <div v-if="deliveryDetail" class="sp-delivery-detail">
+      <div v-if="deliveryDetail" class="sp-delivery-detail sp-notification-delivery-dialog">
         <section class="sp-detail-summary"><div><span>渠道</span><strong>{{ deliveryDetail.channel_name }}</strong></div><div><span>供应商</span><strong>{{ deliveryDetail.provider_name }}</strong></div><div><span>事件</span><strong>{{ eventTypeLabel(deliveryDetail.event_type) }}</strong></div><div><span>状态</span><strong class="sp-status" :class="deliveryStatusTone(deliveryDetail.status)">{{ deliveryStatusLabel(deliveryDetail.status) }}</strong></div><div><span>尝试次数</span><strong>{{ deliveryDetail.attempt_count }} 次</strong></div><div><span>创建时间</span><strong>{{ formatDateTime(deliveryDetail.created_at) }}</strong></div></section>
         <div v-if="deliveryDetail.last_error" class="sp-alert sp-error-line">最近失败：{{ deliveryDetail.last_error }}</div>
         <section class="sp-detail-section"><header class="sp-detail-section-head"><h3>投递载荷</h3><span>仅展示余额事件内容，不包含渠道凭据</span></header><pre class="sp-payload">{{ formatPayload(deliveryDetail.payload) }}</pre></section>
         <section class="sp-detail-section"><header class="sp-detail-section-head"><h3>投递尝试</h3><span>{{ deliveryAttempts.length }} 条记录</span></header><DataTable :columns="attemptColumns" :data="deliveryAttempts" :loading="deliveryAttemptsLoading" row-key="id"><template #cell-attempt_number="{ row: attempt }">第 {{ attempt.attempt_number }} 次</template><template #cell-status="{ row: attempt }"><span class="sp-status" :class="attempt.status === 'delivered' ? 'good' : attempt.status === 'failed' ? 'bad' : 'info'">{{ deliveryStatusLabel(attempt.status) }}</span></template><template #cell-http_status="{ row: attempt }">{{ attempt.http_status || '—' }}</template><template #cell-error_message="{ row: attempt }">{{ attempt.error_message || attempt.response_body || '—' }}</template><template #cell-attempted_at="{ row: attempt }">{{ formatDateTime(attempt.attempted_at) }}</template><template #empty><div class="sp-empty-state">暂无投递尝试记录。</div></template></DataTable></section>
       </div>
-      <div v-else class="sp-empty-state">正在加载投递详情…</div>
+      <div v-else class="sp-empty-state sp-notification-delivery-dialog">正在加载投递详情…</div>
     </BaseDialog>
   </SupplierModuleLayout>
 </template>
@@ -811,5 +811,62 @@ onMounted(() => {
   .sp-notification-metrics .sp-metric-value { font-size: 1.5rem; }
   .sp-detail-summary { grid-template-columns: 1fr 1fr; gap: 0.5rem; }
   .sp-detail-section-head { align-items: flex-start; flex-direction: column; }
+}
+
+/* BaseDialog teleport 到 body 后会脱离 .supplier-management-page，需要在弹层上重声明 sp 变量 */
+:global(.modal-content:has(.sp-notification-channel-dialog)),
+:global(.modal-content:has(.sp-notification-subscription-dialog)),
+:global(.modal-content:has(.sp-notification-delivery-dialog)) {
+  --sp-panel: #ffffff;
+  --sp-panel-2: #f9fafb;
+  --sp-panel-3: #f3f4f6;
+  --sp-line: #e5e7eb;
+  --sp-soft: #f1f5f9;
+  --sp-text: #111827;
+  --sp-muted: #64748b;
+  --sp-dim: #94a3b8;
+  --sp-cyan: #3b82f6;
+  --sp-green: #16a34a;
+  --sp-amber: #d97706;
+  --sp-orange: #ea580c;
+  --sp-red: #dc2626;
+  --sp-blue: #2563eb;
+  --sp-violet: #7c3aed;
+  color: var(--sp-text);
+}
+
+:global(.dark .modal-content:has(.sp-notification-channel-dialog)),
+:global(.dark .modal-content:has(.sp-notification-subscription-dialog)),
+:global(.dark .modal-content:has(.sp-notification-delivery-dialog)) {
+  --sp-panel: #1f2937;
+  --sp-panel-2: #111827;
+  --sp-panel-3: #374151;
+  --sp-line: #374151;
+  --sp-soft: #374151;
+  --sp-text: #f9fafb;
+  --sp-muted: #9ca3af;
+  --sp-dim: #6b7280;
+  color: var(--sp-text);
+}
+
+:global(.modal-content:has(.sp-notification-channel-dialog) .modal-footer),
+:global(.modal-content:has(.sp-notification-subscription-dialog) .modal-footer),
+:global(.modal-content:has(.sp-notification-delivery-dialog) .modal-footer) {
+  border-color: var(--sp-line);
+  background: var(--sp-panel);
+}
+
+:global(.modal-content:has(.sp-notification-channel-dialog) .modal-footer .sp-button.primary),
+:global(.modal-content:has(.sp-notification-subscription-dialog) .modal-footer .sp-button.primary) {
+  border-color: var(--sp-cyan, #3b82f6);
+  background: var(--sp-cyan, #3b82f6);
+  color: #fff;
+}
+
+:global(.modal-content:has(.sp-notification-channel-dialog) .modal-footer .sp-button.primary:hover),
+:global(.modal-content:has(.sp-notification-subscription-dialog) .modal-footer .sp-button.primary:hover) {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
 }
 </style>

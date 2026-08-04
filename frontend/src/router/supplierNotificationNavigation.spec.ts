@@ -13,7 +13,15 @@ describe('供应商余额预警导航', () => {
     expect(routerSource).toContain('SupplierNotificationView.vue')
     expect(sidebarSource).toContain("/admin/supplier-management/balance-alert")
     expect(sidebarSource).toContain("/admin/supplier-management/notifications")
-    expect(sidebarSource).toContain('余额预警')
-    expect(sidebarSource).toContain('通知配置')
+    expect(sidebarSource).toContain('供应商余额预警')
+    expect(sidebarSource).toContain('供应商通知配置')
+
+    const cssSource = readFileSync(
+      resolve(process.cwd(), 'src/components/admin/supplier-management/supplier-management.css'),
+      'utf8'
+    )
+    expect(cssSource).toContain('.sp-button.primary')
+    expect(cssSource).toContain('background: var(--sp-cyan, #3b82f6)')
+    expect(cssSource).toContain('color: #fff')
   })
 })
