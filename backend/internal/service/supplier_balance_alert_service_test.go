@@ -24,6 +24,11 @@ type supplierBalanceAlertState struct {
 	message string
 }
 
+func supplierBalanceAlertTestSyncTime() *time.Time {
+	syncedAt := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
+	return &syncedAt
+}
+
 func (r *supplierBalanceAlertRepoStub) ListConfigs(context.Context, int64) ([]SupplierBalanceAlertConfig, error) {
 	items := make([]SupplierBalanceAlertConfig, 0, len(r.configs))
 	for _, item := range r.configs {
@@ -135,7 +140,7 @@ func TestSupplierBalanceAlertServiceTriggersOnlyWhenBalanceIsStrictlyBelowThresh
 		states: make(map[int64]supplierBalanceAlertState),
 	}
 	source := &supplierBalanceSourceStub{
-		providers: []SupplierBalanceProvider{{ID: 1, Name: "供应商一"}, {ID: 2, Name: "供应商二"}, {ID: 3, Name: "供应商三"}},
+		providers: []SupplierBalanceProvider{{ID: 1, Name: "供应商一", LastSyncAt: supplierBalanceAlertTestSyncTime()}, {ID: 2, Name: "供应商二", LastSyncAt: supplierBalanceAlertTestSyncTime()}, {ID: 3, Name: "供应商三", LastSyncAt: supplierBalanceAlertTestSyncTime()}},
 		balances:  map[int64]decimal.Decimal{1: decimal.NewFromInt(9), 2: decimal.NewFromInt(10), 3: decimal.NewFromInt(-1)},
 		errors:    make(map[int64]error),
 	}
@@ -168,7 +173,7 @@ func TestSupplierBalanceAlertServiceDoesNotDuplicateActiveEventAndCreatesRecover
 		active:  map[int64]*SupplierBalanceAlertEvent{1: active},
 		states:  make(map[int64]supplierBalanceAlertState),
 	}
-	source := &supplierBalanceSourceStub{providers: []SupplierBalanceProvider{{ID: 1, Name: "供应商一"}}, balances: map[int64]decimal.Decimal{1: decimal.NewFromInt(11)}, errors: map[int64]error{}}
+	source := &supplierBalanceSourceStub{providers: []SupplierBalanceProvider{{ID: 1, Name: "供应商一", LastSyncAt: supplierBalanceAlertTestSyncTime()}}, balances: map[int64]decimal.Decimal{1: decimal.NewFromInt(11)}, errors: map[int64]error{}}
 	dispatcher := &supplierBalanceDispatcherStub{}
 	service := NewSupplierBalanceAlertService(repo, source, dispatcher)
 
@@ -187,6 +192,46 @@ func TestSupplierBalanceAlertServiceDoesNotDuplicateActiveEventAndCreatesRecover
 	}
 }
 
+func TestSupplierBalanceAlertServiceDispatchesAgainForActiveLowEvent(t *testing.T) {
+	now := time.Now()
+	active := &SupplierBalanceAlertEvent{
+		ID:           7,
+		ProviderID:   1,
+		ProviderName: "供应商一",
+		EventType:    SupplierBalanceAlertEventLow,
+		Status:       SupplierBalanceAlertEventActive,
+		Balance:      decimal.NewFromInt(5),
+		Threshold:    decimal.NewFromInt(10),
+		ObservedAt:   now,
+		LastSeenAt:   now,
+	}
+	repo := &supplierBalanceAlertRepoStub{
+		configs: map[int64]SupplierBalanceAlertConfig{
+			1: {ProviderID: 1, ProviderName: "供应商一", Enabled: true, Threshold: decimal.NewFromInt(10), CooldownSeconds: 60},
+		},
+		active: map[int64]*SupplierBalanceAlertEvent{1: active},
+		states: make(map[int64]supplierBalanceAlertState),
+	}
+	source := &supplierBalanceSourceStub{
+		providers: []SupplierBalanceProvider{{ID: 1, Name: "供应商一", LastSyncAt: supplierBalanceAlertTestSyncTime()}},
+		balances:  map[int64]decimal.Decimal{1: decimal.NewFromInt(5)},
+		errors:    map[int64]error{},
+	}
+	dispatcher := &supplierBalanceDispatcherStub{}
+	service := NewSupplierBalanceAlertService(repo, source, dispatcher)
+
+	result, err := service.RunNow(context.Background())
+	if err != nil {
+		t.Fatalf("RunNow returned error: %v", err)
+	}
+	if result.Triggered != 1 || len(repo.events) != 0 || len(dispatcher.events) != 1 {
+		t.Fatalf("triggered/events/dispatches = %d/%d/%d, want 1/0/1", result.Triggered, len(repo.events), len(dispatcher.events))
+	}
+	if event := dispatcher.events[0]; event.ID != active.ID || event.EventType != SupplierBalanceAlertEventLow || !event.Balance.Equal(decimal.NewFromInt(5)) {
+		t.Fatalf("dispatched event = %+v", event)
+	}
+}
+
 func TestSupplierBalanceAlertServiceIsolatesBalanceFetchFailures(t *testing.T) {
 	repo := &supplierBalanceAlertRepoStub{
 		configs: map[int64]SupplierBalanceAlertConfig{
@@ -197,7 +242,7 @@ func TestSupplierBalanceAlertServiceIsolatesBalanceFetchFailures(t *testing.T) {
 		states: make(map[int64]supplierBalanceAlertState),
 	}
 	source := &supplierBalanceSourceStub{
-		providers: []SupplierBalanceProvider{{ID: 1, Name: "失败供应商"}, {ID: 2, Name: "正常供应商"}},
+		providers: []SupplierBalanceProvider{{ID: 1, Name: "失败供应商", LastSyncAt: supplierBalanceAlertTestSyncTime()}, {ID: 2, Name: "正常供应商", LastSyncAt: supplierBalanceAlertTestSyncTime()}},
 		balances:  map[int64]decimal.Decimal{2: decimal.NewFromInt(1)},
 		errors:    map[int64]error{1: errors.New("余额接口失败")},
 	}
@@ -213,5 +258,70 @@ func TestSupplierBalanceAlertServiceIsolatesBalanceFetchFailures(t *testing.T) {
 	}
 	if repo.states[1].status != SupplierBalanceAlertScanStatusError || repo.states[2].status != SupplierBalanceAlertScanStatusOK {
 		t.Fatalf("scan states = %+v", repo.states)
+	}
+}
+
+func TestSupplierBalanceAlertSourceUsesLocalBalanceWithoutRemote(t *testing.T) {
+	syncedAt := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
+	repo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID:             7,
+		Name:           "本地余额供应商",
+		Code:           "local-balance",
+		Enabled:        true,
+		CurrentBalance: 7.25,
+		LastSyncAt:     &syncedAt,
+	}}}
+	source := NewSupplierBalanceAlertSource(repo)
+
+	providers, err := source.ListEnabledProviders(context.Background())
+	if err != nil {
+		t.Fatalf("ListEnabledProviders returned error: %v", err)
+	}
+	if len(providers) != 1 {
+		t.Fatalf("providers length = %d, want 1", len(providers))
+	}
+	if providers[0].CurrentBalance != 7.25 {
+		t.Fatalf("current balance = %v, want 7.25", providers[0].CurrentBalance)
+	}
+	if providers[0].LastSyncAt == nil || !providers[0].LastSyncAt.Equal(syncedAt) {
+		t.Fatalf("last sync at = %v, want %v", providers[0].LastSyncAt, syncedAt)
+	}
+
+	balance, err := source.FetchBalance(context.Background(), providers[0])
+	if err != nil {
+		t.Fatalf("FetchBalance returned error: %v", err)
+	}
+	if !balance.Equal(decimal.RequireFromString("7.25")) {
+		t.Fatalf("balance = %s, want 7.25", balance.String())
+	}
+}
+
+func TestSupplierBalanceAlertServiceSkipsProviderWithoutLocalBalance(t *testing.T) {
+	repo := &supplierBalanceAlertRepoStub{
+		configs: map[int64]SupplierBalanceAlertConfig{
+			7: {ProviderID: 7, Enabled: true, Threshold: decimal.NewFromInt(10)},
+		},
+		active: make(map[int64]*SupplierBalanceAlertEvent),
+		states: make(map[int64]supplierBalanceAlertState),
+	}
+	source := &supplierBalanceSourceStub{
+		providers: []SupplierBalanceProvider{{ID: 7, Name: "未同步供应商"}},
+		balances:  map[int64]decimal.Decimal{7: decimal.Zero},
+		errors:    make(map[int64]error),
+	}
+	service := NewSupplierBalanceAlertService(repo, source, nil)
+
+	result, err := service.RunNow(context.Background())
+	if err != nil {
+		t.Fatalf("RunNow returned error: %v", err)
+	}
+	if result.Skipped != 1 || result.Failed != 0 || result.Triggered != 0 {
+		t.Fatalf("skipped/failed/triggered = %d/%d/%d, want 1/0/0", result.Skipped, result.Failed, result.Triggered)
+	}
+	if repo.states[7].status != SupplierBalanceAlertScanStatusSkip {
+		t.Fatalf("scan state status = %q, want %q", repo.states[7].status, SupplierBalanceAlertScanStatusSkip)
+	}
+	if repo.states[7].message != "暂无本地余额数据" {
+		t.Fatalf("scan state message = %q, want 暂无本地余额数据", repo.states[7].message)
 	}
 }

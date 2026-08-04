@@ -299,7 +299,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	supplierDashboardService := service.ProvideSupplierDashboardService(supplierDashboardRepository, opsService)
 	supplierDashboardHandler := admin.NewSupplierDashboardHandler(supplierDashboardService)
 	supplierBalanceAlertRepository := repository.NewSupplierBalanceAlertRepository(db)
-	supplierBalanceSource := service.ProvideSupplierBalanceAlertSource(supplierProviderRepository, supplierProviderRemoteRegistry, secretEncryptor)
+	supplierBalanceSource := service.ProvideSupplierBalanceAlertSource(supplierProviderRepository)
 	supplierNotificationRepository := repository.NewSupplierNotificationRepository(db)
 	supplierNotificationSender := service.NewSupplierNotificationSender(secretEncryptor)
 	supplierNotificationDispatcher := service.ProvideSupplierNotificationDispatcher(supplierNotificationRepository, supplierNotificationSender)

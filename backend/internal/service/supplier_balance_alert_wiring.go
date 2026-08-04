@@ -2,13 +2,9 @@ package service
 
 import "github.com/google/wire"
 
-// ProvideSupplierBalanceAlertSource 复用供应商管理的余额客户端，但向预警模块暴露独立数据源接口。
-func ProvideSupplierBalanceAlertSource(
-	providerRepo SupplierProviderRepository,
-	remote SupplierProviderRemoteClient,
-	encryptor SecretEncryptor,
-) SupplierBalanceSource {
-	return NewSupplierBalanceAlertSource(providerRepo, remote, encryptor)
+// ProvideSupplierBalanceAlertSource 将供应商同步任务写入的本地余额提供给预警模块。
+func ProvideSupplierBalanceAlertSource(providerRepo SupplierProviderRepository) SupplierBalanceSource {
+	return NewSupplierBalanceAlertSource(providerRepo)
 }
 
 // ProvideSupplierBalanceAlertService 创建并启动供应商余额扫描服务。

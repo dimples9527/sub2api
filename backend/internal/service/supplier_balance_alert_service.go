@@ -143,6 +143,14 @@ func (s *SupplierBalanceAlertService) scanProvider(ctx context.Context, provider
 		}
 		return result, nil
 	}
+	if provider.LastSyncAt == nil {
+		result.Status = SupplierBalanceAlertScanStatusSkip
+		result.Message = "暂无本地余额数据"
+		if stateErr := s.repo.UpdateScanState(ctx, provider.ID, time.Now(), nil, SupplierBalanceAlertScanStatusSkip, result.Message); stateErr != nil {
+			result.Message = stateErr.Error()
+		}
+		return result, nil
+	}
 
 	balance, err := s.source.FetchBalance(ctx, provider)
 	if err != nil {
@@ -169,14 +177,6 @@ func (s *SupplierBalanceAlertService) scanProvider(ctx context.Context, provider
 	if isLow {
 		result.Status = SupplierBalanceAlertScanStatusOK
 		result.EventType = SupplierBalanceAlertEventLow
-		if active != nil {
-			if err := s.repo.TouchActiveLowEvent(ctx, active.ID, balance, now); err != nil {
-				result.Status = SupplierBalanceAlertScanStatusError
-				result.Message = err.Error()
-				return result, err
-			}
-			return result, nil
-		}
 		event := SupplierBalanceAlertEvent{
 			ProviderID:   provider.ID,
 			ProviderCode: firstNonEmptySupplierText(provider.Code, config.ProviderCode),
@@ -189,10 +189,19 @@ func (s *SupplierBalanceAlertService) scanProvider(ctx context.Context, provider
 			ObservedAt:   now,
 			LastSeenAt:   now,
 		}
-		if err := s.repo.CreateEvent(ctx, &event); err != nil {
-			result.Status = SupplierBalanceAlertScanStatusError
-			result.Message = err.Error()
-			return result, err
+		if active != nil {
+			if err := s.repo.TouchActiveLowEvent(ctx, active.ID, balance, now); err != nil {
+				result.Status = SupplierBalanceAlertScanStatusError
+				result.Message = err.Error()
+				return result, err
+			}
+			event.ID = active.ID
+		} else {
+			if err := s.repo.CreateEvent(ctx, &event); err != nil {
+				result.Status = SupplierBalanceAlertScanStatusError
+				result.Message = err.Error()
+				return result, err
+			}
 		}
 		if s.dispatcher != nil {
 			if dispatchErr := s.dispatcher.Dispatch(ctx, event); dispatchErr != nil {
@@ -305,15 +314,13 @@ func (s *SupplierBalanceAlertService) Stop() {
 	}
 }
 
-// NewSupplierBalanceAlertSource 将供应商管理仓储和余额客户端适配为预警模块自己的数据源。
-func NewSupplierBalanceAlertSource(providerRepo SupplierProviderRepository, remote SupplierProviderRemoteClient, encryptor SecretEncryptor) SupplierBalanceSource {
-	return &supplierBalanceAlertSource{providerRepo: providerRepo, remote: remote, encryptor: encryptor}
+// NewSupplierBalanceAlertSource 将供应商管理仓储中的本地余额数据适配为预警模块自己的数据源。
+func NewSupplierBalanceAlertSource(providerRepo SupplierProviderRepository) SupplierBalanceSource {
+	return &supplierBalanceAlertSource{providerRepo: providerRepo}
 }
 
 type supplierBalanceAlertSource struct {
 	providerRepo SupplierProviderRepository
-	remote       SupplierProviderRemoteClient
-	encryptor    SecretEncryptor
 }
 
 func (s *supplierBalanceAlertSource) ListEnabledProviders(ctx context.Context) ([]SupplierBalanceProvider, error) {
@@ -342,26 +349,14 @@ func (s *supplierBalanceAlertSource) ListEnabledProviders(ctx context.Context) (
 	return result, nil
 }
 
-func (s *supplierBalanceAlertSource) FetchBalance(ctx context.Context, provider SupplierBalanceProvider) (decimal.Decimal, error) {
-	if s == nil || s.remote == nil {
+func (s *supplierBalanceAlertSource) FetchBalance(_ context.Context, provider SupplierBalanceProvider) (decimal.Decimal, error) {
+	if s == nil {
 		return decimal.Zero, ErrSupplierBalanceAlertInvalid
 	}
-	password := ""
-	if provider.PasswordEncrypted != "" {
-		if s.encryptor == nil {
-			return decimal.Zero, fmt.Errorf("供应商凭据加密器未配置")
-		}
-		var err error
-		password, err = s.encryptor.Decrypt(provider.PasswordEncrypted)
-		if err != nil {
-			return decimal.Zero, fmt.Errorf("解密供应商凭据失败: %w", err)
-		}
+	if provider.LastSyncAt == nil {
+		return decimal.Zero, fmt.Errorf("暂无本地余额数据")
 	}
-	remoteProvider := supplierProviderForBalance(provider)
-	value, err := s.remote.FetchBalance(ctx, &remoteProvider, password)
-	if err != nil {
-		return decimal.Zero, err
-	}
+	value := provider.CurrentBalance
 	if math.IsNaN(value) || math.IsInf(value, 0) {
 		return decimal.Zero, fmt.Errorf("供应商余额不是有效数字")
 	}
@@ -375,17 +370,7 @@ func supplierBalanceProviderFromModel(provider *SupplierProvider) SupplierBalanc
 		GroupsURL: provider.GroupsURL, AvailableGroupsURL: provider.AvailableGroupsURL,
 		BalanceURL: provider.BalanceURL, UsageCostURL: provider.UsageCostURL,
 		Username: provider.Username, Email: provider.Email, Enabled: provider.Enabled,
-		TurnstileEnabled: provider.TurnstileEnabled, PasswordEncrypted: provider.PasswordEncrypted,
-	}
-}
-
-func supplierProviderForBalance(provider SupplierBalanceProvider) SupplierProvider {
-	return SupplierProvider{
-		ID: provider.ID, Code: provider.Code, Name: provider.Name, ProviderType: provider.ProviderType,
-		BaseURL: provider.BaseURL, LoginURL: provider.LoginURL, APIKeysURL: provider.APIKeysURL,
-		GroupsURL: provider.GroupsURL, AvailableGroupsURL: provider.AvailableGroupsURL,
-		BalanceURL: provider.BalanceURL, UsageCostURL: provider.UsageCostURL,
-		Username: provider.Username, Email: provider.Email, Enabled: provider.Enabled,
-		TurnstileEnabled: provider.TurnstileEnabled,
+		TurnstileEnabled: provider.TurnstileEnabled, CurrentBalance: provider.CurrentBalance,
+		LastSyncAt: provider.LastSyncAt,
 	}
 }

@@ -47,7 +47,8 @@ type SupplierBalanceProvider struct {
 	Email              string
 	Enabled            bool
 	TurnstileEnabled   bool
-	PasswordEncrypted  string
+	CurrentBalance     float64
+	LastSyncAt         *time.Time
 }
 
 type SupplierBalanceSource interface {
