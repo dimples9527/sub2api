@@ -689,6 +689,26 @@ const routes: RouteRecordRaw[] = [
   },
 
   {
+    path: '/admin/supplier-management/balance-alert',
+    name: 'AdminSupplierBalanceAlert',
+    component: () => import('@/views/admin/supplier-management/SupplierBalanceAlertView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: '供应商余额预警'
+    }
+  },
+  {
+    path: '/admin/supplier-management/notifications',
+    name: 'AdminSupplierNotifications',
+    component: () => import('@/views/admin/supplier-management/SupplierNotificationView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: '供应商通知配置'
+    }
+  },
+  {
     path: '/admin/supplier-management/captcha-settings',
     name: 'AdminSupplierCaptchaSettings',
     component: () => import('@/views/admin/supplier-management/SupplierCaptchaSettingsView.vue'),

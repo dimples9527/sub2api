@@ -298,6 +298,15 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	supplierDashboardRepository := repository.NewSupplierDashboardRepository(db)
 	supplierDashboardService := service.ProvideSupplierDashboardService(supplierDashboardRepository, opsService)
 	supplierDashboardHandler := admin.NewSupplierDashboardHandler(supplierDashboardService)
+	supplierBalanceAlertRepository := repository.NewSupplierBalanceAlertRepository(db)
+	supplierBalanceSource := service.ProvideSupplierBalanceAlertSource(supplierProviderRepository, supplierProviderRemoteRegistry, secretEncryptor)
+	supplierNotificationRepository := repository.NewSupplierNotificationRepository(db)
+	supplierNotificationSender := service.NewSupplierNotificationSender(secretEncryptor)
+	supplierNotificationDispatcher := service.ProvideSupplierNotificationDispatcher(supplierNotificationRepository, supplierNotificationSender)
+	supplierBalanceAlertService := service.ProvideSupplierBalanceAlertService(supplierBalanceAlertRepository, supplierBalanceSource, supplierNotificationDispatcher)
+	supplierBalanceAlertHandler := admin.NewSupplierBalanceAlertHandler(supplierBalanceAlertService)
+	supplierNotificationService := service.ProvideSupplierNotificationService(supplierNotificationRepository, secretEncryptor, supplierNotificationSender)
+	supplierNotificationHandler := admin.NewSupplierNotificationHandler(supplierNotificationService)
 	upstreamProviderService := service.NewUpstreamProviderService(settingRepository)
 	upstreamProviderHandler := admin.NewUpstreamProviderHandler(upstreamProviderService)
 	upstreamManagementService := service.ProvideUpstreamManagementService(upstreamProviderService, groupRepository, settingRepository, apiKeyAuthCacheInvalidator)
@@ -315,7 +324,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	upstreamAccountHealthGuardScheduler := service.ProvideUpstreamAccountHealthGuardScheduler(upstreamAccountHealthGuardService)
 	upstreamAccountSyncHandler := admin.NewUpstreamAccountSyncHandler(upstreamAccountSyncService, upstreamAccountRateGuardScheduler, upstreamBalanceConsumptionService, upstreamBalanceSamplerScheduler, upstreamAccountHealthGuardService, upstreamAccountHealthGuardScheduler)
 	ollamaCloudUsageService := service.ProvideOllamaCloudUsageService(accountRepository, httpUpstream, settingService, secretEncryptor, configConfig, leaderLockCache, db)
-	adminHandlers := handler.ProvideAdminHandlers(dashboardHandler, adminUserHandler, groupHandler, accountHandler, adminAnnouncementHandler, dataManagementHandler, backupHandler, oAuthHandler, openAIOAuthHandler, geminiOAuthHandler, antigravityOAuthHandler, grokOAuthHandler, proxyHandler, adminRedeemHandler, promoHandler, settingHandler, opsHandler, systemHandler, adminSubscriptionHandler, adminUsageHandler, userAttributeHandler, errorPassthroughHandler, tlsFingerprintProfileHandler, adminAPIKeyHandler, scheduledTestHandler, channelHandler, channelMonitorHandler, channelMonitorRequestTemplateHandler, contentModerationHandler, promptAdminHandler, paymentHandler, affiliateHandler, complianceHandler, auditLogHandler, upstreamBillingProbeService, supplierProviderHandler, supplierProviderTypeHandler, supplierProviderSyncHandler, supplierAutomationHandler, supplierDashboardHandler, upstreamProviderHandler, upstreamDashboardHandler, upstreamManagementHandler, upstreamAccountSyncHandler, ollamaCloudUsageService)
+	adminHandlers := handler.ProvideAdminHandlers(dashboardHandler, adminUserHandler, groupHandler, accountHandler, adminAnnouncementHandler, dataManagementHandler, backupHandler, oAuthHandler, openAIOAuthHandler, geminiOAuthHandler, antigravityOAuthHandler, grokOAuthHandler, proxyHandler, adminRedeemHandler, promoHandler, settingHandler, opsHandler, systemHandler, adminSubscriptionHandler, adminUsageHandler, userAttributeHandler, errorPassthroughHandler, tlsFingerprintProfileHandler, adminAPIKeyHandler, scheduledTestHandler, channelHandler, channelMonitorHandler, channelMonitorRequestTemplateHandler, contentModerationHandler, promptAdminHandler, paymentHandler, affiliateHandler, complianceHandler, auditLogHandler, upstreamBillingProbeService, supplierProviderHandler, supplierProviderTypeHandler, supplierProviderSyncHandler, supplierAutomationHandler, supplierDashboardHandler, supplierBalanceAlertHandler, supplierNotificationHandler, upstreamProviderHandler, upstreamDashboardHandler, upstreamManagementHandler, upstreamAccountSyncHandler, ollamaCloudUsageService)
 	usageRecordWorkerPool := service.NewUsageRecordWorkerPool(configConfig)
 	userMsgQueueCache := repository.NewUserMsgQueueCache(redisClient)
 	userMessageQueueService := service.ProvideUserMessageQueueService(userMsgQueueCache, rpmCache, configConfig)
@@ -377,7 +386,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	upstreamGroupRateFixScheduler := service.ProvideUpstreamGroupRateFixScheduler(upstreamManagementService)
 	upstreamAccountSyncPreviewScheduler := service.ProvideUpstreamAccountSyncPreviewScheduler(upstreamAccountSyncService)
 	supplierAutomationScheduler := service.ProvideSupplierAutomationScheduler(supplierAutomationRepository, supplierAutomationService)
-	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, opsService, opsIngressRejectAggregator, apiKeyService, authCacheInvalidationWorker, schedulerSnapshotService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, batchImageCleanupService, batchImageWorkerRuntime, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, userPlatformQuotaUsageFlusher, upstreamBillingProbeService, ollamaCloudUsageService, auditLogService, upstreamGroupRateFixScheduler, upstreamAccountSyncPreviewScheduler, upstreamAccountRateGuardScheduler, upstreamBalanceSamplerScheduler, upstreamAccountHealthGuardScheduler, supplierAutomationScheduler, promptService)
+	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, opsService, opsIngressRejectAggregator, apiKeyService, authCacheInvalidationWorker, schedulerSnapshotService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, batchImageCleanupService, batchImageWorkerRuntime, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, userPlatformQuotaUsageFlusher, upstreamBillingProbeService, ollamaCloudUsageService, auditLogService, upstreamGroupRateFixScheduler, upstreamAccountSyncPreviewScheduler, upstreamAccountRateGuardScheduler, upstreamBalanceSamplerScheduler, upstreamAccountHealthGuardScheduler, supplierAutomationScheduler, supplierBalanceAlertService, supplierNotificationDispatcher, promptService)
 	application := &Application{
 		Server:      httpServer,
 		PromptAudit: promptService,
@@ -452,6 +461,8 @@ func provideCleanup(
 	upstreamBalanceSamplerScheduler *service.UpstreamBalanceSamplerScheduler,
 	upstreamAccountHealthGuardScheduler *service.UpstreamAccountHealthGuardScheduler,
 	supplierAutomationScheduler *service.SupplierAutomationScheduler,
+	supplierBalanceAlert *service.SupplierBalanceAlertService,
+	supplierNotificationDispatcher *service.SupplierNotificationDispatcher,
 	promptAudit *securityaudit.PromptService,
 ) func() {
 	return func() {
@@ -464,6 +475,18 @@ func provideCleanup(
 		}
 
 		parallelSteps := []cleanupStep{
+			{"SupplierNotificationDispatcher", func() error {
+				if supplierNotificationDispatcher != nil {
+					supplierNotificationDispatcher.Stop()
+				}
+				return nil
+			}},
+			{"SupplierBalanceAlertService", func() error {
+				if supplierBalanceAlert != nil {
+					supplierBalanceAlert.Stop()
+				}
+				return nil
+			}},
 			{"OpsIngressRejectAggregator", func() error {
 				if opsIngressReject != nil {
 					opsIngressReject.Stop()

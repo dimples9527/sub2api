@@ -119,6 +119,8 @@ func provideCleanup(
 	upstreamBalanceSamplerScheduler *service.UpstreamBalanceSamplerScheduler,
 	upstreamAccountHealthGuardScheduler *service.UpstreamAccountHealthGuardScheduler,
 	supplierAutomationScheduler *service.SupplierAutomationScheduler,
+	supplierBalanceAlert *service.SupplierBalanceAlertService,
+	supplierNotificationDispatcher *service.SupplierNotificationDispatcher,
 	promptAudit *securityaudit.PromptService,
 ) func() {
 	return func() {
@@ -132,6 +134,18 @@ func provideCleanup(
 
 		// 应用层清理步骤可并行执行，基础设施资源（Redis/Ent）最后按顺序关闭。
 		parallelSteps := []cleanupStep{
+			{"SupplierNotificationDispatcher", func() error {
+				if supplierNotificationDispatcher != nil {
+					supplierNotificationDispatcher.Stop()
+				}
+				return nil
+			}},
+			{"SupplierBalanceAlertService", func() error {
+				if supplierBalanceAlert != nil {
+					supplierBalanceAlert.Stop()
+				}
+				return nil
+			}},
 			{"OpsIngressRejectAggregator", func() error {
 				if opsIngressReject != nil {
 					opsIngressReject.Stop()

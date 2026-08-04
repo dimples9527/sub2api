@@ -808,6 +808,8 @@ var ProviderSet = wire.NewSet(
 	ProvideOllamaCloudUsageService,
 	ProvideSettingService,
 	ProvideSupplierProviderService,
+	SupplierBalanceAlertWiringSet,
+	SupplierNotificationWiringSet,
 	NewSupplierProviderTypeService,
 	ProvideSupplierProviderRemoteClient,
 	wire.Bind(new(SupplierProviderRemoteClient), new(*SupplierProviderRemoteRegistry)),

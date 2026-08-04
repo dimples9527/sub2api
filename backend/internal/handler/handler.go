@@ -46,6 +46,8 @@ type AdminHandlers struct {
 	SupplierProviderSync   *admin.SupplierProviderSyncHandler
 	SupplierAutomation     *admin.SupplierAutomationHandler
 	SupplierDashboard      *admin.SupplierDashboardHandler
+	SupplierBalanceAlert   *admin.SupplierBalanceAlertHandler
+	SupplierNotification   *admin.SupplierNotificationHandler
 	UpstreamProvider       *admin.UpstreamProviderHandler
 	UpstreamDashboard      *admin.UpstreamDashboardHandler
 	UpstreamManagement     *admin.UpstreamManagementHandler

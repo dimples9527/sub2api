@@ -38,6 +38,38 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 		supplier.GET("/captcha-settings", h.Admin.Setting.GetSupplierCaptchaSettings)
 		supplier.PUT("/captcha-settings", h.Admin.Setting.UpdateSupplierCaptchaSettings)
 
+		balanceAlert := supplier.Group("/balance-alert")
+		{
+			balanceAlert.GET("/configs", h.Admin.SupplierBalanceAlert.ListConfigs)
+			balanceAlert.PUT("/configs/:provider_id", h.Admin.SupplierBalanceAlert.UpdateConfig)
+			balanceAlert.POST("/scan", h.Admin.SupplierBalanceAlert.Scan)
+			balanceAlert.GET("/events", h.Admin.SupplierBalanceAlert.ListEvents)
+		}
+
+		notificationChannels := supplier.Group("/notification-channels")
+		{
+			notificationChannels.GET("", h.Admin.SupplierNotification.ListChannels)
+			notificationChannels.POST("", h.Admin.SupplierNotification.CreateChannel)
+			notificationChannels.PUT("/:id", h.Admin.SupplierNotification.UpdateChannel)
+			notificationChannels.DELETE("/:id", h.Admin.SupplierNotification.DeleteChannel)
+			notificationChannels.POST("/:id/test", h.Admin.SupplierNotification.TestChannel)
+		}
+
+		notificationSubscriptions := supplier.Group("/notification-subscriptions")
+		{
+			notificationSubscriptions.GET("", h.Admin.SupplierNotification.ListSubscriptions)
+			notificationSubscriptions.POST("", h.Admin.SupplierNotification.CreateSubscription)
+			notificationSubscriptions.PUT("/:id", h.Admin.SupplierNotification.UpdateSubscription)
+			notificationSubscriptions.DELETE("/:id", h.Admin.SupplierNotification.DeleteSubscription)
+		}
+
+		notificationDeliveries := supplier.Group("/notification-deliveries")
+		{
+			notificationDeliveries.GET("", h.Admin.SupplierNotification.ListDeliveries)
+			notificationDeliveries.GET("/:id", h.Admin.SupplierNotification.GetDelivery)
+			notificationDeliveries.GET("/:id/attempts", h.Admin.SupplierNotification.ListDeliveryAttempts)
+		}
+
 		supplier.GET("/accounts", h.Admin.SupplierProviderSync.ListAccounts)
 		supplier.GET("/accounts/:local_account_id/health-guard-models", h.Admin.SupplierProviderSync.ListLocalAccountHealthGuardModels)
 		supplier.PUT("/accounts/:local_account_id/platform-override", h.Admin.SupplierProviderSync.SetLocalAccountPlatformOverride)
