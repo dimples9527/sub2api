@@ -1380,8 +1380,15 @@
       return 0;
     }
 
+    function pointStatus(point) {
+      const rawStatus = pickValue(point, ['status'], undefined);
+      if (rawStatus === undefined || rawStatus === null || rawStatus === '') return undefined;
+      const status = asNumber(rawStatus, Number.NaN);
+      return Number.isFinite(status) ? status : undefined;
+    }
+
     function pointTone(point) {
-      const status = asNumber(pickValue(point, ['status'], undefined), undefined);
+      const status = pointStatus(point);
       const availability = asNumber(pickValue(point, ['availability'], statusAvailability(status)), 0);
       if (status === 0 || availability <= 0) return 'red';
       if (status === 1 || availability >= 40) return 'green';
@@ -1503,7 +1510,7 @@
             availability: row?.availability || 0
           };
         }
-        const status = asNumber(pickValue(point, ['status'], undefined), undefined);
+        const status = pointStatus(point);
         const latency = asNumber(pickValue(point, ['latency', 'latency_ms', 'latencyMs'], row?.latency || 0));
         return {
           tone: pointTone(point),

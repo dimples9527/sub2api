@@ -107,4 +107,29 @@ describe('模型监控平台展示', () => {
       dom.window.close()
     }
   })
+
+  it.each(monitorPages)('页面 %s 根据历史点的可用率保留正确趋势颜色', (pageUrl) => {
+    const dom = mountMonitorPage(pageUrl)
+    try {
+      const runtimeWindow = dom.window as typeof dom.window & {
+        normalizeStatusItem: (item: unknown, index: number, group: unknown) => { trend: Array<{ tone: string }> }
+      }
+      const row = runtimeWindow.normalizeStatusItem({
+        provider: 'history',
+        service: 'CC',
+        layers: [{
+          current_status: { status: 1, latency: 120, timestamp: 1_784_604_000 },
+          timeline: [
+            { availability: 100, latency: 100, timestamp: 1_784_601_000 },
+            { availability: 100, latency: 110, timestamp: 1_784_602_000 },
+            { availability: 100, latency: 120, timestamp: 1_784_604_000 }
+          ]
+        }]
+      }, 0, { rateMultiplier: 1 })
+
+      expect(row.trend.map((point) => point.tone)).toEqual(['green', 'green', 'green'])
+    } finally {
+      dom.window.close()
+    }
+  })
 })
