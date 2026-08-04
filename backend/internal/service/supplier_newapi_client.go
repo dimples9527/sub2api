@@ -13,6 +13,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/google/uuid"
 )
 
 const (
@@ -26,6 +29,7 @@ const (
 
 type SupplierNewAPIClient struct {
 	httpClient      *http.Client
+	tokenCache      SupplierProviderTokenCache
 	turnstileSolver SupplierTurnstileSolver
 
 	sessionMu sync.Mutex
@@ -39,6 +43,7 @@ type supplierNewAPISession struct {
 	UserID       int64
 	AccessToken  string
 	CookieHeader string
+	ExpiresAt    time.Time
 }
 
 type supplierNewAPIGroupRatio struct {
@@ -53,7 +58,7 @@ type supplierNewAPIGroupInfo struct {
 	RawStatus      string
 }
 
-func NewSupplierNewAPIClient(httpClient *http.Client, turnstileSolver SupplierTurnstileSolver) *SupplierNewAPIClient {
+func NewSupplierNewAPIClient(httpClient *http.Client, tokenCache SupplierProviderTokenCache, turnstileSolver SupplierTurnstileSolver) *SupplierNewAPIClient {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: defaultSupplierSub2APIHTTPTimeout}
 	}
@@ -62,6 +67,7 @@ func NewSupplierNewAPIClient(httpClient *http.Client, turnstileSolver SupplierTu
 	}
 	return &SupplierNewAPIClient{
 		httpClient:      httpClient,
+		tokenCache:      tokenCache,
 		turnstileSolver: turnstileSolver,
 		sessions:        make(map[string]supplierNewAPISession),
 		endpointResults: make(map[string]SupplierProviderEndpointResult),
@@ -104,7 +110,7 @@ func (c *SupplierNewAPIClient) FetchAccounts(ctx context.Context, provider *Supp
 		keysRaw, status, err := c.authenticatedGet(ctx, provider, session, keysPath, "accounts")
 		if err != nil {
 			if attempt == 0 && supplierNewAPIAuthFailure(status, keysRaw, err) {
-				c.clearSession(provider)
+				c.clearSession(ctx, provider)
 				lastErr = err
 				continue
 			}
@@ -113,7 +119,7 @@ func (c *SupplierNewAPIClient) FetchAccounts(ctx context.Context, provider *Supp
 		groupsRaw, groupStatus, err := c.authenticatedGet(ctx, provider, session, groupsPath, "groups")
 		if err != nil {
 			if attempt == 0 && supplierNewAPIAuthFailure(groupStatus, groupsRaw, err) {
-				c.clearSession(provider)
+				c.clearSession(ctx, provider)
 				lastErr = err
 				continue
 			}
@@ -137,7 +143,7 @@ func (c *SupplierNewAPIClient) FetchGroups(ctx context.Context, provider *Suppli
 		raw, status, err := c.authenticatedGet(ctx, provider, session, groupsPath, "groups")
 		if err != nil {
 			if attempt == 0 && supplierNewAPIAuthFailure(status, raw, err) {
-				c.clearSession(provider)
+				c.clearSession(ctx, provider)
 				lastErr = err
 				continue
 			}
@@ -249,7 +255,7 @@ func (c *SupplierNewAPIClient) fetchJSONWithRetry(ctx context.Context, provider 
 			return raw, nil
 		}
 		if attempt == 0 && supplierNewAPIAuthFailure(status, raw, err) {
-			c.clearSession(provider)
+			c.clearSession(ctx, provider)
 			lastErr = err
 			continue
 		}
@@ -288,6 +294,92 @@ func (c *SupplierNewAPIClient) ensureSession(ctx context.Context, provider *Supp
 	if session, ok := c.cachedSession(provider); ok {
 		return session, nil
 	}
+	if c.tokenCache == nil {
+		return c.loginAndStore(ctx, provider, password)
+	}
+
+	if token, found, err := c.tokenCache.Get(ctx, provider.ID); err != nil {
+		c.logCacheError(provider, "get", err)
+		return c.loginAndStore(ctx, provider, password)
+	} else if found {
+		if session, ok := supplierNewAPISessionFromToken(token); ok {
+			c.storeSession(provider, session)
+			return session, nil
+		}
+	}
+
+	owner := uuid.NewString()
+	acquired, err := c.tokenCache.TryAcquireLoginLock(ctx, provider.ID, owner, supplierSub2APILoginLockTTL)
+	if err != nil {
+		c.logCacheError(provider, "acquire login lock", err)
+		return c.loginAndStore(ctx, provider, password)
+	}
+	if acquired {
+		return c.loginAndCache(ctx, provider, password, owner)
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, supplierSub2APILoginLockWait)
+	defer cancel()
+	ticker := time.NewTicker(supplierSub2APILoginLockPoll)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-waitCtx.Done():
+			return supplierNewAPISession{}, waitCtx.Err()
+		case <-ticker.C:
+			if token, found, err := c.tokenCache.Get(waitCtx, provider.ID); err != nil {
+				c.logCacheError(provider, "poll token", err)
+				return c.loginAndStore(ctx, provider, password)
+			} else if found {
+				if session, ok := supplierNewAPISessionFromToken(token); ok {
+					c.storeSession(provider, session)
+					return session, nil
+				}
+			}
+			acquired, err := c.tokenCache.TryAcquireLoginLock(waitCtx, provider.ID, owner, supplierSub2APILoginLockTTL)
+			if err != nil {
+				c.logCacheError(provider, "retry login lock", err)
+				return c.loginAndStore(ctx, provider, password)
+			}
+			if acquired {
+				return c.loginAndCache(ctx, provider, password, owner)
+			}
+		}
+	}
+}
+
+func (c *SupplierNewAPIClient) cachedSession(provider *SupplierProvider) (supplierNewAPISession, bool) {
+	c.sessionMu.Lock()
+	defer c.sessionMu.Unlock()
+	session, ok := c.sessions[supplierNewAPISessionKey(provider)]
+	if !ok || !supplierNewAPISessionUsable(session) {
+		return supplierNewAPISession{}, false
+	}
+	return session, true
+}
+
+func (c *SupplierNewAPIClient) storeSession(provider *SupplierProvider, session supplierNewAPISession) {
+	if !supplierNewAPISessionUsable(session) {
+		return
+	}
+	c.sessionMu.Lock()
+	defer c.sessionMu.Unlock()
+	c.sessions[supplierNewAPISessionKey(provider)] = session
+}
+
+func (c *SupplierNewAPIClient) clearSession(ctx context.Context, provider *SupplierProvider) {
+	c.sessionMu.Lock()
+	delete(c.sessions, supplierNewAPISessionKey(provider))
+	c.sessionMu.Unlock()
+	if c.tokenCache == nil || provider == nil {
+		return
+	}
+	if err := c.tokenCache.Delete(ctx, provider.ID); err != nil {
+		c.logCacheError(provider, "delete", err)
+	}
+}
+
+func (c *SupplierNewAPIClient) loginAndStore(ctx context.Context, provider *SupplierProvider, password string) (supplierNewAPISession, error) {
 	session, err := c.login(ctx, provider, password)
 	if err != nil {
 		return supplierNewAPISession{}, err
@@ -296,29 +388,77 @@ func (c *SupplierNewAPIClient) ensureSession(ctx context.Context, provider *Supp
 	return session, nil
 }
 
-func (c *SupplierNewAPIClient) cachedSession(provider *SupplierProvider) (supplierNewAPISession, bool) {
-	c.sessionMu.Lock()
-	defer c.sessionMu.Unlock()
-	session, ok := c.sessions[supplierNewAPISessionKey(provider)]
-	if !ok || session.UserID <= 0 || !supplierNewAPIHasSessionAuth(session) {
+func (c *SupplierNewAPIClient) loginAndCache(ctx context.Context, provider *SupplierProvider, password, owner string) (supplierNewAPISession, error) {
+	defer func() {
+		if err := c.tokenCache.ReleaseLoginLock(context.Background(), provider.ID, owner); err != nil {
+			c.logCacheError(provider, "release login lock", err)
+		}
+	}()
+
+	if token, found, err := c.tokenCache.Get(ctx, provider.ID); err != nil {
+		c.logCacheError(provider, "recheck token", err)
+	} else if found {
+		if session, ok := supplierNewAPISessionFromToken(token); ok {
+			c.storeSession(provider, session)
+			return session, nil
+		}
+	}
+
+	session, err := c.login(ctx, provider, password)
+	if err != nil {
+		return supplierNewAPISession{}, err
+	}
+	if err := c.tokenCache.Set(ctx, provider.ID, supplierNewAPISessionToken(session), supplierNewAPISessionTTL(session)); err != nil {
+		c.logCacheError(provider, "set", err)
+	}
+	c.storeSession(provider, session)
+	return session, nil
+}
+
+func (c *SupplierNewAPIClient) logCacheError(provider *SupplierProvider, action string, err error) {
+	if err == nil || provider == nil {
+		return
+	}
+	logger.LegacyPrintf("supplier_newapi_client", "supplier provider cache %s failed provider_id=%d provider_code=%s err=%v", action, provider.ID, provider.Code, err)
+}
+
+func supplierNewAPISessionFromToken(token SupplierProviderAuthToken) (supplierNewAPISession, bool) {
+	session := supplierNewAPISession{
+		UserID:       token.UserID,
+		AccessToken:  strings.TrimSpace(token.AccessToken),
+		CookieHeader: strings.TrimSpace(token.CookieHeader),
+		ExpiresAt:    token.ExpiresAt,
+	}
+	if !supplierNewAPISessionUsable(session) {
 		return supplierNewAPISession{}, false
 	}
 	return session, true
 }
 
-func (c *SupplierNewAPIClient) storeSession(provider *SupplierProvider, session supplierNewAPISession) {
-	if session.UserID <= 0 || !supplierNewAPIHasSessionAuth(session) {
-		return
+func supplierNewAPISessionToken(session supplierNewAPISession) SupplierProviderAuthToken {
+	return SupplierProviderAuthToken{
+		AccessToken:  strings.TrimSpace(session.AccessToken),
+		TokenType:    "Bearer",
+		ExpiresAt:    session.ExpiresAt,
+		UserID:       session.UserID,
+		CookieHeader: strings.TrimSpace(session.CookieHeader),
 	}
-	c.sessionMu.Lock()
-	defer c.sessionMu.Unlock()
-	c.sessions[supplierNewAPISessionKey(provider)] = session
 }
 
-func (c *SupplierNewAPIClient) clearSession(provider *SupplierProvider) {
-	c.sessionMu.Lock()
-	defer c.sessionMu.Unlock()
-	delete(c.sessions, supplierNewAPISessionKey(provider))
+func supplierNewAPISessionTTL(session supplierNewAPISession) time.Duration {
+	if !session.ExpiresAt.IsZero() {
+		if ttl := time.Until(session.ExpiresAt); ttl > 0 {
+			return ttl
+		}
+	}
+	return SupplierProviderTokenTTL(0)
+}
+
+func supplierNewAPISessionUsable(session supplierNewAPISession) bool {
+	if session.UserID <= 0 || !supplierNewAPIHasSessionAuth(session) {
+		return false
+	}
+	return !session.ExpiresAt.IsZero() && time.Now().Before(session.ExpiresAt)
 }
 
 func (c *SupplierNewAPIClient) login(ctx context.Context, provider *SupplierProvider, password string) (supplierNewAPISession, error) {
@@ -356,9 +496,10 @@ func (c *SupplierNewAPIClient) login(ctx context.Context, provider *SupplierProv
 		Success bool   `json:"success"`
 		Message string `json:"message"`
 		Data    struct {
-			ID          int64  `json:"id"`
-			AccessToken string `json:"access_token"`
-			User        struct {
+			ID              int64  `json:"id"`
+			AccessToken     string `json:"access_token"`
+			AccessExpiresAt any    `json:"access_expires_at"`
+			User            struct {
 				ID int64 `json:"id"`
 			} `json:"user"`
 		} `json:"data"`
@@ -369,11 +510,17 @@ func (c *SupplierNewAPIClient) login(ctx context.Context, provider *SupplierProv
 	if !resp.Success {
 		return supplierNewAPISession{}, fmt.Errorf("supplier newapi login failed: %s", firstSupplierSub2APIString(resp.Message, "unknown error"))
 	}
+	expiresAt := supplierNewAPISessionExpiresAt(resp.Data.AccessExpiresAt)
 	if accessToken := strings.TrimSpace(resp.Data.AccessToken); accessToken != "" {
 		if resp.Data.User.ID <= 0 {
 			return supplierNewAPISession{}, fmt.Errorf("supplier newapi login failed: missing user id")
 		}
-		return supplierNewAPISession{UserID: resp.Data.User.ID, AccessToken: accessToken}, nil
+		return supplierNewAPISession{
+			UserID:       resp.Data.User.ID,
+			AccessToken:  accessToken,
+			CookieHeader: supplierNewAPICookiesHeader(cookies),
+			ExpiresAt:    expiresAt,
+		}, nil
 	}
 	userID := resp.Data.User.ID
 	if userID <= 0 {
@@ -386,7 +533,7 @@ func (c *SupplierNewAPIClient) login(ctx context.Context, provider *SupplierProv
 	if cookieHeader == "" {
 		return supplierNewAPISession{}, fmt.Errorf("supplier newapi login failed: missing cookie")
 	}
-	return supplierNewAPISession{UserID: userID, CookieHeader: cookieHeader}, nil
+	return supplierNewAPISession{UserID: userID, CookieHeader: cookieHeader, ExpiresAt: expiresAt}, nil
 }
 
 func (c *SupplierNewAPIClient) doLogin(ctx context.Context, provider *SupplierProvider, path string, body io.Reader) ([]byte, int, []*http.Cookie, error) {
@@ -689,6 +836,20 @@ func supplierNewAPICookiesHeader(cookies []*http.Cookie) string {
 	return strings.Join(parts, "; ")
 }
 
+func supplierNewAPISessionExpiresAt(raw any) time.Time {
+	seconds := jsonFloat(raw)
+	if seconds > 1e12 {
+		seconds /= 1000
+	}
+	if seconds > 0 {
+		expiresIn := time.Until(time.Unix(int64(seconds), 0))
+		if expiresIn > 0 {
+			return time.Now().Add(SupplierProviderTokenTTL(expiresIn))
+		}
+	}
+	return time.Now().Add(SupplierProviderTokenTTL(0))
+}
+
 func supplierNewAPIHasSessionAuth(session supplierNewAPISession) bool {
 	return strings.TrimSpace(session.AccessToken) != "" || strings.TrimSpace(session.CookieHeader) != ""
 }
@@ -781,7 +942,6 @@ func parseSupplierNewAPIAccountDiagnostic(payload []byte) ([]map[string]string, 
 	}
 	return items, nil
 }
-
 
 func supplierNewAPIAppendQuery(path, key, value string) string {
 	path = strings.TrimSpace(path)

@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +19,204 @@ type supplierTurnstileSolverStub struct {
 
 func (s supplierTurnstileSolverStub) PrepareToken(context.Context, *SupplierProvider, string, func(context.Context) (string, error)) (string, error) {
 	return s.token, nil
+}
+
+func supplierNewAPICacheTestProvider(baseURL string) *SupplierProvider {
+	return &SupplierProvider{
+		ID:           42,
+		Code:         "supplier-newapi-cache",
+		ProviderType: SupplierProviderTypeNewAPI,
+		BaseURL:      baseURL,
+		LoginURL:     "/api/user/login",
+		BalanceURL:   "/api/user/self",
+		Username:     "root",
+	}
+}
+
+func TestSupplierNewAPIClientReusesSessionFromSharedTokenCache(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	var loginCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			loginCalls.Add(1)
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "cached-session"})
+			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"newapi-token","access_expires_at":4102444800,"user":{"id":42}}}`))
+		case "/api/user/self":
+			require.Equal(t, "42", r.Header.Get("New-Api-User"))
+			require.Equal(t, "Bearer newapi-token", r.Header.Get("Authorization"))
+			_, _ = w.Write([]byte(`{"success":true,"data":{"quota":500000}}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	provider := supplierNewAPICacheTestProvider(server.URL)
+	firstRegistry := NewSupplierProviderRemoteRegistry(server.Client(), cache, nil)
+	secondRegistry := NewSupplierProviderRemoteRegistry(server.Client(), cache, nil)
+
+	firstBalance, err := firstRegistry.FetchBalance(context.Background(), provider, "secret")
+	require.NoError(t, err)
+	require.Equal(t, float64(1), firstBalance)
+	secondBalance, err := secondRegistry.FetchBalance(context.Background(), provider, "secret")
+	require.NoError(t, err)
+	require.Equal(t, float64(1), secondBalance)
+
+	require.Equal(t, int32(1), loginCalls.Load())
+	cache.mu.Lock()
+	cachedToken := cache.tokens[provider.ID]
+	setTTLs := append([]time.Duration(nil), cache.setTTLs...)
+	cache.mu.Unlock()
+	require.Equal(t, "newapi-token", cachedToken.AccessToken)
+	require.Equal(t, int64(42), cachedToken.UserID)
+	require.Equal(t, "session=cached-session", cachedToken.CookieHeader)
+	require.False(t, cachedToken.ExpiresAt.IsZero())
+	require.Len(t, setTTLs, 1)
+	require.Greater(t, setTTLs[0], time.Duration(0))
+}
+
+func TestSupplierNewAPIClientRefreshesExpiredCachedSession(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	cache.preload(42, SupplierProviderAuthToken{
+		AccessToken:  "expired-token",
+		TokenType:    "Bearer",
+		ExpiresAt:    time.Now().Add(-time.Minute),
+		UserID:       42,
+		CookieHeader: "session=expired",
+	})
+	var loginCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			loginCalls.Add(1)
+			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"refreshed-token","access_expires_at":4102444800,"user":{"id":42}}}`))
+		case "/api/user/self":
+			require.Equal(t, "Bearer refreshed-token", r.Header.Get("Authorization"))
+			_, _ = w.Write([]byte(`{"success":true,"data":{"quota":500000}}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	balance, err := NewSupplierProviderRemoteRegistry(server.Client(), cache, nil).FetchBalance(
+		context.Background(), supplierNewAPICacheTestProvider(server.URL), "secret",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, float64(1), balance)
+	require.Equal(t, int32(1), loginCalls.Load())
+	cache.mu.Lock()
+	setCalls := cache.setCalls
+	cache.mu.Unlock()
+	require.Equal(t, 1, setCalls)
+}
+
+func TestSupplierNewAPIClientDeletesInvalidSessionAndRetriesLogin(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	cache.preload(42, SupplierProviderAuthToken{
+		AccessToken: "cached-token",
+		TokenType:   "Bearer",
+		ExpiresAt:   time.Now().Add(20 * time.Minute),
+		UserID:      42,
+	})
+	var loginCalls atomic.Int32
+	var balanceCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			loginCalls.Add(1)
+			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"refreshed-token","access_expires_at":4102444800,"user":{"id":42}}}`))
+		case "/api/user/self":
+			if balanceCalls.Add(1) == 1 {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"success":false,"message":"unauthorized"}`))
+				return
+			}
+			require.Equal(t, "Bearer refreshed-token", r.Header.Get("Authorization"))
+			_, _ = w.Write([]byte(`{"success":true,"data":{"quota":500000}}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	balance, err := NewSupplierProviderRemoteRegistry(server.Client(), cache, nil).FetchBalance(
+		context.Background(), supplierNewAPICacheTestProvider(server.URL), "secret",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, float64(1), balance)
+	require.Equal(t, int32(1), loginCalls.Load())
+	require.Equal(t, int32(2), balanceCalls.Load())
+	cache.mu.Lock()
+	deleteCalls := cache.deleteCalls
+	cache.mu.Unlock()
+	require.Equal(t, 1, deleteCalls)
+}
+
+func TestSupplierNewAPIClientUsesSharedLoginLock(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	var loginCalls atomic.Int32
+	loginStarted := make(chan struct{}, 2)
+	releaseLogin := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			loginCalls.Add(1)
+			loginStarted <- struct{}{}
+			<-releaseLogin
+			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"lock-token","access_expires_at":4102444800,"user":{"id":42}}}`))
+		case "/api/user/self":
+			require.Equal(t, "Bearer lock-token", r.Header.Get("Authorization"))
+			_, _ = w.Write([]byte(`{"success":true,"data":{"quota":500000}}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	provider := supplierNewAPICacheTestProvider(server.URL)
+	firstRegistry := NewSupplierProviderRemoteRegistry(server.Client(), cache, nil)
+	secondRegistry := NewSupplierProviderRemoteRegistry(server.Client(), cache, nil)
+	results := make(chan error, 2)
+	var waitGroup sync.WaitGroup
+	waitGroup.Add(2)
+	go func() {
+		defer waitGroup.Done()
+		_, err := firstRegistry.FetchBalance(context.Background(), provider, "secret")
+		results <- err
+	}()
+	select {
+	case <-loginStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first NewAPI login did not start")
+	}
+	go func() {
+		defer waitGroup.Done()
+		_, err := secondRegistry.FetchBalance(context.Background(), provider, "secret")
+		results <- err
+	}()
+
+	secondLoginStarted := false
+	select {
+	case <-loginStarted:
+		secondLoginStarted = true
+	case <-time.After(500 * time.Millisecond):
+	}
+	close(releaseLogin)
+	waitGroup.Wait()
+	close(results)
+	for err := range results {
+		require.NoError(t, err)
+	}
+	require.False(t, secondLoginStarted)
+	require.Equal(t, int32(1), loginCalls.Load())
 }
 
 func TestSupplierNewAPIClientFetchesAndParsesProviderData(t *testing.T) {
@@ -81,7 +281,7 @@ func TestSupplierNewAPIClientFetchesAndParsesProviderData(t *testing.T) {
 		Username:          "root",
 		AccountNamePrefix: "ignored-prefix",
 	}
-	client := NewSupplierNewAPIClient(server.Client(), nil)
+	client := NewSupplierNewAPIClient(server.Client(), nil, nil)
 
 	accounts, err := client.FetchAccounts(context.Background(), provider, "secret")
 	require.NoError(t, err)
@@ -161,7 +361,7 @@ func TestSupplierNewAPIClientTestEndpointCountsAccountsWithoutGroupsPayload(t *t
 		APIKeysURL:   "/api/token/",
 		Username:     "root",
 	}
-	client := NewSupplierNewAPIClient(server.Client(), nil)
+	client := NewSupplierNewAPIClient(server.Client(), nil, nil)
 
 	result, err := client.TestEndpoint(context.Background(), provider, "secret", SupplierSyncScopeAccounts)
 
@@ -204,7 +404,7 @@ func TestSupplierNewAPIClientAcceptsNestedUserIDFromTurnstileLogin(t *testing.T)
 		Username:         "root",
 		TurnstileEnabled: true,
 	}
-	client := NewSupplierNewAPIClient(server.Client(), supplierTurnstileSolverStub{token: "turnstile-token"})
+	client := NewSupplierNewAPIClient(server.Client(), nil, supplierTurnstileSolverStub{token: "turnstile-token"})
 
 	balance, err := client.FetchBalance(context.Background(), provider, "secret")
 
@@ -243,7 +443,7 @@ func TestSupplierNewAPIClientUsesAccessTokenFromTurnstileLogin(t *testing.T) {
 		Username:         "root",
 		TurnstileEnabled: true,
 	}
-	client := NewSupplierNewAPIClient(server.Client(), supplierTurnstileSolverStub{token: "turnstile-token"})
+	client := NewSupplierNewAPIClient(server.Client(), nil, supplierTurnstileSolverStub{token: "turnstile-token"})
 
 	firstBalance, err := client.FetchBalance(context.Background(), provider, "secret")
 	require.NoError(t, err)

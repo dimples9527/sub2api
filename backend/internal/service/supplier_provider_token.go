@@ -6,9 +6,11 @@ import (
 )
 
 type SupplierProviderAuthToken struct {
-	AccessToken string    `json:"access_token"`
-	TokenType   string    `json:"token_type"`
-	ExpiresAt   time.Time `json:"expires_at"`
+	AccessToken  string    `json:"access_token"`
+	TokenType    string    `json:"token_type"`
+	ExpiresAt    time.Time `json:"expires_at"`
+	UserID       int64     `json:"user_id,omitempty"`
+	CookieHeader string    `json:"cookie_header,omitempty"`
 }
 
 type SupplierProviderTokenCache interface {

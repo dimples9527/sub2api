@@ -36,9 +36,11 @@ func TestSupplierProviderTokenCacheStoresTokenWithTTL(t *testing.T) {
 	cache, mr := newSupplierProviderTokenCacheTestClient(t)
 	ctx := context.Background()
 	token := service.SupplierProviderAuthToken{
-		AccessToken: "access-token",
-		TokenType:   "Bearer",
-		ExpiresAt:   time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC),
+		AccessToken:  "access-token",
+		TokenType:    "Bearer",
+		ExpiresAt:    time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC),
+		UserID:       42,
+		CookieHeader: "session=cached-session",
 	}
 
 	require.NoError(t, cache.Set(ctx, 42, token, 5*time.Minute))
