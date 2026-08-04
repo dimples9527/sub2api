@@ -397,6 +397,15 @@
                   @click.stop="requestDeleteGroupRecord(account)"
                 >{{ deletingGroupRecordID === account.group_record_id ? '删除中' : '删除失效分组记录' }}</button>
               </template>
+              <template v-if="account.account_record_delete_eligible">
+                <button
+                  class="sp-button small danger sp-account-action-delete"
+                  type="button"
+                  :disabled="deletingSupplierAccountRecordID === account.id"
+                  title="删除上游账号记录"
+                  @click.stop="requestDeleteSupplierAccountRecord(account)"
+                >{{ deletingSupplierAccountRecordID === account.id ? '删除中' : '删除上游账号记录' }}</button>
+              </template>
               <template v-if="canManageLocalAccount(account)">
                 <button
                   class="sp-button small sp-account-action-test"
@@ -943,6 +952,17 @@
       @cancel="deleteGroupRecordTarget = null"
     />
 
+    <ConfirmDialog
+      :show="Boolean(deleteSupplierAccountRecordTarget)"
+      title="删除上游账号记录"
+      :message="deleteSupplierAccountRecordMessage"
+      confirm-text="删除记录"
+      cancel-text="取消"
+      danger
+      @confirm="confirmDeleteSupplierAccountRecord"
+      @cancel="deleteSupplierAccountRecordTarget = null"
+    />
+
     <BaseDialog
       :show="Boolean(duplicateResultAccount)"
       title="账号已复制"
@@ -986,6 +1006,7 @@ import supplierProvidersAPI, { type SupplierProvider } from '@/api/admin/supplie
 import {
   cancelSupplierAccountBatchTestJob,
   clearSupplierLocalAccountPlatformOverride,
+  deleteSupplierAccount,
   deleteSupplierGroup,
   getSupplierAccountBatchTestJob,
   listSupplierAccounts,
@@ -1074,9 +1095,11 @@ const savingPriorityAccountID = ref<number | null>(null)
 const accountActionLoadingID = ref<number | null>(null)
 const deletingAccountID = ref<number | null>(null)
 const deletingGroupRecordID = ref<number | null>(null)
+const deletingSupplierAccountRecordID = ref<number | null>(null)
 const duplicatingAccountID = ref<number | null>(null)
 const duplicateConfirmAccount = ref<SupplierProviderAccount | null>(null)
 const deleteGroupRecordTarget = ref<SupplierProviderAccount | null>(null)
+const deleteSupplierAccountRecordTarget = ref<SupplierProviderAccount | null>(null)
 const duplicateResultAccount = ref<Account | null>(null)
 const testingAccountID = ref<number | null>(null)
 const testingAccount = ref<Account | null>(null)
@@ -1936,7 +1959,17 @@ const deleteGroupRecordMessage = computed(() => {
   const account = deleteGroupRecordTarget.value
   if (!account) return ''
   const groupName = account.group_name || account.group_key || '该分组'
-  return `仅删除本地保存的失效上游分组记录“${groupName}”，不会删除上游系统数据。删除后账号列表中的失效提示将消失，且无法恢复。`
+  return `仅删除本地保存的失效上游分组记录“${groupName}”，不会删除上游系统数据。若该记录已绑定本地分组，删除时会解除绑定，但不会删除本地分组。删除后账号列表中的失效提示将消失，且无法恢复。`
+})
+
+const deleteSupplierAccountRecordMessage = computed(() => {
+  const account = deleteSupplierAccountRecordTarget.value
+  if (!account || !(account.status === 'deleted' || account.group_status === 'missing')) return ''
+  const accountName = account.name || account.upstream_account_key || `账号 #${account.id}`
+  if (account.status === 'deleted') {
+    return `确认删除本地保存的上游账号记录“${accountName}”？上游账号已删除，本操作不会删除上游系统数据，且删除后无法恢复。`
+  }
+  return `确认删除本地保存的上游账号记录“${accountName}”？该账号引用的上游分组已删除，本操作不会删除上游系统数据，且删除后无法恢复。`
 })
 
 function requestDeleteGroupRecord(account: SupplierProviderAccount) {
@@ -1966,6 +1999,35 @@ async function confirmDeleteGroupRecord() {
     appStore.showError(extractApiErrorMessage(err, '删除失效分组记录失败'))
   } finally {
     deletingGroupRecordID.value = null
+  }
+}
+
+function requestDeleteSupplierAccountRecord(account: SupplierProviderAccount) {
+  if (
+    !account.account_record_delete_eligible
+    || !(account.status === 'deleted' || account.group_status === 'missing')
+    || deletingSupplierAccountRecordID.value !== null
+  ) return
+
+  deleteSupplierAccountRecordTarget.value = account
+}
+
+async function confirmDeleteSupplierAccountRecord() {
+  const target = deleteSupplierAccountRecordTarget.value
+  if (!target || !target.account_record_delete_eligible || deletingSupplierAccountRecordID.value !== null) return
+
+  deletingSupplierAccountRecordID.value = target.id
+  deleteSupplierAccountRecordTarget.value = null
+
+  try {
+    await deleteSupplierAccount(target.id)
+    if (selected.value?.id === target.id) selected.value = null
+    await loadAccounts()
+    appStore.showSuccess('上游账号记录已删除')
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '删除上游账号记录失败'))
+  } finally {
+    deletingSupplierAccountRecordID.value = null
   }
 }
 

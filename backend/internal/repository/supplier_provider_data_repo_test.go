@@ -453,7 +453,7 @@ func TestSupplierProviderDataRepositoryListAccountsExposesInactiveGroupDeleteMet
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM supplier_provider_accounts a")).
 		WithArgs(int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
-	mock.ExpectQuery(`(?s)inactive_group_record\.id AS group_record_id.*group_record_delete_eligible`).
+	mock.ExpectQuery(`(?s)inactive_group_record\.id AS group_record_id\s*,\s*COALESCE\(\s*inactive_group_record\.id IS NOT NULL\s+AND inactive_group_record\.rate_guard_selected = FALSE\s*,\s*FALSE\s*\)\s+AS group_record_delete_eligible`).
 		WithArgs(int64(42), 20, 0).
 		WillReturnRows(sqlmock.NewRows(columns).AddRow(
 			int64(7), int64(42), "Supplier A", "account-1", "Primary", "active", "group-1", "VIP", "", "inactive",

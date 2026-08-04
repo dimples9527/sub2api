@@ -68,6 +68,7 @@ export interface SupplierProviderAccount {
   group_status?: 'active' | 'inactive' | 'missing' | ''
   group_record_id?: number
   group_record_delete_eligible: boolean
+  account_record_delete_eligible: boolean
   rate_multiplier: number
   binding_groups: SupplierProviderAccountBindingGroup[]
   raw_status: string
@@ -202,6 +203,13 @@ export async function listSupplierAccounts(params: SupplierProviderDataListParam
   const { data } = await apiClient.get<SupplierProviderAccountListResult>(
     '/admin/supplier-management/accounts',
     { params }
+  )
+  return data
+}
+
+export async function deleteSupplierAccount(id: number): Promise<{ account_id: number }> {
+  const { data } = await apiClient.delete<{ account_id: number }>(
+    `/admin/supplier-management/accounts/${id}`
   )
   return data
 }
@@ -375,6 +383,7 @@ export const supplierProviderDataAPI = {
   syncProvider,
   testProviderEndpoint,
   listSupplierAccounts,
+  deleteSupplierAccount,
   setSupplierLocalAccountPlatformOverride,
   clearSupplierLocalAccountPlatformOverride,
   getSupplierHealthGuardModels,

@@ -15,7 +15,8 @@ import (
 var ErrSupplierProviderSyncConflict = infraerrors.Conflict("SUPPLIER_PROVIDER_SYNC_CONFLICT", "supplier provider sync already running")
 var ErrSupplierProviderGroupNotFound = infraerrors.NotFound("SUPPLIER_PROVIDER_GROUP_NOT_FOUND", "supplier provider group not found")
 var ErrSupplierLocalGroupNotFound = infraerrors.NotFound("SUPPLIER_LOCAL_GROUP_NOT_FOUND", "active local group not found")
-var ErrSupplierProviderGroupDeleteConflict = infraerrors.Conflict("SUPPLIER_PROVIDER_GROUP_DELETE_CONFLICT", "仅可删除已失效、未关联本地分组、未参与倍率守护且没有有效上游账号的分组记录")
+var ErrSupplierProviderGroupDeleteConflict = infraerrors.Conflict("SUPPLIER_PROVIDER_GROUP_DELETE_CONFLICT", "仅可删除已失效且未参与倍率守护的分组记录")
+var ErrSupplierProviderAccountDeleteConflict = infraerrors.Conflict("SUPPLIER_PROVIDER_ACCOUNT_DELETE_CONFLICT", "仅可删除未匹配本地账号的已删除上游账号或上游分组已删除的账号记录")
 
 type SupplierProviderAccountBindingGroup struct {
 	ID               int64   `json:"id"`
@@ -26,40 +27,41 @@ type SupplierProviderAccountBindingGroup struct {
 }
 
 type SupplierProviderAccount struct {
-	ID                         int64                                 `json:"id"`
-	ProviderID                 int64                                 `json:"provider_id"`
-	ProviderName               string                                `json:"provider_name"`
-	UpstreamKey                string                                `json:"upstream_account_key"`
-	Name                       string                                `json:"name"`
-	Status                     string                                `json:"status"`
-	GroupKey                   string                                `json:"group_key"`
-	GroupName                  string                                `json:"group_name"`
-	Platform                   string                                `json:"platform,omitempty"`
-	RateMultiplier             float64                               `json:"rate_multiplier"`
-	RawStatus                  string                                `json:"raw_status"`
-	Active                     bool                                  `json:"active"`
-	LastSeenAt                 time.Time                             `json:"last_seen_at"`
-	InactiveAt                 *time.Time                            `json:"inactive_at,omitempty"`
-	LocalAccountMatchStatus    string                                `json:"local_account_match_status"`
-	LocalAccountMatchCount     int                                   `json:"local_account_match_count"`
-	LocalAccountID             *int64                                `json:"local_account_id,omitempty"`
-	LocalAccountName           string                                `json:"local_account_name,omitempty"`
-	LocalAccountPlatform       string                                `json:"local_account_platform,omitempty"`
-	LocalAccountType           string                                `json:"local_account_type,omitempty"`
-	PlatformOverride           string                                `json:"platform_override,omitempty"`
-	EffectivePlatform          string                                `json:"effective_platform,omitempty"`
-	LocalAccountPriority       *int                                  `json:"local_account_priority,omitempty"`
-	LocalAccountStatus         string                                `json:"local_account_status,omitempty"`
-	LocalAccountSchedulable    *bool                                 `json:"local_account_schedulable,omitempty"`
-	LocalAccountLastTestStatus string                                `json:"local_account_last_test_status,omitempty"`
-	LocalAccountLastTestedAt   string                                `json:"local_account_last_tested_at,omitempty"`
-	LocalAccountLastTestError  string                                `json:"local_account_last_test_error,omitempty"`
-	GroupStatus                string                                `json:"group_status,omitempty"`
-	BindingGroups              []SupplierProviderAccountBindingGroup `json:"binding_groups"`
-	SupplierCurrentBalance     float64                               `json:"supplier_current_balance"`
-	SupplierTodayCost          float64                               `json:"supplier_today_cost"`
-	GroupRecordID              *int64                                `json:"group_record_id,omitempty"`
-	GroupRecordDeleteEligible  bool                                  `json:"group_record_delete_eligible"`
+	ID                          int64                                 `json:"id"`
+	ProviderID                  int64                                 `json:"provider_id"`
+	ProviderName                string                                `json:"provider_name"`
+	UpstreamKey                 string                                `json:"upstream_account_key"`
+	Name                        string                                `json:"name"`
+	Status                      string                                `json:"status"`
+	GroupKey                    string                                `json:"group_key"`
+	GroupName                   string                                `json:"group_name"`
+	Platform                    string                                `json:"platform,omitempty"`
+	RateMultiplier              float64                               `json:"rate_multiplier"`
+	RawStatus                   string                                `json:"raw_status"`
+	Active                      bool                                  `json:"active"`
+	LastSeenAt                  time.Time                             `json:"last_seen_at"`
+	InactiveAt                  *time.Time                            `json:"inactive_at,omitempty"`
+	LocalAccountMatchStatus     string                                `json:"local_account_match_status"`
+	LocalAccountMatchCount      int                                   `json:"local_account_match_count"`
+	LocalAccountID              *int64                                `json:"local_account_id,omitempty"`
+	LocalAccountName            string                                `json:"local_account_name,omitempty"`
+	LocalAccountPlatform        string                                `json:"local_account_platform,omitempty"`
+	LocalAccountType            string                                `json:"local_account_type,omitempty"`
+	PlatformOverride            string                                `json:"platform_override,omitempty"`
+	EffectivePlatform           string                                `json:"effective_platform,omitempty"`
+	LocalAccountPriority        *int                                  `json:"local_account_priority,omitempty"`
+	LocalAccountStatus          string                                `json:"local_account_status,omitempty"`
+	LocalAccountSchedulable     *bool                                 `json:"local_account_schedulable,omitempty"`
+	LocalAccountLastTestStatus  string                                `json:"local_account_last_test_status,omitempty"`
+	LocalAccountLastTestedAt    string                                `json:"local_account_last_tested_at,omitempty"`
+	LocalAccountLastTestError   string                                `json:"local_account_last_test_error,omitempty"`
+	GroupStatus                 string                                `json:"group_status,omitempty"`
+	BindingGroups               []SupplierProviderAccountBindingGroup `json:"binding_groups"`
+	SupplierCurrentBalance      float64                               `json:"supplier_current_balance"`
+	SupplierTodayCost           float64                               `json:"supplier_today_cost"`
+	GroupRecordID               *int64                                `json:"group_record_id,omitempty"`
+	GroupRecordDeleteEligible   bool                                  `json:"group_record_delete_eligible"`
+	AccountRecordDeleteEligible bool                                  `json:"account_record_delete_eligible"`
 }
 
 type SupplierProviderGroup struct {
@@ -187,6 +189,7 @@ type SupplierProviderDataRepository interface {
 	GetGroupForAutoMatch(ctx context.Context, groupID int64) (SupplierProviderGroup, error)
 	UpdateGroupMapping(ctx context.Context, groupID int64, localGroupID *int64) error
 	DeleteGroup(ctx context.Context, groupID int64) error
+	DeleteAccount(ctx context.Context, accountID int64) error
 	ApplyAutoMatch(ctx context.Context, groupID, localGroupID int64, matchedUpstreamName string) (bool, error)
 	UpdateAutoMatchState(ctx context.Context, groupID int64, status string, nameChangePending bool) error
 	UpdateAutoMatchIgnored(ctx context.Context, groupID int64, ignored bool) error

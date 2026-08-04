@@ -123,15 +123,7 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
        inactive_group_record.id AS group_record_id,
        COALESCE(
          inactive_group_record.id IS NOT NULL
-         AND inactive_group_record.local_group_id IS NULL
-         AND inactive_group_record.rate_guard_selected = FALSE
-         AND NOT EXISTS (
-           SELECT 1
-           FROM supplier_provider_accounts a2
-           WHERE a2.provider_id = inactive_group_record.provider_id
-             AND a2.group_key = inactive_group_record.upstream_group_key
-             AND a2.active = TRUE
-         ),
+         AND inactive_group_record.rate_guard_selected = FALSE,
          FALSE
        ) AS group_record_delete_eligible
 FROM supplier_provider_accounts a
@@ -459,15 +451,7 @@ func (r *supplierProviderDataRepository) DeleteGroup(ctx context.Context, groupI
 DELETE FROM supplier_provider_groups g
 WHERE g.id = $1
   AND g.active = FALSE
-  AND g.local_group_id IS NULL
   AND g.rate_guard_selected = FALSE
-  AND NOT EXISTS (
-    SELECT 1
-    FROM supplier_provider_accounts a
-    WHERE a.provider_id = g.provider_id
-      AND a.group_key = g.upstream_group_key
-      AND a.active = TRUE
-	  )
 RETURNING g.provider_id, g.upstream_group_key`, groupID).Scan(&providerID, &upstreamGroupKey)
 	if err == sql.ErrNoRows {
 		return service.ErrSupplierProviderGroupDeleteConflict
@@ -487,6 +471,54 @@ WHERE a.provider_id = $1
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit supplier provider group delete: %w", err)
+	}
+	return nil
+}
+
+func (r *supplierProviderDataRepository) DeleteAccount(ctx context.Context, accountID int64) error {
+	result, err := r.db.ExecContext(ctx, `
+DELETE FROM supplier_provider_accounts a
+USING supplier_providers p
+WHERE a.id = $1
+  AND p.id = a.provider_id
+  AND (
+    (
+      a.active = FALSE
+      AND LOWER(a.status) = 'deleted'
+    )
+    OR (
+      a.active = TRUE
+      AND LOWER(a.status) = 'active'
+      AND NULLIF(TRIM(a.group_key), '') IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM supplier_provider_groups g
+        WHERE g.provider_id = a.provider_id
+          AND g.upstream_group_key = a.group_key
+      )
+    )
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM accounts local_account
+    WHERE local_account.deleted_at IS NULL
+      AND regexp_replace(lower(local_account.name), '[^[:alnum:]]', '', 'g')
+          = regexp_replace(
+              lower(p.account_name_prefix || a.name),
+              '[^[:alnum:]]',
+              '',
+              'g'
+            )
+  )`, accountID)
+	if err != nil {
+		return fmt.Errorf("delete supplier provider account record: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read supplier provider account delete result: %w", err)
+	}
+	if affected == 0 {
+		return service.ErrSupplierProviderAccountDeleteConflict
 	}
 	return nil
 }
@@ -1500,6 +1532,7 @@ func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (servic
 	if err := json.Unmarshal(bindingGroupsJSON, &item.BindingGroups); err != nil {
 		return service.SupplierProviderAccount{}, fmt.Errorf("decode supplier provider account binding groups: %w", err)
 	}
+	item.AccountRecordDeleteEligible = item.LocalAccountMatchCount == 0 && ((!item.Active && strings.EqualFold(item.Status, "deleted")) || (item.Active && strings.EqualFold(item.Status, "active") && strings.EqualFold(item.GroupStatus, "missing")))
 	return item, nil
 }
 

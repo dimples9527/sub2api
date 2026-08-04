@@ -83,6 +83,8 @@ type supplierProviderSyncHandlerDataStub struct {
 	clearedOverrideAccount  int64
 	deletedGroupID          int64
 	deleteGroupErr          error
+	deletedAccountID        int64
+	deleteAccountErr        error
 }
 
 type supplierProviderGroupMatcherHandlerStub struct {
@@ -183,6 +185,11 @@ func (s *supplierProviderSyncHandlerDataStub) DeleteGroup(_ context.Context, gro
 	return s.deleteGroupErr
 }
 
+func (s *supplierProviderSyncHandlerDataStub) DeleteAccount(_ context.Context, accountID int64) error {
+	s.deletedAccountID = accountID
+	return s.deleteAccountErr
+}
+
 func TestSupplierProviderSyncHandlerRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	syncStub := &supplierProviderSyncHandlerSyncStub{}
@@ -276,6 +283,52 @@ func TestSupplierProviderSyncHandlerReturnsDeleteGroupConflict(t *testing.T) {
 
 	require.Equal(t, http.StatusConflict, rec.Code)
 	require.Equal(t, int64(7), dataStub.deletedGroupID)
+}
+
+func TestSupplierProviderSyncHandlerDeletesSupplierAccountRecord(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dataStub := &supplierProviderSyncHandlerDataStub{}
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, dataStub)
+	router := gin.New()
+	router.DELETE("/accounts/:id", handler.DeleteAccount)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/accounts/9", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(9), dataStub.deletedAccountID)
+	require.Contains(t, rec.Body.String(), `"account_id":9`)
+}
+
+func TestSupplierProviderSyncHandlerRejectsInvalidDeleteSupplierAccountID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dataStub := &supplierProviderSyncHandlerDataStub{}
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, dataStub)
+	router := gin.New()
+	router.DELETE("/accounts/:id", handler.DeleteAccount)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/accounts/not-a-number", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Zero(t, dataStub.deletedAccountID)
+}
+
+func TestSupplierProviderSyncHandlerReturnsDeleteSupplierAccountConflict(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dataStub := &supplierProviderSyncHandlerDataStub{deleteAccountErr: service.ErrSupplierProviderAccountDeleteConflict}
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, dataStub)
+	router := gin.New()
+	router.DELETE("/accounts/:id", handler.DeleteAccount)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/accounts/9", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusConflict, rec.Code)
+	require.Equal(t, int64(9), dataStub.deletedAccountID)
 }
 
 func TestSupplierProviderSyncHandlerRejectsInvalidProviderID(t *testing.T) {
@@ -548,4 +601,19 @@ func TestSupplierProviderSyncHandlerListsHealthGuardModelsByBusinessPlatform(t *
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), `"grok-4.5"`)
 	require.NotContains(t, rec.Body.String(), `"gpt-5.6-sol"`)
+}
+
+func TestSupplierProviderSyncHandlerClearsPlatformOverrideWithSharedAccountIDRouteParam(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dataStub := &supplierProviderSyncHandlerDataStub{uniqueLocalAccount: true}
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, dataStub)
+	router := gin.New()
+	router.DELETE("/accounts/:id/platform-override", handler.ClearLocalAccountPlatformOverride)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/accounts/101/platform-override", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(101), dataStub.clearedOverrideAccount)
 }

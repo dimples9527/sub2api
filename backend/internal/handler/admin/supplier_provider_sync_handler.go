@@ -40,6 +40,7 @@ type SupplierProviderDataRepositoryPort interface {
 	ListMappingsByLocalGroup(ctx context.Context, localGroupIDs []int64) ([]service.SupplierProviderGroup, error)
 	UpdateGroupMapping(ctx context.Context, groupID int64, localGroupID *int64) error
 	DeleteGroup(ctx context.Context, groupID int64) error
+	DeleteAccount(ctx context.Context, accountID int64) error
 }
 
 type SupplierProviderGroupMatcherPort interface {
@@ -317,7 +318,11 @@ func (h *SupplierProviderSyncHandler) ClearLocalAccountPlatformOverride(c *gin.C
 }
 
 func parseSupplierLocalAccountID(c *gin.Context) (int64, bool) {
-	localAccountID, err := strconv.ParseInt(strings.TrimSpace(c.Param("local_account_id")), 10, 64)
+	rawID := strings.TrimSpace(c.Param("local_account_id"))
+	if rawID == "" {
+		rawID = strings.TrimSpace(c.Param("id"))
+	}
+	localAccountID, err := strconv.ParseInt(rawID, 10, 64)
 	if err != nil || localAccountID <= 0 {
 		response.ErrorFrom(c, badRequest("本地账号 ID 无效"))
 		return 0, false
@@ -456,6 +461,18 @@ func (h *SupplierProviderSyncHandler) DeleteGroup(c *gin.Context) {
 	response.Success(c, gin.H{"group_id": groupID})
 }
 
+func (h *SupplierProviderSyncHandler) DeleteAccount(c *gin.Context) {
+	accountID, ok := parseSupplierAccountID(c)
+	if !ok {
+		return
+	}
+	if err := h.dataRepo.DeleteAccount(c.Request.Context(), accountID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"account_id": accountID})
+}
+
 func (h *SupplierProviderSyncHandler) AutoMatchGroups(c *gin.Context) {
 	if h.groupMatcher == nil {
 		response.ErrorFrom(c, infraerrors.InternalServer("SUPPLIER_GROUP_MATCHER_UNAVAILABLE", "supplier group matcher unavailable"))
@@ -543,6 +560,15 @@ func parseSupplierGroupID(c *gin.Context) (int64, bool) {
 		return 0, false
 	}
 	return groupID, true
+}
+
+func parseSupplierAccountID(c *gin.Context) (int64, bool) {
+	accountID, err := strconv.ParseInt(strings.TrimSpace(c.Param("id")), 10, 64)
+	if err != nil || accountID <= 0 {
+		response.ErrorFrom(c, badRequest("供应商账号 ID 无效"))
+		return 0, false
+	}
+	return accountID, true
 }
 
 func parseOptionalInt64(raw string) int64 {
