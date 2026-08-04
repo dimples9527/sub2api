@@ -18,8 +18,6 @@
     </header>
 
     <div v-if="error" class="sp-alert sp-error-line" data-test="balance-alert-error">{{ error }}</div>
-    <div v-if="toast" class="sp-alert sp-success-line" data-test="balance-alert-toast">{{ toast }}</div>
-
     <section class="sp-metric-grid sp-balance-alert-metrics" aria-label="余额预警概览">
       <article class="sp-metric-card sp-blue">
         <div class="sp-metric-label">供应商数</div>
@@ -216,15 +214,16 @@ import {
   type SupplierBalanceAlertEventListParams,
   type SupplierBalanceAlertScanResult,
 } from '@/api/admin/supplierBalanceAlert'
+import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 
+const appStore = useAppStore()
 const configs = ref<SupplierBalanceAlertConfig[]>([])
 const events = ref<SupplierBalanceAlertEvent[]>([])
 const loading = ref(false)
 const eventsLoading = ref(false)
 const scanning = ref(false)
 const error = ref('')
-const toast = ref('')
 const lastLoadedAt = ref('')
 const scanResult = ref<SupplierBalanceAlertScanResult | null>(null)
 const savingProviderId = ref<number | null>(null)
@@ -276,8 +275,6 @@ const enabledConfigCount = computed(() => configs.value.filter((item) => item.en
 const activeLowCount = computed(() => configs.value.filter((item) => isActiveLowConfig(item)).length)
 const scanFailureCount = computed(() => configs.value.filter((item) => item.last_scan_status === 'error').length)
 
-let toastTimer: ReturnType<typeof setTimeout> | undefined
-
 async function loadAll(): Promise<void> {
   loading.value = true
   error.value = ''
@@ -321,7 +318,7 @@ async function runScan(): Promise<void> {
   try {
     scanResult.value = await scanSupplierBalanceAlerts()
     await loadAll()
-    showToast(scanSummary(scanResult.value))
+    appStore.showSuccess(scanSummary(scanResult.value))
   } catch (err) {
     error.value = extractApiErrorMessage(err, '手动扫描余额失败')
   } finally {
@@ -341,10 +338,14 @@ function openConfigDialog(config: SupplierBalanceAlertConfig): void {
   configDialogVisible.value = true
 }
 
-function closeConfigDialog(): void {
-  if (savingProviderId.value !== null) return
+function forceCloseConfigDialog(): void {
   configDialogVisible.value = false
   configForm.value = null
+}
+
+function closeConfigDialog(): void {
+  if (savingProviderId.value !== null) return
+  forceCloseConfigDialog()
 }
 
 async function saveConfig(): Promise<void> {
@@ -372,8 +373,8 @@ async function saveConfig(): Promise<void> {
     const saved = await updateSupplierBalanceAlertConfig(form.providerId, input)
     const index = configs.value.findIndex((item) => item.provider_id === form.providerId)
     if (index >= 0) configs.value[index] = saved
-    closeConfigDialog()
-    showToast('余额预警配置已保存')
+    forceCloseConfigDialog()
+    appStore.showSuccess('余额预警配置已保存')
   } catch (err) {
     error.value = extractApiErrorMessage(err, '保存余额预警配置失败')
   } finally {
@@ -392,7 +393,7 @@ async function toggleConfig(config: SupplierBalanceAlertConfig, enabled: boolean
     })
     const index = configs.value.findIndex((item) => item.provider_id === config.provider_id)
     if (index >= 0) configs.value[index] = saved
-    showToast(`${config.provider_name}余额预警已${enabled ? '启用' : '停用'}`)
+    appStore.showSuccess(`${config.provider_name}余额预警已${enabled ? '启用' : '停用'}`)
   } catch (err) {
     error.value = extractApiErrorMessage(err, '更新余额预警开关失败')
   } finally {
@@ -414,14 +415,6 @@ function onEventPageSizeChange(): void {
 
 function scanSummary(result: SupplierBalanceAlertScanResult): string {
   return `扫描完成：检查 ${result.checked} 个，触发 ${result.triggered} 个，恢复 ${result.recovered} 个，失败 ${result.failed} 个`
-}
-
-function showToast(message: string): void {
-  toast.value = message
-  if (toastTimer) clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => {
-    toast.value = ''
-  }, 4500)
 }
 
 function formatBalance(value?: string | null): string {

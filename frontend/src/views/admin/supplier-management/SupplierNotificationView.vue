@@ -14,8 +14,6 @@
     </header>
 
     <div v-if="error" class="sp-alert sp-error-line" data-test="supplier-notification-error">{{ error }}</div>
-    <div v-if="toast" class="sp-alert sp-success-line" data-test="supplier-notification-toast">{{ toast }}</div>
-
     <section class="sp-metric-grid sp-notification-metrics" aria-label="通知配置概览">
       <article class="sp-metric-card sp-blue"><div class="sp-metric-label">通知渠道</div><div class="sp-metric-value">{{ channels.length }}</div><div class="sp-metric-foot">飞书与邮件渠道统一管理</div></article>
       <article class="sp-metric-card sp-green"><div class="sp-metric-label">已启用渠道</div><div class="sp-metric-value">{{ enabledChannelCount }}</div><div class="sp-metric-foot">未配置完整的渠道不会成功投递</div></article>
@@ -156,7 +154,10 @@ import {
   type SupplierNotificationSubscription,
   type SupplierNotificationSubscriptionInput,
 } from '@/api/admin/supplierNotifications'
+import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
+
+const appStore = useAppStore()
 
 interface ChannelForm {
   id: number | null
@@ -204,7 +205,6 @@ const savingChannelId = ref<number | null>(null)
 const savingSubscriptionId = ref<number | null>(null)
 const testingChannelId = ref<number | null>(null)
 const error = ref('')
-const toast = ref('')
 const lastLoadedAt = ref('')
 
 const channelDialogVisible = ref(false)
@@ -293,8 +293,6 @@ const pendingDeliveryCount = computed(() =>
   deliveries.value.filter((delivery) => delivery.status === 'pending' || delivery.status === 'sending').length
 )
 
-let toastTimer: ReturnType<typeof setTimeout> | undefined
-
 async function loadAll(): Promise<void> {
   loading.value = true
   error.value = ''
@@ -364,10 +362,14 @@ function openEditChannelDialog(channel: SupplierNotificationChannelView): void {
   channelDialogVisible.value = true
 }
 
-function closeChannelDialog(): void {
-  if (saving.value) return
+function forceCloseChannelDialog(): void {
   channelDialogVisible.value = false
   channelForm.value = null
+}
+
+function closeChannelDialog(): void {
+  if (saving.value) return
+  forceCloseChannelDialog()
 }
 
 async function saveChannel(): Promise<void> {
@@ -450,8 +452,8 @@ async function saveChannel(): Promise<void> {
     } else {
       replaceById(channels.value, saved)
     }
-    closeChannelDialog()
-    showToast(form.id === null ? '通知渠道已新增' : '通知渠道已保存')
+    forceCloseChannelDialog()
+    appStore.showSuccess(form.id === null ? '通知渠道已新增' : '通知渠道已保存')
   } catch (err) {
     error.value = extractApiErrorMessage(err, '保存通知渠道失败')
   } finally {
@@ -470,7 +472,7 @@ async function toggleChannel(channel: SupplierNotificationChannelView, enabled: 
       enabled,
     })
     replaceById(channels.value, saved)
-    showToast(`${channel.name}已${enabled ? '启用' : '停用'}`)
+    appStore.showSuccess(`${channel.name}已${enabled ? '启用' : '停用'}`)
   } catch (err) {
     error.value = extractApiErrorMessage(err, '更新通知渠道开关失败')
   } finally {
@@ -484,7 +486,7 @@ async function testChannel(channel: SupplierNotificationChannelView): Promise<vo
   error.value = ''
   try {
     const result = await sendSupplierNotificationChannelTest(channel.id)
-    showToast(`${channel.name}测试发送成功（HTTP ${result.http_status || '—'}）`)
+    appStore.showSuccess(`${channel.name}测试发送成功（HTTP ${result.http_status || '—'}）`)
   } catch (err) {
     error.value = extractApiErrorMessage(err, `测试发送「${channel.name}」失败`)
   } finally {
@@ -499,7 +501,7 @@ async function removeChannel(channel: SupplierNotificationChannelView): Promise<
     await deleteSupplierNotificationChannel(channel.id)
     channels.value = channels.value.filter((item) => item.id !== channel.id)
     subscriptions.value = subscriptions.value.filter((item) => item.channel_id !== channel.id)
-    showToast('通知渠道已删除')
+    appStore.showSuccess('通知渠道已删除')
     if (deliveryChannelFilter.value === channel.id) {
       deliveryChannelFilter.value = null
       deliveryPage.value = 1
@@ -535,10 +537,14 @@ function openEditSubscriptionDialog(subscription: SupplierNotificationSubscripti
   subscriptionDialogVisible.value = true
 }
 
-function closeSubscriptionDialog(): void {
-  if (savingSubscription.value) return
+function forceCloseSubscriptionDialog(): void {
   subscriptionDialogVisible.value = false
   subscriptionForm.value = null
+}
+
+function closeSubscriptionDialog(): void {
+  if (savingSubscription.value) return
+  forceCloseSubscriptionDialog()
 }
 
 async function saveSubscription(): Promise<void> {
@@ -565,8 +571,8 @@ async function saveSubscription(): Promise<void> {
     } else {
       replaceById(subscriptions.value, saved)
     }
-    closeSubscriptionDialog()
-    showToast(form.id === null ? '事件订阅已新增' : '事件订阅已保存')
+    forceCloseSubscriptionDialog()
+    appStore.showSuccess(form.id === null ? '事件订阅已新增' : '事件订阅已保存')
   } catch (err) {
     error.value = extractApiErrorMessage(err, '保存事件订阅失败')
   } finally {
@@ -586,7 +592,7 @@ async function toggleSubscription(subscription: SupplierNotificationSubscription
       enabled,
     })
     replaceById(subscriptions.value, saved)
-    showToast(`事件订阅已${enabled ? '启用' : '停用'}`)
+    appStore.showSuccess(`事件订阅已${enabled ? '启用' : '停用'}`)
   } catch (err) {
     error.value = extractApiErrorMessage(err, '更新事件订阅开关失败')
   } finally {
@@ -600,7 +606,7 @@ async function removeSubscription(subscription: SupplierNotificationSubscription
   try {
     await deleteSupplierNotificationSubscription(subscription.id)
     subscriptions.value = subscriptions.value.filter((item) => item.id !== subscription.id)
-    showToast('事件订阅已删除')
+    appStore.showSuccess('事件订阅已删除')
   } catch (err) {
     error.value = extractApiErrorMessage(err, '删除事件订阅失败')
   }
@@ -740,14 +746,6 @@ function formatPayload(payload?: Record<string, unknown>): string {
   } catch {
     return '载荷无法展示'
   }
-}
-
-function showToast(message: string): void {
-  toast.value = message
-  if (toastTimer) clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => {
-    toast.value = ''
-  }, 4500)
 }
 
 onMounted(() => {
