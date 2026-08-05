@@ -473,8 +473,9 @@ func scanSupplierNotificationDelivery(scanner supplierNotificationScanner) (serv
 
 func scanSupplierNotificationDeliveryView(scanner supplierNotificationScanner) (service.SupplierNotificationDelivery, error) {
 	var item service.SupplierNotificationDelivery
+	var payloadJSON []byte
 	err := scanner.Scan(&item.ID, &item.ChannelID, &item.ChannelName, &item.EventID, &item.ProviderID,
-		&item.ProviderName, &item.EventType, &item.Status, &item.AttemptCount, &item.NextAttemptAt,
+		&item.ProviderName, &item.EventType, &item.Status, &payloadJSON, &item.AttemptCount, &item.NextAttemptAt,
 		&item.LastError, &item.SentAt, &item.CreatedAt, &item.UpdatedAt)
 	return item, err
 }
