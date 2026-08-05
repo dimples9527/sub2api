@@ -42,7 +42,13 @@ SELECT p.id, p.code, p.name, p.provider_type, p.base_url, p.login_url,
        COALESCE(s.request_count, 0), COALESCE(s.success_rate, 0),
        COALESCE(s.period_cost, 0), COALESCE(s.current_balance, 0),
        COALESCE(s.today_cost, 0), s.estimated_days, COALESCE(s.rate_risk_count, 0),
-       COALESCE(s.sync_status, 'never'), COALESCE(s.sync_message, ''), s.last_sync_at
+       COALESCE(s.sync_status, 'never'), COALESCE(s.sync_message, ''), s.last_sync_at,
+       COALESCE(s.auth_login_count, 0), COALESCE(s.auth_login_success_count, 0),
+       COALESCE(s.auth_login_failure_count, 0), COALESCE(s.auth_cache_hit_count, 0),
+       COALESCE(s.auth_cache_miss_count, 0), s.auth_last_login_at,
+       COALESCE(s.auth_last_login_status, ''), COALESCE(s.auth_last_login_error, ''),
+       s.auth_last_cache_hit_at, COALESCE(s.auth_last_cache_error, ''),
+       s.auth_last_token_expires_at, COALESCE(s.auth_last_token_fingerprint, '')
 FROM supplier_providers p
 LEFT JOIN supplier_provider_credentials c ON c.provider_id = p.id
 LEFT JOIN supplier_provider_runtime_stats s ON s.provider_id = p.id`
@@ -460,6 +466,9 @@ func scanSupplierProvider(scanner supplierProviderScanner) (*service.SupplierPro
 	provider := &service.SupplierProvider{}
 	var estimatedDays sql.NullFloat64
 	var lastSyncAt sql.NullTime
+	var authLastLoginAt sql.NullTime
+	var authLastCacheHitAt sql.NullTime
+	var authLastTokenExpiresAt sql.NullTime
 	err := scanner.Scan(&provider.ID, &provider.Code, &provider.Name, &provider.ProviderType,
 		&provider.BaseURL, &provider.LoginURL, &provider.APIKeysURL, &provider.GroupsURL,
 		&provider.AvailableGroupsURL, &provider.BalanceURL, &provider.UsageCostURL,
@@ -469,7 +478,13 @@ func scanSupplierProvider(scanner supplierProviderScanner) (*service.SupplierPro
 		&provider.Username, &provider.PasswordEncrypted, &provider.Status, &provider.RiskLevel,
 		&provider.ValidAccountCount, &provider.SchedulableAccountCount, &provider.RequestCount,
 		&provider.SuccessRate, &provider.PeriodCost, &provider.CurrentBalance, &provider.TodayCost,
-		&estimatedDays, &provider.RateRiskCount, &provider.SyncStatus, &provider.SyncMessage, &lastSyncAt)
+		&estimatedDays, &provider.RateRiskCount, &provider.SyncStatus, &provider.SyncMessage, &lastSyncAt,
+		&provider.AuthSummary.LoginCount, &provider.AuthSummary.LoginSuccessCount,
+		&provider.AuthSummary.LoginFailureCount, &provider.AuthSummary.CacheHitCount,
+		&provider.AuthSummary.CacheMissCount, &authLastLoginAt,
+		&provider.AuthSummary.LastLoginStatus, &provider.AuthSummary.LastLoginError,
+		&authLastCacheHitAt, &provider.AuthSummary.LastCacheError,
+		&authLastTokenExpiresAt, &provider.AuthSummary.LastTokenFingerprint)
 	if err != nil {
 		return nil, err
 	}
@@ -478,6 +493,15 @@ func scanSupplierProvider(scanner supplierProviderScanner) (*service.SupplierPro
 	}
 	if lastSyncAt.Valid {
 		provider.LastSyncAt = &lastSyncAt.Time
+	}
+	if authLastLoginAt.Valid {
+		provider.AuthSummary.LastLoginAt = &authLastLoginAt.Time
+	}
+	if authLastCacheHitAt.Valid {
+		provider.AuthSummary.LastCacheHitAt = &authLastCacheHitAt.Time
+	}
+	if authLastTokenExpiresAt.Valid {
+		provider.AuthSummary.LastTokenExpiresAt = &authLastTokenExpiresAt.Time
 	}
 	provider.CredentialConfigured = provider.PasswordEncrypted != ""
 	return provider, nil

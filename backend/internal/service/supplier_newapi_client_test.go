@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,81 @@ import (
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestSupplierNewAPIClientStopsWhenRedisIsUnavailable(t *testing.T) {
+	tests := []struct {
+		name               string
+		configure          func(*supplierSub2APIFakeTokenCache)
+		expectedLoginCalls int32
+	}{
+		{
+			name: "get failure",
+			configure: func(cache *supplierSub2APIFakeTokenCache) {
+				cache.getErr = errors.New("redis get unavailable")
+			},
+		},
+		{
+			name: "lock failure",
+			configure: func(cache *supplierSub2APIFakeTokenCache) {
+				cache.lockErr = errors.New("redis lock unavailable")
+			},
+		},
+		{
+			name: "set failure",
+			configure: func(cache *supplierSub2APIFakeTokenCache) {
+				cache.setErr = errors.New("redis set unavailable")
+			},
+			expectedLoginCalls: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cache := newSupplierSub2APIFakeTokenCache()
+			tt.configure(cache)
+			var loginCalls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path == "/api/user/login" {
+					loginCalls.Add(1)
+					_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"newapi-token","access_expires_at":4102444800,"user":{"id":42}}}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{"success":true,"data":{"quota":500000}}`))
+			}))
+			defer server.Close()
+
+			client := NewSupplierNewAPIClient(server.Client(), cache, nil)
+			_, err := client.FetchBalance(context.Background(), supplierNewAPICacheTestProvider(server.URL), "secret")
+			require.Error(t, err)
+			require.Equal(t, tt.expectedLoginCalls, loginCalls.Load())
+		})
+	}
+}
+
+func TestSupplierNewAPIClientRecordsCacheMissAndLoginSuccess(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	auditor := &supplierProviderAuthAuditorSpy{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"audited-token","access_expires_at":4102444800,"user":{"id":42}}}`))
+		case "/api/user/self":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"quota":500000}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewSupplierNewAPIClient(server.Client(), cache, nil)
+	client.SetAuthAuditor(auditor)
+	_, err := client.FetchBalance(context.Background(), supplierNewAPICacheTestProvider(server.URL), "secret")
+	require.NoError(t, err)
+	require.Contains(t, auditor.eventTypes(), SupplierProviderAuthEventCacheMiss)
+	require.Contains(t, auditor.eventTypes(), SupplierProviderAuthEventLoginSuccess)
+}
 
 type supplierTurnstileSolverStub struct {
 	token string

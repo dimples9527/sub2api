@@ -21,6 +21,19 @@ type SupplierProviderTokenCache interface {
 	ReleaseLoginLock(ctx context.Context, providerID int64, owner string) error
 }
 
+// SupplierProviderTokenCacheInspector 只用于管理端读取当前缓存状态，完整 Token 不应直接暴露给 HTTP 层。
+type SupplierProviderTokenCacheInspector interface {
+	Inspect(ctx context.Context, providerID int64) (SupplierProviderTokenCacheSnapshot, error)
+}
+
+type SupplierProviderTokenCacheSnapshot struct {
+	Token    SupplierProviderAuthToken
+	Found    bool
+	TTL      time.Duration
+	LockHeld bool
+	LockTTL  time.Duration
+}
+
 type SupplierProviderSyncLock interface {
 	TryAcquireSyncLock(ctx context.Context, providerID int64, owner string, ttl time.Duration) (bool, error)
 	ReleaseSyncLock(ctx context.Context, providerID int64, owner string) error

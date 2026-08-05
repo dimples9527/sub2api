@@ -65,9 +65,14 @@ type SupplierProviderRemoteDiagnostics interface {
 type SupplierSub2APIClient struct {
 	httpClient       *http.Client
 	tokenCache       SupplierProviderTokenCache
+	authAuditor      SupplierProviderAuthAuditor
 	turnstileSolver  SupplierTurnstileSolver
 	endpointResultMu sync.Mutex
 	endpointResults  map[string]SupplierProviderEndpointResult
+}
+
+func (c *SupplierSub2APIClient) SetAuthAuditor(auditor SupplierProviderAuthAuditor) {
+	c.authAuditor = auditor
 }
 
 type supplierSub2APILoginResult struct {
@@ -297,23 +302,25 @@ func supplierSub2APIEndpointResultKey(providerID int64, scope string) string {
 
 func (c *SupplierSub2APIClient) ensureToken(ctx context.Context, provider *SupplierProvider, password string) (SupplierProviderAuthToken, error) {
 	if c.tokenCache == nil {
-		result, err := c.login(ctx, provider, password)
+		c.recordAuthEvent(ctx, provider, SupplierProviderAuthEventInput{
+			EventType: SupplierProviderAuthEventCacheError,
+			Error:     errors.New("supplier provider token cache is unavailable"),
+		})
+		result, err := c.loginWithAudit(ctx, provider, password)
 		return result.token, err
 	}
 	if token, found, err := c.tokenCache.Get(ctx, provider.ID); err != nil {
-		c.logCacheError(provider, "get", err)
-		result, loginErr := c.login(ctx, provider, password)
-		return result.token, loginErr
+		return SupplierProviderAuthToken{}, c.cacheFailure(ctx, provider, "get", err)
 	} else if found && strings.TrimSpace(token.AccessToken) != "" {
+		c.recordAuthEvent(ctx, provider, SupplierProviderAuthEventInput{EventType: SupplierProviderAuthEventCacheHit, Token: &token})
 		return normalizeSupplierSub2APIToken(token), nil
 	}
+	c.recordAuthEvent(ctx, provider, SupplierProviderAuthEventInput{EventType: SupplierProviderAuthEventCacheMiss})
 
 	owner := uuid.NewString()
 	acquired, err := c.tokenCache.TryAcquireLoginLock(ctx, provider.ID, owner, supplierSub2APILoginLockTTL)
 	if err != nil {
-		c.logCacheError(provider, "acquire login lock", err)
-		result, loginErr := c.login(ctx, provider, password)
-		return result.token, loginErr
+		return SupplierProviderAuthToken{}, c.cacheFailure(ctx, provider, "acquire login lock", err)
 	}
 	if acquired {
 		return c.loginAndCache(ctx, provider, password, owner)
@@ -330,17 +337,14 @@ func (c *SupplierSub2APIClient) ensureToken(ctx context.Context, provider *Suppl
 			return SupplierProviderAuthToken{}, waitCtx.Err()
 		case <-ticker.C:
 			if token, found, err := c.tokenCache.Get(waitCtx, provider.ID); err != nil {
-				c.logCacheError(provider, "poll token", err)
-				result, loginErr := c.login(ctx, provider, password)
-				return result.token, loginErr
+				return SupplierProviderAuthToken{}, c.cacheFailure(ctx, provider, "poll token", err)
 			} else if found && strings.TrimSpace(token.AccessToken) != "" {
+				c.recordAuthEvent(ctx, provider, SupplierProviderAuthEventInput{EventType: SupplierProviderAuthEventCacheHit, Token: &token})
 				return normalizeSupplierSub2APIToken(token), nil
 			}
 			acquired, err := c.tokenCache.TryAcquireLoginLock(waitCtx, provider.ID, owner, supplierSub2APILoginLockTTL)
 			if err != nil {
-				c.logCacheError(provider, "retry login lock", err)
-				result, loginErr := c.login(ctx, provider, password)
-				return result.token, loginErr
+				return SupplierProviderAuthToken{}, c.cacheFailure(ctx, provider, "retry login lock", err)
 			}
 			if acquired {
 				return c.loginAndCache(ctx, provider, password, owner)
@@ -355,14 +359,59 @@ func (c *SupplierSub2APIClient) loginAndCache(ctx context.Context, provider *Sup
 			c.logCacheError(provider, "release login lock", err)
 		}
 	}()
-	result, err := c.login(ctx, provider, password)
+	if token, found, err := c.tokenCache.Get(ctx, provider.ID); err != nil {
+		return SupplierProviderAuthToken{}, c.cacheFailure(ctx, provider, "recheck token", err)
+	} else if found && strings.TrimSpace(token.AccessToken) != "" {
+		c.recordAuthEvent(ctx, provider, SupplierProviderAuthEventInput{EventType: SupplierProviderAuthEventCacheHit, Token: &token})
+		return normalizeSupplierSub2APIToken(token), nil
+	}
+	result, err := c.loginWithAudit(ctx, provider, password)
 	if err != nil {
 		return SupplierProviderAuthToken{}, err
 	}
 	if err := c.tokenCache.Set(ctx, provider.ID, result.token, result.ttl); err != nil {
-		c.logCacheError(provider, "set", err)
+		return SupplierProviderAuthToken{}, c.cacheFailure(ctx, provider, "set", err)
 	}
 	return result.token, nil
+}
+
+func (c *SupplierSub2APIClient) loginWithAudit(ctx context.Context, provider *SupplierProvider, password string) (supplierSub2APILoginResult, error) {
+	startedAt := time.Now()
+	result, err := c.login(ctx, provider, password)
+	event := SupplierProviderAuthEventInput{
+		EventType:  SupplierProviderAuthEventLoginSuccess,
+		StartedAt:  startedAt,
+		FinishedAt: time.Now(),
+		HTTPStatus: supplierProviderAuthHTTPStatus(err),
+		Error:      err,
+	}
+	if err != nil {
+		event.EventType = SupplierProviderAuthEventLoginFailed
+	} else {
+		event.Token = &result.token
+	}
+	c.recordAuthEvent(ctx, provider, event)
+	return result, err
+}
+
+func (c *SupplierSub2APIClient) cacheFailure(ctx context.Context, provider *SupplierProvider, action string, err error) error {
+	c.logCacheError(provider, action, err)
+	wrapped := fmt.Errorf("supplier provider token cache %s failed: %w", action, err)
+	c.recordAuthEvent(ctx, provider, SupplierProviderAuthEventInput{EventType: SupplierProviderAuthEventCacheError, Error: wrapped})
+	return wrapped
+}
+
+func (c *SupplierSub2APIClient) recordAuthEvent(ctx context.Context, provider *SupplierProvider, event SupplierProviderAuthEventInput) {
+	if c == nil || c.authAuditor == nil || provider == nil {
+		return
+	}
+	event.ProviderID = provider.ID
+	if event.Source == "" {
+		event.Source = supplierProviderAuthSourceFromContext(ctx)
+	}
+	if err := c.authAuditor.Record(ctx, event); err != nil {
+		logger.LegacyPrintf("supplier_sub2api_client", "record supplier provider auth event failed provider_id=%d provider_code=%s err=%v", provider.ID, provider.Code, err)
+	}
 }
 
 func (c *SupplierSub2APIClient) login(ctx context.Context, provider *SupplierProvider, password string) (supplierSub2APILoginResult, error) {
@@ -821,8 +870,10 @@ func (c *SupplierSub2APIClient) deleteToken(ctx context.Context, provider *Suppl
 		return
 	}
 	if err := c.tokenCache.Delete(ctx, provider.ID); err != nil {
-		c.logCacheError(provider, "delete", err)
+		_ = c.cacheFailure(ctx, provider, "delete", err)
+		return
 	}
+	c.recordAuthEvent(ctx, provider, SupplierProviderAuthEventInput{EventType: SupplierProviderAuthEventCacheInvalidated})
 }
 
 func (c *SupplierSub2APIClient) logCacheError(provider *SupplierProvider, action string, err error) {

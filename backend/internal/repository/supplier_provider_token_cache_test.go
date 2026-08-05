@@ -95,6 +95,45 @@ func TestSupplierProviderTokenCacheDeletesToken(t *testing.T) {
 	require.Equal(t, service.SupplierProviderAuthToken{}, cached)
 }
 
+func TestSupplierProviderTokenCacheInspectsTokenAndLoginLockTTL(t *testing.T) {
+	cache, mr := newSupplierProviderTokenCacheTestClient(t)
+	ctx := context.Background()
+	token := service.SupplierProviderAuthToken{
+		AccessToken: "inspect-token",
+		TokenType:   "Bearer",
+		ExpiresAt:   time.Now().Add(5 * time.Minute),
+	}
+
+	require.NoError(t, cache.Set(ctx, 42, token, 5*time.Minute))
+	_, err := cache.(service.SupplierProviderTokenCacheInspector).Inspect(ctx, 42)
+	require.NoError(t, err)
+
+	acquired, err := cache.TryAcquireLoginLock(ctx, 42, "owner", time.Minute)
+	require.NoError(t, err)
+	require.True(t, acquired)
+
+	snapshot, err := cache.(service.SupplierProviderTokenCacheInspector).Inspect(ctx, 42)
+	require.NoError(t, err)
+	require.True(t, snapshot.Found)
+	require.Equal(t, token.AccessToken, snapshot.Token.AccessToken)
+	require.Equal(t, token.TokenType, snapshot.Token.TokenType)
+	require.Equal(t, token.UserID, snapshot.Token.UserID)
+	require.WithinDuration(t, token.ExpiresAt, snapshot.Token.ExpiresAt, time.Millisecond)
+	require.Greater(t, snapshot.TTL, 0*time.Second)
+	require.True(t, snapshot.LockHeld)
+	require.Equal(t, time.Minute, mr.TTL("supplier:provider:auth-lock:42"))
+}
+
+func TestSupplierProviderTokenCacheInspectReportsMiss(t *testing.T) {
+	cache, _ := newSupplierProviderTokenCacheTestClient(t)
+
+	snapshot, err := cache.(service.SupplierProviderTokenCacheInspector).Inspect(context.Background(), 43)
+	require.NoError(t, err)
+	require.False(t, snapshot.Found)
+	require.False(t, snapshot.LockHeld)
+	require.Zero(t, snapshot.Token)
+}
+
 func TestSupplierProviderTokenCacheReleasesOnlyOwnedLoginLock(t *testing.T) {
 	cache, mr := newSupplierProviderTokenCacheTestClient(t)
 	ctx := context.Background()

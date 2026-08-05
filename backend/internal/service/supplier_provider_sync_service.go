@@ -355,6 +355,7 @@ func (s *SupplierProviderSyncService) providerPassword(provider *SupplierProvide
 }
 
 func (s *SupplierProviderSyncService) SyncAccounts(ctx context.Context, providerID int64, trigger string) (SupplierProviderSyncResult, error) {
+	ctx = WithSupplierProviderAuthSource(ctx, SupplierProviderAuthSourceSync)
 	return s.syncWithLock(ctx, providerID, func(provider *SupplierProvider) (SupplierProviderSyncResult, error) {
 		password := s.providerPassword(provider)
 		return s.syncStage(ctx, provider, password, SupplierSyncScopeAccounts, trigger, true)
@@ -363,6 +364,7 @@ func (s *SupplierProviderSyncService) SyncAccounts(ctx context.Context, provider
 
 // SyncAccountRates 仅刷新已存在上游账号的倍率快照，不修改名称、状态、分组或 active 状态。
 func (s *SupplierProviderSyncService) SyncAccountRates(ctx context.Context, providerID int64, trigger string) (SupplierProviderRateSyncResult, error) {
+	ctx = WithSupplierProviderAuthSource(ctx, SupplierProviderAuthSourceSync)
 	_ = trigger
 	provider, err := s.validSyncProvider(ctx, providerID)
 	if err != nil {
@@ -436,6 +438,7 @@ func supplierProviderRemoteAccountKey(item SupplierProviderRemoteAccount) string
 }
 
 func (s *SupplierProviderSyncService) SyncGroups(ctx context.Context, providerID int64, trigger string) (SupplierProviderSyncResult, error) {
+	ctx = WithSupplierProviderAuthSource(ctx, SupplierProviderAuthSourceSync)
 	return s.syncWithLock(ctx, providerID, func(provider *SupplierProvider) (SupplierProviderSyncResult, error) {
 		password := s.providerPassword(provider)
 		return s.syncStage(ctx, provider, password, SupplierSyncScopeGroups, trigger, true)
@@ -443,6 +446,7 @@ func (s *SupplierProviderSyncService) SyncGroups(ctx context.Context, providerID
 }
 
 func (s *SupplierProviderSyncService) SyncBalance(ctx context.Context, providerID int64, trigger string) (SupplierProviderSyncResult, error) {
+	ctx = WithSupplierProviderAuthSource(ctx, SupplierProviderAuthSourceSync)
 	return s.syncWithLock(ctx, providerID, func(provider *SupplierProvider) (SupplierProviderSyncResult, error) {
 		password := s.providerPassword(provider)
 		return s.syncStage(ctx, provider, password, SupplierSyncScopeBalance, trigger, true)
@@ -478,6 +482,7 @@ type SupplierProviderCostBackfillResult struct {
 // BackfillCosts 按闭区间日期从上游拉取成本并写入本地 daily_stats。
 // Sub2API 仅支持当天；NewAPI 支持按天历史。
 func (s *SupplierProviderSyncService) BackfillCosts(ctx context.Context, startDate, endDate string, providerID int64, trigger string) (SupplierProviderCostBackfillResult, error) {
+	ctx = WithSupplierProviderAuthSource(ctx, SupplierProviderAuthSourceSync)
 	startedAt := time.Now()
 	result := SupplierProviderCostBackfillResult{
 		StartDate:  strings.TrimSpace(startDate),
@@ -719,6 +724,7 @@ func supplierProviderSupportsHistoricalCost(provider *SupplierProvider) bool {
 }
 
 func (s *SupplierProviderSyncService) SyncCost(ctx context.Context, providerID int64, day time.Time, trigger string) (SupplierProviderSyncResult, error) {
+	ctx = WithSupplierProviderAuthSource(ctx, SupplierProviderAuthSourceSync)
 	return s.syncWithLock(ctx, providerID, func(provider *SupplierProvider) (SupplierProviderSyncResult, error) {
 		password := s.providerPassword(provider)
 		return s.syncCostStage(ctx, provider, password, day, trigger, true)
@@ -726,6 +732,7 @@ func (s *SupplierProviderSyncService) SyncCost(ctx context.Context, providerID i
 }
 
 func (s *SupplierProviderSyncService) TestEndpoint(ctx context.Context, providerID int64, scope string) (SupplierProviderEndpointTestResult, error) {
+	ctx = WithSupplierProviderAuthSource(ctx, SupplierProviderAuthSourceEndpointTest)
 	provider, err := s.validSyncProvider(ctx, providerID)
 	if err != nil {
 		return SupplierProviderEndpointTestResult{}, err
@@ -746,6 +753,7 @@ func (s *SupplierProviderSyncService) TestEndpoint(ctx context.Context, provider
 }
 
 func (s *SupplierProviderSyncService) SyncAll(ctx context.Context, providerID int64, trigger string) (SupplierProviderSyncResult, error) {
+	ctx = WithSupplierProviderAuthSource(ctx, SupplierProviderAuthSourceSync)
 	return s.syncWithLock(ctx, providerID, func(provider *SupplierProvider) (SupplierProviderSyncResult, error) {
 		password := s.providerPassword(provider)
 		startedAt := time.Now()
@@ -795,6 +803,7 @@ func (s *SupplierProviderSyncService) SyncAll(ctx context.Context, providerID in
 }
 
 func (s *SupplierProviderSyncService) SyncAllEnabled(ctx context.Context, trigger string) (SupplierProviderBatchSyncResult, error) {
+	ctx = WithSupplierProviderAuthSource(ctx, SupplierProviderAuthSourceSync)
 	enabled := true
 	providers, _, err := s.providerRepo.List(ctx, SupplierProviderListParams{Enabled: &enabled, Page: 1, PageSize: 1000})
 	if err != nil {

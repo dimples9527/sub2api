@@ -36,8 +36,86 @@ export interface SupplierProvider {
   sync_status: string
   sync_message: string
   last_sync_at?: string
+  auth_summary: SupplierProviderAuthSummary
   created_at: string
   updated_at: string
+}
+
+export interface SupplierProviderAuthSummary {
+  login_count: number
+  login_success_count: number
+  login_failure_count: number
+  cache_hit_count: number
+  cache_miss_count: number
+  last_login_at?: string
+  last_login_status: string
+  last_login_error: string
+  last_cache_hit_at?: string
+  last_cache_error: string
+  last_token_expires_at?: string
+  last_token_fingerprint: string
+}
+
+export interface SupplierProviderAuthTokenSnapshot {
+  status: 'cached' | 'missing' | 'expired' | 'error'
+  cached: boolean
+  token_type?: string
+  token_summary?: string
+  token_length?: number
+  token_fingerprint?: string
+  token_expires_at?: string
+  remaining_seconds: number
+  ttl_seconds: number
+  cookie_present: boolean
+  error?: string
+}
+
+export interface SupplierProviderAuthLockSnapshot {
+  held: boolean
+  status: string
+  remaining_seconds: number
+  error?: string
+}
+
+export interface SupplierProviderAuthStatusResult {
+  provider_id: number
+  summary: SupplierProviderAuthSummary
+  cache: SupplierProviderAuthTokenSnapshot
+  login_lock: SupplierProviderAuthLockSnapshot
+  checked_at: string
+}
+
+export type SupplierProviderAuthEventType = 'cache_hit' | 'cache_miss' | 'login_success' | 'login_failed' | 'cache_invalidated' | 'cache_error'
+
+export interface SupplierProviderAuthHistoryItem {
+  id: number
+  provider_id: number
+  event_type: SupplierProviderAuthEventType
+  source: 'sync' | 'endpoint_test' | 'manual' | 'unknown'
+  status: string
+  started_at: string
+  finished_at: string
+  duration_ms: number
+  http_status?: number
+  error_message?: string
+  token_fingerprint?: string
+  token_expires_at?: string
+  token_length?: number
+  cookie_present: boolean
+  created_at: string
+}
+
+export interface SupplierProviderAuthHistoryResult {
+  items: SupplierProviderAuthHistoryItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface SupplierProviderAuthHistoryParams {
+  page?: number
+  page_size?: number
+  event_type?: SupplierProviderAuthEventType | ''
 }
 
 export interface SupplierProviderSummary {
@@ -242,6 +320,21 @@ export async function setDefault(id: number): Promise<SupplierProvider> {
   return data
 }
 
+export async function getAuthStatus(id: number): Promise<SupplierProviderAuthStatusResult> {
+  const { data } = await apiClient.get<SupplierProviderAuthStatusResult>(
+    `/admin/supplier-management/providers/${id}/auth-status`
+  )
+  return data
+}
+
+export async function listAuthHistory(id: number, params: SupplierProviderAuthHistoryParams = {}): Promise<SupplierProviderAuthHistoryResult> {
+  const { data } = await apiClient.get<SupplierProviderAuthHistoryResult>(
+    `/admin/supplier-management/providers/${id}/auth-history`,
+    { params }
+  )
+  return data
+}
+
 export const supplierProvidersAPI = {
   list,
   listCostTrends,
@@ -250,7 +343,9 @@ export const supplierProvidersAPI = {
   create,
   update,
   delete: deleteProvider,
-  setDefault
+  setDefault,
+  getAuthStatus,
+  listAuthHistory
 }
 
 export default supplierProvidersAPI

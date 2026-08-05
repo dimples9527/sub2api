@@ -12,6 +12,10 @@ const providerViewMocks = vi.hoisted(() => ({
   backfillCostTrends: vi.fn(),
   listProviderTypes: vi.fn(),
   updateProvider: vi.fn(),
+  getAuthStatus: vi.fn(),
+  listAuthHistory: vi.fn(),
+  syncProvider: vi.fn(),
+  testProviderEndpoint: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
   showWarning: vi.fn(),
@@ -36,11 +40,22 @@ vi.mock('@/api/admin/supplierProviders', () => ({
     listCostTrends: providerViewMocks.listCostTrends,
     backfillCostTrends: providerViewMocks.backfillCostTrends,
     update: providerViewMocks.updateProvider,
+    getAuthStatus: providerViewMocks.getAuthStatus,
+    listAuthHistory: providerViewMocks.listAuthHistory,
   },
 }))
 
 vi.mock('@/api/admin/supplierProviderTypes', () => ({
   default: { list: providerViewMocks.listProviderTypes },
+}))
+
+vi.mock('@/api/admin/supplierProviderData', () => ({
+  syncProvider: providerViewMocks.syncProvider,
+  testProviderEndpoint: providerViewMocks.testProviderEndpoint,
+  default: {
+    syncProvider: providerViewMocks.syncProvider,
+    testProviderEndpoint: providerViewMocks.testProviderEndpoint,
+  },
 }))
 
 vi.mock('@/stores/app', () => ({
@@ -95,9 +110,19 @@ async function mountSupplierProviders() {
       stubs: {
         SupplierModuleLayout: { template: '<div><slot /></div>' },
         SupplierDrawer: true,
-        BaseDialog: true,
+        BaseDialog: {
+          name: 'BaseDialog',
+          props: ['show', 'title'],
+          template: '<section v-if="show" data-test="base-dialog-stub"><h2>{{ title }}</h2><slot /><slot name="footer" /></section>',
+        },
         Input: true,
-        Select: true,
+        Select: {
+          name: 'Select',
+          inheritAttrs: false,
+          props: ['modelValue', 'options'],
+          emits: ['update:modelValue'],
+          template: '<button type="button" v-bind="$attrs" @click="$emit(\'update:modelValue\', \'login_failed\')">{{ modelValue }}</button>',
+        },
         DateRangePicker: {
           name: 'DateRangePicker',
           props: ['startDate', 'endDate'],
@@ -124,6 +149,59 @@ describe('SupplierProvidersView payload normalization', () => {
     providerRows = createProviderRows()
     providerViewMocks.listProviderTypes.mockResolvedValue([])
     providerViewMocks.updateProvider.mockResolvedValue({})
+    providerViewMocks.getAuthStatus.mockResolvedValue({
+      provider_id: 1,
+      summary: {
+        login_count: 4,
+        login_success_count: 3,
+        login_failure_count: 1,
+        cache_hit_count: 7,
+        cache_miss_count: 2,
+        last_login_at: '2026-08-05T06:30:00Z',
+        last_login_status: 'success',
+        last_login_error: '',
+        last_cache_hit_at: '2026-08-05T06:35:00Z',
+        last_cache_error: '',
+        last_token_expires_at: '2026-08-05T08:30:00Z',
+        last_token_fingerprint: 'fingerprint-only',
+      },
+      cache: {
+        status: 'cached',
+        cached: true,
+        token_type: 'Bearer',
+        token_summary: 'abcd…wxyz',
+        token_length: 64,
+        token_fingerprint: 'fingerprint-only',
+        token_expires_at: '2026-08-05T08:30:00Z',
+        remaining_seconds: 3600,
+        ttl_seconds: 3500,
+        cookie_present: true,
+      },
+      login_lock: { held: false, status: 'available', remaining_seconds: 0 },
+      checked_at: '2026-08-05T07:30:00Z',
+    })
+    providerViewMocks.listAuthHistory.mockResolvedValue({
+      items: [
+        {
+        id: 9,
+        provider_id: 1,
+        event_type: 'login_success',
+        source: 'sync',
+        status: 'success',
+        started_at: '2026-08-05T06:30:00Z',
+        finished_at: '2026-08-05T06:30:01Z',
+        duration_ms: 1000,
+        http_status: 200,
+        token_fingerprint: 'fingerprint-only',
+        token_length: 64,
+        cookie_present: true,
+          created_at: '2026-08-05T06:30:01Z',
+        },
+      ],
+      total: 25,
+      page: 1,
+      page_size: 20,
+    })
     providerViewMocks.listCostTrends.mockResolvedValue({
       days: 14,
       points: [
@@ -160,6 +238,50 @@ describe('SupplierProvidersView payload normalization', () => {
       page: 1,
       page_size: 100,
     })
+  })
+
+  it('loads masked token status and paged login history without triggering a new login', async () => {
+    const wrapper = await mountSupplierProviders()
+    const loginHistoryButton = wrapper.findAll('button').find(button => button.text() === '登录记录')
+    expect(loginHistoryButton).toBeDefined()
+
+    await loginHistoryButton!.trigger('click')
+    await flushPromises()
+
+    expect(providerViewMocks.getAuthStatus).toHaveBeenCalledWith(1)
+    expect(providerViewMocks.listAuthHistory).toHaveBeenCalledWith(1, {
+      page: 1,
+      page_size: 20,
+      event_type: '',
+    })
+    expect(wrapper.text()).toContain('abcd…wxyz')
+    expect(wrapper.text()).toContain('登录成功')
+    expect(wrapper.text()).not.toContain('access-token')
+
+    await wrapper.get('[data-test="supplier-auth-event-filter"]').trigger('click')
+    await flushPromises()
+    expect(providerViewMocks.listAuthHistory).toHaveBeenLastCalledWith(1, {
+      page: 1,
+      page_size: 20,
+      event_type: 'login_failed',
+    })
+
+    await wrapper.get('[data-test="supplier-auth-next"]').trigger('click')
+    await flushPromises()
+    expect(providerViewMocks.listAuthHistory).toHaveBeenLastCalledWith(1, {
+      page: 2,
+      page_size: 20,
+      event_type: 'login_failed',
+    })
+
+    providerViewMocks.getAuthStatus.mockClear()
+    providerViewMocks.listAuthHistory.mockClear()
+    await wrapper.get('[data-test="supplier-auth-refresh"]').trigger('click')
+    await flushPromises()
+    expect(providerViewMocks.getAuthStatus).toHaveBeenCalledTimes(1)
+    expect(providerViewMocks.listAuthHistory).toHaveBeenCalledTimes(1)
+    expect(providerViewMocks.syncProvider).not.toHaveBeenCalled()
+    expect(providerViewMocks.testProviderEndpoint).not.toHaveBeenCalled()
   })
 
   it('sorts provider rows when a sortable table header is clicked', async () => {
@@ -322,6 +444,7 @@ describe('SupplierProvidersView payload normalization', () => {
       'current_balance',
       'rate_risk_count',
       'credential_configured',
+      'auth_summary',
       'last_sync_at',
     ]) {
       expect(supplierProvidersSource).toContain(`{ key: '${key}',`)
@@ -333,6 +456,8 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(supplierProvidersSource).toContain('@sort="handleProviderSort"')
     expect(supplierProvidersSource).toContain("const providerSortKey = ref('')")
     expect(supplierProvidersSource).toContain("const providerSortOrder = ref<'asc' | 'desc'>('asc')")
+    expect(supplierProvidersSource).toContain("case 'auth_summary':")
+    expect(supplierProvidersSource).toContain('numericValue(left.auth_summary?.login_count) - numericValue(right.auth_summary?.login_count)')
     expect(supplierProvidersSource).not.toContain("const sorts = ['风险优先', '成本效率', '最近同步']")
   })
 

@@ -41,6 +41,28 @@ type supplierSub2APIFakeTokenCache struct {
 	releasedOwners []string
 }
 
+type supplierProviderAuthAuditorSpy struct {
+	mu     sync.Mutex
+	events []SupplierProviderAuthEventInput
+}
+
+func (s *supplierProviderAuthAuditorSpy) Record(_ context.Context, event SupplierProviderAuthEventInput) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, event)
+	return nil
+}
+
+func (s *supplierProviderAuthAuditorSpy) eventTypes() []SupplierProviderAuthEventType {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	items := make([]SupplierProviderAuthEventType, 0, len(s.events))
+	for _, event := range s.events {
+		items = append(items, event.EventType)
+	}
+	return items
+}
+
 func newSupplierSub2APIFakeTokenCache() *supplierSub2APIFakeTokenCache {
 	return &supplierSub2APIFakeTokenCache{
 		tokens: make(map[int64]SupplierProviderAuthToken),
@@ -497,28 +519,32 @@ func TestSupplierSub2APIClientRetriesBusinessTokenFailure(t *testing.T) {
 	require.Equal(t, int32(2), groupCalls.Load())
 }
 
-func TestSupplierSub2APIClientContinuesWhenRedisIsUnavailable(t *testing.T) {
+func TestSupplierSub2APIClientStopsWhenRedisIsUnavailable(t *testing.T) {
 	tests := []struct {
-		name      string
-		configure func(*supplierSub2APIFakeTokenCache)
+		name               string
+		configure          func(*supplierSub2APIFakeTokenCache)
+		expectedLoginCalls int32
 	}{
 		{
 			name: "get failure",
 			configure: func(cache *supplierSub2APIFakeTokenCache) {
 				cache.getErr = errors.New("redis get unavailable")
 			},
+			expectedLoginCalls: 0,
 		},
 		{
 			name: "lock failure",
 			configure: func(cache *supplierSub2APIFakeTokenCache) {
 				cache.lockErr = errors.New("redis lock unavailable")
 			},
+			expectedLoginCalls: 0,
 		},
 		{
 			name: "set failure",
 			configure: func(cache *supplierSub2APIFakeTokenCache) {
 				cache.setErr = errors.New("redis set unavailable")
 			},
+			expectedLoginCalls: 1,
 		},
 	}
 
@@ -543,13 +569,35 @@ func TestSupplierSub2APIClientContinuesWhenRedisIsUnavailable(t *testing.T) {
 			defer server.Close()
 
 			client := NewSupplierSub2APIClient(nil, cache, nil)
-			balance, err := client.FetchBalance(context.Background(), supplierSub2APITestProvider(server.URL), "secret")
+			_, err := client.FetchBalance(context.Background(), supplierSub2APITestProvider(server.URL), "secret")
 
-			require.NoError(t, err)
-			require.Equal(t, 88.75, balance)
-			require.Equal(t, int32(1), loginCalls.Load())
+			require.Error(t, err)
+			require.Equal(t, tt.expectedLoginCalls, loginCalls.Load())
 		})
 	}
+}
+
+func TestSupplierSub2APIClientRecordsCacheMissAndLoginSuccess(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	auditor := &supplierProviderAuthAuditorSpy{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			supplierSub2APIWriteJSON(w, http.StatusOK, `{"code":0,"data":{"access_token":"audited-token"}}`)
+		case "/balance":
+			supplierSub2APIWriteJSON(w, http.StatusOK, `{"code":0,"data":{"balance":12.5}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewSupplierSub2APIClient(server.Client(), cache, nil)
+	client.SetAuthAuditor(auditor)
+	_, err := client.FetchBalance(context.Background(), supplierSub2APITestProvider(server.URL), "secret")
+	require.NoError(t, err)
+	require.Contains(t, auditor.eventTypes(), SupplierProviderAuthEventCacheMiss)
+	require.Contains(t, auditor.eventTypes(), SupplierProviderAuthEventLoginSuccess)
 }
 
 func TestSupplierSub2APIClientParsesAccountsGroupsBalanceAndCost(t *testing.T) {

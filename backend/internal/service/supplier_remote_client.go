@@ -25,6 +25,14 @@ func NewSupplierProviderRemoteRegistry(httpClient *http.Client, tokenCache Suppl
 	}
 }
 
+func (r *SupplierProviderRemoteRegistry) SetAuthAuditor(auditor SupplierProviderAuthAuditor) {
+	if r == nil {
+		return
+	}
+	r.sub2api.SetAuthAuditor(auditor)
+	r.newapi.SetAuthAuditor(auditor)
+}
+
 func (r *SupplierProviderRemoteRegistry) FetchAccounts(ctx context.Context, provider *SupplierProvider, password string) ([]SupplierProviderRemoteAccount, error) {
 	client, err := r.client(provider)
 	if err != nil {

@@ -42,6 +42,7 @@ type AdminHandlers struct {
 	Compliance             *admin.ComplianceHandler
 	AuditLog               *admin.AuditLogHandler
 	SupplierProvider       *admin.SupplierProviderHandler
+	SupplierProviderAuth   *admin.SupplierProviderAuthHandler
 	SupplierProviderType   *admin.SupplierProviderTypeHandler
 	SupplierProviderSync   *admin.SupplierProviderSyncHandler
 	SupplierAutomation     *admin.SupplierAutomationHandler

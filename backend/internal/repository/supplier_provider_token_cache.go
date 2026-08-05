@@ -53,6 +53,38 @@ func (c *SupplierProviderTokenRedisCache) Get(ctx context.Context, providerID in
 	return token, true, nil
 }
 
+func (c *SupplierProviderTokenRedisCache) Inspect(ctx context.Context, providerID int64) (service.SupplierProviderTokenCacheSnapshot, error) {
+	if err := c.validateProvider(providerID); err != nil {
+		return service.SupplierProviderTokenCacheSnapshot{}, err
+	}
+	token, found, err := c.Get(ctx, providerID)
+	if err != nil {
+		return service.SupplierProviderTokenCacheSnapshot{}, err
+	}
+	ttl, err := c.rdb.TTL(ctx, supplierProviderTokenKey(providerID)).Result()
+	if err != nil {
+		return service.SupplierProviderTokenCacheSnapshot{}, fmt.Errorf("inspect supplier provider token ttl: %w", err)
+	}
+	lockTTL, err := c.rdb.TTL(ctx, supplierProviderLoginLockKey(providerID)).Result()
+	if err != nil {
+		return service.SupplierProviderTokenCacheSnapshot{}, fmt.Errorf("inspect supplier provider login lock ttl: %w", err)
+	}
+	return service.SupplierProviderTokenCacheSnapshot{
+		Token:    token,
+		Found:    found,
+		TTL:      normalizeRedisTTL(ttl),
+		LockHeld: lockTTL != -2,
+		LockTTL:  normalizeRedisTTL(lockTTL),
+	}, nil
+}
+
+func normalizeRedisTTL(ttl time.Duration) time.Duration {
+	if ttl < 0 {
+		return 0
+	}
+	return ttl
+}
+
 func (c *SupplierProviderTokenRedisCache) Set(ctx context.Context, providerID int64, token service.SupplierProviderAuthToken, ttl time.Duration) error {
 	if err := c.validateProvider(providerID); err != nil {
 		return err

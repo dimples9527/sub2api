@@ -133,8 +133,13 @@
           <template #cell-last_sync_at="{ row: provider }">
             {{ syncText(provider) }}
           </template>
+          <template #cell-auth_summary="{ row: provider }">
+            <div class="sp-entity">{{ provider.auth_summary?.login_count || 0 }} 次</div>
+            <div class="sp-sub">成功 {{ provider.auth_summary?.login_success_count || 0 }} / 失败 {{ provider.auth_summary?.login_failure_count || 0 }}</div>
+          </template>
           <template #cell-actions="{ row: provider }">
             <div class="sp-inline" @click.stop>
+              <button class="sp-button small" type="button" @click="openAuthHistory(provider)">登录记录</button>
               <button class="sp-button small" type="button" @click="openEdit(provider)">编辑</button>
               <button class="sp-button small" type="button" :disabled="isSyncing(provider, 'all')" @click="syncProviderData(provider, 'all')">{{ isSyncing(provider, 'all') ? '同步中' : '同步全部' }}</button>
               <button class="sp-button small" type="button" :disabled="provider.is_default" @click="makeDefault(provider)">默认</button>
@@ -266,13 +271,11 @@
                   @update:model-value="onCostTrendProviderChange"
                 />
                 <span class="text-xs text-gray-500 whitespace-nowrap">偏差阈值</span>
-                <input
-                  type="range"
-                  min="0"
-                  max="0.3"
-                  step="0.01"
+                <Select
                   v-model="deviationThreshold"
-                  class="w-24 accent-blue-500 cursor-pointer"
+                  class="w-24"
+                  :options="deviationThresholdOptions"
+                  aria-label="成本偏差阈值"
                 />
                 <span class="text-xs font-mono w-12 text-blue-600">{{ (deviationThreshold * 100).toFixed(0) }}%</span>
               </div>
@@ -371,6 +374,7 @@
         </div>
         <div class="sp-drawer-actions">
           <button class="sp-button primary" type="button" @click="openEdit(selectedProvider)">编辑配置</button>
+          <button class="sp-button" type="button" @click="openAuthHistory(selectedProvider)">登录与 Token</button>
           <button class="sp-button" type="button" :disabled="isSyncing(selectedProvider, 'accounts')" @click="syncProviderData(selectedProvider, 'accounts')">同步 API Key</button>
           <button class="sp-button" type="button" :disabled="isSyncing(selectedProvider, 'groups')" @click="syncProviderData(selectedProvider, 'groups')">同步分组</button>
           <button class="sp-button" type="button" :disabled="isSyncing(selectedProvider, 'balance')" @click="syncProviderData(selectedProvider, 'balance')">刷新余额</button>
@@ -390,6 +394,55 @@
         </div>
       </template>
     </SupplierDrawer>
+
+    <BaseDialog
+      :show="authDialogVisible"
+      :title="authProvider ? `${authProvider.name} · 登录与 Token` : '登录与 Token'"
+      width="wide"
+      @close="closeAuthHistory"
+    >
+      <div v-if="authLoading && !authStatus" class="sp-alert">正在读取认证缓存与历史记录…</div>
+      <template v-else-if="authStatus">
+        <div class="sp-detail-grid">
+          <div class="sp-detail-cell"><span>登录总次数</span><b>{{ authStatus.summary.login_count }}</b></div>
+          <div class="sp-detail-cell"><span>成功 / 失败</span><b>{{ authStatus.summary.login_success_count }} / {{ authStatus.summary.login_failure_count }}</b></div>
+          <div class="sp-detail-cell"><span>最近登录</span><b>{{ formatAuthTime(authStatus.summary.last_login_at) }}</b></div>
+          <div class="sp-detail-cell"><span>最近结果</span><b>{{ authEventLabel(authStatus.summary.last_login_status) }}</b></div>
+          <div class="sp-detail-cell"><span>Token 缓存</span><b>{{ authCacheLabel(authStatus.cache.status) }}</b></div>
+          <div class="sp-detail-cell"><span>剩余有效期</span><b>{{ formatDuration(authStatus.cache.remaining_seconds) }}</b></div>
+          <div class="sp-detail-cell"><span>Redis TTL</span><b>{{ formatDuration(authStatus.cache.ttl_seconds) }}</b></div>
+          <div class="sp-detail-cell"><span>Cookie 会话</span><b>{{ authStatus.cache.cookie_present ? '存在' : '不存在' }}</b></div>
+          <div class="sp-detail-cell"><span>Token 摘要</span><b>{{ authStatus.cache.token_summary || '—' }}</b></div>
+          <div class="sp-detail-cell"><span>Token 长度</span><b>{{ authStatus.cache.token_length || 0 }}</b></div>
+          <div class="sp-detail-cell"><span>登录锁</span><b>{{ authStatus.login_lock.held ? `持有（${formatDuration(authStatus.login_lock.remaining_seconds)}）` : '未持有' }}</b></div>
+          <div class="sp-detail-cell"><span>检查时间</span><b>{{ formatAuthTime(authStatus.checked_at) }}</b></div>
+        </div>
+        <div v-if="authStatus.cache.token_fingerprint" class="sp-alert">Token 指纹：{{ authStatus.cache.token_fingerprint }}</div>
+        <div v-if="authStatus.summary.last_login_error || authStatus.summary.last_cache_error || authStatus.cache.error" class="sp-alert sp-error-line">
+          {{ authStatus.summary.last_login_error || authStatus.summary.last_cache_error || authStatus.cache.error }}
+        </div>
+        <div class="sp-inline">
+          <Select v-model="authEventFilter" class="w-40" :options="authEventOptions" data-test="supplier-auth-event-filter" @update:model-value="reloadAuthHistory" />
+          <button class="sp-button" type="button" data-test="supplier-auth-refresh" :disabled="authLoading" @click="reloadAuthData">{{ authLoading ? '刷新中' : '刷新状态' }}</button>
+        </div>
+        <DataTable :columns="authHistoryColumns" :data="authHistory.items" :loading="authLoading" row-key="id">
+          <template #cell-created_at="{ row }">{{ formatAuthTime(row.created_at) }}</template>
+          <template #cell-event_type="{ row }">{{ authEventLabel(row.event_type) }}</template>
+          <template #cell-source="{ row }">{{ authSourceLabel(row.source) }}</template>
+          <template #cell-status="{ row }"><span class="sp-status" :class="row.status === 'success' ? 'good' : row.status === 'failed' || row.status === 'unavailable' ? 'bad' : 'warn'">{{ authEventLabel(row.status) }}</span></template>
+          <template #cell-duration_ms="{ row }">{{ row.duration_ms }} ms</template>
+          <template #cell-http_status="{ row }">{{ row.http_status || '—' }}</template>
+          <template #cell-error_message="{ row }">{{ row.error_message || '—' }}</template>
+          <template #empty>暂无认证历史</template>
+        </DataTable>
+        <div class="sp-inline">
+          <button class="sp-button small" type="button" data-test="supplier-auth-prev" :disabled="authHistory.page <= 1 || authLoading" @click="changeAuthPage(-1)">上一页</button>
+          <span>第 {{ authHistory.page }} 页 · 共 {{ authHistory.total }} 条</span>
+          <button class="sp-button small" type="button" data-test="supplier-auth-next" :disabled="authHistory.page * authHistory.page_size >= authHistory.total || authLoading" @click="changeAuthPage(1)">下一页</button>
+        </div>
+      </template>
+      <template #footer><button class="sp-button primary" type="button" @click="closeAuthHistory">关闭</button></template>
+    </BaseDialog>
 
     <BaseDialog
       :show="modalVisible"
@@ -698,7 +751,7 @@ import Icon from '@/components/icons/Icon.vue'
 import Input from '@/components/common/Input.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
-import supplierProvidersAPI, { type SupplierProvider, type SupplierProviderSummary, type SupplierProviderUpsertPayload, type SupplierProviderCostTrendPoint, type SupplierProviderCostBreakdown, type SupplierProviderCostBackfillResult } from '@/api/admin/supplierProviders'
+import supplierProvidersAPI, { type SupplierProvider, type SupplierProviderSummary, type SupplierProviderUpsertPayload, type SupplierProviderCostTrendPoint, type SupplierProviderCostBreakdown, type SupplierProviderCostBackfillResult, type SupplierProviderAuthStatusResult, type SupplierProviderAuthHistoryResult, type SupplierProviderAuthEventType } from '@/api/admin/supplierProviders'
 import supplierProviderTypesAPI, { type SupplierProviderType, type SupplierProviderTypeUpsertPayload } from '@/api/admin/supplierProviderTypes'
 import { syncProvider, testProviderEndpoint, type SupplierProviderEndpointTestResult, type SupplierSyncScope } from '@/api/admin/supplierProviderData'
 import { useAppStore } from '@/stores/app'
@@ -805,6 +858,10 @@ const costTrendLoading = ref(false)
 const costBreakdownLoading = ref(false)
 const costTrendPoints = ref<SupplierProviderCostTrendPoint[]>([])
 const costTrendBreakdown = ref<SupplierProviderCostBreakdown[]>([])
+const deviationThresholdOptions: SelectOption[] = Array.from({ length: 31 }, (_, value) => ({
+  value: value / 100,
+  label: `${value}%`,
+}))
 const deviationThreshold = ref(0.15) // 15%
 const search = ref('')
 const providerQuickFilter = ref<ProviderQuickFilter>('all')
@@ -814,6 +871,12 @@ const providerSortOrder = ref<'asc' | 'desc'>('asc')
 const loading = ref(false)
 const error = ref('')
 const selectedProvider = ref<SupplierProvider | null>(null)
+const authDialogVisible = ref(false)
+const authProvider = ref<SupplierProvider | null>(null)
+const authStatus = ref<SupplierProviderAuthStatusResult | null>(null)
+const authHistory = ref<SupplierProviderAuthHistoryResult>({ items: [], total: 0, page: 1, page_size: 20 })
+const authEventFilter = ref<SupplierProviderAuthEventType | ''>('')
+const authLoading = ref(false)
 const editingProvider = ref<SupplierProvider | null>(null)
 const editingProviderType = ref<SupplierProviderType | null>(null)
 const modalVisible = ref(false)
@@ -844,7 +907,28 @@ const providerColumns: Column[] = [
   { key: 'rate_risk_count', label: '倍率风险', sortable: true },
   { key: 'credential_configured', label: '凭据', sortable: true },
   { key: 'last_sync_at', label: '最近同步', sortable: true, class: 'min-w-[110px]' },
-  { key: 'actions', label: '操作', class: 'min-w-[260px]' },
+  { key: 'auth_summary', label: '登录认证', sortable: true, class: 'min-w-[130px]' },
+  { key: 'actions', label: '操作', class: 'min-w-[330px]' },
+]
+
+const authHistoryColumns: Column[] = [
+  { key: 'created_at', label: '时间', class: 'min-w-[150px]' },
+  { key: 'event_type', label: '事件' },
+  { key: 'source', label: '来源' },
+  { key: 'status', label: '结果' },
+  { key: 'duration_ms', label: '耗时' },
+  { key: 'http_status', label: 'HTTP' },
+  { key: 'error_message', label: '错误摘要', class: 'min-w-[220px]' },
+]
+
+const authEventOptions: SelectOption[] = [
+  { value: '', label: '全部事件' },
+  { value: 'login_success', label: '登录成功' },
+  { value: 'login_failed', label: '登录失败' },
+  { value: 'cache_hit', label: '缓存命中' },
+  { value: 'cache_miss', label: '缓存未命中' },
+  { value: 'cache_invalidated', label: '缓存失效' },
+  { value: 'cache_error', label: '缓存异常' },
 ]
 
 const metrics = computed(() => [
@@ -1323,6 +1407,83 @@ function selectProviderForDetail(provider: SupplierProvider) {
   }
 }
 
+async function openAuthHistory(provider: SupplierProvider) {
+  authProvider.value = provider
+  authDialogVisible.value = true
+  authEventFilter.value = ''
+  authHistory.value = { items: [], total: 0, page: 1, page_size: 20 }
+  authStatus.value = null
+  await reloadAuthData()
+}
+
+function closeAuthHistory() {
+  authDialogVisible.value = false
+  authProvider.value = null
+  authStatus.value = null
+  authHistory.value = { items: [], total: 0, page: 1, page_size: 20 }
+}
+
+async function reloadAuthData() {
+  if (!authProvider.value) return
+  authLoading.value = true
+  try {
+    const [status, history] = await Promise.all([
+      supplierProvidersAPI.getAuthStatus(authProvider.value.id),
+      supplierProvidersAPI.listAuthHistory(authProvider.value.id, {
+        page: authHistory.value.page,
+        page_size: authHistory.value.page_size,
+        event_type: authEventFilter.value,
+      }),
+    ])
+    authStatus.value = status
+    authHistory.value = history
+  } catch (err) {
+    error.value = errorMessage(err, '加载供应商登录记录失败')
+  } finally {
+    authLoading.value = false
+  }
+}
+
+async function reloadAuthHistory() {
+  authHistory.value.page = 1
+  await reloadAuthData()
+}
+
+async function changeAuthPage(offset: number) {
+  authHistory.value.page = Math.max(1, authHistory.value.page + offset)
+  await reloadAuthData()
+}
+
+function formatAuthTime(value?: string): string {
+  if (!value) return '—'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false })
+}
+
+function formatDuration(seconds: number): string {
+  const value = Math.max(0, Number(seconds || 0))
+  if (value <= 0) return '0 秒'
+  if (value < 60) return `${Math.floor(value)} 秒`
+  if (value < 3600) return `${Math.floor(value / 60)} 分 ${Math.floor(value % 60)} 秒`
+  return `${Math.floor(value / 3600)} 小时 ${Math.floor((value % 3600) / 60)} 分`
+}
+
+function authCacheLabel(status: string): string {
+  return ({ cached: '已缓存', missing: '未缓存', expired: '已过期', error: '缓存异常' } as Record<string, string>)[status] || status || '未知'
+}
+
+function authEventLabel(value: string): string {
+  return ({
+    cache_hit: '缓存命中', cache_miss: '缓存未命中', login_success: '登录成功', login_failed: '登录失败',
+    cache_invalidated: '缓存失效', cache_error: '缓存异常', success: '成功', failed: '失败', miss: '未命中',
+    invalidated: '已失效', unavailable: '不可用',
+  } as Record<string, string>)[value] || value || '—'
+}
+
+function authSourceLabel(value: string): string {
+  return ({ sync: '同步任务', endpoint_test: '接口测试', manual: '手动操作', unknown: '未知来源' } as Record<string, string>)[value] || value
+}
+
 async function refreshProvidersView() {
   await Promise.all([loadProviders(), loadCostTrends(), loadCostBreakdown()])
 }
@@ -1736,6 +1897,9 @@ function compareProviders(left: SupplierProvider, right: SupplierProvider, key: 
       break
     case 'credential_configured':
       comparison = Number(left.credential_configured) - Number(right.credential_configured)
+      break
+    case 'auth_summary':
+      comparison = numericValue(left.auth_summary?.login_count) - numericValue(right.auth_summary?.login_count)
       break
   }
   return comparison === 0 ? left.id - right.id : comparison * sortDirection(order)

@@ -20,4 +20,5 @@ func ProvideSupplierProviderSyncHandler(
 
 var SupplierProviderWiringSet = wire.NewSet(
 	ProvideSupplierProviderSyncHandler,
+	admin.NewSupplierProviderAuthHandler,
 )

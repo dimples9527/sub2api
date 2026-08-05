@@ -152,9 +152,10 @@ func (r *supplierProviderDataRepoStub) Cleanup(context.Context, SupplierCleanupP
 }
 
 type supplierRemoteClientStub struct {
-	passwords []string
-	accounts  []SupplierProviderRemoteAccount
-	costDays  []time.Time
+	passwords   []string
+	authSources []SupplierProviderAuthSource
+	accounts    []SupplierProviderRemoteAccount
+	costDays    []time.Time
 
 	accountsErr error
 	groupsErr   error
@@ -166,8 +167,9 @@ type supplierRemoteClientStub struct {
 	testErr   error
 }
 
-func (c *supplierRemoteClientStub) FetchAccounts(_ context.Context, _ *SupplierProvider, password string) ([]SupplierProviderRemoteAccount, error) {
+func (c *supplierRemoteClientStub) FetchAccounts(ctx context.Context, _ *SupplierProvider, password string) ([]SupplierProviderRemoteAccount, error) {
 	c.passwords = append(c.passwords, password)
+	c.authSources = append(c.authSources, supplierProviderAuthSourceFromContext(ctx))
 	if c.accountsErr != nil {
 		return nil, c.accountsErr
 	}
@@ -201,8 +203,9 @@ func (c *supplierRemoteClientStub) FetchCost(_ context.Context, _ *SupplierProvi
 	}
 	return 45.6, nil
 }
-func (c *supplierRemoteClientStub) TestEndpoint(_ context.Context, _ *SupplierProvider, password string, scope string) (SupplierProviderEndpointTestResult, error) {
+func (c *supplierRemoteClientStub) TestEndpoint(ctx context.Context, _ *SupplierProvider, password string, scope string) (SupplierProviderEndpointTestResult, error) {
 	c.passwords = append(c.passwords, password)
+	c.authSources = append(c.authSources, supplierProviderAuthSourceFromContext(ctx))
 	c.testCalls = append(c.testCalls, scope)
 	if c.testErr != nil {
 		return SupplierProviderEndpointTestResult{}, c.testErr
@@ -334,6 +337,7 @@ func TestSupplierProviderSyncServiceSyncAccountsDecryptsPasswordAndPersists(t *t
 	require.Equal(t, SupplierSyncStatusSuccess, result.Status)
 	require.Equal(t, SupplierSyncScopeAccounts, result.Scope)
 	require.Equal(t, []string{"secret"}, remote.passwords)
+	require.Equal(t, []SupplierProviderAuthSource{SupplierProviderAuthSourceSync}, remote.authSources)
 	require.Equal(t, 1, dataRepo.accountsCalls)
 	require.Len(t, dataRepo.createdRuns, 1)
 	require.Len(t, dataRepo.finishedRuns, 1)
@@ -403,6 +407,7 @@ func TestSupplierProviderSyncServiceAllowsNewAPIProviderType(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, SupplierSyncStatusSuccess, result.Status)
 	require.Equal(t, []string{"secret"}, remote.passwords)
+	require.Equal(t, []SupplierProviderAuthSource{SupplierProviderAuthSourceSync}, remote.authSources)
 	require.Equal(t, 1, dataRepo.accountsCalls)
 }
 
@@ -501,12 +506,12 @@ func TestSupplierProviderSyncServiceTestsEndpointWithoutPersisting(t *testing.T)
 	require.Equal(t, SupplierSyncScopeBalance, result.Scope)
 	require.Equal(t, "/test/balance", result.Endpoint)
 	require.Equal(t, []string{"secret"}, remote.passwords)
+	require.Equal(t, []SupplierProviderAuthSource{SupplierProviderAuthSourceEndpointTest}, remote.authSources)
 	require.Equal(t, []string{SupplierSyncScopeBalance}, remote.testCalls)
 	require.Empty(t, dataRepo.createdRuns)
 	require.Empty(t, dataRepo.finishedRuns)
 	require.Zero(t, dataRepo.balanceCalls)
 }
-
 
 func TestSupplierProviderSyncServiceBackfillCostsNewAPIPullsEachDay(t *testing.T) {
 	today := supplierCostBackfillToday()
