@@ -123,6 +123,8 @@ export interface SupplierProviderGroup {
 	 group_sync_status: 'never' | 'running' | 'success' | 'failed'
 	 last_group_sync_at?: string
   account_count: number
+  key_sync_status: 'never' | 'running' | 'success' | 'partial' | 'failed' | 'skipped'
+  key_status: 'created' | 'not_created' | 'unknown'
   last_seen_at: string
   inactive_at?: string
 }

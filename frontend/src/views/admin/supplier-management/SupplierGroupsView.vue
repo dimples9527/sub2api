@@ -241,6 +241,15 @@
               </div>
             </template>
 
+            <template #cell-key_status="{ row: group }">
+              <div class="sp-status-stack" :title="keyStatusDetail(group)">
+                <span class="sp-status" :class="keyStatusTone(group)">
+                  <i></i>{{ keyStatusLabel(group) }}
+                </span>
+                <small>{{ keyStatusDetail(group) }}</small>
+              </div>
+            </template>
+
             <template #cell-rate_multiplier="{ row: group }">
               <span :class="['sp-rate-value', platformTextClass(group.local_group_platform || '')]">{{ formatRate(group.rate_multiplier) }}</span>
             </template>
@@ -914,6 +923,7 @@ const platformOptions: SelectOption[] = Object.entries(PLATFORM_LABELS).map(([va
 const groupColumns: Column[] = [
   { key: 'provider_name', label: '供应商', sortable: true, class: 'min-w-[150px]' },
   { key: 'name', label: '上游分组', sortable: true, class: 'min-w-[190px]' },
+  { key: 'key_status', label: '密钥状态', class: 'min-w-[150px]' },
   { key: 'rate_multiplier', label: '上游倍率', sortable: true, class: 'min-w-[96px]' },
   { key: 'raw_status', label: '上游状态', class: 'min-w-[105px]' },
   { key: 'monitor_trend', label: '可用率趋势', class: 'min-w-[160px]' },
@@ -969,6 +979,35 @@ const localRateDeltaTone = computed<'neutral' | 'danger' | 'warning' | 'success'
 const rateGuardChangeLogTotalPages = computed(() => (
   Math.max(1, Math.ceil(rateGuardChangeLogTotal.value / rateGuardChangeLogPageSize.value))
 ))
+
+function keyStatusTone(group: SupplierProviderGroup) {
+  if (group.key_status === 'created') return 'good'
+  if (group.key_status === 'not_created') return 'bad'
+  return 'info'
+}
+
+function keyStatusLabel(group: SupplierProviderGroup) {
+  if (group.key_status === 'created') return '已创建'
+  if (group.key_status === 'not_created') return '未创建'
+  return '无法确认'
+}
+
+function keyStatusDetail(group: SupplierProviderGroup) {
+  if (group.key_status === 'created') {
+    if (group.key_sync_status === 'failed') return `${group.account_count} 个密钥 · 最近同步失败`
+    if (group.key_sync_status === 'running') return `${group.account_count} 个密钥 · 正在同步`
+    if (group.key_sync_status === 'skipped') return `${group.account_count} 个密钥 · 最近同步已跳过`
+    if (group.key_sync_status === 'never') return `${group.account_count} 个密钥 · 本地已有记录`
+    if (group.key_sync_status === 'partial') return `${group.account_count} 个密钥 · 最近同步部分成功`
+    return `${group.account_count} 个密钥`
+  }
+  if (group.key_status === 'not_created') return '暂无匹配密钥'
+  if (group.key_sync_status === 'running') return '密钥同步中'
+  if (group.key_sync_status === 'failed') return '最近同步失败'
+  if (group.key_sync_status === 'partial') return '最近同步部分成功'
+  if (group.key_sync_status === 'skipped') return '最近同步已跳过'
+  return '尚未同步'
+}
 
 onMounted(async () => {
   try {

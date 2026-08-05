@@ -94,6 +94,8 @@ type SupplierProviderGroup struct {
 	GroupSyncStatus                 string     `json:"group_sync_status"`
 	LastGroupSyncAt                 *time.Time `json:"last_group_sync_at,omitempty"`
 	AccountCount                    int        `json:"account_count"`
+	KeySyncStatus                   string     `json:"key_sync_status"`
+	KeyStatus                       string     `json:"key_status"`
 	LastSeenAt                      time.Time  `json:"last_seen_at"`
 	InactiveAt                      *time.Time `json:"inactive_at,omitempty"`
 }

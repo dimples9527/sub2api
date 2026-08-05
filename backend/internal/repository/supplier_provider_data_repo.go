@@ -245,11 +245,20 @@ SELECT g.id, g.provider_id, p.name AS provider_name, g.upstream_group_key, g.nam
 	   COALESCE(guardian_group.name, '') AS local_group_rate_guard_group_name,
 	   COALESCE(guardian_provider.name, '') AS local_group_rate_guard_provider_name,
        COALESCE(COUNT(a.id) FILTER (WHERE a.active = TRUE), 0) AS account_count,
-       g.last_seen_at, g.inactive_at
+       g.last_seen_at, g.inactive_at,
+       COALESCE(account_sync.status, 'never') AS key_sync_status
 FROM supplier_provider_groups g
 JOIN supplier_providers p ON p.id = g.provider_id
 LEFT JOIN groups lg ON lg.id = g.local_group_id
 LEFT JOIN supplier_provider_runtime_stats s ON s.provider_id = g.provider_id
+LEFT JOIN LATERAL (
+  SELECT r.status
+  FROM supplier_provider_sync_runs r
+  WHERE r.provider_id = g.provider_id
+    AND r.sync_scope = 'accounts'
+  ORDER BY r.started_at DESC, r.id DESC
+  LIMIT 1
+) account_sync ON TRUE
 LEFT JOIN (
   SELECT local_group_id,
          COUNT(*) FILTER (WHERE active = TRUE) AS active_mapping_count,
@@ -261,7 +270,7 @@ LEFT JOIN (
 LEFT JOIN supplier_provider_groups guardian_group ON guardian_group.id = guard_state.rate_guard_group_id
 LEFT JOIN supplier_providers guardian_provider ON guardian_provider.id = guardian_group.provider_id
 LEFT JOIN supplier_provider_accounts a ON a.provider_id = g.provider_id AND a.group_key = g.upstream_group_key
-WHERE `+where+fmt.Sprintf(" GROUP BY g.id, p.name, lg.id, s.group_sync_status, s.last_group_sync_at, guard_state.active_mapping_count, guard_state.rate_guard_group_id, guardian_group.id, guardian_provider.id ORDER BY %s LIMIT $%d OFFSET $%d", supplierProviderGroupOrderBy(params), len(args)+1, len(args)+2), queryArgs...)
+WHERE `+where+fmt.Sprintf(" GROUP BY g.id, p.name, lg.id, s.group_sync_status, s.last_group_sync_at, account_sync.status, guard_state.active_mapping_count, guard_state.rate_guard_group_id, guardian_group.id, guardian_provider.id ORDER BY %s LIMIT $%d OFFSET $%d", supplierProviderGroupOrderBy(params), len(args)+1, len(args)+2), queryArgs...)
 	if err != nil {
 		return service.SupplierProviderGroupListResult{}, fmt.Errorf("query supplier provider groups: %w", err)
 	}
@@ -1504,6 +1513,18 @@ func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (servic
 
 type supplierProviderGroupScanner interface{ Scan(dest ...any) error }
 
+func supplierProviderGroupKeyStatus(keySyncStatus string, activeKeyCount int) string {
+	if activeKeyCount > 0 {
+		return "created"
+	}
+	switch strings.ToLower(strings.TrimSpace(keySyncStatus)) {
+	case service.SupplierSyncStatusSuccess, service.SupplierSyncStatusPartial:
+		return "not_created"
+	default:
+		return "unknown"
+	}
+}
+
 func scanSupplierProviderGroup(scanner supplierProviderGroupScanner) (service.SupplierProviderGroup, error) {
 	var item service.SupplierProviderGroup
 	var localGroupRateGuardGroupID sql.NullInt64
@@ -1519,7 +1540,8 @@ func scanSupplierProviderGroup(scanner supplierProviderGroupScanner) (service.Su
 		&item.GroupSyncStatus, &lastGroupSyncAt,
 		&item.LocalGroupActiveMappingCount, &localGroupRateGuardGroupID,
 		&item.LocalGroupRateGuardGroupName, &item.LocalGroupRateGuardProviderName,
-		&item.AccountCount, &item.LastSeenAt, &inactiveAt)
+		&item.AccountCount, &item.LastSeenAt, &inactiveAt,
+		&item.KeySyncStatus)
 	if err != nil {
 		return service.SupplierProviderGroup{}, err
 	}
@@ -1538,6 +1560,7 @@ func scanSupplierProviderGroup(scanner supplierProviderGroupScanner) (service.Su
 	if localGroupRateGuardGroupID.Valid {
 		item.LocalGroupRateGuardGroupID = &localGroupRateGuardGroupID.Int64
 	}
+	item.KeyStatus = supplierProviderGroupKeyStatus(item.KeySyncStatus, item.AccountCount)
 	return item, nil
 }
 

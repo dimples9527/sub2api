@@ -626,11 +626,12 @@ func TestSupplierProviderDataRepositoryListGroupsIncludesFilteredSummary(t *test
 			"auto_match_status", "matched_upstream_name", "name_change_pending",
 			"rate_guard_selected", "rate_guard_ignored", "rate_guard_selection_mode", "rate_guard_last_snapshot_at", "rate_guard_last_checked_at",
 			"group_sync_status", "last_group_sync_at", "local_group_active_mapping_count", "local_group_rate_guard_group_id", "local_group_rate_guard_group_name", "local_group_rate_guard_provider_name", "account_count",
-			"last_seen_at", "inactive_at",
+			"last_seen_at", "inactive_at", "key_sync_status",
 		}).AddRow(
 			int64(7), int64(42), "Supplier A", "group-1", "VIP", 2.5, "active", true,
 			int64(12), "VIP 本地", "openai", 3.0, "active", false, "manual", "VIP", false,
 			true, false, "manual", now.Add(-time.Minute), now, "success", now.Add(-time.Minute), 2, int64(7), "VIP Guardian", "Supplier B", 5, now, nil,
+			"success",
 		))
 
 	result, err := repo.ListGroups(context.Background(), service.SupplierProviderDataListParams{
@@ -663,11 +664,84 @@ func TestSupplierProviderDataRepositoryListGroupsIncludesFilteredSummary(t *test
 	require.Equal(t, "manual", result.Items[0].RateGuardSelectionMode)
 	require.Equal(t, "success", result.Items[0].GroupSyncStatus)
 	require.NotNil(t, result.Items[0].LastGroupSyncAt)
+	require.Equal(t, "success", result.Items[0].KeySyncStatus)
+	require.Equal(t, "created", result.Items[0].KeyStatus)
 	require.Equal(t, 2, result.Items[0].LocalGroupActiveMappingCount)
 	require.Equal(t, int64(7), *result.Items[0].LocalGroupRateGuardGroupID)
 	require.Equal(t, "VIP Guardian", result.Items[0].LocalGroupRateGuardGroupName)
 	require.Equal(t, "Supplier B", result.Items[0].LocalGroupRateGuardProviderName)
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryListGroupsReturnsKeyStatus(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	now := time.Date(2026, 8, 5, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(`COUNT\(\*\) FILTER \(WHERE local_group_id IS NOT NULL\) AS linked_group_count`).
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"group_count", "account_count", "linked_group_count", "unlinked_group_count", "rate_risk_count",
+		}).AddRow(int64(3), int64(2), int64(0), int64(3), int64(0)))
+	mock.ExpectQuery(`(?s)SELECT g\.id, g\.provider_id.*LEFT JOIN LATERAL.*sync_scope = 'accounts'.*ORDER BY`).
+		WithArgs(int64(42), 20, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "provider_id", "provider_name", "upstream_group_key", "name",
+			"rate_multiplier", "raw_status", "active", "local_group_id", "local_group_name",
+			"local_group_platform", "local_rate_multiplier", "local_group_status", "auto_match_ignored",
+			"auto_match_status", "matched_upstream_name", "name_change_pending",
+			"rate_guard_selected", "rate_guard_ignored", "rate_guard_selection_mode", "rate_guard_last_snapshot_at", "rate_guard_last_checked_at",
+			"group_sync_status", "last_group_sync_at", "local_group_active_mapping_count", "local_group_rate_guard_group_id", "local_group_rate_guard_group_name", "local_group_rate_guard_provider_name", "account_count",
+			"last_seen_at", "inactive_at", "key_sync_status",
+		}).AddRow(
+			int64(1), int64(42), "Supplier A", "group-created", "已创建分组", 1.5, "active", true,
+			nil, "", "", nil, "", false, "unmatched", "", false,
+			false, false, "", nil, nil, "success", now, 0, nil, "", "", 2, now, nil, "failed",
+		).AddRow(
+			int64(2), int64(42), "Supplier A", "group-empty", "未创建分组", 1.5, "active", true,
+			nil, "", "", nil, "", false, "unmatched", "", false,
+			false, false, "", nil, nil, "success", now, 0, nil, "", "", 0, now, nil, "success",
+		).AddRow(
+			int64(3), int64(42), "Supplier A", "group-running", "同步中分组", 1.5, "active", true,
+			nil, "", "", nil, "", false, "unmatched", "", false,
+			false, false, "", nil, nil, "success", now, 0, nil, "", "", 0, now, nil, "running",
+		))
+
+	result, err := repo.ListGroups(context.Background(), service.SupplierProviderDataListParams{
+		ProviderID: 42,
+		Page:       1,
+		PageSize:   20,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, result.Items, 3)
+	require.Equal(t, "failed", result.Items[0].KeySyncStatus)
+	require.Equal(t, "created", result.Items[0].KeyStatus)
+	require.Equal(t, "success", result.Items[1].KeySyncStatus)
+	require.Equal(t, "not_created", result.Items[1].KeyStatus)
+	require.Equal(t, "running", result.Items[2].KeySyncStatus)
+	require.Equal(t, "unknown", result.Items[2].KeyStatus)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderGroupKeyStatusPrefersExistingActiveKeys(t *testing.T) {
+	tests := []struct {
+		name           string
+		keySyncStatus  string
+		activeKeyCount int
+		want           string
+	}{
+		{name: "同步失败但已有密钥", keySyncStatus: service.SupplierSyncStatusFailed, activeKeyCount: 2, want: "created"},
+		{name: "尚未同步但已有密钥", keySyncStatus: "never", activeKeyCount: 1, want: "created"},
+		{name: "同步成功且没有密钥", keySyncStatus: service.SupplierSyncStatusSuccess, activeKeyCount: 0, want: "not_created"},
+		{name: "部分成功且没有密钥", keySyncStatus: service.SupplierSyncStatusPartial, activeKeyCount: 0, want: "not_created"},
+		{name: "同步失败且没有密钥", keySyncStatus: service.SupplierSyncStatusFailed, activeKeyCount: 0, want: "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, supplierProviderGroupKeyStatus(tt.keySyncStatus, tt.activeKeyCount))
+		})
+	}
 }
 
 func TestSupplierProviderDataRepositoryUpdatesGroupSyncStatus(t *testing.T) {
@@ -868,11 +942,11 @@ func TestSupplierProviderDataRepositoryListGroupsKeepsSummaryOutsideStatusFilter
 			"auto_match_status", "matched_upstream_name", "name_change_pending",
 			"rate_guard_selected", "rate_guard_ignored", "rate_guard_selection_mode", "rate_guard_last_snapshot_at", "rate_guard_last_checked_at",
 			"group_sync_status", "last_group_sync_at", "local_group_active_mapping_count", "local_group_rate_guard_group_id", "local_group_rate_guard_group_name", "local_group_rate_guard_provider_name", "account_count",
-			"last_seen_at", "inactive_at",
+			"last_seen_at", "inactive_at", "key_sync_status",
 		}).AddRow(
 			int64(7), int64(42), "Supplier A", "group-1", "VIP", 2.5, "active", true,
 			int64(12), "VIP 本地", "openai", 2.6, "active", false, "manual", "VIP", false,
-			false, false, "", nil, nil, "never", nil, 2, nil, "", "", 5, now, nil,
+			false, false, "", nil, nil, "never", nil, 2, nil, "", "", 5, now, nil, "never",
 		))
 
 	result, err := repo.ListGroups(context.Background(), service.SupplierProviderDataListParams{
