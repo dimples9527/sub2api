@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { getMock, putMock, postMock } = vi.hoisted(() => ({
+const { getMock, putMock, postMock, deleteMock } = vi.hoisted(() => ({
   getMock: vi.fn(),
   putMock: vi.fn(),
   postMock: vi.fn(),
+  deleteMock: vi.fn(),
 }))
 
 vi.mock('../client', () => ({
@@ -11,12 +12,14 @@ vi.mock('../client', () => ({
     get: getMock,
     put: putMock,
     post: postMock,
+    delete: deleteMock,
   },
 }))
 
 import {
   listSupplierBalanceAlertConfigs,
   listSupplierBalanceAlertEvents,
+  deleteSupplierBalanceAlertEvent,
   scanSupplierBalanceAlerts,
   updateSupplierBalanceAlertConfig,
 } from './supplierBalanceAlert'
@@ -26,9 +29,11 @@ describe('supplierBalanceAlert API', () => {
     getMock.mockReset()
     putMock.mockReset()
     postMock.mockReset()
+    deleteMock.mockReset()
     getMock.mockResolvedValue({ data: { items: [], total: 0, page: 1, page_size: 20 } })
     putMock.mockResolvedValue({ data: { provider_id: 8, threshold: '12.50' } })
     postMock.mockResolvedValue({ data: { checked: 1, triggered: 0 } })
+    deleteMock.mockResolvedValue({ data: { event_id: 12 } })
   })
 
   it('loads all balance alert configs without adding an empty provider filter', async () => {
@@ -76,5 +81,11 @@ describe('supplierBalanceAlert API', () => {
     await scanSupplierBalanceAlerts()
 
     expect(postMock).toHaveBeenCalledWith('/admin/supplier-management/balance-alert/scan')
+  })
+
+  it('deletes a balance alert event by id', async () => {
+    await deleteSupplierBalanceAlertEvent(12)
+
+    expect(deleteMock).toHaveBeenCalledWith('/admin/supplier-management/balance-alert/events/12')
   })
 })

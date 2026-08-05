@@ -114,11 +114,19 @@ export async function listSupplierBalanceAlertEvents(
   return data
 }
 
+export async function deleteSupplierBalanceAlertEvent(id: number): Promise<{ event_id: number }> {
+  const { data } = await apiClient.delete<{ event_id: number }>(
+    `/admin/supplier-management/balance-alert/events/${id}`
+  )
+  return data
+}
+
 export const supplierBalanceAlertAPI = {
   listSupplierBalanceAlertConfigs,
   updateSupplierBalanceAlertConfig,
   scanSupplierBalanceAlerts,
   listSupplierBalanceAlertEvents,
+  deleteSupplierBalanceAlertEvent,
 }
 
 export default supplierBalanceAlertAPI

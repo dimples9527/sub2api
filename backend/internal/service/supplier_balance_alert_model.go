@@ -11,6 +11,7 @@ import (
 var (
 	ErrSupplierBalanceAlertConfigNotFound = infraerrors.NotFound("SUPPLIER_BALANCE_ALERT_CONFIG_NOT_FOUND", "供应商余额预警配置不存在")
 	ErrSupplierBalanceAlertEventNotFound  = infraerrors.NotFound("SUPPLIER_BALANCE_ALERT_EVENT_NOT_FOUND", "供应商余额预警事件不存在")
+	ErrSupplierBalanceAlertEventActive    = infraerrors.Conflict("SUPPLIER_BALANCE_ALERT_EVENT_ACTIVE", "活动中的余额预警事件不能删除，请等待余额恢复后再删除")
 	ErrSupplierBalanceAlertInvalid        = infraerrors.BadRequest("SUPPLIER_BALANCE_ALERT_INVALID", "供应商余额预警参数无效")
 	ErrSupplierBalanceAlertScanBusy       = infraerrors.Conflict("SUPPLIER_BALANCE_ALERT_SCAN_BUSY", "供应商余额预警扫描正在执行")
 )
@@ -143,6 +144,7 @@ type SupplierBalanceAlertRepository interface {
 	TouchActiveLowEvent(ctx context.Context, eventID int64, balance decimal.Decimal, now time.Time) error
 	ResolveActiveLowEvent(ctx context.Context, eventID int64, now time.Time, balance decimal.Decimal) error
 	ListEvents(ctx context.Context, params SupplierBalanceAlertEventListParams) (SupplierBalanceAlertEventListResult, error)
+	DeleteEvent(ctx context.Context, eventID int64) error
 }
 
 type SupplierBalanceAlertDispatcher interface {

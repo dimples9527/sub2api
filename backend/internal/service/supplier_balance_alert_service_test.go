@@ -15,6 +15,8 @@ type supplierBalanceAlertRepoStub struct {
 	events    []SupplierBalanceAlertEvent
 	states    map[int64]supplierBalanceAlertState
 	nextEvent int64
+	deletedID int64
+	deleteErr error
 }
 
 type supplierBalanceAlertState struct {
@@ -103,6 +105,10 @@ func (r *supplierBalanceAlertRepoStub) ResolveActiveLowEvent(_ context.Context, 
 func (r *supplierBalanceAlertRepoStub) ListEvents(context.Context, SupplierBalanceAlertEventListParams) (SupplierBalanceAlertEventListResult, error) {
 	return SupplierBalanceAlertEventListResult{Items: r.events, Total: int64(len(r.events)), Page: 1, PageSize: 50}, nil
 }
+func (r *supplierBalanceAlertRepoStub) DeleteEvent(_ context.Context, eventID int64) error {
+	r.deletedID = eventID
+	return r.deleteErr
+}
 
 type supplierBalanceSourceStub struct {
 	providers []SupplierBalanceProvider
@@ -118,6 +124,30 @@ func (s *supplierBalanceSourceStub) FetchBalance(_ context.Context, provider Sup
 		return decimal.Zero, err
 	}
 	return s.balances[provider.ID], nil
+}
+
+func TestSupplierBalanceAlertServiceDeletesEvent(t *testing.T) {
+	repo := &supplierBalanceAlertRepoStub{}
+	svc := NewSupplierBalanceAlertService(repo, nil, nil)
+
+	if err := svc.DeleteEvent(context.Background(), 12); err != nil {
+		t.Fatalf("DeleteEvent returned error: %v", err)
+	}
+	if repo.deletedID != 12 {
+		t.Fatalf("deleted event ID = %d, want 12", repo.deletedID)
+	}
+}
+
+func TestSupplierBalanceAlertServiceRejectsInvalidEventID(t *testing.T) {
+	repo := &supplierBalanceAlertRepoStub{}
+	svc := NewSupplierBalanceAlertService(repo, nil, nil)
+
+	if err := svc.DeleteEvent(context.Background(), 0); !errors.Is(err, ErrSupplierBalanceAlertInvalid) {
+		t.Fatalf("DeleteEvent error = %v, want %v", err, ErrSupplierBalanceAlertInvalid)
+	}
+	if repo.deletedID != 0 {
+		t.Fatalf("deleted event ID = %d, want no repository call", repo.deletedID)
+	}
 }
 
 type supplierBalanceDispatcherStub struct {

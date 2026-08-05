@@ -81,6 +81,13 @@ func (s *SupplierBalanceAlertService) ListEvents(ctx context.Context, params Sup
 	return s.repo.ListEvents(ctx, params)
 }
 
+func (s *SupplierBalanceAlertService) DeleteEvent(ctx context.Context, eventID int64) error {
+	if s == nil || s.repo == nil || eventID <= 0 {
+		return ErrSupplierBalanceAlertInvalid
+	}
+	return s.repo.DeleteEvent(ctx, eventID)
+}
+
 // RunNow 执行一轮完整扫描。同一实例同时只允许一个扫描任务运行。
 func (s *SupplierBalanceAlertService) RunNow(ctx context.Context) (SupplierBalanceAlertScanResult, error) {
 	result := SupplierBalanceAlertScanResult{StartedAt: time.Now(), Providers: make([]SupplierBalanceAlertScanProviderResult, 0)}

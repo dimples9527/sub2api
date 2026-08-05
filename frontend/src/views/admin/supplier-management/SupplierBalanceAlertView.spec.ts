@@ -26,6 +26,22 @@ describe('SupplierBalanceAlertView', () => {
     expect(source).toContain('last_scan_status')
   })
 
+  it('provides resolved-event deletion with an active-event guard', () => {
+    expect(source).toContain('deleteSupplierBalanceAlertEvent')
+    expect(source).toContain('删除余额预警事件')
+    expect(source).toContain("row.status === 'resolved'")
+    expect(source).toContain(":disabled=\"row.status !== 'resolved' || deletingEventId !== null\"")
+    expect(source).toContain('window.confirm')
+    expect(source).toContain('if (!(await loadEvents())) return')
+    expect(source).toContain('Math.ceil(eventTotal.value / eventPageSize.value)')
+  })
+
+  it('does not report a scan as fully refreshed when event loading fails', () => {
+    expect(source).toContain('const [configResult, eventsLoaded]')
+    expect(source).toContain('if (!eventsLoaded) return false')
+    expect(source).toContain('if (!(await loadAll())) return')
+  })
+
   it('keeps manual close guarded and uses the global success toast after closing', () => {
     const closeStart = source.indexOf('function closeConfigDialog')
     const saveStart = source.indexOf('async function saveConfig')

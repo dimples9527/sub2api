@@ -78,11 +78,33 @@ func (h *SupplierBalanceAlertHandler) ListEvents(c *gin.Context) {
 	response.Paginated(c, result.Items, result.Total, result.Page, result.PageSize)
 }
 
+func (h *SupplierBalanceAlertHandler) DeleteEvent(c *gin.Context) {
+	eventID, ok := parseSupplierBalanceAlertEventPathID(c)
+	if !ok {
+		return
+	}
+	if err := h.service.DeleteEvent(c.Request.Context(), eventID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"event_id": eventID})
+}
+
 func parseSupplierBalanceAlertPathID(c *gin.Context, name string) (int64, bool) {
 	raw := strings.TrimSpace(c.Param(name))
 	id, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || id <= 0 {
 		response.ErrorFrom(c, infraerrors.BadRequest("INVALID_SUPPLIER_ID", "供应商 ID 无效"))
+		return 0, false
+	}
+	return id, true
+}
+
+func parseSupplierBalanceAlertEventPathID(c *gin.Context) (int64, bool) {
+	raw := strings.TrimSpace(c.Param("id"))
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id <= 0 {
+		response.ErrorFrom(c, infraerrors.BadRequest("INVALID_EVENT_ID", "事件 ID 无效"))
 		return 0, false
 	}
 	return id, true

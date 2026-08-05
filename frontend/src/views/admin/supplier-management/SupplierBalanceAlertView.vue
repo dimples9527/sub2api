@@ -145,6 +145,18 @@
         <template #cell-balance="{ row }">{{ formatBalance(row.balance) }}</template>
         <template #cell-threshold="{ row }">{{ formatBalance(row.threshold) }}</template>
         <template #cell-observed_at="{ row }">{{ formatDateTime(row.observed_at) }}</template>
+        <template #cell-actions="{ row }">
+          <button
+            class="sp-button small"
+            :class="row.status === 'resolved' ? 'danger' : 'ghost'"
+            type="button"
+            :disabled="row.status !== 'resolved' || deletingEventId !== null"
+            :title="row.status === 'resolved' ? '删除余额预警事件' : '活动中的事件需等待余额恢复后才能删除'"
+            @click="deleteEvent(row)"
+          >
+            {{ deletingEventId === row.id ? '删除中…' : row.status === 'resolved' ? '删除' : '等待恢复' }}
+          </button>
+        </template>
         <template #empty>
           <div class="sp-panel-body sp-empty-state">暂无余额预警事件。</div>
         </template>
@@ -206,6 +218,7 @@ import type { Column } from '@/components/common/types'
 import {
   listSupplierBalanceAlertConfigs,
   listSupplierBalanceAlertEvents,
+  deleteSupplierBalanceAlertEvent,
   scanSupplierBalanceAlerts,
   updateSupplierBalanceAlertConfig,
   type SupplierBalanceAlertConfig,
@@ -230,6 +243,7 @@ const savingProviderId = ref<number | null>(null)
 const eventPage = ref(1)
 const eventPageSize = ref(10)
 const eventTotal = ref(0)
+const deletingEventId = ref<number | null>(null)
 const eventTypeFilter = ref<string | number | boolean | null>(null)
 const eventStatusFilter = ref<string | number | boolean | null>(null)
 const configDialogVisible = ref(false)
@@ -259,6 +273,7 @@ const eventColumns: Column[] = [
   { key: 'balance', label: '观测余额' },
   { key: 'threshold', label: '阈值' },
   { key: 'observed_at', label: '发生时间' },
+  { key: 'actions', label: '操作' },
 ]
 
 const eventTypeOptions: SelectOption[] = [
@@ -275,24 +290,27 @@ const enabledConfigCount = computed(() => configs.value.filter((item) => item.en
 const activeLowCount = computed(() => configs.value.filter((item) => isActiveLowConfig(item)).length)
 const scanFailureCount = computed(() => configs.value.filter((item) => item.last_scan_status === 'error').length)
 
-async function loadAll(): Promise<void> {
+async function loadAll(): Promise<boolean> {
   loading.value = true
   error.value = ''
   try {
-    const [configResult] = await Promise.all([
+    const [configResult, eventsLoaded] = await Promise.all([
       listSupplierBalanceAlertConfigs(),
       loadEvents(),
     ])
     configs.value = configResult.items ?? []
+    if (!eventsLoaded) return false
     lastLoadedAt.value = new Date().toISOString()
+    return true
   } catch (err) {
     error.value = extractApiErrorMessage(err, '加载余额预警数据失败')
+    return false
   } finally {
     loading.value = false
   }
 }
 
-async function loadEvents(): Promise<void> {
+async function loadEvents(): Promise<boolean> {
   eventsLoading.value = true
   try {
     const params: SupplierBalanceAlertEventListParams = {
@@ -304,10 +322,38 @@ async function loadEvents(): Promise<void> {
     const result = await listSupplierBalanceAlertEvents(params)
     events.value = result.items ?? []
     eventTotal.value = result.total ?? 0
+    return true
   } catch (err) {
     error.value = extractApiErrorMessage(err, '加载余额预警事件失败')
+    return false
   } finally {
     eventsLoading.value = false
+  }
+}
+
+async function deleteEvent(event: SupplierBalanceAlertEvent): Promise<void> {
+  if (deletingEventId.value !== null) return
+  if (event.status !== 'resolved') {
+    error.value = '活动中的余额预警事件不能删除，请等待余额恢复后再删除'
+    return
+  }
+  if (!window.confirm(`确认删除「${event.provider_name}」的${eventTypeLabel(event.event_type)}事件？删除后无法恢复。`)) return
+
+  deletingEventId.value = event.id
+  error.value = ''
+  try {
+    await deleteSupplierBalanceAlertEvent(event.id)
+    if (!(await loadEvents())) return
+    const maxPage = Math.max(1, Math.ceil(eventTotal.value / eventPageSize.value))
+    if (eventPage.value > maxPage) {
+      eventPage.value = maxPage
+      if (!(await loadEvents())) return
+    }
+    appStore.showSuccess('余额预警事件已删除')
+  } catch (err) {
+    error.value = extractApiErrorMessage(err, '删除余额预警事件失败')
+  } finally {
+    deletingEventId.value = null
   }
 }
 
@@ -317,7 +363,7 @@ async function runScan(): Promise<void> {
   scanResult.value = null
   try {
     scanResult.value = await scanSupplierBalanceAlerts()
-    await loadAll()
+    if (!(await loadAll())) return
     appStore.showSuccess(scanSummary(scanResult.value))
   } catch (err) {
     error.value = extractApiErrorMessage(err, '手动扫描余额失败')

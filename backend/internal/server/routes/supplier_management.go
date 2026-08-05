@@ -44,6 +44,7 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 			balanceAlert.PUT("/configs/:provider_id", h.Admin.SupplierBalanceAlert.UpdateConfig)
 			balanceAlert.POST("/scan", h.Admin.SupplierBalanceAlert.Scan)
 			balanceAlert.GET("/events", h.Admin.SupplierBalanceAlert.ListEvents)
+			balanceAlert.DELETE("/events/:id", h.Admin.SupplierBalanceAlert.DeleteEvent)
 		}
 
 		notificationChannels := supplier.Group("/notification-channels")

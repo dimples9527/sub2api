@@ -27,13 +27,14 @@ SELECT COALESCE(c.id, 0), p.id, p.code, p.name, p.provider_type, p.enabled,
        COALESCE(c.last_scan_status, 'never'), COALESCE(c.last_scan_error, ''),
        COALESCE(c.created_at, p.created_at), COALESCE(c.updated_at, p.updated_at)
 FROM supplier_providers p
-LEFT JOIN supplier_balance_alert_configs c ON c.provider_id = p.id`
+LEFT JOIN supplier_balance_alert_configs c ON c.provider_id = p.id
+WHERE p.deleted_at IS NULL`
 
 func (r *supplierBalanceAlertRepository) ListConfigs(ctx context.Context, providerID int64) ([]service.SupplierBalanceAlertConfig, error) {
 	query := supplierBalanceAlertConfigSelect
 	args := make([]any, 0, 1)
 	if providerID > 0 {
-		query += " WHERE p.id = $1"
+		query += " AND p.id = $1"
 		args = append(args, providerID)
 	}
 	query += " ORDER BY p.sort_order ASC, p.id ASC"
@@ -57,7 +58,7 @@ func (r *supplierBalanceAlertRepository) ListConfigs(ctx context.Context, provid
 }
 
 func (r *supplierBalanceAlertRepository) GetConfig(ctx context.Context, providerID int64) (*service.SupplierBalanceAlertConfig, error) {
-	item, err := scanSupplierBalanceAlertConfig(r.db.QueryRowContext(ctx, supplierBalanceAlertConfigSelect+" WHERE p.id = $1", providerID))
+	item, err := scanSupplierBalanceAlertConfig(r.db.QueryRowContext(ctx, supplierBalanceAlertConfigSelect+" AND p.id = $1", providerID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, service.ErrSupplierBalanceAlertConfigNotFound
 	}
@@ -220,6 +221,49 @@ func (r *supplierBalanceAlertRepository) ListEvents(ctx context.Context, params 
 		return service.SupplierBalanceAlertEventListResult{}, fmt.Errorf("遍历供应商余额预警事件失败: %w", err)
 	}
 	return service.SupplierBalanceAlertEventListResult{Items: items, Total: total, Page: page, PageSize: pageSize}, nil
+}
+
+func (r *supplierBalanceAlertRepository) DeleteEvent(ctx context.Context, eventID int64) error {
+	if eventID <= 0 {
+		return service.ErrSupplierBalanceAlertInvalid
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("开启删除供应商余额预警事件事务失败: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var status string
+	err = tx.QueryRowContext(ctx, `SELECT status FROM supplier_balance_alert_events WHERE id = $1 FOR UPDATE`, eventID).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return service.ErrSupplierBalanceAlertEventNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("查询供应商余额预警事件状态失败: %w", err)
+	}
+	if status == service.SupplierBalanceAlertEventActive {
+		return service.ErrSupplierBalanceAlertEventActive
+	}
+	if status != service.SupplierBalanceAlertEventResolved {
+		return service.ErrSupplierBalanceAlertEventNotFound
+	}
+
+	result, err := tx.ExecContext(ctx, `DELETE FROM supplier_balance_alert_events WHERE id = $1 AND status = 'resolved'`, eventID)
+	if err != nil {
+		return fmt.Errorf("删除供应商余额预警事件失败: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("确认删除供应商余额预警事件结果失败: %w", err)
+	}
+	if affected == 0 {
+		return service.ErrSupplierBalanceAlertEventNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("提交删除供应商余额预警事件事务失败: %w", err)
+	}
+	return nil
 }
 
 type supplierBalanceAlertScanner interface {
