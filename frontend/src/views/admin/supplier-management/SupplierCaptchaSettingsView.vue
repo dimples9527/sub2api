@@ -17,7 +17,6 @@
     </section>
 
     <div v-if="error" class="sp-alert sp-error-line">{{ error }}</div>
-    <div v-if="success" class="sp-alert sp-success-line">{{ success }}</div>
 
     <section class="sp-panel">
       <header class="sp-panel-head">
@@ -118,11 +117,12 @@ import {
   type SupplierCaptchaSettings,
 } from '@/api/admin/supplierCaptchaSettings'
 import { extractApiErrorMessage } from '@/utils/apiError'
+import { useAppStore } from '@/stores/app'
 
 const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
-const success = ref('')
+const appStore = useAppStore()
 
 const form = reactive({
   provider: '2captcha',
@@ -141,7 +141,6 @@ function applySettings(settings: SupplierCaptchaSettings) {
 async function loadSettings() {
   loading.value = true
   error.value = ''
-  success.value = ''
   try {
     const settings = await supplierCaptchaSettingsAPI.get()
     applySettings(settings)
@@ -155,7 +154,6 @@ async function loadSettings() {
 async function saveSettings() {
   saving.value = true
   error.value = ''
-  success.value = ''
   try {
     const settings = await supplierCaptchaSettingsAPI.update({
       provider: form.provider || '2captcha',
@@ -163,7 +161,7 @@ async function saveSettings() {
       endpoint: form.endpoint.trim(),
     })
     applySettings(settings)
-    success.value = '打码配置已保存'
+    appStore.showSuccess('打码配置已保存')
   } catch (e) {
     error.value = extractApiErrorMessage(e, '保存打码配置失败')
   } finally {
@@ -177,7 +175,6 @@ async function clearApiKey() {
   }
   saving.value = true
   error.value = ''
-  success.value = ''
   try {
     const settings = await supplierCaptchaSettingsAPI.update({
       provider: form.provider || '2captcha',
@@ -185,7 +182,7 @@ async function clearApiKey() {
       clear_api_key: true,
     })
     applySettings(settings)
-    success.value = 'API Key 已清空'
+    appStore.showSuccess('API Key 已清空')
   } catch (e) {
     error.value = extractApiErrorMessage(e, '清空 API Key 失败')
   } finally {
@@ -261,12 +258,4 @@ onMounted(() => {
   line-height: 1.55;
 }
 
-.sp-success-line {
-  color: #047857;
-  background: #ecfdf5;
-  border: 1px solid #a7f3d0;
-  border-radius: 0.75rem;
-  padding: 0.75rem 1rem;
-  margin-bottom: 1rem;
-}
 </style>
