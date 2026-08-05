@@ -246,9 +246,14 @@
             </template>
 
             <template #cell-raw_status="{ row: group }">
-              <span class="sp-status" :class="upstreamStatusTone(group)">
-                <i></i>{{ upstreamStatusLabel(group) }}
-              </span>
+              <div class="sp-status-stack">
+                <span class="sp-status" :class="upstreamStatusTone(group)">
+                  <i></i>{{ upstreamStatusLabel(group) }}
+                </span>
+                <small v-if="!group.active && group.inactive_at" class="sp-sub">
+                  {{ formatTime(group.inactive_at) }}
+                </small>
+              </div>
             </template>
 
             <template #cell-monitor_trend="{ row: group }">
@@ -341,19 +346,17 @@
 
             <template #cell-actions="{ row: group }">
               <div class="sp-row-actions" @click.stop>
-                <template v-if="!group.active">
-                  <button
-                    type="button"
-                    class="sp-row-action danger"
-                    :disabled="deletingGroupID === group.id || !canDeleteSupplierGroup(group)"
-                    :title="supplierGroupDeleteHint(group)"
-                    @click="openDeleteGroupDialog(group)"
-                  >
-                    <Icon name="x" size="sm" />
-                    <span>{{ deletingGroupID === group.id ? '删除中' : '删除记录' }}</span>
-                  </button>
-                </template>
-                <template v-else>
+                <button
+                  type="button"
+                  class="sp-row-action danger"
+                  :disabled="deletingGroupID === group.id"
+                  title="删除分组记录"
+                  @click="openDeleteGroupDialog(group)"
+                >
+                  <Icon name="x" size="sm" />
+                  <span>{{ deletingGroupID === group.id ? '删除中' : '删除记录' }}</span>
+                </button>
+                <template v-if="group.active">
                 <template v-if="!group.local_group_id">
                   <button type="button" class="sp-row-action primary" title="匹配本地分组" @click="openMappingDialog(group)">
                     <Icon name="link" size="sm" />
@@ -677,8 +680,8 @@
 
     <ConfirmDialog
       :show="Boolean(deleteTarget)"
-      title="删除失效分组记录"
-      :message="`仅删除本地保存的失效上游分组记录，不会删除上游系统内容。删除 ${deleteTarget?.name || deleteTarget?.upstream_group_key || '该分组'} 后不可恢复。`"
+      title="删除分组记录"
+      :message="`仅删除本地保存的上游分组记录，不会删除上游系统内容。删除后会解除相关上游账号的分组引用，且无法恢复。`"
       confirm-text="删除记录"
       cancel-text="取消"
       danger
@@ -1255,23 +1258,7 @@ async function loadGroups() {
   }
 }
 
-function canDeleteSupplierGroup(group: SupplierProviderGroup): boolean {
-  return !group.active
-    && !group.local_group_id
-    && !group.rate_guard_selected
-    && group.account_count === 0
-}
-
-function supplierGroupDeleteHint(group: SupplierProviderGroup): string {
-  if (canDeleteSupplierGroup(group)) return '删除失效分组记录'
-  if (group.local_group_id) return '该分组已关联本地分组，不能删除'
-  if (group.rate_guard_selected) return '该分组仍参与倍率守护，不能删除'
-  if (group.account_count > 0) return '该分组仍有有效上游账号，不能删除'
-  return '仅可删除失效分组记录'
-}
-
 function openDeleteGroupDialog(group: SupplierProviderGroup) {
-  if (!canDeleteSupplierGroup(group)) return
   deleteTarget.value = group
 }
 
@@ -1287,7 +1274,7 @@ async function confirmDeleteGroup() {
       selected.value = null
     }
     await loadGroups()
-    appStore.showSuccess('失效分组记录已删除')
+    appStore.showSuccess('分组记录已删除')
   } catch (err) {
     appStore.showError(errorMessage(err, '删除分组记录失败'))
   } finally {
@@ -1604,7 +1591,12 @@ function groupPlatform(platform?: string): GroupPlatform | undefined {
 }
 
 function upstreamStatusLabel(group: SupplierProviderGroup): string {
-  return group.raw_status?.trim() || (group.active ? '有效' : '失效')
+  if (!group.active) return '已失效'
+  const rawStatus = group.raw_status?.trim()
+  if (!rawStatus) return '正常'
+  const status = rawStatus.toLowerCase()
+  if (['active', 'enabled', 'normal', 'success', '有效'].includes(status)) return '正常'
+  return rawStatus
 }
 
 function upstreamStatusTone(group: SupplierProviderGroup): string {

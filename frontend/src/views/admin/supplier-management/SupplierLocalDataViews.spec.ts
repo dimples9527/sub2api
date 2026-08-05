@@ -1345,13 +1345,14 @@ describe('supplier local data views component usage', () => {
 		expect(mobileStyles).not.toContain('.sp-summary-grid { grid-template-columns: 1fr; }')
   })
 
-  it('shows only groups available in the latest collection', () => {
+  it('显示上游分组记录及其同步状态', () => {
     expect(groupsSource).not.toContain('activeFilter')
     expect(groupsSource).not.toContain("{ key: 'active'")
     expect(groupsSource).not.toContain('selected.active')
     expect(groupsSource).not.toContain('inactiveGroupCount')
     expect(groupsSource).not.toContain('失效记录')
-    expect(groupsSource).toContain('active: true')
+    expect(groupsSource).toContain('group.active')
+    expect(groupsSource).toContain('group.inactive_at')
   })
 
   it('uses existing dialogs and APIs for local-group operations', () => {

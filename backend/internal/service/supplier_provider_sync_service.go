@@ -15,8 +15,8 @@ import (
 var ErrSupplierProviderSyncConflict = infraerrors.Conflict("SUPPLIER_PROVIDER_SYNC_CONFLICT", "supplier provider sync already running")
 var ErrSupplierProviderGroupNotFound = infraerrors.NotFound("SUPPLIER_PROVIDER_GROUP_NOT_FOUND", "supplier provider group not found")
 var ErrSupplierLocalGroupNotFound = infraerrors.NotFound("SUPPLIER_LOCAL_GROUP_NOT_FOUND", "active local group not found")
-var ErrSupplierProviderGroupDeleteConflict = infraerrors.Conflict("SUPPLIER_PROVIDER_GROUP_DELETE_CONFLICT", "仅可删除已失效且未参与倍率守护的分组记录")
-var ErrSupplierProviderAccountDeleteConflict = infraerrors.Conflict("SUPPLIER_PROVIDER_ACCOUNT_DELETE_CONFLICT", "仅可删除未匹配本地账号的已删除上游账号或上游分组已删除的账号记录")
+var ErrSupplierProviderGroupDeleteConflict = infraerrors.Conflict("SUPPLIER_PROVIDER_GROUP_DELETE_CONFLICT", "供应商上游分组记录不存在或已删除")
+var ErrSupplierProviderAccountDeleteConflict = infraerrors.Conflict("SUPPLIER_PROVIDER_ACCOUNT_DELETE_CONFLICT", "供应商上游账号记录不存在或已删除")
 
 type SupplierProviderAccountBindingGroup struct {
 	ID               int64   `json:"id"`
@@ -460,17 +460,17 @@ type SupplierProviderCostBackfillItem struct {
 
 // SupplierProviderCostBackfillResult 是按时间范围回补上游成本的汇总。
 type SupplierProviderCostBackfillResult struct {
-	StartDate     string                            `json:"start_date"`
-	EndDate       string                            `json:"end_date"`
-	ProviderID    int64                             `json:"provider_id,omitempty"`
-	ProviderCount int                               `json:"provider_count"`
-	DayCount      int                               `json:"day_count"`
-	SuccessCount  int                               `json:"success_count"`
-	FailedCount   int                               `json:"failed_count"`
-	SkippedCount  int                               `json:"skipped_count"`
+	StartDate     string                             `json:"start_date"`
+	EndDate       string                             `json:"end_date"`
+	ProviderID    int64                              `json:"provider_id,omitempty"`
+	ProviderCount int                                `json:"provider_count"`
+	DayCount      int                                `json:"day_count"`
+	SuccessCount  int                                `json:"success_count"`
+	FailedCount   int                                `json:"failed_count"`
+	SkippedCount  int                                `json:"skipped_count"`
 	Items         []SupplierProviderCostBackfillItem `json:"items"`
-	StartedAt     time.Time                         `json:"started_at"`
-	FinishedAt    time.Time                         `json:"finished_at"`
+	StartedAt     time.Time                          `json:"started_at"`
+	FinishedAt    time.Time                          `json:"finished_at"`
 }
 
 // BackfillCosts 按闭区间日期从上游拉取成本并写入本地 daily_stats。
