@@ -919,7 +919,7 @@ const platformFilter = ref('')
 const matchStatusFilter = ref('')
 const rateStatusFilter = ref('')
 const groupScope = ref<GroupScope>('active')
-const keyStatusFilter = ref<KeyStatusFilter>('')
+const keyStatusFilter = ref<KeyStatusFilter>('created')
 let searchTimer: number | undefined
 let monitorTrendRequestID = 0
 let healthTrendRequestID = 0
@@ -1013,7 +1013,7 @@ const canResetFilters = computed(() => (
   || matchStatusFilter.value !== ''
   || rateStatusFilter.value !== ''
   || groupScope.value !== 'active'
-  || keyStatusFilter.value !== ''
+  || keyStatusFilter.value !== 'created'
 ))
 const matchedGroupRate = computed(() => percentage(groupSummary.value.linked_group_count, groupSummary.value.group_count))
 const unmatchedGroupRate = computed(() => percentage(groupSummary.value.unlinked_group_count, groupSummary.value.group_count))
@@ -1115,7 +1115,7 @@ function resetGroupFilters() {
   matchStatusFilter.value = ''
   rateStatusFilter.value = ''
   groupScope.value = 'active'
-  keyStatusFilter.value = ''
+  keyStatusFilter.value = 'created'
   page.value = 1
   void nextTick(() => {
     suppressFilterWatch = false
@@ -1198,9 +1198,10 @@ function applyAttentionShortcut(shortcut: AttentionShortcut) {
 }
 
 function applyCreatedKeyShortcut() {
+  const active = isCreatedKeyShortcutActive.value
   suppressFilterWatch = true
   groupScope.value = 'active'
-  keyStatusFilter.value = 'created'
+  keyStatusFilter.value = active ? '' : 'created'
   matchStatusFilter.value = ''
   rateStatusFilter.value = ''
   page.value = 1

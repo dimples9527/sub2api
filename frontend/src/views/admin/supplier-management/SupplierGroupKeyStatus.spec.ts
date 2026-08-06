@@ -32,4 +32,20 @@ describe('供应商分组密钥状态展示', () => {
     expect(source).toContain('key_status: keyStatusFilter.value || undefined')
     expect(source).toContain('已创建密钥')
   })
+
+  it('默认仅显示已创建密钥分组，重置后恢复默认筛选', () => {
+    expect(source).toContain("const keyStatusFilter = ref<KeyStatusFilter>('created')")
+    const resetGroupFilters = source.match(/function resetGroupFilters\(\) \{[\s\S]*?\n\}/)?.[0] ?? ''
+    expect(resetGroupFilters).toContain("keyStatusFilter.value = 'created'")
+    expect(source).toContain("|| keyStatusFilter.value !== 'created'")
+  })
+
+  it('已创建密钥快捷入口支持再次点击取消筛选', () => {
+    const createdKeyShortcut = source.match(/function applyCreatedKeyShortcut\(\) \{[\s\S]*?\n\}/)?.[0] ?? ''
+    expect(createdKeyShortcut).toContain('const active = isCreatedKeyShortcutActive.value')
+    expect(createdKeyShortcut).toContain("keyStatusFilter.value = active ? '' : 'created'")
+    expect(createdKeyShortcut).toContain("groupScope.value = 'active'")
+    expect(createdKeyShortcut).toContain("matchStatusFilter.value = ''")
+    expect(createdKeyShortcut).toContain("rateStatusFilter.value = ''")
+  })
 })
