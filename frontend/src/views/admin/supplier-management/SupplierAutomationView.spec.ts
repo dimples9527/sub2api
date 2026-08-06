@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+﻿import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -284,7 +284,7 @@ describe('SupplierAutomationView edit dialog', () => {
     )?.[0] || ''
     expect(failedStageCardStyles).toContain('border-left: 3px solid var(--sp-red);')
     expect(failedStageCardStyles).not.toContain('background: var(--sp-result-red-soft);')
-    expect(failedStageCardStyles).not.toContain('padding: 8px 10px;')
+    expect(failedStageCardStyles).not.toContain('padding: 6px 10px;')
   })
   it('adds clear spacing between flat result detail sections', () => {
     expect(supplierAutomationSource).toContain('padding: 18px 0')
@@ -469,11 +469,55 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('.sp-health-guard-account-source')
   })
 
+  it('shows upstream account rates in the health guard account workspace list', () => {
+    expect(supplierAutomationSource).toContain('healthGuardAccountRateText(mapping)')
+    expect(supplierAutomationSource).toContain('healthGuardAccountRateTitle(mapping)')
+    expect(supplierAutomationSource).toContain('sp-health-guard-account-rate')
+    expect(supplierAutomationSource).toContain('source.rate_multiplier')
+    expect(supplierAutomationSource).toContain("`×${formatRate(rate)}`")
+    expect(supplierAutomationSource).toContain("return `${base} · ×${formatRate(rate)}`")
+    expect(supplierAutomationSource).toContain('platformTextClass(mapping.platform)')
+    expect(supplierAutomationSource).toContain('border: 1px solid color-mix(in srgb, currentColor 22%, var(--sp-line))')
+    expect(supplierAutomationSource).toContain('.sp-health-guard-account-rate.empty')
+    expect(supplierAutomationSource).toContain('.sp-health-guard-account-rate.unavailable')
+  })
+
   it('applies the automation dialog palette to the teleported health guard workspace', () => {
     expect(supplierAutomationSource).toContain(':global(.modal-content:has(.sp-health-guard-account-dialog))')
     expect(supplierAutomationSource).toContain(':global(.dark .modal-content:has(.sp-health-guard-account-dialog))')
     expect(supplierAutomationSource).toContain(':global(.modal-content:has(.sp-health-guard-account-dialog) .modal-body)')
     expect(supplierAutomationSource).toContain(':global(.modal-content:has(.sp-health-guard-account-dialog) .modal-footer)')
+  })
+
+  it('lets the mobile health guard account dialog scroll as a single body layer', () => {
+    const mobileBreakpoint = supplierAutomationSource.indexOf('@media (max-width: 760px)')
+    expect(mobileBreakpoint).toBeGreaterThan(-1)
+    const mobileStyles = supplierAutomationSource.slice(mobileBreakpoint)
+    expect(mobileStyles).toContain(':global(.modal-content:has(.sp-health-guard-account-dialog))')
+    expect(mobileStyles).toContain('height: min(92dvh, calc(100dvh - 12px));')
+    expect(mobileStyles).toContain('overflow-y: auto;')
+    expect(mobileStyles).toContain('.sp-health-guard-account-dialog')
+    expect(mobileStyles).toContain('height: auto;')
+    expect(mobileStyles).toContain('.sp-health-guard-account-list')
+    expect(mobileStyles).toContain('overflow: visible;')
+    expect(mobileStyles).not.toContain('flex: 1 1 40vh;')
+    expect(mobileStyles).not.toContain('max-height: min(22vh, 160px);')
+  })
+
+  it('compacts the mobile health guard account filter row spacing', () => {
+    expect(supplierAutomationSource).toContain('sp-health-guard-account-filter-actions')
+    expect(supplierAutomationSource).toContain('sp-health-guard-account-search')
+    const mobileBreakpoint = supplierAutomationSource.indexOf('@media (max-width: 760px)')
+    const mobileStyles = supplierAutomationSource.slice(mobileBreakpoint)
+    expect(mobileStyles).toContain('.sp-health-guard-account-filter-actions')
+    expect(mobileStyles).toContain('justify-content: space-between;')
+    expect(mobileStyles).toContain('min-height: 34px;')
+    expect(mobileStyles).toContain('min-height: 32px;')
+    expect(mobileStyles).toContain('padding: 6px 10px;')
+    expect(mobileStyles).toContain('gap: 6px;')
+    expect(mobileStyles).toContain('align-content: start;')
+    expect(mobileStyles).toContain('.sp-health-guard-selected-toggle')
+    expect(mobileStyles).not.toContain('max-height: min(22vh, 160px);')
   })
 
   it('validates checked accounts and effective models before saving or running', () => {

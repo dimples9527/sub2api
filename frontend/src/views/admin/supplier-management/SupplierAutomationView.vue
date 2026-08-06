@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <SupplierModuleLayout>
     <div class="sp-automation-console">
       <header class="sp-page-head sp-console-head">
@@ -2125,7 +2125,7 @@ function intervalSecondsToCron(seconds: number): string | null {
 .sp-overview-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  gap: 8px;
   background: transparent;
 }
 
@@ -2191,7 +2191,7 @@ function intervalSecondsToCron(seconds: number): string | null {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
 }
 
 .sp-metric-label {
@@ -2622,7 +2622,7 @@ function intervalSecondsToCron(seconds: number): string | null {
 .sp-form-section-head {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: 8px;
 }
 
 .sp-form-section-head > span {
@@ -3055,7 +3055,7 @@ function intervalSecondsToCron(seconds: number): string | null {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
 }
 
 .sp-provider-head {
@@ -3365,7 +3365,7 @@ function intervalSecondsToCron(seconds: number): string | null {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   min-height: 0;
   height: 100%;
   max-height: none;
@@ -3383,7 +3383,7 @@ function intervalSecondsToCron(seconds: number): string | null {
 
 .sp-health-guard-platform-models {
   flex: 0 0 auto;
-  padding: 12px 14px;
+  padding: 8px 12px;
   background: color-mix(in srgb, var(--sp-blue) 3%, var(--sp-panel));
 }
 
@@ -3398,13 +3398,13 @@ function intervalSecondsToCron(seconds: number): string | null {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
 }
 
 .sp-health-guard-platform-model-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px 16px;
+  gap: 6px 12px;
   margin-top: 10px;
 }
 
@@ -3412,7 +3412,7 @@ function intervalSecondsToCron(seconds: number): string | null {
   display: grid;
   grid-template-columns: minmax(110px, 0.62fr) minmax(180px, 1.38fr);
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   border-top: 1px solid var(--sp-line);
   padding-top: 10px;
 }
@@ -3470,8 +3470,8 @@ function intervalSecondsToCron(seconds: number): string | null {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
+  gap: 8px;
+  padding: 8px 12px;
 }
 
 .sp-health-guard-account-filters {
@@ -3870,7 +3870,7 @@ function intervalSecondsToCron(seconds: number): string | null {
 
 .sp-health-guard-items {
   display: grid;
-  gap: 12px;
+  gap: 8px;
 }
 
 .sp-health-guard-item {
@@ -3884,9 +3884,9 @@ function intervalSecondsToCron(seconds: number): string | null {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   border-bottom: 1px solid var(--sp-line);
-  padding: 12px 14px;
+  padding: 8px 12px;
   background: color-mix(in srgb, var(--sp-blue) 3%, var(--sp-panel));
 }
 
@@ -3998,7 +3998,7 @@ function intervalSecondsToCron(seconds: number): string | null {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   padding-bottom: 10px;
 }
 
@@ -4220,7 +4220,7 @@ function intervalSecondsToCron(seconds: number): string | null {
 
 
   .sp-panel-head {
-    gap: 12px;
+    gap: 8px;
     padding: 14px;
   }
 
@@ -4230,7 +4230,7 @@ function intervalSecondsToCron(seconds: number): string | null {
   }
 
   .sp-history-toolbar {
-    padding: 12px 14px;
+    padding: 8px 12px; background: color-mix(in srgb, var(--sp-blue) 5%, var(--sp-panel)); border-left: 3px solid var(--sp-blue); background: color-mix(in srgb, var(--sp-blue) 5%, var(--sp-panel)); border-left: 3px solid var(--sp-blue); background: color-mix(in srgb, var(--sp-blue) 5%, var(--sp-panel)); border-left: 3px solid var(--sp-blue);
   }
 
 
@@ -4297,7 +4297,7 @@ function intervalSecondsToCron(seconds: number): string | null {
   }
 
   .sp-health-guard-selection-summary article {
-    padding: 8px 10px;
+    padding: 6px 10px;
   }
 
   .sp-health-guard-selection-summary article strong {
