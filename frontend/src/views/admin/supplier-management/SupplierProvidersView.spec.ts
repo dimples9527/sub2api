@@ -412,6 +412,18 @@ describe('SupplierProvidersView payload normalization', () => {
     await wrapper.get('tbody tr[data-row-id="1"]').trigger('click')
     expect(wrapper.get('[data-test="supplier-sync-progress"]').text()).toContain('上游登录失败：打码平台超时')
   })
+
+  it('供应商名称按类型展示不同颜色', () => {
+    expect(supplierProvidersSource).toContain('sp-provider-name')
+    expect(supplierProvidersSource).toContain('providerNameTypeClass(provider.provider_type)')
+    expect(supplierProvidersSource).toContain('providerNameTypeStyle(provider.provider_type)')
+    expect(supplierProvidersSource).toContain("sub2api: 'type-sub2api'")
+    expect(supplierProvidersSource).toContain("newapi: 'type-newapi'")
+    expect(supplierProvidersSource).toContain("return normalized ? 'type-random' : 'type-default'")
+    expect(supplierProvidersSource).toContain('function providerNameTypeStyle')
+  })
+
+
   it('uses one unified provider filter card without a repeated page heading', () => {
     expect(supplierProvidersSource).not.toContain('class="sp-page-head"')
     expect(supplierProvidersSource).not.toContain('Provider Operations')

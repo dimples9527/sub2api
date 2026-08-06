@@ -138,6 +138,23 @@
 .sp-table tbody tr.selected { background: color-mix(in srgb, var(--sp-cyan) 7%, var(--sp-panel)); }
 .sp-entity,
 .sp-account-name { color: var(--sp-text); font-size: 0.875rem; font-weight: 600; }
+.sp-provider-name.type-sub2api {
+  color: var(--sp-green);
+}
+
+.sp-provider-name.type-newapi {
+  color: var(--sp-violet);
+}
+
+.sp-provider-name.type-default {
+  color: var(--sp-text);
+}
+
+/* 其他类型颜色由行内 style 注入，这里仅保留字重继承 */
+.sp-provider-name.type-random {
+  font-weight: 600;
+}
+
 .sp-sub,
 .sp-subline { margin-top: 0.25rem; color: var(--sp-muted); font-size: 0.75rem; }
 .sp-num,

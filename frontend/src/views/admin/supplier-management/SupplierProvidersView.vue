@@ -94,7 +94,11 @@
             </button>
           </template>
           <template #cell-name="{ row: provider }">
-            <div class="sp-entity">{{ provider.name }}</div>
+            <div
+              class="sp-entity sp-provider-name"
+              :class="providerNameTypeClass(provider.provider_type)"
+              :style="providerNameTypeStyle(provider.provider_type)"
+            >{{ provider.name }}</div>
             <div class="sp-sub">{{ provider.code }} · {{ provider.provider_type }} · {{ provider.base_url }}</div>
           </template>
           <template #cell-status="{ row: provider }">
@@ -2139,6 +2143,31 @@ function openProviderHomepage(provider: SupplierProvider) {
   window.open(url, '_blank', 'noopener,noreferrer')
 }
 
+const PROVIDER_NAME_TYPE_CLASSES: Record<string, string> = {
+  sub2api: 'type-sub2api',
+  newapi: 'type-newapi',
+}
+
+function providerNameTypeClass(providerType?: string): string {
+  const normalized = providerType?.trim().toLowerCase() || ''
+  if (PROVIDER_NAME_TYPE_CLASSES[normalized]) {
+    return PROVIDER_NAME_TYPE_CLASSES[normalized]
+  }
+  // 未知类型使用随机色类，具体颜色由 providerNameTypeStyle 按类型稳定哈希生成
+  return normalized ? 'type-random' : 'type-default'
+}
+
+function providerNameTypeStyle(providerType?: string): Record<string, string> | undefined {
+  const normalized = providerType?.trim().toLowerCase() || ''
+  if (!normalized || PROVIDER_NAME_TYPE_CLASSES[normalized]) return undefined
+  let hash = 0
+  for (let i = 0; i < normalized.length; i += 1) {
+    hash = ((hash << 5) - hash + normalized.charCodeAt(i)) | 0
+  }
+  const hue = Math.abs(hash) % 360
+  return { color: `hsl(${hue} 62% 42%)` }
+}
+
 function statusTone(provider: SupplierProvider): Tone {
   if (!provider.enabled) return ''
   if (['critical', 'high'].includes(provider.risk_level)) return 'bad'
@@ -2250,6 +2279,7 @@ function errorMessage(err: unknown, fallback: string): string {
   color: var(--sp-amber);
   font-weight: 700;
 }
+
 
 .sp-provider-balance-normal {
   color: var(--sp-cyan);
