@@ -452,43 +452,133 @@
     >
       <div v-if="authLoading && !authStatus" class="sp-alert">正在读取认证缓存与历史记录…</div>
       <template v-else-if="authStatus">
-        <div class="sp-detail-grid">
-          <div class="sp-detail-cell"><span>登录总次数</span><b>{{ authStatus.summary.login_count }}</b></div>
-          <div class="sp-detail-cell"><span>成功 / 失败</span><b>{{ authStatus.summary.login_success_count }} / {{ authStatus.summary.login_failure_count }}</b></div>
-          <div class="sp-detail-cell"><span>缓存命中 / 未命中</span><b>{{ authStatus.summary.cache_hit_count }} / {{ authStatus.summary.cache_miss_count }}</b></div>
-          <div class="sp-detail-cell"><span>最近登录</span><b>{{ formatAuthTime(authStatus.summary.last_login_at) }}</b></div>
-          <div class="sp-detail-cell"><span>最近结果</span><b>{{ authEventLabel(authStatus.summary.last_login_status) }}</b></div>
-          <div class="sp-detail-cell"><span>最近缓存命中</span><b>{{ formatAuthTime(authStatus.summary.last_cache_hit_at) }}</b></div>
-          <div class="sp-detail-cell"><span>Token 缓存</span><b>{{ authCacheLabel(authStatus.cache.status) }}</b></div>
-          <div class="sp-detail-cell"><span>缓存策略</span><b>长期缓存，接口鉴权失败后重登</b></div>
-          <div class="sp-detail-cell"><span>Cookie 会话</span><b>{{ authStatus.cache.cookie_present ? '存在' : '不存在' }}</b></div>
-          <div class="sp-detail-cell"><span>Token 摘要</span><b>{{ authStatus.cache.token_summary || '—' }}</b></div>
-          <div class="sp-detail-cell"><span>Token 长度</span><b>{{ authStatus.cache.token_length || 0 }}</b></div>
-          <div class="sp-detail-cell"><span>登录锁</span><b>{{ authStatus.login_lock.held ? `持有（${formatDuration(authStatus.login_lock.remaining_seconds)}）` : '未持有' }}</b></div>
-          <div class="sp-detail-cell"><span>检查时间</span><b>{{ formatAuthTime(authStatus.checked_at) }}</b></div>
-        </div>
-        <div v-if="authStatus.cache.token_fingerprint" class="sp-alert">Token 指纹：{{ authStatus.cache.token_fingerprint }}</div>
-        <div v-if="authStatus.summary.last_login_error || authStatus.summary.last_cache_error || authStatus.cache.error" class="sp-alert sp-error-line">
-          {{ authStatus.summary.last_login_error || authStatus.summary.last_cache_error || authStatus.cache.error }}
-        </div>
-        <div class="sp-inline">
-          <Select v-model="authEventFilter" class="w-40" :options="authEventOptions" data-test="supplier-auth-event-filter" @update:model-value="reloadAuthHistory" />
-          <button class="sp-button" type="button" data-test="supplier-auth-refresh" :disabled="authLoading" @click="reloadAuthData">{{ authLoading ? '刷新中' : '刷新状态' }}</button>
-        </div>
-        <DataTable :columns="authHistoryColumns" :data="authHistory.items" :loading="authLoading" row-key="id">
-          <template #cell-created_at="{ row }">{{ formatAuthTime(row.created_at) }}</template>
-          <template #cell-event_type="{ row }">{{ authEventLabel(row.event_type) }}</template>
-          <template #cell-source="{ row }">{{ authSourceLabel(row.source) }}</template>
-          <template #cell-status="{ row }"><span class="sp-status" :class="row.status === 'success' ? 'good' : row.status === 'failed' || row.status === 'unavailable' ? 'bad' : 'warn'">{{ authEventLabel(row.status) }}</span></template>
-          <template #cell-duration_ms="{ row }">{{ row.duration_ms }} ms</template>
-          <template #cell-http_status="{ row }">{{ row.http_status || '—' }}</template>
-          <template #cell-error_message="{ row }">{{ row.error_message || '—' }}</template>
-          <template #empty>暂无认证历史</template>
-        </DataTable>
-        <div class="sp-inline">
-          <button class="sp-button small" type="button" data-test="supplier-auth-prev" :disabled="authHistory.page <= 1 || authLoading" @click="changeAuthPage(-1)">上一页</button>
-          <span>第 {{ authHistory.page }} 页 · 共 {{ authHistory.total }} 条</span>
-          <button class="sp-button small" type="button" data-test="supplier-auth-next" :disabled="authHistory.page * authHistory.page_size >= authHistory.total || authLoading" @click="changeAuthPage(1)">下一页</button>
+        <div class="sp-auth-dialog sp-auth-panel">
+          <div class="sp-auth-kpi-grid" role="group" aria-label="认证状态摘要">
+            <article class="sp-auth-kpi tone-blue">
+              <div class="sp-auth-kpi-top">
+                <span>登录总次数</span>
+                <i class="sp-auth-signal" aria-hidden="true"></i>
+              </div>
+              <b>{{ authStatus.summary.login_count }}</b>
+              <small>累计认证尝试</small>
+            </article>
+            <article class="sp-auth-kpi" :class="authLoginToneClass(authStatus.summary)">
+              <div class="sp-auth-kpi-top">
+                <span>成功 / 失败</span>
+                <i class="sp-auth-signal" aria-hidden="true"></i>
+              </div>
+              <b>{{ authStatus.summary.login_success_count }} / {{ authStatus.summary.login_failure_count }}</b>
+              <small>成功率 {{ authRateText(authStatus.summary.login_success_count, authStatus.summary.login_count) }}</small>
+            </article>
+            <article class="sp-auth-kpi tone-violet">
+              <div class="sp-auth-kpi-top">
+                <span>缓存命中 / 未命中</span>
+                <i class="sp-auth-signal" aria-hidden="true"></i>
+              </div>
+              <b>{{ authStatus.summary.cache_hit_count }} / {{ authStatus.summary.cache_miss_count }}</b>
+              <small>命中率 {{ authRateText(authStatus.summary.cache_hit_count, authStatus.summary.cache_hit_count + authStatus.summary.cache_miss_count) }}</small>
+            </article>
+            <article class="sp-auth-kpi" :class="authCacheToneClass(authStatus.cache.status)">
+              <div class="sp-auth-kpi-top">
+                <span>Token 缓存</span>
+                <i class="sp-auth-signal" aria-hidden="true"></i>
+              </div>
+              <b>{{ authCacheLabel(authStatus.cache.status) }}</b>
+              <small>{{ authStatus.cache.cookie_present ? 'Cookie 会话存在' : 'Cookie 会话不存在' }}</small>
+            </article>
+          </div>
+
+          <div class="sp-auth-meta-grid">
+            <div class="sp-auth-meta" :class="authEventToneClass(authStatus.summary.last_login_status)">
+              <span>最近登录</span>
+              <b>{{ formatAuthTime(authStatus.summary.last_login_at) }}</b>
+              <em class="sp-status" :class="authEventTone(authStatus.summary.last_login_status)">{{ authEventLabel(authStatus.summary.last_login_status) }}</em>
+            </div>
+            <div class="sp-auth-meta tone-cyan">
+              <span>最近缓存命中</span>
+              <b>{{ formatAuthTime(authStatus.summary.last_cache_hit_at) }}</b>
+              <em class="sp-status info">长期缓存，鉴权失败后重登</em>
+            </div>
+            <div class="sp-auth-meta" :class="authStatus.login_lock.held ? 'tone-amber' : 'tone-green'">
+              <span>登录锁</span>
+              <b>{{ authStatus.login_lock.held ? `持有（${formatDuration(authStatus.login_lock.remaining_seconds)}）` : '未持有' }}</b>
+              <em class="sp-status" :class="authStatus.login_lock.held ? 'warn' : 'good'">{{ authStatus.login_lock.held ? '互斥中' : '空闲' }}</em>
+            </div>
+            <div class="sp-auth-meta tone-slate">
+              <span>检查时间</span>
+              <b>{{ formatAuthTime(authStatus.checked_at) }}</b>
+              <em class="sp-status">实时快照</em>
+            </div>
+          </div>
+
+          <div class="sp-auth-token-card">
+            <div class="sp-auth-token-main">
+              <span>Token 摘要</span>
+              <b class="sp-auth-token-summary">{{ authStatus.cache.token_summary || '—' }}</b>
+            </div>
+            <div class="sp-auth-token-side">
+              <div>
+                <span>Token 长度</span>
+                <b>{{ authStatus.cache.token_length || 0 }}</b>
+              </div>
+              <div>
+                <span>Cookie 会话</span>
+                <b>
+                  <span class="sp-status" :class="authStatus.cache.cookie_present ? 'good' : 'warn'">
+                    {{ authStatus.cache.cookie_present ? '存在' : '不存在' }}
+                  </span>
+                </b>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="authStatus.cache.token_fingerprint" class="sp-alert sp-auth-fingerprint">Token 指纹：{{ authStatus.cache.token_fingerprint }}</div>
+          <div v-if="authStatus.summary.last_login_error || authStatus.summary.last_cache_error || authStatus.cache.error" class="sp-alert sp-error-line">
+            {{ authStatus.summary.last_login_error || authStatus.summary.last_cache_error || authStatus.cache.error }}
+          </div>
+
+          <div class="sp-auth-history-toolbar">
+            <div class="sp-auth-history-title">
+              <span class="sp-auth-history-dot" aria-hidden="true"></span>
+              <strong>认证历史</strong>
+              <span>共 {{ authHistory.total }} 条</span>
+            </div>
+            <div class="sp-inline sp-auth-history-actions">
+              <Select v-model="authEventFilter" class="w-40" :options="authEventOptions" data-test="supplier-auth-event-filter" @update:model-value="reloadAuthHistory" />
+              <button class="sp-button" type="button" data-test="supplier-auth-refresh" :disabled="authLoading" @click="reloadAuthData">{{ authLoading ? '刷新中' : '刷新状态' }}</button>
+            </div>
+          </div>
+
+          <DataTable :columns="authHistoryColumns" :data="authHistory.items" :loading="authLoading" row-key="id">
+            <template #cell-created_at="{ row }">
+              <span class="sp-auth-time">{{ formatAuthTime(row.created_at) }}</span>
+            </template>
+            <template #cell-event_type="{ row }">
+              <span class="sp-status" :class="authEventTone(row.event_type)">{{ authEventLabel(row.event_type) }}</span>
+            </template>
+            <template #cell-source="{ row }">
+              <span class="sp-status" :class="authSourceTone(row.source)">{{ authSourceLabel(row.source) }}</span>
+            </template>
+            <template #cell-status="{ row }">
+              <span class="sp-status" :class="authEventTone(row.status)">{{ authEventLabel(row.status) }}</span>
+            </template>
+            <template #cell-duration_ms="{ row }">
+              <span class="sp-auth-duration" :class="authDurationTone(row.duration_ms)">{{ row.duration_ms }} ms</span>
+            </template>
+            <template #cell-http_status="{ row }">
+              <span class="sp-status" :class="authHttpTone(row.http_status)">{{ row.http_status || '—' }}</span>
+            </template>
+            <template #cell-error_message="{ row }">
+              <span class="sp-auth-error" :class="{ 'has-error': !!row.error_message }">{{ row.error_message || '—' }}</span>
+            </template>
+            <template #empty>暂无认证历史</template>
+          </DataTable>
+
+          <div class="sp-inline sp-auth-pager">
+            <button class="sp-button small" type="button" data-test="supplier-auth-prev" :disabled="authHistory.page <= 1 || authLoading" @click="changeAuthPage(-1)">上一页</button>
+            <span>第 {{ authHistory.page }} 页 · 共 {{ authHistory.total }} 条</span>
+            <button class="sp-button small" type="button" data-test="supplier-auth-next" :disabled="authHistory.page * authHistory.page_size >= authHistory.total || authLoading" @click="changeAuthPage(1)">下一页</button>
+          </div>
         </div>
       </template>
       <template #footer><button class="sp-button primary" type="button" @click="closeAuthHistory">关闭</button></template>
@@ -1568,6 +1658,80 @@ function authEventLabel(value: string): string {
 
 function authSourceLabel(value: string): string {
   return ({ sync: '同步任务', endpoint_test: '接口测试', manual: '手动操作', unknown: '未知来源' } as Record<string, string>)[value] || value
+}
+
+function authRateText(part: number, total: number): string {
+  const safeTotal = Number(total || 0)
+  if (safeTotal <= 0) return '—'
+  return `${((Number(part || 0) / safeTotal) * 100).toFixed(0)}%`
+}
+
+function authLoginToneClass(summary: { login_count: number; login_success_count: number; login_failure_count: number }): string {
+  if (!summary.login_count) return 'tone-slate'
+  if (summary.login_failure_count <= 0) return 'tone-green'
+  const rate = summary.login_success_count / summary.login_count
+  if (rate >= 0.8) return 'tone-green'
+  if (rate >= 0.5) return 'tone-amber'
+  return 'tone-red'
+}
+
+function authCacheToneClass(status: string): string {
+  return ({
+    cached: 'tone-green',
+    missing: 'tone-amber',
+    expired: 'tone-amber',
+    error: 'tone-red',
+  } as Record<string, string>)[status] || 'tone-slate'
+}
+
+function authEventTone(value: string): string {
+  return ({
+    login_success: 'good',
+    success: 'good',
+    cache_hit: 'info',
+    login_failed: 'bad',
+    failed: 'bad',
+    cache_error: 'bad',
+    unavailable: 'bad',
+    cache_miss: 'warn',
+    miss: 'warn',
+    cache_invalidated: 'warn',
+    invalidated: 'warn',
+  } as Record<string, string>)[value] || ''
+}
+
+function authEventToneClass(value: string): string {
+  const tone = authEventTone(value)
+  if (tone === 'good') return 'tone-green'
+  if (tone === 'bad') return 'tone-red'
+  if (tone === 'warn') return 'tone-amber'
+  if (tone === 'info') return 'tone-cyan'
+  return 'tone-slate'
+}
+
+function authSourceTone(value: string): string {
+  return ({
+    sync: 'info',
+    endpoint_test: 'warn',
+    manual: 'good',
+    unknown: '',
+  } as Record<string, string>)[value] || ''
+}
+
+function authHttpTone(status?: number | string): string {
+  const code = Number(status || 0)
+  if (!code) return ''
+  if (code >= 200 && code < 300) return 'good'
+  if (code >= 400) return 'bad'
+  return 'warn'
+}
+
+function authDurationTone(durationMs?: number): string {
+  const value = Number(durationMs || 0)
+  if (value <= 0) return ''
+  if (value <= 800) return 'fast'
+  if (value <= 3000) return 'normal'
+  return 'slow'
 }
 
 async function refreshProvidersView() {
@@ -2966,6 +3130,16 @@ function errorMessage(err: unknown, fallback: string): string {
   word-break: break-word;
 }
 
+:global(.modal-content:has(.sp-auth-dialog)) {
+  /* 登录记录内容较多：固定约 80% 视口宽度 */
+  width: min(1440px, 80vw);
+  max-width: min(1440px, 80vw);
+}
+
+:global(.modal-content:has(.sp-auth-dialog) .modal-body) {
+  min-height: 0;
+}
+
 :global(.modal-content:has(.sp-provider-dialog)),
 :global(.modal-content:has(.sp-type-create-dialog)),
 :global(.modal-content:has(.sp-type-manager-dialog)),
@@ -3655,4 +3829,375 @@ function errorMessage(err: unknown, fallback: string): string {
   }
 }
 
+
+/* 登录记录弹窗：Teleport 后仍自带主题变量，并提高状态色对比 */
+.sp-auth-panel {
+  /* 兜底变量：即使未挂到页面根节点也能出颜色 */
+  --sp-panel: #ffffff;
+  --sp-panel-2: #f8fafc;
+  --sp-panel-3: #f1f5f9;
+  --sp-line: #e2e8f0;
+  --sp-soft: #eef2f7;
+  --sp-text: #0f172a;
+  --sp-muted: #64748b;
+  --sp-dim: #94a3b8;
+  --sp-cyan: #2563eb;
+  --sp-green: #16a34a;
+  --sp-amber: #d97706;
+  --sp-orange: #ea580c;
+  --sp-red: #dc2626;
+  --sp-blue: #1d4ed8;
+  --sp-violet: #7c3aed;
+  --sp-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  display: grid;
+  gap: 0.9rem;
+  color: var(--sp-text);
+}
+
+:global(.dark) .sp-auth-panel,
+.dark .sp-auth-panel {
+  --sp-panel: #1f2937;
+  --sp-panel-2: #111827;
+  --sp-panel-3: #374151;
+  --sp-line: #374151;
+  --sp-soft: #374151;
+  --sp-text: #f9fafb;
+  --sp-muted: #9ca3af;
+  --sp-dim: #6b7280;
+  --sp-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+.sp-auth-kpi-grid,
+.sp-auth-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.sp-auth-kpi,
+.sp-auth-meta,
+.sp-auth-token-card {
+  --sp-auth-accent: #2563eb;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--sp-auth-accent) 34%, var(--sp-line));
+  border-left: 4px solid var(--sp-auth-accent);
+  border-radius: 0.75rem;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--sp-auth-accent) 16%, var(--sp-panel)) 0%,
+      color-mix(in srgb, var(--sp-auth-accent) 5%, var(--sp-panel)) 48%,
+      var(--sp-panel) 100%
+    );
+  box-shadow:
+    var(--sp-shadow),
+    0 10px 24px color-mix(in srgb, var(--sp-auth-accent) 10%, transparent);
+}
+
+.sp-auth-kpi::before,
+.sp-auth-meta::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 4.5rem;
+  height: 4.5rem;
+  border-radius: 999px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--sp-auth-accent) 28%, transparent) 0%, transparent 70%);
+  transform: translate(30%, -30%);
+  content: '';
+  pointer-events: none;
+}
+
+.sp-auth-kpi {
+  min-height: 6.6rem;
+  padding: 0.95rem 1rem 0.9rem;
+}
+
+.sp-auth-kpi-top {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.sp-auth-kpi span,
+.sp-auth-meta span,
+.sp-auth-token-card span {
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.sp-auth-kpi b {
+  position: relative;
+  z-index: 1;
+  display: block;
+  margin-top: 0.55rem;
+  color: var(--sp-auth-accent);
+  font-size: 1.55rem;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.sp-auth-kpi small {
+  position: relative;
+  z-index: 1;
+  display: block;
+  margin-top: 0.45rem;
+  color: color-mix(in srgb, var(--sp-auth-accent) 78%, var(--sp-muted));
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.sp-auth-signal {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: var(--sp-auth-accent);
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--sp-auth-accent) 18%, transparent),
+    0 0 12px color-mix(in srgb, var(--sp-auth-accent) 45%, transparent);
+}
+
+.sp-auth-meta {
+  min-height: 6.2rem;
+  padding: 0.95rem 1rem 0.9rem;
+  display: grid;
+  align-content: start;
+  gap: 0.45rem;
+}
+
+.sp-auth-meta b {
+  position: relative;
+  z-index: 1;
+  color: var(--sp-text);
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.sp-auth-meta em {
+  position: relative;
+  z-index: 1;
+  justify-self: start;
+  font-style: normal;
+}
+
+.sp-auth-token-card {
+  --sp-auth-accent: #7c3aed;
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(12rem, 0.8fr);
+  gap: 0.9rem;
+  padding: 1rem 1.05rem;
+}
+
+.sp-auth-token-main,
+.sp-auth-token-side,
+.sp-auth-token-side > div {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.sp-auth-token-side {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.sp-auth-token-summary {
+  color: #6d28d9;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+:global(.dark) .sp-auth-token-summary,
+.dark .sp-auth-token-summary {
+  color: #c4b5fd;
+}
+
+.sp-auth-token-side b {
+  color: var(--sp-text);
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.sp-auth-fingerprint {
+  border-color: color-mix(in srgb, #7c3aed 34%, var(--sp-line));
+  background: color-mix(in srgb, #7c3aed 12%, var(--sp-panel));
+  color: #6d28d9;
+}
+
+:global(.dark) .sp-auth-fingerprint,
+.dark .sp-auth-fingerprint {
+  color: #c4b5fd;
+}
+
+.sp-auth-history-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid color-mix(in srgb, #2563eb 26%, var(--sp-line));
+  border-radius: 0.75rem;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, #2563eb 12%, var(--sp-panel)), var(--sp-panel) 70%);
+}
+
+.sp-auth-history-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.sp-auth-history-title strong {
+  color: var(--sp-text);
+  font-size: 0.875rem;
+  font-weight: 760;
+}
+
+.sp-auth-history-title > span:last-child {
+  color: #2563eb;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.sp-auth-history-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: #2563eb;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.16);
+}
+
+.sp-auth-history-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.sp-auth-pager {
+  justify-content: flex-end;
+  color: var(--sp-muted);
+  font-size: 0.8125rem;
+}
+
+.sp-auth-time {
+  color: var(--sp-text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.sp-auth-duration {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.18rem 0.5rem;
+  border-radius: 999px;
+  background: var(--sp-panel-2);
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-auth-duration.fast {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.sp-auth-duration.normal {
+  background: #ffedd5;
+  color: #c2410c;
+}
+
+.sp-auth-duration.slow {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.sp-auth-error {
+  color: var(--sp-muted);
+}
+
+.sp-auth-error.has-error {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+/* 表格状态色兜底：Teleport 场景下共享变量可能缺失 */
+.sp-auth-panel :deep(.sp-status.good),
+.sp-auth-panel .sp-status.good {
+  border-color: #86efac;
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.sp-auth-panel :deep(.sp-status.warn),
+.sp-auth-panel .sp-status.warn {
+  border-color: #fdba74;
+  background: #ffedd5;
+  color: #c2410c;
+}
+
+.sp-auth-panel :deep(.sp-status.bad),
+.sp-auth-panel .sp-status.bad {
+  border-color: #fca5a5;
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.sp-auth-panel :deep(.sp-status.info),
+.sp-auth-panel .sp-status.info {
+  border-color: #93c5fd;
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.sp-auth-kpi.tone-blue,
+.sp-auth-meta.tone-blue { --sp-auth-accent: #1d4ed8; }
+.sp-auth-kpi.tone-cyan,
+.sp-auth-meta.tone-cyan { --sp-auth-accent: #0284c7; }
+.sp-auth-kpi.tone-green,
+.sp-auth-meta.tone-green { --sp-auth-accent: #16a34a; }
+.sp-auth-kpi.tone-amber,
+.sp-auth-meta.tone-amber { --sp-auth-accent: #d97706; }
+.sp-auth-kpi.tone-red,
+.sp-auth-meta.tone-red { --sp-auth-accent: #dc2626; }
+.sp-auth-kpi.tone-violet,
+.sp-auth-meta.tone-violet { --sp-auth-accent: #7c3aed; }
+.sp-auth-kpi.tone-slate,
+.sp-auth-meta.tone-slate { --sp-auth-accent: #64748b; }
+
+@media (max-width: 1100px) {
+  .sp-auth-kpi-grid,
+  .sp-auth-meta-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .sp-auth-kpi-grid,
+  .sp-auth-meta-grid,
+  .sp-auth-token-card,
+  .sp-auth-token-side {
+    grid-template-columns: 1fr;
+  }
+
+  .sp-auth-history-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .sp-auth-history-actions,
+  .sp-auth-pager {
+    justify-content: flex-start;
+  }
+}
 </style>
