@@ -198,7 +198,7 @@
       </div>
 
       <BaseDialog :show="editVisible" :title="editingTask?.name || '编辑任务'" width="wide" @close="closeEdit">
-        <form class="sp-edit-dialog" @submit.prevent="saveTask">
+        <form class="sp-edit-dialog" :class="{ 'is-health-guard': editForm.task_code === 'supplier_account_health_guard' }" @submit.prevent="saveTask">
           <section class="sp-edit-summary" aria-label="当前任务摘要">
             <div><span>任务编码</span><strong>{{ editForm.task_code }}</strong></div>
             <div><span>当前状态</span><strong>{{ editForm.enabled ? '已启用' : '已停用' }}</strong></div>
@@ -655,7 +655,7 @@
       <BaseDialog
         :show="healthGuardAccountsVisible"
         title="配置健康守护账号"
-        width="wide"
+        width="full"
         :z-index="60"
         @close="closeHealthGuardAccounts"
       >
@@ -2746,6 +2746,15 @@ function showToast(message: string) {
   max-height: min(95vh, calc(100dvh - 16px));
 }
 
+/* 电脑端：健康守护编辑与账号配置弹窗加宽到约 80% 视口 */
+@media (min-width: 768px) {
+  :global(.modal-content:has(.sp-edit-dialog.is-health-guard)),
+  :global(.modal-content:has(.sp-health-guard-account-dialog)) {
+    width: min(1440px, 80vw);
+    max-width: min(1440px, 80vw);
+  }
+}
+
 :global(.modal-content:has(.sp-health-guard-account-dialog) .modal-body),
 :global(.modal-content:has(.sp-edit-dialog) .modal-body),
 :global(.modal-content:has(.sp-run-detail) .modal-body) {
@@ -2759,6 +2768,11 @@ function showToast(message: string) {
 
 :global(.modal-content:has(.sp-health-guard-account-dialog) .modal-body) {
   overflow: hidden;
+}
+
+/* 账号配置弹窗：让内容区吃满可用高度，列表在剩余空间内滚动 */
+:global(.modal-content:has(.sp-health-guard-account-dialog)) {
+  height: min(95vh, calc(100dvh - 16px));
 }
 
 :global(.modal-content:has(.sp-health-guard-account-dialog) .modal-footer),
@@ -3365,7 +3379,7 @@ function showToast(message: string) {
   gap: 12px;
   min-height: 0;
   height: 100%;
-  max-height: min(78vh, calc(100dvh - 148px));
+  max-height: none;
   overflow: hidden;
 }
 
@@ -3545,7 +3559,7 @@ function showToast(message: string) {
 
 .sp-health-guard-account-list {
   flex: 1 1 auto;
-  min-height: 180px;
+  min-height: 0;
   max-height: none;
   overflow: auto;
   overscroll-behavior: contain;
@@ -4250,14 +4264,24 @@ function showToast(message: string) {
   }
 
   .sp-health-guard-account-dialog {
-    max-height: min(82vh, calc(100dvh - 120px));
+    /* 高度由 modal-content 约束，避免独立 max-height 把账号列表裁切掉 */
+    max-height: none;
+    min-height: 0;
   }
 
   .sp-health-guard-platform-models {
-    max-height: min(28vh, 220px);
+    flex: 0 1 auto;
+    max-height: min(22vh, 160px);
+    min-height: 0;
     overflow: auto;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
+  }
+
+  .sp-health-guard-account-workspace {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .sp-health-guard-platform-model-grid,
@@ -4305,7 +4329,12 @@ function showToast(message: string) {
   }
 
   .sp-health-guard-account-list {
-    min-height: 220px;
+    /* 优先占剩余空间，可收缩；列表内部滚动，避免整页被裁切 */
+    flex: 1 1 40vh;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   .sp-health-guard-account-model-editor {

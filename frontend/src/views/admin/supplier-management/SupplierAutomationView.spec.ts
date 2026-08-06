@@ -903,7 +903,9 @@ describe('SupplierAutomationView edit dialog composition', () => {
     expect(editDialogSource).toContain(
       '<BaseDialog :show="editVisible" :title="editingTask?.name || \'编辑任务\'" width="wide" @close="closeEdit">'
     )
-    expect(editDialogSource).toContain('<form class="sp-edit-dialog" @submit.prevent="saveTask">')
+    expect(editDialogSource).toContain('class="sp-edit-dialog"')
+    expect(editDialogSource).toContain(":class=\"{ 'is-health-guard': editForm.task_code === 'supplier_account_health_guard' }\"")
+    expect(editDialogSource).toContain('@submit.prevent="saveTask"')
     expect(editDialogSource).toContain('class="sp-form-section sp-state-section"')
     expect(editDialogSource).toContain('class="sp-form-section sp-schedule-section"')
     expect(editDialogSource).toContain('<Toggle v-model="editForm.enabled" />')
