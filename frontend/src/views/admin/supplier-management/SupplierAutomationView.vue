@@ -244,6 +244,13 @@
               <span>03</span>
               <div><h3>健康守护策略</h3><p>控制每轮检测规模、单账号测试压力以及暂停和恢复调度的连续次数。</p></div>
             </div>
+            <div class="sp-health-guard-account-card">
+              <div>
+                <strong>需要检查的账号</strong>
+                <span>已选择 {{ healthGuardAccountIDs.length }} 个本地账号，可按平台设置默认测试模型并为账号单独覆盖。</span>
+              </div>
+              <button class="sp-button small ghost" type="button" @click="openHealthGuardAccounts">配置检查账号</button>
+            </div>
             <div class="sp-form-grid sp-health-guard-policy-grid">
               <Input :model-value="editForm.config.account_health_guard_max_accounts_per_run" type="number" label="单次检查账号数" @update:model-value="editForm.config.account_health_guard_max_accounts_per_run = toNumber($event, editForm.config.account_health_guard_max_accounts_per_run)" />
               <Input :model-value="editForm.config.account_health_guard_concurrency" type="number" label="并发数" @update:model-value="editForm.config.account_health_guard_concurrency = toNumber($event, editForm.config.account_health_guard_concurrency)" />
@@ -252,13 +259,6 @@
               <Input :model-value="editForm.config.account_health_guard_slow_threshold" type="number" label="连续慢响应暂停阈值" @update:model-value="editForm.config.account_health_guard_slow_threshold = toNumber($event, editForm.config.account_health_guard_slow_threshold)" />
               <Input :model-value="editForm.config.account_health_guard_recovery_threshold" type="number" label="连续健康恢复阈值" @update:model-value="editForm.config.account_health_guard_recovery_threshold = toNumber($event, editForm.config.account_health_guard_recovery_threshold)" />
               <Input :model-value="editForm.config.account_health_guard_healthy_latency_ms" type="number" label="默认健康延迟（毫秒）" @update:model-value="editForm.config.account_health_guard_healthy_latency_ms = toNumber($event, editForm.config.account_health_guard_healthy_latency_ms)" />
-            </div>
-            <div class="sp-health-guard-account-card">
-              <div>
-                <strong>需要检查的账号</strong>
-                <span>已选择 {{ healthGuardAccountIDs.length }} 个本地账号，可按平台设置默认测试模型并为账号单独覆盖。</span>
-              </div>
-              <button class="sp-button small ghost" type="button" @click="openHealthGuardAccounts">配置检查账号</button>
             </div>
           </section>
 
