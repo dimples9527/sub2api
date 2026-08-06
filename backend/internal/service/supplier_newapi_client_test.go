@@ -60,6 +60,8 @@ func TestSupplierNewAPIClientStopsWhenRedisIsUnavailable(t *testing.T) {
 			client := NewSupplierNewAPIClient(server.Client(), cache, nil)
 			_, err := client.FetchBalance(context.Background(), supplierNewAPICacheTestProvider(server.URL), "secret")
 			require.Error(t, err)
+			require.False(t, IsSupplierProviderAuthFailure(err))
+			require.True(t, IsSupplierProviderSessionFailure(err))
 			require.Equal(t, tt.expectedLoginCalls, loginCalls.Load())
 		})
 	}
@@ -233,6 +235,64 @@ func TestSupplierNewAPIClientDeletesInvalidSessionAndRetriesLogin(t *testing.T) 
 	deleteCalls := cache.deleteCalls
 	cache.mu.Unlock()
 	require.Equal(t, 1, deleteCalls)
+}
+
+func TestSupplierNewAPIClientMarksFinalUnauthorizedAsAuthFailure(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	cache.preload(42, SupplierProviderAuthToken{
+		AccessToken: "cached-token",
+		TokenType:   "Bearer",
+		ExpiresAt:   time.Now().Add(20 * time.Minute),
+		UserID:      42,
+	})
+	var loginCalls atomic.Int32
+	var balanceCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			loginCalls.Add(1)
+			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"refreshed-token","access_expires_at":4102444800,"user":{"id":42}}}`))
+		case "/api/user/self":
+			balanceCalls.Add(1)
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"success":false,"message":"unauthorized"}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	_, err := NewSupplierProviderRemoteRegistry(server.Client(), cache, nil).FetchBalance(
+		context.Background(), supplierNewAPICacheTestProvider(server.URL), "secret",
+	)
+
+	require.Error(t, err)
+	require.True(t, IsSupplierProviderAuthFailure(err))
+	require.Equal(t, int32(1), loginCalls.Load())
+	require.Equal(t, int32(2), balanceCalls.Load())
+}
+
+func TestSupplierNewAPIClientMarksLoginCredentialFailureAsAuthFailure(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"success":false,"message":"invalid username or password"}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	_, err := NewSupplierProviderRemoteRegistry(server.Client(), cache, nil).FetchBalance(
+		context.Background(), supplierNewAPICacheTestProvider(server.URL), "secret",
+	)
+
+	require.Error(t, err)
+	require.True(t, IsSupplierProviderAuthFailure(err))
 }
 
 func TestSupplierNewAPIClientUsesSharedLoginLock(t *testing.T) {

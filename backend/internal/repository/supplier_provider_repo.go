@@ -412,6 +412,43 @@ password_encrypted=EXCLUDED.password_encrypted, updated_at=NOW()`, provider.ID, 
 	return nil
 }
 
+func (r *supplierProviderRepository) DisableAfterAuthFailure(ctx context.Context, providerID int64, message string, syncedAt time.Time) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin supplier provider auth failure update: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	result, err := tx.ExecContext(ctx, `
+UPDATE supplier_providers
+SET enabled=FALSE, updated_at=NOW()
+WHERE id=$1 AND deleted_at IS NULL`, providerID)
+	if err != nil {
+		return fmt.Errorf("disable supplier provider after auth failure: %w", err)
+	}
+	if affected, affectedErr := result.RowsAffected(); affectedErr != nil {
+		return fmt.Errorf("check supplier provider auth failure update: %w", affectedErr)
+	} else if affected == 0 {
+		return service.ErrSupplierProviderNotFound
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO supplier_provider_runtime_stats (
+  provider_id, sync_status, sync_message, last_sync_at, updated_at
+) VALUES ($1,$2,$3,$4,$4)
+ON CONFLICT (provider_id) DO UPDATE SET
+  sync_status=EXCLUDED.sync_status,
+  sync_message=EXCLUDED.sync_message,
+  last_sync_at=EXCLUDED.last_sync_at,
+  updated_at=EXCLUDED.updated_at`, providerID, service.SupplierSyncStatusFailed, message, syncedAt); err != nil {
+		return fmt.Errorf("record supplier provider auth failure: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit supplier provider auth failure update: %w", err)
+	}
+	return nil
+}
+
 func (r *supplierProviderRepository) Delete(ctx context.Context, id int64) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {

@@ -108,6 +108,19 @@ func (r *supplierProviderHandlerRepoStub) Update(_ context.Context, item *servic
 	return service.ErrSupplierProviderNotFound
 }
 
+func (r *supplierProviderHandlerRepoStub) DisableAfterAuthFailure(_ context.Context, providerID int64, message string, syncedAt time.Time) error {
+	for _, item := range r.items {
+		if item.ID == providerID {
+			item.Enabled = false
+			item.SyncStatus = service.SupplierSyncStatusFailed
+			item.SyncMessage = message
+			item.LastSyncAt = &syncedAt
+			return nil
+		}
+	}
+	return service.ErrSupplierProviderNotFound
+}
+
 func (r *supplierProviderHandlerRepoStub) Delete(_ context.Context, id int64) error {
 	for index := range r.items {
 		if r.items[index].ID == id {

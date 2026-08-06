@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,13 +15,55 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type failingSupplierSyncProgressWriter struct {
+	mu       sync.Mutex
+	writes   int
+	writeErr error
+}
+
+func (w *failingSupplierSyncProgressWriter) Write([]byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.writes++
+	return 0, w.writeErr
+}
+
+func (*failingSupplierSyncProgressWriter) Flush() {}
+
+func (w *failingSupplierSyncProgressWriter) writeCount() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.writes
+}
+
+func TestSupplierSyncProgressStreamWriterCancelsOnWriteFailure(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	writer := &failingSupplierSyncProgressWriter{writeErr: errors.New("client disconnected")}
+	stream := newSupplierSyncProgressStream(writer, writer, ctx.Done(), cancel)
+
+	stream.write(service.SupplierSyncProgressEvent{Stage: service.SupplierSyncProgressStagePrepare, Message: "prepare"})
+	stream.write(service.SupplierSyncProgressEvent{Stage: service.SupplierSyncProgressStageDone, Message: "done"})
+
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
+	require.Equal(t, 1, writer.writeCount())
+}
+
 type supplierProviderSyncHandlerSyncStub struct {
-	calledScope string
-	testScope   string
+	calledScope          string
+	testScope            string
+	streamError          error
+	streamFailureMessage string
+	endpointError        error
+	endpointResult       service.SupplierProviderEndpointTestResult
+	emitStream           bool
 }
 
 func (s *supplierProviderSyncHandlerSyncStub) SyncAccounts(context.Context, int64, string) (service.SupplierProviderSyncResult, error) {
 	s.calledScope = service.SupplierSyncScopeAccounts
+	if s.streamError != nil {
+		return service.SupplierProviderSyncResult{Scope: service.SupplierSyncScopeAccounts, Status: service.SupplierSyncStatusFailed, Message: s.streamFailureMessage}, s.streamError
+	}
 	return supplierProviderSyncHandlerResult(service.SupplierSyncScopeAccounts), nil
 }
 func (s *supplierProviderSyncHandlerSyncStub) SyncGroups(context.Context, int64, string) (service.SupplierProviderSyncResult, error) {
@@ -53,12 +96,25 @@ func (s *supplierProviderSyncHandlerSyncStub) BackfillCosts(_ context.Context, s
 		}},
 	}, nil
 }
-func (s *supplierProviderSyncHandlerSyncStub) SyncAll(context.Context, int64, string) (service.SupplierProviderSyncResult, error) {
+func (s *supplierProviderSyncHandlerSyncStub) SyncAll(ctx context.Context, _ int64, _ string) (service.SupplierProviderSyncResult, error) {
 	s.calledScope = service.SupplierSyncScopeAll
+	if s.emitStream {
+		service.SupplierSyncProgress(ctx, service.SupplierSyncProgressStagePrepare, "准备同步", nil)
+	}
+	if s.streamError != nil {
+		return service.SupplierProviderSyncResult{}, s.streamError
+	}
 	return supplierProviderSyncHandlerResult(service.SupplierSyncScopeAll), nil
 }
 func (s *supplierProviderSyncHandlerSyncStub) TestEndpoint(_ context.Context, _ int64, scope string) (service.SupplierProviderEndpointTestResult, error) {
 	s.testScope = scope
+	if s.endpointError != nil {
+		result := s.endpointResult
+		if result.Scope == "" {
+			result.Scope = scope
+		}
+		return result, s.endpointError
+	}
 	return service.SupplierProviderEndpointTestResult{Scope: scope, Endpoint: "/test/" + scope, HTTPStatus: 200, ResponseSummary: `{"code":0}`}, nil
 }
 
@@ -237,6 +293,101 @@ func TestSupplierProviderSyncHandlerRoutes(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, int64(7), dataStub.mappedGroupID)
 	require.Nil(t, dataStub.mappedLocalGroupID)
+}
+
+func TestSupplierProviderSyncHandlerStreamsProgress(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	syncStub := &supplierProviderSyncHandlerSyncStub{emitStream: true}
+	handler := NewSupplierProviderSyncHandler(syncStub, &supplierProviderSyncHandlerDataStub{})
+	router := gin.New()
+	router.POST("/providers/:id/sync/all/stream", handler.SyncAllStream)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/providers/42/sync/all/stream", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Header().Get("Content-Type"), "text/event-stream")
+	require.Contains(t, rec.Body.String(), `"stage":"prepare"`)
+	require.Contains(t, rec.Body.String(), `"stage":"done"`)
+}
+
+func TestSupplierProviderSyncHandlerStreamsErrorEvent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	syncStub := &supplierProviderSyncHandlerSyncStub{streamError: errors.New("上游登录失败")}
+	handler := NewSupplierProviderSyncHandler(syncStub, &supplierProviderSyncHandlerDataStub{})
+	router := gin.New()
+	router.POST("/providers/:id/sync/all/stream", handler.SyncAllStream)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/providers/42/sync/all/stream", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"stage":"error"`)
+	require.Contains(t, rec.Body.String(), "上游登录失败")
+}
+
+func TestSupplierProviderSyncHandlerStreamsResultMessageWhenSyncReturnsError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	message := "供应商登录失败，已自动停用。请处理后手动重新启用。"
+	syncStub := &supplierProviderSyncHandlerSyncStub{
+		streamError:          errors.New("upstream login failed"),
+		streamFailureMessage: message,
+	}
+	handler := NewSupplierProviderSyncHandler(syncStub, &supplierProviderSyncHandlerDataStub{})
+	router := gin.New()
+	router.POST("/providers/:id/sync/accounts/stream", handler.SyncAccountsStream)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/providers/42/sync/accounts/stream", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), message)
+	require.NotContains(t, rec.Body.String(), "upstream login failed")
+}
+
+func TestSupplierProviderSyncHandlerReturnsResultMessageWhenSyncReturnsError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	message := "供应商登录失败，已自动停用。请处理后手动重新启用。"
+	syncStub := &supplierProviderSyncHandlerSyncStub{
+		streamError:          errors.New("upstream login failed"),
+		streamFailureMessage: message,
+	}
+	handler := NewSupplierProviderSyncHandler(syncStub, &supplierProviderSyncHandlerDataStub{})
+	router := gin.New()
+	router.POST("/providers/:id/sync/accounts", handler.SyncAccounts)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/providers/42/sync/accounts", nil)
+	router.ServeHTTP(rec, req)
+
+	require.NotEqual(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), message)
+	require.NotContains(t, rec.Body.String(), "upstream login failed")
+}
+
+func TestSupplierProviderSyncHandlerReturnsEndpointResultMessageWhenTestReturnsError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	message := "供应商登录失败，已自动停用。请处理后手动重新启用。"
+	syncStub := &supplierProviderSyncHandlerSyncStub{
+		endpointError: errors.New("upstream login failed"),
+		endpointResult: service.SupplierProviderEndpointTestResult{
+			Error: message,
+		},
+	}
+	handler := NewSupplierProviderSyncHandler(syncStub, &supplierProviderSyncHandlerDataStub{})
+	router := gin.New()
+	router.POST("/providers/:id/test/:scope", handler.TestEndpoint)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/providers/42/test/balance", nil)
+	router.ServeHTTP(rec, req)
+
+	require.NotEqual(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), message)
+	require.NotContains(t, rec.Body.String(), "upstream login failed")
 }
 
 func TestSupplierProviderSyncHandlerDeletesGroupRecord(t *testing.T) {

@@ -30,10 +30,15 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 			providers.DELETE("/:id", h.Admin.SupplierProvider.Delete)
 			providers.PUT("/:id/default", h.Admin.SupplierProvider.SetDefault)
 			providers.POST("/:id/sync/accounts", h.Admin.SupplierProviderSync.SyncAccounts)
+			providers.POST("/:id/sync/accounts/stream", h.Admin.SupplierProviderSync.SyncAccountsStream)
 			providers.POST("/:id/sync/groups", h.Admin.SupplierProviderSync.SyncGroups)
+			providers.POST("/:id/sync/groups/stream", h.Admin.SupplierProviderSync.SyncGroupsStream)
 			providers.POST("/:id/sync/balance", h.Admin.SupplierProviderSync.SyncBalance)
+			providers.POST("/:id/sync/balance/stream", h.Admin.SupplierProviderSync.SyncBalanceStream)
 			providers.POST("/:id/sync/cost", h.Admin.SupplierProviderSync.SyncCost)
+			providers.POST("/:id/sync/cost/stream", h.Admin.SupplierProviderSync.SyncCostStream)
 			providers.POST("/:id/sync/all", h.Admin.SupplierProviderSync.SyncAll)
+			providers.POST("/:id/sync/all/stream", h.Admin.SupplierProviderSync.SyncAllStream)
 			providers.POST("/:id/test/:scope", h.Admin.SupplierProviderSync.TestEndpoint)
 		}
 

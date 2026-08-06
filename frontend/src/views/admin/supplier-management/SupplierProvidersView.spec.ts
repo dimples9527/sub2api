@@ -15,6 +15,7 @@ const providerViewMocks = vi.hoisted(() => ({
   getAuthStatus: vi.fn(),
   listAuthHistory: vi.fn(),
   syncProvider: vi.fn(),
+  streamSupplierProviderSync: vi.fn(),
   testProviderEndpoint: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
@@ -51,9 +52,11 @@ vi.mock('@/api/admin/supplierProviderTypes', () => ({
 
 vi.mock('@/api/admin/supplierProviderData', () => ({
   syncProvider: providerViewMocks.syncProvider,
+  streamSupplierProviderSync: providerViewMocks.streamSupplierProviderSync,
   testProviderEndpoint: providerViewMocks.testProviderEndpoint,
   default: {
     syncProvider: providerViewMocks.syncProvider,
+    streamSupplierProviderSync: providerViewMocks.streamSupplierProviderSync,
     testProviderEndpoint: providerViewMocks.testProviderEndpoint,
   },
 }))
@@ -109,7 +112,11 @@ async function mountSupplierProviders() {
       plugins: [createI18n({ legacy: false, locale: 'en-US', messages: { 'en-US': {} } })],
       stubs: {
         SupplierModuleLayout: { template: '<div><slot /></div>' },
-        SupplierDrawer: true,
+        SupplierDrawer: {
+          props: ['show', 'title', 'eyebrow'],
+          emits: ['close'],
+          template: '<aside v-if="show" data-test="supplier-drawer"><button type="button" data-test="supplier-drawer-close" @click="$emit(\'close\')">关闭</button><slot /></aside>',
+        },
         BaseDialog: {
           name: 'BaseDialog',
           props: ['show', 'title'],
@@ -238,6 +245,7 @@ describe('SupplierProvidersView payload normalization', () => {
       page: 1,
       page_size: 100,
     })
+    providerViewMocks.streamSupplierProviderSync.mockResolvedValue(undefined)
   })
 
   it('loads masked token status and paged login history without triggering a new login', async () => {
@@ -341,6 +349,55 @@ describe('SupplierProvidersView payload normalization', () => {
 
     expect(providerViewMocks.showError).toHaveBeenCalledWith('更新失败')
     expect(wrapper.get('[data-test="supplier-provider-enabled-1"]').attributes('data-enabled')).toBe('true')
+  })
+
+  it('opens the provider drawer and renders each live sync stage', async () => {
+    providerViewMocks.streamSupplierProviderSync.mockImplementationOnce(async (_id, _scope, options) => {
+      options.onEvent({ stage: 'prepare', message: '准备同步', time: '2026-08-05T07:00:00Z' })
+      options.onEvent({ stage: 'captcha', message: 'YesCaptcha 打码成功', ok: true, time: '2026-08-05T07:00:01Z' })
+      options.onEvent({ stage: 'done', message: '同步完成', ok: true, time: '2026-08-05T07:00:02Z' })
+    })
+
+    const wrapper = await mountSupplierProviders()
+    const syncButton = wrapper.findAll('button').find(button => button.text() === '同步全部')
+    expect(syncButton).toBeDefined()
+
+    await syncButton!.trigger('click')
+    await flushPromises()
+
+    expect(providerViewMocks.streamSupplierProviderSync).toHaveBeenCalledWith(
+      1,
+      'all',
+      expect.objectContaining({ onEvent: expect.any(Function) }),
+    )
+    const progress = wrapper.get('[data-test="supplier-sync-progress"]')
+    expect(progress.text()).toContain('实时同步诊断')
+    expect(progress.text()).toContain('准备同步')
+    expect(progress.text()).toContain('打码')
+    expect(progress.text()).toContain('YesCaptcha 打码成功')
+    expect(progress.text()).toContain('已完成')
+  })
+
+  it('keeps a failed sync message after closing and reopening the provider drawer', async () => {
+    providerViewMocks.streamSupplierProviderSync.mockImplementationOnce(async (_id, _scope, options) => {
+      options.onEvent({ stage: 'prepare', message: '准备同步', time: '2026-08-05T07:00:00Z' })
+      options.onEvent({ stage: 'error', message: '上游登录失败：打码平台超时', ok: false, time: '2026-08-05T07:00:01Z' })
+    })
+
+    const wrapper = await mountSupplierProviders()
+    const syncButton = wrapper.findAll('button').find(button => button.text() === '同步全部')
+    expect(syncButton).toBeDefined()
+
+    await syncButton!.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="supplier-sync-progress"]').text()).toContain('上游登录失败：打码平台超时')
+    expect(wrapper.get('[data-test="supplier-sync-progress-all"]').text()).toContain('失败')
+
+    await wrapper.get('[data-test="supplier-drawer-close"]').trigger('click')
+    expect(wrapper.find('[data-test="supplier-sync-progress"]').exists()).toBe(false)
+
+    await wrapper.get('tbody tr[data-row-id="1"]').trigger('click')
+    expect(wrapper.get('[data-test="supplier-sync-progress"]').text()).toContain('上游登录失败：打码平台超时')
   })
   it('uses one unified provider filter card without a repeated page heading', () => {
     expect(supplierProvidersSource).not.toContain('class="sp-page-head"')

@@ -3,8 +3,12 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
@@ -145,6 +149,36 @@ func (h *SupplierProviderSyncHandler) SyncAll(c *gin.Context) {
 	})
 }
 
+func (h *SupplierProviderSyncHandler) SyncAccountsStream(c *gin.Context) {
+	h.syncStream(c, func(ctx context.Context, id int64) (service.SupplierProviderSyncResult, error) {
+		return h.syncService.SyncAccounts(ctx, id, service.SupplierSyncTriggerManual)
+	})
+}
+
+func (h *SupplierProviderSyncHandler) SyncGroupsStream(c *gin.Context) {
+	h.syncStream(c, func(ctx context.Context, id int64) (service.SupplierProviderSyncResult, error) {
+		return h.syncService.SyncGroups(ctx, id, service.SupplierSyncTriggerManual)
+	})
+}
+
+func (h *SupplierProviderSyncHandler) SyncBalanceStream(c *gin.Context) {
+	h.syncStream(c, func(ctx context.Context, id int64) (service.SupplierProviderSyncResult, error) {
+		return h.syncService.SyncBalance(ctx, id, service.SupplierSyncTriggerManual)
+	})
+}
+
+func (h *SupplierProviderSyncHandler) SyncCostStream(c *gin.Context) {
+	h.syncStream(c, func(ctx context.Context, id int64) (service.SupplierProviderSyncResult, error) {
+		return h.syncService.SyncCost(ctx, id, time.Now(), service.SupplierSyncTriggerManual)
+	})
+}
+
+func (h *SupplierProviderSyncHandler) SyncAllStream(c *gin.Context) {
+	h.syncStream(c, func(ctx context.Context, id int64) (service.SupplierProviderSyncResult, error) {
+		return h.syncService.SyncAll(ctx, id, service.SupplierSyncTriggerManual)
+	})
+}
+
 func (h *SupplierProviderSyncHandler) TestEndpoint(c *gin.Context) {
 	id, ok := parseSupplierProviderID(c)
 	if !ok {
@@ -157,6 +191,9 @@ func (h *SupplierProviderSyncHandler) TestEndpoint(c *gin.Context) {
 	}
 	result, err := h.syncService.TestEndpoint(c.Request.Context(), id, scope)
 	if err != nil {
+		if message := strings.TrimSpace(result.Error); message != "" {
+			err = infraerrors.InternalServer("SUPPLIER_PROVIDER_ENDPOINT_TEST_FAILED", message)
+		}
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -170,10 +207,112 @@ func (h *SupplierProviderSyncHandler) sync(c *gin.Context, fn func(context.Conte
 	}
 	result, err := fn(c.Request.Context(), id)
 	if err != nil {
+		if message := strings.TrimSpace(result.Message); message != "" {
+			err = infraerrors.InternalServer("SUPPLIER_PROVIDER_SYNC_FAILED", message)
+		}
 		response.ErrorFrom(c, err)
 		return
 	}
 	response.Success(c, result)
+}
+
+func (h *SupplierProviderSyncHandler) syncStream(c *gin.Context, fn func(context.Context, int64) (service.SupplierProviderSyncResult, error)) {
+	id, ok := parseSupplierProviderID(c)
+	if !ok {
+		return
+	}
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		response.ErrorFrom(c, badRequest("当前响应不支持同步进度流"))
+		return
+	}
+
+	c.Header("Content-Type", "text/event-stream; charset=utf-8")
+	c.Header("Cache-Control", "no-cache, no-transform")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+	c.Status(http.StatusOK)
+
+	streamCtx, cancel := context.WithCancel(c.Request.Context())
+	defer cancel()
+	stream := newSupplierSyncProgressStream(c.Writer, flusher, streamCtx.Done(), cancel)
+	ctx := service.WithSupplierSyncProgressObserver(streamCtx, stream.write)
+	result, err := fn(ctx, id)
+	if err != nil {
+		terminalErr := err
+		if message := strings.TrimSpace(result.Message); message != "" {
+			terminalErr = errors.New(message)
+		}
+		service.SupplierSyncProgressFail(ctx, service.SupplierSyncProgressStageError, terminalErr)
+		return
+	}
+	if result.Status == service.SupplierSyncStatusSuccess {
+		service.SupplierSyncProgressOK(ctx, service.SupplierSyncProgressStageDone, result.Message)
+		return
+	}
+	service.SupplierSyncProgressFail(ctx, service.SupplierSyncProgressStageDone, errors.New(result.Message))
+}
+
+type supplierSyncProgressStream struct {
+	writer      io.Writer
+	flusher     http.Flusher
+	requestDone <-chan struct{}
+	cancel      context.CancelFunc
+	mu          sync.Mutex
+	closed      bool
+}
+
+func newSupplierSyncProgressStream(writer io.Writer, flusher http.Flusher, requestDone <-chan struct{}, cancel context.CancelFunc) *supplierSyncProgressStream {
+	return &supplierSyncProgressStream{
+		writer:      writer,
+		flusher:     flusher,
+		requestDone: requestDone,
+		cancel:      cancel,
+	}
+}
+
+func (s *supplierSyncProgressStream) closeLocked() {
+	if s.closed {
+		return
+	}
+	s.closed = true
+	if s.cancel != nil {
+		s.cancel()
+	}
+}
+
+func (s *supplierSyncProgressStream) write(event service.SupplierSyncProgressEvent) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	if s.requestDone != nil {
+		select {
+		case <-s.requestDone:
+			s.closeLocked()
+			return
+		default:
+		}
+	}
+	payload, err := json.Marshal(event)
+	if err != nil {
+		s.closeLocked()
+		return
+	}
+	if _, err := io.WriteString(s.writer, "data: "); err != nil {
+		s.closeLocked()
+		return
+	}
+	if _, err := s.writer.Write(payload); err != nil {
+		s.closeLocked()
+		return
+	}
+	if _, err := io.WriteString(s.writer, "\n\n"); err != nil {
+		s.closeLocked()
+		return
+	}
+	s.flusher.Flush()
 }
 
 func (h *SupplierProviderSyncHandler) ListAccounts(c *gin.Context) {

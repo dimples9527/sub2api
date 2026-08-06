@@ -177,6 +177,7 @@ type SupplierProviderRepository interface {
 	GetByID(ctx context.Context, id int64) (*SupplierProvider, error)
 	Create(ctx context.Context, provider *SupplierProvider) error
 	Update(ctx context.Context, provider *SupplierProvider) error
+	DisableAfterAuthFailure(ctx context.Context, providerID int64, message string, syncedAt time.Time) error
 	Delete(ctx context.Context, id int64) error
 	SetDefault(ctx context.Context, id int64) (*SupplierProvider, error)
 }

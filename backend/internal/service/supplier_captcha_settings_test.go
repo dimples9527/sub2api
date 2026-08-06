@@ -74,3 +74,64 @@ func TestUpdateSupplierCaptchaSettings_RejectUnsupportedProvider(t *testing.T) {
 	})
 	require.Error(t, err)
 }
+
+func TestUpdateSupplierCaptchaSettings_AllowsYesCaptcha(t *testing.T) {
+	repo := newMockSettingRepo()
+	svc := NewSettingService(repo, &config.Config{})
+
+	got, err := svc.UpdateSupplierCaptchaSettings(context.Background(), &UpdateSupplierCaptchaSettingsInput{
+		Provider: captcha.ProviderYesCaptcha,
+		APIKey:   "yes-secret",
+		Endpoint: "https://captcha.example.com",
+	})
+	require.NoError(t, err)
+	require.Equal(t, captcha.ProviderYesCaptcha, got.Provider)
+	require.True(t, got.APIKeyConfigured)
+	require.Equal(t, "https://captcha.example.com", got.Endpoint)
+}
+
+func TestUpdateSupplierCaptchaSettings_RequiresNewAPIKeyWhenProviderChanges(t *testing.T) {
+	repo := newMockSettingRepo()
+	svc := NewSettingService(repo, &config.Config{})
+
+	_, err := svc.UpdateSupplierCaptchaSettings(context.Background(), &UpdateSupplierCaptchaSettingsInput{
+		Provider: captcha.ProviderTwoCaptcha,
+		APIKey:   "old-secret",
+		Endpoint: "https://old-captcha.example.com",
+	})
+	require.NoError(t, err)
+
+	_, err = svc.UpdateSupplierCaptchaSettings(context.Background(), &UpdateSupplierCaptchaSettingsInput{
+		Provider: captcha.ProviderYesCaptcha,
+		Endpoint: "https://old-captcha.example.com",
+	})
+	require.EqualError(t, err, "switching captcha provider requires a new api key")
+
+	cfg, err := svc.loadSupplierCaptchaRuntimeConfig(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, captcha.ProviderTwoCaptcha, cfg.Provider)
+	require.Equal(t, "old-secret", cfg.APIKey)
+	require.Equal(t, "https://old-captcha.example.com", cfg.Endpoint)
+}
+
+func TestUpdateSupplierCaptchaSettings_DoesNotReuseEndpointWhenProviderChanges(t *testing.T) {
+	repo := newMockSettingRepo()
+	svc := NewSettingService(repo, &config.Config{})
+
+	_, err := svc.UpdateSupplierCaptchaSettings(context.Background(), &UpdateSupplierCaptchaSettingsInput{
+		Provider: captcha.ProviderTwoCaptcha,
+		APIKey:   "old-secret",
+		Endpoint: "https://old-captcha.example.com",
+	})
+	require.NoError(t, err)
+
+	got, err := svc.UpdateSupplierCaptchaSettings(context.Background(), &UpdateSupplierCaptchaSettingsInput{
+		Provider: captcha.ProviderYesCaptcha,
+		APIKey:   "new-secret",
+		Endpoint: "https://old-captcha.example.com",
+	})
+	require.NoError(t, err)
+	require.Equal(t, captcha.ProviderYesCaptcha, got.Provider)
+	require.True(t, got.APIKeyConfigured)
+	require.Equal(t, "", got.Endpoint)
+}

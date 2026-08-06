@@ -6,12 +6,12 @@
           <span class="sp-section-index">00</span>
           <div>
             <h2>上游打码设置</h2>
-            <span>系统全局 2Captcha 账号，供应商侧单独开关启用</span>
+            <span>系统全局打码平台账号，供应商侧单独开关启用</span>
           </div>
         </div>
       </header>
       <p class="sp-intro">
-        配置 2Captcha 账号，用于自动求解 Sub2API / NewAPI 上游登录的 Cloudflare Turnstile。
+        配置当前打码平台账号，用于自动求解 Sub2API / NewAPI 上游登录的 Cloudflare Turnstile。
         账号为系统全局一份；是否启用由各供应商的「Turnstile 人机校验」开关控制。失败时直接失败，不降级。
       </p>
     </section>
@@ -23,7 +23,7 @@
         <div class="sp-panel-title">
           <span class="sp-section-index">01</span>
           <div>
-            <h2>2Captcha 账号</h2>
+            <h2>{{ currentCaptchaProvider.label }} 账号</h2>
             <span>仅在供应商开启 Turnstile 时才会调用</span>
           </div>
         </div>
@@ -32,10 +32,13 @@
       <div class="sp-captcha-form">
         <div class="sp-field">
           <label for="captcha-provider">打码平台</label>
-          <select id="captcha-provider" v-model="form.provider" class="sp-input" disabled>
+          <select id="captcha-provider" v-model="form.provider" class="sp-input" @change="handleProviderChange">
             <option value="2captcha">2Captcha</option>
+            <option value="yescaptcha">YesCaptcha</option>
           </select>
-          <p class="sp-field-hint">当前仅支持 2Captcha</p>
+          <p class="sp-field-hint">
+            当前平台：{{ currentCaptchaProvider.label }}；切换平台后需重新填写 API Key，自定义 Endpoint 不会跨平台复用。
+          </p>
         </div>
 
         <div class="sp-field">
@@ -52,7 +55,7 @@
             {{
               form.api_key_configured
                 ? 'API Key 已配置，留空以保留当前值。'
-                : '从 2Captcha 控制台获取；请保密。'
+                : currentCaptchaProvider.keyHint
             }}
           </p>
           <button
@@ -73,9 +76,11 @@
             v-model="form.endpoint"
             class="sp-input mono"
             type="text"
-            placeholder="https://api.2captcha.com"
+            :placeholder="currentCaptchaProvider.endpoint"
           />
-          <p class="sp-field-hint">可选。默认 https://api.2captcha.com；仅在使用代理或镜像时填写。</p>
+          <p class="sp-field-hint">
+            可选。默认 {{ currentCaptchaProvider.endpoint }}；仅在使用代理或镜像时填写。
+          </p>
         </div>
 
         <div class="sp-form-actions">
@@ -100,7 +105,7 @@
         </div>
       </header>
       <ul class="sp-help-list">
-        <li>在本页配置全局 2Captcha 账号。</li>
+        <li>在本页配置全局打码平台账号（当前为 {{ currentCaptchaProvider.label }}）。</li>
         <li>在「供应商管理」中为需要绕过上游人机验证的供应商打开「Turnstile 人机校验」。</li>
         <li>仅在登录上游时打码；token / session 缓存命中时不会再次打码。</li>
         <li>打码失败会直接导致登录失败，不会用空 token 重试。</li>
@@ -110,7 +115,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { SupplierModuleLayout } from '@/components/admin/supplier-management'
 import {
   supplierCaptchaSettingsAPI,
@@ -124,15 +129,52 @@ const saving = ref(false)
 const error = ref('')
 const appStore = useAppStore()
 
-const form = reactive({
-  provider: '2captcha',
+const captchaProviderMeta = {
+  '2captcha': {
+    label: '2Captcha',
+    endpoint: 'https://api.2captcha.com',
+    keyHint: '从 2Captcha 控制台获取；请保密。',
+  },
+  yescaptcha: {
+    label: 'YesCaptcha',
+    endpoint: 'https://api.yescaptcha.com',
+    keyHint: '从 YesCaptcha 控制台获取；请保密。',
+  },
+} as const
+
+type CaptchaProvider = keyof typeof captchaProviderMeta
+const defaultCaptchaProvider: CaptchaProvider = '2captcha'
+
+function normalizeCaptchaProvider(provider?: string): CaptchaProvider {
+  const normalized = provider?.trim().toLowerCase()
+  if (!normalized || !Object.prototype.hasOwnProperty.call(captchaProviderMeta, normalized)) {
+    return defaultCaptchaProvider
+  }
+  return normalized as CaptchaProvider
+}
+
+const form = reactive<{
+  provider: CaptchaProvider
+  api_key: string
+  api_key_configured: boolean
+  endpoint: string
+}>({
+  provider: defaultCaptchaProvider,
   api_key: '',
   api_key_configured: false,
   endpoint: '',
 })
 
+const currentCaptchaProvider = computed(() => captchaProviderMeta[normalizeCaptchaProvider(form.provider)])
+
+function handleProviderChange() {
+  form.api_key = ''
+  form.api_key_configured = false
+  form.endpoint = ''
+}
+
 function applySettings(settings: SupplierCaptchaSettings) {
-  form.provider = settings.provider || '2captcha'
+  form.provider = normalizeCaptchaProvider(settings.provider)
   form.api_key = ''
   form.api_key_configured = !!settings.api_key_configured
   form.endpoint = settings.endpoint || ''
@@ -156,7 +198,7 @@ async function saveSettings() {
   error.value = ''
   try {
     const settings = await supplierCaptchaSettingsAPI.update({
-      provider: form.provider || '2captcha',
+      provider: normalizeCaptchaProvider(form.provider),
       api_key: form.api_key.trim() || undefined,
       endpoint: form.endpoint.trim(),
     })
@@ -170,14 +212,14 @@ async function saveSettings() {
 }
 
 async function clearApiKey() {
-  if (!window.confirm('确认清空已配置的 2Captcha API Key？')) {
+  if (!window.confirm(`确认清空已配置的 ${currentCaptchaProvider.value.label} API Key？`)) {
     return
   }
   saving.value = true
   error.value = ''
   try {
     const settings = await supplierCaptchaSettingsAPI.update({
-      provider: form.provider || '2captcha',
+      provider: normalizeCaptchaProvider(form.provider),
       endpoint: form.endpoint.trim(),
       clear_api_key: true,
     })

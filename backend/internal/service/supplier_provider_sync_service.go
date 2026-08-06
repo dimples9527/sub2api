@@ -354,6 +354,21 @@ func (s *SupplierProviderSyncService) providerPassword(provider *SupplierProvide
 	return password
 }
 
+func (s *SupplierProviderSyncService) disableProviderAfterAuthFailure(ctx context.Context, providerID int64, syncedAt time.Time) error {
+	return s.providerRepo.DisableAfterAuthFailure(ctx, providerID, supplierProviderAuthFailureDisableMessage, syncedAt)
+}
+
+func supplierProviderAuthFailureWithDisableError(authErr, disableErr error) error {
+	if authErr == nil {
+		return disableErr
+	}
+	if disableErr == nil {
+		return authErr
+	}
+	// 以认证错误作为首个 %w，确保调用方仍可用 IsSupplierProviderAuthFailure 判断。
+	return fmt.Errorf("%w；自动停用供应商失败: %v", authErr, disableErr)
+}
+
 func (s *SupplierProviderSyncService) SyncAccounts(ctx context.Context, providerID int64, trigger string) (SupplierProviderSyncResult, error) {
 	ctx = WithSupplierProviderAuthSource(ctx, SupplierProviderAuthSourceSync)
 	return s.syncWithLock(ctx, providerID, func(provider *SupplierProvider) (SupplierProviderSyncResult, error) {
@@ -398,6 +413,10 @@ func (s *SupplierProviderSyncService) SyncAccountRates(ctx context.Context, prov
 	if err != nil {
 		result.Status = SupplierSyncStatusFailed
 		result.Message = err.Error()
+		if IsSupplierProviderAuthFailure(err) {
+			result.Message = supplierProviderAuthFailureDisableMessage
+			err = supplierProviderAuthFailureWithDisableError(err, s.disableProviderAfterAuthFailure(ctx, provider.ID, syncedAt))
+		}
 		return result, err
 	}
 	result.CheckedCount = len(items)
@@ -509,6 +528,10 @@ func (s *SupplierProviderSyncService) BackfillCosts(ctx context.Context, startDa
 
 	for _, provider := range providers {
 		itemResult, syncErr := s.backfillProviderCosts(ctx, provider, start, end, trigger)
+		result.SuccessCount += itemResult.SuccessCount
+		result.FailedCount += itemResult.FailedCount
+		result.SkippedCount += itemResult.SkippedCount
+		result.Items = append(result.Items, itemResult.Items...)
 		if syncErr != nil && errors.Is(syncErr, ErrSupplierProviderSyncConflict) {
 			// 整段被锁占用时，按天记为跳过，便于前端提示。
 			for cursor := start; !cursor.After(end); cursor = cursor.AddDate(0, 0, 1) {
@@ -527,10 +550,6 @@ func (s *SupplierProviderSyncService) BackfillCosts(ctx context.Context, startDa
 		if syncErr != nil {
 			return result, syncErr
 		}
-		result.SuccessCount += itemResult.SuccessCount
-		result.FailedCount += itemResult.FailedCount
-		result.SkippedCount += itemResult.SkippedCount
-		result.Items = append(result.Items, itemResult.Items...)
 	}
 
 	result.FinishedAt = time.Now()
@@ -563,6 +582,8 @@ func (s *SupplierProviderSyncService) backfillProviderCosts(ctx context.Context,
 		supportsHistory := supplierProviderSupportsHistoricalCost(locked)
 		today := supplierCostBackfillToday()
 		var firstErr error
+		authFailure := false
+		sessionFailure := false
 		for cursor := start; !cursor.After(end); cursor = cursor.AddDate(0, 0, 1) {
 			dateText := cursor.Format("2006-01-02")
 			item := SupplierProviderCostBackfillItem{
@@ -585,11 +606,36 @@ func (s *SupplierProviderSyncService) backfillProviderCosts(ctx context.Context,
 			if fetchErr != nil {
 				item.Status = SupplierSyncStatusFailed
 				item.Message = fetchErr.Error()
+				stopAfterFetchFailure := false
+				if IsSupplierProviderAuthFailure(fetchErr) {
+					authFailure = true
+					stopAfterFetchFailure = true
+					item.Message = supplierProviderAuthFailureDisableMessage
+					fetchErr = supplierProviderAuthFailureWithDisableError(fetchErr, s.disableProviderAfterAuthFailure(ctx, locked.ID, time.Now()))
+				} else if IsSupplierProviderSessionFailure(fetchErr) {
+					sessionFailure = true
+					stopAfterFetchFailure = true
+				}
 				partial.FailedCount++
 				partial.Items = append(partial.Items, item)
 				run.Counts.CheckedCount++
 				if firstErr == nil {
 					firstErr = fetchErr
+				}
+				if stopAfterFetchFailure {
+					for next := cursor.AddDate(0, 0, 1); !next.After(end); next = next.AddDate(0, 0, 1) {
+						partial.SkippedCount++
+						partial.Items = append(partial.Items, SupplierProviderCostBackfillItem{
+							ProviderID:   locked.ID,
+							ProviderName: locked.Name,
+							ProviderType: locked.ProviderType,
+							Date:         next.Format("2006-01-02"),
+							Status:       SupplierSyncStatusSkipped,
+							Message:      item.Message,
+						})
+						run.Counts.SkippedCount++
+					}
+					break
 				}
 				continue
 			}
@@ -616,6 +662,8 @@ func (s *SupplierProviderSyncService) backfillProviderCosts(ctx context.Context,
 		finishedAt := time.Now()
 		run.FinishedAt = &finishedAt
 		switch {
+		case authFailure || sessionFailure:
+			run.Status = SupplierSyncStatusFailed
 		case partial.FailedCount == 0 && partial.SuccessCount > 0:
 			run.Status = SupplierSyncStatusSuccess
 		case partial.SuccessCount > 0 && partial.FailedCount > 0:
@@ -625,16 +673,25 @@ func (s *SupplierProviderSyncService) backfillProviderCosts(ctx context.Context,
 		default:
 			run.Status = SupplierSyncStatusSuccess
 		}
-		if firstErr != nil {
+		if authFailure {
+			run.ErrorMessage = supplierProviderAuthFailureDisableMessage
+		} else if firstErr != nil {
 			run.ErrorMessage = firstErr.Error()
 		} else {
 			run.ErrorMessage = supplierSyncMessage(run.Status)
 		}
+		var callbackErr error
 		if finishErr := s.dataRepo.FinishSyncRun(ctx, run); finishErr != nil {
-			return SupplierProviderSyncResult{}, fmt.Errorf("finish supplier cost backfill run: %w", finishErr)
+			if firstErr != nil && IsSupplierProviderAuthFailure(firstErr) {
+				callbackErr = supplierProviderAuthFailureWithDisableError(firstErr, fmt.Errorf("finish supplier cost backfill run: %w", finishErr))
+			} else if firstErr != nil && IsSupplierProviderSessionFailure(firstErr) {
+				callbackErr = supplierProviderSessionFailureWithFinishError(firstErr, finishErr)
+			} else {
+				callbackErr = fmt.Errorf("finish supplier cost backfill run: %w", finishErr)
+			}
 		}
 		_ = s.dataRepo.UpdateSyncStatus(ctx, locked.ID, run.Status, run.ErrorMessage, finishedAt)
-		return SupplierProviderSyncResult{
+		result := SupplierProviderSyncResult{
 			ProviderID:   locked.ID,
 			ProviderName: locked.Name,
 			Scope:        SupplierSyncScopeCost,
@@ -643,7 +700,14 @@ func (s *SupplierProviderSyncService) backfillProviderCosts(ctx context.Context,
 			Counts:       run.Counts,
 			StartedAt:    runStarted,
 			FinishedAt:   finishedAt,
-		}, nil
+		}
+		if callbackErr != nil {
+			return result, callbackErr
+		}
+		if authFailure || sessionFailure {
+			return result, firstErr
+		}
+		return result, nil
 	})
 	if err != nil {
 		return partial, err
@@ -743,13 +807,28 @@ func (s *SupplierProviderSyncService) TestEndpoint(ctx context.Context, provider
 		return SupplierProviderEndpointTestResult{}, fmt.Errorf("supplier provider remote client does not support endpoint test")
 	}
 	result, err := tester.TestEndpoint(ctx, provider, password, scope)
+	if err == nil && supplierProviderEndpointAuthFailure(result) {
+		err = wrapSupplierProviderAuthFailure(fmt.Errorf("supplier provider endpoint test returned HTTP %d: %s", result.HTTPStatus, result.Error))
+	}
 	if err != nil {
-		return SupplierProviderEndpointTestResult{}, err
+		if IsSupplierProviderAuthFailure(err) {
+			result.Error = supplierProviderAuthFailureDisableMessage
+			err = supplierProviderAuthFailureWithDisableError(err, s.disableProviderAfterAuthFailure(ctx, provider.ID, time.Now()))
+		}
+		return result, err
 	}
 	result.ProviderID = provider.ID
 	result.Scope = scope
 	result.SensitiveRedacted = true
 	return result, nil
+}
+
+func supplierProviderEndpointAuthFailure(result SupplierProviderEndpointTestResult) bool {
+	if result.HTTPStatus == 401 || result.HTTPStatus == 403 {
+		return true
+	}
+	text := strings.ToLower(strings.TrimSpace(result.Error + " " + result.ResponseSummary))
+	return supplierSub2APIAuthPhrase(text) || supplierNewAPIAuthPhrase(text)
 }
 
 func (s *SupplierProviderSyncService) SyncAll(ctx context.Context, providerID int64, trigger string) (SupplierProviderSyncResult, error) {
@@ -759,45 +838,76 @@ func (s *SupplierProviderSyncService) SyncAll(ctx context.Context, providerID in
 		startedAt := time.Now()
 		run := &SupplierProviderSyncRun{ProviderID: provider.ID, SyncScope: SupplierSyncScopeAll, TriggerSource: normalizeSupplierSyncTrigger(trigger), Status: SupplierSyncStatusRunning, StartedAt: startedAt}
 		if err := s.dataRepo.CreateSyncRun(ctx, run); err != nil {
-			return SupplierProviderSyncResult{}, fmt.Errorf("create supplier sync run: %w", err)
+			err = fmt.Errorf("create supplier sync run: %w", err)
+			SupplierSyncProgressFail(ctx, SupplierSyncProgressStagePersist, err)
+			return SupplierProviderSyncResult{}, err
 		}
 		result := SupplierProviderSyncResult{ProviderID: provider.ID, ProviderName: provider.Name, Scope: SupplierSyncScopeAll, Status: SupplierSyncStatusSuccess, StartedAt: startedAt}
-		for _, stageFn := range []func() SupplierProviderSyncStage{
-			func() SupplierProviderSyncStage {
+		authFailure := false
+		sessionFailure := false
+		for _, stageFn := range []func() (SupplierProviderSyncStage, error){
+			func() (SupplierProviderSyncStage, error) {
 				return s.syncStageAsSummary(ctx, provider, password, SupplierSyncScopeAccounts)
 			},
-			func() SupplierProviderSyncStage {
+			func() (SupplierProviderSyncStage, error) {
 				return s.syncStageAsSummary(ctx, provider, password, SupplierSyncScopeGroups)
 			},
-			func() SupplierProviderSyncStage {
+			func() (SupplierProviderSyncStage, error) {
 				return s.syncStageAsSummary(ctx, provider, password, SupplierSyncScopeBalance)
 			},
-			func() SupplierProviderSyncStage { return s.syncCostStageAsSummary(ctx, provider, password, time.Now()) },
+			func() (SupplierProviderSyncStage, error) {
+				return s.syncCostStageAsSummary(ctx, provider, password, time.Now())
+			},
 		} {
-			stage := stageFn()
+			stage, stageErr := stageFn()
 			result.Stages = append(result.Stages, stage)
 			result.Counts.CheckedCount += stage.Counts.CheckedCount
 			result.Counts.CreatedCount += stage.Counts.CreatedCount
 			result.Counts.UpdatedCount += stage.Counts.UpdatedCount
 			result.Counts.SkippedCount += stage.Counts.SkippedCount
+			if IsSupplierProviderAuthFailure(stageErr) {
+				authFailure = true
+				result.Status = SupplierSyncStatusFailed
+				break
+			}
+			if IsSupplierProviderSessionFailure(stageErr) {
+				sessionFailure = true
+				result.Status = SupplierSyncStatusFailed
+				result.Message = stage.Message
+				break
+			}
 			if stage.Status == SupplierSyncStatusFailed {
 				result.Status = SupplierSyncStatusPartial
 			}
 		}
-		if allStagesFailed(result.Stages) {
+		if !authFailure && !sessionFailure && allStagesFailed(result.Stages) {
 			result.Status = SupplierSyncStatusFailed
 		}
 		result.FinishedAt = time.Now()
-		result.Message = supplierSyncMessage(result.Status)
+		if authFailure {
+			result.Message = supplierProviderAuthFailureDisableMessage
+		} else if !sessionFailure {
+			result.Message = supplierSyncMessage(result.Status)
+		}
 		finishedAt := result.FinishedAt
 		run.Status = result.Status
 		run.Counts = result.Counts
 		run.ErrorMessage = result.Message
 		run.FinishedAt = &finishedAt
-		if err := s.dataRepo.FinishSyncRun(ctx, run); err != nil {
-			return result, fmt.Errorf("finish supplier sync run: %w", err)
+		if finishErr := s.dataRepo.FinishSyncRun(ctx, run); finishErr != nil {
+			err := fmt.Errorf("finish supplier sync run: %w", finishErr)
+			result.Status = SupplierSyncStatusFailed
+			result.Message = err.Error()
+			SupplierSyncProgressFail(ctx, SupplierSyncProgressStagePersist, err)
+			return result, err
 		}
-		_ = s.dataRepo.UpdateSyncStatus(ctx, provider.ID, result.Status, result.Message, finishedAt)
+		if statusErr := s.dataRepo.UpdateSyncStatus(ctx, provider.ID, result.Status, result.Message, finishedAt); statusErr != nil {
+			err := fmt.Errorf("update supplier sync status: %w", statusErr)
+			result.Status = SupplierSyncStatusFailed
+			result.Message = err.Error()
+			SupplierSyncProgressFail(ctx, SupplierSyncProgressStagePersist, err)
+			return result, err
+		}
 		return result, nil
 	})
 }
@@ -842,21 +952,26 @@ func (s *SupplierProviderSyncService) SyncAllEnabled(ctx context.Context, trigge
 }
 
 func (s *SupplierProviderSyncService) syncWithLock(ctx context.Context, providerID int64, fn func(*SupplierProvider) (SupplierProviderSyncResult, error)) (SupplierProviderSyncResult, error) {
+	SupplierSyncProgress(ctx, SupplierSyncProgressStagePrepare, "正在校验供应商配置并准备同步", nil)
 	provider, err := s.validSyncProvider(ctx, providerID)
 	if err != nil {
+		SupplierSyncProgressFail(ctx, SupplierSyncProgressStagePrepare, err)
 		return SupplierProviderSyncResult{}, err
 	}
 	owner := uuid.NewString()
 	if s.syncLock != nil {
 		acquired, err := s.syncLock.TryAcquireSyncLock(ctx, providerID, owner, 15*time.Minute)
 		if err != nil {
+			SupplierSyncProgressFail(ctx, SupplierSyncProgressStagePrepare, err)
 			return SupplierProviderSyncResult{}, fmt.Errorf("acquire supplier sync lock: %w", err)
 		}
 		if !acquired {
+			SupplierSyncProgressFail(ctx, SupplierSyncProgressStagePrepare, ErrSupplierProviderSyncConflict)
 			return SupplierProviderSyncResult{}, ErrSupplierProviderSyncConflict
 		}
 		defer func() { _ = s.syncLock.ReleaseSyncLock(context.Background(), providerID, owner) }()
 	}
+	SupplierSyncProgressOK(ctx, SupplierSyncProgressStagePrepare, "供应商配置校验通过，已开始同步")
 	return fn(provider)
 }
 
@@ -880,18 +995,25 @@ func (s *SupplierProviderSyncService) syncStage(ctx context.Context, provider *S
 	if scope == SupplierSyncScopeCost {
 		return s.syncCostStage(ctx, provider, password, time.Now(), trigger, createRun)
 	}
+	progressStage := supplierSyncProgressStageForScope(scope)
 	startedAt := time.Now()
 	result := SupplierProviderSyncResult{ProviderID: provider.ID, ProviderName: provider.Name, Scope: scope, Status: SupplierSyncStatusRunning, StartedAt: startedAt}
 	run := &SupplierProviderSyncRun{ProviderID: provider.ID, SyncScope: scope, TriggerSource: normalizeSupplierSyncTrigger(trigger), Status: SupplierSyncStatusRunning, StartedAt: startedAt}
 	if createRun {
 		if err := s.dataRepo.CreateSyncRun(ctx, run); err != nil {
-			return result, fmt.Errorf("create supplier sync run: %w", err)
+			err = fmt.Errorf("create supplier sync run: %w", err)
+			SupplierSyncProgressFail(ctx, SupplierSyncProgressStagePersist, err)
+			return result, err
 		}
 	}
 	var counts SupplierSyncCounts
 	var err error
+	SupplierSyncProgress(ctx, SupplierSyncProgressStageSession, "正在获取或复用上游登录会话", nil)
 	if scope == SupplierSyncScopeGroups {
 		err = s.dataRepo.UpdateGroupSyncStatus(ctx, provider.ID, SupplierSyncStatusRunning, "", startedAt)
+		if err != nil {
+			SupplierSyncProgressFail(ctx, SupplierSyncProgressStagePersist, err)
+		}
 	}
 	if err == nil {
 		counts, err = s.executeStage(ctx, provider, password, scope, startedAt)
@@ -901,15 +1023,21 @@ func (s *SupplierProviderSyncService) syncStage(ctx context.Context, provider *S
 	if err != nil {
 		result.Status = SupplierSyncStatusFailed
 		result.Message = err.Error()
+		if IsSupplierProviderAuthFailure(err) {
+			result.Message = supplierProviderAuthFailureDisableMessage
+			err = supplierProviderAuthFailureWithDisableError(err, s.disableProviderAfterAuthFailure(ctx, provider.ID, result.FinishedAt))
+		}
 	} else {
 		result.Status = SupplierSyncStatusSuccess
 		result.Message = supplierSyncMessage(result.Status)
+		SupplierSyncProgressOK(ctx, progressStage, fmt.Sprintf("%s同步完成", supplierSyncProgressScopeLabel(scope)))
 	}
 	if scope == SupplierSyncScopeGroups {
 		if statusErr := s.dataRepo.UpdateGroupSyncStatus(ctx, provider.ID, result.Status, result.Message, result.FinishedAt); statusErr != nil && err == nil {
 			err = fmt.Errorf("update supplier group sync status: %w", statusErr)
 			result.Status = SupplierSyncStatusFailed
 			result.Message = err.Error()
+			SupplierSyncProgressFail(ctx, SupplierSyncProgressStagePersist, err)
 		}
 	}
 	if createRun {
@@ -920,38 +1048,70 @@ func (s *SupplierProviderSyncService) syncStage(ctx context.Context, provider *S
 		run.FinishedAt = &finishedAt
 		if finishErr := s.dataRepo.FinishSyncRun(ctx, run); finishErr != nil && err == nil {
 			err = fmt.Errorf("finish supplier sync run: %w", finishErr)
+			result.Status = SupplierSyncStatusFailed
+			result.Message = err.Error()
+			SupplierSyncProgressFail(ctx, SupplierSyncProgressStagePersist, err)
 		}
-		_ = s.dataRepo.UpdateSyncStatus(ctx, provider.ID, result.Status, result.Message, finishedAt)
+		if statusErr := s.dataRepo.UpdateSyncStatus(ctx, provider.ID, result.Status, result.Message, finishedAt); statusErr != nil {
+			statusErr = fmt.Errorf("update supplier sync status: %w", statusErr)
+			if err == nil {
+				err = statusErr
+				result.Status = SupplierSyncStatusFailed
+				result.Message = statusErr.Error()
+			}
+			SupplierSyncProgressFail(ctx, SupplierSyncProgressStagePersist, statusErr)
+		}
 	}
 	return result, err
 }
 
 func (s *SupplierProviderSyncService) syncCostStage(ctx context.Context, provider *SupplierProvider, password string, day time.Time, trigger string, createRun bool) (SupplierProviderSyncResult, error) {
+	progressStage := SupplierSyncProgressStageCost
 	startedAt := time.Now()
 	result := SupplierProviderSyncResult{ProviderID: provider.ID, ProviderName: provider.Name, Scope: SupplierSyncScopeCost, Status: SupplierSyncStatusRunning, StartedAt: startedAt}
 	run := &SupplierProviderSyncRun{ProviderID: provider.ID, SyncScope: SupplierSyncScopeCost, TriggerSource: normalizeSupplierSyncTrigger(trigger), Status: SupplierSyncStatusRunning, StartedAt: startedAt}
 	if createRun {
 		if err := s.dataRepo.CreateSyncRun(ctx, run); err != nil {
-			return result, fmt.Errorf("create supplier sync run: %w", err)
+			err = fmt.Errorf("create supplier sync run: %w", err)
+			SupplierSyncProgressFail(ctx, SupplierSyncProgressStagePersist, err)
+			return result, err
 		}
 	}
+	SupplierSyncProgress(ctx, SupplierSyncProgressStageSession, "正在获取或复用上游登录会话", nil)
+	SupplierSyncProgress(ctx, progressStage, "正在请求上游成本接口", nil)
 	statDay := day
 	if statDay.IsZero() {
 		statDay = startedAt
 	}
-	cost, err := s.remote.FetchCost(ctx, provider, password, statDay)
-	if err == nil {
+	cost, requestErr := s.remote.FetchCost(ctx, provider, password, statDay)
+	var err error
+	if requestErr == nil {
+		SupplierSyncProgress(ctx, progressStage, "成本接口请求成功，正在写入本地数据", nil)
+		SupplierSyncProgress(ctx, SupplierSyncProgressStagePersist, "正在写入成本数据", nil)
 		// 按成本归属日写入 daily_stats，避免历史回补落到当天。
 		err = s.dataRepo.UpdateCost(ctx, provider.ID, cost, statDay)
+	} else {
+		err = requestErr
 	}
 	result.Counts = SupplierSyncCounts{CheckedCount: 1, UpdatedCount: boolToInt(err == nil)}
 	result.FinishedAt = time.Now()
 	if err != nil {
 		result.Status = SupplierSyncStatusFailed
 		result.Message = err.Error()
+		if IsSupplierProviderAuthFailure(err) {
+			result.Message = supplierProviderAuthFailureDisableMessage
+			err = supplierProviderAuthFailureWithDisableError(err, s.disableProviderAfterAuthFailure(ctx, provider.ID, result.FinishedAt))
+		}
+		if requestErr == nil {
+			SupplierSyncProgressFail(ctx, SupplierSyncProgressStagePersist, err)
+		} else {
+			SupplierSyncProgressFail(ctx, progressStage, err)
+		}
 	} else {
 		result.Status = SupplierSyncStatusSuccess
 		result.Message = supplierSyncMessage(result.Status)
+		SupplierSyncProgressOK(ctx, SupplierSyncProgressStagePersist, "成本数据写入完成")
+		SupplierSyncProgressOK(ctx, progressStage, "成本同步完成")
 	}
 	if createRun {
 		finishedAt := result.FinishedAt
@@ -961,65 +1121,110 @@ func (s *SupplierProviderSyncService) syncCostStage(ctx context.Context, provide
 		run.FinishedAt = &finishedAt
 		if finishErr := s.dataRepo.FinishSyncRun(ctx, run); finishErr != nil && err == nil {
 			err = fmt.Errorf("finish supplier sync run: %w", finishErr)
+			result.Status = SupplierSyncStatusFailed
+			result.Message = err.Error()
+			SupplierSyncProgressFail(ctx, SupplierSyncProgressStagePersist, err)
 		}
-		_ = s.dataRepo.UpdateSyncStatus(ctx, provider.ID, result.Status, result.Message, finishedAt)
+		if statusErr := s.dataRepo.UpdateSyncStatus(ctx, provider.ID, result.Status, result.Message, finishedAt); statusErr != nil {
+			statusErr = fmt.Errorf("update supplier sync status: %w", statusErr)
+			if err == nil {
+				err = statusErr
+				result.Status = SupplierSyncStatusFailed
+				result.Message = statusErr.Error()
+			}
+			SupplierSyncProgressFail(ctx, SupplierSyncProgressStagePersist, statusErr)
+		}
 	}
 	return result, err
 }
 
 func (s *SupplierProviderSyncService) executeStage(ctx context.Context, provider *SupplierProvider, password, scope string, seenAt time.Time) (SupplierSyncCounts, error) {
+	progressStage := supplierSyncProgressStageForScope(scope)
 	switch scope {
 	case SupplierSyncScopeAccounts:
+		SupplierSyncProgress(ctx, progressStage, "正在请求上游 API Key 接口", nil)
 		items, err := s.remote.FetchAccounts(ctx, provider, password)
 		if err != nil {
+			SupplierSyncProgressFail(ctx, progressStage, err)
 			return SupplierSyncCounts{}, err
 		}
-		return s.dataRepo.ReplaceAccounts(ctx, provider.ID, items, seenAt)
+		SupplierSyncProgress(ctx, progressStage, fmt.Sprintf("API Key 接口请求成功，获取 %d 条记录", len(items)), nil)
+		SupplierSyncProgress(ctx, SupplierSyncProgressStagePersist, "正在写入 API Key 数据", nil)
+		counts, err := s.dataRepo.ReplaceAccounts(ctx, provider.ID, items, seenAt)
+		if err != nil {
+			SupplierSyncProgressFail(ctx, SupplierSyncProgressStagePersist, err)
+			return counts, err
+		}
+		SupplierSyncProgressOK(ctx, SupplierSyncProgressStagePersist, "API Key 数据写入完成")
+		return counts, nil
 	case SupplierSyncScopeGroups:
+		SupplierSyncProgress(ctx, progressStage, "正在请求上游分组接口", nil)
 		items, err := s.remote.FetchGroups(ctx, provider, password)
 		if err != nil {
+			SupplierSyncProgressFail(ctx, progressStage, err)
 			return SupplierSyncCounts{}, err
 		}
+		SupplierSyncProgress(ctx, progressStage, fmt.Sprintf("分组接口请求成功，获取 %d 条记录", len(items)), nil)
+		SupplierSyncProgress(ctx, SupplierSyncProgressStagePersist, "正在写入分组数据", nil)
 		counts, err := s.dataRepo.ReplaceGroups(ctx, provider.ID, items, seenAt)
 		if err != nil {
+			SupplierSyncProgressFail(ctx, SupplierSyncProgressStagePersist, err)
 			return counts, err
 		}
 		if s.groupMatcher != nil {
+			SupplierSyncProgress(ctx, SupplierSyncProgressStagePersist, "正在更新分组自动匹配关系", nil)
 			if _, err := s.groupMatcher.AutoMatch(ctx, provider.ID); err != nil {
+				SupplierSyncProgressFail(ctx, SupplierSyncProgressStagePersist, err)
 				return counts, fmt.Errorf("auto match supplier groups: %w", err)
 			}
 		}
+		SupplierSyncProgressOK(ctx, SupplierSyncProgressStagePersist, "分组数据写入完成")
 		return counts, nil
 	case SupplierSyncScopeBalance:
+		SupplierSyncProgress(ctx, progressStage, "正在请求上游余额接口", nil)
 		balance, err := s.remote.FetchBalance(ctx, provider, password)
 		if err != nil {
+			SupplierSyncProgressFail(ctx, progressStage, err)
 			return SupplierSyncCounts{}, err
 		}
+		SupplierSyncProgress(ctx, progressStage, "余额接口请求成功，正在写入本地数据", nil)
+		SupplierSyncProgress(ctx, SupplierSyncProgressStagePersist, "正在写入余额数据", nil)
 		if err := s.dataRepo.UpdateBalance(ctx, provider.ID, balance, seenAt); err != nil {
+			SupplierSyncProgressFail(ctx, SupplierSyncProgressStagePersist, err)
 			return SupplierSyncCounts{}, err
 		}
+		SupplierSyncProgressOK(ctx, SupplierSyncProgressStagePersist, "余额数据写入完成")
 		return SupplierSyncCounts{CheckedCount: 1, UpdatedCount: 1}, nil
 	default:
+		SupplierSyncProgressFail(ctx, SupplierSyncProgressStageError, ErrSupplierProviderInvalid)
 		return SupplierSyncCounts{}, ErrSupplierProviderInvalid
 	}
 }
 
-func (s *SupplierProviderSyncService) syncStageAsSummary(ctx context.Context, provider *SupplierProvider, password, scope string) SupplierProviderSyncStage {
+func (s *SupplierProviderSyncService) syncStageAsSummary(ctx context.Context, provider *SupplierProvider, password, scope string) (SupplierProviderSyncStage, error) {
 	result, err := s.syncStage(ctx, provider, password, scope, SupplierSyncTriggerScheduled, false)
 	if err != nil {
 		result.Status = SupplierSyncStatusFailed
-		result.Message = err.Error()
+		if IsSupplierProviderAuthFailure(err) {
+			result.Message = supplierProviderAuthFailureDisableMessage
+		} else {
+			result.Message = err.Error()
+		}
 	}
-	return SupplierProviderSyncStage{Scope: scope, Status: result.Status, Message: result.Message, Counts: result.Counts, EndpointResult: s.lastEndpointResult(provider.ID, scope)}
+	return SupplierProviderSyncStage{Scope: scope, Status: result.Status, Message: result.Message, Counts: result.Counts, EndpointResult: s.lastEndpointResult(provider.ID, scope)}, err
 }
 
-func (s *SupplierProviderSyncService) syncCostStageAsSummary(ctx context.Context, provider *SupplierProvider, password string, day time.Time) SupplierProviderSyncStage {
+func (s *SupplierProviderSyncService) syncCostStageAsSummary(ctx context.Context, provider *SupplierProvider, password string, day time.Time) (SupplierProviderSyncStage, error) {
 	result, err := s.syncCostStage(ctx, provider, password, day, SupplierSyncTriggerScheduled, false)
 	if err != nil {
 		result.Status = SupplierSyncStatusFailed
-		result.Message = err.Error()
+		if IsSupplierProviderAuthFailure(err) {
+			result.Message = supplierProviderAuthFailureDisableMessage
+		} else {
+			result.Message = err.Error()
+		}
 	}
-	return SupplierProviderSyncStage{Scope: SupplierSyncScopeCost, Status: result.Status, Message: result.Message, Counts: result.Counts, EndpointResult: s.lastEndpointResult(provider.ID, SupplierSyncScopeCost)}
+	return SupplierProviderSyncStage{Scope: SupplierSyncScopeCost, Status: result.Status, Message: result.Message, Counts: result.Counts, EndpointResult: s.lastEndpointResult(provider.ID, SupplierSyncScopeCost)}, err
 }
 
 func (s *SupplierProviderSyncService) lastEndpointResult(providerID int64, scope string) *SupplierProviderEndpointResult {

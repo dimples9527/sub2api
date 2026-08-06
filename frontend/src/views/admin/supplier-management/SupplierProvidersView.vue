@@ -141,7 +141,7 @@
             <div class="sp-inline" @click.stop>
               <button class="sp-button small" type="button" @click="openAuthHistory(provider)">登录记录</button>
               <button class="sp-button small" type="button" @click="openEdit(provider)">编辑</button>
-              <button class="sp-button small" type="button" :disabled="isSyncing(provider, 'all')" @click="syncProviderData(provider, 'all')">{{ isSyncing(provider, 'all') ? '同步中' : '同步全部' }}</button>
+              <button class="sp-button small" type="button" :disabled="isProviderSyncing(provider)" @click="syncProviderData(provider, 'all')">{{ isProviderSyncing(provider) ? '同步中' : '同步全部' }}</button>
               <button class="sp-button small" type="button" :disabled="provider.is_default" @click="makeDefault(provider)">默认</button>
               <button class="sp-button small danger" type="button" @click="removeProvider(provider)">删除</button>
             </div>
@@ -375,16 +375,53 @@
         <div class="sp-drawer-actions">
           <button class="sp-button primary" type="button" @click="openEdit(selectedProvider)">编辑配置</button>
           <button class="sp-button" type="button" @click="openAuthHistory(selectedProvider)">登录与 Token</button>
-          <button class="sp-button" type="button" :disabled="isSyncing(selectedProvider, 'accounts')" @click="syncProviderData(selectedProvider, 'accounts')">同步 API Key</button>
-          <button class="sp-button" type="button" :disabled="isSyncing(selectedProvider, 'groups')" @click="syncProviderData(selectedProvider, 'groups')">同步分组</button>
-          <button class="sp-button" type="button" :disabled="isSyncing(selectedProvider, 'balance')" @click="syncProviderData(selectedProvider, 'balance')">刷新余额</button>
-          <button class="sp-button" type="button" :disabled="isSyncing(selectedProvider, 'cost')" @click="syncProviderData(selectedProvider, 'cost')">刷新成本</button>
+          <button class="sp-button primary" type="button" :disabled="isProviderSyncing(selectedProvider)" @click="syncProviderData(selectedProvider, 'all')">同步全部</button>
+          <button class="sp-button" type="button" :disabled="isProviderSyncing(selectedProvider)" @click="syncProviderData(selectedProvider, 'accounts')">同步 API Key</button>
+          <button class="sp-button" type="button" :disabled="isProviderSyncing(selectedProvider)" @click="syncProviderData(selectedProvider, 'groups')">同步分组</button>
+          <button class="sp-button" type="button" :disabled="isProviderSyncing(selectedProvider)" @click="syncProviderData(selectedProvider, 'balance')">刷新余额</button>
+          <button class="sp-button" type="button" :disabled="isProviderSyncing(selectedProvider)" @click="syncProviderData(selectedProvider, 'cost')">刷新成本</button>
           <button class="sp-button" type="button" :disabled="isTesting(selectedProvider, 'accounts')" @click="testProviderEndpointData(selectedProvider, 'accounts')">{{ isTesting(selectedProvider, 'accounts') ? '测试中' : '测试 API Key' }}</button>
           <button class="sp-button" type="button" :disabled="isTesting(selectedProvider, 'groups')" @click="testProviderEndpointData(selectedProvider, 'groups')">{{ isTesting(selectedProvider, 'groups') ? '测试中' : '测试分组' }}</button>
           <button class="sp-button" type="button" :disabled="isTesting(selectedProvider, 'balance')" @click="testProviderEndpointData(selectedProvider, 'balance')">{{ isTesting(selectedProvider, 'balance') ? '测试中' : '测试余额' }}</button>
           <button class="sp-button" type="button" :disabled="isTesting(selectedProvider, 'cost')" @click="testProviderEndpointData(selectedProvider, 'cost')">{{ isTesting(selectedProvider, 'cost') ? '测试中' : '测试成本' }}</button>
           <button class="sp-button" type="button" :disabled="selectedProvider.is_default" @click="makeDefault(selectedProvider)">设为默认</button>
         </div>
+        <section v-if="syncProgressEntries(selectedProvider).length > 0" class="sp-sync-progress" data-test="supplier-sync-progress">
+          <div class="sp-sync-progress-heading">
+            <div>
+              <span class="sp-sync-progress-kicker">实时同步诊断</span>
+              <h4>同步进度</h4>
+            </div>
+            <span class="sp-sync-progress-note">关闭抽屉后仍会保留本次记录</span>
+          </div>
+          <article
+            v-for="progress in syncProgressEntries(selectedProvider)"
+            :key="`${progress.scope}`"
+            class="sp-sync-progress-card"
+            :data-test="`supplier-sync-progress-${progress.scope}`"
+          >
+            <header class="sp-sync-progress-card-head">
+              <div>
+                <strong>{{ scopeLabel(progress.scope) }}同步</strong>
+                <span>{{ syncProgressStatusDetail(progress) }}</span>
+              </div>
+              <span class="sp-sync-progress-status" :class="syncProgressStatusClass(progress)">{{ syncProgressStatusLabel(progress) }}</span>
+            </header>
+            <div v-if="progress.events.length === 0" class="sp-sync-progress-empty">正在建立实时进度连接…</div>
+            <ol v-else class="sp-sync-progress-list">
+              <li
+                v-for="event in syncProgressSteps(progress.events)"
+                :key="`${progress.scope}:${event.stage}`"
+                class="sp-sync-progress-item"
+                :class="syncProgressEventClass(event)"
+              >
+                <span class="sp-sync-progress-icon" aria-hidden="true">{{ syncProgressEventGlyph(event) }}</span>
+                <span class="sp-sync-progress-stage">{{ syncStageLabel(event.stage) }}</span>
+                <span class="sp-sync-progress-message">{{ event.message }}</span>
+              </li>
+            </ol>
+          </article>
+        </section>
         <div class="sp-timeline">
           <h4>接口配置</h4>
           <div class="sp-event"><b>基础地址</b><p>{{ selectedProvider.base_url }}</p></div>
@@ -520,7 +557,7 @@
                 <Toggle v-model="form.turnstile_enabled" />
                 <em>{{ form.turnstile_enabled ? '开启' : '关闭' }}</em>
               </div>
-              <p class="sp-toggle-hint">开启后，登录该上游前会调用 2Captcha 自动求解验证码；失败将导致登录失败</p>
+              <p class="sp-toggle-hint">开启后，登录该上游前会调用当前配置的打码平台自动求解验证码；失败将导致登录失败</p>
             </label>
             <label class="sp-toggle-field sp-dialog-toggle-card">
               <span>设为默认供应商</span>
@@ -753,7 +790,7 @@ import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import supplierProvidersAPI, { type SupplierProvider, type SupplierProviderSummary, type SupplierProviderUpsertPayload, type SupplierProviderCostTrendPoint, type SupplierProviderCostBreakdown, type SupplierProviderCostBackfillResult, type SupplierProviderAuthStatusResult, type SupplierProviderAuthHistoryResult, type SupplierProviderAuthEventType } from '@/api/admin/supplierProviders'
 import supplierProviderTypesAPI, { type SupplierProviderType, type SupplierProviderTypeUpsertPayload } from '@/api/admin/supplierProviderTypes'
-import { syncProvider, testProviderEndpoint, type SupplierProviderEndpointTestResult, type SupplierSyncScope } from '@/api/admin/supplierProviderData'
+import { streamSupplierProviderSync, testProviderEndpoint, type SupplierProviderEndpointTestResult, type SupplierSyncProgressEvent, type SupplierSyncProgressStage, type SupplierSyncScope } from '@/api/admin/supplierProviderData'
 import { useAppStore } from '@/stores/app'
 import type { Column } from '@/components/common/types'
 
@@ -779,6 +816,41 @@ const providerQuickFilters: Array<{ key: ProviderQuickFilter; label: string }> =
   { key: 'default', label: '默认' },
 ]
 type SupplierDiagnosticScope = Exclude<SupplierSyncScope, 'all'>
+
+type SupplierSyncProgressState = {
+  scope: SupplierSyncScope
+  running: boolean
+  events: SupplierSyncProgressEvent[]
+  finalOk: boolean | null
+}
+
+const syncProgressScopes: SupplierSyncScope[] = ['all', 'accounts', 'groups', 'balance', 'cost']
+const syncStageLabels: Record<SupplierSyncProgressStage, string> = {
+  prepare: '准备',
+  captcha: '打码',
+  session: '会话',
+  login: '登录',
+  accounts: 'API Key',
+  groups: '分组',
+  balance: '余额',
+  cost: '成本',
+  persist: '写入',
+  done: '完成',
+  error: '失败',
+}
+const syncStageOrder: Record<SupplierSyncProgressStage, number> = {
+  prepare: 1,
+  captcha: 2,
+  session: 3,
+  login: 4,
+  accounts: 5,
+  groups: 6,
+  balance: 7,
+  cost: 8,
+  persist: 9,
+  done: 10,
+  error: 10,
+}
 
 const emptySummary = (): SupplierProviderSummary => ({
   total_count: 0,
@@ -885,6 +957,7 @@ const createTypeVisible = ref(false)
 const form = reactive<SupplierProviderUpsertPayload>(emptyForm())
 const typeForm = reactive<SupplierProviderTypeUpsertPayload>(emptyTypeForm())
 const syncingKeys = ref<Set<string>>(new Set())
+const syncProgressStates = ref<Record<string, SupplierSyncProgressState>>({})
 const testingKeys = ref<Set<string>>(new Set())
 const updatingProviderIDs = ref<Set<number>>(new Set())
 const testResultVisible = ref(false)
@@ -1708,25 +1781,156 @@ async function removeProvider(provider: SupplierProvider) {
   }
 }
 
+function syncProgressKey(providerID: number, scope: SupplierSyncScope): string {
+  return `${providerID}:${scope}`
+}
+
+function resetSyncProgress(provider: SupplierProvider, scope: SupplierSyncScope): void {
+  const key = syncProgressKey(provider.id, scope)
+  syncProgressStates.value = {
+    ...syncProgressStates.value,
+    [key]: { scope, running: true, events: [], finalOk: null },
+  }
+}
+
+function appendSyncProgress(provider: SupplierProvider, scope: SupplierSyncScope, event: SupplierSyncProgressEvent): void {
+  const key = syncProgressKey(provider.id, scope)
+  const previous = syncProgressStates.value[key] || { scope, running: true, events: [], finalOk: null }
+  const failed = event.stage === 'error' || event.ok === false
+  const terminal = event.stage === 'done' || event.stage === 'error'
+  syncProgressStates.value = {
+    ...syncProgressStates.value,
+    [key]: {
+      ...previous,
+      scope,
+      running: terminal ? false : previous.running,
+      events: [...previous.events, event],
+      finalOk: terminal ? !failed : failed ? false : previous.finalOk,
+    },
+  }
+}
+
+function appendLocalSyncProgressError(provider: SupplierProvider, scope: SupplierSyncScope, message: string): void {
+  appendSyncProgress(provider, scope, {
+    stage: 'error',
+    message,
+    ok: false,
+    time: new Date().toISOString(),
+  })
+}
+
+function syncProgressEntries(provider: SupplierProvider): SupplierSyncProgressState[] {
+  return syncProgressScopes
+    .map(scope => syncProgressStates.value[syncProgressKey(provider.id, scope)])
+    .filter((state): state is SupplierSyncProgressState => Boolean(state))
+}
+
+function syncProgressSteps(events: SupplierSyncProgressEvent[]): SupplierSyncProgressEvent[] {
+  const latestByStage = new Map<SupplierSyncProgressStage, SupplierSyncProgressEvent>()
+  for (const event of events) latestByStage.set(event.stage, event)
+  return [...latestByStage.values()].sort((left, right) => syncStageOrder[left.stage] - syncStageOrder[right.stage])
+}
+
+function syncStageLabel(stage: SupplierSyncProgressStage): string {
+  return syncStageLabels[stage]
+}
+
+function syncProgressEventStatus(event: SupplierSyncProgressEvent): 'running' | 'success' | 'failed' {
+  if (event.stage === 'error' || event.ok === false) return 'failed'
+  if (event.stage === 'done' || event.ok === true) return 'success'
+  return 'running'
+}
+
+function syncProgressEventClass(event: SupplierSyncProgressEvent): string {
+  return `sp-sync-progress-${syncProgressEventStatus(event)}`
+}
+
+function syncProgressEventGlyph(event: SupplierSyncProgressEvent): string {
+  const status = syncProgressEventStatus(event)
+  if (status === 'failed') return '×'
+  if (status === 'success') return '✓'
+  return '…'
+}
+
+function syncProgressStatus(state: SupplierSyncProgressState): 'running' | 'success' | 'failed' {
+  if (state.running || state.finalOk === null) return 'running'
+  return state.finalOk ? 'success' : 'failed'
+}
+
+function syncProgressStatusClass(state: SupplierSyncProgressState): string {
+  return `sp-sync-progress-${syncProgressStatus(state)}`
+}
+
+function syncProgressStatusLabel(state: SupplierSyncProgressState): string {
+  const status = syncProgressStatus(state)
+  if (status === 'failed') return '失败'
+  if (status === 'success') return '已完成'
+  return '进行中'
+}
+
+function syncProgressFailureMessage(state: SupplierSyncProgressState): string {
+  const event = [...state.events].reverse().find(item => syncProgressEventStatus(item) === 'failed')
+  return event?.message || ''
+}
+
+function syncProgressStatusDetail(state: SupplierSyncProgressState): string {
+  if (state.running) return state.events.at(-1)?.message || '正在建立实时进度连接…'
+  if (state.finalOk === false) return syncProgressFailureMessage(state) || '同步未完成，请查看失败阶段'
+  return state.events.at(-1)?.message || '同步已完成'
+}
+
 async function syncProviderData(provider: SupplierProvider, scope: SupplierSyncScope) {
-  const key = `${provider.id}:${scope}`
-  if (syncingKeys.value.has(key)) return
+  if (scope === 'all') selectedProvider.value = provider
+  if (isProviderSyncing(provider)) return
+
+  const key = syncProgressKey(provider.id, scope)
   syncingKeys.value = new Set(syncingKeys.value).add(key)
+  resetSyncProgress(provider, scope)
+  let sawTerminalEvent = false
+
   try {
-    const result = await syncProvider(provider.id, scope)
-    showSyncResultFeedback(result.status, scope)
-    await loadProviders()
+    await streamSupplierProviderSync(provider.id, scope, {
+      onEvent: event => {
+        if (event.stage === 'done' || event.stage === 'error') sawTerminalEvent = true
+        appendSyncProgress(provider, scope, event)
+      },
+    })
+
+    if (!sawTerminalEvent) {
+      const message = '同步进度流在完成前断开'
+      appendLocalSyncProgressError(provider, scope, message)
+      appStore.showError(message)
+    } else {
+      const progress = syncProgressStates.value[key]
+      if (progress?.finalOk === false) {
+        appStore.showError(syncProgressFailureMessage(progress) || syncResultText('failed', scope))
+      } else {
+        appStore.showSuccess(syncResultText('success', scope))
+      }
+    }
   } catch (err) {
-    appStore.showError(errorMessage(err, '同步供应商失败'))
+    const message = errorMessage(err, '同步供应商失败')
+    appendLocalSyncProgressError(provider, scope, message)
+    appStore.showError(message)
   } finally {
     const next = new Set(syncingKeys.value)
     next.delete(key)
     syncingKeys.value = next
   }
+
+  try {
+    await loadProviders()
+  } catch (err) {
+    appStore.showError(errorMessage(err, '刷新供应商列表失败'))
+  }
 }
 
 function isSyncing(provider: SupplierProvider, scope: SupplierSyncScope): boolean {
-  return syncingKeys.value.has(`${provider.id}:${scope}`)
+  return syncingKeys.value.has(syncProgressKey(provider.id, scope))
+}
+
+function isProviderSyncing(provider: SupplierProvider): boolean {
+  return syncProgressScopes.some(scope => isSyncing(provider, scope))
 }
 
 async function testProviderEndpointData(provider: SupplierProvider, scope: SupplierDiagnosticScope) {
@@ -1983,19 +2187,6 @@ function currency(value: number): string {
 function numericValue(value: unknown): number {
   const number = Number(value)
   return Number.isFinite(number) ? number : 0
-}
-
-function showSyncResultFeedback(status: string, scope: SupplierSyncScope) {
-  const message = syncResultText(status, scope)
-  if (status === 'failed') {
-    appStore.showError(message)
-    return
-  }
-  if (status === 'partial') {
-    appStore.showWarning(message)
-    return
-  }
-  appStore.showSuccess(message)
 }
 
 function errorMessage(err: unknown, fallback: string): string {
@@ -3219,6 +3410,155 @@ function errorMessage(err: unknown, fallback: string): string {
   max-width: 14rem;
 }
 
+.sp-sync-progress {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding: 0.875rem;
+  border: 1px solid color-mix(in srgb, var(--sp-cyan) 25%, var(--sp-line));
+  border-radius: 0.75rem;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--sp-cyan) 7%, var(--sp-panel)), var(--sp-panel-2));
+}
+
+.sp-sync-progress-heading,
+.sp-sync-progress-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.sp-sync-progress-kicker {
+  display: block;
+  margin-bottom: 0.2rem;
+  color: var(--sp-cyan);
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+
+.sp-sync-progress-heading h4 {
+  margin: 0;
+  color: var(--sp-text);
+  font-size: 0.875rem;
+  font-weight: 800;
+}
+
+.sp-sync-progress-note,
+.sp-sync-progress-card-head span,
+.sp-sync-progress-empty {
+  color: var(--sp-muted);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+}
+
+.sp-sync-progress-note {
+  flex: 0 1 auto;
+  text-align: right;
+}
+
+.sp-sync-progress-card {
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.625rem;
+  background: color-mix(in srgb, var(--sp-panel) 88%, var(--sp-soft));
+}
+
+.sp-sync-progress-card-head strong {
+  display: block;
+  color: var(--sp-text);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.sp-sync-progress-card-head div > span {
+  display: block;
+  max-width: 36rem;
+  margin-top: 0.2rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-sync-progress-status {
+  flex-shrink: 0;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 999px;
+  font-size: 0.625rem !important;
+  font-weight: 800;
+}
+
+.sp-sync-progress-list {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sp-sync-progress-item {
+  display: grid;
+  grid-template-columns: 1rem 3.2rem minmax(0, 1fr);
+  align-items: start;
+  gap: 0.45rem;
+  min-width: 0;
+  color: var(--sp-text);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.sp-sync-progress-icon {
+  display: inline-flex;
+  width: 1rem;
+  height: 1rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 0.625rem;
+  font-weight: 900;
+}
+
+.sp-sync-progress-stage {
+  color: var(--sp-muted);
+  font-size: 0.6875rem;
+  font-weight: 800;
+}
+
+.sp-sync-progress-message {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.sp-sync-progress-running {
+  color: var(--sp-cyan);
+}
+
+.sp-sync-progress-running .sp-sync-progress-icon {
+  animation: sp-sync-progress-pulse 1.25s ease-in-out infinite;
+}
+
+.sp-sync-progress-success {
+  color: var(--sp-green);
+}
+
+.sp-sync-progress-failed {
+  color: var(--sp-red);
+}
+
+.sp-sync-progress-failed .sp-sync-progress-message {
+  font-weight: 700;
+}
+
+@keyframes sp-sync-progress-pulse {
+  0%,
+  100% { opacity: 0.5; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
 @media (max-width: 640px) {
   .sp-health-todo-list {
     grid-template-columns: 1fr;
@@ -3236,6 +3576,20 @@ function errorMessage(err: unknown, fallback: string): string {
 
   .sp-health-date-range {
     max-width: none;
+  }
+
+  .sp-sync-progress-heading,
+  .sp-sync-progress-card-head {
+    flex-direction: column;
+  }
+
+  .sp-sync-progress-note {
+    text-align: left;
+  }
+
+  .sp-sync-progress-card-head div > span {
+    max-width: none;
+    white-space: normal;
   }
 }
 

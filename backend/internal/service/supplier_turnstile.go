@@ -22,7 +22,7 @@ type settingBackedSupplierTurnstileSolver struct {
 	httpClient *http.Client
 }
 
-// NewSettingBackedSupplierTurnstileSolver 使用 settings 表中的全局 2Captcha 配置构造求解器。
+// NewSettingBackedSupplierTurnstileSolver 使用 settings 表中的全局打码配置构造求解器。
 func NewSettingBackedSupplierTurnstileSolver(settings *SettingService, httpClient *http.Client) SupplierTurnstileSolver {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: defaultSupplierSub2APIHTTPTimeout}
@@ -39,50 +39,64 @@ func (s *settingBackedSupplierTurnstileSolver) PrepareToken(
 	if provider == nil || !provider.TurnstileEnabled {
 		return "", nil
 	}
+	SupplierSyncProgress(ctx, SupplierSyncProgressStageCaptcha, "正在准备 Turnstile 打码", nil)
+	fail := func(err error) (string, error) {
+		SupplierSyncProgressFail(ctx, SupplierSyncProgressStageCaptcha, err)
+		return "", err
+	}
 	if s == nil || s.settings == nil {
-		return "", fmt.Errorf("supplier turnstile solver is not configured")
+		return fail(fmt.Errorf("supplier turnstile solver is not configured"))
 	}
 	if fetchSiteKey == nil {
-		return "", fmt.Errorf("supplier turnstile site key fetcher is nil")
+		return fail(fmt.Errorf("supplier turnstile site key fetcher is nil"))
 	}
 
 	cfg, err := s.loadCaptchaConfig(ctx)
 	if err != nil {
-		return "", err
+		return fail(err)
 	}
 	if err := captcha.ValidateConfig(cfg); err != nil {
-		return "", fmt.Errorf("supplier captcha config invalid: %w", err)
+		return fail(fmt.Errorf("supplier captcha config invalid: %w", err))
 	}
 
+	SupplierSyncProgress(ctx, SupplierSyncProgressStageCaptcha, "正在获取上游 Turnstile 配置", nil)
 	siteKey, err := fetchSiteKey(ctx)
 	if err != nil {
-		return "", fmt.Errorf("fetch supplier turnstile site key: %w", err)
+		return fail(fmt.Errorf("fetch supplier turnstile site key: %w", err))
 	}
 	siteKey = strings.TrimSpace(siteKey)
 	if siteKey == "" {
-		return "", fmt.Errorf("supplier turnstile is enabled but upstream site key is empty")
+		return fail(fmt.Errorf("supplier turnstile is enabled but upstream site key is empty"))
 	}
+	SupplierSyncProgressOK(ctx, SupplierSyncProgressStageCaptcha, "已获取上游 Turnstile 配置")
 
 	pageURL = strings.TrimSpace(pageURL)
 	if pageURL == "" {
 		pageURL = strings.TrimRight(strings.TrimSpace(provider.BaseURL), "/")
 	}
 	if pageURL == "" {
-		return "", fmt.Errorf("supplier turnstile page url is empty")
+		return fail(fmt.Errorf("supplier turnstile page url is empty"))
 	}
 
 	providerImpl, err := captcha.New(cfg)
 	if err != nil {
-		return "", err
+		return fail(err)
+	}
+	providerLabel := strings.ToLower(strings.TrimSpace(cfg.Provider))
+	if providerLabel == captcha.ProviderYesCaptcha {
+		SupplierSyncProgress(ctx, SupplierSyncProgressStageCaptcha, "正在调用 YesCaptcha", nil)
+	} else {
+		SupplierSyncProgress(ctx, SupplierSyncProgressStageCaptcha, "正在调用打码平台", nil)
 	}
 	token, err := providerImpl.SolveTurnstile(ctx, siteKey, pageURL)
 	if err != nil {
-		return "", fmt.Errorf("solve supplier turnstile: %w", err)
+		return fail(fmt.Errorf("solve supplier turnstile: %w", err))
 	}
 	token = strings.TrimSpace(token)
 	if token == "" {
-		return "", fmt.Errorf("solve supplier turnstile: empty token")
+		return fail(fmt.Errorf("solve supplier turnstile: empty token"))
 	}
+	SupplierSyncProgressOK(ctx, SupplierSyncProgressStageCaptcha, "打码成功")
 	return token, nil
 }
 

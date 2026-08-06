@@ -10,8 +10,8 @@ import (
 
 // 供应商上游打码 settings key（独立维护，避免侵入通用 SystemSettings）。
 const (
-	SettingKeySupplierCaptchaProvider = "supplier_captcha_provider" // 打码平台，当前仅 2captcha
-	SettingKeySupplierCaptchaAPIKey   = "supplier_captcha_api_key"  // 2Captcha API Key（敏感）
+	SettingKeySupplierCaptchaProvider = "supplier_captcha_provider" // 打码平台
+	SettingKeySupplierCaptchaAPIKey   = "supplier_captcha_api_key"  // 打码平台 API Key（敏感）
 	SettingKeySupplierCaptchaEndpoint = "supplier_captcha_endpoint" // 可选自定义 endpoint
 )
 
@@ -31,6 +31,7 @@ type supplierCaptchaRuntimeConfig struct {
 
 // UpdateSupplierCaptchaSettingsInput 更新请求。
 // APIKey 留空表示保留原值；ClearAPIKey=true 时清空。
+// 切换打码平台时必须提供新 API Key，避免复用旧平台凭据。
 type UpdateSupplierCaptchaSettingsInput struct {
 	Provider    string `json:"provider"`
 	APIKey      string `json:"api_key"`
@@ -39,7 +40,7 @@ type UpdateSupplierCaptchaSettingsInput struct {
 }
 
 func normalizeSupplierCaptchaProvider(provider string) string {
-	provider = strings.TrimSpace(provider)
+	provider = strings.ToLower(strings.TrimSpace(provider))
 	if provider == "" {
 		return captcha.ProviderTwoCaptcha
 	}
@@ -91,12 +92,23 @@ func (s *SettingService) UpdateSupplierCaptchaSettings(ctx context.Context, inpu
 	}
 
 	provider := normalizeSupplierCaptchaProvider(input.Provider)
-	if provider != captcha.ProviderTwoCaptcha {
+	if provider != captcha.ProviderTwoCaptcha && provider != captcha.ProviderYesCaptcha {
 		return nil, fmt.Errorf("unsupported captcha provider: %s", provider)
 	}
 
 	endpoint := strings.TrimSpace(input.Endpoint)
 	apiKey := strings.TrimSpace(input.APIKey)
+	current, err := s.loadSupplierCaptchaRuntimeConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	providerChanged := provider != current.Provider
+	if providerChanged && apiKey == "" && !input.ClearAPIKey {
+		return nil, fmt.Errorf("switching captcha provider requires a new api key")
+	}
+	if providerChanged && endpoint == current.Endpoint {
+		endpoint = ""
+	}
 
 	updates := map[string]string{
 		SettingKeySupplierCaptchaProvider: provider,

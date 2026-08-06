@@ -1,8 +1,35 @@
 import { apiClient } from '../client'
+import { ADMIN_UI_REQUEST_HEADER } from '../adminUIRequest'
+import { buildApiUrl } from '../url'
 import type { BatchAccountTestJob, GroupPlatform, SubscriptionType } from '@/types'
 
 export type SupplierSyncScope = 'accounts' | 'groups' | 'balance' | 'cost' | 'all'
 export type SupplierSyncStatus = 'success' | 'partial' | 'failed'
+
+export type SupplierSyncProgressStage =
+  | 'prepare'
+  | 'captcha'
+  | 'session'
+  | 'login'
+  | 'accounts'
+  | 'groups'
+  | 'balance'
+  | 'cost'
+  | 'persist'
+  | 'done'
+  | 'error'
+
+export interface SupplierSyncProgressEvent {
+  stage: SupplierSyncProgressStage
+  message: string
+  ok?: boolean
+  time: string
+}
+
+export interface SupplierSyncProgressStreamOptions {
+  onEvent: (event: SupplierSyncProgressEvent) => void
+  signal?: AbortSignal
+}
 
 export interface SupplierSyncCounts {
   checked_count: number
@@ -192,6 +219,115 @@ export async function syncProvider(id: number, scope: SupplierSyncScope): Promis
     `/admin/supplier-management/providers/${id}/sync/${scope}`
   )
   return data
+}
+
+/** 使用 SSE 读取供应商同步过程，便于在页面展示打码、登录和数据写入等阶段。 */
+export async function streamSupplierProviderSync(
+  id: number,
+  scope: SupplierSyncScope,
+  options: SupplierSyncProgressStreamOptions,
+): Promise<void> {
+  const path = `/admin/supplier-management/providers/${id}/sync/${scope}/stream`
+  const token = localStorage.getItem('auth_token')
+  const headers: HeadersInit = {
+    Accept: 'text/event-stream',
+    [ADMIN_UI_REQUEST_HEADER]: '1',
+  }
+  if (token) headers.Authorization = `Bearer ${token}`
+
+  const requestInit: RequestInit = {
+    method: 'POST',
+    headers,
+  }
+  if (options.signal) requestInit.signal = options.signal
+
+  const response = await fetch(buildApiUrl(path), requestInit)
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    const detail = readableSupplierSyncError(body) || response.statusText || '未知错误'
+    throw new Error(`同步进度请求失败（${response.status}）：${detail}`)
+  }
+  if (!response.body) {
+    throw new Error('浏览器不支持读取同步进度流')
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) {
+        buffer += decoder.decode()
+        if (buffer.trim()) emitSupplierSyncProgressBlock(buffer, options.onEvent)
+        return
+      }
+
+      buffer += decoder.decode(value, { stream: true })
+      buffer = buffer.replace(/\r\n/g, '\n')
+      let separatorIndex = buffer.indexOf('\n\n')
+      while (separatorIndex >= 0) {
+        const block = buffer.slice(0, separatorIndex)
+        buffer = buffer.slice(separatorIndex + 2)
+        emitSupplierSyncProgressBlock(block, options.onEvent)
+        separatorIndex = buffer.indexOf('\n\n')
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}
+
+function emitSupplierSyncProgressBlock(
+  block: string,
+  onEvent: (event: SupplierSyncProgressEvent) => void,
+): void {
+  const dataLines = block
+    .split('\n')
+    .map(line => line.endsWith('\r') ? line.slice(0, -1) : line)
+    .filter(line => line.startsWith('data:'))
+    .map(line => line.slice(5).trimStart())
+  if (dataLines.length === 0) return
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(dataLines.join('\n'))
+  } catch {
+    throw new Error('同步进度事件格式无效')
+  }
+  if (!isSupplierSyncProgressEvent(parsed)) {
+    throw new Error('同步进度事件内容无效')
+  }
+  onEvent(parsed)
+}
+
+function isSupplierSyncProgressEvent(value: unknown): value is SupplierSyncProgressEvent {
+  if (!value || typeof value !== 'object') return false
+  const event = value as Record<string, unknown>
+  const stages: SupplierSyncProgressStage[] = [
+    'prepare', 'captcha', 'session', 'login', 'accounts', 'groups',
+    'balance', 'cost', 'persist', 'done', 'error',
+  ]
+  if (!stages.includes(event.stage as SupplierSyncProgressStage)) return false
+  if (typeof event.message !== 'string' || typeof event.time !== 'string') return false
+  return event.ok === undefined || typeof event.ok === 'boolean'
+}
+
+function readableSupplierSyncError(body: string): string {
+  const raw = body.trim()
+  if (!raw) return ''
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const data = parsed.data && typeof parsed.data === 'object'
+      ? parsed.data as Record<string, unknown>
+      : undefined
+    const message = parsed.message || parsed.error || data?.message
+    if (typeof message === 'string' && message.trim()) return message.trim()
+  } catch {
+    // 非 JSON 响应直接使用截断后的文本，避免把整段代理页面塞进提示。
+  }
+  return raw.slice(0, 500)
 }
 
 export async function testProviderEndpoint(id: number, scope: Exclude<SupplierSyncScope, 'all'>): Promise<SupplierProviderEndpointTestResult> {

@@ -251,7 +251,13 @@ func (c *SupplierSub2APIClient) authenticatedGet(ctx context.Context, provider *
 			continue
 		}
 		c.deleteToken(ctx, provider)
+		if supplierSub2APIAuthFailure(status, raw, err) {
+			return nil, wrapSupplierProviderAuthFailure(fmt.Errorf("supplier sub2api %s failed after auth retry: %w", label, err))
+		}
 		return nil, err
+	}
+	if supplierSub2APIAuthFailure(0, nil, lastErr) {
+		return nil, wrapSupplierProviderAuthFailure(fmt.Errorf("supplier sub2api %s failed after auth retry: %w", label, lastErr))
 	}
 	return nil, fmt.Errorf("supplier sub2api %s failed after auth retry: %w", label, lastErr)
 }
@@ -300,7 +306,16 @@ func supplierSub2APIEndpointResultKey(providerID int64, scope string) string {
 	return fmt.Sprintf("%d:%s", providerID, strings.TrimSpace(scope))
 }
 
-func (c *SupplierSub2APIClient) ensureToken(ctx context.Context, provider *SupplierProvider, password string) (SupplierProviderAuthToken, error) {
+func (c *SupplierSub2APIClient) ensureToken(ctx context.Context, provider *SupplierProvider, password string) (result SupplierProviderAuthToken, err error) {
+	SupplierSyncProgress(ctx, SupplierSyncProgressStageSession, "正在检查上游登录会话", nil)
+	defer func() {
+		if err != nil {
+			err = wrapSupplierProviderSessionFailure(err)
+			SupplierSyncProgressFail(ctx, SupplierSyncProgressStageSession, err)
+			return
+		}
+		SupplierSyncProgressOK(ctx, SupplierSyncProgressStageSession, "上游登录会话已准备")
+	}()
 	if c.tokenCache == nil {
 		c.recordAuthEvent(ctx, provider, SupplierProviderAuthEventInput{
 			EventType: SupplierProviderAuthEventCacheError,
@@ -376,8 +391,14 @@ func (c *SupplierSub2APIClient) loginAndCache(ctx context.Context, provider *Sup
 }
 
 func (c *SupplierSub2APIClient) loginWithAudit(ctx context.Context, provider *SupplierProvider, password string) (supplierSub2APILoginResult, error) {
+	SupplierSyncProgress(ctx, SupplierSyncProgressStageLogin, "正在登录上游", nil)
 	startedAt := time.Now()
 	result, err := c.login(ctx, provider, password)
+	if err != nil {
+		SupplierSyncProgressFail(ctx, SupplierSyncProgressStageLogin, err)
+	} else {
+		SupplierSyncProgressOK(ctx, SupplierSyncProgressStageLogin, "上游登录成功")
+	}
 	event := SupplierProviderAuthEventInput{
 		EventType:  SupplierProviderAuthEventLoginSuccess,
 		StartedAt:  startedAt,
@@ -428,7 +449,7 @@ func (c *SupplierSub2APIClient) login(ctx context.Context, provider *SupplierPro
 			return fetchSupplierSub2APITurnstileSiteKey(fetchCtx, c.httpClient, provider)
 		})
 		if err != nil {
-			return supplierSub2APILoginResult{}, err
+			return supplierSub2APILoginResult{}, wrapSupplierProviderAuthFailure(err)
 		}
 		if token != "" {
 			payload["turnstile_token"] = token
@@ -443,10 +464,17 @@ func (c *SupplierSub2APIClient) login(ctx context.Context, provider *SupplierPro
 		return supplierSub2APILoginResult{}, fmt.Errorf("supplier sub2api login request failed: %w", err)
 	}
 	if status < 200 || status >= 300 {
-		return supplierSub2APILoginResult{}, supplierSub2APIHTTPError("login", status, raw)
+		loginErr := supplierSub2APIHTTPError("login", status, raw)
+		if supplierSub2APILoginAuthFailure(status, raw, loginErr) {
+			return supplierSub2APILoginResult{}, wrapSupplierProviderAuthFailure(loginErr)
+		}
+		return supplierSub2APILoginResult{}, loginErr
 	}
 	token, expiresIn, err := parseSupplierSub2APILogin(raw)
 	if err != nil {
+		if supplierSub2APILoginAuthFailure(status, raw, err) {
+			return supplierSub2APILoginResult{}, wrapSupplierProviderAuthFailure(err)
+		}
 		return supplierSub2APILoginResult{}, err
 	}
 	if token.TokenType == "" {
@@ -722,6 +750,16 @@ func supplierSub2APIAuthFailure(status int, raw []byte, err error) bool {
 	return supplierSub2APIBusinessAuthFailure(raw) || supplierSub2APIErrorLooksAuth(err)
 }
 
+func supplierSub2APILoginAuthFailure(status int, raw []byte, err error) bool {
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		return true
+	}
+	if supplierSub2APIBusinessAuthFailure(raw) || supplierSub2APIErrorLooksAuth(err) {
+		return true
+	}
+	return false
+}
+
 func supplierSub2APIBusinessAuthFailure(raw []byte) bool {
 	if len(raw) == 0 {
 		return false
@@ -746,7 +784,39 @@ func supplierSub2APIErrorLooksAuth(err error) bool {
 }
 
 func supplierSub2APIAuthPhrase(text string) bool {
-	for _, phrase := range []string{"unauthorized", "forbidden", "token expired", "invalid token", "session expired", "auth failed"} {
+	for _, phrase := range []string{
+		"unauthorized",
+		"forbidden",
+		"token expired",
+		"invalid token",
+		"session expired",
+		"auth failed",
+		"authentication failed",
+		"authentication error",
+		"invalid credential",
+		"invalid username",
+		"invalid password",
+		"username or password",
+		"account or password",
+		"incorrect password",
+		"wrong password",
+		"bad credential",
+		"login failed",
+		"failed to login",
+		"login required",
+		"not logged in",
+		"未登录",
+		"认证失败",
+		"身份验证失败",
+		"登录失败",
+		"用户名或密码",
+		"账号或密码",
+		"密码错误",
+		"账号错误",
+		"凭证无效",
+		"token无效",
+		"会话过期",
+	} {
 		if strings.Contains(text, phrase) {
 			return true
 		}

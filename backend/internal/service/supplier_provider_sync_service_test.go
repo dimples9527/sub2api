@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -21,10 +22,13 @@ type supplierProviderDataRepoStub struct {
 	statusUpdates      []string
 	groupStatusUpdates []string
 
-	accountsErr error
-	groupsErr   error
-	balanceErr  error
-	costErr     error
+	accountsErr    error
+	groupsErr      error
+	balanceErr     error
+	costErr        error
+	groupStatusErr error
+	finishErr      error
+	statusErr      error
 }
 
 func (r *supplierProviderDataRepoStub) ListAccounts(context.Context, SupplierProviderDataListParams) (SupplierProviderAccountListResult, error) {
@@ -137,25 +141,29 @@ func (r *supplierProviderDataRepoStub) CreateSyncRun(_ context.Context, run *Sup
 }
 func (r *supplierProviderDataRepoStub) FinishSyncRun(_ context.Context, run *SupplierProviderSyncRun) error {
 	r.finishedRuns = append(r.finishedRuns, *run)
-	return nil
+	return r.finishErr
 }
 func (r *supplierProviderDataRepoStub) UpdateSyncStatus(_ context.Context, _ int64, status, _ string, _ time.Time) error {
 	r.statusUpdates = append(r.statusUpdates, status)
-	return nil
+	return r.statusErr
 }
 func (r *supplierProviderDataRepoStub) UpdateGroupSyncStatus(_ context.Context, _ int64, status, _ string, _ time.Time) error {
 	r.groupStatusUpdates = append(r.groupStatusUpdates, status)
-	return nil
+	return r.groupStatusErr
 }
 func (r *supplierProviderDataRepoStub) Cleanup(context.Context, SupplierCleanupPolicy, time.Time, int) (SupplierCleanupCounts, error) {
 	return SupplierCleanupCounts{}, nil
 }
 
 type supplierRemoteClientStub struct {
-	passwords   []string
-	authSources []SupplierProviderAuthSource
-	accounts    []SupplierProviderRemoteAccount
-	costDays    []time.Time
+	passwords     []string
+	authSources   []SupplierProviderAuthSource
+	accounts      []SupplierProviderRemoteAccount
+	costDays      []time.Time
+	accountsCalls int
+	groupsCalls   int
+	balanceCalls  int
+	costCalls     int
 
 	accountsErr error
 	groupsErr   error
@@ -163,11 +171,13 @@ type supplierRemoteClientStub struct {
 	costErr     error
 	costFn      func(day time.Time) (float64, error)
 
-	testCalls []string
-	testErr   error
+	testCalls  []string
+	testErr    error
+	testResult *SupplierProviderEndpointTestResult
 }
 
 func (c *supplierRemoteClientStub) FetchAccounts(ctx context.Context, _ *SupplierProvider, password string) ([]SupplierProviderRemoteAccount, error) {
+	c.accountsCalls++
 	c.passwords = append(c.passwords, password)
 	c.authSources = append(c.authSources, supplierProviderAuthSourceFromContext(ctx))
 	if c.accountsErr != nil {
@@ -179,6 +189,7 @@ func (c *supplierRemoteClientStub) FetchAccounts(ctx context.Context, _ *Supplie
 	return []SupplierProviderRemoteAccount{{Key: "account-1", Name: "Primary", Status: "active"}}, nil
 }
 func (c *supplierRemoteClientStub) FetchGroups(_ context.Context, _ *SupplierProvider, password string) ([]SupplierProviderRemoteGroup, error) {
+	c.groupsCalls++
 	c.passwords = append(c.passwords, password)
 	if c.groupsErr != nil {
 		return nil, c.groupsErr
@@ -186,6 +197,7 @@ func (c *supplierRemoteClientStub) FetchGroups(_ context.Context, _ *SupplierPro
 	return []SupplierProviderRemoteGroup{{Key: "group-1", Name: "VIP"}}, nil
 }
 func (c *supplierRemoteClientStub) FetchBalance(_ context.Context, _ *SupplierProvider, password string) (float64, error) {
+	c.balanceCalls++
 	c.passwords = append(c.passwords, password)
 	if c.balanceErr != nil {
 		return 0, c.balanceErr
@@ -193,6 +205,7 @@ func (c *supplierRemoteClientStub) FetchBalance(_ context.Context, _ *SupplierPr
 	return 123.5, nil
 }
 func (c *supplierRemoteClientStub) FetchCost(_ context.Context, _ *SupplierProvider, password string, day time.Time) (float64, error) {
+	c.costCalls++
 	c.passwords = append(c.passwords, password)
 	c.costDays = append(c.costDays, day)
 	if c.costErr != nil {
@@ -209,6 +222,9 @@ func (c *supplierRemoteClientStub) TestEndpoint(ctx context.Context, _ *Supplier
 	c.testCalls = append(c.testCalls, scope)
 	if c.testErr != nil {
 		return SupplierProviderEndpointTestResult{}, c.testErr
+	}
+	if c.testResult != nil {
+		return *c.testResult, nil
 	}
 	return SupplierProviderEndpointTestResult{
 		Scope:           scope,
@@ -316,6 +332,27 @@ func TestSupplierProviderSyncServiceSyncAccountRatesDoesNotPersistWhenRemoteFail
 	require.Equal(t, SupplierSyncStatusFailed, result.Status)
 	require.Empty(t, dataRepo.updates)
 	require.Zero(t, dataRepo.accountsCalls)
+}
+
+func TestSupplierProviderSyncServiceSyncAccountRatesDisablesProviderAfterAuthFailure(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID: 42, ProviderType: SupplierProviderTypeSub2API, Enabled: true, PasswordEncrypted: "secret",
+	}}}
+	dataRepo := &supplierProviderRateDataRepoStub{
+		supplierProviderDataRepoStub: &supplierProviderDataRepoStub{},
+		knownKeys:                    map[string]bool{"known": true},
+	}
+	remote := &supplierRemoteClientStub{accountsErr: &SupplierProviderAuthFailureError{Err: errors.New("login failed")}}
+	service := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	result, err := service.SyncAccountRates(context.Background(), 42, SupplierSyncTriggerManual)
+
+	require.Error(t, err)
+	require.True(t, IsSupplierProviderAuthFailure(err))
+	require.Equal(t, SupplierSyncStatusFailed, result.Status)
+	require.False(t, providerRepo.items[0].Enabled)
+	require.Equal(t, 1, providerRepo.disableAfterAuthFailureCalls)
+	require.Empty(t, dataRepo.updates)
 }
 
 func TestSupplierProviderSyncServiceSyncAccountsDecryptsPasswordAndPersists(t *testing.T) {
@@ -429,6 +466,133 @@ func TestSupplierProviderSyncServiceSyncAllReturnsPartialWhenOneStageFails(t *te
 	require.Equal(t, []string{SupplierSyncStatusRunning, SupplierSyncStatusFailed}, dataRepo.groupStatusUpdates)
 }
 
+func TestSupplierProviderSyncServiceSyncAllStopsAfterAuthFailureAndDisablesProvider(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{ID: 42, Name: "供应商甲", ProviderType: "sub2api", Enabled: true, PasswordEncrypted: "secret"}}}
+	dataRepo := &supplierProviderDataRepoStub{}
+	remote := &supplierRemoteClientStub{accountsErr: &SupplierProviderAuthFailureError{Err: errors.New("账号密码认证失败")}}
+	service := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	result, err := service.SyncAll(context.Background(), 42, SupplierSyncTriggerManual)
+
+	require.NoError(t, err)
+	require.Equal(t, SupplierSyncStatusFailed, result.Status)
+	require.Len(t, result.Stages, 1)
+	require.Equal(t, 1, remote.accountsCalls)
+	require.Zero(t, remote.groupsCalls)
+	require.Zero(t, remote.balanceCalls)
+	require.Zero(t, remote.costCalls)
+	require.False(t, providerRepo.items[0].Enabled)
+	require.Equal(t, 1, providerRepo.disableAfterAuthFailureCalls)
+	require.Contains(t, providerRepo.items[0].SyncMessage, "自动停用")
+	require.Contains(t, providerRepo.items[0].SyncMessage, "手动重新启用")
+}
+
+func TestSupplierProviderSyncServiceSyncAllStopsAfterSessionFailureWithoutDisablingProvider(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID: 42, ProviderType: SupplierProviderTypeSub2API, Enabled: true, PasswordEncrypted: "secret",
+	}}}
+	dataRepo := &supplierProviderDataRepoStub{}
+	sessionErr := &SupplierProviderSessionFailureError{Err: errors.New("token cache get failed")}
+	remote := &supplierRemoteClientStub{accountsErr: sessionErr}
+	service := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	result, err := service.SyncAll(context.Background(), 42, SupplierSyncTriggerManual)
+
+	require.NoError(t, err)
+	require.Equal(t, SupplierSyncStatusFailed, result.Status)
+	require.Len(t, result.Stages, 1)
+	require.Equal(t, 1, remote.accountsCalls)
+	require.Zero(t, remote.groupsCalls)
+	require.Zero(t, remote.balanceCalls)
+	require.Zero(t, remote.costCalls)
+	require.Zero(t, providerRepo.disableAfterAuthFailureCalls)
+	require.True(t, providerRepo.items[0].Enabled)
+	require.Contains(t, result.Message, "token cache get failed")
+}
+
+func TestSupplierProviderSyncServiceSyncAllEnabledSkipsProviderAfterAuthFailure(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{ID: 42, Name: "供应商甲", ProviderType: "sub2api", Enabled: true, PasswordEncrypted: "secret"}}}
+	dataRepo := &supplierProviderDataRepoStub{}
+	remote := &supplierRemoteClientStub{accountsErr: &SupplierProviderAuthFailureError{Err: errors.New("登录失败")}}
+	service := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	first, err := service.SyncAllEnabled(context.Background(), SupplierSyncTriggerScheduled)
+	require.NoError(t, err)
+	require.Equal(t, 1, first.ProcessedCount)
+	require.Equal(t, 1, first.FailedCount)
+	require.Equal(t, 1, remote.accountsCalls)
+
+	second, err := service.SyncAllEnabled(context.Background(), SupplierSyncTriggerScheduled)
+	require.NoError(t, err)
+	require.Zero(t, second.ProcessedCount)
+	require.Zero(t, second.FailedCount)
+	require.Equal(t, 1, remote.accountsCalls)
+}
+
+func TestSupplierProviderSyncServiceSyncAccountsDisablesProviderAfterAuthFailure(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{ID: 42, ProviderType: "sub2api", Enabled: true, PasswordEncrypted: "secret"}}}
+	remote := &supplierRemoteClientStub{accountsErr: &SupplierProviderAuthFailureError{Err: errors.New("登录失败")}}
+	service := NewSupplierProviderSyncService(providerRepo, &supplierProviderDataRepoStub{}, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	result, err := service.SyncAccounts(context.Background(), 42, SupplierSyncTriggerManual)
+
+	require.Error(t, err)
+	require.Equal(t, SupplierSyncStatusFailed, result.Status)
+	require.False(t, providerRepo.items[0].Enabled)
+	require.Equal(t, 1, providerRepo.disableAfterAuthFailureCalls)
+	require.Equal(t, 1, remote.accountsCalls)
+
+	callsBeforeDisabledProviderRetry := remote.accountsCalls
+	_, err = service.SyncAccounts(context.Background(), 42, SupplierSyncTriggerManual)
+	require.Error(t, err)
+	require.Equal(t, callsBeforeDisabledProviderRetry, remote.accountsCalls)
+}
+
+func TestSupplierProviderSyncServiceBackfillCostsStopsAfterAuthFailure(t *testing.T) {
+	today := supplierCostBackfillToday()
+	start := today.AddDate(0, 0, -2)
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{ID: 42, Name: "供应商甲", ProviderType: SupplierProviderTypeNewAPI, Enabled: true, PasswordEncrypted: "secret"}}}
+	remote := &supplierRemoteClientStub{costErr: &SupplierProviderAuthFailureError{Err: errors.New("登录失败")}}
+	service := NewSupplierProviderSyncService(providerRepo, &supplierProviderDataRepoStub{}, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	result, err := service.BackfillCosts(context.Background(), start.Format("2006-01-02"), today.Format("2006-01-02"), 42, SupplierSyncTriggerManual)
+
+	require.Error(t, err)
+	require.Equal(t, 1, remote.costCalls)
+	require.False(t, providerRepo.items[0].Enabled)
+	require.Equal(t, 1, providerRepo.disableAfterAuthFailureCalls)
+	require.Len(t, result.Items, 3)
+	require.Equal(t, SupplierSyncStatusFailed, result.Items[0].Status)
+	require.Equal(t, SupplierSyncStatusSkipped, result.Items[1].Status)
+	require.Equal(t, SupplierSyncStatusSkipped, result.Items[2].Status)
+}
+
+func TestSupplierProviderSyncServiceBackfillCostsStopsAfterSessionFailureWithoutDisablingProvider(t *testing.T) {
+	today := supplierCostBackfillToday()
+	start := today.AddDate(0, 0, -2)
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID: 7, Name: "NewAPI-A", ProviderType: SupplierProviderTypeNewAPI, Enabled: true, PasswordEncrypted: "secret",
+	}}}
+	dataRepo := &supplierProviderDataRepoStub{}
+	sessionErr := &SupplierProviderSessionFailureError{Err: errors.New("session lock unavailable")}
+	remote := &supplierRemoteClientStub{costErr: sessionErr}
+	service := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	result, err := service.BackfillCosts(context.Background(), start.Format("2006-01-02"), today.Format("2006-01-02"), 7, SupplierSyncTriggerManual)
+
+	require.ErrorIs(t, err, sessionErr)
+	require.Equal(t, 1, result.FailedCount)
+	require.Equal(t, 2, result.SkippedCount)
+	require.Zero(t, result.SuccessCount)
+	require.Equal(t, 1, remote.costCalls)
+	require.Zero(t, providerRepo.disableAfterAuthFailureCalls)
+	require.True(t, providerRepo.items[0].Enabled)
+	require.Len(t, result.Items, 3)
+	require.Equal(t, SupplierSyncStatusFailed, result.Items[0].Status)
+	require.Equal(t, SupplierSyncStatusSkipped, result.Items[1].Status)
+	require.Equal(t, SupplierSyncStatusSkipped, result.Items[2].Status)
+}
+
 func TestSupplierProviderSyncServiceRecordsSuccessfulGroupStageIndependently(t *testing.T) {
 	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{ID: 42, ProviderType: "sub2api", Enabled: true, PasswordEncrypted: "secret"}}}
 	dataRepo := &supplierProviderDataRepoStub{}
@@ -511,6 +675,26 @@ func TestSupplierProviderSyncServiceTestsEndpointWithoutPersisting(t *testing.T)
 	require.Empty(t, dataRepo.createdRuns)
 	require.Empty(t, dataRepo.finishedRuns)
 	require.Zero(t, dataRepo.balanceCalls)
+}
+
+func TestSupplierProviderSyncServiceTestEndpointDisablesProviderAfterUnauthorizedResponse(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID: 42, ProviderType: SupplierProviderTypeSub2API, Enabled: true, PasswordEncrypted: "secret",
+	}}}
+	remote := &supplierRemoteClientStub{testResult: &SupplierProviderEndpointTestResult{
+		Scope:      SupplierSyncScopeBalance,
+		Endpoint:   "/test/balance",
+		HTTPStatus: http.StatusUnauthorized,
+	}}
+	service := NewSupplierProviderSyncService(providerRepo, &supplierProviderDataRepoStub{}, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	result, err := service.TestEndpoint(context.Background(), 42, SupplierSyncScopeBalance)
+
+	require.Error(t, err)
+	require.True(t, IsSupplierProviderAuthFailure(err))
+	require.Equal(t, supplierProviderAuthFailureDisableMessage, result.Error)
+	require.False(t, providerRepo.items[0].Enabled)
+	require.Equal(t, 1, providerRepo.disableAfterAuthFailureCalls)
 }
 
 func TestSupplierProviderSyncServiceBackfillCostsNewAPIPullsEachDay(t *testing.T) {

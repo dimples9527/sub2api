@@ -265,7 +265,14 @@ func (c *SupplierNewAPIClient) fetchJSONWithRetry(ctx context.Context, provider 
 			lastErr = err
 			continue
 		}
+		if supplierNewAPIAuthFailure(status, raw, err) {
+			c.clearSession(ctx, provider)
+			return nil, wrapSupplierProviderAuthFailure(fmt.Errorf("supplier newapi %s failed after auth retry: %w", label, err))
+		}
 		return nil, err
+	}
+	if supplierNewAPIAuthFailure(0, nil, lastErr) {
+		return nil, wrapSupplierProviderAuthFailure(fmt.Errorf("supplier newapi %s failed after auth retry: %w", label, lastErr))
 	}
 	return nil, fmt.Errorf("supplier newapi %s failed after auth retry: %w", label, lastErr)
 }
@@ -296,7 +303,16 @@ func (c *SupplierNewAPIClient) authenticatedGet(ctx context.Context, provider *S
 	return raw, status, nil
 }
 
-func (c *SupplierNewAPIClient) ensureSession(ctx context.Context, provider *SupplierProvider, password string) (supplierNewAPISession, error) {
+func (c *SupplierNewAPIClient) ensureSession(ctx context.Context, provider *SupplierProvider, password string) (result supplierNewAPISession, err error) {
+	SupplierSyncProgress(ctx, SupplierSyncProgressStageSession, "正在检查上游登录会话", nil)
+	defer func() {
+		if err != nil {
+			err = wrapSupplierProviderSessionFailure(err)
+			SupplierSyncProgressFail(ctx, SupplierSyncProgressStageSession, err)
+			return
+		}
+		SupplierSyncProgressOK(ctx, SupplierSyncProgressStageSession, "上游登录会话已准备")
+	}()
 	if session, ok := c.cachedSession(provider); ok {
 		token := supplierNewAPISessionToken(session)
 		c.recordAuthEvent(ctx, provider, SupplierProviderAuthEventInput{EventType: SupplierProviderAuthEventCacheHit, Token: &token})
@@ -433,8 +449,14 @@ func (c *SupplierNewAPIClient) loginAndCache(ctx context.Context, provider *Supp
 }
 
 func (c *SupplierNewAPIClient) loginWithAudit(ctx context.Context, provider *SupplierProvider, password string) (supplierNewAPISession, error) {
+	SupplierSyncProgress(ctx, SupplierSyncProgressStageLogin, "正在登录上游", nil)
 	startedAt := time.Now()
 	session, err := c.login(ctx, provider, password)
+	if err != nil {
+		SupplierSyncProgressFail(ctx, SupplierSyncProgressStageLogin, err)
+	} else {
+		SupplierSyncProgressOK(ctx, SupplierSyncProgressStageLogin, "上游登录成功")
+	}
 	event := SupplierProviderAuthEventInput{
 		EventType:  SupplierProviderAuthEventLoginSuccess,
 		StartedAt:  startedAt,
@@ -532,7 +554,7 @@ func (c *SupplierNewAPIClient) login(ctx context.Context, provider *SupplierProv
 			return fetchSupplierNewAPITurnstileSiteKey(fetchCtx, c.httpClient, provider)
 		})
 		if err != nil {
-			return supplierNewAPISession{}, err
+			return supplierNewAPISession{}, wrapSupplierProviderAuthFailure(err)
 		}
 		if token != "" {
 			loginPath = supplierNewAPIAppendQuery(loginPath, "turnstile", token)
@@ -547,7 +569,11 @@ func (c *SupplierNewAPIClient) login(ctx context.Context, provider *SupplierProv
 		return supplierNewAPISession{}, err
 	}
 	if status < 200 || status >= 300 {
-		return supplierNewAPISession{}, supplierSub2APIHTTPError("newapi login", status, raw)
+		loginErr := supplierSub2APIHTTPError("newapi login", status, raw)
+		if supplierNewAPILoginAuthFailure(status, raw, loginErr) {
+			return supplierNewAPISession{}, wrapSupplierProviderAuthFailure(loginErr)
+		}
+		return supplierNewAPISession{}, loginErr
 	}
 	var resp struct {
 		Success bool   `json:"success"`
@@ -565,7 +591,11 @@ func (c *SupplierNewAPIClient) login(ctx context.Context, provider *SupplierProv
 		return supplierNewAPISession{}, fmt.Errorf("decode supplier newapi login response: %w", err)
 	}
 	if !resp.Success {
-		return supplierNewAPISession{}, fmt.Errorf("supplier newapi login failed: %s", firstSupplierSub2APIString(resp.Message, "unknown error"))
+		loginErr := fmt.Errorf("supplier newapi login failed: %s", firstSupplierSub2APIString(resp.Message, "unknown error"))
+		if supplierNewAPILoginAuthFailure(status, raw, loginErr) {
+			return supplierNewAPISession{}, wrapSupplierProviderAuthFailure(loginErr)
+		}
+		return supplierNewAPISession{}, loginErr
 	}
 	expiresAt := supplierNewAPISessionExpiresAt(resp.Data.AccessExpiresAt)
 	if accessToken := strings.TrimSpace(resp.Data.AccessToken); accessToken != "" {
@@ -813,6 +843,20 @@ func supplierNewAPIAuthFailure(status int, raw []byte, err error) bool {
 	return false
 }
 
+func supplierNewAPILoginAuthFailure(status int, raw []byte, err error) bool {
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		return true
+	}
+	return supplierNewAPIBusinessAuthFailure(raw) || supplierNewAPIAuthPhraseFromError(err)
+}
+
+func supplierNewAPIAuthPhraseFromError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return supplierNewAPIAuthPhrase(strings.ToLower(err.Error()))
+}
+
 func supplierNewAPIBusinessAuthFailure(raw []byte) bool {
 	if len(raw) == 0 {
 		return false
@@ -828,7 +872,39 @@ func supplierNewAPIBusinessAuthFailure(raw []byte) bool {
 }
 
 func supplierNewAPIAuthPhrase(text string) bool {
-	for _, phrase := range []string{"unauthorized", "forbidden", "token expired", "invalid token", "session expired", "auth failed", "未登录", "登录"} {
+	for _, phrase := range []string{
+		"unauthorized",
+		"forbidden",
+		"token expired",
+		"invalid token",
+		"session expired",
+		"auth failed",
+		"authentication failed",
+		"authentication error",
+		"invalid credential",
+		"invalid username",
+		"invalid password",
+		"username or password",
+		"account or password",
+		"incorrect password",
+		"wrong password",
+		"bad credential",
+		"login failed",
+		"failed to login",
+		"login required",
+		"not logged in",
+		"未登录",
+		"认证失败",
+		"身份验证失败",
+		"登录失败",
+		"用户名或密码",
+		"账号或密码",
+		"密码错误",
+		"账号错误",
+		"凭证无效",
+		"token无效",
+		"会话过期",
+	} {
 		if strings.Contains(text, phrase) {
 			return true
 		}

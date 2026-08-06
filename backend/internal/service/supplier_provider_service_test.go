@@ -10,10 +10,12 @@ import (
 )
 
 type supplierProviderRepoStub struct {
-	items          []*SupplierProvider
-	next           int64
-	costTrends     []SupplierProviderCostTrendPoint
-	costBreakdowns []SupplierProviderCostBreakdown
+	items                        []*SupplierProvider
+	next                         int64
+	costTrends                   []SupplierProviderCostTrendPoint
+	costBreakdowns               []SupplierProviderCostBreakdown
+	disableAfterAuthFailureCalls int
+	disableMessages              []string
 }
 
 type supplierProviderTypeRepoStub struct {
@@ -122,6 +124,22 @@ func (r *supplierProviderRepoStub) Update(_ context.Context, item *SupplierProvi
 			r.items[index] = &clone
 			return nil
 		}
+	}
+	return ErrSupplierProviderNotFound
+}
+
+func (r *supplierProviderRepoStub) DisableAfterAuthFailure(_ context.Context, providerID int64, message string, syncedAt time.Time) error {
+	for _, item := range r.items {
+		if item.ID != providerID {
+			continue
+		}
+		item.Enabled = false
+		item.SyncStatus = SupplierSyncStatusFailed
+		item.SyncMessage = message
+		item.LastSyncAt = &syncedAt
+		r.disableAfterAuthFailureCalls++
+		r.disableMessages = append(r.disableMessages, message)
+		return nil
 	}
 	return ErrSupplierProviderNotFound
 }

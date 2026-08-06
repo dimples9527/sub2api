@@ -20,11 +20,13 @@ type Config struct {
 }
 
 const (
-	ProviderTwoCaptcha       = "2captcha"
+	ProviderTwoCaptcha        = "2captcha"
+	ProviderYesCaptcha        = "yescaptcha"
 	defaultTwoCaptchaEndpoint = "https://api.2captcha.com"
+	defaultYesCaptchaEndpoint = "https://api.yescaptcha.com"
 )
 
-// New 根据配置构造打码 Provider。当前仅支持 2Captcha。
+// New 根据配置构造打码 Provider。
 func New(cfg Config) (Provider, error) {
 	providerType := strings.ToLower(strings.TrimSpace(cfg.Provider))
 	if providerType == "" {
@@ -33,6 +35,8 @@ func New(cfg Config) (Provider, error) {
 	switch providerType {
 	case ProviderTwoCaptcha:
 		return newTwoCaptcha(cfg), nil
+	case ProviderYesCaptcha:
+		return newYesCaptcha(cfg), nil
 	default:
 		return nil, fmt.Errorf("unsupported captcha provider: %s", cfg.Provider)
 	}
@@ -47,7 +51,7 @@ func ValidateConfig(cfg Config) error {
 	if providerType == "" {
 		providerType = ProviderTwoCaptcha
 	}
-	if providerType != ProviderTwoCaptcha {
+	if providerType != ProviderTwoCaptcha && providerType != ProviderYesCaptcha {
 		return fmt.Errorf("unsupported captcha provider: %s", cfg.Provider)
 	}
 	return nil

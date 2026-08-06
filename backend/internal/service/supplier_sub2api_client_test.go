@@ -475,6 +475,7 @@ func TestSupplierSub2APIClientStopsAfterSecondUnauthorized(t *testing.T) {
 	_, err := client.FetchAccounts(context.Background(), supplierSub2APITestProvider(server.URL), "secret")
 
 	require.Error(t, err)
+	require.True(t, IsSupplierProviderAuthFailure(err))
 	require.Equal(t, int32(2), loginCalls.Load())
 	require.Equal(t, int32(2), accountCalls.Load())
 	cache.mu.Lock()
@@ -572,9 +573,30 @@ func TestSupplierSub2APIClientStopsWhenRedisIsUnavailable(t *testing.T) {
 			_, err := client.FetchBalance(context.Background(), supplierSub2APITestProvider(server.URL), "secret")
 
 			require.Error(t, err)
+			require.False(t, IsSupplierProviderAuthFailure(err))
+			require.True(t, IsSupplierProviderSessionFailure(err))
 			require.Equal(t, tt.expectedLoginCalls, loginCalls.Load())
 		})
 	}
+}
+
+func TestSupplierSub2APIClientMarksLoginCredentialFailureAsAuthFailure(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			supplierSub2APIWriteJSON(w, http.StatusUnauthorized, `{"message":"invalid username or password"}`)
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewSupplierSub2APIClient(nil, cache, nil)
+	_, err := client.FetchBalance(context.Background(), supplierSub2APITestProvider(server.URL), "secret")
+
+	require.Error(t, err)
+	require.True(t, IsSupplierProviderAuthFailure(err))
 }
 
 func TestSupplierSub2APIClientRecordsCacheMissAndLoginSuccess(t *testing.T) {
