@@ -73,13 +73,14 @@ func TestSupplierProviderTokenCacheReturnsMissAfterExpiry(t *testing.T) {
 	require.Equal(t, service.SupplierProviderAuthToken{}, cached)
 }
 
-func TestSupplierProviderTokenCacheSetUsesFallbackForInvalidTTL(t *testing.T) {
+func TestSupplierProviderTokenCacheSetUsesNoExpiration(t *testing.T) {
 	cache, mr := newSupplierProviderTokenCacheTestClient(t)
 	ctx := context.Background()
 
-	require.NoError(t, cache.Set(ctx, 8, service.SupplierProviderAuthToken{AccessToken: "fallback-ttl"}, 0))
+	require.NoError(t, cache.Set(ctx, 8, service.SupplierProviderAuthToken{AccessToken: "no-expiration"}, 0))
 
-	require.Equal(t, 30*time.Minute, mr.TTL("supplier:provider:auth:8"))
+	ttl := mr.TTL("supplier:provider:auth:8")
+	require.Equal(t, time.Duration(0), ttl)
 }
 
 func TestSupplierProviderTokenCacheDeletesToken(t *testing.T) {
@@ -191,25 +192,4 @@ func TestSupplierProviderTokenCacheRejectsInvalidLockArguments(t *testing.T) {
 
 	_, err = cache.TryAcquireLoginLock(ctx, 1, "owner", 0)
 	require.Error(t, err)
-}
-
-func TestSupplierProviderTokenTTLUsesSafetyWindow(t *testing.T) {
-	tests := []struct {
-		name      string
-		expiresIn time.Duration
-		want      time.Duration
-	}{
-		{name: "one hour subtracts sixty seconds", expiresIn: time.Hour, want: 59 * time.Minute},
-		{name: "one hundred twenty seconds subtracts ten percent", expiresIn: 120 * time.Second, want: 108 * time.Second},
-		{name: "one hundred twenty one seconds subtracts sixty seconds", expiresIn: 121 * time.Second, want: 61 * time.Second},
-		{name: "one hundred seconds subtracts ten percent", expiresIn: 100 * time.Second, want: 90 * time.Second},
-		{name: "zero uses fallback", expiresIn: 0, want: 30 * time.Minute},
-		{name: "negative uses fallback", expiresIn: -time.Second, want: 30 * time.Minute},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.want, service.SupplierProviderTokenTTL(tt.expiresIn))
-		})
-	}
 }

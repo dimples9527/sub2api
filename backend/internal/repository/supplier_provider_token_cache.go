@@ -89,8 +89,9 @@ func (c *SupplierProviderTokenRedisCache) Set(ctx context.Context, providerID in
 	if err := c.validateProvider(providerID); err != nil {
 		return err
 	}
-	if ttl <= 0 {
-		ttl = service.SupplierProviderTokenTTL(ttl)
+	// ttl <= 0 表示不过期，仅在接口返回 token 过期/鉴权失败时主动删除并重登。
+	if ttl < 0 {
+		ttl = 0
 	}
 	payload, err := json.Marshal(token)
 	if err != nil {

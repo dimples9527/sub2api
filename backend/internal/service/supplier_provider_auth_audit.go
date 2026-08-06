@@ -296,16 +296,12 @@ func supplierProviderAuthSummaryEmpty(summary SupplierProviderAuthSummary) bool 
 }
 
 // supplierProviderAuthTokenUsable 判断缓存中的 Token/Cookie 当前是否仍可用。
+// 不再按 ExpiresAt 主动失效，仅检查凭证是否存在；真正失效由接口鉴权失败触发。
 func supplierProviderAuthTokenUsable(token SupplierProviderAuthToken, now time.Time) bool {
+	_ = now
 	accessToken := strings.TrimSpace(token.AccessToken)
 	cookiePresent := strings.TrimSpace(token.CookieHeader) != ""
-	if accessToken == "" && !cookiePresent {
-		return false
-	}
-	if !token.ExpiresAt.IsZero() && !token.ExpiresAt.After(now) {
-		return false
-	}
-	return true
+	return accessToken != "" || cookiePresent
 }
 
 func normalizeSupplierProviderAuthEvent(event SupplierProviderAuthEventInput) SupplierProviderAuthEventRecord {
@@ -386,18 +382,18 @@ func publicSupplierProviderAuthTokenSnapshot(token SupplierProviderAuthToken, tt
 	if !token.ExpiresAt.IsZero() {
 		expiresAt := token.ExpiresAt
 		snapshot.TokenExpiresAt = &expiresAt
-		if token.ExpiresAt.After(now) && ttl > 0 {
+		// 兼容历史带过期时间的缓存：仍展示过期信息，但不因 TTL=0 直接判失效。
+		if token.ExpiresAt.After(now) {
 			snapshot.Status = SupplierProviderAuthCacheCached
 			snapshot.RemainingSeconds = positiveDurationSeconds(token.ExpiresAt.Sub(now))
 		} else if authPresent {
-			snapshot.Status = SupplierProviderAuthCacheExpired
-			snapshot.TTLSeconds = 0
+			// 时间已过，但新策略下仍可能继续使用，直到接口返回鉴权失败。
+			snapshot.Status = SupplierProviderAuthCacheCached
+			snapshot.TTLSeconds = positiveDurationSeconds(ttl)
 		}
-	} else if authPresent && ttl > 0 {
-		snapshot.Status = SupplierProviderAuthCacheCached
 	} else if authPresent {
-		snapshot.Status = SupplierProviderAuthCacheExpired
-		snapshot.TTLSeconds = 0
+		// 无固定过期时间：视为已缓存且长期有效。
+		snapshot.Status = SupplierProviderAuthCacheCached
 	}
 	return snapshot
 }

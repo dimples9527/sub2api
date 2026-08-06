@@ -483,9 +483,9 @@ func (c *SupplierSub2APIClient) login(ctx context.Context, provider *SupplierPro
 	if token.TokenType == "" {
 		token.TokenType = "Bearer"
 	}
-	ttl := SupplierProviderTokenTTL(expiresIn)
-	token.ExpiresAt = time.Now().Add(ttl)
-	return supplierSub2APILoginResult{token: normalizeSupplierSub2APIToken(token), ttl: ttl}, nil
+	// 忽略上游 expires_in：token 长期缓存，仅在接口返回鉴权失败时删除并重登。
+	_ = expiresIn
+	return supplierSub2APILoginResult{token: normalizeSupplierSub2APIToken(token), ttl: 0}, nil
 }
 
 func (c *SupplierSub2APIClient) doJSON(ctx context.Context, method string, provider *SupplierProvider, path string, label string, token SupplierProviderAuthToken, body io.Reader) ([]byte, int, error) {

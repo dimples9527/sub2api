@@ -150,12 +150,11 @@ func TestSupplierNewAPIClientReusesSessionFromSharedTokenCache(t *testing.T) {
 	require.Equal(t, "newapi-token", cachedToken.AccessToken)
 	require.Equal(t, int64(42), cachedToken.UserID)
 	require.Equal(t, "session=cached-session", cachedToken.CookieHeader)
-	require.False(t, cachedToken.ExpiresAt.IsZero())
-	require.Len(t, setTTLs, 1)
-	require.Greater(t, setTTLs[0], time.Duration(0))
+	require.True(t, cachedToken.ExpiresAt.IsZero())
+	require.Equal(t, []time.Duration{0}, setTTLs)
 }
 
-func TestSupplierNewAPIClientRefreshesExpiredCachedSession(t *testing.T) {
+func TestSupplierNewAPIClientReusesTimeExpiredCachedSessionUntilAPIRejects(t *testing.T) {
 	cache := newSupplierSub2APIFakeTokenCache()
 	cache.preload(42, SupplierProviderAuthToken{
 		AccessToken:  "expired-token",
@@ -172,7 +171,8 @@ func TestSupplierNewAPIClientRefreshesExpiredCachedSession(t *testing.T) {
 			loginCalls.Add(1)
 			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"refreshed-token","access_expires_at":4102444800,"user":{"id":42}}}`))
 		case "/api/user/self":
-			require.Equal(t, "Bearer refreshed-token", r.Header.Get("Authorization"))
+			// 时间已过期的缓存仍应直接复用，直到接口真正返回鉴权失败。
+			require.Equal(t, "Bearer expired-token", r.Header.Get("Authorization"))
 			_, _ = w.Write([]byte(`{"success":true,"data":{"quota":500000}}`))
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
@@ -186,11 +186,11 @@ func TestSupplierNewAPIClientRefreshesExpiredCachedSession(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, float64(1), balance)
-	require.Equal(t, int32(1), loginCalls.Load())
+	require.Equal(t, int32(0), loginCalls.Load())
 	cache.mu.Lock()
 	setCalls := cache.setCalls
 	cache.mu.Unlock()
-	require.Equal(t, 1, setCalls)
+	require.Equal(t, 0, setCalls)
 }
 
 func TestSupplierNewAPIClientDeletesInvalidSessionAndRetriesLogin(t *testing.T) {

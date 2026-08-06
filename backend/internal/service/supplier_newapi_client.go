@@ -528,19 +528,14 @@ func supplierNewAPISessionToken(session supplierNewAPISession) SupplierProviderA
 }
 
 func supplierNewAPISessionTTL(session supplierNewAPISession) time.Duration {
-	if !session.ExpiresAt.IsZero() {
-		if ttl := time.Until(session.ExpiresAt); ttl > 0 {
-			return ttl
-		}
-	}
-	return SupplierProviderTokenTTL(0)
+	// 不再按过期时间设置 Redis TTL；会话长期缓存，接口鉴权失败后再重登。
+	_ = session
+	return 0
 }
 
 func supplierNewAPISessionUsable(session supplierNewAPISession) bool {
-	if session.UserID <= 0 || !supplierNewAPIHasSessionAuth(session) {
-		return false
-	}
-	return !session.ExpiresAt.IsZero() && time.Now().Before(session.ExpiresAt)
+	// 不再根据 ExpiresAt 主动判定失效，仅校验会话字段是否完整。
+	return session.UserID > 0 && supplierNewAPIHasSessionAuth(session)
 }
 
 func (c *SupplierNewAPIClient) login(ctx context.Context, provider *SupplierProvider, password string) (supplierNewAPISession, error) {
@@ -600,7 +595,7 @@ func (c *SupplierNewAPIClient) login(ctx context.Context, provider *SupplierProv
 		}
 		return supplierNewAPISession{}, loginErr
 	}
-	expiresAt := supplierNewAPISessionExpiresAt(resp.Data.AccessExpiresAt)
+	// 登录成功后不记录固定过期时间，由调用侧在鉴权失败时清理缓存。
 	if accessToken := strings.TrimSpace(resp.Data.AccessToken); accessToken != "" {
 		if resp.Data.User.ID <= 0 {
 			return supplierNewAPISession{}, fmt.Errorf("supplier newapi login failed: missing user id")
@@ -609,7 +604,6 @@ func (c *SupplierNewAPIClient) login(ctx context.Context, provider *SupplierProv
 			UserID:       resp.Data.User.ID,
 			AccessToken:  accessToken,
 			CookieHeader: supplierNewAPICookiesHeader(cookies),
-			ExpiresAt:    expiresAt,
 		}, nil
 	}
 	userID := resp.Data.User.ID
@@ -623,7 +617,7 @@ func (c *SupplierNewAPIClient) login(ctx context.Context, provider *SupplierProv
 	if cookieHeader == "" {
 		return supplierNewAPISession{}, fmt.Errorf("supplier newapi login failed: missing cookie")
 	}
-	return supplierNewAPISession{UserID: userID, CookieHeader: cookieHeader, ExpiresAt: expiresAt}, nil
+	return supplierNewAPISession{UserID: userID, CookieHeader: cookieHeader}, nil
 }
 
 func (c *SupplierNewAPIClient) doLogin(ctx context.Context, provider *SupplierProvider, path string, body io.Reader) ([]byte, int, []*http.Cookie, error) {
@@ -970,20 +964,6 @@ func supplierNewAPICookiesHeader(cookies []*http.Cookie) string {
 		parts = append(parts, cookie.Name+"="+cookie.Value)
 	}
 	return strings.Join(parts, "; ")
-}
-
-func supplierNewAPISessionExpiresAt(raw any) time.Time {
-	seconds := jsonFloat(raw)
-	if seconds > 1e12 {
-		seconds /= 1000
-	}
-	if seconds > 0 {
-		expiresIn := time.Until(time.Unix(int64(seconds), 0))
-		if expiresIn > 0 {
-			return time.Now().Add(SupplierProviderTokenTTL(expiresIn))
-		}
-	}
-	return time.Now().Add(SupplierProviderTokenTTL(0))
 }
 
 func supplierNewAPIHasSessionAuth(session supplierNewAPISession) bool {

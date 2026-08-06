@@ -210,7 +210,7 @@ func TestSupplierSub2APIClientLoginUsesEmailAndCachesToken(t *testing.T) {
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
 	require.Equal(t, 1, cache.setCalls)
-	require.Equal(t, []time.Duration{59 * time.Minute}, cache.setTTLs)
+	require.Equal(t, []time.Duration{0}, cache.setTTLs)
 	require.Equal(t, []time.Duration{supplierSub2APILoginLockTTL}, cache.lockTTLs)
 	require.Len(t, cache.acquiredOwners, 1)
 	require.Equal(t, cache.acquiredOwners, cache.releasedOwners)
@@ -229,25 +229,25 @@ func TestSupplierSub2APIClientExtractsSupportedLoginTokenShapes(t *testing.T) {
 			name:              "nested access token and expiry",
 			loginResponse:     `{"code":0,"data":{"access_token":"nested-access","token_type":"Token","expires_in":100}}`,
 			wantAuthorization: "Token nested-access",
-			wantTTL:           90 * time.Second,
+			wantTTL:           0,
 		},
 		{
 			name:              "nested token",
 			loginResponse:     `{"code":0,"data":{"token":"nested-token"},"expires_in":120}`,
 			wantAuthorization: "Bearer nested-token",
-			wantTTL:           108 * time.Second,
+			wantTTL:           0,
 		},
 		{
 			name:              "top level access token",
 			loginResponse:     `{"code":0,"access_token":"top-access","token_type":"JWT","expires_in":121}`,
 			wantAuthorization: "JWT top-access",
-			wantTTL:           61 * time.Second,
+			wantTTL:           0,
 		},
 		{
 			name:              "top level token with fallback expiry",
 			loginResponse:     `{"code":0,"token":"top-token"}`,
 			wantAuthorization: "Bearer top-token",
-			wantTTL:           30 * time.Minute,
+			wantTTL:           0,
 		},
 	}
 

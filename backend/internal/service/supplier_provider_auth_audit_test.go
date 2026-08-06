@@ -47,18 +47,18 @@ func TestSupplierProviderAuthTokenPublicSnapshotReportsCachedCookieSession(t *te
 	require.Zero(t, snapshot.TokenLength)
 }
 
-func TestSupplierProviderAuthTokenPublicSnapshotReportsExpiredToken(t *testing.T) {
+func TestSupplierProviderAuthTokenPublicSnapshotKeepsTimeExpiredTokenUsable(t *testing.T) {
 	now := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
 	token := SupplierProviderAuthToken{
 		AccessToken: "expired-token",
 		ExpiresAt:   now.Add(-time.Second),
 	}
 
-	snapshot := publicSupplierProviderAuthTokenSnapshot(token, -time.Second, now)
+	snapshot := publicSupplierProviderAuthTokenSnapshot(token, 0, now)
 
-	require.Equal(t, SupplierProviderAuthCacheExpired, snapshot.Status)
+	// 新策略：时间过期不主动判失效，等待接口鉴权失败后再清理。
+	require.Equal(t, SupplierProviderAuthCacheCached, snapshot.Status)
 	require.Equal(t, int64(0), snapshot.RemainingSeconds)
-	require.Equal(t, int64(0), snapshot.TTLSeconds)
 }
 
 func TestSanitizeSupplierProviderAuthErrorRemovesSecrets(t *testing.T) {

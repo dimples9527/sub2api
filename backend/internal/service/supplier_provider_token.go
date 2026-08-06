@@ -39,14 +39,3 @@ type SupplierProviderSyncLock interface {
 	ReleaseSyncLock(ctx context.Context, providerID int64, owner string) error
 }
 
-func SupplierProviderTokenTTL(expiresIn time.Duration) time.Duration {
-	if expiresIn <= 0 {
-		return 30 * time.Minute
-	}
-
-	safetyWindow := time.Minute
-	if expiresIn <= 2*time.Minute {
-		safetyWindow = expiresIn / 10
-	}
-	return expiresIn - safetyWindow
-}
