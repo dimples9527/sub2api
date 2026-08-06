@@ -136,4 +136,3 @@ WHERE task_code=$1`)).
 	require.NoError(t, repo.UpdateTaskRuntime(context.Background(), task))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
-

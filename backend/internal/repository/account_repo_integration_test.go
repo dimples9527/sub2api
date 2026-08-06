@@ -13,8 +13,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/accountgroup"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/stretchr/testify/require"
 	"github.com/lib/pq"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
 

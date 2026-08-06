@@ -33,7 +33,6 @@ func TestSupplierAutomationLockReleasesOnlyOwner(t *testing.T) {
 	require.True(t, acquired)
 }
 
-
 func TestSupplierAutomationLockForceRelease(t *testing.T) {
 	mr, err := miniredis.Run()
 	require.NoError(t, err)
