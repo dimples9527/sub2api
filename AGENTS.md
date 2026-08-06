@@ -38,3 +38,13 @@
 
 - 使用 `BaseDialog` 等已经提供标题的弹窗时，弹窗内容区左上角不得重复显示英文眉题、二级标题或说明文案；只有完成当前操作不可缺少的业务提示才能保留。
 - 列表型弹窗应优先直接展示筛选、状态摘要或列表内容，不得在列表上方增加与弹窗标题重复的装饰性标题和说明段落。
+
+## 供应商模块弹窗样式与 Teleport
+
+- `BaseDialog` 会通过 `Teleport` 挂载到 `body`，弹窗内容会脱离 `.supplier-management-page` 祖先节点。
+- 供应商主题 CSS 变量（如 `--sp-panel`、`--sp-line`、`--sp-green`、`--sp-blue`、`--sp-cyan`、`--sp-violet` 等）定义在 `.supplier-management-page` 上；Teleport 后这些变量默认不可用，依赖 `var(--sp-*)` / `color-mix(... var(--sp-*) ...)` 的配色会失效，表现为“改了颜色但弹窗里看不出来”。
+- 在 `BaseDialog` 内做配色、状态色、KPI 卡、标签等样式时，必须任选一种可靠方案，禁止只依赖页面根节点变量：
+  1. 在弹窗内容根节点自行声明完整的 `--sp-*` 兜底变量（推荐用于页面 scoped 样式）；
+  2. 或像 `SupplierDrawer` / `SupplierModal` 一样，给 Teleport 后的内容根节点挂上 `supplier-management-page`（若挂该类，需注意并覆盖其页面级 `min-height` 等布局副作用）；
+  3. 对关键强调色可同时使用明确色值兜底，避免变量缺失时完全无色。
+- 验收时必须打开真实弹窗确认颜色生效；不能只看页面内非 Teleport 区域，也不能只靠代码里写了 `var(--sp-*)` 就视为完成。
