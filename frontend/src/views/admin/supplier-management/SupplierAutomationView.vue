@@ -4230,7 +4230,7 @@ function intervalSecondsToCron(seconds: number): string | null {
   }
 
   .sp-history-toolbar {
-    padding: 8px 12px; background: color-mix(in srgb, var(--sp-blue) 5%, var(--sp-panel)); border-left: 3px solid var(--sp-blue); background: color-mix(in srgb, var(--sp-blue) 5%, var(--sp-panel)); border-left: 3px solid var(--sp-blue); background: color-mix(in srgb, var(--sp-blue) 5%, var(--sp-panel)); border-left: 3px solid var(--sp-blue);
+    padding: 8px 12px; background: color-mix(in srgb, var(--sp-blue) 5%, var(--sp-panel)); border-left: 3px solid var(--sp-blue); background: color-mix(in srgb, var(--sp-blue) 5%, var(--sp-panel)); border-left: 3px solid var(--sp-blue); background: color-mix(in srgb, var(--sp-blue) 5%, var(--sp-panel)); border-left: 3px solid var(--sp-blue); background: color-mix(in srgb, var(--sp-blue) 5%, var(--sp-panel)); border-left: 3px solid var(--sp-blue);
   }
 
 
