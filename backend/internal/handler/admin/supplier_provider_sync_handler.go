@@ -479,6 +479,7 @@ func (h *SupplierProviderSyncHandler) ListGroups(c *gin.Context) {
 	result, err := h.dataRepo.ListGroups(c.Request.Context(), service.SupplierProviderDataListParams{
 		ProviderID:  parseOptionalInt64(c.Query("provider_id")),
 		Active:      parseSupplierProviderEnabled(c.Query("active")),
+		KeyStatus:   strings.TrimSpace(c.Query("key_status")),
 		Search:      strings.TrimSpace(c.Query("search")),
 		Platform:    strings.TrimSpace(c.Query("platform")),
 		MatchStatus: strings.TrimSpace(c.Query("match_status")),

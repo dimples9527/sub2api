@@ -172,6 +172,8 @@ export interface SupplierProviderDataListParams {
   active?: boolean
   /** 上游密钥业务状态：active/disabled/expired/quota_exhausted/unknown */
   status?: string
+  /** 分组密钥状态：created/not_created/unknown */
+  key_status?: 'created' | 'not_created' | 'unknown' | string
   search?: string
   platform?: string
   match_status?: string
@@ -204,6 +206,10 @@ export interface SupplierProviderGroupSummary {
   linked_group_count: number
   unlinked_group_count: number
   rate_risk_count: number
+  active_group_count: number
+  removed_group_count: number
+  created_key_group_count: number
+  attention_group_count: number
 }
 
 export interface SupplierProviderGroupListResult {

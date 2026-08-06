@@ -279,6 +279,16 @@ func TestSupplierProviderSyncHandlerRoutes(t *testing.T) {
 	require.Equal(t, "desc", dataStub.accountListParams.SortOrder)
 
 	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/groups?provider_id=42&active=true&key_status=created&page=1&page_size=20", nil)
+	router.GET("/groups", handler.ListGroups)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(42), dataStub.groupListParams.ProviderID)
+	require.NotNil(t, dataStub.groupListParams.Active)
+	require.True(t, *dataStub.groupListParams.Active)
+	require.Equal(t, "created", dataStub.groupListParams.KeyStatus)
+
+	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPut, "/groups/7/mapping", bytes.NewBufferString(`{"local_group_id":12}`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)

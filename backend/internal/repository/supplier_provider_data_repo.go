@@ -178,38 +178,77 @@ WHERE `+where+fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", supplierProviderA
 
 func (r *supplierProviderDataRepository) ListGroups(ctx context.Context, params service.SupplierProviderDataListParams) (service.SupplierProviderGroupListResult, error) {
 	params = normalizeSupplierProviderDataListParams(params)
-	baseWhere, baseArgs := supplierProviderGroupBaseWhere(params)
+	summaryParams := params
+	summaryParams.Active = nil
+	summaryWhere, summaryArgs := supplierProviderGroupBaseWhere(summaryParams)
 	where, args := supplierProviderGroupListWhere(params)
+
+	summaryScope := "TRUE"
+	if params.Active != nil {
+		if *params.Active {
+			summaryScope = "active = TRUE"
+		} else {
+			summaryScope = "active = FALSE"
+		}
+	}
 
 	var summary service.SupplierProviderGroupSummary
 	if err := r.db.QueryRowContext(ctx, `
-SELECT COUNT(*) AS group_count,
-       COALESCE(SUM(account_count), 0) AS account_count,
-       COUNT(*) FILTER (WHERE local_group_id IS NOT NULL) AS linked_group_count,
-       COUNT(*) FILTER (WHERE local_group_id IS NULL) AS unlinked_group_count,
+SELECT COUNT(*) FILTER (WHERE `+summaryScope+`) AS group_count,
+       COALESCE(SUM(account_count) FILTER (WHERE `+summaryScope+`), 0) AS account_count,
+       COUNT(*) FILTER (WHERE `+summaryScope+` AND local_group_id IS NOT NULL) AS linked_group_count,
+       COUNT(*) FILTER (WHERE `+summaryScope+` AND local_group_id IS NULL) AS unlinked_group_count,
        COUNT(*) FILTER (
-         WHERE local_group_id IS NOT NULL
+         WHERE `+summaryScope+`
+           AND local_group_id IS NOT NULL
            AND local_group_status = 'active'
            AND local_rate_multiplier < upstream_rate_multiplier
-       ) AS rate_risk_count
+       ) AS rate_risk_count,
+       COUNT(*) FILTER (WHERE active = TRUE) AS active_group_count,
+       COUNT(*) FILTER (WHERE active = FALSE) AS removed_group_count,
+       COUNT(*) FILTER (WHERE active = TRUE AND account_count > 0) AS created_key_group_count,
+       COUNT(*) FILTER (WHERE active = TRUE AND attention_required) AS attention_group_count
 FROM (
-  SELECT g.id, g.local_group_id,
+  SELECT g.id, g.active, g.local_group_id,
          g.rate_multiplier AS upstream_rate_multiplier,
          lg.rate_multiplier AS local_rate_multiplier,
          COALESCE(lg.status, '') AS local_group_status,
-         COUNT(a.id) FILTER (WHERE a.active = TRUE) AS account_count
+         COUNT(a.id) FILTER (WHERE a.active = TRUE) AS account_count,
+         (
+           g.name_change_pending
+           OR g.auto_match_status = 'ambiguous'
+           OR (
+             g.local_group_id IS NOT NULL
+             AND COALESCE(lg.status, '') <> 'inactive'
+             AND g.rate_multiplier > 0
+             AND lg.rate_multiplier > 0
+             AND lg.rate_multiplier < g.rate_multiplier - 0.000000001
+           )
+         ) AS attention_required
   FROM supplier_provider_groups g
   JOIN supplier_providers p ON p.id = g.provider_id
   LEFT JOIN groups lg ON lg.id = g.local_group_id
+  LEFT JOIN LATERAL (
+    SELECT r.status
+    FROM supplier_provider_sync_runs r
+    WHERE r.provider_id = g.provider_id
+      AND r.sync_scope = 'accounts'
+    ORDER BY r.started_at DESC, r.id DESC
+    LIMIT 1
+  ) account_sync ON TRUE
   LEFT JOIN supplier_provider_accounts a ON a.provider_id = g.provider_id AND a.group_key = g.upstream_group_key
-  WHERE `+baseWhere+`
-  GROUP BY g.id, g.local_group_id, lg.id
-) matched_groups`, baseArgs...).Scan(
+  WHERE `+summaryWhere+`
+  GROUP BY g.id, lg.id, account_sync.status
+) matched_groups`, summaryArgs...).Scan(
 		&summary.GroupCount,
 		&summary.AccountCount,
 		&summary.LinkedGroupCount,
 		&summary.UnlinkedGroupCount,
 		&summary.RateRiskCount,
+		&summary.ActiveGroupCount,
+		&summary.RemovedGroupCount,
+		&summary.CreatedKeyGroupCount,
+		&summary.AttentionGroupCount,
 	); err != nil {
 		return service.SupplierProviderGroupListResult{}, fmt.Errorf("summarize supplier provider groups: %w", err)
 	}
@@ -1331,6 +1370,10 @@ func supplierProviderGroupListWhere(params service.SupplierProviderDataListParam
 		conditions = append(conditions, "g.name_change_pending = TRUE")
 	}
 
+	if keyStatusCondition := supplierProviderGroupKeyStatusCondition(params.KeyStatus); keyStatusCondition != "" {
+		conditions = append(conditions, keyStatusCondition)
+	}
+
 	validRateCondition := "g.local_group_id IS NOT NULL AND COALESCE(lg.status, '') <> 'inactive' AND g.rate_multiplier > 0 AND lg.rate_multiplier > 0"
 	switch strings.TrimSpace(params.RateStatus) {
 	case "normal":
@@ -1350,8 +1393,37 @@ func supplierProviderGroupListWhere(params service.SupplierProviderDataListParam
 	return strings.Join(conditions, " AND "), args
 }
 
+func supplierProviderGroupKeyStatusCondition(status string) string {
+	activeKeyExists := `EXISTS (
+  SELECT 1
+  FROM supplier_provider_accounts key_account
+  WHERE key_account.provider_id = g.provider_id
+    AND key_account.group_key = g.upstream_group_key
+    AND key_account.active = TRUE
+)`
+	lastAccountSyncStatus := `COALESCE((
+  SELECT account_sync.status
+  FROM supplier_provider_sync_runs account_sync
+  WHERE account_sync.provider_id = g.provider_id
+    AND account_sync.sync_scope = 'accounts'
+  ORDER BY account_sync.started_at DESC, account_sync.id DESC
+  LIMIT 1
+), 'never')`
+
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "created":
+		return activeKeyExists
+	case "not_created":
+		return "NOT " + activeKeyExists + " AND " + lastAccountSyncStatus + " IN ('success', 'partial')"
+	case "unknown":
+		return "NOT " + activeKeyExists + " AND " + lastAccountSyncStatus + " NOT IN ('success', 'partial')"
+	default:
+		return ""
+	}
+}
+
 func supplierProviderGroupHasListFilters(params service.SupplierProviderDataListParams) bool {
-	return strings.TrimSpace(params.MatchStatus) != "" || strings.TrimSpace(params.RateStatus) != ""
+	return strings.TrimSpace(params.MatchStatus) != "" || strings.TrimSpace(params.RateStatus) != "" || supplierProviderGroupKeyStatusCondition(params.KeyStatus) != ""
 }
 
 func supplierProviderAccountOrderBy(params service.SupplierProviderDataListParams) string {

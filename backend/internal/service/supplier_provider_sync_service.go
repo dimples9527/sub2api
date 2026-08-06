@@ -107,6 +107,7 @@ type SupplierProviderDataListParams struct {
 	GroupID     int64
 	Active      *bool
 	Status      string
+	KeyStatus   string
 	Search      string
 	Platform    string
 	MatchStatus string
@@ -125,11 +126,15 @@ type SupplierProviderAccountListResult struct {
 }
 
 type SupplierProviderGroupSummary struct {
-	GroupCount         int64 `json:"group_count"`
-	AccountCount       int64 `json:"account_count"`
-	LinkedGroupCount   int64 `json:"linked_group_count"`
-	UnlinkedGroupCount int64 `json:"unlinked_group_count"`
-	RateRiskCount      int64 `json:"rate_risk_count"`
+	GroupCount           int64 `json:"group_count"`
+	AccountCount         int64 `json:"account_count"`
+	LinkedGroupCount     int64 `json:"linked_group_count"`
+	UnlinkedGroupCount   int64 `json:"unlinked_group_count"`
+	RateRiskCount        int64 `json:"rate_risk_count"`
+	ActiveGroupCount     int64 `json:"active_group_count"`
+	RemovedGroupCount    int64 `json:"removed_group_count"`
+	CreatedKeyGroupCount int64 `json:"created_key_group_count"`
+	AttentionGroupCount  int64 `json:"attention_group_count"`
 }
 
 type SupplierProviderGroupListResult struct {

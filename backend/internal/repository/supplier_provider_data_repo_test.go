@@ -612,11 +612,12 @@ func TestSupplierProviderDataRepositoryListGroupsIncludesFilteredSummary(t *test
 	active := true
 	now := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
 
-	mock.ExpectQuery(`COUNT\(\*\) FILTER \(WHERE local_group_id IS NOT NULL\) AS linked_group_count`).
-		WithArgs(int64(42), active, "%vip%").
+	mock.ExpectQuery(`COUNT\(\*\) FILTER \(WHERE active = TRUE AND local_group_id IS NOT NULL\) AS linked_group_count`).
+		WithArgs(int64(42), "%vip%").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"group_count", "account_count", "linked_group_count", "unlinked_group_count", "rate_risk_count",
-		}).AddRow(int64(4), int64(9), int64(3), int64(1), int64(2)))
+			"active_group_count", "removed_group_count", "created_key_group_count", "attention_group_count",
+		}).AddRow(int64(4), int64(9), int64(3), int64(1), int64(2), int64(4), int64(0), int64(3), int64(1)))
 	mock.ExpectQuery(`(?s)LEFT JOIN groups lg ON lg\.id = g\.local_group_id.*LEFT JOIN supplier_provider_groups guardian_group ON guardian_group\.id = guard_state\.rate_guard_group_id.*LEFT JOIN supplier_providers guardian_provider ON guardian_provider\.id = guardian_group\.provider_id.*ORDER BY LOWER\(lg\.name\) DESC NULLS LAST, g\.id ASC`).
 		WithArgs(int64(42), active, "%vip%", 20, 20).
 		WillReturnRows(sqlmock.NewRows([]string{
@@ -651,6 +652,10 @@ func TestSupplierProviderDataRepositoryListGroupsIncludesFilteredSummary(t *test
 	require.Equal(t, int64(3), result.Summary.LinkedGroupCount)
 	require.Equal(t, int64(1), result.Summary.UnlinkedGroupCount)
 	require.Equal(t, int64(2), result.Summary.RateRiskCount)
+	require.Equal(t, int64(4), result.Summary.ActiveGroupCount)
+	require.Equal(t, int64(0), result.Summary.RemovedGroupCount)
+	require.Equal(t, int64(3), result.Summary.CreatedKeyGroupCount)
+	require.Equal(t, int64(1), result.Summary.AttentionGroupCount)
 	require.Len(t, result.Items, 1)
 	require.Equal(t, int64(12), *result.Items[0].LocalGroupID)
 	require.Equal(t, "VIP 本地", result.Items[0].LocalGroupName)
@@ -677,11 +682,12 @@ func TestSupplierProviderDataRepositoryListGroupsReturnsKeyStatus(t *testing.T) 
 	repo, mock := newSupplierProviderDataRepoMock(t)
 	now := time.Date(2026, 8, 5, 10, 0, 0, 0, time.UTC)
 
-	mock.ExpectQuery(`COUNT\(\*\) FILTER \(WHERE local_group_id IS NOT NULL\) AS linked_group_count`).
+	mock.ExpectQuery(`COUNT\(\*\) FILTER \(WHERE TRUE AND local_group_id IS NOT NULL\) AS linked_group_count`).
 		WithArgs(int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"group_count", "account_count", "linked_group_count", "unlinked_group_count", "rate_risk_count",
-		}).AddRow(int64(3), int64(2), int64(0), int64(3), int64(0)))
+			"active_group_count", "removed_group_count", "created_key_group_count", "attention_group_count",
+		}).AddRow(int64(3), int64(2), int64(0), int64(3), int64(0), int64(3), int64(0), int64(1), int64(0)))
 	mock.ExpectQuery(`(?s)SELECT g\.id, g\.provider_id.*LEFT JOIN LATERAL.*sync_scope = 'accounts'.*ORDER BY`).
 		WithArgs(int64(42), 20, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
@@ -925,11 +931,12 @@ func TestSupplierProviderDataRepositoryListGroupsKeepsSummaryOutsideStatusFilter
 	active := true
 	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
 
-	mock.ExpectQuery(`(?s)COUNT\(\*\) AS group_count.*WHERE .*lg\.platform = \$3`).
-		WithArgs(int64(42), active, "openai").
+	mock.ExpectQuery(`(?s)COUNT\(\*\) FILTER \(WHERE active = TRUE\) AS group_count.*WHERE .*lg\.platform = \$2`).
+		WithArgs(int64(42), "openai").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"group_count", "account_count", "linked_group_count", "unlinked_group_count", "rate_risk_count",
-		}).AddRow(int64(4), int64(9), int64(3), int64(1), int64(2)))
+			"active_group_count", "removed_group_count", "created_key_group_count", "attention_group_count",
+		}).AddRow(int64(4), int64(9), int64(3), int64(1), int64(2), int64(4), int64(0), int64(3), int64(1)))
 	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\) FROM supplier_provider_groups g.*g\.auto_match_status = 'manual'.*lg\.rate_multiplier > g\.rate_multiplier \+ 0\.000000001`).
 		WithArgs(int64(42), active, "openai").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
@@ -964,6 +971,56 @@ func TestSupplierProviderDataRepositoryListGroupsKeepsSummaryOutsideStatusFilter
 	require.Equal(t, int64(1), result.Total)
 	require.Len(t, result.Items, 1)
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderGroupListWhereFiltersKeyStatusOnServer(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    string
+		wantParts []string
+	}{
+		{
+			name:   "created",
+			status: "created",
+			wantParts: []string{
+				"EXISTS (",
+				"supplier_provider_accounts key_account",
+				"key_account.active = TRUE",
+			},
+		},
+		{
+			name:   "not created",
+			status: "not_created",
+			wantParts: []string{
+				"NOT EXISTS (",
+				"supplier_provider_accounts key_account",
+				"COALESCE((",
+				"sync_scope = 'accounts'",
+				"IN ('success', 'partial')",
+			},
+		},
+		{
+			name:   "unknown",
+			status: "unknown",
+			wantParts: []string{
+				"NOT EXISTS (",
+				"supplier_provider_accounts key_account",
+				"COALESCE((",
+				"sync_scope = 'accounts'",
+				"NOT IN ('success', 'partial')",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			where, args := supplierProviderGroupListWhere(service.SupplierProviderDataListParams{KeyStatus: tt.status})
+			for _, part := range tt.wantParts {
+				require.Contains(t, where, part)
+			}
+			require.Empty(t, args)
+		})
+	}
 }
 
 func TestSupplierProviderDataRepositoryUpdateGroupMappingSetsAndClearsLocalGroup(t *testing.T) {

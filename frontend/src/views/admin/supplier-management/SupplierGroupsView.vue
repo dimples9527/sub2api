@@ -5,7 +5,7 @@
         <div>
           <span class="sp-filter-card-kicker">筛选条件</span>
           <h2>筛选分组</h2>
-          <p>按供应商、平台、匹配状态和倍率状态定位上游分组。</p>
+          <p>按供应商、平台、匹配状态、倍率状态和密钥状态定位上游分组。</p>
         </div>
       </header>
 
@@ -52,6 +52,15 @@
               :searchable="false"
             />
           </div>
+          <div class="sp-filter-control">
+            <span class="sr-only">密钥状态</span>
+            <Select
+              v-model="keyStatusFilter"
+              class="w-full"
+              :options="keyStatusFilterOptions"
+              :searchable="false"
+            />
+          </div>
         </div>
         <div class="sp-filter-actions">
           <button class="sp-button small sp-control-button sp-control-button-reset" type="button" :disabled="loading || !canResetFilters" @click="resetGroupFilters">
@@ -82,6 +91,30 @@
     <div v-if="error" class="sp-alert sp-error-line">{{ error }}</div>
 
     <div class="sp-console-shell">
+      <div class="sp-scope-bar" aria-label="分组范围">
+        <div class="sp-scope-tabs" role="tablist" aria-label="选择分组范围">
+          <button
+            v-for="option in groupScopeOptions"
+            :key="option.value"
+            type="button"
+            class="sp-scope-tab"
+            :class="{ active: groupScope === option.value }"
+            :aria-selected="groupScope === option.value"
+            :disabled="loading"
+            role="tab"
+            @click="setGroupScope(option.value)"
+          >
+            <span>{{ option.label }}</span>
+            <strong>{{ groupScopeCount(option.value) }}</strong>
+          </button>
+        </div>
+        <div class="sp-scope-hint">
+          <span>{{ groupScopeHint }}</span>
+          <span v-if="groupScope !== 'removed' && groupSummary.attention_group_count > 0" class="sp-attention-count">
+            {{ groupSummary.attention_group_count }} 个需关注
+          </span>
+        </div>
+      </div>
       <div class="sp-summary-grid" aria-label="分组匹配汇总">
         <button
           type="button"
@@ -93,7 +126,7 @@
           @click="applySummaryFilter('all')"
         >
           <StatCard
-            title="上游分组"
+            :title="groupScopeTitle"
             :value="groupSummary.group_count"
             :icon="UpstreamGroupsIcon"
             icon-variant="primary"
@@ -183,7 +216,18 @@
           </div>
         </header>
 
-        <div class="sp-attention-shortcuts" aria-label="待处理快捷过滤">
+        <div class="sp-attention-shortcuts" aria-label="快捷过滤">
+          <button
+            type="button"
+            class="sp-attention-shortcut sp-key-shortcut"
+            :class="{ active: isCreatedKeyShortcutActive }"
+            :aria-pressed="isCreatedKeyShortcutActive"
+            :disabled="loading"
+            @click="applyCreatedKeyShortcut"
+          >
+            <span>已创建密钥</span>
+            <strong>{{ groupSummary.created_key_group_count }}</strong>
+          </button>
           <button
             v-for="shortcut in attentionShortcuts"
             :key="shortcut.label"
@@ -259,9 +303,8 @@
                 <span class="sp-status" :class="upstreamStatusTone(group)">
                   <i></i>{{ upstreamStatusLabel(group) }}
                 </span>
-                <small v-if="!group.active && group.inactive_at" class="sp-sub">
-                  {{ formatTime(group.inactive_at) }}
-                </small>
+                <small v-if="group.last_seen_at" class="sp-sub">最近出现：{{ formatTime(group.last_seen_at) }}</small>
+                <small v-if="!group.active && group.inactive_at" class="sp-sub">移除时间：{{ formatTime(group.inactive_at) }}</small>
               </div>
             </template>
 
@@ -755,9 +798,15 @@ const EMPTY_GROUP_SUMMARY: SupplierProviderGroupSummary = {
   linked_group_count: 0,
   unlinked_group_count: 0,
   rate_risk_count: 0,
+  active_group_count: 0,
+  removed_group_count: 0,
+  created_key_group_count: 0,
+  attention_group_count: 0,
 }
 
 type SummaryFilter = 'all' | 'linked' | 'unlinked' | 'inverted'
+type GroupScope = 'active' | 'removed' | 'all'
+type KeyStatusFilter = '' | 'created' | 'not_created' | 'unknown'
 
 interface AttentionShortcut {
   label: string
@@ -869,12 +918,19 @@ const search = ref('')
 const platformFilter = ref('')
 const matchStatusFilter = ref('')
 const rateStatusFilter = ref('')
+const groupScope = ref<GroupScope>('active')
+const keyStatusFilter = ref<KeyStatusFilter>('')
 let searchTimer: number | undefined
 let monitorTrendRequestID = 0
 let healthTrendRequestID = 0
 let suppressFilterWatch = false
 
 const DEFAULT_PROVIDER_ID = 0
+const groupScopeOptions: Array<{ value: GroupScope; label: string }> = [
+  { value: 'active', label: '当前分组' },
+  { value: 'removed', label: '已移除' },
+  { value: 'all', label: '全部' },
+]
 const providerOptions = computed<SelectOption[]>(() => [
   { value: 0, label: '全部供应商' },
   ...providers.value.map(provider => ({ value: provider.id, label: provider.name })),
@@ -906,6 +962,12 @@ const rateStatusFilterOptions: SelectOption[] = [
   { value: 'inverted', label: '倒挂风险' },
   { value: 'inactive', label: '本地停用' },
   { value: 'invalid', label: '数据异常' },
+]
+const keyStatusFilterOptions: SelectOption[] = [
+  { value: '', label: '全部密钥状态' },
+  { value: 'created', label: '已创建密钥' },
+  { value: 'not_created', label: '未创建密钥' },
+  { value: 'unknown', label: '无法确认密钥' },
 ]
 const attentionShortcuts: AttentionShortcut[] = [
   { label: '名称冲突', matchStatus: 'ambiguous', rateStatus: '' },
@@ -950,9 +1012,18 @@ const canResetFilters = computed(() => (
   || platformFilter.value !== ''
   || matchStatusFilter.value !== ''
   || rateStatusFilter.value !== ''
+  || groupScope.value !== 'active'
+  || keyStatusFilter.value !== ''
 ))
 const matchedGroupRate = computed(() => percentage(groupSummary.value.linked_group_count, groupSummary.value.group_count))
 const unmatchedGroupRate = computed(() => percentage(groupSummary.value.unlinked_group_count, groupSummary.value.group_count))
+const groupScopeTitle = computed(() => groupScopeOptions.find(option => option.value === groupScope.value)?.label || '当前分组')
+const groupScopeHint = computed(() => {
+  if (groupScope.value === 'removed') return '保留上游已移除的历史记录，便于清理本地映射。'
+  if (groupScope.value === 'all') return '同时查看当前可用分组和已移除的历史记录。'
+  return '默认仅展示最近同步仍存在于上游的分组。'
+})
+const isCreatedKeyShortcutActive = computed(() => groupScope.value === 'active' && keyStatusFilter.value === 'created')
 const currentPageMatchedCount = computed(() => items.value.filter(group => group.local_group_id).length)
 const currentPageAttentionCount = computed(() => items.value.filter(group => {
   const code = rateInsight(group).code
@@ -1020,7 +1091,7 @@ onMounted(async () => {
   await refreshRateGuardChangeLogs()
 })
 
-watch([providerID, platformFilter, matchStatusFilter, rateStatusFilter], () => {
+watch([groupScope, providerID, platformFilter, matchStatusFilter, rateStatusFilter, keyStatusFilter], () => {
   if (suppressFilterWatch) return
   page.value = 1
   void loadGroups()
@@ -1043,6 +1114,8 @@ function resetGroupFilters() {
   platformFilter.value = ''
   matchStatusFilter.value = ''
   rateStatusFilter.value = ''
+  groupScope.value = 'active'
+  keyStatusFilter.value = ''
   page.value = 1
   void nextTick(() => {
     suppressFilterWatch = false
@@ -1053,6 +1126,26 @@ function resetGroupFilters() {
 function selectProviderShortcut(value: SelectOption['value']) {
   if (typeof value !== 'number' || providerID.value === value) return
   providerID.value = value
+}
+
+function groupScopeCount(scope: GroupScope): number {
+  if (scope === 'active') return groupSummary.value.active_group_count
+  if (scope === 'removed') return groupSummary.value.removed_group_count
+  return groupSummary.value.active_group_count + groupSummary.value.removed_group_count
+}
+
+function setGroupScope(nextScope: GroupScope) {
+  if (groupScope.value === nextScope) return
+  suppressFilterWatch = true
+  groupScope.value = nextScope
+  matchStatusFilter.value = ''
+  rateStatusFilter.value = ''
+  keyStatusFilter.value = ''
+  page.value = 1
+  void nextTick(() => {
+    suppressFilterWatch = false
+    void loadGroups()
+  })
 }
 
 function isSummaryFilterActive(filter: SummaryFilter): boolean {
@@ -1086,7 +1179,8 @@ function applySummaryFilter(filter: SummaryFilter) {
 }
 
 function isAttentionShortcutActive(shortcut: AttentionShortcut): boolean {
-  return matchStatusFilter.value === shortcut.matchStatus
+  return keyStatusFilter.value === ''
+    && matchStatusFilter.value === shortcut.matchStatus
     && rateStatusFilter.value === shortcut.rateStatus
 }
 
@@ -1095,6 +1189,20 @@ function applyAttentionShortcut(shortcut: AttentionShortcut) {
   suppressFilterWatch = true
   matchStatusFilter.value = active ? '' : shortcut.matchStatus
   rateStatusFilter.value = active ? '' : shortcut.rateStatus
+  keyStatusFilter.value = ''
+  page.value = 1
+  void nextTick(() => {
+    suppressFilterWatch = false
+    void loadGroups()
+  })
+}
+
+function applyCreatedKeyShortcut() {
+  suppressFilterWatch = true
+  groupScope.value = 'active'
+  keyStatusFilter.value = 'created'
+  matchStatusFilter.value = ''
+  rateStatusFilter.value = ''
   page.value = 1
   void nextTick(() => {
     suppressFilterWatch = false
@@ -1272,6 +1380,8 @@ async function loadGroups() {
   try {
     const result = await listSupplierGroups({
       provider_id: providerID.value || undefined,
+      active: groupScope.value === 'all' ? undefined : groupScope.value === 'active',
+      key_status: keyStatusFilter.value || undefined,
       search: search.value.trim() || undefined,
       platform: platformFilter.value || undefined,
       match_status: matchStatusFilter.value || undefined,
@@ -1630,18 +1740,20 @@ function groupPlatform(platform?: string): GroupPlatform | undefined {
 }
 
 function upstreamStatusLabel(group: SupplierProviderGroup): string {
-  if (!group.active) return '已失效'
+  if (!group.active) return '上游已移除'
+  if (group.raw_status === 'disabled' || group.raw_status === 'inactive') return '上游停用'
   const rawStatus = group.raw_status?.trim()
-  if (!rawStatus) return '正常'
+  if (!rawStatus) return '当前可用'
   const status = rawStatus.toLowerCase()
-  if (['active', 'enabled', 'normal', 'success', '有效'].includes(status)) return '正常'
+  if (['disabled', 'inactive'].includes(status)) return '上游停用'
+  if (['active', 'enabled', 'normal', 'success', '有效'].includes(status)) return '当前可用'
   return rawStatus
 }
 
 function upstreamStatusTone(group: SupplierProviderGroup): string {
   const status = upstreamStatusLabel(group).toLowerCase()
-  if (group.active && ['active', 'enabled', 'normal', 'success', '有效'].includes(status)) return 'good'
-  if (!group.active || ['inactive', 'disabled', 'failed', '失效'].includes(status)) return 'bad'
+  if (status === '当前可用') return 'good'
+  if (['上游已移除', '上游停用', 'failed'].includes(status)) return 'bad'
   return 'info'
 }
 
@@ -1759,7 +1871,7 @@ function errorMessage(err: unknown, fallback: string): string {
   display: grid;
   min-width: 0;
   flex: 1 1 auto;
-  grid-template-columns: minmax(15rem, 1fr) repeat(4, minmax(9rem, 0.55fr));
+  grid-template-columns: minmax(15rem, 1fr) repeat(5, minmax(9rem, 0.55fr));
   gap: 0.625rem;
 }
 
@@ -1944,6 +2056,103 @@ function errorMessage(err: unknown, fallback: string): string {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.75rem;
+}
+
+.sp-scope-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.875rem;
+  padding: 0.2rem 0.15rem 0;
+}
+
+.sp-scope-tabs {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.5rem;
+  background: var(--sp-panel-2);
+}
+
+.sp-scope-tab {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+  white-space: nowrap;
+}
+
+.sp-scope-tab strong {
+  min-width: 1.35rem;
+  padding: 0.1rem 0.28rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sp-muted) 12%, transparent);
+  color: var(--sp-muted);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.sp-scope-tab:hover {
+  color: var(--sp-cyan);
+}
+
+.sp-scope-tab.active {
+  border-color: color-mix(in srgb, var(--sp-cyan) 48%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-cyan) 9%, var(--sp-panel));
+  color: var(--sp-cyan);
+}
+
+.sp-scope-tab.active strong {
+  background: color-mix(in srgb, var(--sp-cyan) 16%, transparent);
+  color: var(--sp-cyan);
+}
+
+.sp-scope-tab:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.sp-scope-tab:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--sp-cyan) 60%, transparent);
+  outline-offset: 2px;
+}
+
+.sp-scope-hint {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  text-align: right;
+}
+
+.sp-attention-count {
+  flex: 0 0 auto;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid color-mix(in srgb, var(--sp-amber) 36%, var(--sp-line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sp-amber) 9%, var(--sp-panel));
+  color: var(--sp-amber);
+  font-size: 0.68rem;
+  font-weight: 750;
 }
 
 .sp-summary-filter {
@@ -2175,6 +2384,28 @@ function errorMessage(err: unknown, fallback: string): string {
   border-color: color-mix(in srgb, var(--sp-amber) 58%, var(--sp-line));
   background: color-mix(in srgb, var(--sp-amber) 9%, var(--sp-panel));
   color: var(--sp-amber);
+}
+
+.sp-key-shortcut {
+  border-color: color-mix(in srgb, var(--sp-green) 36%, var(--sp-line));
+  color: var(--sp-green);
+}
+
+.sp-key-shortcut:hover,
+.sp-key-shortcut.active {
+  border-color: color-mix(in srgb, var(--sp-green) 58%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-green) 9%, var(--sp-panel));
+  color: var(--sp-green);
+}
+
+.sp-key-shortcut strong {
+  min-width: 1.25rem;
+  padding: 0.08rem 0.3rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sp-green) 14%, transparent);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
 }
 
 .sp-attention-shortcut:disabled {
@@ -2807,6 +3038,9 @@ function errorMessage(err: unknown, fallback: string): string {
   .sp-filter-search-control { grid-column: 1 / -1; }
   .sp-filter-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sp-filter-actions .sp-button { width: 100%; min-width: 0; padding-inline: 0.45rem; }
+  .sp-scope-bar { align-items: stretch; flex-direction: column; }
+  .sp-scope-tabs { max-width: 100%; overflow-x: auto; }
+  .sp-scope-hint { justify-content: flex-start; text-align: left; }
   .sp-summary-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .sp-summary-grid { gap: 0.35rem; }
   .sp-summary-grid :deep(.stat-card) { min-height: 4.75rem; padding: 0.55rem; }

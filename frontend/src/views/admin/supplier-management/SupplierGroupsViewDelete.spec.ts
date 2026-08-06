@@ -32,8 +32,9 @@ describe('SupplierGroupsView 分组记录删除', () => {
   it('显示上游分组状态和失效时间，删除成功后刷新列表', () => {
     expect(source).toContain('group.active')
     expect(source).toContain('group.inactive_at')
-    expect(source).toContain("if (!group.active) return '已失效'")
-    expect(source).toContain("return '正常'")
+    expect(source).toContain("if (!group.active) return '上游已移除'")
+    expect(source).toContain("if (group.raw_status === 'disabled' || group.raw_status === 'inactive') return '上游停用'")
+    expect(source).toContain("return '当前可用'")
     expect(source).not.toContain('active: true')
     expect(source).toContain('await loadGroups()')
     expect(source).toContain("appStore.showSuccess('分组记录已删除')")
