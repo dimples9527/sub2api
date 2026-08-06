@@ -460,8 +460,7 @@
           <div class="sp-detail-cell"><span>最近结果</span><b>{{ authEventLabel(authStatus.summary.last_login_status) }}</b></div>
           <div class="sp-detail-cell"><span>最近缓存命中</span><b>{{ formatAuthTime(authStatus.summary.last_cache_hit_at) }}</b></div>
           <div class="sp-detail-cell"><span>Token 缓存</span><b>{{ authCacheLabel(authStatus.cache.status) }}</b></div>
-          <div class="sp-detail-cell"><span>剩余有效期</span><b>{{ formatDuration(authStatus.cache.remaining_seconds) }}</b></div>
-          <div class="sp-detail-cell"><span>Redis TTL</span><b>{{ formatDuration(authStatus.cache.ttl_seconds) }}</b></div>
+          <div class="sp-detail-cell"><span>缓存策略</span><b>长期缓存，接口鉴权失败后重登</b></div>
           <div class="sp-detail-cell"><span>Cookie 会话</span><b>{{ authStatus.cache.cookie_present ? '存在' : '不存在' }}</b></div>
           <div class="sp-detail-cell"><span>Token 摘要</span><b>{{ authStatus.cache.token_summary || '—' }}</b></div>
           <div class="sp-detail-cell"><span>Token 长度</span><b>{{ authStatus.cache.token_length || 0 }}</b></div>
@@ -1556,7 +1555,7 @@ function formatDuration(seconds: number): string {
 }
 
 function authCacheLabel(status: string): string {
-  return ({ cached: '已缓存', missing: '未缓存', expired: '已过期', error: '缓存异常' } as Record<string, string>)[status] || status || '未知'
+  return ({ cached: '已缓存', missing: '未缓存', expired: '已失效', error: '缓存异常' } as Record<string, string>)[status] || status || '未知'
 }
 
 function authEventLabel(value: string): string {
