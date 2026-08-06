@@ -326,6 +326,16 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(rowIds()).toEqual(['1', '2', '3'])
   })
 
+  it('prevents syncing a disabled provider until it is enabled again', async () => {
+    const wrapper = await mountSupplierProviders()
+
+    const syncButton = wrapper.get('[data-test="supplier-provider-sync-all-2"]')
+
+    expect(syncButton.attributes('disabled')).toBeDefined()
+    expect(syncButton.attributes('title')).toBe('供应商已停用，请先启用后再同步')
+    expect(providerViewMocks.streamSupplierProviderSync).not.toHaveBeenCalled()
+  })
+
   it('updates a provider enabled state from the table switch', async () => {
     const wrapper = await mountSupplierProviders()
 

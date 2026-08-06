@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -425,6 +426,24 @@ func TestSupplierProviderSyncServiceRejectsUnsupportedProviderType(t *testing.T)
 	_, err := service.SyncAccounts(context.Background(), 42, SupplierSyncTriggerManual)
 
 	require.Error(t, err)
+}
+
+func TestSupplierProviderSyncServiceReportsDisabledProviderSeparately(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID:           42,
+		Name:         "供应商甲",
+		ProviderType: SupplierProviderTypeSub2API,
+		Enabled:      false,
+	}}}
+	remote := &supplierRemoteClientStub{}
+	service := NewSupplierProviderSyncService(providerRepo, &supplierProviderDataRepoStub{}, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	_, err := service.SyncAll(context.Background(), 42, SupplierSyncTriggerManual)
+
+	require.Error(t, err)
+	require.Equal(t, "SUPPLIER_PROVIDER_DISABLED", infraerrors.Reason(err))
+	require.Equal(t, "supplier provider is disabled", infraerrors.Message(err))
+	require.Zero(t, remote.accountsCalls)
 }
 
 func TestSupplierProviderSyncServiceAllowsNewAPIProviderType(t *testing.T) {

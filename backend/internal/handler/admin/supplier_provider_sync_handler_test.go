@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -326,6 +327,24 @@ func TestSupplierProviderSyncHandlerStreamsErrorEvent(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), `"stage":"error"`)
 	require.Contains(t, rec.Body.String(), "上游登录失败")
+}
+
+func TestSupplierProviderSyncHandlerUsesFriendlyMessageForDisabledProvider(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	syncStub := &supplierProviderSyncHandlerSyncStub{
+		streamError: infraerrors.BadRequest("SUPPLIER_PROVIDER_DISABLED", "supplier provider is disabled"),
+	}
+	handler := NewSupplierProviderSyncHandler(syncStub, &supplierProviderSyncHandlerDataStub{})
+	router := gin.New()
+	router.POST("/providers/:id/sync/all/stream", handler.SyncAllStream)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/providers/42/sync/all/stream", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "供应商已停用，请先启用后再同步")
+	require.NotContains(t, rec.Body.String(), "error: code=400 reason=\"SUPPLIER_PROVIDER_DISABLED\"")
 }
 
 func TestSupplierProviderSyncHandlerStreamsResultMessageWhenSyncReturnsError(t *testing.T) {

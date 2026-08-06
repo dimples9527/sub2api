@@ -986,7 +986,7 @@ func (s *SupplierProviderSyncService) validSyncProvider(ctx context.Context, pro
 		return nil, ErrSupplierProviderInvalid
 	}
 	if !provider.Enabled {
-		return nil, ErrSupplierProviderInvalid
+		return nil, ErrSupplierProviderDisabled
 	}
 	return provider, nil
 }

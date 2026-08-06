@@ -242,6 +242,8 @@ func (h *SupplierProviderSyncHandler) syncStream(c *gin.Context, fn func(context
 		terminalErr := err
 		if message := strings.TrimSpace(result.Message); message != "" {
 			terminalErr = errors.New(message)
+		} else if errors.Is(err, service.ErrSupplierProviderDisabled) {
+			terminalErr = errors.New("供应商已停用，请先启用后再同步")
 		}
 		service.SupplierSyncProgressFail(ctx, service.SupplierSyncProgressStageError, terminalErr)
 		return

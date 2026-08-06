@@ -141,7 +141,14 @@
             <div class="sp-inline" @click.stop>
               <button class="sp-button small" type="button" @click="openAuthHistory(provider)">登录记录</button>
               <button class="sp-button small" type="button" @click="openEdit(provider)">编辑</button>
-              <button class="sp-button small" type="button" :disabled="isProviderSyncing(provider)" @click="syncProviderData(provider, 'all')">{{ isProviderSyncing(provider) ? '同步中' : '同步全部' }}</button>
+              <button
+                class="sp-button small"
+                type="button"
+                :data-test="`supplier-provider-sync-all-${provider.id}`"
+                :disabled="!provider.enabled || isProviderSyncing(provider)"
+                :title="provider.enabled ? '同步全部数据' : supplierProviderDisabledSyncMessage"
+                @click="syncProviderData(provider, 'all')"
+              >{{ isProviderSyncing(provider) ? '同步中' : '同步全部' }}</button>
               <button class="sp-button small" type="button" :disabled="provider.is_default" @click="makeDefault(provider)">默认</button>
               <button class="sp-button small danger" type="button" @click="removeProvider(provider)">删除</button>
             </div>
@@ -375,11 +382,11 @@
         <div class="sp-drawer-actions">
           <button class="sp-button primary" type="button" @click="openEdit(selectedProvider)">编辑配置</button>
           <button class="sp-button" type="button" @click="openAuthHistory(selectedProvider)">登录与 Token</button>
-          <button class="sp-button primary" type="button" :disabled="isProviderSyncing(selectedProvider)" @click="syncProviderData(selectedProvider, 'all')">同步全部</button>
-          <button class="sp-button" type="button" :disabled="isProviderSyncing(selectedProvider)" @click="syncProviderData(selectedProvider, 'accounts')">同步 API Key</button>
-          <button class="sp-button" type="button" :disabled="isProviderSyncing(selectedProvider)" @click="syncProviderData(selectedProvider, 'groups')">同步分组</button>
-          <button class="sp-button" type="button" :disabled="isProviderSyncing(selectedProvider)" @click="syncProviderData(selectedProvider, 'balance')">刷新余额</button>
-          <button class="sp-button" type="button" :disabled="isProviderSyncing(selectedProvider)" @click="syncProviderData(selectedProvider, 'cost')">刷新成本</button>
+          <button class="sp-button primary" type="button" :disabled="!selectedProvider.enabled || isProviderSyncing(selectedProvider)" :title="selectedProvider.enabled ? '同步全部数据' : supplierProviderDisabledSyncMessage" @click="syncProviderData(selectedProvider, 'all')">同步全部</button>
+          <button class="sp-button" type="button" :disabled="!selectedProvider.enabled || isProviderSyncing(selectedProvider)" :title="selectedProvider.enabled ? '同步 API Key' : supplierProviderDisabledSyncMessage" @click="syncProviderData(selectedProvider, 'accounts')">同步 API Key</button>
+          <button class="sp-button" type="button" :disabled="!selectedProvider.enabled || isProviderSyncing(selectedProvider)" :title="selectedProvider.enabled ? '同步分组' : supplierProviderDisabledSyncMessage" @click="syncProviderData(selectedProvider, 'groups')">同步分组</button>
+          <button class="sp-button" type="button" :disabled="!selectedProvider.enabled || isProviderSyncing(selectedProvider)" :title="selectedProvider.enabled ? '刷新余额' : supplierProviderDisabledSyncMessage" @click="syncProviderData(selectedProvider, 'balance')">刷新余额</button>
+          <button class="sp-button" type="button" :disabled="!selectedProvider.enabled || isProviderSyncing(selectedProvider)" :title="selectedProvider.enabled ? '刷新成本' : supplierProviderDisabledSyncMessage" @click="syncProviderData(selectedProvider, 'cost')">刷新成本</button>
           <button class="sp-button" type="button" :disabled="isTesting(selectedProvider, 'accounts')" @click="testProviderEndpointData(selectedProvider, 'accounts')">{{ isTesting(selectedProvider, 'accounts') ? '测试中' : '测试 API Key' }}</button>
           <button class="sp-button" type="button" :disabled="isTesting(selectedProvider, 'groups')" @click="testProviderEndpointData(selectedProvider, 'groups')">{{ isTesting(selectedProvider, 'groups') ? '测试中' : '测试分组' }}</button>
           <button class="sp-button" type="button" :disabled="isTesting(selectedProvider, 'balance')" @click="testProviderEndpointData(selectedProvider, 'balance')">{{ isTesting(selectedProvider, 'balance') ? '测试中' : '测试余额' }}</button>
@@ -824,6 +831,7 @@ type SupplierSyncProgressState = {
   finalOk: boolean | null
 }
 
+const supplierProviderDisabledSyncMessage = '供应商已停用，请先启用后再同步'
 const syncProgressScopes: SupplierSyncScope[] = ['all', 'accounts', 'groups', 'balance', 'cost']
 const syncStageLabels: Record<SupplierSyncProgressStage, string> = {
   prepare: '准备',
@@ -1881,6 +1889,10 @@ function syncProgressStatusDetail(state: SupplierSyncProgressState): string {
 
 async function syncProviderData(provider: SupplierProvider, scope: SupplierSyncScope) {
   if (scope === 'all') selectedProvider.value = provider
+  if (!provider.enabled) {
+    appStore.showWarning(supplierProviderDisabledSyncMessage)
+    return
+  }
   if (isProviderSyncing(provider)) return
 
   const key = syncProgressKey(provider.id, scope)
@@ -2194,6 +2206,9 @@ function errorMessage(err: unknown, fallback: string): string {
     const apiErr = err as { message?: unknown; reason?: unknown; code?: unknown }
     const reason = String(apiErr.reason || '')
     const message = String(apiErr.message || '')
+    if (reason === 'SUPPLIER_PROVIDER_DISABLED' || message === 'supplier provider is disabled') {
+      return supplierProviderDisabledSyncMessage
+    }
     if (reason === 'SUPPLIER_PROVIDER_INVALID' || message === 'invalid supplier provider configuration') {
       return '供应商配置无效：请检查基础地址是否为完整 http/https 地址，接口路径是否以 / 开头，排序和倍率等数值是否有效。'
     }

@@ -17,6 +17,7 @@ var (
 	ErrSupplierProviderNotFound = infraerrors.NotFound("SUPPLIER_PROVIDER_NOT_FOUND", "supplier provider not found")
 	ErrSupplierProviderExists   = infraerrors.Conflict("SUPPLIER_PROVIDER_EXISTS", "supplier provider code already exists")
 	ErrSupplierProviderInvalid  = infraerrors.BadRequest("SUPPLIER_PROVIDER_INVALID", "invalid supplier provider configuration")
+	ErrSupplierProviderDisabled = infraerrors.BadRequest("SUPPLIER_PROVIDER_DISABLED", "supplier provider is disabled")
 
 	ErrSupplierProviderTypeNotFound = infraerrors.NotFound("SUPPLIER_PROVIDER_TYPE_NOT_FOUND", "supplier provider type not found")
 	ErrSupplierProviderTypeExists   = infraerrors.Conflict("SUPPLIER_PROVIDER_TYPE_EXISTS", "supplier provider type code already exists")
