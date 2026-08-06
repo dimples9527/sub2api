@@ -136,6 +136,7 @@
           <template #cell-auth_summary="{ row: provider }">
             <div class="sp-entity">{{ provider.auth_summary?.login_count || 0 }} 次</div>
             <div class="sp-sub">成功 {{ provider.auth_summary?.login_success_count || 0 }} / 失败 {{ provider.auth_summary?.login_failure_count || 0 }}</div>
+            <div class="sp-sub">缓存命中 {{ provider.auth_summary?.cache_hit_count || 0 }}</div>
           </template>
           <template #cell-actions="{ row: provider }">
             <div class="sp-inline" @click.stop>
@@ -450,8 +451,10 @@
         <div class="sp-detail-grid">
           <div class="sp-detail-cell"><span>登录总次数</span><b>{{ authStatus.summary.login_count }}</b></div>
           <div class="sp-detail-cell"><span>成功 / 失败</span><b>{{ authStatus.summary.login_success_count }} / {{ authStatus.summary.login_failure_count }}</b></div>
+          <div class="sp-detail-cell"><span>缓存命中 / 未命中</span><b>{{ authStatus.summary.cache_hit_count }} / {{ authStatus.summary.cache_miss_count }}</b></div>
           <div class="sp-detail-cell"><span>最近登录</span><b>{{ formatAuthTime(authStatus.summary.last_login_at) }}</b></div>
           <div class="sp-detail-cell"><span>最近结果</span><b>{{ authEventLabel(authStatus.summary.last_login_status) }}</b></div>
+          <div class="sp-detail-cell"><span>最近缓存命中</span><b>{{ formatAuthTime(authStatus.summary.last_cache_hit_at) }}</b></div>
           <div class="sp-detail-cell"><span>Token 缓存</span><b>{{ authCacheLabel(authStatus.cache.status) }}</b></div>
           <div class="sp-detail-cell"><span>剩余有效期</span><b>{{ formatDuration(authStatus.cache.remaining_seconds) }}</b></div>
           <div class="sp-detail-cell"><span>Redis TTL</span><b>{{ formatDuration(authStatus.cache.ttl_seconds) }}</b></div>
@@ -1508,15 +1511,14 @@ async function reloadAuthData() {
   if (!authProvider.value) return
   authLoading.value = true
   try {
-    const [status, history] = await Promise.all([
-      supplierProvidersAPI.getAuthStatus(authProvider.value.id),
-      supplierProvidersAPI.listAuthHistory(authProvider.value.id, {
-        page: authHistory.value.page,
-        page_size: authHistory.value.page_size,
-        event_type: authEventFilter.value,
-      }),
-    ])
+    // 先读状态（可能回补 cache_hit），再读历史，避免并行时历史漏掉刚写入的事件
+    const status = await supplierProvidersAPI.getAuthStatus(authProvider.value.id)
     authStatus.value = status
+    const history = await supplierProvidersAPI.listAuthHistory(authProvider.value.id, {
+      page: authHistory.value.page,
+      page_size: authHistory.value.page_size,
+      event_type: authEventFilter.value || '',
+    })
     authHistory.value = history
   } catch (err) {
     error.value = errorMessage(err, '加载供应商登录记录失败')

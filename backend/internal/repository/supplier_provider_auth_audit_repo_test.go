@@ -58,7 +58,7 @@ func TestSupplierProviderAuthAuditRepositoryRecordsEventAndUpdatesSummary(t *tes
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestSupplierProviderAuthAuditRepositoryTreatsCacheHitAsSuccessfulLogin(t *testing.T) {
+func TestSupplierProviderAuthAuditRepositoryTreatsCacheHitSeparatelyFromLogin(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer db.Close()
@@ -83,7 +83,7 @@ func TestSupplierProviderAuthAuditRepositoryTreatsCacheHitAsSuccessfulLogin(t *t
 			event.TokenExpiresAt, event.CookiePresent, event.CreatedAt,
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec(`CASE WHEN \$2 IN \('cache_hit', 'login_success', 'login_failed'\) THEN 1 ELSE 0 END,\s+CASE WHEN \$2 IN \('cache_hit', 'login_success'\) THEN 1 ELSE 0 END[\s\S]+auth_last_login_at = CASE WHEN \$2 IN \('cache_hit', 'login_success', 'login_failed'\) THEN EXCLUDED\.auth_last_login_at`).
+	mock.ExpectExec(`CASE WHEN \$2 IN \('login_success', 'login_failed'\) THEN 1 ELSE 0 END,\s+CASE WHEN \$2 = 'login_success' THEN 1 ELSE 0 END[\s\S]+CASE WHEN \$2 = 'cache_hit' THEN 1 ELSE 0 END[\s\S]+auth_last_cache_hit_at = CASE\s+WHEN \$2 = 'cache_hit' THEN EXCLUDED\.auth_last_cache_hit_at`).
 		WithArgs(
 			event.ProviderID, event.EventType, event.Status, event.FinishedAt,
 			event.ErrorMessage, event.TokenExpiresAt, event.TokenFingerprint,

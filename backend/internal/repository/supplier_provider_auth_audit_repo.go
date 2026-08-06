@@ -39,6 +39,8 @@ INSERT INTO supplier_provider_auth_events (
 		return fmt.Errorf("insert supplier provider auth event: %w", err)
 	}
 
+	// 时间参数必须显式 ::timestamptz：CASE 分支里 PostgreSQL 会把未标注的 $n 推断为 text，
+	// 写入 auth_last_login_at / auth_last_cache_hit_at 等 timestamptz 列时会失败并回滚整事务。
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO supplier_provider_runtime_stats (
   provider_id,
@@ -49,19 +51,19 @@ INSERT INTO supplier_provider_runtime_stats (
   auth_last_token_expires_at, auth_last_token_fingerprint, updated_at
 ) VALUES (
   $1,
-  CASE WHEN $2 IN ('cache_hit', 'login_success', 'login_failed') THEN 1 ELSE 0 END,
-  CASE WHEN $2 IN ('cache_hit', 'login_success') THEN 1 ELSE 0 END,
+  CASE WHEN $2 IN ('login_success', 'login_failed') THEN 1 ELSE 0 END,
+  CASE WHEN $2 = 'login_success' THEN 1 ELSE 0 END,
   CASE WHEN $2 = 'login_failed' THEN 1 ELSE 0 END,
   CASE WHEN $2 = 'cache_hit' THEN 1 ELSE 0 END,
   CASE WHEN $2 = 'cache_miss' THEN 1 ELSE 0 END,
-  CASE WHEN $2 IN ('cache_hit', 'login_success', 'login_failed') THEN $4 ELSE NULL END,
-  CASE WHEN $2 IN ('cache_hit', 'login_success', 'login_failed') THEN $3 ELSE '' END,
-  CASE WHEN $2 IN ('cache_hit', 'login_success') THEN '' WHEN $2 = 'login_failed' THEN $5 ELSE '' END,
-  CASE WHEN $2 = 'cache_hit' THEN $4 ELSE NULL END,
-  CASE WHEN $2 = 'cache_error' THEN $5 ELSE '' END,
-  $6,
-  $7,
-  $4
+  CASE WHEN $2 IN ('login_success', 'login_failed') THEN $4::timestamptz ELSE NULL END,
+  CASE WHEN $2 IN ('login_success', 'login_failed') THEN $3::text ELSE '' END,
+  CASE WHEN $2 = 'login_failed' THEN $5::text ELSE '' END,
+  CASE WHEN $2 = 'cache_hit' THEN $4::timestamptz ELSE NULL END,
+  CASE WHEN $2 = 'cache_error' THEN $5::text ELSE '' END,
+  $6::timestamptz,
+  $7::text,
+  $4::timestamptz
 )
 ON CONFLICT (provider_id) DO UPDATE SET
   auth_login_count = supplier_provider_runtime_stats.auth_login_count + EXCLUDED.auth_login_count,
@@ -70,15 +72,15 @@ ON CONFLICT (provider_id) DO UPDATE SET
   auth_cache_hit_count = supplier_provider_runtime_stats.auth_cache_hit_count + EXCLUDED.auth_cache_hit_count,
   auth_cache_miss_count = supplier_provider_runtime_stats.auth_cache_miss_count + EXCLUDED.auth_cache_miss_count,
   auth_last_login_at = CASE
-    WHEN $2 IN ('cache_hit', 'login_success', 'login_failed') THEN EXCLUDED.auth_last_login_at
+    WHEN $2 IN ('login_success', 'login_failed') THEN EXCLUDED.auth_last_login_at
     ELSE supplier_provider_runtime_stats.auth_last_login_at
   END,
   auth_last_login_status = CASE
-    WHEN $2 IN ('cache_hit', 'login_success', 'login_failed') THEN EXCLUDED.auth_last_login_status
+    WHEN $2 IN ('login_success', 'login_failed') THEN EXCLUDED.auth_last_login_status
     ELSE supplier_provider_runtime_stats.auth_last_login_status
   END,
   auth_last_login_error = CASE
-    WHEN $2 IN ('cache_hit', 'login_success') THEN ''
+    WHEN $2 = 'login_success' THEN ''
     WHEN $2 = 'login_failed' THEN EXCLUDED.auth_last_login_error
     ELSE supplier_provider_runtime_stats.auth_last_login_error
   END,
@@ -114,6 +116,7 @@ func (r *supplierProviderAuthAuditRepository) GetSummary(ctx context.Context, pr
 	var lastLoginAt sql.NullTime
 	var lastCacheHitAt sql.NullTime
 	var lastTokenExpiresAt sql.NullTime
+
 	err := r.db.QueryRowContext(ctx, `
 SELECT COALESCE(s.auth_login_count, 0),
        COALESCE(s.auth_login_success_count, 0),
@@ -129,7 +132,7 @@ SELECT COALESCE(s.auth_login_count, 0),
        COALESCE(s.auth_last_token_fingerprint, '')
 FROM supplier_providers p
 LEFT JOIN supplier_provider_runtime_stats s ON s.provider_id = p.id
-WHERE p.id = $1 AND p.deleted_at IS NULL`, providerID).Scan(
+WHERE p.id = $1`, providerID).Scan(
 		&summary.LoginCount,
 		&summary.LoginSuccessCount,
 		&summary.LoginFailureCount,
@@ -143,10 +146,10 @@ WHERE p.id = $1 AND p.deleted_at IS NULL`, providerID).Scan(
 		&lastTokenExpiresAt,
 		&summary.LastTokenFingerprint,
 	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return service.SupplierProviderAuthSummary{}, service.ErrSupplierProviderNotFound
-	}
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return service.SupplierProviderAuthSummary{}, service.ErrSupplierProviderNotFound
+		}
 		return service.SupplierProviderAuthSummary{}, fmt.Errorf("get supplier provider auth summary: %w", err)
 	}
 	if lastLoginAt.Valid {
@@ -163,42 +166,49 @@ WHERE p.id = $1 AND p.deleted_at IS NULL`, providerID).Scan(
 
 func (r *supplierProviderAuthAuditRepository) ListHistory(ctx context.Context, providerID int64, params service.SupplierProviderAuthHistoryParams) (service.SupplierProviderAuthHistoryResult, error) {
 	page := params.Page
-	if page < 1 {
+	if page <= 0 {
 		page = 1
 	}
 	pageSize := params.PageSize
-	if pageSize < 1 || pageSize > 100 {
+	if pageSize <= 0 {
 		pageSize = 20
 	}
-	if params.EventType != "" && !isSupplierProviderAuthEventType(params.EventType) {
-		return service.SupplierProviderAuthHistoryResult{}, fmt.Errorf("invalid supplier provider auth event type: %s", params.EventType)
+	if pageSize > 100 {
+		pageSize = 100
 	}
+	offset := (page - 1) * pageSize
 
-	where := "provider_id = $1"
+	where := "WHERE provider_id = $1"
 	args := []any{providerID}
+	argPos := 2
 	if params.EventType != "" {
-		where += " AND event_type = $2"
+		if !isSupplierProviderAuthEventType(params.EventType) {
+			return service.SupplierProviderAuthHistoryResult{}, fmt.Errorf("invalid auth event type: %s", params.EventType)
+		}
+		where += fmt.Sprintf(" AND event_type = $%d", argPos)
 		args = append(args, params.EventType)
+		argPos++
 	}
 
 	var total int64
-	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM supplier_provider_auth_events WHERE "+where, args...).Scan(&total); err != nil {
+	countSQL := "SELECT COUNT(*) FROM supplier_provider_auth_events " + where
+	if err := r.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
 		return service.SupplierProviderAuthHistoryResult{}, fmt.Errorf("count supplier provider auth history: %w", err)
 	}
 
-	limitArg := len(args) + 1
-	offsetArg := len(args) + 2
-	query := fmt.Sprintf(`
+	listSQL := fmt.Sprintf(`
 SELECT id, provider_id, event_type, source, status, started_at, finished_at,
        duration_ms, http_status, error_message, token_fingerprint, token_length,
        token_expires_at, cookie_present, created_at
 FROM supplier_provider_auth_events
-WHERE %s
-ORDER BY created_at DESC, id DESC LIMIT $%d OFFSET $%d`, where, limitArg, offsetArg)
-	queryArgs := append(append([]any{}, args...), pageSize, (page-1)*pageSize)
-	rows, err := r.db.QueryContext(ctx, query, queryArgs...)
+%s
+ORDER BY created_at DESC, id DESC
+LIMIT $%d OFFSET $%d`, where, argPos, argPos+1)
+	args = append(args, pageSize, offset)
+
+	rows, err := r.db.QueryContext(ctx, listSQL, args...)
 	if err != nil {
-		return service.SupplierProviderAuthHistoryResult{}, fmt.Errorf("query supplier provider auth history: %w", err)
+		return service.SupplierProviderAuthHistoryResult{}, fmt.Errorf("list supplier provider auth history: %w", err)
 	}
 	defer rows.Close()
 

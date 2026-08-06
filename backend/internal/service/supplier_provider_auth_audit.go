@@ -233,6 +233,26 @@ func (s *SupplierProviderAuthAuditService) GetStatus(ctx context.Context, provid
 	} else {
 		status.Cache = SupplierProviderAuthTokenSnapshot{Status: SupplierProviderAuthCacheMissing, TTLSeconds: positiveDurationSeconds(snapshot.TTL)}
 	}
+	// 打开登录记录只读状态时不会走 ensureToken；若 Redis 已有可用 Token 但审计为空，补记一次 cache_hit，
+	// 避免界面长期显示全 0，同时不把缓存命中算作真实登录。
+	if snapshot.Found &&
+		status.Cache.Status == SupplierProviderAuthCacheCached &&
+		supplierProviderAuthSummaryEmpty(summary) &&
+		supplierProviderAuthTokenUsable(snapshot.Token, now) {
+		token := snapshot.Token
+		if recordErr := s.Record(ctx, SupplierProviderAuthEventInput{
+			ProviderID: providerID,
+			EventType:  SupplierProviderAuthEventCacheHit,
+			Source:     SupplierProviderAuthSourceManual,
+			Token:      &token,
+			StartedAt:  now,
+			FinishedAt: now,
+		}); recordErr == nil {
+			if refreshed, refreshErr := s.repo.GetSummary(ctx, providerID); refreshErr == nil {
+				status.Summary = refreshed
+			}
+		}
+	}
 	status.LoginLock = SupplierProviderAuthLockSnapshot{
 		Held:             snapshot.LockHeld,
 		Status:           "available",
@@ -258,6 +278,34 @@ func (s *SupplierProviderAuthAuditService) ListHistory(ctx context.Context, prov
 		params.PageSize = 20
 	}
 	return s.repo.ListHistory(ctx, providerID, params)
+}
+
+// supplierProviderAuthSummaryEmpty 判断认证汇总是否完全空白（尚无任何审计数据）。
+func supplierProviderAuthSummaryEmpty(summary SupplierProviderAuthSummary) bool {
+	return summary.LoginCount == 0 &&
+		summary.LoginSuccessCount == 0 &&
+		summary.LoginFailureCount == 0 &&
+		summary.CacheHitCount == 0 &&
+		summary.CacheMissCount == 0 &&
+		summary.LastLoginAt == nil &&
+		summary.LastCacheHitAt == nil &&
+		strings.TrimSpace(summary.LastLoginStatus) == "" &&
+		strings.TrimSpace(summary.LastLoginError) == "" &&
+		strings.TrimSpace(summary.LastCacheError) == "" &&
+		strings.TrimSpace(summary.LastTokenFingerprint) == ""
+}
+
+// supplierProviderAuthTokenUsable 判断缓存中的 Token/Cookie 当前是否仍可用。
+func supplierProviderAuthTokenUsable(token SupplierProviderAuthToken, now time.Time) bool {
+	accessToken := strings.TrimSpace(token.AccessToken)
+	cookiePresent := strings.TrimSpace(token.CookieHeader) != ""
+	if accessToken == "" && !cookiePresent {
+		return false
+	}
+	if !token.ExpiresAt.IsZero() && !token.ExpiresAt.After(now) {
+		return false
+	}
+	return true
 }
 
 func normalizeSupplierProviderAuthEvent(event SupplierProviderAuthEventInput) SupplierProviderAuthEventRecord {

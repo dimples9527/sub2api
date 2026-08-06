@@ -264,6 +264,9 @@ describe('SupplierProvidersView payload normalization', () => {
     })
     expect(wrapper.text()).toContain('abcd…wxyz')
     expect(wrapper.text()).toContain('登录成功')
+    expect(wrapper.text()).toContain('缓存命中 / 未命中')
+    expect(wrapper.text()).toContain('7 / 2')
+    expect(wrapper.text()).toContain('最近缓存命中')
     expect(wrapper.text()).not.toContain('access-token')
 
     await wrapper.get('[data-test="supplier-auth-event-filter"]').trigger('click')

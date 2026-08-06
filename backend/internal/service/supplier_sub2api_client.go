@@ -430,7 +430,10 @@ func (c *SupplierSub2APIClient) recordAuthEvent(ctx context.Context, provider *S
 	if event.Source == "" {
 		event.Source = supplierProviderAuthSourceFromContext(ctx)
 	}
-	if err := c.authAuditor.Record(ctx, event); err != nil {
+	// 使用独立超时上下文，避免父请求取消后审计写入被静默丢弃。
+	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	if err := c.authAuditor.Record(auditCtx, event); err != nil {
 		logger.LegacyPrintf("supplier_sub2api_client", "record supplier provider auth event failed provider_id=%d provider_code=%s err=%v", provider.ID, provider.Code, err)
 	}
 }
