@@ -58,6 +58,44 @@ func TestSupplierProviderAuthAuditRepositoryRecordsEventAndUpdatesSummary(t *tes
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestSupplierProviderAuthAuditRepositoryTreatsCacheHitAsSuccessfulLogin(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	finishedAt := time.Date(2026, time.August, 5, 10, 0, 0, 0, time.UTC)
+	event := service.SupplierProviderAuthEventRecord{
+		ProviderID:  42,
+		EventType:   service.SupplierProviderAuthEventCacheHit,
+		Source:      service.SupplierProviderAuthSourceSync,
+		Status:      service.SupplierProviderAuthStatusSuccess,
+		StartedAt:   finishedAt,
+		FinishedAt:  finishedAt,
+		TokenLength: 16,
+		CreatedAt:   finishedAt,
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO supplier_provider_auth_events (")).
+		WithArgs(
+			event.ProviderID, event.EventType, event.Source, event.Status,
+			event.StartedAt, event.FinishedAt, int64(0), (*int)(nil), "", "", event.TokenLength,
+			event.TokenExpiresAt, event.CookiePresent, event.CreatedAt,
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`CASE WHEN \$2 IN \('cache_hit', 'login_success', 'login_failed'\) THEN 1 ELSE 0 END,\s+CASE WHEN \$2 IN \('cache_hit', 'login_success'\) THEN 1 ELSE 0 END[\s\S]+auth_last_login_at = CASE WHEN \$2 IN \('cache_hit', 'login_success', 'login_failed'\) THEN EXCLUDED\.auth_last_login_at`).
+		WithArgs(
+			event.ProviderID, event.EventType, event.Status, event.FinishedAt,
+			event.ErrorMessage, event.TokenExpiresAt, event.TokenFingerprint,
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	repo := NewSupplierProviderAuthAuditRepository(db)
+	require.NoError(t, repo.Record(context.Background(), event))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestSupplierProviderAuthAuditRepositoryGetsSummary(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)

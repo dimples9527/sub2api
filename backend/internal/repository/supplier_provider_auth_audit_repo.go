@@ -49,14 +49,14 @@ INSERT INTO supplier_provider_runtime_stats (
   auth_last_token_expires_at, auth_last_token_fingerprint, updated_at
 ) VALUES (
   $1,
-  CASE WHEN $2 IN ('login_success', 'login_failed') THEN 1 ELSE 0 END,
-  CASE WHEN $2 = 'login_success' THEN 1 ELSE 0 END,
+  CASE WHEN $2 IN ('cache_hit', 'login_success', 'login_failed') THEN 1 ELSE 0 END,
+  CASE WHEN $2 IN ('cache_hit', 'login_success') THEN 1 ELSE 0 END,
   CASE WHEN $2 = 'login_failed' THEN 1 ELSE 0 END,
   CASE WHEN $2 = 'cache_hit' THEN 1 ELSE 0 END,
   CASE WHEN $2 = 'cache_miss' THEN 1 ELSE 0 END,
-  CASE WHEN $2 IN ('login_success', 'login_failed') THEN $4 ELSE NULL END,
-  CASE WHEN $2 IN ('login_success', 'login_failed') THEN $3 ELSE '' END,
-  CASE WHEN $2 = 'login_failed' THEN $5 ELSE '' END,
+  CASE WHEN $2 IN ('cache_hit', 'login_success', 'login_failed') THEN $4 ELSE NULL END,
+  CASE WHEN $2 IN ('cache_hit', 'login_success', 'login_failed') THEN $3 ELSE '' END,
+  CASE WHEN $2 IN ('cache_hit', 'login_success') THEN '' WHEN $2 = 'login_failed' THEN $5 ELSE '' END,
   CASE WHEN $2 = 'cache_hit' THEN $4 ELSE NULL END,
   CASE WHEN $2 = 'cache_error' THEN $5 ELSE '' END,
   $6,
@@ -70,15 +70,15 @@ ON CONFLICT (provider_id) DO UPDATE SET
   auth_cache_hit_count = supplier_provider_runtime_stats.auth_cache_hit_count + EXCLUDED.auth_cache_hit_count,
   auth_cache_miss_count = supplier_provider_runtime_stats.auth_cache_miss_count + EXCLUDED.auth_cache_miss_count,
   auth_last_login_at = CASE
-    WHEN $2 IN ('login_success', 'login_failed') THEN EXCLUDED.auth_last_login_at
+    WHEN $2 IN ('cache_hit', 'login_success', 'login_failed') THEN EXCLUDED.auth_last_login_at
     ELSE supplier_provider_runtime_stats.auth_last_login_at
   END,
   auth_last_login_status = CASE
-    WHEN $2 IN ('login_success', 'login_failed') THEN EXCLUDED.auth_last_login_status
+    WHEN $2 IN ('cache_hit', 'login_success', 'login_failed') THEN EXCLUDED.auth_last_login_status
     ELSE supplier_provider_runtime_stats.auth_last_login_status
   END,
   auth_last_login_error = CASE
-    WHEN $2 = 'login_success' THEN ''
+    WHEN $2 IN ('cache_hit', 'login_success') THEN ''
     WHEN $2 = 'login_failed' THEN EXCLUDED.auth_last_login_error
     ELSE supplier_provider_runtime_stats.auth_last_login_error
   END,
