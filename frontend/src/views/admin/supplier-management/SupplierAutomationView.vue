@@ -15,8 +15,6 @@
         </div>
       </header>
 
-      <div v-if="error" class="sp-alert sp-error-line" role="alert">{{ error }}</div>
-
       <section class="sp-overview-strip" aria-label="自动化任务运行概览">
         <article v-for="metric in metrics" :key="metric.label" class="sp-overview-item" :class="`sp-${metric.tone}`">
           <div class="sp-metric-head">
@@ -840,7 +838,6 @@
         @pending-count-change="updateAccountRateGuardPendingCount"
       />
 
-      <Transition name="sp-fade"><div v-if="toast" class="sp-toast">{{ toast }}</div></Transition>
     </div>
   </SupplierModuleLayout>
 </template>
@@ -873,6 +870,7 @@ import {
   type SupplierAutomationConfig,
   type SupplierAutomationTask,
 } from '@/api/admin/supplierAutomation'
+import { useAppStore } from '@/stores/app'
 import { platformBadgeClass, platformLabel, platformTextClass } from '@/utils/platformColors'
 import { extractApiErrorMessage } from '@/utils/apiError'
 
@@ -880,6 +878,7 @@ const tasks = ref<SupplierAutomationTask[]>([])
 const runs = ref<SupplierAutomationRun[]>([])
 const lastRefreshedAt = ref('')
 const loading = ref(false)
+const appStore = useAppStore()
 const savingCode = ref('')
 const runningCode = ref('')
 const runningMode = ref<'preview' | 'execute'>('execute')
@@ -891,9 +890,7 @@ const detailTitle = ref('')
 const detailMessage = ref('')
 const detailRun = ref<SupplierAutomationRun | null>(null)
 const selectedDetailProviderID = ref<number | null>(null)
-const error = ref('')
-const toast = ref('')
-const runPage = ref(1)
+ const runPage = ref(1)
 const runPageSize = ref(10)
 const runTotal = ref(0)
 const runTaskFilter = ref('')
@@ -913,8 +910,7 @@ const healthGuardModelOptionsByPlatform = ref<Record<string, SupplierHealthGuard
 const healthGuardModelLoadingByPlatform = ref<Record<string, boolean>>({})
 const healthGuardStatusFilter = ref('all')
 
-let toastTimer: number | undefined
-
+ 
 const editForm = reactive<SupplierAutomationTask>({
   id: 0,
   task_code: '',
@@ -1071,14 +1067,13 @@ onMounted(async () => {
 
 async function loadData() {
   loading.value = true
-  error.value = ''
   try {
     tasks.value = await listTasks()
     await loadRuns()
     await loadAccountRateGuardPendingCount()
     lastRefreshedAt.value = new Date().toISOString()
   } catch (err) {
-    error.value = extractApiErrorMessage(err, '加载自动化任务失败')
+    appStore.showError(extractApiErrorMessage(err, '加载自动化任务失败'))
   } finally {
     loading.value = false
   }
@@ -1154,12 +1149,12 @@ async function saveTask() {
   if (!editingTask.value) return
   const cronExpression = intervalSecondsToCron(editIntervalSeconds.value)
   if (!cronExpression) {
-    error.value = '执行间隔必须是正整数秒'
+    appStore.showError('执行间隔必须是正整数秒')
     return
   }
   if (editForm.task_code === 'supplier_rate_guard') {
     if (editForm.config.rate_guard_max_snapshot_age_seconds < 60) {
-      error.value = '快照最大有效期不能少于 60 秒'
+      appStore.showError('快照最大有效期不能少于 60 秒')
       return
     }
   }
@@ -1167,12 +1162,12 @@ async function saveTask() {
     try {
       await ensureHealthGuardAccountCandidatesLoaded()
     } catch (err) {
-      error.value = extractApiErrorMessage(err, '加载健康守护账号失败')
+      appStore.showError(extractApiErrorMessage(err, '加载健康守护账号失败'))
       return
     }
     const validationMessage = validateAccountHealthGuardConfig()
     if (validationMessage) {
-      error.value = validationMessage
+      appStore.showError(validationMessage)
       return
     }
   }
@@ -1180,11 +1175,11 @@ async function saveTask() {
   savingCode.value = editingTask.value.task_code
   try {
     await updateTask(editingTask.value.task_code, editForm)
-    showToast('任务已保存')
+    appStore.showSuccess('任务已保存')
     editVisible.value = false
     await loadData()
   } catch (err) {
-    error.value = extractApiErrorMessage(err, '保存任务失败')
+    appStore.showError(extractApiErrorMessage(err, '保存任务失败'))
   } finally {
     savingCode.value = ''
   }
@@ -1195,7 +1190,7 @@ async function runNow(taskCode: string) {
     try {
       await ensureHealthGuardAccountCandidatesLoaded()
     } catch (err) {
-      error.value = extractApiErrorMessage(err, '加载健康守护账号失败')
+      appStore.showError(extractApiErrorMessage(err, '加载健康守护账号失败'))
       return
     }
     const task = tasks.value.find(item => item.task_code === taskCode)
@@ -1203,7 +1198,7 @@ async function runNow(taskCode: string) {
       ? validateAccountHealthGuardSelection(task.config)
       : '请至少选择一个需要检查的账号'
     if (validationMessage) {
-      error.value = validationMessage
+      appStore.showError(validationMessage)
       return
     }
   }
@@ -1211,12 +1206,12 @@ async function runNow(taskCode: string) {
   runningMode.value = 'execute'
   try {
     const run = await runTask(taskCode)
-    showToast(`任务执行完成：${statusText(run.status)}`)
+    appStore.showSuccess(`任务执行完成：${statusText(run.status)}`)
     runPage.value = 1
     await loadData()
     openRunDetail(run)
   } catch (err) {
-    error.value = extractApiErrorMessage(err, '运行任务失败')
+    appStore.showError(extractApiErrorMessage(err, '运行任务失败'))
     runPage.value = 1
     try {
       await loadData()
@@ -1238,12 +1233,12 @@ async function runPreview(taskCode: string) {
   runningMode.value = 'preview'
   try {
     const run = await runTask(taskCode, 'preview')
-    showToast(`检测预览完成：发现 ${run.result_detail?.account_rate_guard?.risk_groups || 0} 个风险分组`)
+    appStore.showSuccess(`检测预览完成：发现 ${run.result_detail?.account_rate_guard?.risk_groups || 0} 个风险分组`)
     runPage.value = 1
     await loadData()
     openRunDetail(run)
   } catch (err) {
-    error.value = extractApiErrorMessage(err, '账号倍率守护检测预览失败')
+    appStore.showError(extractApiErrorMessage(err, '账号倍率守护检测预览失败'))
   } finally {
     runningCode.value = ''
   }
@@ -1266,14 +1261,14 @@ async function executeAccountRateGuard() {
   runningMode.value = 'execute'
   try {
     const run = await runTask(pendingExecuteTask.value.task_code, 'execute')
-    showToast(`账号倍率守护执行完成：解除 ${run.result_detail?.account_rate_guard?.unbound_groups || 0} 个分组绑定`)
+    appStore.showSuccess(`账号倍率守护执行完成：解除 ${run.result_detail?.account_rate_guard?.unbound_groups || 0} 个分组绑定`)
     accountRateGuardExecuteVisible.value = false
     pendingExecuteTask.value = null
     runPage.value = 1
     await loadData()
     openRunDetail(run)
   } catch (err) {
-    error.value = extractApiErrorMessage(err, '执行账号倍率守护失败')
+    appStore.showError(extractApiErrorMessage(err, '执行账号倍率守护失败'))
   } finally {
     runningCode.value = ''
   }
@@ -1301,7 +1296,7 @@ async function openTaskLatestResult(task: SupplierAutomationTask) {
       return
     }
   } catch (err) {
-    error.value = extractApiErrorMessage(err, '加载最近结果失败')
+    appStore.showError(extractApiErrorMessage(err, '加载最近结果失败'))
     return
   }
   openResultDetail(`${task.name} 最近结果`, task.last_message)
@@ -1910,7 +1905,7 @@ async function openHealthGuardAccounts() {
     await ensureHealthGuardAccountCandidatesLoaded()
     await loadHealthGuardModels()
   } catch (err) {
-    error.value = extractApiErrorMessage(err, '加载健康守护账号失败')
+    appStore.showError(extractApiErrorMessage(err, '加载健康守护账号失败'))
   }
 }
 
@@ -1994,11 +1989,10 @@ async function resetRunFilters() {
 
 async function refreshRuns() {
   loading.value = true
-  error.value = ''
   try {
     await loadRuns()
   } catch (err) {
-    error.value = extractApiErrorMessage(err, '加载运行历史失败')
+    appStore.showError(extractApiErrorMessage(err, '加载运行历史失败'))
   } finally {
     loading.value = false
   }
@@ -2085,11 +2079,6 @@ function intervalSecondsToCron(seconds: number): string | null {
   return `@every ${seconds}s`
 }
 
-function showToast(message: string) {
-  toast.value = message
-  window.clearTimeout(toastTimer)
-  toastTimer = window.setTimeout(() => { toast.value = '' }, 1800)
-}
 </script>
 
 <style scoped>

@@ -35,7 +35,7 @@ describe('SupplierAutomationView second-level intervals', () => {
   it('stores positive integer seconds as @every descriptors', () => {
     expect(supplierAutomationSource).toContain('if (!Number.isInteger(seconds) || seconds < 1) return null')
     expect(supplierAutomationSource).toContain('return `@every ${seconds}s`')
-    expect(supplierAutomationSource).toContain("error.value = '执行间隔必须是正整数秒'")
+    expect(supplierAutomationSource).toContain("appStore.showError('执行间隔必须是正整数秒')")
     expect(supplierAutomationSource).toContain('执行间隔最小为 1 秒，可按正整数秒配置。')
   })
 
@@ -88,7 +88,10 @@ describe('SupplierAutomationView edit dialog', () => {
 
   it('opens structured run detail after executing a task and surfaces API error messages', () => {
     expect(supplierAutomationSource).toContain('const run = await runTask(taskCode)')
-    expect(supplierAutomationSource).toContain('showToast(`任务执行完成：${statusText(run.status)}`)')
+    expect(supplierAutomationSource).toContain("appStore.showSuccess('任务已保存')")
+    expect(supplierAutomationSource).toContain('appStore.showSuccess(`任务执行完成：${statusText(run.status)}`)')
+    expect(supplierAutomationSource).toContain("import { useAppStore } from '@/stores/app'")
+    expect(supplierAutomationSource).not.toContain('class="sp-toast"')
     expect(supplierAutomationSource).toContain('openRunDetail(run)')
     expect(supplierAutomationSource).toContain("import { extractApiErrorMessage } from '@/utils/apiError'")
     expect(supplierAutomationSource).toContain("extractApiErrorMessage(err, '运行任务失败')")
@@ -334,7 +337,7 @@ describe('SupplierAutomationView edit dialog', () => {
   it('validates rate guard settings before saving the task', () => {
     expect(supplierAutomationSource).not.toContain('rate_guard_safety_multiplier')
     expect(supplierAutomationSource).toContain('editForm.config.rate_guard_max_snapshot_age_seconds < 60')
-    expect(supplierAutomationSource).toContain("error.value = '快照最大有效期不能少于 60 秒'")
+    expect(supplierAutomationSource).toContain("appStore.showError('快照最大有效期不能少于 60 秒')")
   })
 
   it('declares supplier account health guard configuration and result types', () => {
@@ -699,7 +702,8 @@ describe('SupplierAutomationView operations console composition', () => {
     )
     expect(supplierAutomationSource.match(/^ {6}<BaseDialog\b/gm)).toHaveLength(4)
     expect(supplierAutomationSource).toMatch(/^ {6}<SupplierAccountRateGuardLogDialog\b/m)
-    expect(supplierAutomationSource).toMatch(/^ {6}<Transition name="sp-fade">/m)
+    expect(supplierAutomationSource).not.toContain('<Transition name="sp-fade">')
+    expect(supplierAutomationSource).not.toContain('class="sp-toast"')
   })
 
   it('keeps shared table and dialog components unchanged', () => {
@@ -1005,14 +1009,14 @@ describe('SupplierAutomationView edit dialog composition', () => {
     )
     expect(saveTaskSource).toContain('if (!cronExpression) {')
     expect(saveTaskSource).toContain(
-      "error.value = '执行间隔必须是正整数秒'"
+      "appStore.showError('执行间隔必须是正整数秒')"
     )
     expect(saveTaskSource).toContain("if (editForm.task_code === 'supplier_rate_guard') {")
     expect(saveTaskSource).not.toContain('rate_guard_safety_multiplier')
     expect(saveTaskSource).toContain(
       'if (editForm.config.rate_guard_max_snapshot_age_seconds < 60) {'
     )
-    expect(saveTaskSource).toContain("error.value = '快照最大有效期不能少于 60 秒'")
+    expect(saveTaskSource).toContain("appStore.showError('快照最大有效期不能少于 60 秒')")
     expect(saveTaskSource).toContain('editForm.cron_expression = cronExpression')
   })
 
