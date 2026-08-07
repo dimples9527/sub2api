@@ -757,7 +757,7 @@
                     @change="toggleHealthGuardAccount(mapping.localAccountID)"
                   />
                   <span class="sp-health-guard-account-choice-copy">
-                    <strong :class="platformTextClass(mapping.platform)">{{ mapping.localAccountName }}</strong>
+                    <strong :class="platformTextClass(mapping.platform)">{{ mapping.localAccountName }}{{ healthGuardAccountMultiplierText(mapping) }}</strong>
                     <span
                       v-if="mapping.available"
                       :class="['sp-health-guard-account-platform', platformBadgeClass(mapping.platform)]"
@@ -1743,6 +1743,17 @@ function healthGuardSourceSummary(mapping: HealthGuardAccountMapping): string {
     .map(source => `${source.provider_name || `供应商 ${source.provider_id}`} · ${source.name || source.upstream_account_key}`)
     .filter(Boolean)
   return sources.length ? sources.join('；') : '供应商来源不可用'
+}
+
+function healthGuardAccountMultiplierText(mapping: HealthGuardAccountMapping): string {
+  const rates = Array.from(new Set(
+    mapping.sources
+      .map(source => Number(source.rate_multiplier))
+      .filter(rate => Number.isFinite(rate))
+      .map(rate => rate.toFixed(4).replace(/\.?0+$/, ''))
+  ))
+  if (!rates.length) return ''
+  return `（倍率：${rates.join(' / ')}）`
 }
 
 function healthGuardModelSelectOptions(platform: string, currentModel = ''): SelectOption[] {

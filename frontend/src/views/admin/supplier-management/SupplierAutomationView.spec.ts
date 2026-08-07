@@ -469,17 +469,16 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('.sp-health-guard-account-source')
   })
 
-  it('shows upstream account rates in the health guard account workspace list', () => {
-    expect(supplierAutomationSource).toContain('healthGuardAccountRateText(mapping)')
-    expect(supplierAutomationSource).toContain('healthGuardAccountRateTitle(mapping)')
-    expect(supplierAutomationSource).toContain('sp-health-guard-account-rate')
+  it('在健康守护账号名称后显示对应倍率并沿用账号名称颜色', () => {
+    expect(supplierAutomationSource).toContain(
+      '<strong :class="platformTextClass(mapping.platform)">{{ mapping.localAccountName }}{{ healthGuardAccountMultiplierText(mapping) }}</strong>'
+    )
+    expect(supplierAutomationSource).toContain(
+      'function healthGuardAccountMultiplierText(mapping: HealthGuardAccountMapping): string {'
+    )
     expect(supplierAutomationSource).toContain('source.rate_multiplier')
-    expect(supplierAutomationSource).toContain("`×${formatRate(rate)}`")
-    expect(supplierAutomationSource).toContain("return `${base} · ×${formatRate(rate)}`")
-    expect(supplierAutomationSource).toContain('platformTextClass(mapping.platform)')
-    expect(supplierAutomationSource).toContain('border: 1px solid color-mix(in srgb, currentColor 22%, var(--sp-line))')
-    expect(supplierAutomationSource).toContain('.sp-health-guard-account-rate.empty')
-    expect(supplierAutomationSource).toContain('.sp-health-guard-account-rate.unavailable')
+    expect(supplierAutomationSource).toContain("return `（倍率：${rates.join(' / ')}）`")
+    expect(supplierAutomationSource).not.toContain('sp-health-guard-account-rate')
   })
 
   it('applies the automation dialog palette to the teleported health guard workspace', () => {
