@@ -25,6 +25,30 @@ const { compileStyle } = testRequire(compilerSfcPath) as {
   }) => { code: string; errors: unknown[] }
 }
 
+describe('SupplierAutomationView task status toggle', () => {
+  it('uses the shared Toggle component to update the enabled state of each task', () => {
+    expect(supplierAutomationSource).toContain('<template #cell-enabled="{ row: task }">')
+    expect(supplierAutomationSource).toContain(':model-value="task.enabled"')
+    expect(supplierAutomationSource).toContain(
+      '@update:model-value="toggleTaskStatus(task.task_code, $event)"'
+    )
+  })
+
+  it('prevents duplicate requests and restores the previous state when an update fails', () => {
+    expect(supplierAutomationSource).toContain('const updatingTaskIDs = ref<Set<string>>(new Set())')
+    expect(supplierAutomationSource).toContain(
+      'async function toggleTaskStatus(taskCode: string, enabled: boolean)'
+    )
+    expect(supplierAutomationSource).toContain(
+      'if (!task || task.enabled === enabled || updatingTaskIDs.value.has(taskCode)) return'
+    )
+    expect(supplierAutomationSource).toContain('task.enabled = previousEnabled')
+    expect(supplierAutomationSource).toContain(
+      "appStore.showError(extractApiErrorMessage(err, '更新任务运行状态失败'))"
+    )
+  })
+})
+
 describe('SupplierAutomationView second-level intervals', () => {
   it('reuses the shared account rate guard log dialog without duplicate headings', () => {
     expect(supplierAutomationSource).toContain('<SupplierAccountRateGuardLogDialog')

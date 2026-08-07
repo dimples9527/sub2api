@@ -53,7 +53,15 @@
                 <div class="sp-sub">{{ task.task_code }}</div>
               </template>
               <template #cell-enabled="{ row: task }">
-                <span class="sp-status" :class="task.enabled ? 'good' : ''">{{ task.enabled ? '已启用' : '已停用' }}</span>
+                <div class="sp-inline gap-2">
+                  <Toggle
+                    :model-value="task.enabled"
+                    :disabled="updatingTaskIDs.has(task.task_code)"
+                    :aria-label="`切换${task.name}任务状态`"
+                    @update:model-value="toggleTaskStatus(task.task_code, $event)"
+                  />
+                  <span class="sp-status" :class="task.enabled ? 'good' : ''">{{ task.enabled ? '已启用' : '已停用' }}</span>
+                </div>
               </template>
               <template #cell-cron_expression="{ row: task }">
                 <span class="sp-status info">{{ formatInterval(task.cron_expression) }}</span>
@@ -1143,15 +1151,19 @@ function openEdit(task: SupplierAutomationTask) {
 }
 
 function closeEdit() {
-async function toggleTaskStatus(taskCode: string) {
-  const task = tasks.value.find(t => t.task_code === taskCode)
-  if (!task || updatingTaskIDs.value.has(taskCode)) return
+  editVisible.value = false
+}
+
+async function toggleTaskStatus(taskCode: string, enabled: boolean) {
+  const task = tasks.value.find(item => item.task_code === taskCode)
+  if (!task || task.enabled === enabled || updatingTaskIDs.value.has(taskCode)) return
+
   const previousEnabled = task.enabled
-  task.enabled = !task.enabled
+  task.enabled = enabled
   updatingTaskIDs.value = new Set(updatingTaskIDs.value).add(taskCode)
   try {
     await updateTask(taskCode, task)
-    appStore.showSuccess(task.enabled ? '任务已启用' : '任务已停用')
+    appStore.showSuccess(enabled ? '任务已启用' : '任务已停用')
     await loadData()
   } catch (err) {
     task.enabled = previousEnabled
@@ -1161,45 +1173,6 @@ async function toggleTaskStatus(taskCode: string) {
     next.delete(taskCode)
     updatingTaskIDs.value = next
   }
-}
-
-  if (updatingTaskIDs.value.has(task.task_code) || !task.enabled) return
-  const previousEnabled = task.enabled
-  task.enabled = !task.enabled
-  updatingTaskIDs.value = new Set(updatingTaskIDs.value).add(task.task_code)
-  try {
-    await updateTask(task.task_code, task)
-    appStore.showSuccess(task.enabled ? '任务已启用' : '任务已停用')
-    await loadData()
-  } catch (err) {
-    task.enabled = previousEnabled
-    appStore.showError(extractApiErrorMessage(err, '更新任务运行状态失败'))
-  } finally {
-    const next = new Set(updatingTaskIDs.value)
-    next.delete(task.task_code)
-    updatingTaskIDs.value = next
-  }
-}
-
-  if (updatingTaskIDs.value.has(task.task_code) || task.enabled === enabled) return
-  const previousEnabled = task.enabled
-  task.enabled = enabled
-  updatingTaskIDs.value = new Set(updatingTaskIDs.value).add(task.task_code)
-  try {
-    await updateTask(task.task_code, task)
-    appStore.showSuccess(enabled ? '任务已启用' : '任务已停用')
-    await loadData()
-  } catch (err) {
-    task.enabled = previousEnabled
-    appStore.showError(extractApiErrorMessage(err, '更新任务运行状态失败'))
-  } finally {
-    const next = new Set(updatingTaskIDs.value)
-    next.delete(task.task_code)
-    updatingTaskIDs.value = next
-  }
-}
-
-  editVisible.value = false
 }
 
 async function saveTask() {
