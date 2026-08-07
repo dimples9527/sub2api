@@ -187,14 +187,10 @@ func fetchSupplierNewAPITurnstileSiteKey(ctx context.Context, httpClient *http.C
 		raw = envelope.Data
 	}
 	var statusBody struct {
-		TurnstileCheck   bool   `json:"turnstile_check"`
 		TurnstileSiteKey string `json:"turnstile_site_key"`
 	}
 	if err := json.Unmarshal(raw, &statusBody); err != nil {
 		return "", fmt.Errorf("decode supplier newapi status: %w", err)
-	}
-	if !statusBody.TurnstileCheck {
-		return "", nil
 	}
 	return strings.TrimSpace(statusBody.TurnstileSiteKey), nil
 }
