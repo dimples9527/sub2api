@@ -63,6 +63,30 @@ func (s *supplierProviderAuthAuditorSpy) eventTypes() []SupplierProviderAuthEven
 	return items
 }
 
+func TestSupplierSub2APIClientRedactsRefreshTokenBeforeAuditing(t *testing.T) {
+	auditor := &supplierProviderAuthAuditorSpy{}
+	client := NewSupplierSub2APIClient(nil, nil, nil)
+	client.SetAuthAuditor(auditor)
+	token := SupplierProviderAuthToken{
+		AccessToken:  "access-token",
+		RefreshToken: "unredacted-refresh",
+	}
+
+	client.recordAuthEvent(context.Background(), &SupplierProvider{ID: 42, Code: "supplier-sub2api"}, SupplierProviderAuthEventInput{
+		EventType: SupplierProviderAuthEventRefreshFailed,
+		Error:     errors.New("upstream refresh failed: refresh_token=unredacted-refresh"),
+		Token:     &token,
+	})
+
+	auditor.mu.Lock()
+	events := append([]SupplierProviderAuthEventInput(nil), auditor.events...)
+	auditor.mu.Unlock()
+	require.Len(t, events, 1)
+	require.Error(t, events[0].Error)
+	require.NotContains(t, events[0].Error.Error(), "unredacted-refresh")
+	require.NotNil(t, events[0].Token)
+	require.Empty(t, events[0].Token.RefreshToken)
+}
 func newSupplierSub2APIFakeTokenCache() *supplierSub2APIFakeTokenCache {
 	return &supplierSub2APIFakeTokenCache{
 		tokens: make(map[int64]SupplierProviderAuthToken),
@@ -892,6 +916,64 @@ func TestSupplierSub2APIClientUsesNetURLComposition(t *testing.T) {
 	}, paths)
 }
 
+func TestSupplierSub2APISafeResponseSummaryRedactsEmbeddedPlaintextSecrets(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{
+			name: "plain text",
+			raw:  "upstream failed: refresh_token=unredacted-refresh-token access_token=unredacted-access-token",
+		},
+		{
+			name: "JSON message",
+			raw:  `{"success":false,"message":"upstream failed: refresh_token=unredacted-refresh-token access_token=unredacted-access-token"}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			summary := supplierSub2APISafeResponseSummary([]byte(tt.raw))
+
+			require.NotContains(t, summary, "unredacted-refresh-token")
+			require.NotContains(t, summary, "unredacted-access-token")
+			require.Contains(t, summary, "refresh_token=[REDACTED]")
+			require.Contains(t, summary, "access_token=[REDACTED]")
+		})
+	}
+}
+
+func TestSupplierSub2APISafeResponseSummaryRedactsNewAPIRefreshCookie(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{
+			name: "plain text",
+			raw:  "upstream failed: new_api_refresh=unredacted-new-api-refresh-cookie",
+		},
+		{
+			name: "JSON message",
+			raw:  `{"success":false,"message":"upstream failed: new_api_refresh=unredacted-new-api-refresh-cookie"}`,
+		},
+		{
+			name: "JSON refresh cookie field",
+			raw:  `{"success":false,"new_api_refresh":"unredacted-new-api-refresh-cookie"}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			summary := supplierSub2APISafeResponseSummary([]byte(tt.raw))
+
+			require.NotContains(t, summary, "unredacted-new-api-refresh-cookie")
+			if tt.name == "JSON refresh cookie field" {
+				require.Contains(t, summary, `"new_api_refresh":"[redacted]"`)
+				return
+			}
+			require.Contains(t, summary, "new_api_refresh=[REDACTED]")
+		})
+	}
+}
+
 func TestSupplierSub2APISafeResponseSummaryRedactsAndTruncates(t *testing.T) {
 	raw := []byte(`{"code":0,"message":"ok","data":{"access_token":"secret-access-token-value","refresh_token":"secret-refresh-token-value","password":"secret-password-value","items":[{"id":"a"}]},"extra":"` + strings.Repeat("abcdefghijklmnopqrstuvwxyz", 40) + `"}`)
 
@@ -905,4 +987,220 @@ func TestSupplierSub2APISafeResponseSummaryRedactsAndTruncates(t *testing.T) {
 	require.Contains(t, summary, `"access_token":"[redacted]"`)
 	require.Contains(t, summary, "...")
 	require.LessOrEqual(t, len(summary), supplierSub2APILogResponseSummaryLimit+3)
+}
+
+func TestSupplierSub2APIClientRefreshesNearExpiredCachedSession(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	cache.preload(42, SupplierProviderAuthToken{
+		AccessToken:  "stale-access",
+		RefreshToken: "old-refresh",
+		TokenType:    "Bearer",
+		ExpiresAt:    time.Now().Add(time.Minute),
+	})
+	var refreshCalls atomic.Int32
+	var loginCalls atomic.Int32
+	var accountCalls atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/refresh":
+			refreshCalls.Add(1)
+			require.Equal(t, http.MethodPost, r.Method)
+			var payload map[string]string
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+			require.Equal(t, "old-refresh", payload["refresh_token"])
+			supplierSub2APIWriteJSON(w, http.StatusOK, `{"code":0,"data":{"access_token":"fresh-access","refresh_token":"rotated-refresh","token_type":"Bearer","expires_in":3600}}`)
+		case "/api/v1/auth/login":
+			loginCalls.Add(1)
+			http.Error(w, "login must not be called", http.StatusInternalServerError)
+		case "/accounts":
+			accountCalls.Add(1)
+			require.Equal(t, "Bearer fresh-access", r.Header.Get("Authorization"))
+			supplierSub2APIWriteJSON(w, http.StatusOK, `{"code":0,"data":{"items":[]}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewSupplierSub2APIClient(server.Client(), cache, nil)
+	_, err := client.FetchAccounts(context.Background(), supplierSub2APITestProvider(server.URL), "secret")
+
+	require.NoError(t, err)
+	require.Equal(t, int32(1), refreshCalls.Load())
+	require.Zero(t, loginCalls.Load())
+	require.Equal(t, int32(1), accountCalls.Load())
+	cache.mu.Lock()
+	cached, found := cache.tokens[42]
+	setTTLs := append([]time.Duration(nil), cache.setTTLs...)
+	lockCalls := cache.lockCalls
+	cache.mu.Unlock()
+	require.True(t, found)
+	require.Equal(t, "fresh-access", cached.AccessToken)
+	require.Equal(t, "rotated-refresh", cached.RefreshToken)
+	require.True(t, cached.ExpiresAt.After(time.Now()))
+	require.Equal(t, []time.Duration{0}, setTTLs)
+	require.GreaterOrEqual(t, lockCalls, 1)
+}
+
+func TestSupplierSub2APIClientKeepsRefreshTokenWhenRefreshDoesNotRotate(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	cache.preload(42, SupplierProviderAuthToken{
+		AccessToken:  "stale-access",
+		RefreshToken: "old-refresh",
+		TokenType:    "Bearer",
+		ExpiresAt:    time.Now().Add(time.Minute),
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/refresh":
+			supplierSub2APIWriteJSON(w, http.StatusOK, `{"code":0,"data":{"access_token":"fresh-access","expires_in":3600}}`)
+		case "/api/v1/auth/login":
+			http.Error(w, "login must not be called", http.StatusInternalServerError)
+		case "/accounts":
+			require.Equal(t, "Bearer fresh-access", r.Header.Get("Authorization"))
+			supplierSub2APIWriteJSON(w, http.StatusOK, `{"code":0,"data":{"items":[]}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewSupplierSub2APIClient(server.Client(), cache, nil)
+	_, err := client.FetchAccounts(context.Background(), supplierSub2APITestProvider(server.URL), "secret")
+
+	require.NoError(t, err)
+	cache.mu.Lock()
+	cached := cache.tokens[42]
+	cache.mu.Unlock()
+	require.Equal(t, "fresh-access", cached.AccessToken)
+	require.Equal(t, "old-refresh", cached.RefreshToken)
+}
+
+func TestSupplierSub2APIClientFallsBackToLoginWhenRefreshFails(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	cache.preload(42, SupplierProviderAuthToken{
+		AccessToken:  "stale-access",
+		RefreshToken: "old-refresh",
+		TokenType:    "Bearer",
+		ExpiresAt:    time.Now().Add(time.Minute),
+	})
+	var refreshCalls atomic.Int32
+	var loginCalls atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/refresh":
+			refreshCalls.Add(1)
+			supplierSub2APIWriteJSON(w, http.StatusUnauthorized, `{"code":"AUTH_FAILED","message":"refresh expired"}`)
+		case "/api/v1/auth/login":
+			loginCalls.Add(1)
+			supplierSub2APIWriteJSON(w, http.StatusOK, `{"code":0,"data":{"access_token":"login-access","refresh_token":"login-refresh","expires_in":3600}}`)
+		case "/accounts":
+			require.Equal(t, "Bearer login-access", r.Header.Get("Authorization"))
+			supplierSub2APIWriteJSON(w, http.StatusOK, `{"code":0,"data":{"items":[]}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewSupplierSub2APIClient(server.Client(), cache, nil)
+	_, err := client.FetchAccounts(context.Background(), supplierSub2APITestProvider(server.URL), "secret")
+
+	require.NoError(t, err)
+	require.Equal(t, int32(1), refreshCalls.Load())
+	require.Equal(t, int32(1), loginCalls.Load())
+	cache.mu.Lock()
+	cached := cache.tokens[42]
+	cache.mu.Unlock()
+	require.Equal(t, "login-access", cached.AccessToken)
+	require.Equal(t, "login-refresh", cached.RefreshToken)
+}
+
+func TestSupplierSub2APIClientRefreshesAfterAuthFailureBeforeLogin(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	cache.preload(42, SupplierProviderAuthToken{
+		AccessToken:  "expired-access",
+		RefreshToken: "old-refresh",
+		TokenType:    "Bearer",
+		ExpiresAt:    time.Now().Add(time.Hour),
+	})
+	var refreshCalls atomic.Int32
+	var loginCalls atomic.Int32
+	var accountCalls atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/refresh":
+			refreshCalls.Add(1)
+			supplierSub2APIWriteJSON(w, http.StatusOK, `{"code":0,"data":{"access_token":"fresh-access","refresh_token":"rotated-refresh","expires_in":3600}}`)
+		case "/api/v1/auth/login":
+			loginCalls.Add(1)
+			http.Error(w, "login must not be called", http.StatusInternalServerError)
+		case "/accounts":
+			if accountCalls.Add(1) == 1 {
+				require.Equal(t, "Bearer expired-access", r.Header.Get("Authorization"))
+				supplierSub2APIWriteJSON(w, http.StatusUnauthorized, `{"code":"AUTH_FAILED","message":"session expired"}`)
+				return
+			}
+			require.Equal(t, "Bearer fresh-access", r.Header.Get("Authorization"))
+			supplierSub2APIWriteJSON(w, http.StatusOK, `{"code":0,"data":{"items":[]}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewSupplierSub2APIClient(server.Client(), cache, nil)
+	_, err := client.FetchAccounts(context.Background(), supplierSub2APITestProvider(server.URL), "secret")
+
+	require.NoError(t, err)
+	require.Equal(t, int32(1), refreshCalls.Load())
+	require.Zero(t, loginCalls.Load())
+	require.Equal(t, int32(2), accountCalls.Load())
+}
+
+func TestSupplierSub2APIClientRecordsRefreshAuditWithoutRefreshToken(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	cache.preload(42, SupplierProviderAuthToken{
+		AccessToken:  "stale-access",
+		RefreshToken: "old-refresh",
+		TokenType:    "Bearer",
+		ExpiresAt:    time.Now().Add(time.Minute),
+	})
+	auditor := &supplierProviderAuthAuditorSpy{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/refresh":
+			supplierSub2APIWriteJSON(w, http.StatusOK, `{"code":0,"data":{"access_token":"fresh-access","refresh_token":"rotated-refresh","expires_in":3600}}`)
+		case "/accounts":
+			supplierSub2APIWriteJSON(w, http.StatusOK, `{"code":0,"data":{"items":[]}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewSupplierSub2APIClient(server.Client(), cache, nil)
+	client.SetAuthAuditor(auditor)
+	_, err := client.FetchAccounts(context.Background(), supplierSub2APITestProvider(server.URL), "secret")
+
+	require.NoError(t, err)
+	auditor.mu.Lock()
+	events := append([]SupplierProviderAuthEventInput(nil), auditor.events...)
+	auditor.mu.Unlock()
+	var refreshEvent *SupplierProviderAuthEventInput
+	for i := range events {
+		if events[i].EventType == SupplierProviderAuthEventRefreshSuccess {
+			refreshEvent = &events[i]
+			break
+		}
+	}
+	require.NotNil(t, refreshEvent)
+	require.NotNil(t, refreshEvent.Token)
+	require.Equal(t, "fresh-access", refreshEvent.Token.AccessToken)
+	require.Empty(t, refreshEvent.Token.RefreshToken)
 }

@@ -162,6 +162,9 @@ describe('SupplierProvidersView payload normalization', () => {
         login_count: 4,
         login_success_count: 3,
         login_failure_count: 1,
+        refresh_count: 4,
+        refresh_success_count: 3,
+        refresh_failure_count: 1,
         cache_hit_count: 7,
         cache_miss_count: 2,
         last_login_at: '2026-08-05T06:30:00Z',
@@ -190,18 +193,18 @@ describe('SupplierProvidersView payload normalization', () => {
     providerViewMocks.listAuthHistory.mockResolvedValue({
       items: [
         {
-        id: 9,
-        provider_id: 1,
-        event_type: 'login_success',
-        source: 'sync',
-        status: 'success',
-        started_at: '2026-08-05T06:30:00Z',
-        finished_at: '2026-08-05T06:30:01Z',
-        duration_ms: 1000,
-        http_status: 200,
-        token_fingerprint: 'fingerprint-only',
-        token_length: 64,
-        cookie_present: true,
+          id: 9,
+          provider_id: 1,
+          event_type: 'refresh_success',
+          source: 'sync',
+          status: 'success',
+          started_at: '2026-08-05T06:30:00Z',
+          finished_at: '2026-08-05T06:30:01Z',
+          duration_ms: 1000,
+          http_status: 200,
+          token_fingerprint: 'fingerprint-only',
+          token_length: 64,
+          cookie_present: true,
           created_at: '2026-08-05T06:30:01Z',
         },
       ],
@@ -263,7 +266,10 @@ describe('SupplierProvidersView payload normalization', () => {
       event_type: '',
     })
     expect(wrapper.text()).toContain('abcd…wxyz')
-    expect(wrapper.text()).toContain('登录成功')
+    expect(wrapper.text()).toContain('刷新成功')
+    expect(wrapper.text()).toContain('Token 刷新')
+    expect(wrapper.text()).toContain('3 / 1')
+    expect(wrapper.text()).toContain('共 4 次')
     expect(wrapper.text()).toContain('缓存命中 / 未命中')
     expect(wrapper.text()).toContain('7 / 2')
     expect(wrapper.text()).toContain('最近缓存命中')
@@ -293,6 +299,13 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(providerViewMocks.listAuthHistory).toHaveBeenCalledTimes(1)
     expect(providerViewMocks.syncProvider).not.toHaveBeenCalled()
     expect(providerViewMocks.testProviderEndpoint).not.toHaveBeenCalled()
+  })
+
+  it('declares refresh event filters and API types for login history', () => {
+    expect(supplierProvidersSource).toContain("{ value: 'refresh_success', label: '刷新成功' }")
+    expect(supplierProvidersSource).toContain("{ value: 'refresh_failed', label: '刷新失败' }")
+    expect(supplierProvidersSource).toContain("refresh_success: '刷新成功'")
+    expect(supplierProvidersSource).toContain("refresh_failed: '刷新失败'")
   })
 
   it('sorts provider rows when a sortable table header is clicked', async () => {

@@ -20,11 +20,13 @@ import (
 
 const (
 	defaultSupplierSub2APILoginPath               = "/api/v1/auth/login"
+	defaultSupplierSub2APIRefreshPath             = "/api/v1/auth/refresh"
 	defaultSupplierSub2APIHTTPTimeout             = 30 * time.Second
 	supplierSub2APIMaxResponseBytes         int64 = 4 << 20
 	supplierSub2APILoginLockTTL                   = 120 * time.Second
 	supplierSub2APILoginLockWait                  = 130 * time.Second
 	supplierSub2APILoginLockPoll                  = 100 * time.Millisecond
+	supplierSub2APISessionRefreshThreshold        = 5 * time.Minute
 	supplierSub2APILogResponseSummaryLimit        = 512
 	supplierSub2APITestResponseSummaryLimit       = 8192
 	supplierSub2APILogStringValueLimit            = 160
@@ -173,22 +175,21 @@ func (c *SupplierSub2APIClient) TestEndpoint(ctx context.Context, provider *Supp
 	default:
 		return SupplierProviderEndpointTestResult{}, fmt.Errorf("unsupported supplier endpoint test scope: %s", scope)
 	}
-	token, err := c.ensureToken(ctx, provider, password)
-	if err != nil {
-		return SupplierProviderEndpointTestResult{}, err
-	}
 	for _, endpoint := range endpoints {
 		startedAt := time.Now()
-		raw, status, err := c.doJSON(ctx, http.MethodGet, provider, endpoint, scope, token, nil)
+		raw, status, requestErr := c.authenticatedRequest(ctx, provider, password, http.MethodGet, endpoint, scope, nil)
+		if requestErr != nil && IsSupplierProviderSessionFailure(requestErr) {
+			return SupplierProviderEndpointTestResult{}, requestErr
+		}
 		attempt := SupplierProviderEndpointTestAttempt{
 			Endpoint:        endpoint,
 			HTTPStatus:      status,
 			DurationMS:      time.Since(startedAt).Milliseconds(),
 			ResponseBytes:   len(raw),
 			ResponseSummary: supplierSub2APISafeResponseText(raw, supplierSub2APITestResponseSummaryLimit),
-			Error:           supplierSub2APIErrorText(err),
+			Error:           supplierSub2APIErrorText(requestErr),
 		}
-		if err == nil {
+		if requestErr == nil {
 			attempt.ParsedData, attempt.ParseError = supplierSub2APIParsedDiagnostic(scope, raw)
 		}
 		result.Attempts = append(result.Attempts, attempt)
@@ -200,7 +201,7 @@ func (c *SupplierSub2APIClient) TestEndpoint(ctx context.Context, provider *Supp
 		result.ParsedData = attempt.ParsedData
 		result.ParseError = attempt.ParseError
 		result.Error = attempt.Error
-		if err != nil || status < 200 || status >= 300 {
+		if requestErr != nil || status < 200 || status >= 300 {
 			if scope == SupplierSyncScopeAccounts && supplierSub2APIStatusCodeIs(status, http.StatusNotFound) {
 				continue
 			}
@@ -212,54 +213,64 @@ func (c *SupplierSub2APIClient) TestEndpoint(ctx context.Context, provider *Supp
 }
 
 func (c *SupplierSub2APIClient) authenticatedGet(ctx context.Context, provider *SupplierProvider, password, path, label string) ([]byte, error) {
+	startedAt := time.Now()
+	raw, status, err := c.authenticatedRequest(ctx, provider, password, http.MethodGet, path, label, nil)
+	c.recordEndpointResult(provider.ID, label, SupplierProviderEndpointResult{
+		Endpoint:        path,
+		HTTPStatus:      status,
+		DurationMS:      time.Since(startedAt).Milliseconds(),
+		ResponseBytes:   len(raw),
+		ResponseSummary: supplierSub2APISafeResponseText(raw, supplierSub2APITestResponseSummaryLimit),
+		Error:           supplierSub2APIErrorText(err),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+func (c *SupplierSub2APIClient) authenticatedRequest(ctx context.Context, provider *SupplierProvider, password, method, path, label string, body io.Reader) ([]byte, int, error) {
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
 		token, err := c.ensureToken(ctx, provider, password)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
-		startedAt := time.Now()
-		raw, status, err := c.doJSON(ctx, http.MethodGet, provider, path, label, token, nil)
-		c.recordEndpointResult(provider.ID, label, SupplierProviderEndpointResult{
-			Endpoint:        path,
-			HTTPStatus:      status,
-			DurationMS:      time.Since(startedAt).Milliseconds(),
-			ResponseBytes:   len(raw),
-			ResponseSummary: supplierSub2APISafeResponseText(raw, supplierSub2APITestResponseSummaryLimit),
-			Error:           supplierSub2APIErrorText(err),
-		})
+		raw, status, err := c.doJSON(ctx, method, provider, path, label, token, body)
 		if err != nil {
-			return nil, fmt.Errorf("supplier sub2api %s request failed: %w", label, err)
+			return raw, status, fmt.Errorf("supplier sub2api %s request failed: %w", label, err)
 		}
 		if status >= 200 && status < 300 && !supplierSub2APIBusinessAuthFailure(raw) {
-			if err := supplierSub2APIEnvelopeOK(raw); err != nil {
-				c.updateEndpointError(provider.ID, label, err)
-				if attempt == 0 && supplierSub2APIErrorLooksAuth(err) {
-					c.deleteToken(ctx, provider)
-					lastErr = err
-					continue
+			if envelopeErr := supplierSub2APIEnvelopeOK(raw); envelopeErr == nil {
+				return raw, status, nil
+			} else if attempt == 0 && supplierSub2APIAuthFailure(status, raw, envelopeErr) {
+				lastErr = envelopeErr
+				if _, recoverErr := c.recoverTokenAfterAuthFailure(ctx, provider, password, token); recoverErr != nil {
+					return raw, status, recoverErr
 				}
-				return nil, err
+				continue
+			} else {
+				return raw, status, envelopeErr
 			}
-			return raw, nil
 		}
-		err = supplierSub2APIHTTPError(label, status, raw)
-		c.updateEndpointError(provider.ID, label, err)
-		if attempt == 0 && supplierSub2APIAuthFailure(status, raw, err) {
-			c.deleteToken(ctx, provider)
-			lastErr = err
+		requestErr := supplierSub2APIHTTPError(label, status, raw)
+		if attempt == 0 && supplierSub2APIAuthFailure(status, raw, requestErr) {
+			lastErr = requestErr
+			if _, recoverErr := c.recoverTokenAfterAuthFailure(ctx, provider, password, token); recoverErr != nil {
+				return raw, status, recoverErr
+			}
 			continue
 		}
 		c.deleteToken(ctx, provider)
-		if supplierSub2APIAuthFailure(status, raw, err) {
-			return nil, wrapSupplierProviderAuthFailure(fmt.Errorf("supplier sub2api %s failed after auth retry: %w", label, err))
+		if supplierSub2APIAuthFailure(status, raw, requestErr) {
+			return raw, status, wrapSupplierProviderAuthFailure(fmt.Errorf("supplier sub2api %s failed after auth retry: %w", label, requestErr))
 		}
-		return nil, err
+		return raw, status, requestErr
 	}
 	if supplierSub2APIAuthFailure(0, nil, lastErr) {
-		return nil, wrapSupplierProviderAuthFailure(fmt.Errorf("supplier sub2api %s failed after auth retry: %w", label, lastErr))
+		return nil, 0, wrapSupplierProviderAuthFailure(fmt.Errorf("supplier sub2api %s failed after auth retry: %w", label, lastErr))
 	}
-	return nil, fmt.Errorf("supplier sub2api %s failed after auth retry: %w", label, lastErr)
+	return nil, 0, fmt.Errorf("supplier sub2api %s failed after auth retry: %w", label, lastErr)
 }
 
 func (c *SupplierSub2APIClient) LastEndpointResult(providerID int64, scope string) *SupplierProviderEndpointResult {
@@ -321,73 +332,132 @@ func (c *SupplierSub2APIClient) ensureToken(ctx context.Context, provider *Suppl
 			EventType: SupplierProviderAuthEventCacheError,
 			Error:     errors.New("supplier provider token cache is unavailable"),
 		})
-		result, err := c.loginWithAudit(ctx, provider, password)
-		return result.token, err
+		loginResult, loginErr := c.loginWithAudit(ctx, provider, password)
+		return loginResult.token, loginErr
 	}
-	if token, found, err := c.tokenCache.Get(ctx, provider.ID); err != nil {
-		return SupplierProviderAuthToken{}, c.cacheFailure(ctx, provider, "get", err)
-	} else if found && strings.TrimSpace(token.AccessToken) != "" {
+	if token, found, getErr := c.tokenCache.Get(ctx, provider.ID); getErr != nil {
+		return SupplierProviderAuthToken{}, c.cacheFailure(ctx, provider, "get", getErr)
+	} else if found && supplierSub2APITokenUsable(token) {
+		token = normalizeSupplierSub2APIToken(token)
 		c.recordAuthEvent(ctx, provider, SupplierProviderAuthEventInput{EventType: SupplierProviderAuthEventCacheHit, Token: &token})
-		return normalizeSupplierSub2APIToken(token), nil
+		if !supplierSub2APITokenNeedsRefresh(token, time.Now()) {
+			return token, nil
+		}
+		return c.acquireTokenLockMode(ctx, provider, password, false, token)
 	}
 	c.recordAuthEvent(ctx, provider, SupplierProviderAuthEventInput{EventType: SupplierProviderAuthEventCacheMiss})
+	return c.acquireTokenLockMode(ctx, provider, password, false, SupplierProviderAuthToken{})
+}
 
+func (c *SupplierSub2APIClient) recoverTokenAfterAuthFailure(ctx context.Context, provider *SupplierProvider, password string, failedToken SupplierProviderAuthToken) (SupplierProviderAuthToken, error) {
+	if c.tokenCache == nil {
+		if refreshed, refreshErr := c.refreshWithAudit(ctx, provider, failedToken); refreshErr == nil {
+			return refreshed.token, nil
+		}
+		loginResult, loginErr := c.loginWithAudit(ctx, provider, password)
+		if loginErr != nil {
+			return SupplierProviderAuthToken{}, loginErr
+		}
+		return loginResult.token, nil
+	}
+	return c.acquireTokenLockMode(ctx, provider, password, true, failedToken)
+}
+
+func (c *SupplierSub2APIClient) acquireTokenLockMode(ctx context.Context, provider *SupplierProvider, password string, forceRefresh bool, fallbackToken SupplierProviderAuthToken) (SupplierProviderAuthToken, error) {
 	owner := uuid.NewString()
 	acquired, err := c.tokenCache.TryAcquireLoginLock(ctx, provider.ID, owner, supplierSub2APILoginLockTTL)
 	if err != nil {
 		return SupplierProviderAuthToken{}, c.cacheFailure(ctx, provider, "acquire login lock", err)
 	}
 	if acquired {
-		return c.loginAndCache(ctx, provider, password, owner)
+		return c.refreshOrLoginAndCache(ctx, provider, password, owner, forceRefresh, fallbackToken)
 	}
 
 	waitCtx, cancel := context.WithTimeout(ctx, supplierSub2APILoginLockWait)
 	defer cancel()
 	ticker := time.NewTicker(supplierSub2APILoginLockPoll)
 	defer ticker.Stop()
-
 	for {
 		select {
 		case <-waitCtx.Done():
 			return SupplierProviderAuthToken{}, waitCtx.Err()
 		case <-ticker.C:
-			if token, found, err := c.tokenCache.Get(waitCtx, provider.ID); err != nil {
-				return SupplierProviderAuthToken{}, c.cacheFailure(ctx, provider, "poll token", err)
-			} else if found && strings.TrimSpace(token.AccessToken) != "" {
-				c.recordAuthEvent(ctx, provider, SupplierProviderAuthEventInput{EventType: SupplierProviderAuthEventCacheHit, Token: &token})
-				return normalizeSupplierSub2APIToken(token), nil
+			if token, found, getErr := c.tokenCache.Get(waitCtx, provider.ID); getErr != nil {
+				return SupplierProviderAuthToken{}, c.cacheFailure(ctx, provider, "poll token", getErr)
+			} else if found && supplierSub2APITokenUsable(token) {
+				token = normalizeSupplierSub2APIToken(token)
+				canReuse := !supplierSub2APITokenNeedsRefresh(token, time.Now())
+				if forceRefresh {
+					canReuse = !supplierSub2APITokenAuthEqual(token, fallbackToken) && canReuse
+				}
+				if canReuse {
+					c.recordAuthEvent(ctx, provider, SupplierProviderAuthEventInput{EventType: SupplierProviderAuthEventCacheHit, Token: &token})
+					return token, nil
+				}
 			}
 			acquired, err := c.tokenCache.TryAcquireLoginLock(waitCtx, provider.ID, owner, supplierSub2APILoginLockTTL)
 			if err != nil {
 				return SupplierProviderAuthToken{}, c.cacheFailure(ctx, provider, "retry login lock", err)
 			}
 			if acquired {
-				return c.loginAndCache(ctx, provider, password, owner)
+				return c.refreshOrLoginAndCache(ctx, provider, password, owner, forceRefresh, fallbackToken)
 			}
 		}
 	}
 }
 
-func (c *SupplierSub2APIClient) loginAndCache(ctx context.Context, provider *SupplierProvider, password, owner string) (SupplierProviderAuthToken, error) {
+func (c *SupplierSub2APIClient) refreshOrLoginAndCache(ctx context.Context, provider *SupplierProvider, password, owner string, forceRefresh bool, fallbackToken SupplierProviderAuthToken) (SupplierProviderAuthToken, error) {
 	defer func() {
 		if err := c.tokenCache.ReleaseLoginLock(context.Background(), provider.ID, owner); err != nil {
 			c.logCacheError(provider, "release login lock", err)
 		}
 	}()
-	if token, found, err := c.tokenCache.Get(ctx, provider.ID); err != nil {
-		return SupplierProviderAuthToken{}, c.cacheFailure(ctx, provider, "recheck token", err)
-	} else if found && strings.TrimSpace(token.AccessToken) != "" {
-		c.recordAuthEvent(ctx, provider, SupplierProviderAuthEventInput{EventType: SupplierProviderAuthEventCacheHit, Token: &token})
-		return normalizeSupplierSub2APIToken(token), nil
+
+	var candidate SupplierProviderAuthToken
+	foundCandidate := false
+	if token, found, getErr := c.tokenCache.Get(ctx, provider.ID); getErr != nil {
+		return SupplierProviderAuthToken{}, c.cacheFailure(ctx, provider, "recheck token", getErr)
+	} else if found && supplierSub2APITokenUsable(token) {
+		token = normalizeSupplierSub2APIToken(token)
+		candidate = token
+		foundCandidate = true
+		canReuse := !supplierSub2APITokenNeedsRefresh(token, time.Now())
+		if forceRefresh {
+			canReuse = !supplierSub2APITokenAuthEqual(token, fallbackToken) && canReuse
+		}
+		if canReuse {
+			c.recordAuthEvent(ctx, provider, SupplierProviderAuthEventInput{EventType: SupplierProviderAuthEventCacheHit, Token: &token})
+			return token, nil
+		}
 	}
-	result, err := c.loginWithAudit(ctx, provider, password)
-	if err != nil {
-		return SupplierProviderAuthToken{}, err
+	if !foundCandidate && forceRefresh && supplierSub2APITokenUsable(fallbackToken) {
+		candidate = normalizeSupplierSub2APIToken(fallbackToken)
+		foundCandidate = true
 	}
-	if err := c.tokenCache.Set(ctx, provider.ID, result.token, result.ttl); err != nil {
+	if foundCandidate {
+		shouldRefresh := supplierSub2APITokenNeedsRefresh(candidate, time.Now())
+		if forceRefresh && supplierSub2APITokenAuthEqual(candidate, fallbackToken) {
+			shouldRefresh = true
+		}
+		if shouldRefresh {
+			if refreshed, refreshErr := c.refreshWithAudit(ctx, provider, candidate); refreshErr == nil {
+				if err := c.tokenCache.Set(ctx, provider.ID, refreshed.token, refreshed.ttl); err != nil {
+					return SupplierProviderAuthToken{}, c.cacheFailure(ctx, provider, "set refreshed token", err)
+				}
+				return refreshed.token, nil
+			}
+			c.deleteToken(ctx, provider)
+		}
+	}
+
+	loginResult, loginErr := c.loginWithAudit(ctx, provider, password)
+	if loginErr != nil {
+		return SupplierProviderAuthToken{}, loginErr
+	}
+	if err := c.tokenCache.Set(ctx, provider.ID, loginResult.token, loginResult.ttl); err != nil {
 		return SupplierProviderAuthToken{}, c.cacheFailure(ctx, provider, "set", err)
 	}
-	return result.token, nil
+	return loginResult.token, nil
 }
 
 func (c *SupplierSub2APIClient) loginWithAudit(ctx context.Context, provider *SupplierProvider, password string) (supplierSub2APILoginResult, error) {
@@ -425,6 +495,13 @@ func (c *SupplierSub2APIClient) cacheFailure(ctx context.Context, provider *Supp
 func (c *SupplierSub2APIClient) recordAuthEvent(ctx context.Context, provider *SupplierProvider, event SupplierProviderAuthEventInput) {
 	if c == nil || c.authAuditor == nil || provider == nil {
 		return
+	}
+	if event.Token != nil {
+		token := supplierProviderAuthAuditToken(*event.Token)
+		event.Token = &token
+	}
+	if event.Error != nil {
+		event.Error = supplierProviderAuthAuditError(event.Error)
 	}
 	event.ProviderID = provider.ID
 	if event.Source == "" {
@@ -480,12 +557,70 @@ func (c *SupplierSub2APIClient) login(ctx context.Context, provider *SupplierPro
 		}
 		return supplierSub2APILoginResult{}, err
 	}
-	if token.TokenType == "" {
-		token.TokenType = "Bearer"
+	if expiresIn > 0 {
+		token.ExpiresAt = time.Now().Add(expiresIn)
 	}
-	// 忽略上游 expires_in：token 长期缓存，仅在接口返回鉴权失败时删除并重登。
-	_ = expiresIn
 	return supplierSub2APILoginResult{token: normalizeSupplierSub2APIToken(token), ttl: 0}, nil
+}
+
+func (c *SupplierSub2APIClient) refreshWithAudit(ctx context.Context, provider *SupplierProvider, previous SupplierProviderAuthToken) (supplierSub2APILoginResult, error) {
+	startedAt := time.Now()
+	result, status, err := c.refresh(ctx, provider, previous)
+	var httpStatus *int
+	if status > 0 {
+		statusForAudit := status
+		httpStatus = &statusForAudit
+	}
+	event := SupplierProviderAuthEventInput{
+		EventType:  SupplierProviderAuthEventRefreshSuccess,
+		StartedAt:  startedAt,
+		FinishedAt: time.Now(),
+		HTTPStatus: httpStatus,
+		Error:      err,
+	}
+	if err != nil {
+		event.EventType = SupplierProviderAuthEventRefreshFailed
+		if supplierSub2APITokenUsable(previous) {
+			token := previous
+			event.Token = &token
+		}
+	} else {
+		token := result.token
+		event.Token = &token
+	}
+	c.recordAuthEvent(ctx, provider, event)
+	return result, err
+}
+
+func (c *SupplierSub2APIClient) refresh(ctx context.Context, provider *SupplierProvider, previous SupplierProviderAuthToken) (supplierSub2APILoginResult, int, error) {
+	refreshToken := strings.TrimSpace(previous.RefreshToken)
+	if refreshToken == "" {
+		return supplierSub2APILoginResult{}, 0, fmt.Errorf("supplier sub2api refresh failed: missing refresh token")
+	}
+	body, err := json.Marshal(map[string]string{"refresh_token": refreshToken})
+	if err != nil {
+		return supplierSub2APILoginResult{}, 0, fmt.Errorf("marshal supplier sub2api refresh: %w", err)
+	}
+	raw, status, err := c.doJSON(ctx, http.MethodPost, provider, defaultSupplierSub2APIRefreshPath, "refresh", SupplierProviderAuthToken{}, bytes.NewReader(body))
+	if err != nil {
+		return supplierSub2APILoginResult{}, status, fmt.Errorf("supplier sub2api refresh request failed: %w", err)
+	}
+	if status < 200 || status >= 300 {
+		return supplierSub2APILoginResult{}, status, supplierSub2APIHTTPError("refresh", status, raw)
+	}
+	token, expiresIn, err := parseSupplierSub2APILogin(raw)
+	if err != nil {
+		summary := supplierSub2APISafeResponseSummary(raw)
+		if summary == "" {
+			return supplierSub2APILoginResult{}, status, errors.New("supplier sub2api refresh response is invalid")
+		}
+		return supplierSub2APILoginResult{}, status, fmt.Errorf("supplier sub2api refresh response is invalid: %s", summary)
+	}
+	token.RefreshToken = firstSupplierSub2APIString(token.RefreshToken, refreshToken)
+	if expiresIn > 0 {
+		token.ExpiresAt = time.Now().Add(expiresIn)
+	}
+	return supplierSub2APILoginResult{token: normalizeSupplierSub2APIToken(token), ttl: 0}, status, nil
 }
 
 func (c *SupplierSub2APIClient) doJSON(ctx context.Context, method string, provider *SupplierProvider, path string, label string, token SupplierProviderAuthToken, body io.Reader) ([]byte, int, error) {
@@ -576,17 +711,19 @@ func supplierSub2APIURL(baseURL, endpoint string) (*url.URL, error) {
 
 func parseSupplierSub2APILogin(raw []byte) (SupplierProviderAuthToken, time.Duration, error) {
 	var resp struct {
-		Code        any    `json:"code"`
-		Message     string `json:"message"`
-		AccessToken string `json:"access_token"`
-		Token       string `json:"token"`
-		TokenType   string `json:"token_type"`
-		ExpiresIn   any    `json:"expires_in"`
-		Data        struct {
-			AccessToken string `json:"access_token"`
-			Token       string `json:"token"`
-			TokenType   string `json:"token_type"`
-			ExpiresIn   any    `json:"expires_in"`
+		Code         any    `json:"code"`
+		Message      string `json:"message"`
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		Token        string `json:"token"`
+		TokenType    string `json:"token_type"`
+		ExpiresIn    any    `json:"expires_in"`
+		Data         struct {
+			AccessToken  string `json:"access_token"`
+			RefreshToken string `json:"refresh_token"`
+			Token        string `json:"token"`
+			TokenType    string `json:"token_type"`
+			ExpiresIn    any    `json:"expires_in"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
@@ -604,8 +741,9 @@ func parseSupplierSub2APILogin(raw []byte) (SupplierProviderAuthToken, time.Dura
 		expiresIn = supplierSub2APIDurationSeconds(resp.ExpiresIn)
 	}
 	return SupplierProviderAuthToken{
-		AccessToken: token,
-		TokenType:   firstSupplierSub2APIString(resp.Data.TokenType, resp.TokenType, "Bearer"),
+		AccessToken:  token,
+		RefreshToken: firstSupplierSub2APIString(resp.Data.RefreshToken, resp.RefreshToken),
+		TokenType:    firstSupplierSub2APIString(resp.Data.TokenType, resp.TokenType, "Bearer"),
 	}, expiresIn, nil
 }
 
@@ -831,11 +969,11 @@ func supplierSub2APIHTTPError(label string, status int, raw []byte) error {
 	if status == 0 {
 		return errors.New("supplier sub2api request failed")
 	}
-	msg := strings.TrimSpace(string(raw))
-	if len(msg) > 256 {
-		msg = msg[:256]
+	return supplierSub2APIHTTPStatusError{
+		label:   label,
+		status:  status,
+		message: supplierSub2APISafeResponseText(raw, 256),
 	}
-	return supplierSub2APIHTTPStatusError{label: label, status: status, message: msg}
 }
 
 type supplierSub2APIHTTPStatusError struct {
@@ -877,11 +1015,24 @@ func supplierSub2APIAccountEndpoints(configured string) []string {
 
 func normalizeSupplierSub2APIToken(token SupplierProviderAuthToken) SupplierProviderAuthToken {
 	token.AccessToken = strings.TrimSpace(token.AccessToken)
+	token.RefreshToken = strings.TrimSpace(token.RefreshToken)
 	token.TokenType = strings.TrimSpace(token.TokenType)
 	if token.TokenType == "" {
 		token.TokenType = "Bearer"
 	}
 	return token
+}
+
+func supplierSub2APITokenUsable(token SupplierProviderAuthToken) bool {
+	return strings.TrimSpace(token.AccessToken) != ""
+}
+
+func supplierSub2APITokenNeedsRefresh(token SupplierProviderAuthToken, now time.Time) bool {
+	return !token.ExpiresAt.IsZero() && !token.ExpiresAt.After(now.Add(supplierSub2APISessionRefreshThreshold))
+}
+
+func supplierSub2APITokenAuthEqual(left, right SupplierProviderAuthToken) bool {
+	return strings.TrimSpace(left.AccessToken) == strings.TrimSpace(right.AccessToken)
 }
 
 func normalizeSupplierSub2APIKeyFromName(name string) string {
@@ -978,8 +1129,14 @@ func supplierSub2APISafeResponseText(raw []byte, limit int) string {
 		if encoded, err := json.Marshal(redacted); err == nil {
 			text = string(encoded)
 		}
+	} else {
+		text = supplierSub2APIRedactInlineSensitiveText(text)
 	}
 	return supplierSub2APITruncateLogText(text, limit)
+}
+
+func supplierSub2APIRedactInlineSensitiveText(text string) string {
+	return supplierProviderAuthSecretPattern.ReplaceAllString(text, "$1[REDACTED]")
 }
 
 func supplierSub2APIParsedDiagnostic(scope string, raw []byte) (any, string) {
@@ -1066,7 +1223,7 @@ func supplierSub2APIRedactSensitiveJSON(value any) any {
 		}
 		return out
 	case string:
-		return supplierSub2APITruncateLogText(typed, supplierSub2APILogStringValueLimit)
+		return supplierSub2APITruncateLogText(supplierSub2APIRedactInlineSensitiveText(typed), supplierSub2APILogStringValueLimit)
 	default:
 		return value
 	}
@@ -1074,6 +1231,9 @@ func supplierSub2APIRedactSensitiveJSON(value any) any {
 
 func supplierSub2APISensitiveLogKey(key string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(key))
+	if strings.ReplaceAll(strings.ReplaceAll(normalized, "_", ""), "-", "") == "newapirefresh" {
+		return true
+	}
 	for _, marker := range []string{"token", "password", "secret", "authorization", "cookie"} {
 		if strings.Contains(normalized, marker) {
 			return true

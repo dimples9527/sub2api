@@ -96,6 +96,53 @@ func TestSupplierProviderAuthAuditRepositoryTreatsCacheHitSeparatelyFromLogin(t 
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestSupplierProviderAuthAuditRepositoryRecordsRefreshEventsSeparatelyFromLogin(t *testing.T) {
+	for _, eventType := range []service.SupplierProviderAuthEventType{
+		service.SupplierProviderAuthEventRefreshSuccess,
+		service.SupplierProviderAuthEventRefreshFailed,
+	} {
+		t.Run(string(eventType), func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer db.Close()
+
+			finishedAt := time.Date(2026, time.August, 7, 10, 0, 0, 0, time.UTC)
+			event := service.SupplierProviderAuthEventRecord{
+				ProviderID: 42,
+				EventType:  eventType,
+				Source:     service.SupplierProviderAuthSourceSync,
+				Status: map[service.SupplierProviderAuthEventType]service.SupplierProviderAuthStatus{
+					service.SupplierProviderAuthEventRefreshSuccess: service.SupplierProviderAuthStatusSuccess,
+					service.SupplierProviderAuthEventRefreshFailed:  service.SupplierProviderAuthStatusFailed,
+				}[eventType],
+				StartedAt:  finishedAt,
+				FinishedAt: finishedAt,
+				CreatedAt:  finishedAt,
+			}
+
+			mock.ExpectBegin()
+			mock.ExpectExec(regexp.QuoteMeta("INSERT INTO supplier_provider_auth_events (")).
+				WithArgs(
+					event.ProviderID, event.EventType, event.Source, event.Status,
+					event.StartedAt, event.FinishedAt, int64(0), (*int)(nil), "", "", 0,
+					event.TokenExpiresAt, event.CookiePresent, event.CreatedAt,
+				).
+				WillReturnResult(sqlmock.NewResult(1, 1))
+			mock.ExpectExec(`auth_refresh_count, auth_refresh_success_count, auth_refresh_failure_count,[\s\S]+CASE WHEN \$2 IN \('refresh_success', 'refresh_failed'\) THEN 1 ELSE 0 END,[\s\S]+CASE WHEN \$2 = 'refresh_success' THEN 1 ELSE 0 END,[\s\S]+CASE WHEN \$2 = 'refresh_failed' THEN 1 ELSE 0 END,[\s\S]+auth_refresh_count = supplier_provider_runtime_stats\.auth_refresh_count \+ EXCLUDED\.auth_refresh_count`).
+				WithArgs(
+					event.ProviderID, event.EventType, event.Status, event.FinishedAt,
+					event.ErrorMessage, event.TokenExpiresAt, event.TokenFingerprint,
+				).
+				WillReturnResult(sqlmock.NewResult(0, 1))
+			mock.ExpectCommit()
+
+			repo := NewSupplierProviderAuthAuditRepository(db)
+			require.NoError(t, repo.Record(context.Background(), event))
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
 func TestSupplierProviderAuthAuditRepositoryGetsSummary(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
@@ -108,11 +155,12 @@ func TestSupplierProviderAuthAuditRepositoryGetsSummary(t *testing.T) {
 		WithArgs(int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"auth_login_count", "auth_login_success_count", "auth_login_failure_count",
+			"auth_refresh_count", "auth_refresh_success_count", "auth_refresh_failure_count",
 			"auth_cache_hit_count", "auth_cache_miss_count", "auth_last_login_at",
 			"auth_last_login_status", "auth_last_login_error", "auth_last_cache_hit_at",
 			"auth_last_cache_error", "auth_last_token_expires_at", "auth_last_token_fingerprint",
 		}).AddRow(
-			int64(5), int64(4), int64(1), int64(9), int64(2), lastLoginAt,
+			int64(5), int64(4), int64(1), int64(6), int64(5), int64(1), int64(9), int64(2), lastLoginAt,
 			"success", "", lastCacheHitAt, "", lastTokenExpiresAt, "fingerprint",
 		))
 
@@ -122,6 +170,9 @@ func TestSupplierProviderAuthAuditRepositoryGetsSummary(t *testing.T) {
 	require.Equal(t, int64(5), summary.LoginCount)
 	require.Equal(t, int64(4), summary.LoginSuccessCount)
 	require.Equal(t, int64(1), summary.LoginFailureCount)
+	require.Equal(t, int64(6), summary.RefreshCount)
+	require.Equal(t, int64(5), summary.RefreshSuccessCount)
+	require.Equal(t, int64(1), summary.RefreshFailureCount)
 	require.Equal(t, int64(9), summary.CacheHitCount)
 	require.Equal(t, int64(2), summary.CacheMissCount)
 	require.Equal(t, "success", summary.LastLoginStatus)
@@ -147,6 +198,42 @@ func TestSupplierProviderAuthAuditRepositoryReturnsNotFoundForMissingProvider(t 
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestSupplierProviderAuthAuditRepositoryListsRefreshFilteredHistory(t *testing.T) {
+	for _, eventType := range []service.SupplierProviderAuthEventType{
+		service.SupplierProviderAuthEventRefreshSuccess,
+		service.SupplierProviderAuthEventRefreshFailed,
+	} {
+		t.Run(string(eventType), func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer db.Close()
+
+			params := service.SupplierProviderAuthHistoryParams{
+				Page:      1,
+				PageSize:  20,
+				EventType: eventType,
+			}
+			mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM supplier_provider_auth_events WHERE provider_id = $1 AND event_type = $2")).
+				WithArgs(int64(42), eventType).
+				WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(0)))
+			mock.ExpectQuery(`SELECT id, provider_id, event_type, source, status,[\s\S]*ORDER BY created_at DESC, id DESC LIMIT \$3 OFFSET \$4`).
+				WithArgs(int64(42), eventType, 20, 0).
+				WillReturnRows(sqlmock.NewRows([]string{
+					"id", "provider_id", "event_type", "source", "status", "started_at", "finished_at",
+					"duration_ms", "http_status", "error_message", "token_fingerprint", "token_length",
+					"token_expires_at", "cookie_present", "created_at",
+				}))
+
+			repo := NewSupplierProviderAuthAuditRepository(db)
+			result, err := repo.ListHistory(context.Background(), 42, params)
+
+			require.NoError(t, err)
+			require.Zero(t, result.Total)
+			require.Empty(t, result.Items)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
 func TestSupplierProviderAuthAuditRepositoryListsFilteredHistory(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)

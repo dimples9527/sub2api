@@ -470,6 +470,14 @@
               <b>{{ authStatus.summary.login_success_count }} / {{ authStatus.summary.login_failure_count }}</b>
               <small>成功率 {{ authRateText(authStatus.summary.login_success_count, authStatus.summary.login_count) }}</small>
             </article>
+            <article class="sp-auth-kpi" :class="authRefreshToneClass(authStatus.summary)">
+              <div class="sp-auth-kpi-top">
+                <span>Token 刷新</span>
+                <i class="sp-auth-signal" aria-hidden="true"></i>
+              </div>
+              <b>{{ authStatus.summary.refresh_success_count }} / {{ authStatus.summary.refresh_failure_count }}</b>
+              <small>共 {{ authStatus.summary.refresh_count }} 次 · 成功率 {{ authRateText(authStatus.summary.refresh_success_count, authStatus.summary.refresh_count) }}</small>
+            </article>
             <article class="sp-auth-kpi tone-violet">
               <div class="sp-auth-kpi-top">
                 <span>缓存命中 / 未命中</span>
@@ -1102,6 +1110,8 @@ const authEventOptions: SelectOption[] = [
   { value: '', label: '全部事件' },
   { value: 'login_success', label: '登录成功' },
   { value: 'login_failed', label: '登录失败' },
+  { value: 'refresh_success', label: '刷新成功' },
+  { value: 'refresh_failed', label: '刷新失败' },
   { value: 'cache_hit', label: '缓存命中' },
   { value: 'cache_miss', label: '缓存未命中' },
   { value: 'cache_invalidated', label: '缓存失效' },
@@ -1651,6 +1661,7 @@ function authCacheLabel(status: string): string {
 function authEventLabel(value: string): string {
   return ({
     cache_hit: '缓存命中', cache_miss: '缓存未命中', login_success: '登录成功', login_failed: '登录失败',
+    refresh_success: '刷新成功', refresh_failed: '刷新失败',
     cache_invalidated: '缓存失效', cache_error: '缓存异常', success: '成功', failed: '失败', miss: '未命中',
     invalidated: '已失效', unavailable: '不可用',
   } as Record<string, string>)[value] || value || '—'
@@ -1675,6 +1686,15 @@ function authLoginToneClass(summary: { login_count: number; login_success_count:
   return 'tone-red'
 }
 
+function authRefreshToneClass(summary: { refresh_count: number; refresh_success_count: number; refresh_failure_count: number }): string {
+  if (!summary.refresh_count) return 'tone-slate'
+  if (summary.refresh_failure_count <= 0) return 'tone-green'
+  const rate = summary.refresh_success_count / summary.refresh_count
+  if (rate >= 0.8) return 'tone-green'
+  if (rate >= 0.5) return 'tone-amber'
+  return 'tone-red'
+}
+
 function authCacheToneClass(status: string): string {
   return ({
     cached: 'tone-green',
@@ -1687,9 +1707,11 @@ function authCacheToneClass(status: string): string {
 function authEventTone(value: string): string {
   return ({
     login_success: 'good',
+    refresh_success: 'good',
     success: 'good',
     cache_hit: 'info',
     login_failed: 'bad',
+    refresh_failed: 'bad',
     failed: 'bad',
     cache_error: 'bad',
     unavailable: 'bad',
@@ -3870,8 +3892,15 @@ function errorMessage(err: unknown, fallback: string): string {
 .sp-auth-kpi-grid,
 .sp-auth-meta-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.75rem;
+}
+
+.sp-auth-kpi-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.sp-auth-meta-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .sp-auth-kpi,

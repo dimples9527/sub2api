@@ -78,9 +78,12 @@ func newSupplierProviderAuthHandlerTestRouter(repo service.SupplierProviderAuthA
 func TestSupplierProviderAuthHandlerReturnsMaskedCacheStatus(t *testing.T) {
 	now := time.Now()
 	repo := &supplierProviderAuthHandlerRepoStub{summary: service.SupplierProviderAuthSummary{
-		LoginCount:        4,
-		LoginSuccessCount: 3,
-		LoginFailureCount: 1,
+		LoginCount:          4,
+		LoginSuccessCount:   3,
+		LoginFailureCount:   1,
+		RefreshCount:        6,
+		RefreshSuccessCount: 5,
+		RefreshFailureCount: 1,
 	}}
 	cache := &supplierProviderAuthHandlerTokenCacheStub{snapshot: service.SupplierProviderTokenCacheSnapshot{
 		Found: true,
@@ -103,6 +106,9 @@ func TestSupplierProviderAuthHandlerReturnsMaskedCacheStatus(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, int64(42), repo.statusID)
 	require.Contains(t, rec.Body.String(), `"login_count":4`)
+	require.Contains(t, rec.Body.String(), `"refresh_count":6`)
+	require.Contains(t, rec.Body.String(), `"refresh_success_count":5`)
+	require.Contains(t, rec.Body.String(), `"refresh_failure_count":1`)
 	require.Contains(t, rec.Body.String(), `"status":"cached"`)
 	require.Contains(t, rec.Body.String(), `"token_summary":"0123…cdef"`)
 	require.Contains(t, rec.Body.String(), `"cookie_present":true`)
@@ -150,4 +156,23 @@ func TestSupplierProviderAuthHandlerRejectsInvalidParameters(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, rec.Code, target)
 	}
 	require.Zero(t, repo.historyCalls)
+}
+
+func TestSupplierProviderAuthHandlerAllowsRefreshHistoryFilter(t *testing.T) {
+	repo := &supplierProviderAuthHandlerRepoStub{history: service.SupplierProviderAuthHistoryResult{
+		Items: []service.SupplierProviderAuthHistoryItem{{
+			ID: 9, ProviderID: 42, EventType: service.SupplierProviderAuthEventRefreshSuccess,
+			Source: service.SupplierProviderAuthSourceSync, Status: service.SupplierProviderAuthStatusSuccess,
+		}},
+		Total: 1, Page: 1, PageSize: 20,
+	}}
+	router := newSupplierProviderAuthHandlerTestRouter(repo, nil)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/providers/42/auth-history?event_type=refresh_success", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, service.SupplierProviderAuthEventRefreshSuccess, repo.historyParams.EventType)
+	require.Contains(t, rec.Body.String(), `"event_type":"refresh_success"`)
 }

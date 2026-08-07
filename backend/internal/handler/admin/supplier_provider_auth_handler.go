@@ -60,6 +60,8 @@ func isSupplierProviderAuthEventTypeForHandler(eventType service.SupplierProvide
 		service.SupplierProviderAuthEventCacheMiss,
 		service.SupplierProviderAuthEventLoginSuccess,
 		service.SupplierProviderAuthEventLoginFailed,
+		service.SupplierProviderAuthEventRefreshSuccess,
+		service.SupplierProviderAuthEventRefreshFailed,
 		service.SupplierProviderAuthEventCacheInvalidated,
 		service.SupplierProviderAuthEventCacheError:
 		return true

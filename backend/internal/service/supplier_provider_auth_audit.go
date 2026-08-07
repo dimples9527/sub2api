@@ -15,6 +15,8 @@ const (
 	SupplierProviderAuthEventCacheMiss        SupplierProviderAuthEventType = "cache_miss"
 	SupplierProviderAuthEventLoginSuccess     SupplierProviderAuthEventType = "login_success"
 	SupplierProviderAuthEventLoginFailed      SupplierProviderAuthEventType = "login_failed"
+	SupplierProviderAuthEventRefreshSuccess   SupplierProviderAuthEventType = "refresh_success"
+	SupplierProviderAuthEventRefreshFailed    SupplierProviderAuthEventType = "refresh_failed"
 	SupplierProviderAuthEventCacheInvalidated SupplierProviderAuthEventType = "cache_invalidated"
 	SupplierProviderAuthEventCacheError       SupplierProviderAuthEventType = "cache_error"
 
@@ -93,6 +95,9 @@ type SupplierProviderAuthSummary struct {
 	LoginCount           int64      `json:"login_count"`
 	LoginSuccessCount    int64      `json:"login_success_count"`
 	LoginFailureCount    int64      `json:"login_failure_count"`
+	RefreshCount         int64      `json:"refresh_count"`
+	RefreshSuccessCount  int64      `json:"refresh_success_count"`
+	RefreshFailureCount  int64      `json:"refresh_failure_count"`
 	CacheHitCount        int64      `json:"cache_hit_count"`
 	CacheMissCount       int64      `json:"cache_miss_count"`
 	LastLoginAt          *time.Time `json:"last_login_at,omitempty"`
@@ -304,6 +309,14 @@ func supplierProviderAuthTokenUsable(token SupplierProviderAuthToken, now time.T
 	return accessToken != "" || cookiePresent
 }
 
+func supplierProviderAuthAuditToken(token SupplierProviderAuthToken) SupplierProviderAuthToken {
+	token.RefreshToken = ""
+	if strings.TrimSpace(token.CookieHeader) != "" {
+		token.CookieHeader = "present"
+	}
+	return token
+}
+
 func normalizeSupplierProviderAuthEvent(event SupplierProviderAuthEventInput) SupplierProviderAuthEventRecord {
 	startedAt := event.StartedAt
 	if startedAt.IsZero() {
@@ -323,11 +336,11 @@ func normalizeSupplierProviderAuthEvent(event SupplierProviderAuthEventInput) Su
 	status := event.Status
 	if status == "" {
 		switch event.EventType {
-		case SupplierProviderAuthEventCacheHit, SupplierProviderAuthEventLoginSuccess:
+		case SupplierProviderAuthEventCacheHit, SupplierProviderAuthEventLoginSuccess, SupplierProviderAuthEventRefreshSuccess:
 			status = SupplierProviderAuthStatusSuccess
 		case SupplierProviderAuthEventCacheMiss:
 			status = SupplierProviderAuthStatusMiss
-		case SupplierProviderAuthEventLoginFailed:
+		case SupplierProviderAuthEventLoginFailed, SupplierProviderAuthEventRefreshFailed:
 			status = SupplierProviderAuthStatusFailed
 		case SupplierProviderAuthEventCacheInvalidated:
 			status = SupplierProviderAuthStatusInvalidated
@@ -425,7 +438,7 @@ func positiveDurationSeconds(value time.Duration) int64 {
 
 var supplierProviderAuthAuthorizationPattern = regexp.MustCompile(`(?i)(authorization\s*[:=]\s*)(?:bearer\s+)?[^\s,;]+`)
 var supplierProviderAuthCookiePattern = regexp.MustCompile(`(?i)(cookie(?:[_-]?header)?\s*[:=]\s*)[^\r\n]+`)
-var supplierProviderAuthSecretPattern = regexp.MustCompile(`(?i)(["']?(?:access[_-]?token|refresh[_-]?token|token|password|secret|api[_-]?key)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}]+)`)
+var supplierProviderAuthSecretPattern = regexp.MustCompile(`(?i)(["']?(?:access[_-]?token|refresh[_-]?token|new[_-]?api[_-]?refresh|token|password|secret|api[_-]?key)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}]+)`)
 var supplierProviderAuthURLPattern = regexp.MustCompile(`(?i)(?:https?|redis)://[^\s,;]+`)
 
 func sanitizeSupplierProviderAuthError(err error) string {
@@ -441,6 +454,13 @@ func sanitizeSupplierProviderAuthError(err error) string {
 		message = message[:supplierProviderAuthErrorLimit]
 	}
 	return message
+}
+
+func supplierProviderAuthAuditError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return errors.New(sanitizeSupplierProviderAuthError(err))
 }
 
 func supplierProviderAuthHTTPStatus(err error) *int {

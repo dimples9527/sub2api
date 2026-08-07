@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -21,11 +22,16 @@ import (
 
 const (
 	defaultSupplierNewAPILoginPath    = "/api/user/login"
+	defaultSupplierNewAPIRefreshPath  = "/api/user/auth/refresh"
 	defaultSupplierNewAPIKeysPath     = "/api/token/"
 	defaultSupplierNewAPIGroupsPath   = "/api/group/"
 	defaultSupplierNewAPIBalancePath  = "/api/user/self"
 	defaultSupplierNewAPIUsageCostURL = "/api/log/self/stat?type=0&token_name=&model_name=&start_timestamp={start_timestamp}&end_timestamp={end_timestamp}&group="
 	supplierNewAPIQuotaUnit           = 500000
+
+	supplierNewAPISessionRefreshThreshold = 5 * time.Minute
+	supplierNewAPIDefaultAccessTokenTTL   = 14 * time.Minute
+	supplierNewAPIRefreshCookieName       = "new_api_refresh"
 )
 
 type SupplierNewAPIClient struct {
@@ -48,8 +54,22 @@ func (c *SupplierNewAPIClient) SetAuthAuditor(auditor SupplierProviderAuthAudito
 type supplierNewAPISession struct {
 	UserID       int64
 	AccessToken  string
+	RefreshToken string
 	CookieHeader string
 	ExpiresAt    time.Time
+}
+
+type supplierNewAPIAuthResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    struct {
+		ID              int64  `json:"id"`
+		AccessToken     string `json:"access_token"`
+		AccessExpiresAt any    `json:"access_expires_at"`
+		User            struct {
+			ID int64 `json:"id"`
+		} `json:"user"`
+	} `json:"data"`
 }
 
 type supplierNewAPIGroupRatio struct {
@@ -116,24 +136,40 @@ func (c *SupplierNewAPIClient) FetchAccounts(ctx context.Context, provider *Supp
 		keysRaw, status, err := c.authenticatedGet(ctx, provider, session, keysPath, "accounts")
 		if err != nil {
 			if attempt == 0 && supplierNewAPIAuthFailure(status, keysRaw, err) {
-				c.clearSession(ctx, provider)
+				if retryErr := c.recoverSessionAfterAuthFailure(ctx, provider, password, session); retryErr != nil {
+					return nil, retryErr
+				}
 				lastErr = err
 				continue
+			}
+			if supplierNewAPIAuthFailure(status, keysRaw, err) {
+				c.clearSession(ctx, provider)
+				return nil, wrapSupplierProviderAuthFailure(fmt.Errorf("supplier newapi accounts failed after auth retry: %w", err))
 			}
 			return nil, err
 		}
 		groupsRaw, groupStatus, err := c.authenticatedGet(ctx, provider, session, groupsPath, "groups")
 		if err != nil {
 			if attempt == 0 && supplierNewAPIAuthFailure(groupStatus, groupsRaw, err) {
-				c.clearSession(ctx, provider)
+				if retryErr := c.recoverSessionAfterAuthFailure(ctx, provider, password, session); retryErr != nil {
+					return nil, retryErr
+				}
 				lastErr = err
 				continue
+			}
+			if supplierNewAPIAuthFailure(groupStatus, groupsRaw, err) {
+				c.clearSession(ctx, provider)
+				return nil, wrapSupplierProviderAuthFailure(fmt.Errorf("supplier newapi accounts failed after auth retry: %w", err))
 			}
 			return nil, err
 		}
 		accounts, parseErr := parseSupplierNewAPIAccounts(keysRaw, groupsRaw)
 		c.annotateEndpointParse(provider.ID, "accounts", map[string]any{"count": len(accounts)}, parseErr)
 		return accounts, parseErr
+	}
+	if supplierNewAPIAuthFailure(0, nil, lastErr) {
+		c.clearSession(ctx, provider)
+		return nil, wrapSupplierProviderAuthFailure(fmt.Errorf("supplier newapi accounts failed after auth retry: %w", lastErr))
 	}
 	return nil, fmt.Errorf("supplier newapi accounts failed after auth retry: %w", lastErr)
 }
@@ -149,15 +185,25 @@ func (c *SupplierNewAPIClient) FetchGroups(ctx context.Context, provider *Suppli
 		raw, status, err := c.authenticatedGet(ctx, provider, session, groupsPath, "groups")
 		if err != nil {
 			if attempt == 0 && supplierNewAPIAuthFailure(status, raw, err) {
-				c.clearSession(ctx, provider)
+				if retryErr := c.recoverSessionAfterAuthFailure(ctx, provider, password, session); retryErr != nil {
+					return nil, retryErr
+				}
 				lastErr = err
 				continue
+			}
+			if supplierNewAPIAuthFailure(status, raw, err) {
+				c.clearSession(ctx, provider)
+				return nil, wrapSupplierProviderAuthFailure(fmt.Errorf("supplier newapi groups failed after auth retry: %w", err))
 			}
 			return nil, err
 		}
 		groups, parseErr := parseSupplierNewAPIGroups(raw)
 		c.annotateEndpointParse(provider.ID, "groups", map[string]any{"count": len(groups)}, parseErr)
 		return groups, parseErr
+	}
+	if supplierNewAPIAuthFailure(0, nil, lastErr) {
+		c.clearSession(ctx, provider)
+		return nil, wrapSupplierProviderAuthFailure(fmt.Errorf("supplier newapi groups failed after auth retry: %w", lastErr))
 	}
 	return nil, fmt.Errorf("supplier newapi groups failed after auth retry: %w", lastErr)
 }
@@ -194,10 +240,6 @@ func (c *SupplierNewAPIClient) FetchCost(ctx context.Context, provider *Supplier
 func (c *SupplierNewAPIClient) TestEndpoint(ctx context.Context, provider *SupplierProvider, password string, scope string) (SupplierProviderEndpointTestResult, error) {
 	scope = strings.TrimSpace(scope)
 	result := SupplierProviderEndpointTestResult{ProviderID: provider.ID, Scope: scope, Attempts: []SupplierProviderEndpointTestAttempt{}}
-	session, err := c.ensureSession(ctx, provider, password)
-	if err != nil {
-		return result, err
-	}
 	endpoints := []string{}
 	switch scope {
 	case SupplierSyncScopeAccounts:
@@ -213,16 +255,39 @@ func (c *SupplierNewAPIClient) TestEndpoint(ctx context.Context, provider *Suppl
 	}
 	for _, endpoint := range endpoints {
 		startedAt := time.Now()
-		raw, status, err := c.authenticatedGet(ctx, provider, session, endpoint, scope)
+		var raw []byte
+		var status int
+		var requestErr error
+		for requestAttempt := 0; requestAttempt < 2; requestAttempt++ {
+			session, err := c.ensureSession(ctx, provider, password)
+			if err != nil {
+				return result, err
+			}
+			raw, status, requestErr = c.authenticatedGet(ctx, provider, session, endpoint, scope)
+			if requestErr == nil {
+				break
+			}
+			if requestAttempt == 0 && supplierNewAPIAuthFailure(status, raw, requestErr) {
+				if recoverErr := c.recoverSessionAfterAuthFailure(ctx, provider, password, session); recoverErr != nil {
+					return result, recoverErr
+				}
+				continue
+			}
+			if supplierNewAPIAuthFailure(status, raw, requestErr) {
+				c.clearSession(ctx, provider)
+				requestErr = wrapSupplierProviderAuthFailure(fmt.Errorf("supplier newapi %s failed after auth retry: %w", scope, requestErr))
+			}
+			break
+		}
 		attempt := SupplierProviderEndpointTestAttempt{
 			Endpoint:        endpoint,
 			HTTPStatus:      status,
 			DurationMS:      time.Since(startedAt).Milliseconds(),
 			ResponseBytes:   len(raw),
 			ResponseSummary: supplierSub2APISafeResponseText(raw, supplierSub2APITestResponseSummaryLimit),
-			Error:           supplierSub2APIErrorText(err),
+			Error:           supplierSub2APIErrorText(requestErr),
 		}
-		if err == nil {
+		if requestErr == nil {
 			attempt.ParsedData, attempt.ParseError = supplierNewAPIParsedDiagnostic(scope, raw, provider)
 		}
 		result.Attempts = append(result.Attempts, attempt)
@@ -238,7 +303,6 @@ func (c *SupplierNewAPIClient) TestEndpoint(ctx context.Context, provider *Suppl
 	}
 	return result, nil
 }
-
 func (c *SupplierNewAPIClient) LastEndpointResult(providerID int64, scope string) *SupplierProviderEndpointResult {
 	c.endpointResultMu.Lock()
 	defer c.endpointResultMu.Unlock()
@@ -261,7 +325,9 @@ func (c *SupplierNewAPIClient) fetchJSONWithRetry(ctx context.Context, provider 
 			return raw, nil
 		}
 		if attempt == 0 && supplierNewAPIAuthFailure(status, raw, err) {
-			c.clearSession(ctx, provider)
+			if retryErr := c.recoverSessionAfterAuthFailure(ctx, provider, password, session); retryErr != nil {
+				return nil, retryErr
+			}
 			lastErr = err
 			continue
 		}
@@ -313,7 +379,7 @@ func (c *SupplierNewAPIClient) ensureSession(ctx context.Context, provider *Supp
 		}
 		SupplierSyncProgressOK(ctx, SupplierSyncProgressStageSession, "上游登录会话已准备")
 	}()
-	if session, ok := c.cachedSession(provider); ok {
+	if session, ok := c.cachedSession(provider); ok && !supplierNewAPISessionNeedsRefresh(session, time.Now()) {
 		token := supplierNewAPISessionToken(session)
 		c.recordAuthEvent(ctx, provider, SupplierProviderAuthEventInput{EventType: SupplierProviderAuthEventCacheHit, Token: &token})
 		return session, nil
@@ -323,27 +389,73 @@ func (c *SupplierNewAPIClient) ensureSession(ctx context.Context, provider *Supp
 			EventType: SupplierProviderAuthEventCacheError,
 			Error:     errors.New("supplier provider token cache is unavailable"),
 		})
-		return c.loginAndStore(ctx, provider, password)
+		return c.ensureSessionWithoutCache(ctx, provider, password)
 	}
+	return c.ensureSessionFromCache(ctx, provider, password)
+}
 
+func (c *SupplierNewAPIClient) ensureSessionWithoutCache(ctx context.Context, provider *SupplierProvider, password string) (supplierNewAPISession, error) {
+	if session, ok := c.cachedSession(provider); ok {
+		token := supplierNewAPISessionToken(session)
+		c.recordAuthEvent(ctx, provider, SupplierProviderAuthEventInput{EventType: SupplierProviderAuthEventCacheHit, Token: &token})
+		if refreshed, err := c.refreshSessionWithAudit(ctx, provider, session); err == nil {
+			c.storeSession(provider, refreshed)
+			return refreshed, nil
+		} else {
+			logger.LegacyPrintf("supplier_newapi_client", "supplier newapi refresh failed provider_id=%d provider_code=%s, fallback to login: %v", provider.ID, provider.Code, err)
+			c.clearSession(ctx, provider)
+		}
+	}
+	return c.loginAndStore(ctx, provider, password)
+}
+
+func (c *SupplierNewAPIClient) ensureSessionFromCache(ctx context.Context, provider *SupplierProvider, password string) (supplierNewAPISession, error) {
 	if token, found, err := c.tokenCache.Get(ctx, provider.ID); err != nil {
 		return supplierNewAPISession{}, c.cacheFailure(ctx, provider, "get", err)
 	} else if found {
 		if session, ok := supplierNewAPISessionFromToken(token); ok {
 			c.recordAuthEvent(ctx, provider, SupplierProviderAuthEventInput{EventType: SupplierProviderAuthEventCacheHit, Token: &token})
 			c.storeSession(provider, session)
-			return session, nil
+			if !supplierNewAPISessionNeedsRefresh(session, time.Now()) {
+				return session, nil
+			}
 		}
 	}
 	c.recordAuthEvent(ctx, provider, SupplierProviderAuthEventInput{EventType: SupplierProviderAuthEventCacheMiss})
+	return c.acquireSessionLock(ctx, provider, password)
+}
 
+func (c *SupplierNewAPIClient) acquireSessionLock(ctx context.Context, provider *SupplierProvider, password string) (supplierNewAPISession, error) {
+	return c.acquireSessionLockMode(ctx, provider, password, false, supplierNewAPISession{})
+}
+
+func (c *SupplierNewAPIClient) recoverSessionAfterAuthFailure(ctx context.Context, provider *SupplierProvider, password string, failedSession supplierNewAPISession) error {
+	if strings.TrimSpace(failedSession.RefreshToken) == "" {
+		c.clearSession(ctx, provider)
+		return nil
+	}
+	if c.tokenCache == nil {
+		if refreshed, err := c.refreshSessionWithAudit(ctx, provider, failedSession); err == nil {
+			c.storeSession(provider, refreshed)
+			return nil
+		} else {
+			logger.LegacyPrintf("supplier_newapi_client", "supplier newapi refresh after auth failure failed provider_id=%d provider_code=%s, fallback to login: %v", provider.ID, provider.Code, err)
+			c.clearSession(ctx, provider)
+			return nil
+		}
+	}
+	_, err := c.acquireSessionLockMode(ctx, provider, password, true, failedSession)
+	return err
+}
+
+func (c *SupplierNewAPIClient) acquireSessionLockMode(ctx context.Context, provider *SupplierProvider, password string, forceRefresh bool, fallbackSession supplierNewAPISession) (supplierNewAPISession, error) {
 	owner := uuid.NewString()
 	acquired, err := c.tokenCache.TryAcquireLoginLock(ctx, provider.ID, owner, supplierSub2APILoginLockTTL)
 	if err != nil {
 		return supplierNewAPISession{}, c.cacheFailure(ctx, provider, "acquire login lock", err)
 	}
 	if acquired {
-		return c.loginAndCache(ctx, provider, password, owner)
+		return c.refreshOrLoginAndCache(ctx, provider, password, owner, forceRefresh, fallbackSession)
 	}
 
 	waitCtx, cancel := context.WithTimeout(ctx, supplierSub2APILoginLockWait)
@@ -359,9 +471,15 @@ func (c *SupplierNewAPIClient) ensureSession(ctx context.Context, provider *Supp
 				return supplierNewAPISession{}, c.cacheFailure(ctx, provider, "poll token", err)
 			} else if found {
 				if session, ok := supplierNewAPISessionFromToken(token); ok {
-					c.recordAuthEvent(ctx, provider, SupplierProviderAuthEventInput{EventType: SupplierProviderAuthEventCacheHit, Token: &token})
-					c.storeSession(provider, session)
-					return session, nil
+					canReuse := !supplierNewAPISessionNeedsRefresh(session, time.Now())
+					if forceRefresh {
+						canReuse = !supplierNewAPISessionAuthEqual(session, fallbackSession) && canReuse
+					}
+					if canReuse {
+						c.recordAuthEvent(ctx, provider, SupplierProviderAuthEventInput{EventType: SupplierProviderAuthEventCacheHit, Token: &token})
+						c.storeSession(provider, session)
+						return session, nil
+					}
 				}
 			}
 			acquired, err := c.tokenCache.TryAcquireLoginLock(waitCtx, provider.ID, owner, supplierSub2APILoginLockTTL)
@@ -369,12 +487,11 @@ func (c *SupplierNewAPIClient) ensureSession(ctx context.Context, provider *Supp
 				return supplierNewAPISession{}, c.cacheFailure(ctx, provider, "retry login lock", err)
 			}
 			if acquired {
-				return c.loginAndCache(ctx, provider, password, owner)
+				return c.refreshOrLoginAndCache(ctx, provider, password, owner, forceRefresh, fallbackSession)
 			}
 		}
 	}
 }
-
 func (c *SupplierNewAPIClient) cachedSession(provider *SupplierProvider) (supplierNewAPISession, bool) {
 	c.sessionMu.Lock()
 	defer c.sessionMu.Unlock()
@@ -420,20 +537,53 @@ func (c *SupplierNewAPIClient) loginAndStore(ctx context.Context, provider *Supp
 	return session, nil
 }
 
-func (c *SupplierNewAPIClient) loginAndCache(ctx context.Context, provider *SupplierProvider, password, owner string) (supplierNewAPISession, error) {
+func (c *SupplierNewAPIClient) refreshOrLoginAndCache(ctx context.Context, provider *SupplierProvider, password, owner string, forceRefresh bool, fallbackSession supplierNewAPISession) (supplierNewAPISession, error) {
 	defer func() {
 		if err := c.tokenCache.ReleaseLoginLock(context.Background(), provider.ID, owner); err != nil {
 			c.logCacheError(provider, "release login lock", err)
 		}
 	}()
 
+	var candidate supplierNewAPISession
+	foundCandidate := false
 	if token, found, err := c.tokenCache.Get(ctx, provider.ID); err != nil {
 		return supplierNewAPISession{}, c.cacheFailure(ctx, provider, "recheck token", err)
 	} else if found {
 		if session, ok := supplierNewAPISessionFromToken(token); ok {
-			c.recordAuthEvent(ctx, provider, SupplierProviderAuthEventInput{EventType: SupplierProviderAuthEventCacheHit, Token: &token})
-			c.storeSession(provider, session)
-			return session, nil
+			candidate = session
+			foundCandidate = true
+			canReuse := !supplierNewAPISessionNeedsRefresh(session, time.Now())
+			if forceRefresh {
+				canReuse = !supplierNewAPISessionAuthEqual(session, fallbackSession) && canReuse
+			}
+			if canReuse {
+				c.recordAuthEvent(ctx, provider, SupplierProviderAuthEventInput{EventType: SupplierProviderAuthEventCacheHit, Token: &token})
+				c.storeSession(provider, session)
+				return session, nil
+			}
+		}
+	}
+	if !foundCandidate && forceRefresh && supplierNewAPISessionUsable(fallbackSession) {
+		candidate = fallbackSession
+		foundCandidate = true
+	}
+	if foundCandidate {
+		shouldRefresh := supplierNewAPISessionNeedsRefresh(candidate, time.Now())
+		if forceRefresh && supplierNewAPISessionAuthEqual(candidate, fallbackSession) {
+			shouldRefresh = true
+		}
+		if shouldRefresh && strings.TrimSpace(candidate.RefreshToken) != "" {
+			if refreshed, refreshErr := c.refreshSessionWithAudit(ctx, provider, candidate); refreshErr == nil {
+				refreshedToken := supplierNewAPISessionToken(refreshed)
+				if err := c.tokenCache.Set(ctx, provider.ID, refreshedToken, supplierNewAPISessionTTL(refreshed)); err != nil {
+					return supplierNewAPISession{}, c.cacheFailure(ctx, provider, "set refreshed token", err)
+				}
+				c.storeSession(provider, refreshed)
+				return refreshed, nil
+			} else {
+				logger.LegacyPrintf("supplier_newapi_client", "supplier newapi refresh failed provider_id=%d provider_code=%s, fallback to login: %v", provider.ID, provider.Code, refreshErr)
+				c.clearSession(ctx, provider)
+			}
 		}
 	}
 
@@ -447,7 +597,6 @@ func (c *SupplierNewAPIClient) loginAndCache(ctx context.Context, provider *Supp
 	c.storeSession(provider, session)
 	return session, nil
 }
-
 func (c *SupplierNewAPIClient) loginWithAudit(ctx context.Context, provider *SupplierProvider, password string) (supplierNewAPISession, error) {
 	SupplierSyncProgress(ctx, SupplierSyncProgressStageLogin, "正在登录上游", nil)
 	startedAt := time.Now()
@@ -481,9 +630,22 @@ func (c *SupplierNewAPIClient) cacheFailure(ctx context.Context, provider *Suppl
 	return wrapped
 }
 
+func (c *SupplierNewAPIClient) logCacheError(provider *SupplierProvider, action string, err error) {
+	if err == nil || provider == nil {
+		return
+	}
+	logger.LegacyPrintf("supplier_newapi_client", "supplier provider cache %s failed provider_id=%d provider_code=%s err=%v", action, provider.ID, provider.Code, err)
+}
 func (c *SupplierNewAPIClient) recordAuthEvent(ctx context.Context, provider *SupplierProvider, event SupplierProviderAuthEventInput) {
 	if c == nil || c.authAuditor == nil || provider == nil {
 		return
+	}
+	if event.Token != nil {
+		token := supplierProviderAuthAuditToken(*event.Token)
+		event.Token = &token
+	}
+	if event.Error != nil {
+		event.Error = supplierProviderAuthAuditError(event.Error)
 	}
 	event.ProviderID = provider.ID
 	if event.Source == "" {
@@ -497,18 +659,18 @@ func (c *SupplierNewAPIClient) recordAuthEvent(ctx context.Context, provider *Su
 	}
 }
 
-func (c *SupplierNewAPIClient) logCacheError(provider *SupplierProvider, action string, err error) {
-	if err == nil || provider == nil {
-		return
-	}
-	logger.LegacyPrintf("supplier_newapi_client", "supplier provider cache %s failed provider_id=%d provider_code=%s err=%v", action, provider.ID, provider.Code, err)
-}
-
 func supplierNewAPISessionFromToken(token SupplierProviderAuthToken) (supplierNewAPISession, bool) {
+	cookieHeader := strings.TrimSpace(token.CookieHeader)
+	refreshToken := strings.TrimSpace(token.RefreshToken)
+	if refreshToken == "" {
+		refreshToken = supplierNewAPICookieValue(cookieHeader, supplierNewAPIRefreshCookieName)
+	}
+	cookieHeader = supplierNewAPICookieHeaderWithout(cookieHeader, supplierNewAPIRefreshCookieName)
 	session := supplierNewAPISession{
 		UserID:       token.UserID,
 		AccessToken:  strings.TrimSpace(token.AccessToken),
-		CookieHeader: strings.TrimSpace(token.CookieHeader),
+		RefreshToken: refreshToken,
+		CookieHeader: cookieHeader,
 		ExpiresAt:    token.ExpiresAt,
 	}
 	if !supplierNewAPISessionUsable(session) {
@@ -520,24 +682,124 @@ func supplierNewAPISessionFromToken(token SupplierProviderAuthToken) (supplierNe
 func supplierNewAPISessionToken(session supplierNewAPISession) SupplierProviderAuthToken {
 	return SupplierProviderAuthToken{
 		AccessToken:  strings.TrimSpace(session.AccessToken),
+		RefreshToken: strings.TrimSpace(session.RefreshToken),
 		TokenType:    "Bearer",
 		ExpiresAt:    session.ExpiresAt,
 		UserID:       session.UserID,
-		CookieHeader: strings.TrimSpace(session.CookieHeader),
+		CookieHeader: supplierNewAPICookieHeaderWithout(strings.TrimSpace(session.CookieHeader), supplierNewAPIRefreshCookieName),
 	}
 }
 
 func supplierNewAPISessionTTL(session supplierNewAPISession) time.Duration {
-	// 不再按过期时间设置 Redis TTL；会话长期缓存，接口鉴权失败后再重登。
+	// Redis 会话不按 Access Token 的短期过期时间设置 TTL，续期由客户端主动完成。
 	_ = session
 	return 0
 }
 
 func supplierNewAPISessionUsable(session supplierNewAPISession) bool {
-	// 不再根据 ExpiresAt 主动判定失效，仅校验会话字段是否完整。
 	return session.UserID > 0 && supplierNewAPIHasSessionAuth(session)
 }
 
+func supplierNewAPISessionAuthEqual(left, right supplierNewAPISession) bool {
+	if left.UserID != right.UserID {
+		return false
+	}
+	leftAccessToken := strings.TrimSpace(left.AccessToken)
+	rightAccessToken := strings.TrimSpace(right.AccessToken)
+	if leftAccessToken != "" || rightAccessToken != "" {
+		return leftAccessToken == rightAccessToken
+	}
+	return strings.TrimSpace(left.CookieHeader) == strings.TrimSpace(right.CookieHeader)
+}
+
+func supplierNewAPISessionNeedsRefresh(session supplierNewAPISession, now time.Time) bool {
+	if strings.TrimSpace(session.AccessToken) == "" || strings.TrimSpace(session.RefreshToken) == "" {
+		return false
+	}
+	if session.ExpiresAt.IsZero() {
+		// 兼容旧缓存：旧版本没有保存过期时间，但如果已经有 refresh token，首次使用时主动刷新一次。
+		return true
+	}
+	return !session.ExpiresAt.After(now.Add(supplierNewAPISessionRefreshThreshold))
+}
+func supplierNewAPIAccessTokenExpiresAt(raw any, hasRefreshToken bool) time.Time {
+	if expiresAt, ok := supplierNewAPITimestamp(raw); ok {
+		return expiresAt
+	}
+	if hasRefreshToken {
+		return time.Now().Add(supplierNewAPIDefaultAccessTokenTTL)
+	}
+	return time.Time{}
+}
+
+func supplierNewAPITimestamp(raw any) (time.Time, bool) {
+	var value float64
+	switch v := raw.(type) {
+	case json.Number:
+		parsed, err := strconv.ParseFloat(string(v), 64)
+		if err != nil {
+			return time.Time{}, false
+		}
+		value = parsed
+	case float64:
+		value = v
+	case float32:
+		value = float64(v)
+	case int:
+		value = float64(v)
+	case int8:
+		value = float64(v)
+	case int16:
+		value = float64(v)
+	case int32:
+		value = float64(v)
+	case int64:
+		value = float64(v)
+	case uint:
+		value = float64(v)
+	case uint8:
+		value = float64(v)
+	case uint16:
+		value = float64(v)
+	case uint32:
+		value = float64(v)
+	case uint64:
+		value = float64(v)
+	case string:
+		text := strings.TrimSpace(v)
+		if text == "" {
+			return time.Time{}, false
+		}
+		if parsed, err := time.Parse(time.RFC3339, text); err == nil {
+			return parsed, true
+		}
+		parsed, err := strconv.ParseFloat(text, 64)
+		if err != nil {
+			return time.Time{}, false
+		}
+		value = parsed
+	case time.Time:
+		if v.IsZero() {
+			return time.Time{}, false
+		}
+		return v, true
+	default:
+		return time.Time{}, false
+	}
+	if math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 {
+		return time.Time{}, false
+	}
+	if value >= 1e12 {
+		value /= 1000
+	}
+	seconds := math.Floor(value)
+	nanoseconds := math.Round((value - seconds) * float64(time.Second))
+	if nanoseconds >= float64(time.Second) {
+		seconds++
+		nanoseconds -= float64(time.Second)
+	}
+	return time.Unix(int64(seconds), int64(nanoseconds)), true
+}
 func (c *SupplierNewAPIClient) login(ctx context.Context, provider *SupplierProvider, password string) (supplierNewAPISession, error) {
 	loginPath := strings.TrimSpace(provider.LoginURL)
 	if loginPath == "" {
@@ -573,18 +835,7 @@ func (c *SupplierNewAPIClient) login(ctx context.Context, provider *SupplierProv
 		}
 		return supplierNewAPISession{}, loginErr
 	}
-	var resp struct {
-		Success bool   `json:"success"`
-		Message string `json:"message"`
-		Data    struct {
-			ID              int64  `json:"id"`
-			AccessToken     string `json:"access_token"`
-			AccessExpiresAt any    `json:"access_expires_at"`
-			User            struct {
-				ID int64 `json:"id"`
-			} `json:"user"`
-		} `json:"data"`
-	}
+	var resp supplierNewAPIAuthResponse
 	if err := json.Unmarshal(raw, &resp); err != nil {
 		return supplierNewAPISession{}, fmt.Errorf("decode supplier newapi login response: %w", err)
 	}
@@ -595,15 +846,22 @@ func (c *SupplierNewAPIClient) login(ctx context.Context, provider *SupplierProv
 		}
 		return supplierNewAPISession{}, loginErr
 	}
-	// 登录成功后不记录固定过期时间，由调用侧在鉴权失败时清理缓存。
+	refreshToken := supplierNewAPICookieValueFromCookies(cookies, supplierNewAPIRefreshCookieName)
+	cookieHeader := supplierNewAPICookiesHeaderExcept(cookies, supplierNewAPIRefreshCookieName)
 	if accessToken := strings.TrimSpace(resp.Data.AccessToken); accessToken != "" {
-		if resp.Data.User.ID <= 0 {
+		userID := resp.Data.User.ID
+		if userID <= 0 {
+			userID = resp.Data.ID
+		}
+		if userID <= 0 {
 			return supplierNewAPISession{}, fmt.Errorf("supplier newapi login failed: missing user id")
 		}
 		return supplierNewAPISession{
-			UserID:       resp.Data.User.ID,
+			UserID:       userID,
 			AccessToken:  accessToken,
-			CookieHeader: supplierNewAPICookiesHeader(cookies),
+			RefreshToken: refreshToken,
+			CookieHeader: cookieHeader,
+			ExpiresAt:    supplierNewAPIAccessTokenExpiresAt(resp.Data.AccessExpiresAt, refreshToken != ""),
 		}, nil
 	}
 	userID := resp.Data.User.ID
@@ -613,13 +871,114 @@ func (c *SupplierNewAPIClient) login(ctx context.Context, provider *SupplierProv
 	if userID <= 0 {
 		return supplierNewAPISession{}, fmt.Errorf("supplier newapi login failed: missing user id")
 	}
-	cookieHeader := supplierNewAPICookiesHeader(cookies)
 	if cookieHeader == "" {
 		return supplierNewAPISession{}, fmt.Errorf("supplier newapi login failed: missing cookie")
 	}
 	return supplierNewAPISession{UserID: userID, CookieHeader: cookieHeader}, nil
 }
 
+func (c *SupplierNewAPIClient) refreshSessionWithAudit(ctx context.Context, provider *SupplierProvider, session supplierNewAPISession) (supplierNewAPISession, error) {
+	startedAt := time.Now()
+	refreshed, err := c.refreshSession(ctx, provider, session)
+	event := SupplierProviderAuthEventInput{
+		EventType:  SupplierProviderAuthEventRefreshSuccess,
+		StartedAt:  startedAt,
+		FinishedAt: time.Now(),
+		HTTPStatus: supplierProviderAuthHTTPStatus(err),
+		Error:      err,
+	}
+	if err != nil {
+		event.EventType = SupplierProviderAuthEventRefreshFailed
+		token := supplierNewAPISessionToken(session)
+		event.Token = &token
+	} else {
+		token := supplierNewAPISessionToken(refreshed)
+		event.Token = &token
+	}
+	c.recordAuthEvent(ctx, provider, event)
+	return refreshed, err
+}
+
+func (c *SupplierNewAPIClient) refreshSession(ctx context.Context, provider *SupplierProvider, session supplierNewAPISession) (supplierNewAPISession, error) {
+	refreshToken := strings.TrimSpace(session.RefreshToken)
+	if refreshToken == "" {
+		return supplierNewAPISession{}, fmt.Errorf("supplier newapi refresh failed: missing refresh token")
+	}
+	raw, status, cookies, err := c.doRefresh(ctx, provider, session.UserID, refreshToken)
+	if err != nil {
+		return supplierNewAPISession{}, err
+	}
+	if status < 200 || status >= 300 {
+		return supplierNewAPISession{}, supplierSub2APIHTTPError("newapi refresh", status, raw)
+	}
+	var resp supplierNewAPIAuthResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return supplierNewAPISession{}, fmt.Errorf("decode supplier newapi refresh response: %w", err)
+	}
+	if !resp.Success {
+		refreshErr := fmt.Errorf("supplier newapi refresh failed: %s", firstSupplierSub2APIString(resp.Message, "unknown error"))
+		return supplierNewAPISession{}, supplierProviderAuthAuditError(refreshErr)
+	}
+	accessToken := strings.TrimSpace(resp.Data.AccessToken)
+	if accessToken == "" {
+		return supplierNewAPISession{}, fmt.Errorf("supplier newapi refresh failed: missing access token")
+	}
+	userID := resp.Data.User.ID
+	if userID <= 0 {
+		userID = resp.Data.ID
+	}
+	if userID <= 0 {
+		userID = session.UserID
+	}
+	if userID <= 0 {
+		return supplierNewAPISession{}, fmt.Errorf("supplier newapi refresh failed: missing user id")
+	}
+	if rotated := supplierNewAPICookieValueFromCookies(cookies, supplierNewAPIRefreshCookieName); rotated != "" {
+		refreshToken = rotated
+	}
+	return supplierNewAPISession{
+		UserID:       userID,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		CookieHeader: supplierNewAPICookieHeaderWithout(strings.TrimSpace(session.CookieHeader), supplierNewAPIRefreshCookieName),
+		ExpiresAt:    supplierNewAPIAccessTokenExpiresAt(resp.Data.AccessExpiresAt, true),
+	}, nil
+}
+
+func (c *SupplierNewAPIClient) doRefresh(ctx context.Context, provider *SupplierProvider, userID int64, refreshToken string) ([]byte, int, []*http.Cookie, error) {
+	target, err := supplierSub2APIURL(provider.BaseURL, defaultSupplierNewAPIRefreshPath)
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), nil)
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", supplierNewAPIRefreshCookieName+"="+strings.TrimSpace(refreshToken))
+	if userID > 0 {
+		req.Header.Set("New-Api-User", strconv.FormatInt(userID, 10))
+	}
+	httpClient := *c.httpClient
+	originHost := target.Host
+	httpClient.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		if len(via) > 0 && !strings.EqualFold(next.URL.Host, originHost) {
+			return fmt.Errorf("supplier newapi redirect to different host rejected")
+		}
+		return nil
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("supplier newapi refresh request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, err := readSupplierSub2APIResponse(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, resp.Cookies(), err
+	}
+	return raw, resp.StatusCode, resp.Cookies(), nil
+}
 func (c *SupplierNewAPIClient) doLogin(ctx context.Context, provider *SupplierProvider, path string, body io.Reader) ([]byte, int, []*http.Cookie, error) {
 	target, err := supplierSub2APIURL(provider.BaseURL, path)
 	if err != nil {
@@ -955,15 +1314,70 @@ func supplierNewAPISessionKey(provider *SupplierProvider) string {
 	return strings.TrimSpace(provider.Code)
 }
 
-func supplierNewAPICookiesHeader(cookies []*http.Cookie) string {
+func supplierNewAPICookieValue(cookieHeader, name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	for _, part := range strings.Split(cookieHeader, ";") {
+		parts := strings.SplitN(strings.TrimSpace(part), "=", 2)
+		if len(parts) != 2 || strings.TrimSpace(parts[0]) != name {
+			continue
+		}
+		if value := strings.TrimSpace(parts[1]); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func supplierNewAPICookieValueFromCookies(cookies []*http.Cookie, name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	value := ""
+	for _, cookie := range cookies {
+		if cookie == nil || cookie.Name != name {
+			continue
+		}
+		if candidate := strings.TrimSpace(cookie.Value); candidate != "" {
+			value = candidate
+		}
+	}
+	return value
+}
+
+func supplierNewAPICookieHeaderWithout(cookieHeader, excludedName string) string {
+	excludedName = strings.TrimSpace(excludedName)
+	parts := make([]string, 0)
+	for _, rawPart := range strings.Split(cookieHeader, ";") {
+		part := strings.TrimSpace(rawPart)
+		if part == "" {
+			continue
+		}
+		nameParts := strings.SplitN(part, "=", 2)
+		if excludedName != "" && len(nameParts) == 2 && strings.TrimSpace(nameParts[0]) == excludedName {
+			continue
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, "; ")
+}
+
+func supplierNewAPICookiesHeaderExcept(cookies []*http.Cookie, excludedName string) string {
+	excludedName = strings.TrimSpace(excludedName)
 	parts := make([]string, 0, len(cookies))
 	for _, cookie := range cookies {
-		if cookie == nil || strings.TrimSpace(cookie.Name) == "" {
+		if cookie == nil || strings.TrimSpace(cookie.Name) == "" || cookie.Name == excludedName {
 			continue
 		}
 		parts = append(parts, cookie.Name+"="+cookie.Value)
 	}
 	return strings.Join(parts, "; ")
+}
+func supplierNewAPICookiesHeader(cookies []*http.Cookie) string {
+	return supplierNewAPICookiesHeaderExcept(cookies, "")
 }
 
 func supplierNewAPIHasSessionAuth(session supplierNewAPISession) bool {

@@ -45,6 +45,9 @@ export interface SupplierProviderAuthSummary {
   login_count: number
   login_success_count: number
   login_failure_count: number
+  refresh_count: number
+  refresh_success_count: number
+  refresh_failure_count: number
   cache_hit_count: number
   cache_miss_count: number
   last_login_at?: string
@@ -85,7 +88,7 @@ export interface SupplierProviderAuthStatusResult {
   checked_at: string
 }
 
-export type SupplierProviderAuthEventType = 'cache_hit' | 'cache_miss' | 'login_success' | 'login_failed' | 'cache_invalidated' | 'cache_error'
+export type SupplierProviderAuthEventType = 'cache_hit' | 'cache_miss' | 'login_success' | 'login_failed' | 'refresh_success' | 'refresh_failed' | 'cache_invalidated' | 'cache_error'
 
 export interface SupplierProviderAuthHistoryItem {
   id: number

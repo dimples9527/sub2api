@@ -7,6 +7,7 @@ import (
 
 type SupplierProviderAuthToken struct {
 	AccessToken  string    `json:"access_token"`
+	RefreshToken string    `json:"refresh_token,omitempty"`
 	TokenType    string    `json:"token_type"`
 	ExpiresAt    time.Time `json:"expires_at"`
 	UserID       int64     `json:"user_id,omitempty"`
@@ -38,4 +39,3 @@ type SupplierProviderSyncLock interface {
 	TryAcquireSyncLock(ctx context.Context, providerID int64, owner string, ttl time.Duration) (bool, error)
 	ReleaseSyncLock(ctx context.Context, providerID int64, owner string) error
 }
-

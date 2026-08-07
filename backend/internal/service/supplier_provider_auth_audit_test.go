@@ -104,3 +104,36 @@ func TestSupplierProviderAuthEventInputNormalizesDefaults(t *testing.T) {
 	require.Equal(t, now, record.StartedAt)
 	require.Equal(t, now.Add(250*time.Millisecond), record.FinishedAt)
 }
+
+func TestSupplierProviderAuthEventInputNormalizesRefreshEvents(t *testing.T) {
+	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	token := SupplierProviderAuthToken{
+		AccessToken:  "new-access-token",
+		RefreshToken: "sensitive-refresh-token",
+		ExpiresAt:    now.Add(time.Hour),
+	}
+
+	for _, tt := range []struct {
+		name      string
+		eventType SupplierProviderAuthEventType
+		want      SupplierProviderAuthStatus
+	}{
+		{name: "success", eventType: SupplierProviderAuthEventRefreshSuccess, want: SupplierProviderAuthStatusSuccess},
+		{name: "failed", eventType: SupplierProviderAuthEventRefreshFailed, want: SupplierProviderAuthStatusFailed},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			record := normalizeSupplierProviderAuthEvent(SupplierProviderAuthEventInput{
+				ProviderID: 42,
+				EventType:  tt.eventType,
+				StartedAt:  now,
+				FinishedAt: now.Add(time.Second),
+				Token:      &token,
+			})
+
+			require.Equal(t, tt.want, record.Status)
+			require.Equal(t, supplierProviderAuthTokenFingerprint("new-access-token"), record.TokenFingerprint)
+			require.NotEqual(t, "sensitive-refresh-token", record.TokenFingerprint)
+			require.Equal(t, len("new-access-token"), record.TokenLength)
+		})
+	}
+}
