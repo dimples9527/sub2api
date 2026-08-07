@@ -881,6 +881,7 @@ const loading = ref(false)
 const appStore = useAppStore()
 const savingCode = ref('')
 const runningCode = ref('')
+const updatingTaskIDs = ref<Set<string>>(new Set())
 const runningMode = ref<'preview' | 'execute'>('execute')
 const editVisible = ref(false)
 const editingTask = ref<SupplierAutomationTask | null>(null)
@@ -1142,6 +1143,62 @@ function openEdit(task: SupplierAutomationTask) {
 }
 
 function closeEdit() {
+async function toggleTaskStatus(taskCode: string) {
+  const task = tasks.value.find(t => t.task_code === taskCode)
+  if (!task || updatingTaskIDs.value.has(taskCode)) return
+  const previousEnabled = task.enabled
+  task.enabled = !task.enabled
+  updatingTaskIDs.value = new Set(updatingTaskIDs.value).add(taskCode)
+  try {
+    await updateTask(taskCode, task)
+    appStore.showSuccess(task.enabled ? '任务已启用' : '任务已停用')
+    await loadData()
+  } catch (err) {
+    task.enabled = previousEnabled
+    appStore.showError(extractApiErrorMessage(err, '更新任务运行状态失败'))
+  } finally {
+    const next = new Set(updatingTaskIDs.value)
+    next.delete(taskCode)
+    updatingTaskIDs.value = next
+  }
+}
+
+  if (updatingTaskIDs.value.has(task.task_code) || !task.enabled) return
+  const previousEnabled = task.enabled
+  task.enabled = !task.enabled
+  updatingTaskIDs.value = new Set(updatingTaskIDs.value).add(task.task_code)
+  try {
+    await updateTask(task.task_code, task)
+    appStore.showSuccess(task.enabled ? '任务已启用' : '任务已停用')
+    await loadData()
+  } catch (err) {
+    task.enabled = previousEnabled
+    appStore.showError(extractApiErrorMessage(err, '更新任务运行状态失败'))
+  } finally {
+    const next = new Set(updatingTaskIDs.value)
+    next.delete(task.task_code)
+    updatingTaskIDs.value = next
+  }
+}
+
+  if (updatingTaskIDs.value.has(task.task_code) || task.enabled === enabled) return
+  const previousEnabled = task.enabled
+  task.enabled = enabled
+  updatingTaskIDs.value = new Set(updatingTaskIDs.value).add(task.task_code)
+  try {
+    await updateTask(task.task_code, task)
+    appStore.showSuccess(enabled ? '任务已启用' : '任务已停用')
+    await loadData()
+  } catch (err) {
+    task.enabled = previousEnabled
+    appStore.showError(extractApiErrorMessage(err, '更新任务运行状态失败'))
+  } finally {
+    const next = new Set(updatingTaskIDs.value)
+    next.delete(task.task_code)
+    updatingTaskIDs.value = next
+  }
+}
+
   editVisible.value = false
 }
 
