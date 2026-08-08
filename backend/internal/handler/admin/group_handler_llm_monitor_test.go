@@ -28,3 +28,21 @@ func TestGroupHandlerGetLLMMonitorGroupsReturnsMinimalActiveGroupData(t *testing
 	require.Contains(t, rec.Body.String(), `"platform":"anthropic"`)
 	require.Contains(t, rec.Body.String(), `"rate_multiplier":1.5`)
 }
+
+func TestGroupHandlerGetLLMMonitorGroupsUsesEffectivePlatformOverride(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handler := NewGroupHandler(&stubAdminService{groups: []service.Group{
+		{ID: 7, Name: "default", Platform: service.PlatformAnthropic, RateMultiplier: 1.5},
+	}, monitorGroupPlatformOverrides: map[int64]string{7: service.PlatformOpenAI}}, nil, nil)
+	router := gin.New()
+	router.GET("/api/llm-monitor/groups", handler.GetLLMMonitorGroups)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/llm-monitor/groups", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"effective_platform":"openai"`)
+	require.Contains(t, rec.Body.String(), `"platform":"anthropic"`)
+}

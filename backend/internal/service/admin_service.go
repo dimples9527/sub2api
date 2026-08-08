@@ -39,6 +39,9 @@ type AdminService interface {
 	GetAllGroupsIncludingInactive(ctx context.Context) ([]Group, error)
 	GetGroup(ctx context.Context, id int64) (*Group, error)
 	GetGroupModelsListCandidates(ctx context.Context, id int64, platform string) ([]string, error)
+	GetLLMMonitorGroupPlatformOverrides(ctx context.Context, groupIDs []int64) (map[int64]string, error)
+	SetLLMMonitorGroupPlatformOverride(ctx context.Context, groupID int64, actualPlatform string) error
+	ClearLLMMonitorGroupPlatformOverride(ctx context.Context, groupID int64) error
 	CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error)
 	// DuplicateGroup creates an inactive independent copy of a group's configuration
 	// and account bindings while preserving each binding's priority.
@@ -622,30 +625,31 @@ var ErrRPMStatusUnavailable = infraerrors.New(http.StatusNotImplemented, "RPM_ST
 
 // adminServiceImpl implements AdminService
 type adminServiceImpl struct {
-	userRepo             UserRepository
-	groupRepo            GroupRepository
-	groupDuplicateRepo   GroupDuplicateRepository
-	accountRepo          AccountRepository
-	accountDuplicateRepo AccountDuplicateRepository
-	accountBillingRepo   AccountBillingSettingsRepository
-	proxyRepo            ProxyRepository
-	apiKeyRepo           APIKeyRepository
-	redeemCodeRepo       RedeemCodeRepository
-	userGroupRateRepo    UserGroupRateRepository
-	userRPMCache         UserRPMCache
-	billingCacheService  *BillingCacheService
-	proxyProber          ProxyExitInfoProber
-	proxyLatencyCache    ProxyLatencyCache
-	authCacheInvalidator APIKeyAuthCacheInvalidator
-	entClient            *dbent.Client // 用于开启数据库事务
-	settingService       *SettingService
-	defaultSubAssigner   DefaultSubscriptionAssigner
-	userSubRepo          UserSubscriptionRepository
-	privacyClientFactory PrivacyClientFactory
-	runtimeBlocker       AccountRuntimeBlocker
-	affiliateService     adminRechargeAffiliateAccruer
-	compositeRouteRepo   CompositeModelRouteRepository
-	compositeResolver    *CompositeRouteResolver
+	userRepo                         UserRepository
+	groupRepo                        GroupRepository
+	groupDuplicateRepo               GroupDuplicateRepository
+	accountRepo                      AccountRepository
+	accountDuplicateRepo             AccountDuplicateRepository
+	accountBillingRepo               AccountBillingSettingsRepository
+	proxyRepo                        ProxyRepository
+	apiKeyRepo                       APIKeyRepository
+	redeemCodeRepo                   RedeemCodeRepository
+	userGroupRateRepo                UserGroupRateRepository
+	userRPMCache                     UserRPMCache
+	billingCacheService              *BillingCacheService
+	proxyProber                      ProxyExitInfoProber
+	proxyLatencyCache                ProxyLatencyCache
+	authCacheInvalidator             APIKeyAuthCacheInvalidator
+	entClient                        *dbent.Client // 用于开启数据库事务
+	settingService                   *SettingService
+	defaultSubAssigner               DefaultSubscriptionAssigner
+	userSubRepo                      UserSubscriptionRepository
+	privacyClientFactory             PrivacyClientFactory
+	runtimeBlocker                   AccountRuntimeBlocker
+	affiliateService                 adminRechargeAffiliateAccruer
+	compositeRouteRepo               CompositeModelRouteRepository
+	compositeResolver                *CompositeRouteResolver
+	monitorGroupPlatformOverrideRepo MonitorGroupPlatformOverrideRepository
 }
 
 type adminRechargeAffiliateAccruer interface {
@@ -679,31 +683,33 @@ func NewAdminService(
 	affiliateService *AffiliateService,
 	compositeRouteRepo CompositeModelRouteRepository,
 	compositeResolver *CompositeRouteResolver,
+	monitorGroupPlatformOverrideRepo MonitorGroupPlatformOverrideRepository,
 ) AdminService {
 	return &adminServiceImpl{
-		userRepo:             userRepo,
-		groupRepo:            groupRepo,
-		groupDuplicateRepo:   groupRepo,
-		accountRepo:          accountRepo,
-		accountDuplicateRepo: accountRepo,
-		accountBillingRepo:   accountRepo,
-		proxyRepo:            proxyRepo,
-		apiKeyRepo:           apiKeyRepo,
-		redeemCodeRepo:       redeemCodeRepo,
-		userGroupRateRepo:    userGroupRateRepo,
-		userRPMCache:         userRPMCache,
-		billingCacheService:  billingCacheService,
-		proxyProber:          proxyProber,
-		proxyLatencyCache:    proxyLatencyCache,
-		authCacheInvalidator: authCacheInvalidator,
-		entClient:            entClient,
-		settingService:       settingService,
-		defaultSubAssigner:   defaultSubAssigner,
-		userSubRepo:          userSubRepo,
-		privacyClientFactory: privacyClientFactory,
-		runtimeBlocker:       runtimeBlocker,
-		affiliateService:     affiliateService,
-		compositeRouteRepo:   compositeRouteRepo,
-		compositeResolver:    compositeResolver,
+		userRepo:                         userRepo,
+		groupRepo:                        groupRepo,
+		groupDuplicateRepo:               groupRepo,
+		accountRepo:                      accountRepo,
+		accountDuplicateRepo:             accountRepo,
+		accountBillingRepo:               accountRepo,
+		proxyRepo:                        proxyRepo,
+		apiKeyRepo:                       apiKeyRepo,
+		redeemCodeRepo:                   redeemCodeRepo,
+		userGroupRateRepo:                userGroupRateRepo,
+		userRPMCache:                     userRPMCache,
+		billingCacheService:              billingCacheService,
+		proxyProber:                      proxyProber,
+		proxyLatencyCache:                proxyLatencyCache,
+		authCacheInvalidator:             authCacheInvalidator,
+		entClient:                        entClient,
+		settingService:                   settingService,
+		defaultSubAssigner:               defaultSubAssigner,
+		userSubRepo:                      userSubRepo,
+		privacyClientFactory:             privacyClientFactory,
+		runtimeBlocker:                   runtimeBlocker,
+		affiliateService:                 affiliateService,
+		compositeRouteRepo:               compositeRouteRepo,
+		compositeResolver:                compositeResolver,
+		monitorGroupPlatformOverrideRepo: monitorGroupPlatformOverrideRepo,
 	}
 }

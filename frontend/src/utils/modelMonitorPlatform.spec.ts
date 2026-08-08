@@ -56,6 +56,37 @@ describe('模型监控平台展示', () => {
     expect(html).not.toContain('${serviceBadge(row.service)}')
   })
 
+  it.each(monitorPages)('页面 %s 优先使用分组实际平台并回退原平台', (pageUrl) => {
+    const dom = mountMonitorPage(pageUrl)
+    try {
+      const runtimeWindow = dom.window as typeof dom.window & {
+        normalizeGroupPayload: (payload: unknown) => Array<{
+          platform: string
+          effectivePlatform: string
+        }>
+        normalizeStatusItem: (item: unknown, index: number, group: unknown) => { groupPlatform: string }
+      }
+      const normalizeGroupPayload = runtimeWindow.normalizeGroupPayload
+      const overridden = normalizeGroupPayload([{
+        name: '配置分组',
+        platform: 'openai',
+        effective_platform: 'anthropic',
+      }])[0]
+      const inherited = normalizeGroupPayload([{
+        name: '默认分组',
+        platform: 'gemini',
+      }])[0]
+
+      expect(overridden.platform).toBe('openai')
+      expect(overridden.effectivePlatform).toBe('anthropic')
+      expect(inherited.effectivePlatform).toBe('gemini')
+      expect(runtimeWindow.normalizeStatusItem({ provider: '配置分组', layers: [] }, 0, overridden).groupPlatform).toBe('anthropic')
+      expect(runtimeWindow.normalizeStatusItem({ provider: '默认分组', layers: [] }, 0, inherited).groupPlatform).toBe('gemini')
+    } finally {
+      dom.window.close()
+    }
+  })
+
   it.each(monitorPages)('页面 %s 按 40% 阈值尽可能展示绿色', (pageUrl) => {
     const html = readFileSync(pageUrl, 'utf8')
 

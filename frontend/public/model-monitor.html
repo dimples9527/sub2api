@@ -1363,6 +1363,7 @@
       return list.map((group) => ({
         name: String(pickValue(group, ['name', 'group_name', 'groupName'], '')).trim(),
         platform: String(pickValue(group, ['platform'], '')).trim(),
+        effectivePlatform: String(pickValue(group, ['effective_platform', 'effectivePlatform', 'platform'], '')).trim(),
         rateMultiplier: asNumber(pickValue(group, ['rate_multiplier', 'rateMultiplier'], 1), 1)
       })).filter((group) => group.name);
     }
@@ -1766,7 +1767,7 @@
         rate: rateMultiplier,
         rateMultiplier,
         groupName: group?.name || provider,
-        groupPlatform: group?.platform || '',
+        groupPlatform: group?.effectivePlatform || group?.platform || '',
         availability,
         latency,
         time,
@@ -1807,7 +1808,7 @@
         }
         const availablePlatforms = uniqueValues([
           ...rows.map((row) => row.groupPlatform),
-          ...Array.from(groupIndex.values()).map((group) => group.platform)
+          ...Array.from(groupIndex.values()).map((group) => group.effectivePlatform || group.platform)
         ]);
         if (state.platform !== 'all' && !availablePlatforms.includes(state.platform)) {
           state.platform = 'all';
@@ -2193,7 +2194,7 @@
       replaceOptions('provider', t('allProviders'), uniqueValues(rows.map((row) => row.provider)), state.provider);
       const platforms = uniqueValues([
         ...rows.map((row) => row.groupPlatform),
-        ...Array.from(groupIndex.values()).map((group) => group.platform)
+        ...Array.from(groupIndex.values()).map((group) => group.effectivePlatform || group.platform)
       ]);
       replaceOptions('platform', t('allPlatforms'), platforms, state.platform, formatPlatformOption);
       replaceOptions('channel', t('allChannels'), uniqueValues(rows.map((row) => row.channel || row.note)), state.channel);

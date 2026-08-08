@@ -21,9 +21,10 @@ import (
 
 // GroupHandler handles admin group management
 type GroupHandler struct {
-	adminService         service.AdminService
-	dashboardService     *service.DashboardService
-	groupCapacityService *service.GroupCapacityService
+	adminService                        service.AdminService
+	dashboardService                    *service.DashboardService
+	groupCapacityService                *service.GroupCapacityService
+	monitorGroupPlatformOverrideService service.MonitorGroupPlatformOverrideService
 }
 
 // GetLiveCapability 返回当前服务端是否具备生成 Live attestation 的运行环境。
@@ -87,10 +88,16 @@ func (f optionalLimitField) ToServiceInput() *float64 {
 
 // NewGroupHandler creates a new admin group handler
 func NewGroupHandler(adminService service.AdminService, dashboardService *service.DashboardService, groupCapacityService *service.GroupCapacityService) *GroupHandler {
+	return NewGroupHandlerWithPlatformOverride(adminService, dashboardService, groupCapacityService, nil)
+}
+
+// NewGroupHandlerWithPlatformOverride creates a group handler with monitor-only platform configuration.
+func NewGroupHandlerWithPlatformOverride(adminService service.AdminService, dashboardService *service.DashboardService, groupCapacityService *service.GroupCapacityService, overrideService service.MonitorGroupPlatformOverrideService) *GroupHandler {
 	return &GroupHandler{
-		adminService:         adminService,
-		dashboardService:     dashboardService,
-		groupCapacityService: groupCapacityService,
+		adminService:                        adminService,
+		dashboardService:                    dashboardService,
+		groupCapacityService:                groupCapacityService,
+		monitorGroupPlatformOverrideService: overrideService,
 	}
 }
 
@@ -218,9 +225,12 @@ type UpdateGroupRequest struct {
 }
 
 type LLMMonitorGroup struct {
-	Name           string  `json:"name"`
-	Platform       string  `json:"platform"`
-	RateMultiplier float64 `json:"rate_multiplier"`
+	ID                int64   `json:"id"`
+	Name              string  `json:"name"`
+	Platform          string  `json:"platform"`
+	ActualPlatform    string  `json:"actual_platform,omitempty"`
+	EffectivePlatform string  `json:"effective_platform"`
+	RateMultiplier    float64 `json:"rate_multiplier"`
 }
 
 type CompositeRouteRequest struct {
@@ -445,16 +455,89 @@ func (h *GroupHandler) GetLLMMonitorGroups(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-
-	outGroups := make([]LLMMonitorGroup, 0, len(groups))
-	for _, group := range groups {
-		outGroups = append(outGroups, LLMMonitorGroup{
-			Name:           group.Name,
-			Platform:       group.Platform,
-			RateMultiplier: group.RateMultiplier,
-		})
+	outGroups, ok := h.buildLLMMonitorGroups(c, groups)
+	if !ok {
+		return
 	}
 	response.Success(c, outGroups)
+}
+
+// ListLLMMonitorPlatformOverrides returns all groups and their monitor-only platform overrides.
+func (h *GroupHandler) ListLLMMonitorPlatformOverrides(c *gin.Context) {
+	groups, err := h.adminService.GetAllGroupsIncludingInactive(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	outGroups, ok := h.buildLLMMonitorGroups(c, groups)
+	if !ok {
+		return
+	}
+	response.Success(c, outGroups)
+}
+
+// SetLLMMonitorPlatformOverride sets the actual platform used by model monitoring for a group.
+func (h *GroupHandler) SetLLMMonitorPlatformOverride(c *gin.Context) {
+	groupID, ok := parsePositiveIDParam(c, "group_id")
+	if !ok {
+		return
+	}
+	var req struct {
+		ActualPlatform string `json:"actual_platform" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "actual_platform is required")
+		return
+	}
+	if err := h.adminService.SetLLMMonitorGroupPlatformOverride(c.Request.Context(), groupID, req.ActualPlatform); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.Success(c, gin.H{"message": "platform override updated"})
+}
+
+// ClearLLMMonitorPlatformOverride clears the monitor-only platform override for a group.
+func (h *GroupHandler) ClearLLMMonitorPlatformOverride(c *gin.Context) {
+	groupID, ok := parsePositiveIDParam(c, "group_id")
+	if !ok {
+		return
+	}
+	if err := h.adminService.ClearLLMMonitorGroupPlatformOverride(c.Request.Context(), groupID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"message": "platform override cleared"})
+}
+
+func (h *GroupHandler) buildLLMMonitorGroups(c *gin.Context, groups []service.Group) ([]LLMMonitorGroup, bool) {
+	groupIDs := make([]int64, 0, len(groups))
+	for _, group := range groups {
+		groupIDs = append(groupIDs, group.ID)
+	}
+	overrides := map[int64]string{}
+	loaded, err := h.adminService.GetLLMMonitorGroupPlatformOverrides(c.Request.Context(), groupIDs)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return nil, false
+	}
+	overrides = loaded
+	outGroups := make([]LLMMonitorGroup, 0, len(groups))
+	for _, group := range groups {
+		effective := group.Platform
+		actual := strings.TrimSpace(overrides[group.ID])
+		if actual != "" {
+			effective = actual
+		}
+		outGroups = append(outGroups, LLMMonitorGroup{
+			ID:                group.ID,
+			Name:              group.Name,
+			Platform:          group.Platform,
+			ActualPlatform:    actual,
+			EffectivePlatform: effective,
+			RateMultiplier:    group.RateMultiplier,
+		})
+	}
+	return outGroups, true
 }
 
 // GetByID handles getting a group by ID

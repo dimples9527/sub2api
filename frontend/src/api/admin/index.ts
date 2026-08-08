@@ -43,6 +43,7 @@ import upstreamDashboardAPI from './upstreamDashboard'
 import upstreamManagementAPI from './upstreamManagement'
 import upstreamAccountSyncAPI from './upstreamAccountSync'
 import modelSquareAPI from './modelSquare'
+import modelMonitorAPI from './modelMonitor'
 
 /**
  * Unified admin API object for convenient access
@@ -87,7 +88,8 @@ export const adminAPI = {
   upstreamDashboard: upstreamDashboardAPI,
   upstreamManagement: upstreamManagementAPI,
   upstreamAccountSync: upstreamAccountSyncAPI,
-  modelSquare: modelSquareAPI
+  modelSquare: modelSquareAPI,
+  modelMonitor: modelMonitorAPI,
 }
 
 export {
@@ -130,7 +132,8 @@ export {
   upstreamDashboardAPI,
   upstreamManagementAPI,
   upstreamAccountSyncAPI,
-  modelSquareAPI
+  modelSquareAPI,
+  modelMonitorAPI,
 }
 
 export default adminAPI
@@ -221,3 +224,7 @@ export type {
   ModelSquareModel,
   ModelSquarePayload
 } from './modelSquare'
+export type {
+  LLMMonitorGroupPlatformOverride,
+  LLMMonitorGroupPlatformOverrideUpdateResult,
+} from './modelMonitor'

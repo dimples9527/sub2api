@@ -125,7 +125,7 @@ describe('AppSidebar image generation visibility', () => {
     expect(wrapper.text()).toContain('供应商账号管理')
   })
 
-  it('opens upstream ops as an external link under supplier management', async () => {
+  it('opens monitoring links and upstream ops in their separate menu groups', async () => {
     const wrapper = mountSidebar('admin')
 
     const supplierMenu = wrapper.findAll('button').find((button) => button.text().includes('供应商管理'))
@@ -139,10 +139,18 @@ describe('AppSidebar image generation visibility', () => {
     expect(externalLink.attributes('rel')).toContain('noopener')
     expect(externalLink.text()).toContain('上游运维平台')
 
+    const monitorMenu = wrapper.findAll('button').find((button) => button.text().includes('模型监控'))
+    expect(monitorMenu).toBeDefined()
+    await monitorMenu!.trigger('click')
+
     const localMonitorLink = wrapper.find('a[href="/model-monitor-local.html"]')
     expect(localMonitorLink.exists()).toBe(true)
     expect(localMonitorLink.attributes('target')).toBe('_blank')
     expect(localMonitorLink.attributes('rel')).toContain('noopener')
     expect(localMonitorLink.text()).toContain('本地模型监控')
+
+    const overridesLink = wrapper.find('a[href="/admin/model-monitor/platform-overrides"]')
+    expect(overridesLink.exists()).toBe(true)
+    expect(overridesLink.text()).toContain('分组平台配置')
   })
 })

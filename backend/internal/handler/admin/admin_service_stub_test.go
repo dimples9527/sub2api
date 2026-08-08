@@ -13,6 +13,7 @@ type stubAdminService struct {
 	users                               []service.User
 	apiKeys                             []service.APIKey
 	groups                              []service.Group
+	monitorGroupPlatformOverrides       map[int64]string
 	accounts                            []service.Account
 	accountSchedulerScoreFilterAccounts []service.Account
 	openAISchedulerScorePoolAccounts    []service.Account
@@ -716,6 +717,29 @@ func (s *stubAdminService) ExpireRedeemCode(ctx context.Context, id int64) (*ser
 
 func (s *stubAdminService) GetUserBalanceHistory(ctx context.Context, userID int64, page, pageSize int, codeType string) ([]service.RedeemCode, int64, float64, error) {
 	return s.redeems, int64(len(s.redeems)), 100.0, nil
+}
+
+func (s *stubAdminService) GetLLMMonitorGroupPlatformOverrides(ctx context.Context, groupIDs []int64) (map[int64]string, error) {
+	result := make(map[int64]string)
+	for _, groupID := range groupIDs {
+		if platform, ok := s.monitorGroupPlatformOverrides[groupID]; ok {
+			result[groupID] = platform
+		}
+	}
+	return result, nil
+}
+
+func (s *stubAdminService) SetLLMMonitorGroupPlatformOverride(ctx context.Context, groupID int64, actualPlatform string) error {
+	if s.monitorGroupPlatformOverrides == nil {
+		s.monitorGroupPlatformOverrides = map[int64]string{}
+	}
+	s.monitorGroupPlatformOverrides[groupID] = actualPlatform
+	return nil
+}
+
+func (s *stubAdminService) ClearLLMMonitorGroupPlatformOverride(ctx context.Context, groupID int64) error {
+	delete(s.monitorGroupPlatformOverrides, groupID)
+	return nil
 }
 
 func (s *stubAdminService) UpdateGroupSortOrders(ctx context.Context, updates []service.GroupSortOrderUpdate) error {

@@ -719,6 +719,16 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/model-monitor/platform-overrides',
+    name: 'AdminModelMonitorPlatformOverrides',
+    component: () => import('@/views/admin/model-monitor/PlatformOverridesView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: '模型监控平台配置'
+    }
+  },
+  {
     path: '/admin/announcements',
     name: 'AdminAnnouncements',
     component: () => import('@/views/admin/AnnouncementsView.vue'),

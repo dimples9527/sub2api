@@ -38,6 +38,7 @@ func RegisterAdminRoutes(
 
 		// 分组管理
 		registerGroupRoutes(admin, h)
+		registerModelMonitorRoutes(admin, h)
 
 		// 账号管理
 		registerAccountRoutes(admin, h, stepUpAuth)
@@ -346,6 +347,15 @@ func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		groups.PUT("/:id/rpm-overrides", h.Admin.Group.BatchSetGroupRPMOverrides)
 		groups.DELETE("/:id/rpm-overrides", h.Admin.Group.ClearGroupRPMOverrides)
 		groups.GET("/:id/api-keys", h.Admin.Group.GetGroupAPIKeys)
+	}
+}
+
+func registerModelMonitorRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	modelMonitor := admin.Group("/model-monitor")
+	{
+		modelMonitor.GET("/platform-overrides", h.Admin.Group.ListLLMMonitorPlatformOverrides)
+		modelMonitor.PUT("/platform-overrides/:group_id", h.Admin.Group.SetLLMMonitorPlatformOverride)
+		modelMonitor.DELETE("/platform-overrides/:group_id", h.Admin.Group.ClearLLMMonitorPlatformOverride)
 	}
 }
 
