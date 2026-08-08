@@ -44,6 +44,7 @@ import upstreamManagementAPI from './upstreamManagement'
 import upstreamAccountSyncAPI from './upstreamAccountSync'
 import modelSquareAPI from './modelSquare'
 import modelMonitorAPI from './modelMonitor'
+import customPlatformsAPI from './customPlatforms'
 
 /**
  * Unified admin API object for convenient access
@@ -90,6 +91,7 @@ export const adminAPI = {
   upstreamAccountSync: upstreamAccountSyncAPI,
   modelSquare: modelSquareAPI,
   modelMonitor: modelMonitorAPI,
+  customPlatforms: customPlatformsAPI,
 }
 
 export {
@@ -134,6 +136,7 @@ export {
   upstreamAccountSyncAPI,
   modelSquareAPI,
   modelMonitorAPI,
+  customPlatformsAPI,
 }
 
 export default adminAPI

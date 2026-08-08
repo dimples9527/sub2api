@@ -729,6 +729,16 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/model-monitor/custom-platforms',
+    name: 'AdminCustomPlatforms',
+    component: () => import('@/views/admin/model-monitor/CustomPlatformsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: '自定义平台管理'
+    }
+  },
+  {
     path: '/admin/announcements',
     name: 'AdminAnnouncements',
     component: () => import('@/views/admin/AnnouncementsView.vue'),

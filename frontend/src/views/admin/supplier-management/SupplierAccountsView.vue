@@ -980,6 +980,7 @@ import Input from '@/components/common/Input.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import supplierProvidersAPI, { type SupplierProvider } from '@/api/admin/supplierProviders'
+import { customPlatformsAPI, type CustomPlatform } from '@/api/admin/customPlatforms'
 import {
   cancelSupplierAccountBatchTestJob,
   clearSupplierLocalAccountPlatformOverride,
@@ -1004,11 +1005,11 @@ import type {
   GroupPlatform,
   Proxy as AccountProxy,
 } from '@/types'
+import { ensureCustomPlatformLabels, resolvePlatformDisplayLabel as platformLabel } from '@/utils/customPlatformLabels'
 import {
   platformAccentBarClass,
   platformBadgeClass,
   platformButtonClass,
-  platformLabel,
   platformTextClass,
 } from '@/utils/platformColors'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -1061,6 +1062,7 @@ type SupplierBatchResultFilter =
 
 const providers = ref<SupplierProvider[]>([])
 const localGroups = ref<AdminGroup[]>([])
+const customPlatforms = ref<CustomPlatform[]>([])
 const accountSourceItems = ref<SupplierProviderAccount[]>([])
 const items = ref<SupplierProviderAccount[]>([])
 const selected = ref<SupplierProviderAccount | null>(null)
@@ -1212,22 +1214,26 @@ const upstreamStatusFilterOptions: SelectOption[] = [
   { value: 'unknown', label: '未知' },
   { value: 'deleted', label: '已删除' },
 ]
-const platformFilterOptions: SelectOption[] = [
+const corePlatformOptions: SelectOption[] = [
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'gemini', label: 'Gemini' },
+  { value: 'antigravity', label: 'Antigravity' },
+  { value: 'grok', label: 'Grok' },
+]
+const customPlatformOptions = computed<SelectOption[]>(() => customPlatforms.value
+  .filter(platform => platform.enabled)
+  .map(platform => ({ value: platform.code, label: platform.name })))
+const platformFilterOptions = computed<SelectOption[]>(() => [
   { value: '', label: '全部平台' },
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'gemini', label: 'Gemini' },
-  { value: 'antigravity', label: 'Antigravity' },
-  { value: 'grok', label: 'Grok' },
-]
-const businessPlatformOptions: SelectOption[] = [
+  ...corePlatformOptions,
+  ...customPlatformOptions.value,
+])
+const businessPlatformOptions = computed<SelectOption[]>(() => [
   { value: '', label: '业务平台跟随接入平台' },
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'gemini', label: 'Gemini' },
-  { value: 'antigravity', label: 'Antigravity' },
-  { value: 'grok', label: 'Grok' },
-]
+  ...corePlatformOptions,
+  ...customPlatformOptions.value,
+])
 const pageSizeOptions: SelectOption[] = [
   { value: 20, label: '20' },
   { value: 50, label: '50' },
@@ -1403,7 +1409,7 @@ const accountColumns: Column[] = [
 
 onMounted(async () => {
   applyFilterControlLabels()
-  await Promise.all([loadProviders(), loadLocalGroups(), loadAccountRateGuardPendingCount()])
+  await Promise.all([ensureCustomPlatformLabels(), loadCustomPlatforms(), loadProviders(), loadLocalGroups(), loadAccountRateGuardPendingCount()])
   await loadAccounts()
 })
 
@@ -1440,6 +1446,10 @@ async function loadProviders() {
 
 async function loadLocalGroups() {
   localGroups.value = await adminAPI.groups.getAll()
+}
+
+async function loadCustomPlatforms() {
+  customPlatforms.value = await customPlatformsAPI.list(true)
 }
 
 function accountMatchesQuickFilter(

@@ -14,7 +14,10 @@ func ProvideAdminHandlers(
 	dashboardHandler *admin.DashboardHandler,
 	userHandler *admin.UserHandler,
 	groupHandler *admin.GroupHandler,
+	customPlatformHandler *admin.CustomPlatformHandler,
 	accountHandler *admin.AccountHandler,
+	customPlatformService service.CustomPlatformService,
+	monitorGroupPlatformOverrideService service.MonitorGroupPlatformOverrideService,
 	announcementHandler *admin.AnnouncementHandler,
 	dataManagementHandler *admin.DataManagementHandler,
 	backupHandler *admin.BackupHandler,
@@ -62,10 +65,13 @@ func ProvideAdminHandlers(
 ) *AdminHandlers {
 	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)
 	accountHandler.SetOllamaCloudUsageService(ollamaCloudUsage)
+	groupHandler.SetCustomPlatformService(customPlatformService)
+	groupHandler.SetMonitorGroupPlatformOverrideService(monitorGroupPlatformOverrideService)
 	return &AdminHandlers{
 		Dashboard:              dashboardHandler,
 		User:                   userHandler,
 		Group:                  groupHandler,
+		CustomPlatform:         customPlatformHandler,
 		Account:                accountHandler,
 		Announcement:           announcementHandler,
 		DataManagement:         dataManagementHandler,
@@ -269,6 +275,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewDashboardHandler,
 	admin.NewUserHandler,
 	admin.NewGroupHandler,
+	admin.NewCustomPlatformHandler,
 	admin.ProvideAccountHandler,
 	admin.NewAnnouncementHandler,
 	admin.NewDataManagementHandler,

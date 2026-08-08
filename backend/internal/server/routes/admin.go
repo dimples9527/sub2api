@@ -113,6 +113,7 @@ func RegisterAdminRoutes(
 		registerSupplierManagementRoutes(admin, h)
 		registerSupplierDashboardRoutes(admin, h)
 		registerUpstreamManagementRoutes(admin, h)
+		registerCustomPlatformRoutes(admin, h)
 		RegisterAdminLLMMonitorRoutes(admin, settingService)
 
 		// 风控中心

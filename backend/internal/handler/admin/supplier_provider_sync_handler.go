@@ -60,11 +60,17 @@ type SupplierGroupGuardPort interface {
 	SetRateGuardIgnored(ctx context.Context, groupID int64, ignored bool) error
 }
 
+// SupplierCustomPlatformResolver 仅负责校验启用的自定义平台，保持处理器对完整服务接口的最小依赖。
+type SupplierCustomPlatformResolver interface {
+	ResolveEnabled(ctx context.Context, code string) (*service.CustomPlatform, error)
+}
+
 type SupplierProviderSyncHandler struct {
-	syncService  SupplierProviderSyncServicePort
-	dataRepo     SupplierProviderDataRepositoryPort
-	groupMatcher SupplierProviderGroupMatcherPort
-	groupGuard   SupplierGroupGuardPort
+	syncService            SupplierProviderSyncServicePort
+	dataRepo               SupplierProviderDataRepositoryPort
+	groupMatcher           SupplierProviderGroupMatcherPort
+	groupGuard             SupplierGroupGuardPort
+	customPlatformResolver SupplierCustomPlatformResolver
 }
 
 func (h *SupplierProviderSyncHandler) SetGroupGuard(guard SupplierGroupGuardPort) {
@@ -76,6 +82,12 @@ func (h *SupplierProviderSyncHandler) SetGroupGuard(guard SupplierGroupGuardPort
 func (h *SupplierProviderSyncHandler) SetGroupMatcher(matcher SupplierProviderGroupMatcherPort) {
 	if h != nil {
 		h.groupMatcher = matcher
+	}
+}
+
+func (h *SupplierProviderSyncHandler) SetCustomPlatformResolver(resolver SupplierCustomPlatformResolver) {
+	if h != nil {
+		h.customPlatformResolver = resolver
 	}
 }
 
@@ -371,9 +383,16 @@ func (h *SupplierProviderSyncHandler) ListLocalAccountHealthGuardModels(c *gin.C
 		return
 	}
 	models, supported := supplierLocalAccountHealthGuardModels(platform)
+	if !supported && h.customPlatformResolver != nil {
+		_, resolveErr := h.customPlatformResolver.ResolveEnabled(c.Request.Context(), strings.ToLower(strings.TrimSpace(platform)))
+		supported = resolveErr == nil
+	}
 	if !supported {
 		response.ErrorFrom(c, badRequest("业务平台无效"))
 		return
+	}
+	if models == nil {
+		models = make([]supplierLocalAccountHealthGuardModel, 0)
 	}
 	response.Success(c, models)
 }
@@ -418,7 +437,7 @@ func (h *SupplierProviderSyncHandler) SetLocalAccountPlatformOverride(c *gin.Con
 		return
 	}
 	platform := strings.ToLower(strings.TrimSpace(req.Platform))
-	if !service.IsAllowedQuotaPlatform(platform) {
+	if !h.isAllowedBusinessPlatform(c.Request.Context(), platform) {
 		response.ErrorFrom(c, badRequest("业务平台无效"))
 		return
 	}
@@ -436,6 +455,17 @@ func (h *SupplierProviderSyncHandler) SetLocalAccountPlatformOverride(c *gin.Con
 		return
 	}
 	response.Success(c, gin.H{"local_account_id": localAccountID, "platform_override": platform})
+}
+
+func (h *SupplierProviderSyncHandler) isAllowedBusinessPlatform(ctx context.Context, platform string) bool {
+	if service.IsAllowedQuotaPlatform(platform) {
+		return true
+	}
+	if h == nil || h.customPlatformResolver == nil {
+		return false
+	}
+	_, err := h.customPlatformResolver.ResolveEnabled(ctx, platform)
+	return err == nil
 }
 
 func (h *SupplierProviderSyncHandler) ClearLocalAccountPlatformOverride(c *gin.Context) {

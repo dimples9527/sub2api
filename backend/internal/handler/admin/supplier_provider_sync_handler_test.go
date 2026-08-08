@@ -149,6 +149,17 @@ type supplierProviderSyncHandlerDataStub struct {
 	deleteAccountErr        error
 }
 
+type supplierCustomPlatformResolverStub struct {
+	platform   *service.CustomPlatform
+	err        error
+	calledCode string
+}
+
+func (s *supplierCustomPlatformResolverStub) ResolveEnabled(_ context.Context, code string) (*service.CustomPlatform, error) {
+	s.calledCode = code
+	return s.platform, s.err
+}
+
 type supplierProviderGroupMatcherHandlerStub struct {
 	autoProviderID  int64
 	ignoredGroupID  int64
@@ -789,6 +800,28 @@ func TestSupplierProviderSyncHandlerUpdatesLocalAccountBusinessPlatform(t *testi
 	require.Equal(t, int64(101), dataStub.clearedOverrideAccount)
 }
 
+func TestSupplierProviderSyncHandlerUpdatesLocalAccountWithEnabledCustomPlatform(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dataStub := &supplierProviderSyncHandlerDataStub{uniqueLocalAccount: true}
+	platformResolver := &supplierCustomPlatformResolverStub{
+		platform: &service.CustomPlatform{Code: "glm", Name: "GLM", Enabled: true},
+	}
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, dataStub)
+	handler.SetCustomPlatformResolver(platformResolver)
+	router := gin.New()
+	router.PUT("/accounts/:local_account_id/platform-override", handler.SetLocalAccountPlatformOverride)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/accounts/101/platform-override", bytes.NewBufferString(`{"platform":" GLM "}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "glm", platformResolver.calledCode)
+	require.Equal(t, int64(101), dataStub.platformOverrideAccount)
+	require.Equal(t, "glm", dataStub.platformOverride)
+}
+
 func TestSupplierProviderSyncHandlerRejectsPlatformOverrideForNonSupplierAccount(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	dataStub := &supplierProviderSyncHandlerDataStub{}
@@ -802,6 +835,25 @@ func TestSupplierProviderSyncHandlerRejectsPlatformOverrideForNonSupplierAccount
 	router.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Zero(t, dataStub.platformOverrideAccount)
+}
+
+func TestSupplierProviderSyncHandlerListsEmptyHealthGuardModelsForCustomPlatform(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dataStub := &supplierProviderSyncHandlerDataStub{uniqueLocalAccount: true, effectivePlatform: "glm"}
+	platformResolver := &supplierCustomPlatformResolverStub{
+		platform: &service.CustomPlatform{Code: "glm", Name: "GLM", Enabled: true},
+	}
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, dataStub)
+	handler.SetCustomPlatformResolver(platformResolver)
+	router := gin.New()
+	router.GET("/accounts/:local_account_id/health-guard-models", handler.ListLocalAccountHealthGuardModels)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/accounts/101/health-guard-models", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `[]`)
 }
 
 func TestSupplierProviderSyncHandlerListsHealthGuardModelsByBusinessPlatform(t *testing.T) {

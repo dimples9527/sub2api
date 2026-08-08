@@ -4,14 +4,15 @@
  */
 
 import { apiClient } from '../client'
-import type { GroupPlatform } from '@/types'
+
 
 export interface LLMMonitorGroupPlatformOverride {
   id: number
   name: string
-  platform: GroupPlatform
-  actual_platform: GroupPlatform | ''
-  effective_platform: GroupPlatform
+  platform: string
+  actual_platform: string | ''
+  effective_platform: string
+  effective_platform_name: string
   rate_multiplier: number
 }
 
@@ -26,7 +27,7 @@ export async function listLLMMonitorGroupPlatformOverrides(): Promise<LLMMonitor
 
 export async function setLLMMonitorGroupPlatformOverride(
   groupId: number,
-  actualPlatform: GroupPlatform,
+  actualPlatform: string,
 ): Promise<LLMMonitorGroupPlatformOverrideUpdateResult> {
   const { data } = await apiClient.put<LLMMonitorGroupPlatformOverrideUpdateResult>(
     `/admin/model-monitor/platform-overrides/${groupId}`,

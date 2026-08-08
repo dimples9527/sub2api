@@ -63,8 +63,12 @@ describe('模型监控平台展示', () => {
         normalizeGroupPayload: (payload: unknown) => Array<{
           platform: string
           effectivePlatform: string
+          effectivePlatformName: string
         }>
-        normalizeStatusItem: (item: unknown, index: number, group: unknown) => { groupPlatform: string }
+        normalizeStatusItem: (item: unknown, index: number, group: unknown) => {
+          groupPlatform: string
+          groupPlatformName: string
+        }
       }
       const normalizeGroupPayload = runtimeWindow.normalizeGroupPayload
       const overridden = normalizeGroupPayload([{
@@ -82,6 +86,18 @@ describe('模型监控平台展示', () => {
       expect(inherited.effectivePlatform).toBe('gemini')
       expect(runtimeWindow.normalizeStatusItem({ provider: '配置分组', layers: [] }, 0, overridden).groupPlatform).toBe('anthropic')
       expect(runtimeWindow.normalizeStatusItem({ provider: '默认分组', layers: [] }, 0, inherited).groupPlatform).toBe('gemini')
+
+      const customPlatform = normalizeGroupPayload([{
+        name: 'Custom platform group',
+        platform: 'openai',
+        effective_platform: 'glm',
+        effective_platform_name: 'Custom GLM',
+      }])[0]
+      const customRow = runtimeWindow.normalizeStatusItem({ provider: 'Custom platform group', layers: [] }, 0, customPlatform)
+      expect(customPlatform.effectivePlatform).toBe('glm')
+      expect(customPlatform.effectivePlatformName).toBe('Custom GLM')
+      expect(customRow.groupPlatform).toBe('glm')
+      expect(customRow.groupPlatformName).toBe('Custom GLM')
     } finally {
       dom.window.close()
     }

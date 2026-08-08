@@ -1360,12 +1360,17 @@
         ? payload
         : (Array.isArray(payload?.data) ? payload.data : []);
 
-      return list.map((group) => ({
-        name: String(pickValue(group, ['name', 'group_name', 'groupName'], '')).trim(),
-        platform: String(pickValue(group, ['platform'], '')).trim(),
-        effectivePlatform: String(pickValue(group, ['effective_platform', 'effectivePlatform', 'platform'], '')).trim(),
-        rateMultiplier: asNumber(pickValue(group, ['rate_multiplier', 'rateMultiplier'], 1), 1)
-      })).filter((group) => group.name);
+      return list.map((group) => {
+        const platform = String(pickValue(group, ['platform'], '')).trim();
+        const effectivePlatform = String(pickValue(group, ['effective_platform', 'effectivePlatform', 'platform'], '')).trim();
+        return {
+          name: String(pickValue(group, ['name', 'group_name', 'groupName'], '')).trim(),
+          platform,
+          effectivePlatform,
+          effectivePlatformName: String(pickValue(group, ['effective_platform_name', 'effectivePlatformName'], '')).trim(),
+          rateMultiplier: asNumber(pickValue(group, ['rate_multiplier', 'rateMultiplier'], 1), 1)
+        };
+      }).filter((group) => group.name);
     }
 
     async function loadMonitorGroups() {
@@ -1568,6 +1573,11 @@
 
     function formatPlatformOption(platform) {
       const normalized = String(platform || '').trim().toLowerCase();
+      const configuredLabel = Array.from(groupIndex.values()).find((group) => (
+        String(group?.effectivePlatform || group?.platform || '').trim().toLowerCase() === normalized
+        && String(group?.effectivePlatformName || '').trim()
+      ))?.effectivePlatformName;
+      if (configuredLabel) return configuredLabel;
       const labels = {
         anthropic: 'Anthropic',
         openai: 'OpenAI',
@@ -1634,7 +1644,7 @@
 
     function platformBadge(value, extraClass = '') {
       const platform = String(value || '').trim();
-      return `<span class="platform-badge ${extraClass}">${escapeHtml(platform || '—')}</span>`;
+      return `<span class="platform-badge ${extraClass}">${escapeHtml(formatPlatformOption(platform) || '\u2014')}</span>`;
     }
 
     function formatCheckedTime(value, fallback = '--:--') {
@@ -1768,6 +1778,7 @@
         rateMultiplier,
         groupName: group?.name || provider,
         groupPlatform: group?.effectivePlatform || group?.platform || '',
+        groupPlatformName: group?.effectivePlatformName || '',
         availability,
         latency,
         time,
@@ -1904,7 +1915,7 @@
     }
 
     function searchText(row) {
-      return [row.provider, row.groupName, row.groupPlatform, row.service, row.model, row.note, row.channel, row.category, row.rateMultiplier, row.availability, row.latency, row.time]
+      return [row.provider, row.groupName, row.groupPlatform, row.groupPlatformName, row.service, row.model, row.note, row.channel, row.category, row.rateMultiplier, row.availability, row.latency, row.time]
         .join(' ')
         .toLowerCase();
     }

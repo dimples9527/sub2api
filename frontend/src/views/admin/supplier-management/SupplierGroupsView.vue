@@ -779,6 +779,7 @@ import type { Column } from '@/components/common/types'
 import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores/app'
 import type { AdminGroup, GroupPlatform } from '@/types'
+import { ensureCustomPlatformLabels, resolvePlatformDisplayLabel } from '@/utils/customPlatformLabels'
 import { platformTextClass } from '@/utils/platformColors'
 import {
   buildSupplierGroupMonitorTrendIndex,
@@ -1082,7 +1083,7 @@ function keyStatusDetail(group: SupplierProviderGroup) {
 
 onMounted(async () => {
   try {
-    await Promise.all([loadProviders(), loadLocalGroups()])
+    await Promise.all([ensureCustomPlatformLabels(), loadProviders(), loadLocalGroups()])
   } catch (err) {
     appStore.showError(errorMessage(err, '加载筛选选项失败'))
   }
@@ -1788,7 +1789,7 @@ function formatRate(value?: number): string {
 
 function platformLabel(platform?: string): string {
   if (!platform) return '未设置平台'
-  return PLATFORM_LABELS[platform] || platform
+  return resolvePlatformDisplayLabel(platform)
 }
 
 function formatTime(value?: string): string {

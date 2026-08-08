@@ -78,9 +78,9 @@
             </div>
           </template>
 
-          <template #cell-effective_platform="{ value }">
+          <template #cell-effective_platform="{ row, value }">
             <span :class="['inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium', platformBadgeClass(value)]">
-              {{ platformText(value) }}
+              {{ row.effective_platform_name || platformText(value) }}
             </span>
           </template>
 
@@ -199,9 +199,10 @@
 import { computed, onMounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
-import { platformBadgeClass, platformLabel } from '@/utils/platformColors'
+import { platformBadgeClass } from '@/utils/platformColors'
 import { adminAPI } from '@/api/admin'
-import type { GroupPlatform } from '@/types'
+import { resolvePlatformDisplayLabel, setCustomPlatformLabels } from '@/utils/customPlatformLabels'
+import type { CustomPlatform } from '@/api/admin/customPlatforms'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -217,28 +218,39 @@ const appStore = useAppStore()
 
 const loading = ref(false)
 const groups = ref<LLMMonitorGroupPlatformOverride[]>([])
+const customPlatforms = ref<CustomPlatform[]>([])
 const searchQuery = ref('')
-const platformFilter = ref<'all' | GroupPlatform>('all')
+const platformFilter = ref<'all' | string>('all')
 const savingGroupId = ref<number | null>(null)
 const showEditDialog = ref(false)
 const editingGroup = ref<LLMMonitorGroupPlatformOverride | null>(null)
-const platformDraft = ref<GroupPlatform | ''>('')
+const platformDraft = ref<string>('')
 const showClearConfirm = ref(false)
 const clearTargetGroup = ref<LLMMonitorGroupPlatformOverride | null>(null)
 
-const platformOptions = [
-  { value: 'anthropic', label: platformLabel('anthropic') },
-  { value: 'openai', label: platformLabel('openai') },
-  { value: 'gemini', label: platformLabel('gemini') },
-  { value: 'antigravity', label: platformLabel('antigravity') },
-  { value: 'grok', label: platformLabel('grok') },
-  { value: 'composite', label: platformLabel('composite') },
-] satisfies Array<{ value: GroupPlatform; label: string }>
-
-const platformFilterOptions = [
-  { value: 'all', label: '全部平台' },
-  ...platformOptions,
+const corePlatformOptions = [
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'gemini', label: 'Gemini' },
+  { value: 'antigravity', label: 'Antigravity' },
+  { value: 'grok', label: 'Grok' },
+  { value: 'composite', label: 'Composite' },
 ]
+
+const platformOptions = computed(() => [
+  ...corePlatformOptions,
+  ...customPlatforms.value
+    .filter((platform) => platform.enabled)
+    .map((platform) => ({
+      value: platform.code,
+      label: platform.name,
+    })),
+])
+
+const platformFilterOptions = computed(() => [
+  { value: 'all', label: '全部平台' },
+  ...platformOptions.value,
+])
 
 const columns = computed<Column[]>(() => [
   { key: 'name', label: '分组名称', sortable: false },
@@ -279,7 +291,13 @@ const clearConfirmMessage = computed(() => {
 async function reload() {
   loading.value = true
   try {
-    groups.value = await adminAPI.modelMonitor.listLLMMonitorGroupPlatformOverrides()
+    const [items, platforms] = await Promise.all([
+      adminAPI.modelMonitor.listLLMMonitorGroupPlatformOverrides(),
+      adminAPI.customPlatforms.list(false),
+    ])
+    groups.value = items
+    customPlatforms.value = platforms
+    setCustomPlatformLabels(platforms)
   } catch (error) {
     appStore.showError(extractApiErrorMessage(error, '加载分组平台配置失败'))
   } finally {
@@ -292,7 +310,7 @@ function applyFilters() {
 }
 
 function platformText(value: string) {
-  return platformLabel(value)
+  return resolvePlatformDisplayLabel(value)
 }
 
 function formatRateMultiplier(value: unknown) {

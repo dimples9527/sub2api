@@ -48,31 +48,6 @@ func (s *adminServiceImpl) GetGroup(ctx context.Context, id int64) (*Group, erro
 	return s.groupRepo.GetByID(ctx, id)
 }
 
-func (s *adminServiceImpl) GetLLMMonitorGroupPlatformOverrides(ctx context.Context, groupIDs []int64) (map[int64]string, error) {
-	if s == nil || s.monitorGroupPlatformOverrideRepo == nil {
-		return map[int64]string{}, nil
-	}
-	return s.monitorGroupPlatformOverrideRepo.ListByGroupIDs(ctx, groupIDs)
-}
-
-func (s *adminServiceImpl) SetLLMMonitorGroupPlatformOverride(ctx context.Context, groupID int64, actualPlatform string) error {
-	if s == nil || s.monitorGroupPlatformOverrideRepo == nil {
-		return fmt.Errorf("monitor group platform override repository is not initialized")
-	}
-	actualPlatform = strings.ToLower(strings.TrimSpace(actualPlatform))
-	if !isMonitorGroupPlatform(actualPlatform) {
-		return fmt.Errorf("unsupported monitor group platform: %s", actualPlatform)
-	}
-	return s.monitorGroupPlatformOverrideRepo.Set(ctx, groupID, actualPlatform)
-}
-
-func (s *adminServiceImpl) ClearLLMMonitorGroupPlatformOverride(ctx context.Context, groupID int64) error {
-	if s == nil || s.monitorGroupPlatformOverrideRepo == nil {
-		return fmt.Errorf("monitor group platform override repository is not initialized")
-	}
-	return s.monitorGroupPlatformOverrideRepo.Clear(ctx, groupID)
-}
-
 func (s *adminServiceImpl) GetGroupModelsListCandidates(ctx context.Context, id int64, platform string) ([]string, error) {
 	platform = strings.TrimSpace(platform)
 	if id > 0 {

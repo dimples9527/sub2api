@@ -879,7 +879,8 @@ import {
   type SupplierAutomationTask,
 } from '@/api/admin/supplierAutomation'
 import { useAppStore } from '@/stores/app'
-import { platformBadgeClass, platformLabel, platformTextClass } from '@/utils/platformColors'
+import { ensureCustomPlatformLabels, resolvePlatformDisplayLabel as platformLabel } from '@/utils/customPlatformLabels'
+import { platformBadgeClass, platformTextClass } from '@/utils/platformColors'
 import { extractApiErrorMessage } from '@/utils/apiError'
 
 const tasks = ref<SupplierAutomationTask[]>([])
@@ -1077,6 +1078,7 @@ onMounted(async () => {
 async function loadData() {
   loading.value = true
   try {
+    await ensureCustomPlatformLabels()
     tasks.value = await listTasks()
     await loadRuns()
     await loadAccountRateGuardPendingCount()
