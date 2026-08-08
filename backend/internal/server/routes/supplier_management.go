@@ -39,6 +39,7 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 			providers.POST("/:id/sync/cost/stream", h.Admin.SupplierProviderSync.SyncCostStream)
 			providers.POST("/:id/sync/all", h.Admin.SupplierProviderSync.SyncAll)
 			providers.POST("/:id/sync/all/stream", h.Admin.SupplierProviderSync.SyncAllStream)
+			providers.POST("/:id/refresh-token", h.Admin.SupplierProviderSync.RefreshToken)
 			providers.POST("/:id/test/:scope", h.Admin.SupplierProviderSync.TestEndpoint)
 		}
 

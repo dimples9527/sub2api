@@ -80,6 +80,11 @@ export interface SupplierProviderAuthLockSnapshot {
   error?: string
 }
 
+export interface SupplierProviderTokenRefreshResult {
+  provider_id: number
+  expires_at?: string
+  message: string
+}
 export interface SupplierProviderAuthStatusResult {
   provider_id: number
   summary: SupplierProviderAuthSummary
@@ -323,6 +328,13 @@ export async function setDefault(id: number): Promise<SupplierProvider> {
   return data
 }
 
+export async function refreshToken(id: number): Promise<SupplierProviderTokenRefreshResult> {
+  const { data } = await apiClient.post<SupplierProviderTokenRefreshResult>(
+    `/admin/supplier-management/providers/${id}/refresh-token`
+  )
+  return data
+}
+
 export async function getAuthStatus(id: number): Promise<SupplierProviderAuthStatusResult> {
   const { data } = await apiClient.get<SupplierProviderAuthStatusResult>(
     `/admin/supplier-management/providers/${id}/auth-status`
@@ -347,6 +359,7 @@ export const supplierProvidersAPI = {
   update,
   delete: deleteProvider,
   setDefault,
+  refreshToken,
   getAuthStatus,
   listAuthHistory
 }

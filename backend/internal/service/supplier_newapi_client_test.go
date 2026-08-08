@@ -159,6 +159,40 @@ func TestSupplierNewAPIClientRecordsRefreshAuditWithoutRefreshToken(t *testing.T
 	require.Equal(t, "fresh-access-token", refreshEvent.Token.AccessToken)
 	require.Empty(t, refreshEvent.Token.RefreshToken)
 }
+
+func TestSupplierNewAPIClientRefreshTokenManually(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	cache.preload(42, SupplierProviderAuthToken{
+		AccessToken:  "old-access-token",
+		RefreshToken: "old-refresh-token",
+		TokenType:    "Bearer",
+		ExpiresAt:    time.Now().Add(time.Minute),
+		UserID:       42,
+	})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "new_api_refresh=old-refresh-token", r.Header.Get("Cookie"))
+		require.Equal(t, "http://"+r.Host, r.Header.Get("Origin"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"fresh-access-token","access_expires_at":4102444800,"user":{"id":42}}}`))
+	}))
+	defer server.Close()
+
+	client := NewSupplierNewAPIClient(server.Client(), cache, nil)
+	refreshed, err := client.RefreshToken(context.Background(), supplierNewAPICacheTestProvider(server.URL))
+
+	require.NoError(t, err)
+	require.Equal(t, "fresh-access-token", refreshed.AccessToken)
+	require.Equal(t, "old-refresh-token", refreshed.RefreshToken)
+	require.Equal(t, refreshed, mustSupplierProviderCachedToken(t, cache, 42))
+}
+
+func mustSupplierProviderCachedToken(t *testing.T, cache *supplierSub2APIFakeTokenCache, providerID int64) SupplierProviderAuthToken {
+	t.Helper()
+	token, found, err := cache.Get(context.Background(), providerID)
+	require.NoError(t, err)
+	require.True(t, found)
+	return token
+}
 func TestSupplierNewAPIClientRedactsRefreshTokenFromRefreshFailureErrorAndAudit(t *testing.T) {
 	cache := newSupplierSub2APIFakeTokenCache()
 	auditor := &supplierProviderAuthAuditorSpy{}
@@ -1098,4 +1132,23 @@ func TestSupplierNewAPIClientUsesAccessTokenFromTurnstileLogin(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, float64(1), secondBalance)
 	require.Equal(t, 1, loginCalls)
+}
+
+func TestSupplierNewAPIClientSendsOwnOriginWhenRefreshing(t *testing.T) {
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, defaultSupplierNewAPIRefreshPath, r.URL.Path)
+		require.Equal(t, server.URL, r.Header.Get("Origin"))
+		require.Equal(t, "new_api_refresh=refresh-token", r.Header.Get("Cookie"))
+		_, _ = w.Write([]byte(`{"success":true,"data":{}}`))
+	}))
+	defer server.Close()
+
+	client := NewSupplierNewAPIClient(server.Client(), nil, nil)
+	raw, status, _, err := client.doRefresh(context.Background(), &SupplierProvider{BaseURL: server.URL}, 42, "refresh-token")
+
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, status)
+	require.JSONEq(t, `{"success":true,"data":{}}`, string(raw))
 }

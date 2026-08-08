@@ -1248,3 +1248,7 @@ func supplierSub2APITruncateLogText(text string, limit int) string {
 	}
 	return text[:limit] + "..."
 }
+
+type SupplierProviderRemoteTokenRefresher interface {
+	RefreshToken(ctx context.Context, provider *SupplierProvider) (SupplierProviderAuthToken, error)
+}

@@ -144,6 +144,14 @@
           </template>
           <template #cell-actions="{ row: provider }">
             <div class="sp-inline" @click.stop>
+              <button
+                v-if="provider.provider_type === 'newapi'"
+                class="sp-button small"
+                type="button"
+                :data-test="`supplier-provider-refresh-token-${provider.id}`"
+                :disabled="!provider.enabled || isRefreshingToken(provider)"
+                @click="refreshProviderToken(provider)"
+              >{{ isRefreshingToken(provider) ? '刷新中' : '刷新 Token' }}</button>
               <button class="sp-button small" type="button" @click="openAuthHistory(provider)">登录记录</button>
               <button class="sp-button small" type="button" @click="openEdit(provider)">编辑</button>
               <button
@@ -387,6 +395,14 @@
         <div class="sp-drawer-actions">
           <button class="sp-button primary" type="button" @click="openEdit(selectedProvider)">编辑配置</button>
           <button class="sp-button" type="button" @click="openAuthHistory(selectedProvider)">登录与 Token</button>
+          <button
+            v-if="selectedProvider.provider_type === 'newapi'"
+            class="sp-button"
+            type="button"
+            data-test="supplier-provider-detail-refresh-token"
+            :disabled="!selectedProvider.enabled || isRefreshingToken(selectedProvider)"
+            @click="refreshProviderToken(selectedProvider)"
+          >{{ isRefreshingToken(selectedProvider) ? '刷新中' : '刷新 Token' }}</button>
           <button class="sp-button primary" type="button" :disabled="!selectedProvider.enabled || isProviderSyncing(selectedProvider)" :title="selectedProvider.enabled ? '同步全部数据' : supplierProviderDisabledSyncMessage" @click="syncProviderData(selectedProvider, 'all')">同步全部</button>
           <button class="sp-button" type="button" :disabled="!selectedProvider.enabled || isProviderSyncing(selectedProvider)" :title="selectedProvider.enabled ? '同步 API Key' : supplierProviderDisabledSyncMessage" @click="syncProviderData(selectedProvider, 'accounts')">同步 API Key</button>
           <button class="sp-button" type="button" :disabled="!selectedProvider.enabled || isProviderSyncing(selectedProvider)" :title="selectedProvider.enabled ? '同步分组' : supplierProviderDisabledSyncMessage" @click="syncProviderData(selectedProvider, 'groups')">同步分组</button>
@@ -1072,6 +1088,7 @@ const syncingKeys = ref<Set<string>>(new Set())
 const syncProgressStates = ref<Record<string, SupplierSyncProgressState>>({})
 const testingKeys = ref<Set<string>>(new Set())
 const updatingProviderIDs = ref<Set<number>>(new Set())
+const refreshingTokenIDs = ref<Set<number>>(new Set())
 const testResultVisible = ref(false)
 const testResult = ref<SupplierProviderEndpointTestResult | null>(null)
 let searchTimer: number | undefined
@@ -2152,6 +2169,25 @@ async function testProviderEndpointData(provider: SupplierProvider, scope: Suppl
   }
 }
 
+function isRefreshingToken(provider: SupplierProvider): boolean {
+  return refreshingTokenIDs.value.has(provider.id)
+}
+
+async function refreshProviderToken(provider: SupplierProvider) {
+  if (provider.provider_type !== 'newapi' || refreshingTokenIDs.value.has(provider.id)) return
+  refreshingTokenIDs.value = new Set(refreshingTokenIDs.value).add(provider.id)
+  try {
+    const result = await supplierProvidersAPI.refreshToken(provider.id)
+    appStore.showSuccess(result?.message || '刷新 Token 成功')
+    await loadProviders()
+  } catch (err) {
+    appStore.showError(errorMessage(err, '刷新 Token 失败'))
+  } finally {
+    const next = new Set(refreshingTokenIDs.value)
+    next.delete(provider.id)
+    refreshingTokenIDs.value = next
+  }
+}
 function isTesting(provider: SupplierProvider, scope: SupplierDiagnosticScope): boolean {
   return testingKeys.value.has(`${provider.id}:${scope}`)
 }

@@ -30,6 +30,7 @@ type SupplierProviderSyncServicePort interface {
 	BackfillCosts(ctx context.Context, startDate, endDate string, providerID int64, trigger string) (service.SupplierProviderCostBackfillResult, error)
 	SyncAll(ctx context.Context, providerID int64, trigger string) (service.SupplierProviderSyncResult, error)
 	TestEndpoint(ctx context.Context, providerID int64, scope string) (service.SupplierProviderEndpointTestResult, error)
+	RefreshToken(ctx context.Context, providerID int64) (service.SupplierProviderAuthToken, error)
 }
 
 type SupplierProviderDataRepositoryPort interface {
@@ -755,4 +756,21 @@ func (h *SupplierProviderSyncHandler) UpdateGroupRateGuardIgnored(c *gin.Context
 		return
 	}
 	response.Success(c, gin.H{"group_id": groupID, "ignored": *input.Ignored})
+}
+
+func (h *SupplierProviderSyncHandler) RefreshToken(c *gin.Context) {
+	id, ok := parseSupplierProviderID(c)
+	if !ok {
+		return
+	}
+	token, err := h.syncService.RefreshToken(c.Request.Context(), id)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{
+		"provider_id": id,
+		"expires_at":  token.ExpiresAt,
+		"message":     "Token 刷新成功",
+	})
 }

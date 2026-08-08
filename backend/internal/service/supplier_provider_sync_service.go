@@ -1279,3 +1279,16 @@ func boolToInt(value bool) int {
 	}
 	return 0
 }
+
+func (s *SupplierProviderSyncService) RefreshToken(ctx context.Context, providerID int64) (SupplierProviderAuthToken, error) {
+	ctx = WithSupplierProviderAuthSource(ctx, SupplierProviderAuthSourceManual)
+	provider, err := s.validSyncProvider(ctx, providerID)
+	if err != nil {
+		return SupplierProviderAuthToken{}, err
+	}
+	refresher, ok := s.remote.(SupplierProviderRemoteTokenRefresher)
+	if !ok {
+		return SupplierProviderAuthToken{}, infraerrors.BadRequest("SUPPLIER_PROVIDER_TOKEN_REFRESH_UNSUPPORTED", "current supplier type does not support manual token refresh")
+	}
+	return refresher.RefreshToken(ctx, provider)
+}

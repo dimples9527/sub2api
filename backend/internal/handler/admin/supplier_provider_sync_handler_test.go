@@ -52,6 +52,7 @@ func TestSupplierSyncProgressStreamWriterCancelsOnWriteFailure(t *testing.T) {
 
 type supplierProviderSyncHandlerSyncStub struct {
 	calledScope          string
+	refreshProviderID    int64
 	testScope            string
 	streamError          error
 	streamFailureMessage string
@@ -106,6 +107,10 @@ func (s *supplierProviderSyncHandlerSyncStub) SyncAll(ctx context.Context, _ int
 		return service.SupplierProviderSyncResult{}, s.streamError
 	}
 	return supplierProviderSyncHandlerResult(service.SupplierSyncScopeAll), nil
+}
+func (s *supplierProviderSyncHandlerSyncStub) RefreshToken(_ context.Context, providerID int64) (service.SupplierProviderAuthToken, error) {
+	s.refreshProviderID = providerID
+	return service.SupplierProviderAuthToken{ExpiresAt: time.Date(2026, time.August, 8, 0, 0, 0, 0, time.UTC)}, nil
 }
 func (s *supplierProviderSyncHandlerSyncStub) TestEndpoint(_ context.Context, _ int64, scope string) (service.SupplierProviderEndpointTestResult, error) {
 	s.testScope = scope
@@ -519,6 +524,38 @@ func TestSupplierProviderSyncHandlerRejectsInvalidProviderID(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/providers/bad/sync/all", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestSupplierProviderSyncHandlerRefreshesTokenWithoutReturningCredentials(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	syncStub := &supplierProviderSyncHandlerSyncStub{}
+	handler := NewSupplierProviderSyncHandler(syncStub, &supplierProviderSyncHandlerDataStub{})
+	router := gin.New()
+	router.POST("/providers/:id/refresh-token", handler.RefreshToken)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/providers/42/refresh-token", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(42), syncStub.refreshProviderID)
+	require.Contains(t, rec.Body.String(), `"provider_id":42`)
+	require.Contains(t, rec.Body.String(), `"message":"Token 刷新成功"`)
+	require.NotContains(t, rec.Body.String(), `"access_token"`)
+	require.NotContains(t, rec.Body.String(), `"refresh_token"`)
+}
+
+func TestSupplierProviderSyncHandlerRejectsInvalidRefreshTokenProviderID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, &supplierProviderSyncHandlerDataStub{})
+	router := gin.New()
+	router.POST("/providers/:id/refresh-token", handler.RefreshToken)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/providers/not-a-number/refresh-token", nil)
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)

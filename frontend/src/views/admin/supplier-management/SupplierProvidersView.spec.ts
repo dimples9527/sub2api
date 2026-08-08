@@ -12,6 +12,7 @@ const providerViewMocks = vi.hoisted(() => ({
   backfillCostTrends: vi.fn(),
   listProviderTypes: vi.fn(),
   updateProvider: vi.fn(),
+  refreshToken: vi.fn(),
   getAuthStatus: vi.fn(),
   listAuthHistory: vi.fn(),
   syncProvider: vi.fn(),
@@ -41,6 +42,7 @@ vi.mock('@/api/admin/supplierProviders', () => ({
     listCostTrends: providerViewMocks.listCostTrends,
     backfillCostTrends: providerViewMocks.backfillCostTrends,
     update: providerViewMocks.updateProvider,
+    refreshToken: providerViewMocks.refreshToken,
     getAuthStatus: providerViewMocks.getAuthStatus,
     listAuthHistory: providerViewMocks.listAuthHistory,
   },
@@ -299,6 +301,45 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(providerViewMocks.listAuthHistory).toHaveBeenCalledTimes(1)
     expect(providerViewMocks.syncProvider).not.toHaveBeenCalled()
     expect(providerViewMocks.testProviderEndpoint).not.toHaveBeenCalled()
+  })
+
+  it('shows the manual refresh button only for NewAPI providers and refreshes the token', async () => {
+    providerRows.splice(0, providerRows.length, ...[
+      { ...createProviderRow(1, 'NewAPI', 30, 100, 1), provider_type: 'newapi' },
+      createProviderRow(2, 'Sub2API', 10, 20, 2),
+    ])
+    providerViewMocks.refreshToken.mockResolvedValue({
+      provider_id: 1,
+      expires_at: '2026-08-08T08:30:00Z',
+      message: 'Token 刷新成功',
+    })
+
+    const wrapper = await mountSupplierProviders()
+    const refreshButton = wrapper.get('[data-test="supplier-provider-refresh-token-1"]')
+
+    expect(wrapper.find('[data-test="supplier-provider-refresh-token-2"]').exists()).toBe(false)
+    await refreshButton.trigger('click')
+    await flushPromises()
+
+    expect(providerViewMocks.refreshToken).toHaveBeenCalledWith(1)
+    expect(providerViewMocks.showSuccess).toHaveBeenCalledWith('Token 刷新成功')
+  })
+
+  it('disables the manual refresh button while the request is running', async () => {
+    providerRows.splice(0, providerRows.length, { ...createProviderRow(1, 'NewAPI', 30, 100, 1), provider_type: 'newapi' })
+    let resolveRefresh!: (value: unknown) => void
+    providerViewMocks.refreshToken.mockReturnValue(new Promise(resolve => {
+      resolveRefresh = resolve
+    }))
+
+    const wrapper = await mountSupplierProviders()
+    const refreshButton = wrapper.get('[data-test="supplier-provider-refresh-token-1"]')
+    await refreshButton.trigger('click')
+
+    expect(refreshButton.text()).toBe('刷新中')
+    expect((refreshButton.element as HTMLButtonElement).disabled).toBe(true)
+
+    resolveRefresh({ message: 'Token 刷新成功' })
   })
 
   it('declares refresh event filters and API types for login history', () => {

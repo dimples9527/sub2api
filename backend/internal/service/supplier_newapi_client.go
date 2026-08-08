@@ -50,6 +50,52 @@ type SupplierNewAPIClient struct {
 func (c *SupplierNewAPIClient) SetAuthAuditor(auditor SupplierProviderAuthAuditor) {
 	c.authAuditor = auditor
 }
+func (c *SupplierNewAPIClient) RefreshToken(ctx context.Context, provider *SupplierProvider) (SupplierProviderAuthToken, error) {
+	if c == nil || c.tokenCache == nil {
+		return SupplierProviderAuthToken{}, errors.New("supplier provider token cache is unavailable")
+	}
+	if provider == nil || provider.ID <= 0 {
+		return SupplierProviderAuthToken{}, ErrSupplierProviderInvalid
+	}
+
+	token, found, err := c.tokenCache.Get(ctx, provider.ID)
+	if err != nil {
+		return SupplierProviderAuthToken{}, fmt.Errorf("get supplier provider token: %w", err)
+	}
+	if !found {
+		return SupplierProviderAuthToken{}, errors.New("supplier newapi refresh failed: missing cached token")
+	}
+	session, ok := supplierNewAPISessionFromToken(token)
+	if !ok || strings.TrimSpace(session.RefreshToken) == "" {
+		return SupplierProviderAuthToken{}, errors.New("supplier newapi refresh failed: missing refresh token")
+	}
+
+	owner := uuid.NewString()
+	acquired, err := c.tokenCache.TryAcquireLoginLock(ctx, provider.ID, owner, supplierSub2APILoginLockTTL)
+	if err != nil {
+		return SupplierProviderAuthToken{}, fmt.Errorf("acquire supplier provider login lock: %w", err)
+	}
+	if !acquired {
+		return SupplierProviderAuthToken{}, errors.New("supplier provider token refresh is already running")
+	}
+	defer func() {
+		if releaseErr := c.tokenCache.ReleaseLoginLock(context.Background(), provider.ID, owner); releaseErr != nil {
+			logger.LegacyPrintf("supplier_newapi_client", "release manual refresh lock failed provider_id=%d err=%v", provider.ID, releaseErr)
+		}
+	}()
+
+	ctx = WithSupplierProviderAuthSource(ctx, SupplierProviderAuthSourceManual)
+	refreshed, err := c.refreshSessionWithAudit(ctx, provider, session)
+	if err != nil {
+		return SupplierProviderAuthToken{}, err
+	}
+	refreshedToken := supplierNewAPISessionToken(refreshed)
+	if err := c.tokenCache.Set(ctx, provider.ID, refreshedToken, supplierNewAPISessionTTL(refreshed)); err != nil {
+		return SupplierProviderAuthToken{}, fmt.Errorf("store supplier provider token: %w", err)
+	}
+	c.storeSession(provider, refreshed)
+	return refreshedToken, nil
+}
 
 type supplierNewAPISession struct {
 	UserID       int64
@@ -956,6 +1002,7 @@ func (c *SupplierNewAPIClient) doRefresh(ctx context.Context, provider *Supplier
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", target.Scheme+"://"+target.Host)
 	req.Header.Set("Cookie", supplierNewAPIRefreshCookieName+"="+strings.TrimSpace(refreshToken))
 	if userID > 0 {
 		req.Header.Set("New-Api-User", strconv.FormatInt(userID, 10))

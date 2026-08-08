@@ -183,3 +183,15 @@ func normalizeSupplierSub2APIKeyStatus(status string) string {
 		return "unknown"
 	}
 }
+
+func (r *SupplierProviderRemoteRegistry) RefreshToken(ctx context.Context, provider *SupplierProvider) (SupplierProviderAuthToken, error) {
+	client, err := r.client(provider)
+	if err != nil {
+		return SupplierProviderAuthToken{}, err
+	}
+	refresher, ok := client.(SupplierProviderRemoteTokenRefresher)
+	if !ok {
+		return SupplierProviderAuthToken{}, fmt.Errorf("supplier provider type %s does not support manual token refresh", provider.ProviderType)
+	}
+	return refresher.RefreshToken(ctx, provider)
+}
