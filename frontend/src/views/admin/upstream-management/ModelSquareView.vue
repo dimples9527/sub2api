@@ -426,8 +426,11 @@ function groupRate(group?: ModelSquareGroup) {
 }
 
 function modelDisplayPrice(model: ModelSquareModel, field: PriceField) {
-  const price = Number(model[field] ?? 0)
-  if (!Number.isFinite(price)) return 0
+  const value = model[field]
+  if (value == null || value === '') return undefined
+
+  const price = Number(value)
+  if (!Number.isFinite(price)) return undefined
   return price * primaryGroupRate(model)
 }
 
@@ -468,9 +471,11 @@ function formatRate(value?: number) {
 }
 
 function formatPrice(value?: number | string) {
-  const n = Number(value ?? 0)
-  if (!Number.isFinite(n)) return '$0'
-  return `$${n.toFixed(n >= 10 ? 2 : 3).replace(/0+$/, '').replace(/\.$/, '')}`
+  if (value == null || value === '') return '-'
+
+  const n = Number(value)
+  if (!Number.isFinite(n)) return '-'
+  return '$' + n.toFixed(n >= 10 ? 2 : 3).replace(/0+$/, '').replace(/\.$/, '')
 }
 
 function unique(values: string[]) {
