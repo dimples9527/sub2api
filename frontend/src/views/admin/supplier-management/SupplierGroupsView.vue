@@ -754,6 +754,7 @@ import {
 import {
   autoMatchSupplierGroups,
   deleteSupplierGroup,
+  getLocalMonitorStatus,
   listSupplierGroupHealthTrends,
   listSupplierGroups,
   resolveSupplierGroupNameChange,
@@ -1295,7 +1296,7 @@ async function loadHealthTrend(groupIDs: number[], requestID = ++healthTrendRequ
 async function loadMonitorTrend(requestID = ++monitorTrendRequestID) {
   monitorLoading.value = true
   try {
-    const payload = await adminAPI.groups.getUpstreamMonitorStatus({ period: '90m', board: 'hot' })
+    const payload = await getLocalMonitorStatus({ period: '90m', board: 'hot' })
     if (requestID !== monitorTrendRequestID) return
     monitorTrendIndex.value = buildSupplierGroupMonitorTrendIndex(payload)
   } catch (err) {

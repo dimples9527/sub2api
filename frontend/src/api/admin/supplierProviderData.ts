@@ -1,4 +1,4 @@
-import { apiClient } from '../client'
+import { apiClient, buildGatewayUrl } from '../client'
 import { ADMIN_UI_REQUEST_HEADER } from '../adminUIRequest'
 import { buildApiUrl } from '../url'
 import type { BatchAccountTestJob, GroupPlatform, SubscriptionType } from '@/types'
@@ -442,6 +442,18 @@ export async function listSupplierGroupHealthTrends(
     '/admin/supplier-management/groups/health-trends',
     { params: { group_ids: groupIds.join(','), period } }
   )
+  return data
+}
+export async function getLocalMonitorStatus(params?: {
+  period?: string
+  board?: string
+}): Promise<unknown> {
+  const { data } = await apiClient.get<unknown>(buildGatewayUrl('/api/llm-monitor/local-status'), {
+    params: {
+      period: params?.period || '90m',
+      board: params?.board || 'hot'
+    }
+  })
   return data
 }
 export async function listSupplierGroups(params: SupplierProviderDataListParams = {}): Promise<SupplierProviderGroupListResult> {
