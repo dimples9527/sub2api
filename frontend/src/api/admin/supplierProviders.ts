@@ -12,6 +12,7 @@ export interface SupplierProvider {
   available_groups_url: string
   balance_url: string
   usage_cost_url: string
+  monitor_url: string
   account_name_prefix: string
   temp_disable_minutes: number
   account_rate_multiplier_scale: number
@@ -154,6 +155,7 @@ export interface SupplierProviderUpsertPayload {
   available_groups_url?: string
   balance_url?: string
   usage_cost_url?: string
+  monitor_url?: string
   email?: string
   username?: string
   password?: string
@@ -303,7 +305,7 @@ export async function listCostTrends(
   return data
 }
 
-/** ??????????????? daily_stats?????????? */
+/** 回填供应商消耗趋势 daily_stats 数据。 */
 export async function backfillCostTrends(
   params: SupplierProviderCostBackfillParams
 ): Promise<SupplierProviderCostBackfillResult> {

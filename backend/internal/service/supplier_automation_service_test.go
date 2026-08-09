@@ -114,6 +114,12 @@ type supplierAutomationSyncStub struct {
 	result SupplierProviderBatchSyncResult
 }
 
+type supplierAutomationMonitorSyncStub struct {
+	called int
+	err    error
+	result SupplierProviderMonitorSyncResult
+}
+
 type supplierAutomationRateGuardStub struct {
 	called int
 	config SupplierRateGuardConfig
@@ -169,6 +175,11 @@ func (s *supplierAutomationSyncStub) SyncAllEnabled(context.Context, string) (Su
 		return s.result, nil
 	}
 	return SupplierProviderBatchSyncResult{ProcessedCount: 2, SuccessCount: 1, FailedCount: 1}, nil
+}
+
+func (s *supplierAutomationMonitorSyncStub) SyncMonitorsEnabled(context.Context, string) (SupplierProviderMonitorSyncResult, error) {
+	s.called++
+	return s.result, s.err
 }
 
 func TestSupplierAutomationCronParserSupportsLegacySecondsAndEvery(t *testing.T) {
@@ -335,6 +346,50 @@ func TestSupplierAutomationServiceUsesUpstreamFetchLockForDataSync(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, 1, syncer.called)
 	require.Equal(t, []string{SupplierAutomationTaskSync, "supplier_upstream_fetch"}, lock.acquireCalls)
+	require.Equal(t, 2, lock.released)
+}
+
+func TestSupplierAutomationServiceRunsSupplierMonitorSyncTask(t *testing.T) {
+	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
+		SupplierAutomationTaskMonitorSync: {
+			TaskCode: SupplierAutomationTaskMonitorSync, Name: "供应商监控数据同步", Enabled: true,
+			CronExpression: "@every 30s", TimeoutSeconds: 600,
+		},
+	}}
+	lock := &supplierAutomationLockStub{
+		acquired: true,
+		acquireResults: map[string][]bool{
+			SupplierAutomationTaskMonitorSync: {true},
+			"supplier_upstream_fetch":         {true},
+		},
+	}
+	monitorSync := &supplierAutomationMonitorSyncStub{result: SupplierProviderMonitorSyncResult{
+		ProcessedCount: 2,
+		SuccessCount:   2,
+		Items: []SupplierProviderMonitorSyncItem{{
+			ProviderID:     12,
+			ProviderName:   "供应商 A",
+			LocalAccountID: 98,
+			UpstreamName:   "grok对话",
+			Status:         SupplierAccountHealthGuardStatusSlow,
+			LatencyMS:      10122,
+		}},
+	}}
+	service := NewSupplierAutomationService(repo, lock, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
+	service.SetMonitorSyncService(monitorSync)
+
+	run, err := service.Run(context.Background(), SupplierAutomationTaskMonitorSync, SupplierSyncTriggerScheduled)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, monitorSync.called)
+	require.Equal(t, SupplierAutomationStatusSuccess, run.Status)
+	require.Equal(t, 2, run.ProcessedCount)
+	require.Equal(t, 2, run.SuccessCount)
+	require.NotNil(t, run.ResultDetail)
+	require.NotNil(t, run.ResultDetail.SupplierMonitor)
+	require.Len(t, run.ResultDetail.SupplierMonitor.Items, 1)
+	require.Equal(t, int64(98), run.ResultDetail.SupplierMonitor.Items[0].LocalAccountID)
+	require.Equal(t, []string{SupplierAutomationTaskMonitorSync, "supplier_upstream_fetch"}, lock.acquireCalls)
 	require.Equal(t, 2, lock.released)
 }
 func TestSupplierAutomationServiceRejectsPreviewModeForOtherTasks(t *testing.T) {
@@ -790,7 +845,6 @@ func TestSupplierAutomationServiceRecordsConflictWhenLockBusy(t *testing.T) {
 	require.Equal(t, SupplierSyncTriggerScheduled, run.TriggerSource)
 }
 
-
 func TestSupplierAutomationRunDoesNotOverwriteCronExpression(t *testing.T) {
 	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
 		SupplierAutomationTaskAccountRateGuard: {
@@ -899,7 +953,6 @@ func (s *supplierAutomationAccountHealthGuardMutatingStub) Run(_ context.Context
 	return s.result, s.err
 }
 
-
 func TestSupplierAutomationSchedulerSkipsInvalidTaskWithoutBlockingOthers(t *testing.T) {
 	badConfig := validSupplierAccountHealthGuardAutomationConfig()
 	badConfig.AccountHealthGuardAccountIDs = nil
@@ -932,4 +985,3 @@ func TestSupplierAutomationSchedulerSkipsInvalidTaskWithoutBlockingOthers(t *tes
 	}
 	require.Greater(t, len(repo.runs), 0, "valid cleanup task should still be scheduled when health guard config is invalid")
 }
-

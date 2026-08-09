@@ -75,11 +75,12 @@ func RegisterLocalLLMMonitorRoutes(
 			return
 		}
 		healthTrends, err := dataProvider.ListLocalGroupHealthTrends(ctx, service.SupplierProviderGroupHealthTrendParams{
-			GroupIDs:    localGroupIDs,
-			Period:      period.Duration,
-			BucketCount: period.BucketCount,
-			Now:         time.Now().UTC(),
-			AllHistory:  period.AllHistory,
+			GroupIDs:                 localGroupIDs,
+			Period:                   period.Duration,
+			BucketCount:              period.BucketCount,
+			Now:                      time.Now().UTC(),
+			AllHistory:               period.AllHistory,
+			PreferRawMonitorTimeline: true,
 		})
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load local health trends"})

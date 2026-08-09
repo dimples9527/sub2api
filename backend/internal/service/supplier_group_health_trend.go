@@ -1,8 +1,14 @@
 package service
 
-import "time"
+import (
+	"sort"
+	"time"
+)
 
-const SupplierProviderGroupHealthTrendSource = "supplier_account_health_guard"
+const (
+	SupplierProviderGroupHealthTrendSource        = "supplier_account_health_guard"
+	SupplierProviderGroupHealthTrendMonitorSource = "supplier_monitor"
+)
 
 const (
 	supplierProviderGroupHealthTrendToneGreen  = "green"
@@ -12,16 +18,18 @@ const (
 )
 
 type SupplierProviderGroupHealthTrendParams struct {
-	GroupIDs    []int64
-	Period      time.Duration
-	BucketCount int
-	Now         time.Time
-	AllHistory  bool
+	GroupIDs                 []int64
+	Period                   time.Duration
+	BucketCount              int
+	Now                      time.Time
+	AllHistory               bool
+	PreferRawMonitorTimeline bool
 }
 
 type SupplierProviderGroupHealthSample struct {
 	GroupID    int64
 	AccountID  int64
+	Source     string
 	Status     string
 	Latency    int64
 	FinishedAt time.Time
@@ -50,18 +58,50 @@ type supplierProviderGroupHealthSampleKey struct {
 	bucketIndex int
 }
 
+type supplierProviderGroupHealthRawSampleKey struct {
+	groupID   int64
+	accountID int64
+	minute    time.Time
+}
+
 func BuildSupplierProviderGroupHealthTrends(samples []SupplierProviderGroupHealthSample, params SupplierProviderGroupHealthTrendParams) map[int64]SupplierProviderGroupHealthTrend {
 	params = normalizeSupplierProviderGroupHealthTrendParams(params)
-	requestedGroups := make(map[int64]struct{}, len(params.GroupIDs))
-	for _, groupID := range params.GroupIDs {
-		if groupID > 0 {
-			requestedGroups[groupID] = struct{}{}
-		}
-	}
+	requestedGroups := supplierProviderGroupHealthRequestedGroups(params.GroupIDs)
 	if len(requestedGroups) == 0 {
 		return map[int64]SupplierProviderGroupHealthTrend{}
 	}
 
+	fallbackSamples := make([]SupplierProviderGroupHealthSample, 0, len(samples))
+	monitorSamples := make([]SupplierProviderGroupHealthSample, 0)
+	for _, sample := range samples {
+		if sample.Source == SupplierProviderGroupHealthTrendMonitorSource {
+			monitorSamples = append(monitorSamples, sample)
+			continue
+		}
+		fallbackSamples = append(fallbackSamples, sample)
+	}
+
+	trends := buildSupplierProviderGroupHealthBucketTrends(fallbackSamples, params, requestedGroups)
+	if !params.PreferRawMonitorTimeline {
+		return trends
+	}
+	for groupID, trend := range buildSupplierProviderGroupHealthRawMonitorTrends(monitorSamples, params, requestedGroups) {
+		trends[groupID] = trend
+	}
+	return trends
+}
+
+func supplierProviderGroupHealthRequestedGroups(groupIDs []int64) map[int64]struct{} {
+	requestedGroups := make(map[int64]struct{}, len(groupIDs))
+	for _, groupID := range groupIDs {
+		if groupID > 0 {
+			requestedGroups[groupID] = struct{}{}
+		}
+	}
+	return requestedGroups
+}
+
+func buildSupplierProviderGroupHealthBucketTrends(samples []SupplierProviderGroupHealthSample, params SupplierProviderGroupHealthTrendParams, requestedGroups map[int64]struct{}) map[int64]SupplierProviderGroupHealthTrend {
 	windowStart := params.Now.Add(-params.Period)
 	if params.AllHistory {
 		var earliestSample time.Time
@@ -133,6 +173,65 @@ func BuildSupplierProviderGroupHealthTrends(samples []SupplierProviderGroupHealt
 		if latestPoint == nil {
 			continue
 		}
+		trend.Availability = latestPoint.Availability
+		trend.Latency = latestPoint.Latency
+		trend.Time = latestPoint.Time
+		trends[groupID] = trend
+	}
+	return trends
+}
+
+func buildSupplierProviderGroupHealthRawMonitorTrends(samples []SupplierProviderGroupHealthSample, params SupplierProviderGroupHealthTrendParams, requestedGroups map[int64]struct{}) map[int64]SupplierProviderGroupHealthTrend {
+	latestSamples := make(map[supplierProviderGroupHealthRawSampleKey]SupplierProviderGroupHealthSample)
+	for _, sample := range samples {
+		if _, ok := requestedGroups[sample.GroupID]; !ok || !supplierProviderGroupHealthSampleUsable(sample) {
+			continue
+		}
+		finishedAt := sample.FinishedAt.UTC()
+		if finishedAt.After(params.Now) {
+			continue
+		}
+		key := supplierProviderGroupHealthRawSampleKey{
+			groupID:   sample.GroupID,
+			accountID: sample.AccountID,
+			minute:    finishedAt.Truncate(time.Minute),
+		}
+		if current, exists := latestSamples[key]; !exists || finishedAt.After(current.FinishedAt) {
+			latestSamples[key] = sample
+		}
+	}
+
+	pointsByGroup := make(map[int64]map[time.Time][]SupplierProviderGroupHealthSample)
+	for key, sample := range latestSamples {
+		if pointsByGroup[key.groupID] == nil {
+			pointsByGroup[key.groupID] = make(map[time.Time][]SupplierProviderGroupHealthSample)
+		}
+		pointsByGroup[key.groupID][key.minute] = append(pointsByGroup[key.groupID][key.minute], sample)
+	}
+
+	trends := make(map[int64]SupplierProviderGroupHealthTrend, len(pointsByGroup))
+	for groupID, pointsByMinute := range pointsByGroup {
+		minutes := make([]time.Time, 0, len(pointsByMinute))
+		for minute := range pointsByMinute {
+			minutes = append(minutes, minute)
+		}
+		sort.Slice(minutes, func(i, j int) bool { return minutes[i].Before(minutes[j]) })
+		if len(minutes) > params.BucketCount {
+			minutes = minutes[len(minutes)-params.BucketCount:]
+		}
+
+		trend := SupplierProviderGroupHealthTrend{
+			GroupID: groupID,
+			Source:  SupplierProviderGroupHealthTrendMonitorSource,
+			Trend:   make([]SupplierProviderGroupHealthTrendPoint, 0, len(minutes)),
+		}
+		for _, minute := range minutes {
+			trend.Trend = append(trend.Trend, buildSupplierProviderGroupHealthTrendPoint(minute, pointsByMinute[minute]))
+		}
+		if len(trend.Trend) == 0 {
+			continue
+		}
+		latestPoint := trend.Trend[len(trend.Trend)-1]
 		trend.Availability = latestPoint.Availability
 		trend.Latency = latestPoint.Latency
 		trend.Time = latestPoint.Time

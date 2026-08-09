@@ -10,6 +10,7 @@ export interface SupplierProviderType {
   available_groups_url: string
   balance_url: string
   usage_cost_url: string
+  monitor_url: string
   enabled: boolean
   sort_order: number
   created_at: string
@@ -25,6 +26,7 @@ export interface SupplierProviderTypeUpsertPayload {
   available_groups_url?: string
   balance_url?: string
   usage_cost_url?: string
+  monitor_url?: string
   enabled: boolean
   sort_order?: number
 }

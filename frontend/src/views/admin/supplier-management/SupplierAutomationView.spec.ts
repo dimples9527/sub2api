@@ -72,6 +72,22 @@ describe('SupplierAutomationView second-level intervals', () => {
 })
 
 describe('SupplierAutomationView edit dialog', () => {
+  it('exposes supplier monitor matching details from monitor item to local account and group', () => {
+    expect(supplierAutomationAPISource).toContain('supplier_monitor?: SupplierProviderMonitorSyncResult')
+    expect(supplierAutomationAPISource).toContain('local_group_names?: string[]')
+    expect(supplierAutomationSource).toContain('监控项 / 本地账号 / 本地分组')
+    expect(supplierAutomationSource).toContain('未匹配本地账号')
+    expect(supplierAutomationSource).toContain('未归属本地分组')
+    expect(supplierAutomationSource).toContain('detailRun.result_detail?.supplier_monitor')
+  })
+
+
+  it('shows only the newest timeline point for each supplier monitor in the result list', () => {
+    expect(supplierAutomationSource).toContain('const supplierMonitorDisplayItems = computed<SupplierProviderMonitorSyncItem[]>(() => {')
+    expect(supplierAutomationSource).toContain('const latestByMonitor = new Map<string, SupplierProviderMonitorSyncItem>()')
+    expect(supplierAutomationSource).toContain('supplierMonitorCheckedAt(item) > supplierMonitorCheckedAt(previous)')
+    expect(supplierAutomationSource).toContain('v-for="item in supplierMonitorDisplayItems"')
+  })
   it('shows the task name and code in each run history row', () => {
     expect(supplierAutomationSource).toContain('<template #cell-task_code="{ row: run }">')
     expect(supplierAutomationSource).toContain('{{ taskName(run.task_code) }}')

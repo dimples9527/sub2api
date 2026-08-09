@@ -13,7 +13,7 @@ func ProvideSupplierAccountHealthGuardTester(tester *AccountTestService) supplie
 func ProvideSupplierAutomationService(
 	repo SupplierAutomationRepository,
 	lock SupplierAutomationLock,
-	syncer SupplierProviderBatchSyncer,
+	syncer *SupplierProviderSyncService,
 	dataRepo SupplierProviderDataRepository,
 	rateGuard *SupplierRateGuardService,
 	accountRateGuard *SupplierAccountRateGuardService,
@@ -21,6 +21,7 @@ func ProvideSupplierAutomationService(
 	accountRateGuardRepo SupplierAccountRateGuardRepository,
 ) *SupplierAutomationService {
 	svc := NewSupplierAutomationService(repo, lock, syncer, dataRepo)
+	svc.SetMonitorSyncService(syncer)
 	svc.SetRateGuardService(rateGuard)
 	svc.SetAccountRateGuardService(accountRateGuard)
 	svc.SetAccountHealthGuardService(accountHealthGuard)

@@ -65,6 +65,18 @@ func (r *SupplierProviderRemoteRegistry) FetchCost(ctx context.Context, provider
 	return client.FetchCost(ctx, provider, password, day)
 }
 
+func (r *SupplierProviderRemoteRegistry) FetchMonitorItems(ctx context.Context, provider *SupplierProvider, password string) ([]SupplierProviderMonitorItem, error) {
+	client, err := r.client(provider)
+	if err != nil {
+		return nil, err
+	}
+	monitorClient, ok := client.(SupplierProviderRemoteMonitorClient)
+	if !ok {
+		return nil, ErrSupplierProviderInvalid
+	}
+	return monitorClient.FetchMonitorItems(ctx, provider, password)
+}
+
 func (r *SupplierProviderRemoteRegistry) TestEndpoint(ctx context.Context, provider *SupplierProvider, password string, scope string) (SupplierProviderEndpointTestResult, error) {
 	client, err := r.client(provider)
 	if err != nil {

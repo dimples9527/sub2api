@@ -14,15 +14,19 @@ import (
 )
 
 type localLLMMonitorDataStub struct {
-	mappings []service.SupplierProviderGroup
-	trends   []service.SupplierProviderGroupHealthTrend
+	mappings          []service.SupplierProviderGroup
+	trends            []service.SupplierProviderGroupHealthTrend
+	healthTrendParams *[]service.SupplierProviderGroupHealthTrendParams
 }
 
 func (s localLLMMonitorDataStub) ListMappingsByLocalGroup(context.Context, []int64) ([]service.SupplierProviderGroup, error) {
 	return s.mappings, nil
 }
 
-func (s localLLMMonitorDataStub) ListLocalGroupHealthTrends(context.Context, service.SupplierProviderGroupHealthTrendParams) ([]service.SupplierProviderGroupHealthTrend, error) {
+func (s localLLMMonitorDataStub) ListLocalGroupHealthTrends(_ context.Context, params service.SupplierProviderGroupHealthTrendParams) ([]service.SupplierProviderGroupHealthTrend, error) {
+	if s.healthTrendParams != nil {
+		*s.healthTrendParams = append(*s.healthTrendParams, params)
+	}
 	return s.trends, nil
 }
 
@@ -44,6 +48,7 @@ func TestLocalLLMMonitorStatusMergesActiveLocalGroupsAndHidesSources(t *testing.
 	localID1 := int64(1)
 	localID2 := int64(2)
 	localID3 := int64(3)
+	var healthTrendParams []service.SupplierProviderGroupHealthTrendParams
 	router := gin.New()
 	RegisterLocalLLMMonitorRoutes(
 		router,
@@ -55,6 +60,7 @@ func TestLocalLLMMonitorStatusMergesActiveLocalGroupsAndHidesSources(t *testing.
 			{ID: 4, Name: "Disabled", Status: "disabled"},
 		}},
 		localLLMMonitorDataStub{
+			healthTrendParams: &healthTrendParams,
 			mappings: []service.SupplierProviderGroup{
 				{LocalGroupID: &localID1, Name: "供应商 VIP", UpstreamKey: "vip", MatchedUpstreamName: "Upstream VIP"},
 				{LocalGroupID: &localID3, Name: "Local Upstream", UpstreamKey: "local-upstream"},
@@ -75,6 +81,8 @@ func TestLocalLLMMonitorStatusMergesActiveLocalGroupsAndHidesSources(t *testing.
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Len(t, healthTrendParams, 1)
+	require.True(t, healthTrendParams[0].PreferRawMonitorTimeline)
 	var payload struct {
 		Groups []map[string]any `json:"groups"`
 	}
@@ -105,6 +113,15 @@ func TestLocalLLMMonitorStatusMergesActiveLocalGroupsAndHidesSources(t *testing.
 	require.Equal(t, 88.0, upstreamLayer["timeline"].([]any)[0].(map[string]any)["availability"])
 }
 
+func TestParseLocalLLMMonitorPeriodUsesNinetyMinutesForDefaultSupplierTimeline(t *testing.T) {
+	period, ok := parseLocalLLMMonitorPeriod("")
+
+	require.True(t, ok)
+	require.Equal(t, 90*time.Minute, period.Duration)
+	require.Equal(t, 18, period.BucketCount)
+	_, ok = parseLocalLLMMonitorPeriod("3h")
+	require.False(t, ok)
+}
 func TestLocalLLMMonitorToneUsesFortyPercentGreenThreshold(t *testing.T) {
 	require.Equal(t, "green", localLLMMonitorTone(nil, 40))
 	require.Equal(t, "yellow", localLLMMonitorTone(nil, 39.99))

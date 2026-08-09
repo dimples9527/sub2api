@@ -34,8 +34,8 @@ func TestSupplierProviderDataRepositoryListGroupHealthTrendsUsesHealthGuardHisto
 			now,
 			"{12}",
 		).
-		WillReturnRows(sqlmock.NewRows([]string{"group_id", "account_id", "status", "latency_ms", "finished_at"}).
-			AddRow(int64(12), int64(98), service.SupplierAccountHealthGuardStatusHealthy, int64(140), now.Add(-time.Minute)))
+		WillReturnRows(sqlmock.NewRows([]string{"group_id", "account_id", "status", "latency_ms", "finished_at", "source"}).
+			AddRow(int64(12), int64(98), service.SupplierAccountHealthGuardStatusHealthy, int64(140), now.Add(-time.Minute), service.SupplierProviderGroupHealthTrendSource))
 
 	trends, err := repo.ListGroupHealthTrends(context.Background(), service.SupplierProviderGroupHealthTrendParams{
 		GroupIDs:    []int64{12},
@@ -56,16 +56,17 @@ func TestSupplierProviderDataRepositoryListGroupHealthTrendsUsesHealthGuardHisto
 func TestSupplierProviderDataRepositoryListLocalGroupHealthTrendsResolvesAccountToEveryBoundLocalGroup(t *testing.T) {
 	repo, mock := newSupplierProviderDataRepoMock(t)
 	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
-	mock.ExpectQuery(`(?s)SELECT account_group\.group_id AS group_id,.*\(item->>'local_account_id'\)::bigint AS account_id,.*FROM supplier_automation_runs run.*JOIN supplier_provider_accounts account.*JOIN account_groups account_group.*account_group\.group_id = ANY\(\$4\)`).
+	mock.ExpectQuery(`(?s)SELECT account_group\.group_id AS group_id,.*NULLIF\(item->>'local_account_id', ''\)::bigint AS account_id,.*FROM supplier_automation_runs run.*JOIN supplier_provider_accounts account.*JOIN account_groups account_group.*result_detail->'supplier_monitor'->'items'.*account_group\.group_id = ANY\(\$5\)`).
 		WithArgs(
 			service.SupplierAutomationTaskAccountHealthGuard,
+			service.SupplierAutomationTaskMonitorSync,
 			now.Add(-24*time.Hour),
 			now,
 			"{101,202}",
 		).
-		WillReturnRows(sqlmock.NewRows([]string{"group_id", "account_id", "status", "latency_ms", "finished_at"}).
-			AddRow(int64(101), int64(98), service.SupplierAccountHealthGuardStatusHealthy, int64(140), now.Add(-time.Minute)).
-			AddRow(int64(202), int64(98), service.SupplierAccountHealthGuardStatusHealthy, int64(140), now.Add(-time.Minute)))
+		WillReturnRows(sqlmock.NewRows([]string{"group_id", "account_id", "status", "latency_ms", "finished_at", "source"}).
+			AddRow(int64(101), int64(98), service.SupplierAccountHealthGuardStatusHealthy, int64(140), now.Add(-time.Minute), service.SupplierProviderGroupHealthTrendSource).
+			AddRow(int64(202), int64(98), service.SupplierAccountHealthGuardStatusHealthy, int64(140), now.Add(-time.Minute), service.SupplierProviderGroupHealthTrendSource))
 
 	trends, err := repo.ListLocalGroupHealthTrends(context.Background(), service.SupplierProviderGroupHealthTrendParams{
 		GroupIDs:    []int64{101, 202},
@@ -86,14 +87,15 @@ func TestSupplierProviderDataRepositoryListLocalGroupHealthTrendsResolvesAccount
 func TestSupplierProviderDataRepositoryListLocalGroupHealthTrendsAllHistoryOmitsLowerBound(t *testing.T) {
 	repo, mock := newSupplierProviderDataRepoMock(t)
 	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
-	mock.ExpectQuery(`(?s)SELECT account_group\.group_id AS group_id,.*\(item->>'local_account_id'\)::bigint AS account_id,.*JOIN account_groups account_group.*WHERE run\.task_code = \$1\s+AND run\.finished_at IS NOT NULL\s+AND run\.finished_at <= \$2\s+AND account_group\.group_id IS NOT NULL\s+AND account_group\.group_id = ANY\(\$3\)`).
+	mock.ExpectQuery(`(?s)SELECT account_group\.group_id AS group_id,.*NULLIF\(item->>'local_account_id', ''\)::bigint AS account_id,.*JOIN account_groups account_group.*WHERE run\.task_code = \$1\s+AND run\.finished_at IS NOT NULL\s+AND run\.finished_at <= \$3\s+AND account_group\.group_id IS NOT NULL\s+AND account_group\.group_id = ANY\(\$4\).*result_detail->'supplier_monitor'->'items'`).
 		WithArgs(
 			service.SupplierAutomationTaskAccountHealthGuard,
+			service.SupplierAutomationTaskMonitorSync,
 			now,
 			"{101}",
 		).
-		WillReturnRows(sqlmock.NewRows([]string{"group_id", "account_id", "status", "latency_ms", "finished_at"}).
-			AddRow(int64(101), int64(98), service.SupplierAccountHealthGuardStatusHealthy, int64(140), now.Add(-30*24*time.Hour)))
+		WillReturnRows(sqlmock.NewRows([]string{"group_id", "account_id", "status", "latency_ms", "finished_at", "source"}).
+			AddRow(int64(101), int64(98), service.SupplierAccountHealthGuardStatusHealthy, int64(140), now.Add(-30*24*time.Hour), service.SupplierProviderGroupHealthTrendSource))
 
 	trends, err := repo.ListLocalGroupHealthTrends(context.Background(), service.SupplierProviderGroupHealthTrendParams{
 		GroupIDs:    []int64{101},
@@ -106,6 +108,36 @@ func TestSupplierProviderDataRepositoryListLocalGroupHealthTrendsAllHistoryOmits
 	require.NoError(t, err)
 	require.Len(t, trends, 1)
 	require.Equal(t, int64(101), trends[0].GroupID)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryListLocalGroupHealthTrendsIncludesSupplierMonitorHistory(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	checkedAt := now.Add(-30 * time.Second)
+	mock.ExpectQuery(`(?s)result_detail->'supplier_monitor'->'items'.*COALESCE\(NULLIF\(item->>'checked_at', ''\)::timestamptz, run\.finished_at\).*account_group\.group_id = ANY\(\$5\)`).
+		WithArgs(
+			service.SupplierAutomationTaskAccountHealthGuard,
+			service.SupplierAutomationTaskMonitorSync,
+			now.Add(-10*time.Minute),
+			now,
+			"{101}",
+		).
+		WillReturnRows(sqlmock.NewRows([]string{"group_id", "account_id", "status", "latency_ms", "finished_at", "source"}).
+			AddRow(int64(101), int64(98), service.SupplierAccountHealthGuardStatusSlow, int64(10122), checkedAt, service.SupplierProviderGroupHealthTrendMonitorSource))
+
+	trends, err := repo.ListLocalGroupHealthTrends(context.Background(), service.SupplierProviderGroupHealthTrendParams{
+		GroupIDs:                 []int64{101},
+		Period:                   10 * time.Minute,
+		BucketCount:              10,
+		Now:                      now,
+		PreferRawMonitorTimeline: true,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, trends, 1)
+	require.Equal(t, int64(101), trends[0].GroupID)
+	require.Equal(t, int64(10122), trends[0].Latency)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -238,15 +270,7 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
        inactive_group_record.id AS group_record_id,
        COALESCE(
          inactive_group_record.id IS NOT NULL
-         AND inactive_group_record.local_group_id IS NULL
-         AND inactive_group_record.rate_guard_selected = FALSE
-         AND NOT EXISTS (
-           SELECT 1
-           FROM supplier_provider_accounts a2
-           WHERE a2.provider_id = inactive_group_record.provider_id
-             AND a2.group_key = inactive_group_record.upstream_group_key
-             AND a2.active = TRUE
-         ),
+         AND inactive_group_record.rate_guard_selected = FALSE,
          FALSE
        ) AS group_record_delete_eligible
 FROM supplier_provider_accounts a
@@ -266,14 +290,7 @@ LEFT JOIN LATERAL (
          MIN(local_account.id) AS local_account_id
   FROM accounts local_account
   WHERE local_account.deleted_at IS NULL
-    AND regexp_replace(lower(local_account.name), '[^[:alnum:]]', '', 'g')
-        = regexp_replace(
-            lower(p.account_name_prefix || a.name),
-            '[^[:alnum:]]',
-            '',
-            'g'
-          )
-) local_match ON TRUE
+    AND ` + supplierProviderLocalAccountMatchCondition("local_account.name", "a.name") + `) local_match ON TRUE
 LEFT JOIN accounts matched_account
   ON matched_account.id = local_match.local_account_id
  AND local_match.match_count = 1
@@ -282,7 +299,11 @@ LEFT JOIN supplier_local_account_platform_overrides platform_override
 WHERE ` + whereSQL + `
 ORDER BY a.active DESC, a.last_seen_at DESC, a.id ASC LIMIT ` + limitPlaceholder + ` OFFSET ` + offsetPlaceholder
 
-	return "^" + regexp.QuoteMeta(strings.Join(strings.Fields(querySQL), " ")) + "$"
+	normalizedQuery := strings.Join(strings.Fields(querySQL), " ")
+	normalizedMatchCondition := strings.Join(strings.Fields(supplierProviderLocalAccountMatchCondition("local_account.name", "a.name")), " ")
+	quotedQuery := regexp.QuoteMeta(normalizedQuery)
+	quotedMatchCondition := regexp.QuoteMeta(normalizedMatchCondition)
+	return "^" + strings.Replace(quotedQuery, quotedMatchCondition, `(?s:.*?)`, 1) + "$"
 }
 
 func TestSupplierProviderDataRepositoryReplaceAccountsUpsertsAndDeactivatesMissing(t *testing.T) {
@@ -476,6 +497,13 @@ func TestSupplierProviderDataRepositoryListAccountsExposesInactiveGroupDeleteMet
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestSupplierProviderLocalAccountMatchConditionSupportsReorderedChineseAndLatinAccountName(t *testing.T) {
+	condition := supplierProviderLocalAccountMatchCondition("local_account.name", "a.name")
+
+	require.Contains(t, condition, "^([^a-z0-9]+)([a-z]+)([0-9]*)$")
+	require.Contains(t, condition, "^([a-z]+)([^a-z0-9]+)([0-9]*)$")
+	require.Contains(t, condition, `\2\1\3`)
+}
 func TestSupplierProviderDataRepositoryListAccountsSQLContractMapsUnmatchedAndConflictRows(t *testing.T) {
 	repo, mock := newSupplierProviderDataRepoMock(t)
 	now := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
@@ -555,7 +583,7 @@ func TestSupplierProviderDataRepositoryListAccountsExposesLocalAccountTypeForDup
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM supplier_provider_accounts a")).
 		WithArgs(int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
-	mock.ExpectQuery(`(?s)COALESCE\(matched_account\.type, ''\) AS local_account_type`).
+	mock.ExpectQuery(`(?s)COALESCE\(matched_account\.type, ''\) AS local_account_type.*COALESCE\(p\.name, ''\) \|\| '-' \|\| a\.name`).
 		WithArgs(int64(42), 20, 0).
 		WillReturnRows(sqlmock.NewRows(columns).AddRow(
 			int64(7), int64(42), "Supplier A", "upstream-key", "Primary", "active", "group-1", "VIP", "openai", "active", 1.5, "active", true, now, nil,
@@ -797,7 +825,7 @@ func TestSupplierProviderAccountWhereIncludesMappedGroupPlatform(t *testing.T) {
 	require.Contains(t, where, "COALESCE(NULLIF(platform_override.platform, ''), local_account.platform)")
 	require.Contains(t, where, "COALESCE(")
 	require.Contains(t, where, ") = $4")
-	require.Contains(t, where, "lower(p.account_name_prefix || a.name)")
+	require.Contains(t, where, "lower(COALESCE(p.account_name_prefix, '') || a.name)")
 	require.Equal(t, []any{int64(42), active, "%primary%", "openai"}, args)
 }
 
@@ -812,7 +840,7 @@ func TestSupplierProviderAccountWhereIncludesLocalGroup(t *testing.T) {
 	require.Contains(t, where, "JOIN account_groups account_group")
 	require.Contains(t, where, "account_group.group_id = $2")
 	require.Contains(t, where, "local_group.deleted_at IS NULL")
-	require.Contains(t, where, "lower(p.account_name_prefix || a.name)")
+	require.Contains(t, where, "lower(COALESCE(p.account_name_prefix, '') || a.name)")
 	require.Contains(t, where, ") = 1")
 	require.NotContains(t, where, "mapped_group.local_group_id = $2")
 	require.Equal(t, []any{int64(42), int64(201)}, args)

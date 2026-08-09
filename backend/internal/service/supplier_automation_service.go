@@ -100,6 +100,7 @@ type SupplierAutomationRunDetail struct {
 	RateGuard          *SupplierRateGuardResult              `json:"rate_guard,omitempty"`
 	AccountRateGuard   *SupplierAccountRateGuardResult       `json:"account_rate_guard,omitempty"`
 	AccountHealthGuard *SupplierAccountHealthGuardResult     `json:"account_health_guard,omitempty"`
+	SupplierMonitor    *SupplierProviderMonitorSyncResult    `json:"supplier_monitor,omitempty"`
 }
 
 type SupplierAutomationProviderRunDetail struct {
@@ -193,6 +194,7 @@ const (
 	SupplierAutomationRunModeExecute = "execute"
 
 	SupplierAutomationTaskSync               = "supplier_data_sync"
+	SupplierAutomationTaskMonitorSync        = "supplier_monitor_sync"
 	SupplierAutomationTaskCleanup            = "supplier_data_cleanup"
 	SupplierAutomationTaskRateGuard          = "supplier_rate_guard"
 	SupplierAutomationTaskAccountRateGuard   = "supplier_account_rate_guard"
@@ -216,6 +218,7 @@ type SupplierAutomationService struct {
 	repo               SupplierAutomationRepository
 	lock               SupplierAutomationLock
 	syncer             SupplierProviderBatchSyncer
+	monitorSyncer      SupplierProviderMonitorSyncer
 	dataRepo           SupplierProviderDataRepository
 	rateGuard          SupplierRateGuardRunner
 	accountRateGuard   SupplierAccountRateGuardRunner
@@ -230,6 +233,12 @@ func NewSupplierAutomationService(repo SupplierAutomationRepository, lock Suppli
 
 func (s *SupplierAutomationService) SetSchedulerReloader(reloader SupplierAutomationSchedulerReloader) {
 	s.reloader = reloader
+}
+
+func (s *SupplierAutomationService) SetMonitorSyncService(syncer SupplierProviderMonitorSyncer) {
+	if s != nil {
+		s.monitorSyncer = syncer
+	}
 }
 
 func (s *SupplierAutomationService) SetRateGuardService(rateGuard SupplierRateGuardRunner) {
@@ -448,12 +457,10 @@ func (s *SupplierAutomationService) persistAccountHealthGuardCursor(ctx context.
 	return s.repo.UpdateTask(ctx, current)
 }
 
-
-
 // supplierAutomationTaskRequiresUpstreamFetchLock 标记会读取上游供应商数据的自动化任务。
 func supplierAutomationTaskRequiresUpstreamFetchLock(taskCode string) bool {
 	switch taskCode {
-	case SupplierAutomationTaskSync, SupplierAutomationTaskAccountRateGuard:
+	case SupplierAutomationTaskSync, SupplierAutomationTaskMonitorSync, SupplierAutomationTaskAccountRateGuard:
 		return true
 	default:
 		return false
@@ -498,6 +505,23 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 		if result.FailedCount > 0 {
 			run.Status = SupplierAutomationStatusPartial
 			run.Message = supplierAutomationBatchFailureMessage(result)
+		}
+		return nil
+	case SupplierAutomationTaskMonitorSync:
+		if s.monitorSyncer == nil {
+			return fmt.Errorf("supplier monitor sync service is required")
+		}
+		result, err := s.monitorSyncer.SyncMonitorsEnabled(ctx, SupplierSyncTriggerScheduled)
+		run.ProcessedCount = result.ProcessedCount
+		run.SuccessCount = result.SuccessCount
+		run.FailedCount = result.FailedCount
+		run.ResultDetail = &SupplierAutomationRunDetail{SupplierMonitor: &result}
+		if err != nil {
+			return err
+		}
+		if result.FailedCount > 0 {
+			run.Status = SupplierAutomationStatusPartial
+			run.Message = fmt.Sprintf("供应商监控数据同步存在 %d 个失败供应商", result.FailedCount)
 		}
 		return nil
 	case SupplierAutomationTaskCleanup:
@@ -770,6 +794,7 @@ func (s *SupplierAutomationScheduler) Start() {
 	if s.service != nil && s.service.lock != nil {
 		for _, taskCode := range []string{
 			SupplierAutomationTaskSync,
+			SupplierAutomationTaskMonitorSync,
 			SupplierAutomationTaskCleanup,
 			SupplierAutomationTaskRateGuard,
 			SupplierAutomationTaskAccountRateGuard,

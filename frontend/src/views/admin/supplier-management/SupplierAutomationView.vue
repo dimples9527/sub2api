@@ -569,6 +569,59 @@
               </section>
             </section>
 
+            <section v-else-if="detailRun.result_detail?.supplier_monitor && supplierMonitorResult" class="sp-rate-guard-detail sp-monitor-detail">
+              <div class="sp-rate-guard-summary sp-monitor-summary">
+                <div><span>监控项</span><strong>{{ supplierMonitorDisplayItems.length }}</strong></div>
+                <div><span>已匹配本地账号</span><strong>{{ supplierMonitorMatchedAccountCount }}</strong></div>
+                <div><span>未匹配本地账号</span><strong :class="{ 'sp-monitor-warning-value': supplierMonitorUnmatchedAccountCount > 0 }">{{ supplierMonitorUnmatchedAccountCount }}</strong></div>
+                <div><span>已归属本地分组</span><strong>{{ supplierMonitorMatchedGroupCount }}</strong></div>
+                <div><span>未归属本地分组</span><strong :class="{ 'sp-monitor-warning-value': supplierMonitorUngroupedCount > 0 }">{{ supplierMonitorUngroupedCount }}</strong></div>
+                <div><span>健康 / 慢 / 失败</span><strong>{{ supplierMonitorHealthyCount }} / {{ supplierMonitorSlowCount }} / {{ supplierMonitorFailedCount }}</strong></div>
+                <div><span>供应商成功</span><strong>{{ supplierMonitorResult.success_count }} / {{ supplierMonitorResult.processed_count }}</strong></div>
+              </div>
+
+              <section class="sp-monitor-items">
+                <header class="sp-rate-guard-section-head">
+                  <div>
+                    <span>Matching Evidence</span>
+                    <h4>监控项 / 本地账号 / 本地分组</h4>
+                  </div>
+                  <strong>{{ supplierMonitorDisplayItems.length }} 项</strong>
+                </header>
+                <div v-if="supplierMonitorDisplayItems.length" class="sp-rate-guard-items sp-monitor-items-table">
+                  <div class="sp-monitor-row sp-monitor-row-head" aria-hidden="true">
+                    <span>供应商 / 监控名称</span>
+                    <span>本地账号</span>
+                    <span>本地分组</span>
+                    <span>状态</span>
+                    <span>延迟</span>
+                    <span>7 天可用率</span>
+                    <span>检查时间</span>
+                  </div>
+                  <div v-for="item in supplierMonitorDisplayItems" :key="`${item.provider_id}-${item.upstream_name}-${item.checked_at}`" class="sp-monitor-row">
+                    <span>
+                      <strong>{{ item.provider_name || `供应商 ${item.provider_id}` }}</strong>
+                      <small>{{ item.upstream_name }}</small>
+                      <small v-if="item.primary_model">模型 {{ item.primary_model }}</small>
+                    </span>
+                    <span :class="{ 'sp-monitor-unmatched': !item.local_account_id }">
+                      <strong>{{ item.local_account_name || '未匹配本地账号' }}</strong>
+                      <small v-if="item.local_account_id">账号 #{{ item.local_account_id }}</small>
+                    </span>
+                    <span :class="{ 'sp-monitor-unmatched': !item.local_group_names?.length }">
+                      <strong>{{ item.local_group_names?.length ? item.local_group_names.join('、') : '未归属本地分组' }}</strong>
+                      <small v-if="item.local_group_ids?.length">分组 {{ item.local_group_ids.map(groupID => `#${groupID}`).join('、') }}</small>
+                    </span>
+                    <span><span class="sp-status" :class="statusTone(item.status)">{{ statusText(item.status) }}</span><small v-if="item.raw_status">上游 {{ item.raw_status }}</small></span>
+                    <span><strong>{{ item.latency_ms }}ms</strong><small v-if="item.ping_latency_ms !== undefined">Ping {{ item.ping_latency_ms }}ms</small></span>
+                    <span>{{ formatAvailability(item.availability_7d) }}</span>
+                    <span>{{ formatTime(item.checked_at) }}</span>
+                  </div>
+                </div>
+                <div v-else class="sp-rate-guard-empty">本次没有返回监控项，请检查供应商接口和 token 配置。</div>
+              </section>
+            </section>
+
             <section v-else-if="detailRun.result_detail?.providers?.length" class="sp-provider-detail-layout">
               <aside class="sp-provider-index" aria-label="供应商结果">
                 <button
@@ -877,6 +930,7 @@ import {
   type SupplierAutomationStageRunDetail,
   type SupplierAutomationConfig,
   type SupplierAutomationTask,
+  type SupplierProviderMonitorSyncItem,
 } from '@/api/admin/supplierAutomation'
 import { useAppStore } from '@/stores/app'
 import { ensureCustomPlatformLabels, resolvePlatformDisplayLabel as platformLabel } from '@/utils/customPlatformLabels'
@@ -972,6 +1026,40 @@ const rateGuardAlertActions = new Set(['invalid', 'stale', 'failed'])
 const rateGuardResult = computed(() => detailRun.value?.result_detail?.rate_guard || null)
 const accountRateGuardResult = computed(() => detailRun.value?.result_detail?.account_rate_guard || null)
 const accountHealthGuardResult = computed(() => detailRun.value?.result_detail?.account_health_guard || null)
+const supplierMonitorResult = computed(() => detailRun.value?.result_detail?.supplier_monitor || null)
+const supplierMonitorItems = computed<SupplierProviderMonitorSyncItem[]>(() => supplierMonitorResult.value?.items || [])
+const supplierMonitorDisplayItems = computed<SupplierProviderMonitorSyncItem[]>(() => {
+  const latestByMonitor = new Map<string, SupplierProviderMonitorSyncItem>()
+  for (const item of supplierMonitorItems.value) {
+    const key = `${item.provider_id}:${item.upstream_key || item.upstream_name}`
+    const previous = latestByMonitor.get(key)
+    if (!previous || supplierMonitorCheckedAt(item) > supplierMonitorCheckedAt(previous)) {
+      latestByMonitor.set(key, item)
+    }
+  }
+  return Array.from(latestByMonitor.values())
+})
+const supplierMonitorMatchedAccountCount = computed(() => (
+  supplierMonitorDisplayItems.value.filter(item => Boolean(item.local_account_id)).length
+))
+const supplierMonitorUnmatchedAccountCount = computed(() => (
+  supplierMonitorDisplayItems.value.filter(item => !item.local_account_id).length
+))
+const supplierMonitorMatchedGroupCount = computed(() => (
+  supplierMonitorDisplayItems.value.filter(item => Boolean(item.local_group_names?.length)).length
+))
+const supplierMonitorUngroupedCount = computed(() => (
+  supplierMonitorDisplayItems.value.filter(item => !item.local_group_names?.length).length
+))
+const supplierMonitorHealthyCount = computed(() => (
+  supplierMonitorDisplayItems.value.filter(item => item.status === 'healthy').length
+))
+const supplierMonitorSlowCount = computed(() => (
+  supplierMonitorDisplayItems.value.filter(item => item.status === 'slow').length
+))
+const supplierMonitorFailedCount = computed(() => (
+  supplierMonitorDisplayItems.value.filter(item => item.status === 'failed').length
+))
 const accountHealthGuardSummaryMetrics = computed(() => {
   const result = accountHealthGuardResult.value
   if (!result) return []
@@ -2011,6 +2099,14 @@ function positiveIntegerOr(value: unknown, fallback: number): number {
 function toNumber(value: string | number, fallback: number): number {
   const next = Number(value)
   return Number.isFinite(next) ? next : fallback
+}
+
+function supplierMonitorCheckedAt(item: SupplierProviderMonitorSyncItem): number {
+  const timestamp = Date.parse(item.checked_at)
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+function formatAvailability(value?: number): string {
+  return typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(2)}%` : '-'
 }
 
 async function changeRunPage(page: number) {
@@ -4123,6 +4219,61 @@ function intervalSecondsToCron(seconds: number): string | null {
   color: var(--sp-muted);
   font-size: 11px;
   font-weight: 700;
+}
+
+.sp-monitor-detail {
+  --sp-monitor-accent: var(--sp-cyan);
+}
+
+.sp-monitor-summary strong.sp-monitor-warning-value,
+.sp-monitor-unmatched strong {
+  color: var(--sp-red);
+}
+
+.sp-monitor-items {
+  min-width: 0;
+}
+
+.sp-monitor-items-table {
+  border-left: 3px solid var(--sp-cyan);
+  background: color-mix(in srgb, var(--sp-cyan) 4%, transparent);
+}
+
+.sp-monitor-row {
+  display: grid;
+  grid-template-columns: minmax(190px, 1.25fr) minmax(150px, 1fr) minmax(170px, 1.1fr) 110px 90px 105px 150px;
+  min-width: 1080px;
+  border-bottom: 1px solid var(--sp-line);
+}
+
+.sp-monitor-row > span {
+  min-width: 0;
+  padding: 11px 12px;
+  color: var(--sp-text);
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.sp-monitor-row strong {
+  display: block;
+  font-size: 12px;
+}
+
+.sp-monitor-row small {
+  display: block;
+  margin-top: 3px;
+  color: var(--sp-muted);
+  font-size: 11px;
+}
+
+.sp-monitor-row-head > span {
+  color: var(--sp-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.sp-monitor-unmatched {
+  color: var(--sp-red) !important;
 }
 
 .sp-rate-guard-empty {

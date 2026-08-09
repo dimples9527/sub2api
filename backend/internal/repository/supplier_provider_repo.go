@@ -33,7 +33,7 @@ func NewSupplierProviderTypeRepository(db *sql.DB) service.SupplierProviderTypeR
 const supplierProviderSelect = `
 SELECT p.id, p.code, p.name, p.provider_type, p.base_url, p.login_url,
        p.api_keys_url, p.groups_url, p.available_groups_url, p.balance_url,
-       p.usage_cost_url, p.account_name_prefix, p.temp_disable_minutes,
+       p.usage_cost_url, p.monitor_url, p.account_name_prefix, p.temp_disable_minutes,
        p.account_rate_multiplier_scale, p.sort_order, p.enabled, p.turnstile_enabled, p.is_default,
        p.created_at, p.updated_at,
        COALESCE(c.email, ''), COALESCE(c.username, ''), COALESCE(c.password_encrypted, ''),
@@ -345,13 +345,13 @@ func (r *supplierProviderRepository) Create(ctx context.Context, provider *servi
 	err = tx.QueryRowContext(ctx, `
 INSERT INTO supplier_providers (
   code, name, provider_type, base_url, login_url, api_keys_url, groups_url,
-  available_groups_url, balance_url, usage_cost_url, account_name_prefix,
+  available_groups_url, balance_url, usage_cost_url, monitor_url, account_name_prefix,
   temp_disable_minutes, account_rate_multiplier_scale, sort_order, enabled, turnstile_enabled, is_default
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
 RETURNING id, created_at, updated_at`, provider.Code, provider.Name, provider.ProviderType,
 		provider.BaseURL, provider.LoginURL, provider.APIKeysURL, provider.GroupsURL,
 		provider.AvailableGroupsURL, provider.BalanceURL, provider.UsageCostURL,
-		provider.AccountNamePrefix, provider.TempDisableMinutes, provider.AccountRateMultiplierScale,
+		provider.MonitorURL, provider.AccountNamePrefix, provider.TempDisableMinutes, provider.AccountRateMultiplierScale,
 		provider.SortOrder, provider.Enabled, provider.TurnstileEnabled, provider.IsDefault).Scan(&provider.ID, &provider.CreatedAt, &provider.UpdatedAt)
 	if err != nil {
 		return mapSupplierProviderError(err)
@@ -383,13 +383,13 @@ func (r *supplierProviderRepository) Update(ctx context.Context, provider *servi
 UPDATE supplier_providers SET
   code=$2, name=$3, provider_type=$4, base_url=$5, login_url=$6,
   api_keys_url=$7, groups_url=$8, available_groups_url=$9, balance_url=$10,
-  usage_cost_url=$11, account_name_prefix=$12, temp_disable_minutes=$13,
-  account_rate_multiplier_scale=$14, sort_order=$15, enabled=$16,
-  turnstile_enabled=$17, is_default=$18, updated_at=NOW()
+  usage_cost_url=$11, monitor_url=$12, account_name_prefix=$13, temp_disable_minutes=$14,
+  account_rate_multiplier_scale=$15, sort_order=$16, enabled=$17,
+  turnstile_enabled=$18, is_default=$19, updated_at=NOW()
 WHERE id=$1 AND deleted_at IS NULL`, provider.ID, provider.Code, provider.Name,
 		provider.ProviderType, provider.BaseURL, provider.LoginURL, provider.APIKeysURL,
 		provider.GroupsURL, provider.AvailableGroupsURL, provider.BalanceURL,
-		provider.UsageCostURL, provider.AccountNamePrefix, provider.TempDisableMinutes,
+		provider.UsageCostURL, provider.MonitorURL, provider.AccountNamePrefix, provider.TempDisableMinutes,
 		provider.AccountRateMultiplierScale, provider.SortOrder, provider.Enabled,
 		provider.TurnstileEnabled, provider.IsDefault)
 	if err != nil {
@@ -508,7 +508,7 @@ func scanSupplierProvider(scanner supplierProviderScanner) (*service.SupplierPro
 	var authLastTokenExpiresAt sql.NullTime
 	err := scanner.Scan(&provider.ID, &provider.Code, &provider.Name, &provider.ProviderType,
 		&provider.BaseURL, &provider.LoginURL, &provider.APIKeysURL, &provider.GroupsURL,
-		&provider.AvailableGroupsURL, &provider.BalanceURL, &provider.UsageCostURL,
+		&provider.AvailableGroupsURL, &provider.BalanceURL, &provider.UsageCostURL, &provider.MonitorURL,
 		&provider.AccountNamePrefix, &provider.TempDisableMinutes,
 		&provider.AccountRateMultiplierScale, &provider.SortOrder, &provider.Enabled,
 		&provider.TurnstileEnabled, &provider.IsDefault, &provider.CreatedAt, &provider.UpdatedAt, &provider.Email,
@@ -554,7 +554,7 @@ func mapSupplierProviderError(err error) error {
 
 const supplierProviderTypeSelect = `
 SELECT id, code, name, login_url, api_keys_url, groups_url, available_groups_url,
-       balance_url, usage_cost_url, enabled, sort_order, created_at, updated_at
+       balance_url, usage_cost_url, monitor_url, enabled, sort_order, created_at, updated_at
 FROM supplier_provider_types`
 
 func (r *supplierProviderTypeRepository) List(ctx context.Context, enabledOnly bool) ([]*service.SupplierProviderType, error) {
@@ -601,11 +601,11 @@ func (r *supplierProviderTypeRepository) Create(ctx context.Context, item *servi
 	err := r.db.QueryRowContext(ctx, `
 INSERT INTO supplier_provider_types (
   code, name, login_url, api_keys_url, groups_url, available_groups_url,
-  balance_url, usage_cost_url, enabled, sort_order
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+  balance_url, usage_cost_url, monitor_url, enabled, sort_order
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 RETURNING id, created_at, updated_at`, item.Code, item.Name, item.LoginURL, item.APIKeysURL,
 		item.GroupsURL, item.AvailableGroupsURL, item.BalanceURL, item.UsageCostURL,
-		item.Enabled, item.SortOrder).Scan(&item.ID, &item.CreatedAt, &item.UpdatedAt)
+		item.MonitorURL, item.Enabled, item.SortOrder).Scan(&item.ID, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		return mapSupplierProviderTypeError(err)
 	}
@@ -617,10 +617,10 @@ func (r *supplierProviderTypeRepository) Update(ctx context.Context, item *servi
 UPDATE supplier_provider_types SET
   code=$2, name=$3, login_url=$4, api_keys_url=$5, groups_url=$6,
   available_groups_url=$7, balance_url=$8, usage_cost_url=$9,
-  enabled=$10, sort_order=$11, updated_at=NOW()
+  monitor_url=$10, enabled=$11, sort_order=$12, updated_at=NOW()
 WHERE id=$1 AND deleted_at IS NULL`, item.ID, item.Code, item.Name, item.LoginURL,
 		item.APIKeysURL, item.GroupsURL, item.AvailableGroupsURL, item.BalanceURL,
-		item.UsageCostURL, item.Enabled, item.SortOrder)
+		item.UsageCostURL, item.MonitorURL, item.Enabled, item.SortOrder)
 	if err != nil {
 		return mapSupplierProviderTypeError(err)
 	}
@@ -647,7 +647,7 @@ func scanSupplierProviderType(scanner supplierProviderTypeScanner) (*service.Sup
 	item := &service.SupplierProviderType{}
 	err := scanner.Scan(&item.ID, &item.Code, &item.Name, &item.LoginURL,
 		&item.APIKeysURL, &item.GroupsURL, &item.AvailableGroupsURL,
-		&item.BalanceURL, &item.UsageCostURL, &item.Enabled, &item.SortOrder,
+		&item.BalanceURL, &item.UsageCostURL, &item.MonitorURL, &item.Enabled, &item.SortOrder,
 		&item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		return nil, err

@@ -412,6 +412,7 @@
           <button class="sp-button" type="button" :disabled="isTesting(selectedProvider, 'groups')" @click="testProviderEndpointData(selectedProvider, 'groups')">{{ isTesting(selectedProvider, 'groups') ? '测试中' : '测试分组' }}</button>
           <button class="sp-button" type="button" :disabled="isTesting(selectedProvider, 'balance')" @click="testProviderEndpointData(selectedProvider, 'balance')">{{ isTesting(selectedProvider, 'balance') ? '测试中' : '测试余额' }}</button>
           <button class="sp-button" type="button" :disabled="isTesting(selectedProvider, 'cost')" @click="testProviderEndpointData(selectedProvider, 'cost')">{{ isTesting(selectedProvider, 'cost') ? '测试中' : '测试成本' }}</button>
+          <button class="sp-button" type="button" :disabled="isTesting(selectedProvider, 'monitor')" @click="testProviderEndpointData(selectedProvider, 'monitor')">{{ isTesting(selectedProvider, 'monitor') ? '测试中' : '测试监控' }}</button>
           <button class="sp-button" type="button" :disabled="selectedProvider.is_default" @click="makeDefault(selectedProvider)">设为默认</button>
         </div>
         <section v-if="syncProgressEntries(selectedProvider).length > 0" class="sp-sync-progress" data-test="supplier-sync-progress">
@@ -654,6 +655,7 @@
             <Input v-model="form.groups_url" label="分组接口" />
             <Input v-model="form.balance_url" label="余额接口" />
             <Input v-model="form.usage_cost_url" label="成本接口" />
+            <Input v-model="form.monitor_url" label="监控接口" placeholder="/api/v1/channel-monitors?timezone=Asia%2FShanghai" />
           </div>
           <div class="sp-dialog-note">切换类型会用类型模板覆盖接口字段；覆盖后仍可继续手动编辑。</div>
         </section>
@@ -738,6 +740,7 @@
             <Input v-model="typeForm.groups_url" label="分组接口" />
             <Input v-model="typeForm.balance_url" label="余额接口" />
             <Input v-model="typeForm.usage_cost_url" label="成本接口" />
+            <Input v-model="typeForm.monitor_url" label="监控接口" placeholder="/api/v1/channel-monitors?timezone=Asia%2FShanghai" />
             <label class="sp-toggle-field sp-dialog-toggle-card">
               <span>启用类型</span>
               <div class="sp-toggle-row">
@@ -810,6 +813,7 @@
               <Input v-model="typeForm.groups_url" label="分组接口" />
               <Input v-model="typeForm.balance_url" label="余额接口" />
               <Input v-model="typeForm.usage_cost_url" label="成本接口" />
+              <Input v-model="typeForm.monitor_url" label="监控接口" placeholder="/api/v1/channel-monitors?timezone=Asia%2FShanghai" />
               <label class="sp-toggle-field sp-dialog-toggle-card">
                 <span>启用类型</span>
                 <div class="sp-toggle-row">
@@ -1000,6 +1004,7 @@ const emptyForm = (): SupplierProviderUpsertPayload => ({
   available_groups_url: '',
   balance_url: '',
   usage_cost_url: '',
+  monitor_url: '',
   email: '',
   username: '',
   password: '',
@@ -1021,6 +1026,7 @@ const emptyTypeForm = (): SupplierProviderTypeUpsertPayload => ({
   available_groups_url: '',
   balance_url: '',
   usage_cost_url: '',
+  monitor_url: '',
   enabled: true,
   sort_order: 0,
 })
@@ -1812,6 +1818,7 @@ function openEdit(provider: SupplierProvider) {
     available_groups_url: provider.available_groups_url,
     balance_url: provider.balance_url,
     usage_cost_url: provider.usage_cost_url,
+    monitor_url: provider.monitor_url,
     email: provider.email,
     username: provider.username,
     password: '',
@@ -1865,6 +1872,7 @@ function editProviderType(providerType: SupplierProviderType) {
     available_groups_url: providerType.available_groups_url,
     balance_url: providerType.balance_url,
     usage_cost_url: providerType.usage_cost_url,
+    monitor_url: providerType.monitor_url,
     enabled: providerType.enabled,
     sort_order: providerType.sort_order,
   })
@@ -1925,6 +1933,7 @@ function providerUpdatePayload(provider: SupplierProvider, enabled: boolean): Su
     available_groups_url: provider.available_groups_url,
     balance_url: provider.balance_url,
     usage_cost_url: provider.usage_cost_url,
+    monitor_url: provider.monitor_url,
     email: provider.email,
     username: provider.username,
     password: '',
@@ -2202,6 +2211,7 @@ function syncResultText(status: string, scope: SupplierSyncScope): string {
     groups: '分组',
     balance: '余额',
     cost: '成本',
+    monitor: '监控',
     all: '全部数据',
   }
   if (status === 'partial') return `${label[scope]}部分同步失败`
@@ -2215,6 +2225,7 @@ function scopeLabel(scope: string): string {
     groups: '分组',
     balance: '余额',
     cost: '成本',
+    monitor: '监控',
     all: '全部数据',
   }
   return label[scope] || scope
@@ -2248,6 +2259,7 @@ function normalizePayload(payload: SupplierProviderUpsertPayload): SupplierProvi
     available_groups_url: payload.groups_url?.trim() || '',
     balance_url: payload.balance_url?.trim() || '',
     usage_cost_url: payload.usage_cost_url?.trim() || '',
+    monitor_url: payload.monitor_url?.trim() || '',
     email: normalizedProviderType === 'sub2api' ? payload.email?.trim() || '' : '',
     username: normalizedProviderType === 'sub2api' ? '' : payload.username?.trim() || '',
     password: payload.password?.trim() || '',
@@ -2271,6 +2283,7 @@ function normalizeTypePayload(payload: SupplierProviderTypeUpsertPayload): Suppl
     available_groups_url: payload.groups_url?.trim() || '',
     balance_url: payload.balance_url?.trim() || '',
     usage_cost_url: payload.usage_cost_url?.trim() || '',
+    monitor_url: payload.monitor_url?.trim() || '',
     enabled: Boolean(payload.enabled),
     sort_order: Number(payload.sort_order || 0),
   }
@@ -2284,9 +2297,10 @@ function applySelectedTypeTemplate(overwrite: boolean) {
   applyTemplateField('groups_url', providerType.groups_url, overwrite)
   applyTemplateField('balance_url', providerType.balance_url, overwrite)
   applyTemplateField('usage_cost_url', providerType.usage_cost_url, overwrite)
+  applyTemplateField('monitor_url', providerType.monitor_url, overwrite)
 }
 
-function applyTemplateField(field: keyof Pick<SupplierProviderUpsertPayload, 'login_url' | 'api_keys_url' | 'groups_url' | 'balance_url' | 'usage_cost_url'>, value: string, overwrite: boolean) {
+function applyTemplateField(field: keyof Pick<SupplierProviderUpsertPayload, 'login_url' | 'api_keys_url' | 'groups_url' | 'balance_url' | 'usage_cost_url' | 'monitor_url'>, value: string, overwrite: boolean) {
   if (!value) return
   if (overwrite || !String(form[field] || '').trim()) form[field] = value
 }

@@ -143,13 +143,7 @@ LEFT JOIN LATERAL (
          MIN(local_account.id) AS local_account_id
   FROM accounts local_account
   WHERE local_account.deleted_at IS NULL
-    AND regexp_replace(lower(local_account.name), '[^[:alnum:]]', '', 'g')
-        = regexp_replace(
-            lower(p.account_name_prefix || a.name),
-            '[^[:alnum:]]',
-            '',
-            'g'
-          )
+    AND `+supplierProviderLocalAccountMatchCondition("local_account.name", "a.name")+`
 ) local_match ON TRUE
 LEFT JOIN accounts matched_account
   ON matched_account.id = local_match.local_account_id
@@ -372,6 +366,135 @@ func (r *supplierProviderDataRepository) listHealthTrends(ctx context.Context, p
 		return []service.SupplierProviderGroupHealthTrend{}, nil
 	}
 
+	if byLocalGroup {
+		args := []any{
+			service.SupplierAutomationTaskAccountHealthGuard,
+			service.SupplierAutomationTaskMonitorSync,
+			params.Now,
+			pq.Array(groupIDs),
+		}
+		healthGuardWhereSQL := `
+WHERE run.task_code = $1
+  AND run.finished_at IS NOT NULL
+  AND run.finished_at <= $3
+  AND account_group.group_id IS NOT NULL
+  AND account_group.group_id = ANY($4)
+`
+		latestMonitorRunWhereSQL := `
+WHERE run.task_code = $2
+  AND run.finished_at IS NOT NULL
+  AND run.finished_at <= $3
+  AND run.status IN ('success', 'partial')
+  AND jsonb_array_length(COALESCE(run.result_detail->'supplier_monitor'->'items', '[]'::jsonb)) > 0
+`
+		monitorWhereSQL := `
+WHERE COALESCE(NULLIF(item->>'checked_at', '')::timestamptz, run.finished_at) <= $3
+  AND account_group.group_id IS NOT NULL
+  AND account_group.group_id = ANY($4)
+`
+		if !params.AllHistory {
+			args = []any{
+				service.SupplierAutomationTaskAccountHealthGuard,
+				service.SupplierAutomationTaskMonitorSync,
+				params.Now.Add(-params.Period),
+				params.Now,
+				pq.Array(groupIDs),
+			}
+			healthGuardWhereSQL = `
+WHERE run.task_code = $1
+  AND run.finished_at IS NOT NULL
+  AND run.finished_at >= $3
+  AND run.finished_at <= $4
+  AND account_group.group_id IS NOT NULL
+  AND account_group.group_id = ANY($5)
+`
+			latestMonitorRunWhereSQL = `
+WHERE run.task_code = $2
+  AND run.finished_at IS NOT NULL
+  AND run.finished_at <= $4
+  AND run.status IN ('success', 'partial')
+  AND jsonb_array_length(COALESCE(run.result_detail->'supplier_monitor'->'items', '[]'::jsonb)) > 0
+`
+			monitorWhereSQL = `
+WHERE COALESCE(NULLIF(item->>'checked_at', '')::timestamptz, run.finished_at) <= $4
+  AND account_group.group_id IS NOT NULL
+  AND account_group.group_id = ANY($5)
+`
+		}
+		query := fmt.Sprintf(`
+WITH latest_monitor_run AS (
+  SELECT run.result_detail, run.finished_at
+  FROM supplier_automation_runs run
+  %s
+  ORDER BY run.finished_at DESC
+  LIMIT 1
+), trend_samples AS (
+  SELECT account_group.group_id AS group_id,
+         NULLIF(item->>'local_account_id', '')::bigint AS account_id,
+         COALESCE(item->>'status', '') AS status,
+         COALESCE((NULLIF(item->>'latency_ms', ''))::bigint, 0) AS latency_ms,
+         run.finished_at,
+         'supplier_account_health_guard' AS source
+  FROM supplier_automation_runs run
+  CROSS JOIN LATERAL jsonb_array_elements(
+    COALESCE(run.result_detail->'account_health_guard'->'items', '[]'::jsonb)
+  ) AS item
+  CROSS JOIN LATERAL jsonb_array_elements(
+    COALESCE(item->'sources', '[]'::jsonb)
+  ) AS source
+  JOIN supplier_provider_accounts account
+    ON account.id = (source->>'supplier_provider_account_id')::bigint
+   AND account.active = TRUE
+  JOIN account_groups account_group
+    ON account_group.account_id = NULLIF(item->>'local_account_id', '')::bigint
+  %s
+
+  UNION ALL
+
+  SELECT account_group.group_id AS group_id,
+         NULLIF(item->>'local_account_id', '')::bigint AS account_id,
+         COALESCE(item->>'status', '') AS status,
+         COALESCE((NULLIF(item->>'latency_ms', ''))::bigint, 0) AS latency_ms,
+         COALESCE(NULLIF(item->>'checked_at', '')::timestamptz, run.finished_at) AS finished_at,
+         'supplier_monitor' AS source
+  FROM latest_monitor_run run
+  CROSS JOIN LATERAL jsonb_array_elements(
+    COALESCE(run.result_detail->'supplier_monitor'->'items', '[]'::jsonb)
+  ) AS item
+  JOIN account_groups account_group
+    ON account_group.account_id = NULLIF(item->>'local_account_id', '')::bigint
+  %s
+)
+SELECT group_id, account_id, status, latency_ms, finished_at, source
+FROM trend_samples`, latestMonitorRunWhereSQL, healthGuardWhereSQL, monitorWhereSQL)
+		rows, err := r.db.QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("query supplier provider group health trends: %w", err)
+		}
+		defer rows.Close()
+
+		samples := make([]service.SupplierProviderGroupHealthSample, 0)
+		for rows.Next() {
+			var sample service.SupplierProviderGroupHealthSample
+			if err := rows.Scan(&sample.GroupID, &sample.AccountID, &sample.Status, &sample.Latency, &sample.FinishedAt, &sample.Source); err != nil {
+				return nil, fmt.Errorf("scan supplier provider group health trend: %w", err)
+			}
+			samples = append(samples, sample)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("iterate supplier provider group health trends: %w", err)
+		}
+
+		trendIndex := service.BuildSupplierProviderGroupHealthTrends(samples, params)
+		trends := make([]service.SupplierProviderGroupHealthTrend, 0, len(trendIndex))
+		for _, groupID := range groupIDs {
+			if trend, ok := trendIndex[groupID]; ok {
+				trends = append(trends, trend)
+			}
+		}
+		return trends, nil
+	}
+
 	groupColumn := "g.id"
 	accountIDColumn := "(source->>'supplier_provider_account_id')::bigint"
 	groupJoinSQL := `
@@ -379,14 +502,6 @@ JOIN supplier_provider_groups g
   ON g.provider_id = account.provider_id
  AND g.upstream_group_key = account.group_key
 `
-	if byLocalGroup {
-		groupColumn = "account_group.group_id"
-		accountIDColumn = "(item->>'local_account_id')::bigint"
-		groupJoinSQL = `
-JOIN account_groups account_group
-  ON account_group.account_id = (item->>'local_account_id')::bigint
-`
-	}
 	whereSQL := fmt.Sprintf(`
 WHERE run.task_code = $1
   AND run.finished_at IS NOT NULL
@@ -420,7 +535,8 @@ SELECT %s AS group_id,
        %s AS account_id,
        COALESCE(item->>'status', '') AS status,
        COALESCE((item->>'latency_ms')::bigint, 0) AS latency_ms,
-       run.finished_at
+       run.finished_at,
+       'supplier_account_health_guard' AS source
 FROM supplier_automation_runs run
 CROSS JOIN LATERAL jsonb_array_elements(
   COALESCE(run.result_detail->'account_health_guard'->'items', '[]'::jsonb)
@@ -443,7 +559,7 @@ JOIN supplier_provider_accounts account
 	samples := make([]service.SupplierProviderGroupHealthSample, 0)
 	for rows.Next() {
 		var sample service.SupplierProviderGroupHealthSample
-		if err := rows.Scan(&sample.GroupID, &sample.AccountID, &sample.Status, &sample.Latency, &sample.FinishedAt); err != nil {
+		if err := rows.Scan(&sample.GroupID, &sample.AccountID, &sample.Status, &sample.Latency, &sample.FinishedAt, &sample.Source); err != nil {
 			return nil, fmt.Errorf("scan supplier provider group health trend: %w", err)
 		}
 		samples = append(samples, sample)
@@ -1277,7 +1393,6 @@ func supplierProviderAccountWhere(params service.SupplierProviderDataListParams)
 	}
 	if params.GroupID > 0 {
 		args = append(args, params.GroupID)
-		// 按本地账号绑定分组过滤：唯一匹配到的本地账号在 account_groups 中包含所选分组。
 		conditions = append(conditions, fmt.Sprintf(`EXISTS (
 SELECT 1
 FROM accounts local_account
@@ -1288,24 +1403,12 @@ JOIN groups local_group
   ON local_group.id = account_group.group_id
  AND local_group.deleted_at IS NULL
 WHERE local_account.deleted_at IS NULL
-  AND regexp_replace(lower(local_account.name), '[^[:alnum:]]', '', 'g')
-      = regexp_replace(
-          lower(p.account_name_prefix || a.name),
-          '[^[:alnum:]]',
-          '',
-          'g'
-        )
+  AND `+supplierProviderLocalAccountMatchCondition("local_account.name", "a.name")+`
   AND (
     SELECT COUNT(*)
     FROM accounts candidate
     WHERE candidate.deleted_at IS NULL
-      AND regexp_replace(lower(candidate.name), '[^[:alnum:]]', '', 'g')
-          = regexp_replace(
-              lower(p.account_name_prefix || a.name),
-              '[^[:alnum:]]',
-              '',
-              'g'
-            )
+      AND `+supplierProviderLocalAccountMatchCondition("candidate.name", "a.name")+`
   ) = 1
 )`, len(args)))
 	}
@@ -1320,13 +1423,7 @@ WHERE local_account.deleted_at IS NULL
   LEFT JOIN supplier_local_account_platform_overrides platform_override
     ON platform_override.local_account_id = local_account.id
   WHERE local_account.deleted_at IS NULL
-    AND regexp_replace(lower(local_account.name), '[^[:alnum:]]', '', 'g')
-        = regexp_replace(
-            lower(p.account_name_prefix || a.name),
-            '[^[:alnum:]]',
-            '',
-            'g'
-          )
+    AND `+supplierProviderLocalAccountMatchCondition("local_account.name", "a.name")+`
 ), (
   SELECT local_group.platform
   FROM supplier_provider_groups mapped_group
@@ -1338,7 +1435,6 @@ WHERE local_account.deleted_at IS NULL
 	}
 	return strings.Join(conditions, " AND "), args
 }
-
 func supplierProviderGroupBaseWhere(params service.SupplierProviderDataListParams) (string, []any) {
 	where, args := supplierProviderDataWhere("g", params)
 	conditions := []string{where}
@@ -1678,7 +1774,7 @@ func (r *supplierProviderDataRepository) IsUniqueMatchedLocalAccount(ctx context
 		return false, fmt.Errorf("local account id must be positive")
 	}
 	var matched bool
-	err := r.db.QueryRowContext(ctx, `
+	query := `
 SELECT EXISTS (
   SELECT 1
   FROM supplier_provider_accounts a
@@ -1688,23 +1784,58 @@ SELECT EXISTS (
       SELECT COUNT(*)
       FROM accounts local_account
       WHERE local_account.deleted_at IS NULL
-        AND regexp_replace(lower(local_account.name), '[^[:alnum:]]', '', 'g')
-            = regexp_replace(lower(p.account_name_prefix || a.name), '[^[:alnum:]]', '', 'g')
+        AND %s
     ) = 1
     AND (
       SELECT MIN(local_account.id)
       FROM accounts local_account
       WHERE local_account.deleted_at IS NULL
-        AND regexp_replace(lower(local_account.name), '[^[:alnum:]]', '', 'g')
-            = regexp_replace(lower(p.account_name_prefix || a.name), '[^[:alnum:]]', '', 'g')
+        AND %s
     ) = $1
-)`, localAccountID).Scan(&matched)
+)`
+	query = fmt.Sprintf(query, supplierProviderLocalAccountMatchCondition("local_account.name", "a.name"), supplierProviderLocalAccountMatchCondition("local_account.name", "a.name"))
+	err := r.db.QueryRowContext(ctx, query, localAccountID).Scan(&matched)
 	if err != nil {
 		return false, fmt.Errorf("check supplier local account match: %w", err)
 	}
 	return matched, nil
 }
 
+func supplierProviderLocalAccountMatchCondition(localAccountNameSQL, upstreamAccountNameSQL string) string {
+	normalize := supplierProviderLocalAccountNormalizeSQL
+	reorderedUpstreamName := supplierProviderReorderedAccountNameAliasSQL(upstreamAccountNameSQL)
+	prefix := normalize("COALESCE(p.account_name_prefix, '')")
+	providerName := normalize("COALESCE(p.name, '')")
+	return fmt.Sprintf(`%s IN (
+  %s,
+  %s || %s,
+  %s,
+  %s,
+  %s,
+  %s || %s
+)`, normalize(localAccountNameSQL),
+		normalize("COALESCE(p.account_name_prefix, '') || "+upstreamAccountNameSQL),
+		prefix, reorderedUpstreamName,
+		normalize(upstreamAccountNameSQL),
+		reorderedUpstreamName,
+		normalize("COALESCE(p.name, '') || '-' || "+upstreamAccountNameSQL),
+		providerName, reorderedUpstreamName)
+}
+
+func supplierProviderLocalAccountNormalizeSQL(value string) string {
+	return fmt.Sprintf("regexp_replace(lower(%s), '[^[:alnum:]]', '', 'g')", value)
+}
+
+func supplierProviderReorderedAccountNameAliasSQL(value string) string {
+	normalized := supplierProviderLocalAccountNormalizeSQL(value)
+	return fmt.Sprintf(`CASE
+  WHEN %s ~ '^[^a-z0-9]+[a-z]+[0-9]*$'
+    THEN regexp_replace(%s, '^([^a-z0-9]+)([a-z]+)([0-9]*)$', '\2\1\3')
+  WHEN %s ~ '^[a-z]+[^a-z0-9]+[0-9]*$'
+    THEN regexp_replace(%s, '^([a-z]+)([^a-z0-9]+)([0-9]*)$', '\2\1\3')
+  ELSE %s
+END`, normalized, normalized, normalized, normalized, normalized)
+}
 func (r *supplierProviderDataRepository) GetLocalAccountEffectivePlatform(ctx context.Context, localAccountID int64) (string, error) {
 	if localAccountID <= 0 {
 		return "", fmt.Errorf("local account id must be positive")

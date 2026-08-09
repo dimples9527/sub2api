@@ -67,3 +67,48 @@ func TestBuildSupplierProviderGroupHealthTrendsOmitsGroupsWithoutUsableSamples(t
 
 	require.Empty(t, trends)
 }
+
+func TestBuildSupplierProviderGroupHealthTrendsPrefersLatestEighteenRawMonitorTimelinePoints(t *testing.T) {
+	now := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	rawStart := now.Add(-25 * time.Hour)
+	samples := []SupplierProviderGroupHealthSample{
+		{GroupID: 101, AccountID: 11, Source: SupplierProviderGroupHealthTrendSource, Status: SupplierAccountHealthGuardStatusFailed, Latency: 30000, FinishedAt: now.Add(-time.Minute)},
+		{GroupID: 102, AccountID: 21, Source: SupplierProviderGroupHealthTrendSource, Status: SupplierAccountHealthGuardStatusHealthy, Latency: 100, FinishedAt: now.Add(-time.Minute)},
+	}
+	for index := 0; index < 20; index++ {
+		checkedAt := rawStart.Add(time.Duration(index) * time.Hour)
+		status := SupplierAccountHealthGuardStatusSlow
+		latency := int64(1000 + index)
+		if index == 19 {
+			status = SupplierAccountHealthGuardStatusHealthy
+			latency = 1234
+		}
+		samples = append(samples, SupplierProviderGroupHealthSample{
+			GroupID: 101, AccountID: 11, Source: SupplierProviderGroupHealthTrendMonitorSource,
+			Status: status, Latency: latency, FinishedAt: checkedAt,
+		})
+	}
+	// 同一账号、同一分钟的重入历史点只保留最后一次采样。
+	samples = append(samples, SupplierProviderGroupHealthSample{
+		GroupID: 101, AccountID: 11, Source: SupplierProviderGroupHealthTrendMonitorSource,
+		Status: SupplierAccountHealthGuardStatusFailed, Latency: 30000, FinishedAt: rawStart.Add(19*time.Hour + 20*time.Second),
+	})
+
+	trends := BuildSupplierProviderGroupHealthTrends(samples, SupplierProviderGroupHealthTrendParams{
+		GroupIDs: []int64{101, 102}, Period: 90 * time.Minute, BucketCount: 18, Now: now,
+		PreferRawMonitorTimeline: true,
+	})
+
+	rawTrend := trends[101]
+	require.Equal(t, SupplierProviderGroupHealthTrendMonitorSource, rawTrend.Source)
+	require.Len(t, rawTrend.Trend, 18)
+	require.Equal(t, rawStart.Add(2*time.Hour).Truncate(time.Minute), rawTrend.Trend[0].Time)
+	require.Equal(t, rawStart.Add(19*time.Hour).Truncate(time.Minute), rawTrend.Trend[17].Time)
+	require.Equal(t, 0.0, rawTrend.Trend[17].Availability)
+	require.Equal(t, int64(30000), rawTrend.Trend[17].Latency)
+
+	fallbackTrend := trends[102]
+	require.Equal(t, SupplierProviderGroupHealthTrendSource, fallbackTrend.Source)
+	require.Len(t, fallbackTrend.Trend, 18)
+	require.Equal(t, 100.0, fallbackTrend.Availability)
+}

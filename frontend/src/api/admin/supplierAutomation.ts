@@ -56,7 +56,37 @@ export interface SupplierAutomationRunDetail {
   rate_guard?: SupplierRateGuardResult
   account_rate_guard?: SupplierAccountRateGuardResult
   account_health_guard?: SupplierAccountHealthGuardResult
+  supplier_monitor?: SupplierProviderMonitorSyncResult
   cleanup?: SupplierAutomationCleanupRunDetail
+}
+
+export interface SupplierProviderMonitorSyncResult {
+  processed_count: number
+  success_count: number
+  failed_count: number
+  skipped_count: number
+  items: SupplierProviderMonitorSyncItem[]
+}
+
+export interface SupplierProviderMonitorSyncItem {
+  provider_id: number
+  provider_name: string
+  provider_type: string
+  local_account_id?: number
+  local_account_name?: string
+  local_group_ids?: number[]
+  local_group_names?: string[]
+  upstream_key?: string
+  upstream_name: string
+  monitor_provider?: string
+  primary_model?: string
+  status: string
+  raw_status?: string
+  latency_ms: number
+  ping_latency_ms?: number
+  availability_7d?: number
+  checked_at: string
+  message?: string
 }
 
 export type SupplierAccountRateGuardRunMode = 'preview' | 'execute'

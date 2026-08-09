@@ -319,6 +319,7 @@ const (
 	SupplierSyncScopeGroups   = "groups"
 	SupplierSyncScopeBalance  = "balance"
 	SupplierSyncScopeCost     = "cost"
+	SupplierSyncScopeMonitor  = "monitor"
 	SupplierSyncScopeAll      = "all"
 )
 

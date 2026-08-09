@@ -758,7 +758,7 @@ func badRequest(message string) error {
 
 func supplierProviderTestScopeAllowed(scope string) bool {
 	switch scope {
-	case service.SupplierSyncScopeAccounts, service.SupplierSyncScopeGroups, service.SupplierSyncScopeBalance, service.SupplierSyncScopeCost:
+	case service.SupplierSyncScopeAccounts, service.SupplierSyncScopeGroups, service.SupplierSyncScopeBalance, service.SupplierSyncScopeCost, service.SupplierSyncScopeMonitor:
 		return true
 	default:
 		return false

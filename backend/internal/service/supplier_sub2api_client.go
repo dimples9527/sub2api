@@ -21,6 +21,7 @@ import (
 const (
 	defaultSupplierSub2APILoginPath               = "/api/v1/auth/login"
 	defaultSupplierSub2APIRefreshPath             = "/api/v1/auth/refresh"
+	DefaultSupplierSub2APIMonitorPath             = "/api/v1/channel-monitors?timezone=Asia%2FShanghai"
 	defaultSupplierSub2APIHTTPTimeout             = 30 * time.Second
 	supplierSub2APIMaxResponseBytes         int64 = 4 << 20
 	supplierSub2APILoginLockTTL                   = 120 * time.Second
@@ -49,11 +50,35 @@ type SupplierProviderRemoteGroup struct {
 	RawStatus      string
 }
 
+type SupplierProviderMonitorPoint struct {
+	Status        string
+	LatencyMS     int64
+	PingLatencyMS int64
+	CheckedAt     time.Time
+}
+
+type SupplierProviderMonitorItem struct {
+	Key                  string
+	Name                 string
+	Provider             string
+	GroupName            string
+	PrimaryModel         string
+	PrimaryStatus        string
+	PrimaryLatencyMS     int64
+	PrimaryPingLatencyMS int64
+	Availability7D       float64
+	Timeline             []SupplierProviderMonitorPoint
+}
+
 type SupplierProviderRemoteClient interface {
 	FetchAccounts(ctx context.Context, provider *SupplierProvider, password string) ([]SupplierProviderRemoteAccount, error)
 	FetchGroups(ctx context.Context, provider *SupplierProvider, password string) ([]SupplierProviderRemoteGroup, error)
 	FetchBalance(ctx context.Context, provider *SupplierProvider, password string) (float64, error)
 	FetchCost(ctx context.Context, provider *SupplierProvider, password string, day time.Time) (float64, error)
+}
+
+type SupplierProviderRemoteMonitorClient interface {
+	FetchMonitorItems(ctx context.Context, provider *SupplierProvider, password string) ([]SupplierProviderMonitorItem, error)
 }
 
 type SupplierProviderRemoteTester interface {
@@ -151,6 +176,20 @@ func (c *SupplierSub2APIClient) FetchCost(ctx context.Context, provider *Supplie
 	return cost, parseErr
 }
 
+func (c *SupplierSub2APIClient) FetchMonitorItems(ctx context.Context, provider *SupplierProvider, password string) ([]SupplierProviderMonitorItem, error) {
+	monitorPath := strings.TrimSpace(provider.MonitorURL)
+	if monitorPath == "" {
+		monitorPath = DefaultSupplierSub2APIMonitorPath
+	}
+	raw, err := c.authenticatedGet(ctx, provider, password, monitorPath, SupplierSyncScopeMonitor)
+	if err != nil {
+		return nil, err
+	}
+	items, parseErr := parseSupplierSub2APIMonitorItems(raw)
+	c.annotateEndpointParse(provider.ID, SupplierSyncScopeMonitor, SupplierSyncScopeMonitor, raw, parseErr)
+	return items, parseErr
+}
+
 func (c *SupplierSub2APIClient) TestEndpoint(ctx context.Context, provider *SupplierProvider, password string, scope string) (SupplierProviderEndpointTestResult, error) {
 	scope = strings.TrimSpace(scope)
 	result := SupplierProviderEndpointTestResult{
@@ -172,6 +211,12 @@ func (c *SupplierSub2APIClient) TestEndpoint(ctx context.Context, provider *Supp
 		endpoints = []string{provider.BalanceURL}
 	case SupplierSyncScopeCost:
 		endpoints = []string{provider.UsageCostURL}
+	case SupplierSyncScopeMonitor:
+		monitorPath := strings.TrimSpace(provider.MonitorURL)
+		if monitorPath == "" {
+			monitorPath = DefaultSupplierSub2APIMonitorPath
+		}
+		endpoints = []string{monitorPath}
 	default:
 		return SupplierProviderEndpointTestResult{}, fmt.Errorf("unsupported supplier endpoint test scope: %s", scope)
 	}
@@ -813,6 +858,53 @@ func parseSupplierSub2APIGroups(raw []byte) ([]SupplierProviderRemoteGroup, erro
 	return out, nil
 }
 
+func parseSupplierSub2APIMonitorItems(raw []byte) ([]SupplierProviderMonitorItem, error) {
+	items, err := supplierSub2APIItems(raw)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SupplierProviderMonitorItem, 0, len(items))
+	for _, item := range items {
+		key := firstSupplierSub2APIString(jsonString(item["id"]), jsonString(item["key"]))
+		name := strings.TrimSpace(jsonString(item["name"]))
+		if key == "" && name != "" {
+			key = normalizeSupplierSub2APIKeyFromName(name)
+		}
+		if key == "" && name == "" {
+			continue
+		}
+		monitor := SupplierProviderMonitorItem{
+			Key:                  strings.TrimSpace(key),
+			Name:                 name,
+			Provider:             strings.TrimSpace(jsonString(item["provider"])),
+			GroupName:            strings.TrimSpace(jsonString(item["group_name"])),
+			PrimaryModel:         strings.TrimSpace(jsonString(item["primary_model"])),
+			PrimaryStatus:        strings.TrimSpace(jsonString(item["primary_status"])),
+			PrimaryLatencyMS:     jsonInt64(item["primary_latency_ms"]),
+			PrimaryPingLatencyMS: jsonInt64(item["primary_ping_latency_ms"]),
+			Availability7D:       jsonFloat(item["availability_7d"]),
+		}
+		if timeline, ok := item["timeline"].([]any); ok {
+			monitor.Timeline = make([]SupplierProviderMonitorPoint, 0, len(timeline))
+			for _, rawPoint := range timeline {
+				pointMap, ok := rawPoint.(map[string]any)
+				if !ok {
+					continue
+				}
+				checkedAt, _ := time.Parse(time.RFC3339, strings.TrimSpace(jsonString(pointMap["checked_at"])))
+				monitor.Timeline = append(monitor.Timeline, SupplierProviderMonitorPoint{
+					Status:        strings.TrimSpace(jsonString(pointMap["status"])),
+					LatencyMS:     jsonInt64(pointMap["latency_ms"]),
+					PingLatencyMS: jsonInt64(pointMap["ping_latency_ms"]),
+					CheckedAt:     checkedAt,
+				})
+			}
+		}
+		out = append(out, monitor)
+	}
+	return out, nil
+}
+
 func parseSupplierSub2APINumberField(raw []byte, field string) (float64, error) {
 	var resp struct {
 		Code    any            `json:"code"`
@@ -1081,6 +1173,29 @@ func jsonFloat(value any) float64 {
 	}
 }
 
+func jsonInt64(value any) int64 {
+	switch v := value.(type) {
+	case float64:
+		return int64(v)
+	case json.Number:
+		parsed, _ := strconv.ParseInt(v.String(), 10, 64)
+		if parsed != 0 {
+			return parsed
+		}
+		floatValue, _ := strconv.ParseFloat(v.String(), 64)
+		return int64(floatValue)
+	case string:
+		parsed, _ := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		return parsed
+	case int:
+		return int64(v)
+	case int64:
+		return v
+	default:
+		return 0
+	}
+}
+
 func supplierSub2APIDurationSeconds(value any) time.Duration {
 	seconds := jsonFloat(value)
 	if seconds <= 0 {
@@ -1165,6 +1280,12 @@ func supplierSub2APIParsedDiagnostic(scope string, raw []byte) (any, string) {
 			return nil, err.Error()
 		}
 		return map[string]any{"today_actual_cost": value}, ""
+	case SupplierSyncScopeMonitor:
+		items, err := parseSupplierSub2APIMonitorItems(raw)
+		if err != nil {
+			return nil, err.Error()
+		}
+		return map[string]any{"count": len(items), "items": items}, ""
 	default:
 		return nil, "unsupported scope"
 	}
@@ -1199,6 +1320,12 @@ func supplierSub2APIParsedSummary(scope string, raw []byte, parseErr error) (str
 			return "", err.Error()
 		}
 		return fmt.Sprintf("今日成本 %.6f", value), ""
+	case SupplierSyncScopeMonitor:
+		items, err := parseSupplierSub2APIMonitorItems(raw)
+		if err != nil {
+			return "", err.Error()
+		}
+		return fmt.Sprintf("监控 %d 个", len(items)), ""
 	default:
 		return "", "unsupported scope"
 	}

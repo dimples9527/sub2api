@@ -3,7 +3,7 @@ import { ADMIN_UI_REQUEST_HEADER } from '../adminUIRequest'
 import { buildApiUrl } from '../url'
 import type { BatchAccountTestJob, GroupPlatform, SubscriptionType } from '@/types'
 
-export type SupplierSyncScope = 'accounts' | 'groups' | 'balance' | 'cost' | 'all'
+export type SupplierSyncScope = 'accounts' | 'groups' | 'balance' | 'cost' | 'monitor' | 'all'
 export type SupplierSyncStatus = 'success' | 'partial' | 'failed'
 
 export type SupplierSyncProgressStage =

@@ -242,6 +242,62 @@ func TestSupplierSub2APIClientLoginUsesEmailAndCachesToken(t *testing.T) {
 	require.Equal(t, "Bearer", cache.tokens[42].TokenType)
 }
 
+func TestSupplierSub2APIClientFetchMonitorItemsUsesConfiguredMonitorURLAndBearerToken(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	cache.preload(42, SupplierProviderAuthToken{AccessToken: "cached-token", TokenType: "Bearer", ExpiresAt: time.Now().Add(time.Hour)})
+	var authorization string
+	var requestURI string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorization = r.Header.Get("Authorization")
+		requestURI = r.URL.RequestURI()
+		require.Equal(t, http.MethodGet, r.Method)
+		supplierSub2APIWriteJSON(w, http.StatusOK, `{
+			"code": 0,
+			"message": "success",
+			"data": {
+				"items": [{
+					"id": 39,
+					"name": "grok对话",
+					"provider": "grok",
+					"group_name": "",
+					"primary_model": "grok-4.5",
+					"primary_status": "degraded",
+					"primary_latency_ms": 10122,
+					"primary_ping_latency_ms": 56,
+					"availability_7d": 83.28358208955224,
+					"timeline": [
+						{"status":"degraded","latency_ms":10122,"ping_latency_ms":56,"checked_at":"2026-08-08T03:09:00Z"},
+						{"status":"operational","latency_ms":4331,"ping_latency_ms":23,"checked_at":"2026-08-08T02:59:01Z"}
+					]
+				}]
+			}
+		}`)
+	}))
+	defer server.Close()
+
+	provider := supplierSub2APITestProvider(server.URL)
+	provider.MonitorURL = "/api/v1/channel-monitors?timezone=Asia%2FShanghai"
+	client := NewSupplierSub2APIClient(server.Client(), cache, nil)
+
+	items, err := client.FetchMonitorItems(context.Background(), provider, "secret")
+
+	require.NoError(t, err)
+	require.Equal(t, "Bearer cached-token", authorization)
+	require.Equal(t, "/api/v1/channel-monitors?timezone=Asia%2FShanghai", requestURI)
+	require.Len(t, items, 1)
+	require.Equal(t, "39", items[0].Key)
+	require.Equal(t, "grok对话", items[0].Name)
+	require.Equal(t, "grok", items[0].Provider)
+	require.Equal(t, "grok-4.5", items[0].PrimaryModel)
+	require.Equal(t, "degraded", items[0].PrimaryStatus)
+	require.Equal(t, int64(10122), items[0].PrimaryLatencyMS)
+	require.Equal(t, int64(56), items[0].PrimaryPingLatencyMS)
+	require.InDelta(t, 83.2835, items[0].Availability7D, 0.0001)
+	require.Len(t, items[0].Timeline, 2)
+	require.Equal(t, "operational", items[0].Timeline[1].Status)
+	require.Equal(t, time.Date(2026, 8, 8, 3, 9, 0, 0, time.UTC), items[0].Timeline[0].CheckedAt)
+}
+
 func TestSupplierSub2APIClientExtractsSupportedLoginTokenShapes(t *testing.T) {
 	tests := []struct {
 		name              string
