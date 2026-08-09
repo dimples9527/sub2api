@@ -300,7 +300,7 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/admin/upstream-management/ModelSquareView.vue'),
     meta: {
       requiresAuth: true,
-      requiresAdmin: false,
+      requiresAdmin: true,
       title: 'Model Square',
       titleKey: 'admin.modelSquare.title',
       descriptionKey: 'admin.modelSquare.description'
@@ -1052,13 +1052,13 @@ router.beforeEach(async (to, _from, next) => {
         )
         return
       }
-      if (plazaSettings?.model_plaza_require_auth === true && !authStore.isAuthenticated) {
+      if (!authStore.isAuthenticated) {
         next({ path: '/login', query: { redirect: to.fullPath } })
         return
       }
-      // Backend mode:登录的非管理员也不可见(匿名由下方公共拦截处理,广场不在白名单)
-      if (appStore.backendModeEnabled && authStore.isAuthenticated && !authStore.isAdmin) {
-        next('/login')
+      // 模型广场页面仅允许管理员查看，普通用户回到用户首页。
+      if (!authStore.isAdmin) {
+        next('/dashboard')
         return
       }
     }

@@ -113,6 +113,18 @@ describe('AppSidebar image generation visibility', () => {
     expect(wrapper.find('a[href="/image"]').exists()).toBe(true)
   })
 
+  it('hides the model square menu entry from regular users', () => {
+    const wrapper = mountSidebar('user')
+
+    expect(wrapper.find('a[href="/model-square"]').exists()).toBe(false)
+  })
+
+  it('keeps the model square menu entry visible for admins', () => {
+    const wrapper = mountSidebar('admin')
+
+    expect(wrapper.find('a[href="/model-square"]').exists()).toBe(true)
+  })
+
   it('uses explicit supplier prefixes for supplier group and account entries', async () => {
     const wrapper = mountSidebar('admin')
 

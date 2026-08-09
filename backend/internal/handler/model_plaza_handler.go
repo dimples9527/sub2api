@@ -93,8 +93,13 @@ func (h *ModelPlazaHandler) Get(c *gin.Context) {
 	}
 
 	subject, authed := middleware.GetAuthSubjectFromContext(c)
-	if rt.RequireAuth && !authed {
+	if !authed {
 		response.Unauthorized(c, "Authentication required")
+		return
+	}
+	role, _ := middleware.GetUserRoleFromContext(c)
+	if role != service.RoleAdmin {
+		response.Forbidden(c, "Admin access required")
 		return
 	}
 

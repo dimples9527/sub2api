@@ -27,6 +27,16 @@ function makeAdmin(): User {
   }
 }
 
+function makeRegularUser(): User {
+  return {
+    id: 2, username: 'user', email: 'user@example.com', role: 'user',
+    balance: 0, concurrency: 0, status: 'active', allowed_groups: null,
+    balance_notify_enabled: false, balance_notify_threshold: null,
+    balance_notify_extra_emails: [], created_at: '2026-07-11T00:00:00Z',
+    updated_at: '2026-07-11T00:00:00Z',
+  }
+}
+
 describe('AppHeader admin tools', () => {
   it('always shows the model monitor entry without an API URL setting', () => {
     const pinia = createPinia()
@@ -74,5 +84,30 @@ describe('AppHeader admin tools', () => {
     })
     expect(wrapper.find('a[href="/model-monitor-local.html"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="header-version-badge"]').text()).toBe('0.1.151')
+  })
+
+  it('hides the model plaza entry from regular users', () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const authStore = useAuthStore()
+    authStore.user = makeRegularUser()
+    authStore.token = 'test-token'
+    const appStore = useAppStore()
+    appStore.cachedPublicSettings = {
+      model_plaza_enabled: true, custom_menu_items: [],
+    } as typeof appStore.cachedPublicSettings
+
+    const wrapper = mount(AppHeader, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          AnnouncementBell: true, LocaleSwitcher: true, SubscriptionProgressMini: true,
+          RouterLink: { props: ['to'], template: '<a><slot /></a>' },
+          VersionBadge: true,
+        },
+      },
+    })
+
+    expect(wrapper.text()).not.toContain('nav.modelPlaza')
   })
 })

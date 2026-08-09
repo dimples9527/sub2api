@@ -3,11 +3,14 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -60,6 +63,26 @@ func TestModelPlazaHandler_NilSettingServiceFailsClosed404(t *testing.T) {
 	h.Get(c)
 
 	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestModelPlazaHandler_RegularUserForbidden(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := &ModelPlazaHandler{
+		settingService: newModelPlazaSettingService(map[string]string{
+			service.SettingKeyModelPlazaEnabled:     "true",
+			service.SettingKeyModelPlazaRequireAuth: "false",
+			service.SettingKeyModelPlazaDescription: "",
+		}),
+	}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/model-plaza", nil)
+	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 11})
+	c.Set(string(middleware.ContextKeyUserRole), service.RoleUser)
+
+	h.Get(c)
+
+	require.Equal(t, http.StatusForbidden, w.Code)
 }
 
 func TestToModelPlazaGroupDTO_UserRateAndFieldWhitelist(t *testing.T) {
@@ -125,3 +148,69 @@ func TestToModelPlazaOfficialPricing_NilPassthrough(t *testing.T) {
 }
 
 func testPtr(v float64) *float64 { return &v }
+
+func newModelPlazaSettingService(seed map[string]string) *service.SettingService {
+	return service.NewSettingService(&modelPlazaSettingRepo{values: seed}, nil)
+}
+
+type modelPlazaSettingRepo struct {
+	values map[string]string
+}
+
+func (r *modelPlazaSettingRepo) Get(ctx context.Context, key string) (*service.Setting, error) {
+	if value, ok := r.values[key]; ok {
+		return &service.Setting{Key: key, Value: value}, nil
+	}
+	return nil, service.ErrSettingNotFound
+}
+
+func (r *modelPlazaSettingRepo) GetValue(ctx context.Context, key string) (string, error) {
+	if value, ok := r.values[key]; ok {
+		return value, nil
+	}
+	return "", service.ErrSettingNotFound
+}
+
+func (r *modelPlazaSettingRepo) Set(ctx context.Context, key, value string) error {
+	if r.values == nil {
+		r.values = make(map[string]string)
+	}
+	r.values[key] = value
+	return nil
+}
+
+func (r *modelPlazaSettingRepo) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
+	out := make(map[string]string, len(keys))
+	for _, key := range keys {
+		if value, ok := r.values[key]; ok {
+			out[key] = value
+		}
+	}
+	return out, nil
+}
+
+func (r *modelPlazaSettingRepo) SetMultiple(ctx context.Context, settings map[string]string) error {
+	if r.values == nil {
+		r.values = make(map[string]string)
+	}
+	for key, value := range settings {
+		r.values[key] = value
+	}
+	return nil
+}
+
+func (r *modelPlazaSettingRepo) GetAll(ctx context.Context) (map[string]string, error) {
+	out := make(map[string]string, len(r.values))
+	for key, value := range r.values {
+		out[key] = value
+	}
+	return out, nil
+}
+
+func (r *modelPlazaSettingRepo) Delete(ctx context.Context, key string) error {
+	if _, ok := r.values[key]; !ok {
+		return fmt.Errorf("setting %s not found: %w", key, service.ErrSettingNotFound)
+	}
+	delete(r.values, key)
+	return nil
+}
