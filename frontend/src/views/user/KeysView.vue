@@ -586,6 +586,10 @@ import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 	import KeyGroupSelectorPopover from '@/components/keys/KeyGroupSelectorPopover.vue'
 	import type { KeyGroupSelectorPosition } from '@/components/keys/KeyGroupSelectorPopover.vue'
 	import KeyFormModal from '@/components/keys/KeyFormModal.vue'
+import {
+  loadGroupBusinessPlatformMap,
+  type GroupBusinessPlatformInfo,
+} from '@/features/model-monitor/groupBusinessPlatformData'
 	import GroupBadge from '@/components/common/GroupBadge.vue'
 	import type { ApiKey, Group, PublicSettings } from '@/types'
 import type { Column } from '@/components/common/types'
@@ -696,6 +700,7 @@ const columns = computed<Column[]>(() =>
 
 const apiKeys = ref<ApiKey[]>([])
 const groups = ref<Group[]>([])
+const groupBusinessPlatforms = ref<Map<number, GroupBusinessPlatformInfo>>(new Map())
 const loading = ref(false)
 const now = ref(new Date())
 let resetTimer: ReturnType<typeof setInterval> | null = null
@@ -733,7 +738,6 @@ const groupSelectorKeyId = ref<number | null>(null)
 const publicSettings = ref<PublicSettings | null>(null)
 const groupSelectorPopoverRef = ref<{
   containsElement: (target: Node | null) => boolean
-  handleInsideClick: (target: HTMLElement) => void
 } | null>(null)
 const columnDropdownRef = ref<HTMLElement | null>(null)
 const dropdownPosition = ref<KeyGroupSelectorPosition | null>(null)
@@ -786,19 +790,26 @@ const onStatusFilterChange = (value: string | number | boolean | null) => {
 
 // Convert groups to Select options format with rate multiplier and subscription type
 const groupOptions = computed(() =>
-  groups.value.map((group) => ({
-    value: group.id,
-    label: group.name,
-    description: group.description,
-    rate: group.rate_multiplier,
-    userRate: userGroupRates.value[group.id] ?? null,
-    peakRateEnabled: group.peak_rate_enabled,
-    peakStart: group.peak_start,
-    peakEnd: group.peak_end,
-    peakRateMultiplier: group.peak_rate_multiplier,
-    subscriptionType: group.subscription_type,
-    platform: group.platform
-  }))
+  groups.value.map((group) => {
+    const businessPlatform = groupBusinessPlatforms.value.get(group.id)
+    return {
+      value: group.id,
+      label: group.name,
+      description: group.description,
+      rate: group.rate_multiplier,
+      userRate: userGroupRates.value[group.id] ?? null,
+      peakRateEnabled: group.peak_rate_enabled,
+      peakStart: group.peak_start,
+      peakEnd: group.peak_end,
+      peakRateMultiplier: group.peak_rate_multiplier,
+      subscriptionType: group.subscription_type,
+      platform: group.platform,
+      businessPlatform: businessPlatform?.businessPlatform || group.platform,
+      businessPlatformName: businessPlatform?.businessPlatformName || null,
+      effectivePlatform: businessPlatform?.effectivePlatform || null,
+      actualPlatform: businessPlatform?.actualPlatform || null,
+    }
+  })
 )
 
 const copyToClipboard = async (text: string, keyId: number) => {
@@ -873,7 +884,12 @@ const loadApiKeys = async () => {
 
 const loadGroups = async () => {
   try {
-    groups.value = await userGroupsAPI.getAvailable()
+    const [availableGroups, businessPlatformMap] = await Promise.all([
+      userGroupsAPI.getAvailable(),
+      loadGroupBusinessPlatformMap(),
+    ])
+    groups.value = availableGroups
+    groupBusinessPlatforms.value = businessPlatformMap
   } catch (error) {
     console.error('Failed to load groups:', error)
   }
@@ -1005,9 +1021,6 @@ const closeGroupSelector = (event: MouseEvent) => {
 
   if (!clickedTrigger && !clickedPopover) {
     closeGroupSelectorPopover()
-  } else if (clickedPopover) {
-    // 点击浮层内部时，仅处理平台下拉收起
-    groupSelectorPopoverRef.value?.handleInsideClick(target)
   }
 
   if (columnDropdownRef.value && !columnDropdownRef.value.contains(target)) {
@@ -1201,5 +1214,3 @@ onUnmounted(() => {
   if (resetTimer) clearInterval(resetTimer)
 })
 </script>
-
-

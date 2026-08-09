@@ -530,11 +530,11 @@ import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
 import { formatDateTime } from '@/utils/format'
 import {
-  buildKeyFormPlatformOptions,
-  filterAndSortKeyFormGroupOptions,
-  isSelectedGroupValidForPlatformFilter,
-  type KeyFormPlatformFilter
-} from '@/utils/keyFormGroupOptions'
+  buildGroupBusinessPlatformOptions as buildKeyFormPlatformOptions,
+  filterAndSortGroupsByBusinessPlatform as filterAndSortKeyFormGroupOptions,
+  isGroupValidForBusinessPlatformFilter as isSelectedGroupValidForPlatformFilter,
+  type BusinessPlatformFilterValue as KeyFormPlatformFilter
+} from '@/features/model-monitor/groupBusinessPlatformFilter'
 import type { ApiKey, GroupPlatform, SubscriptionType, UpdateApiKeyRequest } from '@/types'
 
 /** 创建/编辑弹窗中的分组选项 */
@@ -550,6 +550,14 @@ export interface KeyFormGroupOption {
   peakRateMultiplier: number
   subscriptionType: SubscriptionType
   platform: GroupPlatform
+  businessPlatform?: string | null
+  businessPlatformName?: string | null
+  effectivePlatform?: string | null
+  effective_platform?: string | null
+  effectivePlatformName?: string | null
+  effective_platform_name?: string | null
+  actualPlatform?: string | null
+  actual_platform?: string | null
   // 兼容 common/Select.vue 的 SelectOption（含索引签名）
   [key: string]: unknown
 }
@@ -643,7 +651,7 @@ const onFormPlatformFilterChange = (value: string | number | boolean | null) => 
   const selectedId = formData.value.group_id
   if (selectedId == null) return
   const selected = props.groupOptions.find((option) => option.value === selectedId)
-  if (!isSelectedGroupValidForPlatformFilter(selectedId, selected?.platform, formPlatformFilter.value)) {
+  if (!isSelectedGroupValidForPlatformFilter(selectedId, selected?.platform, formPlatformFilter.value, selected)) {
     formData.value.group_id = null
   }
 }

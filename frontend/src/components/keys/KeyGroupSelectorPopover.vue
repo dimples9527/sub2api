@@ -12,80 +12,16 @@
       }"
       data-tour="key-group-selector-popover"
     >
-      <!-- 平台过滤 + 搜索：平台用自定义下拉，避免原生 option 列表无法美化 -->
+      <!-- 平台过滤 + 搜索：复用通用 Select，和创建密钥弹窗保持一致 -->
       <div class="space-y-2 rounded-t-xl border-b border-gray-100 p-2 dark:border-dark-700">
-        <div class="relative" data-tour="key-list-group-platform-wrap">
-          <button
-            type="button"
-            class="group-platform-trigger"
-            :class="[
-              platformFilter ? 'group-platform-trigger--active' : '',
-              platformMenuOpen ? 'group-platform-trigger--open' : ''
-            ]"
+        <div data-tour="key-list-group-platform-wrap">
+          <Select
+            v-model="platformFilter"
+            :options="platformOptions"
+            :placeholder="t('keys.allPlatforms')"
             :aria-label="t('keys.platformLabel')"
-            :aria-expanded="platformMenuOpen"
-            aria-haspopup="listbox"
             data-tour="key-list-group-platform"
-            @click.stop="platformMenuOpen = !platformMenuOpen"
-          >
-            <svg
-              class="h-4 w-4 flex-shrink-0 text-gray-400 dark:text-dark-400"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              aria-hidden="true"
-            >
-              <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h10M4 18h7" />
-            </svg>
-            <span class="min-w-0 flex-1 truncate text-left">
-              {{ platformLabel }}
-            </span>
-            <svg
-              class="h-4 w-4 flex-shrink-0 text-gray-400 transition-transform duration-150 dark:text-dark-400"
-              :class="platformMenuOpen ? 'rotate-180' : ''"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              aria-hidden="true"
-            >
-              <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-
-          <div
-            v-if="platformMenuOpen"
-            class="group-platform-menu"
-            role="listbox"
-            :aria-label="t('keys.platformLabel')"
-            data-tour="key-list-group-platform-menu"
-            @click.stop
-          >
-            <button
-              v-for="option in platformOptions"
-              :key="String(option.value)"
-              type="button"
-              role="option"
-              class="group-platform-option"
-              :class="platformFilter === option.value ? 'group-platform-option--selected' : ''"
-              :aria-selected="platformFilter === option.value"
-              @click.stop="selectPlatform(option.value)"
-            >
-              <span class="min-w-0 flex-1 truncate text-left">{{ option.label }}</span>
-              <svg
-                v-if="platformFilter === option.value"
-                class="h-4 w-4 flex-shrink-0 text-primary-500"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                aria-hidden="true"
-              >
-                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
-            </button>
-          </div>
+          />
         </div>
 
         <div class="relative">
@@ -104,8 +40,7 @@
             type="text"
             class="group-selector-search-input"
             :placeholder="t('keys.searchGroup')"
-            @click.stop="platformMenuOpen = false"
-            @focus="platformMenuOpen = false"
+            @click.stop
           />
         </div>
       </div>
@@ -155,12 +90,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import Select from '@/components/common/Select.vue'
 import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
 import {
-  buildKeyFormPlatformOptions,
-  filterAndSortKeyFormGroupOptions,
-  type KeyFormPlatformFilter
-} from '@/utils/keyFormGroupOptions'
+  buildGroupBusinessPlatformOptions as buildKeyFormPlatformOptions,
+  filterAndSortGroupsByBusinessPlatform as filterAndSortKeyFormGroupOptions,
+  type BusinessPlatformFilterValue as KeyFormPlatformFilter
+} from '@/features/model-monitor/groupBusinessPlatformFilter'
 import type { GroupPlatform, SubscriptionType } from '@/types'
 
 /** 列表切换分组浮层中的分组选项 */
@@ -176,6 +112,14 @@ export interface KeyGroupSelectorOption {
   peakRateMultiplier: number
   subscriptionType: SubscriptionType
   platform: GroupPlatform
+  businessPlatform?: string | null
+  businessPlatformName?: string | null
+  effectivePlatform?: string | null
+  effective_platform?: string | null
+  effectivePlatformName?: string | null
+  effective_platform_name?: string | null
+  actualPlatform?: string | null
+  actual_platform?: string | null
 }
 
 export interface KeyGroupSelectorPosition {
@@ -202,7 +146,6 @@ const { t } = useI18n()
 const rootRef = ref<HTMLElement | null>(null)
 const searchQuery = ref('')
 const platformFilter = ref<KeyFormPlatformFilter>('')
-const platformMenuOpen = ref(false)
 
 const platformOptions = computed(() =>
   buildKeyFormPlatformOptions(props.options, {
@@ -210,11 +153,6 @@ const platformOptions = computed(() =>
     platformLabel: (platform) => t(`admin.groups.platforms.${platform}`)
   })
 )
-
-const platformLabel = computed(() => {
-  const current = platformOptions.value.find((option) => option.value === platformFilter.value)
-  return current?.label ?? t('keys.allPlatforms')
-})
 
 const filteredOptions = computed(() => {
   const platformFiltered = filterAndSortKeyFormGroupOptions(props.options, platformFilter.value)
@@ -231,12 +169,6 @@ const filteredOptions = computed(() => {
 const resetFilters = () => {
   searchQuery.value = ''
   platformFilter.value = ''
-  platformMenuOpen.value = false
-}
-
-const selectPlatform = (value: KeyFormPlatformFilter) => {
-  platformFilter.value = value
-  platformMenuOpen.value = false
 }
 
 const isOptionSelected = (option: KeyGroupSelectorOption) => {
@@ -250,13 +182,6 @@ const isOptionSelected = (option: KeyGroupSelectorOption) => {
 const containsElement = (target: Node | null) => {
   if (!target || !rootRef.value) return false
   return rootRef.value.contains(target)
-}
-
-/** 点击浮层内部但非平台下拉区域时，收起平台菜单 */
-const handleInsideClick = (target: HTMLElement) => {
-  if (!platformMenuOpen.value) return
-  if (target.closest('[data-tour="key-list-group-platform-wrap"]')) return
-  platformMenuOpen.value = false
 }
 
 watch(
@@ -276,14 +201,12 @@ watch(
 
 defineExpose({
   containsElement,
-  handleInsideClick,
   resetFilters
 })
 </script>
 
 <style scoped>
-/* 列表切换分组浮层：平台自定义下拉 + 搜索框统一视觉 */
-.group-platform-trigger,
+/* 列表切换分组浮层：搜索框保持和通用 Select 接近的视觉 */
 .group-selector-search-input {
   @apply w-full rounded-lg border border-gray-200 bg-gray-50 text-sm leading-5;
   @apply text-gray-900 outline-none transition-colors duration-150;
@@ -291,38 +214,6 @@ defineExpose({
   @apply dark:border-dark-600 dark:bg-dark-700 dark:text-white;
   @apply dark:hover:border-dark-500 dark:focus:border-primary-600 dark:focus:ring-primary-600;
   min-height: 2.125rem;
-}
-
-.group-platform-trigger {
-  @apply flex cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left;
-}
-
-.group-platform-trigger--active {
-  @apply border-primary-200 bg-primary-50/70 text-primary-800;
-  @apply dark:border-primary-700/60 dark:bg-primary-900/25 dark:text-primary-100;
-}
-
-.group-platform-trigger--open {
-  @apply border-primary-300 ring-1 ring-primary-300;
-  @apply dark:border-primary-600 dark:ring-primary-600;
-}
-
-.group-platform-menu {
-  @apply absolute left-0 right-0 top-[calc(100%+4px)] z-20;
-  @apply max-h-56 overflow-y-auto rounded-xl border border-gray-200 bg-white py-1;
-  @apply shadow-lg shadow-black/10;
-  @apply dark:border-dark-700 dark:bg-dark-800 dark:shadow-black/30;
-}
-
-.group-platform-option {
-  @apply flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-sm;
-  @apply text-gray-700 transition-colors duration-150;
-  @apply hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-dark-700;
-}
-
-.group-platform-option--selected {
-  @apply bg-primary-50 text-primary-700;
-  @apply dark:bg-primary-900/20 dark:text-primary-300;
 }
 
 .group-selector-search-input {
