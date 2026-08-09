@@ -11,6 +11,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/migrations"
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/require"
 )
@@ -66,6 +67,25 @@ func TestLatestMigrationBaseline(t *testing.T) {
 		_, _, _, err := latestMigrationBaseline(fsys)
 		require.Error(t, err)
 	})
+}
+
+func TestEmbeddedMigrationsDoNotStartWithUTF8BOM(t *testing.T) {
+	entries, err := fs.ReadDir(migrations.FS, ".")
+	require.NoError(t, err)
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+
+		content, err := migrations.FS.ReadFile(entry.Name())
+		require.NoError(t, err)
+		require.Falsef(t,
+			len(content) >= 3 && content[0] == 0xEF && content[1] == 0xBB && content[2] == 0xBF,
+			"migration %s starts with UTF-8 BOM; PostgreSQL treats it as part of the first token",
+			entry.Name(),
+		)
+	}
 }
 
 func TestIsMigrationChecksumCompatible_AdditionalCases(t *testing.T) {
