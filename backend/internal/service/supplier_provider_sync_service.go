@@ -76,6 +76,8 @@ type SupplierProviderGroup struct {
 	LocalGroupID                    *int64     `json:"local_group_id,omitempty"`
 	LocalGroupName                  string     `json:"local_group_name,omitempty"`
 	LocalGroupPlatform              string     `json:"local_group_platform,omitempty"`
+	PlatformOverride                string     `json:"platform_override,omitempty"`
+	EffectivePlatform               string     `json:"effective_platform,omitempty"`
 	LocalRateMultiplier             *float64   `json:"local_rate_multiplier,omitempty"`
 	LocalGroupStatus                string     `json:"local_group_status,omitempty"`
 	AutoMatchIgnored                bool       `json:"auto_match_ignored"`

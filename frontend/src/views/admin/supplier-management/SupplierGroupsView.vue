@@ -274,8 +274,8 @@
                 <span
                   :class="[
                     'sp-inline-platform',
-                    group.local_group_platform
-                      ? platformTextClass(group.local_group_platform)
+                    groupEffectivePlatform(group)
+                      ? platformTextClass(groupEffectivePlatform(group))
                       : 'sp-inline-platform-muted',
                   ]"
                 >【{{ upstreamPlatformLabel(group) }}】</span>
@@ -323,15 +323,19 @@
               <div v-if="group.local_group_id" class="sp-local-group">
                 <GroupBadge
                   :name="group.local_group_name || `本地分组 #${group.local_group_id}`"
-                  :platform="groupPlatform(group.local_group_platform)"
+                  :platform="groupPlatform(groupEffectivePlatform(group))"
                   :show-rate="false"
                   class="sp-local-group-badge"
                 />
                 <div class="sp-sub">
-                  <span :class="platformTextClass(group.local_group_platform || '')">
-                    {{ platformLabel(group.local_group_platform) }}
+                  <span :class="platformTextClass(groupEffectivePlatform(group))">
+                    {{ platformLabel(groupEffectivePlatform(group)) }}
                   </span>
+                  <em v-if="group.platform_override" class="sp-platform-override-mark">业务平台</em>
                   <span>#{{ group.local_group_id }}</span>
+                </div>
+                <div v-if="group.platform_override" class="sp-sub sp-platform-default">
+                  默认平台：{{ platformLabel(group.local_group_platform) }}
                 </div>
               </div>
               <button v-else type="button" class="sp-inline-empty" @click.stop="openMappingDialog(group)">
@@ -341,7 +345,7 @@
             </template>
 
             <template #cell-local_rate_multiplier="{ row: group }">
-              <span v-if="group.local_rate_multiplier != null" class="sp-rate-value" :class="platformTextClass(group.local_group_platform || '')">
+              <span v-if="group.local_rate_multiplier != null" class="sp-rate-value" :class="platformTextClass(groupEffectivePlatform(group))">
                 {{ formatRate(group.local_rate_multiplier) }}
               </span>
               <span v-else class="sp-empty-value">-</span>
@@ -448,6 +452,17 @@
                     <Icon name="edit" size="sm" />
                     <span>调倍率</span>
                   </button>
+                  <button
+                    type="button"
+                    class="sp-row-action"
+                    :class="{ active: Boolean(group.platform_override) }"
+                    :disabled="savingGroupPlatform && groupPlatformTarget?.id === group.id"
+                    title="配置本地分组业务平台"
+                    @click="openGroupPlatformDialog(group)"
+                  >
+                    <Icon name="edit" size="sm" />
+                    <span>{{ group.platform_override ? '改业务平台' : '业务平台' }}</span>
+                  </button>
                   <button type="button" class="sp-row-action" title="更换关联的本地分组" @click="openMappingDialog(group)">
                     <Icon name="refresh" size="sm" />
                     <span>更换本地分组</span>
@@ -538,11 +553,16 @@
             <GroupBadge
               v-if="selected.local_group_id"
               :name="selected.local_group_name || `本地分组 #${selected.local_group_id}`"
-              :platform="groupPlatform(selected.local_group_platform)"
+              :platform="groupPlatform(groupEffectivePlatform(selected))"
               :show-rate="false"
               class="sp-detail-group-badge"
             />
             <b v-else>未匹配</b>
+          </div>
+          <div v-if="selected.local_group_id" class="sp-detail-cell">
+            <span>业务平台</span>
+            <b :class="platformTextClass(groupEffectivePlatform(selected))">{{ platformLabel(groupEffectivePlatform(selected)) }}</b>
+            <small v-if="selected.platform_override">覆盖默认：{{ platformLabel(selected.local_group_platform) }}</small>
           </div>
           <div class="sp-detail-cell"><span>本地倍率</span><b>{{ formatRate(selected.local_rate_multiplier) }}</b></div>
 			<div class="sp-detail-cell">
@@ -643,6 +663,47 @@
           <button type="button" class="sp-button sp-dialog-primary rate" :disabled="savingLocalRate" @click="saveLocalRate">
             <Icon name="edit" size="sm" />
             <span>{{ savingLocalRate ? '保存中' : '保存倍率' }}</span>
+          </button>
+        </div>
+      </template>
+    </BaseDialog>
+
+    <BaseDialog :show="Boolean(groupPlatformTarget)" title="配置业务平台" width="narrow" @close="closeGroupPlatformDialog">
+      <template v-if="groupPlatformTarget">
+        <div class="sp-dialog-context platform">
+          <span>{{ groupPlatformTarget.local_group_name || `本地分组 #${groupPlatformTarget.local_group_id}` }}</span>
+          <strong>当前 {{ platformLabel(groupEffectivePlatform(groupPlatformTarget)) }}</strong>
+          <small>默认平台 {{ platformLabel(groupPlatformTarget.local_group_platform) }}</small>
+        </div>
+        <div class="sp-field">
+          <span>业务平台</span>
+          <Select
+            v-model="groupPlatformInput"
+            :options="platformOptions"
+            :searchable="true"
+            search-placeholder="搜索平台"
+            placeholder="请选择业务平台"
+          />
+        </div>
+        <div class="sp-rate-recommendation platform">
+          <span v-if="groupPlatformTarget.platform_override">已覆盖默认分组平台</span>
+          <span v-else>未配置时使用本地分组默认平台</span>
+          <strong>{{ platformLabel(groupPlatformInput) }}</strong>
+        </div>
+      </template>
+      <template #footer>
+        <div class="sp-dialog-actions">
+          <button
+            v-if="groupPlatformTarget?.platform_override"
+            type="button"
+            class="sp-button secondary"
+            :disabled="savingGroupPlatform"
+            @click="restoreGroupPlatformDefault"
+          >恢复默认</button>
+          <button type="button" class="sp-button secondary" :disabled="savingGroupPlatform" @click="closeGroupPlatformDialog">取消</button>
+          <button type="button" class="sp-button sp-dialog-primary platform" :disabled="savingGroupPlatform || !groupPlatformInput" @click="saveGroupPlatformOverride">
+            <Icon name="edit" size="sm" />
+            <span>{{ savingGroupPlatform ? '保存中' : '保存平台' }}</span>
           </button>
         </div>
       </template>
@@ -753,11 +814,13 @@ import {
 } from '@/api/admin/supplierAutomation'
 import {
   autoMatchSupplierGroups,
+  clearSupplierLocalGroupPlatformOverride,
   deleteSupplierGroup,
   getLocalMonitorStatus,
   listSupplierGroupHealthTrends,
   listSupplierGroups,
   resolveSupplierGroupNameChange,
+  setSupplierLocalGroupPlatformOverride,
   updateSupplierGroupAutoMatchPolicy,
 	updateSupplierGroupRateGuard,
 	updateSupplierGroupRateGuardIgnore,
@@ -765,6 +828,7 @@ import {
   type SupplierProviderGroup,
   type SupplierProviderGroupSummary,
 } from '@/api/admin/supplierProviderData'
+import { customPlatformsAPI, type CustomPlatform } from '@/api/admin/customPlatforms'
 import supplierProvidersAPI, { type SupplierProvider } from '@/api/admin/supplierProviders'
 import { SupplierDrawer, SupplierModuleLayout } from '@/components/admin/supplier-management'
 import SupplierGroupAvailabilityTrend from '@/components/admin/supplier-management/SupplierGroupAvailabilityTrend.vue'
@@ -872,6 +936,7 @@ const RateRiskIcon = () => h(Icon, { name: 'exclamationCircle', size: 'lg' })
 
 const appStore = useAppStore()
 const providers = ref<SupplierProvider[]>([])
+const customPlatforms = ref<CustomPlatform[]>([])
 const localGroups = ref<AdminGroup[]>([])
 const items = ref<SupplierProviderGroup[]>([])
 const groupSummary = ref<SupplierProviderGroupSummary>({ ...EMPTY_GROUP_SUMMARY })
@@ -879,6 +944,7 @@ const selected = ref<SupplierProviderGroup | null>(null)
 const mappingTarget = ref<SupplierProviderGroup | null>(null)
 const createTarget = ref<SupplierProviderGroup | null>(null)
 const rateTarget = ref<SupplierProviderGroup | null>(null)
+const groupPlatformTarget = ref<SupplierProviderGroup | null>(null)
 const unmatchTarget = ref<SupplierProviderGroup | null>(null)
 const deleteTarget = ref<SupplierProviderGroup | null>(null)
 const rateGuardIgnoreTarget = ref<SupplierProviderGroup | null>(null)
@@ -887,6 +953,7 @@ const newGroupName = ref('')
 const newGroupPlatform = ref<string>('openai')
 const newGroupRate = ref('')
 const localRateInput = ref('')
+const groupPlatformInput = ref('')
 const total = ref(0)
 const loading = ref(false)
 const monitorTrendIndex = ref<Map<string, SupplierGroupMonitorTrendRow>>(new Map())
@@ -897,6 +964,7 @@ const savingMapping = ref(false)
 const creatingLocalGroup = ref(false)
 const deletingGroupID = ref<number | null>(null)
 const savingLocalRate = ref(false)
+const savingGroupPlatform = ref(false)
 const autoMatching = ref(false)
 const policyUpdatingGroupID = ref<number | null>(null)
 const guardUpdatingGroupID = ref<number | null>(null)
@@ -938,14 +1006,15 @@ const providerOptions = computed<SelectOption[]>(() => [
   ...providers.value.map(provider => ({ value: provider.id, label: provider.name })),
 ])
 const quickProviderOptions = computed<SelectOption[]>(() => providerOptions.value)
-const platformFilterOptions: SelectOption[] = [
+const corePlatformOptions: SelectOption[] = Object.entries(PLATFORM_LABELS).map(([value, label]) => ({ value, label }))
+const customPlatformOptions = computed<SelectOption[]>(() => customPlatforms.value
+  .filter(platform => platform.enabled)
+  .map(platform => ({ value: platform.code, label: platform.name })))
+const platformFilterOptions = computed<SelectOption[]>(() => [
   { value: '', label: '全部平台' },
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'gemini', label: 'Gemini' },
-  { value: 'antigravity', label: 'Antigravity' },
-  { value: 'grok', label: 'Grok' },
-]
+  ...corePlatformOptions,
+  ...customPlatformOptions.value,
+])
 const matchStatusFilterOptions: SelectOption[] = [
   { value: '', label: '全部匹配状态' },
   { value: 'linked', label: '已匹配' },
@@ -983,7 +1052,10 @@ const localGroupOptions = computed<SelectOption[]>(() => localGroups.value.map(g
   value: group.id,
   label: `${group.name} · ${platformLabel(group.platform)} · ${formatRate(group.rate_multiplier)}`,
 })))
-const platformOptions: SelectOption[] = Object.entries(PLATFORM_LABELS).map(([value, label]) => ({ value, label }))
+const platformOptions = computed<SelectOption[]>(() => [
+  ...corePlatformOptions,
+  ...customPlatformOptions.value,
+])
 const groupColumns: Column[] = [
   { key: 'provider_name', label: '供应商', sortable: true, class: 'min-w-[150px]' },
   { key: 'name', label: '上游分组', sortable: true, class: 'min-w-[190px]' },
@@ -1084,7 +1156,7 @@ function keyStatusDetail(group: SupplierProviderGroup) {
 
 onMounted(async () => {
   try {
-    await Promise.all([ensureCustomPlatformLabels(), loadProviders(), loadLocalGroups()])
+    await Promise.all([ensureCustomPlatformLabels(), loadCustomPlatforms(), loadProviders(), loadLocalGroups()])
   } catch (err) {
     appStore.showError(errorMessage(err, '加载筛选选项失败'))
   }
@@ -1238,13 +1310,17 @@ async function loadProviders() {
   providers.value = result.items
 }
 
+async function loadCustomPlatforms() {
+  customPlatforms.value = await customPlatformsAPI.list(true)
+}
+
 async function loadLocalGroups() {
   localGroups.value = await adminAPI.groups.getAll()
 }
 
 async function refreshAll() {
   try {
-    await Promise.all([loadLocalGroups(), loadGroups(), loadRateGuardChangeLogs(), loadMonitorTrend()])
+    await Promise.all([loadCustomPlatforms(), loadLocalGroups(), loadGroups(), loadRateGuardChangeLogs(), loadMonitorTrend()])
   } catch (err) {
     appStore.showError(errorMessage(err, '刷新分组数据失败'))
   }
@@ -1550,6 +1626,64 @@ async function saveLocalRate() {
   }
 }
 
+function openGroupPlatformDialog(group: SupplierProviderGroup) {
+  if (!group.local_group_id) return
+  groupPlatformTarget.value = group
+  groupPlatformInput.value = groupEffectivePlatform(group) || group.local_group_platform || 'openai'
+}
+
+function closeGroupPlatformDialog() {
+  if (savingGroupPlatform.value) return
+  groupPlatformTarget.value = null
+  groupPlatformInput.value = ''
+}
+
+async function saveGroupPlatformOverride() {
+  const target = groupPlatformTarget.value
+  const localGroupID = Number(target?.local_group_id)
+  const platform = groupPlatformInput.value.trim()
+  if (!target || !Number.isInteger(localGroupID) || localGroupID <= 0) return
+  if (!platform) {
+    appStore.showError('请选择业务平台')
+    return
+  }
+  savingGroupPlatform.value = true
+  try {
+    if (platform === (target.local_group_platform || '').trim()) {
+      await clearSupplierLocalGroupPlatformOverride(localGroupID)
+      appStore.showSuccess('业务平台已恢复默认')
+    } else {
+      await setSupplierLocalGroupPlatformOverride(localGroupID, platform)
+      appStore.showSuccess('业务平台已保存')
+    }
+    groupPlatformTarget.value = null
+    groupPlatformInput.value = ''
+    await loadGroups()
+  } catch (err) {
+    appStore.showError(errorMessage(err, '保存业务平台失败'))
+  } finally {
+    savingGroupPlatform.value = false
+  }
+}
+
+async function restoreGroupPlatformDefault() {
+  const target = groupPlatformTarget.value
+  const localGroupID = Number(target?.local_group_id)
+  if (!target || !Number.isInteger(localGroupID) || localGroupID <= 0) return
+  savingGroupPlatform.value = true
+  try {
+    await clearSupplierLocalGroupPlatformOverride(localGroupID)
+    groupPlatformTarget.value = null
+    groupPlatformInput.value = ''
+    await loadGroups()
+    appStore.showSuccess('业务平台已恢复默认')
+  } catch (err) {
+    appStore.showError(errorMessage(err, '恢复默认业务平台失败'))
+  } finally {
+    savingGroupPlatform.value = false
+  }
+}
+
 async function removeMapping() {
   const target = unmatchTarget.value
   if (!target) return
@@ -1734,7 +1868,12 @@ function supplierTypeTone(providerID: number): string {
 }
 
 function upstreamPlatformLabel(group: SupplierProviderGroup): string {
-  return group.local_group_platform ? platformLabel(group.local_group_platform) : '待匹配'
+  const platform = groupEffectivePlatform(group)
+  return platform ? platformLabel(platform) : '待匹配'
+}
+
+function groupEffectivePlatform(group: SupplierProviderGroup): string {
+  return group.effective_platform || group.local_group_platform || ''
 }
 
 function groupPlatform(platform?: string): GroupPlatform | undefined {
@@ -2639,6 +2778,22 @@ function errorMessage(err: unknown, fallback: string): string {
   gap: 0.5rem;
 }
 
+.sp-platform-override-mark {
+  padding: 0.08rem 0.32rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sp-violet) 12%, transparent);
+  color: var(--sp-violet);
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.sp-local-group .sp-platform-default {
+  gap: 0;
+  color: var(--sp-muted);
+  font-size: 0.68rem;
+}
+
 .sp-local-group-badge {
   max-width: 12rem;
 }
@@ -2842,6 +2997,10 @@ function errorMessage(err: unknown, fallback: string): string {
   --sp-dialog-shell-accent: var(--sp-amber);
 }
 
+:global(.modal-content:has(.sp-dialog-context.platform)) {
+  --sp-dialog-shell-accent: var(--sp-violet);
+}
+
 :global(.modal-content:has(.sp-change-log-dialog)) {
   --sp-dialog-shell-accent: var(--sp-violet);
 }
@@ -2878,6 +3037,7 @@ function errorMessage(err: unknown, fallback: string): string {
 .sp-dialog-context.match { --sp-dialog-accent: var(--sp-cyan); }
 .sp-dialog-context.create { --sp-dialog-accent: var(--sp-green); }
 .sp-dialog-context.rate { --sp-dialog-accent: var(--sp-amber); }
+.sp-dialog-context.platform { --sp-dialog-accent: var(--sp-violet); }
 
 .sp-dialog-context > span { color: var(--sp-dialog-accent); font-weight: 700; }
 
@@ -2954,6 +3114,7 @@ function errorMessage(err: unknown, fallback: string): string {
 .sp-rate-recommendation.success { --sp-recommendation-accent: var(--sp-green); }
 .sp-rate-recommendation.rate,
 .sp-rate-recommendation.warning { --sp-recommendation-accent: var(--sp-amber); }
+.sp-rate-recommendation.platform { --sp-recommendation-accent: var(--sp-violet); }
 .sp-rate-recommendation.danger { --sp-recommendation-accent: var(--sp-red); }
 .sp-rate-recommendation.neutral { --sp-recommendation-accent: var(--sp-muted); }
 .sp-rate-recommendation strong { color: var(--sp-recommendation-accent); }
@@ -2973,6 +3134,7 @@ function errorMessage(err: unknown, fallback: string): string {
 .sp-dialog-primary.match { --sp-dialog-button: var(--sp-cyan); }
 .sp-dialog-primary.create { --sp-dialog-button: var(--sp-green); }
 .sp-dialog-primary.rate { --sp-dialog-button: var(--sp-amber); }
+.sp-dialog-primary.platform { --sp-dialog-button: var(--sp-violet); }
 .sp-dialog-primary.log { --sp-dialog-button: #7c3aed; }
 .sp-dialog-primary:disabled { box-shadow: none; }
 

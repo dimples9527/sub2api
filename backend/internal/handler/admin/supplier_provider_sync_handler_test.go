@@ -160,6 +160,34 @@ func (s *supplierCustomPlatformResolverStub) ResolveEnabled(_ context.Context, c
 	return s.platform, s.err
 }
 
+type supplierGroupPlatformOverrideHandlerStub struct {
+	setGroupID     int64
+	setPlatform    string
+	clearedGroupID int64
+	listGroupIDs   []int64
+	listResult     map[int64]string
+	err            error
+}
+
+func (s *supplierGroupPlatformOverrideHandlerStub) ListByGroupIDs(_ context.Context, groupIDs []int64) (map[int64]string, error) {
+	s.listGroupIDs = append([]int64(nil), groupIDs...)
+	if s.listResult != nil {
+		return s.listResult, s.err
+	}
+	return map[int64]string{}, s.err
+}
+
+func (s *supplierGroupPlatformOverrideHandlerStub) Set(_ context.Context, groupID int64, platform string) error {
+	s.setGroupID = groupID
+	s.setPlatform = platform
+	return s.err
+}
+
+func (s *supplierGroupPlatformOverrideHandlerStub) Clear(_ context.Context, groupID int64) error {
+	s.clearedGroupID = groupID
+	return s.err
+}
+
 type supplierProviderGroupMatcherHandlerStub struct {
 	autoProviderID  int64
 	ignoredGroupID  int64
@@ -320,6 +348,68 @@ func TestSupplierProviderSyncHandlerRoutes(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, int64(7), dataStub.mappedGroupID)
 	require.Nil(t, dataStub.mappedLocalGroupID)
+}
+
+func TestSupplierProviderSyncHandlerSetsLocalGroupPlatformOverride(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	localGroupID := int64(12)
+	dataStub := &supplierProviderSyncHandlerDataStub{mappings: []service.SupplierProviderGroup{{ID: 7, LocalGroupID: &localGroupID}}}
+	overrideStub := &supplierGroupPlatformOverrideHandlerStub{}
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, dataStub)
+	handler.SetGroupPlatformOverrideService(overrideStub)
+	router := gin.New()
+	router.PUT("/local-groups/:id/platform-override", handler.SetLocalGroupPlatformOverride)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/local-groups/12/platform-override", bytes.NewBufferString(`{"platform":"Grok"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, []int64{12}, dataStub.mappingLocalGroupIDs)
+	require.Equal(t, int64(12), overrideStub.setGroupID)
+	require.Equal(t, "grok", overrideStub.setPlatform)
+	require.Contains(t, rec.Body.String(), `"local_group_id":12`)
+	require.Contains(t, rec.Body.String(), `"platform_override":"grok"`)
+}
+
+func TestSupplierProviderSyncHandlerClearsLocalGroupPlatformOverride(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	localGroupID := int64(12)
+	dataStub := &supplierProviderSyncHandlerDataStub{mappings: []service.SupplierProviderGroup{{ID: 7, LocalGroupID: &localGroupID}}}
+	overrideStub := &supplierGroupPlatformOverrideHandlerStub{}
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, dataStub)
+	handler.SetGroupPlatformOverrideService(overrideStub)
+	router := gin.New()
+	router.DELETE("/local-groups/:id/platform-override", handler.ClearLocalGroupPlatformOverride)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/local-groups/12/platform-override", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, []int64{12}, dataStub.mappingLocalGroupIDs)
+	require.Equal(t, int64(12), overrideStub.clearedGroupID)
+	require.Contains(t, rec.Body.String(), `"local_group_id":12`)
+}
+
+func TestSupplierProviderSyncHandlerRejectsUnmappedLocalGroupPlatformOverride(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dataStub := &supplierProviderSyncHandlerDataStub{}
+	overrideStub := &supplierGroupPlatformOverrideHandlerStub{}
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, dataStub)
+	handler.SetGroupPlatformOverrideService(overrideStub)
+	router := gin.New()
+	router.PUT("/local-groups/:id/platform-override", handler.SetLocalGroupPlatformOverride)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/local-groups/12/platform-override", bytes.NewBufferString(`{"platform":"openai"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, []int64{12}, dataStub.mappingLocalGroupIDs)
+	require.Zero(t, overrideStub.setGroupID)
 }
 
 func TestSupplierProviderSyncHandlerStreamsProgress(t *testing.T) {

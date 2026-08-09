@@ -293,7 +293,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	supplierGroupGuardReconciler := service.ProvideSupplierGroupGuardReconciler(supplierProviderDataRepository)
 	supplierProviderGroupMatcher := service.ProvideSupplierProviderGroupMatcher(supplierProviderDataRepository, groupRepository, supplierGroupGuardReconciler)
 	supplierProviderSyncService := service.ProvideSupplierProviderSyncService(supplierProviderRepository, supplierProviderDataRepository, supplierProviderRemoteRegistry, secretEncryptor, supplierProviderTokenRedisCache, supplierProviderGroupMatcher)
-	supplierProviderSyncHandler := handler.ProvideSupplierProviderSyncHandler(supplierProviderSyncService, supplierProviderDataRepository, supplierProviderGroupMatcher, supplierGroupGuardReconciler, customPlatformService)
+	supplierProviderSyncHandler := handler.ProvideSupplierProviderSyncHandler(supplierProviderSyncService, supplierProviderDataRepository, supplierProviderGroupMatcher, supplierGroupGuardReconciler, customPlatformService, monitorGroupPlatformOverrideService)
 	supplierAutomationRepository := repository.NewSupplierAutomationRepository(db)
 	supplierAutomationRedisLock := repository.NewSupplierAutomationLock(redisClient)
 	supplierRateGuardService := service.ProvideSupplierRateGuardService(supplierProviderDataRepository)

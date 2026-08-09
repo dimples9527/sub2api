@@ -651,14 +651,14 @@ func TestSupplierProviderDataRepositoryListGroupsIncludesFilteredSummary(t *test
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "provider_id", "provider_name", "upstream_group_key", "name",
 			"rate_multiplier", "raw_status", "active", "local_group_id", "local_group_name",
-			"local_group_platform", "local_rate_multiplier", "local_group_status", "auto_match_ignored",
+			"local_group_platform", "platform_override", "effective_platform", "local_rate_multiplier", "local_group_status", "auto_match_ignored",
 			"auto_match_status", "matched_upstream_name", "name_change_pending",
 			"rate_guard_selected", "rate_guard_ignored", "rate_guard_selection_mode", "rate_guard_last_snapshot_at", "rate_guard_last_checked_at",
 			"group_sync_status", "last_group_sync_at", "local_group_active_mapping_count", "local_group_rate_guard_group_id", "local_group_rate_guard_group_name", "local_group_rate_guard_provider_name", "account_count",
 			"last_seen_at", "inactive_at", "key_sync_status",
 		}).AddRow(
 			int64(7), int64(42), "Supplier A", "group-1", "VIP", 2.5, "active", true,
-			int64(12), "VIP 本地", "openai", 3.0, "active", false, "manual", "VIP", false,
+			int64(12), "VIP 本地", "openai", "grok", "grok", 3.0, "active", false, "manual", "VIP", false,
 			true, false, "manual", now.Add(-time.Minute), now, "success", now.Add(-time.Minute), 2, int64(7), "VIP Guardian", "Supplier B", 5, now, nil,
 			"success",
 		))
@@ -688,6 +688,8 @@ func TestSupplierProviderDataRepositoryListGroupsIncludesFilteredSummary(t *test
 	require.Equal(t, int64(12), *result.Items[0].LocalGroupID)
 	require.Equal(t, "VIP 本地", result.Items[0].LocalGroupName)
 	require.Equal(t, "openai", result.Items[0].LocalGroupPlatform)
+	require.Equal(t, "grok", result.Items[0].PlatformOverride)
+	require.Equal(t, "grok", result.Items[0].EffectivePlatform)
 	require.Equal(t, 3.0, *result.Items[0].LocalRateMultiplier)
 	require.Equal(t, "active", result.Items[0].LocalGroupStatus)
 	require.False(t, result.Items[0].AutoMatchIgnored)
@@ -721,22 +723,22 @@ func TestSupplierProviderDataRepositoryListGroupsReturnsKeyStatus(t *testing.T) 
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "provider_id", "provider_name", "upstream_group_key", "name",
 			"rate_multiplier", "raw_status", "active", "local_group_id", "local_group_name",
-			"local_group_platform", "local_rate_multiplier", "local_group_status", "auto_match_ignored",
+			"local_group_platform", "platform_override", "effective_platform", "local_rate_multiplier", "local_group_status", "auto_match_ignored",
 			"auto_match_status", "matched_upstream_name", "name_change_pending",
 			"rate_guard_selected", "rate_guard_ignored", "rate_guard_selection_mode", "rate_guard_last_snapshot_at", "rate_guard_last_checked_at",
 			"group_sync_status", "last_group_sync_at", "local_group_active_mapping_count", "local_group_rate_guard_group_id", "local_group_rate_guard_group_name", "local_group_rate_guard_provider_name", "account_count",
 			"last_seen_at", "inactive_at", "key_sync_status",
 		}).AddRow(
 			int64(1), int64(42), "Supplier A", "group-created", "已创建分组", 1.5, "active", true,
-			nil, "", "", nil, "", false, "unmatched", "", false,
+			nil, "", "", "", "", nil, "", false, "unmatched", "", false,
 			false, false, "", nil, nil, "success", now, 0, nil, "", "", 2, now, nil, "failed",
 		).AddRow(
 			int64(2), int64(42), "Supplier A", "group-empty", "未创建分组", 1.5, "active", true,
-			nil, "", "", nil, "", false, "unmatched", "", false,
+			nil, "", "", "", "", nil, "", false, "unmatched", "", false,
 			false, false, "", nil, nil, "success", now, 0, nil, "", "", 0, now, nil, "success",
 		).AddRow(
 			int64(3), int64(42), "Supplier A", "group-running", "同步中分组", 1.5, "active", true,
-			nil, "", "", nil, "", false, "unmatched", "", false,
+			nil, "", "", "", "", nil, "", false, "unmatched", "", false,
 			false, false, "", nil, nil, "success", now, 0, nil, "", "", 0, now, nil, "running",
 		))
 
@@ -802,7 +804,7 @@ func TestSupplierProviderGroupBaseWhereIncludesPlatform(t *testing.T) {
 	require.Contains(t, where, "g.provider_id = $1")
 	require.Contains(t, where, "g.active = $2")
 	require.Contains(t, where, "(g.name ILIKE $3 OR g.upstream_group_key ILIKE $3)")
-	require.Contains(t, where, "lg.platform = $4")
+	require.Contains(t, where, "COALESCE(NULLIF(group_platform_override.actual_platform, ''), lg.platform) = $4")
 	require.Equal(t, []any{int64(42), active, "%vip%", "openai"}, args)
 }
 
@@ -959,7 +961,7 @@ func TestSupplierProviderDataRepositoryListGroupsKeepsSummaryOutsideStatusFilter
 	active := true
 	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
 
-	mock.ExpectQuery(`(?s)COUNT\(\*\) FILTER \(WHERE active = TRUE\) AS group_count.*WHERE .*lg\.platform = \$2`).
+	mock.ExpectQuery(`(?s)COUNT\(\*\) FILTER \(WHERE active = TRUE\) AS group_count.*WHERE .*COALESCE\(NULLIF\(group_platform_override\.actual_platform, ''\), lg\.platform\) = \$2`).
 		WithArgs(int64(42), "openai").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"group_count", "account_count", "linked_group_count", "unlinked_group_count", "rate_risk_count",
@@ -973,14 +975,14 @@ func TestSupplierProviderDataRepositoryListGroupsKeepsSummaryOutsideStatusFilter
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "provider_id", "provider_name", "upstream_group_key", "name",
 			"rate_multiplier", "raw_status", "active", "local_group_id", "local_group_name",
-			"local_group_platform", "local_rate_multiplier", "local_group_status", "auto_match_ignored",
+			"local_group_platform", "platform_override", "effective_platform", "local_rate_multiplier", "local_group_status", "auto_match_ignored",
 			"auto_match_status", "matched_upstream_name", "name_change_pending",
 			"rate_guard_selected", "rate_guard_ignored", "rate_guard_selection_mode", "rate_guard_last_snapshot_at", "rate_guard_last_checked_at",
 			"group_sync_status", "last_group_sync_at", "local_group_active_mapping_count", "local_group_rate_guard_group_id", "local_group_rate_guard_group_name", "local_group_rate_guard_provider_name", "account_count",
 			"last_seen_at", "inactive_at", "key_sync_status",
 		}).AddRow(
 			int64(7), int64(42), "Supplier A", "group-1", "VIP", 2.5, "active", true,
-			int64(12), "VIP 本地", "openai", 2.6, "active", false, "manual", "VIP", false,
+			int64(12), "VIP 本地", "openai", "", "openai", 2.6, "active", false, "manual", "VIP", false,
 			false, false, "", nil, nil, "never", nil, 2, nil, "", "", 5, now, nil, "never",
 		))
 

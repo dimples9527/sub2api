@@ -132,6 +132,8 @@ export interface SupplierProviderGroup {
   local_group_id?: number
   local_group_name?: string
   local_group_platform?: string
+  platform_override?: string
+  effective_platform?: string
   local_rate_multiplier?: number
   local_group_status?: string
   auto_match_ignored: boolean
@@ -475,6 +477,26 @@ export async function updateSupplierGroupMapping(
   return data
 }
 
+export async function setSupplierLocalGroupPlatformOverride(
+  localGroupID: number,
+  platform: string
+): Promise<{ local_group_id: number; platform_override: string }> {
+  const { data } = await apiClient.put<{ local_group_id: number; platform_override: string }>(
+    `/admin/supplier-management/local-groups/${localGroupID}/platform-override`,
+    { platform }
+  )
+  return data
+}
+
+export async function clearSupplierLocalGroupPlatformOverride(
+  localGroupID: number
+): Promise<{ local_group_id: number; platform_override: string }> {
+  const { data } = await apiClient.delete<{ local_group_id: number; platform_override: string }>(
+    `/admin/supplier-management/local-groups/${localGroupID}/platform-override`
+  )
+  return data
+}
+
 export async function deleteSupplierGroup(id: number): Promise<{ group_id: number }> {
   const { data } = await apiClient.delete<{ group_id: number }>(
     `/admin/supplier-management/groups/${id}`
@@ -548,6 +570,8 @@ export const supplierProviderDataAPI = {
   cancelSupplierAccountBatchTestJob,
   listSupplierGroups,
   updateSupplierGroupMapping,
+  setSupplierLocalGroupPlatformOverride,
+  clearSupplierLocalGroupPlatformOverride,
   deleteSupplierGroup,
   autoMatchSupplierGroups,
   updateSupplierGroupAutoMatchPolicy,

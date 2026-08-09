@@ -89,6 +89,8 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 		supplier.POST("/accounts/batch-test/:job_id/cancel", h.Admin.Account.CancelSupplierBatchTest)
 		supplier.GET("/groups", h.Admin.SupplierProviderSync.ListGroups)
 		supplier.GET("/groups/health-trends", h.Admin.SupplierProviderSync.ListGroupHealthTrends)
+		supplier.PUT("/local-groups/:id/platform-override", h.Admin.SupplierProviderSync.SetLocalGroupPlatformOverride)
+		supplier.DELETE("/local-groups/:id/platform-override", h.Admin.SupplierProviderSync.ClearLocalGroupPlatformOverride)
 		supplier.POST("/groups/auto-match", h.Admin.SupplierProviderSync.AutoMatchGroups)
 		supplier.DELETE("/groups/:id", h.Admin.SupplierProviderSync.DeleteGroup)
 		supplier.PUT("/groups/:id/mapping", h.Admin.SupplierProviderSync.UpdateGroupMapping)

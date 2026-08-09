@@ -71,6 +71,7 @@ type SupplierProviderSyncHandler struct {
 	groupMatcher           SupplierProviderGroupMatcherPort
 	groupGuard             SupplierGroupGuardPort
 	customPlatformResolver SupplierCustomPlatformResolver
+	groupPlatformOverride  service.MonitorGroupPlatformOverrideService
 }
 
 func (h *SupplierProviderSyncHandler) SetGroupGuard(guard SupplierGroupGuardPort) {
@@ -88,6 +89,12 @@ func (h *SupplierProviderSyncHandler) SetGroupMatcher(matcher SupplierProviderGr
 func (h *SupplierProviderSyncHandler) SetCustomPlatformResolver(resolver SupplierCustomPlatformResolver) {
 	if h != nil {
 		h.customPlatformResolver = resolver
+	}
+}
+
+func (h *SupplierProviderSyncHandler) SetGroupPlatformOverrideService(overrideService service.MonitorGroupPlatformOverrideService) {
+	if h != nil {
+		h.groupPlatformOverride = overrideService
 	}
 }
 
@@ -358,6 +365,10 @@ type supplierLocalAccountPlatformOverrideRequest struct {
 	Platform string `json:"platform"`
 }
 
+type supplierLocalGroupPlatformOverrideRequest struct {
+	Platform string `json:"platform"`
+}
+
 type supplierLocalAccountHealthGuardModel struct {
 	ID          string `json:"id"`
 	DisplayName string `json:"display_name"`
@@ -500,6 +511,80 @@ func parseSupplierLocalAccountID(c *gin.Context) (int64, bool) {
 		return 0, false
 	}
 	return localAccountID, true
+}
+
+func (h *SupplierProviderSyncHandler) SetLocalGroupPlatformOverride(c *gin.Context) {
+	localGroupID, ok := parseSupplierLocalGroupID(c)
+	if !ok {
+		return
+	}
+	var req supplierLocalGroupPlatformOverrideRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.ErrorFrom(c, badRequest("业务平台参数无效"))
+		return
+	}
+	platform := strings.ToLower(strings.TrimSpace(req.Platform))
+	if !h.isAllowedBusinessPlatform(c.Request.Context(), platform) {
+		response.ErrorFrom(c, badRequest("业务平台无效"))
+		return
+	}
+	if !h.ensureSupplierLocalGroupMapped(c, localGroupID) {
+		return
+	}
+	if h.groupPlatformOverride == nil {
+		response.ErrorFrom(c, infraerrors.InternalServer("SUPPLIER_GROUP_PLATFORM_OVERRIDE_UNAVAILABLE", "supplier group platform override service unavailable"))
+		return
+	}
+	if err := h.groupPlatformOverride.Set(c.Request.Context(), localGroupID, platform); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"local_group_id": localGroupID, "platform_override": platform})
+}
+
+func (h *SupplierProviderSyncHandler) ClearLocalGroupPlatformOverride(c *gin.Context) {
+	localGroupID, ok := parseSupplierLocalGroupID(c)
+	if !ok {
+		return
+	}
+	if !h.ensureSupplierLocalGroupMapped(c, localGroupID) {
+		return
+	}
+	if h.groupPlatformOverride == nil {
+		response.ErrorFrom(c, infraerrors.InternalServer("SUPPLIER_GROUP_PLATFORM_OVERRIDE_UNAVAILABLE", "supplier group platform override service unavailable"))
+		return
+	}
+	if err := h.groupPlatformOverride.Clear(c.Request.Context(), localGroupID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"local_group_id": localGroupID, "platform_override": ""})
+}
+
+func (h *SupplierProviderSyncHandler) ensureSupplierLocalGroupMapped(c *gin.Context, localGroupID int64) bool {
+	mappings, err := h.dataRepo.ListMappingsByLocalGroup(c.Request.Context(), []int64{localGroupID})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return false
+	}
+	if len(mappings) == 0 {
+		response.ErrorFrom(c, badRequest("本地分组不属于供应商管理模块的匹配分组"))
+		return false
+	}
+	return true
+}
+
+func parseSupplierLocalGroupID(c *gin.Context) (int64, bool) {
+	rawID := strings.TrimSpace(c.Param("local_group_id"))
+	if rawID == "" {
+		rawID = strings.TrimSpace(c.Param("id"))
+	}
+	localGroupID, err := strconv.ParseInt(rawID, 10, 64)
+	if err != nil || localGroupID <= 0 {
+		response.ErrorFrom(c, badRequest("本地分组 ID 无效"))
+		return 0, false
+	}
+	return localGroupID, true
 }
 
 func (h *SupplierProviderSyncHandler) ListGroups(c *gin.Context) {

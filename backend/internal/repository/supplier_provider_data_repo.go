@@ -222,6 +222,7 @@ FROM (
   FROM supplier_provider_groups g
   JOIN supplier_providers p ON p.id = g.provider_id
   LEFT JOIN groups lg ON lg.id = g.local_group_id
+  LEFT JOIN monitor_group_platform_overrides group_platform_override ON group_platform_override.group_id = lg.id
   LEFT JOIN LATERAL (
     SELECT r.status
     FROM supplier_provider_sync_runs r
@@ -232,7 +233,7 @@ FROM (
   ) account_sync ON TRUE
   LEFT JOIN supplier_provider_accounts a ON a.provider_id = g.provider_id AND a.group_key = g.upstream_group_key
   WHERE `+summaryWhere+`
-  GROUP BY g.id, lg.id, account_sync.status
+  GROUP BY g.id, lg.id, group_platform_override.actual_platform, account_sync.status
 ) matched_groups`, summaryArgs...).Scan(
 		&summary.GroupCount,
 		&summary.AccountCount,
@@ -253,6 +254,7 @@ FROM (
 SELECT COUNT(*) FROM supplier_provider_groups g
 JOIN supplier_providers p ON p.id = g.provider_id
 LEFT JOIN groups lg ON lg.id = g.local_group_id
+LEFT JOIN monitor_group_platform_overrides group_platform_override ON group_platform_override.group_id = lg.id
 WHERE `+where, args...).Scan(&total); err != nil {
 			return service.SupplierProviderGroupListResult{}, fmt.Errorf("count filtered supplier provider groups: %w", err)
 		}
@@ -264,6 +266,8 @@ SELECT g.id, g.provider_id, p.name AS provider_name, g.upstream_group_key, g.nam
        g.rate_multiplier, g.raw_status, g.active,
        lg.id AS local_group_id, COALESCE(lg.name, '') AS local_group_name,
        COALESCE(lg.platform, '') AS local_group_platform,
+       COALESCE(group_platform_override.actual_platform, '') AS platform_override,
+       COALESCE(NULLIF(group_platform_override.actual_platform, ''), COALESCE(lg.platform, '')) AS effective_platform,
        lg.rate_multiplier AS local_rate_multiplier,
        COALESCE(lg.status, '') AS local_group_status,
        g.auto_match_ignored, g.auto_match_status,
@@ -283,6 +287,7 @@ SELECT g.id, g.provider_id, p.name AS provider_name, g.upstream_group_key, g.nam
 FROM supplier_provider_groups g
 JOIN supplier_providers p ON p.id = g.provider_id
 LEFT JOIN groups lg ON lg.id = g.local_group_id
+LEFT JOIN monitor_group_platform_overrides group_platform_override ON group_platform_override.group_id = lg.id
 LEFT JOIN supplier_provider_runtime_stats s ON s.provider_id = g.provider_id
 LEFT JOIN LATERAL (
   SELECT r.status
@@ -303,7 +308,7 @@ LEFT JOIN (
 LEFT JOIN supplier_provider_groups guardian_group ON guardian_group.id = guard_state.rate_guard_group_id
 LEFT JOIN supplier_providers guardian_provider ON guardian_provider.id = guardian_group.provider_id
 LEFT JOIN supplier_provider_accounts a ON a.provider_id = g.provider_id AND a.group_key = g.upstream_group_key
-WHERE `+where+fmt.Sprintf(" GROUP BY g.id, p.name, lg.id, s.group_sync_status, s.last_group_sync_at, account_sync.status, guard_state.active_mapping_count, guard_state.rate_guard_group_id, guardian_group.id, guardian_provider.id ORDER BY %s LIMIT $%d OFFSET $%d", supplierProviderGroupOrderBy(params), len(args)+1, len(args)+2), queryArgs...)
+WHERE `+where+fmt.Sprintf(" GROUP BY g.id, p.name, lg.id, group_platform_override.actual_platform, s.group_sync_status, s.last_group_sync_at, account_sync.status, guard_state.active_mapping_count, guard_state.rate_guard_group_id, guardian_group.id, guardian_provider.id ORDER BY %s LIMIT $%d OFFSET $%d", supplierProviderGroupOrderBy(params), len(args)+1, len(args)+2), queryArgs...)
 	if err != nil {
 		return service.SupplierProviderGroupListResult{}, fmt.Errorf("query supplier provider groups: %w", err)
 	}
@@ -1440,7 +1445,7 @@ func supplierProviderGroupBaseWhere(params service.SupplierProviderDataListParam
 	conditions := []string{where}
 	if platform := strings.TrimSpace(params.Platform); platform != "" {
 		args = append(args, platform)
-		conditions = append(conditions, fmt.Sprintf("lg.platform = $%d", len(args)))
+		conditions = append(conditions, fmt.Sprintf("COALESCE(NULLIF(group_platform_override.actual_platform, ''), lg.platform) = $%d", len(args)))
 	}
 	return strings.Join(conditions, " AND "), args
 }
@@ -1700,6 +1705,7 @@ func scanSupplierProviderGroup(scanner supplierProviderGroupScanner) (service.Su
 	err := scanner.Scan(&item.ID, &item.ProviderID, &item.ProviderName, &item.UpstreamKey,
 		&item.Name, &item.RateMultiplier, &item.RawStatus, &item.Active,
 		&item.LocalGroupID, &item.LocalGroupName, &item.LocalGroupPlatform,
+		&item.PlatformOverride, &item.EffectivePlatform,
 		&item.LocalRateMultiplier, &item.LocalGroupStatus,
 		&item.AutoMatchIgnored, &item.AutoMatchStatus, &item.MatchedUpstreamName,
 		&item.NameChangePending,

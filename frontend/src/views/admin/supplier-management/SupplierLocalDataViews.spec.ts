@@ -10,6 +10,8 @@ const supplierAccountMocks = vi.hoisted(() => ({
   listProviders: vi.fn(),
   listGroups: vi.fn(),
   listAccounts: vi.fn(),
+  listCustomPlatforms: vi.fn(),
+  listAccountRateGuardUnbindLogs: vi.fn(),
   getAccountById: vi.fn(),
   getAvailableModels: vi.fn(),
   duplicate: vi.fn(),
@@ -51,6 +53,19 @@ vi.mock('@/api/admin/supplierProviders', () => ({
   },
 }))
 
+vi.mock('@/api/admin/customPlatforms', () => ({
+  customPlatformsAPI: {
+    list: supplierAccountMocks.listCustomPlatforms,
+  },
+  default: {
+    list: supplierAccountMocks.listCustomPlatforms,
+  },
+}))
+
+vi.mock('@/api/admin/supplierAutomation', () => ({
+  listAccountRateGuardUnbindLogs: supplierAccountMocks.listAccountRateGuardUnbindLogs,
+}))
+
 vi.mock('@/api/admin/supplierProviderData', async importOriginal => {
   const actual = await importOriginal<typeof import('@/api/admin/supplierProviderData')>()
   return {
@@ -75,6 +90,7 @@ const supplierProviderDataSource = readFileSync(
 const runtimeCellKeys = [
   'provider_name',
   'upstream_account_key',
+  'upstream_account_status',
   'local_account_name',
   'local_account_priority',
   'rate_multiplier',
@@ -419,6 +435,14 @@ describe('supplier local data views component usage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     supplierAccountMocks.listProviders.mockResolvedValue({ items: [] })
+    supplierAccountMocks.listCustomPlatforms.mockResolvedValue([])
+    supplierAccountMocks.listAccountRateGuardUnbindLogs.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 1,
+      pending_count: 0,
+    })
     supplierAccountMocks.listGroups.mockResolvedValue([
       { id: 201, name: '本地分组 A', platform: 'openai' },
       { id: 202, name: '本地分组 B', platform: 'anthropic' },
@@ -514,6 +538,8 @@ describe('supplier local data views component usage', () => {
       '可参与调度1',
       '暂停调度1',
       '测试失败1',
+      '上游分组已删除0',
+      '上游密钥已删除0',
     ])
 
     await wrapper.get('[data-test="supplier-account-quick-filter-bound"]').trigger('click')
@@ -666,20 +692,22 @@ describe('supplier local data views component usage', () => {
     const wrapper = await mountSupplierAccounts()
     const filterGroups = wrapper.findAll('.sp-account-filter-control[role="group"]')
 
-    expect(filterGroups).toHaveLength(5)
+    expect(filterGroups).toHaveLength(6)
     expect(filterGroups.map(group => group.attributes('aria-labelledby'))).toEqual([
       'supplier-account-search-label',
       'supplier-account-provider-label',
       'supplier-account-platform-label',
       'supplier-account-group-label',
       'supplier-account-active-label',
+      'supplier-account-upstream-status-label',
     ])
     expect(filterGroups.map(group => group.get('.sr-only').text())).toEqual([
       '账号搜索',
       '供应商',
       '平台',
       '本地分组',
-      '账号状态',
+      '同步有效性',
+      '上游状态',
     ])
     expect(filterGroups.map(group => {
       const control = group.find('input, button')
@@ -690,6 +718,7 @@ describe('supplier local data views component usage', () => {
       'supplier-account-platform-label',
       'supplier-account-group-label',
       'supplier-account-active-label',
+      'supplier-account-upstream-status-label',
     ])
 
     wrapper.unmount()
@@ -785,7 +814,34 @@ describe('supplier local data views component usage', () => {
     expect(source).not.toContain('<input')
   })
 
-  it('uses a compact account workbench with the required 13-column order', () => {
+  it('adds enabled custom platforms to the group platform filter and editor dropdown', () => {
+    expect(groupsSource).toContain("import { customPlatformsAPI, type CustomPlatform } from '@/api/admin/customPlatforms'")
+    expect(groupsSource).toContain('const customPlatforms = ref<CustomPlatform[]>([])')
+    expect(groupsSource).toContain('const customPlatformOptions = computed<SelectOption[]>(() => customPlatforms.value')
+    expect(groupsSource).toContain('const platformFilterOptions = computed<SelectOption[]>(() => [')
+    expect(groupsSource).toContain('const platformOptions = computed<SelectOption[]>(() => [')
+    expect(groupsSource).toContain('...customPlatformOptions.value')
+    expect(groupsSource).toContain("await Promise.all([ensureCustomPlatformLabels(), loadCustomPlatforms(), loadProviders(), loadLocalGroups()])")
+    expect(groupsSource).toContain('customPlatforms.value = await customPlatformsAPI.list(true)')
+  })
+
+  it('supports supplier local group business platform overrides without using core group management', () => {
+    expect(supplierProviderDataSource).toContain('platform_override?: string')
+    expect(supplierProviderDataSource).toContain('effective_platform?: string')
+    expect(supplierProviderDataSource).toContain('setSupplierLocalGroupPlatformOverride')
+    expect(supplierProviderDataSource).toContain('/admin/supplier-management/local-groups/${localGroupID}/platform-override')
+    expect(groupsSource).toContain('groupPlatformTarget = ref<SupplierProviderGroup | null>(null)')
+    expect(groupsSource).toContain('title="配置业务平台"')
+    expect(groupsSource).toContain('groupEffectivePlatform(group)')
+    expect(groupsSource).toContain('openGroupPlatformDialog(group)')
+    expect(groupsSource).toContain('await setSupplierLocalGroupPlatformOverride(localGroupID, platform)')
+    expect(groupsSource).toContain('await clearSupplierLocalGroupPlatformOverride(localGroupID)')
+    expect(groupsSource).not.toContain('adminAPI.groups.update(localGroupID, { platform')
+  })
+
+
+
+  it('uses a compact account workbench with the required 14-column order', () => {
     const accountColumnsSource = accountsSource.match(
       /const accountColumns: Column\[\] = \[([\s\S]*?)\n\]/
     )?.[1]
@@ -796,6 +852,7 @@ describe('supplier local data views component usage', () => {
     expect(accountColumns).toEqual([
       { key: 'provider_name', label: '供应商' },
       { key: 'upstream_account_key', label: '上游账号' },
+      { key: 'upstream_account_status', label: '上游状态' },
       { key: 'local_account_name', label: '本地账号' },
       { key: 'local_account_priority', label: '优先级' },
       { key: 'rate_multiplier', label: '上游倍率' },
@@ -1378,7 +1435,7 @@ describe('supplier local data views component usage', () => {
     expect(groupsSource).toContain('SUPPLIER_TONES')
     expect(groupsSource).toContain('supplierTone(group.provider_id)')
     expect(groupsSource).toContain('sp-supplier-chip')
-    expect(groupsSource).toContain('groupPlatform(group.local_group_platform)')
+    expect(groupsSource).toContain('groupPlatform(groupEffectivePlatform(group))')
     expect(groupsSource).toContain('UPSTREAM_GROUP_TONES')
     expect(groupsSource).toContain('upstreamGroupTone(group.upstream_group_key)')
     expect(groupsSource).toContain('sp-upstream-group-chip')
@@ -1386,7 +1443,7 @@ describe('supplier local data views component usage', () => {
       `<span :class="['sp-rate-value', platformTextClass(group.local_group_platform || '')]">`
     )
     expect(groupsSource).toContain(
-      `class="sp-rate-value" :class="platformTextClass(group.local_group_platform || '')"`
+      `class="sp-rate-value" :class="platformTextClass(groupEffectivePlatform(group))"`
     )
     expect(groupsSource).not.toContain('upstreamRateTone')
     expect(groupsSource).not.toContain('UPSTREAM_RATE_TONES')
