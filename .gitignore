@@ -147,3 +147,6 @@ output/
 /frontend/src/__tests__/font-scale.spec.ts
 /frontend/src/api/__tests__/*
 /backend/.gomodcache
+
+# Vitest / Vite cache at repo root
+.vite/
