@@ -86,6 +86,9 @@ var migrationChecksumCompatibilityRules = map[string]migrationChecksumCompatibil
 	// 195 originally seeded mode=v2; flipped to v1 (safe default / opt-in v2). Existing DBs
 	// that already applied the v2 seed keep their row and the historical checksum.
 	"195_channel_monitor_mode.sql": newMigrationChecksumCompatibilityRule("13f3792f3e3e53ee96e26415c884cf8062c77172824b54fcc9a8c0c2b1f185ec", "4c74fe33ef2274cc72e1bb49671e651274532c034b29f5b2982c2a4c88d101a6"),
+	// 205 在已应用的本地开发库中存在历史 checksum；当前文件保留最新种子内容，
+	// 允许旧库继续启动，避免每次拉起本地开发环境都因为迁移校验失败而中断。
+	"205_custom_platforms.sql": newMigrationChecksumCompatibilityRule("166e861e4284416fb039230564f2b6211577c1bab7260e7c765d9e7080713523", "76753c3b137ab2f7139471f26943ddf720cbf08ebe882f7495f02d6ccce0e399"),
 	// 220 originally cleared video prices for all non-grok platforms (including composite);
 	// composite is now preserved because it may route to Grok accounts.
 	"220_clear_non_grok_video_generation_config.sql": newMigrationChecksumCompatibilityRule("85e320b9ec64f2d3fcd8cf705b2b4e76a7b49f7a57140c14bff97f32691c818b", "3da48c8fdffe6390325f43d08b8e353e0a365df43d44a78dbbe655d0deb18402"),
