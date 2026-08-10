@@ -90,12 +90,15 @@ func (s *settingBackedSupplierTurnstileSolver) PrepareToken(
 	}
 	token, err := providerImpl.SolveTurnstile(ctx, siteKey, pageURL)
 	if err != nil {
+		_ = s.settings.RecordSupplierCaptchaCall(ctx, false)
 		return fail(fmt.Errorf("solve supplier turnstile: %w", err))
 	}
 	token = strings.TrimSpace(token)
 	if token == "" {
+		_ = s.settings.RecordSupplierCaptchaCall(ctx, false)
 		return fail(fmt.Errorf("solve supplier turnstile: empty token"))
 	}
+	_ = s.settings.RecordSupplierCaptchaCall(ctx, true)
 	SupplierSyncProgressOK(ctx, SupplierSyncProgressStageCaptcha, "打码成功")
 	return token, nil
 }

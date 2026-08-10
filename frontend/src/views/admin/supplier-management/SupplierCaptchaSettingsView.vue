@@ -18,10 +18,46 @@
 
     <div v-if="error" class="sp-alert sp-error-line">{{ error }}</div>
 
-    <section class="sp-panel">
+    <section class="sp-panel" aria-label="打码调用统计">
       <header class="sp-panel-head">
         <div class="sp-panel-title">
           <span class="sp-section-index">01</span>
+          <div>
+            <h2>调用统计</h2>
+            <span>仅统计真实调用打码平台的次数</span>
+          </div>
+        </div>
+      </header>
+      <div class="sp-stats-body">
+        <div class="sp-metric-grid sp-captcha-metric-grid">
+          <article class="sp-metric-card sp-stat-static" aria-label="累计调用">
+            <div class="sp-metric-label">累计调用</div>
+            <div class="sp-metric-value">{{ stats.call_total }}</div>
+            <div class="sp-metric-foot">真实发起 SolveTurnstile 的次数</div>
+          </article>
+          <article class="sp-metric-card sp-stat-static" aria-label="成功次数">
+            <div class="sp-metric-label">成功</div>
+            <div class="sp-metric-value sp-green">{{ stats.call_success }}</div>
+            <div class="sp-metric-foot">返回有效 token 的次数</div>
+          </article>
+          <article class="sp-metric-card sp-stat-static" aria-label="失败次数">
+            <div class="sp-metric-label">失败</div>
+            <div class="sp-metric-value sp-red">{{ stats.call_failed }}</div>
+            <div class="sp-metric-foot">打码失败或空 token 的次数</div>
+          </article>
+          <article class="sp-metric-card sp-stat-static" aria-label="最近调用时间">
+            <div class="sp-metric-label">最近调用</div>
+            <div class="sp-metric-value sp-last-called">{{ lastCalledLabel }}</div>
+            <div class="sp-metric-foot">UTC 时间，缓存命中不计入</div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="sp-panel">
+      <header class="sp-panel-head">
+        <div class="sp-panel-title">
+          <span class="sp-section-index">02</span>
           <div>
             <h2>{{ currentCaptchaProvider.label }} 账号</h2>
             <span>仅在供应商开启 Turnstile 时才会调用</span>
@@ -97,7 +133,7 @@
     <section class="sp-panel">
       <header class="sp-panel-head">
         <div class="sp-panel-title">
-          <span class="sp-section-index">02</span>
+          <span class="sp-section-index">03</span>
           <div>
             <h2>使用说明</h2>
             <span>与供应商开关的配合方式</span>
@@ -109,6 +145,7 @@
         <li>在「供应商管理」中为需要绕过上游人机验证的供应商打开「Turnstile 人机校验」。</li>
         <li>仅在登录上游时打码；token / session 缓存命中时不会再次打码。</li>
         <li>打码失败会直接导致登录失败，不会用空 token 重试。</li>
+        <li>上方统计只记录真实调用打码平台的次数，配置错误或未实际请求平台不计入。</li>
       </ul>
     </section>
   </SupplierModuleLayout>
@@ -165,7 +202,21 @@ const form = reactive<{
   endpoint: '',
 })
 
+const stats = reactive({
+  call_total: 0,
+  call_success: 0,
+  call_failed: 0,
+  last_called_at: '',
+})
+
 const currentCaptchaProvider = computed(() => captchaProviderMeta[normalizeCaptchaProvider(form.provider)])
+
+const lastCalledLabel = computed(() => {
+  if (!stats.last_called_at) return '暂无'
+  const date = new Date(stats.last_called_at)
+  if (Number.isNaN(date.getTime())) return stats.last_called_at
+  return date.toLocaleString()
+})
 
 function handleProviderChange() {
   form.api_key = ''
@@ -178,6 +229,10 @@ function applySettings(settings: SupplierCaptchaSettings) {
   form.api_key = ''
   form.api_key_configured = !!settings.api_key_configured
   form.endpoint = settings.endpoint || ''
+  stats.call_total = Number(settings.call_total || 0)
+  stats.call_success = Number(settings.call_success || 0)
+  stats.call_failed = Number(settings.call_failed || 0)
+  stats.last_called_at = settings.last_called_at || ''
 }
 
 async function loadSettings() {
@@ -246,6 +301,30 @@ onMounted(() => {
   line-height: 1.6;
 }
 
+.sp-stats-body {
+  padding: 1rem 1.25rem 1.25rem;
+}
+
+.sp-captcha-metric-grid {
+  grid-template-columns: repeat(4, minmax(140px, 1fr));
+  margin-bottom: 0;
+}
+
+.sp-stat-static {
+  cursor: default;
+}
+
+.sp-stat-static:hover {
+  border-color: var(--sp-line, #e5e7eb);
+  box-shadow: var(--sp-shadow, none);
+}
+
+.sp-last-called {
+  font-size: 1rem;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
 .sp-captcha-form {
   display: grid;
   gap: 1.25rem;
@@ -300,4 +379,15 @@ onMounted(() => {
   line-height: 1.55;
 }
 
+@media (max-width: 960px) {
+  .sp-captcha-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .sp-captcha-metric-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 </style>

@@ -4,6 +4,10 @@ export interface SupplierCaptchaSettings {
   provider: string
   api_key_configured: boolean
   endpoint: string
+  call_total: number
+  call_success: number
+  call_failed: number
+  last_called_at?: string
 }
 
 export interface UpdateSupplierCaptchaSettingsRequest {

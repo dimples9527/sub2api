@@ -20,6 +20,10 @@ func TestGetSupplierCaptchaSettings_Defaults(t *testing.T) {
 	require.Equal(t, captcha.ProviderTwoCaptcha, got.Provider)
 	require.False(t, got.APIKeyConfigured)
 	require.Equal(t, "", got.Endpoint)
+	require.Equal(t, int64(0), got.CallTotal)
+	require.Equal(t, int64(0), got.CallSuccess)
+	require.Equal(t, int64(0), got.CallFailed)
+	require.Equal(t, "", got.LastCalledAt)
 }
 
 func TestUpdateSupplierCaptchaSettings_KeepAPIKeyWhenEmpty(t *testing.T) {
@@ -134,4 +138,20 @@ func TestUpdateSupplierCaptchaSettings_DoesNotReuseEndpointWhenProviderChanges(t
 	require.Equal(t, captcha.ProviderYesCaptcha, got.Provider)
 	require.True(t, got.APIKeyConfigured)
 	require.Equal(t, "", got.Endpoint)
+}
+
+func TestRecordSupplierCaptchaCall_IncrementsStats(t *testing.T) {
+	repo := newMockSettingRepo()
+	svc := NewSettingService(repo, &config.Config{})
+
+	require.NoError(t, svc.RecordSupplierCaptchaCall(context.Background(), true))
+	require.NoError(t, svc.RecordSupplierCaptchaCall(context.Background(), false))
+	require.NoError(t, svc.RecordSupplierCaptchaCall(context.Background(), true))
+
+	got, err := svc.GetSupplierCaptchaSettings(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, int64(3), got.CallTotal)
+	require.Equal(t, int64(2), got.CallSuccess)
+	require.Equal(t, int64(1), got.CallFailed)
+	require.NotEmpty(t, got.LastCalledAt)
 }
