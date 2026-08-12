@@ -134,6 +134,11 @@ type supplierProviderSyncHandlerDataStub struct {
 	mappedLocalGroupID      *int64
 	accountListParams       service.SupplierProviderDataListParams
 	groupListParams         service.SupplierProviderDataListParams
+	monitorTargetListParams service.SupplierProviderMonitorTargetListParams
+	monitorTargets          service.SupplierProviderMonitorTargetListResult
+	boundMonitorTargetID    int64
+	boundLocalAccountID     int64
+	unboundMonitorTargetID  int64
 	healthTrendParams       service.SupplierProviderGroupHealthTrendParams
 	healthTrends            []service.SupplierProviderGroupHealthTrend
 	mappingLocalGroupIDs    []int64
@@ -244,6 +249,22 @@ func (s *supplierProviderSyncHandlerDataStub) ListGroups(_ context.Context, para
 	s.groupListParams = params
 	return service.SupplierProviderGroupListResult{Items: []service.SupplierProviderGroup{{ID: 1, ProviderID: 42, Name: "VIP"}}, Total: 1, Page: 1, PageSize: 20}, nil
 }
+func (s *supplierProviderSyncHandlerDataStub) ListMonitorTargets(_ context.Context, params service.SupplierProviderMonitorTargetListParams) (service.SupplierProviderMonitorTargetListResult, error) {
+	s.monitorTargetListParams = params
+	if s.monitorTargets.Page == 0 {
+		return service.SupplierProviderMonitorTargetListResult{Items: []service.SupplierProviderMonitorTarget{{ID: 9, ProviderID: 42, MonitorKey: "2", MonitorName: "Plus-稳定", LocalAccountID: 7, LocalAccountName: "皓悦-福利-Codex高并发"}}, Total: 1, Page: 1, PageSize: 20}, nil
+	}
+	return s.monitorTargets, nil
+}
+func (s *supplierProviderSyncHandlerDataStub) BindMonitorTarget(_ context.Context, monitorTargetID, localAccountID int64) error {
+	s.boundMonitorTargetID = monitorTargetID
+	s.boundLocalAccountID = localAccountID
+	return nil
+}
+func (s *supplierProviderSyncHandlerDataStub) UnbindMonitorTarget(_ context.Context, monitorTargetID int64) error {
+	s.unboundMonitorTargetID = monitorTargetID
+	return nil
+}
 func (s *supplierProviderSyncHandlerDataStub) ListGroupHealthTrends(_ context.Context, params service.SupplierProviderGroupHealthTrendParams) ([]service.SupplierProviderGroupHealthTrend, error) {
 	s.healthTrendParams = params
 	return s.healthTrends, nil
@@ -300,6 +321,9 @@ func TestSupplierProviderSyncHandlerRoutes(t *testing.T) {
 	router.POST("/providers/:id/sync/all", handler.SyncAll)
 	router.POST("/providers/:id/test/:scope", handler.TestEndpoint)
 	router.GET("/accounts", handler.ListAccounts)
+	router.GET("/monitor-targets", handler.ListMonitorTargets)
+	router.PUT("/monitor-targets/:id/binding", handler.BindMonitorTarget)
+	router.DELETE("/monitor-targets/:id/binding", handler.UnbindMonitorTarget)
 	router.PUT("/groups/:id/mapping", handler.UpdateGroupMapping)
 
 	rec := httptest.NewRecorder()
@@ -321,6 +345,32 @@ func TestSupplierProviderSyncHandlerRoutes(t *testing.T) {
 	require.Equal(t, "openai", dataStub.accountListParams.Platform)
 	require.Equal(t, "supplier_today_cost", dataStub.accountListParams.SortBy)
 	require.Equal(t, "desc", dataStub.accountListParams.SortOrder)
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/monitor-targets?provider_id=42&active=true&search=Plus&page=2&page_size=20", nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(42), dataStub.monitorTargetListParams.ProviderID)
+	require.NotNil(t, dataStub.monitorTargetListParams.Active)
+	require.True(t, *dataStub.monitorTargetListParams.Active)
+	require.Equal(t, "Plus", dataStub.monitorTargetListParams.Search)
+	require.Equal(t, 2, dataStub.monitorTargetListParams.Page)
+	require.Equal(t, 20, dataStub.monitorTargetListParams.PageSize)
+	require.Contains(t, rec.Body.String(), `"monitor_name":"Plus-稳定"`)
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPut, "/monitor-targets/9/binding", bytes.NewBufferString(`{"local_account_id":7}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(9), dataStub.boundMonitorTargetID)
+	require.Equal(t, int64(7), dataStub.boundLocalAccountID)
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodDelete, "/monitor-targets/9/binding", nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(9), dataStub.unboundMonitorTargetID)
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/groups?provider_id=42&active=true&key_status=created&page=1&page_size=20", nil)

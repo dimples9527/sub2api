@@ -15,6 +15,8 @@ import (
 var ErrSupplierProviderSyncConflict = infraerrors.Conflict("SUPPLIER_PROVIDER_SYNC_CONFLICT", "supplier provider sync already running")
 var ErrSupplierProviderGroupNotFound = infraerrors.NotFound("SUPPLIER_PROVIDER_GROUP_NOT_FOUND", "supplier provider group not found")
 var ErrSupplierLocalGroupNotFound = infraerrors.NotFound("SUPPLIER_LOCAL_GROUP_NOT_FOUND", "active local group not found")
+var ErrSupplierProviderMonitorTargetNotFound = infraerrors.NotFound("SUPPLIER_PROVIDER_MONITOR_TARGET_NOT_FOUND", "supplier provider monitor target not found")
+var ErrSupplierProviderMonitorBindingInvalid = infraerrors.BadRequest("SUPPLIER_PROVIDER_MONITOR_BINDING_INVALID", "supplier provider monitor binding is invalid")
 var ErrSupplierProviderGroupDeleteConflict = infraerrors.Conflict("SUPPLIER_PROVIDER_GROUP_DELETE_CONFLICT", "供应商上游分组记录不存在或已删除")
 var ErrSupplierProviderAccountDeleteConflict = infraerrors.Conflict("SUPPLIER_PROVIDER_ACCOUNT_DELETE_CONFLICT", "供应商上游账号记录不存在或已删除")
 
@@ -194,6 +196,9 @@ type SupplierProviderDataRepository interface {
 	ListGroups(ctx context.Context, params SupplierProviderDataListParams) (SupplierProviderGroupListResult, error)
 	ListGroupHealthTrends(ctx context.Context, params SupplierProviderGroupHealthTrendParams) ([]SupplierProviderGroupHealthTrend, error)
 	ListLocalGroupHealthTrends(ctx context.Context, params SupplierProviderGroupHealthTrendParams) ([]SupplierProviderGroupHealthTrend, error)
+	ListMonitorTargets(ctx context.Context, params SupplierProviderMonitorTargetListParams) (SupplierProviderMonitorTargetListResult, error)
+	BindMonitorTarget(ctx context.Context, monitorTargetID, localAccountID int64) error
+	UnbindMonitorTarget(ctx context.Context, monitorTargetID int64) error
 	ListGroupsForAutoMatch(ctx context.Context, providerID int64) ([]SupplierProviderGroup, error)
 	GetGroupForAutoMatch(ctx context.Context, groupID int64) (SupplierProviderGroup, error)
 	UpdateGroupMapping(ctx context.Context, groupID int64, localGroupID *int64) error

@@ -37,6 +37,51 @@ type SupplierProviderMonitorSyncItem struct {
 	Message          string    `json:"message,omitempty"`
 }
 
+type SupplierProviderMonitorBinding struct {
+	ProviderID       int64                                 `json:"provider_id"`
+	MonitorTargetID  int64                                 `json:"monitor_target_id"`
+	MonitorKey       string                                `json:"monitor_key"`
+	MonitorName      string                                `json:"monitor_name"`
+	LocalAccountID   int64                                 `json:"local_account_id"`
+	LocalAccountName string                                `json:"local_account_name"`
+	BindingGroups    []SupplierProviderAccountBindingGroup `json:"binding_groups"`
+}
+
+type SupplierProviderMonitorTarget struct {
+	ID               int64                                 `json:"id"`
+	ProviderID       int64                                 `json:"provider_id"`
+	ProviderName     string                                `json:"provider_name"`
+	MonitorKey       string                                `json:"monitor_key"`
+	MonitorName      string                                `json:"monitor_name"`
+	MonitorProvider  string                                `json:"monitor_provider"`
+	PrimaryModel     string                                `json:"primary_model"`
+	Availability7D   float64                               `json:"availability_7d"`
+	Active           bool                                  `json:"active"`
+	LastSeenAt       time.Time                             `json:"last_seen_at"`
+	LocalAccountID   int64                                 `json:"local_account_id,omitempty"`
+	LocalAccountName string                                `json:"local_account_name,omitempty"`
+	BindingGroups    []SupplierProviderAccountBindingGroup `json:"binding_groups"`
+}
+
+type SupplierProviderMonitorTargetListParams struct {
+	ProviderID int64
+	Active     *bool
+	Search     string
+	Page       int
+	PageSize   int
+}
+
+type SupplierProviderMonitorTargetListResult struct {
+	Items    []SupplierProviderMonitorTarget `json:"items"`
+	Total    int64                           `json:"total"`
+	Page     int                             `json:"page"`
+	PageSize int                             `json:"page_size"`
+}
+
+type SupplierProviderMonitorSnapshotRepository interface {
+	SaveMonitorSnapshot(ctx context.Context, providerID int64, monitors []SupplierProviderMonitorItem, seenAt time.Time) ([]SupplierProviderMonitorBinding, error)
+}
+
 type SupplierProviderMonitorSyncer interface {
 	SyncMonitorsEnabled(ctx context.Context, trigger string) (SupplierProviderMonitorSyncResult, error)
 }
@@ -116,10 +161,19 @@ func (s *SupplierProviderSyncService) syncProviderMonitors(ctx context.Context, 
 			finish(SupplierSyncStatusFailed, SupplierSyncCounts{CheckedCount: len(monitors)}, matchErr.Error())
 			return SupplierProviderSyncResult{ProviderID: locked.ID, ProviderName: locked.Name, Scope: SupplierSyncScopeMonitor, Status: SupplierSyncStatusFailed, Message: matchErr.Error(), StartedAt: startedAt, FinishedAt: time.Now()}, matchErr
 		}
+		bindingMatches := supplierMonitorBindingMatches{}
+		if snapshotRepo, ok := s.dataRepo.(SupplierProviderMonitorSnapshotRepository); ok {
+			bindings, saveErr := snapshotRepo.SaveMonitorSnapshot(ctx, locked.ID, monitors, time.Now().UTC())
+			if saveErr != nil {
+				finish(SupplierSyncStatusFailed, SupplierSyncCounts{CheckedCount: len(monitors)}, saveErr.Error())
+				return SupplierProviderSyncResult{ProviderID: locked.ID, ProviderName: locked.Name, Scope: SupplierSyncScopeMonitor, Status: SupplierSyncStatusFailed, Message: saveErr.Error(), StartedAt: startedAt, FinishedAt: time.Now()}, saveErr
+			}
+			bindingMatches = supplierMonitorBindingMatchIndex(bindings)
+		}
 		counts := SupplierSyncCounts{CheckedCount: len(monitors)}
 		updatedCount := 0
 		for _, monitor := range monitors {
-			matched := accountMatches[normalizeSupplierMonitorMatchKey(monitor.Name)]
+			matched := supplierMonitorMatchForMonitor(monitor, accountMatches, bindingMatches)
 			if matched.localAccountID == 0 {
 				counts.SkippedCount++
 			}
@@ -148,6 +202,59 @@ type supplierMonitorAccountMatch struct {
 	localAccountName string
 	localGroupIDs    []int64
 	localGroupNames  []string
+}
+
+type supplierMonitorBindingMatches struct {
+	byKey  map[string]supplierMonitorAccountMatch
+	byName map[string]supplierMonitorAccountMatch
+}
+
+func supplierMonitorMatchForMonitor(monitor SupplierProviderMonitorItem, accountMatches map[string]supplierMonitorAccountMatch, bindingMatches supplierMonitorBindingMatches) supplierMonitorAccountMatch {
+	if match, ok := bindingMatches.byKey[normalizeSupplierMonitorMatchKey(monitor.Key)]; ok && match.localAccountID > 0 {
+		return match
+	}
+	if match, ok := bindingMatches.byName[normalizeSupplierMonitorMatchKey(monitor.Name)]; ok && match.localAccountID > 0 {
+		return match
+	}
+	return accountMatches[normalizeSupplierMonitorMatchKey(monitor.Name)]
+}
+
+func supplierMonitorBindingMatchIndex(bindings []SupplierProviderMonitorBinding) supplierMonitorBindingMatches {
+	matches := supplierMonitorBindingMatches{byKey: make(map[string]supplierMonitorAccountMatch), byName: make(map[string]supplierMonitorAccountMatch)}
+	for _, binding := range bindings {
+		match := supplierMonitorAccountMatchFromBinding(binding)
+		if match.localAccountID <= 0 {
+			continue
+		}
+		if key := normalizeSupplierMonitorMatchKey(binding.MonitorKey); key != "" {
+			if _, exists := matches.byKey[key]; !exists {
+				matches.byKey[key] = match
+			}
+		}
+		if name := normalizeSupplierMonitorMatchKey(binding.MonitorName); name != "" {
+			if _, exists := matches.byName[name]; !exists {
+				matches.byName[name] = match
+			}
+		}
+	}
+	return matches
+}
+
+func supplierMonitorAccountMatchFromBinding(binding SupplierProviderMonitorBinding) supplierMonitorAccountMatch {
+	match := supplierMonitorAccountMatch{
+		localAccountID:   binding.LocalAccountID,
+		localAccountName: binding.LocalAccountName,
+		localGroupIDs:    make([]int64, 0, len(binding.BindingGroups)),
+		localGroupNames:  make([]string, 0, len(binding.BindingGroups)),
+	}
+	for _, group := range binding.BindingGroups {
+		if group.ID <= 0 {
+			continue
+		}
+		match.localGroupIDs = append(match.localGroupIDs, group.ID)
+		match.localGroupNames = append(match.localGroupNames, group.Name)
+	}
+	return match
 }
 
 func supplierMonitorAccountMatchFromAccount(account SupplierProviderAccount) supplierMonitorAccountMatch {

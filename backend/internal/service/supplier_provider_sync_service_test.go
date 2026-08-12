@@ -38,6 +38,15 @@ func (r *supplierProviderDataRepoStub) ListAccounts(context.Context, SupplierPro
 func (r *supplierProviderDataRepoStub) ListGroups(context.Context, SupplierProviderDataListParams) (SupplierProviderGroupListResult, error) {
 	return SupplierProviderGroupListResult{}, nil
 }
+func (r *supplierProviderDataRepoStub) ListMonitorTargets(context.Context, SupplierProviderMonitorTargetListParams) (SupplierProviderMonitorTargetListResult, error) {
+	return SupplierProviderMonitorTargetListResult{}, nil
+}
+func (r *supplierProviderDataRepoStub) BindMonitorTarget(context.Context, int64, int64) error {
+	return nil
+}
+func (r *supplierProviderDataRepoStub) UnbindMonitorTarget(context.Context, int64) error {
+	return nil
+}
 func (r *supplierProviderDataRepoStub) ListGroupHealthTrends(context.Context, SupplierProviderGroupHealthTrendParams) ([]SupplierProviderGroupHealthTrend, error) {
 	return []SupplierProviderGroupHealthTrend{}, nil
 }

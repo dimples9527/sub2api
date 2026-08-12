@@ -43,6 +43,31 @@ func TestSupplierMonitorAccountMatchKeysAllowReorderedLatinAndChineseParts(t *te
 	require.Contains(t, keys, "gpt\u7834\u75321")
 }
 
+func TestSupplierMonitorMatchPrefersExplicitBindingByMonitorKey(t *testing.T) {
+	monitor := SupplierProviderMonitorItem{Key: "2", Name: "Plus-\u7a33\u5b9a"}
+	explicitBinding := SupplierProviderMonitorBinding{
+		MonitorKey:       "2",
+		MonitorName:      "Plus-\u7a33\u5b9a",
+		LocalAccountID:   7,
+		LocalAccountName: "\u7693\u60a6-\u798f\u5229-Codex\u9ad8\u5e76\u53d1",
+		BindingGroups: []SupplierProviderAccountBindingGroup{
+			{ID: 81, Name: "AAA"},
+		},
+	}
+	nameMatch := supplierMonitorAccountMatch{localAccountID: 9, localAccountName: "\u7693\u60a6-Plus-\u7a33\u5b9a"}
+
+	match := supplierMonitorMatchForMonitor(
+		monitor,
+		map[string]supplierMonitorAccountMatch{normalizeSupplierMonitorMatchKey(monitor.Name): nameMatch},
+		supplierMonitorBindingMatchIndex([]SupplierProviderMonitorBinding{explicitBinding}),
+	)
+
+	require.Equal(t, int64(7), match.localAccountID)
+	require.Equal(t, "\u7693\u60a6-\u798f\u5229-Codex\u9ad8\u5e76\u53d1", match.localAccountName)
+	require.Equal(t, []int64{81}, match.localGroupIDs)
+	require.Equal(t, []string{"AAA"}, match.localGroupNames)
+}
+
 func ptrInt64(value int64) *int64 {
 	return &value
 }

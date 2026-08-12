@@ -37,6 +37,265 @@ RETURNING id`, providerID, strings.TrimSpace(upstreamKey), rate, syncedAt).Scan(
 	return true, nil
 }
 
+func (r *supplierProviderDataRepository) SaveMonitorSnapshot(ctx context.Context, providerID int64, monitors []service.SupplierProviderMonitorItem, seenAt time.Time) ([]service.SupplierProviderMonitorBinding, error) {
+	if providerID <= 0 {
+		return []service.SupplierProviderMonitorBinding{}, nil
+	}
+	if seenAt.IsZero() {
+		seenAt = time.Now().UTC()
+	} else {
+		seenAt = seenAt.UTC()
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin supplier provider monitor snapshot: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	targetKeys := make([]string, 0, len(monitors))
+	seenTargetKeys := make(map[string]struct{}, len(monitors))
+	for _, monitor := range monitors {
+		targetKey := strings.TrimSpace(monitor.Key)
+		if targetKey == "" {
+			targetKey = strings.TrimSpace(monitor.Name)
+		}
+		if targetKey == "" {
+			continue
+		}
+		if _, exists := seenTargetKeys[targetKey]; !exists {
+			seenTargetKeys[targetKey] = struct{}{}
+			targetKeys = append(targetKeys, targetKey)
+		}
+
+		var targetID int64
+		if err := tx.QueryRowContext(ctx, `
+INSERT INTO supplier_provider_monitor_targets (
+  provider_id, monitor_key, monitor_name, monitor_provider, primary_model,
+  availability_7d, active, first_seen_at, last_seen_at, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, TRUE, $7, $7, NOW(), NOW())
+ON CONFLICT (provider_id, monitor_key) DO UPDATE SET
+  monitor_name = EXCLUDED.monitor_name,
+  monitor_provider = EXCLUDED.monitor_provider,
+  primary_model = EXCLUDED.primary_model,
+  availability_7d = EXCLUDED.availability_7d,
+  active = TRUE,
+  last_seen_at = EXCLUDED.last_seen_at,
+  updated_at = NOW()
+RETURNING id`, providerID, targetKey, strings.TrimSpace(monitor.Name), strings.TrimSpace(monitor.Provider), strings.TrimSpace(monitor.PrimaryModel), monitor.Availability7D, seenAt).Scan(&targetID); err != nil {
+			return nil, fmt.Errorf("upsert supplier provider monitor target: %w", err)
+		}
+
+		points := monitor.Timeline
+		if len(points) == 0 {
+			points = []service.SupplierProviderMonitorPoint{{Status: monitor.PrimaryStatus, LatencyMS: monitor.PrimaryLatencyMS, PingLatencyMS: monitor.PrimaryPingLatencyMS, CheckedAt: seenAt}}
+		}
+		for _, point := range points {
+			checkedAt := point.CheckedAt
+			if checkedAt.IsZero() {
+				checkedAt = seenAt
+			}
+			checkedAt = checkedAt.UTC()
+			if _, err := tx.ExecContext(ctx, `
+INSERT INTO supplier_provider_monitor_samples (
+  monitor_target_id, checked_at, status, raw_status, latency_ms, ping_latency_ms, availability_7d, created_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+ON CONFLICT (monitor_target_id, checked_at) DO UPDATE SET
+  status = EXCLUDED.status,
+  raw_status = EXCLUDED.raw_status,
+  latency_ms = EXCLUDED.latency_ms,
+  ping_latency_ms = EXCLUDED.ping_latency_ms,
+  availability_7d = EXCLUDED.availability_7d`, targetID, checkedAt, normalizeSupplierProviderMonitorStatus(point.Status), strings.TrimSpace(point.Status), point.LatencyMS, point.PingLatencyMS, monitor.Availability7D); err != nil {
+				return nil, fmt.Errorf("upsert supplier provider monitor sample: %w", err)
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit supplier provider monitor snapshot: %w", err)
+	}
+	if len(targetKeys) == 0 {
+		return []service.SupplierProviderMonitorBinding{}, nil
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+SELECT t.id, t.provider_id, t.monitor_key, t.monitor_name,
+       CASE WHEN local_account.id IS NULL THEN 0 ELSE b.local_account_id END AS local_account_id,
+       COALESCE(local_account.name, '') AS local_account_name,
+       COALESCE((
+         SELECT jsonb_agg(
+           jsonb_build_object(
+             'id', local_group.id,
+             'name', local_group.name,
+             'platform', COALESCE(local_group.platform, ''),
+             'rate_multiplier', COALESCE(local_group.rate_multiplier, 0),
+             'subscription_type', COALESCE(local_group.subscription_type, '')
+           )
+           ORDER BY local_group.id
+         )
+         FROM account_groups account_group
+         JOIN groups local_group ON local_group.id = account_group.group_id AND local_group.deleted_at IS NULL
+         WHERE account_group.account_id = local_account.id
+       ), '[]'::jsonb) AS binding_groups
+FROM supplier_provider_monitor_targets t
+LEFT JOIN supplier_provider_monitor_bindings b
+  ON b.provider_id = t.provider_id
+ AND b.monitor_target_id = t.id
+ AND b.match_status = 'active'
+LEFT JOIN accounts local_account
+  ON local_account.id = b.local_account_id
+ AND local_account.deleted_at IS NULL
+WHERE t.provider_id = $1
+  AND t.monitor_key = ANY($2)
+ORDER BY t.id`, providerID, pq.Array(targetKeys))
+	if err != nil {
+		return nil, fmt.Errorf("query supplier provider monitor bindings: %w", err)
+	}
+	defer rows.Close()
+
+	bindings := make([]service.SupplierProviderMonitorBinding, 0)
+	for rows.Next() {
+		var binding service.SupplierProviderMonitorBinding
+		var localAccountID int64
+		var bindingGroupsJSON []byte
+		if err := rows.Scan(&binding.MonitorTargetID, &binding.ProviderID, &binding.MonitorKey, &binding.MonitorName, &localAccountID, &binding.LocalAccountName, &bindingGroupsJSON); err != nil {
+			return nil, fmt.Errorf("scan supplier provider monitor binding: %w", err)
+		}
+		binding.LocalAccountID = localAccountID
+		if err := json.Unmarshal(bindingGroupsJSON, &binding.BindingGroups); err != nil {
+			return nil, fmt.Errorf("decode supplier provider monitor binding groups: %w", err)
+		}
+		bindings = append(bindings, binding)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate supplier provider monitor bindings: %w", err)
+	}
+	return bindings, nil
+}
+
+func (r *supplierProviderDataRepository) ListMonitorTargets(ctx context.Context, params service.SupplierProviderMonitorTargetListParams) (service.SupplierProviderMonitorTargetListResult, error) {
+	params = normalizeSupplierProviderMonitorTargetListParams(params)
+	where := []string{"TRUE"}
+	args := make([]any, 0, 3)
+	if params.ProviderID > 0 {
+		args = append(args, params.ProviderID)
+		where = append(where, fmt.Sprintf("t.provider_id = $%d", len(args)))
+	}
+	if params.Active != nil {
+		args = append(args, *params.Active)
+		where = append(where, fmt.Sprintf("t.active = $%d", len(args)))
+	}
+	if search := strings.TrimSpace(params.Search); search != "" {
+		args = append(args, "%"+search+"%")
+		where = append(where, fmt.Sprintf("(t.monitor_key ILIKE $%d OR t.monitor_name ILIKE $%d OR t.primary_model ILIKE $%d)", len(args), len(args), len(args)))
+	}
+	whereSQL := strings.Join(where, " AND ")
+
+	var total int64
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM supplier_provider_monitor_targets t WHERE "+whereSQL, args...).Scan(&total); err != nil {
+		return service.SupplierProviderMonitorTargetListResult{}, fmt.Errorf("count supplier provider monitor targets: %w", err)
+	}
+
+	queryArgs := append(append([]any{}, args...), params.PageSize, (params.Page-1)*params.PageSize)
+	rows, err := r.db.QueryContext(ctx, `
+SELECT t.id, t.provider_id, p.name, t.monitor_key, t.monitor_name, t.monitor_provider,
+       t.primary_model, t.availability_7d, t.active, t.last_seen_at,
+       CASE WHEN local_account.id IS NULL THEN 0 ELSE b.local_account_id END AS local_account_id,
+       COALESCE(local_account.name, '') AS local_account_name,
+       COALESCE((
+         SELECT jsonb_agg(
+           jsonb_build_object(
+             'id', local_group.id,
+             'name', local_group.name,
+             'platform', COALESCE(local_group.platform, ''),
+             'rate_multiplier', COALESCE(local_group.rate_multiplier, 0),
+             'subscription_type', COALESCE(local_group.subscription_type, '')
+           )
+           ORDER BY local_group.id
+         )
+         FROM account_groups account_group
+         JOIN groups local_group ON local_group.id = account_group.group_id AND local_group.deleted_at IS NULL
+         WHERE account_group.account_id = local_account.id
+       ), '[]'::jsonb) AS binding_groups
+FROM supplier_provider_monitor_targets t
+JOIN supplier_providers p ON p.id = t.provider_id
+LEFT JOIN supplier_provider_monitor_bindings b
+  ON b.provider_id = t.provider_id
+ AND b.monitor_target_id = t.id
+ AND b.match_status = 'active'
+LEFT JOIN accounts local_account
+  ON local_account.id = b.local_account_id
+ AND local_account.deleted_at IS NULL
+WHERE `+whereSQL+`
+ORDER BY t.last_seen_at DESC, t.id DESC
+LIMIT $`+fmt.Sprint(len(args)+1)+` OFFSET $`+fmt.Sprint(len(args)+2), queryArgs...)
+	if err != nil {
+		return service.SupplierProviderMonitorTargetListResult{}, fmt.Errorf("query supplier provider monitor targets: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]service.SupplierProviderMonitorTarget, 0)
+	for rows.Next() {
+		item, err := scanSupplierProviderMonitorTarget(rows)
+		if err != nil {
+			return service.SupplierProviderMonitorTargetListResult{}, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return service.SupplierProviderMonitorTargetListResult{}, fmt.Errorf("iterate supplier provider monitor targets: %w", err)
+	}
+	return service.SupplierProviderMonitorTargetListResult{Items: items, Total: total, Page: params.Page, PageSize: params.PageSize}, nil
+}
+
+func (r *supplierProviderDataRepository) BindMonitorTarget(ctx context.Context, monitorTargetID, localAccountID int64) error {
+	if monitorTargetID <= 0 || localAccountID <= 0 {
+		return service.ErrSupplierProviderMonitorBindingInvalid
+	}
+	result, err := r.db.ExecContext(ctx, `
+WITH valid_binding AS (
+  SELECT target.provider_id, target.id AS monitor_target_id, local_account.id AS local_account_id
+  FROM supplier_provider_monitor_targets target
+  JOIN accounts local_account ON local_account.id = $2 AND local_account.deleted_at IS NULL
+  WHERE target.id = $1
+)
+INSERT INTO supplier_provider_monitor_bindings (
+  provider_id, monitor_target_id, local_account_id, match_source, match_status, created_at, updated_at
+)
+SELECT provider_id, monitor_target_id, local_account_id, 'manual', 'active', NOW(), NOW()
+FROM valid_binding
+ON CONFLICT (provider_id, monitor_target_id) DO UPDATE SET
+  local_account_id = EXCLUDED.local_account_id,
+  match_source = 'manual',
+  match_status = 'active',
+  updated_at = NOW()`, monitorTargetID, localAccountID)
+	if err != nil {
+		return fmt.Errorf("bind supplier provider monitor target: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read supplier provider monitor binding result: %w", err)
+	}
+	if affected == 0 {
+		return service.ErrSupplierProviderMonitorTargetNotFound
+	}
+	return nil
+}
+
+func (r *supplierProviderDataRepository) UnbindMonitorTarget(ctx context.Context, monitorTargetID int64) error {
+	if monitorTargetID <= 0 {
+		return service.ErrSupplierProviderMonitorBindingInvalid
+	}
+	if _, err := r.db.ExecContext(ctx, `
+UPDATE supplier_provider_monitor_bindings
+SET match_status = 'inactive', updated_at = NOW()
+WHERE monitor_target_id = $1
+  AND match_status = 'active'`, monitorTargetID); err != nil {
+		return fmt.Errorf("unbind supplier provider monitor target: %w", err)
+	}
+	return nil
+}
+
 func (r *supplierProviderDataRepository) ListAccounts(ctx context.Context, params service.SupplierProviderDataListParams) (service.SupplierProviderAccountListResult, error) {
 	params = normalizeSupplierProviderDataListParams(params)
 	where, args := supplierProviderAccountWhere(params)
@@ -397,6 +656,11 @@ WHERE COALESCE(NULLIF(item->>'checked_at', '')::timestamptz, run.finished_at) <=
   AND account_group.group_id IS NOT NULL
   AND account_group.group_id = ANY($4)
 `
+		structuredMonitorWhereSQL := `
+WHERE sample.checked_at <= $3
+  AND account_group.group_id IS NOT NULL
+  AND account_group.group_id = ANY($4)
+`
 		if !params.AllHistory {
 			args = []any{
 				service.SupplierAutomationTaskAccountHealthGuard,
@@ -422,6 +686,12 @@ WHERE run.task_code = $2
 `
 			monitorWhereSQL = `
 WHERE COALESCE(NULLIF(item->>'checked_at', '')::timestamptz, run.finished_at) <= $4
+  AND account_group.group_id IS NOT NULL
+  AND account_group.group_id = ANY($5)
+`
+			structuredMonitorWhereSQL = `
+WHERE sample.checked_at >= $3
+  AND sample.checked_at <= $4
   AND account_group.group_id IS NOT NULL
   AND account_group.group_id = ANY($5)
 `
@@ -469,9 +739,32 @@ WITH latest_monitor_run AS (
   JOIN account_groups account_group
     ON account_group.account_id = NULLIF(item->>'local_account_id', '')::bigint
   %s
+
+  UNION ALL
+
+  SELECT account_group.group_id AS group_id,
+         binding.local_account_id AS account_id,
+         COALESCE(sample.status, '') AS status,
+         COALESCE(sample.latency_ms, 0) AS latency_ms,
+         sample.checked_at AS finished_at,
+         'supplier_monitor' AS source
+  FROM supplier_provider_monitor_samples sample
+  JOIN supplier_provider_monitor_targets target
+    ON target.id = sample.monitor_target_id
+   AND target.active = TRUE
+  JOIN supplier_provider_monitor_bindings binding
+    ON binding.provider_id = target.provider_id
+   AND binding.monitor_target_id = target.id
+   AND binding.match_status = 'active'
+  JOIN accounts local_account
+    ON local_account.id = binding.local_account_id
+   AND local_account.deleted_at IS NULL
+  JOIN account_groups account_group
+    ON account_group.account_id = binding.local_account_id
+  %s
 )
 SELECT group_id, account_id, status, latency_ms, finished_at, source
-FROM trend_samples`, latestMonitorRunWhereSQL, healthGuardWhereSQL, monitorWhereSQL)
+FROM trend_samples`, latestMonitorRunWhereSQL, healthGuardWhereSQL, monitorWhereSQL, structuredMonitorWhereSQL)
 		rows, err := r.db.QueryContext(ctx, query, args...)
 		if err != nil {
 			return nil, fmt.Errorf("query supplier provider group health trends: %w", err)
@@ -1626,6 +1919,17 @@ func normalizeSupplierProviderDataListParams(params service.SupplierProviderData
 	return params
 }
 
+func normalizeSupplierProviderMonitorTargetListParams(params service.SupplierProviderMonitorTargetListParams) service.SupplierProviderMonitorTargetListParams {
+	if params.Page < 1 {
+		params.Page = 1
+	}
+	if params.PageSize < 1 || params.PageSize > 200 {
+		params.PageSize = 50
+	}
+	params.Search = strings.TrimSpace(params.Search)
+	return params
+}
+
 func supplierStatDate(seenAt time.Time) time.Time {
 	loc, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
@@ -1635,7 +1939,36 @@ func supplierStatDate(seenAt time.Time) time.Time {
 	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, loc)
 }
 
+func normalizeSupplierProviderMonitorStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "operational", service.SupplierAccountHealthGuardStatusHealthy:
+		return service.SupplierAccountHealthGuardStatusHealthy
+	case "degraded", service.SupplierAccountHealthGuardStatusSlow:
+		return service.SupplierAccountHealthGuardStatusSlow
+	case "error", service.SupplierAccountHealthGuardStatusFailed:
+		return service.SupplierAccountHealthGuardStatusFailed
+	default:
+		return service.SupplierAccountHealthGuardStatusUnavailable
+	}
+}
+
 type supplierProviderAccountScanner interface{ Scan(dest ...any) error }
+
+type supplierProviderMonitorTargetScanner interface{ Scan(dest ...any) error }
+
+func scanSupplierProviderMonitorTarget(scanner supplierProviderMonitorTargetScanner) (service.SupplierProviderMonitorTarget, error) {
+	var item service.SupplierProviderMonitorTarget
+	var bindingGroupsJSON []byte
+	if err := scanner.Scan(&item.ID, &item.ProviderID, &item.ProviderName, &item.MonitorKey, &item.MonitorName, &item.MonitorProvider,
+		&item.PrimaryModel, &item.Availability7D, &item.Active, &item.LastSeenAt,
+		&item.LocalAccountID, &item.LocalAccountName, &bindingGroupsJSON); err != nil {
+		return service.SupplierProviderMonitorTarget{}, err
+	}
+	if err := json.Unmarshal(bindingGroupsJSON, &item.BindingGroups); err != nil {
+		return service.SupplierProviderMonitorTarget{}, fmt.Errorf("decode supplier provider monitor target binding groups: %w", err)
+	}
+	return item, nil
+}
 
 func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (service.SupplierProviderAccount, error) {
 	var item service.SupplierProviderAccount

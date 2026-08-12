@@ -42,6 +42,9 @@ type SupplierProviderDataRepositoryPort interface {
 	ListGroups(ctx context.Context, params service.SupplierProviderDataListParams) (service.SupplierProviderGroupListResult, error)
 	ListGroupHealthTrends(ctx context.Context, params service.SupplierProviderGroupHealthTrendParams) ([]service.SupplierProviderGroupHealthTrend, error)
 	ListLocalGroupHealthTrends(ctx context.Context, params service.SupplierProviderGroupHealthTrendParams) ([]service.SupplierProviderGroupHealthTrend, error)
+	ListMonitorTargets(ctx context.Context, params service.SupplierProviderMonitorTargetListParams) (service.SupplierProviderMonitorTargetListResult, error)
+	BindMonitorTarget(ctx context.Context, monitorTargetID, localAccountID int64) error
+	UnbindMonitorTarget(ctx context.Context, monitorTargetID int64) error
 	ListMappingsByLocalGroup(ctx context.Context, localGroupIDs []int64) ([]service.SupplierProviderGroup, error)
 	UpdateGroupMapping(ctx context.Context, groupID int64, localGroupID *int64) error
 	DeleteGroup(ctx context.Context, groupID int64) error
@@ -359,6 +362,56 @@ func (h *SupplierProviderSyncHandler) ListAccounts(c *gin.Context) {
 		return
 	}
 	response.Success(c, result)
+}
+
+func (h *SupplierProviderSyncHandler) ListMonitorTargets(c *gin.Context) {
+	page, pageSize := response.ParsePagination(c)
+	if pageSize > supplierProviderMaxPageSize {
+		pageSize = supplierProviderMaxPageSize
+	}
+	result, err := h.dataRepo.ListMonitorTargets(c.Request.Context(), service.SupplierProviderMonitorTargetListParams{
+		ProviderID: parseOptionalInt64(c.Query("provider_id")),
+		Active:     parseSupplierProviderEnabled(c.Query("active")),
+		Search:     strings.TrimSpace(c.Query("search")),
+		Page:       page,
+		PageSize:   pageSize,
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *SupplierProviderSyncHandler) BindMonitorTarget(c *gin.Context) {
+	monitorTargetID, ok := parseSupplierMonitorTargetID(c)
+	if !ok {
+		return
+	}
+	var input struct {
+		LocalAccountID int64 `json:"local_account_id"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil || input.LocalAccountID <= 0 {
+		response.ErrorFrom(c, badRequest("本地账号 ID 无效"))
+		return
+	}
+	if err := h.dataRepo.BindMonitorTarget(c.Request.Context(), monitorTargetID, input.LocalAccountID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"monitor_target_id": monitorTargetID, "local_account_id": input.LocalAccountID})
+}
+
+func (h *SupplierProviderSyncHandler) UnbindMonitorTarget(c *gin.Context) {
+	monitorTargetID, ok := parseSupplierMonitorTargetID(c)
+	if !ok {
+		return
+	}
+	if err := h.dataRepo.UnbindMonitorTarget(c.Request.Context(), monitorTargetID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"monitor_target_id": monitorTargetID})
 }
 
 type supplierLocalAccountPlatformOverrideRequest struct {
@@ -827,6 +880,15 @@ func parseSupplierAccountID(c *gin.Context) (int64, bool) {
 		return 0, false
 	}
 	return accountID, true
+}
+
+func parseSupplierMonitorTargetID(c *gin.Context) (int64, bool) {
+	monitorTargetID, err := strconv.ParseInt(strings.TrimSpace(c.Param("id")), 10, 64)
+	if err != nil || monitorTargetID <= 0 {
+		response.ErrorFrom(c, badRequest("监控项 ID 无效"))
+		return 0, false
+	}
+	return monitorTargetID, true
 }
 
 func parseOptionalInt64(raw string) int64 {

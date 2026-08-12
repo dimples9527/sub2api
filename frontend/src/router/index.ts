@@ -687,6 +687,16 @@ const routes: RouteRecordRaw[] = [
       title: '供应商上游账号'
     }
   },
+  {
+    path: '/admin/supplier-management/monitor-bindings',
+    name: 'AdminSupplierMonitorBindings',
+    component: () => import('@/views/admin/supplier-management/SupplierMonitorBindingsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: '供应商监控绑定'
+    }
+  },
 
   {
     path: '/admin/supplier-management/balance-alert',

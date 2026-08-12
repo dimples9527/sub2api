@@ -222,6 +222,37 @@ export interface SupplierProviderGroupListResult {
   summary: SupplierProviderGroupSummary
 }
 
+export interface SupplierProviderMonitorTarget {
+  id: number
+  provider_id: number
+  provider_name: string
+  monitor_key: string
+  monitor_name: string
+  monitor_provider: string
+  primary_model: string
+  availability_7d: number
+  active: boolean
+  last_seen_at: string
+  local_account_id?: number
+  local_account_name?: string
+  binding_groups: SupplierProviderAccountBindingGroup[]
+}
+
+export interface SupplierProviderMonitorTargetListResult {
+  items: SupplierProviderMonitorTarget[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface SupplierProviderMonitorTargetListParams {
+  provider_id?: number
+  active?: boolean
+  search?: string
+  page?: number
+  page_size?: number
+}
+
 export async function syncProvider(id: number, scope: SupplierSyncScope): Promise<SupplierProviderSyncResult> {
   const { data } = await apiClient.post<SupplierProviderSyncResult>(
     `/admin/supplier-management/providers/${id}/sync/${scope}`
@@ -349,6 +380,36 @@ export async function listSupplierAccounts(params: SupplierProviderDataListParam
   const { data } = await apiClient.get<SupplierProviderAccountListResult>(
     '/admin/supplier-management/accounts',
     { params }
+  )
+  return data
+}
+
+export async function listSupplierMonitorTargets(
+  params: SupplierProviderMonitorTargetListParams = {}
+): Promise<SupplierProviderMonitorTargetListResult> {
+  const { data } = await apiClient.get<SupplierProviderMonitorTargetListResult>(
+    '/admin/supplier-management/monitor-targets',
+    { params }
+  )
+  return data
+}
+
+export async function bindSupplierMonitorTarget(
+  monitorTargetID: number,
+  localAccountID: number
+): Promise<{ monitor_target_id: number; local_account_id: number }> {
+  const { data } = await apiClient.put<{ monitor_target_id: number; local_account_id: number }>(
+    `/admin/supplier-management/monitor-targets/${monitorTargetID}/binding`,
+    { local_account_id: localAccountID }
+  )
+  return data
+}
+
+export async function unbindSupplierMonitorTarget(
+  monitorTargetID: number
+): Promise<{ monitor_target_id: number }> {
+  const { data } = await apiClient.delete<{ monitor_target_id: number }>(
+    `/admin/supplier-management/monitor-targets/${monitorTargetID}/binding`
   )
   return data
 }
@@ -561,6 +622,9 @@ export const supplierProviderDataAPI = {
   syncProvider,
   testProviderEndpoint,
   listSupplierAccounts,
+  listSupplierMonitorTargets,
+  bindSupplierMonitorTarget,
+  unbindSupplierMonitorTarget,
   deleteSupplierAccount,
   setSupplierLocalAccountPlatformOverride,
   clearSupplierLocalAccountPlatformOverride,

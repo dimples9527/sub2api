@@ -141,6 +141,133 @@ func TestSupplierProviderDataRepositoryListLocalGroupHealthTrendsIncludesSupplie
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestSupplierProviderDataRepositoryListLocalGroupHealthTrendsIncludesStructuredMonitorBindings(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	now := time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC)
+	checkedAt := now.Add(-time.Minute)
+	mock.ExpectQuery(`(?s)supplier_provider_monitor_samples sample.*supplier_provider_monitor_bindings binding.*account_group\.group_id = ANY\(\$5\)`).
+		WithArgs(
+			service.SupplierAutomationTaskAccountHealthGuard,
+			service.SupplierAutomationTaskMonitorSync,
+			now.Add(-10*time.Minute),
+			now,
+			"{81}",
+		).
+		WillReturnRows(sqlmock.NewRows([]string{"group_id", "account_id", "status", "latency_ms", "finished_at", "source"}).
+			AddRow(int64(81), int64(777), service.SupplierAccountHealthGuardStatusHealthy, int64(880), checkedAt, service.SupplierProviderGroupHealthTrendMonitorSource))
+
+	trends, err := repo.ListLocalGroupHealthTrends(context.Background(), service.SupplierProviderGroupHealthTrendParams{
+		GroupIDs:                 []int64{81},
+		Period:                   10 * time.Minute,
+		BucketCount:              10,
+		Now:                      now,
+		PreferRawMonitorTimeline: true,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, trends, 1)
+	require.Equal(t, int64(81), trends[0].GroupID)
+	require.Equal(t, int64(880), trends[0].Latency)
+	require.Equal(t, service.SupplierProviderGroupHealthTrendMonitorSource, trends[0].Source)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositorySaveMonitorSnapshotReturnsExplicitBindings(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	seenAt := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
+	checkedAt := seenAt.Add(-time.Minute)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?s)INSERT INTO supplier_provider_monitor_targets.*ON CONFLICT \(provider_id, monitor_key\).*RETURNING id`).
+		WithArgs(int64(7), "2", "Plus-稳定", "sub2api", "gpt-5", 99.5, seenAt).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(31)))
+	mock.ExpectExec(`(?s)INSERT INTO supplier_provider_monitor_samples.*ON CONFLICT \(monitor_target_id, checked_at\)`).
+		WithArgs(int64(31), checkedAt, service.SupplierAccountHealthGuardStatusHealthy, "operational", int64(120), int64(30), 99.5).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+	mock.ExpectQuery(`(?s)SELECT t\.id, t\.provider_id, t\.monitor_key, t\.monitor_name,.*account_groups account_group.*FROM supplier_provider_monitor_targets t.*supplier_provider_monitor_bindings b`).
+		WithArgs(int64(7), `{"2"}`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_id", "monitor_key", "monitor_name", "local_account_id", "local_account_name", "binding_groups"}).
+			AddRow(int64(31), int64(7), "2", "Plus-稳定", int64(777), "皓悦-福利-Codex高并发", []byte(`[{"id":81,"name":"AAA","platform":"openai","rate_multiplier":1,"subscription_type":"plus"}]`)))
+
+	bindings, err := repo.SaveMonitorSnapshot(context.Background(), int64(7), []service.SupplierProviderMonitorItem{{
+		Key:            "2",
+		Name:           "Plus-稳定",
+		Provider:       "sub2api",
+		PrimaryModel:   "gpt-5",
+		Availability7D: 99.5,
+		Timeline: []service.SupplierProviderMonitorPoint{{
+			Status:        "operational",
+			LatencyMS:     120,
+			PingLatencyMS: 30,
+			CheckedAt:     checkedAt,
+		}},
+	}}, seenAt)
+
+	require.NoError(t, err)
+	require.Len(t, bindings, 1)
+	require.Equal(t, int64(31), bindings[0].MonitorTargetID)
+	require.Equal(t, int64(777), bindings[0].LocalAccountID)
+	require.Equal(t, "皓悦-福利-Codex高并发", bindings[0].LocalAccountName)
+	require.Equal(t, []service.SupplierProviderAccountBindingGroup{{ID: 81, Name: "AAA", Platform: "openai", RateMultiplier: 1, SubscriptionType: "plus"}}, bindings[0].BindingGroups)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryListMonitorTargetsReturnsBindingAccountAndGroups(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	active := true
+	lastSeenAt := time.Date(2026, 8, 12, 11, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\) FROM supplier_provider_monitor_targets t WHERE TRUE AND t\.provider_id = \$1 AND t\.active = \$2 AND \(t\.monitor_key ILIKE \$3 OR t\.monitor_name ILIKE \$3 OR t\.primary_model ILIKE \$3\)`).
+		WithArgs(int64(7), true, "%Plus%").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
+	mock.ExpectQuery(`(?s)SELECT t\.id, t\.provider_id, p\.name, t\.monitor_key, t\.monitor_name, t\.monitor_provider,.*FROM supplier_provider_monitor_targets t.*JOIN supplier_providers p ON p\.id = t\.provider_id.*supplier_provider_monitor_bindings b.*ORDER BY t\.last_seen_at DESC, t\.id DESC`).
+		WithArgs(int64(7), true, "%Plus%", 20, 20).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_id", "provider_name", "monitor_key", "monitor_name", "monitor_provider", "primary_model", "availability_7d", "active", "last_seen_at", "local_account_id", "local_account_name", "binding_groups"}).
+			AddRow(int64(31), int64(7), "皓悦", "2", "Plus-稳定", "sub2api", "gpt-5", 99.5, true, lastSeenAt, int64(777), "皓悦-福利-Codex高并发", []byte(`[{"id":81,"name":"AAA","platform":"openai","rate_multiplier":1,"subscription_type":"plus"}]`)))
+
+	result, err := repo.ListMonitorTargets(context.Background(), service.SupplierProviderMonitorTargetListParams{
+		ProviderID: 7,
+		Active:     &active,
+		Search:     " Plus ",
+		Page:       2,
+		PageSize:   20,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, int64(1), result.Total)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, int64(777), result.Items[0].LocalAccountID)
+	require.Equal(t, "皓悦", result.Items[0].ProviderName)
+	require.Equal(t, "皓悦-福利-Codex高并发", result.Items[0].LocalAccountName)
+	require.Equal(t, []service.SupplierProviderAccountBindingGroup{{ID: 81, Name: "AAA", Platform: "openai", RateMultiplier: 1, SubscriptionType: "plus"}}, result.Items[0].BindingGroups)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryBindMonitorTargetUpsertsManualBinding(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	mock.ExpectExec(`(?s)WITH valid_binding AS .*INSERT INTO supplier_provider_monitor_bindings .*ON CONFLICT \(provider_id, monitor_target_id\) DO UPDATE SET`).
+		WithArgs(int64(31), int64(777)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	err := repo.BindMonitorTarget(context.Background(), 31, 777)
+
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryUnbindMonitorTargetMarksBindingInactive(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	mock.ExpectExec(`(?s)UPDATE supplier_provider_monitor_bindings\s+SET match_status = 'inactive', updated_at = NOW\(\)\s+WHERE monitor_target_id = \$1\s+AND match_status = 'active'`).
+		WithArgs(int64(31)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	err := repo.UnbindMonitorTarget(context.Background(), 31)
+
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestSupplierProviderDataRepositoryUpdateAccountRateSnapshotOnlyTouchesRateFields(t *testing.T) {
 	repo, mock := newSupplierProviderDataRepoMock(t)
 	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
