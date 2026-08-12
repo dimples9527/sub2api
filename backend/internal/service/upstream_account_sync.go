@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -1730,16 +1729,7 @@ func upstreamAccountSyncLocalAccountName(provider UpstreamProviderConfig, keyNam
 }
 
 func normalizeDefaultUpstreamAccountMatchName(name string) string {
-	normalized := strings.ToLower(strings.TrimSpace(name))
-	var b strings.Builder
-	b.Grow(len(normalized))
-	for _, r := range normalized {
-		if unicode.IsSpace(r) {
-			continue
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
+	return normalizeSupplierUpstreamMatchName(name, false)
 }
 
 func hydrateUpstreamAccountSyncAccountGroups(accounts []Account, groups []Group) []Account {

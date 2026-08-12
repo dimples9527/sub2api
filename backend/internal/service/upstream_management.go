@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
@@ -1015,18 +1014,5 @@ func limitUpstreamGroupRateFixRecords(records []UpstreamGroupRateFixRecord) []Up
 }
 
 func normalizeUpstreamGroupMatchName(name string) string {
-	normalized := strings.ToLower(strings.TrimSpace(name))
-	var b strings.Builder
-	b.Grow(len(normalized))
-	for _, r := range normalized {
-		switch {
-		case unicode.IsSpace(r):
-			continue
-		case r == '_' || r == '-':
-			continue
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
+	return normalizeSupplierUpstreamMatchName(name, true)
 }

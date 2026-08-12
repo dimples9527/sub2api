@@ -622,6 +622,92 @@ func TestUpstreamAccountSyncPreviewDefaultProviderOnlyIgnoresSpacesAndCase(t *te
 	}
 }
 
+func TestUpstreamAccountSyncPreviewMatchesAccountNamesWithEmojiVariationSelector(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{
+			Slug:      "main",
+			Name:      "Main upstream",
+			IsDefault: true,
+			Enabled:   true,
+		},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"main": {{ProviderSlug: "main", KeyName: "codex\U0001f525pro", GroupName: "VIP", RateMultiplier: 1}},
+		},
+	}
+	svc, _ := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 1, Status: StatusActive}},
+		[]Account{{
+			ID:       10,
+			Name:     "codex\U0001f525\ufe0fpro",
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeAPIKey,
+			GroupIDs: []int64{7},
+		}},
+		nil,
+	)
+
+	result, err := svc.Preview(context.Background())
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("item count = %d, want 1", len(result.Items))
+	}
+	item := result.Items[0]
+	if item.MatchedAccountID == nil || *item.MatchedAccountID != 10 {
+		t.Fatalf("matched account id = %+v, want 10", item.MatchedAccountID)
+	}
+}
+
+func TestUpstreamAccountSyncPreviewMatchesPrefixedAccountNamesWithEmojiVariationSelector(t *testing.T) {
+	provider := &upstreamAccountSyncProviderSourceStub{
+		defaultProvider: UpstreamProviderConfig{
+			Slug:      "main",
+			Name:      "Main upstream",
+			IsDefault: true,
+			Enabled:   true,
+		},
+		providers: []UpstreamProviderConfig{
+			{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},
+			{Slug: "backup", Name: "Backup upstream", AccountNamePrefix: "backup-", Enabled: true},
+		},
+		keysBySlug: map[string][]UpstreamProviderKey{
+			"backup": {{ProviderSlug: "backup", KeyName: "codex\U0001f525pro", GroupName: "VIP", RateMultiplier: 1}},
+		},
+	}
+	svc, _ := newUpstreamAccountSyncServiceForTest(
+		provider,
+		[]Group{{ID: 7, Name: "VIP", Platform: PlatformOpenAI, RateMultiplier: 1, Status: StatusActive}},
+		[]Account{{
+			ID:       10,
+			Name:     "backup-codex\U0001f525\ufe0fpro",
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeAPIKey,
+			GroupIDs: []int64{7},
+		}},
+		nil,
+	)
+
+	result, err := svc.Preview(context.Background())
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("item count = %d, want 1", len(result.Items))
+	}
+	item := result.Items[0]
+	if item.ProviderSlug != "backup" {
+		t.Fatalf("provider slug = %q, want backup", item.ProviderSlug)
+	}
+	if item.MatchedAccountID == nil || *item.MatchedAccountID != 10 {
+		t.Fatalf("matched account id = %+v, want 10", item.MatchedAccountID)
+	}
+}
+
 func TestUpstreamAccountSyncPreviewKeepsAvailableProvidersWhenOneProviderKeysFail(t *testing.T) {
 	provider := &upstreamAccountSyncProviderSourceStub{
 		defaultProvider: UpstreamProviderConfig{Slug: "main", Name: "Main upstream", IsDefault: true, Enabled: true},
