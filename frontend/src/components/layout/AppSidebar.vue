@@ -891,6 +891,7 @@ const adminNavItems = computed((): NavItem[] => {
         { path: '/admin/model-monitor/custom-platforms', label: '自定义平台', icon: CogIcon },
       ],
     },
+    { path: '/admin/model-square/config', label: '模型广场配置', icon: ServerIcon, hideInSimpleMode: true },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
     {

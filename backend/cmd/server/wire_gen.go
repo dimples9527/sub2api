@@ -333,7 +333,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	upstreamAccountHealthGuardService := service.NewUpstreamAccountHealthGuardService(accountRepository, upstreamProviderService, settingRepository, accountTestService, upstreamAccountHealthGuardRecordStore)
 	upstreamDashboardService := service.ProvideUpstreamDashboardService(upstreamProviderService, upstreamManagementService, upstreamAccountSyncService, upstreamBalanceConsumptionService, upstreamAccountHealthGuardService, opsService, usageService)
 	upstreamDashboardHandler := admin.NewUpstreamDashboardHandler(upstreamDashboardService)
-	upstreamManagementHandler := admin.NewUpstreamManagementHandler(upstreamManagementService)
+	upstreamManagementHandler := admin.NewUpstreamManagementHandler(upstreamManagementService, billingService)
 	upstreamAccountRateGuardScheduler := service.ProvideUpstreamAccountRateGuardScheduler(upstreamAccountSyncService)
 	upstreamBalanceSamplerScheduler := service.ProvideUpstreamBalanceSamplerScheduler(upstreamBalanceConsumptionService)
 	upstreamAccountHealthGuardScheduler := service.ProvideUpstreamAccountHealthGuardScheduler(upstreamAccountHealthGuardService)

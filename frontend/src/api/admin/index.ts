@@ -43,6 +43,7 @@ import upstreamDashboardAPI from './upstreamDashboard'
 import upstreamManagementAPI from './upstreamManagement'
 import upstreamAccountSyncAPI from './upstreamAccountSync'
 import modelSquareAPI from './modelSquare'
+import modelSquareConfigAPI from './modelSquareConfig'
 import modelMonitorAPI from './modelMonitor'
 import customPlatformsAPI from './customPlatforms'
 
@@ -90,6 +91,7 @@ export const adminAPI = {
   upstreamManagement: upstreamManagementAPI,
   upstreamAccountSync: upstreamAccountSyncAPI,
   modelSquare: modelSquareAPI,
+  modelSquareConfig: modelSquareConfigAPI,
   modelMonitor: modelMonitorAPI,
   customPlatforms: customPlatformsAPI,
 }
@@ -135,6 +137,7 @@ export {
   upstreamManagementAPI,
   upstreamAccountSyncAPI,
   modelSquareAPI,
+  modelSquareConfigAPI,
   modelMonitorAPI,
   customPlatformsAPI,
 }

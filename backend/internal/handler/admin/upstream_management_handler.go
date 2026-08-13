@@ -17,6 +17,8 @@ type upstreamManagementService interface {
 	MarkRateFixRecordHandled(ctx context.Context, key string) ([]service.UpstreamGroupRateFixRecord, error)
 	SaveGroupMapping(ctx context.Context, input service.UpstreamGroupMappingInput) (service.UpstreamGroupCompareResult, error)
 	CreateLocalGroupFromUpstream(ctx context.Context, input service.UpstreamGroupLocalCreateInput) (service.UpstreamGroupCompareResult, error)
+	GetModelSquareConfig(ctx context.Context) (service.ModelSquareConfig, error)
+	UpdateModelSquareConfig(ctx context.Context, input service.ModelSquareConfig) (service.ModelSquareConfig, error)
 }
 
 type upstreamModelSquareService interface {
@@ -24,15 +26,20 @@ type upstreamModelSquareService interface {
 }
 
 type UpstreamManagementHandler struct {
-	service upstreamManagementService
+	service        upstreamManagementService
+	billingService *service.BillingService
 }
 
-func NewUpstreamManagementHandler(service *service.UpstreamManagementService) *UpstreamManagementHandler {
-	return &UpstreamManagementHandler{service: service}
+func NewUpstreamManagementHandler(service *service.UpstreamManagementService, billingService *service.BillingService) *UpstreamManagementHandler {
+	return &UpstreamManagementHandler{service: service, billingService: billingService}
 }
 
 func newUpstreamManagementHandlerWithService(service upstreamManagementService) *UpstreamManagementHandler {
 	return &UpstreamManagementHandler{service: service}
+}
+
+func newUpstreamManagementHandlerWithServices(service upstreamManagementService, billingService *service.BillingService) *UpstreamManagementHandler {
+	return &UpstreamManagementHandler{service: service, billingService: billingService}
 }
 
 func (h *UpstreamManagementHandler) CompareGroups(c *gin.Context) {
@@ -106,6 +113,29 @@ func (h *UpstreamManagementHandler) CreateLocalGroupFromUpstream(c *gin.Context)
 		return
 	}
 	result, err := h.service.CreateLocalGroupFromUpstream(c.Request.Context(), input)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *UpstreamManagementHandler) GetModelSquareConfig(c *gin.Context) {
+	result, err := h.service.GetModelSquareConfig(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *UpstreamManagementHandler) UpdateModelSquareConfig(c *gin.Context) {
+	var input service.ModelSquareConfig
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	result, err := h.service.UpdateModelSquareConfig(c.Request.Context(), input)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

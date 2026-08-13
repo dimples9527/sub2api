@@ -749,6 +749,16 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/model-square/config',
+    name: 'AdminModelSquareConfig',
+    component: () => import('@/views/admin/model-square/ModelSquareConfigView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: '模型广场配置'
+    }
+  },
+  {
     path: '/admin/announcements',
     name: 'AdminAnnouncements',
     component: () => import('@/views/admin/AnnouncementsView.vue'),
