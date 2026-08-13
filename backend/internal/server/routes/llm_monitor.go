@@ -129,7 +129,11 @@ func proxyLLMMonitorStatus(
 }
 
 func fetchLLMMonitorStatus(ctx context.Context, targetURL, userAgent string) ([]byte, string, int, error) {
-	requestCtx, cancel := context.WithTimeout(ctx, llmMonitorProxyTimeout)
+	return fetchLLMMonitorStatusWithTimeout(ctx, targetURL, userAgent, llmMonitorProxyTimeout)
+}
+
+func fetchLLMMonitorStatusWithTimeout(ctx context.Context, targetURL, userAgent string, timeout time.Duration) ([]byte, string, int, error) {
+	requestCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, targetURL, nil)
 	if err != nil {

@@ -32,6 +32,8 @@ type localLLMMonitorParsedTrend struct {
 	Model    string
 }
 
+const localLLMMonitorUpstreamTimeout = 2 * time.Second
+
 // RegisterLocalLLMMonitorRoutes 注册面向本地分组的模型监控聚合接口。
 func RegisterLocalLLMMonitorRoutes(
 	r gin.IRouter,
@@ -127,6 +129,16 @@ func loadLocalLLMMonitorUpstream(
 	period, board string,
 	historyStore service.LLMMonitorHistoryStore,
 ) []map[string]any {
+	return loadLocalLLMMonitorUpstreamWithTimeout(ctx, settingsProvider, period, board, historyStore, localLLMMonitorUpstreamTimeout)
+}
+
+func loadLocalLLMMonitorUpstreamWithTimeout(
+	ctx context.Context,
+	settingsProvider llmMonitorSettingsProvider,
+	period, board string,
+	historyStore service.LLMMonitorHistoryStore,
+	timeout time.Duration,
+) []map[string]any {
 	if settingsProvider == nil {
 		return nil
 	}
@@ -140,7 +152,7 @@ func loadLocalLLMMonitorUpstream(
 	}
 
 	sourceKey, historyPeriod, historyBoard, historyKeyOK := llmMonitorHistoryRequestKey(settings.StatusAPIURL, period, board)
-	body, _, statusCode, fetchErr := fetchLLMMonitorStatus(ctx, targetURL, "sub2api-llm-monitor-local/1.0")
+	body, _, statusCode, fetchErr := fetchLLMMonitorStatusWithTimeout(ctx, targetURL, "sub2api-llm-monitor-local/1.0", timeout)
 	freshSnapshot := fetchErr == nil && statusCode >= http.StatusOK && statusCode < http.StatusMultipleChoices && llmMonitorPayloadHasTimeline(body)
 	if !freshSnapshot {
 		if recovered, ok := loadLLMMonitorHistory(ctx, historyStore, sourceKey, historyPeriod, historyBoard, historyKeyOK); ok {

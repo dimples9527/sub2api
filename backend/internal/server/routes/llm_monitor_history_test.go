@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -116,4 +117,46 @@ func TestLocalLLMMonitorStatusRestoresRawRemoteSnapshotAfterFilteredRoute(t *tes
 	layer := payload.Groups[0]["layers"].([]any)[0].(map[string]any)
 	point := layer["timeline"].([]any)[0].(map[string]any)
 	require.Equal(t, 88.0, point["availability"])
+}
+
+func TestLoadLocalLLMMonitorUpstreamTimesOutAndRestoresHistory(t *testing.T) {
+	requestStarted := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(requestStarted)
+		<-r.Context().Done()
+	}))
+	defer upstream.Close()
+
+	statusAPIURL := upstream.URL + "/api/status"
+	history := &llmMonitorHistoryStoreStub{snapshots: []service.LLMMonitorHistorySnapshot{{
+		SourceKey: service.LLMMonitorHistorySourceKey(statusAPIURL),
+		Period:    "90m",
+		Board:     "hot",
+		Payload: []byte(`{
+			"groups": [{
+				"provider": "Upstream VIP",
+				"layers": [{"timeline": [{"availability": 88, "latency": 120, "timestamp": 1722513000}]}]
+			}]
+		}`),
+	}}}
+
+	startedAt := time.Now()
+	groups := loadLocalLLMMonitorUpstreamWithTimeout(
+		context.Background(),
+		llmMonitorSettingsStub{statusAPIURL: statusAPIURL},
+		"90m",
+		"hot",
+		history,
+		25*time.Millisecond,
+	)
+	elapsed := time.Since(startedAt)
+
+	select {
+	case <-requestStarted:
+	default:
+		t.Fatal("慢上游请求未发起")
+	}
+	require.Less(t, elapsed, time.Second)
+	require.Len(t, groups, 1)
+	require.Equal(t, "Upstream VIP", groups[0]["provider"])
 }
