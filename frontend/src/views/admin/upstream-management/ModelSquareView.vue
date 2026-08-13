@@ -55,7 +55,7 @@
 
           <select v-model="providerFilter" class="input w-full sm:w-44">
             <option value="">{{ t('admin.modelSquare.allProviders') }}</option>
-            <option v-for="item in providers" :key="item" :value="item">{{ item }}</option>
+            <option v-for="item in providers" :key="item" :value="item">{{ providerLabel(item) }}</option>
           </select>
 
           <select v-model="modeFilter" class="input w-full sm:w-40">
@@ -101,7 +101,7 @@
         <EmptyState
           v-else-if="filteredModels.length === 0"
           :title="t('admin.modelSquare.emptyTitle')"
-          :description="t('admin.modelSquare.emptyDescription')"
+          :description="emptyDescription"
           :action-text="t('common.refresh')"
           @action="reload"
         />
@@ -133,7 +133,7 @@
                 class="model-card"
                 role="button"
                 tabindex="0"
-                :title="t('admin.modelSquare.copyTitle')"
+                :title="modelCardTitle(model)"
                 @click="copyModelId(model)"
                 @keydown.enter.prevent="copyModelId(model)"
               >
@@ -150,7 +150,7 @@
 
                 <div class="model-title-row">
                   <h3 class="model-title">
-                    {{ model.id || t('admin.modelSquare.unnamedModel') }}
+                    {{ modelDisplayName(model) }}
                   </h3>
                   <button
                     type="button"
@@ -163,38 +163,38 @@
                 </div>
 
                 <div class="price-grid">
-                  <div class="price-box price-box-neutral">
-                    <span>{{ t('admin.modelSquare.inputPrice') }}</span>
-                    <strong>{{ formatPrice(modelDisplayPrice(model, 'input_price')) }}</strong>
-                    <small>{{ t('admin.modelSquare.perMillionTokens') }}</small>
-                  </div>
-                  <div class="price-box price-box-neutral">
-                    <span>{{ t('admin.modelSquare.outputPrice') }}</span>
-                    <strong>{{ formatPrice(modelDisplayPrice(model, 'output_price')) }}</strong>
-                    <small>{{ t('admin.modelSquare.perMillionTokens') }}</small>
-                  </div>
-                  <div class="price-box price-box-blue">
-                    <span>{{ t('admin.modelSquare.cacheReadPrice') }}</span>
-                    <strong>{{ formatPrice(modelDisplayPrice(model, 'cache_read_price')) }}</strong>
-                  </div>
-                  <div class="price-box price-box-violet">
-                    <span>{{ t('admin.modelSquare.cacheWritePrice') }}</span>
-                    <strong>{{ formatPrice(modelDisplayPrice(model, 'cache_create_price')) }}</strong>
+                  <div
+                    v-for="slot in modelPriceSlots(model)"
+                    :key="slot.key"
+                    :class="['price-box', slot.toneClass]"
+                  >
+                    <span>{{ slot.label }}</span>
+                    <strong>{{ formatPriceOrUnset(slot.value) }}</strong>
+                    <small v-if="slot.unit">{{ slot.unit }}</small>
                   </div>
                 </div>
 
                 <div class="model-card-footer">
                   <span class="mode-chip">{{ modeLabel(model.mode) }}</span>
                   <button
-                    v-if="primaryGroup(model)"
+                    type="button"
+                    class="model-detail-button"
+                    title="详情"
+                    @click.stop="openModelDetails(model)"
+                  >
+                    <Icon name="eye" size="xs" />
+                    <span>详情</span>
+                  </button>
+                  <button
+                    v-if="modelGroups(model).length > 0"
                     type="button"
                     class="primary-group-chip"
                     @click.stop="openGroupDialog(model)"
                   >
                     <span class="truncate">{{ primaryGroup(model)?.name }}</span>
-                    <b>{{ formatRate(primaryGroup(model)?.rate_multiplier) }}</b>
                     <span v-if="modelGroupOverflowCount(model) > 0" class="group-overflow">+{{ modelGroupOverflowCount(model) }}</span>
                   </button>
+                  <span class="model-rate-chip">{{ formatRate(modelEffectiveRate(model)) }}</span>
                 </div>
               </article>
             </div>
@@ -220,8 +220,9 @@
               <tr
                 v-for="(model, index) in filteredModels"
                 :key="modelKey(model, index)"
+                data-test="model-row"
                 class="cursor-pointer transition hover:bg-gray-50 dark:hover:bg-dark-700/60"
-                :title="t('admin.modelSquare.copyTitle')"
+                :title="modelCardTitle(model)"
                 @click="copyModelId(model)"
               >
                 <td class="whitespace-nowrap px-4 py-3">
@@ -231,12 +232,12 @@
                 </td>
                 <td class="whitespace-nowrap px-4 py-3">{{ providerLabel(model.provider) }}</td>
                 <td class="max-w-72 px-4 py-3 font-medium text-gray-950 dark:text-white">
-                  <span class="break-words">{{ model.id || t('admin.modelSquare.unnamedModel') }}</span>
+                  <span class="break-words">{{ modelDisplayName(model) }}</span>
                 </td>
-                <td class="whitespace-nowrap px-4 py-3 font-mono">{{ formatPrice(modelDisplayPrice(model, 'input_price')) }}</td>
-                <td class="whitespace-nowrap px-4 py-3 font-mono">{{ formatPrice(modelDisplayPrice(model, 'output_price')) }}</td>
-                <td class="whitespace-nowrap px-4 py-3 font-mono">{{ formatPrice(modelDisplayPrice(model, 'cache_read_price')) }}</td>
-                <td class="whitespace-nowrap px-4 py-3 font-mono">{{ formatPrice(modelDisplayPrice(model, 'cache_create_price')) }}</td>
+                <td class="whitespace-nowrap px-4 py-3 font-mono">{{ formatPriceOrUnset(modelPriceValue(model, 'input_price')) }}</td>
+                <td class="whitespace-nowrap px-4 py-3 font-mono">{{ formatPriceOrUnset(modelPriceValue(model, 'output_price')) }}</td>
+                <td class="whitespace-nowrap px-4 py-3 font-mono">{{ formatPriceOrUnset(modelPriceValue(model, 'cache_read_price')) }}</td>
+                <td class="whitespace-nowrap px-4 py-3 font-mono">{{ formatPriceOrUnset(modelPriceValue(model, 'cache_write_price')) }}</td>
                 <td class="whitespace-nowrap px-4 py-3">{{ modeLabel(model.mode) }}</td>
                 <td class="px-4 py-3">
                   <div class="flex min-w-72 flex-wrap gap-1.5">
@@ -256,6 +257,78 @@
         </div>
       </template>
     </TablePageLayout>
+
+    <BaseDialog
+      :show="Boolean(detailModel)"
+      :title="detailDialogTitle"
+      width="extra-wide"
+      @close="closeModelDetails"
+    >
+      <div v-if="detailModel" class="space-y-5">
+        <div class="flex flex-wrap items-start justify-between gap-3 border-b border-gray-100 pb-4 dark:border-dark-700">
+          <div class="min-w-0">
+            <div class="break-words text-lg font-bold text-gray-950 dark:text-white">{{ modelDisplayName(detailModel) }}</div>
+            <code class="mt-1 block break-all text-xs text-gray-400">{{ detailModel.id }}</code>
+          </div>
+          <div class="flex shrink-0 flex-wrap items-center gap-2 text-xs">
+            <span class="mode-chip">{{ modeLabel(detailModel.mode) }}</span>
+            <span class="model-rate-chip">{{ formatRate(detailRate) }}</span>
+          </div>
+        </div>
+
+        <div>
+          <div class="mb-2 flex items-center justify-between gap-3">
+            <span class="text-sm font-semibold text-gray-950 dark:text-white">分组倍率</span>
+            <span class="text-xs text-gray-500 dark:text-gray-400">平台: {{ providerLabel(detailModel.provider) }}</span>
+          </div>
+          <div v-if="detailGroups.length > 0" class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            <button
+              v-for="group in detailGroups"
+              :key="String(group.id)"
+              type="button"
+              data-test="detail-group-option"
+              :class="['detail-group-option', { active: String(group.id) === detailGroupId }]"
+              @click="selectDetailGroup(group)"
+            >
+              <span class="min-w-0 text-left">
+                <span class="block truncate font-semibold">{{ group.name }}</span>
+                <code class="mt-1 block text-[11px] text-gray-400">#{{ group.id }}</code>
+              </span>
+              <span class="shrink-0 font-mono text-xs font-bold text-orange-600 dark:text-orange-300">{{ formatRate(group.rate_multiplier) }}</span>
+            </button>
+          </div>
+          <div v-else class="rounded-lg border border-dashed border-gray-200 px-3 py-4 text-sm text-gray-500 dark:border-dark-700 dark:text-gray-400">
+            暂无可切换的分组
+          </div>
+        </div>
+
+        <div class="detail-price-section">
+          <div class="mb-3 flex items-center justify-between gap-3">
+            <span class="text-sm font-semibold text-gray-950 dark:text-white">当前价格</span>
+            <span v-if="selectedDetailGroup" class="text-xs text-gray-500 dark:text-gray-400">
+              {{ selectedDetailGroup.name }} · {{ formatRate(detailRate) }}
+            </span>
+          </div>
+          <div class="price-grid !mt-0">
+            <div
+              v-for="slot in detailPriceSlots"
+              :key="slot.key"
+              :class="['price-box', slot.toneClass]"
+            >
+              <span>{{ slot.label }}</span>
+              <strong>{{ formatPriceOrUnset(slot.value) }}</strong>
+              <small v-if="slot.unit">{{ slot.unit }}</small>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <template #footer>
+        <button type="button" class="btn btn-secondary" @click="closeModelDetails">
+          {{ t('common.close') }}
+        </button>
+      </template>
+    </BaseDialog>
 
     <BaseDialog
       :show="Boolean(groupDialogModel)"
@@ -305,7 +378,28 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Icon from '@/components/icons/Icon.vue'
 
-type PriceField = 'input_price' | 'output_price' | 'cache_read_price' | 'cache_create_price'
+type PriceField =
+  | 'input_price'
+  | 'output_price'
+  | 'cache_read_price'
+  | 'cache_write_price'
+  | 'cache_write_1h_price'
+  | 'input_price_priority'
+  | 'output_price_priority'
+  | 'cache_write_price_priority'
+  | 'cache_read_price_priority'
+  | 'image_input_price'
+  | 'image_output_price'
+  | 'per_request_price'
+type PriceDescriptor = {
+  key: PriceField
+  label: string
+  unit: string
+  toneClass: string
+}
+type ModelPriceSlot = PriceDescriptor & {
+  value?: number
+}
 type ModelSquareProviderSection = {
   provider: string
   models: ModelSquareModel[]
@@ -329,8 +423,30 @@ useRouteQueryFilters([
 ])
 const viewMode = ref<'grid' | 'list'>('grid')
 const groupDialogModel = ref<ModelSquareModel | null>(null)
+const detailModel = ref<ModelSquareModel | null>(null)
+const detailGroupId = ref('')
 const copiedModelId = ref('')
 let copiedTimer: ReturnType<typeof setTimeout> | undefined
+
+const defaultPriceDescriptors: PriceDescriptor[] = [
+  { key: 'input_price', label: '\u8f93\u5165', unit: '$/\u767e\u4e07 tokens', toneClass: 'price-box-neutral' },
+  { key: 'output_price', label: '\u8f93\u51fa', unit: '$/\u767e\u4e07 tokens', toneClass: 'price-box-neutral' },
+  { key: 'cache_read_price', label: '\u7f13\u5b58\u8bfb\u53d6', unit: '', toneClass: 'price-box-blue' },
+  { key: 'cache_write_price', label: '\u7f13\u5b58\u5199\u5165', unit: '', toneClass: 'price-box-violet' },
+]
+
+const priceDescriptors: PriceDescriptor[] = [
+  ...defaultPriceDescriptors,
+  { key: 'cache_write_1h_price', label: '\u7f13\u5b58\u5199\u5165 1h', unit: '$/\u767e\u4e07 tokens', toneClass: 'price-box-violet' },
+  { key: 'input_price_priority', label: '\u4f18\u5148\u7ea7\u8f93\u5165', unit: '$/\u767e\u4e07 tokens', toneClass: 'price-box-neutral' },
+  { key: 'output_price_priority', label: '\u4f18\u5148\u7ea7\u8f93\u51fa', unit: '$/\u767e\u4e07 tokens', toneClass: 'price-box-neutral' },
+  { key: 'cache_write_price_priority', label: '\u4f18\u5148\u7ea7\u7f13\u5b58\u5199\u5165', unit: '$/\u767e\u4e07 tokens', toneClass: 'price-box-violet' },
+  { key: 'cache_read_price_priority', label: '\u4f18\u5148\u7ea7\u7f13\u5b58\u8bfb\u53d6', unit: '$/\u767e\u4e07 tokens', toneClass: 'price-box-blue' },
+  { key: 'image_input_price', label: '\u56fe\u50cf\u8f93\u5165', unit: '$/\u767e\u4e07 tokens', toneClass: 'price-box-neutral' },
+  { key: 'image_output_price', label: '\u56fe\u50cf\u8f93\u51fa', unit: '$/\u767e\u4e07 tokens', toneClass: 'price-box-neutral' },
+  { key: 'per_request_price', label: '\u6309\u8bf7\u6c42', unit: '$/\u6b21', toneClass: 'price-box-neutral' },
+]
+const emptyDescription = '\u5c1a\u672a\u914d\u7f6e\u6a21\u578b\u5e7f\u573a\u5e73\u53f0\u6216\u6a21\u578b\uff0c\u8bf7\u5148\u5728\u201c\u6a21\u578b\u5e7f\u573a\u914d\u7f6e\u201d\u4e2d\u7ef4\u62a4\u5c55\u793a\u76ee\u5f55\u3002'
 
 const payload = computed(() => result.value?.payload?.data || result.value?.payload || {})
 const models = computed<ModelSquareModel[]>(() => Array.isArray(payload.value.models) ? payload.value.models : [])
@@ -343,6 +459,21 @@ const groupDialogGroups = computed(() => groupDialogModel.value ? modelGroups(gr
 const groupDialogTitle = computed(() => {
   const id = groupDialogModel.value?.id || t('admin.modelSquare.unnamedModel')
   return t('admin.modelSquare.groupDialogTitle', { id })
+})
+const detailGroups = computed(() => detailModel.value ? modelDetailGroups(detailModel.value) : [])
+const selectedDetailGroup = computed(() => detailGroups.value.find(group => String(group.id) === detailGroupId.value))
+const detailRate = computed(() => {
+  const rate = groupRate(selectedDetailGroup.value)
+  if (Number.isFinite(rate)) return rate
+  return detailModel.value ? modelEffectiveRate(detailModel.value) : 1
+})
+const detailPriceSlots = computed(() => {
+  if (!detailModel.value) return []
+  return modelPriceSlots(detailModel.value, detailRate.value)
+})
+const detailDialogTitle = computed(() => {
+  const id = detailModel.value?.id || t('admin.modelSquare.unnamedModel')
+  return `${id} 详情`
 })
 
 const filteredModels = computed(() => {
@@ -407,9 +538,23 @@ function modelGroups(model: ModelSquareModel): ModelSquareGroup[] {
     .sort((a, b) => groupRate(a) - groupRate(b)) as ModelSquareGroup[]
 }
 
+function modelDetailGroups(model: ModelSquareModel): ModelSquareGroup[] {
+  const directGroupIds = new Set((model.group_ids || []).map(id => String(id)))
+  const candidates = groups.value.filter(group => {
+    if (directGroupIds.has(String(group.id))) return true
+    const platform = group.platform?.trim().toLowerCase()
+    const modelPlatform = model.platform?.trim().toLowerCase()
+    return !platform || platform === 'composite' || (Boolean(modelPlatform) && platform === modelPlatform)
+  })
+  return candidates.sort((a, b) => {
+    const rateDiff = groupRate(a) - groupRate(b)
+    if (rateDiff !== 0) return rateDiff
+    return String(a.name).localeCompare(String(b.name))
+  })
+}
+
 function primaryGroupRate(model: ModelSquareModel) {
-  const rate = groupRate(primaryGroup(model))
-  return Number.isFinite(rate) ? rate : 1
+  return modelEffectiveRate(model)
 }
 
 function primaryGroup(model: ModelSquareModel) {
@@ -425,13 +570,64 @@ function groupRate(group?: ModelSquareGroup) {
   return Number.isFinite(rate) ? rate : Number.POSITIVE_INFINITY
 }
 
-function modelDisplayPrice(model: ModelSquareModel, field: PriceField) {
+function modelEffectiveRate(model: ModelSquareModel) {
+  const rate = Number(model.rate_multiplier)
+  if (Number.isFinite(rate)) return rate
+
+  const groupRateValue = groupRate(primaryGroup(model))
+  return Number.isFinite(groupRateValue) ? groupRateValue : 1
+}
+
+function modelPriceValue(model: ModelSquareModel, field: PriceField, multiplier?: number) {
   const value = model[field]
   if (value == null || value === '') return undefined
 
   const price = Number(value)
   if (!Number.isFinite(price)) return undefined
-  return price * primaryGroupRate(model)
+  if (multiplier == null) return price
+
+  const baseRate = modelEffectiveRate(model)
+  if (!Number.isFinite(baseRate) || baseRate === 0) return price === 0 ? 0 : undefined
+  return (price / baseRate) * multiplier
+}
+
+function modelDisplayName(model: ModelSquareModel) {
+  const displayName = model.display_name?.trim()
+  if (displayName && model.id && displayName !== model.id) return `${displayName} (${model.id})`
+  return displayName || model.id || t('admin.modelSquare.unnamedModel')
+}
+
+function modelPriceSlots(model: ModelSquareModel, multiplier?: number): ModelPriceSlot[] {
+  const slots = defaultPriceDescriptors.map(descriptor => ({ ...descriptor, value: modelPriceValue(model, descriptor.key, multiplier) }))
+  const extraSlots = priceDescriptors
+    .filter(descriptor => !defaultPriceDescriptors.some(defaultDescriptor => defaultDescriptor.key === descriptor.key))
+    .map(descriptor => ({ ...descriptor, value: modelPriceValue(model, descriptor.key, multiplier) }))
+    .filter(slot => slot.value != null)
+
+  for (const extraSlot of extraSlots) {
+    const emptyIndex = slots.findIndex(slot => slot.value == null)
+    if (emptyIndex < 0) break
+    slots[emptyIndex] = extraSlot
+  }
+
+  return slots
+}
+
+function modelCardTitle(model: ModelSquareModel) {
+  const items = modelConfiguredPriceLines(model)
+  return [t('admin.modelSquare.copyTitle'), model.id, ...items].filter(Boolean).join('\n')
+}
+
+function modelConfiguredPriceLines(model: ModelSquareModel) {
+  return priceDescriptors.flatMap(descriptor => {
+    const value = modelPriceValue(model, descriptor.key)
+    const unit = descriptor.unit ? ` ${descriptor.unit}` : ''
+    return value == null ? [] : [`${descriptor.label}: ${formatPrice(value)}${unit}`]
+  })
+}
+
+function formatPriceOrUnset(value?: number | string) {
+  return value == null || value === '' ? '\u672a\u8bbe\u7f6e' : formatPrice(value)
 }
 
 function isAvailable(model: ModelSquareModel) {
@@ -443,14 +639,14 @@ function availabilityLabel(model: ModelSquareModel) {
 }
 
 function modelSearchText(model: ModelSquareModel) {
-  return [model.id, model.provider, model.mode]
+  return [model.id, model.display_name, model.provider, model.platform, model.mode]
     .filter(Boolean)
     .join(' ')
     .toLowerCase()
 }
 
 function modelKey(model: ModelSquareModel, index: number) {
-  return `${model.provider || 'unknown'}:${model.id || index}`
+  return `${model.platform || model.provider || 'unknown'}:${model.id || index}`
 }
 
 function providerLabel(value?: string) {
@@ -488,6 +684,21 @@ function openGroupDialog(model: ModelSquareModel) {
 
 function closeGroupDialog() {
   groupDialogModel.value = null
+}
+
+function openModelDetails(model: ModelSquareModel) {
+  detailModel.value = model
+  const firstGroup = modelDetailGroups(model)[0]
+  detailGroupId.value = firstGroup ? String(firstGroup.id) : ''
+}
+
+function closeModelDetails() {
+  detailModel.value = null
+  detailGroupId.value = ''
+}
+
+function selectDetailGroup(group: ModelSquareGroup) {
+  detailGroupId.value = String(group.id)
 }
 
 async function copyModelId(model: ModelSquareModel) {
@@ -675,7 +886,7 @@ onMounted(reload)
 }
 
 .model-card-footer {
-  @apply mt-auto flex items-end justify-between gap-3 pt-4;
+  @apply mt-auto flex flex-wrap items-end justify-between gap-3 pt-4;
 }
 
 .mode-chip {
@@ -688,6 +899,26 @@ onMounted(reload)
 
 .primary-group-chip b {
   @apply shrink-0 font-bold text-orange-500;
+}
+
+.model-rate-chip {
+  @apply ml-auto inline-flex h-7 shrink-0 items-center rounded-md bg-amber-50 px-2.5 font-mono text-xs font-bold text-orange-600 dark:bg-amber-950/30 dark:text-orange-300;
+}
+
+.model-detail-button {
+  @apply inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-gray-200 px-2 text-xs font-semibold text-gray-500 transition hover:border-cyan-300 hover:bg-cyan-50 hover:text-cyan-700 dark:border-dark-600 dark:text-gray-400 dark:hover:border-cyan-700 dark:hover:bg-cyan-950/30 dark:hover:text-cyan-300;
+}
+
+.detail-group-option {
+  @apply flex min-w-0 items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 transition hover:border-orange-300 hover:bg-orange-50 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-300 dark:hover:border-orange-700 dark:hover:bg-orange-950/20;
+}
+
+.detail-group-option.active {
+  @apply border-orange-400 bg-orange-50 text-orange-800 shadow-sm dark:border-orange-500 dark:bg-orange-950/30 dark:text-orange-200;
+}
+
+.detail-price-section {
+  @apply rounded-lg border border-gray-100 bg-gray-50/70 p-3 dark:border-dark-700 dark:bg-dark-800/60;
 }
 
 .group-overflow {

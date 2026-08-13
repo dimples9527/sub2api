@@ -1,22 +1,43 @@
-import { getAllIncludingInactive, getModelsListCandidates } from './groups'
-import { list, type Channel, type ChannelModelPricing } from './channels'
+import { getAllIncludingInactive } from './groups'
+import { list, type Channel } from './channels'
+import {
+  get as getModelSquareConfig,
+  getModelPricing as getModelSquareReferencePricing,
+  type ModelSquareConfigPayload,
+  type ModelSquareOfficialPricing,
+  type ModelSquarePlatformModelConfig,
+} from './modelSquareConfig'
 import type { AdminGroup } from '@/types'
+
+export type { ModelSquareConfigPayload } from './modelSquareConfig'
 
 export interface ModelSquareGroup {
   id: number | string
   name: string
+  platform?: string
   rate_multiplier?: number
 }
 
 export interface ModelSquareModel {
   id: string
+  display_name?: string
   provider?: string
+  platform?: string
   available?: boolean
   mode?: string
   input_price?: number | string
   output_price?: number | string
+  cache_write_price?: number | string
+  cache_write_1h_price?: number | string
   cache_read_price?: number | string
-  cache_create_price?: number | string
+  input_price_priority?: number | string
+  output_price_priority?: number | string
+  cache_write_price_priority?: number | string
+  cache_read_price_priority?: number | string
+  image_input_price?: number | string
+  image_output_price?: number | string
+  per_request_price?: number | string
+  rate_multiplier?: number
   group_ids?: Array<number | string>
 }
 
@@ -39,220 +60,241 @@ export interface AdminModelSquareResult {
 }
 
 const PER_MILLION = 1_000_000
+const TOKEN_PRICE_FIELDS = [
+  'input_price',
+  'output_price',
+  'cache_write_price',
+  'cache_write_1h_price',
+  'cache_read_price',
+  'input_price_priority',
+  'output_price_priority',
+  'cache_write_price_priority',
+  'cache_read_price_priority',
+  'image_input_price',
+  'image_output_price',
+] as const
+const REQUEST_PRICE_FIELDS = ['per_request_price'] as const
 
-type AggregatedModel = ModelSquareModel & {
-  pricingRate: number
-  hasPricing: boolean
-  pricingChannelActive: boolean
+type TokenPriceField = typeof TOKEN_PRICE_FIELDS[number]
+type RequestPriceField = typeof REQUEST_PRICE_FIELDS[number]
+type PriceField = TokenPriceField | RequestPriceField
+
+type ModelMatch = {
+  available: boolean
+  groupIDs: Array<number | string>
 }
 
-type CandidateModelsByGroup = Map<string, Set<string>>
-
 /**
- * 将本地渠道与分组配置压平为管理端模型广场的旧数据结构。
- * 模型来自渠道的 model_pricing / model_mapping，价格来自渠道定价配置。
+ * 使用模型广场配置生成展示目录，并仅用渠道与分组补充可用状态和倍率信息。
  */
-export function buildLocalModelSquareResult(
+export function buildConfiguredModelSquareResult(
+  config: ModelSquareConfigPayload,
   channels: Channel[],
   localGroups: AdminGroup[],
-  candidateModelsByGroup?: CandidateModelsByGroup
+  referencePrices = new Map<string, ModelSquareOfficialPricing>()
 ): AdminModelSquareResult {
   const groupById = new Map(localGroups.map(group => [String(group.id), group]))
-  const usedGroupIDs = new Set<string>()
-  const models = new Map<string, AggregatedModel>()
+  const configuredPlatforms = new Set(
+    (config.platforms || [])
+      .map(item => normalizePlatform(item.platform))
+      .filter(Boolean)
+  )
+  const models: ModelSquareModel[] = []
 
-  for (const channel of channels) {
-    const channelActive = channel.status === 'active'
-    const pricingByModel = pricingIndex(channel.model_pricing)
+  for (const platformConfig of config.platforms || []) {
+    const platform = normalizePlatform(platformConfig.platform)
+    if (!platform) continue
+    const providerName = platformConfig.name?.trim() || platform
 
-    for (const pricing of channel.model_pricing || []) {
-      const platform = pricing.platform || 'anthropic'
-      for (const modelName of pricing.models || []) {
-        addModel(
-          modelName,
-          platform,
-          pricing,
-          channelActive,
-          channel.group_ids,
-          groupById,
-          usedGroupIDs,
-          models,
-          candidateModelsByGroup
-        )
-      }
-    }
+    for (const modelConfig of platformConfig.models || []) {
+      const modelID = modelConfig.id?.trim()
+      if (!modelID) continue
 
-    for (const [platform, mapping] of Object.entries(channel.model_mapping || {})) {
-      for (const [sourceModel, targetModel] of Object.entries(mapping || {})) {
-        const pricing = pricingByModel.get(modelKey(platform, targetModel)) || pricingByModel.get(modelKey(platform, sourceModel))
-        addModel(
-          sourceModel,
-          platform,
-          pricing,
-          channelActive,
-          channel.group_ids,
-          groupById,
-          usedGroupIDs,
-          models,
-          candidateModelsByGroup
-        )
-      }
+      const match = findConfiguredModelMatch(platform, modelID, channels, groupById)
+      const minimumRateMultiplier = minimumGroupRateMultiplier(localGroups, platform)
+
+      models.push({
+        id: modelID,
+        display_name: modelConfig.display_name?.trim() || undefined,
+        provider: providerName,
+        platform,
+        available: match.available,
+        mode: modelMode(modelID, modelConfig, referencePrices.get(referencePricingKey(modelID))),
+        rate_multiplier: minimumRateMultiplier,
+        ...configuredPrices(modelConfig, referencePrices.get(referencePricingKey(modelID)), minimumRateMultiplier),
+        group_ids: match.groupIDs,
+      })
     }
   }
 
   const groups: ModelSquareGroup[] = localGroups
-    .filter(group => usedGroupIDs.has(String(group.id)))
+    .filter(group => {
+      const platform = normalizePlatform(group.platform)
+      return configuredPlatforms.has(platform) || platform === 'composite'
+    })
     .map(group => ({
-    id: group.id,
-    name: group.name,
-    rate_multiplier: group.rate_multiplier
-  }))
+      id: group.id,
+      name: group.name,
+      platform: normalizePlatform(group.platform),
+      rate_multiplier: group.rate_multiplier,
+    }))
 
-  const publicModels = Array.from(models.values()).map(({ pricingRate: _pricingRate, hasPricing: _hasPricing, pricingChannelActive: _pricingChannelActive, ...model }) => model)
   return {
-    provider_slug: 'local',
-    provider_name: '本地渠道配置',
+    provider_slug: 'configured',
+    provider_name: '模型广场配置',
     provider_type: 'local',
-    payload: { groups, models: publicModels }
+    payload: { groups, models },
   }
+}
+
+function findConfiguredModelMatch(
+  platform: string,
+  modelID: string,
+  channels: Channel[],
+  groupById: Map<string, AdminGroup>
+): ModelMatch {
+  const usedGroupIDs = new Set<number | string>()
+  let available = false
+
+  for (const channel of channels) {
+    if (!channelSupportsModel(channel, platform, modelID)) continue
+
+    const compatibleGroupIDs = (channel.group_ids || []).filter(groupID => isGroupCompatible(groupById.get(String(groupID)), platform))
+    if (compatibleGroupIDs.length === 0) continue
+
+    for (const groupID of compatibleGroupIDs) usedGroupIDs.add(groupID)
+    if (channel.status === 'active') available = true
+  }
+
+  return { available, groupIDs: Array.from(usedGroupIDs) }
+}
+
+function channelSupportsModel(channel: Channel, platform: string, modelID: string) {
+  const key = modelKey(platform, modelID)
+
+  for (const pricing of channel.model_pricing || []) {
+    const pricingPlatform = normalizePlatform(pricing.platform || 'anthropic')
+    for (const modelName of pricing.models || []) {
+      if (modelKey(pricingPlatform, modelName) === key) return true
+    }
+  }
+
+  for (const [mappingPlatform, mapping] of Object.entries(channel.model_mapping || {})) {
+    if (normalizePlatform(mappingPlatform) !== platform) continue
+    for (const [sourceModel, targetModel] of Object.entries(mapping || {})) {
+      if (modelKey(platform, sourceModel) === key || modelKey(platform, targetModel) === key) return true
+    }
+  }
+
+  return false
+}
+
+function isGroupCompatible(group: AdminGroup | undefined, platform: string) {
+  if (!group) return false
+  const groupPlatform = normalizePlatform(group.platform)
+  return groupPlatform === platform || groupPlatform === 'composite'
+}
+
+function configuredPrices(
+  model: ModelSquarePlatformModelConfig,
+  referencePrice?: ModelSquareOfficialPricing,
+  rateMultiplier = 1
+): Partial<ModelSquareModel> {
+  const prices: Partial<ModelSquareModel> = {}
+  for (const field of TOKEN_PRICE_FIELDS) {
+    const configuredPrice = displayTokenPrice(model[field])
+    const officialPrice = displayOfficialReferencePrice(referencePrice?.[field])
+    assignPrice(prices, field, multiplyPrice(configuredPrice ?? officialPrice, rateMultiplier))
+  }
+  for (const field of REQUEST_PRICE_FIELDS) {
+    assignPrice(prices, field, multiplyPrice(displayRequestPrice(model[field]), rateMultiplier))
+  }
+  return prices
+}
+
+function minimumGroupRateMultiplier(groups: AdminGroup[], platform: string) {
+  const rates = groups
+    .filter(group => {
+      const groupPlatform = normalizePlatform(group.platform)
+      return groupPlatform === platform || groupPlatform === 'composite'
+    })
+    .map(group => toFiniteNumber(group.rate_multiplier))
+    .filter((rate): rate is number => rate != null && rate >= 0)
+  return rates.length > 0 ? Math.min(...rates) : 1
+}
+
+function multiplyPrice(price: number | undefined, multiplier: number) {
+  return price == null ? undefined : price * multiplier
+}
+
+function assignPrice(target: Partial<ModelSquareModel>, field: PriceField, value: number | null | undefined) {
+  if (value != null) target[field] = value
+}
+
+function displayTokenPrice(value: unknown): number | undefined {
+  const price = toFiniteNumber(value)
+  return price == null ? undefined : price * PER_MILLION
+}
+
+function displayOfficialReferencePrice(value: unknown): number | undefined {
+  const price = toFiniteNumber(value)
+  return price != null && price > 0 ? price * PER_MILLION : undefined
+}
+
+function displayRequestPrice(value: unknown): number | undefined {
+  return toFiniteNumber(value)
+}
+
+function toFiniteNumber(value: unknown): number | undefined {
+  if (value == null || value === '') return undefined
+  const price = Number(value)
+  return Number.isFinite(price) ? price : undefined
+}
+
+function normalizePlatform(value: string | undefined) {
+  return (value || '').trim().toLowerCase()
 }
 
 function modelKey(platform: string, modelName: string): string {
-  return `${platform}:${modelName}`.toLowerCase()
+  return `${normalizePlatform(platform)}:${modelName.trim()}`.toLowerCase()
 }
 
-function pricingIndex(entries: ChannelModelPricing[]): Map<string, ChannelModelPricing> {
-  const index = new Map<string, ChannelModelPricing>()
-  for (const entry of entries || []) {
-    const platform = entry.platform || 'anthropic'
-    for (const modelName of entry.models || []) {
-      index.set(modelKey(platform, modelName), entry)
-    }
-  }
-  return index
-}
-
-function addModel(
+function modelMode(
   modelName: string,
-  platform: string,
-  pricing: ChannelModelPricing | undefined,
-  channelActive: boolean,
-  channelGroupIDs: number[],
-  groupById: Map<string, AdminGroup>,
-  usedGroupIDs: Set<string>,
-  models: Map<string, AggregatedModel>,
-  candidateModelsByGroup?: CandidateModelsByGroup
-) {
-  const normalizedName = modelName.trim()
-  const normalizedPlatform = platform.trim() || 'anthropic'
-  if (!normalizedName) return
-
-  const groupIDs = channelGroupIDs.filter(groupID => {
-    const group = groupById.get(String(groupID))
-    return !group || group.platform === normalizedPlatform || group.platform === 'composite'
-  })
-  if (groupIDs.length === 0) return
-
-  const candidateGroupIDs = groupIDs.filter(groupID => {
-    const candidates = candidateModelsByGroup?.get(String(groupID))
-    return candidates === undefined || candidates.has(normalizedName)
-  })
-  if (candidateGroupIDs.length === 0) return
-
-  for (const groupID of candidateGroupIDs) usedGroupIDs.add(String(groupID))
-
-  const key = modelKey(normalizedPlatform, normalizedName)
-  const current = models.get(key)
-  const hasPricing = pricing != null
-  const pricingRate = candidateGroupIDs.reduce((lowest, groupID) => {
-    const rate = Number(groupById.get(String(groupID))?.rate_multiplier)
-    return Number.isFinite(rate) ? Math.min(lowest, rate) : lowest
-  }, Number.POSITIVE_INFINITY)
-  const shouldUsePricing = hasPricing && (
-    !current?.hasPricing ||
-    (channelActive && !current.pricingChannelActive) ||
-    (channelActive === current.pricingChannelActive && pricingRate < current.pricingRate)
-  )
-
-  if (!current) {
-    models.set(key, {
-      id: normalizedName,
-      provider: normalizedPlatform,
-      available: channelActive,
-      mode: modelMode(normalizedName, pricing),
-      input_price: perMillion(pricing?.input_price),
-      output_price: perMillion(pricing?.output_price),
-      cache_read_price: perMillion(pricing?.cache_read_price),
-      cache_create_price: perMillion(pricing?.cache_write_price),
-      group_ids: candidateGroupIDs,
-      pricingRate,
-      hasPricing,
-      pricingChannelActive: channelActive
-    })
-    return
-  }
-
-  current.available = current.available !== false || channelActive
-  current.group_ids = Array.from(new Set([...(current.group_ids || []), ...candidateGroupIDs]))
-  if (!shouldUsePricing) return
-
-  current.input_price = perMillion(pricing?.input_price)
-  current.output_price = perMillion(pricing?.output_price)
-  current.cache_read_price = perMillion(pricing?.cache_read_price)
-  current.cache_create_price = perMillion(pricing?.cache_write_price)
-  current.pricingRate = pricingRate
-  current.hasPricing = true
-  current.pricingChannelActive = channelActive
-}
-
-function normalizeModelNames(models: string[] | undefined): Set<string> {
-  const normalized = new Set<string>()
-  for (const model of models || []) {
-    const value = model.trim()
-    if (!value) continue
-    normalized.add(value)
-  }
-  return normalized
-}
-
-async function buildCandidateModelsByGroup(localGroups: AdminGroup[]): Promise<CandidateModelsByGroup> {
-  const index: CandidateModelsByGroup = new Map()
-  await Promise.all(localGroups.map(async group => {
-    const key = String(group.id)
-    const config = group.models_list_config
-    const configuredModels = config?.enabled ? normalizeModelNames(config.models) : new Set<string>()
-    if (configuredModels.size > 0) {
-      index.set(key, configuredModels)
-      return
-    }
-
-    const models = await getModelsListCandidates(group.id, group.platform).catch(() => undefined)
-    if (models) index.set(key, normalizeModelNames(models))
-  }))
-  return index
-}
-
-function perMillion(value: number | null | undefined): number | undefined {
-  return value == null ? undefined : value * PER_MILLION
-}
-
-function modelMode(modelName: string, pricing?: ChannelModelPricing): string {
-  const billingMode = pricing?.billing_mode
-  if (billingMode === 'image') return 'image_generation'
-
+  modelConfig?: ModelSquarePlatformModelConfig,
+  referencePrice?: ModelSquareOfficialPricing
+): string {
+  if (hasAnyPrice(modelConfig, ['image_input_price', 'image_output_price']) || hasReferenceImagePrice(referencePrice)) return 'image_generation'
   const name = modelName.toLowerCase()
   if (name.includes('embedding')) return 'embedding'
   if (name.includes('response')) return 'responses'
   return 'chat'
 }
 
+function hasAnyPrice(modelConfig: ModelSquarePlatformModelConfig | undefined, fields: PriceField[]) {
+  return fields.some(field => modelConfig?.[field] != null)
+}
+
+function hasReferenceImagePrice(referencePrice?: ModelSquareOfficialPricing) {
+  return ['image_input_price', 'image_output_price'].some(field => displayOfficialReferencePrice(referencePrice?.[field as TokenPriceField]) != null)
+}
+
 export async function getModelSquare(): Promise<AdminModelSquareResult> {
-  const [channelResult, localGroups] = await Promise.all([
+  const config = await getModelSquareConfig()
+  if (!hasConfiguredModels(config)) {
+    return buildConfiguredModelSquareResult(config, [], [])
+  }
+
+  const [channels, localGroups, referencePrices] = await Promise.all([
     listAllChannels(),
-    getAllIncludingInactive()
+    getAllIncludingInactive(),
+    listReferencePrices(config),
   ])
-  const candidateModelsByGroup = await buildCandidateModelsByGroup(localGroups)
-  return buildLocalModelSquareResult(channelResult, localGroups, candidateModelsByGroup)
+  return buildConfiguredModelSquareResult(config, channels, localGroups, referencePrices)
+}
+
+function hasConfiguredModels(config: ModelSquareConfigPayload) {
+  return (config.platforms || []).some(platform => (platform.models || []).some(model => model.id?.trim()))
 }
 
 async function listAllChannels(): Promise<Channel[]> {
@@ -270,8 +312,37 @@ async function listAllChannels(): Promise<Channel[]> {
   return channels
 }
 
+async function listReferencePrices(config: ModelSquareConfigPayload): Promise<Map<string, ModelSquareOfficialPricing>> {
+  const modelIDs = new Set<string>()
+  for (const platform of config.platforms || []) {
+    for (const model of platform.models || []) {
+      const id = model.id?.trim()
+      if (id && hasMissingConfiguredTokenPrice(model)) modelIDs.add(id)
+    }
+  }
+
+  const entries = await Promise.all(Array.from(modelIDs).map(async id => {
+    try {
+      const price = await getModelSquareReferencePricing(id)
+      return price.found ? [referencePricingKey(id), price] as const : undefined
+    } catch {
+      return undefined
+    }
+  }))
+
+  return new Map(entries.filter((entry): entry is readonly [string, ModelSquareOfficialPricing] => entry != null))
+}
+
+function hasMissingConfiguredTokenPrice(model: ModelSquarePlatformModelConfig) {
+  return TOKEN_PRICE_FIELDS.some(field => toFiniteNumber(model[field]) == null)
+}
+
+function referencePricingKey(modelID: string) {
+  return modelID.trim().toLowerCase()
+}
+
 export const modelSquareAPI = {
-  get: getModelSquare
+  get: getModelSquare,
 }
 
 export default modelSquareAPI
