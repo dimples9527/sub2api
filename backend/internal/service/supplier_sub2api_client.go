@@ -85,6 +85,10 @@ type SupplierProviderRemoteTester interface {
 	TestEndpoint(ctx context.Context, provider *SupplierProvider, password string, scope string) (SupplierProviderEndpointTestResult, error)
 }
 
+type SupplierProviderRemoteReauthenticator interface {
+	Reauthenticate(ctx context.Context, provider *SupplierProvider, password string) (SupplierProviderAuthToken, error)
+}
+
 type SupplierProviderRemoteDiagnostics interface {
 	LastEndpointResult(providerID int64, scope string) *SupplierProviderEndpointResult
 }

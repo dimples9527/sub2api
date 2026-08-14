@@ -53,6 +53,7 @@ func TestSupplierSyncProgressStreamWriterCancelsOnWriteFailure(t *testing.T) {
 type supplierProviderSyncHandlerSyncStub struct {
 	calledScope          string
 	refreshProviderID    int64
+	refreshToken         service.SupplierProviderAuthToken
 	testScope            string
 	streamError          error
 	streamFailureMessage string
@@ -110,6 +111,9 @@ func (s *supplierProviderSyncHandlerSyncStub) SyncAll(ctx context.Context, _ int
 }
 func (s *supplierProviderSyncHandlerSyncStub) RefreshToken(_ context.Context, providerID int64) (service.SupplierProviderAuthToken, error) {
 	s.refreshProviderID = providerID
+	if s.refreshToken.AccessToken != "" || s.refreshToken.CookieHeader != "" || !s.refreshToken.ExpiresAt.IsZero() {
+		return s.refreshToken, nil
+	}
 	return service.SupplierProviderAuthToken{ExpiresAt: time.Date(2026, time.August, 8, 0, 0, 0, 0, time.UTC)}, nil
 }
 func (s *supplierProviderSyncHandlerSyncStub) TestEndpoint(_ context.Context, _ int64, scope string) (service.SupplierProviderEndpointTestResult, error) {
@@ -697,6 +701,22 @@ func TestSupplierProviderSyncHandlerRefreshesTokenWithoutReturningCredentials(t 
 	require.Contains(t, rec.Body.String(), `"message":"Token 刷新成功"`)
 	require.NotContains(t, rec.Body.String(), `"access_token"`)
 	require.NotContains(t, rec.Body.String(), `"refresh_token"`)
+}
+
+func TestSupplierProviderSyncHandlerReportsCookieSessionReauthentication(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	syncStub := &supplierProviderSyncHandlerSyncStub{refreshToken: service.SupplierProviderAuthToken{CookieHeader: "session=renewed"}}
+	handler := NewSupplierProviderSyncHandler(syncStub, &supplierProviderSyncHandlerDataStub{})
+	router := gin.New()
+	router.POST("/providers/:id/refresh-token", handler.RefreshToken)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/providers/42/refresh-token", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"message":"登录会话已更新"`)
+	require.NotContains(t, rec.Body.String(), `"cookie"`)
 }
 
 func TestSupplierProviderSyncHandlerRejectsInvalidRefreshTokenProviderID(t *testing.T) {

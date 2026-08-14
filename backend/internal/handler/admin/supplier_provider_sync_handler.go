@@ -945,9 +945,13 @@ func (h *SupplierProviderSyncHandler) RefreshToken(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	message := "Token 刷新成功"
+	if token.AccessToken == "" && token.CookieHeader != "" {
+		message = "登录会话已更新"
+	}
 	response.Success(c, gin.H{
 		"provider_id": id,
 		"expires_at":  token.ExpiresAt,
-		"message":     "Token 刷新成功",
+		"message":     message,
 	})
 }

@@ -342,6 +342,30 @@ describe('SupplierProvidersView payload normalization', () => {
     resolveRefresh({ message: 'Token 刷新成功' })
   })
 
+  it('re-authenticates Cookie-session NewAPI providers through the existing refresh endpoint', async () => {
+    providerRows.splice(0, providerRows.length, {
+      ...createProviderRow(1, 'MidNux', 30, 100, 1),
+      provider_type: 'newapi',
+      newapi_auth_mode: 'cookie_session',
+    })
+    let resolveRefresh!: (value: unknown) => void
+    providerViewMocks.refreshToken.mockReturnValue(new Promise(resolve => {
+      resolveRefresh = resolve
+    }))
+
+    const wrapper = await mountSupplierProviders()
+    const refreshButton = wrapper.get('[data-test="supplier-provider-refresh-token-1"]')
+    expect(refreshButton.text()).toBe('重新登录')
+
+    await refreshButton.trigger('click')
+    expect(refreshButton.text()).toBe('登录中')
+    expect(providerViewMocks.refreshToken).toHaveBeenCalledWith(1)
+
+    resolveRefresh({ message: '登录会话已更新' })
+    await flushPromises()
+    expect(providerViewMocks.showSuccess).toHaveBeenCalledWith('登录会话已更新')
+  })
+
   it('declares refresh event filters and API types for login history', () => {
     expect(supplierProvidersSource).toContain("{ value: 'refresh_success', label: '刷新成功' }")
     expect(supplierProvidersSource).toContain("{ value: 'refresh_failed', label: '刷新失败' }")

@@ -186,6 +186,44 @@ func TestSupplierNewAPIClientRefreshTokenManually(t *testing.T) {
 	require.Equal(t, refreshed, mustSupplierProviderCachedToken(t, cache, 42))
 }
 
+func TestSupplierNewAPIClientReauthenticateCookieSessionWithoutRefreshEndpoint(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	cache.preload(42, SupplierProviderAuthToken{
+		UserID:       42,
+		CookieHeader: "session=stale-session",
+	})
+	var loginCalls atomic.Int32
+	var refreshCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			loginCalls.Add(1)
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "fresh-session"})
+			http.SetCookie(w, &http.Cookie{Name: "new_api_refresh", Value: "ignored-refresh"})
+			_, _ = w.Write([]byte(`{"success":true,"data":{"user":{"id":42}}}`))
+		case "/api/user/auth/refresh":
+			refreshCalls.Add(1)
+			t.Fatal("cookie session reauthentication must not call refresh endpoint")
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	provider := supplierNewAPICacheTestProvider(server.URL)
+	provider.NewAPIAuthMode = SupplierNewAPIAuthModeCookieSession
+	reauthenticated, err := NewSupplierNewAPIClient(server.Client(), cache, nil).Reauthenticate(context.Background(), provider, "secret")
+
+	require.NoError(t, err)
+	require.Equal(t, int32(1), loginCalls.Load())
+	require.Equal(t, int32(0), refreshCalls.Load())
+	require.Empty(t, reauthenticated.AccessToken)
+	require.Empty(t, reauthenticated.RefreshToken)
+	require.Equal(t, "session=fresh-session", reauthenticated.CookieHeader)
+	require.Equal(t, reauthenticated, mustSupplierProviderCachedToken(t, cache, 42))
+}
+
 func mustSupplierProviderCachedToken(t *testing.T, cache *supplierSub2APIFakeTokenCache, providerID int64) SupplierProviderAuthToken {
 	t.Helper()
 	token, found, err := cache.Get(context.Background(), providerID)
@@ -299,6 +337,86 @@ func TestSupplierNewAPIClientReusesSessionFromSharedTokenCache(t *testing.T) {
 	require.Equal(t, "session=cached-session", cachedToken.CookieHeader)
 	require.Equal(t, time.Unix(4102444800, 0), cachedToken.ExpiresAt)
 	require.Equal(t, []time.Duration{0}, setTTLs)
+}
+
+func TestSupplierNewAPIClientUsesCookieOnlyLoginSession(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	var loginCalls atomic.Int32
+	var balanceCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			loginCalls.Add(1)
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "cookie-session"})
+			_, _ = w.Write([]byte(`{"success":true,"data":{"user":{"id":42}}}`))
+		case "/api/user/self":
+			balanceCalls.Add(1)
+			require.Empty(t, r.Header.Get("Authorization"))
+			require.Equal(t, "42", r.Header.Get("New-Api-User"))
+			require.Equal(t, "session=cookie-session", r.Header.Get("Cookie"))
+			_, _ = w.Write([]byte(`{"success":true,"data":{"quota":500000}}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	balance, err := NewSupplierProviderRemoteRegistry(server.Client(), cache, nil).FetchBalance(
+		context.Background(), supplierNewAPICacheTestProvider(server.URL), "secret",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, float64(1), balance)
+	require.Equal(t, int32(1), loginCalls.Load())
+	require.Equal(t, int32(1), balanceCalls.Load())
+	cache.mu.Lock()
+	cachedToken := cache.tokens[42]
+	cache.mu.Unlock()
+	require.Empty(t, cachedToken.AccessToken)
+	require.Empty(t, cachedToken.RefreshToken)
+	require.Equal(t, "session=cookie-session", cachedToken.CookieHeader)
+}
+
+func TestSupplierNewAPIClientDeduplicatesLoginCookiesLikeBrowser(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	var balanceCookie string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "stale-session", MaxAge: -1, Path: "/"})
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "fresh-session", Path: "/"})
+			http.SetCookie(w, &http.Cookie{Name: "theme", Value: "dark", Path: "/"})
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":42}}`))
+		case "/api/user/self":
+			balanceCookie = r.Header.Get("Cookie")
+			require.Equal(t, "42", r.Header.Get("New-Api-User"))
+			if balanceCookie != "session=fresh-session; theme=dark" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"success":false,"message":"Unauthorized, not logged in and no access token provided"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"quota":500000}}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	provider := supplierNewAPICacheTestProvider(server.URL)
+	provider.NewAPIAuthMode = SupplierNewAPIAuthModeCookieSession
+	balance, err := NewSupplierProviderRemoteRegistry(server.Client(), cache, nil).FetchBalance(
+		context.Background(), provider, "secret",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, float64(1), balance)
+	require.Equal(t, "session=fresh-session; theme=dark", balanceCookie)
+	cache.mu.Lock()
+	cachedToken := cache.tokens[42]
+	cache.mu.Unlock()
+	require.Equal(t, "session=fresh-session; theme=dark", cachedToken.CookieHeader)
 }
 
 func TestSupplierNewAPIClientReusesLegacySessionWithoutRefreshTokenUntilAPIRejects(t *testing.T) {
@@ -967,6 +1085,53 @@ func TestSupplierNewAPIClientFetchesAndParsesProviderData(t *testing.T) {
 	require.Equal(t, 1, costCalls)
 }
 
+func TestSupplierNewAPIClientAddsDefaultPaginationToAccountsURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "abc"})
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":42}}`))
+		case "/api/token/":
+			require.Equal(t, "1", r.URL.Query().Get("p"))
+			require.Equal(t, "10", r.URL.Query().Get("size"))
+			require.Equal(t, "42", r.Header.Get("New-Api-User"))
+			require.Contains(t, r.Header.Get("Cookie"), "session=abc")
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"name":"key-1","group":"VIP","status":1}]}}`))
+		case "/api/group/":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"VIP":{"id":7,"ratio":1}}}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	provider := &SupplierProvider{
+		ID:             42,
+		Code:           "supplier-newapi-pagination",
+		ProviderType:   "newapi",
+		BaseURL:        server.URL,
+		LoginURL:       "/api/user/login",
+		APIKeysURL:     "/api/token/",
+		GroupsURL:      "/api/group/",
+		Username:       "root",
+		NewAPIAuthMode: SupplierNewAPIAuthModeCookieSession,
+	}
+	client := NewSupplierNewAPIClient(server.Client(), nil, nil)
+
+	accounts, err := client.FetchAccounts(context.Background(), provider, "secret")
+
+	require.NoError(t, err)
+	require.Len(t, accounts, 1)
+	require.Equal(t, "key-1", accounts[0].Name)
+}
+
+func TestSupplierNewAPISafeLogPathKeepsPaginationAndRedactsOtherQuery(t *testing.T) {
+	require.Equal(t, "/api/token/?p=1&size=10", supplierNewAPISafeLogPath("/api/token/?p=1&size=10"))
+	require.Equal(t, "/api/token/?p=1&size=10&[redacted]", supplierNewAPISafeLogPath("/api/token/?turnstile=secret&p=1&size=10"))
+	require.Equal(t, "/api/user/login?[redacted]", supplierNewAPISafeLogPath("/api/user/login?turnstile=secret"))
+}
+
 func TestSupplierNewAPIClientTestEndpointRefreshesAfterAuthFailureBeforeLogin(t *testing.T) {
 	cache := newSupplierSub2APIFakeTokenCache()
 	cache.preload(42, SupplierProviderAuthToken{
@@ -1022,6 +1187,8 @@ func TestSupplierNewAPIClientTestEndpointCountsAccountsWithoutGroupsPayload(t *t
 			http.SetCookie(w, &http.Cookie{Name: "session", Value: "abc"})
 			_, _ = w.Write([]byte(`{"success":true,"data":{"id":42}}`))
 		case "/api/token/":
+			require.Equal(t, "1", r.URL.Query().Get("p"))
+			require.Equal(t, "10", r.URL.Query().Get("size"))
 			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[
 				{"name":"key-1","group":"VIP"},
 				{"name":"key-2","group":"Trial"}

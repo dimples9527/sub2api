@@ -10,6 +10,7 @@ import (
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 )
 
@@ -26,11 +27,18 @@ var (
 
 var supplierProviderCodePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
 
+const (
+	SupplierNewAPIAuthModeAuto               = "auto"
+	SupplierNewAPIAuthModeCookieSession      = "cookie_session"
+	SupplierNewAPIAuthModeAccessTokenRefresh = "access_token_refresh"
+)
+
 type SupplierProvider struct {
 	ID                         int64                       `json:"id"`
 	Code                       string                      `json:"code"`
 	Name                       string                      `json:"name"`
 	ProviderType               string                      `json:"provider_type"`
+	NewAPIAuthMode             string                      `json:"newapi_auth_mode"`
 	BaseURL                    string                      `json:"base_url"`
 	LoginURL                   string                      `json:"login_url"`
 	APIKeysURL                 string                      `json:"api_keys_url"`
@@ -80,6 +88,7 @@ type SupplierProviderUpsertParams struct {
 	Code                       string  `json:"code"`
 	Name                       string  `json:"name"`
 	ProviderType               string  `json:"provider_type"`
+	NewAPIAuthMode             string  `json:"newapi_auth_mode"`
 	BaseURL                    string  `json:"base_url"`
 	LoginURL                   string  `json:"login_url"`
 	APIKeysURL                 string  `json:"api_keys_url"`
@@ -412,10 +421,12 @@ func (s *SupplierProviderService) Create(ctx context.Context, params SupplierPro
 	if err := s.applyTypeTemplate(ctx, &params); err != nil {
 		return nil, err
 	}
+	requestedNewAPIAuthMode := params.NewAPIAuthMode
 	provider, err := s.buildProvider(params)
 	if err != nil {
 		return nil, err
 	}
+	logger.LegacyPrintf("supplier_provider_service", "upsert provider action=create provider_code=%s provider_type=%s requested_newapi_auth_mode=%s normalized_newapi_auth_mode=%s enabled=%t", provider.Code, provider.ProviderType, requestedNewAPIAuthMode, provider.NewAPIAuthMode, provider.Enabled)
 	if strings.TrimSpace(params.Password) != "" {
 		provider.PasswordEncrypted = strings.TrimSpace(params.Password)
 	}
@@ -433,6 +444,7 @@ func (s *SupplierProviderService) Update(ctx context.Context, id int64, params S
 	if err := s.applyTypeTemplate(ctx, &params); err != nil {
 		return nil, err
 	}
+	requestedNewAPIAuthMode := params.NewAPIAuthMode
 	provider, err := s.buildProvider(params)
 	if err != nil {
 		return nil, err
@@ -443,6 +455,7 @@ func (s *SupplierProviderService) Update(ctx context.Context, id int64, params S
 	if strings.TrimSpace(params.Password) != "" {
 		provider.PasswordEncrypted = strings.TrimSpace(params.Password)
 	}
+	logger.LegacyPrintf("supplier_provider_service", "upsert provider action=update provider_id=%d provider_code=%s provider_type=%s previous_newapi_auth_mode=%s requested_newapi_auth_mode=%s normalized_newapi_auth_mode=%s enabled=%t", provider.ID, provider.Code, provider.ProviderType, existing.NewAPIAuthMode, requestedNewAPIAuthMode, provider.NewAPIAuthMode, provider.Enabled)
 	if s.authConfigurationChanged(existing, provider) {
 		if err := s.deleteToken(ctx, id); err != nil {
 			return nil, err
@@ -477,6 +490,7 @@ func (s *SupplierProviderService) buildProvider(params SupplierProviderUpsertPar
 	params.Code = strings.TrimSpace(params.Code)
 	params.Name = strings.TrimSpace(params.Name)
 	params.ProviderType = strings.TrimSpace(params.ProviderType)
+	params.NewAPIAuthMode = strings.ToLower(strings.TrimSpace(params.NewAPIAuthMode))
 	params.BaseURL = strings.TrimRight(strings.TrimSpace(params.BaseURL), "/")
 	params.AvailableGroupsURL = params.GroupsURL
 	if !supplierProviderCodePattern.MatchString(params.Code) || params.Name == "" || params.ProviderType == "" || !validSupplierURL(params.BaseURL, true) {
@@ -495,10 +509,21 @@ func (s *SupplierProviderService) buildProvider(params SupplierProviderUpsertPar
 	}
 	email := strings.TrimSpace(params.Email)
 	username := strings.TrimSpace(params.Username)
+	if strings.EqualFold(params.ProviderType, SupplierProviderTypeNewAPI) {
+		switch params.NewAPIAuthMode {
+		case "", SupplierNewAPIAuthModeAuto:
+			params.NewAPIAuthMode = SupplierNewAPIAuthModeAuto
+		case SupplierNewAPIAuthModeCookieSession, SupplierNewAPIAuthModeAccessTokenRefresh:
+		default:
+			return nil, ErrSupplierProviderInvalid
+		}
+	} else {
+		params.NewAPIAuthMode = SupplierNewAPIAuthModeAuto
+	}
 	if strings.EqualFold(params.ProviderType, "sub2api") {
 		username = ""
 	}
-	return &SupplierProvider{Code: params.Code, Name: params.Name, ProviderType: params.ProviderType, BaseURL: params.BaseURL, LoginURL: strings.TrimSpace(params.LoginURL), APIKeysURL: strings.TrimSpace(params.APIKeysURL), GroupsURL: strings.TrimSpace(params.GroupsURL), AvailableGroupsURL: strings.TrimSpace(params.AvailableGroupsURL), BalanceURL: strings.TrimSpace(params.BalanceURL), UsageCostURL: strings.TrimSpace(params.UsageCostURL), MonitorURL: strings.TrimSpace(params.MonitorURL), Email: email, Username: username, AccountNamePrefix: strings.TrimSpace(params.AccountNamePrefix), TempDisableMinutes: params.TempDisableMinutes, AccountRateMultiplierScale: params.AccountRateMultiplierScale, SortOrder: params.SortOrder, Enabled: params.Enabled, TurnstileEnabled: params.TurnstileEnabled, IsDefault: params.IsDefault}, nil
+	return &SupplierProvider{Code: params.Code, Name: params.Name, ProviderType: params.ProviderType, NewAPIAuthMode: params.NewAPIAuthMode, BaseURL: params.BaseURL, LoginURL: strings.TrimSpace(params.LoginURL), APIKeysURL: strings.TrimSpace(params.APIKeysURL), GroupsURL: strings.TrimSpace(params.GroupsURL), AvailableGroupsURL: strings.TrimSpace(params.AvailableGroupsURL), BalanceURL: strings.TrimSpace(params.BalanceURL), UsageCostURL: strings.TrimSpace(params.UsageCostURL), MonitorURL: strings.TrimSpace(params.MonitorURL), Email: email, Username: username, AccountNamePrefix: strings.TrimSpace(params.AccountNamePrefix), TempDisableMinutes: params.TempDisableMinutes, AccountRateMultiplierScale: params.AccountRateMultiplierScale, SortOrder: params.SortOrder, Enabled: params.Enabled, TurnstileEnabled: params.TurnstileEnabled, IsDefault: params.IsDefault}, nil
 }
 
 func validSupplierURL(value string, required bool) bool {
@@ -588,11 +613,20 @@ func (s *SupplierProviderService) authConfigurationChanged(existing, next *Suppl
 		return false
 	}
 	return strings.TrimSpace(existing.ProviderType) != strings.TrimSpace(next.ProviderType) ||
+		normalizeSupplierNewAPIAuthModeForCompare(existing.NewAPIAuthMode) != normalizeSupplierNewAPIAuthModeForCompare(next.NewAPIAuthMode) ||
 		strings.TrimSpace(existing.BaseURL) != strings.TrimSpace(next.BaseURL) ||
 		strings.TrimSpace(existing.LoginURL) != strings.TrimSpace(next.LoginURL) ||
 		strings.TrimSpace(existing.Email) != strings.TrimSpace(next.Email) ||
 		strings.TrimSpace(existing.Username) != strings.TrimSpace(next.Username) ||
 		strings.TrimSpace(existing.PasswordEncrypted) != strings.TrimSpace(next.PasswordEncrypted)
+}
+
+func normalizeSupplierNewAPIAuthModeForCompare(mode string) string {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" {
+		return SupplierNewAPIAuthModeAuto
+	}
+	return mode
 }
 
 func (s *SupplierProviderService) deleteToken(ctx context.Context, providerID int64) error {

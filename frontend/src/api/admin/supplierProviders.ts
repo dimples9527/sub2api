@@ -1,10 +1,16 @@
 import { apiClient } from '../client'
 
+export type SupplierNewAPIAuthMode =
+  | 'auto'
+  | 'cookie_session'
+  | 'access_token_refresh'
+
 export interface SupplierProvider {
   id: number
   code: string
   name: string
   provider_type: string
+  newapi_auth_mode: SupplierNewAPIAuthMode
   base_url: string
   login_url: string
   api_keys_url: string
@@ -148,6 +154,7 @@ export interface SupplierProviderUpsertPayload {
   code: string
   name: string
   provider_type: string
+  newapi_auth_mode: SupplierNewAPIAuthMode
   base_url: string
   login_url?: string
   api_keys_url?: string

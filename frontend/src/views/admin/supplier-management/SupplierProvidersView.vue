@@ -151,7 +151,7 @@
                 :data-test="`supplier-provider-refresh-token-${provider.id}`"
                 :disabled="!provider.enabled || isRefreshingToken(provider)"
                 @click="refreshProviderToken(provider)"
-              >{{ isRefreshingToken(provider) ? '刷新中' : '刷新 Token' }}</button>
+              >{{ isRefreshingToken(provider) ? newAPIAuthActionLoadingLabel(provider) : newAPIAuthActionLabel(provider) }}</button>
               <button class="sp-button small" type="button" @click="openAuthHistory(provider)">登录记录</button>
               <button class="sp-button small" type="button" @click="openEdit(provider)">编辑</button>
               <button
@@ -402,7 +402,7 @@
             data-test="supplier-provider-detail-refresh-token"
             :disabled="!selectedProvider.enabled || isRefreshingToken(selectedProvider)"
             @click="refreshProviderToken(selectedProvider)"
-          >{{ isRefreshingToken(selectedProvider) ? '刷新中' : '刷新 Token' }}</button>
+          >{{ isRefreshingToken(selectedProvider) ? newAPIAuthActionLoadingLabel(selectedProvider) : newAPIAuthActionLabel(selectedProvider) }}</button>
           <button class="sp-button primary" type="button" :disabled="!selectedProvider.enabled || isProviderSyncing(selectedProvider)" :title="selectedProvider.enabled ? '同步全部数据' : supplierProviderDisabledSyncMessage" @click="syncProviderData(selectedProvider, 'all')">同步全部</button>
           <button class="sp-button" type="button" :disabled="!selectedProvider.enabled || isProviderSyncing(selectedProvider)" :title="selectedProvider.enabled ? '同步 API Key' : supplierProviderDisabledSyncMessage" @click="syncProviderData(selectedProvider, 'accounts')">同步 API Key</button>
           <button class="sp-button" type="button" :disabled="!selectedProvider.enabled || isProviderSyncing(selectedProvider)" :title="selectedProvider.enabled ? '同步分组' : supplierProviderDisabledSyncMessage" @click="syncProviderData(selectedProvider, 'groups')">同步分组</button>
@@ -669,6 +669,15 @@
             <Input v-if="form.provider_type === 'sub2api'" v-model="form.email" label="登录邮箱" />
             <Input v-else v-model="form.username" label="登录用户名" />
             <Input v-model="form.password" type="password" label="登录密码" :placeholder="editingProvider ? '留空则保留原密码' : ''" />
+            <label v-if="form.provider_type === 'newapi'" class="sp-select-field">
+              <span>NewAPI 认证模式</span>
+              <Select
+                v-model="form.newapi_auth_mode"
+                :options="newAPIAuthModeOptions"
+                placeholder="请选择认证模式"
+                :searchable="false"
+              />
+            </label>
             <Input v-model="form.account_name_prefix" label="账号名前缀" />
             <Input :model-value="form.temp_disable_minutes" type="number" label="临时禁用分钟" @update:model-value="form.temp_disable_minutes = toNumber($event, form.temp_disable_minutes ?? 0)" />
             <Input :model-value="form.account_rate_multiplier_scale" type="number" label="倍率缩放" @update:model-value="form.account_rate_multiplier_scale = toNumber($event, form.account_rate_multiplier_scale)" />
@@ -997,6 +1006,7 @@ const emptyForm = (): SupplierProviderUpsertPayload => ({
   code: '',
   name: '',
   provider_type: 'sub2api',
+  newapi_auth_mode: 'auto',
   base_url: '',
   login_url: '',
   api_keys_url: '',
@@ -1104,6 +1114,11 @@ const enabledProviderTypes = computed(() => providerTypes.value.filter(type => t
 const providerTypeOptions = computed<SelectOption[]>(() =>
   enabledProviderTypes.value.map(type => ({ value: type.code, label: `${type.name}（${type.code}）` }))
 )
+const newAPIAuthModeOptions: SelectOption[] = [
+  { value: 'auto', label: '自动识别' },
+  { value: 'cookie_session', label: 'Cookie 会话' },
+  { value: 'access_token_refresh', label: 'Access Token + Refresh Token' },
+]
 const providerColumns: Column[] = [
   { key: 'homepage', label: '主页', class: 'w-[64px]' },
   { key: 'name', label: '供应商', sortable: true, class: 'min-w-[220px]' },
@@ -1811,6 +1826,7 @@ function openEdit(provider: SupplierProvider) {
     code: provider.code,
     name: provider.name,
     provider_type: provider.provider_type,
+    newapi_auth_mode: provider.newapi_auth_mode || 'auto',
     base_url: provider.base_url,
     login_url: provider.login_url,
     api_keys_url: provider.api_keys_url,
@@ -1926,6 +1942,7 @@ function providerUpdatePayload(provider: SupplierProvider, enabled: boolean): Su
     code: provider.code,
     name: provider.name,
     provider_type: provider.provider_type,
+    newapi_auth_mode: provider.newapi_auth_mode || 'auto',
     base_url: provider.base_url,
     login_url: provider.login_url,
     api_keys_url: provider.api_keys_url,
@@ -2182,15 +2199,27 @@ function isRefreshingToken(provider: SupplierProvider): boolean {
   return refreshingTokenIDs.value.has(provider.id)
 }
 
+function usesCookieSession(provider: SupplierProvider): boolean {
+  return provider.provider_type === 'newapi' && provider.newapi_auth_mode === 'cookie_session'
+}
+
+function newAPIAuthActionLabel(provider: SupplierProvider): string {
+  return usesCookieSession(provider) ? '重新登录' : '刷新 Token'
+}
+
+function newAPIAuthActionLoadingLabel(provider: SupplierProvider): string {
+  return usesCookieSession(provider) ? '登录中' : '刷新中'
+}
+
 async function refreshProviderToken(provider: SupplierProvider) {
   if (provider.provider_type !== 'newapi' || refreshingTokenIDs.value.has(provider.id)) return
   refreshingTokenIDs.value = new Set(refreshingTokenIDs.value).add(provider.id)
   try {
     const result = await supplierProvidersAPI.refreshToken(provider.id)
-    appStore.showSuccess(result?.message || '刷新 Token 成功')
+    appStore.showSuccess(result?.message || (usesCookieSession(provider) ? '登录会话已更新' : '刷新 Token 成功'))
     await loadProviders()
   } catch (err) {
-    appStore.showError(errorMessage(err, '刷新 Token 失败'))
+    appStore.showError(errorMessage(err, usesCookieSession(provider) ? '重新登录失败' : '刷新 Token 失败'))
   } finally {
     const next = new Set(refreshingTokenIDs.value)
     next.delete(provider.id)
@@ -2252,6 +2281,7 @@ function normalizePayload(payload: SupplierProviderUpsertPayload): SupplierProvi
     code: payload.code.trim(),
     name: payload.name.trim(),
     provider_type: normalizedProviderType,
+    newapi_auth_mode: normalizedProviderType === 'newapi' ? payload.newapi_auth_mode || 'auto' : 'auto',
     base_url: payload.base_url.trim(),
     login_url: payload.login_url?.trim() || '',
     api_keys_url: payload.api_keys_url?.trim() || '',

@@ -170,6 +170,8 @@ type supplierRemoteClientStub struct {
 	authSources   []SupplierProviderAuthSource
 	accounts      []SupplierProviderRemoteAccount
 	costDays      []time.Time
+	reauthCalls   int
+	reauthToken   SupplierProviderAuthToken
 	accountsCalls int
 	groupsCalls   int
 	balanceCalls  int
@@ -184,6 +186,13 @@ type supplierRemoteClientStub struct {
 	testCalls  []string
 	testErr    error
 	testResult *SupplierProviderEndpointTestResult
+}
+
+func (c *supplierRemoteClientStub) Reauthenticate(ctx context.Context, _ *SupplierProvider, password string) (SupplierProviderAuthToken, error) {
+	c.reauthCalls++
+	c.passwords = append(c.passwords, password)
+	c.authSources = append(c.authSources, supplierProviderAuthSourceFromContext(ctx))
+	return c.reauthToken, nil
 }
 
 func (c *supplierRemoteClientStub) FetchAccounts(ctx context.Context, _ *SupplierProvider, password string) ([]SupplierProviderRemoteAccount, error) {
@@ -474,6 +483,26 @@ func TestSupplierProviderSyncServiceAllowsNewAPIProviderType(t *testing.T) {
 	require.Equal(t, []string{"secret"}, remote.passwords)
 	require.Equal(t, []SupplierProviderAuthSource{SupplierProviderAuthSourceSync}, remote.authSources)
 	require.Equal(t, 1, dataRepo.accountsCalls)
+}
+
+func TestSupplierProviderSyncServiceReauthenticatesCookieSessionNewAPI(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID:                42,
+		ProviderType:      SupplierProviderTypeNewAPI,
+		NewAPIAuthMode:    SupplierNewAPIAuthModeCookieSession,
+		Enabled:           true,
+		PasswordEncrypted: "secret",
+	}}}
+	remote := &supplierRemoteClientStub{reauthToken: SupplierProviderAuthToken{CookieHeader: "session=renewed"}}
+	service := NewSupplierProviderSyncService(providerRepo, &supplierProviderDataRepoStub{}, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	result, err := service.RefreshToken(context.Background(), 42)
+
+	require.NoError(t, err)
+	require.Equal(t, "session=renewed", result.CookieHeader)
+	require.Equal(t, 1, remote.reauthCalls)
+	require.Equal(t, []string{"secret"}, remote.passwords)
+	require.Equal(t, []SupplierProviderAuthSource{SupplierProviderAuthSourceManual}, remote.authSources)
 }
 
 func TestSupplierProviderSyncServiceSyncAllReturnsPartialWhenOneStageFails(t *testing.T) {

@@ -275,6 +275,27 @@ func TestSupplierProviderServiceCreateSub2APIClearsUsername(t *testing.T) {
 	require.Empty(t, repo.items[0].Username)
 }
 
+func TestSupplierProviderServiceStoresNewAPIAuthModeAndRejectsUnknownMode(t *testing.T) {
+	repo := &supplierProviderRepoStub{}
+	service := NewSupplierProviderService(repo, supplierEncryptorStub{})
+	params := validSupplierProviderParams()
+	params.ProviderType = SupplierProviderTypeNewAPI
+	params.Username = "root"
+	params.NewAPIAuthMode = " cookie_session "
+
+	created, err := service.Create(context.Background(), params)
+
+	require.NoError(t, err)
+	require.Equal(t, SupplierNewAPIAuthModeCookieSession, created.NewAPIAuthMode)
+	require.Equal(t, SupplierNewAPIAuthModeCookieSession, repo.items[0].NewAPIAuthMode)
+
+	params.Code = "invalid-newapi-auth-mode"
+	params.NewAPIAuthMode = "unsupported"
+	_, err = service.Create(context.Background(), params)
+
+	require.ErrorIs(t, err, ErrSupplierProviderInvalid)
+}
+
 func TestSupplierProviderServiceUpdateKeepsCredentialWhenPasswordBlank(t *testing.T) {
 	repo := &supplierProviderRepoStub{next: 1, items: []*SupplierProvider{{ID: 1, Code: "primary", PasswordEncrypted: "encrypted:old"}}}
 	service := NewSupplierProviderService(repo, supplierEncryptorStub{})

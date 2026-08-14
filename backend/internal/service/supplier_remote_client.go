@@ -207,3 +207,15 @@ func (r *SupplierProviderRemoteRegistry) RefreshToken(ctx context.Context, provi
 	}
 	return refresher.RefreshToken(ctx, provider)
 }
+
+func (r *SupplierProviderRemoteRegistry) Reauthenticate(ctx context.Context, provider *SupplierProvider, password string) (SupplierProviderAuthToken, error) {
+	client, err := r.client(provider)
+	if err != nil {
+		return SupplierProviderAuthToken{}, err
+	}
+	reauthenticator, ok := client.(SupplierProviderRemoteReauthenticator)
+	if !ok {
+		return SupplierProviderAuthToken{}, fmt.Errorf("supplier provider type %s does not support manual reauthentication", provider.ProviderType)
+	}
+	return reauthenticator.Reauthenticate(ctx, provider, password)
+}

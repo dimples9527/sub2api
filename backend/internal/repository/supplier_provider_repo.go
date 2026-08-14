@@ -31,7 +31,7 @@ func NewSupplierProviderTypeRepository(db *sql.DB) service.SupplierProviderTypeR
 }
 
 const supplierProviderSelect = `
-SELECT p.id, p.code, p.name, p.provider_type, p.base_url, p.login_url,
+SELECT p.id, p.code, p.name, p.provider_type, p.newapi_auth_mode, p.base_url, p.login_url,
        p.api_keys_url, p.groups_url, p.available_groups_url, p.balance_url,
        p.usage_cost_url, p.monitor_url, p.account_name_prefix, p.temp_disable_minutes,
        p.account_rate_multiplier_scale, p.sort_order, p.enabled, p.turnstile_enabled, p.is_default,
@@ -344,12 +344,12 @@ func (r *supplierProviderRepository) Create(ctx context.Context, provider *servi
 	}
 	err = tx.QueryRowContext(ctx, `
 INSERT INTO supplier_providers (
-  code, name, provider_type, base_url, login_url, api_keys_url, groups_url,
+  code, name, provider_type, newapi_auth_mode, base_url, login_url, api_keys_url, groups_url,
   available_groups_url, balance_url, usage_cost_url, monitor_url, account_name_prefix,
   temp_disable_minutes, account_rate_multiplier_scale, sort_order, enabled, turnstile_enabled, is_default
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
 RETURNING id, created_at, updated_at`, provider.Code, provider.Name, provider.ProviderType,
-		provider.BaseURL, provider.LoginURL, provider.APIKeysURL, provider.GroupsURL,
+		provider.NewAPIAuthMode, provider.BaseURL, provider.LoginURL, provider.APIKeysURL, provider.GroupsURL,
 		provider.AvailableGroupsURL, provider.BalanceURL, provider.UsageCostURL,
 		provider.MonitorURL, provider.AccountNamePrefix, provider.TempDisableMinutes, provider.AccountRateMultiplierScale,
 		provider.SortOrder, provider.Enabled, provider.TurnstileEnabled, provider.IsDefault).Scan(&provider.ID, &provider.CreatedAt, &provider.UpdatedAt)
@@ -381,13 +381,13 @@ func (r *supplierProviderRepository) Update(ctx context.Context, provider *servi
 	}
 	result, err := tx.ExecContext(ctx, `
 UPDATE supplier_providers SET
-  code=$2, name=$3, provider_type=$4, base_url=$5, login_url=$6,
-  api_keys_url=$7, groups_url=$8, available_groups_url=$9, balance_url=$10,
-  usage_cost_url=$11, monitor_url=$12, account_name_prefix=$13, temp_disable_minutes=$14,
-  account_rate_multiplier_scale=$15, sort_order=$16, enabled=$17,
-  turnstile_enabled=$18, is_default=$19, updated_at=NOW()
+  code=$2, name=$3, provider_type=$4, newapi_auth_mode=$5, base_url=$6, login_url=$7,
+  api_keys_url=$8, groups_url=$9, available_groups_url=$10, balance_url=$11,
+  usage_cost_url=$12, monitor_url=$13, account_name_prefix=$14, temp_disable_minutes=$15,
+  account_rate_multiplier_scale=$16, sort_order=$17, enabled=$18,
+  turnstile_enabled=$19, is_default=$20, updated_at=NOW()
 WHERE id=$1 AND deleted_at IS NULL`, provider.ID, provider.Code, provider.Name,
-		provider.ProviderType, provider.BaseURL, provider.LoginURL, provider.APIKeysURL,
+		provider.ProviderType, provider.NewAPIAuthMode, provider.BaseURL, provider.LoginURL, provider.APIKeysURL,
 		provider.GroupsURL, provider.AvailableGroupsURL, provider.BalanceURL,
 		provider.UsageCostURL, provider.MonitorURL, provider.AccountNamePrefix, provider.TempDisableMinutes,
 		provider.AccountRateMultiplierScale, provider.SortOrder, provider.Enabled,
@@ -506,7 +506,7 @@ func scanSupplierProvider(scanner supplierProviderScanner) (*service.SupplierPro
 	var authLastLoginAt sql.NullTime
 	var authLastCacheHitAt sql.NullTime
 	var authLastTokenExpiresAt sql.NullTime
-	err := scanner.Scan(&provider.ID, &provider.Code, &provider.Name, &provider.ProviderType,
+	err := scanner.Scan(&provider.ID, &provider.Code, &provider.Name, &provider.ProviderType, &provider.NewAPIAuthMode,
 		&provider.BaseURL, &provider.LoginURL, &provider.APIKeysURL, &provider.GroupsURL,
 		&provider.AvailableGroupsURL, &provider.BalanceURL, &provider.UsageCostURL, &provider.MonitorURL,
 		&provider.AccountNamePrefix, &provider.TempDisableMinutes,

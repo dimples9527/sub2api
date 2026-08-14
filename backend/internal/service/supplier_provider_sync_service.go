@@ -9,6 +9,7 @@ import (
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/google/uuid"
 )
 
@@ -1293,6 +1294,14 @@ func (s *SupplierProviderSyncService) RefreshToken(ctx context.Context, provider
 	provider, err := s.validSyncProvider(ctx, providerID)
 	if err != nil {
 		return SupplierProviderAuthToken{}, err
+	}
+	logger.LegacyPrintf("supplier_provider_sync_service", "manual auth action provider_id=%d provider_code=%s provider_type=%s newapi_auth_mode=%s cookie_session=%t", provider.ID, provider.Code, provider.ProviderType, provider.NewAPIAuthMode, normalizeSupplierProviderType(provider.ProviderType) == SupplierProviderTypeNewAPI && supplierNewAPIUsesCookieSession(provider))
+	if normalizeSupplierProviderType(provider.ProviderType) == SupplierProviderTypeNewAPI && supplierNewAPIUsesCookieSession(provider) {
+		reauthenticator, ok := s.remote.(SupplierProviderRemoteReauthenticator)
+		if !ok {
+			return SupplierProviderAuthToken{}, infraerrors.BadRequest("SUPPLIER_PROVIDER_REAUTH_UNSUPPORTED", "current supplier type does not support manual reauthentication")
+		}
+		return reauthenticator.Reauthenticate(ctx, provider, s.providerPassword(provider))
 	}
 	refresher, ok := s.remote.(SupplierProviderRemoteTokenRefresher)
 	if !ok {
