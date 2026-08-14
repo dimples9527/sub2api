@@ -734,6 +734,26 @@ func TestSupplierProviderSyncServiceTestsEndpointWithoutPersisting(t *testing.T)
 	require.Zero(t, dataRepo.balanceCalls)
 }
 
+func TestSupplierProviderEndpointAuthFailureIgnoresProbeBlockedForbidden(t *testing.T) {
+	result := SupplierProviderEndpointTestResult{
+		HTTPStatus:      http.StatusForbidden,
+		Error:           `supplier sub2api monitor failed with HTTP 403: {"error":{"message":"Probe, monitoring, and test traffic are disabled by site policy.","type":"probe_blocked"}}`,
+		ResponseSummary: `{"error":{"message":"Probe, monitoring, and test traffic are disabled by site policy.","type":"probe_blocked"}}`,
+	}
+
+	require.False(t, supplierProviderEndpointAuthFailure(result))
+}
+
+func TestSupplierProviderEndpointAuthFailureKeepsInvalidTokenForbidden(t *testing.T) {
+	result := SupplierProviderEndpointTestResult{
+		HTTPStatus:      http.StatusForbidden,
+		Error:           `supplier sub2api accounts failed with HTTP 403: {"code":403,"message":"invalid token"}`,
+		ResponseSummary: `{"code":403,"message":"invalid token"}`,
+	}
+
+	require.True(t, supplierProviderEndpointAuthFailure(result))
+}
+
 func TestSupplierProviderSyncServiceTestEndpointDisablesProviderAfterUnauthorizedResponse(t *testing.T) {
 	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
 		ID: 42, ProviderType: SupplierProviderTypeSub2API, Enabled: true, PasswordEncrypted: "secret",

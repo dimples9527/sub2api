@@ -838,10 +838,13 @@ func (s *SupplierProviderSyncService) TestEndpoint(ctx context.Context, provider
 }
 
 func supplierProviderEndpointAuthFailure(result SupplierProviderEndpointTestResult) bool {
-	if result.HTTPStatus == 401 || result.HTTPStatus == 403 {
+	text := strings.ToLower(strings.TrimSpace(result.Error + " " + result.ResponseSummary))
+	if supplierSub2APIProbeBlockedText(text) {
+		return false
+	}
+	if result.HTTPStatus == 401 {
 		return true
 	}
-	text := strings.ToLower(strings.TrimSpace(result.Error + " " + result.ResponseSummary))
 	return supplierSub2APIAuthPhrase(text) || supplierNewAPIAuthPhrase(text)
 }
 

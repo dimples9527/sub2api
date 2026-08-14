@@ -287,39 +287,63 @@ func (c *SupplierSub2APIClient) authenticatedRequest(ctx context.Context, provid
 		}
 		raw, status, err := c.doJSON(ctx, method, provider, path, label, token, body)
 		if err != nil {
+			c.logRequestDiagnosis(provider, label, attempt+1, status, raw, err, false)
 			return raw, status, fmt.Errorf("supplier sub2api %s request failed: %w", label, err)
 		}
 		if status >= 200 && status < 300 && !supplierSub2APIBusinessAuthFailure(raw) {
 			if envelopeErr := supplierSub2APIEnvelopeOK(raw); envelopeErr == nil {
 				return raw, status, nil
 			} else if attempt == 0 && supplierSub2APIAuthFailure(status, raw, envelopeErr) {
+				c.logRequestDiagnosis(provider, label, attempt+1, status, raw, envelopeErr, true)
 				lastErr = envelopeErr
 				if _, recoverErr := c.recoverTokenAfterAuthFailure(ctx, provider, password, token); recoverErr != nil {
 					return raw, status, recoverErr
 				}
 				continue
 			} else {
+				c.logRequestDiagnosis(provider, label, attempt+1, status, raw, envelopeErr, false)
 				return raw, status, envelopeErr
 			}
 		}
 		requestErr := supplierSub2APIHTTPError(label, status, raw)
 		if attempt == 0 && supplierSub2APIAuthFailure(status, raw, requestErr) {
+			c.logRequestDiagnosis(provider, label, attempt+1, status, raw, requestErr, true)
 			lastErr = requestErr
 			if _, recoverErr := c.recoverTokenAfterAuthFailure(ctx, provider, password, token); recoverErr != nil {
 				return raw, status, recoverErr
 			}
 			continue
 		}
-		c.deleteToken(ctx, provider)
 		if supplierSub2APIAuthFailure(status, raw, requestErr) {
+			c.deleteToken(ctx, provider)
+			c.logRequestDiagnosis(provider, label, attempt+1, status, raw, requestErr, true)
 			return raw, status, wrapSupplierProviderAuthFailure(fmt.Errorf("supplier sub2api %s failed after auth retry: %w", label, requestErr))
 		}
+		c.logRequestDiagnosis(provider, label, attempt+1, status, raw, requestErr, false)
 		return raw, status, requestErr
 	}
 	if supplierSub2APIAuthFailure(0, nil, lastErr) {
 		return nil, 0, wrapSupplierProviderAuthFailure(fmt.Errorf("supplier sub2api %s failed after auth retry: %w", label, lastErr))
 	}
 	return nil, 0, fmt.Errorf("supplier sub2api %s failed after auth retry: %w", label, lastErr)
+}
+
+func (c *SupplierSub2APIClient) logRequestDiagnosis(provider *SupplierProvider, label string, attempt int, status int, raw []byte, err error, authFailure bool) {
+	if provider == nil {
+		return
+	}
+	logger.LegacyPrintf(
+		"supplier_sub2api_client",
+		"supplier request diagnosis provider_id=%d provider_code=%s label=%s attempt=%d http_status=%d auth_failure=%t response=%s err=%v",
+		provider.ID,
+		provider.Code,
+		label,
+		attempt,
+		status,
+		authFailure,
+		supplierSub2APISafeResponseSummary(raw),
+		err,
+	)
 }
 
 func (c *SupplierSub2APIClient) LastEndpointResult(providerID int64, scope string) *SupplierProviderEndpointResult {
@@ -981,20 +1005,73 @@ func supplierSub2APICodeOK(code any) bool {
 }
 
 func supplierSub2APIAuthFailure(status int, raw []byte, err error) bool {
-	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+	if supplierSub2APIProbeBlocked(raw) {
+		return false
+	}
+	if status == http.StatusUnauthorized {
 		return true
+	}
+	if status == http.StatusForbidden {
+		return supplierSub2APIBusinessAuthFailure(raw) || supplierSub2APIErrorLooksAuth(err)
 	}
 	return supplierSub2APIBusinessAuthFailure(raw) || supplierSub2APIErrorLooksAuth(err)
 }
 
 func supplierSub2APILoginAuthFailure(status int, raw []byte, err error) bool {
-	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+	if supplierSub2APIProbeBlocked(raw) {
+		return false
+	}
+	if status == http.StatusUnauthorized {
 		return true
+	}
+	if status == http.StatusForbidden {
+		return supplierSub2APIBusinessAuthFailure(raw) || supplierSub2APIErrorLooksAuth(err)
 	}
 	if supplierSub2APIBusinessAuthFailure(raw) || supplierSub2APIErrorLooksAuth(err) {
 		return true
 	}
 	return false
+}
+
+func supplierSub2APIProbeBlocked(raw []byte) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return false
+	}
+	return supplierSub2APIProbeBlockedValue(decoded)
+}
+
+func supplierSub2APIProbeBlockedValue(value any) bool {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, item := range typed {
+			if strings.EqualFold(strings.TrimSpace(key), "type") || strings.EqualFold(strings.TrimSpace(key), "code") {
+				if supplierSub2APIProbeBlockedText(fmt.Sprint(item)) {
+					return true
+				}
+			}
+			if supplierSub2APIProbeBlockedValue(item) {
+				return true
+			}
+		}
+	case []any:
+		for _, item := range typed {
+			if supplierSub2APIProbeBlockedValue(item) {
+				return true
+			}
+		}
+	case string:
+		return supplierSub2APIProbeBlockedText(typed)
+	}
+	return false
+}
+
+func supplierSub2APIProbeBlockedText(text string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	return normalized == "probe_blocked" || strings.Contains(normalized, "probe, monitoring, and test traffic are disabled")
 }
 
 func supplierSub2APIBusinessAuthFailure(raw []byte) bool {

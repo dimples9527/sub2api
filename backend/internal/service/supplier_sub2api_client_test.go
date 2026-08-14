@@ -298,6 +298,57 @@ func TestSupplierSub2APIClientFetchMonitorItemsUsesConfiguredMonitorURLAndBearer
 	require.Equal(t, time.Date(2026, 8, 8, 3, 9, 0, 0, time.UTC), items[0].Timeline[0].CheckedAt)
 }
 
+func TestSupplierSub2APIClientMonitorProbeBlockedIsNotAuthFailure(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	cache.preload(42, SupplierProviderAuthToken{AccessToken: "cached-token", TokenType: "Bearer", ExpiresAt: time.Now().Add(time.Hour)})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			supplierSub2APIWriteJSON(w, http.StatusOK, `{"code":0,"data":{"access_token":"login-token","token_type":"Bearer","expires_in":3600}}`)
+		case "/api/v1/channel-monitors":
+			require.Equal(t, "/api/v1/channel-monitors", r.URL.Path)
+			require.Equal(t, "Bearer cached-token", r.Header.Get("Authorization"))
+			supplierSub2APIWriteJSON(w, http.StatusForbidden, `{"error":{"message":"Probe, monitoring, and test traffic are disabled by site policy.","type":"probe_blocked"}}`)
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	provider := supplierSub2APITestProvider(server.URL)
+	provider.MonitorURL = "/api/v1/channel-monitors?timezone=Asia%2FShanghai"
+	client := NewSupplierSub2APIClient(server.Client(), cache, nil)
+
+	_, err := client.FetchMonitorItems(context.Background(), provider, "secret")
+
+	require.Error(t, err)
+	require.False(t, IsSupplierProviderAuthFailure(err))
+	require.Contains(t, err.Error(), "probe_blocked")
+	require.Equal(t, 0, cache.deleteCalls)
+}
+
+func TestSupplierSub2APIClientForbiddenInvalidTokenIsAuthFailure(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	cache.preload(42, SupplierProviderAuthToken{AccessToken: "cached-token", TokenType: "Bearer", ExpiresAt: time.Now().Add(time.Hour)})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		supplierSub2APIWriteJSON(w, http.StatusForbidden, `{"code":403,"message":"invalid token"}`)
+	}))
+	defer server.Close()
+
+	provider := supplierSub2APITestProvider(server.URL)
+	client := NewSupplierSub2APIClient(server.Client(), cache, nil)
+
+	_, err := client.FetchAccounts(context.Background(), provider, "secret")
+
+	require.Error(t, err)
+	require.True(t, IsSupplierProviderAuthFailure(err))
+}
+
+func TestSupplierSub2APIProbeBlockedClassifier(t *testing.T) {
+	require.True(t, supplierSub2APIProbeBlocked([]byte(`{"error":{"message":"Probe, monitoring, and test traffic are disabled by site policy.","type":"probe_blocked"}}`)))
+	require.False(t, supplierSub2APIProbeBlocked([]byte(`{"error":{"message":"invalid token","type":"auth_error"}}`)))
+}
+
 func TestSupplierSub2APIClientExtractsSupportedLoginTokenShapes(t *testing.T) {
 	tests := []struct {
 		name              string
