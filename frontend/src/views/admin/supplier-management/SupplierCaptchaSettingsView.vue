@@ -68,25 +68,39 @@
       <div class="sp-captcha-form">
         <div class="sp-field">
           <label for="captcha-provider">打码平台</label>
-          <select id="captcha-provider" v-model="form.provider" class="sp-input" @change="handleProviderChange">
+          <select id="captcha-provider" v-model="form.provider" class="sp-select" @change="handleProviderChange">
             <option value="2captcha">2Captcha</option>
             <option value="yescaptcha">YesCaptcha</option>
           </select>
           <p class="sp-field-hint">
-            当前平台：{{ currentCaptchaProvider.label }}；切换平台后需重新填写 API Key，自定义 Endpoint 不会跨平台复用。
+            当前平台：<strong>{{ currentCaptchaProvider.label }}</strong>；切换平台后需重新填写 API Key，自定义 Endpoint 不会跨平台复用。
           </p>
         </div>
 
         <div class="sp-field">
-          <label for="captcha-api-key">API Key</label>
-          <input
-            id="captcha-api-key"
-            v-model="form.api_key"
-            class="sp-input mono"
-            type="password"
-            placeholder="********"
-            autocomplete="new-password"
-          />
+          <label for="captcha-api-key">
+            API Key
+            <span v-if="form.api_key_configured" class="sp-field-badge">已配置</span>
+          </label>
+          <div class="sp-input-row">
+            <input
+              id="captcha-api-key"
+              v-model="form.api_key"
+              class="sp-input mono"
+              type="password"
+              placeholder="********"
+              autocomplete="new-password"
+            />
+            <button
+              v-if="form.api_key_configured"
+              class="sp-button small ghost"
+              type="button"
+              :disabled="saving"
+              @click="clearApiKey"
+            >
+              清空
+            </button>
+          </div>
           <p class="sp-field-hint">
             {{
               form.api_key_configured
@@ -94,15 +108,6 @@
                 : currentCaptchaProvider.keyHint
             }}
           </p>
-          <button
-            v-if="form.api_key_configured"
-            class="sp-button small ghost"
-            type="button"
-            :disabled="saving"
-            @click="clearApiKey"
-          >
-            清空 API Key
-          </button>
         </div>
 
         <div class="sp-field">
@@ -115,7 +120,7 @@
             :placeholder="currentCaptchaProvider.endpoint"
           />
           <p class="sp-field-hint">
-            可选。默认 {{ currentCaptchaProvider.endpoint }}；仅在使用代理或镜像时填写。
+            可选。默认 <code>{{ currentCaptchaProvider.endpoint }}</code>；仅在使用代理或镜像时填写。
           </p>
         </div>
 
@@ -141,7 +146,7 @@
         </div>
       </header>
       <ul class="sp-help-list">
-        <li>在本页配置全局打码平台账号（当前为 {{ currentCaptchaProvider.label }}）。</li>
+        <li>在本页配置全局打码平台账号（当前为 <strong>{{ currentCaptchaProvider.label }}</strong>）。</li>
         <li>在「供应商管理」中为需要绕过上游人机验证的供应商打开「Turnstile 人机校验」。</li>
         <li>仅在登录上游时打码；token / session 缓存命中时不会再次打码。</li>
         <li>打码失败会直接导致登录失败，不会用空 token 重试。</li>
@@ -293,14 +298,25 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* ===== 面板间距 ===== */
+.sp-panel + .sp-panel {
+  margin-top: 1rem;
+}
+
+.sp-panel + .sp-alert {
+  margin-top: 1rem;
+}
+
+/* ===== 说明文字 ===== */
 .sp-intro {
   margin: 0;
   padding: 0 1.5rem 1.25rem;
-  color: var(--sp-muted, #4b5563);
-  font-size: 0.9rem;
-  line-height: 1.6;
+  color: var(--sp-muted);
+  font-size: 0.875rem;
+  line-height: 1.65;
 }
 
+/* ===== 统计区域 ===== */
 .sp-stats-body {
   padding: 1rem 1.25rem 1.25rem;
 }
@@ -315,8 +331,8 @@ onMounted(() => {
 }
 
 .sp-stat-static:hover {
-  border-color: var(--sp-line, #e5e7eb);
-  box-shadow: var(--sp-shadow, none);
+  border-color: var(--sp-line);
+  box-shadow: var(--sp-shadow);
 }
 
 .sp-last-called {
@@ -325,6 +341,7 @@ onMounted(() => {
   word-break: break-word;
 }
 
+/* ===== 表单 ===== */
 .sp-captcha-form {
   display: grid;
   gap: 1.25rem;
@@ -339,28 +356,99 @@ onMounted(() => {
 .sp-field label {
   font-size: 0.875rem;
   font-weight: 600;
-  color: var(--sp-text, #111827);
+  color: var(--sp-text);
+}
+
+.sp-field-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.4rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--sp-green) 12%, transparent);
+  color: var(--sp-green);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
 }
 
 .sp-field-hint {
   margin: 0;
   font-size: 0.75rem;
-  color: var(--sp-muted, #6b7280);
+  color: var(--sp-muted);
+  line-height: 1.5;
+}
+
+.sp-field-hint strong {
+  color: var(--sp-text);
+  font-weight: 600;
+}
+
+.sp-field-hint code {
+  padding: 0.1rem 0.35rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.25rem;
+  background: var(--sp-panel-2);
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 0.75rem;
+  color: var(--sp-text);
+}
+
+.sp-select {
+  width: 100%;
+  max-width: 24rem;
+  min-height: 2.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.5rem;
+  outline: 0;
+  background: var(--sp-panel);
+  color: var(--sp-text);
+  font-size: 0.875rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.sp-select:focus {
+  border-color: var(--sp-cyan);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--sp-cyan) 12%, transparent);
 }
 
 .sp-input {
   width: 100%;
   max-width: 36rem;
-  border: 1px solid var(--sp-border, #d1d5db);
+  min-height: 2.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--sp-line);
   border-radius: 0.5rem;
-  padding: 0.55rem 0.75rem;
-  background: var(--sp-surface, #fff);
-  color: inherit;
+  outline: 0;
+  background: var(--sp-panel);
+  color: var(--sp-text);
+  font-size: 0.875rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.sp-input:focus {
+  border-color: var(--sp-cyan);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--sp-cyan) 12%, transparent);
 }
 
 .sp-input.mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
   font-size: 0.875rem;
+}
+
+.sp-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 36rem;
+}
+
+.sp-input-row .sp-input {
+  flex: 1;
+  max-width: none;
 }
 
 .sp-form-actions {
@@ -369,19 +457,35 @@ onMounted(() => {
   flex-wrap: wrap;
 }
 
+/* ===== 使用说明列表 ===== */
 .sp-help-list {
   margin: 0;
   padding: 0 1.5rem 1.5rem 2.75rem;
   display: grid;
   gap: 0.5rem;
-  color: var(--sp-muted, #4b5563);
-  font-size: 0.9rem;
-  line-height: 1.55;
+  color: var(--sp-muted);
+  font-size: 0.875rem;
+  line-height: 1.6;
 }
 
+.sp-help-list li::marker {
+  color: var(--sp-cyan);
+}
+
+.sp-help-list strong {
+  color: var(--sp-text);
+  font-weight: 600;
+}
+
+/* ===== 响应式 ===== */
 @media (max-width: 960px) {
   .sp-captcha-metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sp-input-row {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
 

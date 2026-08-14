@@ -2,36 +2,53 @@
   <AppLayout>
     <TablePageLayout>
       <template #actions>
-        <div class="flex flex-col gap-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-dark-700 dark:bg-dark-800 lg:flex-row lg:items-stretch lg:justify-between">
-          <div class="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-3">
-            <div class="rounded-xl border border-gray-200 bg-gray-50/80 px-4 py-3 dark:border-dark-700 dark:bg-dark-900/50">
-              <p class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-dark-400">平台总数</p>
-              <p class="mt-2 text-2xl font-semibold text-gray-900 dark:text-white">{{ totalCount }}</p>
+        <div class="cp-actions-card">
+          <div class="cp-kpi-grid">
+            <div class="cp-kpi cp-kpi-default">
+              <div class="cp-kpi-icon cp-kpi-icon-default">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+              </div>
+              <div class="cp-kpi-body">
+                <span class="cp-kpi-label">平台总数</span>
+                <strong class="cp-kpi-value">{{ totalCount }}</strong>
+              </div>
             </div>
-            <div class="rounded-xl border border-emerald-200 bg-emerald-50/80 px-4 py-3 dark:border-emerald-500/30 dark:bg-emerald-500/10">
-              <p class="text-xs font-medium uppercase tracking-wide text-emerald-700 dark:text-emerald-300">启用中</p>
-              <p class="mt-2 text-2xl font-semibold text-emerald-800 dark:text-emerald-200">{{ enabledCount }}</p>
+            <div class="cp-kpi cp-kpi-success">
+              <div class="cp-kpi-icon cp-kpi-icon-success">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+              </div>
+              <div class="cp-kpi-body">
+                <span class="cp-kpi-label">启用中</span>
+                <strong class="cp-kpi-value">{{ enabledCount }}</strong>
+              </div>
             </div>
-            <div class="rounded-xl border border-rose-200 bg-rose-50/80 px-4 py-3 dark:border-rose-500/30 dark:bg-rose-500/10">
-              <p class="text-xs font-medium uppercase tracking-wide text-rose-700 dark:text-rose-300">停用中</p>
-              <p class="mt-2 text-2xl font-semibold text-rose-800 dark:text-rose-200">{{ disabledCount }}</p>
+            <div class="cp-kpi cp-kpi-danger">
+              <div class="cp-kpi-icon cp-kpi-icon-danger">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </div>
+              <div class="cp-kpi-body">
+                <span class="cp-kpi-label">停用中</span>
+                <strong class="cp-kpi-value">{{ disabledCount }}</strong>
+              </div>
             </div>
           </div>
 
-          <div class="flex flex-wrap items-center gap-2 lg:flex-shrink-0 lg:justify-end">
-            <button class="btn btn-secondary" :disabled="loading" @click="loadCustomPlatforms">
-              {{ loading ? '刷新中…' : '刷新' }}
+          <div class="cp-actions-right">
+            <button class="cp-btn cp-btn-refresh" :disabled="loading" @click="loadCustomPlatforms">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" :class="loading ? 'cp-spin' : ''"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+              <span>{{ loading ? '刷新中…' : '刷新' }}</span>
             </button>
-            <button class="btn btn-primary" @click="openCreateDialog">
-              新增平台
+            <button class="cp-btn cp-btn-primary" @click="openCreateDialog">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              <span>新增平台</span>
             </button>
           </div>
         </div>
       </template>
 
       <template #filters>
-        <div class="flex flex-col gap-3 lg:flex-row lg:items-center">
-          <div class="w-full lg:max-w-md">
+        <div class="cp-filter-bar">
+          <div class="cp-filter-search">
             <SearchInput
               v-model="searchQuery"
               placeholder="搜索平台代号或名称"
@@ -44,61 +61,60 @@
             class="w-44"
             :clearable="false"
           />
-          <div class="text-sm text-gray-500 dark:text-dark-400">
+          <div class="cp-filter-hint">
             这里维护的是模型监控和供应商模块共用的独立平台字典，不影响原有分组平台字段。
           </div>
         </div>
       </template>
 
       <template #table>
-        <DataTable
-          :columns="columns"
-          :data="filteredPlatforms"
-          :loading="loading"
-          row-key="id"
-        >
-          <template #cell-code="{ value }">
-            <span class="inline-flex items-center rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs font-mono font-medium text-gray-700 dark:border-dark-700 dark:bg-dark-900/50 dark:text-gray-200">
-              {{ value }}
-            </span>
-          </template>
+        <div class="cp-table-wrapper">
+          <DataTable
+            :columns="columns"
+            :data="filteredPlatforms"
+            :loading="loading"
+            row-key="id"
+          >
+            <template #cell-code="{ value }">
+              <span class="cp-code-badge">{{ value }}</span>
+            </template>
 
-          <template #cell-name="{ value }">
-            <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
-          </template>
+            <template #cell-name="{ value }">
+              <span class="cp-cell-name">{{ value }}</span>
+            </template>
 
-          <template #cell-enabled="{ value }">
-            <span
-              :class="[
-                'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
-                value
-                  ? 'bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200'
-                  : 'bg-gray-500/10 text-gray-600 dark:bg-dark-700 dark:text-dark-300'
-              ]"
-            >
-              {{ value ? '启用' : '停用' }}
-            </span>
-          </template>
+            <template #cell-enabled="{ value }">
+              <span
+                :class="[
+                  'cp-status-pill',
+                  value ? 'cp-status-pill-success' : 'cp-status-pill-muted'
+                ]"
+              >
+                <span class="cp-status-dot" :class="value ? 'cp-status-dot-success' : 'cp-status-dot-muted'" aria-hidden="true"></span>
+                {{ value ? '启用' : '停用' }}
+              </span>
+            </template>
 
-          <template #cell-sort_order="{ value }">
-            <span class="font-mono text-sm text-gray-700 dark:text-gray-300">{{ value }}</span>
-          </template>
+            <template #cell-sort_order="{ value }">
+              <span class="cp-cell-mono">{{ value }}</span>
+            </template>
 
-          <template #cell-created_at="{ value }">
-            <span class="text-sm text-gray-600 dark:text-dark-300">{{ formatTime(value) }}</span>
-          </template>
+            <template #cell-created_at="{ value }">
+              <span class="cp-cell-time">{{ formatTime(value) }}</span>
+            </template>
 
-          <template #cell-updated_at="{ value }">
-            <span class="text-sm text-gray-600 dark:text-dark-300">{{ formatTime(value) }}</span>
-          </template>
+            <template #cell-updated_at="{ value }">
+              <span class="cp-cell-time">{{ formatTime(value) }}</span>
+            </template>
 
-          <template #cell-actions="{ row }">
-            <div class="flex justify-end gap-2">
-              <button class="btn btn-secondary btn-sm" @click="openEditDialog(row)">编辑</button>
-              <button class="btn btn-danger btn-sm" @click="askDeletePlatform(row)">删除</button>
-            </div>
-          </template>
-        </DataTable>
+            <template #cell-actions="{ row }">
+              <div class="cp-cell-actions">
+                <button class="cp-btn cp-btn-sm cp-btn-edit" @click="openEditDialog(row)">编辑</button>
+                <button class="cp-btn cp-btn-sm cp-btn-delete" @click="askDeletePlatform(row)">删除</button>
+              </div>
+            </template>
+          </DataTable>
+        </div>
       </template>
     </TablePageLayout>
 
@@ -108,43 +124,45 @@
       width="wide"
       @close="closeDialog"
     >
-      <div class="grid gap-4">
-        <div class="grid gap-4 md:grid-cols-2">
-          <Input
-            v-model="form.code"
-            label="平台代号"
-            placeholder="例如 glm、deepseek、kimi"
-            :disabled="saving"
-            required
-          />
-          <Input
-            v-model="form.name"
-            label="显示名称"
-            placeholder="例如 GLM、DeepSeek、Kimi"
-            :disabled="saving"
-            required
-          />
+      <div class="cp-dialog-body">
+        <div class="cp-dialog-row">
+          <div class="cp-dialog-field">
+            <label class="cp-dialog-label">平台代号</label>
+            <Input
+              v-model="form.code"
+              placeholder="例如 glm、deepseek、kimi"
+              :disabled="saving"
+              required
+            />
+          </div>
+          <div class="cp-dialog-field">
+            <label class="cp-dialog-label">显示名称</label>
+            <Input
+              v-model="form.name"
+              placeholder="例如 GLM、DeepSeek、Kimi"
+              :disabled="saving"
+              required
+            />
+          </div>
         </div>
 
-        <div class="grid gap-4 md:grid-cols-2">
-          <Input
-            v-model="form.sortOrder"
-            type="number"
-            label="排序"
-            placeholder="数字越小越靠前"
-            :disabled="saving"
-          />
-          <div>
-            <label class="input-label mb-1.5 block">启用状态</label>
-            <div class="flex items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 dark:border-dark-700 dark:bg-dark-900/40">
+        <div class="cp-dialog-row">
+          <div class="cp-dialog-field">
+            <label class="cp-dialog-label">排序</label>
+            <Input
+              v-model="form.sortOrder"
+              type="number"
+              placeholder="数字越小越靠前"
+              :disabled="saving"
+            />
+          </div>
+          <div class="cp-dialog-field">
+            <label class="cp-dialog-label">启用状态</label>
+            <div class="cp-dialog-toggle">
               <Toggle v-model="form.enabled" :disabled="saving" />
-              <div>
-                <div class="text-sm font-medium text-gray-900 dark:text-white">
-                  {{ form.enabled ? '启用' : '停用' }}
-                </div>
-                <div class="text-xs text-gray-500 dark:text-dark-400">
-                  停用后不会出现在新配置的可选项中，但历史记录仍会保留。
-                </div>
+              <div class="cp-dialog-toggle-text">
+                <span class="cp-dialog-toggle-state">{{ form.enabled ? '启用' : '停用' }}</span>
+                <span class="cp-dialog-toggle-hint">停用后不会出现在新配置的可选项中，但历史记录仍会保留。</span>
               </div>
             </div>
           </div>
@@ -152,9 +170,9 @@
       </div>
 
       <template #footer>
-        <div class="flex items-center justify-end gap-3">
-          <button class="btn btn-secondary" :disabled="saving" @click="closeDialog">取消</button>
-          <button class="btn btn-primary" :disabled="saving" @click="savePlatform">
+        <div class="cp-dialog-footer">
+          <button class="cp-btn cp-btn-cancel" :disabled="saving" @click="closeDialog">取消</button>
+          <button class="cp-btn cp-btn-primary" :disabled="saving" @click="savePlatform">
             {{ saving ? '保存中…' : '保存' }}
           </button>
         </div>
@@ -362,3 +380,549 @@ onMounted(() => {
   void loadCustomPlatforms()
 })
 </script>
+
+<style scoped>
+/* ===== KPI 卡片区域 ===== */
+.cp-actions-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.125rem 1.25rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.875rem;
+  background: linear-gradient(135deg, #f8fafc 0%, #fff 50%);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+:global(.dark) .cp-actions-card {
+  border-color: #374151;
+  background: linear-gradient(135deg, #1f2937 0%, #111827 50%);
+}
+
+.cp-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  flex: 1;
+}
+
+.cp-kpi {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.875rem 1rem;
+  border-radius: 0.75rem;
+  border: 1px solid transparent;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.cp-kpi-default {
+  background: #f9fafb;
+  border-color: #e5e7eb;
+}
+
+:global(.dark) .cp-kpi-default {
+  background: #1f2937;
+  border-color: #374151;
+}
+
+.cp-kpi-success {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+}
+
+:global(.dark) .cp-kpi-success {
+  background: rgba(22, 163, 74, 0.08);
+  border-color: rgba(22, 163, 74, 0.25);
+}
+
+.cp-kpi-danger {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+:global(.dark) .cp-kpi-danger {
+  background: rgba(220, 38, 38, 0.08);
+  border-color: rgba(220, 38, 38, 0.25);
+}
+
+.cp-kpi-icon {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 0.625rem;
+}
+
+.cp-kpi-icon-default {
+  background: #e5e7eb;
+  color: #6b7280;
+}
+
+:global(.dark) .cp-kpi-icon-default {
+  background: #374151;
+  color: #9ca3af;
+}
+
+.cp-kpi-icon-success {
+  background: #d1fae5;
+  color: #16a34a;
+}
+
+:global(.dark) .cp-kpi-icon-success {
+  background: rgba(22, 163, 74, 0.2);
+  color: #4ade80;
+}
+
+.cp-kpi-icon-danger {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+:global(.dark) .cp-kpi-icon-danger {
+  background: rgba(220, 38, 38, 0.2);
+  color: #fca5a5;
+}
+
+.cp-kpi-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.cp-kpi-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+
+:global(.dark) .cp-kpi-label {
+  color: #9ca3af;
+}
+
+.cp-kpi-success .cp-kpi-label {
+  color: #166534;
+}
+
+:global(.dark) .cp-kpi-success .cp-kpi-label {
+  color: #6ee7b7;
+}
+
+.cp-kpi-danger .cp-kpi-label {
+  color: #991b1b;
+}
+
+:global(.dark) .cp-kpi-danger .cp-kpi-label {
+  color: #fca5a5;
+}
+
+.cp-kpi-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: #111827;
+}
+
+:global(.dark) .cp-kpi-value {
+  color: #f9fafb;
+}
+
+.cp-actions-right {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+@media (min-width: 1024px) {
+  .cp-actions-card {
+    flex-direction: row;
+    align-items: stretch;
+  }
+}
+
+/* ===== 按钮 ===== */
+.cp-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 2.25rem;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  background: #fff;
+  color: #374151;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+:global(.dark) .cp-btn {
+  background: #1f2937;
+  border-color: #374151;
+  color: #e5e7eb;
+}
+
+.cp-btn:hover {
+  background: #f9fafb;
+}
+
+:global(.dark) .cp-btn:hover {
+  background: #374151;
+}
+
+.cp-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.cp-btn-primary {
+  color: #fff;
+  border-color: #3b82f6;
+  background: #3b82f6;
+}
+
+.cp-btn-primary:hover {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+.cp-btn-refresh {
+  color: #16a34a;
+  border-color: #d1fae5;
+  background: #f0fdf4;
+}
+
+:global(.dark) .cp-btn-refresh {
+  color: #4ade80;
+  border-color: rgba(22, 163, 74, 0.3);
+  background: rgba(22, 163, 74, 0.1);
+}
+
+.cp-btn-refresh:hover {
+  background: #dcfce7;
+}
+
+:global(.dark) .cp-btn-refresh:hover {
+  background: rgba(22, 163, 74, 0.18);
+}
+
+.cp-btn-sm {
+  min-height: 1.75rem;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.75rem;
+}
+
+.cp-btn-edit {
+  color: #3b82f6;
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+:global(.dark) .cp-btn-edit {
+  color: #93c5fd;
+  border-color: rgba(59, 130, 246, 0.3);
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.cp-btn-edit:hover {
+  background: #dbeafe;
+}
+
+.cp-btn-delete {
+  color: #dc2626;
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+:global(.dark) .cp-btn-delete {
+  color: #fca5a5;
+  border-color: rgba(220, 38, 38, 0.3);
+  background: rgba(220, 38, 38, 0.1);
+}
+
+.cp-btn-delete:hover {
+  background: #fee2e2;
+}
+
+.cp-btn-cancel {
+  color: #6b7280;
+  border-color: #e5e7eb;
+  background: #fff;
+}
+
+:global(.dark) .cp-btn-cancel {
+  color: #9ca3af;
+  border-color: #374151;
+  background: #1f2937;
+}
+
+/* ===== 筛选栏 ===== */
+.cp-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.875rem 1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.75rem;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+:global(.dark) .cp-filter-bar {
+  border-color: #374151;
+  background: #1f2937;
+}
+
+.cp-filter-search {
+  flex: 1;
+  min-width: 0;
+  max-width: 24rem;
+}
+
+.cp-filter-hint {
+  color: #9ca3af;
+  font-size: 0.8125rem;
+  margin-left: auto;
+}
+
+:global(.dark) .cp-filter-hint {
+  color: #6b7280;
+}
+
+/* ===== 表格 ===== */
+.cp-table-wrapper {
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.875rem;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+:global(.dark) .cp-table-wrapper {
+  border-color: #374151;
+  background: #1f2937;
+}
+
+.cp-code-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.55rem;
+  border-radius: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  border: 1px solid #e5e7eb;
+  background: #f3f4f6;
+  color: #374151;
+}
+
+:global(.dark) .cp-code-badge {
+  border-color: #374151;
+  background: #374151;
+  color: #e5e7eb;
+}
+
+.cp-cell-name {
+  color: #111827;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+:global(.dark) .cp-cell-name {
+  color: #f9fafb;
+}
+
+.cp-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.cp-status-pill-success {
+  background: #ecfdf5;
+  color: #166534;
+}
+
+:global(.dark) .cp-status-pill-success {
+  background: rgba(22, 163, 74, 0.15);
+  color: #6ee7b7;
+}
+
+.cp-status-pill-muted {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+:global(.dark) .cp-status-pill-muted {
+  background: #374151;
+  color: #9ca3af;
+}
+
+.cp-status-dot {
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.cp-status-dot-success {
+  background: #16a34a;
+}
+
+:global(.dark) .cp-status-dot-success {
+  background: #4ade80;
+}
+
+.cp-status-dot-muted {
+  background: #9ca3af;
+}
+
+:global(.dark) .cp-status-dot-muted {
+  background: #6b7280;
+}
+
+.cp-cell-mono {
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 0.8125rem;
+  color: #374151;
+}
+
+:global(.dark) .cp-cell-mono {
+  color: #e5e7eb;
+}
+
+.cp-cell-time {
+  color: #6b7280;
+  font-size: 0.8125rem;
+}
+
+:global(.dark) .cp-cell-time {
+  color: #9ca3af;
+}
+
+.cp-cell-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+/* ===== 弹窗 ===== */
+.cp-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.cp-dialog-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.cp-dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.cp-dialog-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+:global(.dark) .cp-dialog-label {
+  color: #f9fafb;
+}
+
+.cp-dialog-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.75rem;
+  background: #f9fafb;
+}
+
+:global(.dark) .cp-dialog-toggle {
+  border-color: #374151;
+  background: #1f2937;
+}
+
+.cp-dialog-toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.cp-dialog-toggle-state {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+:global(.dark) .cp-dialog-toggle-state {
+  color: #f9fafb;
+}
+
+.cp-dialog-toggle-hint {
+  font-size: 0.75rem;
+  color: #9ca3af;
+}
+
+:global(.dark) .cp-dialog-toggle-hint {
+  color: #6b7280;
+}
+
+.cp-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+/* 旋转动画 */
+.cp-spin {
+  animation: cp-spin 0.7s linear infinite;
+}
+
+@keyframes cp-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ===== 响应式 ===== */
+@media (max-width: 640px) {
+  .cp-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cp-filter-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .cp-filter-search {
+    max-width: none;
+  }
+
+  .cp-filter-hint {
+    margin-left: 0;
+  }
+
+  .cp-dialog-row {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
