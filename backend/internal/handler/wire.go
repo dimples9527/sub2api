@@ -65,6 +65,7 @@ func ProvideAdminHandlers(
 ) *AdminHandlers {
 	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)
 	accountHandler.SetOllamaCloudUsageService(ollamaCloudUsage)
+	accountHandler.SetMonitorGroupPlatformOverrideService(monitorGroupPlatformOverrideService)
 	groupHandler.SetCustomPlatformService(customPlatformService)
 	groupHandler.SetMonitorGroupPlatformOverrideService(monitorGroupPlatformOverrideService)
 	return &AdminHandlers{

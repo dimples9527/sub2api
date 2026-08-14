@@ -49,6 +49,17 @@ export interface ModelSquareOfficialPricing {
   image_output_price?: number
 }
 
+export interface ModelSquareSyncAccountCandidate {
+  id: number
+  name: string
+  platform: string
+  type: string
+  status: string
+  group_ids?: number[]
+  group_names?: string[]
+  effective_platform?: string
+}
+
 export async function get(): Promise<ModelSquareConfigPayload> {
   const { data } = await apiClient.get<ModelSquareConfigPayload>('/admin/upstream-management/model-square/config')
   return data
@@ -66,10 +77,18 @@ export async function getModelPricing(model: string): Promise<ModelSquareOfficia
   return data
 }
 
+export async function listSyncAccounts(platform: string): Promise<ModelSquareSyncAccountCandidate[]> {
+  const { data } = await apiClient.get<ModelSquareSyncAccountCandidate[]>('/admin/upstream-management/model-square/sync-accounts', {
+    params: { platform },
+  })
+  return data
+}
+
 export const modelSquareConfigAPI = {
   get,
   update,
   getModelPricing,
+  listSyncAccounts,
 }
 
 export default modelSquareConfigAPI

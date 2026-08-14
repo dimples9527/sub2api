@@ -11,6 +11,7 @@ func registerUpstreamManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 		upstream.GET("/dashboard", h.Admin.UpstreamDashboard.Get)
 		upstream.GET("/model-square/config", h.Admin.UpstreamManagement.GetModelSquareConfig)
 		upstream.PUT("/model-square/config", h.Admin.UpstreamManagement.UpdateModelSquareConfig)
+		upstream.GET("/model-square/sync-accounts", h.Admin.Account.ListModelSquareSyncAccounts)
 		upstream.GET("/model-square/model-pricing", h.Admin.UpstreamManagement.GetModelSquareModelPricing)
 		upstream.GET("/model-square", h.Admin.UpstreamManagement.ModelSquare)
 		providers := upstream.Group("/providers")

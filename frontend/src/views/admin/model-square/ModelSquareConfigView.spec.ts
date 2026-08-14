@@ -45,6 +45,7 @@ const { adminApiMock, appStoreMock } = vi.hoisted(() => ({
       get: vi.fn(),
       update: vi.fn(),
       getModelPricing: vi.fn(),
+      listSyncAccounts: vi.fn(),
     },
     customPlatforms: {
       list: vi.fn(),
@@ -94,6 +95,7 @@ describe('model square config wiring', () => {
     ])
     adminApiMock.accounts.list.mockResolvedValue({ items: [] })
     adminApiMock.modelSquareConfig.getModelPricing.mockResolvedValue({ found: false })
+    adminApiMock.modelSquareConfig.listSyncAccounts.mockResolvedValue([])
   })
 
   it('registers the admin route between model monitor and announcements', () => {
@@ -122,8 +124,10 @@ describe('model square config wiring', () => {
   it('wires the model square config API to the new backend endpoints', () => {
     const apiSource = readFileSync(resolve(process.cwd(), 'src/api/admin/modelSquareConfig.ts'), 'utf8')
     expect(apiSource).toContain("/admin/upstream-management/model-square/config")
+    expect(apiSource).toContain('/admin/upstream-management/model-square/sync-accounts')
     expect(apiSource).toContain('export async function get()')
     expect(apiSource).toContain('export async function update(payload: ModelSquareConfigPayload)')
+    expect(apiSource).toContain('export async function listSyncAccounts(platform: string)')
   })
 
   it('includes custom platforms in the model square platform lists', () => {
@@ -187,6 +191,60 @@ describe('model square config wiring', () => {
     expect(text.indexOf('自定义平台 Sigma')).toBeGreaterThanOrEqual(0)
     expect(text.indexOf('自定义平台 Alpha')).toBeLessThan(text.indexOf('自定义平台 Sigma'))
     expect(wrapper.text()).toContain('自定义平台 Sigma')
+  })
+
+  it('loads group-effective-platform accounts when opening the sync dialog', async () => {
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: null,
+      platforms: [{
+        platform: 'glm',
+        name: 'GLM',
+        models: [],
+      }],
+    })
+    adminApiMock.modelSquareConfig.listSyncAccounts.mockResolvedValue([{
+      id: 11,
+      name: 'glm-group-account',
+      platform: 'openai',
+      type: 'api_key',
+      status: 'active',
+      group_ids: [101],
+      group_names: ['glm-group'],
+      effective_platform: 'glm',
+    }])
+
+    const wrapper = mount(ModelSquareConfigView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="actions" /><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: { template: '<div />' },
+          EmptyState: { template: '<div />' },
+          BaseDialog: {
+            props: ['show'],
+            template: '<div v-if="show"><slot /><slot name="footer" /></div>',
+          },
+          ConfirmDialog: { template: '<div />' },
+          Input: { template: '<input />' },
+          SearchInput: { template: '<input />' },
+          Select: {
+            props: ['options'],
+            template: '<div><span v-for="option in options" :key="option.value">{{ option.label }}</span></div>',
+          },
+          TextArea: { template: '<textarea />' },
+          PlatformIcon: { template: '<span />' },
+          Icon: { template: '<span />' },
+        },
+      },
+    })
+
+    await flushPromises()
+    await wrapper.findAll('.platform-chip').find(button => button.text().includes('GLM'))!.trigger('click')
+    await wrapper.findAll('button.btn-secondary')[2].trigger('click')
+    await flushPromises()
+
+    expect(adminApiMock.modelSquareConfig.listSyncAccounts).toHaveBeenCalledWith('glm')
+    expect(wrapper.text()).toContain('glm-group-account')
   })
 
   it('renders configured prices directly in the model list', async () => {

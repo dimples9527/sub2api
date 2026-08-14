@@ -224,16 +224,17 @@
 
     <BaseDialog :show="syncDialogVisible" title="同步上游账号模型" width="wide" @close="closeSyncDialog">
       <div class="space-y-4">
-        <div class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
-          将调用所选账号的上游模型列表接口，并把返回模型合并到当前平台配置中。已有模型不会重复添加。
-        </div>
-        <Select
-          v-model="syncAccountId"
-          :options="syncAccountOptions"
-          searchable
-          clearable
-          placeholder="选择同平台账号"
-          empty-text="当前平台暂无可选账号"
+          <div class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
+            将调用所选账号的上游模型列表接口，并把返回模型合并到当前平台配置中。已有模型不会重复添加。
+          </div>
+          <Select
+            v-model="syncAccountId"
+            :options="syncAccountOptions"
+            :disabled="syncAccountsLoading"
+            searchable
+            clearable
+            :placeholder="syncAccountsLoading ? '正在加载账号' : '选择同平台账号'"
+            empty-text="当前平台暂无可选账号"
           aria-label="选择同步账号"
         />
         <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -280,6 +281,7 @@ import type {
   ModelSquareOfficialPricing,
   ModelSquarePlatformConfig,
   ModelSquarePlatformModelConfig,
+  ModelSquareSyncAccountCandidate,
 } from '@/api/admin/modelSquareConfig'
 import type { CustomPlatform } from '@/api/admin/customPlatforms'
 import type { Account } from '@/types'
@@ -370,6 +372,8 @@ const configUpdatedAt = ref<string | null>(null)
 const platformConfigs = ref<ModelSquarePlatformConfig[]>([])
 const customPlatforms = ref<CustomPlatform[]>([])
 const accounts = ref<Account[]>([])
+const syncAccounts = ref<ModelSquareSyncAccountCandidate[]>([])
+const syncAccountsLoading = ref(false)
 
 const modelDialogVisible = ref(false)
 const editingModelId = ref<string | null>(null)
@@ -471,11 +475,15 @@ const filteredModels = computed(() => {
   if (!keyword) return currentModels.value
   return currentModels.value.filter(model => `${model.id} ${model.display_name || ''}`.toLowerCase().includes(keyword))
 })
-const syncAccountOptions = computed<SelectOption[]>(() => accounts.value
-  .filter(account => normalizePlatform(account.platform) === selectedPlatform.value)
+const syncAccountOptions = computed<SelectOption[]>(() => syncAccounts.value
   .map(account => ({
     value: account.id,
-    label: `${account.name || `#${account.id}`} · ${account.type} · ${account.status}`,
+    label: [
+      account.name || `#${account.id}`,
+      account.type,
+      account.status,
+      ...(account.group_names || []),
+    ].filter(Boolean).join(' · '),
   })))
 
 function createPlatformConfig(platform: string): ModelSquarePlatformConfig {
@@ -603,6 +611,28 @@ async function reload(): Promise<void> {
     appStore.showError(loadError.value)
   } finally {
     loading.value = false
+  }
+}
+
+async function loadSyncAccountsForCurrentPlatform(): Promise<void> {
+  const platform = normalizePlatform(selectedPlatform.value)
+  syncAccounts.value = []
+  if (!platform) return
+
+  syncAccountsLoading.value = true
+  try {
+    const candidates = await adminAPI.modelSquareConfig.listSyncAccounts(platform)
+    if (normalizePlatform(selectedPlatform.value) === platform) {
+      syncAccounts.value = Array.isArray(candidates) ? candidates : []
+    }
+  } catch (err) {
+    if (normalizePlatform(selectedPlatform.value) === platform) {
+      appStore.showError(extractApiErrorMessage(err, '加载可同步账号失败'))
+    }
+  } finally {
+    if (normalizePlatform(selectedPlatform.value) === platform) {
+      syncAccountsLoading.value = false
+    }
   }
 }
 
@@ -885,12 +915,14 @@ function submitBatchDialog(): void {
 function openSyncDialog(): void {
   syncAccountId.value = null
   syncDialogVisible.value = true
+  void loadSyncAccountsForCurrentPlatform()
 }
 
 function closeSyncDialog(): void {
   if (syncing.value) return
   syncDialogVisible.value = false
   syncAccountId.value = null
+  syncAccounts.value = []
 }
 
 async function submitSyncDialog(): Promise<void> {
@@ -898,7 +930,7 @@ async function submitSyncDialog(): Promise<void> {
     appStore.showError('请选择要同步的账号')
     return
   }
-  const account = accounts.value.find(item => item.id === syncAccountId.value)
+  const account = syncAccounts.value.find(item => item.id === syncAccountId.value)
   syncing.value = true
   try {
     const result = await adminAPI.accounts.syncUpstreamModels(syncAccountId.value)
@@ -1028,6 +1060,10 @@ function formatTime(value?: string | null): string {
 watch(selectedPlatform, () => {
   searchQuery.value = ''
   syncAccountId.value = null
+  syncAccounts.value = []
+  if (syncDialogVisible.value) {
+    void loadSyncAccountsForCurrentPlatform()
+  }
   void loadCurrentPlatformReferencePricing()
 })
 
