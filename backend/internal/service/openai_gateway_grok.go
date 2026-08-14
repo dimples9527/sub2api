@@ -102,14 +102,16 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 		proxyURL = account.Proxy.URL()
 	}
 
-	upstreamStart := time.Now()
 	var resp *http.Response
+	attemptTimer := newSuccessfulAttemptTimer(startTime)
 	for attempt := 0; ; attempt++ {
+		attemptStart := time.Now()
 		upstreamReq, buildErr := buildGrokResponsesRequest(upstreamCtx, c, account, patchedBody, token, cacheIdentity, s.cfg, s.settingService)
 		if buildErr != nil {
 			return nil, buildErr
 		}
 
+		upstreamStart := time.Now()
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if err != nil {
@@ -120,6 +122,9 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 		// another account or cache identity. Retry once with the same routing and
 		// credential after removing only the rejected encrypted reasoning payload.
 		if attempt > 0 || resp.StatusCode != http.StatusBadRequest {
+			if resp.StatusCode < 400 {
+				attemptTimer.Mark(attemptStart)
+			}
 			break
 		}
 		respBody := s.readUpstreamErrorBody(resp)
@@ -202,7 +207,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 		if hasGrokResponsesClientToolMapping(clientToolMapping) {
 			resp.Body = newGrokResponsesClientToolStreamBody(resp.Body, clientToolMapping, maxLineSize)
 		}
-		streamResult, err := s.handleStreamingResponse(ctx, resp, c, account, startTime, originalModel, upstreamModel)
+		streamResult, err := s.handleStreamingResponse(ctx, resp, c, account, attemptTimer.Start(), originalModel, upstreamModel)
 		if err != nil {
 			return nil, err
 		}
@@ -238,7 +243,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 		Stream:          reqStream,
 		OpenAIWSMode:    false,
 		ResponseHeaders: resp.Header.Clone(),
-		Duration:        time.Since(startTime),
+		Duration:        attemptTimer.Since(),
 		FirstTokenMs:    firstTokenMs,
 	}
 	// Propagate search/image counters from the shared Responses handler — without

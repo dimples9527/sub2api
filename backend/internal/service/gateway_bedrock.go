@@ -113,7 +113,8 @@ func (s *GatewayService) forwardBedrock(
 	}
 
 	// 执行上游请求（含重试）
-	resp, err := s.executeBedrockUpstream(ctx, c, account, bedrockBody, mappedModel, region, reqStream, signer, bedrockAPIKey, proxyURL)
+	attemptTimer := newSuccessfulAttemptTimer(startTime)
+	resp, err := s.executeBedrockUpstream(ctx, c, account, bedrockBody, mappedModel, region, reqStream, signer, bedrockAPIKey, proxyURL, &attemptTimer)
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +141,7 @@ func (s *GatewayService) forwardBedrock(
 	var firstTokenMs *int
 	var clientDisconnect bool
 	if reqStream {
-		streamResult, err := s.handleBedrockStreamingResponse(ctx, resp, c, account, startTime, reqModel)
+		streamResult, err := s.handleBedrockStreamingResponse(ctx, resp, c, account, attemptTimer.Start(), reqModel)
 		if err != nil {
 			return nil, err
 		}
@@ -163,7 +164,7 @@ func (s *GatewayService) forwardBedrock(
 		Model:            reqModel,
 		UpstreamModel:    mappedModel,
 		Stream:           reqStream,
-		Duration:         time.Since(startTime),
+		Duration:         attemptTimer.Since(),
 		FirstTokenMs:     firstTokenMs,
 		ClientDisconnect: clientDisconnect,
 	}, nil
@@ -181,11 +182,13 @@ func (s *GatewayService) executeBedrockUpstream(
 	signer *BedrockSigner,
 	apiKey string,
 	proxyURL string,
+	attemptTimer *successfulAttemptTimer,
 ) (*http.Response, error) {
 	var resp *http.Response
 	var err error
 	retryStart := time.Now()
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
+		attemptStart := time.Now()
 		var upstreamReq *http.Request
 		if account.IsBedrockAPIKey() {
 			upstreamReq, err = s.buildUpstreamRequestBedrockAPIKey(ctx, body, modelID, region, stream, apiKey)
@@ -265,6 +268,11 @@ func (s *GatewayService) executeBedrockUpstream(
 			break
 		}
 
+		if resp.StatusCode < 400 {
+			if attemptTimer != nil {
+				attemptTimer.Mark(attemptStart)
+			}
+		}
 		break
 	}
 	if resp == nil || resp.Body == nil {

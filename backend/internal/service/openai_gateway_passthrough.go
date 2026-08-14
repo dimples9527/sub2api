@@ -193,7 +193,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 
 	agentTaskRecoveryTried := false
 	var resp *http.Response
+	attemptTimer := newSuccessfulAttemptTimer(startTime)
 	for {
+		attemptStart := time.Now()
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 		upstreamReq, buildErr := s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, body, token)
 		releaseUpstreamCtx()
@@ -210,6 +212,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 		}
 		if resp.StatusCode < 400 {
+			attemptTimer.Mark(attemptStart)
 			break
 		}
 
@@ -245,7 +248,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	imageCount := 0
 	var imageOutputSizes []string
 	if reqStream {
-		result, err := s.handleStreamingResponsePassthrough(ctx, resp, c, account, startTime, reqModel, upstreamPassthroughModel)
+		result, err := s.handleStreamingResponsePassthrough(ctx, resp, c, account, attemptTimer.Start(), reqModel, upstreamPassthroughModel)
 		if err != nil {
 			return nil, err
 		}
@@ -289,7 +292,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		ReasoningEffort:               reasoningEffort,
 		Stream:                        reqStream,
 		OpenAIWSMode:                  false,
-		Duration:                      time.Since(startTime),
+		Duration:                      attemptTimer.Since(),
 		FirstTokenMs:                  firstTokenMs,
 	}
 	if imageCount > 0 {

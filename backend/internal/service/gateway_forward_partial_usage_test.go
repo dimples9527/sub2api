@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +19,7 @@ import (
 // 已观测到的上游 usage 不得随错误一起被丢弃，Forward 必须把部分结果与错误一同
 // 返回，供 handler 照常提交 usage 记录。
 
-func newForwardPartialUsageServiceForTest(upstream *anthropicHTTPUpstreamRecorder) *GatewayService {
+func newForwardPartialUsageServiceForTest(upstream HTTPUpstream) *GatewayService {
 	cfg := &config.Config{
 		Gateway: config.GatewayConfig{
 			MaxLineSize: defaultMaxLineSize,
@@ -31,6 +32,24 @@ func newForwardPartialUsageServiceForTest(upstream *anthropicHTTPUpstreamRecorde
 		rateLimitService:     &RateLimitService{},
 		deferredService:      &DeferredService{},
 	}
+}
+
+type sequenceAnthropicHTTPUpstream struct {
+	responses []*http.Response
+	calls     int
+}
+
+func (u *sequenceAnthropicHTTPUpstream) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
+	idx := u.calls
+	u.calls++
+	if idx >= len(u.responses) {
+		return nil, errors.New("unexpected upstream call")
+	}
+	return u.responses[idx], nil
+}
+
+func (u *sequenceAnthropicHTTPUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, profile *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxyURL, accountID, accountConcurrency)
 }
 
 func newAnthropicOAuthAccountForPartialUsageTest() *Account {
@@ -125,6 +144,56 @@ func TestGatewayService_Forward_StreamReadErrorAfterOutputPreservesPartialUsage(
 	require.NotNil(t, result, "已写出内容后的读错误必须保留部分 usage")
 	require.Equal(t, 9, result.Usage.InputTokens)
 	require.Equal(t, 4, result.Usage.CacheCreationInputTokens)
+}
+
+func TestGatewayService_Forward_RetryLatencyUsesSuccessfulAttempt(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	body := []byte(`{"model":"claude-3-5-sonnet-latest","stream":true,"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	require.NoError(t, err)
+
+	upstreamSSE := strings.Join([]string{
+		`event: message_start`,
+		`data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-3-5-sonnet-latest","content":[],"usage":{"input_tokens":11}}}`,
+		"",
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}`,
+		"",
+		`event: message_delta`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
+		"",
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		"",
+		"",
+	}, "\n")
+	upstream := &sequenceAnthropicHTTPUpstream{responses: []*http.Response{
+		{
+			StatusCode: http.StatusForbidden,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"temporary upstream error"}}`)),
+		},
+		{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader(upstreamSSE)),
+		},
+	}}
+	svc := newForwardPartialUsageServiceForTest(upstream)
+	account := newAnthropicOAuthAccountForPartialUsageTest()
+
+	result, err := svc.Forward(context.Background(), c, account, parsed)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 2, upstream.calls)
+	require.NotNil(t, result.FirstTokenMs)
+	require.Less(t, *result.FirstTokenMs, int(retryBaseDelay.Milliseconds()/2), "首字耗时不应包含失败重试的退避等待")
+	require.Less(t, result.Duration, retryBaseDelay/2, "总耗时不应包含失败重试的退避等待")
 }
 
 func TestGatewayService_Forward_StreamErrorWithoutUsageReturnsNilResult(t *testing.T) {

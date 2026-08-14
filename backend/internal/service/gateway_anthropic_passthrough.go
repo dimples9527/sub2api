@@ -93,8 +93,10 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	}
 
 	var resp *http.Response
+	attemptTimer := newSuccessfulAttemptTimer(input.StartTime)
 	retryStart := time.Now()
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
+		attemptStart := time.Now()
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, input.RequestStream)
 		upstreamReq, wireBody, err := s.buildUpstreamRequestAnthropicAPIKeyPassthrough(upstreamCtx, c, account, input.Body, token)
 		releaseUpstreamCtx()
@@ -185,6 +187,9 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 			break
 		}
 
+		if resp.StatusCode < 400 {
+			attemptTimer.Mark(attemptStart)
+		}
 		break
 	}
 	if resp == nil || resp.Body == nil {
@@ -267,11 +272,11 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	var firstTokenMs *int
 	var clientDisconnect bool
 	if input.RequestStream {
-		streamResult, err := s.handleStreamingResponseAnthropicAPIKeyPassthrough(ctx, resp, c, account, input.StartTime, input.RequestModel)
+		streamResult, err := s.handleStreamingResponseAnthropicAPIKeyPassthrough(ctx, resp, c, account, attemptTimer.Start(), input.RequestModel)
 		if err != nil {
 			// 流中断时保留已观测到的 usage 与错误一起返回，避免上游已计量的请求
 			// 完全漏记漏计费（issue #5148）。
-			if partial := partialStreamUsageResult(c, resp, streamResult, input.OriginalModel, input.RequestModel, input.StartTime, err); partial != nil {
+			if partial := partialStreamUsageResult(c, resp, streamResult, input.OriginalModel, input.RequestModel, attemptTimer.Start(), err); partial != nil {
 				return partial, err
 			}
 			return nil, err
@@ -297,7 +302,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		UpstreamResponseModel:         observedUpstreamResponseModel(c),
 		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
 		Stream:                        input.RequestStream,
-		Duration:                      time.Since(input.StartTime),
+		Duration:                      attemptTimer.Since(),
 		FirstTokenMs:                  firstTokenMs,
 		ClientDisconnect:              clientDisconnect,
 	}, nil
