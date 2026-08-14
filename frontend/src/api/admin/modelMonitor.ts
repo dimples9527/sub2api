@@ -14,6 +14,7 @@ export interface LLMMonitorGroupPlatformOverride {
   effective_platform: string
   effective_platform_name: string
   rate_multiplier: number
+  show_in_monitor: boolean
 }
 
 export interface LLMMonitorGroupPlatformOverrideUpdateResult {
@@ -45,9 +46,21 @@ export async function clearLLMMonitorGroupPlatformOverride(
   return data
 }
 
+export async function setLLMMonitorGroupVisibility(
+  groupId: number,
+  showInMonitor: boolean,
+): Promise<LLMMonitorGroupPlatformOverrideUpdateResult> {
+  const { data } = await apiClient.put<LLMMonitorGroupPlatformOverrideUpdateResult>(
+    `/admin/model-monitor/visibility/${groupId}`,
+    { show_in_monitor: showInMonitor },
+  )
+  return data
+}
+
 export const modelMonitorAPI = {
   listLLMMonitorGroupPlatformOverrides,
   setLLMMonitorGroupPlatformOverride,
+  setLLMMonitorGroupVisibility,
   clearLLMMonitorGroupPlatformOverride,
 }
 

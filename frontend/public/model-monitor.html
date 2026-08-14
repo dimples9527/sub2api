@@ -1363,14 +1363,17 @@
       return list.map((group) => {
         const platform = String(pickValue(group, ['platform'], '')).trim();
         const effectivePlatform = String(pickValue(group, ['effective_platform', 'effectivePlatform', 'platform'], '')).trim();
+        const visibility = pickValue(group, ['show_in_monitor', 'showInMonitor'], true);
+        const showInMonitor = visibility !== false && String(visibility).trim().toLowerCase() !== 'false';
         return {
           name: String(pickValue(group, ['name', 'group_name', 'groupName'], '')).trim(),
           platform,
           effectivePlatform,
           effectivePlatformName: String(pickValue(group, ['effective_platform_name', 'effectivePlatformName'], '')).trim(),
-          rateMultiplier: asNumber(pickValue(group, ['rate_multiplier', 'rateMultiplier'], 1), 1)
+          rateMultiplier: asNumber(pickValue(group, ['rate_multiplier', 'rateMultiplier'], 1), 1),
+          showInMonitor
         };
-      }).filter((group) => group.name);
+      }).filter((group) => group.name && group.showInMonitor);
     }
 
     async function loadMonitorGroups() {
@@ -2364,4 +2367,3 @@
   </script>
 </body>
 </html>
-

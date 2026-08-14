@@ -353,15 +353,6 @@ func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	}
 }
 
-func registerModelMonitorRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
-	modelMonitor := admin.Group("/model-monitor")
-	{
-		modelMonitor.GET("/platform-overrides", h.Admin.Group.ListLLMMonitorPlatformOverrides)
-		modelMonitor.PUT("/platform-overrides/:group_id", h.Admin.Group.SetLLMMonitorPlatformOverride)
-		modelMonitor.DELETE("/platform-overrides/:group_id", h.Admin.Group.ClearLLMMonitorPlatformOverride)
-	}
-}
-
 func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth middleware.StepUpAuthMiddleware) {
 	accounts := admin.Group("/accounts")
 	{

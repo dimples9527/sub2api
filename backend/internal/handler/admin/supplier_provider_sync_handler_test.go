@@ -174,16 +174,16 @@ type supplierGroupPlatformOverrideHandlerStub struct {
 	setPlatform    string
 	clearedGroupID int64
 	listGroupIDs   []int64
-	listResult     map[int64]string
+	listResult     map[int64]service.MonitorGroupPlatformOverride
 	err            error
 }
 
-func (s *supplierGroupPlatformOverrideHandlerStub) ListByGroupIDs(_ context.Context, groupIDs []int64) (map[int64]string, error) {
+func (s *supplierGroupPlatformOverrideHandlerStub) ListByGroupIDs(_ context.Context, groupIDs []int64) (map[int64]service.MonitorGroupPlatformOverride, error) {
 	s.listGroupIDs = append([]int64(nil), groupIDs...)
 	if s.listResult != nil {
 		return s.listResult, s.err
 	}
-	return map[int64]string{}, s.err
+	return map[int64]service.MonitorGroupPlatformOverride{}, s.err
 }
 
 func (s *supplierGroupPlatformOverrideHandlerStub) Set(_ context.Context, groupID int64, platform string) error {
@@ -194,6 +194,10 @@ func (s *supplierGroupPlatformOverrideHandlerStub) Set(_ context.Context, groupI
 
 func (s *supplierGroupPlatformOverrideHandlerStub) Clear(_ context.Context, groupID int64) error {
 	s.clearedGroupID = groupID
+	return s.err
+}
+
+func (s *supplierGroupPlatformOverrideHandlerStub) SetShowInMonitor(context.Context, int64, bool) error {
 	return s.err
 }
 

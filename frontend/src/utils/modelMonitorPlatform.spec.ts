@@ -61,9 +61,11 @@ describe('模型监控平台展示', () => {
     try {
       const runtimeWindow = dom.window as typeof dom.window & {
         normalizeGroupPayload: (payload: unknown) => Array<{
+          name: string
           platform: string
           effectivePlatform: string
           effectivePlatformName: string
+          showInMonitor: boolean
         }>
         normalizeStatusItem: (item: unknown, index: number, group: unknown) => {
           groupPlatform: string
@@ -98,6 +100,12 @@ describe('模型监控平台展示', () => {
       expect(customPlatform.effectivePlatformName).toBe('Custom GLM')
       expect(customRow.groupPlatform).toBe('glm')
       expect(customRow.groupPlatformName).toBe('Custom GLM')
+
+      const visibleGroups = normalizeGroupPayload([
+        { name: '显示分组', platform: 'openai', show_in_monitor: true },
+        { name: '隐藏分组', platform: 'gemini', show_in_monitor: false },
+      ])
+      expect(visibleGroups.map((group) => group.name)).toEqual(['显示分组'])
     } finally {
       dom.window.close()
     }

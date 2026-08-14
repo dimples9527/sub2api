@@ -8,20 +8,23 @@ import (
 )
 
 type monitorGroupPlatformOverrideRepoStub struct {
-	listResult map[int64]string
-	listErr    error
-	setGroupID int64
-	setPlatform string
-	setErr     error
-	clearGroupID int64
-	clearErr   error
+	listResult        map[int64]MonitorGroupPlatformOverride
+	listErr           error
+	setGroupID        int64
+	setPlatform       string
+	setErr            error
+	visibilityGroupID int64
+	showInMonitor     bool
+	visibilityErr     error
+	clearGroupID      int64
+	clearErr          error
 }
 
-func (s *monitorGroupPlatformOverrideRepoStub) ListByGroupIDs(ctx context.Context, groupIDs []int64) (map[int64]string, error) {
+func (s *monitorGroupPlatformOverrideRepoStub) ListByGroupIDs(ctx context.Context, groupIDs []int64) (map[int64]MonitorGroupPlatformOverride, error) {
 	if s.listErr != nil {
 		return nil, s.listErr
 	}
-	result := make(map[int64]string, len(s.listResult))
+	result := make(map[int64]MonitorGroupPlatformOverride, len(s.listResult))
 	for k, v := range s.listResult {
 		result[k] = v
 	}
@@ -34,6 +37,15 @@ func (s *monitorGroupPlatformOverrideRepoStub) Set(ctx context.Context, groupID 
 	}
 	s.setGroupID = groupID
 	s.setPlatform = platform
+	return nil
+}
+
+func (s *monitorGroupPlatformOverrideRepoStub) SetShowInMonitor(ctx context.Context, groupID int64, show bool) error {
+	if s.visibilityErr != nil {
+		return s.visibilityErr
+	}
+	s.visibilityGroupID = groupID
+	s.showInMonitor = show
 	return nil
 }
 
@@ -59,13 +71,17 @@ func TestMonitorGroupPlatformOverrideServiceSetNormalizesAndValidatesPlatform(t 
 	require.Equal(t, PlatformOpenAI, repo.setPlatform, "unsupported platform should not overwrite the last valid write")
 }
 
-func TestMonitorGroupPlatformOverrideServiceListAndClearDelegate(t *testing.T) {
-	repo := &monitorGroupPlatformOverrideRepoStub{listResult: map[int64]string{3: PlatformGemini}}
+func TestMonitorGroupPlatformOverrideServiceListVisibilityAndClearDelegate(t *testing.T) {
+	repo := &monitorGroupPlatformOverrideRepoStub{listResult: map[int64]MonitorGroupPlatformOverride{3: {ActualPlatform: PlatformGemini, ShowInMonitor: false}}}
 	svc := NewMonitorGroupPlatformOverrideService(repo)
 
 	loaded, err := svc.ListByGroupIDs(context.Background(), []int64{3})
 	require.NoError(t, err)
-	require.Equal(t, map[int64]string{3: PlatformGemini}, loaded)
+	require.Equal(t, map[int64]MonitorGroupPlatformOverride{3: {ActualPlatform: PlatformGemini, ShowInMonitor: false}}, loaded)
+
+	require.NoError(t, svc.SetShowInMonitor(context.Background(), 3, false))
+	require.Equal(t, int64(3), repo.visibilityGroupID)
+	require.False(t, repo.showInMonitor)
 
 	require.NoError(t, svc.Clear(context.Background(), 3))
 	require.Equal(t, int64(3), repo.clearGroupID)
@@ -78,6 +94,7 @@ func TestMonitorGroupPlatformOverrideServiceRejectsInvalidGroupID(t *testing.T) 
 		err  error
 	}{
 		{name: "set", err: svc.Set(context.Background(), 0, PlatformOpenAI)},
+		{name: "visibility", err: svc.SetShowInMonitor(context.Background(), 0, true)},
 		{name: "clear", err: svc.Clear(context.Background(), -1)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -90,6 +107,7 @@ func TestMonitorGroupPlatformOverrideServiceRejectsInvalidGroupID(t *testing.T) 
 func TestMonitorGroupPlatformOverrideServiceErrorsWhenRepoMissing(t *testing.T) {
 	var svc MonitorGroupPlatformOverrideService = &monitorGroupPlatformOverrideService{}
 	require.Error(t, svc.Set(context.Background(), 1, PlatformOpenAI))
+	require.Error(t, svc.SetShowInMonitor(context.Background(), 1, true))
 	require.Error(t, svc.Clear(context.Background(), 1))
 	loaded, err := svc.ListByGroupIDs(context.Background(), []int64{1})
 	require.NoError(t, err)

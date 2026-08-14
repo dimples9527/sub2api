@@ -110,6 +110,11 @@
               >
                 {{ row.actual_platform ? '已配置' : '默认继承' }}
               </span>
+              <span
+                :class="['po-status-pill', row.show_in_monitor ? 'po-status-pill-success' : 'po-status-pill-muted']"
+              >
+                {{ row.show_in_monitor ? '监控页显示' : '监控页隐藏' }}
+              </span>
             </template>
 
             <template #cell-rate_multiplier="{ value }">
@@ -118,6 +123,12 @@
 
             <template #cell-actions="{ row }">
               <div class="po-cell-actions">
+                <Toggle
+                  :model-value="row.show_in_monitor"
+                  :disabled="savingGroupId === row.id"
+                  :aria-label="row.show_in_monitor ? `隐藏「${row.name}」的模型监控展示` : `显示「${row.name}」到模型监控页面`"
+                  @update:model-value="(value) => toggleGroupVisibility(row, value)"
+                />
                 <button class="po-btn po-btn-sm po-btn-edit" :disabled="savingGroupId === row.id" @click="openEditDialog(row)">
                   编辑
                 </button>
@@ -225,6 +236,7 @@ import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import SearchInput from '@/components/common/SearchInput.vue'
 import Select from '@/components/common/Select.vue'
+import Toggle from '@/components/common/Toggle.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
@@ -311,7 +323,10 @@ async function reload() {
       adminAPI.modelMonitor.listLLMMonitorGroupPlatformOverrides(),
       adminAPI.customPlatforms.list(false),
     ])
-    groups.value = items
+    groups.value = items.map((item) => ({
+      ...item,
+      show_in_monitor: item.show_in_monitor !== false,
+    }))
     customPlatforms.value = platforms
     setCustomPlatformLabels(platforms)
   } catch (error) {
@@ -369,6 +384,26 @@ async function saveOverride() {
     await reload()
   } catch (error) {
     appStore.showError(extractApiErrorMessage(error, '保存分组平台配置失败'))
+  } finally {
+    savingGroupId.value = null
+  }
+}
+
+async function toggleGroupVisibility(group: LLMMonitorGroupPlatformOverride, showInMonitor: boolean) {
+  if (savingGroupId.value !== null || group.show_in_monitor === showInMonitor) return
+
+  const previous = group.show_in_monitor
+  group.show_in_monitor = showInMonitor
+  savingGroupId.value = group.id
+  try {
+    await adminAPI.modelMonitor.setLLMMonitorGroupVisibility(group.id, showInMonitor)
+    appStore.showSuccess(showInMonitor
+      ? `「${group.name}」将在模型监控页面显示`
+      : `「${group.name}」已从模型监控页面隐藏`)
+    await reload()
+  } catch (error) {
+    group.show_in_monitor = previous
+    appStore.showError(extractApiErrorMessage(error, '保存模型监控显示配置失败'))
   } finally {
     savingGroupId.value = null
   }
@@ -820,6 +855,17 @@ onMounted(() => {
   color: #fcd34d;
 }
 
+.po-status-pill-success {
+  margin-left: 0.35rem;
+  background: #dcfce7;
+  color: #166534;
+}
+
+:global(.dark) .po-status-pill-success {
+  background: rgba(22, 163, 74, 0.16);
+  color: #86efac;
+}
+
 .po-status-pill-muted {
   background: #f3f4f6;
   color: #6b7280;
@@ -857,6 +903,7 @@ onMounted(() => {
 
 .po-cell-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 0.4rem;
 }

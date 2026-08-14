@@ -27,7 +27,7 @@ func TestAccountHandlerListModelSquareSyncAccountsUsesGroupEffectivePlatform(t *
 		},
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
 	)
-	handler.SetMonitorGroupPlatformOverrideService(&monitorGroupPlatformOverrideHandlerStub{platforms: map[int64]string{101: "glm"}})
+	handler.SetMonitorGroupPlatformOverrideService(&monitorGroupPlatformOverrideHandlerStub{platforms: map[int64]service.MonitorGroupPlatformOverride{101: {ActualPlatform: "glm", ShowInMonitor: true}}})
 
 	router := gin.New()
 	router.GET("/admin/upstream-management/model-square/sync-accounts", handler.ListModelSquareSyncAccounts)
@@ -71,7 +71,7 @@ func TestAccountHandlerListModelSquareSyncAccountsDoesNotUseRawPlatformForGroupe
 		},
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
 	)
-	handler.SetMonitorGroupPlatformOverrideService(&monitorGroupPlatformOverrideHandlerStub{platforms: map[int64]string{101: "glm"}})
+	handler.SetMonitorGroupPlatformOverrideService(&monitorGroupPlatformOverrideHandlerStub{platforms: map[int64]service.MonitorGroupPlatformOverride{101: {ActualPlatform: "glm", ShowInMonitor: true}}})
 
 	router := gin.New()
 	router.GET("/admin/upstream-management/model-square/sync-accounts", handler.ListModelSquareSyncAccounts)
