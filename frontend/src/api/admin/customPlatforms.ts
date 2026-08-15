@@ -4,6 +4,7 @@ export interface CustomPlatform {
   id: number
   code: string
   name: string
+  color: string
   enabled: boolean
   sort_order: number
   created_at: string
@@ -13,6 +14,7 @@ export interface CustomPlatform {
 export interface CustomPlatformUpsertPayload {
   code: string
   name: string
+  color?: string
   enabled: boolean
   sort_order?: number
 }

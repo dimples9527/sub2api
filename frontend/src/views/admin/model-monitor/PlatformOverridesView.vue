@@ -11,6 +11,7 @@
               <div class="po-kpi-body">
                 <span class="po-kpi-label">分组总数</span>
                 <strong class="po-kpi-value">{{ totalCount }}</strong>
+                <span class="po-kpi-foot">全部模型监控分组</span>
               </div>
             </div>
             <div class="po-kpi po-kpi-warning">
@@ -20,6 +21,7 @@
               <div class="po-kpi-body">
                 <span class="po-kpi-label">已配置实际平台</span>
                 <strong class="po-kpi-value">{{ overrideCount }}</strong>
+                <span class="po-kpi-foot">已设置独立展示平台</span>
               </div>
             </div>
             <div class="po-kpi po-kpi-success">
@@ -29,6 +31,7 @@
               <div class="po-kpi-body">
                 <span class="po-kpi-label">默认继承原平台</span>
                 <strong class="po-kpi-value">{{ inheritedCount }}</strong>
+                <span class="po-kpi-foot">沿用原平台展示</span>
               </div>
             </div>
           </div>
@@ -43,23 +46,32 @@
       </template>
 
       <template #filters>
-        <div class="po-filter-bar">
-          <div class="po-filter-search">
-            <SearchInput
-              v-model="searchQuery"
-              placeholder="搜索分组名称、原平台或实际平台"
+        <div class="po-filter-panel">
+          <div class="po-filter-bar">
+            <div class="po-filter-search">
+              <SearchInput
+                v-model="searchQuery"
+                placeholder="搜索分组名称、原平台或实际平台"
+              />
+            </div>
+            <Select
+              v-model="platformFilter"
+              :options="platformFilterOptions"
+              placeholder="全部平台"
+              class="w-44"
+              :clearable="false"
+              @change="applyFilters"
             />
+            <div class="po-filter-hint">
+              监控页展示优先使用实际平台；未配置时回退原分组平台。
+            </div>
           </div>
-          <Select
-            v-model="platformFilter"
-            :options="platformFilterOptions"
-            placeholder="全部平台"
-            class="w-44"
-            :clearable="false"
-            @change="applyFilters"
-          />
-          <div class="po-filter-hint">
-            监控页展示优先使用实际平台；未配置时回退原分组平台。
+          <div class="po-legend-bar" aria-label="平台颜色图例">
+            <span class="po-legend-title">平台配色</span>
+            <span v-for="item in legendItems" :key="item.value" class="po-legend-item">
+              <i class="po-legend-dot" :style="{ background: resolvePlatformColor(item.value) }"></i>
+              {{ item.label }}
+            </span>
           </div>
         </div>
       </template>
@@ -74,19 +86,24 @@
           >
             <template #cell-name="{ row, value }">
               <div class="po-cell-name">
-                <strong>{{ value }}</strong>
+                <div class="po-cell-name-main">
+                  <i class="po-cell-name-dot" :style="{ background: resolvePlatformColor(row.effective_platform) }"></i>
+                  <strong :style="{ color: resolvePlatformColor(row.effective_platform) }">{{ value }}</strong>
+                </div>
                 <span>ID：{{ row.id }}</span>
               </div>
             </template>
 
             <template #cell-platform="{ value }">
-              <span :class="['po-badge', platformBadgeClass(value)]">
+              <span :class="['po-badge', platformBadgeClass(value)]" :style="customPlatformBadgeStyle(value)">
+                <i class="po-badge-dot"></i>
                 {{ platformText(value) }}
               </span>
             </template>
 
             <template #cell-actual_platform="{ row, value }">
-              <span v-if="value" :class="['po-badge', platformBadgeClass(value)]">
+              <span v-if="value" :class="['po-badge', platformBadgeClass(value)]" :style="customPlatformBadgeStyle(value)">
+                <i class="po-badge-dot"></i>
                 {{ platformText(value) }}
               </span>
               <span v-else class="po-cell-dim">未配置</span>
@@ -96,7 +113,8 @@
             </template>
 
             <template #cell-effective_platform="{ row, value }">
-              <span :class="['po-badge', platformBadgeClass(value)]">
+              <span :class="['po-badge', platformBadgeClass(value)]" :style="customPlatformBadgeStyle(value)">
+                <i class="po-badge-dot"></i>
                 {{ row.effective_platform_name || platformText(value) }}
               </span>
             </template>
@@ -110,25 +128,23 @@
               >
                 {{ row.actual_platform ? '已配置' : '默认继承' }}
               </span>
-              <span
-                :class="['po-status-pill', row.show_in_monitor ? 'po-status-pill-success' : 'po-status-pill-muted']"
-              >
-                {{ row.show_in_monitor ? '监控页显示' : '监控页隐藏' }}
-              </span>
+            </template>
+
+            <template #cell-show_in_monitor="{ row }">
+              <Toggle
+                :model-value="row.show_in_monitor"
+                :disabled="savingGroupId === row.id"
+                :aria-label="row.show_in_monitor ? `隐藏「${row.name}」的模型监控展示` : `显示「${row.name}」到模型监控页面`"
+                @update:model-value="(value) => toggleGroupVisibility(row, value)"
+              />
             </template>
 
             <template #cell-rate_multiplier="{ value }">
-              <span class="po-cell-mono">{{ formatRateMultiplier(value) }}</span>
+              <span class="po-rate-chip">{{ formatRateMultiplier(value) }}</span>
             </template>
 
             <template #cell-actions="{ row }">
               <div class="po-cell-actions">
-                <Toggle
-                  :model-value="row.show_in_monitor"
-                  :disabled="savingGroupId === row.id"
-                  :aria-label="row.show_in_monitor ? `隐藏「${row.name}」的模型监控展示` : `显示「${row.name}」到模型监控页面`"
-                  @update:model-value="(value) => toggleGroupVisibility(row, value)"
-                />
                 <button class="po-btn po-btn-sm po-btn-edit" :disabled="savingGroupId === row.id" @click="openEditDialog(row)">
                   编辑
                 </button>
@@ -160,10 +176,11 @@
       @close="closeEditDialog"
     >
       <div v-if="editingGroup" class="po-dialog-body">
-        <div class="po-dialog-summary">
+        <div class="po-dialog-summary" :style="{ borderLeftColor: resolvePlatformColor(editingGroup.effective_platform) }">
           <div class="po-dialog-summary-head">
             <span class="po-dialog-summary-name">{{ editingGroup.name }}</span>
-            <span :class="['po-badge', platformBadgeClass(editingGroup.effective_platform)]">
+            <span :class="['po-badge', platformBadgeClass(editingGroup.effective_platform)]" :style="customPlatformBadgeStyle(editingGroup.effective_platform)">
+              <i class="po-badge-dot"></i>
               当前展示：{{ platformText(editingGroup.effective_platform) }}
             </span>
           </div>
@@ -182,6 +199,13 @@
             class="w-full"
             :clearable="true"
           />
+          <div v-if="platformDraft" class="po-draft-preview">
+            <span :class="['po-badge', platformBadgeClass(platformDraft)]" :style="customPlatformBadgeStyle(platformDraft)">
+              <i class="po-badge-dot"></i>
+              {{ platformText(platformDraft) }}
+            </span>
+            <span class="po-draft-preview-hint">保存后，模型监控页面将以该平台展示并筛选此分组。</span>
+          </div>
         </div>
 
         <p class="po-dialog-hint">
@@ -229,6 +253,7 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 import { platformBadgeClass } from '@/utils/platformColors'
 import { adminAPI } from '@/api/admin'
 import { resolvePlatformDisplayLabel, setCustomPlatformLabels } from '@/utils/customPlatformLabels'
+import { customPlatformBadgeStyle, resolvePlatformColor, updateCustomPlatformColors } from '@/utils/customPlatformColors'
 import type { CustomPlatform } from '@/api/admin/customPlatforms'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -280,12 +305,20 @@ const platformFilterOptions = computed(() => [
   ...platformOptions.value,
 ])
 
+const legendItems = computed(() => [
+  ...corePlatformOptions,
+  ...customPlatforms.value
+    .filter((platform) => platform.enabled)
+    .map((platform) => ({ value: platform.code, label: platform.name })),
+])
+
 const columns = computed<Column[]>(() => [
   { key: 'name', label: '分组名称', sortable: false },
   { key: 'platform', label: '原平台', sortable: false },
   { key: 'actual_platform', label: '实际平台', sortable: false },
   { key: 'effective_platform', label: '展示平台', sortable: false },
   { key: 'override_state', label: '配置状态', sortable: false },
+  { key: 'show_in_monitor', label: '监控显示', sortable: false },
   { key: 'rate_multiplier', label: '倍率', sortable: false },
   { key: 'actions', label: '操作', sortable: false, class: 'text-right' },
 ])
@@ -329,6 +362,7 @@ async function reload() {
     }))
     customPlatforms.value = platforms
     setCustomPlatformLabels(platforms)
+    updateCustomPlatformColors(platforms)
   } catch (error) {
     appStore.showError(extractApiErrorMessage(error, '加载分组平台配置失败'))
   } finally {
@@ -475,43 +509,72 @@ onMounted(() => {
 }
 
 .po-kpi {
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: flex-start;
   gap: 0.75rem;
-  padding: 0.875rem 1rem;
+  padding: 1rem;
   border-radius: 0.75rem;
   border: 1px solid transparent;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+/* 顶部平台色渐变条 */
+.po-kpi::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+}
+
+.po-kpi:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px -6px rgba(15, 23, 42, 0.14);
 }
 
 .po-kpi-default {
-  background: #f9fafb;
-  border-color: #e5e7eb;
+  background: linear-gradient(180deg, #eef2ff 0%, #f9fafb 55%);
+  border-color: #e0e7ff;
+}
+
+.po-kpi-default::before {
+  background: linear-gradient(90deg, #6366f1, #a855f7);
 }
 
 :global(.dark) .po-kpi-default {
-  background: #1f2937;
-  border-color: #374151;
+  background: linear-gradient(180deg, rgba(99, 102, 241, 0.12) 0%, #1f2937 55%);
+  border-color: rgba(99, 102, 241, 0.3);
 }
 
 .po-kpi-warning {
-  background: #fffbeb;
+  background: linear-gradient(180deg, #fffbeb 0%, #fefce8 60%);
   border-color: #fde68a;
 }
 
+.po-kpi-warning::before {
+  background: linear-gradient(90deg, #f59e0b, #f97316);
+}
+
 :global(.dark) .po-kpi-warning {
-  background: rgba(217, 119, 6, 0.08);
-  border-color: rgba(217, 119, 6, 0.25);
+  background: linear-gradient(180deg, rgba(217, 119, 6, 0.14) 0%, #1f2937 55%);
+  border-color: rgba(217, 119, 6, 0.3);
 }
 
 .po-kpi-success {
-  background: #ecfdf5;
+  background: linear-gradient(180deg, #ecfdf5 0%, #f0fdf4 60%);
   border-color: #a7f3d0;
 }
 
+.po-kpi-success::before {
+  background: linear-gradient(90deg, #10b981, #14b8a6);
+}
+
 :global(.dark) .po-kpi-success {
-  background: rgba(22, 163, 74, 0.08);
-  border-color: rgba(22, 163, 74, 0.25);
+  background: linear-gradient(180deg, rgba(22, 163, 74, 0.12) 0%, #1f2937 55%);
+  border-color: rgba(22, 163, 74, 0.3);
 }
 
 .po-kpi-icon {
@@ -521,42 +584,40 @@ onMounted(() => {
   flex-shrink: 0;
   place-items: center;
   border-radius: 0.625rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 
 .po-kpi-icon-default {
-  background: #e5e7eb;
-  color: #6b7280;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff;
 }
 
 :global(.dark) .po-kpi-icon-default {
-  background: #374151;
-  color: #9ca3af;
+  background: linear-gradient(135deg, #818cf8, #a78bfa);
 }
 
 .po-kpi-icon-warning {
-  background: #fef3c7;
-  color: #d97706;
+  background: linear-gradient(135deg, #f59e0b, #f97316);
+  color: #fff;
 }
 
 :global(.dark) .po-kpi-icon-warning {
-  background: rgba(217, 119, 6, 0.2);
-  color: #fbbf24;
+  background: linear-gradient(135deg, #fbbf24, #fb923c);
 }
 
 .po-kpi-icon-success {
-  background: #d1fae5;
-  color: #16a34a;
+  background: linear-gradient(135deg, #10b981, #14b8a6);
+  color: #fff;
 }
 
 :global(.dark) .po-kpi-icon-success {
-  background: rgba(22, 163, 74, 0.2);
-  color: #4ade80;
+  background: linear-gradient(135deg, #34d399, #2dd4bf);
 }
 
 .po-kpi-body {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.3rem;
   min-width: 0;
 }
 
@@ -572,8 +633,16 @@ onMounted(() => {
   color: #9ca3af;
 }
 
+.po-kpi-default .po-kpi-label {
+  color: #4f46e5;
+}
+
+:global(.dark) .po-kpi-default .po-kpi-label {
+  color: #a5b4fc;
+}
+
 .po-kpi-warning .po-kpi-label {
-  color: #92400e;
+  color: #b45309;
 }
 
 :global(.dark) .po-kpi-warning .po-kpi-label {
@@ -581,7 +650,7 @@ onMounted(() => {
 }
 
 .po-kpi-success .po-kpi-label {
-  color: #166534;
+  color: #047857;
 }
 
 :global(.dark) .po-kpi-success .po-kpi-label {
@@ -598,6 +667,16 @@ onMounted(() => {
 
 :global(.dark) .po-kpi-value {
   color: #f9fafb;
+}
+
+.po-kpi-foot {
+  margin-top: 0.1rem;
+  font-size: 0.6875rem;
+  color: #9ca3af;
+}
+
+:global(.dark) .po-kpi-foot {
+  color: #6b7280;
 }
 
 .po-actions-right {
@@ -745,7 +824,13 @@ onMounted(() => {
   background: rgba(220, 38, 38, 0.1);
 }
 
-/* ===== 筛选栏 ===== */
+/* ===== 筛选面板 ===== */
+.po-filter-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
 .po-filter-bar {
   display: flex;
   flex-wrap: wrap;
@@ -779,6 +864,66 @@ onMounted(() => {
   color: #6b7280;
 }
 
+/* 平台配色图例 */
+.po-legend-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  padding: 0.5rem 0.875rem;
+  border: 1px dashed #d1d5db;
+  border-radius: 0.625rem;
+  background: rgba(249, 250, 251, 0.7);
+}
+
+:global(.dark) .po-legend-bar {
+  border-color: #4b5563;
+  background: rgba(31, 41, 55, 0.5);
+}
+
+.po-legend-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+}
+
+:global(.dark) .po-legend-title {
+  color: #9ca3af;
+}
+
+.po-legend-title::before {
+  content: '';
+  width: 0.625rem;
+  height: 0.625rem;
+  border-radius: 9999px;
+  background: conic-gradient(#f97316, #22c55e, #a855f7, #3b82f6, #71717a, #06b6d4, #f97316);
+}
+
+.po-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #4b5563;
+}
+
+:global(.dark) .po-legend-item {
+  color: #d1d5db;
+}
+
+.po-legend-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.06);
+}
+
 /* ===== 表格 ===== */
 .po-table-wrapper {
   overflow: hidden;
@@ -799,7 +944,25 @@ onMounted(() => {
   gap: 0.2rem;
 }
 
+.po-cell-name-main {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.po-cell-name-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.05);
+}
+
 .po-cell-name strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: #111827;
   font-size: 0.875rem;
   font-weight: 600;
@@ -818,36 +981,55 @@ onMounted(() => {
   color: #6b7280;
 }
 
+/* 平台徽章：只声明布局与边框宽度/样式，背景与配色交给
+   platformBadgeClass 的 Tailwind 工具类，避免 scoped 基础样式
+   因优先级覆盖平台品牌色。 */
 .po-badge {
   display: inline-flex;
   align-items: center;
-  padding: 0.2rem 0.55rem;
-  border-radius: 0.35rem;
+  gap: 0.35rem;
+  padding: 0.15rem 0.6rem;
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 9999px;
   font-size: 0.75rem;
   font-weight: 600;
-  border: 1px solid #e5e7eb;
-  background: #f3f4f6;
-  color: #374151;
+  line-height: 1.375rem;
+  white-space: nowrap;
 }
 
-:global(.dark) .po-badge {
-  border-color: #374151;
-  background: #374151;
-  color: #e5e7eb;
+.po-badge-dot {
+  width: 0.375rem;
+  height: 0.375rem;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background: currentColor;
+  opacity: 0.85;
 }
 
 .po-status-pill {
   display: inline-flex;
   align-items: center;
+  gap: 0.375rem;
   padding: 0.2rem 0.6rem;
   border-radius: 9999px;
   font-size: 0.75rem;
   font-weight: 600;
 }
 
+.po-status-pill::before {
+  content: '';
+  width: 0.375rem;
+  height: 0.375rem;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background: currentColor;
+  opacity: 0.85;
+}
+
 .po-status-pill-warning {
   background: #fef3c7;
-  color: #92400e;
+  color: #b45309;
 }
 
 :global(.dark) .po-status-pill-warning {
@@ -858,7 +1040,7 @@ onMounted(() => {
 .po-status-pill-success {
   margin-left: 0.35rem;
   background: #dcfce7;
-  color: #166534;
+  color: #047857;
 }
 
 :global(.dark) .po-status-pill-success {
@@ -891,13 +1073,25 @@ onMounted(() => {
   color: #6b7280;
 }
 
-.po-cell-mono {
+/* 倍率胶囊 */
+.po-rate-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 3.25rem;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  background: #f9fafb;
   font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
+  font-weight: 600;
   color: #374151;
 }
 
-:global(.dark) .po-cell-mono {
+:global(.dark) .po-rate-chip {
+  border-color: #374151;
+  background: #1f2937;
   color: #e5e7eb;
 }
 
@@ -918,6 +1112,7 @@ onMounted(() => {
 .po-dialog-summary {
   padding: 0.875rem 1rem;
   border: 1px solid #e5e7eb;
+  border-left-width: 3px;
   border-radius: 0.75rem;
   background: #f9fafb;
 }
@@ -978,6 +1173,27 @@ onMounted(() => {
   color: #9ca3af;
   font-size: 0.75rem;
   line-height: 1.5;
+}
+
+/* 平台草稿预览 */
+.po-draft-preview {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.625rem;
+  background: #f9fafb;
+}
+
+:global(.dark) .po-draft-preview {
+  border-color: #374151;
+  background: #1f2937;
+}
+
+.po-draft-preview-hint {
+  color: #9ca3af;
+  font-size: 0.75rem;
 }
 
 .po-dialog-footer {
