@@ -46,22 +46,26 @@
             />
           </div>
 
-          <select v-model="groupFilter" class="input w-full sm:w-44">
-            <option value="">{{ t('admin.modelSquare.allGroups') }}</option>
-            <option v-for="group in groups" :key="String(group.id)" :value="String(group.id)">
-              {{ group.name }}
-            </option>
-          </select>
+          <Select
+            v-model="groupFilter"
+            :options="groupFilterOptions"
+            class="w-full sm:w-44"
+            :aria-label="t('admin.modelSquare.allGroups')"
+          />
 
-          <select v-model="providerFilter" class="input w-full sm:w-44">
-            <option value="">{{ t('admin.modelSquare.allProviders') }}</option>
-            <option v-for="item in providers" :key="item" :value="item">{{ providerLabel(item) }}</option>
-          </select>
+          <Select
+            v-model="providerFilter"
+            :options="providerFilterOptions"
+            class="w-full sm:w-44"
+            :aria-label="t('admin.modelSquare.allProviders')"
+          />
 
-          <select v-model="modeFilter" class="input w-full sm:w-40">
-            <option value="">{{ t('admin.modelSquare.allModes') }}</option>
-            <option v-for="item in modes" :key="item" :value="item">{{ modeLabel(item) }}</option>
-          </select>
+          <Select
+            v-model="modeFilter"
+            :options="modeFilterOptions"
+            class="w-full sm:w-40"
+            :aria-label="t('admin.modelSquare.allModes')"
+          />
 
           <div class="ml-auto inline-grid grid-cols-2 gap-1 rounded-lg border border-gray-200 bg-gray-100 p-1 dark:border-dark-700 dark:bg-dark-800">
             <button
@@ -377,6 +381,7 @@ import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Icon from '@/components/icons/Icon.vue'
+import Select, { type SelectOption } from '@/components/common/Select.vue'
 
 type PriceField =
   | 'input_price'
@@ -454,6 +459,21 @@ const groups = computed<ModelSquareGroup[]>(() => Array.isArray(payload.value.gr
 const groupById = computed(() => new Map(groups.value.map(group => [String(group.id), group])))
 const providers = computed(() => unique(models.value.map(model => model.provider).filter(Boolean) as string[]))
 const modes = computed(() => unique(models.value.map(model => model.mode || 'chat')))
+// 分组筛选下拉选项（含“全部”占位项）
+const groupFilterOptions = computed<SelectOption[]>(() => [
+  { value: '', label: t('admin.modelSquare.allGroups') },
+  ...groups.value.map(group => ({ value: String(group.id), label: group.name })),
+])
+// 平台筛选下拉选项（含“全部”占位项）
+const providerFilterOptions = computed<SelectOption[]>(() => [
+  { value: '', label: t('admin.modelSquare.allProviders') },
+  ...providers.value.map(item => ({ value: item, label: providerLabel(item) })),
+])
+// 模式筛选下拉选项（含“全部”占位项）
+const modeFilterOptions = computed<SelectOption[]>(() => [
+  { value: '', label: t('admin.modelSquare.allModes') },
+  ...modes.value.map(item => ({ value: item, label: modeLabel(item) })),
+])
 const availableCount = computed(() => models.value.filter(isAvailable).length)
 const groupDialogGroups = computed(() => groupDialogModel.value ? modelGroups(groupDialogModel.value) : [])
 const groupDialogTitle = computed(() => {

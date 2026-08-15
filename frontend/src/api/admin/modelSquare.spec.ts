@@ -126,6 +126,7 @@ describe('admin model square API', () => {
       if (path === '/admin/upstream-management/model-square/config') return Promise.resolve({ data: config })
       if (path === '/admin/channels') return Promise.resolve({ data: { items: [channel()], total: 1 } })
       if (path === '/admin/groups/all') return Promise.resolve({ data: [group(1)] })
+      if (path === '/admin/model-monitor/platform-overrides') return Promise.resolve({ data: [] })
       return Promise.resolve({ data: [] })
     })
   })
@@ -306,5 +307,61 @@ describe('admin model square API', () => {
       { id: 1, name: 'Group 1', platform: 'openai', rate_multiplier: 1 },
       { id: 3, name: 'Group 3', platform: 'composite', rate_multiplier: 0.8 },
     ])
+  })
+
+  it('按分组平台配置的覆盖平台过滤分组归属与最低倍率', () => {
+    const glmPricing = { ...channel().model_pricing[0], platform: 'glm', models: ['glm-4.5'] }
+    const result = buildConfiguredModelSquareResult(
+      {
+        platforms: [
+          { platform: 'openai', name: 'OpenAI', models: [{ id: 'gpt-5.5' }] },
+          { platform: 'glm', name: 'GLM', models: [{ id: 'glm-4.5' }] },
+        ],
+      },
+      [channel({ group_ids: [1, 2], model_pricing: [channel().model_pricing[0], glmPricing] })],
+      [group(1, 'openai', 0.3), group(2, 'openai', 0.8)],
+      new Map(),
+      new Map([['1', 'glm']])
+    )
+
+    const openaiModel = result.payload.models?.find(model => model.id === 'gpt-5.5')
+    const glmModel = result.payload.models?.find(model => model.id === 'glm-4.5')
+
+    expect(openaiModel?.group_ids).toEqual([2])
+    expect(openaiModel?.rate_multiplier).toBe(0.8)
+    expect(glmModel?.group_ids).toEqual([1])
+    expect(glmModel?.rate_multiplier).toBe(0.3)
+    expect(result.payload.groups).toEqual([
+      { id: 1, name: 'Group 1', platform: 'glm', rate_multiplier: 0.3 },
+      { id: 2, name: 'Group 2', platform: 'openai', rate_multiplier: 0.8 },
+    ])
+  })
+
+  it('从分组平台配置接口加载覆盖平台并应用到模型广场', async () => {
+    const glmConfig: ModelSquareConfigPayload = {
+      platforms: [
+        { platform: 'openai', name: 'OpenAI', models: [{ id: 'gpt-5.5' }] },
+        { platform: 'glm', name: 'GLM', models: [{ id: 'glm-4.5' }] },
+      ],
+    }
+    const glmPricing = { ...channel().model_pricing[0], platform: 'glm', models: ['glm-4.5'] }
+    getMock.mockImplementation((path: string) => {
+      if (path === '/admin/upstream-management/model-square/config') return Promise.resolve({ data: glmConfig })
+      if (path === '/admin/channels') return Promise.resolve({ data: { items: [channel({ group_ids: [1], model_pricing: [channel().model_pricing[0], glmPricing] })], total: 1 } })
+      if (path === '/admin/groups/all') return Promise.resolve({ data: [group(1, 'openai', 0.3)] })
+      if (path === '/admin/model-monitor/platform-overrides') {
+        return Promise.resolve({ data: [{ id: 1, name: 'Group 1', platform: 'openai', actual_platform: 'glm', effective_platform: 'glm', effective_platform_name: 'GLM', rate_multiplier: 0.3, show_in_monitor: true }] })
+      }
+      throw new Error(`unexpected request: ${path}`)
+    })
+
+    const result = await getModelSquare()
+
+    expect(getMock).toHaveBeenCalledWith('/admin/model-monitor/platform-overrides')
+    const openaiModel = result.payload.models?.find(model => model.id === 'gpt-5.5')
+    const glmModel = result.payload.models?.find(model => model.id === 'glm-4.5')
+    expect(openaiModel?.group_ids).toEqual([])
+    expect(glmModel?.group_ids).toEqual([1])
+    expect(result.payload.groups).toEqual([{ id: 1, name: 'Group 1', platform: 'glm', rate_multiplier: 0.3 }])
   })
 })

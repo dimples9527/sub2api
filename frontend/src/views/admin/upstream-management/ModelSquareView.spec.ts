@@ -1,7 +1,36 @@
 import { flushPromises, mount } from '@vue/test-utils'
+import { defineComponent, h } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ModelSquareView from './ModelSquareView.vue'
+
+// Select 组件是 Teleport 到 body 的自定义下拉框，这里用原生 select 模拟，
+// 便于测试继续通过 setValue 触发 v-model 筛选
+const SelectStub = defineComponent({
+  inheritAttrs: false,
+  props: {
+    modelValue: {
+      type: [String, Number, Boolean],
+      default: undefined,
+    },
+    options: {
+      type: Array,
+      default: () => [],
+    },
+  },
+  emits: ['update:modelValue'],
+  setup(props, { attrs, emit }) {
+    return () => h('select', {
+      ...attrs,
+      class: ['input', attrs.class],
+      value: props.modelValue ?? '',
+      onChange: (event: Event) => {
+        emit('update:modelValue', (event.target as HTMLSelectElement).value)
+      },
+    }, (props.options as Array<{ value: string | number | boolean | null; label: string }>)
+      .map(option => h('option', { value: String(option.value) }, option.label)))
+  },
+})
 
 const { getMock, showErrorMock, showSuccessMock } = vi.hoisted(() => ({
   getMock: vi.fn(),
@@ -161,6 +190,7 @@ function mountView() {
         EmptyState: { props: ['title', 'description'], template: '<div data-test="empty-state">{{ title }} {{ description }}</div>' },
         BaseDialog: { props: ['show', 'title'], template: '<div v-if="show" data-test="dialog"><slot /></div>' },
         Icon: { props: ['name'], template: '<span data-test="icon">{{ name }}</span>' },
+        Select: SelectStub,
       },
     },
   })
@@ -232,6 +262,43 @@ describe('ModelSquareView', () => {
     expect(dialogText).toContain('Default Group')
     expect(dialogText).toContain('$10')
     expect(dialogText).toContain('1x')
+  })
+
+  it('按覆盖后的平台过滤详情弹窗中的分组', async () => {
+    getMock.mockResolvedValue({
+      provider_slug: 'configured',
+      provider_name: 'Model Square Config',
+      provider_type: 'local',
+      payload: {
+        groups: [
+          { id: 1, name: 'OpenAI Group', platform: 'openai', rate_multiplier: 1 },
+          { id: 2, name: 'GLM Group', platform: 'glm', rate_multiplier: 0.5 },
+        ],
+        models: [
+          {
+            id: 'glm-4.5',
+            display_name: 'GLM-4.5',
+            provider: 'GLM',
+            platform: 'glm',
+            available: true,
+            mode: 'chat',
+            input_price: 5,
+            rate_multiplier: 0.5,
+            group_ids: [2],
+          },
+        ],
+      },
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const glmCard = wrapper.findAll('[data-test="model-card"]')
+      .find(card => card.text().includes('GLM-4.5'))
+    await glmCard?.find('.model-detail-button').trigger('click')
+
+    const dialogText = wrapper.find('[data-test="dialog"]').text()
+    expect(dialogText).toContain('GLM Group')
+    expect(dialogText).not.toContain('OpenAI Group')
   })
 
   it('does not render missing prices as zero while preserving explicit zero prices', async () => {

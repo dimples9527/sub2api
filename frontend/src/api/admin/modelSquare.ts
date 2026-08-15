@@ -1,5 +1,6 @@
 import { getAllIncludingInactive } from './groups'
 import { list, type Channel } from './channels'
+import { listLLMMonitorGroupPlatformOverrides } from './modelMonitor'
 import {
   get as getModelSquareConfig,
   getModelPricing as getModelSquareReferencePricing,
@@ -91,7 +92,8 @@ export function buildConfiguredModelSquareResult(
   config: ModelSquareConfigPayload,
   channels: Channel[],
   localGroups: AdminGroup[],
-  referencePrices = new Map<string, ModelSquareOfficialPricing>()
+  referencePrices = new Map<string, ModelSquareOfficialPricing>(),
+  platformOverrides = new Map<string, string>()
 ): AdminModelSquareResult {
   const groupById = new Map(localGroups.map(group => [String(group.id), group]))
   const configuredPlatforms = new Set(
@@ -110,8 +112,8 @@ export function buildConfiguredModelSquareResult(
       const modelID = modelConfig.id?.trim()
       if (!modelID) continue
 
-      const match = findConfiguredModelMatch(platform, modelID, channels, groupById)
-      const minimumRateMultiplier = minimumGroupRateMultiplier(localGroups, platform)
+      const match = findConfiguredModelMatch(platform, modelID, channels, groupById, platformOverrides)
+      const minimumRateMultiplier = minimumGroupRateMultiplier(localGroups, platform, platformOverrides)
 
       models.push({
         id: modelID,
@@ -129,13 +131,13 @@ export function buildConfiguredModelSquareResult(
 
   const groups: ModelSquareGroup[] = localGroups
     .filter(group => {
-      const platform = normalizePlatform(group.platform)
+      const platform = effectiveGroupPlatform(group, platformOverrides)
       return configuredPlatforms.has(platform) || platform === 'composite'
     })
     .map(group => ({
       id: group.id,
       name: group.name,
-      platform: normalizePlatform(group.platform),
+      platform: effectiveGroupPlatform(group, platformOverrides),
       rate_multiplier: group.rate_multiplier,
     }))
 
@@ -151,7 +153,8 @@ function findConfiguredModelMatch(
   platform: string,
   modelID: string,
   channels: Channel[],
-  groupById: Map<string, AdminGroup>
+  groupById: Map<string, AdminGroup>,
+  platformOverrides: Map<string, string>
 ): ModelMatch {
   const usedGroupIDs = new Set<number | string>()
   let available = false
@@ -159,7 +162,7 @@ function findConfiguredModelMatch(
   for (const channel of channels) {
     if (!channelSupportsModel(channel, platform, modelID)) continue
 
-    const compatibleGroupIDs = (channel.group_ids || []).filter(groupID => isGroupCompatible(groupById.get(String(groupID)), platform))
+    const compatibleGroupIDs = (channel.group_ids || []).filter(groupID => isGroupCompatible(groupById.get(String(groupID)), platform, platformOverrides))
     if (compatibleGroupIDs.length === 0) continue
 
     for (const groupID of compatibleGroupIDs) usedGroupIDs.add(groupID)
@@ -189,9 +192,17 @@ function channelSupportsModel(channel: Channel, platform: string, modelID: strin
   return false
 }
 
-function isGroupCompatible(group: AdminGroup | undefined, platform: string) {
+/**
+ * 计算分组的展示平台：优先使用“分组平台配置”中的实际平台覆盖，否则沿用分组原始平台。
+ */
+function effectiveGroupPlatform(group: AdminGroup, platformOverrides: Map<string, string>) {
+  const overridden = platformOverrides.get(String(group.id))
+  return normalizePlatform(overridden || group.platform)
+}
+
+function isGroupCompatible(group: AdminGroup | undefined, platform: string, platformOverrides: Map<string, string>) {
   if (!group) return false
-  const groupPlatform = normalizePlatform(group.platform)
+  const groupPlatform = effectiveGroupPlatform(group, platformOverrides)
   return groupPlatform === platform || groupPlatform === 'composite'
 }
 
@@ -212,10 +223,10 @@ function configuredPrices(
   return prices
 }
 
-function minimumGroupRateMultiplier(groups: AdminGroup[], platform: string) {
+function minimumGroupRateMultiplier(groups: AdminGroup[], platform: string, platformOverrides: Map<string, string>) {
   const rates = groups
     .filter(group => {
-      const groupPlatform = normalizePlatform(group.platform)
+      const groupPlatform = effectiveGroupPlatform(group, platformOverrides)
       return groupPlatform === platform || groupPlatform === 'composite'
     })
     .map(group => toFiniteNumber(group.rate_multiplier))
@@ -285,16 +296,30 @@ export async function getModelSquare(): Promise<AdminModelSquareResult> {
     return buildConfiguredModelSquareResult(config, [], [])
   }
 
-  const [channels, localGroups, referencePrices] = await Promise.all([
+  const [channels, localGroups, referencePrices, platformOverrides] = await Promise.all([
     listAllChannels(),
     getAllIncludingInactive(),
     listReferencePrices(config),
+    listGroupPlatformOverrides(),
   ])
-  return buildConfiguredModelSquareResult(config, channels, localGroups, referencePrices)
+  return buildConfiguredModelSquareResult(config, channels, localGroups, referencePrices, platformOverrides)
 }
 
 function hasConfiguredModels(config: ModelSquareConfigPayload) {
   return (config.platforms || []).some(platform => (platform.models || []).some(model => model.id?.trim()))
+}
+
+/**
+ * 加载“分组平台配置”中的实际平台覆盖（分组 ID -> 展示平台）。
+ * 模型广场按覆盖后的平台过滤分组归属，与模型监控保持一致；加载失败时沿用分组原始平台。
+ */
+async function listGroupPlatformOverrides(): Promise<Map<string, string>> {
+  try {
+    const items = await listLLMMonitorGroupPlatformOverrides()
+    return new Map(items.map(item => [String(item.id), normalizePlatform(item.effective_platform)]))
+  } catch {
+    return new Map()
+  }
 }
 
 async function listAllChannels(): Promise<Channel[]> {
