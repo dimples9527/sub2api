@@ -19,7 +19,7 @@ func NewCustomPlatformRepository(db *sql.DB) service.CustomPlatformRepository {
 }
 
 const customPlatformSelect = `
-SELECT id, code, name, enabled, sort_order, created_at, updated_at
+SELECT id, code, name, color, enabled, sort_order, created_at, updated_at
 FROM custom_platforms`
 
 func (r *customPlatformRepository) List(ctx context.Context, enabledOnly bool) ([]*service.CustomPlatform, error) {
@@ -64,9 +64,9 @@ func (r *customPlatformRepository) GetByCode(ctx context.Context, code string) (
 
 func (r *customPlatformRepository) Create(ctx context.Context, item *service.CustomPlatform) error {
 	err := r.db.QueryRowContext(ctx, `
-INSERT INTO custom_platforms (code, name, enabled, sort_order)
-VALUES ($1, $2, $3, $4)
-RETURNING id, created_at, updated_at`, item.Code, item.Name, item.Enabled, item.SortOrder).
+INSERT INTO custom_platforms (code, name, color, enabled, sort_order)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, created_at, updated_at`, item.Code, item.Name, item.Color, item.Enabled, item.SortOrder).
 		Scan(&item.ID, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		return mapCustomPlatformError(err)
@@ -76,8 +76,8 @@ RETURNING id, created_at, updated_at`, item.Code, item.Name, item.Enabled, item.
 
 func (r *customPlatformRepository) Update(ctx context.Context, item *service.CustomPlatform) error {
 	result, err := r.db.ExecContext(ctx, `
-UPDATE custom_platforms SET code=$2, name=$3, enabled=$4, sort_order=$5, updated_at=NOW()
-WHERE id=$1 AND deleted_at IS NULL`, item.ID, item.Code, item.Name, item.Enabled, item.SortOrder)
+UPDATE custom_platforms SET code=$2, name=$3, color=$4, enabled=$5, sort_order=$6, updated_at=NOW()
+WHERE id=$1 AND deleted_at IS NULL`, item.ID, item.Code, item.Name, item.Color, item.Enabled, item.SortOrder)
 	if err != nil {
 		return mapCustomPlatformError(err)
 	}
@@ -104,7 +104,7 @@ type customPlatformScanner interface{ Scan(dest ...any) error }
 
 func scanCustomPlatform(scanner customPlatformScanner) (*service.CustomPlatform, error) {
 	item := &service.CustomPlatform{}
-	err := scanner.Scan(&item.ID, &item.Code, &item.Name, &item.Enabled, &item.SortOrder, &item.CreatedAt, &item.UpdatedAt)
+	err := scanner.Scan(&item.ID, &item.Code, &item.Name, &item.Color, &item.Enabled, &item.SortOrder, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}

@@ -17,11 +17,17 @@ var (
 
 var customPlatformCodePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,49}$`)
 
+var customPlatformColorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+// defaultCustomPlatformColor 是未指定颜色时的默认色值（灰蓝色）。
+const defaultCustomPlatformColor = "#64748b"
+
 // CustomPlatform 是供应商模块和模型监控模块使用的独立平台字典项。
 type CustomPlatform struct {
 	ID        int64     `json:"id"`
 	Code      string    `json:"code"`
 	Name      string    `json:"name"`
+	Color     string    `json:"color"`
 	Enabled   bool      `json:"enabled"`
 	SortOrder int       `json:"sort_order"`
 	CreatedAt time.Time `json:"created_at"`
@@ -31,6 +37,7 @@ type CustomPlatform struct {
 type CustomPlatformUpsertParams struct {
 	Code      string `json:"code"`
 	Name      string `json:"name"`
+	Color     string `json:"color"`
 	Enabled   bool   `json:"enabled"`
 	SortOrder int    `json:"sort_order"`
 }
@@ -143,7 +150,14 @@ func normalizeCustomPlatform(params CustomPlatformUpsertParams) (*CustomPlatform
 	if params.SortOrder < 0 {
 		params.SortOrder = 0
 	}
-	return &CustomPlatform{Code: code, Name: name, Enabled: params.Enabled, SortOrder: params.SortOrder}, nil
+	color := strings.ToLower(strings.TrimSpace(params.Color))
+	if color == "" {
+		color = defaultCustomPlatformColor
+	}
+	if !customPlatformColorPattern.MatchString(color) {
+		return nil, ErrCustomPlatformInvalid
+	}
+	return &CustomPlatform{Code: code, Name: name, Color: color, Enabled: params.Enabled, SortOrder: params.SortOrder}, nil
 }
 
 func normalizeCustomPlatformCode(code string) string {
