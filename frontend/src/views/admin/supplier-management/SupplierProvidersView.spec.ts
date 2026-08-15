@@ -10,6 +10,7 @@ const providerViewMocks = vi.hoisted(() => ({
   listProviders: vi.fn(),
   listCostTrends: vi.fn(),
   backfillCostTrends: vi.fn(),
+  getBalanceSummary: vi.fn(),
   listProviderTypes: vi.fn(),
   updateProvider: vi.fn(),
   refreshToken: vi.fn(),
@@ -18,6 +19,7 @@ const providerViewMocks = vi.hoisted(() => ({
   syncProvider: vi.fn(),
   streamSupplierProviderSync: vi.fn(),
   testProviderEndpoint: vi.fn(),
+  listUpstreamBalanceRecharges: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
   showWarning: vi.fn(),
@@ -41,12 +43,21 @@ vi.mock('@/api/admin/supplierProviders', () => ({
     list: providerViewMocks.listProviders,
     listCostTrends: providerViewMocks.listCostTrends,
     backfillCostTrends: providerViewMocks.backfillCostTrends,
+    getBalanceSummary: providerViewMocks.getBalanceSummary,
     update: providerViewMocks.updateProvider,
     refreshToken: providerViewMocks.refreshToken,
     getAuthStatus: providerViewMocks.getAuthStatus,
     listAuthHistory: providerViewMocks.listAuthHistory,
   },
 }))
+
+vi.mock('@/api/admin/upstreamAccountSync', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/admin/upstreamAccountSync')>()
+  return {
+    ...actual,
+    listBalanceRecharges: providerViewMocks.listUpstreamBalanceRecharges,
+  }
+})
 
 vi.mock('@/api/admin/supplierProviderTypes', () => ({
   default: { list: providerViewMocks.listProviderTypes },
@@ -236,6 +247,34 @@ describe('SupplierProvidersView payload normalization', () => {
       items: [],
       started_at: '2026-07-31T00:00:00Z',
     })
+    providerViewMocks.getBalanceSummary.mockResolvedValue({
+      latest_date: '2026-08-14',
+      today: { date: '2026-08-14', balance: 170, cost: 60 },
+      previous: { date: '2026-08-13', balance: 140, cost: 55 },
+      history: { first_date: '2026-08-01', days: 14, total_balance: 2400, total_cost: 620 },
+    })
+    providerViewMocks.listUpstreamBalanceRecharges.mockResolvedValue([
+      {
+        id: 1,
+        provider_slug: 'alpha',
+        provider_name: 'Alpha',
+        amount: 100,
+        amount_scale: 1,
+        note: '手动充值',
+        occurred_at: '2026-08-10T08:00:00Z',
+        created_at: '2026-08-10T08:00:00Z',
+      },
+      {
+        id: 2,
+        provider_slug: 'alpha',
+        provider_name: 'Alpha',
+        amount: 50,
+        amount_scale: 1,
+        note: '',
+        occurred_at: '2026-08-12T08:00:00Z',
+        created_at: '2026-08-12T08:00:00Z',
+      },
+    ])
     providerViewMocks.listProviders.mockResolvedValue({
       items: providerRows,
       summary: {
@@ -673,6 +712,39 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(supplierProvidersSource).toContain('Bar')
   })
 
+  it('shows today and historical balance/cost summary cards', async () => {
+    const wrapper = await mountSupplierProviders()
+
+    expect(wrapper.get('[data-test="supplier-balance-today"]').text()).toContain('今日总余额')
+    expect(wrapper.get('[data-test="supplier-balance-today"]').text()).toContain('170')
+    expect(wrapper.get('[data-test="supplier-cost-today"]').text()).toContain('今日总成本')
+    expect(wrapper.get('[data-test="supplier-balance-previous"]').text()).toContain('历史总余额')
+    expect(wrapper.get('[data-test="supplier-balance-previous"]').text()).toContain('140')
+    expect(wrapper.get('[data-test="supplier-cost-history"]').text()).toContain('历史总成本')
+    // 历史总成本按上一统计日对比口径展示，脚注保留累计成本。
+    expect(wrapper.get('[data-test="supplier-cost-history"]').text()).toContain('55')
+    expect(wrapper.get('[data-test="supplier-cost-history"]').text()).toContain('620')
+    expect(supplierProvidersSource).toContain('getBalanceSummary')
+    expect(supplierProvidersSource).toContain('loadBalanceSummary')
+  })
+
+  it('loads upstream recharge records in the provider detail drawer', async () => {
+    const wrapper = await mountSupplierProviders()
+    const row = wrapper.find('tbody tr[data-row-id="1"]')
+    await row.trigger('click')
+    await flushPromises()
+
+    expect(providerViewMocks.listUpstreamBalanceRecharges).toHaveBeenCalledWith({
+      provider_slug: 'alpha',
+      days: 30,
+    })
+    const section = wrapper.get('[data-test="supplier-provider-recharges"]')
+    expect(section.text()).toContain('充值记录')
+    expect(wrapper.get('[data-test="supplier-recharge-total"]').text()).toContain('150')
+    expect(section.text()).toContain('手动充值')
+    expect(supplierProvidersSource).toContain('loadProviderRecharges')
+  })
+
   it('places the supplier cost breakdown in a full-width panel without horizontal scrolling', async () => {
     const wrapper = await mountSupplierProviders()
 
@@ -746,7 +818,7 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(wrapper.get('[data-test="supplier-cost-date-range"]').exists()).toBe(true)
   })
 
-  it('switches supplier cost breakdown date range independently', async () => {
+  it('separates the cost breakdown date range from the cost trend chart', async () => {
     const wrapper = await mountSupplierProviders()
     providerViewMocks.listCostTrends.mockClear()
 
@@ -754,16 +826,32 @@ describe('SupplierProvidersView payload normalization', () => {
     await breakdownDateRange.get('[data-test="supplier-cost-date-range-trigger"]').trigger('click')
     await flushPromises()
 
+    // 两个图时间范围独立：改拆分图日期只刷新拆分图，只发一次请求。
+    expect(providerViewMocks.listCostTrends).toHaveBeenCalledTimes(1)
     expect(providerViewMocks.listCostTrends).toHaveBeenLastCalledWith({
       start_date: '2026-07-01',
       end_date: '2026-07-10',
     })
+    expect(supplierProvidersSource).toContain('costTrendStartDate')
+    expect(supplierProvidersSource).toContain('costTrendEndDate')
     expect(supplierProvidersSource).toContain('costBreakdownStartDate')
     expect(supplierProvidersSource).toContain('costBreakdownEndDate')
     expect(supplierProvidersSource).toContain('onCostBreakdownDateRangeChange')
     expect(supplierProvidersSource).toContain('costBreakdownLoading')
     expect(wrapper.get('[data-test="supplier-cost-controls"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="supplier-cost-breakdown-controls"]').exists()).toBe(true)
+  })
+
+  it('highlights cost trend points whose deviation exceeds the threshold', async () => {
+    const wrapper = await mountSupplierProviders()
+
+    const line = wrapper.findComponent({ name: 'Line' })
+    expect(line.exists()).toBe(true)
+    const upstream = line.props('data').datasets[0]
+    expect(upstream.pointBackgroundColor).toEqual(['#dc2626', '#3b82f6'])
+    expect(wrapper.get('[data-test="supplier-cost-deviation-summary"]').text()).toContain('偏差超阈值 1/2 天')
+    expect(supplierProvidersSource).toContain('costTrendDeviation')
+    expect(supplierProvidersSource).toContain('pointBackgroundColor')
   })
 
   it('keeps the supplier cost breakdown date control in the left heading group', async () => {

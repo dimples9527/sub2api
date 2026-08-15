@@ -201,6 +201,26 @@ export interface SupplierProviderCostTrendResult {
   breakdown: SupplierProviderCostBreakdown[]
 }
 
+export interface SupplierProviderBalanceSummaryDay {
+  date: string
+  balance: number
+  cost: number
+}
+
+export interface SupplierProviderBalanceHistory {
+  first_date: string
+  days: number
+  total_balance: number
+  total_cost: number
+}
+
+export interface SupplierProviderBalanceSummary {
+  latest_date: string
+  today: SupplierProviderBalanceSummaryDay
+  previous: SupplierProviderBalanceSummaryDay
+  history: SupplierProviderBalanceHistory
+}
+
 export interface SupplierProviderCostTrendParams {
   days?: number
   start_date?: string
@@ -330,6 +350,13 @@ export async function backfillCostTrends(
   return data
 }
 
+export async function getBalanceSummary(): Promise<SupplierProviderBalanceSummary> {
+  const { data } = await apiClient.get<SupplierProviderBalanceSummary>(
+    '/admin/supplier-management/providers/balance-summary'
+  )
+  return data
+}
+
 export async function setDefault(id: number): Promise<SupplierProvider> {
   const { data } = await apiClient.put<SupplierProvider>(
     `/admin/supplier-management/providers/${id}/default`
@@ -363,6 +390,7 @@ export const supplierProvidersAPI = {
   list,
   listCostTrends,
   backfillCostTrends,
+  getBalanceSummary,
   get,
   create,
   update,

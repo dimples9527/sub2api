@@ -430,6 +430,21 @@ export async function addBalanceRecharge(
   return data
 }
 
+export interface UpstreamBalanceRechargeListParams {
+  provider_slug: string
+  days?: number
+}
+
+export async function listBalanceRecharges(
+  params: UpstreamBalanceRechargeListParams
+): Promise<UpstreamBalanceRecharge[]> {
+  const { data } = await apiClient.get<UpstreamBalanceRecharge[]>(
+    '/admin/upstream-management/providers/balance-consumption/recharges',
+    { params }
+  )
+  return data
+}
+
 export async function runBalanceSampleNow(): Promise<UpstreamBalanceSamplerConfig> {
   const { data } = await apiClient.post<UpstreamBalanceSamplerConfig>(
     '/admin/upstream-management/providers/balance-consumption/samples'
@@ -495,6 +510,7 @@ export const upstreamAccountSyncAPI = {
   getBalanceSamplerConfig,
   updateBalanceSamplerConfig,
   addBalanceRecharge,
+  listBalanceRecharges,
   runBalanceSampleNow,
   getBalanceSamplerPollLogs,
   getHealthGuardConfig,

@@ -44,6 +44,51 @@
     </section>
     <div v-if="error" class="sp-alert sp-error-line">{{ error }}</div>
 
+    <section class="sp-panel sp-balance-summary-panel" data-test="supplier-balance-summary">
+      <header class="sp-panel-head">
+        <div class="sp-panel-title">
+          <span class="sp-section-index">◈</span>
+          <div>
+            <h2>余额与成本汇总</h2>
+            <span>来自供应商每日同步快照：今日为最近统计日，历史为上一统计日对比口径</span>
+          </div>
+        </div>
+        <button
+          class="sp-button small ghost"
+          type="button"
+          :disabled="balanceSummaryLoading"
+          data-test="supplier-balance-summary-refresh"
+          @click="loadBalanceSummary"
+        >{{ balanceSummaryLoading ? '加载中…' : '刷新' }}</button>
+      </header>
+      <div class="sp-panel-body sp-balance-summary-body">
+        <div v-if="balanceSummaryLoading" class="sp-balance-summary-loading">余额汇总加载中…</div>
+        <div v-else-if="balanceSummary" class="sp-balance-summary-grid" data-test="supplier-balance-summary-grid">
+          <article class="sp-balance-summary-card balance" data-test="supplier-balance-today">
+            <span class="sp-balance-summary-label">今日总余额</span>
+            <strong class="sp-balance-summary-value">{{ currency(balanceSummary.today.balance) }}</strong>
+            <small class="sp-balance-summary-foot">最近统计日 {{ balanceSummary.today.date || '—' }}</small>
+          </article>
+          <article class="sp-balance-summary-card cost" data-test="supplier-cost-today">
+            <span class="sp-balance-summary-label">今日总成本</span>
+            <strong class="sp-balance-summary-value">{{ currency(balanceSummary.today.cost) }}</strong>
+            <small class="sp-balance-summary-foot">最近统计日 {{ balanceSummary.today.date || '—' }}</small>
+          </article>
+          <article class="sp-balance-summary-card history-balance" data-test="supplier-balance-previous">
+            <span class="sp-balance-summary-label">历史总余额</span>
+            <strong class="sp-balance-summary-value">{{ currency(balanceSummary.previous?.balance) }}</strong>
+            <small class="sp-balance-summary-foot">上一统计日 {{ balanceSummary.previous?.date || '暂无' }}（与今日对比）</small>
+          </article>
+          <article class="sp-balance-summary-card history-cost" data-test="supplier-cost-history">
+            <span class="sp-balance-summary-label">历史总成本</span>
+            <strong class="sp-balance-summary-value">{{ currency(balanceSummary.previous?.cost) }}</strong>
+            <small class="sp-balance-summary-foot">上一统计日 {{ balanceSummary.previous?.date || '暂无' }} · 自 {{ balanceSummary.history.first_date || '—' }} 起累计 {{ currency(balanceSummary.history.total_cost) }}</small>
+          </article>
+        </div>
+        <div v-else class="sp-balance-summary-loading">暂无每日同步快照数据，待供应商同步任务写入后展示</div>
+      </div>
+    </section>
+
     <section class="sp-metric-grid">
       <article
         v-for="metric in metrics"
@@ -178,20 +223,10 @@
             <span class="sp-section-index">02</span>
             <div>
               <h2>供应商组合健康</h2>
-              <span>综合状态 · 优先待办 · 成本对比</span>
+              <span>综合状态 · 优先待办 · 配置完整性</span>
             </div>
           </div>
           <div class="sp-health-head-right">
-            <button
-              class="sp-button small ghost"
-              type="button"
-              :disabled="costTrendLoading"
-              data-test="supplier-cost-refresh"
-              title="按当前时间范围向上游回补成本并刷新曲线（NewAPI 支持历史，Sub2API 仅当天）"
-              @click="refreshCostTrends"
-            >
-              {{ costTrendLoading ? '回补中…' : '重新获取' }}
-            </button>
             <span class="sp-status" :class="healthTone" data-test="supplier-health-tone">{{ healthLabel }}</span>
           </div>
         </header>
@@ -262,68 +297,88 @@
             </div>
           </section>
 
-          <section class="sp-health-section sp-health-chart-section" data-test="supplier-cost-trend">
-            <div class="sp-health-section-head sp-health-cost-section-head">
-              <div class="sp-health-section-title">
-                <span>成本对比</span>
-                <small>{{ costTrendRangeLabel }} · {{ costTrendScopeLabel }} · 上游成本 / 本地成本</small>
-              </div>
-              <div class="sp-health-date-range-control" data-test="supplier-cost-controls">
-                <span class="sp-health-control-label">日期范围</span>
-                <div class="sp-health-date-range" data-test="supplier-cost-date-range">
-                  <DateRangePicker
-                    v-model:start-date="costTrendStartDate"
-                    v-model:end-date="costTrendEndDate"
-                    @change="onCostTrendDateRangeChange"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div class="sp-health-chart-controls">
-              <div class="sp-health-provider-filter w-full sm:w-44 flex items-center gap-2">
-                <Select
-                  v-model="costTrendProviderId"
-                  class="w-full"
-                  :options="costTrendProviderOptions"
-                  aria-label="成本对比供应商"
-                  data-test="supplier-cost-provider"
-                  @update:model-value="onCostTrendProviderChange"
-                />
-                <span class="text-xs text-gray-500 whitespace-nowrap">偏差阈值</span>
-                <Select
-                  v-model="deviationThreshold"
-                  class="w-24"
-                  :options="deviationThresholdOptions"
-                  aria-label="成本偏差阈值"
-                />
-                <span class="text-xs font-mono w-12 text-blue-600">{{ (deviationThreshold * 100).toFixed(0) }}%</span>
-              </div>
-            </div>
-
-            <div class="sp-health-chart-meta">
-              <div class="sp-health-chart-legend">
-                <span class="sp-health-legend-item upstream"><i></i>上游成本</span>
-                <span class="sp-health-legend-item local"><i></i>本地成本</span>
-              </div>
-              <div class="sp-health-chart-totals">
-                <span>上游合计 <b>{{ currency(costTrendTotals.upstream) }}</b></span>
-                <span>本地合计 <b>{{ currency(costTrendTotals.local) }}</b></span>
-              </div>
-            </div>
-            <div class="sp-health-chart-canvas">
-              <Line
-                v-if="costTrendChartData"
-                :data="costTrendChartData"
-                :options="costTrendChartOptions"
-              />
-              <div v-else-if="costTrendLoading" class="sp-health-chart-empty">成本曲线加载中…</div>
-              <div v-else class="sp-health-chart-empty">暂无按天成本数据，可调整时间范围或供应商后点「重新获取」向上游回补</div>
-            </div>
-          </section>
-
         </div>
       </aside>
+    </section>
+
+    <section class="sp-panel sp-cost-trend-panel" data-test="supplier-cost-trend">
+      <header class="sp-panel-head">
+        <div class="sp-cost-trend-head-left" data-test="supplier-cost-trend-head-left">
+          <div class="sp-health-date-range-control" data-test="supplier-cost-controls">
+            <span class="sp-health-control-label">日期范围</span>
+            <div class="sp-health-date-range" data-test="supplier-cost-date-range">
+              <DateRangePicker
+                v-model:start-date="costTrendStartDate"
+                v-model:end-date="costTrendEndDate"
+                @change="onCostTrendDateRangeChange"
+              />
+            </div>
+          </div>
+          <div class="sp-panel-title">
+            <span class="sp-section-index">03</span>
+            <div>
+              <h2>成本对比</h2>
+              <span>{{ costTrendRangeLabel }} · {{ costTrendScopeLabel }} · 上游成本 / 本地成本</span>
+            </div>
+          </div>
+        </div>
+        <button
+          class="sp-button small ghost"
+          type="button"
+          :disabled="costTrendLoading"
+          data-test="supplier-cost-refresh"
+          title="按当前时间范围向上游回补成本并刷新曲线（NewAPI 支持历史，Sub2API 仅当天）"
+          @click="refreshCostTrends"
+        >{{ costTrendLoading ? '回补中…' : '重新获取' }}</button>
+      </header>
+      <div class="sp-panel-body sp-cost-trend-body" data-test="supplier-cost-trend-body">
+        <div class="sp-health-chart-controls">
+          <div class="sp-health-provider-filter w-full sm:w-44 flex items-center gap-2">
+            <Select
+              v-model="costTrendProviderId"
+              class="w-full"
+              :options="costTrendProviderOptions"
+              aria-label="成本对比供应商"
+              data-test="supplier-cost-provider"
+              @update:model-value="onCostTrendProviderChange"
+            />
+            <span class="text-xs text-gray-500 whitespace-nowrap">偏差阈值</span>
+            <Select
+              v-model="deviationThreshold"
+              class="w-24"
+              :options="deviationThresholdOptions"
+              aria-label="成本偏差阈值"
+            />
+            <span class="text-xs font-mono w-12 text-blue-600">{{ (deviationThreshold * 100).toFixed(0) }}%</span>
+          </div>
+        </div>
+
+        <div class="sp-health-chart-meta">
+          <div class="sp-health-chart-legend">
+            <span class="sp-health-legend-item upstream"><i></i>上游成本</span>
+            <span class="sp-health-legend-item local"><i></i>本地成本</span>
+          </div>
+          <div class="sp-health-chart-totals">
+            <span>上游合计 <b>{{ currency(costTrendTotals.upstream) }}</b></span>
+            <span>本地合计 <b>{{ currency(costTrendTotals.local) }}</b></span>
+            <span
+              v-if="costTrendChartData"
+              class="sp-deviation-summary"
+              :class="costTrendDeviationCount ? 'warn' : 'ok'"
+              data-test="supplier-cost-deviation-summary"
+            >{{ deviationSummaryLabel }}</span>
+          </div>
+        </div>
+        <div class="sp-health-chart-canvas sp-cost-trend-canvas">
+          <Line
+            v-if="costTrendChartData"
+            :data="costTrendChartData"
+            :options="costTrendChartOptions"
+          />
+          <div v-else-if="costTrendLoading" class="sp-health-chart-empty">成本曲线加载中…</div>
+          <div v-else class="sp-health-chart-empty">暂无按天成本数据，可调整时间范围或供应商后点「重新获取」向上游回补</div>
+        </div>
+      </div>
     </section>
 
     <section class="sp-panel sp-cost-breakdown-panel" data-test="supplier-cost-breakdown-panel">
@@ -340,7 +395,7 @@
             </div>
           </div>
           <div class="sp-panel-title">
-            <span class="sp-section-index">03</span>
+            <span class="sp-section-index">04</span>
             <div>
               <h2>按供应商拆分成本</h2>
               <span>{{ costBreakdownRangeLabel }} · 每个供应商并排比较上游成本和本地成本</span>
@@ -392,6 +447,28 @@
           <div class="sp-detail-cell"><span>预计可用</span><b :class="{ 'sp-up': isLowBalance(selectedProvider) }">{{ balanceText(selectedProvider) }}</b></div>
           <div class="sp-detail-cell"><span>最近同步</span><b>{{ syncText(selectedProvider) }}</b></div>
         </div>
+        <section class="sp-recharge-section" data-test="supplier-provider-recharges">
+          <div class="sp-recharge-head">
+            <div>
+              <span class="sp-recharge-kicker">上游充值</span>
+              <h4>充值记录（近 {{ rechargeDays }} 天）</h4>
+            </div>
+            <span class="sp-recharge-total" data-test="supplier-recharge-total">累计 <b>{{ currency(rechargeTotal) }}</b></span>
+          </div>
+          <div v-if="rechargesLoading" class="sp-recharge-empty">充值记录加载中…</div>
+          <div v-else-if="recharges.length" class="sp-recharge-list">
+            <div v-for="item in recharges" :key="item.id" class="sp-recharge-item">
+              <div class="sp-recharge-main">
+                <strong>{{ currency(item.amount) }}</strong>
+                <small>{{ formatAuthTime(item.occurred_at) }}</small>
+              </div>
+              <span class="sp-recharge-note">{{ item.note || '无备注' }}</span>
+            </div>
+          </div>
+          <div v-else class="sp-recharge-empty">
+            未找到该供应商对应的上游充值记录（按编码 {{ selectedProvider.code }} 匹配上游 slug / 名称）。可在「上游管理」的余额消费中登记充值。
+          </div>
+        </section>
         <div class="sp-drawer-actions">
           <button class="sp-button primary" type="button" @click="openEdit(selectedProvider)">编辑配置</button>
           <button class="sp-button" type="button" @click="openAuthHistory(selectedProvider)">登录与 Token</button>
@@ -928,9 +1005,10 @@ import Icon from '@/components/icons/Icon.vue'
 import Input from '@/components/common/Input.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
-import supplierProvidersAPI, { type SupplierProvider, type SupplierProviderSummary, type SupplierProviderUpsertPayload, type SupplierProviderCostTrendPoint, type SupplierProviderCostBreakdown, type SupplierProviderCostBackfillResult, type SupplierProviderAuthStatusResult, type SupplierProviderAuthHistoryResult, type SupplierProviderAuthEventType } from '@/api/admin/supplierProviders'
+import supplierProvidersAPI, { type SupplierProvider, type SupplierProviderSummary, type SupplierProviderUpsertPayload, type SupplierProviderCostTrendPoint, type SupplierProviderCostBreakdown, type SupplierProviderCostBackfillResult, type SupplierProviderAuthStatusResult, type SupplierProviderAuthHistoryResult, type SupplierProviderAuthEventType, type SupplierProviderBalanceSummary } from '@/api/admin/supplierProviders'
 import supplierProviderTypesAPI, { type SupplierProviderType, type SupplierProviderTypeUpsertPayload } from '@/api/admin/supplierProviderTypes'
 import { streamSupplierProviderSync, testProviderEndpoint, type SupplierProviderEndpointTestResult, type SupplierSyncProgressEvent, type SupplierSyncProgressStage, type SupplierSyncScope } from '@/api/admin/supplierProviderData'
+import { listBalanceRecharges as listUpstreamBalanceRecharges, type UpstreamBalanceRecharge } from '@/api/admin/upstreamAccountSync'
 import { useAppStore } from '@/stores/app'
 import type { Column } from '@/components/common/types'
 
@@ -1072,8 +1150,13 @@ const costBreakdownEndDate = ref(costBreakdownDefaultRange.end)
 const costTrendProviderId = ref<number | ''>('')
 const costTrendLoading = ref(false)
 const costBreakdownLoading = ref(false)
+const balanceSummary = ref<SupplierProviderBalanceSummary | null>(null)
+const balanceSummaryLoading = ref(false)
 const costTrendPoints = ref<SupplierProviderCostTrendPoint[]>([])
 const costTrendBreakdown = ref<SupplierProviderCostBreakdown[]>([])
+const recharges = ref<UpstreamBalanceRecharge[]>([])
+const rechargesLoading = ref(false)
+const rechargeDays = 30
 const deviationThresholdOptions: SelectOption[] = Array.from({ length: 31 }, (_, value) => ({
   value: value / 100,
   label: `${value}%`,
@@ -1318,6 +1401,10 @@ const costBreakdownRangeLabel = computed(() => {
   return `${start} ~ ${end}`
 })
 
+const rechargeTotal = computed(() =>
+  recharges.value.reduce((sum, item) => sum + Number(item.amount || 0), 0),
+)
+
 const costTrendTotals = computed(() =>
   costTrendPoints.value.reduce((acc, point) => {
     acc.upstream += Number(point.upstream_cost || 0)
@@ -1325,6 +1412,27 @@ const costTrendTotals = computed(() =>
     return acc
   }, { upstream: 0, local: 0 }),
 )
+
+// 每日上游/本地成本偏差率，用于成本对比图按阈值高亮异常点。
+const costTrendDeviation = computed(() =>
+  costTrendPoints.value.map(point => {
+    const upstream = Number(point.upstream_cost || 0)
+    const local = Number(point.local_cost || 0)
+    const max = Math.max(upstream, local)
+    return max <= 0 ? 0 : Math.abs(upstream - local) / max
+  }),
+)
+
+const costTrendDeviationCount = computed(
+  () => costTrendDeviation.value.filter(value => value > deviationThreshold.value).length,
+)
+
+const deviationSummaryLabel = computed(() => {
+  const total = costTrendPoints.value.length
+  const count = costTrendDeviationCount.value
+  if (!total) return '暂无偏差数据'
+  return count ? `偏差超阈值 ${count}/${total} 天` : `偏差均未超 ${(deviationThreshold.value * 100).toFixed(0)}%`
+})
 
 const costBreakdown = computed(() =>
   costTrendBreakdown.value.map(provider => ({
@@ -1339,6 +1447,9 @@ const costTrendChartData = computed(() => {
   if (!costTrendPoints.value.length) return null
   const hasValue = costTrendPoints.value.some(point => Number(point.upstream_cost || 0) > 0 || Number(point.local_cost || 0) > 0)
   if (!hasValue) return null
+  const threshold = deviationThreshold.value
+  const pointColors = costTrendDeviation.value.map(value => (value > threshold ? '#dc2626' : '#3b82f6'))
+  const pointRadius = costTrendDeviation.value.map(value => (value > threshold ? 4.5 : 2.75))
   return {
     labels: costTrendPoints.value.map(point => formatCostTrendLabel(point.date)),
     datasets: [
@@ -1347,16 +1458,28 @@ const costTrendChartData = computed(() => {
         data: costTrendPoints.value.map(point => Number(point.upstream_cost || 0)),
         borderColor: '#3b82f6',
         backgroundColor: 'rgba(59, 130, 246, 0.12)',
+        borderWidth: 2,
         fill: true,
         tension: 0.35,
+        pointRadius,
+        pointHoverRadius: 5,
+        pointBackgroundColor: pointColors,
+        pointBorderColor: 'rgba(255, 255, 255, 0.9)',
+        pointBorderWidth: 1,
       },
       {
         label: '本地成本',
         data: costTrendPoints.value.map(point => Number(point.local_cost || 0)),
         borderColor: '#d97706',
         backgroundColor: 'rgba(217, 119, 6, 0.10)',
+        borderWidth: 2,
         fill: true,
         tension: 0.35,
+        pointRadius,
+        pointHoverRadius: 5,
+        pointBackgroundColor: pointColors,
+        pointBorderColor: 'rgba(255, 255, 255, 0.9)',
+        pointBorderWidth: 1,
       },
     ],
   }
@@ -1381,6 +1504,15 @@ const costTrendChartOptions = computed<ChartOptions<'line'>>(() => {
             const label = context.dataset.label || ''
             const value = Number(context.parsed.y ?? 0)
             return `${label}: ${currency(value)}`
+          },
+          afterBody(items: TooltipItem<'line'>[]) {
+            const upstream = Number(items.find(item => item.dataset.label === '上游成本')?.parsed.y ?? 0)
+            const local = Number(items.find(item => item.dataset.label === '本地成本')?.parsed.y ?? 0)
+            const max = Math.max(upstream, local)
+            if (max <= 0) return []
+            const deviation = Math.abs(upstream - local) / max
+            const over = deviation > deviationThreshold.value
+            return [`偏差率 ${(deviation * 100).toFixed(1)}%${over ? ' · 超阈值' : ''}`]
           },
         },
       },
@@ -1410,13 +1542,14 @@ const costBreakdownChartData = computed(() => {
   if (!costBreakdown.value.length) return null
   const hasValue = costBreakdown.value.some(item => item.upstreamCost > 0 || item.localCost > 0)
   if (!hasValue) return null
+  const items = [...costBreakdown.value].sort((a, b) => b.upstreamCost - a.upstreamCost)
 
   return {
-    labels: costBreakdown.value.map(item => item.name),
+    labels: items.map(item => item.name),
     datasets: [
       {
         label: '上游成本',
-        data: costBreakdown.value.map(item => item.upstreamCost),
+        data: items.map(item => item.upstreamCost),
         backgroundColor: '#3b82f6',
         borderColor: '#2563eb',
         borderWidth: 1,
@@ -1428,7 +1561,7 @@ const costBreakdownChartData = computed(() => {
       },
       {
         label: '本地成本',
-        data: costBreakdown.value.map(item => item.localCost),
+        data: items.map(item => item.localCost),
         backgroundColor: '#d97706',
         borderColor: '#b45309',
         borderWidth: 1,
@@ -1462,6 +1595,13 @@ const costBreakdownChartOptions = computed<ChartOptions<'bar'>>(() => {
             const value = Number(context.parsed.y ?? 0)
             return `${label}: ${currency(value)}`
           },
+          afterBody(items: TooltipItem<'bar'>[]) {
+            const upstream = Number(items.find(item => item.dataset.label === '上游成本')?.parsed.y ?? 0)
+            const local = Number(items.find(item => item.dataset.label === '本地成本')?.parsed.y ?? 0)
+            const max = Math.max(upstream, local)
+            if (max <= 0) return []
+            return [`偏差率 ${((Math.abs(upstream - local) / max) * 100).toFixed(1)}%`]
+          },
         },
       },
     },
@@ -1473,7 +1613,8 @@ const costBreakdownChartOptions = computed<ChartOptions<'bar'>>(() => {
           minRotation: 0,
           autoSkip: false,
           callback(value: string | number) {
-            const label = costBreakdown.value[Number(value)]?.name || ''
+            const sorted = [...costBreakdown.value].sort((a, b) => b.upstreamCost - a.upstreamCost)
+            const label = sorted[Number(value)]?.name || ''
             return label.length > 12 ? `${label.slice(0, 12)}…` : label
           },
         },
@@ -1502,7 +1643,7 @@ watch(search, () => {
 
 onMounted(async () => {
   await loadProviderTypes()
-  await Promise.all([loadProviders(), loadCostTrends(), loadCostBreakdown()])
+  await Promise.all([loadProviders(), loadCostTrendData(), loadCostBreakdownData(), loadBalanceSummary()])
 })
 
 async function loadProviderTypes() {
@@ -1530,10 +1671,10 @@ async function loadProviders() {
   }
 }
 
-async function loadCostTrends() {
+async function loadCostTrendData() {
+  const providerId = typeof costTrendProviderId.value === 'number' ? costTrendProviderId.value : 0
   costTrendLoading.value = true
   try {
-    const providerId = typeof costTrendProviderId.value === 'number' ? costTrendProviderId.value : 0
     const result = await supplierProvidersAPI.listCostTrends({
       start_date: costTrendStartDate.value,
       end_date: costTrendEndDate.value,
@@ -1547,8 +1688,7 @@ async function loadCostTrends() {
   }
 }
 
-async function loadCostBreakdown() {
-  if (costBreakdownLoading.value) return
+async function loadCostBreakdownData() {
   costBreakdownLoading.value = true
   try {
     const result = await supplierProvidersAPI.listCostTrends({
@@ -1566,21 +1706,22 @@ async function loadCostBreakdown() {
 async function onCostTrendDateRangeChange(range: { startDate: string; endDate: string; preset: string | null }) {
   costTrendStartDate.value = range.startDate
   costTrendEndDate.value = range.endDate
-  await loadCostTrends()
-}
-
-async function onCostTrendProviderChange() {
-  await loadCostTrends()
+  await loadCostTrendData()
 }
 
 async function onCostBreakdownDateRangeChange(range: { startDate: string; endDate: string; preset: string | null }) {
   costBreakdownStartDate.value = range.startDate
   costBreakdownEndDate.value = range.endDate
-  await loadCostBreakdown()
+  await loadCostBreakdownData()
+}
+
+async function onCostTrendProviderChange() {
+  // 供应商筛选只影响成本对比曲线，拆分图无需重拉，减少一次请求。
+  await loadCostTrendData()
 }
 
 async function refreshCostTrends() {
-  if (costTrendLoading.value) return
+  if (costTrendLoading.value || costBreakdownLoading.value) return
   costTrendLoading.value = true
   try {
     const providerId = typeof costTrendProviderId.value === 'number' ? costTrendProviderId.value : 0
@@ -1589,17 +1730,38 @@ async function refreshCostTrends() {
       end_date: costTrendEndDate.value,
       provider_id: providerId || undefined,
     })
-    const result = await supplierProvidersAPI.listCostTrends({
-      start_date: costTrendStartDate.value,
-      end_date: costTrendEndDate.value,
-      provider_id: providerId || undefined,
-    })
-    costTrendPoints.value = Array.isArray(result?.points) ? result.points : []
     notifyCostBackfillResult(backfill)
   } catch (err) {
     appStore.showError(errorMessage(err, '回补上游成本失败'))
   } finally {
     costTrendLoading.value = false
+  }
+  await loadCostTrendData()
+}
+
+async function loadBalanceSummary() {
+  balanceSummaryLoading.value = true
+  try {
+    balanceSummary.value = await supplierProvidersAPI.getBalanceSummary()
+  } catch (err) {
+    appStore.showError(errorMessage(err, '加载余额汇总失败'))
+  } finally {
+    balanceSummaryLoading.value = false
+  }
+}
+
+async function loadProviderRecharges(provider: SupplierProvider) {
+  rechargesLoading.value = true
+  recharges.value = []
+  try {
+    recharges.value = await listUpstreamBalanceRecharges({
+      provider_slug: provider.code,
+      days: rechargeDays,
+    })
+  } catch (err) {
+    appStore.showError(errorMessage(err, '加载充值记录失败'))
+  } finally {
+    rechargesLoading.value = false
   }
 }
 
@@ -1628,8 +1790,9 @@ function selectProviderForDetail(provider: SupplierProvider) {
   // 点击列表行时同步成本对比范围，便于按供应商查看
   if (costTrendProviderId.value !== provider.id) {
     costTrendProviderId.value = provider.id
-    void loadCostTrends()
+    void loadCostTrendData()
   }
+  void loadProviderRecharges(provider)
 }
 
 async function openAuthHistory(provider: SupplierProvider) {
@@ -1795,7 +1958,7 @@ function authDurationTone(durationMs?: number): string {
 }
 
 async function refreshProvidersView() {
-  await Promise.all([loadProviders(), loadCostTrends(), loadCostBreakdown()])
+  await Promise.all([loadProviders(), loadCostTrendData(), loadCostBreakdownData(), loadBalanceSummary()])
 }
 
 function applyHealthTodo(todo: HealthTodo) {
@@ -2670,6 +2833,177 @@ function errorMessage(err: unknown, fallback: string): string {
 /* 统计卡：页面层压缩窄屏高度，并保持 2 列（覆盖共享样式在 460px 的单列） */
 .sp-metric-grid {
   gap: 0.75rem;
+}
+
+/* 余额与成本汇总卡 */
+.sp-balance-summary-panel {
+  margin-top: 0.75rem;
+}
+
+.sp-balance-summary-body {
+  padding: 0.9rem 1rem 1rem;
+}
+
+.sp-balance-summary-loading {
+  padding: 1rem 0.25rem;
+  color: var(--sp-muted);
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+.sp-balance-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.sp-balance-summary-card {
+  --sp-card-accent: var(--sp-blue, #3b82f6);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  overflow: hidden;
+  padding: 0.8rem 0.9rem 0.8rem 1rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.75rem;
+  background: var(--sp-panel-2, var(--sp-panel));
+}
+
+.sp-balance-summary-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--sp-card-accent);
+}
+
+.sp-balance-summary-card.balance { --sp-card-accent: var(--sp-green, #16a34a); }
+.sp-balance-summary-card.cost { --sp-card-accent: var(--sp-amber, #d97706); }
+.sp-balance-summary-card.history-balance { --sp-card-accent: var(--sp-cyan, #3b82f6); }
+.sp-balance-summary-card.history-cost { --sp-card-accent: var(--sp-violet, #7c3aed); }
+
+.sp-balance-summary-label {
+  color: var(--sp-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.sp-balance-summary-value {
+  color: var(--sp-text);
+  font-size: 1.3rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.sp-balance-summary-foot {
+  color: var(--sp-muted);
+  font-size: 0.66rem;
+}
+
+/* 详情抽屉：上游充值记录 */
+.sp-recharge-section {
+  margin-top: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.85rem;
+  background: var(--sp-panel-2, var(--sp-panel));
+}
+
+.sp-recharge-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.6rem;
+}
+
+.sp-recharge-kicker {
+  display: block;
+  color: var(--sp-cyan, #3b82f6);
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.sp-recharge-head h4 {
+  margin: 0.15rem 0 0;
+  color: var(--sp-text);
+  font-size: 0.9rem;
+}
+
+.sp-recharge-total {
+  color: var(--sp-muted);
+  font-size: 0.72rem;
+}
+
+.sp-recharge-total b {
+  color: var(--sp-green, #16a34a);
+  font-weight: 800;
+}
+
+.sp-recharge-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 13rem;
+  overflow-y: auto;
+}
+
+.sp-recharge-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.55rem;
+  background: var(--sp-panel);
+}
+
+.sp-recharge-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.sp-recharge-main strong {
+  color: var(--sp-text);
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.sp-recharge-main small {
+  color: var(--sp-muted);
+  font-size: 0.65rem;
+}
+
+.sp-recharge-note {
+  max-width: 45%;
+  overflow: hidden;
+  color: var(--sp-muted);
+  font-size: 0.7rem;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-recharge-empty {
+  padding: 0.6rem 0.25rem;
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+}
+
+@media (max-width: 1100px) {
+  .sp-balance-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .sp-balance-summary-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 900px) {
@@ -3588,6 +3922,27 @@ function errorMessage(err: unknown, fallback: string): string {
   font-weight: 800;
 }
 
+.sp-deviation-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.sp-deviation-summary.ok {
+  color: #16a34a;
+  background: rgba(22, 163, 74, 0.1);
+}
+
+.sp-deviation-summary.warn {
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.1);
+}
+
 .sp-health-chart-canvas {
   height: 180px;
   border: 1px solid var(--sp-line);
@@ -3605,6 +3960,39 @@ function errorMessage(err: unknown, fallback: string): string {
   font-size: 0.8125rem;
   text-align: center;
   padding: 0.75rem;
+}
+
+.sp-cost-trend-panel {
+  margin-bottom: 1rem;
+}
+
+.sp-cost-trend-head-left {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex: 1 1 auto;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.sp-cost-trend-head-left .sp-health-date-range-control {
+  flex: 0 1 auto;
+  justify-content: flex-start;
+}
+
+.sp-cost-trend-head-left .sp-panel-title {
+  min-width: 12rem;
+  flex: 1 1 18rem;
+}
+
+.sp-cost-trend-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.sp-cost-trend-canvas {
+  height: 240px;
 }
 
 .sp-cost-breakdown-panel {
