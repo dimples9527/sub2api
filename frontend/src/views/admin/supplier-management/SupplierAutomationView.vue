@@ -255,9 +255,16 @@
             <div class="sp-health-guard-account-card">
               <div>
                 <strong>需要检查的账号</strong>
-                <span>已选择 {{ healthGuardAccountIDs.length }} 个本地账号，可按平台设置默认测试模型并为账号单独覆盖。</span>
+                <span>已选择 <strong class="sp-health-guard-card-count">{{ healthGuardAccountIDs.length }}</strong> 个本地账号，可按平台设置默认测试模型并为账号单独覆盖。</span>
               </div>
-              <button class="sp-button small ghost" type="button" @click="openHealthGuardAccounts">配置检查账号</button>
+              <button
+                class="sp-button small ghost sp-health-guard-config-button"
+                type="button"
+                @click="openHealthGuardAccounts"
+              >
+                <Icon name="cog" size="sm" />
+                配置检查账号
+              </button>
             </div>
             <div class="sp-form-grid sp-health-guard-policy-grid">
               <Input :model-value="editForm.config.account_health_guard_max_accounts_per_run" type="number" label="单次检查账号数" @update:model-value="editForm.config.account_health_guard_max_accounts_per_run = toNumber($event, editForm.config.account_health_guard_max_accounts_per_run)" />
@@ -726,7 +733,7 @@
             </div>
             <div v-if="healthGuardPlatformSummaries.length" class="sp-health-guard-platform-model-grid">
               <article v-for="summary in healthGuardPlatformSummaries" :key="summary.platform">
-                <div>
+                <div :class="platformTextClass(summary.platform)">
                   <strong>{{ platformLabel(summary.platform) }}</strong>
                   <span>{{ summary.accountCount }} 个可选账号</span>
                 </div>
@@ -792,7 +799,7 @@
                   <strong>{{ healthGuardSelectionSummary.selected }}</strong>
                 </button>
               </div>
-              <span class="sp-health-guard-filter-result">筛选结果 {{ healthGuardWorkspaceAccounts.length }} 个</span>
+              <span class="sp-health-guard-filter-result">筛选结果 <strong>{{ healthGuardWorkspaceAccounts.length }}</strong> 个</span>
             </div>
 
             <div v-if="loadingHealthGuardSupplierAccounts" class="sp-rate-guard-empty">正在加载账号...</div>
@@ -916,6 +923,7 @@ import Input from '@/components/common/Input.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
+import Icon from '@/components/icons/Icon.vue'
 import type { Column } from '@/components/common/types'
 import {
   listSupplierAccounts,
@@ -3505,11 +3513,44 @@ function intervalSecondsToCron(seconds: number): string | null {
   font-size: 12px;
 }
 
+.sp-health-guard-account-card strong.sp-health-guard-card-count {
+  color: var(--sp-blue);
+  font-size: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-health-guard-account-card .sp-button.sp-health-guard-config-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-color: color-mix(in srgb, var(--sp-blue) 45%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-blue) 9%, var(--sp-panel));
+  color: var(--sp-blue);
+  font-weight: 600;
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, transform 120ms ease;
+}
+
+.sp-health-guard-account-card .sp-button.sp-health-guard-config-button:hover {
+  border-color: var(--sp-blue);
+  background: color-mix(in srgb, var(--sp-blue) 14%, var(--sp-panel));
+  color: var(--sp-blue);
+}
+
+.sp-health-guard-account-card .sp-button.sp-health-guard-config-button:active {
+  transform: translateY(1px);
+}
+
+.sp-health-guard-account-card .sp-button.sp-health-guard-config-button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--sp-blue) 30%, transparent);
+  outline-offset: 2px;
+}
+
 .sp-health-guard-account-dialog {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   min-height: 0;
   height: 100%;
   max-height: none;
@@ -3527,8 +3568,8 @@ function intervalSecondsToCron(seconds: number): string | null {
 
 .sp-health-guard-platform-models {
   flex: 0 0 auto;
-  padding: 8px 12px;
-  background: color-mix(in srgb, var(--sp-blue) 3%, var(--sp-panel));
+  padding: 10px 14px 12px;
+  background: color-mix(in srgb, var(--sp-blue) 4%, var(--sp-panel));
 }
 
 .sp-health-guard-account-workspace {
@@ -3540,25 +3581,56 @@ function intervalSecondsToCron(seconds: number): string | null {
 
 .sp-health-guard-dialog-section-head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
+  flex-wrap: wrap;
   justify-content: space-between;
-  gap: 8px;
+  gap: 4px 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--sp-line);
+}
+
+.sp-health-guard-dialog-section-head strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: color-mix(in srgb, var(--sp-blue) 78%, var(--sp-text));
+}
+
+.sp-health-guard-dialog-section-head strong::before {
+  content: '';
+  width: 4px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--sp-blue);
+}
+
+.sp-health-guard-dialog-section-head > span {
+  color: color-mix(in srgb, var(--sp-blue) 52%, var(--sp-muted));
 }
 
 .sp-health-guard-platform-model-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px 12px;
-  margin-top: 10px;
+  gap: 8px 14px;
+  margin-top: 12px;
 }
 
 .sp-health-guard-platform-model-grid article {
   display: grid;
-  grid-template-columns: minmax(110px, 0.62fr) minmax(180px, 1.38fr);
+  grid-template-columns: minmax(118px, 0.6fr) minmax(180px, 1.4fr);
   align-items: center;
-  gap: 8px;
-  border-top: 1px solid var(--sp-line);
-  padding-top: 10px;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--sp-blue) 12%, var(--sp-line));
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--sp-panel);
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+.sp-health-guard-platform-model-grid article:hover {
+  border-color: color-mix(in srgb, var(--sp-blue) 30%, var(--sp-line));
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--sp-blue) 9%, transparent);
 }
 
 .sp-health-guard-platform-model-grid article > div {
@@ -3567,45 +3639,97 @@ function intervalSecondsToCron(seconds: number): string | null {
   gap: 2px;
 }
 
+.sp-health-guard-platform-model-grid article > div strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: inherit;
+}
+
+.sp-health-guard-platform-model-grid article > div span {
+  color: color-mix(in srgb, currentColor 58%, var(--sp-muted));
+  font-variant-numeric: tabular-nums;
+}
+
 .sp-health-guard-selection-summary {
   display: grid;
   flex: 0 0 auto;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   border-bottom: 1px solid var(--sp-line);
-  background: color-mix(in srgb, var(--sp-soft) 26%, transparent);
+  background: color-mix(in srgb, var(--sp-soft) 22%, transparent);
 }
 
 .sp-health-guard-selection-summary article {
+  --sp-summary-accent: var(--sp-muted);
+
+  position: relative;
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   min-width: 0;
   gap: 10px;
   border-left: 1px solid var(--sp-line);
-  padding: 11px 14px;
+  padding: 12px 14px 11px;
 }
 
 .sp-health-guard-selection-summary article:first-child {
   border-left: 0;
 }
 
+.sp-health-guard-selection-summary article:nth-child(1) {
+  --sp-summary-accent: var(--sp-blue);
+}
+
+.sp-health-guard-selection-summary article:nth-child(2) {
+  --sp-summary-accent: var(--sp-violet);
+}
+
+.sp-health-guard-selection-summary article:nth-child(3) {
+  --sp-summary-accent: var(--sp-green);
+}
+
+.sp-health-guard-selection-summary article:nth-child(4) {
+  --sp-summary-accent: var(--sp-amber);
+}
+
+.sp-health-guard-selection-summary article::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 3px;
+  background: var(--sp-summary-accent);
+  opacity: 0.85;
+}
+
 .sp-health-guard-selection-summary article span {
-  color: var(--sp-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: color-mix(in srgb, var(--sp-summary-accent) 64%, var(--sp-muted));
   font-size: 12px;
 }
 
+.sp-health-guard-selection-summary article span::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--sp-summary-accent);
+  opacity: 0.9;
+}
+
 .sp-health-guard-selection-summary article strong {
-  color: var(--sp-text);
-  font-size: 17px;
+  color: var(--sp-summary-accent);
+  font-size: 18px;
+  font-weight: 750;
   font-variant-numeric: tabular-nums;
+  line-height: 1;
 }
 
 .sp-health-guard-selection-summary article.warning {
-  background: color-mix(in srgb, var(--sp-amber) 8%, transparent);
-}
-
-.sp-health-guard-selection-summary article.warning strong {
-  color: var(--sp-amber);
+  background: color-mix(in srgb, var(--sp-amber) 10%, transparent);
 }
 
 .sp-health-guard-account-toolbar {
@@ -3614,8 +3738,8 @@ function intervalSecondsToCron(seconds: number): string | null {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: 8px 12px;
+  padding: 10px 14px;
 }
 
 .sp-health-guard-account-filters {
@@ -3630,7 +3754,7 @@ function intervalSecondsToCron(seconds: number): string | null {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 8px;
   min-height: 38px;
   border: 1px solid var(--sp-line);
   border-radius: 9px;
@@ -3640,8 +3764,9 @@ function intervalSecondsToCron(seconds: number): string | null {
   cursor: pointer;
   font: inherit;
   font-size: 12px;
+  font-weight: 600;
   white-space: nowrap;
-  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 120ms ease;
 }
 
 .sp-health-guard-selected-toggle:hover,
@@ -3650,44 +3775,64 @@ function intervalSecondsToCron(seconds: number): string | null {
   color: var(--sp-blue);
 }
 
+.sp-health-guard-selected-toggle:active {
+  transform: translateY(1px);
+}
+
 .sp-health-guard-selected-toggle:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--sp-blue) 28%, transparent);
   outline-offset: 2px;
 }
 
 .sp-health-guard-selected-toggle.active {
-  border-color: color-mix(in srgb, var(--sp-blue) 45%, var(--sp-line));
+  border-color: color-mix(in srgb, var(--sp-blue) 52%, var(--sp-line));
   color: var(--sp-blue);
-  background: color-mix(in srgb, var(--sp-blue) 8%, var(--sp-panel));
+  background: color-mix(in srgb, var(--sp-blue) 10%, var(--sp-panel));
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--sp-blue) 20%, transparent);
 }
 
 .sp-health-guard-selected-toggle-mark {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 999px;
   background: var(--sp-muted);
+  transition: background-color 160ms ease, box-shadow 160ms ease;
 }
 
 .sp-health-guard-selected-toggle.active .sp-health-guard-selected-toggle-mark {
   background: var(--sp-blue);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sp-blue) 15%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sp-blue) 18%, transparent);
 }
 
 .sp-health-guard-selected-toggle strong {
   min-width: 20px;
   border-radius: 999px;
-  padding: 1px 6px;
+  padding: 1px 7px;
   color: inherit;
   background: color-mix(in srgb, currentColor 10%, transparent);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+  font-weight: 700;
 }
 
 .sp-health-guard-filter-result {
+  display: inline-flex;
+  align-items: center;
   flex: 0 0 auto;
+  min-height: 24px;
+  border-radius: 999px;
+  padding: 0 9px;
   color: var(--sp-muted);
-  font-size: 12px;
+  background: color-mix(in srgb, var(--sp-soft) 72%, transparent);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.sp-health-guard-filter-result strong {
+  color: var(--sp-blue);
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
 }
 
 .sp-health-guard-account-list {
@@ -3698,7 +3843,20 @@ function intervalSecondsToCron(seconds: number): string | null {
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   border-top: 1px solid var(--sp-line);
-  background: color-mix(in srgb, var(--sp-soft) 10%, var(--sp-panel));
+  background: color-mix(in srgb, var(--sp-soft) 12%, var(--sp-panel));
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--sp-line) 82%, transparent) transparent;
+}
+
+.sp-health-guard-account-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.sp-health-guard-account-list::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sp-line) 85%, transparent);
+  background-clip: padding-box;
 }
 
 .sp-health-guard-account-row {
@@ -3709,7 +3867,7 @@ function intervalSecondsToCron(seconds: number): string | null {
   min-width: 0;
   gap: 8px 12px;
   border-bottom: 1px solid var(--sp-line);
-  padding: 7px 14px;
+  padding: 8px 14px;
   background: var(--sp-panel);
   transition: background-color 160ms ease, box-shadow 160ms ease;
 }
@@ -3719,12 +3877,16 @@ function intervalSecondsToCron(seconds: number): string | null {
 }
 
 .sp-health-guard-account-row:hover {
-  background: color-mix(in srgb, var(--sp-blue) 3%, var(--sp-panel));
+  background: color-mix(in srgb, var(--sp-blue) 4%, var(--sp-panel));
 }
 
 .sp-health-guard-account-row.selected {
-  background: color-mix(in srgb, var(--sp-blue) 7%, var(--sp-panel));
+  background: color-mix(in srgb, var(--sp-blue) 8%, var(--sp-panel));
   box-shadow: inset 3px 0 0 var(--sp-blue);
+}
+
+.sp-health-guard-account-row.selected:hover {
+  background: color-mix(in srgb, var(--sp-blue) 11%, var(--sp-panel));
 }
 
 .sp-health-guard-account-row.missing-model {
@@ -3733,7 +3895,7 @@ function intervalSecondsToCron(seconds: number): string | null {
 }
 
 .sp-health-guard-account-row.unavailable {
-  background: color-mix(in srgb, var(--sp-amber) 9%, var(--sp-panel));
+  background: color-mix(in srgb, var(--sp-amber) 8%, var(--sp-panel));
   box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sp-amber) 72%, var(--sp-line));
 }
 
@@ -3744,15 +3906,15 @@ function intervalSecondsToCron(seconds: number): string | null {
 .sp-health-guard-account-choice {
   display: grid;
   min-width: 0;
-  grid-template-columns: 15px minmax(0, 1fr);
+  grid-template-columns: 16px minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   cursor: pointer;
 }
 
 .sp-health-guard-account-choice input[type='checkbox'] {
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
   margin: 0;
   cursor: pointer;
   accent-color: var(--sp-blue);
@@ -3767,7 +3929,7 @@ function intervalSecondsToCron(seconds: number): string | null {
   display: flex;
   align-items: center;
   min-width: 0;
-  gap: 6px;
+  gap: 8px;
   color: var(--sp-muted);
   font-size: 12px;
 }
@@ -3785,7 +3947,7 @@ function intervalSecondsToCron(seconds: number): string | null {
 
 .sp-health-guard-account-id {
   flex: 0 0 auto;
-  color: var(--sp-muted);
+  color: color-mix(in srgb, var(--sp-blue) 52%, var(--sp-muted));
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -3821,29 +3983,32 @@ function intervalSecondsToCron(seconds: number): string | null {
 }
 
 .sp-health-guard-model-status {
+  display: inline-flex;
+  align-items: center;
   flex: 0 0 auto;
-  border: 1px solid color-mix(in srgb, var(--sp-blue) 24%, var(--sp-line));
+  gap: 4px;
+  border: 1px solid color-mix(in srgb, var(--sp-blue) 26%, var(--sp-line));
   border-radius: 999px;
-  padding: 1px 6px;
+  padding: 1px 7px;
   color: var(--sp-blue);
-  background: color-mix(in srgb, var(--sp-blue) 6%, var(--sp-panel));
+  background: color-mix(in srgb, var(--sp-blue) 7%, var(--sp-panel));
   font-size: 10px;
   font-weight: 700;
-  line-height: 1.35;
+  line-height: 1.4;
   white-space: nowrap;
 }
 
 .sp-health-guard-model-status.override {
   color: var(--sp-green);
-  border-color: color-mix(in srgb, var(--sp-green) 26%, var(--sp-line));
-  background: color-mix(in srgb, var(--sp-green) 7%, var(--sp-panel));
+  border-color: color-mix(in srgb, var(--sp-green) 30%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-green) 8%, var(--sp-panel));
 }
 
 .sp-health-guard-model-status.missing,
 .sp-health-guard-model-status.unavailable {
   color: var(--sp-amber);
-  border-color: color-mix(in srgb, var(--sp-amber) 30%, var(--sp-line));
-  background: color-mix(in srgb, var(--sp-amber) 8%, var(--sp-panel));
+  border-color: color-mix(in srgb, var(--sp-amber) 34%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-amber) 9%, var(--sp-panel));
 }
 
 .sp-health-guard-account-model-editor {
@@ -3853,7 +4018,7 @@ function intervalSecondsToCron(seconds: number): string | null {
 }
 
 .sp-health-guard-account-model-editor :deep(.select-trigger) {
-  min-height: 32px;
+  min-height: 34px;
   border-radius: 8px;
   padding: 5px 10px;
   font-size: 12px;
@@ -4296,6 +4461,13 @@ function intervalSecondsToCron(seconds: number): string | null {
   .sp-overview-item:hover {
     transform: none;
   }
+
+  .sp-health-guard-account-row,
+  .sp-health-guard-selected-toggle,
+  .sp-health-guard-account-card .sp-button.sp-health-guard-config-button,
+  .sp-health-guard-platform-model-grid article {
+    transition: none;
+  }
 }
 @media (max-width: 1024px) {
   .sp-overview-strip {
@@ -4459,7 +4631,7 @@ function intervalSecondsToCron(seconds: number): string | null {
 
   .sp-health-guard-platform-models {
     flex: 0 1 auto;
-    max-height: min(22vh, 160px);
+    max-height: min(24vh, 180px);
     min-height: 0;
     overflow: auto;
     overscroll-behavior: contain;
@@ -4496,7 +4668,7 @@ function intervalSecondsToCron(seconds: number): string | null {
   }
 
   .sp-health-guard-selection-summary article {
-    padding: 6px 10px;
+    padding: 8px 10px 7px;
   }
 
   .sp-health-guard-selection-summary article strong {

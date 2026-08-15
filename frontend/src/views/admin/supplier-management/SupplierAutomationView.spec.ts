@@ -507,7 +507,8 @@ describe('SupplierAutomationView edit dialog', () => {
   })
 
   it('keeps the selected-account filter from overlapping its result and colors account platforms', () => {
-    expect(supplierAutomationSource).toContain("import { platformBadgeClass, platformLabel, platformTextClass } from '@/utils/platformColors'")
+    expect(supplierAutomationSource).toContain("import { platformBadgeClass, platformTextClass } from '@/utils/platformColors'")
+    expect(supplierAutomationSource).toContain("import { ensureCustomPlatformLabels, resolvePlatformDisplayLabel as platformLabel } from '@/utils/customPlatformLabels'")
     expect(supplierAutomationSource).toContain(":class=\"['sp-health-guard-account-platform', platformBadgeClass(mapping.platform)]\"")
     expect(supplierAutomationSource).toContain('.sp-health-guard-account-toolbar')
     expect(supplierAutomationSource).toContain('flex-wrap: wrap')
@@ -534,35 +535,25 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain(':global(.modal-content:has(.sp-health-guard-account-dialog) .modal-footer)')
   })
 
-  it('lets the mobile health guard account dialog scroll as a single body layer', () => {
+  it('keeps the mobile health guard account regions internally scrollable', () => {
     const mobileBreakpoint = supplierAutomationSource.indexOf('@media (max-width: 760px)')
     expect(mobileBreakpoint).toBeGreaterThan(-1)
     const mobileStyles = supplierAutomationSource.slice(mobileBreakpoint)
-    expect(mobileStyles).toContain(':global(.modal-content:has(.sp-health-guard-account-dialog))')
-    expect(mobileStyles).toContain('height: min(92dvh, calc(100dvh - 12px));')
-    expect(mobileStyles).toContain('overflow-y: auto;')
     expect(mobileStyles).toContain('.sp-health-guard-account-dialog')
-    expect(mobileStyles).toContain('height: auto;')
+    expect(mobileStyles).toContain('.sp-health-guard-platform-models')
+    expect(mobileStyles).toMatch(/\.sp-health-guard-platform-models\s*\{[^}]*max-height:\s*min\(24vh,\s*180px\);[^}]*overflow:\s*auto;/s)
+    expect(mobileStyles).toContain('.sp-health-guard-account-workspace')
     expect(mobileStyles).toContain('.sp-health-guard-account-list')
-    expect(mobileStyles).toContain('overflow: visible;')
-    expect(mobileStyles).not.toContain('flex: 1 1 40vh;')
-    expect(mobileStyles).not.toContain('max-height: min(22vh, 160px);')
+    expect(mobileStyles).toMatch(/\.sp-health-guard-account-list\s*\{[^}]*flex:\s*1 1 40vh;[^}]*overflow:\s*auto;/s)
   })
 
-  it('compacts the mobile health guard account filter row spacing', () => {
-    expect(supplierAutomationSource).toContain('sp-health-guard-account-filter-actions')
-    expect(supplierAutomationSource).toContain('sp-health-guard-account-search')
+  it('compacts the mobile health guard account filters and summary', () => {
+    expect(supplierAutomationSource).toContain('sp-health-guard-account-filters')
     const mobileBreakpoint = supplierAutomationSource.indexOf('@media (max-width: 760px)')
     const mobileStyles = supplierAutomationSource.slice(mobileBreakpoint)
-    expect(mobileStyles).toContain('.sp-health-guard-account-filter-actions')
-    expect(mobileStyles).toContain('justify-content: space-between;')
-    expect(mobileStyles).toContain('min-height: 34px;')
-    expect(mobileStyles).toContain('min-height: 32px;')
-    expect(mobileStyles).toContain('padding: 6px 10px;')
-    expect(mobileStyles).toContain('gap: 6px;')
-    expect(mobileStyles).toContain('align-content: start;')
-    expect(mobileStyles).toContain('.sp-health-guard-selected-toggle')
-    expect(mobileStyles).not.toContain('max-height: min(22vh, 160px);')
+    expect(mobileStyles).toMatch(/\.sp-health-guard-account-filters\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s)
+    expect(mobileStyles).toMatch(/\.sp-health-guard-account-filters\s*> :nth-child\(n \+ 3\)\s*\{[^}]*grid-column:\s*1 \/ -1;/s)
+    expect(mobileStyles).toMatch(/\.sp-health-guard-selection-summary\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s)
   })
 
   it('validates checked accounts and effective models before saving or running', () => {
