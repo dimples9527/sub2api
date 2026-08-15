@@ -1,5 +1,5 @@
 <template>
-  <AppLayout>
+  <AppLayout class="model-square-root">
     <TablePageLayout>
       <template #filters>
         <div class="flex flex-wrap items-center gap-3">
@@ -115,6 +115,7 @@
             v-for="section in providerSections"
             :key="section.provider"
             class="provider-section"
+            :style="providerAccent(section.provider)"
           >
             <div class="provider-section-header">
               <div class="min-w-0">
@@ -138,6 +139,7 @@
                 role="button"
                 tabindex="0"
                 :title="modelCardTitle(model)"
+                :style="providerAccent(model.provider)"
                 @click="copyModelId(model)"
                 @keydown.enter.prevent="copyModelId(model)"
               >
@@ -173,7 +175,8 @@
                     :class="['price-box', slot.toneClass]"
                   >
                     <span>{{ slot.label }}</span>
-                    <strong>{{ formatPriceOrUnset(slot.value) }}</strong>
+                    <strong>{{ formatPriceOrZero(slot.value) }}</strong>
+                    <s v-if="slot.originalValue != null" class="price-original">{{ formatPrice(slot.originalValue) }}</s>
                     <small v-if="slot.unit">{{ slot.unit }}</small>
                   </div>
                 </div>
@@ -238,10 +241,10 @@
                 <td class="max-w-72 px-4 py-3 font-medium text-gray-950 dark:text-white">
                   <span class="break-words">{{ modelDisplayName(model) }}</span>
                 </td>
-                <td class="whitespace-nowrap px-4 py-3 font-mono">{{ formatPriceOrUnset(modelPriceValue(model, 'input_price')) }}</td>
-                <td class="whitespace-nowrap px-4 py-3 font-mono">{{ formatPriceOrUnset(modelPriceValue(model, 'output_price')) }}</td>
-                <td class="whitespace-nowrap px-4 py-3 font-mono">{{ formatPriceOrUnset(modelPriceValue(model, 'cache_read_price')) }}</td>
-                <td class="whitespace-nowrap px-4 py-3 font-mono">{{ formatPriceOrUnset(modelPriceValue(model, 'cache_write_price')) }}</td>
+                <td class="whitespace-nowrap px-4 py-3 font-mono">{{ formatPriceOrZero(modelPriceValue(model, 'input_price')) }}</td>
+                <td class="whitespace-nowrap px-4 py-3 font-mono">{{ formatPriceOrZero(modelPriceValue(model, 'output_price')) }}</td>
+                <td class="whitespace-nowrap px-4 py-3 font-mono">{{ formatPriceOrZero(modelPriceValue(model, 'cache_read_price')) }}</td>
+                <td class="whitespace-nowrap px-4 py-3 font-mono">{{ formatPriceOrZero(modelPriceValue(model, 'cache_write_price')) }}</td>
                 <td class="whitespace-nowrap px-4 py-3">{{ modeLabel(model.mode) }}</td>
                 <td class="px-4 py-3">
                   <div class="flex min-w-72 flex-wrap gap-1.5">
@@ -268,7 +271,7 @@
       width="extra-wide"
       @close="closeModelDetails"
     >
-      <div v-if="detailModel" class="space-y-5">
+      <div v-if="detailModel" class="model-square-root space-y-5">
         <div class="flex flex-wrap items-start justify-between gap-3 border-b border-gray-100 pb-4 dark:border-dark-700">
           <div class="min-w-0">
             <div class="break-words text-lg font-bold text-gray-950 dark:text-white">{{ modelDisplayName(detailModel) }}</div>
@@ -320,7 +323,8 @@
               :class="['price-box', slot.toneClass]"
             >
               <span>{{ slot.label }}</span>
-              <strong>{{ formatPriceOrUnset(slot.value) }}</strong>
+              <strong>{{ formatPriceOrZero(slot.value) }}</strong>
+              <s v-if="slot.originalValue != null" class="price-original">{{ formatPrice(slot.originalValue) }}</s>
               <small v-if="slot.unit">{{ slot.unit }}</small>
             </div>
           </div>
@@ -340,7 +344,7 @@
       width="wide"
       @close="closeGroupDialog"
     >
-      <div class="max-h-[56vh] space-y-2 overflow-y-auto">
+      <div class="model-square-root max-h-[56vh] space-y-2 overflow-y-auto">
         <div
           v-for="group in groupDialogGroups"
           :key="String(group.id)"
@@ -382,6 +386,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Icon from '@/components/icons/Icon.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
+import { platformAccentColor } from '@/utils/platformColors'
 
 type PriceField =
   | 'input_price'
@@ -404,6 +409,7 @@ type PriceDescriptor = {
 }
 type ModelPriceSlot = PriceDescriptor & {
   value?: number
+  originalValue?: number
 }
 type ModelSquareProviderSection = {
   provider: string
@@ -434,8 +440,8 @@ const copiedModelId = ref('')
 let copiedTimer: ReturnType<typeof setTimeout> | undefined
 
 const defaultPriceDescriptors: PriceDescriptor[] = [
-  { key: 'input_price', label: '\u8f93\u5165', unit: '$/\u767e\u4e07 tokens', toneClass: 'price-box-neutral' },
-  { key: 'output_price', label: '\u8f93\u51fa', unit: '$/\u767e\u4e07 tokens', toneClass: 'price-box-neutral' },
+  { key: 'input_price', label: '\u8f93\u5165', unit: '$/\u767e\u4e07 tokens', toneClass: 'price-box-teal' },
+  { key: 'output_price', label: '\u8f93\u51fa', unit: '$/\u767e\u4e07 tokens', toneClass: 'price-box-orange' },
   { key: 'cache_read_price', label: '\u7f13\u5b58\u8bfb\u53d6', unit: '', toneClass: 'price-box-blue' },
   { key: 'cache_write_price', label: '\u7f13\u5b58\u5199\u5165', unit: '', toneClass: 'price-box-violet' },
 ]
@@ -618,19 +624,18 @@ function modelDisplayName(model: ModelSquareModel) {
 }
 
 function modelPriceSlots(model: ModelSquareModel, multiplier?: number): ModelPriceSlot[] {
-  const slots = defaultPriceDescriptors.map(descriptor => ({ ...descriptor, value: modelPriceValue(model, descriptor.key, multiplier) }))
-  const extraSlots = priceDescriptors
-    .filter(descriptor => !defaultPriceDescriptors.some(defaultDescriptor => defaultDescriptor.key === descriptor.key))
-    .map(descriptor => ({ ...descriptor, value: modelPriceValue(model, descriptor.key, multiplier) }))
-    .filter(slot => slot.value != null)
-
-  for (const extraSlot of extraSlots) {
-    const emptyIndex = slots.findIndex(slot => slot.value == null)
-    if (emptyIndex < 0) break
-    slots[emptyIndex] = extraSlot
-  }
-
-  return slots
+  // 固定展示输入、输出、缓存读取、缓存写入四个价格位，不被优先级/图片/按请求等额外价格顶替。
+  return defaultPriceDescriptors.map(descriptor => {
+    const value = modelPriceValue(model, descriptor.key, multiplier)
+    const original = value == null ? undefined : modelPriceValue(model, descriptor.key, 1)
+    const originalValue = original != null && value != null && value < original - 1e-9 ? original : undefined
+    return {
+      ...descriptor,
+      value,
+      originalValue,
+      toneClass: value == null ? 'price-box-unset' : descriptor.toneClass,
+    }
+  })
 }
 
 function modelCardTitle(model: ModelSquareModel) {
@@ -646,8 +651,8 @@ function modelConfiguredPriceLines(model: ModelSquareModel) {
   })
 }
 
-function formatPriceOrUnset(value?: number | string) {
-  return value == null || value === '' ? '\u672a\u8bbe\u7f6e' : formatPrice(value)
+function formatPriceOrZero(value?: number | string) {
+  return value == null || value === '' ? '$0' : formatPrice(value)
 }
 
 function isAvailable(model: ModelSquareModel) {
@@ -671,6 +676,21 @@ function modelKey(model: ModelSquareModel, index: number) {
 
 function providerLabel(value?: string) {
   return value || t('admin.modelSquare.unknownProvider')
+}
+
+// 平台强调色：已知平台复用全站 platformColors，未知平台按名称哈希取本地深色，保证不同平台有辨识度。
+const providerAccentFallbackColors = ['#0d9488', '#2563eb', '#7c3aed', '#d97706', '#dc2626', '#0891b2', '#16a34a', '#db2777']
+const providerAccentKnownPlatforms = new Set(['anthropic', 'openai', 'antigravity', 'gemini', 'grok', 'composite'])
+
+function providerAccent(provider?: string) {
+  const key = (provider || '').trim().toLowerCase()
+  if (providerAccentKnownPlatforms.has(key)) {
+    return { '--ms-provider': platformAccentColor(key) }
+  }
+
+  let hash = 0
+  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0
+  return { '--ms-provider': providerAccentFallbackColors[hash % providerAccentFallbackColors.length] }
 }
 
 function modeLabel(value?: string) {
@@ -758,19 +778,30 @@ onMounted(reload)
 
 <style scoped>
 .summary-pill {
-  @apply flex h-11 items-center gap-3 rounded-lg border border-gray-200 px-3 text-sm text-gray-600 dark:border-dark-600 dark:text-gray-300;
+  @apply flex h-11 items-center gap-3 rounded-lg border px-3 text-sm;
+  border-color: var(--ms-line);
+  color: var(--ms-muted);
 }
 
 .summary-pill strong {
-  @apply font-mono text-base text-gray-900 dark:text-white;
+  @apply font-mono text-base;
+  color: var(--ms-text);
 }
 
 .view-toggle-btn {
-  @apply grid h-8 w-8 place-items-center rounded-md text-gray-500 transition-colors hover:bg-white hover:text-gray-900 dark:hover:bg-dark-700 dark:hover:text-white;
+  @apply grid h-8 w-8 place-items-center rounded-md transition-colors;
+  color: var(--ms-muted);
+}
+
+.view-toggle-btn:hover {
+  background: var(--ms-panel-2);
+  color: var(--ms-text);
 }
 
 .view-toggle-btn.active {
-  @apply bg-white text-primary-600 shadow-sm dark:bg-dark-700 dark:text-primary-400;
+  background: color-mix(in srgb, var(--ms-brand) 10%, var(--ms-panel));
+  color: var(--ms-brand-strong);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ms-brand) 45%, transparent);
 }
 
 .model-square-board {
@@ -778,7 +809,19 @@ onMounted(reload)
 }
 
 .provider-section {
-  @apply space-y-3;
+  @apply relative space-y-3 pl-3;
+}
+
+.provider-section::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.4rem;
+  bottom: 0.4rem;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--ms-provider, var(--ms-brand));
+  opacity: 0.9;
 }
 
 .provider-section-header {
@@ -786,20 +829,26 @@ onMounted(reload)
 }
 
 .provider-title {
-  @apply flex min-w-0 items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white;
+  @apply flex min-w-0 items-center gap-2 text-sm font-semibold;
+  color: var(--ms-text);
 }
 
 .provider-dot,
 .model-provider-dot {
-  @apply h-2 w-2 shrink-0 rounded-full bg-slate-400;
+  @apply h-2 w-2 shrink-0 rounded-full;
+  background: var(--ms-provider, var(--ms-brand));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ms-provider, var(--ms-brand)) 16%, transparent);
 }
 
 .provider-meta {
-  @apply mt-0.5 text-xs text-gray-500 dark:text-gray-400;
+  @apply mt-0.5 text-xs;
+  color: var(--ms-muted);
 }
 
 .provider-count {
-  @apply grid h-7 min-w-7 place-items-center rounded-md bg-gray-100 px-2 font-mono text-xs font-semibold text-gray-600 dark:bg-dark-700 dark:text-gray-300;
+  @apply grid h-7 min-w-7 place-items-center rounded-md px-2 font-mono text-xs font-semibold;
+  background: var(--ms-panel-3);
+  color: var(--ms-muted);
 }
 
 .model-card-grid {
@@ -809,13 +858,17 @@ onMounted(reload)
 }
 
 .model-card {
-  @apply relative flex min-h-[16.5rem] cursor-pointer flex-col rounded-lg border border-gray-200 bg-white p-5 transition duration-200 dark:border-dark-700 dark:bg-dark-800;
+  @apply relative flex min-h-[16.5rem] cursor-pointer flex-col rounded-lg border p-5 transition duration-200;
+  border-color: var(--ms-line);
+  background: var(--ms-panel);
+  box-shadow: var(--ms-shadow);
 }
 
 .model-card:hover,
 .model-card:focus-visible {
-  @apply -translate-y-0.5 border-cyan-400 outline-none dark:border-cyan-500;
-  box-shadow: 0 16px 38px rgba(15, 23, 42, 0.08), 0 0 0 1px rgba(6, 182, 212, 0.18);
+  @apply -translate-y-0.5 outline-none;
+  border-color: var(--ms-brand);
+  box-shadow: 0 16px 38px rgba(15, 23, 42, 0.12), 0 0 0 1px color-mix(in srgb, var(--ms-brand) 55%, transparent), 0 0 28px var(--ms-glow);
 }
 
 .model-card-top {
@@ -823,7 +876,8 @@ onMounted(reload)
 }
 
 .model-provider {
-  @apply inline-flex min-w-0 items-center gap-2 text-xs font-semibold text-gray-500 dark:text-gray-400;
+  @apply inline-flex min-w-0 items-center gap-2 text-xs font-semibold;
+  color: var(--ms-muted);
 }
 
 .model-status {
@@ -831,11 +885,13 @@ onMounted(reload)
 }
 
 .model-status-available {
-  @apply bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300;
+  background: color-mix(in srgb, var(--ms-green) 12%, var(--ms-panel));
+  color: var(--ms-green);
 }
 
 .model-status-muted {
-  @apply bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-gray-300;
+  background: var(--ms-panel-3);
+  color: var(--ms-muted);
 }
 
 .status-dot {
@@ -847,17 +903,24 @@ onMounted(reload)
 }
 
 .model-title {
-  @apply min-w-0 flex-1 text-base font-bold leading-snug text-gray-950 transition-colors dark:text-white;
+  @apply min-w-0 flex-1 text-base font-bold leading-snug transition-colors;
+  color: var(--ms-text);
   overflow-wrap: anywhere;
 }
 
 .model-card:hover .model-title,
 .model-card:focus-visible .model-title {
-  @apply text-teal-700 dark:text-teal-300;
+  color: var(--ms-brand-strong);
 }
 
 .copy-button {
-  @apply grid h-8 w-8 shrink-0 place-items-center rounded-md text-gray-300 opacity-0 transition hover:bg-gray-100 hover:text-teal-700 focus:opacity-100 dark:hover:bg-dark-700 dark:hover:text-teal-300;
+  @apply grid h-8 w-8 shrink-0 place-items-center rounded-md opacity-0 transition focus:opacity-100;
+  color: var(--ms-dim);
+}
+
+.copy-button:hover {
+  background: var(--ms-panel-3);
+  color: var(--ms-brand-strong);
 }
 
 .model-card:hover .copy-button,
@@ -871,38 +934,96 @@ onMounted(reload)
 
 .price-box {
   @apply min-h-[4.6rem] rounded-lg border p-3;
+  border-color: var(--ms-line);
+  background: var(--ms-panel-2);
 }
 
 .price-box-neutral {
-  @apply border-gray-100 bg-gray-50 dark:border-dark-700 dark:bg-dark-700/50;
+  border-color: var(--ms-line);
+  background: var(--ms-panel-2);
+}
+
+.price-box-teal {
+  border-color: color-mix(in srgb, var(--ms-brand) 40%, var(--ms-line));
+  background: color-mix(in srgb, var(--ms-brand) 12%, var(--ms-panel));
+}
+
+.price-box-orange {
+  border-color: color-mix(in srgb, var(--ms-orange) 40%, var(--ms-line));
+  background: color-mix(in srgb, var(--ms-orange) 12%, var(--ms-panel));
 }
 
 .price-box-blue {
-  @apply border-blue-100 bg-blue-50 text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-300;
+  border-color: color-mix(in srgb, var(--ms-blue) 40%, var(--ms-line));
+  background: color-mix(in srgb, var(--ms-blue) 12%, var(--ms-panel));
 }
 
 .price-box-violet {
-  @apply border-violet-100 bg-violet-50 text-violet-700 dark:border-violet-900/50 dark:bg-violet-950/30 dark:text-violet-300;
+  border-color: color-mix(in srgb, var(--ms-violet) 40%, var(--ms-line));
+  background: color-mix(in srgb, var(--ms-violet) 12%, var(--ms-panel));
+}
+
+.price-box-unset {
+  border-style: dashed;
+  border-color: var(--ms-line);
+  background: var(--ms-panel-2);
 }
 
 .price-box span {
-  @apply block text-xs font-medium text-gray-500 dark:text-gray-400;
+  @apply block text-xs font-medium;
+  color: var(--ms-muted);
+}
+
+.price-box-teal span {
+  color: var(--ms-brand);
+}
+
+.price-box-orange span {
+  color: var(--ms-orange);
+}
+
+.price-box-blue span {
+  color: var(--ms-blue);
+}
+
+.price-box-violet span {
+  color: var(--ms-violet);
 }
 
 .price-box strong {
-  @apply mt-1 block font-mono text-sm font-bold text-gray-950 dark:text-white;
+  @apply mt-1 block font-mono text-sm font-bold;
+  color: var(--ms-text);
+}
+
+.price-box-teal strong {
+  color: var(--ms-brand-strong);
+}
+
+.price-box-orange strong {
+  color: var(--ms-orange);
 }
 
 .price-box-blue strong {
-  @apply text-blue-700 dark:text-blue-300;
+  color: var(--ms-blue);
 }
 
 .price-box-violet strong {
-  @apply text-violet-700 dark:text-violet-300;
+  color: var(--ms-violet);
+}
+
+.price-box-unset strong {
+  color: var(--ms-dim);
 }
 
 .price-box small {
-  @apply mt-0.5 block text-[11px] font-medium text-gray-400 dark:text-gray-500;
+  @apply mt-0.5 block text-[11px] font-medium;
+  color: var(--ms-dim);
+}
+
+.price-original {
+  @apply mt-0.5 block text-[11px] font-medium leading-none line-through;
+  color: var(--ms-dim);
+  opacity: 0.85;
 }
 
 .model-card-footer {
@@ -910,51 +1031,96 @@ onMounted(reload)
 }
 
 .mode-chip {
-  @apply inline-flex h-7 items-center rounded-md bg-blue-50 px-2.5 text-xs font-semibold text-blue-700 dark:bg-blue-950/40 dark:text-blue-300;
+  @apply inline-flex h-7 items-center rounded-md px-2.5 text-xs font-semibold;
+  background: color-mix(in srgb, var(--ms-blue) 10%, var(--ms-panel));
+  color: var(--ms-blue);
+  border: 1px solid color-mix(in srgb, var(--ms-blue) 26%, transparent);
 }
 
 .primary-group-chip {
-  @apply inline-flex min-w-0 max-w-[68%] items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-gray-500 transition hover:bg-amber-50 hover:text-amber-700 dark:text-gray-400 dark:hover:bg-amber-950/30 dark:hover:text-amber-300;
+  @apply inline-flex min-w-0 max-w-[68%] items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition;
+  color: var(--ms-muted);
+}
+
+.primary-group-chip:hover {
+  background: color-mix(in srgb, var(--ms-amber) 10%, var(--ms-panel));
+  color: var(--ms-amber);
 }
 
 .primary-group-chip b {
-  @apply shrink-0 font-bold text-orange-500;
+  @apply shrink-0 font-bold;
+  color: var(--ms-amber);
 }
 
 .model-rate-chip {
-  @apply ml-auto inline-flex h-7 shrink-0 items-center rounded-md bg-amber-50 px-2.5 font-mono text-xs font-bold text-orange-600 dark:bg-amber-950/30 dark:text-orange-300;
+  @apply ml-auto inline-flex h-7 shrink-0 items-center rounded-md px-2.5 font-mono text-xs font-bold;
+  background: color-mix(in srgb, var(--ms-amber) 12%, var(--ms-panel));
+  color: var(--ms-amber);
+  border: 1px solid color-mix(in srgb, var(--ms-amber) 30%, transparent);
 }
 
 .model-detail-button {
-  @apply inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-gray-200 px-2 text-xs font-semibold text-gray-500 transition hover:border-cyan-300 hover:bg-cyan-50 hover:text-cyan-700 dark:border-dark-600 dark:text-gray-400 dark:hover:border-cyan-700 dark:hover:bg-cyan-950/30 dark:hover:text-cyan-300;
+  @apply inline-flex h-7 shrink-0 items-center gap-1 rounded-md border px-2 text-xs font-semibold transition;
+  border-color: var(--ms-line);
+  color: var(--ms-muted);
+}
+
+.model-detail-button:hover {
+  border-color: var(--ms-brand);
+  background: color-mix(in srgb, var(--ms-brand) 9%, var(--ms-panel));
+  color: var(--ms-brand-strong);
 }
 
 .detail-group-option {
-  @apply flex min-w-0 items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 transition hover:border-orange-300 hover:bg-orange-50 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-300 dark:hover:border-orange-700 dark:hover:bg-orange-950/20;
+  @apply flex min-w-0 items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm transition;
+  border-color: var(--ms-line);
+  background: var(--ms-panel);
+  color: var(--ms-muted);
+}
+
+.detail-group-option:hover {
+  border-color: color-mix(in srgb, var(--ms-amber) 55%, var(--ms-line));
+  background: color-mix(in srgb, var(--ms-amber) 8%, var(--ms-panel));
 }
 
 .detail-group-option.active {
-  @apply border-orange-400 bg-orange-50 text-orange-800 shadow-sm dark:border-orange-500 dark:bg-orange-950/30 dark:text-orange-200;
+  border-color: var(--ms-amber);
+  background: color-mix(in srgb, var(--ms-amber) 12%, var(--ms-panel));
+  color: var(--ms-amber);
+  box-shadow: var(--ms-shadow);
 }
 
 .detail-price-section {
-  @apply rounded-lg border border-gray-100 bg-gray-50/70 p-3 dark:border-dark-700 dark:bg-dark-800/60;
+  @apply rounded-lg border p-3;
+  border-color: var(--ms-line);
+  background: color-mix(in srgb, var(--ms-brand) 5%, var(--ms-panel-2));
 }
 
 .group-overflow {
-  @apply shrink-0 rounded bg-gray-100 px-1 font-mono text-[10px] text-gray-500 dark:bg-dark-700 dark:text-gray-300;
+  @apply shrink-0 rounded px-1 font-mono text-[10px];
+  background: var(--ms-panel-3);
+  color: var(--ms-muted);
 }
 
 .group-chip {
-  @apply inline-flex max-w-full items-center gap-1 rounded bg-gray-100 px-2 py-1 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300;
+  @apply inline-flex max-w-full items-center gap-1 rounded px-2 py-1 text-xs;
+  background: var(--ms-panel-3);
+  color: var(--ms-muted);
 }
 
 .group-chip b {
-  @apply font-semibold text-orange-500;
+  @apply font-semibold;
+  color: var(--ms-amber);
 }
 
 .group-more {
-  @apply rounded bg-primary-50 px-2 py-1 text-xs font-semibold text-primary-700 transition hover:bg-primary-100 dark:bg-primary-900/30 dark:text-primary-300 dark:hover:bg-primary-900/50;
+  @apply rounded px-2 py-1 text-xs font-semibold transition;
+  background: color-mix(in srgb, var(--ms-brand) 10%, var(--ms-panel));
+  color: var(--ms-brand-strong);
+}
+
+.group-more:hover {
+  background: color-mix(in srgb, var(--ms-brand) 16%, var(--ms-panel));
 }
 
 @media (max-width: 480px) {
@@ -969,5 +1135,50 @@ onMounted(reload)
   .model-card {
     @apply p-4;
   }
+}
+</style>
+
+<style>
+/* 模型广场主题变量：明/暗两套，挂在 .model-square-root 上，覆盖 Teleport 到 body 的弹窗内容。 */
+.model-square-root {
+  --ms-panel: #ffffff;
+  --ms-panel-2: #f9fafb;
+  --ms-panel-3: #f3f4f6;
+  --ms-line: #e5e7eb;
+  --ms-soft: #f1f5f9;
+  --ms-text: #111827;
+  --ms-muted: #64748b;
+  --ms-dim: #94a3b8;
+  --ms-brand: #0f766e;
+  --ms-brand-strong: #115e59;
+  --ms-glow: rgba(20, 184, 166, 0.3);
+  --ms-green: #047857;
+  --ms-amber: #b45309;
+  --ms-orange: #ea580c;
+  --ms-blue: #1d4ed8;
+  --ms-violet: #6d28d9;
+  --ms-red: #b91c1c;
+  --ms-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+.dark .model-square-root {
+  --ms-panel: #1e293b;
+  --ms-panel-2: #334155;
+  --ms-panel-3: #374151;
+  --ms-line: #334155;
+  --ms-soft: #374151;
+  --ms-text: #f9fafb;
+  --ms-muted: #9ca3af;
+  --ms-dim: #6b7280;
+  --ms-brand: #5eead4;
+  --ms-brand-strong: #2dd4bf;
+  --ms-glow: rgba(45, 212, 191, 0.32);
+  --ms-green: #34d399;
+  --ms-amber: #fbbf24;
+  --ms-orange: #fb923c;
+  --ms-blue: #60a5fa;
+  --ms-violet: #a78bfa;
+  --ms-red: #f87171;
+  --ms-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 </style>

@@ -203,7 +203,7 @@ describe('ModelSquareView', () => {
     Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } })
   })
 
-  it('renders configured display names, providers and configured prices without new price styles', async () => {
+  it('renders configured display names, providers and prices with the fixed semantic price palette', async () => {
     const wrapper = mountView()
     await flushPromises()
 
@@ -233,11 +233,13 @@ describe('ModelSquareView', () => {
     const orphanCard = wrapper.findAll('[data-test="model-card"]')
       .find(card => card.text().includes('Orphan Model'))
     expect(orphanCard?.find('.model-rate-chip').text()).toBe('0.25x')
-    expect(wrapper.find('.price-box-neutral').exists()).toBe(true)
-    expect(wrapper.find('.price-box-blue').exists()).toBe(true)
-    expect(wrapper.find('.price-box-violet').exists()).toBe(true)
-    expect(wrapper.find('.price-box-amber').exists()).toBe(false)
-    expect(wrapper.find('.price-box-cyan').exists()).toBe(false)
+  expect(wrapper.find('.price-box-teal').exists()).toBe(true)
+  expect(wrapper.find('.price-box-orange').exists()).toBe(true)
+  expect(wrapper.find('.price-box-blue').exists()).toBe(true)
+  expect(wrapper.find('.price-box-violet').exists()).toBe(true)
+  expect(wrapper.find('.price-box-neutral').exists()).toBe(false)
+  expect(wrapper.find('.price-box-amber').exists()).toBe(false)
+  expect(wrapper.find('.price-box-cyan').exists()).toBe(false)
     expect(wrapper.find('.price-box-emerald').exists()).toBe(false)
     expect(wrapper.find('.table-price-chip').exists()).toBe(false)
   })
@@ -301,15 +303,15 @@ describe('ModelSquareView', () => {
     expect(dialogText).not.toContain('OpenAI Group')
   })
 
-  it('does not render missing prices as zero while preserving explicit zero prices', async () => {
+  it('renders unset prices as zero while preserving explicit zero prices', async () => {
     const wrapper = mountView()
     await flushPromises()
 
     const cards = wrapper.findAll('[data-test="model-card"]')
     const customCard = cards.find(card => card.text().includes('Custom Model'))
     expect(customCard?.text()).toContain('$0')
-    expect(customCard?.text()).toContain('\u672a\u8bbe\u7f6e')
     expect(customCard?.text()).not.toContain('$0.000')
+    expect(customCard?.findAll('.price-box-unset').length).toBeGreaterThan(0)
   })
 
   it('keeps search, platform filter, group filter, view switching and copying interactions', async () => {
