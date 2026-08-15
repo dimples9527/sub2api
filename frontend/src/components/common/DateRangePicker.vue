@@ -249,6 +249,14 @@ const selectPreset = (preset: DatePreset) => {
   localStartDate.value = range.start
   localEndDate.value = range.end
   activePreset.value = preset.value
+  // 预设点击立即生效，无需再点「应用」，避免“切换今天没反应”的误解。
+  emit('update:startDate', localStartDate.value)
+  emit('update:endDate', localEndDate.value)
+  emit('change', {
+    startDate: localStartDate.value,
+    endDate: localEndDate.value,
+    preset: preset.value,
+  })
 }
 
 const onDateChange = () => {
