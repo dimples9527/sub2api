@@ -800,6 +800,13 @@ onMounted(async () => {
   gap: 0.4rem;
 }
 
+.sp-monitor-actions .sp-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  white-space: nowrap;
+}
+
 /* 空状态 */
 .sp-monitor-empty {
   display: flex;
@@ -1038,6 +1045,13 @@ onMounted(async () => {
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
+}
+
+.sp-dialog-actions .sp-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  white-space: nowrap;
 }
 
 /* 旋转动画 */
