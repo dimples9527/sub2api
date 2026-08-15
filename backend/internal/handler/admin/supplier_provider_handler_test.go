@@ -44,6 +44,10 @@ func (r *supplierProviderHandlerRepoStub) ListCostBreakdowns(_ context.Context, 
 	return []service.SupplierProviderCostBreakdown{}, nil
 }
 
+func (r *supplierProviderHandlerRepoStub) ListBalanceSummaryDays(_ context.Context) ([]service.SupplierProviderBalanceSummaryDay, error) {
+	return []service.SupplierProviderBalanceSummaryDay{}, nil
+}
+
 func (r *supplierProviderHandlerRepoStub) Summary(_ context.Context, params service.SupplierProviderListParams) (service.SupplierProviderSummary, error) {
 	var summary service.SupplierProviderSummary
 	for _, item := range r.items {
@@ -212,12 +216,31 @@ func newSupplierProviderHandlerTestRouter(repo *supplierProviderHandlerRepoStub)
 	svc := service.NewSupplierProviderService(repo, supplierProviderHandlerEncryptorStub{})
 	handler := NewSupplierProviderHandler(svc)
 	router.GET("/admin/supplier-management/providers", handler.List)
+	router.GET("/admin/supplier-management/providers/balance-summary", handler.BalanceSummary)
 	router.GET("/admin/supplier-management/providers/:id", handler.Get)
 	router.POST("/admin/supplier-management/providers", handler.Create)
 	router.PUT("/admin/supplier-management/providers/:id", handler.Update)
 	router.DELETE("/admin/supplier-management/providers/:id", handler.Delete)
 	router.PUT("/admin/supplier-management/providers/:id/default", handler.SetDefault)
 	return router
+}
+
+func TestSupplierProviderHandlerBalanceSummary(t *testing.T) {
+	router := newSupplierProviderHandlerTestRouter(&supplierProviderHandlerRepoStub{})
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/supplier-management/providers/balance-summary", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Contains(t, body, "data")
+	data, ok := body["data"].(map[string]any)
+	require.True(t, ok)
+	require.Contains(t, data, "today")
+	require.Contains(t, data, "previous")
+	require.Contains(t, data, "history")
 }
 
 func newSupplierProviderTypeHandlerTestRouter(repo *supplierProviderTypeHandlerRepoStub) *gin.Engine {

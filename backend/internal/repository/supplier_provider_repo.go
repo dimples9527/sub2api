@@ -304,6 +304,35 @@ ORDER BY p.sort_order ASC, p.id ASC`
 	return breakdowns, nil
 }
 
+// ListBalanceSummaryDays 按统计日汇总全部供应商的余额与成本快照。
+func (r *supplierProviderRepository) ListBalanceSummaryDays(ctx context.Context) ([]service.SupplierProviderBalanceSummaryDay, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT TO_CHAR(d.stat_date, 'YYYY-MM-DD') AS date,
+       COALESCE(SUM(d.current_balance), 0) AS balance,
+       COALESCE(SUM(d.today_cost), 0) AS cost
+FROM supplier_provider_daily_stats d
+JOIN supplier_providers p ON p.id = d.provider_id AND p.deleted_at IS NULL
+GROUP BY d.stat_date
+ORDER BY d.stat_date`)
+	if err != nil {
+		return nil, fmt.Errorf("query supplier provider balance summary days: %w", err)
+	}
+	defer rows.Close()
+
+	days := make([]service.SupplierProviderBalanceSummaryDay, 0)
+	for rows.Next() {
+		var day service.SupplierProviderBalanceSummaryDay
+		if scanErr := rows.Scan(&day.Date, &day.Balance, &day.Cost); scanErr != nil {
+			return nil, fmt.Errorf("scan supplier provider balance summary day: %w", scanErr)
+		}
+		days = append(days, day)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate supplier provider balance summary days: %w", err)
+	}
+	return days, nil
+}
+
 func supplierProviderWhere(params service.SupplierProviderListParams) (string, []any) {
 	conditions := []string{"p.deleted_at IS NULL"}
 	args := make([]any, 0, 2)

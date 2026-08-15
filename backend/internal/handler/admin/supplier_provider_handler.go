@@ -89,6 +89,16 @@ func (h *SupplierProviderHandler) ListCostTrends(c *gin.Context) {
 	response.Success(c, result)
 }
 
+// BalanceSummary 返回供应商组合的余额/成本汇总，用于页面统计卡。
+func (h *SupplierProviderHandler) BalanceSummary(c *gin.Context) {
+	result, err := h.service.GetBalanceSummary(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
 func (h *SupplierProviderHandler) Get(c *gin.Context) {
 	id, ok := parseSupplierProviderID(c)
 	if !ok {

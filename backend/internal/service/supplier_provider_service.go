@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -183,11 +184,35 @@ type SupplierProviderCostTrendResult struct {
 	Breakdown  []SupplierProviderCostBreakdown  `json:"breakdown"`
 }
 
+// SupplierProviderBalanceSummaryDay 表示某个统计日的供应商余额/成本合计。
+type SupplierProviderBalanceSummaryDay struct {
+	Date    string  `json:"date"`
+	Balance float64 `json:"balance"`
+	Cost    float64 `json:"cost"`
+}
+
+// SupplierProviderBalanceHistory 表示历史统计区间内的累计口径。
+type SupplierProviderBalanceHistory struct {
+	FirstDate    string  `json:"first_date"`
+	Days         int     `json:"days"`
+	TotalBalance float64 `json:"total_balance"`
+	TotalCost    float64 `json:"total_cost"`
+}
+
+// SupplierProviderBalanceSummary 是供应商组合余额/成本汇总，用于页面统计卡。
+type SupplierProviderBalanceSummary struct {
+	LatestDate string                            `json:"latest_date"`
+	Today      SupplierProviderBalanceSummaryDay `json:"today"`
+	Previous   SupplierProviderBalanceSummaryDay `json:"previous"`
+	History    SupplierProviderBalanceHistory    `json:"history"`
+}
+
 type SupplierProviderRepository interface {
 	List(ctx context.Context, params SupplierProviderListParams) ([]*SupplierProvider, int64, error)
 	Summary(ctx context.Context, params SupplierProviderListParams) (SupplierProviderSummary, error)
 	ListCostTrends(ctx context.Context, start, end time.Time, providerID int64) ([]SupplierProviderCostTrendPoint, error)
 	ListCostBreakdowns(ctx context.Context, start, end time.Time, providerID int64) ([]SupplierProviderCostBreakdown, error)
+	ListBalanceSummaryDays(ctx context.Context) ([]SupplierProviderBalanceSummaryDay, error)
 	GetByID(ctx context.Context, id int64) (*SupplierProvider, error)
 	Create(ctx context.Context, provider *SupplierProvider) error
 	Update(ctx context.Context, provider *SupplierProvider) error
@@ -422,6 +447,36 @@ func (s *SupplierProviderService) Get(ctx context.Context, id int64) (*SupplierP
 	}
 	redactSupplierProvider(provider)
 	return provider, nil
+}
+
+// GetBalanceSummary 汇总供应商每日快照的余额与成本，用于页面统计卡。
+// today 为最近一个统计日，previous 为最近一个非当日统计日，history 为累计口径。
+func (s *SupplierProviderService) GetBalanceSummary(ctx context.Context) (SupplierProviderBalanceSummary, error) {
+	days, err := s.repo.ListBalanceSummaryDays(ctx)
+	if err != nil {
+		return SupplierProviderBalanceSummary{}, fmt.Errorf("list supplier provider balance summary days: %w", err)
+	}
+	summary := SupplierProviderBalanceSummary{
+		History: SupplierProviderBalanceHistory{},
+	}
+	if len(days) == 0 {
+		return summary, nil
+	}
+	sort.Slice(days, func(i, j int) bool {
+		return days[i].Date < days[j].Date
+	})
+	summary.LatestDate = days[len(days)-1].Date
+	summary.Today = days[len(days)-1]
+	summary.History.FirstDate = days[0].Date
+	summary.History.Days = len(days)
+	for _, day := range days {
+		summary.History.TotalBalance += day.Balance
+		summary.History.TotalCost += day.Cost
+	}
+	if len(days) >= 2 {
+		summary.Previous = days[len(days)-2]
+	}
+	return summary, nil
 }
 
 func (s *SupplierProviderService) Create(ctx context.Context, params SupplierProviderUpsertParams) (*SupplierProvider, error) {

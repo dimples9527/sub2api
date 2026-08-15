@@ -14,6 +14,7 @@ type supplierProviderRepoStub struct {
 	next                         int64
 	costTrends                   []SupplierProviderCostTrendPoint
 	costBreakdowns               []SupplierProviderCostBreakdown
+	balanceSummaryDays           []SupplierProviderBalanceSummaryDay
 	costTrendCalls               int
 	disableAfterAuthFailureCalls int
 	disableMessages              []string
@@ -58,6 +59,13 @@ func (r *supplierProviderRepoStub) ListCostBreakdowns(_ context.Context, start, 
 		return r.costBreakdowns, nil
 	}
 	return []SupplierProviderCostBreakdown{}, nil
+}
+
+func (r *supplierProviderRepoStub) ListBalanceSummaryDays(_ context.Context) ([]SupplierProviderBalanceSummaryDay, error) {
+	if r.balanceSummaryDays != nil {
+		return r.balanceSummaryDays, nil
+	}
+	return []SupplierProviderBalanceSummaryDay{}, nil
 }
 
 func (r *supplierProviderRepoStub) Summary(_ context.Context, params SupplierProviderListParams) (SupplierProviderSummary, error) {
@@ -568,4 +576,37 @@ func TestSupplierProviderServiceListCostTrendsByDateRangeRejectsInvalid(t *testi
 
 	_, err = svc.ListCostTrendsByDateRange(context.Background(), "2026-07-12", "2026-07-10", 0)
 	require.Error(t, err)
+}
+
+func TestSupplierProviderServiceGetBalanceSummary(t *testing.T) {
+	repo := &supplierProviderRepoStub{balanceSummaryDays: []SupplierProviderBalanceSummaryDay{
+		{Date: "2026-08-01", Balance: 100, Cost: 10},
+		{Date: "2026-08-02", Balance: 120, Cost: 12},
+		{Date: "2026-08-03", Balance: 90, Cost: 15},
+	}}
+	svc := NewSupplierProviderService(repo, supplierEncryptorStub{})
+
+	summary, err := svc.GetBalanceSummary(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "2026-08-03", summary.LatestDate)
+	require.Equal(t, "2026-08-03", summary.Today.Date)
+	require.Equal(t, 90.0, summary.Today.Balance)
+	require.Equal(t, 15.0, summary.Today.Cost)
+	require.Equal(t, "2026-08-02", summary.Previous.Date)
+	require.Equal(t, 120.0, summary.Previous.Balance)
+	require.Equal(t, "2026-08-01", summary.History.FirstDate)
+	require.Equal(t, 3, summary.History.Days)
+	require.Equal(t, 310.0, summary.History.TotalBalance)
+	require.Equal(t, 37.0, summary.History.TotalCost)
+}
+
+func TestSupplierProviderServiceGetBalanceSummaryEmpty(t *testing.T) {
+	svc := NewSupplierProviderService(&supplierProviderRepoStub{}, supplierEncryptorStub{})
+
+	summary, err := svc.GetBalanceSummary(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, summary.LatestDate)
+	require.Empty(t, summary.Today.Date)
+	require.Empty(t, summary.Previous.Date)
+	require.Equal(t, 0, summary.History.Days)
 }
