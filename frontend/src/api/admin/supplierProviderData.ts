@@ -421,11 +421,6 @@ export async function deleteSupplierAccount(id: number): Promise<{ account_id: n
   return data
 }
 
-export interface SupplierHealthGuardModel {
-  id: string
-  display_name: string
-}
-
 export async function setSupplierLocalAccountPlatformOverride(
   localAccountID: number,
   platform: string
@@ -442,15 +437,6 @@ export async function clearSupplierLocalAccountPlatformOverride(
 ): Promise<{ local_account_id: number; platform_override: string }> {
   const { data } = await apiClient.delete<{ local_account_id: number; platform_override: string }>(
     `/admin/supplier-management/accounts/${localAccountID}/platform-override`
-  )
-  return data
-}
-
-export async function getSupplierHealthGuardModels(
-  localAccountID: number
-): Promise<SupplierHealthGuardModel[]> {
-  const { data } = await apiClient.get<SupplierHealthGuardModel[]>(
-    `/admin/supplier-management/accounts/${localAccountID}/health-guard-models`
   )
   return data
 }
@@ -628,7 +614,6 @@ export const supplierProviderDataAPI = {
   deleteSupplierAccount,
   setSupplierLocalAccountPlatformOverride,
   clearSupplierLocalAccountPlatformOverride,
-  getSupplierHealthGuardModels,
   startSupplierAccountBatchTest,
   getSupplierAccountBatchTestJob,
   cancelSupplierAccountBatchTestJob,

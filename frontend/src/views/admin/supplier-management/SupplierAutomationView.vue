@@ -735,6 +735,8 @@
                   :options="healthGuardModelSelectOptions(summary.platform, editForm.config.account_health_guard_platform_models[summary.platform])"
                   searchable
                   clearable
+                  creatable
+                  :creatable-prefix="healthGuardModelCreatablePrefix"
                   :placeholder="healthGuardModelLoadingByPlatform[summary.platform] ? '加载模型中…' : '选择平台默认模型'"
                   empty-text="暂无可用模型"
                 />
@@ -860,6 +862,8 @@
                     :options="healthGuardModelSelectOptions(mapping.platform, editForm.config.account_health_guard_account_models[String(mapping.localAccountID)])"
                     searchable
                     clearable
+                    creatable
+                    :creatable-prefix="healthGuardModelCreatablePrefix"
                     placeholder="平台默认模型"
                     empty-text="暂无可用模型"
                   />
@@ -914,11 +918,10 @@ import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import type { Column } from '@/components/common/types'
 import {
-  getSupplierHealthGuardModels,
   listSupplierAccounts,
-  type SupplierHealthGuardModel,
   type SupplierProviderAccount,
 } from '@/api/admin/supplierProviderData'
+import { adminAPI } from '@/api/admin'
 import {
   listAccountRateGuardUnbindLogs,
   listRuns,
@@ -936,6 +939,7 @@ import { useAppStore } from '@/stores/app'
 import { ensureCustomPlatformLabels, resolvePlatformDisplayLabel as platformLabel } from '@/utils/customPlatformLabels'
 import { platformBadgeClass, platformTextClass } from '@/utils/platformColors'
 import { extractApiErrorMessage } from '@/utils/apiError'
+import type { ClaudeModel } from '@/types'
 
 const tasks = ref<SupplierAutomationTask[]>([])
 const runs = ref<SupplierAutomationRun[]>([])
@@ -970,7 +974,7 @@ const healthGuardAccountSearch = ref('')
 const healthGuardSelectedOnly = ref(false)
 const healthGuardSupplierAccounts = ref<SupplierProviderAccount[]>([])
 const loadingHealthGuardSupplierAccounts = ref(false)
-const healthGuardModelOptionsByPlatform = ref<Record<string, SupplierHealthGuardModel[]>>({})
+const healthGuardModelOptionsByPlatform = ref<Record<string, ClaudeModel[]>>({})
 const healthGuardModelLoadingByPlatform = ref<Record<string, boolean>>({})
 const healthGuardStatusFilter = ref('all')
 
@@ -1739,18 +1743,17 @@ const healthGuardSelectedAccountRows = computed(() =>
 const healthGuardPlatformSummaries = computed<HealthGuardPlatformSummary[]>(() => {
   const summaries = new Map<string, HealthGuardPlatformSummary>()
   for (const mapping of healthGuardAvailableAccountMappings.value) {
-    for (const platform of mapping.localGroupPlatforms) {
-      const current = summaries.get(platform)
-      if (current) {
-        current.accountCount += 1
-        continue
-      }
-      summaries.set(platform, {
-        platform,
-        accountCount: 1,
-        representativeAccountID: mapping.localAccountID,
-      })
+    const platform = mapping.platform
+    const current = summaries.get(platform)
+    if (current) {
+      current.accountCount += 1
+      continue
     }
+    summaries.set(platform, {
+      platform,
+      accountCount: 1,
+      representativeAccountID: mapping.localAccountID,
+    })
   }
   return Array.from(summaries.values()).sort((a, b) => platformLabel(a.platform).localeCompare(platformLabel(b.platform), 'zh-CN'))
 })
@@ -1807,7 +1810,7 @@ const healthGuardWorkspaceAccounts = computed(() => {
   const keyword = healthGuardAccountSearch.value.trim().toLowerCase()
   return accounts.filter(mapping => {
     if (healthGuardSelectedOnly.value && !healthGuardAccountIDs.value.includes(mapping.localAccountID)) return false
-    if (platform && !mapping.localGroupPlatforms.includes(platform)) return false
+    if (platform && mapping.platform !== platform) return false
     if (providerID && !mapping.sources.some(source => String(source.provider_id) === providerID)) return false
     if (!keyword) return true
     const searchableText = [
@@ -1875,6 +1878,8 @@ function healthGuardAccountMultiplierText(mapping: HealthGuardAccountMapping): s
   if (!rates.length) return ''
   return `（倍率：${rates.join(' / ')}）`
 }
+
+const healthGuardModelCreatablePrefix = '使用模型'
 
 function healthGuardModelSelectOptions(platform: string, currentModel = ''): SelectOption[] {
   const models = healthGuardModelOptionsByPlatform.value[platform] || []
@@ -1957,7 +1962,7 @@ async function loadHealthGuardModels() {
   )
   await Promise.all(healthGuardPlatformSummaries.value.map(async summary => {
     try {
-      const models = await getSupplierHealthGuardModels(summary.representativeAccountID)
+      const models = await adminAPI.accounts.getAvailableModels(summary.representativeAccountID)
       healthGuardModelOptionsByPlatform.value = {
         ...healthGuardModelOptionsByPlatform.value,
         [summary.platform]: models,

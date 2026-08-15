@@ -452,13 +452,19 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('平台默认测试模型')
     expect(supplierAutomationSource).toContain('需要检查的账号')
     expect(supplierAutomationSource).toContain('当前不可用')
-    expect(supplierAutomationSource).toContain('getSupplierHealthGuardModels')
-    expect(supplierAutomationSource).not.toContain('adminAPI.accounts.getAvailableModels')
+    expect(supplierAutomationSource).toContain('adminAPI.accounts.getAvailableModels')
     expect(supplierAutomationSource).toContain('searchable')
     expect(supplierAutomationSource).toContain('normalizePositiveAccountIDs')
     expect(supplierAutomationSource).toContain('type="checkbox"')
     expect(supplierAutomationSource).toContain(':checked="healthGuardAccountIDs.includes(mapping.localAccountID)"')
     expect(supplierAutomationSource).toContain('@change="toggleHealthGuardAccount(mapping.localAccountID)"')
+  })
+
+  it('allows manually entering health guard test models as a fallback', () => {
+    expect(supplierAutomationSource).toContain(':creatable-prefix="healthGuardModelCreatablePrefix"')
+    expect(supplierAutomationSource).toContain("const healthGuardModelCreatablePrefix = '使用模型'")
+    expect(supplierAutomationSource).toContain('healthGuardModelSelectOptions')
+    expect(supplierAutomationSource).toContain('adminAPI.accounts.getAvailableModels(summary.representativeAccountID)')
   })
 
   it('uses the supplier effective business platform for health guard account grouping', () => {
@@ -468,13 +474,13 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain(
       'account.effective_platform || account.local_account_platform || account.platform'
     )
-    expect(supplierAutomationSource).toContain('getSupplierHealthGuardModels,')
-    expect(supplierAutomationSource).toContain('await getSupplierHealthGuardModels(summary.representativeAccountID)')
+    expect(supplierAutomationSource).toContain("import { adminAPI } from '@/api/admin'")
+    expect(supplierAutomationSource).toContain('await adminAPI.accounts.getAvailableModels(summary.representativeAccountID)')
     expect(supplierAutomationSource).toContain('current.platform = effectiveHealthGuardPlatform(account)')
     expect(supplierAutomationSource).toContain('platform: effectiveHealthGuardPlatform(account)')
   })
 
-  it('filters health guard accounts by their bound local group platforms', () => {
+  it('filters health guard accounts by their post-override platform', () => {
     expect(supplierAutomationSource).toContain(
       'function healthGuardLocalGroupPlatforms(account: SupplierProviderAccount): string[] {'
     )
@@ -482,8 +488,8 @@ describe('SupplierAutomationView edit dialog', () => {
       'account.binding_groups.map(group => normalizeHealthGuardPlatform(group.platform))'
     )
     expect(supplierAutomationSource).toContain('localGroupPlatforms: string[]')
-    expect(supplierAutomationSource).toContain('mapping.localGroupPlatforms.includes(platform)')
-    expect(supplierAutomationSource).toContain('for (const platform of mapping.localGroupPlatforms)')
+    expect(supplierAutomationSource).toContain('mapping.platform !== platform')
+    expect(supplierAutomationSource).toContain('const platform = mapping.platform')
   })
 
   it('renders health guard accounts as a unified selectable workspace', () => {
