@@ -371,7 +371,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { adminAPI } from '@/api/admin'
+import { modelSquareAPI } from '@/api/modelSquare'
 import type { AdminModelSquareResult, ModelSquareGroup, ModelSquareModel } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -540,7 +540,7 @@ async function reload() {
   loading.value = true
   loadError.value = ''
   try {
-    result.value = await adminAPI.modelSquare.get()
+    result.value = await modelSquareAPI.get()
   } catch (err) {
     const message = extractApiErrorMessage(err, t('admin.modelSquare.loadFailed'))
     loadError.value = message

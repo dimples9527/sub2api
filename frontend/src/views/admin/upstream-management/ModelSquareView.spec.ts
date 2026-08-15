@@ -111,8 +111,8 @@ vi.mock('vue-i18n', async (importOriginal) => {
   }
 })
 
-vi.mock('@/api/admin', () => ({
-  adminAPI: { modelSquare: { get: getMock } },
+vi.mock('@/api/modelSquare', () => ({
+  modelSquareAPI: { get: getMock },
 }))
 
 vi.mock('@/stores/app', () => ({

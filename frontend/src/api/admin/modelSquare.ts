@@ -8,7 +8,6 @@ import {
   type ModelSquareOfficialPricing,
   type ModelSquarePlatformModelConfig,
 } from './modelSquareConfig'
-import type { AdminGroup } from '@/types'
 
 export type { ModelSquareConfigPayload } from './modelSquareConfig'
 
@@ -53,6 +52,31 @@ export interface ModelSquarePayload {
   message?: string
 }
 
+/**
+ * 模型广场用户接口返回的最小渠道结构（只读聚合数据，不含管理端敏感字段）。
+ * buildConfiguredModelSquareResult 只需这些字段即可完成可用性与分组归属计算。
+ */
+export interface ModelSquareUserChannel {
+  id?: number | string
+  status?: string
+  group_ids?: Array<number | string>
+  model_pricing?: Array<{
+    platform?: string
+    models?: string[]
+  }>
+  model_mapping?: Record<string, Record<string, string>>
+}
+
+/**
+ * 模型广场用户接口返回的最小分组结构。
+ */
+export interface ModelSquareUserGroup {
+  id: number | string
+  name: string
+  platform?: string
+  rate_multiplier?: number
+}
+
 export interface AdminModelSquareResult {
   provider_slug: string
   provider_name: string
@@ -90,8 +114,8 @@ type ModelMatch = {
  */
 export function buildConfiguredModelSquareResult(
   config: ModelSquareConfigPayload,
-  channels: Channel[],
-  localGroups: AdminGroup[],
+  channels: ModelSquareUserChannel[],
+  localGroups: ModelSquareUserGroup[],
   referencePrices = new Map<string, ModelSquareOfficialPricing>(),
   platformOverrides = new Map<string, string>()
 ): AdminModelSquareResult {
@@ -152,8 +176,8 @@ export function buildConfiguredModelSquareResult(
 function findConfiguredModelMatch(
   platform: string,
   modelID: string,
-  channels: Channel[],
-  groupById: Map<string, AdminGroup>,
+  channels: ModelSquareUserChannel[],
+  groupById: Map<string, ModelSquareUserGroup>,
   platformOverrides: Map<string, string>
 ): ModelMatch {
   const usedGroupIDs = new Set<number | string>()
@@ -172,7 +196,7 @@ function findConfiguredModelMatch(
   return { available, groupIDs: Array.from(usedGroupIDs) }
 }
 
-function channelSupportsModel(channel: Channel, platform: string, modelID: string) {
+function channelSupportsModel(channel: ModelSquareUserChannel, platform: string, modelID: string) {
   const key = modelKey(platform, modelID)
 
   for (const pricing of channel.model_pricing || []) {
@@ -195,12 +219,12 @@ function channelSupportsModel(channel: Channel, platform: string, modelID: strin
 /**
  * 计算分组的展示平台：优先使用“分组平台配置”中的实际平台覆盖，否则沿用分组原始平台。
  */
-function effectiveGroupPlatform(group: AdminGroup, platformOverrides: Map<string, string>) {
+function effectiveGroupPlatform(group: ModelSquareUserGroup, platformOverrides: Map<string, string>) {
   const overridden = platformOverrides.get(String(group.id))
   return normalizePlatform(overridden || group.platform)
 }
 
-function isGroupCompatible(group: AdminGroup | undefined, platform: string, platformOverrides: Map<string, string>) {
+function isGroupCompatible(group: ModelSquareUserGroup | undefined, platform: string, platformOverrides: Map<string, string>) {
   if (!group) return false
   const groupPlatform = effectiveGroupPlatform(group, platformOverrides)
   return groupPlatform === platform || groupPlatform === 'composite'
@@ -223,7 +247,7 @@ function configuredPrices(
   return prices
 }
 
-function minimumGroupRateMultiplier(groups: AdminGroup[], platform: string, platformOverrides: Map<string, string>) {
+function minimumGroupRateMultiplier(groups: ModelSquareUserGroup[], platform: string, platformOverrides: Map<string, string>) {
   const rates = groups
     .filter(group => {
       const groupPlatform = effectiveGroupPlatform(group, platformOverrides)

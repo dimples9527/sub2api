@@ -53,12 +53,8 @@ vi.mock('@/stores/app', () => ({
   }),
 }))
 
-vi.mock('@/api/admin', () => ({
-  adminAPI: {
-    modelSquare: {
-      get: getModelSquareMock,
-    },
-  },
+vi.mock('@/api/modelSquare', () => ({
+  modelSquareAPI: { get: getModelSquareMock },
 }))
 
 function mountView() {

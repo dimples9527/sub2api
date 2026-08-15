@@ -113,10 +113,10 @@ describe('AppSidebar image generation visibility', () => {
     expect(wrapper.find('a[href="/image"]').exists()).toBe(true)
   })
 
-  it('hides the model square menu entry from regular users', () => {
+  it('shows the model square menu entry for regular users', () => {
     const wrapper = mountSidebar('user')
 
-    expect(wrapper.find('a[href="/model-square"]').exists()).toBe(false)
+    expect(wrapper.find('a[href="/model-square"]').exists()).toBe(true)
   })
 
   it('keeps the model square menu entry visible for admins', () => {

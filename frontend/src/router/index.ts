@@ -300,7 +300,7 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/admin/upstream-management/ModelSquareView.vue'),
     meta: {
       requiresAuth: true,
-      requiresAdmin: true,
+      requiresAdmin: false,
       title: 'Model Square',
       titleKey: 'admin.modelSquare.title',
       descriptionKey: 'admin.modelSquare.description'
