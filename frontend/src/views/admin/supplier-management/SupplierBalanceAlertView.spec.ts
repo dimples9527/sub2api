@@ -42,6 +42,20 @@ describe('SupplierBalanceAlertView', () => {
     expect(source).toContain('if (!(await loadAll())) return')
   })
 
+  it('applies supplier type preset colors and alert preset tones', () => {
+    expect(source).toContain("sub2api: 'type-sub2api'")
+    expect(source).toContain('providerNameTypeClass(row.provider_type)')
+    expect(source).toContain('providerNameTypeStyle(row.provider_type)')
+    expect(source).toContain('function providerNameTypeStyle')
+    expect(source).toContain("function eventBalanceTone(event: SupplierBalanceAlertEvent): string")
+    expect(source).toContain("return event.event_type === 'balance_recovered' ? 'sp-balance-alert-recovered' : 'sp-balance-alert-low'")
+    expect(source).toContain("function thresholdTone(config: SupplierBalanceAlertConfig): string")
+    expect(source).toContain("return isActiveLowConfig(config) ? 'sp-balance-alert-low' : 'sp-balance-alert-muted'")
+    expect(source).toContain("function eventThresholdTone(event: SupplierBalanceAlertEvent): string")
+    expect(source).toContain('.sp-balance-alert-recovered { color: var(--sp-green)')
+    expect(source).toContain('.sp-balance-alert-muted { color: var(--sp-muted)')
+  })
+
   it('keeps manual close guarded and uses the global success toast after closing', () => {
     const closeStart = source.indexOf('function closeConfigDialog')
     const saveStart = source.indexOf('async function saveConfig')
