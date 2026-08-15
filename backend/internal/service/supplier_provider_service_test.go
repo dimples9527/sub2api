@@ -14,6 +14,7 @@ type supplierProviderRepoStub struct {
 	next                         int64
 	costTrends                   []SupplierProviderCostTrendPoint
 	costBreakdowns               []SupplierProviderCostBreakdown
+	costTrendCalls               int
 	disableAfterAuthFailureCalls int
 	disableMessages              []string
 }
@@ -45,6 +46,7 @@ func (r *supplierProviderRepoStub) List(_ context.Context, params SupplierProvid
 }
 
 func (r *supplierProviderRepoStub) ListCostTrends(_ context.Context, start, end time.Time, providerID int64) ([]SupplierProviderCostTrendPoint, error) {
+	r.costTrendCalls++
 	if r.costTrends != nil {
 		return r.costTrends, nil
 	}

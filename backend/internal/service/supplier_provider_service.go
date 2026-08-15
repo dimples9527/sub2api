@@ -371,6 +371,11 @@ func (s *SupplierProviderService) listCostTrendsBetween(ctx context.Context, sta
 		days = 1
 	}
 
+	cacheKey := supplierCostTrendCacheKey(start, endInclusive, providerID)
+	if cached, ok := getSupplierCostTrendCache(cacheKey); ok {
+		return cached, nil
+	}
+
 	rawPoints, err := s.repo.ListCostTrends(ctx, start, endExclusive, providerID)
 	if err != nil {
 		return SupplierProviderCostTrendResult{}, fmt.Errorf("list supplier provider cost trends: %w", err)
@@ -398,14 +403,16 @@ func (s *SupplierProviderService) listCostTrendsBetween(ctx context.Context, sta
 		points = append(points, SupplierProviderCostTrendPoint{Date: date})
 	}
 
-	return SupplierProviderCostTrendResult{
+	result := SupplierProviderCostTrendResult{
 		Days:       days,
 		StartDate:  start.In(loc).Format("2006-01-02"),
 		EndDate:    endInclusive.In(loc).Format("2006-01-02"),
 		ProviderID: providerID,
 		Points:     points,
 		Breakdown:  rawBreakdown,
-	}, nil
+	}
+	setSupplierCostTrendCache(cacheKey, result)
+	return result, nil
 }
 
 func (s *SupplierProviderService) Get(ctx context.Context, id int64) (*SupplierProvider, error) {

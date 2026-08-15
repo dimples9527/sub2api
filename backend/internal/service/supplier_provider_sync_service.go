@@ -566,6 +566,8 @@ func (s *SupplierProviderSyncService) BackfillCosts(ctx context.Context, startDa
 		}
 	}
 
+	// 成本数据已写入，清空趋势缓存，避免「重新获取」后读到旧数据。
+	invalidateSupplierCostTrendCache()
 	result.FinishedAt = time.Now()
 	return result, nil
 }
@@ -1107,6 +1109,10 @@ func (s *SupplierProviderSyncService) syncCostStage(ctx context.Context, provide
 		SupplierSyncProgress(ctx, SupplierSyncProgressStagePersist, "正在写入成本数据", nil)
 		// 按成本归属日写入 daily_stats，避免历史回补落到当天。
 		err = s.dataRepo.UpdateCost(ctx, provider.ID, cost, statDay)
+		if err == nil {
+			// 定时同步写入成功后同样失效成本趋势缓存。
+			invalidateSupplierCostTrendCache()
+		}
 	} else {
 		err = requestErr
 	}
