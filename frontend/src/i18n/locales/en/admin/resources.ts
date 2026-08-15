@@ -1364,7 +1364,8 @@ export default {
             cacheRead: 'Cache read',
             cacheWrite: 'Cache write',
             mode: 'Mode',
-            groups: 'Groups'
+            groups: 'Groups',
+            actions: 'Actions'
           }
         },
 

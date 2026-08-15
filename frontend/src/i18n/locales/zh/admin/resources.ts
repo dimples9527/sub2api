@@ -1361,7 +1361,8 @@ export default {
             cacheRead: '缓存读取',
             cacheWrite: '缓存写入',
             mode: '类型',
-            groups: '分组'
+            groups: '分组',
+            actions: '操作'
           }
         },
 

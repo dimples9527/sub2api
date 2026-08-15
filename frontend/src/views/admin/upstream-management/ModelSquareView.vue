@@ -60,13 +60,6 @@
             :aria-label="t('admin.modelSquare.allProviders')"
           />
 
-          <Select
-            v-model="modeFilter"
-            :options="modeFilterOptions"
-            class="w-full sm:w-40"
-            :aria-label="t('admin.modelSquare.allModes')"
-          />
-
           <div class="ml-auto inline-grid grid-cols-2 gap-1 rounded-lg border border-gray-200 bg-gray-100 p-1 dark:border-dark-700 dark:bg-dark-800">
             <button
               type="button"
@@ -148,10 +141,6 @@
                     <span class="model-provider-dot"></span>
                     <span class="truncate">{{ providerLabel(model.provider) }}</span>
                   </span>
-                  <span :class="['model-status', isAvailable(model) ? 'model-status-available' : 'model-status-muted']">
-                    <span class="status-dot"></span>
-                    {{ copiedModelId === model.id ? t('admin.modelSquare.copied') : availabilityLabel(model) }}
-                  </span>
                 </div>
 
                 <div class="model-title-row">
@@ -182,7 +171,16 @@
                 </div>
 
                 <div class="model-card-footer">
-                  <span class="mode-chip">{{ modeLabel(model.mode) }}</span>
+                  <span class="model-rate-chip">{{ formatRate(modelEffectiveRate(model)) }}</span>
+                  <button
+                    type="button"
+                    v-if="modelGroups(model).length > 0"
+                    class="primary-group-chip"
+                    @click.stop="openGroupDialog(model)"
+                  >
+                    <span class="truncate">{{ primaryGroup(model)?.name }}</span>
+                    <span v-if="modelGroupOverflowCount(model) > 0" class="group-overflow">+{{ modelGroupOverflowCount(model) }}</span>
+                  </button>
                   <button
                     type="button"
                     class="model-detail-button"
@@ -192,16 +190,6 @@
                     <Icon name="eye" size="xs" />
                     <span>详情</span>
                   </button>
-                  <button
-                    v-if="modelGroups(model).length > 0"
-                    type="button"
-                    class="primary-group-chip"
-                    @click.stop="openGroupDialog(model)"
-                  >
-                    <span class="truncate">{{ primaryGroup(model)?.name }}</span>
-                    <span v-if="modelGroupOverflowCount(model) > 0" class="group-overflow">+{{ modelGroupOverflowCount(model) }}</span>
-                  </button>
-                  <span class="model-rate-chip">{{ formatRate(modelEffectiveRate(model)) }}</span>
                 </div>
               </article>
             </div>
@@ -209,18 +197,17 @@
         </div>
 
         <div v-else class="overflow-x-auto">
-          <table class="w-full min-w-[980px] divide-y divide-gray-100 text-sm dark:divide-dark-700">
+          <table class="w-full min-w-[1100px] divide-y divide-gray-100 text-sm dark:divide-dark-700">
             <thead class="bg-gray-50 dark:bg-dark-800">
               <tr>
-                <th class="px-4 py-3 text-left font-medium">{{ t('admin.modelSquare.columns.status') }}</th>
                 <th class="px-4 py-3 text-left font-medium">{{ t('admin.modelSquare.columns.provider') }}</th>
                 <th class="px-4 py-3 text-left font-medium">{{ t('admin.modelSquare.columns.modelId') }}</th>
                 <th class="px-4 py-3 text-left font-medium">{{ t('admin.modelSquare.columns.input') }}</th>
                 <th class="px-4 py-3 text-left font-medium">{{ t('admin.modelSquare.columns.output') }}</th>
                 <th class="px-4 py-3 text-left font-medium">{{ t('admin.modelSquare.columns.cacheRead') }}</th>
                 <th class="px-4 py-3 text-left font-medium">{{ t('admin.modelSquare.columns.cacheWrite') }}</th>
-                <th class="px-4 py-3 text-left font-medium">{{ t('admin.modelSquare.columns.mode') }}</th>
                 <th class="px-4 py-3 text-left font-medium">{{ t('admin.modelSquare.columns.groups') }}</th>
+                <th class="px-4 py-3 text-right font-medium">{{ t('admin.modelSquare.columns.actions') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
@@ -233,30 +220,46 @@
                 @click="copyModelId(model)"
               >
                 <td class="whitespace-nowrap px-4 py-3">
-                  <span :class="['badge', isAvailable(model) ? 'badge-success' : 'badge-gray']">
-                    {{ copiedModelId === model.id ? t('admin.modelSquare.copied') : availabilityLabel(model) }}
+                  <span class="model-provider">
+                    <span class="model-provider-dot" :style="providerAccent(model.provider)"></span>
+                    <span class="truncate">{{ providerLabel(model.provider) }}</span>
                   </span>
                 </td>
-                <td class="whitespace-nowrap px-4 py-3">{{ providerLabel(model.provider) }}</td>
                 <td class="max-w-72 px-4 py-3 font-medium text-gray-950 dark:text-white">
                   <span class="break-words">{{ modelDisplayName(model) }}</span>
                 </td>
-                <td class="whitespace-nowrap px-4 py-3 font-mono">{{ formatPriceOrZero(modelPriceValue(model, 'input_price')) }}</td>
-                <td class="whitespace-nowrap px-4 py-3 font-mono">{{ formatPriceOrZero(modelPriceValue(model, 'output_price')) }}</td>
-                <td class="whitespace-nowrap px-4 py-3 font-mono">{{ formatPriceOrZero(modelPriceValue(model, 'cache_read_price')) }}</td>
-                <td class="whitespace-nowrap px-4 py-3 font-mono">{{ formatPriceOrZero(modelPriceValue(model, 'cache_write_price')) }}</td>
-                <td class="whitespace-nowrap px-4 py-3">{{ modeLabel(model.mode) }}</td>
+                <td
+                  v-for="slot in modelPriceSlots(model)"
+                  :key="slot.key"
+                  class="whitespace-nowrap px-4 py-3"
+                >
+                  <span :class="['price-cell', priceCellClass(slot.toneClass)]">{{ formatPriceOrZero(slot.value) }}</span>
+                </td>
                 <td class="px-4 py-3">
-                  <div class="flex min-w-72 flex-wrap gap-1.5">
-                    <span
+                  <div class="flex min-w-56 flex-wrap gap-1.5">
+                    <button
                       v-for="group in modelGroups(model)"
                       :key="String(group.id)"
+                      type="button"
                       class="group-chip"
+                      @click.stop="openGroupDialog(model)"
                     >
                       {{ group.name }}
                       <b>{{ formatRate(group.rate_multiplier) }}</b>
-                    </span>
+                    </button>
+                    <span v-if="modelGroups(model).length === 0" class="text-xs text-gray-400 dark:text-gray-500">—</span>
                   </div>
+                </td>
+                <td class="whitespace-nowrap px-4 py-3 text-right">
+                  <button
+                    type="button"
+                    class="model-detail-button"
+                    title="详情"
+                    @click.stop="openModelDetails(model)"
+                  >
+                    <Icon name="eye" size="xs" />
+                    <span>详情</span>
+                  </button>
                 </td>
               </tr>
             </tbody>
@@ -278,7 +281,6 @@
             <code class="mt-1 block break-all text-xs text-gray-400">{{ detailModel.id }}</code>
           </div>
           <div class="flex shrink-0 flex-wrap items-center gap-2 text-xs">
-            <span class="mode-chip">{{ modeLabel(detailModel.mode) }}</span>
             <span class="model-rate-chip">{{ formatRate(detailRate) }}</span>
           </div>
         </div>
@@ -425,7 +427,6 @@ const loading = ref(false)
 const loadError = ref('')
 const searchQuery = ref('')
 const providerFilter = ref('')
-const modeFilter = ref('')
 const groupFilter = ref('')
 useRouteQueryFilters([
   { queryKey: 'provider', state: providerFilter },
@@ -464,7 +465,6 @@ const models = computed<ModelSquareModel[]>(() => Array.isArray(payload.value.mo
 const groups = computed<ModelSquareGroup[]>(() => Array.isArray(payload.value.groups) ? payload.value.groups : [])
 const groupById = computed(() => new Map(groups.value.map(group => [String(group.id), group])))
 const providers = computed(() => unique(models.value.map(model => model.provider).filter(Boolean) as string[]))
-const modes = computed(() => unique(models.value.map(model => model.mode || 'chat')))
 // 分组筛选下拉选项（含“全部”占位项）
 const groupFilterOptions = computed<SelectOption[]>(() => [
   { value: '', label: t('admin.modelSquare.allGroups') },
@@ -474,11 +474,6 @@ const groupFilterOptions = computed<SelectOption[]>(() => [
 const providerFilterOptions = computed<SelectOption[]>(() => [
   { value: '', label: t('admin.modelSquare.allProviders') },
   ...providers.value.map(item => ({ value: item, label: providerLabel(item) })),
-])
-// 模式筛选下拉选项（含“全部”占位项）
-const modeFilterOptions = computed<SelectOption[]>(() => [
-  { value: '', label: t('admin.modelSquare.allModes') },
-  ...modes.value.map(item => ({ value: item, label: modeLabel(item) })),
 ])
 const availableCount = computed(() => models.value.filter(isAvailable).length)
 const groupDialogGroups = computed(() => groupDialogModel.value ? modelGroups(groupDialogModel.value) : [])
@@ -507,7 +502,6 @@ const filteredModels = computed(() => {
   return models.value.filter(model => {
     if (keyword && !modelSearchText(model).includes(keyword)) return false
     if (providerFilter.value && model.provider !== providerFilter.value) return false
-    if (modeFilter.value && (model.mode || 'chat') !== modeFilter.value) return false
     if (groupFilter.value && !(model.group_ids || []).some(id => String(id) === groupFilter.value)) return false
     return true
   })
@@ -655,12 +649,12 @@ function formatPriceOrZero(value?: number | string) {
   return value == null || value === '' ? '$0' : formatPrice(value)
 }
 
-function isAvailable(model: ModelSquareModel) {
-  return model.available !== false
+function priceCellClass(toneClass: string) {
+  return toneClass === 'price-box-unset' ? 'price-cell-unset' : `price-cell-${toneClass.replace('price-box-', '')}`
 }
 
-function availabilityLabel(model: ModelSquareModel) {
-  return isAvailable(model) ? t('admin.modelSquare.available') : t('admin.modelSquare.unavailable')
+function isAvailable(model: ModelSquareModel) {
+  return model.available !== false
 }
 
 function modelSearchText(model: ModelSquareModel) {
@@ -691,13 +685,6 @@ function providerAccent(provider?: string) {
   let hash = 0
   for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0
   return { '--ms-provider': providerAccentFallbackColors[hash % providerAccentFallbackColors.length] }
-}
-
-function modeLabel(value?: string) {
-  if (value === 'image_generation') return t('admin.modelSquare.modes.image')
-  if (value === 'embedding') return t('admin.modelSquare.modes.embedding')
-  if (value === 'responses') return t('admin.modelSquare.modes.responses')
-  return value || t('admin.modelSquare.modes.chat')
 }
 
 function formatRate(value?: number) {
@@ -880,24 +867,6 @@ onMounted(reload)
   color: var(--ms-muted);
 }
 
-.model-status {
-  @apply inline-flex shrink-0 items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold;
-}
-
-.model-status-available {
-  background: color-mix(in srgb, var(--ms-green) 12%, var(--ms-panel));
-  color: var(--ms-green);
-}
-
-.model-status-muted {
-  background: var(--ms-panel-3);
-  color: var(--ms-muted);
-}
-
-.status-dot {
-  @apply h-1.5 w-1.5 rounded-full bg-current opacity-70;
-}
-
 .model-title-row {
   @apply mt-3 flex min-h-[2.5rem] items-start gap-2;
 }
@@ -1026,15 +995,43 @@ onMounted(reload)
   opacity: 0.85;
 }
 
-.model-card-footer {
-  @apply mt-auto flex flex-wrap items-end justify-between gap-3 pt-4;
+.price-cell {
+  @apply inline-flex items-center rounded border px-1.5 py-0.5 font-mono text-xs font-semibold;
 }
 
-.mode-chip {
-  @apply inline-flex h-7 items-center rounded-md px-2.5 text-xs font-semibold;
-  background: color-mix(in srgb, var(--ms-blue) 10%, var(--ms-panel));
+.price-cell-teal {
+  background: color-mix(in srgb, var(--ms-brand) 12%, var(--ms-panel));
+  color: var(--ms-brand-strong);
+  border-color: color-mix(in srgb, var(--ms-brand) 30%, var(--ms-line));
+}
+
+.price-cell-orange {
+  background: color-mix(in srgb, var(--ms-orange) 12%, var(--ms-panel));
+  color: var(--ms-orange);
+  border-color: color-mix(in srgb, var(--ms-orange) 30%, var(--ms-line));
+}
+
+.price-cell-blue {
+  background: color-mix(in srgb, var(--ms-blue) 12%, var(--ms-panel));
   color: var(--ms-blue);
-  border: 1px solid color-mix(in srgb, var(--ms-blue) 26%, transparent);
+  border-color: color-mix(in srgb, var(--ms-blue) 30%, var(--ms-line));
+}
+
+.price-cell-violet {
+  background: color-mix(in srgb, var(--ms-violet) 12%, var(--ms-panel));
+  color: var(--ms-violet);
+  border-color: color-mix(in srgb, var(--ms-violet) 30%, var(--ms-line));
+}
+
+.price-cell-unset {
+  border-style: dashed;
+  border-color: var(--ms-line);
+  background: var(--ms-panel-2);
+  color: var(--ms-dim);
+}
+
+.model-card-footer {
+  @apply mt-auto flex flex-wrap items-end justify-between gap-3 pt-4;
 }
 
 .primary-group-chip {
@@ -1053,14 +1050,14 @@ onMounted(reload)
 }
 
 .model-rate-chip {
-  @apply ml-auto inline-flex h-7 shrink-0 items-center rounded-md px-2.5 font-mono text-xs font-bold;
+  @apply inline-flex h-7 shrink-0 items-center rounded-md px-2.5 font-mono text-xs font-bold;
   background: color-mix(in srgb, var(--ms-amber) 12%, var(--ms-panel));
   color: var(--ms-amber);
   border: 1px solid color-mix(in srgb, var(--ms-amber) 30%, transparent);
 }
 
 .model-detail-button {
-  @apply inline-flex h-7 shrink-0 items-center gap-1 rounded-md border px-2 text-xs font-semibold transition;
+  @apply ml-auto inline-flex h-7 shrink-0 items-center gap-1 rounded-md border px-2 text-xs font-semibold transition;
   border-color: var(--ms-line);
   color: var(--ms-muted);
 }
@@ -1103,9 +1100,14 @@ onMounted(reload)
 }
 
 .group-chip {
-  @apply inline-flex max-w-full items-center gap-1 rounded px-2 py-1 text-xs;
+  @apply inline-flex max-w-full cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs;
   background: var(--ms-panel-3);
   color: var(--ms-muted);
+}
+
+.group-chip:hover {
+  background: color-mix(in srgb, var(--ms-amber) 10%, var(--ms-panel));
+  color: var(--ms-amber);
 }
 
 .group-chip b {
