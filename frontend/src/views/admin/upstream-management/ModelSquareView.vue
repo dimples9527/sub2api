@@ -288,7 +288,7 @@
         <div>
           <div class="mb-2 flex items-center justify-between gap-3">
             <span class="text-sm font-semibold text-gray-950 dark:text-white">分组倍率</span>
-            <span class="text-xs text-gray-500 dark:text-gray-400">平台: {{ providerLabel(detailModel.provider) }}</span>
+            <span class="provider-inline text-xs" :style="providerAccent(detailModel.provider)">平台: {{ providerLabel(detailModel.provider) }}</span>
           </div>
           <div v-if="detailGroups.length > 0" class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             <button
@@ -817,7 +817,7 @@ onMounted(reload)
 
 .provider-title {
   @apply flex min-w-0 items-center gap-2 text-sm font-semibold;
-  color: var(--ms-text);
+  color: var(--ms-provider, var(--ms-brand));
 }
 
 .provider-dot,
@@ -864,7 +864,11 @@ onMounted(reload)
 
 .model-provider {
   @apply inline-flex min-w-0 items-center gap-2 text-xs font-semibold;
-  color: var(--ms-muted);
+  color: var(--ms-provider, var(--ms-brand));
+}
+
+.provider-inline {
+  color: var(--ms-provider, var(--ms-brand));
 }
 
 .model-title-row {
