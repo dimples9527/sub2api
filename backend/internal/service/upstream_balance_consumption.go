@@ -327,6 +327,34 @@ func (s *UpstreamBalanceConsumptionService) AddRecharge(ctx context.Context, inp
 	return s.store.AddRecharge(ctx, input)
 }
 
+// ListProviderRecharges 返回指定上游供应商近 days 天内的充值记录。
+// 按 provider_slug 精确匹配，同时允许按 provider_name 兜底匹配，便于页面用供应商编码关联。
+func (s *UpstreamBalanceConsumptionService) ListProviderRecharges(ctx context.Context, providerSlug string, days int) ([]UpstreamBalanceRecharge, error) {
+	if s == nil || s.store == nil {
+		return []UpstreamBalanceRecharge{}, infraerrors.ServiceUnavailable("UPSTREAM_BALANCE_STORE_UNAVAILABLE", "upstream balance store is unavailable")
+	}
+	providerSlug = strings.TrimSpace(providerSlug)
+	if providerSlug == "" {
+		return nil, infraerrors.BadRequest("UPSTREAM_BALANCE_PROVIDER_REQUIRED", "provider_slug is required")
+	}
+	if days <= 0 || days > 90 {
+		days = 30
+	}
+	now := s.currentTime()
+	start := now.AddDate(0, 0, -days)
+	recharges, err := s.store.ListRecharges(ctx, start, now)
+	if err != nil {
+		return nil, fmt.Errorf("list upstream balance recharges: %w", err)
+	}
+	matched := make([]UpstreamBalanceRecharge, 0, len(recharges))
+	for _, item := range recharges {
+		if strings.EqualFold(item.ProviderSlug, providerSlug) || strings.EqualFold(strings.TrimSpace(item.ProviderName), providerSlug) {
+			matched = append(matched, item)
+		}
+	}
+	return matched, nil
+}
+
 func (s *UpstreamBalanceConsumptionService) GetOverview(ctx context.Context, days int) (UpstreamBalanceConsumptionOverview, error) {
 	if days <= 0 || days > 90 {
 		days = 30

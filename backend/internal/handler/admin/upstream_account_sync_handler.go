@@ -30,6 +30,7 @@ type upstreamBalanceConsumptionService interface {
 	GetConfig(ctx context.Context) (service.UpstreamBalanceSamplerConfig, error)
 	UpdateConfig(ctx context.Context, input service.UpstreamBalanceSamplerConfig) (service.UpstreamBalanceSamplerConfig, error)
 	AddRecharge(ctx context.Context, input service.UpstreamBalanceRechargeInput) (service.UpstreamBalanceRecharge, error)
+	ListProviderRecharges(ctx context.Context, providerSlug string, days int) ([]service.UpstreamBalanceRecharge, error)
 }
 
 type upstreamBalanceSamplerScheduler interface {
@@ -243,6 +244,26 @@ func (h *UpstreamAccountSyncHandler) AddBalanceRecharge(c *gin.Context) {
 		return
 	}
 	result, err := h.balance.AddRecharge(c.Request.Context(), input)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+// ListBalanceRecharges 返回指定上游供应商近 days 天内的充值记录。
+func (h *UpstreamAccountSyncHandler) ListBalanceRecharges(c *gin.Context) {
+	if h.balance == nil {
+		response.InternalError(c, "upstream balance consumption service is unavailable")
+		return
+	}
+	days := 30
+	if raw := c.Query("days"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 90 {
+			days = parsed
+		}
+	}
+	result, err := h.balance.ListProviderRecharges(c.Request.Context(), c.Query("provider_slug"), days)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

@@ -8,6 +8,7 @@ import (
 
 type upstreamBalanceConsumptionMemoryStore struct {
 	snapshots []UpstreamBalanceSnapshot
+	recharges []UpstreamBalanceRecharge
 }
 
 func (s *upstreamBalanceConsumptionMemoryStore) AddSnapshot(_ context.Context, snapshot UpstreamBalanceSnapshot) (UpstreamBalanceSnapshot, error) {
@@ -48,11 +49,27 @@ func (s *upstreamBalanceConsumptionMemoryStore) ListLatestSnapshots(_ context.Co
 }
 
 func (s *upstreamBalanceConsumptionMemoryStore) AddRecharge(_ context.Context, input UpstreamBalanceRechargeInput) (UpstreamBalanceRecharge, error) {
-	return UpstreamBalanceRecharge{ProviderSlug: input.ProviderSlug, Amount: input.Amount, AmountScale: input.AmountScale, OccurredAt: input.OccurredAt}, nil
+	item := UpstreamBalanceRecharge{
+		ID:           int64(len(s.recharges) + 1),
+		ProviderSlug: input.ProviderSlug,
+		ProviderName: input.ProviderSlug,
+		Amount:       input.Amount,
+		AmountScale:  input.AmountScale,
+		Note:         input.Note,
+		OccurredAt:   input.OccurredAt,
+	}
+	s.recharges = append(s.recharges, item)
+	return item, nil
 }
 
-func (s *upstreamBalanceConsumptionMemoryStore) ListRecharges(_ context.Context, _, _ time.Time) ([]UpstreamBalanceRecharge, error) {
-	return []UpstreamBalanceRecharge{}, nil
+func (s *upstreamBalanceConsumptionMemoryStore) ListRecharges(_ context.Context, startTime, endTime time.Time) ([]UpstreamBalanceRecharge, error) {
+	out := []UpstreamBalanceRecharge{}
+	for _, item := range s.recharges {
+		if !item.OccurredAt.Before(startTime) && item.OccurredAt.Before(endTime) {
+			out = append(out, item)
+		}
+	}
+	return out, nil
 }
 
 type upstreamBalanceConsumptionProviderStub struct {
@@ -377,5 +394,43 @@ func TestUpstreamBalanceConsumptionOverviewIncludesLocalDailyConsumption(t *test
 	}
 	if overview.LocalDailyConsumptions[1].Date != "2026-06-17" || overview.LocalDailyConsumptions[1].ActualCost != 8 {
 		t.Fatalf("second local consumption = %+v, want 2026-06-17/8", overview.LocalDailyConsumptions[1])
+	}
+}
+
+func TestUpstreamBalanceConsumptionListProviderRecharges(t *testing.T) {
+	store := &upstreamBalanceConsumptionMemoryStore{}
+	_, err := store.AddRecharge(context.Background(), UpstreamBalanceRechargeInput{
+		ProviderSlug: "main",
+		Amount:       100,
+		OccurredAt:   time.Date(2026, 8, 10, 8, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("AddRecharge returned error: %v", err)
+	}
+	_, err = store.AddRecharge(context.Background(), UpstreamBalanceRechargeInput{
+		ProviderSlug: "backup",
+		Amount:       50,
+		OccurredAt:   time.Date(2026, 8, 12, 8, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("AddRecharge returned error: %v", err)
+	}
+
+	svc := NewUpstreamBalanceConsumptionService(store, &upstreamBalanceConsumptionProviderStub{}, nil)
+	svc.now = func() time.Time { return time.Date(2026, 8, 15, 10, 0, 0, 0, time.UTC) }
+
+	items, err := svc.ListProviderRecharges(context.Background(), "main", 30)
+	if err != nil {
+		t.Fatalf("ListProviderRecharges returned error: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("recharge count = %d, want 1", len(items))
+	}
+	if items[0].ProviderSlug != "main" || items[0].Amount != 100 {
+		t.Fatalf("recharge = %+v, want main/100", items[0])
+	}
+
+	if _, err := svc.ListProviderRecharges(context.Background(), "  ", 30); err == nil {
+		t.Fatalf("ListProviderRecharges with empty slug should fail")
 	}
 }
