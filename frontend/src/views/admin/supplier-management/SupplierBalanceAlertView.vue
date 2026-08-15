@@ -2,7 +2,7 @@
   <SupplierModuleLayout>
     <header class="sp-page-head">
       <div>
-        <div class="sp-eyebrow">Supplier Operations / Balance Guard</div>
+        <div class="sp-eyebrow">供应商运营 / 余额预警</div>
         <h1>供应商余额预警</h1>
         <p class="sp-subtitle">按供应商设置余额阈值，追踪低余额与恢复事件，并把事件交给独立通知渠道投递。</p>
       </div>
@@ -61,14 +61,18 @@
         :virtualize-threshold="1000"
       >
         <template #cell-provider_name="{ row }">
-          <div class="sp-entity">{{ row.provider_name }}</div>
+          <div
+            class="sp-entity sp-provider-name"
+            :class="providerNameTypeClass(row.provider_type)"
+            :style="providerNameTypeStyle(row.provider_type)"
+          >{{ row.provider_name }}</div>
           <div class="sp-sub">{{ row.provider_code }} · {{ row.provider_type }}</div>
         </template>
         <template #cell-last_balance="{ row }">
           <span :class="balanceTone(row)">{{ formatBalance(row.last_balance) }}</span>
         </template>
         <template #cell-threshold="{ row }">
-          <span class="sp-num">{{ formatBalance(row.threshold) }}</span>
+          <span :class="thresholdTone(row)">{{ formatBalance(row.threshold) }}</span>
         </template>
         <template #cell-enabled="{ row }">
           <div class="sp-inline">
@@ -133,7 +137,11 @@
         :virtualize-threshold="1000"
       >
         <template #cell-provider_name="{ row }">
-          <div class="sp-entity">{{ row.provider_name }}</div>
+          <div
+            class="sp-entity sp-provider-name"
+            :class="providerNameTypeClass(row.provider_type)"
+            :style="providerNameTypeStyle(row.provider_type)"
+          >{{ row.provider_name }}</div>
           <div class="sp-sub">{{ row.provider_code }}</div>
         </template>
         <template #cell-event_type="{ row }">
@@ -142,8 +150,12 @@
         <template #cell-status="{ row }">
           <span class="sp-status" :class="row.status === 'active' ? 'warn' : 'good'">{{ eventStatusLabel(row.status) }}</span>
         </template>
-        <template #cell-balance="{ row }">{{ formatBalance(row.balance) }}</template>
-        <template #cell-threshold="{ row }">{{ formatBalance(row.threshold) }}</template>
+        <template #cell-balance="{ row }">
+          <span :class="eventBalanceTone(row)">{{ formatBalance(row.balance) }}</span>
+        </template>
+        <template #cell-threshold="{ row }">
+          <span :class="eventThresholdTone(row)">{{ formatBalance(row.threshold) }}</span>
+        </template>
         <template #cell-observed_at="{ row }">{{ formatDateTime(row.observed_at) }}</template>
         <template #cell-actions="{ row }">
           <button
@@ -175,7 +187,25 @@
     </section>
 
     <BaseDialog :show="configDialogVisible" :title="configDialogTitle" width="normal" @close="closeConfigDialog">
-      <div v-if="configForm" class="sp-form">
+      <div v-if="configForm" class="sp-form sp-balance-alert-config-dialog">
+        <div class="sp-balance-alert-config-summary" aria-label="供应商余额预警摘要">
+          <div>
+            <span>供应商</span>
+            <strong
+              :class="providerNameTypeClass(configForm.providerType)"
+              :style="providerNameTypeStyle(configForm.providerType)"
+              :title="configForm.providerName"
+            >{{ configForm.providerName }}</strong>
+          </div>
+          <div>
+            <span>当前余额</span>
+            <strong :class="configForm.balanceTone">{{ configForm.balanceDisplay }}</strong>
+          </div>
+          <div>
+            <span>最近扫描</span>
+            <strong :class="configForm.scanTone">{{ configForm.scanLabel }}</strong>
+          </div>
+        </div>
         <Input v-model="configForm.threshold" type="number" min="0" step="0.01" label="余额阈值" hint="余额严格小于该值时触发预警；填写 0 表示跳过预警。" />
         <Input
           :model-value="configForm.cooldown_seconds"
@@ -193,7 +223,7 @@
             <span class="sp-status" :class="configForm.enabled ? 'good' : 'info'">{{ configForm.enabled ? '已启用' : '已停用' }}</span>
           </span>
         </label>
-        <div class="sp-form-note">供应商：{{ configForm.providerName }}。保存后下一次定时扫描会使用新的阈值和冷却时间。</div>
+        <div class="sp-form-note">保存后下一次定时扫描会使用新的阈值和冷却时间。</div>
       </div>
       <template #footer>
         <button class="sp-button" type="button" @click="closeConfigDialog">取消</button>
@@ -251,9 +281,14 @@ const configDialogTitle = ref('编辑余额预警配置')
 const configForm = ref<{
   providerId: number
   providerName: string
+  providerType: string
   enabled: boolean
   threshold: string
   cooldown_seconds: string
+  balanceDisplay: string
+  balanceTone: string
+  scanLabel: string
+  scanTone: string
 } | null>(null)
 
 const configColumns: Column[] = [
@@ -377,9 +412,14 @@ function openConfigDialog(config: SupplierBalanceAlertConfig): void {
   configForm.value = {
     providerId: config.provider_id,
     providerName: config.provider_name,
+    providerType: config.provider_type,
     enabled: config.enabled,
     threshold: config.threshold || '0',
     cooldown_seconds: String(config.cooldown_seconds || 0),
+    balanceDisplay: formatBalance(config.last_balance),
+    balanceTone: isActiveLowConfig(config) ? 'sp-balance-alert-low' : 'sp-balance-alert-normal',
+    scanLabel: scanStatusLabel(config.last_scan_status),
+    scanTone: scanStatusTone(config.last_scan_status),
   }
   configDialogVisible.value = true
 }
@@ -506,6 +546,43 @@ function scanStatusLabel(status: string): string {
   return '未扫描'
 }
 
+const PROVIDER_NAME_TYPE_CLASSES: Record<string, string> = {
+  sub2api: 'type-sub2api',
+  newapi: 'type-newapi',
+}
+
+function providerNameTypeClass(providerType?: string): string {
+  const normalized = providerType?.trim().toLowerCase() || ''
+  if (PROVIDER_NAME_TYPE_CLASSES[normalized]) {
+    return PROVIDER_NAME_TYPE_CLASSES[normalized]
+  }
+  // 未知类型使用随机色类，具体颜色由 providerNameTypeStyle 按类型稳定哈希生成
+  return normalized ? 'type-random' : 'type-default'
+}
+
+function providerNameTypeStyle(providerType?: string): Record<string, string> | undefined {
+  const normalized = providerType?.trim().toLowerCase() || ''
+  if (!normalized || PROVIDER_NAME_TYPE_CLASSES[normalized]) return undefined
+  let hash = 0
+  for (let i = 0; i < normalized.length; i += 1) {
+    hash = ((hash << 5) - hash + normalized.charCodeAt(i)) | 0
+  }
+  const hue = Math.abs(hash) % 360
+  return { color: `hsl(${hue} 62% 42%)` }
+}
+
+function eventBalanceTone(event: SupplierBalanceAlertEvent): string {
+  return event.event_type === 'balance_recovered' ? 'sp-balance-alert-recovered' : 'sp-balance-alert-low'
+}
+
+function thresholdTone(config: SupplierBalanceAlertConfig): string {
+  return isActiveLowConfig(config) ? 'sp-balance-alert-low' : 'sp-balance-alert-muted'
+}
+
+function eventThresholdTone(event: SupplierBalanceAlertEvent): string {
+  return event.event_type === 'balance_recovered' ? 'sp-balance-alert-recovered' : 'sp-balance-alert-low'
+}
+
 function eventTypeLabel(eventType: string): string {
   return eventType === 'balance_recovered' ? '余额恢复' : '余额不足'
 }
@@ -530,22 +607,146 @@ onMounted(() => {
 
 <style scoped>
 .sp-balance-alert-metrics { grid-template-columns: repeat(4, minmax(145px, 1fr)); }
+.sp-balance-alert-metrics .sp-metric-card {
+  --sp-metric-accent: var(--sp-blue);
+  cursor: default;
+  border-color: color-mix(in srgb, var(--sp-metric-accent) 24%, var(--sp-line));
+  background:
+    linear-gradient(150deg, color-mix(in srgb, var(--sp-metric-accent) 7%, transparent), transparent 56%),
+    var(--sp-panel);
+}
+.sp-balance-alert-metrics .sp-metric-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--sp-metric-accent), color-mix(in srgb, var(--sp-metric-accent) 30%, transparent));
+}
+.sp-balance-alert-metrics .sp-metric-card.sp-green { --sp-metric-accent: var(--sp-green); }
+.sp-balance-alert-metrics .sp-metric-card.sp-amber { --sp-metric-accent: var(--sp-amber); }
+.sp-balance-alert-metrics .sp-metric-card.sp-red { --sp-metric-accent: var(--sp-red); }
+.sp-balance-alert-metrics .sp-metric-card:hover,
+.sp-balance-alert-metrics .sp-metric-card.selected {
+  border-color: color-mix(in srgb, var(--sp-metric-accent) 55%, var(--sp-line));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--sp-metric-accent) 22%, transparent),
+    0 10px 24px color-mix(in srgb, var(--sp-metric-accent) 8%, transparent);
+}
+.sp-balance-alert-metrics .sp-metric-value {
+  margin-top: 0.625rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.sp-balance-alert-metrics .sp-metric-foot {
+  margin-top: 0.75rem;
+  padding-top: 0.625rem;
+  border-top: 1px solid color-mix(in srgb, var(--sp-metric-accent) 14%, var(--sp-soft));
+}
 .sp-balance-alert-panel { margin-bottom: 1rem; }
 .sp-balance-alert-loaded { margin: 0; padding: 0.45rem 0.65rem; border-left: 0; background: var(--sp-panel-2); }
 .sp-balance-alert-filter-head { align-items: flex-start; }
 .sp-balance-alert-filters { justify-content: flex-end; }
 .sp-balance-alert-filter-control { min-width: 9rem; }
 .sp-balance-alert-error-text { max-width: 16rem; overflow: hidden; color: var(--sp-red); text-overflow: ellipsis; }
-.sp-balance-alert-low { color: var(--sp-red); font-weight: 700; }
-.sp-balance-alert-normal { color: var(--sp-text); }
+.sp-balance-alert-low { color: var(--sp-red); font-weight: 700; font-variant-numeric: tabular-nums; }
+.sp-balance-alert-normal { color: var(--sp-text); font-variant-numeric: tabular-nums; }
+.sp-balance-alert-recovered { color: var(--sp-green); font-weight: 600; font-variant-numeric: tabular-nums; }
+.sp-balance-alert-muted { color: var(--sp-muted); font-variant-numeric: tabular-nums; }
+.sp-balance-alert-panel .sp-num { font-variant-numeric: tabular-nums; }
 .sp-empty-state { color: var(--sp-muted); text-align: center; }
 .sp-pagination-row { display: flex; justify-content: flex-end; padding: 0.75rem 1rem 1rem; }
+
+/* 编辑配置弹窗内容（BaseDialog Teleport 后脱离 .supplier-management-page） */
+.sp-balance-alert-config-dialog { grid-template-columns: 1fr; gap: 1rem; }
+.sp-balance-alert-config-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.625rem;
+  padding: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--sp-cyan) 22%, var(--sp-line));
+  border-radius: 0.7rem;
+  background: color-mix(in srgb, var(--sp-cyan) 5%, var(--sp-panel));
+}
+.sp-balance-alert-config-summary > div { display: grid; gap: 0.25rem; min-width: 0; }
+.sp-balance-alert-config-summary span { color: var(--sp-muted); font-size: 0.72rem; }
+.sp-balance-alert-config-summary strong {
+  overflow: hidden;
+  color: var(--sp-text);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sp-balance-alert-config-summary strong.sp-balance-alert-low { color: var(--sp-red); }
+.sp-balance-alert-config-summary strong.type-sub2api { color: var(--sp-green); }
+.sp-balance-alert-config-summary strong.type-newapi { color: var(--sp-violet); }
+.sp-balance-alert-config-summary strong.good { color: var(--sp-green); }
+.sp-balance-alert-config-summary strong.bad { color: var(--sp-red); }
+.sp-balance-alert-config-summary strong.warn { color: var(--sp-amber); }
+.sp-balance-alert-config-summary strong.info { color: var(--sp-blue); }
+.sp-balance-alert-config-dialog .sp-switch-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: var(--sp-text);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+/* BaseDialog Teleport 到 body 后需要重声明 sp 变量，避免弹窗内容配色失效 */
+:global(.modal-content:has(.sp-balance-alert-config-dialog)) {
+  --sp-panel: #ffffff;
+  --sp-panel-2: #f9fafb;
+  --sp-panel-3: #f3f4f6;
+  --sp-line: #e5e7eb;
+  --sp-soft: #f1f5f9;
+  --sp-text: #111827;
+  --sp-muted: #64748b;
+  --sp-dim: #94a3b8;
+  --sp-cyan: #3b82f6;
+  --sp-green: #16a34a;
+  --sp-amber: #d97706;
+  --sp-orange: #ea580c;
+  --sp-red: #dc2626;
+  --sp-blue: #2563eb;
+  --sp-violet: #7c3aed;
+  color: var(--sp-text);
+  background: var(--sp-panel);
+}
+:global(.dark .modal-content:has(.sp-balance-alert-config-dialog)) {
+  --sp-panel: #1f2937;
+  --sp-panel-2: #111827;
+  --sp-panel-3: #374151;
+  --sp-line: #374151;
+  --sp-soft: #374151;
+  --sp-text: #f9fafb;
+  --sp-muted: #9ca3af;
+  --sp-dim: #6b7280;
+  color: var(--sp-text);
+  background: var(--sp-panel);
+}
+:global(.modal-content:has(.sp-balance-alert-config-dialog) .modal-footer) {
+  border-color: var(--sp-line);
+  background: var(--sp-panel);
+}
+:global(.modal-content:has(.sp-balance-alert-config-dialog) .modal-footer .sp-button.primary) {
+  border-color: var(--sp-cyan, #3b82f6);
+  background: var(--sp-cyan, #3b82f6);
+  color: #fff;
+}
+:global(.modal-content:has(.sp-balance-alert-config-dialog) .modal-footer .sp-button.primary:hover) {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+}
 
 @media (max-width: 760px) {
   .sp-balance-alert-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sp-balance-alert-filter-head { align-items: stretch; }
   .sp-balance-alert-filters { justify-content: stretch; }
   .sp-balance-alert-filter-control { min-width: 0; flex: 1 1 8rem; }
+  .sp-balance-alert-config-summary { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 480px) {

@@ -34,6 +34,7 @@ export interface SupplierBalanceAlertEvent {
   provider_id: number
   provider_code: string
   provider_name: string
+  provider_type: string
   event_type: SupplierBalanceAlertEventType | string
   status: SupplierBalanceAlertEventStatus | string
   balance: string

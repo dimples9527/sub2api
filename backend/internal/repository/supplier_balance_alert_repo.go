@@ -109,7 +109,7 @@ WHERE provider_id = $1`, providerID, now, balanceValue, status, truncateSupplier
 }
 
 const supplierBalanceAlertEventSelect = `
-SELECT e.id, e.provider_id, p.code, p.name, e.event_type, e.status,
+SELECT e.id, e.provider_id, p.code, p.name, p.provider_type, e.event_type, e.status,
        e.balance, e.threshold, e.observed_at, e.resolved_at, e.last_seen_at,
        e.created_at, e.updated_at
 FROM supplier_balance_alert_events e
@@ -302,7 +302,7 @@ func scanSupplierBalanceAlertEvent(scanner supplierBalanceAlertScanner) (service
 	var item service.SupplierBalanceAlertEvent
 	var balanceRaw, thresholdRaw sql.NullString
 	if err := scanner.Scan(
-		&item.ID, &item.ProviderID, &item.ProviderCode, &item.ProviderName, &item.EventType,
+		&item.ID, &item.ProviderID, &item.ProviderCode, &item.ProviderName, &item.ProviderType, &item.EventType,
 		&item.Status, &balanceRaw, &thresholdRaw, &item.ObservedAt, &item.ResolvedAt,
 		&item.LastSeenAt, &item.CreatedAt, &item.UpdatedAt,
 	); err != nil {

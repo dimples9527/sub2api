@@ -87,6 +87,7 @@ type SupplierBalanceAlertEvent struct {
 	ProviderID   int64           `json:"provider_id"`
 	ProviderCode string          `json:"provider_code"`
 	ProviderName string          `json:"provider_name"`
+	ProviderType string          `json:"provider_type"`
 	EventType    string          `json:"event_type"`
 	Status       string          `json:"status"`
 	Balance      decimal.Decimal `json:"balance"`
