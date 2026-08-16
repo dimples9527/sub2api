@@ -1495,15 +1495,14 @@ describe('supplier local data views component usage', () => {
     expect(groupsSource).toContain('max-width: min(58vw, 52rem);')
   })
 
-  it('supports ignoring automatic rate guard for a selected supplier group', () => {
-    expect(groupsSource).toContain('updateSupplierGroupRateGuardIgnore')
-    expect(groupsSource).toContain('toggleRateGuardIgnored')
-    expect(groupsSource).toContain('忽略守护')
-    expect(groupsSource).toContain('恢复守护')
-    expect(groupsSource).toContain('已忽略自动守护')
-    expect(groupsSource).toContain('保留守护来源，仅暂停自动倍率调整')
-    expect(supplierProviderDataSource).toContain('rate_guard_ignored')
-    expect(supplierProviderDataSource).toContain('updateSupplierGroupRateGuardIgnore')
+  it('supports toggling participation in automatic rate guard for a supplier group', () => {
+    expect(groupsSource).toContain('updateSupplierGroupRateGuardEnabled')
+    expect(groupsSource).toContain('toggleRateGuardEnabled')
+    expect(groupsSource).toContain('参与守护')
+    expect(groupsSource).toContain('已暂停参与')
+    expect(groupsSource).toContain('保留守护来源，已暂停自动倍率调整')
+    expect(supplierProviderDataSource).toContain('rate_guard_enabled')
+    expect(supplierProviderDataSource).toContain('updateSupplierGroupRateGuardEnabled')
   })
 
 })

@@ -81,6 +81,18 @@
             <span>分组倍率变更日志</span>
             <em v-if="pendingRateGuardChangeLogCount > 0" class="sp-pending-count">{{ pendingRateGuardChangeLogCount }}</em>
           </button>
+          <div class="sp-column-settings-wrap">
+            <button
+              class="sp-button sp-control-button sp-control-button-columns"
+              type="button"
+              :class="{ active: showColumnSettings }"
+              title="选择要展示的列"
+              @click="toggleColumnSettings($event)"
+            >
+              <Icon name="grid" size="sm" />
+              <span>列设置</span>
+            </button>
+          </div>
           <button class="sp-button sp-control-button sp-control-button-refresh" type="button" :disabled="loading" @click="refreshAll">
             <Icon name="refresh" size="sm" :class="loading ? 'sp-spin' : ''" />
             <span>刷新</span>
@@ -290,7 +302,7 @@
                 <span class="sp-status" :class="keyStatusTone(group)">
                   <i></i>{{ keyStatusLabel(group) }}
                 </span>
-                <small>{{ keyStatusDetail(group) }}</small>
+                <small class="sp-sub">{{ keyStatusDetail(group) }}</small>
               </div>
             </template>
 
@@ -367,10 +379,18 @@
 
 			<template #cell-rate_guard_status="{ row: group }">
 				<div class="sp-guard-state-stack" :title="rateGuardStatus(group).title">
-					<span class="sp-guard-state" :class="rateGuardStatus(group).tone">
-						<Icon name="shield" size="xs" />
-						{{ rateGuardStatus(group).label }}
-					</span>
+					<div class="sp-guard-toggle-row">
+						<Toggle
+							:model-value="group.rate_guard_enabled"
+							:disabled="guardEnabledUpdatingGroupID === group.id"
+							:aria-label="`切换${group.name || group.upstream_group_key}的倍率守护参与状态`"
+							@update:model-value="toggleRateGuardEnabled(group)"
+						/>
+						<span class="sp-guard-state" :class="rateGuardStatus(group).tone">
+							<Icon name="shield" size="xs" />
+							{{ rateGuardStatus(group).label }}
+						</span>
+					</div>
 					<small v-if="rateGuardStatus(group).detail">{{ rateGuardStatus(group).detail }}</small>
 				</div>
 			</template>
@@ -403,87 +423,34 @@
             <template #cell-actions="{ row: group }">
               <div class="sp-row-actions" @click.stop>
                 <button
+                  v-if="group.active && !group.local_group_id"
                   type="button"
-                  class="sp-row-action danger"
-                  :disabled="deletingGroupID === group.id"
-                  title="删除分组记录"
-                  @click="openDeleteGroupDialog(group)"
+                  class="sp-row-action primary"
+                  title="匹配本地分组"
+                  @click="openMappingDialog(group)"
                 >
-                  <Icon name="x" size="sm" />
-                  <span>{{ deletingGroupID === group.id ? '删除中' : '删除记录' }}</span>
+                  <Icon name="link" size="sm" />
+                  <span>匹配分组</span>
                 </button>
-                <template v-if="group.active">
-                <template v-if="!group.local_group_id">
-                  <button type="button" class="sp-row-action primary" title="匹配本地分组" @click="openMappingDialog(group)">
-                    <Icon name="link" size="sm" />
-                    <span>匹配分组</span>
-                  </button>
-                  <button type="button" class="sp-row-action" title="新建本地分组" @click="openCreateDialog(group)">
-                    <Icon name="plus" size="sm" />
-                    <span>新建分组</span>
-                  </button>
-                </template>
-                <template v-else>
-					<button
-						v-if="canManageManualRateGuard(group)"
-						type="button"
-						class="sp-row-action guard"
-						:class="{ active: group.rate_guard_selected }"
-						:disabled="guardUpdatingGroupID === group.id || (!group.rate_guard_selected && !rateGuardEligible(group))"
-						:title="group.rate_guard_selected ? '取消人工倍率守护' : (hasOtherRateGuard(group) ? '切换为该本地分组的倍率守护来源' : '设为该本地分组的倍率守护来源')"
-						@click="toggleRateGuard(group)"
-					>
-						<Icon name="shield" size="sm" />
-						<span>{{ group.rate_guard_selected ? '取消守护' : (hasOtherRateGuard(group) ? '切换为守护' : '设为守护') }}</span>
-					</button>
-					<button
-						v-if="group.rate_guard_selected"
-						type="button"
-						class="sp-row-action"
-						:class="{ active: group.rate_guard_ignored }"
-						:disabled="guardIgnoreUpdatingGroupID === group.id"
-						:title="group.rate_guard_ignored ? '恢复该分组的自动倍率守护' : '忽略该分组的自动倍率守护'"
-						@click="group.rate_guard_ignored ? toggleRateGuardIgnored(group) : (rateGuardIgnoreTarget = group)"
-					>
-						<Icon :name="group.rate_guard_ignored ? 'refresh' : 'x'" size="sm" />
-						<span>{{ group.rate_guard_ignored ? '恢复守护' : '忽略守护' }}</span>
-					</button>
-                  <button type="button" class="sp-row-action primary" title="修改本地分组倍率" @click="openRateDialog(group)">
-                    <Icon name="edit" size="sm" />
-                    <span>调倍率</span>
-                  </button>
-                  <button
-                    type="button"
-                    class="sp-row-action"
-                    :class="{ active: Boolean(group.platform_override) }"
-                    :disabled="savingGroupPlatform && groupPlatformTarget?.id === group.id"
-                    title="配置本地分组业务平台"
-                    @click="openGroupPlatformDialog(group)"
-                  >
-                    <Icon name="edit" size="sm" />
-                    <span>{{ group.platform_override ? '改业务平台' : '业务平台' }}</span>
-                  </button>
-                  <button type="button" class="sp-row-action" title="更换关联的本地分组" @click="openMappingDialog(group)">
-                    <Icon name="refresh" size="sm" />
-                    <span>更换本地分组</span>
-                  </button>
-                  <button type="button" class="sp-row-action danger" title="取消本地分组关联" @click="unmatchTarget = group">
-                    <Icon name="x" size="sm" />
-                    <span>取消关联</span>
-                  </button>
-                </template>
+                <button
+                  v-else-if="group.active && group.local_group_id"
+                  type="button"
+                  class="sp-row-action primary"
+                  title="修改本地分组倍率"
+                  @click="openRateDialog(group)"
+                >
+                  <Icon name="edit" size="sm" />
+                  <span>调倍率</span>
+                </button>
                 <button
                   type="button"
-                  class="sp-row-action"
-                  :class="{ active: group.auto_match_ignored }"
-                  :disabled="policyUpdatingGroupID === group.id"
-                  :title="group.auto_match_ignored ? '重新允许自动匹配' : '忽略该分组的自动匹配'"
-                  @click="toggleAutoMatchIgnored(group)"
+                  class="sp-row-action sp-row-more"
+                  :class="{ active: actionMenu.open && actionMenu.group?.id === group.id }"
+                  title="更多操作"
+                  @click="openActionMenu(group, $event)"
                 >
-                  <Icon :name="group.auto_match_ignored ? 'refresh' : 'x'" size="sm" />
-                  <span>{{ group.auto_match_ignored ? '允许自动' : '忽略自动' }}</span>
+                  <Icon name="more" size="sm" />
                 </button>
-                </template>
               </div>
             </template>
 
@@ -769,16 +736,6 @@
       </template>
     </BaseDialog>
 
-    <ConfirmDialog
-      :show="Boolean(rateGuardIgnoreTarget)"
-      title="忽略自动倍率守护"
-      :message="`忽略后，${rateGuardIgnoreTarget?.name || rateGuardIgnoreTarget?.upstream_group_key || '该上游分组'} 将保留守护来源，仅暂停自动倍率调整。`"
-      confirm-text="忽略守护"
-      cancel-text="取消"
-      danger
-      @confirm="confirmRateGuardIgnore"
-      @cancel="rateGuardIgnoreTarget = null"
-    />
 
     <ConfirmDialog
       :show="Boolean(unmatchTarget)"
@@ -801,11 +758,109 @@
       @confirm="confirmDeleteGroup"
       @cancel="deleteTarget = null"
     />
+    <Teleport to="body">
+      <div v-if="actionMenu.open && actionMenu.group">
+        <div class="fixed inset-0 z-[9998]" @click="closeActionMenu"></div>
+        <div
+          class="sp-group-action-menu fixed z-[9999]"
+          :style="{ top: `${actionMenu.top}px`, left: `${actionMenu.left}px` }"
+        >
+          <template v-if="actionMenu.group.active">
+            <template v-if="actionMenu.group.local_group_id">
+              <button
+                v-if="canManageManualRateGuard(actionMenu.group)"
+                type="button"
+                class="sp-group-action-item guard"
+                :class="{ active: actionMenu.group.rate_guard_selected }"
+                :disabled="guardUpdatingGroupID === actionMenu.group.id || (!actionMenu.group.rate_guard_selected && !rateGuardEligible(actionMenu.group))"
+                @click="runActionMenuAction((group) => toggleRateGuard(group))"
+              >
+                <Icon name="shield" size="sm" />
+                <span>{{ actionMenu.group.rate_guard_selected ? '取消守护' : (hasOtherRateGuard(actionMenu.group) ? '切换为守护' : '设为守护') }}</span>
+              </button>
+              <button
+                type="button"
+                class="sp-group-action-item"
+                :class="{ active: Boolean(actionMenu.group.platform_override) }"
+                :disabled="savingGroupPlatform && groupPlatformTarget?.id === actionMenu.group.id"
+                @click="runActionMenuAction((group) => openGroupPlatformDialog(group))"
+              >
+                <Icon name="edit" size="sm" />
+                <span>{{ actionMenu.group.platform_override ? '改业务平台' : '业务平台' }}</span>
+              </button>
+              <button type="button" class="sp-group-action-item" @click="runActionMenuAction((group) => openMappingDialog(group))">
+                <Icon name="refresh" size="sm" />
+                <span>更换本地分组</span>
+              </button>
+              <button type="button" class="sp-group-action-item danger" @click="runActionMenuAction(unmatchSelectedGroup)">
+                <Icon name="x" size="sm" />
+                <span>取消关联</span>
+              </button>
+            </template>
+            <template v-else>
+              <button type="button" class="sp-group-action-item" @click="runActionMenuAction((group) => openCreateDialog(group))">
+                <Icon name="plus" size="sm" />
+                <span>新建分组</span>
+              </button>
+            </template>
+            <button
+              type="button"
+              class="sp-group-action-item"
+              :class="{ active: actionMenu.group.auto_match_ignored }"
+              :disabled="policyUpdatingGroupID === actionMenu.group.id"
+              @click="runActionMenuAction((group) => toggleAutoMatchIgnored(group))"
+            >
+              <Icon :name="actionMenu.group.auto_match_ignored ? 'refresh' : 'x'" size="sm" />
+              <span>{{ actionMenu.group.auto_match_ignored ? '允许自动' : '忽略自动' }}</span>
+            </button>
+            <div class="sp-group-action-divider"></div>
+          </template>
+          <button
+            type="button"
+            class="sp-group-action-item danger"
+            :disabled="deletingGroupID === actionMenu.group.id"
+            @click="runActionMenuAction((group) => openDeleteGroupDialog(group))"
+          >
+            <Icon name="x" size="sm" />
+            <span>{{ deletingGroupID === actionMenu.group.id ? '删除中' : '删除记录' }}</span>
+          </button>
+        </div>
+      </div>
+    </Teleport>
+    <Teleport to="body">
+      <div v-if="showColumnSettings">
+        <div class="fixed inset-0 z-[9998]" @click="showColumnSettings = false"></div>
+        <div
+          class="sp-column-settings-menu fixed z-[9999]"
+          :style="{ top: `${columnSettingsTop}px`, left: `${columnSettingsLeft}px` }"
+        >
+          <div class="sp-column-settings-head">
+            <span>展示列</span>
+            <button type="button" class="sp-column-settings-reset" @click="resetGroupColumns">恢复默认</button>
+          </div>
+          <div class="sp-column-settings-list">
+            <button
+              v-for="col in toggleableGroupColumns"
+              :key="col.key"
+              type="button"
+              class="sp-column-settings-item"
+              :class="{ checked: isGroupColumnVisible(col.key) }"
+              @click="toggleGroupColumn(col.key)"
+            >
+              <span class="sp-column-settings-check">
+                <Icon v-if="isGroupColumnVisible(col.key)" name="check" size="sm" />
+              </span>
+              <span>{{ col.label }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </SupplierModuleLayout>
 </template>
 
 <script setup lang="ts">
-import { computed, h, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, h, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { adminAPI } from '@/api/admin'
 import {
   listRateGuardChangeLogs,
@@ -823,7 +878,7 @@ import {
   setSupplierLocalGroupPlatformOverride,
   updateSupplierGroupAutoMatchPolicy,
 	updateSupplierGroupRateGuard,
-	updateSupplierGroupRateGuardIgnore,
+	updateSupplierGroupRateGuardEnabled,
   updateSupplierGroupMapping,
   type SupplierProviderGroup,
   type SupplierProviderGroupSummary,
@@ -839,6 +894,7 @@ import GroupBadge from '@/components/common/GroupBadge.vue'
 import Input from '@/components/common/Input.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
+import Toggle from '@/components/common/Toggle.vue'
 import StatCard from '@/components/common/StatCard.vue'
 import type { Column } from '@/components/common/types'
 import Icon from '@/components/icons/Icon.vue'
@@ -947,7 +1003,6 @@ const rateTarget = ref<SupplierProviderGroup | null>(null)
 const groupPlatformTarget = ref<SupplierProviderGroup | null>(null)
 const unmatchTarget = ref<SupplierProviderGroup | null>(null)
 const deleteTarget = ref<SupplierProviderGroup | null>(null)
-const rateGuardIgnoreTarget = ref<SupplierProviderGroup | null>(null)
 const mappingLocalGroupID = ref<number | null>(null)
 const newGroupName = ref('')
 const newGroupPlatform = ref<string>('openai')
@@ -968,7 +1023,7 @@ const savingGroupPlatform = ref(false)
 const autoMatching = ref(false)
 const policyUpdatingGroupID = ref<number | null>(null)
 const guardUpdatingGroupID = ref<number | null>(null)
-const guardIgnoreUpdatingGroupID = ref<number | null>(null)
+const guardEnabledUpdatingGroupID = ref<number | null>(null)
 const resolvingNameGroupID = ref<number | null>(null)
 const rateGuardChangeLogsVisible = ref(false)
 const rateGuardChangeLogsLoading = ref(false)
@@ -1056,25 +1111,100 @@ const platformOptions = computed<SelectOption[]>(() => [
   ...corePlatformOptions,
   ...customPlatformOptions.value,
 ])
-const groupColumns: Column[] = [
-  { key: 'provider_name', label: '供应商', sortable: true, class: 'min-w-[150px]' },
-  { key: 'name', label: '上游分组', sortable: true, class: 'min-w-[190px]' },
-  { key: 'key_status', label: '密钥状态', class: 'min-w-[150px]' },
-  { key: 'rate_multiplier', label: '上游倍率', sortable: true, class: 'min-w-[96px]' },
-  { key: 'raw_status', label: '上游状态', class: 'min-w-[105px]' },
-  { key: 'monitor_trend', label: '可用率趋势', class: 'min-w-[160px]' },
-  { key: 'local_group_name', label: '匹配本地分组', sortable: true, class: 'min-w-[190px]' },
-  { key: 'auto_match_status', label: '匹配状态', class: 'min-w-[120px]' },
-	{ key: 'rate_guard_status', label: '倍率守护', class: 'min-w-[180px]' },
-  { key: 'local_rate_multiplier', label: '本地分组倍率', sortable: true, class: 'min-w-[110px]' },
-  { key: 'rate_delta', label: '价差', class: 'min-w-[110px]' },
-  { key: 'account_count', label: '绑定账号', sortable: true, class: 'min-w-[90px]' },
-  { key: 'rate_status', label: '倍率状态', class: 'min-w-[110px]' },
-  { key: 'actions', label: '操作', class: 'min-w-[270px]' },
+const ALL_GROUP_COLUMNS: Column[] = [
+  { key: 'provider_name', label: '供应商', sortable: true, class: 'min-w-[120px]' },
+  { key: 'name', label: '上游分组', sortable: true, class: 'min-w-[170px]' },
+  { key: 'key_status', label: '密钥状态', class: 'min-w-[120px]' },
+  { key: 'rate_multiplier', label: '上游倍率', sortable: true, class: 'min-w-[88px]' },
+  { key: 'raw_status', label: '上游状态', class: 'min-w-[95px]' },
+  { key: 'monitor_trend', label: '可用率趋势', class: 'min-w-[140px]' },
+  { key: 'local_group_name', label: '匹配本地分组', sortable: true, class: 'min-w-[170px]' },
+  { key: 'auto_match_status', label: '匹配状态', class: 'min-w-[100px]' },
+  { key: 'rate_guard_status', label: '倍率守护', class: 'min-w-[160px]' },
+  { key: 'local_rate_multiplier', label: '本地分组倍率', sortable: true, class: 'min-w-[100px]' },
+  { key: 'rate_delta', label: '价差', class: 'min-w-[100px]' },
+  { key: 'account_count', label: '绑定账号', sortable: true, class: 'min-w-[80px]' },
+  { key: 'rate_status', label: '倍率状态', class: 'min-w-[100px]' },
+  { key: 'actions', label: '操作', class: 'min-w-[140px]' },
 ]
+const ALWAYS_VISIBLE_GROUP_COLUMNS = new Set(['provider_name', 'name', 'rate_guard_status', 'actions'])
+const GROUP_COLUMNS_STORAGE_KEY = 'supplierGroups.hiddenColumns'
+
+const hiddenGroupColumns = reactive<Set<string>>(new Set())
+const showColumnSettings = ref(false)
+const columnSettingsTop = ref(0)
+const columnSettingsLeft = ref(0)
+
+const toggleableGroupColumns = computed(() =>
+  ALL_GROUP_COLUMNS.filter((column) => !ALWAYS_VISIBLE_GROUP_COLUMNS.has(column.key)),
+)
+const groupColumns = computed<Column[]>(() =>
+  ALL_GROUP_COLUMNS.filter(
+    (column) => ALWAYS_VISIBLE_GROUP_COLUMNS.has(column.key) || !hiddenGroupColumns.has(column.key),
+  ),
+)
+
+function isGroupColumnVisible(key: string): boolean {
+  return ALWAYS_VISIBLE_GROUP_COLUMNS.has(key) || !hiddenGroupColumns.has(key)
+}
+
+function loadGroupColumnSettings() {
+  hiddenGroupColumns.clear()
+  try {
+    const saved = window.localStorage.getItem(GROUP_COLUMNS_STORAGE_KEY)
+    if (!saved) return
+    const parsed: unknown = JSON.parse(saved)
+    if (!Array.isArray(parsed)) return
+    const validKeys = new Set(ALL_GROUP_COLUMNS.map((column) => column.key))
+    for (const key of parsed) {
+      if (typeof key === 'string' && validKeys.has(key) && !ALWAYS_VISIBLE_GROUP_COLUMNS.has(key)) {
+        hiddenGroupColumns.add(key)
+      }
+    }
+  } catch (error) {
+    console.error('读取分组列设置失败:', error)
+  }
+}
+
+function saveGroupColumnSettings() {
+  try {
+    window.localStorage.setItem(GROUP_COLUMNS_STORAGE_KEY, JSON.stringify([...hiddenGroupColumns]))
+  } catch (error) {
+    console.error('保存分组列设置失败:', error)
+  }
+}
+
+function toggleGroupColumn(key: string) {
+  if (ALWAYS_VISIBLE_GROUP_COLUMNS.has(key)) return
+  if (hiddenGroupColumns.has(key)) {
+    hiddenGroupColumns.delete(key)
+  } else {
+    hiddenGroupColumns.add(key)
+  }
+  saveGroupColumnSettings()
+}
+
+function resetGroupColumns() {
+  hiddenGroupColumns.clear()
+  saveGroupColumnSettings()
+}
+
+function toggleColumnSettings(event: MouseEvent) {
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  const menuWidth = 220
+  const menuHeight = 360
+  columnSettingsTop.value = Math.min(rect.bottom + 6, Math.max(8, window.innerHeight - menuHeight - 8))
+  columnSettingsLeft.value = Math.max(8, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 8))
+  showColumnSettings.value = !showColumnSettings.value
+}
+
+if (typeof window !== 'undefined') {
+  loadGroupColumnSettings()
+}
+
 const rateGuardChangeLogColumns: Column[] = [
   { key: 'status', label: '处理状态', class: 'min-w-[100px]' },
-  { key: 'local_group_name', label: '本地分组', class: 'min-w-[150px]' },
+  { key: 'local_group_name', label: '本地分组', class: 'min-w-[120px]' },
   { key: 'upstream_group_name', label: '上游分组', class: 'min-w-[170px]' },
   { key: 'old_rate', label: '原倍率', class: 'min-w-[90px]' },
   { key: 'new_rate', label: '新倍率', class: 'min-w-[90px]' },
@@ -1711,7 +1841,7 @@ async function toggleAutoMatchIgnored(group: SupplierProviderGroup) {
 }
 
 async function toggleRateGuard(group: SupplierProviderGroup) {
-	if (!group.rate_guard_selected && !rateGuardEligible(group)) return
+	if (!group.rate_guard_selected && (!rateGuardEligible(group) || !group.rate_guard_enabled)) return
 	guardUpdatingGroupID.value = group.id
 	const selected = !group.rate_guard_selected
 	try {
@@ -1725,25 +1855,50 @@ async function toggleRateGuard(group: SupplierProviderGroup) {
 	}
 }
 
-async function toggleRateGuardIgnored(group: SupplierProviderGroup) {
-	guardIgnoreUpdatingGroupID.value = group.id
-	const ignored = !group.rate_guard_ignored
+async function toggleRateGuardEnabled(group: SupplierProviderGroup) {
+	guardEnabledUpdatingGroupID.value = group.id
+	const enabled = !group.rate_guard_enabled
 	try {
-		await updateSupplierGroupRateGuardIgnore(group.id, ignored)
+		await updateSupplierGroupRateGuardEnabled(group.id, enabled)
 		await loadGroups()
-		appStore.showSuccess(ignored ? '已忽略该分组的自动倍率守护' : '已恢复该分组的自动倍率守护')
+		appStore.showSuccess(enabled ? '已开启该分组的自动倍率守护' : '已关闭该分组的自动倍率守护')
 	} catch (err) {
-		appStore.showError(errorMessage(err, '更新自动倍率守护忽略状态失败'))
+		appStore.showError(errorMessage(err, '更新倍率守护参与状态失败'))
 	} finally {
-		guardIgnoreUpdatingGroupID.value = null
+		guardEnabledUpdatingGroupID.value = null
 	}
 }
 
-async function confirmRateGuardIgnore() {
-	const target = rateGuardIgnoreTarget.value
-	if (!target) return
-	rateGuardIgnoreTarget.value = null
-	await toggleRateGuardIgnored(target)
+const actionMenu = reactive<{
+  open: boolean
+  group: SupplierProviderGroup | null
+  top: number
+  left: number
+}>({ open: false, group: null, top: 0, left: 0 })
+
+function openActionMenu(group: SupplierProviderGroup, event: MouseEvent) {
+  const menuWidth = 200
+  const menuHeight = 330
+  const viewportPadding = 8
+  actionMenu.open = true
+  actionMenu.group = group
+  actionMenu.top = Math.max(viewportPadding, Math.min(event.clientY, window.innerHeight - menuHeight - viewportPadding))
+  actionMenu.left = Math.max(viewportPadding, Math.min(event.clientX, window.innerWidth - menuWidth - viewportPadding))
+}
+
+function closeActionMenu() {
+  actionMenu.open = false
+  actionMenu.group = null
+}
+
+function unmatchSelectedGroup(group: SupplierProviderGroup) {
+  unmatchTarget.value = group
+}
+
+function runActionMenuAction(action: (group: SupplierProviderGroup) => void) {
+  const group = actionMenu.group
+  closeActionMenu()
+  if (group) action(group)
 }
 
 function rateGuardEligible(group: SupplierProviderGroup): boolean {
@@ -1762,9 +1917,9 @@ function hasOtherRateGuard(group: SupplierProviderGroup): boolean {
 }
 
 function rateGuardStatus(group: SupplierProviderGroup): { label: string; tone: string; detail?: string; title?: string } {
-	if (group.rate_guard_selected && group.rate_guard_ignored) {
+	if (group.rate_guard_selected && !group.rate_guard_enabled) {
 		const detail = '保留守护来源，已暂停自动倍率调整'
-		return { label: '已忽略自动守护', tone: 'muted', detail, title: detail }
+		return { label: '已暂停参与', tone: 'muted', detail, title: detail }
 	}
 	if (group.rate_guard_selected && !group.active) {
 		const detail = '最近同步未返回该分组，或上游已停用'
@@ -1795,6 +1950,10 @@ function rateGuardStatus(group: SupplierProviderGroup): { label: string; tone: s
 	}
 	if (group.rate_guard_selected && group.rate_guard_selection_mode === 'manual') {
 		return { label: '人工守护', tone: 'manual' }
+	}
+	if (!group.rate_guard_enabled) {
+		const detail = '已关闭参与开关，不会被自动守护'
+		return { label: '已关闭参与', tone: 'muted', detail, title: detail }
 	}
 	if (!group.local_group_id) {
 		return { label: '未匹配', tone: 'muted' }
@@ -2067,6 +2226,21 @@ function errorMessage(err: unknown, fallback: string): string {
   border-color: color-mix(in srgb, var(--sp-green) 38%, var(--sp-line));
   background: color-mix(in srgb, var(--sp-green) 9%, var(--sp-panel));
   color: var(--sp-green);
+}
+
+.sp-column-settings-wrap {
+  display: inline-flex;
+}
+
+.sp-control-button-columns {
+  border-color: color-mix(in srgb, var(--sp-violet) 38%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-violet) 9%, var(--sp-panel));
+  color: var(--sp-violet);
+}
+
+.sp-control-button-columns.active {
+  border-color: var(--sp-violet);
+  background: color-mix(in srgb, var(--sp-violet) 16%, var(--sp-panel));
 }
 
 .sp-pending-count {
@@ -2702,6 +2876,11 @@ function errorMessage(err: unknown, fallback: string): string {
 .sp-rate-status.inactive,
 .sp-rate-status.invalid { color: var(--sp-muted); }
 
+.sp-status-stack {
+  display: grid;
+  justify-items: start;
+  gap: 0.25rem;
+}
 .sp-match-state-stack {
   display: grid;
   justify-items: start;
@@ -2742,6 +2921,12 @@ function errorMessage(err: unknown, fallback: string): string {
 	display: grid;
 	justify-items: start;
 	gap: 0.3rem;
+}
+
+.sp-guard-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .sp-guard-state-stack small,
@@ -2910,6 +3095,176 @@ function errorMessage(err: unknown, fallback: string): string {
 .sp-row-action.danger:hover {
   border-color: var(--sp-red);
   color: var(--sp-red);
+}
+
+.sp-row-more {
+  padding-inline: 0.5rem;
+}
+
+:global(.sp-group-action-menu),
+:global(.sp-column-settings-menu) {
+  --sp-panel: #ffffff;
+  --sp-panel-2: #f9fafb;
+  --sp-panel-3: #f3f4f6;
+  --sp-line: #e5e7eb;
+  --sp-soft: #f1f5f9;
+  --sp-text: #111827;
+  --sp-muted: #64748b;
+  --sp-dim: #94a3b8;
+  --sp-cyan: #3b82f6;
+  --sp-green: #16a34a;
+  --sp-amber: #d97706;
+  --sp-orange: #ea580c;
+  --sp-red: #dc2626;
+  --sp-blue: #2563eb;
+  --sp-violet: #7c3aed;
+  color: var(--sp-text);
+}
+
+:global(.dark .sp-group-action-menu),
+:global(.dark .sp-column-settings-menu) {
+  --sp-panel: #1f2937;
+  --sp-panel-2: #111827;
+  --sp-panel-3: #374151;
+  --sp-line: #374151;
+  --sp-soft: #374151;
+  --sp-text: #f9fafb;
+  --sp-muted: #9ca3af;
+  --sp-dim: #6b7280;
+  color: var(--sp-text);
+}
+
+.sp-group-action-menu {
+  width: 12.5rem;
+  padding: 0.375rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.75rem;
+  background: var(--sp-panel);
+  box-shadow: 0 0.875rem 2.25rem rgba(15, 23, 42, 0.18);
+}
+
+.sp-group-action-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.625rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--sp-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.sp-group-action-item:hover {
+  background: color-mix(in srgb, var(--sp-cyan) 8%, transparent);
+  color: var(--sp-text);
+}
+
+.sp-group-action-item.active {
+  color: var(--sp-amber);
+}
+
+.sp-group-action-item.guard {
+  color: var(--sp-green);
+}
+
+.sp-group-action-item.guard.active {
+  color: var(--sp-amber);
+}
+
+.sp-group-action-item.danger {
+  color: var(--sp-red);
+}
+
+.sp-group-action-item.danger:hover {
+  background: color-mix(in srgb, var(--sp-red) 9%, transparent);
+  color: var(--sp-red);
+}
+
+.sp-group-action-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.sp-group-action-divider {
+  margin: 0.375rem 0;
+  border-top: 1px solid var(--sp-line);
+}
+
+.sp-column-settings-menu {
+  width: 13.75rem;
+  overflow: hidden;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.75rem;
+  background: var(--sp-panel);
+  box-shadow: 0 0.875rem 2.25rem rgba(15, 23, 42, 0.18);
+}
+
+.sp-column-settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.625rem 0.375rem;
+  border-bottom: 1px solid var(--sp-line);
+  color: var(--sp-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.sp-column-settings-reset {
+  padding: 0.125rem 0.375rem;
+  border: 0;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--sp-cyan);
+  font-size: 0.7rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.sp-column-settings-reset:hover {
+  background: color-mix(in srgb, var(--sp-cyan) 9%, transparent);
+}
+
+.sp-column-settings-list {
+  max-height: 20rem;
+  overflow-y: auto;
+  padding: 0.375rem;
+}
+
+.sp-column-settings-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.5rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--sp-text);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+
+.sp-column-settings-item:hover {
+  background: color-mix(in srgb, var(--sp-cyan) 8%, transparent);
+}
+
+.sp-column-settings-check {
+  display: inline-grid;
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--sp-cyan);
 }
 
 .sp-drawer-summary {
