@@ -7,17 +7,26 @@
         <p class="sp-subtitle">先处理影响真实流量的问题，再判断账号池健康与成本变化。</p>
       </div>
       <div class="sp-controls">
-        <div class="sp-segmented" aria-label="统计范围">
-          <button data-test="range-24h" type="button" :class="{ active: range === '24h' }" @click="setRange('24h')">24 小时</button>
-          <button data-test="range-7d" type="button" :class="{ active: range === '7d' }" @click="setRange('7d')">7 天</button>
+        <div class="sp-seg-wrap">
+          <span class="sp-seg-label">概况范围</span>
+          <div class="sp-segmented" aria-label="统计范围">
+            <button data-test="range-24h" type="button" :class="{ active: range === '24h' }" @click="setRange('24h')">24 小时</button>
+            <button data-test="range-7d" type="button" :class="{ active: range === '7d' }" @click="setRange('7d')">7 天</button>
+          </div>
         </div>
-        <div class="sp-segmented" aria-label="趋势统计范围">
-          <button data-test="trend-range-7d" type="button" :class="{ active: trendRange === '7d' }" @click="setTrendRange('7d')">7 天</button>
-          <button data-test="trend-range-30d" type="button" :class="{ active: trendRange === '30d' }" @click="setTrendRange('30d')">30 天</button>
+        <div class="sp-seg-wrap">
+          <span class="sp-seg-label">趋势范围</span>
+          <div class="sp-segmented" aria-label="趋势统计范围">
+            <button data-test="trend-range-7d" type="button" :class="{ active: trendRange === '7d' }" @click="setTrendRange('7d')">7 天</button>
+            <button data-test="trend-range-30d" type="button" :class="{ active: trendRange === '30d' }" @click="setTrendRange('30d')">30 天</button>
+          </div>
         </div>
-        <button class="sp-button" data-test="refresh" type="button" :disabled="refreshing" @click="refreshAll">
-          {{ refreshing ? '刷新中…' : '刷新数据' }}
-        </button>
+        <div class="sp-refresh-wrap">
+          <button class="sp-button" data-test="refresh" type="button" :disabled="refreshing" @click="refreshAll">
+            {{ refreshing ? '刷新中…' : '刷新数据' }}
+          </button>
+          <span class="sp-refresh-meta" data-test="refresh-meta">{{ lastRefreshLabel }}</span>
+        </div>
         <button class="sp-button primary" type="button" @click="openAutomation">查看自动任务</button>
       </div>
     </header>
@@ -34,7 +43,11 @@
         class="sp-risk-card"
         :class="[`sp-${risk.tone}`, { selected: selectedRisk === risk.key }]"
         :data-test="`risk-${risk.key}`"
+        role="button"
+        tabindex="0"
         @click="selectRisk(risk.key)"
+        @keydown.enter.prevent="selectRisk(risk.key)"
+        @keydown.space.prevent="selectRisk(risk.key)"
       >
         <div class="sp-risk-label">{{ risk.label }}</div>
         <div class="sp-risk-value">{{ risk.value }}</div>
@@ -60,7 +73,7 @@
 
         <div v-if="accounts.loading && !accounts.data" class="sp-panel-body" data-test="accounts-loading">账号风险加载中…</div>
         <div v-else-if="accounts.error" class="sp-panel-body sp-error-line" data-test="accounts-error">{{ accounts.error }}</div>
-        <div v-else class="sp-table-wrap">
+        <div v-else class="sp-table-wrap" tabindex="0">
           <table class="sp-table">
             <thead>
               <tr>
@@ -157,7 +170,7 @@
       </aside>
     </section>
 
-    <section class="sp-panel" style="margin-bottom: 14px" data-test="health-timeline-section">
+    <section class="sp-panel sp-panel-gap" data-test="health-timeline-section">
       <header class="sp-panel-head">
         <div class="sp-panel-title">
           <span class="sp-section-index">03</span>
@@ -167,13 +180,13 @@
           </div>
         </div>
         <div class="sp-tools">
-          <span class="sp-filter-pill">小时粒度</span>
+          <span class="sp-filter-pill">{{ healthBucketLabel }}</span>
           <span class="sp-health-legend">
-            <span class="sp-health-legend-item"><i class="sp-health-dot healthy" />健康</span>
-            <span class="sp-health-legend-item"><i class="sp-health-dot slow" />慢</span>
-            <span class="sp-health-legend-item"><i class="sp-health-dot failed" />失败</span>
-            <span class="sp-health-legend-item"><i class="sp-health-dot unavailable" />不可用</span>
-            <span class="sp-health-legend-item"><i class="sp-health-dot skipped" />跳过</span>
+            <span class="sp-health-legend-item"><i class="sp-health-dot healthy" aria-hidden="true" />健康</span>
+            <span class="sp-health-legend-item"><i class="sp-health-dot slow" aria-hidden="true" />慢</span>
+            <span class="sp-health-legend-item"><i class="sp-health-dot failed" aria-hidden="true" />失败</span>
+            <span class="sp-health-legend-item"><i class="sp-health-dot unavailable" aria-hidden="true" />不可用</span>
+            <span class="sp-health-legend-item"><i class="sp-health-dot skipped" aria-hidden="true" />跳过</span>
           </span>
         </div>
       </header>
@@ -197,7 +210,13 @@
                 <div class="sp-subline">{{ row.provider_name }} · {{ row.group_name || row.group_key || '未分组' }}</div>
               </td>
               <td v-for="cell in row.cells" :key="cell.time" class="sp-health-cell">
-                <span class="sp-health-dot" :class="healthDotTone(cell.status)" :title="healthCellTitle(cell)" />
+                <span
+                  class="sp-health-dot"
+                  :class="healthDotTone(cell.status)"
+                  role="img"
+                  :aria-label="healthCellTitle(cell)"
+                  :title="healthCellTitle(cell)"
+                />
               </td>
             </tr>
             <tr class="sp-health-summary" data-test="health-timeline-summary">
@@ -370,15 +389,24 @@
         <div v-else-if="profitRanking.error" class="sp-panel-body sp-error-line" data-test="profit-error">{{ profitRanking.error }}</div>
         <div v-else-if="profitRows.length === 0" class="sp-panel-body" data-test="profit-empty">当前区间暂无盈利数据</div>
         <div v-else class="sp-profit-list">
-          <div v-for="(item, index) in profitRows" :key="item.account_id" class="sp-profit-row" :data-test="`profit-row-${item.account_id}`">
+          <div
+            v-for="(item, index) in profitRows"
+            :key="item.account_id"
+            class="sp-profit-row"
+            :class="index < 3 ? `sp-profit-rank-${index + 1}` : ''"
+            :data-test="`profit-row-${item.account_id}`"
+          >
             <span class="sp-profit-rank">{{ String(index + 1).padStart(2, '0') }}</span>
             <div class="sp-profit-main">
               <div class="sp-account-name">{{ item.account_name }}</div>
               <div class="sp-subline">{{ item.provider_name }} · {{ item.group_name || item.group_key || '未分组' }}</div>
             </div>
-            <div class="sp-profit-stat"><span>请求</span><b>{{ formatCount(item.requests) }}</b></div>
-            <div class="sp-profit-stat"><span>Token</span><b>{{ formatCompact(item.tokens) }}</b></div>
-            <div class="sp-profit-stat"><span>成本</span><b>{{ formatMoney(item.actual_cost) }}</b></div>
+            <div class="sp-profit-stats">
+              <div class="sp-profit-stat"><span>请求</span><b>{{ formatCount(item.requests) }}</b></div>
+              <div class="sp-profit-stat"><span>Token</span><b>{{ formatCompact(item.tokens) }}</b></div>
+              <div class="sp-profit-stat"><span>成本</span><b>{{ formatMoney(item.actual_cost) }}</b></div>
+              <div class="sp-profit-stat"><span>利润率</span><b>{{ profitMarginLabel(item) }}</b></div>
+            </div>
             <div class="sp-profit-value" :class="{ 'sp-down': item.profit > 0, 'sp-up': item.profit < 0 }">
               <span>利润</span>
               <b>{{ formatMoney(item.profit) }}</b>
@@ -388,7 +416,7 @@
       </div>
     </section>
 
-    <section class="sp-panel" style="margin-bottom: 14px" data-test="tasks-section">
+    <section class="sp-panel sp-panel-gap" data-test="tasks-section">
       <header class="sp-panel-head">
         <div class="sp-panel-title">
           <span class="sp-section-index">08</span>
@@ -447,6 +475,7 @@ import {
   type SupplierDashboardHealthCell,
   type SupplierDashboardHealthHour,
   type SupplierDashboardOverviewResponse,
+  type SupplierDashboardProfitItem,
   type SupplierDashboardProfitResponse,
   type SupplierDashboardProviderItem,
   type SupplierDashboardProvidersResponse,
@@ -637,16 +666,37 @@ const profitMeta = computed(() => {
   return '等待数据'
 })
 
+const healthBucketLabel = computed(() => (trendRange.value === '30d' ? '每 6 小时' : '每小时'))
+
 const healthTimelineMeta = computed(() => {
   if (healthTimeline.loading) return '加载中'
   if (healthTimeline.error) return '加载失败'
   if (healthTimeline.data)
-    return `共 ${healthTimeline.data.accounts.length} 个账号 · ${healthTimeline.data.hours.length} 个小时`
+    return `共 ${healthTimeline.data.accounts.length} 个账号 · ${healthTimeline.data.hours.length} 个时间桶 · ${healthBucketLabel.value}`
   return '等待数据'
+})
+
+const lastRefreshLabel = computed(() => {
+  const sections = [overview, accounts, rates, providers, traffic, profitRanking, healthTimeline]
+  const times = sections
+    .map((section) => section.lastUpdated)
+    .filter((value): value is string => Boolean(value))
+  if (!times.length) return '尚未刷新'
+  const latest = times.reduce((max, value) => (value > max ? value : max))
+  return `最近刷新 ${formatClock(latest)}`
 })
 
 const trafficChartData = computed(() => {
   const series = traffic.data?.series ?? []
+  const manyPoints = series.length > 72
+  const makeFill = (rgb: string) => (context: any) => {
+    const { chartArea } = context.chart
+    if (!chartArea) return `rgba(${rgb}, 0.24)`
+    const gradient = context.chart.ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom)
+    gradient.addColorStop(0, `rgba(${rgb}, 0.24)`)
+    gradient.addColorStop(1, `rgba(${rgb}, 0)`)
+    return gradient
+  }
   return {
     labels: series.map((point) => formatHourShort(point.time)),
     datasets: [
@@ -654,22 +704,24 @@ const trafficChartData = computed(() => {
         label: '请求量',
         data: series.map((point) => point.requests),
         borderColor: '#3b82f6',
-        backgroundColor: '#3b82f6',
+        backgroundColor: makeFill('59, 130, 246'),
         yAxisID: 'yRequests',
         tension: 0.3,
         borderWidth: 2,
-        pointRadius: 2,
+        fill: true,
+        pointRadius: manyPoints ? 0 : 2,
         pointHoverRadius: 4,
       },
       {
         label: 'Token',
         data: series.map((point) => point.tokens),
         borderColor: '#7c3aed',
-        backgroundColor: '#7c3aed',
+        backgroundColor: makeFill('124, 58, 237'),
         yAxisID: 'yTokens',
         tension: 0.3,
         borderWidth: 2,
-        pointRadius: 2,
+        fill: true,
+        pointRadius: manyPoints ? 0 : 2,
         pointHoverRadius: 4,
       },
     ],
@@ -688,6 +740,10 @@ const trafficChartOptions = computed(() => ({
     },
     tooltip: {
       callbacks: {
+        title: (items: any[]) => {
+          const point = traffic.data?.series?.[items[0]?.dataIndex]
+          return point ? formatDateTime(point.time) : ''
+        },
         label: (context: any) => {
           const label = context.dataset?.label || ''
           const value = context.parsed?.y
@@ -1121,7 +1177,10 @@ async function settleProfit(seq: number, signal: AbortSignal): Promise<void> {
 async function settleHealthTimeline(seq: number, signal: AbortSignal): Promise<void> {
   const local = ++healthSeq.value
   try {
-    const data = await getAccountHealthTimeline({ range: trendRange.value, limit: 30, buckets: 72 }, { signal })
+    const data = await getAccountHealthTimeline(
+      { range: trendRange.value, limit: 30, ...healthTimelineParams(trendRange.value) },
+      { signal },
+    )
     if (!isCurrent(seq) || signal.aborted || local !== healthSeq.value) return
     healthTimeline.data = data
     healthTimeline.lastUpdated = data.generated_at
@@ -1135,6 +1194,12 @@ async function settleHealthTimeline(seq: number, signal: AbortSignal): Promise<v
   } finally {
     if (isCurrent(seq) && local === healthSeq.value) healthTimeline.loading = false
   }
+}
+
+function healthTimelineParams(range: SupplierDashboardRange): { buckets: number; bucket_hours: number } {
+  if (range === '7d') return { buckets: 168, bucket_hours: 1 }
+  if (range === '30d') return { buckets: 120, bucket_hours: 6 }
+  return { buckets: 24, bucket_hours: 1 }
 }
 
 function riskValue(key: SupplierDashboardRiskType | 'disabled'): string {
@@ -1262,8 +1327,9 @@ function formatHourShort(time: string): string {
   if (Number.isNaN(date.getTime())) return time
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
-  const hour = String(date.getHours()).padStart(2, '0')
-  return `${month}-${day} ${hour}时`
+  const hour = date.getHours()
+  if (hour === 0) return `${month}-${day}`
+  return `${hour}时`
 }
 
 function formatCompact(value: number | null | undefined): string {
@@ -1272,6 +1338,11 @@ function formatCompact(value: number | null | undefined): string {
   if (abs >= 1e8) return `${Number((value / 1e8).toFixed(2))}亿`
   if (abs >= 1e4) return `${Number((value / 1e4).toFixed(2))}万`
   return new Intl.NumberFormat('zh-CN').format(value)
+}
+
+function profitMarginLabel(item: SupplierDashboardProfitItem): string {
+  if (!item.user_cost) return UNKNOWN
+  return `${Number(((item.profit / item.user_cost) * 100).toFixed(1))}%`
 }
 
 function healthDotTone(status: string): string {
@@ -1436,6 +1507,39 @@ function taskMeta(task: OverviewTask): string {
 }
 </script>
 <style scoped>
+/* 顶部操作区：分段控件与刷新按钮增加小标题/刷新时间辅助信息 */
+.sp-seg-wrap,
+.sp-refresh-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.25rem;
+}
+
+.sp-seg-label,
+.sp-refresh-meta {
+  color: var(--sp-muted);
+  font-size: 0.6875rem;
+  line-height: 1.2;
+}
+
+.sp-refresh-meta {
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
+/* 面板间距工具类 */
+.sp-panel-gap {
+  margin-bottom: 14px;
+}
+
+/* 风险卡与表格滚动区键盘可达焦点样式 */
+.sp-risk-card:focus-visible,
+.sp-table-wrap:focus-visible {
+  outline: 2px solid var(--sp-blue);
+  outline-offset: 2px;
+}
+
 /* 手机端顶部操作区：时间范围通栏，刷新/自动任务 2 列，避免按钮逐个整行 */
 @media (max-width: 760px) {
   .sp-controls {
@@ -1445,8 +1549,12 @@ function taskMeta(task: OverviewTask): string {
     gap: 0.5rem;
   }
 
-  .sp-segmented {
+  .sp-seg-wrap {
     grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .sp-segmented {
     width: 100%;
     justify-content: stretch;
   }
@@ -1454,6 +1562,16 @@ function taskMeta(task: OverviewTask): string {
   .sp-segmented button {
     flex: 1 1 0;
     text-align: center;
+  }
+
+  .sp-refresh-wrap {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .sp-refresh-wrap .sp-button {
+    width: 100%;
+    min-width: 0;
   }
 
   .sp-controls > .sp-button {
@@ -1481,7 +1599,7 @@ function taskMeta(task: OverviewTask): string {
   max-width: 230px;
   padding: 0.625rem 1rem;
   background: var(--sp-panel);
-  box-shadow: 4px 0 8px rgba(15, 23, 42, 0.05);
+  box-shadow: 4px 0 8px color-mix(in srgb, var(--sp-panel) 82%, transparent);
 }
 
 .sp-health-table th.sp-health-account-col {
@@ -1523,7 +1641,7 @@ function taskMeta(task: OverviewTask): string {
 }
 
 .sp-health-dot.unavailable {
-  background: #b91c1c;
+  background: color-mix(in srgb, var(--sp-red) 84%, #000 16%);
 }
 
 .sp-health-dot.skipped {
@@ -1600,9 +1718,9 @@ function taskMeta(task: OverviewTask): string {
 
 .sp-profit-row {
   display: grid;
-  grid-template-columns: 2rem minmax(0, 1fr) repeat(3, minmax(74px, auto)) minmax(90px, auto);
+  grid-template-columns: 2rem minmax(0, 1fr) auto minmax(92px, auto);
   align-items: center;
-  gap: 0.625rem;
+  gap: 0.625rem 1rem;
   padding: 0.625rem 1rem;
   border-bottom: 1px solid var(--sp-soft);
 }
@@ -1618,12 +1736,41 @@ function taskMeta(task: OverviewTask): string {
   text-align: center;
 }
 
-.sp-profit-row:first-child .sp-profit-rank {
+.sp-profit-rank-1 .sp-profit-rank {
   color: var(--sp-amber);
+}
+
+.sp-profit-rank-2 .sp-profit-rank {
+  color: color-mix(in srgb, var(--sp-amber) 55%, var(--sp-muted));
+}
+
+.sp-profit-rank-3 .sp-profit-rank {
+  color: color-mix(in srgb, var(--sp-amber) 30%, var(--sp-muted));
+}
+
+.sp-profit-rank-1 {
+  position: relative;
+}
+
+.sp-profit-rank-1::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.5rem;
+  bottom: 0.5rem;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--sp-amber);
 }
 
 .sp-profit-main {
   min-width: 0;
+}
+
+.sp-profit-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(64px, auto));
+  gap: 0.625rem 1rem;
 }
 
 .sp-profit-stat,
@@ -1655,16 +1802,22 @@ function taskMeta(task: OverviewTask): string {
 
 @media (max-width: 760px) {
   .sp-profit-row {
-    grid-template-columns: 1.5rem minmax(0, 1fr) repeat(2, minmax(64px, auto));
+    grid-template-columns: 1.5rem minmax(0, 1fr) minmax(92px, auto);
+    gap: 0.5rem 0.75rem;
   }
 
-  .sp-profit-stat:nth-of-type(3) {
-    grid-column: 2;
+  .sp-profit-stats {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.5rem 0.75rem;
+    padding-top: 0.5rem;
+    border-top: 1px dashed var(--sp-soft);
   }
 
   .sp-profit-value {
     grid-column: 3;
     grid-row: 1;
+    text-align: right;
   }
 }
 </style>

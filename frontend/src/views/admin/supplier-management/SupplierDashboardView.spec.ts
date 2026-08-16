@@ -319,6 +319,19 @@ const profitResponse = {
       user_cost: 60,
       profit: -20,
     },
+    {
+      account_id: 16,
+      account_name: 'free-tier',
+      provider_slug: 'openrouter',
+      provider_name: 'OpenRouter',
+      group_key: 'free',
+      group_name: '免费额度',
+      requests: 300,
+      tokens: 100000,
+      actual_cost: 50,
+      user_cost: 0,
+      profit: 0,
+    },
   ],
   warnings: [],
   generated_at: '2026-07-25T09:42:18Z',
@@ -640,13 +653,37 @@ describe('SupplierDashboardView real data', () => {
     expect(wrapper.get('[data-test="health-timeline-summary"]').exists()).toBe(true)
   })
 
+  it('shows profit margin, refresh time, bucket label and accessible annotations', async () => {
+    const wrapper = await mountView()
+
+    // 利润率列：正负利润按 user_cost 计算百分比
+    expect(wrapper.get('[data-test="profit-row-12"]').text()).toContain('22.4%')
+    expect(wrapper.get('[data-test="profit-row-15"]').text()).toContain('-33.3%')
+    // user_cost 为 0 时无法计算利润率，显示占位符
+    expect(wrapper.get('[data-test="profit-row-16"]').text()).toContain('—')
+
+    // 刷新时间辅助信息
+    expect(wrapper.get('[data-test="refresh-meta"]').text()).toContain('最近刷新')
+
+    // 30 天趋势默认按 6 小时分桶
+    expect(wrapper.text()).toContain('每 6 小时')
+
+    // 健康圆点带可访问名称
+    const healthDot = wrapper.get('[data-test="health-row-12"]').find('.sp-health-dot')
+    expect(healthDot.attributes('aria-label')).toContain('健康')
+
+    // 风险卡具备按钮语义
+    expect(wrapper.get('[data-test="risk-critical"]').attributes('role')).toBe('button')
+    expect(wrapper.get('[data-test="risk-critical"]').attributes('tabindex')).toBe('0')
+  })
+
   it('keeps trend range independent from the main range', async () => {
     const wrapper = await mountView()
 
     // 首次加载：主接口 24h，趋势接口 30d
     expect(getAccountTrafficMock.mock.calls[0][0]).toMatchObject({ range: '30d' })
     expect(getAccountProfitRankingMock.mock.calls[0][0]).toMatchObject({ range: '30d' })
-    expect(getAccountHealthTimelineMock.mock.calls[0][0]).toMatchObject({ range: '30d' })
+    expect(getAccountHealthTimelineMock.mock.calls[0][0]).toMatchObject({ range: '30d', limit: 30, buckets: 120, bucket_hours: 6 })
 
     getOverviewMock.mockClear()
     getAccountsMock.mockClear()
@@ -662,7 +699,7 @@ describe('SupplierDashboardView real data', () => {
     expect(getOverviewMock).toHaveBeenCalledWith('7d', expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(getAccountTrafficMock.mock.calls[0][0]).toMatchObject({ range: '30d' })
     expect(getAccountProfitRankingMock.mock.calls[0][0]).toMatchObject({ range: '30d' })
-    expect(getAccountHealthTimelineMock.mock.calls[0][0]).toMatchObject({ range: '30d' })
+    expect(getAccountHealthTimelineMock.mock.calls[0][0]).toMatchObject({ range: '30d', limit: 30, buckets: 120, bucket_hours: 6 })
 
     getOverviewMock.mockClear()
     getAccountsMock.mockClear()
@@ -677,7 +714,7 @@ describe('SupplierDashboardView real data', () => {
     await flushPromises()
     expect(getAccountTrafficMock.mock.calls[0][0]).toMatchObject({ range: '7d' })
     expect(getAccountProfitRankingMock.mock.calls[0][0]).toMatchObject({ range: '7d' })
-    expect(getAccountHealthTimelineMock.mock.calls[0][0]).toMatchObject({ range: '7d' })
+    expect(getAccountHealthTimelineMock.mock.calls[0][0]).toMatchObject({ range: '7d', limit: 30, buckets: 168, bucket_hours: 1 })
     expect(getOverviewMock).not.toHaveBeenCalled()
     expect(getAccountsMock).not.toHaveBeenCalled()
     expect(getRatesMock).not.toHaveBeenCalled()
