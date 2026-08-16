@@ -4691,6 +4691,9 @@ function intervalSecondsToCron(seconds: number): string | null {
 
   /* 健康守护账号筛选：平台/供应商 2 列，搜索与仅看已选通栏 */
   .sp-health-guard-account-filters {
+    /* 手机端工具栏改为纵向布局后，桌面端 flex: 1 1 640px 的 640px 会变成高度基准，
+       导致筛选区被撑到约 640px 高、账号列表被挤出可视区域；这里改为按内容自适应 */
+    flex: 1 1 auto;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
