@@ -647,10 +647,8 @@ describe('SupplierDashboardView real data', () => {
     expect(profitRow.text()).toContain('69.5')
     expect(wrapper.get('[data-test="profit-row-15"]').text()).toContain('gpt-primary')
 
-    // 健康时间线：每小时点阵 + 异常汇总
-    const healthRow = wrapper.get('[data-test="health-row-12"]')
-    expect(healthRow.findAll('.sp-health-dot').length).toBe(3)
-    expect(wrapper.get('[data-test="health-timeline-summary"]').exists()).toBe(true)
+    // 健康时间线：按账号状态分级的折线图
+    expect(wrapper.get('[data-test="health-chart"]').exists()).toBe(true)
   })
 
   it('shows profit margin, refresh time, bucket label and accessible annotations', async () => {
@@ -668,13 +666,20 @@ describe('SupplierDashboardView real data', () => {
     // 30 天趋势默认按 6 小时分桶
     expect(wrapper.text()).toContain('每 6 小时')
 
-    // 健康圆点带可访问名称
-    const healthDot = wrapper.get('[data-test="health-row-12"]').find('.sp-health-dot')
-    expect(healthDot.attributes('aria-label')).toContain('健康')
-
     // 风险卡具备按钮语义
     expect(wrapper.get('[data-test="risk-critical"]').attributes('role')).toBe('button')
     expect(wrapper.get('[data-test="risk-critical"]').attributes('tabindex')).toBe('0')
+  })
+
+  it('renders health timeline as per-account status line chart', async () => {
+    const wrapper = await mountView()
+    // 流量图 + 健康时间线图共两张折线图
+    expect(wrapper.findAll('[data-test="line-chart"]').length).toBe(2)
+    expect(wrapper.get('[data-test="health-chart"]').exists()).toBe(true)
+    // 原逐时段点阵表已移除
+    expect(wrapper.find('[data-test="health-row-12"]').exists()).toBe(false)
+    // 账号数量较少（<=10）时显示折线图例，不显示账号过多的提示
+    expect(wrapper.find('[data-test="health-chart-note"]').exists()).toBe(false)
   })
 
   it('keeps trend range independent from the main range', async () => {

@@ -181,52 +181,18 @@
         </div>
         <div class="sp-tools">
           <span class="sp-filter-pill">{{ healthBucketLabel }}</span>
-          <span class="sp-health-legend">
-            <span class="sp-health-legend-item"><i class="sp-health-dot healthy" aria-hidden="true" />健康</span>
-            <span class="sp-health-legend-item"><i class="sp-health-dot slow" aria-hidden="true" />慢</span>
-            <span class="sp-health-legend-item"><i class="sp-health-dot failed" aria-hidden="true" />失败</span>
-            <span class="sp-health-legend-item"><i class="sp-health-dot unavailable" aria-hidden="true" />不可用</span>
-            <span class="sp-health-legend-item"><i class="sp-health-dot skipped" aria-hidden="true" />跳过</span>
-          </span>
         </div>
       </header>
       <div v-if="healthTimeline.loading && !healthTimeline.data" class="sp-panel-body" data-test="health-timeline-loading">健康时间线加载中…</div>
       <div v-else-if="healthTimeline.error" class="sp-panel-body sp-error-line" data-test="health-timeline-error">{{ healthTimeline.error }}</div>
       <div v-else-if="healthTimelineRows.length === 0" class="sp-panel-body" data-test="health-timeline-empty">当前区间暂无健康巡检数据</div>
-      <div v-else class="sp-table-wrap">
-        <table class="sp-table sp-health-table">
-          <thead>
-            <tr>
-              <th class="sp-health-account-col">账号</th>
-              <th v-for="hour in healthTimeline.data?.hours ?? []" :key="hour.time" class="sp-health-hour" :title="formatDateTime(hour.time)">
-                {{ formatHourShort(hour.time) }}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in healthTimelineRows" :key="row.account_id" :data-test="`health-row-${row.account_id}`">
-              <td class="sp-health-account-col">
-                <div class="sp-account-name">{{ row.account_name }}</div>
-                <div class="sp-subline">{{ row.provider_name }} · {{ row.group_name || row.group_key || '未分组' }}</div>
-              </td>
-              <td v-for="cell in row.cells" :key="cell.time" class="sp-health-cell">
-                <span
-                  class="sp-health-dot"
-                  :class="healthDotTone(cell.status)"
-                  role="img"
-                  :aria-label="healthCellTitle(cell)"
-                  :title="healthCellTitle(cell)"
-                />
-              </td>
-            </tr>
-            <tr class="sp-health-summary" data-test="health-timeline-summary">
-              <td class="sp-health-account-col">异常数</td>
-              <td v-for="hour in healthTimeline.data?.hours ?? []" :key="hour.time" class="sp-health-cell" :class="{ 'sp-up': healthAnomalyCount(hour) > 0 }">
-                {{ healthAnomalyCount(hour) || '·' }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <div v-else>
+        <div class="sp-health-chart-body" data-test="health-chart">
+          <div class="sp-health-chart">
+            <Line :data="healthChartData" :options="healthChartOptions" />
+          </div>
+          <p v-if="!healthLegendDisplay" class="sp-health-chart-note" data-test="health-chart-note">账号较多时仅显示折线概览，悬停可查看账号与状态。</p>
+        </div>
       </div>
     </section>
 
@@ -472,8 +438,6 @@ import {
   type SupplierDashboardAccountHealthResponse,
   type SupplierDashboardAccountItem,
   type SupplierDashboardAccountsResponse,
-  type SupplierDashboardHealthCell,
-  type SupplierDashboardHealthHour,
   type SupplierDashboardOverviewResponse,
   type SupplierDashboardProfitItem,
   type SupplierDashboardProfitResponse,
@@ -773,6 +737,103 @@ const trafficChartOptions = computed(() => ({
       ticks: { color: '#7c3aed', font: { size: 10 }, callback: (value: any) => formatCompact(value) },
       grid: { display: false },
       title: { display: true, text: 'Token', color: '#7c3aed', font: { size: 11 } },
+    },
+  },
+}))
+
+// 账号健康时间线折线图：x 轴为时间桶，y 轴为健康状态分级，每个账号一条折线
+const healthLevelLabels = ['失败', '不可用', '慢', '跳过', '健康']
+const healthStatusLevelMap: Record<string, number> = {
+  failed: 0,
+  unavailable: 1,
+  slow: 2,
+  skipped: 3,
+  healthy: 4,
+}
+
+function healthStatusLevel(status: string): number {
+  return healthStatusLevelMap[status] ?? 2
+}
+
+const healthChartPalette = [
+  '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899',
+  '#14b8a6', '#f97316', '#6366f1', '#84cc16', '#06b6d4',
+]
+
+const healthLegendDisplay = computed(() => healthTimelineRows.value.length <= 10)
+
+const healthChartData = computed(() => {
+  const accounts = healthTimelineRows.value
+  const hours = healthTimeline.data?.hours ?? []
+  const manyBuckets = hours.length > 72
+  return {
+    labels: hours.map((hour) => formatHourShort(hour.time)),
+    datasets: accounts.map((account, index) => {
+      const statusByTime = new Map(account.cells.map((cell) => [cell.time, cell.status]))
+      return {
+        label: account.account_name,
+        data: hours.map((hour) => {
+          const status = statusByTime.get(hour.time)
+          return status == null ? null : healthStatusLevel(status)
+        }),
+        borderColor: healthChartPalette[index % healthChartPalette.length],
+        backgroundColor: healthChartPalette[index % healthChartPalette.length],
+        tension: 0,
+        borderWidth: 1.5,
+        pointRadius: manyBuckets ? 0 : 2,
+        pointHoverRadius: 4,
+        stepped: true,
+      }
+    }),
+  }
+})
+
+const healthChartOptions = computed(() => ({
+  responsive: true,
+  maintainAspectRatio: false,
+  interaction: { mode: 'index' as const, intersect: false },
+  plugins: {
+    legend: {
+      display: healthLegendDisplay.value,
+      position: 'top' as const,
+      labels: { color: '#9ca3af', boxWidth: 10, boxHeight: 10, font: { size: 11 } },
+    },
+    tooltip: {
+      callbacks: {
+        title: (items: any[]) => {
+          const hour = healthTimeline.data?.hours?.[items[0]?.dataIndex]
+          return hour ? formatDateTime(hour.time) : ''
+        },
+        label: (context: any) => {
+          const label = context.dataset?.label || ''
+          const level = context.parsed?.y
+          if (level == null) return `${label}: 无数据`
+          return `${label}: ${healthLevelLabels[level] ?? '未知'}`
+        },
+      },
+    },
+  },
+  scales: {
+    x: {
+      ticks: { color: '#9ca3af', maxRotation: 0, autoSkip: true, maxTicksLimit: 10, autoSkipPadding: 12, font: { size: 10 } },
+      grid: { display: false },
+    },
+    y: {
+      type: 'linear' as const,
+      min: -0.5,
+      max: 4.5,
+      ticks: {
+        stepSize: 1,
+        color: '#9ca3af',
+        font: { size: 10 },
+        callback: (value: any) => {
+          const idx = Number(value)
+          if (Number.isInteger(idx) && idx >= 0 && idx <= 4) return healthLevelLabels[idx]
+          return ''
+        },
+      },
+      grid: { color: 'rgba(148, 163, 184, 0.16)', borderDash: [4, 4] },
+      title: { display: true, text: '健康状态', color: '#9ca3af', font: { size: 11 } },
     },
   },
 }))
@@ -1345,48 +1406,6 @@ function profitMarginLabel(item: SupplierDashboardProfitItem): string {
   return `${Number(((item.profit / item.user_cost) * 100).toFixed(1))}%`
 }
 
-function healthDotTone(status: string): string {
-  switch (status) {
-    case 'healthy':
-      return 'healthy'
-    case 'slow':
-      return 'slow'
-    case 'failed':
-      return 'failed'
-    case 'unavailable':
-      return 'unavailable'
-    default:
-      return 'skipped'
-  }
-}
-
-function healthStatusLabel(status: string): string {
-  switch (status) {
-    case 'healthy':
-      return '健康'
-    case 'slow':
-      return '慢'
-    case 'failed':
-      return '失败'
-    case 'unavailable':
-      return '不可用'
-    case 'skipped':
-      return '跳过'
-    default:
-      return status || '未知'
-  }
-}
-
-function healthCellTitle(cell: SupplierDashboardHealthCell): string {
-  return `${formatDateTime(cell.time)} · ${healthStatusLabel(cell.status)}`
-}
-
-function healthAnomalyCount(hour: SupplierDashboardHealthHour): number {
-  const counts = hour.status_counts
-  if (!counts) return 0
-  return (counts.failed || 0) + (counts.unavailable || 0)
-}
-
 function rateHint(item: SupplierDashboardAccountItem): string {
   const delta = item.rate_delta_percent
   const lowest = item.lowest_rate
@@ -1586,100 +1605,20 @@ function taskMeta(task: OverviewTask): string {
   }
 }
 
-/* 账号健康时间线：小时点阵表格 */
-.sp-health-table {
-  min-width: 760px;
+/* 账号健康时间线：折线概览图 */
+.sp-health-chart-body {
+  padding: 1rem 1rem 0.25rem;
 }
 
-.sp-health-table .sp-health-account-col {
-  position: sticky;
-  left: 0;
-  z-index: 1;
-  min-width: 190px;
-  max-width: 230px;
-  padding: 0.625rem 1rem;
-  background: var(--sp-panel);
-  box-shadow: 4px 0 8px color-mix(in srgb, var(--sp-panel) 82%, transparent);
+.sp-health-chart {
+  position: relative;
+  height: 240px;
 }
 
-.sp-health-table th.sp-health-account-col {
-  background: var(--sp-panel-2);
-}
-
-.sp-health-table th.sp-health-hour {
-  min-width: 60px;
-  padding: 0.625rem 0.375rem;
-  font-size: 0.6875rem;
-  text-align: center;
-  white-space: nowrap;
-}
-
-.sp-health-table td.sp-health-cell {
-  padding: 0.4375rem 0.375rem;
-  text-align: center;
-  white-space: nowrap;
-}
-
-.sp-health-dot {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  border-radius: 9999px;
-  vertical-align: middle;
-}
-
-.sp-health-dot.healthy {
-  background: var(--sp-green, #16a34a);
-}
-
-.sp-health-dot.slow {
-  background: var(--sp-amber, #d97706);
-}
-
-.sp-health-dot.failed {
-  background: var(--sp-red, #dc2626);
-}
-
-.sp-health-dot.unavailable {
-  background: color-mix(in srgb, var(--sp-red) 84%, #000 16%);
-}
-
-.sp-health-dot.skipped {
-  background: var(--sp-muted, #9ca3af);
-  opacity: 0.45;
-}
-
-.sp-health-legend {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.625rem;
-  font-size: 0.6875rem;
-  color: var(--sp-muted);
-  white-space: nowrap;
-}
-
-.sp-health-legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.sp-health-legend-item i {
-  width: 9px;
-  height: 9px;
-}
-
-.sp-health-table tr.sp-health-summary td {
-  padding: 0.5rem 0.375rem;
-  border-top: 1px solid var(--sp-soft);
+.sp-health-chart-note {
+  margin: 0.5rem 0 0;
   color: var(--sp-muted);
   font-size: 0.75rem;
-  text-align: center;
-}
-
-.sp-health-table tr.sp-health-summary td.sp-up {
-  color: var(--sp-red);
-  font-weight: 700;
 }
 
 /* 账号时间流量：双轴折线图 */
