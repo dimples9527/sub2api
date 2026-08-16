@@ -2718,14 +2718,16 @@ function intervalSecondsToCron(seconds: number): string | null {
 
 .sp-edit-dialog {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   min-height: 0;
   max-height: 72vh;
-  gap: 18px;
+  gap: 14px;
   overflow: auto;
   padding: 4px 2px 12px;
 }
 
 .sp-edit-summary {
+  grid-column: 1 / -1;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   border: 1px solid var(--sp-soft);
@@ -2736,7 +2738,7 @@ function intervalSecondsToCron(seconds: number): string | null {
 .sp-edit-summary > div {
   min-width: 0;
   border-left: 1px solid var(--sp-soft);
-  padding: 14px 16px;
+  padding: 10px 14px;
 }
 
 .sp-edit-summary > div:first-child {
@@ -2751,7 +2753,7 @@ function intervalSecondsToCron(seconds: number): string | null {
 
 .sp-edit-summary strong {
   display: block;
-  margin-top: 5px;
+  margin-top: 3px;
   overflow: hidden;
   color: var(--sp-text);
   font-size: 14px;
@@ -2761,9 +2763,12 @@ function intervalSecondsToCron(seconds: number): string | null {
 
 .sp-form-section {
   display: grid;
-  gap: 14px;
-  border-top: 1px solid var(--sp-soft);
-  padding-top: 18px;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--sp-blue) 14%, var(--sp-line));
+  border-radius: 14px;
+  padding: 14px;
+  background: color-mix(in srgb, var(--sp-blue) 3%, var(--sp-panel));
 }
 
 .sp-state-section {
@@ -2771,14 +2776,28 @@ function intervalSecondsToCron(seconds: number): string | null {
   padding-top: 0;
 }
 
+.sp-policy-section {
+  grid-column: 1 / -1;
+}
+
 .sp-form-section-head {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 10px;
 }
 
 .sp-form-section-head > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-width: 32px;
+  height: 30px;
+  border: 1px solid color-mix(in srgb, var(--sp-blue) 26%, var(--sp-line));
+  border-radius: 9px;
+  padding: 0 7px;
   color: var(--sp-blue);
+  background: color-mix(in srgb, var(--sp-blue) 9%, var(--sp-panel));
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -2791,23 +2810,36 @@ function intervalSecondsToCron(seconds: number): string | null {
 }
 
 .sp-form-section-head p {
-  margin: 4px 0 0;
-  line-height: 1.6;
+  margin: 3px 0 0;
+  line-height: 1.5;
 }
 
 .sp-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: 12px;
+}
+
+.sp-health-guard-policy-grid,
+.sp-retention-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .sp-toggle-field {
-  display: grid;
-  justify-items: start;
-  gap: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
   color: var(--sp-text);
   font-size: 13px;
   font-weight: 600;
+}
+
+.sp-form-note {
+  color: var(--sp-muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .sp-message-detail {
@@ -4476,6 +4508,7 @@ function intervalSecondsToCron(seconds: number): string | null {
 
 
 
+  .sp-health-guard-policy-grid,
   .sp-retention-grid,
   .sp-run-detail-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4577,8 +4610,10 @@ function intervalSecondsToCron(seconds: number): string | null {
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--sp-metric-accent) 12%, transparent);
   }
 
+  .sp-edit-dialog,
   .sp-edit-summary,
   .sp-form-grid,
+  .sp-health-guard-policy-grid,
   .sp-retention-grid,
   .sp-run-detail-summary,
   .sp-provider-detail-layout,

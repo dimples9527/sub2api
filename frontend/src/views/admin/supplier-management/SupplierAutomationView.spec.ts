@@ -919,7 +919,7 @@ describe('SupplierAutomationView Task 5 visual system', () => {
     expect(mobileStyles).toContain('flex-direction: column;')
     expect(mobileStyles).toContain('.sp-head-actions,\n  .sp-run-filters {')
     expect(mobileStyles).toContain('width: 100%;')
-    expect(mobileStyles).toContain('.sp-edit-summary,\n  .sp-form-grid,\n  .sp-retention-grid,\n  .sp-run-detail-summary,\n  .sp-provider-detail-layout,\n  .sp-cleanup-grid,\n  .sp-rate-guard-summary,\n  .sp-stage-body {')
+    expect(mobileStyles).toContain('.sp-edit-dialog,\n  .sp-edit-summary,\n  .sp-form-grid,\n  .sp-health-guard-policy-grid,\n  .sp-retention-grid,\n  .sp-run-detail-summary,\n  .sp-provider-detail-layout,\n  .sp-cleanup-grid,\n  .sp-rate-guard-summary,\n  .sp-stage-body {')
     expect(mobileStyles).toMatch(/\.sp-overview-strip\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s)
     expect(mobileStyles).toMatch(/\.sp-overview-item\s*\{[^}]*min-height:\s*0;/s)
     expect(mobileStyles).toContain('grid-template-columns: 1fr;')
