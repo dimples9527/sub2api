@@ -100,7 +100,7 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 		supplier.PUT("/groups/:id/mapping", h.Admin.SupplierProviderSync.UpdateGroupMapping)
 		supplier.PUT("/groups/:id/auto-match-policy", h.Admin.SupplierProviderSync.UpdateAutoMatchPolicy)
 		supplier.PUT("/groups/:id/rate-guard", h.Admin.SupplierProviderSync.UpdateGroupRateGuard)
-		supplier.PUT("/groups/:id/rate-guard-ignore", h.Admin.SupplierProviderSync.UpdateGroupRateGuardIgnored)
+		supplier.PUT("/groups/:id/rate-guard-enabled", h.Admin.SupplierProviderSync.UpdateGroupRateGuardEnabled)
 		supplier.POST("/groups/:id/name-change/resolve", h.Admin.SupplierProviderSync.ResolveGroupNameChange)
 
 		automation := supplier.Group("/automation")

@@ -60,7 +60,7 @@ type SupplierProviderGroupMatcherPort interface {
 
 type SupplierGroupGuardPort interface {
 	SetManualGuard(ctx context.Context, groupID int64, selected bool) error
-	SetRateGuardIgnored(ctx context.Context, groupID int64, ignored bool) error
+	SetRateGuardEnabled(ctx context.Context, groupID int64, enabled bool) error
 }
 
 // SupplierCustomPlatformResolver 仅负责校验启用的自定义平台，保持处理器对完整服务接口的最小依赖。
@@ -912,27 +912,27 @@ func supplierProviderTestScopeAllowed(scope string) bool {
 	}
 }
 
-func (h *SupplierProviderSyncHandler) UpdateGroupRateGuardIgnored(c *gin.Context) {
+func (h *SupplierProviderSyncHandler) UpdateGroupRateGuardEnabled(c *gin.Context) {
 	groupID, ok := parseSupplierGroupID(c)
 	if !ok {
 		return
 	}
 	var input struct {
-		Ignored *bool `json:"ignored"`
+		Enabled *bool `json:"enabled"`
 	}
-	if err := c.ShouldBindJSON(&input); err != nil || input.Ignored == nil {
-		response.ErrorFrom(c, badRequest("倍率守护忽略参数无效"))
+	if err := c.ShouldBindJSON(&input); err != nil || input.Enabled == nil {
+		response.ErrorFrom(c, badRequest("倍率守护参与参数无效"))
 		return
 	}
 	if h.groupGuard == nil {
 		response.ErrorFrom(c, infraerrors.InternalServer("SUPPLIER_GROUP_GUARD_UNAVAILABLE", "supplier group guard unavailable"))
 		return
 	}
-	if err := h.groupGuard.SetRateGuardIgnored(c.Request.Context(), groupID, *input.Ignored); err != nil {
+	if err := h.groupGuard.SetRateGuardEnabled(c.Request.Context(), groupID, *input.Enabled); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, gin.H{"group_id": groupID, "ignored": *input.Ignored})
+	response.Success(c, gin.H{"group_id": groupID, "enabled": *input.Enabled})
 }
 
 func (h *SupplierProviderSyncHandler) RefreshToken(c *gin.Context) {

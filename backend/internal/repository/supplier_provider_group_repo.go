@@ -11,7 +11,6 @@ SET local_group_id = NULL,
     matched_upstream_name = NULL,
     name_change_pending = FALSE,
     rate_guard_selected = FALSE,
-    rate_guard_ignored = FALSE,
     rate_guard_selection_mode = '',
     updated_at = NOW()
 WHERE local_group_id = $1

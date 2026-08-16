@@ -532,7 +532,7 @@ SELECT g.id, g.provider_id, p.name AS provider_name, g.upstream_group_key, g.nam
        g.auto_match_ignored, g.auto_match_status,
        COALESCE(g.matched_upstream_name, '') AS matched_upstream_name,
        g.name_change_pending,
-	   g.rate_guard_selected, g.rate_guard_ignored, g.rate_guard_selection_mode,
+	   g.rate_guard_selected, g.rate_guard_enabled, g.rate_guard_selection_mode,
 	   g.rate_guard_last_snapshot_at, g.rate_guard_last_checked_at,
 	   COALESCE(s.group_sync_status, 'never') AS group_sync_status,
 	   s.last_group_sync_at,
@@ -886,7 +886,7 @@ func (r *supplierProviderDataRepository) UpdateGroupMapping(ctx context.Context,
 		}
 	}
 
-	result, err := r.db.ExecContext(ctx, "UPDATE supplier_provider_groups SET local_group_id = $2::bigint, auto_match_status = CASE WHEN $2::bigint IS NULL THEN 'unmatched' ELSE 'manual' END, auto_match_ignored = CASE WHEN $2::bigint IS NULL THEN TRUE ELSE auto_match_ignored END, matched_upstream_name = CASE WHEN $2::bigint IS NULL THEN NULL ELSE name END, name_change_pending = FALSE, rate_guard_selected = CASE WHEN local_group_id IS DISTINCT FROM $2::bigint THEN FALSE ELSE rate_guard_selected END, rate_guard_ignored = CASE WHEN local_group_id IS DISTINCT FROM $2::bigint THEN FALSE ELSE rate_guard_ignored END, rate_guard_selection_mode = CASE WHEN local_group_id IS DISTINCT FROM $2::bigint THEN '' ELSE rate_guard_selection_mode END, updated_at = NOW() WHERE id = $1", groupID, localGroupID)
+	result, err := r.db.ExecContext(ctx, "UPDATE supplier_provider_groups SET local_group_id = $2::bigint, auto_match_status = CASE WHEN $2::bigint IS NULL THEN 'unmatched' ELSE 'manual' END, auto_match_ignored = CASE WHEN $2::bigint IS NULL THEN TRUE ELSE auto_match_ignored END, matched_upstream_name = CASE WHEN $2::bigint IS NULL THEN NULL ELSE name END, name_change_pending = FALSE, rate_guard_selected = CASE WHEN local_group_id IS DISTINCT FROM $2::bigint THEN FALSE ELSE rate_guard_selected END, rate_guard_selection_mode = CASE WHEN local_group_id IS DISTINCT FROM $2::bigint THEN '' ELSE rate_guard_selection_mode END, updated_at = NOW() WHERE id = $1", groupID, localGroupID)
 	if err != nil {
 		return fmt.Errorf("update supplier provider group mapping: %w", err)
 	}
@@ -1053,7 +1053,7 @@ SELECT g.id, g.provider_id, p.name AS provider_name, g.upstream_group_key, g.nam
        g.rate_multiplier, g.raw_status, g.active, g.local_group_id,
        g.auto_match_ignored, g.auto_match_status,
        COALESCE(g.matched_upstream_name, ''), g.name_change_pending,
-       g.rate_guard_selected, g.rate_guard_ignored, g.rate_guard_selection_mode,
+       g.rate_guard_selected, g.rate_guard_enabled, g.rate_guard_selection_mode,
        g.last_seen_at, g.inactive_at
 FROM supplier_provider_groups g
 JOIN supplier_providers p ON p.id = g.provider_id
@@ -1085,7 +1085,7 @@ SELECT g.id, g.provider_id, p.name AS provider_name, g.upstream_group_key, g.nam
        g.rate_multiplier, g.raw_status, g.active, g.local_group_id,
        g.auto_match_ignored, g.auto_match_status,
        COALESCE(g.matched_upstream_name, ''), g.name_change_pending,
-       g.rate_guard_selected, g.rate_guard_ignored, g.rate_guard_selection_mode,
+       g.rate_guard_selected, g.rate_guard_enabled, g.rate_guard_selection_mode,
        g.last_seen_at, g.inactive_at
 FROM supplier_provider_groups g
 JOIN supplier_providers p ON p.id = g.provider_id
@@ -1125,7 +1125,7 @@ func (r *supplierProviderDataRepository) SelectRateGuard(ctx context.Context, gr
 	if err := tx.QueryRowContext(ctx, "SELECT pg_advisory_xact_lock($1)", localGroupID.Int64).Scan(&lockValue); err != nil {
 		return fmt.Errorf("lock supplier rate guard local group: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE supplier_provider_groups SET rate_guard_selected=FALSE, rate_guard_ignored=FALSE, rate_guard_selection_mode='', updated_at=NOW() WHERE local_group_id=$1 AND rate_guard_selected=TRUE", localGroupID.Int64); err != nil {
+	if _, err := tx.ExecContext(ctx, "UPDATE supplier_provider_groups SET rate_guard_selected=FALSE, rate_guard_selection_mode='', updated_at=NOW() WHERE local_group_id=$1 AND rate_guard_selected=TRUE", localGroupID.Int64); err != nil {
 		return fmt.Errorf("clear existing supplier rate guard: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, "UPDATE supplier_provider_groups SET rate_guard_selected=TRUE, rate_guard_selection_mode=$2, updated_at=NOW() WHERE id=$1", groupID, mode); err != nil {
@@ -1138,7 +1138,7 @@ func (r *supplierProviderDataRepository) SelectRateGuard(ctx context.Context, gr
 }
 
 func (r *supplierProviderDataRepository) ClearRateGuard(ctx context.Context, groupID int64, mode string) error {
-	query := "UPDATE supplier_provider_groups SET rate_guard_selected=FALSE, rate_guard_ignored=FALSE, rate_guard_selection_mode='', updated_at=NOW() WHERE id=$1"
+	query := "UPDATE supplier_provider_groups SET rate_guard_selected=FALSE, rate_guard_selection_mode='', updated_at=NOW() WHERE id=$1"
 	args := []any{groupID}
 	if mode != "" {
 		query += " AND rate_guard_selection_mode=$2"
@@ -1150,17 +1150,17 @@ func (r *supplierProviderDataRepository) ClearRateGuard(ctx context.Context, gro
 	return nil
 }
 
-func (r *supplierProviderDataRepository) SetRateGuardIgnored(ctx context.Context, groupID int64, ignored bool) error {
-	result, err := r.db.ExecContext(ctx, "UPDATE supplier_provider_groups SET rate_guard_ignored=$2, updated_at=NOW() WHERE id=$1 AND rate_guard_selected=TRUE", groupID, ignored)
+func (r *supplierProviderDataRepository) SetRateGuardEnabled(ctx context.Context, groupID int64, enabled bool) error {
+	result, err := r.db.ExecContext(ctx, "UPDATE supplier_provider_groups SET rate_guard_enabled=$2, updated_at=NOW() WHERE id=$1", groupID, enabled)
 	if err != nil {
-		return fmt.Errorf("update supplier rate guard ignore policy: %w", err)
+		return fmt.Errorf("update supplier rate guard enabled policy: %w", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("read supplier rate guard ignore policy result: %w", err)
+		return fmt.Errorf("read supplier rate guard enabled policy result: %w", err)
 	}
 	if affected == 0 {
-		return service.ErrSupplierRateGuardSelectionInvalid
+		return service.ErrSupplierProviderGroupNotFound
 	}
 	return nil
 }
@@ -1179,7 +1179,7 @@ JOIN supplier_providers p ON p.id = g.provider_id
 LEFT JOIN groups lg ON lg.id = g.local_group_id AND lg.deleted_at IS NULL
 LEFT JOIN supplier_provider_runtime_stats s ON s.provider_id = g.provider_id
 WHERE g.rate_guard_selected = TRUE
-  AND g.rate_guard_ignored = FALSE
+  AND g.rate_guard_enabled = TRUE
 ORDER BY g.provider_id, g.id`)
 	if err != nil {
 		return nil, fmt.Errorf("query supplier rate guard candidates: %w", err)
@@ -2042,7 +2042,7 @@ func scanSupplierProviderGroup(scanner supplierProviderGroupScanner) (service.Su
 		&item.LocalRateMultiplier, &item.LocalGroupStatus,
 		&item.AutoMatchIgnored, &item.AutoMatchStatus, &item.MatchedUpstreamName,
 		&item.NameChangePending,
-		&item.RateGuardSelected, &item.RateGuardIgnored, &item.RateGuardSelectionMode,
+		&item.RateGuardSelected, &item.RateGuardEnabled, &item.RateGuardSelectionMode,
 		&rateGuardLastSnapshotAt, &rateGuardLastCheckedAt,
 		&item.GroupSyncStatus, &lastGroupSyncAt,
 		&item.LocalGroupActiveMappingCount, &localGroupRateGuardGroupID,
@@ -2096,7 +2096,7 @@ func scanSupplierProviderGroupGuard(scanner supplierProviderGroupScanner) (servi
 		&item.ID, &item.ProviderID, &item.ProviderName, &item.UpstreamKey, &item.Name,
 		&item.RateMultiplier, &item.RawStatus, &item.Active, &item.LocalGroupID,
 		&item.AutoMatchIgnored, &item.AutoMatchStatus, &item.MatchedUpstreamName,
-		&item.NameChangePending, &item.RateGuardSelected, &item.RateGuardIgnored, &item.RateGuardSelectionMode,
+		&item.NameChangePending, &item.RateGuardSelected, &item.RateGuardEnabled, &item.RateGuardSelectionMode,
 		&item.LastSeenAt, &inactiveAt,
 	)
 	if err != nil {

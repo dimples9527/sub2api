@@ -212,7 +212,7 @@ type supplierProviderGroupMatcherHandlerStub struct {
 type supplierGroupGuardHandlerStub struct {
 	groupID  int64
 	selected bool
-	ignored  bool
+	enabled  bool
 	err      error
 }
 
@@ -222,9 +222,9 @@ func (s *supplierGroupGuardHandlerStub) SetManualGuard(_ context.Context, groupI
 	return s.err
 }
 
-func (s *supplierGroupGuardHandlerStub) SetRateGuardIgnored(_ context.Context, groupID int64, ignored bool) error {
+func (s *supplierGroupGuardHandlerStub) SetRateGuardEnabled(_ context.Context, groupID int64, enabled bool) error {
 	s.groupID = groupID
-	s.ignored = ignored
+	s.enabled = enabled
 	return s.err
 }
 
@@ -916,28 +916,28 @@ func TestSupplierProviderSyncHandlerGroupRateGuardReturnsServiceError(t *testing
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
-func TestSupplierProviderSyncHandlerGroupRateGuardIgnoreUpdatesPolicy(t *testing.T) {
+func TestSupplierProviderSyncHandlerGroupRateGuardEnabledUpdatesPolicy(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	guard := &supplierGroupGuardHandlerStub{}
 	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, &supplierProviderSyncHandlerDataStub{})
 	handler.SetGroupGuard(guard)
 	router := gin.New()
-	router.PUT("/groups/:id/rate-guard-ignore", handler.UpdateGroupRateGuardIgnored)
+	router.PUT("/groups/:id/rate-guard-enabled", handler.UpdateGroupRateGuardEnabled)
 
-	for _, ignored := range []bool{true, false} {
+	for _, enabled := range []bool{true, false} {
 		rec := httptest.NewRecorder()
-		body := `{"ignored":false}`
-		if ignored {
-			body = `{"ignored":true}`
+		body := `{"enabled":false}`
+		if enabled {
+			body = `{"enabled":true}`
 		}
-		req := httptest.NewRequest(http.MethodPut, "/groups/7/rate-guard-ignore", bytes.NewBufferString(body))
+		req := httptest.NewRequest(http.MethodPut, "/groups/7/rate-guard-enabled", bytes.NewBufferString(body))
 		req.Header.Set("Content-Type", "application/json")
 		router.ServeHTTP(rec, req)
 
 		require.Equal(t, http.StatusOK, rec.Code)
 		require.Equal(t, int64(7), guard.groupID)
-		require.Equal(t, ignored, guard.ignored)
-		require.Contains(t, rec.Body.String(), `"ignored":`)
+		require.Equal(t, enabled, guard.enabled)
+		require.Contains(t, rec.Body.String(), `"enabled":`)
 	}
 }
 

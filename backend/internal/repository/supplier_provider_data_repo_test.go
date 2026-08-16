@@ -780,7 +780,7 @@ func TestSupplierProviderDataRepositoryListGroupsIncludesFilteredSummary(t *test
 			"rate_multiplier", "raw_status", "active", "local_group_id", "local_group_name",
 			"local_group_platform", "platform_override", "effective_platform", "local_rate_multiplier", "local_group_status", "auto_match_ignored",
 			"auto_match_status", "matched_upstream_name", "name_change_pending",
-			"rate_guard_selected", "rate_guard_ignored", "rate_guard_selection_mode", "rate_guard_last_snapshot_at", "rate_guard_last_checked_at",
+			"rate_guard_selected", "rate_guard_enabled", "rate_guard_selection_mode", "rate_guard_last_snapshot_at", "rate_guard_last_checked_at",
 			"group_sync_status", "last_group_sync_at", "local_group_active_mapping_count", "local_group_rate_guard_group_id", "local_group_rate_guard_group_name", "local_group_rate_guard_provider_name", "account_count",
 			"last_seen_at", "inactive_at", "key_sync_status",
 		}).AddRow(
@@ -852,7 +852,7 @@ func TestSupplierProviderDataRepositoryListGroupsReturnsKeyStatus(t *testing.T) 
 			"rate_multiplier", "raw_status", "active", "local_group_id", "local_group_name",
 			"local_group_platform", "platform_override", "effective_platform", "local_rate_multiplier", "local_group_status", "auto_match_ignored",
 			"auto_match_status", "matched_upstream_name", "name_change_pending",
-			"rate_guard_selected", "rate_guard_ignored", "rate_guard_selection_mode", "rate_guard_last_snapshot_at", "rate_guard_last_checked_at",
+			"rate_guard_selected", "rate_guard_enabled", "rate_guard_selection_mode", "rate_guard_last_snapshot_at", "rate_guard_last_checked_at",
 			"group_sync_status", "last_group_sync_at", "local_group_active_mapping_count", "local_group_rate_guard_group_id", "local_group_rate_guard_group_name", "local_group_rate_guard_provider_name", "account_count",
 			"last_seen_at", "inactive_at", "key_sync_status",
 		}).AddRow(
@@ -1104,7 +1104,7 @@ func TestSupplierProviderDataRepositoryListGroupsKeepsSummaryOutsideStatusFilter
 			"rate_multiplier", "raw_status", "active", "local_group_id", "local_group_name",
 			"local_group_platform", "platform_override", "effective_platform", "local_rate_multiplier", "local_group_status", "auto_match_ignored",
 			"auto_match_status", "matched_upstream_name", "name_change_pending",
-			"rate_guard_selected", "rate_guard_ignored", "rate_guard_selection_mode", "rate_guard_last_snapshot_at", "rate_guard_last_checked_at",
+			"rate_guard_selected", "rate_guard_enabled", "rate_guard_selection_mode", "rate_guard_last_snapshot_at", "rate_guard_last_checked_at",
 			"group_sync_status", "last_group_sync_at", "local_group_active_mapping_count", "local_group_rate_guard_group_id", "local_group_rate_guard_group_name", "local_group_rate_guard_provider_name", "account_count",
 			"last_seen_at", "inactive_at", "key_sync_status",
 		}).AddRow(
@@ -1187,13 +1187,13 @@ func TestSupplierProviderDataRepositoryUpdateGroupMappingSetsAndClearsLocalGroup
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS(SELECT 1 FROM groups WHERE id = $1 AND status = 'active')")).
 		WithArgs(localGroupID).
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET local_group_id = $2::bigint, auto_match_status = CASE WHEN $2::bigint IS NULL THEN 'unmatched' ELSE 'manual' END, auto_match_ignored = CASE WHEN $2::bigint IS NULL THEN TRUE ELSE auto_match_ignored END, matched_upstream_name = CASE WHEN $2::bigint IS NULL THEN NULL ELSE name END, name_change_pending = FALSE, rate_guard_selected = CASE WHEN local_group_id IS DISTINCT FROM $2::bigint THEN FALSE ELSE rate_guard_selected END, rate_guard_ignored = CASE WHEN local_group_id IS DISTINCT FROM $2::bigint THEN FALSE ELSE rate_guard_ignored END, rate_guard_selection_mode = CASE WHEN local_group_id IS DISTINCT FROM $2::bigint THEN '' ELSE rate_guard_selection_mode END, updated_at = NOW() WHERE id = $1")).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET local_group_id = $2::bigint, auto_match_status = CASE WHEN $2::bigint IS NULL THEN 'unmatched' ELSE 'manual' END, auto_match_ignored = CASE WHEN $2::bigint IS NULL THEN TRUE ELSE auto_match_ignored END, matched_upstream_name = CASE WHEN $2::bigint IS NULL THEN NULL ELSE name END, name_change_pending = FALSE, rate_guard_selected = CASE WHEN local_group_id IS DISTINCT FROM $2::bigint THEN FALSE ELSE rate_guard_selected END, rate_guard_selection_mode = CASE WHEN local_group_id IS DISTINCT FROM $2::bigint THEN '' ELSE rate_guard_selection_mode END, updated_at = NOW() WHERE id = $1")).
 		WithArgs(int64(7), localGroupID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	require.NoError(t, repo.UpdateGroupMapping(context.Background(), 7, &localGroupID))
 
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET local_group_id = $2::bigint, auto_match_status = CASE WHEN $2::bigint IS NULL THEN 'unmatched' ELSE 'manual' END, auto_match_ignored = CASE WHEN $2::bigint IS NULL THEN TRUE ELSE auto_match_ignored END, matched_upstream_name = CASE WHEN $2::bigint IS NULL THEN NULL ELSE name END, name_change_pending = FALSE, rate_guard_selected = CASE WHEN local_group_id IS DISTINCT FROM $2::bigint THEN FALSE ELSE rate_guard_selected END, rate_guard_ignored = CASE WHEN local_group_id IS DISTINCT FROM $2::bigint THEN FALSE ELSE rate_guard_ignored END, rate_guard_selection_mode = CASE WHEN local_group_id IS DISTINCT FROM $2::bigint THEN '' ELSE rate_guard_selection_mode END, updated_at = NOW() WHERE id = $1")).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET local_group_id = $2::bigint, auto_match_status = CASE WHEN $2::bigint IS NULL THEN 'unmatched' ELSE 'manual' END, auto_match_ignored = CASE WHEN $2::bigint IS NULL THEN TRUE ELSE auto_match_ignored END, matched_upstream_name = CASE WHEN $2::bigint IS NULL THEN NULL ELSE name END, name_change_pending = FALSE, rate_guard_selected = CASE WHEN local_group_id IS DISTINCT FROM $2::bigint THEN FALSE ELSE rate_guard_selected END, rate_guard_selection_mode = CASE WHEN local_group_id IS DISTINCT FROM $2::bigint THEN '' ELSE rate_guard_selection_mode END, updated_at = NOW() WHERE id = $1")).
 		WithArgs(int64(7), nil).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
@@ -1250,11 +1250,11 @@ func TestSupplierProviderDataRepositoryListsMappingsForGuardReconciliation(t *te
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "provider_id", "provider_name", "upstream_group_key", "name", "rate_multiplier", "raw_status", "active",
 			"local_group_id", "auto_match_ignored", "auto_match_status", "matched_upstream_name", "name_change_pending",
-			"rate_guard_selected", "rate_guard_ignored", "rate_guard_selection_mode", "last_seen_at", "inactive_at",
+			"rate_guard_selected", "rate_guard_enabled", "rate_guard_selection_mode", "last_seen_at", "inactive_at",
 		}).AddRow(
 			int64(10), int64(42), "Supplier A", "vip", "VIP", 2.5, "active", true,
 			int64(7), false, service.AutoMatchStatusAutoMatched, "VIP", false,
-			true, false, service.RateGuardSelectionModeAuto, now, nil,
+			true, true, service.RateGuardSelectionModeAuto, now, nil,
 		))
 
 	groups, err := repo.ListMappingsByLocalGroup(context.Background(), []int64{7})
@@ -1276,7 +1276,7 @@ func TestSupplierProviderDataRepositorySelectsRateGuardAtomically(t *testing.T) 
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT pg_advisory_xact_lock($1)")).
 		WithArgs(int64(7)).
 		WillReturnRows(sqlmock.NewRows([]string{"pg_advisory_xact_lock"}).AddRow(nil))
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET rate_guard_selected=FALSE, rate_guard_ignored=FALSE, rate_guard_selection_mode='', updated_at=NOW() WHERE local_group_id=$1 AND rate_guard_selected=TRUE")).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET rate_guard_selected=FALSE, rate_guard_selection_mode='', updated_at=NOW() WHERE local_group_id=$1 AND rate_guard_selected=TRUE")).
 		WithArgs(int64(7)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET rate_guard_selected=TRUE, rate_guard_selection_mode=$2, updated_at=NOW() WHERE id=$1")).
@@ -1291,7 +1291,7 @@ func TestSupplierProviderDataRepositorySelectsRateGuardAtomically(t *testing.T) 
 func TestSupplierProviderDataRepositoryClearsOnlyMatchingGuardMode(t *testing.T) {
 	repo, mock := newSupplierProviderDataRepoMock(t)
 
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET rate_guard_selected=FALSE, rate_guard_ignored=FALSE, rate_guard_selection_mode='', updated_at=NOW() WHERE id=$1 AND rate_guard_selection_mode=$2")).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_groups SET rate_guard_selected=FALSE, rate_guard_selection_mode='', updated_at=NOW() WHERE id=$1 AND rate_guard_selection_mode=$2")).
 		WithArgs(int64(10), service.RateGuardSelectionModeAuto).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
@@ -1299,7 +1299,7 @@ func TestSupplierProviderDataRepositoryClearsOnlyMatchingGuardMode(t *testing.T)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestSupplierProviderDataRepositoryGetsRateGuardSelectionWithIgnorePolicy(t *testing.T) {
+func TestSupplierProviderDataRepositoryGetsRateGuardSelectionWithEnabledPolicy(t *testing.T) {
 	repo, mock := newSupplierProviderDataRepoMock(t)
 	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
 
@@ -1308,7 +1308,7 @@ func TestSupplierProviderDataRepositoryGetsRateGuardSelectionWithIgnorePolicy(t 
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "provider_id", "provider_name", "upstream_group_key", "name", "rate_multiplier", "raw_status", "active",
 			"local_group_id", "auto_match_ignored", "auto_match_status", "matched_upstream_name", "name_change_pending",
-			"rate_guard_selected", "rate_guard_ignored", "rate_guard_selection_mode", "last_seen_at", "inactive_at",
+			"rate_guard_selected", "rate_guard_enabled", "rate_guard_selection_mode", "last_seen_at", "inactive_at",
 		}).AddRow(
 			int64(10), int64(42), "Supplier A", "vip", "VIP", 2.5, "active", true,
 			int64(7), false, service.AutoMatchStatusManual, "VIP", false,
@@ -1319,31 +1319,31 @@ func TestSupplierProviderDataRepositoryGetsRateGuardSelectionWithIgnorePolicy(t 
 
 	require.NoError(t, err)
 	require.True(t, group.RateGuardSelected)
-	require.True(t, group.RateGuardIgnored)
+	require.True(t, group.RateGuardEnabled)
 	require.Equal(t, service.RateGuardSelectionModeManual, group.RateGuardSelectionMode)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestSupplierProviderDataRepositoryUpdatesRateGuardIgnorePolicy(t *testing.T) {
+func TestSupplierProviderDataRepositoryUpdatesRateGuardEnabledPolicy(t *testing.T) {
 	repo, mock := newSupplierProviderDataRepoMock(t)
-	expectedSQL := regexp.QuoteMeta("UPDATE supplier_provider_groups SET rate_guard_ignored=$2, updated_at=NOW() WHERE id=$1 AND rate_guard_selected=TRUE")
+	expectedSQL := regexp.QuoteMeta("UPDATE supplier_provider_groups SET rate_guard_enabled=$2, updated_at=NOW() WHERE id=$1")
 
 	mock.ExpectExec(expectedSQL).
 		WithArgs(int64(10), true).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	require.NoError(t, repo.SetRateGuardIgnored(context.Background(), 10, true))
+	require.NoError(t, repo.SetRateGuardEnabled(context.Background(), 10, true))
 
 	mock.ExpectExec(expectedSQL).
 		WithArgs(int64(10), false).
 		WillReturnResult(sqlmock.NewResult(0, 0))
-	require.ErrorIs(t, repo.SetRateGuardIgnored(context.Background(), 10, false), service.ErrSupplierRateGuardSelectionInvalid)
+	require.ErrorIs(t, repo.SetRateGuardEnabled(context.Background(), 10, false), service.ErrSupplierProviderGroupNotFound)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
-func TestSupplierProviderDataRepositoryListsSelectedAndUnignoredRateGuardCandidates(t *testing.T) {
+func TestSupplierProviderDataRepositoryListsSelectedAndEnabledRateGuardCandidates(t *testing.T) {
 	repo, mock := newSupplierProviderDataRepoMock(t)
 	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
 
-	mock.ExpectQuery(`WHERE g\.rate_guard_selected = TRUE\s+AND g\.rate_guard_ignored = FALSE`).
+	mock.ExpectQuery(`WHERE g\.rate_guard_selected = TRUE\s+AND g\.rate_guard_enabled = TRUE`).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"mapping_id", "provider_id", "provider_name", "provider_enabled",
 			"upstream_group_key", "upstream_group_name", "upstream_rate_multiplier", "guardian_active",

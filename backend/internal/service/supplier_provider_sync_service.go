@@ -88,7 +88,7 @@ type SupplierProviderGroup struct {
 	MatchedUpstreamName             string     `json:"matched_upstream_name,omitempty"`
 	NameChangePending               bool       `json:"name_change_pending"`
 	RateGuardSelected               bool       `json:"rate_guard_selected"`
-	RateGuardIgnored                bool       `json:"rate_guard_ignored"`
+	RateGuardEnabled                bool       `json:"rate_guard_enabled"`
 	RateGuardSelectionMode          string     `json:"rate_guard_selection_mode"`
 	RateGuardLastSnapshotAt         *time.Time `json:"rate_guard_last_snapshot_at,omitempty"`
 	RateGuardLastCheckedAt          *time.Time `json:"rate_guard_last_checked_at,omitempty"`
@@ -213,7 +213,7 @@ type SupplierProviderDataRepository interface {
 	GetGroupForRateGuard(ctx context.Context, groupID int64) (SupplierProviderGroup, error)
 	SelectRateGuard(ctx context.Context, groupID int64, mode string) error
 	ClearRateGuard(ctx context.Context, groupID int64, mode string) error
-	SetRateGuardIgnored(ctx context.Context, groupID int64, ignored bool) error
+	SetRateGuardEnabled(ctx context.Context, groupID int64, enabled bool) error
 	ListRateGuardCandidates(ctx context.Context) ([]SupplierRateGuardCandidate, error)
 	ApplyRateGuard(ctx context.Context, input SupplierRateGuardApplyInput) (SupplierRateGuardApplyResult, error)
 	MarkRateGuardChecked(ctx context.Context, mappingID int64, checkedAt time.Time) error

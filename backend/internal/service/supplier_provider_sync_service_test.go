@@ -108,7 +108,7 @@ func (r *supplierProviderDataRepoStub) SelectRateGuard(context.Context, int64, s
 func (r *supplierProviderDataRepoStub) ClearRateGuard(context.Context, int64, string) error {
 	return nil
 }
-func (r *supplierProviderDataRepoStub) SetRateGuardIgnored(context.Context, int64, bool) error {
+func (r *supplierProviderDataRepoStub) SetRateGuardEnabled(context.Context, int64, bool) error {
 	return nil
 }
 func (r *supplierProviderDataRepoStub) ListRateGuardCandidates(context.Context) ([]SupplierRateGuardCandidate, error) {

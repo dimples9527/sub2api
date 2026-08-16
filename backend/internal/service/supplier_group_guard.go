@@ -21,7 +21,7 @@ type SupplierGroupGuardRepository interface {
 	GetGroupForRateGuard(ctx context.Context, groupID int64) (SupplierProviderGroup, error)
 	SelectRateGuard(ctx context.Context, groupID int64, mode string) error
 	ClearRateGuard(ctx context.Context, groupID int64, mode string) error
-	SetRateGuardIgnored(ctx context.Context, groupID int64, ignored bool) error
+	SetRateGuardEnabled(ctx context.Context, groupID int64, enabled bool) error
 }
 
 type SupplierGroupGuardReconciler struct {
@@ -69,6 +69,9 @@ func (r *SupplierGroupGuardReconciler) ReconcileLocalGroups(ctx context.Context,
 			selected = nil
 		}
 		if len(active) == 1 {
+			if !active[0].RateGuardEnabled {
+				continue
+			}
 			if selected == nil || selected.ID != active[0].ID || selected.RateGuardSelectionMode != RateGuardSelectionModeAuto {
 				if err := r.repo.SelectRateGuard(ctx, active[0].ID, RateGuardSelectionModeAuto); err != nil {
 					return err
@@ -99,7 +102,7 @@ func (r *SupplierGroupGuardReconciler) SetManualGuard(ctx context.Context, group
 	if !selected {
 		return r.repo.ClearRateGuard(ctx, groupID, "")
 	}
-	if group.LocalGroupID == nil || !group.Active {
+	if group.LocalGroupID == nil || !group.Active || !group.RateGuardEnabled {
 		return ErrSupplierRateGuardSelectionInvalid
 	}
 	mappings, err := r.repo.ListMappingsByLocalGroup(ctx, []int64{*group.LocalGroupID})
@@ -134,16 +137,12 @@ func uniquePositiveInt64s(values []int64) []int64 {
 	return result
 }
 
-func (r *SupplierGroupGuardReconciler) SetRateGuardIgnored(ctx context.Context, groupID int64, ignored bool) error {
+func (r *SupplierGroupGuardReconciler) SetRateGuardEnabled(ctx context.Context, groupID int64, enabled bool) error {
 	if r == nil || r.repo == nil {
 		return ErrSupplierRateGuardSelectionInvalid
 	}
-	group, err := r.repo.GetGroupForRateGuard(ctx, groupID)
-	if err != nil {
+	if _, err := r.repo.GetGroupForRateGuard(ctx, groupID); err != nil {
 		return err
 	}
-	if !group.RateGuardSelected {
-		return ErrSupplierRateGuardSelectionInvalid
-	}
-	return r.repo.SetRateGuardIgnored(ctx, groupID, ignored)
+	return r.repo.SetRateGuardEnabled(ctx, groupID, enabled)
 }
