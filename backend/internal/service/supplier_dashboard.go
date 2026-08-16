@@ -16,6 +16,7 @@ type SupplierDashboardRange string
 const (
 	SupplierDashboardRange24Hours SupplierDashboardRange = "24h"
 	SupplierDashboardRange7Days   SupplierDashboardRange = "7d"
+	SupplierDashboardRange30Days  SupplierDashboardRange = "30d"
 )
 
 type SupplierDashboardSeverity string
@@ -49,6 +50,8 @@ func (s *SupplierDashboardService) resolveRange(value SupplierDashboardRange) (t
 		return end.Add(-24 * time.Hour), end, 1, nil
 	case SupplierDashboardRange7Days:
 		return end.Add(-7 * 24 * time.Hour), end, 7, nil
+	case SupplierDashboardRange30Days:
+		return end.Add(-30 * 24 * time.Hour), end, 30, nil
 	default:
 		return time.Time{}, time.Time{}, 0, fmt.Errorf("unsupported supplier dashboard range %q", value)
 	}
@@ -173,10 +176,49 @@ type SupplierDashboardProviderSnapshot struct {
 	LastSyncedAt            *time.Time `json:"last_synced_at"`
 }
 
+type SupplierDashboardTrafficSnapshot struct {
+	Time         string
+	AccountID    int64
+	AccountName  string
+	ProviderSlug string
+	ProviderName string
+	GroupKey     string
+	GroupName    string
+	Requests     int64
+	Tokens       int64
+}
+
+type SupplierDashboardProfitSnapshot struct {
+	AccountID    int64
+	AccountName  string
+	ProviderSlug string
+	ProviderName string
+	GroupKey     string
+	GroupName    string
+	Requests     int64
+	Tokens       int64
+	UserCost     float64
+	ActualCost   float64
+}
+
+type SupplierDashboardHealthSnapshot struct {
+	AccountID    int64
+	AccountName  string
+	ProviderSlug string
+	ProviderName string
+	GroupKey     string
+	GroupName    string
+	Time         string
+	Status       string
+}
+
 type SupplierDashboardDetailRepository interface {
 	ListDashboardAccounts(context.Context, time.Time, time.Time, string, string) ([]SupplierDashboardAccountSnapshot, error)
 	ListDashboardRates(context.Context, time.Time, time.Time, string, string) ([]SupplierDashboardRateSnapshot, error)
 	ListDashboardProviders(context.Context, time.Time, time.Time) ([]SupplierDashboardProviderSnapshot, error)
+	ListDashboardAccountTraffic(context.Context, time.Time, time.Time, string, string) ([]SupplierDashboardTrafficSnapshot, error)
+	ListDashboardAccountProfit(context.Context, time.Time, time.Time, string, string, int) ([]SupplierDashboardProfitSnapshot, error)
+	ListDashboardAccountHealth(context.Context, time.Time, time.Time, string, string) ([]SupplierDashboardHealthSnapshot, error)
 }
 
 type SupplierDashboardAccountsQuery struct {
@@ -201,6 +243,25 @@ type SupplierDashboardProvidersQuery struct {
 	Status   SupplierDashboardProviderStatus `json:"status"`
 	Page     int                             `json:"page"`
 	PageSize int                             `json:"page_size"`
+}
+
+type SupplierDashboardTrafficQuery struct {
+	Range        SupplierDashboardRange `json:"range"`
+	ProviderSlug string                 `json:"provider_slug"`
+	GroupKey     string                 `json:"group_key"`
+}
+type SupplierDashboardProfitQuery struct {
+	Range        SupplierDashboardRange `json:"range"`
+	ProviderSlug string                 `json:"provider_slug"`
+	GroupKey     string                 `json:"group_key"`
+	Limit        int                    `json:"limit"`
+}
+type SupplierDashboardAccountHealthQuery struct {
+	Range        SupplierDashboardRange `json:"range"`
+	ProviderSlug string                 `json:"provider_slug"`
+	GroupKey     string                 `json:"group_key"`
+	Limit        int                    `json:"limit"`
+	Buckets      int                    `json:"buckets"`
 }
 
 type SupplierDashboardAccountItem struct {
@@ -296,6 +357,77 @@ type SupplierDashboardProvidersResponse struct {
 	GeneratedAt time.Time                       `json:"generated_at"`
 }
 
+type SupplierDashboardTrafficPoint struct {
+	Time     string `json:"time"`
+	Requests int64  `json:"requests"`
+	Tokens   int64  `json:"tokens"`
+}
+type SupplierDashboardTrafficAccount struct {
+	AccountID    int64  `json:"account_id"`
+	AccountName  string `json:"account_name"`
+	ProviderSlug string `json:"provider_slug"`
+	ProviderName string `json:"provider_name"`
+	GroupKey     string `json:"group_key"`
+	GroupName    string `json:"group_name"`
+}
+type SupplierDashboardTrafficResponse struct {
+	Range       SupplierDashboardRange            `json:"range"`
+	Series      []SupplierDashboardTrafficPoint   `json:"series"`
+	Accounts    []SupplierDashboardTrafficAccount `json:"accounts"`
+	Warnings    []SupplierDashboardWarning        `json:"warnings"`
+	GeneratedAt time.Time                         `json:"generated_at"`
+}
+type SupplierDashboardProfitItem struct {
+	AccountID    int64   `json:"account_id"`
+	AccountName  string  `json:"account_name"`
+	ProviderSlug string  `json:"provider_slug"`
+	ProviderName string  `json:"provider_name"`
+	GroupKey     string  `json:"group_key"`
+	GroupName    string  `json:"group_name"`
+	Requests     int64   `json:"requests"`
+	Tokens       int64   `json:"tokens"`
+	ActualCost   float64 `json:"actual_cost"`
+	UserCost     float64 `json:"user_cost"`
+	Profit       float64 `json:"profit"`
+}
+type SupplierDashboardProfitResponse struct {
+	Items       []SupplierDashboardProfitItem `json:"items"`
+	Warnings    []SupplierDashboardWarning    `json:"warnings"`
+	GeneratedAt time.Time                     `json:"generated_at"`
+}
+type SupplierDashboardHealthStatusCounts struct {
+	Healthy     int `json:"healthy"`
+	Slow        int `json:"slow"`
+	Failed      int `json:"failed"`
+	Unavailable int `json:"unavailable"`
+	Skipped     int `json:"skipped"`
+}
+type SupplierDashboardHealthHour struct {
+	Time         string                              `json:"time"`
+	StatusCounts SupplierDashboardHealthStatusCounts `json:"status_counts"`
+	Total        int                                 `json:"total"`
+}
+type SupplierDashboardHealthCell struct {
+	Time   string `json:"time"`
+	Status string `json:"status"`
+}
+type SupplierDashboardHealthAccount struct {
+	AccountID    int64                       `json:"account_id"`
+	AccountName  string                      `json:"account_name"`
+	ProviderSlug string                      `json:"provider_slug"`
+	ProviderName string                      `json:"provider_name"`
+	GroupKey     string                      `json:"group_key"`
+	GroupName    string                      `json:"group_name"`
+	Cells        []SupplierDashboardHealthCell `json:"cells"`
+}
+type SupplierDashboardAccountHealthResponse struct {
+	Range       SupplierDashboardRange           `json:"range"`
+	Accounts    []SupplierDashboardHealthAccount `json:"accounts"`
+	Hours       []SupplierDashboardHealthHour    `json:"hours"`
+	Warnings    []SupplierDashboardWarning       `json:"warnings"`
+	GeneratedAt time.Time                        `json:"generated_at"`
+}
+
 func (r *SupplierDashboardAccountsResponse) addWarning(source string, err error) {
 	if err != nil {
 		r.Warnings = append(r.Warnings, SupplierDashboardWarning{Source: source, Message: err.Error()})
@@ -307,6 +439,21 @@ func (r *SupplierDashboardRatesResponse) addWarning(source string, err error) {
 	}
 }
 func (r *SupplierDashboardProvidersResponse) addWarning(source string, err error) {
+	if err != nil {
+		r.Warnings = append(r.Warnings, SupplierDashboardWarning{Source: source, Message: err.Error()})
+	}
+}
+func (r *SupplierDashboardTrafficResponse) addWarning(source string, err error) {
+	if err != nil {
+		r.Warnings = append(r.Warnings, SupplierDashboardWarning{Source: source, Message: err.Error()})
+	}
+}
+func (r *SupplierDashboardProfitResponse) addWarning(source string, err error) {
+	if err != nil {
+		r.Warnings = append(r.Warnings, SupplierDashboardWarning{Source: source, Message: err.Error()})
+	}
+}
+func (r *SupplierDashboardAccountHealthResponse) addWarning(source string, err error) {
 	if err != nil {
 		r.Warnings = append(r.Warnings, SupplierDashboardWarning{Source: source, Message: err.Error()})
 	}
@@ -455,6 +602,215 @@ func (s *SupplierDashboardService) GetProviders(ctx context.Context, q SupplierD
 	})
 	result.Total = len(result.Items)
 	result.Items = pageSlice(result.Items, q.Page, q.PageSize)
+	return result, nil
+}
+
+func (s *SupplierDashboardService) GetAccountTraffic(ctx context.Context, q SupplierDashboardTrafficQuery) (SupplierDashboardTrafficResponse, error) {
+	q.Range = SupplierDashboardRange(strings.TrimSpace(string(q.Range)))
+	q.ProviderSlug = strings.TrimSpace(q.ProviderSlug)
+	q.GroupKey = strings.TrimSpace(q.GroupKey)
+	start, end, _, err := s.resolveRange(q.Range)
+	if err != nil {
+		return SupplierDashboardTrafficResponse{}, err
+	}
+	result := SupplierDashboardTrafficResponse{Range: q.Range, Series: []SupplierDashboardTrafficPoint{}, Accounts: []SupplierDashboardTrafficAccount{}, Warnings: []SupplierDashboardWarning{}, GeneratedAt: end}
+	rows, listErr := s.detail.ListDashboardAccountTraffic(ctx, start, end, q.ProviderSlug, q.GroupKey)
+	if dashboardContextErr(listErr) {
+		return SupplierDashboardTrafficResponse{}, listErr
+	}
+	result.addWarning("dashboard_account_traffic", listErr)
+	series := map[string]*SupplierDashboardTrafficPoint{}
+	order := []string{}
+	accountSeen := map[int64]bool{}
+	for _, row := range rows {
+		point, ok := series[row.Time]
+		if !ok {
+			point = &SupplierDashboardTrafficPoint{Time: row.Time}
+			series[row.Time] = point
+			order = append(order, row.Time)
+		}
+		point.Requests += row.Requests
+		point.Tokens += row.Tokens
+		if accountSeen[row.AccountID] {
+			continue
+		}
+		accountSeen[row.AccountID] = true
+		result.Accounts = append(result.Accounts, SupplierDashboardTrafficAccount{
+			AccountID: row.AccountID, AccountName: row.AccountName, ProviderSlug: row.ProviderSlug, ProviderName: row.ProviderName,
+			GroupKey: row.GroupKey, GroupName: row.GroupName,
+		})
+	}
+	sort.SliceStable(result.Accounts, func(i, j int) bool {
+		return result.Accounts[i].AccountID < result.Accounts[j].AccountID
+	})
+	for _, key := range order {
+		result.Series = append(result.Series, *series[key])
+	}
+	return result, nil
+}
+
+func (s *SupplierDashboardService) GetAccountProfitRanking(ctx context.Context, q SupplierDashboardProfitQuery) (SupplierDashboardProfitResponse, error) {
+	q.Range = SupplierDashboardRange(strings.TrimSpace(string(q.Range)))
+	q.ProviderSlug = strings.TrimSpace(q.ProviderSlug)
+	q.GroupKey = strings.TrimSpace(q.GroupKey)
+	start, end, _, err := s.resolveRange(q.Range)
+	if err != nil {
+		return SupplierDashboardProfitResponse{}, err
+	}
+	limit := q.Limit
+	if limit < 1 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	result := SupplierDashboardProfitResponse{Items: []SupplierDashboardProfitItem{}, Warnings: []SupplierDashboardWarning{}, GeneratedAt: end}
+	rows, listErr := s.detail.ListDashboardAccountProfit(ctx, start, end, q.ProviderSlug, q.GroupKey, limit)
+	if dashboardContextErr(listErr) {
+		return SupplierDashboardProfitResponse{}, listErr
+	}
+	result.addWarning("dashboard_account_profit", listErr)
+	for _, row := range rows {
+		result.Items = append(result.Items, SupplierDashboardProfitItem{
+			AccountID: row.AccountID, AccountName: row.AccountName, ProviderSlug: row.ProviderSlug, ProviderName: row.ProviderName,
+			GroupKey: row.GroupKey, GroupName: row.GroupName, Requests: row.Requests, Tokens: row.Tokens,
+			ActualCost: row.ActualCost, UserCost: row.UserCost, Profit: row.UserCost - row.ActualCost,
+		})
+	}
+	sort.SliceStable(result.Items, func(i, j int) bool {
+		a, b := result.Items[i], result.Items[j]
+		if a.Profit != b.Profit {
+			return a.Profit > b.Profit
+		}
+		return a.AccountID < b.AccountID
+	})
+	if len(result.Items) > limit {
+		result.Items = result.Items[:limit]
+	}
+	return result, nil
+}
+
+func (s *SupplierDashboardService) GetAccountHealthTimeline(ctx context.Context, q SupplierDashboardAccountHealthQuery) (SupplierDashboardAccountHealthResponse, error) {
+	q.Range = SupplierDashboardRange(strings.TrimSpace(string(q.Range)))
+	q.ProviderSlug = strings.TrimSpace(q.ProviderSlug)
+	q.GroupKey = strings.TrimSpace(q.GroupKey)
+	start, end, _, err := s.resolveRange(q.Range)
+	if err != nil {
+		return SupplierDashboardAccountHealthResponse{}, err
+	}
+	limit := q.Limit
+	if limit < 1 {
+		limit = 30
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	buckets := q.Buckets
+	if buckets < 1 {
+		buckets = 72
+	}
+	if buckets > 24*30 {
+		buckets = 24 * 30
+	}
+	result := SupplierDashboardAccountHealthResponse{Range: q.Range, Accounts: []SupplierDashboardHealthAccount{}, Hours: []SupplierDashboardHealthHour{}, Warnings: []SupplierDashboardWarning{}, GeneratedAt: end}
+	rows, listErr := s.detail.ListDashboardAccountHealth(ctx, start, end, q.ProviderSlug, q.GroupKey)
+	if dashboardContextErr(listErr) {
+		return SupplierDashboardAccountHealthResponse{}, listErr
+	}
+	result.addWarning("dashboard_account_health", listErr)
+
+	// 按账号 ID 去重收集元信息，稍后按 limit 截断。
+	accountMeta := map[int64]SupplierDashboardHealthAccount{}
+	accountOrder := []int64{}
+	for _, row := range rows {
+		if _, ok := accountMeta[row.AccountID]; ok {
+			continue
+		}
+		accountMeta[row.AccountID] = SupplierDashboardHealthAccount{
+			AccountID: row.AccountID, AccountName: row.AccountName, ProviderSlug: row.ProviderSlug, ProviderName: row.ProviderName,
+			GroupKey: row.GroupKey, GroupName: row.GroupName, Cells: []SupplierDashboardHealthCell{},
+		}
+		accountOrder = append(accountOrder, row.AccountID)
+	}
+	sort.SliceStable(accountOrder, func(i, j int) bool { return accountOrder[i] < accountOrder[j] })
+	if len(accountOrder) > limit {
+		accountOrder = accountOrder[:limit]
+	}
+	selected := map[int64]bool{}
+	for _, accountID := range accountOrder {
+		selected[accountID] = true
+		result.Accounts = append(result.Accounts, accountMeta[accountID])
+	}
+
+	// 汇总选中账号的小时桶，随后按 buckets 截取最近区间。
+	hourSet := map[string]bool{}
+	for _, row := range rows {
+		if selected[row.AccountID] {
+			hourSet[row.Time] = true
+		}
+	}
+	hourOrder := make([]string, 0, len(hourSet))
+	for key := range hourSet {
+		hourOrder = append(hourOrder, key)
+	}
+	sort.Strings(hourOrder)
+	if len(hourOrder) > buckets {
+		hourOrder = hourOrder[len(hourOrder)-buckets:]
+	}
+	keptHours := map[string]int{}
+	for i, key := range hourOrder {
+		keptHours[key] = i
+	}
+
+	// 为每个账号预置小时格，再填充状态与每小时计数。
+	perAccountCells := map[int64][]SupplierDashboardHealthCell{}
+	for i := range result.Accounts {
+		cells := make([]SupplierDashboardHealthCell, len(hourOrder))
+		for j, key := range hourOrder {
+			cells[j] = SupplierDashboardHealthCell{Time: key}
+		}
+		perAccountCells[result.Accounts[i].AccountID] = cells
+	}
+	perHourCounts := map[string]*SupplierDashboardHealthStatusCounts{}
+	for _, row := range rows {
+		if !selected[row.AccountID] {
+			continue
+		}
+		idx, ok := keptHours[row.Time]
+		if !ok {
+			continue
+		}
+		cell := &perAccountCells[row.AccountID][idx]
+		cell.Status = row.Status
+		counts := perHourCounts[row.Time]
+		if counts == nil {
+			counts = &SupplierDashboardHealthStatusCounts{}
+			perHourCounts[row.Time] = counts
+		}
+		switch row.Status {
+		case "healthy":
+			counts.Healthy++
+		case "slow":
+			counts.Slow++
+		case "failed":
+			counts.Failed++
+		case "unavailable":
+			counts.Unavailable++
+		case "skipped":
+			counts.Skipped++
+		}
+	}
+	for i := range result.Accounts {
+		result.Accounts[i].Cells = perAccountCells[result.Accounts[i].AccountID]
+	}
+	for _, key := range hourOrder {
+		counts := perHourCounts[key]
+		if counts == nil {
+			counts = &SupplierDashboardHealthStatusCounts{}
+		}
+		total := counts.Healthy + counts.Slow + counts.Failed + counts.Unavailable + counts.Skipped
+		result.Hours = append(result.Hours, SupplierDashboardHealthHour{Time: key, StatusCounts: *counts, Total: total})
+	}
 	return result, nil
 }
 

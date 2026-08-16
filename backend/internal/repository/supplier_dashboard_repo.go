@@ -280,6 +280,79 @@ dashboard_provider_collection_evidence AS (
   FROM dashboard_provider_collection_status status
 )`
 
+const supplierDashboardTrafficQuery = supplierDashboardOpsCTE + `
+SELECT
+  TO_CHAR(date_trunc('hour', usage_logs.created_at), 'YYYY-MM-DD"T"HH24:00:00') AS time,
+  usage_logs.account_id,
+  spa.name AS account_name,
+  sp.code AS provider_slug,
+  sp.name AS provider_name,
+  spa.group_key,
+  spa.group_name,
+  COUNT(*) AS requests,
+  COALESCE(SUM(usage_logs.input_tokens + usage_logs.output_tokens + usage_logs.cache_creation_tokens + usage_logs.cache_read_tokens), 0) AS tokens
+FROM usage_logs
+JOIN dashboard_unique_local_account_ids unique_accounts ON unique_accounts.local_account_id = usage_logs.account_id
+JOIN dashboard_account_matches matches ON matches.local_account_id = usage_logs.account_id
+JOIN supplier_provider_accounts spa ON spa.id = matches.supplier_account_id
+JOIN supplier_providers sp ON sp.id = spa.provider_id AND sp.deleted_at IS NULL
+WHERE usage_logs.created_at >= $1
+  AND usage_logs.created_at < $2
+GROUP BY time, usage_logs.account_id, spa.name, sp.code, sp.name, spa.group_key, spa.group_name
+ORDER BY time ASC, usage_logs.account_id ASC`
+
+const supplierDashboardProfitQuery = supplierDashboardOpsCTE + `
+SELECT
+  usage_logs.account_id,
+  spa.name AS account_name,
+  sp.code AS provider_slug,
+  sp.name AS provider_name,
+  spa.group_key,
+  spa.group_name,
+  COUNT(*) AS requests,
+  COALESCE(SUM(usage_logs.input_tokens + usage_logs.output_tokens + usage_logs.cache_creation_tokens + usage_logs.cache_read_tokens), 0) AS tokens,
+  COALESCE(SUM(COALESCE(usage_logs.account_stats_cost, usage_logs.total_cost) * COALESCE(usage_logs.account_rate_multiplier, 1)), 0) AS actual_cost,
+  COALESCE(SUM(usage_logs.actual_cost), 0) AS user_cost
+FROM usage_logs
+JOIN dashboard_unique_local_account_ids unique_accounts ON unique_accounts.local_account_id = usage_logs.account_id
+JOIN dashboard_account_matches matches ON matches.local_account_id = usage_logs.account_id
+JOIN supplier_provider_accounts spa ON spa.id = matches.supplier_account_id
+JOIN supplier_providers sp ON sp.id = spa.provider_id AND sp.deleted_at IS NULL
+WHERE usage_logs.created_at >= $1
+  AND usage_logs.created_at < $2
+GROUP BY usage_logs.account_id, spa.name, sp.code, sp.name, spa.group_key, spa.group_name
+ORDER BY COALESCE(SUM(usage_logs.actual_cost), 0) - COALESCE(SUM(COALESCE(usage_logs.account_stats_cost, usage_logs.total_cost) * COALESCE(usage_logs.account_rate_multiplier, 1)), 0) DESC, usage_logs.account_id ASC
+LIMIT $5`
+
+const supplierDashboardHealthQuery = supplierDashboardOpsCTE + `,
+dashboard_health_items AS MATERIALIZED (
+  SELECT DISTINCT ON (item.account_id, hour_bucket)
+    item.account_id,
+    date_trunc('hour', item.finished_at) AS hour_bucket,
+    item.status,
+    item.finished_at
+  FROM upstream_account_health_guard_run_items item
+  JOIN dashboard_unique_local_account_ids unique_accounts ON unique_accounts.local_account_id = item.account_id
+  WHERE item.finished_at >= $1
+    AND item.finished_at < $2
+  ORDER BY item.account_id, hour_bucket, item.finished_at DESC, item.id DESC
+)
+SELECT
+  item.account_id,
+  accounts.name AS account_name,
+  sp.code AS provider_slug,
+  sp.name AS provider_name,
+  spa.group_key,
+  spa.group_name,
+  TO_CHAR(item.hour_bucket, 'YYYY-MM-DD"T"HH24:00:00') AS time,
+  item.status
+FROM dashboard_health_items item
+JOIN accounts ON accounts.id = item.account_id AND accounts.deleted_at IS NULL
+JOIN dashboard_account_matches matches ON matches.local_account_id = item.account_id
+JOIN supplier_provider_accounts spa ON spa.id = matches.supplier_account_id
+JOIN supplier_providers sp ON sp.id = spa.provider_id AND sp.deleted_at IS NULL
+ORDER BY item.account_id ASC, time ASC`
+
 const supplierDashboardAccountsQuery = supplierDashboardOpsCTE + supplierDashboardRateHistoryCTE + supplierDashboardCollectionCTE + `
 SELECT spa.id AS account_id,
        spa.name AS account_name,
@@ -535,6 +608,80 @@ func (r *supplierDashboardRepository) ListDashboardProviders(ctx context.Context
 	}
 	return items, nil
 }
+
+func (r *supplierDashboardRepository) ListDashboardAccountTraffic(ctx context.Context, start, end time.Time, providerSlug, groupKey string) ([]service.SupplierDashboardTrafficSnapshot, error) {
+	rows, err := r.db.QueryContext(ctx, supplierDashboardTrafficQuery, start, end, providerSlug, groupKey)
+	if err != nil {
+		return nil, fmt.Errorf("query supplier dashboard account traffic: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]service.SupplierDashboardTrafficSnapshot, 0)
+	for rows.Next() {
+		var item service.SupplierDashboardTrafficSnapshot
+		if err := rows.Scan(
+			&item.Time, &item.AccountID, &item.AccountName, &item.ProviderSlug, &item.ProviderName,
+			&item.GroupKey, &item.GroupName, &item.Requests, &item.Tokens,
+		); err != nil {
+			return nil, fmt.Errorf("scan supplier dashboard account traffic: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate supplier dashboard account traffic: %w", err)
+	}
+	return items, nil
+}
+
+func (r *supplierDashboardRepository) ListDashboardAccountProfit(ctx context.Context, start, end time.Time, providerSlug, groupKey string, limit int) ([]service.SupplierDashboardProfitSnapshot, error) {
+	rows, err := r.db.QueryContext(ctx, supplierDashboardProfitQuery, start, end, providerSlug, groupKey, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query supplier dashboard account profit: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]service.SupplierDashboardProfitSnapshot, 0)
+	for rows.Next() {
+		var item service.SupplierDashboardProfitSnapshot
+		if err := rows.Scan(
+			&item.AccountID, &item.AccountName, &item.ProviderSlug, &item.ProviderName,
+			&item.GroupKey, &item.GroupName, &item.Requests, &item.Tokens,
+			&item.ActualCost, &item.UserCost,
+		); err != nil {
+			return nil, fmt.Errorf("scan supplier dashboard account profit: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate supplier dashboard account profit: %w", err)
+	}
+	return items, nil
+}
+
+func (r *supplierDashboardRepository) ListDashboardAccountHealth(ctx context.Context, start, end time.Time, providerSlug, groupKey string) ([]service.SupplierDashboardHealthSnapshot, error) {
+	rows, err := r.db.QueryContext(ctx, supplierDashboardHealthQuery, start, end, providerSlug, groupKey)
+	if err != nil {
+		return nil, fmt.Errorf("query supplier dashboard account health: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]service.SupplierDashboardHealthSnapshot, 0)
+	for rows.Next() {
+		var item service.SupplierDashboardHealthSnapshot
+		if err := rows.Scan(
+			&item.AccountID, &item.AccountName, &item.ProviderSlug, &item.ProviderName,
+			&item.GroupKey, &item.GroupName, &item.Time, &item.Status,
+		); err != nil {
+			return nil, fmt.Errorf("scan supplier dashboard account health: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate supplier dashboard account health: %w", err)
+	}
+	return items, nil
+}
+
 func dashboardNullFloat(value sql.NullFloat64) *float64 {
 	if !value.Valid {
 		return nil

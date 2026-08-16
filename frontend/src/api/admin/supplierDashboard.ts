@@ -5,7 +5,7 @@
 
 import { apiClient } from '../client'
 
-export type SupplierDashboardRange = '24h' | '7d'
+export type SupplierDashboardRange = '24h' | '7d' | '30d'
 export type SupplierDashboardSeverity = 'critical' | 'high' | 'medium' | 'low'
 export type SupplierDashboardRiskType =
   | 'all'
@@ -173,6 +173,107 @@ export interface SupplierDashboardProvidersQuery {
   page_size?: number
 }
 
+export interface SupplierDashboardTrafficPoint {
+  time: string
+  requests: number
+  tokens: number
+}
+
+export interface SupplierDashboardTrafficAccount {
+  account_id: number
+  account_name: string
+  provider_slug: string
+  provider_name: string
+  group_key: string
+  group_name: string
+}
+
+export interface SupplierDashboardTrafficResponse {
+  range: SupplierDashboardRange
+  series: SupplierDashboardTrafficPoint[]
+  accounts: SupplierDashboardTrafficAccount[]
+  warnings: SupplierDashboardWarning[]
+  generated_at: string
+}
+
+export interface SupplierDashboardProfitItem {
+  account_id: number
+  account_name: string
+  provider_slug: string
+  provider_name: string
+  group_key: string
+  group_name: string
+  requests: number
+  tokens: number
+  actual_cost: number
+  user_cost: number
+  profit: number
+}
+
+export interface SupplierDashboardProfitResponse {
+  items: SupplierDashboardProfitItem[]
+  warnings: SupplierDashboardWarning[]
+  generated_at: string
+}
+
+export interface SupplierDashboardHealthStatusCounts {
+  healthy: number
+  slow: number
+  failed: number
+  unavailable: number
+  skipped: number
+}
+
+export interface SupplierDashboardHealthHour {
+  time: string
+  status_counts: SupplierDashboardHealthStatusCounts
+  total: number
+}
+
+export interface SupplierDashboardHealthCell {
+  time: string
+  status: string
+}
+
+export interface SupplierDashboardHealthAccount {
+  account_id: number
+  account_name: string
+  provider_slug: string
+  provider_name: string
+  group_key: string
+  group_name: string
+  cells: SupplierDashboardHealthCell[]
+}
+
+export interface SupplierDashboardAccountHealthResponse {
+  range: SupplierDashboardRange
+  accounts: SupplierDashboardHealthAccount[]
+  hours: SupplierDashboardHealthHour[]
+  warnings: SupplierDashboardWarning[]
+  generated_at: string
+}
+
+export interface SupplierDashboardTrafficQuery {
+  range?: SupplierDashboardRange
+  provider_slug?: string
+  group_key?: string
+}
+
+export interface SupplierDashboardProfitQuery {
+  range?: SupplierDashboardRange
+  provider_slug?: string
+  group_key?: string
+  limit?: number
+}
+
+export interface SupplierDashboardAccountHealthQuery {
+  range?: SupplierDashboardRange
+  provider_slug?: string
+  group_key?: string
+  limit?: number
+  buckets?: number
+}
+
 export interface SupplierDashboardRequestOptions {
   signal?: AbortSignal
 }
@@ -268,11 +369,74 @@ export async function getProviders(
   return data
 }
 
+/** 账号小时级请求量 / Token 流量趋势。 */
+export async function getAccountTraffic(
+  query: SupplierDashboardTrafficQuery = {},
+  options?: SupplierDashboardRequestOptions
+): Promise<SupplierDashboardTrafficResponse> {
+  const { data } = await apiClient.get<SupplierDashboardTrafficResponse>(
+    '/admin/upstream-management/dashboard/traffic',
+    {
+      params: compactParams({
+        range: query.range ?? '30d',
+        provider_slug: query.provider_slug,
+        group_key: query.group_key,
+      }),
+      signal: options?.signal,
+    }
+  )
+  return data
+}
+
+/** 账号盈利排行。 */
+export async function getAccountProfitRanking(
+  query: SupplierDashboardProfitQuery = {},
+  options?: SupplierDashboardRequestOptions
+): Promise<SupplierDashboardProfitResponse> {
+  const { data } = await apiClient.get<SupplierDashboardProfitResponse>(
+    '/admin/upstream-management/dashboard/profit-ranking',
+    {
+      params: compactParams({
+        range: query.range ?? '30d',
+        provider_slug: query.provider_slug,
+        group_key: query.group_key,
+        limit: query.limit ?? 20,
+      }),
+      signal: options?.signal,
+    }
+  )
+  return data
+}
+
+/** 账号健康状态小时级时间线。 */
+export async function getAccountHealthTimeline(
+  query: SupplierDashboardAccountHealthQuery = {},
+  options?: SupplierDashboardRequestOptions
+): Promise<SupplierDashboardAccountHealthResponse> {
+  const { data } = await apiClient.get<SupplierDashboardAccountHealthResponse>(
+    '/admin/upstream-management/dashboard/health-timeline',
+    {
+      params: compactParams({
+        range: query.range ?? '30d',
+        provider_slug: query.provider_slug,
+        group_key: query.group_key,
+        limit: query.limit ?? 30,
+        buckets: query.buckets ?? 72,
+      }),
+      signal: options?.signal,
+    }
+  )
+  return data
+}
+
 export const supplierDashboardAPI = {
   getOverview,
   getAccounts,
   getRates,
   getProviders,
+  getAccountTraffic,
+  getAccountProfitRanking,
+  getAccountHealthTimeline,
 }
 
 export default supplierDashboardAPI

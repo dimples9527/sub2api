@@ -33,6 +33,16 @@ var dashboardProviderColumns = []string{
 	"rate_risk_count", "enabled_account_count", "schedulable_account_count", "success_count", "error_count", "balance", "estimated_days", "period_cost", "last_synced_at",
 }
 
+var dashboardTrafficColumns = []string{
+	"time", "account_id", "account_name", "provider_slug", "provider_name", "group_key", "group_name", "requests", "tokens",
+}
+var dashboardProfitColumns = []string{
+	"account_id", "account_name", "provider_slug", "provider_name", "group_key", "group_name", "requests", "tokens", "actual_cost", "user_cost",
+}
+var dashboardHealthColumns = []string{
+	"account_id", "account_name", "provider_slug", "provider_name", "group_key", "group_name", "time", "status",
+}
+
 func TestSupplierDashboardRepositoryScansNeutralFactsAndBatchedWindow(t *testing.T) {
 	start := time.Date(2026, 7, 23, 8, 0, 0, 0, time.UTC)
 	end := start.Add(24 * time.Hour)
@@ -368,6 +378,57 @@ func TestSupplierDashboardRateChangeEventsUseRequestedWindow(t *testing.T) {
 		})
 	}
 }
+func TestSupplierDashboardRepositoryTrafficProfitHealthEncodeSharedOpsAndUniqueSemantics(t *testing.T) {
+	// 新的趋势类查询复用匹配 CTE，但各自保留独有的时间/分组/排序语义
+	cases := []struct {
+		name, query string
+		parts       []string
+	}{
+		{"traffic", supplierDashboardTrafficQuery, []string{
+			"dashboard_unique_local_account_ids as materialized",
+			"join dashboard_account_matches matches",
+			"usage_logs.created_at >= $1", "usage_logs.created_at < $2",
+			"date_trunc('hour', usage_logs.created_at)",
+			"group by time, usage_logs.account_id",
+			"count(*) as requests",
+			"coalesce(sum(usage_logs.input_tokens + usage_logs.output_tokens + usage_logs.cache_creation_tokens + usage_logs.cache_read_tokens), 0) as tokens",
+		}},
+		{"profit", supplierDashboardProfitQuery, []string{
+			"dashboard_unique_local_account_ids as materialized",
+			"join dashboard_account_matches matches",
+			"usage_logs.created_at >= $1", "usage_logs.created_at < $2",
+			"coalesce(sum(coalesce(usage_logs.account_stats_cost, usage_logs.total_cost) * coalesce(usage_logs.account_rate_multiplier, 1)), 0) as actual_cost",
+			"coalesce(sum(usage_logs.actual_cost), 0) as user_cost",
+			"order by coalesce(sum(usage_logs.actual_cost), 0) - coalesce(sum(coalesce(usage_logs.account_stats_cost, usage_logs.total_cost) * coalesce(usage_logs.account_rate_multiplier, 1)), 0) desc", "limit $5",
+		}},
+		{"health", supplierDashboardHealthQuery, []string{
+			"dashboard_unique_local_account_ids as materialized",
+			"join dashboard_account_matches matches",
+			"from upstream_account_health_guard_run_items item",
+			"item.finished_at >= $1", "item.finished_at < $2",
+			"date_trunc('hour', item.finished_at)",
+			"select distinct on (item.account_id, hour_bucket)",
+			"order by item.account_id asc, time asc",
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			lower := strings.ToLower(tc.query)
+			for _, part := range tc.parts {
+				if !strings.Contains(lower, part) {
+					t.Fatalf("SQL missing shared/unique semantics %q", part)
+				}
+			}
+			for _, forbidden := range []string{"as success_rate", "lateral"} {
+				if strings.Contains(lower, forbidden) {
+					t.Fatalf("SQL contains forbidden derived logic %q: %s", forbidden, tc.query)
+				}
+			}
+			assertDashboardSQLSafe(t, tc.query)
+		})
+	}
+}
+
 func TestSupplierDashboardRepositoryPropagatesQueryRowsAndScanErrors(t *testing.T) {
 	start := time.Date(2026, 7, 23, 8, 0, 0, 0, time.UTC)
 	end := start.Add(24 * time.Hour)
@@ -375,11 +436,13 @@ func TestSupplierDashboardRepositoryPropagatesQueryRowsAndScanErrors(t *testing.
 		name, pattern string
 		columns       []string
 		good, bad     []driver.Value
+		args          []driver.Value
 		call          func(service.SupplierDashboardDetailRepository) error
 	}{
 		{"accounts", "(?s)FROM supplier_provider_accounts", dashboardAccountColumns,
 			[]driver.Value{int64(1), "a", "p", "P", true, true, "g", "G", "normal", nil, "active", "success", "never", nil, nil, nil, nil, nil, nil, 1, nil, nil, 0, nil, nil, nil, nil, nil, nil, nil, end},
 			[]driver.Value{"bad-id", "a", "p", "P", true, true, "g", "G", "normal", nil, "active", "success", "never", nil, nil, nil, nil, nil, nil, 1, nil, nil, 0, nil, nil, nil, nil, nil, nil, nil, end},
+			nil,
 			func(r service.SupplierDashboardDetailRepository) error {
 				_, e := r.ListDashboardAccounts(context.Background(), start, end, "", "")
 				return e
@@ -387,6 +450,7 @@ func TestSupplierDashboardRepositoryPropagatesQueryRowsAndScanErrors(t *testing.
 		{"rates", "(?s)FROM supplier_provider_accounts", dashboardRateColumns,
 			[]driver.Value{int64(1), "a", "p", "P", true, true, "g", "G", nil, nil, 1, nil, nil, 0, nil, nil, nil, nil, nil, end},
 			[]driver.Value{"bad-id", "a", "p", "P", true, true, "g", "G", nil, nil, 1, nil, nil, 0, nil, nil, nil, nil, nil, end},
+			nil,
 			func(r service.SupplierDashboardDetailRepository) error {
 				_, e := r.ListDashboardRates(context.Background(), start, end, "", "")
 				return e
@@ -394,8 +458,33 @@ func TestSupplierDashboardRepositoryPropagatesQueryRowsAndScanErrors(t *testing.
 		{"providers", "(?s)FROM supplier_providers", dashboardProviderColumns,
 			[]driver.Value{"p", "P", true, false, "normal", "never", "never", "never", 0, 0, 0, int64(0), int64(0), nil, nil, 0.0, nil},
 			[]driver.Value{"p", "P", "bad-bool", false, "normal", "never", "never", "never", 0, 0, 0, int64(0), int64(0), nil, nil, 0.0, nil},
+			nil,
 			func(r service.SupplierDashboardDetailRepository) error {
 				_, e := r.ListDashboardProviders(context.Background(), start, end)
+				return e
+			}},
+		{"traffic", "(?s)FROM usage_logs", dashboardTrafficColumns,
+			[]driver.Value{"2026-07-23T08:00:00", int64(1), "a", "p", "P", "g", "G", int64(10), int64(100)},
+			[]driver.Value{"2026-07-23T08:00:00", "bad-id", "a", "p", "P", "g", "G", int64(10), int64(100)},
+			nil,
+			func(r service.SupplierDashboardDetailRepository) error {
+				_, e := r.ListDashboardAccountTraffic(context.Background(), start, end, "", "")
+				return e
+			}},
+		{"profit", "(?s)FROM usage_logs", dashboardProfitColumns,
+			[]driver.Value{int64(1), "a", "p", "P", "g", "G", int64(10), int64(100), 0.5, 1.0},
+			[]driver.Value{"bad-id", "a", "p", "P", "g", "G", int64(10), int64(100), 0.5, 1.0},
+			[]driver.Value{20},
+			func(r service.SupplierDashboardDetailRepository) error {
+				_, e := r.ListDashboardAccountProfit(context.Background(), start, end, "", "", 20)
+				return e
+			}},
+		{"health", "(?s)FROM upstream_account_health_guard_run_items", dashboardHealthColumns,
+			[]driver.Value{int64(1), "a", "p", "P", "g", "G", "2026-07-23T08:00:00", "healthy"},
+			[]driver.Value{"bad-id", "a", "p", "P", "g", "G", "2026-07-23T08:00:00", "healthy"},
+			nil,
+			func(r service.SupplierDashboardDetailRepository) error {
+				_, e := r.ListDashboardAccountHealth(context.Background(), start, end, "", "")
 				return e
 			}},
 	}
@@ -403,7 +492,7 @@ func TestSupplierDashboardRepositoryPropagatesQueryRowsAndScanErrors(t *testing.
 		t.Run(tc.name+" query", func(t *testing.T) {
 			repo, mock, _ := newDashboardRepoMock(t)
 			want := errors.New("query failed")
-			mock.ExpectQuery(tc.pattern).WithArgs(start, end, "", "").WillReturnError(want)
+			mock.ExpectQuery(tc.pattern).WithArgs(append([]driver.Value{start, end, "", ""}, tc.args...)...).WillReturnError(want)
 			if !errors.Is(tc.call(repo), want) {
 				t.Fatal("query error was not propagated")
 			}
@@ -411,14 +500,14 @@ func TestSupplierDashboardRepositoryPropagatesQueryRowsAndScanErrors(t *testing.
 		t.Run(tc.name+" rows", func(t *testing.T) {
 			repo, mock, _ := newDashboardRepoMock(t)
 			want := errors.New("rows failed")
-			mock.ExpectQuery(tc.pattern).WithArgs(start, end, "", "").WillReturnRows(sqlmock.NewRows(tc.columns).AddRow(tc.good...).RowError(0, want))
+			mock.ExpectQuery(tc.pattern).WithArgs(append([]driver.Value{start, end, "", ""}, tc.args...)...).WillReturnRows(sqlmock.NewRows(tc.columns).AddRow(tc.good...).RowError(0, want))
 			if !errors.Is(tc.call(repo), want) {
 				t.Fatal("rows error was not propagated")
 			}
 		})
 		t.Run(tc.name+" scan", func(t *testing.T) {
 			repo, mock, _ := newDashboardRepoMock(t)
-			mock.ExpectQuery(tc.pattern).WithArgs(start, end, "", "").WillReturnRows(sqlmock.NewRows(tc.columns).AddRow(tc.bad...))
+			mock.ExpectQuery(tc.pattern).WithArgs(append([]driver.Value{start, end, "", ""}, tc.args...)...).WillReturnRows(sqlmock.NewRows(tc.columns).AddRow(tc.bad...))
 			if err := tc.call(repo); err == nil || !strings.Contains(err.Error(), "scan supplier dashboard") {
 				t.Fatalf("scan error = %v", err)
 			}

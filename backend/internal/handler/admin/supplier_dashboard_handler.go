@@ -15,6 +15,9 @@ type supplierDashboardService interface {
 	GetAccounts(ctx context.Context, q service.SupplierDashboardAccountsQuery) (service.SupplierDashboardAccountsResponse, error)
 	GetRates(ctx context.Context, q service.SupplierDashboardRatesQuery) (service.SupplierDashboardRatesResponse, error)
 	GetProviders(ctx context.Context, q service.SupplierDashboardProvidersQuery) (service.SupplierDashboardProvidersResponse, error)
+	GetAccountTraffic(ctx context.Context, q service.SupplierDashboardTrafficQuery) (service.SupplierDashboardTrafficResponse, error)
+	GetAccountProfitRanking(ctx context.Context, q service.SupplierDashboardProfitQuery) (service.SupplierDashboardProfitResponse, error)
+	GetAccountHealthTimeline(ctx context.Context, q service.SupplierDashboardAccountHealthQuery) (service.SupplierDashboardAccountHealthResponse, error)
 }
 
 // SupplierDashboardHandler 提供供应商运维驾驶舱只读接口。
@@ -66,6 +69,48 @@ func (h *SupplierDashboardHandler) GetProviders(c *gin.Context) {
 		return
 	}
 	result, err := h.service.GetProviders(c.Request.Context(), query)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+// GetAccountTraffic 查询账号小时级请求量 / Token 流量趋势。
+func (h *SupplierDashboardHandler) GetAccountTraffic(c *gin.Context) {
+	query, ok := parseSupplierDashboardTrafficQuery(c)
+	if !ok {
+		return
+	}
+	result, err := h.service.GetAccountTraffic(c.Request.Context(), query)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+// GetAccountProfitRanking 查询账号盈利排行。
+func (h *SupplierDashboardHandler) GetAccountProfitRanking(c *gin.Context) {
+	query, ok := parseSupplierDashboardProfitQuery(c)
+	if !ok {
+		return
+	}
+	result, err := h.service.GetAccountProfitRanking(c.Request.Context(), query)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+// GetAccountHealthTimeline 查询账号健康状态小时级时间线。
+func (h *SupplierDashboardHandler) GetAccountHealthTimeline(c *gin.Context) {
+	query, ok := parseSupplierDashboardAccountHealthQuery(c)
+	if !ok {
+		return
+	}
+	result, err := h.service.GetAccountHealthTimeline(c.Request.Context(), query)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -145,11 +190,80 @@ func parseSupplierDashboardProvidersQuery(c *gin.Context) (service.SupplierDashb
 	}, true
 }
 
+func parseSupplierDashboardTrafficQuery(c *gin.Context) (service.SupplierDashboardTrafficQuery, bool) {
+	rangeValue, ok := parseSupplierDashboardRangeDefault(c, service.SupplierDashboardRange30Days)
+	if !ok {
+		return service.SupplierDashboardTrafficQuery{}, false
+	}
+	return service.SupplierDashboardTrafficQuery{
+		Range:        rangeValue,
+		ProviderSlug: strings.TrimSpace(c.Query("provider_slug")),
+		GroupKey:     strings.TrimSpace(c.Query("group_key")),
+	}, true
+}
+
+func parseSupplierDashboardProfitQuery(c *gin.Context) (service.SupplierDashboardProfitQuery, bool) {
+	rangeValue, ok := parseSupplierDashboardRangeDefault(c, service.SupplierDashboardRange30Days)
+	if !ok {
+		return service.SupplierDashboardProfitQuery{}, false
+	}
+	limit, ok := parseSupplierDashboardPositiveInt(c, "limit", 20)
+	if !ok {
+		return service.SupplierDashboardProfitQuery{}, false
+	}
+	if limit > 100 {
+		response.BadRequest(c, "limit must be between 1 and 100")
+		return service.SupplierDashboardProfitQuery{}, false
+	}
+	return service.SupplierDashboardProfitQuery{
+		Range:        rangeValue,
+		ProviderSlug: strings.TrimSpace(c.Query("provider_slug")),
+		GroupKey:     strings.TrimSpace(c.Query("group_key")),
+		Limit:        limit,
+	}, true
+}
+
+func parseSupplierDashboardAccountHealthQuery(c *gin.Context) (service.SupplierDashboardAccountHealthQuery, bool) {
+	rangeValue, ok := parseSupplierDashboardRangeDefault(c, service.SupplierDashboardRange30Days)
+	if !ok {
+		return service.SupplierDashboardAccountHealthQuery{}, false
+	}
+	limit, ok := parseSupplierDashboardPositiveInt(c, "limit", 30)
+	if !ok {
+		return service.SupplierDashboardAccountHealthQuery{}, false
+	}
+	if limit > 100 {
+		response.BadRequest(c, "limit must be between 1 and 100")
+		return service.SupplierDashboardAccountHealthQuery{}, false
+	}
+	buckets, ok := parseSupplierDashboardPositiveInt(c, "buckets", 72)
+	if !ok {
+		return service.SupplierDashboardAccountHealthQuery{}, false
+	}
+	if buckets > 720 {
+		response.BadRequest(c, "buckets must be between 1 and 720")
+		return service.SupplierDashboardAccountHealthQuery{}, false
+	}
+	return service.SupplierDashboardAccountHealthQuery{
+		Range:        rangeValue,
+		ProviderSlug: strings.TrimSpace(c.Query("provider_slug")),
+		GroupKey:     strings.TrimSpace(c.Query("group_key")),
+		Limit:        limit,
+		Buckets:      buckets,
+	}, true
+}
+
 func parseSupplierDashboardRange(c *gin.Context) (service.SupplierDashboardRange, bool) {
-	raw := strings.TrimSpace(c.DefaultQuery("range", string(service.SupplierDashboardRange24Hours)))
+	return parseSupplierDashboardRangeDefault(c, service.SupplierDashboardRange24Hours)
+}
+
+func parseSupplierDashboardRangeDefault(c *gin.Context, defaultValue service.SupplierDashboardRange) (service.SupplierDashboardRange, bool) {
+	raw := strings.TrimSpace(c.DefaultQuery("range", string(defaultValue)))
 	rangeValue := service.SupplierDashboardRange(raw)
-	if rangeValue != service.SupplierDashboardRange24Hours && rangeValue != service.SupplierDashboardRange7Days {
-		response.BadRequest(c, "range must be 24h or 7d")
+	if rangeValue != service.SupplierDashboardRange24Hours &&
+		rangeValue != service.SupplierDashboardRange7Days &&
+		rangeValue != service.SupplierDashboardRange30Days {
+		response.BadRequest(c, "range must be 24h, 7d or 30d")
 		return "", false
 	}
 	return rangeValue, true

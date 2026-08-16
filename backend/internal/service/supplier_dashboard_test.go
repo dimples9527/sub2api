@@ -23,6 +23,16 @@ type dashboardDetailStub struct {
 	accountGroupKey     string
 	rateProviderSlug    string
 	rateGroupKey        string
+	traffic             []SupplierDashboardTrafficSnapshot
+	profit              []SupplierDashboardProfitSnapshot
+	health              []SupplierDashboardHealthSnapshot
+	trafficProviderSlug string
+	trafficGroupKey     string
+	profitProviderSlug  string
+	profitGroupKey      string
+	profitLimit         int
+	healthProviderSlug  string
+	healthGroupKey      string
 }
 
 func (s *dashboardDetailStub) ListDashboardAccounts(_ context.Context, start, end time.Time, providerSlug, groupKey string) ([]SupplierDashboardAccountSnapshot, error) {
@@ -40,6 +50,25 @@ func (s *dashboardDetailStub) ListDashboardRates(_ context.Context, start, end t
 func (s *dashboardDetailStub) ListDashboardProviders(_ context.Context, start, end time.Time) ([]SupplierDashboardProviderSnapshot, error) {
 	s.start, s.end = start, end
 	return s.providers, nil
+}
+
+func (s *dashboardDetailStub) ListDashboardAccountTraffic(_ context.Context, start, end time.Time, providerSlug, groupKey string) ([]SupplierDashboardTrafficSnapshot, error) {
+	s.start, s.end = start, end
+	s.trafficProviderSlug, s.trafficGroupKey = providerSlug, groupKey
+	return s.traffic, nil
+}
+
+func (s *dashboardDetailStub) ListDashboardAccountProfit(_ context.Context, start, end time.Time, providerSlug, groupKey string, limit int) ([]SupplierDashboardProfitSnapshot, error) {
+	s.start, s.end = start, end
+	s.profitProviderSlug, s.profitGroupKey = providerSlug, groupKey
+	s.profitLimit = limit
+	return s.profit, nil
+}
+
+func (s *dashboardDetailStub) ListDashboardAccountHealth(_ context.Context, start, end time.Time, providerSlug, groupKey string) ([]SupplierDashboardHealthSnapshot, error) {
+	s.start, s.end = start, end
+	s.healthProviderSlug, s.healthGroupKey = providerSlug, groupKey
+	return s.health, nil
 }
 
 type dashboardThresholdStub struct {
@@ -152,6 +181,37 @@ func TestSupplierDashboardAccountRiskFiltersHaveHitAndMissPaths(t *testing.T) {
 	}
 	if !repo.start.Equal(now.Add(-24*time.Hour)) || !repo.end.Equal(now) {
 		t.Fatalf("window=%s..%s", repo.start, repo.end)
+	}
+}
+
+func TestSupplierDashboardResolveRange30Days(t *testing.T) {
+	now := time.Date(2026, 7, 24, 8, 0, 0, 0, time.UTC)
+	repo := &dashboardDetailStub{}
+	svc := newDashboardDetailService(now, repo)
+
+	if _, err := svc.GetAccountTraffic(context.Background(), SupplierDashboardTrafficQuery{Range: SupplierDashboardRange30Days}); err != nil {
+		t.Fatal(err)
+	}
+	if !repo.start.Equal(now.Add(-30*24*time.Hour)) || !repo.end.Equal(now) {
+		t.Fatalf("30d window=%s..%s", repo.start, repo.end)
+	}
+
+	repo = &dashboardDetailStub{}
+	svc = newDashboardDetailService(now, repo)
+	if _, err := svc.GetAccountProfitRanking(context.Background(), SupplierDashboardProfitQuery{Range: SupplierDashboardRange30Days}); err != nil {
+		t.Fatal(err)
+	}
+	if !repo.start.Equal(now.Add(-30*24*time.Hour)) || !repo.end.Equal(now) {
+		t.Fatalf("30d profit window=%s..%s", repo.start, repo.end)
+	}
+
+	repo = &dashboardDetailStub{}
+	svc = newDashboardDetailService(now, repo)
+	if _, err := svc.GetAccountHealthTimeline(context.Background(), SupplierDashboardAccountHealthQuery{Range: SupplierDashboardRange30Days}); err != nil {
+		t.Fatal(err)
+	}
+	if !repo.start.Equal(now.Add(-30*24*time.Hour)) || !repo.end.Equal(now) {
+		t.Fatalf("30d health window=%s..%s", repo.start, repo.end)
 	}
 }
 
@@ -837,6 +897,15 @@ func (r *supplierDashboardErrorRepository) ListDashboardRates(context.Context, t
 func (r *supplierDashboardErrorRepository) ListDashboardProviders(context.Context, time.Time, time.Time) ([]SupplierDashboardProviderSnapshot, error) {
 	return nil, r.err
 }
+func (r *supplierDashboardErrorRepository) ListDashboardAccountTraffic(context.Context, time.Time, time.Time, string, string) ([]SupplierDashboardTrafficSnapshot, error) {
+	return nil, r.err
+}
+func (r *supplierDashboardErrorRepository) ListDashboardAccountProfit(context.Context, time.Time, time.Time, string, string, int) ([]SupplierDashboardProfitSnapshot, error) {
+	return nil, r.err
+}
+func (r *supplierDashboardErrorRepository) ListDashboardAccountHealth(context.Context, time.Time, time.Time, string, string) ([]SupplierDashboardHealthSnapshot, error) {
+	return nil, r.err
+}
 
 func TestSupplierDashboardContextErrorsPropagate(t *testing.T) {
 	now := time.Date(2026, 7, 24, 8, 0, 0, 0, time.UTC)
@@ -856,6 +925,18 @@ func TestSupplierDashboardContextErrorsPropagate(t *testing.T) {
 				},
 				func() error {
 					_, err := svc.GetProviders(context.Background(), SupplierDashboardProvidersQuery{Range: SupplierDashboardRange24Hours})
+					return err
+				},
+				func() error {
+					_, err := svc.GetAccountTraffic(context.Background(), SupplierDashboardTrafficQuery{Range: SupplierDashboardRange24Hours})
+					return err
+				},
+				func() error {
+					_, err := svc.GetAccountProfitRanking(context.Background(), SupplierDashboardProfitQuery{Range: SupplierDashboardRange24Hours})
+					return err
+				},
+				func() error {
+					_, err := svc.GetAccountHealthTimeline(context.Background(), SupplierDashboardAccountHealthQuery{Range: SupplierDashboardRange24Hours})
 					return err
 				},
 			}

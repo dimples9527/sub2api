@@ -6,12 +6,18 @@ const {
   getAccountsMock,
   getRatesMock,
   getProvidersMock,
+  getAccountTrafficMock,
+  getAccountProfitRankingMock,
+  getAccountHealthTimelineMock,
   pushMock,
 } = vi.hoisted(() => ({
   getOverviewMock: vi.fn(),
   getAccountsMock: vi.fn(),
   getRatesMock: vi.fn(),
   getProvidersMock: vi.fn(),
+  getAccountTrafficMock: vi.fn(),
+  getAccountProfitRankingMock: vi.fn(),
+  getAccountHealthTimelineMock: vi.fn(),
   pushMock: vi.fn(),
 }))
 
@@ -24,12 +30,33 @@ vi.mock('@/api/admin/supplierDashboard', () => ({
   getAccounts: getAccountsMock,
   getRates: getRatesMock,
   getProviders: getProvidersMock,
+  getAccountTraffic: getAccountTrafficMock,
+  getAccountProfitRanking: getAccountProfitRankingMock,
+  getAccountHealthTimeline: getAccountHealthTimelineMock,
   supplierDashboardAPI: {
     getOverview: getOverviewMock,
     getAccounts: getAccountsMock,
     getRates: getRatesMock,
     getProviders: getProvidersMock,
+    getAccountTraffic: getAccountTrafficMock,
+    getAccountProfitRanking: getAccountProfitRankingMock,
+    getAccountHealthTimeline: getAccountHealthTimelineMock,
   },
+}))
+
+vi.mock('vue-chartjs', () => ({
+  Line: { name: 'Line', props: ['data', 'options'], template: '<div data-test="line-chart" />' },
+}))
+
+vi.mock('chart.js', () => ({
+  Chart: { register: vi.fn() },
+  CategoryScale: {},
+  LinearScale: {},
+  PointElement: {},
+  LineElement: {},
+  Title: {},
+  Tooltip: {},
+  Legend: {},
 }))
 
 import SupplierDashboardView from './SupplierDashboardView.vue'
@@ -243,6 +270,98 @@ const providersResponse = {
   generated_at: '2026-07-25T09:42:18Z',
 }
 
+const trafficResponse = {
+  range: '30d' as const,
+  series: [
+    { time: '2026-07-24T00:00:00Z', requests: 1200, tokens: 1800000 },
+    { time: '2026-07-24T01:00:00Z', requests: 2400, tokens: 3600000 },
+    { time: '2026-07-24T02:00:00Z', requests: 900, tokens: 1200000 },
+  ],
+  accounts: [
+    {
+      account_id: 12,
+      account_name: 'prod-cn-02',
+      provider_slug: 'volc',
+      provider_name: '火山引擎',
+      group_key: 'ent-a',
+      group_name: '企业 A 组',
+    },
+  ],
+  warnings: [],
+  generated_at: '2026-07-25T09:42:18Z',
+}
+
+const profitResponse = {
+  items: [
+    {
+      account_id: 12,
+      account_name: 'prod-cn-02',
+      provider_slug: 'volc',
+      provider_name: '火山引擎',
+      group_key: 'ent-a',
+      group_name: '企业 A 组',
+      requests: 12684,
+      tokens: 9000000,
+      actual_cost: 240.5,
+      user_cost: 310,
+      profit: 69.5,
+    },
+    {
+      account_id: 15,
+      account_name: 'gpt-primary',
+      provider_slug: 'new-api',
+      provider_name: 'New API',
+      group_key: 'vip-3',
+      group_name: 'vip-3',
+      requests: 5000,
+      tokens: 2000000,
+      actual_cost: 80,
+      user_cost: 60,
+      profit: -20,
+    },
+  ],
+  warnings: [],
+  generated_at: '2026-07-25T09:42:18Z',
+}
+
+const healthTimelineResponse = {
+  range: '30d' as const,
+  accounts: [
+    {
+      account_id: 12,
+      account_name: 'prod-cn-02',
+      provider_slug: 'volc',
+      provider_name: '火山引擎',
+      group_key: 'ent-a',
+      group_name: '企业 A 组',
+      cells: [
+        { time: '2026-07-24T00:00:00Z', status: 'healthy' },
+        { time: '2026-07-24T01:00:00Z', status: 'failed' },
+        { time: '2026-07-24T02:00:00Z', status: 'slow' },
+      ],
+    },
+  ],
+  hours: [
+    {
+      time: '2026-07-24T00:00:00Z',
+      status_counts: { healthy: 1, slow: 0, failed: 0, unavailable: 0, skipped: 0 },
+      total: 1,
+    },
+    {
+      time: '2026-07-24T01:00:00Z',
+      status_counts: { healthy: 0, slow: 0, failed: 1, unavailable: 0, skipped: 0 },
+      total: 1,
+    },
+    {
+      time: '2026-07-24T02:00:00Z',
+      status_counts: { healthy: 0, slow: 1, failed: 0, unavailable: 0, skipped: 0 },
+      total: 1,
+    },
+  ],
+  warnings: [],
+  generated_at: '2026-07-25T09:42:18Z',
+}
+
 const emptyAccounts = {
   ...accountsResponse,
   items: [],
@@ -274,10 +393,16 @@ describe('SupplierDashboardView real data', () => {
     getAccountsMock.mockReset()
     getRatesMock.mockReset()
     getProvidersMock.mockReset()
+    getAccountTrafficMock.mockReset()
+    getAccountProfitRankingMock.mockReset()
+    getAccountHealthTimelineMock.mockReset()
     getOverviewMock.mockResolvedValue(overviewResponse)
     getAccountsMock.mockResolvedValue(accountsResponse)
     getRatesMock.mockResolvedValue(ratesResponse)
     getProvidersMock.mockResolvedValue(providersResponse)
+    getAccountTrafficMock.mockResolvedValue(trafficResponse)
+    getAccountProfitRankingMock.mockResolvedValue(profitResponse)
+    getAccountHealthTimelineMock.mockResolvedValue(healthTimelineResponse)
   })
 
   it('loads overview/accounts/rates/providers in parallel on mount with defaults', async () => {
@@ -384,6 +509,9 @@ describe('SupplierDashboardView real data', () => {
     getAccountsMock.mockResolvedValue(emptyAccounts)
     getRatesMock.mockResolvedValue({ ...ratesResponse, items: [], total: 0 })
     getProvidersMock.mockResolvedValue({ ...providersResponse, items: [], total: 0 })
+    getAccountTrafficMock.mockResolvedValue({ ...trafficResponse, series: [], accounts: [] })
+    getAccountProfitRankingMock.mockResolvedValue({ ...profitResponse, items: [] })
+    getAccountHealthTimelineMock.mockResolvedValue({ ...healthTimelineResponse, accounts: [], hours: [] })
     getOverviewMock.mockResolvedValue({
       ...overviewResponse,
       tasks: [],
@@ -487,5 +615,98 @@ describe('SupplierDashboardView real data', () => {
     const row = wrapper.get('[data-test="account-row-15"]')
     expect(row.text()).toMatch(/0/)
     expect(row.text()).toContain('—')
+  })
+
+  it('renders traffic chart, profit ranking and health timeline sections with data', async () => {
+    const wrapper = await mountView()
+
+    // 时间流量：双指标折线图 + 汇总脚注
+    expect(wrapper.get('[data-test="traffic-section"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="line-chart"]').exists()).toBe(true)
+    const trafficFoot = wrapper.get('[data-test="traffic-summary"]').text()
+    expect(trafficFoot).toContain('覆盖账号 1 个')
+    expect(trafficFoot).toContain('4,500')
+    expect(trafficFoot).toContain('660万')
+
+    // 盈利排行：按账号渲染利润与成本
+    const profitRow = wrapper.get('[data-test="profit-row-12"]')
+    expect(profitRow.text()).toContain('prod-cn-02')
+    expect(profitRow.text()).toContain('69.5')
+    expect(wrapper.get('[data-test="profit-row-15"]').text()).toContain('gpt-primary')
+
+    // 健康时间线：每小时点阵 + 异常汇总
+    const healthRow = wrapper.get('[data-test="health-row-12"]')
+    expect(healthRow.findAll('.sp-health-dot').length).toBe(3)
+    expect(wrapper.get('[data-test="health-timeline-summary"]').exists()).toBe(true)
+  })
+
+  it('keeps trend range independent from the main range', async () => {
+    const wrapper = await mountView()
+
+    // 首次加载：主接口 24h，趋势接口 30d
+    expect(getAccountTrafficMock.mock.calls[0][0]).toMatchObject({ range: '30d' })
+    expect(getAccountProfitRankingMock.mock.calls[0][0]).toMatchObject({ range: '30d' })
+    expect(getAccountHealthTimelineMock.mock.calls[0][0]).toMatchObject({ range: '30d' })
+
+    getOverviewMock.mockClear()
+    getAccountsMock.mockClear()
+    getRatesMock.mockClear()
+    getProvidersMock.mockClear()
+    getAccountTrafficMock.mockClear()
+    getAccountProfitRankingMock.mockClear()
+    getAccountHealthTimelineMock.mockClear()
+
+    // 主范围切到 7d：旧接口用 7d，趋势接口仍保持 30d
+    await wrapper.get('[data-test="range-7d"]').trigger('click')
+    await flushPromises()
+    expect(getOverviewMock).toHaveBeenCalledWith('7d', expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(getAccountTrafficMock.mock.calls[0][0]).toMatchObject({ range: '30d' })
+    expect(getAccountProfitRankingMock.mock.calls[0][0]).toMatchObject({ range: '30d' })
+    expect(getAccountHealthTimelineMock.mock.calls[0][0]).toMatchObject({ range: '30d' })
+
+    getOverviewMock.mockClear()
+    getAccountsMock.mockClear()
+    getRatesMock.mockClear()
+    getProvidersMock.mockClear()
+    getAccountTrafficMock.mockClear()
+    getAccountProfitRankingMock.mockClear()
+    getAccountHealthTimelineMock.mockClear()
+
+    // 趋势范围切到 7d：仅趋势接口重载，旧接口不重载
+    await wrapper.get('[data-test="trend-range-7d"]').trigger('click')
+    await flushPromises()
+    expect(getAccountTrafficMock.mock.calls[0][0]).toMatchObject({ range: '7d' })
+    expect(getAccountProfitRankingMock.mock.calls[0][0]).toMatchObject({ range: '7d' })
+    expect(getAccountHealthTimelineMock.mock.calls[0][0]).toMatchObject({ range: '7d' })
+    expect(getOverviewMock).not.toHaveBeenCalled()
+    expect(getAccountsMock).not.toHaveBeenCalled()
+    expect(getRatesMock).not.toHaveBeenCalled()
+    expect(getProvidersMock).not.toHaveBeenCalled()
+  })
+
+  it('shows empty states for traffic, profit ranking and health timeline', async () => {
+    getAccountTrafficMock.mockResolvedValue({ ...trafficResponse, series: [], accounts: [] })
+    getAccountProfitRankingMock.mockResolvedValue({ ...profitResponse, items: [] })
+    getAccountHealthTimelineMock.mockResolvedValue({ ...healthTimelineResponse, accounts: [], hours: [] })
+
+    const wrapper = await mountView()
+
+    expect(wrapper.get('[data-test="traffic-empty"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="profit-empty"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="health-timeline-empty"]').exists()).toBe(true)
+  })
+
+  it('shows independent errors for traffic, profit ranking and health timeline', async () => {
+    getAccountTrafficMock.mockRejectedValueOnce(new Error('流量加载失败'))
+    getAccountProfitRankingMock.mockRejectedValueOnce(new Error('排行加载失败'))
+    getAccountHealthTimelineMock.mockRejectedValueOnce(new Error('时间线加载失败'))
+
+    const wrapper = await mountView()
+
+    expect(wrapper.get('[data-test="traffic-error"]').text()).toContain('流量加载失败')
+    expect(wrapper.get('[data-test="profit-error"]').text()).toContain('排行加载失败')
+    expect(wrapper.get('[data-test="health-timeline-error"]').text()).toContain('时间线加载失败')
+    // 其他区块保持正常渲染
+    expect(wrapper.get('[data-test="accounts-section"]').exists()).toBe(true)
   })
 })

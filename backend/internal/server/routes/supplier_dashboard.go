@@ -13,5 +13,8 @@ func registerSupplierDashboardRoutes(admin *gin.RouterGroup, h *handler.Handlers
 		dashboard.GET("/accounts", h.Admin.SupplierDashboard.GetAccounts)
 		dashboard.GET("/rates", h.Admin.SupplierDashboard.GetRates)
 		dashboard.GET("/providers", h.Admin.SupplierDashboard.GetProviders)
+		dashboard.GET("/traffic", h.Admin.SupplierDashboard.GetAccountTraffic)
+		dashboard.GET("/profit-ranking", h.Admin.SupplierDashboard.GetAccountProfitRanking)
+		dashboard.GET("/health-timeline", h.Admin.SupplierDashboard.GetAccountHealthTimeline)
 	}
 }
