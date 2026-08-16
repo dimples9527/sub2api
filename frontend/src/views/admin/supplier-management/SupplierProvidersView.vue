@@ -35,10 +35,10 @@
           </div>
         </div>
         <div class="sp-provider-filter-actions">
-          <button class="sp-button" type="button" :disabled="loading || costTrendLoading" @click="refreshProvidersView">刷新数据</button>
-          <button class="sp-button" type="button" @click="openTypeManager">类型维护</button>
-          <button class="sp-button" type="button" @click="openCreateProviderType">新增供应商类型</button>
-          <button class="sp-button primary" type="button" @click="openCreate">新增供应商</button>
+          <button class="sp-button sp-filter-action-refresh" type="button" :disabled="loading || costTrendLoading" @click="refreshProvidersView">刷新数据</button>
+          <button class="sp-button sp-filter-action-maintain" type="button" @click="openTypeManager">类型维护</button>
+          <button class="sp-button sp-filter-action-type" type="button" @click="openCreateProviderType">新增供应商类型</button>
+          <button class="sp-button primary sp-filter-action-create" type="button" @click="openCreate">新增供应商</button>
         </div>
       </div>
     </section>
@@ -2828,6 +2828,56 @@ function errorMessage(err: unknown, fallback: string): string {
   justify-content: flex-end;
   order: 2;
   gap: 0.5rem;
+}
+
+/* 顶部筛选区四个操作按钮：按语义区分配色，与账号管理工具栏“绿=新增、蓝=类型/测试、琥珀=维护、紫=刷新”的语言保持一致 */
+.sp-provider-filter-actions .sp-filter-action-refresh {
+  border-color: color-mix(in srgb, var(--sp-violet, #7c3aed) 30%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-violet, #7c3aed) 8%, var(--sp-panel));
+  color: var(--sp-violet, #7c3aed);
+}
+
+.sp-provider-filter-actions .sp-filter-action-refresh:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--sp-violet, #7c3aed) 52%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-violet, #7c3aed) 15%, var(--sp-panel));
+  color: color-mix(in srgb, var(--sp-violet, #7c3aed) 90%, #1e1b4b);
+}
+
+.sp-provider-filter-actions .sp-filter-action-maintain {
+  border-color: color-mix(in srgb, var(--sp-amber, #d97706) 42%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-amber, #d97706) 10%, var(--sp-panel));
+  color: var(--sp-amber, #d97706);
+}
+
+.sp-provider-filter-actions .sp-filter-action-maintain:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--sp-amber, #d97706) 62%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-amber, #d97706) 18%, var(--sp-panel));
+  color: color-mix(in srgb, var(--sp-amber, #d97706) 88%, #7c2d12);
+}
+
+.sp-provider-filter-actions .sp-filter-action-type {
+  border-color: color-mix(in srgb, var(--sp-blue, #2563eb) 42%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-blue, #2563eb) 10%, var(--sp-panel));
+  color: var(--sp-blue, #2563eb);
+}
+
+.sp-provider-filter-actions .sp-filter-action-type:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--sp-blue, #2563eb) 58%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-blue, #2563eb) 16%, var(--sp-panel));
+  color: color-mix(in srgb, var(--sp-blue, #2563eb) 85%, #0f172a);
+}
+
+.sp-provider-filter-actions .sp-button.primary.sp-filter-action-create {
+  border-color: var(--sp-green, #16a34a);
+  background: var(--sp-green, #16a34a);
+  color: #fff;
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--sp-green, #16a34a) 24%, transparent);
+}
+
+.sp-provider-filter-actions .sp-button.primary.sp-filter-action-create:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--sp-green, #16a34a) 70%, #14532d);
+  background: color-mix(in srgb, var(--sp-green, #16a34a) 88%, #14532d);
+  color: #fff;
 }
 
 /* 统计卡：页面层压缩窄屏高度，并保持 2 列（覆盖共享样式在 460px 的单列） */
