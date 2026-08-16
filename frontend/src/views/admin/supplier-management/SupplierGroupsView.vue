@@ -384,6 +384,7 @@
 							:model-value="group.rate_guard_enabled"
 							:disabled="guardEnabledUpdatingGroupID === group.id"
 							:aria-label="`切换${group.name || group.upstream_group_key}的倍率守护参与状态`"
+							@click.stop
 							@update:model-value="toggleRateGuardEnabled(group)"
 						/>
 						<span class="sp-guard-state" :class="rateGuardStatus(group).tone">
