@@ -244,12 +244,21 @@ func parseSupplierDashboardAccountHealthQuery(c *gin.Context) (service.SupplierD
 		response.BadRequest(c, "buckets must be between 1 and 720")
 		return service.SupplierDashboardAccountHealthQuery{}, false
 	}
+	bucketHours, ok := parseSupplierDashboardPositiveInt(c, "bucket_hours", 1)
+	if !ok {
+		return service.SupplierDashboardAccountHealthQuery{}, false
+	}
+	if bucketHours > 24 {
+		response.BadRequest(c, "bucket_hours must be between 1 and 24")
+		return service.SupplierDashboardAccountHealthQuery{}, false
+	}
 	return service.SupplierDashboardAccountHealthQuery{
 		Range:        rangeValue,
 		ProviderSlug: strings.TrimSpace(c.Query("provider_slug")),
 		GroupKey:     strings.TrimSpace(c.Query("group_key")),
 		Limit:        limit,
 		Buckets:      buckets,
+		BucketHours:  bucketHours,
 	}, true
 }
 

@@ -328,7 +328,7 @@ const supplierDashboardHealthQuery = supplierDashboardOpsCTE + `,
 dashboard_health_items AS MATERIALIZED (
   SELECT DISTINCT ON (item.account_id, hour_bucket)
     item.account_id,
-    date_trunc('hour', item.finished_at) AS hour_bucket,
+    TO_TIMESTAMP(FLOOR(EXTRACT(EPOCH FROM item.finished_at) / ($5 * 3600)) * ($5 * 3600)) AS hour_bucket,
     item.status,
     item.finished_at
   FROM upstream_account_health_guard_run_items item
@@ -658,8 +658,8 @@ func (r *supplierDashboardRepository) ListDashboardAccountProfit(ctx context.Con
 	return items, nil
 }
 
-func (r *supplierDashboardRepository) ListDashboardAccountHealth(ctx context.Context, start, end time.Time, providerSlug, groupKey string) ([]service.SupplierDashboardHealthSnapshot, error) {
-	rows, err := r.db.QueryContext(ctx, supplierDashboardHealthQuery, start, end, providerSlug, groupKey)
+func (r *supplierDashboardRepository) ListDashboardAccountHealth(ctx context.Context, start, end time.Time, providerSlug, groupKey string, bucketHours int) ([]service.SupplierDashboardHealthSnapshot, error) {
+	rows, err := r.db.QueryContext(ctx, supplierDashboardHealthQuery, start, end, providerSlug, groupKey, bucketHours)
 	if err != nil {
 		return nil, fmt.Errorf("query supplier dashboard account health: %w", err)
 	}

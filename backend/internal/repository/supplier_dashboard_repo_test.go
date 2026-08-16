@@ -406,7 +406,7 @@ func TestSupplierDashboardRepositoryTrafficProfitHealthEncodeSharedOpsAndUniqueS
 			"join dashboard_account_matches matches",
 			"from upstream_account_health_guard_run_items item",
 			"item.finished_at >= $1", "item.finished_at < $2",
-			"date_trunc('hour', item.finished_at)",
+			"to_timestamp(floor(extract(epoch from item.finished_at)",
 			"select distinct on (item.account_id, hour_bucket)",
 			"order by item.account_id asc, time asc",
 		}},
@@ -482,9 +482,9 @@ func TestSupplierDashboardRepositoryPropagatesQueryRowsAndScanErrors(t *testing.
 		{"health", "(?s)FROM upstream_account_health_guard_run_items", dashboardHealthColumns,
 			[]driver.Value{int64(1), "a", "p", "P", "g", "G", "2026-07-23T08:00:00", "healthy"},
 			[]driver.Value{"bad-id", "a", "p", "P", "g", "G", "2026-07-23T08:00:00", "healthy"},
-			nil,
+			[]driver.Value{1},
 			func(r service.SupplierDashboardDetailRepository) error {
-				_, e := r.ListDashboardAccountHealth(context.Background(), start, end, "", "")
+				_, e := r.ListDashboardAccountHealth(context.Background(), start, end, "", "", 1)
 				return e
 			}},
 	}

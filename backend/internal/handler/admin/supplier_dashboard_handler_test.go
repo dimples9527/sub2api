@@ -148,6 +148,7 @@ func TestSupplierDashboardHandlerUsesSecureDefaults(t *testing.T) {
 	require.Equal(t, service.SupplierDashboardRange30Days, stub.healthQuery.Range)
 	require.Equal(t, 30, stub.healthQuery.Limit)
 	require.Equal(t, 72, stub.healthQuery.Buckets)
+	require.Equal(t, 1, stub.healthQuery.BucketHours)
 }
 
 func TestSupplierDashboardHandlerParsesFiltersAndPagination(t *testing.T) {
@@ -219,6 +220,9 @@ func TestSupplierDashboardHandlerRejectsInvalidQuery(t *testing.T) {
 		{path: "/health-timeline?buckets=0"},
 		{path: "/health-timeline?buckets=721"},
 		{path: "/health-timeline?buckets=abc"},
+		{path: "/health-timeline?bucket_hours=0"},
+		{path: "/health-timeline?bucket_hours=25"},
+		{path: "/health-timeline?bucket_hours=abc"},
 	}
 	for _, tc := range cases {
 		recorder := httptest.NewRecorder()
@@ -254,7 +258,7 @@ func TestSupplierDashboardHandlerParsesTrendQueries(t *testing.T) {
 	}, stub.profitQuery)
 
 	recorder = httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/health-timeline?range=24h&provider_slug=p3&group_key=g3&limit=10&buckets=48", nil))
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/health-timeline?range=24h&provider_slug=p3&group_key=g3&limit=10&buckets=48&bucket_hours=6", nil))
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Equal(t, service.SupplierDashboardAccountHealthQuery{
 		Range:        service.SupplierDashboardRange24Hours,
@@ -262,6 +266,7 @@ func TestSupplierDashboardHandlerParsesTrendQueries(t *testing.T) {
 		GroupKey:     "g3",
 		Limit:        10,
 		Buckets:      48,
+		BucketHours:  6,
 	}, stub.healthQuery)
 }
 

@@ -218,7 +218,7 @@ type SupplierDashboardDetailRepository interface {
 	ListDashboardProviders(context.Context, time.Time, time.Time) ([]SupplierDashboardProviderSnapshot, error)
 	ListDashboardAccountTraffic(context.Context, time.Time, time.Time, string, string) ([]SupplierDashboardTrafficSnapshot, error)
 	ListDashboardAccountProfit(context.Context, time.Time, time.Time, string, string, int) ([]SupplierDashboardProfitSnapshot, error)
-	ListDashboardAccountHealth(context.Context, time.Time, time.Time, string, string) ([]SupplierDashboardHealthSnapshot, error)
+	ListDashboardAccountHealth(context.Context, time.Time, time.Time, string, string, int) ([]SupplierDashboardHealthSnapshot, error)
 }
 
 type SupplierDashboardAccountsQuery struct {
@@ -262,6 +262,7 @@ type SupplierDashboardAccountHealthQuery struct {
 	GroupKey     string                 `json:"group_key"`
 	Limit        int                    `json:"limit"`
 	Buckets      int                    `json:"buckets"`
+	BucketHours  int                    `json:"bucket_hours"`
 }
 
 type SupplierDashboardAccountItem struct {
@@ -712,8 +713,15 @@ func (s *SupplierDashboardService) GetAccountHealthTimeline(ctx context.Context,
 	if buckets > 24*30 {
 		buckets = 24 * 30
 	}
+	bucketHours := q.BucketHours
+	if bucketHours < 1 {
+		bucketHours = 1
+	}
+	if bucketHours > 24 {
+		bucketHours = 24
+	}
 	result := SupplierDashboardAccountHealthResponse{Range: q.Range, Accounts: []SupplierDashboardHealthAccount{}, Hours: []SupplierDashboardHealthHour{}, Warnings: []SupplierDashboardWarning{}, GeneratedAt: end}
-	rows, listErr := s.detail.ListDashboardAccountHealth(ctx, start, end, q.ProviderSlug, q.GroupKey)
+	rows, listErr := s.detail.ListDashboardAccountHealth(ctx, start, end, q.ProviderSlug, q.GroupKey, bucketHours)
 	if dashboardContextErr(listErr) {
 		return SupplierDashboardAccountHealthResponse{}, listErr
 	}

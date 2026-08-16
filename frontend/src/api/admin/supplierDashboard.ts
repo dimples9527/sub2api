@@ -272,6 +272,7 @@ export interface SupplierDashboardAccountHealthQuery {
   group_key?: string
   limit?: number
   buckets?: number
+  bucket_hours?: number
 }
 
 export interface SupplierDashboardRequestOptions {
@@ -408,7 +409,7 @@ export async function getAccountProfitRanking(
   return data
 }
 
-/** 账号健康状态小时级时间线。 */
+/** 账号健康状态分桶时间线，bucket_hours 表示每个时间桶跨越的小时数。 */
 export async function getAccountHealthTimeline(
   query: SupplierDashboardAccountHealthQuery = {},
   options?: SupplierDashboardRequestOptions
@@ -422,6 +423,7 @@ export async function getAccountHealthTimeline(
         group_key: query.group_key,
         limit: query.limit ?? 30,
         buckets: query.buckets ?? 72,
+        bucket_hours: query.bucket_hours ?? 1,
       }),
       signal: options?.signal,
     }

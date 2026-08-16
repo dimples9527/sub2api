@@ -65,7 +65,7 @@ func (s *dashboardDetailStub) ListDashboardAccountProfit(_ context.Context, star
 	return s.profit, nil
 }
 
-func (s *dashboardDetailStub) ListDashboardAccountHealth(_ context.Context, start, end time.Time, providerSlug, groupKey string) ([]SupplierDashboardHealthSnapshot, error) {
+func (s *dashboardDetailStub) ListDashboardAccountHealth(_ context.Context, start, end time.Time, providerSlug, groupKey string, _ int) ([]SupplierDashboardHealthSnapshot, error) {
 	s.start, s.end = start, end
 	s.healthProviderSlug, s.healthGroupKey = providerSlug, groupKey
 	return s.health, nil
@@ -903,7 +903,7 @@ func (r *supplierDashboardErrorRepository) ListDashboardAccountTraffic(context.C
 func (r *supplierDashboardErrorRepository) ListDashboardAccountProfit(context.Context, time.Time, time.Time, string, string, int) ([]SupplierDashboardProfitSnapshot, error) {
 	return nil, r.err
 }
-func (r *supplierDashboardErrorRepository) ListDashboardAccountHealth(context.Context, time.Time, time.Time, string, string) ([]SupplierDashboardHealthSnapshot, error) {
+func (r *supplierDashboardErrorRepository) ListDashboardAccountHealth(context.Context, time.Time, time.Time, string, string, int) ([]SupplierDashboardHealthSnapshot, error) {
 	return nil, r.err
 }
 
