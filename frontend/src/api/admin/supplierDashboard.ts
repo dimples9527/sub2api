@@ -5,7 +5,7 @@
 
 import { apiClient } from '../client'
 
-export type SupplierDashboardRange = '24h' | '7d' | '30d'
+export type SupplierDashboardRange = '1h' | '6h' | '24h' | '7d' | '30d'
 export type SupplierDashboardSeverity = 'critical' | 'high' | 'medium' | 'low'
 export type SupplierDashboardRiskType =
   | 'all'
@@ -273,6 +273,7 @@ export interface SupplierDashboardAccountHealthQuery {
   limit?: number
   buckets?: number
   bucket_hours?: number
+  bucket_minutes?: number
 }
 
 export interface SupplierDashboardRequestOptions {
@@ -409,7 +410,7 @@ export async function getAccountProfitRanking(
   return data
 }
 
-/** 账号健康状态分桶时间线，bucket_hours 表示每个时间桶跨越的小时数。 */
+/** 账号健康状态分桶时间线，bucket_hours 表示小时级桶，bucket_minutes 表示分钟级桶（优先于 bucket_hours）。 */
 export async function getAccountHealthTimeline(
   query: SupplierDashboardAccountHealthQuery = {},
   options?: SupplierDashboardRequestOptions
@@ -424,6 +425,7 @@ export async function getAccountHealthTimeline(
         limit: query.limit ?? 30,
         buckets: query.buckets ?? 72,
         bucket_hours: query.bucket_hours ?? 1,
+        bucket_minutes: query.bucket_minutes,
       }),
       signal: options?.signal,
     }

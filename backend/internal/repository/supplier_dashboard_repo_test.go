@@ -407,7 +407,7 @@ func TestSupplierDashboardRepositoryTrafficProfitHealthEncodeSharedOpsAndUniqueS
 			"from upstream_account_health_guard_run_items item",
 			"item.finished_at >= $1", "item.finished_at < $2",
 			"to_timestamp(floor(extract(epoch from item.finished_at)",
-			"select distinct on (item.account_id, hour_bucket)",
+			"select distinct on (item.account_id, bucket_start)",
 			"order by item.account_id asc, time asc",
 		}},
 	}

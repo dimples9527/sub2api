@@ -326,16 +326,16 @@ LIMIT $5`
 
 const supplierDashboardHealthQuery = supplierDashboardOpsCTE + `,
 dashboard_health_items AS MATERIALIZED (
-  SELECT DISTINCT ON (item.account_id, hour_bucket)
+  SELECT DISTINCT ON (item.account_id, bucket_start)
     item.account_id,
-    TO_TIMESTAMP(FLOOR(EXTRACT(EPOCH FROM item.finished_at) / ($5 * 3600)) * ($5 * 3600)) AS hour_bucket,
+    TO_TIMESTAMP(FLOOR(EXTRACT(EPOCH FROM item.finished_at) / $5) * $5) AS bucket_start,
     item.status,
     item.finished_at
   FROM upstream_account_health_guard_run_items item
   JOIN dashboard_unique_local_account_ids unique_accounts ON unique_accounts.local_account_id = item.account_id
   WHERE item.finished_at >= $1
     AND item.finished_at < $2
-  ORDER BY item.account_id, hour_bucket, item.finished_at DESC, item.id DESC
+  ORDER BY item.account_id, bucket_start, item.finished_at DESC, item.id DESC
 )
 SELECT
   item.account_id,
@@ -344,7 +344,7 @@ SELECT
   sp.name AS provider_name,
   spa.group_key,
   spa.group_name,
-  TO_CHAR(item.hour_bucket, 'YYYY-MM-DD"T"HH24:00:00') AS time,
+  TO_CHAR(item.bucket_start, 'YYYY-MM-DD"T"HH24:MI:00') AS time,
   item.status
 FROM dashboard_health_items item
 JOIN accounts ON accounts.id = item.account_id AND accounts.deleted_at IS NULL
@@ -658,8 +658,8 @@ func (r *supplierDashboardRepository) ListDashboardAccountProfit(ctx context.Con
 	return items, nil
 }
 
-func (r *supplierDashboardRepository) ListDashboardAccountHealth(ctx context.Context, start, end time.Time, providerSlug, groupKey string, bucketHours int) ([]service.SupplierDashboardHealthSnapshot, error) {
-	rows, err := r.db.QueryContext(ctx, supplierDashboardHealthQuery, start, end, providerSlug, groupKey, bucketHours)
+func (r *supplierDashboardRepository) ListDashboardAccountHealth(ctx context.Context, start, end time.Time, providerSlug, groupKey string, bucketSeconds int) ([]service.SupplierDashboardHealthSnapshot, error) {
+	rows, err := r.db.QueryContext(ctx, supplierDashboardHealthQuery, start, end, providerSlug, groupKey, bucketSeconds)
 	if err != nil {
 		return nil, fmt.Errorf("query supplier dashboard account health: %w", err)
 	}

@@ -14,6 +14,8 @@ import (
 type SupplierDashboardRange string
 
 const (
+	SupplierDashboardRange1Hour   SupplierDashboardRange = "1h"
+	SupplierDashboardRange6Hours  SupplierDashboardRange = "6h"
 	SupplierDashboardRange24Hours SupplierDashboardRange = "24h"
 	SupplierDashboardRange7Days   SupplierDashboardRange = "7d"
 	SupplierDashboardRange30Days  SupplierDashboardRange = "30d"
@@ -46,6 +48,10 @@ func NewSupplierDashboardService(detail SupplierDashboardDetailRepository, thres
 func (s *SupplierDashboardService) resolveRange(value SupplierDashboardRange) (time.Time, time.Time, int, error) {
 	end := s.now().UTC()
 	switch value {
+	case SupplierDashboardRange1Hour:
+		return end.Add(-time.Hour), end, 1, nil
+	case SupplierDashboardRange6Hours:
+		return end.Add(-6 * time.Hour), end, 6, nil
 	case SupplierDashboardRange24Hours:
 		return end.Add(-24 * time.Hour), end, 1, nil
 	case SupplierDashboardRange7Days:
@@ -257,12 +263,13 @@ type SupplierDashboardProfitQuery struct {
 	Limit        int                    `json:"limit"`
 }
 type SupplierDashboardAccountHealthQuery struct {
-	Range        SupplierDashboardRange `json:"range"`
-	ProviderSlug string                 `json:"provider_slug"`
-	GroupKey     string                 `json:"group_key"`
-	Limit        int                    `json:"limit"`
-	Buckets      int                    `json:"buckets"`
-	BucketHours  int                    `json:"bucket_hours"`
+	Range         SupplierDashboardRange `json:"range"`
+	ProviderSlug  string                 `json:"provider_slug"`
+	GroupKey      string                 `json:"group_key"`
+	Limit         int                    `json:"limit"`
+	Buckets       int                    `json:"buckets"`
+	BucketHours   int                    `json:"bucket_hours"`
+	BucketMinutes int                    `json:"bucket_minutes"`
 }
 
 type SupplierDashboardAccountItem struct {
@@ -413,12 +420,12 @@ type SupplierDashboardHealthCell struct {
 	Status string `json:"status"`
 }
 type SupplierDashboardHealthAccount struct {
-	AccountID    int64                       `json:"account_id"`
-	AccountName  string                      `json:"account_name"`
-	ProviderSlug string                      `json:"provider_slug"`
-	ProviderName string                      `json:"provider_name"`
-	GroupKey     string                      `json:"group_key"`
-	GroupName    string                      `json:"group_name"`
+	AccountID    int64                         `json:"account_id"`
+	AccountName  string                        `json:"account_name"`
+	ProviderSlug string                        `json:"provider_slug"`
+	ProviderName string                        `json:"provider_name"`
+	GroupKey     string                        `json:"group_key"`
+	GroupName    string                        `json:"group_name"`
 	Cells        []SupplierDashboardHealthCell `json:"cells"`
 }
 type SupplierDashboardAccountHealthResponse struct {
@@ -713,15 +720,21 @@ func (s *SupplierDashboardService) GetAccountHealthTimeline(ctx context.Context,
 	if buckets > 24*30 {
 		buckets = 24 * 30
 	}
-	bucketHours := q.BucketHours
-	if bucketHours < 1 {
-		bucketHours = 1
+	bucketSeconds := q.BucketHours * 3600
+	if q.BucketMinutes > 0 {
+		bucketSeconds = q.BucketMinutes * 60
 	}
-	if bucketHours > 24 {
-		bucketHours = 24
+	if bucketSeconds <= 0 {
+		bucketSeconds = 3600
+	}
+	if bucketSeconds < 60 {
+		bucketSeconds = 60
+	}
+	if bucketSeconds > 24*3600 {
+		bucketSeconds = 24 * 3600
 	}
 	result := SupplierDashboardAccountHealthResponse{Range: q.Range, Accounts: []SupplierDashboardHealthAccount{}, Hours: []SupplierDashboardHealthHour{}, Warnings: []SupplierDashboardWarning{}, GeneratedAt: end}
-	rows, listErr := s.detail.ListDashboardAccountHealth(ctx, start, end, q.ProviderSlug, q.GroupKey, bucketHours)
+	rows, listErr := s.detail.ListDashboardAccountHealth(ctx, start, end, q.ProviderSlug, q.GroupKey, bucketSeconds)
 	if dashboardContextErr(listErr) {
 		return SupplierDashboardAccountHealthResponse{}, listErr
 	}

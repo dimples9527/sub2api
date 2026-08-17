@@ -33,6 +33,7 @@ type dashboardDetailStub struct {
 	profitLimit         int
 	healthProviderSlug  string
 	healthGroupKey      string
+	healthBucketSeconds int
 }
 
 func (s *dashboardDetailStub) ListDashboardAccounts(_ context.Context, start, end time.Time, providerSlug, groupKey string) ([]SupplierDashboardAccountSnapshot, error) {
@@ -65,9 +66,10 @@ func (s *dashboardDetailStub) ListDashboardAccountProfit(_ context.Context, star
 	return s.profit, nil
 }
 
-func (s *dashboardDetailStub) ListDashboardAccountHealth(_ context.Context, start, end time.Time, providerSlug, groupKey string, _ int) ([]SupplierDashboardHealthSnapshot, error) {
+func (s *dashboardDetailStub) ListDashboardAccountHealth(_ context.Context, start, end time.Time, providerSlug, groupKey string, bucketSeconds int) ([]SupplierDashboardHealthSnapshot, error) {
 	s.start, s.end = start, end
 	s.healthProviderSlug, s.healthGroupKey = providerSlug, groupKey
+	s.healthBucketSeconds = bucketSeconds
 	return s.health, nil
 }
 
@@ -212,6 +214,52 @@ func TestSupplierDashboardResolveRange30Days(t *testing.T) {
 	}
 	if !repo.start.Equal(now.Add(-30*24*time.Hour)) || !repo.end.Equal(now) {
 		t.Fatalf("30d health window=%s..%s", repo.start, repo.end)
+	}
+}
+
+func TestSupplierDashboardHealthTimelineSupportsMinuteBucketsAndShortRanges(t *testing.T) {
+	now := time.Date(2026, 7, 24, 8, 0, 0, 0, time.UTC)
+	repo := &dashboardDetailStub{}
+	svc := newDashboardDetailService(now, repo)
+
+	// 1 小时范围 + 每分钟分桶：桶宽 60 秒，窗口为最近 1 小时。
+	if _, err := svc.GetAccountHealthTimeline(context.Background(), SupplierDashboardAccountHealthQuery{
+		Range: SupplierDashboardRange1Hour, Buckets: 60, BucketMinutes: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !repo.start.Equal(now.Add(-time.Hour)) || !repo.end.Equal(now) {
+		t.Fatalf("1h window=%s..%s", repo.start, repo.end)
+	}
+	if repo.healthBucketSeconds != 60 {
+		t.Fatalf("1h bucket seconds=%d, want 60", repo.healthBucketSeconds)
+	}
+
+	// 6 小时范围 + 每 5 分钟分桶：桶宽 300 秒。
+	repo = &dashboardDetailStub{}
+	svc = newDashboardDetailService(now, repo)
+	if _, err := svc.GetAccountHealthTimeline(context.Background(), SupplierDashboardAccountHealthQuery{
+		Range: SupplierDashboardRange6Hours, Buckets: 72, BucketMinutes: 5,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !repo.start.Equal(now.Add(-6*time.Hour)) || !repo.end.Equal(now) {
+		t.Fatalf("6h window=%s..%s", repo.start, repo.end)
+	}
+	if repo.healthBucketSeconds != 300 {
+		t.Fatalf("6h bucket seconds=%d, want 300", repo.healthBucketSeconds)
+	}
+
+	// 未传小时/分钟桶参数时默认回退为小时级（3600 秒）。
+	repo = &dashboardDetailStub{}
+	svc = newDashboardDetailService(now, repo)
+	if _, err := svc.GetAccountHealthTimeline(context.Background(), SupplierDashboardAccountHealthQuery{
+		Range: SupplierDashboardRange30Days,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if repo.healthBucketSeconds != 3600 {
+		t.Fatalf("default bucket seconds=%d, want 3600", repo.healthBucketSeconds)
 	}
 }
 

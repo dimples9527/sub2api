@@ -104,7 +104,7 @@ func (h *SupplierDashboardHandler) GetAccountProfitRanking(c *gin.Context) {
 	response.Success(c, result)
 }
 
-// GetAccountHealthTimeline 查询账号健康状态小时级时间线。
+// GetAccountHealthTimeline 查询账号健康状态时间线（支持分钟级/小时级时间桶）。
 func (h *SupplierDashboardHandler) GetAccountHealthTimeline(c *gin.Context) {
 	query, ok := parseSupplierDashboardAccountHealthQuery(c)
 	if !ok {
@@ -224,7 +224,7 @@ func parseSupplierDashboardProfitQuery(c *gin.Context) (service.SupplierDashboar
 }
 
 func parseSupplierDashboardAccountHealthQuery(c *gin.Context) (service.SupplierDashboardAccountHealthQuery, bool) {
-	rangeValue, ok := parseSupplierDashboardRangeDefault(c, service.SupplierDashboardRange30Days)
+	rangeValue, ok := parseSupplierDashboardAccountHealthRange(c)
 	if !ok {
 		return service.SupplierDashboardAccountHealthQuery{}, false
 	}
@@ -252,14 +252,54 @@ func parseSupplierDashboardAccountHealthQuery(c *gin.Context) (service.SupplierD
 		response.BadRequest(c, "bucket_hours must be between 1 and 24")
 		return service.SupplierDashboardAccountHealthQuery{}, false
 	}
+	bucketMinutes, ok := parseSupplierDashboardOptionalPositiveInt(c, "bucket_minutes", 0)
+	if !ok {
+		return service.SupplierDashboardAccountHealthQuery{}, false
+	}
+	if bucketMinutes > 1440 {
+		response.BadRequest(c, "bucket_minutes must be between 1 and 1440")
+		return service.SupplierDashboardAccountHealthQuery{}, false
+	}
 	return service.SupplierDashboardAccountHealthQuery{
-		Range:        rangeValue,
-		ProviderSlug: strings.TrimSpace(c.Query("provider_slug")),
-		GroupKey:     strings.TrimSpace(c.Query("group_key")),
-		Limit:        limit,
-		Buckets:      buckets,
-		BucketHours:  bucketHours,
+		Range:         rangeValue,
+		ProviderSlug:  strings.TrimSpace(c.Query("provider_slug")),
+		GroupKey:      strings.TrimSpace(c.Query("group_key")),
+		Limit:         limit,
+		Buckets:       buckets,
+		BucketHours:   bucketHours,
+		BucketMinutes: bucketMinutes,
 	}, true
+}
+
+// parseSupplierDashboardAccountHealthRange 解析健康时间线区间，额外支持 1h / 6h 分钟级短区间。
+func parseSupplierDashboardAccountHealthRange(c *gin.Context) (service.SupplierDashboardRange, bool) {
+	raw := strings.TrimSpace(c.DefaultQuery("range", string(service.SupplierDashboardRange30Days)))
+	rangeValue := service.SupplierDashboardRange(raw)
+	switch rangeValue {
+	case service.SupplierDashboardRange1Hour,
+		service.SupplierDashboardRange6Hours,
+		service.SupplierDashboardRange24Hours,
+		service.SupplierDashboardRange7Days,
+		service.SupplierDashboardRange30Days:
+		return rangeValue, true
+	default:
+		response.BadRequest(c, "range must be 1h, 6h, 24h, 7d or 30d")
+		return "", false
+	}
+}
+
+// parseSupplierDashboardOptionalPositiveInt 解析可选正整数参数，未传时返回 defaultValue（0 表示未设置）。
+func parseSupplierDashboardOptionalPositiveInt(c *gin.Context, key string, defaultValue int) (int, bool) {
+	raw := strings.TrimSpace(c.Query(key))
+	if raw == "" {
+		return defaultValue, true
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 1 {
+		response.BadRequest(c, key+" must be a positive integer")
+		return 0, false
+	}
+	return value, true
 }
 
 func parseSupplierDashboardRange(c *gin.Context) (service.SupplierDashboardRange, bool) {

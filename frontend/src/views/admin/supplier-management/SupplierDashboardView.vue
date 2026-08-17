@@ -180,7 +180,19 @@
           </div>
         </div>
         <div class="sp-tools">
-          <span class="sp-filter-pill">{{ healthBucketLabel }}</span>
+          <div class="sp-segmented" aria-label="健康时间线范围">
+            <button
+              v-for="option in healthRangeOptions"
+              :key="option.range"
+              type="button"
+              class="sp-pill"
+              :class="{ active: healthRange === option.range }"
+              :data-test="`health-range-${option.range}`"
+              @click="setHealthRange(option.range)"
+            >
+              {{ option.label }}
+            </button>
+          </div>
         </div>
       </header>
       <div v-if="healthTimeline.loading && !healthTimeline.data" class="sp-panel-body" data-test="health-timeline-loading">健康时间线加载中…</div>
@@ -485,8 +497,17 @@ const UNKNOWN = '—'
 const router = useRouter()
 
 const range = ref<SupplierDashboardRange>('24h')
-/** 趋势区块（时间流量 / 盈利排行 / 健康时间线）独立统计范围，默认 30 天。 */
+/** 趋势区块（时间流量 / 盈利排行）独立统计范围，默认 30 天。 */
 const trendRange = ref<SupplierDashboardRange>('30d')
+/** 健康时间线独立范围，默认 30 天；短范围（1h/6h）支持分钟级分桶。 */
+const healthRange = ref<SupplierDashboardRange>('30d')
+const healthRangeOptions: Array<{ range: SupplierDashboardRange; label: string }> = [
+  { range: '1h', label: '1 小时' },
+  { range: '6h', label: '6 小时' },
+  { range: '24h', label: '24 小时' },
+  { range: '7d', label: '7 天' },
+  { range: '30d', label: '30 天' },
+]
 const selectedRisk = ref<SupplierDashboardRiskType | 'disabled'>('critical')
 const rateView = ref<SupplierDashboardRateView>('risk')
 const refreshing = ref(false)
@@ -630,7 +651,13 @@ const profitMeta = computed(() => {
   return '等待数据'
 })
 
-const healthBucketLabel = computed(() => (trendRange.value === '30d' ? '每 6 小时' : '每小时'))
+const healthBucketLabel = computed(() => {
+  const range = healthRange.value
+  if (range === '1h') return '每 1 分钟'
+  if (range === '6h') return '每 5 分钟'
+  if (range === '24h' || range === '7d') return '每小时'
+  return '每 6 小时'
+})
 
 const healthTimelineMeta = computed(() => {
   if (healthTimeline.loading) return '加载中'
@@ -1191,14 +1218,11 @@ async function loadTrendSections(): Promise<void> {
   const { seq, signal } = beginGlobalRequest()
   traffic.loading = true
   profitRanking.loading = true
-  healthTimeline.loading = true
   traffic.error = ''
   profitRanking.error = ''
-  healthTimeline.error = ''
   await Promise.all([
     settleTraffic(seq, signal),
     settleProfit(seq, signal),
-    settleHealthTimeline(seq, signal),
   ])
 }
 
@@ -1206,6 +1230,38 @@ async function setTrendRange(next: SupplierDashboardRange): Promise<void> {
   if (trendRange.value === next) return
   trendRange.value = next
   await loadTrendSections()
+}
+
+async function setHealthRange(next: SupplierDashboardRange): Promise<void> {
+  if (healthRange.value === next) return
+  healthRange.value = next
+  await reloadHealthTimeline()
+}
+
+async function reloadHealthTimeline(): Promise<void> {
+  if (!abortController) beginGlobalRequest()
+  const signal = abortController!.signal
+  const seq = ++healthSeq.value
+  healthTimeline.loading = true
+  healthTimeline.error = ''
+  try {
+    const data = await getAccountHealthTimeline(
+      { range: healthRange.value, limit: 30, ...healthTimelineParams(healthRange.value) },
+      { signal },
+    )
+    if (signal.aborted || seq !== healthSeq.value) return
+    healthTimeline.data = data
+    healthTimeline.lastUpdated = data.generated_at
+    healthTimeline.error = ''
+  } catch (error) {
+    if (signal.aborted || seq !== healthSeq.value) return
+    const message = errorMessage(error, '健康时间线加载失败')
+    if (!message) return
+    healthTimeline.error = message
+    healthTimeline.data = null
+  } finally {
+    if (seq === healthSeq.value) healthTimeline.loading = false
+  }
 }
 
 async function settleTraffic(seq: number, signal: AbortSignal): Promise<void> {
@@ -1250,7 +1306,7 @@ async function settleHealthTimeline(seq: number, signal: AbortSignal): Promise<v
   const local = ++healthSeq.value
   try {
     const data = await getAccountHealthTimeline(
-      { range: trendRange.value, limit: 30, ...healthTimelineParams(trendRange.value) },
+      { range: healthRange.value, limit: 30, ...healthTimelineParams(healthRange.value) },
       { signal },
     )
     if (!isCurrent(seq) || signal.aborted || local !== healthSeq.value) return
@@ -1268,10 +1324,14 @@ async function settleHealthTimeline(seq: number, signal: AbortSignal): Promise<v
   }
 }
 
-function healthTimelineParams(range: SupplierDashboardRange): { buckets: number; bucket_hours: number } {
+function healthTimelineParams(
+  range: SupplierDashboardRange,
+): { buckets: number; bucket_hours?: number; bucket_minutes?: number } {
+  if (range === '1h') return { buckets: 60, bucket_minutes: 1 }
+  if (range === '6h') return { buckets: 72, bucket_minutes: 5 }
+  if (range === '24h') return { buckets: 24, bucket_hours: 1 }
   if (range === '7d') return { buckets: 168, bucket_hours: 1 }
-  if (range === '30d') return { buckets: 120, bucket_hours: 6 }
-  return { buckets: 24, bucket_hours: 1 }
+  return { buckets: 120, bucket_hours: 6 }
 }
 
 function riskValue(key: SupplierDashboardRiskType | 'disabled'): string {
@@ -1400,6 +1460,12 @@ function formatHourShort(time: string): string {
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
   const hour = date.getHours()
+  const minute = date.getMinutes()
+  if (minute !== 0) {
+    const hh = String(hour).padStart(2, '0')
+    const mm = String(minute).padStart(2, '0')
+    return hour === 0 ? `${month}-${day} ${hh}:${mm}` : `${hh}:${mm}`
+  }
   if (hour === 0) return `${month}-${day}`
   return `${hour}时`
 }

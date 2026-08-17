@@ -739,11 +739,51 @@ describe('SupplierDashboardView real data', () => {
     await flushPromises()
     expect(getAccountTrafficMock.mock.calls[0][0]).toMatchObject({ range: '7d' })
     expect(getAccountProfitRankingMock.mock.calls[0][0]).toMatchObject({ range: '7d' })
-    expect(getAccountHealthTimelineMock.mock.calls[0][0]).toMatchObject({ range: '7d', limit: 30, buckets: 168, bucket_hours: 1 })
+    expect(getAccountHealthTimelineMock).not.toHaveBeenCalled()
     expect(getOverviewMock).not.toHaveBeenCalled()
     expect(getAccountsMock).not.toHaveBeenCalled()
     expect(getRatesMock).not.toHaveBeenCalled()
     expect(getProvidersMock).not.toHaveBeenCalled()
+  })
+
+  it('switches health timeline to minute buckets independently', async () => {
+    const wrapper = await mountView()
+
+    // 默认 30 天按 6 小时分桶
+    expect(getAccountHealthTimelineMock.mock.calls[0][0]).toMatchObject({
+      range: '30d',
+      limit: 30,
+      buckets: 120,
+      bucket_hours: 6,
+    })
+
+    getAccountTrafficMock.mockClear()
+    getAccountProfitRankingMock.mockClear()
+    getAccountHealthTimelineMock.mockClear()
+
+    // 切换到 1 小时：每分钟一个时间桶，仅健康时间线重载
+    await wrapper.get('[data-test="health-range-1h"]').trigger('click')
+    await flushPromises()
+    expect(getAccountHealthTimelineMock.mock.calls[0][0]).toMatchObject({
+      range: '1h',
+      limit: 30,
+      buckets: 60,
+      bucket_minutes: 1,
+    })
+    expect(getAccountTrafficMock).not.toHaveBeenCalled()
+    expect(getAccountProfitRankingMock).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('每 1 分钟')
+
+    getAccountHealthTimelineMock.mockClear()
+    await wrapper.get('[data-test="health-range-6h"]').trigger('click')
+    await flushPromises()
+    expect(getAccountHealthTimelineMock.mock.calls[0][0]).toMatchObject({
+      range: '6h',
+      limit: 30,
+      buckets: 72,
+      bucket_minutes: 5,
+    })
+    expect(wrapper.text()).toContain('每 5 分钟')
   })
 
   it('shows empty states for traffic, profit ranking and health timeline', async () => {

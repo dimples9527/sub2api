@@ -223,6 +223,10 @@ func TestSupplierDashboardHandlerRejectsInvalidQuery(t *testing.T) {
 		{path: "/health-timeline?bucket_hours=0"},
 		{path: "/health-timeline?bucket_hours=25"},
 		{path: "/health-timeline?bucket_hours=abc"},
+		{path: "/health-timeline?bucket_minutes=0"},
+		{path: "/health-timeline?bucket_minutes=1441"},
+		{path: "/health-timeline?bucket_minutes=abc"},
+		{path: "/health-timeline?range=90d"},
 	}
 	for _, tc := range cases {
 		recorder := httptest.NewRecorder()
@@ -267,6 +271,19 @@ func TestSupplierDashboardHandlerParsesTrendQueries(t *testing.T) {
 		Limit:        10,
 		Buckets:      48,
 		BucketHours:  6,
+	}, stub.healthQuery)
+
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/health-timeline?range=1h&provider_slug=p4&group_key=g4&limit=50&buckets=60&bucket_minutes=1", nil))
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, service.SupplierDashboardAccountHealthQuery{
+		Range:         service.SupplierDashboardRange1Hour,
+		ProviderSlug:  "p4",
+		GroupKey:      "g4",
+		Limit:         50,
+		Buckets:       60,
+		BucketHours:   1,
+		BucketMinutes: 1,
 	}, stub.healthQuery)
 }
 
