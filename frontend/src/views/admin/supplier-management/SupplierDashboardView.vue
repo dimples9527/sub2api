@@ -851,6 +851,17 @@ const dataNoteTitle = computed(() => {
   return '数据完整'
 })
 
+/** 将后端原始告警转换为适合展示的中文说明，避免把底层网络/DNS 报错直接暴露给用户。 */
+function presentableWarning(message: string): string {
+  const text = message?.trim()
+  if (!text) return ''
+  if (/no such host/i.test(text)) return '部分上游供应商域名无法解析（可能已失效），请检查供应商配置。'
+  if (/(connection refused|i\/o timeout|context deadline exceeded|no route to host|network is unreachable)/i.test(text)) {
+    return '部分上游供应商暂时无法连接，请检查网络与供应商配置。'
+  }
+  return text
+}
+
 const dataNoteText = computed(() => {
   if (overview.error && !overview.data) return overview.error
   if (overview.loading && !overview.data) return '正在并行拉取概览、异常账号、倍率与供应商数据。'
@@ -859,7 +870,7 @@ const dataNoteText = computed(() => {
   const base = generated
     ? `统计生成于 ${formatClock(generated)}；账号实时状态为当前值，流量与成本按所选时间范围统计。`
     : '尚未获取到生成时间。'
-  return warning ? `${base} ${warning}` : base
+  return warning ? `${base} ${presentableWarning(warning)}` : base
 })
 
 const riskCards = computed<RiskCard[]>(() =>

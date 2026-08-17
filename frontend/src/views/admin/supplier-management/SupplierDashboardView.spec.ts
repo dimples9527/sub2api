@@ -623,6 +623,26 @@ describe('SupplierDashboardView real data', () => {
     expect(wrapper.text()).not.toContain('过期 24h 数据')
   })
 
+  it('数据提示将上游域名失效的原始 DNS 报错转换为友好中文说明', async () => {
+    getOverviewMock.mockResolvedValue({
+      ...overviewResponse,
+      warnings: [
+        {
+          source: 'providers',
+          message:
+            'sub2api login request failed: Post "https://www.findcg.com/api/v1/auth/login": dial tcp: lookup www.findcg.com on 127.0.0.11:53: no such host',
+        },
+      ],
+    })
+
+    const wrapper = await mountView()
+    const note = wrapper.get('[data-test="data-note"]').text()
+
+    expect(note).toContain('域名无法解析')
+    expect(note).toContain('供应商配置')
+    expect(note).not.toContain('no such host')
+  })
+
   it('renders null metrics as dash and zero metrics as zero', async () => {
     const wrapper = await mountView()
     const row = wrapper.get('[data-test="account-row-15"]')
