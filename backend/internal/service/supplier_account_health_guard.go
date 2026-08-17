@@ -22,6 +22,7 @@ const (
 	DefaultSupplierAccountHealthGuardSlowThreshold            = 3
 	DefaultSupplierAccountHealthGuardRecoveryThreshold        = 2
 	DefaultSupplierAccountHealthGuardHealthyLatencyMs         = 15000
+	MinSupplierAccountHealthGuardAccountIntervalSeconds       = 60
 
 	SupplierAccountHealthGuardStatusHealthy     = "healthy"
 	SupplierAccountHealthGuardStatusSlow        = "slow"
@@ -73,6 +74,7 @@ type SupplierAccountHealthGuardConfig struct {
 	AccountModels            map[int64]string  `json:"account_health_guard_account_models"`
 	PlatformModels           map[string]string `json:"account_health_guard_platform_models"`
 	PlatformLatencyMs        map[string]int64  `json:"account_health_guard_platform_latency_ms"`
+	AccountIntervals         map[int64]int     `json:"account_health_guard_account_intervals"`
 	CursorAccountID          int64             `json:"account_health_guard_cursor_account_id"`
 }
 
@@ -217,7 +219,6 @@ func (s *SupplierAccountHealthGuardService) Run(ctx context.Context, config Supp
 		Items:         make([]SupplierAccountHealthGuardRunItem, 0, len(config.AccountIDs)),
 	}
 	targets := make([]supplierAccountHealthGuardTarget, 0, len(config.AccountIDs))
-	missingModels := make([]string, 0)
 	for _, accountID := range config.AccountIDs {
 		accountCandidates := candidatesByID[accountID]
 		target, available := supplierAccountHealthGuardBuildTarget(accountID, accountCandidates, config)
@@ -225,14 +226,22 @@ func (s *SupplierAccountHealthGuardService) Run(ctx context.Context, config Supp
 			result.Items = append(result.Items, supplierAccountHealthGuardUnavailableItem(accountID, accountCandidates, now))
 			continue
 		}
+		targets = append(targets, target)
+	}
+	targets, notDueItems := supplierAccountHealthGuardFilterNotDue(targets, config, now)
+	if len(notDueItems) > 0 {
+		result.Items = append(result.Items, notDueItems...)
+		result.SkipReasons = append(result.SkipReasons, supplierAccountHealthGuardNotDueSkipReasons(notDueItems)...)
+	}
+	missingModels := make([]string, 0)
+	for _, target := range targets {
 		if target.modelID == "" {
 			accountName := strings.TrimSpace(target.account.Name)
 			if accountName == "" {
-				accountName = fmt.Sprintf("账号 #%d", accountID)
+				accountName = fmt.Sprintf("账号 #%d", target.account.ID)
 			}
 			missingModels = append(missingModels, accountName)
 		}
-		targets = append(targets, target)
 	}
 	if len(missingModels) > 0 {
 		return SupplierAccountHealthGuardResult{}, fmt.Errorf("以下账号尚未配置测试模型：%s", strings.Join(missingModels, "、"))
@@ -484,6 +493,68 @@ func supplierAccountHealthGuardSkippedItem(candidate SupplierAccountHealthGuardC
 	return item
 }
 
+func supplierAccountHealthGuardFilterNotDue(targets []supplierAccountHealthGuardTarget, config SupplierAccountHealthGuardConfig, now time.Time) ([]supplierAccountHealthGuardTarget, []SupplierAccountHealthGuardRunItem) {
+	out := make([]supplierAccountHealthGuardTarget, 0, len(targets))
+	notDue := make([]SupplierAccountHealthGuardRunItem, 0)
+	for _, target := range targets {
+		interval := config.AccountIntervals[target.account.ID]
+		if interval <= 0 {
+			out = append(out, target)
+			continue
+		}
+		lastCheckedAt := supplierAccountHealthGuardLastCheckedAt(target.account.Extra)
+		if !lastCheckedAt.IsZero() && now.Sub(lastCheckedAt) < time.Duration(interval)*time.Second {
+			notDue = append(notDue, SupplierAccountHealthGuardRunItem{
+				LocalAccountID:    target.account.ID,
+				LocalAccountName:  target.account.Name,
+				Platform:          target.platform,
+				Sources:           append([]SupplierAccountHealthGuardSource(nil), target.sources...),
+				ModelID:           target.modelID,
+				SchedulableBefore: target.account.Schedulable,
+				SchedulableAfter:  target.account.Schedulable,
+				Status:            SupplierAccountHealthGuardStatusSkipped,
+				Action:            SupplierAccountHealthGuardActionNone,
+				Reason:            fmt.Sprintf("距上次检查不足 %d 秒", interval),
+				StartedAt:         now,
+				FinishedAt:        now,
+			})
+			continue
+		}
+		out = append(out, target)
+	}
+	return out, notDue
+}
+
+func supplierAccountHealthGuardLastCheckedAt(extra map[string]any) time.Time {
+	if extra == nil {
+		return time.Time{}
+	}
+	raw, _ := extra[supplierHealthGuardLastCheckedAtExtraKey].(string)
+	parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(raw))
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed
+}
+
+func supplierAccountHealthGuardNotDueSkipReasons(items []SupplierAccountHealthGuardRunItem) []SupplierAccountHealthGuardSkipReason {
+	if len(items) == 0 {
+		return nil
+	}
+	reason := SupplierAccountHealthGuardSkipReason{Reason: "未到检查间隔"}
+	for _, item := range items {
+		reason.Count++
+		if len(reason.SampleAccounts) >= supplierAccountHealthGuardSkipReasonSampleLimit {
+			continue
+		}
+		reason.SampleAccounts = append(reason.SampleAccounts, SupplierAccountHealthGuardSkippedAccount{
+			LocalAccountID:   item.LocalAccountID,
+			LocalAccountName: item.LocalAccountName,
+		})
+	}
+	return []SupplierAccountHealthGuardSkipReason{reason}
+}
+
 func newSupplierAccountHealthGuardSkipCollector() *supplierAccountHealthGuardSkipCollector {
 	return &supplierAccountHealthGuardSkipCollector{reasons: make(map[string]*SupplierAccountHealthGuardSkipReason)}
 }
@@ -551,6 +622,7 @@ func normalizeSupplierAccountHealthGuardConfig(config SupplierAccountHealthGuard
 	config.AccountModels = normalizeSupplierAccountHealthGuardAccountModels(config.AccountModels)
 	config.PlatformModels = normalizeSupplierAccountHealthGuardPlatformModels(config.PlatformModels)
 	config.PlatformLatencyMs = normalizeSupplierAccountHealthGuardPlatformLatency(config.PlatformLatencyMs)
+	config.AccountIntervals = normalizeSupplierAccountHealthGuardAccountIntervals(config.AccountIntervals)
 	return config
 }
 
@@ -600,6 +672,16 @@ func normalizeSupplierAccountHealthGuardPlatformLatency(values map[string]int64)
 		platform = strings.ToLower(strings.TrimSpace(platform))
 		if platform != "" && latency > 0 {
 			out[platform] = latency
+		}
+	}
+	return out
+}
+
+func normalizeSupplierAccountHealthGuardAccountIntervals(values map[int64]int) map[int64]int {
+	out := make(map[int64]int)
+	for accountID, interval := range values {
+		if accountID > 0 && interval >= MinSupplierAccountHealthGuardAccountIntervalSeconds {
+			out[accountID] = interval
 		}
 	}
 	return out

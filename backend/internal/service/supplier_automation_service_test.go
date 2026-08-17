@@ -666,7 +666,7 @@ func TestSupplierAutomationServiceRunsAccountHealthGuardTask(t *testing.T) {
 		SupplierAutomationTaskAccountHealthGuard: {
 			TaskCode: SupplierAutomationTaskAccountHealthGuard, Name: "供应商账号健康守护", Enabled: true,
 			CronExpression: "@every 3600s", TimeoutSeconds: 1800,
-			Config: validSupplierAccountHealthGuardAutomationConfig(),
+			Config: validSupplierAccountHealthGuardAutomationConfigWithIntervals(),
 		},
 	}}
 	runner := &supplierAutomationAccountHealthGuardStub{result: SupplierAccountHealthGuardResult{
@@ -687,6 +687,7 @@ func TestSupplierAutomationServiceRunsAccountHealthGuardTask(t *testing.T) {
 	require.Equal(t, "健康守护发现 3 个异常账号", run.Message)
 	require.NotNil(t, run.ResultDetail)
 	require.Equal(t, []int64{1}, runner.config.AccountIDs)
+	require.Equal(t, map[int64]int{1: 600, 2: 300}, runner.config.AccountIntervals)
 	require.Equal(t, int64(20), run.ResultDetail.AccountHealthGuard.CursorAccountID)
 	require.Equal(t, int64(20), repo.tasks[SupplierAutomationTaskAccountHealthGuard].Config.AccountHealthGuardCursorAccountID)
 }
@@ -795,6 +796,7 @@ func TestSupplierAutomationServiceRejectsInvalidAccountHealthGuardConfig(t *test
 		{name: "慢响应阈值", mutate: func(c *SupplierAutomationConfig) { c.AccountHealthGuardSlowThreshold = 0 }},
 		{name: "恢复阈值", mutate: func(c *SupplierAutomationConfig) { c.AccountHealthGuardRecoveryThreshold = 0 }},
 		{name: "健康延迟", mutate: func(c *SupplierAutomationConfig) { c.AccountHealthGuardHealthyLatencyMs = 0 }},
+		{name: "检查间隔低于下限", mutate: func(c *SupplierAutomationConfig) { c.AccountHealthGuardAccountIntervals = map[int64]int{1: 59} }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -806,6 +808,12 @@ func TestSupplierAutomationServiceRejectsInvalidAccountHealthGuardConfig(t *test
 			require.Error(t, err)
 		})
 	}
+}
+
+func validSupplierAccountHealthGuardAutomationConfigWithIntervals() SupplierAutomationConfig {
+	config := validSupplierAccountHealthGuardAutomationConfig()
+	config.AccountHealthGuardAccountIntervals = map[int64]int{1: 600, 2: 300}
+	return config
 }
 
 func validSupplierAccountHealthGuardAutomationConfig() SupplierAutomationConfig {
@@ -821,6 +829,7 @@ func validSupplierAccountHealthGuardAutomationConfig() SupplierAutomationConfig 
 		AccountHealthGuardAccountModels:            map[int64]string{},
 		AccountHealthGuardPlatformModels:           map[string]string{},
 		AccountHealthGuardPlatformLatencyMs:        map[string]int64{},
+		AccountHealthGuardAccountIntervals:         map[int64]int{},
 	}
 }
 

@@ -19,6 +19,7 @@ export interface SupplierAutomationConfig {
   account_health_guard_account_models: Record<string, string>
   account_health_guard_platform_models: Record<string, string>
   account_health_guard_platform_latency_ms: Record<string, number>
+  account_health_guard_account_intervals: Record<string, number>
   account_health_guard_cursor_account_id: number
 }
 

@@ -76,6 +76,7 @@ type SupplierAutomationConfig struct {
 	AccountHealthGuardAccountModels            map[int64]string  `json:"account_health_guard_account_models"`
 	AccountHealthGuardPlatformModels           map[string]string `json:"account_health_guard_platform_models"`
 	AccountHealthGuardPlatformLatencyMs        map[string]int64  `json:"account_health_guard_platform_latency_ms"`
+	AccountHealthGuardAccountIntervals         map[int64]int     `json:"account_health_guard_account_intervals"`
 	AccountHealthGuardCursorAccountID          int64             `json:"account_health_guard_cursor_account_id"`
 }
 
@@ -581,6 +582,7 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 			AccountModels:            task.Config.AccountHealthGuardAccountModels,
 			PlatformModels:           task.Config.AccountHealthGuardPlatformModels,
 			PlatformLatencyMs:        task.Config.AccountHealthGuardPlatformLatencyMs,
+			AccountIntervals:         task.Config.AccountHealthGuardAccountIntervals,
 			CursorAccountID:          task.Config.AccountHealthGuardCursorAccountID,
 		}, time.Now())
 		run.ProcessedCount = result.CheckedCount + result.UnavailableCount
@@ -746,6 +748,11 @@ func validateSupplierAutomationTask(task SupplierAutomationTask) error {
 			config.AccountHealthGuardRecoveryThreshold <= 0 ||
 			config.AccountHealthGuardHealthyLatencyMs <= 0 {
 			return ErrSupplierProviderInvalid
+		}
+		for _, interval := range config.AccountHealthGuardAccountIntervals {
+			if interval > 0 && interval < MinSupplierAccountHealthGuardAccountIntervalSeconds {
+				return ErrSupplierProviderInvalid
+			}
 		}
 	}
 	return nil

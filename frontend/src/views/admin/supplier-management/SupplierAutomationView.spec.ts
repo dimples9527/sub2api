@@ -393,6 +393,7 @@ describe('SupplierAutomationView edit dialog', () => {
       'account_health_guard_account_models',
       'account_health_guard_platform_models',
       'account_health_guard_platform_latency_ms',
+      'account_health_guard_account_intervals',
       'account_health_guard_cursor_account_id',
     ]
 
@@ -432,6 +433,18 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('连续健康恢复阈值')
     expect(supplierAutomationSource).toContain('默认健康延迟（毫秒）')
     expect(supplierAutomationSource).toContain('validateAccountHealthGuardConfig')
+  })
+
+  it('supports per-account check interval override in the health guard account dialog', () => {
+    expect(supplierAutomationSource).toContain('account_health_guard_account_intervals: {}')
+    expect(supplierAutomationSource).toContain('healthGuardAccountIntervalValue')
+    expect(supplierAutomationSource).toContain('setHealthGuardAccountInterval')
+    expect(supplierAutomationSource).toContain('normalizeAccountHealthGuardAccountIntervals')
+    expect(supplierAutomationSource).toContain('检查间隔（秒）')
+    expect(supplierAutomationSource).toContain('已设检查间隔')
+    expect(supplierAutomationSource).toContain('interval >= 60')
+    expect(supplierAutomationSource).toContain('的检查间隔不能小于 60 秒')
+    expect(supplierAutomationSource).toContain('留空表示按任务全局执行间隔')
   })
 
   it('configures checked accounts with platform filters and searchable model overrides', () => {

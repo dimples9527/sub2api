@@ -766,6 +766,10 @@
                 <span>账号模型覆盖</span>
                 <strong>{{ healthGuardSelectionSummary.overridden }}</strong>
               </article>
+              <article>
+                <span>已设检查间隔</span>
+                <strong>{{ healthGuardSelectionSummary.intervals }}</strong>
+              </article>
               <article :class="{ warning: healthGuardSelectionSummary.missingModel > 0 }">
                 <span>缺少有效模型</span>
                 <strong>{{ healthGuardSelectionSummary.missingModel }}</strong>
@@ -857,6 +861,10 @@
                       v-else-if="healthGuardAccountIsSelected(mapping.localAccountID)"
                       class="sp-health-guard-model-status missing"
                     >缺模型</span>
+                    <span
+                      v-if="healthGuardAccountIsSelected(mapping.localAccountID) && mapping.available && healthGuardAccountIntervalValue(mapping.localAccountID)"
+                      class="sp-health-guard-model-status interval"
+                    >间隔 {{ healthGuardAccountIntervalValue(mapping.localAccountID) }}s</span>
                   </span>
                 </label>
 
@@ -873,6 +881,15 @@
                     :creatable-prefix="healthGuardModelCreatablePrefix"
                     placeholder="平台默认模型"
                     empty-text="暂无可用模型"
+                  />
+                  <Input
+                    :model-value="healthGuardAccountIntervalValue(mapping.localAccountID)"
+                    type="number"
+                    min="60"
+                    placeholder="检查间隔（秒）"
+                    :aria-label="`账号 ${mapping.localAccountName} 检查间隔（秒），留空表示按任务全局执行间隔`"
+                    title="为该账号单独设置检查频率，留空表示按任务全局执行间隔"
+                    @update:model-value="setHealthGuardAccountInterval(mapping.localAccountID, $event)"
                   />
                 </div>
               </article>
@@ -1011,6 +1028,7 @@ const editForm = reactive<SupplierAutomationTask>({
     account_health_guard_healthy_latency_ms: 15000,
     account_health_guard_account_ids: [],
     account_health_guard_account_models: {},
+    account_health_guard_account_intervals: {},
     account_health_guard_platform_models: {},
     account_health_guard_platform_latency_ms: {},
     account_health_guard_cursor_account_id: 0,
@@ -1838,6 +1856,7 @@ const healthGuardSelectionSummary = computed(() => {
   let platformDefault = 0
   let overridden = 0
   let missingModel = 0
+  let intervals = 0
 
   for (const mapping of healthGuardSelectedAccountRows.value) {
     if (!mapping.available) continue
@@ -1848,6 +1867,7 @@ const healthGuardSelectionSummary = computed(() => {
     } else {
       missingModel += 1
     }
+    if (healthGuardAccountIntervalValue(mapping.localAccountID)) intervals += 1
   }
 
   return {
@@ -1855,6 +1875,7 @@ const healthGuardSelectionSummary = computed(() => {
     platformDefault,
     overridden,
     missingModel,
+    intervals,
   }
 })
 function healthGuardSelectedRowsForConfig(config: SupplierAutomationConfig): HealthGuardAccountMapping[] {
@@ -2002,6 +2023,7 @@ function applyAccountHealthGuardDefaults() {
   config.account_health_guard_account_models = normalizeStringMap(config.account_health_guard_account_models)
   config.account_health_guard_platform_models = normalizeStringMap(config.account_health_guard_platform_models)
   config.account_health_guard_platform_latency_ms = normalizePositiveNumberMap(config.account_health_guard_platform_latency_ms)
+  config.account_health_guard_account_intervals = normalizeAccountHealthGuardAccountIntervals(config.account_health_guard_account_intervals)
   const cursorAccountID = Number(config.account_health_guard_cursor_account_id)
   config.account_health_guard_cursor_account_id = Number.isSafeInteger(cursorAccountID) && cursorAccountID > 0 ? cursorAccountID : 0
 }
@@ -2035,7 +2057,14 @@ function validateAccountHealthGuardConfig(config: SupplierAutomationConfig = edi
   config.account_health_guard_account_ids = normalizePositiveAccountIDs(config.account_health_guard_account_ids)
   config.account_health_guard_account_models = normalizeStringMap(config.account_health_guard_account_models)
   config.account_health_guard_platform_models = normalizeStringMap(config.account_health_guard_platform_models)
-  config.account_health_guard_platform_latency_ms = normalizePositiveNumberMap(config.account_health_guard_platform_latency_ms)
+  const rawIntervals = config.account_health_guard_account_intervals || {}
+  for (const [accountID, interval] of Object.entries(rawIntervals)) {
+    const parsed = Math.floor(Number(interval))
+    if (Number.isFinite(parsed) && parsed > 0 && parsed < 60) {
+      return `账号 #${accountID} 的检查间隔不能小于 60 秒`
+    }
+  }
+  config.account_health_guard_account_intervals = normalizeAccountHealthGuardAccountIntervals(config.account_health_guard_account_intervals)
   return validateAccountHealthGuardSelection(config)
 }
 
@@ -2076,6 +2105,9 @@ function removeHealthGuardAccount(id: number) {
   const accountModels = { ...editForm.config.account_health_guard_account_models }
   delete accountModels[String(id)]
   editForm.config.account_health_guard_account_models = accountModels
+  const accountIntervals = { ...(editForm.config.account_health_guard_account_intervals || {}) }
+  delete accountIntervals[String(id)]
+  editForm.config.account_health_guard_account_intervals = accountIntervals
 }
 function normalizePositiveAccountIDs(value: unknown): number[] {
   if (!Array.isArray(value)) return []
@@ -2093,6 +2125,31 @@ function normalizeStringMap(value: unknown): Record<string, string> {
       .map(([key, item]) => [key.trim(), String(item || '').trim()])
       .filter(([key, item]) => key && item)
   )
+}
+
+function healthGuardAccountIntervalValue(accountID: number): number | undefined {
+  const interval = Number(editForm.config.account_health_guard_account_intervals?.[String(accountID)])
+  return Number.isSafeInteger(interval) && interval >= 60 ? interval : undefined
+}
+
+function setHealthGuardAccountInterval(accountID: number, value: string | number) {
+  const intervals = { ...(editForm.config.account_health_guard_account_intervals || {}) }
+  const parsed = Math.floor(Number(value))
+  if (Number.isSafeInteger(parsed) && parsed >= 60) {
+    intervals[String(accountID)] = parsed
+  } else {
+    delete intervals[String(accountID)]
+  }
+  editForm.config.account_health_guard_account_intervals = intervals
+}
+
+function normalizeAccountHealthGuardAccountIntervals(value: unknown): Record<string, number> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .map(([key, item]) => [key.trim(), Math.floor(Number(item))])
+      .filter(([key, item]) => Boolean(key) && Number.isFinite(item) && Number(item) >= 60)
+  ) as Record<string, number>
 }
 
 function normalizePositiveNumberMap(value: unknown): Record<string, number> {
@@ -3686,7 +3743,7 @@ function intervalSecondsToCron(seconds: number): string | null {
 .sp-health-guard-selection-summary {
   display: grid;
   flex: 0 0 auto;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   border-bottom: 1px solid var(--sp-line);
   background: color-mix(in srgb, var(--sp-soft) 22%, transparent);
 }
@@ -3721,6 +3778,10 @@ function intervalSecondsToCron(seconds: number): string | null {
 }
 
 .sp-health-guard-selection-summary article:nth-child(4) {
+  --sp-summary-accent: var(--sp-cyan);
+}
+
+.sp-health-guard-selection-summary article:nth-child(5) {
   --sp-summary-accent: var(--sp-amber);
 }
 
@@ -3894,7 +3955,7 @@ function intervalSecondsToCron(seconds: number): string | null {
 .sp-health-guard-account-row {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.42fr);
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.8fr);
   align-items: center;
   min-width: 0;
   gap: 8px 12px;
@@ -4036,6 +4097,12 @@ function intervalSecondsToCron(seconds: number): string | null {
   background: color-mix(in srgb, var(--sp-green) 8%, var(--sp-panel));
 }
 
+.sp-health-guard-model-status.interval {
+  color: var(--sp-cyan);
+  border-color: color-mix(in srgb, var(--sp-cyan) 32%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-cyan) 8%, var(--sp-panel));
+}
+
 .sp-health-guard-model-status.missing,
 .sp-health-guard-model-status.unavailable {
   color: var(--sp-amber);
@@ -4045,8 +4112,10 @@ function intervalSecondsToCron(seconds: number): string | null {
 
 .sp-health-guard-account-model-editor {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(112px, 0.45fr);
   min-width: 0;
   align-items: center;
+  gap: 8px;
 }
 
 .sp-health-guard-account-model-editor :deep(.select-trigger) {
@@ -4736,6 +4805,7 @@ function intervalSecondsToCron(seconds: number): string | null {
   }
 
   .sp-health-guard-account-model-editor {
+    grid-template-columns: minmax(0, 1fr);
     min-width: 0;
   }
 

@@ -574,3 +574,93 @@ func supplierAccountHealthGuardReasonNames(reasons []SupplierAccountHealthGuardS
 	}
 	return out
 }
+
+func TestNormalizeSupplierAccountHealthGuardConfigAccountIntervals(t *testing.T) {
+	config := normalizeSupplierAccountHealthGuardConfig(SupplierAccountHealthGuardConfig{
+		AccountIntervals: map[int64]int{
+			1: 60,
+			2: 300,
+			3: 59,
+			4: 0,
+			5: -1,
+			0: 120,
+		},
+	})
+	require.Equal(t, map[int64]int{1: 60, 2: 300}, config.AccountIntervals)
+}
+
+func TestSupplierAccountHealthGuardRunSkipsAccountNotDueByAccountInterval(t *testing.T) {
+	notDue := newSupplierAccountHealthGuardCandidate(71, "间隔未到账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 71})
+	notDue.LocalAccount.Extra[supplierHealthGuardLastCheckedAtExtraKey] = time.Date(2026, 8, 17, 9, 59, 30, 0, time.UTC).Format(time.RFC3339)
+	repo := &supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{notDue}}
+	tester := &supplierAccountHealthGuardTesterStub{results: map[int64]*ScheduledTestResult{}, errs: map[int64]error{}}
+	store := &supplierAccountHealthGuardAccountStoreStub{}
+	guard := NewSupplierAccountHealthGuardService(repo, store, tester)
+
+	now := time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC)
+	result, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{
+		AccountIDs:       []int64{71},
+		AccountIntervals: map[int64]int{71: 300},
+		PlatformModels:   map[string]string{"openai": "gpt-4o-mini"},
+	}, now)
+
+	require.NoError(t, err)
+	require.Empty(t, tester.calls)
+	require.Empty(t, store.extraUpdates)
+	require.Equal(t, 1, result.TotalAccounts)
+	require.Zero(t, result.CheckedCount)
+	require.Equal(t, 1, result.SkippedCount)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, SupplierAccountHealthGuardStatusSkipped, result.Items[0].Status)
+	require.Contains(t, result.Items[0].Reason, "距上次检查不足")
+	require.Equal(t, []string{"未到检查间隔"}, supplierAccountHealthGuardReasonNames(result.SkipReasons))
+}
+
+func TestSupplierAccountHealthGuardRunChecksAccountDueByAccountInterval(t *testing.T) {
+	due := newSupplierAccountHealthGuardCandidate(72, "间隔到期账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 72})
+	due.LocalAccount.Extra[supplierHealthGuardLastCheckedAtExtraKey] = time.Date(2026, 8, 17, 9, 0, 0, 0, time.UTC).Format(time.RFC3339)
+	repo := &supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{due}}
+	tester := &supplierAccountHealthGuardTesterStub{
+		results: map[int64]*ScheduledTestResult{72: {Status: "success", LatencyMs: 20}},
+		errs:    map[int64]error{},
+	}
+	store := &supplierAccountHealthGuardAccountStoreStub{}
+	guard := NewSupplierAccountHealthGuardService(repo, store, tester)
+
+	now := time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC)
+	result, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{
+		AccountIDs:       []int64{72},
+		AccountIntervals: map[int64]int{72: 300},
+		PlatformModels:   map[string]string{"openai": "gpt-4o-mini"},
+	}, now)
+
+	require.NoError(t, err)
+	require.Equal(t, []supplierAccountHealthGuardTestCall{{accountID: 72, modelID: "gpt-4o-mini"}}, tester.calls)
+	require.Equal(t, 1, result.CheckedCount)
+	require.Zero(t, result.SkippedCount)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, SupplierAccountHealthGuardStatusHealthy, result.Items[0].Status)
+	require.NotEmpty(t, store.extraUpdates[72][supplierHealthGuardLastCheckedAtExtraKey])
+}
+
+func TestSupplierAccountHealthGuardRunWithoutAccountIntervalKeepsGlobalFrequency(t *testing.T) {
+	recent := newSupplierAccountHealthGuardCandidate(73, "无单独间隔账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 73})
+	recent.LocalAccount.Extra[supplierHealthGuardLastCheckedAtExtraKey] = time.Date(2026, 8, 17, 9, 59, 50, 0, time.UTC).Format(time.RFC3339)
+	repo := &supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{recent}}
+	tester := &supplierAccountHealthGuardTesterStub{
+		results: map[int64]*ScheduledTestResult{73: {Status: "success", LatencyMs: 20}},
+		errs:    map[int64]error{},
+	}
+	guard := NewSupplierAccountHealthGuardService(repo, &supplierAccountHealthGuardAccountStoreStub{}, tester)
+
+	now := time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC)
+	result, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{
+		AccountIDs:     []int64{73},
+		PlatformModels: map[string]string{"openai": "gpt-4o-mini"},
+	}, now)
+
+	require.NoError(t, err)
+	require.Equal(t, []supplierAccountHealthGuardTestCall{{accountID: 73, modelID: "gpt-4o-mini"}}, tester.calls)
+	require.Equal(t, 1, result.CheckedCount)
+	require.Zero(t, result.SkippedCount)
+}
