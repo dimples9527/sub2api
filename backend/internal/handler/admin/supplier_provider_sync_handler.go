@@ -124,8 +124,13 @@ func (h *SupplierProviderSyncHandler) SyncBalance(c *gin.Context) {
 }
 
 func (h *SupplierProviderSyncHandler) SyncCost(c *gin.Context) {
+	day, ok := supplierSyncCostDay(c.Query("date"))
+	if !ok {
+		response.ErrorFrom(c, badRequest("成本日期无效，需为 YYYY-MM-DD"))
+		return
+	}
 	h.sync(c, func(ctx context.Context, id int64) (service.SupplierProviderSyncResult, error) {
-		return h.syncService.SyncCost(ctx, id, time.Now(), service.SupplierSyncTriggerManual)
+		return h.syncService.SyncCost(ctx, id, day, service.SupplierSyncTriggerManual)
 	})
 }
 
@@ -897,6 +902,19 @@ func parseOptionalInt64(raw string) int64 {
 		return 0
 	}
 	return value
+}
+
+// supplierSyncCostDay 解析成本同步的归属日期；空值返回今天。
+func supplierSyncCostDay(raw string) (time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Now(), true
+	}
+	day, err := time.ParseInLocation("2006-01-02", raw, time.Local)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return day, true
 }
 
 func badRequest(message string) error {

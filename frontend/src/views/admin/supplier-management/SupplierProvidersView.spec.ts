@@ -20,6 +20,9 @@ const providerViewMocks = vi.hoisted(() => ({
   streamSupplierProviderSync: vi.fn(),
   testProviderEndpoint: vi.fn(),
   listUpstreamBalanceRecharges: vi.fn(),
+  getCostDeviationSettings: vi.fn(),
+  updateCostDeviationSettings: vi.fn(),
+  syncProviderCostOnDate: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
   showWarning: vi.fn(),
@@ -48,6 +51,9 @@ vi.mock('@/api/admin/supplierProviders', () => ({
     refreshToken: providerViewMocks.refreshToken,
     getAuthStatus: providerViewMocks.getAuthStatus,
     listAuthHistory: providerViewMocks.listAuthHistory,
+    getCostDeviationSettings: providerViewMocks.getCostDeviationSettings,
+    updateCostDeviationSettings: providerViewMocks.updateCostDeviationSettings,
+    syncProviderCostOnDate: providerViewMocks.syncProviderCostOnDate,
   },
 }))
 
@@ -246,6 +252,17 @@ describe('SupplierProvidersView payload normalization', () => {
       skipped_count: 0,
       items: [],
       started_at: '2026-07-31T00:00:00Z',
+    })
+    providerViewMocks.getCostDeviationSettings.mockResolvedValue({ threshold: 0.5 })
+    providerViewMocks.updateCostDeviationSettings.mockResolvedValue({ threshold: 0.5 })
+    providerViewMocks.syncProviderCostOnDate.mockResolvedValue({
+      provider_id: 1,
+      provider_name: 'Alpha',
+      scope: 'cost',
+      status: 'success',
+      message: '成本同步完成',
+      started_at: '2026-07-31T00:00:00Z',
+      finished_at: '2026-07-31T00:00:01Z',
     })
     providerViewMocks.getBalanceSummary.mockResolvedValue({
       latest_date: '2026-08-14',
@@ -843,6 +860,15 @@ describe('SupplierProvidersView payload normalization', () => {
   })
 
   it('highlights cost trend points whose deviation exceeds the threshold', async () => {
+    // 默认阈值 0.5：首日本地成本偏低使偏差超过 50%。
+    providerViewMocks.listCostTrends.mockResolvedValue({
+      days: 14,
+      points: [
+        { date: '2026-07-16', upstream_cost: 12, local_cost: 5 },
+        { date: '2026-07-17', upstream_cost: 15, local_cost: 14 },
+      ],
+      breakdown: [],
+    })
     const wrapper = await mountSupplierProviders()
 
     const line = wrapper.findComponent({ name: 'Line' })
@@ -852,6 +878,62 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(wrapper.get('[data-test="supplier-cost-deviation-summary"]').text()).toContain('偏差超阈值 1/2 天')
     expect(supplierProvidersSource).toContain('costTrendDeviation')
     expect(supplierProvidersSource).toContain('pointBackgroundColor')
+  })
+
+  it('persists cost deviation threshold changes to the backend settings', async () => {
+    const wrapper = await mountSupplierProviders()
+    expect(providerViewMocks.getCostDeviationSettings).toHaveBeenCalled()
+
+    // 首次加载完成前不持久化。
+    expect(providerViewMocks.updateCostDeviationSettings).not.toHaveBeenCalled()
+    expect(supplierProvidersSource).toContain('deviationThresholdReady')
+    expect(supplierProvidersSource).toContain('persistCostDeviationThreshold')
+    expect(supplierProvidersSource).toContain('updateCostDeviationSettings')
+  })
+
+  it('fetches cost for the selected provider on the chosen date', async () => {
+    const wrapper = await mountSupplierProviders()
+    providerViewMocks.listCostTrends.mockClear()
+    providerViewMocks.syncProviderCostOnDate.mockClear()
+    providerViewMocks.showSuccess.mockClear()
+
+    const row = wrapper.find('tbody tr[data-row-id="1"]')
+    expect(row.exists()).toBe(true)
+    await row.trigger('click')
+    await flushPromises()
+
+    const pad = (value: number) => String(value).padStart(2, '0')
+    const today = new Date()
+    const expectedDate = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`
+
+    const button = wrapper.get('[data-test="supplier-cost-single-day"]')
+    expect(button.attributes('disabled')).toBeUndefined()
+    await button.trigger('click')
+    await flushPromises()
+
+    expect(providerViewMocks.syncProviderCostOnDate).toHaveBeenCalledWith(1, expectedDate)
+    expect(providerViewMocks.showSuccess).toHaveBeenCalledWith(expect.stringContaining('已获取'))
+    // 获取成功后刷新成本曲线。
+    expect(providerViewMocks.listCostTrends).toHaveBeenCalled()
+  })
+
+  it('shows deviation override warnings on the trend and breakdown panels', async () => {
+    providerViewMocks.listCostTrends.mockResolvedValue({
+      days: 14,
+      points: [
+        { date: '2026-07-16', upstream_cost: 12, local_cost: 10, warning: '上游成本 12.00 与本地成本 10.00 偏差 17%，已按本地成本展示' },
+        { date: '2026-07-17', upstream_cost: 15, local_cost: 14 },
+      ],
+      breakdown: [
+        { provider_id: 1, provider_name: 'Alpha', provider_type: 'sub2api', upstream_cost: 120, local_cost: 80, cost_warning: '上游成本 120.00 与本地成本 80.00 偏差 33%，已按本地成本展示' },
+      ],
+    })
+    const wrapper = await mountSupplierProviders()
+
+    expect(wrapper.get('[data-test="supplier-cost-warnings"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="supplier-cost-warning-item"]').text()).toContain('已按本地成本展示')
+    expect(wrapper.get('[data-test="supplier-cost-breakdown-warnings"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="supplier-cost-breakdown-warning-item"]').text()).toContain('Alpha')
   })
 
   it('keeps the supplier cost breakdown date control in the left heading group', async () => {

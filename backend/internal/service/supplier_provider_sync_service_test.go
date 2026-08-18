@@ -18,10 +18,21 @@ type supplierProviderDataRepoStub struct {
 	costCalls          int
 	costDays           []time.Time
 	costValues         []float64
+	costFallbackCalls  int
+	costFallbackBal    SupplierProviderCostFallbackBalance
+	costFallbackOK     bool
+	costFallbackErr    error
 	createdRuns        []SupplierProviderSyncRun
 	finishedRuns       []SupplierProviderSyncRun
 	statusUpdates      []string
 	groupStatusUpdates []string
+
+	localCostCalls   int
+	localCostValue   float64
+	localCostOK      bool
+	localCostErr     error
+	detailedRawCosts []*float64
+	detailedWarnings []*string
 
 	accountsErr    error
 	groupsErr      error
@@ -143,6 +154,22 @@ func (r *supplierProviderDataRepoStub) UpdateCost(_ context.Context, _ int64, co
 	r.costDays = append(r.costDays, seenAt)
 	r.costValues = append(r.costValues, cost)
 	return r.costErr
+}
+func (r *supplierProviderDataRepoStub) UpdateCostDetailed(_ context.Context, _ int64, cost float64, rawUpstream *float64, warning *string, seenAt time.Time) error {
+	r.costCalls++
+	r.costDays = append(r.costDays, seenAt)
+	r.costValues = append(r.costValues, cost)
+	r.detailedRawCosts = append(r.detailedRawCosts, rawUpstream)
+	r.detailedWarnings = append(r.detailedWarnings, warning)
+	return r.costErr
+}
+func (r *supplierProviderDataRepoStub) GetLocalCostForDay(context.Context, int64, time.Time) (float64, bool, error) {
+	r.localCostCalls++
+	return r.localCostValue, r.localCostOK, r.localCostErr
+}
+func (r *supplierProviderDataRepoStub) GetCostFallbackBalances(context.Context, int64, time.Time) (SupplierProviderCostFallbackBalance, bool, error) {
+	r.costFallbackCalls++
+	return r.costFallbackBal, r.costFallbackOK, r.costFallbackErr
 }
 func (r *supplierProviderDataRepoStub) CreateSyncRun(_ context.Context, run *SupplierProviderSyncRun) error {
 	run.ID = int64(len(r.createdRuns) + 1)
@@ -870,6 +897,191 @@ func TestSupplierProviderSyncServiceBackfillCostsMarksLockedProviderAsSkipped(t 
 	require.Empty(t, remote.costDays)
 	require.Empty(t, dataRepo.costDays)
 	require.Equal(t, SupplierSyncStatusSkipped, result.Items[0].Status)
+}
+
+func TestSupplierCostFallbackEstimate(t *testing.T) {
+	cases := []struct {
+		name   string
+		bal    SupplierProviderCostFallbackBalance
+		want   float64
+		usable bool
+	}{
+		{name: "余额减少", bal: SupplierProviderCostFallbackBalance{CurrentBalance: 80, DayStartBalance: 100}, want: 20, usable: true},
+		{name: "余额未变", bal: SupplierProviderCostFallbackBalance{CurrentBalance: 100, DayStartBalance: 100}, usable: false},
+		{name: "余额增加", bal: SupplierProviderCostFallbackBalance{CurrentBalance: 120, DayStartBalance: 100}, usable: false},
+		{name: "起始余额缺失", bal: SupplierProviderCostFallbackBalance{CurrentBalance: 100, DayStartBalance: 0}, usable: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, usable := supplierCostFallbackEstimate(tc.bal)
+			require.Equal(t, tc.usable, usable)
+			if usable {
+				require.Equal(t, tc.want, got)
+			}
+		})
+	}
+}
+
+func TestSupplierProviderSyncServiceCostFallbackEstimatesCostWhenRequestFails(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID: 42, Name: "供应商甲", ProviderType: SupplierProviderTypeSub2API, Enabled: true, PasswordEncrypted: "secret",
+	}}}
+	dataRepo := &supplierProviderDataRepoStub{
+		costFallbackBal: SupplierProviderCostFallbackBalance{CurrentBalance: 80, DayStartBalance: 100},
+		costFallbackOK:  true,
+	}
+	remote := &supplierRemoteClientStub{costErr: errors.New("成本接口不可用")}
+	svc := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	result, err := svc.SyncCost(context.Background(), 42, time.Now(), SupplierSyncTriggerManual)
+
+	require.NoError(t, err)
+	require.Equal(t, SupplierSyncStatusSuccess, result.Status)
+	require.Equal(t, 1, remote.costCalls)
+	require.Equal(t, 1, dataRepo.costFallbackCalls)
+	require.Equal(t, 1, dataRepo.costCalls)
+	require.Equal(t, []float64{20}, dataRepo.costValues)
+}
+
+func TestSupplierProviderSyncServiceCostFallbackKeepsFailedWhenBalanceBaselineUnavailable(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID: 42, ProviderType: SupplierProviderTypeSub2API, Enabled: true, PasswordEncrypted: "secret",
+	}}}
+	dataRepo := &supplierProviderDataRepoStub{}
+	remote := &supplierRemoteClientStub{costErr: errors.New("成本接口不可用")}
+	svc := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	result, err := svc.SyncCost(context.Background(), 42, time.Now(), SupplierSyncTriggerManual)
+
+	require.Error(t, err)
+	require.Equal(t, SupplierSyncStatusFailed, result.Status)
+	require.Equal(t, 1, dataRepo.costFallbackCalls)
+	require.Zero(t, dataRepo.costCalls)
+}
+
+func TestSupplierProviderSyncServiceCostFallbackKeepsFailedWhenBalanceNotDecreased(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID: 42, ProviderType: SupplierProviderTypeSub2API, Enabled: true, PasswordEncrypted: "secret",
+	}}}
+	dataRepo := &supplierProviderDataRepoStub{
+		costFallbackBal: SupplierProviderCostFallbackBalance{CurrentBalance: 120, DayStartBalance: 100},
+		costFallbackOK:  true,
+	}
+	remote := &supplierRemoteClientStub{costErr: errors.New("成本接口不可用")}
+	svc := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	result, err := svc.SyncCost(context.Background(), 42, time.Now(), SupplierSyncTriggerManual)
+
+	require.Error(t, err)
+	require.Equal(t, SupplierSyncStatusFailed, result.Status)
+	require.Equal(t, 1, dataRepo.costFallbackCalls)
+	require.Zero(t, dataRepo.costCalls)
+}
+
+func TestSupplierProviderSyncServiceCostFallbackSkipsAuthFailure(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID: 42, Name: "供应商甲", ProviderType: SupplierProviderTypeSub2API, Enabled: true, PasswordEncrypted: "secret",
+	}}}
+	dataRepo := &supplierProviderDataRepoStub{
+		costFallbackBal: SupplierProviderCostFallbackBalance{CurrentBalance: 80, DayStartBalance: 100},
+		costFallbackOK:  true,
+	}
+	remote := &supplierRemoteClientStub{costErr: &SupplierProviderAuthFailureError{Err: errors.New("登录失败")}}
+	svc := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	result, err := svc.SyncCost(context.Background(), 42, time.Now(), SupplierSyncTriggerManual)
+
+	require.Error(t, err)
+	require.Equal(t, SupplierSyncStatusFailed, result.Status)
+	require.Zero(t, dataRepo.costFallbackCalls)
+	require.Zero(t, dataRepo.costCalls)
+	require.False(t, providerRepo.items[0].Enabled)
+	require.Equal(t, 1, providerRepo.disableAfterAuthFailureCalls)
+}
+
+func TestSupplierProviderSyncServiceCostFallbackSkipsSessionFailure(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID: 42, Name: "供应商甲", ProviderType: SupplierProviderTypeSub2API, Enabled: true, PasswordEncrypted: "secret",
+	}}}
+	dataRepo := &supplierProviderDataRepoStub{
+		costFallbackBal: SupplierProviderCostFallbackBalance{CurrentBalance: 80, DayStartBalance: 100},
+		costFallbackOK:  true,
+	}
+	sessionErr := &SupplierProviderSessionFailureError{Err: errors.New("session unavailable")}
+	remote := &supplierRemoteClientStub{costErr: sessionErr}
+	svc := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	result, err := svc.SyncCost(context.Background(), 42, time.Now(), SupplierSyncTriggerManual)
+
+	require.ErrorIs(t, err, sessionErr)
+	require.Equal(t, SupplierSyncStatusFailed, result.Status)
+	require.Zero(t, dataRepo.costFallbackCalls)
+	require.Zero(t, dataRepo.costCalls)
+	require.True(t, providerRepo.items[0].Enabled)
+	require.Zero(t, providerRepo.disableAfterAuthFailureCalls)
+}
+
+func TestSupplierProviderSyncServiceCostOverridesUpstreamWithLocalWhenDeviationExceedsThreshold(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID: 42, Name: "供应商甲", ProviderType: SupplierProviderTypeSub2API, Enabled: true, PasswordEncrypted: "secret",
+	}}}
+	// 上游返回 45.6，本地成本 5，偏差 89% > 50%。
+	dataRepo := &supplierProviderDataRepoStub{localCostValue: 5, localCostOK: true}
+	remote := &supplierRemoteClientStub{}
+	svc := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+	svc.SetCostDeviationThresholdProvider(supplierCostDeviationThresholdStub{threshold: 0.5})
+
+	result, err := svc.SyncCost(context.Background(), 42, time.Now(), SupplierSyncTriggerManual)
+
+	require.NoError(t, err)
+	require.Equal(t, SupplierSyncStatusSuccess, result.Status)
+	// 写入生效值改为本地成本，并记录上游原始值与覆盖提示。
+	require.Equal(t, []float64{5}, dataRepo.costValues)
+	require.Len(t, dataRepo.detailedRawCosts, 1)
+	require.NotNil(t, dataRepo.detailedRawCosts[0])
+	require.Equal(t, 45.6, *dataRepo.detailedRawCosts[0])
+	require.Len(t, dataRepo.detailedWarnings, 1)
+	require.NotNil(t, dataRepo.detailedWarnings[0])
+	require.Contains(t, *dataRepo.detailedWarnings[0], "已按本地成本展示")
+}
+
+func TestSupplierProviderSyncServiceCostKeepsUpstreamWithinThreshold(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID: 42, Name: "供应商甲", ProviderType: SupplierProviderTypeSub2API, Enabled: true, PasswordEncrypted: "secret",
+	}}}
+	// 上游 45.6，本地 30，偏差 34% <= 50%。
+	dataRepo := &supplierProviderDataRepoStub{localCostValue: 30, localCostOK: true}
+	remote := &supplierRemoteClientStub{}
+	svc := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+	svc.SetCostDeviationThresholdProvider(supplierCostDeviationThresholdStub{threshold: 0.5})
+
+	result, err := svc.SyncCost(context.Background(), 42, time.Now(), SupplierSyncTriggerManual)
+
+	require.NoError(t, err)
+	require.Equal(t, SupplierSyncStatusSuccess, result.Status)
+	require.Equal(t, []float64{45.6}, dataRepo.costValues)
+	require.NotNil(t, dataRepo.detailedRawCosts[0])
+	require.Equal(t, 45.6, *dataRepo.detailedRawCosts[0])
+	require.Nil(t, dataRepo.detailedWarnings[0])
+}
+
+func TestSupplierProviderSyncServiceCostKeepsUpstreamWithoutLocalCost(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID: 42, Name: "供应商甲", ProviderType: SupplierProviderTypeSub2API, Enabled: true, PasswordEncrypted: "secret",
+	}}}
+	// 无唯一匹配本地账号（ok=false），不覆盖。
+	dataRepo := &supplierProviderDataRepoStub{localCostOK: false}
+	remote := &supplierRemoteClientStub{}
+	svc := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+	svc.SetCostDeviationThresholdProvider(supplierCostDeviationThresholdStub{threshold: 0.5})
+
+	result, err := svc.SyncCost(context.Background(), 42, time.Now(), SupplierSyncTriggerManual)
+
+	require.NoError(t, err)
+	require.Equal(t, SupplierSyncStatusSuccess, result.Status)
+	require.Equal(t, []float64{45.6}, dataRepo.costValues)
+	require.Equal(t, 45.6, *dataRepo.detailedRawCosts[0])
+	require.Nil(t, dataRepo.detailedWarnings[0])
 }
 
 func TestSupplierProviderServiceUpdateClearsTokenWhenAuthConfigurationChanges(t *testing.T) {

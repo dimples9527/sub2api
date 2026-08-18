@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"regexp"
 	"sort"
@@ -163,15 +164,48 @@ type SupplierProviderCostTrendPoint struct {
 	Date         string  `json:"date"`
 	UpstreamCost float64 `json:"upstream_cost"`
 	LocalCost    float64 `json:"local_cost"`
+	// RawUpstreamCost 为上游成本接口返回的原始值（未做偏差覆盖），可能为 nil（历史数据未记录）。
+	RawUpstreamCost *float64 `json:"raw_upstream_cost,omitempty"`
+	// Warning 表示该日因上游与本地成本偏差过大而采用本地成本时记录的提示。
+	Warning string `json:"warning,omitempty"`
 }
 
 // SupplierProviderCostBreakdown 表示指定日期范围内单个供应商的成本拆分。
 type SupplierProviderCostBreakdown struct {
-	ProviderID   int64   `json:"provider_id"`
-	ProviderName string  `json:"provider_name"`
-	ProviderType string  `json:"provider_type"`
-	UpstreamCost float64 `json:"upstream_cost"`
-	LocalCost    float64 `json:"local_cost"`
+	ProviderID      int64   `json:"provider_id"`
+	ProviderName    string  `json:"provider_name"`
+	ProviderType    string  `json:"provider_type"`
+	UpstreamCost    float64 `json:"upstream_cost"`
+	LocalCost       float64 `json:"local_cost"`
+	RawUpstreamCost float64 `json:"raw_upstream_cost,omitempty"`
+	CostWarning     string  `json:"cost_warning,omitempty"`
+}
+
+// SupplierProviderBalanceCostDay 表示供应商在某一天的余额差额成本。
+// BalanceCost 为当天第一条余额快照减去当天最后条余额快照得到的成本估算（仅大于 0 时有效）。
+type SupplierProviderBalanceCostDay struct {
+	Date        string  // YYYY-MM-DD（本地时区）
+	ProviderID  int64   // 供应商 ID
+	BalanceCost float64 // 第一条余额 - 最后条余额，仅在大于 0 时返回
+}
+
+// supplierCostDeviation 计算上游成本与本地成本的相对偏差，公式与前端保持一致：
+// |上游-本地| / max(上游, 本地)，两者都非正时视为无偏差。
+func supplierCostDeviation(upstream, local float64) float64 {
+	if upstream <= 0 && local <= 0 {
+		return 0
+	}
+	max := math.Max(upstream, local)
+	if max <= 0 {
+		return 0
+	}
+	return math.Abs(upstream-local) / max
+}
+
+// supplierCostDeviationWarning 生成成本偏差覆盖时的中文提示。
+func supplierCostDeviationWarning(upstream, local float64) string {
+	pct := int(math.Round(supplierCostDeviation(upstream, local) * 100))
+	return fmt.Sprintf("上游成本 %.2f 与本地成本 %.2f 偏差 %d%%，已按本地成本展示", upstream, local, pct)
 }
 
 // SupplierProviderCostTrendResult 是供应商组合成本趋势响应。
@@ -213,6 +247,9 @@ type SupplierProviderRepository interface {
 	ListCostTrends(ctx context.Context, start, end time.Time, providerID int64) ([]SupplierProviderCostTrendPoint, error)
 	ListCostBreakdowns(ctx context.Context, start, end time.Time, providerID int64) ([]SupplierProviderCostBreakdown, error)
 	ListBalanceSummaryDays(ctx context.Context) ([]SupplierProviderBalanceSummaryDay, error)
+	// ListBalanceCosts returns balance difference costs per day per provider for date range.
+	ListBalanceCosts(ctx context.Context, start, end time.Time, providerID int64) ([]SupplierProviderBalanceCostDay, error)
+
 	GetByID(ctx context.Context, id int64) (*SupplierProvider, error)
 	Create(ctx context.Context, provider *SupplierProvider) error
 	Update(ctx context.Context, provider *SupplierProvider) error
@@ -231,10 +268,11 @@ type SupplierProviderTypeRepository interface {
 }
 
 type SupplierProviderService struct {
-	repo       SupplierProviderRepository
-	encryptor  SecretEncryptor
-	typeRepo   SupplierProviderTypeRepository
-	tokenCache SupplierProviderTokenCache
+	repo              SupplierProviderRepository
+	encryptor         SecretEncryptor
+	typeRepo          SupplierProviderTypeRepository
+	tokenCache        SupplierProviderTokenCache
+	thresholdProvider SupplierCostDeviationThresholdProvider
 }
 
 func NewSupplierProviderService(repo SupplierProviderRepository, encryptor SecretEncryptor, typeRepo ...SupplierProviderTypeRepository) *SupplierProviderService {
@@ -247,6 +285,20 @@ func NewSupplierProviderService(repo SupplierProviderRepository, encryptor Secre
 
 func (s *SupplierProviderService) SetTokenCache(cache SupplierProviderTokenCache) {
 	s.tokenCache = cache
+}
+
+// SetCostDeviationThresholdProvider 注入成本偏差覆盖阈值提供方，未注入时使用默认阈值。
+func (s *SupplierProviderService) SetCostDeviationThresholdProvider(provider SupplierCostDeviationThresholdProvider) {
+	if s != nil {
+		s.thresholdProvider = provider
+	}
+}
+
+func (s *SupplierProviderService) costDeviationThreshold(ctx context.Context) float64 {
+	if s != nil && s.thresholdProvider != nil {
+		return s.thresholdProvider.SupplierCostDeviationThreshold(ctx)
+	}
+	return DefaultSupplierCostDeviationThreshold
 }
 
 type SupplierProviderTypeService struct {
@@ -401,6 +453,9 @@ func (s *SupplierProviderService) listCostTrendsBetween(ctx context.Context, sta
 		return cached, nil
 	}
 
+	// 偏差覆盖阈值；历史数据在展示时也会按该阈值做兜底改写。
+	threshold := s.costDeviationThreshold(ctx)
+
 	rawPoints, err := s.repo.ListCostTrends(ctx, start, endExclusive, providerID)
 	if err != nil {
 		return SupplierProviderCostTrendResult{}, fmt.Errorf("list supplier provider cost trends: %w", err)
@@ -418,6 +473,57 @@ func (s *SupplierProviderService) listCostTrendsBetween(ctx context.Context, sta
 		byDate[point.Date] = point
 	}
 
+	// 用当天首条余额 - 当天末条余额的成本，作为 today_cost 缺失(<=0)时的保底估算，
+	// 同时补上只有余额快照、没有 daily_stats 的日期。
+	balanceCosts, err := s.repo.ListBalanceCosts(ctx, start, endExclusive, providerID)
+	if err != nil {
+		return SupplierProviderCostTrendResult{}, fmt.Errorf("list balance costs: %w", err)
+	}
+	dateBalanceCost := make(map[string]float64, len(balanceCosts))
+	for _, bc := range balanceCosts {
+		dateBalanceCost[bc.Date] += bc.BalanceCost
+	}
+	for date, balanceCost := range dateBalanceCost {
+		point, ok := byDate[date]
+		if !ok {
+			point = SupplierProviderCostTrendPoint{Date: date}
+		}
+		if point.UpstreamCost <= 0 {
+			point.UpstreamCost = balanceCost
+			byDate[date] = point
+		}
+	}
+
+	// 按供应商拆分的成本同样用余额差额做保底估算。
+	for i := range rawBreakdown {
+		if rawBreakdown[i].UpstreamCost <= 0 {
+			sum := 0.0
+			for _, bc := range balanceCosts {
+				if bc.ProviderID == rawBreakdown[i].ProviderID {
+					sum += bc.BalanceCost
+				}
+			}
+			rawBreakdown[i].UpstreamCost = sum
+		}
+	}
+
+	// 展示时偏差覆盖：上游与本地成本差距超过阈值时，按本地成本展示并记录警告。
+	// 优先以原始上游值为基准（历史数据未记录时退化为已写入的 today_cost）。
+	for i := range rawBreakdown {
+		b := &rawBreakdown[i]
+		if b.LocalCost <= 0 {
+			continue
+		}
+		base := b.UpstreamCost
+		if b.RawUpstreamCost > 0 {
+			base = b.RawUpstreamCost
+		}
+		if base > 0 && supplierCostDeviation(base, b.LocalCost) > threshold {
+			b.CostWarning = supplierCostDeviationWarning(base, b.LocalCost)
+			b.UpstreamCost = b.LocalCost
+		}
+	}
+
 	points := make([]SupplierProviderCostTrendPoint, 0, days)
 	for cursor := start; cursor.Before(endExclusive); cursor = cursor.AddDate(0, 0, 1) {
 		date := cursor.In(loc).Format("2006-01-02")
@@ -426,6 +532,21 @@ func (s *SupplierProviderService) listCostTrendsBetween(ctx context.Context, sta
 			continue
 		}
 		points = append(points, SupplierProviderCostTrendPoint{Date: date})
+	}
+
+	for i := range points {
+		p := &points[i]
+		if p.LocalCost <= 0 {
+			continue
+		}
+		base := p.UpstreamCost
+		if p.RawUpstreamCost != nil && *p.RawUpstreamCost > 0 {
+			base = *p.RawUpstreamCost
+		}
+		if base > 0 && supplierCostDeviation(base, p.LocalCost) > threshold {
+			p.Warning = supplierCostDeviationWarning(base, p.LocalCost)
+			p.UpstreamCost = p.LocalCost
+		}
 	}
 
 	result := SupplierProviderCostTrendResult{

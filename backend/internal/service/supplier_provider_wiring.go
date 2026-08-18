@@ -27,9 +27,11 @@ func ProvideSupplierProviderSyncService(
 	encryptor SecretEncryptor,
 	syncLock SupplierProviderSyncLock,
 	groupMatcher *SupplierProviderGroupMatcher,
+	costDeviationSettings *SupplierCostDeviationSettingsService,
 ) *SupplierProviderSyncService {
 	svc := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, encryptor, syncLock)
 	svc.SetGroupMatcher(groupMatcher)
+	svc.SetCostDeviationThresholdProvider(costDeviationSettings)
 	return svc
 }
 

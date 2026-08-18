@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"regexp"
 	"strings"
 	"testing"
@@ -511,7 +512,7 @@ func TestSupplierProviderDataRepositoryUpdateBalanceAndCostUpsertsDailyStats(t *
 		WithArgs(int64(42), supplierProviderNonNilArg{}, 45.625, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO supplier_provider_daily_stats")).
-		WithArgs(int64(42), sqlmock.AnyArg(), 45.625).
+		WithArgs(int64(42), sqlmock.AnyArg(), 45.625, sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	require.NoError(t, repo.UpdateCost(context.Background(), 42, 45.625, historicalDay))
@@ -526,10 +527,135 @@ func TestSupplierProviderDataRepositoryUpdateBalanceAndCostUpsertsDailyStats(t *
 		WithArgs(int64(42), supplierProviderNonNilArg{}, 12.5, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO supplier_provider_daily_stats")).
-		WithArgs(int64(42), sqlmock.AnyArg(), 12.5).
+		WithArgs(int64(42), sqlmock.AnyArg(), 12.5, sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	require.NoError(t, repo.UpdateCost(context.Background(), 42, 12.5, today))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryGetCostFallbackBalances(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	statDay := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(`(?s)SELECT s\.current_balance,.*FROM supplier_provider_runtime_stats s.*WHERE s\.provider_id = \$1`).
+		WithArgs(int64(42), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"current_balance", "day_start_balance"}).AddRow(80.5, 100.0))
+
+	bal, ok, err := repo.GetCostFallbackBalances(context.Background(), 42, statDay)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, service.SupplierProviderCostFallbackBalance{CurrentBalance: 80.5, DayStartBalance: 100.0}, bal)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryGetCostFallbackBalancesMissingRuntimeStats(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	statDay := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(`(?s)SELECT s\.current_balance,.*FROM supplier_provider_runtime_stats s.*WHERE s\.provider_id = \$1`).
+		WithArgs(int64(42), sqlmock.AnyArg()).
+		WillReturnError(sql.ErrNoRows)
+
+	bal, ok, err := repo.GetCostFallbackBalances(context.Background(), 42, statDay)
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Zero(t, bal)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryGetCostFallbackBalancesNegativeBalance(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	statDay := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(`(?s)SELECT s\.current_balance,.*FROM supplier_provider_runtime_stats s.*WHERE s\.provider_id = \$1`).
+		WithArgs(int64(42), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"current_balance", "day_start_balance"}).AddRow(-1.0, 100.0))
+
+	bal, ok, err := repo.GetCostFallbackBalances(context.Background(), 42, statDay)
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Zero(t, bal)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryGetCostFallbackBalancesQueryError(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	statDay := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(`(?s)SELECT s\.current_balance,.*FROM supplier_provider_runtime_stats s.*WHERE s\.provider_id = \$1`).
+		WithArgs(int64(42), sqlmock.AnyArg()).
+		WillReturnError(errors.New("db down"))
+
+	_, ok, err := repo.GetCostFallbackBalances(context.Background(), 42, statDay)
+	require.Error(t, err)
+	require.False(t, ok)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryUpdateCostDetailedUpsertsRawAndWarning(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	historicalDay := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	raw := 45.625
+	warning := "上游成本 45.63 与本地成本 5.00 偏差 89%，已按本地成本展示"
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO supplier_provider_metric_snapshots (provider_id, current_balance, today_cost, captured_at)")).
+		WithArgs(int64(42), supplierProviderNonNilArg{}, 5.0, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO supplier_provider_daily_stats")).
+		WithArgs(int64(42), sqlmock.AnyArg(), 5.0, 45.625, warning).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	require.NoError(t, repo.UpdateCostDetailed(context.Background(), 42, 5.0, &raw, &warning, historicalDay))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryUpdateCostDetailedNilsRawAndWarning(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	historicalDay := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO supplier_provider_metric_snapshots (provider_id, current_balance, today_cost, captured_at)")).
+		WithArgs(int64(42), supplierProviderNonNilArg{}, 5.0, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO supplier_provider_daily_stats")).
+		WithArgs(int64(42), sqlmock.AnyArg(), 5.0, sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	require.NoError(t, repo.UpdateCostDetailed(context.Background(), 42, 5.0, nil, nil, historicalDay))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryGetLocalCostForDay(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	day := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(`(?s)WITH provider_account_matches.*COUNT\(DISTINCT u\.local_account_id\).*WHERE ul\.created_at >= \$2.*ul\.created_at < \$3`).
+		WithArgs(int64(42), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"local_cost", "matched_count"}).AddRow(15.25, 1))
+
+	local, ok, err := repo.GetLocalCostForDay(context.Background(), 42, day)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, 15.25, local)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryGetLocalCostForDayNoMatch(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	day := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(`(?s)WITH provider_account_matches.*COUNT\(DISTINCT u\.local_account_id\).*WHERE ul\.created_at >= \$2.*ul\.created_at < \$3`).
+		WithArgs(int64(42), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"local_cost", "matched_count"}).AddRow(0.0, 0))
+
+	local, ok, err := repo.GetLocalCostForDay(context.Background(), 42, day)
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Equal(t, 0.0, local)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

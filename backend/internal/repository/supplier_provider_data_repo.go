@@ -1523,14 +1523,85 @@ WHERE provider_id = $1 AND active = TRUE AND NOT (upstream_group_key = ANY($2))`
 }
 
 func (r *supplierProviderDataRepository) UpdateBalance(ctx context.Context, providerID int64, balance float64, seenAt time.Time) error {
-	return r.updateMetric(ctx, providerID, &balance, nil, seenAt)
+	return r.updateMetric(ctx, providerID, &balance, nil, nil, nil, seenAt)
 }
 
 func (r *supplierProviderDataRepository) UpdateCost(ctx context.Context, providerID int64, cost float64, seenAt time.Time) error {
-	return r.updateMetric(ctx, providerID, nil, &cost, seenAt)
+	return r.updateMetric(ctx, providerID, nil, &cost, nil, nil, seenAt)
 }
 
-func (r *supplierProviderDataRepository) updateMetric(ctx context.Context, providerID int64, balance *float64, cost *float64, seenAt time.Time) error {
+// UpdateCostDetailed 写入成本生效值（today_cost），同时记录上游原始值 rawUpstream 与
+// 偏差覆盖提示 costWarning；rawUpstream/warning 为 nil 时表示不记录。
+func (r *supplierProviderDataRepository) UpdateCostDetailed(ctx context.Context, providerID int64, cost float64, rawUpstream *float64, warning *string, statDay time.Time) error {
+	return r.updateMetric(ctx, providerID, nil, &cost, rawUpstream, warning, statDay)
+}
+
+// GetCostFallbackBalances 返回成本保底估算所需的余额基线：
+// CurrentBalance 为当前余额（runtime_stats.current_balance），
+// DayStartBalance 为统计日 statDay 当天开始时的余额（前一统计日的 daily_stats 最终余额）。
+// 当前余额记录缺失或为负时返回 ok=false，表示无法进行保底估算。
+func (r *supplierProviderDataRepository) GetCostFallbackBalances(ctx context.Context, providerID int64, statDay time.Time) (service.SupplierProviderCostFallbackBalance, bool, error) {
+	var bal service.SupplierProviderCostFallbackBalance
+	err := r.db.QueryRowContext(ctx, `
+SELECT s.current_balance,
+       COALESCE((SELECT d.current_balance FROM supplier_provider_daily_stats d
+                 WHERE d.provider_id = $1 AND d.stat_date < $2::date
+                 ORDER BY d.stat_date DESC LIMIT 1), 0)
+FROM supplier_provider_runtime_stats s
+WHERE s.provider_id = $1`, providerID, supplierStatDate(statDay)).Scan(&bal.CurrentBalance, &bal.DayStartBalance)
+	if err == sql.ErrNoRows {
+		return service.SupplierProviderCostFallbackBalance{}, false, nil
+	}
+	if err != nil {
+		return service.SupplierProviderCostFallbackBalance{}, false, fmt.Errorf("query supplier cost fallback balances: %w", err)
+	}
+	if bal.CurrentBalance < 0 {
+		return service.SupplierProviderCostFallbackBalance{}, false, nil
+	}
+	return bal, true, nil
+}
+
+// GetLocalCostForDay 返回指定供应商在指定统计日的本地成本
+// （唯一匹配本地账号 usage_logs.actual_cost 之和，口径与 ListCostBreakdowns 一致）。
+// ok=false 表示当天没有唯一匹配且产生用量的本地账号，无法用本地口径校验。
+func (r *supplierProviderDataRepository) GetLocalCostForDay(ctx context.Context, providerID int64, day time.Time) (float64, bool, error) {
+	start := supplierStatDate(day)
+	end := start.AddDate(0, 0, 1)
+	var localCost float64
+	var matchedCount int
+	err := r.db.QueryRowContext(ctx, `
+WITH provider_account_matches AS (
+  SELECT p.id AS provider_id, local_account.id AS local_account_id
+  FROM supplier_providers p
+  JOIN supplier_provider_accounts spa
+    ON spa.provider_id = p.id
+   AND spa.active = TRUE
+  JOIN accounts local_account
+    ON local_account.deleted_at IS NULL
+   AND regexp_replace(lower(local_account.name), '[^[:alnum:]]', '', 'g')
+     = regexp_replace(lower(p.account_name_prefix || spa.name), '[^[:alnum:]]', '', 'g')
+  WHERE p.id = $1
+  GROUP BY p.id, local_account.id
+),
+unique_account_matches AS (
+  SELECT MIN(provider_id) AS provider_id, local_account_id
+  FROM provider_account_matches
+  GROUP BY local_account_id
+  HAVING COUNT(*) = 1
+)
+SELECT COALESCE(SUM(ul.actual_cost), 0) AS local_cost,
+       COUNT(DISTINCT u.local_account_id) AS matched_count
+FROM usage_logs ul
+JOIN unique_account_matches u ON u.local_account_id = ul.account_id
+WHERE ul.created_at >= $2
+  AND ul.created_at < $3`, providerID, start, end).Scan(&localCost, &matchedCount)
+	if err != nil {
+		return 0, false, fmt.Errorf("query supplier local cost for day: %w", err)
+	}
+	return localCost, matchedCount > 0, nil
+}
+
+func (r *supplierProviderDataRepository) updateMetric(ctx context.Context, providerID int64, balance *float64, cost *float64, rawUpstream *float64, warning *string, seenAt time.Time) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin supplier metric update: %w", err)
@@ -1564,9 +1635,13 @@ ON CONFLICT (provider_id, stat_date) DO UPDATE SET current_balance=EXCLUDED.curr
 			return fmt.Errorf("insert supplier cost snapshot: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
-INSERT INTO supplier_provider_daily_stats (provider_id, stat_date, today_cost)
-VALUES ($1,$2,$3)
-ON CONFLICT (provider_id, stat_date) DO UPDATE SET today_cost=EXCLUDED.today_cost, updated_at=NOW()`, providerID, statDay, *cost); err != nil {
+INSERT INTO supplier_provider_daily_stats (provider_id, stat_date, today_cost, raw_upstream_cost, cost_warning)
+VALUES ($1,$2,$3,$4,$5)
+ON CONFLICT (provider_id, stat_date) DO UPDATE SET
+  today_cost=EXCLUDED.today_cost,
+  raw_upstream_cost=EXCLUDED.raw_upstream_cost,
+  cost_warning=EXCLUDED.cost_warning,
+  updated_at=NOW()`, providerID, statDay, *cost, rawUpstream, warning); err != nil {
 			return fmt.Errorf("upsert supplier daily cost: %w", err)
 		}
 	}

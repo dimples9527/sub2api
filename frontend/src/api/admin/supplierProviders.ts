@@ -180,6 +180,8 @@ export interface SupplierProviderCostTrendPoint {
   date: string
   upstream_cost: number
   local_cost: number
+  raw_upstream_cost?: number  // 上游接口原始成本（未做偏差覆盖）
+  warning?: string            // 偏差覆盖提示（已按本地成本展示）
   deviation?: number   // upstream - local
   deviationPercent?: number
 }
@@ -190,6 +192,22 @@ export interface SupplierProviderCostBreakdown {
   provider_type: string
   upstream_cost: number
   local_cost: number
+  raw_upstream_cost?: number  // 上游接口原始成本（未做偏差覆盖）
+  cost_warning?: string       // 偏差覆盖提示（已按本地成本展示）
+}
+
+export interface SupplierProviderCostDeviationSettings {
+  threshold: number
+}
+
+export interface SupplierProviderSyncResult {
+  provider_id: number
+  provider_name: string
+  scope: string
+  status: string
+  message: string
+  started_at: string
+  finished_at: string
 }
 
 export interface SupplierProviderCostTrendResult {
@@ -386,6 +404,31 @@ export async function listAuthHistory(id: number, params: SupplierProviderAuthHi
   return data
 }
 
+export async function getCostDeviationSettings(): Promise<SupplierProviderCostDeviationSettings> {
+  const { data } = await apiClient.get<SupplierProviderCostDeviationSettings>(
+    '/admin/supplier-management/cost-deviation-settings'
+  )
+  return data
+}
+
+export async function updateCostDeviationSettings(threshold: number): Promise<SupplierProviderCostDeviationSettings> {
+  const { data } = await apiClient.put<SupplierProviderCostDeviationSettings>(
+    '/admin/supplier-management/cost-deviation-settings',
+    { threshold }
+  )
+  return data
+}
+
+/** 获取指定供应商指定日期的成本（date 格式 YYYY-MM-DD，空则取今天）。 */
+export async function syncProviderCostOnDate(id: number, date?: string): Promise<SupplierProviderSyncResult> {
+  const { data } = await apiClient.post<SupplierProviderSyncResult>(
+    `/admin/supplier-management/providers/${id}/sync/cost`,
+    undefined,
+    { params: date ? { date } : {} }
+  )
+  return data
+}
+
 export const supplierProvidersAPI = {
   list,
   listCostTrends,
@@ -398,7 +441,10 @@ export const supplierProvidersAPI = {
   setDefault,
   refreshToken,
   getAuthStatus,
-  listAuthHistory
+  listAuthHistory,
+  getCostDeviationSettings,
+  updateCostDeviationSettings,
+  syncProviderCostOnDate
 }
 
 export default supplierProvidersAPI

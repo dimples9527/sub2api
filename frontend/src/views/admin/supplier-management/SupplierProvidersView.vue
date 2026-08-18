@@ -322,14 +322,33 @@
             </div>
           </div>
         </div>
-        <button
-          class="sp-button small ghost"
-          type="button"
-          :disabled="costTrendLoading"
-          data-test="supplier-cost-refresh"
-          title="按当前时间范围向上游回补成本并刷新曲线（NewAPI 支持历史，Sub2API 仅当天）"
-          @click="refreshCostTrends"
-        >{{ costTrendLoading ? '回补中…' : '重新获取' }}</button>
+        <div class="sp-cost-trend-head-actions">
+          <div class="sp-single-day-fetch" data-test="supplier-cost-single-day-fetch">
+            <Input
+              v-model="costSingleDay"
+              type="date"
+              class="input sp-single-day-input"
+              aria-label="获取指定日期成本"
+              title="获取指定供应商在指定日期的成本"
+            />
+            <button
+              class="sp-button small"
+              type="button"
+              :disabled="costSingleDayLoading || costTrendProviderId === ''"
+              data-test="supplier-cost-single-day"
+              title="获取指定供应商指定日期的成本并刷新曲线"
+              @click="fetchSingleDayCost"
+            >{{ costSingleDayLoading ? '获取中…' : '获取指定日期成本' }}</button>
+          </div>
+          <button
+            class="sp-button small ghost"
+            type="button"
+            :disabled="costTrendLoading"
+            data-test="supplier-cost-refresh"
+            title="按当前时间范围向上游回补成本并刷新曲线（NewAPI 支持历史，Sub2API 仅当天）"
+            @click="refreshCostTrends"
+          >{{ costTrendLoading ? '回补中…' : '重新获取' }}</button>
+        </div>
       </header>
       <div class="sp-panel-body sp-cost-trend-body" data-test="supplier-cost-trend-body">
         <div class="sp-health-chart-controls">
@@ -378,6 +397,12 @@
           <div v-else-if="costTrendLoading" class="sp-health-chart-empty">成本曲线加载中…</div>
           <div v-else class="sp-health-chart-empty">暂无按天成本数据，可调整时间范围或供应商后点「重新获取」向上游回补</div>
         </div>
+        <div v-if="costTrendWarnings.length" class="sp-cost-warnings" data-test="supplier-cost-warnings">
+          <div v-for="warn in costTrendWarnings" :key="warn.date" class="sp-cost-warning-item" data-test="supplier-cost-warning-item">
+            <span class="sp-cost-warning-date">{{ formatCostTrendLabel(warn.date) }}</span>
+            <span>{{ warn.warning }}</span>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -420,6 +445,12 @@
           />
           <div v-else-if="costBreakdownLoading" class="sp-health-chart-empty">供应商成本加载中…</div>
           <div v-else class="sp-health-chart-empty">暂无供应商成本数据，可调整时间范围后重试</div>
+        </div>
+        <div v-if="costBreakdownWarnings.length" class="sp-cost-warnings" data-test="supplier-cost-breakdown-warnings">
+          <div v-for="item in costBreakdownWarnings" :key="item.provider_id" class="sp-cost-warning-item" data-test="supplier-cost-breakdown-warning-item">
+            <span class="sp-cost-warning-date">{{ item.provider_name }}</span>
+            <span>{{ item.cost_warning }}</span>
+          </div>
         </div>
       </div>
     </section>
@@ -1157,11 +1188,14 @@ const costTrendBreakdown = ref<SupplierProviderCostBreakdown[]>([])
 const recharges = ref<UpstreamBalanceRecharge[]>([])
 const rechargesLoading = ref(false)
 const rechargeDays = 30
-const deviationThresholdOptions: SelectOption[] = Array.from({ length: 31 }, (_, value) => ({
+const deviationThresholdOptions: SelectOption[] = Array.from({ length: 51 }, (_, value) => ({
   value: value / 100,
   label: `${value}%`,
 }))
-const deviationThreshold = ref(0.15) // 15%
+const deviationThreshold = ref(0.5) // 50%，可配置，后端持久化
+const deviationThresholdReady = ref(false) // 首次从后端加载完成前不触发持久化
+const costSingleDay = ref(formatLocalDate(new Date()))
+const costSingleDayLoading = ref(false)
 const search = ref('')
 const providerQuickFilter = ref<ProviderQuickFilter>('all')
 const filter = ref('all')
@@ -1443,6 +1477,23 @@ const costBreakdown = computed(() =>
   })),
 )
 
+// 上游/本地偏差过大被改写为本地成本的日期提示。
+const costTrendWarnings = computed(() =>
+  costTrendPoints.value.filter(point => point.warning).map(point => ({
+    date: point.date,
+    warning: point.warning as string,
+  })),
+)
+
+// 按供应商拆分中因偏差过大被改写为本地成本的供应商提示。
+const costBreakdownWarnings = computed(() =>
+  costTrendBreakdown.value.filter(item => item.cost_warning).map(item => ({
+    provider_id: item.provider_id,
+    provider_name: item.provider_name,
+    cost_warning: item.cost_warning as string,
+  })),
+)
+
 const costTrendChartData = computed(() => {
   if (!costTrendPoints.value.length) return null
   const hasValue = costTrendPoints.value.some(point => Number(point.upstream_cost || 0) > 0 || Number(point.local_cost || 0) > 0)
@@ -1641,8 +1692,14 @@ watch(search, () => {
   searchTimer = window.setTimeout(loadProviders, 350)
 })
 
+watch(deviationThreshold, value => {
+  if (!deviationThresholdReady.value) return
+  persistCostDeviationThreshold(value)
+})
+
 onMounted(async () => {
   await loadProviderTypes()
+  await loadCostDeviationSettings()
   await Promise.all([loadProviders(), loadCostTrendData(), loadCostBreakdownData(), loadBalanceSummary()])
 })
 
@@ -1735,6 +1792,46 @@ async function refreshCostTrends() {
     appStore.showError(errorMessage(err, '回补上游成本失败'))
   } finally {
     costTrendLoading.value = false
+  }
+  await loadCostTrendData()
+}
+
+async function loadCostDeviationSettings() {
+  try {
+    const settings = await supplierProvidersAPI.getCostDeviationSettings()
+    const value = Number(settings?.threshold ?? 0.5)
+    if (value > 0) deviationThreshold.value = value
+  } catch {
+    // 设置读取失败时静默回退到默认 0.5。
+    deviationThreshold.value = 0.5
+  } finally {
+    deviationThresholdReady.value = true
+  }
+}
+
+async function persistCostDeviationThreshold(value: number) {
+  try {
+    await supplierProvidersAPI.updateCostDeviationSettings(value)
+  } catch (err) {
+    appStore.showError(errorMessage(err, '保存成本偏差阈值失败'))
+  }
+}
+
+async function fetchSingleDayCost() {
+  const providerId = typeof costTrendProviderId.value === 'number' ? costTrendProviderId.value : 0
+  if (!providerId) {
+    appStore.showWarning('请先在上方选择供应商')
+    return
+  }
+  costSingleDayLoading.value = true
+  try {
+    const result = await supplierProvidersAPI.syncProviderCostOnDate(providerId, costSingleDay.value)
+    const message = result?.message ? `：${result.message}` : ''
+    appStore.showSuccess(`已获取 ${costSingleDay.value} 成本${message}`)
+  } catch (err) {
+    appStore.showError(errorMessage(err, '获取指定日期成本失败'))
+  } finally {
+    costSingleDayLoading.value = false
   }
   await loadCostTrendData()
 }
@@ -4109,6 +4206,49 @@ function errorMessage(err: unknown, fallback: string): string {
   justify-content: space-between;
   gap: 0.625rem;
   flex-wrap: wrap;
+}
+
+.sp-cost-trend-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  flex-wrap: wrap;
+}
+
+.sp-single-day-fetch {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.sp-single-day-input {
+  width: 11rem;
+}
+
+.sp-cost-warnings {
+  margin-top: 0.625rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.sp-cost-warning-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.375rem 0.625rem;
+  border-radius: 0.375rem;
+  background: rgba(220, 38, 38, 0.08);
+  border: 1px solid rgba(220, 38, 38, 0.22);
+  color: #b91c1c;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.sp-cost-warning-date {
+  flex-shrink: 0;
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 .sp-health-cost-section-head {

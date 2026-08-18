@@ -187,6 +187,14 @@ type SupplierCleanupCounts struct {
 	Groups          int
 }
 
+// SupplierProviderCostFallbackBalance 保存成本保底估算所需的余额基线。
+// CurrentBalance 为当前余额（supplier_provider_runtime_stats.current_balance），
+// DayStartBalance 为统计日 statDay 当天开始时的余额（前一统计日的最终余额）。
+type SupplierProviderCostFallbackBalance struct {
+	CurrentBalance  float64
+	DayStartBalance float64
+}
+
 type SupplierProviderDataRepository interface {
 	ListAccounts(ctx context.Context, params SupplierProviderDataListParams) (SupplierProviderAccountListResult, error)
 	IsUniqueMatchedLocalAccount(ctx context.Context, localAccountID int64) (bool, error)
@@ -221,6 +229,13 @@ type SupplierProviderDataRepository interface {
 	ReplaceGroups(ctx context.Context, providerID int64, items []SupplierProviderRemoteGroup, seenAt time.Time) (SupplierSyncCounts, error)
 	UpdateBalance(ctx context.Context, providerID int64, balance float64, seenAt time.Time) error
 	UpdateCost(ctx context.Context, providerID int64, cost float64, seenAt time.Time) error
+	// UpdateCostDetailed 写入成本生效值与上游原始值、偏差覆盖提示。
+	UpdateCostDetailed(ctx context.Context, providerID int64, cost float64, rawUpstream *float64, warning *string, statDay time.Time) error
+	// GetLocalCostForDay 获取指定供应商指定统计日的本地成本；ok=false 表示无本地口径可校验。
+	GetLocalCostForDay(ctx context.Context, providerID int64, day time.Time) (float64, bool, error)
+	// GetCostFallbackBalances 获取成本保底估算所需的余额基线；
+	// ok=false 表示当前余额或当天起始余额缺失，无法进行保底估算。
+	GetCostFallbackBalances(ctx context.Context, providerID int64, statDay time.Time) (SupplierProviderCostFallbackBalance, bool, error)
 	CreateSyncRun(ctx context.Context, run *SupplierProviderSyncRun) error
 	FinishSyncRun(ctx context.Context, run *SupplierProviderSyncRun) error
 	UpdateSyncStatus(ctx context.Context, providerID int64, status, message string, syncedAt time.Time) error
@@ -332,18 +347,33 @@ const (
 )
 
 type SupplierProviderSyncService struct {
-	providerRepo SupplierProviderRepository
-	dataRepo     SupplierProviderDataRepository
-	remote       SupplierProviderRemoteClient
-	encryptor    SecretEncryptor
-	syncLock     SupplierProviderSyncLock
-	groupMatcher SupplierProviderGroupAutoMatcher
+	providerRepo      SupplierProviderRepository
+	dataRepo          SupplierProviderDataRepository
+	remote            SupplierProviderRemoteClient
+	encryptor         SecretEncryptor
+	syncLock          SupplierProviderSyncLock
+	groupMatcher      SupplierProviderGroupAutoMatcher
+	thresholdProvider SupplierCostDeviationThresholdProvider
 }
 
 func (s *SupplierProviderSyncService) SetGroupMatcher(matcher SupplierProviderGroupAutoMatcher) {
 	if s != nil {
 		s.groupMatcher = matcher
 	}
+}
+
+// SetCostDeviationThresholdProvider 注入成本偏差覆盖阈值提供方，未注入时使用默认阈值。
+func (s *SupplierProviderSyncService) SetCostDeviationThresholdProvider(provider SupplierCostDeviationThresholdProvider) {
+	if s != nil {
+		s.thresholdProvider = provider
+	}
+}
+
+func (s *SupplierProviderSyncService) costDeviationThreshold(ctx context.Context) float64 {
+	if s != nil && s.thresholdProvider != nil {
+		return s.thresholdProvider.SupplierCostDeviationThreshold(ctx)
+	}
+	return DefaultSupplierCostDeviationThreshold
 }
 
 func NewSupplierProviderSyncService(providerRepo SupplierProviderRepository, dataRepo SupplierProviderDataRepository, remote SupplierProviderRemoteClient, encryptor SecretEncryptor, syncLock SupplierProviderSyncLock) *SupplierProviderSyncService {
@@ -597,6 +627,7 @@ func (s *SupplierProviderSyncService) backfillProviderCosts(ctx context.Context,
 
 		supportsHistory := supplierProviderSupportsHistoricalCost(locked)
 		today := supplierCostBackfillToday()
+		threshold := s.costDeviationThreshold(ctx)
 		var firstErr error
 		authFailure := false
 		sessionFailure := false
@@ -655,7 +686,8 @@ func (s *SupplierProviderSyncService) backfillProviderCosts(ctx context.Context,
 				}
 				continue
 			}
-			if updateErr := s.dataRepo.UpdateCost(ctx, locked.ID, cost, cursor); updateErr != nil {
+			effective, rawUpstream, warning := s.resolveCostDeviation(ctx, locked.ID, cost, cursor, threshold)
+			if updateErr := s.dataRepo.UpdateCostDetailed(ctx, locked.ID, effective, rawUpstream, warning, cursor); updateErr != nil {
 				item.Status = SupplierSyncStatusFailed
 				item.Message = updateErr.Error()
 				partial.FailedCount++
@@ -668,7 +700,7 @@ func (s *SupplierProviderSyncService) backfillProviderCosts(ctx context.Context,
 			}
 
 			item.Status = SupplierSyncStatusSuccess
-			item.Cost = cost
+			item.Cost = effective
 			partial.SuccessCount++
 			partial.Items = append(partial.Items, item)
 			run.Counts.CheckedCount++
@@ -1107,14 +1139,39 @@ func (s *SupplierProviderSyncService) syncCostStage(ctx context.Context, provide
 	if requestErr == nil {
 		SupplierSyncProgress(ctx, progressStage, "成本接口请求成功，正在写入本地数据", nil)
 		SupplierSyncProgress(ctx, SupplierSyncProgressStagePersist, "正在写入成本数据", nil)
-		// 按成本归属日写入 daily_stats，避免历史回补落到当天。
-		err = s.dataRepo.UpdateCost(ctx, provider.ID, cost, statDay)
+		// 按成本归属日写入 daily_stats，避免历史回补落到当天；
+		// 上游成本与本地成本差距过大时直接改写为本地成本并记录提示。
+		threshold := s.costDeviationThreshold(ctx)
+		effective, rawUpstream, warning := s.resolveCostDeviation(ctx, provider.ID, cost, statDay, threshold)
+		err = s.dataRepo.UpdateCostDetailed(ctx, provider.ID, effective, rawUpstream, warning, statDay)
 		if err == nil {
 			// 定时同步写入成功后同样失效成本趋势缓存。
 			invalidateSupplierCostTrendCache()
 		}
 	} else {
-		err = requestErr
+		// 成本接口获取不到数据时，尝试用当天起始余额 - 当前余额做保底估算；
+		// 认证失败、会话失败属于需要停用供应商或无法继续同步的情况，不走保底。
+		if !IsSupplierProviderAuthFailure(requestErr) && !IsSupplierProviderSessionFailure(requestErr) {
+			bal, ok, balErr := s.dataRepo.GetCostFallbackBalances(ctx, provider.ID, statDay)
+			if balErr == nil && ok {
+				if fallbackCost, usable := supplierCostFallbackEstimate(bal); usable {
+					SupplierSyncProgress(ctx, progressStage, "成本接口请求失败，正在用余额差额保底估算成本", nil)
+					SupplierSyncProgress(ctx, SupplierSyncProgressStagePersist, "正在写入保底估算的成本数据", nil)
+					cost = fallbackCost
+					err = s.dataRepo.UpdateCost(ctx, provider.ID, cost, statDay)
+					if err == nil {
+						// 保底估算写入成功后同样失效成本趋势缓存。
+						invalidateSupplierCostTrendCache()
+					}
+				} else {
+					err = requestErr
+				}
+			} else {
+				err = requestErr
+			}
+		} else {
+			err = requestErr
+		}
 	}
 	result.Counts = SupplierSyncCounts{CheckedCount: 1, UpdatedCount: boolToInt(err == nil)}
 	result.FinishedAt = time.Now()
@@ -1289,6 +1346,30 @@ func supplierSyncMessage(status string) string {
 	default:
 		return ""
 	}
+}
+
+// supplierCostFallbackEstimate 根据余额基线计算成本保底估算值。
+// 仅当当天起始余额大于当前余额时返回有效估算（余额未减少视为无成本消耗）。
+func supplierCostFallbackEstimate(bal SupplierProviderCostFallbackBalance) (float64, bool) {
+	estimated := bal.DayStartBalance - bal.CurrentBalance
+	if estimated <= 0 {
+		return 0, false
+	}
+	return estimated, true
+}
+
+// resolveCostDeviation 计算写入成本时的偏差覆盖结果：上游成本与本地成本差距超过阈值时
+// 取本地成本并记录提示；否则保持上游成本。rawUpstream 始终为接口原始上游值。
+func (s *SupplierProviderSyncService) resolveCostDeviation(ctx context.Context, providerID int64, upstream float64, statDay time.Time, threshold float64) (effective float64, rawUpstream *float64, warning *string) {
+	raw := upstream
+	rawUpstream = &raw
+	if local, ok, err := s.dataRepo.GetLocalCostForDay(ctx, providerID, statDay); err == nil && ok && local > 0 {
+		if supplierCostDeviation(upstream, local) > threshold {
+			msg := supplierCostDeviationWarning(upstream, local)
+			return local, rawUpstream, &msg
+		}
+	}
+	return upstream, rawUpstream, nil
 }
 
 func boolToInt(value bool) int {

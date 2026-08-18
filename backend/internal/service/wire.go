@@ -610,9 +610,11 @@ func ProvideSupplierProviderService(
 	encryptor SecretEncryptor,
 	typeRepo SupplierProviderTypeRepository,
 	tokenCache SupplierProviderTokenCache,
+	costDeviationSettings *SupplierCostDeviationSettingsService,
 ) *SupplierProviderService {
 	svc := NewSupplierProviderService(repo, encryptor, typeRepo)
 	svc.SetTokenCache(tokenCache)
+	svc.SetCostDeviationThresholdProvider(costDeviationSettings)
 	return svc
 }
 
@@ -884,6 +886,7 @@ var ProviderSet = wire.NewSet(
 	ProvideUpstreamBillingProbeService,
 	ProvideOllamaCloudUsageService,
 	ProvideSettingService,
+	NewSupplierCostDeviationSettingsService,
 	ProvideSupplierProviderService,
 	SupplierBalanceAlertWiringSet,
 	SupplierNotificationWiringSet,

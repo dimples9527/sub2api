@@ -15,6 +15,7 @@ type supplierProviderRepoStub struct {
 	costTrends                   []SupplierProviderCostTrendPoint
 	costBreakdowns               []SupplierProviderCostBreakdown
 	balanceSummaryDays           []SupplierProviderBalanceSummaryDay
+	balanceCosts                 []SupplierProviderBalanceCostDay
 	costTrendCalls               int
 	disableAfterAuthFailureCalls int
 	disableMessages              []string
@@ -23,6 +24,14 @@ type supplierProviderRepoStub struct {
 type supplierProviderTypeRepoStub struct {
 	items []*SupplierProviderType
 	next  int64
+}
+
+type supplierCostDeviationThresholdStub struct {
+	threshold float64
+}
+
+func (s supplierCostDeviationThresholdStub) SupplierCostDeviationThreshold(context.Context) float64 {
+	return s.threshold
 }
 
 func (r *supplierProviderRepoStub) List(_ context.Context, params SupplierProviderListParams) ([]*SupplierProvider, int64, error) {
@@ -66,6 +75,13 @@ func (r *supplierProviderRepoStub) ListBalanceSummaryDays(_ context.Context) ([]
 		return r.balanceSummaryDays, nil
 	}
 	return []SupplierProviderBalanceSummaryDay{}, nil
+}
+
+func (r *supplierProviderRepoStub) ListBalanceCosts(_ context.Context, _, _ time.Time, _ int64) ([]SupplierProviderBalanceCostDay, error) {
+	if r.balanceCosts != nil {
+		return r.balanceCosts, nil
+	}
+	return []SupplierProviderBalanceCostDay{}, nil
 }
 
 func (r *supplierProviderRepoStub) Summary(_ context.Context, params SupplierProviderListParams) (SupplierProviderSummary, error) {
@@ -551,7 +567,9 @@ func TestSupplierProviderServiceListCostTrendsIncludesCostBreakdown(t *testing.T
 		UpstreamCost: 42.5,
 		LocalCost:    17.25,
 	}}}
+	// 阈值设为 1.0 禁用偏差覆盖，聚焦拆分成本本身的返回。
 	svc := NewSupplierProviderService(repo, supplierEncryptorStub{})
+	svc.SetCostDeviationThresholdProvider(supplierCostDeviationThresholdStub{threshold: 1.0})
 
 	result, err := svc.ListCostTrendsByDateRange(context.Background(), "2026-07-10", "2026-07-12", 0)
 	require.NoError(t, err)
@@ -566,6 +584,149 @@ func TestSupplierProviderServiceListCostTrendsIncludesCostBreakdown(t *testing.T
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(payload, &body))
 	require.Contains(t, body, "breakdown")
+}
+
+func TestSupplierProviderServiceListCostTrendsFillsUpstreamCostFromBalanceFallback(t *testing.T) {
+	invalidateSupplierCostTrendCache()
+	defer invalidateSupplierCostTrendCache()
+
+	repo := &supplierProviderRepoStub{
+		costTrends: []SupplierProviderCostTrendPoint{
+			{Date: "2026-07-10", UpstreamCost: 1, LocalCost: 2},
+			{Date: "2026-07-11", UpstreamCost: 0, LocalCost: 0},
+		},
+		costBreakdowns: []SupplierProviderCostBreakdown{
+			{ProviderID: 7, ProviderName: "甲", ProviderType: "sub2api", UpstreamCost: 42.5, LocalCost: 17.25},
+			{ProviderID: 8, ProviderName: "乙", ProviderType: "sub2api", UpstreamCost: 0, LocalCost: 0},
+		},
+		balanceCosts: []SupplierProviderBalanceCostDay{
+			{Date: "2026-07-11", ProviderID: 7, BalanceCost: 5},
+			{Date: "2026-07-11", ProviderID: 8, BalanceCost: 7},
+			{Date: "2026-07-12", ProviderID: 7, BalanceCost: 3},
+			{Date: "2026-07-10", ProviderID: 7, BalanceCost: 99},
+		},
+	}
+	// 阈值设为 1.0 禁用偏差覆盖，聚焦余额保底填充本身。
+	svc := NewSupplierProviderService(repo, supplierEncryptorStub{})
+	svc.SetCostDeviationThresholdProvider(supplierCostDeviationThresholdStub{threshold: 1.0})
+
+	result, err := svc.ListCostTrendsByDateRange(context.Background(), "2026-07-10", "2026-07-12", 0)
+	require.NoError(t, err)
+	require.Equal(t, 3, result.Days)
+
+	// 已有真实成本的日期不被余额保底覆盖。
+	require.Equal(t, 1.0, result.Points[0].UpstreamCost)
+	// UpstreamCost<=0 的日期按当天各供应商余额差额之和填充。
+	require.Equal(t, 12.0, result.Points[1].UpstreamCost)
+	// 只有余额快照、没有 daily_stats 的日期被补上。
+	require.Equal(t, 3.0, result.Points[2].UpstreamCost)
+
+	// 拆分中已有真实成本的供应商不被覆盖。
+	require.Equal(t, 42.5, result.Breakdown[0].UpstreamCost)
+	// 拆分中 UpstreamCost<=0 的供应商按范围内余额差额之和填充。
+	require.Equal(t, 7.0, result.Breakdown[1].UpstreamCost)
+}
+
+func TestSupplierProviderServiceListCostTrendsOverridesUpstreamWithLocalWhenDeviationExceedsThreshold(t *testing.T) {
+	invalidateSupplierCostTrendCache()
+	defer invalidateSupplierCostTrendCache()
+
+	raw := 100.0
+	repo := &supplierProviderRepoStub{
+		costTrends: []SupplierProviderCostTrendPoint{
+			{Date: "2026-08-10", UpstreamCost: 100, LocalCost: 10, RawUpstreamCost: &raw},
+		},
+		costBreakdowns: []SupplierProviderCostBreakdown{
+			{ProviderID: 7, ProviderName: "甲", ProviderType: "sub2api", UpstreamCost: 100, LocalCost: 10, RawUpstreamCost: 100},
+		},
+	}
+	svc := NewSupplierProviderService(repo, supplierEncryptorStub{})
+	svc.SetCostDeviationThresholdProvider(supplierCostDeviationThresholdStub{threshold: 0.5})
+
+	result, err := svc.ListCostTrendsByDateRange(context.Background(), "2026-08-10", "2026-08-10", 0)
+	require.NoError(t, err)
+
+	// 偏差 90% > 50%，展示值改写为本地成本并记录警告。
+	require.Equal(t, 10.0, result.Points[0].UpstreamCost)
+	require.Contains(t, result.Points[0].Warning, "已按本地成本展示")
+	require.Equal(t, 10.0, result.Breakdown[0].UpstreamCost)
+	require.Contains(t, result.Breakdown[0].CostWarning, "已按本地成本展示")
+}
+
+func TestSupplierProviderServiceListCostTrendsDoesNotOverrideWithinThreshold(t *testing.T) {
+	invalidateSupplierCostTrendCache()
+	defer invalidateSupplierCostTrendCache()
+
+	repo := &supplierProviderRepoStub{
+		costTrends: []SupplierProviderCostTrendPoint{
+			{Date: "2026-08-11", UpstreamCost: 100, LocalCost: 60},
+		},
+		costBreakdowns: []SupplierProviderCostBreakdown{
+			{ProviderID: 7, ProviderName: "甲", ProviderType: "sub2api", UpstreamCost: 100, LocalCost: 60},
+		},
+	}
+	svc := NewSupplierProviderService(repo, supplierEncryptorStub{})
+	svc.SetCostDeviationThresholdProvider(supplierCostDeviationThresholdStub{threshold: 0.5})
+
+	result, err := svc.ListCostTrendsByDateRange(context.Background(), "2026-08-11", "2026-08-11", 0)
+	require.NoError(t, err)
+
+	// 偏差 40% <= 50%，不覆盖。
+	require.Equal(t, 100.0, result.Points[0].UpstreamCost)
+	require.Empty(t, result.Points[0].Warning)
+	require.Equal(t, 100.0, result.Breakdown[0].UpstreamCost)
+	require.Empty(t, result.Breakdown[0].CostWarning)
+}
+
+func TestSupplierProviderServiceListCostTrendsDoesNotOverrideWithoutLocalCost(t *testing.T) {
+	invalidateSupplierCostTrendCache()
+	defer invalidateSupplierCostTrendCache()
+
+	repo := &supplierProviderRepoStub{
+		costTrends: []SupplierProviderCostTrendPoint{
+			{Date: "2026-08-12", UpstreamCost: 100, LocalCost: 0},
+		},
+		costBreakdowns: []SupplierProviderCostBreakdown{
+			{ProviderID: 7, ProviderName: "甲", ProviderType: "sub2api", UpstreamCost: 100, LocalCost: 0},
+		},
+	}
+	svc := NewSupplierProviderService(repo, supplierEncryptorStub{})
+	svc.SetCostDeviationThresholdProvider(supplierCostDeviationThresholdStub{threshold: 0.5})
+
+	result, err := svc.ListCostTrendsByDateRange(context.Background(), "2026-08-12", "2026-08-12", 0)
+	require.NoError(t, err)
+
+	require.Equal(t, 100.0, result.Points[0].UpstreamCost)
+	require.Empty(t, result.Points[0].Warning)
+	require.Equal(t, 100.0, result.Breakdown[0].UpstreamCost)
+	require.Empty(t, result.Breakdown[0].CostWarning)
+}
+
+func TestSupplierProviderServiceListCostTrendsUsesRawUpstreamCostAsOverrideBase(t *testing.T) {
+	invalidateSupplierCostTrendCache()
+	defer invalidateSupplierCostTrendCache()
+
+	// 写入时已覆盖为本地成本 10，raw_upstream_cost 仍为原始上游 100；
+	// 展示时以原始值为基准再次确认覆盖并给出提示。
+	raw := 100.0
+	repo := &supplierProviderRepoStub{
+		costTrends: []SupplierProviderCostTrendPoint{
+			{Date: "2026-08-13", UpstreamCost: 10, LocalCost: 10, RawUpstreamCost: &raw},
+		},
+		costBreakdowns: []SupplierProviderCostBreakdown{
+			{ProviderID: 7, ProviderName: "甲", ProviderType: "sub2api", UpstreamCost: 10, LocalCost: 10, RawUpstreamCost: 100},
+		},
+	}
+	svc := NewSupplierProviderService(repo, supplierEncryptorStub{})
+	svc.SetCostDeviationThresholdProvider(supplierCostDeviationThresholdStub{threshold: 0.5})
+
+	result, err := svc.ListCostTrendsByDateRange(context.Background(), "2026-08-13", "2026-08-13", 0)
+	require.NoError(t, err)
+
+	require.Equal(t, 10.0, result.Points[0].UpstreamCost)
+	require.Contains(t, result.Points[0].Warning, "已按本地成本展示")
+	require.Equal(t, 10.0, result.Breakdown[0].UpstreamCost)
+	require.Contains(t, result.Breakdown[0].CostWarning, "已按本地成本展示")
 }
 
 func TestSupplierProviderServiceListCostTrendsByDateRangeRejectsInvalid(t *testing.T) {

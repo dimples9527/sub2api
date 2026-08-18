@@ -119,7 +119,9 @@ func (r *supplierProviderRepository) ListCostTrends(ctx context.Context, start, 
 
 	upstreamQuery := `
 SELECT TO_CHAR(d.stat_date, 'YYYY-MM-DD') AS date,
-       COALESCE(SUM(d.today_cost), 0) AS upstream_cost
+       COALESCE(SUM(d.today_cost), 0) AS upstream_cost,
+       SUM(d.raw_upstream_cost) AS raw_upstream_cost,
+       COALESCE(string_agg(DISTINCT d.cost_warning, '；') FILTER (WHERE d.cost_warning IS NOT NULL), '') AS cost_warning
 FROM supplier_provider_daily_stats d
 JOIN supplier_providers p ON p.id = d.provider_id AND p.deleted_at IS NULL
 WHERE d.stat_date >= $1::date
@@ -143,7 +145,9 @@ ORDER BY d.stat_date`
 	for upstreamRows.Next() {
 		var date string
 		var upstreamCost float64
-		if scanErr := upstreamRows.Scan(&date, &upstreamCost); scanErr != nil {
+		var rawUpstream sql.NullFloat64
+		var costWarning sql.NullString
+		if scanErr := upstreamRows.Scan(&date, &upstreamCost, &rawUpstream, &costWarning); scanErr != nil {
 			return nil, fmt.Errorf("scan supplier upstream cost trend: %w", scanErr)
 		}
 		point := byDate[date]
@@ -152,6 +156,11 @@ ORDER BY d.stat_date`
 			byDate[date] = point
 		}
 		point.UpstreamCost = upstreamCost
+		if rawUpstream.Valid {
+			raw := rawUpstream.Float64
+			point.RawUpstreamCost = &raw
+		}
+		point.Warning = costWarning.String
 	}
 	if err := upstreamRows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate supplier upstream cost trends: %w", err)
@@ -248,7 +257,10 @@ unique_account_matches AS (
   HAVING COUNT(*) = 1
 ),
 upstream_costs AS (
-  SELECT d.provider_id, COALESCE(SUM(d.today_cost), 0) AS upstream_cost
+  SELECT d.provider_id,
+         COALESCE(SUM(d.today_cost), 0) AS upstream_cost,
+         SUM(d.raw_upstream_cost) AS raw_upstream_cost,
+         COALESCE(string_agg(DISTINCT d.cost_warning, '；') FILTER (WHERE d.cost_warning IS NOT NULL), '') AS cost_warning
   FROM supplier_provider_daily_stats d
   WHERE d.stat_date >= $1::date
     AND d.stat_date < $2::date
@@ -264,7 +276,9 @@ local_costs AS (
 )
 SELECT p.id, p.name, p.provider_type,
        COALESCE(upstream.upstream_cost, 0) AS upstream_cost,
-       COALESCE(local_agg.local_cost, 0) AS local_cost
+       COALESCE(local_agg.local_cost, 0) AS local_cost,
+       COALESCE(upstream.raw_upstream_cost, 0) AS raw_upstream_cost,
+       COALESCE(upstream.cost_warning, '') AS cost_warning
 FROM supplier_providers p
 LEFT JOIN upstream_costs upstream ON upstream.provider_id = p.id
 LEFT JOIN local_costs local_agg ON local_agg.provider_id = p.id
@@ -293,6 +307,8 @@ ORDER BY p.sort_order ASC, p.id ASC`
 			&breakdown.ProviderType,
 			&breakdown.UpstreamCost,
 			&breakdown.LocalCost,
+			&breakdown.RawUpstreamCost,
+			&breakdown.CostWarning,
 		); scanErr != nil {
 			return nil, fmt.Errorf("scan supplier provider cost breakdown: %w", scanErr)
 		}
@@ -331,6 +347,68 @@ ORDER BY d.stat_date`)
 		return nil, fmt.Errorf("iterate supplier provider balance summary days: %w", err)
 	}
 	return days, nil
+}
+
+// ListBalanceCosts returns balance difference costs per day per provider for the date range.
+// Cost is computed as (first balance snapshot of day) - (last balance snapshot of day).
+// Only positive differences are returned (consumption detected).
+func (r *supplierProviderRepository) ListBalanceCosts(ctx context.Context, start, end time.Time, providerID int64) ([]service.SupplierProviderBalanceCostDay, error) {
+	tzName := timezone.Name()
+	if strings.TrimSpace(tzName) == "" {
+		tzName = "Asia/Shanghai"
+	}
+
+	query := `
+WITH daily_snapshots AS (
+  SELECT (captured_at AT TIME ZONE $3)::date AS stat_date,
+         provider_id,
+         array_agg(current_balance ORDER BY captured_at ASC) AS balances
+  FROM supplier_provider_metric_snapshots
+  WHERE current_balance > 0
+    AND captured_at >= $1
+    AND captured_at < $2`
+	args := []any{start, end, tzName}
+	if providerID > 0 {
+		query += ` AND provider_id = $4`
+		args = append(args, providerID)
+	}
+	query += `
+  GROUP BY stat_date, provider_id
+),
+balance_costs AS (
+  SELECT stat_date,
+         provider_id,
+         GREATEST(balances[1]::NUMERIC - COALESCE(balances[array_length(balances, 1)], balances[1]), 0) AS cost
+  FROM daily_snapshots
+  WHERE array_length(balances, 1) >= 1
+)
+SELECT TO_CHAR(stat_date, 'YYYY-MM-DD'), provider_id, cost::FLOAT
+FROM balance_costs
+WHERE cost > 0
+ORDER BY stat_date ASC, provider_id ASC`
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query supplier balance costs: %w", err)
+	}
+	defer rows.Close()
+
+	costs := make([]service.SupplierProviderBalanceCostDay, 0)
+	for rows.Next() {
+		var cd service.SupplierProviderBalanceCostDay
+		var pid int64
+		var cost float64
+		if scanErr := rows.Scan(&cd.Date, &pid, &cost); scanErr != nil {
+			return nil, fmt.Errorf("scan supplier balance cost: %w", scanErr)
+		}
+		cd.ProviderID = pid
+		cd.BalanceCost = cost
+		costs = append(costs, cd)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate supplier balance costs: %w", err)
+	}
+	return costs, nil
 }
 
 func supplierProviderWhere(params service.SupplierProviderListParams) (string, []any) {
