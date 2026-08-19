@@ -1561,6 +1561,35 @@ WHERE s.provider_id = $1`, providerID, supplierStatDate(statDay)).Scan(&bal.Curr
 	return bal, true, nil
 }
 
+// GetBalanceDeltaForDay 获取指定供应商指定统计日的余额差值（当天第一条余额 - 当天最后一条余额）。
+// 从 supplier_provider_metric_snapshots 表查询当天的余额快照，计算余额减少量作为成本估算。
+// ok=false 表示当天没有足够的余额快照数据，无法计算差值。
+func (r *supplierProviderDataRepository) GetBalanceDeltaForDay(ctx context.Context, providerID int64, day time.Time) (float64, bool, error) {
+	start := supplierStatDate(day)
+	end := start.AddDate(0, 0, 1)
+	var firstBalance, lastBalance sql.NullFloat64
+	err := r.db.QueryRowContext(ctx, `
+SELECT
+  (SELECT current_balance FROM supplier_provider_metric_snapshots
+   WHERE provider_id = $1 AND captured_at >= $2 AND captured_at < $3 AND current_balance > 0
+   ORDER BY captured_at ASC LIMIT 1) AS first_balance,
+  (SELECT current_balance FROM supplier_provider_metric_snapshots
+   WHERE provider_id = $1 AND captured_at >= $2 AND captured_at < $3 AND current_balance > 0
+   ORDER BY captured_at DESC LIMIT 1) AS last_balance
+`, providerID, start, end).Scan(&firstBalance, &lastBalance)
+	if err != nil {
+		return 0, false, fmt.Errorf("query supplier balance delta for day: %w", err)
+	}
+	if !firstBalance.Valid || !lastBalance.Valid {
+		return 0, false, nil
+	}
+	delta := firstBalance.Float64 - lastBalance.Float64
+	if delta <= 0 {
+		return 0, false, nil
+	}
+	return delta, true, nil
+}
+
 // GetLocalCostForDay 返回指定供应商在指定统计日的本地成本
 // （唯一匹配本地账号 usage_logs.actual_cost 之和，口径与 ListCostBreakdowns 一致）。
 // ok=false 表示当天没有唯一匹配且产生用量的本地账号，无法用本地口径校验。

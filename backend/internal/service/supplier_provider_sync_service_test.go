@@ -167,6 +167,9 @@ func (r *supplierProviderDataRepoStub) GetLocalCostForDay(context.Context, int64
 	r.localCostCalls++
 	return r.localCostValue, r.localCostOK, r.localCostErr
 }
+func (r *supplierProviderDataRepoStub) GetBalanceDeltaForDay(context.Context, int64, time.Time) (float64, bool, error) {
+	return 0, false, nil
+}
 func (r *supplierProviderDataRepoStub) GetCostFallbackBalances(context.Context, int64, time.Time) (SupplierProviderCostFallbackBalance, bool, error) {
 	r.costFallbackCalls++
 	return r.costFallbackBal, r.costFallbackOK, r.costFallbackErr

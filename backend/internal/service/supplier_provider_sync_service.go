@@ -233,6 +233,9 @@ type SupplierProviderDataRepository interface {
 	UpdateCostDetailed(ctx context.Context, providerID int64, cost float64, rawUpstream *float64, warning *string, statDay time.Time) error
 	// GetLocalCostForDay 获取指定供应商指定统计日的本地成本；ok=false 表示无本地口径可校验。
 	GetLocalCostForDay(ctx context.Context, providerID int64, day time.Time) (float64, bool, error)
+	// GetBalanceDeltaForDay 获取指定供应商指定统计日的余额差值（当天第一条余额 - 当天最后一条余额）；
+	// ok=false 表示当天没有足够的余额快照数据，无法计算差值。
+	GetBalanceDeltaForDay(ctx context.Context, providerID int64, day time.Time) (float64, bool, error)
 	// GetCostFallbackBalances 获取成本保底估算所需的余额基线；
 	// ok=false 表示当前余额或当天起始余额缺失，无法进行保底估算。
 	GetCostFallbackBalances(ctx context.Context, providerID int64, statDay time.Time) (SupplierProviderCostFallbackBalance, bool, error)
@@ -1358,13 +1361,20 @@ func supplierCostFallbackEstimate(bal SupplierProviderCostFallbackBalance) (floa
 	return estimated, true
 }
 
-// resolveCostDeviation 计算写入成本时的偏差覆盖结果：上游成本与本地成本差距超过阈值时
-// 取本地成本并记录提示；否则保持上游成本。rawUpstream 始终为接口原始上游值。
+// resolveCostDeviation 计算写入成本时的偏差覆盖结果：上游成本与本地成本差距超过阈值时，
+// 优先使用余额差值（当天第一条余额快照 - 当天最后一条余额快照）；
+// 如果余额差值不可用，则回退到本地成本。rawUpstream 始终为接口原始上游值。
 func (s *SupplierProviderSyncService) resolveCostDeviation(ctx context.Context, providerID int64, upstream float64, statDay time.Time, threshold float64) (effective float64, rawUpstream *float64, warning *string) {
 	raw := upstream
 	rawUpstream = &raw
 	if local, ok, err := s.dataRepo.GetLocalCostForDay(ctx, providerID, statDay); err == nil && ok && local > 0 {
 		if supplierCostDeviation(upstream, local) > threshold {
+			// 偏差过大时，优先尝试用余额差值覆盖
+			if balanceDelta, ok, err := s.dataRepo.GetBalanceDeltaForDay(ctx, providerID, statDay); err == nil && ok && balanceDelta > 0 {
+				msg := fmt.Sprintf("上游成本 %.2f 与本地成本 %.2f 偏差过大，已用余额差值 %.2f 覆盖", upstream, local, balanceDelta)
+				return balanceDelta, rawUpstream, &msg
+			}
+			// 如果没有余额差值数据，回退到本地成本
 			msg := supplierCostDeviationWarning(upstream, local)
 			return local, rawUpstream, &msg
 		}

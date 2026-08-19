@@ -659,6 +659,66 @@ func TestSupplierProviderDataRepositoryGetLocalCostForDayNoMatch(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestSupplierProviderDataRepositoryGetBalanceDeltaForDay(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	day := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT (SELECT current_balance FROM supplier_provider_metric_snapshots")).
+		WithArgs(int64(42), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"first_balance", "last_balance"}).AddRow(100.50, 85.25))
+
+	delta, ok, err := repo.GetBalanceDeltaForDay(context.Background(), 42, day)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, 15.25, delta)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryGetBalanceDeltaForDayNoData(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	day := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT (SELECT current_balance FROM supplier_provider_metric_snapshots")).
+		WithArgs(int64(42), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"first_balance", "last_balance"}).AddRow(nil, nil))
+
+	delta, ok, err := repo.GetBalanceDeltaForDay(context.Background(), 42, day)
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Equal(t, 0.0, delta)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryGetBalanceDeltaForDayNegativeDelta(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	day := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT (SELECT current_balance FROM supplier_provider_metric_snapshots")).
+		WithArgs(int64(42), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"first_balance", "last_balance"}).AddRow(85.25, 100.50))
+
+	delta, ok, err := repo.GetBalanceDeltaForDay(context.Background(), 42, day)
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Equal(t, 0.0, delta)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryGetBalanceDeltaForDayQueryError(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	day := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT (SELECT current_balance FROM supplier_provider_metric_snapshots")).
+		WithArgs(int64(42), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnError(errors.New("database error"))
+
+	_, ok, err := repo.GetBalanceDeltaForDay(context.Background(), 42, day)
+	require.Error(t, err)
+	require.False(t, ok)
+	require.Contains(t, err.Error(), "query supplier balance delta for day")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestSupplierProviderDataRepositoryListAccountsPaginates(t *testing.T) {
 	repo, mock := newSupplierProviderDataRepoMock(t)
 	active := true
