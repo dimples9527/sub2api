@@ -52,6 +52,7 @@ func TestSupplierSyncProgressStreamWriterCancelsOnWriteFailure(t *testing.T) {
 
 type supplierProviderSyncHandlerSyncStub struct {
 	calledScope          string
+	calledCostDay        time.Time
 	refreshProviderID    int64
 	refreshToken         service.SupplierProviderAuthToken
 	testScope            string
@@ -77,8 +78,9 @@ func (s *supplierProviderSyncHandlerSyncStub) SyncBalance(context.Context, int64
 	s.calledScope = service.SupplierSyncScopeBalance
 	return supplierProviderSyncHandlerResult(service.SupplierSyncScopeBalance), nil
 }
-func (s *supplierProviderSyncHandlerSyncStub) SyncCost(context.Context, int64, time.Time, string) (service.SupplierProviderSyncResult, error) {
+func (s *supplierProviderSyncHandlerSyncStub) SyncCost(_ context.Context, _ int64, day time.Time, _ string) (service.SupplierProviderSyncResult, error) {
 	s.calledScope = service.SupplierSyncScopeCost
+	s.calledCostDay = day
 	return supplierProviderSyncHandlerResult(service.SupplierSyncScopeCost), nil
 }
 

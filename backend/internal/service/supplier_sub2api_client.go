@@ -23,6 +23,10 @@ const (
 	defaultSupplierSub2APIRefreshPath             = "/api/v1/auth/refresh"
 	DefaultSupplierSub2APIMonitorPath             = "/api/v1/channel-monitors?timezone=Asia%2FShanghai"
 	defaultSupplierSub2APIHTTPTimeout             = 30 * time.Second
+	// supplierSub2APICostRequestTimeout 限制成本接口单次请求耗时。
+	// 上游成本接口在部分时段会长时间挂起或返回 500，
+	// 用独立较短时间内让同步流程尽快回落到本地余额差保底估算，避免整个请求被拖满 30s。
+	supplierSub2APICostRequestTimeout             = 15 * time.Second
 	supplierSub2APIMaxResponseBytes         int64 = 4 << 20
 	supplierSub2APILoginLockTTL                   = 120 * time.Second
 	supplierSub2APILoginLockWait                  = 130 * time.Second
@@ -171,7 +175,10 @@ func (c *SupplierSub2APIClient) FetchBalance(ctx context.Context, provider *Supp
 }
 
 func (c *SupplierSub2APIClient) FetchCost(ctx context.Context, provider *SupplierProvider, password string, _ time.Time) (float64, error) {
-	raw, err := c.authenticatedGet(ctx, provider, password, provider.UsageCostURL, "cost")
+	// 上游成本接口不稳定时不应长时间挂起：使用独立较短超时，超时后由服务层走余额差保底估算。
+	requestCtx, cancel := context.WithTimeout(ctx, supplierSub2APICostRequestTimeout)
+	defer cancel()
+	raw, err := c.authenticatedGet(requestCtx, provider, password, provider.UsageCostURL, "cost")
 	if err != nil {
 		return 0, err
 	}

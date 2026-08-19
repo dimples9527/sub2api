@@ -196,8 +196,13 @@ func (h *SupplierProviderSyncHandler) SyncBalanceStream(c *gin.Context) {
 }
 
 func (h *SupplierProviderSyncHandler) SyncCostStream(c *gin.Context) {
+	day, ok := supplierSyncCostDay(c.Query("date"))
+	if !ok {
+		response.ErrorFrom(c, badRequest("成本日期无效，需为 YYYY-MM-DD"))
+		return
+	}
 	h.syncStream(c, func(ctx context.Context, id int64) (service.SupplierProviderSyncResult, error) {
-		return h.syncService.SyncCost(ctx, id, time.Now(), service.SupplierSyncTriggerManual)
+		return h.syncService.SyncCost(ctx, id, day, service.SupplierSyncTriggerManual)
 	})
 }
 
