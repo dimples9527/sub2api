@@ -1824,10 +1824,26 @@ async function fetchSingleDayCost() {
     return
   }
   costSingleDayLoading.value = true
+  let terminalOk: boolean | null = null
+  let terminalMessage = ''
   try {
-    const result = await supplierProvidersAPI.syncProviderCostOnDate(providerId, costSingleDay.value)
-    const message = result?.message ? `：${result.message}` : ''
-    appStore.showSuccess(`已获取 ${costSingleDay.value} 成本${message}`)
+    // 使用流式接口避免 axios 30s 超时导致前端先断连：
+    // 上游成本接口不稳定时由后端继续走余额差保底估算，页面只跟随进度事件。
+    await streamSupplierProviderSync(providerId, 'cost', {
+      params: { date: costSingleDay.value },
+      onEvent: event => {
+        if (event.stage === 'done' || event.stage === 'error') {
+          terminalOk = event.ok !== false
+          terminalMessage = event.message || ''
+        }
+      },
+    })
+    if (terminalOk === false || terminalOk === null) {
+      appStore.showError(terminalMessage || '获取指定日期成本失败')
+    } else {
+      const message = terminalMessage ? `：${terminalMessage}` : ''
+      appStore.showSuccess(`已获取 ${costSingleDay.value} 成本${message}`)
+    }
   } catch (err) {
     appStore.showError(errorMessage(err, '获取指定日期成本失败'))
   } finally {

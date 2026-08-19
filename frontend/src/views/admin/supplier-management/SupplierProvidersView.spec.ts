@@ -22,7 +22,6 @@ const providerViewMocks = vi.hoisted(() => ({
   listUpstreamBalanceRecharges: vi.fn(),
   getCostDeviationSettings: vi.fn(),
   updateCostDeviationSettings: vi.fn(),
-  syncProviderCostOnDate: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
   showWarning: vi.fn(),
@@ -53,7 +52,6 @@ vi.mock('@/api/admin/supplierProviders', () => ({
     listAuthHistory: providerViewMocks.listAuthHistory,
     getCostDeviationSettings: providerViewMocks.getCostDeviationSettings,
     updateCostDeviationSettings: providerViewMocks.updateCostDeviationSettings,
-    syncProviderCostOnDate: providerViewMocks.syncProviderCostOnDate,
   },
 }))
 
@@ -255,15 +253,6 @@ describe('SupplierProvidersView payload normalization', () => {
     })
     providerViewMocks.getCostDeviationSettings.mockResolvedValue({ threshold: 0.5 })
     providerViewMocks.updateCostDeviationSettings.mockResolvedValue({ threshold: 0.5 })
-    providerViewMocks.syncProviderCostOnDate.mockResolvedValue({
-      provider_id: 1,
-      provider_name: 'Alpha',
-      scope: 'cost',
-      status: 'success',
-      message: '成本同步完成',
-      started_at: '2026-07-31T00:00:00Z',
-      finished_at: '2026-07-31T00:00:01Z',
-    })
     providerViewMocks.getBalanceSummary.mockResolvedValue({
       latest_date: '2026-08-14',
       today: { date: '2026-08-14', balance: 170, cost: 60 },
@@ -894,7 +883,7 @@ describe('SupplierProvidersView payload normalization', () => {
   it('fetches cost for the selected provider on the chosen date', async () => {
     const wrapper = await mountSupplierProviders()
     providerViewMocks.listCostTrends.mockClear()
-    providerViewMocks.syncProviderCostOnDate.mockClear()
+    providerViewMocks.streamSupplierProviderSync.mockClear()
     providerViewMocks.showSuccess.mockClear()
 
     const row = wrapper.find('tbody tr[data-row-id="1"]')
@@ -908,10 +897,17 @@ describe('SupplierProvidersView payload normalization', () => {
 
     const button = wrapper.get('[data-test="supplier-cost-single-day"]')
     expect(button.attributes('disabled')).toBeUndefined()
+    providerViewMocks.streamSupplierProviderSync.mockImplementationOnce(async (_id, _scope, options) => {
+      options.onEvent({ stage: 'done', message: '成本同步完成', ok: true, time: '2026-08-05T07:00:02Z' })
+    })
     await button.trigger('click')
     await flushPromises()
 
-    expect(providerViewMocks.syncProviderCostOnDate).toHaveBeenCalledWith(1, expectedDate)
+    expect(providerViewMocks.streamSupplierProviderSync).toHaveBeenCalledWith(
+      1,
+      'cost',
+      expect.objectContaining({ params: { date: expectedDate }, onEvent: expect.any(Function) }),
+    )
     expect(providerViewMocks.showSuccess).toHaveBeenCalledWith(expect.stringContaining('已获取'))
     // 获取成功后刷新成本曲线。
     expect(providerViewMocks.listCostTrends).toHaveBeenCalled()

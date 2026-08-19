@@ -29,6 +29,8 @@ export interface SupplierSyncProgressEvent {
 export interface SupplierSyncProgressStreamOptions {
   onEvent: (event: SupplierSyncProgressEvent) => void
   signal?: AbortSignal
+  /** 附加到请求地址的查询参数（例如获取指定日期成本时的 date）。 */
+  params?: Record<string, string>
 }
 
 export interface SupplierSyncCounts {
@@ -266,7 +268,11 @@ export async function streamSupplierProviderSync(
   scope: SupplierSyncScope,
   options: SupplierSyncProgressStreamOptions,
 ): Promise<void> {
-  const path = `/admin/supplier-management/providers/${id}/sync/${scope}/stream`
+  let path = `/admin/supplier-management/providers/${id}/sync/${scope}/stream`
+  if (options.params) {
+    const search = new URLSearchParams(options.params).toString()
+    if (search) path += `?${search}`
+  }
   const token = localStorage.getItem('auth_token')
   const headers: HeadersInit = {
     Accept: 'text/event-stream',
