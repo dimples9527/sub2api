@@ -254,6 +254,7 @@ import { platformBadgeClass } from '@/utils/platformColors'
 import { adminAPI } from '@/api/admin'
 import { resolvePlatformDisplayLabel, setCustomPlatformLabels } from '@/utils/customPlatformLabels'
 import { customPlatformBadgeStyle, resolvePlatformColor, updateCustomPlatformColors } from '@/utils/customPlatformColors'
+import { buildPlatformOptions } from '@/utils/platformOptions'
 import type { CustomPlatform } from '@/api/admin/customPlatforms'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -281,24 +282,7 @@ const platformDraft = ref<string>('')
 const showClearConfirm = ref(false)
 const clearTargetGroup = ref<LLMMonitorGroupPlatformOverride | null>(null)
 
-const corePlatformOptions = [
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'gemini', label: 'Gemini' },
-  { value: 'antigravity', label: 'Antigravity' },
-  { value: 'grok', label: 'Grok' },
-  { value: 'composite', label: 'Composite' },
-]
-
-const platformOptions = computed(() => [
-  ...corePlatformOptions,
-  ...customPlatforms.value
-    .filter((platform) => platform.enabled)
-    .map((platform) => ({
-      value: platform.code,
-      label: platform.name,
-    })),
-])
+const platformOptions = computed(() => buildPlatformOptions(customPlatforms.value))
 
 const platformFilterOptions = computed(() => [
   { value: 'all', label: '全部平台' },
@@ -306,10 +290,7 @@ const platformFilterOptions = computed(() => [
 ])
 
 const legendItems = computed(() => [
-  ...corePlatformOptions,
-  ...customPlatforms.value
-    .filter((platform) => platform.enabled)
-    .map((platform) => ({ value: platform.code, label: platform.name })),
+  ...platformOptions.value,
 ])
 
 const columns = computed<Column[]>(() => [

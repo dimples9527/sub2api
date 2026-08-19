@@ -29,6 +29,7 @@ func RegisterAdminRoutes(
 	admin.Use(middleware.AdminComplianceGuard(settingService))
 	{
 		// 部署与运营合规确认
+		registerPlatformRoutes(admin, h)
 		registerAdminComplianceRoutes(admin, h)
 
 		// 仪表盘

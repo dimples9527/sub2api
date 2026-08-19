@@ -1555,6 +1555,7 @@ import type {
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime } from '@/utils/format'
+import { CORE_PLATFORM_OPTIONS } from '@/utils/platformOptions'
 import { useRouteQueryFilters } from '@/composables/useRouteQueryFilters'
 import type { Column } from '@/components/common/types'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
@@ -1910,10 +1911,7 @@ const sourceOptions = computed<SelectOption[]>(() => [
 ])
 const platformFilterOptions = computed<SelectOption[]>(() => [
   { value: '', label: t('admin.upstreamAccounts.allPlatforms', '全部平台') },
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'gemini', label: 'Gemini' },
-  { value: 'antigravity', label: 'Antigravity' },
+  ...CORE_PLATFORM_OPTIONS,
 ])
 const groupOptions = computed<SelectOption[]>(() => [
   { value: '', label: t('admin.upstreamAccounts.allGroups') },

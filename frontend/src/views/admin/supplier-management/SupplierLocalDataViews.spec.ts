@@ -816,11 +816,10 @@ describe('supplier local data views component usage', () => {
 
   it('adds enabled custom platforms to the group platform filter and editor dropdown', () => {
     expect(groupsSource).toContain("import { customPlatformsAPI, type CustomPlatform } from '@/api/admin/customPlatforms'")
+    expect(groupsSource).toContain("import { buildPlatformOptions, CORE_PLATFORM_OPTIONS } from '@/utils/platformOptions'")
     expect(groupsSource).toContain('const customPlatforms = ref<CustomPlatform[]>([])')
-    expect(groupsSource).toContain('const customPlatformOptions = computed<SelectOption[]>(() => customPlatforms.value')
+    expect(groupsSource).toContain('const platformOptions = computed<SelectOption[]>(() => buildPlatformOptions(customPlatforms.value))')
     expect(groupsSource).toContain('const platformFilterOptions = computed<SelectOption[]>(() => [')
-    expect(groupsSource).toContain('const platformOptions = computed<SelectOption[]>(() => [')
-    expect(groupsSource).toContain('...customPlatformOptions.value')
     expect(groupsSource).toContain("await Promise.all([ensureCustomPlatformLabels(), loadCustomPlatforms(), loadProviders(), loadLocalGroups()])")
     expect(groupsSource).toContain('customPlatforms.value = await customPlatformsAPI.list(true)')
   })

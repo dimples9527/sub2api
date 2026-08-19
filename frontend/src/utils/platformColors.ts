@@ -197,6 +197,12 @@ const GRADIENT_SUBTEXT: Record<Platform, string> = {
 }
 const GRADIENT_SUBTEXT_DEFAULT = 'text-primary-200'
 
+const RUNTIME_LABELS: Record<string, string> = {}
+
+export function setPlatformLabels(labels: Record<string, string>): void {
+  Object.assign(RUNTIME_LABELS, labels)
+}
+
 // ── Public API ──────────────────────────────────────────────────────
 
 function isPlatform(p: string): p is Platform {
@@ -266,6 +272,7 @@ export function platformGradientSubtextClass(p: string): string {
 }
 
 export function platformLabel(p: string): string {
+  if (RUNTIME_LABELS[p]) return RUNTIME_LABELS[p]
   switch (p) {
     case 'anthropic': return 'Anthropic'
     case 'openai': return 'OpenAI'

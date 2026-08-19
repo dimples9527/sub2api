@@ -732,6 +732,7 @@ import type {
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { useRouteQueryFilters } from '@/composables/useRouteQueryFilters'
+import { CORE_PLATFORM_OPTIONS } from '@/utils/platformOptions'
 import { formatDateTime } from '@/utils/format'
 import {
   buildUpstreamMonitorTrendIndex,
@@ -812,12 +813,7 @@ const markingRateFixRecordKey = ref<string | null>(null)
 const recordsSortOrder = ref<'desc' | 'asc'>('desc')
 let reloadRequestId = 0
 
-const platformOptions = computed<SelectOption[]>(() => [
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'gemini', label: 'Gemini' },
-  { value: 'antigravity', label: 'Antigravity' },
-])
+const platformOptions = computed<SelectOption[]>(() => CORE_PLATFORM_OPTIONS.filter(option => option.value !== 'composite'))
 const platformFilterOptions = computed<SelectOption[]>(() => [
   { value: '', label: t('admin.upstreamGroups.allPlatforms', '全部平台') },
   ...platformOptions.value,

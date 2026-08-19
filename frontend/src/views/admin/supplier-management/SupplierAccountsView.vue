@@ -1012,6 +1012,7 @@ import {
   platformButtonClass,
   platformTextClass,
 } from '@/utils/platformColors'
+import { buildPlatformOptions } from '@/utils/platformOptions'
 import { extractApiErrorMessage } from '@/utils/apiError'
 
 const appStore = useAppStore()
@@ -1214,25 +1215,14 @@ const upstreamStatusFilterOptions: SelectOption[] = [
   { value: 'unknown', label: '未知' },
   { value: 'deleted', label: '已删除' },
 ]
-const corePlatformOptions: SelectOption[] = [
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'gemini', label: 'Gemini' },
-  { value: 'antigravity', label: 'Antigravity' },
-  { value: 'grok', label: 'Grok' },
-]
-const customPlatformOptions = computed<SelectOption[]>(() => customPlatforms.value
-  .filter(platform => platform.enabled)
-  .map(platform => ({ value: platform.code, label: platform.name })))
+const platformOptions = computed<SelectOption[]>(() => buildPlatformOptions(customPlatforms.value))
 const platformFilterOptions = computed<SelectOption[]>(() => [
   { value: '', label: '全部平台' },
-  ...corePlatformOptions,
-  ...customPlatformOptions.value,
+  ...platformOptions.value,
 ])
 const businessPlatformOptions = computed<SelectOption[]>(() => [
   { value: '', label: '业务平台跟随接入平台' },
-  ...corePlatformOptions,
-  ...customPlatformOptions.value,
+  ...platformOptions.value,
 ])
 const pageSizeOptions: SelectOption[] = [
   { value: 20, label: '20' },

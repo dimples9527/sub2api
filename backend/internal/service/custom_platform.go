@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
@@ -165,12 +166,7 @@ func normalizeCustomPlatformCode(code string) string {
 }
 
 func IsCorePlatform(platform string) bool {
-	switch strings.ToLower(strings.TrimSpace(platform)) {
-	case PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformAntigravity, PlatformGrok, PlatformComposite:
-		return true
-	default:
-		return false
-	}
+	return domain.IsCorePlatform(platform)
 }
 
 func PlatformLabel(platform string) string {
@@ -185,6 +181,12 @@ func PlatformLabel(platform string) string {
 		return "Antigravity"
 	case PlatformGrok:
 		return "Grok"
+	case PlatformKimi:
+		return "Kimi"
+	case PlatformZhipu:
+		return "智谱 GLM"
+	case PlatformDeepseek:
+		return "DeepSeek"
 	case PlatformComposite:
 		return "Composite"
 	default:

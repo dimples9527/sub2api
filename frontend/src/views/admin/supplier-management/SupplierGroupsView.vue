@@ -902,6 +902,7 @@ import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores/app'
 import type { AdminGroup, GroupPlatform } from '@/types'
 import { ensureCustomPlatformLabels, resolvePlatformDisplayLabel } from '@/utils/customPlatformLabels'
+import { buildPlatformOptions, CORE_PLATFORM_OPTIONS } from '@/utils/platformOptions'
 import { platformTextClass } from '@/utils/platformColors'
 import {
   buildSupplierGroupMonitorTrendIndex,
@@ -937,13 +938,9 @@ interface AttentionShortcut {
   rateStatus: string
 }
 
-const PLATFORM_LABELS: Record<string, string> = {
-  anthropic: 'Anthropic',
-  openai: 'OpenAI',
-  gemini: 'Gemini',
-  antigravity: 'Antigravity',
-  grok: 'Grok',
-}
+const PLATFORM_LABELS: Record<string, string> = Object.fromEntries(
+  CORE_PLATFORM_OPTIONS.map(option => [String(option.value), String(option.label)]),
+)
 
 const SUPPLIER_TYPE_LABELS: Record<string, string> = {
   sub2api: 'Sub2API',
@@ -1062,14 +1059,10 @@ const providerOptions = computed<SelectOption[]>(() => [
   ...providers.value.map(provider => ({ value: provider.id, label: provider.name })),
 ])
 const quickProviderOptions = computed<SelectOption[]>(() => providerOptions.value)
-const corePlatformOptions: SelectOption[] = Object.entries(PLATFORM_LABELS).map(([value, label]) => ({ value, label }))
-const customPlatformOptions = computed<SelectOption[]>(() => customPlatforms.value
-  .filter(platform => platform.enabled)
-  .map(platform => ({ value: platform.code, label: platform.name })))
+const platformOptions = computed<SelectOption[]>(() => buildPlatformOptions(customPlatforms.value))
 const platformFilterOptions = computed<SelectOption[]>(() => [
   { value: '', label: '全部平台' },
-  ...corePlatformOptions,
-  ...customPlatformOptions.value,
+  ...platformOptions.value,
 ])
 const matchStatusFilterOptions: SelectOption[] = [
   { value: '', label: '全部匹配状态' },
@@ -1108,10 +1101,6 @@ const localGroupOptions = computed<SelectOption[]>(() => localGroups.value.map(g
   value: group.id,
   label: `${group.name} · ${platformLabel(group.platform)} · ${formatRate(group.rate_multiplier)}`,
 })))
-const platformOptions = computed<SelectOption[]>(() => [
-  ...corePlatformOptions,
-  ...customPlatformOptions.value,
-])
 const ALL_GROUP_COLUMNS: Column[] = [
   { key: 'provider_name', label: '供应商', sortable: true, class: 'min-w-[120px]' },
   { key: 'name', label: '上游分组', sortable: true, class: 'min-w-[170px]' },

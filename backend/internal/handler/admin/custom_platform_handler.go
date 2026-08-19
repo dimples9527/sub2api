@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -27,6 +28,28 @@ func (h *CustomPlatformHandler) List(c *gin.Context) {
 		return
 	}
 	response.Success(c, items)
+}
+
+// ListCatalog 返回框架原生平台与启用自定义平台的统一目录。
+func (h *CustomPlatformHandler) ListCatalog(c *gin.Context) {
+	items, err := h.service.List(c.Request.Context(), true)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	definitions := domain.ListCorePlatformDefinitions()
+	for _, item := range items {
+		if item == nil || strings.TrimSpace(item.Code) == "" {
+			continue
+		}
+		definitions = append(definitions, domain.PlatformDefinition{
+			Code:        item.Code,
+			Name:        item.Name,
+			Color:       item.Color,
+			HealthGuard: false,
+		})
+	}
+	response.Success(c, definitions)
 }
 
 func (h *CustomPlatformHandler) Get(c *gin.Context) {

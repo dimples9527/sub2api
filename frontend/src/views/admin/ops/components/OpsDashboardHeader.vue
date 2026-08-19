@@ -11,6 +11,7 @@ import type { OpsRequestDetailsPreset } from './OpsRequestDetailsModal.vue'
 import { useAdminSettingsStore } from '@/stores'
 import { formatNumber } from '@/utils/format'
 import { formatMemorySizeMB } from '../utils/opsFormatters'
+import { CORE_PLATFORM_OPTIONS } from '@/utils/platformOptions'
 
 type RealtimeWindow = '1min' | '5min' | '30min' | '1h'
 
@@ -109,11 +110,7 @@ const groups = ref<Array<{ id: number; name: string; platform: string }>>([])
 
 const platformOptions = computed(() => [
   { value: '', label: t('common.all') },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'gemini', label: 'Gemini' },
-  { value: 'antigravity', label: 'Antigravity' },
-  { value: 'grok', label: 'Grok' }
+  ...CORE_PLATFORM_OPTIONS,
 ])
 
 const timeRangeOptions = computed(() => [

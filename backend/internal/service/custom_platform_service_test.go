@@ -75,3 +75,14 @@ func TestNormalizeCustomPlatformColor(t *testing.T) {
 		require.Equal(t, "foo", repo.created.Code)
 	})
 }
+
+func TestCorePlatformsCannotBeCreatedAsCustomPlatforms(t *testing.T) {
+	for _, code := range []string{PlatformKimi, PlatformZhipu, PlatformDeepseek} {
+		_, err := normalizeCustomPlatform(CustomPlatformUpsertParams{Code: code, Name: code})
+		require.ErrorIs(t, err, ErrCustomPlatformInvalid, "核心平台 %q 不应作为自定义平台创建", code)
+	}
+
+	item, err := normalizeCustomPlatform(CustomPlatformUpsertParams{Code: "provider_x", Name: "Provider X"})
+	require.NoError(t, err)
+	require.Equal(t, "provider_x", item.Code)
+}

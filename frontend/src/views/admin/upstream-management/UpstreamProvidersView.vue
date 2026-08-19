@@ -1591,6 +1591,7 @@ import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import UpstreamBalanceCharts from '@/components/admin/upstream/UpstreamBalanceCharts.vue'
+import { CORE_HEALTH_GUARD_PLATFORM_OPTIONS } from '@/utils/platformOptions'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -1751,13 +1752,7 @@ const enabledFilterOptions = computed<SelectOption[]>(() => [
   { value: 'enabled', label: t('common.enabled') },
   { value: 'disabled', label: t('common.disabled') },
 ])
-const healthGuardPlatformOptions = computed(() => [
-  { value: 'anthropic', label: 'Anthropic', placeholder: 'claude-3-5-haiku-latest' },
-  { value: 'openai', label: 'OpenAI', placeholder: 'gpt-4o-mini' },
-  { value: 'gemini', label: 'Gemini', placeholder: 'gemini-2.5-flash' },
-  { value: 'antigravity', label: 'Antigravity', placeholder: 'gemini-3-flash' },
-  { value: 'grok', label: 'Grok', placeholder: 'grok-3-mini' },
-])
+const healthGuardPlatformOptions = computed(() => CORE_HEALTH_GUARD_PLATFORM_OPTIONS)
 const activeProviderFilterCount = computed(() => {
   let count = 0
   if (typeFilter.value) count += 1
