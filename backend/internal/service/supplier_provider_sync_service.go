@@ -652,8 +652,28 @@ func (s *SupplierProviderSyncService) backfillProviderCosts(ctx context.Context,
 				continue
 			}
 
+			// 先尝试用余额差值预填充，如果余额差值可用，先写入数据库作为兜底。
+			balanceDelta, balanceOk, balanceErr := s.dataRepo.GetBalanceDeltaForDay(ctx, locked.ID, cursor)
+			if balanceErr == nil && balanceOk && balanceDelta > 0 {
+				warning := "使用余额差值预填充，等待上游成本验证"
+				_ = s.dataRepo.UpdateCostDetailed(ctx, locked.ID, balanceDelta, nil, &warning, cursor)
+				// 预填充失败不影响后续流程，忽略错误
+			}
+
 			cost, fetchErr := s.remote.FetchCost(ctx, locked, password, cursor)
 			if fetchErr != nil {
+				// 如果上游接口失败，但余额差值已预填充，则视为成功（有兜底数据）
+				if balanceOk && balanceDelta > 0 {
+					item.Status = SupplierSyncStatusSuccess
+					item.Cost = balanceDelta
+					item.Message = fmt.Sprintf("上游接口失败，已使用余额差值 %.2f 兜底", balanceDelta)
+					partial.SuccessCount++
+					partial.Items = append(partial.Items, item)
+					run.Counts.CheckedCount++
+					run.Counts.UpdatedCount++
+					continue
+				}
+				// 没有余额差值兜底，按原逻辑处理失败
 				item.Status = SupplierSyncStatusFailed
 				item.Message = fetchErr.Error()
 				stopAfterFetchFailure := false
@@ -689,7 +709,24 @@ func (s *SupplierProviderSyncService) backfillProviderCosts(ctx context.Context,
 				}
 				continue
 			}
-			effective, rawUpstream, warning := s.resolveCostDeviation(ctx, locked.ID, cost, cursor, threshold)
+
+			// 上游接口返回了数据，判断是否合理（偏差是否在阈值内）
+			effective := cost
+			rawUpstream := &cost
+			var warning *string
+			if balanceOk && balanceDelta > 0 {
+				deviation := supplierCostDeviation(cost, balanceDelta)
+				if deviation > threshold {
+					// 偏差超过阈值，保留余额差值，记录警告
+					effective = balanceDelta
+					msg := fmt.Sprintf("上游成本 %.2f 与余额差值 %.2f 偏差 %.1f%% 超过阈值，保留余额差值", cost, balanceDelta, deviation*100)
+					warning = &msg
+				} else {
+					// 偏差在阈值内，用上游成本覆盖
+					effective = cost
+					warning = nil
+				}
+			}
 			if updateErr := s.dataRepo.UpdateCostDetailed(ctx, locked.ID, effective, rawUpstream, warning, cursor); updateErr != nil {
 				item.Status = SupplierSyncStatusFailed
 				item.Message = updateErr.Error()
