@@ -3,14 +3,11 @@ package service
 import (
 	"context"
 	"fmt"
+	"math"
 )
 
-// 供应商成本偏差覆盖阈值默认值与上下限。
-const (
-	DefaultSupplierCostDeviationThreshold = 0.5
-	supplierCostDeviationThresholdMin     = 0.05
-	supplierCostDeviationThresholdMax     = 0.95
-)
+// 供应商成本偏差覆盖阈值默认值。
+const DefaultSupplierCostDeviationThreshold = 0.5
 
 // SupplierCostDeviationSettings 供应商成本偏差覆盖阈值全局配置。
 type SupplierCostDeviationSettings struct {
@@ -29,14 +26,11 @@ type SupplierCostDeviationSettingRepository interface {
 	SetThreshold(ctx context.Context, threshold float64) error
 }
 
-func clampSupplierCostDeviationThreshold(threshold float64) float64 {
-	if threshold < supplierCostDeviationThresholdMin {
-		return supplierCostDeviationThresholdMin
+func validateSupplierCostDeviationThreshold(threshold float64) error {
+	if math.IsNaN(threshold) || math.IsInf(threshold, 0) || threshold < 0 {
+		return fmt.Errorf("supplier cost deviation threshold must be a finite non-negative number")
 	}
-	if threshold > supplierCostDeviationThresholdMax {
-		return supplierCostDeviationThresholdMax
-	}
-	return threshold
+	return nil
 }
 
 // SupplierCostDeviationSettingsService 管理供应商成本偏差覆盖阈值配置。
@@ -56,10 +50,10 @@ func (s *SupplierCostDeviationSettingsService) SupplierCostDeviationThreshold(ct
 		return DefaultSupplierCostDeviationThreshold
 	}
 	threshold, err := s.repo.GetThreshold(ctx)
-	if err != nil || threshold <= 0 {
+	if err != nil || validateSupplierCostDeviationThreshold(threshold) != nil {
 		return DefaultSupplierCostDeviationThreshold
 	}
-	return clampSupplierCostDeviationThreshold(threshold)
+	return threshold
 }
 
 // GetSupplierCostDeviationSettings 读取供应商成本偏差覆盖阈值配置。
@@ -75,11 +69,13 @@ func (s *SupplierCostDeviationSettingsService) UpdateSupplierCostDeviationSettin
 	if s == nil || s.repo == nil {
 		return nil, fmt.Errorf("supplier cost deviation settings service is not configured")
 	}
-	clamped := clampSupplierCostDeviationThreshold(threshold)
-	if err := s.repo.SetThreshold(ctx, clamped); err != nil {
+	if err := validateSupplierCostDeviationThreshold(threshold); err != nil {
+		return nil, err
+	}
+	if err := s.repo.SetThreshold(ctx, threshold); err != nil {
 		return nil, fmt.Errorf("update supplier cost deviation settings: %w", err)
 	}
 	// 成本趋势缓存结果依赖覆盖阈值，阈值变化后必须失效缓存。
 	invalidateSupplierCostTrendCache()
-	return &SupplierCostDeviationSettings{Threshold: clamped}, nil
+	return &SupplierCostDeviationSettings{Threshold: threshold}, nil
 }

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -29,8 +30,8 @@ func (s *supplierCostDeviationSettingRepoStub) SetThreshold(_ context.Context, t
 }
 
 func TestSupplierCostDeviationThreshold_Defaults(t *testing.T) {
-	svc := NewSupplierCostDeviationSettingsService(&supplierCostDeviationSettingRepoStub{})
-
+	repo := &supplierCostDeviationSettingRepoStub{threshold: DefaultSupplierCostDeviationThreshold}
+	svc := NewSupplierCostDeviationSettingsService(repo)
 	got, err := svc.GetSupplierCostDeviationSettings(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, DefaultSupplierCostDeviationThreshold, got.Threshold)
@@ -54,9 +55,8 @@ func TestSupplierCostDeviationThreshold_FallsBackOnInvalidValue(t *testing.T) {
 		expected  float64
 	}{
 		{-1, DefaultSupplierCostDeviationThreshold},
-		{0, DefaultSupplierCostDeviationThreshold},
-		{1.5, supplierCostDeviationThresholdMax},
-		{0.01, supplierCostDeviationThresholdMin},
+		{0, 0},
+		{1.5, 1.5},
 		{0.95, 0.95},
 	}
 	for _, tc := range cases {
@@ -70,7 +70,7 @@ func TestSupplierCostDeviationThreshold_FallsBackOnInvalidValue(t *testing.T) {
 	require.Equal(t, DefaultSupplierCostDeviationThreshold, svc.SupplierCostDeviationThreshold(context.Background()))
 }
 
-func TestUpdateSupplierCostDeviationSettings_PersistsClamped(t *testing.T) {
+func TestUpdateSupplierCostDeviationSettings_PersistsAndValidates(t *testing.T) {
 	repo := &supplierCostDeviationSettingRepoStub{}
 	svc := NewSupplierCostDeviationSettingsService(repo)
 
@@ -79,27 +79,33 @@ func TestUpdateSupplierCostDeviationSettings_PersistsClamped(t *testing.T) {
 	require.Equal(t, 0.7, got.Threshold)
 	require.Equal(t, 0.7, repo.threshold)
 
-	// 超上限 clamp 到 0.95。
+	// 大于 100% 的阈值按原值保存。
 	got, err = svc.UpdateSupplierCostDeviationSettings(context.Background(), 2.0)
 	require.NoError(t, err)
-	require.Equal(t, supplierCostDeviationThresholdMax, got.Threshold)
-	require.Equal(t, supplierCostDeviationThresholdMax, svc.SupplierCostDeviationThreshold(context.Background()))
+	require.Equal(t, 2.0, got.Threshold)
+	require.Equal(t, 2.0, svc.SupplierCostDeviationThreshold(context.Background()))
 
-	// 低于下限 clamp 到 0.05。
-	got, err = svc.UpdateSupplierCostDeviationSettings(context.Background(), 0.01)
+	// 0% 是有效阈值。
+	got, err = svc.UpdateSupplierCostDeviationSettings(context.Background(), 0)
 	require.NoError(t, err)
-	require.Equal(t, supplierCostDeviationThresholdMin, got.Threshold)
-	require.Equal(t, supplierCostDeviationThresholdMin, svc.SupplierCostDeviationThreshold(context.Background()))
+	require.Equal(t, float64(0), got.Threshold)
+	require.Equal(t, float64(0), svc.SupplierCostDeviationThreshold(context.Background()))
 
-	// 更新失败时返回错误且不修改阈值。
+	// 负数会被拒绝，且不会修改已保存的值。
+	_, err = svc.UpdateSupplierCostDeviationSettings(context.Background(), -0.1)
+	require.Error(t, err)
+	require.Equal(t, float64(0), repo.threshold)
 	repo.err = errors.New("db down")
 	_, err = svc.UpdateSupplierCostDeviationSettings(context.Background(), 0.6)
 	require.Error(t, err)
-	require.Equal(t, supplierCostDeviationThresholdMin, repo.threshold)
+	require.Equal(t, float64(0), repo.threshold)
 }
 
-func TestClampSupplierCostDeviationThreshold(t *testing.T) {
-	require.Equal(t, 0.5, clampSupplierCostDeviationThreshold(0.5))
-	require.Equal(t, supplierCostDeviationThresholdMin, clampSupplierCostDeviationThreshold(0.01))
-	require.Equal(t, supplierCostDeviationThresholdMax, clampSupplierCostDeviationThreshold(1.5))
+func TestValidateSupplierCostDeviationThreshold(t *testing.T) {
+	require.NoError(t, validateSupplierCostDeviationThreshold(0.5))
+	require.NoError(t, validateSupplierCostDeviationThreshold(0))
+	require.NoError(t, validateSupplierCostDeviationThreshold(1.5))
+	require.Error(t, validateSupplierCostDeviationThreshold(-0.1))
+	require.Error(t, validateSupplierCostDeviationThreshold(math.NaN()))
+	require.Error(t, validateSupplierCostDeviationThreshold(math.Inf(1)))
 }

@@ -139,7 +139,13 @@ async function mountSupplierProviders() {
           props: ['show', 'title'],
           template: '<section v-if="show" data-test="base-dialog-stub"><h2>{{ title }}</h2><slot /><slot name="footer" /></section>',
         },
-        Input: true,
+        Input: {
+          name: 'Input',
+          inheritAttrs: false,
+          props: ['modelValue', 'type'],
+          emits: ['update:modelValue'],
+          template: '<div v-bind="$attrs"><input :type="type" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" /></div>',
+        },
         Select: {
           name: 'Select',
           inheritAttrs: false,
@@ -848,17 +854,58 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(supplierProvidersSource).toContain('pointBackgroundColor')
   })
 
-  it('persists cost deviation threshold changes to the backend settings', async () => {
+  it('shows the saved threshold and only persists an edited value after clicking save', async () => {
     const wrapper = await mountSupplierProviders()
-    expect(providerViewMocks.getCostDeviationSettings).toHaveBeenCalled()
+    const thresholdInput = wrapper.get('[data-test="supplier-cost-deviation-threshold"] input')
+    const savedThreshold = wrapper.get('[data-test="supplier-cost-deviation-current"]')
+    const saveButton = wrapper.get('[data-test="supplier-cost-deviation-save"]')
 
-    // 首次加载完成前不持久化。
+    expect(savedThreshold.text()).toContain('50%')
+    expect(saveButton.text()).toContain('保存')
+    expect(saveButton.attributes('disabled')).toBeDefined()
+
+    await thresholdInput.setValue('250')
+    await flushPromises()
+
     expect(providerViewMocks.updateCostDeviationSettings).not.toHaveBeenCalled()
-    expect(supplierProvidersSource).toContain('deviationThresholdReady')
-    expect(supplierProvidersSource).toContain('persistCostDeviationThreshold')
-    expect(supplierProvidersSource).toContain('updateCostDeviationSettings')
+    expect(savedThreshold.text()).toContain('50%')
+    expect((thresholdInput.element as HTMLInputElement).value).toBe('250')
+    expect(saveButton.attributes('disabled')).toBeUndefined()
+
+    await saveButton.trigger('click')
+    await flushPromises()
+
+    expect(providerViewMocks.updateCostDeviationSettings).toHaveBeenCalledWith(2.5)
+    expect(savedThreshold.text()).toContain('250%')
+    expect(providerViewMocks.showSuccess).toHaveBeenCalled()
   })
 
+  it('allows a zero threshold and rejects negative or empty input', async () => {
+    const wrapper = await mountSupplierProviders()
+    const thresholdInput = wrapper.get('[data-test="supplier-cost-deviation-threshold"] input')
+    const saveButton = wrapper.get('[data-test="supplier-cost-deviation-save"]')
+    providerViewMocks.updateCostDeviationSettings.mockClear()
+    providerViewMocks.showError.mockClear()
+
+    await thresholdInput.setValue('0')
+    await flushPromises()
+    expect(providerViewMocks.updateCostDeviationSettings).not.toHaveBeenCalled()
+    await saveButton.trigger('click')
+    await flushPromises()
+    expect(providerViewMocks.updateCostDeviationSettings).toHaveBeenCalledWith(0)
+
+    providerViewMocks.updateCostDeviationSettings.mockClear()
+    await thresholdInput.setValue('-1')
+    await flushPromises()
+    expect(providerViewMocks.updateCostDeviationSettings).not.toHaveBeenCalled()
+    expect(providerViewMocks.showError).toHaveBeenCalled()
+
+    providerViewMocks.showError.mockClear()
+    await thresholdInput.setValue('')
+    await flushPromises()
+    expect(providerViewMocks.updateCostDeviationSettings).not.toHaveBeenCalled()
+    expect(providerViewMocks.showError).toHaveBeenCalled()
+  })
   it('fetches cost for the selected provider on the chosen date', async () => {
     const wrapper = await mountSupplierProviders()
     providerViewMocks.listCostTrends.mockClear()

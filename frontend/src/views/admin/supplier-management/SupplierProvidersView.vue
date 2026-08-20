@@ -354,7 +354,7 @@
       </header>
       <div class="sp-panel-body sp-cost-trend-body" data-test="supplier-cost-trend-body">
         <div class="sp-health-chart-controls">
-          <div class="sp-health-provider-filter w-full sm:w-44 flex items-center gap-2">
+          <div class="sp-health-provider-filter w-full sm:w-44">
             <Select
               v-model="costTrendProviderId"
               class="w-full"
@@ -363,14 +363,30 @@
               data-test="supplier-cost-provider"
               @update:model-value="onCostTrendProviderChange"
             />
-            <span class="text-xs text-gray-500 whitespace-nowrap">偏差阈值</span>
-            <Select
-              v-model="deviationThreshold"
-              class="w-24"
-              :options="deviationThresholdOptions"
-              aria-label="成本偏差阈值"
-            />
-            <span class="text-xs font-mono w-12 text-blue-600">{{ (deviationThreshold * 100).toFixed(0) }}%</span>
+          </div>
+          <div class="sp-cost-threshold-control" data-test="supplier-cost-deviation-control">
+            <span class="sp-health-control-label">偏差阈值</span>
+            <div class="sp-cost-threshold-editor">
+              <Input
+                :model-value="deviationThresholdPercent"
+                class="sp-cost-threshold-input"
+                type="number"
+                aria-label="成本偏差阈值"
+                data-test="supplier-cost-deviation-threshold"
+                @update:model-value="onDeviationThresholdInput"
+              />
+              <span class="sp-cost-threshold-unit">%</span>
+            </div>
+            <button
+              class="sp-button small primary"
+              type="button"
+              data-test="supplier-cost-deviation-save"
+              :disabled="deviationThresholdSaveLoading || !deviationThresholdDirty"
+              @click="saveCostDeviationThreshold"
+            >{{ deviationThresholdSaveLoading ? '保存中…' : '保存' }}</button>
+            <span class="sp-cost-threshold-current" data-test="supplier-cost-deviation-current" aria-live="polite">
+              当前配置：<strong>{{ formatDeviationThresholdPercent(savedDeviationThresholdPercent) }}%</strong>
+            </span>
           </div>
         </div>
 
@@ -1173,12 +1189,10 @@ const balanceSummary = ref<SupplierProviderBalanceSummary | null>(null)
 const balanceSummaryLoading = ref(false)
 const costTrendPoints = ref<SupplierProviderCostTrendPoint[]>([])
 const costTrendBreakdown = ref<SupplierProviderCostBreakdown[]>([])
-const deviationThresholdOptions: SelectOption[] = Array.from({ length: 51 }, (_, value) => ({
-  value: value / 100,
-  label: `${value}%`,
-}))
-const deviationThreshold = ref(0.5) // 50%，可配置，后端持久化
-const deviationThresholdReady = ref(false) // 首次从后端加载完成前不触发持久化
+const deviationThreshold = ref(0.5) // 当前已应用并持久化的阈值
+const deviationThresholdPercent = ref<number | string>(50) // 输入框中的待保存值
+const savedDeviationThresholdPercent = ref(50)
+const deviationThresholdSaveLoading = ref(false)
 const costSingleDay = ref(formatLocalDate(new Date()))
 const costSingleDayLoading = ref(false)
 const search = ref('')
@@ -1676,11 +1690,6 @@ watch(search, () => {
   searchTimer = window.setTimeout(loadProviders, 350)
 })
 
-watch(deviationThreshold, value => {
-  if (!deviationThresholdReady.value) return
-  persistCostDeviationThreshold(value)
-})
-
 onMounted(async () => {
   await loadProviderTypes()
   await loadCostDeviationSettings()
@@ -1784,20 +1793,62 @@ async function loadCostDeviationSettings() {
   try {
     const settings = await supplierProvidersAPI.getCostDeviationSettings()
     const value = Number(settings?.threshold ?? 0.5)
-    if (value > 0) deviationThreshold.value = value
+    if (Number.isFinite(value) && value >= 0) {
+      const percent = value * 100
+      deviationThreshold.value = value
+      deviationThresholdPercent.value = percent
+      savedDeviationThresholdPercent.value = percent
+    }
   } catch {
     // 设置读取失败时静默回退到默认 0.5。
     deviationThreshold.value = 0.5
-  } finally {
-    deviationThresholdReady.value = true
+    deviationThresholdPercent.value = 50
+    savedDeviationThresholdPercent.value = 50
   }
 }
 
-async function persistCostDeviationThreshold(value: number) {
+const deviationThresholdDirty = computed(() => {
+  const raw = String(deviationThresholdPercent.value).trim()
+  const percent = Number(raw)
+  return Boolean(raw) && Number.isFinite(percent) && percent >= 0 && percent !== savedDeviationThresholdPercent.value
+})
+
+function formatDeviationThresholdPercent(value: number) {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(4)))
+}
+
+function onDeviationThresholdInput(value: string | number) {
+  const raw = String(value).trim()
+  const percent = Number(raw)
+  if (!raw || !Number.isFinite(percent) || percent < 0) {
+    appStore.showError('偏差阈值必须是大于等于 0 的数字')
+    deviationThresholdPercent.value = savedDeviationThresholdPercent.value
+    return
+  }
+  deviationThresholdPercent.value = percent
+}
+
+async function saveCostDeviationThreshold() {
+  const raw = String(deviationThresholdPercent.value).trim()
+  const percent = Number(raw)
+  if (!raw || !Number.isFinite(percent) || percent < 0) {
+    appStore.showError('偏差阈值必须是大于等于 0 的数字')
+    deviationThresholdPercent.value = savedDeviationThresholdPercent.value
+    return
+  }
+
+  deviationThresholdSaveLoading.value = true
   try {
+    const value = percent / 100
     await supplierProvidersAPI.updateCostDeviationSettings(value)
+    deviationThreshold.value = value
+    savedDeviationThresholdPercent.value = percent
+    deviationThresholdPercent.value = percent
+    appStore.showSuccess(`偏差阈值已保存为 ${formatDeviationThresholdPercent(percent)}%`)
   } catch (err) {
     appStore.showError(errorMessage(err, '保存成本偏差阈值失败'))
+  } finally {
+    deviationThresholdSaveLoading.value = false
   }
 }
 
@@ -4316,6 +4367,57 @@ function errorMessage(err: unknown, fallback: string): string {
 .sp-health-provider-filter {
   min-width: 10rem;
   max-width: 14rem;
+}
+
+.sp-cost-threshold-control {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: min(100%, 30rem);
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+}
+
+.sp-cost-threshold-editor {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  width: 11rem;
+  flex-shrink: 0;
+}
+
+.sp-cost-threshold-input {
+  width: 10rem;
+}
+
+.sp-cost-threshold-unit {
+  color: var(--sp-blue);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.sp-cost-threshold-current {
+  margin-left: auto;
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.sp-cost-threshold-current strong {
+  color: var(--sp-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+@media (max-width: 48rem) {
+  .sp-cost-threshold-control {
+    min-width: 100%;
+  }
+
+  .sp-cost-threshold-current {
+    width: 100%;
+    margin-left: 0;
+  }
 }
 
 .sp-sync-progress {
