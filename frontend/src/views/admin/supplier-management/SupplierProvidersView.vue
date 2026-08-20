@@ -36,6 +36,7 @@
         </div>
         <div class="sp-provider-filter-actions">
           <button class="sp-button sp-filter-action-refresh" type="button" :disabled="loading || costTrendLoading" @click="refreshProvidersView">刷新数据</button>
+          <button class="sp-button sp-filter-action-recharge" type="button" @click="openAllRechargeHistory">充值记录</button>
           <button class="sp-button sp-filter-action-maintain" type="button" @click="openTypeManager">类型维护</button>
           <button class="sp-button sp-filter-action-type" type="button" @click="openCreateProviderType">新增供应商类型</button>
           <button class="sp-button primary sp-filter-action-create" type="button" @click="openCreate">新增供应商</button>
@@ -197,6 +198,7 @@
                 :disabled="!provider.enabled || isRefreshingToken(provider)"
                 @click="refreshProviderToken(provider)"
               >{{ isRefreshingToken(provider) ? newAPIAuthActionLoadingLabel(provider) : newAPIAuthActionLabel(provider) }}</button>
+              <button class="sp-button small" type="button" :data-test="`supplier-provider-recharges-${provider.id}`" @click="openProviderRechargeHistory(provider)">充值记录</button>
               <button class="sp-button small" type="button" @click="openAuthHistory(provider)">登录记录</button>
               <button class="sp-button small" type="button" @click="openEdit(provider)">编辑</button>
               <button
@@ -478,30 +480,9 @@
           <div class="sp-detail-cell"><span>预计可用</span><b :class="{ 'sp-up': isLowBalance(selectedProvider) }">{{ balanceText(selectedProvider) }}</b></div>
           <div class="sp-detail-cell"><span>最近同步</span><b>{{ syncText(selectedProvider) }}</b></div>
         </div>
-        <section class="sp-recharge-section" data-test="supplier-provider-recharges">
-          <div class="sp-recharge-head">
-            <div>
-              <span class="sp-recharge-kicker">上游充值</span>
-              <h4>充值记录（近 {{ rechargeDays }} 天）</h4>
-            </div>
-            <span class="sp-recharge-total" data-test="supplier-recharge-total">累计 <b>{{ currency(rechargeTotal) }}</b></span>
-          </div>
-          <div v-if="rechargesLoading" class="sp-recharge-empty">充值记录加载中…</div>
-          <div v-else-if="recharges.length" class="sp-recharge-list">
-            <div v-for="item in recharges" :key="item.id" class="sp-recharge-item">
-              <div class="sp-recharge-main">
-                <strong>{{ currency(item.amount) }}</strong>
-                <small>{{ formatAuthTime(item.occurred_at) }}</small>
-              </div>
-              <span class="sp-recharge-note">{{ item.note || '无备注' }}</span>
-            </div>
-          </div>
-          <div v-else class="sp-recharge-empty">
-            未找到该供应商对应的上游充值记录（按编码 {{ selectedProvider.code }} 匹配上游 slug / 名称）。可在「上游管理」的余额消费中登记充值。
-          </div>
-        </section>
         <div class="sp-drawer-actions">
           <button class="sp-button primary" type="button" @click="openEdit(selectedProvider)">编辑配置</button>
+          <button class="sp-button" type="button" @click="openProviderRechargeHistory(selectedProvider)">充值记录</button>
           <button class="sp-button" type="button" @click="openAuthHistory(selectedProvider)">登录与 Token</button>
           <button
             v-if="selectedProvider.provider_type === 'newapi'"
@@ -1009,6 +990,14 @@
       </template>
     </BaseDialog>
 
+    <SupplierRechargeHistoryDialog
+      :show="rechargeDialogVisible"
+      :provider-id="rechargeDialogProviderId"
+      :provider-name="rechargeDialogProviderName"
+      :providers="providers"
+      @close="rechargeDialogVisible = false"
+    />
+
   </SupplierModuleLayout>
 </template>
 
@@ -1028,7 +1017,7 @@ import {
   type TooltipItem,
 } from 'chart.js'
 import { Bar, Line } from 'vue-chartjs'
-import { SupplierDrawer, SupplierModuleLayout } from '@/components/admin/supplier-management'
+import { SupplierDrawer, SupplierModuleLayout, SupplierRechargeHistoryDialog } from '@/components/admin/supplier-management'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
@@ -1039,7 +1028,6 @@ import Toggle from '@/components/common/Toggle.vue'
 import supplierProvidersAPI, { type SupplierProvider, type SupplierProviderSummary, type SupplierProviderUpsertPayload, type SupplierProviderCostTrendPoint, type SupplierProviderCostBreakdown, type SupplierProviderCostBackfillResult, type SupplierProviderAuthStatusResult, type SupplierProviderAuthHistoryResult, type SupplierProviderAuthEventType, type SupplierProviderBalanceSummary } from '@/api/admin/supplierProviders'
 import supplierProviderTypesAPI, { type SupplierProviderType, type SupplierProviderTypeUpsertPayload } from '@/api/admin/supplierProviderTypes'
 import { streamSupplierProviderSync, testProviderEndpoint, type SupplierProviderEndpointTestResult, type SupplierSyncProgressEvent, type SupplierSyncProgressStage, type SupplierSyncScope } from '@/api/admin/supplierProviderData'
-import { listBalanceRecharges as listUpstreamBalanceRecharges, type UpstreamBalanceRecharge } from '@/api/admin/upstreamAccountSync'
 import { useAppStore } from '@/stores/app'
 import type { Column } from '@/components/common/types'
 
@@ -1185,9 +1173,6 @@ const balanceSummary = ref<SupplierProviderBalanceSummary | null>(null)
 const balanceSummaryLoading = ref(false)
 const costTrendPoints = ref<SupplierProviderCostTrendPoint[]>([])
 const costTrendBreakdown = ref<SupplierProviderCostBreakdown[]>([])
-const recharges = ref<UpstreamBalanceRecharge[]>([])
-const rechargesLoading = ref(false)
-const rechargeDays = 30
 const deviationThresholdOptions: SelectOption[] = Array.from({ length: 51 }, (_, value) => ({
   value: value / 100,
   label: `${value}%`,
@@ -1204,6 +1189,9 @@ const providerSortOrder = ref<'asc' | 'desc'>('asc')
 const loading = ref(false)
 const error = ref('')
 const selectedProvider = ref<SupplierProvider | null>(null)
+const rechargeDialogVisible = ref(false)
+const rechargeDialogProviderId = ref<number | undefined>(undefined)
+const rechargeDialogProviderName = ref('')
 const authDialogVisible = ref(false)
 const authProvider = ref<SupplierProvider | null>(null)
 const authStatus = ref<SupplierProviderAuthStatusResult | null>(null)
@@ -1434,10 +1422,6 @@ const costBreakdownRangeLabel = computed(() => {
   if (start === end) return start
   return `${start} ~ ${end}`
 })
-
-const rechargeTotal = computed(() =>
-  recharges.value.reduce((sum, item) => sum + Number(item.amount || 0), 0),
-)
 
 const costTrendTotals = computed(() =>
   costTrendPoints.value.reduce((acc, point) => {
@@ -1863,21 +1847,6 @@ async function loadBalanceSummary() {
   }
 }
 
-async function loadProviderRecharges(provider: SupplierProvider) {
-  rechargesLoading.value = true
-  recharges.value = []
-  try {
-    recharges.value = await listUpstreamBalanceRecharges({
-      provider_slug: provider.code,
-      days: rechargeDays,
-    })
-  } catch (err) {
-    appStore.showError(errorMessage(err, '加载充值记录失败'))
-  } finally {
-    rechargesLoading.value = false
-  }
-}
-
 function notifyCostBackfillResult(result: SupplierProviderCostBackfillResult) {
   const success = Number(result?.success_count || 0)
   const failed = Number(result?.failed_count || 0)
@@ -1905,7 +1874,18 @@ function selectProviderForDetail(provider: SupplierProvider) {
     costTrendProviderId.value = provider.id
     void loadCostTrendData()
   }
-  void loadProviderRecharges(provider)
+}
+
+function openAllRechargeHistory() {
+  rechargeDialogProviderId.value = undefined
+  rechargeDialogProviderName.value = ''
+  rechargeDialogVisible.value = true
+}
+
+function openProviderRechargeHistory(provider: SupplierProvider) {
+  rechargeDialogProviderId.value = provider.id
+  rechargeDialogProviderName.value = provider.name
+  rechargeDialogVisible.value = true
 }
 
 async function openAuthHistory(provider: SupplierProvider) {
@@ -2954,6 +2934,18 @@ function errorMessage(err: unknown, fallback: string): string {
   border-color: color-mix(in srgb, var(--sp-violet, #7c3aed) 52%, var(--sp-line));
   background: color-mix(in srgb, var(--sp-violet, #7c3aed) 15%, var(--sp-panel));
   color: color-mix(in srgb, var(--sp-violet, #7c3aed) 90%, #1e1b4b);
+}
+
+.sp-provider-filter-actions .sp-filter-action-recharge {
+  border-color: color-mix(in srgb, var(--sp-cyan, #0891b2) 42%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-cyan, #0891b2) 10%, var(--sp-panel));
+  color: var(--sp-cyan, #0891b2);
+}
+
+.sp-provider-filter-actions .sp-filter-action-recharge:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--sp-cyan, #0891b2) 62%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-cyan, #0891b2) 18%, var(--sp-panel));
+  color: color-mix(in srgb, var(--sp-cyan, #0891b2) 88%, #164e63);
 }
 
 .sp-provider-filter-actions .sp-filter-action-maintain {

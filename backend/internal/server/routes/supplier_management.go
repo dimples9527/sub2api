@@ -48,6 +48,8 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 		supplier.PUT("/captcha-settings", h.Admin.Setting.UpdateSupplierCaptchaSettings)
 		supplier.GET("/cost-deviation-settings", h.Admin.SupplierCostDeviationSettings.GetSettings)
 		supplier.PUT("/cost-deviation-settings", h.Admin.SupplierCostDeviationSettings.UpdateSettings)
+		supplier.GET("/recharges", h.Admin.SupplierProviderRecharge.List)
+		supplier.POST("/recharges/sync", h.Admin.SupplierProviderRecharge.Sync)
 
 		balanceAlert := supplier.Group("/balance-alert")
 		{

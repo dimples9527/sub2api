@@ -19,10 +19,12 @@ import (
 )
 
 const (
-	defaultSupplierSub2APILoginPath               = "/api/v1/auth/login"
-	defaultSupplierSub2APIRefreshPath             = "/api/v1/auth/refresh"
-	DefaultSupplierSub2APIMonitorPath             = "/api/v1/channel-monitors?timezone=Asia%2FShanghai"
-	defaultSupplierSub2APIHTTPTimeout             = 30 * time.Second
+	defaultSupplierSub2APILoginPath    = "/api/v1/auth/login"
+	defaultSupplierSub2APIRefreshPath  = "/api/v1/auth/refresh"
+	DefaultSupplierSub2APIMonitorPath  = "/api/v1/channel-monitors?timezone=Asia%2FShanghai"
+	defaultSupplierSub2APIRechargePath = "/api/v1/redeem/history?timezone=Asia%2FShanghai"
+	legacySupplierSub2APIRechargePath  = "/v1/redeem/history?timezone=Asia%2FShanghai"
+	defaultSupplierSub2APIHTTPTimeout  = 30 * time.Second
 	// supplierSub2APICostRequestTimeout 限制成本接口单次请求耗时。
 	// 上游成本接口在部分时段会长时间挂起或返回 500，
 	// 用独立较短时间内让同步流程尽快回落到本地余额差保底估算，避免整个请求被拖满 30s。
@@ -79,6 +81,11 @@ type SupplierProviderRemoteClient interface {
 	FetchGroups(ctx context.Context, provider *SupplierProvider, password string) ([]SupplierProviderRemoteGroup, error)
 	FetchBalance(ctx context.Context, provider *SupplierProvider, password string) (float64, error)
 	FetchCost(ctx context.Context, provider *SupplierProvider, password string, day time.Time) (float64, error)
+}
+
+// SupplierProviderRemoteRechargeClient 提供指定统计日的上游充值金额。
+type SupplierProviderRemoteRechargeClient interface {
+	FetchRechargeAmount(ctx context.Context, provider *SupplierProvider, password string, day time.Time) (float64, error)
 }
 
 type SupplierProviderRemoteMonitorClient interface {
@@ -185,6 +192,36 @@ func (c *SupplierSub2APIClient) FetchCost(ctx context.Context, provider *Supplie
 	cost, parseErr := parseSupplierSub2APINumberField(raw, "today_actual_cost")
 	c.annotateEndpointParse(provider.ID, "cost", "cost", raw, parseErr)
 	return cost, parseErr
+}
+
+func (c *SupplierSub2APIClient) FetchRechargeAmount(ctx context.Context, provider *SupplierProvider, password string, day time.Time) (float64, error) {
+	var lastErr error
+	for _, path := range supplierSub2APIRechargeEndpoints(provider.RechargeURL) {
+		raw, err := c.authenticatedGet(ctx, provider, password, path, "recharge")
+		if err == nil {
+			return parseSupplierSub2APIRechargeAmount(raw, day)
+		}
+		lastErr = err
+		if !supplierSub2APIStatusIs(err, http.StatusNotFound) {
+			return 0, err
+		}
+	}
+	return 0, lastErr
+}
+
+func (c *SupplierSub2APIClient) FetchRechargeRecords(ctx context.Context, provider *SupplierProvider, password string, start, end time.Time) ([]SupplierProviderRechargeRecord, error) {
+	var lastErr error
+	for _, path := range supplierSub2APIRechargeEndpoints(provider.RechargeURL) {
+		raw, err := c.authenticatedGet(ctx, provider, password, path, "recharge")
+		if err == nil {
+			return parseSupplierSub2APIRechargeRecordsInRange(raw, start, end)
+		}
+		lastErr = err
+		if !supplierSub2APIStatusIs(err, http.StatusNotFound) {
+			return nil, err
+		}
+	}
+	return nil, lastErr
 }
 
 func (c *SupplierSub2APIClient) FetchMonitorItems(ctx context.Context, provider *SupplierProvider, password string) ([]SupplierProviderMonitorItem, error) {
@@ -958,6 +995,99 @@ func parseSupplierSub2APINumberField(raw []byte, field string) (float64, error) 
 	return jsonFloat(resp.Data[field]), nil
 }
 
+func parseSupplierSub2APIRechargeAmount(raw []byte, day time.Time) (float64, error) {
+	items, err := supplierSub2APIItems(raw)
+	if err != nil {
+		return 0, fmt.Errorf("decode supplier sub2api recharge response: %w", err)
+	}
+	var amount float64
+	for _, item := range items {
+		if !strings.EqualFold(strings.TrimSpace(jsonString(item["status"])), "used") {
+			continue
+		}
+		rechargeType := strings.ToLower(strings.TrimSpace(jsonString(item["type"])))
+		if rechargeType != "balance" && rechargeType != "admin_balance" {
+			continue
+		}
+		usedAt, parseErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(jsonString(item["used_at"])))
+		if parseErr != nil || !sameSupplierCostStatDay(usedAt, day) {
+			continue
+		}
+		value := jsonFloat(item["value"])
+		if value > 0 {
+			amount += value
+		}
+	}
+	return amount, nil
+}
+
+func parseSupplierSub2APIRechargeRecords(raw []byte, day time.Time) ([]SupplierProviderRechargeRecord, error) {
+	loc := day.Location()
+	if loc == nil {
+		loc = time.UTC
+	}
+	localDay := day.In(loc)
+	start := time.Date(localDay.Year(), localDay.Month(), localDay.Day(), 0, 0, 0, 0, loc)
+	end := start.Add(24 * time.Hour)
+	return parseSupplierSub2APIRechargeRecordsInRange(raw, start, end)
+}
+
+func parseSupplierSub2APIRechargeRecordsInRange(raw []byte, start, end time.Time) ([]SupplierProviderRechargeRecord, error) {
+	var envelope struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Data    []struct {
+			ID        json.RawMessage `json:"id"`
+			Code      string          `json:"code"`
+			Type      string          `json:"type"`
+			Value     float64         `json:"value"`
+			Status    string          `json:"status"`
+			UsedAt    string          `json:"used_at"`
+			CreatedAt string          `json:"created_at"`
+			Raw       json.RawMessage `json:"-"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil, fmt.Errorf("decode supplier sub2api recharge response: %w", err)
+	}
+	if envelope.Code != 0 {
+		return nil, fmt.Errorf("supplier sub2api recharge failed: %s", firstSupplierSub2APIString(envelope.Message, "unknown error"))
+	}
+	if end.IsZero() {
+		end = time.Now()
+	}
+	if start.IsZero() {
+		start = time.Unix(0, 0)
+	}
+	items := make([]map[string]any, 0, len(envelope.Data))
+	var generic struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &generic); err == nil {
+		items = generic.Data
+	}
+	records := make([]SupplierProviderRechargeRecord, 0, len(envelope.Data))
+	for idx, item := range envelope.Data {
+		if item.Status != "used" || (item.Type != "balance" && item.Type != "admin_balance") || item.Value <= 0 {
+			continue
+		}
+		occurredAt, err := time.Parse(time.RFC3339Nano, firstSupplierSub2APIString(item.UsedAt, item.CreatedAt))
+		if err != nil || occurredAt.Before(start) || !occurredAt.Before(end) {
+			continue
+		}
+		externalID := supplierProviderJSONScalarText(item.ID)
+		var payload json.RawMessage
+		if idx < len(items) {
+			payload, _ = json.Marshal(items[idx])
+		}
+		records = append(records, SupplierProviderRechargeRecord{
+			ExternalID: externalID, ExternalCode: strings.TrimSpace(item.Code), RechargeType: strings.TrimSpace(item.Type),
+			Amount: item.Value, Status: strings.TrimSpace(item.Status), OccurredAt: occurredAt, RawPayload: payload,
+		})
+	}
+	return records, nil
+}
+
 func supplierSub2APIItems(raw []byte) ([]map[string]any, error) {
 	var resp struct {
 		Code    any             `json:"code"`
@@ -1180,6 +1310,24 @@ func supplierSub2APIAccountEndpoints(configured string) []string {
 		strings.TrimSpace(configured),
 		"/api/v1/user/keys",
 		"/api/admin/keys",
+	}
+	out := make([]string, 0, len(candidates))
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		if candidate == "" || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		out = append(out, candidate)
+	}
+	return out
+}
+
+func supplierSub2APIRechargeEndpoints(configured string) []string {
+	candidates := []string{
+		strings.TrimSpace(configured),
+		defaultSupplierSub2APIRechargePath,
+		legacySupplierSub2APIRechargePath,
 	}
 	out := make([]string, 0, len(candidates))
 	seen := map[string]bool{}

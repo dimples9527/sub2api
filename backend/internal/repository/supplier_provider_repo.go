@@ -33,7 +33,7 @@ func NewSupplierProviderTypeRepository(db *sql.DB) service.SupplierProviderTypeR
 const supplierProviderSelect = `
 SELECT p.id, p.code, p.name, p.provider_type, p.newapi_auth_mode, p.base_url, p.login_url,
        p.api_keys_url, p.groups_url, p.available_groups_url, p.balance_url,
-       p.usage_cost_url, p.monitor_url, p.account_name_prefix, p.temp_disable_minutes,
+       p.usage_cost_url, p.recharge_url, p.monitor_url, p.account_name_prefix, p.temp_disable_minutes,
        p.account_rate_multiplier_scale, p.sort_order, p.enabled, p.turnstile_enabled, p.is_default,
        p.created_at, p.updated_at,
        COALESCE(c.email, ''), COALESCE(c.username, ''), COALESCE(c.password_encrypted, ''),
@@ -452,12 +452,12 @@ func (r *supplierProviderRepository) Create(ctx context.Context, provider *servi
 	err = tx.QueryRowContext(ctx, `
 INSERT INTO supplier_providers (
   code, name, provider_type, newapi_auth_mode, base_url, login_url, api_keys_url, groups_url,
-  available_groups_url, balance_url, usage_cost_url, monitor_url, account_name_prefix,
+  available_groups_url, balance_url, usage_cost_url, recharge_url, monitor_url, account_name_prefix,
   temp_disable_minutes, account_rate_multiplier_scale, sort_order, enabled, turnstile_enabled, is_default
 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
 RETURNING id, created_at, updated_at`, provider.Code, provider.Name, provider.ProviderType,
 		provider.NewAPIAuthMode, provider.BaseURL, provider.LoginURL, provider.APIKeysURL, provider.GroupsURL,
-		provider.AvailableGroupsURL, provider.BalanceURL, provider.UsageCostURL,
+		provider.AvailableGroupsURL, provider.BalanceURL, provider.UsageCostURL, provider.RechargeURL,
 		provider.MonitorURL, provider.AccountNamePrefix, provider.TempDisableMinutes, provider.AccountRateMultiplierScale,
 		provider.SortOrder, provider.Enabled, provider.TurnstileEnabled, provider.IsDefault).Scan(&provider.ID, &provider.CreatedAt, &provider.UpdatedAt)
 	if err != nil {
@@ -490,13 +490,13 @@ func (r *supplierProviderRepository) Update(ctx context.Context, provider *servi
 UPDATE supplier_providers SET
   code=$2, name=$3, provider_type=$4, newapi_auth_mode=$5, base_url=$6, login_url=$7,
   api_keys_url=$8, groups_url=$9, available_groups_url=$10, balance_url=$11,
-  usage_cost_url=$12, monitor_url=$13, account_name_prefix=$14, temp_disable_minutes=$15,
+  usage_cost_url=$12, recharge_url=$13, monitor_url=$14, account_name_prefix=$15, temp_disable_minutes=$15,
   account_rate_multiplier_scale=$16, sort_order=$17, enabled=$18,
   turnstile_enabled=$19, is_default=$20, updated_at=NOW()
 WHERE id=$1 AND deleted_at IS NULL`, provider.ID, provider.Code, provider.Name,
 		provider.ProviderType, provider.NewAPIAuthMode, provider.BaseURL, provider.LoginURL, provider.APIKeysURL,
 		provider.GroupsURL, provider.AvailableGroupsURL, provider.BalanceURL,
-		provider.UsageCostURL, provider.MonitorURL, provider.AccountNamePrefix, provider.TempDisableMinutes,
+		provider.UsageCostURL, provider.RechargeURL, provider.MonitorURL, provider.AccountNamePrefix, provider.TempDisableMinutes,
 		provider.AccountRateMultiplierScale, provider.SortOrder, provider.Enabled,
 		provider.TurnstileEnabled, provider.IsDefault)
 	if err != nil {
@@ -615,7 +615,7 @@ func scanSupplierProvider(scanner supplierProviderScanner) (*service.SupplierPro
 	var authLastTokenExpiresAt sql.NullTime
 	err := scanner.Scan(&provider.ID, &provider.Code, &provider.Name, &provider.ProviderType, &provider.NewAPIAuthMode,
 		&provider.BaseURL, &provider.LoginURL, &provider.APIKeysURL, &provider.GroupsURL,
-		&provider.AvailableGroupsURL, &provider.BalanceURL, &provider.UsageCostURL, &provider.MonitorURL,
+		&provider.AvailableGroupsURL, &provider.BalanceURL, &provider.UsageCostURL, &provider.RechargeURL, &provider.MonitorURL,
 		&provider.AccountNamePrefix, &provider.TempDisableMinutes,
 		&provider.AccountRateMultiplierScale, &provider.SortOrder, &provider.Enabled,
 		&provider.TurnstileEnabled, &provider.IsDefault, &provider.CreatedAt, &provider.UpdatedAt, &provider.Email,
@@ -661,7 +661,7 @@ func mapSupplierProviderError(err error) error {
 
 const supplierProviderTypeSelect = `
 SELECT id, code, name, login_url, api_keys_url, groups_url, available_groups_url,
-       balance_url, usage_cost_url, monitor_url, enabled, sort_order, created_at, updated_at
+       balance_url, usage_cost_url, recharge_url, monitor_url, enabled, sort_order, created_at, updated_at
 FROM supplier_provider_types`
 
 func (r *supplierProviderTypeRepository) List(ctx context.Context, enabledOnly bool) ([]*service.SupplierProviderType, error) {
@@ -708,7 +708,7 @@ func (r *supplierProviderTypeRepository) Create(ctx context.Context, item *servi
 	err := r.db.QueryRowContext(ctx, `
 INSERT INTO supplier_provider_types (
   code, name, login_url, api_keys_url, groups_url, available_groups_url,
-  balance_url, usage_cost_url, monitor_url, enabled, sort_order
+  balance_url, usage_cost_url, recharge_url, monitor_url, enabled, sort_order
 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 RETURNING id, created_at, updated_at`, item.Code, item.Name, item.LoginURL, item.APIKeysURL,
 		item.GroupsURL, item.AvailableGroupsURL, item.BalanceURL, item.UsageCostURL,
@@ -727,7 +727,7 @@ UPDATE supplier_provider_types SET
   monitor_url=$10, enabled=$11, sort_order=$12, updated_at=NOW()
 WHERE id=$1 AND deleted_at IS NULL`, item.ID, item.Code, item.Name, item.LoginURL,
 		item.APIKeysURL, item.GroupsURL, item.AvailableGroupsURL, item.BalanceURL,
-		item.UsageCostURL, item.MonitorURL, item.Enabled, item.SortOrder)
+		item.UsageCostURL, item.RechargeURL, item.MonitorURL, item.Enabled, item.SortOrder)
 	if err != nil {
 		return mapSupplierProviderTypeError(err)
 	}
@@ -754,7 +754,7 @@ func scanSupplierProviderType(scanner supplierProviderTypeScanner) (*service.Sup
 	item := &service.SupplierProviderType{}
 	err := scanner.Scan(&item.ID, &item.Code, &item.Name, &item.LoginURL,
 		&item.APIKeysURL, &item.GroupsURL, &item.AvailableGroupsURL,
-		&item.BalanceURL, &item.UsageCostURL, &item.MonitorURL, &item.Enabled, &item.SortOrder,
+		&item.BalanceURL, &item.UsageCostURL, &item.RechargeURL, &item.MonitorURL, &item.Enabled, &item.SortOrder,
 		&item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		return nil, err

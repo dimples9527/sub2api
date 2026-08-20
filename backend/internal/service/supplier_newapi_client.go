@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,12 +28,15 @@ const (
 	defaultSupplierNewAPIGroupsPath   = "/api/group/"
 	defaultSupplierNewAPIBalancePath  = "/api/user/self"
 	defaultSupplierNewAPIUsageCostURL = "/api/log/self/stat?type=0&token_name=&model_name=&start_timestamp={start_timestamp}&end_timestamp={end_timestamp}&group="
+	defaultSupplierNewAPIRechargeURL  = "/api/log/self?p=1&page_size=100&type=1&start_timestamp={start_timestamp}&end_timestamp={end_timestamp}"
 	supplierNewAPIQuotaUnit           = 500000
 
 	supplierNewAPISessionRefreshThreshold = 5 * time.Minute
 	supplierNewAPIDefaultAccessTokenTTL   = 14 * time.Minute
 	supplierNewAPIRefreshCookieName       = "new_api_refresh"
 )
+
+var supplierNewAPIRechargeAmountPattern = regexp.MustCompile(`充值金额\s*[:：]\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)\s*额度`)
 
 type SupplierNewAPIClient struct {
 	httpClient      *http.Client
@@ -323,6 +327,50 @@ func (c *SupplierNewAPIClient) FetchCost(ctx context.Context, provider *Supplier
 	cost, parseErr := parseSupplierNewAPINumber(raw, "cost")
 	c.annotateEndpointParse(provider.ID, "cost", map[string]any{"today_actual_cost": cost}, parseErr)
 	return cost, parseErr
+}
+
+func (c *SupplierNewAPIClient) FetchRechargeAmount(ctx context.Context, provider *SupplierProvider, password string, day time.Time) (float64, error) {
+	const pageSize = 100
+	var totalAmount float64
+	for page := 1; ; page++ {
+		path := supplierNewAPIRechargeURL(day, page, pageSize)
+		raw, err := c.fetchJSONWithRetry(ctx, provider, password, path, "recharge")
+		if err != nil {
+			return 0, err
+		}
+		amount, total, itemCount, parseErr := parseSupplierNewAPIRechargePage(raw)
+		if parseErr != nil {
+			return 0, parseErr
+		}
+		totalAmount += amount
+		if itemCount == 0 || page*pageSize >= total {
+			return totalAmount, nil
+		}
+	}
+}
+
+func (c *SupplierNewAPIClient) FetchRechargeRecords(ctx context.Context, provider *SupplierProvider, password string, start, end time.Time) ([]SupplierProviderRechargeRecord, error) {
+	const pageSize = 100
+	pathTemplate := strings.TrimSpace(provider.RechargeURL)
+	if pathTemplate == "" {
+		pathTemplate = defaultSupplierNewAPIRechargeURL
+	}
+	var records []SupplierProviderRechargeRecord
+	for page := 1; ; page++ {
+		path := supplierNewAPIRechargeRangeURL(pathTemplate, start, end, page, pageSize)
+		raw, err := c.fetchJSONWithRetry(ctx, provider, password, path, "recharge")
+		if err != nil {
+			return nil, err
+		}
+		pageRecords, total, itemCount, parseErr := parseSupplierNewAPIRechargeRecords(raw, start, end)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		records = append(records, pageRecords...)
+		if itemCount == 0 || page*pageSize >= total {
+			return records, nil
+		}
+	}
 }
 
 func (c *SupplierNewAPIClient) TestEndpoint(ctx context.Context, provider *SupplierProvider, password string, scope string) (SupplierProviderEndpointTestResult, error) {
@@ -1342,6 +1390,103 @@ func parseSupplierNewAPINumber(payload []byte, label string) (float64, error) {
 	return resp.Data.Quota / supplierNewAPIQuotaUnit, nil
 }
 
+func parseSupplierNewAPIRechargePage(payload []byte) (amount float64, total int, itemCount int, err error) {
+	var resp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			Total int `json:"total"`
+			Items []struct {
+				Type    int    `json:"type"`
+				Content string `json:"content"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(payload, &resp); err != nil {
+		return 0, 0, 0, fmt.Errorf("decode supplier newapi recharge response: %w", err)
+	}
+	if !resp.Success {
+		return 0, 0, 0, fmt.Errorf("supplier newapi recharge failed: %s", firstSupplierSub2APIString(resp.Message, "unknown error"))
+	}
+	for _, item := range resp.Data.Items {
+		if item.Type != 1 {
+			continue
+		}
+		match := supplierNewAPIRechargeAmountPattern.FindStringSubmatch(item.Content)
+		if len(match) != 2 {
+			continue
+		}
+		value, parseErr := strconv.ParseFloat(match[1], 64)
+		if parseErr != nil {
+			return 0, 0, 0, fmt.Errorf("parse supplier newapi recharge amount: %w", parseErr)
+		}
+		if value > 0 {
+			amount += value
+		}
+	}
+	return amount, resp.Data.Total, len(resp.Data.Items), nil
+}
+
+func parseSupplierNewAPIRechargeRecords(payload []byte, start, end time.Time) ([]SupplierProviderRechargeRecord, int, int, error) {
+	var resp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			Total int `json:"total"`
+			Items []struct {
+				ID        json.RawMessage `json:"id"`
+				CreatedAt int64           `json:"created_at"`
+				Type      int             `json:"type"`
+				Content   string          `json:"content"`
+				RequestID string          `json:"request_id"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(payload, &resp); err != nil {
+		return nil, 0, 0, fmt.Errorf("decode supplier newapi recharge response: %w", err)
+	}
+	if !resp.Success {
+		return nil, 0, 0, fmt.Errorf("supplier newapi recharge failed: %s", firstSupplierSub2APIString(resp.Message, "unknown error"))
+	}
+	if start.IsZero() {
+		start = time.Unix(0, 0)
+	}
+	if end.IsZero() {
+		end = time.Now()
+	}
+	records := make([]SupplierProviderRechargeRecord, 0, len(resp.Data.Items))
+	for _, item := range resp.Data.Items {
+		if item.Type != 1 {
+			continue
+		}
+		match := supplierNewAPIRechargeAmountPattern.FindStringSubmatch(item.Content)
+		if len(match) != 2 {
+			continue
+		}
+		amount, err := strconv.ParseFloat(match[1], 64)
+		if err != nil || amount <= 0 {
+			continue
+		}
+		occurredAt := time.Unix(item.CreatedAt, 0)
+		if occurredAt.Before(start) || !occurredAt.Before(end) {
+			continue
+		}
+		var rawID json.RawMessage = item.ID
+		records = append(records, SupplierProviderRechargeRecord{
+			ExternalID: supplierProviderJSONScalarText(rawID), ExternalCode: strings.TrimSpace(item.RequestID),
+			RechargeType: "online", Amount: amount, Status: "success", OccurredAt: occurredAt,
+			Description: strings.TrimSpace(item.Content),
+			RawPayload:  mustMarshalSupplierNewAPIRechargeItem(item),
+		})
+	}
+	return records, resp.Data.Total, len(resp.Data.Items), nil
+}
+
+func mustMarshalSupplierNewAPIRechargeItem(item any) json.RawMessage {
+	raw, _ := json.Marshal(item)
+	return raw
+}
+
 func supplierNewAPIEnvelopeOK(raw []byte) error {
 	var resp struct {
 		Success bool   `json:"success"`
@@ -1464,6 +1609,50 @@ func supplierNewAPIUsageCostURL(path string, day time.Time) string {
 	}
 	parsed.RawQuery = query.Encode()
 	return parsed.String()
+}
+
+func supplierNewAPIRechargeURL(day time.Time, page, pageSize int) string {
+	out := supplierNewAPIUsageCostURL(defaultSupplierNewAPIRechargeURL, day)
+	parsed, err := url.Parse(out)
+	if err != nil {
+		return out
+	}
+	query := parsed.Query()
+	query.Set("p", strconv.Itoa(page))
+	query.Set("page_size", strconv.Itoa(pageSize))
+	query.Set("type", "1")
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
+}
+
+func supplierNewAPIRechargeRangeURL(path string, start, end time.Time, page, pageSize int) string {
+	out := strings.TrimSpace(path)
+	out = strings.ReplaceAll(out, "{page}", strconv.Itoa(page))
+	out = strings.ReplaceAll(out, "{page_size}", strconv.Itoa(pageSize))
+	out = supplierNewAPIUsageCostRangeURL(out, start, end)
+	parsed, err := url.Parse(out)
+	if err != nil {
+		return out
+	}
+	query := parsed.Query()
+	query.Set("p", strconv.Itoa(page))
+	query.Set("page_size", strconv.Itoa(pageSize))
+	query.Set("type", "1")
+	if query.Get("start_timestamp") == "" {
+		query.Set("start_timestamp", strconv.FormatInt(start.Unix(), 10))
+	}
+	if query.Get("end_timestamp") == "" {
+		query.Set("end_timestamp", strconv.FormatInt(end.Unix(), 10))
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
+}
+
+func supplierNewAPIUsageCostRangeURL(path string, start, end time.Time) string {
+	out := strings.TrimSpace(path)
+	out = strings.ReplaceAll(out, "{start_timestamp}", strconv.FormatInt(start.Unix(), 10))
+	out = strings.ReplaceAll(out, "{end_timestamp}", strconv.FormatInt(end.Unix(), 10))
+	return out
 }
 
 func supplierNewAPIGroupsPath(provider *SupplierProvider) string {

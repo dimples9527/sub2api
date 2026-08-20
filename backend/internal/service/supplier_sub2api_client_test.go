@@ -891,6 +891,84 @@ func TestSupplierSub2APIClientUsesNormalizedNameWhenAccountKeyMissing(t *testing
 	require.Empty(t, accounts[1].Name)
 }
 
+func TestSupplierSub2APIClientFetchRechargeAmountFiltersStatDay(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			supplierSub2APIWriteJSON(w, http.StatusOK, `{"code":0,"data":{"access_token":"recharge-token"}}`)
+		case "/api/v1/redeem/history":
+			require.Equal(t, "Asia/Shanghai", r.URL.Query().Get("timezone"))
+			supplierSub2APIWriteJSON(w, http.StatusOK, `{
+				"code":0,
+				"message":"success",
+				"data":[
+					{"id":1,"type":"balance","value":100,"status":"used","used_at":"2026-08-19T22:15:32.45021+08:00"},
+					{"id":2,"type":"admin_balance","value":50,"status":"used","used_at":"2026-08-19T17:38:37.682027+08:00"},
+					{"id":3,"type":"balance","value":25,"status":"unused","used_at":"2026-08-19T15:36:32.673927+08:00"},
+					{"id":4,"type":"other","value":30,"status":"used","used_at":"2026-08-19T12:00:00+08:00"},
+					{"id":5,"type":"balance","value":200,"status":"used","used_at":"2026-08-18T16:16:04.172276+08:00"}
+				]
+			}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewSupplierSub2APIClient(server.Client(), cache, nil)
+	amount, err := client.FetchRechargeAmount(context.Background(), supplierSub2APITestProvider(server.URL), "secret", time.Date(2026, 8, 19, 0, 0, 0, 0, time.UTC))
+
+	require.NoError(t, err)
+	require.Equal(t, 150.0, amount)
+}
+
+func TestSupplierSub2APIClientFetchRechargeRecordsFallsBackToCanonicalPathAfterLegacy404(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	var legacyCalls atomic.Int32
+	var canonicalCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			supplierSub2APIWriteJSON(w, http.StatusOK, `{"code":0,"data":{"access_token":"recharge-token"}}`)
+		case "/v1/redeem/history":
+			legacyCalls.Add(1)
+			http.NotFound(w, r)
+		case "/api/v1/redeem/history":
+			canonicalCalls.Add(1)
+			require.Equal(t, "Asia/Shanghai", r.URL.Query().Get("timezone"))
+			supplierSub2APIWriteJSON(w, http.StatusOK, `{
+				"code":0,
+				"message":"success",
+				"data":[
+					{"id":5362,"code":"PAY-4636-84024","type":"balance","value":100,"status":"used","used_by":906,"used_at":"2026-08-19T22:15:32.45021+08:00","created_at":"2026-08-19T22:15:32.442416+08:00"}
+				]
+			}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	provider := supplierSub2APITestProvider(server.URL)
+	provider.RechargeURL = "/v1/redeem/history?timezone=Asia%2FShanghai"
+	client := NewSupplierSub2APIClient(server.Client(), cache, nil)
+	location := time.FixedZone("CST", 8*3600)
+	records, err := client.FetchRechargeRecords(
+		context.Background(),
+		provider,
+		"secret",
+		time.Date(2026, 8, 19, 0, 0, 0, 0, location),
+		time.Date(2026, 8, 19, 23, 59, 59, 0, location),
+	)
+
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	require.Equal(t, "5362", records[0].ExternalID)
+	require.Equal(t, int32(1), legacyCalls.Load())
+	require.Equal(t, int32(1), canonicalCalls.Load())
+}
+
 func TestSupplierSub2APIClientRejectsMalformedEnvelope(t *testing.T) {
 	cache := newSupplierSub2APIFakeTokenCache()
 
@@ -1310,4 +1388,17 @@ func TestSupplierSub2APIClientRecordsRefreshAuditWithoutRefreshToken(t *testing.
 	require.NotNil(t, refreshEvent.Token)
 	require.Equal(t, "fresh-access", refreshEvent.Token.AccessToken)
 	require.Empty(t, refreshEvent.Token.RefreshToken)
+}
+
+func TestParseSupplierSub2APIRechargeRecordsPreservesUsedBalanceEntries(t *testing.T) {
+	raw := []byte(`{"code":0,"message":"success","data":[{"id":5362,"code":"PAY-4636","type":"balance","value":100,"status":"used","used_at":"2026-08-18T22:15:32.45021+08:00"},{"id":1,"code":"skip","type":"balance","value":50,"status":"unused","used_at":"2026-08-18T12:00:00+08:00"},{"id":2,"code":"admin","type":"admin_balance","value":25,"status":"used","used_at":"2026-08-17T12:00:00+08:00"}]}`)
+
+	records, err := parseSupplierSub2APIRechargeRecords(raw, time.Date(2026, 8, 18, 0, 0, 0, 0, time.FixedZone("CST", 8*3600)))
+
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	require.Equal(t, "5362", records[0].ExternalID)
+	require.Equal(t, "PAY-4636", records[0].ExternalCode)
+	require.Equal(t, "balance", records[0].RechargeType)
+	require.Equal(t, 100.0, records[0].Amount)
 }

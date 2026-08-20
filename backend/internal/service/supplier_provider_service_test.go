@@ -771,3 +771,32 @@ func TestSupplierProviderServiceGetBalanceSummaryEmpty(t *testing.T) {
 	require.Empty(t, summary.Previous.Date)
 	require.Equal(t, 0, summary.History.Days)
 }
+
+func TestSupplierProviderTypeServiceAcceptsRechargeURLTemplate(t *testing.T) {
+	repo := &supplierProviderTypeRepoStub{}
+	service := NewSupplierProviderTypeService(repo)
+	params := validSupplierProviderTypeParams()
+	params.RechargeURL = "/api/log/self?p={page}&page_size={page_size}&type=1&start_timestamp={start_timestamp}&end_timestamp={end_timestamp}"
+
+	created, err := service.Create(context.Background(), params)
+
+	require.NoError(t, err)
+	require.Equal(t, params.RechargeURL, created.RechargeURL)
+}
+
+func TestSupplierProviderServiceAppliesRechargeURLFromTypeTemplate(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{}
+	typeRepo := &supplierProviderTypeRepoStub{items: []*SupplierProviderType{{
+		ID:          1,
+		Code:        "sub2api",
+		Name:        "Sub2API",
+		RechargeURL: "/api/v1/redeem/history?timezone=Asia%2FShanghai",
+		Enabled:     true,
+	}}}
+	service := NewSupplierProviderService(providerRepo, supplierEncryptorStub{}, typeRepo)
+
+	created, err := service.Create(context.Background(), validSupplierProviderParams())
+
+	require.NoError(t, err)
+	require.Equal(t, "/api/v1/redeem/history?timezone=Asia%2FShanghai", created.RechargeURL)
+}

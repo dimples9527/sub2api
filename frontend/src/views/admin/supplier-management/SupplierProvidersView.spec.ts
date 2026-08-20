@@ -19,7 +19,6 @@ const providerViewMocks = vi.hoisted(() => ({
   syncProvider: vi.fn(),
   streamSupplierProviderSync: vi.fn(),
   testProviderEndpoint: vi.fn(),
-  listUpstreamBalanceRecharges: vi.fn(),
   getCostDeviationSettings: vi.fn(),
   updateCostDeviationSettings: vi.fn(),
   showError: vi.fn(),
@@ -55,16 +54,11 @@ vi.mock('@/api/admin/supplierProviders', () => ({
   },
 }))
 
-vi.mock('@/api/admin/upstreamAccountSync', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/admin/upstreamAccountSync')>()
-  return {
-    ...actual,
-    listBalanceRecharges: providerViewMocks.listUpstreamBalanceRecharges,
-  }
-})
 
 vi.mock('@/api/admin/supplierProviderTypes', () => ({
-  default: { list: providerViewMocks.listProviderTypes },
+  default: {
+    list: providerViewMocks.listProviderTypes,
+  },
 }))
 
 vi.mock('@/api/admin/supplierProviderData', () => ({
@@ -129,6 +123,12 @@ async function mountSupplierProviders() {
       plugins: [createI18n({ legacy: false, locale: 'en-US', messages: { 'en-US': {} } })],
       stubs: {
         SupplierModuleLayout: { template: '<div><slot /></div>' },
+        SupplierRechargeHistoryDialog: {
+          name: 'SupplierRechargeHistoryDialog',
+          props: ['show', 'providerId', 'providerName', 'providers'],
+          emits: ['close'],
+          template: `<section v-if="show" data-test="supplier-recharge-dialog-stub">{{ providerId || 'all' }} {{ providerName }}</section>`,
+        },
         SupplierDrawer: {
           props: ['show', 'title', 'eyebrow'],
           emits: ['close'],
@@ -259,28 +259,6 @@ describe('SupplierProvidersView payload normalization', () => {
       previous: { date: '2026-08-13', balance: 140, cost: 55 },
       history: { first_date: '2026-08-01', days: 14, total_balance: 2400, total_cost: 620 },
     })
-    providerViewMocks.listUpstreamBalanceRecharges.mockResolvedValue([
-      {
-        id: 1,
-        provider_slug: 'alpha',
-        provider_name: 'Alpha',
-        amount: 100,
-        amount_scale: 1,
-        note: '手动充值',
-        occurred_at: '2026-08-10T08:00:00Z',
-        created_at: '2026-08-10T08:00:00Z',
-      },
-      {
-        id: 2,
-        provider_slug: 'alpha',
-        provider_name: 'Alpha',
-        amount: 50,
-        amount_scale: 1,
-        note: '',
-        occurred_at: '2026-08-12T08:00:00Z',
-        created_at: '2026-08-12T08:00:00Z',
-      },
-    ])
     providerViewMocks.listProviders.mockResolvedValue({
       items: providerRows,
       summary: {
@@ -734,21 +712,22 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(supplierProvidersSource).toContain('loadBalanceSummary')
   })
 
-  it('loads upstream recharge records in the provider detail drawer', async () => {
+  it('opens one supplier recharge history dialog from the provider row', async () => {
     const wrapper = await mountSupplierProviders()
-    const row = wrapper.find('tbody tr[data-row-id="1"]')
-    await row.trigger('click')
+    await wrapper.get('[data-test="supplier-provider-recharges-1"]').trigger('click')
     await flushPromises()
 
-    expect(providerViewMocks.listUpstreamBalanceRecharges).toHaveBeenCalledWith({
-      provider_slug: 'alpha',
-      days: 30,
-    })
-    const section = wrapper.get('[data-test="supplier-provider-recharges"]')
-    expect(section.text()).toContain('充值记录')
-    expect(wrapper.get('[data-test="supplier-recharge-total"]').text()).toContain('150')
-    expect(section.text()).toContain('手动充值')
-    expect(supplierProvidersSource).toContain('loadProviderRecharges')
+    const dialog = wrapper.get('[data-test="supplier-recharge-dialog-stub"]')
+    expect(dialog.text()).toContain('1 Alpha')
+    expect(supplierProvidersSource).toContain('openProviderRechargeHistory')
+  })
+
+  it('opens all supplier recharge history dialog from the toolbar', async () => {
+    const wrapper = await mountSupplierProviders()
+    await wrapper.get('.sp-filter-action-recharge').trigger('click')
+
+    expect(wrapper.get('[data-test="supplier-recharge-dialog-stub"]').text()).toContain('all')
+    expect(supplierProvidersSource).toContain('openAllRechargeHistory')
   })
 
   it('places the supplier cost breakdown in a full-width panel without horizontal scrolling', async () => {

@@ -2,11 +2,31 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
+
+func supplierProviderJSONScalarText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return strings.Trim(strings.TrimSpace(string(raw)), `"`)
+	}
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case float64:
+		return strconv.FormatInt(int64(typed), 10)
+	default:
+		return strings.TrimSpace(fmt.Sprint(typed))
+	}
+}
 
 const (
 	SupplierProviderTypeSub2API = "sub2api"
@@ -16,6 +36,23 @@ const (
 type SupplierProviderRemoteRegistry struct {
 	sub2api *SupplierSub2APIClient
 	newapi  *SupplierNewAPIClient
+}
+
+// SupplierProviderRechargeRecord 是上游充值记录在供应商模块内的统一表示。
+type SupplierProviderRechargeRecord struct {
+	ExternalID   string
+	ExternalCode string
+	RechargeType string
+	Amount       float64
+	Status       string
+	OccurredAt   time.Time
+	Description  string
+	RawPayload   json.RawMessage
+}
+
+// SupplierProviderRemoteRechargeHistoryClient 提供上游充值历史拉取能力。
+type SupplierProviderRemoteRechargeHistoryClient interface {
+	FetchRechargeRecords(ctx context.Context, provider *SupplierProvider, password string, start, end time.Time) ([]SupplierProviderRechargeRecord, error)
 }
 
 func NewSupplierProviderRemoteRegistry(httpClient *http.Client, tokenCache SupplierProviderTokenCache, turnstileSolver SupplierTurnstileSolver) *SupplierProviderRemoteRegistry {
@@ -63,6 +100,30 @@ func (r *SupplierProviderRemoteRegistry) FetchCost(ctx context.Context, provider
 		return 0, err
 	}
 	return client.FetchCost(ctx, provider, password, day)
+}
+
+func (r *SupplierProviderRemoteRegistry) FetchRechargeAmount(ctx context.Context, provider *SupplierProvider, password string, day time.Time) (float64, error) {
+	client, err := r.client(provider)
+	if err != nil {
+		return 0, err
+	}
+	rechargeClient, ok := client.(SupplierProviderRemoteRechargeClient)
+	if !ok {
+		return 0, fmt.Errorf("supplier provider remote client does not support recharge history")
+	}
+	return rechargeClient.FetchRechargeAmount(ctx, provider, password, day)
+}
+
+func (r *SupplierProviderRemoteRegistry) FetchRechargeRecords(ctx context.Context, provider *SupplierProvider, password string, start, end time.Time) ([]SupplierProviderRechargeRecord, error) {
+	client, err := r.client(provider)
+	if err != nil {
+		return nil, err
+	}
+	rechargeClient, ok := client.(SupplierProviderRemoteRechargeHistoryClient)
+	if !ok {
+		return nil, fmt.Errorf("supplier provider remote client does not support recharge history")
+	}
+	return rechargeClient.FetchRechargeRecords(ctx, provider, password, start, end)
 }
 
 func (r *SupplierProviderRemoteRegistry) FetchMonitorItems(ctx context.Context, provider *SupplierProvider, password string) ([]SupplierProviderMonitorItem, error) {

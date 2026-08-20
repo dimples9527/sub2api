@@ -107,6 +107,7 @@ var ProviderSet = wire.NewSet(
 	NewUpstreamBalanceRepository,
 	NewUpstreamAccountHealthGuardRecordRepository,
 	NewSupplierProviderRepository,
+	NewSupplierProviderRechargeRepository,
 	NewCustomPlatformRepository,
 	NewSupplierProviderAuthAuditRepository,
 	SupplierBalanceAlertWiringSet,

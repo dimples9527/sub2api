@@ -352,6 +352,7 @@ const (
 type SupplierProviderSyncService struct {
 	providerRepo      SupplierProviderRepository
 	dataRepo          SupplierProviderDataRepository
+	rechargeRepo      SupplierProviderRechargeRepository
 	remote            SupplierProviderRemoteClient
 	encryptor         SecretEncryptor
 	syncLock          SupplierProviderSyncLock
@@ -372,6 +373,13 @@ func (s *SupplierProviderSyncService) SetCostDeviationThresholdProvider(provider
 	}
 }
 
+// SetRechargeRepository 注入已落库的供应商充值记录仓储。
+func (s *SupplierProviderSyncService) SetRechargeRepository(repo SupplierProviderRechargeRepository) {
+	if s != nil {
+		s.rechargeRepo = repo
+	}
+}
+
 func (s *SupplierProviderSyncService) costDeviationThreshold(ctx context.Context) float64 {
 	if s != nil && s.thresholdProvider != nil {
 		return s.thresholdProvider.SupplierCostDeviationThreshold(ctx)
@@ -379,14 +387,18 @@ func (s *SupplierProviderSyncService) costDeviationThreshold(ctx context.Context
 	return DefaultSupplierCostDeviationThreshold
 }
 
-func NewSupplierProviderSyncService(providerRepo SupplierProviderRepository, dataRepo SupplierProviderDataRepository, remote SupplierProviderRemoteClient, encryptor SecretEncryptor, syncLock SupplierProviderSyncLock) *SupplierProviderSyncService {
-	return &SupplierProviderSyncService{
+func NewSupplierProviderSyncService(providerRepo SupplierProviderRepository, dataRepo SupplierProviderDataRepository, remote SupplierProviderRemoteClient, encryptor SecretEncryptor, syncLock SupplierProviderSyncLock, rechargeRepo ...SupplierProviderRechargeRepository) *SupplierProviderSyncService {
+	service := &SupplierProviderSyncService{
 		providerRepo: providerRepo,
 		dataRepo:     dataRepo,
 		remote:       remote,
 		encryptor:    encryptor,
 		syncLock:     syncLock,
 	}
+	if len(rechargeRepo) > 0 {
+		service.rechargeRepo = rechargeRepo[0]
+	}
+	return service
 }
 
 func (s *SupplierProviderSyncService) providerPassword(provider *SupplierProvider) string {
@@ -546,7 +558,7 @@ type SupplierProviderCostBackfillResult struct {
 }
 
 // BackfillCosts 按闭区间日期从上游拉取成本并写入本地 daily_stats。
-// Sub2API 仅支持当天；NewAPI 支持按天历史。
+// NewAPI 支持按天查询历史成本；Sub2API 的历史日期使用余额差加当日充值回补。
 func (s *SupplierProviderSyncService) BackfillCosts(ctx context.Context, startDate, endDate string, providerID int64, trigger string) (SupplierProviderCostBackfillResult, error) {
 	ctx = WithSupplierProviderAuthSource(ctx, SupplierProviderAuthSourceSync)
 	startedAt := time.Now()
@@ -643,30 +655,78 @@ func (s *SupplierProviderSyncService) backfillProviderCosts(ctx context.Context,
 				Date:         dateText,
 			}
 
-			if !supportsHistory && !sameSupplierCostStatDay(cursor, today) {
+			historicalBalanceOnly := !supportsHistory && !sameSupplierCostStatDay(cursor, today)
+
+			// 先计算余额差值加当日充值修正值，避免充值导致成本少算。
+			balanceDelta, balanceOk, balanceErr := s.dataRepo.GetBalanceDeltaForDay(ctx, locked.ID, cursor)
+			balanceCost := 0.0
+			rechargeAmount := 0.0
+			balanceUsable := false
+			var rechargeErr error
+			if balanceErr == nil && balanceOk {
+				balanceCost, rechargeAmount, balanceUsable, rechargeErr = s.rechargeAdjustedBalanceEstimate(ctx, locked, password, cursor, balanceDelta)
+			}
+			if historicalBalanceOnly {
+				if balanceUsable {
+					message := fmt.Sprintf("历史日期不请求 Sub2API 当天成本接口，使用充值修正余额成本回补：余额差 %.2f + 充值 %.2f = %.2f", balanceDelta, rechargeAmount, balanceCost)
+					if updateErr := s.dataRepo.UpdateCostDetailed(ctx, locked.ID, balanceCost, nil, &message, cursor); updateErr != nil {
+						item.Status = SupplierSyncStatusFailed
+						item.Message = updateErr.Error()
+						partial.FailedCount++
+						partial.Items = append(partial.Items, item)
+						run.Counts.CheckedCount++
+						if firstErr == nil {
+							firstErr = updateErr
+						}
+						continue
+					}
+					item.Status = SupplierSyncStatusSuccess
+					item.Cost = balanceCost
+					item.Message = message
+					partial.SuccessCount++
+					partial.Items = append(partial.Items, item)
+					run.Counts.CheckedCount++
+					run.Counts.UpdatedCount++
+					continue
+				}
+
+				if rechargeErr != nil {
+					item.Status = SupplierSyncStatusFailed
+					item.Message = fmt.Sprintf("当前供应商类型不支持查询历史上游成本，且充值记录查询失败，无法安全使用余额差回补：%v", rechargeErr)
+					partial.FailedCount++
+					partial.Items = append(partial.Items, item)
+					run.Counts.CheckedCount++
+					if firstErr == nil {
+						firstErr = rechargeErr
+					}
+					continue
+				}
+
 				item.Status = SupplierSyncStatusSkipped
-				item.Message = "当前供应商类型仅支持回补当天上游成本"
+				item.Message = "当前供应商类型不支持查询历史上游成本，且没有可用的充值修正余额成本"
+				if balanceErr != nil {
+					item.Message = fmt.Sprintf("%s：%v", item.Message, balanceErr)
+				}
 				partial.SkippedCount++
 				partial.Items = append(partial.Items, item)
 				run.Counts.SkippedCount++
 				continue
 			}
 
-			// 先尝试用余额差值预填充，如果余额差值可用，先写入数据库作为兜底。
-			balanceDelta, balanceOk, balanceErr := s.dataRepo.GetBalanceDeltaForDay(ctx, locked.ID, cursor)
-			if balanceErr == nil && balanceOk && balanceDelta > 0 {
-				warning := "使用余额差值预填充，等待上游成本验证"
-				_ = s.dataRepo.UpdateCostDetailed(ctx, locked.ID, balanceDelta, nil, &warning, cursor)
+			// 当天或支持历史成本的供应商先写入余额估算值，等待上游成本验证。
+			if balanceUsable {
+				warning := fmt.Sprintf("使用充值修正余额成本预填充：余额差 %.2f + 充值 %.2f = %.2f，等待上游成本验证", balanceDelta, rechargeAmount, balanceCost)
+				_ = s.dataRepo.UpdateCostDetailed(ctx, locked.ID, balanceCost, nil, &warning, cursor)
 				// 预填充失败不影响后续流程，忽略错误
 			}
 
 			cost, fetchErr := s.remote.FetchCost(ctx, locked, password, cursor)
 			if fetchErr != nil {
-				// 如果上游接口失败，但余额差值已预填充，则视为成功（有兜底数据）
-				if balanceOk && balanceDelta > 0 {
+				// 如果上游接口失败，但充值修正后的余额成本已预填充，则视为成功。
+				if balanceUsable {
 					item.Status = SupplierSyncStatusSuccess
-					item.Cost = balanceDelta
-					item.Message = fmt.Sprintf("上游接口失败，已使用余额差值 %.2f 兜底", balanceDelta)
+					item.Cost = balanceCost
+					item.Message = fmt.Sprintf("上游接口失败，已使用充值修正余额成本 %.2f 兜底（余额差 %.2f + 充值 %.2f）", balanceCost, balanceDelta, rechargeAmount)
 					partial.SuccessCount++
 					partial.Items = append(partial.Items, item)
 					run.Counts.CheckedCount++
@@ -676,6 +736,9 @@ func (s *SupplierProviderSyncService) backfillProviderCosts(ctx context.Context,
 				// 没有余额差值兜底，按原逻辑处理失败
 				item.Status = SupplierSyncStatusFailed
 				item.Message = fetchErr.Error()
+				if rechargeErr != nil {
+					item.Message = fmt.Sprintf("%s；充值记录查询失败，未使用余额差兜底：%v", item.Message, rechargeErr)
+				}
 				stopAfterFetchFailure := false
 				if IsSupplierProviderAuthFailure(fetchErr) {
 					authFailure = true
@@ -714,12 +777,12 @@ func (s *SupplierProviderSyncService) backfillProviderCosts(ctx context.Context,
 			effective := cost
 			rawUpstream := &cost
 			var warning *string
-			if balanceOk && balanceDelta > 0 {
-				deviation := supplierCostDeviation(cost, balanceDelta)
+			if balanceUsable {
+				deviation := supplierCostDeviation(cost, balanceCost)
 				if deviation > threshold {
-					// 偏差超过阈值，保留余额差值，记录警告
-					effective = balanceDelta
-					msg := fmt.Sprintf("上游成本 %.2f 与余额差值 %.2f 偏差 %.1f%% 超过阈值，保留余额差值", cost, balanceDelta, deviation*100)
+					// 偏差超过阈值，保留充值修正后的余额成本，记录警告。
+					effective = balanceCost
+					msg := fmt.Sprintf("上游成本 %.2f 与充值修正余额成本 %.2f 偏差 %.1f%% 超过阈值，保留余额成本（余额差 %.2f + 充值 %.2f）", cost, balanceCost, deviation*100, balanceDelta, rechargeAmount)
 					warning = &msg
 				} else {
 					// 偏差在阈值内，用上游成本覆盖
@@ -1182,7 +1245,7 @@ func (s *SupplierProviderSyncService) syncCostStage(ctx context.Context, provide
 		// 按成本归属日写入 daily_stats，避免历史回补落到当天；
 		// 上游成本与本地成本差距过大时直接改写为本地成本并记录提示。
 		threshold := s.costDeviationThreshold(ctx)
-		effective, rawUpstream, warning := s.resolveCostDeviation(ctx, provider.ID, cost, statDay, threshold)
+		effective, rawUpstream, warning := s.resolveCostDeviation(ctx, provider, password, cost, statDay, threshold)
 		err = s.dataRepo.UpdateCostDetailed(ctx, provider.ID, effective, rawUpstream, warning, statDay)
 		if err == nil {
 			// 定时同步写入成功后同样失效成本趋势缓存。
@@ -1194,11 +1257,16 @@ func (s *SupplierProviderSyncService) syncCostStage(ctx context.Context, provide
 		if !IsSupplierProviderAuthFailure(requestErr) && !IsSupplierProviderSessionFailure(requestErr) {
 			bal, ok, balErr := s.dataRepo.GetCostFallbackBalances(ctx, provider.ID, statDay)
 			if balErr == nil && ok {
-				if fallbackCost, usable := supplierCostFallbackEstimate(bal); usable {
+				rawBalanceDelta := bal.DayStartBalance - bal.CurrentBalance
+				fallbackCost, rechargeAmount, usable, rechargeErr := s.rechargeAdjustedBalanceEstimate(ctx, provider, password, statDay, rawBalanceDelta)
+				if rechargeErr != nil {
+					err = fmt.Errorf("成本接口失败且充值记录查询失败，无法安全使用余额差兜底: %w", rechargeErr)
+				} else if usable {
 					SupplierSyncProgress(ctx, progressStage, "成本接口请求失败，正在用余额差额保底估算成本", nil)
 					SupplierSyncProgress(ctx, SupplierSyncProgressStagePersist, "正在写入保底估算的成本数据", nil)
 					cost = fallbackCost
-					err = s.dataRepo.UpdateCost(ctx, provider.ID, cost, statDay)
+					warning := fmt.Sprintf("上游成本接口失败，使用充值修正余额成本兜底：余额差 %.2f + 充值 %.2f = %.2f", rawBalanceDelta, rechargeAmount, fallbackCost)
+					err = s.dataRepo.UpdateCostDetailed(ctx, provider.ID, cost, nil, &warning, statDay)
 					if err == nil {
 						// 保底估算写入成功后同样失效成本趋势缓存。
 						invalidateSupplierCostTrendCache()
@@ -1398,18 +1466,63 @@ func supplierCostFallbackEstimate(bal SupplierProviderCostFallbackBalance) (floa
 	return estimated, true
 }
 
+// rechargeAdjustedBalanceEstimate 使用余额差值和指定统计日充值金额估算实际消耗。
+func (s *SupplierProviderSyncService) rechargeAdjustedBalanceEstimate(ctx context.Context, provider *SupplierProvider, password string, statDay time.Time, balanceDelta float64) (estimated float64, rechargeAmount float64, usable bool, err error) {
+	if s.rechargeRepo != nil {
+		location := statDay.Location()
+		if location == nil {
+			location = time.UTC
+		}
+		start := time.Date(statDay.Year(), statDay.Month(), statDay.Day(), 0, 0, 0, 0, location)
+		end := start.AddDate(0, 0, 1)
+		localRecords, listErr := s.rechargeRepo.List(ctx, SupplierProviderRechargeListParams{
+			ProviderID: provider.ID,
+			Start:      start,
+			End:        end,
+			Page:       1,
+			PageSize:   1,
+		})
+		if listErr == nil && localRecords.Total > 0 {
+			rechargeAmount = localRecords.TotalAmount
+			estimated = balanceDelta + rechargeAmount
+			if estimated <= 0 {
+				return 0, rechargeAmount, false, nil
+			}
+			return estimated, rechargeAmount, true, nil
+		}
+	}
+	rechargeClient, ok := s.remote.(SupplierProviderRemoteRechargeClient)
+	if !ok {
+		return 0, 0, false, fmt.Errorf("supplier provider remote client does not support recharge history")
+	}
+	rechargeAmount, err = rechargeClient.FetchRechargeAmount(ctx, provider, password, statDay)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	if rechargeAmount < 0 {
+		return 0, 0, false, fmt.Errorf("supplier provider recharge amount must not be negative")
+	}
+	estimated = balanceDelta + rechargeAmount
+	if estimated <= 0 {
+		return 0, rechargeAmount, false, nil
+	}
+	return estimated, rechargeAmount, true, nil
+}
+
 // resolveCostDeviation 计算写入成本时的偏差覆盖结果：上游成本与本地成本差距超过阈值时，
-// 优先使用余额差值（当天第一条余额快照 - 当天最后一条余额快照）；
+// 优先使用充值修正余额成本（当天第一条余额快照 - 当天最后一条余额快照 + 当天充值）；
 // 如果余额差值不可用，则回退到本地成本。rawUpstream 始终为接口原始上游值。
-func (s *SupplierProviderSyncService) resolveCostDeviation(ctx context.Context, providerID int64, upstream float64, statDay time.Time, threshold float64) (effective float64, rawUpstream *float64, warning *string) {
+func (s *SupplierProviderSyncService) resolveCostDeviation(ctx context.Context, provider *SupplierProvider, password string, upstream float64, statDay time.Time, threshold float64) (effective float64, rawUpstream *float64, warning *string) {
 	raw := upstream
 	rawUpstream = &raw
-	if local, ok, err := s.dataRepo.GetLocalCostForDay(ctx, providerID, statDay); err == nil && ok && local > 0 {
+	if local, ok, err := s.dataRepo.GetLocalCostForDay(ctx, provider.ID, statDay); err == nil && ok && local > 0 {
 		if supplierCostDeviation(upstream, local) > threshold {
-			// 偏差过大时，优先尝试用余额差值覆盖
-			if balanceDelta, ok, err := s.dataRepo.GetBalanceDeltaForDay(ctx, providerID, statDay); err == nil && ok && balanceDelta > 0 {
-				msg := fmt.Sprintf("上游成本 %.2f 与本地成本 %.2f 偏差过大，已用余额差值 %.2f 覆盖", upstream, local, balanceDelta)
-				return balanceDelta, rawUpstream, &msg
+			// 偏差过大时，优先尝试用充值修正后的余额成本覆盖。
+			if balanceDelta, balanceOK, balanceErr := s.dataRepo.GetBalanceDeltaForDay(ctx, provider.ID, statDay); balanceErr == nil && balanceOK {
+				if balanceCost, rechargeAmount, usable, rechargeErr := s.rechargeAdjustedBalanceEstimate(ctx, provider, password, statDay, balanceDelta); rechargeErr == nil && usable {
+					msg := fmt.Sprintf("上游成本 %.2f 与本地成本 %.2f 偏差过大，已用充值修正余额成本 %.2f 覆盖（余额差 %.2f + 充值 %.2f）", upstream, local, balanceCost, balanceDelta, rechargeAmount)
+					return balanceCost, rawUpstream, &msg
+				}
 			}
 			// 如果没有余额差值数据，回退到本地成本
 			msg := supplierCostDeviationWarning(upstream, local)

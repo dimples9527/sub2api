@@ -22,6 +22,10 @@ type supplierProviderDataRepoStub struct {
 	costFallbackBal    SupplierProviderCostFallbackBalance
 	costFallbackOK     bool
 	costFallbackErr    error
+	balanceDeltaCalls  int
+	balanceDeltaValue  float64
+	balanceDeltaOK     bool
+	balanceDeltaErr    error
 	createdRuns        []SupplierProviderSyncRun
 	finishedRuns       []SupplierProviderSyncRun
 	statusUpdates      []string
@@ -41,6 +45,29 @@ type supplierProviderDataRepoStub struct {
 	groupStatusErr error
 	finishErr      error
 	statusErr      error
+}
+
+type supplierProviderRechargeRepoStub struct {
+	listResult SupplierProviderRechargeListResult
+	listErr    error
+	listCalls  []SupplierProviderRechargeListParams
+}
+
+func (r *supplierProviderRechargeRepoStub) Upsert(context.Context, int64, []SupplierProviderRechargeRecord) error {
+	return nil
+}
+
+func (r *supplierProviderRechargeRepoStub) List(_ context.Context, params SupplierProviderRechargeListParams) (SupplierProviderRechargeListResult, error) {
+	r.listCalls = append(r.listCalls, params)
+	return r.listResult, r.listErr
+}
+
+func (r *supplierProviderRechargeRepoStub) Sum(context.Context, int64, time.Time, time.Time) (float64, error) {
+	return 0, nil
+}
+
+func (r *supplierProviderRechargeRepoStub) HasRecords(context.Context, int64) (bool, error) {
+	return false, nil
 }
 
 func (r *supplierProviderDataRepoStub) ListAccounts(context.Context, SupplierProviderDataListParams) (SupplierProviderAccountListResult, error) {
@@ -168,7 +195,8 @@ func (r *supplierProviderDataRepoStub) GetLocalCostForDay(context.Context, int64
 	return r.localCostValue, r.localCostOK, r.localCostErr
 }
 func (r *supplierProviderDataRepoStub) GetBalanceDeltaForDay(context.Context, int64, time.Time) (float64, bool, error) {
-	return 0, false, nil
+	r.balanceDeltaCalls++
+	return r.balanceDeltaValue, r.balanceDeltaOK, r.balanceDeltaErr
 }
 func (r *supplierProviderDataRepoStub) GetCostFallbackBalances(context.Context, int64, time.Time) (SupplierProviderCostFallbackBalance, bool, error) {
 	r.costFallbackCalls++
@@ -206,12 +234,16 @@ type supplierRemoteClientStub struct {
 	groupsCalls   int
 	balanceCalls  int
 	costCalls     int
+	rechargeCalls int
+	rechargeDays  []time.Time
 
 	accountsErr error
 	groupsErr   error
 	balanceErr  error
 	costErr     error
 	costFn      func(day time.Time) (float64, error)
+	rechargeErr error
+	recharge    float64
 
 	testCalls  []string
 	testErr    error
@@ -264,6 +296,15 @@ func (c *supplierRemoteClientStub) FetchCost(_ context.Context, _ *SupplierProvi
 		return c.costFn(day)
 	}
 	return 45.6, nil
+}
+func (c *supplierRemoteClientStub) FetchRechargeAmount(_ context.Context, _ *SupplierProvider, password string, day time.Time) (float64, error) {
+	c.rechargeCalls++
+	c.passwords = append(c.passwords, password)
+	c.rechargeDays = append(c.rechargeDays, day)
+	if c.rechargeErr != nil {
+		return 0, c.rechargeErr
+	}
+	return c.recharge, nil
 }
 func (c *supplierRemoteClientStub) TestEndpoint(ctx context.Context, _ *SupplierProvider, password string, scope string) (SupplierProviderEndpointTestResult, error) {
 	c.passwords = append(c.passwords, password)
@@ -836,6 +877,60 @@ func TestSupplierProviderSyncServiceBackfillCostsNewAPIPullsEachDay(t *testing.T
 	require.Equal(t, SupplierSyncStatusSuccess, dataRepo.finishedRuns[0].Status)
 }
 
+func TestSupplierProviderSyncServiceBackfillCostsSub2APIUsesRechargeAdjustedBalanceForHistory(t *testing.T) {
+	day := supplierCostBackfillToday().AddDate(0, 0, -1)
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID: 9, Name: "Sub2API-B", ProviderType: SupplierProviderTypeSub2API, Enabled: true, PasswordEncrypted: "secret",
+	}}}
+	dataRepo := &supplierProviderDataRepoStub{
+		balanceDeltaValue: -20,
+		balanceDeltaOK:    true,
+	}
+	remote := &supplierRemoteClientStub{recharge: 50}
+	svc := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	result, err := svc.BackfillCosts(context.Background(), day.Format("2006-01-02"), day.Format("2006-01-02"), 9, SupplierSyncTriggerManual)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, result.SuccessCount)
+	require.Zero(t, result.SkippedCount)
+	require.Zero(t, remote.costCalls)
+	require.Equal(t, 1, remote.rechargeCalls)
+	require.Equal(t, []float64{30}, dataRepo.costValues)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, SupplierSyncStatusSuccess, result.Items[0].Status)
+	require.Equal(t, 30.0, result.Items[0].Cost)
+	require.Contains(t, result.Items[0].Message, "历史日期不请求 Sub2API 当天成本接口")
+}
+
+func TestSupplierProviderSyncServiceBackfillCostsUsesRechargeAdjustedBalanceFallback(t *testing.T) {
+	day := supplierCostBackfillToday().AddDate(0, 0, -1)
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID: 7, Name: "NewAPI-A", ProviderType: SupplierProviderTypeNewAPI, Enabled: true, PasswordEncrypted: "secret",
+	}}}
+	dataRepo := &supplierProviderDataRepoStub{
+		balanceDeltaValue: -20,
+		balanceDeltaOK:    true,
+	}
+	remote := &supplierRemoteClientStub{
+		costErr:  errors.New("成本接口不可用"),
+		recharge: 50,
+	}
+	svc := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	result, err := svc.BackfillCosts(context.Background(), day.Format("2006-01-02"), day.Format("2006-01-02"), 7, SupplierSyncTriggerManual)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, result.SuccessCount)
+	require.Zero(t, result.FailedCount)
+	require.Equal(t, []float64{30}, dataRepo.costValues)
+	require.Equal(t, 1, remote.rechargeCalls)
+	require.Equal(t, day.Format("2006-01-02"), remote.rechargeDays[0].Format("2006-01-02"))
+	require.Len(t, result.Items, 1)
+	require.Equal(t, 30.0, result.Items[0].Cost)
+	require.Contains(t, result.Items[0].Message, "余额差 -20.00 + 充值 50.00")
+}
+
 func TestSupplierProviderSyncServiceBackfillCostsSub2APISkipsHistoryOnlyToday(t *testing.T) {
 	today := supplierCostBackfillToday()
 	start := today.AddDate(0, 0, -1)
@@ -862,7 +957,7 @@ func TestSupplierProviderSyncServiceBackfillCostsSub2APISkipsHistoryOnlyToday(t 
 		switch item.Status {
 		case SupplierSyncStatusSkipped:
 			skipped++
-			require.Contains(t, item.Message, "仅支持回补当天")
+			require.Contains(t, item.Message, "没有可用的充值修正余额成本")
 			require.Equal(t, start.Format("2006-01-02"), item.Date)
 		case SupplierSyncStatusSuccess:
 			success++
@@ -944,6 +1039,77 @@ func TestSupplierProviderSyncServiceCostFallbackEstimatesCostWhenRequestFails(t 
 	require.Equal(t, 1, dataRepo.costFallbackCalls)
 	require.Equal(t, 1, dataRepo.costCalls)
 	require.Equal(t, []float64{20}, dataRepo.costValues)
+}
+
+func TestSupplierProviderSyncServiceCostFallbackIncludesRechargeWhenBalanceIncreases(t *testing.T) {
+	day := time.Date(2026, 8, 18, 0, 0, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID: 42, Name: "供应商甲", ProviderType: SupplierProviderTypeSub2API, Enabled: true, PasswordEncrypted: "secret",
+	}}}
+	dataRepo := &supplierProviderDataRepoStub{
+		costFallbackBal: SupplierProviderCostFallbackBalance{CurrentBalance: 120, DayStartBalance: 100},
+		costFallbackOK:  true,
+	}
+	remote := &supplierRemoteClientStub{costErr: errors.New("成本接口不可用"), recharge: 50}
+	svc := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	result, err := svc.SyncCost(context.Background(), 42, day, SupplierSyncTriggerManual)
+
+	require.NoError(t, err)
+	require.Equal(t, SupplierSyncStatusSuccess, result.Status)
+	require.Equal(t, []float64{30}, dataRepo.costValues)
+	require.Equal(t, 1, remote.rechargeCalls)
+	require.Equal(t, day, remote.rechargeDays[0])
+}
+
+func TestSupplierProviderSyncServiceCostFallbackPrefersLocalRechargeRecords(t *testing.T) {
+	day := time.Date(2026, 8, 18, 0, 0, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID: 42, Name: "supplier-a", ProviderType: SupplierProviderTypeSub2API, Enabled: true, PasswordEncrypted: "secret",
+	}}}
+	dataRepo := &supplierProviderDataRepoStub{
+		costFallbackBal: SupplierProviderCostFallbackBalance{CurrentBalance: 120, DayStartBalance: 100},
+		costFallbackOK:  true,
+	}
+	rechargeRepo := &supplierProviderRechargeRepoStub{listResult: SupplierProviderRechargeListResult{
+		Total:       1,
+		TotalAmount: 50,
+	}}
+	remote := &supplierRemoteClientStub{costErr: errors.New("cost unavailable"), rechargeErr: errors.New("recharge unavailable")}
+	svc := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true}, rechargeRepo)
+
+	result, err := svc.SyncCost(context.Background(), 42, day, SupplierSyncTriggerManual)
+
+	require.NoError(t, err)
+	require.Equal(t, SupplierSyncStatusSuccess, result.Status)
+	require.Equal(t, []float64{30}, dataRepo.costValues)
+	require.Zero(t, remote.rechargeCalls)
+	require.Len(t, rechargeRepo.listCalls, 1)
+	require.Equal(t, int64(42), rechargeRepo.listCalls[0].ProviderID)
+	require.Equal(t, day, rechargeRepo.listCalls[0].Start)
+	require.Equal(t, day.AddDate(0, 0, 1), rechargeRepo.listCalls[0].End)
+}
+
+func TestSupplierProviderSyncServiceCostFallbackFailsWhenRechargeQueryFails(t *testing.T) {
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID: 42, Name: "供应商甲", ProviderType: SupplierProviderTypeSub2API, Enabled: true, PasswordEncrypted: "secret",
+	}}}
+	dataRepo := &supplierProviderDataRepoStub{
+		costFallbackBal: SupplierProviderCostFallbackBalance{CurrentBalance: 80, DayStartBalance: 100},
+		costFallbackOK:  true,
+	}
+	remote := &supplierRemoteClientStub{
+		costErr:     errors.New("成本接口不可用"),
+		rechargeErr: errors.New("充值接口不可用"),
+	}
+	svc := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+
+	result, err := svc.SyncCost(context.Background(), 42, time.Now(), SupplierSyncTriggerManual)
+
+	require.Error(t, err)
+	require.Equal(t, SupplierSyncStatusFailed, result.Status)
+	require.Equal(t, 1, remote.rechargeCalls)
+	require.Zero(t, dataRepo.costCalls)
 }
 
 func TestSupplierProviderSyncServiceCostFallbackKeepsFailedWhenBalanceBaselineUnavailable(t *testing.T) {
@@ -1046,6 +1212,36 @@ func TestSupplierProviderSyncServiceCostOverridesUpstreamWithLocalWhenDeviationE
 	require.Len(t, dataRepo.detailedWarnings, 1)
 	require.NotNil(t, dataRepo.detailedWarnings[0])
 	require.Contains(t, *dataRepo.detailedWarnings[0], "已按本地成本展示")
+}
+
+func TestSupplierProviderSyncServiceCostOverridesUpstreamWithRechargeAdjustedBalanceWhenDeviationExceedsThreshold(t *testing.T) {
+	day := time.Date(2026, 8, 18, 0, 0, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{{
+		ID: 42, Name: "供应商甲", ProviderType: SupplierProviderTypeSub2API, Enabled: true, PasswordEncrypted: "secret",
+	}}}
+	dataRepo := &supplierProviderDataRepoStub{
+		localCostValue:    5,
+		localCostOK:       true,
+		balanceDeltaValue: 10,
+		balanceDeltaOK:    true,
+	}
+	remote := &supplierRemoteClientStub{recharge: 20}
+	svc := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, supplierEncryptorStub{}, &supplierSyncLockStub{acquired: true})
+	svc.SetCostDeviationThresholdProvider(supplierCostDeviationThresholdStub{threshold: 0.5})
+
+	result, err := svc.SyncCost(context.Background(), 42, day, SupplierSyncTriggerManual)
+
+	require.NoError(t, err)
+	require.Equal(t, SupplierSyncStatusSuccess, result.Status)
+	require.Equal(t, []float64{30}, dataRepo.costValues)
+	require.Equal(t, 1, remote.rechargeCalls)
+	require.Equal(t, day, remote.rechargeDays[0])
+	require.Len(t, dataRepo.detailedRawCosts, 1)
+	require.NotNil(t, dataRepo.detailedRawCosts[0])
+	require.Equal(t, 45.6, *dataRepo.detailedRawCosts[0])
+	require.Len(t, dataRepo.detailedWarnings, 1)
+	require.NotNil(t, dataRepo.detailedWarnings[0])
+	require.Contains(t, *dataRepo.detailedWarnings[0], "余额差 10.00 + 充值 20.00")
 }
 
 func TestSupplierProviderSyncServiceCostKeepsUpstreamWithinThreshold(t *testing.T) {

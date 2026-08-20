@@ -129,7 +129,7 @@ func TestSupplierNewAPIClientRecordsRefreshAuditWithoutRefreshToken(t *testing.T
 			require.Equal(t, "new_api_refresh=old-refresh-token", r.Header.Get("Cookie"))
 			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"fresh-access-token","access_expires_at":4102444800,"user":{"id":42}}}`))
 		case "/api/user/login":
-			t.Fatalf("刷新成功时不应重新登录")
+			t.Fatalf("unexpected login after successful refresh")
 		case "/api/user/self":
 			require.Equal(t, "Bearer fresh-access-token", r.Header.Get("Authorization"))
 			_, _ = w.Write([]byte(`{"success":true,"data":{"quota":500000}}`))
@@ -158,6 +158,86 @@ func TestSupplierNewAPIClientRecordsRefreshAuditWithoutRefreshToken(t *testing.T
 	require.NotNil(t, refreshEvent.Token)
 	require.Equal(t, "fresh-access-token", refreshEvent.Token.AccessToken)
 	require.Empty(t, refreshEvent.Token.RefreshToken)
+}
+
+func TestSupplierNewAPIClientFetchRechargeAmountParsesRechargeLogs(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"recharge-token","access_expires_at":4102444800,"user":{"id":42}}}`))
+		case "/api/log/self":
+			require.Equal(t, "1", r.URL.Query().Get("p"))
+			require.Equal(t, "100", r.URL.Query().Get("page_size"))
+			require.Equal(t, "1", r.URL.Query().Get("type"))
+			loc := time.FixedZone("Asia/Shanghai", 8*60*60)
+			start := time.Date(2026, 8, 18, 0, 0, 0, 0, loc)
+			require.Equal(t, strconv.FormatInt(start.Unix(), 10), r.URL.Query().Get("start_timestamp"))
+			require.Equal(t, strconv.FormatInt(start.AddDate(0, 0, 1).Add(-time.Second).Unix(), 10), r.URL.Query().Get("end_timestamp"))
+			_, _ = w.Write([]byte(`{
+				"success":true,
+				"message":"",
+				"data":{"page":1,"page_size":100,"total":3,"items":[
+					{"id":1,"created_at":1787056759,"type":1,"content":"充值金额: ¥50.000000 额度"},
+					{"id":2,"created_at":1787023290,"type":1,"content":"充值金额: ¥50.000000 额度"},
+					{"id":3,"created_at":1787000000,"type":1,"content":"其他系统日志"}
+				]}}
+			`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewSupplierNewAPIClient(server.Client(), cache, nil)
+	amount, err := client.FetchRechargeAmount(context.Background(), supplierNewAPICacheTestProvider(server.URL), "secret", time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC))
+
+	require.NoError(t, err)
+	require.Equal(t, 100.0, amount)
+}
+
+func TestSupplierNewAPIClientFetchRechargeAmountLoadsAllPages(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	requestedPages := []string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"recharge-token","access_expires_at":4102444800,"user":{"id":42}}}`))
+		case "/api/log/self":
+			page := r.URL.Query().Get("p")
+			requestedPages = append(requestedPages, page)
+			switch page {
+			case "1":
+				_, _ = w.Write([]byte(`{
+					"success":true,
+					"data":{"page":1,"page_size":100,"total":101,"items":[
+						{"id":1,"type":1,"content":"充值金额: ¥50.000000 额度"}
+					]}}
+				`))
+			case "2":
+				_, _ = w.Write([]byte(`{
+					"success":true,
+					"data":{"page":2,"page_size":100,"total":101,"items":[
+						{"id":2,"type":1,"content":"充值金额: ¥25.500000 额度"}
+					]}}
+				`))
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewSupplierNewAPIClient(server.Client(), cache, nil)
+	amount, err := client.FetchRechargeAmount(context.Background(), supplierNewAPICacheTestProvider(server.URL), "secret", time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC))
+
+	require.NoError(t, err)
+	require.Equal(t, 75.5, amount)
+	require.Equal(t, []string{"1", "2"}, requestedPages)
 }
 
 func TestSupplierNewAPIClientRefreshTokenManually(t *testing.T) {
@@ -638,7 +718,7 @@ func TestSupplierNewAPIClientRefreshesGroupsAfterAuthFailureBeforeLogin(t *testi
 			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"recovered-access-token","access_expires_at":4102444800,"user":{"id":42}}}`))
 		case "/api/user/login":
 			loginCalls.Add(1)
-			t.Errorf("刷新会话成功时不应重新登录")
+			t.Errorf("unexpected login after session refresh")
 		case "/api/group/":
 			if groupCalls.Add(1) == 1 {
 				w.WriteHeader(http.StatusUnauthorized)
@@ -862,7 +942,7 @@ func TestSupplierNewAPIClientUsesSharedLoginLockForRefresh(t *testing.T) {
 			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"new-access-token","access_expires_at":` + strconv.FormatInt(refreshExpiresAt.Unix(), 10) + `,"user":{"id":42}}}`))
 		case "/api/user/login":
 			loginCalls.Add(1)
-			t.Errorf("刷新会话成功时不应重新登录")
+			t.Errorf("unexpected login after session refresh")
 		case "/api/user/self":
 			require.Equal(t, "Bearer new-access-token", r.Header.Get("Authorization"))
 			_, _ = w.Write([]byte(`{"success":true,"data":{"quota":500000}}`))
@@ -886,7 +966,7 @@ func TestSupplierNewAPIClientUsesSharedLoginLockForRefresh(t *testing.T) {
 	select {
 	case <-refreshStarted:
 	case <-time.After(time.Second):
-		t.Fatal("第一次会话刷新没有开始")
+		t.Fatal("the first session refresh did not start")
 	}
 	go func() {
 		defer waitGroup.Done()
@@ -1318,4 +1398,18 @@ func TestSupplierNewAPIClientSendsOwnOriginWhenRefreshing(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, status)
 	require.JSONEq(t, `{"success":true,"data":{}}`, string(raw))
+}
+
+func TestParseSupplierNewAPIRechargeRecordsParsesAmountAndTimestamp(t *testing.T) {
+	raw := []byte(`{"success":true,"data":{"total":1,"items":[{"id":3,"created_at":1787056759,"type":1,"content":"充值金额: ¥50.000000 额度","request_id":"req-3"}]}}`)
+
+	records, total, _, err := parseSupplierNewAPIRechargeRecords(raw, time.Date(2026, 8, 18, 0, 0, 0, 0, time.FixedZone("CST", 8*3600)), time.Date(2026, 8, 18, 23, 59, 59, 0, time.FixedZone("CST", 8*3600)))
+
+	require.NoError(t, err)
+	require.Equal(t, 1, total)
+	require.Len(t, records, 1)
+	require.Equal(t, "3", records[0].ExternalID)
+	require.Equal(t, "req-3", records[0].ExternalCode)
+	require.Equal(t, 50.0, records[0].Amount)
+	require.Equal(t, "online", records[0].RechargeType)
 }

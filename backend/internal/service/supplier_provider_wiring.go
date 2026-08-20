@@ -20,16 +20,30 @@ func ProvideSupplierProviderGroupMatcher(dataRepo SupplierProviderDataRepository
 	return matcher
 }
 
+func ProvideSupplierProviderRechargeRemoteClient(remote *SupplierProviderRemoteRegistry) SupplierProviderRemoteRechargeHistoryClient {
+	return remote
+}
+
+func ProvideSupplierProviderRechargeService(
+	providerRepo SupplierProviderRepository,
+	rechargeRepo SupplierProviderRechargeRepository,
+	remote SupplierProviderRemoteRechargeHistoryClient,
+	encryptor SecretEncryptor,
+) *SupplierProviderRechargeService {
+	return NewSupplierProviderRechargeService(providerRepo, rechargeRepo, remote, encryptor)
+}
+
 func ProvideSupplierProviderSyncService(
 	providerRepo SupplierProviderRepository,
 	dataRepo SupplierProviderDataRepository,
+	rechargeRepo SupplierProviderRechargeRepository,
 	remote SupplierProviderRemoteClient,
 	encryptor SecretEncryptor,
 	syncLock SupplierProviderSyncLock,
 	groupMatcher *SupplierProviderGroupMatcher,
 	costDeviationSettings *SupplierCostDeviationSettingsService,
 ) *SupplierProviderSyncService {
-	svc := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, encryptor, syncLock)
+	svc := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, encryptor, syncLock, rechargeRepo)
 	svc.SetGroupMatcher(groupMatcher)
 	svc.SetCostDeviationThresholdProvider(costDeviationSettings)
 	return svc
@@ -48,6 +62,8 @@ var SupplierProviderWiringSet = wire.NewSet(
 	ProvideSupplierRateGuardService,
 	ProvideSupplierProviderGroupMatcher,
 	ProvideSupplierProviderSyncService,
+	ProvideSupplierProviderRechargeRemoteClient,
+	ProvideSupplierProviderRechargeService,
 	NewSupplierProviderAuthAuditService,
 	ProvideSupplierAccountRateGuardRateSyncer,
 	NewSupplierAccountRateGuardService,

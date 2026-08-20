@@ -40,6 +40,7 @@ import supplierProvidersAPI from './supplierProviders'
 import supplierProviderTypesAPI from './supplierProviderTypes'
 import supplierProviderDataAPI from './supplierProviderData'
 import supplierAutomationAPI from './supplierAutomation'
+import supplierProviderRechargesAPI from './supplierProviderRecharges'
 import upstreamDashboardAPI from './upstreamDashboard'
 import upstreamManagementAPI from './upstreamManagement'
 import upstreamAccountSyncAPI from './upstreamAccountSync'
@@ -89,6 +90,7 @@ export const adminAPI = {
   supplierProviderTypes: supplierProviderTypesAPI,
   supplierProviderData: supplierProviderDataAPI,
   supplierAutomation: supplierAutomationAPI,
+  supplierProviderRecharges: supplierProviderRechargesAPI,
   upstreamDashboard: upstreamDashboardAPI,
   upstreamManagement: upstreamManagementAPI,
   upstreamAccountSync: upstreamAccountSyncAPI,
@@ -136,6 +138,7 @@ export {
   supplierProviderTypesAPI,
   supplierProviderDataAPI,
   supplierAutomationAPI,
+  supplierProviderRechargesAPI,
   upstreamDashboardAPI,
   upstreamManagementAPI,
   upstreamAccountSyncAPI,
@@ -196,6 +199,12 @@ export type {
   SupplierAutomationRunListResult,
   SupplierAutomationTask
 } from './supplierAutomation'
+export type {
+  SupplierProviderRecharge,
+  SupplierProviderRechargeListParams,
+  SupplierProviderRechargeListResult,
+  SupplierProviderRechargeSyncResult
+} from './supplierProviderRecharges'
 export type {
   UpstreamProviderBalance,
   UpstreamProviderConfig,
