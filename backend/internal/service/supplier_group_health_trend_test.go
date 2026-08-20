@@ -112,3 +112,35 @@ func TestBuildSupplierProviderGroupHealthTrendsPrefersLatestEighteenRawMonitorTi
 	require.Len(t, fallbackTrend.Trend, 18)
 	require.Equal(t, 100.0, fallbackTrend.Availability)
 }
+
+func TestBuildSupplierProviderGroupHealthTrendsKeepsHealthyAccountWhenRawMonitorTimelineIsPreferred(t *testing.T) {
+	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	trends := BuildSupplierProviderGroupHealthTrends([]SupplierProviderGroupHealthSample{
+		{
+			GroupID:    101,
+			AccountID:  11,
+			Source:     SupplierProviderGroupHealthTrendSource,
+			Status:     SupplierAccountHealthGuardStatusHealthy,
+			Latency:    120,
+			FinishedAt: now,
+		},
+		{
+			GroupID:    101,
+			AccountID:  11,
+			Source:     SupplierProviderGroupHealthTrendMonitorSource,
+			Status:     SupplierAccountHealthGuardStatusFailed,
+			Latency:    30000,
+			FinishedAt: now.Add(-time.Minute),
+		},
+	}, SupplierProviderGroupHealthTrendParams{
+		GroupIDs:                 []int64{101},
+		Period:                   90 * time.Minute,
+		BucketCount:              18,
+		Now:                      now,
+		PreferRawMonitorTimeline: true,
+	})
+
+	require.Contains(t, trends, int64(101))
+	require.Equal(t, 100.0, trends[101].Availability)
+	require.Equal(t, "green", trends[101].Trend[len(trends[101].Trend)-1].Tone)
+}

@@ -85,7 +85,21 @@ func BuildSupplierProviderGroupHealthTrends(samples []SupplierProviderGroupHealt
 	if !params.PreferRawMonitorTimeline {
 		return trends
 	}
-	for groupID, trend := range buildSupplierProviderGroupHealthRawMonitorTrends(monitorSamples, params, requestedGroups) {
+	monitorGroups := make(map[int64]struct{}, len(monitorSamples))
+	for _, sample := range monitorSamples {
+		monitorGroups[sample.GroupID] = struct{}{}
+	}
+	rawSamples := make([]SupplierProviderGroupHealthSample, 0, len(fallbackSamples)+len(monitorSamples))
+	for _, sample := range fallbackSamples {
+		if sample.Status == SupplierAccountHealthGuardStatusHealthy || sample.Status == SupplierAccountHealthGuardStatusSlow {
+			rawSamples = append(rawSamples, sample)
+		}
+	}
+	rawSamples = append(rawSamples, monitorSamples...)
+	for groupID, trend := range buildSupplierProviderGroupHealthRawMonitorTrends(rawSamples, params, requestedGroups) {
+		if _, ok := monitorGroups[groupID]; !ok {
+			continue
+		}
 		trends[groupID] = trend
 	}
 	return trends
