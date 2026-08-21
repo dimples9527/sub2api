@@ -400,6 +400,33 @@ func (r *userSubscriptionRepository) ResetUsageWindows(ctx context.Context, id i
 	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
 }
 
+// AdjustUsage 原子扣减客户手动结算金额对应的各个用量窗口。
+func (r *userSubscriptionRepository) AdjustUsage(ctx context.Context, id int64, amountUSD float64) error {
+	if amountUSD <= 0 {
+		return service.ErrInvalidQuotaAmount
+	}
+	const updateSQL = `
+		UPDATE user_subscriptions
+		SET daily_usage_usd = GREATEST(daily_usage_usd - $1, 0),
+			weekly_usage_usd = GREATEST(weekly_usage_usd - $1, 0),
+			monthly_usage_usd = GREATEST(monthly_usage_usd - $1, 0),
+			updated_at = NOW()
+		WHERE id = $2
+			AND deleted_at IS NULL
+	`
+	result, err := clientFromContext(ctx, r.client).ExecContext(ctx, updateSQL, amountUSD, id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrSubscriptionNotFound
+	}
+	return nil
+}
 func (r *userSubscriptionRepository) ResetDailyUsage(ctx context.Context, id int64, expectedWindowStart *time.Time, newWindowStart time.Time) error {
 	client := clientFromContext(ctx, r.client)
 	query := client.UserSubscription.Update().Where(usersubscription.IDEQ(id))

@@ -35,12 +35,17 @@ var (
 	ErrSubscriptionRestoreConflict = infraerrors.Conflict("SUBSCRIPTION_RESTORE_CONFLICT", "subscription already exists for this user and group")
 	ErrGroupNotSubscriptionType    = infraerrors.BadRequest("GROUP_NOT_SUBSCRIPTION_TYPE", "group is not a subscription type")
 	ErrInvalidInput                = infraerrors.BadRequest("INVALID_INPUT", "at least one of resetDaily, resetWeekly, or resetMonthly must be true")
+	ErrInvalidQuotaAmount          = infraerrors.BadRequest("INVALID_QUOTA_AMOUNT", "quota adjustment amount must be greater than zero")
 	ErrDailyLimitExceeded          = infraerrors.TooManyRequests("DAILY_LIMIT_EXCEEDED", "daily usage limit exceeded")
 	ErrWeeklyLimitExceeded         = infraerrors.TooManyRequests("WEEKLY_LIMIT_EXCEEDED", "weekly usage limit exceeded")
 	ErrMonthlyLimitExceeded        = infraerrors.TooManyRequests("MONTHLY_LIMIT_EXCEEDED", "monthly usage limit exceeded")
 	ErrSubscriptionNilInput        = infraerrors.BadRequest("SUBSCRIPTION_NIL_INPUT", "subscription input cannot be nil")
 	ErrAdjustWouldExpire           = infraerrors.BadRequest("ADJUST_WOULD_EXPIRE", "adjustment would result in expired subscription (remaining days must be > 0)")
 )
+
+type subscriptionUsageAdjuster interface {
+	AdjustUsage(ctx context.Context, id int64, amountUSD float64) error
+}
 
 // SubscriptionService 订阅服务
 type SubscriptionService struct {
@@ -939,6 +944,29 @@ func (s *SubscriptionService) CheckAndResetWindows(ctx context.Context, sub *Use
 	}
 
 	return nil
+}
+
+// AdminAdjustQuota 按客户手动结算金额扣减已记录用量。
+func (s *SubscriptionService) AdminAdjustQuota(ctx context.Context, subscriptionID int64, amountUSD float64) (*UserSubscription, error) {
+	if amountUSD <= 0 {
+		return nil, ErrInvalidQuotaAmount
+	}
+	adjuster, ok := s.userSubRepo.(subscriptionUsageAdjuster)
+	if !ok {
+		return nil, ErrInvalidInput
+	}
+	sub, err := s.userSubRepo.GetByID(ctx, subscriptionID)
+	if err != nil {
+		return nil, err
+	}
+	if err := adjuster.AdjustUsage(ctx, sub.ID, amountUSD); err != nil {
+		return nil, err
+	}
+	s.InvalidateSubCacheSync(sub.UserID, sub.GroupID)
+	if s.billingCacheService != nil {
+		_ = s.billingCacheService.InvalidateSubscription(ctx, sub.UserID, sub.GroupID)
+	}
+	return s.userSubRepo.GetByID(ctx, sub.ID)
 }
 
 // EnsureWindowMaintenance advances expired usage windows before a request is

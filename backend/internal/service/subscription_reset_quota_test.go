@@ -70,6 +70,28 @@ func (r *resetQuotaUserSubRepoStub) ResetUsageWindows(_ context.Context, _ int64
 	return nil
 }
 
+func (r *resetQuotaUserSubRepoStub) AdjustUsage(_ context.Context, _ int64, amountUSD float64) error {
+	if r.sub == nil {
+		return nil
+	}
+	if r.sub.DailyUsageUSD > amountUSD {
+		r.sub.DailyUsageUSD -= amountUSD
+	} else {
+		r.sub.DailyUsageUSD = 0
+	}
+	if r.sub.WeeklyUsageUSD > amountUSD {
+		r.sub.WeeklyUsageUSD -= amountUSD
+	} else {
+		r.sub.WeeklyUsageUSD = 0
+	}
+	if r.sub.MonthlyUsageUSD > amountUSD {
+		r.sub.MonthlyUsageUSD -= amountUSD
+	} else {
+		r.sub.MonthlyUsageUSD = 0
+	}
+	return nil
+}
+
 func (r *resetQuotaUserSubRepoStub) ResetDailyUsage(_ context.Context, _ int64, _ *time.Time, windowStart time.Time) error {
 	r.resetDailyCalled = true
 	if r.resetDailyErr == nil && r.sub != nil {
@@ -271,4 +293,28 @@ func TestAdminResetQuota_ReturnsRefreshedSub(t *testing.T) {
 	// 服务应返回第二次 GetByID 的刷新值而非初始的 99.9
 	require.Equal(t, float64(0), result.DailyUsageUSD, "返回的订阅应反映已归零的用量")
 	require.True(t, stub.resetDailyCalled)
+}
+
+func TestAdminAdjustQuota_ReducesUsageWithoutGoingBelowZero(t *testing.T) {
+	stub := &resetQuotaUserSubRepoStub{sub: &UserSubscription{
+		ID: 11, UserID: 10, GroupID: 20,
+		DailyUsageUSD: 12.5, WeeklyUsageUSD: 8, MonthlyUsageUSD: 3,
+	}}
+	svc := newResetQuotaSvc(stub)
+
+	result, err := svc.AdminAdjustQuota(context.Background(), 11, 5)
+
+	require.NoError(t, err)
+	require.Equal(t, 7.5, result.DailyUsageUSD)
+	require.Equal(t, 3.0, result.WeeklyUsageUSD)
+	require.Zero(t, result.MonthlyUsageUSD)
+}
+
+func TestAdminAdjustQuota_RejectsNonPositiveAmount(t *testing.T) {
+	stub := &resetQuotaUserSubRepoStub{sub: &UserSubscription{ID: 12, UserID: 10, GroupID: 20}}
+	svc := newResetQuotaSvc(stub)
+
+	_, err := svc.AdminAdjustQuota(context.Background(), 12, 0)
+
+	require.ErrorIs(t, err, ErrInvalidQuotaAmount)
 }

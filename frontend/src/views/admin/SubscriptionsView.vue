@@ -669,16 +669,53 @@
       @cancel="showRestoreDialog = false"
     />
 
-    <!-- Reset Quota Confirmation Dialog -->
-    <ConfirmDialog
+    <!-- 重置额度弹窗 -->
+    <BaseDialog
       :show="showResetQuotaConfirm"
       :title="t('admin.subscriptions.resetQuotaTitle')"
-      :message="t('admin.subscriptions.resetQuotaConfirm', { user: resettingSubscription?.user?.email })"
-      :confirm-text="t('admin.subscriptions.resetQuota')"
-      :cancel-text="t('common.cancel')"
-      @confirm="confirmResetQuota"
-      @cancel="showResetQuotaConfirm = false"
-    />
+      width="narrow"
+      @close="showResetQuotaConfirm = false"
+    >
+      <form id="reset-quota-form" class="space-y-4" @submit.prevent="confirmResetQuota">
+        <div class="rounded-lg bg-orange-50 p-4 dark:bg-orange-900/20">
+          <p class="text-sm text-orange-800 dark:text-orange-200">
+            {{ t(resetForm.amountUSD.trim() ? 'admin.subscriptions.manualResetConfirm' : 'admin.subscriptions.resetQuotaConfirm', { user: resettingSubscription?.user?.email }) }}
+          </p>
+          <p v-if="resettingSubscription" class="mt-2 text-xs text-orange-700 dark:text-orange-300">
+            {{ t('admin.subscriptions.currentUsage', {
+              daily: resettingSubscription.daily_usage_usd.toFixed(2),
+              weekly: resettingSubscription.weekly_usage_usd.toFixed(2),
+              monthly: resettingSubscription.monthly_usage_usd.toFixed(2)
+            }) }}
+          </p>
+        </div>
+        <div>
+          <label class="input-label">{{ t('admin.subscriptions.manualResetAmount') }}</label>
+          <div class="relative">
+            <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+            <input
+              v-model="resetForm.amountUSD"
+              type="number"
+              min="0.01"
+              step="0.01"
+              class="input pl-7"
+              :placeholder="t('admin.subscriptions.manualResetAmountPlaceholder')"
+            />
+          </div>
+          <p class="input-hint">{{ t('admin.subscriptions.manualResetAmountHint') }}</p>
+        </div>
+      </form>
+      <template #footer>
+        <div class="flex justify-end gap-3">
+          <button type="button" class="btn btn-secondary" @click="showResetQuotaConfirm = false">
+            {{ t('common.cancel') }}
+          </button>
+          <button type="submit" form="reset-quota-form" :disabled="resettingQuota" class="btn btn-primary">
+            {{ resettingQuota ? t('admin.subscriptions.resettingQuota') : t('admin.subscriptions.resetQuota') }}
+          </button>
+        </div>
+      </template>
+    </BaseDialog>
     <!-- Subscription Guide Modal -->
     <teleport to="body">
       <transition name="modal">
@@ -975,6 +1012,9 @@ const showResetQuotaConfirm = ref(false)
 const submitting = ref(false)
 const resettingSubscription = ref<UserSubscription | null>(null)
 const resettingQuota = ref(false)
+const resetForm = reactive({
+  amountUSD: ''
+})
 const extendingSubscription = ref<UserSubscription | null>(null)
 const revokingSubscription = ref<UserSubscription | null>(null)
 const restoringSubscription = ref<UserSubscription | null>(null)
@@ -1312,18 +1352,30 @@ const confirmRestore = async () => {
 
 const handleResetQuota = (subscription: UserSubscription) => {
   resettingSubscription.value = subscription
+  resetForm.amountUSD = ''
   showResetQuotaConfirm.value = true
 }
 
 const confirmResetQuota = async () => {
-  if (!resettingSubscription.value) return
-  if (resettingQuota.value) return
+  if (!resettingSubscription.value || resettingQuota.value) return
+  const amountInput = resetForm.amountUSD.trim()
+  const amountUSD = amountInput === '' ? null : Number(amountInput)
+  if (amountUSD != null && (!Number.isFinite(amountUSD) || amountUSD <= 0)) {
+    appStore.showError(t('admin.subscriptions.invalidResetAmount'))
+    return
+  }
   resettingQuota.value = true
   try {
-    await adminAPI.subscriptions.resetQuota(resettingSubscription.value.id, { daily: true, weekly: true, monthly: true })
+    await adminAPI.subscriptions.resetQuota(
+      resettingSubscription.value.id,
+      amountUSD != null
+        ? { amount_usd: amountUSD }
+        : { daily: true, weekly: true, monthly: true }
+    )
     appStore.showSuccess(t('admin.subscriptions.quotaResetSuccess'))
     showResetQuotaConfirm.value = false
     resettingSubscription.value = null
+    resetForm.amountUSD = ''
     await loadSubscriptions()
   } catch (error: any) {
     appStore.showError(error.response?.data?.detail || t('admin.subscriptions.failedToResetQuota'))
