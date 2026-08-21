@@ -649,7 +649,13 @@ WHERE run.task_code = $2
   AND run.finished_at IS NOT NULL
   AND run.finished_at <= $3
   AND run.status IN ('success', 'partial')
-  AND jsonb_array_length(COALESCE(run.result_detail->'supplier_monitor'->'items', '[]'::jsonb)) > 0
+  AND jsonb_array_length(
+    CASE
+      WHEN jsonb_typeof(run.result_detail->'supplier_monitor'->'items') = 'array'
+      THEN run.result_detail->'supplier_monitor'->'items'
+      ELSE '[]'::jsonb
+    END
+  ) > 0
 `
 		monitorWhereSQL := `
 WHERE COALESCE(NULLIF(item->>'checked_at', '')::timestamptz, run.finished_at) <= $3
@@ -682,7 +688,13 @@ WHERE run.task_code = $2
   AND run.finished_at IS NOT NULL
   AND run.finished_at <= $4
   AND run.status IN ('success', 'partial')
-  AND jsonb_array_length(COALESCE(run.result_detail->'supplier_monitor'->'items', '[]'::jsonb)) > 0
+  AND jsonb_array_length(
+    CASE
+      WHEN jsonb_typeof(run.result_detail->'supplier_monitor'->'items') = 'array'
+      THEN run.result_detail->'supplier_monitor'->'items'
+      ELSE '[]'::jsonb
+    END
+  ) > 0
 `
 			monitorWhereSQL = `
 WHERE COALESCE(NULLIF(item->>'checked_at', '')::timestamptz, run.finished_at) <= $4
@@ -712,10 +724,18 @@ WITH latest_monitor_run AS (
          'supplier_account_health_guard' AS source
   FROM supplier_automation_runs run
   CROSS JOIN LATERAL jsonb_array_elements(
-    COALESCE(run.result_detail->'account_health_guard'->'items', '[]'::jsonb)
+    CASE
+      WHEN jsonb_typeof(run.result_detail->'account_health_guard'->'items') = 'array'
+      THEN run.result_detail->'account_health_guard'->'items'
+      ELSE '[]'::jsonb
+    END
   ) AS item
   CROSS JOIN LATERAL jsonb_array_elements(
-    COALESCE(item->'sources', '[]'::jsonb)
+    CASE
+      WHEN jsonb_typeof(item->'sources') = 'array'
+      THEN item->'sources'
+      ELSE '[]'::jsonb
+    END
   ) AS source
   JOIN supplier_provider_accounts account
     ON account.id = (source->>'supplier_provider_account_id')::bigint
@@ -734,7 +754,11 @@ WITH latest_monitor_run AS (
          'supplier_monitor' AS source
   FROM latest_monitor_run run
   CROSS JOIN LATERAL jsonb_array_elements(
-    COALESCE(run.result_detail->'supplier_monitor'->'items', '[]'::jsonb)
+    CASE
+      WHEN jsonb_typeof(run.result_detail->'supplier_monitor'->'items') = 'array'
+      THEN run.result_detail->'supplier_monitor'->'items'
+      ELSE '[]'::jsonb
+    END
   ) AS item
   JOIN account_groups account_group
     ON account_group.account_id = NULLIF(item->>'local_account_id', '')::bigint
@@ -837,10 +861,18 @@ SELECT %s AS group_id,
        'supplier_account_health_guard' AS source
 FROM supplier_automation_runs run
 CROSS JOIN LATERAL jsonb_array_elements(
-  COALESCE(run.result_detail->'account_health_guard'->'items', '[]'::jsonb)
+  CASE
+    WHEN jsonb_typeof(run.result_detail->'account_health_guard'->'items') = 'array'
+    THEN run.result_detail->'account_health_guard'->'items'
+    ELSE '[]'::jsonb
+  END
 ) AS item
 CROSS JOIN LATERAL jsonb_array_elements(
-  COALESCE(item->'sources', '[]'::jsonb)
+  CASE
+    WHEN jsonb_typeof(item->'sources') = 'array'
+    THEN item->'sources'
+    ELSE '[]'::jsonb
+  END
 ) AS source
 JOIN supplier_provider_accounts account
   ON account.id = (source->>'supplier_provider_account_id')::bigint

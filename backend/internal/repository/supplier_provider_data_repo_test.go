@@ -142,6 +142,32 @@ func TestSupplierProviderDataRepositoryListLocalGroupHealthTrendsIncludesSupplie
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestSupplierProviderDataRepositoryListLocalGroupHealthTrendsTreatsNullTimelineItemsAsEmptyArrays(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(`(?s)jsonb_array_length\(\s*CASE\s+WHEN jsonb_typeof\(run\.result_detail->'supplier_monitor'->'items'\) = 'array'.*jsonb_array_elements\(\s*CASE\s+WHEN jsonb_typeof\(run\.result_detail->'account_health_guard'->'items'\) = 'array'.*jsonb_array_elements\(\s*CASE\s+WHEN jsonb_typeof\(item->'sources'\) = 'array'`).
+		WithArgs(
+			service.SupplierAutomationTaskAccountHealthGuard,
+			service.SupplierAutomationTaskMonitorSync,
+			now.Add(-24*time.Hour),
+			now,
+			"{101}",
+		).
+		WillReturnRows(sqlmock.NewRows([]string{"group_id", "account_id", "status", "latency_ms", "finished_at", "source"}))
+
+	trends, err := repo.ListLocalGroupHealthTrends(context.Background(), service.SupplierProviderGroupHealthTrendParams{
+		GroupIDs:    []int64{101},
+		Period:      24 * time.Hour,
+		BucketCount: 18,
+		Now:         now,
+	})
+
+	require.NoError(t, err)
+	require.Empty(t, trends)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestSupplierProviderDataRepositoryListLocalGroupHealthTrendsIncludesStructuredMonitorBindings(t *testing.T) {
 	repo, mock := newSupplierProviderDataRepoMock(t)
 	now := time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC)
