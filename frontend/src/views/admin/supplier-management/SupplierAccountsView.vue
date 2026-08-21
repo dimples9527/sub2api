@@ -182,7 +182,13 @@
           @row-click="openDrawer"
         >
           <template #cell-provider_name="{ row: account }">
-            <div :class="['sp-provider-cell', supplierTone(account.provider_id).chip]">
+            <div
+              :class="[
+                'sp-provider-cell',
+                supplierTone(account.provider_id).chip,
+                { 'provider-disabled': isProviderDisabled(account) },
+              ]"
+            >
               <span
                 :class="['sp-provider-dot', supplierTone(account.provider_id).dot]"
                 aria-hidden="true"
@@ -2233,6 +2239,10 @@ function isMatchedLocalAccount(account: SupplierProviderAccount): boolean {
   return account.local_account_match_status === 'matched'
 }
 
+function isProviderDisabled(account: SupplierProviderAccount): boolean {
+  return providers.value.find(provider => provider.id === account.provider_id)?.enabled === false
+}
+
 function supplierTone(providerID: number) {
   const providerIndex = supplierIDs.value.indexOf(providerID)
   const toneIndex = providerIndex >= 0 ? providerIndex : Math.abs(Math.trunc(providerID || 0))
@@ -2855,6 +2865,18 @@ function formatTime(value?: string): string {
 .sp-account-table-shell :deep(tbody tr:hover) {
   background: color-mix(in srgb, var(--sp-cyan) 5%, var(--sp-panel));
   box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sp-cyan) 72%, transparent);
+}
+
+.sp-account-table-shell :deep(tbody tr:has(.sp-provider-cell.provider-disabled)),
+.sp-account-table-shell :deep(tbody tr:has(.sp-provider-cell.provider-disabled) .sticky-col) {
+  filter: grayscale(1);
+  background: color-mix(in srgb, var(--sp-muted) 12%, var(--sp-panel));
+}
+
+.sp-account-table-shell :deep(tbody tr:has(.sp-provider-cell.provider-disabled):hover),
+.sp-account-table-shell :deep(tbody tr:has(.sp-provider-cell.provider-disabled):hover .sticky-col) {
+  background: color-mix(in srgb, var(--sp-muted) 18%, var(--sp-panel));
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sp-muted) 52%, transparent);
 }
 
 .sp-account-identity,

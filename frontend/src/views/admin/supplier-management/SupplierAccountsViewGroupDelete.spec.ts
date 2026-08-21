@@ -47,3 +47,16 @@ describe('SupplierAccountsView 失效上游分组记录删除', () => {
     expect(source).toContain('selected.value = null')
   })
 })
+
+
+describe('供应商关闭账号整行灰化', () => {
+  it('供应商关闭时为供应商单元格添加行状态标记', () => {
+    expect(source).toContain("'provider-disabled': isProviderDisabled(account)")
+    expect(source).toContain('function isProviderDisabled(account: SupplierProviderAccount)')
+  })
+
+  it('通过整行选择器将供应商关闭账号显示为灰色', () => {
+    expect(source).toContain('tbody tr:has(.sp-provider-cell.provider-disabled)')
+    expect(source).toContain('filter: grayscale(1)')
+  })
+})
