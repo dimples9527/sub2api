@@ -235,6 +235,9 @@
               <Input :model-value="editForm.timeout_seconds" type="number" label="超时秒数" @update:model-value="editForm.timeout_seconds = toNumber($event, editForm.timeout_seconds)" />
             </div>
             <div class="sp-form-note">执行间隔最小为 1 秒，可按正整数秒配置。</div>
+            <div v-if="editForm.task_code === 'supplier_provider_recharge_sync'" class="sp-form-note">
+              供应商充值记录同步采用增量同步，默认每 30 分钟执行一次；可在此处调整周期。
+            </div>
           </section>
 
           <section v-if="editForm.task_code === 'supplier_rate_guard'" class="sp-form-section sp-policy-section">
@@ -573,6 +576,42 @@
                   </article>
                 </div>
                 <div v-else class="sp-rate-guard-empty">当前筛选条件下没有账号明细。</div>
+              </section>
+            </section>
+
+            <section v-else-if="detailRun.result_detail?.recharge_sync && rechargeSyncResult" class="sp-rate-guard-detail sp-recharge-sync-detail">
+              <div class="sp-rate-guard-summary">
+                <div><span>同步供应商</span><strong>{{ rechargeSyncResult.items.length }}</strong></div>
+                <div><span>成功</span><strong>{{ rechargeSyncResult.success_count }}</strong></div>
+                <div><span>失败</span><strong :class="{ 'sp-monitor-warning-value': rechargeSyncResult.failed_count > 0 }">{{ rechargeSyncResult.failed_count }}</strong></div>
+                <div><span>同步记录数</span><strong>{{ rechargeSyncRecordCount }}</strong></div>
+              </div>
+
+              <section class="sp-monitor-items">
+                <header class="sp-rate-guard-section-head">
+                  <div>
+                    <span>Recharge History Sync</span>
+                    <h4>供应商充值记录同步</h4>
+                  </div>
+                  <strong>{{ rechargeSyncResult.items.length }} 个供应商</strong>
+                </header>
+                <div v-if="rechargeSyncResult.items.length" class="sp-rate-guard-items sp-recharge-sync-items">
+                  <div class="sp-monitor-row sp-monitor-row-head" aria-hidden="true">
+                    <span>供应商</span>
+                    <span>状态</span>
+                    <span>同步记录数</span>
+                    <span>同步时间</span>
+                    <span>结果</span>
+                  </div>
+                  <div v-for="item in rechargeSyncResult.items" :key="`${item.provider_id}-${item.synced_at}`" class="sp-monitor-row">
+                    <span><strong>{{ item.provider_name || `供应商 ${item.provider_id}` }}</strong><small>供应商 #{{ item.provider_id }}</small></span>
+                    <span class="sp-status" :class="statusTone(item.status)">{{ statusText(item.status) }}</span>
+                    <span>{{ item.record_count }}</span>
+                    <span>{{ formatTime(item.synced_at) }}</span>
+                    <span>{{ item.message || '-' }}</span>
+                  </div>
+                </div>
+                <div v-else class="sp-rate-guard-empty">本次没有可同步的启用供应商。</div>
               </section>
             </section>
 
@@ -958,6 +997,7 @@ import {
   type SupplierAutomationStageRunDetail,
   type SupplierAutomationConfig,
   type SupplierAutomationTask,
+  type SupplierProviderRechargeSyncAllResult,
   type SupplierProviderMonitorSyncItem,
 } from '@/api/admin/supplierAutomation'
 import { useAppStore } from '@/stores/app'
@@ -1040,6 +1080,9 @@ const editForm = reactive<SupplierAutomationTask>({
 const taskNameByCode = computed<Record<string, string>>(() =>
   Object.fromEntries(tasks.value.map(task => [task.task_code, task.name]))
 )
+const taskNameFallbackByCode: Record<string, string> = {
+  supplier_provider_recharge_sync: '供应商充值记录同步',
+}
 
 const latestRunByTask = computed<Record<string, SupplierAutomationRun>>(() => {
   const latest: Record<string, SupplierAutomationRun> = {}
@@ -1056,6 +1099,10 @@ const rateGuardAlertActions = new Set(['invalid', 'stale', 'failed'])
 const rateGuardResult = computed(() => detailRun.value?.result_detail?.rate_guard || null)
 const accountRateGuardResult = computed(() => detailRun.value?.result_detail?.account_rate_guard || null)
 const accountHealthGuardResult = computed(() => detailRun.value?.result_detail?.account_health_guard || null)
+const rechargeSyncResult = computed<SupplierProviderRechargeSyncAllResult | null>(() => detailRun.value?.result_detail?.recharge_sync || null)
+const rechargeSyncRecordCount = computed(() => (
+  rechargeSyncResult.value?.items.reduce((total, item) => total + (item.record_count || 0), 0) || 0
+))
 const supplierMonitorResult = computed(() => detailRun.value?.result_detail?.supplier_monitor || null)
 const supplierMonitorItems = computed<SupplierProviderMonitorSyncItem[]>(() => supplierMonitorResult.value?.items || [])
 const supplierMonitorDisplayItems = computed<SupplierProviderMonitorSyncItem[]>(() => {
@@ -1231,7 +1278,7 @@ async function updateAccountRateGuardPendingCount() {
 }
 
 function taskName(taskCode: string): string {
-  return taskNameByCode.value[taskCode] || taskCode
+  return taskNameByCode.value[taskCode] || taskNameFallbackByCode[taskCode] || taskCode
 }
 
 function stableTaskColorHash(value: string): number {
@@ -1529,6 +1576,19 @@ function formatRunDetail(run: SupplierAutomationRun): string {
     for (const provider of providers) {
       lines.push(...formatProviderRunDetail(provider))
     }
+  } else if (run.result_detail?.recharge_sync) {
+    const rechargeSync = run.result_detail.recharge_sync
+    const recordCount = rechargeSync.items.reduce((total, item) => total + (item.record_count || 0), 0)
+    lines.push(
+      '',
+      '供应商充值记录同步明细：',
+      `- 同步供应商：${rechargeSync.items.length}`,
+      `- 成功 / 失败：${rechargeSync.success_count} / ${rechargeSync.failed_count}`,
+      `- 同步记录数：${recordCount}`
+    )
+    for (const item of rechargeSync.items) {
+      lines.push(`- ${item.provider_name || `供应商 ${item.provider_id}`}：${statusText(item.status)}，${item.record_count} 条，${item.message || '无附加信息'}`)
+    }
   } else if (run.result_detail?.account_rate_guard) {
     const guard = run.result_detail.account_rate_guard
     lines.push(
@@ -1674,6 +1734,11 @@ function runSummary(run: SupplierAutomationRun): string {
   const healthGuard = run.result_detail?.account_health_guard
   if (healthGuard) {
     return `检查 ${healthGuard.checked_count}，健康 ${healthGuard.healthy_count}，慢响应 ${healthGuard.slow_count}，失败 ${healthGuard.failed_count}，不可用 ${healthGuard.unavailable_count}，待下轮 ${healthGuard.pending_count}，暂停 ${healthGuard.disabled_count}，恢复 ${healthGuard.recovered_count}`
+  }
+  const rechargeSync = run.result_detail?.recharge_sync
+  if (rechargeSync) {
+    const recordCount = rechargeSync.items.reduce((total, item) => total + (item.record_count || 0), 0)
+    return `同步 ${rechargeSync.items.length} 个供应商，成功 ${rechargeSync.success_count}，失败 ${rechargeSync.failed_count}，充值记录 ${recordCount} 条`
   }
   if (!run.processed_count && !run.success_count && !run.failed_count) {
     return compactMessage(run.message || '暂无结果')

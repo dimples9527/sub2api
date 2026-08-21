@@ -72,6 +72,21 @@ describe('SupplierAutomationView second-level intervals', () => {
 })
 
 describe('SupplierAutomationView edit dialog', () => {
+  it('recognizes the supplier recharge sync task and keeps it on the shared interval editor', () => {
+    expect(supplierAutomationAPISource).toContain('recharge_sync?: SupplierProviderRechargeSyncAllResult')
+    expect(supplierAutomationAPISource).toContain('export interface SupplierProviderRechargeSyncResult')
+    expect(supplierAutomationSource).toContain("supplier_provider_recharge_sync: '供应商充值记录同步'")
+    expect(supplierAutomationSource).toContain("editForm.task_code === 'supplier_provider_recharge_sync'")
+    expect(supplierAutomationSource).toContain('editIntervalSeconds.value = cronToIntervalSeconds(task.cron_expression) || 300')
+  })
+
+  it('shows recharge sync provider results in the structured run detail', () => {
+    expect(supplierAutomationSource).toContain('detailRun.result_detail?.recharge_sync && rechargeSyncResult')
+    expect(supplierAutomationSource).toContain('rechargeSyncResult.items')
+    expect(supplierAutomationSource).toContain('同步记录数')
+    expect(supplierAutomationSource).toContain('供应商充值记录同步')
+  })
+
   it('exposes supplier monitor matching details from monitor item to local account and group', () => {
     expect(supplierAutomationAPISource).toContain('supplier_monitor?: SupplierProviderMonitorSyncResult')
     expect(supplierAutomationAPISource).toContain('local_group_names?: string[]')

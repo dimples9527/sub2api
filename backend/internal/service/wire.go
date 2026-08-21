@@ -938,6 +938,7 @@ var ProviderSet = wire.NewSet(
 	SupplierProviderWiringSet,
 	SupplierAccountHealthGuardWiringSet,
 	wire.Bind(new(SupplierProviderBatchSyncer), new(*SupplierProviderSyncService)),
+	wire.Bind(new(SupplierProviderRechargeSyncer), new(*SupplierProviderRechargeService)),
 	ProvideSupplierAutomationScheduler,
 	NewUpstreamProviderService,
 	ProvideUpstreamManagementService,

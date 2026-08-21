@@ -96,12 +96,13 @@ type SupplierAutomationRun struct {
 }
 
 type SupplierAutomationRunDetail struct {
-	Providers          []SupplierAutomationProviderRunDetail `json:"providers,omitempty"`
-	Cleanup            *SupplierAutomationCleanupRunDetail   `json:"cleanup,omitempty"`
-	RateGuard          *SupplierRateGuardResult              `json:"rate_guard,omitempty"`
-	AccountRateGuard   *SupplierAccountRateGuardResult       `json:"account_rate_guard,omitempty"`
-	AccountHealthGuard *SupplierAccountHealthGuardResult     `json:"account_health_guard,omitempty"`
-	SupplierMonitor    *SupplierProviderMonitorSyncResult    `json:"supplier_monitor,omitempty"`
+	Providers          []SupplierAutomationProviderRunDetail  `json:"providers,omitempty"`
+	Cleanup            *SupplierAutomationCleanupRunDetail    `json:"cleanup,omitempty"`
+	RateGuard          *SupplierRateGuardResult               `json:"rate_guard,omitempty"`
+	AccountRateGuard   *SupplierAccountRateGuardResult        `json:"account_rate_guard,omitempty"`
+	AccountHealthGuard *SupplierAccountHealthGuardResult      `json:"account_health_guard,omitempty"`
+	SupplierMonitor    *SupplierProviderMonitorSyncResult     `json:"supplier_monitor,omitempty"`
+	RechargeSync       *SupplierProviderRechargeSyncAllResult `json:"recharge_sync,omitempty"`
 }
 
 type SupplierAutomationProviderRunDetail struct {
@@ -182,6 +183,10 @@ type SupplierProviderBatchSyncer interface {
 	SyncAllEnabled(ctx context.Context, trigger string) (SupplierProviderBatchSyncResult, error)
 }
 
+type SupplierProviderRechargeSyncer interface {
+	SyncAll(ctx context.Context, fullSync bool) (SupplierProviderRechargeSyncAllResult, error)
+}
+
 type SupplierRateGuardRunner interface {
 	Run(ctx context.Context, config SupplierRateGuardConfig, now time.Time) (SupplierRateGuardResult, error)
 }
@@ -200,6 +205,7 @@ const (
 	SupplierAutomationTaskRateGuard          = "supplier_rate_guard"
 	SupplierAutomationTaskAccountRateGuard   = "supplier_account_rate_guard"
 	SupplierAutomationTaskAccountHealthGuard = "supplier_account_health_guard"
+	SupplierAutomationTaskRechargeSync       = "supplier_provider_recharge_sync"
 
 	SupplierAutomationStatusRunning = "running"
 	SupplierAutomationStatusSuccess = "success"
@@ -225,6 +231,7 @@ type SupplierAutomationService struct {
 	accountRateGuard   SupplierAccountRateGuardRunner
 	accountHealthGuard SupplierAccountHealthGuardRunner
 	accountRateLogs    SupplierAccountRateGuardRepository
+	rechargeSyncer     SupplierProviderRechargeSyncer
 	reloader           SupplierAutomationSchedulerReloader
 }
 
@@ -239,6 +246,12 @@ func (s *SupplierAutomationService) SetSchedulerReloader(reloader SupplierAutoma
 func (s *SupplierAutomationService) SetMonitorSyncService(syncer SupplierProviderMonitorSyncer) {
 	if s != nil {
 		s.monitorSyncer = syncer
+	}
+}
+
+func (s *SupplierAutomationService) SetRechargeSyncService(syncer SupplierProviderRechargeSyncer) {
+	if s != nil {
+		s.rechargeSyncer = syncer
 	}
 }
 
@@ -461,7 +474,7 @@ func (s *SupplierAutomationService) persistAccountHealthGuardCursor(ctx context.
 // supplierAutomationTaskRequiresUpstreamFetchLock 标记会读取上游供应商数据的自动化任务。
 func supplierAutomationTaskRequiresUpstreamFetchLock(taskCode string) bool {
 	switch taskCode {
-	case SupplierAutomationTaskSync, SupplierAutomationTaskMonitorSync, SupplierAutomationTaskAccountRateGuard:
+	case SupplierAutomationTaskSync, SupplierAutomationTaskMonitorSync, SupplierAutomationTaskAccountRateGuard, SupplierAutomationTaskRechargeSync:
 		return true
 	default:
 		return false
@@ -523,6 +536,25 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 		if result.FailedCount > 0 {
 			run.Status = SupplierAutomationStatusPartial
 			run.Message = fmt.Sprintf("供应商监控数据同步存在 %d 个失败供应商", result.FailedCount)
+		}
+		return nil
+	case SupplierAutomationTaskRechargeSync:
+		if s.rechargeSyncer == nil {
+			return fmt.Errorf("supplier recharge sync service is required")
+		}
+		result, err := s.rechargeSyncer.SyncAll(ctx, false)
+		run.ProcessedCount = result.SuccessCount + result.FailedCount
+		run.SuccessCount = result.SuccessCount
+		run.FailedCount = result.FailedCount
+		run.ResultDetail = &SupplierAutomationRunDetail{RechargeSync: &result}
+		if err != nil {
+			return err
+		}
+		if result.FailedCount > 0 {
+			run.Status = SupplierAutomationStatusPartial
+			run.Message = fmt.Sprintf("供应商充值记录同步存在 %d 个失败供应商", result.FailedCount)
+		} else {
+			run.Message = fmt.Sprintf("已同步 %d 个供应商的充值记录", result.SuccessCount)
 		}
 		return nil
 	case SupplierAutomationTaskCleanup:
@@ -806,6 +838,7 @@ func (s *SupplierAutomationScheduler) Start() {
 			SupplierAutomationTaskRateGuard,
 			SupplierAutomationTaskAccountRateGuard,
 			SupplierAutomationTaskAccountHealthGuard,
+			SupplierAutomationTaskRechargeSync,
 			supplierAutomationUpstreamFetchLock,
 		} {
 			if err := s.service.lock.ForceReleaseAutomationLock(ctx, taskCode); err != nil {

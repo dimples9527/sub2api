@@ -120,6 +120,19 @@ type supplierAutomationMonitorSyncStub struct {
 	result SupplierProviderMonitorSyncResult
 }
 
+type supplierAutomationRechargeSyncStub struct {
+	called   int
+	fullSync []bool
+	err      error
+	result   SupplierProviderRechargeSyncAllResult
+}
+
+func (s *supplierAutomationRechargeSyncStub) SyncAll(_ context.Context, fullSync bool) (SupplierProviderRechargeSyncAllResult, error) {
+	s.called++
+	s.fullSync = append(s.fullSync, fullSync)
+	return s.result, s.err
+}
+
 type supplierAutomationRateGuardStub struct {
 	called int
 	config SupplierRateGuardConfig
@@ -392,6 +405,55 @@ func TestSupplierAutomationServiceRunsSupplierMonitorSyncTask(t *testing.T) {
 	require.Equal(t, []string{SupplierAutomationTaskMonitorSync, "supplier_upstream_fetch"}, lock.acquireCalls)
 	require.Equal(t, 2, lock.released)
 }
+
+func TestSupplierAutomationServiceRunsSupplierRechargeSyncTaskIncrementally(t *testing.T) {
+	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
+		SupplierAutomationTaskRechargeSync: {
+			TaskCode: SupplierAutomationTaskRechargeSync, Name: "供应商充值记录同步", Enabled: true,
+			CronExpression: "@every 30m", TimeoutSeconds: 600,
+		},
+	}}
+	rechargeSync := &supplierAutomationRechargeSyncStub{result: SupplierProviderRechargeSyncAllResult{
+		Items: []SupplierProviderRechargeSyncResult{
+			{ProviderID: 1, ProviderName: "供应商 A", Status: SupplierSyncStatusSuccess, RecordCount: 3},
+			{ProviderID: 2, ProviderName: "供应商 B", Status: SupplierSyncStatusFailed, Message: "同步失败"},
+		},
+		SuccessCount: 1,
+		FailedCount:  1,
+	}}
+	service := NewSupplierAutomationService(repo, &supplierAutomationLockStub{acquired: true}, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
+	service.SetRechargeSyncService(rechargeSync)
+
+	run, err := service.Run(context.Background(), SupplierAutomationTaskRechargeSync, SupplierSyncTriggerScheduled)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, rechargeSync.called)
+	require.Equal(t, []bool{false}, rechargeSync.fullSync)
+	require.Equal(t, SupplierAutomationStatusPartial, run.Status)
+	require.Equal(t, 2, run.ProcessedCount)
+	require.Equal(t, 1, run.SuccessCount)
+	require.Equal(t, 1, run.FailedCount)
+	require.NotNil(t, run.ResultDetail)
+	require.NotNil(t, run.ResultDetail.RechargeSync)
+	require.Equal(t, 2, len(run.ResultDetail.RechargeSync.Items))
+	require.Equal(t, int64(2), run.ResultDetail.RechargeSync.Items[1].ProviderID)
+}
+
+func TestSupplierAutomationServiceRequiresRechargeSyncService(t *testing.T) {
+	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
+		SupplierAutomationTaskRechargeSync: {
+			TaskCode: SupplierAutomationTaskRechargeSync, Name: "供应商充值记录同步", Enabled: true,
+			CronExpression: "@every 30m", TimeoutSeconds: 600,
+		},
+	}}
+	service := NewSupplierAutomationService(repo, &supplierAutomationLockStub{acquired: true}, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
+
+	run, err := service.Run(context.Background(), SupplierAutomationTaskRechargeSync, SupplierSyncTriggerManual)
+
+	require.EqualError(t, err, "supplier recharge sync service is required")
+	require.Equal(t, SupplierAutomationStatusFailed, run.Status)
+}
+
 func TestSupplierAutomationServiceRejectsPreviewModeForOtherTasks(t *testing.T) {
 	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
 		SupplierAutomationTaskSync: {

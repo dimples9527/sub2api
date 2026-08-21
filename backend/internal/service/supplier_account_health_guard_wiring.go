@@ -15,6 +15,7 @@ func ProvideSupplierAutomationService(
 	lock SupplierAutomationLock,
 	syncer *SupplierProviderSyncService,
 	dataRepo SupplierProviderDataRepository,
+	rechargeSync *SupplierProviderRechargeService,
 	rateGuard *SupplierRateGuardService,
 	accountRateGuard *SupplierAccountRateGuardService,
 	accountHealthGuard *SupplierAccountHealthGuardService,
@@ -22,6 +23,7 @@ func ProvideSupplierAutomationService(
 ) *SupplierAutomationService {
 	svc := NewSupplierAutomationService(repo, lock, syncer, dataRepo)
 	svc.SetMonitorSyncService(syncer)
+	svc.SetRechargeSyncService(rechargeSync)
 	svc.SetRateGuardService(rateGuard)
 	svc.SetAccountRateGuardService(accountRateGuard)
 	svc.SetAccountHealthGuardService(accountHealthGuard)

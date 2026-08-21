@@ -58,7 +58,23 @@ export interface SupplierAutomationRunDetail {
   account_rate_guard?: SupplierAccountRateGuardResult
   account_health_guard?: SupplierAccountHealthGuardResult
   supplier_monitor?: SupplierProviderMonitorSyncResult
+  recharge_sync?: SupplierProviderRechargeSyncAllResult
   cleanup?: SupplierAutomationCleanupRunDetail
+}
+
+export interface SupplierProviderRechargeSyncResult {
+  provider_id: number
+  provider_name: string
+  status: string
+  message: string
+  record_count: number
+  synced_at: string
+}
+
+export interface SupplierProviderRechargeSyncAllResult {
+  items: SupplierProviderRechargeSyncResult[]
+  success_count: number
+  failed_count: number
 }
 
 export interface SupplierProviderMonitorSyncResult {
