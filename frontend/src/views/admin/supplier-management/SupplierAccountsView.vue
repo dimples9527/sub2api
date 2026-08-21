@@ -40,6 +40,20 @@
             />
           </div>
           <div
+            ref="providerStatusFilterControl"
+            class="sp-account-filter-control"
+            role="group"
+            aria-labelledby="supplier-account-provider-status-label"
+          >
+            <span id="supplier-account-provider-status-label" class="sr-only">供应商状态</span>
+            <Select
+              v-model="providerStatusFilter"
+              class="w-full"
+              :options="providerStatusFilterOptions"
+              :searchable="false"
+            />
+          </div>
+          <div
             ref="platformFilterControl"
             class="sp-account-filter-control"
             role="group"
@@ -1130,6 +1144,7 @@ const error = ref('')
 const page = ref(1)
 const pageSize = ref(20)
 const providerID = ref(0)
+const providerStatusFilter = ref('all')
 const groupID = ref(0)
 const platformFilter = ref('')
 const activeFilter = ref('')
@@ -1137,6 +1152,7 @@ const upstreamStatusFilter = ref('')
 const search = ref('')
 const searchFilterControl = ref<HTMLElement | null>(null)
 const providerFilterControl = ref<HTMLElement | null>(null)
+const providerStatusFilterControl = ref<HTMLElement | null>(null)
 const groupFilterControl = ref<HTMLElement | null>(null)
 const platformFilterControl = ref<HTMLElement | null>(null)
 const activeFilterControl = ref<HTMLElement | null>(null)
@@ -1156,6 +1172,11 @@ const providerOptions = computed<SelectOption[]>(() => [
   { value: 0, label: '全部供应商' },
   ...providers.value.map(provider => ({ value: provider.id, label: provider.name })),
 ])
+const providerStatusFilterOptions: SelectOption[] = [
+  { value: 'all', label: '全部供应商状态' },
+  { value: 'enabled', label: '已启用供应商' },
+  { value: 'disabled', label: '已关闭供应商' },
+]
 const localGroupOptions = computed<SelectOption[]>(() => [
   { value: 0, label: '全部本地分组' },
   ...localGroups.value
@@ -1415,7 +1436,7 @@ onBeforeUnmount(() => {
   clearBatchTestPollTimer()
 })
 
-watch([providerID, groupID, activeFilter, upstreamStatusFilter], () => {
+watch([providerID, providerStatusFilter, groupID, activeFilter, upstreamStatusFilter], () => {
   resetPageAndLoad()
 })
 
@@ -1467,9 +1488,20 @@ function accountMatchesQuickFilter(
   return account.local_account_schedulable === false
 }
 
+function accountMatchesProviderStatusFilter(
+  account: SupplierProviderAccount,
+  filter: string,
+): boolean {
+  if (filter === 'all') return true
+  const provider = providers.value.find(item => item.id === account.provider_id)
+  const isEnabled = provider?.enabled !== false
+  return filter === 'enabled' ? isEnabled : !isEnabled
+}
+
 function applyAccountQuickFilterPage() {
   const filteredAccounts = accountSourceItems.value.filter(account => (
-    accountMatchesQuickFilter(account, accountQuickFilter.value)
+    accountMatchesProviderStatusFilter(account, providerStatusFilter.value)
+    && accountMatchesQuickFilter(account, accountQuickFilter.value)
   ))
   total.value = filteredAccounts.length
   const lastPage = Math.max(1, Math.ceil(total.value / pageSize.value))
@@ -2225,6 +2257,7 @@ async function deleteLocalAccount(account: SupplierProviderAccount) {
 function applyFilterControlLabels() {
   setFilterControlLabel(searchFilterControl.value, 'input', 'supplier-account-search-label')
   setFilterControlLabel(providerFilterControl.value, '.select-trigger', 'supplier-account-provider-label')
+  setFilterControlLabel(providerStatusFilterControl.value, '.select-trigger', 'supplier-account-provider-status-label')
   setFilterControlLabel(groupFilterControl.value, '.select-trigger', 'supplier-account-group-label')
   setFilterControlLabel(platformFilterControl.value, '.select-trigger', 'supplier-account-platform-label')
   setFilterControlLabel(activeFilterControl.value, '.select-trigger', 'supplier-account-active-label')

@@ -60,3 +60,18 @@ describe('供应商关闭账号整行灰化', () => {
     expect(source).toContain('filter: grayscale(1)')
   })
 })
+
+
+describe('供应商状态筛选', () => {
+  it('提供全部、已启用和已关闭供应商状态选项', () => {
+    expect(source).toContain("const providerStatusFilter = ref('all')")
+    expect(source).toContain("{ value: 'disabled', label: '已关闭供应商' }")
+    expect(source).toContain('providerStatusFilterOptions')
+  })
+
+  it('按供应商状态过滤账号并参与分页', () => {
+    expect(source).toContain('accountMatchesProviderStatusFilter(account, providerStatusFilter.value)')
+    expect(source).toContain('watch([providerID, providerStatusFilter, groupID')
+    expect(source).toContain('applyAccountQuickFilterPage()')
+  })
+})
