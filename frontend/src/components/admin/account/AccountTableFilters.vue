@@ -16,9 +16,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'; import { useI18n } from 'vue-i18n'; import Select from '@/components/common/Select.vue'; import SearchInput from '@/components/common/SearchInput.vue'
+import { computed, onMounted, ref } from 'vue'; import { useI18n } from 'vue-i18n'; import Select from '@/components/common/Select.vue'; import SearchInput from '@/components/common/SearchInput.vue'
 import type { AdminGroup } from '@/types'
-import { CORE_PLATFORM_OPTIONS } from '@/utils/platformOptions'
+import { customPlatformsAPI, type CustomPlatform } from '@/api/admin/customPlatforms'
+import { buildPlatformOptions } from '@/utils/platformOptions'
+const customPlatforms = ref<CustomPlatform[]>([])
+
 const props = defineProps<{ searchQuery: string; filters: Record<string, any>; groups?: AdminGroup[] }>()
 const emit = defineEmits(['update:searchQuery', 'update:filters', 'change']); const { t } = useI18n()
 const updatePlatform = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, platform: value }) }
@@ -28,8 +31,20 @@ const updatePrivacyMode = (value: string | number | boolean | null) => { emit('u
 const updateGroup = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, group: value }) }
 const pOpts = computed(() => [
   { value: '', label: t('admin.accounts.allPlatforms') },
-  ...CORE_PLATFORM_OPTIONS.map(option => ({ value: option.value, label: option.label })),
+  ...buildPlatformOptions(customPlatforms.value),
 ])
+const loadCustomPlatforms = async () => {
+  try {
+    customPlatforms.value = await customPlatformsAPI.list(true)
+  } catch {
+    customPlatforms.value = []
+  }
+}
+
+onMounted(() => {
+  void loadCustomPlatforms()
+})
+
 const tOpts = computed(() => [{ value: '', label: t('admin.accounts.allTypes') }, { value: 'oauth', label: t('admin.accounts.oauthType') }, { value: 'setup-token', label: t('admin.accounts.setupToken') }, { value: 'apikey', label: t('admin.accounts.apiKey') }, { value: 'bedrock', label: 'AWS Bedrock' }])
 const sOpts = computed(() => [{ value: '', label: t('admin.accounts.allStatus') }, { value: 'active', label: t('admin.accounts.status.active') }, { value: 'inactive', label: t('admin.accounts.status.inactive') }, { value: 'error', label: t('admin.accounts.status.error') }, { value: 'rate_limited', label: t('admin.accounts.status.rateLimited') }, { value: 'temp_unschedulable', label: t('admin.accounts.status.tempUnschedulable') }, { value: 'unschedulable', label: t('admin.accounts.status.unschedulable') }])
 const privacyOpts = computed(() => [
