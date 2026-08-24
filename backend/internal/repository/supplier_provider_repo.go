@@ -490,9 +490,9 @@ func (r *supplierProviderRepository) Update(ctx context.Context, provider *servi
 UPDATE supplier_providers SET
   code=$2, name=$3, provider_type=$4, newapi_auth_mode=$5, base_url=$6, login_url=$7,
   api_keys_url=$8, groups_url=$9, available_groups_url=$10, balance_url=$11,
-  usage_cost_url=$12, recharge_url=$13, monitor_url=$14, account_name_prefix=$15, temp_disable_minutes=$15,
-  account_rate_multiplier_scale=$16, sort_order=$17, enabled=$18,
-  turnstile_enabled=$19, is_default=$20, updated_at=NOW()
+  usage_cost_url=$12, recharge_url=$13, monitor_url=$14, account_name_prefix=$15, temp_disable_minutes=$16,
+  account_rate_multiplier_scale=$17, sort_order=$18, enabled=$19,
+  turnstile_enabled=$20, is_default=$21, updated_at=NOW()
 WHERE id=$1 AND deleted_at IS NULL`, provider.ID, provider.Code, provider.Name,
 		provider.ProviderType, provider.NewAPIAuthMode, provider.BaseURL, provider.LoginURL, provider.APIKeysURL,
 		provider.GroupsURL, provider.AvailableGroupsURL, provider.BalanceURL,
