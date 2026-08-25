@@ -429,6 +429,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			}
 			return nil, s.handleErrorResponsePassthrough(ctx, resp, c, account, body, probeBody)
 		}
+		attemptTimer.Mark(attemptStart)
 
 		if mapping, ok := openAIResponsesClientToolMapping(c); ok && isEventStreamResponse(resp.Header) {
 			maxLineSize := defaultMaxLineSize
