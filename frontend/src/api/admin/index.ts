@@ -35,6 +35,7 @@ import affiliatesAPI from './affiliates'
 import riskControlAPI from './riskControl'
 import adminComplianceAPI from './compliance'
 import auditAPI from './audit'
+import pluginsAPI from './plugins'
 import upstreamProvidersAPI from './upstreamProviders'
 import supplierProvidersAPI from './supplierProviders'
 import supplierProviderTypesAPI from './supplierProviderTypes'
@@ -85,6 +86,7 @@ export const adminAPI = {
   riskControl: riskControlAPI,
   compliance: adminComplianceAPI,
   audit: auditAPI,
+  plugins: pluginsAPI,
   upstreamProviders: upstreamProvidersAPI,
   supplierProviders: supplierProvidersAPI,
   supplierProviderTypes: supplierProviderTypesAPI,
@@ -133,6 +135,7 @@ export {
   riskControlAPI,
   adminComplianceAPI,
   auditAPI,
+  pluginsAPI,
   upstreamProvidersAPI,
   supplierProvidersAPI,
   supplierProviderTypesAPI,
@@ -157,6 +160,12 @@ export type { ErrorPassthroughRule, CreateRuleRequest, UpdateRuleRequest } from 
 export type { BackupAgentHealth, DataManagementConfig } from './dataManagement'
 export type { TLSFingerprintProfile, CreateProfileRequest, UpdateProfileRequest } from './tlsFingerprintProfile'
 export type { ContentModerationConfig, ContentModerationLog, ModerationMode } from './riskControl'
+export type {
+  PluginInstallation,
+  PluginCompatibility,
+  PluginUISession,
+  PluginTestResult
+} from './plugins'
 export type {
   UpstreamDashboardCost,
   UpstreamDashboardIssue,
