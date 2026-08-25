@@ -872,6 +872,7 @@ const adminNavItems = computed((): NavItem[] => {
         { path: '/admin/supplier-management/accounts', label: '供应商账号管理', icon: GlobeIcon },
         { path: '/admin/supplier-management/monitor-bindings', label: '监控项绑定', icon: ChartIcon },
         { path: '/admin/supplier-management/balance-alert', label: '供应商余额预警', icon: BellIcon },
+        { path: '/admin/supplier-management/cost-reviews', label: '上游成本核对', icon: ChartIcon },
         { path: '/admin/supplier-management/notifications', label: '供应商通知配置', icon: BellIcon },
         { path: '/admin/supplier-management/captcha-settings', label: '上游打码设置', icon: ShieldIcon },
         { path: 'https://ops.sunshinefastlink.top/', label: '上游运维平台', icon: ExternalLinkIcon, external: true },

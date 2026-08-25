@@ -231,6 +231,8 @@ type SupplierProviderDataRepository interface {
 	UpdateCost(ctx context.Context, providerID int64, cost float64, seenAt time.Time) error
 	// UpdateCostDetailed 写入成本生效值与上游原始值、偏差覆盖提示。
 	UpdateCostDetailed(ctx context.Context, providerID int64, cost float64, rawUpstream *float64, warning *string, statDay time.Time) error
+	// UpdateCostDetailedWithReview 在同一事务中写入每日成本和成本核对记录。
+	UpdateCostDetailedWithReview(ctx context.Context, providerID int64, cost float64, rawUpstream *float64, warning *string, statDay time.Time, review SupplierProviderCostReviewSyncInput) error
 	// GetLocalCostForDay 获取指定供应商指定统计日的本地成本；ok=false 表示无本地口径可校验。
 	GetLocalCostForDay(ctx context.Context, providerID int64, day time.Time) (float64, bool, error)
 	// GetBalanceDeltaForDay 获取指定供应商指定统计日的余额差值（当天第一条余额 - 当天最后一条余额）；
@@ -358,6 +360,7 @@ type SupplierProviderSyncService struct {
 	syncLock          SupplierProviderSyncLock
 	groupMatcher      SupplierProviderGroupAutoMatcher
 	thresholdProvider SupplierCostDeviationThresholdProvider
+	costReviewService *SupplierProviderCostReviewService
 }
 
 func (s *SupplierProviderSyncService) SetGroupMatcher(matcher SupplierProviderGroupAutoMatcher) {
@@ -371,6 +374,20 @@ func (s *SupplierProviderSyncService) SetCostDeviationThresholdProvider(provider
 	if s != nil {
 		s.thresholdProvider = provider
 	}
+}
+
+func (s *SupplierProviderSyncService) SetCostReviewService(service *SupplierProviderCostReviewService) {
+	if s != nil {
+		s.costReviewService = service
+	}
+}
+
+func (s *SupplierProviderSyncService) syncCostReview(ctx context.Context, providerID int64, statDay time.Time, upstream, calculated, adopted *float64, effective float64, runID *int64, syncedAt time.Time) error {
+	if s.costReviewService == nil {
+		return nil
+	}
+	_, err := s.costReviewService.Sync(ctx, SupplierProviderCostReviewSyncInput{ProviderID: providerID, StatDate: statDay, UpstreamCost: upstream, CalculatedCost: calculated, AutoAdoptedCost: adopted, EffectiveCost: effective, SyncRunID: runID, SyncedAt: syncedAt})
+	return err
 }
 
 // SetRechargeRepository 注入已落库的供应商充值记录仓储。
@@ -1231,6 +1248,11 @@ func (s *SupplierProviderSyncService) syncCostStage(ctx context.Context, provide
 			return result, err
 		}
 	}
+	var syncRunID *int64
+	if run.ID > 0 {
+		syncRunID = &run.ID
+	}
+	syncAt := time.Now().UTC()
 	SupplierSyncProgress(ctx, SupplierSyncProgressStageSession, "正在获取或复用上游登录会话", nil)
 	SupplierSyncProgress(ctx, progressStage, "正在请求上游成本接口", nil)
 	statDay := day
@@ -1246,7 +1268,17 @@ func (s *SupplierProviderSyncService) syncCostStage(ctx context.Context, provide
 		// 上游成本与本地成本差距过大时直接改写为本地成本并记录提示。
 		threshold := s.costDeviationThreshold(ctx)
 		effective, rawUpstream, warning := s.resolveCostDeviation(ctx, provider, password, cost, statDay, threshold)
-		err = s.dataRepo.UpdateCostDetailed(ctx, provider.ID, effective, rawUpstream, warning, statDay)
+		calculated := cost
+		if local, ok, localErr := s.dataRepo.GetLocalCostForDay(ctx, provider.ID, statDay); localErr == nil && ok && local >= 0 {
+			calculated = local
+		}
+		upstream := cost
+		reviewInput := SupplierProviderCostReviewSyncInput{ProviderID: provider.ID, StatDate: statDay, UpstreamCost: &upstream, CalculatedCost: &calculated, AutoAdoptedCost: &calculated, EffectiveCost: effective, SyncRunID: syncRunID, SyncedAt: syncAt}
+		if s.costReviewService != nil {
+			err = s.dataRepo.UpdateCostDetailedWithReview(ctx, provider.ID, effective, rawUpstream, warning, statDay, reviewInput)
+		} else {
+			err = s.dataRepo.UpdateCostDetailed(ctx, provider.ID, effective, rawUpstream, warning, statDay)
+		}
 		if err == nil {
 			// 定时同步写入成功后同样失效成本趋势缓存。
 			invalidateSupplierCostTrendCache()
@@ -1266,7 +1298,13 @@ func (s *SupplierProviderSyncService) syncCostStage(ctx context.Context, provide
 					SupplierSyncProgress(ctx, SupplierSyncProgressStagePersist, "正在写入保底估算的成本数据", nil)
 					cost = fallbackCost
 					warning := fmt.Sprintf("上游成本接口失败，使用充值修正余额成本兜底：余额差 %.2f + 充值 %.2f = %.2f", rawBalanceDelta, rechargeAmount, fallbackCost)
-					err = s.dataRepo.UpdateCostDetailed(ctx, provider.ID, cost, nil, &warning, statDay)
+					calculated := cost
+					reviewInput := SupplierProviderCostReviewSyncInput{ProviderID: provider.ID, StatDate: statDay, CalculatedCost: &calculated, AutoAdoptedCost: &calculated, EffectiveCost: cost, SyncRunID: syncRunID, SyncedAt: syncAt}
+					if s.costReviewService != nil {
+						err = s.dataRepo.UpdateCostDetailedWithReview(ctx, provider.ID, cost, nil, &warning, statDay, reviewInput)
+					} else {
+						err = s.dataRepo.UpdateCostDetailed(ctx, provider.ID, cost, nil, &warning, statDay)
+					}
 					if err == nil {
 						// 保底估算写入成功后同样失效成本趋势缓存。
 						invalidateSupplierCostTrendCache()

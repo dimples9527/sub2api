@@ -34,3 +34,19 @@ func TestRegisterSupplierManagementRoutesIncludesBalanceAlertEventDeletionRoute(
 	}
 	t.Fatalf("未注册供应商余额预警事件删除路由")
 }
+
+func TestRegisterSupplierManagementRoutesIncludesCostReviewBulkApproveRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	registerSupplierManagementRoutes(router.Group("/api/v1/admin"), &handler.Handlers{
+		Admin: &handler.AdminHandlers{},
+	})
+
+	for _, route := range router.Routes() {
+		if route.Method == "POST" && route.Path == "/api/v1/admin/supplier-management/cost-reviews/bulk-approve" {
+			return
+		}
+	}
+	t.Fatalf("未注册供应商成本核对批量审批路由")
+}

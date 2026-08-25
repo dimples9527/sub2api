@@ -1568,6 +1568,29 @@ func (r *supplierProviderDataRepository) UpdateCostDetailed(ctx context.Context,
 	return r.updateMetric(ctx, providerID, nil, &cost, rawUpstream, warning, statDay)
 }
 
+func (r *supplierProviderDataRepository) UpdateCostDetailedWithReview(ctx context.Context, providerID int64, cost float64, rawUpstream *float64, warning *string, statDay time.Time, reviewInput service.SupplierProviderCostReviewSyncInput) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("开始写入供应商成本核对事务失败: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	review, err := syncCostReviewTx(ctx, tx, reviewInput, false)
+	if err != nil {
+		return err
+	}
+	if err := r.updateMetricTx(ctx, tx, providerID, nil, &review.EffectiveCost, rawUpstream, warning, statDay); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("提交供应商成本核对事务失败: %w", err)
+	}
+	// review.EffectiveCost 是已审批记录的保留值，或待审批记录的最新计算成本。
+	// cost 参数保留用于兼容既有调用方，实际业务生效值以核对结果为准。
+	_ = cost
+	return nil
+}
+
 // GetCostFallbackBalances 返回成本保底估算所需的余额基线：
 // CurrentBalance 为当前余额（runtime_stats.current_balance），
 // DayStartBalance 为统计日 statDay 当天开始时的余额（前一统计日的 daily_stats 最终余额）。
@@ -1669,6 +1692,16 @@ func (r *supplierProviderDataRepository) updateMetric(ctx context.Context, provi
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if err := r.updateMetricTx(ctx, tx, providerID, balance, cost, rawUpstream, warning, seenAt); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit supplier metric update: %w", err)
+	}
+	return nil
+}
+
+func (r *supplierProviderDataRepository) updateMetricTx(ctx context.Context, tx *sql.Tx, providerID int64, balance *float64, cost *float64, rawUpstream *float64, warning *string, seenAt time.Time) error {
 	if balance != nil {
 		if _, err := tx.ExecContext(ctx, "UPDATE supplier_provider_runtime_stats SET current_balance=$2, updated_at=$3 WHERE provider_id=$1", providerID, *balance, seenAt); err != nil {
 			return fmt.Errorf("update supplier balance: %w", err)
@@ -1705,9 +1738,6 @@ ON CONFLICT (provider_id, stat_date) DO UPDATE SET
   updated_at=NOW()`, providerID, statDay, *cost, rawUpstream, warning); err != nil {
 			return fmt.Errorf("upsert supplier daily cost: %w", err)
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit supplier metric update: %w", err)
 	}
 	return nil
 }

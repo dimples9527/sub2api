@@ -50,6 +50,10 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 		supplier.PUT("/cost-deviation-settings", h.Admin.SupplierCostDeviationSettings.UpdateSettings)
 		supplier.GET("/recharges", h.Admin.SupplierProviderRecharge.List)
 		supplier.POST("/recharges/sync", h.Admin.SupplierProviderRecharge.Sync)
+		supplier.GET("/cost-reviews", h.Admin.SupplierProviderCostReview.List)
+		supplier.GET("/cost-reviews/:id/history", h.Admin.SupplierProviderCostReview.History)
+		supplier.POST("/cost-reviews/bulk-approve", h.Admin.SupplierProviderCostReview.BulkApprove)
+		supplier.POST("/cost-reviews/:id/approve", h.Admin.SupplierProviderCostReview.Approve)
 
 		balanceAlert := supplier.Group("/balance-alert")
 		{

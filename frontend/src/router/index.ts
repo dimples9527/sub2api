@@ -709,6 +709,16 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/supplier-management/cost-reviews',
+    name: 'AdminSupplierCostReviews',
+    component: () => import('@/views/admin/supplier-management/SupplierCostReviewView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: '供应商上游成本核对'
+    }
+  },
+  {
     path: '/admin/supplier-management/notifications',
     name: 'AdminSupplierNotifications',
     component: () => import('@/views/admin/supplier-management/SupplierNotificationView.vue'),

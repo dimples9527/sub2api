@@ -28,8 +28,13 @@ func ProvideSupplierProviderRechargeHandler(
 	return admin.NewSupplierProviderRechargeHandler(rechargeService)
 }
 
+func ProvideSupplierProviderCostReviewHandler(svc *service.SupplierProviderCostReviewService) *admin.SupplierProviderCostReviewHandler {
+	return admin.NewSupplierProviderCostReviewHandler(svc)
+}
+
 var SupplierProviderWiringSet = wire.NewSet(
 	ProvideSupplierProviderSyncHandler,
 	ProvideSupplierProviderRechargeHandler,
+	ProvideSupplierProviderCostReviewHandler,
 	admin.NewSupplierProviderAuthHandler,
 )

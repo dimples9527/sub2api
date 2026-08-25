@@ -190,6 +190,9 @@ func (r *supplierProviderDataRepoStub) UpdateCostDetailed(_ context.Context, _ i
 	r.detailedWarnings = append(r.detailedWarnings, warning)
 	return r.costErr
 }
+func (r *supplierProviderDataRepoStub) UpdateCostDetailedWithReview(ctx context.Context, providerID int64, cost float64, rawUpstream *float64, warning *string, seenAt time.Time, _ SupplierProviderCostReviewSyncInput) error {
+	return r.UpdateCostDetailed(ctx, providerID, cost, rawUpstream, warning, seenAt)
+}
 func (r *supplierProviderDataRepoStub) GetLocalCostForDay(context.Context, int64, time.Time) (float64, bool, error) {
 	r.localCostCalls++
 	return r.localCostValue, r.localCostOK, r.localCostErr

@@ -53,6 +53,7 @@ type AdminHandlers struct {
 	SupplierBalanceAlert          *admin.SupplierBalanceAlertHandler
 	SupplierNotification          *admin.SupplierNotificationHandler
 	SupplierCostDeviationSettings *admin.SupplierCostDeviationSettingsHandler
+	SupplierProviderCostReview    *admin.SupplierProviderCostReviewHandler
 	UpstreamProvider              *admin.UpstreamProviderHandler
 	UpstreamDashboard             *admin.UpstreamDashboardHandler
 	UpstreamManagement            *admin.UpstreamManagementHandler

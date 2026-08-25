@@ -42,11 +42,17 @@ func ProvideSupplierProviderSyncService(
 	syncLock SupplierProviderSyncLock,
 	groupMatcher *SupplierProviderGroupMatcher,
 	costDeviationSettings *SupplierCostDeviationSettingsService,
+	costReviewService *SupplierProviderCostReviewService,
 ) *SupplierProviderSyncService {
 	svc := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, encryptor, syncLock, rechargeRepo)
 	svc.SetGroupMatcher(groupMatcher)
 	svc.SetCostDeviationThresholdProvider(costDeviationSettings)
+	svc.SetCostReviewService(costReviewService)
 	return svc
+}
+
+func ProvideSupplierProviderCostReviewService(repo SupplierProviderCostReviewRepository) *SupplierProviderCostReviewService {
+	return NewSupplierProviderCostReviewService(repo)
 }
 
 // ProvideSupplierProviderRemoteClient 构造供应商远程客户端，并注入上游 Turnstile 打码求解器。
@@ -62,6 +68,7 @@ var SupplierProviderWiringSet = wire.NewSet(
 	ProvideSupplierRateGuardService,
 	ProvideSupplierProviderGroupMatcher,
 	ProvideSupplierProviderSyncService,
+	ProvideSupplierProviderCostReviewService,
 	ProvideSupplierProviderRechargeRemoteClient,
 	ProvideSupplierProviderRechargeService,
 	NewSupplierProviderAuthAuditService,
