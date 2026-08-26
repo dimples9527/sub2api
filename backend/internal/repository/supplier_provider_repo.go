@@ -454,7 +454,7 @@ INSERT INTO supplier_providers (
   code, name, provider_type, newapi_auth_mode, base_url, login_url, api_keys_url, groups_url,
   available_groups_url, balance_url, usage_cost_url, recharge_url, monitor_url, account_name_prefix,
   temp_disable_minutes, account_rate_multiplier_scale, sort_order, enabled, turnstile_enabled, is_default
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
 RETURNING id, created_at, updated_at`, provider.Code, provider.Name, provider.ProviderType,
 		provider.NewAPIAuthMode, provider.BaseURL, provider.LoginURL, provider.APIKeysURL, provider.GroupsURL,
 		provider.AvailableGroupsURL, provider.BalanceURL, provider.UsageCostURL, provider.RechargeURL,

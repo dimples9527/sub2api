@@ -46,6 +46,72 @@ ON CONFLICT (provider_id) DO UPDATE SET
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestSupplierProviderRepositoryCreateUsesAllProviderFieldArguments(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := NewSupplierProviderRepository(db)
+	provider := &service.SupplierProvider{
+		Code:                       "claudenb",
+		Name:                       "claudenb",
+		ProviderType:               "sub2api",
+		NewAPIAuthMode:             service.SupplierNewAPIAuthModeAuto,
+		BaseURL:                    "https://ai.claudenb.com",
+		LoginURL:                   "/api/v1/auth/login",
+		APIKeysURL:                 "/api/v1/keys?page=1&page_size=100&timezone=Asia%2FShanghai",
+		GroupsURL:                  "/api/v1/groups/available?timezone=Asia%2FShanghai",
+		AvailableGroupsURL:         "/api/v1/groups/available?timezone=Asia%2FShanghai",
+		BalanceURL:                 "/api/v1/auth/me?timezone=Asia%2FShanghai",
+		UsageCostURL:               "/api/v1/usage/dashboard/stats?timezone=Asia%2FShanghai",
+		MonitorURL:                 "/api/v1/channel-monitors?timezone=Asia%2FShanghai",
+		AccountNamePrefix:          "claudenb-",
+		TempDisableMinutes:         0,
+		AccountRateMultiplierScale: 1,
+		SortOrder:                  0,
+		Enabled:                    true,
+		TurnstileEnabled:           false,
+		IsDefault:                  false,
+		Email:                      "test@example.com",
+		PasswordEncrypted:          "test-password",
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS(SELECT 1 FROM supplier_providers WHERE deleted_at IS NULL)")).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+INSERT INTO supplier_providers (
+  code, name, provider_type, newapi_auth_mode, base_url, login_url, api_keys_url, groups_url,
+  available_groups_url, balance_url, usage_cost_url, recharge_url, monitor_url, account_name_prefix,
+  temp_disable_minutes, account_rate_multiplier_scale, sort_order, enabled, turnstile_enabled, is_default
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+RETURNING id, created_at, updated_at`)).
+		WithArgs(
+			"claudenb", "claudenb", "sub2api", "auto", "https://ai.claudenb.com", "/api/v1/auth/login",
+			"/api/v1/keys?page=1&page_size=100&timezone=Asia%2FShanghai",
+			"/api/v1/groups/available?timezone=Asia%2FShanghai",
+			"/api/v1/groups/available?timezone=Asia%2FShanghai",
+			"/api/v1/auth/me?timezone=Asia%2FShanghai",
+			"/api/v1/usage/dashboard/stats?timezone=Asia%2FShanghai",
+			"", "/api/v1/channel-monitors?timezone=Asia%2FShanghai", "claudenb-", 0, 1.0, 0, true, false, false,
+		).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at"}).AddRow(42, time.Now(), time.Now()))
+	mock.ExpectExec(regexp.QuoteMeta(`
+INSERT INTO supplier_provider_credentials (provider_id, email, username, password_encrypted) VALUES ($1,$2,$3,$4)`)).
+		WithArgs(int64(42), "test@example.com", "", "test-password").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`
+INSERT INTO supplier_provider_runtime_stats (provider_id) VALUES ($1)`)).
+		WithArgs(int64(42)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	err = repo.Create(context.Background(), provider)
+
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestSupplierProviderRepositoryDisableAfterAuthFailureReturnsNotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
