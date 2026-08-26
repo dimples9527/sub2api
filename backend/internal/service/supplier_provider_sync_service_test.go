@@ -30,6 +30,8 @@ type supplierProviderDataRepoStub struct {
 	finishedRuns       []SupplierProviderSyncRun
 	statusUpdates      []string
 	groupStatusUpdates []string
+	cleanupPolicy      SupplierCleanupPolicy
+	cleanupCounts      SupplierCleanupCounts
 
 	localCostCalls   int
 	localCostValue   float64
@@ -222,8 +224,9 @@ func (r *supplierProviderDataRepoStub) UpdateGroupSyncStatus(_ context.Context, 
 	r.groupStatusUpdates = append(r.groupStatusUpdates, status)
 	return r.groupStatusErr
 }
-func (r *supplierProviderDataRepoStub) Cleanup(context.Context, SupplierCleanupPolicy, time.Time, int) (SupplierCleanupCounts, error) {
-	return SupplierCleanupCounts{}, nil
+func (r *supplierProviderDataRepoStub) Cleanup(_ context.Context, policy SupplierCleanupPolicy, _ time.Time, _ int) (SupplierCleanupCounts, error) {
+	r.cleanupPolicy = policy
+	return r.cleanupCounts, nil
 }
 
 type supplierRemoteClientStub struct {

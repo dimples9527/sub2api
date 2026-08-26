@@ -700,6 +700,16 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/supplier-management/account-health',
+    name: 'SupplierAccountHealth',
+    component: () => import('@/views/admin/supplier-management/SupplierAccountHealthView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: '账号健康趋势'
+    }
+  },
+  {
     path: '/admin/supplier-management/monitor-bindings',
     name: 'AdminSupplierMonitorBindings',
     component: () => import('@/views/admin/supplier-management/SupplierMonitorBindingsView.vue'),

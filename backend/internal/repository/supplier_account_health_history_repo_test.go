@@ -1,0 +1,106 @@
+package repository
+
+import (
+	"context"
+	"regexp"
+	"testing"
+	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/stretchr/testify/require"
+)
+
+func TestSupplierAccountHealthHistoryRepositorySave(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	latency := int64(240)
+	checkedAt := time.Date(2026, 8, 26, 10, 0, 0, 0, time.UTC)
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO supplier_account_health_history`)).
+		WithArgs(int64(21), "account-one", int64(3), "provider-a", "openai", checkedAt, checkedAt.Add(-time.Second), checkedAt, "healthy", latency, int64(500), "gpt-4o", true, true, "none", 0, 0, 1, "probe succeeded", "").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	repo := NewSupplierAccountHealthHistoryRepository(db)
+	err = repo.Save(context.Background(), service.SupplierAccountHealthHistoryRecord{
+		LocalAccountID: 21, LocalAccountName: "account-one", ProviderID: 3, ProviderName: "provider-a", Platform: "openai",
+		CheckedAt: checkedAt, StartedAt: checkedAt.Add(-time.Second), FinishedAt: checkedAt, Status: "healthy",
+		LatencyMs: &latency, LatencyLimitMs: 500, ModelID: "gpt-4o", SchedulableBefore: true, SchedulableAfter: true,
+		Action: "none", ConsecutiveHealthy: 1, Reason: "probe succeeded",
+	})
+
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierAccountHealthHistoryRepositoryListAccounts(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	checkedAt := time.Date(2026, 8, 26, 10, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(`(?s)ARRAY_AGG\(DISTINCT a\.provider_id\).*SELECT COUNT\(\*\).*src\.provider_ids @>`).
+		WithArgs(int64(3), "openai", "%account%", "failed").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
+	mock.ExpectQuery(`(?s)ARRAY_AGG\(DISTINCT a\.provider_id\).*supplier_automation_tasks.*src\.provider_ids @>`).
+		WithArgs(int64(3), "openai", "%account%", "failed", service.SupplierAutomationTaskAccountHealthGuard, 20, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"local_account_id", "local_account_name", "provider_id", "provider_name", "platform", "schedulable",
+			"status", "checked_at", "latency_ms", "latency_limit_ms", "consecutive_failures", "guard_enabled",
+		}).AddRow(21, "account-one", 3, "provider-a", "openai", false, "failed", checkedAt, nil, 500, 2, true))
+
+	repo := NewSupplierAccountHealthHistoryRepository(db)
+	result, err := repo.ListAccounts(context.Background(), service.SupplierAccountHealthAccountListParams{
+		ProviderID: 3, Platform: "openai", Search: "account", HealthStatus: "failed", Page: 1, PageSize: 20,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, int64(1), result.Total)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, int64(21), result.Items[0].LocalAccountID)
+	require.Nil(t, result.Items[0].LatencyMs)
+	require.False(t, result.Items[0].Schedulable)
+	require.True(t, result.Items[0].GuardEnabled)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierAccountHealthHistoryRepositoryGetTrendAndDeleteBefore(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	checkedAt := time.Date(2026, 8, 26, 10, 0, 0, 0, time.UTC)
+	since := checkedAt.Add(-24 * time.Hour)
+	mock.ExpectQuery(`(?s)SELECT checked_at, status, latency_ms, latency_limit_ms, reason, action, error_message.*checked_at ASC, id ASC`).
+		WithArgs(int64(21), since).
+		WillReturnRows(sqlmock.NewRows([]string{"checked_at", "status", "latency_ms", "latency_limit_ms", "reason", "action", "error_message"}).
+			AddRow(checkedAt, "failed", nil, 500, "timeout", "disable", "timeout"))
+	mock.ExpectExec(`(?s)WITH target AS.*checked_at < \$1.*LIMIT \$2.*DELETE FROM supplier_account_health_history`).
+		WithArgs(checkedAt, 1000).
+		WillReturnResult(sqlmock.NewResult(0, 2))
+
+	repo := NewSupplierAccountHealthHistoryRepository(db)
+	result, err := repo.GetTrend(context.Background(), 21, since)
+	require.NoError(t, err)
+	require.Len(t, result.Points, 1)
+	require.Nil(t, result.Points[0].LatencyMs)
+	deleted, err := repo.DeleteBefore(context.Background(), checkedAt, 1000)
+	require.NoError(t, err)
+	require.Equal(t, 2, deleted)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierAccountHealthHistoryRepositoryValidateAccount(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	mock.ExpectQuery(`(?s)SELECT EXISTS.*accounts local_account.*supplier_provider_accounts a ON a\.active = TRUE.*supplier_providers p ON p\.id = a\.provider_id AND p\.enabled = TRUE.*local_account\.deleted_at IS NULL`).
+		WithArgs(int64(21)).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+
+	repo := NewSupplierAccountHealthHistoryRepository(db)
+	require.NoError(t, repo.ValidateAccount(context.Background(), 21))
+	require.NoError(t, mock.ExpectationsWereMet())
+}

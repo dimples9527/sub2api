@@ -168,9 +168,10 @@ type SupplierAccountHealthGuardRunner interface {
 }
 
 type SupplierAccountHealthGuardService struct {
-	repository   SupplierAccountHealthGuardRepository
-	accountStore supplierAccountHealthGuardAccountStore
-	tester       supplierAccountHealthGuardTester
+	repository       SupplierAccountHealthGuardRepository
+	accountStore     supplierAccountHealthGuardAccountStore
+	tester           supplierAccountHealthGuardTester
+	historyRecorder  SupplierAccountHealthHistoryRecorder
 }
 
 type supplierAccountHealthGuardTarget struct {
@@ -187,6 +188,12 @@ type supplierAccountHealthGuardSkipCollector struct {
 
 func NewSupplierAccountHealthGuardService(repository SupplierAccountHealthGuardRepository, accountStore supplierAccountHealthGuardAccountStore, tester supplierAccountHealthGuardTester) *SupplierAccountHealthGuardService {
 	return &SupplierAccountHealthGuardService{repository: repository, accountStore: accountStore, tester: tester}
+}
+
+func (s *SupplierAccountHealthGuardService) SetHistoryRecorder(recorder SupplierAccountHealthHistoryRecorder) {
+	if s != nil {
+		s.historyRecorder = recorder
+	}
 }
 
 func (s *SupplierAccountHealthGuardService) Run(ctx context.Context, config SupplierAccountHealthGuardConfig, now time.Time) (SupplierAccountHealthGuardResult, error) {
@@ -442,7 +449,33 @@ func (s *SupplierAccountHealthGuardService) runTarget(ctx context.Context, confi
 	}); err != nil {
 		supplierAccountHealthGuardMarkWriteFailure(&item, originalFailureCount, "更新健康守护状态失败", err)
 	}
+	if s.historyRecorder != nil && (item.Status == SupplierAccountHealthGuardStatusHealthy || item.Status == SupplierAccountHealthGuardStatusSlow || item.Status == SupplierAccountHealthGuardStatusFailed) {
+		if err := s.historyRecorder.Save(ctx, supplierAccountHealthHistoryRecordFromRunItem(item)); err != nil {
+			item.ErrorMessage = supplierAccountHealthGuardAppendMessage(item.ErrorMessage, fmt.Sprintf("保存健康历史失败: %v", err))
+		}
+	}
 	return item
+}
+
+func supplierAccountHealthHistoryRecordFromRunItem(item SupplierAccountHealthGuardRunItem) SupplierAccountHealthHistoryRecord {
+	var source SupplierAccountHealthGuardSource
+	if len(item.Sources) > 0 {
+		source = item.Sources[0]
+	}
+	var latency *int64
+	if item.Status != SupplierAccountHealthGuardStatusFailed {
+		value := item.LatencyMs
+		latency = &value
+	}
+	return SupplierAccountHealthHistoryRecord{
+		LocalAccountID: item.LocalAccountID, LocalAccountName: item.LocalAccountName,
+		ProviderID: source.ProviderID, ProviderName: source.ProviderName, Platform: item.Platform,
+		CheckedAt: item.FinishedAt, StartedAt: item.StartedAt, FinishedAt: item.FinishedAt,
+		Status: item.Status, LatencyMs: latency, LatencyLimitMs: item.LatencyLimitMs, ModelID: item.ModelID,
+		SchedulableBefore: item.SchedulableBefore, SchedulableAfter: item.SchedulableAfter, Action: item.Action,
+		ConsecutiveFailed: item.ConsecutiveFailed, ConsecutiveSlow: item.ConsecutiveSlow,
+		ConsecutiveHealthy: item.ConsecutiveHealthy, Reason: item.Reason, ErrorMessage: item.ErrorMessage,
+	}
 }
 
 func supplierAccountHealthGuardMarkWriteFailure(item *SupplierAccountHealthGuardRunItem, originalFailureCount int, reason string, err error) {

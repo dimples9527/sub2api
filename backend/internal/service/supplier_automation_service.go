@@ -133,12 +133,13 @@ type SupplierAutomationStageRunDetail struct {
 }
 
 type SupplierAutomationCleanupRunDetail struct {
-	AutomationRuns  int `json:"automation_runs"`
-	SyncRuns        int `json:"sync_runs"`
-	MetricSnapshots int `json:"metric_snapshots"`
-	DailyStats      int `json:"daily_stats"`
-	Accounts        int `json:"accounts"`
-	Groups          int `json:"groups"`
+	AutomationRuns       int `json:"automation_runs"`
+	SyncRuns             int `json:"sync_runs"`
+	MetricSnapshots      int `json:"metric_snapshots"`
+	DailyStats           int `json:"daily_stats"`
+	Accounts             int `json:"accounts"`
+	Groups               int `json:"groups"`
+	AccountHealthHistory int `json:"account_health_history"`
 }
 
 type SupplierAutomationRunListParams struct {
@@ -559,24 +560,26 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 		return nil
 	case SupplierAutomationTaskCleanup:
 		counts, err := s.dataRepo.Cleanup(ctx, SupplierCleanupPolicy{
-			AutomationRunRetentionDays: task.Config.AutomationRunRetentionDays,
-			SyncRunRetentionDays:       task.Config.SyncRunRetentionDays,
-			MetricRetentionDays:        task.Config.MetricRetentionDays,
-			DailyStatRetentionDays:     task.Config.DailyStatRetentionDays,
-			InactiveAccountDays:        task.Config.InactiveAccountDays,
-			InactiveGroupDays:          task.Config.InactiveGroupDays,
+			AutomationRunRetentionDays:        task.Config.AutomationRunRetentionDays,
+			SyncRunRetentionDays:              task.Config.SyncRunRetentionDays,
+			MetricRetentionDays:               task.Config.MetricRetentionDays,
+			DailyStatRetentionDays:            task.Config.DailyStatRetentionDays,
+			InactiveAccountDays:               task.Config.InactiveAccountDays,
+			InactiveGroupDays:                 task.Config.InactiveGroupDays,
+			AccountHealthHistoryRetentionDays: 30,
 		}, time.Now(), 1000)
 		if err != nil {
 			return err
 		}
-		run.ProcessedCount = counts.AutomationRuns + counts.SyncRuns + counts.MetricSnapshots + counts.DailyStats + counts.Accounts + counts.Groups
+		run.ProcessedCount = counts.AutomationRuns + counts.SyncRuns + counts.MetricSnapshots + counts.DailyStats + counts.Accounts + counts.Groups + counts.AccountHealthHistory
 		run.ResultDetail = &SupplierAutomationRunDetail{Cleanup: &SupplierAutomationCleanupRunDetail{
-			AutomationRuns:  counts.AutomationRuns,
-			SyncRuns:        counts.SyncRuns,
-			MetricSnapshots: counts.MetricSnapshots,
-			DailyStats:      counts.DailyStats,
-			Accounts:        counts.Accounts,
-			Groups:          counts.Groups,
+			AutomationRuns:       counts.AutomationRuns,
+			SyncRuns:             counts.SyncRuns,
+			MetricSnapshots:      counts.MetricSnapshots,
+			DailyStats:           counts.DailyStats,
+			Accounts:             counts.Accounts,
+			Groups:               counts.Groups,
+			AccountHealthHistory: counts.AccountHealthHistory,
 		}}
 		return nil
 	case SupplierAutomationTaskRateGuard:

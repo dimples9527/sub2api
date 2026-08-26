@@ -414,6 +414,16 @@
                 title="删除上游账号记录"
                 @click.stop="requestDeleteSupplierAccountRecord(account)"
               >{{ deletingSupplierAccountRecordID === account.id ? '删除中' : '删除上游账号记录' }}</button>
+              <button
+                v-if="account.local_account_match_status === 'matched' && account.local_account_id"
+                class="sp-button small ghost sp-account-action-health"
+                type="button"
+                :data-test="'supplier-account-health-' + account.local_account_id"
+                @click.stop="router.push({
+                  name: 'SupplierAccountHealth',
+                  query: { account_id: String(account.local_account_id) },
+                })"
+              >查看健康趋势</button>
               <template v-if="canManageLocalAccount(account)">
                 <button
                   class="sp-button small sp-account-action-test"

@@ -661,12 +661,18 @@ func TestSupplierAutomationServiceRunsCleanupTask(t *testing.T) {
 		},
 	}}
 	dataRepo := &supplierProviderDataRepoStub{}
+	dataRepo.cleanupCounts = SupplierCleanupCounts{AccountHealthHistory: 7}
 	service := NewSupplierAutomationService(repo, &supplierAutomationLockStub{acquired: true}, &supplierAutomationSyncStub{}, dataRepo)
 
 	run, err := service.Run(context.Background(), SupplierAutomationTaskCleanup, SupplierSyncTriggerManual)
 
 	require.NoError(t, err)
 	require.Equal(t, SupplierAutomationStatusSuccess, run.Status)
+	require.Equal(t, 30, dataRepo.cleanupPolicy.AccountHealthHistoryRetentionDays)
+	require.Equal(t, 7, run.ProcessedCount)
+	require.NotNil(t, run.ResultDetail)
+	require.NotNil(t, run.ResultDetail.Cleanup)
+	require.Equal(t, 7, run.ResultDetail.Cleanup.AccountHealthHistory)
 }
 
 func TestSupplierAutomationServiceReturnsConflictWhenLockBusy(t *testing.T) {

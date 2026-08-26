@@ -10,6 +10,23 @@ func ProvideSupplierAccountHealthGuardTester(tester *AccountTestService) supplie
 	return tester
 }
 
+func ProvideSupplierAccountHealthGuardService(
+	repository SupplierAccountHealthGuardRepository,
+	accountStore supplierAccountHealthGuardAccountStore,
+	tester supplierAccountHealthGuardTester,
+	recorder SupplierAccountHealthHistoryRecorder,
+) *SupplierAccountHealthGuardService {
+	svc := NewSupplierAccountHealthGuardService(repository, accountStore, tester)
+	svc.SetHistoryRecorder(recorder)
+	return svc
+}
+
+func ProvideSupplierAccountHealthTrendService(
+	repository SupplierAccountHealthHistoryRepository,
+) *SupplierAccountHealthTrendService {
+	return NewSupplierAccountHealthTrendService(repository, repository)
+}
+
 func ProvideSupplierAutomationService(
 	repo SupplierAutomationRepository,
 	lock SupplierAutomationLock,
@@ -34,6 +51,7 @@ func ProvideSupplierAutomationService(
 var SupplierAccountHealthGuardWiringSet = wire.NewSet(
 	ProvideSupplierAccountHealthGuardAccountStore,
 	ProvideSupplierAccountHealthGuardTester,
-	NewSupplierAccountHealthGuardService,
+	ProvideSupplierAccountHealthGuardService,
+	ProvideSupplierAccountHealthTrendService,
 	ProvideSupplierAutomationService,
 )

@@ -170,21 +170,23 @@ type SupplierProviderSyncRun struct {
 }
 
 type SupplierCleanupPolicy struct {
-	AutomationRunRetentionDays int
-	SyncRunRetentionDays       int
-	MetricRetentionDays        int
-	DailyStatRetentionDays     int
-	InactiveAccountDays        int
-	InactiveGroupDays          int
+	AutomationRunRetentionDays        int
+	SyncRunRetentionDays              int
+	MetricRetentionDays               int
+	DailyStatRetentionDays            int
+	InactiveAccountDays               int
+	InactiveGroupDays                 int
+	AccountHealthHistoryRetentionDays int
 }
 
 type SupplierCleanupCounts struct {
-	AutomationRuns  int
-	SyncRuns        int
-	MetricSnapshots int
-	DailyStats      int
-	Accounts        int
-	Groups          int
+	AutomationRuns       int
+	SyncRuns             int
+	MetricSnapshots      int
+	DailyStats           int
+	Accounts             int
+	Groups               int
+	AccountHealthHistory int
 }
 
 // SupplierProviderCostFallbackBalance 保存成本保底估算所需的余额基线。

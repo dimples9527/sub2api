@@ -877,6 +877,7 @@ const adminNavItems = computed((): NavItem[] => {
         { path: '/admin/supplier-management/providers', label: '供应商管理', icon: ServerIcon },
         { path: '/admin/supplier-management/groups', label: '供应商分组管理', icon: FolderIcon },
         { path: '/admin/supplier-management/accounts', label: '供应商账号管理', icon: GlobeIcon },
+        { path: '/admin/supplier-management/account-health', label: '账号健康趋势', icon: ChartIcon },
         { path: '/admin/supplier-management/monitor-bindings', label: '监控项绑定', icon: ChartIcon },
         { path: '/admin/supplier-management/balance-alert', label: '供应商余额预警', icon: BellIcon },
         { path: '/admin/supplier-management/cost-reviews', label: '上游成本核对', icon: ChartIcon },

@@ -121,6 +121,9 @@ var ProviderSet = wire.NewSet(
 	NewSupplierAutomationRepository,
 	NewSupplierAccountRateGuardRepository,
 	NewSupplierAccountHealthGuardRepository,
+	NewSupplierAccountHealthHistoryRepository,
+	wire.Bind(new(service.SupplierAccountHealthHistoryRepository), new(*supplierAccountHealthHistoryRepository)),
+	wire.Bind(new(service.SupplierAccountHealthHistoryRecorder), new(*supplierAccountHealthHistoryRepository)),
 	NewAccountRateGuardRepository,
 	NewUserPlatformQuotaRepository,     // T14: user × platform quota
 	NewUserPlatformQuotaServiceAdapter, // T14: adapter → service.UserPlatformQuotaRepository

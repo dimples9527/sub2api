@@ -1795,6 +1795,7 @@ func (r *supplierProviderDataRepository) Cleanup(ctx context.Context, policy ser
 		{"supplier_provider_daily_stats", "stat_date < $1", now.AddDate(0, 0, -policy.DailyStatRetentionDays), &counts.DailyStats},
 		{"supplier_provider_accounts", "active = FALSE AND inactive_at < $1", now.AddDate(0, 0, -policy.InactiveAccountDays), &counts.Accounts},
 		{"supplier_provider_groups", "active = FALSE AND inactive_at < $1", now.AddDate(0, 0, -policy.InactiveGroupDays), &counts.Groups},
+		{"supplier_account_health_history", "checked_at < $1", now.AddDate(0, 0, -policy.AccountHealthHistoryRetentionDays), &counts.AccountHealthHistory},
 	}
 	for _, spec := range cleanupSpecs {
 		for {

@@ -1700,12 +1700,13 @@ func TestSupplierProviderDataRepositoryCleanupUsesBatchLimit(t *testing.T) {
 	repo, mock := newSupplierProviderDataRepoMock(t)
 	now := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
 	policy := service.SupplierCleanupPolicy{
-		AutomationRunRetentionDays: 30,
-		SyncRunRetentionDays:       30,
-		MetricRetentionDays:        30,
-		DailyStatRetentionDays:     365,
-		InactiveAccountDays:        90,
-		InactiveGroupDays:          90,
+		AutomationRunRetentionDays:        30,
+		SyncRunRetentionDays:              30,
+		MetricRetentionDays:               30,
+		DailyStatRetentionDays:            365,
+		InactiveAccountDays:               90,
+		InactiveGroupDays:                 90,
+		AccountHealthHistoryRetentionDays: 30,
 	}
 
 	for _, rows := range []int64{2, 1} {
@@ -1718,6 +1719,9 @@ func TestSupplierProviderDataRepositoryCleanupUsesBatchLimit(t *testing.T) {
 			WithArgs(sqlmock.AnyArg(), 2).
 			WillReturnResult(sqlmock.NewResult(0, 0))
 	}
+	mock.ExpectExec("supplier_account_health_history WHERE checked_at <").
+		WithArgs(now.AddDate(0, 0, -30), 2).
+		WillReturnResult(sqlmock.NewResult(0, 0))
 
 	counts, err := repo.Cleanup(context.Background(), policy, now, 2)
 
@@ -1730,12 +1734,13 @@ func TestSupplierProviderDataRepositoryCleanupUsesCapturedAtForMetricSnapshots(t
 	repo, mock := newSupplierProviderDataRepoMock(t)
 	now := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
 	policy := service.SupplierCleanupPolicy{
-		AutomationRunRetentionDays: 30,
-		SyncRunRetentionDays:       30,
-		MetricRetentionDays:        30,
-		DailyStatRetentionDays:     365,
-		InactiveAccountDays:        90,
-		InactiveGroupDays:          90,
+		AutomationRunRetentionDays:        30,
+		SyncRunRetentionDays:              30,
+		MetricRetentionDays:               30,
+		DailyStatRetentionDays:            365,
+		InactiveAccountDays:               90,
+		InactiveGroupDays:                 90,
+		AccountHealthHistoryRetentionDays: 30,
 	}
 
 	for range 2 {
@@ -1751,6 +1756,9 @@ func TestSupplierProviderDataRepositoryCleanupUsesCapturedAtForMetricSnapshots(t
 			WithArgs(sqlmock.AnyArg(), 1000).
 			WillReturnResult(sqlmock.NewResult(0, 0))
 	}
+	mock.ExpectExec("supplier_account_health_history WHERE checked_at <").
+		WithArgs(now.AddDate(0, 0, -30), 1000).
+		WillReturnResult(sqlmock.NewResult(0, 0))
 
 	_, err := repo.Cleanup(context.Background(), policy, now, 1000)
 
