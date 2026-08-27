@@ -679,7 +679,7 @@
       <form id="reset-quota-form" class="space-y-4" @submit.prevent="confirmResetQuota">
         <div class="rounded-lg bg-orange-50 p-4 dark:bg-orange-900/20">
           <p class="text-sm text-orange-800 dark:text-orange-200">
-            {{ t(resetForm.amountUSD.trim() ? 'admin.subscriptions.manualResetConfirm' : 'admin.subscriptions.resetQuotaConfirm', { user: resettingSubscription?.user?.email }) }}
+            {{ t(resetAmountInput ? 'admin.subscriptions.manualResetConfirm' : 'admin.subscriptions.resetQuotaConfirm', { user: resettingSubscription?.user?.email }) }}
           </p>
           <p v-if="resettingSubscription" class="mt-2 text-xs text-orange-700 dark:text-orange-300">
             {{ t('admin.subscriptions.currentUsage', {
@@ -1015,6 +1015,8 @@ const resettingQuota = ref(false)
 const resetForm = reactive({
   amountUSD: ''
 })
+// type="number" 的 v-model 会自动转换为数字，提交与展示前需统一转为字符串
+const resetAmountInput = computed(() => String(resetForm.amountUSD ?? '').trim())
 const extendingSubscription = ref<UserSubscription | null>(null)
 const revokingSubscription = ref<UserSubscription | null>(null)
 const restoringSubscription = ref<UserSubscription | null>(null)
@@ -1358,7 +1360,7 @@ const handleResetQuota = (subscription: UserSubscription) => {
 
 const confirmResetQuota = async () => {
   if (!resettingSubscription.value || resettingQuota.value) return
-  const amountInput = resetForm.amountUSD.trim()
+  const amountInput = resetAmountInput.value
   const amountUSD = amountInput === '' ? null : Number(amountInput)
   if (amountUSD != null && (!Number.isFinite(amountUSD) || amountUSD <= 0)) {
     appStore.showError(t('admin.subscriptions.invalidResetAmount'))
