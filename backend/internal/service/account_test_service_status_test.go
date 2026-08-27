@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -111,4 +112,80 @@ func TestAccountTestService_TestAccountConnectionPersistsFailedStatus(t *testing
 	require.Equal(t, "failed", repo.updatedExtra["last_test_status"])
 	require.NotEmpty(t, repo.updatedExtra["last_tested_at"])
 	require.Contains(t, repo.updatedExtra["last_test_error"], "bad token")
+}
+
+func TestAccountTestService_TestAccountConnectionPersistsCNProviderSuccessStatus(t *testing.T) {
+	account := &Account{
+		ID:          91,
+		Platform:    PlatformDeepseek,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":      "sk-deepseek-test",
+			"api_protocol": APIProtocolChatCompletions,
+			"base_url":     "http://upstream.example/v1",
+		},
+	}
+	repo := &accountTestStatusRepo{
+		mockAccountRepoForGemini: mockAccountRepoForGemini{
+			accountsByID: map[int64]*Account{account.ID: account},
+		},
+	}
+	resp := newAccountTestStatusResponse(http.StatusOK, `data: {"choices":[{"delta":{"content":"chat ok"},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+`)
+	svc := &AccountTestService{
+		accountRepo:  repo,
+		httpUpstream: &accountTestStatusHTTPUpstream{resp: resp},
+		cfg: &config.Config{
+			Security: config.SecurityConfig{
+				URLAllowlist: config.URLAllowlistConfig{AllowInsecureHTTP: true},
+			},
+		},
+	}
+
+	err := svc.TestAccountConnection(newAccountTestStatusContext(), account.ID, "deepseek-chat", "", "")
+	require.NoError(t, err)
+
+	require.Equal(t, "success", repo.updatedExtra["last_test_status"])
+	require.NotEmpty(t, repo.updatedExtra["last_tested_at"])
+	require.Equal(t, "", repo.updatedExtra["last_test_error"])
+}
+
+func TestAccountTestService_TestAccountConnectionPersistsCNProviderFailedStatus(t *testing.T) {
+	account := &Account{
+		ID:          92,
+		Platform:    PlatformDeepseek,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":      "sk-deepseek-test",
+			"api_protocol": APIProtocolChatCompletions,
+			"base_url":     "http://upstream.example/v1",
+		},
+	}
+	repo := &accountTestStatusRepo{
+		mockAccountRepoForGemini: mockAccountRepoForGemini{
+			accountsByID: map[int64]*Account{account.ID: account},
+		},
+	}
+	resp := newAccountTestStatusResponse(http.StatusUnauthorized, `{"error":"invalid DeepSeek token"}`)
+	svc := &AccountTestService{
+		accountRepo:  repo,
+		httpUpstream: &accountTestStatusHTTPUpstream{resp: resp},
+		cfg: &config.Config{
+			Security: config.SecurityConfig{
+				URLAllowlist: config.URLAllowlistConfig{AllowInsecureHTTP: true},
+			},
+		},
+	}
+
+	err := svc.TestAccountConnection(newAccountTestStatusContext(), account.ID, "deepseek-chat", "", "")
+	require.Error(t, err)
+
+	require.Equal(t, "failed", repo.updatedExtra["last_test_status"])
+	require.NotEmpty(t, repo.updatedExtra["last_tested_at"])
+	require.Contains(t, repo.updatedExtra["last_test_error"], "invalid DeepSeek token")
 }
