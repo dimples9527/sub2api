@@ -185,7 +185,8 @@ func supplierAccountHealthAccountFilters(params service.SupplierAccountHealthAcc
 
 func scanSupplierAccountHealthAccount(scanner interface{ Scan(dest ...any) error }) (service.SupplierAccountHealthAccount, error) {
 	var item service.SupplierAccountHealthAccount
-	var status, providerName, platform string
+	var status sql.NullString
+	var providerName, platform string
 	var checkedAt sql.NullTime
 	var latency sql.NullInt64
 	if err := scanner.Scan(
@@ -196,8 +197,8 @@ func scanSupplierAccountHealthAccount(scanner interface{ Scan(dest ...any) error
 	}
 	item.ProviderName = providerName
 	item.Platform = platform
-	if status != "" {
-		item.Status = status
+	if status.Valid {
+		item.Status = status.String
 	}
 	if checkedAt.Valid {
 		value := checkedAt.Time
