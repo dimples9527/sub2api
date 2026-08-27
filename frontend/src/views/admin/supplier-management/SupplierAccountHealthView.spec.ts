@@ -51,4 +51,36 @@ describe('SupplierAccountHealthView', () => {
     expect(source).toContain('extractApiErrorMessage')
     expect(source).not.toContain('sp-alert')
   })
+
+  it('\u5408\u5e76\u8d26\u53f7\u4f9b\u5e94\u5546\u5e73\u53f0\u4fe1\u606f\u5e76\u5c55\u793a\u6309\u72b6\u6001\u4e0e\u54cd\u5e94\u65f6\u95f4\u7f16\u7801\u7684\u5065\u5eb7\u8d8b\u52bf', () => {
+    expect(source).toContain('\u8d26\u53f7 / \u4f9b\u5e94\u5546 / \u5e73\u53f0')
+    expect(source).toContain('providerTone(account.provider_name)')
+    expect(source).toContain('platformTone(account.platform)')
+    expect(source).toContain('healthTrendByAccountId')
+    expect(source).toContain('sp-health-trend-bar')
+    expect(source).toContain('latencyBarHeight(point.latency_ms')
+    expect(source).toContain('formatTrendHealthRate(account.local_account_id)')
+    expect(source).toContain('statusTone(point.status)')
+  })
+
+  it('renders an enlarged chart for each account health trend', () => {
+    expect(source).toContain('const TREND_BAR_COUNT = 28')
+    expect(source).toContain('.sp-health-trend-cell { display: grid; min-width: 22rem;')
+    expect(source).toContain('.sp-health-trend-bars { display: flex; align-items: end; gap: 0.2rem; height: 6.5rem;')
+  })
+
+  it('renders the account list before the per-account trends finish loading', () => {
+    const loadAccountsSource = source.match(/async function loadAccounts\(\) \{([\s\S]*?)\n\}/)?.[1] || ''
+
+    expect(loadAccountsSource).toContain('void loadAccountTrends(accounts.value, selectedRange.value)')
+    expect(loadAccountsSource).not.toContain('await loadAccountTrends(accounts.value, selectedRange.value)')
+  })
+
+  it('limits concurrent trend requests to avoid a request burst on first load', () => {
+    expect(source).toContain('const TREND_LOAD_CONCURRENCY = 6')
+    expect(source).toContain('const workerCount = Math.min(TREND_LOAD_CONCURRENCY, ids.length)')
+    expect(source).toContain('while (nextIndex < ids.length)')
+    expect(source).not.toContain('Promise.all(ids.map(async accountId =>')
+  })
+
 })

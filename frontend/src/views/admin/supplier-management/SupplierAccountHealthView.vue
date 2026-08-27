@@ -67,22 +67,25 @@
       </header>
       <DataTable :columns="accountColumns" :data="accounts" :loading="loading" row-key="local_account_id">
         <template #cell-account="{ row: account }">
-          <button
-            class="sp-health-account-button"
-            type="button"
-            :class="{ active: selectedAccountId === account.local_account_id }"
-            @click="selectAccount(account.local_account_id)"
-          >
-            <strong>{{ account.local_account_name || ('账号 #' + account.local_account_id) }}</strong>
-            <span>ID {{ account.local_account_id }}</span>
-          </button>
-        </template>
-        <template #cell-provider_name="{ row: account }">
-          <span>{{ account.provider_name || '—' }}</span>
-          <div class="sp-sub">{{ account.provider_id ? '供应商 #' + account.provider_id : '未关联供应商' }}</div>
-        </template>
-        <template #cell-platform="{ row: account }">
-          <span class="sp-tag">{{ account.platform || '未知平台' }}</span>
+          <div class="sp-health-account-cell">
+            <button
+              class="sp-health-account-button"
+              type="button"
+              :class="{ active: selectedAccountId === account.local_account_id }"
+              @click="selectAccount(account.local_account_id)"
+            >
+              <strong>{{ account.local_account_name || ('账号 #' + account.local_account_id) }}</strong>
+              <span>ID {{ account.local_account_id }}</span>
+            </button>
+            <div class="sp-health-account-tags">
+              <span :class="['sp-health-chip', 'sp-health-chip--provider', providerTone(account.provider_name)]">
+                {{ account.provider_name || '未关联供应商' }}
+              </span>
+              <span :class="['sp-health-chip', 'sp-health-chip--platform', platformTone(account.platform)]">
+                {{ account.platform || '未知平台' }}
+              </span>
+            </div>
+          </div>
         </template>
         <template #cell-status="{ row: account }">
           <span class="sp-status" :class="statusTone(account.status)">{{ statusLabel(account.status) }}</span>
@@ -91,6 +94,27 @@
         <template #cell-latency_ms="{ row: account }">
           <span class="sp-health-latency">{{ formatLatency(account.latency_ms) }}</span>
           <div v-if="account.latency_limit_ms > 0" class="sp-sub">阈值 {{ account.latency_limit_ms }} ms</div>
+        </template>
+        <template #cell-health_trend="{ row: account }">
+          <div class="sp-health-trend-cell" :title="accountTrendTitle(account)">
+            <div v-if="visibleAccountTrend(account.local_account_id).length" class="sp-health-trend-meta">
+              <span>{{ formatTrendHealthRate(account.local_account_id) }}</span>
+              <time>{{ trendLatestTime(account.local_account_id) }}</time>
+            </div>
+            <div v-if="trendLoadingByAccountId[account.local_account_id]" class="sp-health-trend-bars sp-health-trend-bars--loading" aria-label="正在加载健康趋势">
+              <span v-for="index in TREND_BAR_COUNT" :key="index" class="sp-health-trend-bar sp-health-trend-bar--loading" />
+            </div>
+            <div v-else-if="visibleAccountTrend(account.local_account_id).length" class="sp-health-trend-bars" aria-label="账号健康趋势">
+              <span
+                v-for="(point, index) in visibleAccountTrend(account.local_account_id)"
+                :key="`${point.checked_at}-${index}`"
+                :class="['sp-health-trend-bar', `sp-health-trend-bar--${statusTone(point.status)}`]"
+                :style="{ height: latencyBarHeight(point.latency_ms, account.local_account_id) }"
+                :title="accountTrendPointTitle(point)"
+              />
+            </div>
+            <span v-else class="sp-health-trend-empty">暂无趋势</span>
+          </div>
         </template>
         <template #cell-checked_at="{ row: account }">
           <span>{{ account.checked_at ? formatDateTime(account.checked_at) : '尚未检测' }}</span>
@@ -275,8 +299,13 @@ const platform = ref('')
 const healthStatus = ref('')
 const selectedAccountId = ref<number | null>(null)
 const trendPoints = ref<SupplierAccountHealthPoint[]>([])
+const healthTrendByAccountId = ref<Record<number, SupplierAccountHealthPoint[]>>({})
+const trendLoadingByAccountId = ref<Record<number, boolean>>({})
 const lastLoadedAt = ref('')
+const TREND_BAR_COUNT = 28
+const TREND_LOAD_CONCURRENCY = 6
 let trendLoadSequence = 0
+let accountTrendLoadSequence = 0
 
 const loadTrendRequest = createKeyedRequestLoader(
   getSupplierAccountHealthTrend,
@@ -284,11 +313,10 @@ const loadTrendRequest = createKeyedRequestLoader(
 )
 
 const accountColumns: Column[] = [
-  { key: 'account', label: '账号' },
-  { key: 'provider_name', label: '供应商' },
-  { key: 'platform', label: '平台' },
+  { key: 'account', label: '账号 / 供应商 / 平台' },
   { key: 'status', label: '当前健康状态' },
-  { key: 'latency_ms', label: '响应时间' },
+  { key: 'latency_ms', label: '最近响应' },
+  { key: 'health_trend', label: '健康趋势' },
   { key: 'checked_at', label: '最近检测' },
 ]
 
@@ -325,6 +353,60 @@ function statusTone(status?: string | null): string {
   if (status === 'slow') return 'warn'
   if (status === 'failed') return 'bad'
   return 'info'
+}
+
+function stableTone(value: string | null | undefined, prefix: string, paletteSize: number): string {
+  const text = value || ''
+  let hash = 0
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash * 31 + text.charCodeAt(index)) | 0
+  }
+  return `${prefix}-${Math.abs(hash) % paletteSize}`
+}
+
+function providerTone(value?: string | null): string {
+  return stableTone(value, 'provider', 5)
+}
+
+function platformTone(value?: string | null): string {
+  return stableTone(value, 'platform', 5)
+}
+
+function visibleAccountTrend(accountId: number): SupplierAccountHealthPoint[] {
+  return (healthTrendByAccountId.value[accountId] || []).slice(-TREND_BAR_COUNT)
+}
+
+function formatTrendHealthRate(accountId: number): string {
+  const points = visibleAccountTrend(accountId)
+  if (!points.length) return ''
+  const healthyCount = points.filter(point => point.status === 'healthy').length
+  return `健康率 ${((healthyCount / points.length) * 100).toFixed(0)}%`
+}
+
+function trendLatestTime(accountId: number): string {
+  const points = visibleAccountTrend(accountId)
+  const latest = points[points.length - 1]
+  return latest ? formatDateTime(latest.checked_at) : ''
+}
+
+function accountTrendTitle(account: SupplierAccountHealthAccount): string {
+  const points = visibleAccountTrend(account.local_account_id)
+  if (!points.length) return '暂无健康趋势数据'
+  return `${account.local_account_name || `账号 #${account.local_account_id}`}：${points.length}次检测`
+}
+
+function accountTrendPointTitle(point: SupplierAccountHealthPoint): string {
+  return `${formatDateTime(point.checked_at)} ${statusLabel(point.status)}，响应 ${formatLatency(point.latency_ms)}`
+}
+
+function latencyBarHeight(value: number | null | undefined, accountId: number): string {
+  if (value === null || value === undefined || value <= 0) return '14%'
+  const latencies = (healthTrendByAccountId.value[accountId] || [])
+    .map(point => point.latency_ms)
+    .filter((latency): latency is number => typeof latency === 'number' && latency > 0)
+  const maxLatency = Math.max(...latencies, 0)
+  if (maxLatency <= 0) return '14%'
+  return `${Math.max(16, Math.min(100, Math.round((value / maxLatency) * 100)))}%`
 }
 
 function formatLatency(value?: number | null): string {
@@ -467,13 +549,53 @@ async function loadAccounts() {
     accounts.value = result.items || []
     total.value = Number(result.total || 0)
     lastLoadedAt.value = new Date().toISOString()
+    healthTrendByAccountId.value = {}
+    trendLoadingByAccountId.value = {}
     syncSelectedAccount()
+    void loadAccountTrends(accounts.value, selectedRange.value)
   } catch (err) {
     error.value = extractApiErrorMessage(err, '加载账号健康列表失败')
     appStore.showError(error.value)
   } finally {
     loading.value = false
   }
+}
+
+async function loadAccountTrends(accountList: SupplierAccountHealthAccount[], range: SupplierAccountHealthRange) {
+  const requestSequence = ++accountTrendLoadSequence
+  const accountIds = accountList.map(account => account.local_account_id)
+  const selectedId = selectedAccountId.value
+  const ids = selectedId && accountIds.includes(selectedId)
+    ? [selectedId, ...accountIds.filter(accountId => accountId !== selectedId)]
+    : accountIds
+  trendLoadingByAccountId.value = Object.fromEntries(ids.map(accountId => [accountId, true])) as Record<number, boolean>
+  trendLoading.value = true
+  let nextIndex = 0
+  const loadNextTrend = async () => {
+    while (nextIndex < ids.length) {
+      if (requestSequence !== accountTrendLoadSequence) return
+      const accountId = ids[nextIndex++]
+      try {
+        const result = await loadTrendRequest(accountId, range)
+        if (requestSequence === accountTrendLoadSequence) {
+          const points = result.points || []
+          healthTrendByAccountId.value = { ...healthTrendByAccountId.value, [accountId]: points }
+          if (selectedAccountId.value === accountId && selectedRange.value === range) trendPoints.value = points
+        }
+      } catch {
+        if (requestSequence === accountTrendLoadSequence) {
+          healthTrendByAccountId.value = { ...healthTrendByAccountId.value, [accountId]: [] }
+        }
+      } finally {
+        if (requestSequence === accountTrendLoadSequence) {
+          trendLoadingByAccountId.value = { ...trendLoadingByAccountId.value, [accountId]: false }
+        }
+      }
+    }
+  }
+  const workerCount = Math.min(TREND_LOAD_CONCURRENCY, ids.length)
+  await Promise.all(Array.from({ length: workerCount }, () => loadNextTrend()))
+  if (requestSequence === accountTrendLoadSequence) trendLoading.value = false
 }
 
 async function loadTrend() {
@@ -485,12 +607,19 @@ async function loadTrend() {
     trendLoading.value = false
     return
   }
+  if (Object.prototype.hasOwnProperty.call(healthTrendByAccountId.value, accountId)) {
+    trendPoints.value = healthTrendByAccountId.value[accountId] || []
+    trendLoading.value = false
+    return
+  }
   trendLoading.value = true
   error.value = ''
   try {
     const result = await loadTrendRequest(accountId, range)
     if (requestSequence === trendLoadSequence) {
-      trendPoints.value = result.points || []
+      const points = result.points || []
+      healthTrendByAccountId.value = { ...healthTrendByAccountId.value, [accountId]: points }
+      trendPoints.value = points
     }
   } catch (err) {
     if (requestSequence === trendLoadSequence) {
@@ -524,7 +653,9 @@ function selectAccount(accountId: number) {
 function selectRange(range: SupplierAccountHealthRange) {
   if (selectedRange.value === range) return
   selectedRange.value = range
-  void loadTrend()
+  trendPoints.value = []
+  healthTrendByAccountId.value = {}
+  void loadAccountTrends(accounts.value, range)
 }
 
 function handlePageChange(nextPage: number) {
@@ -534,7 +665,6 @@ function handlePageChange(nextPage: number) {
 
 async function refresh() {
   await loadAccounts()
-  await loadTrend()
 }
 
 watch([search, providerId, platform, healthStatus], () => {
@@ -596,6 +726,35 @@ onMounted(() => {
 .sp-health-event dl > div { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); gap: 0.75rem; }
 .sp-health-event dt { color: var(--sp-muted); font-size: 0.72rem; }
 .sp-health-event dd { margin: 0; overflow-wrap: anywhere; font-size: 0.78rem; }
+.sp-health-account-cell { display: grid; gap: 0.35rem; min-width: 15rem; }
+.sp-health-account-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.sp-health-chip { display: inline-flex; align-items: center; min-height: 1.25rem; padding: 0.1rem 0.45rem; border-radius: 999px; font-size: 0.68rem; font-weight: 600; line-height: 1.1; }
+.sp-health-chip--provider.provider-0 { color: #2563eb; background: #eff6ff; }
+.sp-health-chip--provider.provider-1 { color: #7c3aed; background: #f5f3ff; }
+.sp-health-chip--provider.provider-2 { color: #c2410c; background: #fff7ed; }
+.sp-health-chip--provider.provider-3 { color: #047857; background: #ecfdf5; }
+.sp-health-chip--provider.provider-4 { color: #be185d; background: #fdf2f8; }
+.sp-health-chip--platform.platform-0 { color: #0f766e; background: #f0fdfa; }
+.sp-health-chip--platform.platform-1 { color: #4338ca; background: #eef2ff; }
+.sp-health-chip--platform.platform-2 { color: #b45309; background: #fffbeb; }
+.sp-health-chip--platform.platform-3 { color: #15803d; background: #f0fdf4; }
+.sp-health-chip--platform.platform-4 { color: #0369a1; background: #f0f9ff; }
+.sp-health-trend-cell { display: grid; min-width: 22rem; gap: 0.4rem; padding: 0.45rem 0.55rem 0.35rem; border: 1px solid var(--sp-soft, #e5e7eb); border-radius: 0.5rem; background: linear-gradient(180deg, color-mix(in srgb, var(--sp-panel-2, #fff) 92%, var(--sp-cyan, #0891b2) 8%), var(--sp-panel-2, #fff)); }
+.sp-health-trend-meta { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; color: var(--sp-muted); font-size: 0.7rem; line-height: 1; }
+.sp-health-trend-meta span { color: var(--sp-text); font-variant-numeric: tabular-nums; }
+.sp-health-trend-meta time { font-variant-numeric: tabular-nums; }
+.sp-health-trend-bars { display: flex; align-items: end; gap: 0.2rem; height: 6.5rem; padding: 0.35rem 0; border-bottom: 1px solid var(--sp-soft, #d1d5db); background: repeating-linear-gradient(to top, transparent 0, transparent calc(33.333% - 1px), color-mix(in srgb, var(--sp-soft, #d1d5db) 72%, transparent) calc(33.333% - 1px), color-mix(in srgb, var(--sp-soft, #d1d5db) 72%, transparent) 33.333%); }
+.sp-health-trend-bar { display: block; flex: 1 1 0; min-width: 0.32rem; max-width: 0.8rem; min-height: 0.5rem; border-radius: 0.2rem 0.2rem 0.08rem 0.08rem; box-shadow: inset 0 1px rgb(255 255 255 / 25%); transition: height 160ms ease, opacity 160ms ease; }
+.sp-health-trend-bar:hover { opacity: 0.72; }
+.sp-health-trend-bar--good { background: var(--sp-green, #16a34a); }
+.sp-health-trend-bar--warn { background: var(--sp-amber, #d97706); }
+.sp-health-trend-bar--bad { background: var(--sp-red, #dc2626); }
+.sp-health-trend-bar--info { background: #9ca3af; }
+.sp-health-trend-bar--loading { height: 45%; background: var(--sp-soft, #d1d5db); animation: sp-health-trend-pulse 1.1s ease-in-out infinite alternate; }
+.sp-health-trend-bar--loading:nth-child(2n) { height: 70%; animation-delay: 120ms; }
+.sp-health-trend-bar--loading:nth-child(3n) { height: 30%; animation-delay: 220ms; }
+.sp-health-trend-empty { color: var(--sp-muted); font-size: 0.75rem; }
+@keyframes sp-health-trend-pulse { from { opacity: 0.45; } to { opacity: 1; } }
 @media (max-width: 900px) {
   .sp-health-head { align-items: flex-start; }
   .sp-health-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }

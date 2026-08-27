@@ -62,28 +62,7 @@ func (r *supplierAccountHealthHistoryRepository) ListAccounts(ctx context.Contex
 		pageSize = 100
 	}
 	args, conditions := supplierAccountHealthAccountFilters(params)
-	countArgs := append([]any(nil), args...)
 	where := strings.Join(conditions, " AND ")
-
-	countQuery := fmt.Sprintf(`
-WITH account_sources AS (
-%s
-)
-SELECT COUNT(*)
-FROM account_sources src
-JOIN accounts local_account ON local_account.id = src.local_account_id AND local_account.deleted_at IS NULL
-LEFT JOIN LATERAL (
-    SELECT h.status, h.checked_at, h.latency_ms, h.latency_limit_ms, h.consecutive_failed
-    FROM supplier_account_health_history h
-    WHERE h.local_account_id = src.local_account_id
-    ORDER BY h.checked_at DESC, h.id DESC
-    LIMIT 1
-) latest ON TRUE
-WHERE %s`, supplierAccountHealthAccountSourcesSQL(), where)
-	var total int64
-	if err := r.db.QueryRowContext(ctx, countQuery, countArgs...).Scan(&total); err != nil {
-		return service.SupplierAccountHealthAccountListResult{}, fmt.Errorf("统计账号健康历史失败: %w", err)
-	}
 
 	guardArg := len(args) + 1
 	args = append(args, service.SupplierAutomationTaskAccountHealthGuard)
@@ -104,6 +83,7 @@ SELECT src.local_account_id,
        latest.latency_ms,
        COALESCE(latest.latency_limit_ms, 0),
        COALESCE(latest.consecutive_failed, 0),
+       COUNT(*) OVER() AS total_count,
        EXISTS (
            SELECT 1 FROM supplier_automation_tasks task
            WHERE task.task_code = $%d AND task.enabled = TRUE
@@ -127,10 +107,14 @@ LIMIT $%d OFFSET $%d`, supplierAccountHealthAccountSourcesSQL(), guardArg, where
 	defer rows.Close()
 
 	items := make([]service.SupplierAccountHealthAccount, 0)
+	var total int64
 	for rows.Next() {
-		item, err := scanSupplierAccountHealthAccount(rows)
+		item, rowTotal, err := scanSupplierAccountHealthAccount(rows)
 		if err != nil {
 			return service.SupplierAccountHealthAccountListResult{}, fmt.Errorf("扫描账号健康历史失败: %w", err)
+		}
+		if rowTotal > 0 {
+			total = rowTotal
 		}
 		items = append(items, item)
 	}
@@ -183,17 +167,18 @@ func supplierAccountHealthAccountFilters(params service.SupplierAccountHealthAcc
 	return args, conditions
 }
 
-func scanSupplierAccountHealthAccount(scanner interface{ Scan(dest ...any) error }) (service.SupplierAccountHealthAccount, error) {
+func scanSupplierAccountHealthAccount(scanner interface{ Scan(dest ...any) error }) (service.SupplierAccountHealthAccount, int64, error) {
 	var item service.SupplierAccountHealthAccount
 	var status sql.NullString
 	var providerName, platform string
 	var checkedAt sql.NullTime
 	var latency sql.NullInt64
+	var total sql.NullInt64
 	if err := scanner.Scan(
 		&item.LocalAccountID, &item.LocalAccountName, &item.ProviderID, &providerName, &platform, &item.Schedulable,
-		&status, &checkedAt, &latency, &item.LatencyLimitMs, &item.ConsecutiveFailures, &item.GuardEnabled,
+		&status, &checkedAt, &latency, &item.LatencyLimitMs, &item.ConsecutiveFailures, &total, &item.GuardEnabled,
 	); err != nil {
-		return service.SupplierAccountHealthAccount{}, err
+		return service.SupplierAccountHealthAccount{}, 0, err
 	}
 	item.ProviderName = providerName
 	item.Platform = platform
@@ -208,7 +193,7 @@ func scanSupplierAccountHealthAccount(scanner interface{ Scan(dest ...any) error
 		value := latency.Int64
 		item.LatencyMs = &value
 	}
-	return item, nil
+	return item, total.Int64, nil
 }
 
 func (r *supplierAccountHealthHistoryRepository) ValidateAccount(ctx context.Context, accountID int64) error {

@@ -40,15 +40,12 @@ func TestSupplierAccountHealthHistoryRepositoryListAccounts(t *testing.T) {
 	defer db.Close()
 
 	checkedAt := time.Date(2026, 8, 26, 10, 0, 0, 0, time.UTC)
-	mock.ExpectQuery(`(?s)ARRAY_AGG\(DISTINCT a\.provider_id\).*SELECT COUNT\(\*\).*src\.provider_ids @>`).
-		WithArgs(int64(3), "openai", "%account%", "failed").
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
-	mock.ExpectQuery(`(?s)ARRAY_AGG\(DISTINCT a\.provider_id\).*supplier_automation_tasks.*src\.provider_ids @>`).
+	mock.ExpectQuery(`(?s)ARRAY_AGG\(DISTINCT a\.provider_id\).*COUNT\(\*\) OVER\(\).*supplier_automation_tasks.*src\.provider_ids @>`).
 		WithArgs(int64(3), "openai", "%account%", "failed", service.SupplierAutomationTaskAccountHealthGuard, 20, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"local_account_id", "local_account_name", "provider_id", "provider_name", "platform", "schedulable",
-			"status", "checked_at", "latency_ms", "latency_limit_ms", "consecutive_failures", "guard_enabled",
-		}).AddRow(21, "account-one", 3, "provider-a", "openai", false, "failed", checkedAt, nil, 500, 2, true))
+			"status", "checked_at", "latency_ms", "latency_limit_ms", "consecutive_failures", "total_count", "guard_enabled",
+		}).AddRow(21, "account-one", 3, "provider-a", "openai", false, "failed", checkedAt, nil, 500, 2, 1, true))
 
 	repo := NewSupplierAccountHealthHistoryRepository(db)
 	result, err := repo.ListAccounts(context.Background(), service.SupplierAccountHealthAccountListParams{
@@ -70,14 +67,12 @@ func TestSupplierAccountHealthHistoryRepositoryListAccountsAllowsAccountsWithout
 	require.NoError(t, err)
 	defer db.Close()
 
-	mock.ExpectQuery(`(?s)ARRAY_AGG\(DISTINCT a\.provider_id\).*SELECT COUNT\(\*\).*WHERE TRUE`).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
-	mock.ExpectQuery(`(?s)ARRAY_AGG\(DISTINCT a\.provider_id\).*supplier_automation_tasks.*WHERE TRUE`).
+	mock.ExpectQuery(`(?s)ARRAY_AGG\(DISTINCT a\.provider_id\).*COUNT\(\*\) OVER\(\).*supplier_automation_tasks.*WHERE TRUE`).
 		WithArgs(service.SupplierAutomationTaskAccountHealthGuard, 20, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"local_account_id", "local_account_name", "provider_id", "provider_name", "platform", "schedulable",
-			"status", "checked_at", "latency_ms", "latency_limit_ms", "consecutive_failures", "guard_enabled",
-		}).AddRow(21, "account-one", 3, "provider-a", "openai", true, nil, nil, nil, 500, 0, false))
+			"status", "checked_at", "latency_ms", "latency_limit_ms", "consecutive_failures", "total_count", "guard_enabled",
+		}).AddRow(21, "account-one", 3, "provider-a", "openai", true, nil, nil, nil, 500, 0, 1, false))
 
 	repo := NewSupplierAccountHealthHistoryRepository(db)
 	result, err := repo.ListAccounts(context.Background(), service.SupplierAccountHealthAccountListParams{Page: 1, PageSize: 20})
