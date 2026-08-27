@@ -380,9 +380,16 @@
           </template>
 
           <template #cell-local_account_last_tested_at="{ row: account }">
-            <span v-if="isMatchedLocalAccount(account)" class="sp-account-time">
-              {{ formatTime(account.local_account_last_tested_at) }}
-            </span>
+            <div v-if="isMatchedLocalAccount(account)" class="sp-account-test-times">
+              <span>
+                <em>上次测试</em>
+                {{ formatTime(account.local_account_last_tested_at) }}
+              </span>
+              <span class="sp-guard-test-time">
+                <em>守护检测</em>
+                {{ formatTime(account.local_account_health_guard_last_checked_at) }}
+              </span>
+            </div>
             <span v-else class="sp-account-muted">—</span>
           </template>
 
@@ -527,7 +534,14 @@
           <div class="sp-detail-cell"><span>本地账号状态</span><b>{{ isMatchedLocalAccount(selected) ? localAccountStatusLabel(selected.local_account_status) : '—' }}</b></div>
           <div class="sp-detail-cell"><span>是否调度</span><b>{{ localSchedulableLabel(selected) }}</b></div>
           <div class="sp-detail-cell"><span>测试结果</span><b>{{ isMatchedLocalAccount(selected) ? accountTestStatusLabel(selected.local_account_last_test_status) : '—' }}</b></div>
-          <div class="sp-detail-cell"><span>上次测试时间</span><b>{{ isMatchedLocalAccount(selected) ? formatTime(selected.local_account_last_tested_at) : '—' }}</b></div>
+          <div class="sp-detail-cell">
+            <span>测试时间</span>
+            <b v-if="isMatchedLocalAccount(selected)" class="sp-detail-test-times">
+              <span><em>上次测试</em>{{ formatTime(selected.local_account_last_tested_at) }}</span>
+              <span class="sp-guard-test-time"><em>守护检测</em>{{ formatTime(selected.local_account_health_guard_last_checked_at) }}</span>
+            </b>
+            <b v-else>—</b>
+          </div>
           <div class="sp-detail-cell"><span>余额（供应商汇总）</span><b>{{ formatCNY(selected.supplier_current_balance) }}</b></div>
           <div class="sp-detail-cell"><span>今日消费（供应商汇总）</span><b>{{ formatCNY(selected.supplier_today_cost) }}</b></div>
           <div class="sp-detail-cell"><span>上游状态</span><b>{{ upstreamStatusLabel(selected.status || selected.raw_status) }}</b></div>
@@ -1428,7 +1442,7 @@ const accountColumns: Column[] = [
   { key: 'local_account_status', label: '本地账号状态', sortable: true, class: 'min-w-[136px]' },
   { key: 'local_account_schedulable', label: '是否调度', sortable: true, class: 'min-w-[104px]' },
   { key: 'local_account_last_test_status', label: '测试结果', sortable: true, class: 'min-w-[120px]' },
-  { key: 'local_account_last_tested_at', label: '上次测试时间', sortable: true, class: 'min-w-[172px]' },
+  { key: 'local_account_last_tested_at', label: '上次测试时间', sortable: true, class: 'min-w-[210px]' },
   { key: 'supplier_current_balance', label: '余额', sortable: true, class: 'min-w-[142px]' },
   { key: 'supplier_today_cost', label: '今日消费', sortable: true, class: 'min-w-[142px]' },
   { key: 'actions', label: '操作', class: 'min-w-[300px]' },
@@ -3216,7 +3230,39 @@ button.sp-test-status.failed:hover {
   word-break: break-word;
 }
 
-.sp-account-time,
+.sp-account-test-times,
+.sp-detail-test-times {
+  display: grid;
+  gap: 0.25rem;
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.sp-account-test-times span,
+.sp-detail-test-times span {
+  display: flex;
+  gap: 0.375rem;
+  white-space: nowrap;
+}
+
+.sp-account-test-times em,
+.sp-detail-test-times em {
+  min-width: 3.5rem;
+  color: color-mix(in srgb, var(--sp-muted) 78%, transparent);
+  font-style: normal;
+}
+
+.sp-account-test-times .sp-guard-test-time,
+.sp-detail-test-times .sp-guard-test-time {
+  color: var(--sp-cyan);
+}
+
+.sp-account-test-times .sp-guard-test-time em,
+.sp-detail-test-times .sp-guard-test-time em {
+  color: color-mix(in srgb, var(--sp-cyan) 72%, var(--sp-text));
+}
+
 .sp-account-muted {
   color: var(--sp-muted);
   font-size: 0.8125rem;

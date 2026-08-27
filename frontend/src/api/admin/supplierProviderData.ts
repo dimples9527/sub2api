@@ -118,6 +118,7 @@ export interface SupplierProviderAccount {
   local_account_last_test_status?: string
   local_account_last_tested_at?: string
   local_account_last_test_error?: string
+  local_account_health_guard_last_checked_at?: string
   supplier_current_balance: number
   supplier_today_cost: number
 }

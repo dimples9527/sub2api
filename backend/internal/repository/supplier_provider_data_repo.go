@@ -360,6 +360,7 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
        COALESCE(matched_account.extra->>'last_test_status', '') AS local_account_last_test_status,
        COALESCE(matched_account.extra->>'last_tested_at', '') AS local_account_last_tested_at,
        COALESCE(matched_account.extra->>'last_test_error', '') AS local_account_last_test_error,
+       COALESCE(matched_account.extra->>'supplier_health_guard_last_checked_at', '') AS local_account_health_guard_last_checked_at,
        COALESCE((
          SELECT jsonb_agg(
            jsonb_build_object(
@@ -2151,7 +2152,10 @@ func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (servic
 		&item.LocalAccountMatchStatus, &item.LocalAccountMatchCount,
 		&localAccountID, &item.LocalAccountName, &item.LocalAccountPlatform, &item.LocalAccountType, &item.PlatformOverride, &item.EffectivePlatform, &localAccountPriority,
 		&item.LocalAccountStatus, &localAccountSchedulable,
-		&item.LocalAccountLastTestStatus, &item.LocalAccountLastTestedAt, &item.LocalAccountLastTestError,
+		&item.LocalAccountLastTestStatus,
+		&item.LocalAccountLastTestedAt,
+		&item.LocalAccountLastTestError,
+		&item.LocalAccountHealthGuardLastCheckedAt,
 		&bindingGroupsJSON,
 		&item.SupplierCurrentBalance, &item.SupplierTodayCost,
 		&groupRecordID, &item.GroupRecordDeleteEligible)
