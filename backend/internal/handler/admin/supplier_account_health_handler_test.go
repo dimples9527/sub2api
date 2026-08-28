@@ -35,7 +35,7 @@ func TestSupplierAccountHealthHandlerListsAccountsWithFiltersAndPagination(t *te
 	gin.SetMode(gin.TestMode)
 	stub := &supplierAccountHealthTrendHandlerStub{
 		listResult: service.SupplierAccountHealthAccountListResult{
-			Items: []service.SupplierAccountHealthAccount{{LocalAccountID: 101, LocalAccountName: "账号 A"}},
+			Items: []service.SupplierAccountHealthAccount{{LocalAccountID: 101, LocalAccountName: "账号 A", RateMultiplier: 1.25}},
 			Total: 1, Page: 3, PageSize: 25,
 		},
 	}
@@ -52,6 +52,7 @@ func TestSupplierAccountHealthHandlerListsAccountsWithFiltersAndPagination(t *te
 		ProviderID: 7, Platform: "grok", Search: "acct", HealthStatus: "slow", Page: 3, PageSize: 25,
 	}, stub.listParams)
 	require.Contains(t, rec.Body.String(), `"local_account_id":101`)
+	require.Contains(t, rec.Body.String(), `"rate_multiplier":1.25`)
 }
 
 func TestSupplierAccountHealthHandlerGetsTrendWithDefaultRange(t *testing.T) {

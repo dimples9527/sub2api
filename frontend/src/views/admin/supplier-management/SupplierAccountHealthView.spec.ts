@@ -83,4 +83,14 @@ describe('SupplierAccountHealthView', () => {
     expect(source).not.toContain('Promise.all(ids.map(async accountId =>')
   })
 
+  it('\u65b0\u589e\u4e0a\u6e38\u500d\u7387\u5217\u5e76\u652f\u6301\u8d26\u53f7\u500d\u7387\u5065\u5eb7\u72b6\u6001\u548c\u5065\u5eb7\u8d8b\u52bf\u6392\u5e8f', () => {
+    expect(apiSource).toContain('rate_multiplier: number')
+    expect(source).toContain("{ key: 'rate_multiplier', label: '\u4e0a\u6e38\u500d\u7387', sortable: true")
+    expect(source).toContain('formatAccountRateMultiplier(account.rate_multiplier)')
+    expect(source).toContain("{ key: 'account_sort', label: '\u8d26\u53f7 / \u4f9b\u5e94\u5546 / \u5e73\u53f0', sortable: true }")
+    expect(source).toContain("{ key: 'status_sort', label: '\u5f53\u524d\u5065\u5eb7\u72b6\u6001', sortable: true }")
+    expect(source).toContain("{ key: 'health_trend_sort', label: '\u5065\u5eb7\u8d8b\u52bf', sortable: true }")
+    expect(source).toContain('accountHealthSortData')
+  })
+
 })

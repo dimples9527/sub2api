@@ -43,9 +43,10 @@ func TestSupplierAccountHealthHistoryRepositoryListAccounts(t *testing.T) {
 	mock.ExpectQuery(`(?s)ARRAY_AGG\(DISTINCT a\.provider_id\).*COUNT\(\*\) OVER\(\).*supplier_automation_tasks.*src\.provider_ids @>`).
 		WithArgs(int64(3), "openai", "%account%", "failed", service.SupplierAutomationTaskAccountHealthGuard, 20, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"local_account_id", "local_account_name", "provider_id", "provider_name", "platform", "schedulable",
-			"status", "checked_at", "latency_ms", "latency_limit_ms", "consecutive_failures", "total_count", "guard_enabled",
-		}).AddRow(21, "account-one", 3, "provider-a", "openai", false, "failed", checkedAt, nil, 500, 2, 1, true))
+		"local_account_id", "local_account_name", "provider_id", "provider_name", "platform", "schedulable",
+			"status", "checked_at", "latency_ms", "latency_limit_ms", "consecutive_failures", "rate_multiplier",
+			"total_count", "guard_enabled",
+		}).AddRow(21, "account-one", 3, "provider-a", "openai", false, "failed", checkedAt, nil, 500, 2, 1.5, 1, true))
 
 	repo := NewSupplierAccountHealthHistoryRepository(db)
 	result, err := repo.ListAccounts(context.Background(), service.SupplierAccountHealthAccountListParams{
@@ -57,6 +58,7 @@ func TestSupplierAccountHealthHistoryRepositoryListAccounts(t *testing.T) {
 	require.Len(t, result.Items, 1)
 	require.Equal(t, int64(21), result.Items[0].LocalAccountID)
 	require.Nil(t, result.Items[0].LatencyMs)
+	require.Equal(t, 1.5, result.Items[0].RateMultiplier)
 	require.False(t, result.Items[0].Schedulable)
 	require.True(t, result.Items[0].GuardEnabled)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -70,9 +72,10 @@ func TestSupplierAccountHealthHistoryRepositoryListAccountsAllowsAccountsWithout
 	mock.ExpectQuery(`(?s)ARRAY_AGG\(DISTINCT a\.provider_id\).*COUNT\(\*\) OVER\(\).*supplier_automation_tasks.*WHERE TRUE`).
 		WithArgs(service.SupplierAutomationTaskAccountHealthGuard, 20, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"local_account_id", "local_account_name", "provider_id", "provider_name", "platform", "schedulable",
-			"status", "checked_at", "latency_ms", "latency_limit_ms", "consecutive_failures", "total_count", "guard_enabled",
-		}).AddRow(21, "account-one", 3, "provider-a", "openai", true, nil, nil, nil, 500, 0, 1, false))
+		"local_account_id", "local_account_name", "provider_id", "provider_name", "platform", "schedulable",
+			"status", "checked_at", "latency_ms", "latency_limit_ms", "consecutive_failures", "rate_multiplier",
+			"total_count", "guard_enabled",
+		}).AddRow(21, "account-one", 3, "provider-a", "openai", true, nil, nil, nil, 500, 0, 2.5, 1, false))
 
 	repo := NewSupplierAccountHealthHistoryRepository(db)
 	result, err := repo.ListAccounts(context.Background(), service.SupplierAccountHealthAccountListParams{Page: 1, PageSize: 20})
@@ -82,6 +85,7 @@ func TestSupplierAccountHealthHistoryRepositoryListAccountsAllowsAccountsWithout
 	require.Equal(t, "", result.Items[0].Status)
 	require.Nil(t, result.Items[0].CheckedAt)
 	require.Nil(t, result.Items[0].LatencyMs)
+	require.Equal(t, 2.5, result.Items[0].RateMultiplier)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 func TestSupplierAccountHealthHistoryRepositoryGetTrendAndDeleteBefore(t *testing.T) {

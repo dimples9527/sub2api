@@ -83,6 +83,7 @@ SELECT src.local_account_id,
        latest.latency_ms,
        COALESCE(latest.latency_limit_ms, 0),
        COALESCE(latest.consecutive_failed, 0),
+       COALESCE(local_account.rate_multiplier, 0),
        COUNT(*) OVER() AS total_count,
        EXISTS (
            SELECT 1 FROM supplier_automation_tasks task
@@ -170,18 +171,21 @@ func supplierAccountHealthAccountFilters(params service.SupplierAccountHealthAcc
 func scanSupplierAccountHealthAccount(scanner interface{ Scan(dest ...any) error }) (service.SupplierAccountHealthAccount, int64, error) {
 	var item service.SupplierAccountHealthAccount
 	var status sql.NullString
+	var rateMultiplier float64
 	var providerName, platform string
 	var checkedAt sql.NullTime
 	var latency sql.NullInt64
 	var total sql.NullInt64
 	if err := scanner.Scan(
 		&item.LocalAccountID, &item.LocalAccountName, &item.ProviderID, &providerName, &platform, &item.Schedulable,
-		&status, &checkedAt, &latency, &item.LatencyLimitMs, &item.ConsecutiveFailures, &total, &item.GuardEnabled,
+		&status, &checkedAt, &latency, &item.LatencyLimitMs, &item.ConsecutiveFailures, &rateMultiplier,
+		&total, &item.GuardEnabled,
 	); err != nil {
 		return service.SupplierAccountHealthAccount{}, 0, err
 	}
 	item.ProviderName = providerName
 	item.Platform = platform
+	item.RateMultiplier = rateMultiplier
 	if status.Valid {
 		item.Status = status.String
 	}

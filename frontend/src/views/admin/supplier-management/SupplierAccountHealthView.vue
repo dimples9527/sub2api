@@ -65,8 +65,9 @@
         </div>
         <span v-if="guardDisabledCount > 0" class="sp-status warn">{{ guardDisabledCount }} 个账号未启用健康守护</span>
       </header>
-      <DataTable :columns="accountColumns" :data="accounts" :loading="loading" row-key="local_account_id">
-        <template #cell-account="{ row: account }">
+      <DataTable :columns="accountColumns" :data="accountHealthSortData" :loading="loading" row-key="local_account_id">
+        <template #cell-account_sort="{ row: account }">
+          <span class="sr-only">{{ formatAccountRateMultiplier(account.rate_multiplier) }}</span>
           <div class="sp-health-account-cell">
             <button
               class="sp-health-account-button"
@@ -87,7 +88,10 @@
             </div>
           </div>
         </template>
-        <template #cell-status="{ row: account }">
+        <template #cell-rate_multiplier="{ row: account }">
+          {{ formatAccountRateMultiplier(account.rate_multiplier) }}
+        </template>
+        <template #cell-status_sort="{ row: account }">
           <span class="sp-status" :class="statusTone(account.status)">{{ statusLabel(account.status) }}</span>
           <div v-if="account.consecutive_failures > 0" class="sp-sub sp-health-failure-count">连续失败 {{ account.consecutive_failures }} 次</div>
         </template>
@@ -95,7 +99,7 @@
           <span class="sp-health-latency">{{ formatLatency(account.latency_ms) }}</span>
           <div v-if="account.latency_limit_ms > 0" class="sp-sub">阈值 {{ account.latency_limit_ms }} ms</div>
         </template>
-        <template #cell-health_trend="{ row: account }">
+        <template #cell-health_trend_sort="{ row: account }">
           <div class="sp-health-trend-cell" :title="accountTrendTitle(account)">
             <div v-if="visibleAccountTrend(account.local_account_id).length" class="sp-health-trend-meta">
               <span>{{ formatTrendHealthRate(account.local_account_id) }}</span>
@@ -312,13 +316,27 @@ const loadTrendRequest = createKeyedRequestLoader(
   (accountId, range) => `${accountId}:${range}`,
 )
 
+type AccountHealthSortAccount = SupplierAccountHealthAccount & {
+  account_sort: string
+  status_sort: number
+  health_trend_sort: number
+}
+
 const accountColumns: Column[] = [
-  { key: 'account', label: '账号 / 供应商 / 平台' },
-  { key: 'status', label: '当前健康状态' },
+  { key: 'account_sort', label: '账号 / 供应商 / 平台', sortable: true },
+  { key: 'rate_multiplier', label: '上游倍率', sortable: true, class: 'min-w-[88px]' },
+  { key: 'status_sort', label: '当前健康状态', sortable: true },
   { key: 'latency_ms', label: '最近响应' },
-  { key: 'health_trend', label: '健康趋势' },
+  { key: 'health_trend_sort', label: '健康趋势', sortable: true },
   { key: 'checked_at', label: '最近检测' },
 ]
+
+const accountHealthSortData = computed<AccountHealthSortAccount[]>(() => accounts.value.map((account) => ({
+  ...account,
+  account_sort: `${account.local_account_name || `账号 #${account.local_account_id}`}:${account.local_account_id}`,
+  status_sort: statusSortValue(account.status),
+  health_trend_sort: accountTrendHealthRateSortValue(account.local_account_id),
+})))
 
 const providerOptions = computed<SelectOption[]>(() => [
   { value: null, label: '全部供应商' },
@@ -596,6 +614,24 @@ async function loadAccountTrends(accountList: SupplierAccountHealthAccount[], ra
   const workerCount = Math.min(TREND_LOAD_CONCURRENCY, ids.length)
   await Promise.all(Array.from({ length: workerCount }, () => loadNextTrend()))
   if (requestSequence === accountTrendLoadSequence) trendLoading.value = false
+}
+
+function statusSortValue(status?: string | null): number {
+  if (status === 'healthy') return 0
+  if (status === 'slow') return 1
+  if (status === 'failed') return 2
+  return 3
+}
+
+function accountTrendHealthRateSortValue(accountId: number): number {
+  const points = healthTrendByAccountId.value[accountId] || []
+  if (!points.length) return -1
+  return points.filter(point => point.status === 'healthy').length / points.length
+}
+
+function formatAccountRateMultiplier(value?: number | null): string {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '—'
+  return `× ${Number(value)}`
 }
 
 async function loadTrend() {

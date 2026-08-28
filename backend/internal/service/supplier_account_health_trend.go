@@ -68,6 +68,7 @@ type SupplierAccountHealthAccount struct {
 	LatencyMs           *int64     `json:"latency_ms,omitempty"`
 	LatencyLimitMs      int64      `json:"latency_limit_ms"`
 	ConsecutiveFailures int        `json:"consecutive_failures"`
+	RateMultiplier      float64    `json:"rate_multiplier"`
 	GuardEnabled        bool       `json:"guard_enabled"`
 }
 
