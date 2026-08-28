@@ -32,7 +32,7 @@ func TestNormalizeSupplierAccountHealthGuardConfigUsesDefaultsAndCleansValues(t 
 
 	require.Equal(t, 200, config.MaxAccountsPerRun)
 	require.Equal(t, 3, config.Concurrency)
-	require.Equal(t, 90, config.TimeoutPerAccountSeconds)
+	require.Equal(t, 30, config.TimeoutPerAccountSeconds)
 	require.Equal(t, 3, config.FailureThreshold)
 	require.Equal(t, 3, config.SlowThreshold)
 	require.Equal(t, 2, config.RecoveryThreshold)
@@ -276,6 +276,45 @@ func TestSupplierAccountHealthGuardRunDeduplicatesLocalAccountSourcesAndRotatesC
 	require.NoError(t, err)
 	require.Equal(t, []supplierAccountHealthGuardTestCall{{accountID: 30, modelID: "gpt-4o-mini"}, {accountID: 10, modelID: "gpt-4o-mini"}}, tester.calls)
 	require.Equal(t, int64(10), second.CursorAccountID)
+}
+
+func TestSupplierAccountHealthGuardRunSkipsUnstartedTargetsWhenTaskCancelled(t *testing.T) {
+	candidates := []SupplierAccountHealthGuardCandidate{
+		newSupplierAccountHealthGuardCandidate(41, "慢响应账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 41}),
+		newSupplierAccountHealthGuardCandidate(42, "未开始账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 42}),
+	}
+	tester := &supplierAccountHealthGuardTesterStub{results: map[int64]*ScheduledTestResult{}, errs: map[int64]error{}}
+	tester.fn = func(ctx context.Context, accountID int64, modelID string) (*ScheduledTestResult, error) {
+		if accountID == 41 {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+		return &ScheduledTestResult{Status: "success", LatencyMs: 10}, nil
+	}
+	store := &supplierAccountHealthGuardAccountStoreStub{}
+	guard := NewSupplierAccountHealthGuardService(&supplierAccountHealthGuardRepoStub{candidates: candidates}, store, tester)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+	result, err := guard.Run(ctx, SupplierAccountHealthGuardConfig{
+		AccountIDs:               []int64{41, 42},
+		Concurrency:              1,
+		TimeoutPerAccountSeconds: 30,
+		PlatformModels:           map[string]string{"openai": "gpt-4o-mini"},
+	}, time.Now())
+
+	require.NoError(t, err)
+	require.Equal(t, 1, result.CheckedCount)
+	require.Equal(t, 1, result.FailedCount)
+	require.Equal(t, 1, result.SkippedCount)
+	require.Empty(t, store.extraUpdates[42])
+	skipped := result.Items[1]
+	require.Equal(t, int64(42), skipped.LocalAccountID)
+	require.Equal(t, SupplierAccountHealthGuardStatusSkipped, skipped.Status)
+	require.Equal(t, "任务时间不足，本次跳过", skipped.Reason)
+	require.Equal(t, 1, len(result.SkipReasons))
+	require.Equal(t, "任务时间不足", result.SkipReasons[0].Reason)
+	require.Equal(t, 1, result.SkipReasons[0].Count)
 }
 
 func TestSupplierAccountHealthGuardRunDisablesAfterFailureThresholdAndWritesSupplierKeys(t *testing.T) {

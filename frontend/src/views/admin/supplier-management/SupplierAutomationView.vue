@@ -1061,7 +1061,7 @@ const editForm = reactive<SupplierAutomationTask>({
     inactive_group_retention_days: 90,
     account_health_guard_max_accounts_per_run: 200,
     account_health_guard_concurrency: 3,
-    account_health_guard_timeout_per_account_seconds: 90,
+    account_health_guard_timeout_per_account_seconds: 30,
     account_health_guard_failure_threshold: 3,
     account_health_guard_slow_threshold: 3,
     account_health_guard_recovery_threshold: 2,
@@ -2079,7 +2079,7 @@ function applyAccountHealthGuardDefaults() {
   const config = editForm.config
   config.account_health_guard_max_accounts_per_run = positiveIntegerOr(config.account_health_guard_max_accounts_per_run, 200)
   config.account_health_guard_concurrency = positiveIntegerOr(config.account_health_guard_concurrency, 3)
-  config.account_health_guard_timeout_per_account_seconds = positiveIntegerOr(config.account_health_guard_timeout_per_account_seconds, 90)
+  config.account_health_guard_timeout_per_account_seconds = positiveIntegerOr(config.account_health_guard_timeout_per_account_seconds, 30)
   config.account_health_guard_failure_threshold = positiveIntegerOr(config.account_health_guard_failure_threshold, 3)
   config.account_health_guard_slow_threshold = positiveIntegerOr(config.account_health_guard_slow_threshold, 3)
   config.account_health_guard_recovery_threshold = positiveIntegerOr(config.account_health_guard_recovery_threshold, 2)
@@ -2109,7 +2109,7 @@ function validateAccountHealthGuardSelection(config: SupplierAutomationConfig): 
 function validateAccountHealthGuardConfig(config: SupplierAutomationConfig = editForm.config): string {
   const rules: Array<[number, number, number, string]> = [
     [config.account_health_guard_max_accounts_per_run, 1, 1000, '单次检查账号数必须在 1 到 1000 之间'],
-    [config.account_health_guard_concurrency, 1, 8, '并发数必须在 1 到 8 之间'],
+    [config.account_health_guard_concurrency, 1, 32, '并发数必须在 1 到 32 之间'],
     [config.account_health_guard_timeout_per_account_seconds, 5, 300, '单账号超时必须在 5 到 300 秒之间'],
     [config.account_health_guard_failure_threshold, 1, Number.MAX_SAFE_INTEGER, '连续失败暂停阈值必须是正整数'],
     [config.account_health_guard_slow_threshold, 1, Number.MAX_SAFE_INTEGER, '连续慢响应暂停阈值必须是正整数'],

@@ -14,8 +14,8 @@ const (
 	DefaultSupplierAccountHealthGuardMaxAccountsPerRun        = 200
 	MaxSupplierAccountHealthGuardMaxAccountsPerRun            = 1000
 	DefaultSupplierAccountHealthGuardConcurrency              = 3
-	MaxSupplierAccountHealthGuardConcurrency                  = 8
-	DefaultSupplierAccountHealthGuardTimeoutPerAccountSeconds = 90
+	MaxSupplierAccountHealthGuardConcurrency                  = 32
+	DefaultSupplierAccountHealthGuardTimeoutPerAccountSeconds = 30
 	MinSupplierAccountHealthGuardTimeoutPerAccountSeconds     = 5
 	MaxSupplierAccountHealthGuardTimeoutPerAccountSeconds     = 300
 	DefaultSupplierAccountHealthGuardFailureThreshold         = 3
@@ -262,7 +262,17 @@ func (s *SupplierAccountHealthGuardService) Run(ctx context.Context, config Supp
 	} else {
 		result.CursorAccountID = config.CursorAccountID
 	}
-	result.Items = append(result.Items, s.runTargets(ctx, config, now, selected)...)
+	runItems := s.runTargets(ctx, config, now, selected)
+	result.Items = append(result.Items, runItems...)
+	cancelledSkips := make([]SupplierAccountHealthGuardRunItem, 0)
+	for _, item := range runItems {
+		if item.Status == SupplierAccountHealthGuardStatusSkipped && item.Reason == "任务时间不足，本次跳过" {
+			cancelledSkips = append(cancelledSkips, item)
+		}
+	}
+	if len(cancelledSkips) > 0 {
+		result.SkipReasons = append(result.SkipReasons, supplierAccountHealthGuardCancelledSkipReasons(cancelledSkips)...)
+	}
 	sort.SliceStable(result.Items, func(i, j int) bool {
 		return result.Items[i].LocalAccountID < result.Items[j].LocalAccountID
 	})
@@ -380,6 +390,20 @@ func (s *SupplierAccountHealthGuardService) runTarget(ctx context.Context, confi
 	startedAt := now
 	if startedAt.IsZero() {
 		startedAt = time.Now()
+	}
+	if ctx.Err() != nil {
+		return SupplierAccountHealthGuardRunItem{
+			LocalAccountID: target.account.ID, LocalAccountName: target.account.Name, Platform: target.platform,
+			Sources:           append([]SupplierAccountHealthGuardSource(nil), target.sources...),
+			ModelID:           target.modelID,
+			SchedulableBefore: target.account.Schedulable,
+			SchedulableAfter:  target.account.Schedulable,
+			Status:            SupplierAccountHealthGuardStatusSkipped,
+			Action:            SupplierAccountHealthGuardActionNone,
+			Reason:            "任务时间不足，本次跳过",
+			StartedAt:         startedAt,
+			FinishedAt:        time.Now(),
+		}
 	}
 	item := SupplierAccountHealthGuardRunItem{
 		LocalAccountID: target.account.ID, LocalAccountName: target.account.Name, Platform: target.platform,
@@ -575,6 +599,24 @@ func supplierAccountHealthGuardNotDueSkipReasons(items []SupplierAccountHealthGu
 		return nil
 	}
 	reason := SupplierAccountHealthGuardSkipReason{Reason: "未到检查间隔"}
+	for _, item := range items {
+		reason.Count++
+		if len(reason.SampleAccounts) >= supplierAccountHealthGuardSkipReasonSampleLimit {
+			continue
+		}
+		reason.SampleAccounts = append(reason.SampleAccounts, SupplierAccountHealthGuardSkippedAccount{
+			LocalAccountID:   item.LocalAccountID,
+			LocalAccountName: item.LocalAccountName,
+		})
+	}
+	return []SupplierAccountHealthGuardSkipReason{reason}
+}
+
+func supplierAccountHealthGuardCancelledSkipReasons(items []SupplierAccountHealthGuardRunItem) []SupplierAccountHealthGuardSkipReason {
+	if len(items) == 0 {
+		return nil
+	}
+	reason := SupplierAccountHealthGuardSkipReason{Reason: "任务时间不足"}
 	for _, item := range items {
 		reason.Count++
 		if len(reason.SampleAccounts) >= supplierAccountHealthGuardSkipReasonSampleLimit {
