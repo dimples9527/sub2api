@@ -316,27 +316,41 @@ func dialSupplierNotificationSMTP(ctx context.Context, target string, proxy *Sup
 	return conn, nil
 }
 
+func supplierNotificationEventTypeText(eventType string) string {
+	switch eventType {
+	case SupplierBalanceAlertEventRecovered:
+		return "余额恢复"
+	case SupplierCostAlertEventOverrun:
+		return "成本超额"
+	case SupplierCostAlertEventRecovered:
+		return "成本恢复"
+	default:
+		return "余额不足"
+	}
+}
+
 func supplierNotificationMessage(payload SupplierNotificationEventPayload) string {
-	status := "余额不足"
-	if payload.EventType == SupplierBalanceAlertEventRecovered {
-		status = "余额已恢复"
-	}
 	lines := []string{
-		"供应商余额通知",
-		"状态: " + status,
+		"供应商通知",
+		"类型: " + supplierNotificationEventTypeText(payload.EventType),
 		"供应商: " + payload.ProviderName,
-		"余额: " + payload.Balance.String(),
-		"阈值: " + payload.Threshold.String(),
-		"时间: " + payload.ObservedAt.Format(time.RFC3339),
 	}
+	switch payload.EventType {
+	case SupplierCostAlertEventOverrun, SupplierCostAlertEventRecovered:
+		lines = append(lines,
+			"超额金额: "+payload.Balance.String(),
+			"触发阈值: "+payload.Threshold.String())
+	default:
+		lines = append(lines,
+			"余额: "+payload.Balance.String(),
+			"阈值: "+payload.Threshold.String())
+	}
+	lines = append(lines, "时间: "+payload.ObservedAt.Format(time.RFC3339))
 	return strings.Join(lines, "\n")
 }
 
 func formatSupplierNotificationEmail(config SupplierNotificationEmailConfig, payload SupplierNotificationEventPayload) string {
-	subject := "[供应商余额] 余额不足"
-	if payload.EventType == SupplierBalanceAlertEventRecovered {
-		subject = "[供应商余额] 余额已恢复"
-	}
+	subject := "[供应商] " + supplierNotificationEventTypeText(payload.EventType)
 	to := make([]string, 0, len(config.To))
 	for _, item := range config.To {
 		to = append(to, item)

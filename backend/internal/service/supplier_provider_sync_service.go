@@ -364,6 +364,7 @@ type SupplierProviderSyncService struct {
 	groupMatcher      SupplierProviderGroupAutoMatcher
 	thresholdProvider SupplierCostDeviationThresholdProvider
 	costReviewService *SupplierProviderCostReviewService
+	costAlertHandler  SupplierCostAlertHandler
 }
 
 func (s *SupplierProviderSyncService) SetGroupMatcher(matcher SupplierProviderGroupAutoMatcher) {
@@ -382,6 +383,36 @@ func (s *SupplierProviderSyncService) SetCostDeviationThresholdProvider(provider
 func (s *SupplierProviderSyncService) SetCostReviewService(service *SupplierProviderCostReviewService) {
 	if s != nil {
 		s.costReviewService = service
+	}
+}
+
+// SetCostAlertHandler 注入成本超额预警处理器；预警属于旁路能力，不会阻断成本同步。
+func (s *SupplierProviderSyncService) SetCostAlertHandler(handler SupplierCostAlertHandler) {
+	if s != nil {
+		s.costAlertHandler = handler
+	}
+}
+
+// evaluateCostAlert 在成本成功写入后触发预警检查，并保证预警异常不影响同步结果。
+func (s *SupplierProviderSyncService) evaluateCostAlert(ctx context.Context, provider *SupplierProvider, statDay time.Time, upstreamCost float64) {
+	if s == nil || s.costAlertHandler == nil {
+		return
+	}
+	local, ok, err := s.dataRepo.GetLocalCostForDay(ctx, provider.ID, statDay)
+	if err != nil || !ok {
+		return
+	}
+	evaluation := SupplierCostAlertEvaluation{
+		ProviderID:   provider.ID,
+		ProviderCode: provider.Code,
+		ProviderName: provider.Name,
+		StatDate:     statDay,
+		UpstreamCost: upstreamCost,
+		LocalCost:    local,
+		ObservedAt:   time.Now(),
+	}
+	if alertErr := s.costAlertHandler.Evaluate(ctx, evaluation); alertErr != nil {
+		logger.LegacyPrintf("supplier_cost_alert", "provider_id=%d provider_code=%s evaluate failed: %v", provider.ID, provider.Code, alertErr)
 	}
 }
 
@@ -1285,6 +1316,7 @@ func (s *SupplierProviderSyncService) syncCostStage(ctx context.Context, provide
 		if err == nil {
 			// 定时同步写入成功后同样失效成本趋势缓存。
 			invalidateSupplierCostTrendCache()
+			s.evaluateCostAlert(ctx, provider, statDay, cost)
 		}
 	} else {
 		// 成本接口获取不到数据时，尝试用当天起始余额 - 当前余额做保底估算；

@@ -49,7 +49,7 @@ func (d *SupplierNotificationDispatcher) Dispatch(ctx context.Context, event Sup
 	if d == nil || d.repo == nil {
 		return ErrSupplierNotificationInvalid
 	}
-	if event.ProviderID <= 0 || (event.EventType != SupplierBalanceAlertEventLow && event.EventType != SupplierBalanceAlertEventRecovered) {
+	if !isValidSupplierNotificationEventType(event.EventType) || event.ProviderID <= 0 {
 		return ErrSupplierNotificationInvalid
 	}
 	channels, err := d.repo.ListChannels(ctx)
@@ -108,6 +108,17 @@ func (d *SupplierNotificationDispatcher) Dispatch(ctx context.Context, event Sup
 		}
 	}
 	return dispatchErr
+}
+
+// isValidSupplierNotificationEventType 判断当前供应商通知模块支持的事件类型。
+func isValidSupplierNotificationEventType(eventType string) bool {
+	switch eventType {
+	case SupplierBalanceAlertEventLow, SupplierBalanceAlertEventRecovered,
+		SupplierCostAlertEventOverrun, SupplierCostAlertEventRecovered:
+		return true
+	default:
+		return false
+	}
 }
 
 func supplierNotificationPayloadFromEvent(event SupplierBalanceAlertEvent) SupplierNotificationEventPayload {

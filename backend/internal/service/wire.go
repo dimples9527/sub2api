@@ -963,6 +963,7 @@ var ProviderSet = wire.NewSet(
 	NewSupplierCostDeviationSettingsService,
 	ProvideSupplierProviderService,
 	SupplierBalanceAlertWiringSet,
+	SupplierCostAlertWiringSet,
 	SupplierNotificationWiringSet,
 	NewSupplierProviderTypeService,
 	ProvideSupplierProviderRemoteClient,

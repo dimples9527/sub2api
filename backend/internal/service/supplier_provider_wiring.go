@@ -43,11 +43,13 @@ func ProvideSupplierProviderSyncService(
 	groupMatcher *SupplierProviderGroupMatcher,
 	costDeviationSettings *SupplierCostDeviationSettingsService,
 	costReviewService *SupplierProviderCostReviewService,
+	costAlertHandler SupplierCostAlertHandler,
 ) *SupplierProviderSyncService {
 	svc := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, encryptor, syncLock, rechargeRepo)
 	svc.SetGroupMatcher(groupMatcher)
 	svc.SetCostDeviationThresholdProvider(costDeviationSettings)
 	svc.SetCostReviewService(costReviewService)
+	svc.SetCostAlertHandler(costAlertHandler)
 	return svc
 }
 

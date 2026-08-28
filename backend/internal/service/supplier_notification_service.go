@@ -139,7 +139,7 @@ func (s *SupplierNotificationService) SaveSubscription(ctx context.Context, id i
 	if s == nil || s.repo == nil || id < 0 || input.ChannelID <= 0 {
 		return nil, ErrSupplierNotificationInvalid
 	}
-	if input.EventType != SupplierBalanceAlertEventLow && input.EventType != SupplierBalanceAlertEventRecovered {
+	if !isValidSupplierNotificationEventType(input.EventType) {
 		return nil, ErrSupplierNotificationInvalid
 	}
 	if input.ProviderID != nil && *input.ProviderID <= 0 {

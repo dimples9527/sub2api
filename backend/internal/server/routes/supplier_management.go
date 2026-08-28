@@ -55,6 +55,17 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 		supplier.POST("/cost-reviews/bulk-approve", h.Admin.SupplierProviderCostReview.BulkApprove)
 		supplier.POST("/cost-reviews/:id/approve", h.Admin.SupplierProviderCostReview.Approve)
 
+		costAlert := supplier.Group("/cost-alert")
+		{
+			costAlert.GET("/settings", h.Admin.SupplierCostAlert.GetSettings)
+			costAlert.PUT("/settings", h.Admin.SupplierCostAlert.UpdateSettings)
+			costAlert.GET("/overrides", h.Admin.SupplierCostAlert.ListOverrides)
+			costAlert.POST("/overrides", h.Admin.SupplierCostAlert.CreateOverride)
+			costAlert.PUT("/overrides/:id", h.Admin.SupplierCostAlert.UpdateOverride)
+			costAlert.DELETE("/overrides/:id", h.Admin.SupplierCostAlert.DeleteOverride)
+			costAlert.GET("/events", h.Admin.SupplierCostAlert.ListEvents)
+		}
+
 		balanceAlert := supplier.Group("/balance-alert")
 		{
 			balanceAlert.GET("/configs", h.Admin.SupplierBalanceAlert.ListConfigs)
