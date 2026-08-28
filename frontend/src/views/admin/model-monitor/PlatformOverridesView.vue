@@ -6,7 +6,7 @@
           <div class="po-kpi-grid">
             <div class="po-kpi po-kpi-default">
               <div class="po-kpi-icon po-kpi-icon-default">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
               </div>
               <div class="po-kpi-body">
                 <span class="po-kpi-label">分组总数</span>
@@ -16,7 +16,7 @@
             </div>
             <div class="po-kpi po-kpi-warning">
               <div class="po-kpi-icon po-kpi-icon-warning">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 22h20L12 2z"/><line x1="12" y1="9" x2="12" y2="13"/><circle cx="12" cy="17" r="0.5" fill="currentColor"/></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L2 22h20L12 2z"/><line x1="12" y1="9" x2="12" y2="13"/><circle cx="12" cy="17" r="0.5" fill="currentColor"/></svg>
               </div>
               <div class="po-kpi-body">
                 <span class="po-kpi-label">已配置实际平台</span>
@@ -26,7 +26,7 @@
             </div>
             <div class="po-kpi po-kpi-success">
               <div class="po-kpi-icon po-kpi-icon-success">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
               </div>
               <div class="po-kpi-body">
                 <span class="po-kpi-label">默认继承原平台</span>
@@ -38,7 +38,7 @@
 
           <div class="po-actions-right">
             <button class="po-btn po-btn-refresh" :disabled="loading" @click="reload">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" :class="loading ? 'po-spin' : ''"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" :class="loading ? 'po-spin' : ''"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
               <span>{{ loading ? '刷新中…' : '刷新' }}</span>
             </button>
           </div>
@@ -60,7 +60,6 @@
               placeholder="全部平台"
               class="w-44"
               :clearable="false"
-              @change="applyFilters"
             />
             <div class="po-filter-hint">
               监控页展示优先使用实际平台；未配置时回退原分组平台。
@@ -68,7 +67,7 @@
           </div>
           <div class="po-legend-bar" aria-label="平台颜色图例">
             <span class="po-legend-title">平台配色</span>
-            <span v-for="item in legendItems" :key="item.value" class="po-legend-item">
+            <span v-for="item in platformOptions" :key="item.value" class="po-legend-item">
               <i class="po-legend-dot" :style="{ background: resolvePlatformColor(item.value) }"></i>
               {{ item.label }}
             </span>
@@ -304,11 +303,7 @@ const platformFilterOptions = computed(() => [
   ...platformOptions.value,
 ])
 
-const legendItems = computed(() => [
-  ...platformOptions.value,
-])
-
-const columns = computed<Column[]>(() => [
+const columns: Column[] = [
   { key: 'name', label: '分组名称', sortable: false },
   { key: 'platform', label: '原平台', sortable: false },
   { key: 'actual_platform', label: '实际平台', sortable: false },
@@ -317,7 +312,7 @@ const columns = computed<Column[]>(() => [
   { key: 'show_in_monitor', label: '监控显示', sortable: false },
   { key: 'rate_multiplier', label: '倍率', sortable: false },
   { key: 'actions', label: '操作', sortable: false, class: 'text-right' },
-])
+]
 
 const totalCount = computed(() => groups.value.length)
 const overrideCount = computed(() => groups.value.filter((group) => !!group.actual_platform).length)
@@ -385,10 +380,6 @@ async function reload() {
   }
 }
 
-function applyFilters() {
-  // 纯前端筛选，保留该方法以便 Select 的 change 事件统一收敛。
-}
-
 function platformText(value: string) {
   return resolvePlatformDisplayLabel(value)
 }
@@ -449,7 +440,6 @@ async function toggleGroupVisibility(group: LLMMonitorGroupPlatformOverride, sho
     appStore.showSuccess(showInMonitor
       ? `「${group.name}」将在模型监控页面显示`
       : `「${group.name}」已从模型监控页面隐藏`)
-    await reload()
   } catch (error) {
     group.show_in_monitor = previous
     appStore.showError(extractApiErrorMessage(error, '保存模型监控显示配置失败'))
@@ -1054,17 +1044,6 @@ onMounted(() => {
 :global(.dark) .po-status-pill-warning {
   background: rgba(217, 119, 6, 0.15);
   color: #fcd34d;
-}
-
-.po-status-pill-success {
-  margin-left: 0.35rem;
-  background: #dcfce7;
-  color: #047857;
-}
-
-:global(.dark) .po-status-pill-success {
-  background: rgba(22, 163, 74, 0.16);
-  color: #86efac;
 }
 
 .po-status-pill-muted {

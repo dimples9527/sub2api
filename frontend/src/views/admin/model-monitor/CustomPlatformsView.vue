@@ -7,7 +7,7 @@
             <div class="cp-kpi-grid">
               <div class="cp-kpi cp-kpi-default">
                 <div class="cp-kpi-icon cp-kpi-icon-default">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
                 </div>
                 <div class="cp-kpi-body">
                   <span class="cp-kpi-label">平台总数</span>
@@ -16,7 +16,7 @@
               </div>
               <div class="cp-kpi cp-kpi-success">
                 <div class="cp-kpi-icon cp-kpi-icon-success">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
                 </div>
                 <div class="cp-kpi-body">
                   <span class="cp-kpi-label">启用中</span>
@@ -25,7 +25,7 @@
               </div>
               <div class="cp-kpi cp-kpi-danger">
                 <div class="cp-kpi-icon cp-kpi-icon-danger">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </div>
                 <div class="cp-kpi-body">
                   <span class="cp-kpi-label">停用中</span>
@@ -36,11 +36,11 @@
 
             <div class="cp-actions-right">
               <button class="cp-btn cp-btn-refresh" :disabled="loading" @click="loadCustomPlatforms">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" :class="loading ? 'cp-spin' : ''"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" :class="loading ? 'cp-spin' : ''"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                 <span>{{ loading ? '刷新中…' : '刷新' }}</span>
               </button>
               <button class="cp-btn cp-btn-primary" @click="openCreateDialog">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                 <span>新增平台</span>
               </button>
             </div>
@@ -202,6 +202,7 @@
                   stroke-width="3"
                   stroke-linecap="round"
                   stroke-linejoin="round"
+                  aria-hidden="true"
                 ><path d="M20 6L9 17l-5-5" /></svg>
               </button>
             </div>
@@ -341,7 +342,7 @@ const statusOptions = [
   { value: 'disabled', label: '仅停用' },
 ]
 
-const columns = computed<Column[]>(() => [
+const columns: Column[] = [
   { key: 'code', label: '代号', sortable: false },
   { key: 'name', label: '名称', sortable: false },
   { key: 'enabled', label: '状态', sortable: false },
@@ -349,7 +350,7 @@ const columns = computed<Column[]>(() => [
   { key: 'created_at', label: '创建时间', sortable: false },
   { key: 'updated_at', label: '更新时间', sortable: false },
   { key: 'actions', label: '操作', sortable: false, class: 'text-right' },
-])
+]
 
 const totalCount = computed(() => platforms.value.length)
 const enabledCount = computed(() => platforms.value.filter(item => item.enabled).length)
