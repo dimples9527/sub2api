@@ -14,12 +14,13 @@ type accountHealthTrendHistoryStub struct {
 
 type accountHealthTrendRepositoryStub struct {
 	accountHealthTrendHistoryStub
-	getTrendCalls  int
-	getTrendsCalls int
-	lastBatchIDs   []int64
-	lastPointLimit int
-	validateErr    error
-	batchTrends    map[int64]SupplierAccountHealthTrendResult
+	getTrendCalls     int
+	getTrendsCalls    int
+	lastBatchIDs      []int64
+	lastPointLimit    int
+	lastSummaryParams SupplierAccountHealthAccountListParams
+	validateErr       error
+	batchTrends       map[int64]SupplierAccountHealthTrendResult
 }
 
 func (s *accountHealthTrendRepositoryStub) ValidateAccount(_ context.Context, _ int64) error {
@@ -28,6 +29,11 @@ func (s *accountHealthTrendRepositoryStub) ValidateAccount(_ context.Context, _ 
 
 func (s *accountHealthTrendRepositoryStub) ListAccounts(_ context.Context, _ SupplierAccountHealthAccountListParams) (SupplierAccountHealthAccountListResult, error) {
 	return SupplierAccountHealthAccountListResult{}, nil
+}
+
+func (s *accountHealthTrendRepositoryStub) GetSummary(_ context.Context, params SupplierAccountHealthAccountListParams) (SupplierAccountHealthSummary, error) {
+	s.lastSummaryParams = params
+	return SupplierAccountHealthSummary{Total: 4, Healthy: 2, Slow: 1, Failed: 1}, nil
 }
 
 func (s *accountHealthTrendRepositoryStub) GetTrend(_ context.Context, _ int64, _ time.Time) (SupplierAccountHealthTrendResult, error) {

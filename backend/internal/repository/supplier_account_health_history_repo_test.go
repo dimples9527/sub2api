@@ -88,6 +88,49 @@ func TestSupplierAccountHealthHistoryRepositoryListAccountsAllowsAccountsWithout
 	require.Equal(t, 2.5, result.Items[0].RateMultiplier)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+func TestSupplierAccountHealthHistoryRepositoryListAccountsFiltersUncheckedAccounts(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	mock.ExpectQuery(`(?s)latest\.status IS NULL.*ORDER BY local_account\.name ASC`).
+		WithArgs(service.SupplierAutomationTaskAccountHealthGuard, 20, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"local_account_id", "local_account_name", "provider_id", "provider_name", "platform", "schedulable",
+			"status", "checked_at", "latency_ms", "latency_limit_ms", "consecutive_failures", "rate_multiplier",
+			"total_count", "guard_enabled",
+		}).AddRow(21, "account-one", 3, "provider-a", "openai", true, nil, nil, nil, 500, 0, 1, 1, true))
+
+	repo := NewSupplierAccountHealthHistoryRepository(db)
+	result, err := repo.ListAccounts(context.Background(), service.SupplierAccountHealthAccountListParams{
+		HealthStatus: service.SupplierAccountHealthStatusUnchecked, Page: 1, PageSize: 20,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, "", result.Items[0].Status)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierAccountHealthHistoryRepositoryGetSummaryIgnoresStatusFilter(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	mock.ExpectQuery(`(?s)COUNT\(\*\) FILTER \(WHERE latest\.status = 'healthy'\).*COUNT\(\*\) FILTER \(WHERE latest\.status IS NULL\).*src\.provider_ids @>.*src\.platform = \$2`).
+		WithArgs(int64(3), "openai").
+		WillReturnRows(sqlmock.NewRows([]string{"total", "healthy", "slow", "failed", "unchecked"}).AddRow(9, 5, 2, 1, 1))
+
+	repo := NewSupplierAccountHealthHistoryRepository(db)
+	summary, err := repo.GetSummary(context.Background(), service.SupplierAccountHealthAccountListParams{
+		ProviderID: 3, Platform: "openai", HealthStatus: "failed",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, service.SupplierAccountHealthSummary{Total: 9, Healthy: 5, Slow: 2, Failed: 1, Unchecked: 1}, summary)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestSupplierAccountHealthHistoryRepositoryGetTrendAndDeleteBefore(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)

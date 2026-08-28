@@ -113,6 +113,7 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 		accountHealth := supplier.Group("/account-health")
 		{
 			accountHealth.GET("/accounts", h.Admin.SupplierAccountHealth.ListAccounts)
+			accountHealth.GET("/summary", h.Admin.SupplierAccountHealth.GetSummary)
 			accountHealth.GET("/trend", h.Admin.SupplierAccountHealth.GetTrend)
 			accountHealth.GET("/trends", h.Admin.SupplierAccountHealth.GetTrends)
 		}

@@ -7,7 +7,7 @@
         <p class="sp-subtitle">按账号查看健康状态与响应时间变化，快速定位慢响应和连续失败。</p>
       </div>
       <div class="sp-controls">
-        <span v-if="lastLoadedAt" class="sp-data-note sp-health-loaded">更新于 {{ formatDateTime(lastLoadedAt) }}</span>
+        <span v-if="lastLoadedAt" class="sp-health-loaded"><i aria-hidden="true"></i>更新于 {{ formatDateTime(lastLoadedAt) }}</span>
         <div class="sp-segmented" aria-label="趋势范围">
           <button
             v-for="option in rangeOptions"
@@ -24,18 +24,40 @@
       </div>
     </header>
 
-    <section class="sp-panel sp-health-filter-panel" aria-label="账号健康筛选">
+    <section class="sp-metric-grid sp-health-metrics" aria-label="账号健康概览">
+      <button
+        v-for="metric in summaryMetrics"
+        :key="metric.key || 'all'"
+        type="button"
+        class="sp-metric-card"
+        :class="[`sp-${metric.tone}`, { selected: healthStatus === metric.key }]"
+        :aria-pressed="healthStatus === metric.key"
+        @click="selectHealthStatus(metric.key)"
+      >
+        <div class="sp-metric-label">{{ metric.label }}</div>
+        <div class="sp-metric-value">{{ metric.value }}</div>
+        <div class="sp-metric-foot">{{ metric.foot }}</div>
+      </button>
+    </section>
+
+    <section class="sp-panel sp-health-account-panel">
       <header class="sp-panel-head">
         <div class="sp-panel-title">
           <div>
-            <span class="sp-panel-kicker">Account Health</span>
-            <h2>筛选账号</h2>
-            <p>选择账号后查看健康状态和响应时间趋势。</p>
+            <span class="sp-panel-kicker">Accounts</span>
+            <h2>账号列表</h2>
+            <p>筛选账号后查看健康状态和响应时间趋势。</p>
           </div>
         </div>
-        <span class="sp-status info">{{ total }} 个账号</span>
+        <div class="sp-health-head-meta">
+          <span v-if="guardTaskDisabled" class="sp-health-guard-warning">
+            <span class="sp-status warn">健康守护任务未启用</span>
+            <router-link to="/admin/supplier-management/automations">前往开启</router-link>
+          </span>
+          <span class="sp-status info">{{ total }} 个账号</span>
+        </div>
       </header>
-      <div class="sp-health-filters">
+      <div class="sp-health-filters" role="group" aria-label="账号健康筛选">
         <div class="sp-health-filter-control" role="group" aria-labelledby="supplier-health-provider-label">
           <span id="supplier-health-provider-label" class="sr-only">供应商筛选</span>
           <Select v-model="providerId" class="w-full" :options="providerOptions" :searchable="false" />
@@ -53,18 +75,6 @@
           <Select v-model="healthStatus" class="w-full" :options="healthStatusOptions" :searchable="false" />
         </div>
       </div>
-    </section>
-
-    <section class="sp-panel sp-health-account-panel">
-      <header class="sp-panel-head">
-        <div class="sp-panel-title">
-          <div>
-            <span class="sp-panel-kicker">Accounts</span>
-            <h2>账号列表</h2>
-          </div>
-        </div>
-        <span v-if="guardDisabledCount > 0" class="sp-status warn">{{ guardDisabledCount }} 个账号未启用健康守护</span>
-      </header>
       <DataTable :columns="accountColumns" :data="accountHealthSortData" :loading="loading" row-key="local_account_id">
         <template #cell-account_sort="{ row: account }">
           <span class="sr-only">{{ formatAccountRateMultiplier(account.rate_multiplier) }}</span>
@@ -73,7 +83,7 @@
               class="sp-health-account-button"
               type="button"
               :class="{ active: selectedAccountId === account.local_account_id }"
-              @click="selectAccount(account.local_account_id)"
+              @click="openHealthDetail(account.local_account_id)"
             >
               <strong>{{ account.local_account_name || ('账号 #' + account.local_account_id) }}</strong>
               <span>ID {{ account.local_account_id }}</span>
@@ -83,7 +93,7 @@
                 {{ account.provider_name || '未关联供应商' }}
               </span>
               <span :class="['sp-health-chip', 'sp-health-chip--platform', platformTone(account.platform)]">
-                {{ account.platform || '未知平台' }}
+                {{ platformDisplayLabel(account.platform) }}
               </span>
             </div>
           </div>
@@ -93,36 +103,39 @@
         </template>
         <template #cell-status_sort="{ row: account }">
           <span class="sp-status" :class="statusTone(account.status)">{{ statusLabel(account.status) }}</span>
-          <div v-if="account.consecutive_failures > 0" class="sp-sub sp-health-failure-count">连续失败 {{ account.consecutive_failures }} 次</div>
+          <div v-if="account.consecutive_failures > 0" class="sp-health-failure-count">
+            <span class="sp-status bad">连续失败 {{ account.consecutive_failures }} 次</span>
+          </div>
         </template>
         <template #cell-latency_ms="{ row: account }">
           <span class="sp-health-latency">{{ formatLatency(account.latency_ms) }}</span>
-          <div v-if="account.latency_limit_ms > 0" class="sp-sub">阈值 {{ account.latency_limit_ms }} ms</div>
+          <div class="sp-sub">{{ account.checked_at ? formatDateTime(account.checked_at) : '尚未检测' }}</div>
         </template>
         <template #cell-health_trend_sort="{ row: account }">
           <div class="sp-health-trend-cell" :title="accountTrendTitle(account)">
             <div v-if="visibleAccountTrend(account.local_account_id).length" class="sp-health-trend-meta">
               <span>{{ formatTrendHealthRate(account.local_account_id) }}</span>
+              <em v-if="account.latency_limit_ms > 0">阈值 {{ account.latency_limit_ms }} ms</em>
               <time>{{ trendLatestTime(account.local_account_id) }}</time>
             </div>
             <div v-if="trendLoadingByAccountId[account.local_account_id]" class="sp-health-trend-bars sp-health-trend-bars--loading" aria-label="正在加载健康趋势">
               <span v-for="index in TREND_BAR_COUNT" :key="index" class="sp-health-trend-bar sp-health-trend-bar--loading" />
             </div>
-            <div v-else-if="visibleAccountTrend(account.local_account_id).length" class="sp-health-trend-bars" aria-label="账号健康趋势">
+            <div
+              v-else-if="visibleAccountTrend(account.local_account_id).length"
+              :class="['sp-health-trend-bars', { 'sp-health-trend-bars--threshold': account.latency_limit_ms > 0 }]"
+              aria-label="账号健康趋势"
+            >
               <span
                 v-for="(point, index) in visibleAccountTrend(account.local_account_id)"
                 :key="`${point.checked_at}-${index}`"
                 :class="['sp-health-trend-bar', `sp-health-trend-bar--${statusTone(point.status)}`]"
-                :style="{ height: latencyBarHeight(point.latency_ms, account.local_account_id) }"
+                :style="{ height: latencyBarHeight(point, account) }"
                 :title="accountTrendPointTitle(point)"
               />
             </div>
             <span v-else class="sp-health-trend-empty">暂无趋势</span>
           </div>
-        </template>
-        <template #cell-checked_at="{ row: account }">
-          <span>{{ account.checked_at ? formatDateTime(account.checked_at) : '尚未检测' }}</span>
-          <div class="sp-sub">{{ account.guard_enabled ? '健康守护已启用' : '健康守护未启用' }}</div>
         </template>
         <template #cell-actions="{ row: account }">
           <button class="sp-button sp-health-detail-button" type="button" @click="openHealthDetail(account.local_account_id)">
@@ -131,8 +144,15 @@
         </template>
         <template #empty>
           <div class="sp-empty-state sp-health-empty">
-            <strong>暂无可展示的账号</strong>
-            <span>请调整筛选条件，或先启用供应商账号健康守护任务。</span>
+            <template v-if="error">
+              <strong>账号健康列表加载失败</strong>
+              <span>{{ error }}</span>
+              <button class="sp-button" type="button" :disabled="loading" @click="refresh">重试</button>
+            </template>
+            <template v-else>
+              <strong>暂无可展示的账号</strong>
+              <span>请调整筛选条件，或先启用供应商账号健康守护任务。</span>
+            </template>
           </div>
         </template>
       </DataTable>
@@ -156,7 +176,7 @@
                 <div>
                   <span class="sp-panel-kicker">Selected Account</span>
                   <h2>{{ selectedAccount.local_account_name || ('账号 #' + selectedAccount.local_account_id) }}</h2>
-                  <p>{{ selectedAccount.provider_name || '—' }} · {{ selectedAccount.platform || '未知平台' }} · ID {{ selectedAccount.local_account_id }}</p>
+                  <p>{{ selectedAccount.provider_name || '—' }} · {{ platformDisplayLabel(selectedAccount.platform) }} · ID {{ selectedAccount.local_account_id }}</p>
                 </div>
               </div>
               <span class="sp-status" :class="statusTone(latestPoint?.status || selectedAccount.status)">{{ statusLabel(latestPoint?.status || selectedAccount.status) }}</span>
@@ -181,13 +201,13 @@
             </div>
             <div v-if="!trendLoading && !trendPoints.length" class="sp-empty-state sp-health-no-history">
               <strong>尚无健康检测记录</strong>
-              <span>{{ selectedAccount.guard_enabled ? '健康守护运行后会在这里生成趋势记录。' : '当前账号未启用健康守护，不会产生趋势记录。' }}</span>
+              <span>{{ selectedAccount.guard_enabled ? '健康守护运行后会在这里生成趋势记录。' : '健康守护任务未启用，不会产生趋势记录。' }}</span>
             </div>
             <div v-else class="sp-health-latest">
               <div><span>最近检测</span><strong>{{ latestPoint ? formatDateTime(latestPoint.checked_at) : '—' }}</strong></div>
               <div><span>失败原因</span><strong>{{ latestPoint?.reason || '—' }}</strong></div>
               <div><span>动作</span><strong>{{ latestPoint?.action || '—' }}</strong></div>
-              <div><span>错误详情</span><strong>{{ latestPoint?.error_message || '—' }}</strong></div>
+              <div class="sp-health-latest-error"><span>错误详情</span><strong>{{ latestPoint?.error_message || '—' }}</strong></div>
             </div>
           </article>
 
@@ -222,41 +242,47 @@
             <div v-else-if="trendPoints.length" class="sp-health-chart"><Line :data="latencyChartData" :options="latencyChartOptions" /></div>
             <div v-else class="sp-health-chart-state">尚无健康检测记录</div>
           </article>
+
+          <section v-if="detailEventPoints.length" class="sp-panel sp-health-event-panel">
+            <header class="sp-panel-head">
+              <div class="sp-panel-title">
+                <div>
+                  <span class="sp-panel-kicker">Diagnostics</span>
+                  <h2>检测明细</h2>
+                  <p>{{ detailEventHint }}</p>
+                </div>
+              </div>
+              <span class="sp-status info">{{ trendPoints.length }} 条记录</span>
+            </header>
+            <div class="sp-health-events">
+              <article
+                v-for="point in detailEventPoints"
+                :key="point.checked_at + '-' + point.status"
+                :class="['sp-health-event', `sp-health-event--${statusTone(point.status)}`]"
+              >
+                <div class="sp-health-event-head">
+                  <span class="sp-status" :class="statusTone(point.status)">{{ statusLabel(point.status) }}</span>
+                  <time>{{ formatDateTime(point.checked_at) }}</time>
+                  <strong>{{ formatLatency(point.latency_ms) }}</strong>
+                </div>
+                <dl>
+                  <div><dt>失败原因</dt><dd>{{ point.reason || '—' }}</dd></div>
+                  <div><dt>动作</dt><dd>{{ point.action || '—' }}</dd></div>
+                  <div class="sp-health-event-error"><dt>错误详情</dt><dd>{{ point.error_message || '—' }}</dd></div>
+                </dl>
+              </article>
+            </div>
+          </section>
         </div>
       </div>
     </BaseDialog>
-
-    <section v-if="selectedAccount && trendPoints.length" class="sp-panel sp-health-event-panel">
-      <header class="sp-panel-head">
-        <div class="sp-panel-title">
-          <div>
-            <span class="sp-panel-kicker">Diagnostics</span>
-            <h2>检测明细</h2>
-            <p>查看每次检测的状态、失败原因、动作和错误详情。</p>
-          </div>
-        </div>
-      </header>
-      <div class="sp-health-events">
-        <article v-for="point in reversedTrendPoints" :key="point.checked_at + '-' + point.status" class="sp-health-event">
-          <div class="sp-health-event-head">
-            <span class="sp-status" :class="statusTone(point.status)">{{ statusLabel(point.status) }}</span>
-            <time>{{ formatDateTime(point.checked_at) }}</time>
-            <strong>{{ formatLatency(point.latency_ms) }}</strong>
-          </div>
-          <dl>
-            <div><dt>失败原因</dt><dd>{{ point.reason || '—' }}</dd></div>
-            <div><dt>动作</dt><dd>{{ point.action || '—' }}</dd></div>
-            <div><dt>错误详情</dt><dd>{{ point.error_message || '—' }}</dd></div>
-          </dl>
-        </article>
-      </div>
-    </section>
   </SupplierModuleLayout>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useDebounceFn } from '@vueuse/core'
 import {
   CategoryScale,
   Chart as ChartJS,
@@ -278,13 +304,19 @@ import Pagination from '@/components/common/Pagination.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import { createKeyedRequestLoader } from '@/composables/useKeyedRequestLoader'
 import {
+  getSupplierAccountHealthSummary,
   getSupplierAccountHealthTrend,
   getSupplierAccountHealthTrends,
   listSupplierAccountHealthAccounts,
   type SupplierAccountHealthAccount,
   type SupplierAccountHealthPoint,
   type SupplierAccountHealthRange,
+  type SupplierAccountHealthSummary,
 } from '@/api/admin/supplierAccountHealth'
+import supplierProvidersAPI, { type SupplierProvider } from '@/api/admin/supplierProviders'
+import { customPlatformsAPI, type CustomPlatform } from '@/api/admin/customPlatforms'
+import { buildPlatformOptions, loadPlatformCatalog } from '@/utils/platformOptions'
+import { resolvePlatformDisplayLabel, setCustomPlatformLabels } from '@/utils/customPlatformLabels'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import type { Column } from '@/components/common/types'
@@ -302,6 +334,9 @@ const rangeOptions: Array<{ value: SupplierAccountHealthRange; label: string }> 
 ]
 const selectedRange = ref<SupplierAccountHealthRange>('24h')
 const accounts = ref<SupplierAccountHealthAccount[]>([])
+const summary = ref<SupplierAccountHealthSummary>({ total: 0, healthy: 0, slow: 0, failed: 0, unchecked: 0 })
+const providers = ref<SupplierProvider[]>([])
+const customPlatforms = ref<CustomPlatform[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = 50
@@ -320,6 +355,8 @@ const detailTrendByAccountId = ref<Record<string, SupplierAccountHealthPoint[]>>
 const trendLoadingByAccountId = ref<Record<number, boolean>>({})
 const lastLoadedAt = ref('')
 const TREND_BAR_COUNT = 28
+const TREND_THRESHOLD_RATIO = 0.6
+const DETAIL_EVENT_LIMIT = 50
 let trendLoadSequence = 0
 let accountTrendLoadSequence = 0
 
@@ -338,9 +375,8 @@ const accountColumns: Column[] = [
   { key: 'account_sort', label: '账号 / 供应商 / 平台', sortable: true },
   { key: 'rate_multiplier', label: '上游倍率', sortable: true, class: 'min-w-[88px]' },
   { key: 'status_sort', label: '当前健康状态', sortable: true },
-  { key: 'latency_ms', label: '最近响应' },
+  { key: 'latency_ms', label: '最近响应 / 检测时间' },
   { key: 'health_trend_sort', label: '健康趋势', sortable: true },
-  { key: 'checked_at', label: '最近检测' },
   { key: 'actions', label: '操作', class: 'min-w-[96px]' },
 ]
 
@@ -353,24 +389,39 @@ const accountHealthSortData = computed<AccountHealthSortAccount[]>(() => account
 
 const providerOptions = computed<SelectOption[]>(() => [
   { value: null, label: '全部供应商' },
-  ...Array.from(new Map(accounts.value.map(account => [account.provider_id, account.provider_name || ('供应商 #' + account.provider_id)])).entries())
-    .map(([value, label]) => ({ value, label })),
+  ...providers.value.filter(provider => provider.enabled).map(provider => ({ value: provider.id, label: provider.name })),
 ])
 const platformOptions = computed<SelectOption[]>(() => [
   { value: '', label: '全部平台' },
-  ...Array.from(new Set(accounts.value.map(account => account.platform).filter(Boolean))).map(value => ({ value, label: value })),
+  ...buildPlatformOptions(customPlatforms.value),
 ])
 const healthStatusOptions: SelectOption[] = [
   { value: '', label: '全部健康状态' },
   { value: 'healthy', label: '可用' },
   { value: 'slow', label: '慢响应' },
   { value: 'failed', label: '失败' },
+  { value: 'unchecked', label: '未检测' },
 ]
+const summaryMetrics = computed(() => [
+  { key: '', tone: 'blue', label: '账号总数', value: summary.value.total, foot: '当前筛选范围内的供应商账号' },
+  { key: 'healthy', tone: 'green', label: '可用', value: summary.value.healthy, foot: '最近一次检测在阈值内通过' },
+  { key: 'slow', tone: 'amber', label: '慢响应', value: summary.value.slow, foot: '最近一次检测超过慢响应阈值' },
+  { key: 'failed', tone: 'red', label: '失败', value: summary.value.failed, foot: '最近一次检测未通过' },
+  { key: 'unchecked', tone: 'muted-tone', label: '未检测', value: summary.value.unchecked, foot: '还没有健康检测记录' },
+])
 
 const selectedAccount = computed(() => accounts.value.find(account => account.local_account_id === selectedAccountId.value) || null)
 const latestPoint = computed(() => trendPoints.value[trendPoints.value.length - 1] || null)
-const reversedTrendPoints = computed(() => [...trendPoints.value].reverse())
-const guardDisabledCount = computed(() => accounts.value.filter(account => !account.guard_enabled).length)
+const detailEventPoints = computed(() => [...trendPoints.value].reverse().slice(0, DETAIL_EVENT_LIMIT))
+const detailEventHint = computed(() => (trendPoints.value.length > DETAIL_EVENT_LIMIT
+  ? `按时间倒序展示最近 ${DETAIL_EVENT_LIMIT} 次检测的状态、失败原因、动作和错误详情。`
+  : '查看每次检测的状态、失败原因、动作和错误详情。'))
+// guard_enabled 取自全局健康守护任务开关，所有账号取值一致，因此不按账号计数
+const guardTaskDisabled = computed(() => accounts.value.length > 0 && !accounts.value.some(account => account.guard_enabled))
+
+function platformDisplayLabel(platform?: string | null): string {
+  return platform ? resolvePlatformDisplayLabel(platform) : '未知平台'
+}
 
 function statusLabel(status?: string | null): string {
   if (status === 'healthy') return '可用'
@@ -427,17 +478,27 @@ function accountTrendTitle(account: SupplierAccountHealthAccount): string {
 }
 
 function accountTrendPointTitle(point: SupplierAccountHealthPoint): string {
-  return `${formatDateTime(point.checked_at)} ${statusLabel(point.status)}，响应 ${formatLatency(point.latency_ms)}`
+  const threshold = point.latency_limit_ms > 0 ? `，阈值 ${point.latency_limit_ms} ms` : ''
+  return `${formatDateTime(point.checked_at)} ${statusLabel(point.status)}，响应 ${formatLatency(point.latency_ms)}${threshold}`
 }
 
-function latencyBarHeight(value: number | null | undefined, accountId: number): string {
-  if (value === null || value === undefined || value <= 0) return '14%'
-  const latencies = (healthTrendByAccountId.value[accountId] || [])
-    .map(point => point.latency_ms)
-    .filter((latency): latency is number => typeof latency === 'number' && latency > 0)
+// 优先按慢响应阈值归一，让阈值线固定在同一高度、不同账号之间可以横向对比；
+// 没有配置阈值时退回按该账号自身最大响应时间归一。
+function latencyBarHeight(point: SupplierAccountHealthPoint, account: SupplierAccountHealthAccount): string {
+  const latency = point.latency_ms
+  if (latency === null || latency === undefined || latency <= 0) return '14%'
+  const limit = point.latency_limit_ms > 0 ? point.latency_limit_ms : account.latency_limit_ms
+  if (limit > 0) return clampBarHeight((latency / limit) * TREND_THRESHOLD_RATIO * 100)
+  const latencies = (healthTrendByAccountId.value[account.local_account_id] || [])
+    .map(item => item.latency_ms)
+    .filter((value): value is number => typeof value === 'number' && value > 0)
   const maxLatency = Math.max(...latencies, 0)
   if (maxLatency <= 0) return '14%'
-  return `${Math.max(16, Math.min(100, Math.round((value / maxLatency) * 100)))}%`
+  return clampBarHeight((latency / maxLatency) * 100)
+}
+
+function clampBarHeight(value: number): string {
+  return `${Math.max(16, Math.min(100, Math.round(value)))}%`
 }
 
 function formatLatency(value?: number | null): string {
@@ -565,6 +626,34 @@ const latencyChartOptions = computed<ChartOptions<'line'>>(() => {
   }
 })
 
+async function loadFilterOptions() {
+  try {
+    const [providerResult, platformItems] = await Promise.all([
+      supplierProvidersAPI.list({ page: 1, page_size: 200 }),
+      customPlatformsAPI.list(),
+      loadPlatformCatalog(),
+    ])
+    providers.value = providerResult.items || []
+    customPlatforms.value = platformItems
+    setCustomPlatformLabels(platformItems)
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '加载筛选选项失败'))
+  }
+}
+
+async function loadSummary() {
+  try {
+    summary.value = await getSupplierAccountHealthSummary({
+      provider_id: providerId.value || undefined,
+      platform: platform.value || undefined,
+      search: search.value.trim() || undefined,
+    })
+  } catch (err) {
+    summary.value = { total: 0, healthy: 0, slow: 0, failed: 0, unchecked: 0 }
+    appStore.showError(extractApiErrorMessage(err, '加载账号健康概览失败'))
+  }
+}
+
 async function loadAccounts() {
   loading.value = true
   error.value = ''
@@ -587,6 +676,8 @@ async function loadAccounts() {
     void loadAccountTrends(accounts.value, selectedRange.value)
     void loadTrend()
   } catch (err) {
+    accounts.value = []
+    total.value = 0
     error.value = extractApiErrorMessage(err, '加载账号健康列表失败')
     appStore.showError(error.value)
   } finally {
@@ -681,16 +772,12 @@ function syncSelectedAccount() {
   const queryAccountId = Number(route.query.account_id)
   if (Number.isInteger(queryAccountId) && queryAccountId > 0 && accounts.value.some(account => account.local_account_id === queryAccountId)) {
     selectedAccountId.value = queryAccountId
+    healthDetailVisible.value = true
     return
   }
-  if (!selectedAccountId.value || !accounts.value.some(account => account.local_account_id === selectedAccountId.value)) {
-    selectedAccountId.value = accounts.value[0]?.local_account_id || null
+  if (selectedAccountId.value && !accounts.value.some(account => account.local_account_id === selectedAccountId.value)) {
+    selectedAccountId.value = null
   }
-}
-
-function selectAccount(accountId: number) {
-  selectedAccountId.value = accountId
-  void router.replace({ query: { ...route.query, account_id: String(accountId) } })
 }
 
 function openHealthDetail(accountId: number) {
@@ -701,6 +788,9 @@ function openHealthDetail(accountId: number) {
 
 function closeHealthDetail() {
   healthDetailVisible.value = false
+  const query = { ...route.query }
+  delete query.account_id
+  void router.replace({ query })
 }
 
 function selectRange(range: SupplierAccountHealthRange) {
@@ -713,18 +803,38 @@ function selectRange(range: SupplierAccountHealthRange) {
   void loadTrend()
 }
 
+function selectHealthStatus(status: string) {
+  healthStatus.value = healthStatus.value === status ? '' : status
+}
+
 function handlePageChange(nextPage: number) {
   page.value = nextPage
   void loadAccounts()
 }
 
 async function refresh() {
+  void loadSummary()
   await loadAccounts()
 }
 
-watch([search, providerId, platform, healthStatus], () => {
+const debouncedSearchReload = useDebounceFn(() => {
+  page.value = 1
+  void loadSummary()
+  void loadAccounts()
+}, 300)
+
+// 概览卡按状态切换筛选，其数字本身不受状态筛选影响，因此只有供应商/平台/搜索变化才重新汇总
+watch([providerId, platform], () => {
+  page.value = 1
+  void loadSummary()
+  void loadAccounts()
+})
+watch(healthStatus, () => {
   page.value = 1
   void loadAccounts()
+})
+watch(search, () => {
+  void debouncedSearchReload()
 })
 watch(selectedAccountId, () => {
   void loadTrend()
@@ -733,30 +843,49 @@ watch(() => route.query.account_id, () => {
   syncSelectedAccount()
 })
 onMounted(() => {
+  void loadFilterOptions()
+  void loadSummary()
   void loadAccounts()
 })
 </script>
 
 <style scoped>
 .sp-health-head { align-items: center; }
-.sp-health-loaded { margin: 0; padding: 0.45rem 0.65rem; border-left: 0; }
-.sp-health-filter-panel,
+.sp-health-loaded { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--sp-muted); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+.sp-health-loaded i { width: 0.375rem; height: 0.375rem; border-radius: 50%; background: var(--sp-green); }
+/* 概览卡用 button 承载点击筛选，配色沿用同模块的 --sp-metric-accent 强调色方案 */
+.sp-health-metrics .sp-metric-card { --sp-metric-accent: var(--sp-blue); width: 100%; border-color: color-mix(in srgb, var(--sp-metric-accent) 24%, var(--sp-line)); background: linear-gradient(150deg, color-mix(in srgb, var(--sp-metric-accent) 7%, transparent), transparent 56%), var(--sp-panel); font: inherit; text-align: left; }
+.sp-health-metrics .sp-metric-card::before { content: ''; position: absolute; inset: 0 0 auto 0; height: 3px; background: linear-gradient(90deg, var(--sp-metric-accent), color-mix(in srgb, var(--sp-metric-accent) 30%, transparent)); }
+.sp-health-metrics .sp-metric-card.sp-green { --sp-metric-accent: var(--sp-green); }
+.sp-health-metrics .sp-metric-card.sp-amber { --sp-metric-accent: var(--sp-amber); }
+.sp-health-metrics .sp-metric-card.sp-red { --sp-metric-accent: var(--sp-red); }
+.sp-health-metrics .sp-metric-card.sp-muted-tone { --sp-metric-accent: var(--sp-muted); }
+.sp-health-metrics .sp-metric-card:hover,
+.sp-health-metrics .sp-metric-card.selected { border-color: color-mix(in srgb, var(--sp-metric-accent) 55%, var(--sp-line)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--sp-metric-accent) 30%, transparent); }
+.sp-health-metrics .sp-metric-value { color: var(--sp-metric-accent); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.sp-panel-kicker { color: var(--sp-muted); font-size: 0.625rem; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
+.sp-panel-title p { margin: 0.25rem 0 0; color: var(--sp-muted); font-size: 0.75rem; line-height: 1.5; }
 .sp-health-account-panel,
 .sp-health-event-panel { margin-bottom: 1rem; }
-.sp-health-filters { display: grid; grid-template-columns: minmax(10rem, 1fr) minmax(10rem, 1fr) minmax(14rem, 2fr) minmax(10rem, 1fr); gap: 0.75rem; padding: 0 1rem 1rem; }
+.sp-health-head-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; }
+.sp-health-filters { display: grid; grid-template-columns: minmax(10rem, 1fr) minmax(10rem, 1fr) minmax(14rem, 2fr) minmax(10rem, 1fr); gap: 0.75rem; padding: 0.75rem 1rem; border-bottom: 1px solid var(--sp-soft); background: var(--sp-panel-2); }
 .sp-health-filter-control { min-width: 0; }
 .sp-health-account-button { display: grid; gap: 0.15rem; padding: 0; border: 0; background: transparent; color: var(--sp-text); text-align: left; cursor: pointer; }
 .sp-health-account-button strong { font-size: 0.875rem; }
 .sp-health-account-button span { color: var(--sp-muted); font-size: 0.72rem; }
 .sp-health-account-button.active strong { color: var(--sp-cyan); }
-.sp-health-failure-count { color: var(--sp-red); }
+.sp-health-failure-count { margin-top: 0.3rem; }
+.sp-health-failure-count .sp-status { padding: 0.1rem 0.45rem; font-size: 0.68rem; }
 .sp-health-latency { font-variant-numeric: tabular-nums; }
 .sp-health-pagination { display: flex; justify-content: flex-end; padding: 0.75rem 1rem 1rem; }
+.sp-health-guard-warning { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.75rem; }
+.sp-health-guard-warning a { color: var(--sp-cyan); text-decoration: underline; text-underline-offset: 0.15rem; }
 .sp-health-empty,
 .sp-health-no-history,
 .sp-health-chart-state { display: grid; min-height: 10rem; place-items: center; align-content: center; gap: 0.4rem; padding: 2rem; text-align: center; }
 .sp-health-empty span,
 .sp-health-no-history span { color: var(--sp-muted); font-size: 0.8125rem; }
+.sp-health-empty .sp-button { margin-top: 0.35rem; }
 /* 弹窗根节点复用 supplier-management-page 提供 --sp-* 变量，并抵消其 min-height 副作用 */
 .sp-health-detail-dialog { min-height: 0; }
 /* BaseDialog teleport 到 body，通过 :has 匹配弹层并放大到超过 full 档位默认宽度 */
@@ -772,15 +901,21 @@ onMounted(() => {
 .sp-health-kpis .sp-chart-kpi b.warn { color: var(--sp-amber); }
 .sp-health-kpis .sp-chart-kpi b.bad { color: var(--sp-red); }
 .sp-health-latest { display: grid; gap: 0.625rem; padding: 0 1rem 1rem; }
-.sp-health-latest > div { display: grid; grid-template-columns: 5rem minmax(0, 1fr); gap: 0.75rem; padding: 0.625rem 0.75rem; border: 1px solid var(--sp-soft); background: var(--sp-panel-2); }
+.sp-health-latest > div { display: grid; grid-template-columns: 5rem minmax(0, 1fr); gap: 0.75rem; padding: 0.625rem 0.75rem; border: 1px solid var(--sp-soft); border-radius: 0.5rem; background: var(--sp-panel-2); }
 .sp-health-latest span { color: var(--sp-muted); font-size: 0.75rem; }
 .sp-health-latest strong { overflow-wrap: anywhere; font-size: 0.8125rem; font-weight: 500; }
+.sp-health-latest-error strong,
+.sp-health-event-error dd { font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: 0.75rem; line-height: 1.55; }
 .sp-health-chart-panel { min-width: 0; }
 .sp-health-chart { height: 18rem; padding: 0 1rem 1rem; }
 .sp-health-chart-state { min-height: 18rem; color: var(--sp-muted); }
-.sp-health-event-panel { overflow: hidden; }
-.sp-health-events { display: grid; gap: 0.625rem; padding: 0 1rem 1rem; }
-.sp-health-event { padding: 0.75rem; border: 1px solid var(--sp-soft); background: var(--sp-panel-2); }
+.sp-health-event-panel { overflow: hidden; grid-column: 1 / -1; }
+.sp-health-events { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 0.625rem; max-height: 24rem; padding: 0 1rem 1rem; overflow-y: auto; }
+.sp-health-event { padding: 0.75rem; border: 1px solid var(--sp-soft); border-left: 3px solid var(--sp-line); border-radius: 0.5rem; background: var(--sp-panel-2); }
+.sp-health-event--good { border-left-color: var(--sp-green); }
+.sp-health-event--warn { border-left-color: var(--sp-amber); }
+.sp-health-event--bad { border-left-color: var(--sp-red); }
+.sp-health-event--info { border-left-color: var(--sp-blue); }
 .sp-health-event-head { display: flex; align-items: center; flex-wrap: wrap; gap: 0.625rem; }
 .sp-health-event-head time { color: var(--sp-muted); font-size: 0.75rem; }
 .sp-health-event-head strong { margin-left: auto; font-size: 0.8125rem; font-variant-numeric: tabular-nums; }
@@ -788,24 +923,29 @@ onMounted(() => {
 .sp-health-event dl > div { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); gap: 0.75rem; }
 .sp-health-event dt { color: var(--sp-muted); font-size: 0.72rem; }
 .sp-health-event dd { margin: 0; overflow-wrap: anywhere; font-size: 0.78rem; }
-.sp-health-account-cell { display: grid; gap: 0.35rem; min-width: 15rem; }
+.sp-health-account-cell { display: grid; gap: 0.35rem; min-width: 12.5rem; }
 .sp-health-account-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; }
-.sp-health-chip { display: inline-flex; align-items: center; min-height: 1.25rem; padding: 0.1rem 0.45rem; border-radius: 999px; font-size: 0.68rem; font-weight: 600; line-height: 1.1; }
-.sp-health-chip--provider.provider-0 { color: #2563eb; background: #eff6ff; }
-.sp-health-chip--provider.provider-1 { color: #7c3aed; background: #f5f3ff; }
-.sp-health-chip--provider.provider-2 { color: #c2410c; background: #fff7ed; }
-.sp-health-chip--provider.provider-3 { color: #047857; background: #ecfdf5; }
-.sp-health-chip--provider.provider-4 { color: #be185d; background: #fdf2f8; }
-.sp-health-chip--platform.platform-0 { color: #0f766e; background: #f0fdfa; }
-.sp-health-chip--platform.platform-1 { color: #4338ca; background: #eef2ff; }
-.sp-health-chip--platform.platform-2 { color: #b45309; background: #fffbeb; }
-.sp-health-chip--platform.platform-3 { color: #15803d; background: #f0fdf4; }
-.sp-health-chip--platform.platform-4 { color: #0369a1; background: #f0f9ff; }
-.sp-health-trend-cell { display: grid; min-width: 22rem; gap: 0.4rem; padding: 0.45rem 0.55rem 0.35rem; border: 1px solid var(--sp-soft, #e5e7eb); border-radius: 0.5rem; background: linear-gradient(180deg, color-mix(in srgb, var(--sp-panel-2, #fff) 92%, var(--sp-cyan, #0891b2) 8%), var(--sp-panel-2, #fff)); }
+/* 芯片配色只声明色相，底色和描边由 color-mix 混入当前面板色，明暗主题共用一套规则 */
+.sp-health-chip { display: inline-flex; align-items: center; min-height: 1.25rem; padding: 0.1rem 0.45rem; border: 1px solid color-mix(in srgb, var(--chip-hue) 28%, var(--sp-line)); border-radius: 999px; background: color-mix(in srgb, var(--chip-hue) 10%, var(--sp-panel)); color: var(--chip-hue); font-size: 0.68rem; font-weight: 600; line-height: 1.1; }
+.dark .sp-health-chip { color: color-mix(in srgb, var(--chip-hue) 55%, #ffffff); }
+.sp-health-chip--provider.provider-0 { --chip-hue: #2563eb; }
+.sp-health-chip--provider.provider-1 { --chip-hue: #7c3aed; }
+.sp-health-chip--provider.provider-2 { --chip-hue: #c2410c; }
+.sp-health-chip--provider.provider-3 { --chip-hue: #047857; }
+.sp-health-chip--provider.provider-4 { --chip-hue: #be185d; }
+.sp-health-chip--platform.platform-0 { --chip-hue: #0f766e; }
+.sp-health-chip--platform.platform-1 { --chip-hue: #4338ca; }
+.sp-health-chip--platform.platform-2 { --chip-hue: #b45309; }
+.sp-health-chip--platform.platform-3 { --chip-hue: #15803d; }
+.sp-health-chip--platform.platform-4 { --chip-hue: #0369a1; }
+.sp-health-trend-cell { display: grid; min-width: 16rem; gap: 0.4rem; padding: 0.45rem 0.55rem 0.35rem; border: 1px solid var(--sp-soft, #e5e7eb); border-radius: 0.5rem; background: linear-gradient(180deg, color-mix(in srgb, var(--sp-panel-2, #fff) 92%, var(--sp-cyan, #0891b2) 8%), var(--sp-panel-2, #fff)); }
 .sp-health-trend-meta { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; color: var(--sp-muted); font-size: 0.7rem; line-height: 1; }
 .sp-health-trend-meta span { color: var(--sp-text); font-variant-numeric: tabular-nums; }
-.sp-health-trend-meta time { font-variant-numeric: tabular-nums; }
+.sp-health-trend-meta em { color: var(--sp-amber, #d97706); font-style: normal; font-variant-numeric: tabular-nums; }
+.sp-health-trend-meta time { margin-left: auto; font-variant-numeric: tabular-nums; }
 .sp-health-trend-bars { display: flex; align-items: end; gap: 0.2rem; height: 6.5rem; padding: 0.35rem 0; border-bottom: 1px solid var(--sp-soft, #d1d5db); background: repeating-linear-gradient(to top, transparent 0, transparent calc(33.333% - 1px), color-mix(in srgb, var(--sp-soft, #d1d5db) 72%, transparent) calc(33.333% - 1px), color-mix(in srgb, var(--sp-soft, #d1d5db) 72%, transparent) 33.333%); }
+/* 阈值线画在内容区 60% 处，与 latencyBarHeight 的阈值归一比例一致，过线即慢响应 */
+.sp-health-trend-bars--threshold { background: linear-gradient(to top, transparent calc(60% - 1px), color-mix(in srgb, var(--sp-amber, #d97706) 60%, transparent) calc(60% - 1px), color-mix(in srgb, var(--sp-amber, #d97706) 60%, transparent) 60%, transparent 60%); background-clip: content-box; }
 .sp-health-trend-bar { display: block; flex: 1 1 0; min-width: 0.32rem; max-width: 0.8rem; min-height: 0.5rem; border-radius: 0.2rem 0.2rem 0.08rem 0.08rem; box-shadow: inset 0 1px rgb(255 255 255 / 25%); transition: height 160ms ease, opacity 160ms ease; }
 .sp-health-trend-bar:hover { opacity: 0.72; }
 .sp-health-trend-bar--good { background: var(--sp-green, #16a34a); }

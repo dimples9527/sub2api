@@ -13,19 +13,26 @@ import (
 )
 
 type supplierAccountHealthTrendHandlerStub struct {
-	listParams   service.SupplierAccountHealthAccountListParams
-	trendID      int64
-	trendRange   string
-	batchIDs     []int64
-	batchRange   string
-	listResult   service.SupplierAccountHealthAccountListResult
-	trendResult  service.SupplierAccountHealthTrendResult
-	batchResults []service.SupplierAccountHealthTrendResult
+	listParams    service.SupplierAccountHealthAccountListParams
+	summaryParams service.SupplierAccountHealthAccountListParams
+	trendID       int64
+	trendRange    string
+	batchIDs      []int64
+	batchRange    string
+	listResult    service.SupplierAccountHealthAccountListResult
+	summaryResult service.SupplierAccountHealthSummary
+	trendResult   service.SupplierAccountHealthTrendResult
+	batchResults  []service.SupplierAccountHealthTrendResult
 }
 
 func (s *supplierAccountHealthTrendHandlerStub) ListAccounts(_ context.Context, params service.SupplierAccountHealthAccountListParams) (service.SupplierAccountHealthAccountListResult, error) {
 	s.listParams = params
 	return s.listResult, nil
+}
+
+func (s *supplierAccountHealthTrendHandlerStub) GetSummary(_ context.Context, params service.SupplierAccountHealthAccountListParams) (service.SupplierAccountHealthSummary, error) {
+	s.summaryParams = params
+	return s.summaryResult, nil
 }
 
 func (s *supplierAccountHealthTrendHandlerStub) GetTrend(_ context.Context, accountID int64, rangeValue string) (service.SupplierAccountHealthTrendResult, error) {
@@ -61,6 +68,25 @@ func TestSupplierAccountHealthHandlerListsAccountsWithFiltersAndPagination(t *te
 	}, stub.listParams)
 	require.Contains(t, rec.Body.String(), `"local_account_id":101`)
 	require.Contains(t, rec.Body.String(), `"rate_multiplier":1.25`)
+}
+
+func TestSupplierAccountHealthHandlerGetsSummaryIgnoringStatusFilter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stub := &supplierAccountHealthTrendHandlerStub{
+		summaryResult: service.SupplierAccountHealthSummary{Total: 9, Healthy: 5, Slow: 2, Failed: 1, Unchecked: 1},
+	}
+	handler := NewSupplierAccountHealthHandler(stub)
+	router := gin.New()
+	router.GET("/summary", handler.GetSummary)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/summary?provider_id=7&platform=%20grok%20&search=%20acct%20&health_status=failed", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, service.SupplierAccountHealthAccountListParams{ProviderID: 7, Platform: "grok", Search: "acct"}, stub.summaryParams)
+	require.Contains(t, rec.Body.String(), `"total":9`)
+	require.Contains(t, rec.Body.String(), `"unchecked":1`)
 }
 
 func TestSupplierAccountHealthHandlerGetsTrendWithDefaultRange(t *testing.T) {

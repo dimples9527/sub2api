@@ -36,6 +36,14 @@ export interface SupplierAccountHealthAccountListResult {
   page_size: number
 }
 
+export interface SupplierAccountHealthSummary {
+  total: number
+  healthy: number
+  slow: number
+  failed: number
+  unchecked: number
+}
+
 export interface SupplierAccountHealthTrend {
   account_id: number
   range: SupplierAccountHealthRange | string
@@ -57,6 +65,16 @@ export async function listSupplierAccountHealthAccounts(
 ): Promise<SupplierAccountHealthAccountListResult> {
   const { data } = await apiClient.get<SupplierAccountHealthAccountListResult>(
     '/admin/supplier-management/account-health/accounts',
+    { params }
+  )
+  return data
+}
+
+export async function getSupplierAccountHealthSummary(
+  params: Pick<SupplierAccountHealthAccountListParams, 'provider_id' | 'platform' | 'search'> = {}
+): Promise<SupplierAccountHealthSummary> {
+  const { data } = await apiClient.get<SupplierAccountHealthSummary>(
+    '/admin/supplier-management/account-health/summary',
     { params }
   )
   return data
@@ -86,6 +104,7 @@ export async function getSupplierAccountHealthTrends(
 
 export const supplierAccountHealthAPI = {
   listAccounts: listSupplierAccountHealthAccounts,
+  getSummary: getSupplierAccountHealthSummary,
   getTrend: getSupplierAccountHealthTrend,
   getTrends: getSupplierAccountHealthTrends,
 }

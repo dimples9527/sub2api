@@ -14,6 +14,9 @@ const (
 	// 批量趋势接口的防护上限，避免一次请求拖垮数据库或返回过大的响应。
 	SupplierAccountHealthBatchMaxAccounts = 100
 	SupplierAccountHealthBatchPointLimit  = 50
+
+	// SupplierAccountHealthStatusUnchecked 用于筛选尚无健康检测记录的账号。
+	SupplierAccountHealthStatusUnchecked = "unchecked"
 )
 
 type SupplierAccountHealthHistoryRecord struct {
@@ -47,6 +50,7 @@ type SupplierAccountHealthHistoryRepository interface {
 	SupplierAccountHealthHistoryRecorder
 	ValidateAccount(ctx context.Context, accountID int64) error
 	ListAccounts(ctx context.Context, params SupplierAccountHealthAccountListParams) (SupplierAccountHealthAccountListResult, error)
+	GetSummary(ctx context.Context, params SupplierAccountHealthAccountListParams) (SupplierAccountHealthSummary, error)
 	GetTrend(ctx context.Context, accountID int64, since time.Time) (SupplierAccountHealthTrendResult, error)
 	GetTrends(ctx context.Context, accountIDs []int64, since time.Time, pointLimit int) (map[int64]SupplierAccountHealthTrendResult, error)
 	DeleteBefore(ctx context.Context, before time.Time, batchSize int) (int, error)
@@ -82,6 +86,15 @@ type SupplierAccountHealthAccountListResult struct {
 	Total    int64                          `json:"total"`
 	Page     int                            `json:"page"`
 	PageSize int                            `json:"page_size"`
+}
+
+// SupplierAccountHealthSummary 按最近一次检测状态汇总账号数量，供列表页概览卡展示。
+type SupplierAccountHealthSummary struct {
+	Total     int64 `json:"total"`
+	Healthy   int64 `json:"healthy"`
+	Slow      int64 `json:"slow"`
+	Failed    int64 `json:"failed"`
+	Unchecked int64 `json:"unchecked"`
 }
 
 type SupplierAccountHealthPoint struct {
@@ -142,6 +155,13 @@ func (s *SupplierAccountHealthTrendService) ListAccounts(ctx context.Context, pa
 		return SupplierAccountHealthAccountListResult{}, errors.New("账号健康历史服务未初始化")
 	}
 	return s.repository.ListAccounts(ctx, params)
+}
+
+func (s *SupplierAccountHealthTrendService) GetSummary(ctx context.Context, params SupplierAccountHealthAccountListParams) (SupplierAccountHealthSummary, error) {
+	if s == nil || s.repository == nil {
+		return SupplierAccountHealthSummary{}, errors.New("账号健康历史服务未初始化")
+	}
+	return s.repository.GetSummary(ctx, params)
 }
 
 func (s *SupplierAccountHealthTrendService) GetTrend(ctx context.Context, accountID int64, rangeValue string) (SupplierAccountHealthTrendResult, error) {

@@ -12,6 +12,7 @@ import (
 
 type SupplierAccountHealthTrendServicePort interface {
 	ListAccounts(ctx context.Context, params service.SupplierAccountHealthAccountListParams) (service.SupplierAccountHealthAccountListResult, error)
+	GetSummary(ctx context.Context, params service.SupplierAccountHealthAccountListParams) (service.SupplierAccountHealthSummary, error)
 	GetTrend(ctx context.Context, accountID int64, rangeValue string) (service.SupplierAccountHealthTrendResult, error)
 	GetTrends(ctx context.Context, accountIDs []int64, rangeValue string) ([]service.SupplierAccountHealthTrendResult, error)
 }
@@ -37,6 +38,21 @@ func (h *SupplierAccountHealthHandler) ListAccounts(c *gin.Context) {
 		HealthStatus: strings.TrimSpace(c.Query("health_status")),
 		Page:         page,
 		PageSize:     pageSize,
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+// GetSummary 返回筛选范围内按最近检测状态汇总的账号数量，供列表页概览卡使用。
+// 状态本身是概览卡的切换维度，因此不解析 health_status。
+func (h *SupplierAccountHealthHandler) GetSummary(c *gin.Context) {
+	result, err := h.service.GetSummary(c.Request.Context(), service.SupplierAccountHealthAccountListParams{
+		ProviderID: parseOptionalInt64(c.Query("provider_id")),
+		Platform:   strings.TrimSpace(c.Query("platform")),
+		Search:     strings.TrimSpace(c.Query("search")),
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

@@ -163,10 +163,48 @@ func supplierAccountHealthAccountFilters(params service.SupplierAccountHealthAcc
 		conditions = append(conditions, fmt.Sprintf("(local_account.name ILIKE $%d OR local_account.id::text ILIKE $%d)", len(args), len(args)))
 	}
 	if status := strings.ToLower(strings.TrimSpace(params.HealthStatus)); status != "" {
-		args = append(args, status)
-		conditions = append(conditions, fmt.Sprintf("latest.status = $%d", len(args)))
+		if status == service.SupplierAccountHealthStatusUnchecked {
+			conditions = append(conditions, "latest.status IS NULL")
+		} else {
+			args = append(args, status)
+			conditions = append(conditions, fmt.Sprintf("latest.status = $%d", len(args)))
+		}
 	}
 	return args, conditions
+}
+
+// GetSummary 按最近一次检测状态聚合账号数量。状态筛选是概览卡自身的切换维度，
+// 因此这里忽略 HealthStatus，保证点选某个状态后其它卡片数字不会归零。
+func (r *supplierAccountHealthHistoryRepository) GetSummary(ctx context.Context, params service.SupplierAccountHealthAccountListParams) (service.SupplierAccountHealthSummary, error) {
+	params.HealthStatus = ""
+	args, conditions := supplierAccountHealthAccountFilters(params)
+	query := fmt.Sprintf(`
+WITH account_sources AS (
+%s
+)
+SELECT COUNT(*) AS total,
+       COUNT(*) FILTER (WHERE latest.status = 'healthy') AS healthy,
+       COUNT(*) FILTER (WHERE latest.status = 'slow') AS slow,
+       COUNT(*) FILTER (WHERE latest.status = 'failed') AS failed,
+       COUNT(*) FILTER (WHERE latest.status IS NULL) AS unchecked
+FROM account_sources src
+JOIN accounts local_account ON local_account.id = src.local_account_id AND local_account.deleted_at IS NULL
+LEFT JOIN LATERAL (
+    SELECT h.status
+    FROM supplier_account_health_history h
+    WHERE h.local_account_id = src.local_account_id
+    ORDER BY h.checked_at DESC, h.id DESC
+    LIMIT 1
+) latest ON TRUE
+WHERE %s`, supplierAccountHealthAccountSourcesSQL(), strings.Join(conditions, " AND "))
+
+	var summary service.SupplierAccountHealthSummary
+	if err := r.db.QueryRowContext(ctx, query, args...).Scan(
+		&summary.Total, &summary.Healthy, &summary.Slow, &summary.Failed, &summary.Unchecked,
+	); err != nil {
+		return service.SupplierAccountHealthSummary{}, fmt.Errorf("查询账号健康概览失败: %w", err)
+	}
+	return summary, nil
 }
 
 func scanSupplierAccountHealthAccount(scanner interface{ Scan(dest ...any) error }) (service.SupplierAccountHealthAccount, int64, error) {

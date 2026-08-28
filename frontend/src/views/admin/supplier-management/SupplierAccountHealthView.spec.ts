@@ -58,14 +58,14 @@ describe('SupplierAccountHealthView', () => {
     expect(source).toContain('platformTone(account.platform)')
     expect(source).toContain('healthTrendByAccountId')
     expect(source).toContain('sp-health-trend-bar')
-    expect(source).toContain('latencyBarHeight(point.latency_ms')
+    expect(source).toContain('latencyBarHeight(point, account)')
     expect(source).toContain('formatTrendHealthRate(account.local_account_id)')
     expect(source).toContain('statusTone(point.status)')
   })
 
   it('renders an enlarged chart for each account health trend', () => {
     expect(source).toContain('const TREND_BAR_COUNT = 28')
-    expect(source).toContain('.sp-health-trend-cell { display: grid; min-width: 22rem;')
+    expect(source).toContain('.sp-health-trend-cell { display: grid; min-width: 16rem;')
     expect(source).toContain('.sp-health-trend-bars { display: flex; align-items: end; gap: 0.2rem; height: 6.5rem;')
   })
 
@@ -101,6 +101,80 @@ describe('SupplierAccountHealthView', () => {
     expect(source).toContain('Selected Account')
     expect(source).toContain('Health Trend')
     expect(source).toContain('Latency')
+  })
+
+  it('keeps diagnostics inside the detail dialog instead of auto-selecting the first account', () => {
+    expect(source).toContain('sp-health-event-panel')
+    expect(source).toContain('detailEventPoints')
+    expect(source).not.toContain('accounts.value[0]')
+    expect(source).not.toContain('function selectAccount')
+  })
+
+  it('builds provider and platform filters from independent catalogs', () => {
+    expect(source).toContain('async function loadFilterOptions()')
+    expect(source).toContain('supplierProvidersAPI.list(')
+    expect(source).toContain('buildPlatformOptions(customPlatforms.value)')
+  })
+
+  it('shows the health guard hint from the global automation switch', () => {
+    expect(source).toContain('guardTaskDisabled')
+    expect(source).toContain('健康守护任务未启用')
+    expect(source).toContain('/admin/supplier-management/automations')
+  })
+
+  it('normalizes trend bars by the latency threshold and draws a threshold line', () => {
+    expect(source).toContain('const TREND_THRESHOLD_RATIO = 0.6')
+    expect(source).toContain('sp-health-trend-bars--threshold')
+    expect(source).toContain('阈值 {{ account.latency_limit_ms }} ms')
+  })
+
+  it('merges latency and checked time into one column', () => {
+    expect(source).toContain("{ key: 'latency_ms', label: '最近响应 / 检测时间' }")
+    expect(source).not.toContain('#cell-checked_at')
+  })
+
+  it('explains list failures in the empty state and debounces search', () => {
+    expect(source).toContain('账号健康列表加载失败')
+    expect(source).toContain('重试')
+    expect(source).toContain("import { useDebounceFn } from '@vueuse/core'")
+    expect(source).toContain('debouncedSearchReload')
+  })
+
+  it('keeps the filter bar inside the account panel and drops the standalone filter panel', () => {
+    expect(source).not.toContain('sp-health-filter-panel')
+    expect(source).toContain('<div class="sp-health-filters" role="group" aria-label="账号健康筛选">')
+    expect(source).toContain('sp-health-head-meta')
+    expect(source).not.toContain('sp-data-note')
+  })
+
+  it('colors chips through a single theme-safe rule instead of hardcoded light backgrounds', () => {
+    expect(source).toContain('--chip-hue')
+    expect(source).toContain('.dark .sp-health-chip')
+    expect(source).not.toContain('background: #eff6ff')
+  })
+
+  it('tones diagnostics cards by status and renders error details in monospace', () => {
+    expect(source).toContain('sp-health-event--${statusTone(point.status)}')
+    expect(source).toContain('.sp-health-event--bad { border-left-color: var(--sp-red); }')
+    expect(source).toContain('.sp-health-latest-error strong,')
+  })
+
+  it('renders clickable health overview cards backed by a summary endpoint', () => {
+    expect(apiSource).toContain("'/admin/supplier-management/account-health/summary'")
+    expect(apiSource).toContain('unchecked: number')
+    expect(source).toContain('<section class="sp-metric-grid sp-health-metrics" aria-label="账号健康概览">')
+    expect(source).toContain('summaryMetrics')
+    expect(source).toContain('selectHealthStatus(metric.key)')
+    expect(source).toContain("{ value: 'unchecked', label: '未检测' }")
+    expect(source).toContain('--sp-metric-accent')
+  })
+
+  it('keeps overview counts stable while switching the health status filter', () => {
+    expect(source).toContain('watch([providerId, platform], () => {')
+    expect(source).not.toContain('watch([providerId, platform, healthStatus]')
+    const statusWatchSource = source.match(/watch\(healthStatus, \(\) => \{([\s\S]*?)\n\}\)/)?.[1] || ''
+    expect(statusWatchSource).toContain('void loadAccounts()')
+    expect(statusWatchSource).not.toContain('loadSummary')
   })
 
 })
