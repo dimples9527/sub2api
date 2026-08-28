@@ -80,7 +80,7 @@
         <div class="po-table-wrapper">
           <DataTable
             :columns="columns"
-            :data="filteredGroups"
+            :data="pagedGroups"
             :loading="loading"
             row-key="id"
           >
@@ -167,6 +167,17 @@
           </DataTable>
         </div>
       </template>
+
+      <template #pagination>
+        <Pagination
+          v-if="filteredGroups.length > 0"
+          :page="page"
+          :total="filteredGroups.length"
+          :page-size="pageSize"
+          @update:page="page = $event"
+          @update:pageSize="changePageSize"
+        />
+      </template>
     </TablePageLayout>
 
     <BaseDialog
@@ -247,11 +258,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { platformBadgeClass } from '@/utils/platformColors'
 import { adminAPI } from '@/api/admin'
+import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { resolvePlatformDisplayLabel, setCustomPlatformLabels } from '@/utils/customPlatformLabels'
 import { customPlatformBadgeStyle, resolvePlatformColor, updateCustomPlatformColors } from '@/utils/customPlatformColors'
 import { buildPlatformOptions } from '@/utils/platformOptions'
@@ -264,6 +276,7 @@ import SearchInput from '@/components/common/SearchInput.vue'
 import Select from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
+import Pagination from '@/components/common/Pagination.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import type { LLMMonitorGroupPlatformOverride } from '@/api/admin/modelMonitor'
@@ -275,6 +288,8 @@ const groups = ref<LLMMonitorGroupPlatformOverride[]>([])
 const customPlatforms = ref<CustomPlatform[]>([])
 const searchQuery = ref('')
 const platformFilter = ref<'all' | string>('all')
+const page = ref(1)
+const pageSize = ref(getPersistedPageSize())
 const savingGroupId = ref<number | null>(null)
 const showEditDialog = ref(false)
 const editingGroup = ref<LLMMonitorGroupPlatformOverride | null>(null)
@@ -324,6 +339,25 @@ const filteredGroups = computed(() => {
     })
     .sort((left, right) => left.name.localeCompare(right.name, 'zh-Hans-CN'))
 })
+
+const pagedGroups = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return filteredGroups.value.slice(start, start + pageSize.value)
+})
+
+watch([searchQuery, platformFilter], () => {
+  page.value = 1
+})
+
+watch([() => filteredGroups.value.length, pageSize], ([total, size]) => {
+  const lastPage = Math.max(1, Math.ceil(total / size))
+  if (page.value > lastPage) page.value = lastPage
+})
+
+function changePageSize(size: number) {
+  pageSize.value = size
+  page.value = 1
+}
 
 const clearConfirmMessage = computed(() => {
   if (!clearTargetGroup.value) return ''
@@ -907,6 +941,10 @@ onMounted(() => {
 
 /* ===== 表格 ===== */
 .po-table-wrapper {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
   overflow: hidden;
   border: 1px solid #e5e7eb;
   border-radius: 0.875rem;

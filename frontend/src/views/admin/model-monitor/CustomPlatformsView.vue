@@ -937,6 +937,10 @@ onMounted(() => {
 
 /* ===== 表格 ===== */
 .cp-table-wrapper {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
   overflow: hidden;
   border: 1px solid #e5e7eb;
   border-radius: 0.875rem;
