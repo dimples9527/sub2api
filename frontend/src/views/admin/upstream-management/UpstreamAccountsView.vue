@@ -398,6 +398,12 @@
                   </span>
                   <span v-else class="dash">-</span>
                   <span
+                    v-if="accountTestStatusById[row.matched_account_id || 0] === 'success' && getMatchedAccount(row)?.last_tested_at"
+                    class="test-success-time"
+                  >
+                    {{ formatDateTime(getMatchedAccount(row)!.last_tested_at!) }}
+                  </span>
+                  <span
                     v-if="accountHealthGuardStatus(getMatchedAccount(row))"
                     :class="[
                       'test-status-guard-tag',
@@ -5238,6 +5244,12 @@ button.guard-ignore-summary:disabled {
   font-size: 11px;
   font-weight: 600;
   line-height: 16px;
+  white-space: nowrap;
+}
+
+.test-success-time {
+  font-size: 11px;
+  color: #6b7280;
   white-space: nowrap;
 }
 

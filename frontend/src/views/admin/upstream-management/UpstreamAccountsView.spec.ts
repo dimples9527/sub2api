@@ -2882,6 +2882,9 @@ describe('UpstreamAccountsView', () => {
     const guardTag = wrapper.find('.test-status-guard-tag--slow')
     expect(guardTag.exists()).toBe(true)
     expect(guardTag.text()).toContain('守护慢响应')
+    const successTime = wrapper.find('.test-success-time')
+    expect(successTime.exists()).toBe(true)
+    expect(successTime.text()).toContain('2026')
   })
 
   it('shows the supplier health guard failed tag for guard test failures', async () => {
