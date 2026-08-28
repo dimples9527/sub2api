@@ -124,6 +124,11 @@
           <span>{{ account.checked_at ? formatDateTime(account.checked_at) : '尚未检测' }}</span>
           <div class="sp-sub">{{ account.guard_enabled ? '健康守护已启用' : '健康守护未启用' }}</div>
         </template>
+        <template #cell-actions="{ row: account }">
+          <button class="sp-button sp-health-detail-button" type="button" @click="openHealthDetail(account.local_account_id)">
+            查看详情
+          </button>
+        </template>
         <template #empty>
           <div class="sp-empty-state sp-health-empty">
             <strong>暂无可展示的账号</strong>
@@ -142,80 +147,84 @@
       </footer>
     </section>
 
-    <section v-if="selectedAccount" class="sp-health-detail-grid">
-      <article class="sp-panel sp-health-summary-panel">
-        <header class="sp-panel-head">
-          <div class="sp-panel-title">
-            <div>
-              <span class="sp-panel-kicker">Selected Account</span>
-              <h2>{{ selectedAccount.local_account_name || ('账号 #' + selectedAccount.local_account_id) }}</h2>
-              <p>{{ selectedAccount.provider_name || '—' }} · {{ selectedAccount.platform || '未知平台' }} · ID {{ selectedAccount.local_account_id }}</p>
+    <BaseDialog :show="healthDetailVisible" title="账号健康详情" width="full" @close="closeHealthDetail">
+      <div class="sp-health-detail-dialog supplier-management-page">
+        <div v-if="selectedAccount" class="sp-health-detail-grid">
+          <article class="sp-panel sp-health-summary-panel">
+            <header class="sp-panel-head">
+              <div class="sp-panel-title">
+                <div>
+                  <span class="sp-panel-kicker">Selected Account</span>
+                  <h2>{{ selectedAccount.local_account_name || ('账号 #' + selectedAccount.local_account_id) }}</h2>
+                  <p>{{ selectedAccount.provider_name || '—' }} · {{ selectedAccount.platform || '未知平台' }} · ID {{ selectedAccount.local_account_id }}</p>
+                </div>
+              </div>
+              <span class="sp-status" :class="statusTone(latestPoint?.status || selectedAccount.status)">{{ statusLabel(latestPoint?.status || selectedAccount.status) }}</span>
+            </header>
+            <div class="sp-health-kpis">
+              <div class="sp-chart-kpi">
+                <span>当前状态</span>
+                <b :class="statusTone(latestPoint?.status || selectedAccount.status)">{{ statusLabel(latestPoint?.status || selectedAccount.status) }}</b>
+              </div>
+              <div class="sp-chart-kpi">
+                <span>最近响应</span>
+                <b>{{ formatLatency(latestPoint?.latency_ms ?? selectedAccount.latency_ms) }}</b>
+              </div>
+              <div class="sp-chart-kpi">
+                <span>检测阈值</span>
+                <b>{{ selectedAccount.latency_limit_ms > 0 ? selectedAccount.latency_limit_ms + ' ms' : '未设置' }}</b>
+              </div>
+              <div class="sp-chart-kpi">
+                <span>检测记录</span>
+                <b>{{ trendPoints.length }}</b>
+              </div>
             </div>
-          </div>
-          <span class="sp-status" :class="statusTone(latestPoint?.status || selectedAccount.status)">{{ statusLabel(latestPoint?.status || selectedAccount.status) }}</span>
-        </header>
-        <div class="sp-health-kpis">
-          <div class="sp-chart-kpi">
-            <span>当前状态</span>
-            <b :class="statusTone(latestPoint?.status || selectedAccount.status)">{{ statusLabel(latestPoint?.status || selectedAccount.status) }}</b>
-          </div>
-          <div class="sp-chart-kpi">
-            <span>最近响应</span>
-            <b>{{ formatLatency(latestPoint?.latency_ms ?? selectedAccount.latency_ms) }}</b>
-          </div>
-          <div class="sp-chart-kpi">
-            <span>检测阈值</span>
-            <b>{{ selectedAccount.latency_limit_ms > 0 ? selectedAccount.latency_limit_ms + ' ms' : '未设置' }}</b>
-          </div>
-          <div class="sp-chart-kpi">
-            <span>检测记录</span>
-            <b>{{ trendPoints.length }}</b>
-          </div>
-        </div>
-        <div v-if="!trendLoading && !trendPoints.length" class="sp-empty-state sp-health-no-history">
-          <strong>尚无健康检测记录</strong>
-          <span>{{ selectedAccount.guard_enabled ? '健康守护运行后会在这里生成趋势记录。' : '当前账号未启用健康守护，不会产生趋势记录。' }}</span>
-        </div>
-        <div v-else class="sp-health-latest">
-          <div><span>最近检测</span><strong>{{ latestPoint ? formatDateTime(latestPoint.checked_at) : '—' }}</strong></div>
-          <div><span>失败原因</span><strong>{{ latestPoint?.reason || '—' }}</strong></div>
-          <div><span>动作</span><strong>{{ latestPoint?.action || '—' }}</strong></div>
-          <div><span>错误详情</span><strong>{{ latestPoint?.error_message || '—' }}</strong></div>
-        </div>
-      </article>
+            <div v-if="!trendLoading && !trendPoints.length" class="sp-empty-state sp-health-no-history">
+              <strong>尚无健康检测记录</strong>
+              <span>{{ selectedAccount.guard_enabled ? '健康守护运行后会在这里生成趋势记录。' : '当前账号未启用健康守护，不会产生趋势记录。' }}</span>
+            </div>
+            <div v-else class="sp-health-latest">
+              <div><span>最近检测</span><strong>{{ latestPoint ? formatDateTime(latestPoint.checked_at) : '—' }}</strong></div>
+              <div><span>失败原因</span><strong>{{ latestPoint?.reason || '—' }}</strong></div>
+              <div><span>动作</span><strong>{{ latestPoint?.action || '—' }}</strong></div>
+              <div><span>错误详情</span><strong>{{ latestPoint?.error_message || '—' }}</strong></div>
+            </div>
+          </article>
 
-      <article class="sp-panel sp-health-chart-panel">
-        <header class="sp-panel-head">
-          <div class="sp-panel-title">
-            <div>
-              <span class="sp-panel-kicker">Health Trend</span>
-              <h2>健康状态趋势</h2>
-              <p>可用、慢响应和失败分别映射为 2、1、0。</p>
-            </div>
-          </div>
-          <span class="sp-status info">{{ selectedRange }}</span>
-        </header>
-        <div v-if="trendLoading" class="sp-health-chart-state">正在加载健康状态趋势…</div>
-        <div v-else-if="trendPoints.length" class="sp-health-chart"><Line :data="statusChartData" :options="statusChartOptions" /></div>
-        <div v-else class="sp-health-chart-state">尚无健康检测记录</div>
-      </article>
+          <article class="sp-panel sp-health-chart-panel">
+            <header class="sp-panel-head">
+              <div class="sp-panel-title">
+                <div>
+                  <span class="sp-panel-kicker">Health Trend</span>
+                  <h2>健康状态趋势</h2>
+                  <p>可用、慢响应和失败分别映射为 2、1、0。</p>
+                </div>
+              </div>
+              <span class="sp-status info">{{ selectedRange }}</span>
+            </header>
+            <div v-if="trendLoading" class="sp-health-chart-state">正在加载健康状态趋势…</div>
+            <div v-else-if="trendPoints.length" class="sp-health-chart"><Line :data="statusChartData" :options="statusChartOptions" /></div>
+            <div v-else class="sp-health-chart-state">尚无健康检测记录</div>
+          </article>
 
-      <article class="sp-panel sp-health-chart-panel">
-        <header class="sp-panel-head">
-          <div class="sp-panel-title">
-            <div>
-              <span class="sp-panel-kicker">Latency</span>
-              <h2>响应时间趋势</h2>
-              <p>失败记录保留为空值，不会误显示为 0 ms。</p>
-            </div>
-          </div>
-          <span class="sp-status info">{{ selectedRange }}</span>
-        </header>
-        <div v-if="trendLoading" class="sp-health-chart-state">正在加载响应时间趋势…</div>
-        <div v-else-if="trendPoints.length" class="sp-health-chart"><Line :data="latencyChartData" :options="latencyChartOptions" /></div>
-        <div v-else class="sp-health-chart-state">尚无健康检测记录</div>
-      </article>
-    </section>
+          <article class="sp-panel sp-health-chart-panel">
+            <header class="sp-panel-head">
+              <div class="sp-panel-title">
+                <div>
+                  <span class="sp-panel-kicker">Latency</span>
+                  <h2>响应时间趋势</h2>
+                  <p>失败记录保留为空值，不会误显示为 0 ms。</p>
+                </div>
+              </div>
+              <span class="sp-status info">{{ selectedRange }}</span>
+            </header>
+            <div v-if="trendLoading" class="sp-health-chart-state">正在加载响应时间趋势…</div>
+            <div v-else-if="trendPoints.length" class="sp-health-chart"><Line :data="latencyChartData" :options="latencyChartOptions" /></div>
+            <div v-else class="sp-health-chart-state">尚无健康检测记录</div>
+          </article>
+        </div>
+      </div>
+    </BaseDialog>
 
     <section v-if="selectedAccount && trendPoints.length" class="sp-panel sp-health-event-panel">
       <header class="sp-panel-head">
@@ -262,6 +271,7 @@ import {
 } from 'chart.js'
 import { Line } from 'vue-chartjs'
 import { SupplierModuleLayout } from '@/components/admin/supplier-management'
+import BaseDialog from '@/components/common/BaseDialog.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Input from '@/components/common/Input.vue'
 import Pagination from '@/components/common/Pagination.vue'
@@ -302,6 +312,7 @@ const providerId = ref<number | null>(null)
 const platform = ref('')
 const healthStatus = ref('')
 const selectedAccountId = ref<number | null>(null)
+const healthDetailVisible = ref(false)
 const trendPoints = ref<SupplierAccountHealthPoint[]>([])
 const healthTrendByAccountId = ref<Record<number, SupplierAccountHealthPoint[]>>({})
 const trendLoadingByAccountId = ref<Record<number, boolean>>({})
@@ -329,6 +340,7 @@ const accountColumns: Column[] = [
   { key: 'latency_ms', label: '最近响应' },
   { key: 'health_trend_sort', label: '健康趋势', sortable: true },
   { key: 'checked_at', label: '最近检测' },
+  { key: 'actions', label: '操作', class: 'min-w-[96px]' },
 ]
 
 const accountHealthSortData = computed<AccountHealthSortAccount[]>(() => accounts.value.map((account) => ({
@@ -686,6 +698,16 @@ function selectAccount(accountId: number) {
   void router.replace({ query: { ...route.query, account_id: String(accountId) } })
 }
 
+function openHealthDetail(accountId: number) {
+  selectedAccountId.value = accountId
+  healthDetailVisible.value = true
+  void router.replace({ query: { ...route.query, account_id: String(accountId) } })
+}
+
+function closeHealthDetail() {
+  healthDetailVisible.value = false
+}
+
 function selectRange(range: SupplierAccountHealthRange) {
   if (selectedRange.value === range) return
   selectedRange.value = range
@@ -738,6 +760,13 @@ onMounted(() => {
 .sp-health-chart-state { display: grid; min-height: 10rem; place-items: center; align-content: center; gap: 0.4rem; padding: 2rem; text-align: center; }
 .sp-health-empty span,
 .sp-health-no-history span { color: var(--sp-muted); font-size: 0.8125rem; }
+/* 弹窗根节点复用 supplier-management-page 提供 --sp-* 变量，并抵消其 min-height 副作用 */
+.sp-health-detail-dialog { min-height: 0; }
+/* BaseDialog teleport 到 body，通过 :has 匹配弹层并放大到超过 full 档位默认宽度 */
+:global(.modal-content:has(.sp-health-detail-dialog)) {
+  width: 100%;
+  max-width: min(96rem, calc(100vw - 2rem));
+}
 .sp-health-detail-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 1rem; margin-bottom: 1rem; }
 .sp-health-summary-panel { grid-row: span 2; }
 .sp-health-kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; padding: 0 1rem 1rem; }

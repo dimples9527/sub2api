@@ -93,4 +93,15 @@ describe('SupplierAccountHealthView', () => {
     expect(source).toContain('accountHealthSortData')
   })
 
+  it('\u5728\u64cd\u4f5c\u5217\u6253\u5f00\u5f39\u7a97\u67e5\u770b\u8d26\u53f7\u5065\u5eb7\u8be6\u60c5', () => {
+    expect(source).toContain("import BaseDialog from '@/components/common/BaseDialog.vue'")
+    expect(source).toContain("{ key: 'actions', label: '\u64cd\u4f5c'")
+    expect(source).toContain('openHealthDetail(account.local_account_id)')
+    expect(source).toContain('healthDetailVisible')
+    expect(source).toContain('sp-health-detail-dialog')
+    expect(source).toContain('Selected Account')
+    expect(source).toContain('Health Trend')
+    expect(source).toContain('Latency')
+  })
+
 })
