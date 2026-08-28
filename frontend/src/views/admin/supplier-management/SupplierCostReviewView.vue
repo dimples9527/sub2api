@@ -7,10 +7,19 @@
         <p class="sp-subtitle">对比接口成本与本地计算成本，逐条确认当前业务生效成本。</p>
       </div>
       <div class="sp-controls">
+        <button class="sp-button ghost" type="button" data-test="cost-alert-config-button" @click="openCostAlertConfigDialog">预警配置</button>
+        <button class="sp-button ghost" type="button" data-test="cost-alert-events-button" @click="openCostAlertEventsDialog">预警事件</button>
         <span v-if="lastLoadedAt" class="sp-data-note">更新于 {{ formatDateTime(lastLoadedAt) }}</span>
         <button class="sp-button primary" type="button" :disabled="loading" @click="loadReviews">{{ loading ? '刷新中…' : '刷新数据' }}</button>
       </div>
     </header>
+
+    <section class="sp-metric-grid cost-review-metrics" aria-label="成本核对摘要">
+      <article class="sp-metric-card sp-blue"><div class="sp-metric-label">当前记录</div><div class="sp-metric-value">{{ total }}</div><div class="sp-metric-foot">按当前筛选条件统计</div></article>
+      <article class="sp-metric-card sp-amber"><div class="sp-metric-label">待审批</div><div class="sp-metric-value">{{ statusCounts.pending_review }}</div><div class="sp-metric-foot">首次同步默认采用计算成本</div></article>
+      <article class="sp-metric-card sp-green"><div class="sp-metric-label">已审批</div><div class="sp-metric-value">{{ statusCounts.approved }}</div><div class="sp-metric-foot">人工决定已写入业务成本</div></article>
+      <article class="sp-metric-card sp-violet"><div class="sp-metric-label">审批后有新数据</div><div class="sp-metric-value">{{ statusCounts.changed_after_approval }}</div><div class="sp-metric-foot">需要重新确认最新成本</div></article>
+    </section>
 
     <section class="sp-panel cost-review-filters" aria-label="成本核对筛选">
       <div class="cost-review-filter-grid">
@@ -20,13 +29,6 @@
         <Select v-model="filters.status" :options="statusOptions" clearable aria-label="核对状态" placeholder="全部状态" @change="applyFilters" />
         <button class="sp-button ghost" type="button" :disabled="loading" @click="resetFilters">重置筛选</button>
       </div>
-    </section>
-
-    <section class="sp-metric-grid cost-review-metrics" aria-label="成本核对摘要">
-      <article class="sp-metric-card sp-blue"><div class="sp-metric-label">当前记录</div><div class="sp-metric-value">{{ total }}</div><div class="sp-metric-foot">按当前筛选条件统计</div></article>
-      <article class="sp-metric-card sp-amber"><div class="sp-metric-label">待审批</div><div class="sp-metric-value">{{ statusCounts.pending_review }}</div><div class="sp-metric-foot">首次同步默认采用计算成本</div></article>
-      <article class="sp-metric-card sp-green"><div class="sp-metric-label">已审批</div><div class="sp-metric-value">{{ statusCounts.approved }}</div><div class="sp-metric-foot">人工决定已写入业务成本</div></article>
-      <article class="sp-metric-card sp-violet"><div class="sp-metric-label">审批后有新数据</div><div class="sp-metric-value">{{ statusCounts.changed_after_approval }}</div><div class="sp-metric-foot">需要重新确认最新成本</div></article>
     </section>
 
       <section class="sp-panel cost-review-table-panel">
@@ -39,7 +41,12 @@
         </div>
       </header>
       <DataTable :columns="columns" :data="reviews" :loading="loading" row-key="id" selectable :selected-keys="selectedKeys" :virtualize-threshold="1000" @update:selected-keys="selectedKeys = $event" @selection-change="selectedKeys = $event">
-        <template #cell-provider_name="{ row }"><strong class="sp-entity">{{ row.provider_name }}</strong><span class="sp-sub">供应商 #{{ row.provider_id }}</span></template>
+        <template #cell-provider_name="{ row }">
+          <span class="provider-badge" :class="providerColorClass(row.provider_id)" :data-test="`provider-identity-${row.provider_id}`">
+            <strong>{{ row.provider_name }}</strong>
+            <span class="sp-sub">供应商 #{{ row.provider_id }}</span>
+          </span>
+        </template>
         <template #cell-upstream_cost="{ row }">{{ formatCost(row.upstream_cost) }}</template>
         <template #cell-calculated_cost="{ row }">{{ formatCost(row.calculated_cost) }}</template>
         <template #cell-auto_adopted_cost="{ row }">{{ formatCost(row.auto_adopted_cost) }}</template>
@@ -48,8 +55,8 @@
         <template #cell-cost_delta="{ row }"><span :class="deltaClass(row.cost_delta)">{{ formatSignedCost(row.cost_delta) }}</span></template>
         <template #cell-status="{ row }"><span class="sp-status" :class="statusClass(row.status)">{{ statusLabel(row.status) }}</span></template>
         <template #cell-decision_type="{ row }">{{ decisionLabel(row.decision_type) }}</template>
-        <template #cell-approved_at="{ row }">{{ formatDateTime(row.approved_at) }}</template>
-        <template #cell-last_synced_at="{ row }">{{ formatDateTime(row.last_synced_at) }}</template>
+        <template #cell-approved_at="{ row }"><span class="sp-sub">{{ formatDateTime(row.approved_at) }}</span></template>
+        <template #cell-last_synced_at="{ row }"><span class="sp-sub">{{ formatDateTime(row.last_synced_at) }}</span></template>
         <template #cell-actions="{ row }">
           <div class="cost-review-actions">
             <button class="sp-button small" type="button" :data-test="`approve-${row.id}`" @click="openApproval(row)">{{ row.status === 'approved' ? '重新审批' : '审批' }}</button>
@@ -61,99 +68,91 @@
       <div class="sp-pagination-row"><Pagination v-model:page="page" v-model:page-size="pageSize" :total="total" :show-jump="total > 100" @update:page="onPageChange" @update:page-size="onPageSizeChange" /></div>
     </section>
 
-    <section class="sp-panel cost-alert-panel" data-test="cost-alert-settings-section">
-      <header class="sp-panel-head">
-        <div class="sp-panel-title">
-          <span class="sp-section-index">02</span>
-          <div>
-            <h2>成本超额预警配置</h2>
-            <span>上游成本高于本地成本且差额超过阈值时产生预警，供应商配置优先于全局默认值。</span>
+    <BaseDialog :show="costAlertSettingsVisible" title="成本超额预警配置" width="wide" @close="closeCostAlertSettingsDialog">
+      <div class="cost-alert-dialog supplier-management-page" data-test="cost-alert-settings-section">
+        <div class="cost-alert-settings-body">
+          <div class="cost-alert-global-settings">
+            <Input
+              v-model="costAlertSettingsForm.amount"
+              type="number"
+              min="0"
+              step="0.000001"
+              label="全局差额阈值"
+              hint="填写 0 表示不触发成本超额预警。"
+              data-test="cost-alert-global-amount"
+            />
+            <button class="sp-button primary" type="button" data-test="save-cost-alert-settings" :disabled="savingCostAlertSettings" @click="saveCostAlertSettings">
+              {{ savingCostAlertSettings ? '保存中…' : '保存全局阈值' }}
+            </button>
           </div>
-        </div>
-        <span class="sp-status info">{{ costAlertOverrides.length }} 个供应商覆盖</span>
-      </header>
-      <div class="cost-alert-settings-body">
-        <div class="cost-alert-global-settings">
-          <Input
-            v-model="costAlertSettingsForm.amount"
-            type="number"
-            min="0"
-            step="0.000001"
-            label="全局差额阈值"
-            hint="填写 0 表示不触发成本超额预警。"
-            data-test="cost-alert-global-amount"
-          />
-          <button class="sp-button primary" type="button" data-test="save-cost-alert-settings" :disabled="savingCostAlertSettings" @click="saveCostAlertSettings">
-            {{ savingCostAlertSettings ? '保存中…' : '保存全局阈值' }}
-          </button>
-        </div>
-        <DataTable
-          :columns="costAlertOverrideColumns"
-          :data="costAlertOverrides"
-          :loading="costAlertLoading"
-          row-key="id"
-          :virtualize-threshold="1000"
-        >
-          <template #cell-provider_id="{ row }">
-            <strong class="sp-entity">{{ providerName(row.provider_id) }}</strong>
-            <span class="sp-sub">供应商 #{{ row.provider_id }}</span>
-          </template>
-          <template #cell-amount="{ row }">{{ formatDecimalString(row.amount) }}</template>
-          <template #cell-enabled="{ row }">
-            <div class="sp-inline">
-              <Toggle
-                :model-value="row.enabled"
-                :aria-label="`${providerName(row.provider_id)}成本预警${row.enabled ? '已启用' : '已停用'}`"
-                @click.stop
-                @update:model-value="saveCostAlertOverride({ ...row, enabled: $event })"
-              />
-              <span class="sp-status" :class="row.enabled ? 'good' : 'info'">{{ row.enabled ? '已启用' : '已停用' }}</span>
-            </div>
-          </template>
-          <template #cell-actions="{ row }">
-            <div class="cost-alert-actions">
-              <button class="sp-button small ghost" type="button" @click="openCostAlertOverrideDialog(row)">编辑</button>
-              <button
-                class="sp-button small danger"
-                type="button"
-                :disabled="deletingCostAlertOverrideId !== null"
-                @click="removeCostAlertOverride(row)"
-              >
-                {{ deletingCostAlertOverrideId === row.id ? '删除中…' : '删除' }}
-              </button>
-            </div>
-          </template>
-          <template #empty><div class="sp-panel-body sp-empty-state">暂无供应商覆盖配置，全部使用全局差额阈值。</div></template>
-        </DataTable>
-        <div class="cost-alert-add-row">
-          <Select
-            v-model="costAlertOverrideForm.providerId"
-            :options="availableCostAlertProviderOptions"
-            clearable
-            aria-label="新增覆盖供应商"
-            placeholder="选择供应商"
-            class="cost-alert-provider-select"
-          />
-          <Input v-model="costAlertOverrideForm.amount" type="number" min="0" step="0.000001" aria-label="覆盖差额阈值" placeholder="差额阈值" />
-          <label class="cost-alert-switch">
-            <span>启用覆盖</span>
-            <Toggle v-model="costAlertOverrideForm.enabled" />
-          </label>
-          <button class="sp-button primary" type="button" data-test="add-cost-alert-override" :disabled="savingCostAlertOverride" @click="saveCostAlertOverride()">新增覆盖配置</button>
+          <DataTable
+            :columns="costAlertOverrideColumns"
+            :data="costAlertOverrides"
+            :loading="costAlertLoading"
+            row-key="id"
+            :virtualize-threshold="1000"
+          >
+            <template #cell-provider_id="{ row }">
+              <span class="provider-badge" :class="providerColorClass(row.provider_id)" :data-test="`provider-identity-${row.provider_id}`">
+                <strong>{{ providerName(row.provider_id) }}</strong>
+                <span class="sp-sub">供应商 #{{ row.provider_id }}</span>
+              </span>
+            </template>
+            <template #cell-amount="{ row }">{{ formatDecimalString(row.amount) }}</template>
+            <template #cell-enabled="{ row }">
+              <div class="sp-inline">
+                <Toggle
+                  :model-value="row.enabled"
+                  :aria-label="`${providerName(row.provider_id)}成本预警${row.enabled ? '已启用' : '已停用'}`"
+                  @click.stop
+                  @update:model-value="saveCostAlertOverride({ ...row, enabled: $event })"
+                />
+                <span class="sp-status" :class="row.enabled ? 'good' : 'info'">{{ row.enabled ? '已启用' : '已停用' }}</span>
+              </div>
+            </template>
+            <template #cell-actions="{ row }">
+              <div class="cost-alert-actions">
+                <button class="sp-button small ghost" type="button" @click="openCostAlertOverrideDialog(row)">编辑</button>
+                <button
+                  class="sp-button small danger"
+                  type="button"
+                  :disabled="deletingCostAlertOverrideId !== null"
+                  @click="removeCostAlertOverride(row)"
+                >
+                  {{ deletingCostAlertOverrideId === row.id ? '删除中…' : '删除' }}
+                </button>
+              </div>
+            </template>
+            <template #empty><div class="sp-empty-state">暂无供应商覆盖配置，全部使用全局差额阈值。</div></template>
+          </DataTable>
+          <div class="cost-alert-add-row">
+            <Select
+              v-model="costAlertOverrideForm.providerId"
+              :options="availableCostAlertProviderOptions"
+              clearable
+              aria-label="新增覆盖供应商"
+              placeholder="选择供应商"
+              class="cost-alert-provider-select"
+            />
+            <Input v-model="costAlertOverrideForm.amount" type="number" min="0" step="0.000001" aria-label="覆盖差额阈值" placeholder="差额阈值" />
+            <label class="cost-alert-switch">
+              <span>启用覆盖</span>
+              <Toggle v-model="costAlertOverrideForm.enabled" />
+            </label>
+            <button class="sp-button primary" type="button" data-test="add-cost-alert-override" :disabled="savingCostAlertOverride" @click="saveCostAlertOverride()">新增覆盖配置</button>
+          </div>
         </div>
       </div>
-    </section>
-
-    <section class="sp-panel cost-alert-panel" data-test="cost-alert-events-section">
-      <header class="sp-panel-head">
-        <div class="sp-panel-title">
-          <span class="sp-section-index">03</span>
-          <div>
-            <h2>成本超额预警事件</h2>
-            <span>活动事件去重，本地成本恢复后自动闭环。</span>
-          </div>
+      <template #footer>
+        <div class="dialog-actions">
+          <button class="sp-button ghost" type="button" @click="closeCostAlertSettingsDialog">关闭</button>
         </div>
-        <div class="sp-controls">
+      </template>
+    </BaseDialog>
+
+    <BaseDialog :show="costAlertEventsVisible" title="成本超额预警事件" width="wide" @close="closeCostAlertEventsDialog">
+      <div class="cost-alert-dialog supplier-management-page" data-test="cost-alert-events-section">
+        <div class="cost-alert-event-toolbar">
           <Select
             v-model="costAlertEventFilters.type"
             :options="costAlertEventTypeOptions"
@@ -161,6 +160,7 @@
             aria-label="预警类型"
             placeholder="全部类型"
             class="cost-alert-filter-control"
+            @change="onCostAlertEventFiltersChange"
           />
           <Select
             v-model="costAlertEventFilters.status"
@@ -169,49 +169,56 @@
             aria-label="预警状态"
             placeholder="全部状态"
             class="cost-alert-filter-control"
+            @change="onCostAlertEventFiltersChange"
           />
-          <button class="sp-button small ghost" type="button" @click="resetCostAlertEventFilters">重置筛选</button>
+          <button class="sp-button ghost" type="button" @click="resetCostAlertEventFilters">重置筛选</button>
         </div>
-      </header>
-      <DataTable
-        :columns="costAlertEventColumns"
-        :data="costAlertEvents"
-        :loading="costAlertEventsLoading"
-        row-key="id"
-        :virtualize-threshold="1000"
-      >
-        <template #cell-provider_name="{ row }">
-          <strong class="sp-entity">{{ row.provider_name }}</strong>
-          <span class="sp-sub">{{ row.provider_code }}</span>
-        </template>
-        <template #cell-event_type="{ row }">
-          <span class="sp-tag" :class="row.event_type === 'cost_recovered' ? 'good' : 'warn'">{{ costAlertEventTypeLabel(row.event_type) }}</span>
-        </template>
-        <template #cell-status="{ row }">
-          <span class="sp-status" :class="row.status === 'active' ? 'warn' : 'good'">{{ costAlertEventStatusLabel(row.status) }}</span>
-        </template>
-        <template #cell-stat_date="{ row }">{{ formatDateOnly(row.stat_date) }}</template>
-        <template #cell-upstream_cost="{ row }">{{ formatDecimalString(row.upstream_cost) }}</template>
-        <template #cell-local_cost="{ row }">{{ formatDecimalString(row.local_cost) }}</template>
+        <DataTable
+          :columns="costAlertEventColumns"
+          :data="costAlertEvents"
+          :loading="costAlertEventsLoading"
+          row-key="id"
+          :virtualize-threshold="1000"
+        >
+          <template #cell-provider_name="{ row }">
+            <span class="provider-badge" :class="providerColorClass(row.provider_id)" :data-test="`provider-identity-${row.provider_id}`">
+              <strong>{{ row.provider_name }}</strong>
+              <span class="sp-sub">{{ row.provider_code }}</span>
+            </span>
+          </template>
+          <template #cell-event_type="{ row }">
+            <span class="sp-tag" :class="row.event_type === 'cost_recovered' ? 'good' : 'warn'">{{ costAlertEventTypeLabel(row.event_type) }}</span>
+          </template>
+          <template #cell-status="{ row }">
+            <span class="sp-status" :class="row.status === 'active' ? 'warn' : 'good'">{{ costAlertEventStatusLabel(row.status) }}</span>
+          </template>
+          <template #cell-stat_date="{ row }">{{ formatDateOnly(row.stat_date) }}</template>
+          <template #cell-upstream_cost="{ row }">{{ formatDecimalString(row.upstream_cost) }}</template>
+          <template #cell-local_cost="{ row }">{{ formatDecimalString(row.local_cost) }}</template>
           <template #cell-overrun_amount="{ row }">
             <span :class="row.event_type === 'cost_recovered' ? 'cost-negative' : 'cost-positive'">{{ formatDecimalString(row.overrun_amount) }}</span>
           </template>
-        <template #cell-threshold="{ row }">{{ formatDecimalString(row.threshold) }}</template>
-        <template #cell-observed_at="{ row }">{{ formatDateTime(row.observed_at) }}</template>
-        <template #empty><div class="sp-panel-body sp-empty-state">暂无成本超额预警事件。</div></template>
-      </DataTable>
-      <div class="sp-pagination-row">
-        <Pagination
-          v-model:page="costAlertEventPage"
-          v-model:page-size="costAlertEventPageSize"
-          :total="costAlertEventTotal"
-          :show-jump="costAlertEventTotal > 100"
-          @update:page="loadCostAlertEvents"
-          @update:page-size="onCostAlertEventPageSizeChange"
-        />
+          <template #cell-threshold="{ row }">{{ formatDecimalString(row.threshold) }}</template>
+          <template #cell-observed_at="{ row }">{{ formatDateTime(row.observed_at) }}</template>
+          <template #empty><div class="sp-empty-state">暂无成本超额预警事件。</div></template>
+        </DataTable>
+        <div class="sp-pagination-row">
+          <Pagination
+            v-model:page="costAlertEventPage"
+            v-model:page-size="costAlertEventPageSize"
+            :total="costAlertEventTotal"
+            :show-jump="costAlertEventTotal > 100"
+            @update:page="loadCostAlertEvents"
+            @update:page-size="onCostAlertEventPageSizeChange"
+          />
+        </div>
       </div>
-    </section>
-
+      <template #footer>
+        <div class="dialog-actions">
+          <button class="sp-button ghost" type="button" @click="closeCostAlertEventsDialog">关闭</button>
+        </div>
+      </template>
+    </BaseDialog>
     <BaseDialog :show="bulkApprovalVisible" title="一键审批上游成本" width="normal" @close="closeBulkApproval">
       <div class="cost-review-dialog supplier-management-page">
         <div class="review-summary"><div><span>已选记录</span><strong>{{ selectedReviews.length }} 条</strong></div><div><span>本次审批</span><strong>{{ bulkApprovableReviews.length }} 条</strong></div><div><span>跳过记录</span><strong>{{ selectedReviews.length - bulkApprovableReviews.length }} 条</strong></div></div>
@@ -359,6 +366,8 @@ const deletingCostAlertOverrideId = ref<number | null>(null)
 const costAlertEventPage = ref(1)
 const costAlertEventPageSize = ref(10)
 const costAlertEventTotal = ref(0)
+const costAlertSettingsVisible = ref(false)
+const costAlertEventsVisible = ref(false)
 const costAlertOverrideDialogVisible = ref(false)
 const costAlertOverrideDialogForm = ref<{ id: number; providerId: number; enabled: boolean; amount: string } | null>(null)
 const costAlertOverrideForm = ref<{ providerId: number | null; enabled: boolean; amount: string }>({ providerId: null, enabled: true, amount: '' })
@@ -373,12 +382,12 @@ const statusOptions: SelectOption[] = [
 const columns: Column[] = [
   { key: 'provider_name', label: '供应商', class: 'min-w-36' },
   { key: 'stat_date', label: '统计日期' },
-  { key: 'upstream_cost', label: '接口成本' },
-  { key: 'calculated_cost', label: '计算成本' },
-  { key: 'auto_adopted_cost', label: '自动采用' },
-  { key: 'final_cost', label: '最终成本' },
-  { key: 'effective_cost', label: '生效成本' },
-  { key: 'cost_delta', label: '接口差额' },
+  { key: 'upstream_cost', label: '接口成本', class: 'text-right tabular-col' },
+  { key: 'calculated_cost', label: '计算成本', class: 'text-right tabular-col' },
+  { key: 'auto_adopted_cost', label: '自动采用', class: 'text-right tabular-col muted-col' },
+  { key: 'final_cost', label: '最终成本', class: 'text-right tabular-col' },
+  { key: 'effective_cost', label: '生效成本', class: 'text-right tabular-col effective-col' },
+  { key: 'cost_delta', label: '接口差额', class: 'text-right tabular-col' },
   { key: 'status', label: '状态' },
   { key: 'decision_type', label: '审批方式' },
   { key: 'approved_at', label: '审批时间' },
@@ -430,6 +439,9 @@ function statusLabel(status: SupplierCostReviewStatus) { return { pending_review
 function statusClass(status: SupplierCostReviewStatus) { return { pending_review: 'warn', approved: 'good', changed_after_approval: 'info' }[status] }
 function decisionLabel(decision: SupplierCostReviewDecision) { return { none: '自动采用计算值', upstream: '接口值', calculated: '计算值', manual: '手动输入' }[decision] }
 function deltaClass(value: number | null | undefined) { return value !== null && value !== undefined && value > 0 ? 'cost-positive' : value !== null && value !== undefined && value < 0 ? 'cost-negative' : 'cost-neutral' }
+function providerColorClass(providerId: number) {
+  return `provider-color-${((Math.abs(providerId) - 1) % 8) + 1}`
+}
 function providerName(providerId: number) { return providers.value.find(provider => provider.id === providerId)?.name ?? `供应商 #${providerId}` }
 function costAlertEventTypeLabel(eventType: string) { return eventType === 'cost_recovered' ? '成本恢复' : '成本超额' }
 function costAlertEventStatusLabel(status: string) { return status === 'active' ? '活动中' : status === 'resolved' ? '已恢复' : status }
@@ -495,8 +507,22 @@ async function loadCostAlertEvents() {
   }
 }
 
-async function loadCostAlertData() {
-  await Promise.all([loadCostAlertSettings(), loadCostAlertOverrides(), loadCostAlertEvents()])
+async function openCostAlertConfigDialog() {
+  costAlertSettingsVisible.value = true
+  await Promise.all([loadCostAlertSettings(), loadCostAlertOverrides()])
+}
+
+function closeCostAlertSettingsDialog() {
+  costAlertSettingsVisible.value = false
+}
+
+async function openCostAlertEventsDialog() {
+  costAlertEventsVisible.value = true
+  await loadCostAlertEvents()
+}
+
+function closeCostAlertEventsDialog() {
+  costAlertEventsVisible.value = false
 }
 
 function openCostAlertOverrideDialog(row: SupplierCostAlertOverride) {
@@ -576,10 +602,14 @@ async function removeCostAlertOverride(row: SupplierCostAlertOverride) {
   }
 }
 
-function resetCostAlertEventFilters() {
-  costAlertEventFilters.value = { type: '', status: '' }
+function onCostAlertEventFiltersChange() {
   costAlertEventPage.value = 1
   void loadCostAlertEvents()
+}
+
+function resetCostAlertEventFilters() {
+  costAlertEventFilters.value = { type: '', status: '' }
+  onCostAlertEventFiltersChange()
 }
 
 function onCostAlertEventPageSizeChange() {
@@ -628,37 +658,177 @@ async function submitBulkApproval() {
 async function openHistory(row: SupplierProviderCostReview) { historyVisible.value = true; historyLoading.value = true; history.value = []; try { history.value = await listSupplierProviderCostReviewHistory(row.id) } catch (error) { appStore.showError(extractApiErrorMessage(error, '加载成本历史失败')) } finally { historyLoading.value = false } }
 function closeHistory() { historyVisible.value = false }
 
-onMounted(async () => { await Promise.all([loadProviders(), loadReviews(), loadCostAlertData()]) })
+onMounted(async () => { await Promise.all([loadProviders(), loadReviews(), loadCostAlertSettings()]) })
 </script>
 
 <style scoped>
 .cost-review-head { align-items: flex-start; }
 .cost-review-filters { margin-bottom: 18px; }
 .cost-review-filter-grid { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(280px, 1.5fr) minmax(180px, 1fr) auto; gap: 12px; align-items: center; padding: 16px; }
-.cost-review-metrics { margin-bottom: 18px; }
+.cost-review-metrics { grid-template-columns: repeat(4, minmax(145px, 1fr)); gap: 0.75rem; margin-bottom: 18px; }
+.cost-review-metrics .sp-metric-card {
+  --sp-metric-accent: var(--sp-blue);
+  cursor: default;
+  border-color: color-mix(in srgb, var(--sp-metric-accent) 24%, var(--sp-line));
+  background:
+    linear-gradient(150deg, color-mix(in srgb, var(--sp-metric-accent) 7%, transparent), transparent 56%),
+    var(--sp-panel);
+}
+.cost-review-metrics .sp-metric-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--sp-metric-accent), color-mix(in srgb, var(--sp-metric-accent) 30%, transparent));
+}
+.cost-review-metrics .sp-metric-card.sp-amber { --sp-metric-accent: var(--sp-amber); }
+.cost-review-metrics .sp-metric-card.sp-green { --sp-metric-accent: var(--sp-green); }
+.cost-review-metrics .sp-metric-card.sp-violet { --sp-metric-accent: var(--sp-violet); }
+.cost-review-metrics .sp-metric-card:hover {
+  border-color: color-mix(in srgb, var(--sp-metric-accent) 55%, var(--sp-line));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--sp-metric-accent) 22%, transparent),
+    0 10px 24px color-mix(in srgb, var(--sp-metric-accent) 8%, transparent);
+}
+.cost-review-metrics .sp-metric-value {
+  margin-top: 0.625rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.cost-review-metrics .sp-metric-foot {
+  margin-top: 0.75rem;
+  padding-top: 0.625rem;
+  border-top: 1px solid color-mix(in srgb, var(--sp-metric-accent) 14%, var(--sp-soft));
+}
 .cost-review-table-panel { overflow: hidden; }
-.cost-alert-panel { overflow: hidden; margin-bottom: 18px; }
-.cost-alert-settings-body { padding: 16px; display: grid; gap: 16px; }
+.cost-alert-dialog {
+  --sp-panel: #ffffff;
+  --sp-line: #dbe4ee;
+  --sp-blue: #2563eb;
+  --sp-cyan: #0891b2;
+  --sp-green: #059669;
+  --sp-violet: #7c3aed;
+  --sp-ink: #172033;
+  --sp-muted: #64748b;
+  min-height: 0;
+  color: var(--sp-ink);
+}
+.cost-alert-settings-body { display: grid; gap: 18px; }
+.cost-alert-event-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-bottom: 14px; margin-bottom: 4px; border-bottom: 1px solid var(--sp-line); }
 .cost-alert-global-settings { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
 .cost-alert-actions { display: flex; gap: 8px; white-space: nowrap; }
 .cost-alert-add-row { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; padding-top: 16px; border-top: 1px solid var(--sp-line); }
 .cost-alert-provider-select { min-width: 240px; }
 .cost-alert-switch { display: flex; align-items: center; gap: 8px; }
 .cost-alert-filter-control { min-width: 140px; }
-.cost-alert-panel .sp-panel-body { padding: 0 16px 16px; }
+/* 按供应商 ID 稳定分配 8 色徽标，保证同一供应商在不同区域颜色一致。 */
+.provider-badge {
+  --provider-accent: var(--sp-blue);
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 8px;
+  max-width: 100%;
+  padding: 5px 9px;
+  border: 1px solid color-mix(in srgb, var(--provider-accent) 26%, var(--sp-line));
+  border-radius: 10px;
+  background: linear-gradient(150deg, color-mix(in srgb, var(--provider-accent) 8%, transparent), transparent 64%), #fff;
+  text-align: left;
+}
+.provider-badge::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--provider-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--provider-accent) 13%, transparent);
+}
+.provider-badge strong {
+  overflow: hidden;
+  color: var(--provider-accent);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.provider-badge .sp-sub { grid-column: 2; font-size: 11px; }
+.provider-color-1 { --provider-accent: #2563eb; }
+.provider-color-2 { --provider-accent: #0f766e; }
+.provider-color-3 { --provider-accent: #7c3aed; }
+.provider-color-4 { --provider-accent: #b45309; }
+.provider-color-5 { --provider-accent: #be123c; }
+.provider-color-6 { --provider-accent: #047857; }
+.provider-color-7 { --provider-accent: #4338ca; }
+.provider-color-8 { --provider-accent: #a16207; }
 .cost-review-actions { display: flex; gap: 8px; white-space: nowrap; }
+/* 金额列：右对齐 + 等宽数字，便于逐位比对成本 */
+.tabular-col { font-variant-numeric: tabular-nums; }
+/* 次要成本列（自动采用）：视觉弱化，突出人工确认后的生效值 */
+.muted-col { color: var(--sp-muted); }
+/* 生效成本列：浅蓝渐变底作为当前业务生效值的关键锚点 */
+.effective-col {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--sp-blue) 5%, transparent), transparent 72%);
+  box-shadow: inset 2px 0 0 var(--sp-blue);
+}
+.effective-col strong { font-weight: 700; }
 .cost-review-bulk-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
-.cost-positive { color: #b45309; }
-.cost-negative { color: #047857; }
-.cost-neutral { color: #64748b; }
-.cost-review-dialog, .history-dialog { --sp-panel: #ffffff; --sp-line: #dbe4ee; --sp-blue: #2563eb; --sp-cyan: #0891b2; --sp-green: #059669; --sp-violet: #7c3aed; --sp-ink: #172033; --sp-muted: #64748b; color: var(--sp-ink); }
+.cost-positive,
+.cost-negative,
+.cost-neutral {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.cost-positive {
+  color: #b45309;
+  background: rgba(217, 119, 6, 0.08);
+}
+.cost-negative {
+  color: #047857;
+  background: rgba(5, 150, 105, 0.08);
+}
+.cost-neutral { color: #64748b; background: rgba(100, 116, 139, 0.08); }
+.cost-positive::before { content: '▲'; font-size: 0.625em; }
+.cost-negative::before { content: '▼'; font-size: 0.625em; }
+.cost-neutral::before { content: '—'; font-size: 0.75em; }
+.cost-review-dialog,
+.history-dialog {
+  --sp-panel: #ffffff;
+  --sp-line: #dbe4ee;
+  --sp-blue: #2563eb;
+  --sp-cyan: #0891b2;
+  --sp-green: #059669;
+  --sp-violet: #7c3aed;
+  --sp-ink: #172033;
+  --sp-muted: #64748b;
+  min-height: 0;
+  color: var(--sp-ink);
+}
 .review-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; padding: 16px; border: 1px solid var(--sp-line); border-radius: 14px; background: linear-gradient(135deg, #f8fbff, #f5f3ff); }
 .review-summary span, .review-choice span { display: block; color: var(--sp-muted); font-size: 12px; }
 .review-summary strong { display: block; margin-top: 6px; font-size: 16px; }
 .review-choice-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px; }
-.review-choice { min-height: 118px; padding: 16px; border: 1px solid var(--sp-line); border-radius: 14px; background: var(--sp-panel); text-align: left; transition: border-color .2s, box-shadow .2s, transform .2s; }
-.review-choice:hover { border-color: var(--sp-blue); transform: translateY(-1px); }
-.review-choice.active { border-color: var(--sp-blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--sp-blue) 14%, transparent); background: #eff6ff; }
+.review-choice { position: relative; min-height: 118px; padding: 16px; border: 1px solid var(--sp-line); border-radius: 14px; background: var(--sp-panel); text-align: left; transition: border-color .2s, box-shadow .2s, transform .2s; }
+.review-choice:hover { border-color: color-mix(in srgb, var(--sp-blue) 55%, var(--sp-line)); transform: translateY(-1px); }
+.review-choice.active {
+  border-color: var(--sp-blue);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sp-blue) 14%, transparent), 0 10px 20px color-mix(in srgb, var(--sp-blue) 8%, transparent);
+  background: linear-gradient(150deg, color-mix(in srgb, var(--sp-blue) 7%, transparent), transparent 58%), #eff6ff;
+}
+.review-choice.active::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  border-radius: 14px 14px 0 0;
+  background: linear-gradient(90deg, var(--sp-blue), color-mix(in srgb, var(--sp-blue) 30%, transparent));
+}
+.review-choice:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--sp-blue) 18%, transparent); }
 .review-choice strong { display: block; margin: 10px 0 6px; font-size: 18px; }
 .review-choice small { color: var(--sp-muted); }
 .review-dialog-note { margin-top: 14px; color: var(--sp-muted); font-size: 12px; }
@@ -668,7 +838,21 @@ onMounted(async () => { await Promise.all([loadProviders(), loadReviews(), loadC
 .history-item { position: relative; display: flex; gap: 14px; padding: 10px 0 18px; }
 .history-marker { position: absolute; left: -22px; top: 13px; width: 13px; height: 13px; border: 3px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1px var(--sp-line); background: var(--sp-cyan); }
 .history-marker.approve { background: var(--sp-violet); }
-.history-content { flex: 1; border: 1px solid var(--sp-line); border-radius: 12px; padding: 12px 14px; background: #fbfdff; }
+.history-content {
+  flex: 1;
+  border: 1px solid var(--sp-line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: linear-gradient(150deg, color-mix(in srgb, var(--sp-cyan) 4%, transparent), transparent 62%), #fbfdff;
+  transition: border-color .2s ease, box-shadow .2s ease;
+}
+.history-item:hover .history-content {
+  border-color: color-mix(in srgb, var(--sp-cyan) 35%, var(--sp-line));
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--sp-cyan) 8%, transparent);
+}
+.history-marker {
+  box-shadow: 0 0 0 1px var(--sp-line), 0 0 0 3px color-mix(in srgb, var(--sp-cyan) 10%, transparent);
+}
 .history-title, .history-values { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .history-title span, .history-values { color: var(--sp-muted); font-size: 12px; }
 .history-values { justify-content: flex-start; margin-top: 9px; }

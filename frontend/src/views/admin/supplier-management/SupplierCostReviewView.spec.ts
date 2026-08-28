@@ -84,7 +84,7 @@ function mountView() {
           props: ['data', 'selectable', 'selectedKeys'],
           emits: ['update:selectedKeys', 'selectionChange'],
           template:
-            '<div data-test="cost-review-table"><button v-if="data.length > 1" data-test="select-both" @click="$emit(\'update:selectedKeys\', data.map(row => row.id))">选择当前页</button><div v-for="row in data" :key="row.id"><span>{{ row.provider_name }}</span><slot name="cell-actions" :row="row" /></div></div>',
+            '<div data-test="cost-review-table"><button v-if="data.length > 1" data-test="select-both" @click="$emit(\'update:selectedKeys\', data.map(row => row.id))">选择当前页</button><div v-for="row in data" :key="row.id"><slot name="cell-provider_name" :row="row" /><slot name="cell-actions" :row="row" /></div></div>',
         },
         Pagination: { template: '<div />' },
         BaseDialog: {
@@ -124,6 +124,20 @@ describe('SupplierCostReviewView', () => {
     }))
     expect(wrapper.text()).toContain('示例供应商')
     expect(wrapper.text()).toContain('待审批')
+    expect(wrapper.find('[data-test="provider-identity-3"]').classes()).toContain('provider-color-3')
+  })
+
+  it('通过按钮打开成本预警配置和事件弹窗', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="cost-alert-settings-section"]').exists()).toBe(false)
+    await wrapper.find('[data-test="cost-alert-config-button"]').trigger('click')
+    expect(wrapper.find('[data-test="cost-alert-settings-section"]').exists()).toBe(true)
+
+    expect(wrapper.find('[data-test="cost-alert-events-section"]').exists()).toBe(false)
+    await wrapper.find('[data-test="cost-alert-events-button"]').trigger('click')
+    expect(wrapper.find('[data-test="cost-alert-events-section"]').exists()).toBe(true)
   })
 
   it('重置筛选后查询全部日期的成本核对记录', async () => {
@@ -237,6 +251,7 @@ describe('SupplierCostReviewView', () => {
     const wrapper = mountView()
     await flushPromises()
 
+    await wrapper.find('[data-test="cost-alert-config-button"]').trigger('click')
     await wrapper.find('[data-test="cost-alert-global-amount"] input').setValue('5')
     await wrapper.find('[data-test="save-cost-alert-settings"]').trigger('click')
     await flushPromises()
@@ -249,6 +264,7 @@ describe('SupplierCostReviewView', () => {
     const wrapper = mountView()
     await flushPromises()
 
+    await wrapper.find('[data-test="cost-alert-config-button"]').trigger('click')
     await wrapper.find('[data-test="add-cost-alert-override"]').trigger('click')
 
     expect(mocks.createCostAlertOverride).not.toHaveBeenCalled()
