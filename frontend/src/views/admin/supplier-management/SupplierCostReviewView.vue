@@ -61,6 +61,157 @@
       <div class="sp-pagination-row"><Pagination v-model:page="page" v-model:page-size="pageSize" :total="total" :show-jump="total > 100" @update:page="onPageChange" @update:page-size="onPageSizeChange" /></div>
     </section>
 
+    <section class="sp-panel cost-alert-panel" data-test="cost-alert-settings-section">
+      <header class="sp-panel-head">
+        <div class="sp-panel-title">
+          <span class="sp-section-index">02</span>
+          <div>
+            <h2>成本超额预警配置</h2>
+            <span>上游成本高于本地成本且差额超过阈值时产生预警，供应商配置优先于全局默认值。</span>
+          </div>
+        </div>
+        <span class="sp-status info">{{ costAlertOverrides.length }} 个供应商覆盖</span>
+      </header>
+      <div class="cost-alert-settings-body">
+        <div class="cost-alert-global-settings">
+          <Input
+            v-model="costAlertSettingsForm.amount"
+            type="number"
+            min="0"
+            step="0.000001"
+            label="全局差额阈值"
+            hint="填写 0 表示不触发成本超额预警。"
+            data-test="cost-alert-global-amount"
+          />
+          <button class="sp-button primary" type="button" data-test="save-cost-alert-settings" :disabled="savingCostAlertSettings" @click="saveCostAlertSettings">
+            {{ savingCostAlertSettings ? '保存中…' : '保存全局阈值' }}
+          </button>
+        </div>
+        <DataTable
+          :columns="costAlertOverrideColumns"
+          :data="costAlertOverrides"
+          :loading="costAlertLoading"
+          row-key="id"
+          :virtualize-threshold="1000"
+        >
+          <template #cell-provider_id="{ row }">
+            <strong class="sp-entity">{{ providerName(row.provider_id) }}</strong>
+            <span class="sp-sub">供应商 #{{ row.provider_id }}</span>
+          </template>
+          <template #cell-amount="{ row }">{{ formatDecimalString(row.amount) }}</template>
+          <template #cell-enabled="{ row }">
+            <div class="sp-inline">
+              <Toggle
+                :model-value="row.enabled"
+                :aria-label="`${providerName(row.provider_id)}成本预警${row.enabled ? '已启用' : '已停用'}`"
+                @click.stop
+                @update:model-value="saveCostAlertOverride({ ...row, enabled: $event })"
+              />
+              <span class="sp-status" :class="row.enabled ? 'good' : 'info'">{{ row.enabled ? '已启用' : '已停用' }}</span>
+            </div>
+          </template>
+          <template #cell-actions="{ row }">
+            <div class="cost-alert-actions">
+              <button class="sp-button small ghost" type="button" @click="openCostAlertOverrideDialog(row)">编辑</button>
+              <button
+                class="sp-button small danger"
+                type="button"
+                :disabled="deletingCostAlertOverrideId !== null"
+                @click="removeCostAlertOverride(row)"
+              >
+                {{ deletingCostAlertOverrideId === row.id ? '删除中…' : '删除' }}
+              </button>
+            </div>
+          </template>
+          <template #empty><div class="sp-panel-body sp-empty-state">暂无供应商覆盖配置，全部使用全局差额阈值。</div></template>
+        </DataTable>
+        <div class="cost-alert-add-row">
+          <Select
+            v-model="costAlertOverrideForm.providerId"
+            :options="availableCostAlertProviderOptions"
+            clearable
+            aria-label="新增覆盖供应商"
+            placeholder="选择供应商"
+            class="cost-alert-provider-select"
+          />
+          <Input v-model="costAlertOverrideForm.amount" type="number" min="0" step="0.000001" aria-label="覆盖差额阈值" placeholder="差额阈值" />
+          <label class="cost-alert-switch">
+            <span>启用覆盖</span>
+            <Toggle v-model="costAlertOverrideForm.enabled" />
+          </label>
+          <button class="sp-button primary" type="button" data-test="add-cost-alert-override" :disabled="savingCostAlertOverride" @click="saveCostAlertOverride()">新增覆盖配置</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="sp-panel cost-alert-panel" data-test="cost-alert-events-section">
+      <header class="sp-panel-head">
+        <div class="sp-panel-title">
+          <span class="sp-section-index">03</span>
+          <div>
+            <h2>成本超额预警事件</h2>
+            <span>活动事件去重，本地成本恢复后自动闭环。</span>
+          </div>
+        </div>
+        <div class="sp-controls">
+          <Select
+            v-model="costAlertEventFilters.type"
+            :options="costAlertEventTypeOptions"
+            clearable
+            aria-label="预警类型"
+            placeholder="全部类型"
+            class="cost-alert-filter-control"
+          />
+          <Select
+            v-model="costAlertEventFilters.status"
+            :options="costAlertEventStatusOptions"
+            clearable
+            aria-label="预警状态"
+            placeholder="全部状态"
+            class="cost-alert-filter-control"
+          />
+          <button class="sp-button small ghost" type="button" @click="resetCostAlertEventFilters">重置筛选</button>
+        </div>
+      </header>
+      <DataTable
+        :columns="costAlertEventColumns"
+        :data="costAlertEvents"
+        :loading="costAlertEventsLoading"
+        row-key="id"
+        :virtualize-threshold="1000"
+      >
+        <template #cell-provider_name="{ row }">
+          <strong class="sp-entity">{{ row.provider_name }}</strong>
+          <span class="sp-sub">{{ row.provider_code }}</span>
+        </template>
+        <template #cell-event_type="{ row }">
+          <span class="sp-tag" :class="row.event_type === 'cost_recovered' ? 'good' : 'warn'">{{ costAlertEventTypeLabel(row.event_type) }}</span>
+        </template>
+        <template #cell-status="{ row }">
+          <span class="sp-status" :class="row.status === 'active' ? 'warn' : 'good'">{{ costAlertEventStatusLabel(row.status) }}</span>
+        </template>
+        <template #cell-stat_date="{ row }">{{ formatDateOnly(row.stat_date) }}</template>
+        <template #cell-upstream_cost="{ row }">{{ formatDecimalString(row.upstream_cost) }}</template>
+        <template #cell-local_cost="{ row }">{{ formatDecimalString(row.local_cost) }}</template>
+          <template #cell-overrun_amount="{ row }">
+            <span :class="row.event_type === 'cost_recovered' ? 'cost-negative' : 'cost-positive'">{{ formatDecimalString(row.overrun_amount) }}</span>
+          </template>
+        <template #cell-threshold="{ row }">{{ formatDecimalString(row.threshold) }}</template>
+        <template #cell-observed_at="{ row }">{{ formatDateTime(row.observed_at) }}</template>
+        <template #empty><div class="sp-panel-body sp-empty-state">暂无成本超额预警事件。</div></template>
+      </DataTable>
+      <div class="sp-pagination-row">
+        <Pagination
+          v-model:page="costAlertEventPage"
+          v-model:page-size="costAlertEventPageSize"
+          :total="costAlertEventTotal"
+          :show-jump="costAlertEventTotal > 100"
+          @update:page="loadCostAlertEvents"
+          @update:page-size="onCostAlertEventPageSizeChange"
+        />
+      </div>
+    </section>
+
     <BaseDialog :show="bulkApprovalVisible" title="一键审批上游成本" width="normal" @close="closeBulkApproval">
       <div class="cost-review-dialog supplier-management-page">
         <div class="review-summary"><div><span>已选记录</span><strong>{{ selectedReviews.length }} 条</strong></div><div><span>本次审批</span><strong>{{ bulkApprovableReviews.length }} 条</strong></div><div><span>跳过记录</span><strong>{{ selectedReviews.length - bulkApprovableReviews.length }} 条</strong></div></div>
@@ -73,6 +224,38 @@
         <p class="review-dialog-note">仅审批待审批或审批后有新数据的记录，已审批且没有新数据的记录会自动跳过。</p>
       </div>
       <template #footer><div class="dialog-actions"><button class="sp-button ghost" type="button" @click="closeBulkApproval">取消</button><button class="sp-button primary" type="button" data-test="submit-bulk-approval" :disabled="bulkApproving || bulkApprovableReviews.length === 0" @click="submitBulkApproval">{{ bulkApproving ? '提交中…' : '确认一键审批' }}</button></div></template>
+    </BaseDialog>
+
+    <BaseDialog :show="costAlertOverrideDialogVisible" title="编辑成本预警覆盖" width="normal" @close="closeCostAlertOverrideDialog">
+      <div v-if="costAlertOverrideDialogForm" class="cost-review-dialog supplier-management-page">
+        <div class="review-summary">
+          <div><span>供应商</span><strong>{{ providerName(costAlertOverrideDialogForm.providerId) }}</strong></div>
+          <div><span>覆盖状态</span><strong>{{ costAlertOverrideDialogForm.enabled ? '已启用' : '已停用' }}</strong></div>
+          <div><span>全局阈值</span><strong>{{ formatDecimalString(costAlertSettings.amount) }}</strong></div>
+        </div>
+        <Input
+          v-model="costAlertOverrideDialogForm.amount"
+          type="number"
+          min="0"
+          step="0.000001"
+          label="覆盖差额阈值"
+          hint="填写 0 表示该供应商不触发成本超额预警。"
+          data-test="cost-alert-override-amount"
+        />
+        <label class="cost-alert-switch">
+          <span>启用成本预警覆盖</span>
+          <Toggle v-model="costAlertOverrideDialogForm.enabled" />
+        </label>
+        <p class="review-dialog-note">覆盖配置会优先于全局阈值；停用后该供应商不参与成本超额预警。</p>
+      </div>
+      <template #footer>
+        <div class="dialog-actions">
+          <button class="sp-button ghost" type="button" @click="closeCostAlertOverrideDialog">取消</button>
+          <button class="sp-button primary" type="button" :disabled="savingCostAlertOverride" @click="submitCostAlertOverrideDialog">
+            {{ savingCostAlertOverride ? '保存中…' : '保存覆盖配置' }}
+          </button>
+        </div>
+      </template>
     </BaseDialog>
 
     <BaseDialog :show="approvalVisible" title="审批上游成本" width="normal" @close="closeApproval">
@@ -110,9 +293,26 @@ import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import Input from '@/components/common/Input.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
+import Toggle from '@/components/common/Toggle.vue'
 import type { Column } from '@/components/common/types'
 import { useAppStore } from '@/stores/app'
 import { list as listProviders } from '@/api/admin/supplierProviders'
+import {
+  createSupplierCostAlertOverride,
+  deleteSupplierCostAlertOverride,
+  getSupplierCostAlertSettings,
+  listSupplierCostAlertEvents,
+  listSupplierCostAlertOverrides,
+  updateSupplierCostAlertOverride,
+  updateSupplierCostAlertSettings,
+  type SupplierCostAlertEvent,
+  type SupplierCostAlertEventListParams,
+  type SupplierCostAlertEventType,
+  type SupplierCostAlertEventStatus,
+  type SupplierCostAlertOverride,
+  type SupplierCostAlertSettings,
+  type SupplierCostAlertSettingsInput,
+} from '@/api/admin/supplierCostAlert'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import {
   approveSupplierProviderCostReview,
@@ -147,6 +347,22 @@ const bulkApproving = ref(false)
 const historyVisible = ref(false)
 const historyLoading = ref(false)
 const history = ref<SupplierProviderCostReviewHistory[]>([])
+const costAlertSettings = ref<SupplierCostAlertSettings>({ amount: '0' })
+const costAlertSettingsForm = ref<SupplierCostAlertSettingsInput>({ amount: '0' })
+const costAlertOverrides = ref<SupplierCostAlertOverride[]>([])
+const costAlertEvents = ref<SupplierCostAlertEvent[]>([])
+const costAlertLoading = ref(false)
+const costAlertEventsLoading = ref(false)
+const savingCostAlertSettings = ref(false)
+const savingCostAlertOverride = ref(false)
+const deletingCostAlertOverrideId = ref<number | null>(null)
+const costAlertEventPage = ref(1)
+const costAlertEventPageSize = ref(10)
+const costAlertEventTotal = ref(0)
+const costAlertOverrideDialogVisible = ref(false)
+const costAlertOverrideDialogForm = ref<{ id: number; providerId: number; enabled: boolean; amount: string } | null>(null)
+const costAlertOverrideForm = ref<{ providerId: number | null; enabled: boolean; amount: string }>({ providerId: null, enabled: true, amount: '' })
+const costAlertEventFilters = ref<{ type: SupplierCostAlertEventType | ''; status: SupplierCostAlertEventStatus | '' }>({ type: '', status: '' })
 
 const providerOptions = computed<SelectOption[]>(() => providers.value.map(provider => ({ value: provider.id, label: provider.name })))
 const statusOptions: SelectOption[] = [
@@ -174,8 +390,39 @@ const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize.va
 const statusCounts = computed(() => reviews.value.reduce((counts, row) => { counts[row.status] += 1; return counts }, { pending_review: 0, approved: 0, changed_after_approval: 0 } as Record<SupplierCostReviewStatus, number>))
 const selectedReviews = computed(() => reviews.value.filter(row => selectedKeys.value.some(key => String(key) === String(row.id))))
 const bulkApprovableReviews = computed(() => selectedReviews.value.filter(row => row.status === 'pending_review' || row.status === 'changed_after_approval'))
+const availableCostAlertProviderOptions = computed<SelectOption[]>(() => {
+  const configured = new Set(costAlertOverrides.value.map(item => item.provider_id))
+  return providerOptions.value.filter(option => !configured.has(Number(option.value)))
+})
+const costAlertEventTypeOptions: SelectOption[] = [
+  { value: 'cost_overrun', label: '成本超额' },
+  { value: 'cost_recovered', label: '成本恢复' },
+]
+const costAlertEventStatusOptions: SelectOption[] = [
+  { value: 'active', label: '活动中' },
+  { value: 'resolved', label: '已恢复' },
+]
+const costAlertOverrideColumns: Column[] = [
+  { key: 'provider_id', label: '供应商' },
+  { key: 'amount', label: '差额阈值' },
+  { key: 'enabled', label: '预警开关' },
+  { key: 'updated_at', label: '更新时间' },
+  { key: 'actions', label: '操作' },
+]
+const costAlertEventColumns: Column[] = [
+  { key: 'provider_name', label: '供应商' },
+  { key: 'event_type', label: '事件类型' },
+  { key: 'status', label: '状态' },
+  { key: 'stat_date', label: '统计日期' },
+  { key: 'upstream_cost', label: '上游成本' },
+  { key: 'local_cost', label: '本地成本' },
+  { key: 'overrun_amount', label: '超额金额' },
+  { key: 'threshold', label: '阈值' },
+  { key: 'observed_at', label: '发生时间' },
+]
 
 function formatCost(value: number | null | undefined) { return value === null || value === undefined ? '--' : Number(value).toFixed(6) }
+function formatDecimalString(value: string | null | undefined) { if (value === undefined || value === null || value === '') return '--'; const amount = Number(value); return Number.isFinite(amount) ? amount.toFixed(6) : '--' }
 function formatSignedCost(value: number | null | undefined) { return value === null || value === undefined ? '--' : `${value >= 0 ? '+' : ''}${Number(value).toFixed(6)}` }
 function formatDateOnly(value: string | null | undefined) { if (!value) return '--'; const date = new Date(value); return Number.isNaN(date.getTime()) ? value.slice(0, 10) : date.toISOString().slice(0, 10) }
 function formatDateTime(value: string | null | undefined) { if (!value) return '--'; const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false }) }
@@ -183,6 +430,162 @@ function statusLabel(status: SupplierCostReviewStatus) { return { pending_review
 function statusClass(status: SupplierCostReviewStatus) { return { pending_review: 'warn', approved: 'good', changed_after_approval: 'info' }[status] }
 function decisionLabel(decision: SupplierCostReviewDecision) { return { none: '自动采用计算值', upstream: '接口值', calculated: '计算值', manual: '手动输入' }[decision] }
 function deltaClass(value: number | null | undefined) { return value !== null && value !== undefined && value > 0 ? 'cost-positive' : value !== null && value !== undefined && value < 0 ? 'cost-negative' : 'cost-neutral' }
+function providerName(providerId: number) { return providers.value.find(provider => provider.id === providerId)?.name ?? `供应商 #${providerId}` }
+function costAlertEventTypeLabel(eventType: string) { return eventType === 'cost_recovered' ? '成本恢复' : '成本超额' }
+function costAlertEventStatusLabel(status: string) { return status === 'active' ? '活动中' : status === 'resolved' ? '已恢复' : status }
+function validateCostAlertAmount(value: string, message = '差额阈值必须是大于或等于 0 的数字') {
+  const amount = value.trim()
+  if (!amount || Number.isNaN(Number(amount)) || Number(amount) < 0) {
+    appStore.showError(message)
+    return null
+  }
+  return amount
+}
+
+async function loadCostAlertSettings() {
+  try {
+    costAlertSettings.value = await getSupplierCostAlertSettings()
+    costAlertSettingsForm.value = { amount: costAlertSettings.value.amount || '0' }
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, '加载成本预警配置失败'))
+  }
+}
+
+async function saveCostAlertSettings() {
+  const amount = validateCostAlertAmount(costAlertSettingsForm.value.amount)
+  if (amount === null) return
+  savingCostAlertSettings.value = true
+  try {
+    const saved = await updateSupplierCostAlertSettings({ amount })
+    costAlertSettings.value = saved
+    costAlertSettingsForm.value = { amount: saved.amount || '0' }
+    appStore.showSuccess('全局成本预警阈值已保存')
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, '保存成本预警阈值失败'))
+  } finally {
+    savingCostAlertSettings.value = false
+  }
+}
+
+async function loadCostAlertOverrides() {
+  try {
+    const result = await listSupplierCostAlertOverrides()
+    costAlertOverrides.value = result.items ?? []
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, '加载供应商覆盖配置失败'))
+  }
+}
+
+async function loadCostAlertEvents() {
+  costAlertEventsLoading.value = true
+  try {
+    const params: SupplierCostAlertEventListParams = {
+      page: costAlertEventPage.value,
+      page_size: costAlertEventPageSize.value,
+      event_type: costAlertEventFilters.value.type,
+      status: costAlertEventFilters.value.status,
+    }
+    const result = await listSupplierCostAlertEvents(params)
+    costAlertEvents.value = result.items ?? []
+    costAlertEventTotal.value = result.total ?? 0
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, '加载成本预警事件失败'))
+  } finally {
+    costAlertEventsLoading.value = false
+  }
+}
+
+async function loadCostAlertData() {
+  await Promise.all([loadCostAlertSettings(), loadCostAlertOverrides(), loadCostAlertEvents()])
+}
+
+function openCostAlertOverrideDialog(row: SupplierCostAlertOverride) {
+  costAlertOverrideDialogForm.value = { id: row.id, providerId: row.provider_id, enabled: row.enabled, amount: row.amount || '0' }
+  costAlertOverrideDialogVisible.value = true
+}
+
+function closeCostAlertOverrideDialog() {
+  if (savingCostAlertOverride.value) return
+  costAlertOverrideDialogVisible.value = false
+  costAlertOverrideDialogForm.value = null
+}
+
+async function saveCostAlertOverride(row?: SupplierCostAlertOverride) {
+  if (row) {
+    await updateCostAlertOverride(row.id, { enabled: row.enabled, amount: row.amount })
+    return
+  }
+  const providerId = costAlertOverrideForm.value.providerId
+  if (!providerId) {
+    appStore.showError('请选择需要覆盖预警阈值的供应商')
+    return
+  }
+  const amount = validateCostAlertAmount(costAlertOverrideForm.value.amount, '请输入有效的覆盖差额阈值')
+  if (amount === null) return
+  await upsertCostAlertOverride({ provider_id: providerId, enabled: costAlertOverrideForm.value.enabled, amount })
+  costAlertOverrideForm.value = { providerId: null, enabled: true, amount: '' }
+}
+
+async function updateCostAlertOverride(id: number, input: { enabled: boolean; amount: string }) {
+  savingCostAlertOverride.value = true
+  try {
+    await updateSupplierCostAlertOverride(id, input)
+    await loadCostAlertOverrides()
+    appStore.showSuccess('成本预警覆盖配置已保存')
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, '保存供应商覆盖配置失败'))
+  } finally {
+    savingCostAlertOverride.value = false
+  }
+}
+
+async function upsertCostAlertOverride(input: { provider_id: number; enabled: boolean; amount: string }) {
+  savingCostAlertOverride.value = true
+  try {
+    await createSupplierCostAlertOverride(input)
+    await loadCostAlertOverrides()
+    appStore.showSuccess('成本预警覆盖配置已保存')
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, '保存供应商覆盖配置失败'))
+  } finally {
+    savingCostAlertOverride.value = false
+  }
+}
+
+async function submitCostAlertOverrideDialog() {
+  const form = costAlertOverrideDialogForm.value
+  if (!form) return
+  const amount = validateCostAlertAmount(form.amount)
+  if (amount === null) return
+  await updateCostAlertOverride(form.id, { enabled: form.enabled, amount })
+  costAlertOverrideDialogVisible.value = false
+  costAlertOverrideDialogForm.value = null
+}
+
+async function removeCostAlertOverride(row: SupplierCostAlertOverride) {
+  if (!window.confirm(`确认删除「${providerName(row.provider_id)}」的成本预警覆盖配置？删除后将回退到全局阈值。`)) return
+  deletingCostAlertOverrideId.value = row.id
+  try {
+    await deleteSupplierCostAlertOverride(row.id)
+    await loadCostAlertOverrides()
+    appStore.showSuccess('成本预警覆盖配置已删除')
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, '删除供应商覆盖配置失败'))
+  } finally {
+    deletingCostAlertOverrideId.value = null
+  }
+}
+
+function resetCostAlertEventFilters() {
+  costAlertEventFilters.value = { type: '', status: '' }
+  costAlertEventPage.value = 1
+  void loadCostAlertEvents()
+}
+
+function onCostAlertEventPageSizeChange() {
+  costAlertEventPage.value = 1
+  void loadCostAlertEvents()
+}
 
 async function loadProviders() { try { const result = await listProviders({ page: 1, page_size: 1000 }); providers.value = result.items.map(item => ({ id: item.id, name: item.name })) } catch (error) { appStore.showError(extractApiErrorMessage(error, '加载供应商失败')) } }
 async function loadReviews() { loading.value = true; try { const result = await listSupplierProviderCostReviews({ keyword: filters.keyword.trim() || undefined, provider_id: filters.providerId ?? undefined, start_date: filters.startDate || undefined, end_date: filters.endDate || undefined, status: filters.status, page: page.value, page_size: pageSize.value }); reviews.value = result.items; total.value = result.total; lastLoadedAt.value = new Date().toISOString() } catch (error) { appStore.showError(extractApiErrorMessage(error, '加载成本核对列表失败')) } finally { loading.value = false } }
@@ -225,7 +628,7 @@ async function submitBulkApproval() {
 async function openHistory(row: SupplierProviderCostReview) { historyVisible.value = true; historyLoading.value = true; history.value = []; try { history.value = await listSupplierProviderCostReviewHistory(row.id) } catch (error) { appStore.showError(extractApiErrorMessage(error, '加载成本历史失败')) } finally { historyLoading.value = false } }
 function closeHistory() { historyVisible.value = false }
 
-onMounted(async () => { await Promise.all([loadProviders(), loadReviews()]) })
+onMounted(async () => { await Promise.all([loadProviders(), loadReviews(), loadCostAlertData()]) })
 </script>
 
 <style scoped>
@@ -234,6 +637,15 @@ onMounted(async () => { await Promise.all([loadProviders(), loadReviews()]) })
 .cost-review-filter-grid { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(280px, 1.5fr) minmax(180px, 1fr) auto; gap: 12px; align-items: center; padding: 16px; }
 .cost-review-metrics { margin-bottom: 18px; }
 .cost-review-table-panel { overflow: hidden; }
+.cost-alert-panel { overflow: hidden; margin-bottom: 18px; }
+.cost-alert-settings-body { padding: 16px; display: grid; gap: 16px; }
+.cost-alert-global-settings { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.cost-alert-actions { display: flex; gap: 8px; white-space: nowrap; }
+.cost-alert-add-row { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; padding-top: 16px; border-top: 1px solid var(--sp-line); }
+.cost-alert-provider-select { min-width: 240px; }
+.cost-alert-switch { display: flex; align-items: center; gap: 8px; }
+.cost-alert-filter-control { min-width: 140px; }
+.cost-alert-panel .sp-panel-body { padding: 0 16px 16px; }
 .cost-review-actions { display: flex; gap: 8px; white-space: nowrap; }
 .cost-review-bulk-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 .cost-positive { color: #b45309; }

@@ -8,6 +8,13 @@ const mocks = vi.hoisted(() => ({
   approve: vi.fn(),
   bulkApprove: vi.fn(),
   listProviders: vi.fn(),
+  getCostAlertSettings: vi.fn(),
+  updateCostAlertSettings: vi.fn(),
+  listCostAlertOverrides: vi.fn(),
+  createCostAlertOverride: vi.fn(),
+  updateCostAlertOverride: vi.fn(),
+  deleteCostAlertOverride: vi.fn(),
+  listCostAlertEvents: vi.fn(),
   showSuccess: vi.fn(),
   showError: vi.fn(),
 }))
@@ -23,6 +30,16 @@ vi.mock('@/api/admin/supplierProviders', () => ({
   list: mocks.listProviders,
   supplierProvidersAPI: { list: mocks.listProviders },
   default: { list: mocks.listProviders },
+}))
+
+vi.mock('@/api/admin/supplierCostAlert', () => ({
+  getSupplierCostAlertSettings: mocks.getCostAlertSettings,
+  updateSupplierCostAlertSettings: mocks.updateCostAlertSettings,
+  listSupplierCostAlertOverrides: mocks.listCostAlertOverrides,
+  createSupplierCostAlertOverride: mocks.createCostAlertOverride,
+  updateSupplierCostAlertOverride: mocks.updateCostAlertOverride,
+  deleteSupplierCostAlertOverride: mocks.deleteCostAlertOverride,
+  listSupplierCostAlertEvents: mocks.listCostAlertEvents,
 }))
 
 vi.mock('@/stores/app', () => ({
@@ -84,6 +101,9 @@ describe('SupplierCostReviewView', () => {
     vi.clearAllMocks()
     mocks.listReviews.mockResolvedValue({ items: [review], total: 1, page: 1, page_size: 20 })
     mocks.listProviders.mockResolvedValue({ items: [{ id: 3, name: '示例供应商' }], total: 1 })
+    mocks.getCostAlertSettings.mockResolvedValue({ amount: '2.000000' })
+    mocks.listCostAlertOverrides.mockResolvedValue({ items: [] })
+    mocks.listCostAlertEvents.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 10 })
     mocks.listHistory.mockResolvedValue([
       { id: 1, event_type: 'sync', operated_at: '2026-08-24T08:00:00Z', status: 'pending_review' },
     ])
@@ -210,5 +230,28 @@ describe('SupplierCostReviewView', () => {
 
     expect(mocks.showError).toHaveBeenCalledWith('版本冲突，请刷新后重试')
     expect(wrapper.find('[data-test="submit-bulk-approval"]').exists()).toBe(true)
+  })
+
+  it('加载成本预警配置并保存全局阈值', async () => {
+    mocks.updateCostAlertSettings.mockResolvedValue({ amount: '5.000000' })
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('[data-test="cost-alert-global-amount"] input').setValue('5')
+    await wrapper.find('[data-test="save-cost-alert-settings"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.updateCostAlertSettings).toHaveBeenCalledWith({ amount: '5' })
+    expect(mocks.showSuccess).toHaveBeenCalledWith('全局成本预警阈值已保存')
+  })
+
+  it('新增覆盖配置未选择供应商时不调用接口', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('[data-test="add-cost-alert-override"]').trigger('click')
+
+    expect(mocks.createCostAlertOverride).not.toHaveBeenCalled()
+    expect(mocks.showError).toHaveBeenCalledWith('请选择需要覆盖预警阈值的供应商')
   })
 })

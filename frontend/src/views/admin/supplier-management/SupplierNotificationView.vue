@@ -52,11 +52,11 @@
       <DataTable :columns="subscriptionColumns" :data="subscriptions" :loading="loading" row-key="id" :virtualize-threshold="1000">
         <template #cell-channel_id="{ row: subscription }"><div class="sp-entity">{{ channelName(subscription.channel_id) }}</div><div class="sp-sub">渠道 #{{ subscription.channel_id }}</div></template>
         <template #cell-provider_id="{ row: subscription }">{{ providerName(subscription.provider_id) }}</template>
-        <template #cell-event_type="{ row: subscription }"><span class="sp-tag" :class="subscription.event_type === 'balance_recovered' ? 'good' : 'warn'">{{ eventTypeLabel(subscription.event_type) }}</span></template>
+        <template #cell-event_type="{ row: subscription }"><span class="sp-tag" :class="eventTypeTagTone(subscription.event_type)">{{ eventTypeLabel(subscription.event_type) }}</span></template>
         <template #cell-enabled="{ row: subscription }"><div class="sp-inline"><Toggle :model-value="subscription.enabled" :aria-label="`${channelName(subscription.channel_id)}订阅${subscription.enabled ? '已启用' : '已停用'}`" @click.stop @update:model-value="toggleSubscription(subscription, $event)" /><span class="sp-status" :class="subscription.enabled ? 'good' : 'info'">{{ subscription.enabled ? '已启用' : '已停用' }}</span></div></template>
         <template #cell-updated_at="{ row: subscription }">{{ formatDateTime(subscription.updated_at) }}</template>
         <template #cell-actions="{ row: subscription }"><div class="sp-table-actions"><button class="sp-button small ghost" type="button" @click="openEditSubscriptionDialog(subscription)">编辑</button><button class="sp-button small danger" type="button" @click="removeSubscription(subscription)">删除</button></div></template>
-        <template #empty><div class="sp-panel-body sp-empty-state">暂无事件订阅。新增订阅后，余额不足和余额恢复事件才会进入渠道。</div></template>
+        <template #empty><div class="sp-panel-body sp-empty-state">暂无事件订阅。新增订阅后，余额或成本预警事件才会进入渠道。</div></template>
       </DataTable>
     </section>
 
@@ -269,6 +269,8 @@ const channelTypeOptions: SelectOption[] = [
 const eventTypeOptions: SelectOption[] = [
   { value: 'balance_low', label: '余额不足' },
   { value: 'balance_recovered', label: '余额恢复' },
+  { value: 'cost_overrun', label: '成本超额' },
+  { value: 'cost_recovered', label: '成本恢复' },
 ]
 
 const deliveryStatusOptions: SelectOption[] = [
@@ -531,7 +533,7 @@ function openEditSubscriptionDialog(subscription: SupplierNotificationSubscripti
     id: subscription.id,
     channel_id: subscription.channel_id,
     provider_id: subscription.provider_id ?? 0,
-    event_type: subscription.event_type === 'balance_recovered' ? 'balance_recovered' : 'balance_low',
+    event_type: asEventType(subscription.event_type) ?? 'balance_low',
     enabled: subscription.enabled,
   }
   subscriptionDialogVisible.value = true
@@ -588,7 +590,7 @@ async function toggleSubscription(subscription: SupplierNotificationSubscription
     const saved = await updateSupplierNotificationSubscription(subscription.id, {
       channel_id: subscription.channel_id,
       provider_id: subscription.provider_id ?? null,
-      event_type: subscription.event_type === 'balance_recovered' ? 'balance_recovered' : 'balance_low',
+      event_type: asEventType(subscription.event_type) ?? 'balance_low',
       enabled,
     })
     replaceById(subscriptions.value, saved)
@@ -690,7 +692,7 @@ function asPositiveNumber(value: string | number | boolean | null): number | und
 }
 
 function asEventType(value: string | number | boolean | null): SupplierNotificationEventType | undefined {
-  return value === 'balance_low' || value === 'balance_recovered' ? value : undefined
+  return value === 'balance_low' || value === 'balance_recovered' || value === 'cost_overrun' || value === 'cost_recovered' ? value : undefined
 }
 
 function asDeliveryStatus(value: string | number | boolean | null): SupplierNotificationDeliveryStatus | undefined {
@@ -715,7 +717,15 @@ function channelTypeLabel(channelType: string): string {
 }
 
 function eventTypeLabel(eventType: string): string {
-  return eventType === 'balance_recovered' ? '余额恢复' : '余额不足'
+  if (eventType === 'balance_recovered') return '余额恢复'
+  if (eventType === 'cost_overrun') return '成本超额'
+  if (eventType === 'cost_recovered') return '成本恢复'
+  return '余额不足'
+}
+
+function eventTypeTagTone(eventType: string): string {
+  if (eventType === 'balance_recovered' || eventType === 'cost_recovered') return 'good'
+  return 'warn'
 }
 
 function deliveryStatusLabel(status: string): string {
