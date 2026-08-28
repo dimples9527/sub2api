@@ -48,6 +48,16 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 		supplier.PUT("/captcha-settings", h.Admin.Setting.UpdateSupplierCaptchaSettings)
 		supplier.GET("/cost-deviation-settings", h.Admin.SupplierCostDeviationSettings.GetSettings)
 		supplier.PUT("/cost-deviation-settings", h.Admin.SupplierCostDeviationSettings.UpdateSettings)
+
+		costSource := supplier.Group("/cost-source")
+		{
+			costSource.GET("/settings", h.Admin.SupplierCostSourceConfig.GetSettings)
+			costSource.PUT("/settings", h.Admin.SupplierCostSourceConfig.UpdateSettings)
+			costSource.GET("/overrides", h.Admin.SupplierCostSourceConfig.ListOverrides)
+			costSource.POST("/overrides", h.Admin.SupplierCostSourceConfig.CreateOverride)
+			costSource.PUT("/overrides/:id", h.Admin.SupplierCostSourceConfig.UpdateOverride)
+			costSource.DELETE("/overrides/:id", h.Admin.SupplierCostSourceConfig.DeleteOverride)
+		}
 		supplier.GET("/recharges", h.Admin.SupplierProviderRecharge.List)
 		supplier.POST("/recharges/sync", h.Admin.SupplierProviderRecharge.Sync)
 		supplier.GET("/cost-reviews", h.Admin.SupplierProviderCostReview.List)

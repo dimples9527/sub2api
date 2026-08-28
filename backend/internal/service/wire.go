@@ -1,4 +1,4 @@
-﻿package service
+package service
 
 import (
 	"context"
@@ -678,10 +678,12 @@ func ProvideSupplierProviderService(
 	typeRepo SupplierProviderTypeRepository,
 	tokenCache SupplierProviderTokenCache,
 	costDeviationSettings *SupplierCostDeviationSettingsService,
+	costSourceService *SupplierCostSourceConfigService,
 ) *SupplierProviderService {
 	svc := NewSupplierProviderService(repo, encryptor, typeRepo)
 	svc.SetTokenCache(tokenCache)
 	svc.SetCostDeviationThresholdProvider(costDeviationSettings)
+	svc.SetCostSourceResolver(costSourceService)
 	return svc
 }
 
@@ -964,6 +966,7 @@ var ProviderSet = wire.NewSet(
 	ProvideSupplierProviderService,
 	SupplierBalanceAlertWiringSet,
 	SupplierCostAlertWiringSet,
+	SupplierCostSourceWiringSet,
 	SupplierNotificationWiringSet,
 	NewSupplierProviderTypeService,
 	ProvideSupplierProviderRemoteClient,

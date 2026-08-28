@@ -314,6 +314,10 @@ func applySyncToReview(review service.SupplierProviderCostReview, input service.
 }
 
 func pendingEffectiveCost(input service.SupplierProviderCostReviewSyncInput) float64 {
+	// 上游成本优先模式：待审批记录默认采用上游接口成本。
+	if input.CostSource == service.SupplierCostSourceUpstream && input.UpstreamCost != nil {
+		return costReviewRound6(*input.UpstreamCost)
+	}
 	if input.CalculatedCost != nil {
 		return costReviewRound6(*input.CalculatedCost)
 	}

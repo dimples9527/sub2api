@@ -97,7 +97,9 @@ type SupplierProviderCostReviewBulkApproveInput struct {
 	OperatorID   int64                                   `json:"-"`
 }
 type SupplierProviderCostReviewSyncInput struct {
-	ProviderID      int64
+	ProviderID int64
+	// CostSource 本次同步采用的成本来源模式，决定待审批记录的默认生效成本。
+	CostSource      string
 	StatDate        time.Time
 	UpstreamCost    *float64
 	CalculatedCost  *float64

@@ -7,8 +7,9 @@
         <p class="sp-subtitle">对比接口成本与本地计算成本，逐条确认当前业务生效成本。</p>
       </div>
       <div class="sp-controls">
-        <button class="sp-button ghost" type="button" data-test="cost-alert-config-button" @click="openCostAlertConfigDialog">预警配置</button>
-        <button class="sp-button ghost" type="button" data-test="cost-alert-events-button" @click="openCostAlertEventsDialog">预警事件</button>
+        <button class="sp-button ghost cost-source-button" type="button" data-test="cost-source-config-button" @click="openCostSourceDialog">成本来源</button>
+        <button class="sp-button ghost cost-alert-config-button" type="button" data-test="cost-alert-config-button" @click="openCostAlertConfigDialog">预警配置</button>
+        <button class="sp-button ghost cost-alert-events-button" type="button" data-test="cost-alert-events-button" @click="openCostAlertEventsDialog">预警事件</button>
         <span v-if="lastLoadedAt" class="sp-data-note">更新于 {{ formatDateTime(lastLoadedAt) }}</span>
         <button class="sp-button primary" type="button" :disabled="loading" @click="loadReviews">{{ loading ? '刷新中…' : '刷新数据' }}</button>
       </div>
@@ -68,8 +69,8 @@
       <div class="sp-pagination-row"><Pagination v-model:page="page" v-model:page-size="pageSize" :total="total" :show-jump="total > 100" @update:page="onPageChange" @update:page-size="onPageSizeChange" /></div>
     </section>
 
-    <BaseDialog :show="costAlertSettingsVisible" title="成本超额预警配置" width="wide" @close="closeCostAlertSettingsDialog">
-      <div class="cost-alert-dialog supplier-management-page" data-test="cost-alert-settings-section">
+    <BaseDialog :show="costAlertSettingsVisible" title="成本超额预警配置" width="full" @close="closeCostAlertSettingsDialog">
+      <div class="cost-alert-dialog cost-settings-large-dialog cost-alert-settings-dialog supplier-management-page" data-test="cost-alert-settings-section">
         <div class="cost-alert-settings-body">
           <div class="cost-alert-global-settings">
             <Input
@@ -150,8 +151,131 @@
       </template>
     </BaseDialog>
 
-    <BaseDialog :show="costAlertEventsVisible" title="成本超额预警事件" width="wide" @close="closeCostAlertEventsDialog">
-      <div class="cost-alert-dialog supplier-management-page" data-test="cost-alert-events-section">
+    <BaseDialog :show="costSourceVisible" title="成本来源配置" width="full" @close="closeCostSourceDialog">
+      <div class="cost-source-dialog cost-settings-large-dialog cost-source-settings-dialog supplier-management-page" data-test="cost-source-settings-section">
+        <div class="cost-source-global">
+          <div class="cost-source-field">
+            <span class="cost-source-label">全局默认成本来源</span>
+            <Select
+              v-model="costSourceSettingsForm.costSource"
+              :options="costSourceModeOptions"
+              aria-label="全局默认成本来源"
+              class="cost-source-mode-select"
+            />
+          </div>
+          <button class="sp-button primary" type="button" data-test="save-cost-source-settings" :disabled="savingCostSourceSettings" @click="saveCostSourceSettings">
+            {{ savingCostSourceSettings ? '保存中…' : '保存全局来源' }}
+          </button>
+        </div>
+        <p class="cost-source-note">智能模式保持现有核对行为；接口成本优先或计算成本优先时，待审批记录与同步写入都固定采用所选来源。</p>
+
+        <DataTable
+          :columns="costSourceOverrideColumns"
+          :data="costSourceOverrides"
+          :loading="costSourceLoading"
+          row-key="id"
+          :virtualize-threshold="1000"
+        >
+          <template #cell-provider_id="{ row }">
+            <span class="provider-badge" :class="providerColorClass(row.provider_id)">
+              <strong>{{ providerName(row.provider_id) }}</strong>
+              <span class="sp-sub">供应商 #{{ row.provider_id }}</span>
+            </span>
+          </template>
+          <template #cell-cost_source="{ row }">
+            <span class="sp-tag" :class="costSourceTagClass(row.cost_source)">{{ costSourceLabel(row.cost_source) }}</span>
+          </template>
+          <template #cell-threshold="{ row }">{{ row.cost_source === 'auto' ? formatDecimalString(row.threshold ? String(row.threshold) : null) : '不适用' }}</template>
+          <template #cell-actions="{ row }">
+            <div class="cost-source-actions">
+              <button class="sp-button small ghost" type="button" @click="openCostSourceOverrideDialog(row)">编辑</button>
+              <button
+                class="sp-button small danger"
+                type="button"
+                :disabled="deletingCostSourceOverrideId !== null"
+                @click="removeCostSourceOverride(row)"
+              >
+                {{ deletingCostSourceOverrideId === row.id ? '删除中…' : '删除' }}
+              </button>
+            </div>
+          </template>
+          <template #empty><div class="sp-empty-state">暂无供应商单独配置，全部跟随全局默认成本来源。</div></template>
+        </DataTable>
+
+        <div class="cost-source-add-row">
+          <Select
+            v-model="costSourceOverrideForm.providerId"
+            :options="availableCostSourceProviderOptions"
+            clearable
+            aria-label="新增成本来源供应商"
+            placeholder="选择供应商"
+            class="cost-source-provider-select"
+          />
+          <Select
+            v-model="costSourceOverrideForm.costSource"
+            :options="costSourceModeOptions"
+            aria-label="新增成本来源模式"
+            class="cost-source-mode-select"
+          />
+          <Input
+            v-if="costSourceOverrideForm.costSource === 'auto'"
+            v-model="costSourceOverrideForm.threshold"
+            type="number"
+            min="0"
+            step="0.000001"
+            aria-label="成本来源偏差阈值"
+            placeholder="偏差阈值（留空跟随全局）"
+          />
+          <button class="sp-button primary" type="button" data-test="add-cost-source-override" :disabled="savingCostSourceOverride" @click="saveCostSourceOverride()">新增单独配置</button>
+        </div>
+      </div>
+      <template #footer>
+        <div class="dialog-actions">
+          <button class="sp-button ghost" type="button" @click="closeCostSourceDialog">关闭</button>
+        </div>
+      </template>
+    </BaseDialog>
+
+    <BaseDialog :show="costSourceOverrideDialogVisible" title="编辑成本来源单独配置" width="normal" @close="closeCostSourceOverrideDialog">
+      <div v-if="costSourceOverrideDialogForm" class="cost-source-dialog supplier-management-page">
+        <div class="review-summary">
+          <div><span>供应商</span><strong>{{ providerName(costSourceOverrideDialogForm.providerId) }}</strong></div>
+          <div><span>全局默认来源</span><strong>{{ costSourceLabel(costSourceSettings.cost_source) }}</strong></div>
+          <div><span>全局差额阈值</span><strong>{{ formatDecimalString(costAlertSettings.amount) }}</strong></div>
+        </div>
+        <div class="cost-source-field">
+          <span class="cost-source-label">成本来源</span>
+          <Select
+            v-model="costSourceOverrideDialogForm.costSource"
+            :options="costSourceModeOptions"
+            aria-label="成本来源"
+            class="cost-source-mode-select"
+          />
+        </div>
+        <Input
+          v-if="costSourceOverrideDialogForm.costSource === 'auto'"
+          v-model="costSourceOverrideDialogForm.threshold"
+          type="number"
+          min="0"
+          step="0.000001"
+          label="覆盖偏差阈值"
+          hint="留空表示跟随全局差额阈值。"
+          data-test="cost-source-override-threshold"
+        />
+        <p class="review-dialog-note">仅在智能模式下覆盖阈值参与偏差判断；接口成本优先或计算成本优先时固定采用所选来源。</p>
+      </div>
+      <template #footer>
+        <div class="dialog-actions">
+          <button class="sp-button ghost" type="button" @click="closeCostSourceOverrideDialog">取消</button>
+          <button class="sp-button primary" type="button" :disabled="savingCostSourceOverride" @click="submitCostSourceOverrideDialog">
+            {{ savingCostSourceOverride ? '保存中…' : '保存单独配置' }}
+          </button>
+        </div>
+      </template>
+    </BaseDialog>
+
+    <BaseDialog :show="costAlertEventsVisible" title="成本超额预警事件" width="full" @close="closeCostAlertEventsDialog">
+      <div class="cost-alert-dialog cost-settings-large-dialog cost-alert-events-dialog supplier-management-page" data-test="cost-alert-events-section">
         <div class="cost-alert-event-toolbar">
           <Select
             v-model="costAlertEventFilters.type"
@@ -331,6 +455,17 @@ import {
   type SupplierProviderCostReview,
   type SupplierProviderCostReviewHistory,
 } from '@/api/admin/supplierProviderCostReviews'
+import {
+  createSupplierCostSourceOverride,
+  deleteSupplierCostSourceOverride,
+  getSupplierCostSourceSettings,
+  listSupplierCostSourceOverrides,
+  updateSupplierCostSourceOverride,
+  updateSupplierCostSourceSettings,
+  type SupplierCostSourceMode,
+  type SupplierCostSourceOverride,
+  type SupplierCostSourceSettings,
+} from '@/api/admin/supplierCostSource'
 
 const appStore = useAppStore()
 const filters = reactive<{ keyword: string; providerId: number | null; startDate: string; endDate: string; status: SupplierCostReviewStatus | '' }>({ keyword: '', providerId: null, startDate: '', endDate: '', status: '' })
@@ -372,6 +507,17 @@ const costAlertOverrideDialogVisible = ref(false)
 const costAlertOverrideDialogForm = ref<{ id: number; providerId: number; enabled: boolean; amount: string } | null>(null)
 const costAlertOverrideForm = ref<{ providerId: number | null; enabled: boolean; amount: string }>({ providerId: null, enabled: true, amount: '' })
 const costAlertEventFilters = ref<{ type: SupplierCostAlertEventType | ''; status: SupplierCostAlertEventStatus | '' }>({ type: '', status: '' })
+const costSourceSettings = ref<SupplierCostSourceSettings>({ cost_source: 'auto' })
+const costSourceSettingsForm = ref<{ costSource: SupplierCostSourceMode }>({ costSource: 'auto' })
+const costSourceOverrides = ref<SupplierCostSourceOverride[]>([])
+const costSourceLoading = ref(false)
+const savingCostSourceSettings = ref(false)
+const savingCostSourceOverride = ref(false)
+const deletingCostSourceOverrideId = ref<number | null>(null)
+const costSourceVisible = ref(false)
+const costSourceOverrideDialogVisible = ref(false)
+const costSourceOverrideDialogForm = ref<{ id: number; providerId: number; costSource: SupplierCostSourceMode; threshold: string } | null>(null)
+const costSourceOverrideForm = ref<{ providerId: number | null; costSource: SupplierCostSourceMode; threshold: string }>({ providerId: null, costSource: 'auto', threshold: '' })
 
 const providerOptions = computed<SelectOption[]>(() => providers.value.map(provider => ({ value: provider.id, label: provider.name })))
 const statusOptions: SelectOption[] = [
@@ -403,6 +549,15 @@ const availableCostAlertProviderOptions = computed<SelectOption[]>(() => {
   const configured = new Set(costAlertOverrides.value.map(item => item.provider_id))
   return providerOptions.value.filter(option => !configured.has(Number(option.value)))
 })
+const availableCostSourceProviderOptions = computed<SelectOption[]>(() => {
+  const configured = new Set(costSourceOverrides.value.map(item => item.provider_id))
+  return providerOptions.value.filter(option => !configured.has(Number(option.value)))
+})
+const costSourceModeOptions: SelectOption[] = [
+  { value: 'auto', label: '智能模式' },
+  { value: 'upstream', label: '接口成本优先' },
+  { value: 'calculated', label: '计算成本优先' },
+]
 const costAlertEventTypeOptions: SelectOption[] = [
   { value: 'cost_overrun', label: '成本超额' },
   { value: 'cost_recovered', label: '成本恢复' },
@@ -415,6 +570,13 @@ const costAlertOverrideColumns: Column[] = [
   { key: 'provider_id', label: '供应商' },
   { key: 'amount', label: '差额阈值' },
   { key: 'enabled', label: '预警开关' },
+  { key: 'updated_at', label: '更新时间' },
+  { key: 'actions', label: '操作' },
+]
+const costSourceOverrideColumns: Column[] = [
+  { key: 'provider_id', label: '供应商' },
+  { key: 'cost_source', label: '成本来源' },
+  { key: 'threshold', label: '偏差阈值' },
   { key: 'updated_at', label: '更新时间' },
   { key: 'actions', label: '操作' },
 ]
@@ -445,6 +607,21 @@ function providerColorClass(providerId: number) {
 function providerName(providerId: number) { return providers.value.find(provider => provider.id === providerId)?.name ?? `供应商 #${providerId}` }
 function costAlertEventTypeLabel(eventType: string) { return eventType === 'cost_recovered' ? '成本恢复' : '成本超额' }
 function costAlertEventStatusLabel(status: string) { return status === 'active' ? '活动中' : status === 'resolved' ? '已恢复' : status }
+function costSourceLabel(source: SupplierCostSourceMode | string) {
+  return { auto: '智能模式', upstream: '接口成本优先', calculated: '计算成本优先' }[source] ?? source
+}
+function costSourceTagClass(source: SupplierCostSourceMode | string) {
+  return source === 'upstream' ? 'info' : source === 'calculated' ? 'good' : 'warn'
+}
+function validateCostSourceThreshold(value: string) {
+  const threshold = value.trim()
+  if (!threshold) return null
+  if (!/^\d+(?:\.\d{1,6})?$/.test(threshold)) {
+    appStore.showError('偏差阈值必须是非负数字，且最多 6 位小数')
+    return undefined
+  }
+  return Number(threshold)
+}
 function validateCostAlertAmount(value: string, message = '差额阈值必须是大于或等于 0 的数字') {
   const amount = value.trim()
   if (!amount || Number.isNaN(Number(amount)) || Number(amount) < 0) {
@@ -485,6 +662,135 @@ async function loadCostAlertOverrides() {
     costAlertOverrides.value = result.items ?? []
   } catch (error) {
     appStore.showError(extractApiErrorMessage(error, '加载供应商覆盖配置失败'))
+  }
+}
+
+async function loadCostSourceSettings() {
+  try {
+    const settings = await getSupplierCostSourceSettings()
+    costSourceSettings.value = settings
+    costSourceSettingsForm.value = { costSource: settings.cost_source || 'auto' }
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, '加载成本来源配置失败'))
+  }
+}
+
+async function saveCostSourceSettings() {
+  savingCostSourceSettings.value = true
+  try {
+    const saved = await updateSupplierCostSourceSettings({ cost_source: costSourceSettingsForm.value.costSource })
+    costSourceSettings.value = saved
+    costSourceSettingsForm.value = { costSource: saved.cost_source || 'auto' }
+    appStore.showSuccess('全局成本来源已保存')
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, '保存成本来源配置失败'))
+  } finally {
+    savingCostSourceSettings.value = false
+  }
+}
+
+async function loadCostSourceOverrides() {
+  try {
+    const result = await listSupplierCostSourceOverrides()
+    costSourceOverrides.value = result.items ?? []
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, '加载供应商成本来源配置失败'))
+  }
+}
+
+async function openCostSourceDialog() {
+  costSourceVisible.value = true
+  await Promise.all([loadCostSourceSettings(), loadCostSourceOverrides()])
+}
+
+function closeCostSourceDialog() {
+  costSourceVisible.value = false
+}
+
+function openCostSourceOverrideDialog(row: SupplierCostSourceOverride) {
+  costSourceOverrideDialogForm.value = {
+    id: row.id,
+    providerId: row.provider_id,
+    costSource: row.cost_source,
+    threshold: row.threshold === null || row.threshold === undefined ? '' : String(row.threshold),
+  }
+  costSourceOverrideDialogVisible.value = true
+}
+
+function closeCostSourceOverrideDialog() {
+  if (savingCostSourceOverride.value) return
+  costSourceOverrideDialogVisible.value = false
+  costSourceOverrideDialogForm.value = null
+}
+
+async function saveCostSourceOverride(row?: SupplierCostSourceOverride) {
+  if (row) {
+    await updateCostSourceOverride(row.id, {
+      cost_source: row.cost_source,
+      threshold: row.threshold ?? null,
+    })
+    return
+  }
+  const providerId = costSourceOverrideForm.value.providerId
+  if (!providerId) {
+    appStore.showError('请选择需要单独配置成本来源的供应商')
+    return
+  }
+  const threshold = costSourceOverrideForm.value.costSource === 'auto'
+    ? validateCostSourceThreshold(costSourceOverrideForm.value.threshold)
+    : null
+  if (threshold === undefined) return
+  await createCostSourceOverride({ provider_id: providerId, cost_source: costSourceOverrideForm.value.costSource, threshold })
+  costSourceOverrideForm.value = { providerId: null, costSource: 'auto', threshold: '' }
+}
+
+async function createCostSourceOverride(input: { provider_id: number; cost_source: SupplierCostSourceMode; threshold: number | null }) {
+  savingCostSourceOverride.value = true
+  try {
+    await createSupplierCostSourceOverride(input)
+    await loadCostSourceOverrides()
+    appStore.showSuccess('供应商成本来源已保存')
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, '保存供应商成本来源配置失败'))
+  } finally {
+    savingCostSourceOverride.value = false
+  }
+}
+
+async function updateCostSourceOverride(id: number, input: { cost_source: SupplierCostSourceMode; threshold: number | null }) {
+  savingCostSourceOverride.value = true
+  try {
+    await updateSupplierCostSourceOverride(id, input)
+    await loadCostSourceOverrides()
+    appStore.showSuccess('供应商成本来源已保存')
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, '保存供应商成本来源配置失败'))
+  } finally {
+    savingCostSourceOverride.value = false
+  }
+}
+
+async function submitCostSourceOverrideDialog() {
+  const form = costSourceOverrideDialogForm.value
+  if (!form) return
+  const threshold = form.costSource === 'auto' ? validateCostSourceThreshold(form.threshold) : null
+  if (threshold === undefined) return
+  await updateCostSourceOverride(form.id, { cost_source: form.costSource, threshold })
+  costSourceOverrideDialogVisible.value = false
+  costSourceOverrideDialogForm.value = null
+}
+
+async function removeCostSourceOverride(row: SupplierCostSourceOverride) {
+  if (!window.confirm(`确认删除「${providerName(row.provider_id)}」的成本来源单独配置？删除后将跟随全局默认来源。`)) return
+  deletingCostSourceOverrideId.value = row.id
+  try {
+    await deleteSupplierCostSourceOverride(row.id)
+    await loadCostSourceOverrides()
+    appStore.showSuccess('供应商成本来源配置已删除')
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, '删除供应商成本来源配置失败'))
+  } finally {
+    deletingCostSourceOverrideId.value = null
   }
 }
 
@@ -658,11 +964,37 @@ async function submitBulkApproval() {
 async function openHistory(row: SupplierProviderCostReview) { historyVisible.value = true; historyLoading.value = true; history.value = []; try { history.value = await listSupplierProviderCostReviewHistory(row.id) } catch (error) { appStore.showError(extractApiErrorMessage(error, '加载成本历史失败')) } finally { historyLoading.value = false } }
 function closeHistory() { historyVisible.value = false }
 
-onMounted(async () => { await Promise.all([loadProviders(), loadReviews(), loadCostAlertSettings()]) })
+onMounted(async () => { await Promise.all([loadProviders(), loadReviews(), loadCostAlertSettings(), loadCostSourceSettings()]) })
 </script>
 
 <style scoped>
 .cost-review-head { align-items: flex-start; }
+.cost-review-head .cost-source-button,
+.cost-review-head .cost-alert-config-button,
+.cost-review-head .cost-alert-events-button {
+  --button-accent: #2563eb;
+  color: var(--button-accent);
+  border-color: color-mix(in srgb, var(--button-accent) 34%, transparent);
+  background: linear-gradient(150deg, color-mix(in srgb, var(--button-accent) 8%, transparent), transparent 64%), #fff;
+  transition: border-color .2s ease, box-shadow .2s ease, transform .2s ease;
+}
+.cost-review-head .cost-source-button { --button-accent: #2563eb; }
+.cost-review-head .cost-alert-config-button { --button-accent: #d97706; }
+.cost-review-head .cost-alert-events-button { --button-accent: #7c3aed; }
+.cost-review-head .cost-source-button:hover,
+.cost-review-head .cost-alert-config-button:hover,
+.cost-review-head .cost-alert-events-button:hover {
+  border-color: color-mix(in srgb, var(--button-accent) 68%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--button-accent) 11%, transparent), 0 8px 18px color-mix(in srgb, var(--button-accent) 10%, transparent);
+  transform: translateY(-1px);
+}
+.cost-review-head .cost-source-button:focus-visible,
+.cost-review-head .cost-alert-config-button:focus-visible,
+.cost-review-head .cost-alert-events-button:focus-visible {
+  outline: none;
+  border-color: var(--button-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--button-accent) 18%, transparent);
+}
 .cost-review-filters { margin-bottom: 18px; }
 .cost-review-filter-grid { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(280px, 1.5fr) minmax(180px, 1fr) auto; gap: 12px; align-items: center; padding: 16px; }
 .cost-review-metrics { grid-template-columns: repeat(4, minmax(145px, 1fr)); gap: 0.75rem; margin-bottom: 18px; }
@@ -713,6 +1045,54 @@ onMounted(async () => { await Promise.all([loadProviders(), loadReviews(), loadC
   min-height: 0;
   color: var(--sp-ink);
 }
+.cost-source-dialog {
+  --sp-panel: #ffffff;
+  --sp-line: #dbe4ee;
+  --sp-blue: #2563eb;
+  --sp-cyan: #0891b2;
+  --sp-green: #059669;
+  --sp-amber: #d97706;
+  --sp-violet: #7c3aed;
+  --sp-ink: #172033;
+  --sp-muted: #64748b;
+  --sp-soft: #f1f5f9;
+  min-height: 0;
+  color: var(--sp-ink);
+}
+/* 成本配置大弹窗：宽度使用 full 档，并让内容区撑满更高的弹窗主体。 */
+:global(.modal-content:has(.cost-settings-large-dialog)) {
+  min-height: min(88vh, 940px);
+}
+:global(.modal-content:has(.cost-settings-large-dialog) .modal-body) {
+  display: flex;
+  align-items: stretch;
+}
+.cost-settings-large-dialog { width: 100%; }
+.cost-alert-settings-dialog .cost-alert-settings-body {
+  height: 100%;
+  align-items: stretch;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+.cost-alert-settings-dialog :deep(.table-wrapper) {
+  min-height: 0;
+}
+.cost-source-settings-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.cost-source-settings-dialog :deep(.table-wrapper) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.cost-source-global { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.cost-source-field { min-width: 240px; }
+.cost-source-label { display: block; margin-bottom: 6px; color: var(--sp-muted); font-size: 12px; }
+.cost-source-mode-select { width: 220px; }
+.cost-source-note { margin: -6px 0 0; color: var(--sp-muted); font-size: 12px; }
+.cost-source-actions { display: flex; gap: 8px; white-space: nowrap; }
+.cost-source-add-row { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; padding-top: 16px; border-top: 1px solid var(--sp-line); }
+.cost-source-provider-select { min-width: 240px; }
 .cost-alert-settings-body { display: grid; gap: 18px; }
 .cost-alert-event-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-bottom: 14px; margin-bottom: 4px; border-bottom: 1px solid var(--sp-line); }
 .cost-alert-global-settings { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
@@ -721,6 +1101,19 @@ onMounted(async () => { await Promise.all([loadProviders(), loadReviews(), loadC
 .cost-alert-provider-select { min-width: 240px; }
 .cost-alert-switch { display: flex; align-items: center; gap: 8px; }
 .cost-alert-filter-control { min-width: 140px; }
+.cost-alert-events-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.cost-alert-events-dialog :deep(.table-wrapper) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.cost-alert-events-dialog .sp-pagination-row {
+  flex: 0 0 auto;
+  margin-bottom: 0;
+}
 /* 按供应商 ID 稳定分配 8 色徽标，保证同一供应商在不同区域颜色一致。 */
 .provider-badge {
   --provider-accent: var(--sp-blue);

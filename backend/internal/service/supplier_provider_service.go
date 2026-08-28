@@ -272,11 +272,12 @@ type SupplierProviderTypeRepository interface {
 }
 
 type SupplierProviderService struct {
-	repo              SupplierProviderRepository
-	encryptor         SecretEncryptor
-	typeRepo          SupplierProviderTypeRepository
-	tokenCache        SupplierProviderTokenCache
-	thresholdProvider SupplierCostDeviationThresholdProvider
+	repo               SupplierProviderRepository
+	encryptor          SecretEncryptor
+	typeRepo           SupplierProviderTypeRepository
+	tokenCache         SupplierProviderTokenCache
+	thresholdProvider  SupplierCostDeviationThresholdProvider
+	costSourceResolver SupplierCostSourceResolver
 }
 
 func NewSupplierProviderService(repo SupplierProviderRepository, encryptor SecretEncryptor, typeRepo ...SupplierProviderTypeRepository) *SupplierProviderService {
@@ -303,6 +304,23 @@ func (s *SupplierProviderService) costDeviationThreshold(ctx context.Context) fl
 		return s.thresholdProvider.SupplierCostDeviationThreshold(ctx)
 	}
 	return DefaultSupplierCostDeviationThreshold
+}
+
+// SetCostSourceResolver 注入成本来源解析器；未注入时趋势展示按智能模式 + 全局阈值处理。
+func (s *SupplierProviderService) SetCostSourceResolver(resolver SupplierCostSourceResolver) {
+	if s != nil {
+		s.costSourceResolver = resolver
+	}
+}
+
+// costSourceFor 解析供应商成本来源；未注入解析器或解析失败时回退智能模式 + 全局阈值。
+func (s *SupplierProviderService) costSourceFor(ctx context.Context, providerID int64) SupplierCostSourceResolution {
+	if s != nil && s.costSourceResolver != nil {
+		if resolution, err := s.costSourceResolver.ResolveCostSource(ctx, providerID); err == nil {
+			return resolution
+		}
+	}
+	return SupplierCostSourceResolution{Source: SupplierCostSourceAuto, Threshold: s.costDeviationThreshold(ctx)}
 }
 
 type SupplierProviderTypeService struct {
@@ -511,10 +529,22 @@ func (s *SupplierProviderService) listCostTrendsBetween(ctx context.Context, sta
 		}
 	}
 
-	// 展示时偏差覆盖：上游与本地成本差距超过阈值时，按本地成本展示并记录警告。
-	// 优先以原始上游值为基准（历史数据未记录时退化为已写入的 today_cost）。
+	// 展示时按供应商成本来源决定兜底改写：
+	//   upstream 模式保持上游值；calculated 模式固定展示本地计算成本；
+	//   auto 模式在上游与本地差距超过阈值时按本地成本展示并记录警告，
+	//   优先以原始上游值为基准（历史数据未记录时退化为已写入的 today_cost）。
 	for i := range rawBreakdown {
 		b := &rawBreakdown[i]
+		source := s.costSourceFor(ctx, b.ProviderID)
+		if source.Source == SupplierCostSourceUpstream {
+			continue
+		}
+		if source.Source == SupplierCostSourceCalculated {
+			if b.LocalCost > 0 {
+				b.UpstreamCost = b.LocalCost
+			}
+			continue
+		}
 		if b.LocalCost <= 0 {
 			continue
 		}
@@ -522,7 +552,7 @@ func (s *SupplierProviderService) listCostTrendsBetween(ctx context.Context, sta
 		if b.RawUpstreamCost > 0 {
 			base = b.RawUpstreamCost
 		}
-		if base > 0 && supplierCostDeviation(base, b.LocalCost) > threshold {
+		if base > 0 && supplierCostDeviation(base, b.LocalCost) > source.Threshold {
 			b.CostWarning = supplierCostDeviationWarning(base, b.LocalCost)
 			b.UpstreamCost = b.LocalCost
 		}
@@ -538,8 +568,23 @@ func (s *SupplierProviderService) listCostTrendsBetween(ctx context.Context, sta
 		points = append(points, SupplierProviderCostTrendPoint{Date: date})
 	}
 
+	// 汇总点位按查询维度应用成本来源：指定供应商时用该供应商的解析结果，
+	// 未指定供应商（跨供应商汇总）时回退智能模式 + 全局阈值。
+	pointSource := SupplierCostSourceResolution{Source: SupplierCostSourceAuto, Threshold: threshold}
+	if providerID > 0 {
+		pointSource = s.costSourceFor(ctx, providerID)
+	}
 	for i := range points {
 		p := &points[i]
+		if pointSource.Source == SupplierCostSourceUpstream {
+			continue
+		}
+		if pointSource.Source == SupplierCostSourceCalculated {
+			if p.LocalCost > 0 {
+				p.UpstreamCost = p.LocalCost
+			}
+			continue
+		}
 		if p.LocalCost <= 0 {
 			continue
 		}
@@ -547,7 +592,7 @@ func (s *SupplierProviderService) listCostTrendsBetween(ctx context.Context, sta
 		if p.RawUpstreamCost != nil && *p.RawUpstreamCost > 0 {
 			base = *p.RawUpstreamCost
 		}
-		if base > 0 && supplierCostDeviation(base, p.LocalCost) > threshold {
+		if base > 0 && supplierCostDeviation(base, p.LocalCost) > pointSource.Threshold {
 			p.Warning = supplierCostDeviationWarning(base, p.LocalCost)
 			p.UpstreamCost = p.LocalCost
 		}

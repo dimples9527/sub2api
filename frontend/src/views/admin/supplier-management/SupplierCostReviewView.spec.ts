@@ -15,6 +15,12 @@ const mocks = vi.hoisted(() => ({
   updateCostAlertOverride: vi.fn(),
   deleteCostAlertOverride: vi.fn(),
   listCostAlertEvents: vi.fn(),
+  getCostSourceSettings: vi.fn(),
+  updateCostSourceSettings: vi.fn(),
+  listCostSourceOverrides: vi.fn(),
+  createCostSourceOverride: vi.fn(),
+  updateCostSourceOverride: vi.fn(),
+  deleteCostSourceOverride: vi.fn(),
   showSuccess: vi.fn(),
   showError: vi.fn(),
 }))
@@ -40,6 +46,15 @@ vi.mock('@/api/admin/supplierCostAlert', () => ({
   updateSupplierCostAlertOverride: mocks.updateCostAlertOverride,
   deleteSupplierCostAlertOverride: mocks.deleteCostAlertOverride,
   listSupplierCostAlertEvents: mocks.listCostAlertEvents,
+}))
+
+vi.mock('@/api/admin/supplierCostSource', () => ({
+  getSupplierCostSourceSettings: mocks.getCostSourceSettings,
+  updateSupplierCostSourceSettings: mocks.updateCostSourceSettings,
+  listSupplierCostSourceOverrides: mocks.listCostSourceOverrides,
+  createSupplierCostSourceOverride: mocks.createCostSourceOverride,
+  updateSupplierCostSourceOverride: mocks.updateCostSourceOverride,
+  deleteSupplierCostSourceOverride: mocks.deleteCostSourceOverride,
 }))
 
 vi.mock('@/stores/app', () => ({
@@ -104,6 +119,8 @@ describe('SupplierCostReviewView', () => {
     mocks.getCostAlertSettings.mockResolvedValue({ amount: '2.000000' })
     mocks.listCostAlertOverrides.mockResolvedValue({ items: [] })
     mocks.listCostAlertEvents.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 10 })
+    mocks.getCostSourceSettings.mockResolvedValue({ cost_source: 'auto' })
+    mocks.listCostSourceOverrides.mockResolvedValue({ items: [] })
     mocks.listHistory.mockResolvedValue([
       { id: 1, event_type: 'sync', operated_at: '2026-08-24T08:00:00Z', status: 'pending_review' },
     ])
@@ -131,6 +148,8 @@ describe('SupplierCostReviewView', () => {
     const wrapper = mountView()
     await flushPromises()
 
+    expect(wrapper.find('[data-test="cost-alert-config-button"]').classes()).toContain('cost-alert-config-button')
+    expect(wrapper.find('[data-test="cost-alert-events-button"]').classes()).toContain('cost-alert-events-button')
     expect(wrapper.find('[data-test="cost-alert-settings-section"]').exists()).toBe(false)
     await wrapper.find('[data-test="cost-alert-config-button"]').trigger('click')
     expect(wrapper.find('[data-test="cost-alert-settings-section"]').exists()).toBe(true)
@@ -140,10 +159,31 @@ describe('SupplierCostReviewView', () => {
     expect(wrapper.find('[data-test="cost-alert-events-section"]').exists()).toBe(true)
   })
 
+  it('打开成本来源弹窗并保存全局默认来源', async () => {
+    mocks.updateCostSourceSettings.mockResolvedValue({ cost_source: 'upstream' })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const costSourceButton = wrapper.find('[data-test="cost-source-config-button"]')
+    expect(costSourceButton.classes()).toContain('cost-source-button')
+    expect(wrapper.find('[data-test="cost-source-settings-section"]').exists()).toBe(false)
+
+    await costSourceButton.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="cost-source-settings-section"]').exists()).toBe(true)
+
+    await wrapper.find('[data-test="save-cost-source-settings"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.updateCostSourceSettings).toHaveBeenCalledWith({ cost_source: 'auto' })
+    expect(mocks.showSuccess).toHaveBeenCalledWith('全局成本来源已保存')
+  })
+
   it('重置筛选后查询全部日期的成本核对记录', async () => {
     const wrapper = mountView()
     await flushPromises()
-    await wrapper.find('button.sp-button.ghost').trigger('click')
+    const resetButton = wrapper.findAll('button.sp-button.ghost').find(button => button.text() === '重置筛选')
+    await resetButton?.trigger('click')
     await flushPromises()
 
     expect(mocks.listReviews).toHaveBeenLastCalledWith(expect.objectContaining({

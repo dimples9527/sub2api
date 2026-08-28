@@ -355,16 +355,17 @@ const (
 )
 
 type SupplierProviderSyncService struct {
-	providerRepo      SupplierProviderRepository
-	dataRepo          SupplierProviderDataRepository
-	rechargeRepo      SupplierProviderRechargeRepository
-	remote            SupplierProviderRemoteClient
-	encryptor         SecretEncryptor
-	syncLock          SupplierProviderSyncLock
-	groupMatcher      SupplierProviderGroupAutoMatcher
-	thresholdProvider SupplierCostDeviationThresholdProvider
-	costReviewService *SupplierProviderCostReviewService
-	costAlertHandler  SupplierCostAlertHandler
+	providerRepo       SupplierProviderRepository
+	dataRepo           SupplierProviderDataRepository
+	rechargeRepo       SupplierProviderRechargeRepository
+	remote             SupplierProviderRemoteClient
+	encryptor          SecretEncryptor
+	syncLock           SupplierProviderSyncLock
+	groupMatcher       SupplierProviderGroupAutoMatcher
+	thresholdProvider  SupplierCostDeviationThresholdProvider
+	costSourceResolver SupplierCostSourceResolver
+	costReviewService  *SupplierProviderCostReviewService
+	costAlertHandler   SupplierCostAlertHandler
 }
 
 func (s *SupplierProviderSyncService) SetGroupMatcher(matcher SupplierProviderGroupAutoMatcher) {
@@ -384,6 +385,24 @@ func (s *SupplierProviderSyncService) SetCostReviewService(service *SupplierProv
 	if s != nil {
 		s.costReviewService = service
 	}
+}
+
+// SetCostSourceResolver 注入成本来源解析器；未注入时所有供应商按默认智能模式处理。
+func (s *SupplierProviderSyncService) SetCostSourceResolver(resolver SupplierCostSourceResolver) {
+	if s != nil {
+		s.costSourceResolver = resolver
+	}
+}
+
+// resolveCostSource 解析供应商成本来源；未注入解析器或解析失败时回退智能模式，
+// 阈值沿用已注入的偏差阈值提供方，不阻断同步主链路。
+func (s *SupplierProviderSyncService) resolveCostSource(ctx context.Context, providerID int64) SupplierCostSourceResolution {
+	if s != nil && s.costSourceResolver != nil {
+		if resolution, err := s.costSourceResolver.ResolveCostSource(ctx, providerID); err == nil {
+			return resolution
+		}
+	}
+	return SupplierCostSourceResolution{Source: SupplierCostSourceAuto, Threshold: s.costDeviationThreshold(ctx)}
 }
 
 // SetCostAlertHandler 注入成本超额预警处理器；预警属于旁路能力，不会阻断成本同步。
@@ -693,7 +712,7 @@ func (s *SupplierProviderSyncService) backfillProviderCosts(ctx context.Context,
 
 		supportsHistory := supplierProviderSupportsHistoricalCost(locked)
 		today := supplierCostBackfillToday()
-		threshold := s.costDeviationThreshold(ctx)
+		resolution := s.resolveCostSource(ctx, locked.ID)
 		var firstErr error
 		authFailure := false
 		sessionFailure := false
@@ -824,21 +843,33 @@ func (s *SupplierProviderSyncService) backfillProviderCosts(ctx context.Context,
 				continue
 			}
 
-			// 上游接口返回了数据，判断是否合理（偏差是否在阈值内）
+			// 上游接口返回了数据，按供应商成本来源模式决定回补生效成本。
 			effective := cost
 			rawUpstream := &cost
 			var warning *string
-			if balanceUsable {
-				deviation := supplierCostDeviation(cost, balanceCost)
-				if deviation > threshold {
-					// 偏差超过阈值，保留充值修正后的余额成本，记录警告。
+			switch resolution.Source {
+			case SupplierCostSourceUpstream:
+				// 上游成本优先：回补数据始终以上游接口成本为准。
+			case SupplierCostSourceCalculated:
+				// 计算成本优先：回补数据以充值修正余额成本为准，缺失时保留上游值。
+				if balanceUsable {
 					effective = balanceCost
-					msg := fmt.Sprintf("上游成本 %.2f 与充值修正余额成本 %.2f 偏差 %.1f%% 超过阈值，保留余额成本（余额差 %.2f + 充值 %.2f）", cost, balanceCost, deviation*100, balanceDelta, rechargeAmount)
+					msg := fmt.Sprintf("成本来源配置为计算成本，采用充值修正余额成本 %.2f（余额差 %.2f + 充值 %.2f）", balanceCost, balanceDelta, rechargeAmount)
 					warning = &msg
-				} else {
-					// 偏差在阈值内，用上游成本覆盖
-					effective = cost
-					warning = nil
+				}
+			default:
+				if balanceUsable {
+					deviation := supplierCostDeviation(cost, balanceCost)
+					if deviation > resolution.Threshold {
+						// 偏差超过阈值，保留充值修正后的余额成本，记录警告。
+						effective = balanceCost
+						msg := fmt.Sprintf("上游成本 %.2f 与充值修正余额成本 %.2f 偏差 %.1f%% 超过阈值，保留余额成本（余额差 %.2f + 充值 %.2f）", cost, balanceCost, deviation*100, balanceDelta, rechargeAmount)
+						warning = &msg
+					} else {
+						// 偏差在阈值内，用上游成本覆盖
+						effective = cost
+						warning = nil
+					}
 				}
 			}
 			if updateErr := s.dataRepo.UpdateCostDetailed(ctx, locked.ID, effective, rawUpstream, warning, cursor); updateErr != nil {
@@ -1300,14 +1331,14 @@ func (s *SupplierProviderSyncService) syncCostStage(ctx context.Context, provide
 		SupplierSyncProgress(ctx, SupplierSyncProgressStagePersist, "正在写入成本数据", nil)
 		// 按成本归属日写入 daily_stats，避免历史回补落到当天；
 		// 上游成本与本地成本差距过大时直接改写为本地成本并记录提示。
-		threshold := s.costDeviationThreshold(ctx)
-		effective, rawUpstream, warning := s.resolveCostDeviation(ctx, provider, password, cost, statDay, threshold)
+		resolution := s.resolveCostSource(ctx, provider.ID)
+		effective, rawUpstream, warning := s.resolveCostDeviation(ctx, provider, password, cost, statDay, resolution)
 		calculated := cost
 		if local, ok, localErr := s.dataRepo.GetLocalCostForDay(ctx, provider.ID, statDay); localErr == nil && ok && local >= 0 {
 			calculated = local
 		}
 		upstream := cost
-		reviewInput := SupplierProviderCostReviewSyncInput{ProviderID: provider.ID, StatDate: statDay, UpstreamCost: &upstream, CalculatedCost: &calculated, AutoAdoptedCost: &calculated, EffectiveCost: effective, SyncRunID: syncRunID, SyncedAt: syncAt}
+		reviewInput := SupplierProviderCostReviewSyncInput{ProviderID: provider.ID, StatDate: statDay, CostSource: resolution.Source, UpstreamCost: &upstream, CalculatedCost: &calculated, AutoAdoptedCost: &calculated, EffectiveCost: effective, SyncRunID: syncRunID, SyncedAt: syncAt}
 		if s.costReviewService != nil {
 			err = s.dataRepo.UpdateCostDetailedWithReview(ctx, provider.ID, effective, rawUpstream, warning, statDay, reviewInput)
 		} else {
@@ -1582,14 +1613,28 @@ func (s *SupplierProviderSyncService) rechargeAdjustedBalanceEstimate(ctx contex
 	return estimated, rechargeAmount, true, nil
 }
 
-// resolveCostDeviation 计算写入成本时的偏差覆盖结果：上游成本与本地成本差距超过阈值时，
-// 优先使用充值修正余额成本（当天第一条余额快照 - 当天最后一条余额快照 + 当天充值）；
-// 如果余额差值不可用，则回退到本地成本。rawUpstream 始终为接口原始上游值。
-func (s *SupplierProviderSyncService) resolveCostDeviation(ctx context.Context, provider *SupplierProvider, password string, upstream float64, statDay time.Time, threshold float64) (effective float64, rawUpstream *float64, warning *string) {
+// resolveCostDeviation 计算写入成本时的生效成本：
+//   - upstream 模式：始终返回上游接口成本，不做偏差改写；
+//   - calculated 模式：始终返回本地计算成本，本地缺失时回退上游成本；
+//   - auto 模式（默认）：上游成本与本地成本差距超过阈值时，
+//     优先使用充值修正余额成本（当天第一条余额快照 - 当天最后一条余额快照 + 当天充值），
+//     如果余额差值不可用，则回退到本地成本。rawUpstream 始终为接口原始上游值。
+func (s *SupplierProviderSyncService) resolveCostDeviation(ctx context.Context, provider *SupplierProvider, password string, upstream float64, statDay time.Time, resolution SupplierCostSourceResolution) (effective float64, rawUpstream *float64, warning *string) {
 	raw := upstream
 	rawUpstream = &raw
+	switch resolution.Source {
+	case SupplierCostSourceUpstream:
+		// 上游成本优先：始终以上游接口成本为准，不做偏差改写。
+		return upstream, rawUpstream, nil
+	case SupplierCostSourceCalculated:
+		// 计算成本优先：始终以本地计算成本为准；本地缺失时回退上游成本。
+		if local, ok, err := s.dataRepo.GetLocalCostForDay(ctx, provider.ID, statDay); err == nil && ok && local > 0 {
+			return local, rawUpstream, nil
+		}
+		return upstream, rawUpstream, nil
+	}
 	if local, ok, err := s.dataRepo.GetLocalCostForDay(ctx, provider.ID, statDay); err == nil && ok && local > 0 {
-		if supplierCostDeviation(upstream, local) > threshold {
+		if supplierCostDeviation(upstream, local) > resolution.Threshold {
 			// 偏差过大时，优先尝试用充值修正后的余额成本覆盖。
 			if balanceDelta, balanceOK, balanceErr := s.dataRepo.GetBalanceDeltaForDay(ctx, provider.ID, statDay); balanceErr == nil && balanceOK {
 				if balanceCost, rechargeAmount, usable, rechargeErr := s.rechargeAdjustedBalanceEstimate(ctx, provider, password, statDay, balanceDelta); rechargeErr == nil && usable {
