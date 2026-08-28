@@ -2809,6 +2809,228 @@ describe('UpstreamAccountsView', () => {
     expect(wrapper.text()).toContain('admin.upstreamAccounts.testStatusFailed')
   })
 
+  it('shows the supplier health guard slow tag next to a successful test status', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValue({
+      default_provider: {},
+      providers: [],
+      summary: {
+        upstream_key_count: 1,
+        matched_account_count: 1,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'noop',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-a',
+          local_account_name: 'local-a',
+          matched_account_id: 12,
+          matched_account_name: 'local-a',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 2,
+          rate_violation: false,
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+    accountsMock.getById.mockResolvedValueOnce({
+      id: 12,
+      name: 'local-a',
+      platform: 'openai',
+      type: 'apikey',
+      status: 'active',
+      schedulable: true,
+      group_ids: [7],
+      groups: [],
+      last_test_status: 'success',
+      last_tested_at: '2026-06-16T00:00:00Z',
+      extra: {
+        supplier_health_guard_last_status: 'slow',
+      },
+    })
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any) => h('div', [
+                slots['cell-test_status']?.({ row }),
+              ])))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('admin.upstreamAccounts.testStatusSuccess')
+    const guardTag = wrapper.find('.test-status-guard-tag--slow')
+    expect(guardTag.exists()).toBe(true)
+    expect(guardTag.text()).toContain('守护慢响应')
+  })
+
+  it('shows the supplier health guard failed tag for guard test failures', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValue({
+      default_provider: {},
+      providers: [],
+      summary: {
+        upstream_key_count: 1,
+        matched_account_count: 1,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'noop',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-a',
+          local_account_name: 'local-a',
+          matched_account_id: 12,
+          matched_account_name: 'local-a',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 2,
+          rate_violation: false,
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+    accountsMock.getById.mockResolvedValueOnce({
+      id: 12,
+      name: 'local-a',
+      platform: 'openai',
+      type: 'apikey',
+      status: 'active',
+      schedulable: true,
+      group_ids: [7],
+      groups: [],
+      last_test_status: 'success',
+      last_tested_at: '2026-06-16T00:00:00Z',
+      extra: {
+        supplier_health_guard_last_status: 'failed',
+      },
+    })
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any) => h('div', [
+                slots['cell-test_status']?.({ row }),
+              ])))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const guardTag = wrapper.find('.test-status-guard-tag--failed')
+    expect(guardTag.exists()).toBe(true)
+    expect(guardTag.text()).toContain('守护检测失败')
+  })
+
+  it('hides the health guard tag when the guard status is healthy or missing', async () => {
+    upstreamAccountSyncMock.getPreview.mockResolvedValue({
+      default_provider: {},
+      providers: [],
+      summary: {
+        upstream_key_count: 1,
+        matched_account_count: 1,
+        create_count: 0,
+        update_count: 0,
+        skip_count: 0,
+        conflict_count: 0,
+        rate_violation_count: 0,
+        unbound_group_count: 0,
+      },
+      items: [
+        {
+          action: 'noop',
+          provider_slug: 'upstream-a',
+          provider_name: 'Upstream A',
+          upstream_key_name: 'key-a',
+          local_account_name: 'local-a',
+          matched_account_id: 12,
+          matched_account_name: 'local-a',
+          upstream_group_name: 'vip',
+          upstream_rate_multiplier: 2,
+          rate_violation: false,
+        },
+      ],
+      warnings: [],
+      records: [],
+    })
+    accountsMock.getById.mockResolvedValueOnce({
+      id: 12,
+      name: 'local-a',
+      platform: 'openai',
+      type: 'apikey',
+      status: 'active',
+      schedulable: true,
+      group_ids: [7],
+      groups: [],
+      last_test_status: 'success',
+      last_tested_at: '2026-06-16T00:00:00Z',
+      extra: {
+        supplier_health_guard_last_status: 'healthy',
+      },
+    })
+
+    const wrapper = mount(UpstreamAccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: {
+            props: ['data'],
+            setup(props, { slots }) {
+              return () => h('div', props.data.map((row: any) => h('div', [
+                slots['cell-test_status']?.({ row }),
+              ])))
+            },
+          },
+          EmptyState: true,
+          Icon: true,
+          Select: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('admin.upstreamAccounts.testStatusSuccess')
+    expect(wrapper.find('.test-status-guard-tag').exists()).toBe(false)
+  })
+
   it('renders and refreshes the last account test time', async () => {
     upstreamAccountSyncMock.getPreview.mockResolvedValue({
       default_provider: {},

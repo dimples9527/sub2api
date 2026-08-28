@@ -397,6 +397,15 @@
                     {{ accountTestStatusLabel(accountTestStatusById[row.matched_account_id || 0]) }}
                   </span>
                   <span v-else class="dash">-</span>
+                  <span
+                    v-if="accountHealthGuardStatus(getMatchedAccount(row))"
+                    :class="[
+                      'test-status-guard-tag',
+                      `test-status-guard-tag--${accountHealthGuardStatus(getMatchedAccount(row))}`
+                    ]"
+                  >
+                    {{ accountHealthGuardStatusLabel(accountHealthGuardStatus(getMatchedAccount(row))) }}
+                  </span>
                 </div>
               </template>
 
@@ -2757,6 +2766,23 @@ function accountTestStatusLabel(status: AccountTestStatus | undefined) {
   if (status === 'failed') return t('admin.upstreamAccounts.testStatusFailed')
   if (status === 'success') return t('admin.upstreamAccounts.testStatusSuccess')
   return '-'
+}
+
+type SupplierAccountHealthGuardStatus = 'slow' | 'failed'
+
+// 读取供应商账号健康守护写入 extra 的最近一次守护状态，仅透出慢响应与失败两种需要关注的结论。
+function accountHealthGuardStatus(account: Account | null): SupplierAccountHealthGuardStatus | '' {
+  const status = String(account?.extra?.supplier_health_guard_last_status ?? '')
+  if (status === 'slow' || status === 'failed') {
+    return status
+  }
+  return ''
+}
+
+function accountHealthGuardStatusLabel(status: SupplierAccountHealthGuardStatus | '') {
+  if (status === 'slow') return '守护慢响应'
+  if (status === 'failed') return '守护检测失败'
+  return ''
 }
 
 function upstreamAccountSourceSortValue(row: UpstreamAccountSyncItem) {
@@ -5173,6 +5199,7 @@ button.guard-ignore-summary:disabled {
 .test-status-cell {
   display: flex;
   align-items: center;
+  gap: 6px;
   min-height: 32px;
 }
 
@@ -5198,6 +5225,30 @@ button.guard-ignore-summary:disabled {
 }
 
 .test-status-failed {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.test-status-guard-tag {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.test-status-guard-tag--slow {
+  border-color: #fcd34d;
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.test-status-guard-tag--failed {
+  border-color: #fecaca;
   background: #fef2f2;
   color: #dc2626;
 }
