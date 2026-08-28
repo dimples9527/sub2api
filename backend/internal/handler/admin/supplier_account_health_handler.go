@@ -97,5 +97,5 @@ func (h *SupplierAccountHealthHandler) GetTrends(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, result)
+	response.Success(c, gin.H{"items": result})
 }

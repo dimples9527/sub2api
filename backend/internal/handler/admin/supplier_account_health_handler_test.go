@@ -114,6 +114,7 @@ func TestSupplierAccountHealthHandlerGetsTrendsWithoutDuplicateIDs(t *testing.T)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, []int64{12, 37}, stub.batchIDs)
 	require.Equal(t, service.SupplierAccountHealthRange7d, stub.batchRange)
+	require.Contains(t, rec.Body.String(), `"items":[{"account_id":12`)
 	require.Contains(t, rec.Body.String(), `"account_id":37`)
 }
 

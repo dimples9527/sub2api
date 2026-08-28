@@ -300,7 +300,8 @@ WHERE local_account.id = ANY($1)
 	rows, err := r.db.QueryContext(ctx, `
 SELECT local_account_id, checked_at, status, latency_ms, latency_limit_ms
 FROM (
-    SELECT h.local_account_id,
+    SELECT h.id,
+           h.local_account_id,
            h.checked_at,
            h.status,
            h.latency_ms,

@@ -137,7 +137,7 @@ func TestSupplierAccountHealthHistoryRepositoryGetTrendsLimitsPointsPerAccount(t
 	mock.ExpectQuery(`(?s)SELECT DISTINCT local_account\.id.*local_account\.id = ANY\(\$1\)`).
 		WithArgs(sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(21).AddRow(37))
-	mock.ExpectQuery(`(?s)ROW_NUMBER\(\) OVER.*local_account_id = ANY\(\$1\).*checked_at >= \$2.*row_number <= \$3`).
+	mock.ExpectQuery(`(?s)SELECT h\.id,.*ROW_NUMBER\(\) OVER.*local_account_id = ANY\(\$1\).*checked_at >= \$2.*row_number <= \$3.*ORDER BY trend\.local_account_id ASC, trend\.checked_at ASC, trend\.id ASC`).
 		WithArgs(sqlmock.AnyArg(), since, 50).
 		WillReturnRows(sqlmock.NewRows([]string{"local_account_id", "checked_at", "status", "latency_ms", "latency_limit_ms"}).
 			AddRow(21, checkedAt, "healthy", int64(120), 500).
