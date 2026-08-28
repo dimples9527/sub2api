@@ -13,6 +13,7 @@ import (
 type SupplierAccountHealthTrendServicePort interface {
 	ListAccounts(ctx context.Context, params service.SupplierAccountHealthAccountListParams) (service.SupplierAccountHealthAccountListResult, error)
 	GetTrend(ctx context.Context, accountID int64, rangeValue string) (service.SupplierAccountHealthTrendResult, error)
+	GetTrends(ctx context.Context, accountIDs []int64, rangeValue string) ([]service.SupplierAccountHealthTrendResult, error)
 }
 
 type SupplierAccountHealthHandler struct {
@@ -55,6 +56,43 @@ func (h *SupplierAccountHealthHandler) GetTrend(c *gin.Context) {
 		rangeValue = service.SupplierAccountHealthRange24h
 	}
 	result, err := h.service.GetTrend(c.Request.Context(), accountID, rangeValue)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+// GetTrends 返回批量账号健康趋势，列表页一次请求即可渲染所有迷你趋势。
+func (h *SupplierAccountHealthHandler) GetTrends(c *gin.Context) {
+	rawIDs := strings.Split(strings.TrimSpace(c.Query("ids")), ",")
+	accountIDs := make([]int64, 0, len(rawIDs))
+	seen := make(map[int64]struct{}, len(rawIDs))
+	for _, rawID := range rawIDs {
+		accountID, err := strconv.ParseInt(strings.TrimSpace(rawID), 10, 64)
+		if err != nil || accountID <= 0 {
+			response.ErrorFrom(c, badRequest("账号 ID 必须为正整数"))
+			return
+		}
+		if _, exists := seen[accountID]; exists {
+			continue
+		}
+		seen[accountID] = struct{}{}
+		accountIDs = append(accountIDs, accountID)
+	}
+	if len(accountIDs) == 0 {
+		response.ErrorFrom(c, badRequest("账号 ID 不能为空"))
+		return
+	}
+	if len(accountIDs) > service.SupplierAccountHealthBatchMaxAccounts {
+		response.ErrorFrom(c, badRequest("一次最多查询 100 个账号的健康趋势"))
+		return
+	}
+	rangeValue := strings.TrimSpace(c.Query("range"))
+	if rangeValue == "" {
+		rangeValue = service.SupplierAccountHealthRange24h
+	}
+	result, err := h.service.GetTrends(c.Request.Context(), accountIDs, rangeValue)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

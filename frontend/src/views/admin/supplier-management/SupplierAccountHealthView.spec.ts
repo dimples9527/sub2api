@@ -76,11 +76,10 @@ describe('SupplierAccountHealthView', () => {
     expect(loadAccountsSource).not.toContain('await loadAccountTrends(accounts.value, selectedRange.value)')
   })
 
-  it('limits concurrent trend requests to avoid a request burst on first load', () => {
-    expect(source).toContain('const TREND_LOAD_CONCURRENCY = 6')
-    expect(source).toContain('const workerCount = Math.min(TREND_LOAD_CONCURRENCY, ids.length)')
-    expect(source).toContain('while (nextIndex < ids.length)')
-    expect(source).not.toContain('Promise.all(ids.map(async accountId =>')
+  it('loads all account trends with one batch request to avoid a request burst', () => {
+    expect(source).toContain('await getSupplierAccountHealthTrends(ids, range)')
+    expect(source).not.toContain('TREND_LOAD_CONCURRENCY')
+    expect(source).not.toContain('loadNextTrend')
   })
 
   it('\u65b0\u589e\u4e0a\u6e38\u500d\u7387\u5217\u5e76\u652f\u6301\u8d26\u53f7\u500d\u7387\u5065\u5eb7\u72b6\u6001\u548c\u5065\u5eb7\u8d8b\u52bf\u6392\u5e8f', () => {

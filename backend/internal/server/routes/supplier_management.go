@@ -104,6 +104,7 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 		{
 			accountHealth.GET("/accounts", h.Admin.SupplierAccountHealth.ListAccounts)
 			accountHealth.GET("/trend", h.Admin.SupplierAccountHealth.GetTrend)
+			accountHealth.GET("/trends", h.Admin.SupplierAccountHealth.GetTrends)
 		}
 		supplier.DELETE("/accounts/:id", h.Admin.SupplierProviderSync.DeleteAccount)
 		supplier.GET("/monitor-targets", h.Admin.SupplierProviderSync.ListMonitorTargets)

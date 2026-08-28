@@ -10,6 +10,10 @@ const (
 	SupplierAccountHealthRange24h = "24h"
 	SupplierAccountHealthRange7d  = "7d"
 	SupplierAccountHealthRange30d = "30d"
+
+	// 批量趋势接口的防护上限，避免一次请求拖垮数据库或返回过大的响应。
+	SupplierAccountHealthBatchMaxAccounts = 100
+	SupplierAccountHealthBatchPointLimit  = 50
 )
 
 type SupplierAccountHealthHistoryRecord struct {
@@ -44,6 +48,7 @@ type SupplierAccountHealthHistoryRepository interface {
 	ValidateAccount(ctx context.Context, accountID int64) error
 	ListAccounts(ctx context.Context, params SupplierAccountHealthAccountListParams) (SupplierAccountHealthAccountListResult, error)
 	GetTrend(ctx context.Context, accountID int64, since time.Time) (SupplierAccountHealthTrendResult, error)
+	GetTrends(ctx context.Context, accountIDs []int64, since time.Time, pointLimit int) (map[int64]SupplierAccountHealthTrendResult, error)
 	DeleteBefore(ctx context.Context, before time.Time, batchSize int) (int, error)
 }
 
@@ -143,24 +148,86 @@ func (s *SupplierAccountHealthTrendService) GetTrend(ctx context.Context, accoun
 	if s == nil || s.repository == nil {
 		return SupplierAccountHealthTrendResult{}, errors.New("账号健康历史服务未初始化")
 	}
-	switch rangeValue {
-	case "", SupplierAccountHealthRange24h:
-		rangeValue = SupplierAccountHealthRange24h
-	case SupplierAccountHealthRange7d, SupplierAccountHealthRange30d:
-	default:
+	normalizedRange, err := normalizeSupplierAccountHealthTrendRange(rangeValue)
+	if err != nil {
 		return SupplierAccountHealthTrendResult{}, errors.New("健康趋势范围无效")
 	}
 	if err := s.repository.ValidateAccount(ctx, accountID); err != nil {
 		return SupplierAccountHealthTrendResult{}, err
 	}
-	days := map[string]int{SupplierAccountHealthRange24h: 1, SupplierAccountHealthRange7d: 7, SupplierAccountHealthRange30d: 30}[rangeValue]
-	result, err := s.repository.GetTrend(ctx, accountID, time.Now().Add(-time.Duration(days)*24*time.Hour))
+	result, err := s.repository.GetTrend(ctx, accountID, supplierAccountHealthTrendSince(normalizedRange))
 	if err != nil {
 		return SupplierAccountHealthTrendResult{}, err
 	}
-	result.Range = rangeValue
+	result.Range = normalizedRange
 	if len(result.Points) > 0 {
 		result.Latest = &result.Points[len(result.Points)-1]
 	}
 	return result, nil
+}
+
+// GetTrends 一次查询多个账号的健康趋势，供列表页批量展示迷你趋势使用。
+func (s *SupplierAccountHealthTrendService) GetTrends(ctx context.Context, accountIDs []int64, rangeValue string) ([]SupplierAccountHealthTrendResult, error) {
+	if s == nil || s.repository == nil {
+		return nil, errors.New("账号健康历史服务未初始化")
+	}
+	normalizedRange, err := normalizeSupplierAccountHealthTrendRange(rangeValue)
+	if err != nil {
+		return nil, errors.New("健康趋势范围无效")
+	}
+	uniqueIDs := make([]int64, 0, len(accountIDs))
+	seen := make(map[int64]struct{}, len(accountIDs))
+	for _, accountID := range accountIDs {
+		if accountID <= 0 {
+			continue
+		}
+		if _, exists := seen[accountID]; exists {
+			continue
+		}
+		seen[accountID] = struct{}{}
+		uniqueIDs = append(uniqueIDs, accountID)
+	}
+	if len(uniqueIDs) == 0 {
+		return []SupplierAccountHealthTrendResult{}, nil
+	}
+	if len(uniqueIDs) > SupplierAccountHealthBatchMaxAccounts {
+		return nil, errors.New("一次最多查询 100 个账号的健康趋势")
+	}
+	trendMap, err := s.repository.GetTrends(ctx, uniqueIDs, supplierAccountHealthTrendSince(normalizedRange), SupplierAccountHealthBatchPointLimit)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]SupplierAccountHealthTrendResult, 0, len(uniqueIDs))
+	for _, accountID := range uniqueIDs {
+		result, exists := trendMap[accountID]
+		if !exists {
+			result = SupplierAccountHealthTrendResult{AccountID: accountID, Points: []SupplierAccountHealthPoint{}}
+		}
+		result.AccountID = accountID
+		result.Range = normalizedRange
+		if result.Points == nil {
+			result.Points = []SupplierAccountHealthPoint{}
+		}
+		if len(result.Points) > 0 {
+			result.Latest = &result.Points[len(result.Points)-1]
+		}
+		results = append(results, result)
+	}
+	return results, nil
+}
+
+func normalizeSupplierAccountHealthTrendRange(rangeValue string) (string, error) {
+	switch rangeValue {
+	case "", SupplierAccountHealthRange24h:
+		return SupplierAccountHealthRange24h, nil
+	case SupplierAccountHealthRange7d, SupplierAccountHealthRange30d:
+		return rangeValue, nil
+	default:
+		return "", errors.New("健康趋势范围无效")
+	}
+}
+
+func supplierAccountHealthTrendSince(rangeValue string) time.Time {
+	days := map[string]int{SupplierAccountHealthRange24h: 1, SupplierAccountHealthRange7d: 7, SupplierAccountHealthRange30d: 30}[rangeValue]
+	return time.Now().Add(-time.Duration(days) * 24 * time.Hour)
 }

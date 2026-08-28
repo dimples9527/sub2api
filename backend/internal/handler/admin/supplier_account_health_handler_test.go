@@ -13,11 +13,14 @@ import (
 )
 
 type supplierAccountHealthTrendHandlerStub struct {
-	listParams  service.SupplierAccountHealthAccountListParams
-	trendID     int64
-	trendRange  string
-	listResult  service.SupplierAccountHealthAccountListResult
-	trendResult service.SupplierAccountHealthTrendResult
+	listParams   service.SupplierAccountHealthAccountListParams
+	trendID      int64
+	trendRange   string
+	batchIDs     []int64
+	batchRange   string
+	listResult   service.SupplierAccountHealthAccountListResult
+	trendResult  service.SupplierAccountHealthTrendResult
+	batchResults []service.SupplierAccountHealthTrendResult
 }
 
 func (s *supplierAccountHealthTrendHandlerStub) ListAccounts(_ context.Context, params service.SupplierAccountHealthAccountListParams) (service.SupplierAccountHealthAccountListResult, error) {
@@ -29,6 +32,11 @@ func (s *supplierAccountHealthTrendHandlerStub) GetTrend(_ context.Context, acco
 	s.trendID = accountID
 	s.trendRange = rangeValue
 	return s.trendResult, nil
+}
+func (s *supplierAccountHealthTrendHandlerStub) GetTrends(_ context.Context, accountIDs []int64, rangeValue string) ([]service.SupplierAccountHealthTrendResult, error) {
+	s.batchIDs = accountIDs
+	s.batchRange = rangeValue
+	return s.batchResults, nil
 }
 
 func TestSupplierAccountHealthHandlerListsAccountsWithFiltersAndPagination(t *testing.T) {
@@ -88,4 +96,38 @@ func TestSupplierAccountHealthHandlerRejectsInvalidTrendAccountID(t *testing.T) 
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Zero(t, stub.trendID)
+}
+func TestSupplierAccountHealthHandlerGetsTrendsWithoutDuplicateIDs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stub := &supplierAccountHealthTrendHandlerStub{batchResults: []service.SupplierAccountHealthTrendResult{
+		{AccountID: 12, Points: []service.SupplierAccountHealthPoint{}},
+		{AccountID: 37, Points: []service.SupplierAccountHealthPoint{}},
+	}}
+	handler := NewSupplierAccountHealthHandler(stub)
+	router := gin.New()
+	router.GET("/trends", handler.GetTrends)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/trends?ids=12,37,12&range=7d", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, []int64{12, 37}, stub.batchIDs)
+	require.Equal(t, service.SupplierAccountHealthRange7d, stub.batchRange)
+	require.Contains(t, rec.Body.String(), `"account_id":37`)
+}
+
+func TestSupplierAccountHealthHandlerRejectsInvalidTrendBatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stub := &supplierAccountHealthTrendHandlerStub{}
+	handler := NewSupplierAccountHealthHandler(stub)
+	router := gin.New()
+	router.GET("/trends", handler.GetTrends)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/trends?ids=1,broken", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Nil(t, stub.batchIDs)
 }

@@ -73,9 +73,21 @@ export async function getSupplierAccountHealthTrend(
   return data
 }
 
+export async function getSupplierAccountHealthTrends(
+  accountIds: number[],
+  range: SupplierAccountHealthRange = '24h'
+): Promise<{ items: SupplierAccountHealthTrend[] }> {
+  const { data } = await apiClient.get<{ items: SupplierAccountHealthTrend[] }>(
+    '/admin/supplier-management/account-health/trends',
+    { params: { ids: accountIds.join(','), range } }
+  )
+  return data
+}
+
 export const supplierAccountHealthAPI = {
   listAccounts: listSupplierAccountHealthAccounts,
   getTrend: getSupplierAccountHealthTrend,
+  getTrends: getSupplierAccountHealthTrends,
 }
 
 export default supplierAccountHealthAPI

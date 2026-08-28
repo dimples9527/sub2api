@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 type supplierAccountHealthHistoryRepository struct {
@@ -253,6 +254,89 @@ ORDER BY checked_at ASC, id ASC`, accountID, since)
 	}
 	if err := rows.Err(); err != nil {
 		return service.SupplierAccountHealthTrendResult{}, fmt.Errorf("遍历账号健康趋势失败: %w", err)
+	}
+	return result, nil
+}
+
+// GetTrends 批量查询多个账号的趋势。先一次校验账号仍在供应商可见范围内，
+// 再用窗口函数限制每个账号返回的最新记录数，避免响应过大。
+func (r *supplierAccountHealthHistoryRepository) GetTrends(ctx context.Context, accountIDs []int64, since time.Time, pointLimit int) (map[int64]service.SupplierAccountHealthTrendResult, error) {
+	result := make(map[int64]service.SupplierAccountHealthTrendResult, len(accountIDs))
+	if len(accountIDs) == 0 {
+		return result, nil
+	}
+	if pointLimit <= 0 {
+		pointLimit = 1
+	}
+	validRows, err := r.db.QueryContext(ctx, `
+SELECT DISTINCT local_account.id
+FROM accounts local_account
+JOIN supplier_provider_accounts a ON a.active = TRUE
+JOIN supplier_providers p ON p.id = a.provider_id AND p.enabled = TRUE
+WHERE local_account.id = ANY($1)
+  AND local_account.deleted_at IS NULL
+  AND `+supplierProviderLocalAccountMatchCondition("local_account.name", "a.name"), pq.Array(accountIDs))
+	if err != nil {
+		return nil, fmt.Errorf("校验账号健康趋势范围失败: %w", err)
+	}
+	var validIDs []int64
+	for validRows.Next() {
+		var accountID int64
+		if err := validRows.Scan(&accountID); err != nil {
+			validRows.Close()
+			return nil, fmt.Errorf("扫描账号健康趋势范围失败: %w", err)
+		}
+		validIDs = append(validIDs, accountID)
+	}
+	if err := validRows.Err(); err != nil {
+		validRows.Close()
+		return nil, fmt.Errorf("遍历账号健康趋势范围失败: %w", err)
+	}
+	validRows.Close()
+	if len(validIDs) == 0 {
+		return result, nil
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+SELECT local_account_id, checked_at, status, latency_ms, latency_limit_ms
+FROM (
+    SELECT h.local_account_id,
+           h.checked_at,
+           h.status,
+           h.latency_ms,
+           h.latency_limit_ms,
+           ROW_NUMBER() OVER (
+               PARTITION BY h.local_account_id
+               ORDER BY h.checked_at DESC, h.id DESC
+           ) AS row_number
+    FROM supplier_account_health_history h
+    WHERE h.local_account_id = ANY($1)
+      AND h.checked_at >= $2
+) trend
+WHERE trend.row_number <= $3
+ORDER BY trend.local_account_id ASC, trend.checked_at ASC, trend.id ASC`, pq.Array(validIDs), since, pointLimit)
+	if err != nil {
+		return nil, fmt.Errorf("批量查询账号健康趋势失败: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var accountID int64
+		var point service.SupplierAccountHealthPoint
+		var latency sql.NullInt64
+		if err := rows.Scan(&accountID, &point.CheckedAt, &point.Status, &latency, &point.LatencyLimitMs); err != nil {
+			return nil, fmt.Errorf("扫描账号健康趋势失败: %w", err)
+		}
+		if latency.Valid {
+			value := latency.Int64
+			point.LatencyMs = &value
+		}
+		trend := result[accountID]
+		trend.AccountID = accountID
+		trend.Points = append(trend.Points, point)
+		result[accountID] = trend
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历账号健康趋势失败: %w", err)
 	}
 	return result, nil
 }

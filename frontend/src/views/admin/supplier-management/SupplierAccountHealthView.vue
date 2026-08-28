@@ -279,6 +279,7 @@ import Select, { type SelectOption } from '@/components/common/Select.vue'
 import { createKeyedRequestLoader } from '@/composables/useKeyedRequestLoader'
 import {
   getSupplierAccountHealthTrend,
+  getSupplierAccountHealthTrends,
   listSupplierAccountHealthAccounts,
   type SupplierAccountHealthAccount,
   type SupplierAccountHealthPoint,
@@ -315,10 +316,10 @@ const selectedAccountId = ref<number | null>(null)
 const healthDetailVisible = ref(false)
 const trendPoints = ref<SupplierAccountHealthPoint[]>([])
 const healthTrendByAccountId = ref<Record<number, SupplierAccountHealthPoint[]>>({})
+const detailTrendByAccountId = ref<Record<string, SupplierAccountHealthPoint[]>>({})
 const trendLoadingByAccountId = ref<Record<number, boolean>>({})
 const lastLoadedAt = ref('')
 const TREND_BAR_COUNT = 28
-const TREND_LOAD_CONCURRENCY = 6
 let trendLoadSequence = 0
 let accountTrendLoadSequence = 0
 
@@ -581,8 +582,10 @@ async function loadAccounts() {
     lastLoadedAt.value = new Date().toISOString()
     healthTrendByAccountId.value = {}
     trendLoadingByAccountId.value = {}
+    detailTrendByAccountId.value = {}
     syncSelectedAccount()
     void loadAccountTrends(accounts.value, selectedRange.value)
+    void loadTrend()
   } catch (err) {
     error.value = extractApiErrorMessage(err, '加载账号健康列表失败')
     appStore.showError(error.value)
@@ -593,39 +596,30 @@ async function loadAccounts() {
 
 async function loadAccountTrends(accountList: SupplierAccountHealthAccount[], range: SupplierAccountHealthRange) {
   const requestSequence = ++accountTrendLoadSequence
-  const accountIds = accountList.map(account => account.local_account_id)
-  const selectedId = selectedAccountId.value
-  const ids = selectedId && accountIds.includes(selectedId)
-    ? [selectedId, ...accountIds.filter(accountId => accountId !== selectedId)]
-    : accountIds
+  const ids = accountList.map(account => account.local_account_id)
+  if (!ids.length) {
+    trendLoadingByAccountId.value = {}
+    return
+  }
   trendLoadingByAccountId.value = Object.fromEntries(ids.map(accountId => [accountId, true])) as Record<number, boolean>
-  trendLoading.value = true
-  let nextIndex = 0
-  const loadNextTrend = async () => {
-    while (nextIndex < ids.length) {
-      if (requestSequence !== accountTrendLoadSequence) return
-      const accountId = ids[nextIndex++]
-      try {
-        const result = await loadTrendRequest(accountId, range)
-        if (requestSequence === accountTrendLoadSequence) {
-          const points = result.points || []
-          healthTrendByAccountId.value = { ...healthTrendByAccountId.value, [accountId]: points }
-          if (selectedAccountId.value === accountId && selectedRange.value === range) trendPoints.value = points
-        }
-      } catch {
-        if (requestSequence === accountTrendLoadSequence) {
-          healthTrendByAccountId.value = { ...healthTrendByAccountId.value, [accountId]: [] }
-        }
-      } finally {
-        if (requestSequence === accountTrendLoadSequence) {
-          trendLoadingByAccountId.value = { ...trendLoadingByAccountId.value, [accountId]: false }
-        }
-      }
+  try {
+    const result = await getSupplierAccountHealthTrends(ids, range)
+    if (requestSequence !== accountTrendLoadSequence) return
+    const trendMap = new Map((result.items || []).map(trend => [trend.account_id, trend.points || []]))
+    healthTrendByAccountId.value = Object.fromEntries(
+      ids.map(accountId => [accountId, trendMap.get(accountId) || []]),
+    ) as Record<number, SupplierAccountHealthPoint[]>
+  } catch (err) {
+    if (requestSequence !== accountTrendLoadSequence) return
+    healthTrendByAccountId.value = Object.fromEntries(
+      ids.map(accountId => [accountId, []]),
+    ) as Record<number, SupplierAccountHealthPoint[]>
+    appStore.showError(extractApiErrorMessage(err, '加载账号健康趋势失败'))
+  } finally {
+    if (requestSequence === accountTrendLoadSequence) {
+      trendLoadingByAccountId.value = Object.fromEntries(ids.map(accountId => [accountId, false])) as Record<number, boolean>
     }
   }
-  const workerCount = Math.min(TREND_LOAD_CONCURRENCY, ids.length)
-  await Promise.all(Array.from({ length: workerCount }, () => loadNextTrend()))
-  if (requestSequence === accountTrendLoadSequence) trendLoading.value = false
 }
 
 function statusSortValue(status?: string | null): number {
@@ -655,8 +649,9 @@ async function loadTrend() {
     trendLoading.value = false
     return
   }
-  if (Object.prototype.hasOwnProperty.call(healthTrendByAccountId.value, accountId)) {
-    trendPoints.value = healthTrendByAccountId.value[accountId] || []
+  const cacheKey = `${accountId}:${range}`
+  if (Object.prototype.hasOwnProperty.call(detailTrendByAccountId.value, cacheKey)) {
+    trendPoints.value = detailTrendByAccountId.value[cacheKey] || []
     trendLoading.value = false
     return
   }
@@ -666,7 +661,7 @@ async function loadTrend() {
     const result = await loadTrendRequest(accountId, range)
     if (requestSequence === trendLoadSequence) {
       const points = result.points || []
-      healthTrendByAccountId.value = { ...healthTrendByAccountId.value, [accountId]: points }
+      detailTrendByAccountId.value = { ...detailTrendByAccountId.value, [cacheKey]: points }
       trendPoints.value = points
     }
   } catch (err) {
@@ -713,7 +708,9 @@ function selectRange(range: SupplierAccountHealthRange) {
   selectedRange.value = range
   trendPoints.value = []
   healthTrendByAccountId.value = {}
+  detailTrendByAccountId.value = {}
   void loadAccountTrends(accounts.value, range)
+  void loadTrend()
 }
 
 function handlePageChange(nextPage: number) {
