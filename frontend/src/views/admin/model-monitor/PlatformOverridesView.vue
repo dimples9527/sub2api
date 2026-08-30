@@ -6,7 +6,7 @@
           <div class="po-kpi-grid">
             <div class="po-kpi po-kpi-default">
               <div class="po-kpi-icon po-kpi-icon-default">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                <Icon name="grid" size="md" aria-hidden="true" />
               </div>
               <div class="po-kpi-body">
                 <span class="po-kpi-label">分组总数</span>
@@ -16,7 +16,7 @@
             </div>
             <div class="po-kpi po-kpi-warning">
               <div class="po-kpi-icon po-kpi-icon-warning">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L2 22h20L12 2z"/><line x1="12" y1="9" x2="12" y2="13"/><circle cx="12" cy="17" r="0.5" fill="currentColor"/></svg>
+                <Icon name="exclamationTriangle" size="md" aria-hidden="true" />
               </div>
               <div class="po-kpi-body">
                 <span class="po-kpi-label">已配置实际平台</span>
@@ -26,7 +26,7 @@
             </div>
             <div class="po-kpi po-kpi-success">
               <div class="po-kpi-icon po-kpi-icon-success">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
+                <Icon name="check" size="md" aria-hidden="true" />
               </div>
               <div class="po-kpi-body">
                 <span class="po-kpi-label">默认继承原平台</span>
@@ -37,8 +37,8 @@
           </div>
 
           <div class="po-actions-right">
-            <button class="po-btn po-btn-refresh" :disabled="loading" @click="reload">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" :class="loading ? 'po-spin' : ''"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            <button class="po-btn" :disabled="loading" @click="reload">
+              <Icon name="refresh" size="sm" aria-hidden="true" :class="loading ? 'animate-spin' : ''" />
               <span>{{ loading ? '刷新中…' : '刷新' }}</span>
             </button>
           </div>
@@ -275,6 +275,7 @@ import SearchInput from '@/components/common/SearchInput.vue'
 import Select from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
+import Icon from '@/components/icons/Icon.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
@@ -541,17 +542,17 @@ onMounted(() => {
 }
 
 .po-kpi-default {
-  background: linear-gradient(180deg, #eef2ff 0%, #f9fafb 55%);
-  border-color: #e0e7ff;
+  background: linear-gradient(180deg, #f0fdfa 0%, #f9fafb 55%);
+  border-color: #ccfbf1;
 }
 
 .po-kpi-default::before {
-  background: linear-gradient(90deg, #6366f1, #a855f7);
+  background: linear-gradient(90deg, #0d9488, #2dd4bf);
 }
 
 :global(.dark) .po-kpi-default {
-  background: linear-gradient(180deg, rgba(99, 102, 241, 0.12) 0%, #1f2937 55%);
-  border-color: rgba(99, 102, 241, 0.3);
+  background: linear-gradient(180deg, rgba(20, 184, 166, 0.12) 0%, #1f2937 55%);
+  border-color: rgba(20, 184, 166, 0.3);
 }
 
 .po-kpi-warning {
@@ -574,7 +575,7 @@ onMounted(() => {
 }
 
 .po-kpi-success::before {
-  background: linear-gradient(90deg, #10b981, #14b8a6);
+  background: linear-gradient(90deg, #059669, #34d399);
 }
 
 :global(.dark) .po-kpi-success {
@@ -593,12 +594,12 @@ onMounted(() => {
 }
 
 .po-kpi-icon-default {
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  background: linear-gradient(135deg, #0d9488, #14b8a6);
   color: #fff;
 }
 
 :global(.dark) .po-kpi-icon-default {
-  background: linear-gradient(135deg, #818cf8, #a78bfa);
+  background: linear-gradient(135deg, #14b8a6, #2dd4bf);
 }
 
 .po-kpi-icon-warning {
@@ -611,12 +612,12 @@ onMounted(() => {
 }
 
 .po-kpi-icon-success {
-  background: linear-gradient(135deg, #10b981, #14b8a6);
+  background: linear-gradient(135deg, #059669, #10b981);
   color: #fff;
 }
 
 :global(.dark) .po-kpi-icon-success {
-  background: linear-gradient(135deg, #34d399, #2dd4bf);
+  background: linear-gradient(135deg, #34d399, #6ee7b7);
 }
 
 .po-kpi-body {
@@ -639,11 +640,11 @@ onMounted(() => {
 }
 
 .po-kpi-default .po-kpi-label {
-  color: #4f46e5;
+  color: #0f766e;
 }
 
 :global(.dark) .po-kpi-default .po-kpi-label {
-  color: #a5b4fc;
+  color: #5eead4;
 }
 
 .po-kpi-warning .po-kpi-label {
@@ -734,24 +735,9 @@ onMounted(() => {
   opacity: 0.5;
 }
 
-.po-btn-refresh {
-  color: #16a34a;
-  border-color: #d1fae5;
-  background: #f0fdf4;
-}
-
-:global(.dark) .po-btn-refresh {
-  color: #4ade80;
-  border-color: rgba(22, 163, 74, 0.3);
-  background: rgba(22, 163, 74, 0.1);
-}
-
-.po-btn-refresh:hover {
-  background: #dcfce7;
-}
-
-:global(.dark) .po-btn-refresh:hover {
-  background: rgba(22, 163, 74, 0.18);
+.po-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.5);
 }
 
 .po-btn-sm {
@@ -761,19 +747,19 @@ onMounted(() => {
 }
 
 .po-btn-edit {
-  color: #3b82f6;
-  border-color: #bfdbfe;
-  background: #eff6ff;
+  color: #0d9488;
+  border-color: #99f6e4;
+  background: #f0fdfa;
 }
 
 :global(.dark) .po-btn-edit {
-  color: #93c5fd;
-  border-color: rgba(59, 130, 246, 0.3);
-  background: rgba(59, 130, 246, 0.1);
+  color: #5eead4;
+  border-color: rgba(20, 184, 166, 0.3);
+  background: rgba(20, 184, 166, 0.1);
 }
 
 .po-btn-edit:hover {
-  background: #dbeafe;
+  background: #ccfbf1;
 }
 
 .po-btn-clear {
@@ -794,13 +780,13 @@ onMounted(() => {
 
 .po-btn-primary {
   color: #fff;
-  border-color: #3b82f6;
-  background: #3b82f6;
+  border-color: #0d9488;
+  background: #0d9488;
 }
 
 .po-btn-primary:hover {
-  background: #2563eb;
-  border-color: #2563eb;
+  background: #0f766e;
+  border-color: #0f766e;
 }
 
 .po-btn-cancel {
@@ -1206,15 +1192,6 @@ onMounted(() => {
   align-items: center;
   gap: 0.5rem;
   margin-left: auto;
-}
-
-/* 旋转动画 */
-.po-spin {
-  animation: po-spin 0.7s linear infinite;
-}
-
-@keyframes po-spin {
-  to { transform: rotate(360deg); }
 }
 
 /* ===== 响应式 ===== */

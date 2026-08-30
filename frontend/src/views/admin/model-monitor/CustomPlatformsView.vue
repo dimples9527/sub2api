@@ -7,7 +7,7 @@
             <div class="cp-kpi-grid">
               <div class="cp-kpi cp-kpi-default">
                 <div class="cp-kpi-icon cp-kpi-icon-default">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                  <Icon name="grid" size="md" aria-hidden="true" />
                 </div>
                 <div class="cp-kpi-body">
                   <span class="cp-kpi-label">平台总数</span>
@@ -16,7 +16,7 @@
               </div>
               <div class="cp-kpi cp-kpi-success">
                 <div class="cp-kpi-icon cp-kpi-icon-success">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
+                  <Icon name="check" size="md" aria-hidden="true" />
                 </div>
                 <div class="cp-kpi-body">
                   <span class="cp-kpi-label">启用中</span>
@@ -25,7 +25,7 @@
               </div>
               <div class="cp-kpi cp-kpi-danger">
                 <div class="cp-kpi-icon cp-kpi-icon-danger">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  <Icon name="x" size="md" aria-hidden="true" />
                 </div>
                 <div class="cp-kpi-body">
                   <span class="cp-kpi-label">停用中</span>
@@ -35,12 +35,12 @@
             </div>
 
             <div class="cp-actions-right">
-              <button class="cp-btn cp-btn-refresh" :disabled="loading" @click="loadCustomPlatforms">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" :class="loading ? 'cp-spin' : ''"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+              <button class="cp-btn" :disabled="loading" @click="loadCustomPlatforms">
+                <Icon name="refresh" size="sm" aria-hidden="true" :class="loading ? 'animate-spin' : ''" />
                 <span>{{ loading ? '刷新中…' : '刷新' }}</span>
               </button>
               <button class="cp-btn cp-btn-primary" @click="openCreateDialog">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                <Icon name="plus" size="sm" aria-hidden="true" />
                 <span>新增平台</span>
               </button>
             </div>
@@ -95,7 +95,7 @@
         <div class="cp-table-wrapper">
           <DataTable
             :columns="columns"
-            :data="filteredPlatforms"
+            :data="pagedPlatforms"
             :loading="loading"
             row-key="id"
           >
@@ -146,6 +146,17 @@
           </DataTable>
         </div>
       </template>
+
+      <template #pagination>
+        <Pagination
+          v-if="filteredPlatforms.length > 0"
+          :page="page"
+          :total="filteredPlatforms.length"
+          :page-size="pageSize"
+          @update:page="page = $event"
+          @update:pageSize="changePageSize"
+        />
+      </template>
     </TablePageLayout>
 
     <BaseDialog
@@ -191,19 +202,14 @@
                 :aria-pressed="form.color.toLowerCase() === color"
                 @click="form.color = color"
               >
-                <svg
+                <Icon
                   v-if="form.color.toLowerCase() === color"
+                  name="check"
+                  size="sm"
+                  :stroke-width="3"
                   class="cp-color-swatch-check"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="#ffffff"
-                  stroke-width="3"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
                   aria-hidden="true"
-                ><path d="M20 6L9 17l-5-5" /></svg>
+                />
               </button>
             </div>
             <div class="cp-color-picker-row">
@@ -281,7 +287,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
@@ -291,11 +297,14 @@ import Input from '@/components/common/Input.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import Pagination from '@/components/common/Pagination.vue'
+import Icon from '@/components/icons/Icon.vue'
 import type { Column } from '@/components/common/types'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { customPlatformsAPI, type CustomPlatform, type CustomPlatformUpsertPayload } from '@/api/admin/customPlatforms'
 import { setCustomPlatformLabels } from '@/utils/customPlatformLabels'
+import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 
 const appStore = useAppStore()
 
@@ -304,6 +313,8 @@ const saving = ref(false)
 const platforms = ref<CustomPlatform[]>([])
 const searchQuery = ref('')
 const statusFilter = ref<'all' | 'enabled' | 'disabled'>('all')
+const page = ref(1)
+const pageSize = ref(getPersistedPageSize())
 const showDialog = ref(false)
 const editingPlatform = ref<CustomPlatform | null>(null)
 const showDeleteConfirm = ref(false)
@@ -368,6 +379,25 @@ const filteredPlatforms = computed(() => {
     })
     .sort((left, right) => (left.sort_order - right.sort_order) || left.id - right.id)
 })
+
+const pagedPlatforms = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return filteredPlatforms.value.slice(start, start + pageSize.value)
+})
+
+watch([searchQuery, statusFilter], () => {
+  page.value = 1
+})
+
+watch([() => filteredPlatforms.value.length, pageSize], ([total, size]) => {
+  const lastPage = Math.max(1, Math.ceil(total / size))
+  if (page.value > lastPage) page.value = lastPage
+})
+
+function changePageSize(size: number) {
+  pageSize.value = size
+  page.value = 1
+}
 
 const dialogTitle = computed(() => editingPlatform.value ? `编辑平台：${editingPlatform.value.name}` : '新增自定义平台')
 
@@ -544,43 +574,71 @@ onMounted(() => {
 }
 
 .cp-kpi {
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: flex-start;
   gap: 0.75rem;
-  padding: 0.875rem 1rem;
+  padding: 1rem;
   border-radius: 0.75rem;
   border: 1px solid transparent;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.cp-kpi::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+}
+
+.cp-kpi:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px -6px rgba(15, 23, 42, 0.14);
 }
 
 .cp-kpi-default {
-  background: #f9fafb;
-  border-color: #e5e7eb;
+  background: linear-gradient(180deg, #f0fdfa 0%, #f9fafb 55%);
+  border-color: #ccfbf1;
+}
+
+.cp-kpi-default::before {
+  background: linear-gradient(90deg, #0d9488, #2dd4bf);
 }
 
 :global(.dark) .cp-kpi-default {
-  background: #1f2937;
-  border-color: #374151;
+  background: linear-gradient(180deg, rgba(20, 184, 166, 0.12) 0%, #1f2937 55%);
+  border-color: rgba(20, 184, 166, 0.3);
 }
 
 .cp-kpi-success {
-  background: #ecfdf5;
+  background: linear-gradient(180deg, #ecfdf5 0%, #f0fdf4 60%);
   border-color: #a7f3d0;
 }
 
+.cp-kpi-success::before {
+  background: linear-gradient(90deg, #059669, #34d399);
+}
+
 :global(.dark) .cp-kpi-success {
-  background: rgba(22, 163, 74, 0.08);
-  border-color: rgba(22, 163, 74, 0.25);
+  background: linear-gradient(180deg, rgba(22, 163, 74, 0.12) 0%, #1f2937 55%);
+  border-color: rgba(22, 163, 74, 0.3);
 }
 
 .cp-kpi-danger {
-  background: #fef2f2;
+  background: linear-gradient(180deg, #fef2f2 0%, #fffbfb 60%);
   border-color: #fecaca;
 }
 
+.cp-kpi-danger::before {
+  background: linear-gradient(90deg, #dc2626, #f87171);
+}
+
 :global(.dark) .cp-kpi-danger {
-  background: rgba(220, 38, 38, 0.08);
-  border-color: rgba(220, 38, 38, 0.25);
+  background: linear-gradient(180deg, rgba(220, 38, 38, 0.12) 0%, #1f2937 55%);
+  border-color: rgba(220, 38, 38, 0.3);
 }
 
 .cp-kpi-icon {
@@ -590,36 +648,34 @@ onMounted(() => {
   flex-shrink: 0;
   place-items: center;
   border-radius: 0.625rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 
 .cp-kpi-icon-default {
-  background: #e5e7eb;
-  color: #6b7280;
+  background: linear-gradient(135deg, #0d9488, #14b8a6);
+  color: #fff;
 }
 
 :global(.dark) .cp-kpi-icon-default {
-  background: #374151;
-  color: #9ca3af;
+  background: linear-gradient(135deg, #14b8a6, #2dd4bf);
 }
 
 .cp-kpi-icon-success {
-  background: #d1fae5;
-  color: #16a34a;
+  background: linear-gradient(135deg, #059669, #10b981);
+  color: #fff;
 }
 
 :global(.dark) .cp-kpi-icon-success {
-  background: rgba(22, 163, 74, 0.2);
-  color: #4ade80;
+  background: linear-gradient(135deg, #34d399, #6ee7b7);
 }
 
 .cp-kpi-icon-danger {
-  background: #fee2e2;
-  color: #dc2626;
+  background: linear-gradient(135deg, #dc2626, #ef4444);
+  color: #fff;
 }
 
 :global(.dark) .cp-kpi-icon-danger {
-  background: rgba(220, 38, 38, 0.2);
-  color: #fca5a5;
+  background: linear-gradient(135deg, #f87171, #fca5a5);
 }
 
 .cp-kpi-body {
@@ -641,8 +697,16 @@ onMounted(() => {
   color: #9ca3af;
 }
 
+.cp-kpi-default .cp-kpi-label {
+  color: #0f766e;
+}
+
+:global(.dark) .cp-kpi-default .cp-kpi-label {
+  color: #5eead4;
+}
+
 .cp-kpi-success .cp-kpi-label {
-  color: #166534;
+  color: #047857;
 }
 
 :global(.dark) .cp-kpi-success .cp-kpi-label {
@@ -821,35 +885,20 @@ onMounted(() => {
   opacity: 0.5;
 }
 
+.cp-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.5);
+}
+
 .cp-btn-primary {
   color: #fff;
-  border-color: #3b82f6;
-  background: #3b82f6;
+  border-color: #0d9488;
+  background: #0d9488;
 }
 
 .cp-btn-primary:hover {
-  background: #2563eb;
-  border-color: #2563eb;
-}
-
-.cp-btn-refresh {
-  color: #16a34a;
-  border-color: #d1fae5;
-  background: #f0fdf4;
-}
-
-:global(.dark) .cp-btn-refresh {
-  color: #4ade80;
-  border-color: rgba(22, 163, 74, 0.3);
-  background: rgba(22, 163, 74, 0.1);
-}
-
-.cp-btn-refresh:hover {
-  background: #dcfce7;
-}
-
-:global(.dark) .cp-btn-refresh:hover {
-  background: rgba(22, 163, 74, 0.18);
+  background: #0f766e;
+  border-color: #0f766e;
 }
 
 .cp-btn-sm {
@@ -859,19 +908,19 @@ onMounted(() => {
 }
 
 .cp-btn-edit {
-  color: #3b82f6;
-  border-color: #bfdbfe;
-  background: #eff6ff;
+  color: #0d9488;
+  border-color: #99f6e4;
+  background: #f0fdfa;
 }
 
 :global(.dark) .cp-btn-edit {
-  color: #93c5fd;
-  border-color: rgba(59, 130, 246, 0.3);
-  background: rgba(59, 130, 246, 0.1);
+  color: #5eead4;
+  border-color: rgba(20, 184, 166, 0.3);
+  background: rgba(20, 184, 166, 0.1);
 }
 
 .cp-btn-edit:hover {
-  background: #dbeafe;
+  background: #ccfbf1;
 }
 
 .cp-btn-delete {
@@ -1157,15 +1206,6 @@ onMounted(() => {
   gap: 0.5rem;
 }
 
-/* 旋转动画 */
-.cp-spin {
-  animation: cp-spin 0.7s linear infinite;
-}
-
-@keyframes cp-spin {
-  to { transform: rotate(360deg); }
-}
-
 /* ===== 弹窗颜色搭配面板 ===== */
 .cp-dialog-field-color {
   display: flex;
@@ -1221,6 +1261,7 @@ onMounted(() => {
 }
 
 .cp-color-swatch-check {
+  color: #fff;
   filter: drop-shadow(0 1px 1px rgba(15, 23, 42, 0.25));
 }
 
