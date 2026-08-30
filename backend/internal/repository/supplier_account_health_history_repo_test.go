@@ -138,8 +138,9 @@ func TestSupplierAccountHealthHistoryRepositoryGetTrendAndDeleteBefore(t *testin
 
 	checkedAt := time.Date(2026, 8, 26, 10, 0, 0, 0, time.UTC)
 	since := checkedAt.Add(-24 * time.Hour)
-	mock.ExpectQuery(`(?s)SELECT checked_at, status, latency_ms, latency_limit_ms, reason, action, error_message.*checked_at ASC, id ASC`).
-		WithArgs(int64(21), since).
+	until := checkedAt.Add(time.Hour)
+	mock.ExpectQuery(`(?s)SELECT checked_at, status, latency_ms, latency_limit_ms, reason, action, error_message.*checked_at >= \$2.*checked_at < \$3.*checked_at ASC, id ASC`).
+		WithArgs(int64(21), since, until).
 		WillReturnRows(sqlmock.NewRows([]string{"checked_at", "status", "latency_ms", "latency_limit_ms", "reason", "action", "error_message"}).
 			AddRow(checkedAt, "failed", nil, 500, "timeout", "disable", "timeout"))
 	mock.ExpectExec(`(?s)WITH target AS.*checked_at < \$1.*LIMIT \$2.*DELETE FROM supplier_account_health_history`).
@@ -147,7 +148,7 @@ func TestSupplierAccountHealthHistoryRepositoryGetTrendAndDeleteBefore(t *testin
 		WillReturnResult(sqlmock.NewResult(0, 2))
 
 	repo := NewSupplierAccountHealthHistoryRepository(db)
-	result, err := repo.GetTrend(context.Background(), 21, since)
+	result, err := repo.GetTrend(context.Background(), 21, since, until)
 	require.NoError(t, err)
 	require.Len(t, result.Points, 1)
 	require.Nil(t, result.Points[0].LatencyMs)
@@ -170,31 +171,34 @@ func TestSupplierAccountHealthHistoryRepositoryValidateAccount(t *testing.T) {
 	require.NoError(t, repo.ValidateAccount(context.Background(), 21))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
-func TestSupplierAccountHealthHistoryRepositoryGetTrendsLimitsPointsPerAccount(t *testing.T) {
+func TestSupplierAccountHealthHistoryRepositoryGetTrendsReturnsAllRangePoints(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer db.Close()
 
 	checkedAt := time.Date(2026, 8, 26, 10, 0, 0, 0, time.UTC)
 	since := checkedAt.Add(-24 * time.Hour)
+	until := checkedAt.Add(time.Hour)
 	mock.ExpectQuery(`(?s)SELECT DISTINCT local_account\.id.*local_account\.id = ANY\(\$1\)`).
 		WithArgs(sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(21).AddRow(37))
-	mock.ExpectQuery(`(?s)SELECT h\.id,.*ROW_NUMBER\(\) OVER.*local_account_id = ANY\(\$1\).*checked_at >= \$2.*row_number <= \$3.*ORDER BY trend\.local_account_id ASC, trend\.checked_at ASC, trend\.id ASC`).
-		WithArgs(sqlmock.AnyArg(), since, 50).
-		WillReturnRows(sqlmock.NewRows([]string{"local_account_id", "checked_at", "status", "latency_ms", "latency_limit_ms"}).
-			AddRow(21, checkedAt, "healthy", int64(120), 500).
-			AddRow(37, checkedAt, "failed", nil, 500))
+	mock.ExpectQuery(`(?s)SELECT local_account_id, checked_at, status, latency_ms, latency_limit_ms,.*FROM supplier_account_health_history.*local_account_id = ANY\(\$1\).*checked_at >= \$2.*checked_at < \$3.*ORDER BY local_account_id ASC, checked_at ASC, id ASC`).
+		WithArgs(sqlmock.AnyArg(), since, until).
+		WillReturnRows(sqlmock.NewRows([]string{"local_account_id", "checked_at", "status", "latency_ms", "latency_limit_ms", "reason", "action", "error_message"}).
+			AddRow(21, checkedAt, "healthy", int64(120), 500, "ok", "none", "").
+			AddRow(37, checkedAt, "failed", nil, 500, "timeout", "disable", "timeout"))
 
 	repo := NewSupplierAccountHealthHistoryRepository(db)
-	result, err := repo.GetTrends(context.Background(), []int64{21, 37}, since, 50)
+	result, err := repo.GetTrends(context.Background(), []int64{21, 37}, since, until, 50)
 
 	require.NoError(t, err)
 	require.Len(t, result, 2)
 	require.Len(t, result[21].Points, 1)
 	require.Equal(t, "healthy", result[21].Points[0].Status)
 	require.NotNil(t, result[21].Points[0].LatencyMs)
+	require.Equal(t, "ok", result[21].Points[0].Reason)
 	require.Len(t, result[37].Points, 1)
 	require.Nil(t, result[37].Points[0].LatencyMs)
+	require.Equal(t, "timeout", result[37].Points[0].ErrorMessage)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

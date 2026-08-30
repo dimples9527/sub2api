@@ -21,9 +21,15 @@ export interface SupplierAccountHealthAccount {
 
 export interface SupplierAccountHealthPoint {
   checked_at: string
+  bucket_end_at?: string
+  latest_checked_at?: string
   status: SupplierAccountHealthStatus | string
   latency_ms?: number | null
   latency_limit_ms: number
+  sample_count: number
+  healthy_count: number
+  slow_count: number
+  failed_count: number
   reason?: string
   action?: string
   error_message?: string

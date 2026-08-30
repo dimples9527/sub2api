@@ -263,7 +263,7 @@ SELECT EXISTS (
 	return nil
 }
 
-func (r *supplierAccountHealthHistoryRepository) GetTrend(ctx context.Context, accountID int64, since time.Time) (service.SupplierAccountHealthTrendResult, error) {
+func (r *supplierAccountHealthHistoryRepository) GetTrend(ctx context.Context, accountID int64, since, until time.Time) (service.SupplierAccountHealthTrendResult, error) {
 	if accountID <= 0 {
 		return service.SupplierAccountHealthTrendResult{}, fmt.Errorf("本地账号 ID 必须为正数")
 	}
@@ -272,7 +272,8 @@ SELECT checked_at, status, latency_ms, latency_limit_ms, reason, action, error_m
 FROM supplier_account_health_history
 WHERE local_account_id = $1
   AND checked_at >= $2
-ORDER BY checked_at ASC, id ASC`, accountID, since)
+  AND checked_at < $3
+ORDER BY checked_at ASC, id ASC`, accountID, since, until)
 	if err != nil {
 		return service.SupplierAccountHealthTrendResult{}, fmt.Errorf("查询账号健康趋势失败: %w", err)
 	}
@@ -296,15 +297,12 @@ ORDER BY checked_at ASC, id ASC`, accountID, since)
 	return result, nil
 }
 
-// GetTrends 批量查询多个账号的趋势。先一次校验账号仍在供应商可见范围内，
-// 再用窗口函数限制每个账号返回的最新记录数，避免响应过大。
-func (r *supplierAccountHealthHistoryRepository) GetTrends(ctx context.Context, accountIDs []int64, since time.Time, pointLimit int) (map[int64]service.SupplierAccountHealthTrendResult, error) {
+// GetTrends 批量查询多个账号范围内的原始趋势记录。先一次校验账号仍在供应商可见范围内，
+// 再由服务层统一压缩为固定数量的时间桶；pointLimit 保留用于兼容既有仓储接口。
+func (r *supplierAccountHealthHistoryRepository) GetTrends(ctx context.Context, accountIDs []int64, since, until time.Time, _ int) (map[int64]service.SupplierAccountHealthTrendResult, error) {
 	result := make(map[int64]service.SupplierAccountHealthTrendResult, len(accountIDs))
 	if len(accountIDs) == 0 {
 		return result, nil
-	}
-	if pointLimit <= 0 {
-		pointLimit = 1
 	}
 	validRows, err := r.db.QueryContext(ctx, `
 SELECT DISTINCT local_account.id
@@ -334,26 +332,21 @@ WHERE local_account.id = ANY($1)
 	if len(validIDs) == 0 {
 		return result, nil
 	}
+	for _, accountID := range validIDs {
+		result[accountID] = service.SupplierAccountHealthTrendResult{
+			AccountID: accountID,
+			Points:    make([]service.SupplierAccountHealthPoint, 0),
+		}
+	}
 
 	rows, err := r.db.QueryContext(ctx, `
-SELECT local_account_id, checked_at, status, latency_ms, latency_limit_ms
-FROM (
-    SELECT h.id,
-           h.local_account_id,
-           h.checked_at,
-           h.status,
-           h.latency_ms,
-           h.latency_limit_ms,
-           ROW_NUMBER() OVER (
-               PARTITION BY h.local_account_id
-               ORDER BY h.checked_at DESC, h.id DESC
-           ) AS row_number
-    FROM supplier_account_health_history h
-    WHERE h.local_account_id = ANY($1)
-      AND h.checked_at >= $2
-) trend
-WHERE trend.row_number <= $3
-ORDER BY trend.local_account_id ASC, trend.checked_at ASC, trend.id ASC`, pq.Array(validIDs), since, pointLimit)
+SELECT local_account_id, checked_at, status, latency_ms, latency_limit_ms,
+       reason, action, error_message
+FROM supplier_account_health_history
+WHERE local_account_id = ANY($1)
+  AND checked_at >= $2
+  AND checked_at < $3
+ORDER BY local_account_id ASC, checked_at ASC, id ASC`, pq.Array(validIDs), since, until)
 	if err != nil {
 		return nil, fmt.Errorf("批量查询账号健康趋势失败: %w", err)
 	}
@@ -362,7 +355,7 @@ ORDER BY trend.local_account_id ASC, trend.checked_at ASC, trend.id ASC`, pq.Arr
 		var accountID int64
 		var point service.SupplierAccountHealthPoint
 		var latency sql.NullInt64
-		if err := rows.Scan(&accountID, &point.CheckedAt, &point.Status, &latency, &point.LatencyLimitMs); err != nil {
+		if err := rows.Scan(&accountID, &point.CheckedAt, &point.Status, &latency, &point.LatencyLimitMs, &point.Reason, &point.Action, &point.ErrorMessage); err != nil {
 			return nil, fmt.Errorf("扫描账号健康趋势失败: %w", err)
 		}
 		if latency.Valid {

@@ -17,6 +17,7 @@ describe('SupplierAccountHealthView 账号健康趋势批量加载', () => {
 
   it('选中账号的详情趋势单独缓存完整数据', () => {
     expect(source).toContain('const detailTrendByAccountId = ref<Record<string, SupplierAccountHealthPoint[]>>({})')
+    expect(source).toContain('const detailLatestByAccountId = ref<Record<string, SupplierAccountHealthPoint | null>>({})')
     expect(source).toContain('const cacheKey = `${accountId}:${range}`')
     expect(source).toContain('await loadTrendRequest(accountId, range)')
   })

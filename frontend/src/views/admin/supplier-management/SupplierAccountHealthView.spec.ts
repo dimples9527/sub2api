@@ -64,9 +64,19 @@ describe('SupplierAccountHealthView', () => {
   })
 
   it('renders an enlarged chart for each account health trend', () => {
-    expect(source).toContain('const TREND_BAR_COUNT = 28')
-    expect(source).toContain('.sp-health-trend-cell { display: grid; min-width: 16rem;')
-    expect(source).toContain('.sp-health-trend-bars { display: flex; align-items: end; gap: 0.2rem; height: 6.5rem;')
+    expect(source).toContain('const TREND_BAR_COUNT = 96')
+    expect(source).toContain('.sp-health-trend-cell { display: grid; min-width: 20rem;')
+    expect(source).toContain('.sp-health-trend-bars { display: flex; align-items: end; gap: 0.08rem; height: 6.5rem;')
+    expect(source).not.toContain('slice(-TREND_BAR_COUNT)')
+  })
+
+  it('uses time-bucket samples for health rate and empty bucket display', () => {
+    expect(apiSource).toContain('sample_count: number')
+    expect(apiSource).toContain('healthy_count: number')
+    expect(apiSource).toContain('latest_checked_at?: string')
+    expect(source).toContain('point.sample_count')
+    expect(source).toContain('trendSampleCount')
+    expect(source).toContain('latest_checked_at')
   })
 
   it('renders the account list before the per-account trends finish loading', () => {
