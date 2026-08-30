@@ -896,6 +896,7 @@ const adminNavItems = computed((): NavItem[] => {
         { path: '/model-monitor.html', label: '模型监控', icon: SignalIcon, external: true },
         { path: '/model-monitor-local.html', label: '本地模型监控', icon: SignalIcon, external: true },
         { path: '/admin/model-monitor/platform-overrides', label: '分组平台配置', icon: CogIcon },
+        { path: '/admin/model-monitor/group-health', label: '分组健康趋势', icon: SignalIcon },
         { path: '/admin/model-monitor/custom-platforms', label: '自定义平台', icon: CogIcon },
       ],
     },

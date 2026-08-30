@@ -12,5 +12,6 @@ func registerModelMonitorRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		modelMonitor.PUT("/platform-overrides/:group_id", h.Admin.Group.SetLLMMonitorPlatformOverride)
 		modelMonitor.PUT("/visibility/:group_id", h.Admin.Group.SetLLMMonitorGroupVisibility)
 		modelMonitor.DELETE("/platform-overrides/:group_id", h.Admin.Group.ClearLLMMonitorPlatformOverride)
+		modelMonitor.GET("/group-health", h.Admin.ModelMonitorGroupHealth.Get)
 	}
 }

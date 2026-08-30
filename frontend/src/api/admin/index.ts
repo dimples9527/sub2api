@@ -48,6 +48,7 @@ import upstreamAccountSyncAPI from './upstreamAccountSync'
 import modelSquareAPI from './modelSquare'
 import modelSquareConfigAPI from './modelSquareConfig'
 import modelMonitorAPI from './modelMonitor'
+import modelMonitorGroupHealthAPI from './modelMonitorGroupHealth'
 import customPlatformsAPI from './customPlatforms'
 
 /**
@@ -99,6 +100,7 @@ export const adminAPI = {
   modelSquare: modelSquareAPI,
   modelSquareConfig: modelSquareConfigAPI,
   modelMonitor: modelMonitorAPI,
+  modelMonitorGroupHealth: modelMonitorGroupHealthAPI,
   customPlatforms: customPlatformsAPI,
 }
 
@@ -148,6 +150,7 @@ export {
   modelSquareAPI,
   modelSquareConfigAPI,
   modelMonitorAPI,
+  modelMonitorGroupHealthAPI,
   customPlatformsAPI,
 }
 

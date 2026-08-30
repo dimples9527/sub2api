@@ -69,6 +69,7 @@ func ProvideAdminHandlers(
 	upstreamDashboardHandler *admin.UpstreamDashboardHandler,
 	upstreamManagementHandler *admin.UpstreamManagementHandler,
 	upstreamAccountSyncHandler *admin.UpstreamAccountSyncHandler,
+	modelMonitorGroupHealthHandler *admin.ModelMonitorGroupHealthHandler,
 	ollamaCloudUsage *service.OllamaCloudUsageService,
 ) *AdminHandlers {
 	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)
@@ -132,6 +133,7 @@ func ProvideAdminHandlers(
 		UpstreamDashboard:             upstreamDashboardHandler,
 		UpstreamManagement:            upstreamManagementHandler,
 		UpstreamAccountSync:           upstreamAccountSyncHandler,
+		ModelMonitorGroupHealth:       modelMonitorGroupHealthHandler,
 	}
 }
 
@@ -353,6 +355,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewUpstreamDashboardHandler,
 	admin.NewUpstreamManagementHandler,
 	admin.NewUpstreamAccountSyncHandler,
+	admin.NewModelMonitorGroupHealthHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,

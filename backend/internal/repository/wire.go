@@ -101,6 +101,7 @@ var ProviderSet = wire.NewSet(
 	NewChannelMonitorRepository,
 	NewChannelMonitorV2Repository,
 	LLMMonitorHistoryWiringSet,
+	ModelMonitorGroupHealthWiringSet,
 	NewMonitorGroupPlatformOverrideRepository,
 	NewChannelMonitorRequestTemplateRepository,
 	NewContentModerationRepository,

@@ -62,6 +62,7 @@ type AdminHandlers struct {
 	UpstreamDashboard             *admin.UpstreamDashboardHandler
 	UpstreamManagement            *admin.UpstreamManagementHandler
 	UpstreamAccountSync           *admin.UpstreamAccountSyncHandler
+	ModelMonitorGroupHealth       *admin.ModelMonitorGroupHealthHandler
 }
 
 // Handlers contains all HTTP handlers

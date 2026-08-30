@@ -771,6 +771,16 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/model-monitor/group-health',
+    name: 'AdminModelMonitorGroupHealth',
+    component: () => import('@/views/admin/model-monitor/GroupHealthTrendView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: '分组健康趋势'
+    }
+  },
+  {
     path: '/admin/model-monitor/custom-platforms',
     name: 'AdminCustomPlatforms',
     component: () => import('@/views/admin/model-monitor/CustomPlatformsView.vue'),
