@@ -229,7 +229,7 @@ type SupplierProviderDataRepository interface {
 	ApplyRateGuard(ctx context.Context, input SupplierRateGuardApplyInput) (SupplierRateGuardApplyResult, error)
 	MarkRateGuardChecked(ctx context.Context, mappingID int64, checkedAt time.Time) error
 	ReplaceAccounts(ctx context.Context, providerID int64, items []SupplierProviderRemoteAccount, seenAt time.Time) (SupplierSyncCounts, error)
-	ReplaceGroups(ctx context.Context, providerID int64, items []SupplierProviderRemoteGroup, seenAt time.Time) (SupplierSyncCounts, error)
+	ReplaceGroups(ctx context.Context, providerID int64, items []SupplierProviderRemoteGroup, seenAt time.Time) (SupplierProviderGroupReplaceResult, error)
 	UpdateBalance(ctx context.Context, providerID int64, balance float64, seenAt time.Time) error
 	UpdateCost(ctx context.Context, providerID int64, cost float64, seenAt time.Time) error
 	// UpdateCostDetailed 写入成本生效值与上游原始值、偏差覆盖提示。
@@ -290,6 +290,11 @@ type SupplierProviderSyncStage struct {
 	Message        string                          `json:"message"`
 	Counts         SupplierSyncCounts              `json:"counts"`
 	EndpointResult *SupplierProviderEndpointResult `json:"endpoint_result,omitempty"`
+}
+
+type supplierSyncStageExecution struct {
+	Counts       SupplierSyncCounts
+	GroupChanges SupplierProviderGroupChangeSummary
 }
 
 type SupplierProviderEndpointResult struct {
@@ -355,22 +360,30 @@ const (
 )
 
 type SupplierProviderSyncService struct {
-	providerRepo       SupplierProviderRepository
-	dataRepo           SupplierProviderDataRepository
-	rechargeRepo       SupplierProviderRechargeRepository
-	remote             SupplierProviderRemoteClient
-	encryptor          SecretEncryptor
-	syncLock           SupplierProviderSyncLock
-	groupMatcher       SupplierProviderGroupAutoMatcher
-	thresholdProvider  SupplierCostDeviationThresholdProvider
-	costSourceResolver SupplierCostSourceResolver
-	costReviewService  *SupplierProviderCostReviewService
-	costAlertHandler   SupplierCostAlertHandler
+	providerRepo        SupplierProviderRepository
+	dataRepo            SupplierProviderDataRepository
+	rechargeRepo        SupplierProviderRechargeRepository
+	remote              SupplierProviderRemoteClient
+	encryptor           SecretEncryptor
+	syncLock            SupplierProviderSyncLock
+	groupMatcher        SupplierProviderGroupAutoMatcher
+	thresholdProvider   SupplierCostDeviationThresholdProvider
+	costSourceResolver  SupplierCostSourceResolver
+	costReviewService   *SupplierProviderCostReviewService
+	costAlertHandler    SupplierCostAlertHandler
+	groupChangeNotifier SupplierGroupChangeNotifier
 }
 
 func (s *SupplierProviderSyncService) SetGroupMatcher(matcher SupplierProviderGroupAutoMatcher) {
 	if s != nil {
 		s.groupMatcher = matcher
+	}
+}
+
+// SetGroupChangeNotifier 注入供应商分组变化通知器；通知属于同步成功后的旁路能力。
+func (s *SupplierProviderSyncService) SetGroupChangeNotifier(notifier SupplierGroupChangeNotifier) {
+	if s != nil {
+		s.groupChangeNotifier = notifier
 	}
 }
 
@@ -1242,7 +1255,7 @@ func (s *SupplierProviderSyncService) syncStage(ctx context.Context, provider *S
 			return result, err
 		}
 	}
-	var counts SupplierSyncCounts
+	var stageExecution supplierSyncStageExecution
 	var err error
 	SupplierSyncProgress(ctx, SupplierSyncProgressStageSession, "正在获取或复用上游登录会话", nil)
 	if scope == SupplierSyncScopeGroups {
@@ -1252,8 +1265,9 @@ func (s *SupplierProviderSyncService) syncStage(ctx context.Context, provider *S
 		}
 	}
 	if err == nil {
-		counts, err = s.executeStage(ctx, provider, password, scope, startedAt)
+		stageExecution, err = s.executeStage(ctx, provider, password, scope, startedAt)
 	}
+	counts := stageExecution.Counts
 	result.Counts = counts
 	result.FinishedAt = time.Now()
 	if err != nil {
@@ -1267,6 +1281,26 @@ func (s *SupplierProviderSyncService) syncStage(ctx context.Context, provider *S
 		result.Status = SupplierSyncStatusSuccess
 		result.Message = supplierSyncMessage(result.Status)
 		SupplierSyncProgressOK(ctx, progressStage, fmt.Sprintf("%s同步完成", supplierSyncProgressScopeLabel(scope)))
+		if scope == SupplierSyncScopeGroups && !stageExecution.GroupChanges.Empty() && s.groupChangeNotifier != nil {
+			event := SupplierGroupChangeEvent{
+				ProviderID:   provider.ID,
+				ProviderCode: provider.Code,
+				ProviderName: provider.Name,
+				EventType:    SupplierGroupChangeEventType,
+				Changes:      stageExecution.GroupChanges,
+				ChangeCount:  stageExecution.GroupChanges.Count(),
+				ObservedAt:   result.FinishedAt,
+				CreatedAt:    result.FinishedAt,
+			}
+			if run.ID > 0 {
+				syncRunID := run.ID
+				event.SyncRunID = &syncRunID
+			}
+			if notifyErr := s.groupChangeNotifier.DispatchGroupChanged(ctx, event); notifyErr != nil {
+				result.Message = fmt.Sprintf("%s；分组变化通知失败: %v", result.Message, notifyErr)
+				logger.LegacyPrintf("supplier_group_change_notification", "provider_id=%d provider_code=%s dispatch failed: %v", provider.ID, provider.Code, notifyErr)
+			}
+		}
 	}
 	if scope == SupplierSyncScopeGroups {
 		if statusErr := s.dataRepo.UpdateGroupSyncStatus(ctx, provider.ID, result.Status, result.Message, result.FinishedAt); statusErr != nil && err == nil {
@@ -1430,7 +1464,7 @@ func (s *SupplierProviderSyncService) syncCostStage(ctx context.Context, provide
 	return result, err
 }
 
-func (s *SupplierProviderSyncService) executeStage(ctx context.Context, provider *SupplierProvider, password, scope string, seenAt time.Time) (SupplierSyncCounts, error) {
+func (s *SupplierProviderSyncService) executeStage(ctx context.Context, provider *SupplierProvider, password, scope string, seenAt time.Time) (supplierSyncStageExecution, error) {
 	progressStage := supplierSyncProgressStageForScope(scope)
 	switch scope {
 	case SupplierSyncScopeAccounts:
@@ -1438,58 +1472,58 @@ func (s *SupplierProviderSyncService) executeStage(ctx context.Context, provider
 		items, err := s.remote.FetchAccounts(ctx, provider, password)
 		if err != nil {
 			SupplierSyncProgressFail(ctx, progressStage, err)
-			return SupplierSyncCounts{}, err
+			return supplierSyncStageExecution{}, err
 		}
 		SupplierSyncProgress(ctx, progressStage, fmt.Sprintf("API Key 接口请求成功，获取 %d 条记录", len(items)), nil)
 		SupplierSyncProgress(ctx, SupplierSyncProgressStagePersist, "正在写入 API Key 数据", nil)
 		counts, err := s.dataRepo.ReplaceAccounts(ctx, provider.ID, items, seenAt)
 		if err != nil {
 			SupplierSyncProgressFail(ctx, SupplierSyncProgressStagePersist, err)
-			return counts, err
+			return supplierSyncStageExecution{Counts: counts}, err
 		}
 		SupplierSyncProgressOK(ctx, SupplierSyncProgressStagePersist, "API Key 数据写入完成")
-		return counts, nil
+		return supplierSyncStageExecution{Counts: counts}, nil
 	case SupplierSyncScopeGroups:
 		SupplierSyncProgress(ctx, progressStage, "正在请求上游分组接口", nil)
 		items, err := s.remote.FetchGroups(ctx, provider, password)
 		if err != nil {
 			SupplierSyncProgressFail(ctx, progressStage, err)
-			return SupplierSyncCounts{}, err
+			return supplierSyncStageExecution{}, err
 		}
 		SupplierSyncProgress(ctx, progressStage, fmt.Sprintf("分组接口请求成功，获取 %d 条记录", len(items)), nil)
 		SupplierSyncProgress(ctx, SupplierSyncProgressStagePersist, "正在写入分组数据", nil)
-		counts, err := s.dataRepo.ReplaceGroups(ctx, provider.ID, items, seenAt)
+		replaceResult, err := s.dataRepo.ReplaceGroups(ctx, provider.ID, items, seenAt)
 		if err != nil {
 			SupplierSyncProgressFail(ctx, SupplierSyncProgressStagePersist, err)
-			return counts, err
+			return supplierSyncStageExecution{Counts: replaceResult.Counts}, err
 		}
 		if s.groupMatcher != nil {
 			SupplierSyncProgress(ctx, SupplierSyncProgressStagePersist, "正在更新分组自动匹配关系", nil)
 			if _, err := s.groupMatcher.AutoMatch(ctx, provider.ID); err != nil {
 				SupplierSyncProgressFail(ctx, SupplierSyncProgressStagePersist, err)
-				return counts, fmt.Errorf("auto match supplier groups: %w", err)
+				return supplierSyncStageExecution{Counts: replaceResult.Counts, GroupChanges: replaceResult.Changes}, fmt.Errorf("auto match supplier groups: %w", err)
 			}
 		}
 		SupplierSyncProgressOK(ctx, SupplierSyncProgressStagePersist, "分组数据写入完成")
-		return counts, nil
+		return supplierSyncStageExecution{Counts: replaceResult.Counts, GroupChanges: replaceResult.Changes}, nil
 	case SupplierSyncScopeBalance:
 		SupplierSyncProgress(ctx, progressStage, "正在请求上游余额接口", nil)
 		balance, err := s.remote.FetchBalance(ctx, provider, password)
 		if err != nil {
 			SupplierSyncProgressFail(ctx, progressStage, err)
-			return SupplierSyncCounts{}, err
+			return supplierSyncStageExecution{}, err
 		}
 		SupplierSyncProgress(ctx, progressStage, "余额接口请求成功，正在写入本地数据", nil)
 		SupplierSyncProgress(ctx, SupplierSyncProgressStagePersist, "正在写入余额数据", nil)
 		if err := s.dataRepo.UpdateBalance(ctx, provider.ID, balance, seenAt); err != nil {
 			SupplierSyncProgressFail(ctx, SupplierSyncProgressStagePersist, err)
-			return SupplierSyncCounts{}, err
+			return supplierSyncStageExecution{}, err
 		}
 		SupplierSyncProgressOK(ctx, SupplierSyncProgressStagePersist, "余额数据写入完成")
-		return SupplierSyncCounts{CheckedCount: 1, UpdatedCount: 1}, nil
+		return supplierSyncStageExecution{Counts: SupplierSyncCounts{CheckedCount: 1, UpdatedCount: 1}}, nil
 	default:
 		SupplierSyncProgressFail(ctx, SupplierSyncProgressStageError, ErrSupplierProviderInvalid)
-		return SupplierSyncCounts{}, ErrSupplierProviderInvalid
+		return supplierSyncStageExecution{}, ErrSupplierProviderInvalid
 	}
 }
 

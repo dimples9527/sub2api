@@ -110,11 +110,98 @@ func (d *SupplierNotificationDispatcher) Dispatch(ctx context.Context, event Sup
 	return dispatchErr
 }
 
+// DispatchGroupChanged 保存一次分组变化事件，并按订阅和冷却策略创建投递记录。
+func (d *SupplierNotificationDispatcher) DispatchGroupChanged(ctx context.Context, event SupplierGroupChangeEvent) error {
+	if d == nil || d.repo == nil {
+		return ErrSupplierNotificationInvalid
+	}
+	if event.ProviderID <= 0 || event.Changes.Empty() {
+		return ErrSupplierNotificationInvalid
+	}
+	if event.EventType == "" {
+		event.EventType = SupplierGroupChangeEventType
+	}
+	if event.EventType != SupplierGroupChangeEventType || !isValidSupplierNotificationEventType(event.EventType) {
+		return ErrSupplierNotificationInvalid
+	}
+	if event.ChangeCount <= 0 {
+		event.ChangeCount = event.Changes.Count()
+	}
+	if event.ObservedAt.IsZero() {
+		event.ObservedAt = time.Now()
+	}
+	if event.CreatedAt.IsZero() {
+		event.CreatedAt = event.ObservedAt
+	}
+	if err := d.repo.CreateGroupChangeEvent(ctx, &event); err != nil {
+		return fmt.Errorf("保存供应商分组变化事件失败: %w", err)
+	}
+
+	channels, err := d.repo.ListChannels(ctx)
+	if err != nil {
+		return fmt.Errorf("查询启用供应商通知渠道失败: %w", err)
+	}
+	groupEventID := event.ID
+	changes := event.Changes
+	payloadJSON, err := json.Marshal(SupplierNotificationEventPayload{
+		GroupChangeEventID: &groupEventID,
+		ProviderID:         event.ProviderID,
+		ProviderCode:       event.ProviderCode,
+		ProviderName:       event.ProviderName,
+		EventType:          event.EventType,
+		ObservedAt:         event.ObservedAt,
+		GroupChanges:       &changes,
+	})
+	if err != nil {
+		return fmt.Errorf("编码供应商分组变化通知载荷失败: %w", err)
+	}
+
+	now := time.Now()
+	var dispatchErr error
+	for _, channel := range channels {
+		if !channel.Enabled || channel.ID <= 0 {
+			continue
+		}
+		subscriptions, listErr := d.repo.ListMatchingSubscriptions(ctx, channel.ID, event.ProviderID, event.EventType)
+		if listErr != nil {
+			dispatchErr = errors.Join(dispatchErr, fmt.Errorf("查询渠道 %d 的通知订阅失败: %w", channel.ID, listErr))
+			continue
+		}
+		if len(subscriptions) == 0 {
+			continue
+		}
+		claimed, claimErr := d.repo.ClaimCooldown(ctx, channel.ID, event.ProviderID, event.EventType, now, now.Add(SupplierBalanceAlertDefaultCooldown))
+		if claimErr != nil {
+			dispatchErr = errors.Join(dispatchErr, fmt.Errorf("占用渠道 %d 的通知冷却失败: %w", channel.ID, claimErr))
+			continue
+		}
+		if !claimed {
+			continue
+		}
+		delivery := &SupplierNotificationDeliveryRecord{
+			ChannelID:          channel.ID,
+			ChannelName:        channel.Name,
+			GroupChangeEventID: &groupEventID,
+			ProviderID:         event.ProviderID,
+			ProviderName:       event.ProviderName,
+			EventType:          event.EventType,
+			Status:             SupplierNotificationDeliveryPending,
+			PayloadJSON:        payloadJSON,
+			NextAttemptAt:      now,
+		}
+		if createErr := d.repo.CreateDelivery(ctx, delivery); createErr != nil {
+			dispatchErr = errors.Join(dispatchErr, fmt.Errorf("创建渠道 %d 的通知投递失败: %w", channel.ID, createErr))
+		}
+	}
+	return dispatchErr
+}
+
 // isValidSupplierNotificationEventType 判断当前供应商通知模块支持的事件类型。
 func isValidSupplierNotificationEventType(eventType string) bool {
 	switch eventType {
 	case SupplierBalanceAlertEventLow, SupplierBalanceAlertEventRecovered,
-		SupplierCostAlertEventOverrun, SupplierCostAlertEventRecovered:
+		SupplierCostAlertEventOverrun, SupplierCostAlertEventRecovered,
+		SupplierGroupChangeEventType:
 		return true
 	default:
 		return false

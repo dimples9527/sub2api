@@ -27,4 +27,5 @@ var SupplierNotificationWiringSet = wire.NewSet(
 	ProvideSupplierNotificationDispatcher,
 	ProvideSupplierNotificationService,
 	wire.Bind(new(SupplierBalanceAlertDispatcher), new(*SupplierNotificationDispatcher)),
+	wire.Bind(new(SupplierGroupChangeNotifier), new(*SupplierNotificationDispatcher)),
 )

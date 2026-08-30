@@ -8,17 +8,31 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
+	"github.com/stretchr/testify/require"
 )
 
 type supplierNotificationRepoStub struct {
 	channels       map[int64]SupplierNotificationChannel
 	subscriptions  []SupplierNotificationSubscription
 	cooldowns      map[string]bool
+	groupEvents    []SupplierGroupChangeEvent
 	deliveries     map[int64]*SupplierNotificationDeliveryRecord
 	attempts       map[int64][]SupplierNotificationDeliveryAttempt
 	nextDeliveryID int64
 	dueIDs         []int64
 	claimCount     int
+}
+
+func (r *supplierNotificationRepoStub) CreateGroupChangeEvent(_ context.Context, event *SupplierGroupChangeEvent) error {
+	if event.ID == 0 {
+		event.ID = int64(len(r.groupEvents) + 1)
+	}
+	if event.ChangeCount <= 0 {
+		event.ChangeCount = event.Changes.Count()
+	}
+	copy := *event
+	r.groupEvents = append(r.groupEvents, copy)
+	return nil
 }
 
 func (r *supplierNotificationRepoStub) ListChannels(context.Context) ([]SupplierNotificationChannel, error) {
@@ -290,4 +304,46 @@ func TestSupplierNotificationDispatcherRetriesAndMarksDelivered(t *testing.T) {
 	if len(repo.attempts[7]) != 2 || repo.attempts[7][0].Status != "failed" || repo.attempts[7][1].Status != "succeeded" {
 		t.Fatalf("attempts = %+v", repo.attempts[7])
 	}
+}
+
+func TestSupplierNotificationDispatcherPersistsGroupChangedEventWithoutSubscription(t *testing.T) {
+	repo := newSupplierNotificationRepoStub()
+	repo.channels[1] = SupplierNotificationChannel{ID: 1, Name: "飞书", ChannelType: SupplierNotificationChannelFeishu, Enabled: true}
+	dispatcher := NewSupplierNotificationDispatcher(repo, &supplierNotificationSenderStub{})
+
+	event := SupplierGroupChangeEvent{
+		ProviderID: 42,
+		Changes: SupplierProviderGroupChangeSummary{
+			Added: []SupplierProviderGroupChange{{UpstreamKey: "new", NewName: "新分组", NewRateMultiplier: 1.2}},
+		},
+	}
+
+	require.NoError(t, dispatcher.DispatchGroupChanged(context.Background(), event))
+	require.Len(t, repo.groupEvents, 1)
+	require.Empty(t, repo.deliveries)
+	require.Zero(t, repo.claimCount)
+}
+
+func TestSupplierNotificationDispatcherSkipsGroupChangedDeliveryWhenCooldownIsClaimed(t *testing.T) {
+	repo := newSupplierNotificationRepoStub()
+	repo.channels[1] = SupplierNotificationChannel{ID: 1, Name: "飞书", ChannelType: SupplierNotificationChannelFeishu, Enabled: true}
+	repo.subscriptions = []SupplierNotificationSubscription{{ChannelID: 1, EventType: SupplierGroupChangeEventType, Enabled: true}}
+	dispatcher := NewSupplierNotificationDispatcher(repo, &supplierNotificationSenderStub{})
+
+	event := SupplierGroupChangeEvent{
+		ProviderID: 42,
+		Changes: SupplierProviderGroupChangeSummary{
+			RateChanged: []SupplierProviderGroupChange{{
+				UpstreamKey:       "vip",
+				OldRateMultiplier: 1,
+				NewRateMultiplier: 1.2,
+			}},
+		},
+	}
+
+	require.NoError(t, dispatcher.DispatchGroupChanged(context.Background(), event))
+	require.NoError(t, dispatcher.DispatchGroupChanged(context.Background(), event))
+	require.Len(t, repo.groupEvents, 2)
+	require.Len(t, repo.deliveries, 1)
+	require.Equal(t, 1, repo.claimCount)
 }

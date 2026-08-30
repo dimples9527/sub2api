@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -229,6 +230,64 @@ RETURNING id`, channelID, providerID, eventType, now, expiresAt).Scan(&id)
 	return id > 0, nil
 }
 
+type supplierGroupChangeEventPayload struct {
+	ProviderID   int64                                      `json:"provider_id"`
+	ProviderCode string                                     `json:"provider_code"`
+	ProviderName string                                     `json:"provider_name"`
+	EventType    string                                     `json:"event_type"`
+	ChangeCount  int                                        `json:"change_count"`
+	ObservedAt   time.Time                                  `json:"observed_at"`
+	Changes      service.SupplierProviderGroupChangeSummary `json:"changes"`
+}
+
+func (r *supplierNotificationRepository) CreateGroupChangeEvent(ctx context.Context, event *service.SupplierGroupChangeEvent) error {
+	if event == nil || event.ProviderID <= 0 || event.Changes.Empty() {
+		return service.ErrSupplierNotificationInvalid
+	}
+	if event.EventType == "" {
+		event.EventType = service.SupplierGroupChangeEventType
+	}
+	if event.EventType != service.SupplierGroupChangeEventType {
+		return service.ErrSupplierNotificationInvalid
+	}
+	if event.ChangeCount <= 0 {
+		event.ChangeCount = event.Changes.Count()
+	}
+	if event.ChangeCount <= 0 {
+		return service.ErrSupplierNotificationInvalid
+	}
+	if event.ObservedAt.IsZero() {
+		event.ObservedAt = time.Now()
+	}
+	if event.CreatedAt.IsZero() {
+		event.CreatedAt = time.Now()
+	}
+	payloadJSON, err := json.Marshal(supplierGroupChangeEventPayload{
+		ProviderID:   event.ProviderID,
+		ProviderCode: event.ProviderCode,
+		ProviderName: event.ProviderName,
+		EventType:    event.EventType,
+		ChangeCount:  event.ChangeCount,
+		ObservedAt:   event.ObservedAt,
+		Changes:      event.Changes,
+	})
+	if err != nil {
+		return fmt.Errorf("编码供应商分组变化事件载荷失败: %w", err)
+	}
+	err = r.db.QueryRowContext(ctx, `
+INSERT INTO supplier_group_change_events (
+  provider_id, provider_code, provider_name, sync_run_id, event_type, observed_at,
+  change_count, payload_json, created_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+RETURNING id`, event.ProviderID, event.ProviderCode, event.ProviderName, event.SyncRunID,
+		event.EventType, event.ObservedAt, event.ChangeCount, string(payloadJSON), event.CreatedAt).
+		Scan(&event.ID)
+	if err != nil {
+		return fmt.Errorf("创建供应商分组变化事件失败: %w", err)
+	}
+	return nil
+}
+
 func (r *supplierNotificationRepository) CreateDelivery(ctx context.Context, delivery *service.SupplierNotificationDeliveryRecord) error {
 	if delivery == nil {
 		return service.ErrSupplierNotificationInvalid
@@ -241,10 +300,10 @@ func (r *supplierNotificationRepository) CreateDelivery(ctx context.Context, del
 	}
 	err := r.db.QueryRowContext(ctx, `
 INSERT INTO supplier_notification_deliveries (
-  channel_id, event_id, provider_id, event_type, status, payload_json, attempt_count,
+  channel_id, event_id, cost_alert_event_id, group_change_event_id, provider_id, event_type, status, payload_json, attempt_count,
   next_attempt_at, last_error, sent_at
-) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10)
-RETURNING id, created_at, updated_at`, delivery.ChannelID, delivery.EventID, delivery.ProviderID,
+) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11)
+RETURNING id, created_at, updated_at`, delivery.ChannelID, delivery.EventID, delivery.GroupChangeEventID, delivery.ProviderID,
 		delivery.EventType, delivery.Status, string(delivery.PayloadJSON), delivery.AttemptCount,
 		delivery.NextAttemptAt, delivery.LastError, delivery.SentAt).
 		Scan(&delivery.ID, &delivery.CreatedAt, &delivery.UpdatedAt)
@@ -255,7 +314,7 @@ RETURNING id, created_at, updated_at`, delivery.ChannelID, delivery.EventID, del
 }
 
 const supplierNotificationDeliverySelect = `
-SELECT d.id, d.channel_id, c.name, d.event_id, d.provider_id, p.name, d.event_type,
+SELECT d.id, d.channel_id, c.name, d.event_id, d.group_change_event_id, d.provider_id, p.name, d.event_type,
        d.status, d.payload_json, d.attempt_count, d.next_attempt_at, d.last_error,
        d.sent_at, d.created_at, d.updated_at
 FROM supplier_notification_deliveries d
@@ -465,7 +524,7 @@ func scanSupplierNotificationSubscription(scanner supplierNotificationScanner) (
 
 func scanSupplierNotificationDelivery(scanner supplierNotificationScanner) (service.SupplierNotificationDeliveryRecord, error) {
 	var item service.SupplierNotificationDeliveryRecord
-	err := scanner.Scan(&item.ID, &item.ChannelID, &item.ChannelName, &item.EventID, &item.ProviderID,
+	err := scanner.Scan(&item.ID, &item.ChannelID, &item.ChannelName, &item.EventID, &item.GroupChangeEventID, &item.ProviderID,
 		&item.ProviderName, &item.EventType, &item.Status, &item.PayloadJSON, &item.AttemptCount,
 		&item.NextAttemptAt, &item.LastError, &item.SentAt, &item.CreatedAt, &item.UpdatedAt)
 	return item, err
@@ -474,7 +533,7 @@ func scanSupplierNotificationDelivery(scanner supplierNotificationScanner) (serv
 func scanSupplierNotificationDeliveryView(scanner supplierNotificationScanner) (service.SupplierNotificationDelivery, error) {
 	var item service.SupplierNotificationDelivery
 	var payloadJSON []byte
-	err := scanner.Scan(&item.ID, &item.ChannelID, &item.ChannelName, &item.EventID, &item.ProviderID,
+	err := scanner.Scan(&item.ID, &item.ChannelID, &item.ChannelName, &item.EventID, &item.GroupChangeEventID, &item.ProviderID,
 		&item.ProviderName, &item.EventType, &item.Status, &payloadJSON, &item.AttemptCount, &item.NextAttemptAt,
 		&item.LastError, &item.SentAt, &item.CreatedAt, &item.UpdatedAt)
 	return item, err

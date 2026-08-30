@@ -30,6 +30,7 @@ type supplierProviderDataRepoStub struct {
 	finishedRuns       []SupplierProviderSyncRun
 	statusUpdates      []string
 	groupStatusUpdates []string
+	groupChanges       SupplierProviderGroupChangeSummary
 	cleanupPolicy      SupplierCleanupPolicy
 	cleanupCounts      SupplierCleanupCounts
 
@@ -167,12 +168,15 @@ func (r *supplierProviderDataRepoStub) ReplaceAccounts(_ context.Context, _ int6
 	}
 	return SupplierSyncCounts{CheckedCount: len(items), UpdatedCount: len(items)}, nil
 }
-func (r *supplierProviderDataRepoStub) ReplaceGroups(_ context.Context, _ int64, items []SupplierProviderRemoteGroup, _ time.Time) (SupplierSyncCounts, error) {
+func (r *supplierProviderDataRepoStub) ReplaceGroups(_ context.Context, _ int64, items []SupplierProviderRemoteGroup, _ time.Time) (SupplierProviderGroupReplaceResult, error) {
 	r.groupsCalls++
 	if r.groupsErr != nil {
-		return SupplierSyncCounts{}, r.groupsErr
+		return SupplierProviderGroupReplaceResult{}, r.groupsErr
 	}
-	return SupplierSyncCounts{CheckedCount: len(items), UpdatedCount: len(items)}, nil
+	return SupplierProviderGroupReplaceResult{
+		Counts:  SupplierSyncCounts{CheckedCount: len(items), UpdatedCount: len(items)},
+		Changes: r.groupChanges,
+	}, nil
 }
 func (r *supplierProviderDataRepoStub) UpdateBalance(context.Context, int64, float64, time.Time) error {
 	r.balanceCalls++

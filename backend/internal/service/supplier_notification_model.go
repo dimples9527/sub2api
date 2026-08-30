@@ -106,36 +106,53 @@ type SupplierNotificationSubscriptionInput struct {
 }
 
 type SupplierNotificationDelivery struct {
-	ID            int64      `json:"id"`
-	ChannelID     int64      `json:"channel_id"`
-	ChannelName   string     `json:"channel_name"`
-	EventID       *int64     `json:"event_id,omitempty"`
-	ProviderID    int64      `json:"provider_id"`
-	ProviderName  string     `json:"provider_name"`
-	EventType     string     `json:"event_type"`
-	Status        string     `json:"status"`
-	AttemptCount  int        `json:"attempt_count"`
-	NextAttemptAt time.Time  `json:"next_attempt_at"`
-	LastError     string     `json:"last_error,omitempty"`
-	SentAt        *time.Time `json:"sent_at,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	ID                 int64      `json:"id"`
+	ChannelID          int64      `json:"channel_id"`
+	ChannelName        string     `json:"channel_name"`
+	EventID            *int64     `json:"event_id,omitempty"`
+	GroupChangeEventID *int64     `json:"group_change_event_id,omitempty"`
+	ProviderID         int64      `json:"provider_id"`
+	ProviderName       string     `json:"provider_name"`
+	EventType          string     `json:"event_type"`
+	Status             string     `json:"status"`
+	AttemptCount       int        `json:"attempt_count"`
+	NextAttemptAt      time.Time  `json:"next_attempt_at"`
+	LastError          string     `json:"last_error,omitempty"`
+	SentAt             *time.Time `json:"sent_at,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
 // SupplierNotificationEventPayload 是余额预警通知的统一消息载荷。
 // 载荷会写入投递日志，但不会包含渠道密钥、SMTP 密码或代理密码。
 type SupplierNotificationEventPayload struct {
-	EventID      *int64          `json:"event_id,omitempty"`
-	ProviderID   int64           `json:"provider_id"`
-	ProviderCode string          `json:"provider_code"`
-	ProviderName string          `json:"provider_name"`
-	EventType    string          `json:"event_type"`
-	Status       string          `json:"status"`
-	Balance      decimal.Decimal `json:"balance"`
-	Threshold    decimal.Decimal `json:"threshold"`
-	ObservedAt   time.Time       `json:"observed_at"`
-	ResolvedAt   *time.Time      `json:"resolved_at,omitempty"`
-	Test         bool            `json:"test,omitempty"`
+	EventID            *int64                              `json:"event_id,omitempty"`
+	GroupChangeEventID *int64                              `json:"group_change_event_id,omitempty"`
+	ProviderID         int64                               `json:"provider_id"`
+	ProviderCode       string                              `json:"provider_code"`
+	ProviderName       string                              `json:"provider_name"`
+	EventType          string                              `json:"event_type"`
+	Status             string                              `json:"status"`
+	Balance            decimal.Decimal                     `json:"balance"`
+	Threshold          decimal.Decimal                     `json:"threshold"`
+	ObservedAt         time.Time                           `json:"observed_at"`
+	ResolvedAt         *time.Time                          `json:"resolved_at,omitempty"`
+	GroupChanges       *SupplierProviderGroupChangeSummary `json:"group_changes,omitempty"`
+	Test               bool                                `json:"test,omitempty"`
+}
+
+// SupplierGroupChangeEvent 表示一次供应商分组同步产生的汇总变化事件。
+type SupplierGroupChangeEvent struct {
+	ID           int64
+	ProviderID   int64
+	ProviderCode string
+	ProviderName string
+	SyncRunID    *int64
+	EventType    string
+	Changes      SupplierProviderGroupChangeSummary
+	ChangeCount  int
+	ObservedAt   time.Time
+	CreatedAt    time.Time
 }
 
 type SupplierNotificationDeliveryAttempt struct {
@@ -167,21 +184,22 @@ type SupplierNotificationDeliveryListResult struct {
 }
 
 type SupplierNotificationDeliveryRecord struct {
-	ID            int64
-	ChannelID     int64
-	ChannelName   string
-	EventID       *int64
-	ProviderID    int64
-	ProviderName  string
-	EventType     string
-	Status        string
-	PayloadJSON   []byte
-	AttemptCount  int
-	NextAttemptAt time.Time
-	LastError     string
-	SentAt        *time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID                 int64
+	ChannelID          int64
+	ChannelName        string
+	EventID            *int64
+	GroupChangeEventID *int64
+	ProviderID         int64
+	ProviderName       string
+	EventType          string
+	Status             string
+	PayloadJSON        []byte
+	AttemptCount       int
+	NextAttemptAt      time.Time
+	LastError          string
+	SentAt             *time.Time
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 type SupplierNotificationRepository interface {
@@ -195,6 +213,7 @@ type SupplierNotificationRepository interface {
 	DeleteSubscription(ctx context.Context, id int64) error
 	ListMatchingSubscriptions(ctx context.Context, channelID int64, providerID int64, eventType string) ([]SupplierNotificationSubscription, error)
 	ClaimCooldown(ctx context.Context, channelID, providerID int64, eventType string, now, expiresAt time.Time) (bool, error)
+	CreateGroupChangeEvent(ctx context.Context, event *SupplierGroupChangeEvent) error
 	CreateDelivery(ctx context.Context, delivery *SupplierNotificationDeliveryRecord) error
 	GetDelivery(ctx context.Context, id int64) (*SupplierNotificationDeliveryRecord, error)
 	ListDueDeliveries(ctx context.Context, now time.Time, limit int) ([]SupplierNotificationDeliveryRecord, error)
@@ -214,4 +233,9 @@ type SupplierNotificationSendResult struct {
 // SupplierNotificationSender 负责向单个已启用渠道发送消息。
 type SupplierNotificationSender interface {
 	Send(ctx context.Context, channel SupplierNotificationChannel, payload SupplierNotificationEventPayload) (SupplierNotificationSendResult, error)
+}
+
+// SupplierGroupChangeNotifier 负责发送供应商分组变化通知。
+type SupplierGroupChangeNotifier interface {
+	DispatchGroupChanged(ctx context.Context, event SupplierGroupChangeEvent) error
 }

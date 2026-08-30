@@ -109,3 +109,59 @@ func TestSupplierNotificationSenderDoesNotLeakSecretsInError(t *testing.T) {
 		t.Fatalf("error leaks secret: %v", err)
 	}
 }
+
+func TestSupplierNotificationMessageIncludesGroupChangesInFixedOrder(t *testing.T) {
+	changes := SupplierProviderGroupChangeSummary{
+		Added:       []SupplierProviderGroupChange{{UpstreamKey: "vip-new", NewRateMultiplier: 1.2}},
+		Removed:     []SupplierProviderGroupChange{{UpstreamKey: "old-group", OldRateMultiplier: 1}},
+		RateChanged: []SupplierProviderGroupChange{{UpstreamKey: "vip-pro", OldRateMultiplier: 1.5, NewRateMultiplier: 1.8}},
+		NameChanged: []SupplierProviderGroupChange{{UpstreamKey: "group-key-001", OldName: "企业客户组", NewName: "企业高级客户组"}},
+	}
+
+	message := supplierNotificationMessage(SupplierNotificationEventPayload{
+		ProviderName: "供应商甲",
+		EventType:    SupplierGroupChangeEventType,
+		GroupChanges: &changes,
+	})
+
+	for _, expected := range []string{
+		"供应商「供应商甲」分组发生变化",
+		"新增分组：",
+		"- vip-new，倍率 1.2",
+		"删除分组：",
+		"- old-group，原倍率 1",
+		"倍率变化：",
+		"- vip-pro：1.5 → 1.8",
+		"名称变化：",
+		"- group-key-001：企业客户组 → 企业高级客户组",
+	} {
+		if !strings.Contains(message, expected) {
+			t.Fatalf("message missing %q: %s", expected, message)
+		}
+	}
+	for _, section := range []string{"新增分组：", "删除分组：", "倍率变化：", "名称变化："} {
+		if strings.Index(message, section) < 0 {
+			t.Fatalf("message missing section %q: %s", section, message)
+		}
+	}
+	if !(strings.Index(message, "新增分组：") < strings.Index(message, "删除分组：") &&
+		strings.Index(message, "删除分组：") < strings.Index(message, "倍率变化：") &&
+		strings.Index(message, "倍率变化：") < strings.Index(message, "名称变化：")) {
+		t.Fatalf("group change sections are not in the expected order: %s", message)
+	}
+}
+
+func TestSupplierNotificationMessageOmitsEmptyGroupChangeSections(t *testing.T) {
+	changes := SupplierProviderGroupChangeSummary{
+		Added: []SupplierProviderGroupChange{{UpstreamKey: "new", NewRateMultiplier: 1.2}},
+	}
+	message := supplierNotificationMessage(SupplierNotificationEventPayload{
+		ProviderName: "供应商甲",
+		EventType:    SupplierGroupChangeEventType,
+		GroupChanges: &changes,
+	})
+
+	if strings.Contains(message, "删除分组：") || strings.Contains(message, "倍率变化：") || strings.Contains(message, "名称变化：") {
+		t.Fatalf("message contains empty group change section: %s", message)
+	}
+}

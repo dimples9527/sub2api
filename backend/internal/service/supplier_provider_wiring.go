@@ -45,6 +45,7 @@ func ProvideSupplierProviderSyncService(
 	costSourceService *SupplierCostSourceConfigService,
 	costReviewService *SupplierProviderCostReviewService,
 	costAlertHandler SupplierCostAlertHandler,
+	groupChangeNotifier SupplierGroupChangeNotifier,
 ) *SupplierProviderSyncService {
 	svc := NewSupplierProviderSyncService(providerRepo, dataRepo, remote, encryptor, syncLock, rechargeRepo)
 	svc.SetGroupMatcher(groupMatcher)
@@ -52,6 +53,7 @@ func ProvideSupplierProviderSyncService(
 	svc.SetCostSourceResolver(costSourceService)
 	svc.SetCostReviewService(costReviewService)
 	svc.SetCostAlertHandler(costAlertHandler)
+	svc.SetGroupChangeNotifier(groupChangeNotifier)
 	return svc
 }
 

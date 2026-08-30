@@ -324,12 +324,18 @@ func supplierNotificationEventTypeText(eventType string) string {
 		return "成本超额"
 	case SupplierCostAlertEventRecovered:
 		return "成本恢复"
+	case SupplierGroupChangeEventType:
+		return "分组变化"
 	default:
 		return "余额不足"
 	}
 }
 
 func supplierNotificationMessage(payload SupplierNotificationEventPayload) string {
+	if payload.EventType == SupplierGroupChangeEventType {
+		return supplierGroupChangeNotificationMessage(payload)
+	}
+
 	lines := []string{
 		"供应商通知",
 		"类型: " + supplierNotificationEventTypeText(payload.EventType),
@@ -347,6 +353,40 @@ func supplierNotificationMessage(payload SupplierNotificationEventPayload) strin
 	}
 	lines = append(lines, "时间: "+payload.ObservedAt.Format(time.RFC3339))
 	return strings.Join(lines, "\n")
+}
+
+func supplierGroupChangeNotificationMessage(payload SupplierNotificationEventPayload) string {
+	lines := []string{"供应商「" + payload.ProviderName + "」分组发生变化"}
+	if payload.GroupChanges == nil {
+		return strings.Join(lines, "\n")
+	}
+
+	appendChanges := func(title string, changes []SupplierProviderGroupChange, format func(SupplierProviderGroupChange) string) {
+		if len(changes) == 0 {
+			return
+		}
+		lines = append(lines, "", title)
+		for _, change := range changes {
+			lines = append(lines, "- "+format(change))
+		}
+	}
+	appendChanges("新增分组：", payload.GroupChanges.Added, func(change SupplierProviderGroupChange) string {
+		return change.UpstreamKey + "，倍率 " + formatSupplierNotificationRate(change.NewRateMultiplier)
+	})
+	appendChanges("删除分组：", payload.GroupChanges.Removed, func(change SupplierProviderGroupChange) string {
+		return change.UpstreamKey + "，原倍率 " + formatSupplierNotificationRate(change.OldRateMultiplier)
+	})
+	appendChanges("倍率变化：", payload.GroupChanges.RateChanged, func(change SupplierProviderGroupChange) string {
+		return change.UpstreamKey + "：" + formatSupplierNotificationRate(change.OldRateMultiplier) + " → " + formatSupplierNotificationRate(change.NewRateMultiplier)
+	})
+	appendChanges("名称变化：", payload.GroupChanges.NameChanged, func(change SupplierProviderGroupChange) string {
+		return change.UpstreamKey + "：" + change.OldName + " → " + change.NewName
+	})
+	return strings.Join(lines, "\n")
+}
+
+func formatSupplierNotificationRate(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
 func formatSupplierNotificationEmail(config SupplierNotificationEmailConfig, payload SupplierNotificationEventPayload) string {

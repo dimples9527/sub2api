@@ -1508,14 +1508,40 @@ WHERE provider_id=$1`, providerID, validCount, schedulableCount); err != nil {
 	return counts, nil
 }
 
-func (r *supplierProviderDataRepository) ReplaceGroups(ctx context.Context, providerID int64, items []service.SupplierProviderRemoteGroup, seenAt time.Time) (service.SupplierSyncCounts, error) {
+func (r *supplierProviderDataRepository) ReplaceGroups(ctx context.Context, providerID int64, items []service.SupplierProviderRemoteGroup, seenAt time.Time) (service.SupplierProviderGroupReplaceResult, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return service.SupplierSyncCounts{}, fmt.Errorf("begin supplier group replace: %w", err)
+		return service.SupplierProviderGroupReplaceResult{}, fmt.Errorf("begin supplier group replace: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	counts := service.SupplierSyncCounts{CheckedCount: len(items)}
+	previousRows, err := tx.QueryContext(ctx, `
+SELECT upstream_group_key, name, rate_multiplier, active
+FROM supplier_provider_groups
+WHERE provider_id = $1
+FOR UPDATE`, providerID)
+	if err != nil {
+		return service.SupplierProviderGroupReplaceResult{}, fmt.Errorf("query previous supplier groups: %w", err)
+	}
+	previous := make([]service.SupplierProviderGroupSnapshot, 0)
+	for previousRows.Next() {
+		var snapshot service.SupplierProviderGroupSnapshot
+		if err := previousRows.Scan(&snapshot.UpstreamKey, &snapshot.Name, &snapshot.RateMultiplier, &snapshot.Active); err != nil {
+			_ = previousRows.Close()
+			return service.SupplierProviderGroupReplaceResult{}, fmt.Errorf("scan previous supplier group: %w", err)
+		}
+		previous = append(previous, snapshot)
+	}
+	if err := previousRows.Err(); err != nil {
+		_ = previousRows.Close()
+		return service.SupplierProviderGroupReplaceResult{}, fmt.Errorf("iterate previous supplier groups: %w", err)
+	}
+	if err := previousRows.Close(); err != nil {
+		return service.SupplierProviderGroupReplaceResult{}, fmt.Errorf("close previous supplier groups: %w", err)
+	}
+
+	current := make([]service.SupplierProviderGroupSnapshot, 0, len(items))
 	keys := make([]string, 0, len(items))
 	for _, item := range items {
 		key := strings.TrimSpace(item.Key)
@@ -1528,6 +1554,12 @@ func (r *supplierProviderDataRepository) ReplaceGroups(ctx context.Context, prov
 			continue
 		}
 		keys = append(keys, key)
+		current = append(current, service.SupplierProviderGroupSnapshot{
+			UpstreamKey:    key,
+			Name:           name,
+			RateMultiplier: item.RateMultiplier,
+			Active:         true,
+		})
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO supplier_provider_groups (
   provider_id, upstream_group_key, name, rate_multiplier, raw_status,
@@ -1536,7 +1568,7 @@ INSERT INTO supplier_provider_groups (
 ON CONFLICT (provider_id, upstream_group_key) DO UPDATE SET
   name=EXCLUDED.name, rate_multiplier=EXCLUDED.rate_multiplier, raw_status=EXCLUDED.raw_status,
   active=TRUE, last_seen_at=EXCLUDED.last_seen_at, inactive_at=NULL, updated_at=EXCLUDED.updated_at`, providerID, key, name, item.RateMultiplier, strings.TrimSpace(item.RawStatus), seenAt); err != nil {
-			return service.SupplierSyncCounts{}, fmt.Errorf("upsert supplier group: %w", err)
+			return service.SupplierProviderGroupReplaceResult{}, fmt.Errorf("upsert supplier group: %w", err)
 		}
 		counts.UpdatedCount++
 	}
@@ -1544,15 +1576,18 @@ ON CONFLICT (provider_id, upstream_group_key) DO UPDATE SET
 UPDATE supplier_provider_groups SET active = FALSE, inactive_at = $3, updated_at = $3
 WHERE provider_id = $1 AND active = TRUE AND NOT (upstream_group_key = ANY($2))`, providerID, pq.Array(keys), seenAt)
 	if err != nil {
-		return service.SupplierSyncCounts{}, fmt.Errorf("deactivate missing supplier groups: %w", err)
+		return service.SupplierProviderGroupReplaceResult{}, fmt.Errorf("deactivate missing supplier groups: %w", err)
 	}
 	if affected, _ := result.RowsAffected(); affected > 0 {
 		counts.SkippedCount += int(affected)
 	}
 	if err := tx.Commit(); err != nil {
-		return service.SupplierSyncCounts{}, fmt.Errorf("commit supplier group replace: %w", err)
+		return service.SupplierProviderGroupReplaceResult{}, fmt.Errorf("commit supplier group replace: %w", err)
 	}
-	return counts, nil
+	return service.SupplierProviderGroupReplaceResult{
+		Counts:  counts,
+		Changes: service.BuildSupplierProviderGroupChangeSummary(previous, current),
+	}, nil
 }
 
 func (r *supplierProviderDataRepository) UpdateBalance(ctx context.Context, providerID int64, balance float64, seenAt time.Time) error {

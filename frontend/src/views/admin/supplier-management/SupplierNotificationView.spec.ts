@@ -64,4 +64,9 @@ describe('SupplierNotificationView', () => {
     expect(source).toContain("import { useAppStore } from '@/stores/app'")
     expect(source).not.toContain('data-test="supplier-notification-toast"')
   })
+  it('supports supplier group change subscriptions and delivery labels', () => {
+    expect(source).toContain("'group_changed'")
+    expect(source).toContain("{ value: 'group_changed', label: '分组变化' }")
+    expect(source).toContain("eventType === 'group_changed'")
+  })
 })

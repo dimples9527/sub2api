@@ -2,7 +2,7 @@ import { apiClient } from '../client'
 import type { BasePaginationResponse } from '@/types'
 
 export type SupplierNotificationChannelType = 'feishu' | 'email'
-export type SupplierNotificationEventType = 'balance_low' | 'balance_recovered' | 'cost_overrun' | 'cost_recovered'
+export type SupplierNotificationEventType = 'balance_low' | 'balance_recovered' | 'cost_overrun' | 'cost_recovered' | 'group_changed'
 export type SupplierNotificationDeliveryStatus = 'pending' | 'sending' | 'delivered' | 'failed'
 
 export interface SupplierNotificationFeishuConfigInput {
@@ -77,6 +77,7 @@ export interface SupplierNotificationDelivery {
   channel_id: number
   channel_name: string
   event_id?: number | null
+  group_change_event_id?: number | null
   provider_id: number
   provider_name: string
   event_type: SupplierNotificationEventType | string

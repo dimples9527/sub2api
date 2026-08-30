@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <SupplierModuleLayout>
     <header class="sp-page-head">
       <div>
@@ -110,7 +110,7 @@
       <div v-if="deliveryDetail" class="sp-delivery-detail sp-notification-delivery-dialog">
         <section class="sp-detail-summary"><div><span>渠道</span><strong>{{ deliveryDetail.channel_name }}</strong></div><div><span>供应商</span><strong>{{ deliveryDetail.provider_name }}</strong></div><div><span>事件</span><strong>{{ eventTypeLabel(deliveryDetail.event_type) }}</strong></div><div><span>状态</span><strong class="sp-status" :class="deliveryStatusTone(deliveryDetail.status)">{{ deliveryStatusLabel(deliveryDetail.status) }}</strong></div><div><span>尝试次数</span><strong>{{ deliveryDetail.attempt_count }} 次</strong></div><div><span>创建时间</span><strong>{{ formatDateTime(deliveryDetail.created_at) }}</strong></div></section>
         <div v-if="deliveryDetail.last_error" class="sp-alert sp-error-line">最近失败：{{ deliveryDetail.last_error }}</div>
-        <section class="sp-detail-section"><header class="sp-detail-section-head"><h3>投递载荷</h3><span>仅展示余额事件内容，不包含渠道凭据</span></header><pre class="sp-payload">{{ formatPayload(deliveryDetail.payload) }}</pre></section>
+        <section class="sp-detail-section"><header class="sp-detail-section-head"><h3>投递载荷</h3><span>仅展示事件内容，不包含渠道凭据</span></header><pre class="sp-payload">{{ formatPayload(deliveryDetail.payload) }}</pre></section>
         <section class="sp-detail-section"><header class="sp-detail-section-head"><h3>投递尝试</h3><span>{{ deliveryAttempts.length }} 条记录</span></header><DataTable :columns="attemptColumns" :data="deliveryAttempts" :loading="deliveryAttemptsLoading" row-key="id"><template #cell-attempt_number="{ row: attempt }">第 {{ attempt.attempt_number }} 次</template><template #cell-status="{ row: attempt }"><span class="sp-status" :class="attempt.status === 'delivered' ? 'good' : attempt.status === 'failed' ? 'bad' : 'info'">{{ deliveryStatusLabel(attempt.status) }}</span></template><template #cell-http_status="{ row: attempt }">{{ attempt.http_status || '—' }}</template><template #cell-error_message="{ row: attempt }">{{ attempt.error_message || attempt.response_body || '—' }}</template><template #cell-attempted_at="{ row: attempt }">{{ formatDateTime(attempt.attempted_at) }}</template><template #empty><div class="sp-empty-state">暂无投递尝试记录。</div></template></DataTable></section>
       </div>
       <div v-else class="sp-empty-state sp-notification-delivery-dialog">正在加载投递详情…</div>
@@ -271,6 +271,7 @@ const eventTypeOptions: SelectOption[] = [
   { value: 'balance_recovered', label: '余额恢复' },
   { value: 'cost_overrun', label: '成本超额' },
   { value: 'cost_recovered', label: '成本恢复' },
+  { value: 'group_changed', label: '分组变化' },
 ]
 
 const deliveryStatusOptions: SelectOption[] = [
@@ -720,11 +721,13 @@ function eventTypeLabel(eventType: string): string {
   if (eventType === 'balance_recovered') return '余额恢复'
   if (eventType === 'cost_overrun') return '成本超额'
   if (eventType === 'cost_recovered') return '成本恢复'
+  if (eventType === 'group_changed') return '分组变化'
   return '余额不足'
 }
 
 function eventTypeTagTone(eventType: string): string {
   if (eventType === 'balance_recovered' || eventType === 'cost_recovered') return 'good'
+  if (eventType === 'group_changed') return 'info'
   return 'warn'
 }
 

@@ -496,6 +496,15 @@ func TestSupplierProviderDataRepositoryReplaceGroupsUpsertsAndDeactivatesMissing
 	seenAt := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
 
 	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+SELECT upstream_group_key, name, rate_multiplier, active
+FROM supplier_provider_groups
+WHERE provider_id = $1
+FOR UPDATE`)).
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"upstream_group_key", "name", "rate_multiplier", "active"}).
+			AddRow("group-1", "VIP", 2.5, true).
+			AddRow("group-removed", "Old", 1.5, true))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO supplier_provider_groups")).
 		WithArgs(int64(42), "group-1", "VIP", 2.5, "active", seenAt).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -504,13 +513,15 @@ func TestSupplierProviderDataRepositoryReplaceGroupsUpsertsAndDeactivatesMissing
 		WillReturnResult(sqlmock.NewResult(0, 2))
 	mock.ExpectCommit()
 
-	counts, err := repo.ReplaceGroups(context.Background(), 42, []service.SupplierProviderRemoteGroup{
+	result, err := repo.ReplaceGroups(context.Background(), 42, []service.SupplierProviderRemoteGroup{
 		{Key: "group-1", Name: "VIP", RateMultiplier: 2.5, RawStatus: "active"},
 	}, seenAt)
 
 	require.NoError(t, err)
-	require.Equal(t, 1, counts.CheckedCount)
-	require.Equal(t, 2, counts.SkippedCount)
+	require.Equal(t, 1, result.Counts.CheckedCount)
+	require.Equal(t, 2, result.Counts.SkippedCount)
+	require.Len(t, result.Changes.Removed, 1)
+	require.Equal(t, "group-removed", result.Changes.Removed[0].UpstreamKey)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
