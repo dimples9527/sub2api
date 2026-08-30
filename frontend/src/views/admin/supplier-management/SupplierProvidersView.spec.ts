@@ -171,6 +171,14 @@ async function mountSupplierProviders() {
   await flushPromises()
   return wrapper
 }
+
+type ProvidersWrapper = Awaited<ReturnType<typeof mountSupplierProviders>>
+
+async function openCostDialog(wrapper: ProvidersWrapper) {
+  await wrapper.get('[data-test="supplier-cost-dialog-open"]').trigger('click')
+  await flushPromises()
+}
+
 describe('SupplierProvidersView payload normalization', () => {
   let providerRows: ReturnType<typeof createProviderRows>
 
@@ -664,6 +672,7 @@ describe('SupplierProvidersView payload normalization', () => {
     })
     expect(wrapper.get('[data-test="supplier-health-panel"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="supplier-health-tone"]').text()).toContain('稳定')
+    await openCostDialog(wrapper)
     expect(wrapper.get('[data-test="supplier-cost-trend"]').text()).toContain('成本对比')
     expect(wrapper.get('[data-test="supplier-cost-trend"]').text()).toContain('上游成本')
     expect(wrapper.get('[data-test="supplier-cost-trend"]').text()).toContain('本地成本')
@@ -684,6 +693,7 @@ describe('SupplierProvidersView payload normalization', () => {
 
   it('renders grouped upstream and local cost bars for each supplier', async () => {
     const wrapper = await mountSupplierProviders()
+    await openCostDialog(wrapper)
 
     const chart = wrapper.get('[data-test="supplier-cost-breakdown-chart"]')
     expect(chart.exists()).toBe(true)
@@ -700,6 +710,18 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(supplierProvidersSource).toContain('costBreakdownChartData')
     expect(supplierProvidersSource).toContain('costBreakdownChartOptions')
     expect(supplierProvidersSource).toContain('Bar')
+  })
+
+  it('opens both cost charts in a single dialog from the filter action button', async () => {
+    const wrapper = await mountSupplierProviders()
+
+    expect(wrapper.get('[data-test="supplier-cost-dialog-open"]').text()).toContain('成本分析')
+    expect(wrapper.find('[data-test="supplier-cost-trend"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="supplier-cost-breakdown-panel"]').exists()).toBe(false)
+
+    await openCostDialog(wrapper)
+    expect(wrapper.get('[data-test="supplier-cost-trend"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="supplier-cost-breakdown-panel"]').exists()).toBe(true)
   })
 
   it('shows today and historical balance/cost summary cards', async () => {
@@ -738,6 +760,7 @@ describe('SupplierProvidersView payload normalization', () => {
 
   it('places the supplier cost breakdown in a full-width panel without horizontal scrolling', async () => {
     const wrapper = await mountSupplierProviders()
+    await openCostDialog(wrapper)
 
     const breakdownPanel = wrapper.get('[data-test="supplier-cost-breakdown-panel"]')
     expect(breakdownPanel.classes()).toContain('sp-panel')
@@ -788,6 +811,7 @@ describe('SupplierProvidersView payload normalization', () => {
 
   it('switches cost trend date range and provider filter', async () => {
     const wrapper = await mountSupplierProviders()
+    await openCostDialog(wrapper)
     providerViewMocks.listCostTrends.mockClear()
 
     await wrapper.get('[data-test="supplier-cost-date-range-trigger"]').trigger('click')
@@ -811,6 +835,7 @@ describe('SupplierProvidersView payload normalization', () => {
 
   it('separates the cost breakdown date range from the cost trend chart', async () => {
     const wrapper = await mountSupplierProviders()
+    await openCostDialog(wrapper)
     providerViewMocks.listCostTrends.mockClear()
 
     const breakdownDateRange = wrapper.get('[data-test="supplier-cost-breakdown-date-range"]')
@@ -844,6 +869,7 @@ describe('SupplierProvidersView payload normalization', () => {
       breakdown: [],
     })
     const wrapper = await mountSupplierProviders()
+    await openCostDialog(wrapper)
 
     const line = wrapper.findComponent({ name: 'Line' })
     expect(line.exists()).toBe(true)
@@ -856,6 +882,7 @@ describe('SupplierProvidersView payload normalization', () => {
 
   it('shows the saved threshold and only persists an edited value after clicking save', async () => {
     const wrapper = await mountSupplierProviders()
+    await openCostDialog(wrapper)
     const thresholdInput = wrapper.get('[data-test="supplier-cost-deviation-threshold"] input')
     const savedThreshold = wrapper.get('[data-test="supplier-cost-deviation-current"]')
     const saveButton = wrapper.get('[data-test="supplier-cost-deviation-save"]')
@@ -882,6 +909,7 @@ describe('SupplierProvidersView payload normalization', () => {
 
   it('allows a zero threshold and rejects negative or empty input', async () => {
     const wrapper = await mountSupplierProviders()
+    await openCostDialog(wrapper)
     const thresholdInput = wrapper.get('[data-test="supplier-cost-deviation-threshold"] input')
     const saveButton = wrapper.get('[data-test="supplier-cost-deviation-save"]')
     providerViewMocks.updateCostDeviationSettings.mockClear()
@@ -908,6 +936,7 @@ describe('SupplierProvidersView payload normalization', () => {
   })
   it('fetches cost for the selected provider on the chosen date', async () => {
     const wrapper = await mountSupplierProviders()
+    await openCostDialog(wrapper)
     providerViewMocks.listCostTrends.mockClear()
     providerViewMocks.streamSupplierProviderSync.mockClear()
     providerViewMocks.showSuccess.mockClear()
@@ -951,6 +980,7 @@ describe('SupplierProvidersView payload normalization', () => {
       ],
     })
     const wrapper = await mountSupplierProviders()
+    await openCostDialog(wrapper)
 
     expect(wrapper.get('[data-test="supplier-cost-warnings"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="supplier-cost-warning-item"]').text()).toContain('已按本地成本展示')
@@ -960,6 +990,7 @@ describe('SupplierProvidersView payload normalization', () => {
 
   it('keeps the supplier cost breakdown date control in the left heading group', async () => {
     const wrapper = await mountSupplierProviders()
+    await openCostDialog(wrapper)
 
     const header = wrapper.get('[data-test="supplier-cost-breakdown-panel"] .sp-panel-head')
     const leftGroup = header.get('[data-test="supplier-cost-breakdown-head-left"]')
@@ -971,6 +1002,7 @@ describe('SupplierProvidersView payload normalization', () => {
 
   it('places the shared cost date range control in the cost chart heading', async () => {
     const wrapper = await mountSupplierProviders()
+    await openCostDialog(wrapper)
 
     const trend = wrapper.get('[data-test="supplier-cost-trend"]')
     const controls = trend.get('[data-test="supplier-cost-controls"]')
@@ -1002,6 +1034,7 @@ describe('SupplierProvidersView payload normalization', () => {
 
   it('backfills upstream costs for the selected range before reloading trends', async () => {
     const wrapper = await mountSupplierProviders()
+    await openCostDialog(wrapper)
     providerViewMocks.listCostTrends.mockClear()
     providerViewMocks.backfillCostTrends.mockClear()
     providerViewMocks.showSuccess.mockClear()

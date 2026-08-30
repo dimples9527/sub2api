@@ -40,6 +40,13 @@
           <button class="sp-button sp-filter-action-maintain" type="button" @click="openTypeManager">类型维护</button>
           <button class="sp-button sp-filter-action-type" type="button" @click="openCreateProviderType">新增供应商类型</button>
           <button class="sp-button primary sp-filter-action-create" type="button" @click="openCreate">新增供应商</button>
+          <button
+            class="sp-button sp-filter-action-cost"
+            type="button"
+            data-test="supplier-cost-dialog-open"
+            title="查看成本对比与按供应商拆分成本"
+            @click="openCostDialog"
+          >成本分析</button>
         </div>
       </div>
     </section>
@@ -303,176 +310,6 @@
       </aside>
     </section>
 
-    <section class="sp-panel sp-cost-trend-panel" data-test="supplier-cost-trend">
-      <header class="sp-panel-head">
-        <div class="sp-cost-trend-head-left" data-test="supplier-cost-trend-head-left">
-          <div class="sp-health-date-range-control" data-test="supplier-cost-controls">
-            <span class="sp-health-control-label">日期范围</span>
-            <div class="sp-health-date-range" data-test="supplier-cost-date-range">
-              <DateRangePicker
-                v-model:start-date="costTrendStartDate"
-                v-model:end-date="costTrendEndDate"
-                @change="onCostTrendDateRangeChange"
-              />
-            </div>
-          </div>
-          <div class="sp-panel-title">
-            <span class="sp-section-index">03</span>
-            <div>
-              <h2>成本对比</h2>
-              <span>{{ costTrendRangeLabel }} · {{ costTrendScopeLabel }} · 上游成本 / 本地成本</span>
-            </div>
-          </div>
-        </div>
-        <div class="sp-cost-trend-head-actions">
-          <div class="sp-single-day-fetch" data-test="supplier-cost-single-day-fetch">
-            <Input
-              v-model="costSingleDay"
-              type="date"
-              class="input sp-single-day-input"
-              aria-label="获取指定日期成本"
-              title="获取指定供应商在指定日期的成本"
-            />
-            <button
-              class="sp-button small"
-              type="button"
-              :disabled="costSingleDayLoading || costTrendProviderId === ''"
-              data-test="supplier-cost-single-day"
-              title="获取指定供应商指定日期的成本并刷新曲线"
-              @click="fetchSingleDayCost"
-            >{{ costSingleDayLoading ? '获取中…' : '获取指定日期成本' }}</button>
-          </div>
-          <button
-            class="sp-button small ghost"
-            type="button"
-            :disabled="costTrendLoading"
-            data-test="supplier-cost-refresh"
-            title="按当前时间范围向上游回补成本并刷新曲线（NewAPI 支持历史，Sub2API 仅当天）"
-            @click="refreshCostTrends"
-          >{{ costTrendLoading ? '回补中…' : '重新获取' }}</button>
-        </div>
-      </header>
-      <div class="sp-panel-body sp-cost-trend-body" data-test="supplier-cost-trend-body">
-        <div class="sp-health-chart-controls">
-          <div class="sp-health-provider-filter w-full sm:w-44">
-            <Select
-              v-model="costTrendProviderId"
-              class="w-full"
-              :options="costTrendProviderOptions"
-              aria-label="成本对比供应商"
-              data-test="supplier-cost-provider"
-              @update:model-value="onCostTrendProviderChange"
-            />
-          </div>
-          <div class="sp-cost-threshold-control" data-test="supplier-cost-deviation-control">
-            <span class="sp-health-control-label">偏差阈值</span>
-            <div class="sp-cost-threshold-editor">
-              <Input
-                :model-value="deviationThresholdPercent"
-                class="sp-cost-threshold-input"
-                type="number"
-                aria-label="成本偏差阈值"
-                data-test="supplier-cost-deviation-threshold"
-                @update:model-value="onDeviationThresholdInput"
-              />
-              <span class="sp-cost-threshold-unit">%</span>
-            </div>
-            <button
-              class="sp-button small primary"
-              type="button"
-              data-test="supplier-cost-deviation-save"
-              :disabled="deviationThresholdSaveLoading || !deviationThresholdDirty"
-              @click="saveCostDeviationThreshold"
-            >{{ deviationThresholdSaveLoading ? '保存中…' : '保存' }}</button>
-            <span class="sp-cost-threshold-current" data-test="supplier-cost-deviation-current" aria-live="polite">
-              当前配置：<strong>{{ formatDeviationThresholdPercent(savedDeviationThresholdPercent) }}%</strong>
-            </span>
-          </div>
-        </div>
-
-        <div class="sp-health-chart-meta">
-          <div class="sp-health-chart-legend">
-            <span class="sp-health-legend-item upstream"><i></i>上游成本</span>
-            <span class="sp-health-legend-item local"><i></i>本地成本</span>
-          </div>
-          <div class="sp-health-chart-totals">
-            <span>上游合计 <b>{{ currency(costTrendTotals.upstream) }}</b></span>
-            <span>本地合计 <b>{{ currency(costTrendTotals.local) }}</b></span>
-            <span
-              v-if="costTrendChartData"
-              class="sp-deviation-summary"
-              :class="costTrendDeviationCount ? 'warn' : 'ok'"
-              data-test="supplier-cost-deviation-summary"
-            >{{ deviationSummaryLabel }}</span>
-          </div>
-        </div>
-        <div class="sp-health-chart-canvas sp-cost-trend-canvas">
-          <Line
-            v-if="costTrendChartData"
-            :data="costTrendChartData"
-            :options="costTrendChartOptions"
-          />
-          <div v-else-if="costTrendLoading" class="sp-health-chart-empty">成本曲线加载中…</div>
-          <div v-else class="sp-health-chart-empty">暂无按天成本数据，可调整时间范围或供应商后点「重新获取」向上游回补</div>
-        </div>
-        <div v-if="costTrendWarnings.length" class="sp-cost-warnings" data-test="supplier-cost-warnings">
-          <div v-for="warn in costTrendWarnings" :key="warn.date" class="sp-cost-warning-item" data-test="supplier-cost-warning-item">
-            <span class="sp-cost-warning-date">{{ formatCostTrendLabel(warn.date) }}</span>
-            <span>{{ warn.warning }}</span>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="sp-panel sp-cost-breakdown-panel" data-test="supplier-cost-breakdown-panel">
-      <header class="sp-panel-head">
-        <div class="sp-cost-breakdown-head-left" data-test="supplier-cost-breakdown-head-left">
-          <div class="sp-health-date-range-control" data-test="supplier-cost-breakdown-controls">
-            <span class="sp-health-control-label">日期范围</span>
-            <div class="sp-health-date-range" data-test="supplier-cost-breakdown-date-range">
-              <DateRangePicker
-                v-model:start-date="costBreakdownStartDate"
-                v-model:end-date="costBreakdownEndDate"
-                @change="onCostBreakdownDateRangeChange"
-              />
-            </div>
-          </div>
-          <div class="sp-panel-title">
-            <span class="sp-section-index">04</span>
-            <div>
-              <h2>按供应商拆分成本</h2>
-              <span>{{ costBreakdownRangeLabel }} · 每个供应商并排比较上游成本和本地成本</span>
-            </div>
-          </div>
-        </div>
-        <span class="sp-cost-breakdown-count">供应商 <b>{{ costBreakdown.length }}</b> 个</span>
-      </header>
-      <div class="sp-panel-body sp-cost-breakdown-body" data-test="supplier-cost-breakdown">
-        <div class="sp-health-chart-meta">
-          <div class="sp-health-chart-legend">
-            <span class="sp-health-legend-item upstream"><i></i>上游成本</span>
-            <span class="sp-health-legend-item local"><i></i>本地成本</span>
-          </div>
-        </div>
-        <div class="sp-health-breakdown-chart" data-test="supplier-cost-breakdown-chart-container">
-          <Bar
-            v-if="costBreakdownChartData"
-            :data="costBreakdownChartData"
-            :options="costBreakdownChartOptions"
-            data-test="supplier-cost-breakdown-chart"
-          />
-          <div v-else-if="costBreakdownLoading" class="sp-health-chart-empty">供应商成本加载中…</div>
-          <div v-else class="sp-health-chart-empty">暂无供应商成本数据，可调整时间范围后重试</div>
-        </div>
-        <div v-if="costBreakdownWarnings.length" class="sp-cost-warnings" data-test="supplier-cost-breakdown-warnings">
-          <div v-for="item in costBreakdownWarnings" :key="item.provider_id" class="sp-cost-warning-item" data-test="supplier-cost-breakdown-warning-item">
-            <span class="sp-cost-warning-date">{{ item.provider_name }}</span>
-            <span>{{ item.cost_warning }}</span>
-          </div>
-        </div>
-      </div>
-    </section>
-
     <div class="sp-footer-note">
       <span>数据来源：新供应商管理接口</span>
       <span>编辑时密码留空会保留原凭据</span>
@@ -565,6 +402,181 @@
         </div>
       </template>
     </SupplierDrawer>
+
+    <BaseDialog
+      :show="costDialogVisible"
+      title="成本分析"
+      width="full"
+      @close="closeCostDialog"
+    >
+      <section class="sp-panel sp-cost-trend-panel sp-cost-dialog supplier-management-page" data-test="supplier-cost-trend">
+        <header class="sp-panel-head">
+          <div class="sp-cost-trend-head-left" data-test="supplier-cost-trend-head-left">
+            <div class="sp-health-date-range-control" data-test="supplier-cost-controls">
+              <span class="sp-health-control-label">日期范围</span>
+              <div class="sp-health-date-range" data-test="supplier-cost-date-range">
+                <DateRangePicker
+                  v-model:start-date="costTrendStartDate"
+                  v-model:end-date="costTrendEndDate"
+                  @change="onCostTrendDateRangeChange"
+                />
+              </div>
+            </div>
+            <div class="sp-panel-title">
+              <div>
+                <h2>成本对比</h2>
+                <span>{{ costTrendRangeLabel }} · {{ costTrendScopeLabel }} · 上游成本 / 本地成本</span>
+              </div>
+            </div>
+          </div>
+          <div class="sp-cost-trend-head-actions">
+            <div class="sp-single-day-fetch" data-test="supplier-cost-single-day-fetch">
+              <Input
+                v-model="costSingleDay"
+                type="date"
+                class="input sp-single-day-input"
+                aria-label="获取指定日期成本"
+                title="获取指定供应商在指定日期的成本"
+              />
+              <button
+                class="sp-button small"
+                type="button"
+                :disabled="costSingleDayLoading || costTrendProviderId === ''"
+                data-test="supplier-cost-single-day"
+                title="获取指定供应商指定日期的成本并刷新曲线"
+                @click="fetchSingleDayCost"
+              >{{ costSingleDayLoading ? '获取中…' : '获取指定日期成本' }}</button>
+            </div>
+            <button
+              class="sp-button small ghost"
+              type="button"
+              :disabled="costTrendLoading"
+              data-test="supplier-cost-refresh"
+              title="按当前时间范围向上游回补成本并刷新曲线（NewAPI 支持历史，Sub2API 仅当天）"
+              @click="refreshCostTrends"
+            >{{ costTrendLoading ? '回补中…' : '重新获取' }}</button>
+          </div>
+        </header>
+        <div class="sp-panel-body sp-cost-trend-body" data-test="supplier-cost-trend-body">
+          <div class="sp-health-chart-controls">
+            <div class="sp-health-provider-filter w-full sm:w-44">
+              <Select
+                v-model="costTrendProviderId"
+                class="w-full"
+                :options="costTrendProviderOptions"
+                aria-label="成本对比供应商"
+                data-test="supplier-cost-provider"
+                @update:model-value="onCostTrendProviderChange"
+              />
+            </div>
+            <div class="sp-cost-threshold-control" data-test="supplier-cost-deviation-control">
+              <span class="sp-health-control-label">偏差阈值</span>
+              <div class="sp-cost-threshold-editor">
+                <Input
+                  :model-value="deviationThresholdPercent"
+                  class="sp-cost-threshold-input"
+                  type="number"
+                  aria-label="成本偏差阈值"
+                  data-test="supplier-cost-deviation-threshold"
+                  @update:model-value="onDeviationThresholdInput"
+                />
+                <span class="sp-cost-threshold-unit">%</span>
+              </div>
+              <button
+                class="sp-button small primary"
+                type="button"
+                data-test="supplier-cost-deviation-save"
+                :disabled="deviationThresholdSaveLoading || !deviationThresholdDirty"
+                @click="saveCostDeviationThreshold"
+              >{{ deviationThresholdSaveLoading ? '保存中…' : '保存' }}</button>
+              <span class="sp-cost-threshold-current" data-test="supplier-cost-deviation-current" aria-live="polite">
+                当前配置：<strong>{{ formatDeviationThresholdPercent(savedDeviationThresholdPercent) }}%</strong>
+              </span>
+            </div>
+          </div>
+
+          <div class="sp-health-chart-meta">
+            <div class="sp-health-chart-legend">
+              <span class="sp-health-legend-item upstream"><i></i>上游成本</span>
+              <span class="sp-health-legend-item local"><i></i>本地成本</span>
+            </div>
+            <div class="sp-health-chart-totals">
+              <span>上游合计 <b>{{ currency(costTrendTotals.upstream) }}</b></span>
+              <span>本地合计 <b>{{ currency(costTrendTotals.local) }}</b></span>
+              <span
+                v-if="costTrendChartData"
+                class="sp-deviation-summary"
+                :class="costTrendDeviationCount ? 'warn' : 'ok'"
+                data-test="supplier-cost-deviation-summary"
+              >{{ deviationSummaryLabel }}</span>
+            </div>
+          </div>
+          <div class="sp-health-chart-canvas sp-cost-trend-canvas">
+            <Line
+              v-if="costTrendChartData"
+              :data="costTrendChartData"
+              :options="costTrendChartOptions"
+            />
+            <div v-else-if="costTrendLoading" class="sp-health-chart-empty">成本曲线加载中…</div>
+            <div v-else class="sp-health-chart-empty">暂无按天成本数据，可调整时间范围或供应商后点「重新获取」向上游回补</div>
+          </div>
+          <div v-if="costTrendWarnings.length" class="sp-cost-warnings" data-test="supplier-cost-warnings">
+            <div v-for="warn in costTrendWarnings" :key="warn.date" class="sp-cost-warning-item" data-test="supplier-cost-warning-item">
+              <span class="sp-cost-warning-date">{{ formatCostTrendLabel(warn.date) }}</span>
+              <span>{{ warn.warning }}</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="sp-panel sp-cost-breakdown-panel sp-cost-dialog supplier-management-page" data-test="supplier-cost-breakdown-panel">
+        <header class="sp-panel-head">
+          <div class="sp-cost-breakdown-head-left" data-test="supplier-cost-breakdown-head-left">
+            <div class="sp-health-date-range-control" data-test="supplier-cost-breakdown-controls">
+              <span class="sp-health-control-label">日期范围</span>
+              <div class="sp-health-date-range" data-test="supplier-cost-breakdown-date-range">
+                <DateRangePicker
+                  v-model:start-date="costBreakdownStartDate"
+                  v-model:end-date="costBreakdownEndDate"
+                  @change="onCostBreakdownDateRangeChange"
+                />
+              </div>
+            </div>
+            <div class="sp-panel-title">
+              <div>
+                <h2>按供应商拆分成本</h2>
+                <span>{{ costBreakdownRangeLabel }} · 每个供应商并排比较上游成本和本地成本</span>
+              </div>
+            </div>
+          </div>
+          <span class="sp-cost-breakdown-count">供应商 <b>{{ costBreakdown.length }}</b> 个</span>
+        </header>
+        <div class="sp-panel-body sp-cost-breakdown-body" data-test="supplier-cost-breakdown">
+          <div class="sp-health-chart-meta">
+            <div class="sp-health-chart-legend">
+              <span class="sp-health-legend-item upstream"><i></i>上游成本</span>
+              <span class="sp-health-legend-item local"><i></i>本地成本</span>
+            </div>
+          </div>
+          <div class="sp-health-breakdown-chart" data-test="supplier-cost-breakdown-chart-container">
+            <Bar
+              v-if="costBreakdownChartData"
+              :data="costBreakdownChartData"
+              :options="costBreakdownChartOptions"
+              data-test="supplier-cost-breakdown-chart"
+            />
+            <div v-else-if="costBreakdownLoading" class="sp-health-chart-empty">供应商成本加载中…</div>
+            <div v-else class="sp-health-chart-empty">暂无供应商成本数据，可调整时间范围后重试</div>
+          </div>
+          <div v-if="costBreakdownWarnings.length" class="sp-cost-warnings" data-test="supplier-cost-breakdown-warnings">
+            <div v-for="item in costBreakdownWarnings" :key="item.provider_id" class="sp-cost-warning-item" data-test="supplier-cost-breakdown-warning-item">
+              <span class="sp-cost-warning-date">{{ item.provider_name }}</span>
+              <span>{{ item.cost_warning }}</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </BaseDialog>
 
     <BaseDialog
       :show="authDialogVisible"
@@ -1185,6 +1197,7 @@ const costBreakdownEndDate = ref(costBreakdownDefaultRange.end)
 const costTrendProviderId = ref<number | ''>('')
 const costTrendLoading = ref(false)
 const costBreakdownLoading = ref(false)
+const costDialogVisible = ref(false)
 const balanceSummary = ref<SupplierProviderBalanceSummary | null>(null)
 const balanceSummaryLoading = ref(false)
 const costTrendPoints = ref<SupplierProviderCostTrendPoint[]>([])
@@ -1751,6 +1764,14 @@ async function loadCostBreakdownData() {
   } finally {
     costBreakdownLoading.value = false
   }
+}
+
+function openCostDialog() {
+  costDialogVisible.value = true
+}
+
+function closeCostDialog() {
+  costDialogVisible.value = false
 }
 
 async function onCostTrendDateRangeChange(range: { startDate: string; endDate: string; preset: string | null }) {
@@ -3036,6 +3057,18 @@ function errorMessage(err: unknown, fallback: string): string {
   color: #fff;
 }
 
+.sp-provider-filter-actions .sp-filter-action-cost {
+  border-color: color-mix(in srgb, var(--sp-orange, #ea580c) 42%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-orange, #ea580c) 10%, var(--sp-panel));
+  color: var(--sp-orange, #ea580c);
+}
+
+.sp-provider-filter-actions .sp-filter-action-cost:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--sp-orange, #ea580c) 62%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-orange, #ea580c) 18%, var(--sp-panel));
+  color: color-mix(in srgb, var(--sp-orange, #ea580c) 88%, #7c2d12);
+}
+
 /* 统计卡：页面层压缩窄屏高度，并保持 2 列（覆盖共享样式在 460px 的单列） */
 .sp-metric-grid {
   gap: 0.75rem;
@@ -4168,8 +4201,31 @@ function errorMessage(err: unknown, fallback: string): string {
   padding: 0.75rem;
 }
 
-.sp-cost-trend-panel {
-  margin-bottom: 1rem;
+/* 弹窗根节点复用 supplier-management-page 提供 --sp-* 变量，并抵消其 min-height 副作用 */
+.sp-cost-dialog {
+  min-height: 0;
+}
+
+.sp-cost-dialog + .sp-cost-dialog {
+  margin-top: 1rem;
+}
+
+.sp-cost-dialog .sp-cost-trend-canvas {
+  height: 320px;
+}
+
+.sp-cost-dialog .sp-health-breakdown-chart {
+  height: 360px;
+}
+
+/* BaseDialog teleport 到 body，通过 :has 匹配弹层并放大到超过 full 档位默认宽度 */
+:global(.modal-content:has(.sp-cost-dialog)) {
+  width: 100%;
+  max-width: min(112rem, calc(100vw - 2rem));
+}
+
+:global(.modal-content:has(.sp-cost-dialog) .modal-body) {
+  min-height: 0;
 }
 
 .sp-cost-trend-head-left {
@@ -4199,10 +4255,6 @@ function errorMessage(err: unknown, fallback: string): string {
 
 .sp-cost-trend-canvas {
   height: 240px;
-}
-
-.sp-cost-breakdown-panel {
-  margin-bottom: 1rem;
 }
 
 .sp-cost-breakdown-head-left {
