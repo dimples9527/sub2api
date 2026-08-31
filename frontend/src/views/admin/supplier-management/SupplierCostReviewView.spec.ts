@@ -64,6 +64,13 @@ vi.mock('@/stores/app', () => ({
   }),
 }))
 
+function toDateInputValue(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+const today = toDateInputValue(new Date())
+const yesterday = toDateInputValue(new Date(Date.now() - 24 * 60 * 60 * 1000))
+
 const review = {
   id: 7,
   provider_id: 3,
@@ -93,13 +100,12 @@ function mountView() {
     global: {
       stubs: {
         SupplierModuleLayout: { template: '<div><slot /></div>' },
-        DateRangePicker: { template: '<div />' },
         Select: { props: ['modelValue', 'options'], template: '<div />' },
         DataTable: {
           props: ['data', 'selectable', 'selectedKeys'],
           emits: ['update:selectedKeys', 'selectionChange'],
           template:
-            '<div data-test="cost-review-table"><button v-if="data.length > 1" data-test="select-both" @click="$emit(\'update:selectedKeys\', data.map(row => row.id))">选择当前页</button><div v-for="row in data" :key="row.id"><slot name="cell-provider_name" :row="row" /><slot name="cell-actions" :row="row" /></div></div>',
+            '<div data-test="cost-review-table"><button v-if="data.length > 1" data-test="select-both" @click="$emit(\'update:selectedKeys\', data.map(row => row.id))">选择当前页</button><div v-for="row in data" :key="row.id" :data-test="`row-${row.id}`"><slot name="cell-provider_name" :row="row" /><slot name="cell-cost_delta" :row="row" /><slot name="cell-decision_type" :row="row" /><slot name="cell-approved_at" :row="row" /><slot name="cell-sync_count" :row="row" /><slot name="cell-last_synced_at" :row="row" /><slot name="cell-actions" :row="row" /></div></div>',
         },
         Pagination: { template: '<div />' },
         BaseDialog: {
@@ -128,7 +134,7 @@ describe('SupplierCostReviewView', () => {
     mocks.bulkApprove.mockResolvedValue({ items: [{ ...review, status: 'approved', version: 5 }], count: 1 })
   })
 
-  it('加载供应商和成本核对列表', async () => {
+  it('默认按今天加载供应商和成本核对列表', async () => {
     const wrapper = mountView()
     await flushPromises()
 
@@ -136,11 +142,12 @@ describe('SupplierCostReviewView', () => {
     expect(mocks.listReviews).toHaveBeenCalledWith(expect.objectContaining({
       page: 1,
       page_size: 20,
-      start_date: undefined,
-      end_date: undefined,
+      start_date: today,
+      end_date: today,
     }))
     expect(wrapper.text()).toContain('示例供应商')
     expect(wrapper.text()).toContain('待审批')
+    expect(wrapper.find('[data-test="day-chip"]').text()).toBe(today)
     expect(wrapper.find('[data-test="provider-identity-3"]').classes()).toContain('provider-color-3')
   })
 
@@ -179,17 +186,78 @@ describe('SupplierCostReviewView', () => {
     expect(mocks.showSuccess).toHaveBeenCalledWith('全局成本来源已保存')
   })
 
-  it('重置筛选后查询全部日期的成本核对记录', async () => {
+  it('切换前一天并用今天按钮回到当天', async () => {
     const wrapper = mountView()
     await flushPromises()
+
+    expect(wrapper.find('[data-test="next-day"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-test="today"]').attributes('disabled')).toBeDefined()
+
+    await wrapper.find('[data-test="prev-day"]').trigger('click')
+    await flushPromises()
+    expect(mocks.listReviews).toHaveBeenLastCalledWith(expect.objectContaining({
+      start_date: yesterday,
+      end_date: yesterday,
+    }))
+    expect(wrapper.find('[data-test="day-chip"]').text()).toBe(yesterday)
+
+    await wrapper.find('[data-test="today"]').trigger('click')
+    await flushPromises()
+    expect(mocks.listReviews).toHaveBeenLastCalledWith(expect.objectContaining({
+      start_date: today,
+      end_date: today,
+    }))
+  })
+
+  it('通过日期面板选昨天后重新加载当天记录', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('[data-test="stat-date"]').trigger('click')
+    await flushPromises()
+    document.querySelector<HTMLButtonElement>('[data-test="panel-yesterday"]')?.click()
+    await flushPromises()
+
+    expect(mocks.listReviews).toHaveBeenLastCalledWith(expect.objectContaining({
+      start_date: yesterday,
+      end_date: yesterday,
+    }))
+    expect(wrapper.find('[data-test="day-chip"]').text()).toBe(yesterday)
+    document.body.innerHTML = ''
+  })
+
+  it('重置筛选后回到今天的成本核对记录', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.find('[data-test="prev-day"]').trigger('click')
+    await flushPromises()
+
     const resetButton = wrapper.findAll('button.sp-button.ghost').find(button => button.text() === '重置筛选')
     await resetButton?.trigger('click')
     await flushPromises()
 
     expect(mocks.listReviews).toHaveBeenLastCalledWith(expect.objectContaining({
-      start_date: undefined,
-      end_date: undefined,
+      start_date: today,
+      end_date: today,
     }))
+  })
+
+  it('打开当天同步记录弹窗并只保留同步事件', async () => {
+    mocks.listHistory.mockResolvedValue([
+      { id: 3, event_type: 'sync', operated_at: '2026-08-24T10:00:00Z', status: 'pending_review', sync_run_id: 101 },
+      { id: 2, event_type: 'approve', operated_at: '2026-08-24T09:00:00Z', status: 'approved' },
+      { id: 1, event_type: 'sync', operated_at: '2026-08-24T08:00:00Z', status: 'pending_review', sync_run_id: 99 },
+    ])
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="sync-records-section"]').exists()).toBe(false)
+    await wrapper.find('[data-test="sync-records-7"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.listHistory).toHaveBeenCalledWith(7)
+    expect(wrapper.find('[data-test="sync-records-section"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="sync-records-count"]').text()).toBe('2 次')
   })
 
   it('校验手动成本并提交当前版本', async () => {
@@ -223,7 +291,7 @@ describe('SupplierCostReviewView', () => {
     await wrapper.find('[data-test="history-7"]').trigger('click')
     await flushPromises()
     expect(mocks.listHistory).toHaveBeenCalledWith(7)
-    expect(wrapper.text()).toContain('同步')
+    expect(wrapper.find('.history-item').text()).toContain('同步')
 
     await wrapper.find('[data-test="approve-7"]').trigger('click')
     await wrapper.find('[data-test="decision-upstream"]').trigger('click')
@@ -309,5 +377,108 @@ describe('SupplierCostReviewView', () => {
 
     expect(mocks.createCostAlertOverride).not.toHaveBeenCalled()
     expect(mocks.showError).toHaveBeenCalledWith('请选择需要覆盖预警阈值的供应商')
+  })
+
+  it('差额超出预警阈值时进入报警态并附上占计算成本的占比', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(mocks.listCostAlertOverrides).toHaveBeenCalled()
+    const row = wrapper.find('[data-test="row-7"]')
+    expect(row.find('.cost-alert').exists()).toBe(true)
+    expect(row.find('.cost-alert').text()).toContain('+2.222222')
+    expect(row.find('.delta-percent').text()).toBe('+22.0%')
+  })
+
+  it('差额未超阈值只作普通正向差额，缺失时退化为纯文本', async () => {
+    mocks.getCostAlertSettings.mockResolvedValue({ amount: '10.000000' })
+    mocks.listReviews.mockResolvedValue({
+      items: [review, { ...review, id: 8, cost_delta: null }],
+      total: 2,
+      page: 1,
+      page_size: 20,
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const positiveRow = wrapper.find('[data-test="row-7"]')
+    expect(positiveRow.find('.cost-alert').exists()).toBe(false)
+    expect(positiveRow.find('.cost-positive').exists()).toBe(true)
+
+    const missingRow = wrapper.find('[data-test="row-8"]')
+    expect(missingRow.find('.cost-neutral').exists()).toBe(false)
+    expect(missingRow.find('.delta-percent').exists()).toBe(false)
+  })
+
+  it('供应商覆盖阈值优先于全局阈值判定差额报警', async () => {
+    mocks.getCostAlertSettings.mockResolvedValue({ amount: '10.000000' })
+    mocks.listCostAlertOverrides.mockResolvedValue({
+      items: [{ id: 1, provider_id: 3, enabled: true, amount: '1.000000' }],
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="row-7"] .cost-alert').exists()).toBe(true)
+  })
+
+  it('停用的覆盖阈值回落到全局阈值', async () => {
+    mocks.getCostAlertSettings.mockResolvedValue({ amount: '10.000000' })
+    mocks.listCostAlertOverrides.mockResolvedValue({
+      items: [{ id: 1, provider_id: 3, enabled: false, amount: '1.000000' }],
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="row-7"] .cost-alert').exists()).toBe(false)
+    expect(wrapper.find('[data-test="row-7"] .cost-positive').exists()).toBe(true)
+  })
+
+  it('审批方式按采用来源渲染色点', async () => {
+    mocks.listReviews.mockResolvedValue({
+      items: [
+        review,
+        { ...review, id: 8, decision_type: 'manual' },
+        { ...review, id: 9, decision_type: 'upstream' },
+      ],
+      total: 3,
+      page: 1,
+      page_size: 20,
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="row-7"] .decision-tag').classes()).toContain('decision-none')
+    expect(wrapper.find('[data-test="row-8"] .decision-tag').classes()).toContain('decision-manual')
+    expect(wrapper.find('[data-test="row-9"] .decision-tag').classes()).toContain('decision-upstream')
+  })
+
+  it('同步次数按梯度渲染', async () => {
+    mocks.listReviews.mockResolvedValue({
+      items: [review, { ...review, id: 8, sync_count: 3 }, { ...review, id: 9, sync_count: 7 }],
+      total: 3,
+      page: 1,
+      page_size: 20,
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="row-7"] .sync-count-chip').classes()).toContain('sync-count-low')
+    expect(wrapper.find('[data-test="row-8"] .sync-count-chip').classes()).toContain('sync-count-mid')
+    expect(wrapper.find('[data-test="row-9"] .sync-count-chip').classes()).toContain('sync-count-high')
+  })
+
+  it('时间列同日只显示时分秒，跨日补上月日', async () => {
+    mocks.listReviews.mockResolvedValue({
+      items: [{ ...review, last_synced_at: new Date().toISOString(), approved_at: '2026-08-24T12:00:00Z' }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const cells = wrapper.findAll('[data-test="row-7"] .sp-sub').map(cell => cell.text())
+    expect(cells).toContainEqual(expect.stringMatching(/^\d{1,2}:\d{2}:\d{2}$/))
+    expect(cells).toContainEqual(expect.stringMatching(/^08-24 \d{1,2}:\d{2}:\d{2}$/))
   })
 })

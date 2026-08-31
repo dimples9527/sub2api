@@ -16,7 +16,7 @@
     </header>
 
     <section class="sp-metric-grid cost-review-metrics" aria-label="成本核对摘要">
-      <article class="sp-metric-card sp-blue"><div class="sp-metric-label">当前记录</div><div class="sp-metric-value">{{ total }}</div><div class="sp-metric-foot">按当前筛选条件统计</div></article>
+      <article class="sp-metric-card sp-blue"><div class="sp-metric-label">当天供应商</div><div class="sp-metric-value">{{ total }}</div><div class="sp-metric-foot">所选日期有同步记录的供应商</div></article>
       <article class="sp-metric-card sp-amber"><div class="sp-metric-label">待审批</div><div class="sp-metric-value">{{ statusCounts.pending_review }}</div><div class="sp-metric-foot">首次同步默认采用计算成本</div></article>
       <article class="sp-metric-card sp-green"><div class="sp-metric-label">已审批</div><div class="sp-metric-value">{{ statusCounts.approved }}</div><div class="sp-metric-foot">人工决定已写入业务成本</div></article>
       <article class="sp-metric-card sp-violet"><div class="sp-metric-label">审批后有新数据</div><div class="sp-metric-value">{{ statusCounts.changed_after_approval }}</div><div class="sp-metric-foot">需要重新确认最新成本</div></article>
@@ -26,15 +26,20 @@
       <div class="cost-review-filter-grid">
         <Input v-model="filters.keyword" aria-label="供应商名称" placeholder="搜索供应商名称" @keyup.enter="applyFilters" />
         <Select v-model="filters.providerId" :options="providerOptions" clearable aria-label="供应商" placeholder="全部供应商" @change="applyFilters" />
-        <DateRangePicker v-model:start-date="filters.startDate" v-model:end-date="filters.endDate" @change="applyFilters" />
+        <div class="cost-review-day-picker">
+          <button class="sp-button ghost day-step" type="button" aria-label="前一天" :disabled="loading" data-test="prev-day" @click="stepDay(-1)">‹</button>
+          <SupplierDayPicker v-model="filters.statDate" :max="todayValue" :disabled="loading" label="统计日期" @change="onStatDateChange" />
+          <button class="sp-button ghost day-step" type="button" aria-label="后一天" :disabled="loading || filters.statDate >= todayValue" data-test="next-day" @click="stepDay(1)">›</button>
+          <button class="sp-button ghost day-today" type="button" :disabled="loading || filters.statDate === todayValue" data-test="today" @click="selectToday">今天</button>
+        </div>
         <Select v-model="filters.status" :options="statusOptions" clearable aria-label="核对状态" placeholder="全部状态" @change="applyFilters" />
         <button class="sp-button ghost" type="button" :disabled="loading" @click="resetFilters">重置筛选</button>
       </div>
     </section>
 
-      <section class="sp-panel cost-review-table-panel">
+      <section class="sp-panel cost-review-table-panel cost-color-scope">
       <header class="sp-panel-head">
-        <div class="sp-panel-title"><span class="sp-section-index">01</span><div><h2>成本核对列表</h2><span>接口值、计算值与当前生效值均保留 6 位小数语义</span></div></div>
+        <div class="sp-panel-title"><span class="sp-section-index">01</span><div><h2>成本核对列表<span class="cost-review-day-chip" data-test="day-chip">{{ filters.statDate }}</span></h2><span>共 {{ total }} 个供应商，每行展示当天最近一次同步，金额保留 6 位小数语义</span></div></div>
         <div class="cost-review-bulk-actions">
           <span v-if="selectedKeys.length" class="sp-status info">已选 {{ selectedKeys.length }} 条，可审批 {{ bulkApprovableReviews.length }} 条</span>
           <button v-if="bulkApprovableReviews.length" class="sp-button primary" type="button" data-test="bulk-approve" :disabled="bulkApproving" @click="openBulkApproval">一键审批</button>
@@ -53,18 +58,26 @@
         <template #cell-auto_adopted_cost="{ row }">{{ formatCost(row.auto_adopted_cost) }}</template>
         <template #cell-final_cost="{ row }">{{ formatCost(row.final_cost) }}</template>
         <template #cell-effective_cost="{ row }"><strong>{{ formatCost(row.effective_cost) }}</strong></template>
-        <template #cell-cost_delta="{ row }"><span :class="deltaClass(row.cost_delta)">{{ formatSignedCost(row.cost_delta) }}</span></template>
-        <template #cell-status="{ row }"><span class="sp-status" :class="statusClass(row.status)">{{ statusLabel(row.status) }}</span></template>
-        <template #cell-decision_type="{ row }">{{ decisionLabel(row.decision_type) }}</template>
-        <template #cell-approved_at="{ row }"><span class="sp-sub">{{ formatDateTime(row.approved_at) }}</span></template>
-        <template #cell-last_synced_at="{ row }"><span class="sp-sub">{{ formatDateTime(row.last_synced_at) }}</span></template>
-        <template #cell-actions="{ row }">
-          <div class="cost-review-actions">
-            <button class="sp-button small" type="button" :data-test="`approve-${row.id}`" @click="openApproval(row)">{{ row.status === 'approved' ? '重新审批' : '审批' }}</button>
-            <button class="sp-button small ghost" type="button" :data-test="`history-${row.id}`" @click="openHistory(row)">历史</button>
+        <template #cell-cost_delta="{ row }">
+          <span v-if="row.cost_delta === null || row.cost_delta === undefined" class="sp-sub">--</span>
+          <div v-else class="delta-cell">
+            <span :class="deltaClass(row.cost_delta, row.provider_id)">{{ formatSignedCost(row.cost_delta) }}</span>
+            <span v-if="deltaPercent(row.cost_delta, row.calculated_cost)" class="delta-percent">{{ deltaPercent(row.cost_delta, row.calculated_cost) }}</span>
           </div>
         </template>
-        <template #empty><div class="sp-panel-body sp-empty-state">当前筛选条件下暂无成本核对记录</div></template>
+        <template #cell-status="{ row }"><span class="sp-status" :class="statusClass(row.status)">{{ statusLabel(row.status) }}</span></template>
+        <template #cell-decision_type="{ row }"><span class="decision-tag" :class="decisionClass(row.decision_type)">{{ decisionLabel(row.decision_type) }}</span></template>
+        <template #cell-approved_at="{ row }"><span class="sp-sub">{{ formatDayTime(row.approved_at) }}</span></template>
+        <template #cell-sync_count="{ row }"><span class="sync-count-chip" :class="syncCountClass(row.sync_count)">{{ row.sync_count }} 次</span></template>
+        <template #cell-last_synced_at="{ row }"><span class="sp-sub">{{ formatDayTime(row.last_synced_at) }}</span></template>
+        <template #cell-actions="{ row }">
+          <div class="cost-review-actions">
+            <button class="sp-button small action-approve" :class="{ 'is-pending': row.status !== 'approved' }" type="button" :data-test="`approve-${row.id}`" @click="openApproval(row)">{{ row.status === 'approved' ? '重新审批' : '审批' }}</button>
+            <button class="sp-button small action-sync" type="button" :data-test="`sync-records-${row.id}`" @click="openSyncRecords(row)">同步记录</button>
+            <button class="sp-button small action-history" type="button" :data-test="`history-${row.id}`" @click="openHistory(row)">历史</button>
+          </div>
+        </template>
+        <template #empty><div class="sp-panel-body sp-empty-state">{{ filters.statDate }} 当天没有符合条件的成本核对记录</div></template>
       </DataTable>
       <div class="sp-pagination-row"><Pagination v-model:page="page" v-model:page-size="pageSize" :total="total" :show-jump="total > 100" @update:page="onPageChange" @update:page-size="onPageSizeChange" /></div>
     </section>
@@ -403,7 +416,56 @@
       <template #footer><div class="dialog-actions"><button class="sp-button ghost" type="button" @click="closeApproval">取消</button><button class="sp-button primary" type="button" data-test="submit-approval" :disabled="approving" @click="submitApproval">{{ approving ? '提交中…' : '确认审批' }}</button></div></template>
     </BaseDialog>
 
-    <BaseDialog :show="historyVisible" title="成本核对历史" width="wide" @close="closeHistory">
+    <BaseDialog :show="syncRecordsVisible" title="当天同步记录" width="extra-wide" @close="closeSyncRecords">
+      <div class="sync-records-dialog cost-color-scope supplier-management-page" data-test="sync-records-section">
+        <div v-if="syncRecordsRow" class="sync-records-summary">
+          <span class="provider-badge" :class="providerColorClass(syncRecordsRow.provider_id)">
+            <strong>{{ syncRecordsRow.provider_name }}</strong>
+            <span class="sp-sub">供应商 #{{ syncRecordsRow.provider_id }}</span>
+          </span>
+          <div class="sync-records-facts">
+            <div><span>统计日期</span><strong>{{ formatDateOnly(syncRecordsRow.stat_date) }}</strong></div>
+            <div><span>同步次数</span><strong data-test="sync-records-count">{{ syncRecords.length }} 次</strong></div>
+            <div><span>最近同步</span><strong>{{ formatDateTime(syncRecordsRow.last_synced_at) }}</strong></div>
+          </div>
+        </div>
+        <DataTable
+          :columns="syncRecordColumns"
+          :data="syncRecords"
+          :loading="syncRecordsLoading"
+          row-key="id"
+          :row-class="syncRecordRowClass"
+          :sticky-actions-column="false"
+          :virtualize-threshold="1000"
+        >
+          <template #cell-operated_at="{ row }">
+            <div class="sync-record-time">
+              <strong>{{ formatDayTime(row.operated_at) }}</strong>
+              <span class="sp-sub">第 {{ row.seq }} 次<span v-if="row.is_latest" class="sync-record-latest-tag">最新</span></span>
+            </div>
+          </template>
+          <template #cell-upstream_cost="{ row }">{{ formatCost(row.upstream_cost) }}</template>
+          <template #cell-calculated_cost="{ row }">{{ formatCost(row.calculated_cost) }}</template>
+          <template #cell-cost_delta="{ row }">
+            <span v-if="row.cost_delta === null || row.cost_delta === undefined" class="sp-sub">--</span>
+            <div v-else class="delta-cell">
+              <span :class="deltaClass(row.cost_delta, row.provider_id)">{{ formatSignedCost(row.cost_delta) }}</span>
+              <span v-if="deltaPercent(row.cost_delta, row.calculated_cost)" class="delta-percent">{{ deltaPercent(row.cost_delta, row.calculated_cost) }}</span>
+            </div>
+          </template>
+          <template #cell-status="{ row }"><span class="sp-status" :class="statusClass(row.status)">{{ statusLabel(row.status) }}</span></template>
+          <template #cell-sync_run_id="{ row }"><span class="sp-sub">{{ row.sync_run_id ? `#${row.sync_run_id}` : '--' }}</span></template>
+          <template #empty><div class="sp-empty-state">当天还没有同步记录</div></template>
+        </DataTable>
+      </div>
+      <template #footer>
+        <div class="dialog-actions">
+          <button class="sp-button ghost" type="button" @click="closeSyncRecords">关闭</button>
+        </div>
+      </template>
+    </BaseDialog>
+
+    <BaseDialog :show="historyVisible" title="成本核对历史" width="extra-wide" @close="closeHistory">
       <div class="history-dialog supplier-management-page">
         <div v-if="historyLoading" class="sp-empty-state">历史加载中…</div>
         <div v-else-if="history.length === 0" class="sp-empty-state">暂无历史记录</div>
@@ -417,10 +479,9 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { SupplierModuleLayout } from '@/components/admin/supplier-management'
+import { SupplierDayPicker, SupplierModuleLayout } from '@/components/admin/supplier-management'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import DataTable from '@/components/common/DataTable.vue'
-import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import Input from '@/components/common/Input.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
@@ -468,7 +529,11 @@ import {
 } from '@/api/admin/supplierCostSource'
 
 const appStore = useAppStore()
-const filters = reactive<{ keyword: string; providerId: number | null; startDate: string; endDate: string; status: SupplierCostReviewStatus | '' }>({ keyword: '', providerId: null, startDate: '', endDate: '', status: '' })
+function toDateInputValue(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+const todayValue = computed(() => toDateInputValue(new Date()))
+const filters = reactive<{ keyword: string; providerId: number | null; statDate: string; status: SupplierCostReviewStatus | '' }>({ keyword: '', providerId: null, statDate: toDateInputValue(new Date()), status: '' })
 const reviews = ref<SupplierProviderCostReview[]>([])
 const providers = ref<Array<{ id: number; name: string }>>([])
 const page = ref(1)
@@ -489,6 +554,10 @@ const bulkApproving = ref(false)
 const historyVisible = ref(false)
 const historyLoading = ref(false)
 const history = ref<SupplierProviderCostReviewHistory[]>([])
+const syncRecordsVisible = ref(false)
+const syncRecordsLoading = ref(false)
+const syncRecordsRow = ref<SupplierProviderCostReview | null>(null)
+const syncRecords = ref<Array<SupplierProviderCostReviewHistory & { seq: number; is_latest: boolean }>>([])
 const costAlertSettings = ref<SupplierCostAlertSettings>({ amount: '0' })
 const costAlertSettingsForm = ref<SupplierCostAlertSettingsInput>({ amount: '0' })
 const costAlertOverrides = ref<SupplierCostAlertOverride[]>([])
@@ -527,18 +596,26 @@ const statusOptions: SelectOption[] = [
 ]
 const columns: Column[] = [
   { key: 'provider_name', label: '供应商', class: 'min-w-36' },
-  { key: 'stat_date', label: '统计日期' },
-  { key: 'upstream_cost', label: '接口成本', class: 'text-right tabular-col' },
-  { key: 'calculated_cost', label: '计算成本', class: 'text-right tabular-col' },
-  { key: 'auto_adopted_cost', label: '自动采用', class: 'text-right tabular-col muted-col' },
-  { key: 'final_cost', label: '最终成本', class: 'text-right tabular-col' },
-  { key: 'effective_cost', label: '生效成本', class: 'text-right tabular-col effective-col' },
-  { key: 'cost_delta', label: '接口差额', class: 'text-right tabular-col' },
-  { key: 'status', label: '状态' },
+  { key: 'upstream_cost', label: '接口成本', class: 'text-right tabular-col cost-col cost-amount-col cost-col-upstream' },
+  { key: 'calculated_cost', label: '计算成本', class: 'text-right tabular-col cost-col cost-amount-col cost-col-calculated' },
+  { key: 'auto_adopted_cost', label: '自动采用', class: 'text-right tabular-col cost-col cost-amount-col cost-col-auto' },
+  { key: 'final_cost', label: '最终成本', class: 'text-right tabular-col cost-col cost-amount-col cost-col-final' },
+  { key: 'effective_cost', label: '生效成本', class: 'text-right tabular-col cost-col cost-amount-col cost-col-effective' },
+  { key: 'cost_delta', label: '接口差额', class: 'text-right tabular-col cost-col cost-col-delta' },
+  { key: 'status', label: '状态', class: 'cost-col cost-col-status' },
   { key: 'decision_type', label: '审批方式' },
   { key: 'approved_at', label: '审批时间' },
+  { key: 'sync_count', label: '同步次数', class: 'text-right' },
   { key: 'last_synced_at', label: '最近同步' },
   { key: 'actions', label: '操作', class: 'min-w-32' },
+]
+const syncRecordColumns: Column[] = [
+  { key: 'operated_at', label: '同步时间', class: 'sync-record-col-time' },
+  { key: 'upstream_cost', label: '接口成本', class: 'text-right tabular-col cost-col cost-amount-col cost-col-upstream' },
+  { key: 'calculated_cost', label: '计算成本', class: 'text-right tabular-col cost-col cost-amount-col cost-col-calculated' },
+  { key: 'cost_delta', label: '接口差额', class: 'text-right tabular-col cost-col cost-col-delta' },
+  { key: 'status', label: '当时状态', class: 'cost-col cost-col-status' },
+  { key: 'sync_run_id', label: '同步任务' },
 ]
 
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
@@ -597,10 +674,46 @@ function formatDecimalString(value: string | null | undefined) { if (value === u
 function formatSignedCost(value: number | null | undefined) { return value === null || value === undefined ? '--' : `${value >= 0 ? '+' : ''}${Number(value).toFixed(6)}` }
 function formatDateOnly(value: string | null | undefined) { if (!value) return '--'; const date = new Date(value); return Number.isNaN(date.getTime()) ? value.slice(0, 10) : date.toISOString().slice(0, 10) }
 function formatDateTime(value: string | null | undefined) { if (!value) return '--'; const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false }) }
+// 单日视图下日期基本就是所选那天，同日只留时分秒；跨日（次日凌晨才同步、隔天才审批）补回月日，避免把昨天的时间读成今天。
+function formatDayTime(value: string | null | undefined) {
+  if (!value) return '--'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  const day = toDateInputValue(date)
+  const time = date.toLocaleTimeString('zh-CN', { hour12: false })
+  return day === filters.statDate ? time : `${day.slice(5)} ${time}`
+}
 function statusLabel(status: SupplierCostReviewStatus) { return { pending_review: '待审批', approved: '已审批', changed_after_approval: '审批后有新数据' }[status] }
 function statusClass(status: SupplierCostReviewStatus) { return { pending_review: 'warn', approved: 'good', changed_after_approval: 'info' }[status] }
 function decisionLabel(decision: SupplierCostReviewDecision) { return { none: '自动采用计算值', upstream: '接口值', calculated: '计算值', manual: '手动输入' }[decision] }
-function deltaClass(value: number | null | undefined) { return value !== null && value !== undefined && value > 0 ? 'cost-positive' : value !== null && value !== undefined && value < 0 ? 'cost-negative' : 'cost-neutral' }
+function decisionClass(decision: SupplierCostReviewDecision) { return { none: 'decision-none', upstream: 'decision-upstream', calculated: 'decision-calculated', manual: 'decision-manual' }[decision] }
+function syncCountClass(count: number) { return count >= 5 ? 'sync-count-high' : count >= 2 ? 'sync-count-mid' : 'sync-count-low' }
+// 有效阈值与后端 EffectiveSupplierCostAlertAmount 对齐：只有启用且为正的覆盖值才顶替全局，否则回落全局，非正即视为不预警。
+function alertThreshold(providerId: number) {
+  const override = costAlertOverrides.value.find(item => item.provider_id === providerId)
+  const overrideAmount = override?.enabled ? Number(override.amount) : Number.NaN
+  if (Number.isFinite(overrideAmount) && overrideAmount > 0) return overrideAmount
+  const globalAmount = Number(costAlertSettings.value.amount)
+  return Number.isFinite(globalAmount) && globalAmount > 0 ? globalAmount : 0
+}
+// 与后端 evaluateCostAlert 一致：差额是上游减本地的有向值，只有上游更贵且严格超过阈值才算超额。
+function isDeltaOverrun(value: number | null | undefined, providerId: number | undefined) {
+  if (value === null || value === undefined || value <= 0 || providerId === undefined) return false
+  const threshold = alertThreshold(providerId)
+  return threshold > 0 && value > threshold
+}
+function deltaClass(value: number | null | undefined, providerId?: number) {
+  if (value === null || value === undefined) return 'cost-neutral'
+  if (isDeltaOverrun(value, providerId)) return 'cost-alert'
+  return value > 0 ? 'cost-positive' : value < 0 ? 'cost-negative' : 'cost-neutral'
+}
+// 绝对差额看不出严重程度，补一个相对计算成本的占比；计算成本为 0 或缺失时占比无意义。
+function deltaPercent(value: number | null | undefined, base: number | null | undefined) {
+  if (value === null || value === undefined || !base) return null
+  const percent = (value / base) * 100
+  if (!Number.isFinite(percent)) return null
+  return `${percent >= 0 ? '+' : ''}${percent.toFixed(Math.abs(percent) >= 1 ? 1 : 2)}%`
+}
 function providerColorClass(providerId: number) {
   return `provider-color-${((Math.abs(providerId) - 1) % 8) + 1}`
 }
@@ -924,9 +1037,19 @@ function onCostAlertEventPageSizeChange() {
 }
 
 async function loadProviders() { try { const result = await listProviders({ page: 1, page_size: 1000 }); providers.value = result.items.map(item => ({ id: item.id, name: item.name })) } catch (error) { appStore.showError(extractApiErrorMessage(error, '加载供应商失败')) } }
-async function loadReviews() { loading.value = true; try { const result = await listSupplierProviderCostReviews({ keyword: filters.keyword.trim() || undefined, provider_id: filters.providerId ?? undefined, start_date: filters.startDate || undefined, end_date: filters.endDate || undefined, status: filters.status, page: page.value, page_size: pageSize.value }); reviews.value = result.items; total.value = result.total; lastLoadedAt.value = new Date().toISOString() } catch (error) { appStore.showError(extractApiErrorMessage(error, '加载成本核对列表失败')) } finally { loading.value = false } }
+async function loadReviews() { loading.value = true; try { const result = await listSupplierProviderCostReviews({ keyword: filters.keyword.trim() || undefined, provider_id: filters.providerId ?? undefined, start_date: filters.statDate, end_date: filters.statDate, status: filters.status, page: page.value, page_size: pageSize.value }); reviews.value = result.items; total.value = result.total; lastLoadedAt.value = new Date().toISOString() } catch (error) { appStore.showError(extractApiErrorMessage(error, '加载成本核对列表失败')) } finally { loading.value = false } }
 function applyFilters() { page.value = 1; selectedKeys.value = []; void loadReviews() }
-function resetFilters() { filters.keyword = ''; filters.providerId = null; filters.startDate = ''; filters.endDate = ''; filters.status = ''; applyFilters() }
+function resetFilters() { filters.keyword = ''; filters.providerId = null; filters.statDate = todayValue.value; filters.status = ''; applyFilters() }
+// 单日视图始终需要一个具体日期：清空日期输入或越过今天时回落到当天。
+function onStatDateChange() { if (!filters.statDate || filters.statDate > todayValue.value) filters.statDate = todayValue.value; applyFilters() }
+function stepDay(offset: number) {
+  const base = new Date(`${filters.statDate || todayValue.value}T00:00:00`)
+  base.setDate(base.getDate() + offset)
+  const next = toDateInputValue(base)
+  filters.statDate = next > todayValue.value ? todayValue.value : next
+  applyFilters()
+}
+function selectToday() { filters.statDate = todayValue.value; applyFilters() }
 function onPageChange() { selectedKeys.value = []; void loadReviews() }
 function onPageSizeChange() { page.value = 1; selectedKeys.value = []; void loadReviews() }
 function openApproval(row: SupplierProviderCostReview) { approvalRow.value = row; decisionType.value = row.status === 'changed_after_approval' ? 'calculated' : 'calculated'; manualCost.value = ''; approvalVisible.value = true }
@@ -963,8 +1086,26 @@ async function submitBulkApproval() {
 }
 async function openHistory(row: SupplierProviderCostReview) { historyVisible.value = true; historyLoading.value = true; history.value = []; try { history.value = await listSupplierProviderCostReviewHistory(row.id) } catch (error) { appStore.showError(extractApiErrorMessage(error, '加载成本历史失败')) } finally { historyLoading.value = false } }
 function closeHistory() { historyVisible.value = false }
+async function openSyncRecords(row: SupplierProviderCostReview) {
+  syncRecordsRow.value = row
+  syncRecordsVisible.value = true
+  syncRecordsLoading.value = true
+  syncRecords.value = []
+  try {
+    // 核对记录按供应商 + 统计日期唯一，其历史即当天全部事件，这里只取同步事件。
+    const items = await listSupplierProviderCostReviewHistory(row.id)
+    const syncOnly = items.filter(item => item.event_type === 'sync')
+    syncRecords.value = syncOnly.map((item, index) => ({ ...item, seq: syncOnly.length - index, is_latest: index === 0 }))
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, '加载当天同步记录失败'))
+  } finally {
+    syncRecordsLoading.value = false
+  }
+}
+function closeSyncRecords() { syncRecordsVisible.value = false; syncRecordsRow.value = null; syncRecords.value = [] }
+function syncRecordRowClass(row: { is_latest: boolean }) { return row.is_latest ? 'sync-record-latest-row' : '' }
 
-onMounted(async () => { await Promise.all([loadProviders(), loadReviews(), loadCostAlertSettings(), loadCostSourceSettings()]) })
+onMounted(async () => { await Promise.all([loadProviders(), loadReviews(), loadCostAlertSettings(), loadCostAlertOverrides(), loadCostSourceSettings()]) })
 </script>
 
 <style scoped>
@@ -997,6 +1138,42 @@ onMounted(async () => { await Promise.all([loadProviders(), loadReviews(), loadC
 }
 .cost-review-filters { margin-bottom: 18px; }
 .cost-review-filter-grid { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(280px, 1.5fr) minmax(180px, 1fr) auto; gap: 12px; align-items: center; padding: 16px; }
+/* 单日视图：日期是主导航，前后一天与「今天」贴合日期输入框成一组步进控件。 */
+.cost-review-day-picker { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 6px; align-items: center; }
+.cost-review-day-picker .day-step { min-width: 32px; padding: 0 8px; font-size: 16px; line-height: 1; }
+.cost-review-day-picker .day-today { padding: 0 12px; font-size: 12px; }
+.cost-review-day-picker .day-step,
+.cost-review-day-picker .day-today { height: 38px; }
+.cost-review-day-chip {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 2px 9px;
+  border: 1px solid color-mix(in srgb, var(--sp-blue) 30%, var(--sp-line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sp-blue) 8%, var(--sp-panel));
+  color: var(--sp-blue);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  vertical-align: middle;
+}
+/* 同步次数按梯度而非固定色：次数越多说明上游当天反复改数，越需要留意。 */
+.sync-count-chip {
+  display: inline-block;
+  min-width: 44px;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--count-accent) 26%, var(--sp-line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--count-accent) 8%, var(--sp-panel));
+  color: var(--count-accent);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-align: center;
+}
+.sync-count-low { --count-accent: #64748b; }
+.sync-count-mid { --count-accent: #b45309; }
+.sync-count-high { --count-accent: #dc2626; }
 .cost-review-metrics { grid-template-columns: repeat(4, minmax(145px, 1fr)); gap: 0.75rem; margin-bottom: 18px; }
 .cost-review-metrics .sp-metric-card {
   --sp-metric-accent: var(--sp-blue);
@@ -1155,24 +1332,69 @@ onMounted(async () => { await Promise.all([loadProviders(), loadReviews(), loadC
 .provider-color-7 { --provider-accent: #4338ca; }
 .provider-color-8 { --provider-accent: #a16207; }
 .cost-review-actions { display: flex; gap: 8px; white-space: nowrap; }
+/* 三个操作按钮沿用列身份色：审批=生效蓝、同步记录=接口青、历史=推算紫，未审批的行把审批按钮实心化以吸引点击。 */
+.cost-review-actions .sp-button {
+  border-color: color-mix(in srgb, var(--action-accent) 30%, var(--sp-line));
+  background: color-mix(in srgb, var(--action-accent) 8%, var(--sp-panel));
+  color: var(--action-accent);
+  font-weight: 600;
+}
+.cost-review-actions .sp-button:hover {
+  border-color: var(--action-accent);
+  background: color-mix(in srgb, var(--action-accent) 16%, var(--sp-panel));
+}
+.action-approve { --action-accent: #2563eb; }
+.action-sync { --action-accent: #0891b2; }
+.action-history { --action-accent: #7c3aed; }
+.cost-review-actions .action-approve.is-pending {
+  border-color: var(--action-accent);
+  background: var(--action-accent);
+  color: #fff;
+}
+.cost-review-actions .action-approve.is-pending:hover { background: #1d4ed8; }
 /* 金额列：右对齐 + 等宽数字，便于逐位比对成本 */
 .tabular-col { font-variant-numeric: tabular-nums; }
-/* 次要成本列（自动采用）：视觉弱化，突出人工确认后的生效值 */
-.muted-col { color: var(--sp-muted); }
-/* 生效成本列：浅蓝渐变底作为当前业务生效值的关键锚点 */
-.effective-col {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--sp-blue) 5%, transparent), transparent 72%);
-  box-shadow: inset 2px 0 0 var(--sp-blue);
+/* 成本列身份色，按成本来源区分：接口青 / 推算紫 / 系统灰 / 人工琥珀 / 生效蓝，差额与状态沿用各自的语义色。 */
+.cost-color-scope :deep(.cost-col-upstream) { --col-accent: #0891b2; }
+.cost-color-scope :deep(.cost-col-calculated) { --col-accent: #7c3aed; }
+.cost-color-scope :deep(.cost-col-auto) { --col-accent: #64748b; }
+.cost-color-scope :deep(.cost-col-final) { --col-accent: #b45309; }
+.cost-color-scope :deep(.cost-col-effective) { --col-accent: #2563eb; }
+.cost-color-scope :deep(.cost-col-delta) { --col-accent: #0f766e; }
+.cost-color-scope :deep(.cost-col-status) { --col-accent: #4338ca; }
+/* 列身份只在表头文字和左侧细分隔条上体现，避免整行变成色块 */
+.cost-color-scope :deep(th.cost-col),
+.cost-color-scope :deep(td.cost-col) {
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--col-accent) 16%, transparent);
 }
-.effective-col strong { font-weight: 700; }
+.cost-color-scope :deep(th.cost-col) { color: var(--col-accent); }
+/* 差额与状态列的单元格自带语义色胶囊，只有纯数字的金额列才给文字染色和淡底 */
+.cost-color-scope :deep(td.cost-amount-col) {
+  color: var(--col-accent);
+  background: color-mix(in srgb, var(--col-accent) 5%, transparent);
+}
+/* 生效成本是当前业务真正生效的锚点，用更强的色带把它从其它口径里拎出来 */
+.cost-color-scope :deep(th.cost-col-effective),
+.cost-color-scope :deep(td.cost-col-effective) { box-shadow: inset 2px 0 0 var(--col-accent); }
+.cost-color-scope :deep(td.cost-col-effective) { background: color-mix(in srgb, var(--col-accent) 10%, transparent); }
+.cost-color-scope :deep(td.cost-col-effective) strong { font-weight: 700; }
+.dark .cost-color-scope :deep(.cost-col-upstream) { --col-accent: #22d3ee; }
+.dark .cost-color-scope :deep(.cost-col-calculated) { --col-accent: #c4b5fd; }
+.dark .cost-color-scope :deep(.cost-col-auto) { --col-accent: #94a3b8; }
+.dark .cost-color-scope :deep(.cost-col-final) { --col-accent: #fbbf24; }
+.dark .cost-color-scope :deep(.cost-col-effective) { --col-accent: #60a5fa; }
+.dark .cost-color-scope :deep(.cost-col-delta) { --col-accent: #5eead4; }
+.dark .cost-color-scope :deep(.cost-col-status) { --col-accent: #a5b4fc; }
 .cost-review-bulk-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 .cost-positive,
 .cost-negative,
-.cost-neutral {
+.cost-neutral,
+.cost-alert {
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
   padding: 0.25rem 0.5rem;
+  border: 1px solid transparent;
   border-radius: 0.375rem;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
@@ -1186,10 +1408,31 @@ onMounted(async () => { await Promise.all([loadProviders(), loadReviews(), loadC
   background: rgba(5, 150, 105, 0.08);
 }
 .cost-neutral { color: #64748b; background: rgba(100, 116, 139, 0.08); }
+/* 差额超出该供应商的有效预警阈值：这才是真正要人处理的行，用描边加深区别于普通的正向差额。 */
+.cost-alert {
+  border-color: rgba(220, 38, 38, 0.35);
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.1);
+  font-weight: 700;
+}
 .cost-positive::before { content: '▲'; font-size: 0.625em; }
 .cost-negative::before { content: '▼'; font-size: 0.625em; }
 .cost-neutral::before { content: '—'; font-size: 0.75em; }
+.cost-alert::before { content: '▲'; font-size: 0.625em; }
+/* 差额列右对齐，占比作为副行跟在金额下面 */
+.delta-cell { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.delta-percent { color: var(--sp-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+/* 审批方式：色点复用成本列身份色，一眼看出这行最终采用了哪一列的数字 */
+.decision-tag { display: inline-flex; align-items: center; gap: 6px; color: var(--decision-accent); font-size: 12px; font-weight: 600; }
+.decision-tag::before { content: ''; width: 7px; height: 7px; border-radius: 999px; background: var(--decision-accent); }
+.decision-upstream { --decision-accent: #0891b2; }
+.decision-calculated { --decision-accent: #7c3aed; }
+.decision-manual { --decision-accent: #b45309; }
+/* 还没经人工确认，用空心虚线点和三种已决定的方式区分 */
+.decision-none { --decision-accent: #94a3b8; font-weight: 500; }
+.decision-none::before { border: 1.5px dashed var(--decision-accent); background: transparent; }
 .cost-review-dialog,
+.sync-records-dialog,
 .history-dialog {
   --sp-panel: #ffffff;
   --sp-line: #dbe4ee;
@@ -1202,6 +1445,41 @@ onMounted(async () => { await Promise.all([loadProviders(), loadReviews(), loadC
   min-height: 0;
   color: var(--sp-ink);
 }
+.sync-records-dialog { --sp-amber: #d97706; --sp-soft: #f1f5f9; display: flex; flex-direction: column; gap: 16px; }
+.sync-records-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  border: 1px solid var(--sp-line);
+  border-radius: 14px;
+  background: linear-gradient(135deg, #f8fbff, #f5f3ff);
+}
+.sync-records-facts { display: flex; gap: 26px; flex-wrap: wrap; }
+.sync-records-facts span { display: block; color: var(--sp-muted); font-size: 12px; }
+.sync-records-facts strong { display: block; margin-top: 4px; font-size: 15px; font-variant-numeric: tabular-nums; }
+.sync-record-time strong { font-variant-numeric: tabular-nums; }
+.sync-record-latest-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--sp-blue) 32%, var(--sp-line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sp-blue) 10%, var(--sp-panel));
+  color: var(--sp-blue);
+  font-size: 11px;
+  font-weight: 700;
+}
+/* 最近一次同步即列表里展示的那条，用左侧强调条与列表建立对应关系。 */
+.sync-records-dialog :deep(.sync-record-latest-row td) {
+  background: color-mix(in srgb, var(--sp-blue) 4%, var(--sp-panel));
+}
+.sync-records-dialog :deep(.sync-record-latest-row td:first-child) {
+  box-shadow: inset 3px 0 0 var(--sp-blue);
+}
+.sync-records-dialog :deep(.sync-record-col-time) { min-width: 190px; }
 .review-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; padding: 16px; border: 1px solid var(--sp-line); border-radius: 14px; background: linear-gradient(135deg, #f8fbff, #f5f3ff); }
 .review-summary span, .review-choice span { display: block; color: var(--sp-muted); font-size: 12px; }
 .review-summary strong { display: block; margin-top: 6px; font-size: 16px; }
