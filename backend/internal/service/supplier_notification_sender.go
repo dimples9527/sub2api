@@ -371,18 +371,33 @@ func supplierGroupChangeNotificationMessage(payload SupplierNotificationEventPay
 		}
 	}
 	appendChanges("新增分组：", payload.GroupChanges.Added, func(change SupplierProviderGroupChange) string {
-		return change.UpstreamKey + "，倍率 " + formatSupplierNotificationRate(change.NewRateMultiplier)
+		return supplierNotificationGroupDisplayName(change) + "，倍率 " + formatSupplierNotificationRate(change.NewRateMultiplier)
 	})
 	appendChanges("删除分组：", payload.GroupChanges.Removed, func(change SupplierProviderGroupChange) string {
-		return change.UpstreamKey + "，原倍率 " + formatSupplierNotificationRate(change.OldRateMultiplier)
+		return supplierNotificationGroupDisplayName(change) + "，原倍率 " + formatSupplierNotificationRate(change.OldRateMultiplier)
 	})
 	appendChanges("倍率变化：", payload.GroupChanges.RateChanged, func(change SupplierProviderGroupChange) string {
-		return change.UpstreamKey + "：" + formatSupplierNotificationRate(change.OldRateMultiplier) + " → " + formatSupplierNotificationRate(change.NewRateMultiplier)
+		return supplierNotificationGroupDisplayName(change) + "：" + formatSupplierNotificationRate(change.OldRateMultiplier) + " → " + formatSupplierNotificationRate(change.NewRateMultiplier)
 	})
 	appendChanges("名称变化：", payload.GroupChanges.NameChanged, func(change SupplierProviderGroupChange) string {
 		return change.UpstreamKey + "：" + change.OldName + " → " + change.NewName
 	})
 	return strings.Join(lines, "\n")
+}
+
+func supplierNotificationGroupDisplayName(change SupplierProviderGroupChange) string {
+	name := strings.TrimSpace(change.NewName)
+	if name == "" {
+		name = strings.TrimSpace(change.OldName)
+	}
+	key := strings.TrimSpace(change.UpstreamKey)
+	if name == "" {
+		return key
+	}
+	if key == "" {
+		return name
+	}
+	return name + "（" + key + "）"
 }
 
 func formatSupplierNotificationRate(value float64) string {

@@ -112,9 +112,9 @@ func TestSupplierNotificationSenderDoesNotLeakSecretsInError(t *testing.T) {
 
 func TestSupplierNotificationMessageIncludesGroupChangesInFixedOrder(t *testing.T) {
 	changes := SupplierProviderGroupChangeSummary{
-		Added:       []SupplierProviderGroupChange{{UpstreamKey: "vip-new", NewRateMultiplier: 1.2}},
-		Removed:     []SupplierProviderGroupChange{{UpstreamKey: "old-group", OldRateMultiplier: 1}},
-		RateChanged: []SupplierProviderGroupChange{{UpstreamKey: "vip-pro", OldRateMultiplier: 1.5, NewRateMultiplier: 1.8}},
+		Added:       []SupplierProviderGroupChange{{UpstreamKey: "vip-new", NewName: "新分组", NewRateMultiplier: 1.2}},
+		Removed:     []SupplierProviderGroupChange{{UpstreamKey: "old-group", OldName: "旧分组", OldRateMultiplier: 1}},
+		RateChanged: []SupplierProviderGroupChange{{UpstreamKey: "vip-pro", OldName: "VIP 专业组", NewName: "VIP 专业组", OldRateMultiplier: 1.5, NewRateMultiplier: 1.8}},
 		NameChanged: []SupplierProviderGroupChange{{UpstreamKey: "group-key-001", OldName: "企业客户组", NewName: "企业高级客户组"}},
 	}
 
@@ -127,11 +127,11 @@ func TestSupplierNotificationMessageIncludesGroupChangesInFixedOrder(t *testing.
 	for _, expected := range []string{
 		"供应商「供应商甲」分组发生变化",
 		"新增分组：",
-		"- vip-new，倍率 1.2",
+		"- 新分组（vip-new），倍率 1.2",
 		"删除分组：",
-		"- old-group，原倍率 1",
+		"- 旧分组（old-group），原倍率 1",
 		"倍率变化：",
-		"- vip-pro：1.5 → 1.8",
+		"- VIP 专业组（vip-pro）：1.5 → 1.8",
 		"名称变化：",
 		"- group-key-001：企业客户组 → 企业高级客户组",
 	} {
