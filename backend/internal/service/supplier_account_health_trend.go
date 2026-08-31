@@ -80,8 +80,11 @@ type SupplierAccountHealthAccount struct {
 	LatencyMs           *int64     `json:"latency_ms,omitempty"`
 	LatencyLimitMs      int64      `json:"latency_limit_ms"`
 	ConsecutiveFailures int        `json:"consecutive_failures"`
-	RateMultiplier      float64    `json:"rate_multiplier"`
-	GuardEnabled        bool       `json:"guard_enabled"`
+	// UpstreamRateMultiplier 是上游账号自身的倍率，EffectiveRateMultiplier 额外乘上
+	// 供应商的倍率缩放，与倍率守护、供应商总览的口径一致。
+	UpstreamRateMultiplier  float64 `json:"upstream_rate_multiplier"`
+	EffectiveRateMultiplier float64 `json:"effective_rate_multiplier"`
+	GuardEnabled            bool    `json:"guard_enabled"`
 }
 
 type SupplierAccountHealthAccountListResult struct {

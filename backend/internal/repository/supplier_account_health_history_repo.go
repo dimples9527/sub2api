@@ -84,7 +84,8 @@ SELECT src.local_account_id,
        latest.latency_ms,
        COALESCE(latest.latency_limit_ms, 0),
        COALESCE(latest.consecutive_failed, 0),
-       COALESCE(local_account.rate_multiplier, 0),
+       src.upstream_rate_multiplier,
+       src.effective_rate_multiplier,
        COUNT(*) OVER() AS total_count,
        EXISTS (
            SELECT 1 FROM supplier_automation_tasks task
@@ -136,7 +137,11 @@ SELECT local_account.id AS local_account_id,
            MAX(NULLIF(platform_override.platform, '')),
            MAX(NULLIF(local_account.platform, '')),
            ''
-       ) AS platform
+       ) AS platform,
+       MAX(a.rate_multiplier * p.account_rate_multiplier_scale) AS effective_rate_multiplier,
+       -- 一个本地账号可能匹配到多个上游账号，两列都取有效倍率最高的那一条，
+       -- 否则原始倍率和有效倍率会来自不同供应商、比值对不上倍率缩放。
+       (ARRAY_AGG(a.rate_multiplier ORDER BY a.rate_multiplier * p.account_rate_multiplier_scale DESC, a.id))[1] AS upstream_rate_multiplier
 FROM accounts local_account
 JOIN supplier_provider_accounts a ON a.active = TRUE
 JOIN supplier_providers p ON p.id = a.provider_id AND p.enabled = TRUE
@@ -210,21 +215,20 @@ WHERE %s`, supplierAccountHealthAccountSourcesSQL(), strings.Join(conditions, " 
 func scanSupplierAccountHealthAccount(scanner interface{ Scan(dest ...any) error }) (service.SupplierAccountHealthAccount, int64, error) {
 	var item service.SupplierAccountHealthAccount
 	var status sql.NullString
-	var rateMultiplier float64
 	var providerName, platform string
 	var checkedAt sql.NullTime
 	var latency sql.NullInt64
 	var total sql.NullInt64
 	if err := scanner.Scan(
 		&item.LocalAccountID, &item.LocalAccountName, &item.ProviderID, &providerName, &platform, &item.Schedulable,
-		&status, &checkedAt, &latency, &item.LatencyLimitMs, &item.ConsecutiveFailures, &rateMultiplier,
+		&status, &checkedAt, &latency, &item.LatencyLimitMs, &item.ConsecutiveFailures,
+		&item.UpstreamRateMultiplier, &item.EffectiveRateMultiplier,
 		&total, &item.GuardEnabled,
 	); err != nil {
 		return service.SupplierAccountHealthAccount{}, 0, err
 	}
 	item.ProviderName = providerName
 	item.Platform = platform
-	item.RateMultiplier = rateMultiplier
 	if status.Valid {
 		item.Status = status.String
 	}

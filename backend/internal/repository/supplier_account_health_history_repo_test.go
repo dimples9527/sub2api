@@ -44,9 +44,10 @@ func TestSupplierAccountHealthHistoryRepositoryListAccounts(t *testing.T) {
 		WithArgs(int64(3), "openai", "%account%", "failed", service.SupplierAutomationTaskAccountHealthGuard, 20, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"local_account_id", "local_account_name", "provider_id", "provider_name", "platform", "schedulable",
-			"status", "checked_at", "latency_ms", "latency_limit_ms", "consecutive_failures", "rate_multiplier",
+			"status", "checked_at", "latency_ms", "latency_limit_ms", "consecutive_failures",
+			"upstream_rate_multiplier", "effective_rate_multiplier",
 			"total_count", "guard_enabled",
-		}).AddRow(21, "account-one", 3, "provider-a", "openai", false, "failed", checkedAt, nil, 500, 2, 1.5, 1, true))
+		}).AddRow(21, "account-one", 3, "provider-a", "openai", false, "failed", checkedAt, nil, 500, 2, 1.5, 3.0, 1, true))
 
 	repo := NewSupplierAccountHealthHistoryRepository(db)
 	result, err := repo.ListAccounts(context.Background(), service.SupplierAccountHealthAccountListParams{
@@ -58,7 +59,8 @@ func TestSupplierAccountHealthHistoryRepositoryListAccounts(t *testing.T) {
 	require.Len(t, result.Items, 1)
 	require.Equal(t, int64(21), result.Items[0].LocalAccountID)
 	require.Nil(t, result.Items[0].LatencyMs)
-	require.Equal(t, 1.5, result.Items[0].RateMultiplier)
+	require.Equal(t, 1.5, result.Items[0].UpstreamRateMultiplier)
+	require.Equal(t, 3.0, result.Items[0].EffectiveRateMultiplier)
 	require.False(t, result.Items[0].Schedulable)
 	require.True(t, result.Items[0].GuardEnabled)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -73,9 +75,10 @@ func TestSupplierAccountHealthHistoryRepositoryListAccountsAllowsAccountsWithout
 		WithArgs(service.SupplierAutomationTaskAccountHealthGuard, 20, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"local_account_id", "local_account_name", "provider_id", "provider_name", "platform", "schedulable",
-			"status", "checked_at", "latency_ms", "latency_limit_ms", "consecutive_failures", "rate_multiplier",
+			"status", "checked_at", "latency_ms", "latency_limit_ms", "consecutive_failures",
+			"upstream_rate_multiplier", "effective_rate_multiplier",
 			"total_count", "guard_enabled",
-		}).AddRow(21, "account-one", 3, "provider-a", "openai", true, nil, nil, nil, 500, 0, 2.5, 1, false))
+		}).AddRow(21, "account-one", 3, "provider-a", "openai", true, nil, nil, nil, 500, 0, 2.5, 2.5, 1, false))
 
 	repo := NewSupplierAccountHealthHistoryRepository(db)
 	result, err := repo.ListAccounts(context.Background(), service.SupplierAccountHealthAccountListParams{Page: 1, PageSize: 20})
@@ -85,7 +88,33 @@ func TestSupplierAccountHealthHistoryRepositoryListAccountsAllowsAccountsWithout
 	require.Equal(t, "", result.Items[0].Status)
 	require.Nil(t, result.Items[0].CheckedAt)
 	require.Nil(t, result.Items[0].LatencyMs)
-	require.Equal(t, 2.5, result.Items[0].RateMultiplier)
+	require.Equal(t, 2.5, result.Items[0].UpstreamRateMultiplier)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// 「上游倍率」必须取自 supplier_provider_accounts，而不是本地 accounts.rate_multiplier
+// （后者是账号计费倍率、默认 1.0，会让整列都显示 1x）。
+func TestSupplierAccountHealthHistoryRepositoryListAccountsReadsUpstreamRate(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	mock.ExpectQuery(`(?s)MAX\(a\.rate_multiplier \* p\.account_rate_multiplier_scale\) AS effective_rate_multiplier.*ARRAY_AGG\(a\.rate_multiplier ORDER BY.*\)\)\[1\] AS upstream_rate_multiplier.*src\.upstream_rate_multiplier,\s+src\.effective_rate_multiplier`).
+		WithArgs(service.SupplierAutomationTaskAccountHealthGuard, 20, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"local_account_id", "local_account_name", "provider_id", "provider_name", "platform", "schedulable",
+			"status", "checked_at", "latency_ms", "latency_limit_ms", "consecutive_failures",
+			"upstream_rate_multiplier", "effective_rate_multiplier",
+			"total_count", "guard_enabled",
+		}).AddRow(21, "account-one", 3, "provider-a", "openai", true, nil, nil, nil, 500, 0, 2.0, 5.0, 1, true))
+
+	repo := NewSupplierAccountHealthHistoryRepository(db)
+	result, err := repo.ListAccounts(context.Background(), service.SupplierAccountHealthAccountListParams{Page: 1, PageSize: 20})
+
+	require.NoError(t, err)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, 2.0, result.Items[0].UpstreamRateMultiplier)
+	require.Equal(t, 5.0, result.Items[0].EffectiveRateMultiplier)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 func TestSupplierAccountHealthHistoryRepositoryListAccountsFiltersUncheckedAccounts(t *testing.T) {
@@ -97,9 +126,10 @@ func TestSupplierAccountHealthHistoryRepositoryListAccountsFiltersUncheckedAccou
 		WithArgs(service.SupplierAutomationTaskAccountHealthGuard, 20, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"local_account_id", "local_account_name", "provider_id", "provider_name", "platform", "schedulable",
-			"status", "checked_at", "latency_ms", "latency_limit_ms", "consecutive_failures", "rate_multiplier",
+			"status", "checked_at", "latency_ms", "latency_limit_ms", "consecutive_failures",
+			"upstream_rate_multiplier", "effective_rate_multiplier",
 			"total_count", "guard_enabled",
-		}).AddRow(21, "account-one", 3, "provider-a", "openai", true, nil, nil, nil, 500, 0, 1, 1, true))
+		}).AddRow(21, "account-one", 3, "provider-a", "openai", true, nil, nil, nil, 500, 0, 1, 1, 1, true))
 
 	repo := NewSupplierAccountHealthHistoryRepository(db)
 	result, err := repo.ListAccounts(context.Background(), service.SupplierAccountHealthAccountListParams{

@@ -15,7 +15,8 @@ export interface SupplierAccountHealthAccount {
   latency_ms?: number | null
   latency_limit_ms: number
   consecutive_failures: number
-  rate_multiplier: number
+  upstream_rate_multiplier: number
+  effective_rate_multiplier: number
   guard_enabled: boolean
 }
 

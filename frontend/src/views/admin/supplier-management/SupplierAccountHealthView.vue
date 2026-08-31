@@ -77,7 +77,6 @@
       </div>
       <DataTable :columns="accountColumns" :data="accountHealthSortData" :loading="loading" row-key="local_account_id">
         <template #cell-account_sort="{ row: account }">
-          <span class="sr-only">{{ formatAccountRateMultiplier(account.rate_multiplier) }}</span>
           <div class="sp-health-account-cell">
             <button
               class="sp-health-account-button"
@@ -98,8 +97,15 @@
             </div>
           </div>
         </template>
-        <template #cell-rate_multiplier="{ row: account }">
-          {{ formatAccountRateMultiplier(account.rate_multiplier) }}
+        <template #cell-upstream_rate_multiplier="{ row: account }">
+          <span class="sp-health-value" :class="rateMultiplierTone(account.upstream_rate_multiplier)">
+            {{ formatAccountRateMultiplier(account.upstream_rate_multiplier) }}
+          </span>
+        </template>
+        <template #cell-effective_rate_multiplier="{ row: account }">
+          <span class="sp-health-value" :class="rateMultiplierTone(account.effective_rate_multiplier)">
+            {{ formatAccountRateMultiplier(account.effective_rate_multiplier) }}
+          </span>
         </template>
         <template #cell-status_sort="{ row: account }">
           <span class="sp-status" :class="statusTone(account.status)">{{ statusLabel(account.status) }}</span>
@@ -108,8 +114,14 @@
           </div>
         </template>
         <template #cell-latency_ms="{ row: account }">
-          <span class="sp-health-latency">{{ formatLatency(account.latency_ms) }}</span>
-          <div class="sp-sub">{{ account.checked_at ? formatDateTime(account.checked_at) : '尚未检测' }}</div>
+          <span class="sp-health-value" :class="latencyTone(account)">
+            {{ formatLatency(account.latency_ms) }}
+          </span>
+        </template>
+        <template #cell-checked_at_sort="{ row: account }">
+          <span class="sp-health-value" :class="checkedAtTone(account.checked_at)">
+            {{ account.checked_at ? formatDateTime(account.checked_at) : '尚未检测' }}
+          </span>
         </template>
         <template #cell-health_trend_sort="{ row: account }">
           <div class="sp-health-trend-cell" :title="accountTrendTitle(account)">
@@ -359,6 +371,11 @@ const lastLoadedAt = ref('')
 const TREND_BAR_COUNT = 96
 const TREND_THRESHOLD_RATIO = 0.6
 const DETAIL_EVENT_LIMIT = 50
+// 倍率高于 2 视为明显偏贵；响应超过阈值 75% 视为接近超时；检测超过一天视为守护失效
+const RATE_BAD_THRESHOLD = 2
+const LATENCY_WARN_RATIO = 0.75
+const CHECKED_FRESH_MS = 60 * 60 * 1000
+const CHECKED_STALE_MS = 24 * 60 * 60 * 1000
 let trendLoadSequence = 0
 let accountTrendLoadSequence = 0
 
@@ -367,17 +384,22 @@ const loadTrendRequest = createKeyedRequestLoader(
   (accountId, range) => `${accountId}:${range}`,
 )
 
+type HealthValueTone = 'good' | 'warn' | 'bad' | 'muted'
+
 type AccountHealthSortAccount = SupplierAccountHealthAccount & {
   account_sort: string
   status_sort: number
+  checked_at_sort: number | null
   health_trend_sort: number
 }
 
 const accountColumns: Column[] = [
   { key: 'account_sort', label: '账号 / 供应商 / 平台', sortable: true },
-  { key: 'rate_multiplier', label: '上游倍率', sortable: true, class: 'min-w-[88px]' },
+  { key: 'upstream_rate_multiplier', label: '上游倍率', sortable: true, class: 'min-w-[88px]' },
+  { key: 'effective_rate_multiplier', label: '有效倍率', sortable: true, class: 'min-w-[88px]' },
   { key: 'status_sort', label: '当前健康状态', sortable: true },
-  { key: 'latency_ms', label: '最近响应 / 检测时间' },
+  { key: 'latency_ms', label: '最近响应', sortable: true, class: 'min-w-[96px]' },
+  { key: 'checked_at_sort', label: '检测时间', sortable: true, class: 'min-w-[132px]' },
   { key: 'health_trend_sort', label: '健康趋势', sortable: true },
   { key: 'actions', label: '操作', class: 'min-w-[96px]' },
 ]
@@ -386,6 +408,7 @@ const accountHealthSortData = computed<AccountHealthSortAccount[]>(() => account
   ...account,
   account_sort: `${account.local_account_name || `账号 #${account.local_account_id}`}:${account.local_account_id}`,
   status_sort: statusSortValue(account.status),
+  checked_at_sort: checkedAtSortValue(account.checked_at),
   health_trend_sort: accountTrendHealthRateSortValue(account.local_account_id),
 })))
 
@@ -746,6 +769,37 @@ function statusSortValue(status?: string | null): number {
   return 3
 }
 
+// 返回 null 让 DataTable 把「尚未检测」的账号排到末尾
+function checkedAtSortValue(checkedAt?: string | null): number | null {
+  if (!checkedAt) return null
+  const timestamp = Date.parse(checkedAt)
+  return Number.isNaN(timestamp) ? null : timestamp
+}
+
+function rateMultiplierTone(value?: number | null): HealthValueTone {
+  const rate = Number(value)
+  if (!Number.isFinite(rate)) return 'muted'
+  if (rate > RATE_BAD_THRESHOLD) return 'bad'
+  if (rate > 1) return 'warn'
+  return rate < 1 ? 'good' : 'muted'
+}
+
+function latencyTone(account: SupplierAccountHealthAccount): HealthValueTone {
+  if (account.latency_ms === null || account.latency_ms === undefined) return 'muted'
+  if (account.latency_limit_ms <= 0) return 'muted'
+  if (account.latency_ms > account.latency_limit_ms) return 'bad'
+  return account.latency_ms > account.latency_limit_ms * LATENCY_WARN_RATIO ? 'warn' : 'good'
+}
+
+// 「尚未检测」和「一天没再检测」都说明守护没覆盖到这个账号，用同一个警示色
+function checkedAtTone(checkedAt?: string | null): HealthValueTone {
+  const timestamp = checkedAtSortValue(checkedAt)
+  if (timestamp === null) return 'warn'
+  const age = Date.now() - timestamp
+  if (age >= CHECKED_STALE_MS) return 'warn'
+  return age <= CHECKED_FRESH_MS ? 'good' : 'muted'
+}
+
 function accountTrendHealthRateSortValue(accountId: number): number {
   const points = healthTrendByAccountId.value[accountId] || []
   const sampleCount = points.reduce((total, point) => total + point.sample_count, 0)
@@ -911,7 +965,14 @@ onMounted(() => {
 .sp-health-account-button.active strong { color: var(--sp-cyan); }
 .sp-health-failure-count { margin-top: 0.3rem; }
 .sp-health-failure-count .sp-status { padding: 0.1rem 0.45rem; font-size: 0.68rem; }
-.sp-health-latency { font-variant-numeric: tabular-nums; }
+.sp-health-value { font-variant-numeric: tabular-nums; font-weight: 600; }
+.sp-health-value.good { color: var(--sp-green); }
+.sp-health-value.warn { color: var(--sp-amber); }
+.sp-health-value.bad { color: var(--sp-red); }
+.sp-health-value.muted { color: var(--sp-muted); font-weight: 500; }
+.dark .sp-health-value.good { color: color-mix(in srgb, var(--sp-green) 55%, #ffffff); }
+.dark .sp-health-value.warn { color: color-mix(in srgb, var(--sp-amber) 55%, #ffffff); }
+.dark .sp-health-value.bad { color: color-mix(in srgb, var(--sp-red) 55%, #ffffff); }
 .sp-health-pagination { display: flex; justify-content: flex-end; padding: 0.75rem 1rem 1rem; }
 .sp-health-guard-warning { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.75rem; }
 .sp-health-guard-warning a { color: var(--sp-cyan); text-decoration: underline; text-underline-offset: 0.15rem; }

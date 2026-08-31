@@ -92,10 +92,13 @@ describe('SupplierAccountHealthView', () => {
     expect(source).not.toContain('loadNextTrend')
   })
 
-  it('\u65b0\u589e\u4e0a\u6e38\u500d\u7387\u5217\u5e76\u652f\u6301\u8d26\u53f7\u500d\u7387\u5065\u5eb7\u72b6\u6001\u548c\u5065\u5eb7\u8d8b\u52bf\u6392\u5e8f', () => {
-    expect(apiSource).toContain('rate_multiplier: number')
-    expect(source).toContain("{ key: 'rate_multiplier', label: '\u4e0a\u6e38\u500d\u7387', sortable: true")
-    expect(source).toContain('formatAccountRateMultiplier(account.rate_multiplier)')
+  it('\u62c6\u5206\u4e0a\u6e38\u500d\u7387\u4e0e\u6709\u6548\u500d\u7387\u4e24\u5217\u5e76\u652f\u6301\u6392\u5e8f', () => {
+    expect(apiSource).toContain('upstream_rate_multiplier: number')
+    expect(apiSource).toContain('effective_rate_multiplier: number')
+    expect(source).toContain("{ key: 'upstream_rate_multiplier', label: '\u4e0a\u6e38\u500d\u7387', sortable: true")
+    expect(source).toContain("{ key: 'effective_rate_multiplier', label: '\u6709\u6548\u500d\u7387', sortable: true")
+    expect(source).toContain('formatAccountRateMultiplier(account.upstream_rate_multiplier)')
+    expect(source).toContain('formatAccountRateMultiplier(account.effective_rate_multiplier)')
     expect(source).toContain("{ key: 'account_sort', label: '\u8d26\u53f7 / \u4f9b\u5e94\u5546 / \u5e73\u53f0', sortable: true }")
     expect(source).toContain("{ key: 'status_sort', label: '\u5f53\u524d\u5065\u5eb7\u72b6\u6001', sortable: true }")
     expect(source).toContain("{ key: 'health_trend_sort', label: '\u5065\u5eb7\u8d8b\u52bf', sortable: true }")
@@ -138,9 +141,24 @@ describe('SupplierAccountHealthView', () => {
     expect(source).toContain('阈值 {{ account.latency_limit_ms }} ms')
   })
 
-  it('merges latency and checked time into one column', () => {
-    expect(source).toContain("{ key: 'latency_ms', label: '最近响应 / 检测时间' }")
-    expect(source).not.toContain('#cell-checked_at')
+  it('splits latency and checked time into two sortable columns', () => {
+    expect(source).toContain("{ key: 'latency_ms', label: '最近响应', sortable: true")
+    expect(source).toContain("{ key: 'checked_at_sort', label: '检测时间', sortable: true")
+    expect(source).toContain('checked_at_sort: checkedAtSortValue(account.checked_at)')
+    expect(source).toContain('function checkedAtSortValue(')
+  })
+
+  it('tones rate, latency and checked time cells by business thresholds', () => {
+    expect(source).toContain('rateMultiplierTone(account.upstream_rate_multiplier)')
+    expect(source).toContain('rateMultiplierTone(account.effective_rate_multiplier)')
+    expect(source).toContain('latencyTone(account)')
+    expect(source).toContain('checkedAtTone(account.checked_at)')
+    expect(source).toContain('const RATE_BAD_THRESHOLD = 2')
+    expect(source).toContain('const LATENCY_WARN_RATIO = 0.75')
+    expect(source).toContain('const CHECKED_STALE_MS = 24 * 60 * 60 * 1000')
+    expect(source).toContain('.sp-health-value.bad { color: var(--sp-red); }')
+    expect(source).toContain('.dark .sp-health-value.good')
+    expect(source).not.toContain('sp-health-latency')
   })
 
   it('explains list failures in the empty state and debounces search', () => {
