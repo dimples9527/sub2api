@@ -205,4 +205,48 @@ describe('SupplierAccountHealthView', () => {
     expect(statusWatchSource).not.toContain('loadSummary')
   })
 
+  it('renders the bound upstream monitor series alongside the guard series', () => {
+    expect(apiSource).toContain('upstream_points?: SupplierAccountHealthPoint[]')
+    expect(apiSource).toContain('upstream_latest?: SupplierAccountHealthPoint')
+    expect(apiSource).toContain('upstream_monitors?: SupplierAccountHealthUpstreamMonitor[]')
+    expect(apiSource).toContain("export type SupplierAccountHealthStatus = 'healthy' | 'slow' | 'failed' | 'unavailable'")
+    expect(source).toContain("const UPSTREAM_SERIES_LABEL = '上游监控'")
+    expect(source).toContain('label: UPSTREAM_SERIES_LABEL')
+    expect(source).toContain('borderDash: [5, 4]')
+    expect(source).toContain('hasAnyTrendSamples')
+    expect(source).toContain('upstream_points || []')
+    expect(source).toContain('trend.upstream_monitors || []')
+  })
+
+  it('indexes both trend series by dataset label instead of dataset index', () => {
+    expect(source).toContain('function seriesPointAt(label: string | undefined, index: number)')
+    expect(source).toContain('seriesPointAt(context.dataset.label, context.dataIndex)')
+    expect(source).toContain("const LATENCY_THRESHOLD_LABEL = '慢响应阈值'")
+    expect(source).toContain('context.dataset.label === LATENCY_THRESHOLD_LABEL')
+    expect(source).not.toContain('context.datasetIndex')
+  })
+
+  it('paints the upstream status ribbon under the guard bars in the account list', () => {
+    expect(source).toContain('upstreamTrendByAccountId')
+    expect(source).toContain('function visibleUpstreamTrend(accountId: number)')
+    expect(source).toContain('class="sp-health-upstream-strip"')
+    expect(source).toContain('sp-health-upstream-cell--${statusTone(point.status)}')
+    expect(source).toContain('upstreamTrendPointTitle(point)')
+    expect(source).toContain('.sp-health-upstream-strip { display: flex; gap: 0.08rem; height: 0.3rem;')
+    expect(source).toContain('.sp-health-upstream-cell { flex: 1 1 0; min-width: 0;')
+    // 有色带时不能再显示「暂无趋势」，否则同一格里两种结论并存
+    expect(source).toContain('v-else-if="!visibleUpstreamTrend(account.local_account_id).length"')
+  })
+
+  it('lists bound upstream monitors and separates no-binding from no-samples', () => {
+    expect(source).toContain('v-if="upstreamMonitors.length"')
+    expect(source).toContain('所选范围内暂无上报')
+    expect(source).toContain('formatAvailability(monitor.availability_7d)')
+    expect(source).toContain('monitor.monitor_name || monitor.monitor_key')
+    expect(source).toContain('未标注主模型')
+    expect(source).toContain("if (status === 'unavailable') return '上游未上报'")
+    // 只有上游数据时守护明细整块不渲染，避免一屏「—」
+    expect(source).toContain('v-else-if="hasTrendSamples" class="sp-health-latest"')
+  })
+
 })

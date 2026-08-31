@@ -232,3 +232,71 @@ func TestSupplierAccountHealthHistoryRepositoryGetTrendsReturnsAllRangePoints(t 
 	require.Equal(t, "timeout", result[37].Points[0].ErrorMessage)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestSupplierAccountHealthHistoryRepositoryGetUpstreamTrends(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	checkedAt := time.Date(2026, 8, 26, 10, 0, 0, 0, time.UTC)
+	since := checkedAt.Add(-24 * time.Hour)
+	until := checkedAt.Add(time.Hour)
+	lastSeenAt := checkedAt.Add(-time.Minute)
+	mock.ExpectQuery(`(?s)FROM supplier_provider_monitor_bindings binding.*supplier_provider_monitor_targets target.*target\.active = TRUE.*binding\.local_account_id = ANY\(\$1\) AND binding\.match_status = 'active'`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"local_account_id", "id", "provider_id", "name", "monitor_key", "monitor_name",
+			"primary_model", "availability_7d", "last_seen_at",
+		}).
+			AddRow(21, 5, 3, "provider-a", "claude", "Claude 监控", "claude-sonnet-4", 99.5, lastSeenAt).
+			AddRow(21, 6, 3, "provider-a", "codex", "Codex 监控", "gpt-5", 97.25, lastSeenAt))
+	mock.ExpectQuery(`(?s)NULLIF\(COALESCE\(NULLIF\(sample\.latency_ms, 0\), NULLIF\(sample\.ping_latency_ms, 0\)\), 0\).*FROM supplier_provider_monitor_samples sample.*sample\.checked_at >= \$2.*sample\.checked_at < \$3.*ORDER BY binding\.local_account_id ASC, sample\.checked_at ASC`).
+		WithArgs(sqlmock.AnyArg(), since, until).
+		WillReturnRows(sqlmock.NewRows([]string{"local_account_id", "checked_at", "status", "latency_ms"}).
+			AddRow(21, checkedAt.Add(-2*time.Minute), "healthy", int64(180)).
+			AddRow(21, checkedAt.Add(-time.Minute), "unavailable", nil).
+			AddRow(37, checkedAt, "failed", int64(900)))
+
+	repo := NewSupplierAccountHealthHistoryRepository(db)
+	result, err := repo.GetUpstreamTrends(context.Background(), []int64{21, 37}, since, until)
+
+	require.NoError(t, err)
+	// 账号 37 没有绑定行，它的样本不该被算进来。
+	require.Len(t, result, 1)
+	require.Len(t, result[21].Monitors, 2)
+	require.Equal(t, int64(5), result[21].Monitors[0].TargetID)
+	require.Equal(t, "Claude 监控", result[21].Monitors[0].MonitorName)
+	require.Equal(t, "claude-sonnet-4", result[21].Monitors[0].PrimaryModel)
+	require.Equal(t, 99.5, result[21].Monitors[0].Availability7D)
+	require.NotNil(t, result[21].Monitors[0].LastSeenAt)
+	require.Equal(t, lastSeenAt, *result[21].Monitors[0].LastSeenAt)
+	require.Equal(t, int64(6), result[21].Monitors[1].TargetID)
+	require.Len(t, result[21].Points, 2)
+	require.Equal(t, "healthy", result[21].Points[0].Status)
+	require.NotNil(t, result[21].Points[0].LatencyMs)
+	require.Equal(t, int64(180), *result[21].Points[0].LatencyMs)
+	require.Equal(t, "unavailable", result[21].Points[1].Status)
+	require.Nil(t, result[21].Points[1].LatencyMs)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierAccountHealthHistoryRepositoryGetUpstreamTrendsSkipsSamplesWithoutBindings(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	since := time.Date(2026, 8, 26, 10, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(`(?s)FROM supplier_provider_monitor_bindings binding`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"local_account_id", "id", "provider_id", "name", "monitor_key", "monitor_name",
+			"primary_model", "availability_7d", "last_seen_at",
+		}))
+
+	repo := NewSupplierAccountHealthHistoryRepository(db)
+	result, err := repo.GetUpstreamTrends(context.Background(), []int64{21}, since, since.Add(time.Hour))
+
+	require.NoError(t, err)
+	require.Empty(t, result)
+	require.NoError(t, mock.ExpectationsWereMet())
+}

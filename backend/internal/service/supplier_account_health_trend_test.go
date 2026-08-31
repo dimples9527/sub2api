@@ -22,6 +22,8 @@ type accountHealthTrendRepositoryStub struct {
 	lastSummaryParams SupplierAccountHealthAccountListParams
 	validateErr       error
 	batchTrends       map[int64]SupplierAccountHealthTrendResult
+	upstreamTrends    map[int64]SupplierAccountHealthUpstreamTrend
+	lastUpstreamIDs   []int64
 }
 
 func (s *accountHealthTrendRepositoryStub) ValidateAccount(_ context.Context, _ int64) error {
@@ -47,6 +49,11 @@ func (s *accountHealthTrendRepositoryStub) GetTrends(_ context.Context, accountI
 	s.lastBatchIDs = append([]int64(nil), accountIDs...)
 	s.lastPointLimit = pointLimit
 	return s.batchTrends, nil
+}
+
+func (s *accountHealthTrendRepositoryStub) GetUpstreamTrends(_ context.Context, accountIDs []int64, _, _ time.Time) (map[int64]SupplierAccountHealthUpstreamTrend, error) {
+	s.lastUpstreamIDs = append([]int64(nil), accountIDs...)
+	return s.upstreamTrends, nil
 }
 
 func (s *accountHealthTrendRepositoryStub) DeleteBefore(_ context.Context, _ time.Time, _ int) (int, error) {
@@ -274,4 +281,92 @@ func TestSupplierAccountHealthTrendPointKeepsBucketCountsInJSON(t *testing.T) {
 
 func trendInt64Ptr(value int64) *int64 {
 	return &value
+}
+
+func TestSupplierAccountHealthTrendServiceAttachesUpstreamTrend(t *testing.T) {
+	checkedAt := time.Now().Add(-time.Minute)
+	repo := &accountHealthTrendRepositoryStub{
+		batchTrends: map[int64]SupplierAccountHealthTrendResult{
+			12: {AccountID: 12, Points: []SupplierAccountHealthPoint{{CheckedAt: checkedAt, Status: SupplierAccountHealthGuardStatusHealthy}}},
+		},
+		upstreamTrends: map[int64]SupplierAccountHealthUpstreamTrend{
+			12: {
+				Points:   []SupplierAccountHealthPoint{{CheckedAt: checkedAt, Status: SupplierAccountHealthGuardStatusSlow, LatencyMs: trendInt64Ptr(900)}},
+				Monitors: []SupplierAccountHealthUpstreamMonitor{{TargetID: 5, MonitorName: "Claude 监控"}},
+			},
+			37: {Monitors: []SupplierAccountHealthUpstreamMonitor{{TargetID: 6, MonitorName: "Codex 监控"}}},
+		},
+	}
+	svc := NewSupplierAccountHealthTrendService(repo, repo)
+
+	results, err := svc.GetTrends(context.Background(), []int64{12, 37, 99}, SupplierAccountHealthRange24h)
+
+	require.NoError(t, err)
+	require.Equal(t, []int64{12, 37, 99}, repo.lastUpstreamIDs)
+	require.Len(t, results, 3)
+
+	// 上游序列与守护序列共用同一批时间桶，长度必须一致，前端才能按同一个下标取点。
+	require.Len(t, results[0].Points, SupplierAccountHealthTrendBucketCount)
+	require.Len(t, results[0].UpstreamPoints, SupplierAccountHealthTrendBucketCount)
+	require.Len(t, results[0].UpstreamMonitors, 1)
+	require.NotNil(t, results[0].UpstreamLatest)
+	require.Equal(t, SupplierAccountHealthGuardStatusSlow, results[0].UpstreamLatest.Status)
+	lastBucket := results[0].UpstreamPoints[SupplierAccountHealthTrendBucketCount-1]
+	require.Equal(t, SupplierAccountHealthGuardStatusSlow, lastBucket.Status)
+	require.Equal(t, 1, lastBucket.SampleCount)
+	require.NotNil(t, lastBucket.LatencyMs)
+	require.Equal(t, int64(900), *lastBucket.LatencyMs)
+
+	// 绑了监控项但窗口内没上报：只带绑定信息，不填点位，否则会画出一条纯灰的空序列。
+	require.Len(t, results[1].UpstreamMonitors, 1)
+	require.Nil(t, results[1].UpstreamPoints)
+	require.Nil(t, results[1].UpstreamLatest)
+
+	// 没绑监控项：三个字段全空，响应体与改动前一致。
+	require.Nil(t, results[2].UpstreamMonitors)
+	require.Nil(t, results[2].UpstreamPoints)
+	require.Nil(t, results[2].UpstreamLatest)
+}
+
+func TestSupplierAccountHealthTrendServiceGetTrendAttachesUpstream(t *testing.T) {
+	repo := &accountHealthTrendRepositoryStub{
+		upstreamTrends: map[int64]SupplierAccountHealthUpstreamTrend{
+			12: {
+				Points:   []SupplierAccountHealthPoint{{CheckedAt: time.Now().Add(-time.Minute), Status: SupplierAccountHealthGuardStatusHealthy}},
+				Monitors: []SupplierAccountHealthUpstreamMonitor{{TargetID: 5, MonitorName: "Claude 监控"}},
+			},
+		},
+	}
+	svc := NewSupplierAccountHealthTrendService(repo, repo)
+
+	result, err := svc.GetTrend(context.Background(), 12, SupplierAccountHealthRange24h)
+
+	require.NoError(t, err)
+	require.Equal(t, []int64{12}, repo.lastUpstreamIDs)
+	require.Len(t, result.Points, SupplierAccountHealthTrendBucketCount)
+	require.Len(t, result.UpstreamPoints, SupplierAccountHealthTrendBucketCount)
+	require.Nil(t, result.Latest)
+	require.NotNil(t, result.UpstreamLatest)
+}
+
+// unavailable 只来自上游样本，表示上游没给出可解析的状态，不能盖掉同桶里明确的 failed。
+func TestAggregateSupplierAccountHealthTrendPointsRanksUnavailableBelowFailed(t *testing.T) {
+	since := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	aggregated := aggregateSupplierAccountHealthTrendPoints([]SupplierAccountHealthPoint{
+		{CheckedAt: since.Add(time.Minute), Status: SupplierAccountHealthGuardStatusFailed},
+		{CheckedAt: since.Add(2 * time.Minute), Status: SupplierAccountHealthGuardStatusUnavailable},
+		{CheckedAt: since.Add(3 * time.Minute), Status: SupplierAccountHealthGuardStatusSlow},
+		{CheckedAt: since.Add(16 * time.Minute), Status: SupplierAccountHealthGuardStatusUnavailable},
+		{CheckedAt: since.Add(17 * time.Minute), Status: SupplierAccountHealthGuardStatusSlow},
+	}, since, 24*time.Hour)
+
+	require.Equal(t, SupplierAccountHealthGuardStatusFailed, aggregated[0].Status)
+	require.Equal(t, 3, aggregated[0].SampleCount)
+	require.Equal(t, 1, aggregated[0].FailedCount)
+	require.Equal(t, 1, aggregated[0].SlowCount)
+	// unavailable 计入样本总数但不计入任何子项，健康率据此把它当成不可用。
+	require.Zero(t, aggregated[0].HealthyCount)
+	require.Equal(t, SupplierAccountHealthGuardStatusUnavailable, aggregated[1].Status)
+	require.Equal(t, 2, aggregated[1].SampleCount)
+	require.Equal(t, 1, aggregated[1].SlowCount)
 }

@@ -377,6 +377,100 @@ ORDER BY local_account_id ASC, checked_at ASC, id ASC`, pq.Array(validIDs), sinc
 	return result, nil
 }
 
+// GetUpstreamTrends 读取账号在监控绑定页绑定的上游监控项及其窗口内的原始样本。
+// 绑定信息与样本分两条查询：绑定存在但窗口内没有上报时，服务层据此区分「没绑监控项」和「绑了但没数据」。
+// 不过滤供应商 enabled，与监控绑定页保持一致，否则数据会无声消失。
+func (r *supplierAccountHealthHistoryRepository) GetUpstreamTrends(ctx context.Context, accountIDs []int64, since, until time.Time) (map[int64]service.SupplierAccountHealthUpstreamTrend, error) {
+	result := make(map[int64]service.SupplierAccountHealthUpstreamTrend, len(accountIDs))
+	if len(accountIDs) == 0 {
+		return result, nil
+	}
+	monitorRows, err := r.db.QueryContext(ctx, `
+SELECT binding.local_account_id, target.id, target.provider_id, provider.name,
+       target.monitor_key, target.monitor_name, target.primary_model,
+       target.availability_7d, target.last_seen_at
+FROM supplier_provider_monitor_bindings binding
+JOIN supplier_provider_monitor_targets target
+  ON target.id = binding.monitor_target_id AND target.active = TRUE
+JOIN supplier_providers provider ON provider.id = target.provider_id
+JOIN accounts local_account
+  ON local_account.id = binding.local_account_id AND local_account.deleted_at IS NULL
+WHERE binding.local_account_id = ANY($1) AND binding.match_status = 'active'
+ORDER BY binding.local_account_id ASC, target.monitor_name ASC, target.id ASC`, pq.Array(accountIDs))
+	if err != nil {
+		return nil, fmt.Errorf("查询账号上游监控绑定失败: %w", err)
+	}
+	for monitorRows.Next() {
+		var accountID int64
+		var monitor service.SupplierAccountHealthUpstreamMonitor
+		var lastSeenAt time.Time
+		if err := monitorRows.Scan(&accountID, &monitor.TargetID, &monitor.ProviderID, &monitor.ProviderName,
+			&monitor.MonitorKey, &monitor.MonitorName, &monitor.PrimaryModel, &monitor.Availability7D, &lastSeenAt); err != nil {
+			monitorRows.Close()
+			return nil, fmt.Errorf("扫描账号上游监控绑定失败: %w", err)
+		}
+		monitor.LastSeenAt = &lastSeenAt
+		trend := result[accountID]
+		trend.Monitors = append(trend.Monitors, monitor)
+		result[accountID] = trend
+	}
+	if err := monitorRows.Err(); err != nil {
+		monitorRows.Close()
+		return nil, fmt.Errorf("遍历账号上游监控绑定失败: %w", err)
+	}
+	monitorRows.Close()
+	if len(result) == 0 {
+		return result, nil
+	}
+
+	// latency_ms 与 ping_latency_ms 都是 NOT NULL DEFAULT 0，0 表示没上报而不是 0 ms：
+	// 优先取模型调用延迟，退回 ping 延迟，两者都是 0 时留空。
+	sampleRows, err := r.db.QueryContext(ctx, `
+SELECT binding.local_account_id, sample.checked_at, sample.status,
+       NULLIF(COALESCE(NULLIF(sample.latency_ms, 0), NULLIF(sample.ping_latency_ms, 0)), 0)
+FROM supplier_provider_monitor_samples sample
+JOIN supplier_provider_monitor_targets target
+  ON target.id = sample.monitor_target_id
+ AND target.active = TRUE
+JOIN supplier_provider_monitor_bindings binding
+  ON binding.provider_id = target.provider_id
+ AND binding.monitor_target_id = target.id
+ AND binding.match_status = 'active'
+JOIN accounts local_account
+  ON local_account.id = binding.local_account_id
+ AND local_account.deleted_at IS NULL
+WHERE binding.local_account_id = ANY($1)
+  AND sample.checked_at >= $2
+  AND sample.checked_at < $3
+ORDER BY binding.local_account_id ASC, sample.checked_at ASC`, pq.Array(accountIDs), since, until)
+	if err != nil {
+		return nil, fmt.Errorf("查询账号上游监控样本失败: %w", err)
+	}
+	defer sampleRows.Close()
+	for sampleRows.Next() {
+		var accountID int64
+		var point service.SupplierAccountHealthPoint
+		var latency sql.NullInt64
+		if err := sampleRows.Scan(&accountID, &point.CheckedAt, &point.Status, &latency); err != nil {
+			return nil, fmt.Errorf("扫描账号上游监控样本失败: %w", err)
+		}
+		if latency.Valid {
+			value := latency.Int64
+			point.LatencyMs = &value
+		}
+		trend, bound := result[accountID]
+		if !bound {
+			continue
+		}
+		trend.Points = append(trend.Points, point)
+		result[accountID] = trend
+	}
+	if err := sampleRows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历账号上游监控样本失败: %w", err)
+	}
+	return result, nil
+}
+
 func (r *supplierAccountHealthHistoryRepository) DeleteBefore(ctx context.Context, before time.Time, batchSize int) (int, error) {
 	if batchSize <= 0 {
 		batchSize = 1000

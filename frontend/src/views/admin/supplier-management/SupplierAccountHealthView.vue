@@ -146,7 +146,19 @@
                 :title="accountTrendPointTitle(point)"
               />
             </div>
-            <span v-else class="sp-health-trend-empty">暂无趋势</span>
+            <span v-else-if="!visibleUpstreamTrend(account.local_account_id).length" class="sp-health-trend-empty">暂无趋势</span>
+            <div
+              v-if="visibleUpstreamTrend(account.local_account_id).length"
+              class="sp-health-upstream-strip"
+              aria-label="上游监控状态"
+            >
+              <span
+                v-for="(point, index) in visibleUpstreamTrend(account.local_account_id)"
+                :key="`${point.checked_at}-${index}`"
+                :class="['sp-health-upstream-cell', `sp-health-upstream-cell--${statusTone(point.status)}`]"
+                :title="upstreamTrendPointTitle(point)"
+              />
+            </div>
           </div>
         </template>
         <template #cell-actions="{ row: account }">
@@ -211,15 +223,28 @@
                 <b>{{ trendSampleCount }}</b>
               </div>
             </div>
-            <div v-if="!trendLoading && !hasTrendSamples" class="sp-empty-state sp-health-no-history">
+            <div v-if="!trendLoading && !hasAnyTrendSamples" class="sp-empty-state sp-health-no-history">
               <strong>尚无健康检测记录</strong>
               <span>{{ selectedAccount.guard_enabled ? '健康守护运行后会在这里生成趋势记录。' : '健康守护任务未启用，不会产生趋势记录。' }}</span>
             </div>
-            <div v-else class="sp-health-latest">
+            <div v-else-if="hasTrendSamples" class="sp-health-latest">
               <div><span>最近检测</span><strong>{{ latestPoint ? formatDateTime(latestPoint.checked_at) : '—' }}</strong></div>
               <div><span>失败原因</span><strong>{{ latestPoint?.reason || '—' }}</strong></div>
               <div><span>动作</span><strong>{{ latestPoint?.action || '—' }}</strong></div>
               <div class="sp-health-latest-error"><span>错误详情</span><strong>{{ latestPoint?.error_message || '—' }}</strong></div>
+            </div>
+            <div v-if="upstreamMonitors.length" class="sp-health-upstream">
+              <div class="sp-health-upstream-head">
+                <span>上游监控</span>
+                <span v-if="upstreamLatestPoint" class="sp-status" :class="statusTone(upstreamLatestPoint.status)">{{ statusLabel(upstreamLatestPoint.status) }}</span>
+                <em v-else>所选范围内暂无上报</em>
+              </div>
+              <div v-for="monitor in upstreamMonitors" :key="monitor.target_id" class="sp-health-upstream-item">
+                <strong>{{ monitor.monitor_name || monitor.monitor_key }}</strong>
+                <b>7 天可用率 {{ formatAvailability(monitor.availability_7d) }}</b>
+                <span>{{ monitor.provider_name || '—' }} · {{ monitor.primary_model || '未标注主模型' }}</span>
+                <time>最近上报 {{ formatDateTime(monitor.last_seen_at) }}</time>
+              </div>
             </div>
           </article>
 
@@ -235,7 +260,7 @@
               <span class="sp-status info">{{ selectedRange }}</span>
             </header>
             <div v-if="trendLoading" class="sp-health-chart-state">正在加载健康状态趋势…</div>
-            <div v-else-if="hasTrendSamples" class="sp-health-chart"><Line :data="statusChartData" :options="statusChartOptions" /></div>
+            <div v-else-if="hasAnyTrendSamples" class="sp-health-chart"><Line :data="statusChartData" :options="statusChartOptions" /></div>
             <div v-else class="sp-health-chart-state">尚无健康检测记录</div>
           </article>
 
@@ -251,7 +276,7 @@
               <span class="sp-status info">{{ selectedRange }}</span>
             </header>
             <div v-if="trendLoading" class="sp-health-chart-state">正在加载响应时间趋势…</div>
-            <div v-else-if="hasTrendSamples" class="sp-health-chart"><Line :data="latencyChartData" :options="latencyChartOptions" /></div>
+            <div v-else-if="hasAnyTrendSamples" class="sp-health-chart"><Line :data="latencyChartData" :options="latencyChartOptions" /></div>
             <div v-else class="sp-health-chart-state">尚无健康检测记录</div>
           </article>
 
@@ -324,6 +349,8 @@ import {
   type SupplierAccountHealthPoint,
   type SupplierAccountHealthRange,
   type SupplierAccountHealthSummary,
+  type SupplierAccountHealthTrend,
+  type SupplierAccountHealthUpstreamMonitor,
 } from '@/api/admin/supplierAccountHealth'
 import supplierProvidersAPI, { type SupplierProvider } from '@/api/admin/supplierProviders'
 import { customPlatformsAPI, type CustomPlatform } from '@/api/admin/customPlatforms'
@@ -363,14 +390,20 @@ const selectedAccountId = ref<number | null>(null)
 const healthDetailVisible = ref(false)
 const trendPoints = ref<SupplierAccountHealthPoint[]>([])
 const latestTrendPoint = ref<SupplierAccountHealthPoint | null>(null)
+const upstreamTrendPoints = ref<SupplierAccountHealthPoint[]>([])
+const upstreamLatestPoint = ref<SupplierAccountHealthPoint | null>(null)
+const upstreamMonitors = ref<SupplierAccountHealthUpstreamMonitor[]>([])
 const healthTrendByAccountId = ref<Record<number, SupplierAccountHealthPoint[]>>({})
-const detailTrendByAccountId = ref<Record<string, SupplierAccountHealthPoint[]>>({})
-const detailLatestByAccountId = ref<Record<string, SupplierAccountHealthPoint | null>>({})
+const upstreamTrendByAccountId = ref<Record<number, SupplierAccountHealthPoint[]>>({})
+const detailTrendCache = ref<Record<string, SupplierAccountHealthTrend>>({})
 const trendLoadingByAccountId = ref<Record<number, boolean>>({})
 const lastLoadedAt = ref('')
 const TREND_BAR_COUNT = 96
 const TREND_THRESHOLD_RATIO = 0.6
 const DETAIL_EVENT_LIMIT = 50
+// 上游监控是与本地健康守护并列的第二个来源，两条曲线共用同一批时间桶，靠数据集名区分
+const UPSTREAM_SERIES_LABEL = '上游监控'
+const LATENCY_THRESHOLD_LABEL = '慢响应阈值'
 // 倍率高于 2 视为明显偏贵；响应超过阈值 75% 视为接近超时；检测超过一天视为守护失效
 const RATE_BAD_THRESHOLD = 2
 const LATENCY_WARN_RATIO = 0.75
@@ -439,6 +472,9 @@ const selectedAccount = computed(() => accounts.value.find(account => account.lo
 const latestPoint = computed(() => latestTrendPoint.value || [...trendPoints.value].reverse().find(point => point.sample_count > 0) || null)
 const trendSampleCount = computed(() => trendPoints.value.reduce((total, point) => total + point.sample_count, 0))
 const hasTrendSamples = computed(() => trendSampleCount.value > 0)
+const hasUpstreamTrend = computed(() => upstreamTrendPoints.value.some(point => point.sample_count > 0))
+// 只有上游数据的账号也要出图，否则会卡在「尚无健康检测记录」空态
+const hasAnyTrendSamples = computed(() => hasTrendSamples.value || hasUpstreamTrend.value)
 const detailEventPoints = computed(() => trendPoints.value.filter(point => point.sample_count > 0).reverse().slice(0, DETAIL_EVENT_LIMIT))
 const detailEventHint = computed(() => (trendPoints.value.filter(point => point.sample_count > 0).length > DETAIL_EVENT_LIMIT
   ? `按时间桶倒序展示最近 ${DETAIL_EVENT_LIMIT} 个时间桶的状态、失败原因、动作和错误详情。`
@@ -454,6 +490,8 @@ function statusLabel(status?: string | null): string {
   if (status === 'healthy') return '可用'
   if (status === 'slow') return '慢响应'
   if (status === 'failed') return '失败'
+  // unavailable 只来自上游样本，是上游没给出可解析状态时的兜底值，属于「不知道」而不是「挂了」
+  if (status === 'unavailable') return '上游未上报'
   return '未检测'
 }
 
@@ -485,6 +523,10 @@ function visibleAccountTrend(accountId: number): SupplierAccountHealthPoint[] {
   return healthTrendByAccountId.value[accountId] || []
 }
 
+function visibleUpstreamTrend(accountId: number): SupplierAccountHealthPoint[] {
+  return upstreamTrendByAccountId.value[accountId] || []
+}
+
 function formatTrendHealthRate(accountId: number): string {
   const points = visibleAccountTrend(accountId)
   const sampleCount = points.reduce((total, point) => total + point.sample_count, 0)
@@ -512,6 +554,12 @@ function accountTrendPointTitle(point: SupplierAccountHealthPoint): string {
   return `${formatDateTime(point.checked_at)}${bucketEnd} ${statusLabel(point.status)}，${point.sample_count}次检测，健康 ${point.healthy_count} 次，响应 ${formatLatency(point.latency_ms)}${threshold}`
 }
 
+function upstreamTrendPointTitle(point: SupplierAccountHealthPoint): string {
+  const bucketEnd = point.bucket_end_at ? ` - ${formatDateTime(point.bucket_end_at)}` : ''
+  if (!point.sample_count) return `${formatDateTime(point.checked_at)}${bucketEnd} 上游未上报`
+  return `${formatDateTime(point.checked_at)}${bucketEnd} 上游 ${statusLabel(point.status)}，${point.sample_count} 个样本，响应 ${formatLatency(point.latency_ms)}`
+}
+
 // 优先按慢响应阈值归一，让阈值线固定在同一高度、不同账号之间可以横向对比；
 // 没有配置阈值时退回按该账号自身最大响应时间归一。
 function latencyBarHeight(point: SupplierAccountHealthPoint, account: SupplierAccountHealthAccount): string {
@@ -534,6 +582,13 @@ function clampBarHeight(value: number): string {
 function formatLatency(value?: number | null): string {
   if (value === null || value === undefined) return '—'
   return value + ' ms'
+}
+
+// availability_7d 是 0-100 的百分数，与监控绑定页的展示口径一致
+function formatAvailability(value?: number | null): string {
+  const rate = Number(value)
+  if (!Number.isFinite(rate)) return '—'
+  return `${rate.toFixed(2)}%`
 }
 
 function formatDateTime(value?: string | null): string {
@@ -568,20 +623,39 @@ function trendPointLabel(point?: SupplierAccountHealthPoint): string {
   return `${formatDateTime(point.checked_at)}${end}`
 }
 
+// 两条序列共用同一批时间桶，因此按数据集名而不是下标取点，阈值线插在哪个位置都不影响
+function seriesPointAt(label: string | undefined, index: number): SupplierAccountHealthPoint | undefined {
+  return label === UPSTREAM_SERIES_LABEL ? upstreamTrendPoints.value[index] : trendPoints.value[index]
+}
+
 const statusChartData = computed<ChartData<'line'>>(() => {
   const colors = chartColors()
+  const datasets: ChartData<'line'>['datasets'] = [{
+    label: '健康状态',
+    data: trendPoints.value.map(point => healthValue(point.status)),
+    borderColor: '#16a34a',
+    backgroundColor: 'rgba(22, 163, 74, 0.12)',
+    pointBackgroundColor: trendPoints.value.map(point => trendPointColor(point.status)),
+    pointBorderColor: trendPoints.value.map(point => trendPointColor(point.status)),
+    tension: 0.25,
+    fill: true,
+  }]
+  if (hasUpstreamTrend.value) {
+    datasets.push({
+      label: UPSTREAM_SERIES_LABEL,
+      data: upstreamTrendPoints.value.map(point => healthValue(point.status)),
+      borderColor: '#0891b2',
+      borderDash: [5, 4],
+      pointBackgroundColor: '#0891b2',
+      pointBorderColor: '#0891b2',
+      pointRadius: 2,
+      tension: 0.25,
+      fill: false,
+    })
+  }
   return {
     labels: trendPoints.value.map(point => formatDateTime(point.checked_at)),
-    datasets: [{
-      label: '健康状态',
-      data: trendPoints.value.map(point => healthValue(point.status)),
-      borderColor: '#16a34a',
-      backgroundColor: 'rgba(22, 163, 74, 0.12)',
-       pointBackgroundColor: trendPoints.value.map(point => trendPointColor(point.status)),
-       pointBorderColor: trendPoints.value.map(point => trendPointColor(point.status)),
-      tension: 0.25,
-      fill: true,
-    }],
+    datasets,
     ...(colors && {}),
   }
 })
@@ -596,9 +670,9 @@ const statusChartOptions = computed<ChartOptions<'line'>>(() => {
       legend: { labels: { color: colors.text, usePointStyle: true } },
       tooltip: {
         callbacks: {
-          label: (context) => '健康状态：' + statusLabel(trendPoints.value[context.dataIndex]?.status),
+          label: (context) => `${context.dataset.label}：${statusLabel(seriesPointAt(context.dataset.label, context.dataIndex)?.status)}`,
           afterLabel: (context) => {
-            const point = trendPoints.value[context.dataIndex]
+            const point = seriesPointAt(context.dataset.label, context.dataIndex)
             if (!point) return ''
             return `${trendPointLabel(point)}，${point.sample_count} 次检测，健康 ${point.healthy_count} 次，响应 ${formatLatency(point.latency_ms)}`
           },
@@ -617,9 +691,8 @@ const statusChartOptions = computed<ChartOptions<'line'>>(() => {
   }
 })
 
-const latencyChartData = computed<ChartData<'line'>>(() => ({
-  labels: trendPoints.value.map(point => formatDateTime(point.checked_at)),
-  datasets: [
+const latencyChartData = computed<ChartData<'line'>>(() => {
+  const datasets: ChartData<'line'>['datasets'] = [
     {
       label: '响应时间',
       data: trendPoints.value.map(point => point.latency_ms === null ? null : point.latency_ms ?? null),
@@ -631,7 +704,7 @@ const latencyChartData = computed<ChartData<'line'>>(() => ({
       fill: true,
     },
     {
-      label: '慢响应阈值',
+      label: LATENCY_THRESHOLD_LABEL,
       data: trendPoints.value.map(point => point.latency_limit_ms > 0 ? point.latency_limit_ms : null),
       borderColor: '#d97706',
       borderDash: [6, 4],
@@ -639,8 +712,25 @@ const latencyChartData = computed<ChartData<'line'>>(() => ({
       tension: 0,
       fill: false,
     },
-  ],
-}))
+  ]
+  if (hasUpstreamTrend.value) {
+    datasets.push({
+      label: UPSTREAM_SERIES_LABEL,
+      data: upstreamTrendPoints.value.map(point => point.latency_ms === null ? null : point.latency_ms ?? null),
+      borderColor: '#0891b2',
+      borderDash: [5, 4],
+      pointBackgroundColor: '#0891b2',
+      pointRadius: 2,
+      tension: 0.25,
+      spanGaps: false,
+      fill: false,
+    })
+  }
+  return {
+    labels: trendPoints.value.map(point => formatDateTime(point.checked_at)),
+    datasets,
+  }
+})
 
 const latencyChartOptions = computed<ChartOptions<'line'>>(() => {
   const colors = chartColors()
@@ -653,15 +743,16 @@ const latencyChartOptions = computed<ChartOptions<'line'>>(() => {
       tooltip: {
         callbacks: {
           label: (context) => {
-            if (context.datasetIndex === 1) return '慢响应阈值：' + formatLatency(Number(context.raw))
-            const point = trendPoints.value[context.dataIndex]
-             return '响应时间：' + formatLatency(point?.latency_ms === null ? null : point?.latency_ms)
+            if (context.dataset.label === LATENCY_THRESHOLD_LABEL) return `${LATENCY_THRESHOLD_LABEL}：${formatLatency(Number(context.raw))}`
+            const point = seriesPointAt(context.dataset.label, context.dataIndex)
+            return `${context.dataset.label}：${formatLatency(point?.latency_ms === null ? null : point?.latency_ms)}`
           },
           afterLabel: (context) => {
-            const point = trendPoints.value[context.dataIndex]
-             if (!point) return ''
-             const sampleHint = `${trendPointLabel(point)}，${point.sample_count} 次检测`
-             return point.status === 'failed' ? `${sampleHint}；失败原因：${point.reason || '—'}` : sampleHint
+            if (context.dataset.label === LATENCY_THRESHOLD_LABEL) return ''
+            const point = seriesPointAt(context.dataset.label, context.dataIndex)
+            if (!point) return ''
+            const sampleHint = `${trendPointLabel(point)}，${point.sample_count} 次检测`
+            return point.status === 'failed' ? `${sampleHint}；失败原因：${point.reason || '—'}` : sampleHint
           },
         },
       },
@@ -717,9 +808,9 @@ async function loadAccounts() {
     total.value = Number(result.total || 0)
     lastLoadedAt.value = new Date().toISOString()
     healthTrendByAccountId.value = {}
+    upstreamTrendByAccountId.value = {}
     trendLoadingByAccountId.value = {}
-    detailTrendByAccountId.value = {}
-    detailLatestByAccountId.value = {}
+    detailTrendCache.value = {}
     latestTrendPoint.value = null
     syncSelectedAccount()
     void loadAccountTrends(accounts.value, selectedRange.value)
@@ -745,13 +836,19 @@ async function loadAccountTrends(accountList: SupplierAccountHealthAccount[], ra
   try {
     const result = await getSupplierAccountHealthTrends(ids, range)
     if (requestSequence !== accountTrendLoadSequence) return
-    const trendMap = new Map((result.items || []).map(trend => [trend.account_id, trend.points || []]))
+    const trendMap = new Map((result.items || []).map(trend => [trend.account_id, trend]))
     healthTrendByAccountId.value = Object.fromEntries(
-      ids.map(accountId => [accountId, trendMap.get(accountId) || []]),
+      ids.map(accountId => [accountId, trendMap.get(accountId)?.points || []]),
+    ) as Record<number, SupplierAccountHealthPoint[]>
+    upstreamTrendByAccountId.value = Object.fromEntries(
+      ids.map(accountId => [accountId, trendMap.get(accountId)?.upstream_points || []]),
     ) as Record<number, SupplierAccountHealthPoint[]>
   } catch (err) {
     if (requestSequence !== accountTrendLoadSequence) return
     healthTrendByAccountId.value = Object.fromEntries(
+      ids.map(accountId => [accountId, []]),
+    ) as Record<number, SupplierAccountHealthPoint[]>
+    upstreamTrendByAccountId.value = Object.fromEntries(
       ids.map(accountId => [accountId, []]),
     ) as Record<number, SupplierAccountHealthPoint[]>
     appStore.showError(extractApiErrorMessage(err, '加载账号健康趋势失败'))
@@ -813,20 +910,34 @@ function formatAccountRateMultiplier(value?: number | null): string {
   return `× ${Number(value)}`
 }
 
+function resetDetailTrend() {
+  trendPoints.value = []
+  latestTrendPoint.value = null
+  upstreamTrendPoints.value = []
+  upstreamLatestPoint.value = null
+  upstreamMonitors.value = []
+}
+
+function applyDetailTrend(trend: SupplierAccountHealthTrend) {
+  trendPoints.value = trend.points || []
+  latestTrendPoint.value = trend.latest || null
+  upstreamTrendPoints.value = trend.upstream_points || []
+  upstreamLatestPoint.value = trend.upstream_latest || null
+  upstreamMonitors.value = trend.upstream_monitors || []
+}
+
 async function loadTrend() {
   const requestSequence = ++trendLoadSequence
   const accountId = selectedAccountId.value
   const range = selectedRange.value
   if (!accountId) {
-    trendPoints.value = []
-    latestTrendPoint.value = null
+    resetDetailTrend()
     trendLoading.value = false
     return
   }
   const cacheKey = `${accountId}:${range}`
-  if (Object.prototype.hasOwnProperty.call(detailTrendByAccountId.value, cacheKey)) {
-    trendPoints.value = detailTrendByAccountId.value[cacheKey] || []
-    latestTrendPoint.value = detailLatestByAccountId.value[cacheKey] || null
+  if (Object.prototype.hasOwnProperty.call(detailTrendCache.value, cacheKey)) {
+    applyDetailTrend(detailTrendCache.value[cacheKey])
     trendLoading.value = false
     return
   }
@@ -835,16 +946,12 @@ async function loadTrend() {
   try {
     const result = await loadTrendRequest(accountId, range)
     if (requestSequence === trendLoadSequence) {
-      const points = result.points || []
-      detailTrendByAccountId.value = { ...detailTrendByAccountId.value, [cacheKey]: points }
-      detailLatestByAccountId.value = { ...detailLatestByAccountId.value, [cacheKey]: result.latest || null }
-      trendPoints.value = points
-      latestTrendPoint.value = result.latest || null
+      detailTrendCache.value = { ...detailTrendCache.value, [cacheKey]: result }
+      applyDetailTrend(result)
     }
   } catch (err) {
     if (requestSequence === trendLoadSequence) {
-      trendPoints.value = []
-      latestTrendPoint.value = null
+      resetDetailTrend()
       error.value = extractApiErrorMessage(err, '加载账号健康趋势失败')
       appStore.showError(error.value)
     }
@@ -883,11 +990,10 @@ function closeHealthDetail() {
 function selectRange(range: SupplierAccountHealthRange) {
   if (selectedRange.value === range) return
   selectedRange.value = range
-  trendPoints.value = []
-  latestTrendPoint.value = null
+  resetDetailTrend()
   healthTrendByAccountId.value = {}
-  detailTrendByAccountId.value = {}
-  detailLatestByAccountId.value = {}
+  upstreamTrendByAccountId.value = {}
+  detailTrendCache.value = {}
   void loadAccountTrends(accounts.value, range)
   void loadTrend()
 }
@@ -1002,6 +1108,14 @@ onMounted(() => {
 .sp-health-latest strong { overflow-wrap: anywhere; font-size: 0.8125rem; font-weight: 500; }
 .sp-health-latest-error strong,
 .sp-health-event-error dd { font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: 0.75rem; line-height: 1.55; }
+.sp-health-upstream { display: grid; gap: 0.5rem; padding: 0 1rem 1rem; }
+.sp-health-upstream-head { display: flex; align-items: center; gap: 0.5rem; color: var(--sp-muted); font-size: 0.75rem; }
+.sp-health-upstream-head em { margin-left: auto; font-style: normal; }
+.sp-health-upstream-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.2rem 0.75rem; padding: 0.55rem 0.75rem; border: 1px solid var(--sp-soft); border-radius: 0.5rem; background: var(--sp-panel-2); }
+.sp-health-upstream-item strong { font-size: 0.8125rem; font-weight: 600; }
+.sp-health-upstream-item b { color: var(--sp-cyan); font-size: 0.8125rem; font-variant-numeric: tabular-nums; text-align: right; }
+.sp-health-upstream-item span { color: var(--sp-muted); font-size: 0.72rem; }
+.sp-health-upstream-item time { color: var(--sp-muted); font-size: 0.72rem; font-variant-numeric: tabular-nums; text-align: right; }
 .sp-health-chart-panel { min-width: 0; }
 .sp-health-chart { height: 18rem; padding: 0 1rem 1rem; }
 .sp-health-chart-state { min-height: 18rem; color: var(--sp-muted); }
@@ -1052,6 +1166,13 @@ onMounted(() => {
 .sp-health-trend-bar--loading:nth-child(2n) { height: 70%; animation-delay: 120ms; }
 .sp-health-trend-bar--loading:nth-child(3n) { height: 30%; animation-delay: 220ms; }
 .sp-health-trend-empty { color: var(--sp-muted); font-size: 0.75rem; }
+/* 上游色带是参照信息，整体降透明度让它在视觉层级上低于守护柱 */
+.sp-health-upstream-strip { display: flex; gap: 0.08rem; height: 0.3rem; margin-top: 0.15rem; opacity: 0.85; }
+.sp-health-upstream-cell { flex: 1 1 0; min-width: 0; border-radius: 0.08rem; }
+.sp-health-upstream-cell--good { background: var(--sp-green, #16a34a); }
+.sp-health-upstream-cell--warn { background: var(--sp-amber, #d97706); }
+.sp-health-upstream-cell--bad { background: var(--sp-red, #dc2626); }
+.sp-health-upstream-cell--info { background: var(--sp-soft, #d1d5db); }
 @keyframes sp-health-trend-pulse { from { opacity: 0.45; } to { opacity: 1; } }
 @media (max-width: 900px) {
   .sp-health-head { align-items: flex-start; }
@@ -1064,6 +1185,9 @@ onMounted(() => {
   .sp-health-kpis { grid-template-columns: 1fr 1fr; }
   .sp-health-latest > div,
   .sp-health-event dl > div { grid-template-columns: 1fr; gap: 0.2rem; }
+  .sp-health-upstream-item { grid-template-columns: 1fr; }
+  .sp-health-upstream-item b,
+  .sp-health-upstream-item time { text-align: left; }
   .sp-health-chart { height: 15rem; }
 }
 </style>

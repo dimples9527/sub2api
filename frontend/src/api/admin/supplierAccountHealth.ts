@@ -1,6 +1,6 @@
 import { apiClient } from '../client'
 
-export type SupplierAccountHealthStatus = 'healthy' | 'slow' | 'failed'
+export type SupplierAccountHealthStatus = 'healthy' | 'slow' | 'failed' | 'unavailable'
 export type SupplierAccountHealthRange = '24h' | '7d' | '30d'
 
 export interface SupplierAccountHealthAccount {
@@ -51,11 +51,25 @@ export interface SupplierAccountHealthSummary {
   unchecked: number
 }
 
+export interface SupplierAccountHealthUpstreamMonitor {
+  target_id: number
+  provider_id: number
+  provider_name: string
+  monitor_key: string
+  monitor_name: string
+  primary_model: string
+  availability_7d: number
+  last_seen_at?: string
+}
+
 export interface SupplierAccountHealthTrend {
   account_id: number
   range: SupplierAccountHealthRange | string
   points: SupplierAccountHealthPoint[]
   latest?: SupplierAccountHealthPoint
+  upstream_points?: SupplierAccountHealthPoint[]
+  upstream_latest?: SupplierAccountHealthPoint
+  upstream_monitors?: SupplierAccountHealthUpstreamMonitor[]
 }
 
 export interface SupplierAccountHealthAccountListParams {

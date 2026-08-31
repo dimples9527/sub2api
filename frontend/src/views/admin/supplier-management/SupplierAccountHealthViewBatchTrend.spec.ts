@@ -16,9 +16,10 @@ describe('SupplierAccountHealthView 账号健康趋势批量加载', () => {
   })
 
   it('选中账号的详情趋势单独缓存完整数据', () => {
-    expect(source).toContain('const detailTrendByAccountId = ref<Record<string, SupplierAccountHealthPoint[]>>({})')
-    expect(source).toContain('const detailLatestByAccountId = ref<Record<string, SupplierAccountHealthPoint | null>>({})')
+    // 守护点位、最近一次检测、上游序列与绑定信息按 accountId:range 整份缓存，避免多张并行 map
+    expect(source).toContain('const detailTrendCache = ref<Record<string, SupplierAccountHealthTrend>>({})')
     expect(source).toContain('const cacheKey = `${accountId}:${range}`')
+    expect(source).toContain('applyDetailTrend(detailTrendCache.value[cacheKey])')
     expect(source).toContain('await loadTrendRequest(accountId, range)')
   })
 })

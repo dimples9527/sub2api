@@ -56,6 +56,7 @@ type SupplierAccountHealthHistoryRepository interface {
 	GetSummary(ctx context.Context, params SupplierAccountHealthAccountListParams) (SupplierAccountHealthSummary, error)
 	GetTrend(ctx context.Context, accountID int64, since, until time.Time) (SupplierAccountHealthTrendResult, error)
 	GetTrends(ctx context.Context, accountIDs []int64, since, until time.Time, pointLimit int) (map[int64]SupplierAccountHealthTrendResult, error)
+	GetUpstreamTrends(ctx context.Context, accountIDs []int64, since, until time.Time) (map[int64]SupplierAccountHealthUpstreamTrend, error)
 	DeleteBefore(ctx context.Context, before time.Time, batchSize int) (int, error)
 }
 
@@ -119,11 +120,33 @@ type SupplierAccountHealthPoint struct {
 	ErrorMessage    string     `json:"error_message,omitempty"`
 }
 
+// SupplierAccountHealthUpstreamMonitor 描述账号在监控绑定页绑定的上游监控项。
+type SupplierAccountHealthUpstreamMonitor struct {
+	TargetID       int64      `json:"target_id"`
+	ProviderID     int64      `json:"provider_id"`
+	ProviderName   string     `json:"provider_name"`
+	MonitorKey     string     `json:"monitor_key"`
+	MonitorName    string     `json:"monitor_name"`
+	PrimaryModel   string     `json:"primary_model"`
+	Availability7D float64    `json:"availability_7d"`
+	LastSeenAt     *time.Time `json:"last_seen_at,omitempty"`
+}
+
+// SupplierAccountHealthUpstreamTrend 是仓储层返回的上游原始样本与绑定信息。
+type SupplierAccountHealthUpstreamTrend struct {
+	Points   []SupplierAccountHealthPoint
+	Monitors []SupplierAccountHealthUpstreamMonitor
+}
+
 type SupplierAccountHealthTrendResult struct {
 	AccountID int64                        `json:"account_id"`
 	Range     string                       `json:"range"`
 	Points    []SupplierAccountHealthPoint `json:"points"`
 	Latest    *SupplierAccountHealthPoint  `json:"latest,omitempty"`
+	// 上游监控是补充来源：账号在监控绑定页绑过监控项、且窗口内有上报时才带出这几个字段。
+	UpstreamPoints   []SupplierAccountHealthPoint           `json:"upstream_points,omitempty"`
+	UpstreamLatest   *SupplierAccountHealthPoint            `json:"upstream_latest,omitempty"`
+	UpstreamMonitors []SupplierAccountHealthUpstreamMonitor `json:"upstream_monitors,omitempty"`
 }
 
 type SupplierAccountHealthTrendService struct {
@@ -194,8 +217,14 @@ func (s *SupplierAccountHealthTrendService) GetTrend(ctx context.Context, accoun
 	}
 	result.Range = normalizedRange
 	rawPoints := result.Points
-	result.Points = aggregateSupplierAccountHealthTrendPoints(rawPoints, since, supplierAccountHealthTrendDuration(normalizedRange))
+	duration := supplierAccountHealthTrendDuration(normalizedRange)
+	result.Points = aggregateSupplierAccountHealthTrendPoints(rawPoints, since, duration)
 	result.Latest = latestSupplierAccountHealthPoint(rawPoints)
+	upstream, err := s.repository.GetUpstreamTrends(ctx, []int64{accountID}, since, until)
+	if err != nil {
+		return SupplierAccountHealthTrendResult{}, err
+	}
+	applySupplierAccountHealthUpstreamTrend(&result, upstream[accountID], since, duration)
 	return result, nil
 }
 
@@ -231,6 +260,11 @@ func (s *SupplierAccountHealthTrendService) GetTrends(ctx context.Context, accou
 	if err != nil {
 		return nil, err
 	}
+	upstreamMap, err := s.repository.GetUpstreamTrends(ctx, uniqueIDs, since, until)
+	if err != nil {
+		return nil, err
+	}
+	duration := supplierAccountHealthTrendDuration(normalizedRange)
 	results := make([]SupplierAccountHealthTrendResult, 0, len(uniqueIDs))
 	for _, accountID := range uniqueIDs {
 		result, exists := trendMap[accountID]
@@ -239,16 +273,32 @@ func (s *SupplierAccountHealthTrendService) GetTrends(ctx context.Context, accou
 		}
 		result.AccountID = accountID
 		result.Range = normalizedRange
-		if _, exists := trendMap[accountID]; exists {
+		if exists {
 			rawPoints := result.Points
-			result.Points = aggregateSupplierAccountHealthTrendPoints(rawPoints, since, supplierAccountHealthTrendDuration(normalizedRange))
+			result.Points = aggregateSupplierAccountHealthTrendPoints(rawPoints, since, duration)
 			result.Latest = latestSupplierAccountHealthPoint(rawPoints)
 		} else if result.Points == nil {
 			result.Points = []SupplierAccountHealthPoint{}
 		}
+		applySupplierAccountHealthUpstreamTrend(&result, upstreamMap[accountID], since, duration)
 		results = append(results, result)
 	}
 	return results, nil
+}
+
+// applySupplierAccountHealthUpstreamTrend 把上游样本压进与守护数据同一批时间桶。
+// 绑定信息只要存在就带上，让前端能区分「没绑监控项」和「绑了但窗口内没上报」；
+// 点位则必须有样本才填，否则空输入会被聚合成 96 个 unchecked 桶、画出一条无意义的空序列。
+func applySupplierAccountHealthUpstreamTrend(result *SupplierAccountHealthTrendResult, upstream SupplierAccountHealthUpstreamTrend, since time.Time, duration time.Duration) {
+	if len(upstream.Monitors) == 0 && len(upstream.Points) == 0 {
+		return
+	}
+	result.UpstreamMonitors = upstream.Monitors
+	if len(upstream.Points) == 0 {
+		return
+	}
+	result.UpstreamPoints = aggregateSupplierAccountHealthTrendPoints(upstream.Points, since, duration)
+	result.UpstreamLatest = latestSupplierAccountHealthPoint(upstream.Points)
 }
 
 func normalizeSupplierAccountHealthTrendRange(rangeValue string) (string, error) {
@@ -353,13 +403,17 @@ func aggregateSupplierAccountHealthTrendPoints(points []SupplierAccountHealthPoi
 	return aggregated
 }
 
+// 桶内「最坏状态胜出」的排序。unavailable 只会出现在上游监控样本里，排在 failed 之下、
+// slow 之上：它表示上游没给出可解析的状态，不能当成明确的失败。
 func supplierAccountHealthStatusRank(status string) int {
 	switch status {
-	case "failed":
+	case SupplierAccountHealthGuardStatusFailed:
+		return 4
+	case SupplierAccountHealthGuardStatusUnavailable:
 		return 3
-	case "slow":
+	case SupplierAccountHealthGuardStatusSlow:
 		return 2
-	case "healthy":
+	case SupplierAccountHealthGuardStatusHealthy:
 		return 1
 	default:
 		return 0
