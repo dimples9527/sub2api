@@ -231,6 +231,18 @@
               <span class="text-gray-400 dark:text-gray-500">{{ t('usage.latencyDuration') }}</span>
               <span class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[durationSeverity(row.duration_ms ?? 0)]">{{ formatDuration(row.duration_ms) }}</span>
             </div>
+            <button
+              v-if="showLatencyBreakdown && row.request_id"
+              type="button"
+              data-testid="latency-breakdown-trigger"
+              class="group mt-0.5 self-start rounded-full"
+              :title="t('usage.latencyBreakdown')"
+              @click="openLatencyBreakdown(row)"
+            >
+              <span class="flex h-4 w-4 items-center justify-center rounded-full bg-gray-100 transition-colors group-hover:bg-blue-100 dark:bg-gray-700 dark:group-hover:bg-blue-900/50">
+                <Icon name="infoCircle" size="xs" class="text-gray-400 group-hover:text-blue-500 dark:text-gray-500 dark:group-hover:text-blue-400" />
+              </span>
+            </button>
           </div>
         </template>
 
@@ -494,6 +506,13 @@
       </div>
     </div>
   </Teleport>
+
+  <LatencyBreakdownDialog
+    v-if="showLatencyBreakdown"
+    :show="latencyBreakdownRow !== null"
+    :row="latencyBreakdownRow"
+    @close="latencyBreakdownRow = null"
+  />
 </template>
 
 <script setup lang="ts">
@@ -547,6 +566,7 @@ import DataTable from '@/components/common/DataTable.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import IpGeoCell from '@/components/common/IpGeoCell.vue'
 import Icon from '@/components/icons/Icon.vue'
+import LatencyBreakdownDialog from './LatencyBreakdownDialog.vue'
 import { fetchBatch, getEntry } from '@/utils/ipGeoLookup'
 import type { AdminUsageLog } from '@/types'
 import type { Column } from '@/components/common/types'
@@ -560,6 +580,8 @@ interface Props {
   defaultSortOrder?: 'asc' | 'desc'
   showAccountBilling?: boolean
   showUpstreamEndpoint?: boolean
+  /** 耗时分解暴露本地连接池与上游的内部时序，只在管理端开启 */
+  showLatencyBreakdown?: boolean
   /** 嵌入统一卡片内使用：去掉自身卡片外观 */
   flat?: boolean
 }
@@ -571,6 +593,7 @@ const props = withDefaults(defineProps<Props>(), {
   defaultSortOrder: 'asc',
   showAccountBilling: true,
   showUpstreamEndpoint: true,
+  showLatencyBreakdown: false,
   flat: false
 })
 const emit = defineEmits<{
@@ -583,7 +606,13 @@ const appStore = useAppStore()
 const copiedRequestId = ref<string | null>(null)
 const showAccountBilling = props.showAccountBilling
 const showUpstreamEndpoint = props.showUpstreamEndpoint
+const showLatencyBreakdown = props.showLatencyBreakdown
+const latencyBreakdownRow = ref<AdminUsageLog | null>(null)
 const ipGeoBatchLoading = ref(false)
+
+const openLatencyBreakdown = (row: AdminUsageLog) => {
+  latencyBreakdownRow.value = row
+}
 
 const showIpGeoToolbar = computed(() => props.columns.some((col) => col.key === 'ip_address'))
 

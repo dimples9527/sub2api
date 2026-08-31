@@ -450,6 +450,31 @@ func (h *UsageHandler) SearchAPIKeys(c *gin.Context) {
 	response.Success(c, result)
 }
 
+// LatencyBreakdown returns the per-phase latency breakdown of one usage record.
+// GET /api/v1/admin/usage/latency?request_id=&api_key_id=
+//
+// 首字/总耗时只能说明"慢"，无法说明慢在哪。分解把连接池排队、建连、TLS 与等上游
+// 首字拆开，用来判断差额落在本地还是上游。管理员专属：暴露内部时序。
+func (h *UsageHandler) LatencyBreakdown(c *gin.Context) {
+	requestID := strings.TrimSpace(c.Query("request_id"))
+	if requestID == "" {
+		response.BadRequest(c, "request_id is required")
+		return
+	}
+	apiKeyID, err := strconv.ParseInt(strings.TrimSpace(c.Query("api_key_id")), 10, 64)
+	if err != nil || apiKeyID <= 0 {
+		response.BadRequest(c, "Invalid api_key_id")
+		return
+	}
+
+	phases, err := h.usageService.GetLatencyPhases(c.Request.Context(), requestID, apiKeyID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, phases)
+}
+
 // ListCleanupTasks handles listing usage cleanup tasks
 // GET /api/v1/admin/usage/cleanup-tasks
 func (h *UsageHandler) ListCleanupTasks(c *gin.Context) {

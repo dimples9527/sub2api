@@ -80,6 +80,16 @@ export interface CreateUsageCleanupTaskRequest {
   timezone?: string
 }
 
+// 单次成功上游 attempt 内部的耗时构成，按需从 /admin/usage/latency 拉取。
+export interface LatencyPhases {
+  build_ms: number | null
+  slot_wait_ms: number | null
+  connect_ms: number | null
+  tls_ms: number | null
+  first_byte_ms: number | null
+  conn_reused: boolean | null
+}
+
 export interface AdminUsageQueryParams extends UsageQueryParams {
   user_id?: number
   exact_total?: boolean
@@ -170,6 +180,24 @@ export async function searchApiKeys(userId?: number, keyword?: string): Promise<
 }
 
 /**
+ * Get the per-phase latency breakdown of one usage record (admin only)
+ * @param requestId - Upstream request ID of the usage record
+ * @param apiKeyId - API key ID of the usage record
+ * @returns Latency phases, or null when nothing was captured
+ */
+export async function getLatencyBreakdown(
+  requestId: string,
+  apiKeyId: number,
+  options?: { signal?: AbortSignal }
+): Promise<LatencyPhases | null> {
+  const { data } = await apiClient.get<LatencyPhases | null>('/admin/usage/latency', {
+    params: { request_id: requestId, api_key_id: apiKeyId },
+    signal: options?.signal
+  })
+  return data
+}
+
+/**
  * List usage cleanup tasks (admin only)
  * @param params - Query parameters for pagination
  * @returns Paginated list of cleanup tasks
@@ -211,6 +239,7 @@ export const adminUsageAPI = {
   getStats,
   searchUsers,
   searchApiKeys,
+  getLatencyBreakdown,
   listCleanupTasks,
   createCleanupTask,
   cancelCleanupTask

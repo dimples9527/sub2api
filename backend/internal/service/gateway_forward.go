@@ -374,17 +374,21 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	// 重试循环
 	var resp *http.Response
 	attemptTimer := newSuccessfulAttemptTimer(startTime)
+	var successTrace *latencyTrace
 	lastWireBody := body
 	retryStart := time.Now()
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
 		attemptStart := time.Now()
+		attemptTrace := newLatencyTrace(attemptStart)
 		// 构建上游请求（每次重试需要重新构建，因为请求体需要重新读取）
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
+		upstreamCtx = attemptTrace.attach(upstreamCtx)
 		upstreamReq, wireBody, err := s.buildUpstreamRequest(upstreamCtx, c, account, body, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 		releaseUpstreamCtx()
 		if err != nil {
 			return nil, err
 		}
+		attemptTrace.markBuilt()
 		// 记录本次实际发送的 wire body；只有请求成功后才写回 ParsedRequest，避免 400 retry 基于已签名 CCH 再改写。
 		lastWireBody = wireBody
 
@@ -673,6 +677,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		// 不需要重试（成功或不可重试的错误），跳出循环
 		if resp.StatusCode < 400 {
 			attemptTimer.Mark(attemptStart)
+			successTrace = attemptTrace
 		}
 		// DEBUG: 输出响应 headers（用于检测 rate limit 信息）
 		if account.Platform == PlatformGemini && resp.StatusCode < 400 && s.cfg != nil && s.cfg.Gateway.GeminiDebugResponseHeaders {
@@ -904,6 +909,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		Duration:                      attemptTimer.Since(),
 		FirstTokenMs:                  firstTokenMs,
 		ClientDisconnect:              clientDisconnect,
+		LatencyPhases:                 successTrace.phases(),
 	}, nil
 }
 

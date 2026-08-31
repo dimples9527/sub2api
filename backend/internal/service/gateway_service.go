@@ -621,7 +621,9 @@ type ForwardResult struct {
 	Duration                    time.Duration
 	FirstTokenMs                *int // 首字时间（流式请求）
 	ClientDisconnect            bool // 客户端是否在流式传输过程中断开
-	ReasoningEffort             *string
+	// LatencyPhases 拆解成功 attempt 内部的耗时构成；nil 表示未采集到。
+	LatencyPhases   *LatencyPhases
+	ReasoningEffort *string
 	// ServiceTier records the tier requested by the client. OpenAI uses
 	// service_tier; Anthropic speed=fast is normalized to "fast". Usage recording
 	// lowers it to UpstreamResponseServiceTier when the upstream reports a

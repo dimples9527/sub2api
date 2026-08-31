@@ -9,8 +9,13 @@ const appStoreMocks = vi.hoisted(() => ({
   showError: vi.fn(),
 }))
 
+const adminUsageApiMocks = vi.hoisted(() => ({
+  getLatencyBreakdown: vi.fn(),
+}))
+
 vi.mock('@/utils/ipGeoLookup', () => ipGeoMocks)
 vi.mock('@/stores/app', () => ({ useAppStore: () => appStoreMocks }))
+vi.mock('@/api/admin/usage', () => adminUsageApiMocks)
 
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -66,6 +71,12 @@ const messages: Record<string, string> = {
 	'usage.upstreamResponseModel': 'Upstream response',
 	'usage.modelVariant': 'Possible version variant',
 	'usage.modelMismatch': 'Different model',
+	'usage.latencyBreakdown': 'Latency breakdown',
+	'usage.latencyFirstToken': 'First',
+	'usage.latencyDuration': 'Total',
+	'usage.latencyPhaseSlotWait': 'Connection wait',
+	'usage.latencyPhaseFirstByte': 'Upstream first byte',
+	'usage.latencyLocalOverhead': 'Local overhead',
 }
 
 vi.mock('vue-i18n', async () => {
@@ -638,5 +649,68 @@ describe('admin UsageTable deleted-user badge', () => {
 
     expect(wrapper.text()).not.toContain('Deleted')
     expect(wrapper.text()).toContain('active@test.com')
+  })
+})
+
+describe('admin UsageTable latency breakdown gating', () => {
+  const DataTableStubWithLatency = {
+    props: ['data'],
+    template: `
+      <div>
+        <div v-for="row in data" :key="row.request_id">
+          <slot name="cell-latency" :row="row" />
+        </div>
+      </div>
+    `,
+  }
+
+  const latencyRow = {
+    request_id: 'req-latency-1',
+    api_key_id: 7,
+    first_token_ms: 92_000,
+    duration_ms: 96_000,
+  }
+
+  const mountWith = (props: Record<string, unknown>) =>
+    mount(UsageTable, {
+      props: { data: [latencyRow], loading: false, columns: [], ...props },
+      global: {
+        stubs: {
+          DataTable: DataTableStubWithLatency,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+          BaseDialog: true,
+        },
+      },
+    })
+
+  beforeEach(() => {
+    adminUsageApiMocks.getLatencyBreakdown.mockReset()
+    adminUsageApiMocks.getLatencyBreakdown.mockResolvedValue(null)
+  })
+
+  // 使用记录表是 admin/user 共用组件，耗时分解暴露内部时序，默认必须关着。
+  it('hides the breakdown trigger by default', () => {
+    const wrapper = mountWith({})
+    expect(wrapper.find('[data-testid="latency-breakdown-trigger"]').exists()).toBe(false)
+  })
+
+  it('fetches the breakdown for the clicked row when enabled', async () => {
+    adminUsageApiMocks.getLatencyBreakdown.mockResolvedValue({
+      build_ms: 4,
+      slot_wait_ms: 85_000,
+      connect_ms: null,
+      tls_ms: null,
+      first_byte_ms: 6_290,
+      conn_reused: true,
+    })
+
+    const wrapper = mountWith({ showLatencyBreakdown: true })
+    const trigger = wrapper.get('[data-testid="latency-breakdown-trigger"]')
+    await trigger.trigger('click')
+    await nextTick()
+
+    expect(adminUsageApiMocks.getLatencyBreakdown).toHaveBeenCalledWith('req-latency-1', 7)
   })
 })

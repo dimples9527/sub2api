@@ -938,10 +938,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	agentTaskRecoveryTried := false
 	rejectedFieldRetryState := openAIResponsesRejectedFieldRetryStateForRequest(c, body)
 	attemptTimer := newSuccessfulAttemptTimer(startTime)
+	var successTrace *latencyTrace
 	for {
 		attemptStart := time.Now()
+		attemptTrace := newLatencyTrace(attemptStart)
 		// Build upstream request
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+		upstreamCtx = attemptTrace.attach(upstreamCtx)
 		var headerGuard *openAIFirstOutputHeaderGuard
 		if firstOutputTimeout > 0 {
 			upstreamCtx, headerGuard = newOpenAIFirstOutputHeaderGuard(
@@ -958,6 +961,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			return nil, err
 		}
+		attemptTrace.markBuilt()
 
 		// Get proxy URL
 		proxyURL := ""
@@ -1092,6 +1096,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			return s.handleErrorResponse(ctx, resp, c, account, body, resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel))
 		}
 		attemptTimer.Mark(attemptStart)
+		successTrace = attemptTrace
 		defer func() { _ = resp.Body.Close() }()
 
 		if mapping, ok := openAIResponsesClientToolMapping(c); ok && isEventStreamResponse(resp.Header) {
@@ -1213,6 +1218,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			OpenAIWSMode:                  false,
 			Duration:                      attemptTimer.Since(),
 			FirstTokenMs:                  firstTokenMs,
+			LatencyPhases:                 successTrace.phases(),
 		}
 		if imageCount > 0 {
 			forwardResult.ImageCount = imageCount

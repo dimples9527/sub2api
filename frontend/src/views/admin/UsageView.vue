@@ -123,6 +123,7 @@
         <div v-show="activeTab === 'usage'" class="overflow-hidden rounded-b-2xl">
           <UsageTable
             flat
+            show-latency-breakdown
             :data="usageLogs"
             :loading="loading"
             :columns="visibleColumns"

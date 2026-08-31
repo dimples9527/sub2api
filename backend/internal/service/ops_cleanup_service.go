@@ -313,6 +313,8 @@ func (s *OpsCleanupService) runCleanupOnce(ctx context.Context) (opsCleanupDelet
 		{effective.MinuteMetricsRetentionDays, "ops_system_metrics", "created_at", false, &out.systemMetrics},
 		{effective.HourlyMetricsRetentionDays, "ops_metrics_hourly", "bucket_start", false, &out.hourlyPreagg},
 		{effective.HourlyMetricsRetentionDays, "ops_metrics_daily", "bucket_date", true, &out.dailyPreagg},
+		// 耗时分解是排障用的旁路明细，跟着分钟级指标的保留期走。
+		{effective.MinuteMetricsRetentionDays, "usage_log_latency_phases", "created_at", false, &out.latencyPhases},
 	}
 
 	for _, t := range targets {
