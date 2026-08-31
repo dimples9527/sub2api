@@ -209,6 +209,7 @@ type SupplierProviderDataRepository interface {
 	ListGroupHealthTrends(ctx context.Context, params SupplierProviderGroupHealthTrendParams) ([]SupplierProviderGroupHealthTrend, error)
 	ListLocalGroupHealthTrends(ctx context.Context, params SupplierProviderGroupHealthTrendParams) ([]SupplierProviderGroupHealthTrend, error)
 	ListMonitorTargets(ctx context.Context, params SupplierProviderMonitorTargetListParams) (SupplierProviderMonitorTargetListResult, error)
+	ListBindableLocalAccounts(ctx context.Context, params SupplierBindableLocalAccountListParams) (SupplierBindableLocalAccountListResult, error)
 	BindMonitorTarget(ctx context.Context, monitorTargetID, localAccountID int64) error
 	UnbindMonitorTarget(ctx context.Context, monitorTargetID int64) error
 	ListGroupsForAutoMatch(ctx context.Context, providerID int64) ([]SupplierProviderGroup, error)

@@ -78,6 +78,29 @@ type SupplierProviderMonitorTargetListResult struct {
 	PageSize int                             `json:"page_size"`
 }
 
+type SupplierBindableLocalAccount struct {
+	ID           int64                                 `json:"id"`
+	Name         string                                `json:"name"`
+	Platform     string                                `json:"platform"`
+	ProviderName string                                `json:"provider_name"`
+	Groups       []SupplierProviderAccountBindingGroup `json:"groups"`
+}
+
+type SupplierBindableLocalAccountListParams struct {
+	ProviderID int64
+	Platform   string
+	Search     string
+	Page       int
+	PageSize   int
+}
+
+type SupplierBindableLocalAccountListResult struct {
+	Items    []SupplierBindableLocalAccount `json:"items"`
+	Total    int64                          `json:"total"`
+	Page     int                            `json:"page"`
+	PageSize int                            `json:"page_size"`
+}
+
 type SupplierProviderMonitorSnapshotRepository interface {
 	SaveMonitorSnapshot(ctx context.Context, providerID int64, monitors []SupplierProviderMonitorItem, seenAt time.Time) ([]SupplierProviderMonitorBinding, error)
 }

@@ -142,6 +142,7 @@ type supplierProviderSyncHandlerDataStub struct {
 	groupListParams         service.SupplierProviderDataListParams
 	monitorTargetListParams service.SupplierProviderMonitorTargetListParams
 	monitorTargets          service.SupplierProviderMonitorTargetListResult
+	bindableAccountParams   service.SupplierBindableLocalAccountListParams
 	boundMonitorTargetID    int64
 	boundLocalAccountID     int64
 	unboundMonitorTargetID  int64
@@ -266,6 +267,20 @@ func (s *supplierProviderSyncHandlerDataStub) ListMonitorTargets(_ context.Conte
 	}
 	return s.monitorTargets, nil
 }
+func (s *supplierProviderSyncHandlerDataStub) ListBindableLocalAccounts(_ context.Context, params service.SupplierBindableLocalAccountListParams) (service.SupplierBindableLocalAccountListResult, error) {
+	s.bindableAccountParams = params
+	return service.SupplierBindableLocalAccountListResult{
+		Items: []service.SupplierBindableLocalAccount{{
+			ID:           7,
+			Name:         "皓悦-福利-Codex高并发",
+			Platform:     "openai",
+			ProviderName: "皓悦",
+			Groups:       []service.SupplierProviderAccountBindingGroup{{ID: 3, Name: "VIP"}},
+		}},
+		Total: 1, Page: params.Page, PageSize: params.PageSize,
+	}, nil
+}
+
 func (s *supplierProviderSyncHandlerDataStub) BindMonitorTarget(_ context.Context, monitorTargetID, localAccountID int64) error {
 	s.boundMonitorTargetID = monitorTargetID
 	s.boundLocalAccountID = localAccountID
@@ -332,6 +347,7 @@ func TestSupplierProviderSyncHandlerRoutes(t *testing.T) {
 	router.POST("/providers/:id/test/:scope", handler.TestEndpoint)
 	router.GET("/accounts", handler.ListAccounts)
 	router.GET("/monitor-targets", handler.ListMonitorTargets)
+	router.GET("/monitor-targets/local-accounts", handler.ListBindableLocalAccounts)
 	router.PUT("/monitor-targets/:id/binding", handler.BindMonitorTarget)
 	router.DELETE("/monitor-targets/:id/binding", handler.UnbindMonitorTarget)
 	router.PUT("/groups/:id/mapping", handler.UpdateGroupMapping)
@@ -367,6 +383,16 @@ func TestSupplierProviderSyncHandlerRoutes(t *testing.T) {
 	require.Equal(t, 2, dataStub.monitorTargetListParams.Page)
 	require.Equal(t, 20, dataStub.monitorTargetListParams.PageSize)
 	require.Contains(t, rec.Body.String(), `"monitor_name":"Plus-稳定"`)
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/monitor-targets/local-accounts?provider_id=42&platform=openai&search=Codex&page=1&page_size=500", nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(42), dataStub.bindableAccountParams.ProviderID)
+	require.Equal(t, "openai", dataStub.bindableAccountParams.Platform)
+	require.Equal(t, "Codex", dataStub.bindableAccountParams.Search)
+	require.Equal(t, 200, dataStub.bindableAccountParams.PageSize)
+	require.Contains(t, rec.Body.String(), `"provider_name":"皓悦"`)
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPut, "/monitor-targets/9/binding", bytes.NewBufferString(`{"local_account_id":7}`))

@@ -82,6 +82,9 @@ func (r *supplierProviderDataRepoStub) ListGroups(context.Context, SupplierProvi
 func (r *supplierProviderDataRepoStub) ListMonitorTargets(context.Context, SupplierProviderMonitorTargetListParams) (SupplierProviderMonitorTargetListResult, error) {
 	return SupplierProviderMonitorTargetListResult{}, nil
 }
+func (r *supplierProviderDataRepoStub) ListBindableLocalAccounts(context.Context, SupplierBindableLocalAccountListParams) (SupplierBindableLocalAccountListResult, error) {
+	return SupplierBindableLocalAccountListResult{}, nil
+}
 func (r *supplierProviderDataRepoStub) BindMonitorTarget(context.Context, int64, int64) error {
 	return nil
 }

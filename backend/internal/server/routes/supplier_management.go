@@ -119,6 +119,7 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 		}
 		supplier.DELETE("/accounts/:id", h.Admin.SupplierProviderSync.DeleteAccount)
 		supplier.GET("/monitor-targets", h.Admin.SupplierProviderSync.ListMonitorTargets)
+		supplier.GET("/monitor-targets/local-accounts", h.Admin.SupplierProviderSync.ListBindableLocalAccounts)
 		supplier.PUT("/monitor-targets/:id/binding", h.Admin.SupplierProviderSync.BindMonitorTarget)
 		supplier.DELETE("/monitor-targets/:id/binding", h.Admin.SupplierProviderSync.UnbindMonitorTarget)
 		supplier.GET("/accounts/:local_account_id/health-guard-models", h.Admin.SupplierProviderSync.ListLocalAccountHealthGuardModels)

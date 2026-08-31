@@ -248,6 +248,95 @@ LIMIT $`+fmt.Sprint(len(args)+1)+` OFFSET $`+fmt.Sprint(len(args)+2), queryArgs.
 	return service.SupplierProviderMonitorTargetListResult{Items: items, Total: total, Page: params.Page, PageSize: params.PageSize}, nil
 }
 
+// ListBindableLocalAccounts 为监控绑定弹窗提供候选本地账号。供应商维度靠账号名归一化匹配推导，
+// 且刻意不限制上游账号/供应商是否启用，避免手动绑定时候选账号被隐藏。
+func (r *supplierProviderDataRepository) ListBindableLocalAccounts(ctx context.Context, params service.SupplierBindableLocalAccountListParams) (service.SupplierBindableLocalAccountListResult, error) {
+	params = normalizeSupplierBindableLocalAccountListParams(params)
+	where := []string{"local_account.deleted_at IS NULL", "local_account.status = 'active'"}
+	args := make([]any, 0, 3)
+	if params.ProviderID > 0 {
+		args = append(args, params.ProviderID)
+		where = append(where, fmt.Sprintf("src.provider_ids @> ARRAY[$%d]::BIGINT[]", len(args)))
+	}
+	if params.Platform != "" {
+		args = append(args, params.Platform)
+		where = append(where, fmt.Sprintf("COALESCE(NULLIF(platform_override.platform, ''), NULLIF(local_account.platform, ''), '') = $%d", len(args)))
+	}
+	if params.Search != "" {
+		args = append(args, "%"+params.Search+"%")
+		where = append(where, fmt.Sprintf("(local_account.name ILIKE $%d OR local_account.id::text ILIKE $%d)", len(args), len(args)))
+	}
+
+	queryArgs := append(append([]any{}, args...), params.PageSize, (params.Page-1)*params.PageSize)
+	query := fmt.Sprintf(`
+WITH account_sources AS (
+  SELECT local_account.id AS local_account_id,
+         ARRAY_AGG(DISTINCT a.provider_id) AS provider_ids,
+         STRING_AGG(DISTINCT p.name, ', ' ORDER BY p.name) AS provider_name
+  FROM accounts local_account
+  JOIN supplier_provider_accounts a ON TRUE
+  JOIN supplier_providers p ON p.id = a.provider_id
+  WHERE local_account.deleted_at IS NULL
+    AND %s
+  GROUP BY local_account.id
+)
+SELECT local_account.id,
+       local_account.name,
+       COALESCE(NULLIF(platform_override.platform, ''), NULLIF(local_account.platform, ''), '') AS platform,
+       COALESCE(src.provider_name, '') AS provider_name,
+       COALESCE((
+         SELECT jsonb_agg(
+           jsonb_build_object(
+             'id', local_group.id,
+             'name', local_group.name,
+             'platform', COALESCE(local_group.platform, ''),
+             'rate_multiplier', COALESCE(local_group.rate_multiplier, 0),
+             'subscription_type', COALESCE(local_group.subscription_type, '')
+           )
+           ORDER BY local_group.id
+         )
+         FROM account_groups account_group
+         JOIN groups local_group ON local_group.id = account_group.group_id AND local_group.deleted_at IS NULL
+         WHERE account_group.account_id = local_account.id
+       ), '[]'::jsonb) AS groups,
+       COUNT(*) OVER() AS total_count
+FROM accounts local_account
+LEFT JOIN supplier_local_account_platform_overrides platform_override
+  ON platform_override.local_account_id = local_account.id
+LEFT JOIN account_sources src ON src.local_account_id = local_account.id
+WHERE %s
+ORDER BY LOWER(local_account.name) ASC, local_account.id ASC
+LIMIT $%d OFFSET $%d`,
+		supplierProviderLocalAccountMatchCondition("local_account.name", "a.name"),
+		strings.Join(where, " AND "), len(args)+1, len(args)+2)
+
+	rows, err := r.db.QueryContext(ctx, query, queryArgs...)
+	if err != nil {
+		return service.SupplierBindableLocalAccountListResult{}, fmt.Errorf("query supplier bindable local accounts: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]service.SupplierBindableLocalAccount, 0)
+	var total int64
+	for rows.Next() {
+		var item service.SupplierBindableLocalAccount
+		var groupsJSON []byte
+		var rowTotal int64
+		if err := rows.Scan(&item.ID, &item.Name, &item.Platform, &item.ProviderName, &groupsJSON, &rowTotal); err != nil {
+			return service.SupplierBindableLocalAccountListResult{}, fmt.Errorf("scan supplier bindable local account: %w", err)
+		}
+		if err := json.Unmarshal(groupsJSON, &item.Groups); err != nil {
+			return service.SupplierBindableLocalAccountListResult{}, fmt.Errorf("decode supplier bindable local account groups: %w", err)
+		}
+		total = rowTotal
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return service.SupplierBindableLocalAccountListResult{}, fmt.Errorf("iterate supplier bindable local accounts: %w", err)
+	}
+	return service.SupplierBindableLocalAccountListResult{Items: items, Total: total, Page: params.Page, PageSize: params.PageSize}, nil
+}
+
 func (r *supplierProviderDataRepository) BindMonitorTarget(ctx context.Context, monitorTargetID, localAccountID int64) error {
 	if monitorTargetID <= 0 || localAccountID <= 0 {
 		return service.ErrSupplierProviderMonitorBindingInvalid
@@ -2129,6 +2218,18 @@ func normalizeSupplierProviderMonitorTargetListParams(params service.SupplierPro
 	if params.PageSize < 1 || params.PageSize > 200 {
 		params.PageSize = 50
 	}
+	params.Search = strings.TrimSpace(params.Search)
+	return params
+}
+
+func normalizeSupplierBindableLocalAccountListParams(params service.SupplierBindableLocalAccountListParams) service.SupplierBindableLocalAccountListParams {
+	if params.Page < 1 {
+		params.Page = 1
+	}
+	if params.PageSize < 1 || params.PageSize > 200 {
+		params.PageSize = 50
+	}
+	params.Platform = strings.ToLower(strings.TrimSpace(params.Platform))
 	params.Search = strings.TrimSpace(params.Search)
 	return params
 }

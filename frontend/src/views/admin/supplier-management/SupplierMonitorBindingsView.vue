@@ -178,9 +178,30 @@
             </div>
           </div>
         </div>
-        <div class="sp-binding-search">
-          <span class="sr-only">搜索本地账号</span>
-          <Input v-model="accountSearch" class="w-full" placeholder="搜索本地账号、备注或模型" />
+        <div class="sp-binding-filters">
+          <div class="sp-binding-filter sp-binding-filter-search">
+            <span class="sr-only">搜索本地账号</span>
+            <Input v-model="accountSearch" class="w-full" placeholder="搜索本地账号名称或 ID" />
+          </div>
+          <div class="sp-binding-filter">
+            <span class="sr-only">供应商</span>
+            <Select
+              v-model="accountProviderID"
+              class="w-full"
+              :options="providerOptions"
+              :searchable="true"
+              search-placeholder="搜索供应商"
+            />
+          </div>
+          <div class="sp-binding-filter">
+            <span class="sr-only">平台</span>
+            <Select
+              v-model="accountPlatform"
+              class="w-full"
+              :options="accountPlatformOptions"
+              :searchable="false"
+            />
+          </div>
         </div>
         <div class="sp-binding-account-list" :class="{ loading: accountsLoading }">
           <button
@@ -194,7 +215,7 @@
             <span class="sp-binding-account-mark"><Icon name="check" size="sm" /></span>
             <span class="sp-binding-account-copy">
               <strong>{{ account.name }}</strong>
-              <span>{{ account.platform }} · {{ account.groups?.map(group => group.name).join('、') || '未加入分组' }}</span>
+              <span>{{ account.platform || '未设置平台' }} · {{ account.provider_name || '未匹配供应商' }} · {{ account.groups.map(group => group.name).join('、') || '未加入分组' }}</span>
             </span>
             <span v-if="account.id === bindingTarget?.local_account_id" class="sp-binding-current">当前</span>
           </button>
@@ -202,7 +223,12 @@
             <Icon name="refresh" size="sm" class="sp-spin" />
             <span>正在加载本地账号…</span>
           </div>
-          <div v-else-if="!localAccounts.length" class="sp-binding-list-state">没有找到可绑定的本地账号。</div>
+          <div v-else-if="!localAccounts.length" class="sp-binding-list-state">
+            {{ accountProviderID ? '该供应商下没有匹配到本地账号，可切换为“全部供应商”再查找。' : '没有找到可绑定的本地账号。' }}
+          </div>
+          <div v-else-if="accountsTotal > localAccounts.length" class="sp-binding-list-state">
+            共 {{ accountsTotal }} 个账号，当前只列出前 {{ localAccounts.length }} 个，请用筛选或搜索缩小范围。
+          </div>
         </div>
       </div>
       <template #footer>
@@ -221,13 +247,15 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { adminAPI } from '@/api/admin'
 import {
   bindSupplierMonitorTarget,
+  listSupplierBindableLocalAccounts,
   listSupplierMonitorTargets,
   unbindSupplierMonitorTarget,
+  type SupplierBindableLocalAccount,
   type SupplierProviderMonitorTarget,
 } from '@/api/admin/supplierProviderData'
+import { customPlatformsAPI, type CustomPlatform } from '@/api/admin/customPlatforms'
 import supplierProvidersAPI, { type SupplierProvider } from '@/api/admin/supplierProviders'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import DataTable from '@/components/common/DataTable.vue'
@@ -238,16 +266,20 @@ import type { Column } from '@/components/common/types'
 import Icon from '@/components/icons/Icon.vue'
 import { SupplierModuleLayout } from '@/components/admin/supplier-management'
 import { useAppStore } from '@/stores/app'
-import type { Account } from '@/types'
+import { buildPlatformOptions, loadPlatformCatalog } from '@/utils/platformOptions'
 
 const appStore = useAppStore()
 const targets = ref<SupplierProviderMonitorTarget[]>([])
 const providers = ref<SupplierProvider[]>([])
-const localAccounts = ref<Account[]>([])
+const customPlatforms = ref<CustomPlatform[]>([])
+const localAccounts = ref<SupplierBindableLocalAccount[]>([])
+const accountsTotal = ref(0)
 const bindingTarget = ref<SupplierProviderMonitorTarget | null>(null)
 const selectedAccountID = ref<number | null>(null)
 const search = ref('')
 const accountSearch = ref('')
+const accountProviderID = ref<number | null>(null)
+const accountPlatform = ref('')
 const providerID = ref<number | null>(null)
 const activeFilter = ref<boolean | null>(true)
 const page = ref(1)
@@ -283,15 +315,30 @@ const activeOptions: SelectOption[] = [
   { value: null, label: '全部监控项' },
 ]
 
+const accountPlatformOptions = computed<SelectOption[]>(() => [
+  { value: '', label: '全部平台' },
+  ...buildPlatformOptions(customPlatforms.value),
+])
+
 let searchTimer: number | undefined
 let accountSearchTimer: number | undefined
+let loadedAccountQuery = ''
 
-async function loadProviders() {
+function accountQuerySignature() {
+  return `${accountProviderID.value ?? ''}|${accountPlatform.value}|${accountSearch.value.trim()}`
+}
+
+async function loadFilterOptions() {
   try {
-    const result = await supplierProvidersAPI.list({ page: 1, page_size: 200 })
+    const [result, platformItems] = await Promise.all([
+      supplierProvidersAPI.list({ page: 1, page_size: 200 }),
+      customPlatformsAPI.list(),
+      loadPlatformCatalog(),
+    ])
     providers.value = result.items
+    customPlatforms.value = platformItems
   } catch (error) {
-    appStore.showError(errorMessage(error, '加载供应商失败'))
+    appStore.showError(errorMessage(error, '加载筛选选项失败'))
   }
 }
 
@@ -315,15 +362,18 @@ async function loadTargets() {
 }
 
 async function loadLocalAccounts() {
+  loadedAccountQuery = accountQuerySignature()
   accountsLoading.value = true
   try {
-    const result = await adminAPI.accounts.list(1, 200, {
+    const result = await listSupplierBindableLocalAccounts({
+      provider_id: accountProviderID.value || undefined,
+      platform: accountPlatform.value || undefined,
       search: accountSearch.value.trim() || undefined,
-      status: 'active',
-      sort_by: 'name',
-      sort_order: 'asc',
+      page: 1,
+      page_size: 200,
     })
     localAccounts.value = result.items
+    accountsTotal.value = result.total
   } catch (error) {
     appStore.showError(errorMessage(error, '加载本地账号失败'))
   } finally {
@@ -335,6 +385,8 @@ function openBinding(target: SupplierProviderMonitorTarget) {
   bindingTarget.value = target
   selectedAccountID.value = target.local_account_id || null
   accountSearch.value = ''
+  accountProviderID.value = target.provider_id || null
+  accountPlatform.value = ''
   void loadLocalAccounts()
 }
 
@@ -423,14 +475,16 @@ watch([search, providerID, activeFilter], () => {
   }, 260)
 })
 
-watch(accountSearch, () => {
+watch([accountSearch, accountProviderID, accountPlatform], () => {
   if (!bindingTarget.value) return
+  // openBinding 已按行内供应商拉过一次，跳过初始化筛选带来的重复查询
+  if (accountQuerySignature() === loadedAccountQuery) return
   window.clearTimeout(accountSearchTimer)
   accountSearchTimer = window.setTimeout(() => void loadLocalAccounts(), 260)
 })
 
 onMounted(async () => {
-  await loadProviders()
+  await loadFilterOptions()
   await loadTargets()
 })
 </script>
@@ -1027,8 +1081,25 @@ onMounted(async () => {
   font-weight: 400 !important;
 }
 
-.sp-binding-search {
+.sp-binding-filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
   margin-bottom: 0.75rem;
+}
+
+.sp-binding-filter {
+  min-width: 0;
+}
+
+.sp-binding-filter-search {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 640px) {
+  .sp-binding-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .sp-binding-account-list {

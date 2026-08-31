@@ -256,6 +256,29 @@ export interface SupplierProviderMonitorTargetListParams {
   page_size?: number
 }
 
+export interface SupplierBindableLocalAccount {
+  id: number
+  name: string
+  platform: string
+  provider_name: string
+  groups: SupplierProviderAccountBindingGroup[]
+}
+
+export interface SupplierBindableLocalAccountListResult {
+  items: SupplierBindableLocalAccount[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface SupplierBindableLocalAccountListParams {
+  provider_id?: number
+  platform?: string
+  search?: string
+  page?: number
+  page_size?: number
+}
+
 export async function syncProvider(id: number, scope: SupplierSyncScope): Promise<SupplierProviderSyncResult> {
   const { data } = await apiClient.post<SupplierProviderSyncResult>(
     `/admin/supplier-management/providers/${id}/sync/${scope}`
@@ -396,6 +419,16 @@ export async function listSupplierMonitorTargets(
 ): Promise<SupplierProviderMonitorTargetListResult> {
   const { data } = await apiClient.get<SupplierProviderMonitorTargetListResult>(
     '/admin/supplier-management/monitor-targets',
+    { params }
+  )
+  return data
+}
+
+export async function listSupplierBindableLocalAccounts(
+  params: SupplierBindableLocalAccountListParams = {}
+): Promise<SupplierBindableLocalAccountListResult> {
+  const { data } = await apiClient.get<SupplierBindableLocalAccountListResult>(
+    '/admin/supplier-management/monitor-targets/local-accounts',
     { params }
   )
   return data
@@ -616,6 +649,7 @@ export const supplierProviderDataAPI = {
   testProviderEndpoint,
   listSupplierAccounts,
   listSupplierMonitorTargets,
+  listSupplierBindableLocalAccounts,
   bindSupplierMonitorTarget,
   unbindSupplierMonitorTarget,
   deleteSupplierAccount,

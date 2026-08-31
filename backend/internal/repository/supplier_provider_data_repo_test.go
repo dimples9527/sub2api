@@ -271,6 +271,50 @@ func TestSupplierProviderDataRepositoryListMonitorTargetsReturnsBindingAccountAn
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestSupplierProviderDataRepositoryListBindableLocalAccountsFiltersByProviderAndPlatform(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+
+	mock.ExpectQuery(`(?s)WITH account_sources AS .*ARRAY_AGG\(DISTINCT a\.provider_id\) AS provider_ids.*FROM accounts local_account.*JOIN supplier_provider_accounts a ON TRUE.*LEFT JOIN account_sources src ON src\.local_account_id = local_account\.id.*WHERE local_account\.deleted_at IS NULL AND local_account\.status = 'active' AND src\.provider_ids @> ARRAY\[\$1\]::BIGINT\[\] AND COALESCE\(NULLIF\(platform_override\.platform, ''\), NULLIF\(local_account\.platform, ''\), ''\) = \$2 AND \(local_account\.name ILIKE \$3 OR local_account\.id::text ILIKE \$3\).*ORDER BY LOWER\(local_account\.name\) ASC, local_account\.id ASC.*LIMIT \$4 OFFSET \$5`).
+		WithArgs(int64(7), "openai", "%Codex%", 20, 20).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "platform", "provider_name", "groups", "total_count"}).
+			AddRow(int64(777), "皓悦-福利-Codex高并发", "openai", "皓悦", []byte(`[{"id":81,"name":"AAA","platform":"openai","rate_multiplier":1,"subscription_type":"plus"}]`), int64(3)))
+
+	result, err := repo.ListBindableLocalAccounts(context.Background(), service.SupplierBindableLocalAccountListParams{
+		ProviderID: 7,
+		Platform:   " OpenAI ",
+		Search:     " Codex ",
+		Page:       2,
+		PageSize:   20,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, int64(3), result.Total)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, int64(777), result.Items[0].ID)
+	require.Equal(t, "皓悦", result.Items[0].ProviderName)
+	require.Equal(t, []service.SupplierProviderAccountBindingGroup{{ID: 81, Name: "AAA", Platform: "openai", RateMultiplier: 1, SubscriptionType: "plus"}}, result.Items[0].Groups)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryListBindableLocalAccountsKeepsUnmatchedAccounts(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+
+	mock.ExpectQuery(`(?s)WITH account_sources AS .*WHERE local_account\.deleted_at IS NULL AND local_account\.status = 'active' ORDER BY`).
+		WithArgs(50, 0).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "platform", "provider_name", "groups", "total_count"}).
+			AddRow(int64(9), "独立账号", "anthropic", "", []byte(`[]`), int64(1)))
+
+	result, err := repo.ListBindableLocalAccounts(context.Background(), service.SupplierBindableLocalAccountListParams{PageSize: 500})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Page)
+	require.Equal(t, 50, result.PageSize)
+	require.Len(t, result.Items, 1)
+	require.Empty(t, result.Items[0].ProviderName)
+	require.Empty(t, result.Items[0].Groups)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestSupplierProviderDataRepositoryBindMonitorTargetUpsertsManualBinding(t *testing.T) {
 	repo, mock := newSupplierProviderDataRepoMock(t)
 	mock.ExpectExec(`(?s)WITH valid_binding AS .*INSERT INTO supplier_provider_monitor_bindings .*ON CONFLICT \(provider_id, monitor_target_id\) DO UPDATE SET`).

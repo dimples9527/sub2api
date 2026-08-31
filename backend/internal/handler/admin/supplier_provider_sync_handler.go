@@ -43,6 +43,7 @@ type SupplierProviderDataRepositoryPort interface {
 	ListGroupHealthTrends(ctx context.Context, params service.SupplierProviderGroupHealthTrendParams) ([]service.SupplierProviderGroupHealthTrend, error)
 	ListLocalGroupHealthTrends(ctx context.Context, params service.SupplierProviderGroupHealthTrendParams) ([]service.SupplierProviderGroupHealthTrend, error)
 	ListMonitorTargets(ctx context.Context, params service.SupplierProviderMonitorTargetListParams) (service.SupplierProviderMonitorTargetListResult, error)
+	ListBindableLocalAccounts(ctx context.Context, params service.SupplierBindableLocalAccountListParams) (service.SupplierBindableLocalAccountListResult, error)
 	BindMonitorTarget(ctx context.Context, monitorTargetID, localAccountID int64) error
 	UnbindMonitorTarget(ctx context.Context, monitorTargetID int64) error
 	ListMappingsByLocalGroup(ctx context.Context, localGroupIDs []int64) ([]service.SupplierProviderGroup, error)
@@ -382,6 +383,25 @@ func (h *SupplierProviderSyncHandler) ListMonitorTargets(c *gin.Context) {
 	result, err := h.dataRepo.ListMonitorTargets(c.Request.Context(), service.SupplierProviderMonitorTargetListParams{
 		ProviderID: parseOptionalInt64(c.Query("provider_id")),
 		Active:     parseSupplierProviderEnabled(c.Query("active")),
+		Search:     strings.TrimSpace(c.Query("search")),
+		Page:       page,
+		PageSize:   pageSize,
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *SupplierProviderSyncHandler) ListBindableLocalAccounts(c *gin.Context) {
+	page, pageSize := response.ParsePagination(c)
+	if pageSize > supplierProviderMaxPageSize {
+		pageSize = supplierProviderMaxPageSize
+	}
+	result, err := h.dataRepo.ListBindableLocalAccounts(c.Request.Context(), service.SupplierBindableLocalAccountListParams{
+		ProviderID: parseOptionalInt64(c.Query("provider_id")),
+		Platform:   strings.TrimSpace(c.Query("platform")),
 		Search:     strings.TrimSpace(c.Query("search")),
 		Page:       page,
 		PageSize:   pageSize,
