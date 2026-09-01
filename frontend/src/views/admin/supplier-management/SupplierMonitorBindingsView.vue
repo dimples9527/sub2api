@@ -406,12 +406,12 @@ async function saveBinding() {
   saving.value = true
   try {
     await bindSupplierMonitorTarget(bindingTarget.value.id, selectedAccountID.value)
-    appStore.showSuccess('监控项绑定已保存')
+    appStore.showSuccess('账号监控项绑定已保存')
     saving.value = false
     closeBinding()
     await loadTargets()
   } catch (error) {
-    appStore.showError(errorMessage(error, '保存监控项绑定失败'))
+    appStore.showError(errorMessage(error, '保存账号监控项绑定失败'))
   } finally {
     saving.value = false
   }
@@ -420,10 +420,10 @@ async function saveBinding() {
 async function unbind(target: SupplierProviderMonitorTarget) {
   try {
     await unbindSupplierMonitorTarget(target.id)
-    appStore.showSuccess('监控项绑定已解除')
+    appStore.showSuccess('账号监控项绑定已解除')
     await loadTargets()
   } catch (error) {
-    appStore.showError(errorMessage(error, '解除监控项绑定失败'))
+    appStore.showError(errorMessage(error, '解除账号监控项绑定失败'))
   }
 }
 
