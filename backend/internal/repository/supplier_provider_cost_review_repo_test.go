@@ -168,6 +168,28 @@ func TestSupplierProviderCostReviewRepositorySyncCreatesReviewAndUpdatesDailySta
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestSupplierProviderCostReviewRepositorySyncUsesLocalDateWithoutUTCOffset(t *testing.T) {
+	repo, mock := newSupplierProviderCostReviewRepoMock(t)
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	// 业务日期为 2026-08-24（Asia/Shanghai 本地午夜）；修复前 .UTC() 会偏移成 2026-08-23
+	statDate := time.Date(2026, 8, 24, 0, 0, 0, 0, loc)
+	syncedAt := time.Date(2026, 8, 24, 3, 0, 0, 0, time.UTC)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT r\.id, r\.provider_id, p\.name AS provider_name.*FOR UPDATE`).WithArgs(int64(8), "2026-08-24").WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(`INSERT INTO supplier_provider_cost_reviews`).WithArgs(
+		int64(8), "2026-08-24", 1.2, 1.0, 1.0, 1.0, 0.2, 0.0, int64(7), syncedAt,
+	).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(10)))
+	mock.ExpectExec(`INSERT INTO supplier_provider_daily_stats`).WithArgs(int64(8), "2026-08-24", 1.0).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`INSERT INTO supplier_provider_cost_review_histories`).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	got, err := repo.Sync(context.Background(), service.SupplierProviderCostReviewSyncInput{ProviderID: 8, StatDate: statDate, UpstreamCost: ptr(1.2), CalculatedCost: ptr(1.0), AutoAdoptedCost: ptr(1.0), EffectiveCost: 1.0, SyncRunID: ptrInt64(7), SyncedAt: syncedAt})
+	require.NoError(t, err)
+	require.Equal(t, int64(10), got.ID)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestSupplierProviderCostReviewRepositorySyncPreservesApprovedCost(t *testing.T) {
 	repo, mock := newSupplierProviderCostReviewRepoMock(t)
 	now := time.Date(2026, 8, 24, 3, 0, 0, 0, time.UTC)

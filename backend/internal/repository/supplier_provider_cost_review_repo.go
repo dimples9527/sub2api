@@ -237,7 +237,7 @@ func (r *supplierProviderCostReviewRepository) Sync(ctx context.Context, input s
 
 func syncCostReviewTx(ctx context.Context, tx *sql.Tx, input service.SupplierProviderCostReviewSyncInput, writeDailyStats bool) (service.SupplierProviderCostReview, error) {
 	syncedAt := input.SyncedAt.UTC()
-	statDate := input.StatDate.UTC().Format("2006-01-02")
+	statDate := input.StatDate.Format("2006-01-02")
 	review, err := queryCostReviewForUpdateByDate(ctx, tx, input.ProviderID, statDate)
 	if errors.Is(err, sql.ErrNoRows) {
 		effective := pendingEffectiveCost(input)
