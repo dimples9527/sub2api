@@ -407,6 +407,7 @@ async function saveBinding() {
   try {
     await bindSupplierMonitorTarget(bindingTarget.value.id, selectedAccountID.value)
     appStore.showSuccess('监控项绑定已保存')
+    saving.value = false
     closeBinding()
     await loadTargets()
   } catch (error) {
