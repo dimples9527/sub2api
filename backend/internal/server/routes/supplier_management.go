@@ -121,6 +121,7 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 		supplier.GET("/monitor-targets", h.Admin.SupplierProviderSync.ListMonitorTargets)
 		supplier.GET("/monitor-targets/local-accounts", h.Admin.SupplierProviderSync.ListBindableLocalAccounts)
 		supplier.PUT("/monitor-targets/:id/binding", h.Admin.SupplierProviderSync.BindMonitorTarget)
+		supplier.POST("/monitor-targets/auto-match", h.Admin.SupplierProviderSync.AutoMatchMonitorTargets)
 		supplier.DELETE("/monitor-targets/:id/binding", h.Admin.SupplierProviderSync.UnbindMonitorTarget)
 		supplier.GET("/accounts/:local_account_id/health-guard-models", h.Admin.SupplierProviderSync.ListLocalAccountHealthGuardModels)
 		supplier.PUT("/accounts/:local_account_id/platform-override", h.Admin.SupplierProviderSync.SetLocalAccountPlatformOverride)

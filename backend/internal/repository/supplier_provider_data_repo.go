@@ -371,6 +371,40 @@ ON CONFLICT (provider_id, monitor_target_id) DO UPDATE SET
 	return nil
 }
 
+func (r *supplierProviderDataRepository) ApplyMonitorAutoMatch(ctx context.Context, monitorTargetID, localAccountID int64) error {
+	if monitorTargetID <= 0 || localAccountID <= 0 {
+		return service.ErrSupplierProviderMonitorBindingInvalid
+	}
+	result, err := r.db.ExecContext(ctx, `
+WITH valid_binding AS (
+  SELECT target.provider_id, target.id AS monitor_target_id, local_account.id AS local_account_id
+  FROM supplier_provider_monitor_targets target
+  JOIN accounts local_account ON local_account.id = $2 AND local_account.deleted_at IS NULL
+  WHERE target.id = $1
+)
+INSERT INTO supplier_provider_monitor_bindings (
+  provider_id, monitor_target_id, local_account_id, match_source, match_status, created_at, updated_at
+)
+SELECT provider_id, monitor_target_id, local_account_id, 'auto', 'active', NOW(), NOW()
+FROM valid_binding
+ON CONFLICT (provider_id, monitor_target_id) DO UPDATE SET
+  local_account_id = EXCLUDED.local_account_id,
+  match_source = 'auto',
+  match_status = 'active',
+  updated_at = NOW()`, monitorTargetID, localAccountID)
+	if err != nil {
+		return fmt.Errorf("apply supplier provider monitor auto match: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read supplier provider monitor auto match result: %w", err)
+	}
+	if affected == 0 {
+		return service.ErrSupplierProviderMonitorTargetNotFound
+	}
+	return nil
+}
+
 func (r *supplierProviderDataRepository) UnbindMonitorTarget(ctx context.Context, monitorTargetID int64) error {
 	if monitorTargetID <= 0 {
 		return service.ErrSupplierProviderMonitorBindingInvalid

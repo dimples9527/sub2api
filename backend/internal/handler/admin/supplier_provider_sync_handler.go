@@ -31,6 +31,7 @@ type SupplierProviderSyncServicePort interface {
 	SyncAll(ctx context.Context, providerID int64, trigger string) (service.SupplierProviderSyncResult, error)
 	TestEndpoint(ctx context.Context, providerID int64, scope string) (service.SupplierProviderEndpointTestResult, error)
 	RefreshToken(ctx context.Context, providerID int64) (service.SupplierProviderAuthToken, error)
+	AutoMatchMonitorTargets(ctx context.Context, providerID int64) (service.SupplierProviderMonitorAutoMatchResult, error)
 }
 
 type SupplierProviderDataRepositoryPort interface {
@@ -430,6 +431,15 @@ func (h *SupplierProviderSyncHandler) BindMonitorTarget(c *gin.Context) {
 		return
 	}
 	response.Success(c, gin.H{"monitor_target_id": monitorTargetID, "local_account_id": input.LocalAccountID})
+}
+
+func (h *SupplierProviderSyncHandler) AutoMatchMonitorTargets(c *gin.Context) {
+	result, err := h.syncService.AutoMatchMonitorTargets(c.Request.Context(), parseOptionalInt64(c.Query("provider_id")))
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
 }
 
 func (h *SupplierProviderSyncHandler) UnbindMonitorTarget(c *gin.Context) {

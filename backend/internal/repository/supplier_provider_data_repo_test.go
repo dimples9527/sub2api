@@ -327,6 +327,28 @@ func TestSupplierProviderDataRepositoryBindMonitorTargetUpsertsManualBinding(t *
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestSupplierProviderDataRepositoryApplyMonitorAutoMatchWritesAutoBinding(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	mock.ExpectExec(`(?s)WITH valid_binding AS .*INSERT INTO supplier_provider_monitor_bindings .*ON CONFLICT \(provider_id, monitor_target_id\) DO UPDATE SET`).
+		WithArgs(int64(31), int64(777)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	err := repo.ApplyMonitorAutoMatch(context.Background(), 31, 777)
+
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryApplyMonitorAutoMatchRejectsInvalidIDs(t *testing.T) {
+	repo, _ := newSupplierProviderDataRepoMock(t)
+
+	err := repo.ApplyMonitorAutoMatch(context.Background(), 0, 777)
+	require.ErrorIs(t, err, service.ErrSupplierProviderMonitorBindingInvalid)
+
+	err = repo.ApplyMonitorAutoMatch(context.Background(), 31, 0)
+	require.ErrorIs(t, err, service.ErrSupplierProviderMonitorBindingInvalid)
+}
+
 func TestSupplierProviderDataRepositoryUnbindMonitorTargetMarksBindingInactive(t *testing.T) {
 	repo, mock := newSupplierProviderDataRepoMock(t)
 	mock.ExpectExec(`(?s)UPDATE supplier_provider_monitor_bindings\s+SET match_status = 'inactive', updated_at = NOW\(\)\s+WHERE monitor_target_id = \$1\s+AND match_status = 'active'`).

@@ -212,6 +212,7 @@ type SupplierProviderDataRepository interface {
 	ListBindableLocalAccounts(ctx context.Context, params SupplierBindableLocalAccountListParams) (SupplierBindableLocalAccountListResult, error)
 	BindMonitorTarget(ctx context.Context, monitorTargetID, localAccountID int64) error
 	UnbindMonitorTarget(ctx context.Context, monitorTargetID int64) error
+	ApplyMonitorAutoMatch(ctx context.Context, monitorTargetID, localAccountID int64) error
 	ListGroupsForAutoMatch(ctx context.Context, providerID int64) ([]SupplierProviderGroup, error)
 	GetGroupForAutoMatch(ctx context.Context, groupID int64) (SupplierProviderGroup, error)
 	UpdateGroupMapping(ctx context.Context, groupID int64, localGroupID *int64) error

@@ -414,3 +414,124 @@ func normalizeSupplierMonitorStatus(status string) string {
 		return SupplierAccountHealthGuardStatusUnavailable
 	}
 }
+
+// SupplierProviderMonitorAutoMatchResult 监控项自动匹配结果
+type SupplierProviderMonitorAutoMatchResult struct {
+	ProviderID int64 `json:"provider_id"`
+	Matched    int   `json:"matched"`
+	Ambiguous  int   `json:"ambiguous"`
+	Skipped    int   `json:"skipped"`
+	Total      int   `json:"total"`
+}
+
+// AutoMatchMonitorTargets 为监控项自动匹配已绑定的本地账号
+// providerID 大于 0 时仅处理指定供应商，否则处理全部已启用供应商
+func (s *SupplierProviderSyncService) AutoMatchMonitorTargets(ctx context.Context, providerID int64) (SupplierProviderMonitorAutoMatchResult, error) {
+	result := SupplierProviderMonitorAutoMatchResult{}
+	var providers []*SupplierProvider
+	var err error
+	if providerID > 0 {
+		var provider *SupplierProvider
+		provider, err = s.providerRepo.GetByID(ctx, providerID)
+		if err != nil {
+			return result, fmt.Errorf("get supplier provider for monitor auto match: %w", err)
+		}
+		if provider != nil {
+			providers = append(providers, provider)
+		}
+	} else {
+		enabled := true
+		providers, _, err = s.providerRepo.List(ctx, SupplierProviderListParams{Enabled: &enabled, Page: 1, PageSize: 1000})
+		if err != nil {
+			return result, fmt.Errorf("list enabled supplier providers for monitor auto match: %w", err)
+		}
+	}
+	for _, provider := range providers {
+		if provider == nil {
+			continue
+		}
+		perProvider, matchErr := s.autoMatchMonitorTargetsForProvider(ctx, provider)
+		if matchErr != nil {
+			return result, matchErr
+		}
+		result.Matched += perProvider.Matched
+		result.Ambiguous += perProvider.Ambiguous
+		result.Skipped += perProvider.Skipped
+		result.Total += perProvider.Total
+	}
+	return result, nil
+}
+
+// autoMatchMonitorTargetsForProvider 为单个供应商的监控项执行自动匹配
+func (s *SupplierProviderSyncService) autoMatchMonitorTargetsForProvider(ctx context.Context, provider *SupplierProvider) (SupplierProviderMonitorAutoMatchResult, error) {
+	result := SupplierProviderMonitorAutoMatchResult{ProviderID: provider.ID}
+	candidates, err := s.monitorAccountCandidates(ctx, provider)
+	if err != nil {
+		return result, err
+	}
+	active := true
+	monitorResult, err := s.dataRepo.ListMonitorTargets(ctx, SupplierProviderMonitorTargetListParams{ProviderID: provider.ID, Active: &active, Page: 1, PageSize: 10000})
+	if err != nil {
+		return result, fmt.Errorf("list supplier provider monitor targets for auto match: %w", err)
+	}
+	for _, monitor := range monitorResult.Items {
+		if monitor.LocalAccountID > 0 {
+			continue
+		}
+		result.Total++
+		key := normalizeSupplierMonitorMatchKey(monitor.MonitorName)
+		if key == "" {
+			result.Skipped++
+			continue
+		}
+		matches := candidates[key]
+		switch len(matches) {
+		case 0:
+			result.Skipped++
+		case 1:
+			if applyErr := s.dataRepo.ApplyMonitorAutoMatch(ctx, monitor.ID, matches[0].localAccountID); applyErr != nil {
+				return result, applyErr
+			}
+			result.Matched++
+		default:
+			result.Ambiguous++
+		}
+	}
+	return result, nil
+}
+
+// monitorAccountCandidates 构建已绑定本地账号的上游账号候选索引
+func (s *SupplierProviderSyncService) monitorAccountCandidates(ctx context.Context, provider *SupplierProvider) (map[string][]supplierMonitorAccountMatch, error) {
+	candidates := make(map[string][]supplierMonitorAccountMatch)
+	if provider == nil {
+		return candidates, nil
+	}
+	accounts, err := s.dataRepo.ListAccounts(ctx, SupplierProviderDataListParams{ProviderID: provider.ID, Page: 1, PageSize: 10000})
+	if err != nil {
+		return nil, fmt.Errorf("list supplier provider account candidates: %w", err)
+	}
+	for _, account := range accounts.Items {
+		if account.LocalAccountID == nil || *account.LocalAccountID <= 0 {
+			continue
+		}
+		match := supplierMonitorAccountMatchFromAccount(account)
+		for _, key := range supplierMonitorAccountMatchKeys(provider, account) {
+			normalized := normalizeSupplierMonitorMatchKey(key)
+			if normalized == "" {
+				continue
+			}
+			candidates[normalized] = appendUniqueSupplierMonitorAccountMatch(candidates[normalized], match)
+		}
+	}
+	return candidates, nil
+}
+
+// appendUniqueSupplierMonitorAccountMatch 按本地账号 ID 去重追加候选
+func appendUniqueSupplierMonitorAccountMatch(matches []supplierMonitorAccountMatch, match supplierMonitorAccountMatch) []supplierMonitorAccountMatch {
+	for _, existing := range matches {
+		if existing.localAccountID == match.localAccountID {
+			return matches
+		}
+	}
+	return append(matches, match)
+}

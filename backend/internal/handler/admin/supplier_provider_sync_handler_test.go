@@ -118,6 +118,10 @@ func (s *supplierProviderSyncHandlerSyncStub) RefreshToken(_ context.Context, pr
 	}
 	return service.SupplierProviderAuthToken{ExpiresAt: time.Date(2026, time.August, 8, 0, 0, 0, 0, time.UTC)}, nil
 }
+func (s *supplierProviderSyncHandlerSyncStub) AutoMatchMonitorTargets(_ context.Context, providerID int64) (service.SupplierProviderMonitorAutoMatchResult, error) {
+	return service.SupplierProviderMonitorAutoMatchResult{ProviderID: providerID}, nil
+}
+
 func (s *supplierProviderSyncHandlerSyncStub) TestEndpoint(_ context.Context, _ int64, scope string) (service.SupplierProviderEndpointTestResult, error) {
 	s.testScope = scope
 	if s.endpointError != nil {

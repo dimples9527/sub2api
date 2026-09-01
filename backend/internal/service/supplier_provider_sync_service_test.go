@@ -91,6 +91,9 @@ func (r *supplierProviderDataRepoStub) BindMonitorTarget(context.Context, int64,
 func (r *supplierProviderDataRepoStub) UnbindMonitorTarget(context.Context, int64) error {
 	return nil
 }
+func (r *supplierProviderDataRepoStub) ApplyMonitorAutoMatch(_ context.Context, monitorTargetID, localAccountID int64) error {
+	return nil
+}
 func (r *supplierProviderDataRepoStub) ListGroupHealthTrends(context.Context, SupplierProviderGroupHealthTrendParams) ([]SupplierProviderGroupHealthTrend, error) {
 	return []SupplierProviderGroupHealthTrend{}, nil
 }
