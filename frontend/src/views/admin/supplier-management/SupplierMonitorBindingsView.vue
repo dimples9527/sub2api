@@ -61,6 +61,10 @@
         <Icon name="link" size="sm" class="sp-monitor-overview-note-icon" />
         <span>绑定关系独立于供应商账号名称和本地分组名称。</span>
       </div>
+      <button class="sp-button small sp-overview-auto-match" type="button" :disabled="autoMatching" @click="autoMatch">
+        <Icon name="sparkles" size="sm" :class="autoMatching ? 'sp-spin' : ''" />
+        <span>自动匹配</span>
+      </button>
     </div>
 
     <!-- 数据表格 -->
@@ -248,6 +252,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import {
+  autoMatchSupplierMonitorTargets,
   bindSupplierMonitorTarget,
   listSupplierBindableLocalAccounts,
   listSupplierMonitorTargets,
@@ -461,6 +466,22 @@ function timeStatusClass(value: string) {
   if (hours > 24 * 7) return 'stale'
   if (hours > 24) return 'warning'
   return ''
+}
+
+const autoMatching = ref(false)
+
+async function autoMatch() {
+  if (autoMatching.value) return
+  autoMatching.value = true
+  try {
+    const result = await autoMatchSupplierMonitorTargets(providerID.value || undefined)
+    appStore.showSuccess(`自动匹配完成：${result.matched} 个已绑定，${result.ambiguous} 个存在歧义，${result.skipped} 个未匹配`)
+    await loadTargets()
+  } catch (error) {
+    appStore.showError(errorMessage(error, '自动匹配失败'))
+  } finally {
+    autoMatching.value = false
+  }
 }
 
 function errorMessage(error: unknown, fallback: string) {
@@ -689,6 +710,33 @@ onMounted(async () => {
 }
 
 /* ===== 表格卡片 ===== */
+
+/* 概览栏自动匹配按钮 */
+.sp-overview-auto-match {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  white-space: nowrap;
+  padding: 0.35rem 0.85rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.5rem;
+  background: var(--sp-panel);
+  color: var(--sp-text);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+.sp-overview-auto-match:hover {
+  border-color: color-mix(in srgb, var(--sp-cyan) 50%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-cyan) 6%, var(--sp-panel));
+  color: var(--sp-cyan);
+}
+.sp-overview-auto-match:disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
 .sp-monitor-table-card {
   overflow: hidden;
   border: 1px solid var(--sp-line);

@@ -454,6 +454,26 @@ export async function unbindSupplierMonitorTarget(
   return data
 }
 
+
+export interface SupplierProviderMonitorAutoMatchResult {
+  provider_id: number
+  matched: number
+  ambiguous: number
+  skipped: number
+  total: number
+}
+
+export async function autoMatchSupplierMonitorTargets(
+  providerId?: number
+): Promise<SupplierProviderMonitorAutoMatchResult> {
+  const { data } = await apiClient.post<SupplierProviderMonitorAutoMatchResult>(
+    '/admin/supplier-management/monitor-targets/auto-match',
+    undefined,
+    { params: providerId ? { provider_id: providerId } : undefined }
+  )
+  return data
+}
+
 export async function deleteSupplierAccount(id: number): Promise<{ account_id: number }> {
   const { data } = await apiClient.delete<{ account_id: number }>(
     `/admin/supplier-management/accounts/${id}`
@@ -652,6 +672,7 @@ export const supplierProviderDataAPI = {
   listSupplierBindableLocalAccounts,
   bindSupplierMonitorTarget,
   unbindSupplierMonitorTarget,
+  autoMatchSupplierMonitorTargets,
   deleteSupplierAccount,
   setSupplierLocalAccountPlatformOverride,
   clearSupplierLocalAccountPlatformOverride,
