@@ -388,7 +388,7 @@ func (r *supplierAccountHealthHistoryRepository) GetUpstreamTrends(ctx context.C
 	monitorRows, err := r.db.QueryContext(ctx, `
 SELECT binding.local_account_id, target.id, target.provider_id, provider.name,
        target.monitor_key, target.monitor_name, target.primary_model,
-       target.availability_7d, target.last_seen_at
+       COALESCE(target.availability_7d, 0), target.last_seen_at
 FROM supplier_provider_monitor_bindings binding
 JOIN supplier_provider_monitor_targets target
   ON target.id = binding.monitor_target_id AND target.active = TRUE

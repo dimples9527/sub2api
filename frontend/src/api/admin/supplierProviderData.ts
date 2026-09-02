@@ -233,7 +233,8 @@ export interface SupplierProviderMonitorTarget {
   monitor_name: string
   monitor_provider: string
   primary_model: string
-  availability_7d: number
+  /** null 表示上游没上报可用率，与真实 0% 区分 */
+  availability_7d: number | null
   active: boolean
   last_seen_at: string
   local_account_id?: number
@@ -248,10 +249,20 @@ export interface SupplierProviderMonitorTargetListResult {
   page_size: number
 }
 
+export type SupplierProviderMonitorTargetSort =
+  | 'provider'
+  | 'monitor_name'
+  | 'binding'
+  | 'availability'
+  | 'last_seen'
+
 export interface SupplierProviderMonitorTargetListParams {
   provider_id?: number
   active?: boolean
   search?: string
+  /** 省略时后端按「供应商 → 未绑定优先 → 监控项名」排序 */
+  sort?: SupplierProviderMonitorTargetSort
+  order?: 'asc' | 'desc'
   page?: number
   page_size?: number
 }

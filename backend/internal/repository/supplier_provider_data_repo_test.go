@@ -222,7 +222,7 @@ func TestSupplierProviderDataRepositorySaveMonitorSnapshotReturnsExplicitBinding
 		Name:           "Plus-稳定",
 		Provider:       "sub2api",
 		PrimaryModel:   "gpt-5",
-		Availability7D: 99.5,
+		Availability7D: ptr(99.5),
 		Timeline: []service.SupplierProviderMonitorPoint{{
 			Status:        "operational",
 			LatencyMS:     120,
@@ -248,7 +248,7 @@ func TestSupplierProviderDataRepositoryListMonitorTargetsReturnsBindingAccountAn
 	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\) FROM supplier_provider_monitor_targets t WHERE TRUE AND t\.provider_id = \$1 AND t\.active = \$2 AND \(t\.monitor_key ILIKE \$3 OR t\.monitor_name ILIKE \$3 OR t\.primary_model ILIKE \$3\)`).
 		WithArgs(int64(7), true, "%Plus%").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
-	mock.ExpectQuery(`(?s)SELECT t\.id, t\.provider_id, p\.name, t\.monitor_key, t\.monitor_name, t\.monitor_provider,.*FROM supplier_provider_monitor_targets t.*JOIN supplier_providers p ON p\.id = t\.provider_id.*supplier_provider_monitor_bindings b.*ORDER BY t\.last_seen_at DESC, t\.id DESC`).
+	mock.ExpectQuery(`(?s)SELECT t\.id, t\.provider_id, p\.name, t\.monitor_key, t\.monitor_name, t\.monitor_provider,.*FROM supplier_provider_monitor_targets t.*JOIN supplier_providers p ON p\.id = t\.provider_id.*supplier_provider_monitor_bindings b.*ORDER BY p\.name ASC, CASE WHEN local_account\.id IS NULL THEN 0 ELSE 1 END ASC, t\.monitor_name ASC, t\.id ASC`).
 		WithArgs(int64(7), true, "%Plus%", 20, 20).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_id", "provider_name", "monitor_key", "monitor_name", "monitor_provider", "primary_model", "availability_7d", "active", "last_seen_at", "local_account_id", "local_account_name", "binding_groups"}).
 			AddRow(int64(31), int64(7), "皓悦", "2", "Plus-稳定", "sub2api", "gpt-5", 99.5, true, lastSeenAt, int64(777), "皓悦-福利-Codex高并发", []byte(`[{"id":81,"name":"AAA","platform":"openai","rate_multiplier":1,"subscription_type":"plus"}]`)))
@@ -267,7 +267,62 @@ func TestSupplierProviderDataRepositoryListMonitorTargetsReturnsBindingAccountAn
 	require.Equal(t, int64(777), result.Items[0].LocalAccountID)
 	require.Equal(t, "皓悦", result.Items[0].ProviderName)
 	require.Equal(t, "皓悦-福利-Codex高并发", result.Items[0].LocalAccountName)
+	require.Equal(t, ptr(99.5), result.Items[0].Availability7D)
 	require.Equal(t, []service.SupplierProviderAccountBindingGroup{{ID: 81, Name: "AAA", Platform: "openai", RateMultiplier: 1, SubscriptionType: "plus"}}, result.Items[0].BindingGroups)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryListMonitorTargetsKeepsNullAvailabilityDistinctFromZero(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	lastSeenAt := time.Date(2026, 8, 12, 11, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\) FROM supplier_provider_monitor_targets t WHERE TRUE`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(2)))
+	mock.ExpectQuery(`(?s)SELECT t\.id, t\.provider_id, p\.name`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_id", "provider_name", "monitor_key", "monitor_name", "monitor_provider", "primary_model", "availability_7d", "active", "last_seen_at", "local_account_id", "local_account_name", "binding_groups"}).
+			AddRow(int64(31), int64(7), "皓悦", "2", "无上报", "sub2api", "gpt-5", nil, true, lastSeenAt, int64(0), "", []byte(`[]`)).
+			AddRow(int64(32), int64(7), "皓悦", "3", "真实全挂", "sub2api", "gpt-5", 0.0, true, lastSeenAt, int64(0), "", []byte(`[]`)))
+
+	result, err := repo.ListMonitorTargets(context.Background(), service.SupplierProviderMonitorTargetListParams{})
+
+	require.NoError(t, err)
+	require.Len(t, result.Items, 2)
+	require.Nil(t, result.Items[0].Availability7D)
+	require.Equal(t, ptr(0.0), result.Items[1].Availability7D)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryListMonitorTargetsAppliesWhitelistedSort(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+
+	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\) FROM supplier_provider_monitor_targets t WHERE TRUE`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(0)))
+	mock.ExpectQuery(`(?s)ORDER BY t\.availability_7d DESC NULLS LAST, p\.name ASC, CASE WHEN local_account\.id IS NULL THEN 0 ELSE 1 END ASC, t\.monitor_name ASC, t\.id ASC`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_id", "provider_name", "monitor_key", "monitor_name", "monitor_provider", "primary_model", "availability_7d", "active", "last_seen_at", "local_account_id", "local_account_name", "binding_groups"}))
+
+	_, err := repo.ListMonitorTargets(context.Background(), service.SupplierProviderMonitorTargetListParams{
+		Sort:  service.SupplierProviderMonitorTargetSortAvailability,
+		Order: "desc",
+	})
+
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierProviderDataRepositoryListMonitorTargetsRejectsUnknownSort(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+
+	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\) FROM supplier_provider_monitor_targets t WHERE TRUE`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(0)))
+	mock.ExpectQuery(`(?s)ORDER BY p\.name ASC, CASE WHEN local_account\.id IS NULL THEN 0 ELSE 1 END ASC, t\.monitor_name ASC, t\.id ASC`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_id", "provider_name", "monitor_key", "monitor_name", "monitor_provider", "primary_model", "availability_7d", "active", "last_seen_at", "local_account_id", "local_account_name", "binding_groups"}))
+
+	_, err := repo.ListMonitorTargets(context.Background(), service.SupplierProviderMonitorTargetListParams{
+		Sort:  "t.id; DROP TABLE accounts",
+		Order: "desc",
+	})
+
+	require.NoError(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

@@ -72,8 +72,9 @@ type SupplierProviderMonitorItem struct {
 	PrimaryStatus        string
 	PrimaryLatencyMS     int64
 	PrimaryPingLatencyMS int64
-	Availability7D       float64
-	Timeline             []SupplierProviderMonitorPoint
+	// Availability7D 为 nil 表示上游没上报可用率，与真实 0% 区分。
+	Availability7D *float64
+	Timeline       []SupplierProviderMonitorPoint
 }
 
 type SupplierProviderRemoteClient interface {
@@ -954,7 +955,7 @@ func parseSupplierSub2APIMonitorItems(raw []byte) ([]SupplierProviderMonitorItem
 			PrimaryStatus:        strings.TrimSpace(jsonString(item["primary_status"])),
 			PrimaryLatencyMS:     jsonInt64(item["primary_latency_ms"]),
 			PrimaryPingLatencyMS: jsonInt64(item["primary_ping_latency_ms"]),
-			Availability7D:       jsonFloat(item["availability_7d"]),
+			Availability7D:       jsonFloatPtr(item["availability_7d"]),
 		}
 		if timeline, ok := item["timeline"].([]any); ok {
 			monitor.Timeline = make([]SupplierProviderMonitorPoint, 0, len(timeline))
@@ -1406,6 +1407,33 @@ func jsonFloat(value any) float64 {
 		return parsed
 	default:
 		return 0
+	}
+}
+
+// jsonFloatPtr 与 jsonFloat 的区别是把「字段缺失或无法解析」映射成 nil 而不是 0，
+// 供可用率这类 0 本身有意义的字段使用。
+func jsonFloatPtr(value any) *float64 {
+	switch v := value.(type) {
+	case float64:
+		return &v
+	case json.Number:
+		parsed, err := strconv.ParseFloat(v.String(), 64)
+		if err != nil {
+			return nil
+		}
+		return &parsed
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return nil
+		}
+		parsed, err := strconv.ParseFloat(trimmed, 64)
+		if err != nil {
+			return nil
+		}
+		return &parsed
+	default:
+		return nil
 	}
 }
 

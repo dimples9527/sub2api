@@ -32,7 +32,7 @@ type SupplierProviderMonitorSyncItem struct {
 	RawStatus        string    `json:"raw_status,omitempty"`
 	LatencyMS        int64     `json:"latency_ms"`
 	PingLatencyMS    int64     `json:"ping_latency_ms,omitempty"`
-	Availability7D   float64   `json:"availability_7d,omitempty"`
+	Availability7D   *float64  `json:"availability_7d,omitempty"`
 	CheckedAt        time.Time `json:"checked_at"`
 	Message          string    `json:"message,omitempty"`
 }
@@ -55,7 +55,7 @@ type SupplierProviderMonitorTarget struct {
 	MonitorName      string                                `json:"monitor_name"`
 	MonitorProvider  string                                `json:"monitor_provider"`
 	PrimaryModel     string                                `json:"primary_model"`
-	Availability7D   float64                               `json:"availability_7d"`
+	Availability7D   *float64                              `json:"availability_7d"`
 	Active           bool                                  `json:"active"`
 	LastSeenAt       time.Time                             `json:"last_seen_at"`
 	LocalAccountID   int64                                 `json:"local_account_id,omitempty"`
@@ -67,9 +67,21 @@ type SupplierProviderMonitorTargetListParams struct {
 	ProviderID int64
 	Active     *bool
 	Search     string
-	Page       int
-	PageSize   int
+	// Sort 取 SupplierProviderMonitorTargetSort* 之一，空值走「供应商 → 未绑定优先 → 监控项名」默认序。
+	Sort     string
+	Order    string
+	Page     int
+	PageSize int
 }
+
+// 监控项列表可排序字段。仓储层按白名单映射到列名，不接受任意输入。
+const (
+	SupplierProviderMonitorTargetSortProvider     = "provider"
+	SupplierProviderMonitorTargetSortMonitorName  = "monitor_name"
+	SupplierProviderMonitorTargetSortBinding      = "binding"
+	SupplierProviderMonitorTargetSortAvailability = "availability"
+	SupplierProviderMonitorTargetSortLastSeen     = "last_seen"
+)
 
 type SupplierProviderMonitorTargetListResult struct {
 	Items    []SupplierProviderMonitorTarget `json:"items"`

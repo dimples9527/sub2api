@@ -227,7 +227,7 @@ LEFT JOIN accounts local_account
   ON local_account.id = b.local_account_id
  AND local_account.deleted_at IS NULL
 WHERE `+whereSQL+`
-ORDER BY t.last_seen_at DESC, t.id DESC
+ORDER BY `+supplierProviderMonitorTargetOrderBy(params)+`
 LIMIT $`+fmt.Sprint(len(args)+1)+` OFFSET $`+fmt.Sprint(len(args)+2), queryArgs...)
 	if err != nil {
 		return service.SupplierProviderMonitorTargetListResult{}, fmt.Errorf("query supplier provider monitor targets: %w", err)
@@ -2253,7 +2253,40 @@ func normalizeSupplierProviderMonitorTargetListParams(params service.SupplierPro
 		params.PageSize = 50
 	}
 	params.Search = strings.TrimSpace(params.Search)
+	params.Sort = strings.ToLower(strings.TrimSpace(params.Sort))
+	if _, ok := supplierProviderMonitorTargetSortColumns[params.Sort]; !ok {
+		params.Sort = ""
+	}
+	if strings.ToLower(strings.TrimSpace(params.Order)) == "desc" {
+		params.Order = "DESC"
+	} else {
+		params.Order = "ASC"
+	}
 	return params
+}
+
+// supplierProviderMonitorTargetBindingRank 让未绑定的监控项排在前面，它们才是待处理的。
+const supplierProviderMonitorTargetBindingRank = "CASE WHEN local_account.id IS NULL THEN 0 ELSE 1 END"
+
+var supplierProviderMonitorTargetSortColumns = map[string]string{
+	service.SupplierProviderMonitorTargetSortProvider:     "p.name",
+	service.SupplierProviderMonitorTargetSortMonitorName:  "t.monitor_name",
+	service.SupplierProviderMonitorTargetSortBinding:      supplierProviderMonitorTargetBindingRank,
+	service.SupplierProviderMonitorTargetSortAvailability: "t.availability_7d",
+	service.SupplierProviderMonitorTargetSortLastSeen:     "t.last_seen_at",
+}
+
+// supplierProviderMonitorTargetOrderBy 默认把同一供应商的监控项聚在一起、未绑定的排在前面，
+// 这样相邻行才有关联；显式排序时仍拼上默认序做稳定分页的 tiebreaker。
+// params 必须已经过 normalize，Sort 只可能是白名单内的键。
+func supplierProviderMonitorTargetOrderBy(params service.SupplierProviderMonitorTargetListParams) string {
+	groupedOrder := "p.name ASC, " + supplierProviderMonitorTargetBindingRank + " ASC, t.monitor_name ASC, t.id ASC"
+	column, ok := supplierProviderMonitorTargetSortColumns[params.Sort]
+	if !ok {
+		return groupedOrder
+	}
+	// NULLS LAST 让「上游没上报可用率」的行始终沉底，而不是在 DESC 时冒到最前面。
+	return column + " " + params.Order + " NULLS LAST, " + groupedOrder
 }
 
 func normalizeSupplierBindableLocalAccountListParams(params service.SupplierBindableLocalAccountListParams) service.SupplierBindableLocalAccountListParams {
@@ -2297,10 +2330,15 @@ type supplierProviderMonitorTargetScanner interface{ Scan(dest ...any) error }
 func scanSupplierProviderMonitorTarget(scanner supplierProviderMonitorTargetScanner) (service.SupplierProviderMonitorTarget, error) {
 	var item service.SupplierProviderMonitorTarget
 	var bindingGroupsJSON []byte
+	var availability sql.NullFloat64
 	if err := scanner.Scan(&item.ID, &item.ProviderID, &item.ProviderName, &item.MonitorKey, &item.MonitorName, &item.MonitorProvider,
-		&item.PrimaryModel, &item.Availability7D, &item.Active, &item.LastSeenAt,
+		&item.PrimaryModel, &availability, &item.Active, &item.LastSeenAt,
 		&item.LocalAccountID, &item.LocalAccountName, &bindingGroupsJSON); err != nil {
 		return service.SupplierProviderMonitorTarget{}, err
+	}
+	if availability.Valid {
+		value := availability.Float64
+		item.Availability7D = &value
 	}
 	if err := json.Unmarshal(bindingGroupsJSON, &item.BindingGroups); err != nil {
 		return service.SupplierProviderMonitorTarget{}, fmt.Errorf("decode supplier provider monitor target binding groups: %w", err)

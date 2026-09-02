@@ -70,17 +70,27 @@
     <!-- 数据表格 -->
     <section class="sp-monitor-table-card">
       <div class="sp-monitor-table-inner">
-        <DataTable :columns="columns" :data="targets" :loading="loading" row-key="id">
+        <DataTable
+          :columns="columns"
+          :data="targets"
+          :loading="loading"
+          row-key="id"
+          server-side-sort
+          @sort="handleSort"
+        >
           <template #cell-provider_name="{ row }">
-            <div class="sp-monitor-provider">
-              <span class="sp-monitor-provider-tag" :class="providerTagClass(row.provider_id)">
+            <div class="sp-monitor-provider" :class="rowHueClass(row.provider_id)">
+              <span class="sp-monitor-provider-tag">
                 {{ row.provider_name || `供应商 #${row.provider_id}` }}
               </span>
               <span class="sp-monitor-provider-id">#{{ row.provider_id }}</span>
             </div>
           </template>
           <template #cell-monitor_name="{ row }">
-            <div class="sp-monitor-target-cell" :class="{ 'sp-monitor-target-inactive': !row.active }">
+            <div
+              class="sp-monitor-target-cell"
+              :class="[rowHueClass(row.provider_id), { 'sp-monitor-target-inactive': !row.active }]"
+            >
               <div class="sp-monitor-target-name">
                 <span class="sp-monitor-target-chip">{{ row.monitor_name || '未命名监控项' }}</span>
                 <span v-if="!row.active" class="sp-monitor-inactive-chip">停用</span>
@@ -92,29 +102,48 @@
             </div>
           </template>
           <template #cell-primary_model="{ row }">
-            <code class="sp-monitor-model-code">{{ row.primary_model || '—' }}</code>
+            <span v-if="row.primary_model" class="sp-monitor-model-tag">
+              <span class="sp-monitor-model-logo" aria-hidden="true">
+                <ModelIcon :model="row.primary_model" size="13px" />
+              </span>
+              <span class="sp-monitor-model-name">{{ row.primary_model }}</span>
+            </span>
+            <span v-else class="sp-monitor-muted">—</span>
           </template>
           <template #cell-availability_7d="{ row }">
-            <span :class="['sp-monitor-availability', availabilityClass(row.availability_7d)]">
-              {{ formatAvailability(row.availability_7d) }}
-            </span>
+            <span v-if="row.availability_7d === null" class="sp-monitor-availability-missing">上游未上报</span>
+            <div v-else class="sp-monitor-availability-cell">
+              <span :class="['sp-monitor-availability', availabilityClass(row.availability_7d)]">
+                {{ formatAvailability(row.availability_7d) }}
+              </span>
+              <span class="sp-monitor-availability-track" title="条形以 95%~100% 为量程">
+                <span
+                  :class="['sp-monitor-availability-fill', availabilityClass(row.availability_7d)]"
+                  :style="{ width: availabilityBarWidth(row.availability_7d) }"
+                ></span>
+              </span>
+            </div>
           </template>
           <template #cell-local_account_name="{ row }">
-            <div v-if="row.local_account_id" class="sp-monitor-binding-cell">
-              <div class="sp-monitor-binding-name">
-                <Icon name="link" size="xs" class="sp-monitor-binding-icon" />
-                <strong>{{ row.local_account_name }}</strong>
+            <div
+              class="sp-monitor-binding"
+              :class="[rowHueClass(row.provider_id), { 'sp-monitor-binding-empty': !row.local_account_id }]"
+            >
+              <Icon name="arrowRight" size="xs" class="sp-monitor-binding-arrow" />
+              <div v-if="row.local_account_id" class="sp-monitor-binding-cell">
+                <strong class="sp-monitor-binding-name">{{ row.local_account_name }}</strong>
+                <span v-if="row.binding_groups.length" class="sp-monitor-binding-groups">{{ groupNames(row.binding_groups) }}</span>
+                <span v-else class="sp-monitor-muted">未加入本地分组</span>
               </div>
-              <span v-if="row.binding_groups.length" class="sp-monitor-binding-groups">{{ groupNames(row.binding_groups) }}</span>
-              <span v-else class="sp-monitor-muted">未加入本地分组</span>
+              <span v-else class="sp-monitor-unbound">未绑定本地账号</span>
             </div>
-            <span v-else class="sp-monitor-unbound">
-              <span class="sp-monitor-unbound-dot" aria-hidden="true"></span>
-              未绑定本地账号
-            </span>
           </template>
           <template #cell-last_seen_at="{ row }">
-            <span class="sp-monitor-time" :class="timeStatusClass(row.last_seen_at)">{{ formatTime(row.last_seen_at) }}</span>
+            <span
+              class="sp-monitor-time"
+              :class="timeStatusClass(row.last_seen_at)"
+              :title="formatTime(row.last_seen_at)"
+            >{{ formatRelativeTime(row.last_seen_at) }}</span>
           </template>
           <template #cell-actions="{ row }">
             <div class="sp-monitor-actions">
@@ -122,7 +151,7 @@
                 <Icon name="link" size="sm" />
                 <span>{{ row.local_account_id ? '更换' : '绑定' }}</span>
               </button>
-              <button v-if="row.local_account_id" class="sp-button small ghost" type="button" @click="unbind(row)">
+              <button v-if="row.local_account_id" class="sp-button small danger" type="button" @click="unbind(row)">
                 <Icon name="x" size="sm" />
                 <span>解除</span>
               </button>
@@ -207,9 +236,13 @@
             />
           </div>
         </div>
+        <p v-if="bindingMatchVariants.length" class="sp-binding-list-caption">
+          <Icon name="sort" size="sm" />
+          <span>按与监控项名称的相似度排序，越靠前越可能是同一个账号；100% 即自动匹配会直接采用的那一个。</span>
+        </p>
         <div class="sp-binding-account-list" :class="{ loading: accountsLoading }">
           <button
-            v-for="account in localAccounts"
+            v-for="{ account, score } in rankedLocalAccounts"
             :key="account.id"
             class="sp-binding-account"
             :class="{ selected: selectedAccountID === account.id }"
@@ -221,6 +254,7 @@
               <strong>{{ account.name }}</strong>
               <span>{{ account.platform || '未设置平台' }} · {{ account.provider_name || '未匹配供应商' }} · {{ account.groups.map(group => group.name).join('、') || '未加入分组' }}</span>
             </span>
+            <span v-if="score > 0" class="sp-binding-similarity" :class="`tier-${similarityTierClass(score)}`">{{ similarityLabel(score) }}</span>
             <span v-if="account.id === bindingTarget?.local_account_id" class="sp-binding-current">当前</span>
           </button>
           <div v-if="accountsLoading" class="sp-binding-list-state">
@@ -231,7 +265,7 @@
             {{ accountProviderID ? '该供应商下没有匹配到本地账号，可切换为“全部供应商”再查找。' : '没有找到可绑定的本地账号。' }}
           </div>
           <div v-else-if="accountsTotal > localAccounts.length" class="sp-binding-list-state">
-            共 {{ accountsTotal }} 个账号，当前只列出前 {{ localAccounts.length }} 个，请用筛选或搜索缩小范围。
+            共 {{ accountsTotal }} 个账号，当前只按名称顺序列出前 {{ localAccounts.length }} 个；相似度只在这些账号之间比较，最匹配的那个可能还没被加载，请用筛选或搜索缩小范围。
           </div>
         </div>
       </div>
@@ -259,18 +293,21 @@ import {
   unbindSupplierMonitorTarget,
   type SupplierBindableLocalAccount,
   type SupplierProviderMonitorTarget,
+  type SupplierProviderMonitorTargetSort,
 } from '@/api/admin/supplierProviderData'
 import { customPlatformsAPI, type CustomPlatform } from '@/api/admin/customPlatforms'
 import supplierProvidersAPI, { type SupplierProvider } from '@/api/admin/supplierProviders'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Input from '@/components/common/Input.vue'
+import ModelIcon from '@/components/common/ModelIcon.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import type { Column } from '@/components/common/types'
 import Icon from '@/components/icons/Icon.vue'
 import { SupplierModuleLayout } from '@/components/admin/supplier-management'
 import { useAppStore } from '@/stores/app'
+import { formatRelativeTime } from '@/utils/format'
 import { buildPlatformOptions, loadPlatformCatalog } from '@/utils/platformOptions'
 
 const appStore = useAppStore()
@@ -290,24 +327,40 @@ const activeFilter = ref<boolean | null>(true)
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
+const sortColumn = ref('')
+const sortOrder = ref<'asc' | 'desc'>('asc')
 const loading = ref(false)
 const accountsLoading = ref(false)
 const saving = ref(false)
 
+// 列序刻意把「监控项 → 绑定本地账号」放在一起，这两列才是这个页面要对照的一对；
+// 主模型 / 可用率 / 最近同步 排在后面作为判断绑定是否合理的证据列。
+// 左三列不上列身份色：它们按「行」上色，同一行同色相＝同一条关系链，见样式里的行色相说明。
+// 右三列的 sp-monitor-col-* 才是列身份色。
 const columns: Column[] = [
-  { key: 'provider_name', label: '供应商', class: 'min-w-[170px]' },
-  { key: 'monitor_name', label: '监控项', class: 'min-w-[250px]' },
-  { key: 'primary_model', label: '主模型', class: 'min-w-[145px]' },
-  { key: 'availability_7d', label: '7 天可用率', class: 'min-w-[120px]' },
-  { key: 'local_account_name', label: '绑定本地账号', class: 'min-w-[250px]' },
-  { key: 'last_seen_at', label: '最近同步', class: 'min-w-[165px]' },
+  { key: 'provider_name', label: '供应商', sortable: true, class: 'min-w-[170px]' },
+  { key: 'monitor_name', label: '监控项', sortable: true, class: 'min-w-[250px]' },
+  { key: 'local_account_name', label: '绑定本地账号', sortable: true, class: 'min-w-[260px]' },
+  { key: 'primary_model', label: '主模型', class: 'min-w-[145px] sp-monitor-col sp-monitor-col-model' },
+  { key: 'availability_7d', label: '7 天可用率', sortable: true, class: 'min-w-[155px] sp-monitor-col sp-monitor-col-availability' },
+  { key: 'last_seen_at', label: '最近同步', sortable: true, class: 'min-w-[130px] sp-monitor-col sp-monitor-col-time' },
   { key: 'actions', label: '操作', class: 'min-w-[180px]' },
 ]
 
-const providerPalette = ['#3b82f6', '#16a34a', '#7c3aed', '#d97706', '#dc2626', '#ea580c', '#2563eb']
-function providerTagClass(providerId: number) {
-  const idx = (providerId || 0) % providerPalette.length
-  return `sp-monitor-provider-tag-${idx}`
+// DataTable 用列 key 发排序事件，后端只认白名单里的排序字段，这里做一层映射。
+const sortFieldByColumn: Record<string, SupplierProviderMonitorTargetSort> = {
+  provider_name: 'provider',
+  monitor_name: 'monitor_name',
+  local_account_name: 'binding',
+  availability_7d: 'availability',
+  last_seen_at: 'last_seen',
+}
+
+// 同一行的 供应商标签 / 监控项胶囊 / 绑定账号 共用一个色相，三格连成一条关系链。
+// 色相按供应商 ID 取模，样式里的 .sp-monitor-hue-* 与之一一对应。
+const ROW_HUE_COUNT = 6
+function rowHueClass(providerId: number) {
+  return `sp-monitor-hue-${(providerId || 0) % ROW_HUE_COUNT}`
 }
 
 const providerOptions = computed<SelectOption[]>(() => [
@@ -324,6 +377,88 @@ const accountPlatformOptions = computed<SelectOption[]>(() => [
   { value: '', label: '全部平台' },
   ...buildPlatformOptions(customPlatforms.value),
 ])
+
+// ===== 候选账号相似度 =====
+// 归一化规则和后端自动匹配的 normalizeSupplierMonitorMatchKey 保持一致（只留小写字母、数字、汉字），
+// 这样这里算到 100% 的账号，就是自动匹配会直接认定的那一个。
+function normalizeMatchKey(value: string) {
+  return (value || '').toLowerCase().replace(/[^a-z0-9一-鿿]/g, '')
+}
+
+// 监控项名和本地账号名往往只差一个供应商前缀，两边都补一个去前缀的变体再两两比。
+// 后端用的是供应商配置里的账号名前缀，接口没下发，这里用供应商名尽量覆盖。
+function matchVariants(value: string, prefix: string) {
+  const normalized = normalizeMatchKey(value)
+  if (!normalized) return []
+  const variants = [normalized]
+  const normalizedPrefix = normalizeMatchKey(prefix)
+  if (normalizedPrefix && normalized.startsWith(normalizedPrefix)) {
+    const stripped = normalized.slice(normalizedPrefix.length)
+    if (stripped) variants.push(stripped)
+  }
+  return variants
+}
+
+// 二元组 Dice 系数：账号名里常见「破甲gpt1 / gpt破甲1」这种片段重排，
+// 编辑距离对重排惩罚过重，二元组重合度更稳。
+function bigramSimilarity(left: string, right: string) {
+  if (!left || !right) return 0
+  if (left === right) return 1
+  if (left.length < 2 || right.length < 2) return 0
+  const pool = new Map<string, number>()
+  for (let i = 0; i < left.length - 1; i++) {
+    const gram = left.slice(i, i + 2)
+    pool.set(gram, (pool.get(gram) ?? 0) + 1)
+  }
+  let shared = 0
+  for (let i = 0; i < right.length - 1; i++) {
+    const gram = right.slice(i, i + 2)
+    const available = pool.get(gram) ?? 0
+    if (available > 0) {
+      pool.set(gram, available - 1)
+      shared++
+    }
+  }
+  return (2 * shared) / (left.length + right.length - 2)
+}
+
+const bindingMatchVariants = computed(() => {
+  const target = bindingTarget.value
+  if (!target) return []
+  return matchVariants(target.monitor_name, target.provider_name)
+})
+
+// 相似度降序把最可能的账号顶到最前；同分再按名称升序，低分区仍然是可浏览的字母序。
+const rankedLocalAccounts = computed(() => {
+  const monitorKeys = bindingMatchVariants.value
+  const prefix = bindingTarget.value?.provider_name || ''
+  return localAccounts.value
+    .map(account => {
+      let score = 0
+      for (const accountKey of matchVariants(account.name, prefix)) {
+        for (const monitorKey of monitorKeys) {
+          score = Math.max(score, bigramSimilarity(monitorKey, accountKey))
+        }
+      }
+      return { account, score }
+    })
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        a.account.name.localeCompare(b.account.name, 'zh-Hans-CN') ||
+        a.account.id - b.account.id
+    )
+})
+
+function similarityLabel(score: number) {
+  return `${Math.round(score * 100)}%`
+}
+
+function similarityTierClass(score: number) {
+  if (score >= 0.8) return 'strong'
+  if (score >= 0.5) return 'medium'
+  return 'weak'
+}
 
 let searchTimer: number | undefined
 let accountSearchTimer: number | undefined
@@ -354,6 +489,8 @@ async function loadTargets() {
       provider_id: providerID.value || undefined,
       active: activeFilter.value === null ? undefined : activeFilter.value,
       search: search.value.trim() || undefined,
+      sort: sortFieldByColumn[sortColumn.value] || undefined,
+      order: sortColumn.value ? sortOrder.value : undefined,
       page: page.value,
       page_size: pageSize.value,
     })
@@ -435,6 +572,14 @@ function resetFilters() {
   void loadTargets()
 }
 
+// 排序在后端做：客户端排序只能重排当前一页，和分页一起用会给出错误的「最差/最旧」。
+function handleSort(key: string, order: 'asc' | 'desc') {
+  sortColumn.value = sortFieldByColumn[key] ? key : ''
+  sortOrder.value = order
+  page.value = 1
+  void loadTargets()
+}
+
 function handlePageChange(nextPage: number) {
   page.value = nextPage
   void loadTargets()
@@ -445,13 +590,20 @@ function groupNames(groups: SupplierProviderMonitorTarget['binding_groups']) {
 }
 
 function formatAvailability(value: number) {
-  return `${Number(value || 0).toFixed(2)}%`
+  return `${Number(value).toFixed(2)}%`
 }
 
 function availabilityClass(value: number) {
   if (value >= 99) return 'healthy'
   if (value >= 95) return 'warning'
   return 'danger'
+}
+
+// 可用率几乎都挤在 95%~100%，线性 0~100 的条形里 99.2 和 99.9 看起来一样宽。
+// 这里把 95~100 拉满整条宽度，低于 95 一律留空，让真正需要对比的区间产生差异。
+function availabilityBarWidth(value: number) {
+  const ratio = (value - 95) / 5
+  return `${Math.min(Math.max(ratio, 0), 1) * 100}%`
 }
 
 function formatTime(value: string) {
@@ -713,25 +865,29 @@ onMounted(async () => {
 /* ===== 表格卡片 ===== */
 
 /* 概览栏自动匹配按钮 */
+/* 自动匹配是「系统按名称批量推算绑定」的动作，用紫色和逐行手动绑定（蓝）区分开 */
 .sp-overview-auto-match {
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
   white-space: nowrap;
   padding: 0.35rem 0.85rem;
-  border: 1px solid var(--sp-line);
+  border: 1px solid var(--sp-violet);
   border-radius: 0.5rem;
-  background: var(--sp-panel);
-  color: var(--sp-text);
+  background: var(--sp-violet);
+  color: #fff;
   font-size: 0.8rem;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
   transition: border-color 0.16s ease, background 0.16s ease;
 }
 .sp-overview-auto-match:hover {
-  border-color: color-mix(in srgb, var(--sp-cyan) 50%, var(--sp-line));
-  background: color-mix(in srgb, var(--sp-cyan) 6%, var(--sp-panel));
-  color: var(--sp-cyan);
+  border-color: #6d28d9;
+  background: #6d28d9;
+}
+.dark .sp-overview-auto-match:hover {
+  border-color: #8b5cf6;
+  background: #8b5cf6;
 }
 .sp-overview-auto-match:disabled {
   opacity: 0.6;
@@ -750,6 +906,56 @@ onMounted(async () => {
   overflow: auto;
 }
 
+/* ===== 列身份色（只给右侧证据列）=====
+   主模型青 / 可用率青绿 / 最近同步灰。左侧三列是关系链本身，颜色按行走而不是按列走。
+   th/td 由 DataTable 渲染，不带本组件的 scope 属性，必须走 :deep()。 */
+.sp-monitor-table-card :deep(.sp-monitor-col-model) { --col-accent: #0891b2; }
+.sp-monitor-table-card :deep(.sp-monitor-col-availability) { --col-accent: #0f766e; }
+.sp-monitor-table-card :deep(.sp-monitor-col-time) { --col-accent: #64748b; }
+.dark .sp-monitor-table-card :deep(.sp-monitor-col-model) { --col-accent: #22d3ee; }
+.dark .sp-monitor-table-card :deep(.sp-monitor-col-availability) { --col-accent: #5eead4; }
+.dark .sp-monitor-table-card :deep(.sp-monitor-col-time) { --col-accent: #94a3b8; }
+
+/* 列身份只体现在表头文字和左侧细分隔条上，避免整行变成色块 */
+.sp-monitor-table-card :deep(th.sp-monitor-col),
+.sp-monitor-table-card :deep(td.sp-monitor-col) {
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--col-accent) 16%, transparent);
+}
+.sp-monitor-table-card :deep(th.sp-monitor-col) { color: var(--col-accent); }
+
+/* 主模型是「关系区 → 证据区」的分界，这一道分隔条用实线画满 */
+.sp-monitor-table-card :deep(th.sp-monitor-col-model),
+.sp-monitor-table-card :deep(td.sp-monitor-col-model) {
+  box-shadow: inset 1px 0 0 var(--sp-line);
+}
+
+/* ===== 行色相 =====
+   同一行的 供应商标签 / 监控项胶囊 / 绑定账号 共用 --row-hue，扫一眼就知道哪三格是一条链；
+   色相按供应商 ID 取模，同一个供应商的多个监控项自然同色。
+   这里刻意不用 --sp-amber / --sp-red / --sp-green：那三个色在本页有语义（待处理、异常、健康），
+   拿来当身份色会和状态色打架，所以身份色单独取一组互不相邻的色相。 */
+.sp-monitor-hue-0 { --row-hue: #2563eb; }
+.sp-monitor-hue-1 { --row-hue: #db2777; }
+.sp-monitor-hue-2 { --row-hue: #0d9488; }
+.sp-monitor-hue-3 { --row-hue: #7c3aed; }
+.sp-monitor-hue-4 { --row-hue: #0891b2; }
+.sp-monitor-hue-5 { --row-hue: #c026d3; }
+.dark .sp-monitor-hue-0 { --row-hue: #60a5fa; }
+.dark .sp-monitor-hue-1 { --row-hue: #f472b6; }
+.dark .sp-monitor-hue-2 { --row-hue: #2dd4bf; }
+.dark .sp-monitor-hue-3 { --row-hue: #a78bfa; }
+.dark .sp-monitor-hue-4 { --row-hue: #22d3ee; }
+.dark .sp-monitor-hue-5 { --row-hue: #e879f9; }
+
+/* 未绑定行整行淡琥珀：分组后未绑定的行连成一片，扫一眼就知道还剩哪些要处理。
+   用 background-image 而不是 background-color，DataTable 的 hover 底色才不会被压掉。 */
+.sp-monitor-table-card :deep(tr:has(.sp-monitor-binding-empty)) {
+  background-image: linear-gradient(
+    color-mix(in srgb, var(--sp-amber) 5%, transparent),
+    color-mix(in srgb, var(--sp-amber) 5%, transparent)
+  );
+}
+
 /* ===== 表格单元格 ===== */
 .sp-monitor-provider {
   display: flex;
@@ -763,8 +969,10 @@ onMounted(async () => {
   align-items: center;
   max-width: 100%;
   padding: 0.15rem 0.5rem;
-  border: 1px solid var(--sp-line);
+  border: 1px solid color-mix(in srgb, var(--row-hue) 26%, var(--sp-line));
   border-radius: 9999px;
+  background: color-mix(in srgb, var(--row-hue) 9%, var(--sp-panel));
+  color: var(--row-hue);
   font-size: 0.8125rem;
   font-weight: 600;
   line-height: 1.45;
@@ -772,14 +980,6 @@ onMounted(async () => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-.sp-monitor-provider-tag-0 { background: color-mix(in srgb, var(--sp-cyan) 9%, var(--sp-panel)); border-color: color-mix(in srgb, var(--sp-cyan) 26%, var(--sp-line)); color: var(--sp-cyan); }
-.sp-monitor-provider-tag-1 { background: color-mix(in srgb, var(--sp-green) 9%, var(--sp-panel)); border-color: color-mix(in srgb, var(--sp-green) 26%, var(--sp-line)); color: var(--sp-green); }
-.sp-monitor-provider-tag-2 { background: color-mix(in srgb, var(--sp-violet) 9%, var(--sp-panel)); border-color: color-mix(in srgb, var(--sp-violet) 26%, var(--sp-line)); color: var(--sp-violet); }
-.sp-monitor-provider-tag-3 { background: color-mix(in srgb, var(--sp-amber) 9%, var(--sp-panel)); border-color: color-mix(in srgb, var(--sp-amber) 26%, var(--sp-line)); color: var(--sp-amber); }
-.sp-monitor-provider-tag-4 { background: color-mix(in srgb, var(--sp-red) 9%, var(--sp-panel)); border-color: color-mix(in srgb, var(--sp-red) 26%, var(--sp-line)); color: var(--sp-red); }
-.sp-monitor-provider-tag-5 { background: color-mix(in srgb, var(--sp-orange) 9%, var(--sp-panel)); border-color: color-mix(in srgb, var(--sp-orange) 26%, var(--sp-line)); color: var(--sp-orange); }
-.sp-monitor-provider-tag-6 { background: color-mix(in srgb, var(--sp-blue) 9%, var(--sp-panel)); border-color: color-mix(in srgb, var(--sp-blue) 26%, var(--sp-line)); color: var(--sp-blue); }
 
 .sp-monitor-provider-id {
   flex-shrink: 0;
@@ -806,10 +1006,10 @@ onMounted(async () => {
   align-items: center;
   max-width: 100%;
   padding: 0.15rem 0.5rem;
-  border: 1px solid color-mix(in srgb, var(--sp-violet) 24%, var(--sp-line));
+  border: 1px solid color-mix(in srgb, var(--row-hue) 24%, var(--sp-line));
   border-radius: 9999px;
-  background: color-mix(in srgb, var(--sp-violet) 8%, var(--sp-panel));
-  color: var(--sp-violet);
+  background: color-mix(in srgb, var(--row-hue) 8%, var(--sp-panel));
+  color: var(--row-hue);
   font-size: 0.8125rem;
   font-weight: 600;
   line-height: 1.45;
@@ -846,22 +1046,83 @@ onMounted(async () => {
   font-weight: 500;
 }
 
-.sp-monitor-model-code {
-  display: inline-block;
-  padding: 0.2rem 0.5rem;
-  border: 1px solid color-mix(in srgb, var(--sp-cyan) 22%, var(--sp-line));
-  border-radius: 0.35rem;
-  background: color-mix(in srgb, var(--sp-cyan) 6%, var(--sp-panel-2));
+/* 主模型：胶囊 + 品牌图标。胶囊底色跟随列身份色（青＝上游探针配置），
+   模型家族靠 ModelIcon 的品牌图标区分，不在这里另造一套模型名到颜色的映射。 */
+.sp-monitor-model-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+  padding: 0.2rem 0.5rem 0.2rem 0.25rem;
+  border: 1px solid color-mix(in srgb, var(--col-accent) 26%, var(--sp-line));
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--col-accent) 8%, var(--sp-panel));
+  min-width: 0;
+}
+
+/* 品牌图标用固定亮底托一下：OpenAI 一类的品牌色是纯黑，直接放在深色面板上会看不见 */
+.sp-monitor-model-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.125rem;
+  height: 1.125rem;
+  border-radius: 9999px;
+  background: #fff;
+}
+
+.sp-monitor-model-name {
+  overflow: hidden;
   color: var(--sp-text);
   font-size: 0.75rem;
   font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-  max-width: 100%;
-  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 /* 可用率 */
+.sp-monitor-availability-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.sp-monitor-availability-track {
+  display: block;
+  width: 100%;
+  max-width: 6rem;
+  height: 0.25rem;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--sp-panel-3);
+}
+
+.sp-monitor-availability-fill {
+  display: block;
+  height: 100%;
+  border-radius: 9999px;
+  transition: width 0.2s ease;
+}
+
+.sp-monitor-availability-fill.healthy {
+  background: var(--sp-green);
+}
+
+.sp-monitor-availability-fill.warning {
+  background: var(--sp-amber);
+}
+
+.sp-monitor-availability-fill.danger {
+  background: var(--sp-red);
+}
+
+.sp-monitor-availability-missing {
+  color: var(--sp-dim);
+  font-size: 0.78rem;
+}
+
 .sp-monitor-availability {
   display: inline-flex;
   align-items: center;
@@ -898,32 +1159,42 @@ onMounted(async () => {
   background: color-mix(in srgb, var(--sp-red) 8%, transparent);
 }
 
-/* 绑定 */
+/* 绑定：左侧色轨 + 箭头 + 账号名共用行色相，和同一行的监控项胶囊读成「监控项 → 本地账号」一组。
+   未绑定时整格翻成琥珀（--row-hue 被 sp-monitor-binding-empty 改写），表示这行还等着处理。 */
+.sp-monitor-binding {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  padding-left: 0.55rem;
+  border-left: 2px solid color-mix(in srgb, var(--row-hue) 45%, transparent);
+}
+
+/* 两个类名一起写是为了压过 .dark .sp-monitor-hue-*（同为两级选择器，靠后声明取胜），
+   否则深色模式下未绑定的格子会拿回行色相而不是琥珀。 */
+.sp-monitor-binding.sp-monitor-binding-empty {
+  --row-hue: var(--sp-amber);
+}
+
+.sp-monitor-binding-arrow {
+  flex-shrink: 0;
+  color: var(--row-hue);
+}
+
 .sp-monitor-binding-cell {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: 0.2rem;
   min-width: 0;
 }
 
 .sp-monitor-binding-name {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  color: var(--sp-text);
+  overflow: hidden;
+  color: var(--row-hue);
   font-size: 0.875rem;
   font-weight: 600;
-}
-
-.sp-monitor-binding-name strong {
-  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.sp-monitor-binding-icon {
-  color: var(--sp-cyan);
-  flex-shrink: 0;
 }
 
 .sp-monitor-binding-groups {
@@ -940,20 +1211,10 @@ onMounted(async () => {
 }
 
 .sp-monitor-unbound {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
   color: var(--sp-amber);
   font-size: 0.8rem;
   font-weight: 500;
-}
-
-.sp-monitor-unbound-dot {
-  width: 0.375rem;
-  height: 0.375rem;
-  border-radius: 50%;
-  background: var(--sp-amber);
-  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .sp-monitor-time {
@@ -1151,6 +1412,20 @@ onMounted(async () => {
   }
 }
 
+.sp-binding-list-caption {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0 0 0.55rem;
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.sp-binding-list-caption :deep(svg) {
+  flex-shrink: 0;
+}
+
 .sp-binding-account-list {
   display: grid;
   max-height: 22rem;
@@ -1244,6 +1519,37 @@ onMounted(async () => {
   font-weight: 600;
   flex-shrink: 0;
 }
+
+.sp-binding-similarity {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 9999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-binding-similarity.tier-strong {
+  border-color: color-mix(in srgb, var(--sp-green) 30%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-green) 8%, transparent);
+  color: var(--sp-green);
+}
+
+.sp-binding-similarity.tier-medium {
+  border-color: color-mix(in srgb, var(--sp-amber) 30%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-amber) 8%, transparent);
+  color: var(--sp-amber);
+}
+
+.sp-binding-similarity.tier-weak {
+  border-color: var(--sp-line);
+  background: color-mix(in srgb, var(--sp-muted) 6%, transparent);
+  color: var(--sp-muted);
+}
+
 
 .sp-binding-list-state {
   display: flex;

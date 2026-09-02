@@ -385,6 +385,8 @@ func (h *SupplierProviderSyncHandler) ListMonitorTargets(c *gin.Context) {
 		ProviderID: parseOptionalInt64(c.Query("provider_id")),
 		Active:     parseSupplierProviderEnabled(c.Query("active")),
 		Search:     strings.TrimSpace(c.Query("search")),
+		Sort:       strings.TrimSpace(c.Query("sort")),
+		Order:      strings.TrimSpace(c.Query("order")),
 		Page:       page,
 		PageSize:   pageSize,
 	})
