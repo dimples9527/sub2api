@@ -249,4 +249,15 @@ describe('SupplierAccountHealthView', () => {
     expect(source).toContain('v-else-if="hasTrendSamples" class="sp-health-latest"')
   })
 
+  it('在监控趋势列中把健康守护图表与账号监控项数据分成两行', () => {
+    expect(source).toContain('class="sp-health-trend-row sp-health-trend-row--guard"')
+    expect(source).toContain('class="sp-health-trend-row sp-health-trend-row--monitor"')
+    expect(source).toContain('健康守护')
+    expect(source).toContain('账号监控项')
+    expect(source).toContain('const upstreamMonitorsByAccountId')
+    expect(source).toContain('function visibleUpstreamMonitors(accountId: number)')
+    expect(source).toContain('formatAvailability(monitor.availability_7d)')
+    expect(source).toContain('.sp-health-trend-row--monitor')
+  })
+
 })

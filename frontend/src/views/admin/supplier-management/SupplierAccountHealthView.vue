@@ -125,39 +125,68 @@
         </template>
         <template #cell-health_trend_sort="{ row: account }">
           <div class="sp-health-trend-cell" :title="accountTrendTitle(account)">
-            <div v-if="visibleAccountTrend(account.local_account_id).length" class="sp-health-trend-meta">
-              <span>{{ formatTrendHealthRate(account.local_account_id) }}</span>
-              <em v-if="account.latency_limit_ms > 0">阈值 {{ account.latency_limit_ms }} ms</em>
-              <time>{{ trendLatestTime(account.local_account_id) }}</time>
+            <div class="sp-health-trend-row sp-health-trend-row--guard">
+              <div class="sp-health-trend-row-head">
+                <span class="sp-health-trend-row-label">健康守护</span>
+                <div v-if="visibleAccountTrend(account.local_account_id).length" class="sp-health-trend-meta">
+                  <span>{{ formatTrendHealthRate(account.local_account_id) }}</span>
+                  <em v-if="account.latency_limit_ms > 0">阈值 {{ account.latency_limit_ms }} ms</em>
+                  <time>{{ trendLatestTime(account.local_account_id) }}</time>
+                </div>
+                <span v-else class="sp-health-trend-row-summary">暂无检测数据</span>
+              </div>
+
+              <div v-if="trendLoadingByAccountId[account.local_account_id]" class="sp-health-trend-bars sp-health-trend-bars--loading" aria-label="正在加载健康趋势">
+                <span v-for="index in TREND_BAR_COUNT" :key="index" class="sp-health-trend-bar sp-health-trend-bar--loading" />
+              </div>
+              <div
+                v-else-if="visibleAccountTrend(account.local_account_id).length"
+                :class="['sp-health-trend-bars', { 'sp-health-trend-bars--threshold': account.latency_limit_ms > 0 }]"
+                aria-label="账号健康趋势"
+              >
+                <span
+                  v-for="(point, index) in visibleAccountTrend(account.local_account_id)"
+                  :key="`${point.checked_at}-${index}`"
+                  :class="['sp-health-trend-bar', `sp-health-trend-bar--${statusTone(point.status)}`]"
+                  :style="{ height: latencyBarHeight(point, account) }"
+                  :title="accountTrendPointTitle(point)"
+                />
+              </div>
+              <span v-else class="sp-health-trend-empty">暂无健康守护趋势</span>
             </div>
-            <div v-if="trendLoadingByAccountId[account.local_account_id]" class="sp-health-trend-bars sp-health-trend-bars--loading" aria-label="正在加载健康趋势">
-              <span v-for="index in TREND_BAR_COUNT" :key="index" class="sp-health-trend-bar sp-health-trend-bar--loading" />
-            </div>
-            <div
-              v-else-if="visibleAccountTrend(account.local_account_id).length"
-              :class="['sp-health-trend-bars', { 'sp-health-trend-bars--threshold': account.latency_limit_ms > 0 }]"
-              aria-label="账号健康趋势"
-            >
-              <span
-                v-for="(point, index) in visibleAccountTrend(account.local_account_id)"
-                :key="`${point.checked_at}-${index}`"
-                :class="['sp-health-trend-bar', `sp-health-trend-bar--${statusTone(point.status)}`]"
-                :style="{ height: latencyBarHeight(point, account) }"
-                :title="accountTrendPointTitle(point)"
-              />
-            </div>
-            <span v-else-if="!visibleUpstreamTrend(account.local_account_id).length" class="sp-health-trend-empty">暂无趋势</span>
-            <div
-              v-if="visibleUpstreamTrend(account.local_account_id).length"
-              class="sp-health-upstream-strip"
-              aria-label="上游监控状态"
-            >
-              <span
-                v-for="(point, index) in visibleUpstreamTrend(account.local_account_id)"
-                :key="`${point.checked_at}-${index}`"
-                :class="['sp-health-upstream-cell', `sp-health-upstream-cell--${statusTone(point.status)}`]"
-                :title="upstreamTrendPointTitle(point)"
-              />
+            <div class="sp-health-trend-row sp-health-trend-row--monitor">
+              <div class="sp-health-trend-row-head">
+                <span class="sp-health-trend-row-label">账号监控项</span>
+                <span v-if="visibleUpstreamMonitors(account.local_account_id).length" class="sp-health-trend-row-summary">
+                  {{ visibleUpstreamMonitors(account.local_account_id).length }} 项 · 7 天可用率
+                </span>
+                <span v-else class="sp-health-trend-row-summary">未绑定监控项</span>
+              </div>
+              <div
+                v-if="visibleUpstreamTrend(account.local_account_id).length"
+                class="sp-health-upstream-strip"
+                aria-label="账号监控项状态趋势"
+              >
+                <span
+                  v-for="(point, index) in visibleUpstreamTrend(account.local_account_id)"
+                  :key="`${point.checked_at}-${index}`"
+                  :class="['sp-health-upstream-cell', `sp-health-upstream-cell--${statusTone(point.status)}`]"
+                  :title="upstreamTrendPointTitle(point)"
+                />
+              </div>
+              <div v-if="visibleUpstreamMonitors(account.local_account_id).length" class="sp-health-monitor-items">
+                <span
+                  v-for="monitor in visibleUpstreamMonitors(account.local_account_id)"
+                  :key="monitor.target_id"
+                  class="sp-health-monitor-item"
+                  :title="upstreamMonitorTitle(monitor)"
+                >
+                  <strong>{{ monitor.monitor_name || monitor.monitor_key }}</strong>
+                  <b>{{ formatAvailability(monitor.availability_7d) }}</b>
+                </span>
+              </div>
+              <span v-else-if="!visibleUpstreamTrend(account.local_account_id).length" class="sp-health-trend-empty">未绑定账号监控项</span>
+              <span v-else class="sp-health-trend-empty">暂无监控项上报</span>
             </div>
           </div>
         </template>
@@ -395,6 +424,7 @@ const upstreamLatestPoint = ref<SupplierAccountHealthPoint | null>(null)
 const upstreamMonitors = ref<SupplierAccountHealthUpstreamMonitor[]>([])
 const healthTrendByAccountId = ref<Record<number, SupplierAccountHealthPoint[]>>({})
 const upstreamTrendByAccountId = ref<Record<number, SupplierAccountHealthPoint[]>>({})
+const upstreamMonitorsByAccountId = ref<Record<number, SupplierAccountHealthUpstreamMonitor[]>>({})
 const detailTrendCache = ref<Record<string, SupplierAccountHealthTrend>>({})
 const trendLoadingByAccountId = ref<Record<number, boolean>>({})
 const lastLoadedAt = ref('')
@@ -527,6 +557,10 @@ function visibleUpstreamTrend(accountId: number): SupplierAccountHealthPoint[] {
   return upstreamTrendByAccountId.value[accountId] || []
 }
 
+function visibleUpstreamMonitors(accountId: number): SupplierAccountHealthUpstreamMonitor[] {
+  return upstreamMonitorsByAccountId.value[accountId] || []
+}
+
 function formatTrendHealthRate(accountId: number): string {
   const points = visibleAccountTrend(accountId)
   const sampleCount = points.reduce((total, point) => total + point.sample_count, 0)
@@ -558,6 +592,12 @@ function upstreamTrendPointTitle(point: SupplierAccountHealthPoint): string {
   const bucketEnd = point.bucket_end_at ? ` - ${formatDateTime(point.bucket_end_at)}` : ''
   if (!point.sample_count) return `${formatDateTime(point.checked_at)}${bucketEnd} 上游未上报`
   return `${formatDateTime(point.checked_at)}${bucketEnd} 上游 ${statusLabel(point.status)}，${point.sample_count} 个样本，响应 ${formatLatency(point.latency_ms)}`
+}
+
+function upstreamMonitorTitle(monitor: SupplierAccountHealthUpstreamMonitor): string {
+  const name = monitor.monitor_name || monitor.monitor_key || '未命名监控项'
+  const model = monitor.primary_model || '未标注主模型'
+  return `${name} · ${monitor.provider_name || '未知供应商'} · ${model} · 7 天可用率 ${formatAvailability(monitor.availability_7d)}`
 }
 
 // 优先按慢响应阈值归一，让阈值线固定在同一高度、不同账号之间可以横向对比；
@@ -809,6 +849,7 @@ async function loadAccounts() {
     lastLoadedAt.value = new Date().toISOString()
     healthTrendByAccountId.value = {}
     upstreamTrendByAccountId.value = {}
+    upstreamMonitorsByAccountId.value = {}
     trendLoadingByAccountId.value = {}
     detailTrendCache.value = {}
     latestTrendPoint.value = null
@@ -830,6 +871,7 @@ async function loadAccountTrends(accountList: SupplierAccountHealthAccount[], ra
   const ids = accountList.map(account => account.local_account_id)
   if (!ids.length) {
     trendLoadingByAccountId.value = {}
+    upstreamMonitorsByAccountId.value = {}
     return
   }
   trendLoadingByAccountId.value = Object.fromEntries(ids.map(accountId => [accountId, true])) as Record<number, boolean>
@@ -843,6 +885,9 @@ async function loadAccountTrends(accountList: SupplierAccountHealthAccount[], ra
     upstreamTrendByAccountId.value = Object.fromEntries(
       ids.map(accountId => [accountId, trendMap.get(accountId)?.upstream_points || []]),
     ) as Record<number, SupplierAccountHealthPoint[]>
+    upstreamMonitorsByAccountId.value = Object.fromEntries(
+      ids.map(accountId => [accountId, trendMap.get(accountId)?.upstream_monitors || []]),
+    ) as Record<number, SupplierAccountHealthUpstreamMonitor[]>
   } catch (err) {
     if (requestSequence !== accountTrendLoadSequence) return
     healthTrendByAccountId.value = Object.fromEntries(
@@ -851,6 +896,9 @@ async function loadAccountTrends(accountList: SupplierAccountHealthAccount[], ra
     upstreamTrendByAccountId.value = Object.fromEntries(
       ids.map(accountId => [accountId, []]),
     ) as Record<number, SupplierAccountHealthPoint[]>
+    upstreamMonitorsByAccountId.value = Object.fromEntries(
+      ids.map(accountId => [accountId, []]),
+    ) as Record<number, SupplierAccountHealthUpstreamMonitor[]>
     appStore.showError(extractApiErrorMessage(err, '加载账号健康趋势失败'))
   } finally {
     if (requestSequence === accountTrendLoadSequence) {
@@ -993,6 +1041,7 @@ function selectRange(range: SupplierAccountHealthRange) {
   resetDetailTrend()
   healthTrendByAccountId.value = {}
   upstreamTrendByAccountId.value = {}
+  upstreamMonitorsByAccountId.value = {}
   detailTrendCache.value = {}
   void loadAccountTrends(accounts.value, range)
   void loadTrend()
@@ -1148,7 +1197,14 @@ onMounted(() => {
 .sp-health-chip--platform.platform-2 { --chip-hue: #b45309; }
 .sp-health-chip--platform.platform-3 { --chip-hue: #15803d; }
 .sp-health-chip--platform.platform-4 { --chip-hue: #0369a1; }
-.sp-health-trend-cell { display: grid; min-width: 20rem; gap: 0.4rem; padding: 0.45rem 0.55rem 0.35rem; border: 1px solid var(--sp-soft, #e5e7eb); border-radius: 0.5rem; background: linear-gradient(180deg, color-mix(in srgb, var(--sp-panel-2, #fff) 92%, var(--sp-cyan, #0891b2) 8%), var(--sp-panel-2, #fff)); }
+.sp-health-trend-cell { display: grid; min-width: 20rem; gap: 0.4rem; padding: 0.45rem 0.55rem 0.35rem; border: 1px solid var(--sp-soft, #e5e7eb); border-radius: 0.5rem; background: linear-gradient(180deg, color-mix(in srgb, var(--sp-panel-2, #fff) 92%, var(--sp-cyan, #0891b2) 8%), var(--sp-panel-2, #fff)); white-space: normal; }
+.sp-health-trend-row { display: grid; min-width: 0; gap: 0.3rem; }
+.sp-health-trend-row--monitor { min-width: 0; }
+.sp-health-trend-row + .sp-health-trend-row { padding-top: 0.45rem; border-top: 1px solid color-mix(in srgb, var(--sp-line, #d1d5db) 70%, transparent); }
+.sp-health-trend-row-head { display: flex; align-items: center; min-width: 0; gap: 0.5rem; }
+.sp-health-trend-row-label { flex: 0 0 auto; color: var(--sp-text); font-size: 0.68rem; font-weight: 700; }
+.sp-health-trend-row-summary { margin-left: auto; color: var(--sp-muted); font-size: 0.66rem; font-variant-numeric: tabular-nums; }
+.sp-health-trend-row-head .sp-health-trend-meta { flex: 1 1 auto; min-width: 0; }
 .sp-health-trend-meta { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; color: var(--sp-muted); font-size: 0.7rem; line-height: 1; }
 .sp-health-trend-meta span { color: var(--sp-text); font-variant-numeric: tabular-nums; }
 .sp-health-trend-meta em { color: var(--sp-amber, #d97706); font-style: normal; font-variant-numeric: tabular-nums; }
@@ -1166,6 +1222,10 @@ onMounted(() => {
 .sp-health-trend-bar--loading:nth-child(2n) { height: 70%; animation-delay: 120ms; }
 .sp-health-trend-bar--loading:nth-child(3n) { height: 30%; animation-delay: 220ms; }
 .sp-health-trend-empty { color: var(--sp-muted); font-size: 0.75rem; }
+.sp-health-monitor-items { display: flex; flex-wrap: wrap; min-width: 0; gap: 0.25rem; }
+.sp-health-monitor-item { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; gap: 0.35rem; padding: 0.2rem 0.4rem; border: 1px solid color-mix(in srgb, var(--sp-cyan, #0891b2) 25%, var(--sp-line, #d1d5db)); border-radius: 0.3rem; background: color-mix(in srgb, var(--sp-cyan, #0891b2) 7%, var(--sp-panel-2, #fff)); font-size: 0.66rem; }
+.sp-health-monitor-item strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-health-monitor-item b { flex: 0 0 auto; color: var(--sp-cyan, #0891b2); font-size: 0.64rem; font-variant-numeric: tabular-nums; }
 /* 上游色带是参照信息，整体降透明度让它在视觉层级上低于守护柱 */
 .sp-health-upstream-strip { display: flex; gap: 0.08rem; height: 0.3rem; margin-top: 0.15rem; opacity: 0.85; }
 .sp-health-upstream-cell { flex: 1 1 0; min-width: 0; border-radius: 0.08rem; }
