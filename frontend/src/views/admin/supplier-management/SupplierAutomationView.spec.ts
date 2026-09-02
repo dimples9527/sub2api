@@ -12,6 +12,10 @@ const supplierAutomationAPISource = readFileSync(
   resolve(dirname(fileURLToPath(import.meta.url)), '../../../api/admin/supplierAutomation.ts'),
   'utf-8'
 )
+const supplierAutomationCronSource = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), 'supplierAutomationCron.ts'),
+  'utf-8'
+)
 const testRequire = createRequire(import.meta.url)
 const compilerSfcPath = testRequire.resolve('@vue/compiler-sfc', {
   paths: [dirname(testRequire.resolve('@vitejs/plugin-vue'))],
@@ -64,9 +68,10 @@ describe('SupplierAutomationView second-level intervals', () => {
   })
 
   it('reads @every seconds and keeps legacy five-field cron compatibility', () => {
-    expect(supplierAutomationSource).toContain("cronExpression.match(/^@every\\s+(\\d+)s$/)")
-    expect(supplierAutomationSource).toContain('if (everyMatch) return Number(everyMatch[1])')
-    expect(supplierAutomationSource).toContain('if (parts.length !== 5) return null')
+    expect(supplierAutomationSource).toContain("import { cronToIntervalSeconds } from './supplierAutomationCron'")
+    expect(supplierAutomationCronSource).toContain("cronExpression.match(/^@every\\s+(\\d+)s$/)")
+    expect(supplierAutomationCronSource).toContain('if (everyMatch) return Number(everyMatch[1])')
+    expect(supplierAutomationCronSource).toContain('if (parts.length !== 5) return null')
     expect(supplierAutomationSource).toContain('editIntervalSeconds.value = cronToIntervalSeconds(task.cron_expression) || 300')
   })
 })

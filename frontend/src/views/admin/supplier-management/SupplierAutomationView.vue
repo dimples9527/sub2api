@@ -1004,6 +1004,7 @@ import { useAppStore } from '@/stores/app'
 import { ensureCustomPlatformLabels, resolvePlatformDisplayLabel as platformLabel } from '@/utils/customPlatformLabels'
 import { platformBadgeClass, platformTextClass } from '@/utils/platformColors'
 import { extractApiErrorMessage } from '@/utils/apiError'
+import { cronToIntervalSeconds } from './supplierAutomationCron'
 import type { ClaudeModel } from '@/types'
 
 const tasks = ref<SupplierAutomationTask[]>([])
@@ -2323,29 +2324,6 @@ function formatInterval(cronExpression: string): string {
   if (seconds % 3600 === 0) return `每 ${seconds / 3600} 小时`
   if (seconds % 60 === 0) return `每 ${seconds / 60} 分钟`
   return `每 ${seconds} 秒`
-}
-
-function cronToIntervalSeconds(cronExpression: string): number | null {
-  const everyMatch = cronExpression.match(/^@every\s+(\d+)s$/)
-  if (everyMatch) return Number(everyMatch[1])
-
-  const parts = cronExpression.trim().split(/\s+/)
-  if (parts.length !== 5) return null
-  const [minute, hour, dayOfMonth, month, dayOfWeek] = parts
-  if (hour === '*' && dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
-    const minuteMatch = minute.match(/^\*\/(\d+)$/)
-    if (minuteMatch) return Number(minuteMatch[1]) * 60
-    if (minute === '*') return 60
-  }
-  if (minute === '0' && dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
-    const hourMatch = hour.match(/^\*\/(\d+)$/)
-    if (hourMatch) return Number(hourMatch[1]) * 3600
-    if (hour === '0') return 86400
-  }
-  if (dayOfMonth === '*' && month === '*' && dayOfWeek === '*' && minute !== '*' && hour !== '*') {
-    return 86400
-  }
-  return null
 }
 
 function intervalSecondsToCron(seconds: number): string | null {

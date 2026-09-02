@@ -361,22 +361,29 @@
           </template>
 
           <template #cell-local_account_last_test_status="{ row: account }">
-            <button
-              v-if="isFailedTest(account)"
-              type="button"
-              class="sp-test-status failed"
-              title="查看测试失败详情"
-              @click.stop="openTestErrorDialog(account)"
-            >
-              {{ accountTestStatusLabel(account.local_account_last_test_status) }}
-            </button>
-            <span
-              v-else-if="isMatchedLocalAccount(account) && account.local_account_last_test_status"
-              :class="['sp-test-status', accountTestStatusTone(account.local_account_last_test_status)]"
-            >
-              {{ accountTestStatusLabel(account.local_account_last_test_status) }}
-            </span>
-            <span v-else class="sp-account-muted">—</span>
+            <div class="sp-test-status-cell">
+              <button
+                v-if="isFailedTest(account)"
+                type="button"
+                class="sp-test-status failed"
+                title="查看测试失败详情"
+                @click.stop="openTestErrorDialog(account)"
+              >
+                {{ accountTestStatusLabel(account.local_account_last_test_status) }}
+              </button>
+              <span
+                v-else-if="isMatchedLocalAccount(account) && account.local_account_last_test_status"
+                :class="['sp-test-status', accountTestStatusTone(account.local_account_last_test_status)]"
+              >
+                {{ accountTestStatusLabel(account.local_account_last_test_status) }}
+              </span>
+              <span v-else class="sp-account-muted">—</span>
+              <span
+                v-if="hasRepeatedGuardFailures(account)"
+                class="sp-guard-failure-hint"
+                :title="guardFailureHintTitle(account)"
+              >守护连续失败 {{ guardFailureCount(account) }} 次</span>
+            </div>
           </template>
 
           <template #cell-local_account_last_tested_at="{ row: account }">
@@ -385,9 +392,12 @@
                 <em>上次测试</em>
                 {{ formatTime(account.local_account_last_tested_at) }}
               </span>
-              <span class="sp-guard-test-time">
+              <span :class="['sp-guard-test-time', { 'is-stale': isGuardCheckStale(account) }]">
                 <em>守护检测</em>
-                {{ formatTime(account.local_account_health_guard_last_checked_at) }}
+                <strong :title="guardCheckStaleTitle(account)">
+                  {{ formatTime(account.local_account_health_guard_last_checked_at) }}
+                </strong>
+                <span v-if="isGuardCheckStale(account)" class="sr-only">守护检测已滞后</span>
               </span>
             </div>
             <span v-else class="sp-account-muted">—</span>
@@ -533,12 +543,26 @@
           </div>
           <div class="sp-detail-cell"><span>本地账号状态</span><b>{{ isMatchedLocalAccount(selected) ? localAccountStatusLabel(selected.local_account_status) : '—' }}</b></div>
           <div class="sp-detail-cell"><span>是否调度</span><b>{{ localSchedulableLabel(selected) }}</b></div>
-          <div class="sp-detail-cell"><span>测试结果</span><b>{{ isMatchedLocalAccount(selected) ? accountTestStatusLabel(selected.local_account_last_test_status) : '—' }}</b></div>
+          <div class="sp-detail-cell">
+            <span>测试结果</span>
+            <b class="sp-detail-test-result">
+              {{ isMatchedLocalAccount(selected) ? accountTestStatusLabel(selected.local_account_last_test_status) : '—' }}
+              <span
+                v-if="hasRepeatedGuardFailures(selected)"
+                class="sp-guard-failure-hint"
+                :title="guardFailureHintTitle(selected)"
+              >守护连续失败 {{ guardFailureCount(selected) }} 次</span>
+            </b>
+          </div>
           <div class="sp-detail-cell">
             <span>测试时间</span>
             <b v-if="isMatchedLocalAccount(selected)" class="sp-detail-test-times">
               <span><em>上次测试</em>{{ formatTime(selected.local_account_last_tested_at) }}</span>
-              <span class="sp-guard-test-time"><em>守护检测</em>{{ formatTime(selected.local_account_health_guard_last_checked_at) }}</span>
+              <span :class="['sp-guard-test-time', { 'is-stale': isGuardCheckStale(selected) }]">
+                <em>守护检测</em>
+                <strong :title="guardCheckStaleTitle(selected)">{{ formatTime(selected.local_account_health_guard_last_checked_at) }}</strong>
+                <span v-if="isGuardCheckStale(selected)" class="sr-only">守护检测已滞后</span>
+              </span>
             </b>
             <b v-else>—</b>
           </div>
@@ -1035,7 +1059,7 @@ import {
   startSupplierAccountBatchTest,
   type SupplierProviderAccount,
 } from '@/api/admin/supplierProviderData'
-import { listAccountRateGuardUnbindLogs } from '@/api/admin/supplierAutomation'
+import { listAccountRateGuardUnbindLogs, listTasks as listAutomationTasks } from '@/api/admin/supplierAutomation'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import type { Column } from '@/components/common/types'
@@ -1058,6 +1082,7 @@ import {
 } from '@/utils/platformColors'
 import { buildPlatformOptions } from '@/utils/platformOptions'
 import { extractApiErrorMessage } from '@/utils/apiError'
+import { cronToIntervalSeconds, formatDurationMinutes } from './supplierAutomationCron'
 
 const appStore = useAppStore()
 const router = useRouter()
@@ -1184,6 +1209,19 @@ const upstreamStatusFilterControl = ref<HTMLElement | null>(null)
 let searchTimer: number | undefined
 let batchTestPollTimer: ReturnType<typeof setTimeout> | null = null
 let batchTestPollToken = 0
+
+// 守护检测滞后阈值取守护任务 cron 周期的 2 倍，周期本身较长时才不会把正常账号全部标成告警。
+const GUARD_CHECK_STALE_CRON_MULTIPLIER = 2
+const GUARD_CHECK_STALE_FALLBACK_MINUTES = 10
+const GUARD_FAILURE_HINT_THRESHOLD = 2
+const guardFreshnessNow = ref(Date.now())
+const guardCronIntervalSeconds = ref(0)
+let guardFreshnessTimer: number | undefined
+
+const guardCheckStaleMinutes = computed(() => {
+  if (!guardCronIntervalSeconds.value) return GUARD_CHECK_STALE_FALLBACK_MINUTES
+  return Math.max(1, Math.ceil(guardCronIntervalSeconds.value * GUARD_CHECK_STALE_CRON_MULTIPLIER / 60))
+})
 
 const cnyFormatter = new Intl.NumberFormat('zh-CN', {
   style: 'currency',
@@ -1450,12 +1488,16 @@ const accountColumns: Column[] = [
 
 onMounted(async () => {
   applyFilterControlLabels()
-  await Promise.all([ensureCustomPlatformLabels(), loadCustomPlatforms(), loadProviders(), loadLocalGroups(), loadAccountRateGuardPendingCount()])
+  guardFreshnessTimer = window.setInterval(() => {
+    guardFreshnessNow.value = Date.now()
+  }, 30000)
+  await Promise.all([ensureCustomPlatformLabels(), loadCustomPlatforms(), loadProviders(), loadLocalGroups(), loadAccountRateGuardPendingCount(), loadGuardCheckInterval()])
   await loadAccounts()
 })
 
 onBeforeUnmount(() => {
   window.clearTimeout(searchTimer)
+  window.clearInterval(guardFreshnessTimer)
   batchTestPollToken += 1
   clearBatchTestPollTimer()
 })
@@ -2457,6 +2499,35 @@ function isFailedTest(account: SupplierProviderAccount): boolean {
   return isMatchedLocalAccount(account) && account.local_account_last_test_status === 'failed'
 }
 
+function guardCheckLagMinutes(account: SupplierProviderAccount): number | null {
+  const checkedAt = new Date(account.local_account_health_guard_last_checked_at || '').getTime()
+  if (Number.isNaN(checkedAt)) return null
+  return Math.floor((guardFreshnessNow.value - checkedAt) / 60000)
+}
+
+function isGuardCheckStale(account: SupplierProviderAccount): boolean {
+  const lag = guardCheckLagMinutes(account)
+  return lag !== null && lag >= guardCheckStaleMinutes.value
+}
+
+function guardCheckStaleTitle(account: SupplierProviderAccount): string | undefined {
+  const lag = guardCheckLagMinutes(account)
+  if (lag === null || lag < guardCheckStaleMinutes.value) return undefined
+  return `守护检测已滞后 ${formatDurationMinutes(lag)}，超过 ${formatDurationMinutes(guardCheckStaleMinutes.value)}阈值`
+}
+
+function guardFailureCount(account: SupplierProviderAccount): number {
+  return Number(account.local_account_health_guard_failure_count) || 0
+}
+
+function hasRepeatedGuardFailures(account: SupplierProviderAccount): boolean {
+  return isMatchedLocalAccount(account) && guardFailureCount(account) >= GUARD_FAILURE_HINT_THRESHOLD
+}
+
+function guardFailureHintTitle(account: SupplierProviderAccount): string {
+  return `守护检测已连续失败 ${guardFailureCount(account)} 次，可在健康趋势中排查`
+}
+
 function openTestErrorDialog(account: SupplierProviderAccount) {
   if (!isFailedTest(account)) return
   testErrorAccount.value = account
@@ -2524,6 +2595,17 @@ async function loadAccountRateGuardPendingCount() {
     accountRateGuardPendingCount.value = Number(result.pending_count) || 0
   } catch {
     // 角标加载失败不阻断页面主流程，保留上一次数量。
+  }
+}
+
+async function loadGuardCheckInterval() {
+  try {
+    const tasks = await listAutomationTasks()
+    const guardTask = tasks.find(task => task.task_code === 'supplier_account_health_guard')
+    guardCronIntervalSeconds.value = guardTask ? cronToIntervalSeconds(guardTask.cron_expression) || 0 : 0
+  } catch {
+    // 拿不到守护周期时退回固定阈值，不打扰账号列表主流程。
+    guardCronIntervalSeconds.value = 0
   }
 }
 
@@ -3261,6 +3343,51 @@ button.sp-test-status.failed:hover {
 .sp-account-test-times .sp-guard-test-time em,
 .sp-detail-test-times .sp-guard-test-time em {
   color: color-mix(in srgb, var(--sp-cyan) 72%, var(--sp-text));
+}
+
+.sp-account-test-times .sp-guard-test-time strong,
+.sp-detail-test-times .sp-guard-test-time strong {
+  font-weight: 700;
+}
+
+.sp-account-test-times .sp-guard-test-time.is-stale,
+.sp-account-test-times .sp-guard-test-time.is-stale em,
+.sp-detail-test-times .sp-guard-test-time.is-stale,
+.sp-detail-test-times .sp-guard-test-time.is-stale em {
+  color: var(--sp-amber, #d97706);
+}
+
+.sp-account-test-times .sp-guard-test-time.is-stale strong,
+.sp-detail-test-times .sp-guard-test-time.is-stale strong {
+  padding: 0 0.3125rem;
+  border: 1px solid color-mix(in srgb, var(--sp-amber) 38%, var(--sp-line));
+  border-radius: 0.375rem;
+  background: color-mix(in srgb, var(--sp-amber) 14%, transparent);
+  color: var(--sp-amber, #d97706);
+}
+
+.sp-test-status-cell {
+  display: grid;
+  justify-items: start;
+  gap: 0.25rem;
+}
+
+.sp-detail-test-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.sp-guard-failure-hint {
+  padding: 0.0625rem 0.375rem;
+  border: 1px solid color-mix(in srgb, var(--sp-red) 30%, var(--sp-line));
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--sp-red) 10%, var(--sp-panel));
+  color: var(--sp-red, #dc2626);
+  font-size: 0.625rem;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .sp-account-muted {

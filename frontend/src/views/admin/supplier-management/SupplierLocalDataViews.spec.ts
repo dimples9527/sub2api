@@ -12,6 +12,7 @@ const supplierAccountMocks = vi.hoisted(() => ({
   listAccounts: vi.fn(),
   listCustomPlatforms: vi.fn(),
   listAccountRateGuardUnbindLogs: vi.fn(),
+  listAutomationTasks: vi.fn(),
   getAccountById: vi.fn(),
   getAvailableModels: vi.fn(),
   duplicate: vi.fn(),
@@ -64,6 +65,7 @@ vi.mock('@/api/admin/customPlatforms', () => ({
 
 vi.mock('@/api/admin/supplierAutomation', () => ({
   listAccountRateGuardUnbindLogs: supplierAccountMocks.listAccountRateGuardUnbindLogs,
+  listTasks: supplierAccountMocks.listAutomationTasks,
 }))
 
 vi.mock('@/api/admin/supplierProviderData', async importOriginal => {
@@ -98,6 +100,7 @@ const runtimeCellKeys = [
   'local_account_status',
   'local_account_schedulable',
   'local_account_last_test_status',
+  'local_account_last_tested_at',
   'supplier_current_balance',
   'supplier_today_cost',
   'actions',
@@ -272,6 +275,9 @@ const GroupBadgeStub = defineComponent({
   },
 })
 
+const guardFreshCheckedAt = new Date(Date.now() - 2 * 60 * 1000).toISOString()
+const guardStaleCheckedAt = new Date(Date.now() - 45 * 60 * 1000).toISOString()
+
 const testAccounts = [
   {
     id: 1,
@@ -315,6 +321,8 @@ const testAccounts = [
     local_account_last_test_status: 'success',
     local_account_last_tested_at: '2026-07-22T02:00:00Z',
     local_account_last_test_error: '',
+    local_account_health_guard_last_checked_at: guardFreshCheckedAt,
+    local_account_health_guard_failure_count: 0,
     supplier_current_balance: 0,
     supplier_today_cost: 0,
   },
@@ -405,6 +413,8 @@ const testAccounts = [
     local_account_last_test_status: 'failed',
     local_account_last_tested_at: '2026-07-22T03:00:00Z',
     local_account_last_test_error: '上游鉴权失败：invalid key',
+    local_account_health_guard_last_checked_at: guardStaleCheckedAt,
+    local_account_health_guard_failure_count: 4,
     supplier_current_balance: 20,
     supplier_today_cost: 2,
   },
@@ -443,6 +453,10 @@ describe('supplier local data views component usage', () => {
       page_size: 1,
       pending_count: 0,
     })
+    supplierAccountMocks.listAutomationTasks.mockResolvedValue([
+      { task_code: 'supplier_data_sync', cron_expression: '@every 900s' },
+      { task_code: 'supplier_account_health_guard', cron_expression: '@every 600s' },
+    ])
     supplierAccountMocks.listGroups.mockResolvedValue([
       { id: 201, name: '本地分组 A', platform: 'openai' },
       { id: 202, name: '本地分组 B', platform: 'anthropic' },
@@ -621,11 +635,48 @@ describe('supplier local data views component usage', () => {
     expect(wrapper.get('.runtime-cell-local_account_last_test_status[data-row-index="0"] .sp-test-status').classes())
       .toContain('success')
     expect(wrapper.get('.runtime-cell-local_account_last_test_status[data-row-index="4"]').text())
-      .toBe('失败')
+      .toContain('失败')
     expect(wrapper.get('.runtime-cell-local_account_last_test_status[data-row-index="4"] .sp-test-status').classes())
       .toContain('failed')
 
     wrapper.unmount()
+  })
+
+  it('emphasizes the guard check time and flags lagging checks and repeated guard failures', async () => {
+    const wrapper = await mountSupplierAccounts()
+    const freshGuard = wrapper.get('.runtime-cell-local_account_last_tested_at[data-row-index="0"] .sp-guard-test-time')
+    const staleGuard = wrapper.get('.runtime-cell-local_account_last_tested_at[data-row-index="4"] .sp-guard-test-time')
+
+    expect(freshGuard.find('strong').exists()).toBe(true)
+    expect(freshGuard.classes()).not.toContain('is-stale')
+    expect(freshGuard.find('strong').attributes('title')).toBeUndefined()
+
+    expect(staleGuard.classes()).toContain('is-stale')
+    expect(staleGuard.get('strong').attributes('title')).toContain('守护检测已滞后 45 分钟，超过 20 分钟阈值')
+    expect(staleGuard.text()).toContain('守护检测已滞后')
+
+    expect(wrapper.get('.runtime-cell-local_account_last_test_status[data-row-index="4"] .sp-guard-failure-hint').text())
+      .toBe('守护连续失败 4 次')
+    expect(wrapper.find('.runtime-cell-local_account_last_test_status[data-row-index="0"] .sp-guard-failure-hint').exists())
+      .toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('derives the guard lag threshold from twice the guard cron interval', async () => {
+    supplierAccountMocks.listAutomationTasks.mockResolvedValue([
+      { task_code: 'supplier_account_health_guard', cron_expression: '@every 3600s' },
+    ])
+    const hourlyWrapper = await mountSupplierAccounts()
+    expect(hourlyWrapper.get('.runtime-cell-local_account_last_tested_at[data-row-index="4"] .sp-guard-test-time').classes())
+      .not.toContain('is-stale')
+    hourlyWrapper.unmount()
+
+    supplierAccountMocks.listAutomationTasks.mockResolvedValue([])
+    const fallbackWrapper = await mountSupplierAccounts()
+    expect(fallbackWrapper.get('.runtime-cell-local_account_last_tested_at[data-row-index="4"] .sp-guard-test-time').classes())
+      .toContain('is-stale')
+    fallbackWrapper.unmount()
   })
 
   it('toggles the matched local account with the existing account API without opening the drawer', async () => {
@@ -793,6 +844,8 @@ describe('supplier local data views component usage', () => {
       'local_account_last_test_status?: string',
       'local_account_last_tested_at?: string',
       'local_account_last_test_error?: string',
+      'local_account_health_guard_last_checked_at?: string',
+      'local_account_health_guard_failure_count?: number',
       'supplier_current_balance: number',
       'supplier_today_cost: number',
     ].forEach(field => expect(accountInterface).toContain(field))
@@ -1113,7 +1166,7 @@ describe('supplier local data views component usage', () => {
   })
 
   it('shows pending account rate guard log count on the toolbar button', () => {
-    expect(accountsSource).toContain("import { listAccountRateGuardUnbindLogs } from '@/api/admin/supplierAutomation'")
+    expect(accountsSource).toContain("import { listAccountRateGuardUnbindLogs, listTasks as listAutomationTasks } from '@/api/admin/supplierAutomation'")
     expect(accountsSource).toContain('const accountRateGuardPendingCount = ref(0)')
     expect(accountsSource).toContain('await loadAccountRateGuardPendingCount()')
     expect(accountsSource).toContain("result: 'unbound'")
