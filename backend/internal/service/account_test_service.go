@@ -108,7 +108,7 @@ const (
 	defaultBatchAccountTestConcurrency = 3
 	defaultBatchAccountTestTimeout     = 90 * time.Second
 	defaultBatchAccountTestJobTimeout  = 10 * time.Minute
-	defaultBatchAccountTestPersistWait = 3 * time.Second
+	accountTestStatusPersistTimeout    = 3 * time.Second
 	batchAccountTestJobRetention       = 30 * time.Minute
 	maxBatchAccountTestAccounts        = 200
 	maxBatchAccountTestConcurrency     = 8
@@ -690,9 +690,7 @@ func (s *AccountTestService) persistBatchAccountTestItemStatus(item BatchAccount
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultBatchAccountTestPersistWait)
-	defer cancel()
-	s.persistLastAccountTestStatus(ctx, item.AccountID, errors.New(item.ErrorMessage))
+	s.persistLastAccountTestStatus(context.Background(), item.AccountID, errors.New(item.ErrorMessage))
 }
 
 func (s *AccountTestService) runTestBackground(ctx context.Context, accountID int64, modelID string) (*ScheduledTestResult, error) {
@@ -926,7 +924,11 @@ func (s *AccountTestService) persistLastAccountTestStatus(ctx context.Context, a
 		status = "failed"
 		errorMsg = testErr.Error()
 	}
-	if err := s.accountRepo.UpdateExtra(ctx, accountID, map[string]any{
+	// 守护与批量测试都给单个账号套了 deadline。超时后父 ctx 已失效，沿用它写库会被数据库拒收，
+	// 界面就只剩上一次成功的快照，表现为「测试结果成功」与「调度已关闭」互相矛盾。
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), accountTestStatusPersistTimeout)
+	defer cancel()
+	if err := s.accountRepo.UpdateExtra(persistCtx, accountID, map[string]any{
 		"last_test_status": status,
 		"last_tested_at":   time.Now().UTC().Format(time.RFC3339Nano),
 		"last_test_error":  errorMsg,

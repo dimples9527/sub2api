@@ -28,6 +28,11 @@ func (r *shadowSkipTestRepo) GetByID(_ context.Context, id int64) (*Account, err
 	return r.account, nil
 }
 
+// 连接测试结束后总会回写 last_test_status，属预期调用路径，不能让它落到 panic 分支。
+func (r *shadowSkipTestRepo) UpdateExtra(_ context.Context, _ int64, _ map[string]any) error {
+	return nil
+}
+
 func newShadowTestGinCtx() *gin.Context {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()

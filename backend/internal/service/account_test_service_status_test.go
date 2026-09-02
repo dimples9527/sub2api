@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
@@ -188,4 +189,58 @@ func TestAccountTestService_TestAccountConnectionPersistsCNProviderFailedStatus(
 	require.Equal(t, "failed", repo.updatedExtra["last_test_status"])
 	require.NotEmpty(t, repo.updatedExtra["last_tested_at"])
 	require.Contains(t, repo.updatedExtra["last_test_error"], "invalid DeepSeek token")
+}
+
+type accountTestStatusDeadlineUpstream struct{}
+
+func (u *accountTestStatusDeadlineUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	return nil, fmt.Errorf("Post %q: %w", req.URL.String(), context.DeadlineExceeded)
+}
+
+func (u *accountTestStatusDeadlineUpstream) DoWithTLS(req *http.Request, _ string, _ int64, _ int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, "", 0, 0)
+}
+
+type accountTestStatusCtxAwareRepo struct {
+	mockAccountRepoForGemini
+	updatedExtra map[string]any
+}
+
+func (r *accountTestStatusCtxAwareRepo) UpdateExtra(ctx context.Context, _ int64, updates map[string]any) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.updatedExtra = updates
+	return nil
+}
+
+func TestAccountTestService_PersistsFailedStatusAfterParentDeadlineExceeded(t *testing.T) {
+	account := &Account{
+		ID:          93,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token"},
+	}
+	repo := &accountTestStatusCtxAwareRepo{
+		mockAccountRepoForGemini: mockAccountRepoForGemini{
+			accountsByID: map[int64]*Account{account.ID: account},
+		},
+	}
+	svc := &AccountTestService{
+		accountRepo:  repo,
+		httpUpstream: &accountTestStatusDeadlineUpstream{},
+	}
+
+	expired, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	c := newAccountTestStatusContext()
+	c.Request = c.Request.WithContext(expired)
+
+	err := svc.TestAccountConnection(c, account.ID, "gpt-5.4", "", "")
+	require.Error(t, err)
+
+	require.Equal(t, "failed", repo.updatedExtra["last_test_status"])
+	require.NotEmpty(t, repo.updatedExtra["last_tested_at"])
+	require.Contains(t, repo.updatedExtra["last_test_error"], "context deadline exceeded")
 }

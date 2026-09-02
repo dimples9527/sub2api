@@ -54,7 +54,12 @@ func (r *snapshotUpdateAccountRepo) UpdateExtra(ctx context.Context, id int64, u
 		for k, v := range updates {
 			copied[k] = v
 		}
-		r.updateExtraCalls <- copied
+		// 调用方可能在一次请求里写多次 extra（探测结论 + 测试状态），而用例只取第一次快照，
+		// 阻塞式发送会把被测代码卡死在第二次写库上。
+		select {
+		case r.updateExtraCalls <- copied:
+		default:
+		}
 	}
 	return nil
 }
