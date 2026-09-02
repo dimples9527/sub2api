@@ -499,10 +499,12 @@
             <div class="sp-health-chart-legend">
               <span class="sp-health-legend-item upstream"><i></i>上游成本</span>
               <span class="sp-health-legend-item local"><i></i>本地成本</span>
+              <span class="sp-health-legend-item effective"><i></i>生效成本</span>
             </div>
             <div class="sp-health-chart-totals">
               <span>上游合计 <b>{{ currency(costTrendTotals.upstream) }}</b></span>
               <span>本地合计 <b>{{ currency(costTrendTotals.local) }}</b></span>
+              <span>生效合计 <b>{{ currency(costTrendTotals.effective) }}</b></span>
               <span
                 v-if="costTrendChartData"
                 class="sp-deviation-summary"
@@ -545,7 +547,7 @@
             <div class="sp-panel-title">
               <div>
                 <h2>按供应商拆分成本</h2>
-                <span>{{ costBreakdownRangeLabel }} · 每个供应商并排比较上游成本和本地成本</span>
+                <span>{{ costBreakdownRangeLabel }} · 每个供应商并排比较上游成本、本地成本和生效成本</span>
               </div>
             </div>
           </div>
@@ -556,6 +558,7 @@
             <div class="sp-health-chart-legend">
               <span class="sp-health-legend-item upstream"><i></i>上游成本</span>
               <span class="sp-health-legend-item local"><i></i>本地成本</span>
+              <span class="sp-health-legend-item effective"><i></i>生效成本</span>
             </div>
           </div>
           <div class="sp-health-breakdown-chart" data-test="supplier-cost-breakdown-chart-container">
@@ -1454,8 +1457,9 @@ const costTrendTotals = computed(() =>
   costTrendPoints.value.reduce((acc, point) => {
     acc.upstream += Number(point.upstream_cost || 0)
     acc.local += Number(point.local_cost || 0)
+    acc.effective += Number(point.effective_cost || 0)
     return acc
-  }, { upstream: 0, local: 0 }),
+  }, { upstream: 0, local: 0, effective: 0 }),
 )
 
 // 每日上游/本地成本偏差率，用于成本对比图按阈值高亮异常点。
@@ -1485,10 +1489,11 @@ const costBreakdown = computed(() =>
     name: provider.provider_name,
     upstreamCost: Number(provider.upstream_cost || 0),
     localCost: Number(provider.local_cost || 0),
+    effectiveCost: Number(provider.effective_cost || 0),
   })),
 )
 
-// 上游/本地偏差过大被改写为本地成本的日期提示。
+// 上游与本地成本偏差过大的日期提示。
 const costTrendWarnings = computed(() =>
   costTrendPoints.value.filter(point => point.warning).map(point => ({
     date: point.date,
@@ -1496,7 +1501,7 @@ const costTrendWarnings = computed(() =>
   })),
 )
 
-// 按供应商拆分中因偏差过大被改写为本地成本的供应商提示。
+// 按供应商拆分中上游与本地成本偏差过大的供应商提示。
 const costBreakdownWarnings = computed(() =>
   costTrendBreakdown.value.filter(item => item.cost_warning).map(item => ({
     provider_id: item.provider_id,
@@ -1540,6 +1545,21 @@ const costTrendChartData = computed(() => {
         pointRadius,
         pointHoverRadius: 5,
         pointBackgroundColor: pointColors,
+        pointBorderColor: 'rgba(255, 255, 255, 0.9)',
+        pointBorderWidth: 1,
+      },
+      {
+        label: '生效成本',
+        data: costTrendPoints.value.map(point => Number(point.effective_cost || 0)),
+        borderColor: '#059669',
+        backgroundColor: 'rgba(5, 150, 105, 0.10)',
+        borderWidth: 2,
+        borderDash: [5, 3],
+        fill: false,
+        tension: 0.35,
+        pointRadius: 2,
+        pointHoverRadius: 5,
+        pointBackgroundColor: '#059669',
         pointBorderColor: 'rgba(255, 255, 255, 0.9)',
         pointBorderWidth: 1,
       },
@@ -1617,7 +1637,7 @@ const costBreakdownChartData = computed(() => {
         borderWidth: 1,
         borderRadius: 4,
         borderSkipped: false,
-        barPercentage: 0.36,
+        barPercentage: 0.26,
         categoryPercentage: 0.76,
         maxBarThickness: 24,
       },
@@ -1629,7 +1649,19 @@ const costBreakdownChartData = computed(() => {
         borderWidth: 1,
         borderRadius: 4,
         borderSkipped: false,
-        barPercentage: 0.36,
+        barPercentage: 0.26,
+        categoryPercentage: 0.76,
+        maxBarThickness: 24,
+      },
+      {
+        label: '生效成本',
+        data: items.map(item => item.effectiveCost),
+        backgroundColor: '#059669',
+        borderColor: '#047857',
+        borderWidth: 1,
+        borderRadius: 4,
+        borderSkipped: false,
+        barPercentage: 0.26,
         categoryPercentage: 0.76,
         maxBarThickness: 24,
       },
@@ -4146,6 +4178,10 @@ function errorMessage(err: unknown, fallback: string): string {
 
 .sp-health-legend-item.local i {
   background: #d97706;
+}
+
+.sp-health-legend-item.effective i {
+  background: #059669;
 }
 
 .sp-health-chart-totals {

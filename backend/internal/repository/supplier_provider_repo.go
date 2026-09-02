@@ -119,8 +119,8 @@ func (r *supplierProviderRepository) ListCostTrends(ctx context.Context, start, 
 
 	upstreamQuery := `
 SELECT TO_CHAR(d.stat_date, 'YYYY-MM-DD') AS date,
-       COALESCE(SUM(d.today_cost), 0) AS upstream_cost,
-       SUM(d.raw_upstream_cost) AS raw_upstream_cost,
+       COALESCE(SUM(COALESCE(d.raw_upstream_cost, d.today_cost)), 0) AS upstream_cost,
+       COALESCE(SUM(d.today_cost), 0) AS effective_cost,
        COALESCE(string_agg(DISTINCT d.cost_warning, '；') FILTER (WHERE d.cost_warning IS NOT NULL), '') AS cost_warning
 FROM supplier_provider_daily_stats d
 JOIN supplier_providers p ON p.id = d.provider_id AND p.deleted_at IS NULL
@@ -145,9 +145,9 @@ ORDER BY d.stat_date`
 	for upstreamRows.Next() {
 		var date string
 		var upstreamCost float64
-		var rawUpstream sql.NullFloat64
+		var effectiveCost float64
 		var costWarning sql.NullString
-		if scanErr := upstreamRows.Scan(&date, &upstreamCost, &rawUpstream, &costWarning); scanErr != nil {
+		if scanErr := upstreamRows.Scan(&date, &upstreamCost, &effectiveCost, &costWarning); scanErr != nil {
 			return nil, fmt.Errorf("scan supplier upstream cost trend: %w", scanErr)
 		}
 		point := byDate[date]
@@ -156,10 +156,7 @@ ORDER BY d.stat_date`
 			byDate[date] = point
 		}
 		point.UpstreamCost = upstreamCost
-		if rawUpstream.Valid {
-			raw := rawUpstream.Float64
-			point.RawUpstreamCost = &raw
-		}
+		point.EffectiveCost = effectiveCost
 		point.Warning = costWarning.String
 	}
 	if err := upstreamRows.Err(); err != nil {
@@ -258,8 +255,8 @@ unique_account_matches AS (
 ),
 upstream_costs AS (
   SELECT d.provider_id,
-         COALESCE(SUM(d.today_cost), 0) AS upstream_cost,
-         SUM(d.raw_upstream_cost) AS raw_upstream_cost,
+         COALESCE(SUM(COALESCE(d.raw_upstream_cost, d.today_cost)), 0) AS upstream_cost,
+         COALESCE(SUM(d.today_cost), 0) AS effective_cost,
          COALESCE(string_agg(DISTINCT d.cost_warning, '；') FILTER (WHERE d.cost_warning IS NOT NULL), '') AS cost_warning
   FROM supplier_provider_daily_stats d
   WHERE d.stat_date >= $1::date
@@ -277,7 +274,7 @@ local_costs AS (
 SELECT p.id, p.name, p.provider_type,
        COALESCE(upstream.upstream_cost, 0) AS upstream_cost,
        COALESCE(local_agg.local_cost, 0) AS local_cost,
-       COALESCE(upstream.raw_upstream_cost, 0) AS raw_upstream_cost,
+       COALESCE(upstream.effective_cost, 0) AS effective_cost,
        COALESCE(upstream.cost_warning, '') AS cost_warning
 FROM supplier_providers p
 LEFT JOIN upstream_costs upstream ON upstream.provider_id = p.id
@@ -307,7 +304,7 @@ ORDER BY p.sort_order ASC, p.id ASC`
 			&breakdown.ProviderType,
 			&breakdown.UpstreamCost,
 			&breakdown.LocalCost,
-			&breakdown.RawUpstreamCost,
+			&breakdown.EffectiveCost,
 			&breakdown.CostWarning,
 		); scanErr != nil {
 			return nil, fmt.Errorf("scan supplier provider cost breakdown: %w", scanErr)

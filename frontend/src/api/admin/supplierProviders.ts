@@ -180,8 +180,8 @@ export interface SupplierProviderCostTrendPoint {
   date: string
   upstream_cost: number
   local_cost: number
-  raw_upstream_cost?: number  // 上游接口原始成本（未做偏差覆盖）
-  warning?: string            // 偏差覆盖提示（已按本地成本展示）
+  effective_cost: number  // 实际记账采用的成本
+  warning?: string        // 上游与本地成本偏差过大提示
   deviation?: number   // upstream - local
   deviationPercent?: number
 }
@@ -192,8 +192,8 @@ export interface SupplierProviderCostBreakdown {
   provider_type: string
   upstream_cost: number
   local_cost: number
-  raw_upstream_cost?: number  // 上游接口原始成本（未做偏差覆盖）
-  cost_warning?: string       // 偏差覆盖提示（已按本地成本展示）
+  effective_cost: number  // 实际记账采用的成本
+  cost_warning?: string   // 上游与本地成本偏差过大提示
 }
 
 export interface SupplierProviderCostDeviationSettings {

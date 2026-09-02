@@ -163,26 +163,26 @@ type SupplierProviderListResult struct {
 	PageSize int                     `json:"page_size"`
 }
 
-// SupplierProviderCostTrendPoint 表示某一天的上游成本与本地成本对比。
+// SupplierProviderCostTrendPoint 表示某一天的上游成本、本地成本与生效成本对比。
 type SupplierProviderCostTrendPoint struct {
 	Date         string  `json:"date"`
 	UpstreamCost float64 `json:"upstream_cost"`
 	LocalCost    float64 `json:"local_cost"`
-	// RawUpstreamCost 为上游成本接口返回的原始值（未做偏差覆盖），可能为 nil（历史数据未记录）。
-	RawUpstreamCost *float64 `json:"raw_upstream_cost,omitempty"`
-	// Warning 表示该日因上游与本地成本偏差过大而采用本地成本时记录的提示。
+	// EffectiveCost 为当前实际记账采用的成本，受成本来源配置与偏差处理影响。
+	EffectiveCost float64 `json:"effective_cost"`
+	// Warning 表示该日上游与本地成本偏差过大时记录的提示。
 	Warning string `json:"warning,omitempty"`
 }
 
 // SupplierProviderCostBreakdown 表示指定日期范围内单个供应商的成本拆分。
 type SupplierProviderCostBreakdown struct {
-	ProviderID      int64   `json:"provider_id"`
-	ProviderName    string  `json:"provider_name"`
-	ProviderType    string  `json:"provider_type"`
-	UpstreamCost    float64 `json:"upstream_cost"`
-	LocalCost       float64 `json:"local_cost"`
-	RawUpstreamCost float64 `json:"raw_upstream_cost,omitempty"`
-	CostWarning     string  `json:"cost_warning,omitempty"`
+	ProviderID    int64   `json:"provider_id"`
+	ProviderName  string  `json:"provider_name"`
+	ProviderType  string  `json:"provider_type"`
+	UpstreamCost  float64 `json:"upstream_cost"`
+	LocalCost     float64 `json:"local_cost"`
+	EffectiveCost float64 `json:"effective_cost"`
+	CostWarning   string  `json:"cost_warning,omitempty"`
 }
 
 // SupplierProviderBalanceCostDay 表示供应商在某一天的余额差额成本。
@@ -206,10 +206,10 @@ func supplierCostDeviation(upstream, local float64) float64 {
 	return math.Abs(upstream-local) / max
 }
 
-// supplierCostDeviationWarning 生成成本偏差覆盖时的中文提示。
+// supplierCostDeviationWarning 生成成本偏差过大时的中文提示。
 func supplierCostDeviationWarning(upstream, local float64) string {
 	pct := int(math.Round(supplierCostDeviation(upstream, local) * 100))
-	return fmt.Sprintf("上游成本 %.2f 与本地成本 %.2f 偏差 %d%%，已按本地成本展示", upstream, local, pct)
+	return fmt.Sprintf("上游成本 %.2f 与本地成本 %.2f 偏差 %d%%，生效成本已取本地计算值", upstream, local, pct)
 }
 
 // SupplierProviderCostTrendResult 是供应商组合成本趋势响应。
@@ -475,7 +475,7 @@ func (s *SupplierProviderService) listCostTrendsBetween(ctx context.Context, sta
 		return cached, nil
 	}
 
-	// 偏差覆盖阈值；历史数据在展示时也会按该阈值做兜底改写。
+	// 偏差提示阈值；历史数据在展示时也会按该阈值补充提示。
 	threshold := s.costDeviationThreshold(ctx)
 
 	rawPoints, err := s.repo.ListCostTrends(ctx, start, endExclusive, providerID)
@@ -510,51 +510,51 @@ func (s *SupplierProviderService) listCostTrendsBetween(ctx context.Context, sta
 		if !ok {
 			point = SupplierProviderCostTrendPoint{Date: date}
 		}
+		if point.UpstreamCost > 0 && point.EffectiveCost > 0 {
+			continue
+		}
 		if point.UpstreamCost <= 0 {
 			point.UpstreamCost = balanceCost
-			byDate[date] = point
 		}
+		if point.EffectiveCost <= 0 {
+			point.EffectiveCost = balanceCost
+		}
+		byDate[date] = point
 	}
 
 	// 按供应商拆分的成本同样用余额差额做保底估算。
 	for i := range rawBreakdown {
-		if rawBreakdown[i].UpstreamCost <= 0 {
-			sum := 0.0
-			for _, bc := range balanceCosts {
-				if bc.ProviderID == rawBreakdown[i].ProviderID {
-					sum += bc.BalanceCost
-				}
+		b := &rawBreakdown[i]
+		if b.UpstreamCost > 0 && b.EffectiveCost > 0 {
+			continue
+		}
+		sum := 0.0
+		for _, bc := range balanceCosts {
+			if bc.ProviderID == b.ProviderID {
+				sum += bc.BalanceCost
 			}
-			rawBreakdown[i].UpstreamCost = sum
+		}
+		if b.UpstreamCost <= 0 {
+			b.UpstreamCost = sum
+		}
+		if b.EffectiveCost <= 0 {
+			b.EffectiveCost = sum
 		}
 	}
 
-	// 展示时按供应商成本来源决定兜底改写：
-	//   upstream 模式保持上游值；calculated 模式固定展示本地计算成本；
-	//   auto 模式在上游与本地差距超过阈值时按本地成本展示并记录警告，
-	//   优先以原始上游值为基准（历史数据未记录时退化为已写入的 today_cost）。
+	// 展示层只提示、不改写数值：upstream 与 calculated 是用户主动选择的稳定状态，
+	// 不必逐条提示；auto 模式下上游与本地差距超过阈值时补充偏差提示。
 	for i := range rawBreakdown {
 		b := &rawBreakdown[i]
 		source := s.costSourceFor(ctx, b.ProviderID)
-		if source.Source == SupplierCostSourceUpstream {
+		if source.Source != SupplierCostSourceAuto {
 			continue
 		}
-		if source.Source == SupplierCostSourceCalculated {
-			if b.LocalCost > 0 {
-				b.UpstreamCost = b.LocalCost
-			}
+		if b.LocalCost <= 0 || b.UpstreamCost <= 0 {
 			continue
 		}
-		if b.LocalCost <= 0 {
-			continue
-		}
-		base := b.UpstreamCost
-		if b.RawUpstreamCost > 0 {
-			base = b.RawUpstreamCost
-		}
-		if base > 0 && supplierCostDeviation(base, b.LocalCost) > source.Threshold {
-			b.CostWarning = supplierCostDeviationWarning(base, b.LocalCost)
-			b.UpstreamCost = b.LocalCost
+		if supplierCostDeviation(b.UpstreamCost, b.LocalCost) > source.Threshold {
+			b.CostWarning = supplierCostDeviationWarning(b.UpstreamCost, b.LocalCost)
 		}
 	}
 
@@ -568,33 +568,21 @@ func (s *SupplierProviderService) listCostTrendsBetween(ctx context.Context, sta
 		points = append(points, SupplierProviderCostTrendPoint{Date: date})
 	}
 
-	// 汇总点位按查询维度应用成本来源：指定供应商时用该供应商的解析结果，
+	// 汇总点位按查询维度决定是否提示偏差：指定供应商时用该供应商的解析结果，
 	// 未指定供应商（跨供应商汇总）时回退智能模式 + 全局阈值。
 	pointSource := SupplierCostSourceResolution{Source: SupplierCostSourceAuto, Threshold: threshold}
 	if providerID > 0 {
 		pointSource = s.costSourceFor(ctx, providerID)
 	}
-	for i := range points {
-		p := &points[i]
-		if pointSource.Source == SupplierCostSourceUpstream {
-			continue
-		}
-		if pointSource.Source == SupplierCostSourceCalculated {
-			if p.LocalCost > 0 {
-				p.UpstreamCost = p.LocalCost
+	if pointSource.Source == SupplierCostSourceAuto {
+		for i := range points {
+			p := &points[i]
+			if p.LocalCost <= 0 || p.UpstreamCost <= 0 {
+				continue
 			}
-			continue
-		}
-		if p.LocalCost <= 0 {
-			continue
-		}
-		base := p.UpstreamCost
-		if p.RawUpstreamCost != nil && *p.RawUpstreamCost > 0 {
-			base = *p.RawUpstreamCost
-		}
-		if base > 0 && supplierCostDeviation(base, p.LocalCost) > pointSource.Threshold {
-			p.Warning = supplierCostDeviationWarning(base, p.LocalCost)
-			p.UpstreamCost = p.LocalCost
+			if supplierCostDeviation(p.UpstreamCost, p.LocalCost) > pointSource.Threshold {
+				p.Warning = supplierCostDeviationWarning(p.UpstreamCost, p.LocalCost)
+			}
 		}
 	}
 

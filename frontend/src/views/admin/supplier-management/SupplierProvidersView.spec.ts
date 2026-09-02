@@ -246,12 +246,12 @@ describe('SupplierProvidersView payload normalization', () => {
     providerViewMocks.listCostTrends.mockResolvedValue({
       days: 14,
       points: [
-        { date: '2026-07-16', upstream_cost: 12, local_cost: 10 },
-        { date: '2026-07-17', upstream_cost: 15, local_cost: 14 },
+        { date: '2026-07-16', upstream_cost: 12, local_cost: 10, effective_cost: 10 },
+        { date: '2026-07-17', upstream_cost: 15, local_cost: 14, effective_cost: 15 },
       ],
       breakdown: [
-        { provider_id: 1, provider_name: 'Alpha', provider_type: 'sub2api', upstream_cost: 120, local_cost: 80 },
-        { provider_id: 2, provider_name: 'Beta', provider_type: 'sub2api', upstream_cost: 90, local_cost: 45 },
+        { provider_id: 1, provider_name: 'Alpha', provider_type: 'sub2api', upstream_cost: 120, local_cost: 80, effective_cost: 80 },
+        { provider_id: 2, provider_name: 'Beta', provider_type: 'sub2api', upstream_cost: 90, local_cost: 45, effective_cost: 90 },
       ],
     })
     providerViewMocks.backfillCostTrends.mockResolvedValue({
@@ -676,6 +676,8 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(wrapper.get('[data-test="supplier-cost-trend"]').text()).toContain('成本对比')
     expect(wrapper.get('[data-test="supplier-cost-trend"]').text()).toContain('上游成本')
     expect(wrapper.get('[data-test="supplier-cost-trend"]').text()).toContain('本地成本')
+    expect(wrapper.get('[data-test="supplier-cost-trend"]').text()).toContain('生效成本')
+    expect(wrapper.get('[data-test="supplier-cost-trend"]').text()).toContain('生效合计')
     expect(supplierProvidersSource).toContain('priorityTodos')
     expect(supplierProvidersSource).toContain('costTrendChartData')
     expect(supplierProvidersSource).not.toContain('class="sp-stat-list"')
@@ -691,7 +693,7 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(supplierProvidersSource).toContain('.sp-health-completeness-list .sp-list-item')
   })
 
-  it('renders grouped upstream and local cost bars for each supplier', async () => {
+  it('renders grouped upstream, local and effective cost bars for each supplier', async () => {
     const wrapper = await mountSupplierProviders()
     await openCostDialog(wrapper)
 
@@ -705,6 +707,7 @@ describe('SupplierProvidersView payload normalization', () => {
       datasets: [
         { label: '上游成本', data: [120, 90] },
         { label: '本地成本', data: [80, 45] },
+        { label: '生效成本', data: [80, 90] },
       ],
     })
     expect(supplierProvidersSource).toContain('costBreakdownChartData')
@@ -863,8 +866,8 @@ describe('SupplierProvidersView payload normalization', () => {
     providerViewMocks.listCostTrends.mockResolvedValue({
       days: 14,
       points: [
-        { date: '2026-07-16', upstream_cost: 12, local_cost: 5 },
-        { date: '2026-07-17', upstream_cost: 15, local_cost: 14 },
+        { date: '2026-07-16', upstream_cost: 12, local_cost: 5, effective_cost: 5 },
+        { date: '2026-07-17', upstream_cost: 15, local_cost: 14, effective_cost: 15 },
       ],
       breakdown: [],
     })
@@ -968,22 +971,22 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(providerViewMocks.listCostTrends).toHaveBeenCalled()
   })
 
-  it('shows deviation override warnings on the trend and breakdown panels', async () => {
+  it('shows deviation warnings on the trend and breakdown panels', async () => {
     providerViewMocks.listCostTrends.mockResolvedValue({
       days: 14,
       points: [
-        { date: '2026-07-16', upstream_cost: 12, local_cost: 10, warning: '上游成本 12.00 与本地成本 10.00 偏差 17%，已按本地成本展示' },
-        { date: '2026-07-17', upstream_cost: 15, local_cost: 14 },
+        { date: '2026-07-16', upstream_cost: 12, local_cost: 10, effective_cost: 10, warning: '上游成本 12.00 与本地成本 10.00 偏差 17%，生效成本已取本地计算值' },
+        { date: '2026-07-17', upstream_cost: 15, local_cost: 14, effective_cost: 15 },
       ],
       breakdown: [
-        { provider_id: 1, provider_name: 'Alpha', provider_type: 'sub2api', upstream_cost: 120, local_cost: 80, cost_warning: '上游成本 120.00 与本地成本 80.00 偏差 33%，已按本地成本展示' },
+        { provider_id: 1, provider_name: 'Alpha', provider_type: 'sub2api', upstream_cost: 120, local_cost: 80, effective_cost: 80, cost_warning: '上游成本 120.00 与本地成本 80.00 偏差 33%，生效成本已取本地计算值' },
       ],
     })
     const wrapper = await mountSupplierProviders()
     await openCostDialog(wrapper)
 
     expect(wrapper.get('[data-test="supplier-cost-warnings"]').exists()).toBe(true)
-    expect(wrapper.get('[data-test="supplier-cost-warning-item"]').text()).toContain('已按本地成本展示')
+    expect(wrapper.get('[data-test="supplier-cost-warning-item"]').text()).toContain('生效成本已取本地计算值')
     expect(wrapper.get('[data-test="supplier-cost-breakdown-warnings"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="supplier-cost-breakdown-warning-item"]').text()).toContain('Alpha')
   })
