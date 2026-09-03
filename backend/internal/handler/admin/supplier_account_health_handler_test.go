@@ -23,6 +23,8 @@ type supplierAccountHealthTrendHandlerStub struct {
 	summaryResult service.SupplierAccountHealthSummary
 	trendResult   service.SupplierAccountHealthTrendResult
 	batchResults  []service.SupplierAccountHealthTrendResult
+	recordParams  service.SupplierAccountHealthRecordListParams
+	recordResult  service.SupplierAccountHealthRecordListResult
 }
 
 func (s *supplierAccountHealthTrendHandlerStub) ListAccounts(_ context.Context, params service.SupplierAccountHealthAccountListParams) (service.SupplierAccountHealthAccountListResult, error) {
@@ -44,6 +46,11 @@ func (s *supplierAccountHealthTrendHandlerStub) GetTrends(_ context.Context, acc
 	s.batchIDs = accountIDs
 	s.batchRange = rangeValue
 	return s.batchResults, nil
+}
+
+func (s *supplierAccountHealthTrendHandlerStub) ListRecords(_ context.Context, params service.SupplierAccountHealthRecordListParams) (service.SupplierAccountHealthRecordListResult, error) {
+	s.recordParams = params
+	return s.recordResult, nil
 }
 
 func TestSupplierAccountHealthHandlerListsAccountsWithFiltersAndPagination(t *testing.T) {
@@ -126,6 +133,60 @@ func TestSupplierAccountHealthHandlerRejectsInvalidTrendAccountID(t *testing.T) 
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Zero(t, stub.trendID)
+}
+
+func TestSupplierAccountHealthHandlerListsRecordsWithStatusAndLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stub := &supplierAccountHealthTrendHandlerStub{recordResult: service.SupplierAccountHealthRecordListResult{
+		Items: []service.SupplierAccountHealthRecord{{
+			CheckedAt: time.Date(2026, 8, 26, 8, 0, 0, 0, time.UTC),
+			Status:    "failed", ConsecutiveFailed: 4, Action: "disable", ErrorMessage: "401 invalid api key",
+		}},
+		Limit: 20,
+	}}
+	handler := NewSupplierAccountHealthHandler(stub)
+	router := gin.New()
+	router.GET("/records", handler.ListRecords)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/records?account_id=101&status=%20failed%20&limit=20", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, service.SupplierAccountHealthRecordListParams{AccountID: 101, Status: "failed", Limit: 20}, stub.recordParams)
+	require.Contains(t, rec.Body.String(), `"consecutive_failed":4`)
+	require.Contains(t, rec.Body.String(), `"error_message":"401 invalid api key"`)
+}
+
+func TestSupplierAccountHealthHandlerRejectsInvalidRecordsAccountID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stub := &supplierAccountHealthTrendHandlerStub{}
+	handler := NewSupplierAccountHealthHandler(stub)
+	router := gin.New()
+	router.GET("/records", handler.ListRecords)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/records?account_id=abc", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Zero(t, stub.recordParams.AccountID)
+}
+
+// limit 非法时交给服务层落回默认值，不应因此拒绝请求。
+func TestSupplierAccountHealthHandlerListsRecordsIgnoringInvalidLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stub := &supplierAccountHealthTrendHandlerStub{}
+	handler := NewSupplierAccountHealthHandler(stub)
+	router := gin.New()
+	router.GET("/records", handler.ListRecords)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/records?account_id=101&limit=abc", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, service.SupplierAccountHealthRecordListParams{AccountID: 101}, stub.recordParams)
 }
 func TestSupplierAccountHealthHandlerGetsTrendsWithoutDuplicateIDs(t *testing.T) {
 	gin.SetMode(gin.TestMode)

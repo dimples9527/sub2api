@@ -24,6 +24,8 @@ type accountHealthTrendRepositoryStub struct {
 	batchTrends       map[int64]SupplierAccountHealthTrendResult
 	upstreamTrends    map[int64]SupplierAccountHealthUpstreamTrend
 	lastUpstreamIDs   []int64
+	lastRecordParams  SupplierAccountHealthRecordListParams
+	recordItems       []SupplierAccountHealthRecord
 }
 
 func (s *accountHealthTrendRepositoryStub) ValidateAccount(_ context.Context, _ int64) error {
@@ -54,6 +56,11 @@ func (s *accountHealthTrendRepositoryStub) GetTrends(_ context.Context, accountI
 func (s *accountHealthTrendRepositoryStub) GetUpstreamTrends(_ context.Context, accountIDs []int64, _, _ time.Time) (map[int64]SupplierAccountHealthUpstreamTrend, error) {
 	s.lastUpstreamIDs = append([]int64(nil), accountIDs...)
 	return s.upstreamTrends, nil
+}
+
+func (s *accountHealthTrendRepositoryStub) ListRecords(_ context.Context, params SupplierAccountHealthRecordListParams) (SupplierAccountHealthRecordListResult, error) {
+	s.lastRecordParams = params
+	return SupplierAccountHealthRecordListResult{Items: s.recordItems, Limit: params.Limit}, nil
 }
 
 func (s *accountHealthTrendRepositoryStub) DeleteBefore(_ context.Context, _ time.Time, _ int) (int, error) {
@@ -100,9 +107,11 @@ func TestSupplierAccountHealthTrendServiceRejectsUnknownAccount(t *testing.T) {
 	require.Zero(t, repo.getTrendCalls)
 }
 func TestSupplierAccountHealthTrendServiceGetTrendsDeduplicatesAndFillsMissing(t *testing.T) {
+	// 采样时间必须相对 now，7d 窗口是相对当前时间算的，写死日期会随时间推移滑出窗口。
+	sampledAt := time.Now().Add(-2 * time.Hour).UTC()
 	repo := &accountHealthTrendRepositoryStub{
 		batchTrends: map[int64]SupplierAccountHealthTrendResult{
-			12: {AccountID: 12, Points: []SupplierAccountHealthPoint{{CheckedAt: time.Date(2026, 8, 26, 8, 0, 0, 0, time.UTC), Status: "healthy"}}},
+			12: {AccountID: 12, Points: []SupplierAccountHealthPoint{{CheckedAt: sampledAt, Status: "healthy"}}},
 		},
 	}
 	svc := NewSupplierAccountHealthTrendService(repo, repo)
@@ -369,4 +378,53 @@ func TestAggregateSupplierAccountHealthTrendPointsRanksUnavailableBelowFailed(t 
 	require.Equal(t, SupplierAccountHealthGuardStatusUnavailable, aggregated[1].Status)
 	require.Equal(t, 2, aggregated[1].SampleCount)
 	require.Equal(t, 1, aggregated[1].SlowCount)
+}
+
+func TestSupplierAccountHealthTrendServiceListRecordsNormalizesLimit(t *testing.T) {
+	stub := &accountHealthTrendRepositoryStub{}
+	svc := NewSupplierAccountHealthTrendService(stub, stub)
+
+	_, err := svc.ListRecords(context.Background(), SupplierAccountHealthRecordListParams{AccountID: 21})
+	require.NoError(t, err)
+	require.Equal(t, SupplierAccountHealthRecordDefaultLimit, stub.lastRecordParams.Limit)
+
+	_, err = svc.ListRecords(context.Background(), SupplierAccountHealthRecordListParams{AccountID: 21, Limit: 5000})
+	require.NoError(t, err)
+	require.Equal(t, SupplierAccountHealthRecordMaxLimit, stub.lastRecordParams.Limit)
+}
+
+func TestSupplierAccountHealthTrendServiceListRecordsKeepsStatusFilter(t *testing.T) {
+	stub := &accountHealthTrendRepositoryStub{
+		recordItems: []SupplierAccountHealthRecord{{Status: SupplierAccountHealthGuardStatusFailed, ConsecutiveFailed: 4}},
+	}
+	svc := NewSupplierAccountHealthTrendService(stub, stub)
+
+	result, err := svc.ListRecords(context.Background(), SupplierAccountHealthRecordListParams{
+		AccountID: 21, Status: SupplierAccountHealthGuardStatusFailed, Limit: 20,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, SupplierAccountHealthGuardStatusFailed, stub.lastRecordParams.Status)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, 4, result.Items[0].ConsecutiveFailed)
+}
+
+func TestSupplierAccountHealthTrendServiceListRecordsRejectsUnknownStatus(t *testing.T) {
+	stub := &accountHealthTrendRepositoryStub{}
+	svc := NewSupplierAccountHealthTrendService(stub, stub)
+
+	_, err := svc.ListRecords(context.Background(), SupplierAccountHealthRecordListParams{AccountID: 21, Status: SupplierAccountHealthStatusUnchecked})
+
+	require.EqualError(t, err, "健康检测状态无效")
+	require.Zero(t, stub.lastRecordParams.AccountID)
+}
+
+func TestSupplierAccountHealthTrendServiceListRecordsPropagatesAccountScopeError(t *testing.T) {
+	stub := &accountHealthTrendRepositoryStub{validateErr: ErrAccountNotFound}
+	svc := NewSupplierAccountHealthTrendService(stub, stub)
+
+	_, err := svc.ListRecords(context.Background(), SupplierAccountHealthRecordListParams{AccountID: 21})
+
+	require.ErrorIs(t, err, ErrAccountNotFound)
+	require.Zero(t, stub.lastRecordParams.AccountID)
 }

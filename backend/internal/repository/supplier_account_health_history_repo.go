@@ -471,6 +471,53 @@ ORDER BY binding.local_account_id ASC, sample.checked_at ASC`, pq.Array(accountI
 	return result, nil
 }
 
+// ListRecords 按时间倒序读取单账号的原始守护检测记录，走
+// idx_supplier_account_health_history_account_checked 索引。
+func (r *supplierAccountHealthHistoryRepository) ListRecords(ctx context.Context, params service.SupplierAccountHealthRecordListParams) (service.SupplierAccountHealthRecordListResult, error) {
+	if params.AccountID <= 0 {
+		return service.SupplierAccountHealthRecordListResult{}, fmt.Errorf("本地账号 ID 必须为正数")
+	}
+	args := []any{params.AccountID}
+	statusFilter := ""
+	if params.Status != "" {
+		args = append(args, params.Status)
+		statusFilter = fmt.Sprintf("\n  AND status = $%d", len(args))
+	}
+	args = append(args, params.Limit)
+	query := fmt.Sprintf(`
+SELECT checked_at, status, latency_ms, model_id, action, consecutive_failed, reason, error_message
+FROM supplier_account_health_history
+WHERE local_account_id = $1%s
+ORDER BY checked_at DESC, id DESC
+LIMIT $%d`, statusFilter, len(args))
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return service.SupplierAccountHealthRecordListResult{}, fmt.Errorf("查询账号健康检测记录失败: %w", err)
+	}
+	defer rows.Close()
+	result := service.SupplierAccountHealthRecordListResult{
+		Items: make([]service.SupplierAccountHealthRecord, 0),
+		Limit: params.Limit,
+	}
+	for rows.Next() {
+		var record service.SupplierAccountHealthRecord
+		var latency sql.NullInt64
+		if err := rows.Scan(&record.CheckedAt, &record.Status, &latency, &record.ModelID,
+			&record.Action, &record.ConsecutiveFailed, &record.Reason, &record.ErrorMessage); err != nil {
+			return service.SupplierAccountHealthRecordListResult{}, fmt.Errorf("扫描账号健康检测记录失败: %w", err)
+		}
+		if latency.Valid {
+			value := latency.Int64
+			record.LatencyMs = &value
+		}
+		result.Items = append(result.Items, record)
+	}
+	if err := rows.Err(); err != nil {
+		return service.SupplierAccountHealthRecordListResult{}, fmt.Errorf("遍历账号健康检测记录失败: %w", err)
+	}
+	return result, nil
+}
+
 func (r *supplierAccountHealthHistoryRepository) DeleteBefore(ctx context.Context, before time.Time, batchSize int) (int, error) {
 	if batchSize <= 0 {
 		batchSize = 1000

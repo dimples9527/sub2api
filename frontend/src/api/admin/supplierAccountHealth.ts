@@ -81,6 +81,29 @@ export interface SupplierAccountHealthAccountListParams {
   page_size?: number
 }
 
+// 守护检测的原始逐次记录，与 trend 的时间桶不同，不做任何聚合。
+export interface SupplierAccountHealthRecord {
+  checked_at: string
+  status: SupplierAccountHealthStatus | string
+  latency_ms?: number | null
+  model_id?: string
+  action?: string
+  consecutive_failed: number
+  reason?: string
+  error_message?: string
+}
+
+export interface SupplierAccountHealthRecordListResult {
+  items: SupplierAccountHealthRecord[]
+  limit: number
+}
+
+export interface SupplierAccountHealthRecordListParams {
+  account_id: number
+  status?: SupplierAccountHealthStatus | string
+  limit?: number
+}
+
 export async function listSupplierAccountHealthAccounts(
   params: SupplierAccountHealthAccountListParams = {}
 ): Promise<SupplierAccountHealthAccountListResult> {
@@ -123,11 +146,22 @@ export async function getSupplierAccountHealthTrends(
   return data
 }
 
+export async function listSupplierAccountHealthRecords(
+  params: SupplierAccountHealthRecordListParams
+): Promise<SupplierAccountHealthRecordListResult> {
+  const { data } = await apiClient.get<SupplierAccountHealthRecordListResult>(
+    '/admin/supplier-management/account-health/records',
+    { params }
+  )
+  return data
+}
+
 export const supplierAccountHealthAPI = {
   listAccounts: listSupplierAccountHealthAccounts,
   getSummary: getSupplierAccountHealthSummary,
   getTrend: getSupplierAccountHealthTrend,
   getTrends: getSupplierAccountHealthTrends,
+  listRecords: listSupplierAccountHealthRecords,
 }
 
 export default supplierAccountHealthAPI

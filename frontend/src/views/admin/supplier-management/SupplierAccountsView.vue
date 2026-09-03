@@ -378,11 +378,14 @@
                 {{ accountTestStatusLabel(account.local_account_last_test_status) }}
               </span>
               <span v-else class="sp-account-muted">—</span>
-              <span
+              <button
                 v-if="hasRepeatedGuardFailures(account)"
+                type="button"
                 class="sp-guard-failure-hint"
-                :title="guardFailureHintTitle(account)"
-              >守护连续失败 {{ guardFailureCount(account) }} 次</span>
+                title="查看守护检测失败记录"
+                :data-test="'supplier-account-guard-failures-' + account.local_account_id"
+                @click.stop="openGuardFailureDialog(account)"
+              >守护连续失败 {{ guardFailureCount(account) }} 次</button>
             </div>
           </template>
 
@@ -547,11 +550,13 @@
             <span>测试结果</span>
             <b class="sp-detail-test-result">
               {{ isMatchedLocalAccount(selected) ? accountTestStatusLabel(selected.local_account_last_test_status) : '—' }}
-              <span
+              <button
                 v-if="hasRepeatedGuardFailures(selected)"
+                type="button"
                 class="sp-guard-failure-hint"
-                :title="guardFailureHintTitle(selected)"
-              >守护连续失败 {{ guardFailureCount(selected) }} 次</span>
+                title="查看守护检测失败记录"
+                @click.stop="openGuardFailureDialog(selected)"
+              >守护连续失败 {{ guardFailureCount(selected) }} 次</button>
             </b>
           </div>
           <div class="sp-detail-cell">
@@ -638,6 +643,41 @@
         <div class="sp-test-error-message">
           {{ testErrorAccount.local_account_last_test_error || '暂无错误详情' }}
         </div>
+      </div>
+    </BaseDialog>
+
+    <BaseDialog
+      :show="Boolean(guardFailureAccount)"
+      title="守护检测失败记录"
+      width="normal"
+      @close="closeGuardFailureDialog"
+    >
+      <div v-if="guardFailureAccount" class="sp-guard-failure-dialog">
+        <div class="sp-test-error-meta">
+          <span>本地账号</span>
+          <strong>{{ displayValue(guardFailureAccount.local_account_name) }}</strong>
+        </div>
+        <div class="sp-test-error-meta">
+          <span>当前连续失败</span>
+          <strong>{{ guardFailureCount(guardFailureAccount) }} 次</strong>
+        </div>
+        <p v-if="guardFailureLoading" class="sp-guard-failure-state">加载中…</p>
+        <p v-else-if="guardFailureError" class="sp-guard-failure-state is-error">{{ guardFailureError }}</p>
+        <p v-else-if="!guardFailureRecords.length" class="sp-guard-failure-state">最近没有守护检测失败记录</p>
+        <ul v-else class="sp-guard-failure-list">
+          <li v-for="(record, index) in guardFailureRecords" :key="`${record.checked_at}-${index}`">
+            <div class="sp-guard-failure-row">
+              <strong>{{ formatTime(record.checked_at) }}</strong>
+              <span>连败 {{ record.consecutive_failed }} 次</span>
+              <span>{{ guardActionLabel(record.action) }}</span>
+              <span v-if="record.model_id">{{ record.model_id }}</span>
+            </div>
+            <p class="sp-guard-failure-detail">{{ guardFailureDetail(record) }}</p>
+          </li>
+        </ul>
+        <p class="sp-guard-failure-hint-text">
+          仅展示最近 {{ SUPPLIER_GUARD_FAILURE_RECORD_LIMIT }} 条守护检测失败记录，完整趋势见账号健康趋势页。
+        </p>
       </div>
     </BaseDialog>
 
@@ -1060,6 +1100,10 @@ import {
   type SupplierProviderAccount,
 } from '@/api/admin/supplierProviderData'
 import { listAccountRateGuardUnbindLogs, listTasks as listAutomationTasks } from '@/api/admin/supplierAutomation'
+import {
+  listSupplierAccountHealthRecords,
+  type SupplierAccountHealthRecord,
+} from '@/api/admin/supplierAccountHealth'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import type { Column } from '@/components/common/types'
@@ -1137,6 +1181,10 @@ const accountSourceItems = ref<SupplierProviderAccount[]>([])
 const items = ref<SupplierProviderAccount[]>([])
 const selected = ref<SupplierProviderAccount | null>(null)
 const testErrorAccount = ref<SupplierProviderAccount | null>(null)
+const guardFailureAccount = ref<SupplierProviderAccount | null>(null)
+const guardFailureRecords = ref<SupplierAccountHealthRecord[]>([])
+const guardFailureLoading = ref(false)
+const guardFailureError = ref('')
 const togglingSchedulableID = ref<number | null>(null)
 const editingPriorityAccountID = ref<number | null>(null)
 const savingPriorityAccountID = ref<number | null>(null)
@@ -1214,6 +1262,7 @@ let batchTestPollToken = 0
 const GUARD_CHECK_STALE_CRON_MULTIPLIER = 2
 const GUARD_CHECK_STALE_FALLBACK_MINUTES = 10
 const GUARD_FAILURE_HINT_THRESHOLD = 2
+const SUPPLIER_GUARD_FAILURE_RECORD_LIMIT = 20
 const guardFreshnessNow = ref(Date.now())
 const guardCronIntervalSeconds = ref(0)
 let guardFreshnessTimer: number | undefined
@@ -2524,8 +2573,45 @@ function hasRepeatedGuardFailures(account: SupplierProviderAccount): boolean {
   return isMatchedLocalAccount(account) && guardFailureCount(account) >= GUARD_FAILURE_HINT_THRESHOLD
 }
 
-function guardFailureHintTitle(account: SupplierProviderAccount): string {
-  return `守护检测已连续失败 ${guardFailureCount(account)} 次，可在健康趋势中排查`
+function guardActionLabel(action?: string): string {
+  if (action === 'disabled') return '已暂停调度'
+  if (action === 'recovered') return '已恢复调度'
+  return '未调整调度'
+}
+
+// 守护检测里 reason 是判定结论、error_message 是上游原文，两者都可能为空。
+function guardFailureDetail(record: SupplierAccountHealthRecord): string {
+  const detail = [record.reason, record.error_message].filter(Boolean).join(' · ')
+  return detail || '暂无失败原因'
+}
+
+function closeGuardFailureDialog() {
+  guardFailureAccount.value = null
+  guardFailureRecords.value = []
+  guardFailureError.value = ''
+}
+
+async function openGuardFailureDialog(account: SupplierProviderAccount) {
+  const accountID = Number(account.local_account_id)
+  if (!accountID) return
+  guardFailureAccount.value = account
+  guardFailureRecords.value = []
+  guardFailureError.value = ''
+  guardFailureLoading.value = true
+  try {
+    const result = await listSupplierAccountHealthRecords({
+      account_id: accountID,
+      status: 'failed',
+      limit: SUPPLIER_GUARD_FAILURE_RECORD_LIMIT,
+    })
+    if (guardFailureAccount.value?.local_account_id !== accountID) return
+    guardFailureRecords.value = result.items || []
+  } catch (error) {
+    if (guardFailureAccount.value?.local_account_id !== accountID) return
+    guardFailureError.value = extractApiErrorMessage(error, '加载守护检测失败记录失败')
+  } finally {
+    guardFailureLoading.value = false
+  }
 }
 
 function openTestErrorDialog(account: SupplierProviderAccount) {
@@ -3388,6 +3474,81 @@ button.sp-test-status.failed:hover {
   font-size: 0.625rem;
   font-weight: 700;
   white-space: nowrap;
+}
+
+button.sp-guard-failure-hint {
+  cursor: pointer;
+  transition: filter 140ms ease, transform 140ms ease;
+}
+
+button.sp-guard-failure-hint:hover {
+  filter: brightness(0.96);
+  transform: translateY(-1px);
+}
+
+.sp-guard-failure-dialog {
+  display: grid;
+  gap: 0.875rem;
+}
+
+.sp-guard-failure-state {
+  margin: 0;
+  color: var(--sp-muted);
+  font-size: 0.8125rem;
+}
+
+.sp-guard-failure-state.is-error {
+  color: var(--sp-red);
+}
+
+.sp-guard-failure-list {
+  display: grid;
+  gap: 0.5rem;
+  max-height: 22rem;
+  overflow: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sp-guard-failure-list li {
+  border: 1px solid color-mix(in srgb, var(--sp-red) 20%, var(--sp-line));
+  border-radius: 0.625rem;
+  padding: 0.5rem 0.75rem;
+  background: color-mix(in srgb, var(--sp-red) 5%, var(--sp-panel-2));
+}
+
+.sp-guard-failure-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.625rem;
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+}
+
+.sp-guard-failure-row strong {
+  color: var(--sp-text);
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.sp-guard-failure-detail {
+  margin: 0.375rem 0 0;
+  padding-left: 0.625rem;
+  border-left: 2px solid color-mix(in srgb, var(--sp-red) 30%, var(--sp-line));
+  color: var(--sp-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.6875rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.sp-guard-failure-hint-text {
+  margin: 0;
+  color: var(--sp-muted);
+  font-size: 0.6875rem;
 }
 
 .sp-account-muted {

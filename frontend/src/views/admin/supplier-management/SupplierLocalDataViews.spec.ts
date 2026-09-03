@@ -13,6 +13,7 @@ const supplierAccountMocks = vi.hoisted(() => ({
   listCustomPlatforms: vi.fn(),
   listAccountRateGuardUnbindLogs: vi.fn(),
   listAutomationTasks: vi.fn(),
+  listAccountHealthRecords: vi.fn(),
   getAccountById: vi.fn(),
   getAvailableModels: vi.fn(),
   duplicate: vi.fn(),
@@ -66,6 +67,10 @@ vi.mock('@/api/admin/customPlatforms', () => ({
 vi.mock('@/api/admin/supplierAutomation', () => ({
   listAccountRateGuardUnbindLogs: supplierAccountMocks.listAccountRateGuardUnbindLogs,
   listTasks: supplierAccountMocks.listAutomationTasks,
+}))
+
+vi.mock('@/api/admin/supplierAccountHealth', () => ({
+  listSupplierAccountHealthRecords: supplierAccountMocks.listAccountHealthRecords,
 }))
 
 vi.mock('@/api/admin/supplierProviderData', async importOriginal => {
@@ -474,6 +479,7 @@ describe('supplier local data views component usage', () => {
       status: 'active',
     })
     supplierAccountMocks.getAvailableModels.mockResolvedValue([])
+    supplierAccountMocks.listAccountHealthRecords.mockResolvedValue({ items: [], limit: 20 })
     supplierAccountMocks.duplicate.mockResolvedValue({ id: 1001, name: '本地账号 A (Copy)' })
     supplierAccountMocks.setSchedulable.mockImplementation(async (_id, schedulable) => ({
       schedulable,
@@ -715,11 +721,69 @@ describe('supplier local data views component usage', () => {
     const wrapper = await mountSupplierAccounts()
 
     expect(wrapper.find('.base-dialog-stub').exists()).toBe(false)
-    await wrapper.get('.runtime-cell-local_account_last_test_status[data-row-index="4"] button').trigger('click')
+    await wrapper.get('.runtime-cell-local_account_last_test_status[data-row-index="4"] button.sp-test-status').trigger('click')
 
     expect(wrapper.get('.base-dialog-stub').text()).toContain('测试失败详情')
     expect(wrapper.get('.base-dialog-stub').text()).toContain('本地账号 E')
     expect(wrapper.get('.base-dialog-stub').text()).toContain('上游鉴权失败：invalid key')
+
+    wrapper.unmount()
+  })
+
+  it('opens the guard failure records dialog from the repeated failure badge', async () => {
+    supplierAccountMocks.listAccountHealthRecords.mockResolvedValue({
+      items: [
+        {
+          checked_at: '2026-07-22T04:00:00Z',
+          status: 'failed',
+          model_id: 'gpt-4o',
+          action: 'disabled',
+          consecutive_failed: 4,
+          reason: '上游鉴权失败',
+          error_message: '401 invalid api key',
+        },
+        {
+          checked_at: '2026-07-22T03:30:00Z',
+          status: 'failed',
+          action: 'none',
+          consecutive_failed: 3,
+        },
+      ],
+      limit: 20,
+    })
+    const wrapper = await mountSupplierAccounts()
+
+    expect(wrapper.find('.base-dialog-stub').exists()).toBe(false)
+    await wrapper.get('[data-test="supplier-account-guard-failures-105"]').trigger('click')
+    await flushPromises()
+
+    expect(supplierAccountMocks.listAccountHealthRecords).toHaveBeenCalledWith({
+      account_id: 105,
+      status: 'failed',
+      limit: 20,
+    })
+    const dialog = wrapper.get('.base-dialog-stub')
+    expect(dialog.text()).toContain('守护检测失败记录')
+    expect(dialog.text()).toContain('本地账号 E')
+    expect(dialog.text()).toContain('连败 4 次')
+    expect(dialog.text()).toContain('已暂停调度')
+    expect(dialog.text()).toContain('上游鉴权失败 · 401 invalid api key')
+    expect(dialog.text()).toContain('暂无失败原因')
+    // 徽标点击不能顺带打开账号抽屉。
+    expect(wrapper.find('.supplier-drawer-stub').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('shows the API error inside the guard failure dialog without a global toast', async () => {
+    supplierAccountMocks.listAccountHealthRecords.mockRejectedValueOnce({ error: '账号不存在' })
+    const wrapper = await mountSupplierAccounts()
+
+    await wrapper.get('[data-test="supplier-account-guard-failures-105"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.sp-guard-failure-state.is-error').text()).toBe('账号不存在')
+    expect(supplierAccountMocks.showError).not.toHaveBeenCalled()
 
     wrapper.unmount()
   })
@@ -743,10 +807,11 @@ describe('supplier local data views component usage', () => {
     const wrapper = await mountSupplierAccounts()
     const filterGroups = wrapper.findAll('.sp-account-filter-control[role="group"]')
 
-    expect(filterGroups).toHaveLength(6)
+    expect(filterGroups).toHaveLength(7)
     expect(filterGroups.map(group => group.attributes('aria-labelledby'))).toEqual([
       'supplier-account-search-label',
       'supplier-account-provider-label',
+      'supplier-account-provider-status-label',
       'supplier-account-platform-label',
       'supplier-account-group-label',
       'supplier-account-active-label',
@@ -755,6 +820,7 @@ describe('supplier local data views component usage', () => {
     expect(filterGroups.map(group => group.get('.sr-only').text())).toEqual([
       '账号搜索',
       '供应商',
+      '供应商状态',
       '平台',
       '本地分组',
       '同步有效性',
@@ -766,6 +832,7 @@ describe('supplier local data views component usage', () => {
     })).toEqual([
       'supplier-account-search-label',
       'supplier-account-provider-label',
+      'supplier-account-provider-status-label',
       'supplier-account-platform-label',
       'supplier-account-group-label',
       'supplier-account-active-label',
@@ -783,7 +850,7 @@ describe('supplier local data views component usage', () => {
       group_id: undefined,
     }))
 
-    await wrapper.findAll('.select-trigger')[2].trigger('click')
+    await wrapper.findAll('.select-trigger')[3].trigger('click')
     await flushPromises()
 
     expect(supplierAccountMocks.listAccounts).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -802,21 +869,22 @@ describe('supplier local data views component usage', () => {
     const wrapper = await mountSupplierAccounts()
     const selectTriggers = wrapper.findAll('.select-trigger')
 
-    expect(selectTriggers[2].attributes('data-option-labels')).toContain('本地分组 A #201')
-    expect(selectTriggers[2].attributes('data-option-labels')).toContain('本地分组 B #202')
+    // select-trigger 顺序：供应商、供应商状态、平台、本地分组、同步有效性、上游状态。
+    expect(selectTriggers[3].attributes('data-option-labels')).toContain('本地分组 A #201')
+    expect(selectTriggers[3].attributes('data-option-labels')).toContain('本地分组 B #202')
 
-    await selectTriggers[2].trigger('click')
+    await selectTriggers[3].trigger('click')
     await flushPromises()
     expect(supplierAccountMocks.listAccounts).toHaveBeenLastCalledWith(expect.objectContaining({
       group_id: 201,
     }))
 
-    await selectTriggers[1].trigger('click')
+    await selectTriggers[2].trigger('click')
     await flushPromises()
 
-    expect(wrapper.findAll('.select-trigger')[2].attributes('data-option-labels'))
+    expect(wrapper.findAll('.select-trigger')[3].attributes('data-option-labels'))
       .not.toContain('本地分组 A #201')
-    expect(wrapper.findAll('.select-trigger')[2].attributes('data-option-labels'))
+    expect(wrapper.findAll('.select-trigger')[3].attributes('data-option-labels'))
       .toContain('本地分组 B #202')
     expect(supplierAccountMocks.listAccounts).toHaveBeenLastCalledWith(expect.objectContaining({
       platform: 'anthropic',

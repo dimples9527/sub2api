@@ -15,6 +15,7 @@ type SupplierAccountHealthTrendServicePort interface {
 	GetSummary(ctx context.Context, params service.SupplierAccountHealthAccountListParams) (service.SupplierAccountHealthSummary, error)
 	GetTrend(ctx context.Context, accountID int64, rangeValue string) (service.SupplierAccountHealthTrendResult, error)
 	GetTrends(ctx context.Context, accountIDs []int64, rangeValue string) ([]service.SupplierAccountHealthTrendResult, error)
+	ListRecords(ctx context.Context, params service.SupplierAccountHealthRecordListParams) (service.SupplierAccountHealthRecordListResult, error)
 }
 
 type SupplierAccountHealthHandler struct {
@@ -72,6 +73,27 @@ func (h *SupplierAccountHealthHandler) GetTrend(c *gin.Context) {
 		rangeValue = service.SupplierAccountHealthRange24h
 	}
 	result, err := h.service.GetTrend(c.Request.Context(), accountID, rangeValue)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+// ListRecords 返回单账号最近的原始守护检测记录，供列表页的连续失败徽标下钻查看。
+// limit 非法时回落到默认值，不阻断请求；status 的合法性交给服务层判定。
+func (h *SupplierAccountHealthHandler) ListRecords(c *gin.Context) {
+	accountID, err := strconv.ParseInt(strings.TrimSpace(c.Query("account_id")), 10, 64)
+	if err != nil || accountID <= 0 {
+		response.ErrorFrom(c, badRequest("账号 ID 必须为正整数"))
+		return
+	}
+	limit, _ := strconv.Atoi(strings.TrimSpace(c.Query("limit")))
+	result, err := h.service.ListRecords(c.Request.Context(), service.SupplierAccountHealthRecordListParams{
+		AccountID: accountID,
+		Status:    strings.TrimSpace(c.Query("status")),
+		Limit:     limit,
+	})
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

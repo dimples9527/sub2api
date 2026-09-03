@@ -188,6 +188,54 @@ func TestSupplierAccountHealthHistoryRepositoryGetTrendAndDeleteBefore(t *testin
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestSupplierAccountHealthHistoryRepositoryListRecordsFiltersByStatus(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	checkedAt := time.Date(2026, 8, 26, 10, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(`(?s)SELECT checked_at, status, latency_ms, model_id, action, consecutive_failed, reason, error_message.*local_account_id = \$1.*AND status = \$2.*checked_at DESC, id DESC.*LIMIT \$3`).
+		WithArgs(int64(21), "failed", 20).
+		WillReturnRows(sqlmock.NewRows([]string{"checked_at", "status", "latency_ms", "model_id", "action", "consecutive_failed", "reason", "error_message"}).
+			AddRow(checkedAt, "failed", nil, "gpt-4o", "disable", 4, "上游鉴权失败", "401 invalid api key"))
+
+	repo := NewSupplierAccountHealthHistoryRepository(db)
+	result, err := repo.ListRecords(context.Background(), service.SupplierAccountHealthRecordListParams{
+		AccountID: 21, Status: "failed", Limit: 20,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 20, result.Limit)
+	require.Len(t, result.Items, 1)
+	require.Nil(t, result.Items[0].LatencyMs)
+	require.Equal(t, 4, result.Items[0].ConsecutiveFailed)
+	require.Equal(t, "上游鉴权失败", result.Items[0].Reason)
+	require.Equal(t, "401 invalid api key", result.Items[0].ErrorMessage)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierAccountHealthHistoryRepositoryListRecordsWithoutStatusFilter(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	checkedAt := time.Date(2026, 8, 26, 10, 0, 0, 0, time.UTC)
+	latency := int64(240)
+	mock.ExpectQuery(`(?s)SELECT checked_at, status, latency_ms, model_id, action, consecutive_failed, reason, error_message.*local_account_id = \$1.*checked_at DESC, id DESC.*LIMIT \$2`).
+		WithArgs(int64(21), 5).
+		WillReturnRows(sqlmock.NewRows([]string{"checked_at", "status", "latency_ms", "model_id", "action", "consecutive_failed", "reason", "error_message"}).
+			AddRow(checkedAt, "healthy", latency, "gpt-4o", "none", 0, "", ""))
+
+	repo := NewSupplierAccountHealthHistoryRepository(db)
+	result, err := repo.ListRecords(context.Background(), service.SupplierAccountHealthRecordListParams{AccountID: 21, Limit: 5})
+
+	require.NoError(t, err)
+	require.Len(t, result.Items, 1)
+	require.NotNil(t, result.Items[0].LatencyMs)
+	require.Equal(t, latency, *result.Items[0].LatencyMs)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestSupplierAccountHealthHistoryRepositoryValidateAccount(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)

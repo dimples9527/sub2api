@@ -20,6 +20,9 @@ const (
 
 	// SupplierAccountHealthStatusUnchecked 用于筛选尚无健康检测记录的账号。
 	SupplierAccountHealthStatusUnchecked = "unchecked"
+
+	SupplierAccountHealthRecordDefaultLimit = 20
+	SupplierAccountHealthRecordMaxLimit     = 100
 )
 
 type SupplierAccountHealthHistoryRecord struct {
@@ -57,6 +60,7 @@ type SupplierAccountHealthHistoryRepository interface {
 	GetTrend(ctx context.Context, accountID int64, since, until time.Time) (SupplierAccountHealthTrendResult, error)
 	GetTrends(ctx context.Context, accountIDs []int64, since, until time.Time, pointLimit int) (map[int64]SupplierAccountHealthTrendResult, error)
 	GetUpstreamTrends(ctx context.Context, accountIDs []int64, since, until time.Time) (map[int64]SupplierAccountHealthUpstreamTrend, error)
+	ListRecords(ctx context.Context, params SupplierAccountHealthRecordListParams) (SupplierAccountHealthRecordListResult, error)
 	DeleteBefore(ctx context.Context, before time.Time, batchSize int) (int, error)
 }
 
@@ -149,6 +153,31 @@ type SupplierAccountHealthTrendResult struct {
 	UpstreamMonitors []SupplierAccountHealthUpstreamMonitor `json:"upstream_monitors,omitempty"`
 }
 
+// SupplierAccountHealthRecordListParams 描述单账号原始检测记录的查询条件。
+// Status 为空表示不限状态，否则只保留该状态的记录。
+type SupplierAccountHealthRecordListParams struct {
+	AccountID int64
+	Status    string
+	Limit     int
+}
+
+// SupplierAccountHealthRecord 是一次守护检测的原始结果，与趋势接口的时间桶不同，不做任何聚合。
+type SupplierAccountHealthRecord struct {
+	CheckedAt         time.Time `json:"checked_at"`
+	Status            string    `json:"status"`
+	LatencyMs         *int64    `json:"latency_ms,omitempty"`
+	ModelID           string    `json:"model_id,omitempty"`
+	Action            string    `json:"action,omitempty"`
+	ConsecutiveFailed int       `json:"consecutive_failed"`
+	Reason            string    `json:"reason,omitempty"`
+	ErrorMessage      string    `json:"error_message,omitempty"`
+}
+
+type SupplierAccountHealthRecordListResult struct {
+	Items []SupplierAccountHealthRecord `json:"items"`
+	Limit int                           `json:"limit"`
+}
+
 type SupplierAccountHealthTrendService struct {
 	repository SupplierAccountHealthHistoryRepository
 	recorder   SupplierAccountHealthHistoryRecorder
@@ -226,6 +255,29 @@ func (s *SupplierAccountHealthTrendService) GetTrend(ctx context.Context, accoun
 	}
 	applySupplierAccountHealthUpstreamTrend(&result, upstream[accountID], since, duration)
 	return result, nil
+}
+
+// ListRecords 返回单账号最近的原始守护检测记录。趋势接口按固定时间桶聚合，
+// 无法回答「这几次连续失败分别发生在什么时候、错在哪」，所以单独走不聚合的读取路径。
+func (s *SupplierAccountHealthTrendService) ListRecords(ctx context.Context, params SupplierAccountHealthRecordListParams) (SupplierAccountHealthRecordListResult, error) {
+	if s == nil || s.repository == nil {
+		return SupplierAccountHealthRecordListResult{}, errors.New("账号健康历史服务未初始化")
+	}
+	switch params.Status {
+	case "", SupplierAccountHealthGuardStatusHealthy, SupplierAccountHealthGuardStatusSlow, SupplierAccountHealthGuardStatusFailed:
+	default:
+		return SupplierAccountHealthRecordListResult{}, errors.New("健康检测状态无效")
+	}
+	if params.Limit <= 0 {
+		params.Limit = SupplierAccountHealthRecordDefaultLimit
+	}
+	if params.Limit > SupplierAccountHealthRecordMaxLimit {
+		params.Limit = SupplierAccountHealthRecordMaxLimit
+	}
+	if err := s.repository.ValidateAccount(ctx, params.AccountID); err != nil {
+		return SupplierAccountHealthRecordListResult{}, err
+	}
+	return s.repository.ListRecords(ctx, params)
 }
 
 // GetTrends 一次查询多个账号的健康趋势，供列表页批量展示迷你趋势使用。
