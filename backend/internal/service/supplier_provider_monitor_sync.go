@@ -48,9 +48,12 @@ type SupplierProviderMonitorBinding struct {
 }
 
 type SupplierProviderMonitorTarget struct {
-	ID               int64                                 `json:"id"`
-	ProviderID       int64                                 `json:"provider_id"`
-	ProviderName     string                                `json:"provider_name"`
+	ID           int64  `json:"id"`
+	ProviderID   int64  `json:"provider_id"`
+	ProviderName string `json:"provider_name"`
+	// ProviderEnabled 为 false 时监控同步根本不会遍历这个供应商，它下面的监控项会整批冻结在
+	// 上一次同步的时刻。软删除的供应商同样按停用处理。
+	ProviderEnabled  bool                                  `json:"provider_enabled"`
 	MonitorKey       string                                `json:"monitor_key"`
 	MonitorName      string                                `json:"monitor_name"`
 	MonitorProvider  string                                `json:"monitor_provider"`
@@ -58,6 +61,7 @@ type SupplierProviderMonitorTarget struct {
 	Availability7D   *float64                              `json:"availability_7d"`
 	Active           bool                                  `json:"active"`
 	LastSeenAt       time.Time                             `json:"last_seen_at"`
+	InactiveAt       *time.Time                            `json:"inactive_at"`
 	LocalAccountID   int64                                 `json:"local_account_id,omitempty"`
 	LocalAccountName string                                `json:"local_account_name,omitempty"`
 	BindingGroups    []SupplierProviderAccountBindingGroup `json:"binding_groups"`

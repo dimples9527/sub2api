@@ -230,6 +230,8 @@ export interface SupplierProviderMonitorTarget {
   id: number
   provider_id: number
   provider_name: string
+  /** false 表示供应商已停用或已删除，监控同步不会再遍历它，last_seen_at 会整批冻结 */
+  provider_enabled: boolean
   monitor_key: string
   monitor_name: string
   monitor_provider: string
@@ -238,6 +240,8 @@ export interface SupplierProviderMonitorTarget {
   availability_7d: number | null
   active: boolean
   last_seen_at: string
+  /** 上游快照里不再出现该监控项的时刻，active 为 true 时是 null */
+  inactive_at: string | null
   local_account_id?: number
   local_account_name?: string
   binding_groups: SupplierProviderAccountBindingGroup[]

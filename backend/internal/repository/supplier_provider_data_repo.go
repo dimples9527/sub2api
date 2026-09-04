@@ -72,8 +72,8 @@ func (r *supplierProviderDataRepository) SaveMonitorSnapshot(ctx context.Context
 		if err := tx.QueryRowContext(ctx, `
 INSERT INTO supplier_provider_monitor_targets (
   provider_id, monitor_key, monitor_name, monitor_provider, primary_model,
-  availability_7d, active, first_seen_at, last_seen_at, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, TRUE, $7, $7, NOW(), NOW())
+  availability_7d, active, first_seen_at, last_seen_at, inactive_at, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, TRUE, $7, $7, NULL, NOW(), NOW())
 ON CONFLICT (provider_id, monitor_key) DO UPDATE SET
   monitor_name = EXCLUDED.monitor_name,
   monitor_provider = EXCLUDED.monitor_provider,
@@ -81,6 +81,7 @@ ON CONFLICT (provider_id, monitor_key) DO UPDATE SET
   availability_7d = EXCLUDED.availability_7d,
   active = TRUE,
   last_seen_at = EXCLUDED.last_seen_at,
+  inactive_at = NULL,
   updated_at = NOW()
 RETURNING id`, providerID, targetKey, strings.TrimSpace(monitor.Name), strings.TrimSpace(monitor.Provider), strings.TrimSpace(monitor.PrimaryModel), monitor.Availability7D, seenAt).Scan(&targetID); err != nil {
 			return nil, fmt.Errorf("upsert supplier provider monitor target: %w", err)
@@ -109,6 +110,16 @@ ON CONFLICT (monitor_target_id, checked_at) DO UPDATE SET
 				return nil, fmt.Errorf("upsert supplier provider monitor sample: %w", err)
 			}
 		}
+	}
+
+	// 上游这一次返回的集合就是权威集合：没出现的监控项按下线处理，否则它会一直留在
+	// active = TRUE，last_seen_at 冻结在最后一次出现的时刻，页面上和上游对不上。
+	// 上游之后又出现时，前面的 upsert 会把 active 改回 TRUE 并清空 inactive_at。
+	if _, err := tx.ExecContext(ctx, `
+UPDATE supplier_provider_monitor_targets
+SET active = FALSE, inactive_at = $3, updated_at = $3
+WHERE provider_id = $1 AND active = TRUE AND NOT (monitor_key = ANY($2))`, providerID, pq.Array(targetKeys), seenAt); err != nil {
+		return nil, fmt.Errorf("deactivate missing supplier provider monitor targets: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -198,8 +209,9 @@ func (r *supplierProviderDataRepository) ListMonitorTargets(ctx context.Context,
 
 	queryArgs := append(append([]any{}, args...), params.PageSize, (params.Page-1)*params.PageSize)
 	rows, err := r.db.QueryContext(ctx, `
-SELECT t.id, t.provider_id, p.name, t.monitor_key, t.monitor_name, t.monitor_provider,
-       t.primary_model, t.availability_7d, t.active, t.last_seen_at,
+SELECT t.id, t.provider_id, p.name, (p.enabled AND p.deleted_at IS NULL) AS provider_enabled,
+       t.monitor_key, t.monitor_name, t.monitor_provider,
+       t.primary_model, t.availability_7d, t.active, t.last_seen_at, t.inactive_at,
        CASE WHEN local_account.id IS NULL THEN 0 ELSE b.local_account_id END AS local_account_id,
        COALESCE(local_account.name, '') AS local_account_name,
        COALESCE((
@@ -2334,14 +2346,20 @@ func scanSupplierProviderMonitorTarget(scanner supplierProviderMonitorTargetScan
 	var item service.SupplierProviderMonitorTarget
 	var bindingGroupsJSON []byte
 	var availability sql.NullFloat64
-	if err := scanner.Scan(&item.ID, &item.ProviderID, &item.ProviderName, &item.MonitorKey, &item.MonitorName, &item.MonitorProvider,
-		&item.PrimaryModel, &availability, &item.Active, &item.LastSeenAt,
+	var inactiveAt sql.NullTime
+	if err := scanner.Scan(&item.ID, &item.ProviderID, &item.ProviderName, &item.ProviderEnabled,
+		&item.MonitorKey, &item.MonitorName, &item.MonitorProvider,
+		&item.PrimaryModel, &availability, &item.Active, &item.LastSeenAt, &inactiveAt,
 		&item.LocalAccountID, &item.LocalAccountName, &bindingGroupsJSON); err != nil {
 		return service.SupplierProviderMonitorTarget{}, err
 	}
 	if availability.Valid {
 		value := availability.Float64
 		item.Availability7D = &value
+	}
+	if inactiveAt.Valid {
+		value := inactiveAt.Time
+		item.InactiveAt = &value
 	}
 	if err := json.Unmarshal(bindingGroupsJSON, &item.BindingGroups); err != nil {
 		return service.SupplierProviderMonitorTarget{}, fmt.Errorf("decode supplier provider monitor target binding groups: %w", err)

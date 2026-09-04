@@ -89,11 +89,15 @@
           <template #cell-monitor_name="{ row }">
             <div
               class="sp-monitor-target-cell"
-              :class="[rowHueClass(row.provider_id), { 'sp-monitor-target-inactive': !row.active }]"
+              :class="[rowHueClass(row.provider_id), { 'sp-monitor-target-inactive': !!inactiveReason(row) }]"
             >
               <div class="sp-monitor-target-name">
                 <span class="sp-monitor-target-chip">{{ row.monitor_name || '未命名监控项' }}</span>
-                <span v-if="!row.active" class="sp-monitor-inactive-chip">停用</span>
+                <span
+                  v-if="inactiveReason(row)"
+                  class="sp-monitor-inactive-chip"
+                  :class="{ 'sp-monitor-inactive-chip-provider': !row.provider_enabled }"
+                >{{ inactiveReason(row) }}</span>
               </div>
               <span>
                 {{ row.monitor_key }} ·
@@ -611,13 +615,22 @@ function formatTime(value: string) {
   return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value))
 }
 
+// 监控同步任务是 @every 30s，所以「几分钟没动」就已经是异常，阈值必须比人的直觉紧得多，
+// 否则整片冻结的行看起来和正常行没区别。
 function timeStatusClass(value: string) {
   if (!value) return 'never'
   const timestamp = new Date(value).getTime()
   if (Number.isNaN(timestamp)) return 'never'
-  const hours = (Date.now() - timestamp) / 36e5
-  if (hours > 24 * 7) return 'stale'
-  if (hours > 24) return 'warning'
+  const minutes = (Date.now() - timestamp) / 6e4
+  if (minutes > 60) return 'stale'
+  if (minutes > 10) return 'warning'
+  return ''
+}
+
+// 「对不上上游」有两种成因，页面必须分开说：供应商整体不同步了，还是单个监控项被上游删了。
+function inactiveReason(row: SupplierProviderMonitorTarget) {
+  if (!row.provider_enabled) return '供应商已停用'
+  if (!row.active) return '上游已移除'
   return ''
 }
 
@@ -1034,6 +1047,13 @@ onMounted(async () => {
   font-size: 0.6875rem;
   font-weight: 500;
   line-height: 1.4;
+}
+
+/* 上游删掉监控项是正常生命周期，灰色即可；供应商整体停用需要人去处理，用本页的「待处理」琥珀色。 */
+.sp-monitor-target-cell .sp-monitor-inactive-chip-provider {
+  border-color: color-mix(in srgb, var(--sp-amber) 30%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-amber) 8%, transparent);
+  color: var(--sp-amber);
 }
 
 .sp-monitor-target-cell span {
