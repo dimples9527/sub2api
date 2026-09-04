@@ -653,24 +653,41 @@
       @close="closeGuardFailureDialog"
     >
       <div v-if="guardFailureAccount" class="sp-guard-failure-dialog">
-        <div class="sp-test-error-meta">
-          <span>本地账号</span>
-          <strong>{{ displayValue(guardFailureAccount.local_account_name) }}</strong>
-        </div>
-        <div class="sp-test-error-meta">
-          <span>当前连续失败</span>
-          <strong>{{ guardFailureCount(guardFailureAccount) }} 次</strong>
+        <div class="sp-guard-failure-summary">
+          <div class="sp-test-error-meta">
+            <span>本地账号</span>
+            <strong>{{ displayValue(guardFailureAccount.local_account_name) }}</strong>
+          </div>
+          <div class="sp-test-error-meta">
+            <span>当前连续失败</span>
+            <strong>{{ guardFailureCount(guardFailureAccount) }} 次</strong>
+          </div>
         </div>
         <p v-if="guardFailureLoading" class="sp-guard-failure-state">加载中…</p>
         <p v-else-if="guardFailureError" class="sp-guard-failure-state is-error">{{ guardFailureError }}</p>
         <p v-else-if="!guardFailureRecords.length" class="sp-guard-failure-state">最近没有守护检测失败记录</p>
         <ul v-else class="sp-guard-failure-list">
-          <li v-for="(record, index) in guardFailureRecords" :key="`${record.checked_at}-${index}`">
-            <div class="sp-guard-failure-row">
-              <strong>{{ formatTime(record.checked_at) }}</strong>
-              <span>连败 {{ record.consecutive_failed }} 次</span>
-              <span>{{ guardActionLabel(record.action) }}</span>
-              <span v-if="record.model_id">{{ record.model_id }}</span>
+          <li
+            v-for="(record, index) in guardFailureRecords"
+            :key="`${record.checked_at}-${index}`"
+            class="sp-guard-failure-item"
+          >
+            <div class="sp-guard-failure-record-head">
+              <div class="sp-guard-failure-time">
+                <span class="sp-guard-failure-dot" aria-hidden="true"></span>
+                <strong>{{ formatTime(record.checked_at) }}</strong>
+              </div>
+              <div class="sp-guard-failure-tags">
+                <span class="sp-guard-failure-tag is-fail">
+                  连续失败 {{ record.consecutive_failed }} 次
+                </span>
+                <span class="sp-guard-failure-tag">
+                  {{ guardActionLabel(record.action) }}
+                </span>
+                <span v-if="record.model_id" class="sp-guard-failure-tag is-model">
+                  {{ record.model_id }}
+                </span>
+              </div>
             </div>
             <p class="sp-guard-failure-detail">{{ guardFailureDetail(record) }}</p>
           </li>
@@ -3372,15 +3389,19 @@ button.sp-test-status.failed:hover {
 .sp-test-error-meta {
   display: grid;
   grid-template-columns: 6.5rem 1fr;
-  gap: 0.75rem;
+  gap: 0.5rem;
   align-items: baseline;
+  min-width: 0;
   color: var(--sp-muted);
   font-size: 0.8125rem;
 }
 
 .sp-test-error-meta strong {
+  overflow: hidden;
   color: var(--sp-text);
   font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sp-test-error-message {
@@ -3491,13 +3512,30 @@ button.sp-guard-failure-hint:hover {
   gap: 0.875rem;
 }
 
+.sp-guard-failure-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--sp-red) 16%, var(--sp-line));
+  border-radius: 0.75rem;
+  padding: 0.75rem 0.875rem;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--sp-red) 7%, var(--sp-panel-2)), var(--sp-panel));
+}
+
 .sp-guard-failure-state {
   margin: 0;
+  border: 1px dashed color-mix(in srgb, var(--sp-muted) 30%, var(--sp-line));
+  border-radius: 0.75rem;
+  padding: 0.85rem 0.95rem;
+  background: color-mix(in srgb, var(--sp-muted) 5%, var(--sp-panel-2));
   color: var(--sp-muted);
   font-size: 0.8125rem;
+  line-height: 1.55;
 }
 
 .sp-guard-failure-state.is-error {
+  border-color: color-mix(in srgb, var(--sp-red) 38%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-red) 7%, var(--sp-panel-2));
   color: var(--sp-red);
 }
 
@@ -3512,25 +3550,77 @@ button.sp-guard-failure-hint:hover {
 }
 
 .sp-guard-failure-list li {
-  border: 1px solid color-mix(in srgb, var(--sp-red) 20%, var(--sp-line));
-  border-radius: 0.625rem;
-  padding: 0.5rem 0.75rem;
-  background: color-mix(in srgb, var(--sp-red) 5%, var(--sp-panel-2));
+  position: relative;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--sp-red) 18%, var(--sp-line));
+  border-radius: 0.75rem;
+  padding: 0.75rem 0.875rem 0.75rem 1.05rem;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--sp-red) 8%, transparent), transparent 42%),
+    var(--sp-panel-2);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sp-red) 60%, transparent);
 }
 
-.sp-guard-failure-row {
+.sp-guard-failure-record-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.625rem;
-  color: var(--sp-muted);
-  font-size: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.75rem;
 }
 
-.sp-guard-failure-row strong {
+.sp-guard-failure-time {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
   color: var(--sp-text);
   font-size: 0.8125rem;
   font-weight: 700;
+}
+
+.sp-guard-failure-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: 0 0 auto;
+  border-radius: 9999px;
+  background: var(--sp-red);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sp-red) 14%, transparent);
+}
+
+.sp-guard-failure-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.375rem;
+}
+
+.sp-guard-failure-tag {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--sp-muted) 26%, var(--sp-line));
+  border-radius: 9999px;
+  padding: 0.125rem 0.45rem;
+  color: var(--sp-muted);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-guard-failure-tag.is-fail {
+  border-color: color-mix(in srgb, var(--sp-red) 30%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-red) 10%, transparent);
+  color: var(--sp-red);
+}
+
+.sp-guard-failure-tag.is-model {
+  border-color: color-mix(in srgb, var(--sp-cyan) 28%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-cyan) 8%, transparent);
+  color: color-mix(in srgb, var(--sp-cyan) 78%, var(--sp-text));
 }
 
 .sp-guard-failure-detail {
@@ -3547,8 +3637,11 @@ button.sp-guard-failure-hint:hover {
 
 .sp-guard-failure-hint-text {
   margin: 0;
+  padding-top: 0.15rem;
+  border-top: 1px dashed color-mix(in srgb, var(--sp-muted) 28%, var(--sp-line));
   color: var(--sp-muted);
   font-size: 0.6875rem;
+  line-height: 1.55;
 }
 
 .sp-account-muted {
@@ -3635,6 +3728,7 @@ button.sp-guard-failure-hint:hover {
   background: color-mix(in srgb, currentColor 14%, var(--sp-panel));
 }
 
+:global(.modal-content:has(.sp-guard-failure-dialog)),
 :global(.modal-content:has(.sp-business-platform-dialog)) {
   --sp-panel: #ffffff;
   --sp-panel-2: #f5f8fc;
@@ -3660,6 +3754,7 @@ button.sp-guard-failure-hint:hover {
   color: var(--sp-text);
 }
 
+:global(.dark .modal-content:has(.sp-guard-failure-dialog)),
 :global(.dark .modal-content:has(.sp-business-platform-dialog)) {
   --sp-panel: #172033;
   --sp-panel-2: #1d293d;

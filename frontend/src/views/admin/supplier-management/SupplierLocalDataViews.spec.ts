@@ -765,7 +765,7 @@ describe('supplier local data views component usage', () => {
     const dialog = wrapper.get('.base-dialog-stub')
     expect(dialog.text()).toContain('守护检测失败记录')
     expect(dialog.text()).toContain('本地账号 E')
-    expect(dialog.text()).toContain('连败 4 次')
+    expect(dialog.text()).toContain('连续失败 4 次')
     expect(dialog.text()).toContain('已暂停调度')
     expect(dialog.text()).toContain('上游鉴权失败 · 401 invalid api key')
     expect(dialog.text()).toContain('暂无失败原因')
