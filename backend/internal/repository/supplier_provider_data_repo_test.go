@@ -794,7 +794,7 @@ func TestSupplierProviderDataRepositoryGetLocalCostForDay(t *testing.T) {
 	repo, mock := newSupplierProviderDataRepoMock(t)
 	day := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
 
-	mock.ExpectQuery(`(?s)WITH provider_account_matches.*SUM\(COALESCE\(ul\.account_stats_cost, ul\.total_cost\) \* COALESCE\(ul\.account_rate_multiplier, 1\)\).*COUNT\(DISTINCT u\.local_account_id\).*WHERE ul\.created_at >= \$2.*ul\.created_at < \$3`).
+	mock.ExpectQuery(`(?s)WITH provider_account_matches.*SUM\(ul\.actual_cost\).*COUNT\(DISTINCT u\.local_account_id\).*WHERE ul\.created_at >= \$2.*ul\.created_at < \$3`).
 		WithArgs(int64(42), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"local_cost", "matched_count"}).AddRow(15.25, 1))
 
@@ -809,7 +809,7 @@ func TestSupplierProviderDataRepositoryGetLocalCostForDayNoMatch(t *testing.T) {
 	repo, mock := newSupplierProviderDataRepoMock(t)
 	day := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
 
-	mock.ExpectQuery(`(?s)WITH provider_account_matches.*SUM\(COALESCE\(ul\.account_stats_cost, ul\.total_cost\) \* COALESCE\(ul\.account_rate_multiplier, 1\)\).*COUNT\(DISTINCT u\.local_account_id\).*WHERE ul\.created_at >= \$2.*ul\.created_at < \$3`).
+	mock.ExpectQuery(`(?s)WITH provider_account_matches.*SUM\(ul\.actual_cost\).*COUNT\(DISTINCT u\.local_account_id\).*WHERE ul\.created_at >= \$2.*ul\.created_at < \$3`).
 		WithArgs(int64(42), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"local_cost", "matched_count"}).AddRow(0.0, 0))
 

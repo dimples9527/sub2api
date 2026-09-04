@@ -34,7 +34,7 @@ ORDER BY d.stat_date`)).
 			AddRow("2026-07-28", 12.5, 10.0, "上游成本 12.50 与计算成本 11.00 偏差 12%，生效成本已取计算成本").
 			AddRow("2026-07-29", 7, 7, ""))
 
-	mock.ExpectQuery(`(?s)matched_accounts.*SUM\(COALESCE\(ul\.account_stats_cost, ul\.total_cost\) \* COALESCE\(ul\.account_rate_multiplier, 1\)\)`).
+	mock.ExpectQuery(`(?s)matched_accounts.*SUM\(ul\.actual_cost\)`).
 		WithArgs(start, end, sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"date", "local_cost"}).
 			AddRow("2026-07-28", 10.0).
@@ -83,7 +83,7 @@ func TestSupplierProviderRepositoryListCostTrendsFiltersByProvider(t *testing.T)
 		WillReturnRows(sqlmock.NewRows([]string{"date", "upstream_cost", "effective_cost", "cost_warning"}).
 			AddRow("2026-07-28", 3.5, 3.5, ""))
 
-	mock.ExpectQuery(`(?s)matched_accounts.*SUM\(COALESCE\(ul\.account_stats_cost, ul\.total_cost\) \* COALESCE\(ul\.account_rate_multiplier, 1\)\)`).
+	mock.ExpectQuery(`(?s)matched_accounts.*SUM\(ul\.actual_cost\)`).
 		WithArgs(start, end, sqlmock.AnyArg(), providerID).
 		WillReturnRows(sqlmock.NewRows([]string{"date", "local_cost"}).
 			AddRow("2026-07-28", 2.0))
@@ -182,7 +182,7 @@ func TestSupplierProviderRepositoryListCostBreakdownsAggregatesByProvider(t *tes
 	start := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)
 
-	mock.ExpectQuery(`(?s)WITH provider_account_matches.*SUM\(COALESCE\(ul\.account_stats_cost, ul\.total_cost\) \* COALESCE\(ul\.account_rate_multiplier, 1\)\).*SUM\(r\.calculated_cost\)`).
+	mock.ExpectQuery(`(?s)WITH provider_account_matches.*SUM\(ul\.actual_cost\).*SUM\(r\.calculated_cost\)`).
 		WithArgs(start, end).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "provider_type", "upstream_cost", "calculated_cost", "local_cost", "effective_cost", "cost_warning"}).
 			AddRow(int64(7), "主供应商", "sub2api", 42.5, 17.25, 30.0, 17.25, "上游成本 42.50 与计算成本 17.25 偏差 59%，生效成本已取计算成本").

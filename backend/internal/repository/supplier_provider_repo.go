@@ -190,8 +190,10 @@ WITH matched_accounts AS (
   GROUP BY local_account.id
   HAVING COUNT(*) = 1
 )
+-- 本地成本取使用记录的用户扣费：它带着请求时的分组倍率快照，
+-- 而账号成本口径依赖 accounts.rate_multiplier，未配置时会退化成官方原价。
 SELECT TO_CHAR(ul.created_at AT TIME ZONE $3, 'YYYY-MM-DD') AS date,
-       COALESCE(SUM(COALESCE(ul.account_stats_cost, ul.total_cost) * COALESCE(ul.account_rate_multiplier, 1)), 0) AS local_cost
+       COALESCE(SUM(ul.actual_cost), 0) AS local_cost
 FROM usage_logs ul
 JOIN matched_accounts matched ON matched.local_account_id = ul.account_id
 WHERE ul.created_at >= $1
@@ -306,9 +308,10 @@ upstream_costs AS (
   GROUP BY d.provider_id
 ),
 local_costs AS (
-  -- 本地成本要和上游成本可比，所以用账号成本口径，而不是乘过用户分组倍率的 ul.actual_cost。
+  -- 本地成本取使用记录的用户扣费：它带着请求时的分组倍率快照，
+  -- 而账号成本口径依赖 accounts.rate_multiplier，未配置时会退化成官方原价。
   SELECT matches.provider_id,
-         COALESCE(SUM(COALESCE(ul.account_stats_cost, ul.total_cost) * COALESCE(ul.account_rate_multiplier, 1)), 0) AS local_cost
+         COALESCE(SUM(ul.actual_cost), 0) AS local_cost
   FROM unique_account_matches matches
   JOIN usage_logs ul ON ul.account_id = matches.local_account_id
   WHERE ul.created_at >= $1

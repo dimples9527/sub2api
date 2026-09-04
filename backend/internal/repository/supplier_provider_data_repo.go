@@ -1798,9 +1798,9 @@ SELECT
 }
 
 // GetLocalCostForDay 返回指定供应商在指定统计日的本地成本
-// （唯一匹配本地账号的账号成本之和，口径与供应商看板、ListCostBreakdowns 一致）。
-// 这里必须走账号成本而非 usage_logs.actual_cost：后者是乘过用户分组倍率的对客计费额，
-// 用它替代上游成本会被毛利放大。ok=false 表示当天没有唯一匹配且产生用量的本地账号。
+// （唯一匹配本地账号的用户扣费之和）。用户扣费带着请求时的分组倍率快照，
+// 而账号成本口径依赖 accounts.rate_multiplier，未配置时会退化成官方原价。
+// ok=false 表示当天没有唯一匹配且产生用量的本地账号。
 func (r *supplierProviderDataRepository) GetLocalCostForDay(ctx context.Context, providerID int64, day time.Time) (float64, bool, error) {
 	start := supplierStatDate(day)
 	end := start.AddDate(0, 0, 1)
@@ -1826,7 +1826,7 @@ unique_account_matches AS (
   GROUP BY local_account_id
   HAVING COUNT(*) = 1
 )
-SELECT COALESCE(SUM(COALESCE(ul.account_stats_cost, ul.total_cost) * COALESCE(ul.account_rate_multiplier, 1)), 0) AS local_cost,
+SELECT COALESCE(SUM(ul.actual_cost), 0) AS local_cost,
        COUNT(DISTINCT u.local_account_id) AS matched_count
 FROM usage_logs ul
 JOIN unique_account_matches u ON u.local_account_id = ul.account_id
