@@ -1045,6 +1045,7 @@ import {
   Tooltip,
   Legend,
   type ChartOptions,
+  type TooltipLabelStyle,
   type TooltipItem,
 } from 'chart.js'
 import { Bar, Line } from 'vue-chartjs'
@@ -1476,6 +1477,14 @@ const costTrendDeviationCount = computed(
   () => costTrendDeviation.value.filter(value => value > deviationThreshold.value).length,
 )
 
+// 成本曲线与悬浮提示色标使用同一组颜色，避免点色和线色语义混淆。
+const costTrendSeriesColors = ['#3b82f6', '#d97706', '#059669'] as const
+
+function getCostTrendTooltipLabelColor({ datasetIndex }: TooltipItem<'line'>): TooltipLabelStyle {
+  const color = costTrendSeriesColors[datasetIndex] || costTrendSeriesColors[0]
+  return { borderColor: color, backgroundColor: color }
+}
+
 const deviationSummaryLabel = computed(() => {
   const total = costTrendPoints.value.length
   const count = costTrendDeviationCount.value
@@ -1523,7 +1532,7 @@ const costTrendChartData = computed(() => {
       {
         label: '上游成本',
         data: costTrendPoints.value.map(point => Number(point.upstream_cost || 0)),
-        borderColor: '#3b82f6',
+        borderColor: costTrendSeriesColors[0],
         backgroundColor: 'rgba(59, 130, 246, 0.12)',
         borderWidth: 2,
         fill: true,
@@ -1537,7 +1546,7 @@ const costTrendChartData = computed(() => {
       {
         label: '本地成本',
         data: costTrendPoints.value.map(point => Number(point.local_cost || 0)),
-        borderColor: '#d97706',
+        borderColor: costTrendSeriesColors[1],
         backgroundColor: 'rgba(217, 119, 6, 0.10)',
         borderWidth: 2,
         fill: true,
@@ -1551,7 +1560,7 @@ const costTrendChartData = computed(() => {
       {
         label: '生效成本',
         data: costTrendPoints.value.map(point => Number(point.effective_cost || 0)),
-        borderColor: '#059669',
+        borderColor: costTrendSeriesColors[2],
         backgroundColor: 'rgba(5, 150, 105, 0.10)',
         borderWidth: 2,
         borderDash: [5, 3],
@@ -1582,6 +1591,7 @@ const costTrendChartOptions = computed<ChartOptions<'line'>>(() => {
         borderColor: isDark ? '#374151' : '#e2e8f0',
         borderWidth: 1,
         callbacks: {
+          labelColor: getCostTrendTooltipLabelColor,
           label(context: TooltipItem<'line'>) {
             const label = context.dataset.label || ''
             const value = Number(context.parsed.y ?? 0)

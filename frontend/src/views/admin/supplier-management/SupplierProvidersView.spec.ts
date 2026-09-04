@@ -878,6 +878,19 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(line.exists()).toBe(true)
     const upstream = line.props('data').datasets[0]
     expect(upstream.pointBackgroundColor).toEqual(['#dc2626', '#3b82f6'])
+    const tooltipCallbacks = line.props('options').plugins.tooltip.callbacks
+    expect(tooltipCallbacks.labelColor({ datasetIndex: 0 })).toEqual({
+      borderColor: '#3b82f6',
+      backgroundColor: '#3b82f6',
+    })
+    expect(tooltipCallbacks.labelColor({ datasetIndex: 1 })).toEqual({
+      borderColor: '#d97706',
+      backgroundColor: '#d97706',
+    })
+    expect(tooltipCallbacks.labelColor({ datasetIndex: 2 })).toEqual({
+      borderColor: '#059669',
+      backgroundColor: '#059669',
+    })
     expect(wrapper.get('[data-test="supplier-cost-deviation-summary"]').text()).toContain('偏差超阈值 1/2 天')
     expect(supplierProvidersSource).toContain('costTrendDeviation')
     expect(supplierProvidersSource).toContain('pointBackgroundColor')
