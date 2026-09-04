@@ -63,8 +63,8 @@ describe('供应商关闭账号整行灰化', () => {
 
 
 describe('供应商状态筛选', () => {
-  it('提供全部、已启用和已关闭供应商状态选项', () => {
-    expect(source).toContain("const providerStatusFilter = ref('all')")
+  it('默认展示已启用供应商，并保留全部和已关闭供应商状态选项', () => {
+    expect(source).toContain("const providerStatusFilter = ref('enabled')")
     expect(source).toContain("{ value: 'disabled', label: '已关闭供应商' }")
     expect(source).toContain('providerStatusFilterOptions')
   })
