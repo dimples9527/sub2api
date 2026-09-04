@@ -139,21 +139,28 @@ describe('model square config wiring', () => {
     expect(viewSource).toContain('setCustomPlatformLabels(customPlatformList)')
   })
 
-  it('keeps official reference price fields and uses the model square pricing source', () => {
+  it('keeps only input, output and cache prices and uses the model square pricing source', () => {
     const viewSource = readFileSync(resolve(process.cwd(), 'src/views/admin/model-square/ModelSquareConfigView.vue'), 'utf8')
     const apiSource = readFileSync(resolve(process.cwd(), 'src/api/admin/modelSquareConfig.ts'), 'utf8')
 
     expect(viewSource).toContain("{ key: 'price_summary', label: '价格（每 1M Tokens）'")
-    expect(viewSource).toContain('input_price')
-    expect(viewSource).toContain('input_price_priority')
-    expect(viewSource).toContain('output_price_priority')
-    expect(viewSource).toContain('cache_write_1h_price')
+    expect(viewSource).toContain("{ key: 'input_price', label: '输入价格' }")
+    expect(viewSource).toContain("{ key: 'output_price', label: '输出价格' }")
+    expect(viewSource).toContain("{ key: 'cache_write_price', label: '缓存写入价格' }")
+    expect(viewSource).toContain("{ key: 'cache_read_price', label: '缓存读取价格' }")
+    expect(viewSource).not.toContain('input_price_priority')
+    expect(viewSource).not.toContain('output_price_priority')
+    expect(viewSource).not.toContain('cache_write_price_priority')
+    expect(viewSource).not.toContain('cache_read_price_priority')
+    expect(viewSource).not.toContain('cache_write_1h_price')
+    expect(viewSource).not.toContain('image_input_price')
+    expect(viewSource).not.toContain('image_output_price')
+    expect(viewSource).not.toContain('per_request_price')
     expect(viewSource).toContain('模型配置中心')
     expect(viewSource).not.toContain('Model Square Config')
     expect(viewSource).toContain('官方参考价格来自项目动态价格目录')
     expect(viewSource).toContain('PRICE_PER_MILLION_TOKENS')
     expect(viewSource).toContain('displayPriceToStoredPrice')
-    expect(viewSource).toContain('per_request_price')
     expect(viewSource).toContain('modelPriceGroups(row)')
     expect(viewSource).toContain('price-pill')
     expect(viewSource).toContain('adminAPI.modelSquareConfig.getModelPricing')
@@ -259,9 +266,8 @@ describe('model square config wiring', () => {
           source: 'manual',
           input_price: 0.000005,
           output_price: 0.00003,
-          cache_write_1h_price: 0.0000075,
-          input_price_priority: 0.00001,
-          per_request_price: 0.02,
+          cache_write_price: 0.0000075,
+          cache_read_price: 0.0000005,
         }],
       }],
     })
@@ -294,12 +300,12 @@ describe('model square config wiring', () => {
     expect(wrapper.text()).toContain('输入')
     expect(wrapper.text()).toContain('$5')
     expect(wrapper.text()).toContain('缓存')
-    expect(wrapper.text()).toContain('写 1h')
+    expect(wrapper.text()).toContain('写入')
     expect(wrapper.text()).toContain('$7.50')
-    expect(wrapper.text()).toContain('优先级')
-    expect(wrapper.text()).toContain('图像/请求')
-    expect(wrapper.text()).toContain('请求')
-    expect(wrapper.text()).toContain('0.02')
+    expect(wrapper.text()).toContain('读取')
+    expect(wrapper.text()).toContain('$0.50')
+    expect(wrapper.text()).not.toContain('优先级')
+    expect(wrapper.text()).not.toContain('图像')
   })
 
   it('stores manually entered token prices as per-token values after showing per-million-token inputs', async () => {
@@ -340,8 +346,8 @@ describe('model square config wiring', () => {
     await wrapper.find('input[aria-label="模型 ID"]').setValue('gpt-5.5')
     await wrapper.find('input[aria-label="输入价格（USD / 1M Tokens）"]').setValue('5')
     await wrapper.find('input[aria-label="输出价格（USD / 1M Tokens）"]').setValue('30')
+    await wrapper.find('input[aria-label="缓存写入价格（USD / 1M Tokens）"]').setValue('6.25')
     await wrapper.find('input[aria-label="缓存读取价格（USD / 1M Tokens）"]').setValue('0.5')
-    await wrapper.find('input[aria-label="按请求价格（USD / 请求）"]').setValue('0.02')
 
     const submitButton = wrapper.findAll('button').find(button => button.text() === '保存')
     expect(submitButton).toBeTruthy()
@@ -353,14 +359,14 @@ describe('model square config wiring', () => {
     await flushPromises()
 
     const savedPayload = adminApiMock.modelSquareConfig.update.mock.calls[0][0]
-    expect(savedPayload.platforms[0].models[0]).toMatchObject({
+    expect(savedPayload.platforms[0].models[0]).toEqual({
       id: 'gpt-5.5',
       display_name: 'gpt-5.5',
       source: 'manual',
       input_price: 0.000005,
       output_price: 0.00003,
+      cache_write_price: 0.00000625,
       cache_read_price: 0.0000005,
-      per_request_price: 0.02,
     })
   })
 
@@ -419,22 +425,14 @@ describe('model square config wiring', () => {
     await flushPromises()
 
     const savedPayload = adminApiMock.modelSquareConfig.update.mock.calls[0][0]
-    expect(savedPayload.platforms[0].models[0]).toMatchObject({
+    expect(savedPayload.platforms[0].models[0]).toEqual({
       id: 'gpt-5.5',
       display_name: 'GPT-5.5',
       source: 'sync',
       input_price: null,
       output_price: null,
       cache_write_price: null,
-      cache_write_1h_price: null,
       cache_read_price: null,
-      input_price_priority: null,
-      output_price_priority: null,
-      cache_write_price_priority: null,
-      cache_read_price_priority: null,
-      image_input_price: null,
-      image_output_price: null,
-      per_request_price: null,
     })
   })
 

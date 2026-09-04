@@ -189,8 +189,8 @@
             :key="price.key"
             v-model="modelForm[price.key]"
             type="number"
-            :label="priceInputLabel(price)"
-            :placeholder="priceInputPlaceholder(price)"
+            :label="`${price.label}（USD / 1M Tokens）`"
+            placeholder="例如：5"
           />
         </div>
         <div class="flex justify-end">
@@ -314,25 +314,15 @@ const BUILTIN_PLATFORMS = [
 const PRICE_FIELDS = [
   { key: 'input_price', label: '输入价格' },
   { key: 'output_price', label: '输出价格' },
-  { key: 'cache_write_price', label: '缓存写入价格（5 分钟）' },
-  { key: 'cache_write_1h_price', label: '缓存写入价格（1 小时）' },
+  { key: 'cache_write_price', label: '缓存写入价格' },
   { key: 'cache_read_price', label: '缓存读取价格' },
-  { key: 'input_price_priority', label: '优先级输入价格' },
-  { key: 'output_price_priority', label: '优先级输出价格' },
-  { key: 'cache_write_price_priority', label: '优先级缓存写入价格' },
-  { key: 'cache_read_price_priority', label: '优先级缓存读取价格' },
-  { key: 'image_input_price', label: '图像输入价格' },
-  { key: 'image_output_price', label: '图像输出价格' },
-  { key: 'per_request_price', label: '按请求价格' },
 ] as const
 
 const PRICE_PER_MILLION_TOKENS = 1_000_000
-const PER_REQUEST_PRICE_FIELD = 'per_request_price'
 
 type PriceField = typeof PRICE_FIELDS[number]['key']
 type ModelForm = { id: string; display_name: string } & Record<PriceField, string>
-type PriceFieldMeta = typeof PRICE_FIELDS[number]
-type PriceItem = { key: PriceField; label: string; value: number; source: 'configured' | 'official' }
+type PriceItem = { label: string; value: number; source: 'configured' | 'official' }
 type PriceGroup = { title: string; items: PriceItem[]; hasOfficialReference: boolean }
 type OfficialPricingStatus = 'loading' | 'found' | 'not_found' | 'error'
 
@@ -342,15 +332,7 @@ const createEmptyModelForm = (): ModelForm => ({
   input_price: '',
   output_price: '',
   cache_write_price: '',
-  cache_write_1h_price: '',
   cache_read_price: '',
-  input_price_priority: '',
-  output_price_priority: '',
-  cache_write_price_priority: '',
-  cache_read_price_priority: '',
-  image_input_price: '',
-  image_output_price: '',
-  per_request_price: '',
 })
 
 const columns: Column[] = [
@@ -502,38 +484,17 @@ function modelPriceValues(model: ModelSquarePlatformModelConfig): Pick<ModelSqua
     input_price: model.input_price ?? null,
     output_price: model.output_price ?? null,
     cache_write_price: model.cache_write_price ?? null,
-    cache_write_1h_price: model.cache_write_1h_price ?? null,
     cache_read_price: model.cache_read_price ?? null,
-    input_price_priority: model.input_price_priority ?? null,
-    output_price_priority: model.output_price_priority ?? null,
-    cache_write_price_priority: model.cache_write_price_priority ?? null,
-    cache_read_price_priority: model.cache_read_price_priority ?? null,
-    image_input_price: model.image_input_price ?? null,
-    image_output_price: model.image_output_price ?? null,
-    per_request_price: model.per_request_price ?? null,
   }
 }
 
-function isPerRequestPriceField(key: PriceField): boolean {
-  return key === PER_REQUEST_PRICE_FIELD
-}
-
-function storedPriceToDisplayPrice(value?: number | null, key?: PriceField): string {
+function storedPriceToDisplayPrice(value?: number | null): string {
   if (value == null || !Number.isFinite(value)) return ''
-  const displayValue = key && isPerRequestPriceField(key) ? value : value * PRICE_PER_MILLION_TOKENS
-  return formatPlainPriceNumber(displayValue)
+  return formatPlainPriceNumber(value * PRICE_PER_MILLION_TOKENS)
 }
 
-function displayPriceToStoredPrice(value: number, key: PriceField): number {
-  return isPerRequestPriceField(key) ? value : value / PRICE_PER_MILLION_TOKENS
-}
-
-function priceInputLabel(price: PriceFieldMeta): string {
-  return isPerRequestPriceField(price.key) ? `${price.label}（USD / 请求）` : `${price.label}（USD / 1M Tokens）`
-}
-
-function priceInputPlaceholder(price: PriceFieldMeta): string {
-  return isPerRequestPriceField(price.key) ? '例如：0.02' : '例如：5'
+function displayPriceToStoredPrice(value: number): number {
+  return value / PRICE_PER_MILLION_TOKENS
 }
 
 function formatPlainPriceNumber(value: number): string {
@@ -664,7 +625,7 @@ function fillModelFormFromOfficialPricing(pricing: ModelSquareOfficialPricing): 
     if (modelForm.value[price.key].trim()) continue
     const officialValue = pricing[price.key as keyof ModelSquareOfficialPricing]
     if (isOfficialReferencePriceValue(officialValue)) {
-      modelForm.value[price.key] = storedPriceToDisplayPrice(officialValue, price.key)
+      modelForm.value[price.key] = storedPriceToDisplayPrice(officialValue)
     }
   }
 }
@@ -683,7 +644,7 @@ function openModelDialog(model?: ModelSquarePlatformModelConfig): void {
         : isOfficialReferencePriceValue(officialValue)
           ? officialValue
           : null
-      return [key, storedPriceToDisplayPrice(value, key)]
+      return [key, storedPriceToDisplayPrice(value)]
     })) as Pick<ModelForm, PriceField>,
   }
   modelDialogVisible.value = true
@@ -717,7 +678,7 @@ function parseModelFormPrices(): Pick<ModelSquarePlatformModelConfig, PriceField
       appStore.showError(`${price.label}必须是非负数字`)
       return null
     }
-    prices[price.key] = displayPriceToStoredPrice(value, price.key)
+    prices[price.key] = displayPriceToStoredPrice(value)
   }
   return prices
 }
@@ -847,7 +808,7 @@ async function applyDefaultPricing(): Promise<void> {
       const current = modelForm.value[price.key].trim()
       const defaultValue = pricing[price.key as keyof ModelSquareOfficialPricing]
       if (!current && isOfficialReferencePriceValue(defaultValue)) {
-        modelForm.value[price.key] = storedPriceToDisplayPrice(defaultValue, price.key)
+        modelForm.value[price.key] = storedPriceToDisplayPrice(defaultValue)
         filled += 1
       }
     }
@@ -973,18 +934,17 @@ function confirmRemoveModel(): void {
 
 function formatPriceValue(item: PriceItem): string {
   if (item.value == null || !Number.isFinite(item.value)) return ''
-  if (isPerRequestPriceField(item.key)) return formatPlainPriceNumber(item.value)
   return `$${formatPlainPriceNumber(item.value * PRICE_PER_MILLION_TOKENS)}`
 }
 
 function pricingValue(model: ModelSquarePlatformModelConfig, officialPricing: ModelSquareOfficialPricing | null, key: PriceField): PriceItem | null {
   const configuredValue = model[key]
   if (configuredValue != null && Number.isFinite(configuredValue)) {
-    return { key, value: configuredValue, label: '', source: 'configured' }
+    return { value: configuredValue, label: '', source: 'configured' }
   }
   const officialValue = officialPricing?.[key as keyof ModelSquareOfficialPricing]
   if (isOfficialReferencePriceValue(officialValue)) {
-    return { key, value: officialValue, label: '', source: 'official' }
+    return { value: officialValue, label: '', source: 'official' }
   }
   return null
 }
@@ -1009,26 +969,8 @@ function modelPriceGroups(model: ModelSquarePlatformModelConfig): PriceGroup[] {
     {
       title: '缓存',
       items: pricedItems(model, officialPricing, [
-        { label: '写 5m', key: 'cache_write_price' },
-        { label: '写 1h', key: 'cache_write_1h_price' },
+        { label: '写入', key: 'cache_write_price' },
         { label: '读取', key: 'cache_read_price' },
-      ]),
-    },
-    {
-      title: '优先级',
-      items: pricedItems(model, officialPricing, [
-        { label: '输入', key: 'input_price_priority' },
-        { label: '输出', key: 'output_price_priority' },
-        { label: '写入', key: 'cache_write_price_priority' },
-        { label: '读取', key: 'cache_read_price_priority' },
-      ]),
-    },
-    {
-      title: '图像/请求',
-      items: pricedItems(model, officialPricing, [
-        { label: '图入', key: 'image_input_price' },
-        { label: '图出', key: 'image_output_price' },
-        { label: '请求', key: 'per_request_price' },
       ]),
     },
   ].map(group => ({
