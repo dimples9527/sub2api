@@ -1657,12 +1657,17 @@ const costTrendChartOptions = computed<ChartOptions<'line'>>(() => {
   }
 })
 
+// 柱体与 X 轴刻度必须共用同一份排序结果，否则轴上的供应商名会和柱子对不上。
+const costBreakdownSortedItems = computed(() =>
+  [...costBreakdown.value].sort((a, b) => b.effectiveCost - a.effectiveCost),
+)
+
 const costBreakdownChartData = computed(() => {
   if (!costBreakdown.value.length) return null
   // 上游成本可能拿不到（只有余额兜底），排序和空态都以实际记账的生效成本为准。
   const hasValue = costBreakdown.value.some(item => item.upstreamCost > 0 || item.calculatedCost > 0 || item.localCost > 0 || item.effectiveCost > 0)
   if (!hasValue) return null
-  const items = [...costBreakdown.value].sort((a, b) => b.effectiveCost - a.effectiveCost)
+  const items = costBreakdownSortedItems.value
 
   return {
     labels: items.map(item => item.name),
@@ -1756,8 +1761,7 @@ const costBreakdownChartOptions = computed<ChartOptions<'bar'>>(() => {
           minRotation: 0,
           autoSkip: false,
           callback(value: string | number) {
-            const sorted = [...costBreakdown.value].sort((a, b) => b.upstreamCost - a.upstreamCost)
-            const label = sorted[Number(value)]?.name || ''
+            const label = costBreakdownSortedItems.value[Number(value)]?.name || ''
             return label.length > 12 ? `${label.slice(0, 12)}…` : label
           },
         },
