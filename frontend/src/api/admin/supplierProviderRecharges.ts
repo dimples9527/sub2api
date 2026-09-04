@@ -12,7 +12,6 @@ export interface SupplierProviderRecharge {
   status: string
   occurred_at: string
   description: string
-  source_payload?: unknown
   synced_at: string
   created_at?: string
   updated_at?: string

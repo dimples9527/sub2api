@@ -2,28 +2,26 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 )
 
 type SupplierProviderRecharge struct {
-	ID            int64           `json:"id"`
-	ProviderID    int64           `json:"provider_id"`
-	ProviderName  string          `json:"provider_name"`
-	ProviderType  string          `json:"provider_type"`
-	ExternalID    string          `json:"external_id"`
-	ExternalCode  string          `json:"external_code"`
-	RechargeType  string          `json:"recharge_type"`
-	Amount        float64         `json:"amount"`
-	Status        string          `json:"status"`
-	OccurredAt    time.Time       `json:"occurred_at"`
-	Description   string          `json:"description"`
-	SourcePayload json.RawMessage `json:"source_payload"`
-	SyncedAt      time.Time       `json:"synced_at"`
-	CreatedAt     time.Time       `json:"created_at"`
-	UpdatedAt     time.Time       `json:"updated_at"`
+	ID           int64     `json:"id"`
+	ProviderID   int64     `json:"provider_id"`
+	ProviderName string    `json:"provider_name"`
+	ProviderType string    `json:"provider_type"`
+	ExternalID   string    `json:"external_id"`
+	ExternalCode string    `json:"external_code"`
+	RechargeType string    `json:"recharge_type"`
+	Amount       float64   `json:"amount"`
+	Status       string    `json:"status"`
+	OccurredAt   time.Time `json:"occurred_at"`
+	Description  string    `json:"description"`
+	SyncedAt     time.Time `json:"synced_at"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type SupplierProviderRechargeListParams struct {
