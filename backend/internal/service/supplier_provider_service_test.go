@@ -599,7 +599,7 @@ func TestSupplierProviderServiceListCostTrendsIncludesCostBreakdown(t *testing.T
 	require.Contains(t, body, "breakdown")
 }
 
-func TestSupplierProviderServiceListCostTrendsFillsUpstreamCostFromBalanceFallback(t *testing.T) {
+func TestSupplierProviderServiceListCostTrendsFillsEffectiveCostFromBalanceFallback(t *testing.T) {
 	invalidateSupplierCostTrendCache()
 	defer invalidateSupplierCostTrendCache()
 
@@ -630,31 +630,34 @@ func TestSupplierProviderServiceListCostTrendsFillsUpstreamCostFromBalanceFallba
 	// 已有真实成本的日期不被余额保底覆盖。
 	require.Equal(t, 1.0, result.Points[0].UpstreamCost)
 	require.Equal(t, 1.0, result.Points[0].EffectiveCost)
-	// UpstreamCost<=0 的日期按当天各供应商余额差额之和填充，生效成本同步补齐。
-	require.Equal(t, 12.0, result.Points[1].UpstreamCost)
+	// 生效成本缺失的日期按当天各供应商余额差额之和填充；
+	// 余额差不是上游口径，上游成本保持缺失，不被伪造。
 	require.Equal(t, 12.0, result.Points[1].EffectiveCost)
+	require.Zero(t, result.Points[1].UpstreamCost)
 	// 只有余额快照、没有 daily_stats 的日期被补上。
-	require.Equal(t, 3.0, result.Points[2].UpstreamCost)
 	require.Equal(t, 3.0, result.Points[2].EffectiveCost)
+	require.Zero(t, result.Points[2].UpstreamCost)
 
 	// 拆分中已有真实成本的供应商不被覆盖。
 	require.Equal(t, 42.5, result.Breakdown[0].UpstreamCost)
 	require.Equal(t, 42.5, result.Breakdown[0].EffectiveCost)
-	// 拆分中 UpstreamCost<=0 的供应商按范围内余额差额之和填充。
-	require.Equal(t, 7.0, result.Breakdown[1].UpstreamCost)
+	// 拆分同理：只补生效成本。
 	require.Equal(t, 7.0, result.Breakdown[1].EffectiveCost)
+	require.Zero(t, result.Breakdown[1].UpstreamCost)
 }
 
 func TestSupplierProviderServiceListCostTrendsWarnsWithoutOverridingWhenDeviationExceedsThreshold(t *testing.T) {
 	invalidateSupplierCostTrendCache()
 	defer invalidateSupplierCostTrendCache()
 
+	// 偏差基准必须是计算成本：同步时正是它顶替上游成本成为生效成本。
+	// 这里本地成本贴着上游（10% 偏差），只有计算成本偏离，所以按本地判定会漏报。
 	repo := &supplierProviderRepoStub{
 		costTrends: []SupplierProviderCostTrendPoint{
-			{Date: "2026-08-10", UpstreamCost: 100, LocalCost: 10, EffectiveCost: 10},
+			{Date: "2026-08-10", UpstreamCost: 100, CalculatedCost: 10, LocalCost: 90, EffectiveCost: 10},
 		},
 		costBreakdowns: []SupplierProviderCostBreakdown{
-			{ProviderID: 7, ProviderName: "甲", ProviderType: "sub2api", UpstreamCost: 100, LocalCost: 10, EffectiveCost: 10},
+			{ProviderID: 7, ProviderName: "甲", ProviderType: "sub2api", UpstreamCost: 100, CalculatedCost: 10, LocalCost: 90, EffectiveCost: 10},
 		},
 	}
 	svc := NewSupplierProviderService(repo, supplierEncryptorStub{})
@@ -663,26 +666,53 @@ func TestSupplierProviderServiceListCostTrendsWarnsWithoutOverridingWhenDeviatio
 	result, err := svc.ListCostTrendsByDateRange(context.Background(), "2026-08-10", "2026-08-10", 0)
 	require.NoError(t, err)
 
-	// 偏差 90% > 50%：只记录提示，三个口径的数值都保持原样。
+	// 偏差 90% > 50%：只记录提示，四个口径的数值都保持原样。
 	require.Equal(t, 100.0, result.Points[0].UpstreamCost)
-	require.Equal(t, 10.0, result.Points[0].LocalCost)
+	require.Equal(t, 10.0, result.Points[0].CalculatedCost)
+	require.Equal(t, 90.0, result.Points[0].LocalCost)
 	require.Equal(t, 10.0, result.Points[0].EffectiveCost)
-	require.Contains(t, result.Points[0].Warning, "生效成本已取本地计算值")
+	require.Contains(t, result.Points[0].Warning, "生效成本已取计算成本")
 	require.Equal(t, 100.0, result.Breakdown[0].UpstreamCost)
+	require.Equal(t, 10.0, result.Breakdown[0].CalculatedCost)
 	require.Equal(t, 10.0, result.Breakdown[0].EffectiveCost)
-	require.Contains(t, result.Breakdown[0].CostWarning, "生效成本已取本地计算值")
+	require.Contains(t, result.Breakdown[0].CostWarning, "生效成本已取计算成本")
+}
+
+func TestSupplierProviderServiceListCostTrendsKeepsSyncWarningInsteadOfRecomputing(t *testing.T) {
+	invalidateSupplierCostTrendCache()
+	defer invalidateSupplierCostTrendCache()
+
+	// 同步时写入的逐日提示带着余额差与充值明细，比展示层重算的更具体，不能被覆盖。
+	syncWarning := "上游成本 100.00 与计算成本 10.00 偏差 90%，生效成本已取计算成本（余额差 8.00 + 充值 2.00）"
+	repo := &supplierProviderRepoStub{
+		costTrends: []SupplierProviderCostTrendPoint{
+			{Date: "2026-08-14", UpstreamCost: 100, CalculatedCost: 10, EffectiveCost: 10, Warning: syncWarning},
+		},
+		costBreakdowns: []SupplierProviderCostBreakdown{
+			{ProviderID: 7, ProviderName: "甲", ProviderType: "sub2api", UpstreamCost: 100, CalculatedCost: 10, EffectiveCost: 10, CostWarning: syncWarning},
+		},
+	}
+	svc := NewSupplierProviderService(repo, supplierEncryptorStub{})
+	svc.SetCostDeviationThresholdProvider(supplierCostDeviationThresholdStub{threshold: 0.5})
+
+	result, err := svc.ListCostTrendsByDateRange(context.Background(), "2026-08-14", "2026-08-14", 0)
+	require.NoError(t, err)
+
+	require.Equal(t, syncWarning, result.Points[0].Warning)
+	require.Equal(t, syncWarning, result.Breakdown[0].CostWarning)
 }
 
 func TestSupplierProviderServiceListCostTrendsDoesNotWarnWithinThreshold(t *testing.T) {
 	invalidateSupplierCostTrendCache()
 	defer invalidateSupplierCostTrendCache()
 
+	// 本地成本远离上游不该触发提示：它不参与生效成本的取值。
 	repo := &supplierProviderRepoStub{
 		costTrends: []SupplierProviderCostTrendPoint{
-			{Date: "2026-08-11", UpstreamCost: 100, LocalCost: 60, EffectiveCost: 100},
+			{Date: "2026-08-11", UpstreamCost: 100, CalculatedCost: 60, LocalCost: 5, EffectiveCost: 100},
 		},
 		costBreakdowns: []SupplierProviderCostBreakdown{
-			{ProviderID: 7, ProviderName: "甲", ProviderType: "sub2api", UpstreamCost: 100, LocalCost: 60, EffectiveCost: 100},
+			{ProviderID: 7, ProviderName: "甲", ProviderType: "sub2api", UpstreamCost: 100, CalculatedCost: 60, LocalCost: 5, EffectiveCost: 100},
 		},
 	}
 	svc := NewSupplierProviderService(repo, supplierEncryptorStub{})
@@ -691,23 +721,23 @@ func TestSupplierProviderServiceListCostTrendsDoesNotWarnWithinThreshold(t *test
 	result, err := svc.ListCostTrendsByDateRange(context.Background(), "2026-08-11", "2026-08-11", 0)
 	require.NoError(t, err)
 
-	// 偏差 40% <= 50%，不提示。
+	// 上游与计算成本偏差 40% <= 50%，不提示。
 	require.Equal(t, 100.0, result.Points[0].UpstreamCost)
 	require.Empty(t, result.Points[0].Warning)
 	require.Equal(t, 100.0, result.Breakdown[0].UpstreamCost)
 	require.Empty(t, result.Breakdown[0].CostWarning)
 }
 
-func TestSupplierProviderServiceListCostTrendsDoesNotWarnWithoutLocalCost(t *testing.T) {
+func TestSupplierProviderServiceListCostTrendsDoesNotWarnWithoutCalculatedCost(t *testing.T) {
 	invalidateSupplierCostTrendCache()
 	defer invalidateSupplierCostTrendCache()
 
 	repo := &supplierProviderRepoStub{
 		costTrends: []SupplierProviderCostTrendPoint{
-			{Date: "2026-08-12", UpstreamCost: 100, LocalCost: 0, EffectiveCost: 100},
+			{Date: "2026-08-12", UpstreamCost: 100, CalculatedCost: 0, LocalCost: 10, EffectiveCost: 100},
 		},
 		costBreakdowns: []SupplierProviderCostBreakdown{
-			{ProviderID: 7, ProviderName: "甲", ProviderType: "sub2api", UpstreamCost: 100, LocalCost: 0, EffectiveCost: 100},
+			{ProviderID: 7, ProviderName: "甲", ProviderType: "sub2api", UpstreamCost: 100, CalculatedCost: 0, LocalCost: 10, EffectiveCost: 100},
 		},
 	}
 	svc := NewSupplierProviderService(repo, supplierEncryptorStub{})
@@ -726,13 +756,13 @@ func TestSupplierProviderServiceListCostTrendsKeepsUpstreamForCalculatedSource(t
 	invalidateSupplierCostTrendCache()
 	defer invalidateSupplierCostTrendCache()
 
-	// 计算成本优先：today_cost 写的是本地成本，raw_upstream_cost 仍是真实上游值。
+	// 计算成本优先：today_cost 写的是计算成本，raw_upstream_cost 仍是真实上游值。
 	repo := &supplierProviderRepoStub{
 		costTrends: []SupplierProviderCostTrendPoint{
-			{Date: "2026-08-13", UpstreamCost: 100, LocalCost: 10, EffectiveCost: 10},
+			{Date: "2026-08-13", UpstreamCost: 100, CalculatedCost: 10, LocalCost: 12, EffectiveCost: 10},
 		},
 		costBreakdowns: []SupplierProviderCostBreakdown{
-			{ProviderID: 7, ProviderName: "甲", ProviderType: "sub2api", UpstreamCost: 100, LocalCost: 10, EffectiveCost: 10},
+			{ProviderID: 7, ProviderName: "甲", ProviderType: "sub2api", UpstreamCost: 100, CalculatedCost: 10, LocalCost: 12, EffectiveCost: 10},
 		},
 	}
 	svc := NewSupplierProviderService(repo, supplierEncryptorStub{})
@@ -745,9 +775,9 @@ func TestSupplierProviderServiceListCostTrendsKeepsUpstreamForCalculatedSource(t
 	result, err := svc.ListCostTrendsByDateRange(context.Background(), "2026-08-13", "2026-08-13", 7)
 	require.NoError(t, err)
 
-	// 上游成本保持真实值，不再被改写成本地成本。
+	// 上游成本保持真实值，不再被改写成计算成本。
 	require.Equal(t, 100.0, result.Points[0].UpstreamCost)
-	require.Equal(t, 10.0, result.Points[0].LocalCost)
+	require.Equal(t, 10.0, result.Points[0].CalculatedCost)
 	require.Equal(t, 10.0, result.Points[0].EffectiveCost)
 	// 用户主动选定的稳定状态，不逐日刷提示。
 	require.Empty(t, result.Points[0].Warning)

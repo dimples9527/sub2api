@@ -31,6 +31,7 @@ type SupplierProviderCostReview struct {
 	StatDate        time.Time  `json:"stat_date"`
 	UpstreamCost    *float64   `json:"upstream_cost"`
 	CalculatedCost  *float64   `json:"calculated_cost"`
+	LocalCost       *float64   `json:"local_cost"`
 	AutoAdoptedCost *float64   `json:"auto_adopted_cost"`
 	FinalCost       *float64   `json:"final_cost"`
 	EffectiveCost   float64    `json:"effective_cost"`
@@ -57,6 +58,7 @@ type SupplierProviderCostReviewHistory struct {
 	SyncRunID       *int64    `json:"sync_run_id,omitempty"`
 	UpstreamCost    *float64  `json:"upstream_cost"`
 	CalculatedCost  *float64  `json:"calculated_cost"`
+	LocalCost       *float64  `json:"local_cost"`
 	AutoAdoptedCost *float64  `json:"auto_adopted_cost"`
 	FinalCost       *float64  `json:"final_cost"`
 	CostDelta       *float64  `json:"cost_delta"`
@@ -103,6 +105,8 @@ type SupplierProviderCostReviewSyncInput struct {
 	StatDate        time.Time
 	UpstreamCost    *float64
 	CalculatedCost  *float64
+	// LocalCost 是本地用量统计口径的成本，仅作参考展示，不参与生效成本决策。
+	LocalCost       *float64
 	AutoAdoptedCost *float64
 	EffectiveCost   float64
 	SyncRunID       *int64
@@ -156,7 +160,13 @@ func (s *SupplierProviderCostReviewService) Approve(ctx context.Context, id int6
 	if err := validateCostReviewApproveInput(input.Version, input.DecisionType, input.ManualCost); err != nil {
 		return nil, err
 	}
-	return s.repo.Approve(ctx, id, input)
+	review, err := s.repo.Approve(ctx, id, input)
+	if err != nil {
+		return nil, err
+	}
+	// 审批改写了 daily_stats 的生效成本与提示，趋势缓存必须失效，否则成本分析最多 30 秒还是旧值。
+	invalidateSupplierCostTrendCache()
+	return review, nil
 }
 
 func (s *SupplierProviderCostReviewService) ApproveMany(ctx context.Context, input SupplierProviderCostReviewBulkApproveInput) ([]SupplierProviderCostReview, error) {
@@ -182,7 +192,12 @@ func (s *SupplierProviderCostReviewService) ApproveMany(ctx context.Context, inp
 	if err := validateCostReviewApproveInput(1, input.DecisionType, input.ManualCost); err != nil {
 		return nil, err
 	}
-	return s.repo.ApproveMany(ctx, input)
+	reviews, err := s.repo.ApproveMany(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+	invalidateSupplierCostTrendCache()
+	return reviews, nil
 }
 
 func validateCostReviewApproveInput(version int64, decisionType string, manualCost *float64) error {

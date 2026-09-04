@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSupplierProviderRepositoryListCostTrendsMergesUpstreamAndLocal(t *testing.T) {
+func TestSupplierProviderRepositoryListCostTrendsMergesUpstreamLocalAndCalculated(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer db.Close()
@@ -31,29 +31,38 @@ GROUP BY d.stat_date
 ORDER BY d.stat_date`)).
 		WithArgs(start, end).
 		WillReturnRows(sqlmock.NewRows([]string{"date", "upstream_cost", "effective_cost", "cost_warning"}).
-			AddRow("2026-07-28", 12.5, 10.0, "上游成本 12.50 与本地成本 10.00 偏差 20%，生效成本已取本地计算值").
+			AddRow("2026-07-28", 12.5, 10.0, "上游成本 12.50 与计算成本 11.00 偏差 12%，生效成本已取计算成本").
 			AddRow("2026-07-29", 7, 7, ""))
 
-	mock.ExpectQuery("matched_accounts").
+	mock.ExpectQuery(`(?s)matched_accounts.*SUM\(COALESCE\(ul\.account_stats_cost, ul\.total_cost\) \* COALESCE\(ul\.account_rate_multiplier, 1\)\)`).
 		WithArgs(start, end, sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"date", "local_cost"}).
 			AddRow("2026-07-28", 10.0).
 			AddRow("2026-07-30", 4.5))
+
+	mock.ExpectQuery(`(?s)SUM\(r\.calculated_cost\).*FROM supplier_provider_cost_reviews r`).
+		WithArgs(start, end).
+		WillReturnRows(sqlmock.NewRows([]string{"date", "calculated_cost"}).
+			AddRow("2026-07-28", 11.0).
+			AddRow("2026-07-30", 4.0))
 
 	points, err := repo.ListCostTrends(context.Background(), start, end, 0)
 	require.NoError(t, err)
 	require.Len(t, points, 3)
 	require.Equal(t, "2026-07-28", points[0].Date)
 	require.Equal(t, 12.5, points[0].UpstreamCost)
+	require.Equal(t, 11.0, points[0].CalculatedCost)
 	require.Equal(t, 10.0, points[0].LocalCost)
 	require.Equal(t, 10.0, points[0].EffectiveCost)
-	require.Contains(t, points[0].Warning, "生效成本已取本地计算值")
+	require.Contains(t, points[0].Warning, "生效成本已取计算成本")
 	require.Equal(t, "2026-07-29", points[1].Date)
 	require.Equal(t, 7.0, points[1].UpstreamCost)
+	require.Equal(t, 0.0, points[1].CalculatedCost)
 	require.Equal(t, 0.0, points[1].LocalCost)
 	require.Equal(t, 7.0, points[1].EffectiveCost)
 	require.Equal(t, "2026-07-30", points[2].Date)
 	require.Equal(t, 0.0, points[2].UpstreamCost)
+	require.Equal(t, 4.0, points[2].CalculatedCost)
 	require.Equal(t, 4.5, points[2].LocalCost)
 	require.Equal(t, 0.0, points[2].EffectiveCost)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -74,16 +83,22 @@ func TestSupplierProviderRepositoryListCostTrendsFiltersByProvider(t *testing.T)
 		WillReturnRows(sqlmock.NewRows([]string{"date", "upstream_cost", "effective_cost", "cost_warning"}).
 			AddRow("2026-07-28", 3.5, 3.5, ""))
 
-	mock.ExpectQuery("matched_accounts").
+	mock.ExpectQuery(`(?s)matched_accounts.*SUM\(COALESCE\(ul\.account_stats_cost, ul\.total_cost\) \* COALESCE\(ul\.account_rate_multiplier, 1\)\)`).
 		WithArgs(start, end, sqlmock.AnyArg(), providerID).
 		WillReturnRows(sqlmock.NewRows([]string{"date", "local_cost"}).
 			AddRow("2026-07-28", 2.0))
+
+	mock.ExpectQuery(`(?s)SUM\(r\.calculated_cost\).*FROM supplier_provider_cost_reviews r`).
+		WithArgs(start, end, providerID).
+		WillReturnRows(sqlmock.NewRows([]string{"date", "calculated_cost"}).
+			AddRow("2026-07-28", 3.2))
 
 	points, err := repo.ListCostTrends(context.Background(), start, end, providerID)
 	require.NoError(t, err)
 	require.Len(t, points, 1)
 	require.Equal(t, "2026-07-28", points[0].Date)
 	require.Equal(t, 3.5, points[0].UpstreamCost)
+	require.Equal(t, 3.2, points[0].CalculatedCost)
 	require.Equal(t, 2.0, points[0].LocalCost)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -167,11 +182,11 @@ func TestSupplierProviderRepositoryListCostBreakdownsAggregatesByProvider(t *tes
 	start := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)
 
-	mock.ExpectQuery("WITH provider_account_matches").
+	mock.ExpectQuery(`(?s)WITH provider_account_matches.*SUM\(COALESCE\(ul\.account_stats_cost, ul\.total_cost\) \* COALESCE\(ul\.account_rate_multiplier, 1\)\).*SUM\(r\.calculated_cost\)`).
 		WithArgs(start, end).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "provider_type", "upstream_cost", "local_cost", "effective_cost", "cost_warning"}).
-			AddRow(int64(7), "主供应商", "sub2api", 42.5, 17.25, 17.25, "上游成本 42.50 与本地成本 17.25 偏差 59%，生效成本已取本地计算值").
-			AddRow(int64(9), "备用供应商", "newapi", 8.0, 3.5, 8.0, ""))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "provider_type", "upstream_cost", "calculated_cost", "local_cost", "effective_cost", "cost_warning"}).
+			AddRow(int64(7), "主供应商", "sub2api", 42.5, 17.25, 30.0, 17.25, "上游成本 42.50 与计算成本 17.25 偏差 59%，生效成本已取计算成本").
+			AddRow(int64(9), "备用供应商", "newapi", 8.0, 7.6, 3.5, 8.0, ""))
 
 	breakdowns, err := repo.ListCostBreakdowns(context.Background(), start, end, 0)
 	require.NoError(t, err)
@@ -179,10 +194,12 @@ func TestSupplierProviderRepositoryListCostBreakdownsAggregatesByProvider(t *tes
 	require.Equal(t, int64(7), breakdowns[0].ProviderID)
 	require.Equal(t, "主供应商", breakdowns[0].ProviderName)
 	require.Equal(t, 42.5, breakdowns[0].UpstreamCost)
-	require.Equal(t, 17.25, breakdowns[0].LocalCost)
+	require.Equal(t, 17.25, breakdowns[0].CalculatedCost)
+	require.Equal(t, 30.0, breakdowns[0].LocalCost)
 	require.Equal(t, 17.25, breakdowns[0].EffectiveCost)
-	require.Contains(t, breakdowns[0].CostWarning, "生效成本已取本地计算值")
+	require.Contains(t, breakdowns[0].CostWarning, "生效成本已取计算成本")
 	require.Equal(t, int64(9), breakdowns[1].ProviderID)
+	require.Equal(t, 7.6, breakdowns[1].CalculatedCost)
 	require.Equal(t, 8.0, breakdowns[1].EffectiveCost)
 	require.Equal(t, "", breakdowns[1].CostWarning)
 	require.NoError(t, mock.ExpectationsWereMet())

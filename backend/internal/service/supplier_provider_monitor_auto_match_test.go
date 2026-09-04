@@ -72,10 +72,9 @@ func (s *supplierProviderMonitorAutoMatchDataStub) ClearLocalAccountPlatformOver
 func (s *supplierProviderMonitorAutoMatchDataStub) UpdateBalance(context.Context, int64, float64, time.Time) error { return nil }
 func (s *supplierProviderMonitorAutoMatchDataStub) UpdateCost(context.Context, int64, float64, time.Time) error { return nil }
 func (s *supplierProviderMonitorAutoMatchDataStub) UpdateCostDetailed(context.Context, int64, float64, *float64, *string, time.Time) error { return nil }
-func (s *supplierProviderMonitorAutoMatchDataStub) UpdateCostDetailedWithReview(context.Context, int64, float64, *float64, *string, time.Time, SupplierProviderCostReviewSyncInput) error { return nil }
+func (s *supplierProviderMonitorAutoMatchDataStub) UpdateCostDetailedWithReview(context.Context, int64, *float64, *string, time.Time, SupplierProviderCostReviewSyncInput) (float64, error) { return 0, nil }
 func (s *supplierProviderMonitorAutoMatchDataStub) GetLocalCostForDay(context.Context, int64, time.Time) (float64, bool, error) { return 0, false, nil }
 func (s *supplierProviderMonitorAutoMatchDataStub) GetBalanceDeltaForDay(context.Context, int64, time.Time) (float64, bool, error) { return 0, false, nil }
-func (s *supplierProviderMonitorAutoMatchDataStub) GetCostFallbackBalances(context.Context, int64, time.Time) (SupplierProviderCostFallbackBalance, bool, error) { return SupplierProviderCostFallbackBalance{}, false, nil }
 func (s *supplierProviderMonitorAutoMatchDataStub) CreateSyncRun(context.Context, *SupplierProviderSyncRun) error { return nil }
 func (s *supplierProviderMonitorAutoMatchDataStub) FinishSyncRun(context.Context, *SupplierProviderSyncRun) error { return nil }
 func (s *supplierProviderMonitorAutoMatchDataStub) UpdateSyncStatus(context.Context, int64, string, string, time.Time) error { return nil }

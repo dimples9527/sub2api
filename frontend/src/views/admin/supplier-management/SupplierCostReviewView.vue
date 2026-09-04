@@ -4,7 +4,7 @@
       <div>
         <div class="sp-eyebrow">供应商管理 / 成本核对</div>
         <h1>上游成本核对</h1>
-        <p class="sp-subtitle">对比接口成本与本地计算成本，逐条确认当前业务生效成本。</p>
+        <p class="sp-subtitle">对比接口成本、计算成本（余额差 + 充值）与本地统计成本，逐条确认当前业务生效成本。</p>
       </div>
       <div class="sp-controls">
         <button class="sp-button ghost cost-source-button" type="button" data-test="cost-source-config-button" @click="openCostSourceDialog">成本来源</button>
@@ -55,6 +55,7 @@
         </template>
         <template #cell-upstream_cost="{ row }">{{ formatCost(row.upstream_cost) }}</template>
         <template #cell-calculated_cost="{ row }">{{ formatCost(row.calculated_cost) }}</template>
+        <template #cell-local_cost="{ row }">{{ formatCost(row.local_cost) }}</template>
         <template #cell-auto_adopted_cost="{ row }">{{ formatCost(row.auto_adopted_cost) }}</template>
         <template #cell-final_cost="{ row }">{{ formatCost(row.final_cost) }}</template>
         <template #cell-effective_cost="{ row }"><strong>{{ formatCost(row.effective_cost) }}</strong></template>
@@ -361,7 +362,7 @@
         <div class="review-summary"><div><span>已选记录</span><strong>{{ selectedReviews.length }} 条</strong></div><div><span>本次审批</span><strong>{{ bulkApprovableReviews.length }} 条</strong></div><div><span>跳过记录</span><strong>{{ selectedReviews.length - bulkApprovableReviews.length }} 条</strong></div></div>
         <div class="review-choice-grid">
           <button type="button" class="review-choice" :class="{ active: bulkDecisionType === 'upstream' }" data-test="bulk-decision-upstream" @click="bulkDecisionType = 'upstream'"><span>接口成本</span><strong>统一采用接口值</strong><small>按各记录本次上游接口返回值审批</small></button>
-          <button type="button" class="review-choice" :class="{ active: bulkDecisionType === 'calculated' }" data-test="bulk-decision-calculated" @click="bulkDecisionType = 'calculated'"><span>计算成本</span><strong>统一采用计算值</strong><small>按各记录本地计算成本审批</small></button>
+          <button type="button" class="review-choice" :class="{ active: bulkDecisionType === 'calculated' }" data-test="bulk-decision-calculated" @click="bulkDecisionType = 'calculated'"><span>计算成本</span><strong>统一采用计算值</strong><small>按各记录余额差 + 充值推算值审批</small></button>
           <button type="button" class="review-choice" :class="{ active: bulkDecisionType === 'manual' }" data-test="bulk-decision-manual" @click="bulkDecisionType = 'manual'"><span>手动输入</span><strong>统一手动成本</strong><small>为本次选中的记录写入同一金额</small></button>
         </div>
         <Input v-if="bulkDecisionType === 'manual'" v-model="bulkManualCost" type="number" min="0" step="0.000001" label="统一手动成本" placeholder="请输入成本金额" data-test="bulk-manual-cost" />
@@ -407,7 +408,7 @@
         <div class="review-summary"><div><span>供应商</span><strong>{{ approvalRow.provider_name }}</strong></div><div><span>统计日期</span><strong>{{ formatDateOnly(approvalRow.stat_date) }}</strong></div><div><span>当前生效</span><strong>{{ formatCost(approvalRow.effective_cost) }}</strong></div></div>
         <div class="review-choice-grid">
           <button type="button" class="review-choice" :class="{ active: decisionType === 'upstream' }" data-test="decision-upstream" @click="decisionType = 'upstream'"><span>接口成本</span><strong>{{ formatCost(approvalRow.upstream_cost) }}</strong><small>采用本次上游接口返回值</small></button>
-          <button type="button" class="review-choice" :class="{ active: decisionType === 'calculated' }" data-test="decision-calculated" @click="decisionType = 'calculated'"><span>计算成本</span><strong>{{ formatCost(approvalRow.calculated_cost) }}</strong><small>采用系统本地计算值</small></button>
+          <button type="button" class="review-choice" :class="{ active: decisionType === 'calculated' }" data-test="decision-calculated" @click="decisionType = 'calculated'"><span>计算成本</span><strong>{{ formatCost(approvalRow.calculated_cost) }}</strong><small>采用余额差 + 充值推算值</small></button>
           <button type="button" class="review-choice" :class="{ active: decisionType === 'manual' }" data-test="decision-manual" @click="decisionType = 'manual'"><span>手动输入</span><strong>自定义金额</strong><small>输入非负且最多 6 位小数</small></button>
         </div>
         <Input v-if="decisionType === 'manual'" v-model="manualCost" type="number" min="0" step="0.000001" label="手动成本" placeholder="请输入成本金额" data-test="manual-cost" />
@@ -446,6 +447,7 @@
           </template>
           <template #cell-upstream_cost="{ row }">{{ formatCost(row.upstream_cost) }}</template>
           <template #cell-calculated_cost="{ row }">{{ formatCost(row.calculated_cost) }}</template>
+          <template #cell-local_cost="{ row }">{{ formatCost(row.local_cost) }}</template>
           <template #cell-cost_delta="{ row }">
             <span v-if="row.cost_delta === null || row.cost_delta === undefined" class="sp-sub">--</span>
             <div v-else class="delta-cell">
@@ -598,6 +600,7 @@ const columns: Column[] = [
   { key: 'provider_name', label: '供应商', class: 'min-w-36' },
   { key: 'upstream_cost', label: '接口成本', class: 'text-right tabular-col cost-col cost-amount-col cost-col-upstream' },
   { key: 'calculated_cost', label: '计算成本', class: 'text-right tabular-col cost-col cost-amount-col cost-col-calculated' },
+  { key: 'local_cost', label: '本地成本', class: 'text-right tabular-col cost-col cost-amount-col cost-col-local' },
   { key: 'auto_adopted_cost', label: '自动采用', class: 'text-right tabular-col cost-col cost-amount-col cost-col-auto' },
   { key: 'final_cost', label: '最终成本', class: 'text-right tabular-col cost-col cost-amount-col cost-col-final' },
   { key: 'effective_cost', label: '生效成本', class: 'text-right tabular-col cost-col cost-amount-col cost-col-effective' },
@@ -613,6 +616,7 @@ const syncRecordColumns: Column[] = [
   { key: 'operated_at', label: '同步时间', class: 'sync-record-col-time' },
   { key: 'upstream_cost', label: '接口成本', class: 'text-right tabular-col cost-col cost-amount-col cost-col-upstream' },
   { key: 'calculated_cost', label: '计算成本', class: 'text-right tabular-col cost-col cost-amount-col cost-col-calculated' },
+  { key: 'local_cost', label: '本地成本', class: 'text-right tabular-col cost-col cost-amount-col cost-col-local' },
   { key: 'cost_delta', label: '接口差额', class: 'text-right tabular-col cost-col cost-col-delta' },
   { key: 'status', label: '当时状态', class: 'cost-col cost-col-status' },
   { key: 'sync_run_id', label: '同步任务' },
@@ -1354,9 +1358,10 @@ onMounted(async () => { await Promise.all([loadProviders(), loadReviews(), loadC
 .cost-review-actions .action-approve.is-pending:hover { background: #1d4ed8; }
 /* 金额列：右对齐 + 等宽数字，便于逐位比对成本 */
 .tabular-col { font-variant-numeric: tabular-nums; }
-/* 成本列身份色，按成本来源区分：接口青 / 推算紫 / 系统灰 / 人工琥珀 / 生效蓝，差额与状态沿用各自的语义色。 */
+/* 成本列身份色，按成本来源区分：接口青 / 推算紫 / 本地品红 / 系统灰 / 人工琥珀 / 生效蓝，差额与状态沿用各自的语义色。 */
 .cost-color-scope :deep(.cost-col-upstream) { --col-accent: #0891b2; }
 .cost-color-scope :deep(.cost-col-calculated) { --col-accent: #7c3aed; }
+.cost-color-scope :deep(.cost-col-local) { --col-accent: #c026d3; }
 .cost-color-scope :deep(.cost-col-auto) { --col-accent: #64748b; }
 .cost-color-scope :deep(.cost-col-final) { --col-accent: #b45309; }
 .cost-color-scope :deep(.cost-col-effective) { --col-accent: #2563eb; }
@@ -1380,6 +1385,7 @@ onMounted(async () => { await Promise.all([loadProviders(), loadReviews(), loadC
 .cost-color-scope :deep(td.cost-col-effective) strong { font-weight: 700; }
 .dark .cost-color-scope :deep(.cost-col-upstream) { --col-accent: #22d3ee; }
 .dark .cost-color-scope :deep(.cost-col-calculated) { --col-accent: #c4b5fd; }
+.dark .cost-color-scope :deep(.cost-col-local) { --col-accent: #f0abfc; }
 .dark .cost-color-scope :deep(.cost-col-auto) { --col-accent: #94a3b8; }
 .dark .cost-color-scope :deep(.cost-col-final) { --col-accent: #fbbf24; }
 .dark .cost-color-scope :deep(.cost-col-effective) { --col-accent: #60a5fa; }

@@ -10,6 +10,7 @@ export interface SupplierProviderCostReview {
   stat_date: string
   upstream_cost?: number | null
   calculated_cost?: number | null
+  local_cost?: number | null
   auto_adopted_cost?: number | null
   final_cost?: number | null
   effective_cost: number
@@ -36,6 +37,7 @@ export interface SupplierProviderCostReviewHistory {
   sync_run_id?: number | null
   upstream_cost?: number | null
   calculated_cost?: number | null
+  local_cost?: number | null
   auto_adopted_cost?: number | null
   final_cost?: number | null
   cost_delta?: number | null

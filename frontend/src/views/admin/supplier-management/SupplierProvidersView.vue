@@ -425,7 +425,7 @@
             <div class="sp-panel-title">
               <div>
                 <h2>成本对比</h2>
-                <span>{{ costTrendRangeLabel }} · {{ costTrendScopeLabel }} · 上游成本 / 本地成本</span>
+                <span>{{ costTrendRangeLabel }} · {{ costTrendScopeLabel }} · 上游成本 / 计算成本 / 本地成本</span>
               </div>
             </div>
           </div>
@@ -498,11 +498,13 @@
           <div class="sp-health-chart-meta">
             <div class="sp-health-chart-legend">
               <span class="sp-health-legend-item upstream"><i></i>上游成本</span>
+              <span class="sp-health-legend-item calculated"><i></i>计算成本</span>
               <span class="sp-health-legend-item local"><i></i>本地成本</span>
               <span class="sp-health-legend-item effective"><i></i>生效成本</span>
             </div>
             <div class="sp-health-chart-totals">
               <span>上游合计 <b>{{ currency(costTrendTotals.upstream) }}</b></span>
+              <span>计算合计 <b>{{ currency(costTrendTotals.calculated) }}</b></span>
               <span>本地合计 <b>{{ currency(costTrendTotals.local) }}</b></span>
               <span>生效合计 <b>{{ currency(costTrendTotals.effective) }}</b></span>
               <span
@@ -547,7 +549,7 @@
             <div class="sp-panel-title">
               <div>
                 <h2>按供应商拆分成本</h2>
-                <span>{{ costBreakdownRangeLabel }} · 每个供应商并排比较上游成本、本地成本和生效成本</span>
+                <span>{{ costBreakdownRangeLabel }} · 每个供应商并排比较上游成本、计算成本、本地成本和生效成本</span>
               </div>
             </div>
           </div>
@@ -557,6 +559,7 @@
           <div class="sp-health-chart-meta">
             <div class="sp-health-chart-legend">
               <span class="sp-health-legend-item upstream"><i></i>上游成本</span>
+              <span class="sp-health-legend-item calculated"><i></i>计算成本</span>
               <span class="sp-health-legend-item local"><i></i>本地成本</span>
               <span class="sp-health-legend-item effective"><i></i>生效成本</span>
             </div>
@@ -1457,19 +1460,22 @@ const costBreakdownRangeLabel = computed(() => {
 const costTrendTotals = computed(() =>
   costTrendPoints.value.reduce((acc, point) => {
     acc.upstream += Number(point.upstream_cost || 0)
+    acc.calculated += Number(point.calculated_cost || 0)
     acc.local += Number(point.local_cost || 0)
     acc.effective += Number(point.effective_cost || 0)
     return acc
-  }, { upstream: 0, local: 0, effective: 0 }),
+  }, { upstream: 0, calculated: 0, local: 0, effective: 0 }),
 )
 
-// 每日上游/本地成本偏差率，用于成本对比图按阈值高亮异常点。
+// 每日上游/计算成本偏差率，用于成本对比图按阈值高亮异常点。
+// 基准是计算成本而非本地成本：智能模式下正是它超阈值时顶替上游成本成为生效成本。
+// 与后端一致，任一侧缺值就不算偏差——成本核对记录早于上线的日期没有计算成本，否则整段历史都会误报 100%。
 const costTrendDeviation = computed(() =>
   costTrendPoints.value.map(point => {
     const upstream = Number(point.upstream_cost || 0)
-    const local = Number(point.local_cost || 0)
-    const max = Math.max(upstream, local)
-    return max <= 0 ? 0 : Math.abs(upstream - local) / max
+    const calculated = Number(point.calculated_cost || 0)
+    if (upstream <= 0 || calculated <= 0) return 0
+    return Math.abs(upstream - calculated) / Math.max(upstream, calculated)
   }),
 )
 
@@ -1478,7 +1484,7 @@ const costTrendDeviationCount = computed(
 )
 
 // 成本曲线与悬浮提示色标使用同一组颜色，避免点色和线色语义混淆。
-const costTrendSeriesColors = ['#3b82f6', '#d97706', '#059669'] as const
+const costTrendSeriesColors = ['#3b82f6', '#7c3aed', '#d97706', '#059669'] as const
 
 function getCostTrendTooltipLabelColor({ datasetIndex }: TooltipItem<'line'>): TooltipLabelStyle {
   const color = costTrendSeriesColors[datasetIndex] || costTrendSeriesColors[0]
@@ -1497,12 +1503,13 @@ const costBreakdown = computed(() =>
     id: provider.provider_id,
     name: provider.provider_name,
     upstreamCost: Number(provider.upstream_cost || 0),
+    calculatedCost: Number(provider.calculated_cost || 0),
     localCost: Number(provider.local_cost || 0),
     effectiveCost: Number(provider.effective_cost || 0),
   })),
 )
 
-// 上游与本地成本偏差过大的日期提示。
+// 上游与计算成本偏差过大的日期提示。
 const costTrendWarnings = computed(() =>
   costTrendPoints.value.filter(point => point.warning).map(point => ({
     date: point.date,
@@ -1510,7 +1517,7 @@ const costTrendWarnings = computed(() =>
   })),
 )
 
-// 按供应商拆分中上游与本地成本偏差过大的供应商提示。
+// 按供应商拆分中上游与计算成本偏差过大的供应商提示。
 const costBreakdownWarnings = computed(() =>
   costTrendBreakdown.value.filter(item => item.cost_warning).map(item => ({
     provider_id: item.provider_id,
@@ -1521,11 +1528,18 @@ const costBreakdownWarnings = computed(() =>
 
 const costTrendChartData = computed(() => {
   if (!costTrendPoints.value.length) return null
-  const hasValue = costTrendPoints.value.some(point => Number(point.upstream_cost || 0) > 0 || Number(point.local_cost || 0) > 0)
+  // 只有余额快照兜底的日期只有生效成本，漏掉它整张图会误判为无数据。
+  const hasValue = costTrendPoints.value.some(point =>
+    Number(point.upstream_cost || 0) > 0
+    || Number(point.calculated_cost || 0) > 0
+    || Number(point.local_cost || 0) > 0
+    || Number(point.effective_cost || 0) > 0)
   if (!hasValue) return null
   const threshold = deviationThreshold.value
-  const pointColors = costTrendDeviation.value.map(value => (value > threshold ? '#dc2626' : '#3b82f6'))
-  const pointRadius = costTrendDeviation.value.map(value => (value > threshold ? 4.5 : 2.75))
+  // 只有参与偏差判定的上游与计算成本才标红点，本地成本是旁证，不跟着变色。
+  const deviated = costTrendDeviation.value.map(value => value > threshold)
+  const pointRadius = deviated.map(flag => (flag ? 4.5 : 2.75))
+  const pointColorsFor = (base: string) => deviated.map(flag => (flag ? '#dc2626' : base))
   return {
     labels: costTrendPoints.value.map(point => formatCostTrendLabel(point.date)),
     datasets: [
@@ -1539,28 +1553,42 @@ const costTrendChartData = computed(() => {
         tension: 0.35,
         pointRadius,
         pointHoverRadius: 5,
-        pointBackgroundColor: pointColors,
+        pointBackgroundColor: pointColorsFor(costTrendSeriesColors[0]),
+        pointBorderColor: 'rgba(255, 255, 255, 0.9)',
+        pointBorderWidth: 1,
+      },
+      {
+        label: '计算成本',
+        data: costTrendPoints.value.map(point => Number(point.calculated_cost || 0)),
+        borderColor: costTrendSeriesColors[1],
+        backgroundColor: 'rgba(124, 58, 237, 0.10)',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.35,
+        pointRadius,
+        pointHoverRadius: 5,
+        pointBackgroundColor: pointColorsFor(costTrendSeriesColors[1]),
         pointBorderColor: 'rgba(255, 255, 255, 0.9)',
         pointBorderWidth: 1,
       },
       {
         label: '本地成本',
         data: costTrendPoints.value.map(point => Number(point.local_cost || 0)),
-        borderColor: costTrendSeriesColors[1],
+        borderColor: costTrendSeriesColors[2],
         backgroundColor: 'rgba(217, 119, 6, 0.10)',
         borderWidth: 2,
         fill: true,
         tension: 0.35,
-        pointRadius,
+        pointRadius: 2.75,
         pointHoverRadius: 5,
-        pointBackgroundColor: pointColors,
+        pointBackgroundColor: costTrendSeriesColors[2],
         pointBorderColor: 'rgba(255, 255, 255, 0.9)',
         pointBorderWidth: 1,
       },
       {
         label: '生效成本',
         data: costTrendPoints.value.map(point => Number(point.effective_cost || 0)),
-        borderColor: costTrendSeriesColors[2],
+        borderColor: costTrendSeriesColors[3],
         backgroundColor: 'rgba(5, 150, 105, 0.10)',
         borderWidth: 2,
         borderDash: [5, 3],
@@ -1599,10 +1627,9 @@ const costTrendChartOptions = computed<ChartOptions<'line'>>(() => {
           },
           afterBody(items: TooltipItem<'line'>[]) {
             const upstream = Number(items.find(item => item.dataset.label === '上游成本')?.parsed.y ?? 0)
-            const local = Number(items.find(item => item.dataset.label === '本地成本')?.parsed.y ?? 0)
-            const max = Math.max(upstream, local)
-            if (max <= 0) return []
-            const deviation = Math.abs(upstream - local) / max
+            const calculated = Number(items.find(item => item.dataset.label === '计算成本')?.parsed.y ?? 0)
+            if (upstream <= 0 || calculated <= 0) return []
+            const deviation = Math.abs(upstream - calculated) / Math.max(upstream, calculated)
             const over = deviation > deviationThreshold.value
             return [`偏差率 ${(deviation * 100).toFixed(1)}%${over ? ' · 超阈值' : ''}`]
           },
@@ -1632,9 +1659,10 @@ const costTrendChartOptions = computed<ChartOptions<'line'>>(() => {
 
 const costBreakdownChartData = computed(() => {
   if (!costBreakdown.value.length) return null
-  const hasValue = costBreakdown.value.some(item => item.upstreamCost > 0 || item.localCost > 0)
+  // 上游成本可能拿不到（只有余额兜底），排序和空态都以实际记账的生效成本为准。
+  const hasValue = costBreakdown.value.some(item => item.upstreamCost > 0 || item.calculatedCost > 0 || item.localCost > 0 || item.effectiveCost > 0)
   if (!hasValue) return null
-  const items = [...costBreakdown.value].sort((a, b) => b.upstreamCost - a.upstreamCost)
+  const items = [...costBreakdown.value].sort((a, b) => b.effectiveCost - a.effectiveCost)
 
   return {
     labels: items.map(item => item.name),
@@ -1647,7 +1675,19 @@ const costBreakdownChartData = computed(() => {
         borderWidth: 1,
         borderRadius: 4,
         borderSkipped: false,
-        barPercentage: 0.26,
+        barPercentage: 0.35,
+        categoryPercentage: 0.76,
+        maxBarThickness: 24,
+      },
+      {
+        label: '计算成本',
+        data: items.map(item => item.calculatedCost),
+        backgroundColor: '#7c3aed',
+        borderColor: '#6d28d9',
+        borderWidth: 1,
+        borderRadius: 4,
+        borderSkipped: false,
+        barPercentage: 0.35,
         categoryPercentage: 0.76,
         maxBarThickness: 24,
       },
@@ -1659,7 +1699,7 @@ const costBreakdownChartData = computed(() => {
         borderWidth: 1,
         borderRadius: 4,
         borderSkipped: false,
-        barPercentage: 0.26,
+        barPercentage: 0.35,
         categoryPercentage: 0.76,
         maxBarThickness: 24,
       },
@@ -1671,7 +1711,7 @@ const costBreakdownChartData = computed(() => {
         borderWidth: 1,
         borderRadius: 4,
         borderSkipped: false,
-        barPercentage: 0.26,
+        barPercentage: 0.35,
         categoryPercentage: 0.76,
         maxBarThickness: 24,
       },
@@ -1701,10 +1741,9 @@ const costBreakdownChartOptions = computed<ChartOptions<'bar'>>(() => {
           },
           afterBody(items: TooltipItem<'bar'>[]) {
             const upstream = Number(items.find(item => item.dataset.label === '上游成本')?.parsed.y ?? 0)
-            const local = Number(items.find(item => item.dataset.label === '本地成本')?.parsed.y ?? 0)
-            const max = Math.max(upstream, local)
-            if (max <= 0) return []
-            return [`偏差率 ${((Math.abs(upstream - local) / max) * 100).toFixed(1)}%`]
+            const calculated = Number(items.find(item => item.dataset.label === '计算成本')?.parsed.y ?? 0)
+            if (upstream <= 0 || calculated <= 0) return []
+            return [`偏差率 ${((Math.abs(upstream - calculated) / Math.max(upstream, calculated)) * 100).toFixed(1)}%`]
           },
         },
       },
@@ -4184,6 +4223,10 @@ function errorMessage(err: unknown, fallback: string): string {
 
 .sp-health-legend-item.upstream i {
   background: #3b82f6;
+}
+
+.sp-health-legend-item.calculated i {
+  background: #7c3aed;
 }
 
 .sp-health-legend-item.local i {

@@ -246,12 +246,12 @@ describe('SupplierProvidersView payload normalization', () => {
     providerViewMocks.listCostTrends.mockResolvedValue({
       days: 14,
       points: [
-        { date: '2026-07-16', upstream_cost: 12, local_cost: 10, effective_cost: 10 },
-        { date: '2026-07-17', upstream_cost: 15, local_cost: 14, effective_cost: 15 },
+        { date: '2026-07-16', upstream_cost: 12, calculated_cost: 11, local_cost: 10, effective_cost: 10 },
+        { date: '2026-07-17', upstream_cost: 15, calculated_cost: 15, local_cost: 14, effective_cost: 15 },
       ],
       breakdown: [
-        { provider_id: 1, provider_name: 'Alpha', provider_type: 'sub2api', upstream_cost: 120, local_cost: 80, effective_cost: 80 },
-        { provider_id: 2, provider_name: 'Beta', provider_type: 'sub2api', upstream_cost: 90, local_cost: 45, effective_cost: 90 },
+        { provider_id: 1, provider_name: 'Alpha', provider_type: 'sub2api', upstream_cost: 120, calculated_cost: 110, local_cost: 80, effective_cost: 80 },
+        { provider_id: 2, provider_name: 'Beta', provider_type: 'sub2api', upstream_cost: 90, calculated_cost: 88, local_cost: 45, effective_cost: 90 },
       ],
     })
     providerViewMocks.backfillCostTrends.mockResolvedValue({
@@ -675,6 +675,7 @@ describe('SupplierProvidersView payload normalization', () => {
     await openCostDialog(wrapper)
     expect(wrapper.get('[data-test="supplier-cost-trend"]').text()).toContain('成本对比')
     expect(wrapper.get('[data-test="supplier-cost-trend"]').text()).toContain('上游成本')
+    expect(wrapper.get('[data-test="supplier-cost-trend"]').text()).toContain('计算成本')
     expect(wrapper.get('[data-test="supplier-cost-trend"]').text()).toContain('本地成本')
     expect(wrapper.get('[data-test="supplier-cost-trend"]').text()).toContain('生效成本')
     expect(wrapper.get('[data-test="supplier-cost-trend"]').text()).toContain('生效合计')
@@ -693,7 +694,7 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(supplierProvidersSource).toContain('.sp-health-completeness-list .sp-list-item')
   })
 
-  it('renders grouped upstream, local and effective cost bars for each supplier', async () => {
+  it('renders grouped upstream, calculated, local and effective cost bars for each supplier', async () => {
     const wrapper = await mountSupplierProviders()
     await openCostDialog(wrapper)
 
@@ -702,12 +703,14 @@ describe('SupplierProvidersView payload normalization', () => {
 
     const bar = wrapper.findComponent({ name: 'Bar' })
     expect(bar.exists()).toBe(true)
+    // 上游成本可能只有余额兜底而为 0，所以柱状图按生效成本从高到低排：Beta 生效 90 排在 Alpha 生效 80 之前。
     expect(bar.props('data')).toMatchObject({
-      labels: ['Alpha', 'Beta'],
+      labels: ['Beta', 'Alpha'],
       datasets: [
-        { label: '上游成本', data: [120, 90] },
-        { label: '本地成本', data: [80, 45] },
-        { label: '生效成本', data: [80, 90] },
+        { label: '上游成本', data: [90, 120] },
+        { label: '计算成本', data: [88, 110] },
+        { label: '本地成本', data: [45, 80] },
+        { label: '生效成本', data: [90, 80] },
       ],
     })
     expect(supplierProvidersSource).toContain('costBreakdownChartData')
@@ -862,12 +865,13 @@ describe('SupplierProvidersView payload normalization', () => {
   })
 
   it('highlights cost trend points whose deviation exceeds the threshold', async () => {
-    // 默认阈值 0.5：首日本地成本偏低使偏差超过 50%。
+    // 默认阈值 0.5：首日计算成本偏低使偏差超过 50%。
+    // 本地成本贴着上游也不该消掉红点——偏差基准是计算成本，它才是顶替生效成本的那个值。
     providerViewMocks.listCostTrends.mockResolvedValue({
       days: 14,
       points: [
-        { date: '2026-07-16', upstream_cost: 12, local_cost: 5, effective_cost: 5 },
-        { date: '2026-07-17', upstream_cost: 15, local_cost: 14, effective_cost: 15 },
+        { date: '2026-07-16', upstream_cost: 12, calculated_cost: 5, local_cost: 11, effective_cost: 5 },
+        { date: '2026-07-17', upstream_cost: 15, calculated_cost: 14, local_cost: 4, effective_cost: 15 },
       ],
       breakdown: [],
     })
@@ -878,22 +882,46 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(line.exists()).toBe(true)
     const upstream = line.props('data').datasets[0]
     expect(upstream.pointBackgroundColor).toEqual(['#dc2626', '#3b82f6'])
+    const calculated = line.props('data').datasets[1]
+    expect(calculated.pointBackgroundColor).toEqual(['#dc2626', '#7c3aed'])
     const tooltipCallbacks = line.props('options').plugins.tooltip.callbacks
     expect(tooltipCallbacks.labelColor({ datasetIndex: 0 })).toEqual({
       borderColor: '#3b82f6',
       backgroundColor: '#3b82f6',
     })
     expect(tooltipCallbacks.labelColor({ datasetIndex: 1 })).toEqual({
+      borderColor: '#7c3aed',
+      backgroundColor: '#7c3aed',
+    })
+    expect(tooltipCallbacks.labelColor({ datasetIndex: 2 })).toEqual({
       borderColor: '#d97706',
       backgroundColor: '#d97706',
     })
-    expect(tooltipCallbacks.labelColor({ datasetIndex: 2 })).toEqual({
+    expect(tooltipCallbacks.labelColor({ datasetIndex: 3 })).toEqual({
       borderColor: '#059669',
       backgroundColor: '#059669',
     })
     expect(wrapper.get('[data-test="supplier-cost-deviation-summary"]').text()).toContain('偏差超阈值 1/2 天')
     expect(supplierProvidersSource).toContain('costTrendDeviation')
     expect(supplierProvidersSource).toContain('pointBackgroundColor')
+  })
+
+  it('does not flag deviation on days without a calculated cost', async () => {
+    // 成本核对记录上线前的历史日期没有计算成本，缺值不能当成 100% 偏差报红。
+    providerViewMocks.listCostTrends.mockResolvedValue({
+      days: 14,
+      points: [
+        { date: '2026-07-16', upstream_cost: 12, calculated_cost: 0, local_cost: 11, effective_cost: 12 },
+        { date: '2026-07-17', upstream_cost: 15, calculated_cost: 14, local_cost: 14, effective_cost: 15 },
+      ],
+      breakdown: [],
+    })
+    const wrapper = await mountSupplierProviders()
+    await openCostDialog(wrapper)
+
+    const line = wrapper.findComponent({ name: 'Line' })
+    expect(line.props('data').datasets[0].pointBackgroundColor).toEqual(['#3b82f6', '#3b82f6'])
+    expect(wrapper.get('[data-test="supplier-cost-deviation-summary"]').text()).toContain('偏差均未超')
   })
 
   it('shows the saved threshold and only persists an edited value after clicking save', async () => {
@@ -988,18 +1016,18 @@ describe('SupplierProvidersView payload normalization', () => {
     providerViewMocks.listCostTrends.mockResolvedValue({
       days: 14,
       points: [
-        { date: '2026-07-16', upstream_cost: 12, local_cost: 10, effective_cost: 10, warning: '上游成本 12.00 与本地成本 10.00 偏差 17%，生效成本已取本地计算值' },
-        { date: '2026-07-17', upstream_cost: 15, local_cost: 14, effective_cost: 15 },
+        { date: '2026-07-16', upstream_cost: 12, calculated_cost: 10, local_cost: 10, effective_cost: 10, warning: '上游成本 12.00 与计算成本 10.00 偏差 17%，生效成本已取计算成本' },
+        { date: '2026-07-17', upstream_cost: 15, calculated_cost: 14, local_cost: 14, effective_cost: 15 },
       ],
       breakdown: [
-        { provider_id: 1, provider_name: 'Alpha', provider_type: 'sub2api', upstream_cost: 120, local_cost: 80, effective_cost: 80, cost_warning: '上游成本 120.00 与本地成本 80.00 偏差 33%，生效成本已取本地计算值' },
+        { provider_id: 1, provider_name: 'Alpha', provider_type: 'sub2api', upstream_cost: 120, calculated_cost: 80, local_cost: 80, effective_cost: 80, cost_warning: '上游成本 120.00 与计算成本 80.00 偏差 33%，生效成本已取计算成本' },
       ],
     })
     const wrapper = await mountSupplierProviders()
     await openCostDialog(wrapper)
 
     expect(wrapper.get('[data-test="supplier-cost-warnings"]').exists()).toBe(true)
-    expect(wrapper.get('[data-test="supplier-cost-warning-item"]').text()).toContain('生效成本已取本地计算值')
+    expect(wrapper.get('[data-test="supplier-cost-warning-item"]').text()).toContain('生效成本已取计算成本')
     expect(wrapper.get('[data-test="supplier-cost-breakdown-warnings"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="supplier-cost-breakdown-warning-item"]').text()).toContain('Alpha')
   })

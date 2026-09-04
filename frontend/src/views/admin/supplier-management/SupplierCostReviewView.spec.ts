@@ -78,6 +78,7 @@ const review = {
   stat_date: '2026-08-24',
   upstream_cost: 12.345678,
   calculated_cost: 10.123456,
+  local_cost: 21.681234,
   auto_adopted_cost: 10.123456,
   final_cost: null,
   effective_cost: 10.123456,
@@ -105,7 +106,7 @@ function mountView() {
           props: ['data', 'selectable', 'selectedKeys'],
           emits: ['update:selectedKeys', 'selectionChange'],
           template:
-            '<div data-test="cost-review-table"><button v-if="data.length > 1" data-test="select-both" @click="$emit(\'update:selectedKeys\', data.map(row => row.id))">选择当前页</button><div v-for="row in data" :key="row.id" :data-test="`row-${row.id}`"><slot name="cell-provider_name" :row="row" /><slot name="cell-cost_delta" :row="row" /><slot name="cell-decision_type" :row="row" /><slot name="cell-approved_at" :row="row" /><slot name="cell-sync_count" :row="row" /><slot name="cell-last_synced_at" :row="row" /><slot name="cell-actions" :row="row" /></div></div>',
+            '<div data-test="cost-review-table"><button v-if="data.length > 1" data-test="select-both" @click="$emit(\'update:selectedKeys\', data.map(row => row.id))">选择当前页</button><div v-for="row in data" :key="row.id" :data-test="`row-${row.id}`"><slot name="cell-provider_name" :row="row" /><span data-test="cell-upstream"><slot name="cell-upstream_cost" :row="row" /></span><span data-test="cell-calculated"><slot name="cell-calculated_cost" :row="row" /></span><span data-test="cell-local"><slot name="cell-local_cost" :row="row" /></span><slot name="cell-cost_delta" :row="row" /><slot name="cell-decision_type" :row="row" /><slot name="cell-approved_at" :row="row" /><slot name="cell-sync_count" :row="row" /><slot name="cell-last_synced_at" :row="row" /><slot name="cell-actions" :row="row" /></div></div>',
         },
         Pagination: { template: '<div />' },
         BaseDialog: {
@@ -147,6 +148,10 @@ describe('SupplierCostReviewView', () => {
     }))
     expect(wrapper.text()).toContain('示例供应商')
     expect(wrapper.text()).toContain('待审批')
+    // 接口成本、计算成本（余额差+充值）、本地成本是三个互不相同的口径，串列会让核对失去意义
+    expect(wrapper.find('[data-test="cell-upstream"]').text()).toBe('12.345678')
+    expect(wrapper.find('[data-test="cell-calculated"]').text()).toBe('10.123456')
+    expect(wrapper.find('[data-test="cell-local"]').text()).toBe('21.681234')
     expect(wrapper.find('[data-test="day-chip"]').text()).toBe(today)
     expect(wrapper.find('[data-test="provider-identity-3"]').classes()).toContain('provider-color-3')
   })

@@ -179,10 +179,11 @@ export interface SupplierProviderUpsertPayload {
 export interface SupplierProviderCostTrendPoint {
   date: string
   upstream_cost: number
+  calculated_cost: number  // 余额差 + 充值推算，来自成本核对记录
   local_cost: number
   effective_cost: number  // 实际记账采用的成本
-  warning?: string        // 上游与本地成本偏差过大提示
-  deviation?: number   // upstream - local
+  warning?: string        // 上游与计算成本偏差过大提示
+  deviation?: number   // upstream - calculated
   deviationPercent?: number
 }
 
@@ -191,9 +192,10 @@ export interface SupplierProviderCostBreakdown {
   provider_name: string
   provider_type: string
   upstream_cost: number
+  calculated_cost: number  // 余额差 + 充值推算，来自成本核对记录
   local_cost: number
   effective_cost: number  // 实际记账采用的成本
-  cost_warning?: string   // 上游与本地成本偏差过大提示
+  cost_warning?: string   // 上游与计算成本偏差过大提示
 }
 
 export interface SupplierProviderCostDeviationSettings {

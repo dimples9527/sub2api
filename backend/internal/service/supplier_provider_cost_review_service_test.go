@@ -113,6 +113,32 @@ func TestSupplierProviderCostReviewServiceApproveManyValidatesAndDelegates(t *te
 	}
 }
 
+func TestSupplierProviderCostReviewServiceApproveInvalidatesCostTrendCache(t *testing.T) {
+	invalidateSupplierCostTrendCache()
+	defer invalidateSupplierCostTrendCache()
+
+	trendRepo := &supplierProviderRepoStub{costTrends: []SupplierProviderCostTrendPoint{
+		{Date: "2026-09-01", UpstreamCost: 5, EffectiveCost: 5},
+	}}
+	trendSvc := NewSupplierProviderService(trendRepo, supplierEncryptorStub{})
+	if _, err := trendSvc.ListCostTrendsByDateRange(context.Background(), "2026-09-01", "2026-09-02", 0); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewSupplierProviderCostReviewService(&costReviewRepoFake{})
+	if _, err := svc.Approve(context.Background(), 7, SupplierProviderCostReviewApproveInput{DecisionType: CostReviewDecisionUpstream, Version: 2, OperatorID: 9}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 审批改了 daily_stats 的生效成本，成本分析必须立刻重查，不能再吃 30 秒旧缓存。
+	if _, err := trendSvc.ListCostTrendsByDateRange(context.Background(), "2026-09-01", "2026-09-02", 0); err != nil {
+		t.Fatal(err)
+	}
+	if trendRepo.costTrendCalls != 2 {
+		t.Fatalf("expected cost trend cache invalidation, got %d repo calls", trendRepo.costTrendCalls)
+	}
+}
+
 func ptrFloat(v float64) *float64 { return &v }
 
 var _ = time.Time{}

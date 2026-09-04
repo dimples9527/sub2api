@@ -19,7 +19,7 @@ func NewSupplierProviderCostReviewRepository(db *sql.DB) service.SupplierProvide
 }
 
 const costReviewSelect = `SELECT r.id, r.provider_id, p.name AS provider_name, r.stat_date,
-       r.upstream_cost, r.calculated_cost, r.auto_adopted_cost, r.final_cost, r.effective_cost,
+       r.upstream_cost, r.calculated_cost, r.local_cost, r.auto_adopted_cost, r.final_cost, r.effective_cost,
        r.cost_delta, r.effective_delta, r.status, r.decision_type, r.approved_by, r.approved_at,
        r.sync_count, r.last_sync_run_id, r.last_synced_at, r.version, r.created_at, r.updated_at
 FROM supplier_provider_cost_reviews r
@@ -86,7 +86,7 @@ LIMIT $6 OFFSET $7`, params.ProviderID, params.StartDate, params.EndDate, params
 func (r *supplierProviderCostReviewRepository) History(ctx context.Context, reviewID int64) ([]service.SupplierProviderCostReviewHistory, error) {
 	rows, err := r.db.QueryContext(ctx, `
 SELECT id, review_id, provider_id, stat_date, event_type, sync_run_id,
-       upstream_cost, calculated_cost, auto_adopted_cost, final_cost, cost_delta, effective_delta,
+       upstream_cost, calculated_cost, local_cost, auto_adopted_cost, final_cost, cost_delta, effective_delta,
        status, decision_type, manual_cost, operator_id, operated_at
 FROM supplier_provider_cost_review_histories
 WHERE review_id = $1
@@ -191,9 +191,10 @@ WHERE id = $5 AND version = $6`, finalCost, effectiveDelta, input.DecisionType, 
 
 	statDate := review.StatDate.Format("2006-01-02")
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO supplier_provider_daily_stats (provider_id, stat_date, today_cost, updated_at)
-VALUES ($1, $2::date, $3, NOW())
-ON CONFLICT (provider_id, stat_date) DO UPDATE SET today_cost = EXCLUDED.today_cost, updated_at = NOW()`, review.ProviderID, statDate, finalCost); err != nil {
+INSERT INTO supplier_provider_daily_stats (provider_id, stat_date, today_cost, cost_warning, updated_at)
+VALUES ($1, $2::date, $3, $4, NOW())
+ON CONFLICT (provider_id, stat_date) DO UPDATE SET today_cost = EXCLUDED.today_cost, cost_warning = EXCLUDED.cost_warning, updated_at = NOW()`,
+		review.ProviderID, statDate, finalCost, costReviewApprovalNote(input.DecisionType, finalCost)); err != nil {
 		return service.SupplierProviderCostReview{}, fmt.Errorf("更新每日成本失败: %w", err)
 	}
 	manualCost := any(nil)
@@ -202,10 +203,10 @@ ON CONFLICT (provider_id, stat_date) DO UPDATE SET today_cost = EXCLUDED.today_c
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO supplier_provider_cost_review_histories (
-  review_id, provider_id, stat_date, event_type, upstream_cost, calculated_cost, auto_adopted_cost,
+  review_id, provider_id, stat_date, event_type, upstream_cost, calculated_cost, local_cost, auto_adopted_cost,
   final_cost, cost_delta, effective_delta, status, decision_type, manual_cost, operator_id, operated_at
-) VALUES ($1, $2, $3::date, 'approve', $4, $5, $6, $7, $8, $9, 'approved', $10, $11, NULLIF($12, 0), NOW())`,
-		review.ID, review.ProviderID, statDate, review.UpstreamCost, review.CalculatedCost, review.AutoAdoptedCost,
+) VALUES ($1, $2, $3::date, 'approve', $4, $5, $6, $7, $8, $9, $10, 'approved', $11, $12, NULLIF($13, 0), NOW())`,
+		review.ID, review.ProviderID, statDate, review.UpstreamCost, review.CalculatedCost, review.LocalCost, review.AutoAdoptedCost,
 		finalCost, review.CostDelta, effectiveDelta, input.DecisionType, manualCost, input.OperatorID); err != nil {
 		return service.SupplierProviderCostReview{}, fmt.Errorf("写入成本核对审批历史失败: %w", err)
 	}
@@ -216,6 +217,19 @@ INSERT INTO supplier_provider_cost_review_histories (
 	review.DecisionType = input.DecisionType
 	review.Version++
 	return review, nil
+}
+
+// costReviewApprovalNote 用人工审批结论覆盖同步时写入的自动取值提示，
+// 否则成本分析里会一直挂着「已按计算成本记账」之类过期说明。
+func costReviewApprovalNote(decisionType string, finalCost float64) string {
+	switch decisionType {
+	case service.CostReviewDecisionUpstream:
+		return fmt.Sprintf("已人工审批：生效成本取上游成本 %.2f", finalCost)
+	case service.CostReviewDecisionCalculated:
+		return fmt.Sprintf("已人工审批：生效成本取计算成本 %.2f", finalCost)
+	default:
+		return fmt.Sprintf("已人工审批：生效成本取手动成本 %.2f", finalCost)
+	}
 }
 
 func (r *supplierProviderCostReviewRepository) Sync(ctx context.Context, input service.SupplierProviderCostReviewSyncInput) (*service.SupplierProviderCostReview, error) {
@@ -246,25 +260,25 @@ func syncCostReviewTx(ctx context.Context, tx *sql.Tx, input service.SupplierPro
 		var id int64
 		err = tx.QueryRowContext(ctx, `
 INSERT INTO supplier_provider_cost_reviews (
-  provider_id, stat_date, upstream_cost, calculated_cost, auto_adopted_cost, final_cost, effective_cost,
+  provider_id, stat_date, upstream_cost, calculated_cost, local_cost, auto_adopted_cost, final_cost, effective_cost,
   cost_delta, effective_delta, status, decision_type, sync_count, last_sync_run_id, last_synced_at, version
-) VALUES ($1, $2::date, $3, $4, $5, NULL, $6, $7, $8, 'pending_review', 'none', 1, $9, $10, 1)
-RETURNING id`, input.ProviderID, statDate, input.UpstreamCost, input.CalculatedCost, input.AutoAdoptedCost, effective, delta, effectiveDelta, input.SyncRunID, syncedAt).Scan(&id)
+) VALUES ($1, $2::date, $3, $4, $5, $6, NULL, $7, $8, $9, 'pending_review', 'none', 1, $10, $11, 1)
+RETURNING id`, input.ProviderID, statDate, input.UpstreamCost, input.CalculatedCost, input.LocalCost, input.AutoAdoptedCost, effective, delta, effectiveDelta, input.SyncRunID, syncedAt).Scan(&id)
 		if err != nil {
 			return service.SupplierProviderCostReview{}, fmt.Errorf("创建成本核对记录失败: %w", err)
 		}
-		review = service.SupplierProviderCostReview{ID: id, ProviderID: input.ProviderID, StatDate: input.StatDate, UpstreamCost: input.UpstreamCost, CalculatedCost: input.CalculatedCost, AutoAdoptedCost: input.AutoAdoptedCost, EffectiveCost: effective, CostDelta: delta, EffectiveDelta: &effectiveDelta, Status: service.CostReviewStatusPending, DecisionType: service.CostReviewDecisionNone, SyncCount: 1, LastSyncRunID: input.SyncRunID, LastSyncedAt: &syncedAt, Version: 1}
+		review = service.SupplierProviderCostReview{ID: id, ProviderID: input.ProviderID, StatDate: input.StatDate, UpstreamCost: input.UpstreamCost, CalculatedCost: input.CalculatedCost, LocalCost: input.LocalCost, AutoAdoptedCost: input.AutoAdoptedCost, EffectiveCost: effective, CostDelta: delta, EffectiveDelta: &effectiveDelta, Status: service.CostReviewStatusPending, DecisionType: service.CostReviewDecisionNone, SyncCount: 1, LastSyncRunID: input.SyncRunID, LastSyncedAt: &syncedAt, Version: 1}
 	} else if err != nil {
 		return service.SupplierProviderCostReview{}, fmt.Errorf("锁定成本核对记录失败: %w", err)
 	} else {
 		review = applySyncToReview(review, input)
 		if _, err := tx.ExecContext(ctx, `
 UPDATE supplier_provider_cost_reviews
-SET upstream_cost = $1, calculated_cost = $2, auto_adopted_cost = $3, cost_delta = $4,
-    effective_cost = $5, effective_delta = $6, status = $7,
-    sync_count = sync_count + 1, last_sync_run_id = $8, last_synced_at = $9,
+SET upstream_cost = $1, calculated_cost = $2, local_cost = $3, auto_adopted_cost = $4, cost_delta = $5,
+    effective_cost = $6, effective_delta = $7, status = $8,
+    sync_count = sync_count + 1, last_sync_run_id = $9, last_synced_at = $10,
     version = version + 1, updated_at = NOW()
-WHERE id = $10`, review.UpstreamCost, review.CalculatedCost, review.AutoAdoptedCost, review.CostDelta, review.EffectiveCost, review.EffectiveDelta, review.Status, input.SyncRunID, syncedAt, review.ID); err != nil {
+WHERE id = $11`, review.UpstreamCost, review.CalculatedCost, review.LocalCost, review.AutoAdoptedCost, review.CostDelta, review.EffectiveCost, review.EffectiveDelta, review.Status, input.SyncRunID, syncedAt, review.ID); err != nil {
 			return service.SupplierProviderCostReview{}, fmt.Errorf("更新成本核对记录失败: %w", err)
 		}
 	}
@@ -278,10 +292,10 @@ VALUES ($1, $2::date, $3, NOW())
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO supplier_provider_cost_review_histories (
-  review_id, provider_id, stat_date, event_type, sync_run_id, upstream_cost, calculated_cost, auto_adopted_cost,
+  review_id, provider_id, stat_date, event_type, sync_run_id, upstream_cost, calculated_cost, local_cost, auto_adopted_cost,
   final_cost, cost_delta, effective_delta, status, decision_type, operated_at
-) VALUES ($1, $2, $3::date, 'sync', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-		review.ID, review.ProviderID, statDate, input.SyncRunID, review.UpstreamCost, review.CalculatedCost, review.AutoAdoptedCost,
+) VALUES ($1, $2, $3::date, 'sync', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+		review.ID, review.ProviderID, statDate, input.SyncRunID, review.UpstreamCost, review.CalculatedCost, review.LocalCost, review.AutoAdoptedCost,
 		review.FinalCost, review.CostDelta, review.EffectiveDelta, review.Status, review.DecisionType, syncedAt); err != nil {
 		return service.SupplierProviderCostReview{}, fmt.Errorf("写入成本核对历史失败: %w", err)
 	}
@@ -295,6 +309,8 @@ func applySyncToReview(review service.SupplierProviderCostReview, input service.
 		sameCostReviewValue(review.AutoAdoptedCost, input.AutoAdoptedCost)
 	review.UpstreamCost = input.UpstreamCost
 	review.CalculatedCost = input.CalculatedCost
+	// 本地成本只做参考展示，变动不应把已审批记录打回复核。
+	review.LocalCost = input.LocalCost
 	review.AutoAdoptedCost = input.AutoAdoptedCost
 	review.CostDelta = nullableDelta(input.UpstreamCost, input.CalculatedCost)
 	if wasApproved && !latestDataUnchanged {
@@ -352,15 +368,16 @@ func queryCostReviewForUpdateByDate(ctx context.Context, tx *sql.Tx, providerID 
 
 func scanCostReview(scanner interface{ Scan(...any) error }) (service.SupplierProviderCostReview, error) {
 	var item service.SupplierProviderCostReview
-	var upstream, calculated, autoAdopted, final, delta, effectiveDelta sql.NullFloat64
+	var upstream, calculated, local, autoAdopted, final, delta, effectiveDelta sql.NullFloat64
 	var approvedBy, lastRun sql.NullInt64
 	var approvedAt, lastSynced sql.NullTime
-	err := scanner.Scan(&item.ID, &item.ProviderID, &item.ProviderName, &item.StatDate, &upstream, &calculated, &autoAdopted, &final, &item.EffectiveCost, &delta, &effectiveDelta, &item.Status, &item.DecisionType, &approvedBy, &approvedAt, &item.SyncCount, &lastRun, &lastSynced, &item.Version, &item.CreatedAt, &item.UpdatedAt)
+	err := scanner.Scan(&item.ID, &item.ProviderID, &item.ProviderName, &item.StatDate, &upstream, &calculated, &local, &autoAdopted, &final, &item.EffectiveCost, &delta, &effectiveDelta, &item.Status, &item.DecisionType, &approvedBy, &approvedAt, &item.SyncCount, &lastRun, &lastSynced, &item.Version, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		return item, err
 	}
 	item.UpstreamCost = nullFloatPtr(upstream)
 	item.CalculatedCost = nullFloatPtr(calculated)
+	item.LocalCost = nullFloatPtr(local)
 	item.AutoAdoptedCost = nullFloatPtr(autoAdopted)
 	item.FinalCost = nullFloatPtr(final)
 	item.CostDelta = nullFloatPtr(delta)
@@ -375,14 +392,15 @@ func scanCostReview(scanner interface{ Scan(...any) error }) (service.SupplierPr
 func scanCostReviewHistory(scanner interface{ Scan(...any) error }) (service.SupplierProviderCostReviewHistory, error) {
 	var item service.SupplierProviderCostReviewHistory
 	var reviewID, syncRunID, operatorID sql.NullInt64
-	var upstream, calculated, autoAdopted, final, delta, effectiveDelta, manual sql.NullFloat64
-	if err := scanner.Scan(&item.ID, &reviewID, &item.ProviderID, &item.StatDate, &item.EventType, &syncRunID, &upstream, &calculated, &autoAdopted, &final, &delta, &effectiveDelta, &item.Status, &item.DecisionType, &manual, &operatorID, &item.OperatedAt); err != nil {
+	var upstream, calculated, local, autoAdopted, final, delta, effectiveDelta, manual sql.NullFloat64
+	if err := scanner.Scan(&item.ID, &reviewID, &item.ProviderID, &item.StatDate, &item.EventType, &syncRunID, &upstream, &calculated, &local, &autoAdopted, &final, &delta, &effectiveDelta, &item.Status, &item.DecisionType, &manual, &operatorID, &item.OperatedAt); err != nil {
 		return item, err
 	}
 	item.ReviewID = nullIntPtr(reviewID)
 	item.SyncRunID = nullIntPtr(syncRunID)
 	item.UpstreamCost = nullFloatPtr(upstream)
 	item.CalculatedCost = nullFloatPtr(calculated)
+	item.LocalCost = nullFloatPtr(local)
 	item.AutoAdoptedCost = nullFloatPtr(autoAdopted)
 	item.FinalCost = nullFloatPtr(final)
 	item.CostDelta = nullFloatPtr(delta)

@@ -163,26 +163,29 @@ type SupplierProviderListResult struct {
 	PageSize int                     `json:"page_size"`
 }
 
-// SupplierProviderCostTrendPoint 表示某一天的上游成本、本地成本与生效成本对比。
+// SupplierProviderCostTrendPoint 表示某一天的上游成本、计算成本、本地成本与生效成本对比。
 type SupplierProviderCostTrendPoint struct {
 	Date         string  `json:"date"`
 	UpstreamCost float64 `json:"upstream_cost"`
-	LocalCost    float64 `json:"local_cost"`
+	// CalculatedCost 为余额差 + 充值推算出的成本，来自成本核对记录，也是生效成本的兜底来源。
+	CalculatedCost float64 `json:"calculated_cost"`
+	LocalCost      float64 `json:"local_cost"`
 	// EffectiveCost 为当前实际记账采用的成本，受成本来源配置与偏差处理影响。
 	EffectiveCost float64 `json:"effective_cost"`
-	// Warning 表示该日上游与本地成本偏差过大时记录的提示。
+	// Warning 表示该日上游与计算成本偏差过大时记录的提示。
 	Warning string `json:"warning,omitempty"`
 }
 
 // SupplierProviderCostBreakdown 表示指定日期范围内单个供应商的成本拆分。
 type SupplierProviderCostBreakdown struct {
-	ProviderID    int64   `json:"provider_id"`
-	ProviderName  string  `json:"provider_name"`
-	ProviderType  string  `json:"provider_type"`
-	UpstreamCost  float64 `json:"upstream_cost"`
-	LocalCost     float64 `json:"local_cost"`
-	EffectiveCost float64 `json:"effective_cost"`
-	CostWarning   string  `json:"cost_warning,omitempty"`
+	ProviderID     int64   `json:"provider_id"`
+	ProviderName   string  `json:"provider_name"`
+	ProviderType   string  `json:"provider_type"`
+	UpstreamCost   float64 `json:"upstream_cost"`
+	CalculatedCost float64 `json:"calculated_cost"`
+	LocalCost      float64 `json:"local_cost"`
+	EffectiveCost  float64 `json:"effective_cost"`
+	CostWarning    string  `json:"cost_warning,omitempty"`
 }
 
 // SupplierProviderBalanceCostDay 表示供应商在某一天的余额差额成本。
@@ -193,23 +196,24 @@ type SupplierProviderBalanceCostDay struct {
 	BalanceCost float64 // 第一条余额 - 最后条余额，仅在大于 0 时返回
 }
 
-// supplierCostDeviation 计算上游成本与本地成本的相对偏差，公式与前端保持一致：
-// |上游-本地| / max(上游, 本地)，两者都非正时视为无偏差。
-func supplierCostDeviation(upstream, local float64) float64 {
-	if upstream <= 0 && local <= 0 {
+// supplierCostDeviation 计算上游成本与参照成本的相对偏差，公式与前端保持一致：
+// |上游-参照| / max(上游, 参照)，两者都非正时视为无偏差。
+func supplierCostDeviation(upstream, reference float64) float64 {
+	if upstream <= 0 && reference <= 0 {
 		return 0
 	}
-	max := math.Max(upstream, local)
+	max := math.Max(upstream, reference)
 	if max <= 0 {
 		return 0
 	}
-	return math.Abs(upstream-local) / max
+	return math.Abs(upstream-reference) / max
 }
 
 // supplierCostDeviationWarning 生成成本偏差过大时的中文提示。
-func supplierCostDeviationWarning(upstream, local float64) string {
-	pct := int(math.Round(supplierCostDeviation(upstream, local) * 100))
-	return fmt.Sprintf("上游成本 %.2f 与本地成本 %.2f 偏差 %d%%，生效成本已取本地计算值", upstream, local, pct)
+// 偏差基准是计算成本，因为同步时正是它在 auto 模式下顶替上游成本成为生效成本。
+func supplierCostDeviationWarning(upstream, calculated float64) string {
+	pct := int(math.Round(supplierCostDeviation(upstream, calculated) * 100))
+	return fmt.Sprintf("上游成本 %.2f 与计算成本 %.2f 偏差 %d%%，生效成本已取计算成本", upstream, calculated, pct)
 }
 
 // SupplierProviderCostTrendResult 是供应商组合成本趋势响应。
@@ -495,8 +499,11 @@ func (s *SupplierProviderService) listCostTrendsBetween(ctx context.Context, sta
 		byDate[point.Date] = point
 	}
 
-	// 用当天首条余额 - 当天末条余额的成本，作为 today_cost 缺失(<=0)时的保底估算，
+	// 用当天首条余额 - 当天末条余额的成本，作为生效成本缺失(<=0)时的保底估算，
 	// 同时补上只有余额快照、没有 daily_stats 的日期。
+	// 注意这个余额差既不是上游口径（上游接口返回值），也不是计算成本口径
+	// （前一日收盘余额 - 当日末余额 + 当日充值），所以只用来兜底生效成本，
+	// 绝不能当成上游成本参与偏差比较。
 	balanceCosts, err := s.repo.ListBalanceCosts(ctx, start, endExclusive, providerID)
 	if err != nil {
 		return SupplierProviderCostTrendResult{}, fmt.Errorf("list balance costs: %w", err)
@@ -510,22 +517,17 @@ func (s *SupplierProviderService) listCostTrendsBetween(ctx context.Context, sta
 		if !ok {
 			point = SupplierProviderCostTrendPoint{Date: date}
 		}
-		if point.UpstreamCost > 0 && point.EffectiveCost > 0 {
+		if point.EffectiveCost > 0 {
 			continue
 		}
-		if point.UpstreamCost <= 0 {
-			point.UpstreamCost = balanceCost
-		}
-		if point.EffectiveCost <= 0 {
-			point.EffectiveCost = balanceCost
-		}
+		point.EffectiveCost = balanceCost
 		byDate[date] = point
 	}
 
-	// 按供应商拆分的成本同样用余额差额做保底估算。
+	// 按供应商拆分的成本同样用余额差额兜底生效成本。
 	for i := range rawBreakdown {
 		b := &rawBreakdown[i]
-		if b.UpstreamCost > 0 && b.EffectiveCost > 0 {
+		if b.EffectiveCost > 0 {
 			continue
 		}
 		sum := 0.0
@@ -534,27 +536,26 @@ func (s *SupplierProviderService) listCostTrendsBetween(ctx context.Context, sta
 				sum += bc.BalanceCost
 			}
 		}
-		if b.UpstreamCost <= 0 {
-			b.UpstreamCost = sum
-		}
-		if b.EffectiveCost <= 0 {
-			b.EffectiveCost = sum
-		}
+		b.EffectiveCost = sum
 	}
 
 	// 展示层只提示、不改写数值：upstream 与 calculated 是用户主动选择的稳定状态，
-	// 不必逐条提示；auto 模式下上游与本地差距超过阈值时补充偏差提示。
+	// 不必逐条提示；auto 模式下上游与计算成本差距超过阈值时补充偏差提示。
+	// 同步时写入的逐日 cost_warning 更贴近当时的真实取值，已有提示就不覆盖。
 	for i := range rawBreakdown {
 		b := &rawBreakdown[i]
 		source := s.costSourceFor(ctx, b.ProviderID)
 		if source.Source != SupplierCostSourceAuto {
 			continue
 		}
-		if b.LocalCost <= 0 || b.UpstreamCost <= 0 {
+		if b.CostWarning != "" {
 			continue
 		}
-		if supplierCostDeviation(b.UpstreamCost, b.LocalCost) > source.Threshold {
-			b.CostWarning = supplierCostDeviationWarning(b.UpstreamCost, b.LocalCost)
+		if b.CalculatedCost <= 0 || b.UpstreamCost <= 0 {
+			continue
+		}
+		if supplierCostDeviation(b.UpstreamCost, b.CalculatedCost) > source.Threshold {
+			b.CostWarning = supplierCostDeviationWarning(b.UpstreamCost, b.CalculatedCost)
 		}
 	}
 
@@ -577,11 +578,14 @@ func (s *SupplierProviderService) listCostTrendsBetween(ctx context.Context, sta
 	if pointSource.Source == SupplierCostSourceAuto {
 		for i := range points {
 			p := &points[i]
-			if p.LocalCost <= 0 || p.UpstreamCost <= 0 {
+			if p.Warning != "" {
 				continue
 			}
-			if supplierCostDeviation(p.UpstreamCost, p.LocalCost) > pointSource.Threshold {
-				p.Warning = supplierCostDeviationWarning(p.UpstreamCost, p.LocalCost)
+			if p.CalculatedCost <= 0 || p.UpstreamCost <= 0 {
+				continue
+			}
+			if supplierCostDeviation(p.UpstreamCost, p.CalculatedCost) > pointSource.Threshold {
+				p.Warning = supplierCostDeviationWarning(p.UpstreamCost, p.CalculatedCost)
 			}
 		}
 	}

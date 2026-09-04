@@ -191,7 +191,7 @@ WITH matched_accounts AS (
   HAVING COUNT(*) = 1
 )
 SELECT TO_CHAR(ul.created_at AT TIME ZONE $3, 'YYYY-MM-DD') AS date,
-       COALESCE(SUM(ul.actual_cost), 0) AS local_cost
+       COALESCE(SUM(COALESCE(ul.account_stats_cost, ul.total_cost) * COALESCE(ul.account_rate_multiplier, 1)), 0) AS local_cost
 FROM usage_logs ul
 JOIN matched_accounts matched ON matched.local_account_id = ul.account_id
 WHERE ul.created_at >= $1
@@ -220,6 +220,48 @@ ORDER BY 1`
 	}
 	if err := localRows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate supplier local cost trends: %w", err)
+	}
+
+	// 计算成本（余额差 + 充值）只落在成本核对表里，日统计表没有这一列。
+	calculatedQuery := `
+SELECT TO_CHAR(r.stat_date, 'YYYY-MM-DD') AS date,
+       COALESCE(SUM(r.calculated_cost), 0) AS calculated_cost
+FROM supplier_provider_cost_reviews r
+JOIN supplier_providers p ON p.id = r.provider_id AND p.deleted_at IS NULL
+WHERE r.stat_date >= $1::date
+  AND r.stat_date < $2::date
+  AND r.calculated_cost IS NOT NULL`
+	calculatedArgs := []any{start, end}
+	if providerID > 0 {
+		calculatedQuery += `
+  AND r.provider_id = $3`
+		calculatedArgs = append(calculatedArgs, providerID)
+	}
+	calculatedQuery += `
+GROUP BY r.stat_date
+ORDER BY r.stat_date`
+
+	calculatedRows, err := r.db.QueryContext(ctx, calculatedQuery, calculatedArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("query supplier calculated cost trends: %w", err)
+	}
+	defer calculatedRows.Close()
+
+	for calculatedRows.Next() {
+		var date string
+		var calculatedCost float64
+		if scanErr := calculatedRows.Scan(&date, &calculatedCost); scanErr != nil {
+			return nil, fmt.Errorf("scan supplier calculated cost trend: %w", scanErr)
+		}
+		point := byDate[date]
+		if point == nil {
+			point = &service.SupplierProviderCostTrendPoint{Date: date}
+			byDate[date] = point
+		}
+		point.CalculatedCost = calculatedCost
+	}
+	if err := calculatedRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate supplier calculated cost trends: %w", err)
 	}
 
 	points := make([]service.SupplierProviderCostTrendPoint, 0, len(byDate))
@@ -264,21 +306,35 @@ upstream_costs AS (
   GROUP BY d.provider_id
 ),
 local_costs AS (
-  SELECT matches.provider_id, COALESCE(SUM(ul.actual_cost), 0) AS local_cost
+  -- 本地成本要和上游成本可比，所以用账号成本口径，而不是乘过用户分组倍率的 ul.actual_cost。
+  SELECT matches.provider_id,
+         COALESCE(SUM(COALESCE(ul.account_stats_cost, ul.total_cost) * COALESCE(ul.account_rate_multiplier, 1)), 0) AS local_cost
   FROM unique_account_matches matches
   JOIN usage_logs ul ON ul.account_id = matches.local_account_id
   WHERE ul.created_at >= $1
     AND ul.created_at < $2
   GROUP BY matches.provider_id
+),
+calculated_costs AS (
+  -- 计算成本（余额差 + 充值）只落在成本核对表里，日统计表没有这一列。
+  SELECT r.provider_id,
+         COALESCE(SUM(r.calculated_cost), 0) AS calculated_cost
+  FROM supplier_provider_cost_reviews r
+  WHERE r.stat_date >= $1::date
+    AND r.stat_date < $2::date
+    AND r.calculated_cost IS NOT NULL
+  GROUP BY r.provider_id
 )
 SELECT p.id, p.name, p.provider_type,
        COALESCE(upstream.upstream_cost, 0) AS upstream_cost,
+       COALESCE(calculated.calculated_cost, 0) AS calculated_cost,
        COALESCE(local_agg.local_cost, 0) AS local_cost,
        COALESCE(upstream.effective_cost, 0) AS effective_cost,
        COALESCE(upstream.cost_warning, '') AS cost_warning
 FROM supplier_providers p
 LEFT JOIN upstream_costs upstream ON upstream.provider_id = p.id
 LEFT JOIN local_costs local_agg ON local_agg.provider_id = p.id
+LEFT JOIN calculated_costs calculated ON calculated.provider_id = p.id
 WHERE p.deleted_at IS NULL`
 	args := []any{start, end}
 	if providerID > 0 {
@@ -303,6 +359,7 @@ ORDER BY p.sort_order ASC, p.id ASC`
 			&breakdown.ProviderName,
 			&breakdown.ProviderType,
 			&breakdown.UpstreamCost,
+			&breakdown.CalculatedCost,
 			&breakdown.LocalCost,
 			&breakdown.EffectiveCost,
 			&breakdown.CostWarning,

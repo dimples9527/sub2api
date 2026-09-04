@@ -1742,86 +1742,65 @@ func (r *supplierProviderDataRepository) UpdateCostDetailed(ctx context.Context,
 	return r.updateMetric(ctx, providerID, nil, &cost, rawUpstream, warning, statDay)
 }
 
-func (r *supplierProviderDataRepository) UpdateCostDetailedWithReview(ctx context.Context, providerID int64, cost float64, rawUpstream *float64, warning *string, statDay time.Time, reviewInput service.SupplierProviderCostReviewSyncInput) error {
+// UpdateCostDetailedWithReview 在同一事务里更新成本核对记录与日统计成本，
+// 返回真正写入 today_cost 的生效成本：已审批记录保留人工结论，待审批记录取最新计算成本。
+func (r *supplierProviderDataRepository) UpdateCostDetailedWithReview(ctx context.Context, providerID int64, rawUpstream *float64, warning *string, statDay time.Time, reviewInput service.SupplierProviderCostReviewSyncInput) (float64, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("开始写入供应商成本核对事务失败: %w", err)
+		return 0, fmt.Errorf("开始写入供应商成本核对事务失败: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	review, err := syncCostReviewTx(ctx, tx, reviewInput, false)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if err := r.updateMetricTx(ctx, tx, providerID, nil, &review.EffectiveCost, rawUpstream, warning, statDay); err != nil {
-		return err
+		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("提交供应商成本核对事务失败: %w", err)
+		return 0, fmt.Errorf("提交供应商成本核对事务失败: %w", err)
 	}
-	// review.EffectiveCost 是已审批记录的保留值，或待审批记录的最新计算成本。
-	// cost 参数保留用于兼容既有调用方，实际业务生效值以核对结果为准。
-	_ = cost
-	return nil
+	return review.EffectiveCost, nil
 }
 
-// GetCostFallbackBalances 返回成本保底估算所需的余额基线：
-// CurrentBalance 为当前余额（runtime_stats.current_balance），
-// DayStartBalance 为统计日 statDay 当天开始时的余额（前一统计日的 daily_stats 最终余额）。
-// 当前余额记录缺失或为负时返回 ok=false，表示无法进行保底估算。
-func (r *supplierProviderDataRepository) GetCostFallbackBalances(ctx context.Context, providerID int64, statDay time.Time) (service.SupplierProviderCostFallbackBalance, bool, error) {
-	var bal service.SupplierProviderCostFallbackBalance
-	err := r.db.QueryRowContext(ctx, `
-SELECT s.current_balance,
-       COALESCE((SELECT d.current_balance FROM supplier_provider_daily_stats d
-                 WHERE d.provider_id = $1 AND d.stat_date < $2::date
-                 ORDER BY d.stat_date DESC LIMIT 1), 0)
-FROM supplier_provider_runtime_stats s
-WHERE s.provider_id = $1`, providerID, supplierStatDate(statDay)).Scan(&bal.CurrentBalance, &bal.DayStartBalance)
-	if err == sql.ErrNoRows {
-		return service.SupplierProviderCostFallbackBalance{}, false, nil
-	}
-	if err != nil {
-		return service.SupplierProviderCostFallbackBalance{}, false, fmt.Errorf("query supplier cost fallback balances: %w", err)
-	}
-	if bal.CurrentBalance < 0 {
-		return service.SupplierProviderCostFallbackBalance{}, false, nil
-	}
-	return bal, true, nil
-}
-
-// GetBalanceDeltaForDay 获取指定供应商指定统计日的余额差值（当天第一条余额 - 当天最后一条余额）。
-// 从 supplier_provider_metric_snapshots 表查询当天的余额快照，计算余额减少量作为成本估算。
-// ok=false 表示当天没有足够的余额快照数据，无法计算差值。
+// GetBalanceDeltaForDay 返回指定供应商在指定统计日的余额消耗量（当天开始余额 - 当天结束余额）。
+// 开始余额优先取前一统计日的最后一条余额快照，缺失时退化为当天第一条快照。
+// 只认 current_balance > 0 的快照：仅写成本的快照会插入 0 余额，参与计算会污染差值。
+// 返回值可能为负（当天充值多于消耗），由调用方叠加充值额后再判断可用性；
+// ok=false 表示缺少可用余额快照。
 func (r *supplierProviderDataRepository) GetBalanceDeltaForDay(ctx context.Context, providerID int64, day time.Time) (float64, bool, error) {
 	start := supplierStatDate(day)
 	end := start.AddDate(0, 0, 1)
-	var firstBalance, lastBalance sql.NullFloat64
+	prevStart := start.AddDate(0, 0, -1)
+	var startBalance, endBalance sql.NullFloat64
 	err := r.db.QueryRowContext(ctx, `
 SELECT
+  COALESCE(
+    (SELECT current_balance FROM supplier_provider_metric_snapshots
+     WHERE provider_id = $1 AND captured_at >= $4 AND captured_at < $2 AND current_balance > 0
+     ORDER BY captured_at DESC LIMIT 1),
+    (SELECT current_balance FROM supplier_provider_metric_snapshots
+     WHERE provider_id = $1 AND captured_at >= $2 AND captured_at < $3 AND current_balance > 0
+     ORDER BY captured_at ASC LIMIT 1)
+  ) AS start_balance,
   (SELECT current_balance FROM supplier_provider_metric_snapshots
    WHERE provider_id = $1 AND captured_at >= $2 AND captured_at < $3 AND current_balance > 0
-   ORDER BY captured_at ASC LIMIT 1) AS first_balance,
-  (SELECT current_balance FROM supplier_provider_metric_snapshots
-   WHERE provider_id = $1 AND captured_at >= $2 AND captured_at < $3 AND current_balance > 0
-   ORDER BY captured_at DESC LIMIT 1) AS last_balance
-`, providerID, start, end).Scan(&firstBalance, &lastBalance)
+   ORDER BY captured_at DESC LIMIT 1) AS end_balance
+`, providerID, start, end, prevStart).Scan(&startBalance, &endBalance)
 	if err != nil {
 		return 0, false, fmt.Errorf("query supplier balance delta for day: %w", err)
 	}
-	if !firstBalance.Valid || !lastBalance.Valid {
+	if !startBalance.Valid || !endBalance.Valid {
 		return 0, false, nil
 	}
-	delta := firstBalance.Float64 - lastBalance.Float64
-	if delta <= 0 {
-		return 0, false, nil
-	}
-	return delta, true, nil
+	return startBalance.Float64 - endBalance.Float64, true, nil
 }
 
 // GetLocalCostForDay 返回指定供应商在指定统计日的本地成本
-// （唯一匹配本地账号 usage_logs.actual_cost 之和，口径与 ListCostBreakdowns 一致）。
-// ok=false 表示当天没有唯一匹配且产生用量的本地账号，无法用本地口径校验。
+// （唯一匹配本地账号的账号成本之和，口径与供应商看板、ListCostBreakdowns 一致）。
+// 这里必须走账号成本而非 usage_logs.actual_cost：后者是乘过用户分组倍率的对客计费额，
+// 用它替代上游成本会被毛利放大。ok=false 表示当天没有唯一匹配且产生用量的本地账号。
 func (r *supplierProviderDataRepository) GetLocalCostForDay(ctx context.Context, providerID int64, day time.Time) (float64, bool, error) {
 	start := supplierStatDate(day)
 	end := start.AddDate(0, 0, 1)
@@ -1847,7 +1826,7 @@ unique_account_matches AS (
   GROUP BY local_account_id
   HAVING COUNT(*) = 1
 )
-SELECT COALESCE(SUM(ul.actual_cost), 0) AS local_cost,
+SELECT COALESCE(SUM(COALESCE(ul.account_stats_cost, ul.total_cost) * COALESCE(ul.account_rate_multiplier, 1)), 0) AS local_cost,
        COUNT(DISTINCT u.local_account_id) AS matched_count
 FROM usage_logs ul
 JOIN unique_account_matches u ON u.local_account_id = ul.account_id

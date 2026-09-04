@@ -24,3 +24,14 @@ func TestSupplierProviderCostReviewMigrationDefinesCurrentAndHistoryTables(t *te
 	require.Contains(t, sqlText, "event_type")
 	require.Contains(t, sqlText, "ON DELETE SET NULL")
 }
+
+func TestSupplierProviderCostReviewLocalCostMigrationAddsColumns(t *testing.T) {
+	content, err := FS.ReadFile("241_supplier_provider_cost_review_local_cost.sql")
+	require.NoError(t, err)
+	require.NotEmpty(t, content)
+	require.NotEqual(t, []byte{0xEF, 0xBB, 0xBF}, content[:3], "迁移文件不能包含 UTF-8 BOM")
+
+	sqlText := strings.Join(strings.Fields(string(content)), " ")
+	require.Contains(t, sqlText, "ALTER TABLE supplier_provider_cost_reviews ADD COLUMN IF NOT EXISTS local_cost NUMERIC(20, 6) NULL")
+	require.Contains(t, sqlText, "ALTER TABLE supplier_provider_cost_review_histories ADD COLUMN IF NOT EXISTS local_cost NUMERIC(20, 6) NULL")
+}
