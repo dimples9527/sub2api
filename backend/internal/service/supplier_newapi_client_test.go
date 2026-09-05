@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -787,6 +788,140 @@ func TestSupplierNewAPIClientDeletesInvalidSessionAndRetriesLogin(t *testing.T) 
 	deleteCalls := cache.deleteCalls
 	cache.mu.Unlock()
 	require.Equal(t, 1, deleteCalls)
+}
+
+func TestSupplierNewAPIClientKeepsSessionWhenUpstreamRejectsWithInsufficientPrivilege(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	cache.preload(42, SupplierProviderAuthToken{
+		AccessToken: "cached-token",
+		TokenType:   "Bearer",
+		ExpiresAt:   time.Now().Add(20 * time.Minute),
+		UserID:      42,
+	})
+	var loginCalls, balanceCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			loginCalls.Add(1)
+			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"fresh-token","access_expires_at":4102444800,"user":{"id":42}}}`))
+		case "/api/user/self":
+			balanceCalls.Add(1)
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"code":"AUTH_INSUFFICIENT_PRIVILEGE","message":"Unauthorized, insufficient privileges","success":false}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	_, err := NewSupplierProviderRemoteRegistry(server.Client(), cache, nil).FetchBalance(
+		context.Background(), supplierNewAPICacheTestProvider(server.URL), "secret",
+	)
+
+	require.Error(t, err)
+	require.False(t, IsSupplierProviderAuthFailure(err))
+	require.Equal(t, int32(1), balanceCalls.Load())
+	require.Equal(t, int32(0), loginCalls.Load())
+	cache.mu.Lock()
+	deleteCalls := cache.deleteCalls
+	cache.mu.Unlock()
+	require.Equal(t, 0, deleteCalls)
+}
+
+func supplierNewAPITestAccessToken(sessionID string) string {
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"sid":"` + sessionID + `"}`))
+	return "header." + payload + ".signature"
+}
+
+func TestSupplierNewAPIClientRevokesUpstreamSessionBeforeAbandoningIt(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	var loginCalls, balanceCalls atomic.Int32
+	var revoked []string
+	var mu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/user/login":
+			sessionID := "sess-" + strconv.Itoa(int(loginCalls.Add(1)))
+			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"` + supplierNewAPITestAccessToken(sessionID) + `","access_expires_at":4102444800,"user":{"id":42}}}`))
+		case r.URL.Path == "/api/user/self":
+			if balanceCalls.Add(1) == 1 {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"success":false,"message":"unauthorized"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"quota":500000}}`))
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/user/sessions/"):
+			mu.Lock()
+			revoked = append(revoked, strings.TrimPrefix(r.URL.Path, "/api/user/sessions/"))
+			mu.Unlock()
+			_, _ = w.Write([]byte(`{"success":true,"data":{"revoked_sid":"ok"}}`))
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	balance, err := NewSupplierProviderRemoteRegistry(server.Client(), cache, nil).FetchBalance(
+		context.Background(), supplierNewAPICacheTestProvider(server.URL), "secret",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, float64(1), balance)
+	require.Equal(t, int32(2), loginCalls.Load())
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, []string{"sess-1"}, revoked)
+	require.Equal(t, "sess-2", mustSupplierProviderCachedToken(t, cache, 42).SessionID)
+}
+
+func TestSupplierNewAPIClientRevokesUpstreamSessionInCookieSessionMode(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	var loginCalls, balanceCalls atomic.Int32
+	var revoked []string
+	var revokedAuth []string
+	var mu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/user/login":
+			sessionID := "cookie-sess-" + strconv.Itoa(int(loginCalls.Add(1)))
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: sessionID})
+			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"` + supplierNewAPITestAccessToken(sessionID) + `","access_expires_at":4102444800,"user":{"id":42}}}`))
+		case r.URL.Path == "/api/user/self":
+			if balanceCalls.Add(1) == 1 {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"success":false,"message":"unauthorized"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"quota":500000}}`))
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/user/sessions/"):
+			mu.Lock()
+			revoked = append(revoked, strings.TrimPrefix(r.URL.Path, "/api/user/sessions/"))
+			revokedAuth = append(revokedAuth, r.Header.Get("Cookie")+"|"+r.Header.Get("Authorization"))
+			mu.Unlock()
+			_, _ = w.Write([]byte(`{"success":true,"data":{"revoked_sid":"ok"}}`))
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	provider := supplierNewAPICacheTestProvider(server.URL)
+	provider.NewAPIAuthMode = SupplierNewAPIAuthModeCookieSession
+	balance, err := NewSupplierProviderRemoteRegistry(server.Client(), cache, nil).FetchBalance(context.Background(), provider, "secret")
+
+	require.NoError(t, err)
+	require.Equal(t, float64(1), balance)
+	require.Equal(t, int32(2), loginCalls.Load())
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, []string{"cookie-sess-1"}, revoked)
+	require.Equal(t, []string{"session=cookie-sess-1|"}, revokedAuth)
+	cached := mustSupplierProviderCachedToken(t, cache, 42)
+	require.Equal(t, "cookie-sess-2", cached.SessionID)
+	require.Empty(t, cached.AccessToken)
 }
 
 func TestSupplierNewAPIClientMarksFinalUnauthorizedAsAuthFailure(t *testing.T) {

@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -151,6 +152,7 @@ type supplierNewAPISession struct {
 	AccessToken  string
 	RefreshToken string
 	CookieHeader string
+	SessionID    string
 	ExpiresAt    time.Time
 }
 
@@ -661,16 +663,47 @@ func (c *SupplierNewAPIClient) clearSession(ctx context.Context, provider *Suppl
 		return
 	}
 	c.sessionMu.Lock()
+	abandoned, hasAbandoned := c.sessions[supplierNewAPISessionKey(provider)]
 	delete(c.sessions, supplierNewAPISessionKey(provider))
 	c.sessionMu.Unlock()
 	if c.tokenCache == nil {
+		c.revokeUpstreamSession(ctx, provider, abandoned)
 		return
 	}
+	if !hasAbandoned {
+		// 进程内没有记录时（例如刚重启后手动重新登录），回读缓存才能拿到要吊销的会话。
+		if token, found, err := c.tokenCache.Get(ctx, provider.ID); err == nil && found {
+			abandoned, _ = supplierNewAPISessionFromToken(token)
+		}
+	}
+	c.revokeUpstreamSession(ctx, provider, abandoned)
 	if err := c.tokenCache.Delete(ctx, provider.ID); err != nil {
 		_ = c.cacheFailure(ctx, provider, "delete", err)
 		return
 	}
 	c.recordAuthEvent(ctx, provider, SupplierProviderAuthEventInput{EventType: SupplierProviderAuthEventCacheInvalidated})
+}
+
+// revokeUpstreamSession 主动吊销即将被丢弃的上游会话。New API 没有 logout 接口，
+// 不吊销的话每条被丢弃的会话都会在上游残留到自然过期（30 天），登录会话因此不断堆积。
+func (c *SupplierNewAPIClient) revokeUpstreamSession(ctx context.Context, provider *SupplierProvider, session supplierNewAPISession) {
+	sessionID := strings.TrimSpace(session.SessionID)
+	if sessionID == "" {
+		return
+	}
+	// cookie 会话模式下登录后会清掉 access token，只剩 Cookie；doJSON 会回落到 Cookie 认证，同样能吊销。
+	if strings.TrimSpace(session.AccessToken) == "" && strings.TrimSpace(session.CookieHeader) == "" {
+		return
+	}
+	revokeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	path := "/api/user/sessions/" + url.PathEscape(sessionID)
+	raw, status, err := c.doJSON(revokeCtx, http.MethodDelete, provider, path, session, nil)
+	if err != nil || status < 200 || status >= 300 {
+		logger.LegacyPrintf("supplier_newapi_client", "revoke upstream session failed provider_id=%d provider_code=%s http_status=%d err=%v body=%s", provider.ID, provider.Code, status, err, supplierSub2APISafeResponseText(raw, 200))
+		return
+	}
+	logger.LegacyPrintf("supplier_newapi_client", "revoke upstream session ok provider_id=%d provider_code=%s user_id=%d", provider.ID, provider.Code, session.UserID)
 }
 
 func (c *SupplierNewAPIClient) loginAndStore(ctx context.Context, provider *SupplierProvider, password string) (supplierNewAPISession, error) {
@@ -850,6 +883,7 @@ func supplierNewAPISessionFromToken(token SupplierProviderAuthToken) (supplierNe
 		AccessToken:  strings.TrimSpace(token.AccessToken),
 		RefreshToken: refreshToken,
 		CookieHeader: cookieHeader,
+		SessionID:    strings.TrimSpace(token.SessionID),
 		ExpiresAt:    token.ExpiresAt,
 	}
 	if !supplierNewAPISessionUsable(session) {
@@ -866,6 +900,7 @@ func supplierNewAPISessionToken(session supplierNewAPISession) SupplierProviderA
 		ExpiresAt:    session.ExpiresAt,
 		UserID:       session.UserID,
 		CookieHeader: supplierNewAPICookieHeaderWithout(strings.TrimSpace(session.CookieHeader), supplierNewAPIRefreshCookieName),
+		SessionID:    strings.TrimSpace(session.SessionID),
 	}
 }
 
@@ -925,7 +960,26 @@ func supplierNewAPIAuthMode(provider *SupplierProvider) string {
 }
 
 func supplierNewAPISessionDebugSummary(session supplierNewAPISession) string {
-	return fmt.Sprintf("user_id=%d has_cookie=%t has_access_token=%t has_refresh_token=%t expires_at_set=%t", session.UserID, strings.TrimSpace(session.CookieHeader) != "", strings.TrimSpace(session.AccessToken) != "", strings.TrimSpace(session.RefreshToken) != "", !session.ExpiresAt.IsZero())
+	return fmt.Sprintf("user_id=%d has_cookie=%t has_access_token=%t has_refresh_token=%t has_session_id=%t expires_at_set=%t", session.UserID, strings.TrimSpace(session.CookieHeader) != "", strings.TrimSpace(session.AccessToken) != "", strings.TrimSpace(session.RefreshToken) != "", strings.TrimSpace(session.SessionID) != "", !session.ExpiresAt.IsZero())
+}
+
+// New API 的 access token 是 JWT，sid 声明即上游会话标识；刷新只续期不换会话，因此 sid 在整条会话生命周期内稳定。
+func supplierNewAPISessionIDFromAccessToken(accessToken string) string {
+	parts := strings.Split(strings.TrimSpace(accessToken), ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var claims struct {
+		SID string `json:"sid"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(claims.SID)
 }
 func supplierNewAPIAccessTokenExpiresAt(raw any, hasRefreshToken bool) time.Time {
 	if expiresAt, ok := supplierNewAPITimestamp(raw); ok {
@@ -1068,6 +1122,7 @@ func (c *SupplierNewAPIClient) login(ctx context.Context, provider *SupplierProv
 			AccessToken:  accessToken,
 			RefreshToken: refreshToken,
 			CookieHeader: cookieHeader,
+			SessionID:    supplierNewAPISessionIDFromAccessToken(accessToken),
 			ExpiresAt:    supplierNewAPIAccessTokenExpiresAt(resp.Data.AccessExpiresAt, refreshToken != ""),
 		}
 		logger.LegacyPrintf("supplier_newapi_client", "login parsed session provider_id=%d provider_code=%s auth_mode=%s session=%s", provider.ID, provider.Code, supplierNewAPIAuthMode(provider), supplierNewAPISessionDebugSummary(session))
@@ -1147,11 +1202,16 @@ func (c *SupplierNewAPIClient) refreshSession(ctx context.Context, provider *Sup
 	if rotated := supplierNewAPICookieValueFromCookies(cookies, supplierNewAPIRefreshCookieName); rotated != "" {
 		refreshToken = rotated
 	}
+	sessionID := strings.TrimSpace(session.SessionID)
+	if refreshedID := supplierNewAPISessionIDFromAccessToken(accessToken); refreshedID != "" {
+		sessionID = refreshedID
+	}
 	return supplierNewAPISession{
 		UserID:       userID,
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		CookieHeader: supplierNewAPICookieHeaderWithout(strings.TrimSpace(session.CookieHeader), supplierNewAPIRefreshCookieName),
+		SessionID:    sessionID,
 		ExpiresAt:    supplierNewAPIAccessTokenExpiresAt(resp.Data.AccessExpiresAt, true),
 	}, nil
 }
@@ -1502,6 +1562,9 @@ func supplierNewAPIEnvelopeOK(raw []byte) error {
 }
 
 func supplierNewAPIAuthFailure(status int, raw []byte, err error) bool {
+	if supplierNewAPIInsufficientPrivilege(raw) {
+		return false
+	}
 	if status == http.StatusUnauthorized || status == http.StatusForbidden {
 		return true
 	}
@@ -1515,10 +1578,28 @@ func supplierNewAPIAuthFailure(status int, raw []byte, err error) bool {
 }
 
 func supplierNewAPILoginAuthFailure(status int, raw []byte, err error) bool {
+	if supplierNewAPIInsufficientPrivilege(raw) {
+		return false
+	}
 	if status == http.StatusUnauthorized || status == http.StatusForbidden {
 		return true
 	}
 	return supplierNewAPIBusinessAuthFailure(raw) || supplierNewAPIAuthPhraseFromError(err)
+}
+
+// New API 用 403 + AUTH_INSUFFICIENT_PRIVILEGE 表示"该账号无权访问此接口"，message 里同样带 Unauthorized 字样。
+// 这是权限问题而非会话失效，重新登录只会在上游白建一条 30 天有效期的会话。
+func supplierNewAPIInsufficientPrivilege(raw []byte) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var resp struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(resp.Code), "AUTH_INSUFFICIENT_PRIVILEGE")
 }
 
 func supplierNewAPIAuthPhraseFromError(err error) bool {

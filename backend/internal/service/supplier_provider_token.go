@@ -12,6 +12,8 @@ type SupplierProviderAuthToken struct {
 	ExpiresAt    time.Time `json:"expires_at"`
 	UserID       int64     `json:"user_id,omitempty"`
 	CookieHeader string    `json:"cookie_header,omitempty"`
+	// SessionID 是上游的会话标识，用于放弃会话时反向吊销，避免上游会话堆积。
+	SessionID string `json:"session_id,omitempty"`
 }
 
 type SupplierProviderTokenCache interface {
