@@ -453,6 +453,14 @@
                   @click.stop="openLocalAccountTest(account)"
                 >{{ testingAccountID === account.local_account_id ? '加载中…' : '测试账号' }}</button>
                 <button
+                  class="sp-button small sp-account-action-recover"
+                  type="button"
+                  :disabled="recoveringAccountID === account.local_account_id || accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
+                  title="恢复错误、限流和临时不可调度等可恢复状态"
+                  :data-test="`supplier-account-recover-${account.local_account_id}`"
+                  @click.stop="recoverLocalAccountState(account)"
+                >{{ recoveringAccountID === account.local_account_id ? '恢复中' : '恢复状态' }}</button>
+                <button
                   class="sp-button small sp-account-action-edit"
                   type="button"
                   :disabled="accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
@@ -1208,6 +1216,7 @@ const savingPriorityAccountID = ref<number | null>(null)
 const accountActionLoadingID = ref<number | null>(null)
 const deletingAccountID = ref<number | null>(null)
 const deletingSupplierAccountRecordID = ref<number | null>(null)
+const recoveringAccountID = ref<number | null>(null)
 const duplicatingAccountID = ref<number | null>(null)
 const duplicateConfirmAccount = ref<SupplierProviderAccount | null>(null)
 const deleteSupplierAccountRecordTarget = ref<SupplierProviderAccount | null>(null)
@@ -2547,6 +2556,29 @@ async function handleToggleSchedulable(account: SupplierProviderAccount) {
   }
 }
 
+async function recoverLocalAccountState(account: SupplierProviderAccount) {
+  const localAccountID = manageableLocalAccountID(account)
+  if (localAccountID === null || recoveringAccountID.value === localAccountID) return
+
+  recoveringAccountID.value = localAccountID
+  try {
+    const updated = await adminAPI.accounts.recoverState(localAccountID)
+    const status = updated?.status ?? account.local_account_status
+    accountSourceItems.value = accountSourceItems.value.map(item => item.local_account_id === localAccountID
+      ? { ...item, local_account_status: status }
+      : item)
+    applyAccountQuickFilterPage()
+    if (selected.value?.local_account_id === localAccountID) {
+      selected.value = { ...selected.value, local_account_status: status }
+    }
+    appStore.showSuccess('账号状态已恢复')
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '恢复账号状态失败'))
+  } finally {
+    recoveringAccountID.value = null
+  }
+}
+
 function accountTestStatusLabel(status?: string): string {
   if (status === 'testing') return '测试中'
   if (status === 'success') return '成功'
@@ -3689,6 +3721,12 @@ button.sp-guard-failure-hint:hover {
   color: var(--sp-blue);
 }
 
+.sp-account-row-actions .sp-account-action-recover {
+  border-color: color-mix(in srgb, #0d9488 42%, var(--sp-line));
+  background: color-mix(in srgb, #0d9488 9%, var(--sp-panel));
+  color: #0d9488;
+}
+
 .sp-account-row-actions .sp-account-action-edit {
   border-color: color-mix(in srgb, var(--sp-amber) 42%, var(--sp-line));
   background: color-mix(in srgb, var(--sp-amber) 9%, var(--sp-panel));
@@ -3720,6 +3758,7 @@ button.sp-guard-failure-hint:hover {
 }
 
 .sp-account-row-actions .sp-account-action-test:hover,
+.sp-account-row-actions .sp-account-action-recover:hover,
 .sp-account-row-actions .sp-account-action-edit:hover,
 .sp-account-row-actions .sp-account-action-copy:hover,
 .sp-account-row-actions .sp-account-action-platform:hover,
