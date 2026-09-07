@@ -314,17 +314,17 @@ func TestSupplierAccountHealthTrendServiceAttachesUpstreamTrend(t *testing.T) {
 	require.Equal(t, []int64{12, 37, 99}, repo.lastUpstreamIDs)
 	require.Len(t, results, 3)
 
-	// 上游序列与守护序列共用同一批时间桶，长度必须一致，前端才能按同一个下标取点。
+	// 上游点位只保留真实上报桶，让迷你色带把连续样本等距展示，避免相位错开导致红点断开。
 	require.Len(t, results[0].Points, SupplierAccountHealthTrendBucketCount)
-	require.Len(t, results[0].UpstreamPoints, SupplierAccountHealthTrendBucketCount)
+	require.Len(t, results[0].UpstreamPoints, 1)
 	require.Len(t, results[0].UpstreamMonitors, 1)
 	require.NotNil(t, results[0].UpstreamLatest)
 	require.Equal(t, SupplierAccountHealthGuardStatusSlow, results[0].UpstreamLatest.Status)
-	lastBucket := results[0].UpstreamPoints[SupplierAccountHealthTrendBucketCount-1]
-	require.Equal(t, SupplierAccountHealthGuardStatusSlow, lastBucket.Status)
-	require.Equal(t, 1, lastBucket.SampleCount)
-	require.NotNil(t, lastBucket.LatencyMs)
-	require.Equal(t, int64(900), *lastBucket.LatencyMs)
+	upstreamPoint := results[0].UpstreamPoints[0]
+	require.Equal(t, SupplierAccountHealthGuardStatusSlow, upstreamPoint.Status)
+	require.Equal(t, 1, upstreamPoint.SampleCount)
+	require.NotNil(t, upstreamPoint.LatencyMs)
+	require.Equal(t, int64(900), *upstreamPoint.LatencyMs)
 
 	// 绑了监控项但窗口内没上报：只带绑定信息，不填点位，否则会画出一条纯灰的空序列。
 	require.Len(t, results[1].UpstreamMonitors, 1)
@@ -353,9 +353,40 @@ func TestSupplierAccountHealthTrendServiceGetTrendAttachesUpstream(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, []int64{12}, repo.lastUpstreamIDs)
 	require.Len(t, result.Points, SupplierAccountHealthTrendBucketCount)
-	require.Len(t, result.UpstreamPoints, SupplierAccountHealthTrendBucketCount)
+	require.Len(t, result.UpstreamPoints, 1)
 	require.Nil(t, result.Latest)
 	require.NotNil(t, result.UpstreamLatest)
+}
+
+// 上游采样节奏和固定时间桶相位不一致时，完整上报仍会留下空桶；
+// 服务层必须去掉空桶，避免健康趋势列把连续失败渲染成不连续红点。
+func TestSupplierAccountHealthTrendServiceFiltersEmptyUpstreamBuckets(t *testing.T) {
+	// GetTrend 内部会重新取当前时间构造窗口，这里同样基于当前时间回退 24 小时，
+	// 避免测试数据因为绝对日期落入窗口外而被过滤。
+	since := time.Now().Add(-24 * time.Hour).Add(-2 * time.Minute)
+	repo := &accountHealthTrendRepositoryStub{
+		upstreamTrends: map[int64]SupplierAccountHealthUpstreamTrend{
+			12: {
+				Points: []SupplierAccountHealthPoint{
+					{CheckedAt: since.Add(2 * time.Minute), Status: SupplierAccountHealthGuardStatusFailed},
+					{CheckedAt: since.Add(17 * time.Minute), Status: SupplierAccountHealthGuardStatusFailed},
+				},
+				Monitors: []SupplierAccountHealthUpstreamMonitor{{TargetID: 5, MonitorName: "Codex 监控"}},
+			},
+		},
+	}
+	svc := NewSupplierAccountHealthTrendService(repo, repo)
+
+	result, err := svc.GetTrend(context.Background(), 12, SupplierAccountHealthRange24h)
+
+	require.NoError(t, err)
+	require.Len(t, result.UpstreamPoints, 2)
+	require.WithinDuration(t, since.Add(2*time.Minute), result.UpstreamPoints[0].CheckedAt, time.Minute)
+	require.WithinDuration(t, since.Add(17*time.Minute), result.UpstreamPoints[1].CheckedAt, time.Minute)
+	for _, point := range result.UpstreamPoints {
+		require.Equal(t, SupplierAccountHealthGuardStatusFailed, point.Status)
+		require.Positive(t, point.SampleCount)
+	}
 }
 
 // unavailable 只来自上游样本，表示上游没给出可解析的状态，不能盖掉同桶里明确的 failed。

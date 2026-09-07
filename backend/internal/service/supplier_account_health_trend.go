@@ -341,6 +341,8 @@ func (s *SupplierAccountHealthTrendService) GetTrends(ctx context.Context, accou
 // applySupplierAccountHealthUpstreamTrend 把上游样本压进与守护数据同一批时间桶。
 // 绑定信息只要存在就带上，让前端能区分「没绑监控项」和「绑了但窗口内没上报」；
 // 点位则必须有样本才填，否则空输入会被聚合成 96 个 unchecked 桶、画出一条无意义的空序列。
+// 上游监控的采样间隔不一定对齐 15 分钟桶，这里再过滤掉空桶，让色带按真实上报点等距展示；
+// 否则完整但相位错开的连续失败样本，会被渲染成「红、灰、红、灰」的不连续序列。
 func applySupplierAccountHealthUpstreamTrend(result *SupplierAccountHealthTrendResult, upstream SupplierAccountHealthUpstreamTrend, since time.Time, duration time.Duration) {
 	if len(upstream.Monitors) == 0 && len(upstream.Points) == 0 {
 		return
@@ -349,7 +351,14 @@ func applySupplierAccountHealthUpstreamTrend(result *SupplierAccountHealthTrendR
 	if len(upstream.Points) == 0 {
 		return
 	}
-	result.UpstreamPoints = aggregateSupplierAccountHealthTrendPoints(upstream.Points, since, duration)
+	upstreamPoints := aggregateSupplierAccountHealthTrendPoints(upstream.Points, since, duration)
+	filteredUpstreamPoints := make([]SupplierAccountHealthPoint, 0, len(upstreamPoints))
+	for _, point := range upstreamPoints {
+		if point.SampleCount > 0 {
+			filteredUpstreamPoints = append(filteredUpstreamPoints, point)
+		}
+	}
+	result.UpstreamPoints = filteredUpstreamPoints
 	result.UpstreamLatest = latestSupplierAccountHealthPoint(upstream.Points)
 }
 
