@@ -657,49 +657,83 @@
     <BaseDialog
       :show="Boolean(guardFailureAccount)"
       title="守护检测失败记录"
-      width="normal"
+      width="wide"
       @close="closeGuardFailureDialog"
     >
-      <div v-if="guardFailureAccount" class="sp-guard-failure-dialog">
-        <div class="sp-guard-failure-summary">
-          <div class="sp-test-error-meta">
-            <span>本地账号</span>
-            <strong>{{ displayValue(guardFailureAccount.local_account_name) }}</strong>
+      <div
+        v-if="guardFailureAccount"
+        class="sp-guard-failure-dialog"
+        :aria-busy="guardFailureLoading"
+      >
+        <section class="sp-guard-failure-summary" aria-label="账号状态摘要">
+          <div class="sp-guard-failure-identity">
+            <span class="sp-guard-failure-kicker">本地账号</span>
+            <strong class="sp-guard-failure-name">
+              {{ displayValue(guardFailureAccount.local_account_name) }}
+            </strong>
           </div>
-          <div class="sp-test-error-meta">
+          <div class="sp-guard-failure-counter" aria-label="当前连续失败次数">
+            <strong>
+              {{ guardFailureCount(guardFailureAccount) }}
+              <small>次</small>
+            </strong>
             <span>当前连续失败</span>
-            <strong>{{ guardFailureCount(guardFailureAccount) }} 次</strong>
           </div>
+        </section>
+        <div v-if="guardFailureLoading" class="sp-guard-failure-state" aria-live="polite">
+          <span class="sp-guard-failure-spinner" aria-hidden="true"></span>
+          <span>加载中…</span>
         </div>
-        <p v-if="guardFailureLoading" class="sp-guard-failure-state">加载中…</p>
         <p v-else-if="guardFailureError" class="sp-guard-failure-state is-error">{{ guardFailureError }}</p>
         <p v-else-if="!guardFailureRecords.length" class="sp-guard-failure-state">最近没有守护检测失败记录</p>
-        <ul v-else class="sp-guard-failure-list">
-          <li
-            v-for="(record, index) in guardFailureRecords"
-            :key="`${record.checked_at}-${index}`"
-            class="sp-guard-failure-item"
-          >
-            <div class="sp-guard-failure-record-head">
-              <div class="sp-guard-failure-time">
-                <span class="sp-guard-failure-dot" aria-hidden="true"></span>
-                <strong>{{ formatTime(record.checked_at) }}</strong>
-              </div>
-              <div class="sp-guard-failure-tags">
-                <span class="sp-guard-failure-tag is-fail">
-                  连续失败 {{ record.consecutive_failed }} 次
-                </span>
-                <span class="sp-guard-failure-tag">
-                  {{ guardActionLabel(record.action) }}
-                </span>
-                <span v-if="record.model_id" class="sp-guard-failure-tag is-model">
-                  {{ record.model_id }}
-                </span>
+        <div v-else class="sp-guard-failure-table-wrap">
+          <div class="sp-guard-failure-table" role="table" aria-label="守护检测失败明细">
+            <div class="sp-guard-failure-table-head" role="row">
+              <span role="columnheader">检测时间</span>
+              <span role="columnheader">模型</span>
+              <span role="columnheader" class="is-center">失败次数</span>
+              <span role="columnheader">调度动作</span>
+              <span role="columnheader">失败原因</span>
+            </div>
+            <div class="sp-guard-failure-table-body">
+              <div
+                v-for="(record, index) in guardFailureRecords"
+                :key="`${record.checked_at}-${index}`"
+                class="sp-guard-failure-row"
+                :class="{ 'is-latest': index === 0 }"
+                role="row"
+              >
+                <div role="cell">
+                  <div class="sp-guard-failure-time">
+                    <span>{{ formatTime(record.checked_at) }}</span>
+                    <span v-if="index === 0" class="sp-guard-failure-latest">最新</span>
+                  </div>
+                </div>
+                <div role="cell">
+                  <span
+                    v-if="record.model_id"
+                    class="sp-guard-failure-model"
+                    :title="record.model_id"
+                  >
+                    {{ record.model_id }}
+                  </span>
+                  <span v-else class="sp-guard-failure-empty">—</span>
+                </div>
+                <div class="is-center" role="cell">
+                  <span class="sp-guard-failure-count">连续失败 {{ record.consecutive_failed }} 次</span>
+                </div>
+                <div role="cell">
+                  <span :class="['sp-guard-failure-action', guardActionTone(record.action)]">
+                    {{ guardActionLabel(record.action) }}
+                  </span>
+                </div>
+                <div role="cell">
+                  <p class="sp-guard-failure-detail">{{ guardFailureDetail(record) }}</p>
+                </div>
               </div>
             </div>
-            <p class="sp-guard-failure-detail">{{ guardFailureDetail(record) }}</p>
-          </li>
-        </ul>
+          </div>
+        </div>
         <p class="sp-guard-failure-hint-text">
           仅展示最近 {{ SUPPLIER_GUARD_FAILURE_RECORD_LIMIT }} 条守护检测失败记录，完整趋势见账号健康趋势页。
         </p>
@@ -2628,6 +2662,13 @@ function guardActionLabel(action?: string): string {
   return '未调整调度'
 }
 
+// 动作标签跟随调度结果区分语义色，便于快速识别账号是否已被守护处理。
+function guardActionTone(action?: string): string {
+  if (action === 'disabled') return 'is-disabled'
+  if (action === 'recovered') return 'is-recovered'
+  return 'is-muted'
+}
+
 // 守护检测里 reason 是判定结论、error_message 是上游原文，两者都可能为空。
 function guardFailureDetail(record: SupplierAccountHealthRecord): string {
   const detail = [record.reason, record.error_message].filter(Boolean).join(' · ')
@@ -3542,20 +3583,98 @@ button.sp-guard-failure-hint:hover {
 .sp-guard-failure-dialog {
   display: grid;
   gap: 0.875rem;
+  padding: 0.1rem 0.05rem 0.25rem;
 }
 
 .sp-guard-failure-summary {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  overflow: hidden;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--sp-red) 22%, var(--sp-line));
+  border-radius: 0.875rem;
+  padding: 0.9rem 1rem;
+  background:
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--sp-red) 13%, transparent), transparent 46%),
+    linear-gradient(135deg, color-mix(in srgb, var(--sp-red) 8%, var(--sp-panel-2)), var(--sp-panel));
+  box-shadow: var(--sp-shadow);
+}
+
+.sp-guard-failure-summary::after {
+  content: "";
+  position: absolute;
+  top: -4rem;
+  right: -4rem;
+  width: 10rem;
+  height: 10rem;
+  border-radius: 9999px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--sp-red) 18%, transparent), transparent 70%);
+  pointer-events: none;
+}
+
+.sp-guard-failure-identity,
+.sp-guard-failure-counter {
+  position: relative;
+  z-index: 1;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
-  border: 1px solid color-mix(in srgb, var(--sp-red) 16%, var(--sp-line));
-  border-radius: 0.75rem;
-  padding: 0.75rem 0.875rem;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--sp-red) 7%, var(--sp-panel-2)), var(--sp-panel));
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.sp-guard-failure-identity {
+  flex: 1 1 auto;
+}
+
+.sp-guard-failure-kicker,
+.sp-guard-failure-counter span {
+  color: var(--sp-muted);
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+
+.sp-guard-failure-name {
+  overflow: hidden;
+  color: var(--sp-text);
+  font-size: 0.95rem;
+  font-weight: 800;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-guard-failure-counter {
+  flex: 0 0 auto;
+  justify-items: end;
+  padding-left: 0.9rem;
+  border-left: 1px solid color-mix(in srgb, var(--sp-red) 16%, var(--sp-line));
+}
+
+.sp-guard-failure-counter strong {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  color: var(--sp-red);
+  font-size: 1.55rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.sp-guard-failure-counter small {
+  margin-left: 0.15rem;
+  color: var(--sp-muted);
+  font-size: 0.6875rem;
+  font-weight: 700;
 }
 
 .sp-guard-failure-state {
-  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 9rem;
   border: 1px dashed color-mix(in srgb, var(--sp-muted) 30%, var(--sp-line));
   border-radius: 0.75rem;
   padding: 0.85rem 0.95rem;
@@ -3565,115 +3684,234 @@ button.sp-guard-failure-hint:hover {
   line-height: 1.55;
 }
 
+.sp-guard-failure-spinner {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex: 0 0 auto;
+  border: 2px solid color-mix(in srgb, var(--sp-red) 30%, transparent);
+  border-top-color: var(--sp-red);
+  border-radius: 9999px;
+  animation: sp-guard-failure-spin 700ms linear infinite;
+}
+
 .sp-guard-failure-state.is-error {
   border-color: color-mix(in srgb, var(--sp-red) 38%, var(--sp-line));
   background: color-mix(in srgb, var(--sp-red) 7%, var(--sp-panel-2));
   color: var(--sp-red);
 }
 
-.sp-guard-failure-list {
-  display: grid;
-  gap: 0.5rem;
-  max-height: 22rem;
+.sp-guard-failure-table-wrap {
+  min-height: clamp(18rem, 52vh, 28rem);
+  max-height: clamp(26rem, 70vh, 42rem);
   overflow: auto;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  overscroll-behavior: contain;
+  border: 1px solid color-mix(in srgb, var(--sp-line) 88%, var(--sp-red));
+  border-radius: 0.8rem;
+  background: var(--sp-panel);
+  scrollbar-gutter: stable;
 }
 
-.sp-guard-failure-list li {
-  position: relative;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--sp-red) 18%, var(--sp-line));
-  border-radius: 0.75rem;
-  padding: 0.75rem 0.875rem 0.75rem 1.05rem;
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--sp-red) 8%, transparent), transparent 42%),
-    var(--sp-panel-2);
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sp-red) 60%, transparent);
+.sp-guard-failure-table {
+  --guard-failure-grid: 9.5rem minmax(9rem, 1fr) 6.8rem 8.5rem minmax(14rem, 2fr);
+  width: 100%;
+  min-width: 54rem;
+  display: block;
+  border: 0;
 }
 
-.sp-guard-failure-record-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem 0.75rem;
+.sp-guard-failure-table-head {
+  display: grid;
+  grid-template-columns: var(--guard-failure-grid);
+  align-items: start;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.sp-guard-failure-table-head > span {
+  display: block;
+  padding: 0.7rem 0.8rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--sp-line) 82%, var(--sp-red));
+  background: linear-gradient(180deg, var(--sp-panel), var(--sp-panel-2));
+  color: var(--sp-muted);
+  font-size: 0.6875rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.sp-guard-failure-table-head > span:first-child {
+  padding-left: 1rem;
+}
+
+.sp-guard-failure-table-head > span:last-child {
+  padding-right: 1rem;
+}
+
+.sp-guard-failure-table-head > span.is-center,
+.sp-guard-failure-row > div.is-center {
+  text-align: center;
+}
+
+.sp-guard-failure-table-body {
+  display: block;
+}
+
+.sp-guard-failure-row {
+  display: grid;
+  grid-template-columns: var(--guard-failure-grid);
+  align-items: start;
+}
+
+.sp-guard-failure-row > div {
+  display: block;
+  padding: 0.75rem 0.8rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--sp-line) 78%, transparent);
+  vertical-align: top;
+}
+
+.sp-guard-failure-row > div:first-child {
+  padding-left: 1rem;
+}
+
+.sp-guard-failure-row > div:last-child {
+  padding-right: 1rem;
+}
+
+.sp-guard-failure-row:last-child > div {
+  border-bottom: 0;
+}
+
+.sp-guard-failure-row:nth-child(2n) {
+  background: color-mix(in srgb, var(--sp-red) 2%, transparent);
+}
+
+.sp-guard-failure-row:hover {
+  background: color-mix(in srgb, var(--sp-red) 6%, var(--sp-panel));
 }
 
 .sp-guard-failure-time {
   display: inline-flex;
-  min-width: 0;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
   color: var(--sp-text);
   font-size: 0.8125rem;
   font-weight: 700;
-}
-
-.sp-guard-failure-dot {
-  width: 0.5rem;
-  height: 0.5rem;
-  flex: 0 0 auto;
-  border-radius: 9999px;
-  background: var(--sp-red);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sp-red) 14%, transparent);
-}
-
-.sp-guard-failure-tags {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 0.375rem;
-}
-
-.sp-guard-failure-tag {
-  display: inline-flex;
-  max-width: 100%;
-  align-items: center;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--sp-muted) 26%, var(--sp-line));
-  border-radius: 9999px;
-  padding: 0.125rem 0.45rem;
-  color: var(--sp-muted);
-  font-size: 0.6875rem;
-  font-weight: 600;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.sp-guard-failure-tag.is-fail {
-  border-color: color-mix(in srgb, var(--sp-red) 30%, var(--sp-line));
-  background: color-mix(in srgb, var(--sp-red) 10%, transparent);
+.sp-guard-failure-latest {
+  padding: 0.1rem 0.35rem;
+  border: 1px solid color-mix(in srgb, var(--sp-red) 26%, var(--sp-line));
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--sp-red) 8%, transparent);
   color: var(--sp-red);
+  font-size: 0.625rem;
+  font-weight: 800;
+  line-height: 1.35;
 }
 
-.sp-guard-failure-tag.is-model {
-  border-color: color-mix(in srgb, var(--sp-cyan) 28%, var(--sp-line));
-  background: color-mix(in srgb, var(--sp-cyan) 8%, transparent);
-  color: color-mix(in srgb, var(--sp-cyan) 78%, var(--sp-text));
+.sp-guard-failure-model {
+  display: inline-block;
+  max-width: 14rem;
+  overflow: hidden;
+  color: var(--sp-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.sp-guard-failure-empty {
+  color: var(--sp-dim);
+}
+
+.sp-guard-failure-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 3rem;
+  border: 1px solid color-mix(in srgb, var(--sp-red) 30%, var(--sp-line));
+  border-radius: 9999px;
+  padding: 0.14rem 0.45rem;
+  background: color-mix(in srgb, var(--sp-red) 9%, transparent);
+  color: var(--sp-red);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.sp-guard-failure-action {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--sp-muted) 26%, var(--sp-line));
+  border-radius: 9999px;
+  padding: 0.14rem 0.45rem;
+  color: var(--sp-muted);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.sp-guard-failure-action.is-disabled {
+  border-color: color-mix(in srgb, var(--sp-amber) 30%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-amber) 9%, transparent);
+  color: var(--sp-amber);
+}
+
+.sp-guard-failure-action.is-recovered {
+  border-color: color-mix(in srgb, var(--sp-green) 30%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-green) 9%, transparent);
+  color: var(--sp-green);
 }
 
 .sp-guard-failure-detail {
-  margin: 0.375rem 0 0;
-  padding-left: 0.625rem;
-  border-left: 2px solid color-mix(in srgb, var(--sp-red) 30%, var(--sp-line));
+  margin: 0;
   color: var(--sp-text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.6875rem;
+  font-size: 0.7rem;
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .sp-guard-failure-hint-text {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
   margin: 0;
-  padding-top: 0.15rem;
-  border-top: 1px dashed color-mix(in srgb, var(--sp-muted) 28%, var(--sp-line));
+  padding: 0.7rem 0.8rem;
+  border: 1px dashed color-mix(in srgb, var(--sp-muted) 28%, var(--sp-line));
+  border-radius: 0.7rem;
+  background: color-mix(in srgb, var(--sp-muted) 4%, var(--sp-panel-2));
   color: var(--sp-muted);
   font-size: 0.6875rem;
   line-height: 1.55;
+}
+
+@keyframes sp-guard-failure-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 480px) {
+  .sp-guard-failure-summary {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .sp-guard-failure-counter {
+    justify-items: start;
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .sp-guard-failure-counter strong {
+    justify-content: flex-start;
+  }
 }
 
 .sp-account-muted {
