@@ -22,10 +22,10 @@ import (
 
 // GroupHandler handles admin group management
 type GroupHandler struct {
-	adminService         service.AdminService
-	dashboardService     *service.DashboardService
-	groupCapacityService *service.GroupCapacityService
-	cfg                  *config.Config
+	adminService                        service.AdminService
+	dashboardService                    *service.DashboardService
+	groupCapacityService                *service.GroupCapacityService
+	cfg                                 *config.Config
 	monitorGroupPlatformOverrideService service.MonitorGroupPlatformOverrideService
 	customPlatformService               service.CustomPlatformService
 }
@@ -94,18 +94,24 @@ func (f optionalLimitField) ToServiceInput() *float64 {
 
 // NewGroupHandler creates a new admin group handler
 func NewGroupHandler(adminService service.AdminService, dashboardService *service.DashboardService, groupCapacityService *service.GroupCapacityService) *GroupHandler {
-	return NewGroupHandlerWithPlatformOverride(adminService, dashboardService, groupCapacityService, nil)
+	return NewGroupHandlerWithConfig(adminService, dashboardService, groupCapacityService, nil)
 }
 
-// NewGroupHandlerWithPlatformOverride creates a group handler with monitor-only platform configuration.
-func NewGroupHandlerWithPlatformOverride(adminService service.AdminService, dashboardService *service.DashboardService, groupCapacityService *service.GroupCapacityService, cfg *config.Config, overrideService service.MonitorGroupPlatformOverrideService) *GroupHandler {
+// NewGroupHandlerWithConfig creates a group handler with runtime mode configuration.
+func NewGroupHandlerWithConfig(adminService service.AdminService, dashboardService *service.DashboardService, groupCapacityService *service.GroupCapacityService, cfg *config.Config) *GroupHandler {
 	return &GroupHandler{
 		adminService:         adminService,
 		dashboardService:     dashboardService,
 		groupCapacityService: groupCapacityService,
 		cfg:                  cfg,
-		monitorGroupPlatformOverrideService: overrideService,
 	}
+}
+
+// NewGroupHandlerWithPlatformOverride creates a group handler with monitor-only platform configuration.
+func NewGroupHandlerWithPlatformOverride(adminService service.AdminService, dashboardService *service.DashboardService, groupCapacityService *service.GroupCapacityService, overrideService service.MonitorGroupPlatformOverrideService) *GroupHandler {
+	handler := NewGroupHandler(adminService, dashboardService, groupCapacityService)
+	handler.monitorGroupPlatformOverrideService = overrideService
+	return handler
 }
 
 // SetCustomPlatformService 设置自定义平台服务，用于模型监控页面展示平台名称。
