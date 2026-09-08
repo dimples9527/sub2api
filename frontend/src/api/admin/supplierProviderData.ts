@@ -120,6 +120,7 @@ export interface SupplierProviderAccount {
   local_account_last_test_error?: string
   local_account_health_guard_last_checked_at?: string
   local_account_health_guard_failure_count?: number
+  local_account_health_guard_healthy_count?: number
   supplier_current_balance: number
   supplier_today_cost: number
 }

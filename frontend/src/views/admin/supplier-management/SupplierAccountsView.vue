@@ -386,6 +386,10 @@
                 :data-test="'supplier-account-guard-failures-' + account.local_account_id"
                 @click.stop="openGuardFailureDialog(account)"
               >守护连续失败 {{ guardFailureCount(account) }} 次</button>
+              <span
+                v-if="hasGuardSuccesses(account)"
+                class="sp-guard-success-hint"
+              >守护连续成功 {{ guardHealthyCount(account) }} 次</span>
             </div>
           </template>
 
@@ -565,6 +569,10 @@
                 title="查看守护检测失败记录"
                 @click.stop="openGuardFailureDialog(selected)"
               >守护连续失败 {{ guardFailureCount(selected) }} 次</button>
+              <span
+                v-if="hasGuardSuccesses(selected)"
+                class="sp-guard-success-hint"
+              >守护连续成功 {{ guardHealthyCount(selected) }} 次</span>
             </b>
           </div>
           <div class="sp-detail-cell">
@@ -2652,8 +2660,16 @@ function guardFailureCount(account: SupplierProviderAccount): number {
   return Number(account.local_account_health_guard_failure_count) || 0
 }
 
+function guardHealthyCount(account: SupplierProviderAccount): number {
+  return Number(account.local_account_health_guard_healthy_count) || 0
+}
+
 function hasRepeatedGuardFailures(account: SupplierProviderAccount): boolean {
   return isMatchedLocalAccount(account) && guardFailureCount(account) >= GUARD_FAILURE_HINT_THRESHOLD
+}
+
+function hasGuardSuccesses(account: SupplierProviderAccount): boolean {
+  return isMatchedLocalAccount(account) && guardHealthyCount(account) > 0
 }
 
 function guardActionLabel(action?: string): string {
@@ -3578,6 +3594,17 @@ button.sp-guard-failure-hint {
 button.sp-guard-failure-hint:hover {
   filter: brightness(0.96);
   transform: translateY(-1px);
+}
+
+.sp-guard-success-hint {
+  padding: 0.0625rem 0.375rem;
+  border: 1px solid rgba(22, 163, 74, 0.32);
+  border-radius: 9999px;
+  background: rgba(22, 163, 74, 0.1);
+  color: var(--sp-green, #16a34a);
+  font-size: 0.625rem;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .sp-guard-failure-dialog {

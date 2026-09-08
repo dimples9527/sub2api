@@ -499,6 +499,9 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
        CASE WHEN jsonb_typeof(matched_account.extra->'supplier_health_guard_failure_count') = 'number'
             THEN (matched_account.extra->>'supplier_health_guard_failure_count')::NUMERIC::INT
             ELSE 0 END AS local_account_health_guard_failure_count,
+       CASE WHEN jsonb_typeof(matched_account.extra->'supplier_health_guard_healthy_count') = 'number'
+            THEN (matched_account.extra->>'supplier_health_guard_healthy_count')::NUMERIC::INT
+            ELSE 0 END AS local_account_health_guard_healthy_count,
        COALESCE((
          SELECT jsonb_agg(
            jsonb_build_object(
@@ -2365,6 +2368,7 @@ func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (servic
 		&item.LocalAccountLastTestError,
 		&item.LocalAccountHealthGuardLastCheckedAt,
 		&item.LocalAccountHealthGuardFailureCount,
+		&item.LocalAccountHealthGuardHealthyCount,
 		&bindingGroupsJSON,
 		&item.SupplierCurrentBalance, &item.SupplierTodayCost,
 		&groupRecordID, &item.GroupRecordDeleteEligible)

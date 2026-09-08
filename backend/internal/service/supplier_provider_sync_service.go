@@ -60,6 +60,7 @@ type SupplierProviderAccount struct {
 	LocalAccountLastTestError            string                                `json:"local_account_last_test_error,omitempty"`
 	LocalAccountHealthGuardLastCheckedAt string                                `json:"local_account_health_guard_last_checked_at,omitempty"`
 	LocalAccountHealthGuardFailureCount  int                                   `json:"local_account_health_guard_failure_count,omitempty"`
+	LocalAccountHealthGuardHealthyCount  int                                   `json:"local_account_health_guard_healthy_count,omitempty"`
 	GroupStatus                          string                                `json:"group_status,omitempty"`
 	BindingGroups                        []SupplierProviderAccountBindingGroup `json:"binding_groups"`
 	SupplierCurrentBalance               float64                               `json:"supplier_current_balance"`

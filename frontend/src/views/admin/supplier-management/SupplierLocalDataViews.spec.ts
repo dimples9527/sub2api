@@ -328,6 +328,7 @@ const testAccounts = [
     local_account_last_test_error: '',
     local_account_health_guard_last_checked_at: guardFreshCheckedAt,
     local_account_health_guard_failure_count: 0,
+    local_account_health_guard_healthy_count: 2,
     supplier_current_balance: 0,
     supplier_today_cost: 0,
   },
@@ -637,7 +638,7 @@ describe('supplier local data views component usage', () => {
     expect(wrapper.get('.runtime-cell-local_account_status[data-row-index="0"]').text()).toBe('正常')
     expect(wrapper.get('.runtime-cell-local_account_status[data-row-index="4"]').text()).toBe('异常')
     expect(wrapper.get('.runtime-cell-local_account_last_test_status[data-row-index="0"]').text())
-      .toBe('成功')
+      .toBe('成功守护连续成功 2 次')
     expect(wrapper.get('.runtime-cell-local_account_last_test_status[data-row-index="0"] .sp-test-status').classes())
       .toContain('success')
     expect(wrapper.get('.runtime-cell-local_account_last_test_status[data-row-index="4"]').text())
@@ -663,6 +664,8 @@ describe('supplier local data views component usage', () => {
 
     expect(wrapper.get('.runtime-cell-local_account_last_test_status[data-row-index="4"] .sp-guard-failure-hint').text())
       .toBe('守护连续失败 4 次')
+    expect(wrapper.get('.runtime-cell-local_account_last_test_status[data-row-index="0"]').text())
+      .toContain('守护连续成功 2 次')
     expect(wrapper.find('.runtime-cell-local_account_last_test_status[data-row-index="0"] .sp-guard-failure-hint').exists())
       .toBe(false)
 
@@ -914,6 +917,7 @@ describe('supplier local data views component usage', () => {
       'local_account_last_test_error?: string',
       'local_account_health_guard_last_checked_at?: string',
       'local_account_health_guard_failure_count?: number',
+      'local_account_health_guard_healthy_count?: number',
       'supplier_current_balance: number',
       'supplier_today_cost: number',
     ].forEach(field => expect(accountInterface).toContain(field))
