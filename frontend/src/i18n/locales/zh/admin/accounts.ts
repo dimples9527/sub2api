@@ -366,6 +366,8 @@ export default {
         antigravityOauth: 'Antigravity OAuth',
         grokOauth: 'Grok OAuth',
         antigravityApikey: '通过 Base URL + API Key 连接',
+        api_key: 'API Key',
+        cookie: 'Cookie',
         upstream: '对接上游',
         upstreamDesc: '通过 Base URL + API Key 连接上游'
       },
@@ -1565,7 +1567,42 @@ export default {
       },
 
       deleteFailed: '删除账号失败',
-
+      noAccounts: '暂无账号',
+      noAccountsDescription: '创建第一个账号以开始调度请求。',
+      saving: '保存中...',
+      refreshing: '刷新中...',
+      refreshCookie: '刷新 Cookie',
+      testAccount: '测试账号',
+      testSuccess: '账号测试成功',
+      cookieRefreshedSuccess: 'Cookie 刷新成功',
+      accountCreatedSuccess: '账号创建成功',
+      accountUpdatedSuccess: '账号更新成功',
+      accountDeletedSuccess: '账号删除成功',
+      failedToSave: '保存账号失败',
+      deleteConfirmMessage: '确定要删除该账号吗？',
+      filters: {
+        platform: '平台',
+        type: '类型',
+        status: '状态',
+        allPlatforms: '全部平台',
+        allTypes: '全部类型',
+        allStatuses: '全部状态'
+      },
+      form: {
+        nameLabel: '名称',
+        namePlaceholder: '请输入账号名称',
+        platformLabel: '平台',
+        selectPlatform: '请选择平台',
+        typeLabel: '类型',
+        selectType: '请选择类型',
+        credentialsLabel: '凭证',
+        credentialsPlaceholder: '请输入凭证',
+        statusLabel: '状态',
+        priorityLabel: '优先级',
+        priorityHint: '数值越小优先级越高',
+        weightLabel: '权重',
+        weightHint: '数值越高获得的流量越多'
+      }
     },
 
     // Scheduled Tests
