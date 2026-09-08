@@ -4309,7 +4309,6 @@ import type { ChannelModelPricing } from "@/api/admin/channels";
 import { VueDraggable } from "vue-draggable-plus";
 import { createStableObjectKeyResolver } from "@/utils/stableObjectKey";
 import { extractApiErrorMessage } from "@/utils/apiError";
-import { CORE_PLATFORM_OPTIONS } from "@/utils/platformOptions";
 import { useKeyedDebouncedSearch } from "@/composables/useKeyedDebouncedSearch";
 import { getPersistedPageSize } from "@/composables/usePersistedPageSize";
 import {
@@ -4595,15 +4594,15 @@ const exclusiveOptions = computed(() => [
   { value: "false", label: t("admin.groups.nonExclusive") },
 ]);
 
-const platformOptions = computed(() => [
+const platformOptions = computed(() =>
   GROUP_PLATFORM_OPTIONS.filter(
-      (option) => !authStore.isSimpleMode || option.value !== "composite",
+    (option) => !authStore.isSimpleMode || option.value !== "composite",
   ),
-]);
+);
 
 const platformFilterOptions = computed(() => [
   { value: "", label: t("admin.groups.allPlatforms") },
-  ...CORE_PLATFORM_OPTIONS,
+  ...GROUP_PLATFORM_OPTIONS,
 ]);
 
 const compositeRoutePlatformOptions = computed(() => [
