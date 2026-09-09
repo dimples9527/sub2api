@@ -756,6 +756,7 @@ func TestSupplierAutomationServiceRunsAccountHealthGuardTask(t *testing.T) {
 	require.NotNil(t, run.ResultDetail)
 	require.Equal(t, []int64{1}, runner.config.AccountIDs)
 	require.Equal(t, map[int64]int{1: 600, 2: 300}, runner.config.AccountIntervals)
+	require.Equal(t, map[int64]bool{1: false}, runner.config.AccountSchedulingChange)
 	require.Equal(t, int64(20), run.ResultDetail.AccountHealthGuard.CursorAccountID)
 	require.Equal(t, int64(20), repo.tasks[SupplierAutomationTaskAccountHealthGuard].Config.AccountHealthGuardCursorAccountID)
 }
@@ -895,9 +896,10 @@ func validSupplierAccountHealthGuardAutomationConfig() SupplierAutomationConfig 
 		AccountHealthGuardHealthyLatencyMs:         15000,
 		AccountHealthGuardAccountIDs:               []int64{1},
 		AccountHealthGuardAccountModels:            map[int64]string{},
-		AccountHealthGuardPlatformModels:           map[string]string{},
-		AccountHealthGuardPlatformLatencyMs:        map[string]int64{},
-		AccountHealthGuardAccountIntervals:         map[int64]int{},
+	AccountHealthGuardPlatformModels:           map[string]string{},
+	AccountHealthGuardPlatformLatencyMs:        map[string]int64{},
+	AccountHealthGuardAccountIntervals:         map[int64]int{},
+	AccountHealthGuardAccountSchedulingChange:  map[int64]bool{1: false},
 	}
 }
 

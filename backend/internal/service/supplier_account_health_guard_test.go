@@ -573,6 +573,32 @@ func TestSupplierAccountHealthGuardRunKeepsSchedulingBeforeThreshold(t *testing.
 	require.Empty(t, store.setCalls)
 }
 
+func TestSupplierAccountHealthGuardRunSkipsSchedulingUpdateWhenDisabled(t *testing.T) {
+	candidate := newSupplierAccountHealthGuardCandidate(33, "只检测账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 33})
+	store := &supplierAccountHealthGuardAccountStoreStub{}
+	tester := &supplierAccountHealthGuardTesterStub{
+		results: map[int64]*ScheduledTestResult{33: {Status: "failed", ErrorMessage: "temporary error"}},
+		errs:    map[int64]error{},
+	}
+	guard := NewSupplierAccountHealthGuardService(&supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{candidate}}, store, tester)
+
+	result, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{
+		AccountIDs:              []int64{33},
+		FailureThreshold:        2,
+		PlatformModels:          map[string]string{"openai": "gpt-4o-mini"},
+		AccountSchedulingChange: map[int64]bool{33: false},
+	}, time.Now())
+
+	require.NoError(t, err)
+	require.Equal(t, 1, result.FailedCount)
+	require.Zero(t, result.DisabledCount)
+	require.True(t, result.Items[0].SchedulableAfter)
+	require.Equal(t, SupplierAccountHealthGuardActionNone, result.Items[0].Action)
+	require.Empty(t, store.setCalls)
+	require.Equal(t, 1, result.Items[0].ConsecutiveFailed)
+	require.Equal(t, SupplierAccountHealthGuardStatusFailed, store.extraUpdates[33][supplierHealthGuardLastStatusExtraKey])
+}
+
 func TestSupplierAccountHealthGuardRunUsesEffectivePlatformForDefaults(t *testing.T) {
 	candidate := newSupplierAccountHealthGuardCandidate(23, "覆盖平台账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 13})
 	candidate.PlatformOverride = "grok"

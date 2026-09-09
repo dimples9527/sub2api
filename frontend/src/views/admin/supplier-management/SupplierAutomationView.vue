@@ -930,6 +930,15 @@
                     title="为该账号单独设置检查频率，留空表示按任务全局执行间隔"
                     @update:model-value="setHealthGuardAccountInterval(mapping.localAccountID, $event)"
                   />
+                  <label class="sp-health-guard-account-scheduling-toggle">
+                    <Toggle
+                      :model-value="healthGuardAccountSchedulingChangeValue(mapping.localAccountID)"
+                      :aria-label="`账号 ${mapping.localAccountName} 是否修改调度`"
+                      title="关闭后仅检测账号健康，不会自动暂停或恢复调度"
+                      @update:model-value="setHealthGuardAccountSchedulingChange(mapping.localAccountID, $event)"
+                    />
+                    <span>修改调度</span>
+                  </label>
                 </div>
               </article>
             </div>
@@ -1072,6 +1081,7 @@ const editForm = reactive<SupplierAutomationTask>({
     account_health_guard_account_intervals: {},
     account_health_guard_platform_models: {},
     account_health_guard_platform_latency_ms: {},
+    account_health_guard_account_scheduling_change: {},
     account_health_guard_cursor_account_id: 0,
   },
   last_status: '',
@@ -2090,6 +2100,7 @@ function applyAccountHealthGuardDefaults() {
   config.account_health_guard_platform_models = normalizeStringMap(config.account_health_guard_platform_models)
   config.account_health_guard_platform_latency_ms = normalizePositiveNumberMap(config.account_health_guard_platform_latency_ms)
   config.account_health_guard_account_intervals = normalizeAccountHealthGuardAccountIntervals(config.account_health_guard_account_intervals)
+  config.account_health_guard_account_scheduling_change = normalizeAccountHealthGuardSchedulingChange(config.account_health_guard_account_scheduling_change)
   const cursorAccountID = Number(config.account_health_guard_cursor_account_id)
   config.account_health_guard_cursor_account_id = Number.isSafeInteger(cursorAccountID) && cursorAccountID > 0 ? cursorAccountID : 0
 }
@@ -2174,6 +2185,9 @@ function removeHealthGuardAccount(id: number) {
   const accountIntervals = { ...(editForm.config.account_health_guard_account_intervals || {}) }
   delete accountIntervals[String(id)]
   editForm.config.account_health_guard_account_intervals = accountIntervals
+  const schedulingChange = { ...(editForm.config.account_health_guard_account_scheduling_change || {}) }
+  delete schedulingChange[String(id)]
+  editForm.config.account_health_guard_account_scheduling_change = schedulingChange
 }
 function normalizePositiveAccountIDs(value: unknown): number[] {
   if (!Array.isArray(value)) return []
@@ -2207,6 +2221,28 @@ function setHealthGuardAccountInterval(accountID: number, value: string | number
     delete intervals[String(accountID)]
   }
   editForm.config.account_health_guard_account_intervals = intervals
+}
+
+function healthGuardAccountSchedulingChangeValue(accountID: number): boolean {
+  return editForm.config.account_health_guard_account_scheduling_change?.[String(accountID)] !== false
+}
+
+function setHealthGuardAccountSchedulingChange(accountID: number, value: boolean) {
+  const schedulingChange = { ...(editForm.config.account_health_guard_account_scheduling_change || {}) }
+  if (value) {
+    delete schedulingChange[String(accountID)]
+  } else {
+    schedulingChange[String(accountID)] = false
+  }
+  editForm.config.account_health_guard_account_scheduling_change = schedulingChange
+}
+
+function normalizeAccountHealthGuardSchedulingChange(value: unknown): Record<string, boolean> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key, item]) => Boolean(key) && item === false)
+  ) as Record<string, boolean>
 }
 
 function normalizeAccountHealthGuardAccountIntervals(value: unknown): Record<string, number> {
@@ -4155,10 +4191,22 @@ function intervalSecondsToCron(seconds: number): string | null {
 
 .sp-health-guard-account-model-editor {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(112px, 0.45fr);
+  grid-template-columns: minmax(0, 1fr) minmax(112px, 0.45fr) auto;
   min-width: 0;
   align-items: center;
   gap: 8px;
+}
+
+.sp-health-guard-account-scheduling-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--sp-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .sp-health-guard-account-model-editor :deep(.select-trigger) {

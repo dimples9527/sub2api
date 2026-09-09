@@ -467,6 +467,17 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('留空表示按任务全局执行间隔')
   })
 
+  it('allows each selected health guard account to opt out of scheduling changes', () => {
+    expect(supplierAutomationAPISource).toContain('account_health_guard_account_scheduling_change: Record<string, boolean>')
+    expect(supplierAutomationSource).toContain('account_health_guard_account_scheduling_change: {}')
+    expect(supplierAutomationSource).toContain('healthGuardAccountSchedulingChangeValue')
+    expect(supplierAutomationSource).toContain('setHealthGuardAccountSchedulingChange')
+    expect(supplierAutomationSource).toContain('account_health_guard_account_scheduling_change?.[String(accountID)] !== false')
+    expect(supplierAutomationSource).toContain('delete schedulingChange[String(id)]')
+    expect(supplierAutomationSource).toContain('修改调度')
+    expect(supplierAutomationSource).toContain('关闭后仅检测账号健康，不会自动暂停或恢复调度')
+  })
+
   it('configures checked accounts with platform filters and searchable model overrides', () => {
     expect(supplierAutomationSource).toContain('listSupplierAccounts,')
     expect(supplierAutomationSource).toContain("from '@/api/admin/supplierProviderData'")

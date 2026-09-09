@@ -77,6 +77,7 @@ type SupplierAutomationConfig struct {
 	AccountHealthGuardPlatformModels           map[string]string `json:"account_health_guard_platform_models"`
 	AccountHealthGuardPlatformLatencyMs        map[string]int64  `json:"account_health_guard_platform_latency_ms"`
 	AccountHealthGuardAccountIntervals         map[int64]int     `json:"account_health_guard_account_intervals"`
+	AccountHealthGuardAccountSchedulingChange  map[int64]bool    `json:"account_health_guard_account_scheduling_change"`
 	AccountHealthGuardCursorAccountID          int64             `json:"account_health_guard_cursor_account_id"`
 }
 
@@ -618,6 +619,7 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 			PlatformModels:           task.Config.AccountHealthGuardPlatformModels,
 			PlatformLatencyMs:        task.Config.AccountHealthGuardPlatformLatencyMs,
 			AccountIntervals:         task.Config.AccountHealthGuardAccountIntervals,
+			AccountSchedulingChange:  task.Config.AccountHealthGuardAccountSchedulingChange,
 			CursorAccountID:          task.Config.AccountHealthGuardCursorAccountID,
 		}, time.Now())
 		run.ProcessedCount = result.CheckedCount + result.UnavailableCount

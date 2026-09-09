@@ -75,6 +75,7 @@ type SupplierAccountHealthGuardConfig struct {
 	PlatformModels           map[string]string `json:"account_health_guard_platform_models"`
 	PlatformLatencyMs        map[string]int64  `json:"account_health_guard_platform_latency_ms"`
 	AccountIntervals         map[int64]int     `json:"account_health_guard_account_intervals"`
+	AccountSchedulingChange  map[int64]bool    `json:"account_health_guard_account_scheduling_change"`
 	CursorAccountID          int64             `json:"account_health_guard_cursor_account_id"`
 }
 
@@ -452,6 +453,11 @@ func (s *SupplierAccountHealthGuardService) runTarget(ctx context.Context, confi
 		item.ConsecutiveSlow = 0
 	}
 	item.SchedulableAfter, item.Action, item.Reason = supplierAccountHealthGuardNextSchedulingState(config, item)
+	if value, exists := config.AccountSchedulingChange[item.LocalAccountID]; exists && !value {
+		item.SchedulableAfter = item.SchedulableBefore
+		item.Action = SupplierAccountHealthGuardActionNone
+		item.Reason = "已关闭修改调度"
+	}
 	if item.SchedulableAfter != item.SchedulableBefore {
 		if err := s.accountStore.SetSchedulable(ctx, item.LocalAccountID, item.SchedulableAfter); err != nil {
 			item.SchedulableAfter = item.SchedulableBefore
@@ -698,6 +704,9 @@ func normalizeSupplierAccountHealthGuardConfig(config SupplierAccountHealthGuard
 	config.PlatformModels = normalizeSupplierAccountHealthGuardPlatformModels(config.PlatformModels)
 	config.PlatformLatencyMs = normalizeSupplierAccountHealthGuardPlatformLatency(config.PlatformLatencyMs)
 	config.AccountIntervals = normalizeSupplierAccountHealthGuardAccountIntervals(config.AccountIntervals)
+	if config.AccountSchedulingChange == nil {
+		config.AccountSchedulingChange = map[int64]bool{}
+	}
 	return config
 }
 
