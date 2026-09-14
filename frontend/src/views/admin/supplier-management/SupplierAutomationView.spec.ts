@@ -572,6 +572,17 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).not.toContain('sp-health-guard-account-rate')
   })
 
+  it('在健康守护账号列表显示去重后的绑定分组数量和悬浮信息', () => {
+    expect(supplierAutomationSource).toContain('healthGuardAccountGroupCount(mapping)')
+    expect(supplierAutomationSource).toContain(':title="healthGuardAccountGroupsTitle(mapping)"')
+    expect(supplierAutomationSource).toContain('function healthGuardAccountGroupCount(mapping: HealthGuardAccountMapping): number {')
+    expect(supplierAutomationSource).toContain('function healthGuardAccountGroupsTitle(mapping: HealthGuardAccountMapping): string {')
+    expect(supplierAutomationSource).toContain('source.binding_groups')
+    expect(supplierAutomationSource).toContain('new Map<number, SupplierProviderAccount[\'binding_groups\'][number]>()')
+    expect(supplierAutomationSource).toContain('绑定分组')
+    expect(supplierAutomationSource).toContain('grid-template-columns: minmax(0, 1fr) minmax(140px, 0.35fr)')
+  })
+
   it('applies the automation dialog palette to the teleported health guard workspace', () => {
     expect(supplierAutomationSource).toContain(':global(.modal-content:has(.sp-health-guard-account-dialog))')
     expect(supplierAutomationSource).toContain(':global(.dark .modal-content:has(.sp-health-guard-account-dialog))')

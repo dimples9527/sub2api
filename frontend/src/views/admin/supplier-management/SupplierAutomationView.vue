@@ -908,6 +908,15 @@
                 </label>
 
                 <div
+                  class="sp-health-guard-account-group-summary"
+                  :title="healthGuardAccountGroupsTitle(mapping)"
+                  :aria-label="healthGuardAccountGroupsTitle(mapping)"
+                >
+                  <span>绑定分组</span>
+                  <strong>{{ healthGuardAccountGroupCount(mapping) }} 个</strong>
+                </div>
+
+                <div
                   v-if="healthGuardAccountIsSelected(mapping.localAccountID) && mapping.available"
                   class="sp-health-guard-account-model-editor"
                 >
@@ -1982,6 +1991,27 @@ function healthGuardAccountMultiplierText(mapping: HealthGuardAccountMapping): s
   ))
   if (!rates.length) return ''
   return `（倍率：${rates.join(' / ')}）`
+}
+
+function healthGuardAccountGroups(mapping: HealthGuardAccountMapping): SupplierProviderAccount['binding_groups'] {
+  const groups = new Map<number, SupplierProviderAccount['binding_groups'][number]>()
+  for (const source of mapping.sources) {
+    for (const group of source.binding_groups) {
+      if (!groups.has(group.id)) groups.set(group.id, group)
+    }
+  }
+  return Array.from(groups.values()).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+}
+
+function healthGuardAccountGroupCount(mapping: HealthGuardAccountMapping): number {
+  return healthGuardAccountGroups(mapping).length
+}
+
+function healthGuardAccountGroupsTitle(mapping: HealthGuardAccountMapping): string {
+  const groups = healthGuardAccountGroups(mapping)
+  if (!groups.length) return '未绑定分组'
+  const names = groups.map(group => group.name || `分组 #${group.id}`)
+  return `绑定分组（${groups.length}）：${names.join('、')}`
 }
 
 const healthGuardModelCreatablePrefix = '使用模型'
@@ -4034,7 +4064,7 @@ function intervalSecondsToCron(seconds: number): string | null {
 .sp-health-guard-account-row {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.8fr);
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 0.35fr) minmax(320px, 0.8fr);
   align-items: center;
   min-width: 0;
   gap: 8px 12px;
@@ -4072,7 +4102,7 @@ function intervalSecondsToCron(seconds: number): string | null {
 }
 
 .sp-health-guard-account-row:not(:has(.sp-health-guard-account-model-editor)) {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 0.35fr);
 }
 
 .sp-health-guard-account-choice {
@@ -4151,6 +4181,33 @@ function intervalSecondsToCron(seconds: number): string | null {
   font-size: 10px;
   font-weight: 700;
   line-height: 1.4;
+  white-space: nowrap;
+}
+
+.sp-health-guard-account-group-summary {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  cursor: help;
+}
+
+.sp-health-guard-account-group-summary > span {
+  color: var(--sp-muted);
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.sp-health-guard-account-group-summary > strong {
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--sp-blue);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
