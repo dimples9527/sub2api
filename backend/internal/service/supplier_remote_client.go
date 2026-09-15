@@ -55,6 +55,48 @@ type SupplierProviderRemoteRechargeHistoryClient interface {
 	FetchRechargeRecords(ctx context.Context, provider *SupplierProvider, password string, start, end time.Time) ([]SupplierProviderRechargeRecord, error)
 }
 
+// SupplierProviderUpstreamSession 描述上游一条登录会话的可展示信息。
+// 上游不返回 is_current，Current 由本地已缓存会话的 sid 精确比对得出。
+type SupplierProviderUpstreamSession struct {
+	SID string `json:"sid"`
+	// Current 表示这条会话正是当前同步正在使用的那条，清理时必须保留它。
+	Current      bool      `json:"current"`
+	Status       string    `json:"status"`
+	LoginMethod  string    `json:"login_method"`
+	IP           string    `json:"ip"`
+	UserAgent    string    `json:"user_agent"`
+	CreatedAt    time.Time `json:"created_at"`
+	LastActiveAt time.Time `json:"last_active_at"`
+	ExpiresAt    time.Time `json:"expires_at"`
+}
+
+// SupplierProviderUpstreamSessionSummary 描述上游当前持有的登录会话。
+// 上游的会话列表包含当前正在使用的会话，因此 Count 至少为 1；大于 1 即说明存在未被吊销的残留会话。
+type SupplierProviderUpstreamSessionSummary struct {
+	// Supported 表示上游是否提供会话管理接口，老版本 New API 没有该接口。
+	Supported bool
+	// CredentialAvailable 表示本地是否缓存了可用于查询的登录凭据。
+	// 为 false 时 Count 一定是 0，但这个 0 表示「查不了」而不是「没有会话」，
+	// 调用方必须据此显示明确的说明，绝不能把 0 当成「上游没有残留会话」。
+	CredentialAvailable bool
+	Count               int
+	// Sessions 为会话明细，概览接口只取 Count，明细接口才把它透出给前端。
+	Sessions []SupplierProviderUpstreamSession
+}
+
+// SupplierProviderRemoteSessionManager 提供上游登录会话的查询与清理能力。
+// ListUpstreamSessions / RevokeOtherUpstreamSessions 复用当前已缓存的会话凭据，
+// 不会触发新的登录，避免查询行为本身制造新会话；代价是本地没有凭据时查不了，
+// 此时由 CredentialAvailable=false 如实反馈。
+// ListUpstreamSessionsWithLogin 是唯一会在查询前主动登录的入口，供用户显式发起的操作使用。
+type SupplierProviderRemoteSessionManager interface {
+	ListUpstreamSessions(ctx context.Context, provider *SupplierProvider) (SupplierProviderUpstreamSessionSummary, error)
+	// ListUpstreamSessionsWithLogin 在本地没有可用凭据时用给定密码登录一次再查询。
+	// 登录会在上游新增一条会话，因此只应由用户显式确认的操作触发，不能用在自动巡检路径上。
+	ListUpstreamSessionsWithLogin(ctx context.Context, provider *SupplierProvider, password string) (SupplierProviderUpstreamSessionSummary, error)
+	RevokeOtherUpstreamSessions(ctx context.Context, provider *SupplierProvider) (int, error)
+}
+
 func NewSupplierProviderRemoteRegistry(httpClient *http.Client, tokenCache SupplierProviderTokenCache, turnstileSolver SupplierTurnstileSolver) *SupplierProviderRemoteRegistry {
 	return &SupplierProviderRemoteRegistry{
 		sub2api: NewSupplierSub2APIClient(httpClient, tokenCache, turnstileSolver),
@@ -148,6 +190,43 @@ func (r *SupplierProviderRemoteRegistry) TestEndpoint(ctx context.Context, provi
 		return SupplierProviderEndpointTestResult{}, fmt.Errorf("supplier provider remote client does not support endpoint test")
 	}
 	return tester.TestEndpoint(ctx, provider, password, scope)
+}
+
+func (r *SupplierProviderRemoteRegistry) ListUpstreamSessions(ctx context.Context, provider *SupplierProvider) (SupplierProviderUpstreamSessionSummary, error) {
+	client, err := r.client(provider)
+	if err != nil {
+		return SupplierProviderUpstreamSessionSummary{}, err
+	}
+	manager, ok := client.(SupplierProviderRemoteSessionManager)
+	if !ok {
+		// 会话管理是 New API 特有的能力，其它供应商类型不实现该接口。
+		return SupplierProviderUpstreamSessionSummary{}, ErrSupplierProviderUpstreamSessionUnsupported
+	}
+	return manager.ListUpstreamSessions(ctx, provider)
+}
+
+func (r *SupplierProviderRemoteRegistry) ListUpstreamSessionsWithLogin(ctx context.Context, provider *SupplierProvider, password string) (SupplierProviderUpstreamSessionSummary, error) {
+	client, err := r.client(provider)
+	if err != nil {
+		return SupplierProviderUpstreamSessionSummary{}, err
+	}
+	manager, ok := client.(SupplierProviderRemoteSessionManager)
+	if !ok {
+		return SupplierProviderUpstreamSessionSummary{}, ErrSupplierProviderUpstreamSessionUnsupported
+	}
+	return manager.ListUpstreamSessionsWithLogin(ctx, provider, password)
+}
+
+func (r *SupplierProviderRemoteRegistry) RevokeOtherUpstreamSessions(ctx context.Context, provider *SupplierProvider) (int, error) {
+	client, err := r.client(provider)
+	if err != nil {
+		return 0, err
+	}
+	manager, ok := client.(SupplierProviderRemoteSessionManager)
+	if !ok {
+		return 0, ErrSupplierProviderUpstreamSessionUnsupported
+	}
+	return manager.RevokeOtherUpstreamSessions(ctx, provider)
 }
 
 func (r *SupplierProviderRemoteRegistry) LastEndpointResult(providerID int64, scope string) *SupplierProviderEndpointResult {

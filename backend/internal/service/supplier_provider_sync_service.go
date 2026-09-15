@@ -1754,3 +1754,161 @@ func (s *SupplierProviderSyncService) RefreshToken(ctx context.Context, provider
 	}
 	return refresher.RefreshToken(ctx, provider)
 }
+
+// SupplierProviderUpstreamSessionsResult 是上游登录会话快照。
+// 上游的会话列表包含当前会话，因此 Count 大于 1 即表示存在未被吊销的残留会话。
+type SupplierProviderUpstreamSessionsResult struct {
+	ProviderID int64 `json:"provider_id"`
+	Supported  bool  `json:"supported"`
+	// CredentialAvailable 为 false 表示本地没有该供应商的可用登录凭据，本次没能真正查询上游。
+	// 此时 Count 固定为 0，但它代表「查不了」而非「没有会话」，前端必须区分展示。
+	CredentialAvailable bool      `json:"credential_available"`
+	Count               int       `json:"count"`
+	Message             string    `json:"message,omitempty"`
+	CheckedAt           time.Time `json:"checked_at"`
+}
+
+// SupplierProviderUpstreamSessionRevokeResult 是一次上游会话清理的结果。
+type SupplierProviderUpstreamSessionRevokeResult struct {
+	ProviderID   int64     `json:"provider_id"`
+	RevokedCount int       `json:"revoked_count"`
+	Message      string    `json:"message,omitempty"`
+	RevokedAt    time.Time `json:"revoked_at"`
+}
+
+// upstreamSessionProvider 取用于会话管理的供应商。
+// 与同步流程不同，这里不要求供应商处于启用状态：已停用的供应商同样可能残留未吊销的登录会话。
+func (s *SupplierProviderSyncService) upstreamSessionProvider(ctx context.Context, providerID int64) (*SupplierProvider, error) {
+	provider, err := s.providerRepo.GetByID(ctx, providerID)
+	if err != nil {
+		return nil, err
+	}
+	if normalizeSupplierProviderType(provider.ProviderType) != SupplierProviderTypeNewAPI {
+		// 会话管理接口是 New API 特有的能力。
+		return nil, ErrSupplierProviderUpstreamSessionUnsupported
+	}
+	return provider, nil
+}
+
+// upstreamSessionCredentialMissingMessage 是本地无凭据时的统一说明。
+// 这段文案存在的意义是避免把「读不到」显示成「没有会话」——用户会因此误判上游状态。
+const upstreamSessionCredentialMissingMessage = "本地未缓存该供应商的登录凭据，本次没有真正查询上游；请先在该供应商上完成一次登录或同步，再重新检查。"
+
+// listUpstreamSessionsForReport 读取上游会话概览。
+// allowLogin 为 true（用户显式要求）且本地无凭据时，用已保存的密码登录一次再查询；
+// 其余情况保持只读语义，绝不因为一次查询而新增上游会话。
+func (s *SupplierProviderSyncService) listUpstreamSessionsForReport(ctx context.Context, manager SupplierProviderRemoteSessionManager, provider *SupplierProvider, allowLogin bool) (SupplierProviderUpstreamSessionSummary, error) {
+	if !allowLogin {
+		return manager.ListUpstreamSessions(ctx, provider)
+	}
+	password := s.providerPassword(provider)
+	if strings.TrimSpace(password) == "" {
+		// 没有密码就不存在登录的可能，直接退回只读查询，省掉一次注定失败的往返。
+		return manager.ListUpstreamSessions(ctx, provider)
+	}
+	return manager.ListUpstreamSessionsWithLogin(ctx, provider, password)
+}
+
+// upstreamSessionUnavailableMessage 在只读查询发现本地无凭据时给出可操作的说明。
+func upstreamSessionUnavailableMessage(allowLogin bool, password string) string {
+	if !allowLogin {
+		return upstreamSessionCredentialMissingMessage
+	}
+	if strings.TrimSpace(password) == "" {
+		return "本地未缓存该供应商的登录凭据，且未配置登录密码，无法自动登录查询；请先在供应商配置中补全密码。"
+	}
+	return upstreamSessionCredentialMissingMessage
+}
+
+// GetUpstreamSessions 查询上游当前持有的登录会话数量。
+func (s *SupplierProviderSyncService) GetUpstreamSessions(ctx context.Context, providerID int64) (SupplierProviderUpstreamSessionsResult, error) {
+	result := SupplierProviderUpstreamSessionsResult{ProviderID: providerID, CheckedAt: time.Now()}
+	provider, err := s.upstreamSessionProvider(ctx, providerID)
+	if err != nil {
+		return result, err
+	}
+	manager, ok := s.remote.(SupplierProviderRemoteSessionManager)
+	if !ok {
+		return result, ErrSupplierProviderUpstreamSessionUnsupported
+	}
+	// 概览是自动巡检路径，固定只读，不触发登录。
+	summary, err := manager.ListUpstreamSessions(ctx, provider)
+	if err != nil {
+		return result, err
+	}
+	result.Supported = summary.Supported
+	result.CredentialAvailable = summary.CredentialAvailable
+	result.Count = summary.Count
+	switch {
+	case !summary.Supported:
+		result.Message = "上游未提供会话管理接口，无法统计登录会话"
+	case !summary.CredentialAvailable:
+		result.Message = upstreamSessionCredentialMissingMessage
+	}
+	return result, nil
+}
+
+// SupplierProviderUpstreamSessionDetailResult 是上游登录会话明细快照。
+// Current 为 true 的那条是当前同步正在使用的会话，清理时会保留它。
+type SupplierProviderUpstreamSessionDetailResult struct {
+	ProviderID int64 `json:"provider_id"`
+	Supported  bool  `json:"supported"`
+	// CredentialAvailable 为 false 表示本地没有可用凭据，Sessions 为空并不代表上游没有会话。
+	CredentialAvailable bool                              `json:"credential_available"`
+	Sessions            []SupplierProviderUpstreamSession `json:"sessions"`
+	Message             string                            `json:"message,omitempty"`
+	CheckedAt           time.Time                         `json:"checked_at"`
+}
+
+// GetUpstreamSessionDetails 查询上游登录会话明细，供管理端逐条排查残留会话。
+// allowLogin 为 true 时允许在本地无凭据的情况下登录一次再查询；该路径会产生新的上游会话，
+// 只能由用户显式点按「登录并读取」触发。
+func (s *SupplierProviderSyncService) GetUpstreamSessionDetails(ctx context.Context, providerID int64, allowLogin bool) (SupplierProviderUpstreamSessionDetailResult, error) {
+	result := SupplierProviderUpstreamSessionDetailResult{ProviderID: providerID, CheckedAt: time.Now()}
+	provider, err := s.upstreamSessionProvider(ctx, providerID)
+	if err != nil {
+		return result, err
+	}
+	manager, ok := s.remote.(SupplierProviderRemoteSessionManager)
+	if !ok {
+		return result, ErrSupplierProviderUpstreamSessionUnsupported
+	}
+	summary, err := s.listUpstreamSessionsForReport(ctx, manager, provider, allowLogin)
+	if err != nil {
+		return result, err
+	}
+	result.Supported = summary.Supported
+	result.CredentialAvailable = summary.CredentialAvailable
+	result.Sessions = summary.Sessions
+	if result.Sessions == nil {
+		// 空结果统一序列化成 []，前端不必再区分 null 与空数组。
+		result.Sessions = []SupplierProviderUpstreamSession{}
+	}
+	switch {
+	case !summary.Supported:
+		result.Message = "上游未提供会话管理接口，无法读取登录会话明细"
+	case !summary.CredentialAvailable:
+		result.Message = upstreamSessionUnavailableMessage(allowLogin, s.providerPassword(provider))
+	}
+	return result, nil
+}
+
+// RevokeUpstreamSessions 清理上游除当前会话以外的登录会话，保留当前会话以不打断正在进行的同步。
+func (s *SupplierProviderSyncService) RevokeUpstreamSessions(ctx context.Context, providerID int64) (SupplierProviderUpstreamSessionRevokeResult, error) {
+	result := SupplierProviderUpstreamSessionRevokeResult{ProviderID: providerID, RevokedAt: time.Now()}
+	provider, err := s.upstreamSessionProvider(ctx, providerID)
+	if err != nil {
+		return result, err
+	}
+	manager, ok := s.remote.(SupplierProviderRemoteSessionManager)
+	if !ok {
+		return result, ErrSupplierProviderUpstreamSessionUnsupported
+	}
+	count, err := manager.RevokeOtherUpstreamSessions(ctx, provider)
+	if err != nil {
+		return result, err
+	}
+	result.RevokedCount = count
+	logger.LegacyPrintf("supplier_provider_sync_service", "revoke upstream sessions provider_id=%d provider_code=%s revoked_count=%d", provider.ID, provider.Code, count)
+	return result, nil
+}

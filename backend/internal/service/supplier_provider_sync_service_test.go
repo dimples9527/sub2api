@@ -1422,3 +1422,128 @@ func TestSupplierProviderServiceDeleteClearsToken(t *testing.T) {
 	require.NoError(t, service.Delete(context.Background(), 1))
 	require.Equal(t, 1, cache.deleteCalls)
 }
+
+// supplierRemoteSessionManagerStub 在既有远端 stub 基础上补出会话管理能力，
+// 并记录是否走了「登录后再查询」这条有副作用的路径。
+type supplierRemoteSessionManagerStub struct {
+	*supplierRemoteClientStub
+	listCalls      int
+	listLoginCalls int
+	loginPassword  string
+	summary        SupplierProviderUpstreamSessionSummary
+	err            error
+}
+
+func (s *supplierRemoteSessionManagerStub) ListUpstreamSessions(context.Context, *SupplierProvider) (SupplierProviderUpstreamSessionSummary, error) {
+	s.listCalls++
+	return s.summary, s.err
+}
+
+func (s *supplierRemoteSessionManagerStub) ListUpstreamSessionsWithLogin(_ context.Context, _ *SupplierProvider, password string) (SupplierProviderUpstreamSessionSummary, error) {
+	s.listLoginCalls++
+	s.loginPassword = password
+	return s.summary, s.err
+}
+
+func (s *supplierRemoteSessionManagerStub) RevokeOtherUpstreamSessions(context.Context, *SupplierProvider) (int, error) {
+	return 0, s.err
+}
+
+// supplierPasswordDecryptingEncryptorStub 用可辨认的前缀标记 Decrypt 确实被调用过，
+// 以验证会话查询传给上游的是明文密码而不是库里的密文。
+type supplierPasswordDecryptingEncryptorStub struct{}
+
+func (supplierPasswordDecryptingEncryptorStub) Encrypt(value string) (string, error) {
+	return "cipher:" + value, nil
+}
+
+func (supplierPasswordDecryptingEncryptorStub) Decrypt(value string) (string, error) {
+	return "decrypted:" + value, nil
+}
+
+func newSupplierUpstreamSessionTestService(t *testing.T, provider *SupplierProvider, remote SupplierProviderRemoteClient, encryptor SecretEncryptor) *SupplierProviderSyncService {
+	t.Helper()
+	providerRepo := &supplierProviderRepoStub{items: []*SupplierProvider{provider}}
+	return NewSupplierProviderSyncService(providerRepo, &supplierProviderDataRepoStub{}, remote, encryptor, &supplierSyncLockStub{acquired: true})
+}
+
+// 本地没有凭据时，概览与明细都必须如实回答「查不了」，不能把 0 条伪装成「上游没有残留会话」。
+func TestSupplierProviderSyncServiceReportsUpstreamSessionCredentialMissing(t *testing.T) {
+	remote := &supplierRemoteSessionManagerStub{
+		supplierRemoteClientStub: &supplierRemoteClientStub{},
+		summary:                  SupplierProviderUpstreamSessionSummary{Supported: true, CredentialAvailable: false},
+	}
+	service := newSupplierUpstreamSessionTestService(t, &SupplierProvider{
+		ID: 4, Code: "nikoapi", Name: "NikoAPI", ProviderType: SupplierProviderTypeNewAPI, Enabled: false, PasswordEncrypted: "cipher:secret",
+	}, remote, supplierPasswordDecryptingEncryptorStub{})
+
+	overview, err := service.GetUpstreamSessions(context.Background(), 4)
+	require.NoError(t, err)
+	require.True(t, overview.Supported)
+	require.False(t, overview.CredentialAvailable)
+	require.Zero(t, overview.Count)
+	require.Contains(t, overview.Message, "本地未缓存该供应商的登录凭据")
+	// 概览是自动巡检路径，无论供应商是否启用都不能触发登录。
+	require.Zero(t, remote.listLoginCalls)
+	require.Equal(t, 1, remote.listCalls)
+
+	detail, err := service.GetUpstreamSessionDetails(context.Background(), 4, false)
+	require.NoError(t, err)
+	require.True(t, detail.Supported)
+	require.False(t, detail.CredentialAvailable)
+	require.NotNil(t, detail.Sessions)
+	require.Empty(t, detail.Sessions)
+	require.Contains(t, detail.Message, "本地未缓存该供应商的登录凭据")
+	require.Zero(t, remote.listLoginCalls)
+	require.Equal(t, 2, remote.listCalls)
+}
+
+// 用户显式要求时，允许用解密后的密码登录一次再查询；该路径会新增一条上游会话。
+func TestSupplierProviderSyncServiceLoginBeforeDetailUsesDecryptedPassword(t *testing.T) {
+	remote := &supplierRemoteSessionManagerStub{
+		supplierRemoteClientStub: &supplierRemoteClientStub{},
+		summary: SupplierProviderUpstreamSessionSummary{
+			Supported:           true,
+			CredentialAvailable: true,
+			Count:               2,
+			Sessions: []SupplierProviderUpstreamSession{
+				{SID: "sess-current", Current: true},
+				{SID: "sess-residual"},
+			},
+		},
+	}
+	service := newSupplierUpstreamSessionTestService(t, &SupplierProvider{
+		ID: 4, Code: "nikoapi", ProviderType: SupplierProviderTypeNewAPI, Enabled: false, PasswordEncrypted: "cipher:secret",
+	}, remote, supplierPasswordDecryptingEncryptorStub{})
+
+	detail, err := service.GetUpstreamSessionDetails(context.Background(), 4, true)
+
+	require.NoError(t, err)
+	require.True(t, detail.CredentialAvailable)
+	require.Len(t, detail.Sessions, 2)
+	require.True(t, detail.Sessions[0].Current)
+	require.Empty(t, detail.Message)
+	require.Equal(t, 1, remote.listLoginCalls)
+	require.Zero(t, remote.listCalls)
+	// 必须传解密后的明文密码，而不是库里的密文。
+	require.Equal(t, "decrypted:cipher:secret", remote.loginPassword)
+}
+
+// 没有配置密码就无法登录，此时应退回只读语义并解释原因，而不是凭空发请求。
+func TestSupplierProviderSyncServiceLoginBeforeDetailWithoutPasswordFallsBackToReadOnly(t *testing.T) {
+	remote := &supplierRemoteSessionManagerStub{
+		supplierRemoteClientStub: &supplierRemoteClientStub{},
+		summary:                  SupplierProviderUpstreamSessionSummary{Supported: true, CredentialAvailable: false},
+	}
+	service := newSupplierUpstreamSessionTestService(t, &SupplierProvider{
+		ID: 4, Code: "nikoapi", ProviderType: SupplierProviderTypeNewAPI, Enabled: true,
+	}, remote, supplierPasswordDecryptingEncryptorStub{})
+
+	detail, err := service.GetUpstreamSessionDetails(context.Background(), 4, true)
+
+	require.NoError(t, err)
+	require.False(t, detail.CredentialAvailable)
+	require.Zero(t, remote.listLoginCalls)
+	require.Equal(t, 1, remote.listCalls)
+	require.Contains(t, detail.Message, "未配置登录密码")
+}

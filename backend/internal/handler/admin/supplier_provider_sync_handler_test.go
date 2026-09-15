@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -51,16 +52,24 @@ func TestSupplierSyncProgressStreamWriterCancelsOnWriteFailure(t *testing.T) {
 }
 
 type supplierProviderSyncHandlerSyncStub struct {
-	calledScope          string
-	calledCostDay        time.Time
-	refreshProviderID    int64
-	refreshToken         service.SupplierProviderAuthToken
-	testScope            string
-	streamError          error
-	streamFailureMessage string
-	endpointError        error
-	endpointResult       service.SupplierProviderEndpointTestResult
-	emitStream           bool
+	calledScope            string
+	calledCostDay          time.Time
+	refreshProviderID      int64
+	refreshToken           service.SupplierProviderAuthToken
+	testScope              string
+	streamError            error
+	streamFailureMessage   string
+	endpointError          error
+	endpointResult         service.SupplierProviderEndpointTestResult
+	emitStream             bool
+	upstreamSessionCount   int
+	upstreamSessionRevoked int
+	upstreamSessionErr     error
+	// upstreamSessionAllowLogin 记录 handler 是否把 ?login=true 透传为「允许登录后查询」。
+	upstreamSessionAllowLogin bool
+	// upstreamSessionCredentialMissing 为 true 时 stub 模拟「本地没有可用凭据」，
+	// 用于验证接口返回的是 credential_available=false 而不是谎报 0 条。
+	upstreamSessionCredentialMissing bool
 }
 
 func (s *supplierProviderSyncHandlerSyncStub) SyncAccounts(context.Context, int64, string) (service.SupplierProviderSyncResult, error) {
@@ -118,6 +127,68 @@ func (s *supplierProviderSyncHandlerSyncStub) RefreshToken(_ context.Context, pr
 	}
 	return service.SupplierProviderAuthToken{ExpiresAt: time.Date(2026, time.August, 8, 0, 0, 0, 0, time.UTC)}, nil
 }
+func (s *supplierProviderSyncHandlerSyncStub) GetUpstreamSessions(_ context.Context, providerID int64) (service.SupplierProviderUpstreamSessionsResult, error) {
+	if s.upstreamSessionErr != nil {
+		return service.SupplierProviderUpstreamSessionsResult{}, s.upstreamSessionErr
+	}
+	result := service.SupplierProviderUpstreamSessionsResult{
+		ProviderID:          providerID,
+		Supported:           true,
+		CredentialAvailable: !s.upstreamSessionCredentialMissing,
+		Count:               s.upstreamSessionCount,
+		CheckedAt:           time.Date(2026, time.August, 8, 0, 0, 0, 0, time.UTC),
+	}
+	if s.upstreamSessionCredentialMissing {
+		result.Count = 0
+		result.Message = "本地未缓存该供应商的登录凭据，本次没有真正查询上游；请先在该供应商上完成一次登录或同步，再重新检查。"
+	}
+	return result, nil
+}
+
+func (s *supplierProviderSyncHandlerSyncStub) GetUpstreamSessionDetails(_ context.Context, providerID int64, allowLogin bool) (service.SupplierProviderUpstreamSessionDetailResult, error) {
+	if s.upstreamSessionErr != nil {
+		return service.SupplierProviderUpstreamSessionDetailResult{}, s.upstreamSessionErr
+	}
+	s.upstreamSessionAllowLogin = allowLogin
+	if s.upstreamSessionCredentialMissing {
+		// 没有凭据时上游根本没被访问，Sessions 为空只代表「查不了」。
+		return service.SupplierProviderUpstreamSessionDetailResult{
+			ProviderID:          providerID,
+			Supported:           true,
+			CredentialAvailable: false,
+			Sessions:            []service.SupplierProviderUpstreamSession{},
+			Message:             "本地未缓存该供应商的登录凭据，本次没有真正查询上游；请先在该供应商上完成一次登录或同步，再重新检查。",
+			CheckedAt:           time.Date(2026, time.August, 8, 0, 0, 0, 0, time.UTC),
+		}, nil
+	}
+	// 第一条标记为当前会话，其余为残留会话，与上游「列表包含当前会话」的语义一致。
+	sessions := make([]service.SupplierProviderUpstreamSession, 0, s.upstreamSessionCount)
+	for i := 0; i < s.upstreamSessionCount; i++ {
+		sessions = append(sessions, service.SupplierProviderUpstreamSession{
+			SID:     fmt.Sprintf("sid-%d", i+1),
+			Current: i == 0,
+		})
+	}
+	return service.SupplierProviderUpstreamSessionDetailResult{
+		ProviderID:          providerID,
+		Supported:           true,
+		CredentialAvailable: true,
+		Sessions:            sessions,
+		CheckedAt:           time.Date(2026, time.August, 8, 0, 0, 0, 0, time.UTC),
+	}, nil
+}
+
+func (s *supplierProviderSyncHandlerSyncStub) RevokeUpstreamSessions(_ context.Context, providerID int64) (service.SupplierProviderUpstreamSessionRevokeResult, error) {
+	if s.upstreamSessionErr != nil {
+		return service.SupplierProviderUpstreamSessionRevokeResult{}, s.upstreamSessionErr
+	}
+	return service.SupplierProviderUpstreamSessionRevokeResult{
+		ProviderID:   providerID,
+		RevokedCount: s.upstreamSessionRevoked,
+		RevokedAt:    time.Date(2026, time.August, 8, 0, 0, 0, 0, time.UTC),
+	}, nil
+}
+
 func (s *supplierProviderSyncHandlerSyncStub) AutoMatchMonitorTargets(_ context.Context, providerID int64) (service.SupplierProviderMonitorAutoMatchResult, error) {
 	return service.SupplierProviderMonitorAutoMatchResult{ProviderID: providerID}, nil
 }
@@ -1081,4 +1152,175 @@ func TestSupplierProviderSyncHandlerClearsPlatformOverrideWithSharedAccountIDRou
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, int64(101), dataStub.clearedOverrideAccount)
+}
+
+func TestSupplierProviderSyncHandlerListsUpstreamSessions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	syncStub := &supplierProviderSyncHandlerSyncStub{upstreamSessionCount: 3}
+	handler := NewSupplierProviderSyncHandler(syncStub, &supplierProviderSyncHandlerDataStub{})
+	router := gin.New()
+	router.GET("/providers/:id/upstream-sessions", handler.GetUpstreamSessions)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/providers/42/upstream-sessions", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"provider_id":42`)
+	require.Contains(t, rec.Body.String(), `"supported":true`)
+	require.Contains(t, rec.Body.String(), `"count":3`)
+}
+
+func TestSupplierProviderSyncHandlerRevokesUpstreamSessions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	syncStub := &supplierProviderSyncHandlerSyncStub{upstreamSessionRevoked: 2}
+	handler := NewSupplierProviderSyncHandler(syncStub, &supplierProviderSyncHandlerDataStub{})
+	router := gin.New()
+	router.POST("/providers/:id/upstream-sessions/revoke", handler.RevokeUpstreamSessions)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/providers/42/upstream-sessions/revoke", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"provider_id":42`)
+	require.Contains(t, rec.Body.String(), `"revoked_count":2`)
+}
+
+func TestSupplierProviderSyncHandlerRejectsInvalidUpstreamSessionProviderID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, &supplierProviderSyncHandlerDataStub{})
+	router := gin.New()
+	router.GET("/providers/:id/upstream-sessions", handler.GetUpstreamSessions)
+	router.POST("/providers/:id/upstream-sessions/revoke", handler.RevokeUpstreamSessions)
+
+	for _, tc := range []struct {
+		method string
+		target string
+	}{
+		{method: http.MethodGet, target: "/providers/bad/upstream-sessions"},
+		{method: http.MethodPost, target: "/providers/bad/upstream-sessions/revoke"},
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(tc.method, tc.target, nil)
+		router.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusBadRequest, rec.Code, tc.target)
+	}
+}
+
+func TestSupplierProviderSyncHandlerReturnsUpstreamSessionServiceError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	syncStub := &supplierProviderSyncHandlerSyncStub{upstreamSessionErr: service.ErrSupplierProviderUpstreamSessionUnsupported}
+	handler := NewSupplierProviderSyncHandler(syncStub, &supplierProviderSyncHandlerDataStub{})
+	router := gin.New()
+	router.GET("/providers/:id/upstream-sessions", handler.GetUpstreamSessions)
+	router.POST("/providers/:id/upstream-sessions/revoke", handler.RevokeUpstreamSessions)
+
+	for _, tc := range []struct {
+		method string
+		target string
+	}{
+		{method: http.MethodGet, target: "/providers/42/upstream-sessions"},
+		{method: http.MethodPost, target: "/providers/42/upstream-sessions/revoke"},
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(tc.method, tc.target, nil)
+		router.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusBadRequest, rec.Code, tc.target)
+		require.Contains(t, rec.Body.String(), "upstream does not support login session management", tc.target)
+	}
+}
+
+func TestSupplierProviderSyncHandlerGetsUpstreamSessionDetails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	syncStub := &supplierProviderSyncHandlerSyncStub{upstreamSessionCount: 3}
+	handler := NewSupplierProviderSyncHandler(syncStub, &supplierProviderSyncHandlerDataStub{})
+	router := gin.New()
+	// 概览、明细、清理三条路由同时注册，确保 gin 不会因路径冲突在注册阶段 panic。
+	router.GET("/providers/:id/upstream-sessions", handler.GetUpstreamSessions)
+	router.GET("/providers/:id/upstream-sessions/detail", handler.GetUpstreamSessionDetails)
+	router.POST("/providers/:id/upstream-sessions/revoke", handler.RevokeUpstreamSessions)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/providers/42/upstream-sessions/detail", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"provider_id":42`)
+	require.Contains(t, rec.Body.String(), `"supported":true`)
+	require.Contains(t, rec.Body.String(), `"sid-1"`)
+	require.Contains(t, rec.Body.String(), `"sid-3"`)
+	require.Contains(t, rec.Body.String(), `"current":true`)
+	require.Contains(t, rec.Body.String(), `"current":false`)
+}
+
+func TestSupplierProviderSyncHandlerRejectsInvalidUpstreamSessionDetailProviderID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewSupplierProviderSyncHandler(&supplierProviderSyncHandlerSyncStub{}, &supplierProviderSyncHandlerDataStub{})
+	router := gin.New()
+	router.GET("/providers/:id/upstream-sessions/detail", handler.GetUpstreamSessionDetails)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/providers/bad/upstream-sessions/detail", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestSupplierProviderSyncHandlerReturnsUpstreamSessionDetailServiceError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	syncStub := &supplierProviderSyncHandlerSyncStub{upstreamSessionErr: service.ErrSupplierProviderUpstreamSessionUnavailable}
+	handler := NewSupplierProviderSyncHandler(syncStub, &supplierProviderSyncHandlerDataStub{})
+	router := gin.New()
+	router.GET("/providers/:id/upstream-sessions/detail", handler.GetUpstreamSessionDetails)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/providers/42/upstream-sessions/detail", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "upstream login session is unavailable, please sign in again")
+}
+
+// 本地没有凭据时必须如实回答「查不了」，不能把 0 条伪装成「上游没有残留会话」。
+func TestSupplierProviderSyncHandlerReportsMissingCredentialInsteadOfZeroSessions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	syncStub := &supplierProviderSyncHandlerSyncStub{upstreamSessionCredentialMissing: true}
+	handler := NewSupplierProviderSyncHandler(syncStub, &supplierProviderSyncHandlerDataStub{})
+	router := gin.New()
+	router.GET("/providers/:id/upstream-sessions", handler.GetUpstreamSessions)
+	router.GET("/providers/:id/upstream-sessions/detail", handler.GetUpstreamSessionDetails)
+
+	overviewRec := httptest.NewRecorder()
+	router.ServeHTTP(overviewRec, httptest.NewRequest(http.MethodGet, "/providers/7/upstream-sessions", nil))
+	require.Equal(t, http.StatusOK, overviewRec.Code)
+	require.Contains(t, overviewRec.Body.String(), `"credential_available":false`)
+	require.Contains(t, overviewRec.Body.String(), "本地未缓存该供应商的登录凭据")
+
+	detailRec := httptest.NewRecorder()
+	router.ServeHTTP(detailRec, httptest.NewRequest(http.MethodGet, "/providers/7/upstream-sessions/detail", nil))
+	require.Equal(t, http.StatusOK, detailRec.Code)
+	require.Contains(t, detailRec.Body.String(), `"credential_available":false`)
+	require.Contains(t, detailRec.Body.String(), `"sessions":[]`)
+	require.Contains(t, detailRec.Body.String(), "本地未缓存该供应商的登录凭据")
+}
+
+// 只有显式 ?login=true 才允许把「允许登录后查询」透传给服务层，默认必须是只读。
+func TestSupplierProviderSyncHandlerOnlyAllowsLoginWhenExplicitlyRequested(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	syncStub := &supplierProviderSyncHandlerSyncStub{upstreamSessionCount: 2}
+	handler := NewSupplierProviderSyncHandler(syncStub, &supplierProviderSyncHandlerDataStub{})
+	router := gin.New()
+	router.GET("/providers/:id/upstream-sessions/detail", handler.GetUpstreamSessionDetails)
+
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/providers/9/upstream-sessions/detail", nil))
+	require.False(t, syncStub.upstreamSessionAllowLogin, "默认读取必须保持只读，不能触发登录")
+
+	syncStub.upstreamSessionAllowLogin = false
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/providers/9/upstream-sessions/detail?login=false", nil))
+	require.False(t, syncStub.upstreamSessionAllowLogin)
+
+	syncStub.upstreamSessionAllowLogin = false
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/providers/9/upstream-sessions/detail?login=true", nil))
+	require.True(t, syncStub.upstreamSessionAllowLogin, "?login=true 应透传为允许登录后查询")
 }

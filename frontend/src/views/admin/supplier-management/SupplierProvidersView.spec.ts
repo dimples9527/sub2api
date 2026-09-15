@@ -14,6 +14,9 @@ const providerViewMocks = vi.hoisted(() => ({
   listProviderTypes: vi.fn(),
   updateProvider: vi.fn(),
   refreshToken: vi.fn(),
+  getUpstreamSessions: vi.fn(),
+  getUpstreamSessionDetails: vi.fn(),
+  revokeUpstreamSessions: vi.fn(),
   getAuthStatus: vi.fn(),
   listAuthHistory: vi.fn(),
   syncProvider: vi.fn(),
@@ -47,6 +50,9 @@ vi.mock('@/api/admin/supplierProviders', () => ({
     getBalanceSummary: providerViewMocks.getBalanceSummary,
     update: providerViewMocks.updateProvider,
     refreshToken: providerViewMocks.refreshToken,
+    getUpstreamSessions: providerViewMocks.getUpstreamSessions,
+    getUpstreamSessionDetails: providerViewMocks.getUpstreamSessionDetails,
+    revokeUpstreamSessions: providerViewMocks.revokeUpstreamSessions,
     getAuthStatus: providerViewMocks.getAuthStatus,
     listAuthHistory: providerViewMocks.listAuthHistory,
     getCostDeviationSettings: providerViewMocks.getCostDeviationSettings,
@@ -176,6 +182,44 @@ type ProvidersWrapper = Awaited<ReturnType<typeof mountSupplierProviders>>
 
 async function openCostDialog(wrapper: ProvidersWrapper) {
   await wrapper.get('[data-test="supplier-cost-dialog-open"]').trigger('click')
+  await flushPromises()
+}
+
+// mockSingleNewAPIProvider 让列表只返回一个 New API 供应商，供上游会话相关用例复用。
+function mockSingleNewAPIProvider() {
+  providerViewMocks.listProviders.mockResolvedValueOnce({
+    items: [{ ...createProviderRow(1, 'Alpha', 30, 100, 1), provider_type: 'newapi' }],
+    summary: {
+      total_count: 1,
+      enabled_count: 1,
+      high_risk_count: 0,
+      low_balance_count: 0,
+      sync_failure_count: 0,
+      rate_risk_count: 0,
+    },
+    total: 1,
+    page: 1,
+    page_size: 100,
+  })
+}
+
+// createUpstreamSession 构造一条上游会话明细，字段值可在调用处按需覆盖。
+function createUpstreamSession(sid: string, current = false) {
+  return {
+    sid,
+    current,
+    status: 'active',
+    login_method: 'password',
+    ip: '10.0.0.1',
+    user_agent: 'curl/8',
+    created_at: '2026-08-05T07:00:00Z',
+    last_active_at: '2026-08-05T07:30:00Z',
+    expires_at: '2026-09-05T07:00:00Z',
+  }
+}
+
+async function openSessionDetailDialog(wrapper: ProvidersWrapper) {
+  await wrapper.get('[data-test="supplier-upstream-session-detail-1"]').trigger('click')
   await flushPromises()
 }
 
@@ -658,7 +702,7 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(supplierProvidersSource).not.toContain("const sorts = ['风险优先', '成本效率', '最近同步']")
   })
 
-  it('renders redesigned supplier health panel with cost trend chart', async () => {
+  it('renders the upstream session panel in place of the provider health panel', async () => {
     const wrapper = await mountSupplierProviders()
 
     const defaultEnd = new Date()
@@ -670,8 +714,9 @@ describe('SupplierProvidersView payload normalization', () => {
       start_date: formatDate(defaultStart),
       end_date: formatDate(defaultEnd),
     })
-    expect(wrapper.get('[data-test="supplier-health-panel"]').exists()).toBe(true)
-    expect(wrapper.get('[data-test="supplier-health-tone"]').text()).toContain('稳定')
+    expect(wrapper.get('[data-test="supplier-upstream-session-panel"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="supplier-upstream-session-tone"]').text()).toContain('正常')
+    expect(supplierProvidersSource).not.toContain('供应商组合健康')
     await openCostDialog(wrapper)
     expect(wrapper.get('[data-test="supplier-cost-trend"]').text()).toContain('成本对比')
     expect(wrapper.get('[data-test="supplier-cost-trend"]').text()).toContain('上游成本')
@@ -679,19 +724,339 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(wrapper.get('[data-test="supplier-cost-trend"]').text()).toContain('本地成本')
     expect(wrapper.get('[data-test="supplier-cost-trend"]').text()).toContain('生效成本')
     expect(wrapper.get('[data-test="supplier-cost-trend"]').text()).toContain('生效合计')
-    expect(supplierProvidersSource).toContain('priorityTodos')
+    expect(supplierProvidersSource).toContain('loadUpstreamSessions')
     expect(supplierProvidersSource).toContain('costTrendChartData')
     expect(supplierProvidersSource).not.toContain('class="sp-stat-list"')
   })
 
-  it('lays out the health detail list below priority todos as a compact full-width grid', () => {
-    const listStyle = supplierProvidersSource.match(
-      /\.sp-health-completeness-list\s*\{[\s\S]*?\n\}/,
-    )?.[0] ?? ''
+  it('只对 New API 供应商查询上游会话，并按会话数量给出告警', async () => {
+    providerViewMocks.listProviders.mockResolvedValueOnce({
+      items: [
+        { ...createProviderRow(1, 'Alpha', 30, 100, 1), provider_type: 'newapi' },
+        { ...createProviderRow(2, 'Beta', 10, 20, 2), provider_type: 'newapi' },
+      ],
+      summary: {
+        total_count: 2,
+        enabled_count: 2,
+        high_risk_count: 0,
+        low_balance_count: 0,
+        sync_failure_count: 0,
+        rate_risk_count: 0,
+      },
+      total: 2,
+      page: 1,
+      page_size: 100,
+    })
+    providerViewMocks.getUpstreamSessions.mockImplementation(async (id: number) => ({
+      provider_id: id,
+      supported: true,
+      count: id === 1 ? 4 : 1,
+      message: '',
+      checked_at: '2026-08-05T07:30:00Z',
+    }))
 
-    expect(listStyle).toContain('display: grid')
-    expect(listStyle).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))')
-    expect(supplierProvidersSource).toContain('.sp-health-completeness-list .sp-list-item')
+    const wrapper = await mountSupplierProviders()
+    await flushPromises()
+
+    // 只查询 newapi 类型，sub2api 不在统计范围内。
+    expect(providerViewMocks.getUpstreamSessions).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-test="supplier-upstream-session-tone"]').text()).toContain('需清理')
+    expect(wrapper.get('[data-test="supplier-upstream-session-item-1"]').text()).toContain('4 个')
+    expect(wrapper.get('[data-test="supplier-upstream-session-item-1"]').text()).toContain('存在 3 个残留会话')
+    expect(wrapper.get('[data-test="supplier-upstream-session-item-2"]').text()).toContain('无残留会话')
+  })
+
+  it('清理残留会话后重新查询上游会话数量', async () => {
+    providerViewMocks.listProviders.mockResolvedValueOnce({
+      items: [{ ...createProviderRow(1, 'Alpha', 30, 100, 1), provider_type: 'newapi' }],
+      summary: {
+        total_count: 1,
+        enabled_count: 1,
+        high_risk_count: 0,
+        low_balance_count: 0,
+        sync_failure_count: 0,
+        rate_risk_count: 0,
+      },
+      total: 1,
+      page: 1,
+      page_size: 100,
+    })
+    providerViewMocks.getUpstreamSessions.mockResolvedValue({
+      provider_id: 1,
+      supported: true,
+      count: 5,
+      message: '',
+      checked_at: '2026-08-05T07:30:00Z',
+    })
+    providerViewMocks.revokeUpstreamSessions.mockResolvedValue({
+      provider_id: 1,
+      revoked_count: 4,
+      message: '',
+      revoked_at: '2026-08-05T07:30:00Z',
+    })
+
+    const wrapper = await mountSupplierProviders()
+    await flushPromises()
+
+    expect(providerViewMocks.getUpstreamSessions).toHaveBeenCalledTimes(1)
+    await wrapper.get('[data-test="supplier-upstream-session-revoke-1"]').trigger('click')
+    await flushPromises()
+
+    expect(providerViewMocks.revokeUpstreamSessions).toHaveBeenCalledWith(1)
+    expect(providerViewMocks.showSuccess).toHaveBeenCalledWith('已清理 4 个残留会话')
+    expect(providerViewMocks.getUpstreamSessions).toHaveBeenCalledTimes(2)
+  })
+
+  it('上游不支持会话管理时降级提示而不是报错', async () => {
+    providerViewMocks.listProviders.mockResolvedValueOnce({
+      items: [{ ...createProviderRow(1, 'Alpha', 30, 100, 1), provider_type: 'newapi' }],
+      summary: {
+        total_count: 1,
+        enabled_count: 1,
+        high_risk_count: 0,
+        low_balance_count: 0,
+        sync_failure_count: 0,
+        rate_risk_count: 0,
+      },
+      total: 1,
+      page: 1,
+      page_size: 100,
+    })
+    providerViewMocks.getUpstreamSessions.mockResolvedValue({
+      provider_id: 1,
+      supported: false,
+      count: 0,
+      message: '上游未提供会话管理接口，无法统计登录会话',
+      checked_at: '2026-08-05T07:30:00Z',
+    })
+
+    const wrapper = await mountSupplierProviders()
+    await flushPromises()
+
+    const item = wrapper.get('[data-test="supplier-upstream-session-item-1"]')
+    expect(item.text()).toContain('不支持')
+    expect(item.text()).toContain('上游未提供会话管理接口')
+    // 不支持时既不提供清理入口，也不提供明细入口。
+    expect(wrapper.find('[data-test="supplier-upstream-session-revoke-1"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="supplier-upstream-session-detail-1"]').exists()).toBe(false)
+  })
+
+  it('打开会话明细弹窗并逐条列出上游登录会话', async () => {
+    mockSingleNewAPIProvider()
+    providerViewMocks.getUpstreamSessions.mockResolvedValue({
+      provider_id: 1,
+      supported: true,
+      count: 3,
+      message: '',
+      checked_at: '2026-08-05T07:30:00Z',
+    })
+    providerViewMocks.getUpstreamSessionDetails.mockResolvedValue({
+      provider_id: 1,
+      supported: true,
+      sessions: [
+        createUpstreamSession('sess-current', true),
+        createUpstreamSession('sess-residual-1'),
+        createUpstreamSession('sess-residual-2'),
+      ],
+      checked_at: '2026-08-05T07:30:00Z',
+    })
+
+    const wrapper = await mountSupplierProviders()
+    await flushPromises()
+
+    // 未打开弹窗前不拉明细，避免页面加载时为每个供应商拉全量会话对象。
+    expect(providerViewMocks.getUpstreamSessionDetails).not.toHaveBeenCalled()
+
+    await openSessionDetailDialog(wrapper)
+
+    // 打开弹窗属于只读路径，绝不能带上 allowLogin，否则会凭空在上游新增会话。
+    expect(providerViewMocks.getUpstreamSessionDetails).toHaveBeenCalledWith(1, { allowLogin: false })
+    const dialog = wrapper.get('[data-test="supplier-upstream-session-detail-dialog"]')
+    expect(dialog.text()).toContain('Alpha')
+    expect(dialog.text()).toContain('共 3 个会话，其中残留 2 个')
+
+    // 当前会话与残留会话必须分别标注，便于判断哪条可以清理。
+    expect(wrapper.get('[data-test="supplier-upstream-session-detail-item-sess-current"]').text()).toContain('当前会话')
+    expect(wrapper.get('[data-test="supplier-upstream-session-detail-item-sess-residual-1"]').text()).toContain('残留会话')
+    expect(wrapper.get('[data-test="supplier-upstream-session-detail-item-sess-residual-1"]').text()).toContain('10.0.0.1')
+
+    expect(wrapper.get('[data-test="supplier-upstream-session-detail-revoke"]').text()).toContain('清理 2 个残留会话')
+  })
+
+  it('明细弹窗内清理残留会话后同时刷新明细与数量', async () => {
+    mockSingleNewAPIProvider()
+    providerViewMocks.getUpstreamSessions.mockResolvedValue({
+      provider_id: 1,
+      supported: true,
+      count: 3,
+      message: '',
+      checked_at: '2026-08-05T07:30:00Z',
+    })
+    providerViewMocks.getUpstreamSessionDetails.mockResolvedValue({
+      provider_id: 1,
+      supported: true,
+      sessions: [
+        createUpstreamSession('sess-current', true),
+        createUpstreamSession('sess-residual-1'),
+        createUpstreamSession('sess-residual-2'),
+      ],
+      checked_at: '2026-08-05T07:30:00Z',
+    })
+    providerViewMocks.revokeUpstreamSessions.mockResolvedValue({
+      provider_id: 1,
+      revoked_count: 2,
+      message: '',
+      revoked_at: '2026-08-05T07:30:00Z',
+    })
+
+    const wrapper = await mountSupplierProviders()
+    await flushPromises()
+    await openSessionDetailDialog(wrapper)
+
+    const summaryCallsBefore = providerViewMocks.getUpstreamSessions.mock.calls.length
+
+    await wrapper.get('[data-test="supplier-upstream-session-detail-revoke"]').trigger('click')
+    await flushPromises()
+
+    expect(providerViewMocks.revokeUpstreamSessions).toHaveBeenCalledWith(1)
+    expect(providerViewMocks.showSuccess).toHaveBeenCalledWith('已清理 2 个残留会话')
+    // 明细重新拉取一次（打开时一次 + 清理后一次）。
+    expect(providerViewMocks.getUpstreamSessionDetails).toHaveBeenCalledTimes(2)
+    // 面板的会话数量也要同步刷新，避免弹窗与列表数字不一致。
+    expect(providerViewMocks.getUpstreamSessions.mock.calls.length).toBe(summaryCallsBefore + 1)
+  })
+
+  it('读取会话明细失败时在弹窗内提示而不是静默', async () => {
+    mockSingleNewAPIProvider()
+    providerViewMocks.getUpstreamSessions.mockResolvedValue({
+      provider_id: 1,
+      supported: true,
+      count: 2,
+      message: '',
+      checked_at: '2026-08-05T07:30:00Z',
+    })
+    providerViewMocks.getUpstreamSessionDetails.mockRejectedValue(new Error('boom'))
+
+    const wrapper = await mountSupplierProviders()
+    await flushPromises()
+    await openSessionDetailDialog(wrapper)
+
+    expect(wrapper.get('[data-test="supplier-upstream-session-detail-error"]').text()).toContain('boom')
+    // 读取失败时无法判断残留数量，因此不提供清理入口。
+    expect(wrapper.find('[data-test="supplier-upstream-session-detail-revoke"]').exists()).toBe(false)
+  })
+
+  it('本地无凭据时显示无法查询而不是谎报 0 条会话', async () => {
+    mockSingleNewAPIProvider()
+    providerViewMocks.getUpstreamSessions.mockResolvedValue({
+      provider_id: 1,
+      supported: true,
+      credential_available: false,
+      count: 0,
+      message: '本地未缓存该供应商的登录凭据，本次没有真正查询上游；请先在该供应商上完成一次登录或同步，再重新检查。',
+      checked_at: '2026-08-05T07:30:00Z',
+    })
+
+    const wrapper = await mountSupplierProviders()
+    await flushPromises()
+
+    const item = wrapper.get('[data-test="supplier-upstream-session-item-1"]')
+    // 关键回归点：0 条必须显示成「无法查询」，否则用户会以为上游很干净。
+    expect(item.text()).toContain('无法查询')
+    expect(item.text()).not.toContain('0 个')
+    expect(item.text()).toContain('本地未缓存该供应商的登录凭据')
+    // 面板整体也要提示「部分无法检查」，不能落到「正常」。
+    expect(wrapper.get('[data-test="supplier-upstream-session-summary"]').text()).toContain('部分无法检查')
+    // 没有凭据时不能给出清理入口（清不了），但明细入口要保留，用户才有机会登录后读取。
+    expect(wrapper.find('[data-test="supplier-upstream-session-revoke-1"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="supplier-upstream-session-detail-1"]').exists()).toBe(true)
+  })
+
+  it('明细弹窗在无凭据时给出登录并读取入口，且只在点按后才带上 allowLogin', async () => {
+    mockSingleNewAPIProvider()
+    providerViewMocks.getUpstreamSessions.mockResolvedValue({
+      provider_id: 1,
+      supported: true,
+      credential_available: false,
+      count: 0,
+      message: '本地未缓存该供应商的登录凭据，本次没有真正查询上游；请先在该供应商上完成一次登录或同步，再重新检查。',
+      checked_at: '2026-08-05T07:30:00Z',
+    })
+    providerViewMocks.getUpstreamSessionDetails.mockResolvedValueOnce({
+      provider_id: 1,
+      supported: true,
+      credential_available: false,
+      sessions: [],
+      message: '本地未缓存该供应商的登录凭据，本次没有真正查询上游；请先在该供应商上完成一次登录或同步，再重新检查。',
+      checked_at: '2026-08-05T07:30:00Z',
+    })
+    providerViewMocks.getUpstreamSessionDetails.mockResolvedValueOnce({
+      provider_id: 1,
+      supported: true,
+      credential_available: true,
+      sessions: [createUpstreamSession('sess-current', true), createUpstreamSession('sess-residual-1')],
+      checked_at: '2026-08-05T07:30:00Z',
+    })
+    providerViewMocks.getUpstreamSessions.mockResolvedValue({
+      provider_id: 1,
+      supported: true,
+      credential_available: true,
+      count: 2,
+      message: '',
+      checked_at: '2026-08-05T07:30:00Z',
+    })
+
+    const wrapper = await mountSupplierProviders()
+    await flushPromises()
+    await openSessionDetailDialog(wrapper)
+
+    // 首次打开仍是只读，不能凭空在上游新增会话。
+    expect(providerViewMocks.getUpstreamSessionDetails).toHaveBeenNthCalledWith(1, 1, { allowLogin: false })
+    expect(wrapper.get('[data-test="supplier-upstream-session-detail-no-credential"]').text()).toContain('本地未缓存该供应商的登录凭据')
+    // 无凭据时不应提供清理入口。
+    expect(wrapper.find('[data-test="supplier-upstream-session-detail-revoke"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="supplier-upstream-session-detail-login"]').trigger('click')
+    await flushPromises()
+
+    // 只有用户显式点按才允许登录后查询。
+    expect(providerViewMocks.getUpstreamSessionDetails).toHaveBeenNthCalledWith(2, 1, { allowLogin: true })
+    expect(wrapper.get('[data-test="supplier-upstream-session-detail-item-sess-residual-1"]').text()).toContain('残留会话')
+    expect(wrapper.get('[data-test="supplier-upstream-session-detail-revoke"]').text()).toContain('清理 1 个残留会话')
+    // 登录成功后面板的「无法查询」也要同步刷新掉。
+    expect(wrapper.get('[data-test="supplier-upstream-session-item-1"]').text()).toContain('2 个')
+  })
+
+  it('无凭据且明细读取失败时不把面板刷新成正常', async () => {
+    mockSingleNewAPIProvider()
+    providerViewMocks.getUpstreamSessions.mockResolvedValue({
+      provider_id: 1,
+      supported: true,
+      credential_available: false,
+      count: 0,
+      message: '本地未缓存该供应商的登录凭据，本次没有真正查询上游；请先在该供应商上完成一次登录或同步，再重新检查。',
+      checked_at: '2026-08-05T07:30:00Z',
+    })
+    providerViewMocks.getUpstreamSessionDetails.mockResolvedValueOnce({
+      provider_id: 1,
+      supported: true,
+      credential_available: false,
+      sessions: [],
+      message: '本地未缓存该供应商的登录凭据，本次没有真正查询上游；请先在该供应商上完成一次登录或同步，再重新检查。',
+      checked_at: '2026-08-05T07:30:00Z',
+    })
+    providerViewMocks.getUpstreamSessionDetails.mockRejectedValueOnce(new Error('boom'))
+
+    const wrapper = await mountSupplierProviders()
+    await flushPromises()
+    await openSessionDetailDialog(wrapper)
+
+    await wrapper.get('[data-test="supplier-upstream-session-detail-login"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="supplier-upstream-session-detail-error"]').text()).toContain('boom')
+    // 登录读取失败时面板必须保持「无法查询」，不能被刷新成正常。
+    expect(wrapper.get('[data-test="supplier-upstream-session-item-1"]').text()).toContain('无法查询')
   })
 
   it('renders grouped upstream, calculated, local and effective cost bars for each supplier', async () => {
@@ -771,47 +1136,12 @@ describe('SupplierProvidersView payload normalization', () => {
     const breakdownPanel = wrapper.get('[data-test="supplier-cost-breakdown-panel"]')
     expect(breakdownPanel.classes()).toContain('sp-panel')
     expect(breakdownPanel.classes()).toContain('sp-cost-breakdown-panel')
-    expect(wrapper.get('[data-test="supplier-health-panel"]').find('[data-test="supplier-cost-breakdown"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="supplier-upstream-session-panel"]').find('[data-test="supplier-cost-breakdown"]').exists()).toBe(false)
     expect(supplierProvidersSource).not.toContain('sp-health-breakdown-chart-scroll')
     expect(supplierProvidersSource).not.toContain('costBreakdownChartMinWidth')
     expect(supplierProvidersSource).toMatch(
       /\.sp-health-breakdown-chart\s*\{[\s\S]*?width:\s*100%;[\s\S]*?min-width:\s*0;/,
     )
-  })
-
-  it('shows priority todos and filters high-risk providers when a health todo is clicked', async () => {
-    providerViewMocks.listProviders.mockResolvedValueOnce({
-      items: [
-        {
-          ...createProviderRow(1, 'Alpha', 30, 100, 1),
-          risk_level: 'high',
-          sync_status: 'failed',
-        },
-        createProviderRow(2, 'Beta', 10, 20, 2),
-        { ...createProviderRow(3, 'Gamma', 20, 50, 3), is_default: true },
-      ],
-      summary: {
-        total_count: 3,
-        enabled_count: 3,
-        high_risk_count: 1,
-        low_balance_count: 0,
-        sync_failure_count: 1,
-        rate_risk_count: 0,
-      },
-      total: 3,
-      page: 1,
-      page_size: 100,
-    })
-
-    const wrapper = await mountSupplierProviders()
-    expect(wrapper.get('[data-test="supplier-health-tone"]').text()).toContain('告警')
-    expect(wrapper.get('[data-test="supplier-health-todo-high-risk"]').exists()).toBe(true)
-
-    await wrapper.get('[data-test="supplier-health-todo-high-risk"]').trigger('click')
-    await flushPromises()
-
-    const rowIds = wrapper.findAll('tbody tr[data-row-id]').map(row => row.attributes('data-row-id'))
-    expect(rowIds).toEqual(['1'])
   })
 
 

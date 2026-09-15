@@ -41,6 +41,9 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 			providers.POST("/:id/sync/all", h.Admin.SupplierProviderSync.SyncAll)
 			providers.POST("/:id/sync/all/stream", h.Admin.SupplierProviderSync.SyncAllStream)
 			providers.POST("/:id/refresh-token", h.Admin.SupplierProviderSync.RefreshToken)
+			providers.GET("/:id/upstream-sessions", h.Admin.SupplierProviderSync.GetUpstreamSessions)
+			providers.GET("/:id/upstream-sessions/detail", h.Admin.SupplierProviderSync.GetUpstreamSessionDetails)
+			providers.POST("/:id/upstream-sessions/revoke", h.Admin.SupplierProviderSync.RevokeUpstreamSessions)
 			providers.POST("/:id/test/:scope", h.Admin.SupplierProviderSync.TestEndpoint)
 		}
 

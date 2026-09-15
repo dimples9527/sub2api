@@ -92,6 +92,57 @@ export interface SupplierProviderTokenRefreshResult {
   expires_at?: string
   message: string
 }
+
+/** 上游登录会话快照。上游列表包含当前会话，因此 count 大于 1 即表示存在残留会话。 */
+export interface SupplierProviderUpstreamSessionsResult {
+  provider_id: number
+  /** 上游是否提供会话管理接口，老版本 New API 为 false。 */
+  supported: boolean
+  /**
+   * 本地是否缓存了可用的登录凭据。
+   * 为 false 时 count 一定是 0，但这个 0 表示「查不了」而不是「上游没有会话」，
+   * 界面必须显示明确说明，绝不能把 0 当成「上游很干净」。
+   */
+  credential_available: boolean
+  count: number
+  message?: string
+  checked_at: string
+}
+
+/** 上游一条登录会话的可展示信息。 */
+export interface SupplierProviderUpstreamSession {
+  sid: string
+  /** 当前同步正在使用的那条会话，清理时会被保留。 */
+  current: boolean
+  status: string
+  login_method: string
+  ip: string
+  user_agent: string
+  created_at: string
+  last_active_at: string
+  expires_at: string
+}
+
+/** 上游登录会话明细快照。 */
+export interface SupplierProviderUpstreamSessionDetailResult {
+  provider_id: number
+  /** 上游是否提供会话管理接口，老版本 New API 为 false。 */
+  supported: boolean
+  /** 本地是否缓存了可用的登录凭据；为 false 时 sessions 为空只代表「查不了」。 */
+  credential_available: boolean
+  sessions: SupplierProviderUpstreamSession[]
+  message?: string
+  checked_at: string
+}
+
+/** 一次上游会话清理的结果。 */
+export interface SupplierProviderUpstreamSessionRevokeResult {
+  provider_id: number
+  revoked_count: number
+  message?: string
+  revoked_at: string
+}
+
 export interface SupplierProviderAuthStatusResult {
   provider_id: number
   summary: SupplierProviderAuthSummary
@@ -391,6 +442,38 @@ export async function refreshToken(id: number): Promise<SupplierProviderTokenRef
   return data
 }
 
+/** 查询上游当前持有的登录会话数量。 */
+export async function getUpstreamSessions(id: number): Promise<SupplierProviderUpstreamSessionsResult> {
+  const { data } = await apiClient.get<SupplierProviderUpstreamSessionsResult>(
+    `/admin/supplier-management/providers/${id}/upstream-sessions`
+  )
+  return data
+}
+
+/**
+ * 查询上游登录会话明细，用于逐条排查残留会话。
+ * allowLogin 为 true 时允许后端在本地无凭据的情况下先登录一次再查询——
+ * 该动作会在上游新增一条会话，只能由用户显式点按触发，默认必须是只读。
+ */
+export async function getUpstreamSessionDetails(
+  id: number,
+  options: { allowLogin?: boolean } = {}
+): Promise<SupplierProviderUpstreamSessionDetailResult> {
+  const { data } = await apiClient.get<SupplierProviderUpstreamSessionDetailResult>(
+    `/admin/supplier-management/providers/${id}/upstream-sessions/detail`,
+    { params: options.allowLogin ? { login: 'true' } : undefined }
+  )
+  return data
+}
+
+/** 清理上游除当前会话以外的登录会话。 */
+export async function revokeUpstreamSessions(id: number): Promise<SupplierProviderUpstreamSessionRevokeResult> {
+  const { data } = await apiClient.post<SupplierProviderUpstreamSessionRevokeResult>(
+    `/admin/supplier-management/providers/${id}/upstream-sessions/revoke`
+  )
+  return data
+}
+
 export async function getAuthStatus(id: number): Promise<SupplierProviderAuthStatusResult> {
   const { data } = await apiClient.get<SupplierProviderAuthStatusResult>(
     `/admin/supplier-management/providers/${id}/auth-status`
@@ -442,6 +525,9 @@ export const supplierProvidersAPI = {
   delete: deleteProvider,
   setDefault,
   refreshToken,
+  getUpstreamSessions,
+  getUpstreamSessionDetails,
+  revokeUpstreamSessions,
   getAuthStatus,
   listAuthHistory,
   getCostDeviationSettings,

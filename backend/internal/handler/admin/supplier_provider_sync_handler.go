@@ -31,6 +31,9 @@ type SupplierProviderSyncServicePort interface {
 	SyncAll(ctx context.Context, providerID int64, trigger string) (service.SupplierProviderSyncResult, error)
 	TestEndpoint(ctx context.Context, providerID int64, scope string) (service.SupplierProviderEndpointTestResult, error)
 	RefreshToken(ctx context.Context, providerID int64) (service.SupplierProviderAuthToken, error)
+	GetUpstreamSessions(ctx context.Context, providerID int64) (service.SupplierProviderUpstreamSessionsResult, error)
+	GetUpstreamSessionDetails(ctx context.Context, providerID int64, allowLogin bool) (service.SupplierProviderUpstreamSessionDetailResult, error)
+	RevokeUpstreamSessions(ctx context.Context, providerID int64) (service.SupplierProviderUpstreamSessionRevokeResult, error)
 	AutoMatchMonitorTargets(ctx context.Context, providerID int64) (service.SupplierProviderMonitorAutoMatchResult, error)
 }
 
@@ -1009,4 +1012,50 @@ func (h *SupplierProviderSyncHandler) RefreshToken(c *gin.Context) {
 		"expires_at":  token.ExpiresAt,
 		"message":     message,
 	})
+}
+
+// GetUpstreamSessions 返回上游当前持有的登录会话数量，用于发现未被吊销的残留会话。
+func (h *SupplierProviderSyncHandler) GetUpstreamSessions(c *gin.Context) {
+	id, ok := parseSupplierProviderID(c)
+	if !ok {
+		return
+	}
+	result, err := h.syncService.GetUpstreamSessions(c.Request.Context(), id)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+// GetUpstreamSessionDetails 返回上游登录会话明细，用于逐条排查残留会话。
+// 默认只读：本地没有缓存凭据时如实返回 credential_available=false，而不是谎报 0 条。
+// 仅当调用方显式传 ?login=true 时，才允许在本地无凭据的情况下登录一次再查询
+// （该动作会在上游新增一条会话，必须由用户主动触发）。
+func (h *SupplierProviderSyncHandler) GetUpstreamSessionDetails(c *gin.Context) {
+	id, ok := parseSupplierProviderID(c)
+	if !ok {
+		return
+	}
+	allowLogin := strings.EqualFold(strings.TrimSpace(c.Query("login")), "true")
+	result, err := h.syncService.GetUpstreamSessionDetails(c.Request.Context(), id, allowLogin)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+// RevokeUpstreamSessions 清理上游除当前会话以外的登录会话。
+func (h *SupplierProviderSyncHandler) RevokeUpstreamSessions(c *gin.Context) {
+	id, ok := parseSupplierProviderID(c)
+	if !ok {
+		return
+	}
+	result, err := h.syncService.RevokeUpstreamSessions(c.Request.Context(), id)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
 }

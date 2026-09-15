@@ -1548,3 +1548,281 @@ func TestParseSupplierNewAPIRechargeRecordsParsesAmountAndTimestamp(t *testing.T
 	require.Equal(t, 50.0, records[0].Amount)
 	require.Equal(t, "online", records[0].RechargeType)
 }
+
+func supplierNewAPITestStoredToken(sessionID string) SupplierProviderAuthToken {
+	return SupplierProviderAuthToken{
+		UserID:      42,
+		AccessToken: supplierNewAPITestAccessToken(sessionID),
+		SessionID:   sessionID,
+		ExpiresAt:   time.Now().Add(time.Hour),
+	}
+}
+
+func TestSupplierNewAPIClientListsUpstreamSessions(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	cache.preload(42, supplierNewAPITestStoredToken("sess-current"))
+	var requestedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		require.Equal(t, http.MethodGet, r.Method)
+		requestedPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"success":true,"data":[{"sid":"sess-a"},{"sid":"sess-b"},{"sid":"sess-current"}]}`))
+	}))
+	defer server.Close()
+
+	summary, err := NewSupplierNewAPIClient(server.Client(), cache, nil).
+		ListUpstreamSessions(context.Background(), supplierNewAPICacheTestProvider(server.URL))
+
+	require.NoError(t, err)
+	require.True(t, summary.Supported)
+	require.Equal(t, 3, summary.Count)
+	require.Equal(t, "/api/user/sessions", requestedPath)
+}
+
+func TestSupplierNewAPIClientListsUpstreamSessionDetails(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	cache.preload(42, supplierNewAPITestStoredToken("sess-current"))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":[` +
+			`{"sid":"sess-current","status":"active","login_method":"password","ip":"10.0.0.1","user_agent":"curl/8","created_at":1755000000,"last_active_at":1755000600,"expires_at":1757600000},` +
+			`{"sid":"sess-residual","status":"active","login_method":"password","ip":"10.0.0.2","user_agent":"Mozilla/5.0","created_at":1754000000,"last_active_at":1754000100,"expires_at":0}` +
+			`]}`))
+	}))
+	defer server.Close()
+
+	summary, err := NewSupplierNewAPIClient(server.Client(), cache, nil).
+		ListUpstreamSessions(context.Background(), supplierNewAPICacheTestProvider(server.URL))
+
+	require.NoError(t, err)
+	require.True(t, summary.Supported)
+	require.Equal(t, 2, summary.Count)
+	require.Len(t, summary.Sessions, 2)
+
+	current := summary.Sessions[0]
+	require.Equal(t, "sess-current", current.SID)
+	require.True(t, current.Current)
+	require.Equal(t, "active", current.Status)
+	require.Equal(t, "password", current.LoginMethod)
+	require.Equal(t, "10.0.0.1", current.IP)
+	require.Equal(t, "curl/8", current.UserAgent)
+	require.Equal(t, time.Unix(1755000000, 0).UTC(), current.CreatedAt)
+	require.Equal(t, time.Unix(1755000600, 0).UTC(), current.LastActiveAt)
+	require.Equal(t, time.Unix(1757600000, 0).UTC(), current.ExpiresAt)
+
+	residual := summary.Sessions[1]
+	require.Equal(t, "sess-residual", residual.SID)
+	require.False(t, residual.Current)
+	require.Equal(t, "10.0.0.2", residual.IP)
+	// 上游用 0 表示未提供时间，必须转成零值时间而不是 1970 年。
+	require.True(t, residual.ExpiresAt.IsZero())
+}
+
+func TestSupplierNewAPIClientMarksCurrentUpstreamSessionBySIDNotOrder(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	cache.preload(42, supplierNewAPITestStoredToken("sess-current"))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// 故意把当前会话放在列表末尾，验证标记依据是 sid 比对而不是列表顺序。
+		_, _ = w.Write([]byte(`{"success":true,"data":[{"sid":"sess-a"},{"sid":"sess-b"},{"sid":"sess-current"}]}`))
+	}))
+	defer server.Close()
+
+	summary, err := NewSupplierNewAPIClient(server.Client(), cache, nil).
+		ListUpstreamSessions(context.Background(), supplierNewAPICacheTestProvider(server.URL))
+
+	require.NoError(t, err)
+	require.Len(t, summary.Sessions, 3)
+	require.False(t, summary.Sessions[0].Current)
+	require.False(t, summary.Sessions[1].Current)
+	require.True(t, summary.Sessions[2].Current)
+}
+
+func TestSupplierNewAPIClientListsUpstreamSessionsWithoutStoredSession(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		_, _ = w.Write([]byte(`{"success":true,"data":[]}`))
+	}))
+	defer server.Close()
+
+	summary, err := NewSupplierNewAPIClient(server.Client(), newSupplierSub2APIFakeTokenCache(), nil).
+		ListUpstreamSessions(context.Background(), supplierNewAPICacheTestProvider(server.URL))
+
+	require.NoError(t, err)
+	require.True(t, summary.Supported)
+	require.Zero(t, summary.Count)
+	// 关键：这个 0 必须伴随 CredentialAvailable=false。否则本地凭据丢失时，
+	// 界面会把「读不到上游」显示成「上游没有残留会话」，把用户带偏。
+	require.False(t, summary.CredentialAvailable)
+	// 没有本地会话时不应为了统计而触发上游登录。
+	require.Equal(t, int32(0), calls.Load())
+}
+
+func TestSupplierNewAPIClientListsUpstreamSessionsWithLoginWhenCredentialMissing(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	var loginCalls, sessionCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			loginCalls.Add(1)
+			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"` + supplierNewAPITestAccessToken("sess-fresh") + `","access_expires_at":4102444800,"user":{"id":42}}}`))
+		case "/api/user/sessions":
+			sessionCalls.Add(1)
+			_, _ = w.Write([]byte(`{"success":true,"data":[{"sid":"sess-fresh"},{"sid":"sess-residual"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	summary, err := NewSupplierNewAPIClient(server.Client(), cache, nil).
+		ListUpstreamSessionsWithLogin(context.Background(), supplierNewAPICacheTestProvider(server.URL), "secret")
+
+	require.NoError(t, err)
+	require.True(t, summary.Supported)
+	require.True(t, summary.CredentialAvailable)
+	require.Equal(t, 2, summary.Count)
+	require.Equal(t, int32(1), loginCalls.Load())
+	require.Equal(t, int32(1), sessionCalls.Load())
+	// 登录后新会话必须被识别为当前会话，否则会被界面误判成残留会话。
+	require.True(t, summary.Sessions[0].Current)
+	require.False(t, summary.Sessions[1].Current)
+}
+
+func TestSupplierNewAPIClientListsUpstreamSessionsWithLoginReusesStoredCredential(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	cache.preload(42, supplierNewAPITestStoredToken("sess-current"))
+	var loginCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			loginCalls.Add(1)
+			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"` + supplierNewAPITestAccessToken("sess-new") + `","access_expires_at":4102444800,"user":{"id":42}}}`))
+		case "/api/user/sessions":
+			_, _ = w.Write([]byte(`{"success":true,"data":[{"sid":"sess-current"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	summary, err := NewSupplierNewAPIClient(server.Client(), cache, nil).
+		ListUpstreamSessionsWithLogin(context.Background(), supplierNewAPICacheTestProvider(server.URL), "secret")
+
+	require.NoError(t, err)
+	require.True(t, summary.CredentialAvailable)
+	require.Equal(t, 1, summary.Count)
+	require.True(t, summary.Sessions[0].Current)
+	// 本地已有可用凭据时必须直接复用，绝不能因为一次查询而多出一条上游会话。
+	require.Zero(t, loginCalls.Load())
+}
+
+func TestSupplierNewAPIClientListsUpstreamSessionsWithLoginRequiresPassword(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		_, _ = w.Write([]byte(`{"success":true,"data":[]}`))
+	}))
+	defer server.Close()
+
+	summary, err := NewSupplierNewAPIClient(server.Client(), newSupplierSub2APIFakeTokenCache(), nil).
+		ListUpstreamSessionsWithLogin(context.Background(), supplierNewAPICacheTestProvider(server.URL), "   ")
+
+	require.NoError(t, err)
+	// 没有密码就没法登录，只能如实回答「查不了」，不能凭空发请求也不能谎报 0 条。
+	require.False(t, summary.CredentialAvailable)
+	require.Zero(t, summary.Count)
+	require.Equal(t, int32(0), calls.Load())
+}
+
+func TestSupplierNewAPIClientReportsUpstreamSessionManagementUnsupported(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	cache.preload(42, supplierNewAPITestStoredToken("sess-current"))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// 老版本 New API 没有会话管理接口。
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"success":false,"message":"not found"}`))
+	}))
+	defer server.Close()
+
+	summary, err := NewSupplierNewAPIClient(server.Client(), cache, nil).
+		ListUpstreamSessions(context.Background(), supplierNewAPICacheTestProvider(server.URL))
+
+	require.NoError(t, err)
+	require.False(t, summary.Supported)
+	require.Zero(t, summary.Count)
+}
+
+func TestSupplierNewAPIClientRevokesOtherUpstreamSessions(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	cache.preload(42, supplierNewAPITestStoredToken("sess-current"))
+	var requestedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		require.Equal(t, http.MethodPost, r.Method)
+		requestedPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"success":true,"data":{"revoked_count":4}}`))
+	}))
+	defer server.Close()
+
+	revoked, err := NewSupplierNewAPIClient(server.Client(), cache, nil).
+		RevokeOtherUpstreamSessions(context.Background(), supplierNewAPICacheTestProvider(server.URL))
+
+	require.NoError(t, err)
+	require.Equal(t, 4, revoked)
+	require.Equal(t, "/api/user/sessions/revoke-others", requestedPath)
+}
+
+func TestSupplierNewAPIClientRevokeOtherUpstreamSessionsRequiresStoredSession(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		_, _ = w.Write([]byte(`{"success":true,"data":{"revoked_count":1}}`))
+	}))
+	defer server.Close()
+
+	_, err := NewSupplierNewAPIClient(server.Client(), newSupplierSub2APIFakeTokenCache(), nil).
+		RevokeOtherUpstreamSessions(context.Background(), supplierNewAPICacheTestProvider(server.URL))
+
+	require.ErrorIs(t, err, ErrSupplierProviderUpstreamSessionUnavailable)
+	require.Equal(t, int32(0), calls.Load())
+}
+
+func TestSupplierNewAPIClientRevokeOtherUpstreamSessionsReportsUnsupported(t *testing.T) {
+	cache := newSupplierSub2APIFakeTokenCache()
+	cache.preload(42, supplierNewAPITestStoredToken("sess-current"))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"success":false,"message":"not found"}`))
+	}))
+	defer server.Close()
+
+	_, err := NewSupplierNewAPIClient(server.Client(), cache, nil).
+		RevokeOtherUpstreamSessions(context.Background(), supplierNewAPICacheTestProvider(server.URL))
+
+	require.ErrorIs(t, err, ErrSupplierProviderUpstreamSessionUnsupported)
+}
+
+func TestSupplierNewAPIClientSkipsRevokeWhenSessionIDUnavailable(t *testing.T) {
+	var deleteCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			deleteCalls.Add(1)
+		}
+		_, _ = w.Write([]byte(`{"success":true,"data":{}}`))
+	}))
+	defer server.Close()
+
+	client := NewSupplierNewAPIClient(server.Client(), newSupplierSub2APIFakeTokenCache(), nil)
+	// 持有凭据但拿不到 SessionID 时无法吊销，必须直接跳过而不是发一个注定失败的请求。
+	client.revokeUpstreamSession(context.Background(), supplierNewAPICacheTestProvider(server.URL), supplierNewAPISession{
+		UserID:      42,
+		AccessToken: supplierNewAPITestAccessToken("sess-unknown"),
+		SessionID:   "",
+	})
+
+	require.Equal(t, int32(0), deleteCalls.Load())
+}

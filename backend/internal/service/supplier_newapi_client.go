@@ -32,6 +32,10 @@ const (
 	defaultSupplierNewAPIRechargeURL  = "/api/log/self?p=1&page_size=100&type=1&start_timestamp={start_timestamp}&end_timestamp={end_timestamp}"
 	supplierNewAPIQuotaUnit           = 500000
 
+	// 上游登录会话管理接口，仅较新的 New API 提供；老版本会返回 404。
+	defaultSupplierNewAPISessionsPath             = "/api/user/sessions"
+	defaultSupplierNewAPISessionsRevokeOthersPath = "/api/user/sessions/revoke-others"
+
 	supplierNewAPISessionRefreshThreshold = 5 * time.Minute
 	supplierNewAPIDefaultAccessTokenTTL   = 14 * time.Minute
 	supplierNewAPIRefreshCookieName       = "new_api_refresh"
@@ -689,6 +693,12 @@ func (c *SupplierNewAPIClient) clearSession(ctx context.Context, provider *Suppl
 func (c *SupplierNewAPIClient) revokeUpstreamSession(ctx context.Context, provider *SupplierProvider, session supplierNewAPISession) {
 	sessionID := strings.TrimSpace(session.SessionID)
 	if sessionID == "" {
+		// 会话整体为空属于正常情况（例如首次登录前没有旧会话可吊销），静默跳过；
+		// 但若会话确实持有凭据却拿不到 SessionID，说明上游没有回传可吊销的会话标识，
+		// 这条会话会一直残留到自然过期，必须留下可观测的痕迹，否则问题会无声堆积。
+		if supplierNewAPIHasSessionAuth(session) {
+			logger.LegacyPrintf("supplier_newapi_client", "revoke upstream session skipped: session id unavailable provider_id=%d provider_code=%s auth_mode=%s session=%s", provider.ID, provider.Code, supplierNewAPIAuthMode(provider), supplierNewAPISessionDebugSummary(session))
+		}
 		return
 	}
 	// cookie 会话模式下登录后会清掉 access token，只剩 Cookie；doJSON 会回落到 Cookie 认证，同样能吊销。
@@ -697,13 +707,194 @@ func (c *SupplierNewAPIClient) revokeUpstreamSession(ctx context.Context, provid
 	}
 	revokeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	path := "/api/user/sessions/" + url.PathEscape(sessionID)
+	path := defaultSupplierNewAPISessionsPath + "/" + url.PathEscape(sessionID)
 	raw, status, err := c.doJSON(revokeCtx, http.MethodDelete, provider, path, session, nil)
 	if err != nil || status < 200 || status >= 300 {
 		logger.LegacyPrintf("supplier_newapi_client", "revoke upstream session failed provider_id=%d provider_code=%s http_status=%d err=%v body=%s", provider.ID, provider.Code, status, err, supplierSub2APISafeResponseText(raw, 200))
 		return
 	}
 	logger.LegacyPrintf("supplier_newapi_client", "revoke upstream session ok provider_id=%d provider_code=%s user_id=%d", provider.ID, provider.Code, session.UserID)
+}
+
+// resolveStoredSession 读取当前已缓存的登录会话，不触发登录。
+// 查询与清理上游会话属于只读或补偿性操作，若为此触发登录反而会新增一条会话，与目的相悖。
+func (c *SupplierNewAPIClient) resolveStoredSession(ctx context.Context, provider *SupplierProvider) (supplierNewAPISession, bool) {
+	if session, ok := c.cachedSession(provider); ok {
+		return session, true
+	}
+	if c.tokenCache == nil {
+		return supplierNewAPISession{}, false
+	}
+	token, found, err := c.tokenCache.Get(ctx, provider.ID)
+	if err != nil || !found {
+		return supplierNewAPISession{}, false
+	}
+	return supplierNewAPISessionFromToken(token)
+}
+
+// supplierNewAPIRawSession 对应上游 /api/user/sessions 返回的单条会话对象。
+// 上游已隐藏 refresh 摘要等敏感字段，这里只取可安全展示的信息。
+type supplierNewAPIRawSession struct {
+	SID          string `json:"sid"`
+	Status       string `json:"status"`
+	LoginMethod  string `json:"login_method"`
+	IP           string `json:"ip"`
+	UserAgent    string `json:"user_agent"`
+	CreatedAt    int64  `json:"created_at"`
+	LastActiveAt int64  `json:"last_active_at"`
+	ExpiresAt    int64  `json:"expires_at"`
+}
+
+// supplierNewAPIUnixTime 把上游的 unix 秒时间戳转成 UTC 时间；0 表示上游未提供该时间。
+func supplierNewAPIUnixTime(seconds int64) time.Time {
+	if seconds <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(seconds, 0).UTC()
+}
+
+// supplierNewAPIUpstreamSessionFromRaw 把上游原始会话转成对外展示结构。
+// 上游不返回 is_current，因此用本地已缓存会话的 sid 精确比对来标记当前会话；
+// 上游虽然会把当前会话排在列表首位，但依赖顺序过于脆弱，不作为判定依据。
+func supplierNewAPIUpstreamSessionFromRaw(raw supplierNewAPIRawSession, currentSID string) SupplierProviderUpstreamSession {
+	sid := strings.TrimSpace(raw.SID)
+	return SupplierProviderUpstreamSession{
+		SID:          sid,
+		Current:      currentSID != "" && sid == currentSID,
+		Status:       raw.Status,
+		LoginMethod:  raw.LoginMethod,
+		IP:           raw.IP,
+		UserAgent:    raw.UserAgent,
+		CreatedAt:    supplierNewAPIUnixTime(raw.CreatedAt),
+		LastActiveAt: supplierNewAPIUnixTime(raw.LastActiveAt),
+		ExpiresAt:    supplierNewAPIUnixTime(raw.ExpiresAt),
+	}
+}
+
+// fetchUpstreamSessions 是读取上游登录会话的唯一解析入口，概览与明细共用。
+// supported 为 false 表示上游版本过老、没有会话管理接口，属于可预期情况而非错误。
+func (c *SupplierNewAPIClient) fetchUpstreamSessions(ctx context.Context, provider *SupplierProvider, session supplierNewAPISession) ([]SupplierProviderUpstreamSession, bool, error) {
+	raw, status, err := c.doJSON(ctx, http.MethodGet, provider, defaultSupplierNewAPISessionsPath, session, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("list supplier upstream sessions: %w", err)
+	}
+	if status == http.StatusNotFound || status == http.StatusMethodNotAllowed {
+		// 老版本 New API 没有会话管理接口，降级为“不支持”而不是抛出错误。
+		logger.LegacyPrintf("supplier_newapi_client", "upstream session management unsupported provider_id=%d provider_code=%s http_status=%d", provider.ID, provider.Code, status)
+		return nil, false, nil
+	}
+	if status < 200 || status >= 300 {
+		return nil, false, supplierSub2APIHTTPError("newapi sessions", status, raw)
+	}
+	if err := supplierNewAPIEnvelopeOK(raw); err != nil {
+		return nil, false, err
+	}
+	var resp struct {
+		Data []supplierNewAPIRawSession `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, false, fmt.Errorf("decode supplier newapi sessions response: %w", err)
+	}
+	sessions := make([]SupplierProviderUpstreamSession, 0, len(resp.Data))
+	for _, item := range resp.Data {
+		sessions = append(sessions, supplierNewAPIUpstreamSessionFromRaw(item, session.SessionID))
+	}
+	return sessions, true, nil
+}
+
+// listUpstreamSessions 读取上游登录会话列表。
+// 没有本地已缓存会话时直接返回空列表且不发起任何请求：查询会话是只读动作，
+// 若为此触发登录，反而会新增一条会话，与「减少残留会话」的目的相悖。
+// 此时 credentialAvailable 为 false，调用方必须据此显示「查不了」而不是「没有会话」——
+// 否则本地凭据丢失时界面会谎报 0 条，把「读不到」伪装成「上游很干净」。
+func (c *SupplierNewAPIClient) listUpstreamSessions(ctx context.Context, provider *SupplierProvider) (sessions []SupplierProviderUpstreamSession, supported bool, credentialAvailable bool, err error) {
+	if provider == nil || provider.ID <= 0 {
+		return nil, false, false, ErrSupplierProviderInvalid
+	}
+	session, ok := c.resolveStoredSession(ctx, provider)
+	if !ok {
+		// 尚未建立过会话（或凭据已丢失），无法代表上游发起查询。
+		return nil, true, false, nil
+	}
+	sessions, supported, err = c.fetchUpstreamSessions(ctx, provider, session)
+	return sessions, supported, true, err
+}
+
+// ListUpstreamSessions 读取上游当前持有的登录会话概览。
+// 上游返回的列表包含当前会话，因此数量大于 1 表示存在未被吊销的残留会话。
+func (c *SupplierNewAPIClient) ListUpstreamSessions(ctx context.Context, provider *SupplierProvider) (SupplierProviderUpstreamSessionSummary, error) {
+	sessions, supported, credentialAvailable, err := c.listUpstreamSessions(ctx, provider)
+	if err != nil {
+		return SupplierProviderUpstreamSessionSummary{}, err
+	}
+	return SupplierProviderUpstreamSessionSummary{Supported: supported, CredentialAvailable: credentialAvailable, Count: len(sessions), Sessions: sessions}, nil
+}
+
+// ListUpstreamSessionsWithLogin 在本地没有可用凭据时先登录一次再查询上游会话。
+// 这是唯一会「为查询而登录」的路径：登录本身会在上游新增一条会话，属于副作用，
+// 因此只用于用户显式点按的「登录并读取」，不接入自动巡检。
+// 本地已有可用凭据时直接复用，不会重复登录。
+func (c *SupplierNewAPIClient) ListUpstreamSessionsWithLogin(ctx context.Context, provider *SupplierProvider, password string) (SupplierProviderUpstreamSessionSummary, error) {
+	if provider == nil || provider.ID <= 0 {
+		return SupplierProviderUpstreamSessionSummary{}, ErrSupplierProviderInvalid
+	}
+	if session, ok := c.resolveStoredSession(ctx, provider); ok {
+		sessions, supported, err := c.fetchUpstreamSessions(ctx, provider, session)
+		if err != nil {
+			return SupplierProviderUpstreamSessionSummary{}, err
+		}
+		return SupplierProviderUpstreamSessionSummary{Supported: supported, CredentialAvailable: true, Count: len(sessions), Sessions: sessions}, nil
+	}
+	if strings.TrimSpace(password) == "" {
+		// 没有可用密码就无法登录，退回只读语义，由调用方解释「查不了」的原因。
+		return SupplierProviderUpstreamSessionSummary{Supported: true, CredentialAvailable: false}, nil
+	}
+	session, err := c.loginAndStore(ctx, provider, password)
+	if err != nil {
+		return SupplierProviderUpstreamSessionSummary{}, err
+	}
+	sessions, supported, err := c.fetchUpstreamSessions(ctx, provider, session)
+	if err != nil {
+		return SupplierProviderUpstreamSessionSummary{}, err
+	}
+	logger.LegacyPrintf("supplier_newapi_client", "list upstream sessions after explicit login provider_id=%d provider_code=%s session_count=%d", provider.ID, provider.Code, len(sessions))
+	return SupplierProviderUpstreamSessionSummary{Supported: supported, CredentialAvailable: true, Count: len(sessions), Sessions: sessions}, nil
+}
+
+// RevokeOtherUpstreamSessions 清理上游除当前会话以外的登录会话，返回被吊销的数量。
+// 上游没有 logout 接口，这里复用其会话管理能力，并保留当前会话，避免打断正在进行的同步。
+func (c *SupplierNewAPIClient) RevokeOtherUpstreamSessions(ctx context.Context, provider *SupplierProvider) (int, error) {
+	if provider == nil || provider.ID <= 0 {
+		return 0, ErrSupplierProviderInvalid
+	}
+	session, ok := c.resolveStoredSession(ctx, provider)
+	if !ok {
+		// 清理需要以当前会话为锚点并保留它，没有会话时无法安全清理。
+		return 0, ErrSupplierProviderUpstreamSessionUnavailable
+	}
+	raw, status, err := c.doJSON(ctx, http.MethodPost, provider, defaultSupplierNewAPISessionsRevokeOthersPath, session, nil)
+	if err != nil {
+		return 0, fmt.Errorf("revoke supplier upstream sessions: %w", err)
+	}
+	if status == http.StatusNotFound || status == http.StatusMethodNotAllowed {
+		return 0, ErrSupplierProviderUpstreamSessionUnsupported
+	}
+	if status < 200 || status >= 300 {
+		return 0, supplierSub2APIHTTPError("newapi sessions revoke", status, raw)
+	}
+	if err := supplierNewAPIEnvelopeOK(raw); err != nil {
+		return 0, err
+	}
+	var resp struct {
+		Data struct {
+			RevokedCount int `json:"revoked_count"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return 0, fmt.Errorf("decode supplier newapi session revoke response: %w", err)
+	}
+	logger.LegacyPrintf("supplier_newapi_client", "revoke other upstream sessions ok provider_id=%d provider_code=%s revoked_count=%d", provider.ID, provider.Code, resp.Data.RevokedCount)
+	return resp.Data.RevokedCount, nil
 }
 
 func (c *SupplierNewAPIClient) loginAndStore(ctx context.Context, provider *SupplierProvider, password string) (supplierNewAPISession, error) {

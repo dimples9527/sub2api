@@ -25,6 +25,10 @@ var (
 	ErrSupplierProviderTypeNotFound = infraerrors.NotFound("SUPPLIER_PROVIDER_TYPE_NOT_FOUND", "supplier provider type not found")
 	ErrSupplierProviderTypeExists   = infraerrors.Conflict("SUPPLIER_PROVIDER_TYPE_EXISTS", "supplier provider type code already exists")
 	ErrSupplierProviderTypeInvalid  = infraerrors.BadRequest("SUPPLIER_PROVIDER_TYPE_INVALID", "invalid supplier provider type configuration")
+
+	// 上游会话清理相关错误：前者表示本地没有可用会话（需先登录），后者表示上游未提供会话管理接口。
+	ErrSupplierProviderUpstreamSessionUnavailable = infraerrors.BadRequest("SUPPLIER_PROVIDER_UPSTREAM_SESSION_UNAVAILABLE", "upstream login session is unavailable, please sign in again")
+	ErrSupplierProviderUpstreamSessionUnsupported = infraerrors.BadRequest("SUPPLIER_PROVIDER_UPSTREAM_SESSION_UNSUPPORTED", "upstream does not support login session management")
 )
 
 var supplierProviderCodePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)

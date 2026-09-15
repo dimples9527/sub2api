@@ -226,86 +226,71 @@
         </DataTable>
       </div>
 
-            <aside class="sp-panel sp-health-panel" data-test="supplier-health-panel">
+            <aside class="sp-panel sp-session-panel" data-test="supplier-upstream-session-panel">
         <header class="sp-panel-head">
           <div class="sp-panel-title">
             <span class="sp-section-index">02</span>
             <div>
-              <h2>供应商组合健康</h2>
-              <span>综合状态 · 优先待办 · 配置完整性</span>
+              <h2>上游登录会话</h2>
+              <span>残留会话检查与清理</span>
             </div>
           </div>
-          <div class="sp-health-head-right">
-            <span class="sp-status" :class="healthTone" data-test="supplier-health-tone">{{ healthLabel }}</span>
+          <div class="sp-session-head-right">
+            <span class="sp-status" :class="upstreamSessionTone" data-test="supplier-upstream-session-tone">{{ upstreamSessionLabel }}</span>
           </div>
         </header>
-        <div class="sp-panel-body sp-health-body">
-          <div class="sp-health-summary" :class="healthTone" data-test="supplier-health-summary">
-            <strong>{{ healthLabel }}</strong>
-            <p>{{ healthMessage }}</p>
+        <div class="sp-panel-body sp-session-body">
+          <div class="sp-session-summary" :class="upstreamSessionTone" data-test="supplier-upstream-session-summary">
+            <strong>{{ upstreamSessionLabel }}</strong>
+            <p>{{ upstreamSessionMessage }}</p>
           </div>
 
-          <section v-if="priorityTodos.length" class="sp-health-section" data-test="supplier-health-todos">
-            <div class="sp-health-section-head">
-              <span>优先待办</span>
-              <small>最多展示 3 项，点击可联动筛选</small>
-            </div>
-            <div class="sp-health-todo-list">
-              <button
-                v-for="todo in priorityTodos"
-                :key="todo.key"
-                class="sp-health-todo"
-                :class="todo.tone"
-                type="button"
-                :data-test="`supplier-health-todo-${todo.key}`"
-                @click="applyHealthTodo(todo)"
-              >
-                <div class="sp-health-todo-main">
-                  <strong>{{ todo.title }}</strong>
-                  <small>{{ todo.detail }}</small>
-                </div>
-                <span class="sp-health-todo-action">处理</span>
-              </button>
-            </div>
-          </section>
+          <div class="sp-session-toolbar">
+            <span>共 {{ upstreamSessionProviders.length }} 个 New API 供应商</span>
+            <button
+              class="sp-button small"
+              type="button"
+              data-test="supplier-upstream-session-refresh"
+              :disabled="upstreamSessionLoading"
+              @click="loadUpstreamSessions"
+            >{{ upstreamSessionLoading ? '检查中' : '重新检查' }}</button>
+          </div>
 
-          <section class="sp-health-section" data-test="supplier-health-completeness">
-            <div class="sp-health-section-head">
-              <span>配置完整性</span>
-              <small>基础配置与调度就绪度</small>
-            </div>
-            <div class="sp-list sp-health-completeness-list">
-              <div class="sp-list-item">
-                <div>
-                  <strong>默认供应商</strong>
-                  <small>{{ defaultProvider ? `${defaultProvider.name} · ${defaultProvider.code}` : '尚未配置' }}</small>
-                </div>
-                <span class="sp-status" :class="defaultProvider ? 'good' : 'warn'">{{ defaultProvider ? '已设置' : '缺失' }}</span>
+          <div v-if="upstreamSessionLoading && !upstreamSessionEntries.length" class="sp-session-empty">正在读取上游登录会话…</div>
+          <div v-else-if="!upstreamSessionEntries.length" class="sp-session-empty">当前没有 New API 类型供应商，无需检查上游会话。</div>
+          <ul v-else class="sp-session-list">
+            <li
+              v-for="entry in upstreamSessionEntries"
+              :key="entry.providerId"
+              class="sp-session-item"
+              :class="upstreamSessionItemTone(entry)"
+              :data-test="`supplier-upstream-session-item-${entry.providerId}`"
+            >
+              <div class="sp-session-item-main">
+                <strong>{{ entry.providerName }}</strong>
+                <small>{{ upstreamSessionItemDetail(entry) }}</small>
               </div>
-              <div class="sp-list-item">
-                <div>
-                  <strong>凭据覆盖</strong>
-                  <small>{{ credentialCoverage }}</small>
-                </div>
-                <span class="sp-status" :class="credentialMissingCount ? 'warn' : 'good'">{{ credentialMissingCount ? '需补充' : '完整' }}</span>
+              <div class="sp-session-item-actions">
+                <span class="sp-session-count" :class="upstreamSessionItemTone(entry)">{{ upstreamSessionItemValue(entry) }}</span>
+                <button
+                  v-if="entry.supported && !entry.error"
+                  class="sp-button small ghost"
+                  type="button"
+                  :data-test="`supplier-upstream-session-detail-${entry.providerId}`"
+                  title="查看该供应商上游的登录会话明细"
+                  @click="openUpstreamSessionDetail(entry)"
+                >明细</button>
+                <button
+                  v-if="entry.supported && entry.credentialAvailable && !entry.error"
+                  class="sp-button small"
+                  type="button"
+                  :data-test="`supplier-upstream-session-revoke-${entry.providerId}`"
+                  :disabled="entry.count <= 1 || revokingProviderIDs.has(entry.providerId)"
+                  @click="revokeProviderUpstreamSessions(entry)"
+                >{{ revokingProviderIDs.has(entry.providerId) ? '清理中' : '清理' }}</button>
               </div>
-              <div class="sp-list-item">
-                <div>
-                  <strong>倍率风险</strong>
-                  <small>当前累计 {{ summary.rate_risk_count }} 个风险项</small>
-                </div>
-                <span class="sp-status" :class="summary.rate_risk_count ? 'warn' : 'good'">{{ summary.rate_risk_count ? '关注' : '正常' }}</span>
-              </div>
-              <div class="sp-list-item">
-                <div>
-                  <strong>零可调度</strong>
-                  <small>启用中但无可调度账号 {{ zeroSchedulableCount }} 个</small>
-                </div>
-                <span class="sp-status" :class="zeroSchedulableCount ? 'warn' : 'good'">{{ zeroSchedulableCount ? '关注' : '正常' }}</span>
-              </div>
-            </div>
-          </section>
-
+            </li>
+          </ul>
         </div>
       </aside>
     </section>
@@ -1024,6 +1009,113 @@
       </template>
     </BaseDialog>
 
+    <BaseDialog
+      :show="sessionDetailVisible"
+      title="上游登录会话明细"
+      width="full"
+      @close="closeUpstreamSessionDetail"
+    >
+      <section class="sp-panel sp-session-detail-dialog supplier-management-page" data-test="supplier-upstream-session-detail-dialog">
+        <div class="sp-panel-body sp-session-detail-body">
+          <div class="sp-session-detail-summary" :class="sessionDetailTone" data-test="supplier-upstream-session-detail-summary">
+            <strong>{{ sessionDetailProviderName }}</strong>
+            <p>{{ sessionDetailSummary }}</p>
+          </div>
+
+          <div class="sp-session-detail-toolbar">
+            <span>{{ sessionDetailCountLabel }}</span>
+            <button
+              class="sp-button small ghost"
+              type="button"
+              :disabled="sessionDetailLoading"
+              data-test="supplier-upstream-session-detail-refresh"
+              @click="loadUpstreamSessionDetail()"
+            >{{ sessionDetailLoading ? '读取中…' : '重新读取' }}</button>
+          </div>
+
+          <div
+            v-if="sessionDetailError"
+            class="sp-session-detail-empty bad"
+            data-test="supplier-upstream-session-detail-error"
+          >{{ sessionDetailError }}</div>
+          <div v-else-if="sessionDetailLoading && !sessionDetailSessions.length" class="sp-session-detail-empty">正在读取上游登录会话…</div>
+          <div
+            v-else-if="!sessionDetailSupported"
+            class="sp-session-detail-empty warn"
+            data-test="supplier-upstream-session-detail-unsupported"
+          >上游未提供会话管理接口，无法读取登录会话明细。</div>
+          <div
+            v-else-if="!sessionDetailCredentialAvailable"
+            class="sp-session-detail-empty warn actionable"
+            data-test="supplier-upstream-session-detail-no-credential"
+          >
+            <p>{{ sessionDetailSummary }}</p>
+            <p class="sp-session-detail-hint">
+              登录会在上游新增一条会话，因此这里不会自动执行；如确认需要，可点下方按钮用该供应商已保存的密码登录一次后重新读取。
+            </p>
+            <button
+              class="sp-button small"
+              type="button"
+              :disabled="sessionDetailLoading"
+              data-test="supplier-upstream-session-detail-login"
+              @click="loginAndLoadUpstreamSessionDetail"
+            >{{ sessionDetailLoading ? '登录读取中…' : '登录并读取' }}</button>
+          </div>
+          <div
+            v-else-if="!sessionDetailSessions.length"
+            class="sp-session-detail-empty"
+            data-test="supplier-upstream-session-detail-empty"
+          >该供应商当前没有上游登录会话。</div>
+          <ul v-else class="sp-session-detail-list" data-test="supplier-upstream-session-detail-list">
+            <li
+              v-for="item in sessionDetailSessions"
+              :key="item.sid"
+              class="sp-session-detail-item"
+              :class="item.current ? 'good' : 'bad'"
+              :data-test="`supplier-upstream-session-detail-item-${item.sid}`"
+            >
+              <div class="sp-session-detail-title">
+                <strong>{{ item.sid }}</strong>
+                <span class="sp-session-detail-tag" :class="item.current ? 'good' : 'bad'">{{ item.current ? '当前会话' : '残留会话' }}</span>
+                <span v-if="item.status" class="sp-session-detail-tag">{{ item.status }}</span>
+                <span v-if="item.login_method" class="sp-session-detail-tag">{{ item.login_method }}</span>
+              </div>
+              <div class="sp-session-detail-meta">
+                <div class="sp-session-detail-meta-item">
+                  <span class="sp-session-detail-meta-label">IP</span>
+                  <span class="sp-session-detail-meta-value">{{ item.ip || '—' }}</span>
+                </div>
+                <div class="sp-session-detail-meta-item">
+                  <span class="sp-session-detail-meta-label">创建时间</span>
+                  <span class="sp-session-detail-meta-value">{{ sessionDetailTime(item.created_at) }}</span>
+                </div>
+                <div class="sp-session-detail-meta-item">
+                  <span class="sp-session-detail-meta-label">最近活跃</span>
+                  <span class="sp-session-detail-meta-value">{{ sessionDetailTime(item.last_active_at) }}</span>
+                </div>
+                <div class="sp-session-detail-meta-item">
+                  <span class="sp-session-detail-meta-label">过期时间</span>
+                  <span class="sp-session-detail-meta-value">{{ sessionDetailTime(item.expires_at) }}</span>
+                </div>
+              </div>
+              <p v-if="item.user_agent" class="sp-session-detail-agent" :title="item.user_agent">{{ item.user_agent }}</p>
+            </li>
+          </ul>
+        </div>
+      </section>
+      <template #footer>
+        <button
+          v-if="sessionDetailSupported && sessionDetailCredentialAvailable && !sessionDetailError && sessionDetailResidualCount > 0"
+          class="sp-button"
+          type="button"
+          :disabled="sessionDetailRevoking"
+          data-test="supplier-upstream-session-detail-revoke"
+          @click="revokeSessionsFromDetail"
+        >{{ sessionDetailRevoking ? '清理中…' : `清理 ${sessionDetailResidualCount} 个残留会话` }}</button>
+        <button class="sp-button primary" type="button" @click="closeUpstreamSessionDetail">关闭</button>
+      </template>
+    </BaseDialog>
+
     <SupplierRechargeHistoryDialog
       :show="rechargeDialogVisible"
       :provider-id="rechargeDialogProviderId"
@@ -1060,7 +1152,7 @@ import Icon from '@/components/icons/Icon.vue'
 import Input from '@/components/common/Input.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
-import supplierProvidersAPI, { type SupplierProvider, type SupplierProviderSummary, type SupplierProviderUpsertPayload, type SupplierProviderCostTrendPoint, type SupplierProviderCostBreakdown, type SupplierProviderCostBackfillResult, type SupplierProviderAuthStatusResult, type SupplierProviderAuthHistoryResult, type SupplierProviderAuthEventType, type SupplierProviderBalanceSummary } from '@/api/admin/supplierProviders'
+import supplierProvidersAPI, { type SupplierProvider, type SupplierProviderSummary, type SupplierProviderUpsertPayload, type SupplierProviderCostTrendPoint, type SupplierProviderCostBreakdown, type SupplierProviderCostBackfillResult, type SupplierProviderAuthStatusResult, type SupplierProviderAuthHistoryResult, type SupplierProviderAuthEventType, type SupplierProviderBalanceSummary, type SupplierProviderUpstreamSession } from '@/api/admin/supplierProviders'
 import supplierProviderTypesAPI, { type SupplierProviderType, type SupplierProviderTypeUpsertPayload } from '@/api/admin/supplierProviderTypes'
 import { streamSupplierProviderSync, testProviderEndpoint, type SupplierProviderEndpointTestResult, type SupplierSyncProgressEvent, type SupplierSyncProgressStage, type SupplierSyncScope } from '@/api/admin/supplierProviderData'
 import { useAppStore } from '@/stores/app'
@@ -1071,15 +1163,6 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarEleme
 type Tone = 'good' | 'warn' | 'bad' | 'info' | ''
 type ProviderQuickFilter = 'all' | 'enabled' | 'disabled' | 'default'
 
-type HealthTodo = {
-  key: string
-  title: string
-  detail: string
-  tone: Tone
-  filter?: string
-  quickFilter?: ProviderQuickFilter
-  selectId?: number
-}
 
 const providerQuickFilters: Array<{ key: ProviderQuickFilter; label: string }> = [
   { key: 'all', label: '全部' },
@@ -1323,109 +1406,251 @@ const sortedProviders = computed(() => {
   return rows.sort((left, right) => compareProviders(left, right, providerSortKey.value, providerSortOrder.value))
 })
 
-const defaultProvider = computed(() => providers.value.find(provider => provider.is_default) || null)
-const credentialMissingCount = computed(() => providers.value.filter(provider => !provider.credential_configured).length)
-const credentialCoverage = computed(() => `${providers.value.length - credentialMissingCount.value} / ${providers.value.length} 个供应商已配置凭据`)
-const zeroSchedulableCount = computed(() => providers.value.filter(provider => provider.enabled && Number(provider.schedulable_account_count || 0) <= 0).length)
+type UpstreamSessionEntry = {
+  providerId: number
+  providerName: string
+  supported: boolean
+  /** 本地是否有可用凭据；为 false 时 count 的 0 只代表「查不了」。 */
+  credentialAvailable: boolean
+  count: number
+  message: string
+  error: string
+}
 
-const healthTone = computed<Tone>(() => {
-  if (!providers.value.length) return 'warn'
-  if (summary.value.high_risk_count > 0) return 'bad'
-  if (
-    summary.value.sync_failure_count > 0
-    || summary.value.low_balance_count > 0
-    || !defaultProvider.value
-    || credentialMissingCount.value
-    || summary.value.rate_risk_count
-    || zeroSchedulableCount.value
-  ) return 'warn'
+const upstreamSessionEntries = ref<UpstreamSessionEntry[]>([])
+const upstreamSessionLoading = ref(false)
+const revokingProviderIDs = ref<Set<number>>(new Set())
+
+// 会话明细弹窗：与面板的「数量概览」分离，只有用户主动打开时才按需拉取明细，
+// 避免页面加载时为所有供应商拉全量会话对象。
+const sessionDetailVisible = ref(false)
+const sessionDetailLoading = ref(false)
+const sessionDetailProviderId = ref<number | null>(null)
+const sessionDetailProviderName = ref('')
+const sessionDetailSupported = ref(true)
+// 本地是否有可用凭据。为 false 时列表为空只代表「查不了」，不是「上游没有会话」。
+const sessionDetailCredentialAvailable = ref(true)
+const sessionDetailMessage = ref('')
+const sessionDetailSessions = ref<SupplierProviderUpstreamSession[]>([])
+const sessionDetailError = ref('')
+
+// 上游列表包含当前会话，因此「非当前」的即为残留会话。
+const sessionDetailResidualCount = computed(() => sessionDetailSessions.value.filter(item => !item.current).length)
+
+const sessionDetailRevoking = computed(() => {
+  const providerId = sessionDetailProviderId.value
+  return providerId !== null && revokingProviderIDs.value.has(providerId)
+})
+
+const sessionDetailTone = computed<Tone>(() => {
+  if (sessionDetailError.value || !sessionDetailSupported.value || !sessionDetailCredentialAvailable.value) return 'warn'
+  if (sessionDetailResidualCount.value > 0) return 'bad'
   return 'good'
 })
 
-const healthLabel = computed(() => {
-  if (healthTone.value === 'bad') return '告警'
-  if (healthTone.value === 'warn') return '需关注'
-  return '稳定'
+const sessionDetailCountLabel = computed(() => {
+  if (!sessionDetailSupported.value) return '上游不支持会话管理'
+  // 没有凭据时上游根本没被访问，任何「共 N 个」的说法都是误导。
+  if (!sessionDetailCredentialAvailable.value) return '本地无可用凭据，未真正查询上游'
+  return `共 ${sessionDetailSessions.value.length} 个会话，其中残留 ${sessionDetailResidualCount.value} 个`
 })
 
-const healthMessage = computed(() => {
-  if (!providers.value.length) return '还没有供应商数据，请先新增供应商配置。'
-  if (summary.value.high_risk_count) return `当前有 ${summary.value.high_risk_count} 个高风险供应商，应优先检查凭据、余额和同步结果。`
-  if (summary.value.sync_failure_count) return `当前有 ${summary.value.sync_failure_count} 个供应商同步异常，需要查看同步日志。`
-  if (summary.value.low_balance_count) return `有 ${summary.value.low_balance_count} 个供应商预计可用不足 3 天，建议及时补充余额。`
-  if (!defaultProvider.value) return '尚未设置默认供应商，新建账号时缺少兜底来源。'
-  if (credentialMissingCount.value) return `还有 ${credentialMissingCount.value} 个供应商未配置登录凭据，同步与测试会受影响。`
-  if (zeroSchedulableCount.value) return `有 ${zeroSchedulableCount.value} 个已启用供应商当前 0 可调度账号，实际无法承接流量。`
-  if (summary.value.rate_risk_count) return `累计 ${summary.value.rate_risk_count} 个倍率风险项，建议核对账号倍率配置。`
-  return '供应商组合运行平稳，配置完整，暂无高优先级风险。'
+const sessionDetailSummary = computed(() => {
+  if (sessionDetailError.value) return sessionDetailError.value
+  if (!sessionDetailSupported.value) return '上游未提供会话管理接口，无法读取登录会话明细。'
+  if (!sessionDetailCredentialAvailable.value) {
+    return sessionDetailMessage.value || '本地没有该供应商的可用登录凭据，本次没有真正查询上游；请先完成一次登录或同步后再读取。'
+  }
+  if (!sessionDetailSessions.value.length) return '该供应商当前没有上游登录会话。'
+  if (sessionDetailResidualCount.value > 0) return `存在 ${sessionDetailResidualCount.value} 个残留会话，可在下方直接清理；当前会话会被保留，不影响正在进行的同步。`
+  return '只有当前同步正在使用的会话，没有残留。'
 })
 
-const priorityTodos = computed<HealthTodo[]>(() => {
-  const todos: HealthTodo[] = []
-  if (summary.value.high_risk_count > 0) {
-    todos.push({
-      key: 'high-risk',
-      title: '高风险供应商',
-      detail: `当前有 ${summary.value.high_risk_count} 个高风险供应商，应优先检查凭据、余额和同步结果。`,
-      tone: 'bad',
-      filter: 'risk',
-    })
-  }
-  if (summary.value.sync_failure_count > 0) {
-    todos.push({
-      key: 'sync-failed',
-      title: '同步异常',
-      detail: `当前有 ${summary.value.sync_failure_count} 个供应商同步异常，需要查看同步日志。`,
-      tone: 'warn',
-      filter: 'sync',
-    })
-  }
-  if (summary.value.low_balance_count > 0) {
-    todos.push({
-      key: 'low-balance',
-      title: '余额不足 3 天',
-      detail: `有 ${summary.value.low_balance_count} 个供应商预计可用不足 3 天，建议及时补充余额。`,
-      tone: 'warn',
-      filter: 'balance',
-    })
-  }
-  if (!defaultProvider.value) {
-    todos.push({
-      key: 'no-default',
-      title: '缺少默认供应商',
-      detail: '尚未设置默认供应商，新建账号时缺少兜底来源。',
-      tone: 'warn',
-      quickFilter: 'default',
-    })
-  }
-  if (credentialMissingCount.value > 0) {
-    todos.push({
-      key: 'missing-credential',
-      title: '凭据未配置',
-      detail: `还有 ${credentialMissingCount.value} 个供应商未配置登录凭据。`,
-      tone: 'warn',
-    })
-  }
-  if (zeroSchedulableCount.value > 0) {
-    todos.push({
-      key: 'zero-schedulable',
-      title: '零可调度账号',
-      detail: `有 ${zeroSchedulableCount.value} 个已启用供应商当前 0 可调度账号。`,
-      tone: 'warn',
-      quickFilter: 'enabled',
-    })
-  }
-  if (summary.value.rate_risk_count > 0) {
-    todos.push({
-      key: 'rate-risk',
-      title: '倍率风险',
-      detail: `累计 ${summary.value.rate_risk_count} 个倍率风险项，建议核对账号倍率配置。`,
-      tone: 'warn',
-      filter: 'rate',
-    })
-  }
-  return todos.slice(0, 3)
+// 上游会话管理是 New API 特有的能力，因此只统计 newapi 类型供应商。
+const upstreamSessionProviders = computed(() => providers.value.filter(provider => provider.provider_type === 'newapi'))
+
+// 上游返回的会话列表包含当前会话，所以数量大于 1 即表示存在残留会话。
+// 没有凭据的条目其 count 固定为 0，不能算作「正常」，否则会把「读不到」当成「很干净」。
+const upstreamSessionResidualCount = computed(() => upstreamSessionEntries.value.filter(entry => entry.supported && entry.credentialAvailable && !entry.error && entry.count > 1).length)
+
+const upstreamSessionUnavailableCount = computed(() => upstreamSessionEntries.value.filter(entry => entry.supported && !entry.credentialAvailable && !entry.error).length)
+
+const upstreamSessionTone = computed<Tone>(() => {
+  if (upstreamSessionLoading.value && !upstreamSessionEntries.value.length) return 'warn'
+  if (upstreamSessionResidualCount.value > 0) return 'bad'
+  if (upstreamSessionUnavailableCount.value > 0) return 'warn'
+  return 'good'
 })
+
+const upstreamSessionLabel = computed(() => {
+  if (upstreamSessionLoading.value && !upstreamSessionEntries.value.length) return '检查中'
+  if (upstreamSessionResidualCount.value > 0) return '需清理'
+  if (upstreamSessionUnavailableCount.value > 0) return '部分无法检查'
+  return '正常'
+})
+
+const upstreamSessionMessage = computed(() => {
+  if (upstreamSessionLoading.value && !upstreamSessionEntries.value.length) return '正在读取上游登录会话…'
+  if (!upstreamSessionProviders.value.length) return '当前没有 New API 类型供应商，无需检查上游会话。'
+  if (upstreamSessionResidualCount.value > 0) return `有 ${upstreamSessionResidualCount.value} 个供应商在上游残留了未清理的登录会话，会持续占用上游会话额度，直到自然过期。`
+  if (upstreamSessionUnavailableCount.value > 0) return `有 ${upstreamSessionUnavailableCount.value} 个供应商本地没有可用凭据，本次没能真正查询上游；它们的会话数为未知，不代表没有残留。`
+  return '各供应商上游登录会话数量正常，没有残留会话。'
+})
+
+function upstreamSessionItemValue(entry: UpstreamSessionEntry): string {
+  if (entry.error) return '—'
+  if (!entry.supported) return '不支持'
+  // 关键：不要把「查不了」显示成「0 个」。
+  if (!entry.credentialAvailable) return '无法查询'
+  return `${entry.count} 个`
+}
+
+function upstreamSessionItemDetail(entry: UpstreamSessionEntry): string {
+  if (entry.error) return entry.error
+  if (!entry.supported) return entry.message || '上游未提供会话管理接口'
+  if (!entry.credentialAvailable) return entry.message || '本地没有该供应商的登录凭据，未能查询上游'
+  if (entry.count > 1) return `存在 ${entry.count - 1} 个残留会话`
+  return '无残留会话'
+}
+
+function upstreamSessionItemTone(entry: UpstreamSessionEntry): Tone {
+  if (entry.error || !entry.supported || !entry.credentialAvailable) return 'warn'
+  if (entry.count > 1) return 'bad'
+  return 'good'
+}
+
+// loadUpstreamSessions 逐个查询上游会话数量；单个供应商失败不影响其余结果。
+async function loadUpstreamSessions() {
+  const targets = upstreamSessionProviders.value
+  if (!targets.length) {
+    upstreamSessionEntries.value = []
+    return
+  }
+  upstreamSessionLoading.value = true
+  const results = await Promise.allSettled(
+    targets.map(async (provider): Promise<UpstreamSessionEntry> => {
+      const result = await supplierProvidersAPI.getUpstreamSessions(provider.id)
+      return {
+        providerId: provider.id,
+        providerName: provider.name,
+        supported: Boolean(result?.supported),
+        // 后端未返回该字段时按「可查询」处理，避免老接口把正常结果误标成无法查询。
+        credentialAvailable: result?.credential_available !== false,
+        count: Number(result?.count || 0),
+        message: result?.message || '',
+        error: '',
+      }
+    })
+  )
+  upstreamSessionEntries.value = results.map((result, index) => {
+    if (result.status === 'fulfilled') return result.value
+    const provider = targets[index]
+    return {
+      providerId: provider.id,
+      providerName: provider.name,
+      supported: false,
+      credentialAvailable: false,
+      count: 0,
+      message: '',
+      error: errorMessage(result.reason, '读取上游会话失败'),
+    }
+  })
+  upstreamSessionLoading.value = false
+}
+
+// revokeUpstreamSessionsFor 调用清理接口并返回被吊销的会话数；面板与明细弹窗共用。
+async function revokeUpstreamSessionsFor(providerId: number): Promise<number> {
+  const result = await supplierProvidersAPI.revokeUpstreamSessions(providerId)
+  return Number(result?.revoked_count || 0)
+}
+
+// revokeProviderUpstreamSessions 清理指定供应商上游的残留会话，保留当前会话。
+async function revokeProviderUpstreamSessions(entry: UpstreamSessionEntry) {
+  if (revokingProviderIDs.value.has(entry.providerId)) return
+  revokingProviderIDs.value = new Set(revokingProviderIDs.value).add(entry.providerId)
+  try {
+    const revoked = await revokeUpstreamSessionsFor(entry.providerId)
+    appStore.showSuccess(`已清理 ${revoked} 个残留会话`)
+    await loadUpstreamSessions()
+  } catch (err) {
+    appStore.showError(errorMessage(err, '清理上游会话失败'))
+  } finally {
+    const next = new Set(revokingProviderIDs.value)
+    next.delete(entry.providerId)
+    revokingProviderIDs.value = next
+  }
+}
+
+// openUpstreamSessionDetail 打开会话明细弹窗并立即按需拉取。
+async function openUpstreamSessionDetail(entry: UpstreamSessionEntry) {
+  sessionDetailVisible.value = true
+  sessionDetailProviderId.value = entry.providerId
+  sessionDetailProviderName.value = entry.providerName
+  sessionDetailSupported.value = true
+  // 先用面板已知的状态打底，避免「无法查询」的供应商在弹窗里先闪一下「没有会话」。
+  sessionDetailCredentialAvailable.value = entry.credentialAvailable
+  sessionDetailMessage.value = entry.message
+  sessionDetailSessions.value = []
+  sessionDetailError.value = ''
+  await loadUpstreamSessionDetail()
+}
+
+function closeUpstreamSessionDetail() {
+  sessionDetailVisible.value = false
+}
+
+// loadUpstreamSessionDetail 读取当前弹窗对应供应商的上游会话明细。
+// allowLogin 只在用户显式点按「登录并读取」时为 true：该动作会在上游新增一条会话，
+// 因此绝不能放在打开弹窗或自动刷新这类路径上。
+async function loadUpstreamSessionDetail(options: { allowLogin?: boolean } = {}) {
+  const providerId = sessionDetailProviderId.value
+  if (providerId === null) return
+  sessionDetailLoading.value = true
+  sessionDetailError.value = ''
+  try {
+    const result = await supplierProvidersAPI.getUpstreamSessionDetails(providerId, {
+      allowLogin: Boolean(options.allowLogin),
+    })
+    // 请求返回前弹窗可能已关闭或切到其它供应商，此时丢弃过期结果。
+    if (sessionDetailProviderId.value !== providerId) return
+    sessionDetailSupported.value = Boolean(result?.supported)
+    sessionDetailCredentialAvailable.value = result?.credential_available !== false
+    sessionDetailMessage.value = result?.message || ''
+    sessionDetailSessions.value = Array.isArray(result?.sessions) ? result.sessions : []
+  } catch (err) {
+    if (sessionDetailProviderId.value !== providerId) return
+    sessionDetailSupported.value = true
+    sessionDetailSessions.value = []
+    sessionDetailError.value = errorMessage(err, '读取上游会话明细失败')
+  } finally {
+    if (sessionDetailProviderId.value === providerId) sessionDetailLoading.value = false
+  }
+}
+
+// loginAndLoadUpstreamSessionDetail 由用户显式触发：本地无凭据时先登录一次再读取。
+// 完成后同步刷新面板，让概览的「无法查询」也随之更新。
+async function loginAndLoadUpstreamSessionDetail() {
+  await loadUpstreamSessionDetail({ allowLogin: true })
+  if (!sessionDetailError.value) await loadUpstreamSessions()
+}
+
+// revokeSessionsFromDetail 在明细弹窗内清理残留会话，并同步刷新面板与会话数。
+async function revokeSessionsFromDetail() {
+  const providerId = sessionDetailProviderId.value
+  if (providerId === null || revokingProviderIDs.value.has(providerId)) return
+  revokingProviderIDs.value = new Set(revokingProviderIDs.value).add(providerId)
+  try {
+    const revoked = await revokeUpstreamSessionsFor(providerId)
+    appStore.showSuccess(`已清理 ${revoked} 个残留会话`)
+    await Promise.all([loadUpstreamSessionDetail(), loadUpstreamSessions()])
+  } catch (err) {
+    appStore.showError(errorMessage(err, '清理上游会话失败'))
+  } finally {
+    const next = new Set(revokingProviderIDs.value)
+    next.delete(providerId)
+    revokingProviderIDs.value = next
+  }
+}
 
 const costTrendProviderOptions = computed<SelectOption[]>(() => [
   { value: '', label: '全部供应商' },
@@ -1792,6 +2017,8 @@ onMounted(async () => {
   await loadProviderTypes()
   await loadCostDeviationSettings()
   await Promise.all([loadProviders(), loadCostTrendData(), loadCostBreakdownData(), loadBalanceSummary()])
+  // 会话检查需要逐个请求上游，放到列表渲染之后异步执行，避免拖慢首屏。
+  void loadUpstreamSessions()
 })
 
 async function loadProviderTypes() {
@@ -2097,6 +2324,13 @@ function formatAuthTime(value?: string): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false })
 }
 
+// sessionDetailTime 渲染上游会话时间。Go 的零值时间会序列化成 0001-01-01，
+// 直接格式化会显示成公元 1 年，因此这里统一当作「上游未提供」处理。
+function sessionDetailTime(value?: string): string {
+  if (!value || value.startsWith('0001-01-01')) return '—'
+  return formatAuthTime(value)
+}
+
 function formatDuration(seconds: number): string {
   const value = Math.max(0, Number(seconds || 0))
   if (value <= 0) return '0 秒'
@@ -2209,14 +2443,6 @@ function authDurationTone(durationMs?: number): string {
 
 async function refreshProvidersView() {
   await Promise.all([loadProviders(), loadCostTrendData(), loadCostBreakdownData(), loadBalanceSummary()])
-}
-
-function applyHealthTodo(todo: HealthTodo) {
-  if (todo.filter) filter.value = todo.filter
-  if (todo.quickFilter) providerQuickFilter.value = todo.quickFilter
-  if (todo.selectId) {
-    selectedProvider.value = providers.value.find(provider => provider.id === todo.selectId) || null
-  }
 }
 
 function formatCostTrendLabel(date: string) {
@@ -4026,175 +4252,360 @@ function errorMessage(err: unknown, fallback: string): string {
   }
 }
 
-.sp-health-panel {
+.sp-session-panel {
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
 
-.sp-health-head-right {
-  display: inline-flex;
+.sp-session-head-right {
+  display: flex;
   align-items: center;
   gap: 0.5rem;
-  flex-shrink: 0;
 }
 
-.sp-health-body {
+.sp-session-body {
   display: flex;
   flex-direction: column;
-  gap: 0.875rem;
+  gap: 0.75rem;
+  min-height: 0;
 }
 
-.sp-health-summary {
+.sp-session-summary {
   padding: 0.75rem 0.875rem;
   border: 1px solid var(--sp-line);
   border-radius: 0.75rem;
   background: color-mix(in srgb, var(--sp-panel) 92%, var(--sp-cyan));
 }
 
-.sp-health-summary.good {
+.sp-session-summary.good {
   border-color: color-mix(in srgb, var(--sp-green) 28%, var(--sp-line));
   background: color-mix(in srgb, var(--sp-green) 8%, var(--sp-panel));
 }
 
-.sp-health-summary.warn {
+.sp-session-summary.warn {
   border-color: color-mix(in srgb, var(--sp-amber) 28%, var(--sp-line));
   background: color-mix(in srgb, var(--sp-amber) 8%, var(--sp-panel));
 }
 
-.sp-health-summary.bad {
+.sp-session-summary.bad {
   border-color: color-mix(in srgb, var(--sp-red) 28%, var(--sp-line));
   background: color-mix(in srgb, var(--sp-red) 8%, var(--sp-panel));
 }
 
-.sp-health-summary strong {
+.sp-session-summary strong {
   display: block;
   color: var(--sp-text);
   font-size: 0.9375rem;
   font-weight: 800;
 }
 
-.sp-health-summary p {
+.sp-session-summary p {
   margin: 0.35rem 0 0;
   color: var(--sp-muted);
   font-size: 0.8125rem;
   line-height: 1.5;
 }
 
-.sp-health-section {
+.sp-session-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: var(--sp-muted);
+  font-size: 0.8125rem;
+}
+
+.sp-session-empty {
+  padding: 1.25rem 0.875rem;
+  border: 1px dashed var(--sp-line);
+  border-radius: 0.75rem;
+  color: var(--sp-muted);
+  font-size: 0.8125rem;
+  text-align: center;
+}
+
+.sp-session-list {
   display: flex;
   flex-direction: column;
-  gap: 0.625rem;
-}
-
-.sp-health-section-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.sp-health-section-title {
-  min-width: 0;
-}
-
-.sp-health-section-head > span,
-.sp-health-section-title > span {
-  color: var(--sp-text);
-  font-size: 0.8125rem;
-  font-weight: 800;
-}
-
-.sp-health-section-head > small {
-  color: var(--sp-muted);
-  font-size: 0.72rem;
-}
-
-.sp-health-section-title > small {
-  color: var(--sp-muted);
-  font-size: 0.72rem;
-  display: block;
-  margin-top: 0.2rem;
-}
-
-.sp-health-todo-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.sp-health-todo {
+.sp-session-item {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  width: 100%;
-  min-width: 0;
   padding: 0.7rem 0.8rem;
   border: 1px solid var(--sp-line);
   border-radius: 0.75rem;
   background: var(--sp-panel);
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
-.sp-health-todo:hover {
-  border-color: color-mix(in srgb, var(--sp-cyan) 35%, var(--sp-line));
-  background: color-mix(in srgb, var(--sp-cyan) 6%, var(--sp-panel));
+.sp-session-item.good {
+  border-color: color-mix(in srgb, var(--sp-green) 28%, var(--sp-line));
 }
 
-.sp-health-todo.bad {
-  border-color: color-mix(in srgb, var(--sp-red) 28%, var(--sp-line));
-}
-
-.sp-health-todo.warn {
+.sp-session-item.warn {
   border-color: color-mix(in srgb, var(--sp-amber) 28%, var(--sp-line));
 }
 
-.sp-health-todo-main {
+.sp-session-item.bad {
+  border-color: color-mix(in srgb, var(--sp-red) 28%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-red) 6%, var(--sp-panel));
+}
+
+.sp-session-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
   min-width: 0;
 }
 
-.sp-health-todo-main strong {
-  display: block;
+.sp-session-item-main strong {
+  overflow: hidden;
   color: var(--sp-text);
-  font-size: 0.8125rem;
-  font-weight: 800;
+  font-size: 0.875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.sp-health-todo-main small {
-  display: block;
-  margin-top: 0.2rem;
+.sp-session-item-main small {
   color: var(--sp-muted);
-  font-size: 0.72rem;
-  line-height: 1.4;
+  font-size: 0.75rem;
 }
 
-.sp-health-todo-action {
+.sp-session-item-actions {
+  display: flex;
   flex-shrink: 0;
-  margin-top: 0.1rem;
-  color: var(--sp-cyan);
-  font-size: 0.72rem;
-  font-weight: 800;
-}
-
-.sp-health-completeness-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: center;
   gap: 0.5rem;
-  margin-top: 0;
 }
 
-.sp-health-completeness-list .sp-list-item {
-  align-items: flex-start;
-  min-width: 0;
-  height: 100%;
-  padding: 0.7rem 0.8rem;
+.sp-session-count {
+  color: var(--sp-text);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.sp-session-count.good {
+  color: var(--sp-green);
+}
+
+.sp-session-count.warn {
+  color: var(--sp-amber);
+}
+
+.sp-session-count.bad {
+  color: var(--sp-red);
+}
+
+/* 会话明细弹窗：BaseDialog Teleport 到 body 后会脱离页面根节点，
+   因此根节点复用 supplier-management-page 提供 --sp-* 变量，并抵消其 min-height 副作用。 */
+.sp-session-detail-dialog {
+  min-height: 0;
+}
+
+.sp-session-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.sp-session-detail-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem 0.9rem;
   border: 1px solid var(--sp-line);
   border-radius: 0.75rem;
-  background: var(--sp-panel);
+  background: var(--sp-panel-2);
 }
+
+.sp-session-detail-summary strong {
+  color: var(--sp-text);
+  font-size: 0.9375rem;
+}
+
+.sp-session-detail-summary p {
+  margin: 0;
+  color: var(--sp-muted);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+
+.sp-session-detail-summary.good {
+  border-color: color-mix(in srgb, var(--sp-green) 40%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-green) 8%, var(--sp-panel-2));
+}
+
+.sp-session-detail-summary.warn {
+  border-color: color-mix(in srgb, var(--sp-amber) 40%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-amber) 8%, var(--sp-panel-2));
+}
+
+.sp-session-detail-summary.bad {
+  border-color: color-mix(in srgb, var(--sp-red) 40%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-red) 8%, var(--sp-panel-2));
+}
+
+.sp-session-detail-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: var(--sp-muted);
+  font-size: 0.8125rem;
+}
+
+.sp-session-detail-empty {
+  padding: 1.25rem;
+  border: 1px dashed var(--sp-line);
+  border-radius: 0.75rem;
+  color: var(--sp-muted);
+  font-size: 0.8125rem;
+  text-align: center;
+}
+
+.sp-session-detail-empty.warn {
+  border-color: color-mix(in srgb, var(--sp-amber) 45%, var(--sp-line));
+  color: var(--sp-amber);
+}
+
+/* 无凭据空态不止要说明原因，还要给出可执行的下一步，因此改为纵向排布并容纳按钮。 */
+.sp-session-detail-empty.actionable {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.6rem;
+  text-align: left;
+}
+
+.sp-session-detail-empty.actionable p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.sp-session-detail-hint {
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+}
+
+.sp-session-detail-empty.bad {
+  border-color: color-mix(in srgb, var(--sp-red) 45%, var(--sp-line));
+  color: var(--sp-red);
+}
+
+.sp-session-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sp-session-detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--sp-line);
+  border-left-width: 3px;
+  border-radius: 0.75rem;
+  background: var(--sp-panel-2);
+}
+
+.sp-session-detail-item.good {
+  border-left-color: var(--sp-green);
+}
+
+.sp-session-detail-item.bad {
+  border-left-color: var(--sp-red);
+}
+
+.sp-session-detail-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.sp-session-detail-title strong {
+  color: var(--sp-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8125rem;
+  word-break: break-all;
+}
+
+.sp-session-detail-tag {
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 999px;
+  color: var(--sp-muted);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.sp-session-detail-tag.good {
+  border-color: color-mix(in srgb, var(--sp-green) 45%, var(--sp-line));
+  color: var(--sp-green);
+}
+
+.sp-session-detail-tag.bad {
+  border-color: color-mix(in srgb, var(--sp-red) 45%, var(--sp-line));
+  color: var(--sp-red);
+}
+
+.sp-session-detail-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.25rem 1rem;
+}
+
+.sp-session-detail-meta-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  min-width: 0;
+  font-size: 0.75rem;
+}
+
+.sp-session-detail-meta-label {
+  flex-shrink: 0;
+  color: var(--sp-dim);
+}
+
+.sp-session-detail-meta-value {
+  overflow: hidden;
+  color: var(--sp-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-session-detail-agent {
+  margin: 0;
+  overflow: hidden;
+  color: var(--sp-dim);
+  font-size: 0.6875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* BaseDialog teleport 到 body，通过 :has 匹配弹层并放大到超过 full 档位默认宽度 */
+:global(.modal-content:has(.sp-session-detail-dialog)) {
+  width: 100%;
+  max-width: min(72rem, calc(100vw - 2rem));
+}
+
+:global(.modal-content:has(.sp-session-detail-dialog) .modal-body) {
+  min-height: 0;
+}
+
 
 .sp-health-chart-meta {
   display: flex;
@@ -4715,12 +5126,14 @@ function errorMessage(err: unknown, fallback: string): string {
 }
 
 @media (max-width: 640px) {
-  .sp-health-todo-list {
-    grid-template-columns: 1fr;
+  .sp-session-item {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
-  .sp-health-completeness-list {
-    grid-template-columns: 1fr;
+  .sp-session-item-actions {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .sp-health-cost-section-head .sp-health-date-range-control {
