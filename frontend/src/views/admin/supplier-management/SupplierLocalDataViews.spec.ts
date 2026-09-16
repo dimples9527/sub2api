@@ -1629,4 +1629,42 @@ describe('supplier local data views component usage', () => {
     expect(supplierProviderDataSource).toContain('updateSupplierGroupRateGuardEnabled')
   })
 
+  it('shows the back-to-top button only after scrolling and scrolls back on click', async () => {
+    // 监听注册发生在 onMounted 里，所以必须在 mount 之前装上 spy
+    const addSpy = vi.spyOn(window, 'addEventListener')
+    const removeSpy = vi.spyOn(window, 'removeEventListener')
+    const scrollYSpy = vi.spyOn(window, 'scrollY', 'get').mockReturnValue(0)
+    const scrollToSpy = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+
+    const wrapper = await mountSupplierAccounts()
+
+    try {
+      // 顶部时不渲染：按钮不该留在 DOM 里，否则 Tab 会落到看不见的控件上
+      expect(wrapper.find('[data-test="supplier-account-scroll-top"]').exists()).toBe(false)
+
+      scrollYSpy.mockReturnValue(900)
+      window.dispatchEvent(new Event('scroll'))
+      await wrapper.vm.$nextTick()
+
+      const button = wrapper.get('[data-test="supplier-account-scroll-top"]')
+      expect(button.attributes('aria-label')).toBe('回到顶部')
+
+      await button.trigger('click')
+      expect(scrollToSpy).toHaveBeenCalledTimes(1)
+      expect(scrollToSpy.mock.calls[0][0]).toMatchObject({ top: 0 })
+    } finally {
+      wrapper.unmount()
+    }
+
+    // 卸载必须解绑 window 监听，否则切换路由后仍会响应滚动
+    const scrollListener = addSpy.mock.calls.find(([type]) => type === 'scroll')
+    expect(scrollListener).toBeTruthy()
+    expect(removeSpy.mock.calls.some(([type, handler]) => type === 'scroll' && handler === scrollListener![1]))
+      .toBe(true)
+
+    addSpy.mockRestore()
+    removeSpy.mockRestore()
+    scrollYSpy.mockRestore()
+    scrollToSpy.mockRestore()
+  })
 })

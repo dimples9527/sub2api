@@ -532,6 +532,39 @@
       </footer>
     </section>
 
+    <!--
+      回到顶部：账号列表动辄几十页，翻到列表底部后筛选区已在屏幕外，
+      这里提供一个常驻视口的返回入口。用 v-if 而不是 v-show，
+      避免按钮在顶部时仍占用焦点（键盘 Tab 会落到看不见的按钮上）。
+    -->
+    <Transition name="sp-scroll-top">
+      <button
+        v-if="showScrollTop"
+        class="sp-scroll-top"
+        type="button"
+        aria-label="回到顶部"
+        title="回到顶部"
+        data-test="supplier-account-scroll-top"
+        @click="scrollToTop"
+      >
+        <svg class="sp-scroll-top-ring" viewBox="0 0 44 44" aria-hidden="true">
+          <circle class="sp-scroll-top-ring-track" cx="22" cy="22" r="20" />
+          <circle
+            class="sp-scroll-top-ring-progress"
+            cx="22"
+            cy="22"
+            r="20"
+            :stroke-dasharray="scrollTopRingCircumference"
+            :stroke-dashoffset="scrollTopRingOffset"
+          />
+        </svg>
+        <svg class="sp-scroll-top-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 18.5V5.5" />
+          <path d="M6.5 11L12 5.5l5.5 5.5" />
+        </svg>
+      </button>
+    </Transition>
+
     <SupplierDrawer
       :show="Boolean(selected)"
       :title="selected?.name || selected?.upstream_account_key || '上游账号详情'"
@@ -1603,8 +1636,39 @@ const accountColumns: Column[] = [
   { key: 'actions', label: '操作', class: 'min-w-[300px]' },
 ]
 
+// 回到顶部悬浮按钮
+// 滚动发生在 window：DataTable 的 .table-wrapper 虽然写了 overflow-y: auto，
+// 但它的高度是 auto（.sp-account-table-shell 只设了 min-height），内容不会纵向溢出，
+// 所以表格只是把页面撑高，真正的滚动条在 window 上。
+const SCROLL_TOP_VISIBLE_OFFSET = 320
+const SCROLL_TOP_RING_RADIUS = 20
+// 圆环周长用于把滚动进度映射成 stroke-dashoffset，与模板里的 r=20 保持一致
+const SCROLL_TOP_RING_CIRCUMFERENCE = 2 * Math.PI * SCROLL_TOP_RING_RADIUS
+
+const showScrollTop = ref(false)
+const scrollProgress = ref(0)
+const scrollTopRingCircumference = SCROLL_TOP_RING_CIRCUMFERENCE
+const scrollTopRingOffset = computed(
+  () => SCROLL_TOP_RING_CIRCUMFERENCE * (1 - scrollProgress.value)
+)
+
+function handleWindowScroll() {
+  const scrolled = window.scrollY || document.documentElement.scrollTop || 0
+  showScrollTop.value = scrolled > SCROLL_TOP_VISIBLE_OFFSET
+  const scrollable = document.documentElement.scrollHeight - window.innerHeight
+  scrollProgress.value = scrollable > 0 ? Math.min(1, Math.max(0, scrolled / scrollable)) : 0
+}
+
+function scrollToTop() {
+  // 尊重系统「减少动态效果」设置：该设置下平滑滚动会让前庭敏感用户不适
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  window.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' })
+}
+
 onMounted(async () => {
   applyFilterControlLabels()
+  window.addEventListener('scroll', handleWindowScroll, { passive: true })
+  handleWindowScroll()
   guardFreshnessTimer = window.setInterval(() => {
     guardFreshnessNow.value = Date.now()
   }, 30000)
@@ -1615,6 +1679,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.clearTimeout(searchTimer)
   window.clearInterval(guardFreshnessTimer)
+  window.removeEventListener('scroll', handleWindowScroll)
   batchTestPollToken += 1
   clearBatchTestPollTimer()
 })
@@ -4345,6 +4410,106 @@ button.sp-guard-failure-hint:hover {
   background: transparent;
 }
 
+/*
+  回到顶部悬浮按钮
+  z-index 取 40：低于 BaseDialog 的 z-50 与 .sp-overlay 的 z-80，
+  弹窗 / 抽屉打开时按钮会被盖住，不会浮在遮罩之上抢焦点。
+*/
+.sp-scroll-top {
+  position: fixed;
+  right: 1.5rem;
+  bottom: max(1.5rem, env(safe-area-inset-bottom, 0px));
+  z-index: 40;
+  display: flex;
+  width: 2.75rem;
+  height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  /* 按钮会压在白色表格卡片上，纯白底 + 灰边框几乎看不见，
+     所以用主题强调色描边 + 强调色箭头，靠颜色而不是阴影来区分层次 */
+  border: 1px solid color-mix(in srgb, var(--sp-cyan) 32%, var(--sp-line));
+  border-radius: 999px;
+  background: var(--sp-panel);
+  color: var(--sp-cyan);
+  box-shadow: var(--sp-shadow), 0 6px 18px rgba(15, 23, 42, 0.18);
+  cursor: pointer;
+  transition: color 0.18s ease, background-color 0.18s ease, border-color 0.18s ease,
+    box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.sp-scroll-top:hover {
+  border-color: var(--sp-cyan);
+  background: var(--sp-cyan);
+  color: #fff;
+  box-shadow: var(--sp-shadow), 0 10px 24px color-mix(in srgb, var(--sp-cyan) 30%, transparent);
+  transform: translateY(-2px);
+}
+
+.sp-scroll-top:focus-visible {
+  outline: 2px solid var(--sp-cyan);
+  outline-offset: 2px;
+}
+
+/* 进度环：外圈提示当前滚动位置，配合箭头让按钮不只是个装饰。
+   描边统一走 currentColor，这样 hover 换成强调色底时圆环会自己变成白色 */
+.sp-scroll-top-ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.sp-scroll-top-ring-track,
+.sp-scroll-top-ring-progress {
+  fill: none;
+  stroke-width: 2;
+}
+
+.sp-scroll-top-ring-track {
+  stroke: color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.sp-scroll-top-ring-progress {
+  stroke: currentColor;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.2s linear;
+}
+
+.sp-scroll-top-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.18s ease;
+}
+
+.sp-scroll-top:hover .sp-scroll-top-icon {
+  transform: translateY(-2px);
+}
+
+.sp-scroll-top-enter-active,
+.sp-scroll-top-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.sp-scroll-top-enter-from,
+.sp-scroll-top-leave-to {
+  opacity: 0;
+  transform: translateY(0.5rem) scale(0.92);
+}
+
+@media (max-width: 760px) {
+  .sp-scroll-top {
+    right: 1rem;
+    bottom: max(1rem, env(safe-area-inset-bottom, 0px));
+  }
+}
+
 :global(.modal-content:has(.sp-batch-test-dialog)),
 :global(.modal-content:has(.sp-batch-result-dialog)) {
   --sp-panel: #ffffff;
@@ -5455,6 +5620,25 @@ button.sp-guard-failure-hint:hover {
 @media (prefers-reduced-motion: reduce) {
   .sp-account-table-shell :deep(tbody tr) {
     transition: none;
+  }
+
+  /* 悬浮按钮本身也不做位移/淡入，只保留可见性切换 */
+  .sp-scroll-top,
+  .sp-scroll-top:hover,
+  .sp-scroll-top:hover .sp-scroll-top-icon,
+  .sp-scroll-top-ring-progress,
+  .sp-scroll-top-enter-active,
+  .sp-scroll-top-leave-active {
+    transition: none;
+  }
+
+  .sp-scroll-top:hover {
+    transform: none;
+  }
+
+  .sp-scroll-top-enter-from,
+  .sp-scroll-top-leave-to {
+    transform: none;
   }
 }
 
