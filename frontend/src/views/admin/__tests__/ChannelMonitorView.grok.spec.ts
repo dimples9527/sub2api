@@ -101,7 +101,9 @@ describe('channel monitor Grok provider', () => {
 
     expect(PROVIDERS).toContain(PROVIDER_GROK)
     const providerButtons = wrapper.findAll('[data-testid^="monitor-provider-"]')
-    expect(providerButtons).toHaveLength(8)
+    // 跟着 PROVIDERS 的实际长度断言，不要再硬编码数字：
+    // 原来写死的 8 在 provider 增加到 9、10 之后连红两轮都没人发现。
+    expect(providerButtons).toHaveLength(PROVIDERS.length)
     expect(providerButtons[0].element.parentElement?.className).toContain('grid-cols-2')
     expect(providerButtons[0].element.parentElement?.className).toContain('sm:grid-cols-4')
 

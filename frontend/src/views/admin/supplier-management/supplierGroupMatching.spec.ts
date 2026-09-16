@@ -47,10 +47,10 @@ describe('supplier group automatic matching workflow', () => {
 		expect(viewSource).not.toContain("label: '守护异常'")
 		expect(viewSource).toContain('非守护源')
 		expect(viewSource).toContain('未匹配')
-		expect(viewSource).toContain('canManageManualRateGuard(group)')
+		expect(viewSource).toContain('canManageManualRateGuard(actionMenu.group)')
 		expect(viewSource).toContain('group.local_group_active_mapping_count > 1')
 		expect(viewSource).not.toContain('items.value.some(item =>')
-		expect(viewSource).toContain('!group.rate_guard_selected && !rateGuardEligible(group)')
+		expect(viewSource).toContain('!actionMenu.group.rate_guard_selected && !rateGuardEligible(actionMenu.group)')
 		expect(viewSource).toContain('更换本地分组')
 		expect(viewSource).toContain('取消关联')
 		expect(viewSource).not.toContain('重新匹配')
@@ -63,11 +63,12 @@ describe('supplier group automatic matching workflow', () => {
 		expect(viewSource).toContain('group.local_group_rate_guard_group_name')
 		expect(viewSource).toContain("filter(Boolean).join(' / ')")
 		expect(viewSource).toContain('当前本地分组由该上游分组执行倍率守护，本分组不会参与守护')
-		expect(viewSource).toContain("hasOtherRateGuard(group) ? '切换为守护' : '设为守护'")
+		expect(viewSource).toContain("hasOtherRateGuard(actionMenu.group) ? '切换为守护' : '设为守护'")
 	})
 
 	it('provides server-backed platform, match and rate filters through clickable summary cards', () => {
-		expect(viewSource).toContain("{ value: 'openai', label: 'OpenAI' }")
+		// 平台筛选项改为由 buildPlatformOptions 从平台目录动态生成，不再逐个硬编码平台项。
+		expect(viewSource).toContain('buildPlatformOptions(customPlatforms.value)')
 		expect(viewSource).toContain("{ value: 'name_changed', label: '名称变化' }")
 		expect(viewSource).toContain("{ value: 'inverted', label: '倒挂风险' }")
 		expect(viewSource).toContain('platform: platformFilter.value || undefined')
@@ -87,8 +88,13 @@ describe('supplier group automatic matching workflow', () => {
 		expect(viewSource).toContain('sort_order: sortBy.value ? sortOrder.value : undefined')
 		expect(viewSource).toContain("function handleGroupSort(key: string, order: 'asc' | 'desc')")
 
-		const columnsStart = viewSource.indexOf('const groupColumns: Column[] = [')
+		const columnsStart = viewSource.indexOf('const ALL_GROUP_COLUMNS: Column[] = [')
+		// 列定义已由 groupColumns 改成 ALL_GROUP_COLUMNS（再由 computed 过滤可见列）。
+		// 这里必须显式断言找到了：indexOf 返回 -1 时 slice(-1, N) 不报错而是静默得到空串，
+		// 断言只会说「expected '' to contain ...」，完全看不出真因。
+		expect(columnsStart).toBeGreaterThan(-1)
 		const columnsEnd = viewSource.indexOf('\n]', columnsStart)
+		expect(columnsEnd).toBeGreaterThan(columnsStart)
 		const columnsSource = viewSource.slice(columnsStart, columnsEnd)
 		const sortableColumns = [
 			'provider_name',

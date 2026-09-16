@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { h, onMounted } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import upstreamAccountsSource from './UpstreamAccountsView.vue?raw'
@@ -88,6 +89,10 @@ vi.mock('@/stores/app', () => ({
 
 describe('UpstreamAccountsView', () => {
   beforeEach(() => {
+    // GroupSelector 在 setup 里就调用 useAuthStore()；编辑绑定分组弹窗（.account-group-dialog）
+    // 里的真实 GroupSelector 负责渲染分组 checkbox，不能像其它用例那样 stub 掉，
+    // 所以要提供一个 active pinia，否则 mount 阶段直接抛 "no active Pinia"。
+    setActivePinia(createPinia())
     vi.clearAllMocks()
     routeMock.query = {}
     window.localStorage.clear()

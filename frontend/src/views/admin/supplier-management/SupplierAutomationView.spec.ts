@@ -914,7 +914,8 @@ describe('SupplierAutomationView Task 5 visual system', () => {
     }
 
     expect(styleSource).toMatch(/\.sp-automation-console\s*\{[^}]*display:\s*grid;[^}]*gap:\s*18px;[^}]*min-width:\s*0;/s)
-    expect(styleSource).toMatch(/\.sp-overview-strip\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);[^}]*gap:\s*12px;[^}]*background:\s*transparent;/s)
+    // 概览条间距在 127067492「style(supplier): 自动化任务编辑弹窗卡片化并整体压缩布局」里由 12px 压到 8px。
+    expect(styleSource).toMatch(/\.sp-overview-strip\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);[^}]*gap:\s*8px;[^}]*background:\s*transparent;/s)
     expect(styleSource).toMatch(/\.sp-overview-item\s*\{[^}]*position:\s*relative;[^}]*overflow:\s*hidden;[^}]*border:\s*1px solid color-mix\(in srgb, var\(--sp-metric-accent\) 18%, var\(--sp-soft\)\);[^}]*border-radius:\s*14px;/s)
     expect(styleSource).toMatch(/\.sp-console-panel\s*\{[^}]*border:\s*1px solid var\(--sp-soft\);[^}]*border-radius:\s*14px;[^}]*background:\s*var\(--sp-panel\);/s)
     expect(styleSource).toMatch(/\.sp-task-primary\s*\{[^}]*min-width:\s*76px;/s)
