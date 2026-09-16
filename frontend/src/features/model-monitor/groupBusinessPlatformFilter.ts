@@ -1,14 +1,14 @@
 import type { GroupPlatform } from '@/types'
 
-/** ?????????????????? */
+/** 业务平台筛选值；空字符串表示「全部平台」。 */
 export type BusinessPlatformFilterValue = string | ''
 
 export interface GroupBusinessPlatformSource {
   platform: string
-  /** ?????????????????? */
+  /** 监控层解析出的业务平台，存在时优先于 platform 使用。 */
   businessPlatform?: string | null
   businessPlatformName?: string | null
-  /** ???? DTO / ???? camelCase ? snake_case ?? */
+  /** 同时兼容 DTO 的 camelCase 与 snake_case 两种命名。 */
   effectivePlatform?: string | null
   effective_platform?: string | null
   effectivePlatformName?: string | null
@@ -22,7 +22,7 @@ export interface GroupBusinessPlatformSortable extends GroupBusinessPlatformSour
   rate: number
 }
 
-/** ???????????????????? */
+/** 展示顺序固定的核心平台；其余平台排在它们之后。 */
 export const BUSINESS_PLATFORM_CORE_ORDER = [
   'anthropic',
   'openai',
@@ -54,7 +54,7 @@ function firstPlatformName(...values: Array<string | null | undefined>): string 
   return ''
 }
 
-/** ?????????????????????????? */
+/** 按优先级解析分组真实归属的业务平台，全部缺失时退回 platform。 */
 export function resolveGroupBusinessPlatform(group: GroupBusinessPlatformSource): string {
   return firstPlatformValue(
     group.businessPlatform,
@@ -66,7 +66,7 @@ export function resolveGroupBusinessPlatform(group: GroupBusinessPlatformSource)
   )
 }
 
-/** ??????????????/???????? platform ?? */
+/** 是否由监控层显式指定了业务平台，而不是回退到 platform。 */
 function hasExplicitGroupBusinessPlatform(group: GroupBusinessPlatformSource): boolean {
   return !!firstPlatformValue(
     group.businessPlatform,
@@ -96,8 +96,8 @@ function businessPlatformOptionLabel(
 }
 
 /**
- * ???????????????
- * ???????????????????????? composite ???????????????
+ * 判断分组是否命中平台筛选。
+ * 显式指定了业务平台的分组只按该平台匹配；composite 分组额外视为命中任一核心平台。
  */
 export function matchesGroupBusinessPlatformFilter(
   groupPlatform: string | null | undefined,
@@ -123,7 +123,7 @@ export function matchesGroupBusinessPlatformFilter(
   return rawPlatform === filter || (rawPlatform === 'composite' && BUSINESS_PLATFORM_CORE_SET.has(filter))
 }
 
-/** ???????????????????? */
+/** 按倍率升序排列，倍率相同时按名称排序。 */
 export function sortGroupsByRateAsc<T extends GroupBusinessPlatformSortable>(items: T[]): T[] {
   return [...items].sort((a, b) => {
     if (a.rate !== b.rate) return a.rate - b.rate
@@ -131,7 +131,7 @@ export function sortGroupsByRateAsc<T extends GroupBusinessPlatformSortable>(ite
   })
 }
 
-/** ??????????????? */
+/** 先按业务平台筛选，再按倍率升序排列。 */
 export function filterAndSortGroupsByBusinessPlatform<T extends GroupBusinessPlatformSortable>(
   options: T[],
   platformFilter: BusinessPlatformFilterValue | null | undefined
@@ -143,8 +143,8 @@ export function filterAndSortGroupsByBusinessPlatform<T extends GroupBusinessPla
 }
 
 /**
- * ?????????????
- * ???????????????????????????
+ * 从分组数据里提取实际出现过的业务平台，生成筛选下拉项。
+ * 核心平台按固定顺序排在前面，其余平台按出现顺序追加。
  */
 export function buildGroupBusinessPlatformOptions(
   groups: GroupBusinessPlatformSource[],
@@ -171,7 +171,7 @@ export function buildGroupBusinessPlatformOptions(
     })
   }
 
-  // ???????????????????
+  // 核心平台之外的平台追加在后面，保持数据里出现的顺序。
   for (const [platform, explicitName] of present) {
     if (BUSINESS_PLATFORM_CORE_SET.has(platform)) continue
     options.push({
@@ -183,7 +183,7 @@ export function buildGroupBusinessPlatformOptions(
   return options
 }
 
-/** ??????????????????? */
+/** 切换平台筛选后，判断已选分组是否仍在新筛选范围内。 */
 export function isGroupValidForBusinessPlatformFilter(
   selectedGroupId: number | null | undefined,
   selectedGroupPlatform: GroupPlatform | null | undefined,

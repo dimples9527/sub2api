@@ -12,17 +12,55 @@
       }"
       data-tour="key-group-selector-popover"
     >
-      <!-- 平台过滤 + 搜索：复用通用 Select，和创建密钥弹窗保持一致 -->
+      <!-- 厂商过滤 + 搜索：厂商卡片与创建密钥弹窗同一套实现，两处选择体验保持一致 -->
       <div class="space-y-2 rounded-t-xl border-b border-gray-100 p-2 dark:border-dark-700">
-        <div data-tour="key-list-group-platform-wrap">
-          <Select
-            v-model="platformFilter"
-            :options="platformOptions"
-            :placeholder="t('keys.allPlatforms')"
-            :aria-label="t('keys.platformLabel')"
-            data-tour="key-list-group-platform"
-          />
-        </div>
+        <fieldset data-tour="key-list-group-provider-wrap">
+          <!-- 浮层没有标题栏，用 sr-only legend 给单选组一个无障碍名称，不额外占视觉空间 -->
+          <legend class="sr-only">{{ t('keys.providerLabel') }}</legend>
+          <div class="grid grid-cols-4 gap-1.5" data-tour="key-list-group-provider">
+            <label
+              v-for="provider in providerOptions"
+              :key="provider.value"
+              class="relative min-w-0"
+              :class="provider.count === 0 ? 'cursor-not-allowed' : 'cursor-pointer'"
+            >
+              <input
+                type="radio"
+                name="key-list-group-provider"
+                :value="provider.value"
+                :checked="selectedProvider === provider.value"
+                :disabled="provider.count === 0"
+                class="peer sr-only"
+                @change="selectProvider(provider.value)"
+              />
+              <span
+                class="flex h-full flex-col items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-1.5 py-2 text-center transition-colors peer-checked:border-primary-500 peer-checked:bg-primary-50/60 peer-checked:ring-1 peer-checked:ring-primary-500 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary-500 peer-disabled:opacity-40 dark:border-dark-600 dark:bg-dark-800 dark:peer-checked:border-primary-500 dark:peer-checked:bg-primary-500/10"
+                :class="provider.count > 0 && 'hover:border-primary-300 dark:hover:border-primary-700'"
+              >
+                <span class="flex h-7 items-center justify-center gap-1" aria-hidden="true">
+                  <span
+                    v-for="platform in KEY_GROUP_PROVIDER_ICONS[provider.value]"
+                    :key="platform"
+                    class="flex h-7 w-7 items-center justify-center rounded-lg"
+                    :class="platformBadgeLightClass(platform)"
+                  >
+                    <PlatformIcon :platform="platform" size="lg" />
+                  </span>
+                </span>
+                <span class="w-full truncate text-xs font-semibold text-gray-800 dark:text-gray-100">
+                  {{ provider.label }}
+                </span>
+              </span>
+              <span
+                v-if="selectedProvider === provider.value"
+                class="absolute right-1 top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary-500 text-white"
+                aria-hidden="true"
+              >
+                <Icon name="check" size="xs" :stroke-width="3" />
+              </span>
+            </label>
+          </div>
+        </fieldset>
 
         <div class="relative">
           <svg
@@ -90,12 +128,19 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import Select from '@/components/common/Select.vue'
 import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
+import PlatformIcon from '@/components/common/PlatformIcon.vue'
+import Icon from '@/components/icons/Icon.vue'
+import { platformBadgeLightClass } from '@/utils/platformColors'
 import {
-  buildGroupBusinessPlatformOptions as buildKeyFormPlatformOptions,
-  filterAndSortGroupsByBusinessPlatform as filterAndSortKeyFormGroupOptions,
-  type BusinessPlatformFilterValue as KeyFormPlatformFilter
+  KEY_GROUP_PROVIDERS,
+  KEY_GROUP_PROVIDER_ICONS,
+  getKeyGroupProvider,
+  type KeyGroupProvider
+} from '@/utils/keyGroupProviders'
+import {
+  resolveGroupBusinessPlatform,
+  sortGroupsByRateAsc
 } from '@/features/model-monitor/groupBusinessPlatformFilter'
 import type { GroupPlatform, SubscriptionType } from '@/types'
 
@@ -145,20 +190,40 @@ const { t } = useI18n()
 
 const rootRef = ref<HTMLElement | null>(null)
 const searchQuery = ref('')
-const platformFilter = ref<KeyFormPlatformFilter>('')
+const selectedProvider = ref<KeyGroupProvider>('anthropic')
 
-const platformOptions = computed(() =>
-  buildKeyFormPlatformOptions(props.options, {
-    all: t('keys.allPlatforms'),
-    platformLabel: (platform) => t(`admin.groups.platforms.${platform}`)
-  })
+/**
+ * 分类按「解析后的业务平台」，而不是分组的 platform 原始字段：
+ * composite 分组、或被监控层覆写过上游的分组，其真实上游与 platform 字段并不一致，
+ * 用原始字段会把它们一律错归到「其他」，用户按厂商就找不到它们。
+ */
+const providerOf = (option: KeyGroupSelectorOption): KeyGroupProvider =>
+  getKeyGroupProvider(resolveGroupBusinessPlatform(option))
+
+const providerOptions = computed(() =>
+  KEY_GROUP_PROVIDERS.map((value) => ({
+    value,
+    label: t(`keys.providers.${value}`),
+    count: props.options.filter((option) => providerOf(option) === value).length
+  }))
 )
 
+/** 厂商卡片是单选，没有「全部」项，需要一个默认落点：取第一个有分组的厂商 */
+const firstProviderWithGroups = (): KeyGroupProvider =>
+  providerOptions.value.find((provider) => provider.count > 0)?.value ?? 'anthropic'
+
+const selectProvider = (provider: KeyGroupProvider) => {
+  selectedProvider.value = provider
+}
+
 const filteredOptions = computed(() => {
-  const platformFiltered = filterAndSortKeyFormGroupOptions(props.options, platformFilter.value)
+  // 按倍率升序，与创建密钥弹窗的分组下拉同一套排序，避免两处顺序不一致。
+  const providerFiltered = sortGroupsByRateAsc(
+    props.options.filter((option) => providerOf(option) === selectedProvider.value)
+  )
   const query = searchQuery.value.trim().toLowerCase()
-  if (!query) return platformFiltered
-  return platformFiltered.filter((option) => {
+  if (!query) return providerFiltered
+  return providerFiltered.filter((option) => {
     return (
       option.label.toLowerCase().includes(query) ||
       (option.description && option.description.toLowerCase().includes(query))
@@ -168,8 +233,21 @@ const filteredOptions = computed(() => {
 
 const resetFilters = () => {
   searchQuery.value = ''
-  platformFilter.value = ''
+  selectProvider(firstProviderWithGroups())
 }
+
+// 分组数据可能晚于组件挂载到达。当前厂商一个分组都没有时，落到第一个有分组的厂商，
+// 否则用户打开浮层只会看到空列表。
+watch(
+  providerOptions,
+  (providers) => {
+    const current = providers.find((provider) => provider.value === selectedProvider.value)
+    if (!current || current.count === 0) {
+      selectProvider(providers.find((provider) => provider.count > 0)?.value ?? 'anthropic')
+    }
+  },
+  { immediate: true }
+)
 
 const isOptionSelected = (option: KeyGroupSelectorOption) => {
   return (
@@ -206,7 +284,7 @@ defineExpose({
 </script>
 
 <style scoped>
-/* 列表切换分组浮层：搜索框保持和通用 Select 接近的视觉 */
+/* 列表切换分组浮层：搜索框视觉与创建密钥弹窗的搜索框保持一致 */
 .group-selector-search-input {
   @apply w-full rounded-lg border border-gray-200 bg-gray-50 text-sm leading-5;
   @apply text-gray-900 outline-none transition-colors duration-150;

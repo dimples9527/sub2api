@@ -18,23 +18,64 @@
           />
         </div>
 
-        <div>
-          <label class="input-label">{{ t('keys.platformLabel') }}</label>
-          <Select
-            v-model="formPlatformFilter"
-            :options="formPlatformOptions"
-            :placeholder="t('keys.selectPlatform')"
-            data-tour="key-form-platform"
-            @update:model-value="onFormPlatformFilterChange"
-          />
-        </div>
+        <fieldset v-if="!isEdit" data-tour="key-form-provider">
+          <legend class="input-label">{{ t('keys.providerLabel') }}</legend>
+          <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <label
+              v-for="provider in providerOptions"
+              :key="provider.value"
+              class="relative min-w-0"
+              :class="provider.count === 0 ? 'cursor-not-allowed' : 'cursor-pointer'"
+            >
+              <input
+                type="radio"
+                name="key-provider"
+                :value="provider.value"
+                :checked="selectedProvider === provider.value"
+                :disabled="provider.count === 0"
+                class="peer sr-only"
+                @change="selectProvider(provider.value)"
+              />
+              <span
+                class="flex h-full flex-col items-center gap-2 rounded-xl border border-gray-200 bg-white px-2 py-3 text-center transition-colors peer-checked:border-primary-500 peer-checked:bg-primary-50/60 peer-checked:ring-1 peer-checked:ring-primary-500 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary-500 peer-disabled:opacity-40 dark:border-dark-600 dark:bg-dark-800 dark:peer-checked:border-primary-500 dark:peer-checked:bg-primary-500/10"
+                :class="provider.count > 0 && 'hover:border-primary-300 dark:hover:border-primary-700'"
+              >
+                <span class="flex h-8 items-center justify-center gap-1.5" aria-hidden="true">
+                  <span
+                    v-for="platform in KEY_GROUP_PROVIDER_ICONS[provider.value]"
+                    :key="platform"
+                    class="flex h-8 w-8 items-center justify-center rounded-lg"
+                    :class="platformBadgeLightClass(platform)"
+                  >
+                    <PlatformIcon :platform="platform" size="lg" />
+                  </span>
+                </span>
+                <span class="text-sm font-semibold text-gray-800 dark:text-gray-100">{{ provider.label }}</span>
+              </span>
+              <span
+                v-if="selectedProvider === provider.value"
+                class="absolute right-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary-500 text-white"
+                aria-hidden="true"
+              >
+                <Icon name="check" size="xs" :stroke-width="3" />
+              </span>
+            </label>
+          </div>
+          <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400" aria-live="polite">
+            {{ props.groupOptions.length === 0 ? t('common.noGroupsAvailable') : t(`keys.providerHints.${selectedProvider}`) }}
+          </p>
+        </fieldset>
 
         <div>
-          <label class="input-label">{{ t('keys.groupLabel') }}</label>
+          <label class="input-label" for="key-form-group">{{ t('keys.groupLabel') }}</label>
           <Select
+            :key="isEdit ? 'edit' : selectedProvider"
+            id="key-form-group"
+            :aria-label="t('keys.groupLabel')"
             v-model="formData.group_id"
             :options="formGroupOptions"
             :placeholder="t('keys.selectGroup')"
+            :empty-text="t('common.noGroupsAvailable')"
             :searchable="true"
             :search-placeholder="t('keys.searchGroup')"
             data-tour="key-form-group"
@@ -528,12 +569,19 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
+import PlatformIcon from '@/components/common/PlatformIcon.vue'
+import Icon from '@/components/icons/Icon.vue'
 import { formatDateTime } from '@/utils/format'
+import { platformBadgeLightClass } from '@/utils/platformColors'
 import {
-  buildGroupBusinessPlatformOptions as buildKeyFormPlatformOptions,
-  filterAndSortGroupsByBusinessPlatform as filterAndSortKeyFormGroupOptions,
-  isGroupValidForBusinessPlatformFilter as isSelectedGroupValidForPlatformFilter,
-  type BusinessPlatformFilterValue as KeyFormPlatformFilter
+  KEY_GROUP_PROVIDERS,
+  KEY_GROUP_PROVIDER_ICONS,
+  getKeyGroupProvider,
+  type KeyGroupProvider
+} from '@/utils/keyGroupProviders'
+import {
+  resolveGroupBusinessPlatform,
+  sortGroupsByRateAsc
 } from '@/features/model-monitor/groupBusinessPlatformFilter'
 import type { ApiKey, GroupPlatform, SubscriptionType, UpdateApiKeyRequest } from '@/types'
 
@@ -584,7 +632,7 @@ const onboardingStore = useOnboardingStore()
 
 const isEdit = computed(() => props.mode === 'edit')
 const submitting = ref(false)
-const formPlatformFilter = ref<KeyFormPlatformFilter>('')
+const selectedProvider = ref<KeyGroupProvider>('anthropic')
 
 const createEmptyForm = () => ({
   name: '',
@@ -635,23 +683,37 @@ const statusOptions = computed(() => [
   { value: 'inactive', label: t('common.inactive') }
 ])
 
-const formPlatformOptions = computed(() =>
-  buildKeyFormPlatformOptions(props.groupOptions, {
-    all: t('keys.allPlatforms'),
-    platformLabel: (platform) => t(`admin.groups.platforms.${platform}`)
-  })
+/**
+ * 分类按「解析后的业务平台」，而不是分组的 platform 原始字段：
+ * composite 分组、或被监控层覆写过上游的分组，其真实上游与 platform 字段并不一致，
+ * 用原始字段会把它们一律错归到「其他」，用户按厂商就找不到它们。
+ */
+const providerOf = (option: KeyFormGroupOption): KeyGroupProvider =>
+  getKeyGroupProvider(resolveGroupBusinessPlatform(option))
+
+const providerOptions = computed(() =>
+  KEY_GROUP_PROVIDERS.map((value) => ({
+    value,
+    label: t(`keys.providers.${value}`),
+    count: props.groupOptions.filter((option) => providerOf(option) === value).length
+  }))
 )
 
+// 编辑态展示全部分组，只有创建态才按厂商收窄：编辑已有密钥时把它自己的分组藏起来，
+// 会让人以为分组丢了。两态都按倍率升序排列，与列表页的分组浮层保持一致。
 const formGroupOptions = computed(() =>
-  filterAndSortKeyFormGroupOptions(props.groupOptions, formPlatformFilter.value)
+  sortGroupsByRateAsc(
+    isEdit.value
+      ? props.groupOptions
+      : props.groupOptions.filter((option) => providerOf(option) === selectedProvider.value)
+  )
 )
 
-const onFormPlatformFilterChange = (value: string | number | boolean | null) => {
-  formPlatformFilter.value = (value ?? '') as KeyFormPlatformFilter
-  const selectedId = formData.value.group_id
-  if (selectedId == null) return
-  const selected = props.groupOptions.find((option) => option.value === selectedId)
-  if (!isSelectedGroupValidForPlatformFilter(selectedId, selected?.platform, formPlatformFilter.value, selected)) {
+const selectProvider = (provider: KeyGroupProvider) => {
+  if (selectedProvider.value === provider) return
+  selectedProvider.value = provider
+  // 换厂商后原分组可能不在新列表里，直接清空，避免提交到一个看不见的分组
+  if (!formGroupOptions.value.some((group) => group.value === formData.value.group_id)) {
     formData.value.group_id = null
   }
 }
@@ -692,12 +754,10 @@ const fillFormForEdit = (key: ApiKey) => {
     expiration_preset: 'custom',
     expiration_date: key.expires_at ? formatDateTimeLocal(key.expires_at) : ''
   }
-  formPlatformFilter.value = ''
 }
 
 const resetForm = () => {
   formData.value = createEmptyForm()
-  formPlatformFilter.value = ''
 }
 
 const close = () => {
@@ -818,6 +878,30 @@ watch(
     } else {
       resetForm()
     }
+  }
+)
+
+// 分组是异步加载的，可能在弹窗已经打开之后才到达，厂商的可选数量也随之变化。
+// 必须保证当前选中的厂商始终有可选分组，否则用户看到的是一个空的分组下拉。
+// 只在「刚打开」或「当前厂商已无分组」时重新挑选，避免打断用户已经做出的选择。
+watch([() => props.show, providerOptions], ([isOpen, providers], [wasOpen]) => {
+  if (!isOpen || isEdit.value) return
+  if (!wasOpen || !providers.some((provider) => provider.value === selectedProvider.value && provider.count > 0)) {
+    selectProvider(providers.find((provider) => provider.count > 0)?.value ?? 'anthropic')
+  }
+  if (!formGroupOptions.value.some((group) => group.value === formData.value.group_id)) {
+    formData.value.group_id = null
+  }
+})
+
+// 重置额度后服务端可能把状态从 quota_exhausted 改回 active，表单里的状态下拉必须跟着走，
+// 否则用户一点保存就把旧状态写回去，把刚恢复的密钥又置为不可用。
+// 只在状态确实发生变化时同步：用户手改但尚未保存的状态不能被覆盖。
+watch(
+  () => props.editingKey?.status,
+  (status) => {
+    if (!props.show || !isEdit.value || !status) return
+    formData.value.status = status === 'active' ? 'active' : 'inactive'
   }
 )
 </script>

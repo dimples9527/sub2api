@@ -20,7 +20,7 @@ describe('groupBusinessPlatformData', () => {
     vi.clearAllMocks()
   })
 
-  it('????????????????? ID ?????????', () => {
+  it('构建分组业务平台映射表，跳过无效 ID 并保留解析后的平台字段', () => {
     const map = buildGroupBusinessPlatformMap([
       {
         id: 1,
@@ -34,7 +34,7 @@ describe('groupBusinessPlatformData', () => {
         platform: 'composite',
         actual_platform: 'glm',
         effective_platform: 'glm',
-        effective_platform_name: '?? GLM',
+        effective_platform_name: '智谱 GLM',
       },
       {
         id: 0,
@@ -51,14 +51,14 @@ describe('groupBusinessPlatformData', () => {
     })
     expect(map.get(2)).toEqual({
       businessPlatform: 'glm',
-      businessPlatformName: '?? GLM',
+      businessPlatformName: '智谱 GLM',
       effectivePlatform: 'glm',
       actualPlatform: 'glm',
     })
     expect(map.has(0)).toBe(false)
   })
 
-  it('??????????????????????? API Key ???????', async () => {
+  it('通过网关接口加载分组业务平台映射，供 API Key 表单使用', async () => {
     apiGetMock.mockResolvedValueOnce({
       data: [
         {
@@ -66,7 +66,7 @@ describe('groupBusinessPlatformData', () => {
           platform: 'composite',
           actual_platform: 'custom-foo',
           effective_platform: 'custom-foo',
-          effective_platform_name: '??? Foo',
+          effective_platform_name: '自定义 Foo',
         },
       ],
     } as never)
@@ -77,13 +77,13 @@ describe('groupBusinessPlatformData', () => {
     expect(apiGetMock).toHaveBeenCalledWith('gateway:/api/llm-monitor/groups')
     expect(map.get(9)).toEqual({
       businessPlatform: 'custom-foo',
-      businessPlatformName: '??? Foo',
+      businessPlatformName: '自定义 Foo',
       effectivePlatform: 'custom-foo',
       actualPlatform: 'custom-foo',
     })
   })
 
-  it('??????????????API ?????????????', async () => {
+  it('网关接口请求失败时降级为空映射，并记录 API 错误', async () => {
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     apiGetMock.mockRejectedValueOnce(new Error('network error'))
 

@@ -207,6 +207,8 @@ export default {
     helpCenter: 'Help Docs',
     mySubscriptions: 'My Subscriptions',
     buySubscription: 'Recharge / Subscription',
+    recharge: 'Recharge',
+    subscribe: 'Subscription',
     modelMonitor: 'Model Monitor',
     docs: 'Docs',
     myOrders: 'My Orders',

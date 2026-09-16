@@ -40,7 +40,7 @@ const options: KeyGroupSelectorOption[] = [
   },
 ]
 
-function mountPopover(popoverOptions = options, emitValue = 'gemini') {
+function mountPopover(popoverOptions = options) {
   return mount(KeyGroupSelectorPopover, {
     props: {
       open: true,
@@ -52,12 +52,6 @@ function mountPopover(popoverOptions = options, emitValue = 'gemini') {
     global: {
       stubs: {
         Teleport: true,
-        Select: {
-          name: 'Select',
-          props: ['modelValue', 'options', 'placeholder', 'ariaLabel'],
-          emits: ['update:modelValue'],
-          template: `<button data-test="platform-select" @click="$emit('update:modelValue', '${emitValue}')">{{ placeholder }}</button>`,
-        },
         GroupOptionItem: {
           props: ['name'],
           template: '<span data-test="group-option">{{ name }}</span>',
@@ -68,25 +62,35 @@ function mountPopover(popoverOptions = options, emitValue = 'gemini') {
 }
 
 describe('KeyGroupSelectorPopover', () => {
-  it('uses the shared Select component to filter groups by platform', async () => {
+  it('renders the same provider cards as the create-key dialog', () => {
     const wrapper = mountPopover()
 
-    const select = wrapper.findComponent({ name: 'Select' })
-    expect(select.exists()).toBe(true)
-    expect(select.props('options')).toEqual([
-      { value: '', label: 'keys.allPlatforms' },
-      { value: 'openai', label: 'admin.groups.platforms.openai' },
-      { value: 'gemini', label: 'admin.groups.platforms.gemini' },
+    const radios = wrapper.findAll('input[name="key-list-group-provider"]')
+    expect(radios.map((radio) => (radio.element as HTMLInputElement).value)).toEqual([
+      'anthropic',
+      'openai',
+      'domestic',
+      'other',
     ])
-    expect(wrapper.find('[data-tour="key-list-group-platform-menu"]').exists()).toBe(false)
 
-    await wrapper.get('[data-test="platform-select"]').trigger('click')
-
-    const renderedGroups = wrapper.findAll('[data-test="group-option"]').map((item) => item.text())
-    expect(renderedGroups).toEqual(['Gemini 分组'])
+    // 厂商卡片是单选，没有「全部」项，默认落在第一个有分组的厂商上
+    expect((wrapper.get('input[value="openai"]').element as HTMLInputElement).checked).toBe(true)
+    expect(
+      wrapper.findAll('[data-test="group-option"]').map((item) => item.text())
+    ).toEqual(['OpenAI 分组'])
   })
 
-  it('builds and filters platform options from bound business platform', async () => {
+  it('filters groups when switching provider', async () => {
+    const wrapper = mountPopover()
+
+    await wrapper.get('input[value="other"]').setValue()
+
+    expect(
+      wrapper.findAll('[data-test="group-option"]').map((item) => item.text())
+    ).toEqual(['Gemini 分组'])
+  })
+
+  it('classifies groups by resolved business platform rather than the raw platform field', async () => {
     const wrapper = mountPopover([
       ...options,
       {
@@ -101,22 +105,16 @@ describe('KeyGroupSelectorPopover', () => {
         peakRateMultiplier: 1,
         subscriptionType: 'standard',
         platform: 'composite',
-        businessPlatform: 'glm',
+        businessPlatform: 'zhipu',
         businessPlatformName: '智谱 GLM',
       },
-    ], 'glm')
-
-    const select = wrapper.findComponent({ name: 'Select' })
-    expect(select.props('options')).toEqual([
-      { value: '', label: 'keys.allPlatforms' },
-      { value: 'openai', label: 'admin.groups.platforms.openai' },
-      { value: 'gemini', label: 'admin.groups.platforms.gemini' },
-      { value: 'glm', label: '智谱 GLM' },
     ])
 
-    await wrapper.get('[data-test="platform-select"]').trigger('click')
+    // 原始 platform 是 composite（会归入 other），解析后的业务平台 zhipu 才归入 domestic
+    await wrapper.get('input[value="domestic"]').setValue()
 
-    const renderedGroups = wrapper.findAll('[data-test="group-option"]').map((item) => item.text())
-    expect(renderedGroups).toEqual(['智谱分组'])
+    expect(
+      wrapper.findAll('[data-test="group-option"]').map((item) => item.text())
+    ).toEqual(['智谱分组'])
   })
 })
