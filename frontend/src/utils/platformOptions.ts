@@ -10,6 +10,9 @@ export type PlatformOption = {
 }
 
 // 核心平台选项的唯一前端来源；新增框架平台时只需在这里登记一次。
+// 这份兜底列表会在 platformsAPI.list() 返回后被 applyPlatformCatalog 整体覆盖，
+// 但接口失败或尚未返回时它就是唯一来源 —— 所以必须与后端平台目录保持同步，
+// 漏登记的平台在接口异常时会在各种筛选下拉里凭空消失（minimax / opencode_go 曾漏过）。
 export const CORE_PLATFORM_CODES: readonly Platform[] = [
   'anthropic',
   'openai',
@@ -19,6 +22,8 @@ export const CORE_PLATFORM_CODES: readonly Platform[] = [
   'kimi',
   'zhipu',
   'deepseek',
+  'minimax',
+  'opencode_go',
   'composite',
 ]
 

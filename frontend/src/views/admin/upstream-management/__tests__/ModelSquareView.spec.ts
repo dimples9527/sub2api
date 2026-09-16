@@ -78,7 +78,7 @@ describe('Upstream ModelSquareView', () => {
     showSuccessMock.mockReset()
   })
 
-  it('loads the model square and prices models with the lowest group rate', async () => {
+  it('loads the model square and shows the model price with its 1x equivalent', async () => {
     getModelSquareMock.mockResolvedValueOnce({
       provider_slug: 'default-sub2api',
       provider_name: 'Default Sub2API',
@@ -112,11 +112,17 @@ describe('Upstream ModelSquareView', () => {
 
     expect(getModelSquareMock).toHaveBeenCalledOnce()
 
-    const cardText = wrapper.find('[data-test="model-card"]').text()
+    const card = wrapper.find('[data-test="model-card"]')
+    const cardText = card.text()
     expect(cardText).toContain('codex pro')
     expect(cardText).toContain('0.08x')
     expect(cardText).toContain('+3')
-    expect(cardText).toContain('$0.14')
+
+    // 卡片直接展示模型自身的 input_price（1.75），再折算成 1x 价（1.75 / 0.08 = 21.88）作为划线对照。
+    // 这里曾经断言 $0.14（= 1.75 × 0.08，等于把倍率重复乘了一次），是 08-15 46ed6cb32
+    // 「优化模型广场价格展示与配色」改成本语义之前的旧口径，当时没有同步更新。
+    expect(cardText).toContain('$1.75')
+    expect(card.find('.price-original').text()).toBe('$21.88')
   })
 
   it('hides upstream identity text and exposes an overflow count for extra groups', async () => {

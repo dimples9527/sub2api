@@ -4282,10 +4282,7 @@ import type {
   GroupPlatform,
   SubscriptionType,
 } from "@/types";
-import {
-  CONCRETE_PLATFORM_OPTIONS,
-  GROUP_PLATFORM_OPTIONS,
-} from "@/constants/platforms";
+import { CORE_PLATFORM_OPTIONS } from "@/utils/platformOptions";
 import type { Column } from "@/components/common/types";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import TablePageLayout from "@/components/layout/TablePageLayout.vue";
@@ -4603,19 +4600,20 @@ const exclusiveOptions = computed(() => [
 ]);
 
 const platformOptions = computed(() =>
-  GROUP_PLATFORM_OPTIONS.filter(
+  CORE_PLATFORM_OPTIONS.filter(
     (option) => !authStore.isSimpleMode || option.value !== "composite",
   ),
 );
 
 const platformFilterOptions = computed(() => [
   { value: "", label: t("admin.groups.allPlatforms") },
-  ...GROUP_PLATFORM_OPTIONS,
+  ...CORE_PLATFORM_OPTIONS,
 ]);
 
-const compositeRoutePlatformOptions = computed(() => [
-  ...CONCRETE_PLATFORM_OPTIONS,
-]);
+// composite 是分组聚合类型、不是具体上游，不能作为复合路由的目标平台。
+const compositeRoutePlatformOptions = computed(() =>
+  CORE_PLATFORM_OPTIONS.filter((option) => option.value !== "composite"),
+);
 
 const compositeRouteEndpointOptions = computed(() => [
   { value: "any", label: t("admin.groups.compositeRoutes.endpoints.any") },

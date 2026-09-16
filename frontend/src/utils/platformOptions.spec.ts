@@ -12,6 +12,32 @@ describe('platform options', () => {
       'kimi',
       'zhipu',
       'deepseek',
+      'minimax',
+      'opencode_go',
+      'composite',
+    ])
+  })
+
+  it('covers every concrete account platform plus composite before the API responds', () => {
+    // 这条兜底列表会在 platformsAPI.list() 返回后被 applyPlatformCatalog 覆盖，
+    // 但接口失败或尚未返回时它就是唯一来源。漏登记的平台会在所有筛选下拉里消失，
+    // minimax 与 opencode_go 就漏过一次，所以这里把清单钉死。
+    // ⚠️ 必须在下面 applyPlatformCatalog 那条用例之前跑 —— 它会整体覆盖 CORE_PLATFORM_OPTIONS。
+    const concretePlatforms = [
+      'anthropic',
+      'openai',
+      'gemini',
+      'antigravity',
+      'grok',
+      'kimi',
+      'zhipu',
+      'deepseek',
+      'minimax',
+      'opencode_go',
+    ]
+
+    expect(CORE_PLATFORM_OPTIONS.map((option) => option.value)).toEqual([
+      ...concretePlatforms,
       'composite',
     ])
   })
