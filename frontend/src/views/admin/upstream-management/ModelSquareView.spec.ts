@@ -97,6 +97,17 @@ vi.mock('vue-i18n', async (importOriginal) => {
     'admin.modelSquare.columns.perRequest': 'Per request',
     'admin.modelSquare.columns.mode': 'Mode',
     'admin.modelSquare.columns.groups': 'Groups',
+    'admin.modelSquare.loading': 'Loading',
+    'admin.modelSquare.sortBy': 'Sort',
+    'admin.modelSquare.sortName': 'Name',
+    'admin.modelSquare.sortPriceAsc': 'Price: low to high',
+    'admin.modelSquare.sortPriceDesc': 'Price: high to low',
+    'admin.modelSquare.filteredCount': 'Showing {filtered} / {total}',
+    'admin.modelSquare.clearFilters': 'Clear filters',
+    'admin.modelSquare.noMatchTitle': 'No matching models',
+    'admin.modelSquare.noMatchDescription': 'No models match the current filters.',
+    'admin.modelSquare.groupPricingTitle': 'Pricing by group',
+    'admin.modelSquare.groupPricingEmpty': 'Not available in any group',
     'common.refresh': 'Refresh',
     'common.close': 'Close',
   }
@@ -187,7 +198,7 @@ function mountView() {
       stubs: {
         AppLayout: { template: '<main><slot /></main>' },
         TablePageLayout: { template: '<section><slot name="filters" /><slot name="table" /></section>' },
-        EmptyState: { props: ['title', 'description'], template: '<div data-test="empty-state">{{ title }} {{ description }}</div>' },
+        EmptyState: { props: ['title', 'description'], template: '<div data-test="empty-state">{{ title }} {{ description }}<slot name="action" /></div>' },
         BaseDialog: { props: ['show', 'title'], template: '<div v-if="show" data-test="dialog"><slot /></div>' },
         Icon: { props: ['name'], template: '<span data-test="icon">{{ name }}</span>' },
         Select: SelectStub,
@@ -244,7 +255,7 @@ describe('ModelSquareView', () => {
     expect(wrapper.find('.table-price-chip').exists()).toBe(false)
   })
 
-  it('opens model details and recalculates prices when switching groups', async () => {
+  it('详情弹窗一次列出全部可用分组的价格，并高亮卡片倍率对应的分组', async () => {
     const wrapper = mountView()
     await flushPromises()
 
@@ -252,18 +263,31 @@ describe('ModelSquareView', () => {
       .find(card => card.text().includes('GPT-5.5 Flagship'))
     await openAICard?.find('.model-detail-button').trigger('click')
 
-    expect(wrapper.find('[data-test="dialog"]').exists()).toBe(true)
-    expect(wrapper.find('[data-test="dialog"]').text()).toContain('Premium Group')
-    expect(wrapper.find('[data-test="dialog"]').text()).toContain('$5')
+    const dialog = wrapper.find('[data-test="dialog"]')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.text()).toContain('Pricing by group')
 
-    const groupOptions = wrapper.findAll('[data-test="detail-group-option"]')
-    const defaultGroup = groupOptions.find(option => option.text().includes('Default Group'))
-    await defaultGroup?.trigger('click')
+    // 表头保留四个语义价格位（顺序同 defaultPriceDescriptors），不因优先级/图片/按请求价格而被顶掉
+    expect(dialog.findAll('thead th').map(th => th.text()))
+      .toEqual(['Groups', 'Rate', '输入', '输出', '缓存读取', '缓存写入'])
 
-    const dialogText = wrapper.find('[data-test="dialog"]').text()
-    expect(dialogText).toContain('Default Group')
-    expect(dialogText).toContain('$10')
-    expect(dialogText).toContain('1x')
+    const rows = dialog.findAll('[data-test="detail-group-row"]')
+    expect(rows).toHaveLength(2)
+
+    // 分组按倍率升序：Premium(0.5) 在前、Default(1) 在后。
+    // 价格 = input_price 5 ÷ 模型倍率 0.5 × 分组倍率，所以两行分别是 $5 与 $10。
+    const premiumRow = rows.find(row => row.text().includes('Premium Group'))
+    const defaultRow = rows.find(row => row.text().includes('Default Group'))
+    expect(premiumRow?.text()).toContain('0.5x')
+    expect(premiumRow?.text()).toContain('$5')
+    expect(premiumRow?.text()).toContain('$30')
+    expect(defaultRow?.text()).toContain('1x')
+    expect(defaultRow?.text()).toContain('$10')
+    expect(defaultRow?.text()).toContain('$60')
+
+    // 卡片倍率 chip 是 0.5，只有 Premium 行应被标记为当前分组
+    expect(premiumRow?.classes()).toContain('active')
+    expect(defaultRow?.classes()).not.toContain('active')
   })
 
   it('按覆盖后的平台过滤详情弹窗中的分组', async () => {
@@ -340,5 +364,67 @@ describe('ModelSquareView', () => {
     await wrapper.find('[data-test="model-row"]').trigger('click')
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('custom-model')
     expect(showSuccessMock).toHaveBeenCalledWith('Copied')
+  })
+
+  it('工具条支持按名称与价格排序，网格与列表复用同一顺序', async () => {
+    getMock.mockResolvedValue({
+      provider_slug: 'configured',
+      provider_name: 'Model Square Config',
+      provider_type: 'local',
+      payload: {
+        groups: [{ id: 1, name: 'Default Group', platform: 'openai', rate_multiplier: 1 }],
+        models: [
+          { id: 'alpha', display_name: 'Alpha', provider: 'Same Platform', platform: 'openai', available: true, mode: 'chat', input_price: 30, rate_multiplier: 1, group_ids: [1] },
+          { id: 'beta', display_name: 'Beta', provider: 'Same Platform', platform: 'openai', available: true, mode: 'chat', input_price: 10, rate_multiplier: 1, group_ids: [1] },
+          { id: 'gamma', display_name: 'Gamma', provider: 'Same Platform', platform: 'openai', available: true, mode: 'chat', input_price: 20, rate_multiplier: 1, group_ids: [1] },
+        ],
+      },
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const cardTitles = () => wrapper.findAll('[data-test="model-card"] .model-title').map(node => node.text())
+    // 三个 Select 依次是分组、平台、排序
+    const sortSelect = wrapper.findAll('select')[2]
+    expect(sortSelect.attributes('aria-label')).toBe('Sort')
+
+    expect(cardTitles()).toEqual(['Alpha (alpha)', 'Beta (beta)', 'Gamma (gamma)'])
+
+    await sortSelect.setValue('price-asc')
+    expect(cardTitles()).toEqual(['Beta (beta)', 'Gamma (gamma)', 'Alpha (alpha)'])
+
+    await sortSelect.setValue('price-desc')
+    expect(cardTitles()).toEqual(['Alpha (alpha)', 'Gamma (gamma)', 'Beta (beta)'])
+
+    // 列表视图必须复用同一份排序结果，否则两种视图给出的顺序会不一致
+    await wrapper.find('button[title="List view"]').trigger('click')
+    const rows = wrapper.findAll('[data-test="model-row"]').map(row => row.text())
+    expect(rows[0]).toContain('Alpha (alpha)')
+    expect(rows[1]).toContain('Gamma (gamma)')
+    expect(rows[2]).toContain('Beta (beta)')
+  })
+
+  it('筛选生效时显示计数，空结果可直接清除筛选恢复全量', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('.result-count').exists()).toBe(false)
+
+    const search = wrapper.find('input[type="search"]')
+    await search.setValue('custom')
+    expect(wrapper.find('.result-count').text()).toBe('Showing 1 / 3')
+
+    await search.setValue('no-such-model')
+    const emptyState = wrapper.find('[data-test="empty-state"]')
+    expect(emptyState.text()).toContain('No matching models')
+    expect(emptyState.text()).toContain('No models match the current filters.')
+
+    const clearButton = emptyState.find('button')
+    expect(clearButton.text()).toContain('Clear filters')
+    await clearButton.trigger('click')
+
+    expect(wrapper.find('.result-count').exists()).toBe(false)
+    expect(wrapper.find('[data-test="empty-state"]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-test="model-card"]')).toHaveLength(3)
   })
 })

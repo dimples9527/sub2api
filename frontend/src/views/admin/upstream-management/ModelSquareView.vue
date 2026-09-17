@@ -16,6 +16,9 @@
               <span>{{ t('admin.modelSquare.groupCount') }}</span>
               <strong>{{ groups.length }}</strong>
             </div>
+            <span v-if="hasActiveFilters" class="result-count">
+              {{ t('admin.modelSquare.filteredCount', { filtered: sortedModels.length, total: models.length }) }}
+            </span>
           </div>
 
           <div class="flex flex-wrap items-center justify-end gap-2">
@@ -60,6 +63,13 @@
             :aria-label="t('admin.modelSquare.allProviders')"
           />
 
+          <Select
+            v-model="sortBy"
+            :options="sortOptions"
+            class="w-full sm:w-40"
+            :aria-label="t('admin.modelSquare.sortBy')"
+          />
+
           <div class="ml-auto inline-grid grid-cols-2 gap-1 rounded-lg border border-gray-200 bg-gray-100 p-1 dark:border-dark-700 dark:bg-dark-800">
             <button
               type="button"
@@ -97,11 +107,20 @@
 
         <EmptyState
           v-else-if="filteredModels.length === 0"
-          :title="t('admin.modelSquare.emptyTitle')"
-          :description="emptyDescription"
-          :action-text="t('common.refresh')"
-          @action="reload"
-        />
+          :title="hasActiveFilters ? t('admin.modelSquare.noMatchTitle') : t('admin.modelSquare.emptyTitle')"
+          :description="hasActiveFilters ? t('admin.modelSquare.noMatchDescription') : emptyDescription"
+        >
+          <template #action>
+            <button v-if="hasActiveFilters" type="button" class="btn btn-primary" @click="clearFilters">
+              <Icon name="x" size="sm" />
+              {{ t('admin.modelSquare.clearFilters') }}
+            </button>
+            <button v-else type="button" class="btn btn-primary" @click="reload">
+              <Icon name="refresh" size="sm" />
+              {{ t('common.refresh') }}
+            </button>
+          </template>
+        </EmptyState>
 
         <div v-else-if="viewMode === 'grid'" class="model-square-board">
           <section
@@ -212,7 +231,7 @@
             </thead>
             <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
               <tr
-                v-for="(model, index) in filteredModels"
+                v-for="(model, index) in sortedModels"
                 :key="modelKey(model, index)"
                 data-test="model-row"
                 class="cursor-pointer transition hover:bg-gray-50 dark:hover:bg-dark-700/60"
@@ -286,49 +305,41 @@
         </div>
 
         <div>
-          <div class="mb-2 flex items-center justify-between gap-3">
-            <span class="text-sm font-semibold text-gray-950 dark:text-white">分组倍率</span>
+          <div class="mb-3 flex items-center justify-between gap-3">
+            <span class="text-sm font-semibold text-gray-950 dark:text-white">{{ t('admin.modelSquare.groupPricingTitle') }}</span>
             <span class="provider-inline text-xs" :style="providerAccent(detailModel.provider)">平台: {{ providerLabel(detailModel.provider) }}</span>
           </div>
-          <div v-if="detailGroups.length > 0" class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            <button
-              v-for="group in detailGroups"
-              :key="String(group.id)"
-              type="button"
-              data-test="detail-group-option"
-              :class="['detail-group-option', { active: String(group.id) === detailGroupId }]"
-              @click="selectDetailGroup(group)"
-            >
-              <span class="min-w-0 text-left">
-                <span class="block truncate font-semibold">{{ group.name }}</span>
-                <code class="mt-1 block text-[11px] text-gray-400">#{{ group.id }}</code>
-              </span>
-              <span class="shrink-0 font-mono text-xs font-bold text-orange-600 dark:text-orange-300">{{ formatRate(group.rate_multiplier) }}</span>
-            </button>
+
+          <div v-if="detailGroups.length > 0" class="group-price-table-wrap">
+            <table class="group-price-table">
+              <thead>
+                <tr>
+                  <th scope="col">{{ t('admin.modelSquare.columns.groups') }}</th>
+                  <th scope="col">{{ t('admin.modelSquare.rate') }}</th>
+                  <th v-for="column in detailPriceColumns" :key="column.key" scope="col">{{ column.label }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="group in detailGroups"
+                  :key="String(group.id)"
+                  data-test="detail-group-row"
+                  :class="{ active: isCurrentRateGroup(group) }"
+                >
+                  <td class="group-cell">
+                    <span class="block truncate font-medium">{{ group.name }}</span>
+                    <code class="text-[11px] text-gray-400">#{{ group.id }}</code>
+                  </td>
+                  <td class="rate-cell">{{ formatRate(group.rate_multiplier) }}</td>
+                  <td v-for="slot in detailPriceSlotsFor(group)" :key="slot.key" class="price-col">
+                    {{ formatPriceOrZero(slot.value) }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
           <div v-else class="rounded-lg border border-dashed border-gray-200 px-3 py-4 text-sm text-gray-500 dark:border-dark-700 dark:text-gray-400">
-            暂无可切换的分组
-          </div>
-        </div>
-
-        <div class="detail-price-section">
-          <div class="mb-3 flex items-center justify-between gap-3">
-            <span class="text-sm font-semibold text-gray-950 dark:text-white">当前价格</span>
-            <span v-if="selectedDetailGroup" class="text-xs text-gray-500 dark:text-gray-400">
-              {{ selectedDetailGroup.name }} · {{ formatRate(detailRate) }}
-            </span>
-          </div>
-          <div class="price-grid !mt-0">
-            <div
-              v-for="slot in detailPriceSlots"
-              :key="slot.key"
-              :class="['price-box', slot.toneClass]"
-            >
-              <span>{{ slot.label }}</span>
-              <strong>{{ formatPriceOrZero(slot.value) }}</strong>
-              <s v-if="slot.originalValue != null" class="price-original">{{ formatPrice(slot.originalValue) }}</s>
-              <small v-if="slot.unit">{{ slot.unit }}</small>
-            </div>
+            {{ t('admin.modelSquare.groupPricingEmpty') }}
           </div>
         </div>
       </div>
@@ -418,6 +429,7 @@ type ModelSquareProviderSection = {
   models: ModelSquareModel[]
   lowestRate: number
 }
+type SortOption = 'name' | 'price-asc' | 'price-desc'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -434,9 +446,9 @@ useRouteQueryFilters([
   { queryKey: 'model', state: searchQuery },
 ])
 const viewMode = ref<'grid' | 'list'>('grid')
+const sortBy = ref<SortOption>('name')
 const groupDialogModel = ref<ModelSquareModel | null>(null)
 const detailModel = ref<ModelSquareModel | null>(null)
-const detailGroupId = ref('')
 const copiedModelId = ref('')
 let copiedTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -476,22 +488,23 @@ const providerFilterOptions = computed<SelectOption[]>(() => [
   ...providers.value.map(item => ({ value: item, label: providerLabel(item) })),
 ])
 const availableCount = computed(() => models.value.filter(isAvailable).length)
+const sortOptions = computed<SelectOption[]>(() => [
+  { value: 'name', label: t('admin.modelSquare.sortName') },
+  { value: 'price-asc', label: t('admin.modelSquare.sortPriceAsc') },
+  { value: 'price-desc', label: t('admin.modelSquare.sortPriceDesc') },
+])
 const groupDialogGroups = computed(() => groupDialogModel.value ? modelGroups(groupDialogModel.value) : [])
 const groupDialogTitle = computed(() => {
   const id = groupDialogModel.value?.id || t('admin.modelSquare.unnamedModel')
   return t('admin.modelSquare.groupDialogTitle', { id })
 })
 const detailGroups = computed(() => detailModel.value ? modelDetailGroups(detailModel.value) : [])
-const selectedDetailGroup = computed(() => detailGroups.value.find(group => String(group.id) === detailGroupId.value))
-const detailRate = computed(() => {
-  const rate = groupRate(selectedDetailGroup.value)
-  if (Number.isFinite(rate)) return rate
-  return detailModel.value ? modelEffectiveRate(detailModel.value) : 1
-})
-const detailPriceSlots = computed(() => {
-  if (!detailModel.value) return []
-  return modelPriceSlots(detailModel.value, detailRate.value)
-})
+const detailRate = computed(() => detailModel.value ? modelEffectiveRate(detailModel.value) : 1)
+// 详情表格的列固定取四个语义价格位，与卡片保持一致，避免优先级/图片等价格把列顶掉。
+const detailPriceColumns = computed(() => defaultPriceDescriptors.map(descriptor => ({
+  key: descriptor.key,
+  label: descriptor.label,
+})))
 const detailDialogTitle = computed(() => {
   const id = detailModel.value?.id || t('admin.modelSquare.unnamedModel')
   return `${id} 详情`
@@ -506,9 +519,39 @@ const filteredModels = computed(() => {
     return true
   })
 })
+const hasActiveFilters = computed(() => Boolean(
+  searchQuery.value.trim() || providerFilter.value || groupFilter.value
+))
+// 排序键：名称用模型 ID；价格用卡片展示的输入价（已按模型有效倍率换算）。
+// 未配置价格的模型不参与价格比较，始终排在末尾。
+function modelSortPrice(model: ModelSquareModel): number | null {
+  const value = modelPriceValue(model, 'input_price')
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+function compareModels(left: ModelSquareModel, right: ModelSquareModel): number {
+  const byId = (left.id || '').localeCompare(right.id || '')
+  if (sortBy.value === 'name') return byId
+
+  const leftPrice = modelSortPrice(left)
+  const rightPrice = modelSortPrice(right)
+  if (leftPrice == null && rightPrice == null) return byId
+  if (leftPrice == null) return 1
+  if (rightPrice == null) return -1
+  if (leftPrice !== rightPrice) {
+    return sortBy.value === 'price-asc' ? leftPrice - rightPrice : rightPrice - leftPrice
+  }
+  return byId
+}
+// 可用模型优先，其余按当前排序键；网格与列表共用同一顺序，避免两种视图结果不一致。
+const sortedModels = computed(() => {
+  return [...filteredModels.value].sort((a, b) => {
+    if (isAvailable(a) !== isAvailable(b)) return isAvailable(a) ? -1 : 1
+    return compareModels(a, b)
+  })
+})
 const providerSections = computed<ModelSquareProviderSection[]>(() => {
   const sections = new Map<string, ModelSquareModel[]>()
-  for (const model of filteredModels.value) {
+  for (const model of sortedModels.value) {
     const provider = model.provider || ''
     const list = sections.get(provider) || []
     list.push(model)
@@ -516,19 +559,11 @@ const providerSections = computed<ModelSquareProviderSection[]>(() => {
   }
 
   return Array.from(sections.entries())
-    .map(([provider, sectionModels]) => {
-      const sortedModels = [...sectionModels].sort((a, b) => {
-        if (isAvailable(a) !== isAvailable(b)) return isAvailable(a) ? -1 : 1
-        const rateDiff = primaryGroupRate(a) - primaryGroupRate(b)
-        if (rateDiff !== 0) return rateDiff
-        return (a.id || '').localeCompare(b.id || '')
-      })
-      return {
-        provider,
-        models: sortedModels,
-        lowestRate: Math.min(...sortedModels.map(primaryGroupRate))
-      }
-    })
+    .map(([provider, sectionModels]) => ({
+      provider,
+      models: sectionModels,
+      lowestRate: Math.min(...sectionModels.map(primaryGroupRate))
+    }))
     .sort((a, b) => {
       const rateDiff = a.lowestRate - b.lowestRate
       if (rateDiff !== 0) return rateDiff
@@ -549,6 +584,12 @@ async function reload() {
   } finally {
     loading.value = false
   }
+}
+
+function clearFilters() {
+  searchQuery.value = ''
+  providerFilter.value = ''
+  groupFilter.value = ''
 }
 
 function modelGroups(model: ModelSquareModel): ModelSquareGroup[] {
@@ -715,17 +756,22 @@ function closeGroupDialog() {
 
 function openModelDetails(model: ModelSquareModel) {
   detailModel.value = model
-  const firstGroup = modelDetailGroups(model)[0]
-  detailGroupId.value = firstGroup ? String(firstGroup.id) : ''
 }
 
 function closeModelDetails() {
   detailModel.value = null
-  detailGroupId.value = ''
 }
 
-function selectDetailGroup(group: ModelSquareGroup) {
-  detailGroupId.value = String(group.id)
+// 详情表格按分组各算一遍价格：分组倍率 × 模型基础价，一次列全，用户不必逐个切换。
+function detailPriceSlotsFor(group: ModelSquareGroup): ModelPriceSlot[] {
+  if (!detailModel.value) return []
+  return modelPriceSlots(detailModel.value, groupRate(group))
+}
+
+// 卡片倍率 chip 取模型有效倍率，这里高亮对应分组，让用户能把卡片上的价格对回具体分组。
+function isCurrentRateGroup(group: ModelSquareGroup): boolean {
+  if (!detailModel.value) return false
+  return groupRate(group) === detailRate.value
 }
 
 async function copyModelId(model: ModelSquareModel) {
@@ -773,6 +819,14 @@ onMounted(reload)
 .summary-pill strong {
   @apply font-mono text-base;
   color: var(--ms-text);
+}
+
+/* 只在筛选生效时出现，用品牌色与静态统计 pill 区分，提示当前看到的是子集。 */
+.result-count {
+  @apply inline-flex h-7 items-center rounded-md px-2.5 font-mono text-xs font-semibold;
+  background: color-mix(in srgb, var(--ms-brand) 10%, var(--ms-panel));
+  color: var(--ms-brand-strong);
+  border: 1px solid color-mix(in srgb, var(--ms-brand) 30%, transparent);
 }
 
 .view-toggle-btn {
@@ -1072,29 +1126,68 @@ onMounted(reload)
   color: var(--ms-brand-strong);
 }
 
-.detail-group-option {
-  @apply flex min-w-0 items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm transition;
+/* 详情弹窗的分组价格表：一次列全所有分组，并高亮卡片倍率对应的那一行。 */
+.group-price-table-wrap {
+  @apply overflow-x-auto rounded-lg border;
   border-color: var(--ms-line);
-  background: var(--ms-panel);
+}
+
+.group-price-table {
+  @apply w-full border-collapse text-sm;
+}
+
+.group-price-table th {
+  @apply whitespace-nowrap px-3 py-2 text-left text-xs font-semibold;
+  background: var(--ms-panel-2);
   color: var(--ms-muted);
+  border-bottom: 1px solid var(--ms-line);
 }
 
-.detail-group-option:hover {
-  border-color: color-mix(in srgb, var(--ms-amber) 55%, var(--ms-line));
-  background: color-mix(in srgb, var(--ms-amber) 8%, var(--ms-panel));
+/* 分组列左对齐，倍率与价格列右对齐，数字才好上下比对。 */
+.group-price-table th:not(:first-child) {
+  text-align: right;
 }
 
-.detail-group-option.active {
-  border-color: var(--ms-amber);
+.group-price-table td {
+  @apply px-3 py-2.5 align-middle;
+  border-bottom: 1px solid color-mix(in srgb, var(--ms-line) 60%, transparent);
+  color: var(--ms-text);
+}
+
+.group-price-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.group-price-table tbody tr:hover td {
+  background: var(--ms-panel-2);
+}
+
+/* 卡片倍率 chip 取自模型的有效倍率，这里同步高亮，让卡片价格能对回具体行。
+   12% 与改动前的分组按钮激活态一致，保证浅色下也能和 hover 的灰底区分开。 */
+.group-price-table tbody tr.active td {
   background: color-mix(in srgb, var(--ms-amber) 12%, var(--ms-panel));
-  color: var(--ms-amber);
-  box-shadow: var(--ms-shadow);
 }
 
-.detail-price-section {
-  @apply rounded-lg border p-3;
-  border-color: var(--ms-line);
-  background: color-mix(in srgb, var(--ms-brand) 5%, var(--ms-panel-2));
+.group-price-table tbody tr.active .group-cell {
+  box-shadow: inset 3px 0 0 var(--ms-amber);
+}
+
+.group-cell {
+  @apply min-w-[9rem] max-w-[14rem];
+}
+
+.rate-cell,
+.price-col {
+  @apply whitespace-nowrap text-right font-mono text-xs;
+}
+
+.rate-cell {
+  @apply font-semibold;
+  color: var(--ms-amber);
+}
+
+.price-col {
+  color: var(--ms-text);
 }
 
 .group-overflow {
