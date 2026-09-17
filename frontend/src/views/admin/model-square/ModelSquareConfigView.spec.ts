@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { computed, defineComponent, h } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ModelSquareConfigView from './ModelSquareConfigView.vue'
@@ -15,37 +16,205 @@ function createDeferred<T>() {
   return { promise, resolve, reject }
 }
 
+/**
+ * Select 替身：把 #selected 与 #option 两个插槽都真的渲染出来，并支持点击切换平台。
+ *
+ * 为什么不能再用 `<div />` 敷衍：平台 chip 横栏删除后，切平台只剩这一个入口，stub 必须真的能切。
+ * 而「未覆盖 N」告警同时挂在两处 —— #selected（当前平台，必须一直可见）
+ * 与 #option（展开时一眼看出问题在哪个平台）。只渲染其中一个都会漏测，
+ * 得到「测试通过但其实那个位置根本没渲染」的假绿。
+ *
+ * 插槽签名已对着 `src/components/common/Select.vue` 核过（替身只有在镜像真实 API 时才可信）：
+ *   - `:option="selectedOption"`（`modelValue` 匹配不到任何选项时传 `null`）
+ *   - `:option="option" :selected="isSelected(option)"`
+ * 页面正是靠 `option?.value || selectedPlatform` 兜住 `null` 那一种，所以这里必须也传 `null`。
+ *
+ * ⚠️ 两处**刻意**偏离真实组件，不要据此推断真实行为：
+ *   1. 真实下拉是 `Teleport` 到 `body` 的，且只在 `isOpen` 时才渲染；替身把选项**内联、无条件**渲染，
+ *      于是「点选项切平台」不需要先点开 trigger。测试若依赖「下拉是打开的」这类状态，替身给不了。
+ *   2. 真实 trigger 是 `<button>`，替身也是，但替身不做 `disabled` / `clearable` / 键盘导航。
+ */
+const selectStub = defineComponent({
+  props: {
+    options: { type: Array, default: () => [] },
+    modelValue: { type: String, default: '' },
+  },
+  emits: ['update:modelValue'],
+  setup(props, { emit, slots }) {
+    type StubOption = { value: string; label?: string }
+    const list = () => (props.options || []) as StubOption[]
+    const selectedOption = computed(() => list().find(option => option.value === props.modelValue) || null)
+    return () => h('div', [
+      h(
+        'button',
+        { type: 'button', class: 'select-trigger-stub' },
+        slots.selected
+          ? slots.selected({ option: selectedOption.value })
+          : String(selectedOption.value?.label ?? ''),
+      ),
+      ...list().map(option => h(
+        'button',
+        {
+          type: 'button',
+          class: 'select-option-stub',
+          onClick: () => emit('update:modelValue', option.value),
+        },
+        slots.option
+          ? slots.option({ option, selected: option.value === props.modelValue })
+          : String(option.label ?? ''),
+      )),
+    ])
+  },
+})
+
+/**
+ * 共享替身工厂。
+ *
+ * 为什么需要它：这个 spec 原来有 12 份近乎重复的内联 `stubs: {...}`，改动很容易只落到
+ * 其中一份上，剩下 11 份继续用旧行为静默跑。实测踩过：把 Select 替身换成能渲染插槽的
+ * 版本时，以为改的是 A、实际改到了 B，结果新写的测试里一个选项都选不到。
+ *
+ * 差异收敛成 7 个显式选项，**每个都对应一种真实的差异**，不是随手给的默认值。
+ * 默认值一律取「最贴近真实组件」的那档 —— 替身渲染得越少，测试越容易
+ * 「通过但其实那个位置根本没渲染」；要降级必须显式写出来，一眼能看见。
+ */
+type StubOptions = {
+  /** TablePageLayout 透出哪些插槽。 */
+  layoutSlots?: Array<'actions' | 'filters' | 'table' | 'default'>
+  /** DataTable 透出的单元格插槽；不给就是空壳，渲染不出任何行内容。 */
+  cells?: Array<'price_summary' | 'actions' | 'group_coverage'>
+  /** DataTable 只渲染第一行还是全部行。 */
+  cellRows?: 'first' | 'all'
+  /** none 空壳 / content 只透出内容 / toggle 带 show 开关 / titled 带 show 与标题。 */
+  dialog?: 'none' | 'content' | 'toggle' | 'titled'
+  /** none 空壳 / interactive 可点击的确认框（能测「点了确认之后做没做那件事」）。 */
+  confirm?: 'none' | 'interactive'
+  /** plain 裸 input / labelled 带 label 关联（价格字段靠它定位）。 */
+  input?: 'plain' | 'labelled'
+  /** empty 空壳 / rich 渲染 #selected 与 #option 且可点击切换。 */
+  select?: 'empty' | 'rich'
+}
+
+/** BaseDialog 替身：渲染内容与 footer，并带标题（标题可用来断言弹窗确实打开了）。 */
+const baseDialogStub = {
+  props: ['show', 'title'],
+  template: '<section v-if="show"><h2>{{ title }}</h2><slot /><footer><slot name="footer" /></footer></section>',
+}
+
+const confirmDialogStub = {
+  props: ['show', 'title', 'message', 'confirmText', 'cancelText', 'danger'],
+  emits: ['confirm', 'cancel'],
+  template: [
+    '<div v-if="show" class="confirm-stub">',
+    '<span class="confirm-stub-title">{{ title }}</span>',
+    '<button type="button" class="confirm-stub-confirm" @click="$emit(\'confirm\')">{{ confirmText }}</button>',
+    '<button type="button" class="confirm-stub-cancel" @click="$emit(\'cancel\')">{{ cancelText }}</button>',
+    '</div>',
+  ].join(''),
+}
+
+const inputStub = {
+  props: ['modelValue', 'label', 'placeholder', 'type', 'required'],
+  emits: ['update:modelValue'],
+  template: '<label><span>{{ label }}</span><input :aria-label="label" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" /></label>',
+}
+
+function makeStubs(options: StubOptions = {}) {
+  const {
+    layoutSlots = ['actions', 'filters', 'table'],
+    cells = [],
+    cellRows = 'first',
+    dialog = 'titled',
+    confirm = 'interactive',
+    input = 'labelled',
+    select = 'rich',
+  } = options
+
+  const cellMarkup = (row: string) => cells.map(name => `<slot name="cell-${name}" :row="${row}" />`).join('')
+
+  return {
+    AppLayout: { template: '<div><slot /></div>' },
+    TablePageLayout: {
+      template: `<div>${layoutSlots
+        .map(slot => (slot === 'default' ? '<slot />' : `<slot name="${slot}" />`))
+        .join('')}</div>`,
+    },
+    DataTable: cells.length === 0
+      ? { template: '<div />' }
+      : cellRows === 'all'
+        ? { props: ['data'], template: `<div><template v-for="row in data" :key="row.id">${cellMarkup('row')}</template></div>` }
+        : { props: ['data'], template: `<div v-if="data[0]">${cellMarkup('data[0]')}</div>` },
+    EmptyState: { template: '<div />' },
+    BaseDialog: dialog === 'none'
+      ? { template: '<div />' }
+      : dialog === 'content'
+        ? { template: '<div><slot /></div>' }
+        : dialog === 'toggle'
+          ? { props: ['show'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' }
+          : baseDialogStub,
+    ConfirmDialog: confirm === 'none' ? { template: '<div />' } : confirmDialogStub,
+    Input: input === 'plain' ? { template: '<input />' } : inputStub,
+    SearchInput: { template: '<input />' },
+    Select: select === 'empty' ? { template: '<div />' } : selectStub,
+    TextArea: { template: '<textarea />' },
+    PlatformIcon: { template: '<span />' },
+    Icon: { template: '<span />' },
+  }
+}
+
 function mountPriceSummaryView() {
   return mount(ModelSquareConfigView, {
     global: {
-      stubs: {
-        AppLayout: { template: '<div><slot /></div>' },
-        TablePageLayout: { template: '<div><slot name="table" /></div>' },
-        DataTable: {
-          props: ['data'],
-          template: '<div><slot v-if="data[0]" name="cell-price_summary" :row="data[0]" /></div>',
-        },
-        EmptyState: { template: '<div />' },
-        BaseDialog: { template: '<div />' },
-        ConfirmDialog: { template: '<div />' },
-        Input: { template: '<input />' },
-        SearchInput: { template: '<input />' },
-        Select: { template: '<div />' },
-        TextArea: { template: '<textarea />' },
-        PlatformIcon: { template: '<span />' },
-        Icon: { template: '<span />' },
-      },
+      stubs: makeStubs({ layoutSlots: ['table'], cells: ['price_summary'], dialog: 'none', confirm: 'none', input: 'plain', select: 'empty' }),
     },
   })
 }
 
-const { adminApiMock, appStoreMock } = vi.hoisted(() => ({
+/** 渲染「编辑模型」弹窗：BaseDialog 摊开内容，Input 保留 aria-label 以便定位价格输入框。 */
+function mountModelDialogView() {
+  return mount(ModelSquareConfigView, {
+    global: {
+      stubs: makeStubs({ cells: ['actions'], confirm: 'none', select: 'empty' }),
+    },
+  })
+}
+
+/** 渲染分组覆盖列：只摊开 DataTable 的 cell-group_coverage 插槽。 */
+function mountGroupCoverageView() {
+  return mount(ModelSquareConfigView, {
+    global: {
+      stubs: makeStubs({ cells: ['group_coverage'], cellRows: 'all', dialog: 'none', confirm: 'none', input: 'plain' }),
+    },
+  })
+}
+
+/** 渲染未保存改动相关区域：工具条、表格、编辑弹窗，以及会真实反映 show 的 ConfirmDialog。 */
+function mountDirtyTrackingView() {
+  return mount(ModelSquareConfigView, {
+    global: {
+      stubs: makeStubs({ cells: ['actions'] }),
+    },
+  })
+}
+
+/** 走真实点击路径制造一次未保存改动：编辑模型 -> 改输入价 -> 保存弹窗。 */
+async function makeUnsavedEdit(wrapper: ReturnType<typeof mountDirtyTrackingView>): Promise<void> {
+  await wrapper.findAll('button').find(button => button.text() === '编辑')!.trigger('click')
+  await wrapper.find('input[aria-label="输入价格（USD / 1M Tokens）"]').setValue('9')
+  await wrapper.findAll('button').find(button => button.text() === '保存')!.trigger('click')
+  await flushPromises()
+}
+
+const { adminApiMock, appStoreMock, onBeforeRouteLeaveMock } = vi.hoisted(() => ({
   adminApiMock: {
     modelSquareConfig: {
       get: vi.fn(),
       update: vi.fn(),
       getModelPricing: vi.fn(),
       listSyncAccounts: vi.fn(),
+    },
+    modelSquare: {
+      loadGroupContext: vi.fn(),
     },
     customPlatforms: {
       list: vi.fn(),
@@ -58,6 +227,7 @@ const { adminApiMock, appStoreMock } = vi.hoisted(() => ({
     showError: vi.fn(),
     showSuccess: vi.fn(),
   },
+  onBeforeRouteLeaveMock: vi.fn(),
 }))
 
 vi.mock('@/api/admin', () => ({
@@ -66,6 +236,12 @@ vi.mock('@/api/admin', () => ({
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => appStoreMock,
+}))
+
+// 单测里直接 mount 组件、没有 <router-view>，不 mock 的话 vue-router 会对每次挂载
+// 打一条 "No active route record" 警告。项目里其它 spec 也是这么 mock 的。
+vi.mock('vue-router', () => ({
+  onBeforeRouteLeave: onBeforeRouteLeaveMock,
 }))
 
 describe('model square config wiring', () => {
@@ -96,6 +272,11 @@ describe('model square config wiring', () => {
     adminApiMock.accounts.list.mockResolvedValue({ items: [] })
     adminApiMock.modelSquareConfig.getModelPricing.mockResolvedValue({ found: false })
     adminApiMock.modelSquareConfig.listSyncAccounts.mockResolvedValue([])
+    adminApiMock.modelSquare.loadGroupContext.mockResolvedValue({
+      channels: [],
+      groups: [],
+      platformOverrides: new Map(),
+    })
   })
 
   it('registers the admin route between model monitor and announcements', () => {
@@ -171,23 +352,14 @@ describe('model square config wiring', () => {
     expect(apiSource).toContain('export async function getModelPricing')
   })
 
-  it('renders custom platforms in the platform selector strip', async () => {
+  /*
+    平台 chip 横栏删除后，「自定义平台要按 sort_order 排在内置平台之后」这条约束
+    改由平台 Select 的选项承载 —— 它现在是唯一列出全部平台的地方。
+  */
+  it('renders custom platforms in the platform selector', async () => {
     const wrapper = mount(ModelSquareConfigView, {
       global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' },
-          TablePageLayout: { template: '<div><slot name="actions" /><slot name="filters" /><slot /></div>' },
-          DataTable: { template: '<div />' },
-          EmptyState: { template: '<div />' },
-          BaseDialog: { template: '<div><slot /></div>' },
-          ConfirmDialog: { template: '<div />' },
-          Input: { template: '<input />' },
-          SearchInput: { template: '<input />' },
-          Select: { template: '<div />' },
-          TextArea: { template: '<textarea />' },
-          PlatformIcon: { template: '<span />' },
-          Icon: { template: '<span />' },
-        },
+        stubs: makeStubs({ layoutSlots: ['actions', 'filters', 'default'], dialog: 'content', confirm: 'none', input: 'plain' }),
       },
     })
 
@@ -222,36 +394,56 @@ describe('model square config wiring', () => {
 
     const wrapper = mount(ModelSquareConfigView, {
       global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' },
-          TablePageLayout: { template: '<div><slot name="actions" /><slot name="filters" /><slot name="table" /></div>' },
-          DataTable: { template: '<div />' },
-          EmptyState: { template: '<div />' },
-          BaseDialog: {
-            props: ['show'],
-            template: '<div v-if="show"><slot /><slot name="footer" /></div>',
-          },
-          ConfirmDialog: { template: '<div />' },
-          Input: { template: '<input />' },
-          SearchInput: { template: '<input />' },
-          Select: {
-            props: ['options'],
-            template: '<div><span v-for="option in options" :key="option.value">{{ option.label }}</span></div>',
-          },
-          TextArea: { template: '<textarea />' },
-          PlatformIcon: { template: '<span />' },
-          Icon: { template: '<span />' },
-        },
+        stubs: makeStubs({ dialog: 'toggle', confirm: 'none', input: 'plain' }),
       },
     })
 
     await flushPromises()
-    await wrapper.findAll('.platform-chip').find(button => button.text().includes('GLM'))!.trigger('click')
+    await wrapper.findAll('.select-option-stub').find(button => button.text().includes('GLM'))!.trigger('click')
     await wrapper.findAll('button.btn-secondary')[2].trigger('click')
     await flushPromises()
 
     expect(adminApiMock.modelSquareConfig.listSyncAccounts).toHaveBeenCalledWith('glm')
     expect(wrapper.text()).toContain('glm-group-account')
+  })
+
+  /*
+    synced_from_account_name 一直被写进配置（submitSyncDialog 里赋的值），却从来没显示过。
+    「上次同步」只说了什么时候，没说用的是哪个账号 —— 而「上次是不是用了另一个账号」
+    正是决定要不要重新同步的关键信息。
+  */
+  it('shows which account the platform was last synced from', async () => {
+    const openSyncDialog = async (platform: Record<string, unknown>) => {
+      adminApiMock.modelSquareConfig.get.mockResolvedValue({ updated_at: null, platforms: [platform] })
+      adminApiMock.modelSquareConfig.listSyncAccounts.mockResolvedValue([])
+      const wrapper = mountDirtyTrackingView()
+      await flushPromises()
+      await flushPromises()
+      // 先切到 GLM：currentConfig 跟着 selectedPlatform 走，默认落在第一个内置平台上。
+      await wrapper.findAll('.select-option-stub').find(button => button.text().includes('GLM'))!.trigger('click')
+      await flushPromises()
+      // 按文字找按钮而不是按下标：替身渲染出的按钮数量会随 stub 变化，下标很脆。
+      await wrapper.findAll('button').find(button => button.text().includes('同步账号模型'))!.trigger('click')
+      await flushPromises()
+      return wrapper
+    }
+
+    const synced = await openSyncDialog({
+      platform: 'glm',
+      name: 'GLM',
+      synced_from_account_id: 11,
+      synced_from_account_name: 'glm-group-account',
+      synced_at: '2026-09-17T00:00:00Z',
+      models: [],
+    })
+    const syncedCards = synced.findAll('.sync-meta-card')
+    expect(syncedCards).toHaveLength(4)
+    expect(syncedCards[3].find('span').text()).toBe('上次同步账号')
+    expect(syncedCards[3].find('strong').text()).toBe('glm-group-account')
+
+    // 从没同步过时要显示占位符而不是一片空白 —— 空白会让人以为页面坏了
+    const never = await openSyncDialog({ platform: 'glm', name: 'GLM', models: [] })
+    expect(never.findAll('.sync-meta-card')[3].find('strong').text()).toBe('—')
   })
 
   it('renders configured prices directly in the model list', async () => {
@@ -274,23 +466,7 @@ describe('model square config wiring', () => {
 
     const wrapper = mount(ModelSquareConfigView, {
       global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' },
-          TablePageLayout: { template: '<div><slot name="actions" /><slot name="filters" /><slot name="table" /></div>' },
-          DataTable: {
-            props: ['data'],
-            template: '<div><slot v-if="data[0]" name="cell-price_summary" :row="data[0]" /></div>',
-          },
-          EmptyState: { template: '<div />' },
-          BaseDialog: { template: '<div><slot /></div>' },
-          ConfirmDialog: { template: '<div />' },
-          Input: { template: '<input />' },
-          SearchInput: { template: '<input />' },
-          Select: { template: '<div />' },
-          TextArea: { template: '<textarea />' },
-          PlatformIcon: { template: '<span />' },
-          Icon: { template: '<span />' },
-        },
+        stubs: makeStubs({ cells: ['price_summary'], dialog: 'content', confirm: 'none', input: 'plain', select: 'empty' }),
       },
     })
 
@@ -313,27 +489,7 @@ describe('model square config wiring', () => {
 
     const wrapper = mount(ModelSquareConfigView, {
       global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' },
-          TablePageLayout: { template: '<div><slot name="actions" /><slot name="filters" /><slot name="table" /></div>' },
-          DataTable: { template: '<div />' },
-          EmptyState: { template: '<div />' },
-          BaseDialog: {
-            props: ['show', 'title'],
-            template: '<section v-if="show"><h2>{{ title }}</h2><slot /><footer><slot name="footer" /></footer></section>',
-          },
-          ConfirmDialog: { template: '<div />' },
-          Input: {
-            props: ['modelValue', 'label', 'placeholder', 'type', 'required'],
-            emits: ['update:modelValue'],
-            template: '<label><span>{{ label }}</span><input :aria-label="label" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" /></label>',
-          },
-          SearchInput: { template: '<input />' },
-          Select: { template: '<div />' },
-          TextArea: { template: '<textarea />' },
-          PlatformIcon: { template: '<span />' },
-          Icon: { template: '<span />' },
-        },
+        stubs: makeStubs({ confirm: 'none', select: 'empty' }),
       },
     })
 
@@ -370,6 +526,62 @@ describe('model square config wiring', () => {
     })
   })
 
+  it('保存时原样带回本页未展示的价格字段，不会把它们抹成 null', async () => {
+    // 后端支持 12 个价格位，本页只展示其中 4 个；保存走的是整块 PUT，后端整体覆盖配置。
+    // 所以未展示的字段必须原样带回：有官方参考价兜底的那几个一旦被写成 null，
+    // 展示页会静默回退成官方价（管理员以为自己的定价生效了）；
+    // per_request_price 没有官方兜底，会变成「未设置」不再显示，而不是写成 0。
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: null,
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [{
+          id: 'gpt-5.5',
+          display_name: 'GPT-5.5',
+          source: 'sync',
+          input_price: 0.000005,
+          cache_write_1h_price: 0.000007,
+          input_price_priority: 0.000008,
+          image_input_price: 0.00001,
+          per_request_price: 0.00000012,
+        }],
+      }],
+    })
+
+    const wrapper = mount(ModelSquareConfigView, {
+      global: {
+        stubs: makeStubs({ cells: ['actions'], confirm: 'none', select: 'empty' }),
+      },
+    })
+
+    await flushPromises()
+    await flushPromises()
+
+    const editButton = wrapper.findAll('button').find(button => button.text() === '编辑')
+    expect(editButton).toBeTruthy()
+    await editButton!.trigger('click')
+
+    await wrapper.find('input[aria-label="输入价格（USD / 1M Tokens）"]').setValue('9')
+    const submitButton = wrapper.findAll('button').find(button => button.text() === '保存')
+    expect(submitButton).toBeTruthy()
+    await submitButton!.trigger('click')
+
+    const saveButton = wrapper.findAll('button').find(button => button.text().includes('保存配置'))
+    expect(saveButton).toBeTruthy()
+    await saveButton!.trigger('click')
+    await flushPromises()
+
+    const savedModel = adminApiMock.modelSquareConfig.update.mock.calls[0][0].platforms[0].models[0]
+    // 本次改过的字段按新值写入（9 USD / 1M tokens -> 每 token 9e-6）
+    expect(savedModel.input_price).toBe(0.000009)
+    // 本页没展示的字段必须一个不少地保留
+    expect(savedModel.cache_write_1h_price).toBe(0.000007)
+    expect(savedModel.input_price_priority).toBe(0.000008)
+    expect(savedModel.image_input_price).toBe(0.00001)
+    expect(savedModel.per_request_price).toBe(0.00000012)
+  })
+
   it('shows official reference prices for existing models without saving them as configured prices', async () => {
     adminApiMock.modelSquareConfig.get.mockResolvedValue({
       updated_at: null,
@@ -388,23 +600,7 @@ describe('model square config wiring', () => {
 
     const wrapper = mount(ModelSquareConfigView, {
       global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' },
-          TablePageLayout: { template: '<div><slot name="actions" /><slot name="filters" /><slot name="table" /></div>' },
-          DataTable: {
-            props: ['data'],
-            template: '<div><slot v-if="data[0]" name="cell-price_summary" :row="data[0]" /></div>',
-          },
-          EmptyState: { template: '<div />' },
-          BaseDialog: { template: '<div><slot /></div>' },
-          ConfirmDialog: { template: '<div />' },
-          Input: { template: '<input />' },
-          SearchInput: { template: '<input />' },
-          Select: { template: '<div />' },
-          TextArea: { template: '<textarea />' },
-          PlatformIcon: { template: '<span />' },
-          Icon: { template: '<span />' },
-        },
+        stubs: makeStubs({ cells: ['price_summary'], dialog: 'content', confirm: 'none', input: 'plain', select: 'empty' }),
       },
     })
 
@@ -459,30 +655,7 @@ describe('model square config wiring', () => {
 
     const wrapper = mount(ModelSquareConfigView, {
       global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' },
-          TablePageLayout: { template: '<div><slot name="actions" /><slot name="filters" /><slot name="table" /></div>' },
-          DataTable: {
-            props: ['data'],
-            template: '<div v-if="data[0]"><slot name="cell-price_summary" :row="data[0]" /><slot name="cell-actions" :row="data[0]" /></div>',
-          },
-          EmptyState: { template: '<div />' },
-          BaseDialog: {
-            props: ['show', 'title'],
-            template: '<section v-if="show"><h2>{{ title }}</h2><slot /><footer><slot name="footer" /></footer></section>',
-          },
-          ConfirmDialog: { template: '<div />' },
-          Input: {
-            props: ['modelValue', 'label', 'placeholder', 'type', 'required'],
-            emits: ['update:modelValue'],
-            template: '<label><span>{{ label }}</span><input :aria-label="label" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" /></label>',
-          },
-          SearchInput: { template: '<input />' },
-          Select: { template: '<div />' },
-          TextArea: { template: '<textarea />' },
-          PlatformIcon: { template: '<span />' },
-          Icon: { template: '<span />' },
-        },
+        stubs: makeStubs({ cells: ['price_summary', 'actions'], confirm: 'none', select: 'empty' }),
       },
     })
 
@@ -516,30 +689,7 @@ describe('model square config wiring', () => {
 
     const wrapper = mount(ModelSquareConfigView, {
       global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' },
-          TablePageLayout: { template: '<div><slot name="actions" /><slot name="filters" /><slot name="table" /></div>' },
-          DataTable: {
-            props: ['data'],
-            template: '<div v-if="data[0]"><slot name="cell-price_summary" :row="data[0]" /><slot name="cell-actions" :row="data[0]" /></div>',
-          },
-          EmptyState: { template: '<div />' },
-          BaseDialog: {
-            props: ['show', 'title'],
-            template: '<section v-if="show"><h2>{{ title }}</h2><slot /><footer><slot name="footer" /></footer></section>',
-          },
-          ConfirmDialog: { template: '<div />' },
-          Input: {
-            props: ['modelValue', 'label', 'placeholder', 'type', 'required'],
-            emits: ['update:modelValue'],
-            template: '<label><span>{{ label }}</span><input :aria-label="label" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" /></label>',
-          },
-          SearchInput: { template: '<input />' },
-          Select: { template: '<div />' },
-          TextArea: { template: '<textarea />' },
-          PlatformIcon: { template: '<span />' },
-          Icon: { template: '<span />' },
-        },
+        stubs: makeStubs({ cells: ['price_summary', 'actions'], confirm: 'none', select: 'empty' }),
       },
     })
 
@@ -654,5 +804,441 @@ describe('model square config wiring', () => {
     expect(adminApiMock.modelSquareConfig.getModelPricing).toHaveBeenCalledWith('gpt-5.5')
     expect(wrapper.text()).toContain('官方价格查询失败')
     expect(wrapper.text()).not.toContain('未设置')
+  })
+
+  it('shows the official baseline and markup ratio inside the edit dialog', async () => {
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: null,
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [{ id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual', input_price: 0.00001 }],
+      }],
+    })
+    adminApiMock.modelSquareConfig.getModelPricing.mockResolvedValue({
+      found: true,
+      input_price: 0.000005,
+      output_price: 0.00003,
+    })
+
+    const wrapper = mountModelDialogView()
+    await flushPromises()
+    await flushPromises()
+
+    const editButton = wrapper.findAll('button').find(button => button.text() === '编辑')
+    expect(editButton).toBeTruthy()
+    await editButton!.trigger('click')
+
+    // 字段名必须继续挂在 Input 的 label 上：Input 不透传 $attrs，
+    // 一旦改成页面层自己拼标签，内层 input 就丢掉无障碍名称了。
+    expect(wrapper.find('input[aria-label="输入价格（USD / 1M Tokens）"]').exists()).toBe(true)
+
+    const cards = wrapper.findAll('.model-price-field')
+    expect(cards).toHaveLength(4)
+
+    // 输入价格：已保存配置里有值（10 / 1M），官方基准 5 / 1M → 已自定义，并给出 2 倍关系
+    expect(cards[0].find('.model-price-field-state').text()).toBe('已自定义')
+    expect(cards[0].find('.model-price-field-baseline').text()).toBe('官方基准 $5 · 你的价 ×2.00')
+
+    // 输出价格：已保存配置里没有值，弹窗把它预填成了官方基准 30。
+    // 这里必须仍报「跟随官方」—— 只按表单非空判断会误报成已自定义。
+    expect(cards[1].find('.model-price-field-state').text()).toBe('跟随官方')
+    expect(cards[1].find('.model-price-field-baseline').text()).toBe('官方基准 $30')
+  })
+
+  it('marks dialog fields as unset rather than following official when the catalog has no baseline', async () => {
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: null,
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [{ id: 'internal-embed', display_name: '内部向量模型', source: 'manual' }],
+      }],
+    })
+    adminApiMock.modelSquareConfig.getModelPricing.mockResolvedValue({ found: false })
+
+    const wrapper = mountModelDialogView()
+    await flushPromises()
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text() === '编辑')!.trigger('click')
+    // 打开「没有已配价格」的模型会再触发一次官方价查询，状态会先回到 loading，
+    // 所以这里必须再 flush 一轮，否则断言到的是查询中的文案。
+    await flushPromises()
+    await flushPromises()
+
+    const cards = wrapper.findAll('.model-price-field')
+    expect(cards).toHaveLength(4)
+    for (const card of cards) {
+      expect(card.find('.model-price-field-state').text()).toBe('未设置')
+      expect(card.find('.model-price-field-baseline').text()).toBe('官方目录无参考价，留空则展示页不显示该价格')
+    }
+    // 没有官方基准价可跟随时，绝不能标成「跟随官方」
+    expect(wrapper.text()).not.toContain('跟随官方')
+  })
+
+  it('tones the baseline panel by above, following, and unset', async () => {
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: null,
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [{ id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual', input_price: 0.00001 }],
+      }],
+    })
+    adminApiMock.modelSquareConfig.getModelPricing.mockResolvedValue({
+      found: true,
+      input_price: 0.000005,
+      output_price: 0.00003,
+    })
+
+    const wrapper = mountModelDialogView()
+    await flushPromises()
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text() === '编辑')!.trigger('click')
+
+    const rows = wrapper.findAll('.model-baseline-row')
+    expect(rows).toHaveLength(4)
+
+    // 输入价格：自己填的 10 高于官方 5 → 加价色调 + 倍数
+    expect(rows[0].classes()).toContain('is-high')
+    expect(rows[0].find('.model-baseline-ratio').text()).toBe('×2.00')
+
+    // 输出价格：没配过、跟着官方 30 → 跟随色调，且值直接显示官方价而不是破折号
+    expect(rows[1].classes()).toContain('is-follow')
+    expect(rows[1].find('.model-baseline-row-value').text()).toBe('$30')
+
+    // 缓存写入 / 读取：既没配也没有官方基准 → 未设置
+    expect(rows[2].classes()).toContain('is-unset')
+    expect(rows[3].classes()).toContain('is-unset')
+    expect(rows[2].find('.model-baseline-row-value').text()).toBe('未设置')
+
+    expect(wrapper.find('.model-baseline-summary-value').text()).toBe('1 / 4')
+  })
+
+  it('shows which groups each configured model actually reaches', async () => {
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: null,
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [
+          { id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual' },
+          { id: 'orphan-model', display_name: '孤儿模型', source: 'manual' },
+        ],
+      }],
+    })
+    adminApiMock.modelSquare.loadGroupContext.mockResolvedValue({
+      channels: [{
+        id: 1,
+        status: 'active',
+        group_ids: [7],
+        model_pricing: [{ platform: 'openai', models: ['gpt-5.5'] }],
+      }],
+      groups: [{ id: 7, name: '默认分组', platform: 'openai', rate_multiplier: 1 }],
+      platformOverrides: new Map(),
+    })
+
+    const wrapper = mountGroupCoverageView()
+    await flushPromises()
+    await flushPromises()
+    await flushPromises()
+
+    // 分组归属不是配置里存的字段：它来自「支持该模型的渠道绑了哪些同平台分组」。
+    expect(wrapper.text()).toContain('默认分组')
+    // 没有渠道支持这个模型时，展示页按任何分组都筛不到它 —— 必须明确说出来。
+    expect(wrapper.find('.group-coverage-empty').text()).toBe('无渠道支撑')
+  })
+
+  it('reports unknown instead of uncovered when the group context fails to load', async () => {
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: null,
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [{ id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual' }],
+      }],
+    })
+    adminApiMock.modelSquare.loadGroupContext.mockRejectedValue(new Error('boom'))
+
+    const wrapper = mountGroupCoverageView()
+    await flushPromises()
+    await flushPromises()
+    await flushPromises()
+
+    // 拉不到渠道/分组数据时必须退化成「—」，不能显示成「无渠道支撑」——
+    // 否则一次接口抖动会被读成「配置坏了」，管理员会去做无谓的返工。
+    expect(wrapper.find('.group-coverage-empty').exists()).toBe(false)
+    expect(wrapper.find('.group-coverage-pending').text()).toBe('—')
+    /*
+      未覆盖数同理：未知不能被算成未覆盖，否则会报出一个假的告警。
+      hero 指标卡删除后，这个数字唯一露出的地方就是平台 Select 上的「未覆盖 N」徽标，
+      所以断言改成「徽标不出现」—— 比原来断言某张卡片里是 0 更贴近管理员实际看到的东西。
+    */
+    expect(wrapper.find('.platform-option-warn').exists()).toBe(false)
+  })
+
+  it('counts models without channel support on the platform selector', async () => {
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: null,
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [
+          { id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual' },
+          { id: 'orphan-model', display_name: '孤儿模型', source: 'manual' },
+        ],
+      }],
+    })
+    adminApiMock.modelSquare.loadGroupContext.mockResolvedValue({
+      channels: [{
+        id: 1,
+        status: 'active',
+        group_ids: [7],
+        model_pricing: [{ platform: 'openai', models: ['gpt-5.5'] }],
+      }],
+      groups: [{ id: 7, name: '默认分组', platform: 'openai', rate_multiplier: 1 }],
+      platformOverrides: new Map(),
+    })
+
+    const wrapper = mountGroupCoverageView()
+    await flushPromises()
+    await flushPromises()
+    await flushPromises()
+
+    /*
+      告警要挂在两处：当前平台（一直可见）与下拉选项（展开时看全部平台）。
+      只测其中一个，另一个位置漏渲染也发现不了。
+    */
+    expect(wrapper.find('.select-trigger-stub .platform-option-warn').text()).toBe('未覆盖 1')
+    expect(wrapper.find('.select-option-stub .platform-option-warn').text()).toBe('未覆盖 1')
+  })
+
+  it('flags models whose supporting channels are all disabled', async () => {
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: null,
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [{ id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual' }],
+      }],
+    })
+    // 渠道停用了，但分组绑定还在：展示页会出现分组标签，同时把模型标成不可用。
+    adminApiMock.modelSquare.loadGroupContext.mockResolvedValue({
+      channels: [{
+        id: 1,
+        status: 'disabled',
+        group_ids: [7],
+        model_pricing: [{ platform: 'openai', models: ['gpt-5.5'] }],
+      }],
+      groups: [{ id: 7, name: '默认分组', platform: 'openai', rate_multiplier: 1 }],
+      platformOverrides: new Map(),
+    })
+
+    const wrapper = mountGroupCoverageView()
+    await flushPromises()
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('默认分组')
+    expect(wrapper.find('.group-coverage-warn').text()).toBe('渠道未启用')
+    // 有分组归属就不算未覆盖，平台 Select 上不该报数
+    expect(wrapper.find('.platform-option-warn').exists()).toBe(false)
+  })
+
+  it('flags unsaved edits and clears the flag once saved', async () => {
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: '2026-09-17T00:00:00Z',
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [{ id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual' }],
+      }],
+    })
+    adminApiMock.modelSquareConfig.update.mockImplementation(async (payload: unknown) => payload as never)
+
+    const wrapper = mountDirtyTrackingView()
+    await flushPromises()
+    await flushPromises()
+
+    // 刚加载完没有任何改动，不能一进页面就喊「有未保存改动」
+    expect(wrapper.find('button.btn-primary.is-dirty').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('有未保存改动')
+
+    await makeUnsavedEdit(wrapper)
+
+    // 提示要落在保存按钮上：管理员的视线本来就在那儿（琥珀色提示环 + 圆点）
+    const dirtySaveButton = wrapper.find('button.btn-primary.is-dirty')
+    expect(dirtySaveButton.exists()).toBe(true)
+    /*
+      「有未保存改动」文案原本在 hero 横栏上，hero 删除后挪进保存按钮的 sr-only 文案。
+      这里断言 text() 而不是可见性，是因为要守住的就是「它还在可访问树里」这件事 ——
+      圆点是 aria-hidden 的纯装饰，只剩它的话无障碍上完全不知道有未保存改动。
+    */
+    expect(dirtySaveButton.text()).toContain('有未保存改动')
+
+    await dirtySaveButton.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('button.btn-primary.is-dirty').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('有未保存改动')
+  })
+
+  /*
+    后端 UpdateModelSquareConfig 只做 validate → normalize → 盖新的 updated_at → 整块覆盖，
+    完全不比对入参里的 updated_at（已核对源码）。两个人同时编辑时，后保存的会静默覆盖
+    前一个人的改动，双方都以为存成功了。下面两条锁住「提交前先比对」这个唯一的拦截点。
+  */
+  it('asks before overwriting when the config changed on the server', async () => {
+    const loaded = {
+      updated_at: '2026-09-17T00:00:00Z',
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [{ id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual' }],
+      }],
+    }
+    adminApiMock.modelSquareConfig.get
+      .mockResolvedValueOnce(loaded)
+      // 保存前的探测拿到的是「别人改过之后」的时间戳
+      .mockResolvedValueOnce({ ...loaded, updated_at: '2026-09-17T01:00:00Z' })
+    adminApiMock.modelSquareConfig.update.mockImplementation(async (payload: unknown) => payload as never)
+
+    const wrapper = mountDirtyTrackingView()
+    await flushPromises()
+    await flushPromises()
+
+    await makeUnsavedEdit(wrapper)
+    await wrapper.findAll('button').find(button => button.text().includes('保存配置'))!.trigger('click')
+    await flushPromises()
+
+    // 关键：先问，而且问之前一个字节都不能写上去
+    expect(wrapper.find('.confirm-stub-title').text()).toBe('配置已被他人修改')
+    expect(adminApiMock.modelSquareConfig.update).not.toHaveBeenCalled()
+
+    // 用户选了「覆盖保存」之后才真的提交
+    await wrapper.find('.confirm-stub-confirm').trigger('click')
+    await flushPromises()
+    expect(adminApiMock.modelSquareConfig.update).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.confirm-stub').exists()).toBe(false)
+  })
+
+  it('does not ask when the server copy is unchanged', async () => {
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: '2026-09-17T00:00:00Z',
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [{ id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual' }],
+      }],
+    })
+    adminApiMock.modelSquareConfig.update.mockImplementation(async (payload: unknown) => payload as never)
+
+    const wrapper = mountDirtyTrackingView()
+    await flushPromises()
+    await flushPromises()
+
+    await makeUnsavedEdit(wrapper)
+    await wrapper.findAll('button').find(button => button.text().includes('保存配置'))!.trigger('click')
+    await flushPromises()
+
+    // 没冲突就别多弹一个框 —— 每次保存都拦一下比不拦还烦
+    expect(wrapper.find('.confirm-stub').exists()).toBe(false)
+    expect(adminApiMock.modelSquareConfig.update).toHaveBeenCalledTimes(1)
+  })
+
+  it('asks before reloading when there are unsaved edits', async () => {
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: '2026-09-17T00:00:00Z',
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [{ id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual' }],
+      }],
+    })
+
+    const wrapper = mountDirtyTrackingView()
+    await flushPromises()
+    await flushPromises()
+    expect(wrapper.find('.confirm-stub').exists()).toBe(false)
+
+    await makeUnsavedEdit(wrapper)
+
+    const getCallsBefore = adminApiMock.modelSquareConfig.get.mock.calls.length
+    await wrapper.findAll('button').find(button => button.text().includes('刷新'))!.trigger('click')
+    await flushPromises()
+
+    // 先弹确认，而且不能已经悄悄把配置重新拉了一遍（那样改动就已经没了）
+    expect(wrapper.find('.confirm-stub-title').text()).toBe('刷新配置')
+    expect(adminApiMock.modelSquareConfig.get.mock.calls.length).toBe(getCallsBefore)
+  })
+
+  it('blocks route navigation while there are unsaved edits', async () => {
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: '2026-09-17T00:00:00Z',
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [{ id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual' }],
+      }],
+    })
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+
+    const wrapper = mountDirtyTrackingView()
+    await flushPromises()
+    await flushPromises()
+
+    const guard = onBeforeRouteLeaveMock.mock.calls[0][0] as () => unknown
+    expect(typeof guard).toBe('function')
+
+    // 没有改动就安静放行，别每次都拦一下
+    expect(guard()).toBe(true)
+    expect(confirmSpy).not.toHaveBeenCalled()
+
+    await makeUnsavedEdit(wrapper)
+
+    expect(guard()).toBe(false)
+    expect(confirmSpy).toHaveBeenCalledTimes(1)
+
+    // 用户确认离开后才放行
+    confirmSpy.mockReturnValue(true)
+    expect(guard()).toBe(true)
+
+    confirmSpy.mockRestore()
+  })
+
+  it('asks the browser to confirm before unloading while there are unsaved edits', async () => {
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: '2026-09-17T00:00:00Z',
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [{ id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual' }],
+      }],
+    })
+    // 直接拿注册进 window 的处理器来调，不真的 dispatch：
+    // 组件在 onMounted 里挂的是 window 级监听，dispatch 会被前面用例遗留的实例一起接住。
+    const addListenerSpy = vi.spyOn(window, 'addEventListener')
+
+    const wrapper = mountDirtyTrackingView()
+    await flushPromises()
+    await flushPromises()
+
+    const registered = addListenerSpy.mock.calls.find(([type]) => type === 'beforeunload')
+    expect(registered).toBeTruthy()
+    const handler = registered![1] as (event: Event) => void
+
+    const clean = new Event('beforeunload', { cancelable: true })
+    handler(clean)
+    expect(clean.defaultPrevented).toBe(false)
+
+    await makeUnsavedEdit(wrapper)
+
+    const dirty = new Event('beforeunload', { cancelable: true })
+    handler(dirty)
+    expect(dirty.defaultPrevented).toBe(true)
+
+    addListenerSpy.mockRestore()
   })
 })

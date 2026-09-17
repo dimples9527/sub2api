@@ -390,8 +390,36 @@ function referencePricingKey(modelID: string) {
   return modelID.trim().toLowerCase()
 }
 
+/**
+ * 计算「模型属于哪些分组」所需的外部上下文。
+ *
+ * 分组归属不是配置里存的字段，而是读时推导出来的：渠道支持哪些模型 + 渠道绑了哪些分组
+ * + 分组的有效平台。模型广场配置页要在保存前就告诉管理员每个模型会落到哪些分组，
+ * 所以必须单独拿到这三份数据。
+ *
+ * 这里刻意不复用 getModelSquare()：它内部会重新 GET 一次已保存的配置，
+ * 拿到的永远是上次保存的状态，看不到正在编辑、尚未保存的模型。
+ *
+ * 参考价也不在这里拉：配置页自己按模型 ID 查询并缓存，避免每个模型多发一次请求。
+ */
+export interface ModelSquareGroupContext {
+  channels: ModelSquareUserChannel[]
+  groups: ModelSquareUserGroup[]
+  platformOverrides: Map<string, string>
+}
+
+export async function loadModelSquareGroupContext(): Promise<ModelSquareGroupContext> {
+  const [channels, groups, platformOverrides] = await Promise.all([
+    listAllChannels(),
+    getAllIncludingInactive(),
+    listGroupPlatformOverrides(),
+  ])
+  return { channels, groups, platformOverrides }
+}
+
 export const modelSquareAPI = {
   get: getModelSquare,
+  loadGroupContext: loadModelSquareGroupContext,
 }
 
 export default modelSquareAPI
