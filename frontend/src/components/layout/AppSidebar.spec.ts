@@ -125,6 +125,26 @@ describe('AppSidebar image generation visibility', () => {
     expect(wrapper.find('a[href="/model-square"]').exists()).toBe(true)
   })
 
+  it('opens the model monitor entry as an external link for regular users', () => {
+    const wrapper = mountSidebar('user')
+
+    // public/ 下的静态页没有路由记录，必须是 <a target="_blank">，router-link 会 404
+    const link = wrapper.find('a[href="/model-monitor-local.html"]')
+    expect(link.exists()).toBe(true)
+    expect(link.attributes('target')).toBe('_blank')
+    expect(link.attributes('rel')).toContain('noopener')
+  })
+
+  it('also shows the model monitor entry in the admin personal section', () => {
+    const wrapper = mountSidebar('admin')
+
+    // 管理员走的是另一套菜单（管理区分组 + 「我的账户」区），个人区这个入口是「查看」用，
+    // 与上方折叠的「模型监控」配置分组分工不同，两边都要有。
+    const link = wrapper.find('a[href="/model-monitor-local.html"]')
+    expect(link.exists()).toBe(true)
+    expect(link.attributes('target')).toBe('_blank')
+  })
+
   it('uses explicit supplier prefixes for supplier group and account entries', async () => {
     const wrapper = mountSidebar('admin')
 
