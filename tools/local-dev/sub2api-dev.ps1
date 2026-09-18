@@ -33,6 +33,9 @@ $Settings = [ordered]@{
     RedisHost = '127.0.0.1'
     RedisPort = 6379
     RedisPassword = ''
+    # 等待 PostgreSQL 接受连接的上限（秒）。非正常关机后 PG 要先恢复再同步整个数据目录，
+    # 数据目录在 Windows 绑定挂载上时实测要十几分钟，所以默认值给得比较宽松。
+    PostgresReadyTimeoutSeconds = 1800
     BackendHost = '127.0.0.1'
     BackendPort = 4000
     FrontendHost = '127.0.0.1'
@@ -103,6 +106,7 @@ function Get-StatusObject {
         postgres = [ordered]@{
             container = $Settings.PostgresContainer
             state = Get-ContainerState $Settings.PostgresContainer
+            accepting_connections = Test-PostgresReady -Container $Settings.PostgresContainer -AdminUser $Settings.DatabaseAdminUser
             host = $Settings.DatabaseHost
             port = [int]$Settings.DatabasePort
             database = $Settings.DatabaseName
@@ -129,7 +133,7 @@ function Show-Status {
     Write-Host 'Sub2API local development status' -ForegroundColor Cyan
     Write-Host "  Backend : $($status.backend.url)  healthy=$($status.backend.healthy)  pid=$($status.backend.process_id)"
     Write-Host "  Frontend: $($status.frontend.url)  healthy=$($status.frontend.healthy)  pid=$($status.frontend.process_id)"
-    Write-Host "  Postgres: $($status.postgres.container)  state=$($status.postgres.state)  db=$($status.postgres.database)  port=$($status.postgres.port)"
+    Write-Host "  Postgres: $($status.postgres.container)  state=$($status.postgres.state)  ready=$($status.postgres.accepting_connections)  db=$($status.postgres.database)  port=$($status.postgres.port)"
     Write-Host "  Redis   : $($status.redis.container)  state=$($status.redis.state)  port=$($status.redis.port)"
 }
 
@@ -159,19 +163,75 @@ function Ensure-ContainerRunning {
     }
 }
 
+function Test-PostgresReady {
+    param(
+        [string]$Container,
+        [string]$AdminUser
+    )
+    if ((Get-ContainerState $Container) -ne 'running') { return $false }
+    & docker exec $Container pg_isready -U $AdminUser -d postgres -q 2>$null
+    return ($LASTEXITCODE -eq 0)
+}
+
+function Wait-PostgresReady {
+    param(
+        [string]$Container,
+        [string]$AdminUser,
+        [int]$TimeoutSeconds = 1800
+    )
+    # 容器状态变成 running 不等于 PostgreSQL 能接受连接：非正常关机后 PG 会先做崩溃恢复，
+    # 再由启动进程同步整个数据目录，期间任何连接都会得到
+    # FATAL: the database system is starting up（pg_isready 退出码 1）。
+    # 数据目录在 Windows 绑定挂载（Docker Desktop）上时 fsync 极慢，实测 10~15 分钟，
+    # 所以必须轮询 pg_isready，不能只看容器状态。
+    if ((Get-ContainerState $Container) -ne 'running') {
+        throw "PostgreSQL container is not running: $Container"
+    }
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $nextReportAt = 0
+    do {
+        & docker exec $Container pg_isready -U $AdminUser -d postgres -q 2>$null
+        if ($LASTEXITCODE -eq 0) { return }
+        if ($LASTEXITCODE -eq 2) {
+            throw "PostgreSQL postmaster 无响应（pg_isready 退出码 2）：容器 $Container。请查看 docker logs --tail 50 $Container。"
+        }
+        $elapsed = [int]($TimeoutSeconds - ($deadline - (Get-Date)).TotalSeconds)
+        if ($elapsed -ge $nextReportAt) {
+            $lastLog = ((& docker logs --tail 1 $Container 2>$null) -join ' ').Trim()
+            if ($lastLog.Length -gt 160) { $lastLog = $lastLog.Substring($lastLog.Length - 160) }
+            Write-Host "等待 PostgreSQL 就绪… 已等待 $($elapsed)s | $lastLog" -ForegroundColor Yellow
+            $nextReportAt = $elapsed + 30
+        }
+        Start-Sleep -Seconds 2
+    } while ((Get-Date) -lt $deadline)
+
+    $tail = ((& docker logs --tail 15 $Container 2>$null) -join [Environment]::NewLine)
+    $message = @(
+        "等待 PostgreSQL 就绪超时：容器 $Container 在 $TimeoutSeconds 秒内仍未接受连接。",
+        '常见原因：非正常关机后 PostgreSQL 正在做崩溃恢复并同步整个数据目录，',
+        '而数据目录位于 Windows 绑定挂载上（Docker Desktop），fsync 非常慢。',
+        "处理：保持容器运行等它同步完（另开终端执行 docker logs --tail 20 $Container 看进度），",
+        "或在 local.env.ps1 里调大 PostgresReadyTimeoutSeconds（当前 $TimeoutSeconds）。",
+        '--- 容器日志尾部 ---',
+        $tail
+    ) -join [Environment]::NewLine
+    throw $message
+}
+
 function Ensure-Database {
     $container = [string]$Settings.PostgresContainer
     $admin = [string]$Settings.DatabaseAdminUser
     $database = [string]$Settings.DatabaseName
     $user = [string]$Settings.DatabaseUser
     $password = ([string]$Settings.DatabasePassword).Replace("'", "''")
+    Wait-PostgresReady -Container $container -AdminUser $admin -TimeoutSeconds ([int]$Settings.PostgresReadyTimeoutSeconds)
     $roleExists = & docker exec $container psql -U $admin -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='$user';"
     if (($roleExists -join '').Trim() -ne '1') {
         & docker exec $container psql -U $admin -d postgres -v ON_ERROR_STOP=1 -c "CREATE ROLE $user LOGIN PASSWORD '$password';" | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "Failed to create PostgreSQL role: $user" }
+        if ($LASTEXITCODE -ne 0) { throw "Failed to create PostgreSQL role: $user`n提示：若上一条是 the database system is starting up，说明 PostgreSQL 仍在恢复/同步数据目录，等待其就绪后重试即可。" }
     } else {
         & docker exec $container psql -U $admin -d postgres -v ON_ERROR_STOP=1 -c "ALTER ROLE $user WITH LOGIN PASSWORD '$password';" | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "Failed to synchronize PostgreSQL role password: $user" }
+        if ($LASTEXITCODE -ne 0) { throw "Failed to synchronize PostgreSQL role password: $user`n提示：若上一条是 the database system is starting up，说明 PostgreSQL 仍在恢复/同步数据目录，等待其就绪后重试即可。" }
     }
     $databaseExists = & docker exec $container psql -U $admin -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$database';"
     if (($databaseExists -join '').Trim() -ne '1') {
