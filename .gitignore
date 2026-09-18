@@ -39,6 +39,9 @@ frontend/dist/
 *.tsbuildinfo
 vite.config.d.ts
 vite.config.js.timestamp-*
+# vitest 每次运行都会在 frontend/ 下写一份时间戳临时配置文件（跑完全量测试后必留）。
+# 上一行只覆盖了 vite.config.js 变体，漏了 vitest.config.ts —— 结果为「git status 里多出一堆未跟踪文件」。
+vitest.config.ts.timestamp-*
 
 # 日志
 npm-debug.log*
