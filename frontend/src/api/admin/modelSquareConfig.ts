@@ -6,6 +6,13 @@ export interface ModelSquarePlatformModelConfig {
   id: string
   display_name?: string
   source?: ModelSquareConfigModelSource
+  /**
+   * 模型在模型广场里归属的分组 ID。
+   *
+   * 这是分组归属的唯一来源 —— 不再由渠道反推。留空表示该模型不出现在任何分组下，
+   * 展示页按分组筛选时找不到它，因此配置页必须把这个状态显式呈现出来。
+   */
+  group_ids?: number[]
   input_price?: number | null
   output_price?: number | null
   cache_write_price?: number | null

@@ -27,16 +27,6 @@ func (s *modelSquareStubConfigService) GetModelSquareConfig(ctx context.Context)
 	return s.config, s.err
 }
 
-type modelSquareStubChannelService struct {
-	channels []service.Channel
-	result   *pagination.PaginationResult
-	err      error
-}
-
-func (s *modelSquareStubChannelService) List(ctx context.Context, params pagination.PaginationParams, status, search string) ([]service.Channel, *pagination.PaginationResult, error) {
-	return s.channels, s.result, s.err
-}
-
 type modelSquareStubGroupService struct {
 	groups []service.Group
 	err    error
@@ -129,28 +119,6 @@ func modelSquareTestConfig() service.ModelSquareConfig {
 	}
 }
 
-// modelSquareTestChannels 构造渠道：横跨 openai 与 glm 两个平台定价，并带有管理端敏感字段。
-func modelSquareTestChannels() []service.Channel {
-	return []service.Channel{
-		{
-			ID:                 1,
-			Name:               "Local channel",
-			Description:        "内部描述",
-			Status:             "active",
-			BillingModelSource: "channel_mapped",
-			RestrictModels:     true,
-			GroupIDs:           []int64{1, 2},
-			ModelPricing: []service.ChannelModelPricing{
-				{Platform: "openai", Models: []string{"gpt-5.5"}},
-				{Platform: "glm", Models: []string{"glm-4.5"}},
-			},
-			ModelMapping: map[string]map[string]string{
-				"openai": {"gpt-5.5": "upstream-model"},
-			},
-		},
-	}
-}
-
 // modelSquareTestGroups 构造分组：GLM Group 原始平台是 openai，但分组平台配置会覆盖为 glm。
 func modelSquareTestGroups() []service.Group {
 	return []service.Group{
@@ -163,10 +131,6 @@ func TestModelSquareHandler_Get_ReturnsAggregatedUserData(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := &ModelSquareHandler{
 		configService: &modelSquareStubConfigService{config: modelSquareTestConfig()},
-		channelService: &modelSquareStubChannelService{
-			channels: modelSquareTestChannels(),
-			result:   &pagination.PaginationResult{Total: 1, Page: 1, PageSize: 1000, Pages: 1},
-		},
 		groupService: &modelSquareStubGroupService{groups: modelSquareTestGroups()},
 		overrideService: &modelSquareStubOverrideService{
 			overrides: map[int64]service.MonitorGroupPlatformOverride{
@@ -201,16 +165,6 @@ func TestModelSquareHandler_Get_ReturnsAggregatedUserData(t *testing.T) {
 	require.Equal(t, "gpt-5.5", data.Config.Platforms[0].Models[0].ID)
 	require.NotNil(t, data.Config.Platforms[0].Models[0].InputPrice)
 
-	require.Len(t, data.Channels, 1)
-	ch := data.Channels[0]
-	require.Equal(t, int64(1), ch.ID)
-	require.Equal(t, "active", ch.Status)
-	require.Equal(t, []int64{1, 2}, ch.GroupIDs)
-	require.Len(t, ch.ModelPricing, 2)
-	require.Equal(t, "openai", ch.ModelPricing[0].Platform)
-	require.Equal(t, []string{"gpt-5.5"}, ch.ModelPricing[0].Models)
-	require.Equal(t, map[string]map[string]string{"openai": {"gpt-5.5": "upstream-model"}}, ch.ModelMapping)
-
 	require.Len(t, data.Groups, 2)
 	require.Equal(t, "GLM Group", data.Groups[0].Name)
 	require.InDelta(t, 0.3, data.Groups[0].RateMultiplier, 1e-9)
@@ -241,15 +195,6 @@ func TestModelSquareUserResponse_FieldWhitelist(t *testing.T) {
 				},
 			},
 		},
-		Channels: []modelSquareUserChannel{
-			{
-				ID:           1,
-				Status:       "active",
-				GroupIDs:     []int64{1},
-				ModelPricing: []modelSquareUserChannelModelPricing{{Platform: "openai", Models: []string{"gpt-5.5"}}},
-				ModelMapping: map[string]map[string]string{},
-			},
-		},
 		Groups: []modelSquareUserGroup{
 			{ID: 1, Name: "GLM Group", Platform: "glm", RateMultiplier: 0.3},
 		},
@@ -262,7 +207,7 @@ func TestModelSquareUserResponse_FieldWhitelist(t *testing.T) {
 	var decoded map[string]any
 	require.NoError(t, json.Unmarshal(raw, &decoded))
 
-	for _, key := range []string{"config", "channels", "groups", "platform_overrides", "reference_prices"} {
+	for _, key := range []string{"config", "groups", "platform_overrides", "reference_prices"} {
 		_, exists := decoded[key]
 		require.Truef(t, exists, "response must expose %q", key)
 	}
@@ -273,15 +218,10 @@ func TestModelSquareUserResponse_FieldWhitelist(t *testing.T) {
 		require.Falsef(t, exists, "config platform must not expose %q", key)
 	}
 
-	channel := decoded["channels"].([]any)[0].(map[string]any)
-	for _, key := range []string{"name", "description", "billing_model_source", "restrict_models", "features", "created_at", "updated_at", "apply_pricing_to_account_stats", "account_stats_pricing_rules"} {
-		_, exists := channel[key]
-		require.Falsef(t, exists, "channel must not expose %q", key)
-	}
-	for _, key := range []string{"id", "status", "group_ids", "model_pricing", "model_mapping"} {
-		_, exists := channel[key]
-		require.Truef(t, exists, "channel must expose %q", key)
-	}
+	// 渠道数据已不再进入用户接口：模型可用性改由前端按模型绑定的分组判定。
+	// 这里钉死「不再返回 channels」，避免它被顺手加回来。
+	_, hasChannels := decoded["channels"]
+	require.False(t, hasChannels, "response must not expose channels")
 
 	group := decoded["groups"].([]any)[0].(map[string]any)
 	for _, key := range []string{"description", "status", "subscription_type", "is_exclusive", "peak_rate_enabled", "created_at", "updated_at"} {
@@ -299,10 +239,6 @@ func TestModelSquareHandler_Get_ReferencePricesOnlyForMissingTokenPrices(t *test
 	// 计费服务同时有 gpt-5.5 与 ghost-model 的价目，但 gpt-5.5 配置价格完整，不应回查。
 	handler := &ModelSquareHandler{
 		configService: &modelSquareStubConfigService{config: modelSquareTestConfig()},
-		channelService: &modelSquareStubChannelService{
-			channels: modelSquareTestChannels(),
-			result:   &pagination.PaginationResult{Total: 1, Page: 1, PageSize: 1000, Pages: 1},
-		},
 		groupService: &modelSquareStubGroupService{groups: modelSquareTestGroups()},
 		billingService: &modelSquareStubBillingService{
 			prices: map[string]*service.ModelPricing{
@@ -330,17 +266,15 @@ func TestModelSquareHandler_Get_ReferencePricesOnlyForMissingTokenPrices(t *test
 	require.False(t, hasComplete)
 }
 
-func TestModelSquareHandler_LoadAllChannels_PaginatesUntilComplete(t *testing.T) {
+// 渠道服务不再被读取：模型广场用户接口已不返回渠道数据，
+// 可用性改由前端按模型绑定的分组判定。
+// 用一个「一被调用就失败」的替身钉死这一点，避免渠道读取被顺手加回来。
+func TestModelSquareHandler_Get_DoesNotLoadChannels(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	page1 := []service.Channel{{ID: 1, Status: "active", GroupIDs: []int64{1}}}
-	page2 := []service.Channel{{ID: 2, Status: "disabled", GroupIDs: []int64{2}}}
 	handler := &ModelSquareHandler{
-		configService: &modelSquareStubConfigService{config: service.ModelSquareConfig{Platforms: []service.ModelSquarePlatformConfig{}}},
-		channelService: &modelSquarePagingChannelService{
-			pages: [][]service.Channel{page1, page2},
-			total: 2,
-		},
-		groupService:    &modelSquareStubGroupService{},
+		configService:   &modelSquareStubConfigService{config: modelSquareTestConfig()},
+		channelService:  &modelSquareFailOnCallChannelService{t: t},
+		groupService:    &modelSquareStubGroupService{groups: modelSquareTestGroups()},
 		overrideService: &modelSquareStubOverrideService{},
 		billingService:  &modelSquareStubBillingService{},
 	}
@@ -352,27 +286,20 @@ func TestModelSquareHandler_LoadAllChannels_PaginatesUntilComplete(t *testing.T)
 	handler.Get(c)
 
 	require.Equal(t, http.StatusOK, w.Code)
-	var body struct {
-		Code int                    `json:"code"`
-		Data modelSquareUserResponse `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-	require.Len(t, body.Data.Channels, 2)
-	require.Equal(t, int64(1), body.Data.Channels[0].ID)
-	require.Equal(t, int64(2), body.Data.Channels[1].ID)
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
+	data, ok := raw["data"].(map[string]any)
+	require.True(t, ok)
+	_, hasChannels := data["channels"]
+	require.False(t, hasChannels, "response must not expose channels")
 }
 
-// modelSquarePagingChannelService 按页码返回渠道分页数据，用于验证全量拉取逻辑。
-type modelSquarePagingChannelService struct {
-	pages [][]service.Channel
-	total int64
+// modelSquareFailOnCallChannelService 一旦被调用就让测试失败。
+type modelSquareFailOnCallChannelService struct {
+	t *testing.T
 }
 
-func (s *modelSquarePagingChannelService) List(ctx context.Context, params pagination.PaginationParams, status, search string) ([]service.Channel, *pagination.PaginationResult, error) {
-	index := params.Page - 1
-	pages := len(s.pages)
-	if index < 0 || index >= pages {
-		return nil, &pagination.PaginationResult{Total: s.total, Page: params.Page, PageSize: params.PageSize, Pages: pages}, nil
-	}
-	return s.pages[index], &pagination.PaginationResult{Total: s.total, Page: params.Page, PageSize: params.PageSize, Pages: pages}, nil
+func (s *modelSquareFailOnCallChannelService) List(ctx context.Context, params pagination.PaginationParams, status, search string) ([]service.Channel, *pagination.PaginationResult, error) {
+	s.t.Fatal("模型广场用户接口不应再读取渠道数据")
+	return nil, nil, nil
 }

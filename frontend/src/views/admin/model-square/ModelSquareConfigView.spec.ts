@@ -5,6 +5,7 @@ import { computed, defineComponent, h } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ModelSquareConfigView from './ModelSquareConfigView.vue'
+import { platformBadgeClass, platformTextClass } from '@/utils/platformColors'
 
 function createDeferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void
@@ -20,7 +21,7 @@ function createDeferred<T>() {
  * Select 替身：把 #selected 与 #option 两个插槽都真的渲染出来，并支持点击切换平台。
  *
  * 为什么不能再用 `<div />` 敷衍：平台 chip 横栏删除后，切平台只剩这一个入口，stub 必须真的能切。
- * 而「未覆盖 N」告警同时挂在两处 —— #selected（当前平台，必须一直可见）
+ * 而「未绑定 N」告警同时挂在两处 —— #selected（当前平台，必须一直可见）
  * 与 #option（展开时一眼看出问题在哪个平台）。只渲染其中一个都会漏测，
  * 得到「测试通过但其实那个位置根本没渲染」的假绿。
  *
@@ -82,7 +83,7 @@ type StubOptions = {
   /** TablePageLayout 透出哪些插槽。 */
   layoutSlots?: Array<'actions' | 'filters' | 'table' | 'default'>
   /** DataTable 透出的单元格插槽；不给就是空壳，渲染不出任何行内容。 */
-  cells?: Array<'price_summary' | 'actions' | 'group_coverage'>
+  cells?: Array<'price_summary' | 'actions' | 'group_binding'>
   /** DataTable 只渲染第一行还是全部行。 */
   cellRows?: 'first' | 'all'
   /** none 空壳 / content 只透出内容 / toggle 带 show 开关 / titled 带 show 与标题。 */
@@ -107,6 +108,9 @@ const confirmDialogStub = {
   template: [
     '<div v-if="show" class="confirm-stub">',
     '<span class="confirm-stub-title">{{ title }}</span>',
+    // message 也要渲染出来：确认框里真正让人决定点不点的是这句话
+    // （「会波及几个模型」「覆盖对方的改动」），只测标题等于没测到那层信息。
+    '<span class="confirm-stub-message">{{ message }}</span>',
     '<button type="button" class="confirm-stub-confirm" @click="$emit(\'confirm\')">{{ confirmText }}</button>',
     '<button type="button" class="confirm-stub-cancel" @click="$emit(\'cancel\')">{{ cancelText }}</button>',
     '</div>',
@@ -130,8 +134,6 @@ function makeStubs(options: StubOptions = {}) {
     select = 'rich',
   } = options
 
-  const cellMarkup = (row: string) => cells.map(name => `<slot name="cell-${name}" :row="${row}" />`).join('')
-
   return {
     AppLayout: { template: '<div><slot /></div>' },
     TablePageLayout: {
@@ -139,11 +141,7 @@ function makeStubs(options: StubOptions = {}) {
         .map(slot => (slot === 'default' ? '<slot />' : `<slot name="${slot}" />`))
         .join('')}</div>`,
     },
-    DataTable: cells.length === 0
-      ? { template: '<div />' }
-      : cellRows === 'all'
-        ? { props: ['data'], template: `<div><template v-for="row in data" :key="row.id">${cellMarkup('row')}</template></div>` }
-        : { props: ['data'], template: `<div v-if="data[0]">${cellMarkup('data[0]')}</div>` },
+    DataTable: cells.length === 0 ? { template: '<div />' } : dataTableStub(cells, cellRows),
     EmptyState: { template: '<div />' },
     BaseDialog: dialog === 'none'
       ? { template: '<div />' }
@@ -159,6 +157,47 @@ function makeStubs(options: StubOptions = {}) {
     TextArea: { template: '<textarea />' },
     PlatformIcon: { template: '<span />' },
     Icon: { template: '<span />' },
+  }
+}
+
+/**
+ * DataTable 替身。
+ *
+ * 必须镜像真实组件的**受控选择**接口（`selectable` + `selectedKeys` + `update:selectedKeys`）：
+ * 批量绑定与批量清空的入口就是行勾选，替身不渲染勾选框的话，那些用例只能绕过 UI
+ * 直接改组件内部状态 —— 测的就不是管理员实际走的那条路径了。
+ * 接口已对着 `src/components/common/DataTable.vue` 核过（`:checked="selectedKeySet.has(...)"`、
+ * `emit('update:selectedKeys', keys)`）。
+ */
+function dataTableStub(cells: string[], cellRows: 'first' | 'all') {
+  const cellMarkup = (row: string) => cells.map(name => `<slot name="cell-${name}" :row="${row}" />`).join('')
+  const selectMarkup = (row: string) => [
+    '<input',
+    ' v-if="selectable"',
+    ' type="checkbox"',
+    ' class="row-select"',
+    ` :checked="(selectedKeys || []).map(String).includes(String(${row}.id))"`,
+    ` @change="$emit('update:selectedKeys', $event.target.checked ? [...(selectedKeys || []), ${row}.id] : (selectedKeys || []).filter(key => String(key) !== String(${row}.id)))"`,
+    ' />',
+  ].join('')
+  const rows = cellRows === 'all'
+    ? `<template v-for="row in data" :key="row.id">${selectMarkup('row')}${cellMarkup('row')}</template>`
+    : `<template v-if="data[0]">${selectMarkup('data[0]')}${cellMarkup('data[0]')}</template>`
+
+  return {
+    /*
+      `selectable` 必须声明成 Boolean：真实组件用的是 `selectable?: boolean`（编译后 type=Boolean），
+      页面写的是裸属性 `selectable`。替身若用数组语法声明（type 推断为 null），
+      裸属性会原样传成空字符串 —— `v-if="selectable"` 判假，勾选框一个都不渲染，
+      批量相关的用例全都会在「找不到勾选框」上失败。
+    */
+    props: {
+      data: { type: Array, default: () => [] },
+      selectable: { type: Boolean, default: false },
+      selectedKeys: { type: Array, default: () => [] },
+    },
+    emits: ['update:selectedKeys'],
+    template: `<div>${rows}</div>`,
   }
 }
 
@@ -179,11 +218,16 @@ function mountModelDialogView() {
   })
 }
 
-/** 渲染分组覆盖列：只摊开 DataTable 的 cell-group_coverage 插槽。 */
-function mountGroupCoverageView() {
+/**
+ * 渲染分组绑定列：只摊开 DataTable 的 cell-group_binding 插槽。
+ *
+ * 刻意不 stub ModelGroupBindPicker —— 这个 spec 里它没有外部依赖（不用 i18n、不用 store），
+ * 真实渲染才能测到「勾选之后确实写回配置」；替身会让交互测试在什么都没做的情况下通过。
+ */
+function mountGroupBindingView() {
   return mount(ModelSquareConfigView, {
     global: {
-      stubs: makeStubs({ cells: ['group_coverage'], cellRows: 'all', dialog: 'none', confirm: 'none', input: 'plain' }),
+      stubs: makeStubs({ cells: ['group_binding'], cellRows: 'all', dialog: 'none', confirm: 'none', input: 'plain' }),
     },
   })
 }
@@ -273,7 +317,6 @@ describe('model square config wiring', () => {
     adminApiMock.modelSquareConfig.getModelPricing.mockResolvedValue({ found: false })
     adminApiMock.modelSquareConfig.listSyncAccounts.mockResolvedValue([])
     adminApiMock.modelSquare.loadGroupContext.mockResolvedValue({
-      channels: [],
       groups: [],
       platformOverrides: new Map(),
     })
@@ -342,8 +385,11 @@ describe('model square config wiring', () => {
     expect(viewSource).toContain('官方参考价格来自项目动态价格目录')
     expect(viewSource).toContain('PRICE_PER_MILLION_TOKENS')
     expect(viewSource).toContain('displayPriceToStoredPrice')
-    expect(viewSource).toContain('modelPriceGroups(row)')
-    expect(viewSource).toContain('price-pill')
+    expect(viewSource).toContain('modelPriceSlots(row)')
+    // 价格列的唯一取数口径：四个价格位的键、标签、色调都从这张描述表出
+    expect(viewSource).toContain('PRICE_SLOT_DESCRIPTORS')
+    expect(viewSource).toContain("label: '缓存写入'")
+    expect(viewSource).toContain('price-card')
     expect(viewSource).toContain('adminAPI.modelSquareConfig.getModelPricing')
     expect(viewSource).not.toContain('adminAPI.channels.getModelDefaultPricing')
     expect(viewSource).toContain('isOfficialReferencePriceValue')
@@ -472,14 +518,19 @@ describe('model square config wiring', () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).toContain('基础')
-    expect(wrapper.text()).toContain('输入')
-    expect(wrapper.text()).toContain('$5')
-    expect(wrapper.text()).toContain('缓存')
-    expect(wrapper.text()).toContain('写入')
-    expect(wrapper.text()).toContain('$7.50')
-    expect(wrapper.text()).toContain('读取')
-    expect(wrapper.text()).toContain('$0.50')
+    // 四个价格位各一张卡片，标签随卡片走 —— 不再有「基础 / 缓存」分组框：
+    // 分组标题不携带信息（输入输出的关系读标签就懂），只是多一层视觉噪音。
+    // 顺序与展示页列表视图一致：输入 → 输出 → 缓存读取 → 缓存写入。
+    const cards = wrapper.findAll('.price-card')
+    expect(cards.map(card => card.find('.price-card-label').text()))
+      .toEqual(['输入', '输出', '缓存读取', '缓存写入'])
+    expect(cards.map(card => card.find('.price-card-value').text()))
+      .toEqual(['$5', '$30', '$0.50', '$7.50'])
+    // 单位同样照展示页：只给输入/输出，缓存两项不写。
+    expect(wrapper.findAll('.price-card-meta small').map(node => node.text()))
+      .toEqual(['$/百万 tokens', '$/百万 tokens'])
+    // 四个价格都自己配了，一张参考价标签都不该出现
+    expect(wrapper.findAll('.price-card-tag').length).toBe(0)
     expect(wrapper.text()).not.toContain('优先级')
     expect(wrapper.text()).not.toContain('图像')
   })
@@ -608,12 +659,17 @@ describe('model square config wiring', () => {
     await flushPromises()
 
     expect(adminApiMock.modelSquareConfig.getModelPricing).toHaveBeenCalledWith('gpt-5.5')
-    expect(wrapper.text()).toContain('基础')
-    expect(wrapper.text()).toContain('$5')
-    expect(wrapper.text()).toContain('$30')
-    expect(wrapper.text()).toContain('缓存')
-    expect(wrapper.text()).toContain('$0.50')
-    expect(wrapper.find('.price-reference-badge').text()).toBe('官方参考')
+    const cards = wrapper.findAll('.price-card')
+    expect(cards.map(card => card.find('.price-card-value').text()))
+      .toEqual(['$5', '$30', '$0.50', '—'])
+    // 官方参考价必须逐张卡片可辨：原先徽标挂在组尾，组里两个价格有一个是参考价时读不出是哪个
+    expect(cards.map(card => card.find('.price-card-tag').exists()))
+      .toEqual([true, true, true, false])
+    expect(wrapper.findAll('.price-card-tag').map(tag => tag.text()))
+      .toEqual(['官方参考', '官方参考', '官方参考'])
+    expect(wrapper.findAll('.price-card-unset').length).toBe(1)
+    // 缺价显示破折号而不是 $0：配置页里 $0 会被读成「这一项免费」
+    expect(cards[3].find('.price-card-value').text()).toBe('—')
 
     const saveButton = wrapper.findAll('button').find(button => button.text().includes('保存配置'))
     expect(saveButton).toBeTruthy()
@@ -735,9 +791,10 @@ describe('model square config wiring', () => {
 
     expect(adminApiMock.modelSquareConfig.getModelPricing).toHaveBeenCalledWith('openai/gpt-5.5')
     expect(adminApiMock.modelSquareConfig.getModelPricing).toHaveBeenCalledWith('gpt-5.5')
-    expect(wrapper.text()).toContain('$5')
-    expect(wrapper.text()).toContain('$30')
-    expect(wrapper.find('.price-reference-badge').text()).toBe('官方参考')
+    expect(wrapper.findAll('.price-card-value').map(card => card.text()))
+      .toEqual(['$5', '$30', '—', '—'])
+    expect(wrapper.findAll('.price-card-tag').map(tag => tag.text()))
+      .toEqual(['官方参考', '官方参考'])
   })
 
   it('shows lookup status in the price column while official reference prices are loading', async () => {
@@ -917,92 +974,447 @@ describe('model square config wiring', () => {
     expect(wrapper.find('.model-baseline-summary-value').text()).toBe('1 / 4')
   })
 
-  it('shows which groups each configured model actually reaches', async () => {
+  it('shows the groups each configured model is manually bound to', async () => {
     adminApiMock.modelSquareConfig.get.mockResolvedValue({
       updated_at: null,
       platforms: [{
         platform: 'openai',
         name: 'OpenAI',
         models: [
-          { id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual' },
+          { id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual', group_ids: [7] },
           { id: 'orphan-model', display_name: '孤儿模型', source: 'manual' },
         ],
       }],
     })
     adminApiMock.modelSquare.loadGroupContext.mockResolvedValue({
-      channels: [{
-        id: 1,
-        status: 'active',
-        group_ids: [7],
-        model_pricing: [{ platform: 'openai', models: ['gpt-5.5'] }],
-      }],
       groups: [{ id: 7, name: '默认分组', platform: 'openai', rate_multiplier: 1 }],
       platformOverrides: new Map(),
     })
 
-    const wrapper = mountGroupCoverageView()
+    const wrapper = mountGroupBindingView()
     await flushPromises()
     await flushPromises()
     await flushPromises()
 
-    // 分组归属不是配置里存的字段：它来自「支持该模型的渠道绑了哪些同平台分组」。
+    // 分组归属来自配置里存的 group_ids，不再由渠道反推。
     expect(wrapper.text()).toContain('默认分组')
-    // 没有渠道支持这个模型时，展示页按任何分组都筛不到它 —— 必须明确说出来。
-    expect(wrapper.find('.group-coverage-empty').text()).toBe('无渠道支撑')
+    // 没绑定的模型必须显式说出来 —— 它在展示页按任何分组都筛不到。
+    expect(wrapper.findAll('.group-binding-empty')).toHaveLength(1)
+    expect(wrapper.find('.group-binding-empty').text()).toBe('未绑定分组')
   })
 
-  it('reports unknown instead of uncovered when the group context fails to load', async () => {
+  it('colors bound group chips by the platform each group actually belongs to', async () => {
+    /*
+      chip 的平台色是区分「本平台分组」与 composite 分组的唯一线索 —— 两者光看名字看不出来，
+      而绑错了会让模型在展示页整组消失。
+      断言比的是 platformColors 的返回值而不是几个 Tailwind 字面量：要锁的是
+      「取色来自全站色板、且不同平台确实不同色」，写死类名只会在换色板时变成噪音。
+    */
     adminApiMock.modelSquareConfig.get.mockResolvedValue({
       updated_at: null,
       platforms: [{
         platform: 'openai',
         name: 'OpenAI',
-        models: [{ id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual' }],
+        models: [{ id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual', group_ids: [7, 8] }],
+      }],
+    })
+    adminApiMock.modelSquare.loadGroupContext.mockResolvedValue({
+      groups: [
+        { id: 7, name: '默认分组', platform: 'openai', rate_multiplier: 1 },
+        { id: 8, name: '通用分组', platform: 'composite', rate_multiplier: 1 },
+      ],
+      platformOverrides: new Map(),
+    })
+
+    const wrapper = mountGroupBindingView()
+    await flushPromises()
+    await flushPromises()
+    await flushPromises()
+
+    const chips = wrapper.findAll('.group-chip')
+    expect(chips.map(chip => chip.text())).toEqual(['默认分组', '通用分组'])
+
+    expect(chips[0].classes()).toEqual(expect.arrayContaining(platformBadgeClass('openai').split(' ')))
+    expect(chips[1].classes()).toEqual(expect.arrayContaining(platformBadgeClass('composite').split(' ')))
+    // 两个平台色必须真的不同，否则「按平台着色」等于没做。
+    expect(platformBadgeClass('openai')).not.toBe(platformBadgeClass('composite'))
+  })
+
+  it('colors a group chip by its overridden platform rather than its raw platform', async () => {
+    /*
+      平台覆盖会把分组挂到另一个平台下。着色若取 group.platform，就会出现
+      「分组能被 listBindableGroups 选进来（它走的是有效平台）却标着另一个平台的颜色」这种自相矛盾。
+      这里让原始平台与有效平台刻意不同：原始 anthropic，覆盖成 openai。
+    */
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: null,
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [{ id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual', group_ids: [7] }],
+      }],
+    })
+    adminApiMock.modelSquare.loadGroupContext.mockResolvedValue({
+      groups: [{ id: 7, name: '默认分组', platform: 'anthropic', rate_multiplier: 1 }],
+      platformOverrides: new Map([['7', 'openai']]),
+    })
+
+    const wrapper = mountGroupBindingView()
+    await flushPromises()
+    await flushPromises()
+    await flushPromises()
+
+    const chip = wrapper.find('.group-chip')
+    expect(chip.classes()).toEqual(expect.arrayContaining(platformBadgeClass('openai').split(' ')))
+    expect(chip.classes()).not.toEqual(expect.arrayContaining(platformBadgeClass('anthropic').split(' ')))
+    // 颜色不是唯一载体：悬浮说明里必须写全平台名，色觉障碍下也能读出来。
+    expect(chip.attributes('title')).toBe('默认分组 · OpenAI')
+  })
+
+  it('labels every group option in the bind dialog with its platform', async () => {
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: null,
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [{ id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual', group_ids: [7] }],
+      }],
+    })
+    adminApiMock.modelSquare.loadGroupContext.mockResolvedValue({
+      groups: [
+        { id: 7, name: '默认分组', platform: 'openai', rate_multiplier: 1 },
+        { id: 8, name: '通用分组', platform: 'composite', rate_multiplier: 1 },
+      ],
+      platformOverrides: new Map(),
+    })
+
+    const wrapper = mount(ModelSquareConfigView, {
+      global: {
+        // 这里要真的把弹窗内容渲染出来（mountGroupBindingView 把 BaseDialog 换成了空 div）。
+        stubs: makeStubs({ cells: ['group_binding'], cellRows: 'all', confirm: 'none', input: 'plain', select: 'empty' }),
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+    await flushPromises()
+
+    await wrapper.find('.group-binding').trigger('click')
+    await flushPromises()
+
+    /*
+      第一个徽标是「当前平台」图例，之后才是各分组的平台。
+      图例不能省：没有它，管理员只能看到一堆颜色，不知道哪个颜色对应本平台。
+    */
+    expect(wrapper.findAll('.model-group-bind-platform').map(node => node.text()))
+      .toEqual(['OpenAI', 'OpenAI', 'Composite'])
+
+    /*
+      分组名也要着色，不只是徽标：徽标只占一小块，视线扫一列名字时颜色比文字标签更快。
+      同样比 platformTextClass 的返回值而不是字面量。
+    */
+    const names = wrapper.findAll('.model-group-bind-name')
+    expect(names[0].classes()).toEqual(expect.arrayContaining(platformTextClass('openai').split(' ')))
+    expect(names[1].classes()).toEqual(expect.arrayContaining(platformTextClass('composite').split(' ')))
+    expect(platformTextClass('openai')).not.toBe(platformTextClass('composite'))
+  })
+
+  it('lists bound groups the current platform can no longer bind, and lets them be unbound', async () => {
+    /*
+      换过平台、或分组被平台覆盖改到别处之后，绑定不会自动清理，配置里就留着一条当前平台
+      选不到的 group_id。它会计入「已选 N」，但不在候选列表里就既看不见也取消不掉 ——
+      管理员看到「已选 2、只勾了 1 个」，却没有任何入口把多出来的那个去掉。
+    */
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: null,
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [{ id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual', group_ids: [7, 8] }],
+      }],
+    })
+    adminApiMock.modelSquare.loadGroupContext.mockResolvedValue({
+      groups: [
+        { id: 7, name: '默认分组', platform: 'openai', rate_multiplier: 1 },
+        // 平台对不上：openai 的模型绑不了 anthropic 的分组
+        { id: 8, name: '异构分组', platform: 'anthropic', rate_multiplier: 1 },
+      ],
+      platformOverrides: new Map(),
+    })
+    adminApiMock.modelSquareConfig.update.mockImplementation(async (payload: unknown) => payload as never)
+
+    const wrapper = mount(ModelSquareConfigView, {
+      global: {
+        stubs: makeStubs({ cells: ['group_binding'], cellRows: 'all', confirm: 'none', input: 'plain', select: 'empty' }),
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+    await flushPromises()
+
+    await wrapper.find('.group-binding').trigger('click')
+    await flushPromises()
+
+    // 候选里只有同平台的分组
+    const options = wrapper.findAll('.model-group-bind-option')
+    expect(options).toHaveLength(1)
+    expect(options[0].text()).toContain('默认分组')
+
+    // 不兼容的那条单独列出来，并给出唯一的取消入口
+    const orphans = wrapper.findAll('.model-group-bind-orphan')
+    expect(orphans).toHaveLength(1)
+    expect(orphans[0].text()).toContain('异构分组')
+    expect(orphans[0].text()).toContain('取消绑定')
+
+    await orphans[0].find('button').trigger('click')
+    await flushPromises()
+
+    // 取消后计数必须跟着降下来，否则「已选 N」还是对不上可见的勾选框
+    expect(wrapper.find('.model-group-bind-count').text()).toBe('已选 1')
+
+    await wrapper.findAll('button').find(button => button.text() === '保存')!.trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text().includes('保存配置'))!.trigger('click')
+    await flushPromises()
+
+    const payload = adminApiMock.modelSquareConfig.update.mock.calls[0][0] as {
+      platforms: Array<{ models: Array<{ group_ids?: number[] }> }>
+    }
+    expect(payload.platforms[0].models[0].group_ids).toEqual([7])
+  })
+
+  it('batch-binds groups to every selected model and appends to existing bindings', async () => {
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: null,
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [
+          { id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual', group_ids: [7] },
+          { id: 'gpt-5.4', display_name: 'GPT-5.4', source: 'manual' },
+          { id: 'gpt-5.3', display_name: 'GPT-5.3', source: 'manual' },
+        ],
+      }],
+    })
+    adminApiMock.modelSquare.loadGroupContext.mockResolvedValue({
+      groups: [
+        { id: 7, name: '默认分组', platform: 'openai', rate_multiplier: 1 },
+        { id: 8, name: '备用分组', platform: 'openai', rate_multiplier: 2 },
+      ],
+      platformOverrides: new Map(),
+    })
+    adminApiMock.modelSquareConfig.update.mockImplementation(async (payload: unknown) => payload as never)
+
+    const wrapper = mount(ModelSquareConfigView, {
+      global: {
+        stubs: makeStubs({ cells: ['group_binding'], cellRows: 'all', confirm: 'none', input: 'plain', select: 'empty' }),
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+    await flushPromises()
+
+    // 没有勾选时不出现批量操作条
+    expect(wrapper.find('.batch-bar').exists()).toBe(false)
+
+    const checkboxes = wrapper.findAll('.row-select')
+    expect(checkboxes).toHaveLength(3)
+    await checkboxes[0].setValue(true)
+    await checkboxes[1].setValue(true)
+    await flushPromises()
+
+    expect(wrapper.find('.batch-bar-count').text()).toBe('已选 2 个模型')
+
+    await wrapper.findAll('button').find(button => button.text().includes('绑定分组'))!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('h2').text()).toBe('批量绑定分组')
+    // 批量模式不能沿用「留空则不出现在任何分组下」——这里留空只是「本次不追加」。
+    expect(wrapper.find('.model-group-bind-note').text()).toContain('追加')
+    expect(wrapper.find('.model-group-bind-note').text()).not.toContain('不出现在任何分组下')
+
+    const target = wrapper.findAll('.model-group-bind-option').find(node => node.text().includes('备用分组'))!
+    await target.find('input').setValue(true)
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text() === '绑定')!.trigger('click')
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text().includes('保存配置'))!.trigger('click')
+    await flushPromises()
+
+    const payload = adminApiMock.modelSquareConfig.update.mock.calls[0][0] as {
+      platforms: Array<{ models: Array<{ id: string; group_ids?: number[] }> }>
+    }
+    const byId = new Map(payload.platforms[0].models.map(model => [model.id, model.group_ids]))
+    // 追加而不是覆盖：原有的 [7] 必须留着
+    expect(byId.get('gpt-5.5')).toEqual([7, 8])
+    expect(byId.get('gpt-5.4')).toEqual([8])
+    // 没勾选的模型一个字段都不该被碰到
+    expect(byId.get('gpt-5.3')).toBeUndefined()
+  })
+
+  it('clears group bindings for the selected models only, after a confirmation', async () => {
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: null,
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [
+          { id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual', group_ids: [7, 8] },
+          { id: 'gpt-5.4', display_name: 'GPT-5.4', source: 'manual', group_ids: [7] },
+          { id: 'gpt-5.3', display_name: 'GPT-5.3', source: 'manual', group_ids: [7] },
+        ],
+      }],
+    })
+    adminApiMock.modelSquare.loadGroupContext.mockResolvedValue({
+      groups: [{ id: 7, name: '默认分组', platform: 'openai', rate_multiplier: 1 }],
+      platformOverrides: new Map(),
+    })
+    adminApiMock.modelSquareConfig.update.mockImplementation(async (payload: unknown) => payload as never)
+
+    const wrapper = mount(ModelSquareConfigView, {
+      global: {
+        stubs: makeStubs({ cells: ['group_binding'], cellRows: 'all', input: 'plain', select: 'empty' }),
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+    await flushPromises()
+
+    const checkboxes = wrapper.findAll('.row-select')
+    await checkboxes[0].setValue(true)
+    await checkboxes[1].setValue(true)
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text() === '清空分组')!.trigger('click')
+    await flushPromises()
+
+    // 一次抹掉多个模型的全部分组，必须先问一句，且说明会波及几个模型
+    expect(wrapper.find('.confirm-stub-title').text()).toBe('清空分组绑定')
+    expect(wrapper.find('.confirm-stub-message').text()).toContain('2 个模型')
+
+    await wrapper.find('.confirm-stub-confirm').trigger('click')
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text().includes('保存配置'))!.trigger('click')
+    await flushPromises()
+
+    const payload = adminApiMock.modelSquareConfig.update.mock.calls[0][0] as {
+      platforms: Array<{ models: Array<{ id: string; group_ids?: number[] }> }>
+    }
+    const byId = new Map(payload.platforms[0].models.map(model => [model.id, model.group_ids]))
+    expect(byId.get('gpt-5.5')).toBeUndefined()
+    expect(byId.get('gpt-5.4')).toBeUndefined()
+    // 没勾选的模型必须原样保留
+    expect(byId.get('gpt-5.3')).toEqual([7])
+  })
+
+  it('drops the row selection when the platform changes', async () => {
+    /*
+      勾选键是模型 ID，而模型 ID 只在平台内唯一 —— 两个平台都可能有 gpt-5.5。
+      不清空的话，切平台后那批勾选会落到另一个平台里的同名模型上，
+      管理员点「批量绑定」时改的是他根本没看过的模型。
+    */
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: null,
+      platforms: [
+        { platform: 'openai', name: 'OpenAI', models: [{ id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual' }] },
+        { platform: 'gemini', name: 'Gemini', models: [{ id: 'gpt-5.5', display_name: '同名模型', source: 'manual' }] },
+      ],
+    })
+    adminApiMock.modelSquare.loadGroupContext.mockResolvedValue({
+      groups: [],
+      platformOverrides: new Map(),
+    })
+
+    const wrapper = mount(ModelSquareConfigView, {
+      global: {
+        stubs: makeStubs({ cells: ['group_binding'], cellRows: 'all', confirm: 'none', input: 'plain' }),
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+    await flushPromises()
+
+    await wrapper.find('.row-select').setValue(true)
+    await flushPromises()
+    expect(wrapper.find('.batch-bar-count').text()).toBe('已选 1 个模型')
+
+    await wrapper.findAll('.select-option-stub').find(node => node.text().includes('Gemini'))!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.batch-bar').exists()).toBe(false)
+  })
+
+  it('keeps showing the bound group regardless of channel state', async () => {
+    /*
+      分组归属是配置里手动绑定的，与渠道无关：渠道一个都没有，这一列照样把分组名显示出来，
+      管理员才看得出模型本该出现在哪些分组里。
+
+      渠道也不再产生任何告警 —— 可用性已改为只看分组绑定（见 api/admin/modelSquare.ts）。
+    */
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: null,
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [{ id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual', group_ids: [7] }],
+      }],
+    })
+    adminApiMock.modelSquare.loadGroupContext.mockResolvedValue({
+      groups: [{ id: 7, name: '默认分组', platform: 'openai', rate_multiplier: 1 }],
+      platformOverrides: new Map(),
+    })
+
+    const wrapper = mountGroupBindingView()
+    await flushPromises()
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('默认分组')
+    expect(wrapper.find('.group-binding-warn').exists()).toBe(false)
+  })
+
+  it('reports unknown instead of unbound when the group context fails to load', async () => {
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: null,
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [{ id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual', group_ids: [7] }],
       }],
     })
     adminApiMock.modelSquare.loadGroupContext.mockRejectedValue(new Error('boom'))
 
-    const wrapper = mountGroupCoverageView()
+    const wrapper = mountGroupBindingView()
     await flushPromises()
     await flushPromises()
     await flushPromises()
 
-    // 拉不到渠道/分组数据时必须退化成「—」，不能显示成「无渠道支撑」——
-    // 否则一次接口抖动会被读成「配置坏了」，管理员会去做无谓的返工。
-    expect(wrapper.find('.group-coverage-empty').exists()).toBe(false)
-    expect(wrapper.find('.group-coverage-pending').text()).toBe('—')
     /*
-      未覆盖数同理：未知不能被算成未覆盖，否则会报出一个假的告警。
-      hero 指标卡删除后，这个数字唯一露出的地方就是平台 Select 上的「未覆盖 N」徽标，
-      所以断言改成「徽标不出现」—— 比原来断言某张卡片里是 0 更贴近管理员实际看到的东西。
+      绑定了分组、但分组列表没拉到时必须退化成「—」，不能显示成「未绑定分组」——
+      后者会让管理员去重复绑定一个本来就绑好的模型。
     */
-    expect(wrapper.find('.platform-option-warn').exists()).toBe(false)
+    expect(wrapper.find('.group-binding-empty').exists()).toBe(false)
+    expect(wrapper.find('.group-binding-pending').text()).toBe('—')
   })
 
-  it('counts models without channel support on the platform selector', async () => {
+  it('counts models without any group binding on the platform selector', async () => {
     adminApiMock.modelSquareConfig.get.mockResolvedValue({
       updated_at: null,
       platforms: [{
         platform: 'openai',
         name: 'OpenAI',
         models: [
-          { id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual' },
+          { id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual', group_ids: [7] },
           { id: 'orphan-model', display_name: '孤儿模型', source: 'manual' },
         ],
       }],
     })
-    adminApiMock.modelSquare.loadGroupContext.mockResolvedValue({
-      channels: [{
-        id: 1,
-        status: 'active',
-        group_ids: [7],
-        model_pricing: [{ platform: 'openai', models: ['gpt-5.5'] }],
-      }],
-      groups: [{ id: 7, name: '默认分组', platform: 'openai', rate_multiplier: 1 }],
-      platformOverrides: new Map(),
-    })
+    // 分组上下文拉失败也不影响这个计数：group_ids 存在配置里，不依赖这个接口。
+    adminApiMock.modelSquare.loadGroupContext.mockRejectedValue(new Error('boom'))
 
-    const wrapper = mountGroupCoverageView()
+    const wrapper = mountGroupBindingView()
     await flushPromises()
     await flushPromises()
     await flushPromises()
@@ -1011,11 +1423,43 @@ describe('model square config wiring', () => {
       告警要挂在两处：当前平台（一直可见）与下拉选项（展开时看全部平台）。
       只测其中一个，另一个位置漏渲染也发现不了。
     */
-    expect(wrapper.find('.select-trigger-stub .platform-option-warn').text()).toBe('未覆盖 1')
-    expect(wrapper.find('.select-option-stub .platform-option-warn').text()).toBe('未覆盖 1')
+    expect(wrapper.find('.select-trigger-stub .platform-option-warn').text()).toBe('未绑定 1')
+    expect(wrapper.find('.select-option-stub .platform-option-warn').text()).toBe('未绑定 1')
   })
 
-  it('flags models whose supporting channels are all disabled', async () => {
+  it('no longer flags a model because its channels are disabled', async () => {
+    /*
+      这里曾经断言「渠道全部停用 → 标记渠道未启用」。该判据已按产品决策移除：
+      请求路由走分组→账号（account_groups），渠道只负责定价、模型映射与模型限制，
+      渠道停用不等于模型跑不通 —— 拿它当可用性条件会把有账号支撑的模型误标成不可用。
+
+      渠道上下文已不再进入页面，所以这里也不再提供 channels 数据。
+    */
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: null,
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [{ id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual', group_ids: [7] }],
+      }],
+    })
+    adminApiMock.modelSquare.loadGroupContext.mockResolvedValue({
+      groups: [{ id: 7, name: '默认分组', platform: 'openai', rate_multiplier: 1 }],
+      platformOverrides: new Map(),
+    })
+
+    const wrapper = mountGroupBindingView()
+    await flushPromises()
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('默认分组')
+    expect(wrapper.find('.group-binding-warn').exists()).toBe(false)
+    // 有分组归属就不算未绑定，平台 Select 上不该报数
+    expect(wrapper.find('.platform-option-warn').exists()).toBe(false)
+  })
+
+  it('binds groups inside the edit dialog and persists them', async () => {
     adminApiMock.modelSquareConfig.get.mockResolvedValue({
       updated_at: null,
       platforms: [{
@@ -1024,27 +1468,83 @@ describe('model square config wiring', () => {
         models: [{ id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual' }],
       }],
     })
-    // 渠道停用了，但分组绑定还在：展示页会出现分组标签，同时把模型标成不可用。
     adminApiMock.modelSquare.loadGroupContext.mockResolvedValue({
-      channels: [{
-        id: 1,
-        status: 'disabled',
-        group_ids: [7],
-        model_pricing: [{ platform: 'openai', models: ['gpt-5.5'] }],
-      }],
-      groups: [{ id: 7, name: '默认分组', platform: 'openai', rate_multiplier: 1 }],
+      groups: [
+        { id: 7, name: '默认分组', platform: 'openai', rate_multiplier: 1 },
+        { id: 9, name: '跨平台分组', platform: 'anthropic', rate_multiplier: 1 },
+      ],
       platformOverrides: new Map(),
     })
+    adminApiMock.modelSquareConfig.update.mockImplementation(async (payload: unknown) => payload as never)
 
-    const wrapper = mountGroupCoverageView()
+    const wrapper = mountModelDialogView()
+    await flushPromises()
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text() === '编辑')!.trigger('click')
+
+    // 只列同平台分组：anthropic 的分组不该出现在 openai 模型的绑定项里。
+    expect(wrapper.findAll('.model-group-bind-name').map(node => node.text())).toEqual(['默认分组'])
+
+    await wrapper.find('.model-group-bind-checkbox').setValue(true)
+    await wrapper.findAll('button').find(button => button.text() === '保存')!.trigger('click')
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text().includes('保存配置'))!.trigger('click')
+    await flushPromises()
+
+    const payload = adminApiMock.modelSquareConfig.update.mock.calls[0][0] as {
+      platforms: Array<{ models: Array<{ group_ids?: number[] }> }>
+    }
+    expect(payload.platforms[0].models[0].group_ids).toEqual([7])
+  })
+
+  it('binds groups from the table cell shortcut without touching prices', async () => {
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: null,
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [{ id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual', group_ids: [7] }],
+      }],
+    })
+    adminApiMock.modelSquare.loadGroupContext.mockResolvedValue({
+      groups: [
+        { id: 7, name: '默认分组', platform: 'openai', rate_multiplier: 1 },
+        { id: 8, name: '备用分组', platform: 'openai', rate_multiplier: 2 },
+      ],
+      platformOverrides: new Map(),
+    })
+    adminApiMock.modelSquareConfig.update.mockImplementation(async (payload: unknown) => payload as never)
+
+    const wrapper = mount(ModelSquareConfigView, {
+      global: {
+        stubs: makeStubs({ cells: ['group_binding'], cellRows: 'all', confirm: 'none', input: 'plain', select: 'empty' }),
+      },
+    })
     await flushPromises()
     await flushPromises()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('默认分组')
-    expect(wrapper.find('.group-coverage-warn').text()).toBe('渠道未启用')
-    // 有分组归属就不算未覆盖，平台 Select 上不该报数
-    expect(wrapper.find('.platform-option-warn').exists()).toBe(false)
+    // 整格是快捷入口：点开即可改绑定，不必进「编辑模型」弹窗（那里同时挂着全部价格字段）。
+    await wrapper.find('.group-binding').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('h2').text()).toBe('绑定分组 · gpt-5.5')
+
+    const target = wrapper.findAll('.model-group-bind-option').find(node => node.text().includes('备用分组'))!
+    await target.find('input').setValue(true)
+    await wrapper.findAll('button').find(button => button.text() === '保存')!.trigger('click')
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text().includes('保存配置'))!.trigger('click')
+    await flushPromises()
+
+    const payload = adminApiMock.modelSquareConfig.update.mock.calls[0][0] as {
+      platforms: Array<{ models: Array<{ group_ids?: number[] }> }>
+    }
+    // 原有绑定必须保留，新增的是追加而不是替换。
+    expect(payload.platforms[0].models[0].group_ids).toEqual([7, 8])
   })
 
   it('flags unsaved edits and clears the flag once saved', async () => {

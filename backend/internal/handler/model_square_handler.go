@@ -42,15 +42,20 @@ type modelSquareBillingService interface {
 
 // ModelSquareHandler 处理模型广场用户只读聚合接口。
 //
-// 聚合配置、渠道、分组、平台覆盖与参考价数据，输出结构与前端
+// 聚合配置、分组、平台覆盖与参考价数据，输出结构与前端
 // buildConfiguredModelSquareResult 聚合函数期望的字段保持一致。
 // 仅暴露普通用户查看模型广场所需的白名单字段。
+//
+// 不再聚合渠道：模型可用性改由前端按模型绑定的分组判定，
+// 渠道数据（列表、分组关联、模型定价）在该接口上已无消费方。
 type ModelSquareHandler struct {
 	configService   modelSquareConfigService
-	channelService  modelSquareChannelService
 	groupService    modelSquareGroupService
 	overrideService modelSquareOverrideService
 	billingService  modelSquareBillingService
+	// channelService 仍由 wire 注入：wire_gen.go 的 NewModelSquareHandler 调用依赖这个形参，
+	// 删它必须重新运行 wire。本接口已不再读取它。
+	channelService modelSquareChannelService
 }
 
 // NewModelSquareHandler 创建模型广场用户只读 handler。
@@ -75,6 +80,7 @@ type modelSquareUserModelConfig struct {
 	ID                      string   `json:"id"`
 	DisplayName             string   `json:"display_name,omitempty"`
 	Source                  string   `json:"source,omitempty"`
+	GroupIDs                []int64  `json:"group_ids,omitempty"`
 	InputPrice              *float64 `json:"input_price,omitempty"`
 	OutputPrice             *float64 `json:"output_price,omitempty"`
 	CacheWritePrice         *float64 `json:"cache_write_price,omitempty"`
@@ -100,21 +106,6 @@ type modelSquareUserPlatformConfig struct {
 type modelSquareUserConfig struct {
 	Platforms []modelSquareUserPlatformConfig `json:"platforms"`
 	UpdatedAt *time.Time                      `json:"updated_at,omitempty"`
-}
-
-// modelSquareUserChannelModelPricing 定义渠道内模型定价条目（platform 与 models 白名单）。
-type modelSquareUserChannelModelPricing struct {
-	Platform string   `json:"platform"`
-	Models   []string `json:"models"`
-}
-
-// modelSquareUserChannel 定义用户可见渠道字段，不暴露管理端敏感信息。
-type modelSquareUserChannel struct {
-	ID           int64                                `json:"id"`
-	Status       string                               `json:"status"`
-	GroupIDs     []int64                              `json:"group_ids"`
-	ModelPricing []modelSquareUserChannelModelPricing `json:"model_pricing"`
-	ModelMapping map[string]map[string]string         `json:"model_mapping"`
 }
 
 // modelSquareUserGroup 定义用户可见分组。
@@ -150,7 +141,6 @@ type modelSquareUserReferencePrice struct {
 // modelSquareUserResponse 定义模型广场用户只读接口响应。
 type modelSquareUserResponse struct {
 	Config            modelSquareUserConfig                    `json:"config"`
-	Channels          []modelSquareUserChannel                 `json:"channels"`
 	Groups            []modelSquareUserGroup                   `json:"groups"`
 	PlatformOverrides []modelSquareUserPlatformOverride        `json:"platform_overrides"`
 	ReferencePrices   map[string]modelSquareUserReferencePrice `json:"reference_prices"`
@@ -162,12 +152,6 @@ func (h *ModelSquareHandler) Get(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	config, err := h.configService.GetModelSquareConfig(ctx)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-
-	channels, err := h.loadAllChannels(ctx)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -194,35 +178,10 @@ func (h *ModelSquareHandler) Get(c *gin.Context) {
 
 	response.Success(c, modelSquareUserResponse{
 		Config:            toModelSquareUserConfig(config),
-		Channels:          toModelSquareUserChannels(channels),
 		Groups:            toModelSquareUserGroups(groups),
 		PlatformOverrides: toModelSquareUserPlatformOverrides(overrides),
 		ReferencePrices:   h.loadReferencePrices(ctx, config),
 	})
-}
-
-// loadAllChannels 分页拉取全部渠道（每页 1000 条，直到取完为止）。
-func (h *ModelSquareHandler) loadAllChannels(ctx context.Context) ([]service.Channel, error) {
-	const pageSize = 1000
-	var all []service.Channel
-	for page := 1; ; page++ {
-		channels, result, err := h.channelService.List(ctx, pagination.PaginationParams{Page: page, PageSize: pageSize}, "", "")
-		if err != nil {
-			return nil, err
-		}
-		all = append(all, channels...)
-		if len(channels) == 0 {
-			break
-		}
-		total := int64(0)
-		if result != nil {
-			total = result.Total
-		}
-		if total <= 0 || int64(len(all)) >= total {
-			break
-		}
-	}
-	return all, nil
 }
 
 // loadReferencePrices 仅回查配置中缺失 token 价格的模型参考价。
@@ -261,6 +220,7 @@ func toModelSquareUserConfig(config service.ModelSquareConfig) modelSquareUserCo
 				ID:                      model.ID,
 				DisplayName:             model.DisplayName,
 				Source:                  model.Source,
+				GroupIDs:                model.GroupIDs,
 				InputPrice:              model.InputPrice,
 				OutputPrice:             model.OutputPrice,
 				CacheWritePrice:         model.CacheWritePrice,
@@ -279,28 +239,6 @@ func toModelSquareUserConfig(config service.ModelSquareConfig) modelSquareUserCo
 			Platform: platform.Platform,
 			Name:     platform.Name,
 			Models:   models,
-		})
-	}
-	return out
-}
-
-// toModelSquareUserChannels 将渠道转换为用户 DTO（白名单字段）。
-func toModelSquareUserChannels(channels []service.Channel) []modelSquareUserChannel {
-	out := make([]modelSquareUserChannel, 0, len(channels))
-	for _, ch := range channels {
-		pricing := make([]modelSquareUserChannelModelPricing, 0, len(ch.ModelPricing))
-		for _, p := range ch.ModelPricing {
-			pricing = append(pricing, modelSquareUserChannelModelPricing{
-				Platform: p.Platform,
-				Models:   p.Models,
-			})
-		}
-		out = append(out, modelSquareUserChannel{
-			ID:           ch.ID,
-			Status:       ch.Status,
-			GroupIDs:     ch.GroupIDs,
-			ModelPricing: pricing,
-			ModelMapping: ch.ModelMapping,
 		})
 	}
 	return out

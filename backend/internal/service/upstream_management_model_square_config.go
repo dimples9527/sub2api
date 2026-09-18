@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ type ModelSquarePlatformModelConfig struct {
 	ID                      string   `json:"id"`
 	DisplayName             string   `json:"display_name,omitempty"`
 	Source                  string   `json:"source,omitempty"`
+	GroupIDs                []int64  `json:"group_ids,omitempty"`
 	InputPrice              *float64 `json:"input_price,omitempty"`
 	OutputPrice             *float64 `json:"output_price,omitempty"`
 	CacheWritePrice         *float64 `json:"cache_write_price,omitempty"`
@@ -139,6 +141,7 @@ func normalizeModelSquareModelConfig(input ModelSquarePlatformModelConfig) Model
 		ID:                      strings.TrimSpace(input.ID),
 		DisplayName:             strings.TrimSpace(input.DisplayName),
 		Source:                  normalizeModelSquareModelSource(input.Source),
+		GroupIDs:                normalizeModelSquareGroupIDs(input.GroupIDs),
 		InputPrice:              input.InputPrice,
 		OutputPrice:             input.OutputPrice,
 		CacheWritePrice:         input.CacheWritePrice,
@@ -165,6 +168,38 @@ func normalizeModelSquareModelSource(source string) string {
 	default:
 		return "manual"
 	}
+}
+
+/*
+normalizeModelSquareGroupIDs 规范化模型手动绑定的分组 ID：丢弃非正数、去重、升序排列。
+
+排序不是装饰性的：配置页的「未保存改动」检测靠序列化结果比对，同一组 ID 换个顺序
+就会让管理员看到假的脏标记，进而以为改动没保存成功。
+
+返回 nil 而不是空切片，是为了让 json 的 omitempty 生效 —— 清空绑定与从未绑定
+必须序列化成同一个形态，否则「解绑全部」会与「新增模型」产生不同的存储内容。
+*/
+func normalizeModelSquareGroupIDs(input []int64) []int64 {
+	if len(input) == 0 {
+		return nil
+	}
+	seen := make(map[int64]struct{}, len(input))
+	ids := make([]int64, 0, len(input))
+	for _, id := range input {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids
 }
 
 func validateModelSquareConfig(input ModelSquareConfig) error {

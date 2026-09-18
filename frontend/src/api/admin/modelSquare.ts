@@ -1,5 +1,4 @@
 import { getAllIncludingInactive } from './groups'
-import { list, type Channel } from './channels'
 import { listLLMMonitorGroupPlatformOverrides } from './modelMonitor'
 import {
   get as getModelSquareConfig,
@@ -53,21 +52,6 @@ export interface ModelSquarePayload {
 }
 
 /**
- * 模型广场用户接口返回的最小渠道结构（只读聚合数据，不含管理端敏感字段）。
- * buildConfiguredModelSquareResult 只需这些字段即可完成可用性与分组归属计算。
- */
-export interface ModelSquareUserChannel {
-  id?: number | string
-  status?: string
-  group_ids?: Array<number | string>
-  model_pricing?: Array<{
-    platform?: string
-    models?: string[]
-  }>
-  model_mapping?: Record<string, Record<string, string>>
-}
-
-/**
  * 模型广场用户接口返回的最小分组结构。
  */
 export interface ModelSquareUserGroup {
@@ -104,22 +88,22 @@ type TokenPriceField = typeof TOKEN_PRICE_FIELDS[number]
 type RequestPriceField = typeof REQUEST_PRICE_FIELDS[number]
 type PriceField = TokenPriceField | RequestPriceField
 
-type ModelMatch = {
-  available: boolean
-  groupIDs: Array<number | string>
-}
-
 /**
- * 使用模型广场配置生成展示目录，并仅用渠道与分组补充可用状态和倍率信息。
+ * 使用模型广场配置生成展示目录。
+ *
+ * 分组归属直接取配置里为模型手动绑定的 group_ids —— 它是唯一来源，不再由渠道反推：
+ * 反推出来的归属既不能收窄也不能指定，管理员在配置页看不到、也改不动，
+ * 一旦渠道配置变化就会让展示页的分组筛选结果跟着漂移。
+ *
+ * 可用性同样只看这份绑定（详见下方 available 处的说明）。渠道数据不再参与这里，
+ * 因此本函数也不再需要 channels 入参。
  */
 export function buildConfiguredModelSquareResult(
   config: ModelSquareConfigPayload,
-  channels: ModelSquareUserChannel[],
   localGroups: ModelSquareUserGroup[],
   referencePrices = new Map<string, ModelSquareOfficialPricing>(),
   platformOverrides = new Map<string, string>()
 ): AdminModelSquareResult {
-  const groupById = new Map(localGroups.map(group => [String(group.id), group]))
   const configuredPlatforms = new Set(
     (config.platforms || [])
       .map(item => normalizePlatform(item.platform))
@@ -136,7 +120,7 @@ export function buildConfiguredModelSquareResult(
       const modelID = modelConfig.id?.trim()
       if (!modelID) continue
 
-      const match = findConfiguredModelMatch(platform, modelID, channels, groupById, platformOverrides)
+      const groupIDs = normalizeModelGroupIDs(modelConfig.group_ids)
       const minimumRateMultiplier = minimumGroupRateMultiplier(localGroups, platform, platformOverrides)
 
       models.push({
@@ -144,11 +128,22 @@ export function buildConfiguredModelSquareResult(
         display_name: modelConfig.display_name?.trim() || undefined,
         provider: providerName,
         platform,
-        available: match.available,
+        /*
+          可用性只由「有没有绑定分组」决定。
+          
+          这里曾经要求「存在 active 渠道、渠道包含该模型、且渠道自己绑了与平台兼容的分组」，
+          但那套判据与真实调度路径不符：请求路由走的是分组→账号（account_groups），
+          渠道只负责定价、模型映射与模型限制，分组没配渠道时请求照跑（用分组自身的定价）。
+          结果就是有账号支撑的分组被误判成不可用，管理员看到「渠道未启用」却找不到可修的地方。
+          
+          绑定分组是配置页里唯一需要管理员维护的动作，可用性就以它为准 ——
+          绑了即视为可用，也顺带保证展示页按分组筛选时不会筛出「标着不可用」的模型。
+        */
+        available: groupIDs.length > 0,
         mode: modelMode(modelID, modelConfig, referencePrices.get(referencePricingKey(modelID))),
         rate_multiplier: minimumRateMultiplier,
         ...configuredPrices(modelConfig, referencePrices.get(referencePricingKey(modelID)), minimumRateMultiplier),
-        group_ids: match.groupIDs,
+        group_ids: groupIDs,
       })
     }
   }
@@ -173,53 +168,32 @@ export function buildConfiguredModelSquareResult(
   }
 }
 
-function findConfiguredModelMatch(
-  platform: string,
-  modelID: string,
-  channels: ModelSquareUserChannel[],
-  groupById: Map<string, ModelSquareUserGroup>,
-  platformOverrides: Map<string, string>
-): ModelMatch {
-  const usedGroupIDs = new Set<number | string>()
-  let available = false
-
-  for (const channel of channels) {
-    if (!channelSupportsModel(channel, platform, modelID)) continue
-
-    const compatibleGroupIDs = (channel.group_ids || []).filter(groupID => isGroupCompatible(groupById.get(String(groupID)), platform, platformOverrides))
-    if (compatibleGroupIDs.length === 0) continue
-
-    for (const groupID of compatibleGroupIDs) usedGroupIDs.add(groupID)
-    if (channel.status === 'active') available = true
+/**
+ * 规范化手动绑定的分组 ID：丢弃非法值、去重、升序。
+ *
+ * 口径必须与后端 normalizeModelSquareGroupIDs 保持一致。三处（本函数、配置页保存载荷、
+ * 分组选择控件）必须共用它：任一处的形态不同，同一组 ID 就会序列化成不同字符串，
+ * 配置页的「未保存改动」比对随之误报 —— 管理员会看到明明没改却提示有改动。
+ */
+export function normalizeModelGroupIDs(input?: Array<number | string> | null): number[] {
+  if (!Array.isArray(input) || input.length === 0) return []
+  const ids = new Set<number>()
+  for (const raw of input) {
+    const id = typeof raw === 'number' ? raw : Number(String(raw ?? '').trim())
+    if (!Number.isInteger(id) || id <= 0) continue
+    ids.add(id)
   }
-
-  return { available, groupIDs: Array.from(usedGroupIDs) }
-}
-
-function channelSupportsModel(channel: ModelSquareUserChannel, platform: string, modelID: string) {
-  const key = modelKey(platform, modelID)
-
-  for (const pricing of channel.model_pricing || []) {
-    const pricingPlatform = normalizePlatform(pricing.platform || 'anthropic')
-    for (const modelName of pricing.models || []) {
-      if (modelKey(pricingPlatform, modelName) === key) return true
-    }
-  }
-
-  for (const [mappingPlatform, mapping] of Object.entries(channel.model_mapping || {})) {
-    if (normalizePlatform(mappingPlatform) !== platform) continue
-    for (const [sourceModel, targetModel] of Object.entries(mapping || {})) {
-      if (modelKey(platform, sourceModel) === key || modelKey(platform, targetModel) === key) return true
-    }
-  }
-
-  return false
+  return Array.from(ids).sort((left, right) => left - right)
 }
 
 /**
  * 计算分组的展示平台：优先使用“分组平台配置”中的实际平台覆盖，否则沿用分组原始平台。
+ *
+ * 导出给配置页做分组平台配色用。配色必须取「有效平台」而不是 `group.platform`：
+ * 平台覆盖会把分组挂到另一个平台下，按原始平台着色会与 listBindableGroups 的过滤
+ * 结果自相矛盾 —— 分组能出现在候选列表里，却标着另一个平台的颜色。
  */
-function effectiveGroupPlatform(group: ModelSquareUserGroup, platformOverrides: Map<string, string>) {
+export function effectiveGroupPlatform(group: ModelSquareUserGroup, platformOverrides: Map<string, string>) {
   const overridden = platformOverrides.get(String(group.id))
   return normalizePlatform(overridden || group.platform)
 }
@@ -228,6 +202,23 @@ function isGroupCompatible(group: ModelSquareUserGroup | undefined, platform: st
   if (!group) return false
   const groupPlatform = effectiveGroupPlatform(group, platformOverrides)
   return groupPlatform === platform || groupPlatform === 'composite'
+}
+
+/**
+ * 列出某个平台可以绑定的分组。
+ *
+ * 配置页的分组绑定控件用它，而不是在页面里另写一套平台判断：这里与展示页
+ * 复用同一个 isGroupCompatible，两边口径一旦分叉，就会出现「配置页能绑、
+ * 展示页却筛不到」这种只在保存后才暴露的错配。
+ */
+export function listBindableGroups(
+  groups: ModelSquareUserGroup[],
+  platform: string,
+  platformOverrides = new Map<string, string>()
+): ModelSquareUserGroup[] {
+  const normalized = normalizePlatform(platform)
+  if (!normalized) return []
+  return groups.filter(group => isGroupCompatible(group, normalized, platformOverrides))
 }
 
 function configuredPrices(
@@ -290,10 +281,6 @@ function normalizePlatform(value: string | undefined) {
   return (value || '').trim().toLowerCase()
 }
 
-function modelKey(platform: string, modelName: string): string {
-  return `${normalizePlatform(platform)}:${modelName.trim()}`.toLowerCase()
-}
-
 function modelMode(
   modelName: string,
   modelConfig?: ModelSquarePlatformModelConfig,
@@ -317,16 +304,15 @@ function hasReferenceImagePrice(referencePrice?: ModelSquareOfficialPricing) {
 export async function getModelSquare(): Promise<AdminModelSquareResult> {
   const config = await getModelSquareConfig()
   if (!hasConfiguredModels(config)) {
-    return buildConfiguredModelSquareResult(config, [], [])
+    return buildConfiguredModelSquareResult(config, [])
   }
 
-  const [channels, localGroups, referencePrices, platformOverrides] = await Promise.all([
-    listAllChannels(),
+  const [localGroups, referencePrices, platformOverrides] = await Promise.all([
     getAllIncludingInactive(),
     listReferencePrices(config),
     listGroupPlatformOverrides(),
   ])
-  return buildConfiguredModelSquareResult(config, channels, localGroups, referencePrices, platformOverrides)
+  return buildConfiguredModelSquareResult(config, localGroups, referencePrices, platformOverrides)
 }
 
 function hasConfiguredModels(config: ModelSquareConfigPayload) {
@@ -344,21 +330,6 @@ async function listGroupPlatformOverrides(): Promise<Map<string, string>> {
   } catch {
     return new Map()
   }
-}
-
-async function listAllChannels(): Promise<Channel[]> {
-  const pageSize = 1000
-  const firstPage = await list(1, pageSize)
-  const channels = [...firstPage.items]
-  const total = Number(firstPage.total)
-  const pageCount = Number.isFinite(total) && total > 0 ? Math.ceil(total / pageSize) : 1
-
-  for (let page = 2; page <= pageCount; page += 1) {
-    const nextPage = await list(page, pageSize)
-    channels.push(...nextPage.items)
-  }
-
-  return channels
 }
 
 async function listReferencePrices(config: ModelSquareConfigPayload): Promise<Map<string, ModelSquareOfficialPricing>> {
@@ -393,28 +364,25 @@ function referencePricingKey(modelID: string) {
 /**
  * 计算「模型属于哪些分组」所需的外部上下文。
  *
- * 分组归属不是配置里存的字段，而是读时推导出来的：渠道支持哪些模型 + 渠道绑了哪些分组
- * + 分组的有效平台。模型广场配置页要在保存前就告诉管理员每个模型会落到哪些分组，
- * 所以必须单独拿到这三份数据。
+ * 分组归属是配置里存的字段，但展示它需要分组名单（把 ID 解析成名字、平台与倍率），
+ * 所以配置页要单独拿到这份数据。这里刻意不复用 getModelSquare()：
+ * 它内部会重新 GET 一次已保存的配置，拿到的永远是上次保存的状态，
+ * 看不到正在编辑、尚未保存的模型。
  *
- * 这里刻意不复用 getModelSquare()：它内部会重新 GET 一次已保存的配置，
- * 拿到的永远是上次保存的状态，看不到正在编辑、尚未保存的模型。
- *
+ * 渠道数据不在这里 —— 可用性已改为只看分组绑定，不再需要渠道。
  * 参考价也不在这里拉：配置页自己按模型 ID 查询并缓存，避免每个模型多发一次请求。
  */
 export interface ModelSquareGroupContext {
-  channels: ModelSquareUserChannel[]
   groups: ModelSquareUserGroup[]
   platformOverrides: Map<string, string>
 }
 
 export async function loadModelSquareGroupContext(): Promise<ModelSquareGroupContext> {
-  const [channels, groups, platformOverrides] = await Promise.all([
-    listAllChannels(),
+  const [groups, platformOverrides] = await Promise.all([
     getAllIncludingInactive(),
     listGroupPlatformOverrides(),
   ])
-  return { channels, groups, platformOverrides }
+  return { groups, platformOverrides }
 }
 
 export const modelSquareAPI = {

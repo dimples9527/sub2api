@@ -9,7 +9,8 @@
             无障碍上等于没有；
           · 三个指标卡的 computed（configuredPlatformCount / totalModelCount / uncoveredModelCount）
             与 .metric-card / .hero-* 样式一并删除，避免留下无引用的死代码；
-          · 「无渠道支撑」不是整体丢失：每个模型在表格的「分组覆盖」列里本来就有独立标签。
+          · 指标卡承载的两类信息都还在：每个模型的渠道状态在表格的「分组绑定」列里作为独立标签，
+            未绑定的模型数挂在平台 Select 的「未绑定 N」徽标上。
         不要再把横栏加回来。
       -->
       <template #filters>
@@ -29,14 +30,14 @@
                     <PlatformIcon :platform="platformIconKey(String(option?.value || selectedPlatform))" size="md" />
                     <span class="truncate">{{ option?.label || currentPlatformLabel }}</span>
                     <!--
-                      「未覆盖」告警原本挂在平台 chip 横栏上，横栏删掉后挪到这里。
+                      「未绑定」告警原本挂在平台 chip 横栏上，横栏删掉后挪到这里。
                       当前平台的告警必须一直可见 —— 藏进下拉里等于没有。
                     -->
                     <span
                       v-if="platformUncoveredCount(String(option?.value || selectedPlatform))"
                       class="platform-option-warn"
                     >
-                      未覆盖 {{ platformUncoveredCount(String(option?.value || selectedPlatform)) }}
+                      未绑定 {{ platformUncoveredCount(String(option?.value || selectedPlatform)) }}
                     </span>
                   </span>
                 </template>
@@ -46,7 +47,7 @@
                     <span class="truncate">{{ option.label }}</span>
                     <!-- 展开下拉时要能一眼看出「问题在哪个平台」，否则只能逐个切过去试。 -->
                     <span v-if="platformUncoveredCount(String(option.value))" class="platform-option-warn">
-                      未覆盖 {{ platformUncoveredCount(String(option.value)) }}
+                      未绑定 {{ platformUncoveredCount(String(option.value)) }}
                     </span>
                   </span>
                 </template>
@@ -95,7 +96,7 @@
           <!--
             这里原本还有一条「平台 chip」横栏，和上方的平台 Select 功能完全重复
             （两者都只是把 selectedPlatform 改掉），已整条删除。
-            它唯一独有的「未覆盖 N」告警改挂在 Select 的选项与当前选中项上 ——
+            它唯一独有的「未绑定 N」告警改挂在 Select 的选项与当前选中项上 ——
             重复消失，信息不丢。不要再把横栏加回来。
           -->
           <div v-if="referencePricingLoading" class="reference-pricing-status">
@@ -106,6 +107,27 @@
       </template>
 
       <template #table>
+        <!--
+          批量操作条：勾选后浮出，取消勾选即消失，不额外占常驻位置。
+          计数取的是「当前平台里还找得到的选中模型」，不是勾选键的个数 ——
+          模型被删掉或换过平台后键还留着，按键数显示会虚报处理数量。
+        -->
+        <div v-if="!loadError && selectedModels.length" class="batch-bar">
+          <span class="batch-bar-count">已选 {{ selectedModels.length }} 个模型</span>
+          <div class="batch-bar-actions">
+            <button type="button" class="btn btn-secondary btn-sm" @click="openBatchBindDialog">
+              <Icon name="plus" size="sm" />
+              绑定分组
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" @click="requestClearSelectedGroups">
+              清空分组
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" @click="clearModelSelection">
+              取消选择
+            </button>
+          </div>
+        </div>
+
         <div v-if="loadError" class="m-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-900/20 dark:text-red-300">
           {{ loadError }}
         </div>
@@ -117,6 +139,9 @@
           :loading="loading"
           row-key="id"
           sticky-actions-column
+          selectable
+          v-model:selected-keys="selectedModelKeys"
+          :selection-label="modelSelectionLabel"
         >
           <template #empty>
             <EmptyState
@@ -133,64 +158,76 @@
 
           <template #cell-display_name="{ row, value }">
             <div class="min-w-0">
-              <div class="truncate font-medium text-gray-950 dark:text-white">{{ value || row.id }}</div>
+              <div class="truncate font-semibold text-gray-950 dark:text-white">{{ value || row.id }}</div>
               <div v-if="value && value !== row.id" class="mt-1 truncate text-xs text-gray-500 dark:text-dark-400">{{ row.id }}</div>
             </div>
           </template>
 
           <template #cell-price_summary="{ row }">
-            <div v-if="modelPriceGroups(row).length" class="price-groups">
-              <div v-for="group in modelPriceGroups(row)" :key="group.title" class="price-group">
-                <span class="price-group-title">{{ group.title }}</span>
-                <span
-                  v-for="item in group.items"
-                  :key="item.label"
-                  :class="['price-pill', item.source === 'official' ? 'price-pill-reference' : '']"
-                >
-                  <span>{{ item.label }}</span>
-                  <strong>{{ formatPriceValue(item) }}</strong>
-                </span>
-                <span v-if="group.hasOfficialReference" class="price-reference-badge">官方参考</span>
+            <!--
+              每个价格位一张卡片：标签在上（小字、按价格位着色），数字在下（大字、等宽）。
+
+              改之前四个价格挤在两个灰底圆角框里，标签和数字同为 text-xs，
+              扫读时分不出主次 —— 这就是「没有层级」的来源。而且「官方参考」徽标挂在组尾，
+              视觉上不属于任何一个价格，两个价格里有一个是参考价时读不出来是哪个。
+
+              固定渲染四个价格位（缺价显示「—」）而不是「有什么显示什么」：
+              价格列要承担的工作是横向比对多个模型，缺项就塌陷的布局做不到这件事。
+            -->
+            <div v-if="modelHasAnyPrice(row)" class="price-cards">
+              <div
+                v-for="slot in modelPriceSlots(row)"
+                :key="slot.key"
+                :class="['price-card', slot.toneClass]"
+              >
+                <span class="price-card-label">{{ slot.label }}</span>
+                <strong class="price-card-value">{{ slot.value == null ? '—' : formatPriceSlotValue(slot.value) }}</strong>
+                <!--
+                  第三行二选一：有官方参考价就标来源，否则显示单位。
+                  两个都放会把卡片撑到 103px（单位是 65px、标签 52px，横排相加、竖排则多一行），
+                  而展示页那张卡片是 83px —— 一列宽出去 120px，整表就得横向滚动。
+                  二选一之后第三行宽度恒定是那个更宽的单位，卡片回到 83×76，与展示页一致。
+                -->
+                <div v-if="slot.source === 'official' || slot.unit" class="price-card-meta">
+                  <span v-if="slot.source === 'official'" class="price-card-tag">官方参考</span>
+                  <small v-else>{{ slot.unit }}</small>
+                </div>
               </div>
             </div>
             <span v-else class="price-empty">{{ modelPriceEmptyText(row) }}</span>
           </template>
 
-          <template #cell-group_coverage="{ row }">
-            <!-- 上下文没拉出来时必须说「—」而不是「无渠道支撑」，否则一次接口抖动会被读成配置坏了。 -->
-            <div v-if="groupContextLoading" class="group-coverage-pending">查询中…</div>
-            <div v-else-if="!groupContext" class="group-coverage-pending" title="渠道与分组数据加载失败，点「刷新」可重试">—</div>
-            <div
-              v-else-if="modelCoverageGroups(selectedPlatform, row).length"
-              class="group-coverage"
-              :title="modelCoverageTitle(selectedPlatform, row)"
+          <template #cell-group_binding="{ row }">
+            <!--
+              分组名要查分组列表才能解析，所以上下文没拉出来时说「—」而不是「未绑定分组」——
+              后者会把一次接口抖动读成配置缺失，管理员会去重复绑定。
+              整个单元格是按钮：这是表格里的快捷编辑入口，点开即可改绑定，不必进「编辑模型」。
+            -->
+            <button
+              type="button"
+              class="group-binding"
+              :title="groupBindingCellTitle(row)"
+              @click="openGroupBindDialog(row)"
             >
-              <span
-                v-for="group in modelCoverageGroups(selectedPlatform, row).slice(0, 2)"
-                :key="String(group.id)"
-                class="group-chip"
-              >
-                {{ group.name }}
+              <span v-if="modelBoundGroupList(row) === null" class="group-binding-pending">—</span>
+              <span v-else-if="(modelBoundGroupList(row) || []).length === 0" class="group-binding-empty">
+                未绑定分组
               </span>
-              <span v-if="modelCoverageGroups(selectedPlatform, row).length > 2" class="group-chip-more">
-                +{{ modelCoverageGroups(selectedPlatform, row).length - 2 }}
-              </span>
-              <!-- 有分组但没有启用渠道：展示页会显示分组标签，同时标成不可用，容易被当成 bug。 -->
-              <span
-                v-if="modelCoverage(selectedPlatform, row)?.available === false"
-                class="group-coverage-warn"
-                title="支持该模型的渠道都不是启用状态，展示页会标记为不可用"
-              >
-                渠道未启用
-              </span>
-            </div>
-            <span
-              v-else
-              class="group-coverage-empty"
-              title="没有任何渠道的模型清单包含这个模型，展示页按分组筛不到它。请先在「渠道管理」里把该模型加入某个同平台渠道。"
-            >
-              无渠道支撑
-            </span>
+              <template v-else>
+                <span
+                  v-for="group in (modelBoundGroupList(row) || []).slice(0, 2)"
+                  :key="String(group.id)"
+                  class="group-chip"
+                  :class="groupPlatformBadgeClass(group, groupContext?.platformOverrides)"
+                  :title="`${group.name} · ${groupPlatformLabel(group, groupContext?.platformOverrides)}`"
+                >
+                  {{ group.name }}
+                </span>
+                <span v-if="(modelBoundGroupList(row) || []).length > 2" class="group-chip-more">
+                  +{{ (modelBoundGroupList(row) || []).length - 2 }}
+                </span>
+              </template>
+            </button>
           </template>
 
           <template #cell-source="{ value }">
@@ -220,6 +257,14 @@
             <Input v-model="modelForm.id" label="模型 ID" placeholder="例如：gpt-5.2" required />
             <Input v-model="modelForm.display_name" label="展示名称" placeholder="不填则使用模型 ID" />
           </div>
+
+          <ModelGroupBindPicker
+            v-model="modelForm.group_ids"
+            :groups="groupContext?.groups || []"
+            :platform="selectedPlatform"
+            :platform-overrides="groupContext?.platformOverrides"
+            :context-state="groupContextState"
+          />
 
           <div class="model-dialog-section-head">
             <div class="min-w-0">
@@ -323,6 +368,68 @@
       </template>
     </BaseDialog>
 
+    <!--
+      表格「分组绑定」列的快捷入口。复用与编辑弹窗同一个选择控件 ——
+      两处各写一套的话，改了一处忘另一处是最难发现的那类错。
+    -->
+    <BaseDialog
+      :show="groupBindDialogVisible"
+      :title="groupBindDialogTitle"
+      width="wide"
+      @close="closeGroupBindDialog"
+    >
+      <ModelGroupBindPicker
+        v-model="groupBindForm"
+        :groups="groupContext?.groups || []"
+        :platform="selectedPlatform"
+        :platform-overrides="groupContext?.platformOverrides"
+        :context-state="groupContextState"
+      />
+      <template #footer>
+        <button type="button" class="btn btn-secondary" @click="closeGroupBindDialog">取消</button>
+        <button type="button" class="btn btn-primary" @click="submitGroupBindDialog">保存</button>
+      </template>
+    </BaseDialog>
+
+    <!--
+      批量绑定：复用与单个模型同一个选择控件（mode="batch" 只换文案，勾选逻辑一模一样）。
+      另写一套选择列表的话，平台兼容过滤、排序去重口径迟早会分叉 ——
+      而口径分叉的后果是保存后才暴露的假脏标记。
+    -->
+    <BaseDialog
+      :show="batchBindDialogVisible"
+      title="批量绑定分组"
+      width="wide"
+      @close="closeBatchBindDialog"
+    >
+      <!--
+        必须写清作用对象：批量操作最怕的是「以为只改了勾中的几个」。
+        这里点明平台 + 数量 + 追加语义，是完成本次操作不可缺少的信息。
+      -->
+      <p class="batch-bind-targets">
+        为 {{ currentPlatformLabel }} 下勾选的 {{ selectedModels.length }} 个模型追加分组绑定。
+      </p>
+      <ModelGroupBindPicker
+        v-model="batchBindForm"
+        mode="batch"
+        :groups="groupContext?.groups || []"
+        :platform="selectedPlatform"
+        :platform-overrides="groupContext?.platformOverrides"
+        :context-state="groupContextState"
+      />
+      <template #footer>
+        <button type="button" class="btn btn-secondary" @click="closeBatchBindDialog">取消</button>
+        <button
+          type="button"
+          class="btn btn-primary"
+          :disabled="batchBindForm.length === 0"
+          @click="submitBatchBindDialog"
+        >
+          绑定
+        </button>
+      </template>
+    </BaseDialog>
+
     <BaseDialog :show="batchDialogVisible" title="批量添加模型" width="wide" @close="closeBatchDialog">
       <div class="space-y-4">
         <TextArea
@@ -414,6 +521,21 @@
       @confirm="confirmReload"
       @cancel="reloadConfirmVisible = false"
     />
+
+    <!--
+      批量清空要问一句：它一次抹掉的是多个模型的全部分组绑定，误触后逐个补回来很费事。
+      改动本身在内存里、保存配置前不落盘，但正因为「反正没保存」才更容易顺手点保存。
+    -->
+    <ConfirmDialog
+      :show="clearGroupsConfirmVisible"
+      title="清空分组绑定"
+      :message="`确认清空这 ${selectedModels.length} 个模型的全部已绑定分组吗？它们会从所有分组下消失，保存配置后生效。`"
+      confirm-text="清空分组"
+      cancel-text="取消"
+      danger
+      @confirm="confirmClearSelectedGroups"
+      @cancel="clearGroupsConfirmVisible = false"
+    />
     <!--
       保存前的冲突确认。后端 UpdateModelSquareConfig 完全不比对入参的 updated_at，
       两个人同时编辑时后保存的会静默覆盖前一个人的改动 —— 这个弹窗是唯一的拦截点。
@@ -436,11 +558,10 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { adminAPI } from '@/api/admin'
-// 分组归属的聚合函数与上下文类型直接从模型广场 API 模块取：
-// 它是纯函数，且配置页要用「内存中尚未保存的配置」算一遍，不能走 adminAPI.modelSquare.get()
-// —— 那个入口内部会重新 GET 已保存的配置。
+// 分组 ID 规范化与上下文类型直接从模型广场 API 模块取：规范化口径必须与保存载荷、
+// 聚合函数三处完全一致，任一处形态不同都会让「未保存改动」比对误报。
 import {
-  buildConfiguredModelSquareResult,
+  normalizeModelGroupIDs,
   type ModelSquareGroupContext,
   type ModelSquareUserGroup,
 } from '@/api/admin/modelSquare'
@@ -470,6 +591,8 @@ import Select from '@/components/common/Select.vue'
 import TextArea from '@/components/common/TextArea.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
+import ModelGroupBindPicker from './ModelGroupBindPicker.vue'
+import { groupPlatformBadgeClass, groupPlatformLabel } from './groupPlatformStyle'
 
 const BUILTIN_PLATFORMS = [
   { platform: 'anthropic', name: 'Anthropic' },
@@ -489,9 +612,21 @@ const PRICE_FIELDS = [
 const PRICE_PER_MILLION_TOKENS = 1_000_000
 
 type PriceField = typeof PRICE_FIELDS[number]['key']
-type ModelForm = { id: string; display_name: string } & Record<PriceField, string>
-type PriceItem = { label: string; value: number; source: 'configured' | 'official' }
-type PriceGroup = { title: string; items: PriceItem[]; hasOfficialReference: boolean }
+type ModelForm = { id: string; display_name: string; group_ids: number[] } & Record<PriceField, string>
+type PriceSource = 'configured' | 'official'
+// 价格位的色调。与展示页的价格卡片同源，两个页面的「输入是青、输出是橙」必须一致，
+// 否则管理员在两个页面之间切换时会以为价格换了含义。
+type PriceTone = 'teal' | 'orange' | 'violet' | 'blue'
+type PriceSlot = {
+  key: PriceField
+  label: string
+  unit: string
+  toneClass: string
+  // null 表示这个价格位既没有自定义价、也没有官方参考价 —— 与「价格是 0」是两回事，
+  // 所以不能拿 0 兜底：配置页里 $0 会被读成「这一项免费」，那就不是样式问题了。
+  value: number | null
+  source: PriceSource | null
+}
 type OfficialPricingStatus = 'loading' | 'found' | 'not_found' | 'error'
 // 弹窗里每个价格字段的来源状态。'unset' 必须和 'official' 分开：
 // 没有官方参考价时「跟随官方」是误导 —— 那时并没有官方价可跟。
@@ -506,6 +641,7 @@ const MODEL_PRICE_FIELD_STATE_LABELS: Record<ModelPriceFieldState, string> = {
 const createEmptyModelForm = (): ModelForm => ({
   id: '',
   display_name: '',
+  group_ids: [],
   input_price: '',
   output_price: '',
   cache_write_price: '',
@@ -516,10 +652,10 @@ const columns: Column[] = [
   { key: 'id', label: '模型 ID', sortable: true },
   { key: 'display_name', label: '展示名称', sortable: true },
   { key: 'price_summary', label: '价格（每 1M Tokens）', sortable: false },
-  // 分组归属不在配置里存，是读时由「渠道支持哪些模型 + 渠道绑了哪些分组」推导的。
+  // 分组归属是配置里存的字段（模型的 group_ids），不再由渠道反推。
   // 配置页是唯一能加模型的地方，如果这里不给出分组归属，管理员加完模型
   // 到展示页会发现按分组筛不到，却在配置页看不出任何异常。
-  { key: 'group_coverage', label: '分组覆盖', sortable: false },
+  { key: 'group_binding', label: '分组绑定', sortable: false },
   { key: 'source', label: '来源', sortable: true },
   { key: 'actions', label: '操作', sortable: false },
 ]
@@ -575,70 +711,61 @@ const referencePricingPromises = new Map<string, Promise<void>>()
 const groupContext = ref<ModelSquareGroupContext | null>(null)
 const groupContextLoading = ref(false)
 
-type ModelGroupCoverage = { groupIDs: Array<number | string>; available: boolean }
-
-const groupCoverageKey = (platform: string, modelID: string) => `${normalizePlatform(platform)}::${modelKey(modelID)}`
-
 /**
- * 用「内存里的当前配置」算一遍分组归属，而不是读已保存的配置：
- * 这样新增、删除、改平台都能立刻反映在分组列上，不必先保存一次。
- * 价格与倍率这里不关心，只要 group_ids 和 available。
+ * 分组上下文对 UI 的三态。
+ * 只传「有没有 groups」是不够的：加载中与加载失败都必须和「确实没有可绑定的分组」
+ * 区分开，否则一次接口抖动会被读成配置缺失。
  */
-const groupCoverageByModel = computed<Map<string, ModelGroupCoverage>>(() => {
-  const context = groupContext.value
-  const coverage = new Map<string, ModelGroupCoverage>()
-  if (!context) return coverage
-
-  const result = buildConfiguredModelSquareResult(
-    { platforms: platformConfigs.value },
-    context.channels,
-    context.groups,
-    new Map(Object.entries(officialPricingMap.value)),
-    context.platformOverrides,
-  )
-  for (const model of result.payload.models || []) {
-    const platform = normalizePlatform(model.platform)
-    const id = normalizeModelId(model.id)
-    if (!platform || !id) continue
-    coverage.set(groupCoverageKey(platform, id), {
-      groupIDs: model.group_ids || [],
-      available: model.available === true,
-    })
-  }
-  return coverage
+const groupContextState = computed<'loading' | 'unavailable' | 'ready'>(() => {
+  if (groupContext.value) return 'ready'
+  return groupContextLoading.value ? 'loading' : 'unavailable'
 })
 
 const groupById = computed(() => new Map((groupContext.value?.groups || []).map(group => [String(group.id), group])))
 
 /**
- * 取某个模型的分组归属。返回 null 表示「未知」（上下文没加载出来），
- * 必须和「已知没有任何分组」区分开 —— 前者不能算进未覆盖统计里，否则会把
- * 一次接口抖动误报成「所有模型都没有渠道支撑」。
+ * 模型绑定的分组名单。返回 null 表示「分组名解析不出来」（分组上下文没加载出来），
+ * 必须和「确实没绑定」区分开：前者是一次接口抖动，重试即可；后者是配置缺失，
+ * 需要管理员去绑定。两者的提示语与处理动作完全不同。
  */
-function modelCoverage(platform: string, model: ModelSquarePlatformModelConfig): ModelGroupCoverage | null {
-  return groupCoverageByModel.value.get(groupCoverageKey(platform, model.id)) || null
-}
-
-function modelCoverageGroups(platform: string, model: ModelSquarePlatformModelConfig): ModelSquareUserGroup[] {
-  const ids = modelCoverage(platform, model)?.groupIDs || []
+function modelBoundGroupList(model: ModelSquarePlatformModelConfig): ModelSquareUserGroup[] | null {
+  const ids = model.group_ids || []
+  if (ids.length === 0) return []
+  if (!groupContext.value) return null
   return ids
     .map(id => groupById.value.get(String(id)))
     .filter((group): group is ModelSquareUserGroup => Boolean(group))
 }
 
-/** 列里最多展示两个分组名，剩下的折成 +N，完整名单挂在 title 上。 */
-function modelCoverageTitle(platform: string, model: ModelSquarePlatformModelConfig): string {
-  const names = modelCoverageGroups(platform, model).map(group => group.name)
-  return names.length ? `可见分组：${names.join('、')}` : ''
+/**
+ * 列里最多展示两个分组名，剩下的折成 +N，完整名单挂在 title 上。
+ *
+ * 每个名字后面补上平台：chip 的平台信息只靠颜色传达，色觉障碍下读不出来，
+ * 悬浮说明必须把它写全。
+ */
+function modelBoundGroupsTitle(groups: ModelSquareUserGroup[]): string {
+  if (groups.length === 0) return ''
+  const overrides = groupContext.value?.platformOverrides
+  const names = groups.map(group => `${group.name}（${groupPlatformLabel(group, overrides)}）`)
+  return `已绑定分组：${names.join('、')}`
 }
 
-function countUncoveredModels(platform: string, models: ModelSquarePlatformModelConfig[]): number {
-  let count = 0
-  for (const model of models) {
-    const coverage = modelCoverage(platform, model)
-    if (coverage && coverage.groupIDs.length === 0) count += 1
-  }
-  return count
+/** 分组绑定单元格的悬浮说明。三种状态给三种说法，不能混用。 */
+function groupBindingCellTitle(model: ModelSquarePlatformModelConfig): string {
+  const groups = modelBoundGroupList(model)
+  if (groups === null) return '分组数据加载失败，点「刷新」可重试'
+  if (groups.length === 0) return '未绑定分组：展示页按任何分组都筛不到这个模型。点击选择分组。'
+  return `${modelBoundGroupsTitle(groups)}。点击修改。`
+}
+
+/**
+ * 没有绑定任何分组的模型数：这些模型在展示页按任何分组都筛不到。
+ *
+ * 不看分组上下文是否加载成功 —— group_ids 是配置里存的，不依赖外部接口，
+ * 所以这个数字在接口抖动时依然准确，不需要像从前那样区分「未知」。
+ */
+function countUnboundModels(models: ModelSquarePlatformModelConfig[]): number {
+  return models.filter(model => (model.group_ids || []).length === 0).length
 }
 
 const platformLabelMap = computed(() => {
@@ -692,7 +819,7 @@ const platformCards = computed(() => {
       platform,
       label: config.name?.trim() || existing?.label || resolvePlatformDisplayLabel(platform),
       modelCount: config.models?.length || 0,
-      uncoveredCount: countUncoveredModels(platform, config.models || []),
+      uncoveredCount: countUnboundModels(config.models || []),
       rank: existing?.rank ?? 3,
       order: existing?.order ?? 0,
     })
@@ -710,7 +837,7 @@ const platformSelectOptions = computed<SelectOption[]>(() => platformCards.value
 })))
 
 /**
- * 平台对应的「无渠道支撑」模型数。
+ * 平台对应的「未绑定分组」模型数。
  * 已删除的平台 chip 横栏原本直接遍历 platformCards，现在 Select 的选项与当前选中项都要用，
  * 抽成按平台查的小工具，免得在模板里写两遍 find。
  */
@@ -813,6 +940,7 @@ function dedupeModels(models: ModelSquarePlatformModelConfig[]): ModelSquarePlat
     const key = modelKey(id)
     if (seen.has(key)) continue
     seen.add(key)
+    const groupIDs = normalizeModelGroupIDs(model.group_ids)
     // 先展开原对象，再规范化本页真正负责的那几个字段：
     // 保存走的是整块 PUT、后端整体覆盖配置，所以这里如果只挑字段重建对象，
     // 后端支持但本页没展示的那些价格位（优先级价、1 小时缓存写入价、图片价、按请求价）
@@ -823,6 +951,13 @@ function dedupeModels(models: ModelSquarePlatformModelConfig[]): ModelSquarePlat
       id,
       display_name: (model.display_name || id).trim(),
       source: model.source === 'sync' ? 'sync' : 'manual',
+      /*
+        group_ids 也要在这里规范化，理由同上：保存快照取自本函数的产出，而重新加载后
+        拿到的是后端 normalize 过的形态，两边口径不同就会让「未保存改动」一直亮着。
+        空绑定写成 undefined 而不是 []：后端 json 的 omitempty 会省略这个字段，
+        前端留一个空数组就与后端返回的形态对不上，脏检测随即误报。
+      */
+      group_ids: groupIDs.length ? groupIDs : undefined,
       ...modelPriceValues(model),
     })
   }
@@ -1012,6 +1147,7 @@ function openModelDialog(model?: ModelSquarePlatformModelConfig): void {
   modelForm.value = {
     id: model?.id || '',
     display_name: model?.display_name && model.display_name !== model.id ? model.display_name : '',
+    group_ids: normalizeModelGroupIDs(model?.group_ids),
     ...Object.fromEntries(PRICE_FIELDS.map(({ key }) => {
       const configuredValue = model?.[key]
       const officialValue = officialPricing?.[key as keyof ModelSquareOfficialPricing]
@@ -1039,6 +1175,142 @@ function closeModelDialog(): void {
   modelDialogVisible.value = false
   editingModelId.value = null
   modelForm.value = createEmptyModelForm()
+}
+
+/*
+  表格里「分组绑定」列的快捷入口。
+
+  只改绑定、不碰价格：管理员在表格上就能看出哪个模型绑错了，不该为了改它打开整个编辑弹窗
+  —— 那里同时挂着全部价格字段，误改一个就是一次静默的定价变更。
+*/
+const groupBindDialogVisible = ref(false)
+const groupBindModelID = ref<string | null>(null)
+const groupBindForm = ref<number[]>([])
+
+const groupBindDialogTitle = computed(() => `绑定分组 · ${groupBindModelID.value || '模型'}`)
+
+function openGroupBindDialog(model: ModelSquarePlatformModelConfig): void {
+  groupBindModelID.value = model.id
+  groupBindForm.value = normalizeModelGroupIDs(model.group_ids)
+  groupBindDialogVisible.value = true
+}
+
+function closeGroupBindDialog(): void {
+  groupBindDialogVisible.value = false
+  groupBindModelID.value = null
+  groupBindForm.value = []
+}
+
+function submitGroupBindDialog(): void {
+  const config = ensureCurrentConfig()
+  const index = config.models.findIndex(model => modelKey(model.id) === modelKey(groupBindModelID.value || ''))
+  if (index < 0) {
+    // 弹窗开着的时候模型被别处删掉了。静默不保存会让管理员以为绑定生效了。
+    appStore.showError('模型已不存在，请刷新后重试')
+    closeGroupBindDialog()
+    return
+  }
+  config.models.splice(index, 1, {
+    ...config.models[index],
+    group_ids: normalizeModelGroupIDs(groupBindForm.value),
+  })
+  closeGroupBindDialog()
+}
+
+/*
+  批量绑定。
+
+  入口用表格勾选，而不是「按条件批量」：管理员判断哪个模型该绑哪个分组，靠的是看表格里的
+  价格与渠道状态，勾选是唯一能把「他此刻看到的这一批」原样传下来的方式。
+
+  勾选键只在当前平台内唯一（模型 ID 不带平台前缀），所以换平台必须清空勾选 ——
+  否则 openai 的 gpt-5.2-pro 会把自定义平台里的同名模型一起带上。
+*/
+const selectedModelKeys = ref<string[]>([])
+const batchBindDialogVisible = ref(false)
+const batchBindForm = ref<number[]>([])
+const clearGroupsConfirmVisible = ref(false)
+
+/** 勾选、且当前平台里确实还存在的模型。键可能是模型被删掉后留下的残留，必须按配置过滤。 */
+const selectedModels = computed(() => {
+  const keys = new Set(selectedModelKeys.value.map(key => String(key)))
+  return currentModels.value.filter(model => keys.has(String(model.id)))
+})
+
+/** 勾选框的无障碍名称。默认文案是「请选择 <id>」，读屏时分不清选的是哪个模型。 */
+function modelSelectionLabel(row: ModelSquarePlatformModelConfig): string {
+  return `选择模型 ${row.display_name || row.id}`
+}
+
+function clearModelSelection(): void {
+  selectedModelKeys.value = []
+}
+
+/*
+  合并分组绑定：追加去重后走共享口径规范化。
+  空结果写 undefined 而不是 [] —— 后端那个字段是 omitempty，空数组与缺字段序列化形态不同，
+  会让配置页的「未保存改动」误报（「解绑全部」看起来像「改过但没生效」）。
+*/
+function mergeGroupIDs(current: number[] | undefined, additions: number[]): number[] | undefined {
+  const merged = normalizeModelGroupIDs([...(current || []), ...additions])
+  return merged.length ? merged : undefined
+}
+
+/** 把当前平台下所有被勾选的模型改写一遍分组绑定，返回实际改动的模型数。 */
+function updateSelectedModelGroups(
+  resolve: (model: ModelSquarePlatformModelConfig) => number[] | undefined,
+): number {
+  const targets = selectedModels.value
+  if (targets.length === 0) return 0
+  const targetKeys = new Set(targets.map(model => modelKey(model.id)))
+  const config = ensureCurrentConfig()
+  config.models = config.models.map(model =>
+    targetKeys.has(modelKey(model.id)) ? { ...model, group_ids: resolve(model) } : model
+  )
+  return targets.length
+}
+
+function openBatchBindDialog(): void {
+  if (selectedModels.value.length === 0) return
+  // 每次打开都从空开始：批量操作里「上次勾了哪些分组」是最不该被继承的状态。
+  batchBindForm.value = []
+  batchBindDialogVisible.value = true
+}
+
+function closeBatchBindDialog(): void {
+  batchBindDialogVisible.value = false
+  batchBindForm.value = []
+}
+
+function submitBatchBindDialog(): void {
+  const additions = normalizeModelGroupIDs(batchBindForm.value)
+  if (additions.length === 0) {
+    appStore.showError('请至少选择一个要绑定的分组')
+    return
+  }
+  const count = updateSelectedModelGroups(model => mergeGroupIDs(model.group_ids, additions))
+  if (count === 0) {
+    // 勾选的模型在弹窗开着的时候被别处删掉了。静默关掉会让管理员以为绑定生效了。
+    appStore.showError('勾选的模型已不存在，请刷新后重试')
+    closeBatchBindDialog()
+    return
+  }
+  appStore.showSuccess(`已为 ${count} 个模型追加 ${additions.length} 个分组绑定`)
+  closeBatchBindDialog()
+  clearModelSelection()
+}
+
+function requestClearSelectedGroups(): void {
+  if (selectedModels.value.length === 0) return
+  clearGroupsConfirmVisible.value = true
+}
+
+function confirmClearSelectedGroups(): void {
+  clearGroupsConfirmVisible.value = false
+  const count = updateSelectedModelGroups(() => undefined)
+  if (count === 0) return
+  appStore.showSuccess(`已清空 ${count} 个模型的分组绑定`)
+  clearModelSelection()
 }
 
 function parseModelFormPrices(): Pick<ModelSquarePlatformModelConfig, PriceField> | null {
@@ -1219,6 +1491,7 @@ function submitModelDialog(): void {
     id,
     display_name: displayName,
     source: 'manual',
+    group_ids: normalizeModelGroupIDs(modelForm.value.group_ids),
     ...prices,
   }
   if (index >= 0) config.models.splice(index, 1, nextModel)
@@ -1316,51 +1589,60 @@ function confirmRemoveModel(): void {
   modelPendingRemove.value = null
 }
 
-function formatPriceValue(item: PriceItem): string {
-  if (item.value == null || !Number.isFinite(item.value)) return ''
-  return `$${formatPlainPriceNumber(item.value * PRICE_PER_MILLION_TOKENS)}`
+function formatPriceSlotValue(value: number): string {
+  if (value == null || !Number.isFinite(value)) return ''
+  return `$${formatPlainPriceNumber(value * PRICE_PER_MILLION_TOKENS)}`
 }
 
-function pricingValue(model: ModelSquarePlatformModelConfig, officialPricing: ModelSquareOfficialPricing | null, key: PriceField): PriceItem | null {
+function pricingValue(model: ModelSquarePlatformModelConfig, officialPricing: ModelSquareOfficialPricing | null, key: PriceField): { value: number; source: PriceSource } | null {
   const configuredValue = model[key]
   if (configuredValue != null && Number.isFinite(configuredValue)) {
-    return { value: configuredValue, label: '', source: 'configured' }
+    return { value: configuredValue, source: 'configured' }
   }
   const officialValue = officialPricing?.[key as keyof ModelSquareOfficialPricing]
   if (isOfficialReferencePriceValue(officialValue)) {
-    return { value: officialValue, label: '', source: 'official' }
+    return { value: officialValue, source: 'official' }
   }
   return null
 }
 
-function pricedItems(model: ModelSquarePlatformModelConfig, officialPricing: ModelSquareOfficialPricing | null, items: Array<{ label: string; key: PriceField }>): PriceItem[] {
-  return items.flatMap(item => {
-    const price = pricingValue(model, officialPricing, item.key)
-    return price ? [{ ...price, label: item.label }] : []
+/*
+  价格位描述表。顺序、标签、单位、色调全部照展示页列表视图（defaultPriceDescriptors）：
+  两个页面都要显示这四个价格，顺序或文案差一点，管理员换页面比对时就会读错位。
+
+  单位只给输入/输出：展示页就是这么定的（缓存价是输入价的折算，再写一遍单位是重复）。
+  配置页的列头已经写了「每 1M Tokens」，但照抄展示页的卡片语言更重要 ——
+  少一层「这个页面为什么和那个页面不一样」的困惑。
+*/
+const PRICE_SLOT_DESCRIPTORS: Array<{ key: PriceField; label: string; unit: string; tone: PriceTone }> = [
+  { key: 'input_price', label: '输入', unit: '$/百万 tokens', tone: 'teal' },
+  { key: 'output_price', label: '输出', unit: '$/百万 tokens', tone: 'orange' },
+  { key: 'cache_read_price', label: '缓存读取', unit: '', tone: 'blue' },
+  { key: 'cache_write_price', label: '缓存写入', unit: '', tone: 'violet' },
+]
+
+function modelPriceSlots(model: ModelSquarePlatformModelConfig): PriceSlot[] {
+  const officialPricing = officialPricingForModel(model)
+  return PRICE_SLOT_DESCRIPTORS.map(descriptor => {
+    const price = pricingValue(model, officialPricing, descriptor.key)
+    return {
+      key: descriptor.key,
+      label: descriptor.label,
+      unit: descriptor.unit,
+      // 缺价是虚线空框，与「有价」必须一眼分开。但色调一律保留：
+      // 官方参考价由卡片里那枚「官方参考」标签标记，不再整张卡片换色 ——
+      // 换色会让四个价格位失去各自的色调，这一列就又变回一片同色了。
+      toneClass: price ? `price-card-${descriptor.tone}` : 'price-card-unset',
+      value: price?.value ?? null,
+      source: price?.source ?? null,
+    }
   })
 }
 
-function modelPriceGroups(model: ModelSquarePlatformModelConfig): PriceGroup[] {
-  const officialPricing = officialPricingForModel(model)
-  return [
-    {
-      title: '基础',
-      items: pricedItems(model, officialPricing, [
-        { label: '输入', key: 'input_price' },
-        { label: '输出', key: 'output_price' },
-      ]),
-    },
-    {
-      title: '缓存',
-      items: pricedItems(model, officialPricing, [
-        { label: '写入', key: 'cache_write_price' },
-        { label: '读取', key: 'cache_read_price' },
-      ]),
-    },
-  ].map(group => ({
-    ...group,
-    hasOfficialReference: group.items.some(item => item.source === 'official'),
-  })).filter(group => group.items.length > 0)
+// 四个价格位全无价时不摆四张空卡片 —— 那时该说的是「为什么没有价」（查询中/目录无价/查询失败），
+// 四张破折号会把一条可操作的状态信息压成装饰。
+function modelHasAnyPrice(model: ModelSquarePlatformModelConfig): boolean {
+  return modelPriceSlots(model).some(slot => slot.value != null)
 }
 
 function modelPriceEmptyText(model: ModelSquarePlatformModelConfig): string {
@@ -1548,6 +1830,8 @@ watch(selectedPlatform, () => {
   searchQuery.value = ''
   syncAccountId.value = null
   syncAccounts.value = []
+  // 勾选键只在平台内唯一，换平台后旧键会指向另一个平台的同名模型 —— 必须清空。
+  clearModelSelection()
   if (syncDialogVisible.value) {
     void loadSyncAccountsForCurrentPlatform()
   }
@@ -1617,7 +1901,7 @@ onUnmounted(() => {
   @apply text-xs font-medium text-gray-500 dark:text-dark-400;
 }
 
-/* 「未覆盖 N」告警：原本挂在平台 chip 横栏上，横栏删除后跟随平台 Select 的选项与选中项。 */
+/* 「未绑定 N」告警：原本挂在平台 chip 横栏上，横栏删除后跟随平台 Select 的选项与选中项。 */
 .platform-option-warn {
   @apply shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-500/20 dark:text-amber-100;
 }
@@ -1626,64 +1910,225 @@ onUnmounted(() => {
   @apply inline-flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-medium text-sky-700 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200;
 }
 
+/*
+  模型 ID 胶囊。
+
+  用 indigo 是因为这一页的颜色都被占满了：sky = 官方 / 上游同步，emerald = 手动维护，
+  amber = 自定义，teal·orange·blue·violet = 四个价格位。indigo 是唯一没被赋予语义的色，
+  拿来做标识色不会和任何既有含义撞车 —— 换成其它色就会被读成「这个模型有某种状态」。
+
+  加粗：这一列和展示名称是管理员找模型时第一眼扫的地方，弱化它等于让人先去看价格。
+*/
 .model-code {
-  @apply inline-flex max-w-md rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 font-mono text-xs text-gray-800 dark:border-dark-700 dark:bg-dark-900 dark:text-gray-100;
+  @apply inline-flex max-w-md rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1 font-mono text-xs font-semibold text-indigo-800 dark:border-indigo-500/30 dark:bg-indigo-500/15 dark:text-indigo-200;
 }
 
-.price-groups {
-  @apply flex max-w-3xl flex-wrap gap-2;
+/*
+  价格列卡片组：配色、尺寸、间距全部照展示页（ModelSquareView.vue）列表视图的价格卡片，
+  两页必须长得一样 —— 管理员在这两个页面之间来回切，价格不能换一副样子。
+
+  色值写成变量 + color-mix，与展示页的 --ms-* 是同一组数值、同一个混色公式：
+  底色 = 12% 色调 + 88% 面板色，边框 = 40% 色调 + 60% 分隔线色。
+  这两个结果落在 Tailwind 两个色阶之间，拿现成色阶凑不出来，只能自己混。
+  没提成公共文件是因为展示页那套变量是它整个页面的主题（卡片、chip、弹窗都在用），
+  为四个价格卡片去动它不值得。
+*/
+.price-cards {
+  --pc-panel: #ffffff;
+  --pc-panel-2: #f9fafb;
+  --pc-line: #e5e7eb;
+  --pc-text: #111827;
+  --pc-muted: #64748b;
+  --pc-dim: #94a3b8;
+  --pc-teal: #0f766e;
+  --pc-teal-strong: #115e59;
+  --pc-orange: #ea580c;
+  --pc-blue: #1d4ed8;
+  --pc-violet: #6d28d9;
+
+  /*
+    width: max-content 不能省。grid 是块级的，默认会撑满整个单元格，
+    于是四格均分「列宽减间距」，列被别的列挤宽时卡片就跟着变胖 ——
+    实测撑到 103px，而展示页那张是 83px，同一套样式两个页面却不一样大。
+    收缩到内容宽度后卡片宽度只由内容决定，与展示页一致。
+  */
+  @apply grid grid-cols-4 gap-2;
+  width: max-content;
 }
 
-.price-group {
-  @apply inline-flex max-w-full flex-wrap items-center gap-1 rounded-xl border border-gray-200 bg-gray-50 px-2 py-1 dark:border-dark-700 dark:bg-dark-900/70;
+.dark .price-cards {
+  --pc-panel: #1e293b;
+  --pc-panel-2: #334155;
+  --pc-line: #334155;
+  --pc-text: #f9fafb;
+  --pc-muted: #9ca3af;
+  --pc-dim: #6b7280;
+  --pc-teal: #5eead4;
+  --pc-teal-strong: #2dd4bf;
+  --pc-orange: #fb923c;
+  --pc-blue: #60a5fa;
+  --pc-violet: #a78bfa;
 }
 
-.price-group-title {
-  @apply mr-1 text-xs font-semibold text-gray-500 dark:text-dark-400;
+.price-card {
+  /*
+    min-width 83px = 展示页那张卡片的宽度（列头 + 单位行撑出来的自然宽度）。
+    必须写死：四个价格全吃官方价的行不显示单位，内容只有标签那 52px，
+    卡片会缩到 70px —— 同一列里不同行大小不一，这一列本来就是用来横向比对的。
+    超过 83px 的情况（比如某个价格位数特别长）照常撑开，min-width 只兜下限。
+  */
+  @apply flex min-w-[83px] flex-col rounded-md border px-2 py-1.5;
+  border-color: var(--pc-line);
+  background: var(--pc-panel-2);
 }
 
-.price-pill {
-  @apply inline-flex items-center gap-1 rounded-lg bg-white px-2 py-0.5 text-xs text-gray-600 shadow-sm dark:bg-dark-800 dark:text-dark-300;
+.price-card-teal {
+  border-color: color-mix(in srgb, var(--pc-teal) 40%, var(--pc-line));
+  background: color-mix(in srgb, var(--pc-teal) 12%, var(--pc-panel));
 }
 
-.price-pill-reference {
-  @apply bg-sky-50 text-sky-700 ring-1 ring-inset ring-sky-200 dark:bg-sky-500/10 dark:text-sky-200 dark:ring-sky-500/30;
+.price-card-orange {
+  border-color: color-mix(in srgb, var(--pc-orange) 40%, var(--pc-line));
+  background: color-mix(in srgb, var(--pc-orange) 12%, var(--pc-panel));
 }
 
-.price-pill strong {
-  @apply font-mono font-semibold text-gray-950 dark:text-white;
+.price-card-blue {
+  border-color: color-mix(in srgb, var(--pc-blue) 40%, var(--pc-line));
+  background: color-mix(in srgb, var(--pc-blue) 12%, var(--pc-panel));
 }
 
-.price-reference-badge {
-  @apply rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-700 dark:bg-sky-500/15 dark:text-sky-200;
+.price-card-violet {
+  border-color: color-mix(in srgb, var(--pc-violet) 40%, var(--pc-line));
+  background: color-mix(in srgb, var(--pc-violet) 12%, var(--pc-panel));
+}
+
+/* 未设置：虚线空框。与「有价」靠边框样式区分而不是靠颜色 —— 颜色已经被四个价格位占满了。 */
+.price-card-unset {
+  border-style: dashed;
+  border-color: var(--pc-line);
+  background: var(--pc-panel-2);
+}
+
+.price-card-label {
+  @apply whitespace-nowrap text-xs font-medium;
+  color: var(--pc-muted);
+}
+
+.price-card-teal .price-card-label {
+  color: var(--pc-teal);
+}
+
+.price-card-orange .price-card-label {
+  color: var(--pc-orange);
+}
+
+.price-card-blue .price-card-label {
+  color: var(--pc-blue);
+}
+
+.price-card-violet .price-card-label {
+  color: var(--pc-violet);
+}
+
+.price-card-value {
+  @apply mt-1 whitespace-nowrap font-mono text-[13px] font-bold;
+  color: var(--pc-text);
+}
+
+.price-card-teal .price-card-value {
+  color: var(--pc-teal-strong);
+}
+
+.price-card-orange .price-card-value {
+  color: var(--pc-orange);
+}
+
+.price-card-blue .price-card-value {
+  color: var(--pc-blue);
+}
+
+.price-card-violet .price-card-value {
+  color: var(--pc-violet);
+}
+
+/* 破折号是占位，但仍要比标签深一档：四种卡片共用「标签 < 数字」这条层级规则。 */
+.price-card-unset .price-card-value {
+  color: var(--pc-dim);
+}
+
+.price-card-meta {
+  @apply mt-0.5;
+}
+
+.price-card-meta small {
+  @apply block whitespace-nowrap text-[10px] font-medium;
+  color: var(--pc-dim);
+}
+
+/*
+  「官方参考」标签：这一列里唯一标价格来源的地方。
+  原先它挂在「基础 / 缓存」分组框的末尾，一个组里两个价格有一个是参考价时读不出是哪个，
+  现在跟着卡片走。天蓝是这个页面里「跟随官方」的既定语言（编辑弹窗的 is-official 徽标、
+  基准价对照的 is-follow 行），所以沿用。
+*/
+.price-card-tag {
+  @apply whitespace-nowrap rounded-full bg-sky-100 px-1.5 text-[10px] font-medium leading-4 text-sky-700 dark:bg-sky-500/20 dark:text-sky-200;
 }
 
 .price-empty {
   @apply text-xs text-gray-400 dark:text-dark-500;
 }
 
-/* 分组覆盖列：分组名用中性 sky chip，空态用琥珀 —— 那是这一列唯一需要动作的状态。 */
-.group-coverage {
-  @apply flex max-w-md flex-wrap items-center gap-1;
+/*
+  批量操作条：只在有勾选时出现，所以不用做成常驻工具条。
+
+  为什么不复用 AccountBulkActionsBar：那个组件把 `admin.accounts.bulkActions.*` 文案与
+  账号专属事件（refresh-token / toggle-schedulable / probe-upstream-billing）写死在里面，
+  模型广场套不进去 —— 硬套的结果是出现一批用不上的按钮和错位的 i18n key。
+*/
+.batch-bar {
+  @apply mx-4 mt-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary-200 bg-primary-50/60 px-4 py-2 dark:border-primary-700/60 dark:bg-primary-900/20;
 }
 
+.batch-bar-count {
+  @apply text-sm font-medium text-primary-900 dark:text-primary-100;
+}
+
+.batch-bar-actions {
+  @apply flex flex-wrap items-center gap-2;
+}
+
+/* 批量绑定弹窗里的作用对象说明：不写清「改的是哪一批」，批量操作就是盲操作。 */
+.batch-bind-targets {
+  @apply mb-2 text-sm text-gray-600 dark:text-gray-300;
+}
+
+/*
+  分组绑定列：整格是一个按钮（表格里的快捷编辑入口），但外观保持原来的纯文本 + chip，
+  只在 hover 时才浮出边框和底色 —— 每行都挂一个可见按钮会把这一列变成视觉噪音。
+*/
+.group-binding {
+  @apply flex max-w-md flex-wrap items-center gap-1 rounded-lg border border-transparent px-1 py-0.5 text-left transition-colors hover:border-gray-200 hover:bg-gray-50 dark:hover:border-dark-600 dark:hover:bg-dark-700;
+}
+
+/*
+  chip 只给形状和边框宽度，背景/文字/边框色由 groupPlatformBadgeClass 按分组平台给出
+  （与弹窗里的绑定控件同一套取色）。这里写死颜色会盖掉平台色。
+*/
 .group-chip {
-  @apply inline-flex max-w-40 items-center truncate rounded-lg bg-sky-50 px-2 py-0.5 text-xs text-sky-700 ring-1 ring-inset ring-sky-200 dark:bg-sky-500/10 dark:text-sky-200 dark:ring-sky-500/30;
+  @apply inline-flex max-w-40 items-center truncate rounded-lg border px-2 py-0.5 text-xs;
 }
 
 .group-chip-more {
   @apply inline-flex items-center rounded-lg bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-dark-800 dark:text-dark-300;
 }
 
-.group-coverage-warn {
-  @apply inline-flex items-center rounded-lg bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-500/20 dark:text-amber-100;
-}
-
-.group-coverage-empty {
+/* 未绑定分组：琥珀是这一列唯一需要动作的状态 —— 展示页按任何分组都筛不到它。 */
+.group-binding-empty {
   @apply inline-flex items-center rounded-lg bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-500/20 dark:text-amber-100;
 }
 
-.group-coverage-pending {
+.group-binding-pending {
   @apply text-xs text-gray-400 dark:text-dark-500;
 }
 
