@@ -1371,10 +1371,8 @@ export default {
             status: '状态',
             provider: '提供商',
             modelId: '模型 ID',
-            input: '输入',
-            output: '输出',
-            cacheRead: '缓存读取',
-            cacheWrite: '缓存写入',
+            // 四个价格位合并成一列后由卡片自带标签，列头只需要一个「价格」。
+            price: '价格',
             mode: '类型',
             groups: '分组',
             actions: '操作'

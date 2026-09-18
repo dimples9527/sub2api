@@ -83,10 +83,7 @@ vi.mock('vue-i18n', async (importOriginal) => {
     'admin.modelSquare.columns.status': 'Status',
     'admin.modelSquare.columns.provider': 'Platform',
     'admin.modelSquare.columns.modelId': 'Model ID',
-    'admin.modelSquare.columns.input': 'Input',
-    'admin.modelSquare.columns.output': 'Output',
-    'admin.modelSquare.columns.cacheRead': 'Cache read',
-    'admin.modelSquare.columns.cacheWrite': 'Cache write',
+    'admin.modelSquare.columns.price': 'Price',
     'admin.modelSquare.columns.cacheWrite1h': 'Cache write 1h',
     'admin.modelSquare.columns.priorityInput': 'Priority input',
     'admin.modelSquare.columns.priorityOutput': 'Priority output',
@@ -267,9 +264,9 @@ describe('ModelSquareView', () => {
     expect(dialog.exists()).toBe(true)
     expect(dialog.text()).toContain('Pricing by group')
 
-    // 表头保留四个语义价格位（顺序同 defaultPriceDescriptors），不因优先级/图片/按请求价格而被顶掉
+    // 价格位合并成一列（卡片自带标签，四个列头就是重复信息），与列表视图同一处理
     expect(dialog.findAll('thead th').map(th => th.text()))
-      .toEqual(['Groups', 'Rate', '输入', '输出', '缓存读取', '缓存写入'])
+      .toEqual(['Groups', 'Rate', 'Price'])
 
     const rows = dialog.findAll('[data-test="detail-group-row"]')
     expect(rows).toHaveLength(2)
@@ -285,9 +282,77 @@ describe('ModelSquareView', () => {
     expect(defaultRow?.text()).toContain('$10')
     expect(defaultRow?.text()).toContain('$60')
 
+    // 价格改成与列表视图、配置页同一套卡片：四个语义价格位各一张，标签随卡片走。
+    // 「不被优先级/图片/按请求价格顶掉」这条约束原先是靠列头保证的，现在由卡片自己保证。
+    const premiumBoxes = premiumRow!.findAll('.detail-price-grid .price-box')
+    expect(premiumBoxes.map(box => box.find('span').text()))
+      .toEqual(['输入', '输出', '缓存读取', '缓存写入'])
+    expect(premiumBoxes[0].find('strong').text()).toBe('$5')
+    expect(premiumBoxes[1].find('strong').text()).toBe('$30')
+    expect(premiumBoxes[0].find('small').text()).toBe('$/百万 tokens')
+
+    // 分组名与倍率是胶囊：分组名复用列表视图那枚，倍率复用卡片视图那枚
+    expect(premiumRow!.find('.group-chip').text()).toBe('Premium Group')
+    expect(premiumRow!.find('.rate-cell .model-rate-chip').text()).toBe('0.5x')
+
+    // 刻意不渲染划线原价：每行的「1 倍率原价」都是同一个数（按模型算、与行无关），
+    // 逐行重复只是噪音 —— 折扣多少由左边的倍率胶囊表达
+    expect(premiumRow!.find('.price-original').exists()).toBe(false)
+
     // 卡片倍率 chip 是 0.5，只有 Premium 行应被标记为当前分组
     expect(premiumRow?.classes()).toContain('active')
     expect(defaultRow?.classes()).not.toContain('active')
+  })
+
+  it('筛选生效后，详情弹窗的 active 行跟着切换到被筛的那个分组', async () => {
+    getMock.mockResolvedValue({
+      provider_slug: 'configured',
+      provider_name: 'Model Square Config',
+      provider_type: 'local',
+      payload: {
+        groups: [
+          { id: 1, name: 'Default Group', platform: 'openai', rate_multiplier: 1 },
+          { id: 2, name: 'Premium Group', platform: 'openai', rate_multiplier: 0.5 },
+        ],
+        models: [
+          /*
+            故意不给 rate_multiplier：modelEffectiveRate 优先用模型自带的，分组切换就
+            没法改变 detailRate、详情弹窗里的 active 行也就看不出跟着筛选走的效果。
+          */
+          {
+            id: 'both-groups-detail',
+            display_name: 'Both Groups Detail',
+            provider: 'OpenAI Official',
+            platform: 'openai',
+            available: true,
+            mode: 'chat',
+            input_price: 10,
+            output_price: 60,
+            group_ids: [1, 2],
+          },
+        ],
+      },
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const card = wrapper.findAll('[data-test="model-card"]')
+      .find(c => c.text().includes('Both Groups Detail'))
+    expect(card).toBeTruthy()
+    await card!.find('.model-detail-button').trigger('click')
+
+    const dialog = wrapper.find('[data-test="dialog"]')
+    expect(dialog.exists()).toBe(true)
+
+    // 不筛选：active 是 Premium（最低倍率），与现有详情弹窗用例一致
+    expect(dialog.findAll('[data-test="detail-group-row"].active')).toHaveLength(1)
+    expect(dialog.findAll('[data-test="detail-group-row"].active')[0].text()).toContain('Premium Group')
+
+    // 筛 Default Group：active 必须立刻切过去 —— detailRate 跟着 primaryGroup 走，
+    // 详情弹窗里这一行的价格也是按「卡片当前代表的分组」算的，必须一致
+    await wrapper.findAll('select')[0].setValue('1')
+    expect(dialog.findAll('[data-test="detail-group-row"].active')).toHaveLength(1)
+    expect(dialog.findAll('[data-test="detail-group-row"].active')[0].text()).toContain('Default Group')
   })
 
   it('按覆盖后的平台过滤详情弹窗中的分组', async () => {
@@ -325,6 +390,100 @@ describe('ModelSquareView', () => {
     const dialogText = wrapper.find('[data-test="dialog"]').text()
     expect(dialogText).toContain('GLM Group')
     expect(dialogText).not.toContain('OpenAI Group')
+  })
+
+  it('分组名跟随分组自己的平台配色，同一分组在卡片/列表/详情弹窗三处同色', async () => {
+    getMock.mockResolvedValue({
+      provider_slug: 'configured',
+      provider_name: 'Model Square Config',
+      provider_type: 'local',
+      payload: {
+        /*
+          两个分组挂在不同平台。只放一个平台的话，「跟随分组自己的平台」和
+          「跟随模型的平台」写出来是同一个颜色，验不出取色到底取的是哪一个。
+        */
+        groups: [
+          { id: 1, name: 'OpenAI Group', platform: 'openai', rate_multiplier: 1 },
+          { id: 2, name: 'Gemini Group', platform: 'gemini', rate_multiplier: 0.5 },
+        ],
+        models: [
+          {
+            id: 'dual-platform',
+            display_name: 'Dual Platform',
+            provider: 'OpenAI Official',
+            platform: 'openai',
+            available: true,
+            mode: 'chat',
+            input_price: 10,
+            group_ids: [1, 2],
+          },
+        ],
+      },
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    // 卡片视图：主分组是倍率最低的 Gemini，胶囊就带 Gemini 的平台色
+    const cardChip = wrapper.find('[data-test="model-card"] .primary-group-chip')
+    expect(cardChip.find('.truncate').text()).toBe('Gemini Group')
+    expect(cardChip.classes()).toContain('text-blue-600')
+    // 颜色不能是唯一的信息载体：tooltip 里必须带上平台名
+    expect(cardChip.attributes('title')).toBe('Gemini Group · Gemini')
+
+    // 列表视图：每个分组各按自己的平台着色。两个分组必须是两种颜色 ——
+    // 若取的是模型的平台，这里两枚胶囊会同色，「分组跟随平台」就退化成了「模型跟随平台」
+    await wrapper.find('button[title="List view"]').trigger('click')
+    const listChips = wrapper.findAll('[data-test="model-row"] .group-chip')
+    expect(listChips).toHaveLength(2)
+    expect(listChips[0].text()).toContain('Gemini Group')
+    expect(listChips[1].text()).toContain('OpenAI Group')
+    expect(listChips[0].classes()).toContain('text-blue-600')
+    expect(listChips[1].classes()).toContain('text-green-600')
+    expect(listChips[1].attributes('title')).toBe('OpenAI Group · OpenAI')
+
+    // 详情弹窗：同一个分组必须还是同一个颜色 —— 三处取色一旦分叉，
+    // 管理员会以为它们是两个不同的分组
+    await wrapper.find('[data-test="model-row"] .model-detail-button').trigger('click')
+    const detailChips = wrapper.findAll('[data-test="detail-group-row"] .group-chip')
+    expect(detailChips.map(chip => chip.text())).toEqual(['Gemini Group', 'OpenAI Group'])
+    expect(detailChips[0].classes()).toContain('text-blue-600')
+    expect(detailChips[1].classes()).toContain('text-green-600')
+  })
+
+  it('分组弹窗里的分组名也用平台文字色', async () => {
+    getMock.mockResolvedValue({
+      provider_slug: 'configured',
+      provider_name: 'Model Square Config',
+      provider_type: 'local',
+      payload: {
+        groups: [
+          { id: 1, name: 'OpenAI Group', platform: 'openai', rate_multiplier: 1 },
+          { id: 2, name: 'Gemini Group', platform: 'gemini', rate_multiplier: 0.5 },
+        ],
+        models: [
+          {
+            id: 'dual-platform',
+            display_name: 'Dual Platform',
+            provider: 'OpenAI Official',
+            platform: 'openai',
+            available: true,
+            mode: 'chat',
+            input_price: 10,
+            group_ids: [1, 2],
+          },
+        ],
+      },
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('[data-test="model-card"] .primary-group-chip').trigger('click')
+    const names = wrapper.findAll('[data-test="group-dialog-name"]')
+    expect(names.map(node => node.text())).toEqual(['Gemini Group', 'OpenAI Group'])
+    // 名字走 groupPlatformTextClass（platformColors 的文字色），与胶囊的徽标色同出一处
+    expect(names[0].classes()).toContain('text-blue-600')
+    expect(names[1].classes()).toContain('text-emerald-600')
+    expect(names[1].attributes('title')).toBe('OpenAI')
   })
 
   it('renders unset prices as zero while preserving explicit zero prices', async () => {
@@ -366,6 +525,57 @@ describe('ModelSquareView', () => {
     expect(showSuccessMock).toHaveBeenCalledWith('Copied')
   })
 
+  it('筛选分组后卡片改显示该分组的名字与倍率，不筛选时仍取倍率最低的', async () => {
+    getMock.mockResolvedValue({
+      provider_slug: 'configured',
+      provider_name: 'Model Square Config',
+      provider_type: 'local',
+      payload: {
+        groups: [
+          { id: 1, name: 'Default Group', platform: 'openai', rate_multiplier: 1 },
+          { id: 2, name: 'Premium Group', platform: 'openai', rate_multiplier: 0.5 },
+        ],
+        models: [
+          /*
+            故意不给 rate_multiplier：模型自带倍率时优先用它，分组切换就看不出效果。
+            一个模型同时绑两个分组，才验得出「筛哪个就显示哪个」。
+          */
+          {
+            id: 'both-groups',
+            display_name: 'Both Groups',
+            provider: 'OpenAI Official',
+            platform: 'openai',
+            available: true,
+            input_price: 10,
+            group_ids: [1, 2],
+          },
+        ],
+      },
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const groupName = () => wrapper.find('[data-test="model-card"] .primary-group-chip .truncate').text()
+    const rate = () => wrapper.find('[data-test="model-card"] .model-rate-chip').text()
+    const inputPrice = () => wrapper.find('[data-test="model-card"] .price-box strong').text()
+
+    // 不筛选：取倍率最低的分组 —— 管理员最关心的本来就是最低的那个价
+    expect(groupName()).toBe('Premium Group')
+    expect(rate()).toBe('0.5x')
+    // 价格按同一倍率折算：基础价 10 ÷ 基准 0.5 × 当前 0.5 = 10，原价 20 划线
+    expect(inputPrice()).toBe('$10')
+    expect(wrapper.find('[data-test="model-card"] .price-original').text()).toBe('$20')
+
+    // 筛了 Default Group 就必须切过去：卡片标着 A 分组却按 B 分组的倍率算钱，
+    // 比不改还容易误导
+    await wrapper.findAll('select')[0].setValue('1')
+    expect(groupName()).toBe('Default Group')
+    expect(rate()).toBe('1x')
+    // 倍率变了价格必须跟着变：10 ÷ 基准 0.5 × 当前 1 = 20，且不再有划线原价
+    expect(inputPrice()).toBe('$20')
+    expect(wrapper.find('[data-test="model-card"] .price-original').exists()).toBe(false)
+  })
+
   it('工具条支持按名称与价格排序，网格与列表复用同一顺序', async () => {
     getMock.mockResolvedValue({
       provider_slug: 'configured',
@@ -402,6 +612,36 @@ describe('ModelSquareView', () => {
     expect(rows[0]).toContain('Alpha (alpha)')
     expect(rows[1]).toContain('Gamma (gamma)')
     expect(rows[2]).toContain('Beta (beta)')
+  })
+
+  it('列表视图的价格改用与卡片视图一致的卡片呈现', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('button[title="List view"]').trigger('click')
+
+    const row = wrapper.findAll('[data-test="model-row"]')
+      .find(node => node.text().includes('Orphan Model'))
+    expect(row).toBeTruthy()
+
+    // 四个价格位各一张卡片，标签随卡片走 —— 列头合并成一个「价格」之后仍能分清哪个是哪个
+    const boxes = row!.findAll('.list-price-grid .price-box')
+    expect(boxes.map(box => box.find('span').text()))
+      .toEqual(['输入', '输出', '缓存读取', '缓存写入'])
+    expect(boxes[0].find('strong').text()).toBe('$1.25')
+
+    // 单位跟着卡片走：输入价有单位，缓存位在 descriptor 里 unit 为空
+    expect(boxes[0].find('small').text()).toBe('$/百万 tokens')
+    expect(boxes[2].find('small').exists()).toBe(false)
+
+    // 分组倍率把价格压低时补划线原价 —— 旧的四列药丸只有数字，这条信息是缺的
+    expect(boxes[0].find('.price-original').text()).toBe('$5')
+
+    // 未配置的价格位仍是虚线空态，与卡片视图共用同一套 toneClass 判据
+    expect(boxes[1].classes()).toContain('price-box-unset')
+
+    // 旧实现是四个只显示数字的 .price-cell 药丸，样式与用法都已删除
+    expect(wrapper.find('.price-cell').exists()).toBe(false)
   })
 
   it('筛选生效时显示计数，空结果可直接清除筛选恢复全量', async () => {

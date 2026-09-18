@@ -1,6 +1,6 @@
 /**
  * 模型广场用户只读 API
- * 后端聚合配置、渠道、分组、分组平台覆盖与参考价后，前端复用
+ * 后端聚合配置、分组、分组平台覆盖与参考价后，前端复用
  * buildConfiguredModelSquareResult 生成展示目录，供普通用户查看。
  */
 
@@ -8,15 +8,17 @@ import { apiClient } from './client'
 import {
   buildConfiguredModelSquareResult,
   type AdminModelSquareResult,
-  type ModelSquareUserChannel,
   type ModelSquareUserGroup,
 } from './admin/modelSquare'
 import type { ModelSquareConfigPayload, ModelSquareOfficialPricing } from './admin/modelSquareConfig'
 
-/** 模型广场用户接口返回的聚合数据（字段与后端 DTO 一一对应）。 */
+/**
+ * 模型广场用户接口返回的聚合数据（字段与后端 DTO 一一对应）。
+ *
+ * 不含 channels：可用性已改为只看模型自己绑定的分组，渠道数据不再参与展示目录的生成。
+ */
 export interface ModelSquareUserPayload {
   config: ModelSquareConfigPayload
-  channels: ModelSquareUserChannel[]
   groups: ModelSquareUserGroup[]
   platform_overrides: Array<{ id: number | string; effective_platform?: string }>
   reference_prices: Record<string, ModelSquareOfficialPricing>
@@ -44,7 +46,6 @@ export async function getModelSquare(): Promise<AdminModelSquareResult> {
 
   return buildConfiguredModelSquareResult(
     data.config,
-    data.channels || [],
     data.groups || [],
     referencePrices,
     platformOverrides

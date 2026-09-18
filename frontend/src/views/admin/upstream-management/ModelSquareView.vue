@@ -178,7 +178,7 @@
 
                 <div class="price-grid">
                   <div
-                    v-for="slot in modelPriceSlots(model)"
+                    v-for="slot in modelPriceSlots(model, modelEffectiveRate(model))"
                     :key="slot.key"
                     :class="['price-box', slot.toneClass]"
                   >
@@ -195,6 +195,8 @@
                     type="button"
                     v-if="modelGroups(model).length > 0"
                     class="primary-group-chip"
+                    :class="primaryGroupBadgeClass(model)"
+                    :title="primaryGroupTitle(model)"
                     @click.stop="openGroupDialog(model)"
                   >
                     <span class="truncate">{{ primaryGroup(model)?.name }}</span>
@@ -216,15 +218,21 @@
         </div>
 
         <div v-else class="overflow-x-auto">
+          <!--
+            ⚠️ 这里的 min-w-* 是失效的：TablePageLayout 的 `.table-scroll-container :deep(table)`
+            设了 `min-width: max-content`（选择器权重更高），表格宽度一律由内容撑开、超出即横向滚动。
+            所以价格列一改宽，整表宽度就跟着涨，只能从列内容本身下手。
+          -->
           <table class="w-full min-w-[1100px] divide-y divide-gray-100 text-sm dark:divide-dark-700">
             <thead class="bg-gray-50 dark:bg-dark-800">
               <tr>
                 <th class="px-4 py-3 text-left font-medium">{{ t('admin.modelSquare.columns.provider') }}</th>
                 <th class="px-4 py-3 text-left font-medium">{{ t('admin.modelSquare.columns.modelId') }}</th>
-                <th class="px-4 py-3 text-left font-medium">{{ t('admin.modelSquare.columns.input') }}</th>
-                <th class="px-4 py-3 text-left font-medium">{{ t('admin.modelSquare.columns.output') }}</th>
-                <th class="px-4 py-3 text-left font-medium">{{ t('admin.modelSquare.columns.cacheRead') }}</th>
-                <th class="px-4 py-3 text-left font-medium">{{ t('admin.modelSquare.columns.cacheWrite') }}</th>
+                <!--
+                  四个价格位合并成一列：卡片自带标签，列头再写「输入/输出/缓存读取/缓存写入」就是重复信息，
+                  而且四列只有数字、没有单位，横向扫读时分不清哪个是哪个 —— 这正是「看不出层级」的来源。
+                -->
+                <th class="px-4 py-3 text-left font-medium">{{ t('admin.modelSquare.columns.price') }}</th>
                 <th class="px-4 py-3 text-left font-medium">{{ t('admin.modelSquare.columns.groups') }}</th>
                 <th class="px-4 py-3 text-right font-medium">{{ t('admin.modelSquare.columns.actions') }}</th>
               </tr>
@@ -247,12 +255,27 @@
                 <td class="max-w-72 px-4 py-3 font-medium text-gray-950 dark:text-white">
                   <span class="break-words">{{ modelDisplayName(model) }}</span>
                 </td>
-                <td
-                  v-for="slot in modelPriceSlots(model)"
-                  :key="slot.key"
-                  class="whitespace-nowrap px-4 py-3"
-                >
-                  <span :class="['price-cell', priceCellClass(slot.toneClass)]">{{ formatPriceOrZero(slot.value) }}</span>
+                <td class="px-4 py-3">
+                  <!--
+                    与卡片视图共用同一套 price-box 卡片 —— 两个视图之间切换时，价格的语言必须一致，
+                    否则管理员会以为换了个视图就换了套价格。
+
+                    这段 markup 刻意与上方卡片视图的 .price-grid 保持镜像（唯一差异是外层容器类），
+                    因为两个视图在 DOM 里没有共同的祖先可以挂组件：卡片在 <article> 里，这里在 <td> 里。
+                    视觉规则全部在 .price-box* 样式里，改一边就要改另一边。
+                  -->
+                  <div class="list-price-grid">
+                    <div
+                      v-for="slot in modelPriceSlots(model, modelEffectiveRate(model))"
+                      :key="slot.key"
+                      :class="['price-box', slot.toneClass]"
+                    >
+                      <span>{{ slot.label }}</span>
+                      <strong>{{ formatPriceOrZero(slot.value) }}</strong>
+                      <s v-if="slot.originalValue != null" class="price-original">{{ formatPrice(slot.originalValue) }}</s>
+                      <small v-if="slot.unit">{{ slot.unit }}</small>
+                    </div>
+                  </div>
                 </td>
                 <td class="px-4 py-3">
                   <div class="flex min-w-56 flex-wrap gap-1.5">
@@ -261,6 +284,8 @@
                       :key="String(group.id)"
                       type="button"
                       class="group-chip"
+                      :class="groupPlatformBadgeClass(group)"
+                      :title="groupChipTitle(group)"
                       @click.stop="openGroupDialog(model)"
                     >
                       {{ group.name }}
@@ -316,7 +341,11 @@
                 <tr>
                   <th scope="col">{{ t('admin.modelSquare.columns.groups') }}</th>
                   <th scope="col">{{ t('admin.modelSquare.rate') }}</th>
-                  <th v-for="column in detailPriceColumns" :key="column.key" scope="col">{{ column.label }}</th>
+                  <!--
+                    四个价格位合并成一列，与列表视图同一处理：卡片自带标签，
+                    再摆四个「输入/输出/缓存读取/缓存写入」的列头就是重复信息。
+                  -->
+                  <th scope="col">{{ t('admin.modelSquare.columns.price') }}</th>
                 </tr>
               </thead>
               <tbody>
@@ -327,12 +356,39 @@
                   :class="{ active: isCurrentRateGroup(group) }"
                 >
                   <td class="group-cell">
-                    <span class="block truncate font-medium">{{ group.name }}</span>
+                    <!--
+                      分组名与倍率都做成胶囊：这一行读的是「哪个分组、什么倍率、多少钱」，
+                      前两样是标识而不是数字，胶囊才能把它们和右边的价格块分开。
+                      分组名在这里不可点，所以用 span 复用列表视图那枚胶囊 ——
+                      hover 反馈只挂在 button 上，挂在 span 上会让它看起来能点。
+                      配色也复用同一枚：同一个分组在卡片、列表、弹窗里必须是同一种颜色，
+                      否则管理员会以为它们是两个不同的分组。
+                    -->
+                    <span class="group-chip" :class="groupPlatformBadgeClass(group)" :title="groupChipTitle(group)">
+                      <span class="truncate">{{ group.name }}</span>
+                    </span>
                     <code class="text-[11px] text-gray-400">#{{ group.id }}</code>
                   </td>
-                  <td class="rate-cell">{{ formatRate(group.rate_multiplier) }}</td>
-                  <td v-for="slot in detailPriceSlotsFor(group)" :key="slot.key" class="price-col">
-                    {{ formatPriceOrZero(slot.value) }}
+                  <td class="rate-cell">
+                    <span class="model-rate-chip">{{ formatRate(group.rate_multiplier) }}</span>
+                  </td>
+                  <td>
+                    <!--
+                      价格用卡片而不是裸数字，样式与列表视图、配置页同一套（见 .detail-price-grid）。
+                      刻意不渲染划线原价：每一行都是一个分组，而「1 倍率原价」是按模型算的、与行无关，
+                      逐行重复同一个数字只是噪音 —— 这一行打了多少折，左边的倍率胶囊已经说清楚了。
+                    -->
+                    <div class="detail-price-grid">
+                      <div
+                        v-for="slot in detailPriceSlotsFor(group)"
+                        :key="slot.key"
+                        :class="['price-box', slot.toneClass]"
+                      >
+                        <span>{{ slot.label }}</span>
+                        <strong>{{ formatPriceOrZero(slot.value) }}</strong>
+                        <small v-if="slot.unit">{{ slot.unit }}</small>
+                      </div>
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -364,7 +420,17 @@
           class="flex items-center justify-between gap-3 rounded-lg border border-gray-100 bg-gray-50 px-3 py-3 dark:border-dark-700 dark:bg-dark-700/50"
         >
           <div class="min-w-0">
-            <div class="break-words text-sm font-medium text-gray-950 dark:text-white">{{ group.name }}</div>
+            <!--
+              分组名同样跟随平台配色：这个弹窗列的是同一个模型下的全部分组，
+              名字若在这里是黑的、在列表里是平台色，同一行数据就有两种读法。
+              tooltip 带上平台名 —— 颜色不能是唯一的信息载体。
+            -->
+            <div
+              class="break-words text-sm font-medium"
+              :class="groupPlatformTextClass(group)"
+              :title="groupPlatformLabel(group)"
+              data-test="group-dialog-name"
+            >{{ group.name }}</div>
             <code class="text-xs text-gray-400">#{{ group.id }}</code>
           </div>
           <div class="shrink-0 text-xs text-gray-500 dark:text-gray-400">
@@ -400,6 +466,7 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import Icon from '@/components/icons/Icon.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import { platformAccentColor } from '@/utils/platformColors'
+import { groupPlatformBadgeClass, groupPlatformLabel, groupPlatformTextClass } from '../model-square/groupPlatformStyle'
 
 type PriceField =
   | 'input_price'
@@ -476,6 +543,19 @@ const payload = computed(() => result.value?.payload?.data || result.value?.payl
 const models = computed<ModelSquareModel[]>(() => Array.isArray(payload.value.models) ? payload.value.models : [])
 const groups = computed<ModelSquareGroup[]>(() => Array.isArray(payload.value.groups) ? payload.value.groups : [])
 const groupById = computed(() => new Map(groups.value.map(group => [String(group.id), group])))
+/*
+  当前筛选中的分组对象。
+
+  筛选生效时卡片上的分组名、倍率、价格都要跟着它走：这个页面的价格本来就是按分组倍率
+  折算的，管理员筛了分组 B、卡片却标着分组 A 的倍率，那么「看到的分组」和「算出来的
+  价格」就是两回事，比不改还容易误导。
+
+  只取 groups 里能查得到的：分组被删、或下拉里是一个本页加载不出来的 ID 时，
+  回退到「倍率最低的分组」那套老逻辑，而不是显示一个空名字。
+*/
+const activeFilterGroup = computed<ModelSquareGroup | null>(() =>
+  groupFilter.value ? groupById.value.get(groupFilter.value) || null : null
+)
 const providers = computed(() => unique(models.value.map(model => model.provider).filter(Boolean) as string[]))
 // 分组筛选下拉选项（含“全部”占位项）
 const groupFilterOptions = computed<SelectOption[]>(() => [
@@ -500,11 +580,11 @@ const groupDialogTitle = computed(() => {
 })
 const detailGroups = computed(() => detailModel.value ? modelDetailGroups(detailModel.value) : [])
 const detailRate = computed(() => detailModel.value ? modelEffectiveRate(detailModel.value) : 1)
-// 详情表格的列固定取四个语义价格位，与卡片保持一致，避免优先级/图片等价格把列顶掉。
-const detailPriceColumns = computed(() => defaultPriceDescriptors.map(descriptor => ({
-  key: descriptor.key,
-  label: descriptor.label,
-})))
+/*
+  detailPriceColumns 随「价格列改成卡片」一并删除：卡片自带标签，列头不再需要四个价格名。
+  「只取四个语义价格位、不被优先级/图片/按请求价格顶掉」这条约束现在由 modelPriceSlots 承担
+  （它固定遍历 defaultPriceDescriptors），不必在这里再留一份。
+*/
 const detailDialogTitle = computed(() => {
   const id = detailModel.value?.id || t('admin.modelSquare.unnamedModel')
   return `${id} 详情`
@@ -525,7 +605,9 @@ const hasActiveFilters = computed(() => Boolean(
 // 排序键：名称用模型 ID；价格用卡片展示的输入价（已按模型有效倍率换算）。
 // 未配置价格的模型不参与价格比较，始终排在末尾。
 function modelSortPrice(model: ModelSquareModel): number | null {
-  const value = modelPriceValue(model, 'input_price')
+  // 必须带上当前倍率：卡片上的价格已经按它折算，排序若还用原价，
+  // 顺序会和眼睛看到的数字对不上（筛了分组后尤其明显）。
+  const value = modelPriceValue(model, 'input_price', modelEffectiveRate(model))
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 function compareModels(left: ModelSquareModel, right: ModelSquareModel): number {
@@ -618,8 +700,46 @@ function primaryGroupRate(model: ModelSquareModel) {
   return modelEffectiveRate(model)
 }
 
-function primaryGroup(model: ModelSquareModel) {
+/*
+  卡片上代表这个模型的分组：默认取倍率最低的那个（管理员最关心的就是最低价），
+  筛选生效时改取被筛的那个 —— 否则卡片上的分组与倍率跟筛选条件对不上。
+
+  必须确认模型真的绑了它才生效：filteredModels 保证了列表里的模型都绑着，
+  但详情弹窗、复制等路径拿到的模型不受过滤约束，直接取会显示出一个它根本没绑的分组。
+*/
+function primaryGroup(model: ModelSquareModel): ModelSquareGroup | undefined {
+  const filtered = activeFilterGroup.value
+  if (filtered && (model.group_ids || []).some(id => String(id) === String(filtered.id))) {
+    return filtered
+  }
   return modelGroups(model)[0]
+}
+
+/*
+  分组名跟随分组自己的平台配色，取色与配置页共用一处（groupPlatformStyle）：
+  同一个分组在配置页、卡片、列表、详情弹窗里必须是同一种颜色 —— 取色一旦分叉，
+  管理员会以为它们是两个不同的分组。
+
+  平台色直接取 group.platform。展示页的数据由配置接口产出，那里的 platform 已经是
+  「有效平台」（平台覆盖已解析完），所以不必再传 platformOverrides。
+
+  它和卡片上的平台标签不是一回事，两者本来就允许不同：分组归属是手动绑定的，
+  一个 openai 模型完全可以绑在 gemini 的分组上，那时两种颜色正是要传达的信息。
+*/
+function groupChipTitle(group: ModelSquareGroup) {
+  // 颜色不能是唯一的信息载体：色觉障碍下 gemini 蓝 / zhipu 靛几乎分不出来，
+  // tooltip 里带上平台名，色块才不至于退化成纯装饰。
+  return `${group.name} · ${groupPlatformLabel(group)}`
+}
+
+function primaryGroupBadgeClass(model: ModelSquareModel) {
+  const group = primaryGroup(model)
+  return group ? groupPlatformBadgeClass(group) : ''
+}
+
+function primaryGroupTitle(model: ModelSquareModel) {
+  const group = primaryGroup(model)
+  return group ? groupChipTitle(group) : ''
 }
 
 function modelGroupOverflowCount(model: ModelSquareModel) {
@@ -631,12 +751,35 @@ function groupRate(group?: ModelSquareGroup) {
   return Number.isFinite(rate) ? rate : Number.POSITIVE_INFINITY
 }
 
-function modelEffectiveRate(model: ModelSquareModel) {
-  const rate = Number(model.rate_multiplier)
-  if (Number.isFinite(rate)) return rate
+/*
+  价格折算的基准倍率。**必须不随筛选变化**：价格先归一化到这个固定基准，再乘上
+  「当前展示的倍率」，筛选时价格才会跟着动；基准若也跟着筛选变，分子分母一起变，
+  卡片上的价格就永远等于原价，看起来就像没生效。
 
-  const groupRateValue = groupRate(primaryGroup(model))
-  return Number.isFinite(groupRateValue) ? groupRateValue : 1
+  取模型自带的倍率；没有就取「最低倍率分组」—— 也就是不筛选时卡片代表的那个。
+*/
+function modelBaseRate(model: ModelSquareModel): number {
+  const own = Number(model.rate_multiplier)
+  if (Number.isFinite(own)) return own
+
+  const fallback = groupRate(modelGroups(model)[0])
+  return Number.isFinite(fallback) ? fallback : 1
+}
+
+/*
+  卡片当前展示的倍率：筛选生效时取被筛分组的，否则回退到基准。
+
+  被筛分组优先于「模型自带的 rate_multiplier」：管理员筛了分组 B 就是想看 B 下的表现，
+  卡片标着 B 的名字却显示模型自己的倍率，倍率与分组就对不上 —— 这正是先前
+  「分组名变了、倍率没变」的成因。
+*/
+function modelEffectiveRate(model: ModelSquareModel): number {
+  const filtered = activeFilterGroup.value
+  if (filtered && (model.group_ids || []).some(id => String(id) === String(filtered.id))) {
+    const rate = groupRate(filtered)
+    if (Number.isFinite(rate)) return rate
+  }
+  return modelBaseRate(model)
 }
 
 function modelPriceValue(model: ModelSquareModel, field: PriceField, multiplier?: number) {
@@ -647,7 +790,9 @@ function modelPriceValue(model: ModelSquareModel, field: PriceField, multiplier?
   if (!Number.isFinite(price)) return undefined
   if (multiplier == null) return price
 
-  const baseRate = modelEffectiveRate(model)
+  // 基准必须固定：见 modelBaseRate 的注释。用 modelEffectiveRate 会让分子分母同变，
+  // 价格恒等于原价，筛选看起来就没效果。
+  const baseRate = modelBaseRate(model)
   if (!Number.isFinite(baseRate) || baseRate === 0) return price === 0 ? 0 : undefined
   return (price / baseRate) * multiplier
 }
@@ -688,10 +833,6 @@ function modelConfiguredPriceLines(model: ModelSquareModel) {
 
 function formatPriceOrZero(value?: number | string) {
   return value == null || value === '' ? '$0' : formatPrice(value)
-}
-
-function priceCellClass(toneClass: string) {
-  return toneClass === 'price-box-unset' ? 'price-cell-unset' : `price-cell-${toneClass.replace('price-box-', '')}`
 }
 
 function isAvailable(model: ModelSquareModel) {
@@ -1053,53 +1194,77 @@ onMounted(reload)
   opacity: 0.85;
 }
 
-.price-cell {
-  @apply inline-flex items-center rounded border px-1.5 py-0.5 font-mono text-xs font-semibold;
+/*
+  列表视图与详情弹窗的价格卡片组。
+
+  与卡片视图共用 .price-box 的整套视觉语言（色调边框、标签、单位、划线原价），
+  只压掉卡片视图的固定高度与内边距 —— 列表的价值是「一屏比对多个模型」，
+  照搬 min-h-[4.6rem] 会让行高翻倍，那还不如直接切回卡片视图。
+  四格横排而不是 2×2，同理：两行会把行高再抬一倍。
+
+  原先这里是四个只显示数字的 .price-cell 药丸，既没有单位也没有划线原价，
+  四列并排看不出主次 —— 改成卡片后标签随价格走，不必再依赖列头。
+
+  两处共用同一组排布规则：卡片视图、列表视图、详情弹窗三个地方的价格必须长得一样，
+  管理员来回切的时候不能换一副样子。
+*/
+.list-price-grid,
+.detail-price-grid {
+  @apply grid grid-cols-4 gap-2;
 }
 
-.price-cell-teal {
-  background: color-mix(in srgb, var(--ms-brand) 12%, var(--ms-panel));
-  color: var(--ms-brand-strong);
-  border-color: color-mix(in srgb, var(--ms-brand) 30%, var(--ms-line));
+/*
+  弹窗宽度是列表价格列的两倍多，卡片若跟着铺满会被拉到 160px 上下，比配置页那张（83px）宽一倍 ——
+  「一样的卡片」首先得是一样大。356px = 83 × 4 + 间距 8 × 3，正好是配置页那一组卡片的宽度。
+
+  刻意不用 width: max-content 让它自己缩：那是按每一行自己的内容算宽度，分组名长的行会把整组
+  顶宽，于是第二行的「输出」卡与第一行错开 —— 纵向比对各分组的价格正是这张表存在的理由。
+  余下的空间留在价格列右侧，行尾留白在表格里看不出来。
+*/
+.detail-price-grid {
+  max-width: 356px;
 }
 
-.price-cell-orange {
-  background: color-mix(in srgb, var(--ms-orange) 12%, var(--ms-panel));
-  color: var(--ms-orange);
-  border-color: color-mix(in srgb, var(--ms-orange) 30%, var(--ms-line));
+.list-price-grid .price-box,
+.detail-price-grid .price-box {
+  @apply min-h-0 rounded-md px-2 py-1.5;
 }
 
-.price-cell-blue {
-  background: color-mix(in srgb, var(--ms-blue) 12%, var(--ms-panel));
-  color: var(--ms-blue);
-  border-color: color-mix(in srgb, var(--ms-blue) 30%, var(--ms-line));
+/* 紧凑档比卡片视图小一档，字号各降一档，但要保住「标签 < 数字」的层级差。 */
+.list-price-grid .price-box strong,
+.detail-price-grid .price-box strong {
+  @apply text-[13px];
 }
 
-.price-cell-violet {
-  background: color-mix(in srgb, var(--ms-violet) 12%, var(--ms-panel));
-  color: var(--ms-violet);
-  border-color: color-mix(in srgb, var(--ms-violet) 30%, var(--ms-line));
+.list-price-grid .price-box small,
+.detail-price-grid .price-box small {
+  @apply text-[10px];
 }
 
-.price-cell-unset {
-  border-style: dashed;
-  border-color: var(--ms-line);
-  background: var(--ms-panel-2);
-  color: var(--ms-dim);
+.list-price-grid .price-original {
+  @apply text-[10px];
 }
 
 .model-card-footer {
   @apply mt-auto flex flex-wrap items-end justify-between gap-3 pt-4;
 }
 
+/*
+  分组胶囊。这里只给形状与边框宽度，背景/文字/边框色由 groupPlatformBadgeClass 按
+  分组自己的平台给出（与配置页同一套取色）。在这里写死颜色会盖掉平台色。
+*/
 .primary-group-chip {
-  @apply inline-flex min-w-0 max-w-[68%] items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition;
-  color: var(--ms-muted);
+  @apply inline-flex min-w-0 max-w-[68%] items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium transition;
 }
 
+/*
+  hover 把这枚胶囊加深一档，而不是换成另一种颜色：分组已经有平台身份，
+  换色会被读成「换了个分组」。currentColor 就是平台文字色，所以这套 hover
+  对每个平台都成立，不必逐个平台写一遍。
+*/
 .primary-group-chip:hover {
-  background: color-mix(in srgb, var(--ms-amber) 10%, var(--ms-panel));
-  color: var(--ms-amber);
+  border-color: currentColor;
+  background: color-mix(in srgb, currentColor 16%, transparent);
 }
 
 .primary-group-chip b {
@@ -1143,10 +1308,11 @@ onMounted(reload)
   border-bottom: 1px solid var(--ms-line);
 }
 
-/* 分组列左对齐，倍率与价格列右对齐，数字才好上下比对。 */
-.group-price-table th:not(:first-child) {
-  text-align: right;
-}
+/*
+  三列一律左对齐。原先「分组左、倍率与价格右」是为了让裸数字上下对齐；现在倍率是胶囊、
+  价格是卡片，都是自带边框的块，右对齐会把它们推离行的起点，各行卡片的左边缘也会参差。
+  纵向比对改由卡片位置保证（见 .detail-price-grid），不再依赖文本对齐。
+*/
 
 .group-price-table td {
   @apply px-3 py-2.5 align-middle;
@@ -1176,18 +1342,9 @@ onMounted(reload)
   @apply min-w-[9rem] max-w-[14rem];
 }
 
-.rate-cell,
-.price-col {
-  @apply whitespace-nowrap text-right font-mono text-xs;
-}
-
+/* 倍率列只剩一枚胶囊：字重、颜色、底色都由 .model-rate-chip 承担，这里不再重复。 */
 .rate-cell {
-  @apply font-semibold;
-  color: var(--ms-amber);
-}
-
-.price-col {
-  color: var(--ms-text);
+  @apply whitespace-nowrap;
 }
 
 .group-overflow {
@@ -1196,17 +1353,31 @@ onMounted(reload)
   color: var(--ms-muted);
 }
 
+/*
+  分组胶囊：与 .primary-group-chip 同一处理 —— 只给形状与边框宽度，
+  背景/文字/边框色由 groupPlatformBadgeClass 按分组自己的平台给出。
+*/
 .group-chip {
-  @apply inline-flex max-w-full cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs;
-  background: var(--ms-panel-3);
-  color: var(--ms-muted);
+  @apply inline-flex max-w-full items-center gap-1 rounded border px-2 py-1 text-xs;
 }
 
-.group-chip:hover {
-  background: color-mix(in srgb, var(--ms-amber) 10%, var(--ms-panel));
-  color: var(--ms-amber);
+/* 手型与 hover 反馈只挂在按钮上：详情弹窗里的分组名不可点，用 span 复用同一枚胶囊，
+   挂上这两样会让它看起来能点。 */
+button.group-chip {
+  @apply cursor-pointer;
 }
 
+/* 与卡片视图的胶囊同一套 hover：把当前这枚胶囊加深，不换色。 */
+button.group-chip:hover {
+  border-color: currentColor;
+  background: color-mix(in srgb, currentColor 18%, transparent);
+}
+
+/*
+  倍率留在琥珀色，不跟着分组名走平台色：全页「琥珀 = 倍率/折扣」这条约定
+  （卡片上的 .model-rate-chip 同样是琥珀）不该在胶囊内部断掉，
+  而且列表里一串胶囊的倍率同色才扫得动。
+*/
 .group-chip b {
   @apply font-semibold;
   color: var(--ms-amber);
