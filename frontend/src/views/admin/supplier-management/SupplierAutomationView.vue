@@ -265,7 +265,7 @@
                 type="button"
                 @click="openHealthGuardAccounts"
               >
-                <Icon name="cog" size="sm" />
+                <Icon name="cog" size="md" />
                 配置检查账号
               </button>
             </div>
@@ -939,6 +939,33 @@
                     title="为该账号单独设置检查频率，留空表示按任务全局执行间隔"
                     @update:model-value="setHealthGuardAccountInterval(mapping.localAccountID, $event)"
                   />
+                  <Input
+                    :model-value="healthGuardAccountThresholdValue('account_health_guard_account_failure_thresholds', mapping.localAccountID)"
+                    type="number"
+                    min="1"
+                    :placeholder="`失败阈值（全局 ${editForm.config.account_health_guard_failure_threshold}）`"
+                    :aria-label="`账号 ${mapping.localAccountName} 连续失败暂停阈值，留空表示沿用全局阈值 ${editForm.config.account_health_guard_failure_threshold}`"
+                    :title="`连续失败达到该次数后自动暂停该账号调度，留空表示沿用全局阈值 ${editForm.config.account_health_guard_failure_threshold}`"
+                    @update:model-value="setHealthGuardAccountThreshold('account_health_guard_account_failure_thresholds', mapping.localAccountID, $event)"
+                  />
+                  <Input
+                    :model-value="healthGuardAccountThresholdValue('account_health_guard_account_slow_thresholds', mapping.localAccountID)"
+                    type="number"
+                    min="1"
+                    :placeholder="`慢响应阈值（全局 ${editForm.config.account_health_guard_slow_threshold}）`"
+                    :aria-label="`账号 ${mapping.localAccountName} 连续慢响应暂停阈值，留空表示沿用全局阈值 ${editForm.config.account_health_guard_slow_threshold}`"
+                    :title="`连续慢响应达到该次数后自动暂停该账号调度，留空表示沿用全局阈值 ${editForm.config.account_health_guard_slow_threshold}`"
+                    @update:model-value="setHealthGuardAccountThreshold('account_health_guard_account_slow_thresholds', mapping.localAccountID, $event)"
+                  />
+                  <Input
+                    :model-value="healthGuardAccountThresholdValue('account_health_guard_account_recovery_thresholds', mapping.localAccountID)"
+                    type="number"
+                    min="1"
+                    :placeholder="`恢复阈值（全局 ${editForm.config.account_health_guard_recovery_threshold}）`"
+                    :aria-label="`账号 ${mapping.localAccountName} 连续健康恢复阈值，留空表示沿用全局阈值 ${editForm.config.account_health_guard_recovery_threshold}`"
+                    :title="`连续健康达到该次数后自动恢复该账号调度，留空表示沿用全局阈值 ${editForm.config.account_health_guard_recovery_threshold}`"
+                    @update:model-value="setHealthGuardAccountThreshold('account_health_guard_account_recovery_thresholds', mapping.localAccountID, $event)"
+                  />
                   <label class="sp-health-guard-account-scheduling-toggle">
                     <Toggle
                       :model-value="healthGuardAccountSchedulingChangeValue(mapping.localAccountID)"
@@ -1091,6 +1118,9 @@ const editForm = reactive<SupplierAutomationTask>({
     account_health_guard_platform_models: {},
     account_health_guard_platform_latency_ms: {},
     account_health_guard_account_scheduling_change: {},
+    account_health_guard_account_failure_thresholds: {},
+    account_health_guard_account_slow_thresholds: {},
+    account_health_guard_account_recovery_thresholds: {},
     account_health_guard_cursor_account_id: 0,
   },
   last_status: '',
@@ -2131,6 +2161,9 @@ function applyAccountHealthGuardDefaults() {
   config.account_health_guard_platform_latency_ms = normalizePositiveNumberMap(config.account_health_guard_platform_latency_ms)
   config.account_health_guard_account_intervals = normalizeAccountHealthGuardAccountIntervals(config.account_health_guard_account_intervals)
   config.account_health_guard_account_scheduling_change = normalizeAccountHealthGuardSchedulingChange(config.account_health_guard_account_scheduling_change)
+  config.account_health_guard_account_failure_thresholds = normalizeAccountHealthGuardAccountThresholds(config.account_health_guard_account_failure_thresholds)
+  config.account_health_guard_account_slow_thresholds = normalizeAccountHealthGuardAccountThresholds(config.account_health_guard_account_slow_thresholds)
+  config.account_health_guard_account_recovery_thresholds = normalizeAccountHealthGuardAccountThresholds(config.account_health_guard_account_recovery_thresholds)
   const cursorAccountID = Number(config.account_health_guard_cursor_account_id)
   config.account_health_guard_cursor_account_id = Number.isSafeInteger(cursorAccountID) && cursorAccountID > 0 ? cursorAccountID : 0
 }
@@ -2172,6 +2205,21 @@ function validateAccountHealthGuardConfig(config: SupplierAutomationConfig = edi
     }
   }
   config.account_health_guard_account_intervals = normalizeAccountHealthGuardAccountIntervals(config.account_health_guard_account_intervals)
+  const accountThresholdRules: Array<[Record<string, number>, string]> = [
+    [config.account_health_guard_account_failure_thresholds || {}, '连续失败暂停阈值'],
+    [config.account_health_guard_account_slow_thresholds || {}, '连续慢响应暂停阈值'],
+    [config.account_health_guard_account_recovery_thresholds || {}, '连续健康恢复阈值'],
+  ]
+  for (const [thresholds, label] of accountThresholdRules) {
+    for (const [accountID, threshold] of Object.entries(thresholds)) {
+      if (!Number.isInteger(threshold) || threshold < 1) {
+        return `账号 #${accountID} 的${label}必须是正整数`
+      }
+    }
+  }
+  config.account_health_guard_account_failure_thresholds = normalizeAccountHealthGuardAccountThresholds(config.account_health_guard_account_failure_thresholds)
+  config.account_health_guard_account_slow_thresholds = normalizeAccountHealthGuardAccountThresholds(config.account_health_guard_account_slow_thresholds)
+  config.account_health_guard_account_recovery_thresholds = normalizeAccountHealthGuardAccountThresholds(config.account_health_guard_account_recovery_thresholds)
   return validateAccountHealthGuardSelection(config)
 }
 
@@ -2218,6 +2266,47 @@ function removeHealthGuardAccount(id: number) {
   const schedulingChange = { ...(editForm.config.account_health_guard_account_scheduling_change || {}) }
   delete schedulingChange[String(id)]
   editForm.config.account_health_guard_account_scheduling_change = schedulingChange
+  // 阈值覆盖与账号选择强绑定，取消选择后必须一并清掉，否则重新选中会带着旧覆盖值回来。
+  editForm.config.account_health_guard_account_failure_thresholds = deleteHealthGuardAccountThreshold(
+    editForm.config.account_health_guard_account_failure_thresholds, id)
+  editForm.config.account_health_guard_account_slow_thresholds = deleteHealthGuardAccountThreshold(
+    editForm.config.account_health_guard_account_slow_thresholds, id)
+  editForm.config.account_health_guard_account_recovery_thresholds = deleteHealthGuardAccountThreshold(
+    editForm.config.account_health_guard_account_recovery_thresholds, id)
+}
+
+function deleteHealthGuardAccountThreshold(value: unknown, accountID: number): Record<string, number> {
+  const thresholds = { ...normalizeAccountHealthGuardAccountThresholds(value) }
+  delete thresholds[String(accountID)]
+  return thresholds
+}
+
+function healthGuardAccountThresholdValue(
+  field: 'account_health_guard_account_failure_thresholds'
+    | 'account_health_guard_account_slow_thresholds'
+    | 'account_health_guard_account_recovery_thresholds',
+  accountID: number
+): number | undefined {
+  const threshold = Number(editForm.config[field]?.[String(accountID)])
+  return Number.isSafeInteger(threshold) && threshold > 0 ? threshold : undefined
+}
+
+function setHealthGuardAccountThreshold(
+  field: 'account_health_guard_account_failure_thresholds'
+    | 'account_health_guard_account_slow_thresholds'
+    | 'account_health_guard_account_recovery_thresholds',
+  accountID: number,
+  value: string | number
+) {
+  const thresholds = { ...normalizeAccountHealthGuardAccountThresholds(editForm.config[field]) }
+  const parsed = Math.floor(Number(value))
+  // 留空或非法输入一律回落到全局阈值，与「检查间隔」字段的留空语义保持一致。
+  if (Number.isSafeInteger(parsed) && parsed > 0) {
+    thresholds[String(accountID)] = parsed
+  } else {
+    delete thresholds[String(accountID)]
+  }
+  editForm.config[field] = thresholds
 }
 function normalizePositiveAccountIDs(value: unknown): number[] {
   if (!Array.isArray(value)) return []
@@ -2281,6 +2370,16 @@ function normalizeAccountHealthGuardAccountIntervals(value: unknown): Record<str
     Object.entries(value as Record<string, unknown>)
       .map(([key, item]) => [key.trim(), Math.floor(Number(item))])
       .filter(([key, item]) => Boolean(key) && Number.isFinite(item) && Number(item) >= 60)
+  ) as Record<string, number>
+}
+
+// 账号级阈值只保留正整数；留空或非法值等于不覆盖，交由全局阈值生效。
+function normalizeAccountHealthGuardAccountThresholds(value: unknown): Record<string, number> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .map(([key, item]) => [key.trim(), Math.floor(Number(item))])
+      .filter(([key, item]) => Boolean(key) && Number.isSafeInteger(item) && Number(item) > 0)
   ) as Record<string, number>
 }
 
@@ -3085,12 +3184,14 @@ function intervalSecondsToCron(seconds: number): string | null {
   max-height: min(95vh, calc(100dvh - 16px));
 }
 
-/* 电脑端：健康守护编辑与账号配置弹窗加宽到约 80% 视口 */
+/* 电脑端：任务编辑弹窗与健康守护账号配置弹窗横向铺满屏幕（只留 overlay 自带的四周外边距）。
+   两者是同一层级的配置入口（后者由前者内的按钮打开），尺寸保持一致才不会出现层级间的跳变。
+   只在 >=768px 生效，窄屏沿用 BaseDialog 的 full 档表现，避免手机上挤掉内容宽度。 */
 @media (min-width: 768px) {
-  :global(.modal-content:has(.sp-edit-dialog.is-health-guard)),
-  :global(.modal-content:has(.sp-health-guard-account-dialog)) {
-    width: min(1440px, 80vw);
-    max-width: min(1440px, 80vw);
+  :global(.modal-content:has(.sp-health-guard-account-dialog)),
+  :global(.modal-content:has(.sp-edit-dialog)) {
+    width: calc(100vw - 2rem);
+    max-width: calc(100vw - 2rem);
   }
 }
 
@@ -3109,9 +3210,21 @@ function intervalSecondsToCron(seconds: number): string | null {
   overflow: hidden;
 }
 
-/* 账号配置弹窗：让内容区吃满可用高度，列表在剩余空间内滚动 */
-:global(.modal-content:has(.sp-health-guard-account-dialog)) {
-  height: min(95vh, calc(100dvh - 16px));
+/* 任务编辑弹窗与账号配置弹窗：让内容区吃满可用高度，列表在剩余空间内滚动。
+   高度同样顶到 overlay 留白之内，与宽度一起构成「近全屏」。
+   这条必须排在上面那条 max-height: min(95vh, …) 之后 —— 两者选择器权重相同，
+   靠源码顺序取胜。 */
+:global(.modal-content:has(.sp-health-guard-account-dialog)),
+:global(.modal-content:has(.sp-edit-dialog)) {
+  height: calc(100dvh - 1rem);
+  max-height: calc(100dvh - 1rem);
+}
+@media (min-width: 640px) {
+  :global(.modal-content:has(.sp-health-guard-account-dialog)),
+  :global(.modal-content:has(.sp-edit-dialog)) {
+    height: calc(100dvh - 2rem);
+    max-height: calc(100dvh - 2rem);
+  }
 }
 
 :global(.modal-content:has(.sp-health-guard-account-dialog) .modal-footer),
@@ -3722,6 +3835,12 @@ function intervalSecondsToCron(seconds: number): string | null {
   align-items: center;
   justify-content: center;
   gap: 6px;
+  /* 这个按钮是「健康守护策略」区唯一的操作入口，卡片里也只有它一个可点目标，
+     继承 .small 的 32px 高 / 12px 字在这一片最容易漏看，因此在此处单点放大。
+     量级取常规 .sp-button（40px / 14px）与 .small 之间，并加大左右内边距配合文字。 */
+  min-height: 2.5rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.8125rem;
   border-color: color-mix(in srgb, var(--sp-blue) 45%, var(--sp-line));
   background: color-mix(in srgb, var(--sp-blue) 9%, var(--sp-panel));
   color: var(--sp-blue);

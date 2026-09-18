@@ -640,6 +640,81 @@ func supplierAccountHealthGuardReasonNames(reasons []SupplierAccountHealthGuardS
 	return out
 }
 
+func TestNormalizeSupplierAccountHealthGuardConfigAccountThresholds(t *testing.T) {
+	config := normalizeSupplierAccountHealthGuardConfig(SupplierAccountHealthGuardConfig{
+		AccountFailureThresholds:  map[int64]int{1: 5, 2: 0, 3: -1, 0: 4},
+		AccountSlowThresholds:     map[int64]int{1: 6, 2: 0},
+		AccountRecoveryThresholds: map[int64]int{1: 7, 2: -3},
+	})
+	require.Equal(t, map[int64]int{1: 5}, config.AccountFailureThresholds)
+	require.Equal(t, map[int64]int{1: 6}, config.AccountSlowThresholds)
+	require.Equal(t, map[int64]int{1: 7}, config.AccountRecoveryThresholds)
+}
+
+// 账号级阈值必须逐项独立覆盖：只填其中一项时，另外两项仍走全局，不能被隐式冻结为 0。
+func TestSupplierAccountHealthGuardThresholdsForAccountFallsBackPerField(t *testing.T) {
+	config := normalizeSupplierAccountHealthGuardConfig(SupplierAccountHealthGuardConfig{
+		FailureThreshold:          3,
+		SlowThreshold:             4,
+		RecoveryThreshold:         2,
+		AccountFailureThresholds:  map[int64]int{11: 10},
+		AccountRecoveryThresholds: map[int64]int{11: 1, 12: 5},
+	})
+
+	recovery, slow, failure := supplierAccountHealthGuardThresholdsForAccount(config, 11)
+	require.Equal(t, 1, recovery)
+	require.Equal(t, 4, slow)
+	require.Equal(t, 10, failure)
+
+	recovery, slow, failure = supplierAccountHealthGuardThresholdsForAccount(config, 12)
+	require.Equal(t, 5, recovery)
+	require.Equal(t, 4, slow)
+	require.Equal(t, 3, failure)
+
+	recovery, slow, failure = supplierAccountHealthGuardThresholdsForAccount(config, 99)
+	require.Equal(t, 2, recovery)
+	require.Equal(t, 4, slow)
+	require.Equal(t, 3, failure)
+}
+
+// 账号级阈值收紧后，同一份运行结果应当由该账号自己的阈值决定是否暂停。
+func TestSupplierAccountHealthGuardRunUsesPerAccountThresholds(t *testing.T) {
+	strict := newSupplierAccountHealthGuardCandidate(81, "严格账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 81})
+	strict.LocalAccount.Extra[supplierHealthGuardFailureCountExtraKey] = 1
+	lax := newSupplierAccountHealthGuardCandidate(82, "宽松账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 82})
+	lax.LocalAccount.Extra[supplierHealthGuardFailureCountExtraKey] = 1
+
+	repo := &supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{strict, lax}}
+	tester := &supplierAccountHealthGuardTesterStub{
+		results: map[int64]*ScheduledTestResult{
+			81: {Status: "failed", ErrorMessage: "上游 500"},
+			82: {Status: "failed", ErrorMessage: "上游 500"},
+		},
+		errs: map[int64]error{},
+	}
+	store := &supplierAccountHealthGuardAccountStoreStub{}
+	guard := NewSupplierAccountHealthGuardService(repo, store, tester)
+
+	result, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{
+		AccountIDs:               []int64{81, 82},
+		FailureThreshold:         3,
+		PlatformModels:           map[string]string{"openai": "gpt-4o-mini"},
+		AccountFailureThresholds: map[int64]int{81: 2},
+	}, time.Now())
+
+	require.NoError(t, err)
+	items := map[int64]SupplierAccountHealthGuardRunItem{}
+	for _, item := range result.Items {
+		items[item.LocalAccountID] = item
+	}
+	require.Equal(t, SupplierAccountHealthGuardActionDisabled, items[81].Action)
+	require.False(t, items[81].SchedulableAfter)
+	require.Equal(t, SupplierAccountHealthGuardActionNone, items[82].Action)
+	require.True(t, items[82].SchedulableAfter)
+	require.Equal(t, 2, items[81].ConsecutiveFailed)
+	require.Equal(t, 2, items[82].ConsecutiveFailed)
+}
+
 func TestNormalizeSupplierAccountHealthGuardConfigAccountIntervals(t *testing.T) {
 	config := normalizeSupplierAccountHealthGuardConfig(SupplierAccountHealthGuardConfig{
 		AccountIntervals: map[int64]int{

@@ -21,6 +21,10 @@ export interface SupplierAutomationConfig {
   account_health_guard_platform_latency_ms: Record<string, number>
   account_health_guard_account_intervals: Record<string, number>
   account_health_guard_account_scheduling_change: Record<string, boolean>
+  /** 账号级阈值覆盖，键为本地账号 ID；未列出的账号沿用同名的全局阈值。 */
+  account_health_guard_account_failure_thresholds: Record<string, number>
+  account_health_guard_account_slow_thresholds: Record<string, number>
+  account_health_guard_account_recovery_thresholds: Record<string, number>
   account_health_guard_cursor_account_id: number
 }
 

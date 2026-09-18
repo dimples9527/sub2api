@@ -76,7 +76,12 @@ type SupplierAccountHealthGuardConfig struct {
 	PlatformLatencyMs        map[string]int64  `json:"account_health_guard_platform_latency_ms"`
 	AccountIntervals         map[int64]int     `json:"account_health_guard_account_intervals"`
 	AccountSchedulingChange  map[int64]bool    `json:"account_health_guard_account_scheduling_change"`
-	CursorAccountID          int64             `json:"account_health_guard_cursor_account_id"`
+	// 账号级阈值覆盖：键为本地账号 ID，未出现的账号回落到上面的全局阈值。
+	// 存独立映射而不是「账号 → 整组阈值」，是为了让同一账号只覆盖部分阈值时不会隐式冻结另外两项。
+	AccountFailureThresholds  map[int64]int `json:"account_health_guard_account_failure_thresholds"`
+	AccountSlowThresholds     map[int64]int `json:"account_health_guard_account_slow_thresholds"`
+	AccountRecoveryThresholds map[int64]int `json:"account_health_guard_account_recovery_thresholds"`
+	CursorAccountID           int64         `json:"account_health_guard_cursor_account_id"`
 }
 
 type SupplierAccountHealthGuardSource struct {
@@ -169,10 +174,10 @@ type SupplierAccountHealthGuardRunner interface {
 }
 
 type SupplierAccountHealthGuardService struct {
-	repository       SupplierAccountHealthGuardRepository
-	accountStore     supplierAccountHealthGuardAccountStore
-	tester           supplierAccountHealthGuardTester
-	historyRecorder  SupplierAccountHealthHistoryRecorder
+	repository      SupplierAccountHealthGuardRepository
+	accountStore    supplierAccountHealthGuardAccountStore
+	tester          supplierAccountHealthGuardTester
+	historyRecorder SupplierAccountHealthHistoryRecorder
 }
 
 type supplierAccountHealthGuardTarget struct {
@@ -704,10 +709,23 @@ func normalizeSupplierAccountHealthGuardConfig(config SupplierAccountHealthGuard
 	config.PlatformModels = normalizeSupplierAccountHealthGuardPlatformModels(config.PlatformModels)
 	config.PlatformLatencyMs = normalizeSupplierAccountHealthGuardPlatformLatency(config.PlatformLatencyMs)
 	config.AccountIntervals = normalizeSupplierAccountHealthGuardAccountIntervals(config.AccountIntervals)
+	config.AccountFailureThresholds = normalizeSupplierAccountHealthGuardAccountThresholds(config.AccountFailureThresholds)
+	config.AccountSlowThresholds = normalizeSupplierAccountHealthGuardAccountThresholds(config.AccountSlowThresholds)
+	config.AccountRecoveryThresholds = normalizeSupplierAccountHealthGuardAccountThresholds(config.AccountRecoveryThresholds)
 	if config.AccountSchedulingChange == nil {
 		config.AccountSchedulingChange = map[int64]bool{}
 	}
 	return config
+}
+
+func normalizeSupplierAccountHealthGuardAccountThresholds(values map[int64]int) map[int64]int {
+	out := make(map[int64]int)
+	for accountID, threshold := range values {
+		if accountID > 0 && threshold > 0 {
+			out[accountID] = threshold
+		}
+	}
+	return out
 }
 
 func normalizeSupplierAccountHealthGuardAccountIDs(values []int64) []int64 {
@@ -824,21 +842,48 @@ func supplierAccountHealthGuardEvaluateResult(contextErr error, runErr error, re
 }
 
 func supplierAccountHealthGuardNextSchedulingState(config SupplierAccountHealthGuardConfig, item SupplierAccountHealthGuardRunItem) (bool, string, string) {
+	recovery, slow, failure := supplierAccountHealthGuardThresholdsForAccount(config, item.LocalAccountID)
 	switch item.Status {
 	case SupplierAccountHealthGuardStatusHealthy:
-		if !item.SchedulableBefore && item.ConsecutiveHealthy >= config.RecoveryThreshold {
+		if !item.SchedulableBefore && item.ConsecutiveHealthy >= recovery {
 			return true, SupplierAccountHealthGuardActionRecovered, fmt.Sprintf("连续健康 %d 次", item.ConsecutiveHealthy)
 		}
 	case SupplierAccountHealthGuardStatusSlow:
-		if item.SchedulableBefore && item.ConsecutiveSlow >= config.SlowThreshold {
+		if item.SchedulableBefore && item.ConsecutiveSlow >= slow {
 			return false, SupplierAccountHealthGuardActionDisabled, fmt.Sprintf("连续慢响应 %d 次", item.ConsecutiveSlow)
 		}
 	case SupplierAccountHealthGuardStatusFailed:
-		if item.SchedulableBefore && item.ConsecutiveFailed >= config.FailureThreshold {
+		if item.SchedulableBefore && item.ConsecutiveFailed >= failure {
 			return false, SupplierAccountHealthGuardActionDisabled, fmt.Sprintf("连续失败 %d 次", item.ConsecutiveFailed)
 		}
 	}
 	return item.SchedulableBefore, SupplierAccountHealthGuardActionNone, item.Reason
+}
+
+// 账号级阈值优先，未单独配置的账号沿用全局阈值；全局阈值已被归一化为正数，因此这里的兜底是防御性的。
+func supplierAccountHealthGuardThresholdsForAccount(config SupplierAccountHealthGuardConfig, accountID int64) (recovery, slow, failure int) {
+	recovery = config.RecoveryThreshold
+	if recovery <= 0 {
+		recovery = DefaultSupplierAccountHealthGuardRecoveryThreshold
+	}
+	slow = config.SlowThreshold
+	if slow <= 0 {
+		slow = DefaultSupplierAccountHealthGuardSlowThreshold
+	}
+	failure = config.FailureThreshold
+	if failure <= 0 {
+		failure = DefaultSupplierAccountHealthGuardFailureThreshold
+	}
+	if threshold := config.AccountRecoveryThresholds[accountID]; threshold > 0 {
+		recovery = threshold
+	}
+	if threshold := config.AccountSlowThresholds[accountID]; threshold > 0 {
+		slow = threshold
+	}
+	if threshold := config.AccountFailureThresholds[accountID]; threshold > 0 {
+		failure = threshold
+	}
+	return recovery, slow, failure
 }
 
 func supplierAccountHealthGuardExtraInt(extra map[string]any, key string) int {

@@ -414,6 +414,10 @@ describe('SupplierAutomationView edit dialog', () => {
       'account_health_guard_platform_models',
       'account_health_guard_platform_latency_ms',
       'account_health_guard_account_intervals',
+      'account_health_guard_account_scheduling_change',
+      'account_health_guard_account_failure_thresholds',
+      'account_health_guard_account_slow_thresholds',
+      'account_health_guard_account_recovery_thresholds',
       'account_health_guard_cursor_account_id',
     ]
 
@@ -465,6 +469,22 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('interval >= 60')
     expect(supplierAutomationSource).toContain('的检查间隔不能小于 60 秒')
     expect(supplierAutomationSource).toContain('留空表示按任务全局执行间隔')
+  })
+
+  it('supports per-account failure, slow and recovery threshold override in the health guard account dialog', () => {
+    expect(supplierAutomationSource).toContain('account_health_guard_account_failure_thresholds: {}')
+    expect(supplierAutomationSource).toContain('account_health_guard_account_slow_thresholds: {}')
+    expect(supplierAutomationSource).toContain('account_health_guard_account_recovery_thresholds: {}')
+    expect(supplierAutomationSource).toContain('healthGuardAccountThresholdValue')
+    expect(supplierAutomationSource).toContain('setHealthGuardAccountThreshold')
+    expect(supplierAutomationSource).toContain('normalizeAccountHealthGuardAccountThresholds')
+    expect(supplierAutomationSource).toContain('deleteHealthGuardAccountThreshold')
+    expect(supplierAutomationSource).toContain('失败阈值（全局')
+    expect(supplierAutomationSource).toContain('慢响应阈值（全局')
+    expect(supplierAutomationSource).toContain('恢复阈值（全局')
+    expect(supplierAutomationSource).toContain('的${label}必须是正整数')
+    // 留空即继承全局：非法输入必须落回删除分支，否则「空」会被写成 0 反而覆盖掉全局阈值。
+    expect(supplierAutomationSource).toContain('delete thresholds[String(accountID)]')
   })
 
   it('allows each selected health guard account to opt out of scheduling changes', () => {
@@ -588,6 +608,40 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain(':global(.dark .modal-content:has(.sp-health-guard-account-dialog))')
     expect(supplierAutomationSource).toContain(':global(.modal-content:has(.sp-health-guard-account-dialog) .modal-body)')
     expect(supplierAutomationSource).toContain(':global(.modal-content:has(.sp-health-guard-account-dialog) .modal-footer)')
+  })
+
+  // 任务编辑弹窗与账号配置弹窗是同一层级的配置入口（后者由前者内的按钮打开），
+  // 两者必须共用同一条尺寸规则。历史上只写了一处选择器，导致另一处悄悄退回 BaseDialog 默认宽度。
+  it('sizes the task edit dialog and the health guard account dialog with one shared rule', () => {
+    const widthRule = supplierAutomationSource.slice(
+      supplierAutomationSource.indexOf('@media (min-width: 768px)'),
+    )
+    expect(widthRule).toContain(
+      ':global(.modal-content:has(.sp-health-guard-account-dialog)),\n  :global(.modal-content:has(.sp-edit-dialog)) {',
+    )
+    expect(widthRule).toContain('width: calc(100vw - 2rem);')
+    expect(widthRule).toContain('max-width: calc(100vw - 2rem);')
+
+    const heightRule = supplierAutomationSource.slice(
+      supplierAutomationSource.indexOf('高度同样顶到 overlay 留白之内'),
+    )
+    expect(heightRule).toContain(
+      ':global(.modal-content:has(.sp-health-guard-account-dialog)),\n:global(.modal-content:has(.sp-edit-dialog)) {',
+    )
+    expect(heightRule).toContain('height: calc(100dvh - 1rem);')
+  })
+
+  // 「配置检查账号」是健康守护策略区唯一的操作入口，卡片里也只有它一个可点目标。
+  // 它继承的是 .small（32px / 12px），在那一片最容易漏看，因此在专属类上单点放大。
+  // 这条断言防止以后有人「统一小按钮」把它一起改回去。
+  it('renders the health guard account config button larger than the shared small preset', () => {
+    const buttonRule = supplierAutomationSource.slice(
+      supplierAutomationSource.indexOf('.sp-health-guard-account-card .sp-button.sp-health-guard-config-button {'),
+    )
+    expect(buttonRule).toMatch(/min-height:\s*2\.5rem;/)
+    expect(buttonRule).toMatch(/font-size:\s*0\.8125rem;/)
+    // 模板侧同步放大图标，否则 40px 的按钮里挂一个 16px 图标会显得头轻脚重。
+    expect(supplierAutomationSource).toContain('<Icon name="cog" size="md" />')
   })
 
   it('keeps the mobile health guard account regions internally scrollable', () => {

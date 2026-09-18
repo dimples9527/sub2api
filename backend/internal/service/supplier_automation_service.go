@@ -78,7 +78,11 @@ type SupplierAutomationConfig struct {
 	AccountHealthGuardPlatformLatencyMs        map[string]int64  `json:"account_health_guard_platform_latency_ms"`
 	AccountHealthGuardAccountIntervals         map[int64]int     `json:"account_health_guard_account_intervals"`
 	AccountHealthGuardAccountSchedulingChange  map[int64]bool    `json:"account_health_guard_account_scheduling_change"`
-	AccountHealthGuardCursorAccountID          int64             `json:"account_health_guard_cursor_account_id"`
+	// 账号级阈值覆盖，未列出的账号沿用上面的全局阈值。
+	AccountHealthGuardAccountFailureThresholds  map[int64]int `json:"account_health_guard_account_failure_thresholds"`
+	AccountHealthGuardAccountSlowThresholds     map[int64]int `json:"account_health_guard_account_slow_thresholds"`
+	AccountHealthGuardAccountRecoveryThresholds map[int64]int `json:"account_health_guard_account_recovery_thresholds"`
+	AccountHealthGuardCursorAccountID           int64         `json:"account_health_guard_cursor_account_id"`
 }
 
 type SupplierAutomationRun struct {
@@ -607,20 +611,23 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 			return fmt.Errorf("supplier account health guard service is required")
 		}
 		result, err := s.accountHealthGuard.Run(ctx, SupplierAccountHealthGuardConfig{
-			MaxAccountsPerRun:        task.Config.AccountHealthGuardMaxAccountsPerRun,
-			Concurrency:              task.Config.AccountHealthGuardConcurrency,
-			TimeoutPerAccountSeconds: task.Config.AccountHealthGuardTimeoutPerAccountSeconds,
-			FailureThreshold:         task.Config.AccountHealthGuardFailureThreshold,
-			SlowThreshold:            task.Config.AccountHealthGuardSlowThreshold,
-			RecoveryThreshold:        task.Config.AccountHealthGuardRecoveryThreshold,
-			HealthyLatencyMs:         task.Config.AccountHealthGuardHealthyLatencyMs,
-			AccountIDs:               task.Config.AccountHealthGuardAccountIDs,
-			AccountModels:            task.Config.AccountHealthGuardAccountModels,
-			PlatformModels:           task.Config.AccountHealthGuardPlatformModels,
-			PlatformLatencyMs:        task.Config.AccountHealthGuardPlatformLatencyMs,
-			AccountIntervals:         task.Config.AccountHealthGuardAccountIntervals,
-			AccountSchedulingChange:  task.Config.AccountHealthGuardAccountSchedulingChange,
-			CursorAccountID:          task.Config.AccountHealthGuardCursorAccountID,
+			MaxAccountsPerRun:         task.Config.AccountHealthGuardMaxAccountsPerRun,
+			Concurrency:               task.Config.AccountHealthGuardConcurrency,
+			TimeoutPerAccountSeconds:  task.Config.AccountHealthGuardTimeoutPerAccountSeconds,
+			FailureThreshold:          task.Config.AccountHealthGuardFailureThreshold,
+			SlowThreshold:             task.Config.AccountHealthGuardSlowThreshold,
+			RecoveryThreshold:         task.Config.AccountHealthGuardRecoveryThreshold,
+			HealthyLatencyMs:          task.Config.AccountHealthGuardHealthyLatencyMs,
+			AccountIDs:                task.Config.AccountHealthGuardAccountIDs,
+			AccountModels:             task.Config.AccountHealthGuardAccountModels,
+			PlatformModels:            task.Config.AccountHealthGuardPlatformModels,
+			PlatformLatencyMs:         task.Config.AccountHealthGuardPlatformLatencyMs,
+			AccountIntervals:          task.Config.AccountHealthGuardAccountIntervals,
+			AccountSchedulingChange:   task.Config.AccountHealthGuardAccountSchedulingChange,
+			AccountFailureThresholds:  task.Config.AccountHealthGuardAccountFailureThresholds,
+			AccountSlowThresholds:     task.Config.AccountHealthGuardAccountSlowThresholds,
+			AccountRecoveryThresholds: task.Config.AccountHealthGuardAccountRecoveryThresholds,
+			CursorAccountID:           task.Config.AccountHealthGuardCursorAccountID,
 		}, time.Now())
 		run.ProcessedCount = result.CheckedCount + result.UnavailableCount
 		run.SuccessCount = result.HealthyCount + result.SlowCount
@@ -789,6 +796,19 @@ func validateSupplierAutomationTask(task SupplierAutomationTask) error {
 		for _, interval := range config.AccountHealthGuardAccountIntervals {
 			if interval > 0 && interval < MinSupplierAccountHealthGuardAccountIntervalSeconds {
 				return ErrSupplierProviderInvalid
+			}
+		}
+		// 账号级阈值非正数在归一化时会被丢弃并回落全局，这里直接拒绝，避免管理员以为已生效。
+		accountThresholds := []map[int64]int{
+			config.AccountHealthGuardAccountFailureThresholds,
+			config.AccountHealthGuardAccountSlowThresholds,
+			config.AccountHealthGuardAccountRecoveryThresholds,
+		}
+		for _, thresholds := range accountThresholds {
+			for accountID, threshold := range thresholds {
+				if accountID <= 0 || threshold <= 0 {
+					return ErrSupplierProviderInvalid
+				}
 			}
 		}
 	}
