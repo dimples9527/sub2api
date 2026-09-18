@@ -1137,13 +1137,25 @@ onMounted(() => {
 .sp-health-empty span,
 .sp-health-no-history span { color: var(--sp-muted); font-size: 0.8125rem; }
 .sp-health-empty .sp-button { margin-top: 0.35rem; }
-/* 弹窗根节点复用 supplier-management-page 提供 --sp-* 变量，并抵消其 min-height 副作用 */
-.sp-health-detail-dialog { min-height: 0; }
-/* BaseDialog teleport 到 body，通过 :has 匹配弹层并放大到超过 full 档位默认宽度 */
+/* BaseDialog teleport 到 body，通过 :has 匹配弹层并放大到超过 full 档位默认宽度。
+   四周留白由 overlay 自身的 p-2 sm:p-4 提供，这里不透支它 —— 视口再窄也不会溢出。
+   高度用 dvh 而非 vh：本页是管理端，但同模块另外两个弹窗都用 dvh，
+   移动端浏览器地址栏收起/展开时 vh 不变、dvh 跟随，两者混用会出现高度不一致。 */
 :global(.modal-content:has(.sp-health-detail-dialog)) {
   width: 100%;
-  max-width: min(96rem, calc(100vw - 2rem));
+  max-width: calc(100vw - 1rem);
+  height: calc(100dvh - 1rem);
+  max-height: calc(100dvh - 1rem);
 }
+@media (min-width: 640px) {
+  :global(.modal-content:has(.sp-health-detail-dialog)) {
+    max-width: calc(100vw - 2rem);
+    height: calc(100dvh - 2rem);
+    max-height: calc(100dvh - 2rem);
+  }
+}
+/* 弹窗拉高后内部改为「整块滚动」，避免图表高度被 flex 压扁 */
+.sp-health-detail-dialog { min-height: 0; }
 .sp-health-detail-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 1rem; margin-bottom: 1rem; }
 .sp-health-summary-panel { grid-row: span 2; }
 .sp-health-kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; padding: 0 1rem 1rem; }
