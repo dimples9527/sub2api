@@ -26,6 +26,11 @@ export interface SupplierAutomationConfig {
   account_health_guard_account_slow_thresholds: Record<string, number>
   account_health_guard_account_recovery_thresholds: Record<string, number>
   account_health_guard_cursor_account_id: number
+  /**
+   * 账号倍率守护按本地分组开关：这里存"被关闭守护"的分组 ID。
+   * 空列表或不传 = 所有分组都参与守护（新增分组自动参与，无需补齐配置）。
+   */
+  account_rate_guard_disabled_group_ids?: number[]
 }
 
 export interface SupplierAutomationTask {

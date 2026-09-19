@@ -163,11 +163,13 @@ func effectiveSupplierAccountRate(rawRate, scale float64) (float64, error) {
 	return rawRate * scale, nil
 }
 
-func (s *SupplierAccountRateGuardService) Run(ctx context.Context, runID int64, mode SupplierAccountRateGuardMode, now time.Time) (SupplierAccountRateGuardResult, error) {
+func (s *SupplierAccountRateGuardService) Run(ctx context.Context, runID int64, mode SupplierAccountRateGuardMode, disabledGroupIDs []int64, now time.Time) (SupplierAccountRateGuardResult, error) {
 	result := SupplierAccountRateGuardResult{Mode: string(mode)}
 	if mode != SupplierAccountRateGuardModePreview && mode != SupplierAccountRateGuardModeExecute {
 		return result, ErrSupplierProviderInvalid
 	}
+	// 关闭守护的分组在候选判定前就先排掉：连风险判定都不做，也就不产生任何 planned/unbound 行为。
+	disabledGroups := supplierAccountRateGuardDisabledGroupSet(disabledGroupIDs)
 	enabled := true
 	providers, _, err := s.providerRepo.List(ctx, SupplierProviderListParams{Enabled: &enabled, Page: 1, PageSize: 1000})
 	if err != nil {
@@ -197,7 +199,7 @@ func (s *SupplierAccountRateGuardService) Run(ctx context.Context, runID int64, 
 		}
 		for _, candidate := range candidates {
 			result.CheckedAccounts++
-			logs, processErr := s.processCandidate(ctx, runID, mode, now, candidate, &result)
+			logs, processErr := s.processCandidate(ctx, runID, mode, now, candidate, disabledGroups, &result)
 			if len(logs) > 0 {
 				if logErr := s.repo.CreateAccountRateGuardUnbindLogs(ctx, logs); logErr != nil {
 					return result, fmt.Errorf("保存账号倍率守护解绑日志失败: %w", logErr)
@@ -214,7 +216,7 @@ func (s *SupplierAccountRateGuardService) Run(ctx context.Context, runID int64, 
 	return result, nil
 }
 
-func (s *SupplierAccountRateGuardService) processCandidate(ctx context.Context, runID int64, mode SupplierAccountRateGuardMode, now time.Time, candidate SupplierAccountRateGuardCandidate, result *SupplierAccountRateGuardResult) ([]SupplierAccountRateGuardUnbindLog, error) {
+func (s *SupplierAccountRateGuardService) processCandidate(ctx context.Context, runID int64, mode SupplierAccountRateGuardMode, now time.Time, candidate SupplierAccountRateGuardCandidate, disabledGroups map[int64]struct{}, result *SupplierAccountRateGuardResult) ([]SupplierAccountRateGuardUnbindLog, error) {
 	base := supplierAccountRateGuardLogBase(runID, mode, now, candidate)
 	if candidate.MatchStatus != SupplierAccountRateGuardMatchMatched || candidate.LocalAccountID <= 0 || candidate.ReverseMatchCount > 1 {
 		base.Result = SupplierAccountRateGuardLogResultSkipped
@@ -230,13 +232,27 @@ func (s *SupplierAccountRateGuardService) processCandidate(ctx context.Context, 
 		return []SupplierAccountRateGuardUnbindLog{base}, nil
 	}
 	base.EffectiveUpstreamRate = effectiveRate
-	riskGroups := make([]SupplierAccountRateGuardGroup, 0)
+	riskGroups := make([]SupplierAccountRateGuardGroup, 0, len(candidate.Groups))
+	skippedGroupCount := 0
 	for _, group := range candidate.Groups {
-		if effectiveRate-group.RateMultiplier > 0.0000001 {
-			riskGroups = append(riskGroups, group)
+		if effectiveRate-group.RateMultiplier <= 0.0000001 {
+			continue
 		}
+		if _, disabled := disabledGroups[group.ID]; disabled {
+			skippedGroupCount++
+			continue
+		}
+		riskGroups = append(riskGroups, group)
 	}
 	if len(riskGroups) == 0 {
+		// 全部分组都被关掉时留一条跳过记录，否则用户会看到"检查了账号但什么都没发生"，
+		// 无从判断是开关生效了还是守护压根没跑。
+		if skippedGroupCount > 0 {
+			base.Result = SupplierAccountRateGuardLogResultSkipped
+			base.ErrorMessage = fmt.Sprintf("%d 个风险分组已关闭倍率守护，本次跳过", skippedGroupCount)
+			result.Skipped++
+			return []SupplierAccountRateGuardUnbindLog{base}, nil
+		}
 		return nil, nil
 	}
 	result.RiskGroups += len(riskGroups)
@@ -293,6 +309,22 @@ func (s *SupplierAccountRateGuardService) processCandidate(ctx context.Context, 
 		logs = append(logs, logItem)
 	}
 	return logs, removeErr
+}
+
+// supplierAccountRateGuardDisabledGroupSet 把配置里的分组 ID 列表转成查找集合。
+// 空列表 / nil 都会得到空集合，即"全部分组照常守护" —— 这是默认开启的落点。
+func supplierAccountRateGuardDisabledGroupSet(groupIDs []int64) map[int64]struct{} {
+	if len(groupIDs) == 0 {
+		return nil
+	}
+	set := make(map[int64]struct{}, len(groupIDs))
+	for _, groupID := range groupIDs {
+		if groupID <= 0 {
+			continue
+		}
+		set[groupID] = struct{}{}
+	}
+	return set
 }
 
 func supplierAccountRateGuardLogBase(runID int64, mode SupplierAccountRateGuardMode, now time.Time, candidate SupplierAccountRateGuardCandidate) SupplierAccountRateGuardUnbindLog {

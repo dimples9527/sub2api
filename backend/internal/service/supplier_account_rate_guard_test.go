@@ -108,7 +108,7 @@ func TestSupplierAccountRateGuardPreviewOnlyPlansRiskGroups(t *testing.T) {
 	remover := &accountRateGuardRemoverStub{}
 	guard := NewSupplierAccountRateGuardService(providers, syncer, repo, remover)
 
-	result, err := guard.Run(context.Background(), 99, SupplierAccountRateGuardModePreview, time.Now())
+	result, err := guard.Run(context.Background(), 99, SupplierAccountRateGuardModePreview, nil, time.Now())
 
 	require.NoError(t, err)
 	require.Equal(t, 1, result.CheckedAccounts)
@@ -139,7 +139,7 @@ func TestSupplierAccountRateGuardUsesSameToleranceAsUpstreamAccountGuard(t *test
 	}}
 	guard := NewSupplierAccountRateGuardService(providers, syncer, repo, &accountRateGuardRemoverStub{})
 
-	result, err := guard.Run(context.Background(), 103, SupplierAccountRateGuardModePreview, time.Now())
+	result, err := guard.Run(context.Background(), 103, SupplierAccountRateGuardModePreview, nil, time.Now())
 
 	require.NoError(t, err)
 	require.Equal(t, 1, result.RiskGroups)
@@ -166,7 +166,7 @@ func TestSupplierAccountRateGuardExecuteRemovesOnlyRiskGroupsAndKeepsScheduling(
 	}}
 	guard := NewSupplierAccountRateGuardService(providers, syncer, repo, remover)
 
-	result, err := guard.Run(context.Background(), 100, SupplierAccountRateGuardModeExecute, time.Now())
+	result, err := guard.Run(context.Background(), 100, SupplierAccountRateGuardModeExecute, nil, time.Now())
 
 	require.NoError(t, err)
 	require.Equal(t, 1, result.UnboundGroups)
@@ -196,7 +196,7 @@ func TestSupplierAccountRateGuardRemovalFailureKeepsObservedSchedulingState(t *t
 	remover := &accountRateGuardRemoverStub{err: errors.New("数据库写入失败")}
 	guard := NewSupplierAccountRateGuardService(providers, syncer, repo, remover)
 
-	result, err := guard.Run(context.Background(), 102, SupplierAccountRateGuardModeExecute, time.Now())
+	result, err := guard.Run(context.Background(), 102, SupplierAccountRateGuardModeExecute, nil, time.Now())
 
 	require.NoError(t, err)
 	require.Equal(t, 1, result.Failed)
@@ -220,7 +220,7 @@ func TestSupplierAccountRateGuardContinuesAfterProviderFailure(t *testing.T) {
 	remover := &accountRateGuardRemoverStub{}
 	guard := NewSupplierAccountRateGuardService(providers, syncer, repo, remover)
 
-	result, err := guard.Run(context.Background(), 101, SupplierAccountRateGuardModeExecute, time.Now())
+	result, err := guard.Run(context.Background(), 101, SupplierAccountRateGuardModeExecute, nil, time.Now())
 
 	require.NoError(t, err)
 	require.Equal(t, 1, result.RateSyncFailedProviders)
@@ -238,9 +238,130 @@ func TestSupplierAccountRateGuardDoesNotCountSyncConflictAsFailure(t *testing.T)
 	}
 	guard := NewSupplierAccountRateGuardService(providers, syncer, &supplierAccountRateGuardRepoStub{}, &accountRateGuardRemoverStub{})
 
-	result, err := guard.Run(context.Background(), 102, SupplierAccountRateGuardModeExecute, time.Now())
+	result, err := guard.Run(context.Background(), 102, SupplierAccountRateGuardModeExecute, nil, time.Now())
 
 	require.NoError(t, err)
 	require.Equal(t, 1, result.CheckedProviders)
 	require.Zero(t, result.RateSyncFailedProviders)
+}
+
+// newSupplierAccountRateGuardGroupSwitchFixture 构造一个"两个风险分组 + 一个正常分组"的候选，
+// 供分组开关相关的用例共用。
+func newSupplierAccountRateGuardGroupSwitchFixture() (*supplierProviderRepoStub, *supplierAccountRateGuardRepoStub, *accountRateGuardRemoverStub, *SupplierAccountRateGuardService) {
+	providers := &supplierProviderRepoStub{items: []*SupplierProvider{{ID: 1, Name: "供应商甲", Enabled: true}}}
+	syncer := &supplierAccountRateGuardSyncerStub{results: map[int64]SupplierProviderRateSyncResult{
+		1: {ProviderID: 1, Status: SupplierSyncStatusSuccess, UpdatedKeys: []string{"key-1"}},
+	}, errs: map[int64]error{}}
+	repo := &supplierAccountRateGuardRepoStub{candidates: map[int64][]SupplierAccountRateGuardCandidate{
+		1: {{
+			ProviderID: 1, ProviderName: "供应商甲", ProviderAccountID: 11,
+			UpstreamAccountKey: "key-1", UpstreamAccountName: "上游账号", RawRate: 1, RateScale: 1,
+			LocalAccountID: 21, LocalAccountName: "本地账号", MatchStatus: SupplierAccountRateGuardMatchMatched,
+			Schedulable: true,
+			Groups: []SupplierAccountRateGuardGroup{
+				{ID: 31, Name: "已关闭风险组", RateMultiplier: 0.9},
+				{ID: 32, Name: "未关闭风险组", RateMultiplier: 0.9},
+				{ID: 33, Name: "正常组", RateMultiplier: 1},
+			},
+		}},
+	}}
+	remover := &accountRateGuardRemoverStub{results: map[int64]AccountRateGuardGroupRemovalResult{
+		21: {RemovedGroupIDs: []int64{31, 32}, RemainingGroupIDs: []int64{33}, SchedulableBefore: true, SchedulableAfter: true},
+	}}
+	return providers, repo, remover, NewSupplierAccountRateGuardService(providers, syncer, repo, remover)
+}
+
+func TestSupplierAccountRateGuardSkipsDisabledGroupsInPreview(t *testing.T) {
+	_, repo, remover, guard := newSupplierAccountRateGuardGroupSwitchFixture()
+
+	result, err := guard.Run(context.Background(), 104, SupplierAccountRateGuardModePreview, []int64{31}, time.Now())
+
+	require.NoError(t, err)
+	// 31 被关闭后只剩 32 是风险分组，且关闭的分组不应出现在任何计划里。
+	require.Equal(t, 1, result.RiskGroups)
+	require.Zero(t, result.Skipped)
+	require.Empty(t, remover.calls)
+	require.Len(t, repo.logs, 1)
+	require.Equal(t, int64(32), repo.logs[0].LocalGroupID)
+	require.Equal(t, SupplierAccountRateGuardLogResultPlanned, repo.logs[0].Result)
+}
+
+func TestSupplierAccountRateGuardSkipsDisabledGroupsInExecute(t *testing.T) {
+	_, repo, remover, guard := newSupplierAccountRateGuardGroupSwitchFixture()
+
+	result, err := guard.Run(context.Background(), 105, SupplierAccountRateGuardModeExecute, []int64{31}, time.Now())
+
+	require.NoError(t, err)
+	require.Equal(t, 1, result.RiskGroups)
+	require.Equal(t, 1, result.UnboundGroups)
+	// 关键不变量：解除绑定只发给未关闭的分组，关闭的分组一个都不能进 remover。
+	require.Len(t, remover.calls, 1)
+	require.Equal(t, []int64{32}, remover.calls[0].groupIDs)
+	require.Len(t, repo.logs, 1)
+	require.Equal(t, int64(32), repo.logs[0].LocalGroupID)
+}
+
+func TestSupplierAccountRateGuardLogsSkippedWhenAllRiskGroupsDisabled(t *testing.T) {
+	_, repo, remover, guard := newSupplierAccountRateGuardGroupSwitchFixture()
+
+	result, err := guard.Run(context.Background(), 106, SupplierAccountRateGuardModeExecute, []int64{31, 32}, time.Now())
+
+	require.NoError(t, err)
+	require.Zero(t, result.RiskGroups)
+	require.Zero(t, result.UnboundGroups)
+	require.Equal(t, 1, result.Skipped)
+	// 全部分组被关闭时不能调用 remover，否则会出现"开关关掉了却仍然解绑"的事故。
+	require.Empty(t, remover.calls)
+	require.Len(t, repo.logs, 1)
+	require.Equal(t, SupplierAccountRateGuardLogResultSkipped, repo.logs[0].Result)
+	require.Contains(t, repo.logs[0].ErrorMessage, "已关闭倍率守护")
+}
+
+func TestSupplierAccountRateGuardEmptyDisabledGroupsKeepsCurrentBehavior(t *testing.T) {
+	_, repo, remover, guard := newSupplierAccountRateGuardGroupSwitchFixture()
+
+	result, err := guard.Run(context.Background(), 107, SupplierAccountRateGuardModeExecute, nil, time.Now())
+
+	require.NoError(t, err)
+	// nil 与空列表都必须等价于"全部分组开启"，这是"默认为开启"的兜底。
+	require.Equal(t, 2, result.RiskGroups)
+	require.Equal(t, 2, result.UnboundGroups)
+	require.Len(t, remover.calls, 1)
+	require.ElementsMatch(t, []int64{31, 32}, remover.calls[0].groupIDs)
+	require.Len(t, repo.logs, 2)
+}
+
+func TestSupplierAccountRateGuardIgnoresNonPositiveDisabledGroupIDs(t *testing.T) {
+	_, repo, remover, guard := newSupplierAccountRateGuardGroupSwitchFixture()
+
+	result, err := guard.Run(context.Background(), 108, SupplierAccountRateGuardModeExecute, []int64{0, -1}, time.Now())
+
+	require.NoError(t, err)
+	// 非法 ID 不应误伤任何分组：0 与负数都不可能是真实分组 ID。
+	require.Equal(t, 2, result.RiskGroups)
+	require.Len(t, remover.calls, 1)
+	require.ElementsMatch(t, []int64{31, 32}, remover.calls[0].groupIDs)
+	require.Len(t, repo.logs, 2)
+}
+
+func TestSupplierAccountRateGuardNoRiskGroupsStillProducesNoLog(t *testing.T) {
+	providers := &supplierProviderRepoStub{items: []*SupplierProvider{{ID: 1, Name: "供应商甲", Enabled: true}}}
+	syncer := &supplierAccountRateGuardSyncerStub{results: map[int64]SupplierProviderRateSyncResult{
+		1: {ProviderID: 1, Status: SupplierSyncStatusSuccess, UpdatedKeys: []string{"key-1"}},
+	}, errs: map[int64]error{}}
+	repo := &supplierAccountRateGuardRepoStub{candidates: map[int64][]SupplierAccountRateGuardCandidate{
+		1: {{
+			ProviderID: 1, ProviderAccountID: 11, UpstreamAccountKey: "key-1", RawRate: 1, RateScale: 1,
+			LocalAccountID: 21, MatchStatus: SupplierAccountRateGuardMatchMatched, Schedulable: true,
+			Groups: []SupplierAccountRateGuardGroup{{ID: 33, Name: "正常组", RateMultiplier: 1}},
+		}},
+	}}
+	guard := NewSupplierAccountRateGuardService(providers, syncer, repo, &accountRateGuardRemoverStub{})
+
+	result, err := guard.Run(context.Background(), 109, SupplierAccountRateGuardModeExecute, nil, time.Now())
+
+	require.NoError(t, err)
+	// 本来就没有风险分组时不该产生 skipped 记录，避免日志被"无风险"刷屏。
+	require.Zero(t, result.Skipped)
+	require.Empty(t, repo.logs)
 }

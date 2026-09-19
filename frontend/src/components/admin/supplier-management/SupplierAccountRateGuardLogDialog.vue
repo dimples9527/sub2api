@@ -346,8 +346,12 @@ function schedulableText(value?: boolean): string {
 </script>
 
 <style scoped>
+/* 宽度按「8 列表格刚好排得开」定，不再顶到 1800px。
+   1520px 是实测出来的下限：账号信息列要同时容纳 上游账号名 + Key + 本地账号名，
+   降到 1360px 时长账号名会被折成 4 行、错误信息也挤成 4 行，单行高度翻倍反而更难扫读。
+   再往上加则收益极小 —— 其余 7 列都是短文本，多出来的宽度只会变成列内空白。 */
 :global(.modal-content:has(.account-rate-log-dialog)) {
-  width: min(1800px, calc(100vw - 32px));
+  width: min(1520px, calc(100vw - 32px));
   max-width: none;
 }
 

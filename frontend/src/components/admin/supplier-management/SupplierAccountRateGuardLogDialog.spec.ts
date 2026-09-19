@@ -25,7 +25,9 @@ describe('SupplierAccountRateGuardLogDialog', () => {
   it('使用更宽弹窗并在桌面端隐藏表格横向滚动', () => {
     expect(source).toContain('width="full"')
     expect(source).toContain(':global(.modal-content:has(.account-rate-log-dialog))')
-    expect(source).toContain('width: min(1800px, calc(100vw - 32px))')
+    // 1520px 是实测下限：降到 1360 时长账号名与错误信息会被折成 4 行、单行高度翻倍，
+    // 反而比留白更难扫读。这条断言防止以后有人觉得"太宽"就随手改小。
+    expect(source).toContain('width: min(1520px, calc(100vw - 32px))')
     expect(source).toContain('overflow-x: hidden')
     expect(source).toContain('table-layout: fixed')
     expect(source).toContain('white-space: normal')

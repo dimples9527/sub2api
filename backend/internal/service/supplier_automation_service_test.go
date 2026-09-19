@@ -141,17 +141,19 @@ type supplierAutomationRateGuardStub struct {
 }
 
 type supplierAutomationAccountRateGuardStub struct {
-	called int
-	runID  int64
-	mode   SupplierAccountRateGuardMode
-	result SupplierAccountRateGuardResult
-	err    error
+	called           int
+	runID            int64
+	mode             SupplierAccountRateGuardMode
+	disabledGroupIDs []int64
+	result           SupplierAccountRateGuardResult
+	err              error
 }
 
-func (s *supplierAutomationAccountRateGuardStub) Run(_ context.Context, runID int64, mode SupplierAccountRateGuardMode, _ time.Time) (SupplierAccountRateGuardResult, error) {
+func (s *supplierAutomationAccountRateGuardStub) Run(_ context.Context, runID int64, mode SupplierAccountRateGuardMode, disabledGroupIDs []int64, _ time.Time) (SupplierAccountRateGuardResult, error) {
 	s.called++
 	s.runID = runID
 	s.mode = mode
+	s.disabledGroupIDs = disabledGroupIDs
 	return s.result, s.err
 }
 
@@ -304,6 +306,45 @@ func TestSupplierAutomationServiceRunsSupplierAccountRateGuardInPreviewMode(t *t
 	require.Equal(t, 3, run.SuccessCount)
 	require.NotNil(t, run.ResultDetail)
 	require.Equal(t, 2, run.ResultDetail.AccountRateGuard.RiskGroups)
+}
+
+func TestSupplierAutomationServicePassesDisabledGroupIDsToAccountRateGuard(t *testing.T) {
+	// 分组开关存在任务配置里，必须真的透传到守护服务，否则前端开关点不动后端行为。
+	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
+		SupplierAutomationTaskAccountRateGuard: {
+			TaskCode: SupplierAutomationTaskAccountRateGuard, Name: "供应商账号倍率守护", Enabled: true,
+			CronExpression: "@every 300s", TimeoutSeconds: 600,
+			Config: SupplierAutomationConfig{AccountRateGuardDisabledGroupIDs: []int64{31, 32}},
+		},
+	}}
+	runner := &supplierAutomationAccountRateGuardStub{}
+	service := NewSupplierAutomationService(repo, &supplierAutomationLockStub{acquired: true}, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
+	service.SetAccountRateGuardService(runner)
+
+	_, err := service.RunWithMode(context.Background(), SupplierAutomationTaskAccountRateGuard, SupplierSyncTriggerManual, SupplierAutomationRunModeExecute)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, runner.called)
+	require.Equal(t, []int64{31, 32}, runner.disabledGroupIDs)
+}
+
+func TestSupplierAutomationServicePassesNilWhenNoDisabledGroupConfigured(t *testing.T) {
+	// 未配置时必须是空值，守护服务据此对所有分组生效 —— 这就是"默认为开启"。
+	repo := &supplierAutomationRepoStub{tasks: map[string]*SupplierAutomationTask{
+		SupplierAutomationTaskAccountRateGuard: {
+			TaskCode: SupplierAutomationTaskAccountRateGuard, Name: "供应商账号倍率守护", Enabled: true,
+			CronExpression: "@every 300s", TimeoutSeconds: 600,
+		},
+	}}
+	runner := &supplierAutomationAccountRateGuardStub{}
+	service := NewSupplierAutomationService(repo, &supplierAutomationLockStub{acquired: true}, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
+	service.SetAccountRateGuardService(runner)
+
+	_, err := service.RunWithMode(context.Background(), SupplierAutomationTaskAccountRateGuard, SupplierSyncTriggerManual, SupplierAutomationRunModeExecute)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, runner.called)
+	require.Empty(t, runner.disabledGroupIDs)
 }
 
 func TestSupplierAutomationServiceWaitsForUpstreamFetchLockBeforeRunningAccountRateGuard(t *testing.T) {
@@ -957,7 +998,7 @@ type supplierAutomationAccountRateGuardMutatingStub struct {
 	called   int
 }
 
-func (s *supplierAutomationAccountRateGuardMutatingStub) Run(_ context.Context, runID int64, mode SupplierAccountRateGuardMode, _ time.Time) (SupplierAccountRateGuardResult, error) {
+func (s *supplierAutomationAccountRateGuardMutatingStub) Run(_ context.Context, runID int64, mode SupplierAccountRateGuardMode, _ []int64, _ time.Time) (SupplierAccountRateGuardResult, error) {
 	s.called++
 	if task := s.repo.tasks[s.taskCode]; task != nil {
 		task.CronExpression = s.newCron

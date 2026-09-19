@@ -382,9 +382,12 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('<Select')
     expect(supplierAutomationSource).toContain('<Input')
     expect(supplierAutomationSource).not.toContain('<select')
-    expect(nativeInputs).toHaveLength(1)
+    // 原生 input 只允许用于多选列表：健康守护账号、账号倍率守护分组。
+    expect(nativeInputs).toHaveLength(2)
     expect(nativeInputs[0]).toContain('type="checkbox"')
     expect(nativeInputs[0]).toContain('@change="toggleHealthGuardAccount(mapping.localAccountID)"')
+    expect(nativeInputs[1]).toContain('type="checkbox"')
+    expect(nativeInputs[1]).toContain('@change="toggleRateGuardGroup(group.id)"')
   })
 
   it('shows rate guard settings only for the rate guard task', () => {
@@ -889,7 +892,7 @@ describe('SupplierAutomationView operations console composition', () => {
     expect(supplierAutomationSource).toMatch(
       /^ {8}<section\b[^>]*class="[^"]*\bsp-history-panel\b[^"]*">\n {10}<header/m
     )
-    expect(supplierAutomationSource.match(/^ {6}<BaseDialog\b/gm)).toHaveLength(4)
+    expect(supplierAutomationSource.match(/^ {6}<BaseDialog\b/gm)).toHaveLength(5)
     expect(supplierAutomationSource).toMatch(/^ {6}<SupplierAccountRateGuardLogDialog\b/m)
     expect(supplierAutomationSource).not.toContain('<Transition name="sp-fade">')
     expect(supplierAutomationSource).not.toContain('class="sp-toast"')
@@ -1121,7 +1124,7 @@ describe('SupplierAutomationView edit dialog composition', () => {
 
   it('uses independent conditional policy sections without an unconditional fallback', () => {
     const policyConditions = [...editDialogSource.matchAll(
-      /<section v-if="editForm\.task_code === '(supplier_rate_guard|supplier_account_health_guard|supplier_data_cleanup)'" class="sp-form-section sp-policy-section">/g
+      /<section v-if="editForm\.task_code === '(supplier_rate_guard|supplier_account_rate_guard|supplier_account_health_guard|supplier_data_cleanup)'" class="sp-form-section sp-policy-section">/g
     )].map(([, taskCode]) => taskCode)
     const policySectionCount = editDialogSource.match(
       /class="sp-form-section sp-policy-section"/g
@@ -1129,10 +1132,11 @@ describe('SupplierAutomationView edit dialog composition', () => {
 
     expect(policyConditions).toEqual([
       'supplier_rate_guard',
+      'supplier_account_rate_guard',
       'supplier_account_health_guard',
       'supplier_data_cleanup',
     ])
-    expect(policySectionCount).toBe(3)
+    expect(policySectionCount).toBe(4)
     expect(editDialogSource).not.toMatch(
       /<section(?![^>]*v-if=)[^>]*class="sp-form-section sp-policy-section"/
     )
@@ -1241,5 +1245,58 @@ describe('SupplierAutomationView edit dialog composition', () => {
     for (const [editSelector, detailSelector] of selectorPairs) {
       expect(supplierAutomationSource).toContain(`${editSelector}\n${detailSelector}`)
     }
+  })
+})
+
+describe('SupplierAutomationView account rate guard group switch', () => {
+  it('stores the disabled groups in the task config so new groups stay enabled by default', () => {
+    // 存"关闭项"而不是"开启项"是刻意的：新增分组默认参与守护，不需要任何补齐动作。
+    expect(supplierAutomationAPISource).toContain('account_rate_guard_disabled_group_ids?: number[]')
+    expect(supplierAutomationSource).toContain('account_rate_guard_disabled_group_ids: []')
+    expect(supplierAutomationSource).toContain('function applyAccountRateGuardDefaults()')
+    expect(supplierAutomationSource).toContain(
+      'editForm.config.account_rate_guard_disabled_group_ids = normalizePositiveAccountIDs('
+    )
+  })
+
+  it('renders the group policy section only for the account rate guard task', () => {
+    expect(supplierAutomationSource).toContain(
+      "<section v-if=\"editForm.task_code === 'supplier_account_rate_guard'\" class=\"sp-form-section sp-policy-section\">"
+    )
+    expect(supplierAutomationSource).toContain('账号倍率守护策略')
+    expect(supplierAutomationSource).toContain('不参与守护的分组')
+    // 空态必须明确"全部分组都参与"，否则用户无法判断当前是关闭了还是没配过。
+    expect(supplierAutomationSource).toContain('所有分组都参与守护。新增分组也会自动参与。')
+  })
+
+  it('loads local groups including inactive ones and toggles the disabled list on uncheck', () => {
+    expect(supplierAutomationSource).toContain(
+      "import { getAllIncludingInactive as listAllGroups } from '@/api/admin/groups'"
+    )
+    expect(supplierAutomationSource).toContain('rateGuardGroups.value = await listAllGroups()')
+    expect(supplierAutomationSource).toContain('function toggleRateGuardGroup(groupID: number)')
+    expect(supplierAutomationSource).toContain('function rateGuardGroupIsDisabled(groupID: number)')
+    expect(supplierAutomationSource).toContain('function enableAllRateGuardGroups()')
+    // 面板里勾选 = 参与守护，因此取消勾选才写入关闭列表。
+    expect(supplierAutomationSource).toContain(
+      'const next = disabled.includes(groupID)'
+    )
+  })
+
+  it('normalizes the group list before saving so illegal ids never reach the backend', () => {
+    const saveTaskSource = supplierAutomationSource.slice(
+      supplierAutomationSource.indexOf('async function saveTask()'),
+      supplierAutomationSource.indexOf('async function runNow(taskCode: string)')
+    )
+    expect(saveTaskSource).toContain("if (editForm.task_code === 'supplier_account_rate_guard') {")
+    expect(saveTaskSource).toContain('applyAccountRateGuardDefaults()')
+  })
+
+  it('keeps the group dialog filters and summary wired to the shared components', () => {
+    expect(supplierAutomationSource).toContain(':show="rateGuardGroupsVisible"')
+    expect(supplierAutomationSource).toContain('title="配置参与守护的分组"')
+    expect(supplierAutomationSource).toContain('仅看已关闭')
+    expect(supplierAutomationSource).toContain('const rateGuardGroupScopeSummary = computed(()')
+    expect(supplierAutomationSource).toContain('const rateGuardFilteredGroups = computed(()')
   })
 })

@@ -65,6 +65,10 @@ type SupplierAutomationConfig struct {
 	InactiveGroupDays              int `json:"inactive_group_retention_days"`
 	RateGuardMaxSnapshotAgeSeconds int `json:"rate_guard_max_snapshot_age_seconds"`
 
+	// 账号倍率守护按本地分组开关：这里存"被关闭守护"的分组 ID，空列表表示全部分组都参与守护。
+	// 之所以存关闭项而不是开启项，是为了让"新增分组默认开启"不需要任何数据迁移或补齐动作。
+	AccountRateGuardDisabledGroupIDs []int64 `json:"account_rate_guard_disabled_group_ids"`
+
 	AccountHealthGuardMaxAccountsPerRun        int               `json:"account_health_guard_max_accounts_per_run"`
 	AccountHealthGuardConcurrency              int               `json:"account_health_guard_concurrency"`
 	AccountHealthGuardTimeoutPerAccountSeconds int               `json:"account_health_guard_timeout_per_account_seconds"`
@@ -198,7 +202,7 @@ type SupplierRateGuardRunner interface {
 }
 
 type SupplierAccountRateGuardRunner interface {
-	Run(ctx context.Context, runID int64, mode SupplierAccountRateGuardMode, now time.Time) (SupplierAccountRateGuardResult, error)
+	Run(ctx context.Context, runID int64, mode SupplierAccountRateGuardMode, disabledGroupIDs []int64, now time.Time) (SupplierAccountRateGuardResult, error)
 }
 
 const (
@@ -653,7 +657,7 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 		if mode == SupplierAutomationRunModePreview {
 			guardMode = SupplierAccountRateGuardModePreview
 		}
-		result, err := s.accountRateGuard.Run(ctx, run.ID, guardMode, time.Now())
+		result, err := s.accountRateGuard.Run(ctx, run.ID, guardMode, task.Config.AccountRateGuardDisabledGroupIDs, time.Now())
 		run.ProcessedCount = result.CheckedAccounts
 		run.FailedCount = result.Failed + result.RateSyncFailedProviders
 		run.SuccessCount = run.ProcessedCount - result.Failed

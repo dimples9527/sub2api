@@ -250,6 +250,28 @@
             </div>
           </section>
 
+          <section v-if="editForm.task_code === 'supplier_account_rate_guard'" class="sp-form-section sp-policy-section">
+            <div class="sp-form-section-head">
+              <span>03</span>
+              <div><h3>账号倍率守护策略</h3><p>控制哪些本地分组参与守护；关闭的分组在检测与执行时都会被跳过。</p></div>
+            </div>
+            <div class="sp-rate-guard-scope-card">
+              <div>
+                <strong>不参与守护的分组</strong>
+                <span v-if="accountRateGuardDisabledGroupIDs.length === 0">所有分组都参与守护。新增分组也会自动参与。</span>
+                <span v-else>已关闭 <strong class="sp-rate-guard-scope-count">{{ accountRateGuardDisabledGroupIDs.length }}</strong> 个分组，其余分组正常参与守护。</span>
+              </div>
+              <button
+                class="sp-button small ghost sp-rate-guard-scope-config-button"
+                type="button"
+                @click="openRateGuardGroups"
+              >
+                <Icon name="cog" size="md" />
+                配置参与分组
+              </button>
+            </div>
+          </section>
+
           <section v-if="editForm.task_code === 'supplier_account_health_guard'" class="sp-form-section sp-policy-section">
             <div class="sp-form-section-head">
               <span>03</span>
@@ -988,6 +1010,94 @@
         </template>
       </BaseDialog>
 
+      <BaseDialog
+        :show="rateGuardGroupsVisible"
+        title="配置参与守护的分组"
+        width="full"
+        :z-index="60"
+        @close="closeRateGuardGroups"
+      >
+        <div class="sp-rate-guard-group-dialog">
+          <section class="sp-rate-guard-group-workspace">
+            <div class="sp-rate-guard-group-summary" aria-label="账号倍率守护分组配置摘要">
+              <article>
+                <span>参与守护</span>
+                <strong>{{ rateGuardGroupScopeSummary.enabled }}</strong>
+              </article>
+              <article :class="{ warning: rateGuardGroupScopeSummary.disabled > 0 }">
+                <span>已关闭</span>
+                <strong>{{ rateGuardGroupScopeSummary.disabled }}</strong>
+              </article>
+              <article>
+                <span>可选分组</span>
+                <strong>{{ rateGuardGroups.length }}</strong>
+              </article>
+            </div>
+
+            <div class="sp-rate-guard-group-toolbar">
+              <div class="sp-rate-guard-group-filters">
+                <Input v-model="rateGuardGroupSearch" placeholder="搜索分组名称或 ID" />
+                <button
+                  class="sp-rate-guard-group-selected-toggle"
+                  :class="{ active: rateGuardGroupDisabledOnly }"
+                  type="button"
+                  :aria-pressed="rateGuardGroupDisabledOnly"
+                  @click="rateGuardGroupDisabledOnly = !rateGuardGroupDisabledOnly"
+                >
+                  <span class="sp-rate-guard-group-selected-toggle-mark" aria-hidden="true"></span>
+                  仅看已关闭
+                  <strong>{{ rateGuardGroupScopeSummary.disabled }}</strong>
+                </button>
+              </div>
+              <span class="sp-rate-guard-group-filter-result">
+                筛选结果 <strong>{{ rateGuardFilteredGroups.length }}</strong> 个
+              </span>
+            </div>
+
+            <div v-if="loadingRateGuardGroups" class="sp-rate-guard-empty">正在加载分组...</div>
+            <div v-else-if="rateGuardFilteredGroups.length" class="sp-rate-guard-group-list">
+              <article
+                v-for="group in rateGuardFilteredGroups"
+                :key="group.id"
+                class="sp-rate-guard-group-row"
+                :class="{ disabled: rateGuardGroupIsDisabled(group.id) }"
+              >
+                <label class="sp-rate-guard-group-choice">
+                  <input
+                    type="checkbox"
+                    :checked="!rateGuardGroupIsDisabled(group.id)"
+                    :aria-label="`${rateGuardGroupIsDisabled(group.id) ? '开启' : '关闭'}分组 ${group.name} 的账号倍率守护`"
+                    @change="toggleRateGuardGroup(group.id)"
+                  />
+                  <span class="sp-rate-guard-group-choice-copy">
+                    <strong>{{ group.name }}</strong>
+                    <span class="sp-rate-guard-group-id">#{{ group.id }}</span>
+                    <span class="sp-rate-guard-group-rate">倍率 {{ group.rate_multiplier }}</span>
+                  </span>
+                </label>
+                <!-- 只在"已关闭"时显示标签：勾选行已经用复选框表达了"参与"，
+                     再补一句"参与守护"就是把同一件事说两遍，几十行下来全是噪声。
+                     把标签收窄成"异常提示"，列表里的离群行才能一眼跳出来。 -->
+                <span
+                  v-if="rateGuardGroupIsDisabled(group.id)"
+                  class="sp-rate-guard-group-status off"
+                >
+                  已关闭守护
+                </span>
+              </article>
+            </div>
+            <div v-else class="sp-rate-guard-empty">
+              {{ rateGuardGroupDisabledOnly ? '当前没有已关闭守护的分组。' : '当前没有可配置的分组。' }}
+            </div>
+          </section>
+        </div>
+        <template #footer>
+          <span class="sp-rate-guard-group-hint">取消勾选的分组会被跳过；全部勾选即所有分组都参与守护。</span>
+          <button class="sp-button ghost" type="button" @click="enableAllRateGuardGroups">全部参与</button>
+          <button class="sp-button primary" type="button" @click="closeRateGuardGroups">完成</button>
+        </template>
+      </BaseDialog>
+
       <BaseDialog :show="accountRateGuardExecuteVisible" title="确认执行账号倍率守护" width="wide" @close="closeAccountRateGuardExecute">
         <div class="sp-guard-confirm">
           <span class="sp-guard-confirm-mark" aria-hidden="true">!</span>
@@ -1031,6 +1141,8 @@ import {
   type SupplierProviderAccount,
 } from '@/api/admin/supplierProviderData'
 import { adminAPI } from '@/api/admin'
+import { getAllIncludingInactive as listAllGroups } from '@/api/admin/groups'
+import type { AdminGroup } from '@/types'
 import {
   listAccountRateGuardUnbindLogs,
   listRuns,
@@ -1078,6 +1190,11 @@ const accountRateGuardExecuteVisible = ref(false)
 const pendingExecuteTask = ref<SupplierAutomationTask | null>(null)
 const accountRateGuardLogsVisible = ref(false)
 const accountRateGuardPendingCount = ref(0)
+const rateGuardGroupsVisible = ref(false)
+const rateGuardGroupSearch = ref('')
+const rateGuardGroupDisabledOnly = ref(false)
+const rateGuardGroups = ref<AdminGroup[]>([])
+const loadingRateGuardGroups = ref(false)
 const healthGuardAccountsVisible = ref(false)
 const healthGuardAccountPlatformFilter = ref('')
 const healthGuardAccountProviderFilter = ref('')
@@ -1099,6 +1216,7 @@ const editForm = reactive<SupplierAutomationTask>({
   timeout_seconds: 600,
   config: {
     rate_guard_max_snapshot_age_seconds: 1800,
+    account_rate_guard_disabled_group_ids: [],
     automation_run_retention_days: 30,
     sync_run_retention_days: 30,
     metric_snapshot_retention_days: 30,
@@ -1363,6 +1481,7 @@ function openEdit(task: SupplierAutomationTask) {
   editingTask.value = task
   Object.assign(editForm, JSON.parse(JSON.stringify(task)))
   applyAccountHealthGuardDefaults()
+  applyAccountRateGuardDefaults()
   editIntervalSeconds.value = cronToIntervalSeconds(task.cron_expression) || 300
   editVisible.value = true
 }
@@ -1417,6 +1536,10 @@ async function saveTask() {
       appStore.showError(validationMessage)
       return
     }
+  }
+  if (editForm.task_code === 'supplier_account_rate_guard') {
+    // 提交前再归一化一次：弹窗里勾选产生的值要保证去重升序，且非法 ID 不入库。
+    applyAccountRateGuardDefaults()
   }
   editForm.cron_expression = cronExpression
   savingCode.value = editingTask.value.task_code
@@ -1873,6 +1996,33 @@ const healthGuardAccountIDs = computed(() =>
   normalizePositiveAccountIDs(editForm.config.account_health_guard_account_ids)
 )
 
+// 账号倍率守护的分组开关：配置里存的是"被关闭"的分组，空列表即所有分组都参与。
+const accountRateGuardDisabledGroupIDs = computed(() =>
+  normalizePositiveAccountIDs(editForm.config.account_rate_guard_disabled_group_ids)
+)
+
+const rateGuardGroupScopeSummary = computed(() => {
+  const disabled = accountRateGuardDisabledGroupIDs.value.length
+  return {
+    disabled,
+    enabled: Math.max(rateGuardGroups.value.length - disabled, 0),
+  }
+})
+
+const rateGuardFilteredGroups = computed(() => {
+  const keyword = rateGuardGroupSearch.value.trim().toLowerCase()
+  let result = rateGuardGroups.value
+  if (rateGuardGroupDisabledOnly.value) {
+    result = result.filter(group => rateGuardGroupIsDisabled(group.id))
+  }
+  if (!keyword) {
+    return result
+  }
+  return result.filter(group =>
+    group.name.toLowerCase().includes(keyword) || String(group.id).includes(keyword)
+  )
+})
+
 const healthGuardAvailableAccountMappings = computed(() =>
   healthGuardAccountMappings.value.filter(mapping => mapping.available)
 )
@@ -2168,6 +2318,13 @@ function applyAccountHealthGuardDefaults() {
   config.account_health_guard_cursor_account_id = Number.isSafeInteger(cursorAccountID) && cursorAccountID > 0 ? cursorAccountID : 0
 }
 
+function applyAccountRateGuardDefaults() {
+  // 旧配置里没有这个字段，归一化后得到空数组 —— 正好是"所有分组都参与守护"的默认语义。
+  editForm.config.account_rate_guard_disabled_group_ids = normalizePositiveAccountIDs(
+    editForm.config.account_rate_guard_disabled_group_ids
+  )
+}
+
 function validateAccountHealthGuardSelection(config: SupplierAutomationConfig): string {
   const accountIDs = normalizePositiveAccountIDs(config.account_health_guard_account_ids)
   if (!accountIDs.length) return '请至少选择一个需要检查的账号'
@@ -2221,6 +2378,58 @@ function validateAccountHealthGuardConfig(config: SupplierAutomationConfig = edi
   config.account_health_guard_account_slow_thresholds = normalizeAccountHealthGuardAccountThresholds(config.account_health_guard_account_slow_thresholds)
   config.account_health_guard_account_recovery_thresholds = normalizeAccountHealthGuardAccountThresholds(config.account_health_guard_account_recovery_thresholds)
   return validateAccountHealthGuardSelection(config)
+}
+
+async function openRateGuardGroups() {
+  rateGuardGroupsVisible.value = true
+  rateGuardGroupSearch.value = ''
+  rateGuardGroupDisabledOnly.value = false
+  if (rateGuardGroups.value.length > 0) {
+    return
+  }
+  loadingRateGuardGroups.value = true
+  try {
+    // 用含停用分组的接口：已关闭的分组如果此时正被停用，仍要能看见开关状态，
+    // 否则配置会变成"看不见但依然生效"的幽灵项。
+    rateGuardGroups.value = await listAllGroups()
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '加载分组失败'))
+  } finally {
+    loadingRateGuardGroups.value = false
+  }
+}
+
+function closeRateGuardGroups() {
+  rateGuardGroupsVisible.value = false
+}
+
+function rateGuardGroupIsDisabled(groupID: number): boolean {
+  return accountRateGuardDisabledGroupIDs.value.includes(groupID)
+}
+
+function toggleRateGuardGroup(groupID: number) {
+  // 面板里勾选 = 参与守护；勾掉的才进配置，因此写回的是"关闭列表"。
+  const disabled = accountRateGuardDisabledGroupIDs.value
+  const next = disabled.includes(groupID)
+    ? disabled.filter(id => id !== groupID)
+    : [...disabled, groupID]
+  editForm.config.account_rate_guard_disabled_group_ids = normalizePositiveAccountIDs(next)
+}
+
+function enableAllRateGuardGroups() {
+  const current = accountRateGuardDisabledGroupIDs.value
+  // 一次清空多个分组的开关是不可逆的（弹窗内没有撤销入口），
+  // 所以先确认再执行：误点一下就把几十个分组全部放回守护，用户很难察觉自己改了什么。
+  if (current.length > 1) {
+    const confirmed = window.confirm(`将 ${current.length} 个分组全部恢复为参与守护？此操作在保存任务后生效。`)
+    if (!confirmed) {
+      return
+    }
+  }
+  editForm.config.account_rate_guard_disabled_group_ids = []
+  if (current.length > 0) {
+    appStore.showSuccess(`已将 ${current.length} 个分组恢复为参与守护，保存任务后生效`)
+  }
 }
 
 async function openHealthGuardAccounts() {
@@ -3184,8 +3393,8 @@ function intervalSecondsToCron(seconds: number): string | null {
   max-height: min(95vh, calc(100dvh - 16px));
 }
 
-/* 电脑端：任务编辑弹窗与健康守护账号配置弹窗横向铺满屏幕（只留 overlay 自带的四周外边距）。
-   两者是同一层级的配置入口（后者由前者内的按钮打开），尺寸保持一致才不会出现层级间的跳变。
+/* 电脑端：任务编辑弹窗、健康守护账号配置弹窗、分组配置弹窗横向铺满屏幕（只留 overlay 自带的四周外边距）。
+   三者是同一层级的配置入口（后两者由前者内的按钮打开），尺寸保持一致才不会出现层级间的跳变。
    只在 >=768px 生效，窄屏沿用 BaseDialog 的 full 档表现，避免手机上挤掉内容宽度。 */
 @media (min-width: 768px) {
   :global(.modal-content:has(.sp-health-guard-account-dialog)),
@@ -3206,11 +3415,12 @@ function intervalSecondsToCron(seconds: number): string | null {
   background: var(--sp-panel);
 }
 
-:global(.modal-content:has(.sp-health-guard-account-dialog) .modal-body) {
+:global(.modal-content:has(.sp-health-guard-account-dialog) .modal-body),
+:global(.modal-content:has(.sp-rate-guard-group-dialog) .modal-body) {
   overflow: hidden;
 }
 
-/* 任务编辑弹窗与账号配置弹窗：让内容区吃满可用高度，列表在剩余空间内滚动。
+/* 任务编辑弹窗、账号配置弹窗、分组配置弹窗：让内容区吃满可用高度，列表在剩余空间内滚动。
    高度同样顶到 overlay 留白之内，与宽度一起构成「近全屏」。
    这条必须排在上面那条 max-height: min(95vh, …) 之后 —— 两者选择器权重相同，
    靠源码顺序取胜。 */
@@ -3232,6 +3442,102 @@ function intervalSecondsToCron(seconds: number): string | null {
 :global(.modal-content:has(.sp-run-detail) .modal-footer) {
   border-top-color: var(--sp-line);
   background: var(--sp-panel);
+}
+
+/* 分组配置弹窗是独立 Teleport 出来的 modal-content，不是编辑弹窗的后代，
+   因此上面那些按 .sp-edit-dialog 挂的规则全部够不到它 ——
+   变量、配色、body 布局、尺寸都会缺失，表现为"文字是默认黑、背景透明、列表不滚动"。
+   这里单独给它一份，选择器独立成组，避免改动上面既有的断言锚点。 */
+:global(.modal-content:has(.sp-rate-guard-group-dialog)) {
+  --sp-panel: #ffffff;
+  --sp-panel-2: #f8fafc;
+  --sp-panel-3: #eef2f7;
+  --sp-line: #d7e0ea;
+  --sp-soft: #e8eef5;
+  --sp-text: #172033;
+  --sp-muted: #607089;
+  --sp-cyan: #0284c7;
+  --sp-green: #16835d;
+  --sp-amber: #c56a0a;
+  --sp-orange: #dd5f16;
+  --sp-red: #d14343;
+  --sp-blue: #2563eb;
+  --sp-violet: #6d5bd0;
+  --sp-result-blue-soft: #eaf2ff;
+  --sp-result-cyan-soft: #e6f6fb;
+  --sp-result-green-soft: #e8f7ef;
+  --sp-result-amber-soft: #fff3dc;
+  --sp-result-red-soft: #fff0f0;
+  --sp-result-violet-soft: #f1efff;
+  --sp-result-neutral-soft: #f3f6fa;
+  overflow: hidden;
+  border-color: #cbd7e5;
+  background: var(--sp-panel);
+  color: var(--sp-text);
+  height: min(760px, calc(100dvh - 1rem));
+  max-height: min(760px, calc(100dvh - 1rem));
+}
+
+:global(.dark .modal-content:has(.sp-rate-guard-group-dialog)) {
+  --sp-panel: #172033;
+  --sp-panel-2: #1d293d;
+  --sp-panel-3: #243249;
+  --sp-line: #35445c;
+  --sp-soft: #2c3a51;
+  --sp-text: #edf3fb;
+  --sp-muted: #a8b6ca;
+  --sp-result-blue-soft: #1b3155;
+  --sp-result-cyan-soft: #153947;
+  --sp-result-green-soft: #173a31;
+  --sp-result-amber-soft: #432f1d;
+  --sp-result-red-soft: #48272d;
+  --sp-result-violet-soft: #302b51;
+  --sp-result-neutral-soft: #202d42;
+  border-color: #3b4b64;
+}
+
+:global(.modal-content:has(.sp-rate-guard-group-dialog) .modal-header) {
+  border-bottom-color: var(--sp-line);
+  background: var(--sp-panel);
+}
+
+:global(.modal-content:has(.sp-rate-guard-group-dialog) .modal-title) {
+  color: var(--sp-text);
+}
+
+:global(.modal-content:has(.sp-rate-guard-group-dialog) .modal-body) {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--sp-panel);
+}
+
+:global(.modal-content:has(.sp-rate-guard-group-dialog) .modal-footer) {
+  border-top-color: var(--sp-line);
+  background: var(--sp-panel);
+}
+
+/* 宽度收窄到内容真正需要的尺度：这个弹窗里只有"摘要三块 + 搜索 + 单行列表"，
+   1000px 已经能把分组名、ID、倍率、状态排得疏朗，再宽只是把三段内容拉开成三座孤岛。
+   与编辑弹窗那种「多区块表单」不同 —— 那是必须铺满才能容纳两列网格的。
+   只在 >=768px 生效，窄屏沿用 BaseDialog 的 full 档表现。 */
+@media (min-width: 768px) {
+  :global(.modal-content:has(.sp-rate-guard-group-dialog)) {
+    width: min(1000px, calc(100vw - 2rem));
+    max-width: min(1000px, calc(100vw - 2rem));
+  }
+}
+
+/* 高度同步收窄：宽度降到 1000px 后再顶满 100dvh 会显得又瘦又长。
+   上限按内容量给（最多几十个分组，列表自身还会滚动），
+   低于视口时才生效，屏幕不够高时仍会自动缩到视口内。 */
+@media (min-width: 640px) {
+  :global(.modal-content:has(.sp-rate-guard-group-dialog)) {
+    height: min(760px, calc(100dvh - 2rem));
+    max-height: min(760px, calc(100dvh - 2rem));
+  }
 }
 
 .sp-run-detail {
@@ -3861,6 +4167,398 @@ function intervalSecondsToCron(seconds: number): string | null {
 .sp-health-guard-account-card .sp-button.sp-health-guard-config-button:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--sp-blue) 30%, transparent);
   outline-offset: 2px;
+}
+
+/* 账号倍率守护的「不参与守护的分组」卡片：与健康守护账号卡片同构，
+   只在配色上换成青色系，避免两个卡片在同一弹窗里被误认成同一个入口。 */
+.sp-rate-guard-scope-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--sp-soft);
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: color-mix(in srgb, var(--sp-cyan) 4%, var(--sp-panel));
+}
+
+.sp-rate-guard-scope-card > div {
+  display: grid;
+  gap: 4px;
+}
+
+.sp-rate-guard-scope-card strong {
+  color: var(--sp-text);
+  font-size: 13px;
+}
+
+.sp-rate-guard-scope-card span {
+  color: var(--sp-muted);
+  font-size: 12px;
+}
+
+.sp-rate-guard-scope-card strong.sp-rate-guard-scope-count {
+  color: var(--sp-cyan);
+  font-size: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-rate-guard-scope-card .sp-button.sp-rate-guard-scope-config-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 2.5rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.8125rem;
+  border-color: color-mix(in srgb, var(--sp-cyan) 45%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-cyan) 9%, var(--sp-panel));
+  color: var(--sp-cyan);
+  font-weight: 600;
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, transform 120ms ease;
+}
+
+.sp-rate-guard-scope-card .sp-button.sp-rate-guard-scope-config-button:hover {
+  border-color: var(--sp-cyan);
+  background: color-mix(in srgb, var(--sp-cyan) 14%, var(--sp-panel));
+  color: var(--sp-cyan);
+}
+
+.sp-rate-guard-scope-card .sp-button.sp-rate-guard-scope-config-button:active {
+  transform: translateY(1px);
+}
+
+.sp-rate-guard-scope-card .sp-button.sp-rate-guard-scope-config-button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--sp-cyan) 30%, transparent);
+  outline-offset: 2px;
+}
+
+.sp-rate-guard-group-dialog {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 工作区自己管理滚动：摘要和工具栏固定，只有列表滚动，
+   否则分组多的时候连摘要都会被滚走，用户看不到"已关闭 N 个"这个最关键的判断依据。 */
+.sp-rate-guard-group-workspace {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--sp-line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--sp-panel);
+}
+
+/* 摘要与健康守护弹窗同构：顶部 3px 色条 + 圆点标签 + 大数字，
+   两者是同一层级的配置入口，视觉语言必须一致，用户才不会觉得是两个功能。
+   标签与数字贴在一起（不 space-between）：三块在近全屏宽度下会被拉开 500px 以上，
+   数字散落在半空中反而不成组，读的时候要靠视线来回跳。 */
+.sp-rate-guard-group-summary {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-bottom: 1px solid var(--sp-line);
+  background: color-mix(in srgb, var(--sp-soft) 22%, transparent);
+}
+
+.sp-rate-guard-group-summary article {
+  --sp-summary-accent: var(--sp-cyan);
+
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-start;
+  min-width: 0;
+  gap: 8px;
+  border-left: 1px solid var(--sp-line);
+  padding: 12px 14px 11px;
+}
+
+.sp-rate-guard-group-summary article:first-child {
+  border-left: 0;
+}
+
+.sp-rate-guard-group-summary article:nth-child(1) {
+  --sp-summary-accent: var(--sp-cyan);
+}
+
+.sp-rate-guard-group-summary article:nth-child(2) {
+  --sp-summary-accent: var(--sp-muted);
+}
+
+.sp-rate-guard-group-summary article:nth-child(3) {
+  --sp-summary-accent: var(--sp-blue);
+}
+
+.sp-rate-guard-group-summary article::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 3px;
+  background: var(--sp-summary-accent);
+  opacity: 0.85;
+}
+
+.sp-rate-guard-group-summary article span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: color-mix(in srgb, var(--sp-summary-accent) 64%, var(--sp-muted));
+  font-size: 12px;
+}
+
+.sp-rate-guard-group-summary article span::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--sp-summary-accent);
+  opacity: 0.9;
+}
+
+.sp-rate-guard-group-summary article strong {
+  color: var(--sp-summary-accent);
+  font-size: 18px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* 有关闭项时用琥珀色警示：这是"有分组不参与守护"的唯一可见信号。
+   但只染顶部色条与数字，不铺满整块底色 —— 铺满会让它比"参与守护 19"更抢眼，
+   而那句才是主体数量；附注性质的告警不该喧宾夺主。 */
+.sp-rate-guard-group-summary article.warning {
+  --sp-summary-accent: var(--sp-amber);
+
+  background: color-mix(in srgb, var(--sp-amber) 6%, transparent);
+}
+
+.sp-rate-guard-group-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 10px 14px;
+}
+
+.sp-rate-guard-group-filters {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sp-rate-guard-group-filters :deep(.form-field),
+.sp-rate-guard-group-filters > div {
+  width: 16rem;
+}
+
+.sp-rate-guard-group-selected-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--sp-line);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  background: var(--sp-panel);
+  color: var(--sp-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 160ms ease, color 160ms ease, background-color 160ms ease;
+}
+
+.sp-rate-guard-group-selected-toggle:hover {
+  border-color: color-mix(in srgb, var(--sp-cyan) 30%, var(--sp-line));
+  color: var(--sp-text);
+}
+
+.sp-rate-guard-group-selected-toggle strong {
+  color: var(--sp-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-rate-guard-group-selected-toggle.active {
+  border-color: color-mix(in srgb, var(--sp-cyan) 50%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-cyan) 8%, var(--sp-panel));
+  color: var(--sp-cyan);
+}
+
+.sp-rate-guard-group-selected-toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--sp-cyan) 40%, transparent);
+  outline-offset: 2px;
+}
+
+.sp-rate-guard-group-selected-toggle-mark {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.5;
+}
+
+.sp-rate-guard-group-selected-toggle.active .sp-rate-guard-group-selected-toggle-mark {
+  opacity: 1;
+}
+
+.sp-rate-guard-group-filter-result {
+  flex: 0 0 auto;
+  color: var(--sp-muted);
+  font-size: 12px;
+}
+
+.sp-rate-guard-group-filter-result strong {
+  color: var(--sp-text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 列表整块滚动 + 行分隔线（与健康守护账号列表同构），
+   比"一堆独立小卡片"更耐看，分组多时也能一眼扫完。
+   不设 max-height：弹窗已近全屏，列表直接吃满摘要与工具栏之外的剩余空间，
+   再叠加一层上限会让内容区下方空出一块，反而显得没铺满。 */
+.sp-rate-guard-group-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-top: 1px solid var(--sp-line);
+  background: color-mix(in srgb, var(--sp-soft) 12%, var(--sp-panel));
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--sp-line) 82%, transparent) transparent;
+}
+
+.sp-rate-guard-group-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.sp-rate-guard-group-list::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sp-line) 85%, transparent);
+  background-clip: padding-box;
+}
+
+.sp-rate-guard-group-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 8px 12px;
+  border-bottom: 1px solid var(--sp-line);
+  padding: 10px 14px;
+  background: var(--sp-panel);
+  transition: background-color 160ms ease, box-shadow 160ms ease;
+}
+
+.sp-rate-guard-group-row:last-child {
+  border-bottom: 0;
+}
+
+.sp-rate-guard-group-row:hover {
+  background: color-mix(in srgb, var(--sp-cyan) 4%, var(--sp-panel));
+}
+
+/* 已关闭：左侧色条 + 灰底。色条是关键 —— 视线扫过整列时，
+   靠底色深浅分辨"关没关"太吃力，一条竖线能立刻看出被跳过的行在哪。 */
+.sp-rate-guard-group-row.disabled {
+  background: color-mix(in srgb, var(--sp-muted) 6%, var(--sp-panel));
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sp-muted) 55%, var(--sp-line));
+}
+
+.sp-rate-guard-group-row.disabled:hover {
+  background: color-mix(in srgb, var(--sp-muted) 9%, var(--sp-panel));
+}
+
+.sp-rate-guard-group-choice {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+}
+
+.sp-rate-guard-group-choice input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  /* 不依赖浏览器默认外观：否则各平台未勾选态的方框粗细、圆角都不一样，
+     而这一列正是用户判断"这个分组到底参不参与"的唯一依据，必须稳定可辨。 */
+  accent-color: var(--sp-cyan);
+  border-radius: 4px;
+  cursor: pointer;
+  margin: 0;
+}
+
+.sp-rate-guard-group-choice input[type='checkbox']:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--sp-cyan) 40%, transparent);
+  outline-offset: 2px;
+}
+
+.sp-rate-guard-group-choice-copy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.sp-rate-guard-group-choice-copy strong {
+  color: var(--sp-text);
+  font-size: 13px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-rate-guard-group-row.disabled .sp-rate-guard-group-choice-copy strong {
+  color: var(--sp-muted);
+}
+
+.sp-rate-guard-group-id,
+.sp-rate-guard-group-rate {
+  color: var(--sp-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 倍率用底色块而非描边：--sp-soft 在浅灰列表底上几乎看不见边框，
+   底色块能在不抢视线的前提下把"倍率"和前面的 ID 区分开。 */
+.sp-rate-guard-group-rate {
+  border-radius: 6px;
+  padding: 1px 6px;
+  background: color-mix(in srgb, var(--sp-line) 55%, transparent);
+}
+
+/* 状态标签只在"已关闭"行出现，因此直接用琥珀警示色 ——
+   它现在表达的是"这个分组被排除了"，不是中性状态，不该用灰色低调处理。 */
+.sp-rate-guard-group-status {
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--sp-amber) 38%, var(--sp-line));
+  border-radius: 6px;
+  padding: 2px 8px;
+  background: color-mix(in srgb, var(--sp-amber) 8%, transparent);
+  color: var(--sp-amber);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.sp-rate-guard-group-hint {
+  margin-right: auto;
+  color: var(--sp-muted);
+  font-size: 12px;
 }
 
 .sp-health-guard-account-dialog {
