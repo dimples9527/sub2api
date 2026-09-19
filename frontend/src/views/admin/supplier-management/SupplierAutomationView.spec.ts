@@ -1214,6 +1214,36 @@ describe('SupplierAutomationView edit dialog composition', () => {
     expect(saveTaskSource).toContain('editForm.cron_expression = cronExpression')
   })
 
+  // 编辑弹窗是多任务共用的，宽度必须按内容走，不能一律铺满。
+  // 决定宽度的是「最宽那一行的列数」：3 列网格（健康守护 7 个输入框 / 数据保留 4 个输入框）
+  // 每列都要放得下标签+输入框，压窄会把标签折行；2 列及以下用窄档即可。
+  // 实测铺满时账号倍率守护底部留 248px 空白（约 34%）、策略卡内空出 1012px。
+  it('sizes the shared edit dialog by the widest grid in the active task, not by the task code', () => {
+    // 分档属性由 computed 计算 —— 逐任务写死会在新增任务时静默落空。
+    expect(editDialogSource).toContain(':data-grid-cols="editDialogGridCols"')
+    expect(supplierAutomationSource).toContain('const editDialogGridCols = computed<2 | 3>(() =>')
+    expect(supplierAutomationSource).toContain(
+      "editForm.task_code === 'supplier_account_health_guard' ||"
+    )
+    expect(supplierAutomationSource).toContain("editForm.task_code === 'supplier_data_cleanup'")
+
+    // 两档各自有独立的宽度规则，且必须排在「铺满」那条之后 ——
+    // 同层选择器权重相同，靠源码顺序取胜；顺序颠倒会让窄档失效。
+    const cols2Rule = supplierAutomationSource.indexOf(
+      ':global(.modal-content:has(.sp-edit-dialog[data-grid-cols="2"]))'
+    )
+    const cols3Rule = supplierAutomationSource.indexOf(
+      ':global(.modal-content:has(.sp-edit-dialog[data-grid-cols="3"]))'
+    )
+    const fullBleedRule = supplierAutomationSource.indexOf(
+      '@media (min-width: 768px) {\n  :global(.modal-content:has(.sp-health-guard-account-dialog)),'
+    )
+    expect(fullBleedRule).toBeGreaterThan(-1)
+    expect(cols2Rule).toBeGreaterThan(fullBleedRule)
+    expect(cols3Rule).toBeGreaterThan(fullBleedRule)
+    expect(supplierAutomationSource.slice(cols2Rule)).toContain('width: min(980px, calc(100vw - 2rem));')
+  })
+
   it('extends every result-dialog modal surface selector to the edit dialog', () => {
     const selectorPairs = [
       [

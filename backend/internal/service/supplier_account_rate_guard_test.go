@@ -27,6 +27,10 @@ type supplierAccountRateGuardRepoStub struct {
 	listResult SupplierAccountRateGuardUnbindLogListResult
 	listErr    error
 	createErr  error
+	// 批量标记的入参要被看见：筛选口径漏传会让"一键处理"打到全表。
+	batchParams SupplierAccountRateGuardUnbindLogListParams
+	batchResult SupplierAccountRateGuardUnbindLogBatchHandledResult
+	batchErr    error
 }
 
 func (r *supplierAccountRateGuardRepoStub) ListAccountRateGuardCandidates(_ context.Context, providerID int64, _ []string) ([]SupplierAccountRateGuardCandidate, error) {
@@ -54,6 +58,11 @@ func (r *supplierAccountRateGuardRepoStub) MarkAccountRateGuardUnbindLogHandled(
 		}
 	}
 	return SupplierAccountRateGuardUnbindLog{}, errors.New("未找到解绑日志")
+}
+
+func (r *supplierAccountRateGuardRepoStub) MarkAccountRateGuardUnbindLogsHandled(_ context.Context, params SupplierAccountRateGuardUnbindLogListParams) (SupplierAccountRateGuardUnbindLogBatchHandledResult, error) {
+	r.batchParams = params
+	return r.batchResult, r.batchErr
 }
 
 type accountRateGuardRemoverStub struct {

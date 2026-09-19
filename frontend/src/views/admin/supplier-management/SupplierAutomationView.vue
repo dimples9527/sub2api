@@ -204,7 +204,7 @@
       </div>
 
       <BaseDialog :show="editVisible" :title="editingTask?.name || '编辑任务'" width="wide" @close="closeEdit">
-        <form class="sp-edit-dialog" :class="{ 'is-health-guard': editForm.task_code === 'supplier_account_health_guard' }" @submit.prevent="saveTask">
+        <form class="sp-edit-dialog" :class="{ 'is-health-guard': editForm.task_code === 'supplier_account_health_guard' }" :data-grid-cols="editDialogGridCols" @submit.prevent="saveTask">
           <section class="sp-edit-summary" aria-label="当前任务摘要">
             <div><span>任务编码</span><strong>{{ editForm.task_code }}</strong></div>
             <div><span>当前状态</span><strong>{{ editForm.enabled ? '已启用' : '已停用' }}</strong></div>
@@ -2001,6 +2001,18 @@ const accountRateGuardDisabledGroupIDs = computed(() =>
   normalizePositiveAccountIDs(editForm.config.account_rate_guard_disabled_group_ids)
 )
 
+// 编辑弹窗的宽度由「最宽那一行的列数」决定，不是区块个数 ——
+// 3 列网格（健康守护 7 个输入框 / 数据保留 4 个输入框）每列都要放得下「标签 + 输入框」，
+// 压窄会把标签折行、区块高度反而涨上去；2 列及以下（其余任务）用窄档即可，
+// 铺满只会把内容拉散（实测账号倍率守护铺满后策略卡里从文字到按钮空出 1012px）。
+// 窄屏下 3 列会由既有媒体查询自动降级为 2 列，所以这里只表达「宽屏需要多宽」。
+const editDialogGridCols = computed<2 | 3>(() =>
+  editForm.task_code === 'supplier_account_health_guard' ||
+  editForm.task_code === 'supplier_data_cleanup'
+    ? 3
+    : 2
+)
+
 const rateGuardGroupScopeSummary = computed(() => {
   const disabled = accountRateGuardDisabledGroupIDs.value.length
   return {
@@ -3401,6 +3413,40 @@ function intervalSecondsToCron(seconds: number): string | null {
   :global(.modal-content:has(.sp-edit-dialog)) {
     width: calc(100vw - 2rem);
     max-width: calc(100vw - 2rem);
+  }
+
+  /* 编辑弹窗按「最宽那行的列数」分档，不再一律铺满。
+     这个弹窗是多任务共用的，不同 task_code 的内容量差一倍：
+     账号倍率守护内容总高 481px / 可用高 729px，铺满后底部留 248px 空白（约 34%），
+     策略卡片里从文字到按钮更是空出 1012px；健康守护有 7 个输入框排 3 列（内容高 721px，几乎填满）。
+     决定宽度的是最宽那一行的列数，不是区块个数 —— 3 列要放得下每列的「标签 + 输入框」，
+     2 列则 980px 就够（每列约 450px）。档位值与 data-grid-cols 由脚本同步而来，
+     新增任务只要落进这两档就自动适配，不必再逐任务写死。
+     这条必须排在上一条之后 —— 同层选择器权重相同，靠源码顺序取胜。 */
+  :global(.modal-content:has(.sp-edit-dialog[data-grid-cols="2"])) {
+    width: min(980px, calc(100vw - 2rem));
+    max-width: min(980px, calc(100vw - 2rem));
+  }
+
+  :global(.modal-content:has(.sp-edit-dialog[data-grid-cols="3"])) {
+    width: calc(100vw - 2rem);
+    max-width: calc(100vw - 2rem);
+  }
+}
+
+/* 高度同步收窄：2 列档宽度降到 980px 后再顶满 100dvh 会显得又瘦又长。
+   640px 对 481px 的内容留出约 160px 余量，够容纳策略卡片换行；
+   3 列档内容更高，沿用上面的 100dvh 兜底。
+   屏幕不够高时仍由 calc(100dvh - 2rem) 兜住。 */
+:global(.modal-content:has(.sp-edit-dialog[data-grid-cols="2"])) {
+  height: min(640px, calc(100dvh - 1rem));
+  max-height: min(640px, calc(100dvh - 1rem));
+}
+
+@media (min-width: 640px) {
+  :global(.modal-content:has(.sp-edit-dialog[data-grid-cols="2"])) {
+    height: min(640px, calc(100dvh - 2rem));
+    max-height: min(640px, calc(100dvh - 2rem));
   }
 }
 

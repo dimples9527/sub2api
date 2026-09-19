@@ -69,4 +69,51 @@ describe('SupplierAccountRateGuardLogDialog', () => {
     expect(source).toContain('tbody tr:nth-child(even)')
     expect(source).toContain('tbody tr:hover')
   })
+
+  // 一键处理清的是「当前筛选条件下的全部待处理」。
+  // 这里的每一条断言都对应一个会静默出错的点：筛选漏传会打到范围外、
+  // 不做二次确认会误清几百条、无待处理时按钮可点会白跑一次、并发会互相覆盖列表。
+  it('提供一键处理，且与列表共用同一套筛选口径', () => {
+    expect(source).toContain('markAccountRateGuardUnbindLogsHandled')
+    expect(source).toContain('async function markAllPendingHandled()')
+    // 列表与批量走同一个参数构造器 —— 分成两份写迟早漂移。
+    expect(source).toContain('function buildListParams(withPagination: boolean)')
+    expect(source).toContain('listAccountRateGuardUnbindLogs(buildListParams(true))')
+    expect(source).toContain('markAccountRateGuardUnbindLogsHandled(buildListParams(false))')
+    // 批量不该透传分页参数。
+    expect(source).toContain('...(withPagination ? { page: page.value, page_size: pageSize.value } : {})')
+  })
+
+  it('一键处理前二次确认条数，且只在有待处理时可用', () => {
+    expect(source).toContain('window.confirm(')
+    expect(source).toContain('条待处理记录全部标记为已处理？此操作不可撤销。')
+    // 确认文案里的条数必须取自 pendingCount（后端用同一套 where 统计出来的），
+    // 不能另算一份 —— 否则"按钮上显示 30、确认框说 12"。
+    expect(source).toContain('const target = pendingCount.value')
+    expect(source).toContain(':disabled="operationBusy || pendingCount <= 0"')
+    expect(source).toContain(":title=\"pendingCount > 0 ? `处理当前筛选下的 ${pendingCount} 条待处理记录` : '当前筛选下没有待处理记录'\"")
+  })
+
+  it('一键处理按后端单批上限循环提交，并给出成功/失败反馈', () => {
+    // has_more 由后端返回，前端不硬编码上限值 —— 后端调批次大小不影响这里。
+    expect(source).toContain('hasMore = result.has_more && result.handled > 0')
+    expect(source).toContain('while (hasMore && guard < 40)')
+    // AGENTS.md：业务成功/失败必须走全局 Toast，不能自建提示条。
+    expect(source).toContain('appStore.showSuccess(`已标记 ${handled} 条待处理记录为已处理`)')
+    expect(source).toContain("appStore.showError(err instanceof Error ? err.message : '一键处理失败')")
+    expect(source).toContain("import { useAppStore } from '@/stores/app'")
+  })
+
+  it('单条处理与一键处理互斥，避免并发刷新互相覆盖', () => {
+    expect(source).toContain('const operationBusy = computed(() => loading.value || batchHandling.value || handlingID.value > 0)')
+    expect(source).toContain("if (log.status !== 'pending' || operationBusy.value) return")
+    expect(source).toContain('if (batchHandling.value || pendingCount.value <= 0) return')
+  })
+
+  it('把一键处理与普通筛选按钮在视觉上区分开', () => {
+    expect(source).toContain('account-rate-log-batch-action')
+    // 琥珀与表格里"待处理"同色，语义一致。
+    expect(source).toContain('border: 1px solid color-mix(in srgb, var(--sp-amber) 40%, var(--sp-line))')
+    expect(source).toContain('.account-rate-log-batch-action:disabled')
+  })
 })

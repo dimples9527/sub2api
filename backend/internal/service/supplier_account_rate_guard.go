@@ -106,6 +106,15 @@ type SupplierAccountRateGuardUnbindLogListResult struct {
 	PageSize     int                                 `json:"page_size"`
 }
 
+// SupplierAccountRateGuardUnbindLogBatchHandledResult 是批量标记已处理的结果。
+// Batch 是「还有没有下一批」的依据：单次 UPDATE 有上限，前端据此决定是否继续，
+// 而不是靠"这次改了几条 < 请求的全部条数"去猜。
+type SupplierAccountRateGuardUnbindLogBatchHandledResult struct {
+	Handled int64 `json:"handled"`
+	Batch   int64 `json:"batch"`
+	HasMore bool  `json:"has_more"`
+}
+
 type SupplierAccountRateGuardResult struct {
 	Mode                     string `json:"mode"`
 	CheckedProviders         int    `json:"checked_providers"`
@@ -128,6 +137,7 @@ type SupplierAccountRateGuardRepository interface {
 	CreateAccountRateGuardUnbindLogs(ctx context.Context, logs []SupplierAccountRateGuardUnbindLog) error
 	ListAccountRateGuardUnbindLogs(ctx context.Context, params SupplierAccountRateGuardUnbindLogListParams) (SupplierAccountRateGuardUnbindLogListResult, error)
 	MarkAccountRateGuardUnbindLogHandled(ctx context.Context, id int64) (SupplierAccountRateGuardUnbindLog, error)
+	MarkAccountRateGuardUnbindLogsHandled(ctx context.Context, params SupplierAccountRateGuardUnbindLogListParams) (SupplierAccountRateGuardUnbindLogBatchHandledResult, error)
 }
 
 type AccountRateGuardGroupRemovalResult struct {

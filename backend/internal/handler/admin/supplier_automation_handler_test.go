@@ -20,6 +20,8 @@ type supplierAutomationHandlerServiceStub struct {
 	handledID                 int64
 	accountRateGuardHandledID int64
 	accountRateGuardLogParams service.SupplierAccountRateGuardUnbindLogListParams
+	batchCalled               bool
+	batchParams               service.SupplierAccountRateGuardUnbindLogListParams
 }
 
 func (s *supplierAutomationHandlerServiceStub) ListTasks(context.Context) ([]service.SupplierAutomationTask, error) {
@@ -64,6 +66,12 @@ func (s *supplierAutomationHandlerServiceStub) MarkAccountRateGuardUnbindLogHand
 	return service.SupplierAccountRateGuardUnbindLog{ID: id, Status: service.SupplierAccountRateGuardLogStatusHandled}, nil
 }
 
+func (s *supplierAutomationHandlerServiceStub) MarkAccountRateGuardUnbindLogsHandled(_ context.Context, params service.SupplierAccountRateGuardUnbindLogListParams) (service.SupplierAccountRateGuardUnbindLogBatchHandledResult, error) {
+	s.batchCalled = true
+	s.batchParams = params
+	return service.SupplierAccountRateGuardUnbindLogBatchHandledResult{Handled: 3, Batch: 500, HasMore: false}, nil
+}
+
 func TestSupplierAutomationHandlerRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	stub := &supplierAutomationHandlerServiceStub{}
@@ -76,6 +84,7 @@ func TestSupplierAutomationHandlerRoutes(t *testing.T) {
 	router.GET("/automation/rate-guard-change-logs", handler.ListRateGuardChangeLogs)
 	router.GET("/automation/account-rate-guard-unbind-logs", handler.ListAccountRateGuardUnbindLogs)
 	router.POST("/automation/account-rate-guard-unbind-logs/:id/handled", handler.MarkAccountRateGuardUnbindLogHandled)
+	router.POST("/automation/account-rate-guard-unbind-logs/handled-batch", handler.MarkAccountRateGuardUnbindLogsHandled)
 	router.POST("/automation/rate-guard-change-logs/:id/handled", handler.MarkRateGuardChangeLogHandled)
 
 	rec := httptest.NewRecorder()
@@ -97,6 +106,16 @@ func TestSupplierAutomationHandlerRoutes(t *testing.T) {
 	router.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, int64(11), stub.accountRateGuardHandledID)
+
+	// 一键处理：筛选走 query，与列表同名；Page/PageSize 有意不解析（批量不分页）。
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/automation/account-rate-guard-unbind-logs/handled-batch?provider_id=4&local_account_id=5&search=alpha&mode=execute&only_unbound=true", nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.True(t, stub.batchCalled)
+	require.Equal(t, service.SupplierAccountRateGuardUnbindLogListParams{
+		ProviderID: 4, LocalAccountID: 5, Search: "alpha", Mode: "execute", OnlyUnbound: true,
+	}, stub.batchParams)
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPut, "/automation/tasks/supplier_data_sync", bytes.NewBufferString(`{"enabled":true,"cron_expression":"*/30 * * * *","timeout_seconds":600}`))
@@ -128,8 +147,33 @@ func TestSupplierAutomationHandlerRoutes(t *testing.T) {
 	require.Equal(t, int64(9), stub.handledID)
 }
 
-func TestSupplierAutomationHandlerPassesRunMode(t *testing.T) {
+// 一键处理的路径少一段（没有 :id），与单条处理的 /:id/handled 并存。
+// gin 对「同层级既有通配段又有静态段」是允许的，但一旦把路径改回带 :id 的形式，
+// 冲突会在**服务启动注册路由时 panic** —— 那是最难排查的一类故障，
+// 因此在测试里把它钉死：注册不 panic，且两条路径各自命中正确的处理器。
+func TestSupplierAutomationHandlerBatchRouteDoesNotConflict(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	stub := &supplierAutomationHandlerServiceStub{}
+	handler := NewSupplierAutomationHandler(stub)
+	router := gin.New()
+	require.NotPanics(t, func() {
+		router.POST("/automation/account-rate-guard-unbind-logs/:id/handled", handler.MarkAccountRateGuardUnbindLogHandled)
+		router.POST("/automation/account-rate-guard-unbind-logs/handled-batch", handler.MarkAccountRateGuardUnbindLogsHandled)
+	})
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/automation/account-rate-guard-unbind-logs/77/handled", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(77), stub.accountRateGuardHandledID)
+	require.False(t, stub.batchCalled)
+
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/automation/account-rate-guard-unbind-logs/handled-batch", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.True(t, stub.batchCalled)
+}
+
+func TestSupplierAutomationHandlerPassesRunMode(t *testing.T) {	gin.SetMode(gin.TestMode)
 	stub := &supplierAutomationHandlerServiceStub{}
 	handler := NewSupplierAutomationHandler(stub)
 	router := gin.New()

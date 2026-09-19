@@ -28,12 +28,23 @@
           <Select v-model="filters.status" class="w-full" :options="statusOptions" :searchable="false" />
         </div>
         <div class="account-rate-log-actions">
-          <button class="sp-button small ghost" type="button" :disabled="loading" @click="toggleAllRecords">
+          <button class="sp-button small ghost" type="button" :disabled="operationBusy" @click="toggleAllRecords">
             {{ showingAllRecords ? '仅看已解绑' : '显示所有记录' }}
           </button>
-          <button class="sp-button small ghost" type="button" :disabled="loading" @click="resetFilters">重置</button>
-          <button class="sp-button small primary" type="button" :disabled="loading" @click="applyFilters">
+          <button class="sp-button small ghost" type="button" :disabled="operationBusy" @click="resetFilters">重置</button>
+          <button class="sp-button small primary" type="button" :disabled="operationBusy" @click="applyFilters">
             {{ loading ? '查询中' : '查询' }}
+          </button>
+          <!-- 一键处理：条数直接写在按钮上，避免用户点开二次确认才发现要清多少条。
+               无待处理时禁用 —— 一个点了必然空转的按钮比没有按钮更糟。 -->
+          <button
+            class="sp-button small account-rate-log-batch-action"
+            type="button"
+            :disabled="operationBusy || pendingCount <= 0"
+            :title="pendingCount > 0 ? `处理当前筛选下的 ${pendingCount} 条待处理记录` : '当前筛选下没有待处理记录'"
+            @click="markAllPendingHandled"
+          >
+            {{ batchHandling ? '处理中…' : `一键处理${pendingCount > 0 ? `（${pendingCount}）` : ''}` }}
           </button>
         </div>
       </div>
@@ -150,8 +161,10 @@ import { supplierProvidersAPI } from '@/api/admin/supplierProviders'
 import {
   listAccountRateGuardUnbindLogs,
   markAccountRateGuardUnbindLogHandled,
+  markAccountRateGuardUnbindLogsHandled,
   type SupplierAccountRateGuardUnbindLog,
 } from '@/api/admin/supplierAutomation'
+import { useAppStore } from '@/stores/app'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Input from '@/components/common/Input.vue'
@@ -174,11 +187,16 @@ const props = withDefaults(defineProps<Props>(), {
   initialLocalAccountId: 0,
 })
 const emit = defineEmits<Emits>()
+const appStore = useAppStore()
 
 const items = ref<SupplierAccountRateGuardUnbindLog[]>([])
 const providers = ref<Array<{ id: number; name: string }>>([])
 const loading = ref(false)
 const handlingID = ref(0)
+// 一键处理与单条处理必须互斥：并发时两者都在跑 loadLogs，
+// 先返回的那次会把后返回的结果覆盖掉，列表看起来像"处理没生效"。
+const batchHandling = ref(false)
+const operationBusy = computed(() => loading.value || batchHandling.value || handlingID.value > 0)
 const error = ref('')
 const total = ref(0)
 const pendingCount = ref(0)
@@ -243,20 +261,26 @@ async function loadProviders() {
   }
 }
 
+// 列表与一键处理共用同一套筛选映射。分成两份写迟早会漂移：
+// 页面显示"待处理 30 条"、一键处理却只清了 12 条（因为漏传了某个筛选），
+// 这种 bug 不会报错，只会让用户以为程序吞了数据。
+function buildListParams(withPagination: boolean) {
+  return {
+    provider_id: filters.providerID || undefined,
+    local_account_id: props.initialLocalAccountId || undefined,
+    search: filters.search.trim() || undefined,
+    mode: filters.mode || undefined,
+    result: filters.result || undefined,
+    status: filters.status || undefined,
+    ...(withPagination ? { page: page.value, page_size: pageSize.value } : {}),
+  }
+}
+
 async function loadLogs() {
   loading.value = true
   error.value = ''
   try {
-    const result = await listAccountRateGuardUnbindLogs({
-      provider_id: filters.providerID || undefined,
-      local_account_id: props.initialLocalAccountId || undefined,
-      search: filters.search.trim() || undefined,
-      mode: filters.mode || undefined,
-      result: filters.result || undefined,
-      status: filters.status || undefined,
-      page: page.value,
-      page_size: pageSize.value,
-    })
+    const result = await listAccountRateGuardUnbindLogs(buildListParams(true))
     items.value = result.items
     total.value = result.total
     pendingCount.value = result.pending_count
@@ -293,7 +317,7 @@ async function changePage(nextPage: number) {
 }
 
 async function markHandled(log: SupplierAccountRateGuardUnbindLog) {
-  if (log.status !== 'pending' || handlingID.value) return
+  if (log.status !== 'pending' || operationBusy.value) return
   handlingID.value = log.id
   error.value = ''
   try {
@@ -307,6 +331,45 @@ async function markHandled(log: SupplierAccountRateGuardUnbindLog) {
     error.value = err instanceof Error ? err.message : '标记日志已处理失败'
   } finally {
     handlingID.value = 0
+  }
+}
+
+// 一键处理：清掉「当前筛选条件下的全部待处理」。
+// pendingCount 就是当前筛选口径下的待处理数（后端用同一套 where 统计），
+// 所以拿它做二次确认的条数，与按钮上显示的数字一定是同一个口径。
+async function markAllPendingHandled() {
+  if (batchHandling.value || pendingCount.value <= 0) return
+  const target = pendingCount.value
+  const confirmed = window.confirm(
+    `将当前筛选条件下的 ${target} 条待处理记录全部标记为已处理？此操作不可撤销。`
+  )
+  if (!confirmed) return
+  batchHandling.value = true
+  error.value = ''
+  try {
+    // 单批有上限（后端返回 batch）。打满就继续发，直到 has_more 为 false ——
+    // 这样前端不必知道上限具体是多少，后端调整也不影响这里。
+    let handled = 0
+    let hasMore = true
+    let guard = 0
+    while (hasMore && guard < 40) {
+      const result = await markAccountRateGuardUnbindLogsHandled(buildListParams(false))
+      handled += result.handled
+      hasMore = result.has_more && result.handled > 0
+      guard += 1
+    }
+    page.value = 1
+    await loadLogs()
+    if (handled > 0) {
+      appStore.showSuccess(`已标记 ${handled} 条待处理记录为已处理`)
+    } else {
+      appStore.showSuccess('没有需要处理的记录')
+    }
+  } catch (err) {
+    // 业务错误走全局 Toast（AGENTS.md 要求），页面内只在列表上方保留加载类错误条。
+    appStore.showError(err instanceof Error ? err.message : '一键处理失败')
+  } finally {
+    batchHandling.value = false
   }
 }
 
@@ -424,6 +487,28 @@ function schedulableText(value?: boolean): string {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* 一键处理是这一行里唯一有破坏性的动作（一次改动几百行记录），
+   因此与它左边的「查询 / 重置 / 显示所有记录」在视觉上拉开一档：
+   独立留白 + 琥珀描边（与表格里"待处理"的琥珀是同一个语义色），
+   避免被当成普通筛选按钮顺手点掉。 */
+.account-rate-log-batch-action {
+  margin-left: 8px;
+  border: 1px solid color-mix(in srgb, var(--sp-amber) 40%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-amber) 9%, var(--sp-panel));
+  color: var(--sp-amber);
+}
+
+.account-rate-log-batch-action:hover:not(:disabled) {
+  border-color: var(--sp-amber);
+  background: color-mix(in srgb, var(--sp-amber) 16%, var(--sp-panel));
+}
+
+.account-rate-log-batch-action:disabled {
+  border-color: var(--sp-line);
+  background: var(--sp-panel-2);
+  color: var(--sp-muted);
 }
 
 .account-rate-log-table-region {

@@ -19,6 +19,7 @@ type SupplierAutomationServicePort interface {
 	ListAccountRateGuardUnbindLogs(ctx context.Context, params service.SupplierAccountRateGuardUnbindLogListParams) (service.SupplierAccountRateGuardUnbindLogListResult, error)
 	MarkRateGuardChangeLogHandled(ctx context.Context, id int64) (service.SupplierRateGuardChangeLog, error)
 	MarkAccountRateGuardUnbindLogHandled(ctx context.Context, id int64) (service.SupplierAccountRateGuardUnbindLog, error)
+	MarkAccountRateGuardUnbindLogsHandled(ctx context.Context, params service.SupplierAccountRateGuardUnbindLogListParams) (service.SupplierAccountRateGuardUnbindLogBatchHandledResult, error)
 }
 
 type SupplierAutomationHandler struct {
@@ -164,8 +165,29 @@ func (h *SupplierAutomationHandler) MarkAccountRateGuardUnbindLogHandled(c *gin.
 	response.Success(c, item)
 }
 
-func (h *SupplierAutomationHandler) MarkRateGuardChangeLogHandled(c *gin.Context) {
-	id, err := strconv.ParseInt(strings.TrimSpace(c.Param("id")), 10, 64)
+// MarkAccountRateGuardUnbindLogsHandled 一键处理：把「当前筛选条件下的全部待处理」标记为已处理。
+// 筛选走 query 而不是 body，与列表接口共用同一套参数名 —— 前端不必做两套映射，
+// 也不会出现"列表带了这个筛选、批量忘了带"的口径不一致。
+// Page/PageSize 有意不解析：批量不分页，条数上限由仓库层的 batchLimit 控制。
+func (h *SupplierAutomationHandler) MarkAccountRateGuardUnbindLogsHandled(c *gin.Context) {
+	result, err := h.service.MarkAccountRateGuardUnbindLogsHandled(c.Request.Context(), service.SupplierAccountRateGuardUnbindLogListParams{
+		RunID:          parseOptionalInt64(c.Query("run_id")),
+		ProviderID:     parseOptionalInt64(c.Query("provider_id")),
+		LocalAccountID: parseOptionalInt64(c.Query("local_account_id")),
+		Search:         strings.TrimSpace(c.Query("search")),
+		Result:         strings.TrimSpace(c.Query("result")),
+		Mode:           strings.TrimSpace(c.Query("mode")),
+		Status:         strings.TrimSpace(c.Query("status")),
+		OnlyUnbound:    parseOptionalBool(c.Query("only_unbound")),
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *SupplierAutomationHandler) MarkRateGuardChangeLogHandled(c *gin.Context) {	id, err := strconv.ParseInt(strings.TrimSpace(c.Param("id")), 10, 64)
 	if err != nil || id <= 0 {
 		response.ErrorFrom(c, badRequest("日志编号无效"))
 		return

@@ -354,6 +354,14 @@ export interface SupplierAccountRateGuardUnbindLogListResult {
   page_size: number
 }
 
+// 一键处理的返回。has_more 表示"这次打满了后端单批上限、后面大概率还有"，
+// 前端据此决定要不要再发一次 —— 不能靠 handled < 期望条数去猜。
+export interface SupplierAccountRateGuardUnbindLogBatchHandledResult {
+  handled: number
+  batch: number
+  has_more: boolean
+}
+
 export async function listTasks(): Promise<SupplierAutomationTask[]> {
   const { data } = await apiClient.get<SupplierAutomationTask[]>(
     '/admin/supplier-management/automation/tasks'
@@ -427,6 +435,20 @@ export async function markAccountRateGuardUnbindLogHandled(id: number): Promise<
   return data
 }
 
+// 一键处理：把「当前筛选条件下的全部待处理」标记为已处理。
+// 筛选走 query 而不是 body —— 与列表接口共用同一套参数名，页面上怎么筛的这里就怎么传，
+// 不会出现"列表带了筛选、批量忘了带"的口径漂移。page / page_size 有意不透传（批量不分页）。
+export async function markAccountRateGuardUnbindLogsHandled(
+  params: SupplierAccountRateGuardUnbindLogListParams = {}
+): Promise<SupplierAccountRateGuardUnbindLogBatchHandledResult> {
+  const { data } = await apiClient.post<SupplierAccountRateGuardUnbindLogBatchHandledResult>(
+    '/admin/supplier-management/automation/account-rate-guard-unbind-logs/handled-batch',
+    null,
+    { params }
+  )
+  return data
+}
+
 export const supplierAutomationAPI = {
   listTasks,
   updateTask,
@@ -436,6 +458,7 @@ export const supplierAutomationAPI = {
   markRateGuardChangeLogHandled,
   listAccountRateGuardUnbindLogs,
   markAccountRateGuardUnbindLogHandled,
+  markAccountRateGuardUnbindLogsHandled,
 }
 
 export default supplierAutomationAPI

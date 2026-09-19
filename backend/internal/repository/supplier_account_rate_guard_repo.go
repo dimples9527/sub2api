@@ -246,6 +246,53 @@ RETURNING id, run_id, provider_id, provider_name, supplier_provider_account_id,
 	return item, nil
 }
 
+// supplierAccountRateGuardLogBatchLimit 限制单次批量 UPDATE 影响的行数上限。
+// 一次 UPDATE 上百万行会长时间持锁并撑大 WAL；这里取 500 是「一次请求既能把常见规模清完、
+// 又不至于把库拖住」的折中。超过上限时返回 HasMore，由前端决定是否继续，而不是静默只改一部分。
+const supplierAccountRateGuardLogBatchLimit = 500
+
+// MarkAccountRateGuardUnbindLogsHandled 按筛选条件批量标记已处理。
+// WHERE 复用 supplierAccountRateGuardLogWhere —— 与列表/待处理计数同源，
+// 这样"列表里看到的待处理条数"与"一键处理能清掉的条数"不会出现口径漂移。
+// 状态条件与单条接口一致：只动 result='unbound' AND status='pending'，
+// 避免把 failed/skipped 这类没有"解除绑定"语义的记录也标成已处理。
+func (r *supplierAccountRateGuardRepository) MarkAccountRateGuardUnbindLogsHandled(ctx context.Context, params service.SupplierAccountRateGuardUnbindLogListParams) (service.SupplierAccountRateGuardUnbindLogBatchHandledResult, error) {
+	// Page/PageSize 对批量没有意义，清零后交给 where 构造器（二者都不参与 WHERE）。
+	params.Page = 0
+	params.PageSize = 0
+	params = normalizeSupplierAccountRateGuardLogParams(params)
+	// 强制覆盖 status：调用方可能带着 status=pending 的筛选过来，但其取值不受信任 ——
+	// 批量处理只允许落在 pending 上，否则会把已处理的记录重复刷一遍 handled_at。
+	params.Status = service.SupplierAccountRateGuardLogStatusPending
+	params.OnlyUnbound = true
+	params.Result = ""
+	where, args := supplierAccountRateGuardLogWhere(params)
+	args = append(args, supplierAccountRateGuardLogBatchLimit, service.SupplierAccountRateGuardLogStatusHandled)
+	result, err := r.db.ExecContext(ctx, fmt.Sprintf(`
+UPDATE supplier_account_rate_guard_unbind_logs
+SET status = $%d,
+    handled_at = COALESCE(handled_at, NOW())
+WHERE id IN (
+  SELECT id FROM supplier_account_rate_guard_unbind_logs
+  WHERE %s
+  ORDER BY created_at DESC, id DESC
+  LIMIT $%d
+)`, len(args)-1, where, len(args)-2), args...)
+	if err != nil {
+		return service.SupplierAccountRateGuardUnbindLogBatchHandledResult{}, fmt.Errorf("批量标记账号倍率守护解绑日志已处理失败: %w", err)
+	}
+	handled, err := result.RowsAffected()
+	if err != nil {
+		return service.SupplierAccountRateGuardUnbindLogBatchHandledResult{}, fmt.Errorf("读取批量标记影响行数失败: %w", err)
+	}
+	return service.SupplierAccountRateGuardUnbindLogBatchHandledResult{
+		Handled: handled,
+		Batch:   supplierAccountRateGuardLogBatchLimit,
+		// 刚好打满上限说明后面大概率还有 —— 宁可让前端多查一次，也不要让用户以为已经清空。
+		HasMore: handled >= supplierAccountRateGuardLogBatchLimit,
+	}, nil
+}
+
 func normalizeSupplierAccountRateGuardLogParams(params service.SupplierAccountRateGuardUnbindLogListParams) service.SupplierAccountRateGuardUnbindLogListParams {
 	if params.Page <= 0 {
 		params.Page = 1

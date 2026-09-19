@@ -541,8 +541,34 @@ func TestSupplierAutomationServiceMarksAccountRateGuardUnbindLogHandled(t *testi
 	require.Equal(t, SupplierAccountRateGuardLogStatusHandled, logRepo.logs[0].Status)
 }
 
-func TestSupplierAutomationServiceValidatesRateGuardConfig(t *testing.T) {
-	tests := []SupplierAutomationConfig{
+// 一键处理必须把「当前筛选条件」原样透传给仓库层。
+// 筛选字段漏传的后果是静默的：接口不报错，但一键处理会打到筛选范围之外，
+// 用户以为只处理了自己看到的那批，实际把别的也标了。
+func TestSupplierAutomationServiceBatchMarksAccountRateGuardUnbindLogsHandled(t *testing.T) {
+	logRepo := &supplierAccountRateGuardRepoStub{batchResult: SupplierAccountRateGuardUnbindLogBatchHandledResult{
+		Handled: 7, Batch: 500, HasMore: false,
+	}}
+	service := NewSupplierAutomationService(&supplierAutomationRepoStub{}, &supplierAutomationLockStub{}, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
+	service.SetAccountRateGuardRepository(logRepo)
+	params := SupplierAccountRateGuardUnbindLogListParams{ProviderID: 5, LocalAccountID: 9, Search: "2chat", Mode: "unbind"}
+
+	result, err := service.MarkAccountRateGuardUnbindLogsHandled(context.Background(), params)
+
+	require.NoError(t, err)
+	require.Equal(t, params, logRepo.batchParams)
+	require.Equal(t, int64(7), result.Handled)
+	require.False(t, result.HasMore)
+}
+
+func TestSupplierAutomationServiceRejectsBatchHandledWithoutLogRepository(t *testing.T) {
+	service := NewSupplierAutomationService(&supplierAutomationRepoStub{}, &supplierAutomationLockStub{}, &supplierAutomationSyncStub{}, &supplierProviderDataRepoStub{})
+
+	_, err := service.MarkAccountRateGuardUnbindLogsHandled(context.Background(), SupplierAccountRateGuardUnbindLogListParams{ProviderID: 5})
+
+	require.Error(t, err)
+}
+
+func TestSupplierAutomationServiceValidatesRateGuardConfig(t *testing.T) {	tests := []SupplierAutomationConfig{
 		{RateGuardMaxSnapshotAgeSeconds: 59},
 	}
 	for _, config := range tests {

@@ -338,6 +338,17 @@ func (s *SupplierAutomationService) MarkAccountRateGuardUnbindLogHandled(ctx con
 	return s.accountRateLogs.MarkAccountRateGuardUnbindLogHandled(ctx, id)
 }
 
+// MarkAccountRateGuardUnbindLogsHandled 按筛选条件批量标记已处理。
+// 入参复用列表的筛选结构，列表页看到什么、这里就处理什么 —— 两者口径必须一致，
+// 否则会出现"看着有 30 条待处理、一键处理后还剩几条"的困惑。
+// Page/PageSize 会被仓库层忽略（批量不翻页），但仍调用规范化以保证筛选字段被 trim。
+func (s *SupplierAutomationService) MarkAccountRateGuardUnbindLogsHandled(ctx context.Context, params SupplierAccountRateGuardUnbindLogListParams) (SupplierAccountRateGuardUnbindLogBatchHandledResult, error) {
+	if s.accountRateLogs == nil {
+		return SupplierAccountRateGuardUnbindLogBatchHandledResult{}, fmt.Errorf("supplier account rate guard log repository is required")
+	}
+	return s.accountRateLogs.MarkAccountRateGuardUnbindLogsHandled(ctx, params)
+}
+
 func (s *SupplierAutomationService) MarkRateGuardChangeLogHandled(ctx context.Context, id int64) (SupplierRateGuardChangeLog, error) {
 	store, ok := s.dataRepo.(SupplierRateGuardChangeLogStore)
 	if !ok {
