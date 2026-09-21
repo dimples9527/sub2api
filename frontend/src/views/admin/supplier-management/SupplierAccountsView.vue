@@ -634,6 +634,11 @@
             <span>测试结果</span>
             <b class="sp-detail-test-result">
               {{ isMatchedLocalAccount(selected) ? accountTestStatusLabel(selected.local_account_last_test_status) : '—' }}
+              <span
+                v-if="successLatencyLabel(selected)"
+                class="sp-test-latency"
+                :title="'上次测试成功' + successLatencyLabel(selected)"
+              >{{ successLatencyLabel(selected) }}</span>
               <button
                 v-if="hasRepeatedGuardFailures(selected)"
                 type="button"

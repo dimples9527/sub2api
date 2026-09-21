@@ -680,6 +680,15 @@ describe('supplier local data views component usage', () => {
     expect(failedCell.text()).toContain('失败')
     expect(failedCell.find('.sp-test-latency').exists()).toBe(false)
 
+    // 详情抽屉也要展示：抽屉 Teleport 到 body，但根节点挂了 supplier-management-page，
+    // --sp-muted 仍可取到，所以这里复用列表同一个样式类
+    await wrapper.findAll('.account-row-trigger')[0].trigger('click')
+    expect(wrapper.get('.supplier-drawer-stub').text()).toContain('用时 1.2s')
+
+    await wrapper.findAll('.account-row-trigger')[1].trigger('click')
+    expect(wrapper.get('.supplier-drawer-stub').text()).toContain('失败')
+    expect(wrapper.find('.supplier-drawer-stub .sp-test-latency').exists()).toBe(false)
+
     wrapper.unmount()
   })
 
