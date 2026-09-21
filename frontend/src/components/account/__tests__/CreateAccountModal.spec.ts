@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { defineComponent } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -710,5 +712,29 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     await flushPromises()
 
     expect(createOpenAICodexPATMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBe(false)
+  })
+})
+
+describe('CreateAccountModal 分组区域高度', () => {
+  // GroupSelector 内部把分组列表固定在一个 128px 高的窗口里；而这个弹窗是长表单，
+  // 滚到底部时还要在那个小窗口里再滚一次才能看全分组。这里守住「放开上限」不被回退。
+  const source = readFileSync(
+    join(process.cwd(), 'src/components/account/CreateAccountModal.vue'),
+    'utf-8'
+  )
+
+  it('放开分组列表的高度上限，且把作用域限定在分组选择器子树内', () => {
+    expect(source).toContain('[data-tour="account-form-groups"] :deep(.grid.grid-cols-2) {')
+    expect(source).toContain('max-height: none;')
+  })
+
+  it('不修改通用组件 GroupSelector 本身', () => {
+    const selectorSource = readFileSync(
+      join(process.cwd(), 'src/components/common/GroupSelector.vue'),
+      'utf-8'
+    )
+    // 它的默认上限仍在，调用方各自覆盖，而不是改组件
+    expect(selectorSource).toContain('max-h-32')
+    expect(selectorSource).not.toContain('account-form-groups')
   })
 })

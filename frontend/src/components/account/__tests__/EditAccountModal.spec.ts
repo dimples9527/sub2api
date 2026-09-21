@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
 import { mount } from '@vue/test-utils'
@@ -1710,5 +1713,24 @@ describe('EditAccountModal OpenAI 自动使用重置卡', () => {
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     expect(updateAccountMock).not.toHaveBeenCalled()
     wrapper.unmount()
+  })
+})
+
+describe('EditAccountModal 分组区域高度', () => {
+  // GroupSelector 内部把分组列表固定在一个 128px 高的窗口里；而这个弹窗是长表单，
+  // 滚到底部时还要在那个小窗口里再滚一次才能看全分组。这里守住「放开上限」不被回退。
+  const here = dirname(fileURLToPath(import.meta.url))
+  const source = readFileSync(resolve(here, '../EditAccountModal.vue'), 'utf-8')
+
+  it('放开分组列表的高度上限，且把作用域限定在分组选择器子树内', () => {
+    expect(source).toContain('[data-tour="account-form-groups"] :deep(.grid.grid-cols-2) {')
+    expect(source).toContain('max-height: none;')
+  })
+
+  it('不修改通用组件 GroupSelector 本身', () => {
+    const selectorSource = readFileSync(resolve(here, '../../common/GroupSelector.vue'), 'utf-8')
+    // 它的默认上限仍在，页面层/组件层各自覆盖，而不是改组件
+    expect(selectorSource).toContain('max-h-32')
+    expect(selectorSource).not.toContain('account-form-groups')
   })
 })

@@ -5716,3 +5716,17 @@ const handleMixedChannelCancel = () => {
   clearMixedChannelDialog()
 }
 </script>
+
+<style scoped>
+/* 编辑账号弹窗最下方的分组区域。
+   GroupSelector 内部把列表固定在一个 128px 高的窗口里，而这个弹窗是长表单 ——
+   滚到底部时还要在那个小窗口里再滚一次（嵌套滚动），看不全分组。
+   这里放开高度上限，让分组完整展开，整个弹窗只保留 .modal-body 一条滚动条。
+
+   ⚠️ 本组件是通用组件：账号管理 / 供应商账号管理 / 上游账号管理三处入口同时生效。
+   ⚠️ 用 data-tour 锚点把作用域限定在分组选择器子树内 —— 表单里另有 3 处
+      grid-cols-2 布局（窗口成本、会话上限等），不加锚点会被这条规则一起命中。 */
+[data-tour="account-form-groups"] :deep(.grid.grid-cols-2) {
+  max-height: none;
+}
+</style>

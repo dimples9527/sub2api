@@ -7179,3 +7179,17 @@ const handleCookieAuth = async (sessionKey: string) => {
   }
 }
 </script>
+
+<style scoped>
+/* 创建账号弹窗（Step 1 表单）最下方的分组区域。
+   GroupSelector 内部把列表固定在一个 128px 高的窗口里，而这是一个长表单 ——
+   滚到底部时还要在那个小窗口里再滚一次（嵌套滚动），看不全分组。
+   这里放开高度上限，让分组完整展开，整个弹窗只保留 .modal-body 一条滚动条。
+
+   ⚠️ 用 data-tour 锚点把作用域限定在分组选择器子树内 —— 本表单里另有 13 处
+      grid-cols-2 布局（账号类型、窗口成本、会话上限等），不加锚点会被一起命中。
+   ⚠️ 与 EditAccountModal 的同名规则保持成对；两处入口的分组区高度表现应一致。 */
+[data-tour="account-form-groups"] :deep(.grid.grid-cols-2) {
+  max-height: none;
+}
+</style>

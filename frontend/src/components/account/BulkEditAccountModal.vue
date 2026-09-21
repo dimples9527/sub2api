@@ -2424,3 +2424,19 @@ watch(
   }
 )
 </script>
+
+<style scoped>
+/* 批量编辑弹窗最下方的分组区域（表单最后一个字段）。
+   GroupSelector 内部把列表固定在一个 128px 高的窗口里，而这是一个长表单 ——
+   滚到底部时还要在那个小窗口里再滚一次（嵌套滚动），看不全分组。
+   这里放开高度上限，让分组完整展开，整个弹窗只保留 .modal-body 一条滚动条。
+
+   ⚠️ 用模板里已有的 #bulk-edit-groups 容器定位（GroupSelector 就被它包着）：
+      不新增属性、作用域天然精确。表单里另有一处裸 grid-cols-2 的统计卡布局
+      （约 696 行），在容器之外，不会被误伤。
+   ⚠️ 与 EditAccountModal / CreateAccountModal 的同名规则保持成对；
+      三个「账号表单」弹窗的分组区高度表现应一致。 */
+#bulk-edit-groups :deep(.grid.grid-cols-2) {
+  max-height: none;
+}
+</style>
