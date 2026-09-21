@@ -1253,11 +1253,40 @@
               <p>已选 {{ bindByGroupGroupIDs.length }} 个分组；账号原有分组会保留。</p>
             </div>
           </header>
-          <GroupSelector
-            v-model="bindByGroupGroupIDs"
-            :groups="accountEditGroups"
-            searchable
+          <Input
+            v-model="bindByGroupGroupSearch"
+            class="w-full"
+            placeholder="搜索分组名称或 ID"
           />
+          <div class="sp-bind-by-group-picker" data-test="supplier-account-bind-by-group-group-list">
+            <button
+              v-for="group in filteredBindByGroupGroups"
+              :key="group.id"
+              class="sp-bind-by-group-group"
+              :class="{ selected: bindByGroupGroupIDs.includes(group.id) }"
+              type="button"
+              :style="{ '--sp-group-platform-color': platformAccentColor(group.platform) }"
+              :data-test="`supplier-account-bind-by-group-group-${group.id}`"
+              @click="toggleBindByGroupGroup(group.id)"
+            >
+              <span class="sp-bind-by-group-account-mark" aria-hidden="true">
+                <Icon name="check" size="sm" />
+              </span>
+              <span class="sp-bind-by-group-group-copy">
+                <strong :class="platformTextClass(group.platform)">{{ group.name }}</strong>
+                <span class="sp-platform-badge" :class="platformBadgeClass(group.platform)">
+                  {{ platformLabel(group.platform) }}
+                </span>
+                <span class="sp-bind-by-group-group-id">#{{ group.id }}</span>
+                <span v-if="group.rate_multiplier != null" class="sp-bind-by-group-group-rate">
+                  倍率 {{ group.rate_multiplier }}
+                </span>
+              </span>
+            </button>
+            <div v-if="!filteredBindByGroupGroups.length" class="sp-bind-by-group-state">
+              没有找到分组，换个关键词再试。
+            </div>
+          </div>
         </section>
         <section class="sp-bind-by-group-step">
           <header class="sp-bind-by-group-step-head">
@@ -1304,8 +1333,20 @@
                 <strong>{{ account.name }}</strong>
                 <span>
                   {{ account.platform || '未设置平台' }} ·
-                  {{ account.provider_name || '未匹配供应商' }} ·
-                  {{ bindByGroupAccountGroupsLabel(account) }}
+                  {{ account.provider_name || '未匹配供应商' }}
+                </span>
+                <span class="sp-bind-by-group-account-groups">
+                  <template v-if="account.groups.length">
+                    <span
+                      v-for="group in account.groups"
+                      :key="group.id"
+                      class="sp-platform-badge"
+                      :class="platformBadgeClass(group.platform)"
+                    >
+                      {{ group.name }}
+                    </span>
+                  </template>
+                  <span v-else class="sp-bind-by-group-account-nogroup">未加入分组</span>
                 </span>
               </span>
             </button>
@@ -1483,6 +1524,7 @@ import type {
 import { ensureCustomPlatformLabels, resolvePlatformDisplayLabel as platformLabel } from '@/utils/customPlatformLabels'
 import {
   platformAccentBarClass,
+  platformAccentColor,
   platformBadgeClass,
   platformButtonClass,
   platformTextClass,
@@ -1492,7 +1534,6 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 import { cronToIntervalSeconds, formatDurationMinutes } from './supplierAutomationCron'
 import {
   batchBindResultSummary,
-  bindableAccountGroupsLabel,
   commonBatchBindPlatform,
   uniqueBatchBindAccountIDs,
 } from './supplierAccountBatchBind'
@@ -1611,6 +1652,7 @@ const batchBindGroupIDs = ref<number[]>([])
 const batchBindSubmitting = ref(false)
 const batchBindResult = ref<SupplierAccountGroupBindResult | null>(null)
 const bindByGroupGroupIDs = ref<number[]>([])
+const bindByGroupGroupSearch = ref('')
 const bindByGroupAccountIDs = ref<number[]>([])
 const bindByGroupSearch = ref('')
 const bindByGroupPlatformFilter = ref('')
@@ -1742,6 +1784,7 @@ async function prepareBindByGroupDialog() {
   if (batchBindSubmitting.value) return
   await ensureAccountGroupsLoaded()
   bindByGroupGroupIDs.value = []
+  bindByGroupGroupSearch.value = ''
   bindByGroupAccountIDs.value = []
   bindByGroupSearch.value = ''
   bindByGroupPlatformFilter.value = ''
@@ -1803,8 +1846,21 @@ function toggleBindByGroupAccount(accountID: number) {
     : [...bindByGroupAccountIDs.value, accountID]
 }
 
-function bindByGroupAccountGroupsLabel(account: SupplierBindableLocalAccount): string {
-  return bindableAccountGroupsLabel(account)
+// step 01 选分组：与 SupplierAutomationView 的分组弹窗同一套视觉（左侧平台色条 + 行内平台徽标），
+// 因此不复用 GroupSelector（它走 GroupBadge 的轻着色，且被批量绑定弹窗共用，不宜按本弹窗需求改造）。
+// 关键词同时匹配分组名与 ID：分组一多时按名字找不如按 ID 直接。
+const filteredBindByGroupGroups = computed(() => {
+  const keyword = bindByGroupGroupSearch.value.trim().toLowerCase()
+  if (!keyword) return accountEditGroups.value
+  return accountEditGroups.value.filter(group =>
+    group.name.toLowerCase().includes(keyword) || String(group.id).includes(keyword)
+  )
+})
+
+function toggleBindByGroupGroup(groupID: number) {
+  bindByGroupGroupIDs.value = bindByGroupGroupIDs.value.includes(groupID)
+    ? bindByGroupGroupIDs.value.filter(id => id !== groupID)
+    : [...bindByGroupGroupIDs.value, groupID]
 }
 
 // 两个入口唯一的差别是「先选账号还是先选分组」，提交这一段完全共用。
@@ -6807,11 +6863,99 @@ button.sp-guard-failure-hint:hover {
   font-size: 0.7rem;
 }
 
+/* 已绑定分组改为按平台着色的 chip：多选钩子权重 (0,2,1) 压过上面 (0,1,1) 的省略号规则，
+   否则这一排 chip 会被 white-space: nowrap 截断成一行省略号。分组多时向下换行，不横向溢出。 */
+.sp-bind-by-group-account-copy > span.sp-bind-by-group-account-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+  overflow: visible;
+  white-space: normal;
+}
+
+.sp-bind-by-group-account-nogroup {
+  color: var(--sp-dim);
+}
+
 .sp-bind-by-group-state {
   padding: 1rem;
   color: var(--sp-muted);
   font-size: 0.78rem;
   text-align: center;
+}
+
+/* step 01 选分组列表：与 step 02 账号列表同构（可点击整行 + 勾选标记），
+   额外用左侧 3px 平台色条 + 行内平台徽标承载平台信息，风格对齐 SupplierAutomationView 的分组弹窗。 */
+.sp-bind-by-group-picker {
+  display: grid;
+  max-height: 17rem;
+  gap: 0.35rem;
+  overflow-y: auto;
+  padding: 0.15rem;
+}
+
+.sp-bind-by-group-group {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.65rem 0.5rem 0.85rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.55rem;
+  background: var(--sp-panel);
+  color: var(--sp-text);
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+/* 左侧平台色条：色值来自行内 --sp-group-platform-color。 */
+.sp-bind-by-group-group::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 3px;
+  background: var(--sp-group-platform-color, transparent);
+}
+
+.sp-bind-by-group-group:hover {
+  border-color: color-mix(in srgb, var(--sp-cyan) 40%, var(--sp-line));
+}
+
+.sp-bind-by-group-group.selected {
+  border-color: color-mix(in srgb, var(--sp-cyan) 65%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-cyan) 10%, var(--sp-panel));
+}
+
+.sp-bind-by-group-group.selected .sp-bind-by-group-account-mark {
+  border-color: var(--sp-cyan);
+  background: var(--sp-cyan);
+  color: #fff;
+}
+
+.sp-bind-by-group-group-copy {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.sp-bind-by-group-group-copy > strong {
+  overflow: hidden;
+  font-size: 0.82rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-bind-by-group-group-id,
+.sp-bind-by-group-group-rate {
+  color: var(--sp-muted);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
 }
 
 @media (max-width: 720px) {

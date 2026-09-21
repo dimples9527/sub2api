@@ -107,6 +107,35 @@ describe('SupplierAccountsView 批量绑定分组', () => {
     expect(apiSource).toContain('provider_id?: number')
   })
 
+  it('step 01 选分组列表按平台着色（左侧色条 + 行内平台徽标），不再用轻着色的 GroupSelector', () => {
+    // 与 SupplierAutomationView 的分组弹窗同一套视觉：整行可点 + 平台色条 + 平台徽标。
+    // GroupSelector 走 GroupBadge 的轻着色、且被批量绑定弹窗共用，本弹窗不复用它。
+    expect(source).toContain('data-test="supplier-account-bind-by-group-group-list"')
+    expect(source).toContain('class="sp-bind-by-group-group"')
+    // 左侧色条的色值来自平台强调色，写错成别的函数就会丢平台语义
+    expect(source).toContain("'--sp-group-platform-color': platformAccentColor(group.platform)")
+    expect(source).toContain('.sp-bind-by-group-group::before')
+    // 行内平台徽标：分组名用平台文字色，徽标底用 platformBadgeClass
+    expect(source).toContain('platformTextClass(group.platform)')
+    expect(source).toContain('platformBadgeClass(group.platform)')
+    // 关键词同时匹配名称与 ID，且打开弹窗时必须重置，否则残留上次搜索
+    expect(source).toContain('const filteredBindByGroupGroups = computed')
+    expect(source).toContain("String(group.id).includes(keyword)")
+    const prepareBlock = source.match(/async function prepareBindByGroupDialog\(\) \{([\s\S]*?)\n\}/)?.[1] || ''
+    expect(prepareBlock).toContain('bindByGroupGroupSearch.value = \'\'')
+  })
+
+  it('step 02 候选账号行的「已绑定分组」按平台着色成 chip，而不是纯文本拼接', () => {
+    // 每个分组一枚平台色 chip；分组多时靠 flex-wrap 换行，不横向溢出。
+    expect(source).toContain('class="sp-bind-by-group-account-groups"')
+    expect(source).toContain('v-for="group in account.groups"')
+    expect(source).toContain('platformBadgeClass(group.platform)')
+    // chip 容器权重要压过 .sp-bind-by-group-account-copy > span 的 nowrap 省略号规则，否则会被截成一行
+    expect(source).toContain('span.sp-bind-by-group-account-groups')
+    // 空分组仍要有可读兜底文案
+    expect(source).toContain('class="sp-bind-by-group-account-nogroup"')
+  })
+
   it('候选账号列表丢弃过期响应，避免并发筛选互相覆盖', () => {
     // 搜索防抖、平台下拉、供应商下拉都能触发重新加载；没有序号保护时，
     // 先发后到的旧响应会把新筛选的结果盖掉（下拉显示已筛、列表却是全量）。
