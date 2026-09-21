@@ -5324,7 +5324,8 @@ function intervalSecondsToCron(seconds: number): string | null {
 
 /* 三列：供应商下拉 / 搜索框 / 仅看已选。平台筛选已改成独占一行的标签组、移出这个 grid
    （flex-basis 在 grid 里不生效，塞进来只会把列挤变形），所以列数从 4 减到 3。
-   移动端那条 :nth-child(n + 3) 跨列规则的语义不变 —— 第 3 个仍然是「仅看已选」。 */
+   ⚠️ 被移除的是**第 1 个**子节点 ⇒ 移动端跨列阈值 nth-child 的落点会整体前移一位，
+   原来「搜索框 + 仅看已选通栏」会变成「只有仅看已选通栏」。移动端规则已按单列重写。 */
 .sp-health-guard-account-filters {
   display: grid;
   flex: 1 1 640px;
@@ -6287,16 +6288,15 @@ function intervalSecondsToCron(seconds: number): string | null {
     grid-template-columns: 1fr;
   }
 
-  /* 健康守护账号筛选：平台/供应商 2 列，搜索与仅看已选通栏 */
+  /* 健康守护账号筛选：手机端纵向堆叠，三个控件各占一行通栏。
+     这里原先是「平台/供应商 2 列，搜索与仅看已选通栏」—— 平台下拉改成
+     独占一行的标签组之后，剩下的下拉只剩一个，2 列配对的前提不再成立；
+     若只把跨列阈值从 n+3 改成 n+2，会剩下「下拉占半列、右边空一格」的残缺行。 */
   .sp-health-guard-account-filters {
     /* 手机端工具栏改为纵向布局后，桌面端 flex: 1 1 640px 的 640px 会变成高度基准，
        导致筛选区被撑到约 640px 高、账号列表被挤出可视区域；这里改为按内容自适应 */
     flex: 1 1 auto;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .sp-health-guard-account-filters > :nth-child(n + 3) {
-    grid-column: 1 / -1;
+    grid-template-columns: 1fr;
   }
 
   .sp-health-guard-selection-summary {

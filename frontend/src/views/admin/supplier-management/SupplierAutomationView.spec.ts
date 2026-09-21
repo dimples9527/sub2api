@@ -667,8 +667,12 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('sp-health-guard-account-filters')
     const mobileBreakpoint = supplierAutomationSource.indexOf('@media (max-width: 760px)')
     const mobileStyles = supplierAutomationSource.slice(mobileBreakpoint)
-    expect(mobileStyles).toMatch(/\.sp-health-guard-account-filters\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s)
-    expect(mobileStyles).toMatch(/\.sp-health-guard-account-filters\s*> :nth-child\(n \+ 3\)\s*\{[^}]*grid-column:\s*1 \/ -1;/s)
+    expect(mobileStyles).toMatch(/\.sp-health-guard-account-filters\s*\{[^}]*grid-template-columns:\s*1fr;/s)
+    // 平台下拉改成独占一行的标签组后，这个 grid 里只剩一个下拉，
+    // 「平台/供应商 2 列」的配对前提不再成立 ⇒ 移动端改单列堆叠。
+    // ⚠️ 被移除的是第 1 个子节点，若沿用 :nth-child(n + 3) 跨列，落点会整体前移一位，
+    // 变成「只有仅看已选通栏、搜索框掉进半列」，所以那条规则必须一并删掉。
+    expect(mobileStyles).not.toContain('.sp-health-guard-account-filters > :nth-child(n + 3)')
     expect(mobileStyles).toMatch(/\.sp-health-guard-selection-summary\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s)
   })
 
