@@ -127,3 +127,49 @@ func TestLocalLLMMonitorToneUsesFortyPercentGreenThreshold(t *testing.T) {
 	require.Equal(t, "yellow", localLLMMonitorTone(nil, 39.99))
 	require.Equal(t, "red", localLLMMonitorTone(nil, 0))
 }
+
+func TestLocalLLMMonitorStatusPrefersLatestTone(t *testing.T) {
+	greenTail := []service.LocalModelMonitorTrendPoint{{Time: time.Now(), Availability: 100, Tone: "green", Valid: true}}
+
+	// 最新一刻被调度账号快照覆盖后，灯色以那条账号为准，不能再看趋势尾巴（全组聚合）。
+	require.Equal(t, 0, localLLMMonitorStatus("red", 0, greenTail))
+	require.Equal(t, 2, localLLMMonitorStatus("yellow", 100, greenTail))
+	require.Equal(t, 1, localLLMMonitorStatus("green", 100, greenTail))
+	// 没有快照的分组留空，沿用原来的判断。
+	require.Equal(t, 1, localLLMMonitorStatus("", 100, greenTail))
+}
+
+func TestBuildLocalLLMMonitorPayloadCurrentStatusUsesSchedulingAccountMoment(t *testing.T) {
+	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	groupID := int64(9)
+	snapshotTime := now.Add(-30 * time.Second)
+
+	payload := buildLocalLLMMonitorPayload(
+		[]service.Group{{ID: groupID, Name: "调度账号组", Status: "active"}},
+		nil,
+		[]service.SupplierProviderGroupHealthTrend{{
+			GroupID: groupID,
+			// 最新一刻已被调度账号快照覆盖：这条账号挂了，但趋势线里仍是全组聚合出来的绿点。
+			Availability: 0,
+			Latency:      4321,
+			Time:         snapshotTime,
+			LatestTone:   "red",
+			Trend: []service.SupplierProviderGroupHealthTrendPoint{
+				{Time: now.Add(-time.Minute), Availability: 100, Latency: 100, TestedAccountCount: 2, Tone: "green"},
+			},
+		}},
+		nil,
+	)
+
+	require.Len(t, payload, 1)
+	layer := payload[0]["layers"].([]any)[0].(map[string]any)
+	current := layer["current_status"].(map[string]any)
+	// 状态 / 耗时 / 时间必须同源：都出自调度账号那一条记录。
+	require.Equal(t, 0, current["status"])
+	require.Equal(t, int64(4321), current["latency"])
+	require.Equal(t, snapshotTime.UnixMilli(), current["timestamp"])
+	// 历史不动：趋势线里仍然是全组聚合算出来的 100。
+	timeline := layer["timeline"].([]any)
+	require.Len(t, timeline, 1)
+	require.Equal(t, 100.0, timeline[0].(map[string]any)["availability"])
+}

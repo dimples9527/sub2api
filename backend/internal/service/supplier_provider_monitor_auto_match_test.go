@@ -63,6 +63,10 @@ func (s *supplierProviderMonitorAutoMatchDataStub) ReplaceAccounts(context.Conte
 func (s *supplierProviderMonitorAutoMatchDataStub) ReplaceGroups(context.Context, int64, []SupplierProviderRemoteGroup, time.Time) (SupplierProviderGroupReplaceResult, error) { return SupplierProviderGroupReplaceResult{}, nil }
 func (s *supplierProviderMonitorAutoMatchDataStub) ListGroupHealthTrends(context.Context, SupplierProviderGroupHealthTrendParams) ([]SupplierProviderGroupHealthTrend, error) { return nil, nil }
 func (s *supplierProviderMonitorAutoMatchDataStub) ListLocalGroupHealthTrends(context.Context, SupplierProviderGroupHealthTrendParams) ([]SupplierProviderGroupHealthTrend, error) { return nil, nil }
+
+func (s *supplierProviderMonitorAutoMatchDataStub) RecordGroupMonitorSnapshots(_ context.Context, _ string) error {
+	return nil
+}
 func (s *supplierProviderMonitorAutoMatchDataStub) IsUniqueMatchedLocalAccount(context.Context, int64) (bool, error) { return false, nil }
 func (s *supplierProviderMonitorAutoMatchDataStub) GetLocalAccountEffectivePlatform(context.Context, int64) (string, error) { return "", nil }
 func (s *supplierProviderMonitorAutoMatchDataStub) GetLocalAccountPlatformOverride(context.Context, int64) (string, error) { return "", nil }

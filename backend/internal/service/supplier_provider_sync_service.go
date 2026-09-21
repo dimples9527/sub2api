@@ -203,6 +203,9 @@ type SupplierProviderDataRepository interface {
 	ListGroups(ctx context.Context, params SupplierProviderDataListParams) (SupplierProviderGroupListResult, error)
 	ListGroupHealthTrends(ctx context.Context, params SupplierProviderGroupHealthTrendParams) ([]SupplierProviderGroupHealthTrend, error)
 	ListLocalGroupHealthTrends(ctx context.Context, params SupplierProviderGroupHealthTrendParams) ([]SupplierProviderGroupHealthTrend, error)
+	// RecordGroupMonitorSnapshots 记录「某时刻该分组正在调度的账号」的监控结果。
+	// 给本接口加方法不会改变 ProvideSupplierProviderSyncService 的参数列表，Wire 生成代码无需重新生成。
+	RecordGroupMonitorSnapshots(ctx context.Context, source string) error
 	ListMonitorTargets(ctx context.Context, params SupplierProviderMonitorTargetListParams) (SupplierProviderMonitorTargetListResult, error)
 	ListBindableLocalAccounts(ctx context.Context, params SupplierBindableLocalAccountListParams) (SupplierBindableLocalAccountListResult, error)
 	BindMonitorTarget(ctx context.Context, monitorTargetID, localAccountID int64) error

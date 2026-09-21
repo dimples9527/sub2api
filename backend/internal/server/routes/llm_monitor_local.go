@@ -275,7 +275,7 @@ func buildLocalLLMMonitorPayload(
 		layer := map[string]any{
 			"timeline": localLLMMonitorTimeline(selected.Trend),
 			"current_status": map[string]any{
-				"status":    localLLMMonitorStatus(selected.Availability, selected.Trend),
+				"status":    localLLMMonitorStatus(selected.LatestTone, selected.Availability, selected.Trend),
 				"latency":   selected.Latency,
 				"timestamp": localLLMMonitorTimestamp(selected.Time),
 			},
@@ -301,6 +301,7 @@ func localModelMonitorTrendFromHealth(health service.SupplierProviderGroupHealth
 		Availability: health.Availability,
 		Latency:      health.Latency,
 		Time:         health.Time,
+		LatestTone:   health.LatestTone,
 		Trend:        make([]service.LocalModelMonitorTrendPoint, 0, len(health.Trend)),
 	}
 	for _, point := range health.Trend {
@@ -511,7 +512,20 @@ func localLLMMonitorTimestamp(value time.Time) int64 {
 	return value.UnixMilli()
 }
 
-func localLLMMonitorStatus(availability float64, trend []service.LocalModelMonitorTrendPoint) int {
+// localLLMMonitorStatus 决定「最新一刻」的红绿灯。
+//
+// latestTone 优先：最新一刻被调度账号快照覆盖过之后，可用率/耗时/时间都已经是那条账号的，
+// 状态灯再按趋势最后一个点（全组聚合）算就会和它们不是同一刻。空串表示该分组没有快照，
+// 沿用原来的判断。
+func localLLMMonitorStatus(latestTone string, availability float64, trend []service.LocalModelMonitorTrendPoint) int {
+	switch latestTone {
+	case "green":
+		return 1
+	case "yellow":
+		return 2
+	case "red":
+		return 0
+	}
 	for index := len(trend) - 1; index >= 0; index-- {
 		if trend[index].Valid {
 			switch trend[index].Tone {

@@ -170,6 +170,10 @@ func (r *supplierRateGuardChangeLogDataRepoStub) ListRateGuardChangeLogs(_ conte
 	return r.listResult, nil
 }
 
+func (r *supplierRateGuardChangeLogDataRepoStub) RecordGroupMonitorSnapshots(_ context.Context, _ string) error {
+	return nil
+}
+
 func (r *supplierRateGuardChangeLogDataRepoStub) MarkRateGuardChangeLogHandled(_ context.Context, id int64) (SupplierRateGuardChangeLog, error) {
 	r.handledID = id
 	return r.handled, nil

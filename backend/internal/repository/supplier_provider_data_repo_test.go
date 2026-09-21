@@ -69,6 +69,10 @@ func TestSupplierProviderDataRepositoryListLocalGroupHealthTrendsResolvesAccount
 			AddRow(int64(101), int64(98), service.SupplierAccountHealthGuardStatusHealthy, int64(140), now.Add(-time.Minute), service.SupplierProviderGroupHealthTrendSource).
 			AddRow(int64(202), int64(98), service.SupplierAccountHealthGuardStatusHealthy, int64(140), now.Add(-time.Minute), service.SupplierProviderGroupHealthTrendSource))
 
+	mock.ExpectQuery(`(?s)SELECT DISTINCT ON \(snapshot\.group_id\).*FROM supplier_group_monitor_snapshots.*`).
+		WithArgs("{101,202}", service.StatusActive).
+		WillReturnRows(sqlmock.NewRows([]string{"group_id", "local_account_id", "source", "status", "latency_ms", "availability", "checked_at"}))
+
 	trends, err := repo.ListLocalGroupHealthTrends(context.Background(), service.SupplierProviderGroupHealthTrendParams{
 		GroupIDs:    []int64{101, 202},
 		Period:      24 * time.Hour,
@@ -97,6 +101,10 @@ func TestSupplierProviderDataRepositoryListLocalGroupHealthTrendsAllHistoryOmits
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"group_id", "account_id", "status", "latency_ms", "finished_at", "source"}).
 			AddRow(int64(101), int64(98), service.SupplierAccountHealthGuardStatusHealthy, int64(140), now.Add(-30*24*time.Hour), service.SupplierProviderGroupHealthTrendSource))
+
+	mock.ExpectQuery(`(?s)SELECT DISTINCT ON \(snapshot\.group_id\).*FROM supplier_group_monitor_snapshots.*`).
+		WithArgs("{101}", service.StatusActive).
+		WillReturnRows(sqlmock.NewRows([]string{"group_id", "local_account_id", "source", "status", "latency_ms", "availability", "checked_at"}))
 
 	trends, err := repo.ListLocalGroupHealthTrends(context.Background(), service.SupplierProviderGroupHealthTrendParams{
 		GroupIDs:    []int64{101},
@@ -127,6 +135,10 @@ func TestSupplierProviderDataRepositoryListLocalGroupHealthTrendsIncludesSupplie
 		WillReturnRows(sqlmock.NewRows([]string{"group_id", "account_id", "status", "latency_ms", "finished_at", "source"}).
 			AddRow(int64(101), int64(98), service.SupplierAccountHealthGuardStatusSlow, int64(10122), checkedAt, service.SupplierProviderGroupHealthTrendMonitorSource))
 
+	mock.ExpectQuery(`(?s)SELECT DISTINCT ON \(snapshot\.group_id\).*FROM supplier_group_monitor_snapshots.*`).
+		WithArgs("{101}", service.StatusActive).
+		WillReturnRows(sqlmock.NewRows([]string{"group_id", "local_account_id", "source", "status", "latency_ms", "availability", "checked_at"}))
+
 	trends, err := repo.ListLocalGroupHealthTrends(context.Background(), service.SupplierProviderGroupHealthTrendParams{
 		GroupIDs:                 []int64{101},
 		Period:                   10 * time.Minute,
@@ -156,6 +168,10 @@ func TestSupplierProviderDataRepositoryListLocalGroupHealthTrendsTreatsNullTimel
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"group_id", "account_id", "status", "latency_ms", "finished_at", "source"}))
 
+	mock.ExpectQuery(`(?s)SELECT DISTINCT ON \(snapshot\.group_id\).*FROM supplier_group_monitor_snapshots.*`).
+		WithArgs("{101}", service.StatusActive).
+		WillReturnRows(sqlmock.NewRows([]string{"group_id", "local_account_id", "source", "status", "latency_ms", "availability", "checked_at"}))
+
 	trends, err := repo.ListLocalGroupHealthTrends(context.Background(), service.SupplierProviderGroupHealthTrendParams{
 		GroupIDs:    []int64{101},
 		Period:      24 * time.Hour,
@@ -182,6 +198,10 @@ func TestSupplierProviderDataRepositoryListLocalGroupHealthTrendsIncludesStructu
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"group_id", "account_id", "status", "latency_ms", "finished_at", "source"}).
 			AddRow(int64(81), int64(777), service.SupplierAccountHealthGuardStatusHealthy, int64(880), checkedAt, service.SupplierProviderGroupHealthTrendMonitorSource))
+
+	mock.ExpectQuery(`(?s)SELECT DISTINCT ON \(snapshot\.group_id\).*FROM supplier_group_monitor_snapshots.*`).
+		WithArgs("{81}", service.StatusActive).
+		WillReturnRows(sqlmock.NewRows([]string{"group_id", "local_account_id", "source", "status", "latency_ms", "availability", "checked_at"}))
 
 	trends, err := repo.ListLocalGroupHealthTrends(context.Background(), service.SupplierProviderGroupHealthTrendParams{
 		GroupIDs:                 []int64{81},

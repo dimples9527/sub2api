@@ -154,10 +154,16 @@ type SupplierAccountHealthGuardResult struct {
 	CursorAccountID  int64                                  `json:"cursor_account_id"`
 	SkipReasons      []SupplierAccountHealthGuardSkipReason `json:"skip_reasons,omitempty"`
 	Items            []SupplierAccountHealthGuardRunItem    `json:"items"`
+	// SnapshotErrorMessage 记录分组监控快照写库失败的痕迹：快照只影响模型监控的「最新一刻」，
+	// 写失败不该让整轮守护被判失败，但也不能无声吞掉。
+	SnapshotErrorMessage string `json:"snapshot_error_message,omitempty"`
 }
 
 type SupplierAccountHealthGuardRepository interface {
 	ListAccountHealthGuardCandidates(ctx context.Context) ([]SupplierAccountHealthGuardCandidate, error)
+	// RecordGroupMonitorSnapshots 记录「某时刻该分组正在调度的账号」的监控结果。
+	// 给本接口加方法不会改变 ProvideSupplierAccountHealthGuardService 的参数列表，Wire 生成代码无需重新生成。
+	RecordGroupMonitorSnapshots(ctx context.Context, source string) error
 }
 
 type supplierAccountHealthGuardAccountStore interface {
@@ -308,6 +314,11 @@ func (s *SupplierAccountHealthGuardService) Run(ctx context.Context, config Supp
 				result.UnchangedCount++
 			}
 		}
+	}
+	// 守护跑完后才记快照：本轮刚改过的 schedulable 与健康历史都已落库，
+	// 此刻采到的就是「现在真正在调度的账号」，顺序反了会记到换人之前的那条。
+	if err := s.repository.RecordGroupMonitorSnapshots(ctx, SupplierGroupMonitorSnapshotSourceHealthGuard); err != nil {
+		result.SnapshotErrorMessage = fmt.Sprintf("记录分组监控快照失败: %v", err)
 	}
 	return result, nil
 }

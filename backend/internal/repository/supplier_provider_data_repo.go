@@ -743,7 +743,17 @@ func (r *supplierProviderDataRepository) ListGroupHealthTrends(ctx context.Conte
 }
 
 func (r *supplierProviderDataRepository) ListLocalGroupHealthTrends(ctx context.Context, params service.SupplierProviderGroupHealthTrendParams) ([]service.SupplierProviderGroupHealthTrend, error) {
-	return r.listHealthTrends(ctx, params, true)
+	trends, err := r.listHealthTrends(ctx, params, true)
+	if err != nil {
+		return nil, err
+	}
+	// 趋势线（历史桶）保持按样本聚合的原样，只把「最新一刻」换成当时开启调度的账号的那条记录：
+	// 历史该是谁就是谁，不会因为现在换了调度账号就被改写。
+	snapshots, err := listLatestGroupMonitorSnapshots(ctx, r.db, params.GroupIDs)
+	if err != nil {
+		return nil, err
+	}
+	return service.ApplyLatestGroupMonitorSnapshots(trends, snapshots), nil
 }
 
 func (r *supplierProviderDataRepository) listHealthTrends(ctx context.Context, params service.SupplierProviderGroupHealthTrendParams, byLocalGroup bool) ([]service.SupplierProviderGroupHealthTrend, error) {

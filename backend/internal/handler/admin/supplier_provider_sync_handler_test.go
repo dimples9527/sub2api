@@ -373,6 +373,10 @@ func (s *supplierProviderSyncHandlerDataStub) ListLocalGroupHealthTrends(_ conte
 	s.healthTrendParams = params
 	return s.healthTrends, nil
 }
+
+func (s *supplierProviderSyncHandlerDataStub) RecordGroupMonitorSnapshots(_ context.Context, _ string) error {
+	return nil
+}
 func (s *supplierProviderSyncHandlerDataStub) ListMappingsByLocalGroup(_ context.Context, localGroupIDs []int64) ([]service.SupplierProviderGroup, error) {
 	s.mappingLocalGroupIDs = append([]int64(nil), localGroupIDs...)
 	return s.mappings, nil

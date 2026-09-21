@@ -97,6 +97,10 @@ func (r *supplierProviderDataRepoStub) ListGroupHealthTrends(context.Context, Su
 func (r *supplierProviderDataRepoStub) ListLocalGroupHealthTrends(context.Context, SupplierProviderGroupHealthTrendParams) ([]SupplierProviderGroupHealthTrend, error) {
 	return []SupplierProviderGroupHealthTrend{}, nil
 }
+
+func (r *supplierProviderDataRepoStub) RecordGroupMonitorSnapshots(_ context.Context, _ string) error {
+	return nil
+}
 func (*supplierProviderDataRepoStub) IsUniqueMatchedLocalAccount(context.Context, int64) (bool, error) {
 	return false, nil
 }

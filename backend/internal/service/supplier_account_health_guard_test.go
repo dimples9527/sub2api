@@ -95,10 +95,18 @@ func TestSupplierAccountHealthGuardNextSchedulingState(t *testing.T) {
 type supplierAccountHealthGuardRepoStub struct {
 	candidates []SupplierAccountHealthGuardCandidate
 	err        error
+	// snapshotCalls 记录分组监控快照的写入来源，用于确认守护跑完后确实记了一次。
+	snapshotCalls []string
+	snapshotErr   error
 }
 
 func (s *supplierAccountHealthGuardRepoStub) ListAccountHealthGuardCandidates(context.Context) ([]SupplierAccountHealthGuardCandidate, error) {
 	return append([]SupplierAccountHealthGuardCandidate(nil), s.candidates...), s.err
+}
+
+func (s *supplierAccountHealthGuardRepoStub) RecordGroupMonitorSnapshots(_ context.Context, source string) error {
+	s.snapshotCalls = append(s.snapshotCalls, source)
+	return s.snapshotErr
 }
 
 type supplierAccountHealthGuardAccountStoreStub struct {
@@ -803,4 +811,44 @@ func TestSupplierAccountHealthGuardRunWithoutAccountIntervalKeepsGlobalFrequency
 	require.Equal(t, []supplierAccountHealthGuardTestCall{{accountID: 73, modelID: "gpt-4o-mini"}}, tester.calls)
 	require.Equal(t, 1, result.CheckedCount)
 	require.Zero(t, result.SkippedCount)
+}
+
+func TestSupplierAccountHealthGuardRunRecordsGroupMonitorSnapshot(t *testing.T) {
+	candidate := newSupplierAccountHealthGuardCandidate(23, "健康账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 13})
+	store := &supplierAccountHealthGuardAccountStoreStub{}
+	tester := &supplierAccountHealthGuardTesterStub{results: map[int64]*ScheduledTestResult{23: {Status: "success", LatencyMs: 120}}, errs: map[int64]error{}}
+	repo := &supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{candidate}}
+	guard := NewSupplierAccountHealthGuardService(repo, store, tester)
+
+	result, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{
+		AccountIDs:     []int64{23},
+		PlatformModels: map[string]string{"openai": "gpt-4o-mini"},
+	}, time.Now())
+
+	require.NoError(t, err)
+	require.Equal(t, 1, result.CheckedCount)
+	// 守护跑完后要记一次快照，否则模型监控的「最新一刻」永远拿不到调度账号的数据。
+	require.Equal(t, []string{SupplierGroupMonitorSnapshotSourceHealthGuard}, repo.snapshotCalls)
+	require.Empty(t, result.SnapshotErrorMessage)
+}
+
+func TestSupplierAccountHealthGuardRunKeepsSnapshotWriteFailureVisible(t *testing.T) {
+	candidate := newSupplierAccountHealthGuardCandidate(24, "健康账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 14})
+	store := &supplierAccountHealthGuardAccountStoreStub{}
+	tester := &supplierAccountHealthGuardTesterStub{results: map[int64]*ScheduledTestResult{24: {Status: "success", LatencyMs: 120}}, errs: map[int64]error{}}
+	repo := &supplierAccountHealthGuardRepoStub{
+		candidates:  []SupplierAccountHealthGuardCandidate{candidate},
+		snapshotErr: errors.New("快照表写不进去"),
+	}
+	guard := NewSupplierAccountHealthGuardService(repo, store, tester)
+
+	result, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{
+		AccountIDs:     []int64{24},
+		PlatformModels: map[string]string{"openai": "gpt-4o-mini"},
+	}, time.Now())
+
+	// 快照只服务模型监控的「最新一刻」，写失败不该让整轮守护判失败，但要留下痕迹。
+	require.NoError(t, err)
+	require.Equal(t, 1, result.CheckedCount)
+	require.Contains(t, result.SnapshotErrorMessage, "快照表写不进去")
 }

@@ -17,6 +17,9 @@ type LocalModelMonitorTrend struct {
 	Latency      int64                         `json:"latency"`
 	Time         time.Time                     `json:"time"`
 	Trend        []LocalModelMonitorTrendPoint `json:"trend"`
+	// LatestTone 是「最新一刻」的灯色，空的表示仍按趋势点/可用率判断。
+	// 不进 JSON：只服务于状态页的红绿灯。
+	LatestTone string `json:"-"`
 }
 
 // AverageAvailability 返回趋势中有效采样点的平均可用率。

@@ -50,6 +50,10 @@ type SupplierProviderGroupHealthTrend struct {
 	Latency      int64                                   `json:"latency"`
 	Time         time.Time                               `json:"time"`
 	Trend        []SupplierProviderGroupHealthTrendPoint `json:"trend"`
+	// LatestTone 是「最新一刻」的灯色。只有最新一刻被调度账号快照覆盖过才有值，
+	// 空串表示这一刻仍是全组聚合，调用方按趋势点/可用率自行判断即可。
+	// 不进 JSON：它只用来给状态页定红绿灯，不属于趋势数据本身。
+	LatestTone string `json:"-"`
 }
 
 type supplierProviderGroupHealthSampleKey struct {

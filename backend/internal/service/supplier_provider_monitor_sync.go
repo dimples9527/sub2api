@@ -14,6 +14,9 @@ type SupplierProviderMonitorSyncResult struct {
 	FailedCount    int                               `json:"failed_count"`
 	SkippedCount   int                               `json:"skipped_count"`
 	Items          []SupplierProviderMonitorSyncItem `json:"items"`
+	// SnapshotErrorMessage 记录分组监控快照写库失败的痕迹：快照只影响模型监控的「最新一刻」，
+	// 写失败不该让整轮同步被判失败，但也不能无声吞掉。
+	SnapshotErrorMessage string `json:"snapshot_error_message,omitempty"`
 }
 
 type SupplierProviderMonitorSyncItem struct {
@@ -149,6 +152,12 @@ func (s *SupplierProviderSyncService) SyncMonitorsEnabled(ctx context.Context, t
 			continue
 		}
 		result.SuccessCount++
+	}
+	// 同步写完 samples 之后才记快照，否则采集到的是上一轮的数据。
+	if s.dataRepo != nil {
+		if err := s.dataRepo.RecordGroupMonitorSnapshots(ctx, SupplierGroupMonitorSnapshotSourceMonitor); err != nil {
+			result.SnapshotErrorMessage = fmt.Sprintf("记录分组监控快照失败: %v", err)
+		}
 	}
 	return result, nil
 }

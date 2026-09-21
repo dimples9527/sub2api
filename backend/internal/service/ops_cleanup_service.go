@@ -339,6 +339,9 @@ func (s *OpsCleanupService) runCleanupOnce(ctx context.Context) (opsCleanupDelet
 		{effective.HourlyMetricsRetentionDays, "ops_metrics_daily", "bucket_date", true, &out.dailyPreagg},
 		// 耗时分解是排障用的旁路明细，跟着分钟级指标的保留期走。
 		{effective.MinuteMetricsRetentionDays, "usage_log_latency_phases", "created_at", false, &out.latencyPhases},
+		// 分组监控快照是模型监控的历史底账，按小时级指标的保留期走（默认 30 天），
+		// 与模型监控页面最长的 30d 视图对齐。
+		{effective.HourlyMetricsRetentionDays, "supplier_group_monitor_snapshots", "checked_at", false, &out.groupMonitorSnapshots},
 	}
 
 	for _, t := range targets {
