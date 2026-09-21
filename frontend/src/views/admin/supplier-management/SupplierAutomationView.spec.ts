@@ -555,7 +555,11 @@ describe('SupplierAutomationView edit dialog', () => {
       'account.binding_groups.map(group => normalizeHealthGuardPlatform(group.platform))'
     )
     expect(supplierAutomationSource).toContain('localGroupPlatforms: string[]')
-    expect(supplierAutomationSource).toContain('mapping.platform !== platform')
+    // 平台筛选从单选改多选后，比较仍然是针对 mapping.platform（覆盖后的平台），
+    // 只是挪进共用的 matchesPlatformFilter，语义不变。
+    expect(supplierAutomationSource).toContain(
+      'matchesPlatformFilter(mapping.platform, platformFilter)'
+    )
     expect(supplierAutomationSource).toContain('const platform = mapping.platform')
   })
 
@@ -1331,24 +1335,33 @@ describe('SupplierAutomationView account rate guard group switch', () => {
   })
 })
 
-describe('SupplierAutomationView 分组弹窗的平台筛选与平台配色', () => {
-  it('两个分组弹窗都渲染同一套平台标签筛选', () => {
+describe('SupplierAutomationView 弹窗的平台筛选与平台配色', () => {
+  it('三个弹窗都渲染同一套平台标签筛选', () => {
     expect(
-      supplierAutomationSource.match(/class="sp-rate-guard-group-platform-filter"/g)
-    ).toHaveLength(2)
+      supplierAutomationSource.match(/class="sp-platform-chip-row"/g)
+    ).toHaveLength(3)
     expect(supplierAutomationSource).toContain('aria-label="按平台筛选分组"')
+    expect(supplierAutomationSource).toContain('aria-label="按平台筛选账号"')
     expect(supplierAutomationSource).toContain(
       ':aria-pressed="rateGuardGroupPlatformFilter.includes(facet.platform)"'
     )
     expect(supplierAutomationSource).toContain(
       ':aria-pressed="electionGroupPlatformFilter.includes(facet.platform)"'
     )
+    expect(supplierAutomationSource).toContain(
+      ':aria-pressed="healthGuardAccountPlatformFilter.includes(facet.platform)"'
+    )
   })
 
-  it('平台选项从当前分组现算，不会列出没有分组的平台', () => {
-    expect(supplierAutomationSource).toContain('const groupPlatformFacets = computed(()')
+  it('平台选项从当前数据现算，不会列出没有内容的平台', () => {
     expect(supplierAutomationSource).toContain(
-      'counts.set(group.platform, (counts.get(group.platform) ?? 0) + 1)'
+      'function buildPlatformFacets(items: Array<{ platform: string }>): PlatformFacet[] {'
+    )
+    expect(supplierAutomationSource).toContain(
+      'const groupPlatformFacets = computed(() => buildPlatformFacets(rateGuardGroups.value))'
+    )
+    expect(supplierAutomationSource).toContain(
+      'counts.set(item.platform, (counts.get(item.platform) ?? 0) + 1)'
     )
     expect(supplierAutomationSource).toContain(
       "})).sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'))"
@@ -1358,8 +1371,9 @@ describe('SupplierAutomationView 分组弹窗的平台筛选与平台配色', ()
   it('平台筛选存「已选中」而不是「已排除」，空选即不过滤', () => {
     expect(supplierAutomationSource).toContain('const rateGuardGroupPlatformFilter = ref<string[]>([])')
     expect(supplierAutomationSource).toContain('const electionGroupPlatformFilter = ref<string[]>([])')
+    expect(supplierAutomationSource).toContain('const healthGuardAccountPlatformFilter = ref<string[]>([])')
     expect(supplierAutomationSource).toContain(
-      'function matchesGroupPlatformFilter(platform: string, selected: string[]): boolean {'
+      'function matchesPlatformFilter(platform: string, selected: string[]): boolean {'
     )
     expect(supplierAutomationSource).toContain(
       'return selected.length === 0 || selected.includes(platform)'
@@ -1368,27 +1382,71 @@ describe('SupplierAutomationView 分组弹窗的平台筛选与平台配色', ()
 
   it('平台标签是多选切换：再点一下能移除，而不是被下一个平台顶掉', () => {
     expect(supplierAutomationSource).toContain(
-      'function toggleGroupPlatformFilter(current: string[], platform: string): string[] {'
+      'function togglePlatformFilter(current: string[], platform: string): string[] {'
     )
     expect(supplierAutomationSource).toContain('? current.filter(item => item !== platform)')
     expect(supplierAutomationSource).toContain(': [...current, platform]')
   })
 
-  it('平台条件接进两个弹窗各自的过滤链', () => {
+  it('平台条件接进三个弹窗各自的过滤链', () => {
     const rateGuardBlock = supplierAutomationSource.slice(
       supplierAutomationSource.indexOf('const rateGuardFilteredGroups = computed(()'),
       supplierAutomationSource.indexOf('const healthGuardAvailableAccountMappings')
     )
     expect(rateGuardBlock).toContain(
-      'matchesGroupPlatformFilter(group.platform, rateGuardGroupPlatformFilter.value)'
+      'matchesPlatformFilter(group.platform, rateGuardGroupPlatformFilter.value)'
     )
     const electionBlock = supplierAutomationSource.slice(
       supplierAutomationSource.indexOf('const electionFilteredGroups = computed(()'),
       supplierAutomationSource.indexOf('// 编辑弹窗的宽度由')
     )
     expect(electionBlock).toContain(
-      'matchesGroupPlatformFilter(group.platform, electionGroupPlatformFilter.value)'
+      'matchesPlatformFilter(group.platform, electionGroupPlatformFilter.value)'
     )
+    const accountBlock = supplierAutomationSource.slice(
+      supplierAutomationSource.indexOf('const healthGuardWorkspaceAccounts = computed(()'),
+      supplierAutomationSource.indexOf('const healthGuardSelectionSummary = computed(()')
+    )
+    expect(accountBlock).toContain('matchesPlatformFilter(mapping.platform, platformFilter)')
+  })
+
+  it('账号弹窗的平台标签放在 grid 容器之外，平台下拉已随之移除', () => {
+    const filtersBlock = supplierAutomationSource.slice(
+      supplierAutomationSource.indexOf('<div class="sp-health-guard-account-filters">'),
+      supplierAutomationSource.indexOf('<div v-if="loadingHealthGuardSupplierAccounts"')
+    )
+    // 平台下拉连同「全部平台」空选项一起消失，这一行只剩供应商下拉。
+    expect(filtersBlock).not.toContain('healthGuardPlatformFilterOptions')
+    expect(filtersBlock).not.toContain("label: '全部平台'")
+    expect(filtersBlock.match(/<Select/g)).toHaveLength(1)
+    // 标签行必须落在 toolbar 里、grid 容器闭合之后 —— flex-basis 在 grid 里不生效。
+    expect(filtersBlock).toContain('class="sp-platform-chip-row"')
+    expect(filtersBlock.indexOf('class="sp-platform-chip-row"')).toBeGreaterThan(
+      filtersBlock.indexOf('class="sp-health-guard-filter-result"')
+    )
+    // 桌面端列数相应从 4 减到 3。
+    expect(supplierAutomationSource).toContain(
+      'grid-template-columns: minmax(160px, 0.42fr) minmax(220px, 1fr) auto;'
+    )
+    expect(supplierAutomationSource).not.toContain(
+      'grid-template-columns: minmax(130px, 0.3fr) minmax(160px, 0.42fr) minmax(220px, 1fr) auto;'
+    )
+  })
+
+  it('账号弹窗的平台标签按可用账号数统计，并在打开时重置', () => {
+    expect(supplierAutomationSource).toContain(
+      'const healthGuardAccountPlatformFacets = computed(() =>'
+    )
+    expect(supplierAutomationSource).toContain(
+      'buildPlatformFacets(healthGuardAvailableAccountMappings.value)'
+    )
+    const openBlock = supplierAutomationSource.slice(
+      supplierAutomationSource.indexOf('async function openHealthGuardAccounts()'),
+      supplierAutomationSource.indexOf('function closeHealthGuardAccounts()')
+    )
+    expect(openBlock).toContain('healthGuardAccountPlatformFilter.value = []')
+    // 多选比单选更容易把结果筛空，空态必须说明是筛选造成的（沿用原有文案）。
+    expect(supplierAutomationSource).toContain("'当前筛选条件下没有可配置账号。'")
   })
 
   it('分组行按平台渲染徽标与左侧色条', () => {
@@ -1412,11 +1470,13 @@ describe('SupplierAutomationView 分组弹窗的平台筛选与平台配色', ()
     expect(supplierAutomationSource).toContain(
       "import { platformAccentColor, platformBadgeClass, platformTextClass } from '@/utils/platformColors'"
     )
+    expect(
+      supplierAutomationSource.match(
+        /:style="\{ '--sp-chip-platform-color': platformAccentColor\(facet\.platform\) \}"/g
+      )
+    ).toHaveLength(3)
     expect(supplierAutomationSource).toContain(
-      ":style=\"{ '--sp-chip-platform-color': platformAccentColor(facet.platform) }\""
-    )
-    expect(supplierAutomationSource).toContain(
-      ".sp-rate-guard-group-platform-chip[aria-pressed='true'] {"
+      ".sp-platform-chip[aria-pressed='true'] {"
     )
   })
 

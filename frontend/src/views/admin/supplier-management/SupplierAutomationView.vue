@@ -904,11 +904,6 @@
             <div class="sp-health-guard-account-toolbar">
               <div class="sp-health-guard-account-filters">
                 <Select
-                  v-model="healthGuardAccountPlatformFilter"
-                  :options="healthGuardPlatformFilterOptions"
-                  :searchable="false"
-                />
-                <Select
                   v-model="healthGuardAccountProviderFilter"
                   :options="healthGuardProviderFilterOptions"
                   searchable
@@ -929,6 +924,29 @@
                 </button>
               </div>
               <span class="sp-health-guard-filter-result">筛选结果 <strong>{{ healthGuardWorkspaceAccounts.length }}</strong> 个</span>
+              <!-- 平台标签与两个分组弹窗共用同一套控件与配色语言，独占一行（flex-basis: 100%）。
+                   必须放在 grid 容器之外：.sp-health-guard-account-filters 是 grid，
+                   flex-basis 在 grid 里不生效，塞进去只会把那几列挤变形。
+                   没有可选平台时不渲染，省掉一条空行。 -->
+              <div
+                v-if="healthGuardAccountPlatformFacets.length"
+                class="sp-platform-chip-row"
+                role="group"
+                aria-label="按平台筛选账号"
+              >
+                <button
+                  v-for="facet in healthGuardAccountPlatformFacets"
+                  :key="facet.platform"
+                  class="sp-platform-chip"
+                  type="button"
+                  :aria-pressed="healthGuardAccountPlatformFilter.includes(facet.platform)"
+                  :style="{ '--sp-chip-platform-color': platformAccentColor(facet.platform) }"
+                  @click="healthGuardAccountPlatformFilter = togglePlatformFilter(healthGuardAccountPlatformFilter, facet.platform)"
+                >
+                  {{ facet.label }}
+                  <strong>{{ facet.count }}</strong>
+                </button>
+              </div>
             </div>
 
             <div v-if="loadingHealthGuardSupplierAccounts" class="sp-rate-guard-empty">正在加载账号...</div>
@@ -1120,18 +1138,18 @@
                    没法输入，而平台数量还会随分组增长。没有分组时不渲染，省掉一条空行。 -->
               <div
                 v-if="groupPlatformFacets.length"
-                class="sp-rate-guard-group-platform-filter"
+                class="sp-platform-chip-row"
                 role="group"
                 aria-label="按平台筛选分组"
               >
                 <button
                   v-for="facet in groupPlatformFacets"
                   :key="facet.platform"
-                  class="sp-rate-guard-group-platform-chip"
+                  class="sp-platform-chip"
                   type="button"
                   :aria-pressed="rateGuardGroupPlatformFilter.includes(facet.platform)"
                   :style="{ '--sp-chip-platform-color': platformAccentColor(facet.platform) }"
-                  @click="rateGuardGroupPlatformFilter = toggleGroupPlatformFilter(rateGuardGroupPlatformFilter, facet.platform)"
+                  @click="rateGuardGroupPlatformFilter = togglePlatformFilter(rateGuardGroupPlatformFilter, facet.platform)"
                 >
                   {{ facet.label }}
                   <strong>{{ facet.count }}</strong>
@@ -1230,18 +1248,18 @@
               <!-- 与「配置参与守护的分组」保持同一套筛选控件与配色语言。 -->
               <div
                 v-if="groupPlatformFacets.length"
-                class="sp-rate-guard-group-platform-filter"
+                class="sp-platform-chip-row"
                 role="group"
                 aria-label="按平台筛选分组"
               >
                 <button
                   v-for="facet in groupPlatformFacets"
                   :key="facet.platform"
-                  class="sp-rate-guard-group-platform-chip"
+                  class="sp-platform-chip"
                   type="button"
                   :aria-pressed="electionGroupPlatformFilter.includes(facet.platform)"
                   :style="{ '--sp-chip-platform-color': platformAccentColor(facet.platform) }"
-                  @click="electionGroupPlatformFilter = toggleGroupPlatformFilter(electionGroupPlatformFilter, facet.platform)"
+                  @click="electionGroupPlatformFilter = togglePlatformFilter(electionGroupPlatformFilter, facet.platform)"
                 >
                   {{ facet.label }}
                   <strong>{{ facet.count }}</strong>
@@ -1397,7 +1415,7 @@ const electionGroupSearch = ref('')
 const electionGroupDisabledOnly = ref(false)
 const electionGroupPlatformFilter = ref<string[]>([])
 const healthGuardAccountsVisible = ref(false)
-const healthGuardAccountPlatformFilter = ref('')
+const healthGuardAccountPlatformFilter = ref<string[]>([])
 const healthGuardAccountProviderFilter = ref('')
 const healthGuardAccountSearch = ref('')
 const healthGuardSelectedOnly = ref(false)
@@ -2241,33 +2259,38 @@ const accountRateGuardDisabledGroupIDs = computed(() =>
   normalizePositiveAccountIDs(editForm.config.account_rate_guard_disabled_group_ids)
 )
 
-// ── 分组列表的平台筛选（「配置参与守护的分组」与「配置参与择优的分组」两个弹窗共用）──
+// ── 平台筛选（「配置参与守护/择优的分组」与「健康守护账号」三个弹窗共用）──
 //
-// 平台列表从当前分组里现算，而不是取全平台枚举：只列出「此刻确实有分组的平台」，
+// 平台列表从当前数据里现算，而不是取全平台枚举：只列出「此刻确实有内容的平台」，
 // 避免用户点到一个筛完空空如也的标签，误以为筛选坏了。
-const groupPlatformFacets = computed(() => {
+// 传数组而不是 Map，调用方不必先自己聚合；分组弹窗按分组数统计，账号弹窗按可用账号数统计。
+type PlatformFacet = { platform: string; count: number; label: string }
+
+function buildPlatformFacets(items: Array<{ platform: string }>): PlatformFacet[] {
   const counts = new Map<string, number>()
-  for (const group of rateGuardGroups.value) {
-    counts.set(group.platform, (counts.get(group.platform) ?? 0) + 1)
+  for (const item of items) {
+    counts.set(item.platform, (counts.get(item.platform) ?? 0) + 1)
   }
   return Array.from(counts, ([platform, count]) => ({
     platform,
     count,
     label: platformLabel(platform),
   })).sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'))
-})
+}
+
+const groupPlatformFacets = computed(() => buildPlatformFacets(rateGuardGroups.value))
 
 // 标签是多选：点一下加入、再点一下移除。
-// 不做成单选切换 —— 切到下一个平台就会丢掉上一个的选择，而「同时看两个平台的分组」
+// 不做成单选切换 —— 切到下一个平台就会丢掉上一个的选择，而「同时看两个平台」
 // 恰恰是这个筛选最常见的用法。
-function toggleGroupPlatformFilter(current: string[], platform: string): string[] {
+function togglePlatformFilter(current: string[], platform: string): string[] {
   return current.includes(platform)
     ? current.filter(item => item !== platform)
     : [...current, platform]
 }
 
-// 空选 = 不按平台过滤。与「仅看已关闭」默认关保持一致：打开弹窗先看到全部分组。
-function matchesGroupPlatformFilter(platform: string, selected: string[]): boolean {
+// 空选 = 不按平台过滤。与「仅看已关闭」默认关保持一致：打开弹窗先看到全部。
+function matchesPlatformFilter(platform: string, selected: string[]): boolean {
   return selected.length === 0 || selected.includes(platform)
 }
 
@@ -2324,7 +2347,7 @@ const electionFilteredGroups = computed(() => {
   let result = rateGuardGroups.value
   if (electionGroupPlatformFilter.value.length > 0) {
     result = result.filter(group =>
-      matchesGroupPlatformFilter(group.platform, electionGroupPlatformFilter.value)
+      matchesPlatformFilter(group.platform, electionGroupPlatformFilter.value)
     )
   }
   if (electionGroupDisabledOnly.value) {
@@ -2363,7 +2386,7 @@ const rateGuardFilteredGroups = computed(() => {
   let result = rateGuardGroups.value
   if (rateGuardGroupPlatformFilter.value.length > 0) {
     result = result.filter(group =>
-      matchesGroupPlatformFilter(group.platform, rateGuardGroupPlatformFilter.value)
+      matchesPlatformFilter(group.platform, rateGuardGroupPlatformFilter.value)
     )
   }
   if (rateGuardGroupDisabledOnly.value) {
@@ -2403,13 +2426,11 @@ const healthGuardPlatformSummaries = computed<HealthGuardPlatformSummary[]>(() =
   return Array.from(summaries.values()).sort((a, b) => platformLabel(a.platform).localeCompare(platformLabel(b.platform), 'zh-CN'))
 })
 
-const healthGuardPlatformFilterOptions = computed<SelectOption[]>(() => [
-  { value: '', label: '全部平台' },
-  ...healthGuardPlatformSummaries.value.map(summary => ({
-    value: summary.platform,
-    label: `${platformLabel(summary.platform)}（${summary.accountCount}）`,
-  })),
-])
+// 账号弹窗的平台标签与分组弹窗共用同一套渲染，只是统计口径换成「可用账号数」——
+// 与它替换掉的下拉选项口径一致，筛选行为不变。
+const healthGuardAccountPlatformFacets = computed(() =>
+  buildPlatformFacets(healthGuardAvailableAccountMappings.value)
+)
 
 const healthGuardProviderFilterOptions = computed<SelectOption[]>(() => {
   const providers = new Map<number, { name: string; accountIDs: Set<number> }>()
@@ -2450,12 +2471,12 @@ const healthGuardWorkspaceAccounts = computed(() => {
     includedAccountIDs.add(mapping.localAccountID)
   }
 
-  const platform = healthGuardAccountPlatformFilter.value
+  const platformFilter = healthGuardAccountPlatformFilter.value
   const providerID = healthGuardAccountProviderFilter.value
   const keyword = healthGuardAccountSearch.value.trim().toLowerCase()
   return accounts.filter(mapping => {
     if (healthGuardSelectedOnly.value && !healthGuardAccountIDs.value.includes(mapping.localAccountID)) return false
-    if (platform && mapping.platform !== platform) return false
+    if (!matchesPlatformFilter(mapping.platform, platformFilter)) return false
     if (providerID && !mapping.sources.some(source => String(source.provider_id) === providerID)) return false
     if (!keyword) return true
     const searchableText = [
@@ -2848,7 +2869,7 @@ function enableAllElectionGroups() {
 
 async function openHealthGuardAccounts() {
   healthGuardAccountsVisible.value = true
-  healthGuardAccountPlatformFilter.value = ''
+  healthGuardAccountPlatformFilter.value = []
   healthGuardAccountProviderFilter.value = ''
   healthGuardAccountSearch.value = ''
   healthGuardSelectedOnly.value = false
@@ -4868,9 +4889,10 @@ function intervalSecondsToCron(seconds: number): string | null {
   font-variant-numeric: tabular-nums;
 }
 
-/* 平台标签独占一行：搜索框 + 「仅看已关闭」已经占满第一行，
-   标签跟它们挤在一起会把搜索框压到没法输入，而平台数量还会随分组增长。 */
-.sp-rate-guard-group-platform-filter {
+/* 平台标签独占一行（flex-basis: 100%）。三个弹窗共用同一套控件：
+   分组弹窗里搜索框 + 「仅看已关闭」已经占满第一行，标签挤进去会把搜索框压到没法输入，
+   而平台数量还会随分组增长；账号弹窗里更要放在 grid 容器之外（flex-basis 在 grid 里不生效）。 */
+.sp-platform-chip-row {
   display: flex;
   flex: 1 1 100%;
   flex-wrap: wrap;
@@ -4883,7 +4905,7 @@ function intervalSecondsToCron(seconds: number): string | null {
    选中态才上平台色，写法与「仅看已关闭」的 active 态同构（色描边 + 浅色底）。
    文字不跟着平台色走 —— ACCENT 取的是 500 系，在深色面板上做正文偏暗，
    改用底色和描边承载平台色，两种主题下都读得清。 */
-.sp-rate-guard-group-platform-chip {
+.sp-platform-chip {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -4897,24 +4919,24 @@ function intervalSecondsToCron(seconds: number): string | null {
   transition: border-color 160ms ease, color 160ms ease, background-color 160ms ease;
 }
 
-.sp-rate-guard-group-platform-chip:hover {
+.sp-platform-chip:hover {
   border-color: color-mix(in srgb, var(--sp-chip-platform-color) 30%, var(--sp-line));
   color: var(--sp-text);
 }
 
-.sp-rate-guard-group-platform-chip[aria-pressed='true'] {
+.sp-platform-chip[aria-pressed='true'] {
   border-color: color-mix(in srgb, var(--sp-chip-platform-color) 55%, var(--sp-line));
   background: color-mix(in srgb, var(--sp-chip-platform-color) 16%, var(--sp-panel));
   color: var(--sp-text);
   font-weight: 650;
 }
 
-.sp-rate-guard-group-platform-chip:focus-visible {
+.sp-platform-chip:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--sp-chip-platform-color) 40%, transparent);
   outline-offset: 2px;
 }
 
-.sp-rate-guard-group-platform-chip strong {
+.sp-platform-chip strong {
   color: inherit;
   font-variant-numeric: tabular-nums;
   opacity: 0.7;
@@ -5300,10 +5322,13 @@ function intervalSecondsToCron(seconds: number): string | null {
   padding: 10px 14px;
 }
 
+/* 三列：供应商下拉 / 搜索框 / 仅看已选。平台筛选已改成独占一行的标签组、移出这个 grid
+   （flex-basis 在 grid 里不生效，塞进来只会把列挤变形），所以列数从 4 减到 3。
+   移动端那条 :nth-child(n + 3) 跨列规则的语义不变 —— 第 3 个仍然是「仅看已选」。 */
 .sp-health-guard-account-filters {
   display: grid;
   flex: 1 1 640px;
-  grid-template-columns: minmax(130px, 0.3fr) minmax(160px, 0.42fr) minmax(220px, 1fr) auto;
+  grid-template-columns: minmax(160px, 0.42fr) minmax(220px, 1fr) auto;
   gap: 10px;
   min-width: 0;
 }
