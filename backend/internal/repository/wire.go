@@ -125,6 +125,7 @@ var ProviderSet = wire.NewSet(
 	NewSupplierAutomationRepository,
 	NewSupplierAccountRateGuardRepository,
 	NewSupplierAccountHealthGuardRepository,
+	NewSupplierGroupSchedulingElectionRepository,
 	NewSupplierAccountHealthHistoryRepository,
 	wire.Bind(new(service.SupplierAccountHealthHistoryRepository), new(*supplierAccountHealthHistoryRepository)),
 	wire.Bind(new(service.SupplierAccountHealthHistoryRecorder), new(*supplierAccountHealthHistoryRepository)),

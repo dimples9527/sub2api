@@ -10,6 +10,17 @@ func ProvideSupplierAccountHealthGuardTester(tester *AccountTestService) supplie
 	return tester
 }
 
+func ProvideSupplierGroupSchedulingElectionAccountStore(repo AccountRepository) supplierGroupSchedulingElectionAccountStore {
+	return repo
+}
+
+func ProvideSupplierGroupSchedulingElectionService(
+	repository SupplierGroupSchedulingElectionRepository,
+	accountStore supplierGroupSchedulingElectionAccountStore,
+) *SupplierGroupSchedulingElectionService {
+	return NewSupplierGroupSchedulingElectionService(repository, accountStore)
+}
+
 func ProvideSupplierAccountHealthGuardService(
 	repository SupplierAccountHealthGuardRepository,
 	accountStore supplierAccountHealthGuardAccountStore,
@@ -37,6 +48,7 @@ func ProvideSupplierAutomationService(
 	accountRateGuard *SupplierAccountRateGuardService,
 	accountHealthGuard *SupplierAccountHealthGuardService,
 	accountRateGuardRepo SupplierAccountRateGuardRepository,
+	groupElection *SupplierGroupSchedulingElectionService,
 ) *SupplierAutomationService {
 	svc := NewSupplierAutomationService(repo, lock, syncer, dataRepo)
 	svc.SetMonitorSyncService(syncer)
@@ -45,6 +57,7 @@ func ProvideSupplierAutomationService(
 	svc.SetAccountRateGuardService(accountRateGuard)
 	svc.SetAccountHealthGuardService(accountHealthGuard)
 	svc.SetAccountRateGuardRepository(accountRateGuardRepo)
+	svc.SetGroupSchedulingElectionService(groupElection)
 	return svc
 }
 
@@ -53,5 +66,7 @@ var SupplierAccountHealthGuardWiringSet = wire.NewSet(
 	ProvideSupplierAccountHealthGuardTester,
 	ProvideSupplierAccountHealthGuardService,
 	ProvideSupplierAccountHealthTrendService,
+	ProvideSupplierGroupSchedulingElectionAccountStore,
+	ProvideSupplierGroupSchedulingElectionService,
 	ProvideSupplierAutomationService,
 )

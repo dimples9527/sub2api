@@ -87,6 +87,10 @@ type SupplierAutomationConfig struct {
 	AccountHealthGuardAccountSlowThresholds     map[int64]int `json:"account_health_guard_account_slow_thresholds"`
 	AccountHealthGuardAccountRecoveryThresholds map[int64]int `json:"account_health_guard_account_recovery_thresholds"`
 	AccountHealthGuardCursorAccountID           int64         `json:"account_health_guard_cursor_account_id"`
+
+	// 分组择优调度：每组保持开启的最优账号数（默认 1），以及不参与择优的分组 ID 列表（空=全部参与）。
+	GroupElectionTopN             int     `json:"group_scheduling_election_top_n"`
+	GroupElectionDisabledGroupIDs []int64 `json:"group_scheduling_election_disabled_group_ids"`
 }
 
 type SupplierAutomationRun struct {
@@ -112,6 +116,7 @@ type SupplierAutomationRunDetail struct {
 	AccountHealthGuard *SupplierAccountHealthGuardResult      `json:"account_health_guard,omitempty"`
 	SupplierMonitor    *SupplierProviderMonitorSyncResult     `json:"supplier_monitor,omitempty"`
 	RechargeSync       *SupplierProviderRechargeSyncAllResult `json:"recharge_sync,omitempty"`
+	GroupElection      *SupplierGroupSchedulingElectionResult `json:"group_election,omitempty"`
 }
 
 type SupplierAutomationProviderRunDetail struct {
@@ -216,6 +221,7 @@ const (
 	SupplierAutomationTaskAccountRateGuard   = "supplier_account_rate_guard"
 	SupplierAutomationTaskAccountHealthGuard = "supplier_account_health_guard"
 	SupplierAutomationTaskRechargeSync       = "supplier_provider_recharge_sync"
+	SupplierAutomationTaskGroupElection      = "supplier_group_scheduling_election"
 
 	SupplierAutomationStatusRunning = "running"
 	SupplierAutomationStatusSuccess = "success"
@@ -242,6 +248,7 @@ type SupplierAutomationService struct {
 	accountHealthGuard SupplierAccountHealthGuardRunner
 	accountRateLogs    SupplierAccountRateGuardRepository
 	rechargeSyncer     SupplierProviderRechargeSyncer
+	groupElection      SupplierGroupSchedulingElectionRunner
 	reloader           SupplierAutomationSchedulerReloader
 }
 
@@ -286,6 +293,12 @@ func (s *SupplierAutomationService) SetAccountHealthGuardService(guard SupplierA
 func (s *SupplierAutomationService) SetAccountRateGuardRepository(repository SupplierAccountRateGuardRepository) {
 	if s != nil {
 		s.accountRateLogs = repository
+	}
+}
+
+func (s *SupplierAutomationService) SetGroupSchedulingElectionService(election SupplierGroupSchedulingElectionRunner) {
+	if s != nil {
+		s.groupElection = election
 	}
 }
 
@@ -688,6 +701,28 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 			run.Message = fmt.Sprintf("执行完成，解除 %d 个分组绑定", result.UnboundGroups)
 		}
 		return nil
+	case SupplierAutomationTaskGroupElection:
+		if s.groupElection == nil {
+			return fmt.Errorf("supplier group scheduling election service is required")
+		}
+		result, err := s.groupElection.Run(ctx, SupplierGroupSchedulingElectionConfig{
+			TopN:             task.Config.GroupElectionTopN,
+			DisabledGroupIDs: task.Config.GroupElectionDisabledGroupIDs,
+		}, time.Now())
+		run.ProcessedCount = result.AccountCount
+		run.SuccessCount = result.EnabledCount + result.DisabledCount + result.UnchangedCount
+		run.FailedCount = result.FailedWriteCount
+		run.ResultDetail = &SupplierAutomationRunDetail{GroupElection: &result}
+		if err != nil {
+			return err
+		}
+		if result.FailedWriteCount > 0 {
+			run.Status = SupplierAutomationStatusPartial
+			run.Message = fmt.Sprintf("分组择优调度存在 %d 个账号更新失败", result.FailedWriteCount)
+		} else {
+			run.Message = fmt.Sprintf("择优完成，%d 个分组，开启 %d 个、关闭 %d 个账号", result.GroupCount, result.EnabledCount, result.DisabledCount)
+		}
+		return nil
 	default:
 		return ErrSupplierProviderInvalid
 	}
@@ -794,6 +829,17 @@ func validateSupplierAutomationTask(task SupplierAutomationTask) error {
 			return ErrSupplierProviderInvalid
 		}
 	}
+	if task.TaskCode == SupplierAutomationTaskGroupElection {
+		// TopN 允许为 0（归一化时回落默认 1），但负数视为配置错误。
+		if task.Config.GroupElectionTopN < 0 || task.Config.GroupElectionTopN > MaxSupplierGroupSchedulingElectionTopN {
+			return ErrSupplierProviderInvalid
+		}
+		for _, groupID := range task.Config.GroupElectionDisabledGroupIDs {
+			if groupID <= 0 {
+				return ErrSupplierProviderInvalid
+			}
+		}
+	}
 	if task.TaskCode == SupplierAutomationTaskAccountHealthGuard {
 		config := task.Config
 		if config.AccountHealthGuardMaxAccountsPerRun <= 0 ||
@@ -879,6 +925,7 @@ func (s *SupplierAutomationScheduler) Start() {
 			SupplierAutomationTaskAccountRateGuard,
 			SupplierAutomationTaskAccountHealthGuard,
 			SupplierAutomationTaskRechargeSync,
+			SupplierAutomationTaskGroupElection,
 			supplierAutomationUpstreamFetchLock,
 		} {
 			if err := s.service.lock.ForceReleaseAutomationLock(ctx, taskCode); err != nil {

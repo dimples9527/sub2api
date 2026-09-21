@@ -316,6 +316,31 @@
               <Input :model-value="editForm.config.inactive_group_retention_days" type="number" label="失效分组保留天数" @update:model-value="editForm.config.inactive_group_retention_days = toNumber($event, editForm.config.inactive_group_retention_days)" />
             </div>
           </section>
+
+          <section v-if="editForm.task_code === 'supplier_group_scheduling_election'" class="sp-form-section sp-policy-section">
+            <div class="sp-form-section-head">
+              <span>03</span>
+              <div><h3>分组择优调度策略</h3><p>关闭测试失败仍在调度的账号，并为每个分组选出连续成功次数最多的账号开启调度。复用现有测试状态，不重新测试，建议排在健康守护之后运行。</p></div>
+            </div>
+            <div class="sp-form-grid">
+              <Input :model-value="editForm.config.group_scheduling_election_top_n" type="number" label="每组开启账号数（默认 1 单活）" @update:model-value="editForm.config.group_scheduling_election_top_n = toNumber($event, editForm.config.group_scheduling_election_top_n ?? 1)" />
+            </div>
+            <div class="sp-rate-guard-scope-card">
+              <div>
+                <strong>不参与择优的分组</strong>
+                <span v-if="groupElectionDisabledGroupIDs.length === 0">所有分组都参与择优。新增分组也会自动参与。</span>
+                <span v-else>已关闭 <strong class="sp-rate-guard-scope-count">{{ groupElectionDisabledGroupIDs.length }}</strong> 个分组，其余分组正常参与择优。</span>
+              </div>
+              <button
+                class="sp-button small ghost sp-rate-guard-scope-config-button"
+                type="button"
+                @click="openElectionGroups"
+              >
+                <Icon name="cog" size="md" />
+                配置参与分组
+              </button>
+            </div>
+          </section>
         </form>
         <template #footer>
           <button class="sp-button ghost" type="button" :disabled="Boolean(savingCode)" @click="closeEdit">取消</button>
@@ -509,6 +534,45 @@
               <div class="sp-run-message">
                 {{ accountRateGuardResult.mode === 'preview' ? '预览仅记录计划，不会修改账号分组绑定。' : '实际执行结果已写入独立解除绑定日志。' }}
               </div>
+            </section>
+
+            <section v-else-if="detailRun.result_detail?.group_election && groupElectionResult" class="sp-rate-guard-detail">
+              <div class="sp-rate-guard-summary sp-account-rate-guard-summary">
+                <div><span>每组开启数</span><strong>{{ groupElectionResult.top_n }}</strong></div>
+                <div><span>扫描分组</span><strong>{{ groupElectionResult.group_count }}</strong></div>
+                <div><span>涉及账号</span><strong>{{ groupElectionResult.account_count }}</strong></div>
+                <div><span>开启调度</span><strong>{{ groupElectionResult.enabled_count }}</strong></div>
+                <div><span>关闭调度</span><strong>{{ groupElectionResult.disabled_count }}</strong></div>
+                <div><span>保持不变</span><strong>{{ groupElectionResult.unchanged_count }}</strong></div>
+                <div><span>跳过（未测）</span><strong>{{ groupElectionResult.skipped_count }}</strong></div>
+                <div><span>更新失败</span><strong>{{ groupElectionResult.failed_write_count }}</strong></div>
+              </div>
+              <div v-if="groupElectionResult.items.length" class="sp-rate-guard-table">
+                <div class="sp-rate-guard-head sp-group-election-head">
+                  <span>账号</span>
+                  <span>测试状态</span>
+                  <span>连续成功</span>
+                  <span>调度变更</span>
+                  <span>原因</span>
+                </div>
+                <div v-for="item in groupElectionResult.items" :key="item.account_id" class="sp-rate-guard-row sp-group-election-row">
+                  <span>
+                    <strong>{{ item.account_name || `账号 ${item.account_id}` }}</strong>
+                    <small v-if="item.platform">{{ item.platform }}</small>
+                  </span>
+                  <span>{{ groupElectionTestStatusText(item.test_status) }}</span>
+                  <span>{{ item.healthy_count }}</span>
+                  <span>
+                    <strong>{{ groupElectionActionText(item.action) }}</strong>
+                    <small>{{ item.schedulable_before ? '开' : '关' }} → {{ item.schedulable_after ? '开' : '关' }}</small>
+                  </span>
+                  <span>
+                    <small>{{ item.reason }}</small>
+                    <small v-if="item.error_message" class="sp-group-election-error">{{ item.error_message }}</small>
+                  </span>
+                </div>
+              </div>
+              <div v-else class="sp-rate-guard-empty">本次没有账号发生调度变更。</div>
             </section>
 
             <section v-else-if="detailRun.result_detail?.account_health_guard && accountHealthGuardResult" class="sp-rate-guard-detail sp-account-health-guard-detail">
@@ -1098,6 +1162,91 @@
         </template>
       </BaseDialog>
 
+      <BaseDialog
+        :show="electionGroupsVisible"
+        title="配置参与择优的分组"
+        width="full"
+        :z-index="60"
+        @close="closeElectionGroups"
+      >
+        <div class="sp-rate-guard-group-dialog">
+          <section class="sp-rate-guard-group-workspace">
+            <div class="sp-rate-guard-group-summary" aria-label="分组择优调度分组配置摘要">
+              <article>
+                <span>参与择优</span>
+                <strong>{{ electionGroupScopeSummary.enabled }}</strong>
+              </article>
+              <article :class="{ warning: electionGroupScopeSummary.disabled > 0 }">
+                <span>已关闭</span>
+                <strong>{{ electionGroupScopeSummary.disabled }}</strong>
+              </article>
+              <article>
+                <span>可选分组</span>
+                <strong>{{ rateGuardGroups.length }}</strong>
+              </article>
+            </div>
+
+            <div class="sp-rate-guard-group-toolbar">
+              <div class="sp-rate-guard-group-filters">
+                <Input v-model="electionGroupSearch" placeholder="搜索分组名称或 ID" />
+                <button
+                  class="sp-rate-guard-group-selected-toggle"
+                  :class="{ active: electionGroupDisabledOnly }"
+                  type="button"
+                  :aria-pressed="electionGroupDisabledOnly"
+                  @click="electionGroupDisabledOnly = !electionGroupDisabledOnly"
+                >
+                  <span class="sp-rate-guard-group-selected-toggle-mark" aria-hidden="true"></span>
+                  仅看已关闭
+                  <strong>{{ electionGroupScopeSummary.disabled }}</strong>
+                </button>
+              </div>
+              <span class="sp-rate-guard-group-filter-result">
+                筛选结果 <strong>{{ electionFilteredGroups.length }}</strong> 个
+              </span>
+            </div>
+
+            <div v-if="loadingRateGuardGroups" class="sp-rate-guard-empty">正在加载分组...</div>
+            <div v-else-if="electionFilteredGroups.length" class="sp-rate-guard-group-list">
+              <article
+                v-for="group in electionFilteredGroups"
+                :key="group.id"
+                class="sp-rate-guard-group-row"
+                :class="{ disabled: electionGroupIsDisabled(group.id) }"
+              >
+                <label class="sp-rate-guard-group-choice">
+                  <input
+                    type="checkbox"
+                    :checked="!electionGroupIsDisabled(group.id)"
+                    :aria-label="`${electionGroupIsDisabled(group.id) ? '开启' : '关闭'}分组 ${group.name} 的择优调度`"
+                    @change="toggleElectionGroup(group.id)"
+                  />
+                  <span class="sp-rate-guard-group-choice-copy">
+                    <strong>{{ group.name }}</strong>
+                    <span class="sp-rate-guard-group-id">#{{ group.id }}</span>
+                    <span class="sp-rate-guard-group-rate">倍率 {{ group.rate_multiplier }}</span>
+                  </span>
+                </label>
+                <span
+                  v-if="electionGroupIsDisabled(group.id)"
+                  class="sp-rate-guard-group-status off"
+                >
+                  已关闭择优
+                </span>
+              </article>
+            </div>
+            <div v-else class="sp-rate-guard-empty">
+              {{ electionGroupDisabledOnly ? '当前没有已关闭择优的分组。' : '当前没有可配置的分组。' }}
+            </div>
+          </section>
+        </div>
+        <template #footer>
+          <span class="sp-rate-guard-group-hint">取消勾选的分组会被跳过；全部勾选即所有分组都参与择优。</span>
+          <button class="sp-button ghost" type="button" @click="enableAllElectionGroups">全部参与</button>
+          <button class="sp-button primary" type="button" @click="closeElectionGroups">完成</button>
+        </template>
+      </BaseDialog>
+
       <BaseDialog :show="accountRateGuardExecuteVisible" title="确认执行账号倍率守护" width="wide" @close="closeAccountRateGuardExecute">
         <div class="sp-guard-confirm">
           <span class="sp-guard-confirm-mark" aria-hidden="true">!</span>
@@ -1195,6 +1344,9 @@ const rateGuardGroupSearch = ref('')
 const rateGuardGroupDisabledOnly = ref(false)
 const rateGuardGroups = ref<AdminGroup[]>([])
 const loadingRateGuardGroups = ref(false)
+const electionGroupsVisible = ref(false)
+const electionGroupSearch = ref('')
+const electionGroupDisabledOnly = ref(false)
 const healthGuardAccountsVisible = ref(false)
 const healthGuardAccountPlatformFilter = ref('')
 const healthGuardAccountProviderFilter = ref('')
@@ -1240,6 +1392,8 @@ const editForm = reactive<SupplierAutomationTask>({
     account_health_guard_account_slow_thresholds: {},
     account_health_guard_account_recovery_thresholds: {},
     account_health_guard_cursor_account_id: 0,
+    group_scheduling_election_top_n: 1,
+    group_scheduling_election_disabled_group_ids: [],
   },
   last_status: '',
   last_message: '',
@@ -1250,6 +1404,7 @@ const taskNameByCode = computed<Record<string, string>>(() =>
 )
 const taskNameFallbackByCode: Record<string, string> = {
   supplier_provider_recharge_sync: '供应商充值记录同步',
+  supplier_group_scheduling_election: '分组择优调度',
 }
 
 const latestRunByTask = computed<Record<string, SupplierAutomationRun>>(() => {
@@ -1266,6 +1421,7 @@ const selectedDetailProvider = computed(() => {
 const rateGuardAlertActions = new Set(['invalid', 'stale', 'failed'])
 const rateGuardResult = computed(() => detailRun.value?.result_detail?.rate_guard || null)
 const accountRateGuardResult = computed(() => detailRun.value?.result_detail?.account_rate_guard || null)
+const groupElectionResult = computed(() => detailRun.value?.result_detail?.group_election || null)
 const accountHealthGuardResult = computed(() => detailRun.value?.result_detail?.account_health_guard || null)
 const rechargeSyncResult = computed<SupplierProviderRechargeSyncAllResult | null>(() => detailRun.value?.result_detail?.recharge_sync || null)
 const rechargeSyncRecordCount = computed(() => (
@@ -1482,6 +1638,7 @@ function openEdit(task: SupplierAutomationTask) {
   Object.assign(editForm, JSON.parse(JSON.stringify(task)))
   applyAccountHealthGuardDefaults()
   applyAccountRateGuardDefaults()
+  applyGroupElectionDefaults()
   editIntervalSeconds.value = cronToIntervalSeconds(task.cron_expression) || 300
   editVisible.value = true
 }
@@ -1540,6 +1697,18 @@ async function saveTask() {
   if (editForm.task_code === 'supplier_account_rate_guard') {
     // 提交前再归一化一次：弹窗里勾选产生的值要保证去重升序，且非法 ID 不入库。
     applyAccountRateGuardDefaults()
+  }
+  if (editForm.task_code === 'supplier_group_scheduling_election') {
+    const topN = Number(editForm.config.group_scheduling_election_top_n)
+    if (!Number.isInteger(topN) || topN < 1) {
+      appStore.showError('每组开启账号数必须是不小于 1 的整数')
+      return
+    }
+    if (topN > 100) {
+      appStore.showError('每组开启账号数不能超过 100')
+      return
+    }
+    applyGroupElectionDefaults()
   }
   editForm.cron_expression = cronExpression
   savingCode.value = editingTask.value.task_code
@@ -1695,6 +1864,28 @@ function selectDetailProvider(providerID: number) {
 
 function accountRateGuardModeText(mode: string): string {
   return mode === 'preview' ? '预览' : '执行'
+}
+
+function groupElectionActionText(action: string): string {
+  switch (action) {
+    case 'enabled':
+      return '开启调度'
+    case 'disabled':
+      return '关闭调度'
+    default:
+      return '保持不变'
+  }
+}
+
+function groupElectionTestStatusText(status?: string): string {
+  switch (status) {
+    case 'success':
+      return '成功'
+    case 'failed':
+      return '失败'
+    default:
+      return '未测试'
+  }
 }
 
 function setHealthGuardStatusFilter(filter: string) {
@@ -2000,6 +2191,33 @@ const healthGuardAccountIDs = computed(() =>
 const accountRateGuardDisabledGroupIDs = computed(() =>
   normalizePositiveAccountIDs(editForm.config.account_rate_guard_disabled_group_ids)
 )
+
+// 分组择优调度的分组开关：同样存"被关闭"的分组，空列表即所有分组都参与择优。
+const groupElectionDisabledGroupIDs = computed(() =>
+  normalizePositiveAccountIDs(editForm.config.group_scheduling_election_disabled_group_ids)
+)
+
+const electionGroupScopeSummary = computed(() => {
+  const disabled = groupElectionDisabledGroupIDs.value.length
+  return {
+    disabled,
+    enabled: Math.max(rateGuardGroups.value.length - disabled, 0),
+  }
+})
+
+const electionFilteredGroups = computed(() => {
+  const keyword = electionGroupSearch.value.trim().toLowerCase()
+  let result = rateGuardGroups.value
+  if (electionGroupDisabledOnly.value) {
+    result = result.filter(group => electionGroupIsDisabled(group.id))
+  }
+  if (!keyword) {
+    return result
+  }
+  return result.filter(group =>
+    group.name.toLowerCase().includes(keyword) || String(group.id).includes(keyword)
+  )
+})
 
 // 编辑弹窗的宽度由「最宽那一行的列数」决定，不是区块个数 ——
 // 3 列网格（健康守护 7 个输入框 / 数据保留 4 个输入框）每列都要放得下「标签 + 输入框」，
@@ -2337,6 +2555,15 @@ function applyAccountRateGuardDefaults() {
   )
 }
 
+function applyGroupElectionDefaults() {
+  // 旧配置缺字段时回落默认：每组保留 1 个最优账号（严格单活），所有分组都参与择优。
+  const topN = Number(editForm.config.group_scheduling_election_top_n)
+  editForm.config.group_scheduling_election_top_n = Number.isFinite(topN) && topN > 0 ? topN : 1
+  editForm.config.group_scheduling_election_disabled_group_ids = normalizePositiveAccountIDs(
+    editForm.config.group_scheduling_election_disabled_group_ids
+  )
+}
+
 function validateAccountHealthGuardSelection(config: SupplierAutomationConfig): string {
   const accountIDs = normalizePositiveAccountIDs(config.account_health_guard_account_ids)
   if (!accountIDs.length) return '请至少选择一个需要检查的账号'
@@ -2441,6 +2668,55 @@ function enableAllRateGuardGroups() {
   editForm.config.account_rate_guard_disabled_group_ids = []
   if (current.length > 0) {
     appStore.showSuccess(`已将 ${current.length} 个分组恢复为参与守护，保存任务后生效`)
+  }
+}
+
+async function openElectionGroups() {
+  electionGroupsVisible.value = true
+  electionGroupSearch.value = ''
+  electionGroupDisabledOnly.value = false
+  if (rateGuardGroups.value.length > 0) {
+    return
+  }
+  loadingRateGuardGroups.value = true
+  try {
+    // 含停用分组：已关闭择优的分组若此刻正被停用，仍要能看见开关状态。
+    rateGuardGroups.value = await listAllGroups()
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '加载分组失败'))
+  } finally {
+    loadingRateGuardGroups.value = false
+  }
+}
+
+function closeElectionGroups() {
+  electionGroupsVisible.value = false
+}
+
+function electionGroupIsDisabled(groupID: number): boolean {
+  return groupElectionDisabledGroupIDs.value.includes(groupID)
+}
+
+function toggleElectionGroup(groupID: number) {
+  // 勾选 = 参与择优；勾掉的才进配置，因此写回的是"关闭列表"。
+  const disabled = groupElectionDisabledGroupIDs.value
+  const next = disabled.includes(groupID)
+    ? disabled.filter(id => id !== groupID)
+    : [...disabled, groupID]
+  editForm.config.group_scheduling_election_disabled_group_ids = normalizePositiveAccountIDs(next)
+}
+
+function enableAllElectionGroups() {
+  const current = groupElectionDisabledGroupIDs.value
+  if (current.length > 1) {
+    const confirmed = window.confirm(`将 ${current.length} 个分组全部恢复为参与择优？此操作在保存任务后生效。`)
+    if (!confirmed) {
+      return
+    }
+  }
+  editForm.config.group_scheduling_election_disabled_group_ids = []
+  if (current.length > 0) {
+    appStore.showSuccess(`已将 ${current.length} 个分组恢复为参与择优，保存任务后生效`)
   }
 }
 

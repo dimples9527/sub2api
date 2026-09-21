@@ -31,6 +31,13 @@ export interface SupplierAutomationConfig {
    * 空列表或不传 = 所有分组都参与守护（新增分组自动参与，无需补齐配置）。
    */
   account_rate_guard_disabled_group_ids?: number[]
+  /** 分组择优调度：每个分组保持开启调度的最优账号数量，默认 1（严格单活）。 */
+  group_scheduling_election_top_n?: number
+  /**
+   * 分组择优调度按本地分组开关：这里存"不参与择优"的分组 ID。
+   * 空列表或不传 = 所有分组都参与择优（新增分组自动参与，无需补齐配置）。
+   */
+  group_scheduling_election_disabled_group_ids?: number[]
 }
 
 export interface SupplierAutomationTask {
@@ -70,6 +77,45 @@ export interface SupplierAutomationRunDetail {
   supplier_monitor?: SupplierProviderMonitorSyncResult
   recharge_sync?: SupplierProviderRechargeSyncAllResult
   cleanup?: SupplierAutomationCleanupRunDetail
+  group_election?: SupplierGroupSchedulingElectionResult
+}
+
+export interface SupplierGroupSchedulingElectionGroupDetail {
+  group_id: number
+  group_name: string
+  member_count: number
+  success_count: number
+  failed_count: number
+  untested_count: number
+  winner_count: number
+  winner_ids?: number[]
+}
+
+export interface SupplierGroupSchedulingElectionAccountItem {
+  account_id: number
+  account_name: string
+  platform?: string
+  test_status?: string
+  healthy_count: number
+  schedulable_before: boolean
+  schedulable_after: boolean
+  action: string
+  reason?: string
+  group_ids?: number[]
+  error_message?: string
+}
+
+export interface SupplierGroupSchedulingElectionResult {
+  top_n: number
+  group_count: number
+  account_count: number
+  enabled_count: number
+  disabled_count: number
+  unchanged_count: number
+  skipped_count: number
+  failed_write_count: number
+  groups: SupplierGroupSchedulingElectionGroupDetail[]
+  items: SupplierGroupSchedulingElectionAccountItem[]
 }
 
 export interface SupplierProviderRechargeSyncResult {
