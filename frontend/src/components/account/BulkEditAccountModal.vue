@@ -1415,6 +1415,7 @@
           <GroupSelector
             v-model="groupIds"
             :groups="groups"
+            :platform="bulkEditGroupPlatform"
             aria-labelledby="bulk-edit-groups-label"
           />
         </div>
@@ -1482,6 +1483,7 @@ import type {
   AdminGroup,
   AccountPlatform,
   AccountType,
+  GroupPlatform,
   OpenAICompactMode,
   OpenAIEndpointCapability,
   OpenAIResponsesMode
@@ -1553,6 +1555,16 @@ const allTargetsGrok = computed(
     targetSelectedPlatforms.value.every((p) => p === 'grok')
 )
 const isMixedPlatform = computed(() => targetSelectedPlatforms.value.length > 1)
+
+// 分组列表的平台过滤：单平台时收紧到该平台（与单个账号编辑弹窗一致 ——
+// EditAccountModal 传的就是 :platform="account.platform"）。
+// 不收紧的话会出现「一条警告都没有，却能从列表里挑到别的平台的分组并保存成功」，
+// 用户会以为跨平台绑定是合法的。
+// 多平台混选时不传：此时过滤失去意义（任何分组都至少对某个平台不兼容），
+// 交给后端按账号逐条判定并给出失败原因。
+const bulkEditGroupPlatform = computed<GroupPlatform | undefined>(() =>
+  targetSelectedPlatforms.value.length === 1 ? targetSelectedPlatforms.value[0] : undefined
+)
 
 const allOpenAIPassthroughCapable = computed(() => {
   return (

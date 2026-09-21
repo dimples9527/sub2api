@@ -1031,3 +1031,36 @@ describe('BulkEditAccountModal 分组区域高度', () => {
   })
 })
 
+describe('BulkEditAccountModal 分组列表的平台过滤', () => {
+  const source = readFileSync(
+    join(process.cwd(), 'src/components/account/BulkEditAccountModal.vue'),
+    'utf-8'
+  )
+
+  it('单平台时按该平台过滤分组列表，与单个账号编辑弹窗口径一致', () => {
+    // 不收紧就会出现「零警告却能把账号绑到别的平台分组上并保存成功」。
+    expect(source).toContain(':platform="bulkEditGroupPlatform"')
+    expect(source).toContain('const bulkEditGroupPlatform = computed<GroupPlatform | undefined>')
+  })
+
+  it('多平台混选时不传 platform，交给后端逐账号判定', () => {
+    // 混选时任何分组都至少对一个平台不兼容，前端过滤只会把可选项砍没，
+    // 真正该做的是让后端按账号逐条给出失败原因。
+    const block = source.match(
+      /const bulkEditGroupPlatform = computed<GroupPlatform \| undefined>\(\(\) =>([\s\S]*?)\n\)/
+    )?.[1] || ''
+    expect(block).toContain('targetSelectedPlatforms.value.length === 1')
+    expect(block).toContain('targetSelectedPlatforms.value[0]')
+  })
+
+  it('关闭弹窗时清空已选分组 —— 否则被平台过滤藏起来的分组仍会进提交载荷', () => {
+    // 单平台过滤会把别的平台的分组从列表里隐藏，但 groupIds 是独立状态。
+    // 一旦跨次保留，用户「看不见却已选中」的分组照样会被提交，过滤就白做了。
+    const start = source.indexOf('() => props.show')
+    expect(start).toBeGreaterThan(-1)
+    const watchBlock = source.slice(start, source.indexOf('\n)\n', start))
+    expect(watchBlock).toContain('if (!newShow) {')
+    expect(watchBlock).toContain('enableGroups.value = false')
+    expect(watchBlock).toContain('groupIds.value = []')
+  })
+})
