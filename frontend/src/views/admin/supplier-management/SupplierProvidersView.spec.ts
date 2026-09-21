@@ -488,6 +488,51 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(rowIds()).toEqual(['1', '2', '3'])
   })
 
+  it('点击「启用供应商」指标卡按启用状态过滤，再点一次或点「全部」都能清除', async () => {
+    const wrapper = await mountSupplierProviders()
+    const rowIds = () => wrapper.findAll('tbody tr[data-row-id]').map(row => row.attributes('data-row-id'))
+
+    expect(rowIds()).toEqual(['1', '2', '3'])
+
+    // 回归点：这张卡的 label 与数字都指向「启用供应商」，key 曾写成 'all'，
+    // 而 filteredProviders 里没有 all 分支 ⇒ 点击是 no-op（不报错、列表一行不少）。
+    const card = wrapper.get('[data-test="supplier-provider-metric-enabled"]')
+    await card.trigger('click')
+    expect(rowIds()).toEqual(['1', '3'])
+    expect(card.classes()).toContain('selected')
+    expect(card.attributes('aria-pressed')).toBe('true')
+
+    // 出口一：再点同一张卡取消（同 SupplierAccountHealthView / SupplierAutomationView 的语义）
+    await card.trigger('click')
+    expect(rowIds()).toEqual(['1', '2', '3'])
+    expect(card.attributes('aria-pressed')).toBe('false')
+
+    // 出口二：「全部」按字面意思清除全部维度。filter 只由指标卡写入，
+    // 若它不清 filter，就会出现「点了全部仍是 2 个结果」的陷阱
+    await card.trigger('click')
+    expect(rowIds()).toEqual(['1', '3'])
+    await wrapper.get('[data-test="supplier-provider-filter-all"]').trigger('click')
+    expect(rowIds()).toEqual(['1', '2', '3'])
+    expect(card.attributes('aria-pressed')).toBe('false')
+  })
+
+  it('每张指标卡都对应 filteredProviders 的一个分支，不存在点击无效的卡片', async () => {
+    const wrapper = await mountSupplierProviders()
+    const rowIds = () => wrapper.findAll('tbody tr[data-row-id]').map(row => row.attributes('data-row-id'))
+    const allIds = rowIds()
+
+    // 从源码取卡片键：新增卡片却忘了加筛选分支时，会在这里失败
+    const metricKeys = [...supplierProvidersSource.matchAll(/\{ key: '([a-z_]+)', tone: '/g)].map(match => match[1])
+    expect(metricKeys).toEqual(['enabled', 'risk', 'balance', 'sync', 'rate'])
+
+    // 这类缺陷不抛错：卡片能点、能高亮，只是列表一行不少。夹具里 3 行供应商
+    // 没有任何一行同时命中全部 5 个维度，故每张卡都应筛出真子集。
+    for (const key of metricKeys) {
+      await wrapper.get(`[data-test="supplier-provider-metric-${key}"]`).trigger('click')
+      expect(rowIds(), `指标卡 ${key} 点击后列表没有变化`).not.toEqual(allIds)
+    }
+  })
+
   it('prevents syncing a disabled provider until it is enabled again', async () => {
     const wrapper = await mountSupplierProviders()
 
@@ -496,6 +541,29 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(syncButton.attributes('disabled')).toBeDefined()
     expect(syncButton.attributes('title')).toBe('供应商已停用，请先启用后再同步')
     expect(providerViewMocks.streamSupplierProviderSync).not.toHaveBeenCalled()
+  })
+
+  it('未启用的供应商行带 data-provider-enabled=0 标记，供整行灰化样式定位', async () => {
+    const wrapper = await mountSupplierProviders()
+
+    // DataTable 是通用组件且不消费 rowClass，整行灰化只能靠行内标记 + :has() 反选，
+    // 标记一旦丢失，样式会静默失效（页面看不出报错），故在此钉住。
+    const marks = wrapper.findAll('[data-provider-enabled]')
+    expect(marks).toHaveLength(providerRows.length)
+    expect(marks.filter(mark => mark.attributes('data-provider-enabled') === '0')).toHaveLength(1)
+    expect(marks.filter(mark => mark.attributes('data-provider-enabled') === '1')).toHaveLength(2)
+  })
+
+  it('整行灰化标记跟随开关的乐观更新，而不是写死初值', async () => {
+    const wrapper = await mountSupplierProviders()
+    const markOf = () => wrapper.get('[data-test="supplier-provider-enabled-1"]').element
+      .closest('[data-provider-enabled]')?.getAttribute('data-provider-enabled')
+
+    expect(markOf()).toBe('1')
+
+    // 点按后立即置灰（乐观更新，此时接口还没返回）；标记若写死，这一步会仍是 '1'
+    await wrapper.get('[data-test="supplier-provider-enabled-1"]').trigger('click')
+    expect(markOf()).toBe('0')
   })
 
   it('updates a provider enabled state from the table switch', async () => {
@@ -595,6 +663,17 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(supplierProvidersSource).toContain('筛选供应商')
     expect(supplierProvidersSource).toContain('@media (max-width: 900px)')
     expect(supplierProvidersSource).toContain('@media (max-width: 520px)')
+  })
+
+  it('未启用供应商整行灰化同时覆盖行底色、DataTable 固定列与单元格内容', () => {
+    const offRow = "tbody tr:has(.sp-provider-status-toggle[data-provider-enabled='0'])"
+
+    // 只压行底色不够：DataTable 给固定列写了自带底色，不覆盖的话首列与操作列仍是原色
+    expect(supplierProvidersSource).toContain(offRow)
+    expect(supplierProvidersSource).toContain(`${offRow} .sticky-col`)
+
+    // 只压底色也不够：行内彩色状态徽章必须在灰底上去色
+    expect(supplierProvidersSource).toContain('filter: grayscale(1)')
   })
 
   it('provides a direct create-provider-type action and dedicated dialog', () => {

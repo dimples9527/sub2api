@@ -28,7 +28,7 @@
               :class="{ active: providerQuickFilter === quickFilter.key }"
               :data-test="`supplier-provider-filter-${quickFilter.key}`"
               type="button"
-              @click="providerQuickFilter = quickFilter.key"
+              @click="applyProviderQuickFilter(quickFilter.key)"
             >
               {{ quickFilter.label }}
             </button>
@@ -103,7 +103,13 @@
         :key="metric.key"
         class="sp-metric-card"
         :class="[`sp-${metric.tone}`, { selected: filter === metric.key }]"
-        @click="filter = metric.key"
+        role="button"
+        tabindex="0"
+        :aria-pressed="filter === metric.key"
+        :data-test="`supplier-provider-metric-${metric.key}`"
+        @click="toggleMetricFilter(metric.key)"
+        @keydown.enter.prevent="toggleMetricFilter(metric.key)"
+        @keydown.space.prevent="toggleMetricFilter(metric.key)"
       >
         <div class="sp-metric-label">{{ metric.label }}</div>
         <div class="sp-metric-value">{{ metric.value }}</div>
@@ -155,7 +161,9 @@
             <div class="sp-sub">{{ provider.code }} · {{ provider.provider_type }} · {{ provider.base_url }}</div>
           </template>
           <template #cell-status="{ row: provider }">
-            <div class="sp-provider-status-toggle">
+            <!-- data-provider-enabled 是「未启用整行灰化」的样式钩子：DataTable 属通用组件且不消费
+                 rowClass，页面层只能靠行内状态标记反选整行，不要删除或改名。 -->
+            <div class="sp-provider-status-toggle" :data-provider-enabled="provider.enabled ? '1' : '0'">
               <Toggle
                 :model-value="provider.enabled"
                 :disabled="updatingProviderIDs.has(provider.id)"
@@ -1378,18 +1386,42 @@ const authEventOptions: SelectOption[] = [
   { value: 'cache_error', label: '缓存异常' },
 ]
 
+// 每张指标卡的 key 都必须对应 filteredProviders 里的一个筛选分支，卡片才「点得动」。
+// 为什么强调：key 写错（例如第一张卡曾写成 'all'）不会报错 —— 卡片照样能点、能高亮，
+// 但 filteredProviders 没有该分支，列表一行不少，表现为「点了没过滤」。
 const metrics = computed(() => [
-  { key: 'all', tone: 'green', label: '启用供应商', value: String(summary.value.enabled_count), foot: `共管理 ${summary.value.total_count} 个供应商` },
+  { key: 'enabled', tone: 'green', label: '启用供应商', value: String(summary.value.enabled_count), foot: `共管理 ${summary.value.total_count} 个供应商` },
   { key: 'risk', tone: 'red', label: '高风险供应商', value: String(summary.value.high_risk_count), foot: '风险等级为 high 或 critical' },
   { key: 'balance', tone: 'orange', label: '余额不足 3 天', value: String(summary.value.low_balance_count), foot: '按预计可用天数判断' },
   { key: 'sync', tone: 'blue', label: '同步异常', value: String(summary.value.sync_failure_count), foot: '最近同步状态失败' },
   { key: 'rate', tone: 'amber', label: '倍率风险项', value: String(summary.value.rate_risk_count), foot: '供应商账号倍率风险累计' },
 ])
 
+/**
+ * 再点一次已选中的卡片即取消筛选。
+ * 为什么取这个语义：同模块的 `SupplierAccountHealthView.selectHealthStatus` 与
+ * `SupplierAutomationView` 的 `healthGuardStatusFilter` 都是「再点取消」（后者 title 直接写「取消筛选」）。
+ * 卡片自带 selected + aria-pressed，状态可见 ⇒ 「再点一下取消」可发现，用户不必去找别处的「全部」。
+ */
+function toggleMetricFilter(key: string): void {
+  filter.value = filter.value === key ? 'all' : key
+}
+
+/**
+ * 「全部」按字面意思清除全部筛选。
+ * 为什么需要它：filter（指标卡）与 providerQuickFilter（启用状态快捷筛选）是两个独立维度，
+ * 只清后者的话，用户点了「全部」仍看到被指标卡过滤后的行数，会当成又一处「点击无效」。
+ */
+function applyProviderQuickFilter(next: ProviderQuickFilter): void {
+  providerQuickFilter.value = next
+  if (next === 'all') filter.value = 'all'
+}
+
 const filteredProviders = computed(() => providers.value.filter(provider => {
   if (providerQuickFilter.value === 'enabled' && !provider.enabled) return false
   if (providerQuickFilter.value === 'disabled' && provider.enabled) return false
   if (providerQuickFilter.value === 'default' && !provider.is_default) return false
+  if (filter.value === 'enabled' && !provider.enabled) return false
   if (filter.value === 'risk' && !['high', 'critical'].includes(provider.risk_level)) return false
   if (filter.value === 'balance' && !isLowBalance(provider)) return false
   if (filter.value === 'sync' && provider.sync_status !== 'failed') return false
@@ -3294,6 +3326,46 @@ function errorMessage(err: unknown, fallback: string): string {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+/* --- 未启用供应商整行灰化 ---
+   为什么用 :has() 反选而不是 rowClass：DataTable 是通用组件且不消费 rowClass，
+   按仓库约定不改通用组件，改由 #cell-status 输出 data-provider-enabled 标记。
+   灰化分两层，缺任一层都会露馅：
+   ① 行底色 —— 必须连 .sticky-col 一起覆盖，DataTable 给固定列写了自带底色
+      （浅色 white / 深色 rgb(17 24 39)），不覆盖则首列与操作列保持原色，"整行"是断的；
+   ② 单元格内容 —— grayscale 去掉行内彩色状态徽章 + 降透明，否则灰底上彩色标签依然跳脱。
+   深色主题的中性灰底会把停用行衬得比正常行更亮，故反向压暗一档，主要靠内容褪色表达。 */
+.sp-panel :deep(tbody tr:has(.sp-provider-status-toggle[data-provider-enabled='0'])),
+.sp-panel :deep(div.rounded-lg:has(.sp-provider-status-toggle[data-provider-enabled='0'])) {
+  background-color: color-mix(in srgb, var(--sp-panel) 86%, var(--sp-muted));
+}
+
+.sp-panel :deep(tbody tr:has(.sp-provider-status-toggle[data-provider-enabled='0']) .sticky-col) {
+  background-color: inherit;
+}
+
+.sp-panel :deep(tbody tr:has(.sp-provider-status-toggle[data-provider-enabled='0']) > td),
+.sp-panel :deep(div.rounded-lg:has(.sp-provider-status-toggle[data-provider-enabled='0']) > div) {
+  filter: grayscale(1);
+  opacity: 0.65;
+}
+
+/* 停用行仍可点击查看详情，保留 hover 反馈，避免看起来像不可交互 */
+.sp-panel :deep(tbody tr:has(.sp-provider-status-toggle[data-provider-enabled='0']):hover) {
+  background-color: color-mix(in srgb, var(--sp-panel) 78%, var(--sp-muted));
+}
+
+/* 深色主题：中性灰底会把停用行衬得比正常行更亮，反过来压暗一档，主要靠内容褪色表达。
+   ⚠️ 这里必须写普通 `.dark`，不能用 :global(.dark) —— 后者与 :deep() 混用会被 scoped
+   编译器整段吞掉（实测产物只剩一条裸 `.dark`，后面的选择器全部丢失），表现为「深色下规则静默失效」。 */
+.dark .sp-panel :deep(tbody tr:has(.sp-provider-status-toggle[data-provider-enabled='0'])),
+.dark .sp-panel :deep(div.rounded-lg:has(.sp-provider-status-toggle[data-provider-enabled='0'])) {
+  background-color: color-mix(in srgb, var(--sp-panel) 62%, #000);
+}
+
+.dark .sp-panel :deep(tbody tr:has(.sp-provider-status-toggle[data-provider-enabled='0']):hover) {
+  background-color: color-mix(in srgb, var(--sp-panel) 48%, #000);
 }
 
 .sp-provider-filter-actions {
