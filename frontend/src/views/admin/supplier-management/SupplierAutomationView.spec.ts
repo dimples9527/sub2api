@@ -574,7 +574,7 @@ describe('SupplierAutomationView edit dialog', () => {
   })
 
   it('keeps the selected-account filter from overlapping its result and colors account platforms', () => {
-    expect(supplierAutomationSource).toContain("import { platformBadgeClass, platformTextClass } from '@/utils/platformColors'")
+    expect(supplierAutomationSource).toContain("import { platformAccentColor, platformBadgeClass, platformTextClass } from '@/utils/platformColors'")
     expect(supplierAutomationSource).toContain("import { ensureCustomPlatformLabels, resolvePlatformDisplayLabel as platformLabel } from '@/utils/customPlatformLabels'")
     expect(supplierAutomationSource).toContain(":class=\"['sp-health-guard-account-platform', platformBadgeClass(mapping.platform)]\"")
     expect(supplierAutomationSource).toContain('.sp-health-guard-account-toolbar')
@@ -1328,5 +1328,164 @@ describe('SupplierAutomationView account rate guard group switch', () => {
     expect(supplierAutomationSource).toContain('仅看已关闭')
     expect(supplierAutomationSource).toContain('const rateGuardGroupScopeSummary = computed(()')
     expect(supplierAutomationSource).toContain('const rateGuardFilteredGroups = computed(()')
+  })
+})
+
+describe('SupplierAutomationView 分组弹窗的平台筛选与平台配色', () => {
+  it('两个分组弹窗都渲染同一套平台标签筛选', () => {
+    expect(
+      supplierAutomationSource.match(/class="sp-rate-guard-group-platform-filter"/g)
+    ).toHaveLength(2)
+    expect(supplierAutomationSource).toContain('aria-label="按平台筛选分组"')
+    expect(supplierAutomationSource).toContain(
+      ':aria-pressed="rateGuardGroupPlatformFilter.includes(facet.platform)"'
+    )
+    expect(supplierAutomationSource).toContain(
+      ':aria-pressed="electionGroupPlatformFilter.includes(facet.platform)"'
+    )
+  })
+
+  it('平台选项从当前分组现算，不会列出没有分组的平台', () => {
+    expect(supplierAutomationSource).toContain('const groupPlatformFacets = computed(()')
+    expect(supplierAutomationSource).toContain(
+      'counts.set(group.platform, (counts.get(group.platform) ?? 0) + 1)'
+    )
+    expect(supplierAutomationSource).toContain(
+      "})).sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'))"
+    )
+  })
+
+  it('平台筛选存「已选中」而不是「已排除」，空选即不过滤', () => {
+    expect(supplierAutomationSource).toContain('const rateGuardGroupPlatformFilter = ref<string[]>([])')
+    expect(supplierAutomationSource).toContain('const electionGroupPlatformFilter = ref<string[]>([])')
+    expect(supplierAutomationSource).toContain(
+      'function matchesGroupPlatformFilter(platform: string, selected: string[]): boolean {'
+    )
+    expect(supplierAutomationSource).toContain(
+      'return selected.length === 0 || selected.includes(platform)'
+    )
+  })
+
+  it('平台标签是多选切换：再点一下能移除，而不是被下一个平台顶掉', () => {
+    expect(supplierAutomationSource).toContain(
+      'function toggleGroupPlatformFilter(current: string[], platform: string): string[] {'
+    )
+    expect(supplierAutomationSource).toContain('? current.filter(item => item !== platform)')
+    expect(supplierAutomationSource).toContain(': [...current, platform]')
+  })
+
+  it('平台条件接进两个弹窗各自的过滤链', () => {
+    const rateGuardBlock = supplierAutomationSource.slice(
+      supplierAutomationSource.indexOf('const rateGuardFilteredGroups = computed(()'),
+      supplierAutomationSource.indexOf('const healthGuardAvailableAccountMappings')
+    )
+    expect(rateGuardBlock).toContain(
+      'matchesGroupPlatformFilter(group.platform, rateGuardGroupPlatformFilter.value)'
+    )
+    const electionBlock = supplierAutomationSource.slice(
+      supplierAutomationSource.indexOf('const electionFilteredGroups = computed(()'),
+      supplierAutomationSource.indexOf('// 编辑弹窗的宽度由')
+    )
+    expect(electionBlock).toContain(
+      'matchesGroupPlatformFilter(group.platform, electionGroupPlatformFilter.value)'
+    )
+  })
+
+  it('分组行按平台渲染徽标与左侧色条', () => {
+    expect(
+      supplierAutomationSource.match(
+        /class="sp-rate-guard-group-platform" :class="platformBadgeClass\(group\.platform\)"/g
+      )
+    ).toHaveLength(2)
+    expect(
+      supplierAutomationSource.match(
+        /'--sp-group-platform-color': platformAccentColor\(group\.platform\)/g
+      )
+    ).toHaveLength(2)
+    expect(supplierAutomationSource).toContain('.sp-rate-guard-group-row::before {')
+    expect(supplierAutomationSource).toContain(
+      'background: var(--sp-group-platform-color, transparent);'
+    )
+  })
+
+  it('平台配色取自集中式配色库，不在这里另写一份映射', () => {
+    expect(supplierAutomationSource).toContain(
+      "import { platformAccentColor, platformBadgeClass, platformTextClass } from '@/utils/platformColors'"
+    )
+    expect(supplierAutomationSource).toContain(
+      ":style=\"{ '--sp-chip-platform-color': platformAccentColor(facet.platform) }\""
+    )
+    expect(supplierAutomationSource).toContain(
+      ".sp-rate-guard-group-platform-chip[aria-pressed='true'] {"
+    )
+  })
+
+  it('已关闭行的竖条置灰，与平台色条共用同一条线而不是并排两条', () => {
+    expect(supplierAutomationSource).toContain('.sp-rate-guard-group-row.disabled::before {')
+    expect(supplierAutomationSource).toContain(
+      'background: color-mix(in srgb, var(--sp-muted) 55%, var(--sp-line));'
+    )
+    // 原来的 box-shadow 竖条必须已经让位给 ::before ——
+    // 两者都画在行的最左侧，留着会在左边堆出双色块，反而看不出哪个状态优先。
+    const disabledBlock = supplierAutomationSource.slice(
+      supplierAutomationSource.indexOf('.sp-rate-guard-group-row.disabled {'),
+      supplierAutomationSource.indexOf('.sp-rate-guard-group-row.disabled::before {')
+    )
+    expect(disabledBlock).not.toContain('box-shadow')
+  })
+
+  it('打开弹窗时重置平台筛选，避免上次的选择静默生效', () => {
+    const openRateGuardBlock = supplierAutomationSource.slice(
+      supplierAutomationSource.indexOf('async function openRateGuardGroups()'),
+      supplierAutomationSource.indexOf('function closeRateGuardGroups()')
+    )
+    expect(openRateGuardBlock).toContain('rateGuardGroupPlatformFilter.value = []')
+    const openElectionBlock = supplierAutomationSource.slice(
+      supplierAutomationSource.indexOf('async function openElectionGroups()'),
+      supplierAutomationSource.indexOf('function closeElectionGroups()')
+    )
+    expect(openElectionBlock).toContain('electionGroupPlatformFilter.value = []')
+  })
+
+  it('平台筛选把结果筛空时，空态说明是筛选造成的，而不是「没有分组」', () => {
+    expect(supplierAutomationSource).toContain('function groupFilterEmptyHint(')
+    // 没按平台筛时保持原有两种文案不变：「当前没有已关闭的…」比通用文案更具体。
+    expect(supplierAutomationSource).toContain(
+      "return disabledOnly ? disabledEmptyText : '当前没有可配置的分组。'"
+    )
+    expect(supplierAutomationSource).toContain("const actions = ['减少选中的平台']")
+    // 只列出真正生效的筛选条件，别让用户去关一个本来就开着的开关。
+    expect(supplierAutomationSource).toContain("actions.push('关闭「仅看已关闭」')")
+    expect(supplierAutomationSource).toContain('{{ rateGuardGroupEmptyHint }}')
+    expect(supplierAutomationSource).toContain('{{ electionGroupEmptyHint }}')
+    // 原来写死在模板里的三元必须已经让位给 computed，否则筛空时仍会说「没有分组」。
+    expect(supplierAutomationSource).not.toContain(
+      "? '当前没有已关闭守护的分组。' : '当前没有可配置的分组。'"
+    )
+    expect(supplierAutomationSource).not.toContain(
+      "? '当前没有已关闭择优的分组。' : '当前没有可配置的分组。'"
+    )
+  })
+
+  it('分组名按平台着色，且不让写死的 color 把它压回去', () => {
+    expect(
+      supplierAutomationSource.match(
+        /<strong :class="platformTextClass\(group\.platform\)">\{\{ group\.name \}\}<\/strong>/g
+      )
+    ).toHaveLength(2)
+    // 权重陷阱：`.sp-rate-guard-group-choice-copy strong` 是 (0,1,1)，
+    // 会压过 Tailwind 的平台文字色 (0,1,0) —— 这条规则里不能再写 color。
+    const copyStrongStart = supplierAutomationSource.indexOf(
+      '.sp-rate-guard-group-choice-copy strong {'
+    )
+    expect(copyStrongStart).toBeGreaterThan(-1)
+    // 只取到该规则块的第一个右花括号，别把后面 disabled 规则的 color 算进来。
+    const copyStrongBlock = supplierAutomationSource.slice(copyStrongStart).split('}')[0]
+    expect(copyStrongBlock).not.toContain('color:')
+    // 「已关闭」行的置灰规则权重更高（(0,2,1)），必须保留 ——
+    // 否则被跳过的行还会是彩色，与「已关闭」的状态提示打架。
+    expect(supplierAutomationSource).toContain(
+      '.sp-rate-guard-group-row.disabled .sp-rate-guard-group-choice-copy strong {'
+    )
   })
 })

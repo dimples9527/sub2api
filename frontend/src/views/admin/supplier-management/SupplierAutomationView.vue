@@ -1116,6 +1116,27 @@
               <span class="sp-rate-guard-group-filter-result">
                 筛选结果 <strong>{{ rateGuardFilteredGroups.length }}</strong> 个
               </span>
+              <!-- 平台标签独占一行（flex-basis: 100%）：跟搜索框挤同一行会把搜索框压到
+                   没法输入，而平台数量还会随分组增长。没有分组时不渲染，省掉一条空行。 -->
+              <div
+                v-if="groupPlatformFacets.length"
+                class="sp-rate-guard-group-platform-filter"
+                role="group"
+                aria-label="按平台筛选分组"
+              >
+                <button
+                  v-for="facet in groupPlatformFacets"
+                  :key="facet.platform"
+                  class="sp-rate-guard-group-platform-chip"
+                  type="button"
+                  :aria-pressed="rateGuardGroupPlatformFilter.includes(facet.platform)"
+                  :style="{ '--sp-chip-platform-color': platformAccentColor(facet.platform) }"
+                  @click="rateGuardGroupPlatformFilter = toggleGroupPlatformFilter(rateGuardGroupPlatformFilter, facet.platform)"
+                >
+                  {{ facet.label }}
+                  <strong>{{ facet.count }}</strong>
+                </button>
+              </div>
             </div>
 
             <div v-if="loadingRateGuardGroups" class="sp-rate-guard-empty">正在加载分组...</div>
@@ -1125,6 +1146,7 @@
                 :key="group.id"
                 class="sp-rate-guard-group-row"
                 :class="{ disabled: rateGuardGroupIsDisabled(group.id) }"
+                :style="{ '--sp-group-platform-color': platformAccentColor(group.platform) }"
               >
                 <label class="sp-rate-guard-group-choice">
                   <input
@@ -1134,7 +1156,10 @@
                     @change="toggleRateGuardGroup(group.id)"
                   />
                   <span class="sp-rate-guard-group-choice-copy">
-                    <strong>{{ group.name }}</strong>
+                    <strong :class="platformTextClass(group.platform)">{{ group.name }}</strong>
+                    <span class="sp-rate-guard-group-platform" :class="platformBadgeClass(group.platform)">
+                      {{ platformLabel(group.platform) }}
+                    </span>
                     <span class="sp-rate-guard-group-id">#{{ group.id }}</span>
                     <span class="sp-rate-guard-group-rate">倍率 {{ group.rate_multiplier }}</span>
                   </span>
@@ -1150,9 +1175,7 @@
                 </span>
               </article>
             </div>
-            <div v-else class="sp-rate-guard-empty">
-              {{ rateGuardGroupDisabledOnly ? '当前没有已关闭守护的分组。' : '当前没有可配置的分组。' }}
-            </div>
+            <div v-else class="sp-rate-guard-empty">{{ rateGuardGroupEmptyHint }}</div>
           </section>
         </div>
         <template #footer>
@@ -1204,6 +1227,26 @@
               <span class="sp-rate-guard-group-filter-result">
                 筛选结果 <strong>{{ electionFilteredGroups.length }}</strong> 个
               </span>
+              <!-- 与「配置参与守护的分组」保持同一套筛选控件与配色语言。 -->
+              <div
+                v-if="groupPlatformFacets.length"
+                class="sp-rate-guard-group-platform-filter"
+                role="group"
+                aria-label="按平台筛选分组"
+              >
+                <button
+                  v-for="facet in groupPlatformFacets"
+                  :key="facet.platform"
+                  class="sp-rate-guard-group-platform-chip"
+                  type="button"
+                  :aria-pressed="electionGroupPlatformFilter.includes(facet.platform)"
+                  :style="{ '--sp-chip-platform-color': platformAccentColor(facet.platform) }"
+                  @click="electionGroupPlatformFilter = toggleGroupPlatformFilter(electionGroupPlatformFilter, facet.platform)"
+                >
+                  {{ facet.label }}
+                  <strong>{{ facet.count }}</strong>
+                </button>
+              </div>
             </div>
 
             <div v-if="loadingRateGuardGroups" class="sp-rate-guard-empty">正在加载分组...</div>
@@ -1213,6 +1256,7 @@
                 :key="group.id"
                 class="sp-rate-guard-group-row"
                 :class="{ disabled: electionGroupIsDisabled(group.id) }"
+                :style="{ '--sp-group-platform-color': platformAccentColor(group.platform) }"
               >
                 <label class="sp-rate-guard-group-choice">
                   <input
@@ -1222,7 +1266,10 @@
                     @change="toggleElectionGroup(group.id)"
                   />
                   <span class="sp-rate-guard-group-choice-copy">
-                    <strong>{{ group.name }}</strong>
+                    <strong :class="platformTextClass(group.platform)">{{ group.name }}</strong>
+                    <span class="sp-rate-guard-group-platform" :class="platformBadgeClass(group.platform)">
+                      {{ platformLabel(group.platform) }}
+                    </span>
                     <span class="sp-rate-guard-group-id">#{{ group.id }}</span>
                     <span class="sp-rate-guard-group-rate">倍率 {{ group.rate_multiplier }}</span>
                   </span>
@@ -1235,9 +1282,7 @@
                 </span>
               </article>
             </div>
-            <div v-else class="sp-rate-guard-empty">
-              {{ electionGroupDisabledOnly ? '当前没有已关闭择优的分组。' : '当前没有可配置的分组。' }}
-            </div>
+            <div v-else class="sp-rate-guard-empty">{{ electionGroupEmptyHint }}</div>
           </section>
         </div>
         <template #footer>
@@ -1308,7 +1353,7 @@ import {
 } from '@/api/admin/supplierAutomation'
 import { useAppStore } from '@/stores/app'
 import { ensureCustomPlatformLabels, resolvePlatformDisplayLabel as platformLabel } from '@/utils/customPlatformLabels'
-import { platformBadgeClass, platformTextClass } from '@/utils/platformColors'
+import { platformAccentColor, platformBadgeClass, platformTextClass } from '@/utils/platformColors'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { cronToIntervalSeconds } from './supplierAutomationCron'
 import type { ClaudeModel } from '@/types'
@@ -1342,11 +1387,15 @@ const accountRateGuardPendingCount = ref(0)
 const rateGuardGroupsVisible = ref(false)
 const rateGuardGroupSearch = ref('')
 const rateGuardGroupDisabledOnly = ref(false)
+// 多选：空数组 = 不按平台过滤。存「已选中」而不是「已排除」，
+// 因为平台数量会随分组增删变化，存已排除会在新增平台时出现"凭空多出一个筛选项"的错觉。
+const rateGuardGroupPlatformFilter = ref<string[]>([])
 const rateGuardGroups = ref<AdminGroup[]>([])
 const loadingRateGuardGroups = ref(false)
 const electionGroupsVisible = ref(false)
 const electionGroupSearch = ref('')
 const electionGroupDisabledOnly = ref(false)
+const electionGroupPlatformFilter = ref<string[]>([])
 const healthGuardAccountsVisible = ref(false)
 const healthGuardAccountPlatformFilter = ref('')
 const healthGuardAccountProviderFilter = ref('')
@@ -2192,6 +2241,71 @@ const accountRateGuardDisabledGroupIDs = computed(() =>
   normalizePositiveAccountIDs(editForm.config.account_rate_guard_disabled_group_ids)
 )
 
+// ── 分组列表的平台筛选（「配置参与守护的分组」与「配置参与择优的分组」两个弹窗共用）──
+//
+// 平台列表从当前分组里现算，而不是取全平台枚举：只列出「此刻确实有分组的平台」，
+// 避免用户点到一个筛完空空如也的标签，误以为筛选坏了。
+const groupPlatformFacets = computed(() => {
+  const counts = new Map<string, number>()
+  for (const group of rateGuardGroups.value) {
+    counts.set(group.platform, (counts.get(group.platform) ?? 0) + 1)
+  }
+  return Array.from(counts, ([platform, count]) => ({
+    platform,
+    count,
+    label: platformLabel(platform),
+  })).sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'))
+})
+
+// 标签是多选：点一下加入、再点一下移除。
+// 不做成单选切换 —— 切到下一个平台就会丢掉上一个的选择，而「同时看两个平台的分组」
+// 恰恰是这个筛选最常见的用法。
+function toggleGroupPlatformFilter(current: string[], platform: string): string[] {
+  return current.includes(platform)
+    ? current.filter(item => item !== platform)
+    : [...current, platform]
+}
+
+// 空选 = 不按平台过滤。与「仅看已关闭」默认关保持一致：打开弹窗先看到全部分组。
+function matchesGroupPlatformFilter(platform: string, selected: string[]): boolean {
+  return selected.length === 0 || selected.includes(platform)
+}
+
+// 平台筛选可能把结果筛空。这时沿用「当前没有可配置的分组」会误导 ——
+// 用户会以为分组被删光了，实际上只是筛选条件太窄。
+// 提示里只列出**真正生效**的筛选条件，别让用户去关一个本来就开着的开关。
+// 没按平台筛时保持原有两种文案不变（「当前没有已关闭的…」比通用文案更具体，不要丢）。
+function groupFilterEmptyHint(
+  selectedPlatformCount: number,
+  disabledOnly: boolean,
+  disabledEmptyText: string
+): string {
+  if (selectedPlatformCount === 0) {
+    return disabledOnly ? disabledEmptyText : '当前没有可配置的分组。'
+  }
+  const actions = ['减少选中的平台']
+  if (disabledOnly) {
+    actions.push('关闭「仅看已关闭」')
+  }
+  return `当前筛选条件下没有分组，试试${actions.join('或')}。`
+}
+
+const rateGuardGroupEmptyHint = computed(() =>
+  groupFilterEmptyHint(
+    rateGuardGroupPlatformFilter.value.length,
+    rateGuardGroupDisabledOnly.value,
+    '当前没有已关闭守护的分组。'
+  )
+)
+
+const electionGroupEmptyHint = computed(() =>
+  groupFilterEmptyHint(
+    electionGroupPlatformFilter.value.length,
+    electionGroupDisabledOnly.value,
+    '当前没有已关闭择优的分组。'
+  )
+)
+
 // 分组择优调度的分组开关：同样存"被关闭"的分组，空列表即所有分组都参与择优。
 const groupElectionDisabledGroupIDs = computed(() =>
   normalizePositiveAccountIDs(editForm.config.group_scheduling_election_disabled_group_ids)
@@ -2208,6 +2322,11 @@ const electionGroupScopeSummary = computed(() => {
 const electionFilteredGroups = computed(() => {
   const keyword = electionGroupSearch.value.trim().toLowerCase()
   let result = rateGuardGroups.value
+  if (electionGroupPlatformFilter.value.length > 0) {
+    result = result.filter(group =>
+      matchesGroupPlatformFilter(group.platform, electionGroupPlatformFilter.value)
+    )
+  }
   if (electionGroupDisabledOnly.value) {
     result = result.filter(group => electionGroupIsDisabled(group.id))
   }
@@ -2242,6 +2361,11 @@ const rateGuardGroupScopeSummary = computed(() => {
 const rateGuardFilteredGroups = computed(() => {
   const keyword = rateGuardGroupSearch.value.trim().toLowerCase()
   let result = rateGuardGroups.value
+  if (rateGuardGroupPlatformFilter.value.length > 0) {
+    result = result.filter(group =>
+      matchesGroupPlatformFilter(group.platform, rateGuardGroupPlatformFilter.value)
+    )
+  }
   if (rateGuardGroupDisabledOnly.value) {
     result = result.filter(group => rateGuardGroupIsDisabled(group.id))
   }
@@ -2623,6 +2747,7 @@ async function openRateGuardGroups() {
   rateGuardGroupsVisible.value = true
   rateGuardGroupSearch.value = ''
   rateGuardGroupDisabledOnly.value = false
+  rateGuardGroupPlatformFilter.value = []
   if (rateGuardGroups.value.length > 0) {
     return
   }
@@ -2675,6 +2800,7 @@ async function openElectionGroups() {
   electionGroupsVisible.value = true
   electionGroupSearch.value = ''
   electionGroupDisabledOnly.value = false
+  electionGroupPlatformFilter.value = []
   if (rateGuardGroups.value.length > 0) {
     return
   }
@@ -4742,6 +4868,58 @@ function intervalSecondsToCron(seconds: number): string | null {
   font-variant-numeric: tabular-nums;
 }
 
+/* 平台标签独占一行：搜索框 + 「仅看已关闭」已经占满第一行，
+   标签跟它们挤在一起会把搜索框压到没法输入，而平台数量还会随分组增长。 */
+.sp-rate-guard-group-platform-filter {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 未选中一律保持中性灰：一屏里同时挂着七八个平台色标签，反而看不出"选中了哪几个"。
+   选中态才上平台色，写法与「仅看已关闭」的 active 态同构（色描边 + 浅色底）。
+   文字不跟着平台色走 —— ACCENT 取的是 500 系，在深色面板上做正文偏暗，
+   改用底色和描边承载平台色，两种主题下都读得清。 */
+.sp-rate-guard-group-platform-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--sp-line);
+  border-radius: 8px;
+  padding: 0.28rem 0.6rem;
+  background: var(--sp-panel);
+  color: var(--sp-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 160ms ease, color 160ms ease, background-color 160ms ease;
+}
+
+.sp-rate-guard-group-platform-chip:hover {
+  border-color: color-mix(in srgb, var(--sp-chip-platform-color) 30%, var(--sp-line));
+  color: var(--sp-text);
+}
+
+.sp-rate-guard-group-platform-chip[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--sp-chip-platform-color) 55%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-chip-platform-color) 16%, var(--sp-panel));
+  color: var(--sp-text);
+  font-weight: 650;
+}
+
+.sp-rate-guard-group-platform-chip:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--sp-chip-platform-color) 40%, transparent);
+  outline-offset: 2px;
+}
+
+.sp-rate-guard-group-platform-chip strong {
+  color: inherit;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
 /* 列表整块滚动 + 行分隔线（与健康守护账号列表同构），
    比"一堆独立小卡片"更耐看，分组多时也能一眼扫完。
    不设 max-height：弹窗已近全屏，列表直接吃满摘要与工具栏之外的剩余空间，
@@ -4789,11 +4967,30 @@ function intervalSecondsToCron(seconds: number): string | null {
   background: color-mix(in srgb, var(--sp-cyan) 4%, var(--sp-panel));
 }
 
+/* 平台色条：3px 竖条，色值来自行上的 --sp-group-platform-color。
+   与下面「已关闭」的灰条共用同一条竖线 —— 两者互斥，不该并排画两条：
+   并排会在左边堆出双色块，反而看不出哪个状态优先。 */
+.sp-rate-guard-group-row::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 3px;
+  background: var(--sp-group-platform-color, transparent);
+}
+
 /* 已关闭：左侧色条 + 灰底。色条是关键 —— 视线扫过整列时，
-   靠底色深浅分辨"关没关"太吃力，一条竖线能立刻看出被跳过的行在哪。 */
+   靠底色深浅分辨"关没关"太吃力，一条竖线能立刻看出被跳过的行在哪。
+   这条竖线改由 ::before 提供（原来是 box-shadow inset），已关闭时置灰：
+   对一行被跳过的分组来说"是否参与"比"属于哪个平台"更要紧，
+   平台信息仍由行内徽标承担，不会丢。 */
 .sp-rate-guard-group-row.disabled {
   background: color-mix(in srgb, var(--sp-muted) 6%, var(--sp-panel));
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sp-muted) 55%, var(--sp-line));
+}
+
+.sp-rate-guard-group-row.disabled::before {
+  background: color-mix(in srgb, var(--sp-muted) 55%, var(--sp-line));
 }
 
 .sp-rate-guard-group-row.disabled:hover {
@@ -4834,8 +5031,12 @@ function intervalSecondsToCron(seconds: number): string | null {
   flex-wrap: wrap;
 }
 
+/* 分组名不设 color：它由行上的 platformTextClass 按平台着色
+   （与健康守护账号名同一套做法）。这里若写死 color: var(--sp-text)，
+   权重 (0,1,1) 会压过 Tailwind 的平台文字色 (0,1,0)，平台色永远不生效。
+   未着色时的兜底由继承提供，值同样是 --sp-text。
+   ⚠️「已关闭」行的置灰规则权重更高（(0,2,1)），仍会正常覆盖平台色。 */
 .sp-rate-guard-group-choice-copy strong {
-  color: var(--sp-text);
   font-size: 13px;
   max-width: 100%;
   overflow: hidden;
@@ -4861,6 +5062,22 @@ function intervalSecondsToCron(seconds: number): string | null {
   border-radius: 6px;
   padding: 1px 6px;
   background: color-mix(in srgb, var(--sp-line) 55%, transparent);
+}
+
+/* 平台徽标：规格与健康守护账号行的 .sp-health-guard-account-platform 完全一致 ——
+   同一页面里的平台徽标不该出现两种字号或圆角。
+   配色由 platformBadgeClass 提供（项目集中式平台配色库），这里不再另写一份映射。 */
+.sp-rate-guard-group-platform {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  border-width: 1px;
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
 }
 
 /* 状态标签只在"已关闭"行出现，因此直接用琥珀警示色 ——
