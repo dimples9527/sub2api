@@ -320,10 +320,13 @@
           <section v-if="editForm.task_code === 'supplier_group_scheduling_election'" class="sp-form-section sp-policy-section">
             <div class="sp-form-section-head">
               <span>03</span>
-              <div><h3>分组择优调度策略</h3><p>关闭测试失败仍在调度的账号，并为每个分组选出连续成功次数最多的账号开启调度。复用现有测试状态，不重新测试，建议排在健康守护之后运行。</p></div>
+              <div><h3>分组择优调度策略</h3><p>为每个分组按「连续成功次数 + 测试用时」的综合分选出最优账号开启调度；测试失败的账号要连续失败达到阈值才关闭，且分组里没有备选账号时一律保留。复用现有测试状态，不重新测试，建议排在健康守护之后运行。</p></div>
             </div>
             <div class="sp-form-grid">
               <Input :model-value="editForm.config.group_scheduling_election_top_n" type="number" label="每组开启账号数（默认 1 单活）" @update:model-value="editForm.config.group_scheduling_election_top_n = toNumber($event, editForm.config.group_scheduling_election_top_n ?? 1)" />
+              <Input :model-value="editForm.config.group_scheduling_election_count_weight" type="number" step="0.1" min="0.1" label="连续成功次数权重（默认 1）" @update:model-value="editForm.config.group_scheduling_election_count_weight = toNumber($event, editForm.config.group_scheduling_election_count_weight ?? 1)" />
+              <Input :model-value="editForm.config.group_scheduling_election_latency_weight" type="number" step="0.1" min="0.1" label="测试用时权重（默认 0.5）" @update:model-value="editForm.config.group_scheduling_election_latency_weight = toNumber($event, editForm.config.group_scheduling_election_latency_weight ?? 0.5)" />
+              <Input :model-value="editForm.config.group_scheduling_election_failure_threshold" type="number" min="1" label="连续失败关闭阈值（默认 2 次）" @update:model-value="editForm.config.group_scheduling_election_failure_threshold = toNumber($event, editForm.config.group_scheduling_election_failure_threshold ?? 2)" />
             </div>
             <div class="sp-rate-guard-scope-card">
               <div>
@@ -547,11 +550,12 @@
                 <div><span>跳过（未测）</span><strong>{{ groupElectionResult.skipped_count }}</strong></div>
                 <div><span>更新失败</span><strong>{{ groupElectionResult.failed_write_count }}</strong></div>
               </div>
-              <div v-if="groupElectionResult.items.length" class="sp-rate-guard-table">
+              <div v-if="groupElectionResult.items.length" class="sp-rate-guard-table sp-group-election-table">
                 <div class="sp-rate-guard-head sp-group-election-head">
                   <span>账号</span>
                   <span>测试状态</span>
                   <span>连续成功</span>
+                  <span>测试用时</span>
                   <span>调度变更</span>
                   <span>原因</span>
                 </div>
@@ -562,6 +566,7 @@
                   </span>
                   <span>{{ groupElectionTestStatusText(item.test_status) }}</span>
                   <span>{{ item.healthy_count }}</span>
+                  <span class="sp-group-election-latency" :class="{ 'is-empty': !item.latency_ms }">{{ groupElectionLatencyText(item.latency_ms) }}</span>
                   <span>
                     <strong>{{ groupElectionActionText(item.action) }}</strong>
                     <small>{{ item.schedulable_before ? '开' : '关' }} → {{ item.schedulable_after ? '开' : '关' }}</small>
@@ -1461,6 +1466,9 @@ const editForm = reactive<SupplierAutomationTask>({
     account_health_guard_cursor_account_id: 0,
     group_scheduling_election_top_n: 1,
     group_scheduling_election_disabled_group_ids: [],
+    group_scheduling_election_count_weight: 1,
+    group_scheduling_election_latency_weight: 0.5,
+    group_scheduling_election_failure_threshold: 2,
   },
   last_status: '',
   last_message: '',
@@ -1955,6 +1963,14 @@ function groupElectionTestStatusText(status?: string): string {
   }
 }
 
+// 与供应商健康页的 formatLatency 保持同一口径：没有数据显示"—"而不是 0 ms，
+// 因为 0 会被读成"极快"，实际上只是这个账号还没测出耗时。
+function groupElectionLatencyText(value?: number | null): string {
+  const latency = Number(value)
+  if (!Number.isFinite(latency) || latency <= 0) return '—'
+  return `${Math.round(latency)} ms`
+}
+
 function setHealthGuardStatusFilter(filter: string) {
   healthGuardStatusFilter.value = healthGuardStatusFilter.value === filter ? 'all' : filter
 }
@@ -2165,6 +2181,14 @@ function runSummary(run: SupplierAutomationRun): string {
   const healthGuard = run.result_detail?.account_health_guard
   if (healthGuard) {
     return `检查 ${healthGuard.checked_count}，健康 ${healthGuard.healthy_count}，慢响应 ${healthGuard.slow_count}，失败 ${healthGuard.failed_count}，不可用 ${healthGuard.unavailable_count}，待下轮 ${healthGuard.pending_count}，暂停 ${healthGuard.disabled_count}，恢复 ${healthGuard.recovered_count}`
+  }
+  const groupElection = run.result_detail?.group_election
+  if (groupElection) {
+    // 被闸门拦住的账号不算失败，但要让人一眼看见：否则「关闭 0 个」会被读成一切正常。
+    let summary = `扫描 ${groupElection.group_count} 个分组，开启 ${groupElection.enabled_count}，关闭 ${groupElection.disabled_count}`
+    if (groupElection.pending_count) summary += `，${groupElection.pending_count} 个待观察`
+    if (groupElection.kept_count) summary += `，${groupElection.kept_count} 个待人工确认`
+    return summary
   }
   const rechargeSync = run.result_detail?.recharge_sync
   if (rechargeSync) {
@@ -2707,6 +2731,18 @@ function applyGroupElectionDefaults() {
   editForm.config.group_scheduling_election_disabled_group_ids = normalizePositiveAccountIDs(
     editForm.config.group_scheduling_election_disabled_group_ids
   )
+  // 权重必须是正数：0 在后端归一化里被当成"未配置"回落默认，
+  // 这里先在前端拦住，免得管理员填了 0 却静默拿到默认值。
+  const countWeight = Number(editForm.config.group_scheduling_election_count_weight)
+  editForm.config.group_scheduling_election_count_weight =
+    Number.isFinite(countWeight) && countWeight > 0 ? countWeight : 1
+  const latencyWeight = Number(editForm.config.group_scheduling_election_latency_weight)
+  editForm.config.group_scheduling_election_latency_weight =
+    Number.isFinite(latencyWeight) && latencyWeight > 0 ? latencyWeight : 0.5
+  // 阈值同理，且必须是正整数：0 在后端归一化里被当成"未配置"回落默认 2。
+  const failureThreshold = Math.floor(Number(editForm.config.group_scheduling_election_failure_threshold))
+  editForm.config.group_scheduling_election_failure_threshold =
+    Number.isFinite(failureThreshold) && failureThreshold > 0 ? failureThreshold : 2
 }
 
 function validateAccountHealthGuardSelection(config: SupplierAutomationConfig): string {
@@ -6020,6 +6056,40 @@ function intervalSecondsToCron(seconds: number): string | null {
   color: var(--sp-muted);
   font-size: 11px;
   font-weight: 700;
+}
+
+/* 择优调度明细有自己的列语义：两个评分依据（次数、用时）相邻，然后才是结论与原因。
+   不能沿用限速守护那张表的列宽，否则新列会挤进别人的宽度里。
+   顺带补上表头 —— 原来 .sp-rate-guard-head 没有任何规则，表头和数据行根本对不齐。 */
+.sp-group-election-head,
+.sp-group-election-row {
+  display: grid;
+  grid-template-columns: minmax(170px, 1.25fr) 92px 88px 96px minmax(120px, 0.9fr) minmax(160px, 1.15fr);
+  min-width: 726px;
+}
+
+.sp-group-election-table {
+  overflow-x: auto;
+}
+
+.sp-group-election-head {
+  border-bottom: 1px solid var(--sp-line);
+}
+
+.sp-group-election-head > span {
+  padding: 10px 12px;
+  color: var(--sp-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* 用时是拿来横向比较的数字，等宽数字才不会让相邻行的数字左右跳动。 */
+.sp-group-election-latency {
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-group-election-latency.is-empty {
+  color: var(--sp-muted);
 }
 
 .sp-monitor-detail {

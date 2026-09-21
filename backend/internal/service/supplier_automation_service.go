@@ -91,6 +91,11 @@ type SupplierAutomationConfig struct {
 	// 分组择优调度：每组保持开启的最优账号数（默认 1），以及不参与择优的分组 ID 列表（空=全部参与）。
 	GroupElectionTopN             int     `json:"group_scheduling_election_top_n"`
 	GroupElectionDisabledGroupIDs []int64 `json:"group_scheduling_election_disabled_group_ids"`
+	// 两项各自归一到 [0,1] 后加权，比值即相对话语权；缺省由归一化回落默认值。
+	GroupElectionCountWeight   float64 `json:"group_scheduling_election_count_weight"`
+	GroupElectionLatencyWeight float64 `json:"group_scheduling_election_latency_weight"`
+	// 连续失败多少个调度周期才真正关闭调度，默认 2（一次抖动不关）；配 1 即退回"失败即关"。
+	GroupElectionFailureThreshold int `json:"group_scheduling_election_failure_threshold"`
 }
 
 type SupplierAutomationRun struct {
@@ -708,6 +713,9 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 		result, err := s.groupElection.Run(ctx, SupplierGroupSchedulingElectionConfig{
 			TopN:             task.Config.GroupElectionTopN,
 			DisabledGroupIDs: task.Config.GroupElectionDisabledGroupIDs,
+			CountWeight:      task.Config.GroupElectionCountWeight,
+			LatencyWeight:    task.Config.GroupElectionLatencyWeight,
+			FailureThreshold: task.Config.GroupElectionFailureThreshold,
 		}, time.Now())
 		run.ProcessedCount = result.AccountCount
 		run.SuccessCount = result.EnabledCount + result.DisabledCount + result.UnchangedCount
@@ -721,6 +729,14 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 			run.Message = fmt.Sprintf("分组择优调度存在 %d 个账号更新失败", result.FailedWriteCount)
 		} else {
 			run.Message = fmt.Sprintf("择优完成，%d 个分组，开启 %d 个、关闭 %d 个账号", result.GroupCount, result.EnabledCount, result.DisabledCount)
+			// 被闸门拦住的账号不算失败，但也不是"一切正常"——
+			// 尤其是「分组里只剩这一个坏账号」，必须提示人工确认，否则分组会一直靠一个坏账号撑着。
+			if result.PendingCount > 0 {
+				run.Message += fmt.Sprintf("，%d 个账号连续失败未达阈值待观察", result.PendingCount)
+			}
+			if result.KeptCount > 0 {
+				run.Message += fmt.Sprintf("，%d 个账号因分组无备选账号保留调度需人工确认", result.KeptCount)
+			}
 		}
 		return nil
 	default:
@@ -838,6 +854,19 @@ func validateSupplierAutomationTask(task SupplierAutomationTask) error {
 			if groupID <= 0 {
 				return ErrSupplierProviderInvalid
 			}
+		}
+		// 权重允许缺省或 0（归一化时回落默认），负数与超上限都视为配置错误——
+		// 这里拒绝而不是静默截断，免得管理员以为自己配的 200 生效了。
+		if task.Config.GroupElectionCountWeight < 0 ||
+			task.Config.GroupElectionCountWeight > MaxSupplierGroupSchedulingElectionWeight ||
+			task.Config.GroupElectionLatencyWeight < 0 ||
+			task.Config.GroupElectionLatencyWeight > MaxSupplierGroupSchedulingElectionWeight {
+			return ErrSupplierProviderInvalid
+		}
+		// 阈值 0 表示未配置（归一化时回落默认 2），负数与超上限视为配置错误。
+		if task.Config.GroupElectionFailureThreshold < 0 ||
+			task.Config.GroupElectionFailureThreshold > MaxSupplierGroupSchedulingElectionFailureThreshold {
+			return ErrSupplierProviderInvalid
 		}
 	}
 	if task.TaskCode == SupplierAutomationTaskAccountHealthGuard {

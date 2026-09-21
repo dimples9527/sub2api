@@ -63,6 +63,10 @@ ORDER BY g.id ASC, a.id ASC`, service.StatusActive)
 			member.LastTestStatus = strings.TrimSpace(supplierGroupElectionExtraString(extra, "last_test_status"))
 			member.HealthyCount = parseSupplierGroupElectionInt(extra["supplier_health_guard_healthy_count"])
 			member.LastTestedAt = parseSupplierGroupElectionTime(supplierGroupElectionExtraString(extra, "last_tested_at"))
+			// 用时只在测试成功时写入（失败不覆盖），与 last_test_status 同源，故口径一致。
+			member.LastTestLatencyMs = int64(parseSupplierGroupElectionInt(extra["last_test_latency_ms"]))
+			// 连续失败轮次由择优调度任务自己累计回写，是本任务「连续失败达阈值才关」的依据。
+			member.FailedCount = parseSupplierGroupElectionInt(extra["supplier_group_election_failed_count"])
 		}
 		members = append(members, member)
 	}

@@ -71,6 +71,9 @@ var schedulerNeutralExtraKeys = map[string]struct{}{
 	"last_test_status":           {},
 	"last_tested_at":             {},
 	"session_window_utilization": {},
+	// 分组择优调度自己累计的「连续失败轮次」：只是任务内部的记账，
+	// 不参与调度快照，不能因为回写它就触发 outbox / 调度桶重建。
+	"supplier_group_election_failed_count": {},
 }
 
 const postgresParameterBatchSize = 50000

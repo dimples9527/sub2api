@@ -38,6 +38,18 @@ export interface SupplierAutomationConfig {
    * 空列表或不传 = 所有分组都参与择优（新增分组自动参与，无需补齐配置）。
    */
   group_scheduling_election_disabled_group_ids?: number[]
+  /**
+   * 分组择优调度综合分里「连续成功次数」的权重，默认 1。
+   * 两项各自归一到 [0,1] 后加权，所以与用时权重的比值就是两者的相对话语权。
+   */
+  group_scheduling_election_count_weight?: number
+  /** 分组择优调度综合分里「测试用时」的权重，默认 0.5（影响上限为次数的一半）。 */
+  group_scheduling_election_latency_weight?: number
+  /**
+   * 分组择优调度：测试失败的账号要连续失败多少轮才关闭调度，默认 2（一次抖动不关）。
+   * 配成 1 即退回「一次失败立刻关」；分组里没有备选账号时无论阈值多少都不关。
+   */
+  group_scheduling_election_failure_threshold?: number
 }
 
 export interface SupplierAutomationTask {
@@ -97,6 +109,7 @@ export interface SupplierGroupSchedulingElectionAccountItem {
   platform?: string
   test_status?: string
   healthy_count: number
+  latency_ms?: number
   schedulable_before: boolean
   schedulable_after: boolean
   action: string
@@ -114,6 +127,10 @@ export interface SupplierGroupSchedulingElectionResult {
   unchanged_count: number
   skipped_count: number
   failed_write_count: number
+  /** 连续失败未达阈值、本轮"故意没关"的账号数。旧运行记录没有这个字段。 */
+  pending_count?: number
+  /** 分组内无备选账号而保留调度、待人工确认的账号数。旧运行记录没有这个字段。 */
+  kept_count?: number
   groups: SupplierGroupSchedulingElectionGroupDetail[]
   items: SupplierGroupSchedulingElectionAccountItem[]
 }
