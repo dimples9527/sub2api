@@ -649,6 +649,40 @@ describe('supplier local data views component usage', () => {
     wrapper.unmount()
   })
 
+  it('在测试结果列展示上次测试成功的用时，失败态不展示', async () => {
+    supplierAccountMocks.listAccounts.mockResolvedValue({
+      items: [
+        { ...testAccounts[0], local_account_last_test_latency_ms: 1234 },
+        {
+          ...testAccounts[0],
+          id: 91,
+          upstream_account_key: 'key-latency-failed',
+          local_account_last_test_status: 'failed',
+          local_account_last_test_error: '上游鉴权失败',
+          local_account_last_test_latency_ms: 1234,
+        },
+        { ...testAccounts[0], id: 92, upstream_account_key: 'key-latency-ms', local_account_last_test_latency_ms: 850 },
+      ],
+      total: 3,
+      page: 1,
+      page_size: 20,
+    })
+    const wrapper = await mountSupplierAccounts()
+
+    const successCell = wrapper.get('.runtime-cell-local_account_last_test_status[data-row-index="0"]')
+    expect(successCell.get('.sp-test-latency').text()).toBe('用时 1.2s')
+    expect(successCell.get('.sp-test-latency').attributes('title')).toBe('上次测试成功用时 1.2s')
+    expect(wrapper.get('.runtime-cell-local_account_last_test_status[data-row-index="2"] .sp-test-latency').text())
+      .toBe('用时 850ms')
+
+    // 失败态即便库里还留着上次成功的耗时也不能展示，否则会被读成「本次失败花掉的时间」
+    const failedCell = wrapper.get('.runtime-cell-local_account_last_test_status[data-row-index="1"]')
+    expect(failedCell.text()).toContain('失败')
+    expect(failedCell.find('.sp-test-latency').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
   it('emphasizes the guard check time and flags lagging checks and repeated guard failures', async () => {
     const wrapper = await mountSupplierAccounts()
     const freshGuard = wrapper.get('.runtime-cell-local_account_last_tested_at[data-row-index="0"] .sp-guard-test-time')

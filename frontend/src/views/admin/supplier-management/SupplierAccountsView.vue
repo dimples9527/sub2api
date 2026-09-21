@@ -394,22 +394,29 @@
 
           <template #cell-local_account_last_test_status="{ row: account }">
             <div class="sp-test-status-cell">
-              <button
-                v-if="isFailedTest(account)"
-                type="button"
-                class="sp-test-status failed"
-                title="查看测试失败详情"
-                @click.stop="openTestErrorDialog(account)"
-              >
-                {{ accountTestStatusLabel(account.local_account_last_test_status) }}
-              </button>
-              <span
-                v-else-if="isMatchedLocalAccount(account) && account.local_account_last_test_status"
-                :class="['sp-test-status', accountTestStatusTone(account.local_account_last_test_status)]"
-              >
-                {{ accountTestStatusLabel(account.local_account_last_test_status) }}
-              </span>
-              <span v-else class="sp-account-muted">—</span>
+              <div class="sp-test-result-line">
+                <button
+                  v-if="isFailedTest(account)"
+                  type="button"
+                  class="sp-test-status failed"
+                  title="查看测试失败详情"
+                  @click.stop="openTestErrorDialog(account)"
+                >
+                  {{ accountTestStatusLabel(account.local_account_last_test_status) }}
+                </button>
+                <span
+                  v-else-if="isMatchedLocalAccount(account) && account.local_account_last_test_status"
+                  :class="['sp-test-status', accountTestStatusTone(account.local_account_last_test_status)]"
+                >
+                  {{ accountTestStatusLabel(account.local_account_last_test_status) }}
+                </span>
+                <span v-else class="sp-account-muted">—</span>
+                <span
+                  v-if="successLatencyLabel(account)"
+                  class="sp-test-latency"
+                  :title="'上次测试成功' + successLatencyLabel(account)"
+                >{{ successLatencyLabel(account) }}</span>
+              </div>
               <button
                 v-if="hasRepeatedGuardFailures(account)"
                 type="button"
@@ -3222,6 +3229,24 @@ function isFailedTest(account: SupplierProviderAccount): boolean {
   return isMatchedLocalAccount(account) && account.local_account_last_test_status === 'failed'
 }
 
+function formatTestLatency(ms?: number | null): string {
+  const value = Number(ms)
+  if (!Number.isFinite(value) || value <= 0) return ''
+  if (value < 1000) return `${Math.round(value)}ms`
+  if (value < 60000) return `${(value / 1000).toFixed(1)}s`
+  const minutes = Math.floor(value / 60000)
+  const seconds = Math.round((value % 60000) / 1000)
+  return `${minutes}分${seconds}秒`
+}
+
+// 耗时只在成功时落库，失败态保留上一次成功的值，所以展示也必须跟着测试结果状态走，
+// 否则会出现「失败」配一个成功耗时、用户误以为是本次失败花掉的时间。
+function successLatencyLabel(account: SupplierProviderAccount): string {
+  if (account.local_account_last_test_status !== 'success') return ''
+  const latency = formatTestLatency(account.local_account_last_test_latency_ms)
+  return latency ? `用时 ${latency}` : ''
+}
+
 function guardCheckLagMinutes(account: SupplierProviderAccount): number | null {
   const checkedAt = new Date(account.local_account_health_guard_last_checked_at || '').getTime()
   if (Number.isNaN(checkedAt)) return null
@@ -4150,6 +4175,19 @@ button.sp-test-status.failed:hover {
   display: grid;
   justify-items: start;
   gap: 0.25rem;
+}
+
+.sp-test-result-line {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.sp-test-latency {
+  color: var(--sp-muted);
+  font-size: 0.625rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .sp-detail-test-result {

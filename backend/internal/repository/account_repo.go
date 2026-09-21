@@ -67,6 +67,7 @@ var schedulerNeutralExtraKeys = map[string]struct{}{
 	"codex_usage_updated_at":     {},
 	"grok_billing_snapshot":      {},
 	"last_test_error":            {},
+	"last_test_latency_ms":       {},
 	"last_test_status":           {},
 	"last_tested_at":             {},
 	"session_window_utilization": {},

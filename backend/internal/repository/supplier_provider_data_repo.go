@@ -495,6 +495,9 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
        COALESCE(matched_account.extra->>'last_test_status', '') AS local_account_last_test_status,
        COALESCE(matched_account.extra->>'last_tested_at', '') AS local_account_last_tested_at,
        COALESCE(matched_account.extra->>'last_test_error', '') AS local_account_last_test_error,
+       CASE WHEN jsonb_typeof(matched_account.extra->'last_test_latency_ms') = 'number'
+            THEN (matched_account.extra->>'last_test_latency_ms')::NUMERIC::BIGINT
+            ELSE 0 END AS local_account_last_test_latency_ms,
        COALESCE(matched_account.extra->>'supplier_health_guard_last_checked_at', '') AS local_account_health_guard_last_checked_at,
        CASE WHEN jsonb_typeof(matched_account.extra->'supplier_health_guard_failure_count') = 'number'
             THEN (matched_account.extra->>'supplier_health_guard_failure_count')::NUMERIC::INT
@@ -2366,6 +2369,7 @@ func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (servic
 		&item.LocalAccountLastTestStatus,
 		&item.LocalAccountLastTestedAt,
 		&item.LocalAccountLastTestError,
+		&item.LocalAccountLastTestLatencyMs,
 		&item.LocalAccountHealthGuardLastCheckedAt,
 		&item.LocalAccountHealthGuardFailureCount,
 		&item.LocalAccountHealthGuardHealthyCount,

@@ -750,7 +750,7 @@ func (s *AccountTestService) persistBatchAccountTestItemStatus(item BatchAccount
 		return
 	}
 
-	s.persistLastAccountTestStatus(context.Background(), item.AccountID, errors.New(item.ErrorMessage))
+	s.persistLastAccountTestStatus(context.Background(), item.AccountID, errors.New(item.ErrorMessage), 0)
 }
 
 func (s *AccountTestService) runTestBackground(ctx context.Context, accountID int64, modelID string) (*ScheduledTestResult, error) {
@@ -917,6 +917,8 @@ func createTestPayload(modelID string) (map[string]any, error) {
 // opts is optional media (image/audio data URLs for real generation / STT).
 func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int64, modelID string, prompt string, mode string, opts ...AccountTestOptions) error {
 	ctx := c.Request.Context()
+	// 从进入探测流程起计时：覆盖账号读取与上游往返，用于记录「上次测试成功的用时」。
+	startedAt := time.Now()
 	testOpts := firstAccountTestOptions(opts)
 
 	// Get account
@@ -954,7 +956,7 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		default:
 			testErr = s.testCNProviderChatCompletionsConnection(c, account, modelID, prompt)
 		}
-		s.persistLastAccountTestStatus(ctx, account.ID, testErr)
+		s.persistLastAccountTestStatus(ctx, account.ID, testErr, time.Since(startedAt))
 		return testErr
 	}
 
@@ -972,11 +974,11 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		testErr = s.testClaudeAccountConnection(c, account, modelID)
 	}
 
-	s.persistLastAccountTestStatus(ctx, account.ID, testErr)
+	s.persistLastAccountTestStatus(ctx, account.ID, testErr, time.Since(startedAt))
 	return testErr
 }
 
-func (s *AccountTestService) persistLastAccountTestStatus(ctx context.Context, accountID int64, testErr error) {
+func (s *AccountTestService) persistLastAccountTestStatus(ctx context.Context, accountID int64, testErr error, latency time.Duration) {
 	if s == nil || s.accountRepo == nil || accountID <= 0 {
 		return
 	}
@@ -990,11 +992,17 @@ func (s *AccountTestService) persistLastAccountTestStatus(ctx context.Context, a
 	// 界面就只剩上一次成功的快照，表现为「测试结果成功」与「调度已关闭」互相矛盾。
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), accountTestStatusPersistTimeout)
 	defer cancel()
-	if err := s.accountRepo.UpdateExtra(persistCtx, accountID, map[string]any{
+	updates := map[string]any{
 		"last_test_status": status,
 		"last_tested_at":   time.Now().UTC().Format(time.RFC3339Nano),
 		"last_test_error":  errorMsg,
-	}); err != nil {
+	}
+	// 只在成功时写入耗时：失败不覆盖，避免「上次测试成功的用时」被一次失败抹成空值。
+	// 不能用 latency > 0 做门槛——本地/极快的上游可能不足 1ms，那样会整条字段都不落库。
+	if status == "success" {
+		updates["last_test_latency_ms"] = latency.Milliseconds()
+	}
+	if err := s.accountRepo.UpdateExtra(persistCtx, accountID, updates); err != nil {
 		log.Printf("failed to persist account test status: account=%d err=%v", accountID, err)
 	}
 }

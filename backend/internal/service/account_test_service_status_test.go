@@ -20,6 +20,8 @@ import (
 
 type accountTestStatusHTTPUpstream struct {
 	resp *http.Response
+	// delay 模拟上游往返耗时，用来断言落库的耗时确实是测出来的，而不是常量 0。
+	delay time.Duration
 }
 
 func (u *accountTestStatusHTTPUpstream) Do(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
@@ -29,6 +31,9 @@ func (u *accountTestStatusHTTPUpstream) Do(_ *http.Request, _ string, _ int64, _
 func (u *accountTestStatusHTTPUpstream) DoWithTLS(_ *http.Request, _ string, _ int64, _ int, _ *tlsfingerprint.Profile) (*http.Response, error) {
 	if u.resp == nil {
 		return nil, fmt.Errorf("missing response")
+	}
+	if u.delay > 0 {
+		time.Sleep(u.delay)
 	}
 	return u.resp, nil
 }
@@ -77,7 +82,7 @@ func TestAccountTestService_TestAccountConnectionPersistsSuccessStatus(t *testin
 `)
 	svc := &AccountTestService{
 		accountRepo:  repo,
-		httpUpstream: &accountTestStatusHTTPUpstream{resp: resp},
+		httpUpstream: &accountTestStatusHTTPUpstream{resp: resp, delay: 20 * time.Millisecond},
 	}
 
 	err := svc.TestAccountConnection(newAccountTestStatusContext(), account.ID, "gpt-5.4", "", "")
@@ -86,6 +91,10 @@ func TestAccountTestService_TestAccountConnectionPersistsSuccessStatus(t *testin
 	require.Equal(t, "success", repo.updatedExtra["last_test_status"])
 	require.NotEmpty(t, repo.updatedExtra["last_tested_at"])
 	require.Equal(t, "", repo.updatedExtra["last_test_error"])
+	// 成功必须落耗时，否则列表永远看不到「上次测试成功的用时」
+	latency, ok := repo.updatedExtra["last_test_latency_ms"].(int64)
+	require.True(t, ok, "last_test_latency_ms 必须是 int64 毫秒")
+	require.Greater(t, latency, int64(0))
 }
 
 func TestAccountTestService_TestAccountConnectionPersistsFailedStatus(t *testing.T) {
@@ -113,6 +122,8 @@ func TestAccountTestService_TestAccountConnectionPersistsFailedStatus(t *testing
 	require.Equal(t, "failed", repo.updatedExtra["last_test_status"])
 	require.NotEmpty(t, repo.updatedExtra["last_tested_at"])
 	require.Contains(t, repo.updatedExtra["last_test_error"], "bad token")
+	// 失败不写耗时：保留上一次成功的数值，避免把成功用时抹成空
+	require.NotContains(t, repo.updatedExtra, "last_test_latency_ms")
 }
 
 func TestAccountTestService_TestAccountConnectionPersistsCNProviderSuccessStatus(t *testing.T) {
@@ -139,7 +150,7 @@ data: [DONE]
 `)
 	svc := &AccountTestService{
 		accountRepo:  repo,
-		httpUpstream: &accountTestStatusHTTPUpstream{resp: resp},
+		httpUpstream: &accountTestStatusHTTPUpstream{resp: resp, delay: 20 * time.Millisecond},
 		cfg: &config.Config{
 			Security: config.SecurityConfig{
 				URLAllowlist: config.URLAllowlistConfig{AllowInsecureHTTP: true},
@@ -150,6 +161,10 @@ data: [DONE]
 	err := svc.TestAccountConnection(newAccountTestStatusContext(), account.ID, "deepseek-chat", "", "")
 	require.NoError(t, err)
 
+	// 国内厂商分支同样要落耗时，否则该平台的账号永远不显示用时
+	cnLatency, ok := repo.updatedExtra["last_test_latency_ms"].(int64)
+	require.True(t, ok, "last_test_latency_ms 必须是 int64 毫秒")
+	require.Greater(t, cnLatency, int64(0))
 	require.Equal(t, "success", repo.updatedExtra["last_test_status"])
 	require.NotEmpty(t, repo.updatedExtra["last_tested_at"])
 	require.Equal(t, "", repo.updatedExtra["last_test_error"])
@@ -189,6 +204,7 @@ func TestAccountTestService_TestAccountConnectionPersistsCNProviderFailedStatus(
 	require.Equal(t, "failed", repo.updatedExtra["last_test_status"])
 	require.NotEmpty(t, repo.updatedExtra["last_tested_at"])
 	require.Contains(t, repo.updatedExtra["last_test_error"], "invalid DeepSeek token")
+	require.NotContains(t, repo.updatedExtra, "last_test_latency_ms")
 }
 
 type accountTestStatusDeadlineUpstream struct{}
