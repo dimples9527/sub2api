@@ -543,6 +543,50 @@ export async function cancelSupplierAccountBatchTestJob(jobID: string): Promise<
   return data
 }
 
+export interface SupplierAccountGroupBindRequest {
+  account_ids: number[]
+  group_ids: number[]
+  /** 用户已确认混合渠道风险时才置位；默认由后端拦截并返回原因。 */
+  skip_mixed_channel_check?: boolean
+}
+
+/** bound = 已追加绑定；unchanged = 本来就在这些分组里；failed = 该账号被守卫拦下。 */
+export type SupplierAccountGroupBindStatus = 'bound' | 'unchanged' | 'failed'
+
+export interface SupplierAccountGroupBindItemResult {
+  account_id: number
+  status: SupplierAccountGroupBindStatus
+  /** 写入后该账号的完整分组集合（并集结果）。 */
+  group_ids: number[]
+  /** 本次新追加的分组。 */
+  added: number[]
+  error?: string
+}
+
+export interface SupplierAccountGroupBindResult {
+  bound: number
+  unchanged: number
+  failed: number
+  results: SupplierAccountGroupBindItemResult[]
+}
+
+/**
+ * 把所选分组「追加」绑定到所选本地账号上。
+ *
+ * 后端语义是并集：账号原有分组保留，只补齐缺少的那些。与单账号「编辑绑定」的整体替换不同，
+ * 批量入口的意图是「让这批账号也加入这个分组」，替换会把它们从其它分组里摘掉。
+ */
+export async function batchBindSupplierAccountGroups(
+  payload: SupplierAccountGroupBindRequest
+): Promise<SupplierAccountGroupBindResult> {
+  const { data } = await apiClient.post<SupplierAccountGroupBindResult>(
+    '/admin/supplier-management/accounts/batch-bind-groups',
+    payload,
+    { timeout: 60 * 1000 }
+  )
+  return data
+}
+
 export interface SupplierProviderGroupHealthTrendPoint {
   time: string
   availability: number
@@ -696,6 +740,7 @@ export const supplierProviderDataAPI = {
   startSupplierAccountBatchTest,
   getSupplierAccountBatchTestJob,
   cancelSupplierAccountBatchTestJob,
+  batchBindSupplierAccountGroups,
   listSupplierGroups,
   updateSupplierGroupMapping,
   setSupplierLocalGroupPlatformOverride,

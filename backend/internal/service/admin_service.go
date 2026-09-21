@@ -106,6 +106,9 @@ type AdminService interface {
 	ForceAntigravityPrivacy(ctx context.Context, account *Account) string
 	SetAccountSchedulable(ctx context.Context, id int64, schedulable bool) (*Account, error)
 	BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error)
+	// BatchBindAccountGroups 把分组追加绑定到一批账号上（并集语义，保留账号原有分组），
+	// 与 BulkUpdateAccounts 的「整体替换」区分开；返回逐账号结果便于前端逐条提示。
+	BatchBindAccountGroups(ctx context.Context, input *BatchBindAccountGroupsInput) (*BatchBindAccountGroupsResult, error)
 	CheckMixedChannelRisk(ctx context.Context, currentAccountID int64, currentAccountPlatform string, groupIDs []int64) error
 	// RevertAccountProxyFallback 将账号的 proxy_id 切回 proxy_fallback_origin_id，并清空 origin 字段。
 	// 若账号不存在返回 ErrAccountNotFound；若账号存在但不在 fallback 状态，返回 ErrAccountNotInFallback。

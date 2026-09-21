@@ -151,6 +151,31 @@
           >
             {{ loading ? '刷新中…' : '刷新' }}
           </button>
+          <button
+            class="sp-button sp-account-toolbar-btn sp-account-toolbar-bind-groups"
+            :class="{ 'has-selection': selectedBindableAccounts.length > 0 }"
+            type="button"
+            data-test="supplier-account-batch-bind-groups"
+            :disabled="selectedBindableAccounts.length === 0 || batchBindSubmitting"
+            :title="batchBindGroupsButtonHint"
+            @click="openBatchBindGroupsDialog"
+          >
+            绑定分组
+            <span
+              v-if="selectedBindableAccounts.length > 0"
+              class="sp-account-bind-count"
+              data-test="supplier-account-batch-bind-count"
+            >{{ selectedBindableAccounts.length }}</span>
+          </button>
+          <button
+            class="sp-button sp-account-toolbar-btn sp-account-toolbar-bind-by-group"
+            type="button"
+            data-test="supplier-account-bind-by-group"
+            :disabled="batchBindSubmitting"
+            @click="openBindByGroupDialog"
+          >
+            按分组绑定
+          </button>
         </div>
       </div>
     </section>
@@ -192,6 +217,11 @@
           row-key="id"
           server-side-sort
           clickable-rows
+          selectable
+          :selected-keys="selectedAccountKeys"
+          :selection-label="accountSelectionLabel"
+          @update:selected-keys="selectedAccountKeys = $event"
+          @selection-change="selectedAccountKeys = $event"
           @sort="handleAccountSort"
           @row-click="openDrawer"
         >
@@ -241,12 +271,14 @@
             <span
               v-if="account.local_account_match_status === 'unmatched'"
               class="sp-match-badge unmatched"
+              :title="UNBINDABLE_ACCOUNT_HINT"
             >
               未匹配
             </span>
             <span
               v-else-if="account.local_account_match_status === 'conflict'"
               class="sp-match-badge conflict"
+              :title="UNBINDABLE_ACCOUNT_HINT"
             >
               匹配冲突（{{ account.local_account_match_count }}）
             </span>
@@ -1098,12 +1130,16 @@
             当前未绑定任何分组，保存后该账号将不会参与分组调度。
           </div>
         </div>
-        <GroupSelector
-          v-model="selectedBindingGroupIDs"
-          :groups="accountEditGroups"
-          :platform="bindingPlatform"
-          searchable
-        />
+        <!-- 分组列表是弹窗里唯一需要纵向空间的部分：包一层容器，让高度沿 flex 链传给它，
+             否则 GroupSelector 内部会把列表钉在一个固定的 128px 高度上，分组一多就得在里面滚。 -->
+        <div class="sp-account-binding-picker">
+          <GroupSelector
+            v-model="selectedBindingGroupIDs"
+            :groups="accountEditGroups"
+            :platform="bindingPlatform"
+            searchable
+          />
+        </div>
       </div>
       <template #footer>
         <button
@@ -1118,6 +1154,215 @@
           :disabled="savingBindingAccountID !== null"
           @click="saveAccountBinding"
         >{{ savingBindingAccountID !== null ? '保存中' : '保存绑定' }}</button>
+      </template>
+    </BaseDialog>
+
+    <BaseDialog
+      :show="showBatchBindGroupsDialog"
+      title="批量绑定分组"
+      width="wide"
+      @close="closeBatchBindGroupsDialog"
+    >
+      <div class="sp-batch-bind-dialog" data-test="supplier-account-batch-bind-dialog">
+        <div class="sp-batch-bind-metrics">
+          <div class="sp-batch-bind-metric">
+            <span>已选账号</span>
+            <strong>{{ selectedAccounts.length }}</strong>
+          </div>
+          <div class="sp-batch-bind-metric bindable">
+            <span>可绑定</span>
+            <strong>{{ selectedBindableAccounts.length }}</strong>
+          </div>
+          <div v-if="selectedUnbindableAccountCount > 0" class="sp-batch-bind-metric skipped">
+            <span>将跳过</span>
+            <strong>{{ selectedUnbindableAccountCount }}</strong>
+          </div>
+        </div>
+        <div
+          v-if="selectedUnbindableAccountCount > 0"
+          class="sp-batch-bind-note warn"
+          data-test="supplier-account-batch-bind-skip-note"
+        >
+          <p class="sp-batch-bind-skip-title">
+            以下 {{ selectedUnbindableAccountCount }} 个账号没有匹配到唯一的本地账号，保存时会自动跳过：
+          </p>
+          <ul class="sp-batch-bind-skip-list">
+            <li
+              v-for="account in selectedUnbindableAccounts"
+              :key="account.id"
+              :data-test="`supplier-account-batch-bind-skip-${account.id}`"
+            >
+              <strong>{{ batchBindSkipAccountLabel(account) }}</strong>
+              <span>{{ unbindableAccountReason(account) }}</span>
+            </li>
+          </ul>
+        </div>
+        <p class="sp-batch-bind-note">
+          保存后这 {{ selectedBindableAccounts.length }} 个账号会<strong>新增</strong>所选分组，原有分组保持不变。
+        </p>
+        <GroupSelector
+          v-model="batchBindGroupIDs"
+          :groups="accountEditGroups"
+          :platform="batchBindGroupPlatform"
+          searchable
+        />
+      </div>
+      <template #footer>
+        <button
+          class="sp-button ghost"
+          type="button"
+          :disabled="batchBindSubmitting"
+          @click="closeBatchBindGroupsDialog"
+        >取消</button>
+        <button
+          class="sp-button primary"
+          type="button"
+          data-test="supplier-account-batch-bind-submit"
+          :disabled="batchBindSubmitting || batchBindGroupIDs.length === 0"
+          @click="submitBatchBindGroups"
+        >
+          {{ batchBindSubmitting ? '保存中' : `为 ${selectedBindableAccounts.length} 个账号绑定分组` }}
+        </button>
+      </template>
+    </BaseDialog>
+
+    <BaseDialog
+      :show="showBindByGroupDialog"
+      title="按分组绑定账号"
+      width="extra-wide"
+      @close="closeBindByGroupDialog"
+    >
+      <div class="sp-bind-by-group-dialog" data-test="supplier-account-bind-by-group-dialog">
+        <section class="sp-bind-by-group-step">
+          <header class="sp-bind-by-group-step-head">
+            <span class="sp-bind-by-group-step-index">01</span>
+            <div>
+              <h3>选择要绑定的分组</h3>
+              <p>已选 {{ bindByGroupGroupIDs.length }} 个分组；账号原有分组会保留。</p>
+            </div>
+          </header>
+          <GroupSelector
+            v-model="bindByGroupGroupIDs"
+            :groups="accountEditGroups"
+            searchable
+          />
+        </section>
+        <section class="sp-bind-by-group-step">
+          <header class="sp-bind-by-group-step-head">
+            <span class="sp-bind-by-group-step-index">02</span>
+            <div>
+              <h3>选择要绑定的账号</h3>
+              <p>已选 {{ bindByGroupAccountIDs.length }} 个本地账号；共 {{ bindByGroupAccountTotal }} 个可选。</p>
+            </div>
+          </header>
+          <div class="sp-bind-by-group-filters">
+            <Input
+              v-model="bindByGroupSearch"
+              class="w-full"
+              placeholder="搜索本地账号名称或 ID"
+              @update:model-value="handleBindByGroupSearchInput"
+            />
+            <Select
+              v-model="bindByGroupPlatformFilter"
+              class="w-full"
+              :options="bindByGroupPlatformOptions"
+              :searchable="false"
+            />
+            <Select
+              v-model="bindByGroupProviderFilter"
+              class="w-full"
+              :options="providerOptions"
+              :searchable="false"
+            />
+          </div>
+          <div class="sp-bind-by-group-list" :class="{ loading: bindByGroupAccountsLoading }">
+            <button
+              v-for="account in bindByGroupAccounts"
+              :key="account.id"
+              class="sp-bind-by-group-account"
+              :class="{ selected: bindByGroupAccountIDs.includes(account.id) }"
+              type="button"
+              :data-test="`supplier-account-bind-by-group-option-${account.id}`"
+              @click="toggleBindByGroupAccount(account.id)"
+            >
+              <span class="sp-bind-by-group-account-mark" aria-hidden="true">
+                <Icon name="check" size="sm" />
+              </span>
+              <span class="sp-bind-by-group-account-copy">
+                <strong>{{ account.name }}</strong>
+                <span>
+                  {{ account.platform || '未设置平台' }} ·
+                  {{ account.provider_name || '未匹配供应商' }} ·
+                  {{ bindByGroupAccountGroupsLabel(account) }}
+                </span>
+              </span>
+            </button>
+            <div v-if="bindByGroupAccountsLoading" class="sp-bind-by-group-state">
+              正在加载本地账号…
+            </div>
+            <div v-else-if="!bindByGroupAccounts.length" class="sp-bind-by-group-state">
+              没有找到可绑定的本地账号，可换个关键词或平台再试。
+            </div>
+          </div>
+        </section>
+      </div>
+      <template #footer>
+        <button
+          class="sp-button ghost"
+          type="button"
+          :disabled="batchBindSubmitting"
+          @click="closeBindByGroupDialog"
+        >取消</button>
+        <button
+          class="sp-button primary"
+          type="button"
+          data-test="supplier-account-bind-by-group-submit"
+          :disabled="batchBindSubmitting || bindByGroupGroupIDs.length === 0 || bindByGroupAccountIDs.length === 0"
+          @click="submitBindByGroup"
+        >
+          {{ batchBindSubmitting ? '保存中' : `为 ${bindByGroupAccountIDs.length} 个账号绑定分组` }}
+        </button>
+      </template>
+    </BaseDialog>
+
+    <BaseDialog
+      :show="showBatchBindResultDialog"
+      title="批量绑定分组结果"
+      width="wide"
+      @close="closeBatchBindResultDialog"
+    >
+      <div class="sp-batch-bind-result" data-test="supplier-account-batch-bind-result">
+        <div class="sp-batch-bind-metrics">
+          <div class="sp-batch-bind-metric bindable">
+            <span>已绑定</span>
+            <strong>{{ batchBindResult?.bound || 0 }}</strong>
+          </div>
+          <div class="sp-batch-bind-metric">
+            <span>无需变更</span>
+            <strong>{{ batchBindResult?.unchanged || 0 }}</strong>
+          </div>
+          <div class="sp-batch-bind-metric failed">
+            <span>失败</span>
+            <strong>{{ batchBindResult?.failed || 0 }}</strong>
+          </div>
+        </div>
+        <p class="sp-batch-bind-note">
+          已绑定的账号不会出现在下面；需要重试时请重新勾选这些账号。
+        </p>
+        <div class="sp-batch-bind-failures">
+          <div
+            v-for="item in batchBindFailures"
+            :key="item.account_id"
+            class="sp-batch-bind-failure"
+            :data-test="`supplier-account-batch-bind-failure-${item.account_id}`"
+          >
+            <strong>{{ batchBindAccountLabel(item.account_id) }}</strong>
+            <span>{{ item.error || '绑定分组失败' }}</span>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <button class="sp-button ghost" type="button" @click="closeBatchBindResultDialog">关闭</button>
       </template>
     </BaseDialog>
 
@@ -1190,15 +1435,21 @@ import Select, { type SelectOption } from '@/components/common/Select.vue'
 import supplierProvidersAPI, { type SupplierProvider } from '@/api/admin/supplierProviders'
 import { customPlatformsAPI, type CustomPlatform } from '@/api/admin/customPlatforms'
 import {
+  batchBindSupplierAccountGroups,
   cancelSupplierAccountBatchTestJob,
   clearSupplierLocalAccountPlatformOverride,
   deleteSupplierAccount,
   getSupplierAccountBatchTestJob,
   listSupplierAccounts,
+  listSupplierBindableLocalAccounts,
   setSupplierLocalAccountPlatformOverride,
   startSupplierAccountBatchTest,
+  type SupplierAccountGroupBindItemResult,
+  type SupplierAccountGroupBindResult,
+  type SupplierBindableLocalAccount,
   type SupplierProviderAccount,
 } from '@/api/admin/supplierProviderData'
+import Icon from '@/components/icons/Icon.vue'
 import { listAccountRateGuardUnbindLogs, listTasks as listAutomationTasks } from '@/api/admin/supplierAutomation'
 import {
   listSupplierAccountHealthRecords,
@@ -1227,6 +1478,12 @@ import {
 import { buildPlatformOptions } from '@/utils/platformOptions'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { cronToIntervalSeconds, formatDurationMinutes } from './supplierAutomationCron'
+import {
+  batchBindResultSummary,
+  bindableAccountGroupsLabel,
+  commonBatchBindPlatform,
+  uniqueBatchBindAccountIDs,
+} from './supplierAccountBatchBind'
 
 const appStore = useAppStore()
 const router = useRouter()
@@ -1330,6 +1587,259 @@ const selectedBindingGroups = computed(() => {
   const selectedIDs = new Set(selectedBindingGroupIDs.value)
   return accountEditGroups.value.filter(group => selectedIDs.has(group.id))
 })
+
+// ── 批量绑定分组（表格勾选 / 按分组选账号，两个入口共用同一套提交逻辑）────────────
+// 上游账号表的每一行是「上游账号」，绑定分组必须落到它匹配到的本地账号上。未匹配或匹配冲突的行
+// 没有本地账号，允许勾选但在提交时跳过，并把跳过数量写在弹窗里——否则用户会以为操作没生效。
+const selectedAccountKeys = ref<Array<string | number>>([])
+const showBatchBindGroupsDialog = ref(false)
+const showBindByGroupDialog = ref(false)
+const showBatchBindResultDialog = ref(false)
+const batchBindGroupIDs = ref<number[]>([])
+const batchBindSubmitting = ref(false)
+const batchBindResult = ref<SupplierAccountGroupBindResult | null>(null)
+const bindByGroupGroupIDs = ref<number[]>([])
+const bindByGroupAccountIDs = ref<number[]>([])
+const bindByGroupSearch = ref('')
+const bindByGroupPlatformFilter = ref('')
+const bindByGroupProviderFilter = ref(0)
+const bindByGroupAccounts = ref<SupplierBindableLocalAccount[]>([])
+const bindByGroupAccountTotal = ref(0)
+const bindByGroupAccountsLoading = ref(false)
+let bindByGroupSearchTimer: number | undefined
+// 候选账号列表的请求序号：搜索防抖、平台下拉、供应商下拉都能触发重新加载，
+// 并发时后返回的旧响应会把新筛选的结果盖掉。与 batchTestPollToken 同一套写法。
+let bindByGroupLoadToken = 0
+
+const selectedAccounts = computed(() => {
+  const keys = new Set(selectedAccountKeys.value.map(key => String(key)))
+  return accountSourceItems.value.filter(account => keys.has(String(account.id)))
+})
+
+const selectedBindableAccounts = computed(() =>
+  selectedAccounts.value.filter(account => manageableLocalAccountID(account) !== null)
+)
+
+// 未匹配 / 匹配冲突的行没有可绑定的本地账号。这句话在两处复用：
+// 表格行内匹配状态徽标的 title，以及勾选框的无障碍标签。
+const UNBINDABLE_ACCOUNT_HINT = '没有匹配到唯一的本地账号，无法绑定分组'
+
+const selectedUnbindableAccountCount = computed(
+  () => selectedAccounts.value.length - selectedBindableAccounts.value.length
+)
+
+// 逐条列出「将被跳过」的账号，而不是只给一个数字 ——
+// 用户得知道具体是哪一个，才知道去处理哪条上游账号。
+const selectedUnbindableAccounts = computed(() =>
+  selectedAccounts.value.filter(account => manageableLocalAccountID(account) === null)
+)
+
+const batchBindGroupsButtonHint = computed(() => {
+  if (selectedAccounts.value.length === 0) return '先在上游账号表里勾选要绑定分组的账号'
+  if (selectedBindableAccounts.value.length === 0) {
+    return '勾选的账号都没有匹配到本地账号，无法绑定分组'
+  }
+  if (selectedUnbindableAccountCount.value > 0) {
+    return `为已勾选的 ${selectedBindableAccounts.value.length} 个本地账号追加绑定分组`
+      + `（另有 ${selectedUnbindableAccountCount.value} 个未匹配账号会被跳过）`
+  }
+  return `为已勾选的 ${selectedBindableAccounts.value.length} 个本地账号追加绑定分组`
+})
+
+// 只有勾选的账号同属一个平台时才按平台过滤候选分组；跨平台混选时不过滤，
+// 混合渠道风险交给后端按账号逐条判定，逐条给出失败原因。
+const batchBindGroupPlatform = computed<GroupPlatform | undefined>(() =>
+  commonBatchBindPlatform(selectedBindableAccounts.value.map(account => effectivePlatform(account)))
+)
+
+const batchBindFailures = computed<SupplierAccountGroupBindItemResult[]>(() =>
+  (batchBindResult.value?.results || []).filter(item => item.status === 'failed')
+)
+
+const bindByGroupPlatformOptions = computed<SelectOption[]>(() => [
+  { value: '', label: '全部平台' },
+  ...platformOptions.value,
+])
+
+const BINDABLE_ACCOUNT_PAGE_SIZE = 50
+
+function accountSelectionLabel(row: SupplierProviderAccount): string {
+  const name = row.local_account_name || row.name || row.upstream_account_key || `账号 #${row.id}`
+  // 不可绑定的行依然允许勾选（产品决定：不阻断勾选，改在弹窗里逐条说明会被跳过），
+  // 所以无障碍标签必须把这件事讲清楚，否则读屏用户只会听到一句「选择 X」。
+  if (manageableLocalAccountID(row) === null) return `选择 ${name}（${UNBINDABLE_ACCOUNT_HINT}）`
+  return `选择 ${name}`
+}
+
+// 弹窗里「将被跳过」清单的展示名：上游账号名优先，退回本地账号名 / key / ID。
+function batchBindSkipAccountLabel(account: SupplierProviderAccount): string {
+  return account.name || account.local_account_name || account.upstream_account_key || `账号 #${account.id}`
+}
+
+function unbindableAccountReason(account: SupplierProviderAccount): string {
+  if (account.local_account_match_status === 'conflict') {
+    return `匹配冲突（匹配到 ${account.local_account_match_count} 个本地账号）`
+  }
+  if (account.local_account_match_status === 'unmatched') return '未匹配到本地账号'
+  return '没有可绑定的本地账号'
+}
+
+function bindableLocalAccountIDs(accounts: SupplierProviderAccount[]): number[] {
+  return uniqueBatchBindAccountIDs(accounts.map(account => manageableLocalAccountID(account)))
+}
+
+function batchBindAccountLabel(accountID: number): string {
+  const picked = bindByGroupAccounts.value.find(account => account.id === accountID)
+  if (picked) return picked.name
+  const row = accountSourceItems.value.find(account => manageableLocalAccountID(account) === accountID)
+  return row?.local_account_name || `本地账号 #${accountID}`
+}
+
+async function ensureAccountGroupsLoaded() {
+  if (accountEditGroups.value.length > 0) return
+  try {
+    accountEditGroups.value = await adminAPI.groups.getAll()
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '加载分组列表失败'))
+  }
+}
+
+function openBatchBindGroupsDialog() {
+  void prepareBatchBindGroupsDialog()
+}
+
+async function prepareBatchBindGroupsDialog() {
+  if (selectedBindableAccounts.value.length === 0 || batchBindSubmitting.value) return
+  await ensureAccountGroupsLoaded()
+  batchBindGroupIDs.value = []
+  batchBindResult.value = null
+  showBatchBindGroupsDialog.value = true
+}
+
+function closeBatchBindGroupsDialog() {
+  if (batchBindSubmitting.value) return
+  showBatchBindGroupsDialog.value = false
+  batchBindGroupIDs.value = []
+}
+
+function openBindByGroupDialog() {
+  void prepareBindByGroupDialog()
+}
+
+async function prepareBindByGroupDialog() {
+  if (batchBindSubmitting.value) return
+  await ensureAccountGroupsLoaded()
+  bindByGroupGroupIDs.value = []
+  bindByGroupAccountIDs.value = []
+  bindByGroupSearch.value = ''
+  bindByGroupPlatformFilter.value = ''
+  bindByGroupProviderFilter.value = 0
+  batchBindResult.value = null
+  showBindByGroupDialog.value = true
+  await loadBindableLocalAccounts()
+}
+
+function closeBindByGroupDialog() {
+  if (batchBindSubmitting.value) return
+  showBindByGroupDialog.value = false
+  bindByGroupAccountIDs.value = []
+  // 弹窗已关，在途请求的结果不再需要：让它作废，避免下次打开瞬间闪出上一次筛选的列表。
+  bindByGroupLoadToken += 1
+}
+
+function closeBatchBindResultDialog() {
+  showBatchBindResultDialog.value = false
+  batchBindResult.value = null
+}
+
+async function loadBindableLocalAccounts() {
+  const loadToken = ++bindByGroupLoadToken
+  bindByGroupAccountsLoading.value = true
+  try {
+    const result = await listSupplierBindableLocalAccounts({
+      search: bindByGroupSearch.value.trim() || undefined,
+      platform: bindByGroupPlatformFilter.value || undefined,
+      provider_id: bindByGroupProviderFilter.value || undefined,
+      page: 1,
+      page_size: BINDABLE_ACCOUNT_PAGE_SIZE,
+    })
+    // 过期响应直接丢弃，否则会覆盖后发起的筛选结果。
+    if (loadToken !== bindByGroupLoadToken) return
+    bindByGroupAccounts.value = result.items
+    bindByGroupAccountTotal.value = result.total
+  } catch (err) {
+    if (loadToken !== bindByGroupLoadToken) return
+    appStore.showError(extractApiErrorMessage(err, '加载可绑定本地账号失败'))
+    bindByGroupAccounts.value = []
+    bindByGroupAccountTotal.value = 0
+  } finally {
+    // 只有最新一次请求才有资格关掉 loading，否则先返回的请求会让列表提前脱离加载态。
+    if (loadToken === bindByGroupLoadToken) bindByGroupAccountsLoading.value = false
+  }
+}
+
+function handleBindByGroupSearchInput() {
+  if (bindByGroupSearchTimer !== undefined) window.clearTimeout(bindByGroupSearchTimer)
+  bindByGroupSearchTimer = window.setTimeout(() => {
+    void loadBindableLocalAccounts()
+  }, 300)
+}
+
+function toggleBindByGroupAccount(accountID: number) {
+  bindByGroupAccountIDs.value = bindByGroupAccountIDs.value.includes(accountID)
+    ? bindByGroupAccountIDs.value.filter(id => id !== accountID)
+    : [...bindByGroupAccountIDs.value, accountID]
+}
+
+function bindByGroupAccountGroupsLabel(account: SupplierBindableLocalAccount): string {
+  return bindableAccountGroupsLabel(account)
+}
+
+// 两个入口唯一的差别是「先选账号还是先选分组」，提交这一段完全共用。
+async function runBatchBindGroups(accountIDs: number[], groupIDs: number[]): Promise<boolean> {
+  if (accountIDs.length === 0 || groupIDs.length === 0) return false
+  batchBindSubmitting.value = true
+  try {
+    const result = await batchBindSupplierAccountGroups({
+      account_ids: accountIDs,
+      group_ids: groupIDs,
+    })
+    batchBindResult.value = result
+    const summary = batchBindResultSummary(result)
+    if (summary.failed) {
+      appStore.showError(summary.text)
+    } else {
+      appStore.showSuccess(summary.text)
+    }
+    selectedAccountKeys.value = []
+    await loadAccounts()
+    return true
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '批量绑定分组失败'))
+    return false
+  } finally {
+    batchBindSubmitting.value = false
+  }
+}
+
+async function submitBatchBindGroups() {
+  const accountIDs = bindableLocalAccountIDs(selectedBindableAccounts.value)
+  const ok = await runBatchBindGroups(accountIDs, batchBindGroupIDs.value)
+  if (!ok) return
+  showBatchBindGroupsDialog.value = false
+  batchBindGroupIDs.value = []
+  if (batchBindFailures.value.length > 0) showBatchBindResultDialog.value = true
+}
+
+async function submitBindByGroup() {
+  const accountIDs = [...bindByGroupAccountIDs.value]
+  const ok = await runBatchBindGroups(accountIDs, bindByGroupGroupIDs.value)
+  if (!ok) return
+  showBindByGroupDialog.value = false
+  bindByGroupAccountIDs.value = []
+  if (batchBindFailures.value.length > 0) showBatchBindResultDialog.value = true
+}
+
 const sortBy = ref('')
 const sortOrder = ref<'asc' | 'desc'>('asc')
 const accountQuickFilter = ref<AccountQuickFilterKey>('all')
@@ -1678,10 +2188,16 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.clearTimeout(searchTimer)
+  window.clearTimeout(bindByGroupSearchTimer)
   window.clearInterval(guardFreshnessTimer)
   window.removeEventListener('scroll', handleWindowScroll)
   batchTestPollToken += 1
   clearBatchTestPollTimer()
+})
+
+// 平台 / 供应商筛选变化时重新拉候选账号；已勾选的账号不在新结果里也保留，用户切回来还能看到选择。
+watch([bindByGroupPlatformFilter, bindByGroupProviderFilter], () => {
+  void loadBindableLocalAccounts()
 })
 
 watch([providerID, providerStatusFilter, groupID, activeFilter, upstreamStatusFilter], () => {
@@ -2169,6 +2685,8 @@ async function toggleBatchTestItemSchedulable(item: BatchAccountTestItem) {
 
 function resetPageAndLoad() {
   page.value = 1
+  // 筛选口径变了就清空勾选：跨筛选保留勾选时，用户看到的「已选 N 个」里会混进看不见的行。
+  selectedAccountKeys.value = []
   void loadAccounts()
 }
 
@@ -2878,6 +3396,7 @@ function handleAccountSort(key: string, order: 'asc' | 'desc') {
   sortBy.value = key
   sortOrder.value = order
   page.value = 1
+  selectedAccountKeys.value = []
   void loadAccounts()
 }
 
@@ -4287,9 +4806,102 @@ button.sp-guard-failure-hint:hover {
   color: #ffffff;
 }
 
+/* ===== 编辑账号绑定：分组区域自适应放大 =====
+   GroupSelector 内部把列表固定在 128px 高，分组一多只能在那 128px 里滚。
+   这里在页面层把弹窗撑高，再沿 flex 链（.modal-body → 弹窗内容 → 分组容器 → GroupSelector 根节点）
+   把剩余高度传给列表，让它自己吃掉可用空间。
+
+   两个必须遵守的约束：
+   1) 只给 .modal-content 设 max-height、不设 height —— 分组少时弹窗仍随内容收缩，
+      分组多时才撑到上限，不会留一大片空白。
+   2) BaseDialog 走 Teleport，祖先链在 body 下；整条选择器都要包进 :global()，
+      否则 [data-v] 会被挂到 .modal-content 上（那是 BaseDialog 的 scope，本页面匹配不到）。 */
+:global(.modal-content:has(.sp-account-binding-dialog)) {
+  /* 这个弹窗此前没有兜底：Teleport 到 body 后 --sp-* 全部拿不到，
+     .sp-account-binding-summary 的 border/background 实测直接失效（borderTopWidth=0px、
+     background=rgba(0,0,0,0)）。按 AGENTS.md「弹窗必须自行声明兜底变量」补一份。 */
+  --sp-panel: #ffffff;
+  --sp-panel-2: #f8fafc;
+  --sp-panel-3: #eef2f7;
+  --sp-line: #d7e0ea;
+  --sp-soft: #e8eef5;
+  --sp-text: #172033;
+  --sp-muted: #607089;
+  --sp-dim: #8a99ad;
+  --sp-cyan: #0284c7;
+  --sp-green: #16835d;
+  --sp-amber: #c56a0a;
+  --sp-orange: #ea580c;
+  --sp-red: #d14343;
+  --sp-blue: #2563eb;
+  --sp-violet: #7c3aed;
+  --sp-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  border-color: #cbd7e5;
+  background: var(--sp-panel);
+  color: var(--sp-text);
+  max-height: min(88dvh, 820px);
+}
+
+:global(.dark .modal-content:has(.sp-account-binding-dialog)) {
+  --sp-panel: #172033;
+  --sp-panel-2: #1d293d;
+  --sp-panel-3: #243249;
+  --sp-line: #35445c;
+  --sp-soft: #2c3a51;
+  --sp-text: #edf3fb;
+  --sp-muted: #a8b6ca;
+  --sp-dim: #75849a;
+  --sp-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  border-color: #3b4b64;
+}
+
+:global(.modal-content:has(.sp-account-binding-dialog) .modal-body) {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+
 .sp-account-binding-dialog {
-  display: grid;
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
   gap: 1rem;
+}
+
+.sp-account-binding-picker {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+/* GroupSelector 的根节点没有类名，用子选择器精确命中第一层，避免波及内部其它 div */
+.sp-account-binding-picker :deep(> div) {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+/* GroupSelector 内部的分组列表容器（.grid.grid-cols-2 是它的稳定特征）。
+   ⚠️ 别用列表那个 Tailwind 高度上限类名做选择器：SupplierLocalDataViews.spec.ts 有一条
+   守卫断言禁止本页源码出现该前缀（产品决策：账号表的分组列不得被截断），
+   连注释里写出来都会撞红。改用 grid-cols-2 定位，效果相同。 */
+.sp-account-binding-picker :deep(.grid.grid-cols-2) {
+  max-height: none;
+  min-height: 11rem;
+  flex: 1;
+}
+
+@media (max-width: 640px) {
+  :global(.modal-content:has(.sp-account-binding-dialog)) {
+    max-height: 92dvh;
+  }
+
+  .sp-account-binding-picker :deep(.grid.grid-cols-2) {
+    min-height: 8rem;
+  }
 }
 
 .sp-account-binding-summary {
@@ -5793,6 +6405,375 @@ button.sp-guard-failure-hint:hover {
 
   .sp-batch-result-dialog .batch-result-empty {
     padding-bottom: 1.5rem;
+  }
+}
+
+/* ===== 批量绑定分组：工具栏入口 + 两个弹窗 =====
+   弹窗经 BaseDialog Teleport 到 body，页面根节点 .supplier-management-page 上的 --sp-* 拿不到，
+   所以下面先给 .modal-content 声明一份完整兜底变量，再写弹窗内部样式。 */
+.sp-account-toolbar-bind-groups {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  border-color: color-mix(in srgb, var(--sp-cyan) 30%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-cyan) 8%, var(--sp-panel));
+  color: var(--sp-cyan);
+}
+
+/* 有勾选时按钮转为实心：这是本页唯一「取决于下方表格状态」的动作，需要一眼看出它已经武装好了。 */
+.sp-account-toolbar-bind-groups.has-selection {
+  border-color: color-mix(in srgb, var(--sp-cyan) 70%, var(--sp-line));
+  background: var(--sp-cyan);
+  color: #fff;
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--sp-cyan) 24%, transparent);
+}
+
+.sp-account-toolbar-bind-groups.has-selection:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--sp-cyan) 84%, #0c4a6e);
+  background: color-mix(in srgb, var(--sp-cyan) 88%, #0c4a6e);
+  color: #fff;
+}
+
+.sp-account-toolbar-bind-by-group {
+  border-color: color-mix(in srgb, var(--sp-cyan) 24%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-cyan) 6%, var(--sp-panel));
+  color: var(--sp-cyan);
+}
+
+.sp-account-toolbar-bind-by-group:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--sp-cyan) 48%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-cyan) 12%, var(--sp-panel));
+  color: color-mix(in srgb, var(--sp-cyan) 88%, #0c4a6e);
+}
+
+.sp-account-bind-count {
+  display: inline-flex;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.375rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, #ffffff 28%, transparent);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  line-height: 1;
+}
+
+:global(.modal-content:has(.sp-batch-bind-dialog)),
+:global(.modal-content:has(.sp-bind-by-group-dialog)),
+:global(.modal-content:has(.sp-batch-bind-result)) {
+  --sp-panel: #ffffff;
+  --sp-panel-2: #f8fafc;
+  --sp-panel-3: #eef2f7;
+  --sp-line: #d7e0ea;
+  --sp-soft: #e8eef5;
+  --sp-text: #172033;
+  --sp-muted: #607089;
+  --sp-dim: #8a99ad;
+  --sp-cyan: #0284c7;
+  --sp-green: #16835d;
+  --sp-amber: #c56a0a;
+  --sp-orange: #ea580c;
+  --sp-red: #d14343;
+  --sp-blue: #2563eb;
+  --sp-violet: #7c3aed;
+  --sp-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  border-color: #cbd7e5;
+  background: var(--sp-panel);
+  color: var(--sp-text);
+}
+
+:global(.dark .modal-content:has(.sp-batch-bind-dialog)),
+:global(.dark .modal-content:has(.sp-bind-by-group-dialog)),
+:global(.dark .modal-content:has(.sp-batch-bind-result)) {
+  --sp-panel: #172033;
+  --sp-panel-2: #1d293d;
+  --sp-panel-3: #243249;
+  --sp-line: #35445c;
+  --sp-soft: #2c3a51;
+  --sp-text: #edf3fb;
+  --sp-muted: #a8b6ca;
+  --sp-dim: #75849a;
+  --sp-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  border-color: #3b4b64;
+}
+
+.sp-batch-bind-dialog,
+.sp-bind-by-group-dialog,
+.sp-batch-bind-result {
+  display: grid;
+  gap: 1rem;
+}
+
+.sp-batch-bind-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.sp-batch-bind-metric {
+  display: grid;
+  min-width: 6.5rem;
+  gap: 0.15rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.6rem;
+  background: var(--sp-panel-2);
+}
+
+.sp-batch-bind-metric > span {
+  color: var(--sp-muted);
+  font-size: 0.7rem;
+}
+
+.sp-batch-bind-metric > strong {
+  color: var(--sp-text);
+  font-size: 1.1rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.sp-batch-bind-metric.bindable {
+  border-color: color-mix(in srgb, var(--sp-cyan) 35%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-cyan) 7%, var(--sp-panel-2));
+}
+
+.sp-batch-bind-metric.bindable > strong {
+  color: var(--sp-cyan);
+}
+
+.sp-batch-bind-metric.skipped > strong {
+  color: var(--sp-amber);
+}
+
+.sp-batch-bind-metric.failed > strong {
+  color: var(--sp-red);
+}
+
+.sp-batch-bind-note {
+  margin: 0;
+  color: var(--sp-muted);
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+
+.sp-batch-bind-note.warn {
+  padding: 0.55rem 0.7rem;
+  border: 1px dashed color-mix(in srgb, var(--sp-amber) 45%, var(--sp-line));
+  border-radius: 0.55rem;
+  background: color-mix(in srgb, var(--sp-amber) 8%, var(--sp-panel-2));
+  color: color-mix(in srgb, var(--sp-amber) 82%, var(--sp-text));
+}
+
+/* 「将被跳过」清单：用可换行的标记块，而不是可滚动的内层列表。
+   弹窗自身已经在滚，再套一层内部滚动就是本页一直刻意避开的老问题；
+   名单长就让弹窗变高，不额外限高。
+   圆角/内距/字号都对齐页面既有的 .sp-match-badge，不另起一套视觉语言。 */
+.sp-batch-bind-skip-title {
+  margin: 0 0 0.4rem;
+  font-size: 0.78rem;
+}
+
+.sp-batch-bind-skip-list {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  list-style: none;
+}
+
+.sp-batch-bind-skip-list > li {
+  display: inline-flex;
+  align-items: baseline;
+  padding: 0.22rem 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--sp-amber) 32%, var(--sp-line));
+  border-radius: 0.4rem;
+  background: color-mix(in srgb, var(--sp-amber) 8%, var(--sp-panel));
+  font-size: 0.75rem;
+  line-height: 1.2;
+  gap: 0.35rem;
+}
+
+.sp-batch-bind-skip-list > li strong {
+  font-weight: 600;
+}
+
+.sp-batch-bind-skip-list > li span {
+  color: var(--sp-muted);
+}
+
+.sp-batch-bind-failures {
+  display: grid;
+  max-height: 20rem;
+  gap: 0.4rem;
+  overflow-y: auto;
+}
+
+.sp-batch-bind-failure {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--sp-red) 30%, var(--sp-line));
+  border-radius: 0.55rem;
+  background: color-mix(in srgb, var(--sp-red) 7%, var(--sp-panel-2));
+}
+
+.sp-batch-bind-failure > strong {
+  color: var(--sp-text);
+  font-size: 0.8rem;
+}
+
+.sp-batch-bind-failure > span {
+  color: color-mix(in srgb, var(--sp-red) 82%, var(--sp-text));
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+/* 按分组绑定：01 选分组 → 02 选账号，编号是真实的操作顺序，不是装饰 */
+.sp-bind-by-group-step {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.7rem;
+  background: var(--sp-panel-2);
+}
+
+.sp-bind-by-group-step-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+
+.sp-bind-by-group-step-index {
+  display: inline-flex;
+  min-width: 1.6rem;
+  height: 1.6rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--sp-cyan) 35%, var(--sp-line));
+  border-radius: 0.45rem;
+  background: color-mix(in srgb, var(--sp-cyan) 10%, var(--sp-panel));
+  color: var(--sp-cyan);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+
+.sp-bind-by-group-step-head h3 {
+  margin: 0;
+  color: var(--sp-text);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.sp-bind-by-group-step-head p {
+  margin: 0.15rem 0 0;
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.sp-bind-by-group-filters {
+  display: grid;
+  /* 搜索 + 平台 + 供应商三列；窄屏由 720px 媒体查询降为单列。
+     两个下拉的上限刻意压到 12rem：实测若给到 14rem，在 lg 档弹窗（内容宽约 684px）下
+     两个下拉会各吃掉 224px，把搜索框挤到只剩 217px —— 而搜索框要输入账号名或 ID。
+     12rem 让搜索框在该档位拿到约 281px，宽屏下（内容宽 1152px）仍有 748px。 */
+  grid-template-columns: minmax(0, 1fr) minmax(9rem, 12rem) minmax(9rem, 12rem);
+  gap: 0.6rem;
+}
+
+.sp-bind-by-group-list {
+  display: grid;
+  max-height: 17rem;
+  gap: 0.35rem;
+  overflow-y: auto;
+  padding: 0.15rem;
+}
+
+.sp-bind-by-group-list.loading {
+  opacity: 0.75;
+}
+
+.sp-bind-by-group-account {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.55rem;
+  background: var(--sp-panel);
+  color: var(--sp-text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.sp-bind-by-group-account:hover {
+  border-color: color-mix(in srgb, var(--sp-cyan) 40%, var(--sp-line));
+}
+
+.sp-bind-by-group-account.selected {
+  border-color: color-mix(in srgb, var(--sp-cyan) 65%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-cyan) 10%, var(--sp-panel));
+}
+
+.sp-bind-by-group-account-mark {
+  display: inline-flex;
+  width: 1.15rem;
+  height: 1.15rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.3rem;
+  color: transparent;
+}
+
+.sp-bind-by-group-account.selected .sp-bind-by-group-account-mark {
+  border-color: var(--sp-cyan);
+  background: var(--sp-cyan);
+  color: #fff;
+}
+
+.sp-bind-by-group-account-copy {
+  display: grid;
+  min-width: 0;
+  gap: 0.1rem;
+}
+
+.sp-bind-by-group-account-copy > strong,
+.sp-bind-by-group-account-copy > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-bind-by-group-account-copy > strong {
+  color: var(--sp-text);
+  font-size: 0.82rem;
+}
+
+.sp-bind-by-group-account-copy > span {
+  color: var(--sp-muted);
+  font-size: 0.7rem;
+}
+
+.sp-bind-by-group-state {
+  padding: 1rem;
+  color: var(--sp-muted);
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+@media (max-width: 720px) {
+  .sp-bind-by-group-filters {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

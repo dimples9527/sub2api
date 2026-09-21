@@ -55,6 +55,18 @@ func (s *simpleModeAccountService) BulkUpdateAccounts(ctx context.Context, input
 	return &service.BulkUpdateAccountsResult{}, nil
 }
 
+func (s *simpleModeAccountService) BatchBindAccountGroups(ctx context.Context, input *service.BatchBindAccountGroupsInput) (*service.BatchBindAccountGroupsResult, error) {
+	if len(input.GroupIDs) > 0 {
+		if err := s.ValidateAccountGroupBindings(ctx, input.GroupIDs); err != nil {
+			return nil, err
+		}
+	}
+	return &service.BatchBindAccountGroupsResult{
+		Bound:   len(input.AccountIDs),
+		Results: []service.BatchBindAccountGroupResult{},
+	}, nil
+}
+
 func (s *simpleModeAccountService) ValidateAccountGroupBindings(_ context.Context, groupIDs []int64) error {
 	for _, id := range groupIDs {
 		for i := range s.groups {

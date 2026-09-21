@@ -133,6 +133,9 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 		supplier.POST("/accounts/batch-test", h.Admin.Account.SupplierBatchTest)
 		supplier.GET("/accounts/batch-test/:job_id", h.Admin.Account.GetSupplierBatchTest)
 		supplier.POST("/accounts/batch-test/:job_id/cancel", h.Admin.Account.CancelSupplierBatchTest)
+		// 追加绑定语义：账号原有分组保留，只补齐所选分组。静态段与 /accounts/:id 系列共存，
+		// 段数不同不会与通配段冲突（见 supplier_account_group_binding_route_test.go）。
+		supplier.POST("/accounts/batch-bind-groups", h.Admin.Account.BatchBindSupplierAccountGroups)
 		supplier.GET("/groups", h.Admin.SupplierProviderSync.ListGroups)
 		supplier.GET("/groups/health-trends", h.Admin.SupplierProviderSync.ListGroupHealthTrends)
 		supplier.PUT("/local-groups/:id/platform-override", h.Admin.SupplierProviderSync.SetLocalGroupPlatformOverride)
