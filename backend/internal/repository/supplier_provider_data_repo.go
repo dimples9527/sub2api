@@ -505,6 +505,9 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
        CASE WHEN jsonb_typeof(matched_account.extra->'supplier_health_guard_healthy_count') = 'number'
             THEN (matched_account.extra->>'supplier_health_guard_healthy_count')::NUMERIC::INT
             ELSE 0 END AS local_account_health_guard_healthy_count,
+       COALESCE(recent_health.sample_count, 0) AS local_account_recent_health_sample_count,
+       COALESCE(recent_health.success_count, 0) AS local_account_recent_health_success_count,
+       COALESCE(recent_health.avg_latency_ms, 0) AS local_account_recent_health_avg_latency_ms,
        COALESCE((
          SELECT jsonb_agg(
            jsonb_build_object(
@@ -554,6 +557,14 @@ LEFT JOIN accounts matched_account
  AND local_match.match_count = 1
 LEFT JOIN supplier_local_account_platform_overrides platform_override
   ON platform_override.local_account_id = matched_account.id
+LEFT JOIN LATERAL (
+  SELECT COUNT(*) AS sample_count,
+         COUNT(*) FILTER (WHERE h.status <> 'failed') AS success_count,
+         COALESCE(ROUND(AVG(h.latency_ms) FILTER (WHERE h.status <> 'failed' AND h.latency_ms > 0)), 0)::BIGINT AS avg_latency_ms
+  FROM supplier_account_health_history h
+  WHERE h.local_account_id = matched_account.id
+    AND h.checked_at >= NOW() - INTERVAL '1 hour'
+) recent_health ON matched_account.id IS NOT NULL
 WHERE `+where+fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", supplierProviderAccountOrderBy(params), len(args)+1, len(args)+2), queryArgs...)
 	if err != nil {
 		return service.SupplierProviderAccountListResult{}, fmt.Errorf("query supplier provider accounts: %w", err)
@@ -2383,6 +2394,9 @@ func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (servic
 		&item.LocalAccountHealthGuardLastCheckedAt,
 		&item.LocalAccountHealthGuardFailureCount,
 		&item.LocalAccountHealthGuardHealthyCount,
+		&item.LocalAccountRecentHealthSampleCount,
+		&item.LocalAccountRecentHealthSuccessCount,
+		&item.LocalAccountRecentHealthAvgLatencyMs,
 		&bindingGroupsJSON,
 		&item.SupplierCurrentBalance, &item.SupplierTodayCost,
 		&groupRecordID, &item.GroupRecordDeleteEligible)

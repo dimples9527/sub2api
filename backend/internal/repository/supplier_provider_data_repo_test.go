@@ -542,6 +542,7 @@ var supplierProviderAccountListColumns = []string{
 	"local_account_last_test_status", "local_account_last_tested_at", "local_account_last_test_error", "local_account_last_test_latency_ms", "local_account_health_guard_last_checked_at",
 	"local_account_health_guard_failure_count",
 	"local_account_health_guard_healthy_count",
+	"local_account_recent_health_sample_count", "local_account_recent_health_success_count", "local_account_recent_health_avg_latency_ms",
 	"binding_groups",
 	"supplier_current_balance", "supplier_today_cost", "group_record_id", "group_record_delete_eligible",
 }
@@ -612,6 +613,9 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
        CASE WHEN jsonb_typeof(matched_account.extra->'supplier_health_guard_healthy_count') = 'number'
             THEN (matched_account.extra->>'supplier_health_guard_healthy_count')::NUMERIC::INT
             ELSE 0 END AS local_account_health_guard_healthy_count,
+       COALESCE(recent_health.sample_count, 0) AS local_account_recent_health_sample_count,
+       COALESCE(recent_health.success_count, 0) AS local_account_recent_health_success_count,
+       COALESCE(recent_health.avg_latency_ms, 0) AS local_account_recent_health_avg_latency_ms,
        COALESCE((
          SELECT jsonb_agg(
            jsonb_build_object(
@@ -660,6 +664,14 @@ LEFT JOIN accounts matched_account
  AND local_match.match_count = 1
 LEFT JOIN supplier_local_account_platform_overrides platform_override
   ON platform_override.local_account_id = matched_account.id
+LEFT JOIN LATERAL (
+  SELECT COUNT(*) AS sample_count,
+         COUNT(*) FILTER (WHERE h.status <> 'failed') AS success_count,
+         COALESCE(ROUND(AVG(h.latency_ms) FILTER (WHERE h.status <> 'failed' AND h.latency_ms > 0)), 0)::BIGINT AS avg_latency_ms
+  FROM supplier_account_health_history h
+  WHERE h.local_account_id = matched_account.id
+    AND h.checked_at >= NOW() - INTERVAL '1 hour'
+) recent_health ON matched_account.id IS NOT NULL
 WHERE ` + whereSQL + `
 ORDER BY a.active DESC, a.last_seen_at DESC, a.id ASC LIMIT ` + limitPlaceholder + ` OFFSET ` + offsetPlaceholder
 
@@ -930,6 +942,7 @@ func TestSupplierProviderDataRepositoryListAccountsPaginates(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows(supplierProviderAccountListColumns).AddRow(
 			int64(7), int64(42), "Supplier A", "account-1", "Primary", "active", "group-1", "VIP", "openai", "active", 2.5, "active", true, now, nil,
 			"matched", 1, int64(101), "prefix-key-1", "anthropic", "apikey", "", "anthropic", 80, "active", true, "success", "2026-07-16T09:30:00Z", "upstream authentication failed", int64(1234), "2026-08-27T08:30:00Z", 3, 1,
+			6, 5, int64(280),
 			`[{"id":202,"name":"Claude 订阅","platform":"anthropic","rate_multiplier":2,"subscription_type":"subscription"},{"id":201,"name":"OpenAI 专线","platform":"openai","rate_multiplier":1.5,"subscription_type":"standard"}]`,
 			12.5, 3.25, nil, false,
 		))
@@ -968,6 +981,9 @@ func TestSupplierProviderDataRepositoryListAccountsPaginates(t *testing.T) {
 	require.Equal(t, "2026-08-27T08:30:00Z", result.Items[0].LocalAccountHealthGuardLastCheckedAt)
 	require.Equal(t, 3, result.Items[0].LocalAccountHealthGuardFailureCount)
 	require.Equal(t, 1, result.Items[0].LocalAccountHealthGuardHealthyCount)
+	require.Equal(t, 6, result.Items[0].LocalAccountRecentHealthSampleCount)
+	require.Equal(t, 5, result.Items[0].LocalAccountRecentHealthSuccessCount)
+	require.Equal(t, int64(280), result.Items[0].LocalAccountRecentHealthAvgLatencyMs)
 	require.Equal(t, []service.SupplierProviderAccountBindingGroup{
 		{ID: 202, Name: "Claude 订阅", Platform: "anthropic", RateMultiplier: 2, SubscriptionType: "subscription"},
 		{ID: 201, Name: "OpenAI 专线", Platform: "openai", RateMultiplier: 1.5, SubscriptionType: "standard"},
@@ -990,7 +1006,7 @@ func TestSupplierProviderDataRepositoryListAccountsExposesInactiveGroupDeleteMet
 		WillReturnRows(sqlmock.NewRows(columns).AddRow(
 			int64(7), int64(42), "Supplier A", "account-1", "Primary", "active", "group-1", "VIP", "", "inactive",
 			2.5, "active", true, now, nil,
-			"unmatched", 0, nil, "", "", "", "", "", nil, "", nil, "", "", "", int64(0), "", 0, 0, `[]`, 12.5, 3.25,
+			"unmatched", 0, nil, "", "", "", "", "", nil, "", nil, "", "", "", int64(0), "", 0, 0, 0, 0, int64(0), `[]`, 12.5, 3.25,
 			int64(88), true,
 		))
 
@@ -1031,11 +1047,11 @@ func TestSupplierProviderDataRepositoryListAccountsSQLContractMapsUnmatchedAndCo
 		WillReturnRows(sqlmock.NewRows(supplierProviderAccountListColumns).
 			AddRow(
 				int64(7), int64(42), "Supplier A", "missing-key", "Missing", "active", "group-1", "VIP", "openai", "active", 2.5, "active", true, now, nil,
-				"unmatched", 0, nil, "", "", "", "", "", nil, "", nil, "", "", "", int64(0), "", 0, 0, `[]`, 12.5, 3.25, nil, false,
+				"unmatched", 0, nil, "", "", "", "", "", nil, "", nil, "", "", "", int64(0), "", 0, 0, 0, 0, int64(0), `[]`, 12.5, 3.25, nil, false,
 			).
 			AddRow(
 				int64(8), int64(42), "Supplier A", "duplicate-key", "Duplicate", "active", "group-2", "Standard", "openai", "active", 1.5, "active", true, now, nil,
-				"conflict", 2, nil, "", "", "", "", "", nil, "", nil, "", "", "", int64(0), "", 0, 0, `[]`, 12.5, 3.25, nil, false,
+				"conflict", 2, nil, "", "", "", "", "", nil, "", nil, "", "", "", int64(0), "", 0, 0, 0, 0, int64(0), `[]`, 12.5, 3.25, nil, false,
 			))
 
 	result, err := repo.ListAccounts(context.Background(), service.SupplierProviderDataListParams{
@@ -1091,6 +1107,7 @@ func TestSupplierProviderDataRepositoryListAccountsExposesLocalAccountTypeForDup
 		"local_account_last_test_status", "local_account_last_tested_at", "local_account_last_test_error", "local_account_last_test_latency_ms", "local_account_health_guard_last_checked_at",
 		"local_account_health_guard_failure_count",
 		"local_account_health_guard_healthy_count",
+		"local_account_recent_health_sample_count", "local_account_recent_health_success_count", "local_account_recent_health_avg_latency_ms",
 		"binding_groups",
 		"supplier_current_balance", "supplier_today_cost", "group_record_id", "group_record_delete_eligible",
 	}
@@ -1102,7 +1119,7 @@ func TestSupplierProviderDataRepositoryListAccountsExposesLocalAccountTypeForDup
 		WithArgs(int64(42), 20, 0).
 		WillReturnRows(sqlmock.NewRows(columns).AddRow(
 			int64(7), int64(42), "Supplier A", "upstream-key", "Primary", "active", "group-1", "VIP", "openai", "active", 1.5, "active", true, now, nil,
-			"matched", 1, int64(101), "local-account", "openai", "apikey", "", "openai", 80, "active", true, "success", "2026-07-28T09:30:00Z", "", int64(0), "", 0, 0, `[]`, 12.5, 3.25, nil, false,
+			"matched", 1, int64(101), "local-account", "openai", "apikey", "", "openai", 80, "active", true, "success", "2026-07-28T09:30:00Z", "", int64(0), "", 0, 0, 0, 0, int64(0), `[]`, 12.5, 3.25, nil, false,
 		))
 
 	result, err := repo.ListAccounts(context.Background(), service.SupplierProviderDataListParams{
@@ -1133,7 +1150,7 @@ func TestSupplierProviderDataRepositoryListAccountsUsesBusinessPlatformOverride(
 		WithArgs(int64(42), "grok", 20, 0).
 		WillReturnRows(sqlmock.NewRows(columns).AddRow(
 			int64(7), int64(42), "Supplier A", "upstream-key", "Primary", "active", "group-1", "VIP", "openai", "active", 1.5, "active", true, now, nil,
-			"matched", 1, int64(101), "local-account", "openai", "apikey", "grok", "grok", 80, "active", true, "success", "2026-07-27T11:30:00Z", "", int64(0), "", 0, 0, `[]`, 12.5, 3.25, nil, false,
+			"matched", 1, int64(101), "local-account", "openai", "apikey", "grok", "grok", 80, "active", true, "success", "2026-07-27T11:30:00Z", "", int64(0), "", 0, 0, 0, 0, int64(0), `[]`, 12.5, 3.25, nil, false,
 		))
 
 	result, err := repo.ListAccounts(context.Background(), service.SupplierProviderDataListParams{

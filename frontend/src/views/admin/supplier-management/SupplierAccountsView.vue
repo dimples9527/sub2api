@@ -428,6 +428,15 @@
                   :title="'上次测试成功' + successLatencyLabel(account)"
                 >{{ successLatencyLabel(account) }}</span>
               </div>
+              <div
+                v-if="recentHealthRate(account) !== null"
+                class="sp-test-recent"
+                :title="recentHealthTitle(account)"
+              >
+                <span class="sp-recent-label">近1h</span>
+                <span :class="['sp-recent-rate', recentHealthRateTone(account)]">{{ recentHealthRate(account) }}%</span>
+                <span v-if="recentHealthAvgLabel(account)" class="sp-recent-avg">均{{ recentHealthAvgLabel(account) }}</span>
+              </div>
               <button
                 v-if="hasRepeatedGuardFailures(account)"
                 type="button"
@@ -3338,6 +3347,34 @@ function successLatencyLabel(account: SupplierProviderAccount): string {
   return latency ? `用时 ${latency}` : ''
 }
 
+// 近 1 小时的成功率与平均用时来自守护检测历史(supplier_account_health_history),
+// 与上方「测试结果」的手动/上次测试是两套机制:手动测试只留最新一条,无法算窗口。
+function recentHealthRate(account: SupplierProviderAccount): number | null {
+  const samples = Number(account.local_account_recent_health_sample_count) || 0
+  if (samples <= 0) return null
+  const success = Number(account.local_account_recent_health_success_count) || 0
+  return Math.round((success / samples) * 100)
+}
+
+function recentHealthRateTone(account: SupplierProviderAccount): string {
+  const rate = recentHealthRate(account)
+  if (rate === null) return ''
+  if (rate >= 95) return 'good'
+  if (rate >= 80) return 'warn'
+  return 'bad'
+}
+
+function recentHealthAvgLabel(account: SupplierProviderAccount): string {
+  return formatTestLatency(account.local_account_recent_health_avg_latency_ms)
+}
+
+function recentHealthTitle(account: SupplierProviderAccount): string | undefined {
+  const samples = Number(account.local_account_recent_health_sample_count) || 0
+  if (samples <= 0) return undefined
+  const success = Number(account.local_account_recent_health_success_count) || 0
+  return `最近 1 小时守护检测 ${samples} 次，成功 ${success} 次`
+}
+
 function guardCheckLagMinutes(account: SupplierProviderAccount): number | null {
   const checkedAt = new Date(account.local_account_health_guard_last_checked_at || '').getTime()
   if (Number.isNaN(checkedAt)) return null
@@ -4304,10 +4341,43 @@ button.sp-test-status.failed:hover {
 }
 
 .sp-test-latency {
-  color: var(--sp-muted);
+  color: var(--sp-cyan);
   font-size: 0.625rem;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.sp-test-recent {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.625rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.sp-recent-label {
+  color: var(--sp-muted);
+}
+
+.sp-recent-rate {
+  font-weight: 700;
+}
+
+.sp-recent-rate.good {
+  color: var(--sp-green);
+}
+
+.sp-recent-rate.warn {
+  color: var(--sp-amber);
+}
+
+.sp-recent-rate.bad {
+  color: var(--sp-red);
+}
+
+.sp-recent-avg {
+  color: var(--sp-cyan);
 }
 
 .sp-detail-test-result {

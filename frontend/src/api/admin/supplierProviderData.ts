@@ -122,6 +122,9 @@ export interface SupplierProviderAccount {
   local_account_health_guard_last_checked_at?: string
   local_account_health_guard_failure_count?: number
   local_account_health_guard_healthy_count?: number
+  local_account_recent_health_sample_count?: number
+  local_account_recent_health_success_count?: number
+  local_account_recent_health_avg_latency_ms?: number
   supplier_current_balance: number
   supplier_today_cost: number
 }
