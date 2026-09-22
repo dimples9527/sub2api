@@ -562,6 +562,7 @@ type GenerateRedeemCodesInput struct {
 	GroupID      *int64 // 订阅类型专用：关联的分组ID
 	ValidityDays int    // 订阅类型专用：有效天数
 	ExpiresAt    *time.Time
+	Notes        string // 批次标记，写入每张码的 notes，便于寄售对账
 }
 
 type ProxyBatchDeleteResult struct {

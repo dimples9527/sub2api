@@ -9,6 +9,7 @@ import type {
   GenerateRedeemCodesRequest,
   BatchUpdateRedeemCodeFields,
   RedeemCodeType,
+  RedeemStockGroup,
   PaginatedResponse
 } from '@/types'
 
@@ -70,7 +71,8 @@ export async function generate(
   value: number,
   groupId?: number | null,
   validityDays?: number,
-  expiresInDays?: number | null
+  expiresInDays?: number | null,
+  notes?: string
 ): Promise<RedeemCode[]> {
   const payload: GenerateRedeemCodesRequest = {
     count,
@@ -87,6 +89,10 @@ export async function generate(
   }
   if (expiresInDays && expiresInDays > 0) {
     payload.expires_in_days = expiresInDays
+  }
+  const trimmedNotes = notes?.trim()
+  if (trimmedNotes) {
+    payload.notes = trimmedNotes
   }
 
   const { data } = await apiClient.post<RedeemCode[]>('/admin/redeem-codes/generate', payload)
@@ -191,6 +197,15 @@ export async function exportCodes(filters?: {
   return response.data
 }
 
+/**
+ * Get available redeem code stock grouped by sellable spec (for restock warnings)
+ * @returns Array of stock groups
+ */
+export async function getStock(): Promise<RedeemStockGroup[]> {
+  const { data } = await apiClient.get<{ items: RedeemStockGroup[] }>('/admin/redeem-codes/stock')
+  return data.items ?? []
+}
+
 export const redeemAPI = {
   list,
   getById,
@@ -200,6 +215,7 @@ export const redeemAPI = {
   batchUpdate,
   expire,
   getStats,
+  getStock,
   exportCodes
 }
 

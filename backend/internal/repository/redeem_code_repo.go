@@ -2,10 +2,12 @@ package repository
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -136,6 +138,7 @@ func (r *redeemCodeRepository) ListWithFilters(ctx context.Context, params pagin
 		q = q.Where(
 			redeemcode.Or(
 				redeemcode.CodeContainsFold(search),
+				redeemcode.NotesContainsFold(search),
 				redeemcode.HasUserWith(user.EmailContainsFold(search)),
 			),
 		)
@@ -406,6 +409,83 @@ func (r *redeemCodeRepository) SumPositiveBalanceByUser(ctx context.Context, use
 		return 0, nil
 	}
 	return result[0].Sum, nil
+}
+
+// StockSummary 统计当前可用（未使用且未过期）兑换码，按 (type, value, group_id, validity_days) 分组计数。
+func (r *redeemCodeRepository) StockSummary(ctx context.Context) ([]service.RedeemStockGroup, error) {
+	now := time.Now()
+	var rows []struct {
+		Type         string  `json:"type"`
+		Value        float64 `json:"value"`
+		GroupID      *int64  `json:"group_id"`
+		ValidityDays int     `json:"validity_days"`
+		Count        int     `json:"count"`
+	}
+	err := r.client.RedeemCode.Query().
+		Where(
+			redeemcode.StatusEQ(service.StatusUnused),
+			redeemcode.Or(
+				redeemcode.ExpiresAtIsNil(),
+				redeemcode.ExpiresAtGT(now),
+			),
+		).
+		GroupBy(
+			redeemcode.FieldType,
+			redeemcode.FieldValue,
+			redeemcode.FieldGroupID,
+			redeemcode.FieldValidityDays,
+		).
+		Aggregate(dbent.As(dbent.Count(), "count")).
+		Scan(ctx, &rows)
+	if err != nil {
+		return nil, err
+	}
+
+	groupNames := make(map[int64]string)
+	groupIDs := make([]int64, 0)
+	seen := make(map[int64]struct{})
+	for _, row := range rows {
+		if row.GroupID != nil {
+			if _, ok := seen[*row.GroupID]; !ok {
+				seen[*row.GroupID] = struct{}{}
+				groupIDs = append(groupIDs, *row.GroupID)
+			}
+		}
+	}
+	if len(groupIDs) > 0 {
+		groups, err := r.client.Group.Query().Where(group.IDIn(groupIDs...)).All(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, g := range groups {
+			groupNames[g.ID] = g.Name
+		}
+	}
+
+	out := make([]service.RedeemStockGroup, 0, len(rows))
+	for _, row := range rows {
+		item := service.RedeemStockGroup{
+			Type:         row.Type,
+			Value:        row.Value,
+			GroupID:      row.GroupID,
+			ValidityDays: row.ValidityDays,
+			Count:        row.Count,
+		}
+		if row.GroupID != nil {
+			item.GroupName = groupNames[*row.GroupID]
+		}
+		out = append(out, item)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Type != out[j].Type {
+			return out[i].Type < out[j].Type
+		}
+		if out[i].Value != out[j].Value {
+			return out[i].Value < out[j].Value
+		}
+		return out[i].ValidityDays < out[j].ValidityDays
+	})
+	return out, nil
 }
 
 func redeemCodeEntityToService(m *dbent.RedeemCode) *service.RedeemCode {

@@ -488,6 +488,10 @@ func (s *redeemRepoStub) SumPositiveBalanceByUser(ctx context.Context, userID in
 	panic("unexpected SumPositiveBalanceByUser call")
 }
 
+func (s *redeemRepoStub) StockSummary(context.Context) ([]RedeemStockGroup, error) {
+	panic("unexpected StockSummary call")
+}
+
 type subscriptionInvalidateCall struct {
 	userID  int64
 	groupID int64

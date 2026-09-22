@@ -1843,6 +1843,17 @@ export interface GenerateRedeemCodesRequest {
   validity_days?: number // 订阅类型专用
   expires_at?: string | null
   expires_in_days?: number
+  notes?: string // 批次标记，用于寄售对账
+}
+
+// RedeemStockGroup 表示某一可售规格的可用兑换码库存数量
+export interface RedeemStockGroup {
+  type: RedeemCodeType
+  value: number
+  group_id?: number | null
+  group_name?: string
+  validity_days?: number
+  count: number
 }
 
 export interface BatchUpdateRedeemCodeFields {

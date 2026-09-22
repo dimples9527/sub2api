@@ -77,6 +77,10 @@ func (r *redeemRejectRepo) SumPositiveBalanceByUser(ctx context.Context, userID 
 	panic("unexpected SumPositiveBalanceByUser call")
 }
 
+func (r *redeemRejectRepo) StockSummary(context.Context) ([]RedeemStockGroup, error) {
+	panic("unexpected StockSummary call")
+}
+
 func TestRedeemRejectsInvitationCodeBeforeTransaction(t *testing.T) {
 	ctx := context.Background()
 	redeemRepo := &redeemRejectRepo{

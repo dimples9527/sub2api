@@ -53,6 +53,61 @@
             </button>
           </div>
         </div>
+
+        <!-- 库存 / 补货预警 -->
+        <div class="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-dark-700 dark:bg-dark-800/60">
+          <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200">
+              <Icon name="inbox" size="sm" />
+              {{ t('admin.redeem.stockTitle') }}
+            </div>
+            <div class="flex items-center gap-2">
+              <label class="text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.redeem.stockThreshold') }}
+              </label>
+              <input
+                v-model.number="stockThreshold"
+                type="number"
+                min="0"
+                class="input h-8 w-20 py-1 text-sm"
+              />
+              <button
+                @click="loadStock"
+                :disabled="stockLoading"
+                class="btn btn-secondary btn-sm"
+                :title="t('common.refresh')"
+              >
+                <Icon name="refresh" size="sm" :class="stockLoading ? 'animate-spin' : ''" />
+              </button>
+            </div>
+          </div>
+
+          <p
+            v-if="lowStockGroups.length > 0"
+            class="mb-2 text-xs text-amber-600 dark:text-amber-400"
+          >
+            {{ t('admin.redeem.stockLowWarning', { count: lowStockGroups.length }) }}
+          </p>
+
+          <div v-if="stockGroups.length > 0" class="flex flex-wrap gap-2">
+            <span
+              v-for="(group, index) in stockGroups"
+              :key="`${group.type}-${group.value}-${group.group_id ?? 'none'}-${group.validity_days ?? 0}-${index}`"
+              class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs"
+              :class="
+                isLowStock(group)
+                  ? 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-500/40 dark:bg-amber-900/20 dark:text-amber-300'
+                  : 'border-gray-200 bg-white text-gray-600 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-300'
+              "
+            >
+              {{ stockLabel(group) }}
+              <span class="font-semibold">× {{ group.count }}</span>
+            </span>
+          </div>
+          <p v-else class="text-xs text-gray-400 dark:text-gray-500">
+            {{ t('admin.redeem.stockEmpty') }}
+          </p>
+        </div>
       </template>
 
       <template #table>
@@ -391,10 +446,23 @@
                 v-model.number="generateForm.count"
                 type="number"
                 min="1"
-                max="100"
+                max="1000"
                 required
                 class="input"
               />
+            </div>
+            <div>
+              <label class="input-label">{{ t('admin.redeem.batchTag') }}</label>
+              <input
+                v-model="generateForm.notes"
+                type="text"
+                maxlength="255"
+                class="input"
+                :placeholder="t('admin.redeem.batchTagPlaceholder')"
+              />
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.redeem.batchTagHint') }}
+              </p>
             </div>
             <div class="flex justify-end gap-3 pt-2">
               <button type="button" @click="showGenerateDialog = false" class="btn btn-secondary">
@@ -626,6 +694,7 @@ import {
 import type {
   RedeemCode,
   RedeemCodeType,
+  RedeemStockGroup,
   Group,
   GroupPlatform,
   SubscriptionType,
@@ -839,6 +908,7 @@ const generateForm = reactive({
   type: 'balance' as RedeemCodeType,
   value: 10,
   count: 1,
+  notes: '',
   group_id: null as number | null,
   validity_days: 30,
   expiry_option: 'never' as RedeemCodeExpiryOption,
@@ -1046,17 +1116,20 @@ const handleGenerateCodes = async () => {
       generateForm.value,
       generateForm.type === 'subscription' ? generateForm.group_id : undefined,
       generateForm.type === 'subscription' ? generateForm.validity_days : undefined,
-      expiresInDays
+      expiresInDays,
+      generateForm.notes
     )
     showGenerateDialog.value = false
     generatedCodes.value = result
     showResultDialog.value = true
     // 重置表单
+    generateForm.notes = ''
     generateForm.group_id = null
     generateForm.validity_days = 30
     generateForm.expiry_option = 'never'
     generateForm.custom_expiry_days = 7
     loadCodes()
+    loadStock()
   } catch (error: any) {
     appStore.showError(error.response?.data?.detail || t('admin.redeem.failedToGenerate'))
     console.error('Error generating codes:', error)
@@ -1185,9 +1258,54 @@ const loadSubscriptionGroups = async () => {
   }
 }
 
+// ==================== 库存预警 ====================
+const STOCK_THRESHOLD_KEY = 'redeem_stock_threshold'
+const stockGroups = ref<RedeemStockGroup[]>([])
+const stockLoading = ref(false)
+const stockThreshold = ref<number>(
+  Math.max(0, Number(localStorage.getItem(STOCK_THRESHOLD_KEY)) || 20)
+)
+
+watch(stockThreshold, (value) => {
+  const normalized = Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0
+  localStorage.setItem(STOCK_THRESHOLD_KEY, String(normalized))
+})
+
+const loadStock = async () => {
+  stockLoading.value = true
+  try {
+    stockGroups.value = await adminAPI.redeem.getStock()
+  } catch (error) {
+    console.error('Error loading redeem stock:', error)
+  } finally {
+    stockLoading.value = false
+  }
+}
+
+const stockLabel = (group: RedeemStockGroup): string => {
+  switch (group.type) {
+    case 'balance':
+      return t('admin.redeem.stockSpecBalance', { value: group.value })
+    case 'concurrency':
+      return t('admin.redeem.stockSpecConcurrency', { value: group.value })
+    case 'subscription':
+      return t('admin.redeem.stockSpecSubscription', {
+        group: group.group_name || `#${group.group_id ?? '-'}`,
+        days: group.validity_days || 30
+      })
+    default:
+      return t('admin.redeem.stockSpecOther', { type: group.type, value: group.value })
+  }
+}
+
+const isLowStock = (group: RedeemStockGroup): boolean => group.count < stockThreshold.value
+
+const lowStockGroups = computed(() => stockGroups.value.filter(isLowStock))
+
 onMounted(() => {
   loadCodes()
   loadSubscriptionGroups()
+  loadStock()
 })
 
 onUnmounted(() => {

@@ -72,6 +72,19 @@ type RedeemCodeRepository interface {
 	ListByUserPaginated(ctx context.Context, userID int64, params pagination.PaginationParams, codeType string) ([]RedeemCode, *pagination.PaginationResult, error)
 	// SumPositiveBalanceByUser returns the total recharged amount (sum of positive balance values) for a user.
 	SumPositiveBalanceByUser(ctx context.Context, userID int64) (float64, error)
+	// StockSummary 按类型/面值/分组统计当前可用（未使用且未过期）兑换码的库存数量。
+	StockSummary(ctx context.Context) ([]RedeemStockGroup, error)
+}
+
+// RedeemStockGroup 表示一种「可售规格」的可用兑换码库存，用于寄售补货预警。
+// 一个规格由 (Type, Value, GroupID) 唯一确定，例如「余额 100 元」或「某订阅分组 30 天」。
+type RedeemStockGroup struct {
+	Type         string  `json:"type"`
+	Value        float64 `json:"value"`
+	GroupID      *int64  `json:"group_id,omitempty"`
+	GroupName    string  `json:"group_name,omitempty"`
+	ValidityDays int     `json:"validity_days,omitempty"`
+	Count        int     `json:"count"`
 }
 
 // GenerateCodesRequest 生成兑换码请求
@@ -684,6 +697,15 @@ func (s *RedeemService) GetStats(ctx context.Context) (map[string]any, error) {
 	}
 
 	return stats, nil
+}
+
+// StockSummary 返回按可售规格分组的可用兑换码库存，供后台补货预警使用。
+func (s *RedeemService) StockSummary(ctx context.Context) ([]RedeemStockGroup, error) {
+	groups, err := s.redeemRepo.StockSummary(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("redeem stock summary: %w", err)
+	}
+	return groups, nil
 }
 
 // GetUserHistory 获取用户的兑换历史
