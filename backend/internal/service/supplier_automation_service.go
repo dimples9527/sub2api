@@ -96,6 +96,12 @@ type SupplierAutomationConfig struct {
 	GroupElectionLatencyWeight float64 `json:"group_scheduling_election_latency_weight"`
 	// 连续失败多少个调度周期才真正关闭调度，默认 2（一次抖动不关）；配 1 即退回"失败即关"。
 	GroupElectionFailureThreshold int `json:"group_scheduling_election_failure_threshold"`
+	// 换人迟滞死区，取延迟相对比例（默认 0.15=挑战者要快 15% 才换人），压住正常账号反复对拍的抖动。
+	GroupElectionSwitchMargin float64 `json:"group_scheduling_election_switch_margin"`
+	// 最近平均延迟的时间窗（分钟，默认 30）：延迟改取健康历史窗口均值而非单次采样，从源头削抖。
+	GroupElectionLatencyWindowMinutes int `json:"group_scheduling_election_latency_window_minutes"`
+	// 信任窗口均值所需的最少成功样本数（默认 3）：不足则回退到最近单值，等于退回今天的行为。
+	GroupElectionLatencyMinSamples int `json:"group_scheduling_election_latency_min_samples"`
 }
 
 type SupplierAutomationRun struct {
@@ -722,11 +728,14 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 			return fmt.Errorf("supplier group scheduling election service is required")
 		}
 		result, err := s.groupElection.Run(ctx, SupplierGroupSchedulingElectionConfig{
-			TopN:             task.Config.GroupElectionTopN,
-			DisabledGroupIDs: task.Config.GroupElectionDisabledGroupIDs,
-			CountWeight:      task.Config.GroupElectionCountWeight,
-			LatencyWeight:    task.Config.GroupElectionLatencyWeight,
-			FailureThreshold: task.Config.GroupElectionFailureThreshold,
+			TopN:                 task.Config.GroupElectionTopN,
+			DisabledGroupIDs:     task.Config.GroupElectionDisabledGroupIDs,
+			CountWeight:          task.Config.GroupElectionCountWeight,
+			LatencyWeight:        task.Config.GroupElectionLatencyWeight,
+			FailureThreshold:     task.Config.GroupElectionFailureThreshold,
+			SwitchMargin:         task.Config.GroupElectionSwitchMargin,
+			LatencyWindowMinutes: task.Config.GroupElectionLatencyWindowMinutes,
+			LatencyMinSamples:    task.Config.GroupElectionLatencyMinSamples,
 		}, time.Now())
 		run.ProcessedCount = result.AccountCount
 		run.SuccessCount = result.EnabledCount + result.DisabledCount + result.UnchangedCount

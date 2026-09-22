@@ -337,6 +337,9 @@
               <Input :model-value="editForm.config.group_scheduling_election_count_weight" type="number" step="0.1" min="0.1" label="连续成功次数权重（默认 1）" @update:model-value="editForm.config.group_scheduling_election_count_weight = toNumber($event, editForm.config.group_scheduling_election_count_weight ?? 1)" />
               <Input :model-value="editForm.config.group_scheduling_election_latency_weight" type="number" step="0.1" min="0.1" label="测试用时权重（默认 0.5）" @update:model-value="editForm.config.group_scheduling_election_latency_weight = toNumber($event, editForm.config.group_scheduling_election_latency_weight ?? 0.5)" />
               <Input :model-value="editForm.config.group_scheduling_election_failure_threshold" type="number" min="1" label="连续失败关闭阈值（默认 2 次）" @update:model-value="editForm.config.group_scheduling_election_failure_threshold = toNumber($event, editForm.config.group_scheduling_election_failure_threshold ?? 2)" />
+              <Input :model-value="editForm.config.group_scheduling_election_switch_margin" type="number" step="0.05" min="0" label="切换迟滞比例（默认 0.15，挑战者要快 15% 才换人）" @update:model-value="editForm.config.group_scheduling_election_switch_margin = toNumber($event, editForm.config.group_scheduling_election_switch_margin ?? 0.15)" />
+              <Input :model-value="editForm.config.group_scheduling_election_latency_window_minutes" type="number" min="1" label="延迟平均窗口（分钟，默认 30）" @update:model-value="editForm.config.group_scheduling_election_latency_window_minutes = toNumber($event, editForm.config.group_scheduling_election_latency_window_minutes ?? 30)" />
+              <Input :model-value="editForm.config.group_scheduling_election_latency_min_samples" type="number" min="1" label="平均最少成功样本（默认 3，不足则回退单次）" @update:model-value="editForm.config.group_scheduling_election_latency_min_samples = toNumber($event, editForm.config.group_scheduling_election_latency_min_samples ?? 3)" />
             </div>
             <div class="sp-rate-guard-scope-card">
               <div>
@@ -1486,6 +1489,9 @@ const editForm = reactive<SupplierAutomationTask>({
     group_scheduling_election_count_weight: 1,
     group_scheduling_election_latency_weight: 0.5,
     group_scheduling_election_failure_threshold: 2,
+    group_scheduling_election_switch_margin: 0.15,
+    group_scheduling_election_latency_window_minutes: 30,
+    group_scheduling_election_latency_min_samples: 3,
   },
   last_status: '',
   last_message: '',
@@ -2763,6 +2769,17 @@ function applyGroupElectionDefaults() {
   const failureThreshold = Math.floor(Number(editForm.config.group_scheduling_election_failure_threshold))
   editForm.config.group_scheduling_election_failure_threshold =
     Number.isFinite(failureThreshold) && failureThreshold > 0 ? failureThreshold : 2
+  // 迟滞比例：正数才有效，0 在后端被当成"未配置"回落默认 0.15；想近乎关闭请填极小正数。
+  const switchMargin = Number(editForm.config.group_scheduling_election_switch_margin)
+  editForm.config.group_scheduling_election_switch_margin =
+    Number.isFinite(switchMargin) && switchMargin > 0 ? switchMargin : 0.15
+  // 平均窗口与最少样本必须是正整数：0 在后端被当成"未配置"回落默认 30 / 3。
+  const latencyWindow = Math.floor(Number(editForm.config.group_scheduling_election_latency_window_minutes))
+  editForm.config.group_scheduling_election_latency_window_minutes =
+    Number.isFinite(latencyWindow) && latencyWindow > 0 ? latencyWindow : 30
+  const latencyMinSamples = Math.floor(Number(editForm.config.group_scheduling_election_latency_min_samples))
+  editForm.config.group_scheduling_election_latency_min_samples =
+    Number.isFinite(latencyMinSamples) && latencyMinSamples > 0 ? latencyMinSamples : 3
 }
 
 function validateAccountHealthGuardSelection(config: SupplierAutomationConfig): string {

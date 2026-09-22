@@ -50,6 +50,15 @@ export interface SupplierAutomationConfig {
    * 配成 1 即退回「一次失败立刻关」；分组里没有备选账号时无论阈值多少都不关。
    */
   group_scheduling_election_failure_threshold?: number
+  /**
+   * 分组择优调度：换人的迟滞死区，取延迟的相对比例，默认 0.15（挑战者要快 15% 才换掉在任者）。
+   * 用来压住两个正常账号因延迟抖动每轮对拍、反复开关调度的抖动；0 或缺失回落默认值。
+   */
+  group_scheduling_election_switch_margin?: number
+  /** 分组择优调度：「最近平均延迟」的时间窗（分钟），默认 30，取健康历史窗口内成功样本求平均。 */
+  group_scheduling_election_latency_window_minutes?: number
+  /** 分组择优调度：信任窗口平均所需的最少成功样本数，默认 3，不足则回退到最近一次单值。 */
+  group_scheduling_election_latency_min_samples?: number
 }
 
 export interface SupplierAutomationTask {

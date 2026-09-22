@@ -22,7 +22,13 @@ func NewSupplierGroupSchedulingElectionRepository(db *sql.DB) service.SupplierGr
 // ListGroupSchedulingElectionMembers 返回所有活跃本地分组下的活跃账号成员行。
 // 择优调度只读现有测试状态与连续成功计数（不重测），因此这里连同 extra 一并取出，
 // 在 Go 里解析 last_test_status / supplier_health_guard_healthy_count / last_tested_at。
-func (r *supplierGroupSchedulingElectionRepository) ListGroupSchedulingElectionMembers(ctx context.Context) ([]service.SupplierGroupSchedulingElectionMember, error) {
+func (r *supplierGroupSchedulingElectionRepository) ListGroupSchedulingElectionMembers(ctx context.Context, latencyWindowMinutes int) ([]service.SupplierGroupSchedulingElectionMember, error) {
+	if latencyWindowMinutes <= 0 {
+		latencyWindowMinutes = service.DefaultSupplierGroupSchedulingElectionLatencyWindowMinutes
+	}
+	// LATERAL 聚合最近 $2 分钟的健康历史：延迟平均只取成功样本（healthy/slow 且 latency>0，
+	// 剔除失败/超时），但总样本数含 failed —— 失败要靠成功率在评分侧重新计入代价。
+	// 已有 idx_supplier_account_health_history_account_checked（account+checked_at）索引，聚合很便宜。
 	rows, err := r.db.QueryContext(ctx, `
 SELECT g.id AS group_id,
        COALESCE(g.name, '') AS group_name,
@@ -30,11 +36,26 @@ SELECT g.id AS group_id,
        COALESCE(a.name, '') AS account_name,
        COALESCE(a.platform, '') AS platform,
        COALESCE(a.schedulable, FALSE) AS schedulable,
-       COALESCE(a.extra, '{}'::jsonb)::text AS extra
+       COALESCE(a.extra, '{}'::jsonb)::text AS extra,
+       COALESCE(lat.avg_latency_ms, 0) AS avg_latency_ms,
+       COALESCE(lat.success_count, 0) AS latency_success_count,
+       COALESCE(lat.total_count, 0) AS latency_total_count
 FROM account_groups ag
 JOIN groups g ON g.id = ag.group_id AND g.deleted_at IS NULL AND g.status = $1
 JOIN accounts a ON a.id = ag.account_id AND a.deleted_at IS NULL AND a.status = $1
-ORDER BY g.id ASC, a.id ASC`, service.StatusActive)
+LEFT JOIN LATERAL (
+    SELECT AVG(h.latency_ms) FILTER (
+             WHERE h.status IN ('healthy', 'slow') AND h.latency_ms > 0
+           )::BIGINT AS avg_latency_ms,
+           COUNT(*) FILTER (
+             WHERE h.status IN ('healthy', 'slow') AND h.latency_ms > 0
+           ) AS success_count,
+           COUNT(*) AS total_count
+    FROM supplier_account_health_history h
+    WHERE h.local_account_id = a.id
+      AND h.checked_at >= now() - make_interval(mins => $2)
+) lat ON TRUE
+ORDER BY g.id ASC, a.id ASC`, service.StatusActive, latencyWindowMinutes)
 	if err != nil {
 		return nil, fmt.Errorf("查询分组择优调度成员失败: %w", err)
 	}
@@ -52,6 +73,9 @@ ORDER BY g.id ASC, a.id ASC`, service.StatusActive)
 			&member.Platform,
 			&member.Schedulable,
 			&extraRaw,
+			&member.AvgLatencyMs,
+			&member.LatencySuccessCount,
+			&member.LatencyTotalCount,
 		); err != nil {
 			return nil, fmt.Errorf("扫描分组择优调度成员失败: %w", err)
 		}

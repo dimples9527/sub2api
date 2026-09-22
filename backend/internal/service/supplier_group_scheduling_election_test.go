@@ -15,7 +15,7 @@ type fakeGroupElectionRepo struct {
 	members []SupplierGroupSchedulingElectionMember
 }
 
-func (f *fakeGroupElectionRepo) ListGroupSchedulingElectionMembers(ctx context.Context) ([]SupplierGroupSchedulingElectionMember, error) {
+func (f *fakeGroupElectionRepo) ListGroupSchedulingElectionMembers(_ context.Context, _ int) ([]SupplierGroupSchedulingElectionMember, error) {
 	return f.members, nil
 }
 
@@ -389,7 +389,8 @@ func TestGroupElectionDetailItemsCarryLatency(t *testing.T) {
 	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1}, time.Now())
 	require.NoError(t, err)
 
-	// 112 次数少但明显更快：0.3 + 0.5×1 = 0.8 > 0.7 + 0.5×0 = 0.7，靠用时翻盘。
+	// 112 次数少但明显更快：即便在任者 111 的延迟按迟滞折算(800×0.85=680)仍远慢于 112(120)，
+	// 112 = 0.3 + 0.5×1 = 0.8 > 111 = 0.7 + 0.5×0 = 0.7，靠用时翻盘。
 	require.Equal(t, []int64{112}, result.Groups[0].WinnerIDs)
 
 	require.Len(t, result.Items, 3)
@@ -500,7 +501,7 @@ func TestGroupElectionScoresNormalizeWithinPlatform(t *testing.T) {
 		{AccountID: 142, Platform: "openai", HealthyCount: 5, LastTestLatencyMs: 300},
 		{AccountID: 143, Platform: "gemini", HealthyCount: 5, LastTestLatencyMs: 50},
 	}
-	scores := supplierGroupSchedulingElectionScores(members, 1.0, 0.5)
+	scores := supplierGroupSchedulingElectionScores(members, 1.0, 0.5, DefaultSupplierGroupSchedulingElectionLatencyMinSamples, DefaultSupplierGroupSchedulingElectionSwitchMargin)
 
 	// 三者次数都是 5，归一后同为 0.5，差异全部来自用时项。
 	require.InDelta(t, 0.5+0.5*1.0, scores[141], 1e-9, "同平台最快者用时归一为 1")
@@ -514,7 +515,7 @@ func TestGroupElectionScoresCapCountContribution(t *testing.T) {
 		{AccountID: 151, Platform: "openai", HealthyCount: 50, LastTestLatencyMs: 100},
 		{AccountID: 152, Platform: "openai", HealthyCount: 10, LastTestLatencyMs: 900},
 	}
-	scores := supplierGroupSchedulingElectionScores(members, 1.0, 0.5)
+	scores := supplierGroupSchedulingElectionScores(members, 1.0, 0.5, DefaultSupplierGroupSchedulingElectionLatencyMinSamples, DefaultSupplierGroupSchedulingElectionSwitchMargin)
 
 	require.InDelta(t, 1.0+0.5*1.0, scores[151], 1e-9)
 	require.InDelta(t, 1.0+0.5*0.0, scores[152], 1e-9, "次数达到上限后归一为 1，不再拉开差距")
@@ -581,4 +582,132 @@ func TestGroupElectionLatencyWeightChangesWinner(t *testing.T) {
 	require.Equal(t, true, store.calls[172], "提高用时权重后更快的 172 应翻盘")
 	_, touched171 := store.calls[171]
 	require.False(t, touched171)
+}
+
+// 迟滞死区：挑战者更快但没快过死区比例(默认 15%)时，保持在任者不换人 —— 这是压住
+// 「两个正常账号每轮对拍」抖动的核心。71 在任 1000ms，72 只快 10%(900ms) < 15%，应保住 71。
+// 两者次数都封顶(20)，胜负只看延迟，专门验证死区在「两候选」这种最易抖动的场景里确实生效。
+func TestGroupElectionHysteresisKeepsIncumbentWithinMargin(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, AccountID: 71, Platform: "openai", Schedulable: true, LastTestStatus: "success", HealthyCount: 20, LastTestLatencyMs: 1000},
+		{GroupID: 1, AccountID: 72, Platform: "openai", Schedulable: false, LastTestStatus: "success", HealthyCount: 20, LastTestLatencyMs: 900},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1}, time.Now())
+	require.NoError(t, err)
+
+	require.Equal(t, []int64{71}, result.Groups[0].WinnerIDs, "挑战者只快 10% 未过 15% 死区，应保住在任者 71")
+	require.Equal(t, 0, result.EnabledCount)
+	require.Equal(t, 0, result.DisabledCount)
+	_, touched71 := store.calls[71]
+	require.False(t, touched71, "在任者保持当选，不写库")
+	_, touched72 := store.calls[72]
+	require.False(t, touched72, "挑战者落选且本就未开，不写库")
+}
+
+// 迟滞死区：挑战者快过死区比例时正常换人。72 比 71 快 30%(700 vs 1000) > 15%，应夺位。
+func TestGroupElectionHysteresisSwitchesBeyondMargin(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, AccountID: 71, Platform: "openai", Schedulable: true, LastTestStatus: "success", HealthyCount: 20, LastTestLatencyMs: 1000},
+		{GroupID: 1, AccountID: 72, Platform: "openai", Schedulable: false, LastTestStatus: "success", HealthyCount: 20, LastTestLatencyMs: 700},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	_, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1}, time.Now())
+	require.NoError(t, err)
+
+	require.Equal(t, false, store.calls[71], "被快 30% 的挑战者盖过死区 → 关闭")
+	require.Equal(t, true, store.calls[72], "快过 15% 死区 → 开启")
+}
+
+// 窗口平均 + 成功率惩罚：201 窗口均值更低(800ms)但成功率极差(10/60)，被成功率放大成 4000ms；
+// 202 稍慢(2000ms)但稳(58/60)。202 应当选 —— 只算成功样本会掩盖「偶尔快一下、实则一直失败」的账号，
+// 成功率把被剔除的失败重新计入代价。同时验证明细里显示的是窗口均值(base)，不带惩罚。
+func TestGroupElectionWindowAverageWithSuccessRatePenalty(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, AccountID: 201, Platform: "openai", Schedulable: false, LastTestStatus: "success", HealthyCount: 20,
+			AvgLatencyMs: 800, LatencySuccessCount: 10, LatencyTotalCount: 60},
+		{GroupID: 1, AccountID: 202, Platform: "openai", Schedulable: false, LastTestStatus: "success", HealthyCount: 20,
+			AvgLatencyMs: 2000, LatencySuccessCount: 58, LatencyTotalCount: 60},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1}, time.Now())
+	require.NoError(t, err)
+
+	require.Equal(t, true, store.calls[202], "稳定的 202 应当选，不该被偶尔快一下的 201 抢走")
+	_, touched201 := store.calls[201]
+	require.False(t, touched201)
+
+	require.Len(t, result.Items, 1, "只有当选并开启的 202 产生变更明细")
+	require.Equal(t, int64(202), result.Items[0].AccountID)
+	require.Equal(t, int64(2000), result.Items[0].LatencyMs, "明细显示窗口均值(base)，不含成功率惩罚")
+}
+
+// 少样本不信任：201 窗口均值很低(100ms)但只有 2 个成功样本(< 默认 3)，不信任该均值，
+// 回退到最近单值(5000ms) → 落选；202 单值 200ms 当选。防止几次抽样就把赢家换掉。
+func TestGroupElectionLatencyFallsBackWhenTooFewSamples(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, AccountID: 211, Platform: "openai", Schedulable: false, LastTestStatus: "success", HealthyCount: 20,
+			AvgLatencyMs: 100, LatencySuccessCount: 2, LatencyTotalCount: 2, LastTestLatencyMs: 5000},
+		{GroupID: 1, AccountID: 212, Platform: "openai", Schedulable: false, LastTestStatus: "success", HealthyCount: 20,
+			LastTestLatencyMs: 200},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1}, time.Now())
+	require.NoError(t, err)
+
+	require.Equal(t, true, store.calls[212], "样本不足时 211 回退单值 5000ms，更快的 212 当选")
+	_, touched211 := store.calls[211]
+	require.False(t, touched211)
+	require.Equal(t, int64(200), result.Items[0].LatencyMs, "212 明细显示其单值 200ms")
+}
+
+// 直接钉住有效延迟(显示 base 与评分 scoring)的口径：窗口可信时取均值，评分再按成功率惩罚。
+func TestGroupElectionLatencyHelper(t *testing.T) {
+	// 可信窗口：成功 10、总 60 → 成功率 0.167 但被 floor 0.2 兜住，评分 = 800 / 0.2 = 4000。
+	base, scoring := supplierGroupSchedulingElectionLatency(SupplierGroupSchedulingElectionMember{
+		AvgLatencyMs: 800, LatencySuccessCount: 10, LatencyTotalCount: 60, LastTestLatencyMs: 111,
+	}, DefaultSupplierGroupSchedulingElectionLatencyMinSamples)
+	require.Equal(t, int64(800), base, "显示用取窗口均值")
+	require.Equal(t, int64(4000), scoring, "评分用按成功率惩罚，成功率低于地板时按地板 0.2 除")
+
+	// 成功率高：评分几乎等于均值本身。
+	base, scoring = supplierGroupSchedulingElectionLatency(SupplierGroupSchedulingElectionMember{
+		AvgLatencyMs: 2000, LatencySuccessCount: 58, LatencyTotalCount: 60, LastTestLatencyMs: 111,
+	}, DefaultSupplierGroupSchedulingElectionLatencyMinSamples)
+	require.Equal(t, int64(2000), base)
+	require.InDelta(t, 2069, scoring, 2, "2000 / (58/60) ≈ 2069")
+
+	// 样本不足：base 与 scoring 都回退最近单值，绝不比现状更差。
+	base, scoring = supplierGroupSchedulingElectionLatency(SupplierGroupSchedulingElectionMember{
+		AvgLatencyMs: 100, LatencySuccessCount: 2, LatencyTotalCount: 2, LastTestLatencyMs: 5000,
+	}, DefaultSupplierGroupSchedulingElectionLatencyMinSamples)
+	require.Equal(t, int64(5000), base)
+	require.Equal(t, int64(5000), scoring)
+}
+
+// 迟滞死区、平均窗口、最少样本三项同样要能从旧配置平滑升级（缺失=0 → 默认），并各自 clamp 上限。
+func TestGroupElectionNormalizeConfigLatencyAndMargin(t *testing.T) {
+	cfg := normalizeSupplierGroupSchedulingElectionConfig(SupplierGroupSchedulingElectionConfig{TopN: 1})
+	require.InDelta(t, DefaultSupplierGroupSchedulingElectionSwitchMargin, cfg.SwitchMargin, 1e-9)
+	require.Equal(t, DefaultSupplierGroupSchedulingElectionLatencyWindowMinutes, cfg.LatencyWindowMinutes)
+	require.Equal(t, DefaultSupplierGroupSchedulingElectionLatencyMinSamples, cfg.LatencyMinSamples)
+
+	capped := normalizeSupplierGroupSchedulingElectionConfig(SupplierGroupSchedulingElectionConfig{
+		TopN: 1, SwitchMargin: 9, LatencyWindowMinutes: 999999, LatencyMinSamples: 999999,
+	})
+	require.InDelta(t, MaxSupplierGroupSchedulingElectionSwitchMargin, capped.SwitchMargin, 1e-9)
+	require.Equal(t, MaxSupplierGroupSchedulingElectionLatencyWindowMinutes, capped.LatencyWindowMinutes)
+	require.Equal(t, MaxSupplierGroupSchedulingElectionLatencyMinSamples, capped.LatencyMinSamples)
+
+	// 显式配一个极小正数不被当成缺失（用于近乎关闭迟滞）。
+	tiny := normalizeSupplierGroupSchedulingElectionConfig(SupplierGroupSchedulingElectionConfig{TopN: 1, SwitchMargin: 0.0001})
+	require.InDelta(t, 0.0001, tiny.SwitchMargin, 1e-12)
 }

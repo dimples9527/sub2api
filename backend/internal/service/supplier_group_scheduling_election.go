@@ -60,6 +60,32 @@ const (
 	DefaultSupplierGroupSchedulingElectionFailureThreshold = 2
 	MaxSupplierGroupSchedulingElectionFailureThreshold     = 100
 
+	// DefaultSupplierGroupSchedulingElectionSwitchMargin 是「换人」的迟滞死区，含义是延迟的相对比例：
+	// 挑战者必须在（可靠性校正后的）延迟上比在任者快出这个比例才夺位，否则保持现任。0.15 = 快 15%。
+	// 做成延迟比例而不是综合分死区，是因为组内 min-max 归一化会把任意延迟差放大到满量程，
+	// 综合分层面的死区在「两个候选」这种最常见的抖动场景里根本不生效（分差恒为 LatencyWeight）。
+	DefaultSupplierGroupSchedulingElectionSwitchMargin = 0.15
+	// MaxSupplierGroupSchedulingElectionSwitchMargin 是死区上限。配得过大会让在任者近乎永不被换下
+	// （除非它测试失败），本质变成「谁先占位谁通吃」，故设 0.95 上限防误配（另有 5% 地板兜底）。
+	MaxSupplierGroupSchedulingElectionSwitchMargin = 0.95
+
+	// DefaultSupplierGroupSchedulingElectionLatencyWindowMinutes 是「最近一段时间平均延迟」的时间窗。
+	// 延迟改从 supplier_account_health_history 里取最近这么多分钟的成功样本求平均，而不是用
+	// accounts.extra 里那个被反复覆盖的单值——单采样抖动远大于均值，是抖动的源头之一。
+	DefaultSupplierGroupSchedulingElectionLatencyWindowMinutes = 30
+	MaxSupplierGroupSchedulingElectionLatencyWindowMinutes     = 1440
+
+	// DefaultSupplierGroupSchedulingElectionLatencyMinSamples 是信任窗口均值所需的最少成功样本数。
+	// 低于它就不信任这个均值（几次采样太抖），回退到 accounts.extra 里的最近单值——
+	// 等于退回今天的行为，绝不比现状更差。
+	DefaultSupplierGroupSchedulingElectionLatencyMinSamples = 3
+	MaxSupplierGroupSchedulingElectionLatencyMinSamples     = 1000
+
+	// supplierGroupElectionSuccessRateFloor 是成功率惩罚的下限（写死，不做成配置——它是防爆保护）。
+	// 有效延迟 = 窗口均值 / max(成功率, floor)：只算成功样本会掩盖「偶尔快一下、实则一直在失败」
+	// 的账号，用成功率把失败重新计入代价。floor 0.2 表示失败惩罚最多放大 5 倍，防止成功率趋 0 时除爆。
+	supplierGroupElectionSuccessRateFloor = 0.2
+
 	// supplierGroupElectionFailedCountExtraKey 是本任务自己维护的「连续失败轮次」。
 	// 不能复用健康守护的 supplier_health_guard_failure_count：那个是健康守护自己检测周期里的计数，
 	// 而本任务裁决依据的 last_test_status 只有账号测试才会更新，两者不同源、清零时机也不一致。
@@ -87,6 +113,13 @@ type SupplierGroupSchedulingElectionConfig struct {
 	// FailureThreshold 是连续多少个调度周期都判失败才关闭调度，默认 2。
 	// 配成 1 即退回「一次失败立刻关」的旧行为；0 或缺失都按默认值处理。
 	FailureThreshold int `json:"group_scheduling_election_failure_threshold"`
+	// SwitchMargin 是换人的迟滞死区，取延迟的相对比例（0.15 = 挑战者要快 15% 才换人），默认 0.15；
+	// 0 或缺失回落默认值。想几乎关掉迟滞请填一个极小正数（如 0.0001），不要把 0 当开关用——那会被当成缺失。
+	SwitchMargin float64 `json:"group_scheduling_election_switch_margin"`
+	// LatencyWindowMinutes 是「最近平均延迟」的时间窗（分钟），默认 30；0 或缺失回落默认值。
+	LatencyWindowMinutes int `json:"group_scheduling_election_latency_window_minutes"`
+	// LatencyMinSamples 是信任窗口均值所需的最少成功样本数，默认 3；不足则回退单值。
+	LatencyMinSamples int `json:"group_scheduling_election_latency_min_samples"`
 }
 
 // SupplierGroupSchedulingElectionMember 是仓储层返回的一条"分组×账号"成员行。
@@ -108,10 +141,19 @@ type SupplierGroupSchedulingElectionMember struct {
 	// 它不来自测试系统：last_test_status 只有账号测试才更新，而没有任何自动任务会跑账号测试，
 	// 所以"连续失败几次"必须由本任务按自己的执行周期来数。
 	FailedCount int
+	// 下面三项来自 supplier_account_health_history 在时间窗内的聚合，用来把延迟从"单次采样"
+	// 升级为"最近一段时间的平均"，并让被剔除的失败样本通过成功率重新计入代价。
+	//   AvgLatencyMs        —— 窗口内成功样本（healthy/slow 且 latency>0）的平均延迟，0 表示窗口无数据。
+	//   LatencySuccessCount —— 窗口内成功样本数，用于判断均值是否可信（不足 MinSamples 则回退单值）。
+	//   LatencyTotalCount   —— 窗口内总样本数（含 failed），成功率 = 成功数 / 总数，不受各账号巡检频率差异影响。
+	AvgLatencyMs        int64
+	LatencySuccessCount int
+	LatencyTotalCount   int
 }
 
 type SupplierGroupSchedulingElectionRepository interface {
-	ListGroupSchedulingElectionMembers(ctx context.Context) ([]SupplierGroupSchedulingElectionMember, error)
+	// latencyWindowMinutes 决定「最近平均延迟」聚合的时间窗；<=0 时由仓储回落到默认窗口。
+	ListGroupSchedulingElectionMembers(ctx context.Context, latencyWindowMinutes int) ([]SupplierGroupSchedulingElectionMember, error)
 }
 
 type supplierGroupSchedulingElectionAccountStore interface {
@@ -273,7 +315,7 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 	if s == nil || s.repository == nil || s.accountStore == nil {
 		return SupplierGroupSchedulingElectionResult{}, errors.New("分组择优调度依赖未初始化")
 	}
-	members, err := s.repository.ListGroupSchedulingElectionMembers(ctx)
+	members, err := s.repository.ListGroupSchedulingElectionMembers(ctx, config.LatencyWindowMinutes)
 	if err != nil {
 		return SupplierGroupSchedulingElectionResult{}, err
 	}
@@ -298,6 +340,8 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 		membersByGroup[member.GroupID] = append(membersByGroup[member.GroupID], member)
 		groupNames[member.GroupID] = member.GroupName
 
+		// 显示用延迟：窗口成功样本足够就用平均，否则回退最近单值——同一账号跨分组取值一致。
+		baseLatency, _ := supplierGroupSchedulingElectionLatency(member, config.LatencyMinSamples)
 		account := accounts[member.AccountID]
 		if account == nil {
 			account = &supplierGroupElectionAccount{
@@ -308,13 +352,13 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 				testStatus:        strings.TrimSpace(member.LastTestStatus),
 				healthyCount:      member.HealthyCount,
 				lastTestedAt:      member.LastTestedAt,
-				latencyMs:         member.LastTestLatencyMs,
+				latencyMs:         baseLatency,
 				failedCount:       member.FailedCount,
 			}
 			accounts[member.AccountID] = account
 		}
 		if account.latencyMs == 0 {
-			account.latencyMs = member.LastTestLatencyMs
+			account.latencyMs = baseLatency
 		}
 		account.groupIDs = append(account.groupIDs, member.GroupID)
 	}
@@ -362,7 +406,7 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 		}
 
 		// 综合分依赖组内上下文（同平台内谁最快），必须按组算，不能每个成员独立算。
-		electionScores := supplierGroupSchedulingElectionScores(successMembers, config.CountWeight, config.LatencyWeight)
+		electionScores := supplierGroupSchedulingElectionScores(successMembers, config.CountWeight, config.LatencyWeight, config.LatencyMinSamples, config.SwitchMargin)
 		sort.SliceStable(successMembers, func(i, j int) bool {
 			return supplierGroupSchedulingElectionMemberLess(successMembers[i], successMembers[j], electionScores)
 		})
@@ -537,20 +581,60 @@ func (s *SupplierGroupSchedulingElectionService) persistSupplierGroupElectionFai
 // 直接比毫秒会让低延迟平台的账号长期垄断赢家，那不是择优。
 // 凡无法比较的情形（跨平台、没数据、同平台只有一个样本、用时全都一样）
 // 一律给中性分 0.5，让这一项不影响相对顺序，胜负交回次数决定。
-func supplierGroupSchedulingElectionScores(members []SupplierGroupSchedulingElectionMember, countWeight, latencyWeight float64) map[int64]float64 {
+// supplierGroupSchedulingElectionLatency 返回该成员用于「显示」与「评分」的两个延迟值。
+//
+//	base    —— 窗口内成功样本数达到 minSamples 时取窗口平均延迟，否则回退到最近一次单值
+//	           （accounts.extra 里的 last_test_latency_ms）。这是真实延迟，用于日志显示。
+//	scoring —— 在 base 之上按成功率惩罚：base / max(成功率, floor)。只算成功样本会掩盖
+//	           「偶尔快一下、实则一直在失败」的账号，用成功率把被剔除的失败重新计入代价。
+//	           惩罚只在信任窗口均值（有窗口总样本数）时生效；回退单值时没有成功率可用，不惩罚。
+func supplierGroupSchedulingElectionLatency(member SupplierGroupSchedulingElectionMember, minSamples int) (base int64, scoring int64) {
+	trusted := member.LatencySuccessCount >= minSamples && member.AvgLatencyMs > 0 && member.LatencyTotalCount > 0
+	if !trusted {
+		return member.LastTestLatencyMs, member.LastTestLatencyMs
+	}
+	base = member.AvgLatencyMs
+	successRate := float64(member.LatencySuccessCount) / float64(member.LatencyTotalCount)
+	if successRate < supplierGroupElectionSuccessRateFloor {
+		successRate = supplierGroupElectionSuccessRateFloor
+	}
+	scoring = int64(math.Round(float64(base) / successRate))
+	return base, scoring
+}
+
+func supplierGroupSchedulingElectionScores(members []SupplierGroupSchedulingElectionMember, countWeight, latencyWeight float64, latencyMinSamples int, switchMargin float64) map[int64]float64 {
+	// 迟滞死区做在延迟上而不是综合分上：组内 min-max 归一化会把任意大小的延迟差放大到满量程
+	// （两个候选时分差恒为 latencyWeight），综合分层面的死区因此形同虚设。改为把「在任者(已开启)」
+	// 的评分延迟按 (1-switchMargin) 折算，让它显得更快，于是挑战者必须在延迟上快出 switchMargin 比例
+	// 才能在归一化后反超——这才是能压住两个正常账号反复对拍的真·死区。折算后仍留 5% 地板防止归零。
+	marginFactor := 1.0 - switchMargin
+	if marginFactor < 0.05 {
+		marginFactor = 0.05
+	}
+	// 评分用的有效延迟：窗口平均（可信时）+ 成功率惩罚，否则回退单值；在任者再叠加迟滞折算。
+	effectiveLatency := make(map[int64]int64, len(members))
+	for _, member := range members {
+		_, scoring := supplierGroupSchedulingElectionLatency(member, latencyMinSamples)
+		if member.Schedulable && scoring > 0 {
+			scoring = int64(math.Round(float64(scoring) * marginFactor))
+		}
+		effectiveLatency[member.AccountID] = scoring
+	}
+
 	minLatency := make(map[string]int64)
 	maxLatency := make(map[string]int64)
 	latencySamples := make(map[string]int)
 	for _, member := range members {
-		if member.LastTestLatencyMs <= 0 {
+		latency := effectiveLatency[member.AccountID]
+		if latency <= 0 {
 			continue
 		}
 		latencySamples[member.Platform]++
-		if seen, ok := minLatency[member.Platform]; !ok || member.LastTestLatencyMs < seen {
-			minLatency[member.Platform] = member.LastTestLatencyMs
+		if seen, ok := minLatency[member.Platform]; !ok || latency < seen {
+			minLatency[member.Platform] = latency
 		}
-		if seen, ok := maxLatency[member.Platform]; !ok || member.LastTestLatencyMs > seen {
-			maxLatency[member.Platform] = member.LastTestLatencyMs
+		if seen, ok := maxLatency[member.Platform]; !ok || latency > seen {
+			maxLatency[member.Platform] = latency
 		}
 	}
 
@@ -561,11 +645,12 @@ func supplierGroupSchedulingElectionScores(members []SupplierGroupSchedulingElec
 		if normalizedCount > 1 {
 			normalizedCount = 1
 		}
+		latency := effectiveLatency[member.AccountID]
 		normalizedLatency := 0.5
 		// 至少两个样本才谈得上"谁更快"；极差为 0 说明大家一样快，同样比不出高下。
-		if member.LastTestLatencyMs > 0 && latencySamples[member.Platform] >= 2 {
+		if latency > 0 && latencySamples[member.Platform] >= 2 {
 			if span := maxLatency[member.Platform] - minLatency[member.Platform]; span > 0 {
-				normalizedLatency = float64(maxLatency[member.Platform]-member.LastTestLatencyMs) / float64(span)
+				normalizedLatency = float64(maxLatency[member.Platform]-latency) / float64(span)
 			}
 		}
 		scores[member.AccountID] = countWeight*normalizedCount + latencyWeight*normalizedLatency
@@ -574,9 +659,9 @@ func supplierGroupSchedulingElectionScores(members []SupplierGroupSchedulingElec
 }
 
 // supplierGroupSchedulingElectionMemberLess 定义"更优"排序：综合分高者优先。
-// 综合分并列时优先保留「当前已开启调度」的账号（黏性），只有被严格超过才换人——
-// 否则两个分数长期咬死的账号会因并发测试导致 last_tested_at 轮流领先，赢家在两者间反复横跳、
-// 被开启的账号跟着抖动。分数与调度状态都相同时，再按最近测试时间、账号 ID 兜底，保证确定性。
+// 迟滞死区不在这里做（会被组内 min-max 归一化放大而失效，两候选时分差恒为 latencyWeight），
+// 而是在 supplierGroupSchedulingElectionScores 里对在任者的延迟按比例折算实现——见那里的注释。
+// 综合分并列时优先保留「当前已开启调度」的账号（黏性），再按最近测试时间、账号 ID 兜底，保证确定性。
 func supplierGroupSchedulingElectionMemberLess(a, b SupplierGroupSchedulingElectionMember, scores map[int64]float64) bool {
 	scoreA, scoreB := scores[a.AccountID], scores[b.AccountID]
 	if math.Abs(scoreA-scoreB) > SupplierGroupSchedulingElectionScoreEpsilon {
@@ -624,6 +709,26 @@ func normalizeSupplierGroupSchedulingElectionConfig(config SupplierGroupScheduli
 	}
 	if config.FailureThreshold > MaxSupplierGroupSchedulingElectionFailureThreshold {
 		config.FailureThreshold = MaxSupplierGroupSchedulingElectionFailureThreshold
+	}
+	// 迟滞死区、平均窗口、最少样本三项同样遵循「0 或缺失回落默认值」：
+	// 老任务的 config_json 里没有它们，反序列化都是 0，回落后即拿到防抖后的新默认行为。
+	if config.SwitchMargin <= 0 {
+		config.SwitchMargin = DefaultSupplierGroupSchedulingElectionSwitchMargin
+	}
+	if config.SwitchMargin > MaxSupplierGroupSchedulingElectionSwitchMargin {
+		config.SwitchMargin = MaxSupplierGroupSchedulingElectionSwitchMargin
+	}
+	if config.LatencyWindowMinutes <= 0 {
+		config.LatencyWindowMinutes = DefaultSupplierGroupSchedulingElectionLatencyWindowMinutes
+	}
+	if config.LatencyWindowMinutes > MaxSupplierGroupSchedulingElectionLatencyWindowMinutes {
+		config.LatencyWindowMinutes = MaxSupplierGroupSchedulingElectionLatencyWindowMinutes
+	}
+	if config.LatencyMinSamples <= 0 {
+		config.LatencyMinSamples = DefaultSupplierGroupSchedulingElectionLatencyMinSamples
+	}
+	if config.LatencyMinSamples > MaxSupplierGroupSchedulingElectionLatencyMinSamples {
+		config.LatencyMinSamples = MaxSupplierGroupSchedulingElectionLatencyMinSamples
 	}
 	return config
 }
