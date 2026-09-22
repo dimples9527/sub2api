@@ -20,10 +20,9 @@ function createDeferred<T>() {
 /**
  * Select 替身：把 #selected 与 #option 两个插槽都真的渲染出来，并支持点击切换平台。
  *
- * 为什么不能再用 `<div />` 敷衍：平台 chip 横栏删除后，切平台只剩这一个入口，stub 必须真的能切。
- * 而「未绑定 N」告警同时挂在两处 —— #selected（当前平台，必须一直可见）
- * 与 #option（展开时一眼看出问题在哪个平台）。只渲染其中一个都会漏测，
- * 得到「测试通过但其实那个位置根本没渲染」的假绿。
+ * 为什么不能再用 `<div />` 敷衍：切平台已改由平台平铺标签（真实 `<button class="platform-chip">`，
+ * 不经此替身）承载，但页面里仍有别的 Select（同步账号弹窗等）靠它渲染 #selected / #option
+ * 并点击切换。只渲染其中一个插槽都会漏测，得到「测试通过但其实那个位置根本没渲染」的假绿。
  *
  * 插槽签名已对着 `src/components/common/Select.vue` 核过（替身只有在镜像真实 API 时才可信）：
  *   - `:option="selectedOption"`（`modelValue` 匹配不到任何选项时传 `null`）
@@ -399,8 +398,8 @@ describe('model square config wiring', () => {
   })
 
   /*
-    平台 chip 横栏删除后，「自定义平台要按 sort_order 排在内置平台之后」这条约束
-    改由平台 Select 的选项承载 —— 它现在是唯一列出全部平台的地方。
+    「自定义平台要按 sort_order 排在内置平台之后」这条约束由平台平铺标签承载 ——
+    标签按 platformCards 顺序渲染，是唯一列出全部平台的地方。
   */
   it('renders custom platforms in the platform selector', async () => {
     const wrapper = mount(ModelSquareConfigView, {
@@ -445,7 +444,7 @@ describe('model square config wiring', () => {
     })
 
     await flushPromises()
-    await wrapper.findAll('.select-option-stub').find(button => button.text().includes('GLM'))!.trigger('click')
+    await wrapper.findAll('.platform-chip').find(button => button.text().includes('GLM'))!.trigger('click')
     await wrapper.findAll('button.btn-secondary')[2].trigger('click')
     await flushPromises()
 
@@ -466,7 +465,7 @@ describe('model square config wiring', () => {
       await flushPromises()
       await flushPromises()
       // 先切到 GLM：currentConfig 跟着 selectedPlatform 走，默认落在第一个内置平台上。
-      await wrapper.findAll('.select-option-stub').find(button => button.text().includes('GLM'))!.trigger('click')
+      await wrapper.findAll('.platform-chip').find(button => button.text().includes('GLM'))!.trigger('click')
       await flushPromises()
       // 按文字找按钮而不是按下标：替身渲染出的按钮数量会随 stub 变化，下标很脆。
       await wrapper.findAll('button').find(button => button.text().includes('同步账号模型'))!.trigger('click')
@@ -1340,7 +1339,7 @@ describe('model square config wiring', () => {
     await flushPromises()
     expect(wrapper.find('.batch-bar-count').text()).toBe('已选 1 个模型')
 
-    await wrapper.findAll('.select-option-stub').find(node => node.text().includes('Gemini'))!.trigger('click')
+    await wrapper.findAll('.platform-chip').find(node => node.text().includes('Gemini'))!.trigger('click')
     await flushPromises()
 
     expect(wrapper.find('.batch-bar').exists()).toBe(false)
@@ -1419,12 +1418,9 @@ describe('model square config wiring', () => {
     await flushPromises()
     await flushPromises()
 
-    /*
-      告警要挂在两处：当前平台（一直可见）与下拉选项（展开时看全部平台）。
-      只测其中一个，另一个位置漏渲染也发现不了。
-    */
-    expect(wrapper.find('.select-trigger-stub .platform-option-warn').text()).toBe('未绑定 1')
-    expect(wrapper.find('.select-option-stub .platform-option-warn').text()).toBe('未绑定 1')
+    // 告警挂在对应平台的平铺标签上：openai 有 1 个未绑定模型，只有它那枚标签报数。
+    expect(wrapper.find('.platform-chip .platform-option-warn').text()).toBe('未绑定 1')
+    expect(wrapper.findAll('.platform-chip .platform-option-warn')).toHaveLength(1)
   })
 
   it('no longer flags a model because its channels are disabled', async () => {
@@ -1455,7 +1451,7 @@ describe('model square config wiring', () => {
 
     expect(wrapper.text()).toContain('默认分组')
     expect(wrapper.find('.group-binding-warn').exists()).toBe(false)
-    // 有分组归属就不算未绑定，平台 Select 上不该报数
+    // 有分组归属就不算未绑定，平台平铺标签上不该报数
     expect(wrapper.find('.platform-option-warn').exists()).toBe(false)
   })
 

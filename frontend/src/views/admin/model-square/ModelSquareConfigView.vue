@@ -15,43 +15,32 @@
       -->
       <template #filters>
         <div class="space-y-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-dark-700 dark:bg-dark-800">
+          <!--
+            平台平铺标签：按平台主色着色，替代原来的平台下拉。点一下即切换当前平台。
+            激活态用平台主色实心、未激活用同色淡染，配色统一从 --chip-accent（平台主色）
+            经 color-mix 派生 —— 与模型广场展示页的 PlazaFilterBar 同一套 chip 语言，
+            新增平台无需扩色板。「未绑定 N」告警跟到各标签上，一眼看出问题在哪个平台。
+          -->
+          <div class="flex flex-wrap items-center gap-2" role="group" aria-label="选择平台">
+            <button
+              v-for="card in platformCards"
+              :key="card.platform"
+              type="button"
+              class="platform-chip"
+              :class="selectedPlatform === card.platform ? 'chip-tinted-active' : 'chip-tinted'"
+              :style="{ '--chip-accent': platformAccentColor(card.platform) }"
+              :aria-pressed="selectedPlatform === card.platform"
+              @click="selectedPlatform = card.platform"
+            >
+              <PlatformIcon :platform="platformIconKey(card.platform)" size="xs" />
+              <span class="truncate">{{ card.label }}</span>
+              <span class="platform-chip-count">{{ card.modelCount }}</span>
+              <span v-if="card.uncoveredCount" class="platform-option-warn">未绑定 {{ card.uncoveredCount }}</span>
+            </button>
+          </div>
+
           <div class="flex flex-col gap-3 xl:flex-row xl:items-center">
-            <div class="grid flex-1 grid-cols-1 gap-3 md:grid-cols-[minmax(14rem,18rem)_minmax(14rem,1fr)]">
-              <Select
-                v-model="selectedPlatform"
-                :options="platformSelectOptions"
-                searchable
-                :clearable="false"
-                placeholder="选择平台"
-                aria-label="选择平台"
-              >
-                <template #selected="{ option }">
-                  <span class="inline-flex min-w-0 items-center gap-2">
-                    <PlatformIcon :platform="platformIconKey(String(option?.value || selectedPlatform))" size="md" />
-                    <span class="truncate">{{ option?.label || currentPlatformLabel }}</span>
-                    <!--
-                      「未绑定」告警原本挂在平台 chip 横栏上，横栏删掉后挪到这里。
-                      当前平台的告警必须一直可见 —— 藏进下拉里等于没有。
-                    -->
-                    <span
-                      v-if="platformUncoveredCount(String(option?.value || selectedPlatform))"
-                      class="platform-option-warn"
-                    >
-                      未绑定 {{ platformUncoveredCount(String(option?.value || selectedPlatform)) }}
-                    </span>
-                  </span>
-                </template>
-                <template #option="{ option }">
-                  <span class="inline-flex min-w-0 items-center gap-2">
-                    <PlatformIcon :platform="platformIconKey(String(option.value))" size="sm" />
-                    <span class="truncate">{{ option.label }}</span>
-                    <!-- 展开下拉时要能一眼看出「问题在哪个平台」，否则只能逐个切过去试。 -->
-                    <span v-if="platformUncoveredCount(String(option.value))" class="platform-option-warn">
-                      未绑定 {{ platformUncoveredCount(String(option.value)) }}
-                    </span>
-                  </span>
-                </template>
-              </Select>
+            <div class="w-full md:max-w-sm xl:flex-1">
               <SearchInput v-model="searchQuery" placeholder="搜索模型 ID 或展示名称" />
             </div>
 
@@ -93,12 +82,6 @@
             </div>
           </div>
 
-          <!--
-            这里原本还有一条「平台 chip」横栏，和上方的平台 Select 功能完全重复
-            （两者都只是把 selectedPlatform 改掉），已整条删除。
-            它唯一独有的「未绑定 N」告警改挂在 Select 的选项与当前选中项上 ——
-            重复消失，信息不丢。不要再把横栏加回来。
-          -->
           <div v-if="referencePricingLoading" class="reference-pricing-status">
             <Icon name="refresh" size="sm" class="animate-spin" />
             正在加载官方参考价格
@@ -579,6 +562,7 @@ import type { SelectOption } from '@/components/common/Select.vue'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { resolvePlatformDisplayLabel, setCustomPlatformLabels } from '@/utils/customPlatformLabels'
+import { platformAccentColor } from '@/utils/platformColors'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
@@ -830,20 +814,6 @@ const platformCards = computed(() => {
     return left.label.localeCompare(right.label, 'zh-Hans-CN')
   })
 })
-
-const platformSelectOptions = computed<SelectOption[]>(() => platformCards.value.map(item => ({
-  value: item.platform,
-  label: `${item.label}（${item.modelCount}）`,
-})))
-
-/**
- * 平台对应的「未绑定分组」模型数。
- * 已删除的平台 chip 横栏原本直接遍历 platformCards，现在 Select 的选项与当前选中项都要用，
- * 抽成按平台查的小工具，免得在模板里写两遍 find。
- */
-function platformUncoveredCount(platform: string): number {
-  return platformCards.value.find(item => item.platform === normalizePlatform(platform))?.uncoveredCount || 0
-}
 
 const currentPlatformLabel = computed(() => platformLabelMap.value.get(selectedPlatform.value) || resolvePlatformDisplayLabel(selectedPlatform.value))
 const currentConfig = computed<ModelSquarePlatformConfig>(() => {
@@ -1901,9 +1871,66 @@ onUnmounted(() => {
   @apply text-xs font-medium text-gray-500 dark:text-dark-400;
 }
 
-/* 「未绑定 N」告警：原本挂在平台 chip 横栏上，横栏删除后跟随平台 Select 的选项与选中项。 */
+/* 「未绑定 N」告警：跟随平台平铺标签，一眼看出问题在哪个平台。 */
 .platform-option-warn {
   @apply shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-500/20 dark:text-amber-100;
+}
+
+/* 平台平铺标签。基础排版走 @apply，配色交给下面的 chip-tinted / chip-tinted-active。 */
+.platform-chip {
+  @apply inline-flex min-w-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition;
+}
+
+/* 标签上的模型数徽标：非激活态用平台淡色调，激活态在实心底色上转成半透明白。 */
+.platform-chip-count {
+  @apply shrink-0 rounded-full px-1.5 text-[11px] font-semibold tabular-nums;
+  background-color: color-mix(in srgb, var(--chip-accent) 16%, transparent);
+}
+
+.chip-tinted-active .platform-chip-count {
+  @apply text-white;
+  background-color: rgb(255 255 255 / 0.22);
+}
+
+/* chip 配色统一从 --chip-accent（平台主色）经 color-mix 派生，新增平台无需扩样式；
+   激活态与非激活态在模板上互斥挂载，避免选择器优先级互相覆盖。
+   与展示页 PlazaFilterBar 同一套取色口径。 */
+.chip-tinted {
+  color: color-mix(in srgb, var(--chip-accent) 78%, black);
+  background-color: color-mix(in srgb, var(--chip-accent) 9%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--chip-accent) 25%, transparent);
+}
+
+.chip-tinted:hover {
+  background-color: color-mix(in srgb, var(--chip-accent) 16%, transparent);
+}
+
+.dark .chip-tinted {
+  color: color-mix(in srgb, var(--chip-accent) 72%, white);
+  background-color: color-mix(in srgb, var(--chip-accent) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--chip-accent) 30%, transparent);
+}
+
+.dark .chip-tinted:hover {
+  background-color: color-mix(in srgb, var(--chip-accent) 18%, transparent);
+}
+
+.chip-tinted-active {
+  color: #fff;
+  background-color: color-mix(in srgb, var(--chip-accent) 85%, black);
+  box-shadow: 0 1px 2px 0 color-mix(in srgb, var(--chip-accent) 35%, transparent);
+}
+
+.chip-tinted-active:hover {
+  background-color: color-mix(in srgb, var(--chip-accent) 75%, black);
+}
+
+.dark .chip-tinted-active {
+  background-color: color-mix(in srgb, var(--chip-accent) 80%, transparent);
+}
+
+.dark .chip-tinted-active:hover {
+  background-color: var(--chip-accent);
 }
 
 .reference-pricing-status {
