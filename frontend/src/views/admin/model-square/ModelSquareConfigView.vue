@@ -164,7 +164,7 @@
                 :class="['price-card', slot.toneClass]"
               >
                 <span class="price-card-label">{{ slot.label }}</span>
-                <strong class="price-card-value">{{ slot.value == null ? '—' : formatPriceSlotValue(slot.value) }}</strong>
+                <strong class="price-card-value">{{ slot.value == null ? '—' : (slot.raw ? formatRawPriceSlotValue(slot.value) : formatPriceSlotValue(slot.value)) }}</strong>
                 <!--
                   第三行二选一：有官方参考价就标来源，否则显示单位。
                   两个都放会把卡片撑到 103px（单位是 65px、标签 52px，横排相加、竖排则多一行），
@@ -234,7 +234,7 @@
     </TablePageLayout>
 
     <BaseDialog :show="modelDialogVisible" :title="editingModelId ? '编辑模型' : '添加模型'" width="extra-wide" @close="closeModelDialog">
-      <div class="model-dialog-grid">
+      <div class="model-dialog-grid" :class="{ 'is-single': modelBillingMode !== 'token' }">
         <div class="space-y-4">
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Input v-model="modelForm.id" label="模型 ID" placeholder="例如：gpt-5.2" required />
@@ -249,6 +249,36 @@
             :context-state="groupContextState"
           />
 
+          <!--
+            计费类型二选一：按量（token 价格，之前的默认）或图/张（每张一口价）。
+            两种量纲互斥 —— 一个模型要么按 token 计费、要么按张计费，切换时只展示并保存对应那套字段，
+            另一套在保存时清掉，避免展示页拿到「既有 token 价又有按张价」的混合数据不知道按哪个显示。
+          -->
+          <div class="model-billing-mode">
+            <span class="model-billing-mode-label">计费类型</span>
+            <div class="model-billing-mode-options" role="group" aria-label="计费类型">
+              <button
+                type="button"
+                class="model-billing-mode-btn"
+                :class="{ 'is-active': modelBillingMode === 'token' }"
+                :aria-pressed="modelBillingMode === 'token'"
+                @click="modelBillingMode = 'token'"
+              >
+                按量计费
+              </button>
+              <button
+                type="button"
+                class="model-billing-mode-btn"
+                :class="{ 'is-active': modelBillingMode === 'per_image' }"
+                :aria-pressed="modelBillingMode === 'per_image'"
+                @click="modelBillingMode = 'per_image'"
+              >
+                图 / 张计费
+              </button>
+            </div>
+          </div>
+
+          <template v-if="modelBillingMode === 'token'">
           <div class="model-dialog-section-head">
             <div class="min-w-0">
               <h4 class="model-dialog-section-title">Token 价格</h4>
@@ -303,9 +333,26 @@
               </div>
             </div>
           </div>
+          </template>
+
+          <!--
+            图/张计费：每生成一张图收取的固定价格。与 token 价格是两套量纲，切到这个类型时
+            token 网格与基准价对照都不展示，保存时也会清掉本页的 token 价格字段。
+          -->
+          <div v-else class="model-request-price">
+            <Input
+              v-model="modelForm.per_request_price"
+              type="number"
+              label="按张价格（USD / 张）"
+              placeholder="例如：0.04"
+            />
+            <p class="model-request-price-note">
+              每生成一张图片收取的固定价格，直接按 USD 录入，不按 token 换算。留空表示暂未定价。
+            </p>
+          </div>
         </div>
 
-        <aside class="model-baseline-aside">
+        <aside v-if="modelBillingMode === 'token'" class="model-baseline-aside">
           <div class="model-baseline-head">
             <h4 class="model-baseline-title">基准价对照</h4>
             <p class="model-baseline-note">官方参考价 · USD / 1M Tokens</p>
@@ -596,13 +643,16 @@ const PRICE_FIELDS = [
 const PRICE_PER_MILLION_TOKENS = 1_000_000
 
 type PriceField = typeof PRICE_FIELDS[number]['key']
-type ModelForm = { id: string; display_name: string; group_ids: number[] } & Record<PriceField, string>
+// per_request_price（按张一口价）单独拎出来，不进 PRICE_FIELDS：它是「每张图固定价」，
+// 直接按 USD 录入、不按 token 换算，也没有官方参考价可跟随——塞进 token 价格位会连带
+// 触发 1M 换算、基准价对照、「已自定义 N/4」计数，语义全错。
+type ModelForm = { id: string; display_name: string; group_ids: number[]; per_request_price: string } & Record<PriceField, string>
 type PriceSource = 'configured' | 'official'
 // 价格位的色调。与展示页的价格卡片同源，两个页面的「输入是青、输出是橙」必须一致，
 // 否则管理员在两个页面之间切换时会以为价格换了含义。
 type PriceTone = 'teal' | 'orange' | 'violet' | 'blue'
 type PriceSlot = {
-  key: PriceField
+  key: PriceField | 'per_request_price'
   label: string
   unit: string
   toneClass: string
@@ -610,6 +660,8 @@ type PriceSlot = {
   // 所以不能拿 0 兜底：配置页里 $0 会被读成「这一项免费」，那就不是样式问题了。
   value: number | null
   source: PriceSource | null
+  // 按张价格是绝对单价，展示时不能再 ×1M。raw 为真时走原样格式化。
+  raw?: boolean
 }
 type OfficialPricingStatus = 'loading' | 'found' | 'not_found' | 'error'
 // 弹窗里每个价格字段的来源状态。'unset' 必须和 'official' 分开：
@@ -630,6 +682,7 @@ const createEmptyModelForm = (): ModelForm => ({
   output_price: '',
   cache_write_price: '',
   cache_read_price: '',
+  per_request_price: '',
 })
 
 const columns: Column[] = [
@@ -669,6 +722,10 @@ const syncAccountsLoading = ref(false)
 const modelDialogVisible = ref(false)
 const editingModelId = ref<string | null>(null)
 const modelForm = ref<ModelForm>(createEmptyModelForm())
+// 计费类型：token=按量（默认），per_image=图/张。打开弹窗时按已配置的按张价推断，
+// 有按张价即认定为图/张类型。控制弹窗里展示并保存哪一套价格字段。
+type ModelBillingMode = 'token' | 'per_image'
+const modelBillingMode = ref<ModelBillingMode>('token')
 const defaultPricingLoading = ref(false)
 const referencePricingLoadingCount = ref(0)
 const referencePricingLoading = computed(() => referencePricingLoadingCount.value > 0)
@@ -863,6 +920,12 @@ function storedPriceToDisplayPrice(value?: number | null): string {
 
 function displayPriceToStoredPrice(value: number): number {
   return value / PRICE_PER_MILLION_TOKENS
+}
+
+// 按张价格是「每张图的绝对单价」，存取都不做 1M 换算——展示页也是直接按张显示、不除以百万。
+function storedRequestPriceToDisplay(value?: number | null): string {
+  if (value == null || !Number.isFinite(value)) return ''
+  return formatPlainPriceNumber(value)
 }
 
 function formatPlainPriceNumber(value: number): string {
@@ -1128,7 +1191,11 @@ function openModelDialog(model?: ModelSquarePlatformModelConfig): void {
           : null
       return [key, storedPriceToDisplayPrice(value)]
     })) as Pick<ModelForm, PriceField>,
+    // 按张价格没有官方兜底，只从已配置值回填；缺省即留空。
+    per_request_price: storedRequestPriceToDisplay(model?.per_request_price),
   }
+  // 有按张价的既有模型按图/张类型打开，其余（含新建）默认按量。
+  modelBillingMode.value = model?.per_request_price != null ? 'per_image' : 'token'
   modelDialogVisible.value = true
 
   if (model && !officialPricing && hasMissingConfiguredPrice(model)) {
@@ -1145,6 +1212,7 @@ function closeModelDialog(): void {
   modelDialogVisible.value = false
   editingModelId.value = null
   modelForm.value = createEmptyModelForm()
+  modelBillingMode.value = 'token'
 }
 
 /*
@@ -1301,6 +1369,19 @@ function parseModelFormPrices(): Pick<ModelSquarePlatformModelConfig, PriceField
   return prices
 }
 
+// 解析按张价格：空 -> null（清空 / 不按张计费），非负数 -> 原样存（不换算 1M）。
+// 非法输入返回 'invalid'，调用方据此中止保存，避免把坏值写进配置。
+function parseModelFormRequestPrice(): number | null | 'invalid' {
+  const raw = modelForm.value.per_request_price.trim()
+  if (!raw) return null
+  const value = Number(raw)
+  if (!Number.isFinite(value) || value < 0) {
+    appStore.showError('按张价格必须是非负数字')
+    return 'invalid'
+  }
+  return value
+}
+
 function isOfficialReferencePriceValue(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0
 }
@@ -1451,8 +1532,18 @@ function submitModelDialog(): void {
     return
   }
   const displayName = normalizeModelId(modelForm.value.display_name) || id
-  const prices = parseModelFormPrices()
-  if (!prices) return
+  const isPerImage = modelBillingMode.value === 'per_image'
+  // 只解析当前计费类型对应的那套价格，另一套在下面统一清掉。
+  let tokenPrices: Pick<ModelSquarePlatformModelConfig, PriceField> | null = null
+  let perRequestPrice: number | null = null
+  if (isPerImage) {
+    const parsed = parseModelFormRequestPrice()
+    if (parsed === 'invalid') return
+    perRequestPrice = parsed
+  } else {
+    tokenPrices = parseModelFormPrices()
+    if (!tokenPrices) return
+  }
   const index = config.models.findIndex(model => modelKey(model.id) === modelKey(editingModelId.value || ''))
   // 编辑已有模型时从原对象出发、只覆盖本次改过的字段（理由同 dedupeModels）。
   // 新建时没有原对象，展开 undefined 得到空对象，行为与从前一致。
@@ -1462,7 +1553,16 @@ function submitModelDialog(): void {
     display_name: displayName,
     source: 'manual',
     group_ids: normalizeModelGroupIDs(modelForm.value.group_ids),
-    ...prices,
+  }
+  // 两种计费类型互斥：写入当前类型的价格，并清掉另一套本页字段，避免模型同时带着 token 价与按张价。
+  // 清空用 delete（而非写 null）：整块 PUT 后端按缺省处理，也不给模型平白塞一个 null 字段。
+  if (isPerImage) {
+    if (perRequestPrice !== null) nextModel.per_request_price = perRequestPrice
+    else delete nextModel.per_request_price
+    for (const { key } of PRICE_FIELDS) delete nextModel[key]
+  } else {
+    Object.assign(nextModel, tokenPrices)
+    delete nextModel.per_request_price
   }
   if (index >= 0) config.models.splice(index, 1, nextModel)
   else config.models.push(nextModel)
@@ -1564,6 +1664,12 @@ function formatPriceSlotValue(value: number): string {
   return `$${formatPlainPriceNumber(value * PRICE_PER_MILLION_TOKENS)}`
 }
 
+// 按张价格原样展示，不做 1M 换算。
+function formatRawPriceSlotValue(value: number): string {
+  if (value == null || !Number.isFinite(value)) return ''
+  return `$${formatPlainPriceNumber(value)}`
+}
+
 function pricingValue(model: ModelSquarePlatformModelConfig, officialPricing: ModelSquareOfficialPricing | null, key: PriceField): { value: number; source: PriceSource } | null {
   const configuredValue = model[key]
   if (configuredValue != null && Number.isFinite(configuredValue)) {
@@ -1591,7 +1697,24 @@ const PRICE_SLOT_DESCRIPTORS: Array<{ key: PriceField; label: string; unit: stri
   { key: 'cache_write_price', label: '缓存写入', unit: '', tone: 'violet' },
 ]
 
+// 按张计费的模型（配了 per_request_price）在列表里只显示一张「按张」卡片，
+// 不摆 token 价格位 —— 它没有 token 价，硬摆会回退成官方参考价，读成「按 token 计费」就错了。
+function modelIsPerImage(model: ModelSquarePlatformModelConfig): boolean {
+  return model.per_request_price != null && Number.isFinite(model.per_request_price)
+}
+
 function modelPriceSlots(model: ModelSquarePlatformModelConfig): PriceSlot[] {
+  if (modelIsPerImage(model)) {
+    return [{
+      key: 'per_request_price',
+      label: '按张',
+      unit: '$/张',
+      toneClass: 'price-card-teal',
+      value: model.per_request_price as number,
+      source: 'configured',
+      raw: true,
+    }]
+  }
   const officialPricing = officialPricingForModel(model)
   return PRICE_SLOT_DESCRIPTORS.map(descriptor => {
     const price = pricingValue(model, officialPricing, descriptor.key)
@@ -2187,6 +2310,31 @@ onUnmounted(() => {
   @apply grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_19rem];
 }
 
+/* 图/张类型没有基准价对照 aside，收成单列，别留一条 19rem 的空槽。 */
+.model-dialog-grid.is-single {
+  @apply lg:grid-cols-1;
+}
+
+.model-billing-mode {
+  @apply flex flex-wrap items-center gap-3;
+}
+
+.model-billing-mode-label {
+  @apply text-sm font-medium text-gray-700 dark:text-dark-200;
+}
+
+.model-billing-mode-options {
+  @apply inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5 dark:border-dark-700 dark:bg-dark-900/50;
+}
+
+.model-billing-mode-btn {
+  @apply rounded-md px-3 py-1.5 text-sm font-medium text-gray-500 transition-colors hover:text-gray-800 dark:text-dark-400 dark:hover:text-dark-100;
+}
+
+.model-billing-mode-btn.is-active {
+  @apply bg-white text-primary-600 shadow-sm dark:bg-dark-700 dark:text-primary-300;
+}
+
 .model-dialog-section-head {
   @apply flex flex-wrap items-start justify-between gap-3 border-t border-gray-100 pt-4 dark:border-dark-700;
 }
@@ -2217,6 +2365,14 @@ onUnmounted(() => {
 
 .model-price-field-baseline {
   @apply min-w-0 text-[11px] leading-relaxed text-gray-500 dark:text-dark-400;
+}
+
+.model-request-price {
+  @apply mt-3 rounded-xl border border-gray-200 bg-gray-50/60 px-3 py-3 dark:border-dark-700 dark:bg-dark-900/50;
+}
+
+.model-request-price-note {
+  @apply mt-1 text-[11px] leading-relaxed text-gray-500 dark:text-dark-400;
 }
 
 .model-price-field-state.is-custom {

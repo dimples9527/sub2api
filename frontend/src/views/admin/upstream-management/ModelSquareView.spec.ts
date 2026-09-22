@@ -159,7 +159,6 @@ const payload = {
         cache_read_price_priority: 2,
         image_input_price: 10,
         image_output_price: 20,
-        per_request_price: 0.12,
         rate_multiplier: 0.5,
         group_ids: [1],
       },
@@ -236,7 +235,6 @@ describe('ModelSquareView', () => {
     expect(cardTitle).toContain('\u4f18\u5148\u7ea7\u7f13\u5b58\u8bfb\u53d6: $2 $/\u767e\u4e07 tokens')
     expect(cardTitle).toContain('\u56fe\u50cf\u8f93\u5165: $10 $/\u767e\u4e07 tokens')
     expect(cardTitle).toContain('\u56fe\u50cf\u8f93\u51fa: $20 $/\u767e\u4e07 tokens')
-    expect(cardTitle).toContain('\u6309\u8bf7\u6c42: $0.12 $/\u6b21')
     expect(openAICard?.find('.model-rate-chip').text()).toBe('0.5x')
     const orphanCard = wrapper.findAll('[data-test="model-card"]')
       .find(card => card.text().includes('Orphan Model'))
@@ -250,6 +248,59 @@ describe('ModelSquareView', () => {
   expect(wrapper.find('.price-box-cyan').exists()).toBe(false)
     expect(wrapper.find('.price-box-emerald').exists()).toBe(false)
     expect(wrapper.find('.table-price-chip').exists()).toBe(false)
+  })
+
+  it('图/张计费模型只展示一张「按张」卡片，不摆 token 价格位', async () => {
+    getMock.mockResolvedValue({
+      provider_slug: 'configured',
+      provider_name: 'Model Square Config',
+      provider_type: 'local',
+      payload: {
+        groups: [{ id: 1, name: 'Default Group', platform: 'openai', rate_multiplier: 1 }],
+        models: [{
+          id: 'gpt-image',
+          display_name: 'GPT Image',
+          provider: 'OpenAI Official',
+          platform: 'openai',
+          available: true,
+          mode: 'chat',
+          // 官方回退价会填满 token 位，但按张模型不该展示它们
+          input_price: 5,
+          output_price: 30,
+          per_request_price: 0.04,
+          rate_multiplier: 1,
+          group_ids: [1],
+        }],
+      },
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    const card = wrapper.findAll('[data-test="model-card"]').find(c => c.text().includes('GPT Image'))
+    const boxes = card!.findAll('.price-grid .price-box')
+    // 只有一张按张卡，不摆输入/输出等 token 位
+    expect(boxes).toHaveLength(1)
+    expect(boxes[0].find('span').text()).toBe('按张')
+    expect(boxes[0].find('strong').text()).toBe('$0.04')
+    expect(boxes[0].find('small').text()).toBe('$/张')
+    expect(boxes[0].classes()).toContain('price-box-teal')
+  })
+
+  it('按分组过滤后：隐藏详情按钮、禁用分组胶囊（不可再打开弹窗）', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    const card = () => wrapper.findAll('[data-test="model-card"]').find(c => c.text().includes('GPT-5.5 Flagship'))
+    // 未过滤：详情按钮在、胶囊可点
+    expect(card()!.find('.model-detail-button').exists()).toBe(true)
+    expect(card()!.find('.primary-group-chip').attributes('disabled')).toBeUndefined()
+
+    // 选中分组过滤（select[0] 是分组筛选）后：详情隐藏、胶囊禁用
+    await wrapper.findAll('select')[0].setValue('1')
+    await flushPromises()
+    expect(card()!.find('.model-detail-button').exists()).toBe(false)
+    expect(card()!.find('.primary-group-chip').attributes('disabled')).toBeDefined()
   })
 
   it('详情弹窗一次列出全部可用分组的价格，并高亮卡片倍率对应的分组', async () => {

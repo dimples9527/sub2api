@@ -233,7 +233,8 @@ function configuredPrices(
     assignPrice(prices, field, multiplyPrice(configuredPrice ?? officialPrice, rateMultiplier))
   }
   for (const field of REQUEST_PRICE_FIELDS) {
-    assignPrice(prices, field, multiplyPrice(displayRequestPrice(model[field]), rateMultiplier))
+    // 按张（每张图一口价）不随分组倍率缩放：它是固定单价，乘倍率没有业务含义，直接原样展示。
+    assignPrice(prices, field, displayRequestPrice(model[field]))
   }
   return prices
 }

@@ -197,13 +197,16 @@
                     class="primary-group-chip"
                     :class="primaryGroupBadgeClass(model)"
                     :title="primaryGroupTitle(model)"
+                    :disabled="!!activeFilterGroup"
                     @click.stop="openGroupDialog(model)"
                   >
                     <span class="truncate">{{ primaryGroup(model)?.name }}</span>
                     <span v-if="modelGroupOverflowCount(model) > 0" class="group-overflow">+{{ modelGroupOverflowCount(model) }}</span>
                   </button>
+                  <!-- 已按分组过滤时：卡片价已是该分组价，详情（列全部分组）就多余了，隐藏。 -->
                   <button
                     type="button"
+                    v-if="!activeFilterGroup"
                     class="model-detail-button"
                     title="详情"
                     @click.stop="openModelDetails(model)"
@@ -286,6 +289,7 @@
                       class="group-chip"
                       :class="groupPlatformBadgeClass(group)"
                       :title="groupChipTitle(group)"
+                      :disabled="!!activeFilterGroup"
                       @click.stop="openGroupDialog(model)"
                     >
                       {{ group.name }}
@@ -295,8 +299,10 @@
                   </div>
                 </td>
                 <td class="whitespace-nowrap px-4 py-3 text-right">
+                  <!-- 已按分组过滤时隐藏详情，理由同网格视图。 -->
                   <button
                     type="button"
+                    v-if="!activeFilterGroup"
                     class="model-detail-button"
                     title="详情"
                     @click.stop="openModelDetails(model)"
@@ -526,6 +532,10 @@ const defaultPriceDescriptors: PriceDescriptor[] = [
   { key: 'cache_write_price', label: '\u7f13\u5b58\u5199\u5165', unit: '', toneClass: 'price-box-violet' },
 ]
 
+// \u6309\u5f20\uff08\u56fe/\u5f20\uff09\u8ba1\u8d39\u4ef7\u683c\u4f4d\uff1a\u6a21\u578b\u5e7f\u573a\u914d\u7f6e\u91cc\u914d\u4e86 per_request_price \u7684\u6a21\u578b\u8d70\u8fd9\u4e2a\u3002
+// \u4e0e token \u4ef7\u683c\u4e92\u65a5\uff08\u89c1 modelPriceSlots\uff09\u2014\u2014\u56fe/\u5f20\u6a21\u578b\u53ea\u5c55\u793a\u8fd9\u4e00\u5f20\u5361\uff0c\u4e0d\u6446 token \u4f4d\u3002
+const perRequestDescriptor: PriceDescriptor = { key: 'per_request_price', label: '\u6309\u5f20', unit: '$/\u5f20', toneClass: 'price-box-teal' }
+
 const priceDescriptors: PriceDescriptor[] = [
   ...defaultPriceDescriptors,
   { key: 'cache_write_1h_price', label: '\u7f13\u5b58\u5199\u5165 1h', unit: '$/\u767e\u4e07 tokens', toneClass: 'price-box-violet' },
@@ -535,7 +545,7 @@ const priceDescriptors: PriceDescriptor[] = [
   { key: 'cache_read_price_priority', label: '\u4f18\u5148\u7ea7\u7f13\u5b58\u8bfb\u53d6', unit: '$/\u767e\u4e07 tokens', toneClass: 'price-box-blue' },
   { key: 'image_input_price', label: '\u56fe\u50cf\u8f93\u5165', unit: '$/\u767e\u4e07 tokens', toneClass: 'price-box-neutral' },
   { key: 'image_output_price', label: '\u56fe\u50cf\u8f93\u51fa', unit: '$/\u767e\u4e07 tokens', toneClass: 'price-box-neutral' },
-  { key: 'per_request_price', label: '\u6309\u8bf7\u6c42', unit: '$/\u6b21', toneClass: 'price-box-neutral' },
+  perRequestDescriptor,
 ]
 const emptyDescription = '\u5c1a\u672a\u914d\u7f6e\u6a21\u578b\u5e7f\u573a\u5e73\u53f0\u6216\u6a21\u578b\uff0c\u8bf7\u5148\u5728\u201c\u6a21\u578b\u5e7f\u573a\u914d\u7f6e\u201d\u4e2d\u7ef4\u62a4\u5c55\u793a\u76ee\u5f55\u3002'
 
@@ -803,8 +813,26 @@ function modelDisplayName(model: ModelSquareModel) {
   return displayName || model.id || t('admin.modelSquare.unnamedModel')
 }
 
+// 图/张计费模型：配了 per_request_price 就按这个类型展示。它没有 token 价，
+// token 位会回退成官方参考价，摆出来会被读成「按 token 计费」——所以要单独识别。
+function modelIsPerImage(model: ModelSquareModel): boolean {
+  const value = model.per_request_price
+  return value != null && value !== '' && Number.isFinite(Number(value))
+}
+
 function modelPriceSlots(model: ModelSquareModel, multiplier?: number): ModelPriceSlot[] {
-  // 固定展示输入、输出、缓存读取、缓存写入四个价格位，不被优先级/图片/按请求等额外价格顶替。
+  // 图/张模型只展示一张「按张」卡，不摆 token 价格位。
+  // 按张是固定单价，不乘分组倍率 —— 这里刻意不传 multiplier，原样展示；也没有划线原价。
+  if (modelIsPerImage(model)) {
+    const value = modelPriceValue(model, 'per_request_price')
+    return [{
+      ...perRequestDescriptor,
+      value,
+      originalValue: undefined,
+      toneClass: value == null ? 'price-box-unset' : perRequestDescriptor.toneClass,
+    }]
+  }
+  // 固定展示输入、输出、缓存读取、缓存写入四个价格位，不被优先级/图片等额外价格顶替。
   return defaultPriceDescriptors.map(descriptor => {
     const value = modelPriceValue(model, descriptor.key, multiplier)
     const original = value == null ? undefined : modelPriceValue(model, descriptor.key, 1)
@@ -824,7 +852,9 @@ function modelCardTitle(model: ModelSquareModel) {
 }
 
 function modelConfiguredPriceLines(model: ModelSquareModel) {
-  return priceDescriptors.flatMap(descriptor => {
+  // 图/张模型只列按张价：它的 token 位是官方参考回退价，列出来会与「按张计费」自相矛盾。
+  const descriptors = modelIsPerImage(model) ? [perRequestDescriptor] : priceDescriptors
+  return descriptors.flatMap(descriptor => {
     const value = modelPriceValue(model, descriptor.key)
     const unit = descriptor.unit ? ` ${descriptor.unit}` : ''
     return value == null ? [] : [`${descriptor.label}: ${formatPrice(value)}${unit}`]
@@ -888,6 +918,8 @@ function unique(values: string[]) {
 }
 
 function openGroupDialog(model: ModelSquareModel) {
+  // 已按分组过滤时不再打开分组弹窗：当前就锁定在这一个分组，弹窗（切换分组归属视角）没有意义。
+  if (activeFilterGroup.value) return
   groupDialogModel.value = model
 }
 
@@ -1262,9 +1294,14 @@ onMounted(reload)
   换色会被读成「换了个分组」。currentColor 就是平台文字色，所以这套 hover
   对每个平台都成立，不必逐个平台写一遍。
 */
-.primary-group-chip:hover {
+.primary-group-chip:not(:disabled):hover {
   border-color: currentColor;
   background: color-mix(in srgb, currentColor 16%, transparent);
+}
+
+/* 已按分组过滤时胶囊不可点：去掉手型与 hover 反馈，避免看起来还能点开弹窗。 */
+.primary-group-chip:disabled {
+  @apply cursor-default;
 }
 
 .primary-group-chip b {
@@ -1367,8 +1404,13 @@ button.group-chip {
   @apply cursor-pointer;
 }
 
+/* 已按分组过滤时不可点，理由同 .primary-group-chip:disabled。 */
+button.group-chip:disabled {
+  @apply cursor-default;
+}
+
 /* 与卡片视图的胶囊同一套 hover：把当前这枚胶囊加深，不换色。 */
-button.group-chip:hover {
+button.group-chip:not(:disabled):hover {
   border-color: currentColor;
   background: color-mix(in srgb, currentColor 18%, transparent);
 }

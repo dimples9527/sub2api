@@ -158,7 +158,8 @@ describe('admin model square API', () => {
       output_price: 15,
       cache_write_price: 3,
       cache_read_price: 0.5,
-      per_request_price: 0.06,
+      // 按张价不随倍率缩放，原样保留（token 价才乘 0.5）
+      per_request_price: 0.12,
     }))
   })
 

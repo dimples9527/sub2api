@@ -378,7 +378,10 @@ describe('model square config wiring', () => {
     expect(viewSource).not.toContain('cache_write_1h_price')
     expect(viewSource).not.toContain('image_input_price')
     expect(viewSource).not.toContain('image_output_price')
-    expect(viewSource).not.toContain('per_request_price')
+    // per_request_price（按张一口价）现在是可编辑字段，会出现在源码里；
+    // 但它不进 PRICE_FIELDS（那是 token 价格位，带 1M 换算与官方基准）。
+    expect(viewSource).toContain('per_request_price')
+    expect(viewSource).toContain('按张价格（USD / 张）')
     expect(viewSource).toContain('模型配置中心')
     expect(viewSource).not.toContain('Model Square Config')
     expect(viewSource).toContain('官方参考价格来自项目动态价格目录')
@@ -534,6 +537,39 @@ describe('model square config wiring', () => {
     expect(wrapper.text()).not.toContain('图像')
   })
 
+  it('按张计费的模型在列表里只显示一张「按张」卡片（原样价、不摆 token 位）', async () => {
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: null,
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [{ id: 'gpt-image', display_name: 'GPT Image', source: 'manual', per_request_price: 0.04 }],
+      }],
+    })
+    // 就算官方目录有 token 参考价，也不能让按张模型回退去显示 token 价
+    adminApiMock.modelSquareConfig.getModelPricing.mockResolvedValue({
+      found: true,
+      input_price: 0.000005,
+      output_price: 0.00003,
+    })
+
+    const wrapper = mount(ModelSquareConfigView, {
+      global: {
+        stubs: makeStubs({ cells: ['price_summary'], dialog: 'content', confirm: 'none', input: 'plain', select: 'empty' }),
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+
+    const cards = wrapper.findAll('.price-card')
+    expect(cards.map(card => card.find('.price-card-label').text())).toEqual(['按张'])
+    expect(cards[0].find('.price-card-value').text()).toBe('$0.04')
+    expect(wrapper.findAll('.price-card-meta small').map(node => node.text())).toEqual(['$/张'])
+    // 只有一张卡片即证明没摆 token 价格位；也不吃官方 token 参考价（没有参考价标签）
+    expect(wrapper.findAll('.price-card').length).toBe(1)
+    expect(wrapper.findAll('.price-card-tag').length).toBe(0)
+  })
+
   it('stores manually entered token prices as per-token values after showing per-million-token inputs', async () => {
     adminApiMock.modelSquareConfig.get.mockResolvedValue({ updated_at: null, platforms: [] })
 
@@ -577,10 +613,10 @@ describe('model square config wiring', () => {
   })
 
   it('保存时原样带回本页未展示的价格字段，不会把它们抹成 null', async () => {
-    // 后端支持 12 个价格位，本页只展示其中 4 个；保存走的是整块 PUT，后端整体覆盖配置。
+    // 后端支持 12 个价格位，本页只展示其中一部分；保存走的是整块 PUT，后端整体覆盖配置。
     // 所以未展示的字段必须原样带回：有官方参考价兜底的那几个一旦被写成 null，
-    // 展示页会静默回退成官方价（管理员以为自己的定价生效了）；
-    // per_request_price 没有官方兜底，会变成「未设置」不再显示，而不是写成 0。
+    // 展示页会静默回退成官方价（管理员以为自己的定价生效了）。
+    // 注意 per_request_price 现在是可编辑字段（按张价格），已单独测试，不在这条用例里。
     adminApiMock.modelSquareConfig.get.mockResolvedValue({
       updated_at: null,
       platforms: [{
@@ -594,7 +630,6 @@ describe('model square config wiring', () => {
           cache_write_1h_price: 0.000007,
           input_price_priority: 0.000008,
           image_input_price: 0.00001,
-          per_request_price: 0.00000012,
         }],
       }],
     })
@@ -629,7 +664,134 @@ describe('model square config wiring', () => {
     expect(savedModel.cache_write_1h_price).toBe(0.000007)
     expect(savedModel.input_price_priority).toBe(0.000008)
     expect(savedModel.image_input_price).toBe(0.00001)
-    expect(savedModel.per_request_price).toBe(0.00000012)
+  })
+
+  it('按张价格可编辑并原样保存（不按 1M 换算）', async () => {
+    // 图片/按次计费模型的每张一口价：录入什么就存什么，不像 token 价格那样除以百万。
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: null,
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [{ id: 'gpt-image', display_name: 'GPT Image', source: 'manual', per_request_price: 0.04 }],
+      }],
+    })
+
+    const wrapper = mount(ModelSquareConfigView, {
+      global: {
+        stubs: makeStubs({ cells: ['actions'], confirm: 'none', select: 'empty' }),
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+
+    const editButton = wrapper.findAll('button').find(button => button.text() === '编辑')
+    await editButton!.trigger('click')
+
+    // 回填按原值显示，不做 1M 换算
+    const requestInput = wrapper.find('input[aria-label="按张价格（USD / 张）"]')
+    expect((requestInput.element as HTMLInputElement).value).toBe('0.04')
+
+    await requestInput.setValue('0.08')
+    await wrapper.findAll('button').find(button => button.text() === '保存')!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('保存配置'))!.trigger('click')
+    await flushPromises()
+
+    const savedModel = adminApiMock.modelSquareConfig.update.mock.calls[0][0].platforms[0].models[0]
+    expect(savedModel.per_request_price).toBe(0.08)
+  })
+
+  it('清空按张价格会移除该字段（关闭按张计费）', async () => {
+    // 清空即删键，不写 null：整块 PUT 后端按缺省处理，等价于「不按张计费」。
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: null,
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [{ id: 'gpt-image', display_name: 'GPT Image', source: 'manual', per_request_price: 0.04 }],
+      }],
+    })
+
+    const wrapper = mount(ModelSquareConfigView, {
+      global: {
+        stubs: makeStubs({ cells: ['actions'], confirm: 'none', select: 'empty' }),
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text() === '编辑')!.trigger('click')
+    await wrapper.find('input[aria-label="按张价格（USD / 张）"]').setValue('')
+    await wrapper.findAll('button').find(button => button.text() === '保存')!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('保存配置'))!.trigger('click')
+    await flushPromises()
+
+    const savedModel = adminApiMock.modelSquareConfig.update.mock.calls[0][0].platforms[0].models[0]
+    expect(savedModel.per_request_price).toBeUndefined()
+  })
+
+  it('切到图/张计费后隐藏 token 价格，保存时清掉 token 价并写入按张价', async () => {
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: null,
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [{ id: 'gpt-5.5', display_name: 'GPT-5.5', source: 'manual', input_price: 0.000005 }],
+      }],
+    })
+
+    const wrapper = mount(ModelSquareConfigView, {
+      global: {
+        stubs: makeStubs({ cells: ['actions'], confirm: 'none', select: 'empty' }),
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text() === '编辑')!.trigger('click')
+    // 默认按量：token 输入在、按张输入不在
+    expect(wrapper.find('input[aria-label="输入价格（USD / 1M Tokens）"]').exists()).toBe(true)
+    expect(wrapper.find('input[aria-label="按张价格（USD / 张）"]').exists()).toBe(false)
+
+    // 切到图/张：token 网格隐藏，按张输入出现
+    await wrapper.findAll('button').find(button => button.text().includes('图 / 张计费'))!.trigger('click')
+    expect(wrapper.find('input[aria-label="输入价格（USD / 1M Tokens）"]').exists()).toBe(false)
+    expect(wrapper.find('input[aria-label="按张价格（USD / 张）"]').exists()).toBe(true)
+
+    await wrapper.find('input[aria-label="按张价格（USD / 张）"]').setValue('0.05')
+    await wrapper.findAll('button').find(button => button.text() === '保存')!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('保存配置'))!.trigger('click')
+    await flushPromises()
+
+    const savedModel = adminApiMock.modelSquareConfig.update.mock.calls[0][0].platforms[0].models[0]
+    expect(savedModel.per_request_price).toBe(0.05)
+    // 切换类型后原来的 token 价被清成 null（buildSavePayload 的 modelPriceValues 把这 4 个字段
+    // 统一规范成「有值或 null」），不再作为自定义 token 价参与展示。
+    expect(savedModel.input_price).toBeNull()
+  })
+
+  it('打开带按张价的模型时默认停在图/张计费类型', async () => {
+    adminApiMock.modelSquareConfig.get.mockResolvedValue({
+      updated_at: null,
+      platforms: [{
+        platform: 'openai',
+        name: 'OpenAI',
+        models: [{ id: 'gpt-image', display_name: 'GPT Image', source: 'manual', per_request_price: 0.04 }],
+      }],
+    })
+
+    const wrapper = mount(ModelSquareConfigView, {
+      global: {
+        stubs: makeStubs({ cells: ['actions'], confirm: 'none', select: 'empty' }),
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text() === '编辑')!.trigger('click')
+    // 有按张价 -> 直接停在图/张类型：按张输入可见、token 输入不在
+    expect(wrapper.find('input[aria-label="按张价格（USD / 张）"]').exists()).toBe(true)
+    expect(wrapper.find('input[aria-label="输入价格（USD / 1M Tokens）"]').exists()).toBe(false)
   })
 
   it('shows official reference prices for existing models without saving them as configured prices', async () => {
