@@ -1395,7 +1395,6 @@ import { ensureCustomPlatformLabels, resolvePlatformDisplayLabel as platformLabe
 import { platformAccentColor, platformBadgeClass, platformTextClass } from '@/utils/platformColors'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { cronToIntervalSeconds } from './supplierAutomationCron'
-import type { ClaudeModel } from '@/types'
 
 const tasks = ref<SupplierAutomationTask[]>([])
 const runs = ref<SupplierAutomationRun[]>([])
@@ -1444,7 +1443,7 @@ const healthGuardAccountSearch = ref('')
 const healthGuardSelectedOnly = ref(false)
 const healthGuardSupplierAccounts = ref<SupplierProviderAccount[]>([])
 const loadingHealthGuardSupplierAccounts = ref(false)
-const healthGuardModelOptionsByPlatform = ref<Record<string, ClaudeModel[]>>({})
+const healthGuardModelOptionsByPlatform = ref<Record<string, { id: string; display_name?: string }[]>>({})
 const healthGuardModelLoadingByPlatform = ref<Record<string, boolean>>({})
 const healthGuardStatusFilter = ref('all')
 
@@ -2239,7 +2238,6 @@ interface HealthGuardAccountMapping {
 interface HealthGuardPlatformSummary {
   platform: string
   accountCount: number
-  representativeAccountID: number
 }
 
 function normalizeHealthGuardPlatform(platform?: string): string {
@@ -2470,7 +2468,6 @@ const healthGuardPlatformSummaries = computed<HealthGuardPlatformSummary[]>(() =
     summaries.set(platform, {
       platform,
       accountCount: 1,
-      representativeAccountID: mapping.localAccountID,
     })
   }
   return Array.from(summaries.values()).sort((a, b) => platformLabel(a.platform).localeCompare(platformLabel(b.platform), 'zh-CN'))
@@ -2696,29 +2693,26 @@ async function ensureHealthGuardAccountCandidatesLoaded() {
 }
 
 async function loadHealthGuardModels() {
+  const platforms = healthGuardPlatformSummaries.value.map(summary => summary.platform)
   healthGuardModelOptionsByPlatform.value = {}
-  healthGuardModelLoadingByPlatform.value = Object.fromEntries(
-    healthGuardPlatformSummaries.value.map(summary => [summary.platform, true])
-  )
-  await Promise.all(healthGuardPlatformSummaries.value.map(async summary => {
-    try {
-      const models = await adminAPI.accounts.getAvailableModels(summary.representativeAccountID)
-      healthGuardModelOptionsByPlatform.value = {
-        ...healthGuardModelOptionsByPlatform.value,
-        [summary.platform]: models,
-      }
-    } catch {
-      healthGuardModelOptionsByPlatform.value = {
-        ...healthGuardModelOptionsByPlatform.value,
-        [summary.platform]: [],
-      }
-    } finally {
-      healthGuardModelLoadingByPlatform.value = {
-        ...healthGuardModelLoadingByPlatform.value,
-        [summary.platform]: false,
-      }
+  healthGuardModelLoadingByPlatform.value = Object.fromEntries(platforms.map(platform => [platform, true]))
+  try {
+    const config = await adminAPI.modelSquareConfig.get()
+    const byPlatform: Record<string, { id: string; display_name?: string }[]> = {}
+    for (const platformConfig of config.platforms || []) {
+      byPlatform[platformConfig.platform] = (platformConfig.models || []).map(model => ({
+        id: model.id,
+        display_name: model.display_name,
+      }))
     }
-  }))
+    healthGuardModelOptionsByPlatform.value = Object.fromEntries(
+      platforms.map(platform => [platform, byPlatform[normalizeHealthGuardPlatform(platform)] || []])
+    )
+  } catch {
+    healthGuardModelOptionsByPlatform.value = Object.fromEntries(platforms.map(platform => [platform, []]))
+  } finally {
+    healthGuardModelLoadingByPlatform.value = Object.fromEntries(platforms.map(platform => [platform, false]))
+  }
 }
 
 function applyAccountHealthGuardDefaults() {

@@ -519,7 +519,7 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('平台默认测试模型')
     expect(supplierAutomationSource).toContain('需要检查的账号')
     expect(supplierAutomationSource).toContain('当前不可用')
-    expect(supplierAutomationSource).toContain('adminAPI.accounts.getAvailableModels')
+    expect(supplierAutomationSource).toContain('adminAPI.modelSquareConfig.get')
     expect(supplierAutomationSource).toContain('searchable')
     expect(supplierAutomationSource).toContain('normalizePositiveAccountIDs')
     expect(supplierAutomationSource).toContain('type="checkbox"')
@@ -531,7 +531,7 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain(':creatable-prefix="healthGuardModelCreatablePrefix"')
     expect(supplierAutomationSource).toContain("const healthGuardModelCreatablePrefix = '使用模型'")
     expect(supplierAutomationSource).toContain('healthGuardModelSelectOptions')
-    expect(supplierAutomationSource).toContain('adminAPI.accounts.getAvailableModels(summary.representativeAccountID)')
+    expect(supplierAutomationSource).toContain('adminAPI.modelSquareConfig.get()')
   })
 
   it('uses the supplier effective business platform for health guard account grouping', () => {
@@ -542,7 +542,7 @@ describe('SupplierAutomationView edit dialog', () => {
       'account.effective_platform || account.local_account_platform || account.platform'
     )
     expect(supplierAutomationSource).toContain("import { adminAPI } from '@/api/admin'")
-    expect(supplierAutomationSource).toContain('await adminAPI.accounts.getAvailableModels(summary.representativeAccountID)')
+    expect(supplierAutomationSource).toContain('const config = await adminAPI.modelSquareConfig.get()')
     expect(supplierAutomationSource).toContain('current.platform = effectiveHealthGuardPlatform(account)')
     expect(supplierAutomationSource).toContain('platform: effectiveHealthGuardPlatform(account)')
   })
