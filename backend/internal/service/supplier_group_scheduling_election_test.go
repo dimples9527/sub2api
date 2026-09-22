@@ -762,3 +762,135 @@ func TestGroupElectionKeepHealthyIncumbentRunsElectionWhenIncumbentFailed(t *tes
 	require.NoError(t, err)
 	require.Equal(t, true, store.calls[312], "开着的账号失败 → 不锁定，正常择优开启更优的 312")
 }
+
+// 必需模型覆盖：TopN=1 下最优账号 401 只支持 bbb，若不兜底 aaa 会随换人断供。
+// 配了必需模型 aaa → 额外开启唯一的健康支持者 402（哪怕它综合分更低），保证 aaa 不断供。
+func TestGroupElectionRequiredModelSupplementsHealthySupporter(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, AccountID: 401, Platform: "anthropic", Schedulable: true, LastTestStatus: "success", HealthyCount: 20, ModelMapping: map[string]any{"bbb": "bbb"}},
+		{GroupID: 1, AccountID: 402, Platform: "anthropic", Schedulable: false, LastTestStatus: "success", HealthyCount: 1, ModelMapping: map[string]any{"aaa": "aaa"}},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                  1,
+		RequiredModelsByGroup: map[int64][]string{1: {"aaa"}},
+	}, time.Now())
+	require.NoError(t, err)
+
+	require.Equal(t, true, store.calls[402], "aaa 的唯一健康支持者 402 应被必需模型覆盖补选开启")
+	require.Equal(t, 1, result.EnabledCount)
+	require.Equal(t, 0, result.RequiredModelUncoveredCount, "aaa 有健康支持者，不应告警")
+	require.ElementsMatch(t, []int64{401, 402}, result.Groups[0].WinnerIDs, "最优 401 + 必需模型支持者 402 都应是赢家")
+}
+
+// 必需模型已被最优赢家覆盖：赢家 411 本身支持 aaa → 不额外开启任何人，落选的 412 保持关闭。
+func TestGroupElectionRequiredModelAlreadyCoveredByWinner(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, AccountID: 411, Platform: "anthropic", Schedulable: true, LastTestStatus: "success", HealthyCount: 20, ModelMapping: map[string]any{"aaa": "aaa", "bbb": "bbb"}},
+		{GroupID: 1, AccountID: 412, Platform: "anthropic", Schedulable: false, LastTestStatus: "success", HealthyCount: 1, ModelMapping: map[string]any{"ccc": "ccc"}},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                  1,
+		RequiredModelsByGroup: map[int64][]string{1: {"aaa"}},
+	}, time.Now())
+	require.NoError(t, err)
+
+	_, touched := store.calls[412]
+	require.False(t, touched, "aaa 已被赢家 411 覆盖，不应补选 412")
+	require.Equal(t, 0, result.EnabledCount)
+	require.Equal(t, 0, result.RequiredModelUncoveredCount)
+	require.Equal(t, []int64{411}, result.Groups[0].WinnerIDs)
+}
+
+// 必需模型的支持者全部失败：不硬留失败账号（让健康的 421 生效），只记一条告警并带上失败支持者 ID。
+func TestGroupElectionRequiredModelAllSupportersFailedWarns(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, GroupName: "G1", AccountID: 421, Platform: "anthropic", Schedulable: true, LastTestStatus: "success", HealthyCount: 20, ModelMapping: map[string]any{"bbb": "bbb"}},
+		{GroupID: 1, GroupName: "G1", AccountID: 422, Platform: "anthropic", Schedulable: false, LastTestStatus: "failed", ModelMapping: map[string]any{"aaa": "aaa"}},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                  1,
+		RequiredModelsByGroup: map[int64][]string{1: {"aaa"}},
+	}, time.Now())
+	require.NoError(t, err)
+
+	_, touched := store.calls[422]
+	require.False(t, touched, "aaa 的支持者全失败 → 不硬开失败账号")
+	require.Equal(t, 1, result.RequiredModelUncoveredCount)
+	require.Len(t, result.RequiredModelWarnings, 1)
+	require.Equal(t, "aaa", result.RequiredModelWarnings[0].Model)
+	require.Equal(t, int64(1), result.RequiredModelWarnings[0].GroupID)
+	require.Equal(t, "G1", result.RequiredModelWarnings[0].GroupName)
+	require.Equal(t, []int64{422}, result.RequiredModelWarnings[0].FailedAccountIDs)
+}
+
+// 必需模型是硬底线：即便分组被「在任者健康锁定」，锁定组的在任 501 没覆盖 aaa 时，
+// 仍会额外开启健康支持者 502（只增开、不动在任，不破坏锁定语义）。
+func TestGroupElectionRequiredModelSupplementsLockedGroup(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, AccountID: 501, Platform: "anthropic", Schedulable: true, LastTestStatus: "success", HealthyCount: 5, ModelMapping: map[string]any{"bbb": "bbb"}},
+		{GroupID: 1, AccountID: 502, Platform: "anthropic", Schedulable: false, LastTestStatus: "success", HealthyCount: 20, ModelMapping: map[string]any{"aaa": "aaa"}},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                         1,
+		KeepHealthyIncumbentGroupIDs: []int64{1},
+		RequiredModelsByGroup:        map[int64][]string{1: {"aaa"}},
+	}, time.Now())
+	require.NoError(t, err)
+
+	require.Equal(t, true, store.calls[502], "必需模型是硬底线，锁定组也要补齐 aaa 的支持者 502")
+	_, touched501 := store.calls[501]
+	require.False(t, touched501, "锁定组的在任 501 应保持不动")
+	require.ElementsMatch(t, []int64{501, 502}, result.Groups[0].WinnerIDs)
+}
+
+// 空 model_mapping 账号支持所有模型：赢家 511 无映射即覆盖 aaa → 不补选、不告警。
+func TestGroupElectionRequiredModelCoveredByUnmappedAccount(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, AccountID: 511, Platform: "anthropic", Schedulable: true, LastTestStatus: "success", HealthyCount: 20},
+		{GroupID: 1, AccountID: 512, Platform: "anthropic", Schedulable: false, LastTestStatus: "success", HealthyCount: 1, ModelMapping: map[string]any{"aaa": "aaa"}},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                  1,
+		RequiredModelsByGroup: map[int64][]string{1: {"aaa"}},
+	}, time.Now())
+	require.NoError(t, err)
+
+	_, touched := store.calls[512]
+	require.False(t, touched, "无映射账号支持所有模型，aaa 已覆盖，不应补选 512")
+	require.Equal(t, 0, result.RequiredModelUncoveredCount)
+	require.Equal(t, []int64{511}, result.Groups[0].WinnerIDs)
+}
+
+// 归一化必需模型：丢弃非正 groupID，模型名 trim、按小写去重保序，清洗后为空的分组整条丢弃。
+func TestGroupElectionNormalizeRequiredModels(t *testing.T) {
+	cfg := normalizeSupplierGroupSchedulingElectionConfig(SupplierGroupSchedulingElectionConfig{
+		RequiredModelsByGroup: map[int64][]string{
+			1:  {" aaa ", "aaa", "AAA", "bbb", ""},
+			0:  {"x"},
+			-3: {"y"},
+			2:  {"  ", ""},
+		},
+	})
+	require.Equal(t, []string{"aaa", "bbb"}, cfg.RequiredModelsByGroup[1])
+	_, hasZero := cfg.RequiredModelsByGroup[0]
+	require.False(t, hasZero, "非正 groupID 应被丢弃")
+	_, hasNeg := cfg.RequiredModelsByGroup[-3]
+	require.False(t, hasNeg)
+	_, hasEmpty := cfg.RequiredModelsByGroup[2]
+	require.False(t, hasEmpty, "清洗后为空的分组应整条丢弃")
+}

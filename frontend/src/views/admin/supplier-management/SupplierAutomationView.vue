@@ -348,6 +348,7 @@
                 <span v-else>已关闭 <strong class="sp-rate-guard-scope-count">{{ groupElectionDisabledGroupIDs.length }}</strong> 个分组，其余分组正常参与择优。</span>
                 <span v-if="groupElectionKeepHealthyGroupIDs.length > 0">已对 <strong class="sp-rate-guard-scope-count">{{ groupElectionKeepHealthyGroupIDs.length }}</strong> 个分组开启「在任者健康则锁定」：开着的账号正常就跳过、不换人。</span>
                 <span v-else>暂无分组开启「在任者健康锁定」。</span>
+                <span v-if="groupElectionRequiredModelsCount > 0">已为 <strong class="sp-rate-guard-scope-count">{{ groupElectionRequiredModelsCount }}</strong> 个分组设置必需模型：换人时保证这些模型不断供，支持者全失败则告警待恢复。</span>
               </div>
               <button
                 class="sp-button small ghost sp-rate-guard-scope-config-button"
@@ -564,6 +565,20 @@
                 <div><span>保持不变</span><strong>{{ groupElectionResult.unchanged_count }}</strong></div>
                 <div><span>跳过（未测）</span><strong>{{ groupElectionResult.skipped_count }}</strong></div>
                 <div><span>更新失败</span><strong>{{ groupElectionResult.failed_write_count }}</strong></div>
+                <div v-if="groupElectionResult.required_model_uncovered_count" class="sp-group-election-warn-stat"><span>必需模型断供</span><strong>{{ groupElectionResult.required_model_uncovered_count }}</strong></div>
+              </div>
+              <div v-if="groupElectionResult.required_model_warnings?.length" class="sp-group-election-required-warns">
+                <div class="sp-group-election-required-warns-title">必需模型当前无健康提供者，已切到能用账号，待人工恢复：</div>
+                <div
+                  v-for="(warn, index) in groupElectionResult.required_model_warnings"
+                  :key="`${warn.group_id}-${warn.model}-${index}`"
+                  class="sp-group-election-required-warn"
+                >
+                  <span class="sp-group-election-required-warn-group">{{ warn.group_name || `分组 ${warn.group_id}` }}</span>
+                  <span class="sp-group-election-required-warn-model">{{ warn.model }}</span>
+                  <small v-if="warn.failed_account_ids?.length">失败支持者账号：{{ warn.failed_account_ids.join('、') }}</small>
+                  <small v-else>该分组无任何账号映射此模型</small>
+                </div>
               </div>
               <div v-if="groupElectionResult.items.length" class="sp-rate-guard-table sp-group-election-table">
                 <div class="sp-rate-guard-head sp-group-election-head">
@@ -1330,6 +1345,21 @@
                   />
                   <span>健康锁定</span>
                 </label>
+                <label
+                  v-if="!electionGroupIsDisabled(group.id)"
+                  class="sp-election-required-models"
+                  :title="`分组「${group.name}」的必需模型：择优后若赢家没覆盖这些模型，会补选一个健康支持者开启；支持它的账号全失败时不硬留、只告警待恢复。逗号或空格分隔。`"
+                >
+                  <span class="sp-election-required-models-label">必需模型</span>
+                  <input
+                    class="sp-election-required-models-input"
+                    type="text"
+                    placeholder="留空=无强制要求，如 gpt-5.6, claude-opus-5"
+                    :value="electionGroupRequiredModelsText(group.id)"
+                    :aria-label="`分组 ${group.name} 的必需模型`"
+                    @change="setElectionGroupRequiredModels(group.id, ($event.target as HTMLInputElement).value)"
+                  />
+                </label>
               </article>
             </div>
             <div v-else class="sp-rate-guard-empty">{{ electionGroupEmptyHint }}</div>
@@ -1507,6 +1537,7 @@ const editForm = reactive<SupplierAutomationTask>({
     group_scheduling_election_latency_window_minutes: 30,
     group_scheduling_election_latency_min_samples: 3,
     group_scheduling_election_keep_healthy_incumbent_group_ids: [],
+    group_scheduling_election_required_models: {},
   },
   last_status: '',
   last_message: '',
@@ -2234,6 +2265,7 @@ function runSummary(run: SupplierAutomationRun): string {
     let summary = `扫描 ${groupElection.group_count} 个分组，开启 ${groupElection.enabled_count}，关闭 ${groupElection.disabled_count}`
     if (groupElection.pending_count) summary += `，${groupElection.pending_count} 个待观察`
     if (groupElection.kept_count) summary += `，${groupElection.kept_count} 个待人工确认`
+    if (groupElection.required_model_uncovered_count) summary += `，${groupElection.required_model_uncovered_count} 个必需模型待恢复`
     return summary
   }
   const rechargeSync = run.result_detail?.recharge_sync
@@ -2407,6 +2439,39 @@ const groupElectionDisabledGroupIDs = computed(() =>
 const groupElectionKeepHealthyGroupIDs = computed(() =>
   normalizePositiveAccountIDs(editForm.config.group_scheduling_election_keep_healthy_incumbent_group_ids)
 )
+
+// 模型名清洗：trim、去空、按小写去重保序。必需模型的录入与展示都走它，口径与后端一致。
+function normalizeRequiredModelList(models: unknown): string[] {
+  if (!Array.isArray(models)) return []
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of models) {
+    const model = String(raw ?? '').trim()
+    if (!model) continue
+    const key = model.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(model)
+  }
+  return out
+}
+
+// 分组必需模型：group_id → 模型名列表。JSON 键是字符串，这里统一用 String(groupID) 归一读写。
+const groupElectionRequiredModelsMap = computed<Record<string, string[]>>(() => {
+  const raw = editForm.config.group_scheduling_election_required_models
+  const out: Record<string, string[]> = {}
+  if (raw && typeof raw === 'object') {
+    for (const [key, models] of Object.entries(raw)) {
+      const groupID = Number(key)
+      if (!Number.isFinite(groupID) || groupID <= 0) continue
+      const cleaned = normalizeRequiredModelList(models)
+      if (cleaned.length) out[String(groupID)] = cleaned
+    }
+  }
+  return out
+})
+
+const groupElectionRequiredModelsCount = computed(() => Object.keys(groupElectionRequiredModelsMap.value).length)
 
 const electionGroupScopeSummary = computed(() => {
   const disabled = groupElectionDisabledGroupIDs.value.length
@@ -2804,6 +2869,9 @@ function applyGroupElectionDefaults() {
   const latencyMinSamples = Math.floor(Number(editForm.config.group_scheduling_election_latency_min_samples))
   editForm.config.group_scheduling_election_latency_min_samples =
     Number.isFinite(latencyMinSamples) && latencyMinSamples > 0 ? latencyMinSamples : 3
+  // 必需模型：清洗成 { [groupID]: 模型列表 }，丢弃非正 groupID 与空列表；空 map 也保留（等于无强制要求）。
+  editForm.config.group_scheduling_election_required_models =
+    groupElectionRequiredModelsMap.value as unknown as Record<number, string[]>
 }
 
 function validateAccountHealthGuardSelection(config: SupplierAutomationConfig): string {
@@ -2968,6 +3036,19 @@ function toggleElectionKeepHealthyGroup(groupID: number) {
     ? keep.filter(id => id !== groupID)
     : [...keep, groupID]
   editForm.config.group_scheduling_election_keep_healthy_incumbent_group_ids = normalizePositiveAccountIDs(next)
+}
+
+function electionGroupRequiredModelsText(groupID: number): string {
+  return (groupElectionRequiredModelsMap.value[String(groupID)] || []).join(', ')
+}
+
+// 逗号（中英）或空白分隔录入；清洗后写回 map，空列表则删除该分组键（等于无强制要求）。
+function setElectionGroupRequiredModels(groupID: number, text: string) {
+  const models = normalizeRequiredModelList(String(text ?? '').split(/[,，\s]+/))
+  const next: Record<string, string[]> = { ...groupElectionRequiredModelsMap.value }
+  if (models.length) next[String(groupID)] = models
+  else delete next[String(groupID)]
+  editForm.config.group_scheduling_election_required_models = next as unknown as Record<number, string[]>
 }
 
 function enableAllElectionGroups() {
@@ -6191,6 +6272,81 @@ function intervalSecondsToCron(seconds: number): string | null {
 }
 
 .sp-group-election-latency.is-empty {
+  color: var(--sp-muted);
+}
+
+/* 必需模型录入：占整行、另起一行，避免和上面的勾选/健康锁定挤在同一水平线上。 */
+.sp-election-required-models {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding-left: 24px;
+}
+
+.sp-election-required-models-label {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--sp-muted);
+}
+
+.sp-election-required-models-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--sp-text);
+  background: var(--sp-panel);
+  border: 1px solid var(--sp-line);
+  border-radius: 6px;
+}
+
+.sp-election-required-models-input:focus {
+  outline: none;
+  border-color: var(--sp-cyan);
+}
+
+/* 必需模型断供是需要人工跟进的告警，用红色把统计格与明细都标出来。 */
+.sp-group-election-warn-stat strong {
+  color: var(--sp-red);
+}
+
+.sp-group-election-required-warns {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--sp-red) 40%, var(--sp-line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--sp-red) 6%, var(--sp-panel));
+}
+
+.sp-group-election-required-warns-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sp-red);
+  margin-bottom: 6px;
+}
+
+.sp-group-election-required-warn {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+.sp-group-election-required-warn-group {
+  font-weight: 600;
+  color: var(--sp-text);
+}
+
+.sp-group-election-required-warn-model {
+  font-variant-numeric: tabular-nums;
+  color: var(--sp-red);
+}
+
+.sp-group-election-required-warn small {
   color: var(--sp-muted);
 }
 

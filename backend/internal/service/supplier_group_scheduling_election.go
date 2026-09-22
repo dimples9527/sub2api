@@ -125,6 +125,13 @@ type SupplierGroupSchedulingElectionConfig struct {
 	// 不做任何择优与换人，直接跳过。空列表=所有分组都正常择优（默认），新增分组默认不锁定，安全。
 	// 只在在任者健康时锁定：一旦有开着的账号测试失败，该分组仍走正常择优交给失败闸门处理，绝不锁死一个坏分组。
 	KeepHealthyIncumbentGroupIDs []int64 `json:"group_scheduling_election_keep_healthy_incumbent_group_ids"`
+	// RequiredModelsByGroup 是「分组必须能服务的模型」清单：group_id → 模型名列表（空=该组无强制要求）。
+	// 择优选出赢家后对每个必需模型做覆盖兜底：赢家里若没有账号支持它，就在组内**健康**账号中补选综合分最高的
+	// 支持者 union-enable（哪怕它本不是最优）——保证换人不会把某个必需模型换没了。必需模型是硬底线，
+	// 连「在任者健康锁定」的分组也会补齐。若支持该模型的账号当前全部测试失败/根本没有，则不硬留失败账号
+	// （让正常赢家生效、允许切到能用的账号），只记一条告警待人工恢复。判定「是否支持」复用运行时
+	// account.IsModelSupported，与网关逐请求过滤同源。
+	RequiredModelsByGroup map[int64][]string `json:"group_scheduling_election_required_models"`
 }
 
 // SupplierGroupSchedulingElectionMember 是仓储层返回的一条"分组×账号"成员行。
@@ -154,6 +161,13 @@ type SupplierGroupSchedulingElectionMember struct {
 	AvgLatencyMs        int64
 	LatencySuccessCount int
 	LatencyTotalCount   int
+	// AccountType / ModelMapping / Extra 只服务于「必需模型覆盖」：用它们在择优里重建一个最小 Account，
+	// faithfully 复用 account.IsModelSupported 判断该账号是否支持某模型（与网关逐请求过滤同源）。
+	// ModelMapping 只取 credentials.model_mapping 子对象（不拉 token）；Extra 里带 openai_passthrough 等
+	// 影响模型判定的开关。空 mapping = 支持所有模型，与运行时口径一致。
+	AccountType  string
+	ModelMapping map[string]any
+	Extra        map[string]any
 }
 
 type SupplierGroupSchedulingElectionRepository interface {
@@ -227,8 +241,22 @@ type SupplierGroupSchedulingElectionResult struct {
 	// 「连续失败待观察」和「分组只剩它、需人工确认」这两种状态必须能被一眼看到。
 	PendingCount int                                          `json:"pending_count"`
 	KeptCount    int                                          `json:"kept_count"`
-	Groups       []SupplierGroupSchedulingElectionGroupDetail `json:"groups"`
-	Items        []SupplierGroupSchedulingElectionAccountItem `json:"items"`
+	// RequiredModelUncoveredCount / RequiredModelWarnings 记录「分组配置了必需模型、但当前没有健康账号能提供它」
+	// 的情况。这不是失败（本轮仍让能用的账号生效），但必须被看见——否则某个模型静默断供、无人知晓。
+	RequiredModelUncoveredCount int                                                    `json:"required_model_uncovered_count"`
+	RequiredModelWarnings       []SupplierGroupSchedulingElectionRequiredModelWarning `json:"required_model_warnings,omitempty"`
+	Groups                      []SupplierGroupSchedulingElectionGroupDetail          `json:"groups"`
+	Items                       []SupplierGroupSchedulingElectionAccountItem          `json:"items"`
+}
+
+// SupplierGroupSchedulingElectionRequiredModelWarning 是一条「某分组的必需模型当前无健康账号可提供」的告警。
+// 触发条件：分组配置了必需模型 M，赢家里没有账号支持它，且组内支持 M 的账号当前测试都失败/根本没有。
+// 此时不硬留失败账号（允许切到能用的健康账号），只发这条告警并携带失败支持者 ID，方便人工定位恢复。
+type SupplierGroupSchedulingElectionRequiredModelWarning struct {
+	GroupID          int64   `json:"group_id"`
+	GroupName        string  `json:"group_name,omitempty"`
+	Model            string  `json:"model"`
+	FailedAccountIDs []int64 `json:"failed_account_ids,omitempty"`
 }
 
 // 调度切换日志的方向。明细里能靠 schedulable_before/after 自己推，但列表要能按方向筛，
@@ -387,8 +415,19 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 			GroupID:   groupID,
 			GroupName: groupNames[groupID],
 		}
+		groupMembers := membersByGroup[groupID]
+		// recordWinner 统一「标记账号赢家（union，跨组累积）+ 记入本组明细」。
+		// 明细里始终追加（同一账号跨多组时每组都应列出），故不因 account.winner 已置而跳过追加。
+		recordWinner := func(accountID int64) {
+			if account := accounts[accountID]; account != nil {
+				account.winner = true
+			}
+			detail.WinnerCount++
+			detail.WinnerIDs = append(detail.WinnerIDs, accountID)
+		}
+
 		successMembers := make([]SupplierGroupSchedulingElectionMember, 0)
-		for _, member := range membersByGroup[groupID] {
+		for _, member := range groupMembers {
 			detail.MemberCount++
 			switch strings.TrimSpace(member.LastTestStatus) {
 			case SupplierGroupSchedulingElectionTestStatusSuccess:
@@ -404,7 +443,7 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 		// 关掉最后一个等于把这个分组关成空组，落到调度上就是请求全量失败；
 		// 留着一个坏账号至少还有恢复的可能，所以交给人工确认而不是自动关。
 		if len(successMembers) == 0 {
-			for _, member := range membersByGroup[groupID] {
+			for _, member := range groupMembers {
 				if strings.TrimSpace(member.LastTestStatus) != SupplierGroupSchedulingElectionTestStatusFailed {
 					continue
 				}
@@ -414,13 +453,18 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 			}
 		}
 
+		// 综合分依赖组内上下文（同平台内谁最快），必须按组算一次——锁定路径、正常择优、
+		// 必需模型补选三处都复用它，保证「谁更优」的口径一致。
+		electionScores := supplierGroupSchedulingElectionScores(successMembers, config.CountWeight, config.LatencyWeight, config.LatencyMinSamples, config.SwitchMargin)
+
 		// 在任者健康锁定：仅对被 opt-in 的分组生效，且该组「当前开着的账号」测试都正常（且没有开着却失败的），
 		// 就保留这些在任账号、跳过择优与换人。只在健康时锁定——有开着的账号失败仍走下面的正常择优，
 		// 交给失败闸门处理，绝不把一个坏分组锁死。
+		locked := false
 		if _, keepHealthy := keepHealthyGroups[groupID]; keepHealthy {
 			scheduledHealthy := make([]int64, 0)
 			scheduledFailed := false
-			for _, member := range membersByGroup[groupID] {
+			for _, member := range groupMembers {
 				if !member.Schedulable {
 					continue
 				}
@@ -433,34 +477,33 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 			}
 			if len(scheduledHealthy) > 0 && !scheduledFailed {
 				for _, accountID := range scheduledHealthy {
-					if account := accounts[accountID]; account != nil {
-						account.winner = true
-					}
-					detail.WinnerCount++
-					detail.WinnerIDs = append(detail.WinnerIDs, accountID)
+					recordWinner(accountID)
 				}
-				result.Groups = append(result.Groups, detail)
-				continue
+				locked = true
 			}
 		}
 
-		// 综合分依赖组内上下文（同平台内谁最快），必须按组算，不能每个成员独立算。
-		electionScores := supplierGroupSchedulingElectionScores(successMembers, config.CountWeight, config.LatencyWeight, config.LatencyMinSamples, config.SwitchMargin)
-		sort.SliceStable(successMembers, func(i, j int) bool {
-			return supplierGroupSchedulingElectionMemberLess(successMembers[i], successMembers[j], electionScores)
-		})
-		winners := config.TopN
-		if winners > len(successMembers) {
-			winners = len(successMembers)
-		}
-		for index := 0; index < winners; index++ {
-			winnerID := successMembers[index].AccountID
-			if account := accounts[winnerID]; account != nil {
-				account.winner = true
+		// 正常择优：锁定未生效时才做。综合分排序后取前 N。
+		if !locked {
+			sort.SliceStable(successMembers, func(i, j int) bool {
+				return supplierGroupSchedulingElectionMemberLess(successMembers[i], successMembers[j], electionScores)
+			})
+			winners := config.TopN
+			if winners > len(successMembers) {
+				winners = len(successMembers)
 			}
-			detail.WinnerCount++
-			detail.WinnerIDs = append(detail.WinnerIDs, winnerID)
+			for index := 0; index < winners; index++ {
+				recordWinner(successMembers[index].AccountID)
+			}
 		}
+
+		// 必需模型覆盖兜底：赢家没覆盖的必需模型，补选一个健康支持者 union-enable；全失败则告警。
+		// 必需模型是硬底线，锁定组也执行——它只增开支持者、不动在任赢家，不破坏锁定语义。
+		applySupplierGroupRequiredModelCoverage(
+			groupID, groupNames[groupID], config.RequiredModelsByGroup[groupID],
+			groupMembers, successMembers, electionScores, detail.WinnerIDs, recordWinner, &result,
+		)
+
 		result.Groups = append(result.Groups, detail)
 	}
 
@@ -715,6 +758,113 @@ func supplierGroupSchedulingElectionMemberLess(a, b SupplierGroupSchedulingElect
 	return a.AccountID < b.AccountID
 }
 
+// applySupplierGroupRequiredModelCoverage 保证分组配置的每个「必需模型」都至少有一个赢家能提供。
+// 覆盖判定与网关运行时同源（account.IsModelSupported）：赢家里已有账号支持该模型则跳过；否则在组内
+// **健康(success)**账号里补选综合分最高的支持者 union-enable（哪怕它本不是 TopN 最优）。若支持它的账号
+// 当前全部失败/根本没有，就不硬留失败账号（让已选出的健康赢家生效、允许切到能用的账号），只记一条告警、
+// 携带失败支持者 ID 待人工恢复。只增开支持者、不动已选赢家，因此对「在任者健康锁定」的分组同样安全。
+func applySupplierGroupRequiredModelCoverage(
+	groupID int64,
+	groupName string,
+	requiredModels []string,
+	groupMembers []SupplierGroupSchedulingElectionMember,
+	successMembers []SupplierGroupSchedulingElectionMember,
+	electionScores map[int64]float64,
+	initialWinnerIDs []int64,
+	recordWinner func(int64),
+	result *SupplierGroupSchedulingElectionResult,
+) {
+	if len(requiredModels) == 0 {
+		return
+	}
+	memberByID := make(map[int64]SupplierGroupSchedulingElectionMember, len(groupMembers))
+	for _, member := range groupMembers {
+		memberByID[member.AccountID] = member
+	}
+	winnerSet := make(map[int64]struct{}, len(initialWinnerIDs))
+	for _, id := range initialWinnerIDs {
+		winnerSet[id] = struct{}{}
+	}
+
+	seen := make(map[string]struct{}, len(requiredModels))
+	for _, model := range requiredModels {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			continue
+		}
+		if _, dup := seen[model]; dup {
+			continue
+		}
+		seen[model] = struct{}{}
+
+		// 已有赢家支持该模型？
+		covered := false
+		for id := range winnerSet {
+			if member, ok := memberByID[id]; ok && supplierGroupElectionMemberSupportsModel(member, model) {
+				covered = true
+				break
+			}
+		}
+		if covered {
+			continue
+		}
+
+		// 在健康账号里补选综合分最高的支持者（跳过已是赢家的）。
+		var best *SupplierGroupSchedulingElectionMember
+		for i := range successMembers {
+			candidate := successMembers[i]
+			if _, isWinner := winnerSet[candidate.AccountID]; isWinner {
+				continue
+			}
+			if !supplierGroupElectionMemberSupportsModel(candidate, model) {
+				continue
+			}
+			if best == nil || supplierGroupSchedulingElectionMemberLess(candidate, *best, electionScores) {
+				picked := candidate
+				best = &picked
+			}
+		}
+		if best != nil {
+			recordWinner(best.AccountID)
+			winnerSet[best.AccountID] = struct{}{}
+			continue
+		}
+
+		// 没有健康支持者：收集当前失败的支持者 ID（方便人工恢复），记一条告警。
+		failedIDs := make([]int64, 0)
+		for _, member := range groupMembers {
+			if strings.TrimSpace(member.LastTestStatus) != SupplierGroupSchedulingElectionTestStatusFailed {
+				continue
+			}
+			if supplierGroupElectionMemberSupportsModel(member, model) {
+				failedIDs = append(failedIDs, member.AccountID)
+			}
+		}
+		result.RequiredModelUncoveredCount++
+		result.RequiredModelWarnings = append(result.RequiredModelWarnings, SupplierGroupSchedulingElectionRequiredModelWarning{
+			GroupID:          groupID,
+			GroupName:        groupName,
+			Model:            model,
+			FailedAccountIDs: failedIDs,
+		})
+	}
+}
+
+// supplierGroupElectionMemberSupportsModel 复用运行时 account.IsModelSupported 判断成员是否支持某模型。
+// 重建一个最小 Account（platform/type/model_mapping/extra）——这些正是 IsModelSupported 读取的字段，
+// 因此判定与网关逐请求过滤同源。空 mapping = 支持所有模型。
+func supplierGroupElectionMemberSupportsModel(member SupplierGroupSchedulingElectionMember, model string) bool {
+	account := &Account{
+		Platform: member.Platform,
+		Type:     member.AccountType,
+		Extra:    member.Extra,
+	}
+	if member.ModelMapping != nil {
+		account.Credentials = map[string]any{"model_mapping": member.ModelMapping}
+	}
+	return account.IsModelSupported(model)
+}
+
 func normalizeSupplierGroupSchedulingElectionConfig(config SupplierGroupSchedulingElectionConfig) SupplierGroupSchedulingElectionConfig {
 	if config.TopN <= 0 {
 		config.TopN = DefaultSupplierGroupSchedulingElectionTopN
@@ -773,5 +923,42 @@ func normalizeSupplierGroupSchedulingElectionConfig(config SupplierGroupScheduli
 	if config.LatencyMinSamples > MaxSupplierGroupSchedulingElectionLatencyMinSamples {
 		config.LatencyMinSamples = MaxSupplierGroupSchedulingElectionLatencyMinSamples
 	}
+	config.RequiredModelsByGroup = normalizeSupplierGroupElectionRequiredModels(config.RequiredModelsByGroup)
 	return config
+}
+
+// normalizeSupplierGroupElectionRequiredModels 清洗「分组必需模型」：丢弃非正 groupID，
+// 模型名 trim、去空、按小写去重保序；某分组清洗后为空则整条丢弃（等于该组无强制要求）。
+// 返回 nil 而非空 map，让「没配置」与「配了空」在下游一致（len==0 都不触发覆盖）。
+func normalizeSupplierGroupElectionRequiredModels(raw map[int64][]string) map[int64][]string {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make(map[int64][]string, len(raw))
+	for groupID, models := range raw {
+		if groupID <= 0 {
+			continue
+		}
+		seen := make(map[string]struct{}, len(models))
+		cleaned := make([]string, 0, len(models))
+		for _, model := range models {
+			model = strings.TrimSpace(model)
+			if model == "" {
+				continue
+			}
+			key := strings.ToLower(model)
+			if _, dup := seen[key]; dup {
+				continue
+			}
+			seen[key] = struct{}{}
+			cleaned = append(cleaned, model)
+		}
+		if len(cleaned) > 0 {
+			out[groupID] = cleaned
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

@@ -105,6 +105,9 @@ type SupplierAutomationConfig struct {
 	// 启用「在任者健康锁定」的分组 ID（opt-in，空=都不锁定）：列表内分组开着的账号测试都正常时保留现状、
 	// 跳过择优换人，减少无谓抖动；一旦开着的账号失败仍走正常择优。
 	GroupElectionKeepHealthyIncumbentGroupIDs []int64 `json:"group_scheduling_election_keep_healthy_incumbent_group_ids"`
+	// 分组必需模型：group_id → 必须能服务的模型名列表。择优后对每个必需模型做覆盖兜底——赢家没覆盖它就
+	// 补选一个健康支持者开启；支持它的账号全失败则不硬留、只告警待恢复。空=无强制要求。
+	GroupElectionRequiredModels map[int64][]string `json:"group_scheduling_election_required_models"`
 }
 
 type SupplierAutomationRun struct {
@@ -740,6 +743,7 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 			LatencyWindowMinutes:         task.Config.GroupElectionLatencyWindowMinutes,
 			LatencyMinSamples:            task.Config.GroupElectionLatencyMinSamples,
 			KeepHealthyIncumbentGroupIDs: task.Config.GroupElectionKeepHealthyIncumbentGroupIDs,
+			RequiredModelsByGroup:        task.Config.GroupElectionRequiredModels,
 		}, time.Now())
 		run.ProcessedCount = result.AccountCount
 		run.SuccessCount = result.EnabledCount + result.DisabledCount + result.UnchangedCount
@@ -760,6 +764,10 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 			}
 			if result.KeptCount > 0 {
 				run.Message += fmt.Sprintf("，%d 个账号因分组无备选账号保留调度需人工确认", result.KeptCount)
+			}
+			// 必需模型断供：本轮已切到能用的账号，但该模型当前无健康提供者，必须提示人工恢复。
+			if result.RequiredModelUncoveredCount > 0 {
+				run.Message += fmt.Sprintf("，%d 个必需模型当前无健康提供者待恢复", result.RequiredModelUncoveredCount)
 			}
 		}
 		return nil
@@ -891,6 +899,12 @@ func validateSupplierAutomationTask(task SupplierAutomationTask) error {
 		if task.Config.GroupElectionFailureThreshold < 0 ||
 			task.Config.GroupElectionFailureThreshold > MaxSupplierGroupSchedulingElectionFailureThreshold {
 			return ErrSupplierProviderInvalid
+		}
+		// 必需模型：分组 ID 必须为正；模型名清洗由归一化处理，这里只挡明显非法的 groupID。
+		for groupID := range task.Config.GroupElectionRequiredModels {
+			if groupID <= 0 {
+				return ErrSupplierProviderInvalid
+			}
 		}
 	}
 	if task.TaskCode == SupplierAutomationTaskAccountHealthGuard {

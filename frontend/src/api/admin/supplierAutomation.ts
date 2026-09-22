@@ -65,6 +65,13 @@ export interface SupplierAutomationConfig {
    * 跳过择优与换人；一旦有开着的账号失败，仍走正常择优交给失败闸门处理。
    */
   group_scheduling_election_keep_healthy_incumbent_group_ids?: number[]
+  /**
+   * 分组必需模型：分组 ID → 该分组必须能服务的模型名列表。
+   * 择优后对每个必需模型做覆盖兜底：赢家没覆盖它就补选一个健康支持者开启；
+   * 支持它的账号全部测试失败则不硬留（切到能用的账号），只记一条告警待人工恢复。
+   * 空 = 该分组无强制模型要求（默认）。
+   */
+  group_scheduling_election_required_models?: Record<number, string[]>
 }
 
 export interface SupplierAutomationTask {
@@ -146,8 +153,19 @@ export interface SupplierGroupSchedulingElectionResult {
   pending_count?: number
   /** 分组内无备选账号而保留调度、待人工确认的账号数。旧运行记录没有这个字段。 */
   kept_count?: number
+  /** 配了必需模型但当前无健康账号可提供的数量（本轮已切到能用账号，仍需人工恢复）。旧运行记录没有。 */
+  required_model_uncovered_count?: number
+  /** 必需模型断供的明细告警。旧运行记录没有这个字段。 */
+  required_model_warnings?: SupplierGroupSchedulingElectionRequiredModelWarning[]
   groups: SupplierGroupSchedulingElectionGroupDetail[]
   items: SupplierGroupSchedulingElectionAccountItem[]
+}
+
+export interface SupplierGroupSchedulingElectionRequiredModelWarning {
+  group_id: number
+  group_name?: string
+  model: string
+  failed_account_ids?: number[]
 }
 
 export interface SupplierProviderRechargeSyncResult {

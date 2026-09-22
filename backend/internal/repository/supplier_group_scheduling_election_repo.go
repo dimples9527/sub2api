@@ -35,8 +35,10 @@ SELECT g.id AS group_id,
        a.id AS account_id,
        COALESCE(a.name, '') AS account_name,
        COALESCE(a.platform, '') AS platform,
+       COALESCE(a.type, '') AS account_type,
        COALESCE(a.schedulable, FALSE) AS schedulable,
        COALESCE(a.extra, '{}'::jsonb)::text AS extra,
+       COALESCE(a.credentials->'model_mapping', 'null'::jsonb)::text AS model_mapping,
        COALESCE(lat.avg_latency_ms, 0) AS avg_latency_ms,
        COALESCE(lat.success_count, 0) AS latency_success_count,
        COALESCE(lat.total_count, 0) AS latency_total_count
@@ -65,14 +67,17 @@ ORDER BY g.id ASC, a.id ASC`, service.StatusActive, latencyWindowMinutes)
 	for rows.Next() {
 		var member service.SupplierGroupSchedulingElectionMember
 		var extraRaw string
+		var modelMappingRaw string
 		if err := rows.Scan(
 			&member.GroupID,
 			&member.GroupName,
 			&member.AccountID,
 			&member.AccountName,
 			&member.Platform,
+			&member.AccountType,
 			&member.Schedulable,
 			&extraRaw,
+			&modelMappingRaw,
 			&member.AvgLatencyMs,
 			&member.LatencySuccessCount,
 			&member.LatencyTotalCount,
@@ -91,6 +96,18 @@ ORDER BY g.id ASC, a.id ASC`, service.StatusActive, latencyWindowMinutes)
 			member.LastTestLatencyMs = int64(parseSupplierGroupElectionInt(extra["last_test_latency_ms"]))
 			// 连续失败轮次由择优调度任务自己累计回写，是本任务「连续失败达阈值才关」的依据。
 			member.FailedCount = parseSupplierGroupElectionInt(extra["supplier_group_election_failed_count"])
+			// Extra 整体带给必需模型覆盖用：IsModelSupported 会读 openai_passthrough 等开关。
+			member.Extra = extra
+		}
+		// 必需模型覆盖判定用的 model_mapping 子对象（不含 token）；空/缺失 = 空映射 = 支持所有模型。
+		if modelMappingRaw != "" && modelMappingRaw != "null" {
+			mapping := map[string]any{}
+			if err := json.Unmarshal([]byte(modelMappingRaw), &mapping); err != nil {
+				return nil, fmt.Errorf("解析分组择优调度成员模型映射失败: %w", err)
+			}
+			if len(mapping) > 0 {
+				member.ModelMapping = mapping
+			}
 		}
 		members = append(members, member)
 	}
