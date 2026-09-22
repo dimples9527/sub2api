@@ -1,5 +1,12 @@
 import { apiClient } from '../client'
 
+/** 单条「倍率区间 → 检查间隔」规则：区间取 [min, max)，max<=0 表示无上界。 */
+export interface SupplierAccountHealthGuardMultiplierInterval {
+  min_multiplier: number
+  max_multiplier: number
+  interval_seconds: number
+}
+
 export interface SupplierAutomationConfig {
   rate_guard_max_snapshot_age_seconds: number
   automation_run_retention_days: number
@@ -21,6 +28,10 @@ export interface SupplierAutomationConfig {
   account_health_guard_platform_latency_ms: Record<string, number>
   account_health_guard_account_intervals: Record<string, number>
   account_health_guard_account_scheduling_change: Record<string, boolean>
+  /** 未开调度账号按平台倍率区间取检查间隔：总开关。 */
+  account_health_guard_platform_multiplier_intervals_enabled: boolean
+  /** 平台 → 「倍率区间 → 间隔秒」规则；仅在总开关开启时对未开调度账号生效，覆盖账号级间隔。 */
+  account_health_guard_platform_multiplier_intervals?: Record<string, SupplierAccountHealthGuardMultiplierInterval[]>
   /** 账号级阈值覆盖，键为本地账号 ID；未列出的账号沿用同名的全局阈值。 */
   account_health_guard_account_failure_thresholds: Record<string, number>
   account_health_guard_account_slow_thresholds: Record<string, number>

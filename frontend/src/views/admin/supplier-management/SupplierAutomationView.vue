@@ -310,6 +310,19 @@
               <Input :model-value="editForm.config.account_health_guard_recovery_threshold" type="number" label="连续健康恢复阈值" @update:model-value="editForm.config.account_health_guard_recovery_threshold = toNumber($event, editForm.config.account_health_guard_recovery_threshold)" />
               <Input :model-value="editForm.config.account_health_guard_healthy_latency_ms" type="number" label="默认健康延迟（毫秒）" @update:model-value="editForm.config.account_health_guard_healthy_latency_ms = toNumber($event, editForm.config.account_health_guard_healthy_latency_ms)" />
             </div>
+            <div class="sp-health-guard-multiplier-switch">
+              <div>
+                <strong>未开调度账号按倍率间隔测试</strong>
+                <span v-if="editForm.config.account_health_guard_platform_multiplier_intervals_enabled">
+                  已开启：未开调度的账号改由所属平台的倍率区间决定检查间隔（覆盖账号级间隔），可在「配置检查账号」里为各平台设置区间。
+                </span>
+                <span v-else>关闭时未开调度账号沿用账号级检查间隔；已开调度账号始终不受此规则影响。</span>
+              </div>
+              <div class="sp-toggle-row">
+                <Toggle v-model="editForm.config.account_health_guard_platform_multiplier_intervals_enabled" />
+                <em>{{ editForm.config.account_health_guard_platform_multiplier_intervals_enabled ? '已启用' : '已停用' }}</em>
+              </div>
+            </div>
           </section>
 
           <section v-if="editForm.task_code === 'supplier_data_cleanup'" class="sp-form-section sp-policy-section">
@@ -912,6 +925,42 @@
             <div v-else class="sp-rate-guard-empty">当前没有可配置默认模型的平台。</div>
           </section>
 
+          <section v-if="editForm.config.account_health_guard_platform_multiplier_intervals_enabled" class="sp-health-guard-platform-models">
+            <div class="sp-health-guard-dialog-section-head">
+              <strong>未开调度账号按倍率间隔</strong>
+              <span>仅对未开启调度的账号生效：按账号所属平台 + 计费倍率落入的区间取检查间隔（覆盖账号级间隔）。区间取 [下限, 上限)，上限留空表示无上界；未命中任何区间的账号每轮都会检查。间隔不得低于 60 秒。</span>
+            </div>
+            <div v-if="healthGuardPlatformSummaries.length" class="sp-health-guard-multiplier-grid">
+              <article v-for="summary in healthGuardPlatformSummaries" :key="summary.platform">
+                <div class="sp-health-guard-multiplier-head" :class="platformTextClass(summary.platform)">
+                  <strong>{{ platformLabel(summary.platform) }}</strong>
+                  <button class="sp-button small ghost" type="button" @click="addHealthGuardMultiplierRule(summary.platform)">
+                    <Icon name="plus" size="sm" />
+                    新增区间
+                  </button>
+                </div>
+                <div v-if="healthGuardMultiplierRules(summary.platform).length" class="sp-health-guard-multiplier-rows">
+                  <div class="sp-health-guard-multiplier-row sp-health-guard-multiplier-row-head">
+                    <span>倍率下限（含）</span>
+                    <span>倍率上限（不含，留空=无上界）</span>
+                    <span>检查间隔（秒）</span>
+                    <span></span>
+                  </div>
+                  <div v-for="(rule, index) in healthGuardMultiplierRules(summary.platform)" :key="index" class="sp-health-guard-multiplier-row">
+                    <Input :model-value="rule.min_multiplier" type="number" step="0.1" min="0" @update:model-value="rule.min_multiplier = toNumber($event, rule.min_multiplier)" />
+                    <Input :model-value="rule.max_multiplier || ''" type="number" step="0.1" min="0" placeholder="无上界" @update:model-value="rule.max_multiplier = toNumber($event, 0)" />
+                    <Input :model-value="rule.interval_seconds" type="number" min="60" @update:model-value="rule.interval_seconds = toNumber($event, rule.interval_seconds)" />
+                    <button class="sp-button small ghost danger" type="button" @click="removeHealthGuardMultiplierRule(summary.platform, index)">
+                      <Icon name="trash" size="sm" />
+                    </button>
+                  </div>
+                </div>
+                <div v-else class="sp-rate-guard-empty">未配置区间：该平台下未开调度的账号每轮都会检查。</div>
+              </article>
+            </div>
+            <div v-else class="sp-rate-guard-empty">当前没有可配置倍率间隔的平台。</div>
+          </section>
+
           <section class="sp-health-guard-account-workspace">
             <div class="sp-health-guard-selection-summary" aria-label="健康守护账号配置摘要">
               <article>
@@ -1433,6 +1482,7 @@ import {
   type SupplierAutomationRun,
   type SupplierAutomationStageRunDetail,
   type SupplierAutomationConfig,
+  type SupplierAccountHealthGuardMultiplierInterval,
   type SupplierAutomationTask,
   type SupplierProviderRechargeSyncAllResult,
   type SupplierProviderMonitorSyncItem,
@@ -1527,6 +1577,8 @@ const editForm = reactive<SupplierAutomationTask>({
     account_health_guard_account_failure_thresholds: {},
     account_health_guard_account_slow_thresholds: {},
     account_health_guard_account_recovery_thresholds: {},
+    account_health_guard_platform_multiplier_intervals_enabled: false,
+    account_health_guard_platform_multiplier_intervals: {},
     account_health_guard_cursor_account_id: 0,
     group_scheduling_election_top_n: 1,
     group_scheduling_election_disabled_group_ids: [],
@@ -2825,6 +2877,8 @@ function applyAccountHealthGuardDefaults() {
   config.account_health_guard_account_failure_thresholds = normalizeAccountHealthGuardAccountThresholds(config.account_health_guard_account_failure_thresholds)
   config.account_health_guard_account_slow_thresholds = normalizeAccountHealthGuardAccountThresholds(config.account_health_guard_account_slow_thresholds)
   config.account_health_guard_account_recovery_thresholds = normalizeAccountHealthGuardAccountThresholds(config.account_health_guard_account_recovery_thresholds)
+  config.account_health_guard_platform_multiplier_intervals_enabled = Boolean(config.account_health_guard_platform_multiplier_intervals_enabled)
+  config.account_health_guard_platform_multiplier_intervals = normalizeHealthGuardPlatformMultiplierIntervals(config.account_health_guard_platform_multiplier_intervals)
   const cursorAccountID = Number(config.account_health_guard_cursor_account_id)
   config.account_health_guard_cursor_account_id = Number.isSafeInteger(cursorAccountID) && cursorAccountID > 0 ? cursorAccountID : 0
 }
@@ -3198,6 +3252,27 @@ function setHealthGuardAccountSchedulingChange(accountID: number, value: boolean
   editForm.config.account_health_guard_account_scheduling_change = schedulingChange
 }
 
+// 返回某平台的倍率区间规则数组（不存在则就地建空数组），供模板 v-model 直接编辑。
+function healthGuardMultiplierRules(platform: string): SupplierAccountHealthGuardMultiplierInterval[] {
+  let map = editForm.config.account_health_guard_platform_multiplier_intervals
+  if (!map || typeof map !== 'object' || Array.isArray(map)) {
+    map = {}
+    editForm.config.account_health_guard_platform_multiplier_intervals = map
+  }
+  if (!Array.isArray(map[platform])) {
+    map[platform] = []
+  }
+  return map[platform]
+}
+
+function addHealthGuardMultiplierRule(platform: string) {
+  healthGuardMultiplierRules(platform).push({ min_multiplier: 0, max_multiplier: 0, interval_seconds: 3600 })
+}
+
+function removeHealthGuardMultiplierRule(platform: string, index: number) {
+  healthGuardMultiplierRules(platform).splice(index, 1)
+}
+
 function normalizeAccountHealthGuardSchedulingChange(value: unknown): Record<string, boolean> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
   return Object.fromEntries(
@@ -3213,6 +3288,35 @@ function normalizeAccountHealthGuardAccountIntervals(value: unknown): Record<str
       .map(([key, item]) => [key.trim(), Math.floor(Number(item))])
       .filter(([key, item]) => Boolean(key) && Number.isFinite(item) && Number(item) >= 60)
   ) as Record<string, number>
+}
+
+// 清洗每个平台的倍率区间规则：平台 key 转小写、丢弃间隔<60 或非法区间（min<0、max>0 且 min>=max）的规则，
+// 并按下界升序排；某平台没有合法规则则整体丢弃。与后端归一化保持一致。
+function normalizeHealthGuardPlatformMultiplierIntervals(
+  value: unknown
+): Record<string, SupplierAccountHealthGuardMultiplierInterval[]> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const out: Record<string, SupplierAccountHealthGuardMultiplierInterval[]> = {}
+  for (const [rawPlatform, rawRules] of Object.entries(value as Record<string, unknown>)) {
+    const platform = rawPlatform.trim().toLowerCase()
+    if (!platform || !Array.isArray(rawRules)) continue
+    const cleaned: SupplierAccountHealthGuardMultiplierInterval[] = []
+    for (const rawRule of rawRules) {
+      if (!rawRule || typeof rawRule !== 'object') continue
+      const rule = rawRule as Record<string, unknown>
+      const min = Number(rule.min_multiplier)
+      const max = Number(rule.max_multiplier)
+      const interval = Math.floor(Number(rule.interval_seconds))
+      if (!Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(interval)) continue
+      if (interval < 60 || min < 0) continue
+      if (max > 0 && min >= max) continue
+      cleaned.push({ min_multiplier: min, max_multiplier: max > 0 ? max : 0, interval_seconds: interval })
+    }
+    if (cleaned.length === 0) continue
+    cleaned.sort((a, b) => a.min_multiplier - b.min_multiplier)
+    out[platform] = cleaned
+  }
+  return out
 }
 
 // 账号级阈值只保留正整数；留空或非法值等于不覆盖，交由全局阈值生效。
@@ -5444,6 +5548,66 @@ function intervalSecondsToCron(seconds: number): string | null {
 .sp-health-guard-platform-model-grid article > div span {
   color: color-mix(in srgb, currentColor 58%, var(--sp-muted));
   font-variant-numeric: tabular-nums;
+}
+
+.sp-health-guard-multiplier-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--sp-blue) 12%, var(--sp-line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--sp-soft) 20%, transparent);
+}
+
+.sp-health-guard-multiplier-switch > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.sp-health-guard-multiplier-switch > div span {
+  color: var(--sp-muted);
+}
+
+.sp-health-guard-multiplier-grid {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.sp-health-guard-multiplier-grid article {
+  border: 1px solid color-mix(in srgb, var(--sp-blue) 12%, var(--sp-line));
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--sp-panel);
+}
+
+.sp-health-guard-multiplier-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.sp-health-guard-multiplier-rows {
+  display: grid;
+  gap: 6px;
+}
+
+.sp-health-guard-multiplier-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 8px;
+}
+
+.sp-health-guard-multiplier-row-head span {
+  color: var(--sp-muted);
+  font-size: 12px;
 }
 
 .sp-health-guard-selection-summary {

@@ -81,7 +81,20 @@ type SupplierAccountHealthGuardConfig struct {
 	AccountFailureThresholds  map[int64]int `json:"account_health_guard_account_failure_thresholds"`
 	AccountSlowThresholds     map[int64]int `json:"account_health_guard_account_slow_thresholds"`
 	AccountRecoveryThresholds map[int64]int `json:"account_health_guard_account_recovery_thresholds"`
-	CursorAccountID           int64         `json:"account_health_guard_cursor_account_id"`
+	// 未开调度账号按平台倍率区间取检查间隔：总开关开启后，!Schedulable 的账号改由
+	// PlatformMultiplierIntervals 命中的区间决定间隔，覆盖账号级 AccountIntervals；
+	// 未命中任何区间则不设间隔（每轮都测）。已开调度账号不受影响，仍走 AccountIntervals。
+	PlatformMultiplierIntervalsEnabled bool                                                      `json:"account_health_guard_platform_multiplier_intervals_enabled"`
+	PlatformMultiplierIntervals        map[string][]SupplierAccountHealthGuardMultiplierInterval `json:"account_health_guard_platform_multiplier_intervals"`
+	CursorAccountID                    int64                                                     `json:"account_health_guard_cursor_account_id"`
+}
+
+// SupplierAccountHealthGuardMultiplierInterval 描述一个「倍率区间 → 检查间隔」规则。
+// 区间取 [MinMultiplier, MaxMultiplier)：下界含、上界不含；MaxMultiplier<=0 表示无上界。
+type SupplierAccountHealthGuardMultiplierInterval struct {
+	MinMultiplier   float64 `json:"min_multiplier"`
+	MaxMultiplier   float64 `json:"max_multiplier"`
+	IntervalSeconds int     `json:"interval_seconds"`
 }
 
 type SupplierAccountHealthGuardSource struct {
@@ -572,11 +585,31 @@ func supplierAccountHealthGuardSkippedItem(candidate SupplierAccountHealthGuardC
 	return item
 }
 
+// supplierAccountHealthGuardResolveInterval 决定单个 target 的检查间隔（秒，<=0 表示每轮都测）。
+// 未开调度账号在总开关开启时以平台倍率规则为准，覆盖账号级 AccountIntervals；其余情况沿用 AccountIntervals。
+func supplierAccountHealthGuardResolveInterval(config SupplierAccountHealthGuardConfig, target supplierAccountHealthGuardTarget) int {
+	if config.PlatformMultiplierIntervalsEnabled && !target.account.Schedulable {
+		platform := strings.ToLower(strings.TrimSpace(target.platform))
+		multiplier := target.account.BillingRateMultiplier()
+		for _, rule := range config.PlatformMultiplierIntervals[platform] {
+			if multiplier < rule.MinMultiplier {
+				continue
+			}
+			if rule.MaxMultiplier > 0 && multiplier >= rule.MaxMultiplier {
+				continue
+			}
+			return rule.IntervalSeconds
+		}
+		return 0
+	}
+	return config.AccountIntervals[target.account.ID]
+}
+
 func supplierAccountHealthGuardFilterNotDue(targets []supplierAccountHealthGuardTarget, config SupplierAccountHealthGuardConfig, now time.Time) ([]supplierAccountHealthGuardTarget, []SupplierAccountHealthGuardRunItem) {
 	out := make([]supplierAccountHealthGuardTarget, 0, len(targets))
 	notDue := make([]SupplierAccountHealthGuardRunItem, 0)
 	for _, target := range targets {
-		interval := config.AccountIntervals[target.account.ID]
+		interval := supplierAccountHealthGuardResolveInterval(config, target)
 		if interval <= 0 {
 			out = append(out, target)
 			continue
@@ -720,6 +753,7 @@ func normalizeSupplierAccountHealthGuardConfig(config SupplierAccountHealthGuard
 	config.PlatformModels = normalizeSupplierAccountHealthGuardPlatformModels(config.PlatformModels)
 	config.PlatformLatencyMs = normalizeSupplierAccountHealthGuardPlatformLatency(config.PlatformLatencyMs)
 	config.AccountIntervals = normalizeSupplierAccountHealthGuardAccountIntervals(config.AccountIntervals)
+	config.PlatformMultiplierIntervals = normalizeSupplierAccountHealthGuardPlatformMultiplierIntervals(config.PlatformMultiplierIntervals)
 	config.AccountFailureThresholds = normalizeSupplierAccountHealthGuardAccountThresholds(config.AccountFailureThresholds)
 	config.AccountSlowThresholds = normalizeSupplierAccountHealthGuardAccountThresholds(config.AccountSlowThresholds)
 	config.AccountRecoveryThresholds = normalizeSupplierAccountHealthGuardAccountThresholds(config.AccountRecoveryThresholds)
@@ -796,6 +830,37 @@ func normalizeSupplierAccountHealthGuardAccountIntervals(values map[int64]int) m
 		if accountID > 0 && interval >= MinSupplierAccountHealthGuardAccountIntervalSeconds {
 			out[accountID] = interval
 		}
+	}
+	return out
+}
+
+// normalizeSupplierAccountHealthGuardPlatformMultiplierIntervals 清洗每个平台的倍率区间规则：
+// 平台 key 转小写、丢弃间隔不足或非法区间（min<0、max>0 且 min>=max）的规则，并按下界升序排。
+func normalizeSupplierAccountHealthGuardPlatformMultiplierIntervals(values map[string][]SupplierAccountHealthGuardMultiplierInterval) map[string][]SupplierAccountHealthGuardMultiplierInterval {
+	out := make(map[string][]SupplierAccountHealthGuardMultiplierInterval)
+	for platform, rules := range values {
+		platform = strings.ToLower(strings.TrimSpace(platform))
+		if platform == "" {
+			continue
+		}
+		cleaned := make([]SupplierAccountHealthGuardMultiplierInterval, 0, len(rules))
+		for _, rule := range rules {
+			if rule.IntervalSeconds < MinSupplierAccountHealthGuardAccountIntervalSeconds {
+				continue
+			}
+			if rule.MinMultiplier < 0 {
+				continue
+			}
+			if rule.MaxMultiplier > 0 && rule.MinMultiplier >= rule.MaxMultiplier {
+				continue
+			}
+			cleaned = append(cleaned, rule)
+		}
+		if len(cleaned) == 0 {
+			continue
+		}
+		sort.Slice(cleaned, func(i, j int) bool { return cleaned[i].MinMultiplier < cleaned[j].MinMultiplier })
+		out[platform] = cleaned
 	}
 	return out
 }

@@ -852,3 +852,135 @@ func TestSupplierAccountHealthGuardRunKeepsSnapshotWriteFailureVisible(t *testin
 	require.Equal(t, 1, result.CheckedCount)
 	require.Contains(t, result.SnapshotErrorMessage, "快照表写不进去")
 }
+
+func TestNormalizeSupplierAccountHealthGuardPlatformMultiplierIntervals(t *testing.T) {
+	config := normalizeSupplierAccountHealthGuardConfig(SupplierAccountHealthGuardConfig{
+		PlatformMultiplierIntervals: map[string][]SupplierAccountHealthGuardMultiplierInterval{
+			" OpenAI ": {
+				{MinMultiplier: 2, MaxMultiplier: 5, IntervalSeconds: 600},
+				{MinMultiplier: 0, MaxMultiplier: 2, IntervalSeconds: 300},
+				{MinMultiplier: 5, MaxMultiplier: 0, IntervalSeconds: 1800}, // 无上界
+				{MinMultiplier: 0, MaxMultiplier: 1, IntervalSeconds: 59},   // 间隔不足丢弃
+				{MinMultiplier: -1, MaxMultiplier: 3, IntervalSeconds: 300}, // 负下界丢弃
+				{MinMultiplier: 5, MaxMultiplier: 5, IntervalSeconds: 300},  // 空区间丢弃
+			},
+			"":       {{MinMultiplier: 0, MaxMultiplier: 1, IntervalSeconds: 300}}, // 空平台丢弃
+			"claude": {{MinMultiplier: 0, MaxMultiplier: 1, IntervalSeconds: 40}},  // 全部非法 → 平台整体丢弃
+		},
+	})
+
+	require.Equal(t, map[string][]SupplierAccountHealthGuardMultiplierInterval{
+		"openai": {
+			{MinMultiplier: 0, MaxMultiplier: 2, IntervalSeconds: 300},
+			{MinMultiplier: 2, MaxMultiplier: 5, IntervalSeconds: 600},
+			{MinMultiplier: 5, MaxMultiplier: 0, IntervalSeconds: 1800},
+		},
+	}, config.PlatformMultiplierIntervals)
+}
+
+func TestSupplierAccountHealthGuardResolveInterval(t *testing.T) {
+	multiplier := func(v float64) *float64 { return &v }
+	config := SupplierAccountHealthGuardConfig{
+		PlatformMultiplierIntervalsEnabled: true,
+		AccountIntervals:                   map[int64]int{1: 120},
+		PlatformMultiplierIntervals: map[string][]SupplierAccountHealthGuardMultiplierInterval{
+			"openai": {
+				{MinMultiplier: 0, MaxMultiplier: 2, IntervalSeconds: 300},
+				{MinMultiplier: 2, MaxMultiplier: 5, IntervalSeconds: 600},
+				{MinMultiplier: 5, MaxMultiplier: 0, IntervalSeconds: 1800},
+			},
+		},
+	}
+
+	target := func(id int64, platform string, schedulable bool, mult *float64) supplierAccountHealthGuardTarget {
+		return supplierAccountHealthGuardTarget{
+			account:  Account{ID: id, Platform: platform, Schedulable: schedulable, RateMultiplier: mult},
+			platform: platform,
+		}
+	}
+
+	tests := []struct {
+		name   string
+		target supplierAccountHealthGuardTarget
+		want   int
+	}{
+		{name: "未调度命中低倍率区间", target: target(1, "openai", false, multiplier(1)), want: 300},
+		{name: "未调度命中中倍率区间(下界含)", target: target(2, "openai", false, multiplier(2)), want: 600},
+		{name: "未调度命中无上界区间", target: target(3, "openai", false, multiplier(9)), want: 1800},
+		{name: "未调度无倍率按1.0落低区间", target: target(4, "openai", false, nil), want: 300},
+		{name: "未调度但平台无规则", target: target(5, "claude", false, multiplier(1)), want: 0},
+		{name: "已调度不受平台规则影响仍用账号级", target: target(1, "openai", true, multiplier(1)), want: 120},
+		{name: "已调度且无账号级配置", target: target(3, "openai", true, multiplier(1)), want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, supplierAccountHealthGuardResolveInterval(config, tt.target))
+		})
+	}
+}
+
+func TestSupplierAccountHealthGuardResolveIntervalDisabledFallsBackToAccountIntervals(t *testing.T) {
+	config := SupplierAccountHealthGuardConfig{
+		PlatformMultiplierIntervalsEnabled: false,
+		AccountIntervals:                   map[int64]int{7: 300},
+		PlatformMultiplierIntervals: map[string][]SupplierAccountHealthGuardMultiplierInterval{
+			"openai": {{MinMultiplier: 0, MaxMultiplier: 0, IntervalSeconds: 900}},
+		},
+	}
+	tgt := supplierAccountHealthGuardTarget{
+		account:  Account{ID: 7, Platform: "openai", Schedulable: false},
+		platform: "openai",
+	}
+	// 总开关关闭时未调度账号也走账号级配置，平台规则不介入。
+	require.Equal(t, 300, supplierAccountHealthGuardResolveInterval(config, tgt))
+}
+
+func TestSupplierAccountHealthGuardRunSkipsUnschedulableByPlatformMultiplier(t *testing.T) {
+	notDue := newSupplierAccountHealthGuardCandidate(91, "低倍率未调度账号", "openai", false, SupplierAccountHealthGuardSource{ProviderAccountID: 91})
+	notDue.LocalAccount.Extra[supplierHealthGuardLastCheckedAtExtraKey] = time.Date(2026, 8, 17, 9, 58, 0, 0, time.UTC).Format(time.RFC3339)
+	repo := &supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{notDue}}
+	tester := &supplierAccountHealthGuardTesterStub{results: map[int64]*ScheduledTestResult{}, errs: map[int64]error{}}
+	store := &supplierAccountHealthGuardAccountStoreStub{}
+	guard := NewSupplierAccountHealthGuardService(repo, store, tester)
+
+	now := time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC)
+	result, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{
+		AccountIDs:                         []int64{91},
+		PlatformModels:                     map[string]string{"openai": "gpt-4o-mini"},
+		PlatformMultiplierIntervalsEnabled: true,
+		PlatformMultiplierIntervals: map[string][]SupplierAccountHealthGuardMultiplierInterval{
+			"openai": {{MinMultiplier: 0, MaxMultiplier: 2, IntervalSeconds: 300}},
+		},
+	}, now)
+
+	require.NoError(t, err)
+	require.Empty(t, tester.calls)
+	require.Equal(t, 1, result.SkippedCount)
+	require.Zero(t, result.CheckedCount)
+	require.Equal(t, []string{"未到检查间隔"}, supplierAccountHealthGuardReasonNames(result.SkipReasons))
+}
+
+func TestSupplierAccountHealthGuardRunChecksSchedulableIgnoringPlatformMultiplier(t *testing.T) {
+	// 已开调度账号即便距上次检查很近，也不受平台倍率规则约束，照常测试。
+	due := newSupplierAccountHealthGuardCandidate(92, "已调度账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 92})
+	due.LocalAccount.Extra[supplierHealthGuardLastCheckedAtExtraKey] = time.Date(2026, 8, 17, 9, 59, 0, 0, time.UTC).Format(time.RFC3339)
+	repo := &supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{due}}
+	tester := &supplierAccountHealthGuardTesterStub{results: map[int64]*ScheduledTestResult{92: {Status: "success", LatencyMs: 100}}, errs: map[int64]error{}}
+	store := &supplierAccountHealthGuardAccountStoreStub{}
+	guard := NewSupplierAccountHealthGuardService(repo, store, tester)
+
+	now := time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC)
+	result, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{
+		AccountIDs:                         []int64{92},
+		PlatformModels:                     map[string]string{"openai": "gpt-4o-mini"},
+		PlatformMultiplierIntervalsEnabled: true,
+		PlatformMultiplierIntervals: map[string][]SupplierAccountHealthGuardMultiplierInterval{
+			"openai": {{MinMultiplier: 0, MaxMultiplier: 0, IntervalSeconds: 3600}},
+		},
+	}, now)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, result.CheckedCount)
+	require.Zero(t, result.SkippedCount)
+}
