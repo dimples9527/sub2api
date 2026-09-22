@@ -417,7 +417,8 @@
   .modal-body {
     @apply px-4 py-3;
     @apply sm:px-6 sm:py-4;
-    @apply flex-1 overflow-y-auto;
+    /* overscroll-contain: 弹窗内滚动到边界时不再把滚动"传染"给下方页面。 */
+    @apply flex-1 overflow-y-auto overscroll-contain;
   }
 
   .modal-footer {
@@ -427,7 +428,8 @@
     @apply flex-shrink-0;
   }
 
-  /* 防止body滚动的工具类 */
+  /* 防止背景滚动：本项目滚动条在 <html>(documentElement) 上，只锁 body 挡不住，必须两者都锁。 */
+  html.modal-open,
   body.modal-open {
     overflow: hidden;
   }

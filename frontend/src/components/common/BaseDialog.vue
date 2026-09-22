@@ -123,6 +123,8 @@ watch(
       // 保存当前焦点元素
       previousActiveElement = document.activeElement as HTMLElement
       // 使用CSS类而不是直接操作style,更易于管理多个对话框
+      // 同时锁 html 与 body：本项目滚动条在 documentElement 上，只锁 body 背景仍会滚动。
+      document.documentElement.classList.add('modal-open')
       document.body.classList.add('modal-open')
 
       // 等待DOM更新后设置焦点到对话框
@@ -137,6 +139,7 @@ watch(
         firstFocusable?.focus()
       }
     } else {
+      document.documentElement.classList.remove('modal-open')
       document.body.classList.remove('modal-open')
       // 恢复之前的焦点
       if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
@@ -155,6 +158,7 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('keydown', handleEscape)
   // 确保组件卸载时移除滚动锁定
+  document.documentElement.classList.remove('modal-open')
   document.body.classList.remove('modal-open')
 })
 </script>

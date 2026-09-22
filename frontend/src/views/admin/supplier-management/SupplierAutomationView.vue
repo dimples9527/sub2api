@@ -332,7 +332,7 @@
               <span>03</span>
               <div><h3>分组择优调度策略</h3><p>为每个分组按「连续成功次数 + 测试用时」的综合分选出最优账号开启调度；测试失败的账号要连续失败达到阈值才关闭，且分组里没有备选账号时一律保留。复用现有测试状态，不重新测试，建议排在健康守护之后运行。</p></div>
             </div>
-            <div class="sp-form-grid">
+            <div class="sp-form-grid sp-group-election-policy-grid">
               <Input :model-value="editForm.config.group_scheduling_election_top_n" type="number" label="每组开启账号数（默认 1 单活）" @update:model-value="editForm.config.group_scheduling_election_top_n = toNumber($event, editForm.config.group_scheduling_election_top_n ?? 1)" />
               <Input :model-value="editForm.config.group_scheduling_election_count_weight" type="number" step="0.1" min="0.1" label="连续成功次数权重（默认 1）" @update:model-value="editForm.config.group_scheduling_election_count_weight = toNumber($event, editForm.config.group_scheduling_election_count_weight ?? 1)" />
               <Input :model-value="editForm.config.group_scheduling_election_latency_weight" type="number" step="0.1" min="0.1" label="测试用时权重（默认 0.5）" @update:model-value="editForm.config.group_scheduling_election_latency_weight = toNumber($event, editForm.config.group_scheduling_election_latency_weight ?? 0.5)" />
@@ -3866,7 +3866,8 @@ function intervalSecondsToCron(seconds: number): string | null {
 }
 
 .sp-health-guard-policy-grid,
-.sp-retention-grid {
+.sp-retention-grid,
+.sp-group-election-policy-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
@@ -6384,6 +6385,7 @@ function intervalSecondsToCron(seconds: number): string | null {
   .sp-form-grid,
   .sp-health-guard-policy-grid,
   .sp-retention-grid,
+  .sp-group-election-policy-grid,
   .sp-run-detail-summary,
   .sp-provider-detail-layout,
   .sp-cleanup-grid,
