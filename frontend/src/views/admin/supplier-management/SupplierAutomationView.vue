@@ -341,20 +341,13 @@
               <Input :model-value="editForm.config.group_scheduling_election_latency_window_minutes" type="number" min="1" label="延迟平均窗口（分钟，默认 30）" @update:model-value="editForm.config.group_scheduling_election_latency_window_minutes = toNumber($event, editForm.config.group_scheduling_election_latency_window_minutes ?? 30)" />
               <Input :model-value="editForm.config.group_scheduling_election_latency_min_samples" type="number" min="1" label="平均最少成功样本（默认 3，不足则回退单次）" @update:model-value="editForm.config.group_scheduling_election_latency_min_samples = toNumber($event, editForm.config.group_scheduling_election_latency_min_samples ?? 3)" />
             </div>
-            <label class="sp-health-guard-account-scheduling-toggle">
-              <Toggle
-                :model-value="editForm.config.group_scheduling_election_keep_healthy_incumbent ?? false"
-                aria-label="在任者健康时锁定分组"
-                title="打开后：分组里当前开着调度的账号测试都正常时，直接保留现状、跳过择优与换人；有开着的账号失败则仍走正常择优。"
-                @update:model-value="editForm.config.group_scheduling_election_keep_healthy_incumbent = $event"
-              />
-              <span>在任者健康则锁定分组（开着的账号正常就跳过，不换人）</span>
-            </label>
             <div class="sp-rate-guard-scope-card">
               <div>
-                <strong>不参与择优的分组</strong>
+                <strong>分组参与择优 / 在任者健康锁定</strong>
                 <span v-if="groupElectionDisabledGroupIDs.length === 0">所有分组都参与择优。新增分组也会自动参与。</span>
                 <span v-else>已关闭 <strong class="sp-rate-guard-scope-count">{{ groupElectionDisabledGroupIDs.length }}</strong> 个分组，其余分组正常参与择优。</span>
+                <span v-if="groupElectionKeepHealthyGroupIDs.length > 0">已对 <strong class="sp-rate-guard-scope-count">{{ groupElectionKeepHealthyGroupIDs.length }}</strong> 个分组开启「在任者健康则锁定」：开着的账号正常就跳过、不换人。</span>
+                <span v-else>暂无分组开启「在任者健康锁定」。</span>
               </div>
               <button
                 class="sp-button small ghost sp-rate-guard-scope-config-button"
@@ -362,7 +355,7 @@
                 @click="openElectionGroups"
               >
                 <Icon name="cog" size="md" />
-                配置参与分组
+                配置分组
               </button>
             </div>
           </section>
@@ -1325,13 +1318,25 @@
                 >
                   已关闭择优
                 </span>
+                <label
+                  v-else
+                  class="sp-health-guard-account-scheduling-toggle sp-election-keep-healthy-toggle"
+                  :title="`打开后：分组「${group.name}」当前开着调度的账号测试都正常时，保留现状、跳过择优与换人；有开着的账号失败仍走正常择优`"
+                >
+                  <Toggle
+                    :model-value="electionGroupKeepHealthy(group.id)"
+                    :aria-label="`分组 ${group.name} 在任者健康时是否锁定`"
+                    @update:model-value="toggleElectionKeepHealthyGroup(group.id)"
+                  />
+                  <span>健康锁定</span>
+                </label>
               </article>
             </div>
             <div v-else class="sp-rate-guard-empty">{{ electionGroupEmptyHint }}</div>
           </section>
         </div>
         <template #footer>
-          <span class="sp-rate-guard-group-hint">取消勾选的分组会被跳过；全部勾选即所有分组都参与择优。</span>
+          <span class="sp-rate-guard-group-hint">取消勾选的分组会被跳过；「健康锁定」打开后，该分组开着的账号正常时就保留现状、不换人。</span>
           <button class="sp-button ghost" type="button" @click="enableAllElectionGroups">全部参与</button>
           <button class="sp-button primary" type="button" @click="closeElectionGroups">完成</button>
         </template>
@@ -1501,7 +1506,7 @@ const editForm = reactive<SupplierAutomationTask>({
     group_scheduling_election_switch_margin: 0.15,
     group_scheduling_election_latency_window_minutes: 30,
     group_scheduling_election_latency_min_samples: 3,
-    group_scheduling_election_keep_healthy_incumbent: false,
+    group_scheduling_election_keep_healthy_incumbent_group_ids: [],
   },
   last_status: '',
   last_message: '',
@@ -2398,6 +2403,11 @@ const groupElectionDisabledGroupIDs = computed(() =>
   normalizePositiveAccountIDs(editForm.config.group_scheduling_election_disabled_group_ids)
 )
 
+// 在任者健康锁定：存"要锁定"的分组（opt-in），空列表即都不锁定。
+const groupElectionKeepHealthyGroupIDs = computed(() =>
+  normalizePositiveAccountIDs(editForm.config.group_scheduling_election_keep_healthy_incumbent_group_ids)
+)
+
 const electionGroupScopeSummary = computed(() => {
   const disabled = groupElectionDisabledGroupIDs.value.length
   return {
@@ -2767,6 +2777,9 @@ function applyGroupElectionDefaults() {
   editForm.config.group_scheduling_election_disabled_group_ids = normalizePositiveAccountIDs(
     editForm.config.group_scheduling_election_disabled_group_ids
   )
+  editForm.config.group_scheduling_election_keep_healthy_incumbent_group_ids = normalizePositiveAccountIDs(
+    editForm.config.group_scheduling_election_keep_healthy_incumbent_group_ids
+  )
   // 权重必须是正数：0 在后端归一化里被当成"未配置"回落默认，
   // 这里先在前端拦住，免得管理员填了 0 却静默拿到默认值。
   const countWeight = Number(editForm.config.group_scheduling_election_count_weight)
@@ -2934,6 +2947,26 @@ function toggleElectionGroup(groupID: number) {
     ? disabled.filter(id => id !== groupID)
     : [...disabled, groupID]
   editForm.config.group_scheduling_election_disabled_group_ids = normalizePositiveAccountIDs(next)
+  // 关闭择优的分组不该再留在"健康锁定"列表里（锁定对不择优的分组无意义）。
+  if (!disabled.includes(groupID)) {
+    const keep = groupElectionKeepHealthyGroupIDs.value
+    if (keep.includes(groupID)) {
+      editForm.config.group_scheduling_election_keep_healthy_incumbent_group_ids =
+        normalizePositiveAccountIDs(keep.filter(id => id !== groupID))
+    }
+  }
+}
+
+function electionGroupKeepHealthy(groupID: number): boolean {
+  return groupElectionKeepHealthyGroupIDs.value.includes(groupID)
+}
+
+function toggleElectionKeepHealthyGroup(groupID: number) {
+  const keep = groupElectionKeepHealthyGroupIDs.value
+  const next = keep.includes(groupID)
+    ? keep.filter(id => id !== groupID)
+    : [...keep, groupID]
+  editForm.config.group_scheduling_election_keep_healthy_incumbent_group_ids = normalizePositiveAccountIDs(next)
 }
 
 function enableAllElectionGroups() {

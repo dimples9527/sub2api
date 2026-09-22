@@ -60,11 +60,11 @@ export interface SupplierAutomationConfig {
   /** 分组择优调度：信任窗口平均所需的最少成功样本数，默认 3，不足则回退到最近一次单值。 */
   group_scheduling_election_latency_min_samples?: number
   /**
-   * 分组择优调度：在任者健康锁定开关，默认关。
-   * 打开后，分组里「当前开着调度的账号」测试都正常（且没有开着却失败的）时，直接保留现状、
+   * 分组择优调度：启用「在任者健康锁定」的分组 ID 列表（opt-in，空=都不锁定，默认）。
+   * 列表内分组只要「当前开着调度的账号」测试都正常（且没有开着却失败的），就保留现状、
    * 跳过择优与换人；一旦有开着的账号失败，仍走正常择优交给失败闸门处理。
    */
-  group_scheduling_election_keep_healthy_incumbent?: boolean
+  group_scheduling_election_keep_healthy_incumbent_group_ids?: number[]
 }
 
 export interface SupplierAutomationTask {

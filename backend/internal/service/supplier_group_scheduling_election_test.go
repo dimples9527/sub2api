@@ -722,23 +722,30 @@ func TestGroupElectionKeepHealthyIncumbentLocksGroup(t *testing.T) {
 		}
 	}
 
-	// 开关打开：锁定分组，保留 301，不动 302。
+	// 分组 1 被 opt-in 锁定：保留 301，不动 302。
 	store := newFakeGroupElectionStore()
 	svc := NewSupplierGroupSchedulingElectionService(&fakeGroupElectionRepo{members: newMembers()}, store)
-	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1, KeepHealthyIncumbent: true}, time.Now())
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1, KeepHealthyIncumbentGroupIDs: []int64{1}}, time.Now())
 	require.NoError(t, err)
 	require.Equal(t, []int64{301}, result.Groups[0].WinnerIDs, "在任者健康 → 锁定分组，保留 301")
 	require.Equal(t, 0, result.EnabledCount)
 	require.Equal(t, 0, result.DisabledCount)
 	require.Empty(t, store.calls, "锁定分组不产生任何调度写库")
 
-	// 开关关闭：同样数据下 302 明显更优 → 正常换人，证明差异来自开关。
+	// 分组 1 未被 opt-in：同样数据下 302 明显更优 → 正常换人，证明差异来自分组级开关。
 	store = newFakeGroupElectionStore()
 	svc = NewSupplierGroupSchedulingElectionService(&fakeGroupElectionRepo{members: newMembers()}, store)
 	_, err = svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1}, time.Now())
 	require.NoError(t, err)
-	require.Equal(t, true, store.calls[302], "开关关闭时更优的 302 应正常当选")
-	require.Equal(t, false, store.calls[301], "开关关闭时落选的 301 应被关闭")
+	require.Equal(t, true, store.calls[302], "未锁定时更优的 302 应正常当选")
+	require.Equal(t, false, store.calls[301], "未锁定时落选的 301 应被关闭")
+
+	// 只锁定别的分组(999)时，分组 1 不受影响，仍正常换人 —— 验证锁定确实按分组粒度生效。
+	store = newFakeGroupElectionStore()
+	svc = NewSupplierGroupSchedulingElectionService(&fakeGroupElectionRepo{members: newMembers()}, store)
+	_, err = svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1, KeepHealthyIncumbentGroupIDs: []int64{999}}, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, true, store.calls[302], "只锁定了 999，分组 1 不在列表内应正常换人")
 }
 
 // 只在在任者健康时锁定：开着的账号(311)测试失败时不锁定，仍走正常择优 —— 更优的 312 被开启，
@@ -751,7 +758,7 @@ func TestGroupElectionKeepHealthyIncumbentRunsElectionWhenIncumbentFailed(t *tes
 	store := newFakeGroupElectionStore()
 	svc := NewSupplierGroupSchedulingElectionService(repo, store)
 
-	_, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1, KeepHealthyIncumbent: true}, time.Now())
+	_, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1, KeepHealthyIncumbentGroupIDs: []int64{1}}, time.Now())
 	require.NoError(t, err)
 	require.Equal(t, true, store.calls[312], "开着的账号失败 → 不锁定，正常择优开启更优的 312")
 }

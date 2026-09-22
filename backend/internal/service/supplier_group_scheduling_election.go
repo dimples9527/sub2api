@@ -120,10 +120,11 @@ type SupplierGroupSchedulingElectionConfig struct {
 	LatencyWindowMinutes int `json:"group_scheduling_election_latency_window_minutes"`
 	// LatencyMinSamples 是信任窗口均值所需的最少成功样本数，默认 3；不足则回退单值。
 	LatencyMinSamples int `json:"group_scheduling_election_latency_min_samples"`
-	// KeepHealthyIncumbent 打开后：一个分组只要「当前开启调度的账号」测试都正常（且没有开着却失败的），
-	// 就锁定该分组——保留这些在任账号、不做任何择优与换人，直接跳过。默认关（false），保持正常择优。
-	// 只在在任者健康时锁定：一旦有开着的账号测试失败，仍走正常择优交给失败闸门处理，绝不锁死一个坏分组。
-	KeepHealthyIncumbent bool `json:"group_scheduling_election_keep_healthy_incumbent"`
+	// KeepHealthyIncumbentGroupIDs 存「启用在任者健康锁定」的分组 ID（opt-in，与 DisabledGroupIDs 相反极性）。
+	// 列表里的分组：只要它「当前开启调度的账号」测试都正常（且没有开着却失败的），就锁定——保留这些在任账号、
+	// 不做任何择优与换人，直接跳过。空列表=所有分组都正常择优（默认），新增分组默认不锁定，安全。
+	// 只在在任者健康时锁定：一旦有开着的账号测试失败，该分组仍走正常择优交给失败闸门处理，绝不锁死一个坏分组。
+	KeepHealthyIncumbentGroupIDs []int64 `json:"group_scheduling_election_keep_healthy_incumbent_group_ids"`
 }
 
 // SupplierGroupSchedulingElectionMember 是仓储层返回的一条"分组×账号"成员行。
@@ -328,6 +329,10 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 	for _, groupID := range config.DisabledGroupIDs {
 		disabledGroups[groupID] = struct{}{}
 	}
+	keepHealthyGroups := make(map[int64]struct{}, len(config.KeepHealthyIncumbentGroupIDs))
+	for _, groupID := range config.KeepHealthyIncumbentGroupIDs {
+		keepHealthyGroups[groupID] = struct{}{}
+	}
 
 	// 1) 按分组归拢成员，同时聚合账号级视图（同一账号可能横跨多个分组）。
 	membersByGroup := make(map[int64][]SupplierGroupSchedulingElectionMember)
@@ -409,10 +414,10 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 			}
 		}
 
-		// 在任者健康锁定：开关打开且分组里「当前开着的账号」测试都正常（且没有开着却失败的），
+		// 在任者健康锁定：仅对被 opt-in 的分组生效，且该组「当前开着的账号」测试都正常（且没有开着却失败的），
 		// 就保留这些在任账号、跳过择优与换人。只在健康时锁定——有开着的账号失败仍走下面的正常择优，
 		// 交给失败闸门处理，绝不把一个坏分组锁死。
-		if config.KeepHealthyIncumbent {
+		if _, keepHealthy := keepHealthyGroups[groupID]; keepHealthy {
 			scheduledHealthy := make([]int64, 0)
 			scheduledFailed := false
 			for _, member := range membersByGroup[groupID] {
@@ -720,6 +725,10 @@ func normalizeSupplierGroupSchedulingElectionConfig(config SupplierGroupScheduli
 	config.DisabledGroupIDs = uniquePositiveInt64s(config.DisabledGroupIDs)
 	sort.Slice(config.DisabledGroupIDs, func(i, j int) bool {
 		return config.DisabledGroupIDs[i] < config.DisabledGroupIDs[j]
+	})
+	config.KeepHealthyIncumbentGroupIDs = uniquePositiveInt64s(config.KeepHealthyIncumbentGroupIDs)
+	sort.Slice(config.KeepHealthyIncumbentGroupIDs, func(i, j int) bool {
+		return config.KeepHealthyIncumbentGroupIDs[i] < config.KeepHealthyIncumbentGroupIDs[j]
 	})
 	// 旧的 config_json 里没有权重字段，反序列化后是 0；而 JSON 无法区分"字段缺失"与"显式填 0"，
 	// 所以 0 一律按"未配置"回落到默认值 —— 否则老任务升级后会静默把用时权重当成 0，
