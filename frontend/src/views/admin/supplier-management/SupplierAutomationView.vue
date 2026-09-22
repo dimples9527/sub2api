@@ -132,7 +132,17 @@
                 <p>按任务和状态定位最近运行结果。</p>
               </div>
             </div>
-            <div class="sp-history-count">{{ runTotal }} 条记录</div>
+            <div class="sp-history-head-actions">
+              <div class="sp-history-count">{{ runTotal }} 条记录</div>
+              <button
+                class="sp-button small ghost sp-election-log-entry"
+                type="button"
+                data-test="open-election-change-logs"
+                @click="openElectionChangeLogs"
+              >
+                调度切换日志
+              </button>
+            </div>
           </header>
           <div class="sp-panel-body">
             <div class="sp-history-toolbar">
@@ -1338,13 +1348,19 @@
         @pending-count-change="updateAccountRateGuardPendingCount"
       />
 
+      <!-- 不带 group-id：这里是全局视角，看所有分组最近的调度切换。 -->
+      <SupplierGroupElectionChangeLogDialog
+        :show="electionChangeLogsVisible"
+        @close="closeElectionChangeLogs"
+      />
+
     </div>
   </SupplierModuleLayout>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { SupplierAccountRateGuardLogDialog, SupplierModuleLayout } from '@/components/admin/supplier-management'
+import { SupplierAccountRateGuardLogDialog, SupplierGroupElectionChangeLogDialog, SupplierModuleLayout } from '@/components/admin/supplier-management'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Input from '@/components/common/Input.vue'
@@ -1407,6 +1423,8 @@ const accountRateGuardExecuteVisible = ref(false)
 const pendingExecuteTask = ref<SupplierAutomationTask | null>(null)
 const accountRateGuardLogsVisible = ref(false)
 const accountRateGuardPendingCount = ref(0)
+// 全局视角的调度切换日志：不锁定分组，分组页那个入口才带 group-id。
+const electionChangeLogsVisible = ref(false)
 const rateGuardGroupsVisible = ref(false)
 const rateGuardGroupSearch = ref('')
 const rateGuardGroupDisabledOnly = ref(false)
@@ -1660,6 +1678,14 @@ function openAccountRateGuardLogs() {
 
 function closeAccountRateGuardLogs() {
   accountRateGuardLogsVisible.value = false
+}
+
+function openElectionChangeLogs() {
+  electionChangeLogsVisible.value = true
+}
+
+function closeElectionChangeLogs() {
+  electionChangeLogsVisible.value = false
 }
 
 async function loadAccountRateGuardPendingCount() {
@@ -3390,6 +3416,26 @@ function intervalSecondsToCron(seconds: number): string | null {
   color: var(--sp-muted);
   font-size: 12px;
   font-weight: 700;
+}
+
+.sp-history-head-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 与分组管理页、账号页的「调度切换日志」入口同色（橙），一个功能一个颜色。 */
+.sp-election-log-entry {
+  border-color: color-mix(in srgb, var(--sp-orange) 45%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-orange) 10%, var(--sp-panel));
+  color: var(--sp-orange);
+}
+
+.sp-election-log-entry:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--sp-orange) 62%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-orange) 16%, var(--sp-panel));
+  color: color-mix(in srgb, var(--sp-orange) 88%, #7c2d12);
 }
 
 .sp-panel-signals {

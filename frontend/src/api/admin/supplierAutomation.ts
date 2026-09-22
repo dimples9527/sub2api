@@ -367,6 +367,47 @@ export interface SupplierRateGuardChangeLogListResult {
   page_size: number
 }
 
+// 一条「某账号的调度开关真的被拨动」的记录。
+// 与运行明细的区别：运行明细是「一次任务执行」视角（含未变更和写库失败），
+// 这里只保留开关前后不一致的条目。
+export interface SupplierGroupElectionChangeLog {
+  run_id: number
+  run_status: string
+  changed_at: string
+  account_id: number
+  account_name: string
+  platform?: string
+  test_status?: string
+  healthy_count: number
+  latency_ms?: number
+  schedulable_before: boolean
+  schedulable_after: boolean
+  direction: 'enabled' | 'disabled'
+  action: string
+  reason?: string
+  error_message?: string
+  group_ids?: number[]
+  group_names?: string[]
+}
+
+export interface SupplierGroupElectionChangeLogListParams {
+  group_id?: number
+  account_id?: number
+  search?: string
+  direction?: 'enabled' | 'disabled'
+  started_from?: string
+  started_to?: string
+  page?: number
+  page_size?: number
+}
+
+export interface SupplierGroupElectionChangeLogListResult {
+  items: SupplierGroupElectionChangeLog[]
+  total: number
+  page: number
+  page_size: number
+}
+
 export interface SupplierAccountRateGuardUnbindLog {
   id: number
   run_id: number
@@ -512,12 +553,23 @@ export async function markAccountRateGuardUnbindLogsHandled(
   return data
 }
 
+export async function listGroupElectionChangeLogs(
+  params: SupplierGroupElectionChangeLogListParams = {}
+): Promise<SupplierGroupElectionChangeLogListResult> {
+  const { data } = await apiClient.get<SupplierGroupElectionChangeLogListResult>(
+    '/admin/supplier-management/automation/group-election-change-logs',
+    { params }
+  )
+  return data
+}
+
 export const supplierAutomationAPI = {
   listTasks,
   updateTask,
   runTask,
   listRuns,
   listRateGuardChangeLogs,
+  listGroupElectionChangeLogs,
   markRateGuardChangeLogHandled,
   listAccountRateGuardUnbindLogs,
   markAccountRateGuardUnbindLogHandled,

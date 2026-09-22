@@ -1,4 +1,5 @@
 export { default as SupplierDrawer } from './SupplierDrawer.vue'
+export { default as SupplierGroupElectionChangeLogDialog } from './SupplierGroupElectionChangeLogDialog.vue'
 export { default as SupplierAccountRateGuardLogDialog } from './SupplierAccountRateGuardLogDialog.vue'
 export { default as SupplierDayPicker } from './SupplierDayPicker.vue'
 export { default as SupplierModuleLayout } from './SupplierModuleLayout.vue'

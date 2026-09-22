@@ -93,6 +93,16 @@
               <span>列设置</span>
             </button>
           </div>
+          <!-- 与「分组倍率变更日志」刻意不相邻：两者都属日志族，但配色分别是琥珀与橙，
+               挨在一起会因为两色本身接近而更难分辨。 -->
+          <button
+            class="sp-button sp-control-button sp-control-button-election-log"
+            type="button"
+            @click="openElectionChangeLogs()"
+          >
+            <Icon name="refresh" size="sm" />
+            <span>调度切换日志</span>
+          </button>
           <button class="sp-button sp-control-button sp-control-button-refresh" type="button" :disabled="loading" @click="refreshAll">
             <Icon name="refresh" size="sm" :class="loading ? 'sp-spin' : ''" />
             <span>刷新</span>
@@ -737,6 +747,12 @@
       </template>
     </BaseDialog>
 
+    <SupplierGroupElectionChangeLogDialog
+      :show="electionChangeLogsVisible"
+      :group-id="electionChangeLogGroupID"
+      :group-label="electionChangeLogGroupLabel"
+      @close="closeElectionChangeLogs"
+    />
 
     <ConfirmDialog
       :show="Boolean(unmatchTarget)"
@@ -792,6 +808,14 @@
               <button type="button" class="sp-group-action-item" @click="runActionMenuAction((group) => openMappingDialog(group))">
                 <Icon name="refresh" size="sm" />
                 <span>更换本地分组</span>
+              </button>
+              <button
+                type="button"
+                class="sp-group-action-item"
+                @click="runActionMenuAction((group) => openElectionChangeLogs(group.local_group_id ?? null, group.local_group_name || ''))"
+              >
+                <Icon name="clock" size="sm" />
+                <span>本分组调度切换</span>
               </button>
               <button type="button" class="sp-group-action-item danger" @click="runActionMenuAction(unmatchSelectedGroup)">
                 <Icon name="x" size="sm" />
@@ -886,7 +910,7 @@ import {
 } from '@/api/admin/supplierProviderData'
 import { customPlatformsAPI, type CustomPlatform } from '@/api/admin/customPlatforms'
 import supplierProvidersAPI, { type SupplierProvider } from '@/api/admin/supplierProviders'
-import { SupplierDrawer, SupplierModuleLayout } from '@/components/admin/supplier-management'
+import { SupplierDrawer, SupplierGroupElectionChangeLogDialog, SupplierModuleLayout } from '@/components/admin/supplier-management'
 import SupplierGroupAvailabilityTrend from '@/components/admin/supplier-management/SupplierGroupAvailabilityTrend.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
@@ -1031,6 +1055,11 @@ const pendingRateGuardChangeLogCount = ref(0)
 const rateGuardChangeLogPage = ref(1)
 const rateGuardChangeLogPageSize = ref(20)
 const handlingRateGuardChangeLogID = ref<number | null>(null)
+// 调度切换日志：从某个分组的行菜单进来时锁定该分组，从工具栏进来则看全部分组。
+// 取数与筛选都在 SupplierGroupElectionChangeLogDialog 里，这里只持有「开没开、看哪个分组」。
+const electionChangeLogsVisible = ref(false)
+const electionChangeLogGroupID = ref<number | null>(null)
+const electionChangeLogGroupLabel = ref('')
 const error = ref('')
 const page = ref(1)
 const pageSize = ref(20)
@@ -1200,6 +1229,7 @@ const rateGuardChangeLogColumns: Column[] = [
   { key: 'new_rate', label: '新倍率', class: 'min-w-[90px]' },
   { key: 'changed_at', label: '修改时间', class: 'min-w-[170px]' },
 ]
+
 const canResetFilters = computed(() => (
   providerID.value !== DEFAULT_PROVIDER_ID
   || search.value.trim() !== ''
@@ -1540,6 +1570,17 @@ async function refreshRateGuardChangeLogs() {
   } finally {
     rateGuardChangeLogsLoading.value = false
   }
+}
+
+// groupID 为空表示看全部分组（工具栏入口）；有值时锁定到该分组（行菜单入口）。
+function openElectionChangeLogs(groupID: number | null = null, groupLabel = '') {
+  electionChangeLogGroupID.value = groupID
+  electionChangeLogGroupLabel.value = groupLabel
+  electionChangeLogsVisible.value = true
+}
+
+function closeElectionChangeLogs() {
+  electionChangeLogsVisible.value = false
 }
 
 async function handleRateGuardChangeLog(changeLog: SupplierRateGuardChangeLog) {
@@ -2216,6 +2257,20 @@ function errorMessage(err: unknown, fallback: string): string {
   border-color: color-mix(in srgb, var(--sp-green) 38%, var(--sp-line));
   background: color-mix(in srgb, var(--sp-green) 9%, var(--sp-panel));
   color: var(--sp-green);
+}
+
+/* 调度切换日志用橙，与「分组倍率变更日志」的琥珀区分开；
+   橙是系统色板里唯一在本页未被占用的色（青=自动匹配、紫=列设置、绿=刷新）。 */
+.sp-control-button-election-log {
+  border-color: color-mix(in srgb, var(--sp-orange) 45%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-orange) 10%, var(--sp-panel));
+  color: var(--sp-orange);
+}
+
+.sp-control-button-election-log:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--sp-orange) 62%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-orange) 16%, var(--sp-panel));
+  color: color-mix(in srgb, var(--sp-orange) 88%, #7c2d12);
 }
 
 .sp-column-settings-wrap {

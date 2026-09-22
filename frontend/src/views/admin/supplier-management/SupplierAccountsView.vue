@@ -151,6 +151,17 @@
           >
             {{ loading ? '刷新中…' : '刷新' }}
           </button>
+          <!-- 与「倍率守护日志」刻意不相邻：两者都属日志族但配色不同（琥珀 / 橙），
+               挨在一起会因为两色本身接近而更难分辨。 -->
+          <button
+            class="sp-button sp-account-toolbar-btn sp-account-toolbar-election-logs"
+            type="button"
+            data-test="supplier-account-election-change-logs"
+            title="查看分组择优调度把哪些账号的调度开关拨动过"
+            @click="openElectionChangeLogs()"
+          >
+            调度切换日志
+          </button>
           <button
             class="sp-button sp-account-toolbar-btn sp-account-toolbar-bind-groups"
             :class="{ 'has-selection': selectedBindableAccounts.length > 0 }"
@@ -487,6 +498,14 @@
                   query: { account_id: String(account.local_account_id) },
                 })"
               >查看健康趋势</button>
+              <!-- 未匹配到本地账号的行没有可用的 account_id，传上去会静默查不到数据，所以整条不显示。 -->
+              <button
+                v-if="canManageLocalAccount(account)"
+                class="sp-button small ghost sp-account-action-election-log"
+                type="button"
+                :data-test="'supplier-account-election-logs-' + account.local_account_id"
+                @click.stop="openElectionChangeLogs(account)"
+              >本账号调度切换</button>
               <template v-if="canManageLocalAccount(account)">
                 <button
                   class="sp-button small sp-account-action-test"
@@ -1425,6 +1444,13 @@
       @pending-count-change="updateAccountRateGuardPendingCount"
     />
 
+    <SupplierGroupElectionChangeLogDialog
+      :show="electionChangeLogsVisible"
+      :account-id="electionChangeLogAccountID"
+      :account-label="electionChangeLogAccountLabel"
+      @close="closeElectionChangeLogs"
+    />
+
     <ConfirmDialog
       :show="Boolean(duplicateConfirmAccount)"
       title="确认复制本地账号"
@@ -1475,7 +1501,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
-import { SupplierAccountRateGuardLogDialog, SupplierDrawer, SupplierModuleLayout } from '@/components/admin/supplier-management'
+import { SupplierAccountRateGuardLogDialog, SupplierDrawer, SupplierGroupElectionChangeLogDialog, SupplierModuleLayout } from '@/components/admin/supplier-management'
 import { CreateAccountModal, EditAccountModal } from '@/components/account'
 import DataTable from '@/components/common/DataTable.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -1614,6 +1640,10 @@ const showAccountTestModal = ref(false)
 const showCreateAccountModal = ref(false)
 const showBatchTestConfigDialog = ref(false)
 const showBatchTestResultDialog = ref(false)
+// 调度切换日志的取数与筛选都在弹窗组件里，这里只持有「开没开、锁定哪个账号」。
+const electionChangeLogsVisible = ref(false)
+const electionChangeLogAccountID = ref<number | null>(null)
+const electionChangeLogAccountLabel = ref('')
 const accountRateGuardLogsVisible = ref(false)
 const accountRateGuardPendingCount = ref(0)
 const businessPlatformAccount = ref<SupplierProviderAccount | null>(null)
@@ -3441,6 +3471,21 @@ function openAccountRateGuardLogs() {
   accountRateGuardLogsVisible.value = true
 }
 
+// 不传账号 = 看全部账号的调度切换；传了就锁定到该本地账号。
+// 日志里的 account_id 是**本地账号 ID**，上游账号记录本身的 id 对不上。
+function openElectionChangeLogs(account?: SupplierProviderAccount) {
+  const localAccountID = account ? manageableLocalAccountID(account) : null
+  electionChangeLogAccountID.value = localAccountID
+  electionChangeLogAccountLabel.value = localAccountID === null
+    ? ''
+    : (account?.local_account_name || account?.name || account?.upstream_account_key || '')
+  electionChangeLogsVisible.value = true
+}
+
+function closeElectionChangeLogs() {
+  electionChangeLogsVisible.value = false
+}
+
 function closeAccountRateGuardLogs() {
   accountRateGuardLogsVisible.value = false
 }
@@ -3682,6 +3727,20 @@ function formatTime(value?: string): string {
   border-color: color-mix(in srgb, var(--sp-violet) 48%, var(--sp-line));
   background: color-mix(in srgb, var(--sp-violet) 14%, var(--sp-panel));
   color: color-mix(in srgb, var(--sp-violet) 90%, #1e1b4b);
+}
+
+/* 调度切换日志用橙：系统色板里「青」已被绑定分组占用，而橙与旁边的琥珀（倍率守护日志）
+   本身是邻近色，所以这个按钮在工具栏里的位置刻意排开，见模板里的注释。 */
+.sp-account-toolbar-election-logs {
+  border-color: color-mix(in srgb, var(--sp-orange) 45%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-orange) 10%, var(--sp-panel));
+  color: var(--sp-orange);
+}
+
+.sp-account-toolbar-election-logs:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--sp-orange) 62%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-orange) 16%, var(--sp-panel));
+  color: color-mix(in srgb, var(--sp-orange) 88%, #7c2d12);
 }
 
 .sp-account-workbench {
@@ -4687,6 +4746,13 @@ button.sp-guard-failure-hint:hover {
   color: var(--sp-violet);
 }
 
+/* 与工具栏、分组管理页、任务中心的同名入口同色（橙）。 */
+.sp-account-row-actions .sp-account-action-election-log {
+  border-color: color-mix(in srgb, var(--sp-orange) 42%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-orange) 9%, var(--sp-panel));
+  color: var(--sp-orange);
+}
+
 .sp-account-row-actions .sp-account-action-platform {
   border-color: color-mix(in srgb, #4f46e5 42%, var(--sp-line));
   background: color-mix(in srgb, #4f46e5 9%, var(--sp-panel));
@@ -4709,6 +4775,7 @@ button.sp-guard-failure-hint:hover {
 .sp-account-row-actions .sp-account-action-recover:hover,
 .sp-account-row-actions .sp-account-action-edit:hover,
 .sp-account-row-actions .sp-account-action-copy:hover,
+.sp-account-row-actions .sp-account-action-election-log:hover,
 .sp-account-row-actions .sp-account-action-platform:hover,
 .sp-account-row-actions .sp-account-action-binding:hover,
 .sp-account-row-actions .sp-account-action-delete:hover {
