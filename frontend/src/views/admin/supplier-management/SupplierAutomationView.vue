@@ -2442,7 +2442,8 @@ const electionFilteredGroups = computed(() => {
 // 窄屏下 3 列会由既有媒体查询自动降级为 2 列，所以这里只表达「宽屏需要多宽」。
 const editDialogGridCols = computed<2 | 3>(() =>
   editForm.task_code === 'supplier_account_health_guard' ||
-  editForm.task_code === 'supplier_data_cleanup'
+  editForm.task_code === 'supplier_data_cleanup' ||
+  editForm.task_code === 'supplier_group_scheduling_election'
     ? 3
     : 2
 )
