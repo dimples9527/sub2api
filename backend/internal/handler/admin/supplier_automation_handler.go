@@ -180,6 +180,7 @@ func (h *SupplierAutomationHandler) ListGroupSchedulingElectionChangeLogs(c *gin
 	result, err := h.service.ListGroupSchedulingElectionChangeLogs(c.Request.Context(), service.SupplierGroupSchedulingElectionChangeLogListParams{
 		GroupID:     parseOptionalInt64(c.Query("group_id")),
 		AccountID:   parseOptionalInt64(c.Query("account_id")),
+		RunID:       parseOptionalInt64(c.Query("run_id")),
 		Search:      strings.TrimSpace(c.Query("search")),
 		Direction:   strings.TrimSpace(c.Query("direction")),
 		StartedFrom: parseOptionalDayBoundary(c, "started_from", false),

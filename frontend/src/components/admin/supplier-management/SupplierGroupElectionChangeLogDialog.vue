@@ -1,5 +1,5 @@
 <template>
-  <BaseDialog :show="show" :title="dialogTitle" width="extra-wide" @close="emit('close')">
+  <BaseDialog :show="show" :title="dialogTitle" width="full" @close="emit('close')">
     <div class="sp-election-log-dialog">
       <p class="sp-election-log-hint">
         只显示调度开关真的被拨动的记录：择优调度把某个账号从「开」改成「关」，或重新选回「开」。
@@ -16,6 +16,12 @@
         <span v-if="activeAccountID" class="sp-election-log-group-chip">
           仅看账号：{{ activeAccountLabel || `账号 ${activeAccountID}` }}
           <button type="button" class="sp-election-log-chip-clear" title="查看全部账号" @click="clearAccount">
+            查看全部
+          </button>
+        </span>
+        <span v-if="runFilter" class="sp-election-log-group-chip">
+          仅看批次：#{{ runFilter }}
+          <button type="button" class="sp-election-log-chip-clear" title="查看全部批次" @click="clearRun">
             查看全部
           </button>
         </span>
@@ -52,6 +58,17 @@
           :row-key="rowKey"
           :sticky-actions-column="false"
         >
+          <template #cell-run="{ row: log }">
+            <button
+              type="button"
+              class="sp-election-log-run"
+              :class="{ 'is-active': runFilter === log.run_id }"
+              :title="runFilter === log.run_id ? '已锁定该批次' : '只看这一批次的切换'"
+              @click="filterByRun(log.run_id)"
+            >
+              #{{ log.run_id }}
+            </button>
+          </template>
           <template #cell-changed_at="{ row: log }">
             <span class="sp-election-log-time">{{ formatTime(log.changed_at) }}</span>
           </template>
@@ -87,8 +104,9 @@
           :page="page"
           :total="total"
           :page-size="pageSize"
-          :show-page-size-selector="false"
+          :show-page-size-selector="true"
           @update:page="changePage"
+          @update:page-size="changePageSize"
         />
       </div>
     </div>
@@ -147,6 +165,8 @@ const filters = ref<{ direction: 'all' | 'enabled' | 'disabled'; search: string;
 // 从某个分组/账号进来后又点了「查看全部」，此时以组件内部状态为准。
 const clearedGroup = ref(false)
 const clearedAccount = ref(false)
+// 任务批次筛选纯内部：从表格里点某条记录的批次号锁进来，再点「查看全部」清掉。
+const runFilter = ref<number | null>(null)
 
 const activeGroupID = computed(() => (clearedGroup.value ? null : props.groupId ?? null))
 const activeGroupLabel = computed(() => (clearedGroup.value ? '' : props.groupLabel))
@@ -164,6 +184,7 @@ const hasActiveFilters = computed(() => (
   || filters.value.startedTo !== ''
   || activeGroupID.value !== null
   || activeAccountID.value !== null
+  || runFilter.value !== null
 ))
 
 const directionOptions: SelectOption[] = [
@@ -173,6 +194,7 @@ const directionOptions: SelectOption[] = [
 ]
 
 const columns: Column[] = [
+  { key: 'run', label: '任务批次', class: 'min-w-[100px]' },
   { key: 'changed_at', label: '切换时间', class: 'min-w-[150px]' },
   { key: 'account', label: '账号', class: 'min-w-[150px]' },
   { key: 'direction', label: '调度变更', class: 'min-w-[110px]' },
@@ -220,6 +242,7 @@ async function load() {
     const result = await listGroupElectionChangeLogs({
       group_id: activeGroupID.value ?? undefined,
       account_id: activeAccountID.value ?? undefined,
+      run_id: runFilter.value ?? undefined,
       search: filters.value.search.trim() || undefined,
       direction: filters.value.direction === 'all' ? undefined : filters.value.direction,
       started_from: filters.value.startedFrom || undefined,
@@ -247,6 +270,8 @@ function resetFilters() {
   // 重置清筛选条件，但把「锁定到某个分组 / 账号」保留 —— 用户是冲着它点开弹窗的，
   // 一起清掉会让人误以为看到的是全局日志。换对象要点「查看全部」。
   filters.value = { direction: 'all', search: '', startedFrom: '', startedTo: '' }
+  // 批次锁定是弹窗内点出来的临时筛选，不属于「进来时的对象」，重置一并清掉。
+  runFilter.value = null
   page.value = 1
   return load()
 }
@@ -263,9 +288,28 @@ function clearAccount() {
   return load()
 }
 
+function filterByRun(runId: number) {
+  // 再点已锁定的批次号 = 取消锁定，省得非要移到 chip 上点「查看全部」。
+  runFilter.value = runFilter.value === runId ? null : runId
+  page.value = 1
+  return load()
+}
+
+function clearRun() {
+  runFilter.value = null
+  page.value = 1
+  return load()
+}
+
 function changePage(next: number) {
   const maxPage = Math.max(1, Math.ceil(total.value / pageSize.value))
   page.value = Math.min(Math.max(1, next), maxPage)
+  return load()
+}
+
+function changePageSize(size: number) {
+  pageSize.value = size
+  page.value = 1
   return load()
 }
 
@@ -273,6 +317,7 @@ watch(() => props.show, (visible) => {
   if (!visible) return
   clearedGroup.value = false
   clearedAccount.value = false
+  runFilter.value = null
   page.value = 1
   void load()
 })
@@ -304,6 +349,12 @@ watch(() => props.accountId, () => {
   --sp-election-log-soft: #f1f5f9;
   display: grid;
   gap: 12px;
+}
+
+/* BaseDialog 的 full 预设最宽到 max-w-7xl(1280px)，这份日志列多，再放宽到接近整屏。
+   只命中「装着本日志」的那一个 modal-content，不动其他用 full 的弹窗。 */
+:global(.modal-content:has(.sp-election-log-dialog)) {
+  max-width: min(1600px, 95vw);
 }
 
 :global(.dark) .sp-election-log-dialog {
@@ -373,6 +424,28 @@ watch(() => props.accountId, () => {
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--sp-election-log-accent) 18%, var(--sp-election-log-soft));
   border-radius: 10px;
+}
+
+.sp-election-log-run {
+  border: 1px solid color-mix(in srgb, var(--sp-election-log-accent) 30%, var(--sp-election-log-line));
+  border-radius: 6px;
+  padding: 2px 8px;
+  background: transparent;
+  color: var(--sp-election-log-accent);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.sp-election-log-run:hover {
+  background: color-mix(in srgb, var(--sp-election-log-accent) 12%, var(--sp-election-log-panel));
+}
+
+.sp-election-log-run.is-active {
+  background: var(--sp-election-log-accent);
+  border-color: var(--sp-election-log-accent);
+  color: #fff;
 }
 
 .sp-election-log-account {

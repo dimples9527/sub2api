@@ -2697,6 +2697,10 @@ func supplierGroupSchedulingElectionChangeWhere(params service.SupplierGroupSche
 		args = append(args, params.AccountID)
 		conditions = append(conditions, fmt.Sprintf("e.account_id = $%d", len(args)))
 	}
+	if params.RunID > 0 {
+		args = append(args, params.RunID)
+		conditions = append(conditions, fmt.Sprintf("e.run_id = $%d", len(args)))
+	}
 	if params.Search != "" {
 		args = append(args, "%"+params.Search+"%")
 		placeholder := fmt.Sprintf("$%d", len(args))

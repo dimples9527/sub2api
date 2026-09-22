@@ -426,6 +426,8 @@ export interface SupplierGroupElectionChangeLog {
 export interface SupplierGroupElectionChangeLogListParams {
   group_id?: number
   account_id?: number
+  /** 锁定到某一次择优运行（任务批次），只看这批被拨动的账号。 */
+  run_id?: number
   search?: string
   direction?: 'enabled' | 'disabled'
   started_from?: string

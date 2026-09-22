@@ -294,6 +294,8 @@ type SupplierGroupSchedulingElectionChangeLog struct {
 type SupplierGroupSchedulingElectionChangeLogListParams struct {
 	GroupID   int64
 	AccountID int64
+	// RunID 锁定到某一次择优运行（任务批次），只看这批被拨动的账号；0 = 不按批次筛。
+	RunID int64
 	// Search 按账号名模糊匹配（分组管理页从某个分组进入时不带它，任务中心页全局看时用）。
 	Search      string
 	Direction   string
