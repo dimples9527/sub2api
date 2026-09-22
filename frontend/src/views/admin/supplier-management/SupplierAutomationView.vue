@@ -341,6 +341,15 @@
               <Input :model-value="editForm.config.group_scheduling_election_latency_window_minutes" type="number" min="1" label="延迟平均窗口（分钟，默认 30）" @update:model-value="editForm.config.group_scheduling_election_latency_window_minutes = toNumber($event, editForm.config.group_scheduling_election_latency_window_minutes ?? 30)" />
               <Input :model-value="editForm.config.group_scheduling_election_latency_min_samples" type="number" min="1" label="平均最少成功样本（默认 3，不足则回退单次）" @update:model-value="editForm.config.group_scheduling_election_latency_min_samples = toNumber($event, editForm.config.group_scheduling_election_latency_min_samples ?? 3)" />
             </div>
+            <label class="sp-health-guard-account-scheduling-toggle">
+              <Toggle
+                :model-value="editForm.config.group_scheduling_election_keep_healthy_incumbent ?? false"
+                aria-label="在任者健康时锁定分组"
+                title="打开后：分组里当前开着调度的账号测试都正常时，直接保留现状、跳过择优与换人；有开着的账号失败则仍走正常择优。"
+                @update:model-value="editForm.config.group_scheduling_election_keep_healthy_incumbent = $event"
+              />
+              <span>在任者健康则锁定分组（开着的账号正常就跳过，不换人）</span>
+            </label>
             <div class="sp-rate-guard-scope-card">
               <div>
                 <strong>不参与择优的分组</strong>
@@ -1492,6 +1501,7 @@ const editForm = reactive<SupplierAutomationTask>({
     group_scheduling_election_switch_margin: 0.15,
     group_scheduling_election_latency_window_minutes: 30,
     group_scheduling_election_latency_min_samples: 3,
+    group_scheduling_election_keep_healthy_incumbent: false,
   },
   last_status: '',
   last_message: '',

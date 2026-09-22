@@ -120,6 +120,10 @@ type SupplierGroupSchedulingElectionConfig struct {
 	LatencyWindowMinutes int `json:"group_scheduling_election_latency_window_minutes"`
 	// LatencyMinSamples 是信任窗口均值所需的最少成功样本数，默认 3；不足则回退单值。
 	LatencyMinSamples int `json:"group_scheduling_election_latency_min_samples"`
+	// KeepHealthyIncumbent 打开后：一个分组只要「当前开启调度的账号」测试都正常（且没有开着却失败的），
+	// 就锁定该分组——保留这些在任账号、不做任何择优与换人，直接跳过。默认关（false），保持正常择优。
+	// 只在在任者健康时锁定：一旦有开着的账号测试失败，仍走正常择优交给失败闸门处理，绝不锁死一个坏分组。
+	KeepHealthyIncumbent bool `json:"group_scheduling_election_keep_healthy_incumbent"`
 }
 
 // SupplierGroupSchedulingElectionMember 是仓储层返回的一条"分组×账号"成员行。
@@ -402,6 +406,36 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 				if account := accounts[member.AccountID]; account != nil {
 					account.noAlternative = true
 				}
+			}
+		}
+
+		// 在任者健康锁定：开关打开且分组里「当前开着的账号」测试都正常（且没有开着却失败的），
+		// 就保留这些在任账号、跳过择优与换人。只在健康时锁定——有开着的账号失败仍走下面的正常择优，
+		// 交给失败闸门处理，绝不把一个坏分组锁死。
+		if config.KeepHealthyIncumbent {
+			scheduledHealthy := make([]int64, 0)
+			scheduledFailed := false
+			for _, member := range membersByGroup[groupID] {
+				if !member.Schedulable {
+					continue
+				}
+				switch strings.TrimSpace(member.LastTestStatus) {
+				case SupplierGroupSchedulingElectionTestStatusSuccess:
+					scheduledHealthy = append(scheduledHealthy, member.AccountID)
+				case SupplierGroupSchedulingElectionTestStatusFailed:
+					scheduledFailed = true
+				}
+			}
+			if len(scheduledHealthy) > 0 && !scheduledFailed {
+				for _, accountID := range scheduledHealthy {
+					if account := accounts[accountID]; account != nil {
+						account.winner = true
+					}
+					detail.WinnerCount++
+					detail.WinnerIDs = append(detail.WinnerIDs, accountID)
+				}
+				result.Groups = append(result.Groups, detail)
+				continue
 			}
 		}
 

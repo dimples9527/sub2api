@@ -102,6 +102,8 @@ type SupplierAutomationConfig struct {
 	GroupElectionLatencyWindowMinutes int `json:"group_scheduling_election_latency_window_minutes"`
 	// 信任窗口均值所需的最少成功样本数（默认 3）：不足则回退到最近单值，等于退回今天的行为。
 	GroupElectionLatencyMinSamples int `json:"group_scheduling_election_latency_min_samples"`
+	// 在任者健康锁定开关（默认关）：分组里开着的账号测试都正常时保留现状、跳过择优换人，减少无谓抖动。
+	GroupElectionKeepHealthyIncumbent bool `json:"group_scheduling_election_keep_healthy_incumbent"`
 }
 
 type SupplierAutomationRun struct {
@@ -736,6 +738,7 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 			SwitchMargin:         task.Config.GroupElectionSwitchMargin,
 			LatencyWindowMinutes: task.Config.GroupElectionLatencyWindowMinutes,
 			LatencyMinSamples:    task.Config.GroupElectionLatencyMinSamples,
+			KeepHealthyIncumbent: task.Config.GroupElectionKeepHealthyIncumbent,
 		}, time.Now())
 		run.ProcessedCount = result.AccountCount
 		run.SuccessCount = result.EnabledCount + result.DisabledCount + result.UnchangedCount

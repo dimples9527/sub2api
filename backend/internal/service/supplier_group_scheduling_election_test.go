@@ -711,3 +711,47 @@ func TestGroupElectionNormalizeConfigLatencyAndMargin(t *testing.T) {
 	tiny := normalizeSupplierGroupSchedulingElectionConfig(SupplierGroupSchedulingElectionConfig{TopN: 1, SwitchMargin: 0.0001})
 	require.InDelta(t, 0.0001, tiny.SwitchMargin, 1e-12)
 }
+
+// 在任者健康锁定：开关打开且分组里开着的账号(301)测试正常时，即便存在明显更优的挑战者(302)，
+// 也直接保留现状、跳过换人；开关关闭时同样的数据则正常换人，证明锁定确实由开关控制。
+func TestGroupElectionKeepHealthyIncumbentLocksGroup(t *testing.T) {
+	newMembers := func() []SupplierGroupSchedulingElectionMember {
+		return []SupplierGroupSchedulingElectionMember{
+			{GroupID: 1, AccountID: 301, Platform: "openai", Schedulable: true, LastTestStatus: "success", HealthyCount: 5, LastTestLatencyMs: 3000},
+			{GroupID: 1, AccountID: 302, Platform: "openai", Schedulable: false, LastTestStatus: "success", HealthyCount: 20, LastTestLatencyMs: 100},
+		}
+	}
+
+	// 开关打开：锁定分组，保留 301，不动 302。
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(&fakeGroupElectionRepo{members: newMembers()}, store)
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1, KeepHealthyIncumbent: true}, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, []int64{301}, result.Groups[0].WinnerIDs, "在任者健康 → 锁定分组，保留 301")
+	require.Equal(t, 0, result.EnabledCount)
+	require.Equal(t, 0, result.DisabledCount)
+	require.Empty(t, store.calls, "锁定分组不产生任何调度写库")
+
+	// 开关关闭：同样数据下 302 明显更优 → 正常换人，证明差异来自开关。
+	store = newFakeGroupElectionStore()
+	svc = NewSupplierGroupSchedulingElectionService(&fakeGroupElectionRepo{members: newMembers()}, store)
+	_, err = svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1}, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, true, store.calls[302], "开关关闭时更优的 302 应正常当选")
+	require.Equal(t, false, store.calls[301], "开关关闭时落选的 301 应被关闭")
+}
+
+// 只在在任者健康时锁定：开着的账号(311)测试失败时不锁定，仍走正常择优 —— 更优的 312 被开启，
+// 绝不因为开关就把一个坏分组锁死。
+func TestGroupElectionKeepHealthyIncumbentRunsElectionWhenIncumbentFailed(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, AccountID: 311, Platform: "openai", Schedulable: true, LastTestStatus: "failed"},
+		{GroupID: 1, AccountID: 312, Platform: "openai", Schedulable: false, LastTestStatus: "success", HealthyCount: 20, LastTestLatencyMs: 100},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	_, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1, KeepHealthyIncumbent: true}, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, true, store.calls[312], "开着的账号失败 → 不锁定，正常择优开启更优的 312")
+}
