@@ -32,8 +32,9 @@ const SelectStub = defineComponent({
   },
 })
 
-const { getMock, showErrorMock, showSuccessMock } = vi.hoisted(() => ({
+const { getMock, monitorOverridesMock, showErrorMock, showSuccessMock } = vi.hoisted(() => ({
   getMock: vi.fn(),
+  monitorOverridesMock: vi.fn(),
   showErrorMock: vi.fn(),
   showSuccessMock: vi.fn(),
 }))
@@ -123,6 +124,16 @@ vi.mock('@/api/modelSquare', () => ({
   modelSquareAPI: { get: getMock },
 }))
 
+vi.mock('@/api/admin/modelMonitor', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/admin/modelMonitor')>()
+  return {
+    ...actual,
+    listLLMMonitorGroupPlatformOverrides: monitorOverridesMock,
+    modelMonitorAPI: { ...actual.modelMonitorAPI, listLLMMonitorGroupPlatformOverrides: monitorOverridesMock },
+    default: { ...actual.default, listLLMMonitorGroupPlatformOverrides: monitorOverridesMock },
+  }
+})
+
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({ showError: showErrorMock, showSuccess: showSuccessMock }),
 }))
@@ -207,6 +218,8 @@ describe('ModelSquareView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     getMock.mockResolvedValue(payload)
+    // 默认所有分组监控可见（空列表 = 无隐藏），单个用例按需覆盖。
+    monitorOverridesMock.mockResolvedValue([])
     Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } })
   })
 
@@ -301,6 +314,29 @@ describe('ModelSquareView', () => {
     await flushPromises()
     expect(card()!.find('.model-detail-button').exists()).toBe(false)
     expect(card()!.find('.primary-group-chip').attributes('disabled')).toBeDefined()
+  })
+
+  it('详情弹窗按模型监控可见性过滤分组：监控显示关闭的分组不出现', async () => {
+    // Premium Group(id 2) 在模型监控里关掉了「监控显示」
+    monitorOverridesMock.mockResolvedValue([
+      { id: 2, name: 'Premium Group', platform: 'openai', actual_platform: '', effective_platform: 'openai', effective_platform_name: 'OpenAI', rate_multiplier: 0.5, show_in_monitor: false },
+    ])
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    const openAICard = wrapper.findAll('[data-test="model-card"]')
+      .find(card => card.text().includes('GPT-5.5 Flagship'))
+    await openAICard?.find('.model-detail-button').trigger('click')
+
+    const rowText = wrapper.findAll('[data-test="detail-group-row"]').map(row => row.text()).join(' ')
+    expect(rowText).toContain('Default Group')
+    expect(rowText).not.toContain('Premium Group')
+
+    // 顶部分组筛选下拉也过滤：监控关掉的分组不进选项
+    const groupOptionLabels = wrapper.findAll('select')[0].findAll('option').map(option => option.text())
+    expect(groupOptionLabels).toContain('Default Group')
+    expect(groupOptionLabels).not.toContain('Premium Group')
   })
 
   it('详情弹窗一次列出全部可用分组的价格，并高亮卡片倍率对应的分组', async () => {

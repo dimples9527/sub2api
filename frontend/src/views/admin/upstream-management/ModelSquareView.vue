@@ -461,6 +461,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { modelSquareAPI } from '@/api/modelSquare'
+import { listLLMMonitorGroupPlatformOverrides } from '@/api/admin/modelMonitor'
 import type { AdminModelSquareResult, ModelSquareGroup, ModelSquareModel } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -510,6 +511,8 @@ const appStore = useAppStore()
 const result = ref<AdminModelSquareResult | null>(null)
 const loading = ref(false)
 const loadError = ref('')
+// 模型监控里「监控显示」关掉的分组 ID：详情/分组弹窗的分组列表按它过滤，只留打开的。
+const monitorHiddenGroupIds = ref<Set<string>>(new Set())
 const searchQuery = ref('')
 const providerFilter = ref('')
 const groupFilter = ref('')
@@ -567,10 +570,10 @@ const activeFilterGroup = computed<ModelSquareGroup | null>(() =>
   groupFilter.value ? groupById.value.get(groupFilter.value) || null : null
 )
 const providers = computed(() => unique(models.value.map(model => model.provider).filter(Boolean) as string[]))
-// 分组筛选下拉选项（含“全部”占位项）
+// 分组筛选下拉选项（含“全部”占位项）。同样按「监控显示」过滤：监控里关掉的分组不进下拉。
 const groupFilterOptions = computed<SelectOption[]>(() => [
   { value: '', label: t('admin.modelSquare.allGroups') },
-  ...groups.value.map(group => ({ value: String(group.id), label: group.name })),
+  ...filterMonitorVisibleGroups(groups.value).map(group => ({ value: String(group.id), label: group.name })),
 ])
 // 平台筛选下拉选项（含“全部”占位项）
 const providerFilterOptions = computed<SelectOption[]>(() => [
@@ -583,12 +586,18 @@ const sortOptions = computed<SelectOption[]>(() => [
   { value: 'price-asc', label: t('admin.modelSquare.sortPriceAsc') },
   { value: 'price-desc', label: t('admin.modelSquare.sortPriceDesc') },
 ])
-const groupDialogGroups = computed(() => groupDialogModel.value ? modelGroups(groupDialogModel.value) : [])
+// 弹窗里的分组列表只保留「监控显示」为开的分组（模型监控平台配置页里的开关）。
+function filterMonitorVisibleGroups(list: ModelSquareGroup[]): ModelSquareGroup[] {
+  if (monitorHiddenGroupIds.value.size === 0) return list
+  return list.filter(group => !monitorHiddenGroupIds.value.has(String(group.id)))
+}
+
+const groupDialogGroups = computed(() => groupDialogModel.value ? filterMonitorVisibleGroups(modelGroups(groupDialogModel.value)) : [])
 const groupDialogTitle = computed(() => {
   const id = groupDialogModel.value?.id || t('admin.modelSquare.unnamedModel')
   return t('admin.modelSquare.groupDialogTitle', { id })
 })
-const detailGroups = computed(() => detailModel.value ? modelDetailGroups(detailModel.value) : [])
+const detailGroups = computed(() => detailModel.value ? filterMonitorVisibleGroups(modelDetailGroups(detailModel.value)) : [])
 const detailRate = computed(() => detailModel.value ? modelEffectiveRate(detailModel.value) : 1)
 /*
   detailPriceColumns 随「价格列改成卡片」一并删除：卡片自带标签，列头不再需要四个价格名。
@@ -667,7 +676,15 @@ async function reload() {
   loading.value = true
   loadError.value = ''
   try {
-    result.value = await modelSquareAPI.get()
+    // 监控可见性单独兜底：拉不到就当作全部可见（空集合），不因它拖垮整个列表。
+    const [square, overrides] = await Promise.all([
+      modelSquareAPI.get(),
+      listLLMMonitorGroupPlatformOverrides().catch(() => []),
+    ])
+    result.value = square
+    monitorHiddenGroupIds.value = new Set(
+      overrides.filter(item => !item.show_in_monitor).map(item => String(item.id))
+    )
   } catch (err) {
     const message = extractApiErrorMessage(err, t('admin.modelSquare.loadFailed'))
     loadError.value = message
