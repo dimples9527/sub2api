@@ -184,6 +184,64 @@ type SupplierGroupSchedulingElectionResult struct {
 	Items        []SupplierGroupSchedulingElectionAccountItem `json:"items"`
 }
 
+// 调度切换日志的方向。明细里能靠 schedulable_before/after 自己推，但列表要能按方向筛，
+// 推出来的值必须有一个稳定命名，否则前后端各推一份迟早对不上。
+const (
+	SupplierGroupSchedulingElectionChangeDirectionEnabled  = "enabled"
+	SupplierGroupSchedulingElectionChangeDirectionDisabled = "disabled"
+)
+
+// SupplierGroupSchedulingElectionChangeLog 是一条「某账号的调度开关真的被拨动了」的记录。
+// 与运行明细的区别：运行明细是「一次任务执行」视角（含未变更、写库失败），
+// 这里是「一次开关变化」视角，**只保留 schedulable_before <> schedulable_after 的条目**。
+type SupplierGroupSchedulingElectionChangeLog struct {
+	RunID       int64     `json:"run_id"`
+	RunStatus   string    `json:"run_status"`
+	ChangedAt   time.Time `json:"changed_at"`
+	AccountID   int64     `json:"account_id"`
+	AccountName string    `json:"account_name"`
+	Platform    string    `json:"platform,omitempty"`
+	TestStatus  string    `json:"test_status,omitempty"`
+	// HealthyCount / LatencyMs 是切换发生那一刻的竞选依据，
+	// 事后回看「为什么当时选了它而不是另一个」全靠这两个值。
+	HealthyCount      int      `json:"healthy_count"`
+	LatencyMs         int64    `json:"latency_ms,omitempty"`
+	SchedulableBefore bool     `json:"schedulable_before"`
+	SchedulableAfter  bool     `json:"schedulable_after"`
+	Direction         string   `json:"direction"`
+	Action            string   `json:"action"`
+	Reason            string   `json:"reason,omitempty"`
+	ErrorMessage      string   `json:"error_message,omitempty"`
+	GroupIDs          []int64  `json:"group_ids,omitempty"`
+	GroupNames        []string `json:"group_names,omitempty"`
+}
+
+type SupplierGroupSchedulingElectionChangeLogListParams struct {
+	GroupID   int64
+	AccountID int64
+	// Search 按账号名模糊匹配（分组管理页从某个分组进入时不带它，任务中心页全局看时用）。
+	Search      string
+	Direction   string
+	StartedFrom *time.Time
+	StartedTo   *time.Time
+	Page        int
+	PageSize    int
+}
+
+type SupplierGroupSchedulingElectionChangeLogListResult struct {
+	Items    []SupplierGroupSchedulingElectionChangeLog `json:"items"`
+	Total    int64                                      `json:"total"`
+	Page     int                                        `json:"page"`
+	PageSize int                                        `json:"page_size"`
+}
+
+// SupplierGroupSchedulingElectionChangeLogStore 由已注入的 dataRepo 断言得到。
+// 不进 SupplierProviderDataRepository 大接口，是为了让"谁依赖这份日志"保持可见：
+// 只有自动化任务中心会调它，不该让所有持有 dataRepo 的地方都被动实现一遍。
+type SupplierGroupSchedulingElectionChangeLogStore interface {
+	ListGroupSchedulingElectionChangeLogs(ctx context.Context, params SupplierGroupSchedulingElectionChangeLogListParams) (SupplierGroupSchedulingElectionChangeLogListResult, error)
+}
+
 // supplierGroupElectionAccount 是把同一账号在多个分组里的成员行聚合后的视图。
 type supplierGroupElectionAccount struct {
 	id                int64

@@ -26,6 +26,8 @@ type fakeGroupElectionStore struct {
 	extraUpdates map[int64]map[string]any
 	// extraErr 非 nil 时让 extra 回写失败，用于验证记账失败不会静默吞掉。
 	extraErr error
+	// schedulableErr 非 nil 时让「调度开关写库」失败，用于验证明细会回滚而不是记成一次切换。
+	schedulableErr error
 }
 
 func newFakeGroupElectionStore() *fakeGroupElectionStore {
@@ -35,6 +37,9 @@ func newFakeGroupElectionStore() *fakeGroupElectionStore {
 func (f *fakeGroupElectionStore) SetSchedulable(ctx context.Context, id int64, schedulable bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.schedulableErr != nil {
+		return f.schedulableErr
+	}
 	f.calls[id] = schedulable
 	return nil
 }
@@ -325,6 +330,32 @@ func TestGroupElectionFailedCountWriteErrorSurfaces(t *testing.T) {
 	require.Equal(t, 0, result.FailedWriteCount, "记账失败不改变调度裁决，也不计入写库失败数")
 	_, touched := store.calls[91]
 	require.False(t, touched)
+}
+
+// 调度开关写库失败时，明细里的 after 必须**回滚成 before**。
+// 这条是「调度切换日志」的读侧契约：那份日志只取 schedulable_before <> schedulable_after 的条目，
+// 一旦这里留下"想关但没关成"的 after=false，日志里就会多出一条根本没发生过的切换，
+// 而且没有任何报错 —— 是最难被发现的那类假数据。
+func TestGroupElectionSchedulableWriteFailureRollsBackDetail(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, AccountID: 71, Schedulable: true, LastTestStatus: "success", HealthyCount: 5},
+		{GroupID: 1, AccountID: 72, Schedulable: false, LastTestStatus: "success", HealthyCount: 9},
+	}}
+	store := newFakeGroupElectionStore()
+	store.schedulableErr = errors.New("schedulable 写库失败")
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1}, time.Now())
+	require.NoError(t, err)
+
+	require.Equal(t, 2, result.FailedWriteCount, "两个账号的开关都没写成")
+	require.Len(t, result.Items, 2)
+	for _, item := range result.Items {
+		require.Equal(t, item.SchedulableBefore, item.SchedulableAfter, "写库失败必须回滚 after，否则会被切换日志当成一次真实切换")
+		require.Equal(t, SupplierGroupSchedulingElectionActionNone, item.Action)
+		require.Equal(t, SupplierGroupSchedulingElectionReasonWriteFailed, item.Reason)
+		require.NotEmpty(t, item.ErrorMessage)
+	}
 }
 
 // 同平台、连续成功次数相同：用时短的当选。

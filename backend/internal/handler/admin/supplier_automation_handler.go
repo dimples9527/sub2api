@@ -4,8 +4,10 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -20,6 +22,7 @@ type SupplierAutomationServicePort interface {
 	MarkRateGuardChangeLogHandled(ctx context.Context, id int64) (service.SupplierRateGuardChangeLog, error)
 	MarkAccountRateGuardUnbindLogHandled(ctx context.Context, id int64) (service.SupplierAccountRateGuardUnbindLog, error)
 	MarkAccountRateGuardUnbindLogsHandled(ctx context.Context, params service.SupplierAccountRateGuardUnbindLogListParams) (service.SupplierAccountRateGuardUnbindLogBatchHandledResult, error)
+	ListGroupSchedulingElectionChangeLogs(ctx context.Context, params service.SupplierGroupSchedulingElectionChangeLogListParams) (service.SupplierGroupSchedulingElectionChangeLogListResult, error)
 }
 
 type SupplierAutomationHandler struct {
@@ -143,6 +146,46 @@ func (h *SupplierAutomationHandler) ListAccountRateGuardUnbindLogs(c *gin.Contex
 		OnlyUnbound:    parseOptionalBool(c.Query("only_unbound")),
 		Page:           page,
 		PageSize:       pageSize,
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+// parseOptionalDayBoundary 把 YYYY-MM-DD 解析成时间范围的边界。
+// 结束日要 +24h：用户选「到 9 月 20 日」时想包含 20 日当天，
+// 直接用当天 00:00 做上界会把整日都排除掉 —— 这是日期区间筛选最常见的静默偏差。
+func parseOptionalDayBoundary(c *gin.Context, name string, endOfDay bool) *time.Time {
+	raw := strings.TrimSpace(c.Query(name))
+	if raw == "" {
+		return nil
+	}
+	parsed, err := timezone.ParseInUserLocation("2006-01-02", raw, c.Query("timezone"))
+	if err != nil {
+		return nil
+	}
+	if endOfDay {
+		parsed = parsed.Add(24 * time.Hour)
+	}
+	return &parsed
+}
+
+func (h *SupplierAutomationHandler) ListGroupSchedulingElectionChangeLogs(c *gin.Context) {
+	page, pageSize := response.ParsePagination(c)
+	if pageSize > supplierProviderMaxPageSize {
+		pageSize = supplierProviderMaxPageSize
+	}
+	result, err := h.service.ListGroupSchedulingElectionChangeLogs(c.Request.Context(), service.SupplierGroupSchedulingElectionChangeLogListParams{
+		GroupID:     parseOptionalInt64(c.Query("group_id")),
+		AccountID:   parseOptionalInt64(c.Query("account_id")),
+		Search:      strings.TrimSpace(c.Query("search")),
+		Direction:   strings.TrimSpace(c.Query("direction")),
+		StartedFrom: parseOptionalDayBoundary(c, "started_from", false),
+		StartedTo:   parseOptionalDayBoundary(c, "started_to", true),
+		Page:        page,
+		PageSize:    pageSize,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

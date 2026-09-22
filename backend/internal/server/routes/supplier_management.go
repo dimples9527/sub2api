@@ -156,6 +156,7 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 			automation.GET("/runs", h.Admin.SupplierAutomation.ListRuns)
 			automation.GET("/rate-guard-change-logs", h.Admin.SupplierAutomation.ListRateGuardChangeLogs)
 			automation.GET("/account-rate-guard-unbind-logs", h.Admin.SupplierAutomation.ListAccountRateGuardUnbindLogs)
+			automation.GET("/group-election-change-logs", h.Admin.SupplierAutomation.ListGroupSchedulingElectionChangeLogs)
 			automation.POST("/rate-guard-change-logs/:id/handled", h.Admin.SupplierAutomation.MarkRateGuardChangeLogHandled)
 			automation.POST("/account-rate-guard-unbind-logs/:id/handled", h.Admin.SupplierAutomation.MarkAccountRateGuardUnbindLogHandled)
 			// 一键处理：路径少一段（没有 :id），与上面那条不构成 gin 的路由冲突。

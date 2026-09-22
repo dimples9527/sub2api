@@ -2639,3 +2639,162 @@ func (r *supplierProviderDataRepository) ClearLocalAccountPlatformOverride(ctx c
 	}
 	return nil
 }
+
+// supplierGroupSchedulingElectionChangeInnerSQL 把「一次任务执行」展开成「一个账号一条」的中间结果。
+// 只读不改：数据仍在 supplier_automation_runs.result_detail 的 JSONB 里，
+// 没有为它单独建表 —— 建表要新迁移，而这份日志的生命周期本来就该跟运行记录一致（同被 30 天清理）。
+// 结果里 task_code 固定为择优调度，其余运行级条件（时间范围）在 runWhere 里叠加。
+func supplierGroupSchedulingElectionChangeInnerSQL(runWhere string) string {
+	return `
+SELECT c.run_id,
+       c.run_status,
+       c.changed_at,
+       COALESCE(NULLIF(c.item ->> 'account_id', '')::BIGINT, 0)      AS account_id,
+       COALESCE(c.item ->> 'account_name', '')                       AS account_name,
+       COALESCE(c.item ->> 'platform', '')                           AS platform,
+       COALESCE(c.item ->> 'test_status', '')                        AS test_status,
+       COALESCE(NULLIF(c.item ->> 'healthy_count', '')::INT, 0)      AS healthy_count,
+       COALESCE(NULLIF(c.item ->> 'latency_ms', '')::BIGINT, 0)      AS latency_ms,
+       COALESCE((c.item ->> 'schedulable_before')::BOOLEAN, FALSE)   AS schedulable_before,
+       COALESCE((c.item ->> 'schedulable_after')::BOOLEAN, FALSE)    AS schedulable_after,
+       COALESCE(c.item ->> 'action', '')                             AS action,
+       COALESCE(c.item ->> 'reason', '')                             AS reason,
+       COALESCE(c.item ->> 'error_message', '')                      AS error_message,
+       -- group_ids 保持 jsonb（不加 ::text）才能用 @> 做「包含某分组」筛选；
+       -- 扫描到 Go 的 string 时驱动会给回 JSON 文本，与 ::text 等价。
+       COALESCE(c.item -> 'group_ids', '[]'::jsonb)                  AS group_ids,
+       COALESCE((
+         SELECT jsonb_agg(g.name ORDER BY g.name)
+         FROM jsonb_array_elements_text(COALESCE(c.item -> 'group_ids', '[]'::jsonb)) AS gid(value)
+         JOIN groups g ON g.id = NULLIF(gid.value, '')::BIGINT AND g.deleted_at IS NULL
+       ), '[]'::jsonb)::text                                         AS group_names
+FROM (
+  SELECT r.id AS run_id,
+         r.status AS run_status,
+         r.started_at AS changed_at,
+         item.value AS item
+  FROM supplier_automation_runs r
+  CROSS JOIN LATERAL jsonb_array_elements(
+    CASE WHEN jsonb_typeof(r.result_detail -> 'group_election' -> 'items') = 'array'
+         THEN r.result_detail -> 'group_election' -> 'items'
+         ELSE '[]'::jsonb END
+  ) AS item(value)
+  WHERE ` + runWhere + `
+) c`
+}
+
+// supplierGroupSchedulingElectionChangeWhere 构造「已展开」之后的筛选条件。
+// 第一条是这份日志的定义本身：**只看开关真的被拨动的条目**。
+// 页面上的「跳过/未测/写库失败」都在运行明细里，进不到这里。
+func supplierGroupSchedulingElectionChangeWhere(params service.SupplierGroupSchedulingElectionChangeLogListParams) (string, []any) {
+	conditions := []string{"e.schedulable_before <> e.schedulable_after"}
+	args := make([]any, 0, 6)
+	if params.GroupID > 0 {
+		args = append(args, params.GroupID)
+		conditions = append(conditions, fmt.Sprintf("e.group_ids @> to_jsonb($%d::BIGINT)", len(args)))
+	}
+	if params.AccountID > 0 {
+		args = append(args, params.AccountID)
+		conditions = append(conditions, fmt.Sprintf("e.account_id = $%d", len(args)))
+	}
+	if params.Search != "" {
+		args = append(args, "%"+params.Search+"%")
+		placeholder := fmt.Sprintf("$%d", len(args))
+		conditions = append(conditions, "(e.account_name ILIKE "+placeholder+" OR e.platform ILIKE "+placeholder+")")
+	}
+	switch params.Direction {
+	case service.SupplierGroupSchedulingElectionChangeDirectionEnabled:
+		conditions = append(conditions, "e.schedulable_before = FALSE AND e.schedulable_after = TRUE")
+	case service.SupplierGroupSchedulingElectionChangeDirectionDisabled:
+		conditions = append(conditions, "e.schedulable_before = TRUE AND e.schedulable_after = FALSE")
+	}
+	return strings.Join(conditions, " AND "), args
+}
+
+func normalizeSupplierGroupSchedulingElectionChangeLogListParams(params service.SupplierGroupSchedulingElectionChangeLogListParams) service.SupplierGroupSchedulingElectionChangeLogListParams {
+	if params.Page < 1 {
+		params.Page = 1
+	}
+	if params.PageSize < 1 || params.PageSize > 200 {
+		params.PageSize = 20
+	}
+	params.Search = strings.TrimSpace(params.Search)
+	// 方向非法值当作「不筛」而不是报错：这是个只读列表，宁可多显示也别让页面打不开。
+	switch params.Direction {
+	case service.SupplierGroupSchedulingElectionChangeDirectionEnabled, service.SupplierGroupSchedulingElectionChangeDirectionDisabled:
+	default:
+		params.Direction = ""
+	}
+	return params
+}
+
+func (r *supplierProviderDataRepository) ListGroupSchedulingElectionChangeLogs(ctx context.Context, params service.SupplierGroupSchedulingElectionChangeLogListParams) (service.SupplierGroupSchedulingElectionChangeLogListResult, error) {
+	params = normalizeSupplierGroupSchedulingElectionChangeLogListParams(params)
+
+	// 运行级条件先占位（$1 起），展开后的筛选接着用后面的占位符 —— SQL 文本里内层在前，顺序必须一致。
+	args := []any{service.SupplierAutomationTaskGroupElection}
+	runConditions := []string{"r.task_code = $1"}
+	if params.StartedFrom != nil {
+		args = append(args, params.StartedFrom.UTC())
+		runConditions = append(runConditions, fmt.Sprintf("r.started_at >= $%d", len(args)))
+	}
+	if params.StartedTo != nil {
+		args = append(args, params.StartedTo.UTC())
+		runConditions = append(runConditions, fmt.Sprintf("r.started_at <= $%d", len(args)))
+	}
+	innerSQL := supplierGroupSchedulingElectionChangeInnerSQL(strings.Join(runConditions, " AND "))
+
+	itemWhere, itemArgs := supplierGroupSchedulingElectionChangeWhere(params)
+	countArgs := append(append([]any{}, args...), itemArgs...)
+	var total int64
+	if err := r.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM ("+innerSQL+") e WHERE "+itemWhere, countArgs...).Scan(&total); err != nil {
+		return service.SupplierGroupSchedulingElectionChangeLogListResult{}, fmt.Errorf("统计分组调度切换日志失败: %w", err)
+	}
+
+	queryArgs := append(append([]any{}, args...), itemArgs...)
+	queryArgs = append(queryArgs, params.PageSize, (params.Page-1)*params.PageSize)
+	rows, err := r.db.QueryContext(ctx, `
+SELECT run_id, run_status, changed_at, account_id, account_name, platform, test_status,
+       healthy_count, latency_ms, schedulable_before, schedulable_after,
+       action, reason, error_message, group_ids, group_names
+FROM (`+innerSQL+`) e
+WHERE `+itemWhere+fmt.Sprintf(" ORDER BY e.changed_at DESC, e.run_id DESC, e.account_id DESC LIMIT $%d OFFSET $%d", len(queryArgs)-1, len(queryArgs)), queryArgs...)
+	if err != nil {
+		return service.SupplierGroupSchedulingElectionChangeLogListResult{}, fmt.Errorf("查询分组调度切换日志失败: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	items := make([]service.SupplierGroupSchedulingElectionChangeLog, 0)
+	for rows.Next() {
+		var item service.SupplierGroupSchedulingElectionChangeLog
+		var groupIDsRaw, groupNamesRaw string
+		if err := rows.Scan(
+			&item.RunID, &item.RunStatus, &item.ChangedAt, &item.AccountID, &item.AccountName,
+			&item.Platform, &item.TestStatus, &item.HealthyCount, &item.LatencyMs,
+			&item.SchedulableBefore, &item.SchedulableAfter, &item.Action, &item.Reason,
+			&item.ErrorMessage, &groupIDsRaw, &groupNamesRaw,
+		); err != nil {
+			return service.SupplierGroupSchedulingElectionChangeLogListResult{}, fmt.Errorf("扫描分组调度切换日志失败: %w", err)
+		}
+		// 方向由前后状态推出，不落库 —— 存两份会在某天对不上。
+		if item.SchedulableAfter {
+			item.Direction = service.SupplierGroupSchedulingElectionChangeDirectionEnabled
+		} else {
+			item.Direction = service.SupplierGroupSchedulingElectionChangeDirectionDisabled
+		}
+		if groupIDsRaw != "" && groupIDsRaw != "null" {
+			_ = json.Unmarshal([]byte(groupIDsRaw), &item.GroupIDs)
+		}
+		if groupNamesRaw != "" && groupNamesRaw != "null" {
+			_ = json.Unmarshal([]byte(groupNamesRaw), &item.GroupNames)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return service.SupplierGroupSchedulingElectionChangeLogListResult{}, fmt.Errorf("遍历分组调度切换日志失败: %w", err)
+	}
+	return service.SupplierGroupSchedulingElectionChangeLogListResult{
+		Items: items, Total: total, Page: params.Page, PageSize: params.PageSize,
+	}, nil
+}

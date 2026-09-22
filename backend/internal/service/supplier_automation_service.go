@@ -342,6 +342,17 @@ func (s *SupplierAutomationService) ListRateGuardChangeLogs(ctx context.Context,
 	return store.ListRateGuardChangeLogs(ctx, params)
 }
 
+// ListGroupSchedulingElectionChangeLogs 返回「账号调度开关被拨动」的扁平日志。
+// 走 s.dataRepo 的窄接口断言而不是新增构造参数 —— 加参数会让 Wire 生成代码失效，
+// 而这个仓库本来就已经注入进来了。
+func (s *SupplierAutomationService) ListGroupSchedulingElectionChangeLogs(ctx context.Context, params SupplierGroupSchedulingElectionChangeLogListParams) (SupplierGroupSchedulingElectionChangeLogListResult, error) {
+	store, ok := s.dataRepo.(SupplierGroupSchedulingElectionChangeLogStore)
+	if !ok {
+		return SupplierGroupSchedulingElectionChangeLogListResult{}, fmt.Errorf("supplier group scheduling election change log store is required")
+	}
+	return store.ListGroupSchedulingElectionChangeLogs(ctx, params)
+}
+
 func (s *SupplierAutomationService) ListAccountRateGuardUnbindLogs(ctx context.Context, params SupplierAccountRateGuardUnbindLogListParams) (SupplierAccountRateGuardUnbindLogListResult, error) {
 	if s.accountRateLogs == nil {
 		return SupplierAccountRateGuardUnbindLogListResult{}, fmt.Errorf("supplier account rate guard log repository is required")

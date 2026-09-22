@@ -2034,3 +2034,111 @@ func TestSupplierProviderAccountOrderByUpstreamStatus(t *testing.T) {
 	})
 	require.Equal(t, "LOWER(a.status) DESC, a.id ASC", got)
 }
+
+// 这份日志的**定义**就是第一条条件：开关真的被拨动过。
+// 弄丢它，列表就会退化成「所有参与过择优调度的账号」，页面标题写的却是切换日志。
+func TestSupplierGroupSchedulingElectionChangeWhereOnlyKeepsToggledAccounts(t *testing.T) {
+	t.Parallel()
+
+	where, args := supplierGroupSchedulingElectionChangeWhere(service.SupplierGroupSchedulingElectionChangeLogListParams{})
+	require.Equal(t, "e.schedulable_before <> e.schedulable_after", where)
+	require.Empty(t, args)
+}
+
+func TestSupplierGroupSchedulingElectionChangeWhereBuildsSequentialPlaceholders(t *testing.T) {
+	t.Parallel()
+
+	where, args := supplierGroupSchedulingElectionChangeWhere(service.SupplierGroupSchedulingElectionChangeLogListParams{
+		GroupID:   81,
+		AccountID: 902,
+		Search:    " alpha ",
+		Direction: service.SupplierGroupSchedulingElectionChangeDirectionDisabled,
+	})
+	require.Equal(
+		t,
+		"e.schedulable_before <> e.schedulable_after AND e.group_ids @> to_jsonb($1::BIGINT) AND e.account_id = $2 AND (e.account_name ILIKE $3 OR e.platform ILIKE $3) AND e.schedulable_before = TRUE AND e.schedulable_after = FALSE",
+		where,
+	)
+	require.Equal(t, []any{int64(81), int64(902), "% alpha %"}, args)
+
+	_, args = supplierGroupSchedulingElectionChangeWhere(service.SupplierGroupSchedulingElectionChangeLogListParams{
+		Direction: service.SupplierGroupSchedulingElectionChangeDirectionEnabled,
+	})
+	require.Empty(t, args)
+}
+
+func TestNormalizeSupplierGroupSchedulingElectionChangeLogListParams(t *testing.T) {
+	t.Parallel()
+
+	got := normalizeSupplierGroupSchedulingElectionChangeLogListParams(service.SupplierGroupSchedulingElectionChangeLogListParams{
+		Page: 0, PageSize: 0, Search: "  beta  ", Direction: "whatever",
+	})
+	require.Equal(t, 1, got.Page)
+	require.Equal(t, 20, got.PageSize)
+	require.Equal(t, "beta", got.Search)
+	require.Equal(t, "", got.Direction)
+
+	got = normalizeSupplierGroupSchedulingElectionChangeLogListParams(service.SupplierGroupSchedulingElectionChangeLogListParams{
+		Page: 3, PageSize: 500, Direction: service.SupplierGroupSchedulingElectionChangeDirectionEnabled,
+	})
+	require.Equal(t, 3, got.Page)
+	require.Equal(t, 20, got.PageSize)
+	require.Equal(t, service.SupplierGroupSchedulingElectionChangeDirectionEnabled, got.Direction)
+}
+
+// 占位符顺序是这份查询最容易错的地方：运行级条件（$1 起）在 SQL 文本的**内层**，
+// 展开后的筛选在外层但占位符要接着编号，LIMIT/OFFSET 再排最后。
+func TestSupplierProviderDataRepositoryListGroupSchedulingElectionChangeLogsOrdersPlaceholders(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	startedFrom := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	startedTo := time.Date(2026, 9, 21, 0, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 9, 20, 9, 30, 0, 0, time.UTC)
+
+	countArgs := []driver.Value{
+		service.SupplierAutomationTaskGroupElection,
+		startedFrom, startedTo,
+		int64(81), "%alpha%",
+	}
+	// LIMIT / OFFSET 排在最后：$6 = 每页条数，$7 = 偏移量。
+	queryArgs := append(append([]driver.Value{}, countArgs...), int64(30), int64(30))
+
+	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\) FROM \(.*jsonb_array_elements.*\) e WHERE e\.schedulable_before <> e\.schedulable_after.*`).
+		WithArgs(countArgs...).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(2)))
+
+	mock.ExpectQuery(`(?s)SELECT run_id, run_status, changed_at.*ORDER BY e\.changed_at DESC, e\.run_id DESC, e\.account_id DESC LIMIT \$6 OFFSET \$7`).
+		WithArgs(queryArgs...).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"run_id", "run_status", "changed_at", "account_id", "account_name", "platform", "test_status",
+			"healthy_count", "latency_ms", "schedulable_before", "schedulable_after",
+			"action", "reason", "error_message", "group_ids", "group_names",
+		}).AddRow(
+			int64(5001), "success", now, int64(902), "alpha-01", "anthropic", "failed",
+			int64(0), int64(1200), true, false,
+			"disable", "连续失败达到阈值", "", "[81,82]", `["Plus","Pro"]`,
+		))
+
+	result, err := repo.ListGroupSchedulingElectionChangeLogs(context.Background(), service.SupplierGroupSchedulingElectionChangeLogListParams{
+		GroupID:     81,
+		Search:      "alpha",
+		Direction:   service.SupplierGroupSchedulingElectionChangeDirectionDisabled,
+		StartedFrom: &startedFrom,
+		StartedTo:   &startedTo,
+		Page:        2,
+		PageSize:    30,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, int64(2), result.Total)
+	require.Equal(t, 2, result.Page)
+	require.Equal(t, 30, result.PageSize)
+	require.Len(t, result.Items, 1)
+	item := result.Items[0]
+	require.Equal(t, int64(5001), item.RunID)
+	require.Equal(t, int64(902), item.AccountID)
+	// 方向由前后状态推出，不落库 —— 存两份迟早会对不上。
+	require.Equal(t, service.SupplierGroupSchedulingElectionChangeDirectionDisabled, item.Direction)
+	require.Equal(t, []int64{81, 82}, item.GroupIDs)
+	require.Equal(t, []string{"Plus", "Pro"}, item.GroupNames)
+	require.NoError(t, mock.ExpectationsWereMet())
+}

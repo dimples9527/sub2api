@@ -22,6 +22,7 @@ type supplierAutomationHandlerServiceStub struct {
 	accountRateGuardLogParams service.SupplierAccountRateGuardUnbindLogListParams
 	batchCalled               bool
 	batchParams               service.SupplierAccountRateGuardUnbindLogListParams
+	groupElectionLogParams    service.SupplierGroupSchedulingElectionChangeLogListParams
 }
 
 func (s *supplierAutomationHandlerServiceStub) ListTasks(context.Context) ([]service.SupplierAutomationTask, error) {
@@ -72,6 +73,17 @@ func (s *supplierAutomationHandlerServiceStub) MarkAccountRateGuardUnbindLogsHan
 	return service.SupplierAccountRateGuardUnbindLogBatchHandledResult{Handled: 3, Batch: 500, HasMore: false}, nil
 }
 
+func (s *supplierAutomationHandlerServiceStub) ListGroupSchedulingElectionChangeLogs(_ context.Context, params service.SupplierGroupSchedulingElectionChangeLogListParams) (service.SupplierGroupSchedulingElectionChangeLogListResult, error) {
+	s.groupElectionLogParams = params
+	return service.SupplierGroupSchedulingElectionChangeLogListResult{
+		Items: []service.SupplierGroupSchedulingElectionChangeLog{{
+			RunID: 5, AccountID: 8, Direction: service.SupplierGroupSchedulingElectionChangeDirectionDisabled,
+			SchedulableBefore: true, SchedulableAfter: false,
+		}},
+		Total: 1, Page: params.Page, PageSize: params.PageSize,
+	}, nil
+}
+
 func TestSupplierAutomationHandlerRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	stub := &supplierAutomationHandlerServiceStub{}
@@ -86,6 +98,7 @@ func TestSupplierAutomationHandlerRoutes(t *testing.T) {
 	router.POST("/automation/account-rate-guard-unbind-logs/:id/handled", handler.MarkAccountRateGuardUnbindLogHandled)
 	router.POST("/automation/account-rate-guard-unbind-logs/handled-batch", handler.MarkAccountRateGuardUnbindLogsHandled)
 	router.POST("/automation/rate-guard-change-logs/:id/handled", handler.MarkRateGuardChangeLogHandled)
+	router.GET("/automation/group-election-change-logs", handler.ListGroupSchedulingElectionChangeLogs)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/automation/tasks", nil)
@@ -145,6 +158,22 @@ func TestSupplierAutomationHandlerRoutes(t *testing.T) {
 	router.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, int64(9), stub.handledID)
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/automation/group-election-change-logs?group_id=7&account_id=8&search=alpha&direction=disabled&started_from=2026-09-01&started_to=2026-09-20&page=2&page_size=30", nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(7), stub.groupElectionLogParams.GroupID)
+	require.Equal(t, int64(8), stub.groupElectionLogParams.AccountID)
+	require.Equal(t, "alpha", stub.groupElectionLogParams.Search)
+	require.Equal(t, service.SupplierGroupSchedulingElectionChangeDirectionDisabled, stub.groupElectionLogParams.Direction)
+	require.Equal(t, 2, stub.groupElectionLogParams.Page)
+	require.Equal(t, 30, stub.groupElectionLogParams.PageSize)
+	// 结束日必须 +24h：选「到 9/20」要包含 20 日当天，否则整天都被排除。
+	// 用区间长度断言而不是具体时刻，避免测试结果依赖运行环境的时区。
+	require.NotNil(t, stub.groupElectionLogParams.StartedFrom)
+	require.NotNil(t, stub.groupElectionLogParams.StartedTo)
+	require.Equal(t, 20*24*time.Hour, stub.groupElectionLogParams.StartedTo.Sub(*stub.groupElectionLogParams.StartedFrom))
 }
 
 // 一键处理的路径少一段（没有 :id），与单条处理的 /:id/handled 并存。
