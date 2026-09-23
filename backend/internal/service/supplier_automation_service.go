@@ -114,6 +114,10 @@ type SupplierAutomationConfig struct {
 	// 分组必需模型：group_id → 必须能服务的模型名列表。择优后对每个必需模型做覆盖兜底——赢家没覆盖它就
 	// 补选一个健康支持者开启；支持它的账号全失败则不硬留、只告警待恢复。空=无强制要求。
 	GroupElectionRequiredModels map[int64][]string `json:"group_scheduling_election_required_models"`
+	// 演练模式：打开后只产出「建议切换」并照常写切换日志，但不拨 accounts.schedulable。
+	// 分组名单是并集以外的第二档——只想盯住个别分组时用，避免全量演练让所有分组同时失去择优。
+	GroupElectionDryRun          bool    `json:"group_scheduling_election_dry_run"`
+	GroupElectionDryRunGroupIDs  []int64 `json:"group_scheduling_election_dry_run_group_ids"`
 }
 
 type SupplierAutomationRun struct {
@@ -753,6 +757,8 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 			CountScoreCap:                task.Config.GroupElectionCountScoreCap,
 			KeepHealthyIncumbentGroupIDs: task.Config.GroupElectionKeepHealthyIncumbentGroupIDs,
 			RequiredModelsByGroup:        task.Config.GroupElectionRequiredModels,
+			DryRun:                       task.Config.GroupElectionDryRun,
+			DryRunGroupIDs:               task.Config.GroupElectionDryRunGroupIDs,
 		}, time.Now())
 		run.ProcessedCount = result.AccountCount
 		run.SuccessCount = result.EnabledCount + result.DisabledCount + result.UnchangedCount
@@ -777,6 +783,12 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 			// 必需模型断供：本轮已切到能用的账号，但该模型当前无健康提供者，必须提示人工恢复。
 			if result.RequiredModelUncoveredCount > 0 {
 				run.Message += fmt.Sprintf("，%d 个必需模型当前无健康提供者待恢复", result.RequiredModelUncoveredCount)
+			}
+			// 演练必须写在摘要里：运行历史默认只显示这一行，不写明的话
+			//「开启 0、关闭 0」会被读成任务空转，而实际是故意不生效。
+			if result.DryRun {
+				run.Message += fmt.Sprintf("（演练模式：建议开启 %d 个、建议关闭 %d 个，未实际修改调度）",
+					result.SuggestedEnabledCount, result.SuggestedDisabledCount)
 			}
 		}
 		return nil
@@ -892,6 +904,12 @@ func validateSupplierAutomationTask(task SupplierAutomationTask) error {
 			return ErrSupplierProviderInvalid
 		}
 		for _, groupID := range task.Config.GroupElectionDisabledGroupIDs {
+			if groupID <= 0 {
+				return ErrSupplierProviderInvalid
+			}
+		}
+		// 演练分组名单同样只挡非法 ID：空列表是合法的「不演练」，由归一化去重排序。
+		for _, groupID := range task.Config.GroupElectionDryRunGroupIDs {
 			if groupID <= 0 {
 				return ErrSupplierProviderInvalid
 			}

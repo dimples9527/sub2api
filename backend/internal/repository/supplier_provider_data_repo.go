@@ -2681,6 +2681,8 @@ SELECT c.run_id,
        COALESCE(c.item ->> 'action', '')                             AS action,
        COALESCE(c.item ->> 'reason', '')                             AS reason,
        COALESCE(c.item ->> 'error_message', '')                      AS error_message,
+       -- suggested：演练模式下这条只是「建议切换」，并没有真的改 accounts.schedulable。
+       COALESCE((c.item ->> 'suggested')::BOOLEAN, FALSE)            AS suggested,
        -- group_ids 保持 jsonb（不加 ::text）才能用 @> 做「包含某分组」筛选；
        -- 扫描到 Go 的 string 时驱动会给回 JSON 文本，与 ::text 等价。
        COALESCE(c.item -> 'group_ids', '[]'::jsonb)                  AS group_ids,
@@ -2782,7 +2784,7 @@ func (r *supplierProviderDataRepository) ListGroupSchedulingElectionChangeLogs(c
 	rows, err := r.db.QueryContext(ctx, `
 SELECT run_id, run_status, changed_at, account_id, account_name, platform, test_status,
        healthy_count, latency_ms, schedulable_before, schedulable_after,
-       action, reason, error_message, group_ids, group_names
+       action, reason, error_message, suggested, group_ids, group_names
 FROM (`+innerSQL+`) e
 WHERE `+itemWhere+fmt.Sprintf(" ORDER BY e.changed_at DESC, e.run_id DESC, e.account_id DESC LIMIT $%d OFFSET $%d", len(queryArgs)-1, len(queryArgs)), queryArgs...)
 	if err != nil {
@@ -2798,7 +2800,7 @@ WHERE `+itemWhere+fmt.Sprintf(" ORDER BY e.changed_at DESC, e.run_id DESC, e.acc
 			&item.RunID, &item.RunStatus, &item.ChangedAt, &item.AccountID, &item.AccountName,
 			&item.Platform, &item.TestStatus, &item.HealthyCount, &item.LatencyMs,
 			&item.SchedulableBefore, &item.SchedulableAfter, &item.Action, &item.Reason,
-			&item.ErrorMessage, &groupIDsRaw, &groupNamesRaw,
+			&item.ErrorMessage, &item.Suggested, &groupIDsRaw, &groupNamesRaw,
 		); err != nil {
 			return service.SupplierGroupSchedulingElectionChangeLogListResult{}, fmt.Errorf("扫描分组调度切换日志失败: %w", err)
 		}

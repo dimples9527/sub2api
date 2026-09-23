@@ -345,6 +345,24 @@
               <span>03</span>
               <div><h3>分组择优调度策略</h3><p>为每个分组按综合分选出最优账号开启调度：综合分 = 次数权重 × 连续成功次数分 + 用时权重 × 组内相对用时分，两项都先归一到 0~1 再加权，所以两个权重的比值就是它们的话语权之比。测试失败的账号要连续失败达到阈值才关闭，且分组里没有备选账号时一律保留。本任务只读现有测试状态、不重新测试，建议排在健康守护之后运行。</p></div>
             </div>
+            <div class="sp-election-dry-run-card" :class="{ 'is-on': electionDryRunAll }">
+              <div>
+                <strong>演练模式</strong>
+                <span v-if="electionDryRunAll">本任务只计算并记下「该开谁、该关谁」，不修改任何账号的调度开关；切换日志里这些条目会标成「建议」。</span>
+                <span v-else>按择优结果真实修改调度。改完权重或阈值想先看看它会切谁，就打开演练——计算与日志照常，只是不落地。</span>
+              </div>
+              <label
+                class="sp-election-dry-run-toggle"
+                title="打开后本任务进入演练：只出建议、不改调度"
+              >
+                <Toggle
+                  :model-value="electionDryRunAll"
+                  aria-label="是否开启演练模式（只记录建议、不修改调度）"
+                  @update:model-value="setElectionDryRunAll"
+                />
+                <span>{{ electionDryRunAll ? '演练中' : '正式执行' }}</span>
+              </label>
+            </div>
             <div class="sp-form-grid sp-group-election-policy-grid">
               <Input :model-value="editForm.config.group_scheduling_election_top_n" type="number" label="每组开启账号数（默认 1 单活）" hint="每组最多保留几个账号处于开启调度状态，默认 1 = 单活。注意这只是「每组」的目标、不是硬上限：账号的开关记在账号上（不是记在「账号 + 分组」上），判定规则是「在所属的任一分组里最优就开」。所以同属 A、B 两个组的账号，只要它在 B 组里最优就会被开启，它落在 A 组里的那一份也跟着开着 —— A 组实际开着的数量就会超过这里填的值。要真正单活，只能让分组互不重叠、或让重叠的账号只在其中一个组里最优。填 2 以上时较慢的账号也会分摊到请求。" @update:model-value="editForm.config.group_scheduling_election_top_n = toNumber($event, editForm.config.group_scheduling_election_top_n ?? 1)" />
               <Input :model-value="editForm.config.group_scheduling_election_count_weight" type="number" step="0.1" min="0.1" label="连续成功次数权重（默认 1）" hint="连续成功次数在综合分里的话语权。次数分 = min(连续成功次数 ÷ 封顶值, 1)，即达到封顶值后一律按封顶值算——默认封顶 10 时，142 次与 190 次得分完全相同。封顶是为了防止老账号靠资历永久占位。" @update:model-value="editForm.config.group_scheduling_election_count_weight = toNumber($event, editForm.config.group_scheduling_election_count_weight ?? 1)" />
@@ -363,6 +381,8 @@
                 <span v-if="groupElectionKeepHealthyGroupIDs.length > 0">已对 <strong class="sp-rate-guard-scope-count">{{ groupElectionKeepHealthyGroupIDs.length }}</strong> 个分组开启「在任者健康则锁定」：开着的账号正常就跳过、不换人。</span>
                 <span v-else>暂无分组开启「在任者健康锁定」。</span>
                 <span v-if="groupElectionRequiredModelsCount > 0">已为 <strong class="sp-rate-guard-scope-count">{{ groupElectionRequiredModelsCount }}</strong> 个分组设置必需模型：换人时保证这些模型不断供，支持者全失败则告警待恢复。</span>
+                <span v-if="electionDryRunAll">演练模式已开启：<strong class="sp-election-dry-run-count">全部分组</strong>只记录建议，不修改调度。</span>
+                <span v-else-if="groupElectionDryRunGroupIDs.length > 0">已对 <strong class="sp-election-dry-run-count">{{ groupElectionDryRunGroupIDs.length }}</strong> 个分组开启演练：这些分组只记录建议，不修改调度。</span>
               </div>
               <button
                 class="sp-button small ghost sp-rate-guard-scope-config-button"
@@ -580,6 +600,11 @@
                 <div><span>跳过（未测）</span><strong>{{ groupElectionResult.skipped_count }}</strong></div>
                 <div><span>更新失败</span><strong>{{ groupElectionResult.failed_write_count }}</strong></div>
                 <div v-if="groupElectionResult.required_model_uncovered_count" class="sp-group-election-warn-stat"><span>必需模型断供</span><strong>{{ groupElectionResult.required_model_uncovered_count }}</strong></div>
+                <!-- 演练的建议数单列：它和"开启/关闭"是两回事，混进去会让人以为调度真的被改了。 -->
+                <template v-if="groupElectionResult.dry_run">
+                  <div class="sp-group-election-suggest-stat"><span>建议开启（未生效）</span><strong>{{ groupElectionResult.suggested_enabled_count ?? 0 }}</strong></div>
+                  <div class="sp-group-election-suggest-stat"><span>建议关闭（未生效）</span><strong>{{ groupElectionResult.suggested_disabled_count ?? 0 }}</strong></div>
+                </template>
               </div>
               <div v-if="groupElectionResult.required_model_warnings?.length" class="sp-group-election-required-warns">
                 <div class="sp-group-election-required-warns-title">必需模型当前无健康提供者，已切到能用账号，待人工恢复：</div>
@@ -612,7 +637,7 @@
                   <span>{{ item.healthy_count }}</span>
                   <span class="sp-group-election-latency" :class="{ 'is-empty': !item.latency_ms }">{{ groupElectionLatencyText(item.latency_ms) }}</span>
                   <span>
-                    <strong>{{ groupElectionActionText(item.action) }}</strong>
+                    <strong>{{ groupElectionActionText(item.action, item.suggested) }}</strong>
                     <small>{{ item.schedulable_before ? '开' : '关' }} → {{ item.schedulable_after ? '开' : '关' }}</small>
                   </span>
                   <span>
@@ -1397,6 +1422,18 @@
                 </label>
                 <label
                   v-if="!electionGroupIsDisabled(group.id)"
+                  class="sp-health-guard-account-scheduling-toggle sp-election-dry-run-toggle"
+                  :title="`打开后：分组「${group.name}」只给出建议、不真的改调度（总开关打开时全部分组都演练）`"
+                >
+                  <Toggle
+                    :model-value="electionGroupDryRun(group.id)"
+                    :aria-label="`分组 ${group.name} 是否只演练不生效`"
+                    @update:model-value="toggleElectionGroupDryRun(group.id)"
+                  />
+                  <span>演练</span>
+                </label>
+                <label
+                  v-if="!electionGroupIsDisabled(group.id)"
                   class="sp-election-required-models"
                   :title="`分组「${group.name}」的必需模型：择优后若赢家没覆盖这些模型，会补选一个健康支持者开启；支持它的账号全失败时不硬留、只告警待恢复。逗号或空格分隔。`"
                 >
@@ -1416,7 +1453,7 @@
           </section>
         </div>
         <template #footer>
-          <span class="sp-rate-guard-group-hint">取消勾选的分组会被跳过；「健康锁定」打开后，该分组开着的账号正常时就保留现状、不换人。</span>
+          <span class="sp-rate-guard-group-hint">取消勾选的分组会被跳过；「健康锁定」打开后，该分组开着的账号正常时保留现状、不换人；「演练」只记录建议、不改调度。</span>
           <button class="sp-button ghost" type="button" @click="enableAllElectionGroups">全部参与</button>
           <button class="sp-button primary" type="button" @click="closeElectionGroups">完成</button>
         </template>
@@ -1592,6 +1629,9 @@ const editForm = reactive<SupplierAutomationTask>({
     group_scheduling_election_count_score_cap: 10,
     group_scheduling_election_keep_healthy_incumbent_group_ids: [],
     group_scheduling_election_required_models: {},
+    // 演练默认关闭：默认行为必须是"真的择优"，演练是管理员显式选择的观察模式。
+    group_scheduling_election_dry_run: false,
+    group_scheduling_election_dry_run_group_ids: [],
   },
   last_status: '',
   last_message: '',
@@ -2072,14 +2112,17 @@ function accountRateGuardModeText(mode: string): string {
   return mode === 'preview' ? '预览' : '执行'
 }
 
-function groupElectionActionText(action: string): string {
+// suggested：演练模式下这个账号只是"本该被拨动"，没真写库，文案必须带上"建议"，
+// 否则运行明细里一条"开启调度"会被当成已经生效的切换。
+function groupElectionActionText(action: string, suggested?: boolean): string {
+  const prefix = suggested ? '建议' : ''
   switch (action) {
     case 'enabled':
-      return '开启调度'
+      return `${prefix}开启调度`
     case 'disabled':
-      return '关闭调度'
+      return `${prefix}关闭调度`
     default:
-      return '保持不变'
+      return suggested ? '建议变更' : '保持不变'
   }
 }
 
@@ -2320,6 +2363,10 @@ function runSummary(run: SupplierAutomationRun): string {
     if (groupElection.pending_count) summary += `，${groupElection.pending_count} 个待观察`
     if (groupElection.kept_count) summary += `，${groupElection.kept_count} 个待人工确认`
     if (groupElection.required_model_uncovered_count) summary += `，${groupElection.required_model_uncovered_count} 个必需模型待恢复`
+    // 演练必须写在摘要里：演练轮次的"开启/关闭"恒为 0，不说明就会被读成任务空转。
+    if (groupElection.dry_run) {
+      summary += `（演练：建议开启 ${groupElection.suggested_enabled_count ?? 0}、建议关闭 ${groupElection.suggested_disabled_count ?? 0}，未实际修改调度）`
+    }
     return summary
   }
   const rechargeSync = run.result_detail?.recharge_sync
@@ -2493,6 +2540,15 @@ const groupElectionDisabledGroupIDs = computed(() =>
 const groupElectionKeepHealthyGroupIDs = computed(() =>
   normalizePositiveAccountIDs(editForm.config.group_scheduling_election_keep_healthy_incumbent_group_ids)
 )
+
+// 演练名单：存"要演练"的分组（opt-in），空列表即都不演练（另有总开关可让全部分组演练）。
+const groupElectionDryRunGroupIDs = computed(() =>
+  normalizePositiveAccountIDs(editForm.config.group_scheduling_election_dry_run_group_ids)
+)
+
+// 总开关用 === true 收敛：旧配置的 config_json 里没有这个键，读回来是 undefined，
+// 直接当布尔用会让后面所有判断都拿到 undefined 而不是 false。
+const electionDryRunAll = computed(() => editForm.config.group_scheduling_election_dry_run === true)
 
 // 模型名清洗：trim、去空、按小写去重保序。必需模型的录入与展示都走它，口径与后端一致。
 function normalizeRequiredModelList(models: unknown): string[] {
@@ -2939,6 +2995,13 @@ function applyGroupElectionDefaults() {
   // 必需模型：清洗成 { [groupID]: 模型列表 }，丢弃非正 groupID 与空列表；空 map 也保留（等于无强制要求）。
   editForm.config.group_scheduling_election_required_models =
     groupElectionRequiredModelsMap.value as unknown as Record<number, string[]>
+  // 演练：总开关收敛成真正的布尔（旧配置没有这个键，读回来是 undefined）；
+  // 分组名单必须序列化成数组而不是省略 —— 后端是整块覆盖 config_json，
+  // 省略等于保留旧值，"清掉全部演练分组"就永远保存不成功。
+  editForm.config.group_scheduling_election_dry_run = electionDryRunAll.value
+  editForm.config.group_scheduling_election_dry_run_group_ids = normalizePositiveAccountIDs(
+    editForm.config.group_scheduling_election_dry_run_group_ids
+  )
 }
 
 function validateAccountHealthGuardSelection(config: SupplierAutomationConfig): string {
@@ -3083,18 +3146,42 @@ function toggleElectionGroup(groupID: number) {
     ? disabled.filter(id => id !== groupID)
     : [...disabled, groupID]
   editForm.config.group_scheduling_election_disabled_group_ids = normalizePositiveAccountIDs(next)
-  // 关闭择优的分组不该再留在"健康锁定"列表里（锁定对不择优的分组无意义）。
+  // 关闭择优的分组不该再留在"健康锁定"列表里（锁定对不择优的分组无意义）；
+  // 演练名单同理——不参与择优的分组根本不会产生切换建议，留着只会让摘要多算一个。
   if (!disabled.includes(groupID)) {
     const keep = groupElectionKeepHealthyGroupIDs.value
     if (keep.includes(groupID)) {
       editForm.config.group_scheduling_election_keep_healthy_incumbent_group_ids =
         normalizePositiveAccountIDs(keep.filter(id => id !== groupID))
     }
+    const dryRun = groupElectionDryRunGroupIDs.value
+    if (dryRun.includes(groupID)) {
+      editForm.config.group_scheduling_election_dry_run_group_ids =
+        normalizePositiveAccountIDs(dryRun.filter(id => id !== groupID))
+    }
   }
 }
 
 function electionGroupKeepHealthy(groupID: number): boolean {
   return groupElectionKeepHealthyGroupIDs.value.includes(groupID)
+}
+
+// Toggle 的事件值在组件里是 unknown，收敛成布尔再写回配置，避免把字符串 "false" 存进去。
+function setElectionDryRunAll(value: unknown) {
+  editForm.config.group_scheduling_election_dry_run = Boolean(value)
+}
+
+function electionGroupDryRun(groupID: number): boolean {
+  // 总开关打开时全部分组都演练，行内开关显示成打开（此时改它不会让该分组真的生效）。
+  return electionDryRunAll.value || groupElectionDryRunGroupIDs.value.includes(groupID)
+}
+
+function toggleElectionGroupDryRun(groupID: number) {
+  const list = groupElectionDryRunGroupIDs.value
+  const next = list.includes(groupID)
+    ? list.filter(id => id !== groupID)
+    : [...list, groupID]
+  editForm.config.group_scheduling_election_dry_run_group_ids = normalizePositiveAccountIDs(next)
 }
 
 function toggleElectionKeepHealthyGroup(groupID: number) {
@@ -6519,6 +6606,16 @@ function intervalSecondsToCron(seconds: number): string | null {
   color: var(--sp-red);
 }
 
+/* 演练的建议统计用紫（与编辑弹窗的演练开关同色），
+   不用红/绿：它不是故障，也不是"已开启/已关闭"，而是"没落地"。 */
+.sp-group-election-suggest-stat strong {
+  color: var(--sp-violet, #7c3aed);
+}
+
+.dark .sp-group-election-suggest-stat strong {
+  color: #a78bfa;
+}
+
 .sp-group-election-required-warns {
   margin-top: 10px;
   padding: 10px 12px;
@@ -6974,4 +7071,75 @@ function intervalSecondsToCron(seconds: number): string | null {
 
 :global(.dark .modal-content:has(.sp-edit-dialog) .sp-form-section-head > span) {
   color: color-mix(in srgb, var(--sp-blue) 52%, white);
+}
+
+/* 演练模式开关：与「分组参与择优」范围卡片同构，但配色走紫（--sp-violet）——
+   演练既不是"开"也不是"关"，用绿/红会误导；而蓝已被分组参与占用、橙被切换日志占用、
+   琥珀被倍率日志占用，紫是这套色板里唯一没有歧义的剩余色相。
+   弹窗由 BaseDialog Teleport 到 body，--sp-* 可能取不到，故关键色都带明确回退值。 */
+.sp-election-dry-run-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--sp-line, #e5e7eb);
+  border-radius: 12px;
+  background: var(--sp-panel-2, #f9fafb);
+  margin-bottom: 14px;
+}
+
+.sp-election-dry-run-card > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.sp-election-dry-run-card strong {
+  font-size: 13px;
+  color: var(--sp-text, #111827);
+}
+
+.sp-election-dry-run-card span {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--sp-muted, #64748b);
+}
+
+.sp-election-dry-run-card.is-on {
+  border-color: color-mix(in srgb, var(--sp-violet, #7c3aed) 45%, var(--sp-line, #e5e7eb));
+  background: color-mix(in srgb, var(--sp-violet, #7c3aed) 7%, var(--sp-panel, #ffffff));
+}
+
+.sp-election-dry-run-card.is-on strong,
+strong.sp-election-dry-run-count {
+  color: var(--sp-violet, #7c3aed);
+}
+
+.sp-election-dry-run-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--sp-muted, #64748b);
+}
+
+.sp-election-dry-run-card.is-on .sp-election-dry-run-toggle {
+  font-weight: 600;
+  color: var(--sp-violet, #7c3aed);
+}
+
+.dark .sp-election-dry-run-card {
+  border-color: #374151;
+  background: #111827;
+}
+
+.dark .sp-election-dry-run-card.is-on {
+  background: color-mix(in srgb, #a78bfa 10%, #1f2937);
+}
+
+.dark .sp-election-dry-run-card.is-on strong,
+.dark strong.sp-election-dry-run-count {
+  color: #a78bfa;
 }</style>

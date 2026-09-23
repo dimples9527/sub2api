@@ -174,4 +174,14 @@ describe('调度切换日志的两个入口', () => {
     expect(groupsToolbar.indexOf('sp-control-button-log')).toBeLessThan(groupsToolbar.indexOf('sp-control-button-columns'))
     expect(groupsToolbar.indexOf('sp-control-button-columns')).toBeLessThan(groupsToolbar.indexOf('sp-control-button-election-log'))
   })
+
+  it('演练产生的建议条目要标出来，不能和真实切换混在一起', () => {
+    // 这份日志的取数条件就是 before <> after，演练模式下它描述的是「想改成什么」而不是「改成了什么」。
+    // 不标出来，事后回看就会把根本没发生过的切换当成既成事实。
+    expect(source).toContain('<span v-if="log.suggested" class="sp-election-log-suggested"')
+    expect(source).toContain('title="演练模式：本条只是建议，调度开关没有被修改"')
+    // 徽标用虚线边框而不是实心块：方向已经有绿（开启）/红（关闭）两色，
+    // 再来一个实心色块会被读成第三种方向，虚线才表达「还没落地」。
+    expect(cssBlock('.sp-election-log-suggested')).toContain('dashed')
+  })
 })

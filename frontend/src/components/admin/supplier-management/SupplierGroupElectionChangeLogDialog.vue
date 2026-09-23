@@ -108,6 +108,9 @@
                       <span class="sp-election-log-direction" :class="log.direction === 'enabled' ? 'good' : 'bad'">
                         {{ directionText(log) }}
                       </span>
+                      <!-- 演练产生的条目没有真的写库，必须标出来：
+                           这份日志的取数条件就是「前后不一致」，不标的话建议会被读成已发生的切换。 -->
+                      <span v-if="log.suggested" class="sp-election-log-suggested" title="演练模式：本条只是建议，调度开关没有被修改">建议</span>
                       <small class="sp-election-log-switch">{{ log.schedulable_before ? '开' : '关' }} → {{ log.schedulable_after ? '开' : '关' }}</small>
                     </template>
                     <span v-else-if="column.key === 'test_status'" class="sp-status" :class="log.test_status === 'success' ? 'good' : 'bad'">{{ testStatusText(log.test_status) }}</span>
@@ -648,6 +651,26 @@ watch(() => props.accountId, () => {
 
 .dark .sp-election-log-direction.bad {
   color: #f87171;
+}
+
+/* 「建议」徽标用虚线边框而不是实心块：它与方向色（绿=开启/红=关闭）是两套维度，
+   实心块会被当成第三种方向；虚线则明确表达「这一条还没落地」。 */
+.sp-election-log-suggested {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px dashed var(--sp-election-log-accent, #ea580c);
+  border-radius: 4px;
+  color: var(--sp-election-log-accent, #ea580c);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  vertical-align: 1px;
+}
+
+.dark .sp-election-log-suggested {
+  border-color: #fb923c;
+  color: #fb923c;
 }
 
 .sp-election-log-switch {

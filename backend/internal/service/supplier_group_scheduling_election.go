@@ -141,6 +141,15 @@ type SupplierGroupSchedulingElectionConfig struct {
 	// （让正常赢家生效、允许切到能用的账号），只记一条告警待人工恢复。判定「是否支持」复用运行时
 	// account.IsModelSupported，与网关逐请求过滤同源。
 	RequiredModelsByGroup map[int64][]string `json:"group_scheduling_election_required_models"`
+	// DryRun 打开后本任务进入「演练」：照常算赢家、照常产出切换日志，但绝不拨 accounts.schedulable，
+	// 明细与日志里的每条都标成「建议」。用途是在改权重/阈值后先空跑几轮看它会切谁，
+	// 而不是直接拿线上调度做实验。
+	DryRun bool `json:"group_scheduling_election_dry_run"`
+	// DryRunGroupIDs 是「只演练不生效」的分组 ID（opt-in），与 DisabledGroupIDs 相反极性。
+	// 与 DryRun 是并集关系：总开关打开则全部分组演练，否则只有列表内的分组演练。
+	// 之所以还要分组粒度：同一套权重在不同分组上的后果差别很大，常见诉求是「只盯住一两个分组」；
+	// 全量演练会让所有分组同时失去择优，反而更像故障。
+	DryRunGroupIDs []int64 `json:"group_scheduling_election_dry_run_group_ids"`
 }
 
 // SupplierGroupSchedulingElectionMember 是仓储层返回的一条"分组×账号"成员行。
@@ -234,6 +243,10 @@ type SupplierGroupSchedulingElectionAccountItem struct {
 	Reason            string  `json:"reason,omitempty"`
 	GroupIDs          []int64 `json:"group_ids,omitempty"`
 	ErrorMessage      string  `json:"error_message,omitempty"`
+	// Suggested 为 true 表示这条只是「建议」：目标状态已算出来、也进了切换日志，
+	// 但演练模式下没有真的写库。必须与真实切换区分——切换日志的取数条件就是
+	// before <> after，不标的话运维会把"它想切"读成"它切了"。
+	Suggested bool `json:"suggested,omitempty"`
 }
 
 type SupplierGroupSchedulingElectionResult struct {
@@ -254,6 +267,14 @@ type SupplierGroupSchedulingElectionResult struct {
 	// 的情况。这不是失败（本轮仍让能用的账号生效），但必须被看见——否则某个模型静默断供、无人知晓。
 	RequiredModelUncoveredCount int                                                    `json:"required_model_uncovered_count"`
 	RequiredModelWarnings       []SupplierGroupSchedulingElectionRequiredModelWarning `json:"required_model_warnings,omitempty"`
+	// DryRun 表示本轮处于演练配置下（总开关打开或配了演练分组）。
+	// 放在结果顶层而不是只留在明细里，是因为运行列表默认只显示一行摘要，必须一眼看出这轮没生效。
+	DryRun bool `json:"dry_run,omitempty"`
+	// SuggestedEnabledCount / SuggestedDisabledCount 是演练模式下「本应开启/关闭但没有真改」的账号数。
+	// 它们不计入 EnabledCount / DisabledCount —— 那两项的含义是「真的被拨动了」，
+	// 把建议数混进去会让摘要骗人（"开启 3 个"里可能一个都没生效）。
+	SuggestedEnabledCount  int `json:"suggested_enabled_count"`
+	SuggestedDisabledCount int `json:"suggested_disabled_count"`
 	Groups                      []SupplierGroupSchedulingElectionGroupDetail          `json:"groups"`
 	Items                       []SupplierGroupSchedulingElectionAccountItem          `json:"items"`
 }
@@ -298,6 +319,10 @@ type SupplierGroupSchedulingElectionChangeLog struct {
 	ErrorMessage      string   `json:"error_message,omitempty"`
 	GroupIDs          []int64  `json:"group_ids,omitempty"`
 	GroupNames        []string `json:"group_names,omitempty"`
+	// Suggested 为 true 表示这条是演练产生的「建议切换」：目标状态算出来了，但没有真的写库。
+	// 也就是说这份日志的定义条件（before <> after）在演练模式下描述的是"想改什么"而不是"改了什么"，
+	// 不把它标出来，事后回看会把建议当成既成事实。
+	Suggested bool `json:"suggested"`
 }
 
 type SupplierGroupSchedulingElectionChangeLogListParams struct {
@@ -348,6 +373,10 @@ type supplierGroupElectionAccount struct {
 	// 命中就保留它的调度（哪怕它当前是 failed）—— 把分组关成空组比留着一个坏账号更糟，
 	// 前者是明确故障，后者至少还有恢复的可能。
 	noAlternative bool
+	// dryRun 表示该账号所属分组本轮只演练：算出目标状态并记进日志，但不拨 accounts.schedulable。
+	// 只要它在**任一**所属分组被判演练就为真——账号的开关是单一字段，
+	// 不可能「在 A 组演练、在 B 组真生效」，跟 winner 的 union 语义保持一致。
+	dryRun bool
 	// hold 非空表示这个账号本轮"故意没关"，取值见 supplierGroupElectionHold* 常量。
 	// 非空即 notable：只靠汇总数字的话，运维看到"关闭 0 个"会以为任务没跑，
 	// 而实际恰恰是最需要被看见的情况——有账号连续失败但被闸门拦住了。
@@ -371,6 +400,10 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 	keepHealthyGroups := make(map[int64]struct{}, len(config.KeepHealthyIncumbentGroupIDs))
 	for _, groupID := range config.KeepHealthyIncumbentGroupIDs {
 		keepHealthyGroups[groupID] = struct{}{}
+	}
+	dryRunGroups := make(map[int64]struct{}, len(config.DryRunGroupIDs))
+	for _, groupID := range config.DryRunGroupIDs {
+		dryRunGroups[groupID] = struct{}{}
 	}
 
 	// 1) 按分组归拢成员，同时聚合账号级视图（同一账号可能横跨多个分组）。
@@ -408,11 +441,19 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 		if account.latencyMs == 0 {
 			account.latencyMs = baseLatency
 		}
+		if config.DryRun {
+			account.dryRun = true
+		} else if _, only := dryRunGroups[member.GroupID]; only {
+			account.dryRun = true
+		}
 		account.groupIDs = append(account.groupIDs, member.GroupID)
 	}
 	sort.Slice(groupOrder, func(i, j int) bool { return groupOrder[i] < groupOrder[j] })
 
 	result := SupplierGroupSchedulingElectionResult{
+		// 演练标记取自配置而不是「本轮是否真有建议」：没有建议时（例如一切已是最优）
+		// 摘要也必须写明这轮是演练，否则"开启 0、关闭 0"会被读成任务没干活。
+		DryRun:       config.DryRun || len(dryRunGroups) > 0,
 		TopN:         config.TopN,
 		GroupCount:   len(groupOrder),
 		AccountCount: len(accounts),
@@ -571,6 +612,21 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 			if account.hold != "" || item.ErrorMessage != "" {
 				result.Items = append(result.Items, item)
 			}
+			continue
+		}
+
+		// 演练：走到这里说明本轮"本该拨动"这个账号，但只记建议、不写库。
+		// 连续失败计数仍在上面照常落库——它决定的是下一轮达不达阈值，
+		// 演练轮次若不计数，多轮演练就永远看不到「达到阈值才会关」的那一天。
+		if account.dryRun {
+			item.Suggested = true
+			switch item.Action {
+			case SupplierGroupSchedulingElectionActionEnabled:
+				result.SuggestedEnabledCount++
+			case SupplierGroupSchedulingElectionActionDisabled:
+				result.SuggestedDisabledCount++
+			}
+			result.Items = append(result.Items, item)
 			continue
 		}
 
@@ -895,6 +951,10 @@ func normalizeSupplierGroupSchedulingElectionConfig(config SupplierGroupScheduli
 	config.KeepHealthyIncumbentGroupIDs = uniquePositiveInt64s(config.KeepHealthyIncumbentGroupIDs)
 	sort.Slice(config.KeepHealthyIncumbentGroupIDs, func(i, j int) bool {
 		return config.KeepHealthyIncumbentGroupIDs[i] < config.KeepHealthyIncumbentGroupIDs[j]
+	})
+	config.DryRunGroupIDs = uniquePositiveInt64s(config.DryRunGroupIDs)
+	sort.Slice(config.DryRunGroupIDs, func(i, j int) bool {
+		return config.DryRunGroupIDs[i] < config.DryRunGroupIDs[j]
 	})
 	// 旧的 config_json 里没有权重字段，反序列化后是 0；而 JSON 无法区分"字段缺失"与"显式填 0"，
 	// 所以 0 一律按"未配置"回落到默认值 —— 否则老任务升级后会静默把用时权重当成 0，

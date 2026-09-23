@@ -90,6 +90,18 @@ export interface SupplierAutomationConfig {
    * 空 = 该分组无强制模型要求（默认）。
    */
   group_scheduling_election_required_models?: Record<number, string[]>
+  /**
+   * 分组择优调度演练模式总开关：打开后只算出「该开谁、该关谁」并照常写切换日志，
+   * 但不修改 accounts.schedulable，日志里这些条目标记为建议。
+   * 用于改权重/阈值后先空跑几轮核对，而不是直接拿线上调度做实验。
+   */
+  group_scheduling_election_dry_run?: boolean
+  /**
+   * 分组择优调度演练分组名单（opt-in，空=都不演练，默认）。
+   * 与总开关是并集：总开关打开则全部分组演练；否则只有列表内的分组演练，
+   * 让「只盯住一两个分组」不必让全部分组同时失去择优。
+   */
+  group_scheduling_election_dry_run_group_ids?: number[]
 }
 
 export interface SupplierAutomationTask {
@@ -156,6 +168,8 @@ export interface SupplierGroupSchedulingElectionAccountItem {
   reason?: string
   group_ids?: number[]
   error_message?: string
+  /** 演练模式：本条只是建议，目标状态没有真的写库。旧运行记录没有这个字段。 */
+  suggested?: boolean
 }
 
 export interface SupplierGroupSchedulingElectionResult {
@@ -175,6 +189,12 @@ export interface SupplierGroupSchedulingElectionResult {
   required_model_uncovered_count?: number
   /** 必需模型断供的明细告警。旧运行记录没有这个字段。 */
   required_model_warnings?: SupplierGroupSchedulingElectionRequiredModelWarning[]
+  /** 演练模式：本轮处于演练配置下（总开关打开或配了演练分组）。旧运行记录没有这个字段。 */
+  dry_run?: boolean
+  /** 演练模式下「本应开启但没有真改」的账号数。旧运行记录没有这个字段。 */
+  suggested_enabled_count?: number
+  /** 演练模式下「本应关闭但没有真改」的账号数。旧运行记录没有这个字段。 */
+  suggested_disabled_count?: number
   groups: SupplierGroupSchedulingElectionGroupDetail[]
   items: SupplierGroupSchedulingElectionAccountItem[]
 }
@@ -418,9 +438,11 @@ export interface SupplierRateGuardChangeLogListResult {
   page_size: number
 }
 
-// 一条「某账号的调度开关真的被拨动」的记录。
+// 一条「某账号的调度开关被拨动（或演练模式下被建议拨动）」的记录。
 // 与运行明细的区别：运行明细是「一次任务执行」视角（含未变更和写库失败），
 // 这里只保留开关前后不一致的条目。
+// 注意 suggested：演练模式下取数条件（前后不一致）描述的是「想改成什么」而不是「改成了什么」，
+// 前端必须靠它把建议与已生效区分开，否则回看日志会把没发生过的切换当成事实。
 export interface SupplierGroupElectionChangeLog {
   run_id: number
   run_status: string
@@ -439,6 +461,8 @@ export interface SupplierGroupElectionChangeLog {
   error_message?: string
   group_ids?: number[]
   group_names?: string[]
+  /** 演练模式产生的建议切换：目标状态已算出，但没有真的写库。 */
+  suggested?: boolean
 }
 
 export interface SupplierGroupElectionChangeLogListParams {

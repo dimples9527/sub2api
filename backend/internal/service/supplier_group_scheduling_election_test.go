@@ -951,3 +951,100 @@ func TestGroupElectionNormalizeRequiredModels(t *testing.T) {
 	_, hasEmpty := cfg.RequiredModelsByGroup[2]
 	require.False(t, hasEmpty, "清洗后为空的分组应整条丢弃")
 }
+
+// 演练模式（总开关）：照常算出谁该开谁该关、照常进明细与切换日志，但一个都不真写。
+// 关键在 SchedulableAfter 必须保留期望值 —— 切换日志的取数条件就是 before <> after，
+// 一旦像"写库失败"那样回滚成 before，演练就等于什么都没记。
+func TestGroupElectionDryRunSkipsSchedulableWrite(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, GroupName: "G1", AccountID: 10, Schedulable: true, LastTestStatus: "success", HealthyCount: 3},
+		{GroupID: 1, GroupName: "G1", AccountID: 11, Schedulable: false, LastTestStatus: "success", HealthyCount: 9},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1, DryRun: true}, time.Now())
+	require.NoError(t, err)
+
+	require.Empty(t, store.calls, "演练模式不得调用 SetSchedulable")
+	require.True(t, result.DryRun)
+	require.Equal(t, 0, result.EnabledCount)
+	require.Equal(t, 0, result.DisabledCount, "建议数不能混进真实生效的计数里")
+	require.Equal(t, 1, result.SuggestedEnabledCount)
+	require.Equal(t, 1, result.SuggestedDisabledCount)
+
+	require.Len(t, result.Items, 2)
+	require.Equal(t, int64(10), result.Items[0].AccountID)
+	require.True(t, result.Items[0].Suggested)
+	require.True(t, result.Items[0].SchedulableBefore)
+	require.False(t, result.Items[0].SchedulableAfter, "落选的建议关：期望值要留在明细里，日志才取得到")
+
+	require.Equal(t, int64(11), result.Items[1].AccountID)
+	require.True(t, result.Items[1].Suggested)
+	require.False(t, result.Items[1].SchedulableBefore)
+	require.True(t, result.Items[1].SchedulableAfter, "当选的建议开：同上，回滚成 before 会让日志变空")
+	require.Equal(t, SupplierGroupSchedulingElectionActionEnabled, result.Items[1].Action)
+}
+
+// 演练分组名单（opt-in）：只有名单内的分组只出建议，其余分组照常生效。
+// 名单与总开关是并集，所以这里不能开总开关，否则分不出"名单真的起作用"。
+func TestGroupElectionDryRunGroupIDsScopedToGroup(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, GroupName: "G1", AccountID: 20, Schedulable: true, LastTestStatus: "success", HealthyCount: 1},
+		{GroupID: 1, GroupName: "G1", AccountID: 21, Schedulable: false, LastTestStatus: "success", HealthyCount: 9},
+		{GroupID: 2, GroupName: "G2", AccountID: 22, Schedulable: true, LastTestStatus: "success", HealthyCount: 1},
+		{GroupID: 2, GroupName: "G2", AccountID: 23, Schedulable: false, LastTestStatus: "success", HealthyCount: 9},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN: 1, DryRunGroupIDs: []int64{1},
+	}, time.Now())
+	require.NoError(t, err)
+
+	require.True(t, result.DryRun, "配了演练分组名单就要在摘要里标出来")
+	// G1 只出建议：20 建议关、21 建议开，都不写库。
+	_, touched20 := store.calls[20]
+	_, touched21 := store.calls[21]
+	require.False(t, touched20)
+	require.False(t, touched21)
+	// G2 照常生效。
+	require.Equal(t, false, store.calls[22])
+	require.Equal(t, true, store.calls[23])
+
+	require.Equal(t, 1, result.EnabledCount)
+	require.Equal(t, 1, result.DisabledCount)
+	require.Equal(t, 1, result.SuggestedEnabledCount)
+	require.Equal(t, 1, result.SuggestedDisabledCount)
+
+	byID := make(map[int64]SupplierGroupSchedulingElectionAccountItem, len(result.Items))
+	for _, item := range result.Items {
+		byID[item.AccountID] = item
+	}
+	require.True(t, byID[20].Suggested)
+	require.True(t, byID[21].Suggested)
+	require.False(t, byID[22].Suggested, "不在演练名单里的分组是真的改了，不能标成建议")
+	require.False(t, byID[23].Suggested)
+}
+
+// 演练仍要累计连续失败轮次：演练轮次若不计数，多轮演练永远看不到「达到阈值才会关」的那一天，
+// 演练就退化成只能观察第一轮。
+func TestGroupElectionDryRunStillPersistsFailedCount(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, GroupName: "G1", AccountID: 30, Schedulable: true, LastTestStatus: "failed", HealthyCount: 0},
+		{GroupID: 1, GroupName: "G1", AccountID: 31, Schedulable: false, LastTestStatus: "success", HealthyCount: 5},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1, DryRun: true}, time.Now())
+	require.NoError(t, err)
+
+	require.Empty(t, store.calls, "演练模式下失败的账号也不该被真的关掉")
+	require.Equal(t, 1, store.extraUpdates[30][supplierGroupElectionFailedCountExtraKey], "失败轮次照常记账")
+	// 30 未达阈值保持原状（不产生建议），31 当选但只出建议。
+	require.Equal(t, 1, result.SuggestedEnabledCount)
+	require.Equal(t, 0, result.SuggestedDisabledCount)
+	require.Equal(t, 1, result.PendingCount)
+}

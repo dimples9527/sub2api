@@ -1180,6 +1180,22 @@ describe('SupplierAutomationView edit dialog composition', () => {
     )
   })
 
+  it('marks dry-run suggestions as not applied in the summary, stats and detail rows', () => {
+    // 演练轮次的「开启/关闭」恒为 0，摘要里不写明就会被读成任务空转。
+    expect(supplierAutomationSource).toContain('groupElection.dry_run')
+    expect(supplierAutomationSource).toContain('（演练：建议开启 ${groupElection.suggested_enabled_count ?? 0}')
+    // 明细行同理：演练条目文案必须带「建议」，否则一条"开启调度"会被当成已生效的切换。
+    expect(supplierAutomationSource).toContain('function groupElectionActionText(action: string, suggested?: boolean)')
+    expect(supplierAutomationSource).toContain('groupElectionActionText(item.action, item.suggested)')
+    // 两级开关都要落到配置上。
+    expect(supplierAutomationSource).toContain('setElectionDryRunAll')
+    expect(supplierAutomationSource).toContain('toggleElectionGroupDryRun(group.id)')
+    // 保存时名单必须序列化成数组：后端是整块覆盖 config_json，省略等于清不掉旧值。
+    expect(supplierAutomationSource).toContain(
+      'editForm.config.group_scheduling_election_dry_run_group_ids = normalizePositiveAccountIDs('
+    )
+  })
+
   it('keeps every scheduling, rate guard, and retention input binding', () => {
     const bindings = [
       ['editIntervalSeconds', 'editIntervalSeconds = toNumber($event, editIntervalSeconds)'],
