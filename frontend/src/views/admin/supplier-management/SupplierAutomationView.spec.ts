@@ -1151,6 +1151,35 @@ describe('SupplierAutomationView edit dialog composition', () => {
     expect(editDialogSource).not.toContain('<section v-else class="sp-form-section sp-policy-section">')
   })
 
+  // 择优区块的 7 个配置项都是「光看名字猜不出改大改小会怎样」的参数，说明文字是必需品而不是装饰。
+  // 这条用例的作用是：以后加字段忘了写 hint 时，报错会直接点名是哪个 label。
+  it('explains every group election config field with a non-empty hint', () => {
+    const electionSource = editDialogSource.match(
+      /<section v-if="editForm\.task_code === 'supplier_group_scheduling_election'"[\s\S]*?<\/section>/
+    )?.[0] || ''
+    expect(electionSource).not.toBe('')
+
+    const inputTags = electionSource.match(/<Input\b[^>]*\/>/g) || []
+    expect(inputTags).toHaveLength(7)
+    const missing = inputTags
+      .map(tag => ({
+        label: tag.match(/label="([^"]+)"/)?.[1] || '(未命名字段)',
+        hint: (tag.match(/hint="([^"]*)"/)?.[1] || '').trim(),
+      }))
+      .filter(field => field.hint.length <= 10)
+      .map(field => field.label)
+    expect(missing).toEqual([])
+
+    // 「次数分封顶 10 次」是最容易被误读的一条 —— 连续成功 190 次与 142 次得分完全相同，
+    // 说明里不点出来，用户会继续按「资历越老越优先」理解择优结果。
+    expect(electionSource).toContain('封顶')
+
+    // 说明文字需要宽度：3 列（约 260px/列）会把说明挤成 5~6 行，2 列是刻意的选择，不是漏改。
+    expect(supplierAutomationSource).toMatch(
+      /\.sp-group-election-policy-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,/
+    )
+  })
+
   it('keeps every scheduling, rate guard, and retention input binding', () => {
     const bindings = [
       ['editIntervalSeconds', 'editIntervalSeconds = toNumber($event, editIntervalSeconds)'],

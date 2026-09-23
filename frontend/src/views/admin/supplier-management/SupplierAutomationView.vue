@@ -343,16 +343,16 @@
           <section v-if="editForm.task_code === 'supplier_group_scheduling_election'" class="sp-form-section sp-policy-section">
             <div class="sp-form-section-head">
               <span>03</span>
-              <div><h3>分组择优调度策略</h3><p>为每个分组按「连续成功次数 + 测试用时」的综合分选出最优账号开启调度；测试失败的账号要连续失败达到阈值才关闭，且分组里没有备选账号时一律保留。复用现有测试状态，不重新测试，建议排在健康守护之后运行。</p></div>
+              <div><h3>分组择优调度策略</h3><p>为每个分组按综合分选出最优账号开启调度：综合分 = 次数权重 × 连续成功次数分 + 用时权重 × 组内相对用时分，两项都先归一到 0~1 再加权，所以两个权重的比值就是它们的话语权之比。测试失败的账号要连续失败达到阈值才关闭，且分组里没有备选账号时一律保留。本任务只读现有测试状态、不重新测试，建议排在健康守护之后运行。</p></div>
             </div>
             <div class="sp-form-grid sp-group-election-policy-grid">
-              <Input :model-value="editForm.config.group_scheduling_election_top_n" type="number" label="每组开启账号数（默认 1 单活）" @update:model-value="editForm.config.group_scheduling_election_top_n = toNumber($event, editForm.config.group_scheduling_election_top_n ?? 1)" />
-              <Input :model-value="editForm.config.group_scheduling_election_count_weight" type="number" step="0.1" min="0.1" label="连续成功次数权重（默认 1）" @update:model-value="editForm.config.group_scheduling_election_count_weight = toNumber($event, editForm.config.group_scheduling_election_count_weight ?? 1)" />
-              <Input :model-value="editForm.config.group_scheduling_election_latency_weight" type="number" step="0.1" min="0.1" label="测试用时权重（默认 0.5）" @update:model-value="editForm.config.group_scheduling_election_latency_weight = toNumber($event, editForm.config.group_scheduling_election_latency_weight ?? 0.5)" />
-              <Input :model-value="editForm.config.group_scheduling_election_failure_threshold" type="number" min="1" label="连续失败关闭阈值（默认 2 次）" @update:model-value="editForm.config.group_scheduling_election_failure_threshold = toNumber($event, editForm.config.group_scheduling_election_failure_threshold ?? 2)" />
-              <Input :model-value="editForm.config.group_scheduling_election_switch_margin" type="number" step="0.05" min="0" label="切换迟滞比例（默认 0.15，挑战者要快 15% 才换人）" @update:model-value="editForm.config.group_scheduling_election_switch_margin = toNumber($event, editForm.config.group_scheduling_election_switch_margin ?? 0.15)" />
-              <Input :model-value="editForm.config.group_scheduling_election_latency_window_minutes" type="number" min="1" label="延迟平均窗口（分钟，默认 30）" @update:model-value="editForm.config.group_scheduling_election_latency_window_minutes = toNumber($event, editForm.config.group_scheduling_election_latency_window_minutes ?? 30)" />
-              <Input :model-value="editForm.config.group_scheduling_election_latency_min_samples" type="number" min="1" label="平均最少成功样本（默认 3，不足则回退单次）" @update:model-value="editForm.config.group_scheduling_election_latency_min_samples = toNumber($event, editForm.config.group_scheduling_election_latency_min_samples ?? 3)" />
+              <Input :model-value="editForm.config.group_scheduling_election_top_n" type="number" label="每组开启账号数（默认 1 单活）" hint="同一时刻最多保留几个账号处于开启调度状态。默认 1 = 严格单活，只让综合分最高的那个在跑；填 2 以上会同组多开，请求分摊到多个账号，但较慢的那个也会被用到。" @update:model-value="editForm.config.group_scheduling_election_top_n = toNumber($event, editForm.config.group_scheduling_election_top_n ?? 1)" />
+              <Input :model-value="editForm.config.group_scheduling_election_count_weight" type="number" step="0.1" min="0.1" label="连续成功次数权重（默认 1）" hint="连续成功次数在综合分里的话语权。次数分 = min(连续成功次数 ÷ 10, 1)，即超过 10 次一律按 10 次算——所以 142 次与 190 次得分完全相同。封顶是为了防止老账号靠资历永久占位。" @update:model-value="editForm.config.group_scheduling_election_count_weight = toNumber($event, editForm.config.group_scheduling_election_count_weight ?? 1)" />
+              <Input :model-value="editForm.config.group_scheduling_election_latency_weight" type="number" step="0.1" min="0.1" label="测试用时权重（默认 0.5）" hint="用时在综合分里的话语权。用时只在同一平台内比较（跨平台基线速度差数倍，比了没意义），组内最快的得 1 分、最慢的得 0 分。默认 0.5，即用时最多只能抵 5 次连续成功；调到比次数权重还大就变成谁快谁上。" @update:model-value="editForm.config.group_scheduling_election_latency_weight = toNumber($event, editForm.config.group_scheduling_election_latency_weight ?? 0.5)" />
+              <Input :model-value="editForm.config.group_scheduling_election_failure_threshold" type="number" min="1" label="连续失败关闭阈值（默认 2 次）" hint="测试失败后要连续几个执行周期都失败，才真正关闭调度。默认 2 是给单次网络抖动留翻盘机会，填 1 等于失败一次就关。另有两种情况不关：分组里已无其它成功账号（关了就成空组），或失败次数还没到阈值——都保持原状等下一轮。" @update:model-value="editForm.config.group_scheduling_election_failure_threshold = toNumber($event, editForm.config.group_scheduling_election_failure_threshold ?? 2)" />
+              <Input :model-value="editForm.config.group_scheduling_election_switch_margin" type="number" step="0.05" min="0" label="切换迟滞比例（默认 0.15，挑战者要快 15% 才换人）" hint="换人的死区，比较的是延迟而不是总分。挑战者的延迟要比当前正在跑的账号快出这个比例才夺位，否则维持现状，防止两个差不多的账号来回对拍。默认 0.15 = 快 15%。填到 0.95 会让在任者几乎永不被换下。" @update:model-value="editForm.config.group_scheduling_election_switch_margin = toNumber($event, editForm.config.group_scheduling_election_switch_margin ?? 0.15)" />
+              <Input :model-value="editForm.config.group_scheduling_election_latency_window_minutes" type="number" min="1" label="延迟平均窗口（分钟，默认 30）" hint="综合分用的延迟取最近这么多分钟内健康检测成功样本的平均值，避免被单次抖动带偏。注意账号列表里显示的「近 1h 均」是另一个窗口，数值可能不同，判断依据以本任务的运行记录为准。" @update:model-value="editForm.config.group_scheduling_election_latency_window_minutes = toNumber($event, editForm.config.group_scheduling_election_latency_window_minutes ?? 30)" />
+              <Input :model-value="editForm.config.group_scheduling_election_latency_min_samples" type="number" min="1" label="平均最少成功样本（默认 3，不足则回退单次）" hint="窗口内的成功样本少于这个数时不信任平均值，改回用最近一次测试的耗时。样本太少时均值会被一两次异常带偏，回退单次等于退回旧行为，不会更差。" @update:model-value="editForm.config.group_scheduling_election_latency_min_samples = toNumber($event, editForm.config.group_scheduling_election_latency_min_samples ?? 3)" />
             </div>
             <div class="sp-rate-guard-scope-card">
               <div>
@@ -2557,6 +2557,13 @@ const electionFilteredGroups = computed(() => {
 // 压窄会把标签折行、区块高度反而涨上去；2 列及以下（其余任务）用窄档即可，
 // 铺满只会把内容拉散（实测账号倍率守护铺满后策略卡里从文字到按钮空出 1012px）。
 // 窄屏下 3 列会由既有媒体查询自动降级为 2 列，所以这里只表达「宽屏需要多宽」。
+//
+// 分组择优是唯一的例外：它的网格实际是 2 列（.sp-group-election-policy-grid 要给每个字段
+// 放一段说明文字，3 列会把说明挤成 5~6 行），但**仍留在 3 档** —— 窄档是宽度和高度一起收的
+// （980px 宽 + 640px 高），而择优实测表单内容总高 1015px —— 光「分组择优调度策略」这一个区块
+// 自己就 656px（7 个字段各带一段说明 + 一张范围卡片），收到 640px 必然滚动、看不完一屏。
+// 所以这里的 3 对择优而言表达的是「内容量需要大弹窗」，
+// 不是「表单排 3 列」——别看到这个 3 就去把网格改回 3 列。
 const editDialogGridCols = computed<2 | 3>(() =>
   editForm.task_code === 'supplier_account_health_guard' ||
   editForm.task_code === 'supplier_data_cleanup' ||
@@ -4052,9 +4059,14 @@ function intervalSecondsToCron(seconds: number): string | null {
 }
 
 .sp-health-guard-policy-grid,
-.sp-retention-grid,
-.sp-group-election-policy-grid {
+.sp-retention-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* 分组择优的每个配置项都带一段说明文字，3 列（约 260px/列）会把说明挤成 5~6 行，
+   读起来比不看还累；这里刻意退回 2 列（约 400px/列）。窄屏仍由 media query 收成 1 列。 */
+.sp-group-election-policy-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .sp-toggle-field {
