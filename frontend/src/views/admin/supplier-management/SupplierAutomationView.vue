@@ -5548,16 +5548,17 @@ function intervalSecondsToCron(seconds: number): string | null {
 
 .sp-health-guard-platform-model-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px 14px;
-  margin-top: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  align-content: start;
+  gap: 8px 12px;
+  margin-top: 10px;
 }
 
 .sp-health-guard-platform-model-grid article {
   display: grid;
-  grid-template-columns: minmax(118px, 0.6fr) minmax(180px, 1.4fr);
+  grid-template-columns: minmax(88px, 0.55fr) minmax(150px, 1.45fr);
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
   border: 1px solid color-mix(in srgb, var(--sp-blue) 12%, var(--sp-line));
   border-radius: 10px;
