@@ -43,7 +43,10 @@ describe('SupplierGroupElectionChangeLogDialog', () => {
     // 按分组分节后不再走 DataTable 的 :row-key prop，行键挪到了 :key 上。
     // 同一个账号会出现在它所属的每个分节里，所以键还要再拼一层分组，
     // 否则同一父节点下照样撞键 —— 实现可以换，这个坑不能重新踩回去。
-    expect(source).toContain(':key="`${section.key}-${rowKey(log)}`"')
+    expect(source).toContain(':key="`${batch.key}-${rowKey(log)}`"')
+    // batch.key 必须含分组：只按 run_id 建键的话，同一个批次在两个分组下会共用一个块，
+    // 后一个分组会把前一个的行「吃掉」（少渲染，不报错）。
+    expect(source).toContain('const batchKey = `${groupKey}::${log.run_id}`')
   })
 
   it('方向筛选传后端枚举，全部时不传', () => {
@@ -109,6 +112,11 @@ describe('SupplierGroupElectionChangeLogDialog', () => {
     expect(source).toContain('.dark .sp-election-log-dialog')
     expect(cssSource).not.toContain(':global(.dark)')
     expect(cssBlock('.sp-election-log-dialog')).toContain('--sp-election-log-accent')
+    // 批次状态徽标必须用弹窗自己声明的变量，不能复用页面级 `.sp-status`：
+    // 后者的 --sp-line/--sp-panel-2/--sp-green 来自 `.supplier-management-page`，
+    // Teleport 到 body 后取不到 ⇒ 边框、底色、颜色全部失效，只剩裸文字，且不报错。
+    expect(source).toContain('class="sp-election-log-batch-status"')
+    expect(source).toContain('.sp-election-log-batch-status.is-good')
   })
 
   it('支持锁定到单个账号，语义与分组锁定一致', () => {

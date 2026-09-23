@@ -4,8 +4,9 @@
       <p class="sp-election-log-hint">
         只显示调度开关真的被拨动的记录：择优调度把某个账号从「开」改成「关」，或重新选回「开」。
         未变更、未测试、写库失败的记录不在这里。
-        按分组归类展示，每组标出该组的开 / 关条数；一个账号同属多个分组时，会在它所属的每个分组下各出现一次。
-        分页按记录切分，所以同一个分组可能被分到相邻两页。
+        按分组归类展示，每组标出该组的开 / 关条数；组内再按批次分块，不同批次不混在一起。
+        一个账号同属多个分组时，会在它所属的每个分组下各出现一次。
+        分页按记录切分，所以同一个分组或同一个批次可能被分到相邻两页，上方条数也只统计当前这一页。
       </p>
 
       <div class="sp-election-log-filters">
@@ -84,44 +85,56 @@
                       <em class="good">{{ section.enabled }} 开</em>
                       <em class="bad">{{ section.disabled }} 关</em>
                     </span>
-                    <small class="sp-election-log-group-count">共 {{ section.rows.length }} 条变更</small>
+                    <small class="sp-election-log-group-count">共 {{ section.total }} 条变更 · {{ section.batches.length }} 个批次</small>
                   </th>
                 </tr>
-                <tr v-for="log in section.rows" :key="`${section.key}-${rowKey(log)}`" class="sp-election-log-row">
-                  <td v-for="column in columns" :key="column.key" :class="column.class">
-                    <button
-                      v-if="column.key === 'run'"
-                      type="button"
-                      class="sp-election-log-run"
-                      :class="{ 'is-active': runFilter === log.run_id }"
-                      :title="runFilter === log.run_id ? '已锁定该批次' : '只看这一批次的切换'"
-                      @click="filterByRun(log.run_id)"
-                    >
-                      #{{ log.run_id }}
-                    </button>
-                    <span v-else-if="column.key === 'changed_at'" class="sp-election-log-time">{{ formatTime(log.changed_at) }}</span>
-                    <template v-else-if="column.key === 'account'">
-                      <strong class="sp-election-log-account">{{ log.account_name || `账号 ${log.account_id}` }}</strong>
-                      <span v-if="log.platform" class="sp-election-log-platform" :class="platformTextClass(log.platform)">{{ log.platform }}</span>
-                    </template>
-                    <template v-else-if="column.key === 'direction'">
-                      <span class="sp-election-log-direction" :class="log.direction === 'enabled' ? 'good' : 'bad'">
-                        {{ directionText(log) }}
-                      </span>
-                      <!-- 演练产生的条目没有真的写库，必须标出来：
-                           这份日志的取数条件就是「前后不一致」，不标的话建议会被读成已发生的切换。 -->
-                      <span v-if="log.suggested" class="sp-election-log-suggested" title="演练模式：本条只是建议，调度开关没有被修改">建议</span>
-                      <small class="sp-election-log-switch">{{ log.schedulable_before ? '开' : '关' }} → {{ log.schedulable_after ? '开' : '关' }}</small>
-                    </template>
-                    <span v-else-if="column.key === 'test_status'" class="sp-status" :class="log.test_status === 'success' ? 'good' : 'bad'">{{ testStatusText(log.test_status) }}</span>
-                    <span v-else-if="column.key === 'healthy_count'">{{ log.healthy_count }}</span>
-                    <span v-else-if="column.key === 'latency_ms'" class="sp-election-log-latency" :class="{ 'is-empty': !log.latency_ms }">{{ latencyText(log.latency_ms) }}</span>
-                    <template v-else-if="column.key === 'reason'">
-                      <small class="sp-election-log-reason">{{ log.reason || '—' }}</small>
-                      <small v-if="log.error_message" class="sp-election-log-error">{{ log.error_message }}</small>
-                    </template>
-                  </td>
-                </tr>
+                <!-- 组内再按批次分块。不同批次的变更不混在同一段里 ——
+                     混在一起会把两次运行读成一次，也没法按批次对照前后变化。 -->
+                <template v-for="batch in section.batches" :key="batch.key">
+                  <tr class="sp-election-log-batch-row">
+                    <td :colspan="columns.length">
+                      <span class="sp-election-log-batch-id">批次 #{{ batch.runID }}</span>
+                      <span class="sp-election-log-batch-time">{{ formatTime(batch.changedAt) }}</span>
+                      <span class="sp-election-log-batch-status" :class="runStatusClass(batch.runStatus)">{{ runStatusText(batch.runStatus) }}</span>
+                      <small class="sp-election-log-batch-count">本批次 {{ batch.rows.length }} 条变更</small>
+                    </td>
+                  </tr>
+                  <tr v-for="log in batch.rows" :key="`${batch.key}-${rowKey(log)}`" class="sp-election-log-row">
+                    <td v-for="column in columns" :key="column.key" :class="column.class">
+                      <button
+                        v-if="column.key === 'run'"
+                        type="button"
+                        class="sp-election-log-run"
+                        :class="{ 'is-active': runFilter === log.run_id }"
+                        :title="runFilter === log.run_id ? '已锁定该批次' : '只看这一批次的切换'"
+                        @click="filterByRun(log.run_id)"
+                      >
+                        #{{ log.run_id }}
+                      </button>
+                      <span v-else-if="column.key === 'changed_at'" class="sp-election-log-time">{{ formatTime(log.changed_at) }}</span>
+                      <template v-else-if="column.key === 'account'">
+                        <strong class="sp-election-log-account">{{ log.account_name || `账号 ${log.account_id}` }}</strong>
+                        <span v-if="log.platform" class="sp-election-log-platform" :class="platformTextClass(log.platform)">{{ log.platform }}</span>
+                      </template>
+                      <template v-else-if="column.key === 'direction'">
+                        <span class="sp-election-log-direction" :class="log.direction === 'enabled' ? 'good' : 'bad'">
+                          {{ directionText(log) }}
+                        </span>
+                        <!-- 演练产生的条目没有真的写库，必须标出来：
+                             这份日志的取数条件就是「前后不一致」，不标的话建议会被读成已发生的切换。 -->
+                        <span v-if="log.suggested" class="sp-election-log-suggested" title="演练模式：本条只是建议，调度开关没有被修改">建议</span>
+                        <small class="sp-election-log-switch">{{ log.schedulable_before ? '开' : '关' }} → {{ log.schedulable_after ? '开' : '关' }}</small>
+                      </template>
+                      <span v-else-if="column.key === 'test_status'" class="sp-status" :class="log.test_status === 'success' ? 'good' : 'bad'">{{ testStatusText(log.test_status) }}</span>
+                      <span v-else-if="column.key === 'healthy_count'">{{ log.healthy_count }}</span>
+                      <span v-else-if="column.key === 'latency_ms'" class="sp-election-log-latency" :class="{ 'is-empty': !log.latency_ms }">{{ latencyText(log.latency_ms) }}</span>
+                      <template v-else-if="column.key === 'reason'">
+                        <small class="sp-election-log-reason">{{ log.reason || '—' }}</small>
+                        <small v-if="log.error_message" class="sp-election-log-error">{{ log.error_message }}</small>
+                      </template>
+                    </td>
+                  </tr>
+                </template>
               </template>
             </tbody>
           </table>
@@ -249,40 +262,99 @@ function testStatusText(status?: string) {
   return '未测试'
 }
 
+// 批次（一次运行）的整体状态，取值见后端 SupplierAutomationStatus*：running/success/partial/failed。
+function runStatusText(status?: string) {
+  switch (status) {
+    case 'success': return '成功'
+    case 'partial': return '部分成功'
+    case 'failed': return '失败'
+    case 'running': return '运行中'
+    default: return status || '—'
+  }
+}
+
+// 「部分成功」用黄而不是绿或红：它既不是全好也不是全坏，染成任一种都会误导。
+// 刻意不复用页面级 `.sp-status`：它依赖 `.supplier-management-page` 上的 --sp-*，
+// 而本弹窗被 Teleport 到 body，那些变量在这里未定义 ⇒ 会退化成裸文字（无边框/底色/颜色）。
+function runStatusClass(status?: string) {
+  if (status === 'success') return 'is-good'
+  if (status === 'partial') return 'is-warn'
+  if (status === 'failed') return 'is-bad'
+  return ''
+}
+
 function latencyText(latencyMs?: number) {
   if (!latencyMs || latencyMs <= 0) return '—'
   if (latencyMs < 1000) return `${latencyMs}ms`
   return `${(latencyMs / 1000).toFixed(1)}s`
 }
 
-/** 一个分组分节：该组下被拨动过的账号，以及开 / 关条数。 */
-interface LogSection {
+/** 组内的一块批次：同一次运行里的变更，以及该批次自己的开 / 关条数。 */
+interface LogBatchBlock {
   key: string
-  groupName: string
+  runID: number
+  runStatus: string
+  changedAt: string
   enabled: number
   disabled: number
   rows: SupplierGroupElectionChangeLog[]
 }
 
+/** 一个分组分节：该组下被拨动过的账号，组内再按批次切块。 */
+interface LogSection {
+  key: string
+  groupName: string
+  enabled: number
+  disabled: number
+  /** 该组跨批次的变更总条数。 */
+  total: number
+  batches: LogBatchBlock[]
+}
+
 // 分组名缺失时的兜底桶（分组已被删除，或历史数据没记名字）。
 const NO_GROUP_KEY = '__no_group__'
 
-// 按分组分节：原来一行一个账号，同组的几行是打散的，得自己脑补「这个组整体发生了什么」。
+// 按分组分节、组内再按批次分块。
+// 分两层是因为一份日志里混着多次运行：只按分组归档的话，同一个组下面会把不同批次的行混在一起，
+// 读起来像一次运行，也没法按批次对照「这一批动了谁、下一批又动了谁」。
 // 一个账号同属多个分组时，它会在**每个**分节下各出现一次 —— 这不是重复：
 // 它的开关确实同时影响了那几个组（后端 group_ids 本身就是数组）。
 // 用分组名当键是安全的：groups 上有 name 的部分唯一索引（WHERE deleted_at IS NULL），
 // 后端取名字时也带了同样的过滤，所以同一批日志里不会出现两个同名的组。
 const sections = computed<LogSection[]>(() => {
-  const map = new Map<string, LogSection>()
-  const push = (key: string, groupName: string, log: SupplierGroupElectionChangeLog) => {
-    let section = map.get(key)
+  const groupMap = new Map<string, LogSection>()
+  // 批次块按「分组 + 批次」建键：同一个批次出现在两个分组下时是两块，不能共用一个对象。
+  const batchMap = new Map<string, LogBatchBlock>()
+  const push = (groupKey: string, groupName: string, log: SupplierGroupElectionChangeLog) => {
+    let section = groupMap.get(groupKey)
     if (!section) {
-      section = { key, groupName, enabled: 0, disabled: 0, rows: [] }
-      map.set(key, section)
+      section = { key: groupKey, groupName, enabled: 0, disabled: 0, total: 0, batches: [] }
+      groupMap.set(groupKey, section)
     }
-    section.rows.push(log)
-    if (log.schedulable_after) section.enabled += 1
-    else section.disabled += 1
+    const batchKey = `${groupKey}::${log.run_id}`
+    let block = batchMap.get(batchKey)
+    if (!block) {
+      block = {
+        key: batchKey,
+        runID: log.run_id,
+        runStatus: log.run_status,
+        changedAt: log.changed_at,
+        enabled: 0,
+        disabled: 0,
+        rows: [],
+      }
+      batchMap.set(batchKey, block)
+      section.batches.push(block)
+    }
+    block.rows.push(log)
+    section.total += 1
+    if (log.schedulable_after) {
+      block.enabled += 1
+      section.enabled += 1
+    } else {
+      block.disabled += 1
+      section.disabled += 1
+    }
   }
   for (const log of items.value) {
     const names = (log.group_names || []).filter(Boolean)
@@ -294,9 +366,17 @@ const sections = computed<LogSection[]>(() => {
     for (const name of names) push(name, name, log)
   }
   // 变更条数多的组排前面（动静大的先看），条数相同按名字排，避免刷新后顺序漂移。
-  return Array.from(map.values()).sort((a, b) =>
-    b.rows.length - a.rows.length || a.groupName.localeCompare(b.groupName, 'zh-Hans-CN')
+  const list = Array.from(groupMap.values()).sort((a, b) =>
+    b.total - a.total || a.groupName.localeCompare(b.groupName, 'zh-Hans-CN')
   )
+  // 组内批次新的在前；时间解析失败时用批次号兜底，保证顺序稳定不跳。
+  for (const section of list) {
+    section.batches.sort((a, b) => {
+      const diff = Date.parse(b.changedAt) - Date.parse(a.changedAt)
+      return Number.isFinite(diff) && diff !== 0 ? diff : b.runID - a.runID
+    })
+  }
+  return list
 })
 
 async function load() {
@@ -612,6 +692,66 @@ watch(() => props.accountId, () => {
   font-size: 11px;
 }
 
+/* 批次小标题行：比分组标题轻一档（无 accent 竖条、底色更淡、左缩进更多），
+   让「分组 > 批次 > 行」三级在视觉上分得开。 */
+.sp-election-log-batch-row > td {
+  padding: 6px 12px 6px 30px;
+  border-bottom: 1px solid color-mix(in srgb, var(--sp-election-log-line) 75%, transparent);
+  background: color-mix(in srgb, var(--sp-election-log-accent) 4%, var(--sp-election-log-panel));
+  text-align: left;
+}
+
+.sp-election-log-batch-id {
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-election-log-batch-time {
+  margin-left: 10px;
+  color: var(--sp-election-log-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-election-log-batch-count {
+  margin-left: 10px;
+  color: var(--sp-election-log-muted);
+  font-size: 11px;
+}
+
+/* 批次状态徽标。刻意不复用页面级 `.sp-status`：它依赖 `.supplier-management-page` 上的 --sp-*，
+   而本弹窗被 Teleport 到 body，那些变量在这里未定义 ⇒ 边框/底色/颜色全部失效、只剩裸文字。
+   这里用弹窗自己声明的 --sp-election-log-*，配色与数据行的方向列对齐（绿 / 黄 / 红）。 */
+.sp-election-log-batch-status {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 10px;
+  padding: 1px 7px;
+  border: 1px solid var(--sp-election-log-line);
+  border-radius: 9999px;
+  color: var(--sp-election-log-muted);
+  font-size: 11px;
+}
+
+.sp-election-log-batch-status.is-good {
+  border-color: color-mix(in srgb, #16a34a 35%, var(--sp-election-log-line));
+  background: color-mix(in srgb, #16a34a 8%, var(--sp-election-log-panel));
+  color: #16a34a;
+}
+
+.sp-election-log-batch-status.is-warn {
+  border-color: color-mix(in srgb, #d97706 35%, var(--sp-election-log-line));
+  background: color-mix(in srgb, #d97706 8%, var(--sp-election-log-panel));
+  color: #d97706;
+}
+
+.sp-election-log-batch-status.is-bad {
+  border-color: color-mix(in srgb, #dc2626 35%, var(--sp-election-log-line));
+  background: color-mix(in srgb, #dc2626 8%, var(--sp-election-log-panel));
+  color: #dc2626;
+}
+
 .sp-election-log-skeleton {
   display: block;
   height: 14px;
@@ -629,6 +769,15 @@ watch(() => props.accountId, () => {
 .dark .sp-election-log-group-row > th {
   background: color-mix(in srgb, var(--sp-election-log-accent) 15%, var(--sp-election-log-panel));
 }
+
+.dark .sp-election-log-batch-row > td {
+  background: color-mix(in srgb, var(--sp-election-log-accent) 8%, var(--sp-election-log-panel));
+}
+
+/* 暗色下亮一档，否则深底上的绿 / 黄 / 红对比不足。 */
+.dark .sp-election-log-batch-status.is-good { color: #4ade80; }
+.dark .sp-election-log-batch-status.is-warn { color: #fbbf24; }
+.dark .sp-election-log-batch-status.is-bad { color: #f87171; }
 
 .dark .sp-election-log-group-stat em.good { color: #4ade80; }
 .dark .sp-election-log-group-stat em.bad { color: #f87171; }
