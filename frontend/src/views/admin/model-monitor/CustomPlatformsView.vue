@@ -561,7 +561,7 @@ onMounted(() => {
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
-:global(.dark) .cp-actions-card {
+.dark .cp-actions-card {
   border-color: #374151;
   background: linear-gradient(135deg, #1f2937 0%, #111827 50%);
 }
@@ -608,7 +608,7 @@ onMounted(() => {
   background: linear-gradient(90deg, #0d9488, #2dd4bf);
 }
 
-:global(.dark) .cp-kpi-default {
+.dark .cp-kpi-default {
   background: linear-gradient(180deg, rgba(20, 184, 166, 0.12) 0%, #1f2937 55%);
   border-color: rgba(20, 184, 166, 0.3);
 }
@@ -622,7 +622,7 @@ onMounted(() => {
   background: linear-gradient(90deg, #059669, #34d399);
 }
 
-:global(.dark) .cp-kpi-success {
+.dark .cp-kpi-success {
   background: linear-gradient(180deg, rgba(22, 163, 74, 0.12) 0%, #1f2937 55%);
   border-color: rgba(22, 163, 74, 0.3);
 }
@@ -636,7 +636,7 @@ onMounted(() => {
   background: linear-gradient(90deg, #dc2626, #f87171);
 }
 
-:global(.dark) .cp-kpi-danger {
+.dark .cp-kpi-danger {
   background: linear-gradient(180deg, rgba(220, 38, 38, 0.12) 0%, #1f2937 55%);
   border-color: rgba(220, 38, 38, 0.3);
 }
@@ -656,7 +656,7 @@ onMounted(() => {
   color: #fff;
 }
 
-:global(.dark) .cp-kpi-icon-default {
+.dark .cp-kpi-icon-default {
   background: linear-gradient(135deg, #14b8a6, #2dd4bf);
 }
 
@@ -665,7 +665,7 @@ onMounted(() => {
   color: #fff;
 }
 
-:global(.dark) .cp-kpi-icon-success {
+.dark .cp-kpi-icon-success {
   background: linear-gradient(135deg, #34d399, #6ee7b7);
 }
 
@@ -674,7 +674,7 @@ onMounted(() => {
   color: #fff;
 }
 
-:global(.dark) .cp-kpi-icon-danger {
+.dark .cp-kpi-icon-danger {
   background: linear-gradient(135deg, #f87171, #fca5a5);
 }
 
@@ -693,7 +693,7 @@ onMounted(() => {
   color: #6b7280;
 }
 
-:global(.dark) .cp-kpi-label {
+.dark .cp-kpi-label {
   color: #9ca3af;
 }
 
@@ -701,7 +701,7 @@ onMounted(() => {
   color: #0f766e;
 }
 
-:global(.dark) .cp-kpi-default .cp-kpi-label {
+.dark .cp-kpi-default .cp-kpi-label {
   color: #5eead4;
 }
 
@@ -709,7 +709,7 @@ onMounted(() => {
   color: #047857;
 }
 
-:global(.dark) .cp-kpi-success .cp-kpi-label {
+.dark .cp-kpi-success .cp-kpi-label {
   color: #6ee7b7;
 }
 
@@ -717,7 +717,7 @@ onMounted(() => {
   color: #991b1b;
 }
 
-:global(.dark) .cp-kpi-danger .cp-kpi-label {
+.dark .cp-kpi-danger .cp-kpi-label {
   color: #fca5a5;
 }
 
@@ -729,7 +729,7 @@ onMounted(() => {
   color: #111827;
 }
 
-:global(.dark) .cp-kpi-value {
+.dark .cp-kpi-value {
   color: #f9fafb;
 }
 
@@ -763,7 +763,7 @@ onMounted(() => {
   border-top: 1px dashed #e5e7eb;
 }
 
-:global(.dark) .cp-color-strip {
+.dark .cp-color-strip {
   border-top-color: #374151;
 }
 
@@ -781,7 +781,7 @@ onMounted(() => {
   color: #111827;
 }
 
-:global(.dark) .cp-color-strip-title {
+.dark .cp-color-strip-title {
   color: #f9fafb;
 }
 
@@ -790,7 +790,7 @@ onMounted(() => {
   color: #9ca3af;
 }
 
-:global(.dark) .cp-color-strip-hint {
+.dark .cp-color-strip-hint {
   color: #6b7280;
 }
 
@@ -815,7 +815,7 @@ onMounted(() => {
   transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 }
 
-:global(.dark) .cp-color-chip {
+.dark .cp-color-chip {
   border-color: #374151;
   background: #1f2937;
   color: #e5e7eb;
@@ -845,7 +845,7 @@ onMounted(() => {
   color: #9ca3af;
 }
 
-:global(.dark) .cp-color-strip-empty {
+.dark .cp-color-strip-empty {
   color: #6b7280;
 }
 
@@ -866,7 +866,7 @@ onMounted(() => {
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
-:global(.dark) .cp-btn {
+.dark .cp-btn {
   background: #1f2937;
   border-color: #374151;
   color: #e5e7eb;
@@ -876,7 +876,7 @@ onMounted(() => {
   background: #f9fafb;
 }
 
-:global(.dark) .cp-btn:hover {
+.dark .cp-btn:hover {
   background: #374151;
 }
 
@@ -913,7 +913,7 @@ onMounted(() => {
   background: #f0fdfa;
 }
 
-:global(.dark) .cp-btn-edit {
+.dark .cp-btn-edit {
   color: #5eead4;
   border-color: rgba(20, 184, 166, 0.3);
   background: rgba(20, 184, 166, 0.1);
@@ -929,7 +929,7 @@ onMounted(() => {
   background: #fef2f2;
 }
 
-:global(.dark) .cp-btn-delete {
+.dark .cp-btn-delete {
   color: #fca5a5;
   border-color: rgba(220, 38, 38, 0.3);
   background: rgba(220, 38, 38, 0.1);
@@ -945,7 +945,7 @@ onMounted(() => {
   background: #fff;
 }
 
-:global(.dark) .cp-btn-cancel {
+.dark .cp-btn-cancel {
   color: #9ca3af;
   border-color: #374151;
   background: #1f2937;
@@ -964,7 +964,7 @@ onMounted(() => {
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
-:global(.dark) .cp-filter-bar {
+.dark .cp-filter-bar {
   border-color: #374151;
   background: #1f2937;
 }
@@ -981,7 +981,7 @@ onMounted(() => {
   margin-left: auto;
 }
 
-:global(.dark) .cp-filter-hint {
+.dark .cp-filter-hint {
   color: #6b7280;
 }
 
@@ -998,7 +998,7 @@ onMounted(() => {
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
-:global(.dark) .cp-table-wrapper {
+.dark .cp-table-wrapper {
   border-color: #374151;
   background: #1f2937;
 }
@@ -1017,7 +1017,7 @@ onMounted(() => {
   color: var(--cp-color, #64748b);
 }
 
-:global(.dark) .cp-code-badge {
+.dark .cp-code-badge {
   border-color: color-mix(in srgb, var(--cp-color, #64748b) 34%, #374151);
   background: color-mix(in srgb, var(--cp-color, #64748b) 16%, #1f2937);
   color: color-mix(in srgb, var(--cp-color, #64748b) 55%, #f9fafb);
@@ -1040,7 +1040,7 @@ onMounted(() => {
   font-weight: 600;
 }
 
-:global(.dark) .cp-cell-name {
+.dark .cp-cell-name {
   color: color-mix(in srgb, var(--cp-color, #64748b) 78%, #f9fafb);
 }
 
@@ -1068,7 +1068,7 @@ onMounted(() => {
   color: #166534;
 }
 
-:global(.dark) .cp-status-pill-success {
+.dark .cp-status-pill-success {
   background: rgba(22, 163, 74, 0.15);
   color: #6ee7b7;
 }
@@ -1078,7 +1078,7 @@ onMounted(() => {
   color: #6b7280;
 }
 
-:global(.dark) .cp-status-pill-muted {
+.dark .cp-status-pill-muted {
   background: #374151;
   color: #9ca3af;
 }
@@ -1094,7 +1094,7 @@ onMounted(() => {
   background: #16a34a;
 }
 
-:global(.dark) .cp-status-dot-success {
+.dark .cp-status-dot-success {
   background: #4ade80;
 }
 
@@ -1102,7 +1102,7 @@ onMounted(() => {
   background: #9ca3af;
 }
 
-:global(.dark) .cp-status-dot-muted {
+.dark .cp-status-dot-muted {
   background: #6b7280;
 }
 
@@ -1112,7 +1112,7 @@ onMounted(() => {
   color: #374151;
 }
 
-:global(.dark) .cp-cell-mono {
+.dark .cp-cell-mono {
   color: #e5e7eb;
 }
 
@@ -1121,7 +1121,7 @@ onMounted(() => {
   font-size: 0.8125rem;
 }
 
-:global(.dark) .cp-cell-time {
+.dark .cp-cell-time {
   color: #9ca3af;
 }
 
@@ -1156,7 +1156,7 @@ onMounted(() => {
   color: #111827;
 }
 
-:global(.dark) .cp-dialog-label {
+.dark .cp-dialog-label {
   color: #f9fafb;
 }
 
@@ -1170,7 +1170,7 @@ onMounted(() => {
   background: #f9fafb;
 }
 
-:global(.dark) .cp-dialog-toggle {
+.dark .cp-dialog-toggle {
   border-color: #374151;
   background: #1f2937;
 }
@@ -1187,7 +1187,7 @@ onMounted(() => {
   color: #111827;
 }
 
-:global(.dark) .cp-dialog-toggle-state {
+.dark .cp-dialog-toggle-state {
   color: #f9fafb;
 }
 
@@ -1196,7 +1196,7 @@ onMounted(() => {
   color: #9ca3af;
 }
 
-:global(.dark) .cp-dialog-toggle-hint {
+.dark .cp-dialog-toggle-hint {
   color: #6b7280;
 }
 
@@ -1223,7 +1223,7 @@ onMounted(() => {
   background: #f9fafb;
 }
 
-:global(.dark) .cp-color-picker {
+.dark .cp-color-picker {
   border-color: #374151;
   background: #1f2937;
 }
@@ -1256,7 +1256,7 @@ onMounted(() => {
   box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--cp-color, #64748b);
 }
 
-:global(.dark) .cp-color-swatch.is-active {
+.dark .cp-color-swatch.is-active {
   box-shadow: 0 0 0 2px #1f2937, 0 0 0 4px var(--cp-color, #64748b);
 }
 
@@ -1282,7 +1282,7 @@ onMounted(() => {
   background: #fff;
 }
 
-:global(.dark) .cp-color-preview {
+.dark .cp-color-preview {
   border-color: #374151;
   background: #111827;
 }
@@ -1300,7 +1300,7 @@ onMounted(() => {
   color: #374151;
 }
 
-:global(.dark) .cp-color-preview-hex {
+.dark .cp-color-preview-hex {
   color: #e5e7eb;
 }
 
@@ -1318,7 +1318,7 @@ onMounted(() => {
   white-space: nowrap;
 }
 
-:global(.dark) .cp-color-custom-label {
+.dark .cp-color-custom-label {
   color: #6b7280;
 }
 
@@ -1332,7 +1332,7 @@ onMounted(() => {
   cursor: pointer;
 }
 
-:global(.dark) .cp-native-color {
+.dark .cp-native-color {
   border-color: #374151;
 }
 

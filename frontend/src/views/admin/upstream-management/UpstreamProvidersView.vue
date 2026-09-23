@@ -3650,16 +3650,16 @@ onMounted(async () => {
   text-align: center;
 }
 
-:global(.dark) .provider-mobile-record-card {
+.dark .provider-mobile-record-card {
   border-color: #334155;
   background: #111827;
 }
 
-:global(.dark) .provider-mobile-record-card span {
+.dark .provider-mobile-record-card span {
   color: #94a3b8;
 }
 
-:global(.dark) .provider-mobile-record-card strong {
+.dark .provider-mobile-record-card strong {
   color: #e5e7eb;
 }
 

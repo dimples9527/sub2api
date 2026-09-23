@@ -2095,12 +2095,12 @@ onMounted(reload)
   font-size: 13px;
 }
 
-:global(.dark) .ug-account-chip {
+.dark .ug-account-chip {
   background: #334155;
   color: #e2e8f0;
 }
 
-:global(.dark) .ug-account-more {
+.dark .ug-account-more {
   background: #1f2937;
   color: #cbd5e1;
 }
@@ -2152,17 +2152,17 @@ onMounted(reload)
   @apply bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-gray-200;
 }
 
-:global(.dark) .ug-tag-info {
+.dark .ug-tag-info {
   background-color: rgba(22, 93, 255, 0.15);
   color: #6FAAFF;
 }
 
-:global(.dark) .ug-tag-violet {
+.dark .ug-tag-violet {
   background-color: rgba(114, 46, 209, 0.18);
   color: #B58BE6;
 }
 
-:global(.dark) .ug-tag-warning {
+.dark .ug-tag-warning {
   background-color: rgba(255, 125, 0, 0.16);
   color: #FFB46B;
 }
@@ -2229,12 +2229,12 @@ onMounted(reload)
   @apply bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300;
 }
 
-:global(.dark) .ug-status-success {
+.dark .ug-status-success {
   background-color: rgba(0, 180, 42, 0.18);
   color: #6FE08A;
 }
 
-:global(.dark) .ug-status-warning {
+.dark .ug-status-warning {
   background-color: rgba(245, 63, 63, 0.18);
   color: #FF8C8C;
 }
@@ -2394,34 +2394,34 @@ onMounted(reload)
   color: #047857;
 }
 
-:global(.dark) .ug-rate-fix-warning,
-:global(.dark) .ug-rate-fix-log-status-unhandled {
+.dark .ug-rate-fix-warning,
+.dark .ug-rate-fix-log-status-unhandled {
   border-color: rgba(255, 125, 0, 0.45);
   background: rgba(255, 125, 0, 0.16);
   color: #FFB46B;
 }
 
-:global(.dark) .ug-rate-fix-log-status-handled {
+.dark .ug-rate-fix-log-status-handled {
   border-color: rgba(0, 180, 42, 0.35);
   background: rgba(0, 180, 42, 0.18);
   color: #6FE08A;
 }
 
-:global(.dark) .ug-rate-fix-log-card {
+.dark .ug-rate-fix-log-card {
   border-color: #334155;
   background: #111827;
 }
 
-:global(.dark) .ug-rate-fix-log-card-head {
+.dark .ug-rate-fix-log-card-head {
   border-color: #1f2937;
 }
 
-:global(.dark) .ug-rate-fix-log-card-head time,
-:global(.dark) .ug-rate-fix-log-card-body span {
+.dark .ug-rate-fix-log-card-head time,
+.dark .ug-rate-fix-log-card-body span {
   color: #94a3b8;
 }
 
-:global(.dark) .ug-rate-fix-log-card-body strong {
+.dark .ug-rate-fix-log-card-body strong {
   color: #e5e7eb;
 }
 

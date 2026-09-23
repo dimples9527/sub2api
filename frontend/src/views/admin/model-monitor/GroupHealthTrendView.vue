@@ -401,7 +401,7 @@ onMounted(loadData)
   padding: 20px;
 }
 
-:global(.dark) .group-health-page {
+.dark .group-health-page {
   --gh-bg: #09131f;
   --gh-surface: rgba(17, 31, 48, .88);
   --gh-surface-muted: rgba(13, 26, 42, .82);
@@ -427,10 +427,10 @@ onMounted(loadData)
   box-shadow: 0 18px 50px rgba(15, 42, 67, .055);
 }
 
-:global(.dark) .gh-toolbar,
-:global(.dark) .gh-kpi,
-:global(.dark) .gh-group-card,
-:global(.dark) .gh-empty-state {
+.dark .gh-toolbar,
+.dark .gh-kpi,
+.dark .gh-group-card,
+.dark .gh-empty-state {
   box-shadow: 0 20px 60px rgba(0, 0, 0, .18);
 }
 

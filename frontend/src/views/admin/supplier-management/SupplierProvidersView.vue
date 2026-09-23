@@ -5274,7 +5274,7 @@ function errorMessage(err: unknown, fallback: string): string {
   color: var(--sp-text);
 }
 
-:global(.dark) .sp-auth-panel,
+.dark .sp-auth-panel,
 .dark .sp-auth-panel {
   --sp-panel: #1f2937;
   --sp-panel-2: #111827;
@@ -5444,7 +5444,7 @@ function errorMessage(err: unknown, fallback: string): string {
   letter-spacing: 0.01em;
 }
 
-:global(.dark) .sp-auth-token-summary,
+.dark .sp-auth-token-summary,
 .dark .sp-auth-token-summary {
   color: #c4b5fd;
 }
@@ -5461,7 +5461,7 @@ function errorMessage(err: unknown, fallback: string): string {
   color: #6d28d9;
 }
 
-:global(.dark) .sp-auth-fingerprint,
+.dark .sp-auth-fingerprint,
 .dark .sp-auth-fingerprint {
   color: #c4b5fd;
 }

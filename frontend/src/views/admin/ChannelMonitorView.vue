@@ -661,28 +661,28 @@ onUnmounted(() => {
     padding-top: 8px;
   }
 
-  :global(.dark) .monitor-table :deep(.monitor-row-card.is-disabled) {
+  .dark .monitor-table :deep(.monitor-row-card.is-disabled) {
     background: #111827;
   }
 
-  :global(.dark) .monitor-table :deep(.monitor-metric-text) {
+  .dark .monitor-table :deep(.monitor-metric-text) {
     background: #1f2937;
   }
 
-  :global(.dark) .monitor-mobile-title-row strong,
-  :global(.dark) .monitor-mobile-model strong,
-  :global(.dark) .monitor-mobile-group strong,
-  :global(.dark) .monitor-mobile-metric strong {
+  .dark .monitor-mobile-title-row strong,
+  .dark .monitor-mobile-model strong,
+  .dark .monitor-mobile-group strong,
+  .dark .monitor-mobile-metric strong {
     color: #e5e7eb;
   }
 
-  :global(.dark) .monitor-mobile-model,
-  :global(.dark) .monitor-mobile-group,
-  :global(.dark) .monitor-mobile-metric {
+  .dark .monitor-mobile-model,
+  .dark .monitor-mobile-group,
+  .dark .monitor-mobile-metric {
     background: #111827;
   }
 
-  :global(.dark) .monitor-mobile-actions {
+  .dark .monitor-mobile-actions {
     border-top-color: #1f2937;
   }
 

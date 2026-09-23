@@ -88,7 +88,7 @@ const duplicateTitle = computed(() => {
     line-height: 1;
   }
 
-  :global(.dark) .monitor-actions-cell button {
+  .dark .monitor-actions-cell button {
     border-color: #334155;
     background: #111827;
     color: #cbd5e1;

@@ -56,7 +56,11 @@ describe('SupplierAccountRateGuardLogDialog', () => {
     expect(source).toContain('color-mix(in srgb, var(--sp-green)')
     expect(source).toContain('color-mix(in srgb, var(--sp-blue)')
     expect(source).toContain('color-mix(in srgb, var(--sp-violet)')
-    expect(source).toContain(':global(.dark) .account-rate-log-dialog')
+    // 暗色覆盖必须写普通的 `.dark X`：scoped 块里的 `:global(.dark) X` 会被编译成裸 `.dark`，
+    // 后代选择器和 data-v 属性一起丢 ⇒ 暗色静默失效（编译、运行都不报错）。
+    // 编译产物可自证：`.dark .foo` → `.dark .foo[data-v-xxx]`。
+    expect(source).toContain('.dark .account-rate-log-dialog')
+    expect(source.replace(/\/\*[\s\S]*?\*\//g, '')).not.toContain(':global(.dark)')
   })
 
   it('将上游和本地分组倍率横向展示', () => {

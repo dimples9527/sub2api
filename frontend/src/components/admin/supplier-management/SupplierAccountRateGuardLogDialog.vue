@@ -437,7 +437,7 @@ function schedulableText(value?: boolean): string {
   color: var(--sp-text);
 }
 
-:global(.dark) .account-rate-log-dialog {
+.dark .account-rate-log-dialog {
   --sp-panel: #1f2937;
   --sp-panel-2: #111827;
   --sp-panel-3: #374151;

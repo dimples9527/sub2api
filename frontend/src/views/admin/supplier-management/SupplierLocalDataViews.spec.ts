@@ -1637,7 +1637,11 @@ describe('supplier local data views component usage', () => {
     expect(groupsSource).toContain('.sp-match-preview-card.platform')
     expect(groupsSource).toContain('.sp-rate-recommendation.create')
     expect(groupsSource).toContain('.sp-rate-recommendation.danger')
-    expect(groupsSource).toContain(':global(.dark) .sp-dialog-context')
+    // 暗色覆盖必须写普通的 `.dark X`（scoped 块里的 `:global(.dark) X` 会被编译成裸 `.dark`，
+    // 后代选择器整体丢失 ⇒ 暗色静默失效）。注意 `:global(.modal-content:has(...))` 那种
+    // **整个选择器都包在括号里**的写法是合法的，不在禁止之列。
+    expect(groupsSource).toContain('.dark .sp-dialog-context')
+    expect(groupsSource.replace(/\/\*[\s\S]*?\*\//g, '')).not.toContain(':global(.dark)')
   })
 
   it('keeps supplier group dialog theme variables after teleport', () => {

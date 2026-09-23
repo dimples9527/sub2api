@@ -2326,7 +2326,7 @@ function errorMessage(err: unknown, fallback: string): string {
   background: color-mix(in srgb, var(--sp-change-log-accent) 3%, var(--sp-change-log-panel));
 }
 
-:global(.dark) .sp-change-log-dialog {
+.dark .sp-change-log-dialog {
   --sp-change-log-local: #22d3ee;
   --sp-change-log-upstream: #a78bfa;
   --sp-change-log-old-rate: #fbbf24;
@@ -3449,7 +3449,7 @@ function errorMessage(err: unknown, fallback: string): string {
 .sp-dialog-context small { color: var(--sp-muted); }
 .sp-dialog-context strong { color: var(--sp-text); font-size: 1rem; }
 
-:global(.dark) .sp-dialog-context {
+.dark .sp-dialog-context {
   background: color-mix(in srgb, var(--sp-dialog-accent) 12%, var(--sp-panel));
 }
 
@@ -3491,7 +3491,7 @@ function errorMessage(err: unknown, fallback: string): string {
 .sp-match-preview-card span { color: var(--sp-muted); font-size: 0.75rem; }
 .sp-match-preview-card strong { color: var(--sp-preview-accent); font-size: 0.9rem; }
 
-:global(.dark) .sp-match-preview-card {
+.dark .sp-match-preview-card {
   background: color-mix(in srgb, var(--sp-preview-accent) 11%, var(--sp-panel));
 }
 
@@ -3519,7 +3519,7 @@ function errorMessage(err: unknown, fallback: string): string {
 .sp-rate-recommendation.neutral { --sp-recommendation-accent: var(--sp-muted); }
 .sp-rate-recommendation strong { color: var(--sp-recommendation-accent); }
 
-:global(.dark) .sp-rate-recommendation {
+.dark .sp-rate-recommendation {
   background: color-mix(in srgb, var(--sp-recommendation-accent) 11%, var(--sp-panel));
 }
 
