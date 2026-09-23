@@ -2060,30 +2060,33 @@ func TestSupplierProviderAccountOrderByUpstreamStatus(t *testing.T) {
 func TestSupplierGroupSchedulingElectionChangeWhereOnlyKeepsToggledAccounts(t *testing.T) {
 	t.Parallel()
 
-	where, args := supplierGroupSchedulingElectionChangeWhere(service.SupplierGroupSchedulingElectionChangeLogListParams{})
+	where, args := supplierGroupSchedulingElectionChangeWhere(service.SupplierGroupSchedulingElectionChangeLogListParams{}, 1)
 	require.Equal(t, "e.schedulable_before <> e.schedulable_after", where)
 	require.Empty(t, args)
 }
 
-func TestSupplierGroupSchedulingElectionChangeWhereBuildsSequentialPlaceholders(t *testing.T) {
+// startIndex 必须被接着排，而不是从 $1 重来 —— 从 $1 重来会让 e.run_id 绑到 r.task_code 上，
+// 点批次号筛日志就 500（无筛选时不产出占位符，所以只有带筛选才炸，容易漏）。
+func TestSupplierGroupSchedulingElectionChangeWhereContinuesAfterRunPlaceholders(t *testing.T) {
 	t.Parallel()
 
 	where, args := supplierGroupSchedulingElectionChangeWhere(service.SupplierGroupSchedulingElectionChangeLogListParams{
 		GroupID:   81,
 		AccountID: 902,
+		RunID:     5001,
 		Search:    " alpha ",
 		Direction: service.SupplierGroupSchedulingElectionChangeDirectionDisabled,
-	})
+	}, 3)
 	require.Equal(
 		t,
-		"e.schedulable_before <> e.schedulable_after AND e.group_ids @> to_jsonb($1::BIGINT) AND e.account_id = $2 AND (e.account_name ILIKE $3 OR e.platform ILIKE $3) AND e.schedulable_before = TRUE AND e.schedulable_after = FALSE",
+		"e.schedulable_before <> e.schedulable_after AND e.group_ids @> to_jsonb($4::BIGINT) AND e.account_id = $5 AND e.run_id = $6 AND (e.account_name ILIKE $7 OR e.platform ILIKE $7) AND e.schedulable_before = TRUE AND e.schedulable_after = FALSE",
 		where,
 	)
-	require.Equal(t, []any{int64(81), int64(902), "% alpha %"}, args)
+	require.Equal(t, []any{int64(81), int64(902), int64(5001), "% alpha %"}, args)
 
 	_, args = supplierGroupSchedulingElectionChangeWhere(service.SupplierGroupSchedulingElectionChangeLogListParams{
 		Direction: service.SupplierGroupSchedulingElectionChangeDirectionEnabled,
-	})
+	}, 1)
 	require.Empty(t, args)
 }
 
@@ -2114,19 +2117,22 @@ func TestSupplierProviderDataRepositoryListGroupSchedulingElectionChangeLogsOrde
 	startedTo := time.Date(2026, 9, 21, 0, 0, 0, 0, time.UTC)
 	now := time.Date(2026, 9, 20, 9, 30, 0, 0, time.UTC)
 
+	// $1..$3 是运行级条件（task_code + 时间范围），$4..$7 是展开后的条目级条件。
 	countArgs := []driver.Value{
 		service.SupplierAutomationTaskGroupElection,
 		startedFrom, startedTo,
-		int64(81), "%alpha%",
+		int64(81), int64(902), int64(5001), "%alpha%",
 	}
-	// LIMIT / OFFSET 排在最后：$6 = 每页条数，$7 = 偏移量。
+	// LIMIT / OFFSET 排在最后：$8 = 每页条数，$9 = 偏移量。
 	queryArgs := append(append([]driver.Value{}, countArgs...), int64(30), int64(30))
 
-	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\) FROM \(.*jsonb_array_elements.*\) e WHERE e\.schedulable_before <> e\.schedulable_after.*`).
+	// ⚠️ 正则里必须带上占位符**编号**：sqlmock 只校验参数值，编号错位它看不出来 ——
+	// 这条用例此前只对值，于是漏过了「条目级条件从 $1 重新编号」导致的 500。
+	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\) FROM \(.*jsonb_array_elements.*\) e WHERE e\.schedulable_before <> e\.schedulable_after.*e\.group_ids @> to_jsonb\(\$4::BIGINT\).*e\.account_id = \$5.*e\.run_id = \$6.*`).
 		WithArgs(countArgs...).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(2)))
 
-	mock.ExpectQuery(`(?s)SELECT run_id, run_status, changed_at.*ORDER BY e\.changed_at DESC, e\.run_id DESC, e\.account_id DESC LIMIT \$6 OFFSET \$7`).
+	mock.ExpectQuery(`(?s)SELECT run_id, run_status, changed_at.*e\.run_id = \$6.*ORDER BY e\.changed_at DESC, e\.run_id DESC, e\.account_id DESC LIMIT \$8 OFFSET \$9`).
 		WithArgs(queryArgs...).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"run_id", "run_status", "changed_at", "account_id", "account_name", "platform", "test_status",
@@ -2142,6 +2148,8 @@ func TestSupplierProviderDataRepositoryListGroupSchedulingElectionChangeLogsOrde
 
 	result, err := repo.ListGroupSchedulingElectionChangeLogs(context.Background(), service.SupplierGroupSchedulingElectionChangeLogListParams{
 		GroupID:     81,
+		AccountID:   902,
+		RunID:       5001,
 		Search:      "alpha",
 		Direction:   service.SupplierGroupSchedulingElectionChangeDirectionDisabled,
 		StartedFrom: &startedFrom,

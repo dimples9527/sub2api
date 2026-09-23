@@ -2709,25 +2709,31 @@ FROM (
 // supplierGroupSchedulingElectionChangeWhere 构造「已展开」之后的筛选条件。
 // 第一条是这份日志的定义本身：**只看开关真的被拨动的条目**。
 // 页面上的「跳过/未测/写库失败」都在运行明细里，进不到这里。
-func supplierGroupSchedulingElectionChangeWhere(params service.SupplierGroupSchedulingElectionChangeLogListParams) (string, []any) {
+//
+// startIndex 是运行级条件已经占用的占位符个数。运行级条件在 SQL 文本里位于**内层**，
+// 但编号必须接着它们往后排：两边都从 $1 起的话，`e.run_id = $1` 会绑到 `r.task_code`
+// 上（$1 是 'group_election'），Postgres 报类型不匹配 —— 表现为点某条记录的批次号就 500。
+// 无条目级筛选时该函数不产出占位符，所以「全批次列表」一直是好的，只有带筛选才炸。
+func supplierGroupSchedulingElectionChangeWhere(params service.SupplierGroupSchedulingElectionChangeLogListParams, startIndex int) (string, []any) {
 	conditions := []string{"e.schedulable_before <> e.schedulable_after"}
 	args := make([]any, 0, 6)
+	// 占位符编号 = startIndex + 本函数已产出的参数个数，保证与调用方拼接的参数切片顺序一致。
+	placeholder := func(value any) string {
+		args = append(args, value)
+		return fmt.Sprintf("$%d", startIndex+len(args))
+	}
 	if params.GroupID > 0 {
-		args = append(args, params.GroupID)
-		conditions = append(conditions, fmt.Sprintf("e.group_ids @> to_jsonb($%d::BIGINT)", len(args)))
+		conditions = append(conditions, "e.group_ids @> to_jsonb("+placeholder(params.GroupID)+"::BIGINT)")
 	}
 	if params.AccountID > 0 {
-		args = append(args, params.AccountID)
-		conditions = append(conditions, fmt.Sprintf("e.account_id = $%d", len(args)))
+		conditions = append(conditions, "e.account_id = "+placeholder(params.AccountID))
 	}
 	if params.RunID > 0 {
-		args = append(args, params.RunID)
-		conditions = append(conditions, fmt.Sprintf("e.run_id = $%d", len(args)))
+		conditions = append(conditions, "e.run_id = "+placeholder(params.RunID))
 	}
 	if params.Search != "" {
-		args = append(args, "%"+params.Search+"%")
-		placeholder := fmt.Sprintf("$%d", len(args))
-		conditions = append(conditions, "(e.account_name ILIKE "+placeholder+" OR e.platform ILIKE "+placeholder+")")
+		ph := placeholder("%" + params.Search + "%")
+		conditions = append(conditions, "(e.account_name ILIKE "+ph+" OR e.platform ILIKE "+ph+")")
 	}
 	switch params.Direction {
 	case service.SupplierGroupSchedulingElectionChangeDirectionEnabled:
@@ -2771,7 +2777,7 @@ func (r *supplierProviderDataRepository) ListGroupSchedulingElectionChangeLogs(c
 	}
 	innerSQL := supplierGroupSchedulingElectionChangeInnerSQL(strings.Join(runConditions, " AND "))
 
-	itemWhere, itemArgs := supplierGroupSchedulingElectionChangeWhere(params)
+	itemWhere, itemArgs := supplierGroupSchedulingElectionChangeWhere(params, len(args))
 	countArgs := append(append([]any{}, args...), itemArgs...)
 	var total int64
 	if err := r.db.QueryRowContext(ctx,
