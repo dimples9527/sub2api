@@ -504,9 +504,9 @@ func TestGroupElectionScoresNormalizeWithinPlatform(t *testing.T) {
 	scores := supplierGroupSchedulingElectionScores(members, 1.0, 0.5, DefaultSupplierGroupSchedulingElectionLatencyMinSamples, DefaultSupplierGroupSchedulingElectionSwitchMargin, DefaultSupplierGroupSchedulingElectionCountScoreCap)
 
 	// 三者次数都是 5，归一后同为 0.5，差异全部来自用时项。
-	require.InDelta(t, 0.5+0.5*1.0, scores[141], 1e-9, "同平台最快者用时归一为 1")
-	require.InDelta(t, 0.5+0.5*0.0, scores[142], 1e-9, "同平台最慢者用时归一为 0")
-	require.InDelta(t, 0.5+0.5*0.5, scores[143], 1e-9, "单样本平台拿中性分 0.5")
+	require.InDelta(t, 0.5+0.5*1.0, scores[141].Score, 1e-9, "同平台最快者用时归一为 1")
+	require.InDelta(t, 0.5+0.5*0.0, scores[142].Score, 1e-9, "同平台最慢者用时归一为 0")
+	require.InDelta(t, 0.5+0.5*0.5, scores[143].Score, 1e-9, "单样本平台拿中性分 0.5")
 }
 
 // 次数封顶：超过上限的连续成功不再加分，避免资历压制实际表现。
@@ -517,8 +517,8 @@ func TestGroupElectionScoresCapCountContribution(t *testing.T) {
 	}
 	scores := supplierGroupSchedulingElectionScores(members, 1.0, 0.5, DefaultSupplierGroupSchedulingElectionLatencyMinSamples, DefaultSupplierGroupSchedulingElectionSwitchMargin, DefaultSupplierGroupSchedulingElectionCountScoreCap)
 
-	require.InDelta(t, 1.0+0.5*1.0, scores[151], 1e-9)
-	require.InDelta(t, 1.0+0.5*0.0, scores[152], 1e-9, "次数达到上限后归一为 1，不再拉开差距")
+	require.InDelta(t, 1.0+0.5*1.0, scores[151].Score, 1e-9)
+	require.InDelta(t, 1.0+0.5*0.0, scores[152].Score, 1e-9, "次数达到上限后归一为 1，不再拉开差距")
 }
 
 // 权重缺省回落默认值，保证旧配置（config_json 里没有这两个字段）行为不变；
@@ -581,10 +581,10 @@ func TestGroupElectionScoresCountCapScalesContribution(t *testing.T) {
 
 	// 用时权重传 0，把这一项摘掉，只看次数分的变化。
 	capped := supplierGroupSchedulingElectionScores(members, 1.0, 0.0, DefaultSupplierGroupSchedulingElectionLatencyMinSamples, DefaultSupplierGroupSchedulingElectionSwitchMargin, 10)
-	require.InDelta(t, 1.0, capped[161], 1e-9, "封顶 10：12 次已到顶，拿满分")
+	require.InDelta(t, 1.0, capped[161].Score, 1e-9, "封顶 10：12 次已到顶，拿满分")
 
 	loose := supplierGroupSchedulingElectionScores(members, 1.0, 0.0, DefaultSupplierGroupSchedulingElectionLatencyMinSamples, DefaultSupplierGroupSchedulingElectionSwitchMargin, 100)
-	require.InDelta(t, 0.12, loose[161], 1e-9, "封顶 100：12 次只拿 12/100")
+	require.InDelta(t, 0.12, loose[161].Score, 1e-9, "封顶 100：12 次只拿 12/100")
 }
 
 // 把封顶做成可配，必须真的改变当选结果 —— 只改归一化、忘了把值传进评分实现时，这条会报红。

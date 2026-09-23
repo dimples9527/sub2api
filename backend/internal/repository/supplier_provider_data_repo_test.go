@@ -2137,13 +2137,16 @@ func TestSupplierProviderDataRepositoryListGroupSchedulingElectionChangeLogsOrde
 		WillReturnRows(sqlmock.NewRows([]string{
 			"run_id", "run_status", "changed_at", "account_id", "account_name", "platform", "test_status",
 			"healthy_count", "latency_ms", "schedulable_before", "schedulable_after",
-			"action", "reason", "error_message", "suggested", "group_ids", "group_names",
+			"action", "reason", "error_message", "suggested", "group_ids", "group_names", "group_decisions",
 		}).AddRow(
 			int64(5001), "success", now, int64(902), "alpha-01", "anthropic", "failed",
 			int64(0), int64(1200), true, false,
 			// suggested 夹具故意给 true：JSONB 的键名写错不报错、只会静默读成 false，
 			// 只有让夹具带真值才能挡住「列名写错 / 忘了扫」这类回归。
 			"disable", "连续失败达到阈值", "", true, "[81,82]", `["Plus","Pro"]`,
+			// group_decisions 同理给真值：这一列是逐字段投影出来的，漏加列 / 漏扫都不会报错，
+			// 只会让前端永远看不到「为什么是它」。
+			`[{"group_id":81,"group_name":"Plus","scored":false,"test_failed":true,"no_alternative":true,"rank":0,"rank_total":2,"winner_cutoff":0,"top_n":2,"score":0,"count_score":0,"latency_score":0,"count_weight":1,"latency_weight":0.5,"count_score_cap":10}]`,
 		))
 
 	result, err := repo.ListGroupSchedulingElectionChangeLogs(context.Background(), service.SupplierGroupSchedulingElectionChangeLogListParams{
@@ -2171,5 +2174,10 @@ func TestSupplierProviderDataRepositoryListGroupSchedulingElectionChangeLogsOrde
 	require.Equal(t, []int64{81, 82}, item.GroupIDs)
 	require.Equal(t, []string{"Plus", "Pro"}, item.GroupNames)
 	require.True(t, item.Suggested, "演练产生的建议标记必须能从 JSONB 里读出来，否则前端无法区分建议与已生效")
+	// 逐组裁决依据也要能读出来：它不在投影里就永远不会返回，前端「原因」列会一直是干巴巴一句话。
+	require.Len(t, item.GroupDecisions, 1)
+	require.Equal(t, "Plus", item.GroupDecisions[0].GroupName)
+	require.True(t, item.GroupDecisions[0].TestFailed)
+	require.True(t, item.GroupDecisions[0].NoAlternative)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

@@ -247,6 +247,59 @@ type SupplierGroupSchedulingElectionAccountItem struct {
 	// 但演练模式下没有真的写库。必须与真实切换区分——切换日志的取数条件就是
 	// before <> after，不标的话运维会把"它想切"读成"它切了"。
 	Suggested bool `json:"suggested,omitempty"`
+	// GroupDecisions 按分组记录「为什么是它」：综合分与分量、组内名次、入选线、
+	// 是否因覆盖必需模型被补选、是否走了在任者锁定等。
+	// 一个账号同属多个分组时各组结论可以不同（在 A 组当选、在 B 组落选），
+	// 所以依据必须按分组各存一份，不能只存一条。
+	// ⚠️ 只有升级后新产生的运行才有这个字段，旧运行记录里没有，前端必须能降级显示。
+	GroupDecisions []SupplierGroupSchedulingElectionDecisionDetail `json:"group_decisions,omitempty"`
+}
+
+// SupplierGroupSchedulingElectionDecisionDetail 是「某账号在某分组里为什么是这个裁决」。
+// 存在的意义只有一个：让切换日志能自己解释清楚，管理员不必再去翻配置和源码。
+type SupplierGroupSchedulingElectionDecisionDetail struct {
+	GroupID   int64  `json:"group_id"`
+	GroupName string `json:"group_name,omitempty"`
+	// Scored 为 false 表示该账号在这个分组里当前不是「测试成功」，压根没进择优，
+	// 下面那组评分字段全部无意义（零值），前端必须据此不显示评分。
+	Scored bool `json:"scored"`
+	// Elected 表示该账号在本组入选（择优前 N，或因覆盖必需模型被补选）。
+	// 账号级 reason 是 union 的：在 A 组入选、在 B 组落选时整体仍记「当选」，
+	// 只有逐组标出来才能解释「它为什么在某组没入选却依然被打开」。
+	Elected bool `json:"elected,omitempty"`
+	// 综合分 = CountWeight × CountScore + LatencyWeight × LatencyScore，三项都给出来，
+	// 管理员可以照着配置自己复算一遍。
+	// ⚠️ 这组字段刻意不带 omitempty：0 是合法取值（新账号的连续成功次数就是 0），
+	// 省略后前端只能显示「—」，会把「真的是 0」读成「没有数据」。
+	Score         float64 `json:"score"`
+	CountScore    float64 `json:"count_score"`
+	LatencyScore  float64 `json:"latency_score"`
+	CountWeight   float64 `json:"count_weight"`
+	LatencyWeight float64 `json:"latency_weight"`
+	// CountScoreCap 是次数分的封顶值：连续成功次数超过它之后，次数分不再增长。
+	CountScoreCap int `json:"count_score_cap"`
+	// EffectiveLatencyMs 是参与评分的延迟（含成功率惩罚与在任者迟滞折算），
+	// 与日志里显示的「测试用时」不是同一个数。
+	EffectiveLatencyMs int64 `json:"effective_latency_ms,omitempty"`
+	// LatencyFallback 为 true 表示用时分是中性值（同平台样本不足或极差为 0），不是算出来的。
+	LatencyFallback bool `json:"latency_fallback,omitempty"`
+	// Rank / RankTotal：综合分在该组「测试成功账号」里的名次（1 起）与参评总数。
+	// 同样不带 omitempty —— 未参评时是 0，前端靠 Scored 区分，而不是靠字段缺失。
+	Rank      int `json:"rank"`
+	RankTotal int `json:"rank_total"`
+	// WinnerCutoff 是入选分数线（第 TopN 名的综合分）；落选时用它说明「差多少」。
+	WinnerCutoff float64 `json:"winner_cutoff"`
+	TopN         int     `json:"top_n"`
+	// Locked 表示该组本轮走「在任者健康锁定」，没有做择优 —— 此时名次只是参考，
+	// 真正决定保留的是「它本来就开着且测试正常」。
+	Locked bool `json:"locked,omitempty"`
+	// RequiredModels 非空表示该账号是因为「分组要求这些模型、而赢家里没人支持」被补选开启的。
+	// 它的综合分并不是 TopN，不写清楚日志看起来像择优算错了。
+	RequiredModels []string `json:"required_models,omitempty"`
+	// NoAlternative 表示该组一个测试成功的账号都没有，失败账号因此保持原状待人工确认。
+	NoAlternative bool `json:"no_alternative,omitempty"`
+	// TestFailed 表示该账号在该组当前是测试失败状态。
+	TestFailed bool `json:"test_failed,omitempty"`
 }
 
 type SupplierGroupSchedulingElectionResult struct {
@@ -323,6 +376,11 @@ type SupplierGroupSchedulingElectionChangeLog struct {
 	// 也就是说这份日志的定义条件（before <> after）在演练模式下描述的是"想改什么"而不是"改了什么"，
 	// 不把它标出来，事后回看会把建议当成既成事实。
 	Suggested bool `json:"suggested"`
+	// GroupDecisions 按分组记录「为什么是它」，与运行明细里的同名字段同源。
+	// ⚠️ 切换日志的 SQL 是逐字段投影的（见 supplierGroupSchedulingElectionChangeInnerSQL），
+	// 这里加了字段还必须同步在投影里补一列，否则接口永远不会返回它。
+	// 旧运行记录里没有这个字段，前端必须能降级。
+	GroupDecisions []SupplierGroupSchedulingElectionDecisionDetail `json:"group_decisions,omitempty"`
 }
 
 type SupplierGroupSchedulingElectionChangeLogListParams struct {
@@ -381,6 +439,15 @@ type supplierGroupElectionAccount struct {
 	// 非空即 notable：只靠汇总数字的话，运维看到"关闭 0 个"会以为任务没跑，
 	// 而实际恰恰是最需要被看见的情况——有账号连续失败但被闸门拦住了。
 	hold string
+	// groupDecisions 是逐分组累积的裁决依据（见 SupplierGroupSchedulingElectionDecisionDetail），
+	// 最终原样写进运行明细，供切换日志展开「为什么是它」。
+	groupDecisions []SupplierGroupSchedulingElectionDecisionDetail
+	// noAlternativeGroups 按分组记录「该组一个成功账号都没有」（闸门一）。
+	// 账号级的 noAlternative 是 union 的，直接拿它填逐组依据会让其它分组也显示成"无备选"。
+	noAlternativeGroups map[int64]struct{}
+	// requiredModelsByGroup 记录「该账号因覆盖哪些必需模型被补选」：分组 → 模型名。
+	// 必需模型补选发生在打分之后，而依据是在那之后才组装的，所以中途先攒在这里。
+	requiredModelsByGroup map[int64][]string
 }
 
 func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config SupplierGroupSchedulingElectionConfig, now time.Time) (SupplierGroupSchedulingElectionResult, error) {
@@ -470,9 +537,17 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 		groupMembers := membersByGroup[groupID]
 		// recordWinner 统一「标记账号赢家（union，跨组累积）+ 记入本组明细」。
 		// 明细里始终追加（同一账号跨多组时每组都应列出），故不因 account.winner 已置而跳过追加。
-		recordWinner := func(accountID int64) {
+		// requiredModel 非空表示这次入选是「为覆盖该必需模型」补选的、并不是综合分进了前 N ——
+		// 切换日志必须能区分这两者，否则补选看起来像打分算错了。
+		recordWinner := func(accountID int64, requiredModel string) {
 			if account := accounts[accountID]; account != nil {
 				account.winner = true
+				if requiredModel != "" {
+					if account.requiredModelsByGroup == nil {
+						account.requiredModelsByGroup = make(map[int64][]string)
+					}
+					account.requiredModelsByGroup[groupID] = appendUniqueString(account.requiredModelsByGroup[groupID], requiredModel)
+				}
 			}
 			detail.WinnerCount++
 			detail.WinnerIDs = append(detail.WinnerIDs, accountID)
@@ -501,6 +576,10 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 				}
 				if account := accounts[member.AccountID]; account != nil {
 					account.noAlternative = true
+					if account.noAlternativeGroups == nil {
+						account.noAlternativeGroups = make(map[int64]struct{})
+					}
+					account.noAlternativeGroups[groupID] = struct{}{}
 				}
 			}
 		}
@@ -529,7 +608,7 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 			}
 			if len(scheduledHealthy) > 0 && !scheduledFailed {
 				for _, accountID := range scheduledHealthy {
-					recordWinner(accountID)
+					recordWinner(accountID, "")
 				}
 				locked = true
 			}
@@ -545,7 +624,7 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 				winners = len(successMembers)
 			}
 			for index := 0; index < winners; index++ {
-				recordWinner(successMembers[index].AccountID)
+				recordWinner(successMembers[index].AccountID, "")
 			}
 		}
 
@@ -555,6 +634,70 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 			groupID, groupNames[groupID], config.RequiredModelsByGroup[groupID],
 			groupMembers, successMembers, electionScores, detail.WinnerIDs, recordWinner, &result,
 		)
+
+		// 组装本组逐账号的裁决依据，最终原样写进运行明细，供切换日志展开「原因」。
+		// 必须放在必需模型覆盖之后：补选也算入选，且 RequiredModels 正是在那一步记下的。
+		winnerSet := make(map[int64]struct{}, len(detail.WinnerIDs))
+		for _, id := range detail.WinnerIDs {
+			winnerSet[id] = struct{}{}
+		}
+		// 名次按综合分另排一份副本：锁定组本轮没做择优（successMembers 保持未排序），
+		// 但名次仍要算——否则看不出「在任者按分其实进不了前 N，只是被锁定保住了」。
+		ranked := make([]SupplierGroupSchedulingElectionMember, len(successMembers))
+		copy(ranked, successMembers)
+		sort.SliceStable(ranked, func(i, j int) bool {
+			return supplierGroupSchedulingElectionMemberLess(ranked[i], ranked[j], electionScores)
+		})
+		rankByID := make(map[int64]int, len(ranked))
+		for index, member := range ranked {
+			rankByID[member.AccountID] = index + 1
+		}
+		// 入选分数线 = 实际取到的最后一名（TopN 超过参评数时就是末位）的综合分。
+		cutoffIndex := config.TopN
+		if cutoffIndex > len(ranked) {
+			cutoffIndex = len(ranked)
+		}
+		winnerCutoff := 0.0
+		if cutoffIndex > 0 {
+			winnerCutoff = electionScores[ranked[cutoffIndex-1].AccountID].Score
+		}
+
+		for _, member := range groupMembers {
+			account := accounts[member.AccountID]
+			if account == nil {
+				continue
+			}
+			decision := SupplierGroupSchedulingElectionDecisionDetail{
+				GroupID:      groupID,
+				GroupName:    groupNames[groupID],
+				Locked:       locked,
+				TopN:         config.TopN,
+				RankTotal:    len(ranked),
+				WinnerCutoff: winnerCutoff,
+			}
+			if _, elected := winnerSet[member.AccountID]; elected {
+				decision.Elected = true
+			}
+			if _, noAlternative := account.noAlternativeGroups[groupID]; noAlternative {
+				decision.NoAlternative = true
+			}
+			decision.TestFailed = strings.TrimSpace(member.LastTestStatus) == SupplierGroupSchedulingElectionTestStatusFailed
+			// 只有测试成功的账号才进了择优，才有分可摊开；失败/未测的保持零值。
+			if score, ok := electionScores[member.AccountID]; ok {
+				decision.Scored = true
+				decision.Score = score.Score
+				decision.CountScore = score.CountScore
+				decision.LatencyScore = score.LatencyScore
+				decision.CountWeight = config.CountWeight
+				decision.LatencyWeight = config.LatencyWeight
+				decision.CountScoreCap = config.CountScoreCap
+				decision.EffectiveLatencyMs = score.EffectiveLatencyMs
+				decision.LatencyFallback = score.LatencyFallback
+				decision.Rank = rankByID[member.AccountID]
+			}
+			decision.RequiredModels = account.requiredModelsByGroup[groupID]
+			account.groupDecisions = append(account.groupDecisions, decision)
+		}
 
 		result.Groups = append(result.Groups, detail)
 	}
@@ -579,6 +722,7 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 			SchedulableAfter:  account.schedulableBefore,
 			Action:            SupplierGroupSchedulingElectionActionNone,
 			GroupIDs:          account.groupIDs,
+			GroupDecisions:    account.groupDecisions,
 		}
 
 		desiredSchedulable, action, reason := supplierGroupSchedulingElectionDecide(account, config.FailureThreshold)
@@ -751,7 +895,22 @@ func supplierGroupSchedulingElectionLatency(member SupplierGroupSchedulingElecti
 	return base, scoring
 }
 
-func supplierGroupSchedulingElectionScores(members []SupplierGroupSchedulingElectionMember, countWeight, latencyWeight float64, latencyMinSamples int, switchMargin float64, countScoreCap int) map[int64]float64 {
+// supplierGroupSchedulingElectionScore 是一个候选的综合分及其分量。
+// 拆开返回而不是只给一个 float64：切换日志要把「为什么是它当选」摊开给管理员复核，
+// 只给一个综合分是没法验算的 —— 权重、封顶、归一化口径都在配置里，看不到分量就只能猜。
+type supplierGroupSchedulingElectionScore struct {
+	Score        float64
+	CountScore   float64 // 归一化后的次数分，0..1
+	LatencyScore float64 // 归一化后的用时分，0..1
+	// EffectiveLatencyMs 是真正参与评分的那份延迟：窗口平均（可信时）叠加成功率惩罚，
+	// 在任者再乘迟滞折算系数。与日志里显示的「测试用时」不是同一个数，必须分开标。
+	EffectiveLatencyMs int64
+	// LatencyFallback 为 true 表示用时分没能算出差异（同平台成功样本不足 2 个、或极差为 0），
+	// 取了中性值 0.5。不标出来，管理员会把它当成「算出来的 0.5」去反推配置。
+	LatencyFallback bool
+}
+
+func supplierGroupSchedulingElectionScores(members []SupplierGroupSchedulingElectionMember, countWeight, latencyWeight float64, latencyMinSamples int, switchMargin float64, countScoreCap int) map[int64]supplierGroupSchedulingElectionScore {
 	// 迟滞死区做在延迟上而不是综合分上：组内 min-max 归一化会把任意大小的延迟差放大到满量程
 	// （两个候选时分差恒为 latencyWeight），综合分层面的死区因此形同虚设。改为把「在任者(已开启)」
 	// 的评分延迟按 (1-switchMargin) 折算，让它显得更快，于是挑战者必须在延迟上快出 switchMargin 比例
@@ -793,7 +952,7 @@ func supplierGroupSchedulingElectionScores(members []SupplierGroupSchedulingElec
 	if countCap <= 0 {
 		countCap = float64(DefaultSupplierGroupSchedulingElectionCountScoreCap)
 	}
-	scores := make(map[int64]float64, len(members))
+	scores := make(map[int64]supplierGroupSchedulingElectionScore, len(members))
 	for _, member := range members {
 		normalizedCount := float64(member.HealthyCount) / countCap
 		if normalizedCount > 1 {
@@ -801,13 +960,21 @@ func supplierGroupSchedulingElectionScores(members []SupplierGroupSchedulingElec
 		}
 		latency := effectiveLatency[member.AccountID]
 		normalizedLatency := 0.5
+		latencyFallback := true
 		// 至少两个样本才谈得上"谁更快"；极差为 0 说明大家一样快，同样比不出高下。
 		if latency > 0 && latencySamples[member.Platform] >= 2 {
 			if span := maxLatency[member.Platform] - minLatency[member.Platform]; span > 0 {
 				normalizedLatency = float64(maxLatency[member.Platform]-latency) / float64(span)
+				latencyFallback = false
 			}
 		}
-		scores[member.AccountID] = countWeight*normalizedCount + latencyWeight*normalizedLatency
+		scores[member.AccountID] = supplierGroupSchedulingElectionScore{
+			Score:              countWeight*normalizedCount + latencyWeight*normalizedLatency,
+			CountScore:         normalizedCount,
+			LatencyScore:       normalizedLatency,
+			EffectiveLatencyMs: latency,
+			LatencyFallback:    latencyFallback,
+		}
 	}
 	return scores
 }
@@ -816,8 +983,8 @@ func supplierGroupSchedulingElectionScores(members []SupplierGroupSchedulingElec
 // 迟滞死区不在这里做（会被组内 min-max 归一化放大而失效，两候选时分差恒为 latencyWeight），
 // 而是在 supplierGroupSchedulingElectionScores 里对在任者的延迟按比例折算实现——见那里的注释。
 // 综合分并列时优先保留「当前已开启调度」的账号（黏性），再按最近测试时间、账号 ID 兜底，保证确定性。
-func supplierGroupSchedulingElectionMemberLess(a, b SupplierGroupSchedulingElectionMember, scores map[int64]float64) bool {
-	scoreA, scoreB := scores[a.AccountID], scores[b.AccountID]
+func supplierGroupSchedulingElectionMemberLess(a, b SupplierGroupSchedulingElectionMember, scores map[int64]supplierGroupSchedulingElectionScore) bool {
+	scoreA, scoreB := scores[a.AccountID].Score, scores[b.AccountID].Score
 	if math.Abs(scoreA-scoreB) > SupplierGroupSchedulingElectionScoreEpsilon {
 		return scoreA > scoreB
 	}
@@ -841,9 +1008,10 @@ func applySupplierGroupRequiredModelCoverage(
 	requiredModels []string,
 	groupMembers []SupplierGroupSchedulingElectionMember,
 	successMembers []SupplierGroupSchedulingElectionMember,
-	electionScores map[int64]float64,
+	electionScores map[int64]supplierGroupSchedulingElectionScore,
 	initialWinnerIDs []int64,
-	recordWinner func(int64),
+	// recordWinner 的第二个参数是该次入选所覆盖的必需模型（正常择优传空串）。
+	recordWinner func(int64, string),
 	result *SupplierGroupSchedulingElectionResult,
 ) {
 	if len(requiredModels) == 0 {
@@ -897,7 +1065,7 @@ func applySupplierGroupRequiredModelCoverage(
 			}
 		}
 		if best != nil {
-			recordWinner(best.AccountID)
+			recordWinner(best.AccountID, model)
 			winnerSet[best.AccountID] = struct{}{}
 			continue
 		}
@@ -935,6 +1103,17 @@ func supplierGroupElectionMemberSupportsModel(member SupplierGroupSchedulingElec
 		account.Credentials = map[string]any{"model_mapping": member.ModelMapping}
 	}
 	return account.IsModelSupported(model)
+}
+
+// appendUniqueString 追加一个去重后的字符串。同一账号可能因多个必需模型被补选，
+// 而每个模型只应记一次；用 slice 而不是 set 是为了让日志里的顺序稳定可读。
+func appendUniqueString(list []string, value string) []string {
+	for _, existing := range list {
+		if existing == value {
+			return list
+		}
+	}
+	return append(list, value)
 }
 
 func normalizeSupplierGroupSchedulingElectionConfig(config SupplierGroupSchedulingElectionConfig) SupplierGroupSchedulingElectionConfig {

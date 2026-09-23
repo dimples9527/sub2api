@@ -2690,7 +2690,10 @@ SELECT c.run_id,
          SELECT jsonb_agg(g.name ORDER BY g.name)
          FROM jsonb_array_elements_text(COALESCE(c.item -> 'group_ids', '[]'::jsonb)) AS gid(value)
          JOIN groups g ON g.id = NULLIF(gid.value, '')::BIGINT AND g.deleted_at IS NULL
-       ), '[]'::jsonb)::text                                         AS group_names
+       ), '[]'::jsonb)::text                                         AS group_names,
+       -- group_decisions 整体透传：前端按分组名挑出当前分节那一条，不依赖数组顺序。
+       -- 显式 ::text 是为了不依赖驱动对 jsonb 的类型映射（group_ids 不加是因为要用 @> 筛选）。
+       COALESCE(c.item -> 'group_decisions', '[]'::jsonb)::text      AS group_decisions
 FROM (
   SELECT r.id AS run_id,
          r.status AS run_status,
@@ -2790,7 +2793,7 @@ func (r *supplierProviderDataRepository) ListGroupSchedulingElectionChangeLogs(c
 	rows, err := r.db.QueryContext(ctx, `
 SELECT run_id, run_status, changed_at, account_id, account_name, platform, test_status,
        healthy_count, latency_ms, schedulable_before, schedulable_after,
-       action, reason, error_message, suggested, group_ids, group_names
+       action, reason, error_message, suggested, group_ids, group_names, group_decisions
 FROM (`+innerSQL+`) e
 WHERE `+itemWhere+fmt.Sprintf(" ORDER BY e.changed_at DESC, e.run_id DESC, e.account_id DESC LIMIT $%d OFFSET $%d", len(queryArgs)-1, len(queryArgs)), queryArgs...)
 	if err != nil {
@@ -2801,12 +2804,12 @@ WHERE `+itemWhere+fmt.Sprintf(" ORDER BY e.changed_at DESC, e.run_id DESC, e.acc
 	items := make([]service.SupplierGroupSchedulingElectionChangeLog, 0)
 	for rows.Next() {
 		var item service.SupplierGroupSchedulingElectionChangeLog
-		var groupIDsRaw, groupNamesRaw string
+		var groupIDsRaw, groupNamesRaw, groupDecisionsRaw string
 		if err := rows.Scan(
 			&item.RunID, &item.RunStatus, &item.ChangedAt, &item.AccountID, &item.AccountName,
 			&item.Platform, &item.TestStatus, &item.HealthyCount, &item.LatencyMs,
 			&item.SchedulableBefore, &item.SchedulableAfter, &item.Action, &item.Reason,
-			&item.ErrorMessage, &item.Suggested, &groupIDsRaw, &groupNamesRaw,
+			&item.ErrorMessage, &item.Suggested, &groupIDsRaw, &groupNamesRaw, &groupDecisionsRaw,
 		); err != nil {
 			return service.SupplierGroupSchedulingElectionChangeLogListResult{}, fmt.Errorf("扫描分组调度切换日志失败: %w", err)
 		}
@@ -2821,6 +2824,10 @@ WHERE `+itemWhere+fmt.Sprintf(" ORDER BY e.changed_at DESC, e.run_id DESC, e.acc
 		}
 		if groupNamesRaw != "" && groupNamesRaw != "null" {
 			_ = json.Unmarshal([]byte(groupNamesRaw), &item.GroupNames)
+		}
+		// 旧运行记录里没有这个字段，投影会兜成 '[]' —— 解析后保持 nil，前端据此降级。
+		if groupDecisionsRaw != "" && groupDecisionsRaw != "null" && groupDecisionsRaw != "[]" {
+			_ = json.Unmarshal([]byte(groupDecisionsRaw), &item.GroupDecisions)
 		}
 		items = append(items, item)
 	}
