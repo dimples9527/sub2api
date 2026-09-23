@@ -926,7 +926,7 @@
             <div v-else class="sp-rate-guard-empty">当前没有可配置默认模型的平台。</div>
           </section>
 
-          <section v-if="editForm.config.account_health_guard_platform_multiplier_intervals_enabled" class="sp-health-guard-platform-models">
+          <section v-if="editForm.config.account_health_guard_platform_multiplier_intervals_enabled" class="sp-health-guard-platform-models sp-health-guard-multiplier-section">
             <div class="sp-health-guard-dialog-section-head">
               <strong>未开调度账号按倍率间隔</strong>
               <span>仅对未开启调度的账号生效：按账号所属平台 + 计费倍率落入的区间取检查间隔（覆盖账号级间隔）。区间取 [下限, 上限)，上限留空表示无上界；未命中任何区间的账号每轮都会检查。间隔不得低于 60 秒。</span>
@@ -5489,6 +5489,27 @@ function intervalSecondsToCron(seconds: number): string | null {
   background: color-mix(in srgb, var(--sp-blue) 4%, var(--sp-panel));
 }
 
+/* 倍率区间配置可能很高：让它在剩余空间内可收缩、内部滚动，
+   避免与默认模型区一起把账号列表挤没、导致整个弹窗被 overflow:hidden 裁掉无法滚动。 */
+.sp-health-guard-multiplier-section {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 40vh;
+}
+
+.sp-health-guard-multiplier-section .sp-health-guard-dialog-section-head {
+  flex: 0 0 auto;
+}
+
+.sp-health-guard-multiplier-section .sp-health-guard-multiplier-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
 .sp-health-guard-account-workspace {
   display: flex;
   flex: 1 1 auto;
@@ -5592,11 +5613,14 @@ function intervalSecondsToCron(seconds: number): string | null {
 
 .sp-health-guard-multiplier-grid {
   display: grid;
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 460px), 1fr));
+  align-content: start;
+  gap: 10px 14px;
   margin-top: 12px;
 }
 
 .sp-health-guard-multiplier-grid article {
+  align-self: start;
   border: 1px solid color-mix(in srgb, var(--sp-blue) 12%, var(--sp-line));
   border-radius: 10px;
   padding: 10px 12px;
