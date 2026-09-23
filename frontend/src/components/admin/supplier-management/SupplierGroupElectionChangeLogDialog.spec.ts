@@ -26,6 +26,9 @@ function cssBlock(selector: string): string {
   return match ? match[1] : ''
 }
 
+/** 去掉 CSS 注释后的样式文本：注释里会为了解释「为什么不能这么写」而引用坏写法本身。 */
+const cssSource = source.replace(/\/\*[\s\S]*?\*\//g, '')
+
 describe('SupplierGroupElectionChangeLogDialog', () => {
   it('说明文案写清「只显示开关被拨动的记录」', () => {
     expect(source).toContain('只显示调度开关真的被拨动的记录')
@@ -37,7 +40,10 @@ describe('SupplierGroupElectionChangeLogDialog', () => {
     // 表现是翻页/筛选后某几行内容错乱，而且不报错。
     expect(source).toContain('function rowKey(log: SupplierGroupElectionChangeLog)')
     expect(source).toContain('${log.run_id}-${log.account_id}')
-    expect(source).toContain(':row-key="rowKey"')
+    // 按分组分节后不再走 DataTable 的 :row-key prop，行键挪到了 :key 上。
+    // 同一个账号会出现在它所属的每个分节里，所以键还要再拼一层分组，
+    // 否则同一父节点下照样撞键 —— 实现可以换，这个坑不能重新踩回去。
+    expect(source).toContain(':key="`${section.key}-${rowKey(log)}`"')
   })
 
   it('方向筛选传后端枚举，全部时不传', () => {
@@ -70,6 +76,21 @@ describe('SupplierGroupElectionChangeLogDialog', () => {
     expect(source).toContain("hasActiveFilters ? '当前筛选条件下没有调度切换记录，试试放宽时间范围或换个方向。' : '最近还没有发生调度切换。'")
   })
 
+  it('按分组分节，且分组名查不到时不丢记录', () => {
+    // 一行一个账号时同组的几行是打散的，得自己脑补「这个组整体发生了什么」。
+    expect(source).toContain('const sections = computed<LogSection[]>(() => {')
+    expect(source).toContain('for (const name of names) push(name, name, log)')
+    expect(source).toContain('section.enabled += 1')
+    expect(source).toContain('section.disabled += 1')
+    // 用分组名当键的前提是「未删除的分组名唯一」（groups_name_unique_active），
+    // 后端取名字的 JOIN 也带了 deleted_at IS NULL —— 两边必须同时成立。
+    // 分组被删掉 / 历史数据没记名字时，这条变更仍要出现，不能静默消失。
+    expect(source).toContain("push(NO_GROUP_KEY, '未记录分组', log)")
+    // 分组标题行必须整行贯通，所以走 colspan 而不是 DataTable（它每行固定 N 个 <td>）。
+    expect(source).toContain('scope="colgroup"')
+    expect(source).toContain(':colspan="columns.length"')
+  })
+
   it('平台色交给工具类，样式块里不写 color', () => {
     expect(source).toContain("from '@/utils/platformColors'")
     expect(source).toContain(':class="platformTextClass(log.platform)"')
@@ -80,7 +101,13 @@ describe('SupplierGroupElectionChangeLogDialog', () => {
 
   it('弹窗自带深色变量（BaseDialog 会 Teleport 到 body）', () => {
     expect(source).toContain('--sp-election-log-accent: #ea580c')
-    expect(source).toContain(':global(.dark) .sp-election-log-dialog')
+    // 暗色覆盖必须写普通的 `.dark xxx`。
+    // 实测本仓 Vue 版本里 scoped 样式中的 `:global(.dark) .foo` 会被编译成裸 `.dark {}`：
+    // 后代选择器和 data-v 属性一起丢掉，声明落到 <html> 上；而弹窗根元素自己声明了浅色变量，
+    // 元素自身声明压过继承 ⇒ 暗色永远不生效、且编译和运行都不报错。
+    // 编译产物可自证：`.dark .foo` → `.dark .foo[data-v-xxx]`。
+    expect(source).toContain('.dark .sp-election-log-dialog')
+    expect(cssSource).not.toContain(':global(.dark)')
     expect(cssBlock('.sp-election-log-dialog')).toContain('--sp-election-log-accent')
   })
 

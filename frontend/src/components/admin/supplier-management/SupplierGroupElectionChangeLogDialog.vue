@@ -4,6 +4,8 @@
       <p class="sp-election-log-hint">
         只显示调度开关真的被拨动的记录：择优调度把某个账号从「开」改成「关」，或重新选回「开」。
         未变更、未测试、写库失败的记录不在这里。
+        按分组归类展示，每组标出该组的开 / 关条数；一个账号同属多个分组时，会在它所属的每个分组下各出现一次。
+        分页按记录切分，所以同一个分组可能被分到相邻两页。
       </p>
 
       <div class="sp-election-log-filters">
@@ -51,53 +53,76 @@
       </div>
 
       <div class="sp-election-log-table-region">
-        <DataTable
-          :columns="columns"
-          :data="items"
-          :loading="loading"
-          :row-key="rowKey"
-          :sticky-actions-column="false"
-        >
-          <template #cell-run="{ row: log }">
-            <button
-              type="button"
-              class="sp-election-log-run"
-              :class="{ 'is-active': runFilter === log.run_id }"
-              :title="runFilter === log.run_id ? '已锁定该批次' : '只看这一批次的切换'"
-              @click="filterByRun(log.run_id)"
-            >
-              #{{ log.run_id }}
-            </button>
-          </template>
-          <template #cell-changed_at="{ row: log }">
-            <span class="sp-election-log-time">{{ formatTime(log.changed_at) }}</span>
-          </template>
-          <template #cell-account="{ row: log }">
-            <strong class="sp-election-log-account">{{ log.account_name || `账号 ${log.account_id}` }}</strong>
-            <span v-if="log.platform" class="sp-election-log-platform" :class="platformTextClass(log.platform)">{{ log.platform }}</span>
-            <small class="sp-election-log-groups">{{ groupText(log) }}</small>
-          </template>
-          <template #cell-direction="{ row: log }">
-            <span class="sp-election-log-direction" :class="log.direction === 'enabled' ? 'good' : 'bad'">
-              {{ directionText(log) }}
-            </span>
-            <small class="sp-election-log-switch">{{ log.schedulable_before ? '开' : '关' }} → {{ log.schedulable_after ? '开' : '关' }}</small>
-          </template>
-          <template #cell-test_status="{ row: log }">
-            <span class="sp-status" :class="log.test_status === 'success' ? 'good' : 'bad'">{{ testStatusText(log.test_status) }}</span>
-          </template>
-          <template #cell-latency_ms="{ row: log }">
-            <span class="sp-election-log-latency" :class="{ 'is-empty': !log.latency_ms }">{{ latencyText(log.latency_ms) }}</span>
-          </template>
-          <template #cell-reason="{ row: log }">
-            <small class="sp-election-log-reason">{{ log.reason || '—' }}</small>
-            <small v-if="log.error_message" class="sp-election-log-error">{{ log.error_message }}</small>
-          </template>
-          <!-- 空态要区分「真的没有切换」和「筛选太窄」—— 用同一句话会让人以为功能坏了。 -->
-          <template #empty>
-            {{ hasActiveFilters ? '当前筛选条件下没有调度切换记录，试试放宽时间范围或换个方向。' : '最近还没有发生调度切换。' }}
-          </template>
-        </DataTable>
+        <div class="sp-election-log-scroll">
+          <table class="sp-election-log-table">
+            <thead>
+              <tr>
+                <th v-for="column in columns" :key="column.key" scope="col" :class="column.class">{{ column.label }}</th>
+              </tr>
+            </thead>
+            <tbody v-if="loading">
+              <tr v-for="i in 5" :key="`skeleton-${i}`">
+                <td v-for="column in columns" :key="column.key" :class="column.class">
+                  <span class="sp-election-log-skeleton"></span>
+                </td>
+              </tr>
+            </tbody>
+            <tbody v-else-if="sections.length === 0">
+              <tr>
+                <!-- 空态要区分「真的没有切换」和「筛选太窄」—— 用同一句话会让人以为功能坏了。 -->
+                <td :colspan="columns.length" class="sp-election-log-empty">
+                  {{ hasActiveFilters ? '当前筛选条件下没有调度切换记录，试试放宽时间范围或换个方向。' : '最近还没有发生调度切换。' }}
+                </td>
+              </tr>
+            </tbody>
+            <tbody v-else>
+              <template v-for="section in sections" :key="section.key">
+                <tr class="sp-election-log-group-row">
+                  <th scope="colgroup" :colspan="columns.length">
+                    <strong class="sp-election-log-group-name">{{ section.groupName }}</strong>
+                    <span class="sp-election-log-group-stat">
+                      <em class="good">{{ section.enabled }} 开</em>
+                      <em class="bad">{{ section.disabled }} 关</em>
+                    </span>
+                    <small class="sp-election-log-group-count">共 {{ section.rows.length }} 条变更</small>
+                  </th>
+                </tr>
+                <tr v-for="log in section.rows" :key="`${section.key}-${rowKey(log)}`" class="sp-election-log-row">
+                  <td v-for="column in columns" :key="column.key" :class="column.class">
+                    <button
+                      v-if="column.key === 'run'"
+                      type="button"
+                      class="sp-election-log-run"
+                      :class="{ 'is-active': runFilter === log.run_id }"
+                      :title="runFilter === log.run_id ? '已锁定该批次' : '只看这一批次的切换'"
+                      @click="filterByRun(log.run_id)"
+                    >
+                      #{{ log.run_id }}
+                    </button>
+                    <span v-else-if="column.key === 'changed_at'" class="sp-election-log-time">{{ formatTime(log.changed_at) }}</span>
+                    <template v-else-if="column.key === 'account'">
+                      <strong class="sp-election-log-account">{{ log.account_name || `账号 ${log.account_id}` }}</strong>
+                      <span v-if="log.platform" class="sp-election-log-platform" :class="platformTextClass(log.platform)">{{ log.platform }}</span>
+                    </template>
+                    <template v-else-if="column.key === 'direction'">
+                      <span class="sp-election-log-direction" :class="log.direction === 'enabled' ? 'good' : 'bad'">
+                        {{ directionText(log) }}
+                      </span>
+                      <small class="sp-election-log-switch">{{ log.schedulable_before ? '开' : '关' }} → {{ log.schedulable_after ? '开' : '关' }}</small>
+                    </template>
+                    <span v-else-if="column.key === 'test_status'" class="sp-status" :class="log.test_status === 'success' ? 'good' : 'bad'">{{ testStatusText(log.test_status) }}</span>
+                    <span v-else-if="column.key === 'healthy_count'">{{ log.healthy_count }}</span>
+                    <span v-else-if="column.key === 'latency_ms'" class="sp-election-log-latency" :class="{ 'is-empty': !log.latency_ms }">{{ latencyText(log.latency_ms) }}</span>
+                    <template v-else-if="column.key === 'reason'">
+                      <small class="sp-election-log-reason">{{ log.reason || '—' }}</small>
+                      <small v-if="log.error_message" class="sp-election-log-error">{{ log.error_message }}</small>
+                    </template>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
         <Pagination
           v-if="total > 0"
           class="sp-election-log-pagination"
@@ -120,7 +145,6 @@
 import { computed, ref, watch } from 'vue'
 import { listGroupElectionChangeLogs, type SupplierGroupElectionChangeLog } from '@/api/admin/supplierAutomation'
 import BaseDialog from '@/components/common/BaseDialog.vue'
-import DataTable from '@/components/common/DataTable.vue'
 import Input from '@/components/common/Input.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
@@ -228,13 +252,49 @@ function latencyText(latencyMs?: number) {
   return `${(latencyMs / 1000).toFixed(1)}s`
 }
 
-function groupText(log: SupplierGroupElectionChangeLog) {
-  const names = log.group_names?.filter(Boolean) || []
-  if (names.length) return names.join('、')
-  const ids = log.group_ids?.filter(Boolean) || []
-  if (ids.length) return ids.map(id => `分组 ${id}`).join('、')
-  return '—'
+/** 一个分组分节：该组下被拨动过的账号，以及开 / 关条数。 */
+interface LogSection {
+  key: string
+  groupName: string
+  enabled: number
+  disabled: number
+  rows: SupplierGroupElectionChangeLog[]
 }
+
+// 分组名缺失时的兜底桶（分组已被删除，或历史数据没记名字）。
+const NO_GROUP_KEY = '__no_group__'
+
+// 按分组分节：原来一行一个账号，同组的几行是打散的，得自己脑补「这个组整体发生了什么」。
+// 一个账号同属多个分组时，它会在**每个**分节下各出现一次 —— 这不是重复：
+// 它的开关确实同时影响了那几个组（后端 group_ids 本身就是数组）。
+// 用分组名当键是安全的：groups 上有 name 的部分唯一索引（WHERE deleted_at IS NULL），
+// 后端取名字时也带了同样的过滤，所以同一批日志里不会出现两个同名的组。
+const sections = computed<LogSection[]>(() => {
+  const map = new Map<string, LogSection>()
+  const push = (key: string, groupName: string, log: SupplierGroupElectionChangeLog) => {
+    let section = map.get(key)
+    if (!section) {
+      section = { key, groupName, enabled: 0, disabled: 0, rows: [] }
+      map.set(key, section)
+    }
+    section.rows.push(log)
+    if (log.schedulable_after) section.enabled += 1
+    else section.disabled += 1
+  }
+  for (const log of items.value) {
+    const names = (log.group_names || []).filter(Boolean)
+    if (names.length === 0) {
+      // 不丢掉这条变更：它确实拨动过，只是名字查不到了。
+      push(NO_GROUP_KEY, '未记录分组', log)
+      continue
+    }
+    for (const name of names) push(name, name, log)
+  }
+  // 变更条数多的组排前面（动静大的先看），条数相同按名字排，避免刷新后顺序漂移。
+  return Array.from(map.values()).sort((a, b) =>
+    b.rows.length - a.rows.length || a.groupName.localeCompare(b.groupName, 'zh-Hans-CN')
+  )
+})
 
 async function load() {
   loading.value = true
@@ -357,7 +417,12 @@ watch(() => props.accountId, () => {
   max-width: min(1600px, 95vw);
 }
 
-:global(.dark) .sp-election-log-dialog {
+/* 暗色覆盖一律写普通的 `.dark xxx`，不要写 `:global(.dark) xxx`。
+   实测本仓 Vue 版本里 scoped 样式中的 `:global(.dark) .foo` 会被编译成裸 `.dark {}`
+   —— 后代选择器和 data-v 属性一起丢掉，声明落到 <html> 上，
+   而弹窗根元素自己声明了浅色变量（元素自身声明压过继承），结果就是暗色永远不生效且不报错。
+   `.dark .foo` 才会编译成 `.dark .foo[data-v-xxx]`。 */
+.dark .sp-election-log-dialog {
   --sp-election-log-accent: #fb923c;
   --sp-election-log-muted: #94a3b8;
   --sp-election-log-line: #374151;
@@ -460,11 +525,110 @@ watch(() => props.accountId, () => {
   font-weight: 700;
 }
 
-.sp-election-log-groups {
-  display: block;
+/* ── 分节表格 ─────────────────────────────────────────────────────────
+   这里没有用 DataTable：它每行固定渲染 columns.length 个 <td>，不支持 colspan，
+   而「分组标题行」必须整行贯通。页面层自建表格是既有组件能力之外的正解。 */
+.sp-election-log-scroll {
+  max-height: min(60vh, 680px);
+  overflow: auto;
+}
+
+.sp-election-log-table {
+  width: 100%;
+  min-width: max-content;
+  border-collapse: collapse;
+}
+
+.sp-election-log-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--sp-election-log-line);
+  background: var(--sp-election-log-soft);
+  color: var(--sp-election-log-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.sp-election-log-row > td {
+  padding: 10px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--sp-election-log-line) 55%, transparent);
+  font-size: 13px;
+  vertical-align: top;
+}
+
+.sp-election-log-row:hover > td {
+  background: color-mix(in srgb, var(--sp-election-log-accent) 4%, var(--sp-election-log-panel));
+}
+
+/* 分组标题行：左侧 accent 竖条 + 浅橙底，把「下面几行属于同一组」变成一眼可辨的块。 */
+.sp-election-log-group-row > th {
+  padding: 8px 12px 8px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--sp-election-log-accent) 24%, var(--sp-election-log-line));
+  background: color-mix(in srgb, var(--sp-election-log-accent) 9%, var(--sp-election-log-panel));
+  text-align: left;
+}
+
+.sp-election-log-group-row > th::before {
+  content: '';
+  display: inline-block;
+  width: 3px;
+  height: 13px;
+  margin: 0 8px 0 12px;
+  border-radius: 2px;
+  background: var(--sp-election-log-accent);
+  vertical-align: -2px;
+}
+
+.sp-election-log-group-name {
+  color: var(--sp-election-log-accent);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.sp-election-log-group-stat {
+  margin-left: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-election-log-group-stat em {
+  margin-right: 8px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.sp-election-log-group-stat em.good { color: #16a34a; }
+.sp-election-log-group-stat em.bad { color: #dc2626; }
+
+.sp-election-log-group-count {
   color: var(--sp-election-log-muted);
   font-size: 11px;
 }
+
+.sp-election-log-skeleton {
+  display: block;
+  height: 14px;
+  width: 72%;
+  border-radius: 4px;
+  background: var(--sp-election-log-soft);
+}
+
+.sp-election-log-empty {
+  padding: 48px 12px;
+  color: var(--sp-election-log-muted);
+  text-align: center;
+}
+
+.dark .sp-election-log-group-row > th {
+  background: color-mix(in srgb, var(--sp-election-log-accent) 15%, var(--sp-election-log-panel));
+}
+
+.dark .sp-election-log-group-stat em.good { color: #4ade80; }
+.dark .sp-election-log-group-stat em.bad { color: #f87171; }
 
 .sp-election-log-direction {
   font-weight: 750;
@@ -478,11 +642,11 @@ watch(() => props.accountId, () => {
   color: #dc2626;
 }
 
-:global(.dark) .sp-election-log-direction.good {
+.dark .sp-election-log-direction.good {
   color: #4ade80;
 }
 
-:global(.dark) .sp-election-log-direction.bad {
+.dark .sp-election-log-direction.bad {
   color: #f87171;
 }
 
@@ -511,7 +675,7 @@ watch(() => props.accountId, () => {
   line-height: 1.5;
 }
 
-:global(.dark) .sp-election-log-error {
+.dark .sp-election-log-error {
   color: #f87171;
 }
 </style>
