@@ -71,12 +71,14 @@ func ProvideAdminHandlers(
 	upstreamAccountSyncHandler *admin.UpstreamAccountSyncHandler,
 	modelMonitorGroupHealthHandler *admin.ModelMonitorGroupHealthHandler,
 	ollamaCloudUsage *service.OllamaCloudUsageService,
+	opencodeGoUsage *service.OpenCodeGoUsageService,
 ) *AdminHandlers {
 	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)
 	accountHandler.SetOllamaCloudUsageService(ollamaCloudUsage)
 	accountHandler.SetMonitorGroupPlatformOverrideService(monitorGroupPlatformOverrideService)
 	groupHandler.SetCustomPlatformService(customPlatformService)
 	groupHandler.SetMonitorGroupPlatformOverrideService(monitorGroupPlatformOverrideService)
+	accountHandler.SetOpenCodeGoUsageService(opencodeGoUsage)
 	return &AdminHandlers{
 		Dashboard:                     dashboardHandler,
 		User:                          userHandler,

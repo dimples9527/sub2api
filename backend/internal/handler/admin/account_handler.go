@@ -67,6 +67,7 @@ type AccountHandler struct {
 	ollamaCloudUsage        *service.OllamaCloudUsageService
 	cfg                     *config.Config
 	monitorGroupPlatformOverrideService service.MonitorGroupPlatformOverrideService
+	opencodeGoUsage         *service.OpenCodeGoUsageService
 }
 
 // SetUpstreamBillingProbeService attaches the optional remote billing probe service.
@@ -80,6 +81,10 @@ func (h *AccountHandler) SetOllamaCloudUsageService(usage *service.OllamaCloudUs
 
 func (h *AccountHandler) SetMonitorGroupPlatformOverrideService(overrideService service.MonitorGroupPlatformOverrideService) {
 	h.monitorGroupPlatformOverrideService = overrideService
+}
+
+func (h *AccountHandler) SetOpenCodeGoUsageService(usage *service.OpenCodeGoUsageService) {
+	h.opencodeGoUsage = usage
 }
 
 // NewAccountHandler creates a new admin account handler
@@ -679,14 +684,22 @@ func (h *AccountHandler) List(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	if h.ollamaCloudUsage != nil && len(accounts) > 0 {
+	if len(accounts) > 0 {
 		accountPointers := make([]*service.Account, len(accounts))
 		for index := range accounts {
 			accountPointers[index] = &accounts[index]
 		}
-		if err := h.ollamaCloudUsage.ResolveAccounts(c.Request.Context(), accountPointers); err != nil {
-			response.ErrorFrom(c, err)
-			return
+		if h.ollamaCloudUsage != nil {
+			if err := h.ollamaCloudUsage.ResolveAccounts(c.Request.Context(), accountPointers); err != nil {
+				response.ErrorFrom(c, err)
+				return
+			}
+		}
+		if h.opencodeGoUsage != nil {
+			if err := h.opencodeGoUsage.ResolveOpenCodeGoUsageAccounts(c.Request.Context(), accountPointers); err != nil {
+				response.ErrorFrom(c, err)
+				return
+			}
 		}
 	}
 
@@ -943,6 +956,12 @@ func (h *AccountHandler) GetByID(c *gin.Context) {
 	}
 	if h.ollamaCloudUsage != nil {
 		if err := h.ollamaCloudUsage.ResolveAccounts(c.Request.Context(), []*service.Account{account}); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+	}
+	if h.opencodeGoUsage != nil {
+		if err := h.opencodeGoUsage.ResolveOpenCodeGoUsageAccounts(c.Request.Context(), []*service.Account{account}); err != nil {
 			response.ErrorFrom(c, err)
 			return
 		}
@@ -1696,6 +1715,10 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 		return
 	}
 
+	// Re-auth only returns authentication fields. Preserve account configuration
+	// stored alongside them (for example model_mapping), while allowing the new
+	// OAuth values to replace their existing counterparts.
+	req.Credentials = service.MergeCredentials(existing.Credentials, req.Credentials)
 	// Drop SSO/password residue; re-auth must leave only OAuth tokens on disk.
 	req.Credentials = service.SanitizeStoredCredentials(existing.Platform, req.Credentials)
 
