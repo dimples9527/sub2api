@@ -3357,8 +3357,11 @@ function errorMessage(err: unknown, fallback: string): string {
 }
 
 /* 深色主题：中性灰底会把停用行衬得比正常行更亮，反过来压暗一档，主要靠内容褪色表达。
-   ⚠️ 这里必须写普通 `.dark`，不能用 :global(.dark) —— 后者与 :deep() 混用会被 scoped
-   编译器整段吞掉（实测产物只剩一条裸 `.dark`，后面的选择器全部丢失），表现为「深色下规则静默失效」。 */
+   ⚠️ 这里必须写普通 `.dark`，不能用 `:global(.dark)`。
+   `@vue/compiler-sfc` 在 scoped 样式里遇到 `:global` 会把整个复杂选择器替换成括号内那部分
+   并中止遍历 ⇒ `:global(.dark) X` **恒等于裸 `.dark`**，X 与 data-v 属性一起丢。
+   这与是否混用 `:deep()` 无关（无 :deep() 时同样丢），且编译和运行都不报错，
+   规则落到 <html> 上后被元素自身声明压掉 ⇒ 表现为「深色下规则静默失效」。 */
 .dark .sp-panel :deep(tbody tr:has(.sp-provider-status-toggle[data-provider-enabled='0'])),
 .dark .sp-panel :deep(div.rounded-lg:has(.sp-provider-status-toggle[data-provider-enabled='0'])) {
   background-color: color-mix(in srgb, var(--sp-panel) 62%, #000);

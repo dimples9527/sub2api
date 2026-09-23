@@ -13187,9 +13187,12 @@ watch(
 </style>
 
 <style>
-/* Dark-mode overrides for the settings tabs shell. Kept in an UNSCOPED block
-   because Vue's scoped-CSS compiler was dropping the `:global(.dark) ...`
-   rules in the production build, leaving inactive tabs unreadable on dark. */
+/* 设置页标签壳的暗色覆盖。刻意放在 UNSCOPED 块里：
+   scoped 块里写 `:global(.dark) X` 会在编译期被 `@vue/compiler-sfc` 吞掉 ——
+   整个复杂选择器只剩括号内的 `.dark`，X 与 data-v 属性一起丢。
+   注意这不是「只在构建产物里出问题」，dev 与 production 行为一致，是编译期行为。
+   规则落到 <html> 后压不过元素自身声明 ⇒ 暗色下标签不可读且不报错。
+   不 scoped 时直接写 `.dark X` 即为真全局，行为符合预期。 */
 .dark .settings-tabs-shell {
   border-color: rgb(51 65 85 / 0.65);
   background: rgb(15 23 42 / 0.86);
