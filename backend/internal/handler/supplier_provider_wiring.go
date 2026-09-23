@@ -13,12 +13,15 @@ func ProvideSupplierProviderSyncHandler(
 	groupGuard *service.SupplierGroupGuardReconciler,
 	customPlatformService service.CustomPlatformService,
 	monitorGroupPlatformOverrideService service.MonitorGroupPlatformOverrideService,
+	sessionLimitCache service.SessionLimitCache,
+	accountRepo service.AccountRepository,
 ) *admin.SupplierProviderSyncHandler {
 	h := admin.NewSupplierProviderSyncHandler(syncService, dataRepo)
 	h.SetGroupMatcher(groupMatcher)
 	h.SetGroupGuard(groupGuard)
 	h.SetCustomPlatformResolver(customPlatformService)
 	h.SetGroupPlatformOverrideService(monitorGroupPlatformOverrideService)
+	h.SetSessionEnrichment(sessionLimitCache, accountRepo)
 	return h
 }
 

@@ -125,6 +125,8 @@ export interface SupplierProviderAccount {
   local_account_recent_health_sample_count?: number
   local_account_recent_health_success_count?: number
   local_account_recent_health_avg_latency_ms?: number
+  local_account_max_sessions?: number
+  local_account_active_sessions?: number | null
   supplier_current_balance: number
   supplier_today_cost: number
   supplier_estimated_days?: number | null

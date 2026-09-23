@@ -65,6 +65,8 @@ type SupplierProviderAccount struct {
 	LocalAccountRecentHealthSampleCount  int                                   `json:"local_account_recent_health_sample_count,omitempty"`
 	LocalAccountRecentHealthSuccessCount int                                   `json:"local_account_recent_health_success_count,omitempty"`
 	LocalAccountRecentHealthAvgLatencyMs int64                                 `json:"local_account_recent_health_avg_latency_ms,omitempty"`
+	LocalAccountMaxSessions              int                                   `json:"local_account_max_sessions,omitempty"`
+	LocalAccountActiveSessions           *int                                  `json:"local_account_active_sessions,omitempty"`
 	GroupStatus                          string                                `json:"group_status,omitempty"`
 	BindingGroups                        []SupplierProviderAccountBindingGroup `json:"binding_groups"`
 	SupplierCurrentBalance               float64                               `json:"supplier_current_balance"`

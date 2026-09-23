@@ -2037,6 +2037,9 @@ const SLOW_LATENCY_ALERT_MS = 8000
 // estimated_days 为供应商汇总口径,同一供应商下的多个调度账号会一起命中。
 const BALANCE_LOW_ALERT_DAYS = 3
 const BALANCE_CRITICAL_ALERT_DAYS = 1
+// 会话数告警阈值:活跃会话占满 max_sessions 时严重(新会话会被上游拒绝),
+// 达到 80%(且至少留 1 个空位起算)时预警。仅针对配置了 max_sessions 的账号。
+const SESSION_NEAR_LIMIT_RATIO = 0.8
 const guardFreshnessNow = ref(Date.now())
 const guardCronIntervalSeconds = ref(0)
 let guardFreshnessTimer: number | undefined
@@ -3511,6 +3514,16 @@ function accountSchedulingAlerts(account: SupplierProviderAccount): SchedulingAl
       key: 'balance_low',
       severity: estimatedDays < BALANCE_CRITICAL_ALERT_DAYS ? 'critical' : 'warning',
     })
+  }
+
+  const maxSessions = Number(account.local_account_max_sessions) || 0
+  const activeSessions = account.local_account_active_sessions
+  if (maxSessions > 0 && typeof activeSessions === 'number' && Number.isFinite(activeSessions)) {
+    if (activeSessions >= maxSessions) {
+      alerts.push({ key: 'session_near_limit', severity: 'critical' })
+    } else if (activeSessions >= Math.max(1, Math.min(maxSessions - 1, Math.ceil(maxSessions * SESSION_NEAR_LIMIT_RATIO)))) {
+      alerts.push({ key: 'session_near_limit', severity: 'warning' })
+    }
   }
 
   return alerts

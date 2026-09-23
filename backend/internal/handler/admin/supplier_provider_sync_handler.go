@@ -73,6 +73,12 @@ type SupplierCustomPlatformResolver interface {
 	ResolveEnabled(ctx context.Context, code string) (*service.CustomPlatform, error)
 }
 
+// SupplierLocalAccountReaderPort 仅暴露按 ID 批量读取本地账号的能力，
+// 用于会话数告警时读取匹配账号的 max_sessions / 空闲超时等配置。
+type SupplierLocalAccountReaderPort interface {
+	GetByIDs(ctx context.Context, ids []int64) ([]*service.Account, error)
+}
+
 type SupplierProviderSyncHandler struct {
 	syncService            SupplierProviderSyncServicePort
 	dataRepo               SupplierProviderDataRepositoryPort
@@ -80,6 +86,8 @@ type SupplierProviderSyncHandler struct {
 	groupGuard             SupplierGroupGuardPort
 	customPlatformResolver SupplierCustomPlatformResolver
 	groupPlatformOverride  service.MonitorGroupPlatformOverrideService
+	sessionLimitCache      service.SessionLimitCache
+	localAccountReader     SupplierLocalAccountReaderPort
 }
 
 func (h *SupplierProviderSyncHandler) SetGroupGuard(guard SupplierGroupGuardPort) {
@@ -103,6 +111,15 @@ func (h *SupplierProviderSyncHandler) SetCustomPlatformResolver(resolver Supplie
 func (h *SupplierProviderSyncHandler) SetGroupPlatformOverrideService(overrideService service.MonitorGroupPlatformOverrideService) {
 	if h != nil {
 		h.groupPlatformOverride = overrideService
+	}
+}
+
+// SetSessionEnrichment 注入会话数告警所需的本地账号读取器与会话缓存；
+// 二者缺一时列表接口不补充会话字段，保持其它调用方零依赖。
+func (h *SupplierProviderSyncHandler) SetSessionEnrichment(cache service.SessionLimitCache, reader SupplierLocalAccountReaderPort) {
+	if h != nil {
+		h.sessionLimitCache = cache
+		h.localAccountReader = reader
 	}
 }
 
@@ -376,7 +393,75 @@ func (h *SupplierProviderSyncHandler) ListAccounts(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	h.enrichSessionUsage(c.Request.Context(), &result)
 	response.Success(c, result)
+}
+
+// enrichSessionUsage 为已匹配唯一本地账号的行补充「会话数上限 / 当前活跃会话数」，
+// 仅覆盖 Anthropic OAuth/SetupToken 且配置了 max_sessions 的账号，供前端做会话数告警。
+func (h *SupplierProviderSyncHandler) enrichSessionUsage(ctx context.Context, result *service.SupplierProviderAccountListResult) {
+	if h == nil || h.sessionLimitCache == nil || h.localAccountReader == nil || result == nil || len(result.Items) == 0 {
+		return
+	}
+
+	idSet := make(map[int64]struct{})
+	for i := range result.Items {
+		if id := result.Items[i].LocalAccountID; id != nil && *id > 0 {
+			idSet[*id] = struct{}{}
+		}
+	}
+	if len(idSet) == 0 {
+		return
+	}
+	ids := make([]int64, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+
+	accounts, err := h.localAccountReader.GetByIDs(ctx, ids)
+	if err != nil {
+		return
+	}
+
+	maxSessions := make(map[int64]int, len(accounts))
+	idleTimeouts := make(map[int64]time.Duration, len(accounts))
+	sessionIDs := make([]int64, 0, len(accounts))
+	for _, account := range accounts {
+		if account == nil || !account.IsAnthropicOAuthOrSetupToken() {
+			continue
+		}
+		limit := account.GetMaxSessions()
+		if limit <= 0 {
+			continue
+		}
+		maxSessions[account.ID] = limit
+		idleTimeouts[account.ID] = time.Duration(account.GetSessionIdleTimeoutMinutes()) * time.Minute
+		sessionIDs = append(sessionIDs, account.ID)
+	}
+	if len(sessionIDs) == 0 {
+		return
+	}
+
+	activeSessions, err := h.sessionLimitCache.GetActiveSessionCountBatch(ctx, sessionIDs, idleTimeouts)
+	if err != nil {
+		return
+	}
+
+	for i := range result.Items {
+		id := result.Items[i].LocalAccountID
+		if id == nil {
+			continue
+		}
+		limit, ok := maxSessions[*id]
+		if !ok {
+			continue
+		}
+		result.Items[i].LocalAccountMaxSessions = limit
+		if count, ok := activeSessions[*id]; ok {
+			value := count
+			result.Items[i].LocalAccountActiveSessions = &value
+		}
+	}
 }
 
 func (h *SupplierProviderSyncHandler) ListMonitorTargets(c *gin.Context) {
