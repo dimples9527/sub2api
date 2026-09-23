@@ -527,6 +527,7 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
        ), '[]'::jsonb) AS binding_groups,
        COALESCE(runtime.current_balance, 0) AS supplier_current_balance,
        COALESCE(runtime.today_cost, 0) AS supplier_today_cost,
+       runtime.estimated_days AS supplier_estimated_days,
        inactive_group_record.id AS group_record_id,
        COALESCE(
          inactive_group_record.id IS NOT NULL
@@ -2381,6 +2382,7 @@ func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (servic
 	var localAccountSchedulable sql.NullBool
 	var bindingGroupsJSON []byte
 	var groupRecordID sql.NullInt64
+	var supplierEstimatedDays sql.NullFloat64
 	err := scanner.Scan(&item.ID, &item.ProviderID, &item.ProviderName, &item.UpstreamKey,
 		&item.Name, &item.Status, &item.GroupKey, &item.GroupName, &item.Platform, &item.GroupStatus, &item.RateMultiplier,
 		&item.RawStatus, &item.Active, &item.LastSeenAt, &inactiveAt,
@@ -2399,9 +2401,14 @@ func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (servic
 		&item.LocalAccountRecentHealthAvgLatencyMs,
 		&bindingGroupsJSON,
 		&item.SupplierCurrentBalance, &item.SupplierTodayCost,
+		&supplierEstimatedDays,
 		&groupRecordID, &item.GroupRecordDeleteEligible)
 	if err != nil {
 		return service.SupplierProviderAccount{}, err
+	}
+	if supplierEstimatedDays.Valid {
+		value := supplierEstimatedDays.Float64
+		item.SupplierEstimatedDays = &value
 	}
 	if inactiveAt.Valid {
 		item.InactiveAt = &inactiveAt.Time

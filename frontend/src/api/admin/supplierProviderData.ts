@@ -127,6 +127,7 @@ export interface SupplierProviderAccount {
   local_account_recent_health_avg_latency_ms?: number
   supplier_current_balance: number
   supplier_today_cost: number
+  supplier_estimated_days?: number | null
 }
 
 export interface SupplierProviderGroup {

@@ -1,5 +1,53 @@
 <template>
   <SupplierModuleLayout>
+    <section
+      v-if="schedulingAlertSummary.total > 0"
+      class="sp-alert-banner"
+      :class="{ 'is-critical': schedulingAlertSummary.hasCritical }"
+      aria-label="调度账号告警汇总"
+      data-test="supplier-account-alert-banner"
+    >
+      <button
+        type="button"
+        class="sp-alert-banner-head"
+        :aria-expanded="alertPanelOpen"
+        @click="alertPanelOpen = !alertPanelOpen"
+      >
+        <span class="sp-alert-banner-icon" aria-hidden="true">!</span>
+        <span class="sp-alert-banner-title">
+          当前筛选下 <strong>{{ schedulingAlertSummary.total }}</strong> 个调度账号存在告警
+        </span>
+        <span class="sp-alert-banner-chips">
+          <template v-for="key in SCHEDULING_ALERT_ORDER" :key="key">
+            <span
+              v-if="schedulingAlertSummary.counts[key] > 0"
+              :class="['sp-alert-chip', schedulingAlertHeadClass(key)]"
+            >{{ SCHEDULING_ALERT_LABELS[key] }} {{ schedulingAlertSummary.counts[key] }}</span>
+          </template>
+        </span>
+        <span class="sp-alert-banner-toggle">{{ alertPanelOpen ? '收起' : '查看明细' }}</span>
+      </button>
+      <ul v-if="alertPanelOpen" class="sp-alert-list">
+        <li
+          v-for="entry in schedulingAlertSummary.affected"
+          :key="entry.account.id"
+          class="sp-alert-list-item"
+        >
+          <button type="button" class="sp-alert-list-account" @click="openDrawer(entry.account)">
+            <span class="sp-alert-list-name">{{ displayValue(entry.account.local_account_name || entry.account.name) }}</span>
+            <span class="sp-alert-list-provider">{{ entry.account.provider_name }}</span>
+          </button>
+          <span class="sp-alert-list-tags">
+            <span
+              v-for="alert in entry.alerts"
+              :key="alert.key"
+              :class="['sp-alert-chip', alert.severity === 'critical' ? 'is-critical' : 'is-warning']"
+            >{{ SCHEDULING_ALERT_LABELS[alert.key] }}</span>
+          </span>
+        </li>
+      </ul>
+    </section>
+
     <section class="sp-account-toolbar" aria-label="账号筛选与操作">
       <header class="sp-filter-card-head">
         <div>
@@ -1950,6 +1998,7 @@ async function submitBindByGroup() {
 const sortBy = ref('')
 const sortOrder = ref<'asc' | 'desc'>('asc')
 const accountQuickFilter = ref<AccountQuickFilterKey>('all')
+const alertPanelOpen = ref(false)
 const savingBindingAccountID = ref<number | null>(null)
 const priorityDraft = ref('')
 const priorityInput = ref<InstanceType<typeof Input> | null>(null)
@@ -1981,6 +2030,13 @@ const GUARD_CHECK_STALE_CRON_MULTIPLIER = 2
 const GUARD_CHECK_STALE_FALLBACK_MINUTES = 10
 const GUARD_FAILURE_HINT_THRESHOLD = 2
 const SUPPLIER_GUARD_FAILURE_RECORD_LIMIT = 20
+// 测试耗时告警阈值:近 1 小时守护平均用时超过该值即作早期预警。取固定值而非守护的 slow
+// 阈值,是为了在账号被守护判定为 slow/failed 之前就先提醒,与「失败仍在调度」互补。
+const SLOW_LATENCY_ALERT_MS = 8000
+// 余额可用天数告警阈值:供应商估算可用天数低于 3 天预警、低于 1 天升级为严重。
+// estimated_days 为供应商汇总口径,同一供应商下的多个调度账号会一起命中。
+const BALANCE_LOW_ALERT_DAYS = 3
+const BALANCE_CRITICAL_ALERT_DAYS = 1
 const guardFreshnessNow = ref(Date.now())
 const guardCronIntervalSeconds = ref(0)
 let guardFreshnessTimer: number | undefined
@@ -3414,6 +3470,75 @@ function hasGuardSuccesses(account: SupplierProviderAccount): boolean {
   return isMatchedLocalAccount(account) && guardHealthyCount(account) > 0
 }
 
+type SchedulingAlertKey = 'failing_scheduled' | 'slow_latency' | 'balance_low' | 'session_near_limit'
+
+interface SchedulingAlert {
+  key: SchedulingAlertKey
+  severity: 'critical' | 'warning'
+}
+
+const SCHEDULING_ALERT_LABELS: Record<SchedulingAlertKey, string> = {
+  failing_scheduled: '失败仍在调度',
+  slow_latency: '耗时偏高',
+  balance_low: '余额告急',
+  session_near_limit: '会话将满',
+}
+
+// 展示顺序按处置紧迫度:直接影响可用性的排前面。
+const SCHEDULING_ALERT_ORDER: SchedulingAlertKey[] = ['failing_scheduled', 'session_near_limit', 'balance_low', 'slow_latency']
+
+// 告警只针对已匹配且开启调度的账号:这些账号正在承接线上流量,异常才需要立即处置。
+function accountSchedulingAlerts(account: SupplierProviderAccount): SchedulingAlert[] {
+  if (!isMatchedLocalAccount(account) || account.local_account_schedulable !== true) return []
+  const alerts: SchedulingAlert[] = []
+
+  const rate = recentHealthRate(account)
+  if (
+    account.local_account_last_test_status === 'failed'
+    || (rate !== null && rate < 80)
+    || guardFailureCount(account) >= GUARD_FAILURE_HINT_THRESHOLD
+  ) {
+    alerts.push({ key: 'failing_scheduled', severity: 'critical' })
+  }
+
+  if ((Number(account.local_account_recent_health_avg_latency_ms) || 0) > SLOW_LATENCY_ALERT_MS) {
+    alerts.push({ key: 'slow_latency', severity: 'warning' })
+  }
+
+  const estimatedDays = account.supplier_estimated_days
+  if (typeof estimatedDays === 'number' && Number.isFinite(estimatedDays) && estimatedDays < BALANCE_LOW_ALERT_DAYS) {
+    alerts.push({
+      key: 'balance_low',
+      severity: estimatedDays < BALANCE_CRITICAL_ALERT_DAYS ? 'critical' : 'warning',
+    })
+  }
+
+  return alerts
+}
+
+const schedulingAlertSummary = computed(() => {
+  const affected: Array<{ account: SupplierProviderAccount; alerts: SchedulingAlert[] }> = []
+  const counts: Record<SchedulingAlertKey, number> = {
+    failing_scheduled: 0, slow_latency: 0, balance_low: 0, session_near_limit: 0,
+  }
+  for (const account of accountSourceItems.value) {
+    const alerts = accountSchedulingAlerts(account)
+    if (!alerts.length) continue
+    affected.push({ account, alerts })
+    for (const alert of alerts) counts[alert.key] += 1
+  }
+  return {
+    affected,
+    counts,
+    total: affected.length,
+    hasCritical: affected.some(entry => entry.alerts.some(alert => alert.severity === 'critical')),
+  }
+})
+
+function schedulingAlertHeadClass(key: SchedulingAlertKey): string {
+  return key === 'failing_scheduled' || key === 'session_near_limit' ? 'is-critical' : 'is-warning'
+}
+
 function guardActionLabel(action?: string): string {
   if (action === 'disabled') return '已暂停调度'
   if (action === 'recovered') return '已恢复调度'
@@ -3593,6 +3718,147 @@ function formatTime(value?: string): string {
 }
 </script>
 <style scoped>
+.sp-alert-banner {
+  margin-bottom: 1rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--sp-amber) 40%, var(--sp-line));
+  border-radius: 0.875rem;
+  background: color-mix(in srgb, var(--sp-amber) 8%, var(--sp-panel));
+}
+
+.sp-alert-banner.is-critical {
+  border-color: color-mix(in srgb, var(--sp-red) 45%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-red) 8%, var(--sp-panel));
+}
+
+.sp-alert-banner-head {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 1rem;
+  border: 0;
+  background: transparent;
+  color: var(--sp-text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.sp-alert-banner-icon {
+  display: inline-flex;
+  width: 1.35rem;
+  height: 1.35rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--sp-amber);
+  color: #1a1a1a;
+  font-weight: 800;
+  font-size: 0.85rem;
+}
+
+.sp-alert-banner.is-critical .sp-alert-banner-icon {
+  background: var(--sp-red);
+  color: #fff;
+}
+
+.sp-alert-banner-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.sp-alert-banner-title strong {
+  font-size: 1rem;
+}
+
+.sp-alert-banner-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.sp-alert-banner-toggle {
+  margin-left: auto;
+  flex: 0 0 auto;
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.sp-alert-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.sp-alert-chip.is-warning {
+  background: color-mix(in srgb, var(--sp-amber) 16%, transparent);
+  color: var(--sp-amber);
+}
+
+.sp-alert-chip.is-critical {
+  background: color-mix(in srgb, var(--sp-red) 15%, transparent);
+  color: var(--sp-red);
+}
+
+.sp-alert-list {
+  margin: 0;
+  padding: 0.25rem 0.75rem 0.75rem;
+  list-style: none;
+  border-top: 1px solid color-mix(in srgb, var(--sp-line) 70%, transparent);
+}
+
+.sp-alert-list-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 0.25rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--sp-line) 45%, transparent);
+}
+
+.sp-alert-list-item:last-child {
+  border-bottom: 0;
+}
+
+.sp-alert-list-account {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.1rem;
+  border: 0;
+  background: transparent;
+  color: var(--sp-text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.sp-alert-list-account:hover .sp-alert-list-name {
+  color: var(--sp-cyan);
+  text-decoration: underline;
+}
+
+.sp-alert-list-name {
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.sp-alert-list-provider {
+  color: var(--sp-muted);
+  font-size: 0.7rem;
+}
+
+.sp-alert-list-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-left: auto;
+}
+
 .sp-account-toolbar {
   margin-bottom: 1rem;
   overflow: hidden;
