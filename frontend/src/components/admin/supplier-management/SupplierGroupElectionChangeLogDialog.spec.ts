@@ -192,4 +192,21 @@ describe('调度切换日志的两个入口', () => {
     // 再来一个实心色块会被读成第三种方向，虚线才表达「还没落地」。
     expect(cssBlock('.sp-election-log-suggested')).toContain('dashed')
   })
+
+  it('原因列摊开「为什么是它」：评分、名次、入选线、必需模型补选都要能看见', () => {
+    // 一句话原因（「综合分入选」）没法复核：评分怎么算的、组内第几名、入选线多少、
+    // 是不是因为必需模型被补选，都得摊出来，否则管理员只能回头翻配置和源码。
+    expect(source).toContain('v-if="whyFacts(section, log).length > 0"')
+    expect(source).toContain('<summary>依据</summary>')
+    // 依据按分组存，必须挑当前分节那一条 —— 一个账号跨多个分组时各组结论可以不同，
+    // 把 A 组的评分解释到 B 组的行上是纯误导。
+    expect(source).toContain('decisions.find((decision) => decision.group_name === section.groupName)')
+    // 旧运行记录里没有 group_decisions：取不到依据就整块不渲染，降级回原来的一行原因。
+    expect(source).toContain('if (!decisions || decisions.length === 0) return undefined')
+    // 必需模型补选要单独说明：它的综合分不一定进前 N，不写清楚看起来像择优算错了。
+    expect(source).toContain('在赢家中无人支持，被按综合分补选开启')
+    // 用时项取中性值时必须标明，否则管理员会拿这个 0.5 去反推配置。
+    expect(source).toContain('用时项取中性值 0.5')
+    expect(cssBlock('.sp-election-log-why')).toContain('margin-top')
+  })
 })

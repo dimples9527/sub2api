@@ -131,6 +131,15 @@
                       <template v-else-if="column.key === 'reason'">
                         <small class="sp-election-log-reason">{{ log.reason || '—' }}</small>
                         <small v-if="log.error_message" class="sp-election-log-error">{{ log.error_message }}</small>
+                        <!-- 一句话原因说不清「为什么是它」：评分构成、组内名次、入选线、
+                             必需模型补选、在任者锁定、无备选这些都摊在这里，省得管理员回头翻配置和源码。
+                             旧运行记录里没有 group_decisions，此时整块不渲染（自动降级回原来的一行原因）。 -->
+                        <details v-if="whyFacts(section, log).length > 0" class="sp-election-log-why">
+                          <summary>依据</summary>
+                          <ul class="sp-election-log-why-list">
+                            <li v-for="(fact, index) in whyFacts(section, log)" :key="index">{{ fact }}</li>
+                          </ul>
+                        </details>
                       </template>
                     </td>
                   </tr>
@@ -313,6 +322,65 @@ interface LogSection {
 
 // 分组名缺失时的兜底桶（分组已被删除，或历史数据没记名字）。
 const NO_GROUP_KEY = '__no_group__'
+
+// 取「本行在本分节这个分组下」的那条裁决依据。
+// 依据是按分组存的（一个账号跨多个分组时各组结论可能不同），所以必须按当前分节挑一条，
+// 不能把该行的所有依据堆在一起 —— 那会把 A 组的评分解释到 B 组的行上。
+function decisionFor(section: LogSection, log: SupplierGroupElectionChangeLog) {
+  const decisions = log.group_decisions
+  if (!decisions || decisions.length === 0) return undefined
+  if (section.key === NO_GROUP_KEY) return undefined
+  const matched = decisions.find((decision) => decision.group_name === section.groupName)
+  // 只有一个分组结论时不存在歧义（名字缺失也认），多个却没匹配上就不猜。
+  return matched || (decisions.length === 1 ? decisions[0] : undefined)
+}
+
+// 把一条依据摊成可读的短句。判定逻辑全在这里，模板只负责渲染。
+function whyFacts(section: LogSection, log: SupplierGroupElectionChangeLog): string[] {
+  const decision = decisionFor(section, log)
+  if (!decision) return []
+  const facts: string[] = []
+  const fixed = (value?: number) => (typeof value === 'number' ? value.toFixed(2) : '—')
+  const score = (value?: number) => (typeof value === 'number' ? value.toFixed(3) : '—')
+  const requiredModels = decision.required_models || []
+
+  if (decision.locked) {
+    facts.push('本组走在任者健康锁定：在任账号测试都正常，本轮不做择优换人（名次仅供参考）')
+  }
+  if (decision.no_alternative) {
+    facts.push('本组没有任何测试成功的账号，为避免关成空组，失败账号保持原状待人工确认')
+  }
+
+  if (decision.scored) {
+    facts.push(
+      `综合分 ${score(decision.score)} = 次数分 ${score(decision.count_score)} × 权重 ${fixed(decision.count_weight)}`
+      + ` + 用时分 ${score(decision.latency_score)} × 权重 ${fixed(decision.latency_weight)}`
+    )
+    if (decision.count_score_cap) {
+      facts.push(`次数分按封顶 ${decision.count_score_cap} 归一：连续成功次数超过该值后不再加分`)
+    }
+    if (decision.latency_fallback) {
+      facts.push('用时项取中性值 0.5：同平台可比样本不足 2 个，或各账号耗时完全相同，比不出高下')
+    } else if (decision.effective_latency_ms) {
+      facts.push(`评分用时 ${latencyText(decision.effective_latency_ms)}（已含成功率惩罚，在任者另按迟滞系数折算）`)
+    }
+    if (decision.rank && decision.rank_total) {
+      const cutoff = typeof decision.winner_cutoff === 'number' ? score(decision.winner_cutoff) : '—'
+      facts.push(`组内名次 ${decision.rank} / ${decision.rank_total}，入选线 ${cutoff}（取前 ${decision.top_n ?? '—'} 名）`)
+    }
+  } else {
+    facts.push(decision.test_failed ? '该组当前测试失败，未参与择优' : '该组当前不是测试成功状态，未参与择优')
+  }
+
+  if (requiredModels.length > 0) {
+    facts.push(`因分组必需模型 ${requiredModels.join('、')} 在赢家中无人支持，被按综合分补选开启（不要求名次进前 N）`)
+  } else if (decision.elected) {
+    facts.push('本组择优入选：综合分在前 N 名内')
+  } else if (decision.scored && !decision.locked) {
+    facts.push('本组未入选：综合分不在前 N 名内')
+  }
+  return facts
+}
 
 // 按分组分节、组内再按批次分块。
 // 分两层是因为一份日志里混着多次运行：只按分组归档的话，同一个组下面会把不同批次的行混在一起，
@@ -849,5 +917,46 @@ watch(() => props.accountId, () => {
 
 .dark .sp-election-log-error {
   color: #f87171;
+}
+
+/* 「依据」折叠块：默认收起，免得一屏几十行把表格撑散；展开后逐条列出评分构成、
+   组内名次、入选线、必需模型补选、在任者锁定等。配色沿用弹窗自持变量，暗色自动跟随。 */
+.sp-election-log-why {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.sp-election-log-why > summary {
+  color: var(--sp-election-log-accent);
+  cursor: pointer;
+  font-weight: 700;
+  list-style: none;
+}
+
+.sp-election-log-why > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* 原生 marker 被摘掉后自己画一个，否则看不出这里可以点开。 */
+.sp-election-log-why > summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 4px;
+}
+
+.sp-election-log-why[open] > summary::before {
+  content: '▾';
+}
+
+.sp-election-log-why-list {
+  margin: 4px 0 0;
+  padding-left: 14px;
+  color: var(--sp-election-log-muted);
+  list-style: disc;
+}
+
+.sp-election-log-why-list > li + li {
+  margin-top: 2px;
 }
 </style>

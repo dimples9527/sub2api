@@ -438,6 +438,44 @@ export interface SupplierRateGuardChangeLogListResult {
   page_size: number
 }
 
+// 「某账号在某分组里为什么是这个裁决」的依据，随运行明细一起落库。
+// 一个账号同属多个分组时各组结论可以不同（在 A 组当选、在 B 组落选），所以按分组各存一条。
+// ⚠️ 只有升级后新产生的运行才有这个字段，旧记录里没有，展示必须能降级。
+export interface SupplierGroupElectionDecisionDetail {
+  group_id: number
+  group_name?: string
+  /** false 表示该账号在该组当前不是「测试成功」，压根没进择优，下面评分字段全部无意义。 */
+  scored?: boolean
+  /** 是否在该组入选（择优前 N，或因覆盖必需模型被补选）。 */
+  elected?: boolean
+  /** 综合分 = count_weight × count_score + latency_weight × latency_score，三项都给出来便于复核。 */
+  score?: number
+  count_score?: number
+  latency_score?: number
+  count_weight?: number
+  latency_weight?: number
+  /** 次数分的封顶值：连续成功次数超过它之后不再加分。 */
+  count_score_cap?: number
+  /** 真正参与评分的延迟（含成功率惩罚与在任者迟滞折算），与日志里显示的「测试用时」不是同一个数。 */
+  effective_latency_ms?: number
+  /** true 表示用时分取了中性值 0.5（同平台样本不足或极差为 0），不是算出来的。 */
+  latency_fallback?: boolean
+  /** 综合分在该组「测试成功账号」里的名次（1 起）与参评总数。 */
+  rank?: number
+  rank_total?: number
+  /** 入选分数线（第 top_n 名的综合分），落选时用来说明「差多少」。 */
+  winner_cutoff?: number
+  top_n?: number
+  /** true 表示该组本轮走「在任者健康锁定」，没做择优，此时名次只是参考。 */
+  locked?: boolean
+  /** 非空表示该账号是因「分组要求这些模型、而赢家里没人支持」被补选开启的。 */
+  required_models?: string[]
+  /** true 表示该组一个测试成功的账号都没有，失败账号因此保持原状待人工确认。 */
+  no_alternative?: boolean
+  /** true 表示该账号在该组当前是测试失败状态。 */
+  test_failed?: boolean
+}
+
 // 一条「某账号的调度开关被拨动（或演练模式下被建议拨动）」的记录。
 // 与运行明细的区别：运行明细是「一次任务执行」视角（含未变更和写库失败），
 // 这里只保留开关前后不一致的条目。
@@ -463,6 +501,8 @@ export interface SupplierGroupElectionChangeLog {
   group_names?: string[]
   /** 演练模式产生的建议切换：目标状态已算出，但没有真的写库。 */
   suggested?: boolean
+  /** 按分组记录「为什么是它」：评分明细、是否因覆盖必需模型补选、是否走锁定等。旧记录无此字段。 */
+  group_decisions?: SupplierGroupElectionDecisionDetail[]
 }
 
 export interface SupplierGroupElectionChangeLogListParams {
