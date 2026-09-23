@@ -951,40 +951,24 @@
             <div v-else class="sp-rate-guard-empty">当前没有可配置默认模型的平台。</div>
           </section>
 
-          <section v-if="editForm.config.account_health_guard_platform_multiplier_intervals_enabled" class="sp-health-guard-platform-models sp-health-guard-multiplier-section">
+          <!-- 倍率区间按平台铺开后，7 个平台会把账号工作区挤到看不见（弹窗高度受 100dvh 约束），
+               因此这里只放「摘要 + 入口」，实际区间配置放进二级弹窗。 -->
+          <section v-if="editForm.config.account_health_guard_platform_multiplier_intervals_enabled" class="sp-health-guard-platform-models sp-health-guard-multiplier-entry-section">
             <div class="sp-health-guard-dialog-section-head">
               <strong>未开调度账号按倍率间隔</strong>
               <span>仅对未开启调度的账号生效：按账号所属平台 + 计费倍率落入的区间取检查间隔（覆盖账号级间隔）。区间取 [下限, 上限)，上限留空表示无上界；未命中任何区间的账号每轮都会检查。间隔不得低于 60 秒。</span>
             </div>
-            <div v-if="healthGuardPlatformSummaries.length" class="sp-health-guard-multiplier-grid">
-              <article v-for="summary in healthGuardPlatformSummaries" :key="summary.platform">
-                <div class="sp-health-guard-multiplier-head" :class="platformTextClass(summary.platform)">
-                  <strong>{{ platformLabel(summary.platform) }}</strong>
-                  <button class="sp-button small ghost" type="button" @click="addHealthGuardMultiplierRule(summary.platform)">
-                    <Icon name="plus" size="sm" />
-                    新增区间
-                  </button>
-                </div>
-                <div v-if="healthGuardMultiplierRules(summary.platform).length" class="sp-health-guard-multiplier-rows">
-                  <div class="sp-health-guard-multiplier-row sp-health-guard-multiplier-row-head">
-                    <span>倍率下限（含）</span>
-                    <span>倍率上限（不含，留空=无上界）</span>
-                    <span>检查间隔（秒）</span>
-                    <span></span>
-                  </div>
-                  <div v-for="(rule, index) in healthGuardMultiplierRules(summary.platform)" :key="index" class="sp-health-guard-multiplier-row">
-                    <Input :model-value="rule.min_multiplier" type="number" step="0.1" min="0" @update:model-value="rule.min_multiplier = toNumber($event, rule.min_multiplier)" />
-                    <Input :model-value="rule.max_multiplier || ''" type="number" step="0.1" min="0" placeholder="无上界" @update:model-value="rule.max_multiplier = toNumber($event, 0)" />
-                    <Input :model-value="rule.interval_seconds" type="number" min="60" @update:model-value="rule.interval_seconds = toNumber($event, rule.interval_seconds)" />
-                    <button class="sp-button small ghost danger" type="button" @click="removeHealthGuardMultiplierRule(summary.platform, index)">
-                      <Icon name="trash" size="sm" />
-                    </button>
-                  </div>
-                </div>
-                <div v-else class="sp-rate-guard-empty">未配置区间：该平台下未开调度的账号每轮都会检查。</div>
-              </article>
+            <div class="sp-health-guard-multiplier-entry">
+              <span>{{ healthGuardMultiplierSummary }}</span>
+              <button
+                class="sp-button small ghost sp-health-guard-multiplier-entry-button"
+                type="button"
+                @click="openMultiplierIntervalDialog"
+              >
+                <Icon name="cog" size="sm" />
+                配置倍率区间
+              </button>
             </div>
-            <div v-else class="sp-rate-guard-empty">当前没有可配置倍率间隔的平台。</div>
           </section>
 
           <section class="sp-health-guard-account-workspace">
@@ -1199,6 +1183,53 @@
         </div>
         <template #footer>
           <button class="sp-button primary" type="button" @click="closeHealthGuardAccounts">完成</button>
+        </template>
+      </BaseDialog>
+
+      <!-- 二级弹窗：z-index 必须高于「配置健康守护账号」（60）。BaseDialog 一律 Teleport 到 body，
+           这里的 .modal-content 是父弹窗的**兄弟**节点，配色变量一条都继承不到，
+           所以 .sp-multiplier-interval-dialog 自己声明了完整的 --sp-* 兜底（见样式块）。 -->
+      <BaseDialog
+        :show="multiplierIntervalDialogVisible"
+        title="配置倍率区间"
+        width="extra-wide"
+        :z-index="70"
+        @close="closeMultiplierIntervalDialog"
+      >
+        <div class="sp-multiplier-interval-dialog">
+          <div v-if="healthGuardPlatformSummaries.length" class="sp-health-guard-multiplier-grid">
+            <article v-for="summary in healthGuardPlatformSummaries" :key="summary.platform">
+              <div class="sp-health-guard-multiplier-head" :class="platformTextClass(summary.platform)">
+                <strong>{{ platformLabel(summary.platform) }}</strong>
+                <button class="sp-button small ghost" type="button" @click="addHealthGuardMultiplierRule(summary.platform)">
+                  <Icon name="plus" size="sm" />
+                  新增区间
+                </button>
+              </div>
+              <div v-if="healthGuardMultiplierRules(summary.platform).length" class="sp-health-guard-multiplier-rows">
+                <div class="sp-health-guard-multiplier-row sp-health-guard-multiplier-row-head">
+                  <span>倍率下限（含）</span>
+                  <span>倍率上限（不含，留空=无上界）</span>
+                  <span>检查间隔（秒）</span>
+                  <span></span>
+                </div>
+                <div v-for="(rule, index) in healthGuardMultiplierRules(summary.platform)" :key="index" class="sp-health-guard-multiplier-row">
+                  <Input :model-value="rule.min_multiplier" type="number" step="0.1" min="0" @update:model-value="rule.min_multiplier = toNumber($event, rule.min_multiplier)" />
+                  <Input :model-value="rule.max_multiplier || ''" type="number" step="0.1" min="0" placeholder="无上界" @update:model-value="rule.max_multiplier = toNumber($event, 0)" />
+                  <Input :model-value="rule.interval_seconds" type="number" min="60" @update:model-value="rule.interval_seconds = toNumber($event, rule.interval_seconds)" />
+                  <button class="sp-button small ghost danger" type="button" @click="removeHealthGuardMultiplierRule(summary.platform, index)">
+                    <Icon name="trash" size="sm" />
+                  </button>
+                </div>
+              </div>
+              <div v-else class="sp-rate-guard-empty">未配置区间：该平台下未开调度的账号每轮都会检查。</div>
+            </article>
+          </div>
+          <div v-else class="sp-rate-guard-empty">当前没有可配置倍率间隔的平台。</div>
+        </div>
+        <template #footer>
+          <span class="sp-multiplier-interval-hint">区间取 [下限, 上限)，上限留空表示无上界；未命中任何区间的账号每轮都会检查。</span>
+          <button class="sp-button primary" type="button" @click="closeMultiplierIntervalDialog">完成</button>
         </template>
       </BaseDialog>
 
@@ -1572,6 +1603,7 @@ const electionGroupSearch = ref('')
 const electionGroupDisabledOnly = ref(false)
 const electionGroupPlatformFilter = ref<string[]>([])
 const healthGuardAccountsVisible = ref(false)
+const multiplierIntervalDialogVisible = ref(false)
 const healthGuardAccountPlatformFilter = ref<string[]>([])
 const healthGuardAccountProviderFilter = ref('')
 const healthGuardAccountSearch = ref('')
@@ -2681,6 +2713,26 @@ const healthGuardPlatformSummaries = computed<HealthGuardPlatformSummary[]>(() =
   }
   return Array.from(summaries.values()).sort((a, b) => platformLabel(a.platform).localeCompare(platformLabel(b.platform), 'zh-CN'))
 })
+
+// 入口区只显示一行摘要：配置搬进二级弹窗后，用户需要一个信号判断「有没有配过」，
+// 否则「未开调度账号按倍率间隔」开着却不知道配没配。
+const healthGuardMultiplierSummary = computed(() => {
+  const total = healthGuardPlatformSummaries.value.length
+  if (total === 0) return '当前没有可配置倍率间隔的平台。'
+  const configured = healthGuardPlatformSummaries.value.filter(
+    summary => healthGuardMultiplierRules(summary.platform).length > 0
+  ).length
+  if (configured === 0) return `共 ${total} 个平台，均未配置区间（每轮都会检查）。`
+  return `已为 ${configured}/${total} 个平台配置区间，其余平台每轮都会检查。`
+})
+
+function openMultiplierIntervalDialog() {
+  multiplierIntervalDialogVisible.value = true
+}
+
+function closeMultiplierIntervalDialog() {
+  multiplierIntervalDialogVisible.value = false
+}
 
 // 账号弹窗的平台标签与分组弹窗共用同一套渲染，只是统计口径换成「可用账号数」——
 // 与它替换掉的下拉选项口径一致，筛选行为不变。
@@ -4188,6 +4240,7 @@ function intervalSecondsToCron(seconds: number): string | null {
 }
 
 :global(.modal-content:has(.sp-health-guard-account-dialog)),
+:global(.modal-content:has(.sp-multiplier-interval-dialog)),
 :global(.modal-content:has(.sp-edit-dialog)),
 :global(.modal-content:has(.sp-run-detail)) {
   --sp-panel: #ffffff;
@@ -4218,6 +4271,7 @@ function intervalSecondsToCron(seconds: number): string | null {
 }
 
 :global(.dark .modal-content:has(.sp-health-guard-account-dialog)),
+:global(.dark .modal-content:has(.sp-multiplier-interval-dialog)),
 :global(.dark .modal-content:has(.sp-edit-dialog)),
 :global(.dark .modal-content:has(.sp-run-detail)) {
   --sp-panel: #172033;
@@ -4238,6 +4292,7 @@ function intervalSecondsToCron(seconds: number): string | null {
 }
 
 :global(.modal-content:has(.sp-health-guard-account-dialog) .modal-header),
+:global(.modal-content:has(.sp-multiplier-interval-dialog) .modal-header),
 :global(.modal-content:has(.sp-edit-dialog) .modal-header),
 :global(.modal-content:has(.sp-run-detail) .modal-header) {
   border-bottom-color: var(--sp-line);
@@ -4302,6 +4357,7 @@ function intervalSecondsToCron(seconds: number): string | null {
 }
 
 :global(.modal-content:has(.sp-health-guard-account-dialog) .modal-body),
+:global(.modal-content:has(.sp-multiplier-interval-dialog) .modal-body),
 :global(.modal-content:has(.sp-edit-dialog) .modal-body),
 :global(.modal-content:has(.sp-run-detail) .modal-body) {
   display: flex;
@@ -4310,6 +4366,12 @@ function intervalSecondsToCron(seconds: number): string | null {
   flex-direction: column;
   overflow: hidden;
   background: var(--sp-panel);
+}
+
+/* 倍率区间弹窗是内容型的，不需要「近全屏」那套 height: calc(100dvh - …)，
+   给一个上限让它在内容少时矮、内容多时顶到 70vh 由容器内部滚动。 */
+:global(.modal-content:has(.sp-multiplier-interval-dialog)) {
+  max-height: 70vh;
 }
 
 :global(.modal-content:has(.sp-health-guard-account-dialog) .modal-body),
@@ -4335,6 +4397,7 @@ function intervalSecondsToCron(seconds: number): string | null {
 }
 
 :global(.modal-content:has(.sp-health-guard-account-dialog) .modal-footer),
+:global(.modal-content:has(.sp-multiplier-interval-dialog) .modal-footer),
 :global(.modal-content:has(.sp-edit-dialog) .modal-footer),
 :global(.modal-content:has(.sp-run-detail) .modal-footer) {
   border-top-color: var(--sp-line);
@@ -5576,25 +5639,25 @@ function intervalSecondsToCron(seconds: number): string | null {
   background: color-mix(in srgb, var(--sp-blue) 4%, var(--sp-panel));
 }
 
-/* 倍率区间配置可能很高：让它在剩余空间内可收缩、内部滚动，
-   避免与默认模型区一起把账号列表挤没、导致整个弹窗被 overflow:hidden 裁掉无法滚动。 */
-.sp-health-guard-multiplier-section {
+/* 倍率区间原先按平台铺在主弹窗里，7 个平台会把账号工作区挤没（弹窗高度受 100dvh 约束）。
+   现在主弹窗只留「摘要 + 入口」一行，区间配置搬进 .sp-multiplier-interval-dialog 二级弹窗，
+   这里因此不再需要可收缩/内部滚动那套（它们正是「grid 被压成 0 高度」的根因）。 */
+.sp-health-guard-multiplier-entry {
   display: flex;
-  flex-direction: column;
-  flex: 0 1 auto;
-  min-height: 0;
-  max-height: 40vh;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding-top: 10px;
 }
 
-.sp-health-guard-multiplier-section .sp-health-guard-dialog-section-head {
+.sp-health-guard-multiplier-entry > span {
+  color: var(--sp-muted);
+  font-size: 12px;
+}
+
+.sp-health-guard-multiplier-entry-button {
   flex: 0 0 auto;
-}
-
-.sp-health-guard-multiplier-section .sp-health-guard-multiplier-grid {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  padding-right: 4px;
 }
 
 .sp-health-guard-account-workspace {
@@ -5697,6 +5760,28 @@ function intervalSecondsToCron(seconds: number): string | null {
 
 .sp-health-guard-multiplier-switch > div span {
   color: var(--sp-muted);
+}
+
+/* 倍率区间弹窗容器：自己滚，不靠 modal-body（body 是 overflow: hidden，
+   内部不滚就会被 overflow 吞掉，正是之前主弹窗里 grid 消失的同一个坑）。 */
+.sp-multiplier-interval-dialog {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px;
+}
+
+/* 列宽必须保持 460px：卡片内是「下限 / 上限 / 间隔 / 删除」四列 grid，
+   列宽一收窄，表头「倍率上限（不含，留空=无上界）」就会折成两行、「新增区间」按钮被压扁。
+   弹窗本身用 extra-wide 而不是 wide，就是为了在 460px 列宽下仍能排两列。 */
+.sp-multiplier-interval-dialog .sp-health-guard-multiplier-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 460px), 1fr));
+  margin-top: 0;
+}
+
+.sp-multiplier-interval-hint {
+  color: var(--sp-muted);
+  font-size: 12px;
 }
 
 .sp-health-guard-multiplier-grid {
