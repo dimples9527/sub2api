@@ -426,7 +426,7 @@
                   v-if="successLatencyLabel(account)"
                   class="sp-test-latency"
                   :title="'上次测试成功' + successLatencyLabel(account)"
-                >{{ successLatencyLabel(account) }}</span>
+                >用时 <strong>{{ successLatencyValue(account) }}</strong></span>
               </div>
               <div
                 v-if="recentHealthRate(account) !== null"
@@ -434,8 +434,8 @@
                 :title="recentHealthTitle(account)"
               >
                 <span class="sp-recent-label">近1h</span>
-                <span :class="['sp-recent-rate', recentHealthRateTone(account)]">{{ recentHealthRate(account) }}%</span>
-                <span v-if="recentHealthAvgLabel(account)" class="sp-recent-avg">均{{ recentHealthAvgLabel(account) }}</span>
+                <span :class="['sp-recent-rate', recentHealthRateTone(account)]"><strong>{{ recentHealthRate(account) }}%</strong></span>
+                <span v-if="recentHealthAvgLabel(account)" class="sp-recent-avg">均<strong>{{ recentHealthAvgLabel(account) }}</strong></span>
               </div>
               <button
                 v-if="hasRepeatedGuardFailures(account)"
@@ -444,11 +444,11 @@
                 title="查看守护检测失败记录"
                 :data-test="'supplier-account-guard-failures-' + account.local_account_id"
                 @click.stop="openGuardFailureDialog(account)"
-              >守护连续失败 {{ guardFailureCount(account) }} 次</button>
+              ><em>守护连续失败</em> <strong>{{ guardFailureCount(account) }}</strong> 次</button>
               <span
                 v-if="hasGuardSuccesses(account)"
                 class="sp-guard-success-hint"
-              >守护连续成功 {{ guardHealthyCount(account) }} 次</span>
+              ><em>守护连续成功</em> <strong>{{ guardHealthyCount(account) }}</strong> 次</span>
             </div>
           </template>
 
@@ -666,18 +666,18 @@
                 v-if="successLatencyLabel(selected)"
                 class="sp-test-latency"
                 :title="'上次测试成功' + successLatencyLabel(selected)"
-              >{{ successLatencyLabel(selected) }}</span>
+              >用时 <strong>{{ successLatencyValue(selected) }}</strong></span>
               <button
                 v-if="hasRepeatedGuardFailures(selected)"
                 type="button"
                 class="sp-guard-failure-hint"
                 title="查看守护检测失败记录"
                 @click.stop="openGuardFailureDialog(selected)"
-              >守护连续失败 {{ guardFailureCount(selected) }} 次</button>
+              ><em>守护连续失败</em> <strong>{{ guardFailureCount(selected) }}</strong> 次</button>
               <span
                 v-if="hasGuardSuccesses(selected)"
                 class="sp-guard-success-hint"
-              >守护连续成功 {{ guardHealthyCount(selected) }} 次</span>
+              ><em>守护连续成功</em> <strong>{{ guardHealthyCount(selected) }}</strong> 次</span>
             </b>
           </div>
           <div class="sp-detail-cell">
@@ -3347,6 +3347,12 @@ function successLatencyLabel(account: SupplierProviderAccount): string {
   return latency ? `用时 ${latency}` : ''
 }
 
+// 与 successLatencyLabel 同源，只是不带「用时」前缀：列里要把数字放大，前缀得留在小字号那一档。
+function successLatencyValue(account: SupplierProviderAccount): string {
+  if (account.local_account_last_test_status !== 'success') return ''
+  return formatTestLatency(account.local_account_last_test_latency_ms)
+}
+
 // 近 1 小时的成功率与平均用时来自守护检测历史(supplier_account_health_history),
 // 与上方「测试结果」的手动/上次测试是两套机制:手动测试只留最新一条,无法算窗口。
 function recentHealthRate(account: SupplierProviderAccount): number | null {
@@ -4340,18 +4346,26 @@ button.sp-test-status.failed:hover {
   gap: 0.25rem;
 }
 
+/* 结果列的耗时与近 1h 统计原来是 0.625rem 通铺，字太小且主次不分：
+   「用时 / 近1h / 均」这类说明文字退一档，真正要读的数字（2.2s / 93% / 2.4s）放大一档。
+   列宽是 min-w-[120px] 且表格 overflow-x: auto，放大后列会被内容自然撑开，不会被压窄。 */
 .sp-test-latency {
   color: var(--sp-cyan);
-  font-size: 0.625rem;
+  font-size: 0.6875rem;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
+.sp-test-latency strong {
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
 .sp-test-recent {
   display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.625rem;
+  align-items: baseline;
+  gap: 0.3125rem;
+  font-size: 0.6875rem;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -4360,7 +4374,8 @@ button.sp-test-status.failed:hover {
   color: var(--sp-muted);
 }
 
-.sp-recent-rate {
+.sp-recent-rate strong {
+  font-size: 0.875rem;
   font-weight: 700;
 }
 
@@ -4380,6 +4395,11 @@ button.sp-test-status.failed:hover {
   color: var(--sp-cyan);
 }
 
+.sp-recent-avg strong {
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
 .sp-detail-test-result {
   display: flex;
   flex-wrap: wrap;
@@ -4387,15 +4407,39 @@ button.sp-test-status.failed:hover {
   gap: 0.375rem;
 }
 
-.sp-guard-failure-hint {
-  padding: 0.0625rem 0.375rem;
-  border: 1px solid color-mix(in srgb, var(--sp-red) 30%, var(--sp-line));
+/* 守护连续成功/失败：连续次数才是第一眼要看的信息，所以让数字当主角、说明文字退到背景。
+   只放大数字不放大整句，是因为「测试结果」列只有 min-w-[120px]，整句放大会撑宽列或换行。
+   失败与成功必须同款处理，否则只放大成功会让更该被看见的失败反而变弱。 */
+.sp-guard-failure-hint,
+.sp-guard-success-hint {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  padding: 0.0625rem 0.4375rem;
   border-radius: 9999px;
+  font-size: 0.625rem;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.sp-guard-failure-hint em,
+.sp-guard-success-hint em {
+  font-style: normal;
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+.sp-guard-failure-hint strong,
+.sp-guard-success-hint strong {
+  font-size: 0.875rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-guard-failure-hint {
+  border: 1px solid color-mix(in srgb, var(--sp-red) 30%, var(--sp-line));
   background: color-mix(in srgb, var(--sp-red) 10%, var(--sp-panel));
   color: var(--sp-red, #dc2626);
-  font-size: 0.625rem;
-  font-weight: 700;
-  white-space: nowrap;
 }
 
 button.sp-guard-failure-hint {
@@ -4409,14 +4453,9 @@ button.sp-guard-failure-hint:hover {
 }
 
 .sp-guard-success-hint {
-  padding: 0.0625rem 0.375rem;
-  border: 1px solid rgba(22, 163, 74, 0.32);
-  border-radius: 9999px;
-  background: rgba(22, 163, 74, 0.1);
+  border: 1px solid color-mix(in srgb, var(--sp-green) 40%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-green) 14%, var(--sp-panel));
   color: var(--sp-green, #16a34a);
-  font-size: 0.625rem;
-  font-weight: 700;
-  white-space: nowrap;
 }
 
 .sp-guard-failure-dialog {
