@@ -501,7 +501,7 @@ func TestGroupElectionScoresNormalizeWithinPlatform(t *testing.T) {
 		{AccountID: 142, Platform: "openai", HealthyCount: 5, LastTestLatencyMs: 300},
 		{AccountID: 143, Platform: "gemini", HealthyCount: 5, LastTestLatencyMs: 50},
 	}
-	scores := supplierGroupSchedulingElectionScores(members, 1.0, 0.5, DefaultSupplierGroupSchedulingElectionLatencyMinSamples, DefaultSupplierGroupSchedulingElectionSwitchMargin)
+	scores := supplierGroupSchedulingElectionScores(members, 1.0, 0.5, DefaultSupplierGroupSchedulingElectionLatencyMinSamples, DefaultSupplierGroupSchedulingElectionSwitchMargin, DefaultSupplierGroupSchedulingElectionCountScoreCap)
 
 	// 三者次数都是 5，归一后同为 0.5，差异全部来自用时项。
 	require.InDelta(t, 0.5+0.5*1.0, scores[141], 1e-9, "同平台最快者用时归一为 1")
@@ -515,7 +515,7 @@ func TestGroupElectionScoresCapCountContribution(t *testing.T) {
 		{AccountID: 151, Platform: "openai", HealthyCount: 50, LastTestLatencyMs: 100},
 		{AccountID: 152, Platform: "openai", HealthyCount: 10, LastTestLatencyMs: 900},
 	}
-	scores := supplierGroupSchedulingElectionScores(members, 1.0, 0.5, DefaultSupplierGroupSchedulingElectionLatencyMinSamples, DefaultSupplierGroupSchedulingElectionSwitchMargin)
+	scores := supplierGroupSchedulingElectionScores(members, 1.0, 0.5, DefaultSupplierGroupSchedulingElectionLatencyMinSamples, DefaultSupplierGroupSchedulingElectionSwitchMargin, DefaultSupplierGroupSchedulingElectionCountScoreCap)
 
 	require.InDelta(t, 1.0+0.5*1.0, scores[151], 1e-9)
 	require.InDelta(t, 1.0+0.5*0.0, scores[152], 1e-9, "次数达到上限后归一为 1，不再拉开差距")
@@ -553,6 +553,63 @@ func TestGroupElectionNormalizeConfigFailureThreshold(t *testing.T) {
 
 	cfg = normalizeSupplierGroupSchedulingElectionConfig(SupplierGroupSchedulingElectionConfig{TopN: 1, FailureThreshold: 9999})
 	require.Equal(t, MaxSupplierGroupSchedulingElectionFailureThreshold, cfg.FailureThreshold)
+}
+
+// 次数封顶值同样要能从旧配置平滑升级：config_json 里没有该字段时是 0，
+// 一律按默认 10 处理 —— 升级后老分组的当选结果必须一字不变。
+func TestGroupElectionNormalizeConfigCountScoreCap(t *testing.T) {
+	cfg := normalizeSupplierGroupSchedulingElectionConfig(SupplierGroupSchedulingElectionConfig{TopN: 1})
+	require.Equal(t, DefaultSupplierGroupSchedulingElectionCountScoreCap, cfg.CountScoreCap)
+
+	cfg = normalizeSupplierGroupSchedulingElectionConfig(SupplierGroupSchedulingElectionConfig{TopN: 1, CountScoreCap: 30})
+	require.Equal(t, 30, cfg.CountScoreCap, "显式配置必须生效")
+
+	cfg = normalizeSupplierGroupSchedulingElectionConfig(SupplierGroupSchedulingElectionConfig{TopN: 1, CountScoreCap: 9999})
+	require.Equal(t, MaxSupplierGroupSchedulingElectionCountScoreCap, cfg.CountScoreCap)
+
+	// 负数同样回落默认：JSON 里它和"未配置"没法区分，而拒绝非法值属于校验层（validateSupplierAutomationTask）。
+	cfg = normalizeSupplierGroupSchedulingElectionConfig(SupplierGroupSchedulingElectionConfig{TopN: 1, CountScoreCap: -5})
+	require.Equal(t, DefaultSupplierGroupSchedulingElectionCountScoreCap, cfg.CountScoreCap)
+}
+
+// 封顶值就是次数分的分母：同一个 12 次的账号，封顶 10 时满分、封顶 100 时只拿 0.12。
+func TestGroupElectionScoresCountCapScalesContribution(t *testing.T) {
+	members := []SupplierGroupSchedulingElectionMember{
+		{AccountID: 161, Platform: "openai", HealthyCount: 12, LastTestLatencyMs: 100},
+		{AccountID: 162, Platform: "openai", HealthyCount: 12, LastTestLatencyMs: 100},
+	}
+
+	// 用时权重传 0，把这一项摘掉，只看次数分的变化。
+	capped := supplierGroupSchedulingElectionScores(members, 1.0, 0.0, DefaultSupplierGroupSchedulingElectionLatencyMinSamples, DefaultSupplierGroupSchedulingElectionSwitchMargin, 10)
+	require.InDelta(t, 1.0, capped[161], 1e-9, "封顶 10：12 次已到顶，拿满分")
+
+	loose := supplierGroupSchedulingElectionScores(members, 1.0, 0.0, DefaultSupplierGroupSchedulingElectionLatencyMinSamples, DefaultSupplierGroupSchedulingElectionSwitchMargin, 100)
+	require.InDelta(t, 0.12, loose[161], 1e-9, "封顶 100：12 次只拿 12/100")
+}
+
+// 把封顶做成可配，必须真的改变当选结果 —— 只改归一化、忘了把值传进评分实现时，这条会报红。
+// 同一组数据：封顶 10 时次数打平、更快的 122 赢；封顶 100 时资历重新说话、更老的 121 赢。
+func TestGroupElectionCountScoreCapChangesWinner(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, AccountID: 121, Platform: "openai", Schedulable: false, LastTestStatus: "success", HealthyCount: 100, LastTestLatencyMs: 3000},
+		{GroupID: 1, AccountID: 122, Platform: "openai", Schedulable: false, LastTestStatus: "success", HealthyCount: 12, LastTestLatencyMs: 100},
+	}}
+
+	cappedStore := newFakeGroupElectionStore()
+	cappedSvc := NewSupplierGroupSchedulingElectionService(repo, cappedStore)
+	_, err := cappedSvc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN: 1, CountScoreCap: DefaultSupplierGroupSchedulingElectionCountScoreCap,
+	}, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, true, cappedStore.calls[122], "封顶 10：100 次与 12 次同分，更快的 122 当选")
+
+	looseStore := newFakeGroupElectionStore()
+	looseSvc := NewSupplierGroupSchedulingElectionService(repo, looseStore)
+	_, err = looseSvc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN: 1, CountScoreCap: 100,
+	}, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, true, looseStore.calls[121], "封顶 100：100 次拉开差距，资历更老的 121 当选")
 }
 
 // 权重真的能改变当选结果：同样两个账号，用时权重为 0 时次数多的赢，

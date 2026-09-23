@@ -105,6 +105,9 @@ type SupplierAutomationConfig struct {
 	GroupElectionLatencyWindowMinutes int `json:"group_scheduling_election_latency_window_minutes"`
 	// 信任窗口均值所需的最少成功样本数（默认 3）：不足则回退到最近单值，等于退回今天的行为。
 	GroupElectionLatencyMinSamples int `json:"group_scheduling_election_latency_min_samples"`
+	// 连续成功次数对综合分的贡献上限（默认 10）：次数分 = min(次数, 上限) / 上限，
+	// 达到上限的账号得分完全相同。调大它会让长期稳定的账号更难被更快的账号换掉。
+	GroupElectionCountScoreCap int `json:"group_scheduling_election_count_score_cap"`
 	// 启用「在任者健康锁定」的分组 ID（opt-in，空=都不锁定）：列表内分组开着的账号测试都正常时保留现状、
 	// 跳过择优换人，减少无谓抖动；一旦开着的账号失败仍走正常择优。
 	GroupElectionKeepHealthyIncumbentGroupIDs []int64 `json:"group_scheduling_election_keep_healthy_incumbent_group_ids"`
@@ -747,6 +750,7 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 			SwitchMargin:                 task.Config.GroupElectionSwitchMargin,
 			LatencyWindowMinutes:         task.Config.GroupElectionLatencyWindowMinutes,
 			LatencyMinSamples:            task.Config.GroupElectionLatencyMinSamples,
+			CountScoreCap:                task.Config.GroupElectionCountScoreCap,
 			KeepHealthyIncumbentGroupIDs: task.Config.GroupElectionKeepHealthyIncumbentGroupIDs,
 			RequiredModelsByGroup:        task.Config.GroupElectionRequiredModels,
 		}, time.Now())
@@ -903,6 +907,12 @@ func validateSupplierAutomationTask(task SupplierAutomationTask) error {
 		// 阈值 0 表示未配置（归一化时回落默认 2），负数与超上限视为配置错误。
 		if task.Config.GroupElectionFailureThreshold < 0 ||
 			task.Config.GroupElectionFailureThreshold > MaxSupplierGroupSchedulingElectionFailureThreshold {
+			return ErrSupplierProviderInvalid
+		}
+		// 次数封顶值 0 表示未配置（归一化时回落默认 10），负数与超上限视为配置错误——
+		// 与权重同样选择拒绝而不是静默截断，免得管理员以为自己配的 500 生效了。
+		if task.Config.GroupElectionCountScoreCap < 0 ||
+			task.Config.GroupElectionCountScoreCap > MaxSupplierGroupSchedulingElectionCountScoreCap {
 			return ErrSupplierProviderInvalid
 		}
 		// 必需模型：分组 ID 必须为正；模型名清洗由归一化处理，这里只挡明显非法的 groupID。

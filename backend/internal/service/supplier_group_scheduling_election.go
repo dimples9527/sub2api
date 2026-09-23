@@ -33,10 +33,15 @@ const (
 	// 已经关着的账号也会落到这一条（本任务只关不重开），所以措辞用"保持现状"而不是"保留调度"。
 	SupplierGroupSchedulingElectionReasonKeepLastOne = "分组内无备选账号，保持现状待人工确认"
 
-	// SupplierGroupSchedulingElectionCountScoreCap 是"连续成功次数"对综合分的贡献上限。
+	// DefaultSupplierGroupSchedulingElectionCountScoreCap 是"连续成功次数"对综合分的贡献上限的默认值。
 	// 健康守护的连续成功计数只增不减（失败才归零），不封顶就会让现任赢家永久固化：
 	// 50 次与 51 次没有实质区别，不该因此压过一个用时明显更短的账号。
-	SupplierGroupSchedulingElectionCountScoreCap = 10
+	// 之所以做成可配而不是写死：不同分组对"资历"的重视程度不一样，有的就是想让长期稳定的
+	// 账号更强势。调大它等于把胜负更多交回次数，代价是现任更难被明显更快的账号换掉。
+	DefaultSupplierGroupSchedulingElectionCountScoreCap = 10
+	// MaxSupplierGroupSchedulingElectionCountScoreCap 是封顶值的上限。
+	// 再往上调只是把"资历"推向无限话语权、让择优退化成先到先得，故设上限防误配。
+	MaxSupplierGroupSchedulingElectionCountScoreCap = 100
 
 	// SupplierGroupSchedulingElectionScoreEpsilon 是综合分的比较容差。
 	// 综合分含浮点除法，不能用 == 判并列，否则"算出来应该一样快"的两个账号会因尾差
@@ -120,6 +125,10 @@ type SupplierGroupSchedulingElectionConfig struct {
 	LatencyWindowMinutes int `json:"group_scheduling_election_latency_window_minutes"`
 	// LatencyMinSamples 是信任窗口均值所需的最少成功样本数，默认 3；不足则回退单值。
 	LatencyMinSamples int `json:"group_scheduling_election_latency_min_samples"`
+	// CountScoreCap 是"连续成功次数"对综合分的贡献上限，默认 10。
+	// 次数分 = min(连续成功次数, CountScoreCap) / CountScoreCap，所以超过这个次数的账号得分完全相同
+	// （连续成功 142 次与 190 次在默认值下没有任何差别）。0 或缺失都按默认值处理。
+	CountScoreCap int `json:"group_scheduling_election_count_score_cap"`
 	// KeepHealthyIncumbentGroupIDs 存「启用在任者健康锁定」的分组 ID（opt-in，与 DisabledGroupIDs 相反极性）。
 	// 列表里的分组：只要它「当前开启调度的账号」测试都正常（且没有开着却失败的），就锁定——保留这些在任账号、
 	// 不做任何择优与换人，直接跳过。空列表=所有分组都正常择优（默认），新增分组默认不锁定，安全。
@@ -457,7 +466,7 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 
 		// 综合分依赖组内上下文（同平台内谁最快），必须按组算一次——锁定路径、正常择优、
 		// 必需模型补选三处都复用它，保证「谁更优」的口径一致。
-		electionScores := supplierGroupSchedulingElectionScores(successMembers, config.CountWeight, config.LatencyWeight, config.LatencyMinSamples, config.SwitchMargin)
+		electionScores := supplierGroupSchedulingElectionScores(successMembers, config.CountWeight, config.LatencyWeight, config.LatencyMinSamples, config.SwitchMargin, config.CountScoreCap)
 
 		// 在任者健康锁定：仅对被 opt-in 的分组生效，且该组「当前开着的账号」测试都正常（且没有开着却失败的），
 		// 就保留这些在任账号、跳过择优与换人。只在健康时锁定——有开着的账号失败仍走下面的正常择优，
@@ -686,7 +695,7 @@ func supplierGroupSchedulingElectionLatency(member SupplierGroupSchedulingElecti
 	return base, scoring
 }
 
-func supplierGroupSchedulingElectionScores(members []SupplierGroupSchedulingElectionMember, countWeight, latencyWeight float64, latencyMinSamples int, switchMargin float64) map[int64]float64 {
+func supplierGroupSchedulingElectionScores(members []SupplierGroupSchedulingElectionMember, countWeight, latencyWeight float64, latencyMinSamples int, switchMargin float64, countScoreCap int) map[int64]float64 {
 	// 迟滞死区做在延迟上而不是综合分上：组内 min-max 归一化会把任意大小的延迟差放大到满量程
 	// （两个候选时分差恒为 latencyWeight），综合分层面的死区因此形同虚设。改为把「在任者(已开启)」
 	// 的评分延迟按 (1-switchMargin) 折算，让它显得更快，于是挑战者必须在延迟上快出 switchMargin 比例
@@ -722,7 +731,12 @@ func supplierGroupSchedulingElectionScores(members []SupplierGroupSchedulingElec
 		}
 	}
 
-	countCap := float64(SupplierGroupSchedulingElectionCountScoreCap)
+	// 封顶值可配（0 或缺失已在归一化里回落默认，这里再兜一次）：
+	// 兜底不能省——直接调用本函数的测试/未来调用方可能传 0，那会让次数分除零。
+	countCap := float64(countScoreCap)
+	if countCap <= 0 {
+		countCap = float64(DefaultSupplierGroupSchedulingElectionCountScoreCap)
+	}
 	scores := make(map[int64]float64, len(members))
 	for _, member := range members {
 		normalizedCount := float64(member.HealthyCount) / countCap
@@ -924,6 +938,14 @@ func normalizeSupplierGroupSchedulingElectionConfig(config SupplierGroupScheduli
 	}
 	if config.LatencyMinSamples > MaxSupplierGroupSchedulingElectionLatencyMinSamples {
 		config.LatencyMinSamples = MaxSupplierGroupSchedulingElectionLatencyMinSamples
+	}
+	// 次数封顶值同样遵循「0 或缺失回落默认值」：旧任务的 config_json 里没有这个字段，
+	// 反序列化后是 0，回落即拿到封顶 10 的既有行为，升级后不改变任何现有分组的结果。
+	if config.CountScoreCap <= 0 {
+		config.CountScoreCap = DefaultSupplierGroupSchedulingElectionCountScoreCap
+	}
+	if config.CountScoreCap > MaxSupplierGroupSchedulingElectionCountScoreCap {
+		config.CountScoreCap = MaxSupplierGroupSchedulingElectionCountScoreCap
 	}
 	config.RequiredModelsByGroup = normalizeSupplierGroupElectionRequiredModels(config.RequiredModelsByGroup)
 	return config

@@ -1151,7 +1151,7 @@ describe('SupplierAutomationView edit dialog composition', () => {
     expect(editDialogSource).not.toContain('<section v-else class="sp-form-section sp-policy-section">')
   })
 
-  // 择优区块的 7 个配置项都是「光看名字猜不出改大改小会怎样」的参数，说明文字是必需品而不是装饰。
+  // 择优区块的 8 个配置项都是「光看名字猜不出改大改小会怎样」的参数，说明文字是必需品而不是装饰。
   // 这条用例的作用是：以后加字段忘了写 hint 时，报错会直接点名是哪个 label。
   it('explains every group election config field with a non-empty hint', () => {
     const electionSource = editDialogSource.match(
@@ -1160,7 +1160,7 @@ describe('SupplierAutomationView edit dialog composition', () => {
     expect(electionSource).not.toBe('')
 
     const inputTags = electionSource.match(/<Input\b[^>]*\/>/g) || []
-    expect(inputTags).toHaveLength(7)
+    expect(inputTags).toHaveLength(8)
     const missing = inputTags
       .map(tag => ({
         label: tag.match(/label="([^"]+)"/)?.[1] || '(未命名字段)',
@@ -1170,7 +1170,7 @@ describe('SupplierAutomationView edit dialog composition', () => {
       .map(field => field.label)
     expect(missing).toEqual([])
 
-    // 「次数分封顶 10 次」是最容易被误读的一条 —— 连续成功 190 次与 142 次得分完全相同，
+    // 「次数封顶」是最容易被误读的一条 —— 默认封顶 10 时连续成功 190 次与 142 次得分完全相同，
     // 说明里不点出来，用户会继续按「资历越老越优先」理解择优结果。
     expect(electionSource).toContain('封顶')
 
