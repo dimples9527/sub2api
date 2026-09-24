@@ -254,6 +254,17 @@ func TestSupplierAccountHealthGuardRunRecordsUnavailableSelectedAccountsAndConti
 	require.Equal(t, SupplierAccountHealthGuardStatusUnavailable, result.Items[0].Status)
 	require.Equal(t, SupplierAccountHealthGuardStatusHealthy, result.Items[1].Status)
 	require.Equal(t, SupplierAccountHealthGuardStatusUnavailable, result.Items[2].Status)
+	// 不可用 / 未匹配的账号根本不参与本轮检查，给它们显示一个用不上的间隔会误导 ⇒ 两个字段都留空。
+	// 注意与「每轮都测」区分：那是 0，不是 nil。
+	require.Nil(t, result.Items[0].IntervalSeconds)
+	require.Nil(t, result.Items[0].NextCheckAt)
+	require.Nil(t, result.Items[2].IntervalSeconds)
+	require.Nil(t, result.Items[2].NextCheckAt)
+	// 倍率与间隔的「有没有」不是一回事：61 只是停用，本地账号还查得到 ⇒ 倍率有值（默认 1.0）；
+	// 63 连候选都没有、账号已查不到 ⇒ 倍率为 nil，排序时排到最后而不是当成 0。
+	require.NotNil(t, result.Items[0].BillingRateMultiplier)
+	require.Equal(t, 1.0, *result.Items[0].BillingRateMultiplier)
+	require.Nil(t, result.Items[2].BillingRateMultiplier)
 }
 
 func TestSupplierAccountHealthGuardRunDeduplicatesLocalAccountSourcesAndRotatesCursor(t *testing.T) {
@@ -320,6 +331,11 @@ func TestSupplierAccountHealthGuardRunSkipsUnstartedTargetsWhenTaskCancelled(t *
 	require.Equal(t, int64(42), skipped.LocalAccountID)
 	require.Equal(t, SupplierAccountHealthGuardStatusSkipped, skipped.Status)
 	require.Equal(t, "任务时间不足，本次跳过", skipped.Reason)
+	// 被取消而跳过的行同样带间隔（0 = 每轮都测）：它是真实 target，只是没轮到测，
+	// 与「不可用/未匹配」那类不适用（nil）不同。
+	require.NotNil(t, skipped.IntervalSeconds)
+	require.Zero(t, *skipped.IntervalSeconds)
+	require.Nil(t, skipped.NextCheckAt)
 	require.Equal(t, 1, len(result.SkipReasons))
 	require.Equal(t, "任务时间不足", result.SkipReasons[0].Reason)
 	require.Equal(t, 1, result.SkipReasons[0].Count)
@@ -740,6 +756,9 @@ func TestNormalizeSupplierAccountHealthGuardConfigAccountIntervals(t *testing.T)
 func TestSupplierAccountHealthGuardRunSkipsAccountNotDueByAccountInterval(t *testing.T) {
 	notDue := newSupplierAccountHealthGuardCandidate(71, "间隔未到账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 71})
 	notDue.LocalAccount.Extra[supplierHealthGuardLastCheckedAtExtraKey] = time.Date(2026, 8, 17, 9, 59, 30, 0, time.UTC).Format(time.RFC3339)
+	// 倍率刻意用 0：它是合法值（计费为 0），不能用 omitempty 省掉，否则排序时会被当成「未知」排到最后。
+	zeroMultiplier := 0.0
+	notDue.LocalAccount.RateMultiplier = &zeroMultiplier
 	repo := &supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{notDue}}
 	tester := &supplierAccountHealthGuardTesterStub{results: map[int64]*ScheduledTestResult{}, errs: map[int64]error{}}
 	store := &supplierAccountHealthGuardAccountStoreStub{}
@@ -761,12 +780,24 @@ func TestSupplierAccountHealthGuardRunSkipsAccountNotDueByAccountInterval(t *tes
 	require.Len(t, result.Items, 1)
 	require.Equal(t, SupplierAccountHealthGuardStatusSkipped, result.Items[0].Status)
 	require.Contains(t, result.Items[0].Reason, "距上次检查不足")
+	// 明细列表靠这两个字段解释「多久测一次」和「还要等多久」，跳过行也必须带上：
+	// 这行恰恰是最需要它们的地方 —— 用户看到「跳过」才会去问为什么。
+	require.NotNil(t, result.Items[0].IntervalSeconds)
+	require.Equal(t, 300, *result.Items[0].IntervalSeconds)
+	require.NotNil(t, result.Items[0].NextCheckAt)
+	require.True(t, time.Date(2026, 8, 17, 10, 4, 30, 0, time.UTC).Equal(*result.Items[0].NextCheckAt),
+		"下次检查时间应为上次检查时间 09:59:30 + 300s")
+	// 倍率是明细列表排序用的键，跳过行也必须带上，否则「按倍率升序」在跳过的账号上排不出位置。
+	require.NotNil(t, result.Items[0].BillingRateMultiplier)
+	require.Zero(t, *result.Items[0].BillingRateMultiplier)
 	require.Equal(t, []string{"未到检查间隔"}, supplierAccountHealthGuardReasonNames(result.SkipReasons))
 }
 
 func TestSupplierAccountHealthGuardRunChecksAccountDueByAccountInterval(t *testing.T) {
 	due := newSupplierAccountHealthGuardCandidate(72, "间隔到期账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 72})
 	due.LocalAccount.Extra[supplierHealthGuardLastCheckedAtExtraKey] = time.Date(2026, 8, 17, 9, 0, 0, 0, time.UTC).Format(time.RFC3339)
+	dueMultiplier := 0.35
+	due.LocalAccount.RateMultiplier = &dueMultiplier
 	repo := &supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{due}}
 	tester := &supplierAccountHealthGuardTesterStub{
 		results: map[int64]*ScheduledTestResult{72: {Status: "success", LatencyMs: 20}},
@@ -789,6 +820,14 @@ func TestSupplierAccountHealthGuardRunChecksAccountDueByAccountInterval(t *testi
 	require.Len(t, result.Items, 1)
 	require.Equal(t, SupplierAccountHealthGuardStatusHealthy, result.Items[0].Status)
 	require.NotEmpty(t, store.extraUpdates[72][supplierHealthGuardLastCheckedAtExtraKey])
+	// 实际测过的行同样带间隔；下次检查时间取自**本轮之前**的快照（09:00:00 + 300s），
+	// 不能拿本轮刚写回的时间去算，否则每次看都会显示「刚检查完，还要等满一个间隔」。
+	require.NotNil(t, result.Items[0].IntervalSeconds)
+	require.Equal(t, 300, *result.Items[0].IntervalSeconds)
+	require.NotNil(t, result.Items[0].NextCheckAt)
+	require.True(t, time.Date(2026, 8, 17, 9, 5, 0, 0, time.UTC).Equal(*result.Items[0].NextCheckAt))
+	require.NotNil(t, result.Items[0].BillingRateMultiplier)
+	require.Equal(t, 0.35, *result.Items[0].BillingRateMultiplier)
 }
 
 func TestSupplierAccountHealthGuardRunWithoutAccountIntervalKeepsGlobalFrequency(t *testing.T) {
@@ -811,6 +850,14 @@ func TestSupplierAccountHealthGuardRunWithoutAccountIntervalKeepsGlobalFrequency
 	require.Equal(t, []supplierAccountHealthGuardTestCall{{accountID: 73, modelID: "gpt-4o-mini"}}, tester.calls)
 	require.Equal(t, 1, result.CheckedCount)
 	require.Zero(t, result.SkippedCount)
+	// 没有账号级间隔 = 每轮都测：字段是 0（而不是 nil，nil 表示「不适用」），且没有「下次检查时间」。
+	require.NotNil(t, result.Items[0].IntervalSeconds)
+	require.Zero(t, *result.Items[0].IntervalSeconds)
+	require.Nil(t, result.Items[0].NextCheckAt)
+	// 未配置倍率按 1.0 计（Account.BillingRateMultiplier 的既定语义），不是 nil：
+	// 账号还在、倍率就存在，只是取默认值。
+	require.NotNil(t, result.Items[0].BillingRateMultiplier)
+	require.Equal(t, 1.0, *result.Items[0].BillingRateMultiplier)
 }
 
 func TestSupplierAccountHealthGuardRunRecordsGroupMonitorSnapshot(t *testing.T) {

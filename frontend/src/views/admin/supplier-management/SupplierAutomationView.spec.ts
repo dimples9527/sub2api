@@ -174,7 +174,7 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('响应摘要')
   })
 
-  it('renders latest-result details in a separate task table column', () => {
+  it('opens the latest run detail from both the latest-result status tag and the details column', () => {
     const latestResultCell = supplierAutomationSource.match(
       /<template #cell-last_status="\{ row: task \}">[\s\S]*?<\/template>/
     )?.[0] || ''
@@ -184,7 +184,11 @@ describe('SupplierAutomationView edit dialog', () => {
 
     expect(supplierAutomationSource).toContain("{ key: 'details',")
     expect(detailsCell).toContain('@click.stop="openTaskLatestResult(task)"')
-    expect(latestResultCell).not.toContain('openTaskLatestResult(task)')
+    // 2026-09-24 需求变更：最近结果列的状态标签也作为详情入口，两个入口共用同一动作
+    // 与同一可用条件（无历史结果时禁用），任一处失去入口都算回归。
+    expect(latestResultCell).toContain('@click.stop="openTaskLatestResult(task)"')
+    expect(latestResultCell).toContain('sp-status-action')
+    expect(latestResultCell).toContain(':disabled="!(task.last_message || latestRunByTask[task.task_code])"')
   })
 
   it('uses an indexed provider detail layout and defaults to the first failed provider', () => {
@@ -280,10 +284,11 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(detailDialogSource).toContain('<section class="sp-detail-outcome">')
     expect(detailDialogSource).toContain('<section class="sp-detail-content">')
     expect(detailDialogSource.match(/class="sp-detail-section-head"/g)).toHaveLength(2)
-    expect(detailDialogSource).toContain('Execution Outcome')
-    expect(detailDialogSource).toContain('执行结论')
-    expect(detailDialogSource).toContain('Result Detail')
-    expect(detailDialogSource).toContain('结果明细')
+    // 2026-09-24：两个分区的英文眉题（Execution Outcome / Result Detail）已删除 ——
+    // 弹窗内容区不得重复显示英文眉题（AGENTS.md），且每处实打实占 12px 高度。
+    // 守卫改成直接断言两个中文分区标题，用例语义（执行结论与结果明细彼此分开）不变。
+    expect(detailDialogSource).toContain('<h3>执行结论</h3>')
+    expect(detailDialogSource).toContain('<h3>结果明细</h3>')
     expect(detailDialogSource).toContain(
       '<span class="sp-status" :class="statusTone(detailRun.status)">{{ statusText(detailRun.status) }}</span>'
     )
@@ -694,45 +699,20 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('执行前会重新同步账号倍率，并解除所有不合格的账号与分组绑定')
   })
 
-  it('renders account health guard summaries, filters, and account-level details', () => {
+  // 2026-09-24：健康守护结果明细拆成独立组件（数据重、需要搜索/聚合/折叠），
+  // 明细渲染的断言随组件迁到 SupplierAccountHealthGuardResult.spec.ts，
+  // 这里只守卫「页面把它交给组件渲染」这条接线不再被改回内联分支。
+  it('renders the account health guard result through its own component', () => {
+    expect(supplierAutomationSource).toContain('import { SupplierAccountHealthGuardResult')
+    expect(supplierAutomationSource).toContain('<SupplierAccountHealthGuardResult')
+    expect(supplierAutomationSource).toContain(
+      'v-else-if="detailRun.result_detail?.account_health_guard && accountHealthGuardResult"'
+    )
+    expect(supplierAutomationSource).toContain(':result="accountHealthGuardResult"')
+    expect(supplierAutomationSource).toContain(':key="detailRun.id"')
     expect(supplierAutomationSource).toContain('const accountHealthGuardResult = computed')
-    expect(supplierAutomationSource).toContain('const healthGuardStatusFilter = ref')
-    expect(supplierAutomationSource).toContain('const accountHealthGuardSummaryMetrics = computed')
-    expect(supplierAutomationSource).toContain('function setHealthGuardStatusFilter(filter: string)')
-    expect(supplierAutomationSource).toContain("value: 'checked'")
-    expect(supplierAutomationSource).toContain("value: 'healthy'")
-    expect(supplierAutomationSource).toContain("value: 'slow'")
-    expect(supplierAutomationSource).toContain("value: 'failed'")
-    expect(supplierAutomationSource).toContain("value: 'skipped'")
-    expect(supplierAutomationSource).toContain("value: 'unavailable'")
-    expect(supplierAutomationSource).toContain("value: 'disabled'")
-    expect(supplierAutomationSource).toContain("value: 'recovered'")
-    expect(supplierAutomationSource).toContain('health-guard-summary-filter-')
-    expect(supplierAutomationSource).toContain('@click="setHealthGuardStatusFilter(metric.filter)"')
-    expect(supplierAutomationSource).toContain("filter === 'checked'")
-    expect(supplierAutomationSource).toContain("filter === 'disabled' || filter === 'recovered'")
-    expect(supplierAutomationSource).toContain('健康守护明细')
-    for (const label of ['健康', '慢响应', '失败', '不可用', '待下轮', '暂停', '恢复']) {
-      expect(supplierAutomationSource).toContain(label)
-    }
-    for (const field of [
-      'item.local_account_name',
-      'item.sources',
-      'item.platform',
-      'item.model_id',
-      'item.latency_ms',
-      'item.consecutive_failed',
-      'item.consecutive_slow',
-      'item.consecutive_healthy',
-      'item.schedulable_before',
-      'item.schedulable_after',
-      'item.action',
-      'item.reason',
-      'item.error_message',
-    ]) {
-      expect(supplierAutomationSource).toContain(field)
-    }
   })
+
   it('opens the shared account rate guard log dialog', () => {
     expect(supplierAutomationSource).toContain('SupplierAccountRateGuardLogDialog')
     expect(supplierAutomationSource).toContain('accountRateGuardLogsVisible')
@@ -1486,8 +1466,15 @@ describe('SupplierAutomationView 弹窗的平台筛选与平台配色', () => {
     expect(supplierAutomationSource).toContain(
       'const healthGuardAccountPlatformFacets = computed(() =>'
     )
+    // 统计口径仍是「可用账号」：联动只是在它之上再叠一层供应商筛选，不能把不可用账号算进来。
     expect(supplierAutomationSource).toContain(
-      'buildPlatformFacets(healthGuardAvailableAccountMappings.value)'
+      'const healthGuardProviderScopedMappings = computed(() => {'
+    )
+    expect(supplierAutomationSource).toContain(
+      'if (!providerID) return healthGuardAvailableAccountMappings.value'
+    )
+    expect(supplierAutomationSource).toContain(
+      'buildPlatformFacets(healthGuardProviderScopedMappings.value)'
     )
     const openBlock = supplierAutomationSource.slice(
       supplierAutomationSource.indexOf('async function openHealthGuardAccounts()'),
@@ -1496,6 +1483,51 @@ describe('SupplierAutomationView 弹窗的平台筛选与平台配色', () => {
     expect(openBlock).toContain('healthGuardAccountPlatformFilter.value = []')
     // 多选比单选更容易把结果筛空，空态必须说明是筛选造成的（沿用原有文案）。
     expect(supplierAutomationSource).toContain("'当前筛选条件下没有可配置账号。'")
+  })
+
+  it('账号弹窗的平台标签与供应商下拉互相收窄，失效的选中项会被收回', () => {
+    // 候选只应用对方那一个条件：拿最终列表（healthGuardWorkspaceAccounts）算候选，
+    // 会让当前选中项永远留在候选里，联动退化成两个独立筛选。
+    expect(supplierAutomationSource).toContain(
+      'const healthGuardPlatformScopedMappings = computed(() => {'
+    )
+    expect(supplierAutomationSource).toContain(
+      'return healthGuardAvailableAccountMappings.value.filter(mapping =>'
+    )
+    expect(supplierAutomationSource).toContain(
+      'matchesPlatformFilter(mapping.platform, selected)'
+    )
+    expect(supplierAutomationSource).toContain(
+      'for (const mapping of healthGuardPlatformScopedMappings.value) {'
+    )
+    // 平台标签被供应商挤掉后不会再渲染，连点击取消的机会都没有 ⇒ 必须主动收回，
+    // 否则列表一直空着而用户找不到原因。收回的是**被挤掉的那个**（watch 挂在「值」上），
+    // 不是刚点的那个 —— 否则表现是「点了没反应」。
+    expect(supplierAutomationSource).toContain(
+      'watch(healthGuardAccountPlatformFilter, () => {'
+    )
+    expect(supplierAutomationSource).toContain(
+      'watch(healthGuardAccountProviderFilter, () => {'
+    )
+    expect(supplierAutomationSource).toContain(
+      'const kept = healthGuardAccountPlatformFilter.value.filter(platform => available.has(platform))'
+    )
+    expect(supplierAutomationSource).toContain(
+      "if (!healthGuardProviderFilterOptions.value.some("
+    )
+  })
+
+  it('账号列表按倍率升序，倍率未知的排最后', () => {
+    expect(supplierAutomationSource).toContain(
+      'function healthGuardAccountMultiplierSortKey(mapping: HealthGuardAccountMapping): number {'
+    )
+    expect(supplierAutomationSource).toContain(
+      'return filtered.sort((a, b) => healthGuardAccountMultiplierSortKey(a) - healthGuardAccountMultiplierSortKey(b))'
+    )
+    // 一个账号可能有多来源、倍率各不相同（行上显示成「0.5 / 0.8」），取最小值。
+    expect(supplierAutomationSource).toContain('return rates.length ? Math.min(...rates) : Number.POSITIVE_INFINITY')
+    // 取值过滤必须与行上显示倍率的过滤一致，否则排序键和看到的数字会对不上。
+    expect(supplierAutomationSource).toContain('.filter(rate => Number.isFinite(rate))')
   })
 
   it('分组行按平台渲染徽标与左侧色条', () => {

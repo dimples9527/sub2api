@@ -305,6 +305,15 @@ export interface SupplierAccountHealthGuardItem {
   action: 'none' | 'disabled' | 'recovered' | string
   reason?: string
   error_message?: string
+  /** 该账号本轮生效的检查间隔（秒）；0 表示每轮都测。不参与本轮检查的账号（不可用/未匹配/已停用）不返回。 */
+  interval_seconds?: number
+  /** 下次检查时间 = 上次检查时间 + 间隔；从未检查过或每轮都测时不返回。 */
+  next_check_at?: string
+  /**
+   * 该账号的计费倍率，明细列表按它升序排序（未配置按 1.0 计，0 表示计费为 0）。
+   * 不返回表示账号已查不到 —— 排序时排到最后，不能当成 0。
+   */
+  billing_rate_multiplier?: number
   started_at: string
   finished_at: string
 }

@@ -72,7 +72,17 @@
                 {{ formatTime(task.last_run_at) }}
               </template>
               <template #cell-last_status="{ row: task }">
-                <span class="sp-status" :class="statusTone(task.last_status)">{{ statusText(task.last_status) }}</span>
+                <!-- 状态标签兼作最近一次任务的详情入口，与「详情」列同一动作、同一可用条件：
+                     没有历史结果时不可点，避免打开一个只写着“暂无结果”的空弹窗。 -->
+                <button
+                  class="sp-status sp-status-action"
+                  :class="statusTone(task.last_status)"
+                  type="button"
+                  :disabled="!(task.last_message || latestRunByTask[task.task_code])"
+                  @click.stop="openTaskLatestResult(task)"
+                >
+                  {{ statusText(task.last_status) }}
+                </button>
                 <div class="sp-result-cell">
                   <span class="sp-sub sp-message-preview">{{ taskResultSummary(task) }}</span>
                 </div>
@@ -406,7 +416,6 @@
           <section class="sp-detail-outcome">
             <div class="sp-detail-section-head">
               <div>
-                <span class="sp-detail-section-kicker">Execution Outcome</span>
                 <h3>执行结论</h3>
               </div>
               <span class="sp-status" :class="statusTone(detailRun.status)">{{ statusText(detailRun.status) }}</span>
@@ -415,7 +424,7 @@
             <section class="sp-run-detail-summary">
               <div class="sp-summary-item sp-summary-task">
                 <span class="sp-detail-label">任务</span>
-                <strong>{{ detailRun.task_code }}</strong>
+                <strong>{{ taskName(detailRun.task_code) }}</strong>
               </div>
               <div class="sp-summary-item sp-summary-trigger">
                 <span class="sp-detail-label">触发</span>
@@ -445,7 +454,6 @@
           <section class="sp-detail-content">
             <div class="sp-detail-section-head">
               <div>
-                <span class="sp-detail-section-kicker">Result Detail</span>
                 <h3>结果明细</h3>
               </div>
             </div>
@@ -464,7 +472,6 @@
               <section v-if="rateGuardAlertItems.length" class="sp-rate-guard-alerts">
                 <header class="sp-rate-guard-section-head">
                   <div>
-                    <span>Warnings</span>
                     <h4>告警记录</h4>
                   </div>
                   <strong>{{ rateGuardAlertItems.length }} 项</strong>
@@ -501,7 +508,6 @@
               <section class="sp-rate-guard-changes">
                 <header class="sp-rate-guard-section-head">
                   <div>
-                    <span>Rate Changes</span>
                     <h4>倍率变更记录</h4>
                   </div>
                   <strong>{{ rateGuardRaisedItems.length }} 项</strong>
@@ -536,7 +542,6 @@
               <section class="sp-rate-guard-inspections">
                 <header class="sp-rate-guard-section-head">
                   <div>
-                    <span>Inspection Results</span>
                     <h4>全部检查结果</h4>
                   </div>
                   <strong>{{ rateGuardResult.items.length }} 项</strong>
@@ -649,95 +654,11 @@
               <div v-else class="sp-rate-guard-empty">本次没有账号发生调度变更。</div>
             </section>
 
-            <section v-else-if="detailRun.result_detail?.account_health_guard && accountHealthGuardResult" class="sp-rate-guard-detail sp-account-health-guard-detail">
-              <div class="sp-rate-guard-summary sp-account-health-guard-summary" aria-label="结果明细统计筛选">
-                <div
-                  v-for="metric in accountHealthGuardSummaryMetrics"
-                  :key="metric.key"
-                  class="sp-health-guard-metric"
-                  :class="[
-                    metric.filter ? 'is-filterable' : 'is-static',
-                    metric.tone,
-                    { active: metric.filter && healthGuardStatusFilter === metric.filter },
-                  ]"
-                >
-                  <button
-                    v-if="metric.filter"
-                    type="button"
-                    class="sp-health-guard-metric-button"
-                    :data-test="`health-guard-summary-filter-${metric.filter}`"
-                    :aria-pressed="healthGuardStatusFilter === metric.filter"
-                    :title="metric.filter === healthGuardStatusFilter ? '取消筛选' : `筛选${metric.label}明细`"
-                    @click="setHealthGuardStatusFilter(metric.filter)"
-                  >
-                    <span>{{ metric.label }}</span>
-                    <strong>{{ metric.count }}</strong>
-                  </button>
-                  <template v-else>
-                    <span>{{ metric.label }}</span>
-                    <strong>{{ metric.count }}</strong>
-                  </template>
-                </div>
-              </div>
-
-              <section v-if="accountHealthGuardResult.skip_reasons?.length" class="sp-health-guard-skip-reasons">
-                <div class="sp-rate-guard-section-head">
-                  <div><span>Skip Reasons</span><h4>跳过原因</h4></div>
-                  <strong>{{ accountHealthGuardResult.skipped_count }} 项</strong>
-                </div>
-                <div class="sp-health-guard-reason-list">
-                  <article v-for="reason in accountHealthGuardResult.skip_reasons" :key="reason.reason">
-                    <strong>{{ reason.reason }}</strong>
-                    <span>{{ reason.count }}</span>
-                    <small v-if="reason.sample_accounts?.length">
-                      {{ reason.sample_accounts.map(account => account.local_account_name || account.upstream_account_name || `账号 ${account.local_account_id || account.supplier_provider_account_id}`).join('、') }}
-                    </small>
-                  </article>
-                </div>
-              </section>
-
-              <section class="sp-health-guard-inspections">
-                <div class="sp-rate-guard-section-head sp-health-guard-list-head">
-                  <div><span>Account Results</span><h4>健康守护明细</h4></div>
-                  <div class="sp-health-guard-filter">
-                    <Select v-model="healthGuardStatusFilter" :options="healthGuardStatusFilterOptions" :searchable="false" />
-                    <strong>{{ filteredAccountHealthGuardItems.length }} 项</strong>
-                  </div>
-                </div>
-
-                <div v-if="filteredAccountHealthGuardItems.length" class="sp-health-guard-items">
-                  <article v-for="item in filteredAccountHealthGuardItems" :key="`${item.local_account_id}-${item.started_at}`" class="sp-health-guard-item">
-                    <header>
-                      <div>
-                        <span class="sp-detail-label">本地账号 #{{ item.local_account_id }}</span>
-                        <h4>{{ item.local_account_name || `本地账号 ${item.local_account_id}` }}</h4>
-                      </div>
-                      <span class="sp-status" :class="accountHealthGuardStatusTone(item.status)">{{ accountHealthGuardStatusText(item.status) }}</span>
-                    </header>
-                    <div class="sp-health-guard-item-grid">
-                      <div class="sp-health-guard-sources">
-                        <span>供应商来源</span>
-                        <template v-if="item.sources?.length">
-                          <small v-for="source in item.sources" :key="source.supplier_provider_account_id">
-                            {{ source.provider_name || `供应商 ${source.provider_id}` }} · {{ source.upstream_account_name || source.upstream_account_key }}
-                          </small>
-                        </template>
-                        <small v-else>无来源信息</small>
-                      </div>
-                      <div><span>平台 / 模型</span><strong>{{ item.platform || '-' }}</strong><small>{{ item.model_id || '默认模型' }}</small></div>
-                      <div><span>延迟</span><strong>{{ item.latency_ms }}ms</strong><small>阈值 {{ item.latency_limit_ms }}ms</small></div>
-                      <div><span>连续计数</span><strong>失败 {{ item.consecutive_failed }} / 慢 {{ item.consecutive_slow }}</strong><small>健康 {{ item.consecutive_healthy }}</small></div>
-                      <div><span>调度状态</span><strong>{{ schedulableText(item.schedulable_before) }} → {{ schedulableText(item.schedulable_after) }}</strong><small>{{ accountHealthGuardActionText(item.action) }}</small></div>
-                    </div>
-                    <div v-if="item.reason || item.error_message" class="sp-health-guard-message" :class="{ bad: Boolean(item.error_message) }">
-                      <span v-if="item.reason">原因：{{ item.reason }}</span>
-                      <span v-if="item.error_message">错误：{{ item.error_message }}</span>
-                    </div>
-                  </article>
-                </div>
-                <div v-else class="sp-rate-guard-empty">当前筛选条件下没有账号明细。</div>
-              </section>
-            </section>
+            <SupplierAccountHealthGuardResult
+              v-else-if="detailRun.result_detail?.account_health_guard && accountHealthGuardResult"
+              :key="detailRun.id"
+              :result="accountHealthGuardResult"
+            />
 
             <section v-else-if="detailRun.result_detail?.recharge_sync && rechargeSyncResult" class="sp-rate-guard-detail sp-recharge-sync-detail">
               <div class="sp-rate-guard-summary">
@@ -750,7 +671,6 @@
               <section class="sp-monitor-items">
                 <header class="sp-rate-guard-section-head">
                   <div>
-                    <span>Recharge History Sync</span>
                     <h4>供应商充值记录同步</h4>
                   </div>
                   <strong>{{ rechargeSyncResult.items.length }} 个供应商</strong>
@@ -789,7 +709,6 @@
               <section class="sp-monitor-items">
                 <header class="sp-rate-guard-section-head">
                   <div>
-                    <span>Matching Evidence</span>
                     <h4>监控项 / 本地账号 / 本地分组</h4>
                   </div>
                   <strong>{{ supplierMonitorDisplayItems.length }} 项</strong>
@@ -1524,8 +1443,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { SupplierAccountRateGuardLogDialog, SupplierGroupElectionChangeLogDialog, SupplierModuleLayout } from '@/components/admin/supplier-management'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { SupplierAccountHealthGuardResult, SupplierAccountRateGuardLogDialog, SupplierGroupElectionChangeLogDialog, SupplierModuleLayout } from '@/components/admin/supplier-management'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Input from '@/components/common/Input.vue'
@@ -1612,7 +1531,6 @@ const healthGuardSupplierAccounts = ref<SupplierProviderAccount[]>([])
 const loadingHealthGuardSupplierAccounts = ref(false)
 const healthGuardModelOptionsByPlatform = ref<Record<string, { id: string; display_name?: string }[]>>({})
 const healthGuardModelLoadingByPlatform = ref<Record<string, boolean>>({})
-const healthGuardStatusFilter = ref('all')
 
  
 const editForm = reactive<SupplierAutomationTask>({
@@ -1731,34 +1649,6 @@ const supplierMonitorSlowCount = computed(() => (
 const supplierMonitorFailedCount = computed(() => (
   supplierMonitorDisplayItems.value.filter(item => item.status === 'failed').length
 ))
-const accountHealthGuardSummaryMetrics = computed(() => {
-  const result = accountHealthGuardResult.value
-  if (!result) return []
-  return [
-    { key: 'total', label: '白名单账号', count: result.total_accounts, filter: '', tone: '' },
-    { key: 'selected', label: '本轮选择', count: result.selected_count, filter: '', tone: '' },
-    { key: 'checked', label: '检查', count: result.checked_count, filter: 'checked', tone: 'neutral' },
-    { key: 'healthy', label: '健康', count: result.healthy_count, filter: 'healthy', tone: 'good' },
-    { key: 'slow', label: '慢响应', count: result.slow_count, filter: 'slow', tone: 'warn' },
-    { key: 'failed', label: '失败', count: result.failed_count, filter: 'failed', tone: 'bad' },
-    { key: 'unavailable', label: '不可用', count: result.unavailable_count, filter: 'unavailable', tone: 'warn' },
-    { key: 'pending', label: '待下轮', count: result.pending_count, filter: '', tone: '' },
-    { key: 'disabled', label: '暂停', count: result.disabled_count, filter: 'disabled', tone: 'bad' },
-    { key: 'recovered', label: '恢复', count: result.recovered_count, filter: 'recovered', tone: 'good' },
-  ]
-})
-const filteredAccountHealthGuardItems = computed(() => {
-  const items = accountHealthGuardResult.value?.items || []
-  const filter = healthGuardStatusFilter.value
-  if (filter === 'all') return items
-  if (filter === 'checked') {
-    return items.filter(item => item.status === 'healthy' || item.status === 'slow' || item.status === 'failed')
-  }
-  if (filter === 'disabled' || filter === 'recovered') {
-    return items.filter(item => item.action === filter)
-  }
-  return items.filter(item => item.status === filter)
-})
 const rateGuardAlertItems = computed(() => (
   rateGuardResult.value?.items.filter(item => rateGuardAlertActions.has(item.action)) || []
 ))
@@ -1777,17 +1667,6 @@ const runStatusFilterOptions: SelectOption[] = [
   { value: 'partial', label: '部分成功' },
   { value: 'failed', label: '失败' },
   { value: 'running', label: '运行中' },
-]
-const healthGuardStatusFilterOptions: SelectOption[] = [
-  { value: 'all', label: '全部状态' },
-  { value: 'checked', label: '检查' },
-  { value: 'healthy', label: '健康' },
-  { value: 'slow', label: '慢响应' },
-  { value: 'failed', label: '失败' },
-  { value: 'skipped', label: '跳过' },
-  { value: 'unavailable', label: '不可用' },
-  { value: 'disabled', label: '暂停' },
-  { value: 'recovered', label: '恢复' },
 ]
 const taskColumns: Column[] = [
   { key: 'task', label: '任务', class: 'min-w-[210px]' },
@@ -2121,7 +2000,6 @@ async function openTaskLatestResult(task: SupplierAutomationTask) {
 
 function openRunDetail(run: SupplierAutomationRun) {
   detailRun.value = run
-  healthGuardStatusFilter.value = 'all'
   selectInitialDetailProvider(run)
   detailTitle.value = `${run.task_code} 运行详情：${statusText(run.status)}`
   detailMessage.value = formatRunDetail(run)
@@ -2175,41 +2053,6 @@ function groupElectionLatencyText(value?: number | null): string {
   const latency = Number(value)
   if (!Number.isFinite(latency) || latency <= 0) return '—'
   return `${Math.round(latency)} ms`
-}
-
-function setHealthGuardStatusFilter(filter: string) {
-  healthGuardStatusFilter.value = healthGuardStatusFilter.value === filter ? 'all' : filter
-}
-
-function accountHealthGuardStatusText(status: string): string {
-  const labels: Record<string, string> = {
-    healthy: '健康',
-    slow: '慢响应',
-    failed: '失败',
-    skipped: '跳过',
-    unavailable: '不可用',
-  }
-  return labels[status] || status || '-'
-}
-
-function accountHealthGuardActionText(action: string): string {
-  const labels: Record<string, string> = {
-    none: '无变更',
-    disabled: '暂停调度',
-    recovered: '恢复调度',
-  }
-  return labels[action] || action || '-'
-}
-
-function accountHealthGuardStatusTone(status: string): string {
-  if (status === 'healthy') return 'good'
-  if (status === 'slow' || status === 'skipped' || status === 'unavailable') return 'warn'
-  if (status === 'failed') return 'bad'
-  return ''
-}
-
-function schedulableText(value: boolean): string {
-  return value ? '可调度' : '已暂停'
 }
 
 function formatRunDetail(run: SupplierAutomationRun): string {
@@ -2736,13 +2579,35 @@ function closeMultiplierIntervalDialog() {
 
 // 账号弹窗的平台标签与分组弹窗共用同一套渲染，只是统计口径换成「可用账号数」——
 // 与它替换掉的下拉选项口径一致，筛选行为不变。
+//
+// 平台与供应商两个筛选互相收窄（联动）：
+//   · 平台标签的候选与计数只统计「供应商筛选后」的账号；
+//   · 供应商下拉的候选与计数只统计「平台筛选后」的账号。
+// 两边各自只应用**对方**那一个条件 —— 不能拿最终列表（healthGuardWorkspaceAccounts）算候选，
+// 那会把当前选中项永远留在候选里，联动就退化成两个独立筛选。
+const healthGuardProviderScopedMappings = computed(() => {
+  const providerID = healthGuardAccountProviderFilter.value
+  if (!providerID) return healthGuardAvailableAccountMappings.value
+  return healthGuardAvailableAccountMappings.value.filter(mapping =>
+    mapping.sources.some(source => String(source.provider_id) === providerID)
+  )
+})
+
+const healthGuardPlatformScopedMappings = computed(() => {
+  const selected = healthGuardAccountPlatformFilter.value
+  if (!selected.length) return healthGuardAvailableAccountMappings.value
+  return healthGuardAvailableAccountMappings.value.filter(mapping =>
+    matchesPlatformFilter(mapping.platform, selected)
+  )
+})
+
 const healthGuardAccountPlatformFacets = computed(() =>
-  buildPlatformFacets(healthGuardAvailableAccountMappings.value)
+  buildPlatformFacets(healthGuardProviderScopedMappings.value)
 )
 
 const healthGuardProviderFilterOptions = computed<SelectOption[]>(() => {
   const providers = new Map<number, { name: string; accountIDs: Set<number> }>()
-  for (const mapping of healthGuardAvailableAccountMappings.value) {
+  for (const mapping of healthGuardPlatformScopedMappings.value) {
     for (const source of mapping.sources) {
       const providerID = Number(source.provider_id)
       if (!Number.isSafeInteger(providerID) || providerID <= 0) continue
@@ -2770,6 +2635,30 @@ const healthGuardProviderFilterOptions = computed<SelectOption[]>(() => {
   ]
 })
 
+// 联动必须把「已经选不到」的那一项收回去，否则会留下一个界面上根本不存在、又取消不掉的选中项：
+// 平台标签只在候选里有对应 facet 时才渲染，被挤掉的标签会连点击取消的机会都没有，
+// 结果是列表一直空着而用户找不到原因。
+//
+// 收回的是**被挤掉的那个**，而不是刚改的那个：用户点平台标签就是想看该平台，
+// 若把刚点的标签回退掉，表现就是「点了没反应」。所以两个 watch 都挂在「值」上
+// （谁变了就检查另一个），语义是「后改的生效」。
+// 不会成环：收回只会让对方的候选变多（空选 / 「全部供应商」一定在候选里），不会把对方也挤掉。
+watch(healthGuardAccountPlatformFilter, () => {
+  if (!healthGuardProviderFilterOptions.value.some(
+    option => option.value === healthGuardAccountProviderFilter.value
+  )) {
+    healthGuardAccountProviderFilter.value = ''
+  }
+})
+
+watch(healthGuardAccountProviderFilter, () => {
+  const available = new Set(healthGuardAccountPlatformFacets.value.map(facet => facet.platform))
+  const kept = healthGuardAccountPlatformFilter.value.filter(platform => available.has(platform))
+  if (kept.length !== healthGuardAccountPlatformFilter.value.length) {
+    healthGuardAccountPlatformFilter.value = kept
+  }
+})
+
 const healthGuardWorkspaceAccounts = computed(() => {
   const accounts = [...healthGuardAvailableAccountMappings.value]
   const includedAccountIDs = new Set(accounts.map(mapping => mapping.localAccountID))
@@ -2782,7 +2671,7 @@ const healthGuardWorkspaceAccounts = computed(() => {
   const platformFilter = healthGuardAccountPlatformFilter.value
   const providerID = healthGuardAccountProviderFilter.value
   const keyword = healthGuardAccountSearch.value.trim().toLowerCase()
-  return accounts.filter(mapping => {
+  const filtered = accounts.filter(mapping => {
     if (healthGuardSelectedOnly.value && !healthGuardAccountIDs.value.includes(mapping.localAccountID)) return false
     if (!matchesPlatformFilter(mapping.platform, platformFilter)) return false
     if (providerID && !mapping.sources.some(source => String(source.provider_id) === providerID)) return false
@@ -2796,7 +2685,23 @@ const healthGuardWorkspaceAccounts = computed(() => {
     ].filter(Boolean).join(' ').toLowerCase()
     return searchableText.includes(keyword)
   })
+  // 按倍率升序：倍率区间规则是按倍率落桶取间隔的，同一桶的账号相邻才看得出「这批账号走同一条区间」。
+  // 排序放在筛选之后，列表顺序不随筛选条件跳变（每次都从同一基准重排）。
+  return filtered.sort((a, b) => healthGuardAccountMultiplierSortKey(a) - healthGuardAccountMultiplierSortKey(b))
 })
+
+/**
+ * 倍率升序的排序键。
+ * 一个账号可能有多个来源、各自倍率不同（行上显示成「0.5 / 0.8」），取其中最小值。
+ * 倍率取值与展示用的是同一套过滤（Number + Number.isFinite），避免排序键和行上显示的数字对不上。
+ * 完全没有可用倍率的账号排到最后 —— 用 0 代替会让「免费的」和「查不到倍率的」混在一起。
+ */
+function healthGuardAccountMultiplierSortKey(mapping: HealthGuardAccountMapping): number {
+  const rates = mapping.sources
+    .map(source => Number(source.rate_multiplier))
+    .filter(rate => Number.isFinite(rate))
+  return rates.length ? Math.min(...rates) : Number.POSITIVE_INFINITY
+}
 
 const healthGuardSelectionSummary = computed(() => {
   const accountModels = normalizeStringMap(editForm.config.account_health_guard_account_models)
@@ -4045,6 +3950,25 @@ function intervalSecondsToCron(seconds: number): string | null {
   max-width: 220px;
 }
 
+/* 最近结果列的状态标签兼作详情入口：字体与行高显式归一，避免 button 默认值改变 pill 尺寸
+   （字号仍由 .sp-status 提供）；hover 反馈用 currentColor 光环，跟随 good/warn/bad 语义色，
+   且不参与边框/底色的特异性竞争。 */
+.sp-status-action {
+  font-family: inherit;
+  line-height: inherit;
+  cursor: pointer;
+  transition: box-shadow 0.15s ease;
+}
+
+.sp-status-action:not(:disabled):hover,
+.sp-status-action:not(:disabled):focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.sp-status-action:disabled {
+  cursor: default;
+}
+
 .sp-run-rate-summary {
   display: flex;
   flex-wrap: wrap;
@@ -4103,7 +4027,14 @@ function intervalSecondsToCron(seconds: number): string | null {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   min-height: 0;
-  max-height: 72vh;
+  /* 高度交给 .modal-body 的 flex 分配（见下方 `:has(.sp-edit-dialog) .modal-body` 那条）。
+     这里原先有一条 max-height: 72vh，是弹窗还「按内容自适应高度」的时代留下的；
+     现在 3 档弹窗高度已经是 calc(100dvh - 2rem)，两个上限叠在一起会在内容区下方空出一条：
+     实测 1584x1105 视口下 body 可用 897px，表单被 72vh(=795.6px) 卡住 ⇒ 空出约 101px，
+     而且表单自己还在滚动，观感就是「内容在滚、下面却还有一块白」。
+     同模块的 .sp-health-guard-account-list / .sp-rate-guard-group-list 都已是「不设独立上限、
+     吃满父容器剩余空间」的写法，这条跟上它们。 */
+  flex: 1 1 auto;
   gap: 14px;
   overflow: auto;
   padding: 4px 2px 12px;
@@ -4311,6 +4242,22 @@ function intervalSecondsToCron(seconds: number): string | null {
   max-height: min(95vh, calc(100dvh - 16px));
 }
 
+/* 结果详情弹窗按视口给到 80% 宽：这个弹窗要同时承载 8 类任务的明细（表格列多、字段杂），
+   而 BaseDialog 的 extra-wide 档最宽只到 xl:max-w-6xl = 1152px ——
+   在 1584 视口下只占 73%，横向空间明显浪费。
+   只命中「装着结果详情」的那一个 modal-content，同样用 extra-wide 的其它弹窗
+   （倍率区间、分组切换日志等）不受影响。
+   权重说明：本选择器等于 2 个类（.modal-content + :has() 内的 .sp-run-detail），
+   高于 Tailwind 的 .xl\:max-w-6xl（1 个类），所以不依赖源码顺序也能生效。
+   只在 >=640px 生效：更窄时 BaseDialog 的档位本就是 w-full（铺满可用宽度），
+   强行 80vw 反而会把手机上的弹窗改窄。 */
+@media (min-width: 640px) {
+  :global(.modal-content:has(.sp-run-detail)) {
+    width: 80vw;
+    max-width: 80vw;
+  }
+}
+
 /* 电脑端：任务编辑弹窗、健康守护账号配置弹窗、分组配置弹窗横向铺满屏幕（只留 overlay 自带的四周外边距）。
    三者是同一层级的配置入口（后两者由前者内的按钮打开），尺寸保持一致才不会出现层级间的跳变。
    只在 >=768px 生效，窄屏沿用 BaseDialog 的 full 档表现，避免手机上挤掉内容宽度。 */
@@ -4334,9 +4281,15 @@ function intervalSecondsToCron(seconds: number): string | null {
     max-width: min(980px, calc(100vw - 2rem));
   }
 
+  /* 3 档不再「一律铺满」：铺满时宽度只取决于视口，屏幕越宽越散
+     （实测 1584 视口下 1552px，每个字段的输入框横跨 700px 却只放一个数字）。
+     给一个 1280px 上限（= BaseDialog full 档的 xl:max-w-7xl，回到框架自己的尺度）。
+     收窄的代价实测过：健康守护的 3 列区块高度 494px → 494px 完全不变（每列 384px
+     仍放得下「标签 + 输入框」，没触发上面担心的折行）；分组择优的说明文字各多占一行，
+     表单总高 1224 → 1291（+67px），而它本来就要滚动，边际影响可接受。 */
   :global(.modal-content:has(.sp-edit-dialog[data-grid-cols="3"])) {
-    width: calc(100vw - 2rem);
-    max-width: calc(100vw - 2rem);
+    width: min(1280px, calc(100vw - 2rem));
+    max-width: min(1280px, calc(100vw - 2rem));
   }
 }
 
@@ -4372,6 +4325,33 @@ function intervalSecondsToCron(seconds: number): string | null {
    给一个上限让它在内容少时矮、内容多时顶到 70vh 由容器内部滚动。 */
 :global(.modal-content:has(.sp-multiplier-interval-dialog)) {
   max-height: 70vh;
+}
+
+/* Input 组件的说明文字是全站通用样式（style.css 的 .input-hint = 12px 固定灰字），
+   对本弹窗里动辄两三百字的策略说明太挤：12px 中文行距只有 1.33，读起来很累。
+   在页面层覆盖，只作用于编辑任务弹窗，不动通用组件与全局样式 ——
+   字号提到 13px（与模块 .sp-toggle-field 同档），行高放开到 1.7，
+   颜色改用跟主题的 --sp-muted（浅色 #607089 对白底 5.2:1、深色 #a8b6ca 对深底 7:1，
+   都优于原 gray-500 的 4.8:1），比原来的固定灰更清楚且不再与主题脱节。 */
+:global(.modal-content:has(.sp-edit-dialog) .input-hint) {
+  color: var(--sp-muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* 字段标签改用模块自己的蓝。原先它跟随全站通用的 .input-label
+   （浅色 gray-700 / 深色 gray-300），与本弹窗里同样走灰阶的说明文字只差一档明度 ——
+   深色下更是 #d1d5db 对 #a8b6ca，几乎分不出来；而这些字段的说明动辄三四行，
+   扫视时找不到「下一个字段从哪开始」。换成饱和蓝后标签成了可跳读的锚点。
+   浅色取 --sp-blue（#2563eb，对白底 5.17:1）；深色必须另给亮蓝 ——
+   --sp-blue 在深色块里没有重定义，仍是 #2563eb，在 #172033 上只有 3.5:1。
+   同样只作用于编辑任务弹窗，不动通用组件与全局样式。 */
+:global(.modal-content:has(.sp-edit-dialog) .input-label) {
+  color: var(--sp-blue);
+}
+
+:global(.dark .modal-content:has(.sp-edit-dialog) .input-label) {
+  color: #60a5fa;
 }
 
 :global(.modal-content:has(.sp-health-guard-account-dialog) .modal-body),
@@ -4503,8 +4483,21 @@ function intervalSecondsToCron(seconds: number): string | null {
 .sp-run-detail {
   --sp-result-accent: var(--sp-cyan);
   display: grid;
-  max-width: min(1120px, 86vw);
-  max-height: 72vh;
+  /* 宽度跟随父容器，不再自设上限。原来的 max-width: min(1120px, 86vw) 是弹窗还在
+     BaseDialog extra-wide 档（最宽 1152px、内容区 1104px）时留下的，那个上限从不生效；
+     弹窗按视口放宽到 80vw 后内容区变成 1219px，内容却仍卡在 1120px，
+     而 .modal-body 是 flex column + 默认 stretch（子项从交叉轴起点即左边起算），
+     表现为「弹窗右侧空出一条」。这里靠 stretch 铺满即可，
+     显式写 100% 是为了父容器布局将来变化时仍能兜住。 */
+  max-width: 100%;
+  /* 高度同样交给父容器：原来的 max-height: 72vh 会在弹窗还有余高时提前截断内容区
+     （1105px 视口下只到 795px，而弹窗可用约 1049px），滚动条被提到半空、下方空一截。
+     改 100% 后两种情况都不留白：父容器高度确定时（弹窗被自身 max-height 封顶）正好等于
+     父容器高度；父容器高度为 auto 时百分比无法解析、等价于取消上限，此时靠
+     flex-shrink + overflow: auto 把内容压回弹窗内滚动。
+     ⚠️ 这里不能照抄编辑弹窗的 `flex: 1 1 auto` —— 结果详情弹窗没有固定 height，
+     `.modal-content` 高度是 auto，flex-grow 拿不到剩余空间，真正起作用的是 shrink。 */
+  max-height: 100%;
   overflow: auto;
   border: 0;
   background: transparent;
@@ -4520,8 +4513,15 @@ function intervalSecondsToCron(seconds: number): string | null {
 
 .sp-detail-content {
   border-top: 1px solid var(--sp-line);
-  margin-top: 16px;
-  padding-top: 18px;
+  margin-top: 8px;
+  padding-top: 10px;
+}
+
+/* 明细区里的区块比执行结论区多，间距再紧一档。
+   必须单独成一条规则：上面那块被 spec 的正则钉住了「正好三个声明」的形状
+   （border-top / margin-top / padding-top 后直接收尾），并进去会直接打爆那条断言。 */
+.sp-detail-content {
+  gap: 8px;
 }
 
 .sp-detail-section-head {
@@ -4531,18 +4531,8 @@ function intervalSecondsToCron(seconds: number): string | null {
   gap: 16px;
 }
 
-.sp-detail-section-kicker {
-  display: block;
-  color: var(--sp-result-accent);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  line-height: 1.2;
-  text-transform: uppercase;
-}
-
 .sp-detail-section-head h3 {
-  margin: 3px 0 0;
+  margin: 0;
   color: var(--sp-text);
   font-size: 16px;
   line-height: 1.25;
@@ -4591,7 +4581,13 @@ function intervalSecondsToCron(seconds: number): string | null {
 
 .sp-run-detail-summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* 一行 6 格（原来是 3 列 × 2 行，省掉一整行）。等分就够：
+     最长的是时间戳（19 字符约 152px）和任务中文名（最长 9 字约 126px），
+     每列可用 185px（内容区 1219px 减左右 padding）都放得下。
+     「任务」格显示的是中文名而非原始代号 —— 代号最长 35 字符（约 280px）在等分列里会折行，
+     而完整代号在弹窗标题栏已经显示了，这里不必重复。
+     1024px 以下仍由媒体查询切回 2 列 / 1 列，这里只管桌面。 */
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   row-gap: 18px;
   border-bottom: 1px solid var(--sp-line);
   padding: 4px 0 18px;
@@ -4603,7 +4599,7 @@ function intervalSecondsToCron(seconds: number): string | null {
   padding: 2px 18px 4px;
 }
 
-.sp-summary-item:nth-child(3n + 1) {
+.sp-summary-item:first-child {
   border-left: 0;
   padding-left: 0;
 }
@@ -6254,236 +6250,6 @@ function intervalSecondsToCron(seconds: number): string | null {
   line-height: 1.25;
 }
 
-.sp-account-health-guard-summary {
-  grid-template-columns: repeat(10, minmax(0, 1fr));
-}
-.sp-health-guard-metric {
-  min-width: 0;
-}
-
-.sp-health-guard-metric-button {
-  display: block;
-  width: 100%;
-  margin: -12px;
-  padding: 12px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background-color 0.15s ease, box-shadow 0.15s ease;
-}
-
-.sp-health-guard-metric-button:hover {
-  background: color-mix(in srgb, var(--sp-primary, #3b82f6) 8%, transparent);
-}
-
-.sp-health-guard-metric-button:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--sp-primary, #3b82f6) 55%, transparent);
-  outline-offset: -2px;
-}
-
-.sp-health-guard-metric.is-filterable {
-  position: relative;
-}
-
-.sp-health-guard-metric.is-filterable::after {
-  content: '';
-  position: absolute;
-  inset: auto 10px 8px 10px;
-  height: 2px;
-  border-radius: 999px;
-  background: transparent;
-  transition: background-color 0.15s ease;
-}
-
-.sp-health-guard-metric.is-filterable.good.active,
-.sp-health-guard-metric.is-filterable.good:hover {
-  background: color-mix(in srgb, #16a34a 8%, transparent);
-}
-
-.sp-health-guard-metric.is-filterable.warn.active,
-.sp-health-guard-metric.is-filterable.warn:hover {
-  background: color-mix(in srgb, #d97706 8%, transparent);
-}
-
-.sp-health-guard-metric.is-filterable.bad.active,
-.sp-health-guard-metric.is-filterable.bad:hover {
-  background: color-mix(in srgb, #dc2626 8%, transparent);
-}
-
-.sp-health-guard-metric.is-filterable.neutral.active,
-.sp-health-guard-metric.is-filterable.neutral:hover {
-  background: color-mix(in srgb, var(--sp-primary, #3b82f6) 8%, transparent);
-}
-
-.sp-health-guard-metric.active .sp-health-guard-metric-button strong {
-  color: color-mix(in srgb, var(--sp-primary, #3b82f6) 45%, var(--sp-text));
-}
-
-.sp-health-guard-metric.good.active .sp-health-guard-metric-button strong {
-  color: #15803d;
-}
-
-.sp-health-guard-metric.warn.active .sp-health-guard-metric-button strong {
-  color: #b45309;
-}
-
-.sp-health-guard-metric.bad.active .sp-health-guard-metric-button strong {
-  color: #b91c1c;
-}
-
-.sp-health-guard-metric.active::after {
-  background: currentColor;
-  color: color-mix(in srgb, var(--sp-primary, #3b82f6) 70%, var(--sp-line));
-}
-
-.sp-health-guard-metric.good.active::after {
-  color: #16a34a;
-}
-
-.sp-health-guard-metric.warn.active::after {
-  color: #d97706;
-}
-
-.sp-health-guard-metric.bad.active::after {
-  color: #dc2626;
-}
-
-.sp-health-guard-metric.neutral.active::after {
-  color: var(--sp-primary, #3b82f6);
-}
-
-.sp-health-guard-skip-reasons,
-.sp-health-guard-inspections {
-  min-width: 0;
-  border-top: 1px solid var(--sp-line);
-  padding-top: 16px;
-}
-
-.sp-health-guard-reason-list {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.sp-health-guard-reason-list article {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 4px 10px;
-  border: 1px solid var(--sp-line);
-  border-radius: 10px;
-  padding: 12px;
-  background: var(--sp-panel-2);
-}
-
-.sp-health-guard-reason-list strong,
-.sp-health-guard-reason-list span {
-  color: var(--sp-text);
-  font-size: 12px;
-}
-
-.sp-health-guard-reason-list small {
-  grid-column: 1 / -1;
-  color: var(--sp-muted);
-  font-size: 11px;
-  line-height: 1.5;
-}
-
-.sp-health-guard-list-head {
-  align-items: center;
-}
-
-.sp-health-guard-filter {
-  display: grid;
-  grid-template-columns: minmax(150px, 190px) auto;
-  gap: 10px;
-  align-items: center;
-}
-
-.sp-health-guard-filter > strong {
-  color: var(--sp-muted);
-  font-size: 12px;
-}
-
-.sp-health-guard-items {
-  display: grid;
-  gap: 8px;
-}
-
-.sp-health-guard-item {
-  overflow: hidden;
-  border: 1px solid var(--sp-line);
-  border-radius: 12px;
-  background: var(--sp-panel-2);
-}
-
-.sp-health-guard-item > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  border-bottom: 1px solid var(--sp-line);
-  padding: 8px 12px;
-  background: color-mix(in srgb, var(--sp-blue) 3%, var(--sp-panel));
-}
-
-.sp-health-guard-item h4 {
-  margin: 2px 0 0;
-  color: var(--sp-text);
-  font-size: 14px;
-}
-
-.sp-health-guard-item-grid {
-  display: grid;
-  grid-template-columns: minmax(190px, 1.4fr) repeat(4, minmax(130px, 1fr));
-}
-
-.sp-health-guard-item-grid > div {
-  display: grid;
-  align-content: start;
-  gap: 4px;
-  min-width: 0;
-  border-left: 1px solid var(--sp-line);
-  padding: 12px;
-}
-
-.sp-health-guard-item-grid > div:first-child {
-  border-left: 0;
-}
-
-.sp-health-guard-item-grid span,
-.sp-health-guard-item-grid small {
-  color: var(--sp-muted);
-  font-size: 11px;
-}
-
-.sp-health-guard-item-grid strong {
-  color: var(--sp-text);
-  font-size: 12px;
-}
-
-.sp-health-guard-sources small {
-  overflow: hidden;
-  color: var(--sp-text);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sp-health-guard-message {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 18px;
-  border-top: 1px solid var(--sp-line);
-  padding: 10px 14px;
-  color: var(--sp-amber);
-  font-size: 12px;
-}
-
-.sp-health-guard-message.bad {
-  color: var(--sp-red);
-}
-
 .sp-rate-guard-detail {
   display: grid;
   gap: 16px;
@@ -6540,18 +6306,8 @@ function intervalSecondsToCron(seconds: number): string | null {
   padding-bottom: 10px;
 }
 
-.sp-rate-guard-section-head span {
-  display: block;
-  color: var(--sp-muted);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  line-height: 1.2;
-  text-transform: uppercase;
-}
-
 .sp-rate-guard-section-head h4 {
-  margin: 3px 0 0;
+  margin: 0;
   color: var(--sp-text);
   font-size: 14px;
   line-height: 1.3;
@@ -6968,8 +6724,6 @@ function intervalSecondsToCron(seconds: number): string | null {
   }
 
   .sp-health-guard-account-card,
-  .sp-health-guard-item > header,
-  .sp-health-guard-list-head,
   .sp-health-guard-account-toolbar {
     align-items: stretch;
     flex-direction: column;
@@ -6998,11 +6752,7 @@ function intervalSecondsToCron(seconds: number): string | null {
 
   .sp-health-guard-platform-model-grid,
   .sp-health-guard-platform-model-grid article,
-  .sp-health-guard-account-row,
-  .sp-health-guard-filter,
-  .sp-health-guard-reason-list,
-  .sp-health-guard-item-grid,
-  .sp-account-health-guard-summary {
+  .sp-health-guard-account-row {
     grid-template-columns: 1fr;
   }
 

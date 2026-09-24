@@ -147,8 +147,20 @@ type SupplierAccountHealthGuardRunItem struct {
 	Action             string                             `json:"action"`
 	Reason             string                             `json:"reason,omitempty"`
 	ErrorMessage       string                             `json:"error_message,omitempty"`
-	StartedAt          time.Time                          `json:"started_at"`
-	FinishedAt         time.Time                          `json:"finished_at"`
+	// IntervalSeconds 该账号本轮生效的检查间隔（秒）；0 表示每轮都测。
+	// 用指针是为了区分「不适用」——不可用 / 未匹配 / 已停用的账号不参与本轮检查，
+	// 给它们显示一个用不上的间隔会误导，那类行该字段为 nil。
+	IntervalSeconds *int `json:"interval_seconds,omitempty"`
+	// NextCheckAt 下次检查时间 = 上次检查时间 + 间隔。从未检查过、或每轮都测时为空。
+	NextCheckAt *time.Time `json:"next_check_at,omitempty"`
+	// BillingRateMultiplier 该账号的计费倍率，明细列表按它升序排序。
+	// 与 supplierAccountHealthGuardResolveInterval 用的是同一个值：倍率区间规则就是按它落桶的，
+	// 两处取不同的值会出现「排序显示在同一桶、间隔却按另一桶算」的错乱。
+	// 用指针是为了区分「未知」——账号已查不到时没有倍率可言；0 是合法值（计费为 0），
+	// 靠 omitempty 省掉会把 0 变成「未知」，所以必须是 *float64。
+	BillingRateMultiplier *float64  `json:"billing_rate_multiplier,omitempty"`
+	StartedAt             time.Time `json:"started_at"`
+	FinishedAt            time.Time `json:"finished_at"`
 }
 
 type SupplierAccountHealthGuardResult struct {
@@ -377,6 +389,11 @@ func supplierAccountHealthGuardUnavailableItem(accountID int64, candidates []Sup
 		item.Platform = supplierAccountHealthGuardPlatformForCandidate(candidate)
 		item.SchedulableBefore = candidate.LocalAccount.Schedulable
 		item.SchedulableAfter = candidate.LocalAccount.Schedulable
+		// 多来源时取第一个能查到本地账号的倍率：倍率是本地账号自己的属性，
+		// 同一账号的多个来源不会有不同的倍率。
+		if item.BillingRateMultiplier == nil {
+			item.BillingRateMultiplier = supplierAccountHealthGuardMultiplier(candidate.LocalAccount)
+		}
 		if strings.TrimSpace(candidate.LocalAccount.Status) != StatusActive {
 			item.Reason = "账号已停用"
 		}
@@ -421,6 +438,13 @@ func (s *SupplierAccountHealthGuardService) runTarget(ctx context.Context, confi
 	if startedAt.IsZero() {
 		startedAt = time.Now()
 	}
+	// 间隔、上次检查时间与倍率在两条返回路径里都要带上：明细列表靠它们解释
+	// 「这个账号多久测一次」「为什么这轮被跳过」「按倍率排序时它排在哪」，提前算一次比两处各算一遍安全。
+	intervalSeconds := supplierAccountHealthGuardResolveInterval(config, target)
+	nextCheckAt := supplierAccountHealthGuardNextCheckAt(
+		supplierAccountHealthGuardLastCheckedAt(target.account.Extra), intervalSeconds,
+	)
+	multiplier := supplierAccountHealthGuardMultiplier(&target.account)
 	if ctx.Err() != nil {
 		return SupplierAccountHealthGuardRunItem{
 			LocalAccountID: target.account.ID, LocalAccountName: target.account.Name, Platform: target.platform,
@@ -431,8 +455,12 @@ func (s *SupplierAccountHealthGuardService) runTarget(ctx context.Context, confi
 			Status:            SupplierAccountHealthGuardStatusSkipped,
 			Action:            SupplierAccountHealthGuardActionNone,
 			Reason:            "任务时间不足，本次跳过",
-			StartedAt:         startedAt,
-			FinishedAt:        time.Now(),
+			IntervalSeconds:   &intervalSeconds,
+			NextCheckAt:       nextCheckAt,
+
+			BillingRateMultiplier: multiplier,
+			StartedAt:             startedAt,
+			FinishedAt:            time.Now(),
 		}
 	}
 	item := SupplierAccountHealthGuardRunItem{
@@ -440,9 +468,12 @@ func (s *SupplierAccountHealthGuardService) runTarget(ctx context.Context, confi
 		Sources: append([]SupplierAccountHealthGuardSource(nil), target.sources...), ModelID: target.modelID,
 		SchedulableBefore: target.account.Schedulable, SchedulableAfter: target.account.Schedulable,
 		Action: SupplierAccountHealthGuardActionNone, StartedAt: startedAt,
-		ConsecutiveFailed:  supplierAccountHealthGuardExtraInt(target.account.Extra, supplierHealthGuardFailureCountExtraKey),
-		ConsecutiveSlow:    supplierAccountHealthGuardExtraInt(target.account.Extra, supplierHealthGuardSlowCountExtraKey),
-		ConsecutiveHealthy: supplierAccountHealthGuardExtraInt(target.account.Extra, supplierHealthGuardHealthyCountExtraKey),
+		IntervalSeconds:       &intervalSeconds,
+		NextCheckAt:           nextCheckAt,
+		BillingRateMultiplier: multiplier,
+		ConsecutiveFailed:     supplierAccountHealthGuardExtraInt(target.account.Extra, supplierHealthGuardFailureCountExtraKey),
+		ConsecutiveSlow:       supplierAccountHealthGuardExtraInt(target.account.Extra, supplierHealthGuardSlowCountExtraKey),
+		ConsecutiveHealthy:    supplierAccountHealthGuardExtraInt(target.account.Extra, supplierHealthGuardHealthyCountExtraKey),
 	}
 	originalFailureCount := item.ConsecutiveFailed
 	item.LatencyLimitMs = supplierAccountHealthGuardLatencyLimitForPlatform(config, target.platform)
@@ -627,8 +658,12 @@ func supplierAccountHealthGuardFilterNotDue(targets []supplierAccountHealthGuard
 				Status:            SupplierAccountHealthGuardStatusSkipped,
 				Action:            SupplierAccountHealthGuardActionNone,
 				Reason:            fmt.Sprintf("距上次检查不足 %d 秒", interval),
-				StartedAt:         now,
-				FinishedAt:        now,
+				IntervalSeconds:   &interval,
+				NextCheckAt:       supplierAccountHealthGuardNextCheckAt(lastCheckedAt, interval),
+
+				BillingRateMultiplier: supplierAccountHealthGuardMultiplier(&target.account),
+				StartedAt:             now,
+				FinishedAt:            now,
 			})
 			continue
 		}
@@ -647,6 +682,29 @@ func supplierAccountHealthGuardLastCheckedAt(extra map[string]any) time.Time {
 		return time.Time{}
 	}
 	return parsed
+}
+
+// supplierAccountHealthGuardNextCheckAt 由「上次检查时间 + 间隔」推出下次检查时间。
+// 每轮都测（间隔 <= 0）没有「下次」的概念，从未检查过的账号也推不出时间点，两种情况都返回 nil。
+// 与 supplierAccountHealthGuardFilterNotDue 的跳过判据共用同一个算式：那两处一旦不一致，
+// 就会出现「明细说还要等 3 分钟，却根本没被跳过」这种自相矛盾的结果。
+func supplierAccountHealthGuardNextCheckAt(lastCheckedAt time.Time, intervalSeconds int) *time.Time {
+	if intervalSeconds <= 0 || lastCheckedAt.IsZero() {
+		return nil
+	}
+	next := lastCheckedAt.Add(time.Duration(intervalSeconds) * time.Second)
+	return &next
+}
+
+// supplierAccountHealthGuardMultiplier 取账号计费倍率，账号对象缺失时返回 nil。
+// nil 与 0 必须分开：0 是合法的「计费为 0」，升序排序时要排在最前面；
+// nil 表示这个账号已经查不到了，没有倍率可言，排序时应排在最后。
+func supplierAccountHealthGuardMultiplier(account *Account) *float64 {
+	if account == nil {
+		return nil
+	}
+	multiplier := account.BillingRateMultiplier()
+	return &multiplier
 }
 
 func supplierAccountHealthGuardNotDueSkipReasons(items []SupplierAccountHealthGuardRunItem) []SupplierAccountHealthGuardSkipReason {
