@@ -184,8 +184,34 @@ type SupplierAccountHealthGuardResult struct {
 	SnapshotErrorMessage string `json:"snapshot_error_message,omitempty"`
 }
 
+// SupplierAccountHealthGuardUnavailableCause 白名单账号在守护候选里查不到时的**具体成因**。
+//
+// 为什么需要它：候选查询的 WHERE 是 a.active = TRUE AND p.enabled = TRUE，
+// 于是「供应商被停用」「上游账号已下线」「本地账号改名导致匹配不上」三种情况全都塌成
+// 「候选为空」一条，明细表里统一显示「账号当前不可用」—— 排查时只能去翻库。
+// 这个枚举就是为了让明细表能直接说清楚是哪一种。
+type SupplierAccountHealthGuardUnavailableCause string
+
+const (
+	// 成因未知（诊断查询没查到 / 没跑）。此时沿用原来的笼统文案，行为与加枚举之前一致。
+	SupplierAccountHealthGuardCauseUnknown SupplierAccountHealthGuardUnavailableCause = ""
+	// 本地账号不存在或已软删。
+	SupplierAccountHealthGuardCauseLocalMissing SupplierAccountHealthGuardUnavailableCause = "local_missing"
+	// 没有任何供应商账号的名字能对得上（本地账号改名 / 上游账号改名 / 上游账号已删除）。
+	SupplierAccountHealthGuardCauseNoProviderAccount SupplierAccountHealthGuardUnavailableCause = "no_provider_account"
+	// 名字能配上，但同名的本地账号不止一个 ⇒ 候选取不出唯一一个，判为冲突。
+	SupplierAccountHealthGuardCauseMatchConflict SupplierAccountHealthGuardUnavailableCause = "match_conflict"
+	// 名字能配上、供应商也在启用，但供应商侧账号已停用或删除。
+	SupplierAccountHealthGuardCauseProviderAccountInactive SupplierAccountHealthGuardUnavailableCause = "provider_account_inactive"
+	// 名字能配上，但所属供应商被停用。
+	SupplierAccountHealthGuardCauseProviderDisabled SupplierAccountHealthGuardUnavailableCause = "provider_disabled"
+)
+
 type SupplierAccountHealthGuardRepository interface {
 	ListAccountHealthGuardCandidates(ctx context.Context) ([]SupplierAccountHealthGuardCandidate, error)
+	// ListAccountHealthGuardUnavailableReasons 批量诊断「这些本地账号为什么在候选里查不到」。
+	// 只在候选为空时才需要，正常路径不会调用；返回的 map 里没有的账号按成因未知处理。
+	ListAccountHealthGuardUnavailableReasons(ctx context.Context, accountIDs []int64) (map[int64]SupplierAccountHealthGuardUnavailableCause, error)
 	// RecordGroupMonitorSnapshots 记录「某时刻该分组正在调度的账号」的监控结果。
 	// 给本接口加方法不会改变 ProvideSupplierAccountHealthGuardService 的参数列表，Wire 生成代码无需重新生成。
 	RecordGroupMonitorSnapshots(ctx context.Context, source string) error
@@ -263,14 +289,26 @@ func (s *SupplierAccountHealthGuardService) Run(ctx context.Context, config Supp
 		Items:         make([]SupplierAccountHealthGuardRunItem, 0, len(config.AccountIDs)),
 	}
 	targets := make([]supplierAccountHealthGuardTarget, 0, len(config.AccountIDs))
+	// 不可用的账号先只攒起来、不急着生成明细行：要说清「为什么不可用」得再查一次库，
+	// 而绝大多数账号是可用的，逐条查太浪费 ⇒ 攒完一次性批量查。
+	var unavailable []supplierAccountHealthGuardUnavailableInput
 	for _, accountID := range config.AccountIDs {
 		accountCandidates := candidatesByID[accountID]
 		target, available := supplierAccountHealthGuardBuildTarget(accountID, accountCandidates, config)
 		if !available {
-			result.Items = append(result.Items, supplierAccountHealthGuardUnavailableItem(accountID, accountCandidates, now))
+			unavailable = append(unavailable, supplierAccountHealthGuardUnavailableInput{
+				accountID:  accountID,
+				candidates: accountCandidates,
+			})
 			continue
 		}
 		targets = append(targets, target)
+	}
+	if len(unavailable) > 0 {
+		causes := s.supplierAccountHealthGuardUnavailableCauses(ctx, unavailable)
+		for _, input := range unavailable {
+			result.Items = append(result.Items, supplierAccountHealthGuardUnavailableItem(input.accountID, input.candidates, causes[input.accountID], now))
+		}
 	}
 	targets, notDueItems := supplierAccountHealthGuardFilterNotDue(targets, config, now)
 	if len(notDueItems) > 0 {
@@ -367,12 +405,62 @@ func supplierAccountHealthGuardBuildTarget(accountID int64, candidates []Supplie
 	return target, target.account.ID > 0
 }
 
-func supplierAccountHealthGuardUnavailableItem(accountID int64, candidates []SupplierAccountHealthGuardCandidate, now time.Time) SupplierAccountHealthGuardRunItem {
+// supplierAccountHealthGuardUnavailableInput 攒下来的「不可用账号」及其候选，
+// 供批量诊断原因后再统一生成明细行。
+type supplierAccountHealthGuardUnavailableInput struct {
+	accountID  int64
+	candidates []SupplierAccountHealthGuardCandidate
+}
+
+// supplierAccountHealthGuardUnavailableCauses 批量查「这些账号为什么在候选里查不到」。
+//
+// 只查候选为空的那部分：候选非空时成因已经能从候选举里看出来（本地账号被停用），
+// 再查一次是白跑。诊断失败不能拖垮整轮守护 ⇒ 返回 nil，明细行退化成原来的笼统文案。
+func (s *SupplierAccountHealthGuardService) supplierAccountHealthGuardUnavailableCauses(ctx context.Context, inputs []supplierAccountHealthGuardUnavailableInput) map[int64]SupplierAccountHealthGuardUnavailableCause {
+	if s == nil || s.repository == nil {
+		return nil
+	}
+	accountIDs := make([]int64, 0, len(inputs))
+	for _, input := range inputs {
+		if len(input.candidates) == 0 {
+			accountIDs = append(accountIDs, input.accountID)
+		}
+	}
+	if len(accountIDs) == 0 {
+		return nil
+	}
+	causes, err := s.repository.ListAccountHealthGuardUnavailableReasons(ctx, accountIDs)
+	if err != nil {
+		return nil
+	}
+	return causes
+}
+
+// supplierAccountHealthGuardUnavailableText 把成因翻成明细表里给人看的话。
+// 未知成因沿用「账号当前不可用」，保证诊断拿不到结论时显示与改造前完全一致。
+func supplierAccountHealthGuardUnavailableText(cause SupplierAccountHealthGuardUnavailableCause) string {
+	switch cause {
+	case SupplierAccountHealthGuardCauseLocalMissing:
+		return "本地账号已不存在"
+	case SupplierAccountHealthGuardCauseNoProviderAccount:
+		return "没有匹配的供应商账号"
+	case SupplierAccountHealthGuardCauseMatchConflict:
+		return "多个本地账号同名，匹配冲突"
+	case SupplierAccountHealthGuardCauseProviderAccountInactive:
+		return "供应商侧账号已下线"
+	case SupplierAccountHealthGuardCauseProviderDisabled:
+		return "所属供应商已停用"
+	default:
+		return "账号当前不可用"
+	}
+}
+
+func supplierAccountHealthGuardUnavailableItem(accountID int64, candidates []SupplierAccountHealthGuardCandidate, cause SupplierAccountHealthGuardUnavailableCause, now time.Time) SupplierAccountHealthGuardRunItem {
 	item := SupplierAccountHealthGuardRunItem{
 		LocalAccountID: accountID,
 		Status:         SupplierAccountHealthGuardStatusUnavailable,
 		Action:         SupplierAccountHealthGuardActionNone,
-		Reason:         "账号当前不可用",
+		Reason:         supplierAccountHealthGuardUnavailableText(cause),
 		StartedAt:      now,
 		FinishedAt:     now,
 	}

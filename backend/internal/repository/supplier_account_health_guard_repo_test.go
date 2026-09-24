@@ -45,6 +45,50 @@ func TestSupplierAccountHealthGuardRepositoryListsEnabledProviderAccounts(t *tes
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestSupplierAccountHealthGuardRepositoryExplainsUnavailableReasons(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	rows := sqlmock.NewRows([]string{"local_account_id", "cause"}).
+		AddRow(int64(21), "provider_disabled").
+		AddRow(int64(22), "provider_account_inactive").
+		AddRow(int64(23), "no_provider_account").
+		AddRow(int64(24), "local_missing").
+		AddRow(int64(25), "match_conflict").
+		AddRow(int64(26), "")
+
+	mock.ExpectQuery(regexp.MustCompile(`(?s)CASE.*provider_disabled.*FROM local_account`).String()).WillReturnRows(rows)
+
+	repo := NewSupplierAccountHealthGuardRepository(db)
+	causes, err := repo.ListAccountHealthGuardUnavailableReasons(context.Background(), []int64{21, 22, 23, 24, 25, 26})
+
+	require.NoError(t, err)
+	require.Len(t, causes, 6)
+	require.Equal(t, service.SupplierAccountHealthGuardCauseProviderDisabled, causes[21])
+	require.Equal(t, service.SupplierAccountHealthGuardCauseProviderAccountInactive, causes[22])
+	require.Equal(t, service.SupplierAccountHealthGuardCauseNoProviderAccount, causes[23])
+	require.Equal(t, service.SupplierAccountHealthGuardCauseLocalMissing, causes[24])
+	require.Equal(t, service.SupplierAccountHealthGuardCauseMatchConflict, causes[25])
+	require.Equal(t, service.SupplierAccountHealthGuardCauseUnknown, causes[26], "空成因要落回 Unknown，明细行才会沿用原来的文案")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupplierAccountHealthGuardRepositorySkipsReasonQueryWithoutAccountIDs(t *testing.T) {
+	// 没有账号要诊断时一次库都不该查 —— 正常路径（全部账号可用）会走到这里。
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := NewSupplierAccountHealthGuardRepository(db)
+	causes, err := repo.ListAccountHealthGuardUnavailableReasons(context.Background(), nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, causes)
+	require.Empty(t, causes)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func supplierAccountHealthGuardRows() *sqlmock.Rows {
 	return sqlmock.NewRows([]string{
 		"provider_account_id", "provider_id", "provider_name", "upstream_account_key", "upstream_account_name",

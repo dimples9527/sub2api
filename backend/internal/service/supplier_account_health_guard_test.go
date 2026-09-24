@@ -95,6 +95,12 @@ func TestSupplierAccountHealthGuardNextSchedulingState(t *testing.T) {
 type supplierAccountHealthGuardRepoStub struct {
 	candidates []SupplierAccountHealthGuardCandidate
 	err        error
+	// causes 让用例直接指定「为什么在候选里查不到」；nil 表示诊断没给出结论（沿用笼统文案）。
+	causes    map[int64]SupplierAccountHealthGuardUnavailableCause
+	causesErr error
+	// causeQueryIDs 记录诊断查询收到的账号 ID：只有候选为空的账号才该被查，
+	// 这条是「别为了填文案给每个账号都多查一次库」的守卫。
+	causeQueryIDs [][]int64
 	// snapshotCalls 记录分组监控快照的写入来源，用于确认守护跑完后确实记了一次。
 	snapshotCalls []string
 	snapshotErr   error
@@ -102,6 +108,14 @@ type supplierAccountHealthGuardRepoStub struct {
 
 func (s *supplierAccountHealthGuardRepoStub) ListAccountHealthGuardCandidates(context.Context) ([]SupplierAccountHealthGuardCandidate, error) {
 	return append([]SupplierAccountHealthGuardCandidate(nil), s.candidates...), s.err
+}
+
+func (s *supplierAccountHealthGuardRepoStub) ListAccountHealthGuardUnavailableReasons(_ context.Context, accountIDs []int64) (map[int64]SupplierAccountHealthGuardUnavailableCause, error) {
+	s.causeQueryIDs = append(s.causeQueryIDs, append([]int64(nil), accountIDs...))
+	if s.causesErr != nil {
+		return nil, s.causesErr
+	}
+	return s.causes, nil
 }
 
 func (s *supplierAccountHealthGuardRepoStub) RecordGroupMonitorSnapshots(_ context.Context, source string) error {
@@ -265,6 +279,85 @@ func TestSupplierAccountHealthGuardRunRecordsUnavailableSelectedAccountsAndConti
 	require.NotNil(t, result.Items[0].BillingRateMultiplier)
 	require.Equal(t, 1.0, *result.Items[0].BillingRateMultiplier)
 	require.Nil(t, result.Items[2].BillingRateMultiplier)
+}
+
+func TestSupplierAccountHealthGuardRunExplainsWhySelectedAccountIsUnavailable(t *testing.T) {
+	// 白名单账号在候选里查不到时，明细行必须说清是**哪一种**查不到。
+	// 候选查询的 WHERE 是 a.active = TRUE AND p.enabled = TRUE，于是「供应商被停用」
+	// 「上游账号下线」「压根没匹配上」三种情况全塌成「候选为空」一条 ——
+	// 以前统一显示「账号当前不可用」，排查时只能翻库逐条比对。
+	tests := []struct {
+		name     string
+		cause    SupplierAccountHealthGuardUnavailableCause
+		wantText string
+	}{
+		{name: "所属供应商被停用", cause: SupplierAccountHealthGuardCauseProviderDisabled, wantText: "所属供应商已停用"},
+		{name: "供应商侧账号已下线", cause: SupplierAccountHealthGuardCauseProviderAccountInactive, wantText: "供应商侧账号已下线"},
+		{name: "没有匹配的供应商账号", cause: SupplierAccountHealthGuardCauseNoProviderAccount, wantText: "没有匹配的供应商账号"},
+		{name: "本地账号已不存在", cause: SupplierAccountHealthGuardCauseLocalMissing, wantText: "本地账号已不存在"},
+		{name: "多个本地账号同名", cause: SupplierAccountHealthGuardCauseMatchConflict, wantText: "多个本地账号同名，匹配冲突"},
+		{name: "诊断没给出结论时沿用原文案", cause: SupplierAccountHealthGuardCauseUnknown, wantText: "账号当前不可用"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &supplierAccountHealthGuardRepoStub{
+				candidates: []SupplierAccountHealthGuardCandidate{},
+				causes:     map[int64]SupplierAccountHealthGuardUnavailableCause{71: tt.cause},
+			}
+			guard := NewSupplierAccountHealthGuardService(repo, &supplierAccountHealthGuardAccountStoreStub{}, &supplierAccountHealthGuardTesterStub{
+				results: map[int64]*ScheduledTestResult{},
+				errs:    map[int64]error{},
+			})
+
+			result, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{AccountIDs: []int64{71}}, time.Now())
+
+			require.NoError(t, err)
+			require.Len(t, result.Items, 1)
+			require.Equal(t, tt.wantText, result.Items[0].Reason)
+			require.Equal(t, 1, result.UnavailableCount)
+			require.Equal(t, [][]int64{{71}}, repo.causeQueryIDs, "候选为空的账号才需要查原因")
+		})
+	}
+}
+
+func TestSupplierAccountHealthGuardRunSkipsCauseLookupWhenCandidatesExist(t *testing.T) {
+	// 候选非空时成因已经能从候选举里看出来（本地账号被停用），再查一次库是白跑。
+	disabled := newSupplierAccountHealthGuardCandidate(81, "已停用账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 81})
+	disabled.LocalAccount.Status = StatusDisabled
+	repo := &supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{disabled}}
+	guard := NewSupplierAccountHealthGuardService(repo, &supplierAccountHealthGuardAccountStoreStub{}, &supplierAccountHealthGuardTesterStub{
+		results: map[int64]*ScheduledTestResult{},
+		errs:    map[int64]error{},
+	})
+
+	result, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{
+		AccountIDs:     []int64{81},
+		PlatformModels: map[string]string{"openai": "gpt-4o-mini"},
+	}, time.Now())
+
+	require.NoError(t, err)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, "账号已停用", result.Items[0].Reason)
+	require.Empty(t, repo.causeQueryIDs, "候选非空时不该为填文案多查一次库")
+}
+
+func TestSupplierAccountHealthGuardRunFallsBackToGenericReasonWhenCauseLookupFails(t *testing.T) {
+	// 诊断只是为了让文案更好读，查失败不能把整轮守护拖成失败 —— 退化成原来的笼统文案即可。
+	repo := &supplierAccountHealthGuardRepoStub{
+		candidates: []SupplierAccountHealthGuardCandidate{},
+		causesErr:  errors.New("诊断查询失败"),
+	}
+	guard := NewSupplierAccountHealthGuardService(repo, &supplierAccountHealthGuardAccountStoreStub{}, &supplierAccountHealthGuardTesterStub{
+		results: map[int64]*ScheduledTestResult{},
+		errs:    map[int64]error{},
+	})
+
+	result, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{AccountIDs: []int64{91}}, time.Now())
+
+	require.NoError(t, err)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, "账号当前不可用", result.Items[0].Reason)
 }
 
 func TestSupplierAccountHealthGuardRunDeduplicatesLocalAccountSourcesAndRotatesCursor(t *testing.T) {

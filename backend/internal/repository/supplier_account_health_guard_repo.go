@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 type supplierAccountHealthGuardRepository struct {
@@ -122,4 +123,80 @@ ORDER BY a.id ASC`)
 		return nil, fmt.Errorf("遍历供应商账号健康守护候选失败: %w", err)
 	}
 	return items, nil
+}
+
+func (r *supplierAccountHealthGuardRepository) ListAccountHealthGuardUnavailableReasons(ctx context.Context, accountIDs []int64) (map[int64]service.SupplierAccountHealthGuardUnavailableCause, error) {
+	causes := make(map[int64]service.SupplierAccountHealthGuardUnavailableCause, len(accountIDs))
+	if len(accountIDs) == 0 {
+		return causes, nil
+	}
+	// 与候选查询相反，这里**刻意不加** a.active / p.enabled 过滤：
+	// 那些被挡掉的行正是要报出来的原因本身，过滤掉就又退化成「候选为空」一句了。
+	// 判定顺序按「最具体 → 最笼统」，且名字匹配条件与候选查询逐字一致
+	// （p.account_name_prefix || a.name 归一化后比较），否则诊断会和实际执行结果对不上。
+	rows, err := r.db.QueryContext(ctx, `
+WITH local_account AS (
+  SELECT a.id,
+         a.deleted_at,
+         regexp_replace(lower(a.name), '[^[:alnum:]]', '', 'g') AS local_key
+  FROM accounts a
+  WHERE a.id = ANY($1)
+), provider_account AS (
+  SELECT pa.active AS provider_account_active,
+         sp.enabled AS provider_enabled,
+         regexp_replace(lower(COALESCE(sp.account_name_prefix, '') || pa.name), '[^[:alnum:]]', '', 'g') AS guard_key,
+         (SELECT COUNT(*)
+            FROM accounts x
+           WHERE x.deleted_at IS NULL
+             AND regexp_replace(lower(x.name), '[^[:alnum:]]', '', 'g')
+               = regexp_replace(lower(COALESCE(sp.account_name_prefix, '') || pa.name), '[^[:alnum:]]', '', 'g')
+         ) AS match_count
+  FROM supplier_provider_accounts pa
+  JOIN supplier_providers sp ON sp.id = pa.provider_id
+)
+SELECT local_account.id AS local_account_id,
+       CASE
+         WHEN local_account.deleted_at IS NOT NULL THEN 'local_missing'
+         WHEN NOT EXISTS (
+           SELECT 1 FROM provider_account
+            WHERE provider_account.guard_key = local_account.local_key
+         ) THEN 'no_provider_account'
+         WHEN EXISTS (
+           SELECT 1 FROM provider_account
+            WHERE provider_account.guard_key = local_account.local_key
+              AND provider_account.provider_account_active
+              AND provider_account.provider_enabled
+              AND provider_account.match_count = 1
+         ) THEN ''
+         WHEN EXISTS (
+           SELECT 1 FROM provider_account
+            WHERE provider_account.guard_key = local_account.local_key
+              AND provider_account.provider_account_active
+              AND provider_account.provider_enabled
+         ) THEN 'match_conflict'
+         WHEN EXISTS (
+           SELECT 1 FROM provider_account
+            WHERE provider_account.guard_key = local_account.local_key
+              AND provider_account.provider_enabled
+         ) THEN 'provider_account_inactive'
+         ELSE 'provider_disabled'
+       END AS cause
+FROM local_account`, pq.Array(accountIDs))
+	if err != nil {
+		return nil, fmt.Errorf("查询供应商账号健康守护不可用原因失败: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var accountID int64
+		var cause string
+		if err := rows.Scan(&accountID, &cause); err != nil {
+			return nil, fmt.Errorf("扫描供应商账号健康守护不可用原因失败: %w", err)
+		}
+		causes[accountID] = service.SupplierAccountHealthGuardUnavailableCause(cause)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历供应商账号健康守护不可用原因失败: %w", err)
+	}
+	return causes, nil
 }
