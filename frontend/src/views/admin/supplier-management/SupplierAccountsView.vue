@@ -7,15 +7,10 @@
       aria-label="调度账号告警汇总"
       data-test="supplier-account-alert-banner"
     >
-      <button
-        type="button"
-        class="sp-alert-banner-head"
-        :aria-expanded="alertPanelOpen"
-        @click="alertPanelOpen = !alertPanelOpen"
-      >
+      <div class="sp-alert-banner-head">
         <span class="sp-alert-banner-icon" aria-hidden="true">!</span>
         <span class="sp-alert-banner-title">
-          当前筛选下 <strong>{{ schedulingAlertSummary.total }}</strong> 个调度账号存在告警
+          当前筛选下 <strong>{{ schedulingAlertSummary.total }}</strong> 个参与择优的调度账号存在告警
         </span>
         <span class="sp-alert-banner-chips">
           <template v-for="key in SCHEDULING_ALERT_ORDER" :key="key">
@@ -25,27 +20,15 @@
             >{{ SCHEDULING_ALERT_LABELS[key] }} {{ schedulingAlertSummary.counts[key] }}</span>
           </template>
         </span>
-        <span class="sp-alert-banner-toggle">{{ alertPanelOpen ? '收起' : '查看明细' }}</span>
-      </button>
-      <ul v-if="alertPanelOpen" class="sp-alert-list">
-        <li
-          v-for="entry in schedulingAlertSummary.affected"
-          :key="entry.account.id"
-          class="sp-alert-list-item"
+        <button
+          type="button"
+          class="sp-button small ghost sp-alert-banner-toggle"
+          @click="alertDetailVisible = true"
         >
-          <button type="button" class="sp-alert-list-account" @click="openDrawer(entry.account)">
-            <span class="sp-alert-list-name">{{ displayValue(entry.account.local_account_name || entry.account.name) }}</span>
-            <span class="sp-alert-list-provider">{{ entry.account.provider_name }}</span>
-          </button>
-          <span class="sp-alert-list-tags">
-            <span
-              v-for="alert in entry.alerts"
-              :key="alert.key"
-              :class="['sp-alert-chip', alert.severity === 'critical' ? 'is-critical' : 'is-warning']"
-            >{{ SCHEDULING_ALERT_LABELS[alert.key] }}</span>
-          </span>
-        </li>
-      </ul>
+          <Icon name="eye" size="sm" />
+          查看明细
+        </button>
+      </div>
     </section>
 
     <section class="sp-account-toolbar" aria-label="账号筛选与操作">
@@ -812,6 +795,38 @@
         <div class="sp-test-error-message">
           {{ testErrorAccount.local_account_last_test_error || '暂无错误详情' }}
         </div>
+      </div>
+    </BaseDialog>
+
+    <BaseDialog
+      :show="alertDetailVisible"
+      title="调度账号告警明细"
+      width="wide"
+      @close="closeAlertDetail"
+    >
+      <div class="sp-alert-detail-dialog">
+        <p v-if="!schedulingAlertSummary.affected.length" class="sp-alert-detail-empty">
+          当前筛选下没有告警账号
+        </p>
+        <ul v-else class="sp-alert-list">
+          <li
+            v-for="entry in schedulingAlertSummary.affected"
+            :key="entry.account.id"
+            class="sp-alert-list-item"
+          >
+            <button type="button" class="sp-alert-list-account" @click="openDrawer(entry.account)">
+              <span class="sp-alert-list-name">{{ displayValue(entry.account.local_account_name || entry.account.name) }}</span>
+              <span class="sp-alert-list-provider">{{ entry.account.provider_name }}</span>
+            </button>
+            <span class="sp-alert-list-tags">
+              <span
+                v-for="alert in entry.alerts"
+                :key="alert.key"
+                :class="['sp-alert-chip', alert.severity === 'critical' ? 'is-critical' : 'is-warning']"
+              >{{ SCHEDULING_ALERT_LABELS[alert.key] }}</span>
+            </span>
+          </li>
+        </ul>
       </div>
     </BaseDialog>
 
@@ -1998,7 +2013,7 @@ async function submitBindByGroup() {
 const sortBy = ref('')
 const sortOrder = ref<'asc' | 'desc'>('asc')
 const accountQuickFilter = ref<AccountQuickFilterKey>('all')
-const alertPanelOpen = ref(false)
+const alertDetailVisible = ref(false)
 const savingBindingAccountID = ref<number | null>(null)
 const priorityDraft = ref('')
 const priorityInput = ref<InstanceType<typeof Input> | null>(null)
@@ -2042,6 +2057,9 @@ const BALANCE_CRITICAL_ALERT_DAYS = 1
 const SESSION_NEAR_LIMIT_RATIO = 0.8
 const guardFreshnessNow = ref(Date.now())
 const guardCronIntervalSeconds = ref(0)
+// 分组择优调度里「不参与择优」的本地分组 ID。告警横幅只统计参与择优的分组，
+// 与任务配置弹窗「勾选 = 参与择优」的口径一致；空列表 = 所有分组都参与。
+const electionDisabledGroupIDs = ref<number[]>([])
 let guardFreshnessTimer: number | undefined
 
 const guardCheckStaleMinutes = computed(() => {
@@ -2348,7 +2366,7 @@ onMounted(async () => {
   guardFreshnessTimer = window.setInterval(() => {
     guardFreshnessNow.value = Date.now()
   }, 30000)
-  await Promise.all([ensureCustomPlatformLabels(), loadCustomPlatforms(), loadProviders(), loadLocalGroups(), loadAccountRateGuardPendingCount(), loadGuardCheckInterval()])
+  await Promise.all([ensureCustomPlatformLabels(), loadCustomPlatforms(), loadProviders(), loadLocalGroups(), loadAccountRateGuardPendingCount(), loadAutomationTaskHints()])
   await loadAccounts()
 })
 
@@ -3490,9 +3508,19 @@ const SCHEDULING_ALERT_LABELS: Record<SchedulingAlertKey, string> = {
 // 展示顺序按处置紧迫度:直接影响可用性的排前面。
 const SCHEDULING_ALERT_ORDER: SchedulingAlertKey[] = ['failing_scheduled', 'session_near_limit', 'balance_low', 'slow_latency']
 
-// 告警只针对已匹配且开启调度的账号:这些账号正在承接线上流量,异常才需要立即处置。
+// 账号只要有一个所属本地分组参与了择优就算——与择优本身的 union 语义一致
+// （账号在任一分组里最优就会被开启，判定写在账号上而不是「账号 + 分组」上）。
+// 没有本地分组的账号不会被任何分组选到，因此也不进告警。
+function accountParticipatesInElection(account: SupplierProviderAccount): boolean {
+  const groups = account.binding_groups || []
+  return groups.some(group => !electionDisabledGroupIDs.value.includes(group.id))
+}
+
+// 告警只针对已匹配、开启调度、且所属分组参与择优的账号:这些账号正在承接线上流量,异常才需要立即处置。
+// 择优里被关掉的分组不参与换人,其账号的调度开关是人工开的,不属于这条横幅的处置范围。
 function accountSchedulingAlerts(account: SupplierProviderAccount): SchedulingAlert[] {
   if (!isMatchedLocalAccount(account) || account.local_account_schedulable !== true) return []
+  if (!accountParticipatesInElection(account)) return []
   const alerts: SchedulingAlert[] = []
 
   const rate = recentHealthRate(account)
@@ -3550,6 +3578,10 @@ const schedulingAlertSummary = computed(() => {
 
 function schedulingAlertHeadClass(key: SchedulingAlertKey): string {
   return key === 'failing_scheduled' || key === 'session_near_limit' ? 'is-critical' : 'is-warning'
+}
+
+function closeAlertDetail() {
+  alertDetailVisible.value = false
 }
 
 function guardActionLabel(action?: string): string {
@@ -3685,14 +3717,27 @@ async function loadAccountRateGuardPendingCount() {
   }
 }
 
-async function loadGuardCheckInterval() {
+// 任务 config 是后端透传的 JSONB，字段类型不受前端约束：把未知值收敛成正整数数组，
+// 否则字符串 ID 混进来会让 includes 永远匹配不上、分组过滤静默失效。
+function normalizeGroupIDs(value: unknown): number[] {
+  if (!Array.isArray(value)) return []
+  const ids = value.map(item => Number(item)).filter(id => Number.isInteger(id) && id > 0)
+  return Array.from(new Set(ids))
+}
+
+// 一次性读取本页需要的自动化任务配置：健康守护周期（判定检测是否滞后）与分组择优调度的
+// 分组范围（决定告警横幅统计哪些账号）。任一失败都退回默认值，不打扰账号列表主流程。
+async function loadAutomationTaskHints() {
   try {
     const tasks = await listAutomationTasks()
     const guardTask = tasks.find(task => task.task_code === 'supplier_account_health_guard')
     guardCronIntervalSeconds.value = guardTask ? cronToIntervalSeconds(guardTask.cron_expression) || 0 : 0
+    const electionTask = tasks.find(task => task.task_code === 'supplier_group_scheduling_election')
+    electionDisabledGroupIDs.value = normalizeGroupIDs(electionTask?.config?.group_scheduling_election_disabled_group_ids)
   } catch {
-    // 拿不到守护周期时退回固定阈值，不打扰账号列表主流程。
+    // 拿不到配置时退回固定阈值，且不做分组过滤——宁可多显示告警，也不因一次请求失败漏报。
     guardCronIntervalSeconds.value = 0
+    electionDisabledGroupIDs.value = []
   }
 }
 
@@ -3744,16 +3789,14 @@ function formatTime(value?: string): string {
   background: color-mix(in srgb, var(--sp-red) 8%, var(--sp-panel));
 }
 
+/* 头部只是容器：明细改由右侧按钮打开弹窗，避免整条横幅变成一个大按钮（内部 chips 也会被误触）。 */
 .sp-alert-banner-head {
   display: flex;
   width: 100%;
   align-items: center;
   gap: 0.75rem;
   padding: 0.7rem 1rem;
-  border: 0;
-  background: transparent;
   color: var(--sp-text);
-  cursor: pointer;
   text-align: left;
 }
 
@@ -3791,12 +3834,13 @@ function formatTime(value?: string): string {
   gap: 0.4rem;
 }
 
+/* 只保留定位与图标间距，配色/内边距交给 .sp-button.small.ghost 统一控制。 */
 .sp-alert-banner-toggle {
+  display: inline-flex;
   margin-left: auto;
   flex: 0 0 auto;
-  color: var(--sp-muted);
-  font-size: 0.75rem;
-  font-weight: 700;
+  align-items: center;
+  gap: 0.25rem;
 }
 
 .sp-alert-chip {
@@ -3819,18 +3863,18 @@ function formatTime(value?: string): string {
   color: var(--sp-red);
 }
 
+/* 明细列表从横幅内联搬进弹窗：去掉横幅里的分隔上边线与外边距，交给弹窗 body 的 padding。 */
 .sp-alert-list {
   margin: 0;
-  padding: 0.25rem 0.75rem 0.75rem;
+  padding: 0;
   list-style: none;
-  border-top: 1px solid color-mix(in srgb, var(--sp-line) 70%, transparent);
 }
 
 .sp-alert-list-item {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.4rem 0.25rem;
+  padding: 0.55rem 0.1rem;
   border-bottom: 1px solid color-mix(in srgb, var(--sp-line) 45%, transparent);
 }
 
@@ -3870,6 +3914,22 @@ function formatTime(value?: string): string {
   flex-wrap: wrap;
   gap: 0.35rem;
   margin-left: auto;
+}
+
+/* BaseDialog 会 Teleport 到 body，弹窗内容脱离 .supplier-management-page，
+   所以 --sp-* 必须在 .modal-content 上兜底（见文件末尾的变量声明选择器组）。 */
+.sp-alert-detail-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sp-alert-detail-empty {
+  margin: 0;
+  padding: 1.25rem 0;
+  color: var(--sp-muted);
+  font-size: 0.8rem;
+  text-align: center;
 }
 
 .sp-account-toolbar {
@@ -5171,6 +5231,7 @@ button.sp-guard-failure-hint:hover {
 }
 
 :global(.modal-content:has(.sp-guard-failure-dialog)),
+:global(.modal-content:has(.sp-alert-detail-dialog)),
 :global(.modal-content:has(.sp-business-platform-dialog)) {
   --sp-panel: #ffffff;
   --sp-panel-2: #f5f8fc;
@@ -5197,6 +5258,7 @@ button.sp-guard-failure-hint:hover {
 }
 
 :global(.dark .modal-content:has(.sp-guard-failure-dialog)),
+:global(.dark .modal-content:has(.sp-alert-detail-dialog)),
 :global(.dark .modal-content:has(.sp-business-platform-dialog)) {
   --sp-panel: #172033;
   --sp-panel-2: #1d293d;
@@ -5208,6 +5270,14 @@ button.sp-guard-failure-hint:hover {
   --sp-dim: #75849a;
   --sp-cyan: #3b82f6;
   --sp-blue: #60a5fa;
+  /* 语义色必须在这里重声明：弹窗 Teleport 到 body 后取不到 .supplier-management-page 上的值，
+     而深色规则不会从浅色规则继承（是同一元素的两条规则，只有显式声明才生效）。
+     取值与浅色组一致，保证弹窗内的告警标签与页面内同色。 */
+  --sp-green: #16835d;
+  --sp-amber: #c56a0a;
+  --sp-orange: #ea580c;
+  --sp-red: #d14343;
+  --sp-violet: #7c3aed;
   --sp-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
   border-color: #3b4b64;
   background:
