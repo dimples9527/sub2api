@@ -150,15 +150,34 @@ describe('SupplierGroupElectionChangeLogDialog', () => {
     expect(source).toContain('v-if="recentRunIDs.length > 0"')
     expect(source).toContain('v-for="runID in recentRunIDs"')
     expect(source).toContain('class="sp-election-log-recent-run"')
-    // 与表格里的批次号按钮同一行为：点一下只看这批，再点取消（复用 filterByRun）。
+    // 与表格里的批次号按钮同一行为：点一下加入对照，再点移出（复用 filterByRun）。
     expect(source).toContain('@click="filterByRun(runID)"')
-    expect(source).toContain("'已锁定该批次，再点取消'")
     // 批次号来自后端且**不随筛选变化**：跟着筛选一起收窄的话，
     // 点一个标签其余标签就没了，没法来回切换着对比 —— 那样这个入口就废了。
     expect(source).toContain('recentRunIDs.value = result.recent_run_ids || []')
     expect(source).toContain('const recentRunIDs = ref<number[]>([])')
     expect(cssBlock('.sp-election-log-recent')).toContain('flex-wrap')
     expect(cssBlock('.sp-election-log-recent-run.is-active')).toContain('background')
+  })
+
+  it('批次可多选：顶部标签与行内批次号共用同一个「对照集合」', () => {
+    // 单值锁一批时，想对照「这批动了谁、上批又动了谁」只能来回点，看完记不住。
+    // 收成数组后组内本来就按批次分块，选中的几批会各自成块并排。
+    expect(source).toContain('const runFilters = ref<number[]>([])')
+    // 顶部标签与行内按钮必须是同一个集合、同一套行为；两套状态会互相覆盖。
+    expect(source).toContain(":class=\"{ 'is-active': runFilters.includes(runID) }\"")
+    expect(source).toContain(":class=\"{ 'is-active': runFilters.includes(log.run_id) }\"")
+    expect(source).toContain("'已加入对照，再点移出'")
+    // 再点一次是「移出这一批」，不是清空整个选择 —— 否则选了三批想取消一批就得从头再来。
+    expect(source).toContain('runFilters.value.includes(runId)')
+    expect(source).toContain('? runFilters.value.filter((id) => id !== runId)')
+    expect(source).toContain(': [...runFilters.value, runId]')
+    // 传参是列表；空列表不传 —— 传空数组会让后端拼出 IN () 这种语法错。
+    expect(source).toContain('run_ids: runFilters.value.length > 0 ? runFilters.value : undefined')
+    // 选了批次也算「筛选生效」，否则空态会显示「最近还没有发生调度切换」、误导成功能坏了。
+    expect(source).toContain('|| runFilters.value.length > 0')
+    // 已选批次要在顶部 chip 上列出来：多选之后光看标签高亮，不知道一共选了哪几批。
+    expect(source).toContain("runFilters.map((id) => `#${id}`).join('、')")
   })
 })
 

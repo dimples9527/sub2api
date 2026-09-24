@@ -5,6 +5,7 @@
         只显示调度开关真的被拨动的记录：择优调度把某个账号从「开」改成「关」，或重新选回「开」。
         未变更、未测试、写库失败的记录不在这里。
         按分组归类展示，每组标出该组的开 / 关条数；组内再按批次分块，不同批次不混在一起。
+        顶部「最近批次」标签可多选，选中的几批会各自成块并排，方便对照「这批动了谁、那批又动了谁」。
         一个账号同属多个分组时，会在它所属的每个分组下各出现一次。
         分页按记录切分，所以同一个分组或同一个批次可能被分到相邻两页，上方条数也只统计当前这一页。
       </p>
@@ -22,8 +23,8 @@
             查看全部
           </button>
         </span>
-        <span v-if="runFilter" class="sp-election-log-group-chip">
-          仅看批次：#{{ runFilter }}
+        <span v-if="runFilters.length > 0" class="sp-election-log-group-chip">
+          仅看批次：{{ runFilters.map((id) => `#${id}`).join('、') }}
           <button type="button" class="sp-election-log-chip-clear" title="查看全部批次" @click="clearRun">
             查看全部
           </button>
@@ -67,8 +68,8 @@
           :key="runID"
           type="button"
           class="sp-election-log-recent-run"
-          :class="{ 'is-active': runFilter === runID }"
-          :title="runFilter === runID ? '已锁定该批次，再点取消' : `只看批次 #${runID}`"
+          :class="{ 'is-active': runFilters.includes(runID) }"
+          :title="runFilters.includes(runID) ? '已加入对照，再点移出' : `加入对照：批次 #${runID}`"
           @click="filterByRun(runID)"
         >
           #{{ runID }}
@@ -127,8 +128,8 @@
                         v-if="column.key === 'run'"
                         type="button"
                         class="sp-election-log-run"
-                        :class="{ 'is-active': runFilter === log.run_id }"
-                        :title="runFilter === log.run_id ? '已锁定该批次' : '只看这一批次的切换'"
+                        :class="{ 'is-active': runFilters.includes(log.run_id) }"
+                        :title="runFilters.includes(log.run_id) ? '已加入对照，再点移出' : '加入对照：这一批次的切换'"
                         @click="filterByRun(log.run_id)"
                       >
                         #{{ log.run_id }}
@@ -248,8 +249,9 @@ const filters = ref<{
 // 从某个分组/账号进来后又点了「查看全部」，此时以组件内部状态为准。
 const clearedGroup = ref(false)
 const clearedAccount = ref(false)
-// 任务批次筛选纯内部：从表格里点某条记录的批次号锁进来，再点「查看全部」清掉。
-const runFilter = ref<number | null>(null)
+// 任务批次筛选纯内部：从顶部标签或行内批次号点进来，再点「查看全部」清掉。
+// 收成数组而不是单值 —— 多选后组内按批次分块，几批会各占一块并排，正好用来对照。
+const runFilters = ref<number[]>([])
 // 顶部快捷批次标签：由后端给出（最近 5 个真有变更的批次）。
 // 它不随当前筛选变化 —— 否则点一个标签，其余标签就没了，没法来回切换着看。
 const recentRunIDs = ref<number[]>([])
@@ -271,7 +273,7 @@ const hasActiveFilters = computed(() => (
   || filters.value.startedTo !== ''
   || activeGroupID.value !== null
   || activeAccountID.value !== null
-  || runFilter.value !== null
+  || runFilters.value.length > 0
 ))
 
 const directionOptions: SelectOption[] = [
@@ -522,7 +524,7 @@ async function load() {
     const result = await listGroupElectionChangeLogs({
       group_id: activeGroupID.value ?? undefined,
       account_id: activeAccountID.value ?? undefined,
-      run_id: runFilter.value ?? undefined,
+      run_ids: runFilters.value.length > 0 ? runFilters.value : undefined,
       platform: filters.value.platform || undefined,
       search: filters.value.search.trim() || undefined,
       direction: filters.value.direction === 'all' ? undefined : filters.value.direction,
@@ -554,7 +556,7 @@ function resetFilters() {
   // 一起清掉会让人误以为看到的是全局日志。换对象要点「查看全部」。
   filters.value = { direction: 'all', platform: '', search: '', startedFrom: '', startedTo: '' }
   // 批次锁定是弹窗内点出来的临时筛选，不属于「进来时的对象」，重置一并清掉。
-  runFilter.value = null
+  runFilters.value = []
   page.value = 1
   return load()
 }
@@ -571,15 +573,18 @@ function clearAccount() {
   return load()
 }
 
+// 点批次号 = 把它加入 / 移出「对照集合」。多选是刻意的：组内本来就按批次分块，
+// 选中几批就会各自成块并排显示，一眼能看出「这批动了谁、那批又动了谁」。
 function filterByRun(runId: number) {
-  // 再点已锁定的批次号 = 取消锁定，省得非要移到 chip 上点「查看全部」。
-  runFilter.value = runFilter.value === runId ? null : runId
+  runFilters.value = runFilters.value.includes(runId)
+    ? runFilters.value.filter((id) => id !== runId)
+    : [...runFilters.value, runId]
   page.value = 1
   return load()
 }
 
 function clearRun() {
-  runFilter.value = null
+  runFilters.value = []
   page.value = 1
   return load()
 }
@@ -600,7 +605,7 @@ watch(() => props.show, (visible) => {
   if (!visible) return
   clearedGroup.value = false
   clearedAccount.value = false
-  runFilter.value = null
+  runFilters.value = []
   page.value = 1
   void load()
 })

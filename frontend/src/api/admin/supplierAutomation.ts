@@ -508,8 +508,11 @@ export interface SupplierGroupElectionChangeLog {
 export interface SupplierGroupElectionChangeLogListParams {
   group_id?: number
   account_id?: number
-  /** 锁定到某一次择优运行（任务批次），只看这批被拨动的账号。 */
-  run_id?: number
+  /**
+   * 锁定到若干次择优运行（任务批次），把几批放在一起对照。
+   * 这里按语义收数组；「怎么序列化成 query」由 listGroupElectionChangeLogs 统一处理。
+   */
+  run_ids?: number[]
   /** 精确匹配平台（openai / anthropic …）。与 search 分开：search 是模糊匹配账号名或平台。 */
   platform?: string
   search?: string
@@ -680,9 +683,17 @@ export async function markAccountRateGuardUnbindLogsHandled(
 export async function listGroupElectionChangeLogs(
   params: SupplierGroupElectionChangeLogListParams = {}
 ): Promise<SupplierGroupElectionChangeLogListResult> {
+  // run_ids 在入参里是数组（调用方按语义传），但 axios 默认会把数组序列化成
+  // `run_ids[]=1&run_ids[]=2`，后端得用 c.QueryArray("run_ids[]") 才取得到 —— 又脆又丑。
+  // 本仓既有做法是逗号分隔（同模块的 account-health/trends 就是这么传 ids 的），这里沿用。
+  const { run_ids: runIDs, ...rest } = params
+  const query: Record<string, unknown> = { ...rest }
+  if (runIDs && runIDs.length > 0) {
+    query.run_ids = runIDs.join(',')
+  }
   const { data } = await apiClient.get<SupplierGroupElectionChangeLogListResult>(
     '/admin/supplier-management/automation/group-election-change-logs',
-    { params }
+    { params: query }
   )
   return data
 }
