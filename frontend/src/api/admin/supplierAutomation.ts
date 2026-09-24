@@ -510,6 +510,8 @@ export interface SupplierGroupElectionChangeLogListParams {
   account_id?: number
   /** 锁定到某一次择优运行（任务批次），只看这批被拨动的账号。 */
   run_id?: number
+  /** 精确匹配平台（openai / anthropic …）。与 search 分开：search 是模糊匹配账号名或平台。 */
+  platform?: string
   search?: string
   direction?: 'enabled' | 'disabled'
   started_from?: string
@@ -523,6 +525,11 @@ export interface SupplierGroupElectionChangeLogListResult {
   total: number
   page: number
   page_size: number
+  /**
+   * 最近若干次「确实拨动过开关」的批次号（新到旧），给页面顶部的快捷筛选标签用。
+   * 它**不受当前筛选影响**（后端只按任务类型取），所以点某个标签后其余标签不会消失。
+   */
+  recent_run_ids?: number[]
 }
 
 export interface SupplierAccountRateGuardUnbindLog {

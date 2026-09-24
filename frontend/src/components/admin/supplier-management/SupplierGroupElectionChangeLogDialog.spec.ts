@@ -67,7 +67,8 @@ describe('SupplierGroupElectionChangeLogDialog', () => {
 
   it('重置筛选保留分组锁定，换分组要走查看全部', () => {
     // 用户是冲着某个分组点开弹窗的，重置时把分组一起清掉会让人误以为看到的是全局日志。
-    expect(source).toContain("filters.value = { direction: 'all', search: '', startedFrom: '', startedTo: '' }")
+    // 平台也要一起清：它是筛选条件，不清就会留下一个看不见的收窄。
+    expect(source).toContain("filters.value = { direction: 'all', platform: '', search: '', startedFrom: '', startedTo: '' }")
     expect(source).toContain('function clearGroup()')
     expect(source).toContain('clearedGroup.value = true')
     expect(source).toContain('const activeGroupID = computed(() => (clearedGroup.value ? null : props.groupId ?? null))')
@@ -127,6 +128,37 @@ describe('SupplierGroupElectionChangeLogDialog', () => {
     expect(source).toContain('title="查看全部账号"')
     // 重置不能把账号锁定一起清掉（同分组锁定的理由）
     expect(source).toContain('|| activeAccountID.value !== null')
+  })
+
+  it('平台筛选走精确匹配，选项复用全局目录', () => {
+    // 平台单独一个入参：search 是「账号名或平台」的模糊匹配，拿它当平台筛会把
+    // 「名字里含 openai 的账号」一起捞进来，看着像筛选失灵。
+    expect(source).toContain('platform: filters.value.platform || undefined')
+    expect(source).toContain('v-model="filters.platform"')
+    // 平台清单不在这里另写一份：那份目录是「有哪些平台」的唯一前端来源，
+    // 抄一份出来迟早会跟新增平台 / 自定义平台脱节。
+    expect(source).toContain("import { CORE_PLATFORM_OPTIONS } from '@/utils/platformOptions'")
+    expect(source).toContain('...CORE_PLATFORM_OPTIONS.map((option) => ({ value: option.value, label: option.label }))')
+    // 「全部平台」必须是空串（不传参），传个 'all' 会被后端当成平台名精确匹配、一条都查不到。
+    expect(source).toContain("{ value: '', label: '全部平台' }")
+    // 有平台条件才算「筛选生效」：否则空态会显示「最近还没有发生调度切换」，误导成功能坏了。
+    expect(source).toContain("|| filters.value.platform !== ''")
+  })
+
+  it('顶部给出最近批次快捷标签，且它不随筛选收窄', () => {
+    // 每次都要手动填批次号才能回看某一批，等于没有入口。
+    expect(source).toContain('v-if="recentRunIDs.length > 0"')
+    expect(source).toContain('v-for="runID in recentRunIDs"')
+    expect(source).toContain('class="sp-election-log-recent-run"')
+    // 与表格里的批次号按钮同一行为：点一下只看这批，再点取消（复用 filterByRun）。
+    expect(source).toContain('@click="filterByRun(runID)"')
+    expect(source).toContain("'已锁定该批次，再点取消'")
+    // 批次号来自后端且**不随筛选变化**：跟着筛选一起收窄的话，
+    // 点一个标签其余标签就没了，没法来回切换着对比 —— 那样这个入口就废了。
+    expect(source).toContain('recentRunIDs.value = result.recent_run_ids || []')
+    expect(source).toContain('const recentRunIDs = ref<number[]>([])')
+    expect(cssBlock('.sp-election-log-recent')).toContain('flex-wrap')
+    expect(cssBlock('.sp-election-log-recent-run.is-active')).toContain('background')
   })
 })
 
@@ -208,5 +240,19 @@ describe('调度切换日志的两个入口', () => {
     // 用时项取中性值时必须标明，否则管理员会拿这个 0.5 去反推配置。
     expect(source).toContain('用时项取中性值 0.5')
     expect(cssBlock('.sp-election-log-why')).toContain('margin-top')
+  })
+
+  it('「原因」列给本组结论，不照抄账号级的 union 原因', () => {
+    // 账号的调度开关是单一字段：它在 A 组当选、在 B 组落选时，账号级 reason 仍记「分组内最优」。
+    // 每个分组分节下照抄这句话，就会把「本组落选」写成「分组内最优」。
+    expect(source).toContain("{{ groupReasonText(section, log) || log.reason || '—' }}")
+    expect(source).toContain('function groupReasonText(section: LogSection, log: SupplierGroupElectionChangeLog): string')
+    // 本组没选它、账号却开着（靠别的分组当选）时必须点破，
+    // 否则「开启调度」与「本组未入选」并列会被读成自相矛盾。
+    expect(source).toContain("if (log.direction === 'enabled') return '本组未入选（该账号在其它分组当选）'")
+    // 因必需模型补选要能与「择优入选」区分开。
+    expect(source).toContain("return `本组因必需模型 ${decision.required_models.join('、')} 补选`")
+    // 旧记录没有依据 ⇒ 返回空串，由调用方降级回 log.reason。
+    expect(source).toContain("if (!decision) return ''")
   })
 })

@@ -32,6 +32,10 @@
           <span class="sr-only">开关方向</span>
           <Select v-model="filters.direction" :options="directionOptions" :searchable="false" @update:model-value="applyFilters" />
         </div>
+        <div class="sp-election-log-filter">
+          <span class="sr-only">平台</span>
+          <Select v-model="filters.platform" :options="platformOptions" @update:model-value="applyFilters" />
+        </div>
         <div class="sp-election-log-filter sp-election-log-search">
           <span class="sr-only">按账号名搜索</span>
           <Input v-model="filters.search" placeholder="按账号名搜索" @enter="applyFilters" />
@@ -50,6 +54,24 @@
         </button>
         <button class="sp-button small ghost" type="button" :disabled="loading || !hasActiveFilters" @click="resetFilters">
           重置
+        </button>
+      </div>
+
+      <!-- 最近批次快捷标签：点一下只看那一批，再点一下取消（与表格里的批次号按钮同一套行为）。
+           这批数据由后端给（最近 5 个真有变更的批次），**不随上面的筛选变化** ——
+           否则点一个标签其余标签就消失了，没法来回切换着对比。 -->
+      <div v-if="recentRunIDs.length > 0" class="sp-election-log-recent">
+        <span class="sp-election-log-recent-label">最近批次</span>
+        <button
+          v-for="runID in recentRunIDs"
+          :key="runID"
+          type="button"
+          class="sp-election-log-recent-run"
+          :class="{ 'is-active': runFilter === runID }"
+          :title="runFilter === runID ? '已锁定该批次，再点取消' : `只看批次 #${runID}`"
+          @click="filterByRun(runID)"
+        >
+          #{{ runID }}
         </button>
       </div>
 
@@ -129,10 +151,13 @@
                       <span v-else-if="column.key === 'healthy_count'">{{ log.healthy_count }}</span>
                       <span v-else-if="column.key === 'latency_ms'" class="sp-election-log-latency" :class="{ 'is-empty': !log.latency_ms }">{{ latencyText(log.latency_ms) }}</span>
                       <template v-else-if="column.key === 'reason'">
-                        <small class="sp-election-log-reason">{{ log.reason || '—' }}</small>
+                        <!-- 用本组结论而不是 log.reason：后者是账号级的（union 语义），
+                             照抄到别的分组分节下会把「本组落选」写成「分组内最优」。
+                             旧记录没有依据，groupReasonText 返回空串时降级回账号级原因。 -->
+                        <small class="sp-election-log-reason">{{ groupReasonText(section, log) || log.reason || '—' }}</small>
                         <small v-if="log.error_message" class="sp-election-log-error">{{ log.error_message }}</small>
-                        <!-- 一句话原因说不清「为什么是它」：评分构成、组内名次、入选线、
-                             必需模型补选、在任者锁定、无备选这些都摊在这里，省得管理员回头翻配置和源码。
+                        <!-- 一句话结论说不清「为什么是它」：评分构成、组内名次、入选线、
+                             必需模型补选、在任者锁定这些都摊在这里，省得管理员回头翻配置和源码。
                              旧运行记录里没有 group_decisions，此时整块不渲染（自动降级回原来的一行原因）。 -->
                         <details v-if="whyFacts(section, log).length > 0" class="sp-election-log-why">
                           <summary>依据</summary>
@@ -177,6 +202,7 @@ import type { Column } from '@/components/common/types'
 import { useAppStore } from '@/stores/app'
 import { formatTime } from '@/utils/format'
 import { platformTextClass } from '@/utils/platformColors'
+import { CORE_PLATFORM_OPTIONS } from '@/utils/platformOptions'
 
 interface Props {
   show: boolean
@@ -205,8 +231,16 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 // direction 用字面量联合而不是 string：API 只认 enabled/disabled，写错的值会被后端当成"不过滤"静默吞掉。
-const filters = ref<{ direction: 'all' | 'enabled' | 'disabled'; search: string; startedFrom: string; startedTo: string }>({
+// platform 是 string：平台集合可配置（还能加自定义平台），写死联合类型会把新平台挡在类型层。
+const filters = ref<{
+  direction: 'all' | 'enabled' | 'disabled'
+  platform: string
+  search: string
+  startedFrom: string
+  startedTo: string
+}>({
   direction: 'all',
+  platform: '',
   search: '',
   startedFrom: '',
   startedTo: '',
@@ -216,6 +250,9 @@ const clearedGroup = ref(false)
 const clearedAccount = ref(false)
 // 任务批次筛选纯内部：从表格里点某条记录的批次号锁进来，再点「查看全部」清掉。
 const runFilter = ref<number | null>(null)
+// 顶部快捷批次标签：由后端给出（最近 5 个真有变更的批次）。
+// 它不随当前筛选变化 —— 否则点一个标签，其余标签就没了，没法来回切换着看。
+const recentRunIDs = ref<number[]>([])
 
 const activeGroupID = computed(() => (clearedGroup.value ? null : props.groupId ?? null))
 const activeGroupLabel = computed(() => (clearedGroup.value ? '' : props.groupLabel))
@@ -228,6 +265,7 @@ const dialogTitle = computed(() => {
 })
 const hasActiveFilters = computed(() => (
   filters.value.direction !== 'all'
+  || filters.value.platform !== ''
   || filters.value.search.trim() !== ''
   || filters.value.startedFrom !== ''
   || filters.value.startedTo !== ''
@@ -241,6 +279,13 @@ const directionOptions: SelectOption[] = [
   { value: 'disabled', label: '只看关闭' },
   { value: 'enabled', label: '只看开启' },
 ]
+
+// 平台选项复用全局目录，不在这里另写一份：那份目录是「有哪些平台」的唯一前端来源，
+// 抄一份出来迟早会跟新增平台 / 自定义平台脱节。
+const platformOptions = computed<SelectOption[]>(() => [
+  { value: '', label: '全部平台' },
+  ...CORE_PLATFORM_OPTIONS.map((option) => ({ value: option.value, label: option.label })),
+])
 
 const columns: Column[] = [
   { key: 'run', label: '任务批次', class: 'min-w-[100px]' },
@@ -382,6 +427,30 @@ function whyFacts(section: LogSection, log: SupplierGroupElectionChangeLog): str
   return facts
 }
 
+// 本行在**当前分组**下的结论，用作「原因」列那句话。
+//
+// 为什么不直接用 log.reason：那是账号级结论，而账号的调度开关是单一字段（union 语义）——
+// 它在 A 组当选、在 B 组落选时整体仍记「分组内最优」，照抄到 B 组的分节下就是错的。
+// 这里按本组那条依据重新给结论；旧运行记录没有依据，返回空串由调用方降级回 log.reason。
+//
+// 刻意不判 no_alternative：账号在任一所属分组无备选时，整体都会保持原状（后端闸门一），
+// 于是 before === after，压根不会出现在这份日志里。
+function groupReasonText(section: LogSection, log: SupplierGroupElectionChangeLog): string {
+  const decision = decisionFor(section, log)
+  if (!decision) return ''
+  if (decision.locked) return '本组在任者健康锁定，未换人'
+  if (decision.required_models && decision.required_models.length > 0) {
+    return `本组因必需模型 ${decision.required_models.join('、')} 补选`
+  }
+  if (decision.elected) return '本组择优入选'
+  // 本组没选它，它却可能因为在别的分组当选而被打开 —— 不点破的话，
+  // 「开启调度」与「本组未入选」并列会被读成自相矛盾。
+  if (log.direction === 'enabled') return '本组未入选（该账号在其它分组当选）'
+  if (decision.test_failed) return '本组测试失败'
+  if (decision.scored) return '本组未入选'
+  return '本组未参与择优'
+}
+
 // 按分组分节、组内再按批次分块。
 // 分两层是因为一份日志里混着多次运行：只按分组归档的话，同一个组下面会把不同批次的行混在一起，
 // 读起来像一次运行，也没法按批次对照「这一批动了谁、下一批又动了谁」。
@@ -454,6 +523,7 @@ async function load() {
       group_id: activeGroupID.value ?? undefined,
       account_id: activeAccountID.value ?? undefined,
       run_id: runFilter.value ?? undefined,
+      platform: filters.value.platform || undefined,
       search: filters.value.search.trim() || undefined,
       direction: filters.value.direction === 'all' ? undefined : filters.value.direction,
       started_from: filters.value.startedFrom || undefined,
@@ -465,6 +535,8 @@ async function load() {
     total.value = result.total
     page.value = result.page
     pageSize.value = result.page_size
+    // 后端每次都回全量最近批次（不随筛选变），直接整体替换即可。
+    recentRunIDs.value = result.recent_run_ids || []
   } catch (err) {
     appStore.showError(err instanceof Error ? err.message : '加载调度切换日志失败')
   } finally {
@@ -480,7 +552,7 @@ function applyFilters() {
 function resetFilters() {
   // 重置清筛选条件，但把「锁定到某个分组 / 账号」保留 —— 用户是冲着它点开弹窗的，
   // 一起清掉会让人误以为看到的是全局日志。换对象要点「查看全部」。
-  filters.value = { direction: 'all', search: '', startedFrom: '', startedTo: '' }
+  filters.value = { direction: 'all', platform: '', search: '', startedFrom: '', startedTo: '' }
   // 批次锁定是弹窗内点出来的临时筛选，不属于「进来时的对象」，重置一并清掉。
   runFilter.value = null
   page.value = 1
@@ -659,6 +731,45 @@ watch(() => props.accountId, () => {
 }
 
 .sp-election-log-run.is-active {
+  background: var(--sp-election-log-accent);
+  border-color: var(--sp-election-log-accent);
+  color: #fff;
+}
+
+/* 最近批次快捷标签行。与上面的筛选区并排但不混在一起：它是「换着看」的入口，
+   不是筛选条件本身，所以单独一行、更紧凑（标签比下拉框小一档）。
+   换行时保持左对齐，标签多了也不会把行撑破。 */
+.sp-election-log-recent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.sp-election-log-recent-label {
+  color: var(--sp-election-log-muted);
+  font-size: 12px;
+}
+
+/* 与表格里的批次号按钮同一套视觉（同色、同圆角、同 active 态），
+   点起来才像是同一个动作 —— 只是位置从行内挪到了顶部。 */
+.sp-election-log-recent-run {
+  border: 1px solid color-mix(in srgb, var(--sp-election-log-accent) 30%, var(--sp-election-log-line));
+  border-radius: 6px;
+  padding: 2px 8px;
+  background: transparent;
+  color: var(--sp-election-log-accent);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.sp-election-log-recent-run:hover {
+  background: color-mix(in srgb, var(--sp-election-log-accent) 12%, var(--sp-election-log-panel));
+}
+
+.sp-election-log-recent-run.is-active {
   background: var(--sp-election-log-accent);
   border-color: var(--sp-election-log-accent);
   color: #fff;
