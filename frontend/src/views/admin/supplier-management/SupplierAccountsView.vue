@@ -173,6 +173,18 @@
               data-test="supplier-account-rate-guard-pending-count"
             >{{ accountRateGuardPendingCount }}</span>
           </button>
+          <!-- 「健康守护详情」与上面的「倍率守护日志」同属守护任务的查看入口，刻意紧邻放置、
+               并复用同一个琥珀色，让两者在工具栏里表现为一组（页面既有做法同此：
+               「绑定分组」「按分组绑定」共用青）。琥珀与下方「调度切换日志」的橙色之间仍隔着
+               「刷新」，那处「邻近色要排开」的约束不受影响。 -->
+          <button
+            class="sp-button sp-account-toolbar-btn sp-account-toolbar-health-guard"
+            type="button"
+            data-test="supplier-account-health-guard-detail"
+            @click="openHealthGuardDetail"
+          >
+            健康守护详情
+          </button>
           <button
             class="sp-button sp-account-toolbar-btn sp-account-toolbar-refresh sp-account-refresh"
             type="button"
@@ -796,6 +808,29 @@
           {{ testErrorAccount.local_account_last_test_error || '暂无错误详情' }}
         </div>
       </div>
+    </BaseDialog>
+
+    <!-- 健康守护任务的最近一次运行明细。复用与自动化页「最近结果」入口同一套内容组件
+         （SupplierAccountHealthGuardResult），避免两处各写一份明细渲染而漂移。 -->
+    <BaseDialog
+      :show="healthGuardDetailVisible"
+      title="健康守护任务详情"
+      width="extra-wide"
+      @close="closeHealthGuardDetail"
+    >
+      <div v-if="healthGuardDetailLoading" class="sp-health-guard-detail-state">正在加载最近一次运行…</div>
+      <div v-else-if="!healthGuardDetailResult" class="sp-health-guard-detail-state">
+        暂无健康守护运行记录。
+      </div>
+      <template v-else>
+        <p class="sp-health-guard-detail-meta">
+          最近一次运行：{{ formatTime(healthGuardDetailRun?.started_at) }}
+        </p>
+        <SupplierAccountHealthGuardResult
+          :key="healthGuardDetailRun?.id"
+          :result="healthGuardDetailResult"
+        />
+      </template>
     </BaseDialog>
 
     <BaseDialog
@@ -1573,7 +1608,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
-import { SupplierAccountRateGuardLogDialog, SupplierDrawer, SupplierGroupElectionChangeLogDialog, SupplierModuleLayout } from '@/components/admin/supplier-management'
+import { SupplierAccountHealthGuardResult, SupplierAccountRateGuardLogDialog, SupplierDrawer, SupplierGroupElectionChangeLogDialog, SupplierModuleLayout } from '@/components/admin/supplier-management'
 import { CreateAccountModal, EditAccountModal } from '@/components/account'
 import DataTable from '@/components/common/DataTable.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -1601,7 +1636,8 @@ import {
   type SupplierProviderAccount,
 } from '@/api/admin/supplierProviderData'
 import Icon from '@/components/icons/Icon.vue'
-import { listAccountRateGuardUnbindLogs, listTasks as listAutomationTasks } from '@/api/admin/supplierAutomation'
+import { listAccountRateGuardUnbindLogs, listRuns, listTasks as listAutomationTasks } from '@/api/admin/supplierAutomation'
+import type { SupplierAutomationRun } from '@/api/admin/supplierAutomation'
 import {
   listSupplierAccountHealthRecords,
   type SupplierAccountHealthRecord,
@@ -1718,6 +1754,12 @@ const electionChangeLogAccountID = ref<number | null>(null)
 const electionChangeLogAccountLabel = ref('')
 const accountRateGuardLogsVisible = ref(false)
 const accountRateGuardPendingCount = ref(0)
+// 健康守护详情：与「倍率守护日志」不同，这里展示的是任务**最近一次运行**的明细，
+// 所以除开关外还要持有那一次运行本身（明细组件只吃 result_detail.account_health_guard）。
+const healthGuardDetailVisible = ref(false)
+const healthGuardDetailLoading = ref(false)
+const healthGuardDetailRun = ref<SupplierAutomationRun | null>(null)
+const healthGuardDetailResult = computed(() => healthGuardDetailRun.value?.result_detail?.account_health_guard || null)
 const businessPlatformAccount = ref<SupplierProviderAccount | null>(null)
 const businessPlatformDraft = ref('')
 const savingBusinessPlatform = ref(false)
@@ -3703,6 +3745,28 @@ function closeAccountRateGuardLogs() {
   accountRateGuardLogsVisible.value = false
 }
 
+// 「健康守护详情」看的是任务最近一次运行，按 task_code 拉一页一条即可 —— 与自动化页
+// 「最近结果」入口同源（那里也是 listRuns({ task_code, page: 1, page_size: 1 })）。
+// 不复用本页已有的 loadAutomationTaskHints：那只取任务配置（周期），不含运行明细。
+// 先开弹窗再拉数据，加载态交给 healthGuardDetailLoading 表达，避免点完按钮界面毫无反馈。
+async function openHealthGuardDetail() {
+  healthGuardDetailVisible.value = true
+  healthGuardDetailLoading.value = true
+  try {
+    const result = await listRuns({ task_code: 'supplier_account_health_guard', page: 1, page_size: 1 })
+    healthGuardDetailRun.value = result.items[0] || null
+  } catch (err) {
+    healthGuardDetailRun.value = null
+    appStore.showError(extractApiErrorMessage(err, '加载健康守护详情失败'))
+  } finally {
+    healthGuardDetailLoading.value = false
+  }
+}
+
+function closeHealthGuardDetail() {
+  healthGuardDetailVisible.value = false
+}
+
 async function loadAccountRateGuardPendingCount() {
   try {
     const result = await listAccountRateGuardUnbindLogs({
@@ -4090,6 +4154,21 @@ function formatTime(value?: string): string {
 }
 
 .sp-account-toolbar-logs:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--sp-amber) 62%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-amber) 18%, var(--sp-panel));
+  color: color-mix(in srgb, var(--sp-amber) 88%, #7c2d12);
+}
+
+/* 与上面的「倍率守护日志」同色同族：两者都是守护任务的查看入口，模板里也刻意紧邻放置，
+   让它们在工具栏里表现为一组（页面既有做法同此：「绑定分组」「按分组绑定」共用青）。
+   琥珀与下方「调度切换日志」的橙色之间仍隔着「刷新」，那处「邻近色要排开」的约束不受影响。 */
+.sp-account-toolbar-health-guard {
+  border-color: color-mix(in srgb, var(--sp-amber) 45%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-amber) 12%, var(--sp-panel));
+  color: var(--sp-amber);
+}
+
+.sp-account-toolbar-health-guard:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--sp-amber) 62%, var(--sp-line));
   background: color-mix(in srgb, var(--sp-amber) 18%, var(--sp-panel));
   color: color-mix(in srgb, var(--sp-amber) 88%, #7c2d12);
@@ -4617,6 +4696,21 @@ button.sp-test-status.failed:hover {
   line-height: 1.65;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* 健康守护详情弹窗。⚠️ 该弹窗经 BaseDialog Teleport 到 body，页面上的 --sp-* 变量
+   （定义在 .supplier-management-page）在这里取不到，所以这两个元素**不显式设色**、
+   只靠继承弹窗默认前景色：一旦写成 var(--sp-muted)，变量缺失会整段丢色、暗色也无从兜底。 */
+.sp-health-guard-detail-state {
+  padding: 2.5rem 1rem;
+  text-align: center;
+  font-size: 0.875rem;
+}
+
+.sp-health-guard-detail-meta {
+  margin: 0 0 0.75rem;
+  font-size: 0.8125rem;
+  opacity: 0.75;
 }
 
 .sp-account-test-times,
