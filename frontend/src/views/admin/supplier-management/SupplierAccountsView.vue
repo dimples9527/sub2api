@@ -810,28 +810,14 @@
       </div>
     </BaseDialog>
 
-    <!-- 健康守护任务的最近一次运行明细。复用与自动化页「最近结果」入口同一套内容组件
-         （SupplierAccountHealthGuardResult），避免两处各写一份明细渲染而漂移。 -->
-    <BaseDialog
+    <!-- 健康守护任务最近一次运行的完整详情：执行结论 + 结果明细（含健康守护明细表），
+         结构与自动化页的「运行详情」弹窗一致 —— 由 SupplierHealthGuardRunDialog 承载。 -->
+    <SupplierHealthGuardRunDialog
       :show="healthGuardDetailVisible"
-      title="健康守护任务详情"
-      width="extra-wide"
+      :run="healthGuardDetailRun"
+      :loading="healthGuardDetailLoading"
       @close="closeHealthGuardDetail"
-    >
-      <div v-if="healthGuardDetailLoading" class="sp-health-guard-detail-state">正在加载最近一次运行…</div>
-      <div v-else-if="!healthGuardDetailResult" class="sp-health-guard-detail-state">
-        暂无健康守护运行记录。
-      </div>
-      <template v-else>
-        <p class="sp-health-guard-detail-meta">
-          最近一次运行：{{ formatTime(healthGuardDetailRun?.started_at) }}
-        </p>
-        <SupplierAccountHealthGuardResult
-          :key="healthGuardDetailRun?.id"
-          :result="healthGuardDetailResult"
-        />
-      </template>
-    </BaseDialog>
+    />
 
     <BaseDialog
       :show="alertDetailVisible"
@@ -1608,7 +1594,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
-import { SupplierAccountHealthGuardResult, SupplierAccountRateGuardLogDialog, SupplierDrawer, SupplierGroupElectionChangeLogDialog, SupplierModuleLayout } from '@/components/admin/supplier-management'
+import { SupplierAccountRateGuardLogDialog, SupplierDrawer, SupplierGroupElectionChangeLogDialog, SupplierHealthGuardRunDialog, SupplierModuleLayout } from '@/components/admin/supplier-management'
 import { CreateAccountModal, EditAccountModal } from '@/components/account'
 import DataTable from '@/components/common/DataTable.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -1754,12 +1740,11 @@ const electionChangeLogAccountID = ref<number | null>(null)
 const electionChangeLogAccountLabel = ref('')
 const accountRateGuardLogsVisible = ref(false)
 const accountRateGuardPendingCount = ref(0)
-// 健康守护详情：与「倍率守护日志」不同，这里展示的是任务**最近一次运行**的明细，
-// 所以除开关外还要持有那一次运行本身（明细组件只吃 result_detail.account_health_guard）。
+// 健康守护详情：与「倍率守护日志」不同，这里展示的是任务**最近一次运行**的完整详情，
+// 所以除开关外还要持有那一次运行本身（弹窗组件自己从 result_detail 里取健康守护明细）。
 const healthGuardDetailVisible = ref(false)
 const healthGuardDetailLoading = ref(false)
 const healthGuardDetailRun = ref<SupplierAutomationRun | null>(null)
-const healthGuardDetailResult = computed(() => healthGuardDetailRun.value?.result_detail?.account_health_guard || null)
 const businessPlatformAccount = ref<SupplierProviderAccount | null>(null)
 const businessPlatformDraft = ref('')
 const savingBusinessPlatform = ref(false)
@@ -4696,21 +4681,6 @@ button.sp-test-status.failed:hover {
   line-height: 1.65;
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-/* 健康守护详情弹窗。⚠️ 该弹窗经 BaseDialog Teleport 到 body，页面上的 --sp-* 变量
-   （定义在 .supplier-management-page）在这里取不到，所以这两个元素**不显式设色**、
-   只靠继承弹窗默认前景色：一旦写成 var(--sp-muted)，变量缺失会整段丢色、暗色也无从兜底。 */
-.sp-health-guard-detail-state {
-  padding: 2.5rem 1rem;
-  text-align: center;
-  font-size: 0.875rem;
-}
-
-.sp-health-guard-detail-meta {
-  margin: 0 0 0.75rem;
-  font-size: 0.8125rem;
-  opacity: 0.75;
 }
 
 .sp-account-test-times,
