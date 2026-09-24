@@ -2073,7 +2073,7 @@ func TestSupplierGroupSchedulingElectionChangeWhereContinuesAfterRunPlaceholders
 	where, args := supplierGroupSchedulingElectionChangeWhere(service.SupplierGroupSchedulingElectionChangeLogListParams{
 		GroupID:   81,
 		AccountID: 902,
-		RunID:     5001,
+		RunIDs:    []int64{5001},
 		Platform:  "openai",
 		Search:    " alpha ",
 		Direction: service.SupplierGroupSchedulingElectionChangeDirectionDisabled,
@@ -2082,10 +2082,23 @@ func TestSupplierGroupSchedulingElectionChangeWhereContinuesAfterRunPlaceholders
 	// 拿它当平台筛选会把「名字里含 openai 的账号」也捞进来。
 	require.Equal(
 		t,
-		"e.schedulable_before <> e.schedulable_after AND e.group_ids @> to_jsonb($4::BIGINT) AND e.account_id = $5 AND e.run_id = $6 AND e.platform = $7 AND (e.account_name ILIKE $8 OR e.platform ILIKE $8) AND e.schedulable_before = TRUE AND e.schedulable_after = FALSE",
+		"e.schedulable_before <> e.schedulable_after AND e.group_ids @> to_jsonb($4::BIGINT) AND e.account_id = $5 AND e.run_id IN ($6) AND e.platform = $7 AND (e.account_name ILIKE $8 OR e.platform ILIKE $8) AND e.schedulable_before = TRUE AND e.schedulable_after = FALSE",
 		where,
 	)
 	require.Equal(t, []any{int64(81), int64(902), int64(5001), "openai", "% alpha %"}, args)
+
+	// 批次多选：两个批次各占一个占位符，其后的筛选整体后移一位。
+	// 少排一个占位符不会报错，只会把平台条件绑到第二个批次号上、筛出空结果。
+	where, args = supplierGroupSchedulingElectionChangeWhere(service.SupplierGroupSchedulingElectionChangeLogListParams{
+		RunIDs:   []int64{5001, 4998},
+		Platform: "openai",
+	}, 3)
+	require.Equal(
+		t,
+		"e.schedulable_before <> e.schedulable_after AND e.run_id IN ($4, $5) AND e.platform = $6",
+		where,
+	)
+	require.Equal(t, []any{int64(5001), int64(4998), "openai"}, args)
 
 	_, args = supplierGroupSchedulingElectionChangeWhere(service.SupplierGroupSchedulingElectionChangeLogListParams{
 		Direction: service.SupplierGroupSchedulingElectionChangeDirectionEnabled,
@@ -2110,6 +2123,22 @@ func TestNormalizeSupplierGroupSchedulingElectionChangeLogListParams(t *testing.
 	require.Equal(t, 3, got.Page)
 	require.Equal(t, 20, got.PageSize)
 	require.Equal(t, service.SupplierGroupSchedulingElectionChangeDirectionEnabled, got.Direction)
+
+	// 批次多选：非正值与重复项丢掉，顺序保持不变（前端按点选顺序传，这里不乱序）。
+	got = normalizeSupplierGroupSchedulingElectionChangeLogListParams(service.SupplierGroupSchedulingElectionChangeLogListParams{
+		RunIDs: []int64{5001, 0, -3, 5001, 4998},
+	})
+	require.Equal(t, []int64{5001, 4998}, got.RunIDs)
+
+	// 封顶：批次号是客户端直接给的，不封顶的话一个手写 URL 就能拼出上千个占位符。
+	tooMany := make([]int64, 0, supplierGroupSchedulingElectionRunIDFilterLimit+10)
+	for i := 0; i < supplierGroupSchedulingElectionRunIDFilterLimit+10; i++ {
+		tooMany = append(tooMany, int64(i+1))
+	}
+	got = normalizeSupplierGroupSchedulingElectionChangeLogListParams(service.SupplierGroupSchedulingElectionChangeLogListParams{
+		RunIDs: tooMany,
+	})
+	require.Len(t, got.RunIDs, supplierGroupSchedulingElectionRunIDFilterLimit)
 }
 
 // 占位符顺序是这份查询最容易错的地方：运行级条件（$1 起）在 SQL 文本的**内层**，
@@ -2132,11 +2161,11 @@ func TestSupplierProviderDataRepositoryListGroupSchedulingElectionChangeLogsOrde
 
 	// ⚠️ 正则里必须带上占位符**编号**：sqlmock 只校验参数值，编号错位它看不出来 ——
 	// 这条用例此前只对值，于是漏过了「条目级条件从 $1 重新编号」导致的 500。
-	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\) FROM \(.*jsonb_array_elements.*\) e WHERE e\.schedulable_before <> e\.schedulable_after.*e\.group_ids @> to_jsonb\(\$4::BIGINT\).*e\.account_id = \$5.*e\.run_id = \$6.*e\.platform = \$7.*e\.account_name ILIKE \$8`).
+	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\) FROM \(.*jsonb_array_elements.*\) e WHERE e\.schedulable_before <> e\.schedulable_after.*e\.group_ids @> to_jsonb\(\$4::BIGINT\).*e\.account_id = \$5.*e\.run_id IN \(\$6\).*e\.platform = \$7.*e\.account_name ILIKE \$8`).
 		WithArgs(countArgs...).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(2)))
 
-	mock.ExpectQuery(`(?s)SELECT run_id, run_status, changed_at.*e\.run_id = \$6.*e\.platform = \$7.*ORDER BY e\.changed_at DESC, e\.run_id DESC, e\.account_id DESC LIMIT \$9 OFFSET \$10`).
+	mock.ExpectQuery(`(?s)SELECT run_id, run_status, changed_at.*e\.run_id IN \(\$6\).*e\.platform = \$7.*ORDER BY e\.changed_at DESC, e\.run_id DESC, e\.account_id DESC LIMIT \$9 OFFSET \$10`).
 		WithArgs(queryArgs...).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"run_id", "run_status", "changed_at", "account_id", "account_name", "platform", "test_status",
@@ -2161,7 +2190,7 @@ func TestSupplierProviderDataRepositoryListGroupSchedulingElectionChangeLogsOrde
 	result, err := repo.ListGroupSchedulingElectionChangeLogs(context.Background(), service.SupplierGroupSchedulingElectionChangeLogListParams{
 		GroupID:     81,
 		AccountID:   902,
-		RunID:       5001,
+		RunIDs:      []int64{5001},
 		Platform:    "anthropic",
 		Search:      "alpha",
 		Direction:   service.SupplierGroupSchedulingElectionChangeDirectionDisabled,

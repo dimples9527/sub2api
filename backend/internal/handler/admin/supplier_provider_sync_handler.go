@@ -1029,6 +1029,31 @@ func parseOptionalInt64(raw string) int64 {
 	return value
 }
 
+// parseOptionalInt64List 解析逗号分隔的 ID 列表（如 run_ids=5001,5002），空串返回 nil。
+// 非法 / 非正的项直接丢弃，与 parseOptionalInt64 的宽松口径一致：这是只读筛选，
+// 宁可少筛一个批次，也别因为一个脏值让整个页面打不开。
+// 去重与封顶不在这里做 —— 那是数据访问层的最后一道（见 normalize...Params），
+// 内部调用方也绕不过去。
+func parseOptionalInt64List(raw string) []int64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	values := make([]int64, 0, len(parts))
+	for _, part := range parts {
+		value, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
+		if err != nil || value <= 0 {
+			continue
+		}
+		values = append(values, value)
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	return values
+}
+
 // supplierSyncCostDay 解析成本同步的归属日期；空值返回今天。
 func supplierSyncCostDay(raw string) (time.Time, bool) {
 	raw = strings.TrimSpace(raw)

@@ -386,8 +386,10 @@ type SupplierGroupSchedulingElectionChangeLog struct {
 type SupplierGroupSchedulingElectionChangeLogListParams struct {
 	GroupID   int64
 	AccountID int64
-	// RunID 锁定到某一次择优运行（任务批次），只看这批被拨动的账号；0 = 不按批次筛。
-	RunID int64
+	// RunIDs 锁定到若干次择优运行（任务批次），把几批放在一起对照；空 = 不按批次筛。
+	// 用列表而不是单值：页面顶部的批次标签可多选，行内批次按钮也是往同一份选择里加 ——
+	// 两者必须共用一条路径，否则「顶部多选」和「行内单选」会互相覆盖。
+	RunIDs []int64
 	// Search 按账号名模糊匹配（分组管理页从某个分组进入时不带它，任务中心页全局看时用）。
 	Search string
 	// Platform 精确匹配平台（openai / anthropic …），空 = 不按平台筛。

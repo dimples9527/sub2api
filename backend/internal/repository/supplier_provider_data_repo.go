@@ -2664,6 +2664,11 @@ func (r *supplierProviderDataRepository) ClearLocalAccountPlatformOverride(ctx c
 // supplierGroupSchedulingElectionRecentRunLimit 是页面顶部快捷批次标签的个数。
 const supplierGroupSchedulingElectionRecentRunLimit = 5
 
+// supplierGroupSchedulingElectionRunIDFilterLimit 是「批次多选」一次最多能筛多少个批次。
+// 页面只会用到「最近 5 个标签 + 行内批次按钮」，给足余量的同时挡住手写 URL
+// 拼出上千个占位符把这条查询拖死 —— 同模块的 account-health 批量接口也是这么封顶的。
+const supplierGroupSchedulingElectionRunIDFilterLimit = 50
+
 // supplierGroupSchedulingElectionChangeInnerSQL 把「一次任务执行」展开成「一个账号一条」的中间结果。
 // 只读不改：数据仍在 supplier_automation_runs.result_detail 的 JSONB 里，
 // 没有为它单独建表 —— 建表要新迁移，而这份日志的生命周期本来就该跟运行记录一致（同被 30 天清理）。
@@ -2717,7 +2722,7 @@ FROM (
 // 页面上的「跳过/未测/写库失败」都在运行明细里，进不到这里。
 //
 // startIndex 是运行级条件已经占用的占位符个数。运行级条件在 SQL 文本里位于**内层**，
-// 但编号必须接着它们往后排：两边都从 $1 起的话，`e.run_id = $1` 会绑到 `r.task_code`
+// 但编号必须接着它们往后排：两边都从 $1 起的话，`e.run_id IN ($1)` 会绑到 `r.task_code`
 // 上（$1 是 'group_election'），Postgres 报类型不匹配 —— 表现为点某条记录的批次号就 500。
 // 无条目级筛选时该函数不产出占位符，所以「全批次列表」一直是好的，只有带筛选才炸。
 func supplierGroupSchedulingElectionChangeWhere(params service.SupplierGroupSchedulingElectionChangeLogListParams, startIndex int) (string, []any) {
@@ -2734,8 +2739,15 @@ func supplierGroupSchedulingElectionChangeWhere(params service.SupplierGroupSche
 	if params.AccountID > 0 {
 		conditions = append(conditions, "e.account_id = "+placeholder(params.AccountID))
 	}
-	if params.RunID > 0 {
-		conditions = append(conditions, "e.run_id = "+placeholder(params.RunID))
+	// 批次多选：每个批次各占一个占位符，用 IN 而不是 = ANY(ARRAY[...]) ——
+	// 后者要把整个 Go 切片当一个参数绑定，依赖驱动的数组支持；
+	// 本仓既有的 ARRAY[$N]::BIGINT[] 写法是给 @> 用的单元素数组，这里没必要绕。
+	if len(params.RunIDs) > 0 {
+		placeholders := make([]string, 0, len(params.RunIDs))
+		for _, runID := range params.RunIDs {
+			placeholders = append(placeholders, placeholder(runID))
+		}
+		conditions = append(conditions, "e.run_id IN ("+strings.Join(placeholders, ", ")+")")
 	}
 	if params.Platform != "" {
 		conditions = append(conditions, "e.platform = "+placeholder(params.Platform))
@@ -2764,6 +2776,26 @@ func normalizeSupplierGroupSchedulingElectionChangeLogListParams(params service.
 	// 平台同样只 trim、不校验白名单：平台集合可配置（还能加自定义平台），
 	// 在这里写死名单迟早会把新平台筛没。筛不到就是空列表，不报错。
 	params.Platform = strings.TrimSpace(params.Platform)
+	// 批次多选：丢掉非正值与重复项，并封顶。放在这里而不是 handler，
+	// 是因为这是数据访问层的最后一道，将来的内部调用方也绕不过去。
+	if len(params.RunIDs) > 0 {
+		runIDs := make([]int64, 0, len(params.RunIDs))
+		seen := make(map[int64]struct{}, len(params.RunIDs))
+		for _, runID := range params.RunIDs {
+			if runID <= 0 {
+				continue
+			}
+			if _, exists := seen[runID]; exists {
+				continue
+			}
+			seen[runID] = struct{}{}
+			runIDs = append(runIDs, runID)
+			if len(runIDs) >= supplierGroupSchedulingElectionRunIDFilterLimit {
+				break
+			}
+		}
+		params.RunIDs = runIDs
+	}
 	// 方向非法值当作「不筛」而不是报错：这是个只读列表，宁可多显示也别让页面打不开。
 	switch params.Direction {
 	case service.SupplierGroupSchedulingElectionChangeDirectionEnabled, service.SupplierGroupSchedulingElectionChangeDirectionDisabled:
