@@ -160,11 +160,12 @@ func TestSupplierAutomationHandlerRoutes(t *testing.T) {
 	require.Equal(t, int64(9), stub.handledID)
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/automation/group-election-change-logs?group_id=7&account_id=8&search=alpha&direction=disabled&started_from=2026-09-01&started_to=2026-09-20&page=2&page_size=30", nil)
+	req = httptest.NewRequest(http.MethodGet, "/automation/group-election-change-logs?group_id=7&account_id=8&platform=anthropic&search=alpha&direction=disabled&started_from=2026-09-01&started_to=2026-09-20&page=2&page_size=30", nil)
 	router.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, int64(7), stub.groupElectionLogParams.GroupID)
 	require.Equal(t, int64(8), stub.groupElectionLogParams.AccountID)
+	require.Equal(t, "anthropic", stub.groupElectionLogParams.Platform)
 	require.Equal(t, "alpha", stub.groupElectionLogParams.Search)
 	require.Equal(t, service.SupplierGroupSchedulingElectionChangeDirectionDisabled, stub.groupElectionLogParams.Direction)
 	require.Equal(t, 2, stub.groupElectionLogParams.Page)

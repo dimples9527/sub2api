@@ -2074,15 +2074,18 @@ func TestSupplierGroupSchedulingElectionChangeWhereContinuesAfterRunPlaceholders
 		GroupID:   81,
 		AccountID: 902,
 		RunID:     5001,
+		Platform:  "openai",
 		Search:    " alpha ",
 		Direction: service.SupplierGroupSchedulingElectionChangeDirectionDisabled,
 	}, 3)
+	// 平台是**精确**匹配，必须与后面那个 Search 的模糊匹配分开：Search 同时匹配账号名与平台，
+	// 拿它当平台筛选会把「名字里含 openai 的账号」也捞进来。
 	require.Equal(
 		t,
-		"e.schedulable_before <> e.schedulable_after AND e.group_ids @> to_jsonb($4::BIGINT) AND e.account_id = $5 AND e.run_id = $6 AND (e.account_name ILIKE $7 OR e.platform ILIKE $7) AND e.schedulable_before = TRUE AND e.schedulable_after = FALSE",
+		"e.schedulable_before <> e.schedulable_after AND e.group_ids @> to_jsonb($4::BIGINT) AND e.account_id = $5 AND e.run_id = $6 AND e.platform = $7 AND (e.account_name ILIKE $8 OR e.platform ILIKE $8) AND e.schedulable_before = TRUE AND e.schedulable_after = FALSE",
 		where,
 	)
-	require.Equal(t, []any{int64(81), int64(902), int64(5001), "% alpha %"}, args)
+	require.Equal(t, []any{int64(81), int64(902), int64(5001), "openai", "% alpha %"}, args)
 
 	_, args = supplierGroupSchedulingElectionChangeWhere(service.SupplierGroupSchedulingElectionChangeLogListParams{
 		Direction: service.SupplierGroupSchedulingElectionChangeDirectionEnabled,
@@ -2117,22 +2120,23 @@ func TestSupplierProviderDataRepositoryListGroupSchedulingElectionChangeLogsOrde
 	startedTo := time.Date(2026, 9, 21, 0, 0, 0, 0, time.UTC)
 	now := time.Date(2026, 9, 20, 9, 30, 0, 0, time.UTC)
 
-	// $1..$3 是运行级条件（task_code + 时间范围），$4..$7 是展开后的条目级条件。
+	// $1..$3 是运行级条件（task_code + 时间范围），$4..$8 是展开后的条目级条件
+	// （分组 / 账号 / 批次 / 平台 / 搜索），顺序必须与 where 的构造顺序一致。
 	countArgs := []driver.Value{
 		service.SupplierAutomationTaskGroupElection,
 		startedFrom, startedTo,
-		int64(81), int64(902), int64(5001), "%alpha%",
+		int64(81), int64(902), int64(5001), "anthropic", "%alpha%",
 	}
-	// LIMIT / OFFSET 排在最后：$8 = 每页条数，$9 = 偏移量。
+	// LIMIT / OFFSET 排在最后：$9 = 每页条数，$10 = 偏移量。
 	queryArgs := append(append([]driver.Value{}, countArgs...), int64(30), int64(30))
 
 	// ⚠️ 正则里必须带上占位符**编号**：sqlmock 只校验参数值，编号错位它看不出来 ——
 	// 这条用例此前只对值，于是漏过了「条目级条件从 $1 重新编号」导致的 500。
-	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\) FROM \(.*jsonb_array_elements.*\) e WHERE e\.schedulable_before <> e\.schedulable_after.*e\.group_ids @> to_jsonb\(\$4::BIGINT\).*e\.account_id = \$5.*e\.run_id = \$6.*`).
+	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\) FROM \(.*jsonb_array_elements.*\) e WHERE e\.schedulable_before <> e\.schedulable_after.*e\.group_ids @> to_jsonb\(\$4::BIGINT\).*e\.account_id = \$5.*e\.run_id = \$6.*e\.platform = \$7.*e\.account_name ILIKE \$8`).
 		WithArgs(countArgs...).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(2)))
 
-	mock.ExpectQuery(`(?s)SELECT run_id, run_status, changed_at.*e\.run_id = \$6.*ORDER BY e\.changed_at DESC, e\.run_id DESC, e\.account_id DESC LIMIT \$8 OFFSET \$9`).
+	mock.ExpectQuery(`(?s)SELECT run_id, run_status, changed_at.*e\.run_id = \$6.*e\.platform = \$7.*ORDER BY e\.changed_at DESC, e\.run_id DESC, e\.account_id DESC LIMIT \$9 OFFSET \$10`).
 		WithArgs(queryArgs...).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"run_id", "run_status", "changed_at", "account_id", "account_name", "platform", "test_status",
@@ -2149,10 +2153,16 @@ func TestSupplierProviderDataRepositoryListGroupSchedulingElectionChangeLogsOrde
 			`[{"group_id":81,"group_name":"Plus","scored":false,"test_failed":true,"no_alternative":true,"rank":0,"rank_total":2,"winner_cutoff":0,"top_n":2,"score":0,"count_score":0,"latency_score":0,"count_weight":1,"latency_weight":0.5,"count_score_cap":10}]`,
 		))
 
+	// 顶部快捷批次标签：只带「任务类型」这一个条件，所以参数只有 task_code。
+	mock.ExpectQuery(`(?s)SELECT DISTINCT e\.run_id FROM \(.*jsonb_array_elements.*\) e WHERE e\.schedulable_before <> e\.schedulable_after ORDER BY e\.run_id DESC LIMIT 5`).
+		WithArgs(service.SupplierAutomationTaskGroupElection).
+		WillReturnRows(sqlmock.NewRows([]string{"run_id"}).AddRow(int64(5001)).AddRow(int64(4998)))
+
 	result, err := repo.ListGroupSchedulingElectionChangeLogs(context.Background(), service.SupplierGroupSchedulingElectionChangeLogListParams{
 		GroupID:     81,
 		AccountID:   902,
 		RunID:       5001,
+		Platform:    "anthropic",
 		Search:      "alpha",
 		Direction:   service.SupplierGroupSchedulingElectionChangeDirectionDisabled,
 		StartedFrom: &startedFrom,
@@ -2179,5 +2189,7 @@ func TestSupplierProviderDataRepositoryListGroupSchedulingElectionChangeLogsOrde
 	require.Equal(t, "Plus", item.GroupDecisions[0].GroupName)
 	require.True(t, item.GroupDecisions[0].TestFailed)
 	require.True(t, item.GroupDecisions[0].NoAlternative)
+	// 最近批次标签由独立查询给出（只带任务类型），顺序即新到旧。
+	require.Equal(t, []int64{5001, 4998}, result.RecentRunIDs)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

@@ -2661,6 +2661,9 @@ func (r *supplierProviderDataRepository) ClearLocalAccountPlatformOverride(ctx c
 	return nil
 }
 
+// supplierGroupSchedulingElectionRecentRunLimit 是页面顶部快捷批次标签的个数。
+const supplierGroupSchedulingElectionRecentRunLimit = 5
+
 // supplierGroupSchedulingElectionChangeInnerSQL 把「一次任务执行」展开成「一个账号一条」的中间结果。
 // 只读不改：数据仍在 supplier_automation_runs.result_detail 的 JSONB 里，
 // 没有为它单独建表 —— 建表要新迁移，而这份日志的生命周期本来就该跟运行记录一致（同被 30 天清理）。
@@ -2734,6 +2737,9 @@ func supplierGroupSchedulingElectionChangeWhere(params service.SupplierGroupSche
 	if params.RunID > 0 {
 		conditions = append(conditions, "e.run_id = "+placeholder(params.RunID))
 	}
+	if params.Platform != "" {
+		conditions = append(conditions, "e.platform = "+placeholder(params.Platform))
+	}
 	if params.Search != "" {
 		ph := placeholder("%" + params.Search + "%")
 		conditions = append(conditions, "(e.account_name ILIKE "+ph+" OR e.platform ILIKE "+ph+")")
@@ -2755,6 +2761,9 @@ func normalizeSupplierGroupSchedulingElectionChangeLogListParams(params service.
 		params.PageSize = 20
 	}
 	params.Search = strings.TrimSpace(params.Search)
+	// 平台同样只 trim、不校验白名单：平台集合可配置（还能加自定义平台），
+	// 在这里写死名单迟早会把新平台筛没。筛不到就是空列表，不报错。
+	params.Platform = strings.TrimSpace(params.Platform)
 	// 方向非法值当作「不筛」而不是报错：这是个只读列表，宁可多显示也别让页面打不开。
 	switch params.Direction {
 	case service.SupplierGroupSchedulingElectionChangeDirectionEnabled, service.SupplierGroupSchedulingElectionChangeDirectionDisabled:
@@ -2834,7 +2843,34 @@ WHERE `+itemWhere+fmt.Sprintf(" ORDER BY e.changed_at DESC, e.run_id DESC, e.acc
 	if err := rows.Err(); err != nil {
 		return service.SupplierGroupSchedulingElectionChangeLogListResult{}, fmt.Errorf("遍历分组调度切换日志失败: %w", err)
 	}
+
+	// 顶部快捷批次标签。刻意只带「任务类型」这一个条件、不带页面筛选 ——
+	// 它是来回切换的入口，跟着筛选一起收窄的话，点一下标签其余标签就没了。
+	recentSQL := fmt.Sprintf(`
+SELECT DISTINCT e.run_id
+FROM (%s) e
+WHERE e.schedulable_before <> e.schedulable_after
+ORDER BY e.run_id DESC
+LIMIT %d`, supplierGroupSchedulingElectionChangeInnerSQL("r.task_code = $1"), supplierGroupSchedulingElectionRecentRunLimit)
+	recentRows, err := r.db.QueryContext(ctx, recentSQL, args[0])
+	if err != nil {
+		return service.SupplierGroupSchedulingElectionChangeLogListResult{}, fmt.Errorf("查询分组调度切换日志的最近批次失败: %w", err)
+	}
+	defer func() { _ = recentRows.Close() }()
+	recentRunIDs := make([]int64, 0, supplierGroupSchedulingElectionRecentRunLimit)
+	for recentRows.Next() {
+		var runID int64
+		if err := recentRows.Scan(&runID); err != nil {
+			return service.SupplierGroupSchedulingElectionChangeLogListResult{}, fmt.Errorf("扫描分组调度切换日志的最近批次失败: %w", err)
+		}
+		recentRunIDs = append(recentRunIDs, runID)
+	}
+	if err := recentRows.Err(); err != nil {
+		return service.SupplierGroupSchedulingElectionChangeLogListResult{}, fmt.Errorf("遍历分组调度切换日志的最近批次失败: %w", err)
+	}
+
 	return service.SupplierGroupSchedulingElectionChangeLogListResult{
 		Items: items, Total: total, Page: params.Page, PageSize: params.PageSize,
+		RecentRunIDs: recentRunIDs,
 	}, nil
 }

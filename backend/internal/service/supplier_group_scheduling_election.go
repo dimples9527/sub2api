@@ -389,7 +389,11 @@ type SupplierGroupSchedulingElectionChangeLogListParams struct {
 	// RunID 锁定到某一次择优运行（任务批次），只看这批被拨动的账号；0 = 不按批次筛。
 	RunID int64
 	// Search 按账号名模糊匹配（分组管理页从某个分组进入时不带它，任务中心页全局看时用）。
-	Search      string
+	Search string
+	// Platform 精确匹配平台（openai / anthropic …），空 = 不按平台筛。
+	// 必须与 Search 分开：Search 同时匹配账号名与平台，拿它当平台筛选会把
+	// 「名字里含 openai 的账号」一起捞进来，看着像筛选失灵。
+	Platform    string
 	Direction   string
 	StartedFrom *time.Time
 	StartedTo   *time.Time
@@ -402,6 +406,10 @@ type SupplierGroupSchedulingElectionChangeLogListResult struct {
 	Total    int64                                      `json:"total"`
 	Page     int                                        `json:"page"`
 	PageSize int                                        `json:"page_size"`
+	// RecentRunIDs 是最近若干次「确实拨动过开关」的批次号（新到旧），供页面顶部做快捷筛选标签。
+	// 刻意**不受页面筛选影响**：它是个来回切换的入口，若跟着筛选一起收窄，
+	// 点一下标签其余标签就消失了，反而没法用它换着看。
+	RecentRunIDs []int64 `json:"recent_run_ids,omitempty"`
 }
 
 // SupplierGroupSchedulingElectionChangeLogStore 由已注入的 dataRepo 断言得到。

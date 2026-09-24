@@ -182,6 +182,7 @@ func (h *SupplierAutomationHandler) ListGroupSchedulingElectionChangeLogs(c *gin
 		AccountID:   parseOptionalInt64(c.Query("account_id")),
 		RunID:       parseOptionalInt64(c.Query("run_id")),
 		Search:      strings.TrimSpace(c.Query("search")),
+		Platform:    strings.TrimSpace(c.Query("platform")),
 		Direction:   strings.TrimSpace(c.Query("direction")),
 		StartedFrom: parseOptionalDayBoundary(c, "started_from", false),
 		StartedTo:   parseOptionalDayBoundary(c, "started_to", true),
