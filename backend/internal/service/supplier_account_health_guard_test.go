@@ -242,7 +242,7 @@ func TestSupplierAccountHealthGuardRunRejectsMissingModelsBeforeTesting(t *testi
 }
 
 func TestSupplierAccountHealthGuardRunRecordsUnavailableSelectedAccountsAndContinues(t *testing.T) {
-	disabled := newSupplierAccountHealthGuardCandidate(61, "已停用账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 61})
+	disabled := newSupplierAccountHealthGuardCandidate(61, "已停用账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 61, RateMultiplier: 0.5})
 	disabled.LocalAccount.Status = StatusDisabled
 	repo := &supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{
 		disabled,
@@ -274,10 +274,10 @@ func TestSupplierAccountHealthGuardRunRecordsUnavailableSelectedAccountsAndConti
 	require.Nil(t, result.Items[0].NextCheckAt)
 	require.Nil(t, result.Items[2].IntervalSeconds)
 	require.Nil(t, result.Items[2].NextCheckAt)
-	// 倍率与间隔的「有没有」不是一回事：61 只是停用，本地账号还查得到 ⇒ 倍率有值（默认 1.0）；
-	// 63 连候选都没有、账号已查不到 ⇒ 倍率为 nil，排序时排到最后而不是当成 0。
+	// 倍率取供应商来源的 rate_multiplier：61 只是停用、供应商来源还在 ⇒ 倍率有值（0.5）；
+	// 63 连候选都没有、没有任何来源 ⇒ 倍率为 nil，排序时排到最后而不是当成 0。
 	require.NotNil(t, result.Items[0].BillingRateMultiplier)
-	require.Equal(t, 1.0, *result.Items[0].BillingRateMultiplier)
+	require.Equal(t, 0.5, *result.Items[0].BillingRateMultiplier)
 	require.Nil(t, result.Items[2].BillingRateMultiplier)
 }
 
@@ -847,11 +847,9 @@ func TestNormalizeSupplierAccountHealthGuardConfigAccountIntervals(t *testing.T)
 }
 
 func TestSupplierAccountHealthGuardRunSkipsAccountNotDueByAccountInterval(t *testing.T) {
-	notDue := newSupplierAccountHealthGuardCandidate(71, "间隔未到账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 71})
+	// 倍率刻意用供应商来源的 0：它是合法值（计费为 0），不能用 omitempty 省掉，否则排序时会被当成「未知」排到最后。
+	notDue := newSupplierAccountHealthGuardCandidate(71, "间隔未到账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 71, RateMultiplier: 0})
 	notDue.LocalAccount.Extra[supplierHealthGuardLastCheckedAtExtraKey] = time.Date(2026, 8, 17, 9, 59, 30, 0, time.UTC).Format(time.RFC3339)
-	// 倍率刻意用 0：它是合法值（计费为 0），不能用 omitempty 省掉，否则排序时会被当成「未知」排到最后。
-	zeroMultiplier := 0.0
-	notDue.LocalAccount.RateMultiplier = &zeroMultiplier
 	repo := &supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{notDue}}
 	tester := &supplierAccountHealthGuardTesterStub{results: map[int64]*ScheduledTestResult{}, errs: map[int64]error{}}
 	store := &supplierAccountHealthGuardAccountStoreStub{}
@@ -887,10 +885,8 @@ func TestSupplierAccountHealthGuardRunSkipsAccountNotDueByAccountInterval(t *tes
 }
 
 func TestSupplierAccountHealthGuardRunChecksAccountDueByAccountInterval(t *testing.T) {
-	due := newSupplierAccountHealthGuardCandidate(72, "间隔到期账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 72})
+	due := newSupplierAccountHealthGuardCandidate(72, "间隔到期账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 72, RateMultiplier: 0.35})
 	due.LocalAccount.Extra[supplierHealthGuardLastCheckedAtExtraKey] = time.Date(2026, 8, 17, 9, 0, 0, 0, time.UTC).Format(time.RFC3339)
-	dueMultiplier := 0.35
-	due.LocalAccount.RateMultiplier = &dueMultiplier
 	repo := &supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{due}}
 	tester := &supplierAccountHealthGuardTesterStub{
 		results: map[int64]*ScheduledTestResult{72: {Status: "success", LatencyMs: 20}},
@@ -924,7 +920,7 @@ func TestSupplierAccountHealthGuardRunChecksAccountDueByAccountInterval(t *testi
 }
 
 func TestSupplierAccountHealthGuardRunWithoutAccountIntervalKeepsGlobalFrequency(t *testing.T) {
-	recent := newSupplierAccountHealthGuardCandidate(73, "无单独间隔账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 73})
+	recent := newSupplierAccountHealthGuardCandidate(73, "无单独间隔账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 73, RateMultiplier: 1.0})
 	recent.LocalAccount.Extra[supplierHealthGuardLastCheckedAtExtraKey] = time.Date(2026, 8, 17, 9, 59, 50, 0, time.UTC).Format(time.RFC3339)
 	repo := &supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{recent}}
 	tester := &supplierAccountHealthGuardTesterStub{
@@ -947,8 +943,8 @@ func TestSupplierAccountHealthGuardRunWithoutAccountIntervalKeepsGlobalFrequency
 	require.NotNil(t, result.Items[0].IntervalSeconds)
 	require.Zero(t, *result.Items[0].IntervalSeconds)
 	require.Nil(t, result.Items[0].NextCheckAt)
-	// 未配置倍率按 1.0 计（Account.BillingRateMultiplier 的既定语义），不是 nil：
-	// 账号还在、倍率就存在，只是取默认值。
+	// 供应商来源倍率为 1.0（供应商数据同步写入的库内默认值），不是 nil：
+	// 账号还在、供应商来源就有倍率，只是取默认值。
 	require.NotNil(t, result.Items[0].BillingRateMultiplier)
 	require.Equal(t, 1.0, *result.Items[0].BillingRateMultiplier)
 }
@@ -1032,11 +1028,17 @@ func TestSupplierAccountHealthGuardResolveInterval(t *testing.T) {
 		},
 	}
 
+	// 倍率现在取自供应商来源（Source.RateMultiplier），不再是本地账号的 RateMultiplier；
+	// mult 为 nil 表示该账号没有任何供应商来源，落桶时按 1.0 兜底。
 	target := func(id int64, platform string, schedulable bool, mult *float64) supplierAccountHealthGuardTarget {
-		return supplierAccountHealthGuardTarget{
-			account:  Account{ID: id, Platform: platform, Schedulable: schedulable, RateMultiplier: mult},
+		tgt := supplierAccountHealthGuardTarget{
+			account:  Account{ID: id, Platform: platform, Schedulable: schedulable},
 			platform: platform,
 		}
+		if mult != nil {
+			tgt.sources = []SupplierAccountHealthGuardSource{{ProviderAccountID: id, RateMultiplier: *mult}}
+		}
+		return tgt
 	}
 
 	tests := []struct {

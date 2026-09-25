@@ -103,6 +103,10 @@ type SupplierAccountHealthGuardSource struct {
 	ProviderAccountID   int64  `json:"supplier_provider_account_id"`
 	UpstreamAccountKey  string `json:"upstream_account_key"`
 	UpstreamAccountName string `json:"upstream_account_name"`
+	// RateMultiplier 供应商侧账号的计费倍率（supplier_provider_accounts.rate_multiplier，由供应商数据同步任务写入）。
+	// 未开调度账号按倍率区间取检查间隔、明细按倍率排序，用的都是这个供应商倍率，
+	// 而不是本地账号的 accounts.rate_multiplier（后者是本地计费口径，实测常年为 1.0，落桶时会全挤进同一个区间）。
+	RateMultiplier float64 `json:"rate_multiplier"`
 }
 
 type SupplierAccountHealthGuardCandidate struct {
@@ -153,10 +157,10 @@ type SupplierAccountHealthGuardRunItem struct {
 	IntervalSeconds *int `json:"interval_seconds,omitempty"`
 	// NextCheckAt 下次检查时间 = 上次检查时间 + 间隔。从未检查过、或每轮都测时为空。
 	NextCheckAt *time.Time `json:"next_check_at,omitempty"`
-	// BillingRateMultiplier 该账号的计费倍率，明细列表按它升序排序。
+	// BillingRateMultiplier 该账号的供应商侧计费倍率（取自匹配到的第一个供应商来源），明细列表按它升序排序。
 	// 与 supplierAccountHealthGuardResolveInterval 用的是同一个值：倍率区间规则就是按它落桶的，
 	// 两处取不同的值会出现「排序显示在同一桶、间隔却按另一桶算」的错乱。
-	// 用指针是为了区分「未知」——账号已查不到时没有倍率可言；0 是合法值（计费为 0），
+	// 用指针是为了区分「未知」——账号已查不到、没有任何供应商来源时没有倍率可言；0 是合法值（计费为 0），
 	// 靠 omitempty 省掉会把 0 变成「未知」，所以必须是 *float64。
 	BillingRateMultiplier *float64  `json:"billing_rate_multiplier,omitempty"`
 	StartedAt             time.Time `json:"started_at"`
@@ -477,15 +481,13 @@ func supplierAccountHealthGuardUnavailableItem(accountID int64, candidates []Sup
 		item.Platform = supplierAccountHealthGuardPlatformForCandidate(candidate)
 		item.SchedulableBefore = candidate.LocalAccount.Schedulable
 		item.SchedulableAfter = candidate.LocalAccount.Schedulable
-		// 多来源时取第一个能查到本地账号的倍率：倍率是本地账号自己的属性，
-		// 同一账号的多个来源不会有不同的倍率。
-		if item.BillingRateMultiplier == nil {
-			item.BillingRateMultiplier = supplierAccountHealthGuardMultiplier(candidate.LocalAccount)
-		}
 		if strings.TrimSpace(candidate.LocalAccount.Status) != StatusActive {
 			item.Reason = "账号已停用"
 		}
 	}
+	// 倍率取第一个供应商来源的 rate_multiplier：明细按它排序，与落桶用的是同一个值。
+	// 没有任何候选来源（账号已彻底查不到）时留空（nil），排序时排到最后而不是当成 0。
+	item.BillingRateMultiplier = supplierAccountHealthGuardSourceMultiplier(item.Sources)
 	return item
 }
 
@@ -532,7 +534,7 @@ func (s *SupplierAccountHealthGuardService) runTarget(ctx context.Context, confi
 	nextCheckAt := supplierAccountHealthGuardNextCheckAt(
 		supplierAccountHealthGuardLastCheckedAt(target.account.Extra), intervalSeconds,
 	)
-	multiplier := supplierAccountHealthGuardMultiplier(&target.account)
+	multiplier := supplierAccountHealthGuardSourceMultiplier(target.sources)
 	if ctx.Err() != nil {
 		return SupplierAccountHealthGuardRunItem{
 			LocalAccountID: target.account.ID, LocalAccountName: target.account.Name, Platform: target.platform,
@@ -709,7 +711,11 @@ func supplierAccountHealthGuardSkippedItem(candidate SupplierAccountHealthGuardC
 func supplierAccountHealthGuardResolveInterval(config SupplierAccountHealthGuardConfig, target supplierAccountHealthGuardTarget) int {
 	if config.PlatformMultiplierIntervalsEnabled && !target.account.Schedulable {
 		platform := strings.ToLower(strings.TrimSpace(target.platform))
-		multiplier := target.account.BillingRateMultiplier()
+		// 落桶用供应商来源倍率；没有任何来源时按 1.0 兜底（供应商倍率的库内默认值）。
+		multiplier := 1.0
+		if m := supplierAccountHealthGuardSourceMultiplier(target.sources); m != nil {
+			multiplier = *m
+		}
 		for _, rule := range config.PlatformMultiplierIntervals[platform] {
 			if multiplier < rule.MinMultiplier {
 				continue
@@ -749,7 +755,7 @@ func supplierAccountHealthGuardFilterNotDue(targets []supplierAccountHealthGuard
 				IntervalSeconds:   &interval,
 				NextCheckAt:       supplierAccountHealthGuardNextCheckAt(lastCheckedAt, interval),
 
-				BillingRateMultiplier: supplierAccountHealthGuardMultiplier(&target.account),
+				BillingRateMultiplier: supplierAccountHealthGuardSourceMultiplier(target.sources),
 				StartedAt:             now,
 				FinishedAt:            now,
 			})
@@ -784,14 +790,15 @@ func supplierAccountHealthGuardNextCheckAt(lastCheckedAt time.Time, intervalSeco
 	return &next
 }
 
-// supplierAccountHealthGuardMultiplier 取账号计费倍率，账号对象缺失时返回 nil。
+// supplierAccountHealthGuardSourceMultiplier 取供应商侧账号的计费倍率，供倍率区间落桶与明细排序共用。
+// 一个本地账号可能对应多个供应商来源，取第一个来源的倍率，与平台 / 模型的取值口径一致（都取首个匹配来源）。
 // nil 与 0 必须分开：0 是合法的「计费为 0」，升序排序时要排在最前面；
-// nil 表示这个账号已经查不到了，没有倍率可言，排序时应排在最后。
-func supplierAccountHealthGuardMultiplier(account *Account) *float64 {
-	if account == nil {
+// 没有任何来源时返回 nil，表示这个账号已经查不到、没有供应商倍率可言，排序时应排在最后。
+func supplierAccountHealthGuardSourceMultiplier(sources []SupplierAccountHealthGuardSource) *float64 {
+	if len(sources) == 0 {
 		return nil
 	}
-	multiplier := account.BillingRateMultiplier()
+	multiplier := sources[0].RateMultiplier
 	return &multiplier
 }
 
