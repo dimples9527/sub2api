@@ -129,11 +129,18 @@ type SupplierGroupSchedulingElectionConfig struct {
 	// 次数分 = min(连续成功次数, CountScoreCap) / CountScoreCap，所以超过这个次数的账号得分完全相同
 	// （连续成功 142 次与 190 次在默认值下没有任何差别）。0 或缺失都按默认值处理。
 	CountScoreCap int `json:"group_scheduling_election_count_score_cap"`
-	// KeepHealthyIncumbentGroupIDs 存「启用在任者健康锁定」的分组 ID（opt-in，与 DisabledGroupIDs 相反极性）。
-	// 列表里的分组：只要它「当前开启调度的账号」测试都正常（且没有开着却失败的），就锁定——保留这些在任账号、
-	// 不做任何择优与换人，直接跳过。空列表=所有分组都正常择优（默认），新增分组默认不锁定，安全。
+	// KeepHealthyIncumbentGlobal 是「在任者健康锁定」的全局默认开关，默认 false（与升级前完全一致：默认不锁定）。
+	// 打开后所有分组默认锁定，无需逐组勾选；个别分组可用下面两个名单反向覆盖它。
+	KeepHealthyIncumbentGlobal bool `json:"group_scheduling_election_keep_healthy_incumbent_global"`
+	// KeepHealthyIncumbentGroupIDs 是「强制锁定」名单（force-on）：无论全局开关取何值，列表里的分组都锁定。
+	// 锁定含义：只要它「当前开启调度的账号」测试都正常（且没有开着却失败的），就保留这些在任账号、
+	// 不做任何择优与换人，直接跳过。全局关闭时它等价于旧的 opt-in 名单（空列表=都不锁定，向后兼容）。
 	// 只在在任者健康时锁定：一旦有开着的账号测试失败，该分组仍走正常择优交给失败闸门处理，绝不锁死一个坏分组。
 	KeepHealthyIncumbentGroupIDs []int64 `json:"group_scheduling_election_keep_healthy_incumbent_group_ids"`
+	// KeepHealthyIncumbentExcludedGroupIDs 是「强制不锁定」名单（force-off）：无论全局开关取何值，列表里的分组都不锁定、正常择优。
+	// 主要用途是在全局锁定打开时，把个别分组从「默认锁定」里排除出去。与 KeepHealthyIncumbentGroupIDs 互斥——
+	// 前端保证同一分组不会同时进两个名单，后端按「强制不锁定优先」兜底（见 keepHealthyForGroup）。
+	KeepHealthyIncumbentExcludedGroupIDs []int64 `json:"group_scheduling_election_keep_healthy_incumbent_excluded_group_ids"`
 	// RequiredModelsByGroup 是「分组必须能服务的模型」清单：group_id → 模型名列表（空=该组无强制要求）。
 	// 择优选出赢家后对每个必需模型做覆盖兜底：赢家里若没有账号支持它，就在组内**健康**账号中补选综合分最高的
 	// 支持者 union-enable（哪怕它本不是最优）——保证换人不会把某个必需模型换没了。必需模型是硬底线，
@@ -314,11 +321,11 @@ type SupplierGroupSchedulingElectionResult struct {
 	// PendingCount / KeptCount 是被闸门拦住、本轮"故意没关"的账号数。
 	// 单独计数而不是只留在明细里，是因为运行列表默认只显示一行摘要——
 	// 「连续失败待观察」和「分组只剩它、需人工确认」这两种状态必须能被一眼看到。
-	PendingCount int                                          `json:"pending_count"`
-	KeptCount    int                                          `json:"kept_count"`
+	PendingCount int `json:"pending_count"`
+	KeptCount    int `json:"kept_count"`
 	// RequiredModelUncoveredCount / RequiredModelWarnings 记录「分组配置了必需模型、但当前没有健康账号能提供它」
 	// 的情况。这不是失败（本轮仍让能用的账号生效），但必须被看见——否则某个模型静默断供、无人知晓。
-	RequiredModelUncoveredCount int                                                    `json:"required_model_uncovered_count"`
+	RequiredModelUncoveredCount int                                                   `json:"required_model_uncovered_count"`
 	RequiredModelWarnings       []SupplierGroupSchedulingElectionRequiredModelWarning `json:"required_model_warnings,omitempty"`
 	// DryRun 表示本轮处于演练配置下（总开关打开或配了演练分组）。
 	// 放在结果顶层而不是只留在明细里，是因为运行列表默认只显示一行摘要，必须一眼看出这轮没生效。
@@ -326,10 +333,10 @@ type SupplierGroupSchedulingElectionResult struct {
 	// SuggestedEnabledCount / SuggestedDisabledCount 是演练模式下「本应开启/关闭但没有真改」的账号数。
 	// 它们不计入 EnabledCount / DisabledCount —— 那两项的含义是「真的被拨动了」，
 	// 把建议数混进去会让摘要骗人（"开启 3 个"里可能一个都没生效）。
-	SuggestedEnabledCount  int `json:"suggested_enabled_count"`
-	SuggestedDisabledCount int `json:"suggested_disabled_count"`
-	Groups                      []SupplierGroupSchedulingElectionGroupDetail          `json:"groups"`
-	Items                       []SupplierGroupSchedulingElectionAccountItem          `json:"items"`
+	SuggestedEnabledCount  int                                          `json:"suggested_enabled_count"`
+	SuggestedDisabledCount int                                          `json:"suggested_disabled_count"`
+	Groups                 []SupplierGroupSchedulingElectionGroupDetail `json:"groups"`
+	Items                  []SupplierGroupSchedulingElectionAccountItem `json:"items"`
 }
 
 // SupplierGroupSchedulingElectionRequiredModelWarning 是一条「某分组的必需模型当前无健康账号可提供」的告警。
@@ -474,9 +481,25 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 	for _, groupID := range config.DisabledGroupIDs {
 		disabledGroups[groupID] = struct{}{}
 	}
-	keepHealthyGroups := make(map[int64]struct{}, len(config.KeepHealthyIncumbentGroupIDs))
+	keepHealthyIncluded := make(map[int64]struct{}, len(config.KeepHealthyIncumbentGroupIDs))
 	for _, groupID := range config.KeepHealthyIncumbentGroupIDs {
-		keepHealthyGroups[groupID] = struct{}{}
+		keepHealthyIncluded[groupID] = struct{}{}
+	}
+	keepHealthyExcluded := make(map[int64]struct{}, len(config.KeepHealthyIncumbentExcludedGroupIDs))
+	for _, groupID := range config.KeepHealthyIncumbentExcludedGroupIDs {
+		keepHealthyExcluded[groupID] = struct{}{}
+	}
+	// keepHealthyForGroup 汇总「全局默认 + 分组级覆盖」得到某分组本轮是否走在任者健康锁定：
+	// 强制不锁定名单 → 不锁；强制锁定名单 → 锁；两者都不在 → 跟随全局默认。
+	// 强制不锁定优先于强制锁定，避免两个名单误配同一分组时行为不确定。
+	keepHealthyForGroup := func(groupID int64) bool {
+		if _, excluded := keepHealthyExcluded[groupID]; excluded {
+			return false
+		}
+		if _, included := keepHealthyIncluded[groupID]; included {
+			return true
+		}
+		return config.KeepHealthyIncumbentGlobal
 	}
 	dryRunGroups := make(map[int64]struct{}, len(config.DryRunGroupIDs))
 	for _, groupID := range config.DryRunGroupIDs {
@@ -602,7 +625,7 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 		// 就保留这些在任账号、跳过择优与换人。只在健康时锁定——有开着的账号失败仍走下面的正常择优，
 		// 交给失败闸门处理，绝不把一个坏分组锁死。
 		locked := false
-		if _, keepHealthy := keepHealthyGroups[groupID]; keepHealthy {
+		if keepHealthyForGroup(groupID) {
 			scheduledHealthy := make([]int64, 0)
 			scheduledFailed := false
 			for _, member := range groupMembers {
@@ -1140,6 +1163,10 @@ func normalizeSupplierGroupSchedulingElectionConfig(config SupplierGroupScheduli
 	config.KeepHealthyIncumbentGroupIDs = uniquePositiveInt64s(config.KeepHealthyIncumbentGroupIDs)
 	sort.Slice(config.KeepHealthyIncumbentGroupIDs, func(i, j int) bool {
 		return config.KeepHealthyIncumbentGroupIDs[i] < config.KeepHealthyIncumbentGroupIDs[j]
+	})
+	config.KeepHealthyIncumbentExcludedGroupIDs = uniquePositiveInt64s(config.KeepHealthyIncumbentExcludedGroupIDs)
+	sort.Slice(config.KeepHealthyIncumbentExcludedGroupIDs, func(i, j int) bool {
+		return config.KeepHealthyIncumbentExcludedGroupIDs[i] < config.KeepHealthyIncumbentExcludedGroupIDs[j]
 	})
 	config.DryRunGroupIDs = uniquePositiveInt64s(config.DryRunGroupIDs)
 	sort.Slice(config.DryRunGroupIDs, func(i, j int) bool {

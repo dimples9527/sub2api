@@ -108,16 +108,20 @@ type SupplierAutomationConfig struct {
 	// 连续成功次数对综合分的贡献上限（默认 10）：次数分 = min(次数, 上限) / 上限，
 	// 达到上限的账号得分完全相同。调大它会让长期稳定的账号更难被更快的账号换掉。
 	GroupElectionCountScoreCap int `json:"group_scheduling_election_count_score_cap"`
-	// 启用「在任者健康锁定」的分组 ID（opt-in，空=都不锁定）：列表内分组开着的账号测试都正常时保留现状、
+	// 启用「在任者健康锁定」的分组 ID（force-on，空=不强制锁定）：列表内分组开着的账号测试都正常时保留现状、
 	// 跳过择优换人，减少无谓抖动；一旦开着的账号失败仍走正常择优。
 	GroupElectionKeepHealthyIncumbentGroupIDs []int64 `json:"group_scheduling_election_keep_healthy_incumbent_group_ids"`
+	// 在任者健康锁定的全局默认开关（默认 false=不锁定）：打开后所有分组默认锁定，上面的 force-on 名单与下面的 force-off 名单可反向覆盖。
+	GroupElectionKeepHealthyIncumbentGlobal bool `json:"group_scheduling_election_keep_healthy_incumbent_global"`
+	// 强制不锁定的分组 ID（force-off，空=无排除）：主要用于全局锁定打开时把个别分组排除出默认锁定。
+	GroupElectionKeepHealthyIncumbentExcludedGroupIDs []int64 `json:"group_scheduling_election_keep_healthy_incumbent_excluded_group_ids"`
 	// 分组必需模型：group_id → 必须能服务的模型名列表。择优后对每个必需模型做覆盖兜底——赢家没覆盖它就
 	// 补选一个健康支持者开启；支持它的账号全失败则不硬留、只告警待恢复。空=无强制要求。
 	GroupElectionRequiredModels map[int64][]string `json:"group_scheduling_election_required_models"`
 	// 演练模式：打开后只产出「建议切换」并照常写切换日志，但不拨 accounts.schedulable。
 	// 分组名单是并集以外的第二档——只想盯住个别分组时用，避免全量演练让所有分组同时失去择优。
-	GroupElectionDryRun          bool    `json:"group_scheduling_election_dry_run"`
-	GroupElectionDryRunGroupIDs  []int64 `json:"group_scheduling_election_dry_run_group_ids"`
+	GroupElectionDryRun         bool    `json:"group_scheduling_election_dry_run"`
+	GroupElectionDryRunGroupIDs []int64 `json:"group_scheduling_election_dry_run_group_ids"`
 }
 
 type SupplierAutomationRun struct {
@@ -746,19 +750,21 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 			return fmt.Errorf("supplier group scheduling election service is required")
 		}
 		result, err := s.groupElection.Run(ctx, SupplierGroupSchedulingElectionConfig{
-			TopN:                         task.Config.GroupElectionTopN,
-			DisabledGroupIDs:             task.Config.GroupElectionDisabledGroupIDs,
-			CountWeight:                  task.Config.GroupElectionCountWeight,
-			LatencyWeight:                task.Config.GroupElectionLatencyWeight,
-			FailureThreshold:             task.Config.GroupElectionFailureThreshold,
-			SwitchMargin:                 task.Config.GroupElectionSwitchMargin,
-			LatencyWindowMinutes:         task.Config.GroupElectionLatencyWindowMinutes,
-			LatencyMinSamples:            task.Config.GroupElectionLatencyMinSamples,
-			CountScoreCap:                task.Config.GroupElectionCountScoreCap,
-			KeepHealthyIncumbentGroupIDs: task.Config.GroupElectionKeepHealthyIncumbentGroupIDs,
-			RequiredModelsByGroup:        task.Config.GroupElectionRequiredModels,
-			DryRun:                       task.Config.GroupElectionDryRun,
-			DryRunGroupIDs:               task.Config.GroupElectionDryRunGroupIDs,
+			TopN:                                 task.Config.GroupElectionTopN,
+			DisabledGroupIDs:                     task.Config.GroupElectionDisabledGroupIDs,
+			CountWeight:                          task.Config.GroupElectionCountWeight,
+			LatencyWeight:                        task.Config.GroupElectionLatencyWeight,
+			FailureThreshold:                     task.Config.GroupElectionFailureThreshold,
+			SwitchMargin:                         task.Config.GroupElectionSwitchMargin,
+			LatencyWindowMinutes:                 task.Config.GroupElectionLatencyWindowMinutes,
+			LatencyMinSamples:                    task.Config.GroupElectionLatencyMinSamples,
+			CountScoreCap:                        task.Config.GroupElectionCountScoreCap,
+			KeepHealthyIncumbentGroupIDs:         task.Config.GroupElectionKeepHealthyIncumbentGroupIDs,
+			KeepHealthyIncumbentGlobal:           task.Config.GroupElectionKeepHealthyIncumbentGlobal,
+			KeepHealthyIncumbentExcludedGroupIDs: task.Config.GroupElectionKeepHealthyIncumbentExcludedGroupIDs,
+			RequiredModelsByGroup:                task.Config.GroupElectionRequiredModels,
+			DryRun:                               task.Config.GroupElectionDryRun,
+			DryRunGroupIDs:                       task.Config.GroupElectionDryRunGroupIDs,
 		}, time.Now())
 		run.ProcessedCount = result.AccountCount
 		run.SuccessCount = result.EnabledCount + result.DisabledCount + result.UnchangedCount

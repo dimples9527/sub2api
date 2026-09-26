@@ -373,6 +373,24 @@
                 <span>{{ electionDryRunAll ? '演练中' : '正式执行' }}</span>
               </label>
             </div>
+            <div class="sp-election-dry-run-card sp-election-keep-healthy-card" :class="{ 'is-on': electionKeepHealthyAll }">
+              <div>
+                <strong>在任者健康锁定（全局默认）</strong>
+                <span v-if="electionKeepHealthyAll">默认对所有分组开启：开着调度的账号测试都正常、且没有开着却失败的，就保留现状、跳过择优与换人。可在「配置分组」里对个别分组单独关闭。</span>
+                <span v-else>默认按择优结果照常换人。打开后所有分组默认锁定健康在任者、压住无谓抖动；仍可在「配置分组」里对个别分组单独开或关。</span>
+              </div>
+              <label
+                class="sp-election-dry-run-toggle"
+                title="打开后：默认所有分组在开着的账号都正常时保留现状、不换人；可在配置分组里逐个覆盖"
+              >
+                <Toggle
+                  :model-value="electionKeepHealthyAll"
+                  aria-label="是否全局开启在任者健康锁定"
+                  @update:model-value="setElectionKeepHealthyAll"
+                />
+                <span>{{ electionKeepHealthyAll ? '默认锁定' : '默认不锁' }}</span>
+              </label>
+            </div>
             <div class="sp-form-grid sp-group-election-policy-grid">
               <Input :model-value="editForm.config.group_scheduling_election_top_n" type="number" label="每组开启账号数（默认 1 单活）" hint="每组最多保留几个账号处于开启调度状态，默认 1 = 单活。注意这只是「每组」的目标、不是硬上限：账号的开关记在账号上（不是记在「账号 + 分组」上），判定规则是「在所属的任一分组里最优就开」。所以同属 A、B 两个组的账号，只要它在 B 组里最优就会被开启，它落在 A 组里的那一份也跟着开着 —— A 组实际开着的数量就会超过这里填的值。要真正单活，只能让分组互不重叠、或让重叠的账号只在其中一个组里最优。填 2 以上时较慢的账号也会分摊到请求。" @update:model-value="editForm.config.group_scheduling_election_top_n = toNumber($event, editForm.config.group_scheduling_election_top_n ?? 1)" />
               <Input :model-value="editForm.config.group_scheduling_election_count_weight" type="number" step="0.1" min="0.1" label="连续成功次数权重（默认 1）" hint="连续成功次数在综合分里的话语权。次数分 = min(连续成功次数 ÷ 封顶值, 1)，即达到封顶值后一律按封顶值算——默认封顶 10 时，142 次与 190 次得分完全相同。封顶是为了防止老账号靠资历永久占位。" @update:model-value="editForm.config.group_scheduling_election_count_weight = toNumber($event, editForm.config.group_scheduling_election_count_weight ?? 1)" />
@@ -388,7 +406,8 @@
                 <strong>分组参与择优 / 在任者健康锁定</strong>
                 <span v-if="groupElectionDisabledGroupIDs.length === 0">所有分组都参与择优。新增分组也会自动参与。</span>
                 <span v-else>已关闭 <strong class="sp-rate-guard-scope-count">{{ groupElectionDisabledGroupIDs.length }}</strong> 个分组，其余分组正常参与择优。</span>
-                <span v-if="groupElectionKeepHealthyGroupIDs.length > 0">已对 <strong class="sp-rate-guard-scope-count">{{ groupElectionKeepHealthyGroupIDs.length }}</strong> 个分组开启「在任者健康则锁定」：开着的账号正常就跳过、不换人。</span>
+                <span v-if="electionKeepHealthyAll">已<strong class="sp-election-keep-healthy-count">全局</strong>开启「在任者健康锁定」：开着的账号正常就保留现状、不换人<template v-if="groupElectionKeepHealthyExcludedGroupIDs.length > 0">，其中 <strong class="sp-rate-guard-scope-count">{{ groupElectionKeepHealthyExcludedGroupIDs.length }}</strong> 个分组单独关闭</template>。</span>
+                <span v-else-if="groupElectionKeepHealthyGroupIDs.length > 0">已对 <strong class="sp-rate-guard-scope-count">{{ groupElectionKeepHealthyGroupIDs.length }}</strong> 个分组开启「在任者健康则锁定」：开着的账号正常就跳过、不换人。</span>
                 <span v-else>暂无分组开启「在任者健康锁定」。</span>
                 <span v-if="groupElectionRequiredModelsCount > 0">已为 <strong class="sp-rate-guard-scope-count">{{ groupElectionRequiredModelsCount }}</strong> 个分组设置必需模型：换人时保证这些模型不断供，支持者全失败则告警待恢复。</span>
                 <span v-if="electionDryRunAll">演练模式已开启：<strong class="sp-election-dry-run-count">全部分组</strong>只记录建议，不修改调度。</span>
@@ -1403,7 +1422,7 @@
           </section>
         </div>
         <template #footer>
-          <span class="sp-rate-guard-group-hint">取消勾选的分组会被跳过；「健康锁定」打开后，该分组开着的账号正常时保留现状、不换人；「演练」只记录建议、不改调度。</span>
+          <span class="sp-rate-guard-group-hint">取消勾选的分组会被跳过；「健康锁定」默认跟随全局开关，逐个分组可覆盖（关掉=强制不锁定、打开=强制锁定），开着的账号正常时保留现状、不换人；「演练」只记录建议、不改调度。</span>
           <button class="sp-button ghost" type="button" @click="enableAllElectionGroups">全部参与</button>
           <button class="sp-button primary" type="button" @click="closeElectionGroups">完成</button>
         </template>
@@ -1578,6 +1597,9 @@ const editForm = reactive<SupplierAutomationTask>({
     group_scheduling_election_latency_min_samples: 3,
     group_scheduling_election_count_score_cap: 10,
     group_scheduling_election_keep_healthy_incumbent_group_ids: [],
+    // 在任者健康锁定默认关闭：升级前的行为就是"不锁定、照常择优换人"。
+    group_scheduling_election_keep_healthy_incumbent_global: false,
+    group_scheduling_election_keep_healthy_incumbent_excluded_group_ids: [],
     group_scheduling_election_required_models: {},
     // 演练默认关闭：默认行为必须是"真的择优"，演练是管理员显式选择的观察模式。
     group_scheduling_election_dry_run: false,
@@ -2411,9 +2433,14 @@ const groupElectionDisabledGroupIDs = computed(() =>
   normalizePositiveAccountIDs(editForm.config.group_scheduling_election_disabled_group_ids)
 )
 
-// 在任者健康锁定：存"要锁定"的分组（opt-in），空列表即都不锁定。
+// 在任者健康锁定：存"要锁定"的分组（force-on），空列表即都不强制锁定。
 const groupElectionKeepHealthyGroupIDs = computed(() =>
   normalizePositiveAccountIDs(editForm.config.group_scheduling_election_keep_healthy_incumbent_group_ids)
+)
+
+// 在任者健康锁定的"强制不锁定"名单（force-off），优先级最高：命中即不锁，无论全局开关与 force-on 名单。
+const groupElectionKeepHealthyExcludedGroupIDs = computed(() =>
+  normalizePositiveAccountIDs(editForm.config.group_scheduling_election_keep_healthy_incumbent_excluded_group_ids)
 )
 
 // 演练名单：存"要演练"的分组（opt-in），空列表即都不演练（另有总开关可让全部分组演练）。
@@ -2424,6 +2451,11 @@ const groupElectionDryRunGroupIDs = computed(() =>
 // 总开关用 === true 收敛：旧配置的 config_json 里没有这个键，读回来是 undefined，
 // 直接当布尔用会让后面所有判断都拿到 undefined 而不是 false。
 const electionDryRunAll = computed(() => editForm.config.group_scheduling_election_dry_run === true)
+
+// 在任者健康锁定的全局默认开关，同样用 === true 收敛 undefined（旧配置没有这个键）。
+const electionKeepHealthyAll = computed(
+  () => editForm.config.group_scheduling_election_keep_healthy_incumbent_global === true
+)
 
 // 模型名清洗：trim、去空、按小写去重保序。必需模型的录入与展示都走它，口径与后端一致。
 function normalizeRequiredModelList(models: unknown): string[] {
@@ -2922,6 +2954,13 @@ function applyGroupElectionDefaults() {
   editForm.config.group_scheduling_election_keep_healthy_incumbent_group_ids = normalizePositiveAccountIDs(
     editForm.config.group_scheduling_election_keep_healthy_incumbent_group_ids
   )
+  // 在任者健康锁定的全局开关收敛成真正的布尔（旧配置没有这个键，读回来是 undefined）；
+  // 强制不锁定名单必须序列化成数组而非省略——后端整块覆盖 config_json，省略等于保留旧值。
+  editForm.config.group_scheduling_election_keep_healthy_incumbent_global =
+    editForm.config.group_scheduling_election_keep_healthy_incumbent_global === true
+  editForm.config.group_scheduling_election_keep_healthy_incumbent_excluded_group_ids = normalizePositiveAccountIDs(
+    editForm.config.group_scheduling_election_keep_healthy_incumbent_excluded_group_ids
+  )
   // 权重必须是正数：0 在后端归一化里被当成"未配置"回落默认，
   // 这里先在前端拦住，免得管理员填了 0 却静默拿到默认值。
   const countWeight = Number(editForm.config.group_scheduling_election_count_weight)
@@ -3111,6 +3150,11 @@ function toggleElectionGroup(groupID: number) {
       editForm.config.group_scheduling_election_keep_healthy_incumbent_group_ids =
         normalizePositiveAccountIDs(keep.filter(id => id !== groupID))
     }
+    const keepExcluded = groupElectionKeepHealthyExcludedGroupIDs.value
+    if (keepExcluded.includes(groupID)) {
+      editForm.config.group_scheduling_election_keep_healthy_incumbent_excluded_group_ids =
+        normalizePositiveAccountIDs(keepExcluded.filter(id => id !== groupID))
+    }
     const dryRun = groupElectionDryRunGroupIDs.value
     if (dryRun.includes(groupID)) {
       editForm.config.group_scheduling_election_dry_run_group_ids =
@@ -3120,12 +3164,20 @@ function toggleElectionGroup(groupID: number) {
 }
 
 function electionGroupKeepHealthy(groupID: number): boolean {
-  return groupElectionKeepHealthyGroupIDs.value.includes(groupID)
+  // 生效值口径与后端 keepHealthyForGroup 一致：强制不锁定→false（优先）、强制锁定→true、都不在→跟随全局。
+  if (groupElectionKeepHealthyExcludedGroupIDs.value.includes(groupID)) return false
+  if (groupElectionKeepHealthyGroupIDs.value.includes(groupID)) return true
+  return electionKeepHealthyAll.value
 }
 
 // Toggle 的事件值在组件里是 unknown，收敛成布尔再写回配置，避免把字符串 "false" 存进去。
 function setElectionDryRunAll(value: unknown) {
   editForm.config.group_scheduling_election_dry_run = Boolean(value)
+}
+
+// 全局默认锁定开关：只改全局位，不动分组级覆盖名单 —— 已显式覆盖的分组在全局翻转后仍保持覆盖。
+function setElectionKeepHealthyAll(value: unknown) {
+  editForm.config.group_scheduling_election_keep_healthy_incumbent_global = Boolean(value)
 }
 
 function electionGroupDryRun(groupID: number): boolean {
@@ -3142,11 +3194,17 @@ function toggleElectionGroupDryRun(groupID: number) {
 }
 
 function toggleElectionKeepHealthyGroup(groupID: number) {
-  const keep = groupElectionKeepHealthyGroupIDs.value
-  const next = keep.includes(groupID)
-    ? keep.filter(id => id !== groupID)
-    : [...keep, groupID]
-  editForm.config.group_scheduling_election_keep_healthy_incumbent_group_ids = normalizePositiveAccountIDs(next)
+  // 覆盖语义：目标 = 翻转当前生效值。与全局不一致才写显式覆盖，一致则清掉覆盖、回落继承全局。
+  const desired = !electionGroupKeepHealthy(groupID)
+  let included = groupElectionKeepHealthyGroupIDs.value.filter(id => id !== groupID)
+  let excluded = groupElectionKeepHealthyExcludedGroupIDs.value.filter(id => id !== groupID)
+  if (desired !== electionKeepHealthyAll.value) {
+    if (desired) included = [...included, groupID]
+    else excluded = [...excluded, groupID]
+  }
+  editForm.config.group_scheduling_election_keep_healthy_incumbent_group_ids = normalizePositiveAccountIDs(included)
+  editForm.config.group_scheduling_election_keep_healthy_incumbent_excluded_group_ids =
+    normalizePositiveAccountIDs(excluded)
 }
 
 function electionGroupRequiredModelsText(groupID: number): string {
@@ -6977,4 +7035,30 @@ strong.sp-election-dry-run-count {
 .dark .sp-election-dry-run-card.is-on strong,
 .dark strong.sp-election-dry-run-count {
   color: #a78bfa;
+}
+
+/* 在任者健康锁定卡片复用演练卡片的排版，只把"开启"配色改成绿（--sp-green）：
+   锁定健康在任者是"稳住不动"的正向动作，绿在语义上贴切，也和紫色的演练卡片区分开。
+   这些覆盖规则与演练版同特指度，靠排在其后取胜。 */
+.sp-election-keep-healthy-card.is-on {
+  border-color: color-mix(in srgb, var(--sp-green, #16835d) 45%, var(--sp-line, #e5e7eb));
+  background: color-mix(in srgb, var(--sp-green, #16835d) 7%, var(--sp-panel, #ffffff));
+}
+
+.sp-election-keep-healthy-card.is-on strong,
+strong.sp-election-keep-healthy-count {
+  color: var(--sp-green, #16835d);
+}
+
+.sp-election-keep-healthy-card.is-on .sp-election-dry-run-toggle {
+  color: var(--sp-green, #16835d);
+}
+
+.dark .sp-election-keep-healthy-card.is-on {
+  background: color-mix(in srgb, #34d399 10%, #1f2937);
+}
+
+.dark .sp-election-keep-healthy-card.is-on strong,
+.dark strong.sp-election-keep-healthy-count {
+  color: #34d399;
 }</style>

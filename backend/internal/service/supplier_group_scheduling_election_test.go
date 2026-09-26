@@ -820,7 +820,70 @@ func TestGroupElectionKeepHealthyIncumbentRunsElectionWhenIncumbentFailed(t *tes
 	require.Equal(t, true, store.calls[312], "开着的账号失败 → 不锁定，正常择优开启更优的 312")
 }
 
-// 必需模型覆盖：TopN=1 下最优账号 401 只支持 bbb，若不兜底 aaa 会随换人断供。
+// 全局健康锁定 + 分组级反向覆盖：全局开则默认锁定所有分组，force-off 名单可单独排除，
+// force-on 名单在全局关时单独锁定，且 force-off 优先于 force-on。
+// 两个分组的在任者(501/601)都明显弱于挑战者(502/602)，锁定与否用「有没有换人」即可区分。
+func TestGroupElectionKeepHealthyIncumbentGlobalAndOverrides(t *testing.T) {
+	newMembers := func() []SupplierGroupSchedulingElectionMember {
+		return []SupplierGroupSchedulingElectionMember{
+			{GroupID: 1, AccountID: 501, Platform: "openai", Schedulable: true, LastTestStatus: "success", HealthyCount: 5, LastTestLatencyMs: 3000},
+			{GroupID: 1, AccountID: 502, Platform: "openai", Schedulable: false, LastTestStatus: "success", HealthyCount: 20, LastTestLatencyMs: 100},
+			{GroupID: 2, AccountID: 601, Platform: "openai", Schedulable: true, LastTestStatus: "success", HealthyCount: 5, LastTestLatencyMs: 3000},
+			{GroupID: 2, AccountID: 602, Platform: "openai", Schedulable: false, LastTestStatus: "success", HealthyCount: 20, LastTestLatencyMs: 100},
+		}
+	}
+
+	// 1) 全局锁定打开、无名单 → 两个分组都锁定，谁都不换。
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(&fakeGroupElectionRepo{members: newMembers()}, store)
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1, KeepHealthyIncumbentGlobal: true}, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, []int64{501}, result.Groups[0].WinnerIDs, "全局锁定 → 分组 1 保留在任者 501")
+	require.Equal(t, []int64{601}, result.Groups[1].WinnerIDs, "全局锁定 → 分组 2 保留在任者 601")
+	require.Empty(t, store.calls, "全局锁定下不产生任何调度写库")
+
+	// 2) 全局锁定打开、force-off 排除分组 2 → 分组 1 仍锁定、分组 2 恢复正常择优换人。
+	store = newFakeGroupElectionStore()
+	svc = NewSupplierGroupSchedulingElectionService(&fakeGroupElectionRepo{members: newMembers()}, store)
+	_, err = svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                                 1,
+		KeepHealthyIncumbentGlobal:           true,
+		KeepHealthyIncumbentExcludedGroupIDs: []int64{2},
+	}, time.Now())
+	require.NoError(t, err)
+	_, touched501 := store.calls[501]
+	_, touched502 := store.calls[502]
+	require.False(t, touched501, "分组 1 仍锁定，在任者 501 不应被动")
+	require.False(t, touched502, "分组 1 仍锁定，挑战者 502 不应被开启")
+	require.Equal(t, true, store.calls[602], "分组 2 被 force-off 排除 → 正常择优开启更优的 602")
+	require.Equal(t, false, store.calls[601], "分组 2 正常择优 → 落选的 601 被关闭")
+
+	// 3) 全局锁定关闭、force-on 只锁分组 1 → 分组 1 锁定、分组 2 正常换人（等价于旧的 opt-in 行为）。
+	store = newFakeGroupElectionStore()
+	svc = NewSupplierGroupSchedulingElectionService(&fakeGroupElectionRepo{members: newMembers()}, store)
+	_, err = svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                         1,
+		KeepHealthyIncumbentGroupIDs: []int64{1},
+	}, time.Now())
+	require.NoError(t, err)
+	_, touched501 = store.calls[501]
+	require.False(t, touched501, "全局关、force-on 锁定分组 1 → 501 不应被动")
+	require.Equal(t, true, store.calls[602], "全局关时分组 2 不在任何名单 → 正常择优换人")
+
+	// 4) force-off 优先于 force-on：同一分组同时进两个名单时按「不锁定」处理。
+	store = newFakeGroupElectionStore()
+	svc = NewSupplierGroupSchedulingElectionService(&fakeGroupElectionRepo{members: newMembers()}, store)
+	_, err = svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                                 1,
+		KeepHealthyIncumbentGlobal:           true,
+		KeepHealthyIncumbentGroupIDs:         []int64{1},
+		KeepHealthyIncumbentExcludedGroupIDs: []int64{1},
+	}, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, true, store.calls[502], "force-off 优先 → 分组 1 不锁定，正常择优开启更优的 502")
+	require.Equal(t, false, store.calls[501], "force-off 优先 → 分组 1 落选的 501 被关闭")
+}
+
 // 配了必需模型 aaa → 额外开启唯一的健康支持者 402（哪怕它综合分更低），保证 aaa 不断供。
 func TestGroupElectionRequiredModelSupplementsHealthySupporter(t *testing.T) {
 	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{

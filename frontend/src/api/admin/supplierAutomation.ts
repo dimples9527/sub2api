@@ -84,6 +84,16 @@ export interface SupplierAutomationConfig {
    */
   group_scheduling_election_keep_healthy_incumbent_group_ids?: number[]
   /**
+   * 在任者健康锁定的全局默认开关（默认 false=不锁定，与升级前一致）。
+   * 分组级的强制锁定/强制不锁定名单可以覆盖它：排除名单→false、锁定名单→true、都不在→跟随全局。
+   */
+  group_scheduling_election_keep_healthy_incumbent_global?: boolean
+  /**
+   * 在任者健康锁定的「强制不锁定」分组 ID 列表（force-off，空=无排除，默认）。
+   * 优先级最高：在此名单内的分组无论全局开关如何都不锁定，即便同时出现在强制锁定名单里也以此为准。
+   */
+  group_scheduling_election_keep_healthy_incumbent_excluded_group_ids?: number[]
+  /**
    * 分组必需模型：分组 ID → 该分组必须能服务的模型名列表。
    * 择优后对每个必需模型做覆盖兜底：赢家没覆盖它就补选一个健康支持者开启；
    * 支持它的账号全部测试失败则不硬留（切到能用的账号），只记一条告警待人工恢复。
