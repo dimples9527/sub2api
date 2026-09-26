@@ -2,8 +2,14 @@
   <BaseDialog :show="show" :title="dialogTitle" width="full" @close="emit('close')">
     <div class="sp-election-log-dialog">
       <p class="sp-election-log-hint">
-        只显示调度开关真的被拨动的记录：择优调度把某个账号从「开」改成「关」，或重新选回「开」。
-        未变更、未测试、写库失败的记录不在这里。
+        <template v-if="filters.includeSkipped">
+          已含「本该动却没动」的记录：在任者健康锁定、分组只剩它保留、连续失败未达阈值、写库失败，
+          各自标注原因并显示「本次跳过」。仍不含未测试、未参与择优的账号（它们不产生调度意图）。
+        </template>
+        <template v-else>
+          只显示调度开关真的被拨动的记录：择优调度把某个账号从「开」改成「关」，或重新选回「开」。
+          未变更、未测试、写库失败的记录不在这里，勾选「含未切换」可把带原因的跳过记录一并带出。
+        </template>
         按分组归类展示，每组标出该组的开 / 关条数；组内再按批次分块，不同批次不混在一起。
         顶部「最近批次」标签可多选，选中的几批会各自成块并排，方便对照「这批动了谁、那批又动了谁」。
         一个账号同属多个分组时，会在它所属的每个分组下各出现一次。
@@ -50,6 +56,12 @@
           <span class="sr-only">截止日期</span>
           <Input v-model="filters.startedTo" type="date" />
         </div>
+        <!-- 含未切换：默认只看开关真被拨动的记录，打开后把「本该动却没动」的也带出来
+             （在任者健康锁定 / 分组只剩它保留 / 连续失败未达阈值 / 写库失败），各自标注原因。 -->
+        <label class="sp-election-log-toggle" :class="{ 'is-on': filters.includeSkipped }">
+          <Toggle :model-value="filters.includeSkipped" @update:model-value="onToggleIncludeSkipped" />
+          <span>含未切换（带原因）</span>
+        </label>
         <button class="sp-button small primary" type="button" :disabled="loading" @click="applyFilters">
           {{ loading ? '查询中' : '查询' }}
         </button>
@@ -107,8 +119,9 @@
                     <span class="sp-election-log-group-stat">
                       <em class="good">{{ section.enabled }} 开</em>
                       <em class="bad">{{ section.disabled }} 关</em>
+                      <em v-if="section.skipped" class="skip">{{ section.skipped }} 跳过</em>
                     </span>
-                    <small class="sp-election-log-group-count">共 {{ section.total }} 条变更 · {{ section.batches.length }} 个批次</small>
+                    <small class="sp-election-log-group-count">共 {{ section.total }} 条 · {{ section.batches.length }} 个批次</small>
                   </th>
                 </tr>
                 <!-- 组内再按批次分块。不同批次的变更不混在同一段里 ——
@@ -119,7 +132,7 @@
                       <span class="sp-election-log-batch-id">批次 #{{ batch.runID }}</span>
                       <span class="sp-election-log-batch-time">{{ formatTime(batch.changedAt) }}</span>
                       <span class="sp-election-log-batch-status" :class="runStatusClass(batch.runStatus)">{{ runStatusText(batch.runStatus) }}</span>
-                      <small class="sp-election-log-batch-count">本批次 {{ batch.rows.length }} 条变更</small>
+                      <small class="sp-election-log-batch-count">本批次 {{ batch.rows.length }} 条</small>
                     </td>
                   </tr>
                   <tr v-for="log in batch.rows" :key="`${batch.key}-${rowKey(log)}`" class="sp-election-log-row">
@@ -140,7 +153,7 @@
                         <span v-if="log.platform" class="sp-election-log-platform" :class="platformTextClass(log.platform)">{{ log.platform }}</span>
                       </template>
                       <template v-else-if="column.key === 'direction'">
-                        <span class="sp-election-log-direction" :class="log.direction === 'enabled' ? 'good' : 'bad'">
+                        <span class="sp-election-log-direction" :class="directionClass(log)">
                           {{ directionText(log) }}
                         </span>
                         <!-- 演练产生的条目没有真的写库，必须标出来：
@@ -199,6 +212,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import Input from '@/components/common/Input.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
+import Toggle from '@/components/common/Toggle.vue'
 import type { Column } from '@/components/common/types'
 import { useAppStore } from '@/stores/app'
 import { formatTime } from '@/utils/format'
@@ -239,12 +253,14 @@ const filters = ref<{
   search: string
   startedFrom: string
   startedTo: string
+  includeSkipped: boolean
 }>({
   direction: 'all',
   platform: '',
   search: '',
   startedFrom: '',
   startedTo: '',
+  includeSkipped: false,
 })
 // 从某个分组/账号进来后又点了「查看全部」，此时以组件内部状态为准。
 const clearedGroup = ref(false)
@@ -271,6 +287,7 @@ const hasActiveFilters = computed(() => (
   || filters.value.search.trim() !== ''
   || filters.value.startedFrom !== ''
   || filters.value.startedTo !== ''
+  || filters.value.includeSkipped
   || activeGroupID.value !== null
   || activeAccountID.value !== null
   || runFilters.value.length > 0
@@ -306,9 +323,17 @@ function rowKey(log: SupplierGroupElectionChangeLog) {
 }
 
 function directionText(log: SupplierGroupElectionChangeLog) {
+  // 含未切换视图里会出现 before==after 的行：它「本该动却没动」，不是开也不是关。
+  if (log.schedulable_before === log.schedulable_after) return '本次跳过'
   if (log.direction === 'enabled') return '开启调度'
   if (log.direction === 'disabled') return '关闭调度'
   return log.schedulable_after ? '开启调度' : '关闭调度'
+}
+
+// 方向色：开=绿、关=红，跳过=中性灰（不能染成开/关，那会把「没动」读成一次切换）。
+function directionClass(log: SupplierGroupElectionChangeLog) {
+  if (log.schedulable_before === log.schedulable_after) return 'skip'
+  return log.direction === 'enabled' ? 'good' : 'bad'
 }
 
 function testStatusText(status?: string) {
@@ -345,7 +370,7 @@ function latencyText(latencyMs?: number) {
   return `${(latencyMs / 1000).toFixed(1)}s`
 }
 
-/** 组内的一块批次：同一次运行里的变更，以及该批次自己的开 / 关条数。 */
+/** 组内的一块批次：同一次运行里的变更，以及该批次自己的开 / 关 / 跳过条数。 */
 interface LogBatchBlock {
   key: string
   runID: number
@@ -353,6 +378,8 @@ interface LogBatchBlock {
   changedAt: string
   enabled: number
   disabled: number
+  // skipped：含未切换视图下「本该动却没动」的条数（before === after）。
+  skipped: number
   rows: SupplierGroupElectionChangeLog[]
 }
 
@@ -362,7 +389,8 @@ interface LogSection {
   groupName: string
   enabled: number
   disabled: number
-  /** 该组跨批次的变更总条数。 */
+  skipped: number
+  /** 该组跨批次的记录总条数（含未切换视图下也含跳过条目）。 */
   total: number
   batches: LogBatchBlock[]
 }
@@ -434,9 +462,6 @@ function whyFacts(section: LogSection, log: SupplierGroupElectionChangeLog): str
 // 为什么不直接用 log.reason：那是账号级结论，而账号的调度开关是单一字段（union 语义）——
 // 它在 A 组当选、在 B 组落选时整体仍记「分组内最优」，照抄到 B 组的分节下就是错的。
 // 这里按本组那条依据重新给结论；旧运行记录没有依据，返回空串由调用方降级回 log.reason。
-//
-// 刻意不判 no_alternative：账号在任一所属分组无备选时，整体都会保持原状（后端闸门一），
-// 于是 before === after，压根不会出现在这份日志里。
 function groupReasonText(section: LogSection, log: SupplierGroupElectionChangeLog): string {
   const decision = decisionFor(section, log)
   if (!decision) return ''
@@ -445,6 +470,10 @@ function groupReasonText(section: LogSection, log: SupplierGroupElectionChangeLo
     return `本组因必需模型 ${decision.required_models.join('、')} 补选`
   }
   if (decision.elected) return '本组择优入选'
+  // 含未切换视图里的「本该动却没动」行（before === after，且非锁定）：结论落在账号级
+  // ——无备选保留 / 连续失败待观察 / 写库失败，这些都是 union 语义下账号整体的裁决，
+  // 交回 log.reason 才准；这里按「本组未入选」下结论反而是错的（它压根没被换掉）。
+  if (log.schedulable_before === log.schedulable_after) return ''
   // 本组没选它，它却可能因为在别的分组当选而被打开 —— 不点破的话，
   // 「开启调度」与「本组未入选」并列会被读成自相矛盾。
   if (log.direction === 'enabled') return '本组未入选（该账号在其它分组当选）'
@@ -467,7 +496,7 @@ const sections = computed<LogSection[]>(() => {
   const push = (groupKey: string, groupName: string, log: SupplierGroupElectionChangeLog) => {
     let section = groupMap.get(groupKey)
     if (!section) {
-      section = { key: groupKey, groupName, enabled: 0, disabled: 0, total: 0, batches: [] }
+      section = { key: groupKey, groupName, enabled: 0, disabled: 0, skipped: 0, total: 0, batches: [] }
       groupMap.set(groupKey, section)
     }
     const batchKey = `${groupKey}::${log.run_id}`
@@ -480,6 +509,7 @@ const sections = computed<LogSection[]>(() => {
         changedAt: log.changed_at,
         enabled: 0,
         disabled: 0,
+        skipped: 0,
         rows: [],
       }
       batchMap.set(batchKey, block)
@@ -487,7 +517,11 @@ const sections = computed<LogSection[]>(() => {
     }
     block.rows.push(log)
     section.total += 1
-    if (log.schedulable_after) {
+    // before === after 的行是「本该动却没动」：单独计跳过，不能混进开 / 关 —— 那会把没发生的切换算成一次。
+    if (log.schedulable_before === log.schedulable_after) {
+      block.skipped += 1
+      section.skipped += 1
+    } else if (log.schedulable_after) {
       block.enabled += 1
       section.enabled += 1
     } else {
@@ -530,6 +564,7 @@ async function load() {
       direction: filters.value.direction === 'all' ? undefined : filters.value.direction,
       started_from: filters.value.startedFrom || undefined,
       started_to: filters.value.startedTo || undefined,
+      include_skipped: filters.value.includeSkipped || undefined,
       page: page.value,
       page_size: pageSize.value,
     })
@@ -551,10 +586,16 @@ function applyFilters() {
   return load()
 }
 
+// 「含未切换」是个放宽范围的开关，切一下就该立即重查 —— 与 direction/platform 的 Select 一致。
+function onToggleIncludeSkipped(value: boolean) {
+  filters.value.includeSkipped = value
+  return applyFilters()
+}
+
 function resetFilters() {
   // 重置清筛选条件，但把「锁定到某个分组 / 账号」保留 —— 用户是冲着它点开弹窗的，
   // 一起清掉会让人误以为看到的是全局日志。换对象要点「查看全部」。
-  filters.value = { direction: 'all', platform: '', search: '', startedFrom: '', startedTo: '' }
+  filters.value = { direction: 'all', platform: '', search: '', startedFrom: '', startedTo: '', includeSkipped: false }
   // 批次锁定是弹窗内点出来的临时筛选，不属于「进来时的对象」，重置一并清掉。
   runFilters.value = []
   page.value = 1
@@ -711,6 +752,23 @@ watch(() => props.accountId, () => {
 .sp-election-log-range-sep {
   color: var(--sp-election-log-muted);
   font-size: 12px;
+}
+
+/* 「含未切换」开关：一个开关一句标签并排，切一下即重查。
+   打开后标签转为 accent 色，让「现在多看了跳过记录」这件事在筛选区一眼可辨。 */
+.sp-election-log-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--sp-election-log-muted);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+}
+
+.sp-election-log-toggle.is-on {
+  color: var(--sp-election-log-accent);
 }
 
 .sp-election-log-table-region {
@@ -870,6 +928,7 @@ watch(() => props.accountId, () => {
 
 .sp-election-log-group-stat em.good { color: #16a34a; }
 .sp-election-log-group-stat em.bad { color: #dc2626; }
+.sp-election-log-group-stat em.skip { color: var(--sp-election-log-muted); }
 
 .sp-election-log-group-count {
   color: var(--sp-election-log-muted);
@@ -976,6 +1035,11 @@ watch(() => props.accountId, () => {
 
 .sp-election-log-direction.bad {
   color: #dc2626;
+}
+
+/* 跳过：中性灰。它是「本该动却没动」，与开（绿）/ 关（红）是两套维度，染成任一色都会误读成切换。 */
+.sp-election-log-direction.skip {
+  color: var(--sp-election-log-muted);
 }
 
 .dark .sp-election-log-direction.good {

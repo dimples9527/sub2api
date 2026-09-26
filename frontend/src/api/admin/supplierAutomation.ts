@@ -538,6 +538,11 @@ export interface SupplierGroupElectionChangeLogListParams {
   direction?: 'enabled' | 'disabled'
   started_from?: string
   started_to?: string
+  /**
+   * true 时把「本该动却没动」的记录也带上：在任者健康锁定、分组只剩它保留、
+   * 连续失败未达阈值、写库失败，均标注原因并显示「本次跳过」。默认只看开关真被拨动的条目。
+   */
+  include_skipped?: boolean
   page?: number
   page_size?: number
 }

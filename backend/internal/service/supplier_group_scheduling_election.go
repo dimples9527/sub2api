@@ -406,8 +406,11 @@ type SupplierGroupSchedulingElectionChangeLogListParams struct {
 	Direction   string
 	StartedFrom *time.Time
 	StartedTo   *time.Time
-	Page        int
-	PageSize    int
+	// IncludeSkipped 为 true 时，把「本该动却没动」的记录也纳入：在任者健康锁定、
+	// 分组只剩它保留、连续失败未达阈值、写库失败。默认只看开关真被拨动（before <> after）的条目。
+	IncludeSkipped bool
+	Page           int
+	PageSize       int
 }
 
 type SupplierGroupSchedulingElectionChangeLogListResult struct {
@@ -786,7 +789,10 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 			case supplierGroupElectionHoldNoAlternative:
 				result.KeptCount++
 			}
-			if account.hold != "" || item.ErrorMessage != "" {
+			// 本该重新择优、却因故没动的条目也要落库，这样切换日志的「含未切换」视图
+			// 才有据可查：hold（无备选保留 / 失败待观察）、写库失败早已在此收，
+			// 唯独「在任者健康锁定保住的在任账号」before==after 且 hold 为空，需按锁定标记单独放行。
+			if account.hold != "" || item.ErrorMessage != "" || supplierGroupElectionItemHasLockedIncumbent(item) {
 				result.Items = append(result.Items, item)
 			}
 			continue
@@ -827,6 +833,20 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 	}
 
 	return result, nil
+}
+
+// supplierGroupElectionItemHasLockedIncumbent 判断这条明细是否是「在任者健康锁定保住的在任账号」：
+// 它在某个所属分组里走了锁定、且在该组入选（= 本来就开着、测试正常，被原地保留）。
+// 这类账号 before==after 且 hold 为空，默认不会进切换日志，但它正是「本该重新择优却因锁定跳过」
+// 的记录，「含未切换」视图要能看到，所以在落库时按此标记单独放行。
+// 只认 Locked && Elected：锁定组里未开启的成员也带 Locked 标记，但它们本就不是被保住的在任者。
+func supplierGroupElectionItemHasLockedIncumbent(item SupplierGroupSchedulingElectionAccountItem) bool {
+	for _, decision := range item.GroupDecisions {
+		if decision.Locked && decision.Elected {
+			return true
+		}
+	}
+	return false
 }
 
 // supplierGroupSchedulingElectionDecide 给出账号的目标调度状态。

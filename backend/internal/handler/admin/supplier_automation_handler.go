@@ -186,8 +186,10 @@ func (h *SupplierAutomationHandler) ListGroupSchedulingElectionChangeLogs(c *gin
 		Direction:   strings.TrimSpace(c.Query("direction")),
 		StartedFrom: parseOptionalDayBoundary(c, "started_from", false),
 		StartedTo:   parseOptionalDayBoundary(c, "started_to", true),
-		Page:        page,
-		PageSize:    pageSize,
+		// include_skipped=true 时把「本该动却没动」的记录也带上（在任者锁定 / 无备选 / 待观察 / 写库失败）。
+		IncludeSkipped: parseOptionalBool(c.Query("include_skipped")),
+		Page:           page,
+		PageSize:       pageSize,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

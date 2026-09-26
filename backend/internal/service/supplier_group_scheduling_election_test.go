@@ -788,6 +788,12 @@ func TestGroupElectionKeepHealthyIncumbentLocksGroup(t *testing.T) {
 	require.Equal(t, 0, result.EnabledCount)
 	require.Equal(t, 0, result.DisabledCount)
 	require.Empty(t, store.calls, "锁定分组不产生任何调度写库")
+	// 锁定保住的在任者(301)虽然 before==after、没写库，仍要落进明细：切换日志的「含未切换」
+	// 视图靠它显示「在任者健康锁定，本次跳过」。挑战者 302 未开启、非在任者，不应被这条规则带出。
+	require.Len(t, result.Items, 1, "锁定保住的在任者 301 要进明细，供含未切换视图展示")
+	require.Equal(t, int64(301), result.Items[0].AccountID)
+	require.Equal(t, result.Items[0].SchedulableBefore, result.Items[0].SchedulableAfter, "锁定保留 → 前后状态一致")
+	require.True(t, supplierGroupElectionItemHasLockedIncumbent(result.Items[0]), "该明细应带 Locked && Elected 的分组裁决")
 
 	// 分组 1 未被 opt-in：同样数据下 302 明显更优 → 正常换人，证明差异来自分组级开关。
 	store = newFakeGroupElectionStore()

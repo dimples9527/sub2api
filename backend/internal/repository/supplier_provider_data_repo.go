@@ -2717,6 +2717,16 @@ FROM (
 ) c`
 }
 
+// supplierGroupSchedulingElectionChangeBaseCondition 是这份日志的定义本身：默认只看开关真被拨动的条目。
+// includeSkipped 为 true 时放开这一条（恒真），让「本该动却没动」的记录也进入结果 ——
+// 那些条目在 result_detail 里已按原因（锁定 / 无备选 / 待观察 / 写库失败）落库，只是 before==after 被默认条件挡住。
+func supplierGroupSchedulingElectionChangeBaseCondition(includeSkipped bool) string {
+	if includeSkipped {
+		return "TRUE"
+	}
+	return "e.schedulable_before <> e.schedulable_after"
+}
+
 // supplierGroupSchedulingElectionChangeWhere 构造「已展开」之后的筛选条件。
 // 第一条是这份日志的定义本身：**只看开关真的被拨动的条目**。
 // 页面上的「跳过/未测/写库失败」都在运行明细里，进不到这里。
@@ -2726,7 +2736,9 @@ FROM (
 // 上（$1 是 'group_election'），Postgres 报类型不匹配 —— 表现为点某条记录的批次号就 500。
 // 无条目级筛选时该函数不产出占位符，所以「全批次列表」一直是好的，只有带筛选才炸。
 func supplierGroupSchedulingElectionChangeWhere(params service.SupplierGroupSchedulingElectionChangeLogListParams, startIndex int) (string, []any) {
-	conditions := []string{"e.schedulable_before <> e.schedulable_after"}
+	// 默认只看开关真被拨动的条目；IncludeSkipped 放开这一条，把「本该动却没动」的记录
+	// （在任者健康锁定 / 无备选保留 / 失败待观察 / 写库失败，均已按原因落在运行明细里）纳进来。
+	conditions := []string{supplierGroupSchedulingElectionChangeBaseCondition(params.IncludeSkipped)}
 	args := make([]any, 0, 6)
 	// 占位符编号 = startIndex + 本函数已产出的参数个数，保证与调用方拼接的参数切片顺序一致。
 	placeholder := func(value any) string {
@@ -2881,9 +2893,9 @@ WHERE `+itemWhere+fmt.Sprintf(" ORDER BY e.changed_at DESC, e.run_id DESC, e.acc
 	recentSQL := fmt.Sprintf(`
 SELECT DISTINCT e.run_id
 FROM (%s) e
-WHERE e.schedulable_before <> e.schedulable_after
+WHERE %s
 ORDER BY e.run_id DESC
-LIMIT %d`, supplierGroupSchedulingElectionChangeInnerSQL("r.task_code = $1"), supplierGroupSchedulingElectionRecentRunLimit)
+LIMIT %d`, supplierGroupSchedulingElectionChangeInnerSQL("r.task_code = $1"), supplierGroupSchedulingElectionChangeBaseCondition(params.IncludeSkipped), supplierGroupSchedulingElectionRecentRunLimit)
 	recentRows, err := r.db.QueryContext(ctx, recentSQL, args[0])
 	if err != nil {
 		return service.SupplierGroupSchedulingElectionChangeLogListResult{}, fmt.Errorf("查询分组调度切换日志的最近批次失败: %w", err)
