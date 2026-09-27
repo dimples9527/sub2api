@@ -479,6 +479,28 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('留空表示按任务全局执行间隔')
   })
 
+  it('supports batch interval configuration for selected health guard accounts', () => {
+    expect(supplierAutomationSource).toContain('healthGuardBatchIntervalInput')
+    expect(supplierAutomationSource).toContain('healthGuardBatchIntervalValid')
+    expect(supplierAutomationSource).toContain('healthGuardBatchTargetRows')
+    expect(supplierAutomationSource).toContain('healthGuardBatchTargetCount')
+    expect(supplierAutomationSource).toContain('selectAllFilteredHealthGuardAccounts')
+    expect(supplierAutomationSource).toContain('deselectFilteredHealthGuardAccounts')
+    expect(supplierAutomationSource).toContain('applyHealthGuardBatchInterval')
+    expect(supplierAutomationSource).toContain('clearHealthGuardSelectedIntervals')
+    expect(supplierAutomationSource).toContain('全选筛选结果')
+    expect(supplierAutomationSource).toContain('取消全选')
+    expect(supplierAutomationSource).toContain('应用到已选')
+    expect(supplierAutomationSource).toContain('清除已选间隔')
+    // 批量作用域必须收窄到「筛选结果 ∩ 已勾选 ∩ 可用」，否则给 B 组设间隔会覆盖 A 组。
+    const batchTargetSource = supplierAutomationSource.match(
+      /const healthGuardBatchTargetRows = computed\([\s\S]*?\n\)/
+    )?.[0] || ''
+    expect(batchTargetSource).toContain('healthGuardWorkspaceAccounts.value.filter')
+    expect(batchTargetSource).toContain('mapping.available')
+    expect(batchTargetSource).toContain('healthGuardAccountIDs.value.includes(mapping.localAccountID)')
+  })
+
   it('supports per-account failure, slow and recovery threshold override in the health guard account dialog', () => {
     expect(supplierAutomationSource).toContain('account_health_guard_account_failure_thresholds: {}')
     expect(supplierAutomationSource).toContain('account_health_guard_account_slow_thresholds: {}')

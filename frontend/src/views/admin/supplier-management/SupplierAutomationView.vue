@@ -979,6 +979,46 @@
                   <strong>{{ facet.count }}</strong>
                 </button>
               </div>
+
+              <!-- 批量配置：全选/取消全选作用于「当前筛选结果」；间隔应用/清除作用于「当前筛选结果里已勾选且可用」的账号，
+                   所以可以按筛选分批设不同间隔而互不覆盖。独占一行（flex-basis: 100%），避免挤压上方 grid 列。 -->
+              <div class="sp-health-guard-batch-actions" role="group" aria-label="批量配置账号">
+                <button class="sp-button small ghost" type="button" @click="selectAllFilteredHealthGuardAccounts">
+                  全选筛选结果
+                </button>
+                <button class="sp-button small ghost" type="button" @click="deselectFilteredHealthGuardAccounts">
+                  取消全选
+                </button>
+                <span class="sp-health-guard-batch-divider" aria-hidden="true"></span>
+                <div class="sp-health-guard-batch-interval-input">
+                  <Input
+                    v-model="healthGuardBatchIntervalInput"
+                    type="number"
+                    min="60"
+                    placeholder="间隔（秒）"
+                    aria-label="批量检查间隔（秒），不小于 60 秒"
+                    title="批量为当前筛选结果中已勾选且可用的账号设置检查间隔，不小于 60 秒"
+                  />
+                </div>
+                <button
+                  class="sp-button small"
+                  type="button"
+                  :disabled="!healthGuardBatchIntervalValid || healthGuardBatchTargetCount === 0"
+                  title="为当前筛选结果中已勾选且可用的账号统一设置检查间隔（可按筛选分批设不同值）"
+                  @click="applyHealthGuardBatchInterval"
+                >
+                  应用到已选
+                </button>
+                <button
+                  class="sp-button small ghost danger"
+                  type="button"
+                  :disabled="healthGuardBatchTargetCount === 0"
+                  title="清除当前筛选结果中已勾选账号的检查间隔，回落到默认行为"
+                  @click="clearHealthGuardSelectedIntervals"
+                >
+                  清除已选间隔
+                </button>
+              </div>
             </div>
 
             <div v-if="loadingHealthGuardSupplierAccounts" class="sp-rate-guard-empty">正在加载账号...</div>
@@ -1546,6 +1586,7 @@ const healthGuardAccountPlatformFilter = ref<string[]>([])
 const healthGuardAccountProviderFilter = ref('')
 const healthGuardAccountSearch = ref('')
 const healthGuardSelectedOnly = ref(false)
+const healthGuardBatchIntervalInput = ref<number | string>('')
 const healthGuardSupplierAccounts = ref<SupplierProviderAccount[]>([])
 const loadingHealthGuardSupplierAccounts = ref(false)
 const healthGuardModelOptionsByPlatform = ref<Record<string, { id: string; display_name?: string }[]>>({})
@@ -3240,6 +3281,7 @@ async function openHealthGuardAccounts() {
   healthGuardAccountProviderFilter.value = ''
   healthGuardAccountSearch.value = ''
   healthGuardSelectedOnly.value = false
+  healthGuardBatchIntervalInput.value = ''
   try {
     await ensureHealthGuardAccountCandidatesLoaded()
     await loadHealthGuardModels()
@@ -3351,6 +3393,70 @@ function setHealthGuardAccountInterval(accountID: number, value: string | number
     delete intervals[String(accountID)]
   }
   editForm.config.account_health_guard_account_intervals = intervals
+}
+
+// 批量间隔：解析当前输入框的秒数，非法（空/非整数/小于 60）时返回 null，供按钮禁用与函数守卫共用同一判据。
+const healthGuardBatchIntervalSeconds = computed<number | null>(() => {
+  const parsed = Math.floor(Number(healthGuardBatchIntervalInput.value))
+  return Number.isSafeInteger(parsed) && parsed >= 60 ? parsed : null
+})
+const healthGuardBatchIntervalValid = computed(() => healthGuardBatchIntervalSeconds.value !== null)
+// 批量操作只作用于「当前筛选结果里已勾选且可用」的账号：把筛选当子集选择器，
+// 就能筛选 A 组→设 300→应用、筛选 B 组→设 600→应用，两批互不覆盖。
+// 不可用账号运行时直接记为不可用、不参与检查，故排除在批量作用范围外。
+const healthGuardBatchTargetRows = computed(() =>
+  healthGuardWorkspaceAccounts.value.filter(
+    mapping => mapping.available && healthGuardAccountIDs.value.includes(mapping.localAccountID)
+  )
+)
+const healthGuardBatchTargetCount = computed(() => healthGuardBatchTargetRows.value.length)
+
+// 全选「当前筛选结果」中的可用账号，并入已选集合（不可用账号不纳入，避免制造运行时必然记为不可用的噪声）。
+function selectAllFilteredHealthGuardAccounts() {
+  const ids = healthGuardWorkspaceAccounts.value
+    .filter(mapping => mapping.available)
+    .map(mapping => mapping.localAccountID)
+  editForm.config.account_health_guard_account_ids = normalizePositiveAccountIDs([
+    ...healthGuardAccountIDs.value,
+    ...ids,
+  ])
+}
+
+// 取消勾选「当前筛选结果」中的账号：先快照 ID 再逐个移除，removeHealthGuardAccount 会一并清掉其模型/间隔/阈值/调度覆盖。
+function deselectFilteredHealthGuardAccounts() {
+  const ids = healthGuardWorkspaceAccounts.value.map(mapping => mapping.localAccountID)
+  for (const id of ids) removeHealthGuardAccount(id)
+}
+
+// 把批量间隔应用到「当前筛选结果里已勾选且可用」的账号，保存任务后生效。
+function applyHealthGuardBatchInterval() {
+  const seconds = healthGuardBatchIntervalSeconds.value
+  if (seconds === null) {
+    appStore.showError('检查间隔必须是不小于 60 秒的整数')
+    return
+  }
+  const intervals = { ...(editForm.config.account_health_guard_account_intervals || {}) }
+  let count = 0
+  for (const mapping of healthGuardBatchTargetRows.value) {
+    intervals[String(mapping.localAccountID)] = seconds
+    count += 1
+  }
+  editForm.config.account_health_guard_account_intervals = intervals
+  appStore.showSuccess(`已为 ${count} 个账号设置检查间隔 ${seconds} 秒，保存任务后生效`)
+}
+
+// 清除「当前筛选结果里已勾选」账号的间隔覆盖，回落到「按倍率区间 / 每轮都测」的默认行为。
+function clearHealthGuardSelectedIntervals() {
+  const intervals = { ...(editForm.config.account_health_guard_account_intervals || {}) }
+  let count = 0
+  for (const mapping of healthGuardBatchTargetRows.value) {
+    if (intervals[String(mapping.localAccountID)] !== undefined) {
+      delete intervals[String(mapping.localAccountID)]
+      count += 1
+    }
+  }
+  editForm.config.account_health_guard_account_intervals = intervals
+  appStore.showSuccess(`已清除 ${count} 个账号的检查间隔`)
 }
 
 function healthGuardAccountSchedulingChangeValue(accountID: number): boolean {
@@ -6069,6 +6175,26 @@ function intervalSecondsToCron(seconds: number): string | null {
   color: var(--sp-blue);
   font-weight: 750;
   font-variant-numeric: tabular-nums;
+}
+
+.sp-health-guard-batch-actions {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.sp-health-guard-batch-divider {
+  width: 1px;
+  align-self: stretch;
+  min-height: 24px;
+  background: var(--sp-line);
+}
+
+.sp-health-guard-batch-interval-input {
+  flex: 0 0 auto;
+  width: 132px;
 }
 
 .sp-health-guard-account-list {
