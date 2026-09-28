@@ -18,6 +18,8 @@ var CorePlatformDefinitions = []PlatformDefinition{
 	{Code: PlatformKimi, Name: "Kimi", Color: "#ec4899", HealthGuard: true},
 	{Code: PlatformZhipu, Name: "Zhipu GLM", Color: "#6366f1", HealthGuard: true},
 	{Code: PlatformDeepseek, Name: "DeepSeek", Color: "#14b8a6", HealthGuard: true},
+	{Code: PlatformMiniMax, Name: "MiniMax", Color: "#f43f5e", HealthGuard: true},
+	{Code: PlatformOpenCodeGo, Name: "OpenCode", Color: "#f59e0b", HealthGuard: true},
 	{Code: PlatformComposite, Name: "Composite", Color: "#06b6d4", HealthGuard: false},
 }
 
