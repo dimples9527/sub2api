@@ -65,6 +65,18 @@ export interface RechargeAmountOption {
   credit_amount: number
 }
 
+export interface HolidayPromoTier {
+  threshold: number
+  bonus_rate: number
+}
+
+/** Active holiday recharge promotion, present only while the promo window is live */
+export interface HolidayPromoInfo {
+  active: boolean
+  end_at?: number | null
+  tiers: HolidayPromoTier[]
+}
+
 /** Response from /payment/checkout-info API — single call for the payment page */
 export interface CheckoutInfoResponse {
   methods: Record<string, MethodLimit>
@@ -77,6 +89,8 @@ export interface CheckoutInfoResponse {
   subscription_usd_to_cny_rate: number
   recharge_fee_rate: number
   recharge_options: RechargeAmountOption[]
+  /** Present only when a tiered holiday promo is currently active */
+  holiday_promo?: HolidayPromoInfo | null
   help_text: string
   help_image_url: string
   stripe_publishable_key: string

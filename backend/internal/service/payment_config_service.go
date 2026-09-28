@@ -42,6 +42,7 @@ const (
 	SettingCancelWindowMode              = "CANCEL_RATE_LIMIT_WINDOW_MODE"
 	SettingAlipayForceQRCode             = "ALIPAY_FORCE_QRCODE"
 	SettingRechargeOptions               = "PAYMENT_RECHARGE_OPTIONS"
+	SettingRechargeHolidayPromo          = "RECHARGE_HOLIDAY_PROMO"
 	SettingAlipayMobilePrecreateDeepLink = "ALIPAY_MOBILE_PRECREATE_DEEP_LINK"
 )
 
@@ -65,15 +66,16 @@ type PaymentConfig struct {
 	BalanceDisabled           bool     `json:"balance_disabled"`
 	BalanceRechargeMultiplier float64  `json:"balance_recharge_multiplier"`
 	// SubscriptionUSDToCNYRate 为 0 时订阅换算关闭（兼容存量行为）。
-	SubscriptionUSDToCNYRate float64 `json:"subscription_usd_to_cny_rate"`
-	RechargeFeeRate          float64 `json:"recharge_fee_rate"`
-	LoadBalanceStrategy      string  `json:"load_balance_strategy"`
-	ProductNamePrefix        string  `json:"product_name_prefix"`
-	ProductNameSuffix        string  `json:"product_name_suffix"`
-	HelpImageURL             string  `json:"help_image_url"`
-	HelpText                 string  `json:"help_text"`
-	StripePublishableKey     string  `json:"stripe_publishable_key,omitempty"`
-	RechargeOptions          []float64 `json:"recharge_options"`
+	SubscriptionUSDToCNYRate float64        `json:"subscription_usd_to_cny_rate"`
+	RechargeFeeRate          float64        `json:"recharge_fee_rate"`
+	LoadBalanceStrategy      string         `json:"load_balance_strategy"`
+	ProductNamePrefix        string         `json:"product_name_prefix"`
+	ProductNameSuffix        string         `json:"product_name_suffix"`
+	HelpImageURL             string         `json:"help_image_url"`
+	HelpText                 string         `json:"help_text"`
+	StripePublishableKey     string         `json:"stripe_publishable_key,omitempty"`
+	RechargeOptions          []float64      `json:"recharge_options"`
+	HolidayPromo             *RechargePromo `json:"holiday_promo,omitempty"`
 
 	// Cancel rate limit settings
 	CancelRateLimitEnabled bool   `json:"cancel_rate_limit_enabled"`
@@ -90,23 +92,23 @@ type PaymentConfig struct {
 
 // UpdatePaymentConfigRequest contains fields to update payment configuration.
 type UpdatePaymentConfigRequest struct {
-	Enabled                   *bool    `json:"enabled"`
-	MinAmount                 *float64 `json:"min_amount"`
-	MaxAmount                 *float64 `json:"max_amount"`
-	DailyLimit                *float64 `json:"daily_limit"`
-	OrderTimeoutMin           *int     `json:"order_timeout_minutes"`
-	MaxPendingOrders          *int     `json:"max_pending_orders"`
-	EnabledTypes              []string `json:"enabled_payment_types"`
-	BalanceDisabled           *bool    `json:"balance_disabled"`
-	BalanceRechargeMultiplier *float64 `json:"balance_recharge_multiplier"`
-	SubscriptionUSDToCNYRate  *float64 `json:"subscription_usd_to_cny_rate"`
-	RechargeFeeRate           *float64 `json:"recharge_fee_rate"`
-	LoadBalanceStrategy       *string  `json:"load_balance_strategy"`
-	ProductNamePrefix         *string  `json:"product_name_prefix"`
-	ProductNameSuffix         *string  `json:"product_name_suffix"`
-	HelpImageURL              *string  `json:"help_image_url"`
-	HelpText                  *string  `json:"help_text"`
-	RechargeOptions           []float64 `json:"recharge_options"`
+	Enabled                   *bool          `json:"enabled"`
+	MinAmount                 *float64       `json:"min_amount"`
+	MaxAmount                 *float64       `json:"max_amount"`
+	DailyLimit                *float64       `json:"daily_limit"`
+	OrderTimeoutMin           *int           `json:"order_timeout_minutes"`
+	MaxPendingOrders          *int           `json:"max_pending_orders"`
+	EnabledTypes              []string       `json:"enabled_payment_types"`
+	BalanceDisabled           *bool          `json:"balance_disabled"`
+	BalanceRechargeMultiplier *float64       `json:"balance_recharge_multiplier"`
+	SubscriptionUSDToCNYRate  *float64       `json:"subscription_usd_to_cny_rate"`
+	RechargeFeeRate           *float64       `json:"recharge_fee_rate"`
+	LoadBalanceStrategy       *string        `json:"load_balance_strategy"`
+	ProductNamePrefix         *string        `json:"product_name_prefix"`
+	ProductNameSuffix         *string        `json:"product_name_suffix"`
+	HelpImageURL              *string        `json:"help_image_url"`
+	HelpText                  *string        `json:"help_text"`
+	RechargeOptions           []float64      `json:"recharge_options"`
 
 	// Cancel rate limit settings
 	CancelRateLimitEnabled *bool   `json:"cancel_rate_limit_enabled"`
@@ -231,7 +233,7 @@ func (s *PaymentConfigService) GetPaymentConfig(ctx context.Context) (*PaymentCo
 		SettingHelpImageURL, SettingHelpText,
 		SettingCancelRateLimitOn, SettingCancelRateLimitMax,
 		SettingCancelWindowSize, SettingCancelWindowUnit, SettingCancelWindowMode,
-		SettingAlipayForceQRCode, SettingRechargeOptions, SettingAlipayMobilePrecreateDeepLink,
+		SettingAlipayForceQRCode, SettingRechargeOptions, SettingRechargeHolidayPromo, SettingAlipayMobilePrecreateDeepLink,
 		SettingPaymentVisibleMethodAlipayEnabled, SettingPaymentVisibleMethodAlipaySource,
 		SettingPaymentVisibleMethodWxpayEnabled, SettingPaymentVisibleMethodWxpaySource,
 	}
@@ -263,6 +265,7 @@ func (s *PaymentConfigService) parsePaymentConfig(vals map[string]string) *Payme
 		HelpImageURL:              vals[SettingHelpImageURL],
 		HelpText:                  vals[SettingHelpText],
 		RechargeOptions:           parseRechargeOptionAmounts(vals[SettingRechargeOptions]),
+		HolidayPromo:              parseRechargePromo(vals[SettingRechargeHolidayPromo]),
 
 		CancelRateLimitEnabled: vals[SettingCancelRateLimitOn] == "true",
 		CancelRateLimitMax:     pcParseInt(vals[SettingCancelRateLimitMax], 10),

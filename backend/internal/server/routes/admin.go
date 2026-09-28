@@ -579,6 +579,9 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	{
 		adminSettings.GET("", h.Admin.Setting.GetSettings)
 		adminSettings.PUT("", h.Admin.Setting.UpdateSettings)
+		// 节假日阶梯充值优惠（独立配置端点）
+		adminSettings.GET("/recharge-holiday-promo", h.Admin.Setting.GetRechargeHolidayPromo)
+		adminSettings.PUT("/recharge-holiday-promo", h.Admin.Setting.UpdateRechargeHolidayPromo)
 		adminSettings.POST("/test-smtp", h.Admin.Setting.TestSMTPConnection)
 		adminSettings.POST("/send-test-email", h.Admin.Setting.SendTestEmail)
 		adminSettings.GET("/email-templates", h.Admin.Setting.ListEmailTemplates)

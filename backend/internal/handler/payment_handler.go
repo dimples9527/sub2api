@@ -140,6 +140,7 @@ func (h *PaymentHandler) GetCheckoutInfo(c *gin.Context) {
 		})
 	}
 
+	now := time.Now()
 	response.Success(c, checkoutInfoResponse{
 		Methods:                       limitsResp.Methods,
 		GlobalMin:                     limitsResp.GlobalMin,
@@ -149,7 +150,8 @@ func (h *PaymentHandler) GetCheckoutInfo(c *gin.Context) {
 		BalanceRechargeMultiplier:     cfg.BalanceRechargeMultiplier,
 		SubscriptionUSDToCNYRate:      cfg.SubscriptionUSDToCNYRate,
 		RechargeFeeRate:               cfg.RechargeFeeRate,
-		RechargeOptions:               service.BuildRechargeAmountOptions(cfg),
+		RechargeOptions:               service.BuildRechargeAmountOptions(cfg, now),
+		HolidayPromo:                  buildCheckoutHolidayPromo(cfg, now),
 		HelpText:                      cfg.HelpText,
 		HelpImageURL:                  cfg.HelpImageURL,
 		StripePublishableKey:          cfg.StripePublishableKey,
@@ -168,11 +170,36 @@ type checkoutInfoResponse struct {
 	SubscriptionUSDToCNYRate      float64                         `json:"subscription_usd_to_cny_rate"`
 	RechargeFeeRate               float64                         `json:"recharge_fee_rate"`
 	RechargeOptions               []service.RechargeAmountOption  `json:"recharge_options"`
+	HolidayPromo                  *checkoutHolidayPromo           `json:"holiday_promo,omitempty"`
 	HelpText                      string                          `json:"help_text"`
 	HelpImageURL                  string                          `json:"help_image_url"`
 	StripePublishableKey          string                          `json:"stripe_publishable_key"`
 	AlipayForceQRCode             bool                            `json:"alipay_force_qrcode"`
 	AlipayMobilePrecreateDeepLink bool                            `json:"alipay_mobile_precreate_deep_link"`
+}
+
+// checkoutHolidayPromo describes the currently-active recharge promotion for the user-facing page.
+type checkoutHolidayPromo struct {
+	Active bool                       `json:"active"`
+	EndAt  *int64                     `json:"end_at,omitempty"`
+	Tiers  []checkoutHolidayPromoTier `json:"tiers"`
+}
+
+type checkoutHolidayPromoTier struct {
+	Threshold float64 `json:"threshold"`
+	BonusRate float64 `json:"bonus_rate"`
+}
+
+func buildCheckoutHolidayPromo(cfg *service.PaymentConfig, now time.Time) *checkoutHolidayPromo {
+	if cfg == nil || !cfg.HolidayPromo.IsActive(now) {
+		return nil
+	}
+	promo := cfg.HolidayPromo
+	tiers := make([]checkoutHolidayPromoTier, 0, len(promo.Tiers))
+	for _, tier := range promo.Tiers {
+		tiers = append(tiers, checkoutHolidayPromoTier{Threshold: tier.Threshold, BonusRate: tier.BonusRate})
+	}
+	return &checkoutHolidayPromo{Active: true, EndAt: promo.EndAt, Tiers: tiers}
 }
 
 type checkoutPlan struct {

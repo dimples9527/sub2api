@@ -216,6 +216,7 @@ export default {
     paymentDashboard: 'Payment Dashboard',
     paymentConfig: 'Payment Config',
     paymentPlans: 'Plans',
+    rechargePromo: 'Holiday Promo',
     channelManagement: 'Channels',
     channelPricing: 'Channel Pricing',
     channelMonitor: 'Channel Monitor',

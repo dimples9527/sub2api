@@ -49,6 +49,20 @@
               <p class="text-gray-500 dark:text-gray-400">{{ t('payment.notAvailable') }}</p>
             </div>
             <template v-else>
+            <div
+              v-if="holidayPromo"
+              class="card border border-amber-300 bg-amber-50 p-4 dark:border-amber-500/40 dark:bg-amber-500/10"
+            >
+              <p class="text-sm font-semibold text-amber-700 dark:text-amber-300">{{ t('payment.holidayPromoTitle') }}</p>
+              <p v-if="holidayPromo.end_at" class="mt-0.5 text-xs text-amber-600 dark:text-amber-400">
+                {{ t('payment.holidayPromoUntil', { time: formatHolidayPromoEndAt(holidayPromo.end_at) }) }}
+              </p>
+              <ul class="mt-2 space-y-0.5 text-xs text-amber-700 dark:text-amber-300">
+                <li v-for="(tier, i) in holidayPromo.tiers" :key="`promo-banner-${i}`">
+                  {{ t('payment.holidayPromoTierLine', { threshold: tier.threshold, bonus: formatHolidayPromoBonus(tier.bonus_rate) }) }}
+                </li>
+              </ul>
+            </div>
             <div class="card p-6">
               <AmountInput
                 v-model="amount"
@@ -79,12 +93,12 @@
                   <span class="font-medium text-gray-700 dark:text-gray-300">{{ t('payment.actualPay') }}</span>
                   <span class="text-lg font-bold text-primary-600 dark:text-primary-400">{{ formatSelectedPaymentAmount(totalAmount) }}</span>
                 </div>
-                <div v-if="balanceRechargeMultiplier !== 1" class="flex justify-between" :class="{ 'border-t border-gray-200 pt-2 dark:border-dark-600': feeRate <= 0 }">
+                <div v-if="showCreditedBalance" class="flex justify-between" :class="{ 'border-t border-gray-200 pt-2 dark:border-dark-600': feeRate <= 0 }">
                   <span class="text-gray-500 dark:text-gray-400">{{ t('payment.creditedBalance') }}</span>
                   <span class="text-gray-900 dark:text-white">${{ creditedAmount.toFixed(2) }}</span>
                 </div>
-                <p v-if="balanceRechargeMultiplier !== 1" class="border-t border-gray-200 pt-2 text-xs text-gray-500 dark:border-dark-600 dark:text-gray-400">
-                  {{ t('payment.rechargeRatePreview', { currency: selectedCurrency, usd: balanceRechargeMultiplier.toFixed(2) }) }}
+                <p v-if="showCreditedBalance" class="border-t border-gray-200 pt-2 text-xs text-gray-500 dark:border-dark-600 dark:text-gray-400">
+                  {{ t('payment.rechargeRatePreview', { currency: selectedCurrency, usd: effectiveRechargeMultiplier.toFixed(2) }) }}
                 </p>
               </div>
             </div>
@@ -549,7 +563,42 @@ const subscriptionUsdToCnyRate = computed(() => {
   const rate = checkout.value.subscription_usd_to_cny_rate
   return Number.isFinite(rate) && rate > 0 ? rate : 0
 })
-const creditedAmount = computed(() => Math.round((validAmount.value * balanceRechargeMultiplier.value) * 100) / 100)
+const creditedAmount = computed(() => Math.round((validAmount.value * effectiveRechargeMultiplier.value) * 100) / 100)
+
+// Active tiered holiday promo (server marks active only within its time window). Display-only:
+// the authoritative credited amount is recomputed server-side at order creation.
+const holidayPromo = computed(() => {
+  const promo = checkout.value.holiday_promo
+  if (!promo || !promo.active || !promo.tiers?.length) return null
+  return promo
+})
+
+// Highest tier whose threshold <= amount, mirroring the backend BonusRateFor.
+function holidayBonusRateFor(amount: number): number {
+  const promo = holidayPromo.value
+  if (!promo) return 0
+  let rate = 0
+  for (const tier of promo.tiers) {
+    if (amount + 1e-9 >= tier.threshold) rate = tier.bonus_rate
+    else break
+  }
+  return rate
+}
+
+const effectiveRechargeMultiplier = computed(
+  () => balanceRechargeMultiplier.value + holidayBonusRateFor(validAmount.value),
+)
+
+const showCreditedBalance = computed(() => effectiveRechargeMultiplier.value !== 1)
+
+function formatHolidayPromoEndAt(unix: number | null | undefined): string {
+  if (unix === null || unix === undefined || !Number.isFinite(unix)) return ''
+  return new Date(unix * 1000).toLocaleString()
+}
+
+function formatHolidayPromoBonus(rate: number): string {
+  return String(Math.round(rate * 10000) / 100)
+}
 
 // Adaptive grid: center single card, 2-col for 2 plans, 3-col for 3+
 const planGridClass = computed(() => {

@@ -1,0 +1,27 @@
+export default {
+  rechargePromo: {
+    title: '节假日充值优惠',
+    description: '配置节假日阶梯充值赠送：开启后在起止时间内“充得越多送越多”，到期自动失效。',
+    enabled: '启用节假日充值优惠',
+    enabledHint: '开启后在起止时间内按“充得越多送越多”的阶梯赠送额度，到期自动失效。',
+    start: '开始时间',
+    end: '结束时间',
+    windowHint: '起止时间留空表示该侧不设边界（启用后长期有效，直到手动关闭）。',
+    tiers: '阶梯档位',
+    tiersHint: '每档为“充值门槛 + 额外赠送百分比”，门槛是下限：充值额达到门槛及以上才够得着，结算时取够得着的最高一档。',
+    tiersExample:
+      '举例：配置“满 100 送 5%、满 500 送 10%、满 1000 送 20%”时，充 300 够第一档送 5%、充 500 够第二档送 10%、充 50 未达最低档不送；赠送额度是叠加在基础充值倍率之上的额外到账，不是打折。',
+    thresholdPlaceholder: '门槛',
+    bonusPlaceholder: '赠送',
+    addTier: '添加档位',
+    removeTier: '删除',
+    invalidRange: '结束时间不能早于开始时间',
+    invalidTier: '请输入有效的门槛与赠送比例（0-500%）',
+    duplicateThreshold: '存在重复的充值门槛',
+    noTiers: '启用优惠时至少需要配置一个档位',
+    save: '保存',
+    saveSuccess: '节假日充值优惠已保存',
+    saveFailed: '保存失败',
+    loadFailed: '加载节假日充值优惠配置失败',
+  },
+}

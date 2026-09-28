@@ -35,7 +35,15 @@ func (s *settingHandlerRepoStub) GetValue(ctx context.Context, key string) (stri
 }
 
 func (s *settingHandlerRepoStub) Set(ctx context.Context, key, value string) error {
-	panic("unexpected Set call")
+	if s.values == nil {
+		s.values = map[string]string{}
+	}
+	if s.lastUpdates == nil {
+		s.lastUpdates = map[string]string{}
+	}
+	s.values[key] = value
+	s.lastUpdates[key] = value
+	return nil
 }
 
 func (s *settingHandlerRepoStub) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
@@ -546,4 +554,64 @@ func TestDiffSettings_IncludesAuthSourceDefaultsAndForceEmail(t *testing.T) {
 	require.Contains(t, changed, "auth_source_default_email_grant_on_signup")
 	require.Contains(t, changed, "auth_source_default_email_grant_on_first_bind")
 	require.Contains(t, changed, "force_email_on_third_party_signup")
+}
+
+func TestSettingHandler_RechargeHolidayPromo_PersistsAndReadsBack(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{values: map[string]string{}}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	paymentConfigSvc := service.NewPaymentConfigService(nil, repo, nil)
+	handler := NewSettingHandler(svc, nil, nil, nil, paymentConfigSvc, nil, nil)
+
+	body := map[string]any{
+		"enabled":  true,
+		"start_at": 100,
+		"end_at":   200,
+		"tiers": []map[string]any{
+			{"threshold": 500, "bonus_rate": 0.12},
+			{"threshold": 100, "bonus_rate": 0.05},
+		},
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/recharge-holiday-promo", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateRechargeHolidayPromo(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	stored := repo.values[service.SettingRechargeHolidayPromo]
+	require.NotEmpty(t, stored)
+	require.Contains(t, stored, `"enabled":true`)
+
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	promo, ok := resp.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, true, promo["enabled"])
+	require.Equal(t, float64(100), promo["start_at"])
+	require.Equal(t, float64(200), promo["end_at"])
+	tiers, ok := promo["tiers"].([]any)
+	require.True(t, ok)
+	require.Len(t, tiers, 2)
+	first, ok := tiers[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, float64(100), first["threshold"])
+	require.Equal(t, 0.05, first["bonus_rate"])
+
+	// GET returns the persisted promo
+	getRec := httptest.NewRecorder()
+	getCtx, _ := gin.CreateTestContext(getRec)
+	getCtx.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings/recharge-holiday-promo", nil)
+	handler.GetRechargeHolidayPromo(getCtx)
+	require.Equal(t, http.StatusOK, getRec.Code)
+
+	var getResp response.Response
+	require.NoError(t, json.Unmarshal(getRec.Body.Bytes(), &getResp))
+	getPromo, ok := getResp.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, true, getPromo["enabled"])
 }

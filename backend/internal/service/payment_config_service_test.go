@@ -116,9 +116,9 @@ func TestParsePaymentConfig(t *testing.T) {
 		if len(cfg.EnabledTypes) != 0 {
 			t.Fatalf("expected empty EnabledTypes, got %v", cfg.EnabledTypes)
 		}
-        if cfg.AlipayMobilePrecreateDeepLink {
-    		t.Fatal("expected AlipayMobilePrecreateDeepLink=false by default")
-    	}
+		if cfg.AlipayMobilePrecreateDeepLink {
+			t.Fatal("expected AlipayMobilePrecreateDeepLink=false by default")
+		}
 		assertFloatSliceEqual(t, cfg.RechargeOptions, []float64{2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000})
 	})
 
@@ -426,7 +426,17 @@ func (s *paymentConfigSettingRepoStub) Get(context.Context, string) (*Setting, e
 func (s *paymentConfigSettingRepoStub) GetValue(_ context.Context, key string) (string, error) {
 	return s.values[key], nil
 }
-func (s *paymentConfigSettingRepoStub) Set(context.Context, string, string) error { return nil }
+func (s *paymentConfigSettingRepoStub) Set(_ context.Context, key, value string) error {
+	if s.values == nil {
+		s.values = map[string]string{}
+	}
+	if s.updates == nil {
+		s.updates = map[string]string{}
+	}
+	s.values[key] = value
+	s.updates[key] = value
+	return nil
+}
 func (s *paymentConfigSettingRepoStub) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
 	out := make(map[string]string, len(keys))
 	for _, key := range keys {
@@ -613,4 +623,94 @@ func assertFloatSliceEqual(t *testing.T, got []float64, want []float64) {
 
 func paymentConfigStrPtr(value string) *string {
 	return &value
+}
+
+func TestParsePaymentConfig_HolidayPromoRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	svc := &PaymentConfigService{}
+
+	t.Run("absent promo yields nil", func(t *testing.T) {
+		t.Parallel()
+		cfg := svc.parsePaymentConfig(map[string]string{})
+		if cfg.HolidayPromo != nil {
+			t.Fatalf("expected nil HolidayPromo, got %+v", cfg.HolidayPromo)
+		}
+	})
+
+	t.Run("stored promo is parsed and normalized", func(t *testing.T) {
+		t.Parallel()
+		raw := `{"enabled":true,"start_at":100,"end_at":200,"tiers":[{"threshold":500,"bonus_rate":0.12},{"threshold":100,"bonus_rate":0.05}]}`
+		cfg := svc.parsePaymentConfig(map[string]string{SettingRechargeHolidayPromo: raw})
+		if cfg.HolidayPromo == nil {
+			t.Fatal("expected HolidayPromo, got nil")
+		}
+		if !cfg.HolidayPromo.Enabled || len(cfg.HolidayPromo.Tiers) != 2 {
+			t.Fatalf("promo not parsed: %+v", cfg.HolidayPromo)
+		}
+		if cfg.HolidayPromo.Tiers[0].Threshold != 100 || cfg.HolidayPromo.Tiers[1].Threshold != 500 {
+			t.Fatalf("tiers not sorted: %+v", cfg.HolidayPromo.Tiers)
+		}
+	})
+}
+
+func TestUpdateRechargeHolidayPromo_Persists(t *testing.T) {
+	repo := &paymentConfigSettingRepoStub{values: map[string]string{}}
+	svc := &PaymentConfigService{settingRepo: repo}
+
+	err := svc.UpdateRechargeHolidayPromo(context.Background(), &RechargePromo{
+		Enabled: true,
+		StartAt: func() *int64 { v := int64(100); return &v }(),
+		EndAt:   func() *int64 { v := int64(200); return &v }(),
+		Tiers: []RechargePromoTier{
+			{Threshold: 500, BonusRate: 0.12},
+			{Threshold: 100, BonusRate: 0.05},
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpdateRechargeHolidayPromo returned error: %v", err)
+	}
+
+	stored := repo.values[SettingRechargeHolidayPromo]
+	if stored == "" {
+		t.Fatal("expected holiday promo to be persisted")
+	}
+	// re-parse to confirm normalized round-trip
+	back := parseRechargePromo(stored)
+	if back == nil || !back.Enabled || len(back.Tiers) != 2 {
+		t.Fatalf("persisted promo not round-trippable: %q -> %+v", stored, back)
+	}
+	if back.Tiers[0].Threshold != 100 || back.Tiers[1].Threshold != 500 {
+		t.Fatalf("persisted tiers not sorted: %+v", back.Tiers)
+	}
+}
+
+func TestGetRechargeHolidayPromo_ReadsStored(t *testing.T) {
+	repo := &paymentConfigSettingRepoStub{values: map[string]string{
+		SettingRechargeHolidayPromo: `{"enabled":true,"tiers":[{"threshold":100,"bonus_rate":0.05}]}`,
+	}}
+	svc := &PaymentConfigService{settingRepo: repo}
+
+	promo, err := svc.GetRechargeHolidayPromo(context.Background())
+	if err != nil {
+		t.Fatalf("GetRechargeHolidayPromo returned error: %v", err)
+	}
+	if promo == nil || !promo.Enabled || len(promo.Tiers) != 1 || promo.Tiers[0].Threshold != 100 {
+		t.Fatalf("unexpected promo: %+v", promo)
+	}
+}
+
+func TestUpdateRechargeHolidayPromo_RejectsInvalid(t *testing.T) {
+	repo := &paymentConfigSettingRepoStub{values: map[string]string{}}
+	svc := &PaymentConfigService{settingRepo: repo}
+
+	start := int64(200)
+	end := int64(100)
+	err := svc.UpdateRechargeHolidayPromo(context.Background(), &RechargePromo{Enabled: true, StartAt: &start, EndAt: &end})
+	if err == nil {
+		t.Fatal("expected error for end-before-start promo")
+	}
+	if _, ok := repo.updates[SettingRechargeHolidayPromo]; ok {
+		t.Fatal("invalid promo should not be persisted")
+	}
 }

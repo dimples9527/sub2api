@@ -978,6 +978,18 @@ const routes: RouteRecordRaw[] = [
       requiresPayment: true
     }
   },
+  {
+    path: '/admin/orders/recharge-promo',
+    name: 'AdminRechargePromo',
+    component: () => import('@/views/admin/orders/RechargePromoView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Holiday Recharge Promotion',
+      titleKey: 'nav.rechargePromo',
+      requiresPayment: true
+    }
+  },
 
   // ==================== 404 Not Found ====================
   {
