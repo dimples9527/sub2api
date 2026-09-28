@@ -811,9 +811,10 @@ func TestGroupElectionKeepHealthyIncumbentLocksGroup(t *testing.T) {
 	require.Equal(t, true, store.calls[302], "只锁定了 999，分组 1 不在列表内应正常换人")
 }
 
-// 只在在任者健康时锁定：开着的账号(311)测试失败时不锁定，仍走正常择优 —— 更优的 312 被开启，
-// 绝不因为开关就把一个坏分组锁死。
-func TestGroupElectionKeepHealthyIncumbentRunsElectionWhenIncumbentFailed(t *testing.T) {
+// 锁定分组里在任者一次抖动失败（未到关闭阈值）：不破锁、不换人。更优的挑战者 312 绝不被开出，
+// 在任者 311 由失败闸门原地留着等翻盘。这正是修复「单次失败就开替补 → 抖动翻盘后两账号被永久焊死」的多活累积——
+// 单在任者分组尤其致命：311 一失败 scheduledHealthy 就空了，破锁口径若只看「有没有健康在任者」，锁根本合不上。
+func TestGroupElectionKeepHealthyIncumbentHoldsThroughTransientFailure(t *testing.T) {
 	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
 		{GroupID: 1, AccountID: 311, Platform: "openai", Schedulable: true, LastTestStatus: "failed"},
 		{GroupID: 1, AccountID: 312, Platform: "openai", Schedulable: false, LastTestStatus: "success", HealthyCount: 20, LastTestLatencyMs: 100},
@@ -821,9 +822,37 @@ func TestGroupElectionKeepHealthyIncumbentRunsElectionWhenIncumbentFailed(t *tes
 	store := newFakeGroupElectionStore()
 	svc := NewSupplierGroupSchedulingElectionService(repo, store)
 
-	_, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1, KeepHealthyIncumbentGroupIDs: []int64{1}}, time.Now())
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1, KeepHealthyIncumbentGroupIDs: []int64{1}}, time.Now())
 	require.NoError(t, err)
-	require.Equal(t, true, store.calls[312], "开着的账号失败 → 不锁定，正常择优开启更优的 312")
+	_, opened := store.calls[312]
+	require.False(t, opened, "在任者未到阈值的失败 → 保持锁定，绝不开出替补 312")
+	require.Equal(t, 0, result.EnabledCount)
+	require.Equal(t, 0, result.DisabledCount)
+	// 在任者 311 保持开着，走失败闸门「待观察」，前后状态一致。
+	require.Len(t, result.Items, 1, "只有被留着待观察的 311 进明细")
+	require.Equal(t, int64(311), result.Items[0].AccountID)
+	require.True(t, result.Items[0].SchedulableAfter, "在任者 311 本轮仍保持开着")
+	require.Equal(t, SupplierGroupSchedulingElectionActionNone, result.Items[0].Action)
+	require.Equal(t, 1, result.PendingCount, "311 记为失败待观察")
+}
+
+// 锁定分组里在任者连续失败到关闭阈值：破锁，走正常择优开出替补 312，并关闭坏在任者 311。
+// 破锁口径与失败闸门同步——两者都在「连续失败达到 FailureThreshold」这一刻同时触发。
+func TestGroupElectionKeepHealthyIncumbentBreaksLockAtThreshold(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, AccountID: 311, Platform: "openai", Schedulable: true, LastTestStatus: "failed", FailedCount: 1},
+		{GroupID: 1, AccountID: 312, Platform: "openai", Schedulable: false, LastTestStatus: "success", HealthyCount: 20, LastTestLatencyMs: 100},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	// 默认阈值 2：311 已欠 1 次，本轮再失败即达 2/2 → 破锁、关它、开替补。
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1, KeepHealthyIncumbentGroupIDs: []int64{1}}, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, true, store.calls[312], "在任者连续失败到阈值 → 破锁择优，开启更优的 312")
+	require.Equal(t, false, store.calls[311], "达到阈值的坏在任者 311 被关闭")
+	require.Equal(t, 1, result.EnabledCount)
+	require.Equal(t, 1, result.DisabledCount)
 }
 
 // 全局健康锁定 + 分组级反向覆盖：全局开则默认锁定所有分组，force-off 名单可单独排除，

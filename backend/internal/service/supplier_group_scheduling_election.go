@@ -133,9 +133,10 @@ type SupplierGroupSchedulingElectionConfig struct {
 	// 打开后所有分组默认锁定，无需逐组勾选；个别分组可用下面两个名单反向覆盖它。
 	KeepHealthyIncumbentGlobal bool `json:"group_scheduling_election_keep_healthy_incumbent_global"`
 	// KeepHealthyIncumbentGroupIDs 是「强制锁定」名单（force-on）：无论全局开关取何值，列表里的分组都锁定。
-	// 锁定含义：只要它「当前开启调度的账号」测试都正常（且没有开着却失败的），就保留这些在任账号、
+	// 锁定含义：只要它「当前开启调度的账号」里没有连续失败到阈值的（单次抖动不算），就保留这些在任账号、
 	// 不做任何择优与换人，直接跳过。全局关闭时它等价于旧的 opt-in 名单（空列表=都不锁定，向后兼容）。
-	// 只在在任者健康时锁定：一旦有开着的账号测试失败，该分组仍走正常择优交给失败闸门处理，绝不锁死一个坏分组。
+	// 破锁口径与失败闸门（FailureThreshold）一致：开着的账号一次/几次没到阈值的失败仍算「在任健康」、保持锁定，
+	// 交给失败闸门原地留着等翻盘；只有它连续失败真到阈值、失败闸门也要关它时，才破锁走正常择优补位，绝不锁死一个坏分组。
 	KeepHealthyIncumbentGroupIDs []int64 `json:"group_scheduling_election_keep_healthy_incumbent_group_ids"`
 	// KeepHealthyIncumbentExcludedGroupIDs 是「强制不锁定」名单（force-off）：无论全局开关取何值，列表里的分组都不锁定、正常择优。
 	// 主要用途是在全局锁定打开时，把个别分组从「默认锁定」里排除出去。与 KeepHealthyIncumbentGroupIDs 互斥——
@@ -624,13 +625,19 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 		// 必需模型补选三处都复用它，保证「谁更优」的口径一致。
 		electionScores := supplierGroupSchedulingElectionScores(successMembers, config.CountWeight, config.LatencyWeight, config.LatencyMinSamples, config.SwitchMargin, config.CountScoreCap)
 
-		// 在任者健康锁定：仅对被 opt-in 的分组生效，且该组「当前开着的账号」测试都正常（且没有开着却失败的），
-		// 就保留这些在任账号、跳过择优与换人。只在健康时锁定——有开着的账号失败仍走下面的正常择优，
-		// 交给失败闸门处理，绝不把一个坏分组锁死。
+		// 在任者健康锁定：仅对被 opt-in 的分组生效。只要该组「当前开着的账号」里没有
+		// 已经连续失败到阈值的（单次抖动不算），就保留这些在任账号、跳过择优与换人。
+		// 破锁口径必须与失败闸门（supplierGroupSchedulingElectionDecide 的闸门二）一致——
+		// 都以「连续失败累计到 FailureThreshold」为界：一次/几次没到阈值的失败仍算「在任」、保住席位，
+		// 本轮被失败闸门原地留着等翻盘，锁定继续、绝不换人；只有它连续失败真到阈值、失败闸门也要关它时，
+		// 锁才破、才走正常择优补位。否则一次网络抖动就会破锁开出替补，等抖动账号翻盘、锁再合上，
+		// 就把两个账号永久焊在一起（多活累积）——单在任者分组尤其致命：在任者一失败 scheduledHealthy 就空了，
+		// 若只看「有没有健康在任者」，锁根本合不上，故这里以「有没有未到阈值的在任者」为准。
 		locked := false
 		if keepHealthyForGroup(groupID) {
-			scheduledHealthy := make([]int64, 0)
-			scheduledFailed := false
+			scheduledHealthy := make([]int64, 0) // 开着且测试成功的在任者，锁定时记为赢家
+			hasScheduledIncumbent := false       // 开着、且没到关闭阈值的在任者（含成功、含失败但未到阈值）
+			scheduledFailedPastThreshold := false
 			for _, member := range groupMembers {
 				if !member.Schedulable {
 					continue
@@ -638,11 +645,18 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 				switch strings.TrimSpace(member.LastTestStatus) {
 				case SupplierGroupSchedulingElectionTestStatusSuccess:
 					scheduledHealthy = append(scheduledHealthy, member.AccountID)
+					hasScheduledIncumbent = true
 				case SupplierGroupSchedulingElectionTestStatusFailed:
-					scheduledFailed = true
+					if member.FailedCount+1 >= config.FailureThreshold {
+						scheduledFailedPastThreshold = true
+						continue
+					}
+					// 失败但没到阈值：算作仍在任、保住席位等翻盘，本轮不换人。不记为赢家——
+					// 它「失败待观察」的原因要如实进明细，保留调度靠失败闸门（闸门二）而不是这里。
+					hasScheduledIncumbent = true
 				}
 			}
-			if len(scheduledHealthy) > 0 && !scheduledFailed {
+			if hasScheduledIncumbent && !scheduledFailedPastThreshold {
 				for _, accountID := range scheduledHealthy {
 					recordWinner(accountID, "")
 				}
