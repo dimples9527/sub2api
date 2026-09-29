@@ -28,6 +28,11 @@ export interface SupplierAutomationConfig {
   account_health_guard_platform_latency_ms: Record<string, number>
   account_health_guard_account_intervals: Record<string, number>
   account_health_guard_account_scheduling_change: Record<string, boolean>
+  /**
+   * 健康守护的全局「修改调度」开关，默认 true（连续失败/慢响应达到阈值时自动暂停调度、恢复达标后自动恢复）。
+   * 上面账号级映射里存在的键覆盖它：true/false 都是显式覆盖，键不存在则跟随本开关。
+   */
+  account_health_guard_scheduling_change_enabled: boolean
   /** 未开调度账号按平台倍率区间取检查间隔：总开关。 */
   account_health_guard_platform_multiplier_intervals_enabled: boolean
   /** 平台 → 「倍率区间 → 间隔秒」规则；仅在总开关开启时对未开调度账号生效，覆盖账号级间隔。 */

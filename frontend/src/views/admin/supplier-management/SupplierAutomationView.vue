@@ -332,6 +332,19 @@
             </div>
             <div class="sp-health-guard-multiplier-switch">
               <div>
+                <strong>修改调度（全局）</strong>
+                <span v-if="editForm.config.account_health_guard_scheduling_change_enabled">
+                  已开启：所有检查账号在连续失败/慢响应达到阈值后自动暂停调度，恢复达标后自动恢复；可在「配置检查账号」里为个别账号单独关闭。
+                </span>
+                <span v-else>已关闭：所有账号只做健康检测，不会自动暂停或恢复调度；可在「配置检查账号」里为个别账号单独开启。</span>
+              </div>
+              <div class="sp-toggle-row">
+                <Toggle v-model="editForm.config.account_health_guard_scheduling_change_enabled" />
+                <em>{{ editForm.config.account_health_guard_scheduling_change_enabled ? '已启用' : '已停用' }}</em>
+              </div>
+            </div>
+            <div class="sp-health-guard-multiplier-switch">
+              <div>
                 <strong>未开调度账号按倍率间隔测试</strong>
                 <span v-if="editForm.config.account_health_guard_platform_multiplier_intervals_enabled">
                   已开启：未开调度的账号改由所属平台的倍率区间决定检查间隔（覆盖账号级间隔），可在「配置检查账号」里为各平台设置区间。
@@ -1052,6 +1065,16 @@
                 >
                   清除已选间隔
                 </button>
+                <span class="sp-health-guard-batch-divider" aria-hidden="true"></span>
+                <button
+                  class="sp-button small ghost"
+                  type="button"
+                  :disabled="healthGuardBatchTargetCount === 0"
+                  title="批量为当前筛选结果中已勾选且可用的账号设置修改调度、账号级测试模型和三项阈值"
+                  @click="openHealthGuardBatchSettings"
+                >
+                  批量设置
+                </button>
               </div>
             </div>
 
@@ -1069,16 +1092,22 @@
                     && !supplierAccountHealthGuardModelForMapping(editForm.config, mapping),
                 }"
               >
-                <label
+                <!-- 多选列：只决定「批量设置 / 批量间隔」的作用范围，是纯界面状态（不写进 config）。
+                     与右侧「参与守护」开关刻意分开：开关是业务配置、保存后生效；
+                     若用一个开关兼作多选，想批量设阈值就得先把账号纳入守护，两件事会被绑死。 -->
+                <label class="sp-health-guard-account-check">
+                  <input
+                    type="checkbox"
+                    :checked="healthGuardAccountIsChecked(mapping.localAccountID)"
+                    :aria-label="`选择账号 ${mapping.localAccountName} 用于批量设置`"
+                    @change="toggleHealthGuardAccountCheck(mapping.localAccountID)"
+                  />
+                </label>
+
+                <div
                   class="sp-health-guard-account-choice"
                   :title="mapping.available ? healthGuardSourceSummary(mapping) : '账号已停用、删除或匹配失效，运行时将记录为不可用'"
                 >
-                  <input
-                    type="checkbox"
-                    :checked="healthGuardAccountIDs.includes(mapping.localAccountID)"
-                    :aria-label="`${healthGuardAccountIsSelected(mapping.localAccountID) ? '取消选择' : '选择'}账号 ${mapping.localAccountName}`"
-                    @change="toggleHealthGuardAccount(mapping.localAccountID)"
-                  />
                   <span class="sp-health-guard-account-choice-copy">
                     <strong :class="platformTextClass(mapping.platform)">{{ mapping.localAccountName }}{{ healthGuardAccountMultiplierText(mapping) }}</strong>
                     <span
@@ -1097,24 +1126,42 @@
                     <span
                       v-if="healthGuardAccountIsSelected(mapping.localAccountID) && !mapping.available"
                       class="sp-health-guard-model-status unavailable"
-                    >不可用</span>
+                    >账号不可用</span>
                     <span
                       v-else-if="healthGuardAccountIsSelected(mapping.localAccountID) && healthGuardAccountOverrideModel(mapping.localAccountID)"
                       class="sp-health-guard-model-status override"
-                    >覆盖</span>
+                    >账号覆盖</span>
+                    <!-- 「平台默认」而不是「默认」：单说「默认」看不出默认的是哪一层的东西；
+                         和上一档「账号覆盖」配成一对，才读得出这是在说「测试模型取自哪里」。 -->
                     <span
                       v-else-if="healthGuardAccountIsSelected(mapping.localAccountID) && healthGuardPlatformDefaultModel(mapping.platform)"
                       class="sp-health-guard-model-status"
-                    >默认</span>
+                    >平台默认</span>
                     <span
                       v-else-if="healthGuardAccountIsSelected(mapping.localAccountID)"
                       class="sp-health-guard-model-status missing"
-                    >缺模型</span>
+                    >未设模型</span>
                     <span
                       v-if="healthGuardAccountIsSelected(mapping.localAccountID) && mapping.available && healthGuardAccountIntervalValue(mapping.localAccountID)"
                       class="sp-health-guard-model-status interval"
                     >间隔 {{ healthGuardAccountIntervalValue(mapping.localAccountID) }}s</span>
                   </span>
+                </div>
+
+                <!-- 开关列：表示「该账号是否参与守护」，是业务配置，保存任务后生效。
+                     放在账号信息之后：账号名紧跟勾选框，开关不再抢占行首。 -->
+                <label
+                  class="sp-health-guard-account-guard-toggle"
+                  :title="mapping.available
+                    ? '开启后该账号参与健康守护检查'
+                    : '账号已停用、删除或匹配失效，开启后运行时仍会记录为不可用'"
+                >
+                  <Toggle
+                    :model-value="healthGuardAccountIsSelected(mapping.localAccountID)"
+                    :aria-label="`${healthGuardAccountIsSelected(mapping.localAccountID) ? '关闭' : '开启'}账号 ${mapping.localAccountName} 的健康守护`"
+                    @update:model-value="toggleHealthGuardAccount(mapping.localAccountID)"
+                  />
+                  <span>参与守护</span>
                 </label>
 
                 <div
@@ -1180,7 +1227,7 @@
                     <Toggle
                       :model-value="healthGuardAccountSchedulingChangeValue(mapping.localAccountID)"
                       :aria-label="`账号 ${mapping.localAccountName} 是否修改调度`"
-                      title="关闭后仅检测账号健康，不会自动暂停或恢复调度"
+                      :title="healthGuardAccountSchedulingChangeTitle(mapping.localAccountID)"
                       @update:model-value="setHealthGuardAccountSchedulingChange(mapping.localAccountID, $event)"
                     />
                     <span>修改调度</span>
@@ -1242,6 +1289,109 @@
         <template #footer>
           <span class="sp-multiplier-interval-hint">区间取 [下限, 上限)，上限留空表示无上界；未命中任何区间的账号每轮都会检查。</span>
           <button class="sp-button primary" type="button" @click="closeMultiplierIntervalDialog">完成</button>
+        </template>
+      </BaseDialog>
+
+      <!-- 二级弹窗：批量设置账号。z-index 高于「配置健康守护账号」（60）、低于「配置倍率区间」（70）。
+           内容区不再重复弹窗标题，作用范围与「留空即不改」的语义统一放在页脚提示里。 -->
+      <BaseDialog
+        :show="healthGuardBatchSettingsVisible"
+        title="批量设置账号"
+        width="extra-wide"
+        :z-index="65"
+        @close="closeHealthGuardBatchSettings"
+      >
+        <div class="sp-health-guard-batch-dialog">
+          <div class="sp-health-guard-batch-rows">
+            <div class="sp-health-guard-batch-row">
+              <div>
+                <strong>参与守护</strong>
+                <span>「纳入守护」把勾选账号加入检查名单；「移出守护」会清空该账号的账号级配置，因此选它时本次其余项对该批账号不再生效。</span>
+              </div>
+              <Select
+                v-model="healthGuardBatchGuardInput"
+                :options="healthGuardBatchGuardOptions"
+                :searchable="false"
+                aria-label="批量设置参与守护"
+              />
+            </div>
+            <div class="sp-health-guard-batch-row">
+              <div>
+                <strong>修改调度</strong>
+                <span>「跟随全局」会清掉该账号的账号级覆盖，之后随任务的全局开关一起变。</span>
+              </div>
+              <Select
+                v-model="healthGuardBatchSchedulingChangeInput"
+                :options="healthGuardBatchSchedulingChangeOptions"
+                :searchable="false"
+                aria-label="批量设置修改调度"
+              />
+            </div>
+            <div class="sp-health-guard-batch-row">
+              <div>
+                <strong>账号级测试模型</strong>
+                <span>写入账号级覆盖，优先级高于「平台默认测试模型」；跨平台账号请先确认该模型可用。</span>
+              </div>
+              <Select
+                v-model="healthGuardBatchModelInput"
+                :options="healthGuardBatchModelOptions"
+                searchable
+                creatable
+                :creatable-prefix="healthGuardModelCreatablePrefix"
+                aria-label="批量设置账号级测试模型"
+              />
+            </div>
+            <div class="sp-health-guard-batch-row">
+              <div>
+                <strong>连续失败暂停阈值</strong>
+                <span>写入账号级覆盖，留空的账号继续沿用全局阈值。</span>
+              </div>
+              <Input
+                v-model="healthGuardBatchFailureThresholdInput"
+                type="number"
+                min="1"
+                placeholder="不修改"
+                aria-label="批量设置连续失败暂停阈值"
+              />
+            </div>
+            <div class="sp-health-guard-batch-row">
+              <div>
+                <strong>连续慢响应暂停阈值</strong>
+                <span>写入账号级覆盖，留空的账号继续沿用全局阈值。</span>
+              </div>
+              <Input
+                v-model="healthGuardBatchSlowThresholdInput"
+                type="number"
+                min="1"
+                placeholder="不修改"
+                aria-label="批量设置连续慢响应暂停阈值"
+              />
+            </div>
+            <div class="sp-health-guard-batch-row">
+              <div>
+                <strong>连续健康恢复阈值</strong>
+                <span>写入账号级覆盖，留空的账号继续沿用全局阈值。</span>
+              </div>
+              <Input
+                v-model="healthGuardBatchRecoveryThresholdInput"
+                type="number"
+                min="1"
+                placeholder="不修改"
+                aria-label="批量设置连续健康恢复阈值"
+              />
+            </div>
+          </div>
+        </div>
+        <template #footer>
+          <span class="sp-health-guard-batch-hint">
+            只写入填过的项，留空表示保持原值；作用于当前筛选结果里已勾选的 {{ healthGuardBatchTargetCount }} 个可用账号，保存任务后生效。检查间隔请用工具栏的「应用到已选」。
+          </span>
+          <button
+            class="sp-button primary"
+            type="button"
+            :disabled="healthGuardBatchTargetCount === 0"
+            @click="applyHealthGuardBatchSettings"
+          >应用到已选</button>
         </template>
       </BaseDialog>
 
@@ -1728,6 +1878,8 @@ const editForm = reactive<SupplierAutomationTask>({
     account_health_guard_platform_models: {},
     account_health_guard_platform_latency_ms: {},
     account_health_guard_account_scheduling_change: {},
+    // 全局修改调度默认开启：升级前的行为就是"检测到异常自动暂停调度"。
+    account_health_guard_scheduling_change_enabled: true,
     account_health_guard_account_failure_thresholds: {},
     account_health_guard_account_slow_thresholds: {},
     account_health_guard_account_recovery_thresholds: {},
@@ -3037,6 +3189,21 @@ function healthGuardAccountIsSelected(accountID: number): boolean {
   return healthGuardAccountIDs.value.includes(accountID)
 }
 
+// 多选集合：纯界面瞬时状态（不写进 config），只决定「批量设置 / 批量间隔」的作用范围。
+// 与上面的「参与守护」是两个概念 —— 那个是业务配置、保存后生效；勾选只是本次批量操作的选择。
+// 合并成一个控件会让「想批量设阈值」被迫先把账号纳入守护。
+const healthGuardCheckedAccountIDs = ref<number[]>([])
+
+function healthGuardAccountIsChecked(accountID: number): boolean {
+  return healthGuardCheckedAccountIDs.value.includes(accountID)
+}
+
+function toggleHealthGuardAccountCheck(accountID: number) {
+  healthGuardCheckedAccountIDs.value = healthGuardAccountIsChecked(accountID)
+    ? healthGuardCheckedAccountIDs.value.filter(item => item !== accountID)
+    : normalizePositiveAccountIDs([...healthGuardCheckedAccountIDs.value, accountID])
+}
+
 function healthGuardAccountOverrideModel(accountID: number): string {
   return normalizeStringMap(editForm.config.account_health_guard_account_models)[String(accountID)]?.trim() || ''
 }
@@ -3123,6 +3290,8 @@ function applyAccountHealthGuardDefaults() {
   config.account_health_guard_platform_latency_ms = normalizePositiveNumberMap(config.account_health_guard_platform_latency_ms)
   config.account_health_guard_account_intervals = normalizeAccountHealthGuardAccountIntervals(config.account_health_guard_account_intervals)
   config.account_health_guard_account_scheduling_change = normalizeAccountHealthGuardSchedulingChange(config.account_health_guard_account_scheduling_change)
+  // 旧配置里没有这个键，读回来是 undefined —— 只有显式 false 才算关闭，否则一律按开启处理。
+  config.account_health_guard_scheduling_change_enabled = config.account_health_guard_scheduling_change_enabled !== false
   config.account_health_guard_account_failure_thresholds = normalizeAccountHealthGuardAccountThresholds(config.account_health_guard_account_failure_thresholds)
   config.account_health_guard_account_slow_thresholds = normalizeAccountHealthGuardAccountThresholds(config.account_health_guard_account_slow_thresholds)
   config.account_health_guard_account_recovery_thresholds = normalizeAccountHealthGuardAccountThresholds(config.account_health_guard_account_recovery_thresholds)
@@ -3601,6 +3770,8 @@ async function openHealthGuardAccounts() {
   healthGuardAccountSearch.value = ''
   healthGuardSelectedOnly.value = false
   healthGuardBatchIntervalInput.value = ''
+  // 勾选是「本次批量操作的选择」，每次打开都清空：否则上一次的勾选会静默参与下一次批量设置。
+  healthGuardCheckedAccountIDs.value = []
   try {
     await ensureHealthGuardAccountCandidatesLoaded()
     await loadHealthGuardModels()
@@ -3720,31 +3891,34 @@ const healthGuardBatchIntervalSeconds = computed<number | null>(() => {
   return Number.isSafeInteger(parsed) && parsed >= 60 ? parsed : null
 })
 const healthGuardBatchIntervalValid = computed(() => healthGuardBatchIntervalSeconds.value !== null)
-// 批量操作只作用于「当前筛选结果里已勾选且可用」的账号：把筛选当子集选择器，
+// 批量操作只作用于「当前筛选结果里已勾选（行首勾选框）且可用」的账号：把筛选当子集选择器，
 // 就能筛选 A 组→设 300→应用、筛选 B 组→设 600→应用，两批互不覆盖。
 // 不可用账号运行时直接记为不可用、不参与检查，故排除在批量作用范围外。
 const healthGuardBatchTargetRows = computed(() =>
   healthGuardWorkspaceAccounts.value.filter(
-    mapping => mapping.available && healthGuardAccountIDs.value.includes(mapping.localAccountID)
+    mapping => mapping.available && healthGuardCheckedAccountIDs.value.includes(mapping.localAccountID)
   )
 )
 const healthGuardBatchTargetCount = computed(() => healthGuardBatchTargetRows.value.length)
 
-// 全选「当前筛选结果」中的可用账号，并入已选集合（不可用账号不纳入，避免制造运行时必然记为不可用的噪声）。
+// 全选 / 取消全选只切换「当前筛选结果」里可用账号的**勾选状态**（多选），不动「参与守护」：
+// 否则点一下「全选」就会把几十个账号默默纳入守护，而纳入守护是有副作用的业务配置。
+// 批量纳入/移出守护改由「批量设置」弹窗的「参与守护」项完成，用户需要显式选一次。
 function selectAllFilteredHealthGuardAccounts() {
   const ids = healthGuardWorkspaceAccounts.value
     .filter(mapping => mapping.available)
     .map(mapping => mapping.localAccountID)
-  editForm.config.account_health_guard_account_ids = normalizePositiveAccountIDs([
-    ...healthGuardAccountIDs.value,
+  healthGuardCheckedAccountIDs.value = normalizePositiveAccountIDs([
+    ...healthGuardCheckedAccountIDs.value,
     ...ids,
   ])
 }
 
-// 取消勾选「当前筛选结果」中的账号：先快照 ID 再逐个移除，removeHealthGuardAccount 会一并清掉其模型/间隔/阈值/调度覆盖。
+// 取消勾选「当前筛选结果」中的账号：只清勾选，保留账号已有的守护配置
+// （要连配置一起清掉请用「批量设置 → 移出守护」）。
 function deselectFilteredHealthGuardAccounts() {
-  const ids = healthGuardWorkspaceAccounts.value.map(mapping => mapping.localAccountID)
-  for (const id of ids) removeHealthGuardAccount(id)
+  const filtered = new Set(healthGuardWorkspaceAccounts.value.map(mapping => mapping.localAccountID))
+  healthGuardCheckedAccountIDs.value = healthGuardCheckedAccountIDs.value.filter(id => !filtered.has(id))
 }
 
 // 把批量间隔应用到「当前筛选结果里已勾选且可用」的账号，保存任务后生效。
@@ -3778,18 +3952,207 @@ function clearHealthGuardSelectedIntervals() {
   appStore.showSuccess(`已清除 ${count} 个账号的检查间隔`)
 }
 
+// 全局「修改调度」开关：只有显式 false 才算关闭（旧配置里没有这个键），与后端归一化口径一致。
+const healthGuardGlobalSchedulingChange = computed(
+  () => editForm.config.account_health_guard_scheduling_change_enabled !== false
+)
+
+// 账号级开关显示的是「最终生效值」：有显式覆盖就用覆盖值，否则跟随全局默认。
 function healthGuardAccountSchedulingChangeValue(accountID: number): boolean {
-  return editForm.config.account_health_guard_account_scheduling_change?.[String(accountID)] !== false
+  const override = editForm.config.account_health_guard_account_scheduling_change?.[String(accountID)]
+  return typeof override === 'boolean' ? override : healthGuardGlobalSchedulingChange.value
 }
 
+// 与全局默认一致时不写覆盖值（等于「跟随全局」）；只有不一致才落库成显式覆盖。
+// 不写 false 占位：留着占位会让这个账号永远跟不上全局开关的后续变更。
 function setHealthGuardAccountSchedulingChange(accountID: number, value: boolean) {
   const schedulingChange = { ...(editForm.config.account_health_guard_account_scheduling_change || {}) }
-  if (value) {
+  if (value === healthGuardGlobalSchedulingChange.value) {
     delete schedulingChange[String(accountID)]
   } else {
-    schedulingChange[String(accountID)] = false
+    schedulingChange[String(accountID)] = value
   }
   editForm.config.account_health_guard_account_scheduling_change = schedulingChange
+}
+
+// 悬浮提示要能说清「这一行是覆盖还是跟随全局」，否则两个开关状态一样时分不清。
+function healthGuardAccountSchedulingChangeTitle(accountID: number): string {
+  const override = editForm.config.account_health_guard_account_scheduling_change?.[String(accountID)]
+  const globalHint = healthGuardGlobalSchedulingChange.value ? '全局默认开启' : '全局默认关闭'
+  const base = '关闭后仅检测账号健康，不会自动暂停或恢复调度'
+  return typeof override === 'boolean'
+    ? `${base}（账号级覆盖，${globalHint}）`
+    : `${base}（跟随全局：${globalHint}）`
+}
+
+// ── 批量设置（参与守护 / 修改调度 / 账号级测试模型 / 三项阈值）──
+//
+// 作用范围与批量间隔共用同一个 healthGuardBatchTargetRows：
+// 「多选」就是「当前筛选结果里已勾选（行首勾选框）的可用账号」，两处若各算一套口径，
+// 会出现「按钮说 12 个、实际只改了 8 个」这类对不上的情况。
+const healthGuardBatchSettingsVisible = ref(false)
+
+// 参与守护：不修改 / 纳入 / 移出。
+// 原先工具栏的「全选筛选结果 / 取消全选」顺带承担了批量纳入/移出守护；那两个按钮改成只管勾选后，
+// 这条能力平移到这里 —— 用户必须显式选一次，不会因为点「全选」就把几十个账号默默纳入守护。
+// 「移出」复用 removeHealthGuardAccount：与单行关掉开关一致，会一并清空该账号的模型/间隔/阈值/调度覆盖。
+const HEALTH_GUARD_BATCH_GUARD_KEEP = 'keep'
+const healthGuardBatchGuardInput = ref(HEALTH_GUARD_BATCH_GUARD_KEEP)
+const healthGuardBatchGuardOptions: SelectOption[] = [
+  { value: HEALTH_GUARD_BATCH_GUARD_KEEP, label: '不修改' },
+  { value: 'on', label: '纳入守护' },
+  { value: 'off', label: '移出守护（清空账号级配置）' },
+]
+
+// 修改调度：不修改 / 跟随全局（清掉账号级覆盖）/ 强制开启 / 强制关闭。
+// 「跟随全局」必须单独留一项 —— 全局开关改过之后，被批量写死 true/false 的账号否则再也回不到跟随状态。
+const HEALTH_GUARD_BATCH_SCHEDULING_KEEP = 'keep'
+const healthGuardBatchSchedulingChangeInput = ref(HEALTH_GUARD_BATCH_SCHEDULING_KEEP)
+const healthGuardBatchSchedulingChangeOptions: SelectOption[] = [
+  { value: HEALTH_GUARD_BATCH_SCHEDULING_KEEP, label: '不修改' },
+  { value: 'global', label: '跟随全局（清除账号级覆盖）' },
+  { value: 'on', label: '开启' },
+  { value: 'off', label: '关闭' },
+]
+
+// 账号级测试模型：不修改 / 清除覆盖 / 批量目标涉及平台的模型并集。
+// 账号级覆盖只能是一个模型值，跨平台批量设置本身就需要人工确认模型可用，
+// 因此这里给并集而不是按平台分组（按平台分组等于把「批量」拆成若干次单平台设置）。
+const HEALTH_GUARD_BATCH_MODEL_KEEP = 'keep'
+const HEALTH_GUARD_BATCH_MODEL_CLEAR = 'clear'
+const healthGuardBatchModelInput = ref(HEALTH_GUARD_BATCH_MODEL_KEEP)
+const healthGuardBatchModelOptions = computed<SelectOption[]>(() => {
+  const platforms = new Set(healthGuardBatchTargetRows.value.map(mapping => mapping.platform))
+  const models = new Map<string, string>()
+  for (const platform of platforms) {
+    for (const model of healthGuardModelOptionsByPlatform.value[platform] || []) {
+      if (!models.has(model.id)) models.set(model.id, model.display_name || model.id)
+    }
+  }
+  return [
+    { value: HEALTH_GUARD_BATCH_MODEL_KEEP, label: '不修改' },
+    { value: HEALTH_GUARD_BATCH_MODEL_CLEAR, label: '清除账号级覆盖（回落平台默认）' },
+    ...Array.from(models, ([value, label]) => ({ value, label })),
+  ]
+})
+
+const healthGuardBatchFailureThresholdInput = ref('')
+const healthGuardBatchSlowThresholdInput = ref('')
+const healthGuardBatchRecoveryThresholdInput = ref('')
+
+function openHealthGuardBatchSettings() {
+  // 每次打开都回到「全部不修改」：上一次的输入不该在下一次静默生效。
+  healthGuardBatchGuardInput.value = HEALTH_GUARD_BATCH_GUARD_KEEP
+  healthGuardBatchSchedulingChangeInput.value = HEALTH_GUARD_BATCH_SCHEDULING_KEEP
+  healthGuardBatchModelInput.value = HEALTH_GUARD_BATCH_MODEL_KEEP
+  healthGuardBatchFailureThresholdInput.value = ''
+  healthGuardBatchSlowThresholdInput.value = ''
+  healthGuardBatchRecoveryThresholdInput.value = ''
+  healthGuardBatchSettingsVisible.value = true
+}
+
+function closeHealthGuardBatchSettings() {
+  healthGuardBatchSettingsVisible.value = false
+}
+
+// 阈值输入解析：空或非法一律返回 null（= 该项不修改），合法则返回正整数。
+function healthGuardBatchThresholdValue(value: string): number | null {
+  const parsed = Math.floor(Number(value))
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+type HealthGuardAccountThresholdField =
+  | 'account_health_guard_account_failure_thresholds'
+  | 'account_health_guard_account_slow_thresholds'
+  | 'account_health_guard_account_recovery_thresholds'
+
+// 批量写入：只落「填过的项」，留空一律不动 —— 避免一次「应用」把没打算改的配置一起清掉。
+function applyHealthGuardBatchSettings() {
+  const targets = healthGuardBatchTargetRows.value
+  if (!targets.length) {
+    appStore.showError('当前筛选结果里没有已勾选的可用账号')
+    return
+  }
+
+  const thresholdFields: Array<{ input: string; label: string; field: HealthGuardAccountThresholdField }> = [
+    { input: healthGuardBatchFailureThresholdInput.value, label: '连续失败暂停阈值', field: 'account_health_guard_account_failure_thresholds' },
+    { input: healthGuardBatchSlowThresholdInput.value, label: '连续慢响应暂停阈值', field: 'account_health_guard_account_slow_thresholds' },
+    { input: healthGuardBatchRecoveryThresholdInput.value, label: '连续健康恢复阈值', field: 'account_health_guard_account_recovery_thresholds' },
+  ]
+  // 先整体校验再落库：任何一项非法就整批不动，不留「改了一半」的中间状态。
+  for (const item of thresholdFields) {
+    if (item.input.trim() && healthGuardBatchThresholdValue(item.input) === null) {
+      appStore.showError(`${item.label}必须是正整数`)
+      return
+    }
+  }
+
+  const changed: string[] = []
+
+  // 「参与守护」先处理，并据此收敛本次作用对象：「移出守护」会清空该账号的账号级配置，
+  // 若之后再把阈值/模型写进去就会被反手清掉，出现「提示说设了、实际没设」。
+  // 所以移出后不再处理其余项 —— 弹窗里已写明这一点，不是静默忽略。
+  const guardChoice = healthGuardBatchGuardInput.value
+  let effectiveTargets = targets
+  if (guardChoice === 'off') {
+    for (const mapping of targets) removeHealthGuardAccount(mapping.localAccountID)
+    effectiveTargets = []
+    changed.push('移出守护')
+  } else if (guardChoice === 'on') {
+    editForm.config.account_health_guard_account_ids = normalizePositiveAccountIDs([
+      ...healthGuardAccountIDs.value,
+      ...targets.map(mapping => mapping.localAccountID),
+    ])
+    changed.push('纳入守护')
+  }
+
+  if (effectiveTargets.length) {
+    const schedulingChoice = healthGuardBatchSchedulingChangeInput.value
+    if (schedulingChoice !== HEALTH_GUARD_BATCH_SCHEDULING_KEEP) {
+      const schedulingChange = { ...(editForm.config.account_health_guard_account_scheduling_change || {}) }
+      for (const mapping of effectiveTargets) {
+        const accountID = String(mapping.localAccountID)
+        if (schedulingChoice === 'global') {
+          delete schedulingChange[accountID]
+        } else {
+          schedulingChange[accountID] = schedulingChoice === 'on'
+        }
+      }
+      editForm.config.account_health_guard_account_scheduling_change = schedulingChange
+      changed.push('修改调度')
+    }
+
+    const modelChoice = healthGuardBatchModelInput.value
+    if (modelChoice !== HEALTH_GUARD_BATCH_MODEL_KEEP) {
+      const accountModels = { ...(editForm.config.account_health_guard_account_models || {}) }
+      for (const mapping of effectiveTargets) {
+        const accountID = String(mapping.localAccountID)
+        if (modelChoice === HEALTH_GUARD_BATCH_MODEL_CLEAR) {
+          delete accountModels[accountID]
+        } else {
+          accountModels[accountID] = modelChoice
+        }
+      }
+      editForm.config.account_health_guard_account_models = accountModels
+      changed.push('测试模型')
+    }
+
+    for (const item of thresholdFields) {
+      const threshold = healthGuardBatchThresholdValue(item.input)
+      if (threshold === null) continue
+      const thresholds = { ...normalizeAccountHealthGuardAccountThresholds(editForm.config[item.field]) }
+      for (const mapping of effectiveTargets) thresholds[String(mapping.localAccountID)] = threshold
+      editForm.config[item.field] = thresholds
+      changed.push(item.label)
+    }
+  }
+
+  if (!changed.length) {
+    appStore.showError('请先填写至少一项要批量设置的内容')
+    return
+  }
+  appStore.showSuccess(`已为 ${targets.length} 个账号设置${changed.join('、')}，保存任务后生效`)
+  closeHealthGuardBatchSettings()
 }
 
 // 返回某平台的倍率区间规则数组（不存在则就地建空数组），供模板 v-model 直接编辑。
@@ -4949,6 +5312,64 @@ function intervalSecondsToCron(seconds: number): string | null {
 }
 
 :global(.modal-content:has(.sp-rate-guard-group-dialog) .modal-footer) {
+  border-top-color: var(--sp-line);
+  background: var(--sp-panel);
+}
+
+/* 批量设置弹窗是又一个独立 Teleport 出来的 modal-content（与「配置健康守护账号」是兄弟节点），
+   同样够不到页面根节点上的 --sp-* 变量，所以单独给它一份变量与布局。
+   选择器独立成组：上面那几组已被源码断言逐字钉住，往里面加选择器会直接打爆相邻用例。 */
+:global(.modal-content:has(.sp-health-guard-batch-dialog)) {
+  --sp-panel: #ffffff;
+  --sp-panel-2: #f8fafc;
+  --sp-panel-3: #eef2f7;
+  --sp-line: #d7e0ea;
+  --sp-soft: #e8eef5;
+  --sp-text: #172033;
+  --sp-muted: #607089;
+  --sp-cyan: #0284c7;
+  --sp-green: #16835d;
+  --sp-amber: #c56a0a;
+  --sp-orange: #dd5f16;
+  --sp-red: #d14343;
+  --sp-blue: #2563eb;
+  --sp-violet: #6d5bd0;
+  overflow: hidden;
+  border-color: #cbd7e5;
+  background: var(--sp-panel);
+  color: var(--sp-text);
+}
+
+:global(.dark .modal-content:has(.sp-health-guard-batch-dialog)) {
+  --sp-panel: #172033;
+  --sp-panel-2: #1d293d;
+  --sp-panel-3: #243249;
+  --sp-line: #35445c;
+  --sp-soft: #2c3a51;
+  --sp-text: #edf3fb;
+  --sp-muted: #a8b6ca;
+  border-color: #3b4b64;
+}
+
+:global(.modal-content:has(.sp-health-guard-batch-dialog) .modal-header) {
+  border-bottom-color: var(--sp-line);
+  background: var(--sp-panel);
+}
+
+:global(.modal-content:has(.sp-health-guard-batch-dialog) .modal-title) {
+  color: var(--sp-text);
+}
+
+:global(.modal-content:has(.sp-health-guard-batch-dialog) .modal-body) {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--sp-panel);
+}
+
+:global(.modal-content:has(.sp-health-guard-batch-dialog) .modal-footer) {
   border-top-color: var(--sp-line);
   background: var(--sp-panel);
 }
@@ -6428,6 +6849,47 @@ function intervalSecondsToCron(seconds: number): string | null {
   font-size: 12px;
 }
 
+/* 批量设置弹窗：逐项一行「左侧说明 + 右侧控件」。
+   容器自己滚，不靠 modal-body（body 是 overflow: hidden，内部不滚会被吞掉）。 */
+.sp-health-guard-batch-dialog {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px;
+}
+
+.sp-health-guard-batch-rows {
+  display: grid;
+  gap: 10px;
+}
+
+.sp-health-guard-batch-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.8fr);
+  align-items: center;
+  gap: 8px 16px;
+  border: 1px solid color-mix(in srgb, var(--sp-blue) 12%, var(--sp-line));
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--sp-soft) 20%, transparent);
+}
+
+.sp-health-guard-batch-row > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.sp-health-guard-batch-row > div span {
+  color: var(--sp-muted);
+  font-size: 12px;
+}
+
+.sp-health-guard-batch-hint {
+  color: var(--sp-muted);
+  font-size: 12px;
+}
+
 .sp-health-guard-multiplier-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 460px), 1fr));
@@ -6708,7 +7170,7 @@ function intervalSecondsToCron(seconds: number): string | null {
 .sp-health-guard-account-row {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(140px, 0.35fr) minmax(320px, 0.8fr);
+  grid-template-columns: auto minmax(0, 1fr) auto minmax(140px, 0.35fr) minmax(320px, 0.8fr);
   align-items: center;
   min-width: 0;
   gap: 8px 12px;
@@ -6746,29 +7208,31 @@ function intervalSecondsToCron(seconds: number): string | null {
 }
 
 .sp-health-guard-account-row:not(:has(.sp-health-guard-account-model-editor)) {
-  grid-template-columns: minmax(0, 1fr) minmax(140px, 0.35fr);
+  grid-template-columns: auto minmax(0, 1fr) auto minmax(140px, 0.35fr);
 }
 
-.sp-health-guard-account-choice {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: 16px minmax(0, 1fr);
+/* 多选列：只服务于「批量设置 / 批量间隔」的选择，与右侧「参与守护」开关（业务配置）无关。
+   和开关列一样是固定宽度列（auto），不参与伸缩。 */
+.sp-health-guard-account-check {
+  display: inline-flex;
   align-items: center;
-  gap: 9px;
+  justify-content: center;
   cursor: pointer;
 }
 
-.sp-health-guard-account-choice input[type='checkbox'] {
-  width: 15px;
-  height: 15px;
+.sp-health-guard-account-check input {
+  width: 16px;
+  height: 16px;
   margin: 0;
-  cursor: pointer;
   accent-color: var(--sp-blue);
+  cursor: pointer;
 }
 
-.sp-health-guard-account-choice input[type='checkbox']:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--sp-blue) 55%, transparent);
-  outline-offset: 2px;
+/* 勾选列与开关列都是固定宽度列，账号信息才是唯一可伸缩的列：
+   开关用 fr 会随窗口变宽、把账号名挤成省略号。 */
+.sp-health-guard-account-choice {
+  min-width: 0;
+  cursor: help;
 }
 
 .sp-health-guard-account-choice-copy {
@@ -6898,7 +7362,10 @@ function intervalSecondsToCron(seconds: number): string | null {
   gap: 8px;
 }
 
-.sp-health-guard-account-scheduling-toggle {
+/* 行首的「参与守护」开关与行内的「修改调度」开关共用一套规格，
+   两者都是「开关 + 说明文字」的小控件，分开写会各自漂移。 */
+.sp-health-guard-account-scheduling-toggle,
+.sp-health-guard-account-guard-toggle {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -7472,6 +7939,11 @@ function intervalSecondsToCron(seconds: number): string | null {
   .sp-health-guard-account-model-editor {
     grid-template-columns: minmax(0, 1fr);
     min-width: 0;
+  }
+
+  /* 批量设置：手机端「说明 + 控件」改纵向堆叠，控件通栏 */
+  .sp-health-guard-batch-row {
+    grid-template-columns: 1fr;
   }
 
   .sp-health-guard-filter-result {

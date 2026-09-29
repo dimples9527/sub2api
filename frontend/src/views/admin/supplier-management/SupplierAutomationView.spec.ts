@@ -423,6 +423,7 @@ describe('SupplierAutomationView edit dialog', () => {
       'account_health_guard_platform_latency_ms',
       'account_health_guard_account_intervals',
       'account_health_guard_account_scheduling_change',
+      'account_health_guard_scheduling_change_enabled',
       'account_health_guard_account_failure_thresholds',
       'account_health_guard_account_slow_thresholds',
       'account_health_guard_account_recovery_thresholds',
@@ -498,7 +499,29 @@ describe('SupplierAutomationView edit dialog', () => {
     )?.[0] || ''
     expect(batchTargetSource).toContain('healthGuardWorkspaceAccounts.value.filter')
     expect(batchTargetSource).toContain('mapping.available')
-    expect(batchTargetSource).toContain('healthGuardAccountIDs.value.includes(mapping.localAccountID)')
+    expect(batchTargetSource).toContain('healthGuardCheckedAccountIDs.value.includes(mapping.localAccountID)')
+  })
+
+  it('separates the multi-select checkbox from the participate-in-guard switch', () => {
+    // 勾选是纯界面状态（不写进 config），只决定批量作用范围；「参与守护」才是业务配置。
+    // 合并成一个控件会让「想批量设阈值」被迫先把账号纳入守护。
+    expect(supplierAutomationSource).toContain('const healthGuardCheckedAccountIDs = ref<number[]>([])')
+    expect(supplierAutomationSource).toContain('function healthGuardAccountIsChecked(accountID: number): boolean {')
+    expect(supplierAutomationSource).toContain('function toggleHealthGuardAccountCheck(accountID: number) {')
+    // 每次打开弹窗都清空勾选，否则上一次的勾选会静默参与下一次批量设置。
+    expect(supplierAutomationSource).toContain('healthGuardCheckedAccountIDs.value = []')
+    // 全选/取消全选只切勾选，不得再直接改 account_health_guard_account_ids ——
+    // 否则点一下「全选」就把几十个账号默默纳入守护（纳入守护是有副作用的业务配置）。
+    const selectAllSource = supplierAutomationSource.match(
+      /function selectAllFilteredHealthGuardAccounts\(\)[\s\S]*?\n\}/
+    )?.[0] || ''
+    expect(selectAllSource).toContain('healthGuardCheckedAccountIDs.value = normalizePositiveAccountIDs(')
+    expect(selectAllSource).not.toContain('account_health_guard_account_ids')
+    const deselectSource = supplierAutomationSource.match(
+      /function deselectFilteredHealthGuardAccounts\(\)[\s\S]*?\n\}/
+    )?.[0] || ''
+    expect(deselectSource).toContain('healthGuardCheckedAccountIDs.value = healthGuardCheckedAccountIDs.value.filter(')
+    expect(deselectSource).not.toContain('removeHealthGuardAccount')
   })
 
   it('supports per-account failure, slow and recovery threshold override in the health guard account dialog', () => {
@@ -522,10 +545,45 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('account_health_guard_account_scheduling_change: {}')
     expect(supplierAutomationSource).toContain('healthGuardAccountSchedulingChangeValue')
     expect(supplierAutomationSource).toContain('setHealthGuardAccountSchedulingChange')
-    expect(supplierAutomationSource).toContain('account_health_guard_account_scheduling_change?.[String(accountID)] !== false')
+    // 账号级开关展示的是「最终生效值」：有显式覆盖用覆盖值，否则跟随全局开关（缺省视为开启）。
+    expect(supplierAutomationSource).toContain('typeof override === \'boolean\' ? override : healthGuardGlobalSchedulingChange.value')
+    // 改回与全局一致即删除覆盖、重新变回「跟随全局」，否则账号永远跟不上全局开关的后续变更。
+    expect(supplierAutomationSource).toContain('if (value === healthGuardGlobalSchedulingChange.value)')
+    expect(supplierAutomationSource).toContain('delete schedulingChange[String(accountID)]')
     expect(supplierAutomationSource).toContain('delete schedulingChange[String(id)]')
     expect(supplierAutomationSource).toContain('修改调度')
     expect(supplierAutomationSource).toContain('关闭后仅检测账号健康，不会自动暂停或恢复调度')
+  })
+
+  it('exposes a global scheduling change switch that per-account overrides can follow', () => {
+    expect(supplierAutomationSource).toContain('account_health_guard_scheduling_change_enabled: true')
+    expect(supplierAutomationSource).toContain('config.account_health_guard_scheduling_change_enabled !== false')
+    expect(supplierAutomationSource).toContain('v-model="editForm.config.account_health_guard_scheduling_change_enabled"')
+    expect(supplierAutomationSource).toContain('修改调度（全局）')
+  })
+
+  it('batches scheduling, model and threshold settings for the accounts under guard', () => {
+    expect(supplierAutomationSource).toContain('healthGuardBatchSettingsVisible')
+    expect(supplierAutomationSource).toContain('openHealthGuardBatchSettings')
+    expect(supplierAutomationSource).toContain('applyHealthGuardBatchSettings')
+    expect(supplierAutomationSource).toContain('批量设置账号')
+    expect(supplierAutomationSource).toContain('healthGuardBatchSchedulingChangeOptions')
+    expect(supplierAutomationSource).toContain('healthGuardBatchModelOptions')
+    expect(supplierAutomationSource).toContain('healthGuardBatchThresholdValue')
+    // 批量作用域必须与批量间隔共用同一个 healthGuardBatchTargetRows，
+    // 否则「按钮说改了 N 个、实际改了 M 个」这类口径不一致会静默发生。
+    expect(supplierAutomationSource).toContain('const targets = healthGuardBatchTargetRows.value')
+    // 「跟随全局」必须能清掉账号级覆盖，否则全局开关改过之后账号再也回不到跟随状态。
+    expect(supplierAutomationSource).toContain("if (schedulingChoice === 'global') {")
+    expect(supplierAutomationSource).toContain('delete schedulingChange[accountID]')
+    // 留空即不修改：没填的项一律不落库，避免一次「应用」把没打算改的配置清掉。
+    expect(supplierAutomationSource).toContain('if (threshold === null) continue')
+    // 「全选/取消全选」改成只管勾选后，批量纳入/移出守护的入口平移到了这里。
+    expect(supplierAutomationSource).toContain('healthGuardBatchGuardOptions')
+    expect(supplierAutomationSource).toContain("if (guardChoice === 'off') {")
+    // 移出守护会清空账号级配置，必须先收敛作用对象，否则「提示说设了、实际没设」。
+    expect(supplierAutomationSource).toContain('let effectiveTargets = targets')
+    expect(supplierAutomationSource).toContain('if (effectiveTargets.length) {')
   })
 
   it('configures checked accounts with platform filters and searchable model overrides', () => {
@@ -550,8 +608,14 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('searchable')
     expect(supplierAutomationSource).toContain('normalizePositiveAccountIDs')
     expect(supplierAutomationSource).toContain('type="checkbox"')
-    expect(supplierAutomationSource).toContain(':checked="healthGuardAccountIDs.includes(mapping.localAccountID)"')
-    expect(supplierAutomationSource).toContain('@change="toggleHealthGuardAccount(mapping.localAccountID)"')
+    // 账号行现在有两个各司其职的控件：行首勾选框只管「多选（= 批量作用范围）」，
+    // 开关列管「是否参与守护」（业务配置）。刻意不合并 —— 合并后想批量设阈值就得先把账号纳入守护。
+    expect(supplierAutomationSource).toContain('class="sp-health-guard-account-check"')
+    expect(supplierAutomationSource).toContain(':checked="healthGuardAccountIsChecked(mapping.localAccountID)"')
+    expect(supplierAutomationSource).toContain('@change="toggleHealthGuardAccountCheck(mapping.localAccountID)"')
+    expect(supplierAutomationSource).toContain('class="sp-health-guard-account-guard-toggle"')
+    expect(supplierAutomationSource).toContain(':model-value="healthGuardAccountIsSelected(mapping.localAccountID)"')
+    expect(supplierAutomationSource).toContain('@update:model-value="toggleHealthGuardAccount(mapping.localAccountID)"')
   })
 
   it('allows manually entering health guard test models as a fallback', () => {
@@ -596,7 +660,7 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('healthGuardSelectionSummary')
     expect(supplierAutomationSource).toContain('仅看已选')
     expect(supplierAutomationSource).toContain('使用平台默认')
-    expect(supplierAutomationSource).toContain('>覆盖</span>')
+    expect(supplierAutomationSource).toContain('>账号覆盖</span>')
     expect(supplierAutomationSource).toContain('.sp-health-guard-account-row.selected')
     expect(supplierAutomationSource).toContain('.sp-health-guard-account-row.missing-model')
     expect(supplierAutomationSource).toContain('color: var(--sp-green)')
@@ -634,7 +698,9 @@ describe('SupplierAutomationView edit dialog', () => {
     expect(supplierAutomationSource).toContain('source.binding_groups')
     expect(supplierAutomationSource).toContain('new Map<number, SupplierProviderAccount[\'binding_groups\'][number]>()')
     expect(supplierAutomationSource).toContain('绑定分组')
-    expect(supplierAutomationSource).toContain('grid-template-columns: minmax(0, 1fr) minmax(140px, 0.35fr)')
+    // 未展开编辑器的行是「勾选框 + 账号信息 + 开关列 + 绑定分组」四列（开关排在账号之后）；
+    // 账号信息是唯一可伸缩的列，两个固定列用 auto 才不会随窗口变宽把账号名挤成省略号。
+    expect(supplierAutomationSource).toContain('grid-template-columns: auto minmax(0, 1fr) auto minmax(140px, 0.35fr)')
   })
 
   it('applies the automation dialog palette to the teleported health guard workspace', () => {
