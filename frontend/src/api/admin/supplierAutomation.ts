@@ -550,16 +550,25 @@ export interface SupplierGroupElectionChangeLogListParams {
   page_size?: number
 }
 
+/** 顶部快捷标签用的一条「最近批次」：带上变更时间，供前端显示时间流水号。 */
+export interface SupplierGroupElectionRecentRun {
+  run_id: number
+  changed_at: string
+}
+
 export interface SupplierGroupElectionChangeLogListResult {
   items: SupplierGroupElectionChangeLog[]
   total: number
   page: number
   page_size: number
   /**
-   * 最近若干次「确实拨动过开关」的批次号（新到旧），给页面顶部的快捷筛选标签用。
+   * 最近若干次「确实拨动过开关」的批次（新到旧），给页面顶部的快捷筛选标签用。
    * 它**不受当前筛选影响**（后端只按任务类型取），所以点某个标签后其余标签不会消失。
+   *
+   * 带 changed_at 是为了显示时间流水号；「新到旧」按批次内的变更时间排，
+   * **不是**按 run_id —— runs.id 是自增主键，多 worker 并发时会交错。
    */
-  recent_run_ids?: number[]
+  recent_runs?: SupplierGroupElectionRecentRun[]
 }
 
 export interface SupplierAccountRateGuardUnbindLog {

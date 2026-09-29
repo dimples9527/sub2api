@@ -71,8 +71,47 @@ describe('SupplierGroupElectionChangeLogDialog', () => {
     expect(source).toContain("filters.value = { direction: 'all', platform: '', search: '', startedFrom: '', startedTo: '' }")
     expect(source).toContain('function clearGroup()')
     expect(source).toContain('clearedGroup.value = true')
-    expect(source).toContain('const activeGroupID = computed(() => (clearedGroup.value ? null : props.groupId ?? null))')
+    // 分组筛选有三个来源（下拉 > 查看全部 > props 锁定），props 锁定的优先级最低那一档。
+    expect(source).toContain('if (pickedGroup.value) return pickedGroupID.value')
+    expect(source).toContain('return clearedGroup.value ? null : props.groupId ?? null')
     expect(source).toContain('title="查看全部分组"')
+  })
+
+  it('筛选区提供分组下拉，并接管「进来时的分组锁定」', () => {
+    // 日志按分组分节展示，但筛选区原先只有方向 / 平台 / 账号名 / 日期 ——
+    // 想「只看某个分组」只能从分组页点进来，在弹窗里换不了。
+    expect(source).toContain("import { getAllIncludingInactive } from '@/api/admin/groups'")
+    expect(source).toContain('v-model="groupFilterValue"')
+    expect(source).toContain(':options="groupSelectOptions"')
+    // 「全部分组」必须是空串（不传参），与平台下拉同一约定 ——
+    // 传个 'all' 会被后端当成分组名，一条都查不到。
+    expect(source).toContain("{ value: '', label: '全部分组' }")
+    // 用 include_inactive 版本：历史日志里的分组可能已经停用，
+    // 只查启用分组会让它在下拉里查不到，看着像日志丢了。
+    expect(source).toContain('const list = await getAllIncludingInactive()')
+    // 分组目录拉不到不能连累日志本身：异常必须吞掉，否则下拉一挂整个日志都看不成。
+    expect(source).toContain('void loadGroupOptions()')
+    // 下拉一旦被用过就完全接管分组筛选：否则「下拉显示 B、chip 还写着 A」，两处自相矛盾。
+    expect(source).toContain('const showGroupChip = computed(() => !pickedGroup.value && activeGroupID.value !== null)')
+    // 下拉选的分组属于筛选条件，重置要清掉（与 props 的锁定对象不同，后者保留）。
+    expect(source).toContain('pickedGroup.value = false')
+    // 查询由模板统一触发，与方向 / 平台两个下拉保持同一套行为。
+    expect(source).toContain('@update:model-value="applyFilters"')
+  })
+
+  it('切换时间显示完整日期，不只是时分秒', () => {
+    // 只给时分秒的话，跨天回看时分不清是哪天的变更。
+    expect(source).toContain("import { formatDateTime } from '@/utils/format'")
+    expect(source).toContain('{{ formatDateTime(log.changed_at) }}')
+    expect(source).toContain('{{ formatDateTime(batch.changedAt) }}')
+    // 列宽不够会静默折成两行、把整行撑高（不报错、不溢出）—— nowrap 与列宽必须同时给。
+    expect(cssBlock('.sp-election-log-time')).toContain('white-space: nowrap')
+    expect(source).toContain("class: 'min-w-[170px]', sortable: true")
+  })
+
+  it('弹窗宽度放宽到 95vw', () => {
+    // full 档上限只有 max-w-7xl(1280px)，8 列 + 完整日期时间挤不下。
+    expect(source).toContain('max-width: 95vw')
   })
 
   it('空态区分「还没发生过切换」与「筛选太窄」', () => {
@@ -93,6 +132,23 @@ describe('SupplierGroupElectionChangeLogDialog', () => {
     // 分组标题行必须整行贯通，所以走 colspan 而不是 DataTable（它每行固定 N 个 <td>）。
     expect(source).toContain('scope="colgroup"')
     expect(source).toContain(':colspan="columns.length"')
+  })
+
+  it('切换时间列可排序，默认倒序（最新在前）', () => {
+    // 排序只作用于「组内批次块」：这张表按分组分节，分组顺序是「变更条数多的先看」，
+    // 跨分组做时间排序会把归类打散 —— 所以排序控件不能去动分组顺序。
+    expect(source).toContain("const sortOrder = ref<'asc' | 'desc'>('desc')")
+    expect(source).toContain("if (key !== 'changed_at') return")
+    // 表头那一列要真的渲染成可点的按钮，并带方向指示。
+    expect(source).toContain('class="sp-election-log-sort"')
+    expect(source).toContain(':title="sortTitle"')
+    expect(source).toContain('`is-${sortOrder}`')
+    // 方向必须真的落到批次排序上，只改箭头图标等于点了没反应。
+    expect(source).toContain("return sortOrder.value === 'asc' ? ascending : -ascending")
+    // aria-sort 属于 columnheader 角色，挂在 <th> 上而不是按钮上。
+    expect(source).toContain(':aria-sort="column.sortable ? ariaSortFor(column.key) : undefined"')
+    // 每次打开回到默认倒序，否则「默认按时间倒序」不成立。
+    expect(source).toContain("sortOrder.value = 'desc'")
   })
 
   it('平台色交给工具类，样式块里不写 color', () => {
@@ -147,17 +203,34 @@ describe('SupplierGroupElectionChangeLogDialog', () => {
 
   it('顶部给出最近批次快捷标签，且它不随筛选收窄', () => {
     // 每次都要手动填批次号才能回看某一批，等于没有入口。
-    expect(source).toContain('v-if="recentRunIDs.length > 0"')
-    expect(source).toContain('v-for="runID in recentRunIDs"')
+    expect(source).toContain('v-if="recentRuns.length > 0"')
+    expect(source).toContain('v-for="run in recentRuns"')
     expect(source).toContain('class="sp-election-log-recent-run"')
     // 与表格里的批次号按钮同一行为：点一下加入对照，再点移出（复用 filterByRun）。
-    expect(source).toContain('@click="filterByRun(runID)"')
-    // 批次号来自后端且**不随筛选变化**：跟着筛选一起收窄的话，
+    expect(source).toContain('@click="filterByRun(run.run_id)"')
+    // 批次来自后端且**不随筛选变化**：跟着筛选一起收窄的话，
     // 点一个标签其余标签就没了，没法来回切换着对比 —— 那样这个入口就废了。
-    expect(source).toContain('recentRunIDs.value = result.recent_run_ids || []')
-    expect(source).toContain('const recentRunIDs = ref<number[]>([])')
+    expect(source).toContain('recentRuns.value = result.recent_runs || []')
+    expect(source).toContain('const recentRuns = ref<SupplierGroupElectionRecentRun[]>([])')
     expect(cssBlock('.sp-election-log-recent')).toContain('flex-wrap')
     expect(cssBlock('.sp-election-log-recent-run.is-active')).toContain('background')
+  })
+
+  it('批次统一显示时间流水号，不是裸的 run_id', () => {
+    // run_id 是自增主键，多 worker 并发时会交错 —— 光看号码既不知道是哪一批、
+    // 也读不出先后；时间流水号一眼能看出批次时间。
+    expect(source).toContain('function runSerial(changedAt: string): string')
+    // 四处必须统一：顶部快捷标签、批次小标题、表格行内按钮、已选批次 chip。
+    expect(source).toContain('{{ runSerial(run.changed_at) }}')
+    expect(source).toContain('批次 {{ runSerial(batch.changedAt) }}')
+    expect(source).toContain('{{ runSerial(log.changed_at) }}')
+    expect(source).toContain("runFilters.map((id) => runLabel(id)).join('、')")
+    // chip 只有批次号、拿不到时间，所以要回头查一次；查不到时退回裸号，不显示空串。
+    expect(source).toContain('function runLabel(runID: number): string')
+    expect(source).toContain('return changedAt ? runSerial(changedAt) : `#${runID}`')
+    // 显示格式换了，传后端的值不能跟着换：筛选仍然用真实的 run_id。
+    expect(source).toContain('@click="filterByRun(log.run_id)"')
+    expect(source).toContain('run_ids: runFilters.value.length > 0 ? runFilters.value : undefined')
   })
 
   it('批次可多选：顶部标签与行内批次号共用同一个「对照集合」', () => {
@@ -165,7 +238,7 @@ describe('SupplierGroupElectionChangeLogDialog', () => {
     // 收成数组后组内本来就按批次分块，选中的几批会各自成块并排。
     expect(source).toContain('const runFilters = ref<number[]>([])')
     // 顶部标签与行内按钮必须是同一个集合、同一套行为；两套状态会互相覆盖。
-    expect(source).toContain(":class=\"{ 'is-active': runFilters.includes(runID) }\"")
+    expect(source).toContain(":class=\"{ 'is-active': runFilters.includes(run.run_id) }\"")
     expect(source).toContain(":class=\"{ 'is-active': runFilters.includes(log.run_id) }\"")
     expect(source).toContain("'已加入对照，再点移出'")
     // 再点一次是「移出这一批」，不是清空整个选择 —— 否则选了三批想取消一批就得从头再来。
@@ -177,7 +250,8 @@ describe('SupplierGroupElectionChangeLogDialog', () => {
     // 选了批次也算「筛选生效」，否则空态会显示「最近还没有发生调度切换」、误导成功能坏了。
     expect(source).toContain('|| runFilters.value.length > 0')
     // 已选批次要在顶部 chip 上列出来：多选之后光看标签高亮，不知道一共选了哪几批。
-    expect(source).toContain("runFilters.map((id) => `#${id}`).join('、')")
+    // chip 显示的也是时间流水号，与表格 / 标签保持同一套称呼。
+    expect(source).toContain("runFilters.map((id) => runLabel(id)).join('、')")
   })
 })
 

@@ -17,7 +17,8 @@
       </p>
 
       <div class="sp-election-log-filters">
-        <span v-if="activeGroupID" class="sp-election-log-group-chip">
+        <!-- chip 只在「进来时被锁定到某个分组」时显示，见 showGroupChip。 -->
+        <span v-if="showGroupChip" class="sp-election-log-group-chip">
           仅看分组：{{ activeGroupLabel || `分组 ${activeGroupID}` }}
           <button type="button" class="sp-election-log-chip-clear" title="查看全部分组" @click="clearGroup">
             查看全部
@@ -30,7 +31,7 @@
           </button>
         </span>
         <span v-if="runFilters.length > 0" class="sp-election-log-group-chip">
-          仅看批次：{{ runFilters.map((id) => `#${id}`).join('、') }}
+          仅看批次：{{ runFilters.map((id) => runLabel(id)).join('、') }}
           <button type="button" class="sp-election-log-chip-clear" title="查看全部批次" @click="clearRun">
             查看全部
           </button>
@@ -42,6 +43,12 @@
         <div class="sp-election-log-filter">
           <span class="sr-only">平台</span>
           <Select v-model="filters.platform" :options="platformOptions" @update:model-value="applyFilters" />
+        </div>
+        <!-- 分组筛选跟在平台后面：一个分组必属于某个平台（Group.platform），
+             先平台后分组才符合「先圈大范围、再挑里面的组」的选取顺序。 -->
+        <div class="sp-election-log-filter sp-election-log-filter-group">
+          <span class="sr-only">分组</span>
+          <Select v-model="groupFilterValue" :options="groupSelectOptions" placeholder="全部分组" @update:model-value="applyFilters" />
         </div>
         <div class="sp-election-log-filter sp-election-log-search">
           <span class="sr-only">按账号名搜索</span>
@@ -73,18 +80,18 @@
       <!-- 最近批次快捷标签：点一下只看那一批，再点一下取消（与表格里的批次号按钮同一套行为）。
            这批数据由后端给（最近 5 个真有变更的批次），**不随上面的筛选变化** ——
            否则点一个标签其余标签就消失了，没法来回切换着对比。 -->
-      <div v-if="recentRunIDs.length > 0" class="sp-election-log-recent">
+      <div v-if="recentRuns.length > 0" class="sp-election-log-recent">
         <span class="sp-election-log-recent-label">最近批次</span>
         <button
-          v-for="runID in recentRunIDs"
-          :key="runID"
+          v-for="run in recentRuns"
+          :key="run.run_id"
           type="button"
           class="sp-election-log-recent-run"
-          :class="{ 'is-active': runFilters.includes(runID) }"
-          :title="runFilters.includes(runID) ? '已加入对照，再点移出' : `加入对照：批次 #${runID}`"
-          @click="filterByRun(runID)"
+          :class="{ 'is-active': runFilters.includes(run.run_id) }"
+          :title="runFilters.includes(run.run_id) ? '已加入对照，再点移出' : `加入对照：批次 ${runSerial(run.changed_at)}`"
+          @click="filterByRun(run.run_id)"
         >
-          #{{ runID }}
+          {{ runSerial(run.changed_at) }}
         </button>
       </div>
 
@@ -93,7 +100,27 @@
           <table class="sp-election-log-table">
             <thead>
               <tr>
-                <th v-for="column in columns" :key="column.key" scope="col" :class="column.class">{{ column.label }}</th>
+                <th
+                  v-for="column in columns"
+                  :key="column.key"
+                  scope="col"
+                  :class="column.class"
+                  :aria-sort="column.sortable ? ariaSortFor(column.key) : undefined"
+                >
+                  <button
+                    v-if="column.sortable"
+                    type="button"
+                    class="sp-election-log-sort"
+                    :title="sortTitle"
+                    @click="toggleSort(column.key)"
+                  >
+                    {{ column.label }}
+                    <span class="sp-election-log-sort-icon" :class="`is-${sortOrder}`" aria-hidden="true">
+                      <svg viewBox="0 0 10 6" width="8" height="6"><path d="M5 6 0 0h10L5 6Z" /></svg>
+                    </span>
+                  </button>
+                  <template v-else>{{ column.label }}</template>
+                </th>
               </tr>
             </thead>
             <tbody v-if="loading">
@@ -129,8 +156,8 @@
                 <template v-for="batch in section.batches" :key="batch.key">
                   <tr class="sp-election-log-batch-row">
                     <td :colspan="columns.length">
-                      <span class="sp-election-log-batch-id">批次 #{{ batch.runID }}</span>
-                      <span class="sp-election-log-batch-time">{{ formatTime(batch.changedAt) }}</span>
+                      <span class="sp-election-log-batch-id">批次 {{ runSerial(batch.changedAt) }}</span>
+                      <span class="sp-election-log-batch-time">{{ formatDateTime(batch.changedAt) }}</span>
                       <span class="sp-election-log-batch-status" :class="runStatusClass(batch.runStatus)">{{ runStatusText(batch.runStatus) }}</span>
                       <small class="sp-election-log-batch-count">本批次 {{ batch.rows.length }} 条</small>
                     </td>
@@ -145,9 +172,9 @@
                         :title="runFilters.includes(log.run_id) ? '已加入对照，再点移出' : '加入对照：这一批次的切换'"
                         @click="filterByRun(log.run_id)"
                       >
-                        #{{ log.run_id }}
+                        {{ runSerial(log.changed_at) }}
                       </button>
-                      <span v-else-if="column.key === 'changed_at'" class="sp-election-log-time">{{ formatTime(log.changed_at) }}</span>
+                      <span v-else-if="column.key === 'changed_at'" class="sp-election-log-time">{{ formatDateTime(log.changed_at) }}</span>
                       <template v-else-if="column.key === 'account'">
                         <strong class="sp-election-log-account">{{ log.account_name || `账号 ${log.account_id}` }}</strong>
                         <span v-if="log.platform" class="sp-election-log-platform" :class="platformTextClass(log.platform)">{{ log.platform }}</span>
@@ -207,7 +234,12 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { listGroupElectionChangeLogs, type SupplierGroupElectionChangeLog } from '@/api/admin/supplierAutomation'
+import { getAllIncludingInactive } from '@/api/admin/groups'
+import {
+  listGroupElectionChangeLogs,
+  type SupplierGroupElectionChangeLog,
+  type SupplierGroupElectionRecentRun,
+} from '@/api/admin/supplierAutomation'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Input from '@/components/common/Input.vue'
 import Pagination from '@/components/common/Pagination.vue'
@@ -215,7 +247,7 @@ import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import type { Column } from '@/components/common/types'
 import { useAppStore } from '@/stores/app'
-import { formatTime } from '@/utils/format'
+import { formatDateTime } from '@/utils/format'
 import { platformTextClass } from '@/utils/platformColors'
 import { CORE_PLATFORM_OPTIONS } from '@/utils/platformOptions'
 
@@ -265,15 +297,39 @@ const filters = ref<{
 // 从某个分组/账号进来后又点了「查看全部」，此时以组件内部状态为准。
 const clearedGroup = ref(false)
 const clearedAccount = ref(false)
+// 用户在「分组」下拉里主动选过的值。pickedGroup 标记「下拉被用过」，
+// pickedGroupID 为 null 表示选了「全部分组」。
+// 一旦用过下拉就由它完全接管分组筛选 —— 否则会出现「下拉显示 B、chip 显示 A」的自相矛盾。
+const pickedGroup = ref(false)
+const pickedGroupID = ref<number | null>(null)
 // 任务批次筛选纯内部：从顶部标签或行内批次号点进来，再点「查看全部」清掉。
 // 收成数组而不是单值 —— 多选后组内按批次分块，几批会各占一块并排，正好用来对照。
 const runFilters = ref<number[]>([])
-// 顶部快捷批次标签：由后端给出（最近 5 个真有变更的批次）。
-// 它不随当前筛选变化 —— 否则点一个标签，其余标签就没了，没法来回切换着看。
-const recentRunIDs = ref<number[]>([])
+// 顶部快捷批次标签：由后端给出（最近 5 个真有变更的批次，按变更时间新到旧）。
+// 带 changed_at 才能显示时间流水号；它不随当前筛选变化 —— 否则点一个标签，其余标签就没了，
+// 没法来回切换着看。
+const recentRuns = ref<SupplierGroupElectionRecentRun[]>([])
+// 分组目录，给筛选下拉用（加载逻辑见 loadGroupOptions）。
+const groupOptions = ref<SelectOption[]>([])
+let groupOptionsLoaded = false
 
-const activeGroupID = computed(() => (clearedGroup.value ? null : props.groupId ?? null))
-const activeGroupLabel = computed(() => (clearedGroup.value ? '' : props.groupLabel))
+// 分组筛选有三个来源，优先级从高到低：
+//   ① 用户在筛选下拉里选的值（pickedGroup 为真时）；
+//   ② 「查看全部」清掉的锁定（clearedGroup）；
+//   ③ 进来时 props 带的分组锁定。
+// ① 必须最高：用户刚在下拉里改完，任何回填都会把这次操作静默抹掉。
+const activeGroupID = computed(() => {
+  if (pickedGroup.value) return pickedGroupID.value
+  return clearedGroup.value ? null : props.groupId ?? null
+})
+const activeGroupLabel = computed(() => {
+  if (pickedGroup.value) {
+    if (pickedGroupID.value === null) return ''
+    // 下拉里选出来的分组用目录里的名字；目录没拉到就留空，由调用方回退成「分组 N」。
+    return groupOptions.value.find((option) => Number(option.value) === pickedGroupID.value)?.label ?? ''
+  }
+  return clearedGroup.value ? '' : props.groupLabel
+})
 const activeAccountID = computed(() => (clearedAccount.value ? null : props.accountId ?? null))
 const activeAccountLabel = computed(() => (clearedAccount.value ? '' : props.accountLabel))
 const dialogTitle = computed(() => {
@@ -306,9 +362,49 @@ const platformOptions = computed<SelectOption[]>(() => [
   ...CORE_PLATFORM_OPTIONS.map((option) => ({ value: option.value, label: option.label })),
 ])
 
+// 分组目录。用 include_inactive 版本 —— 日志里的分组可能已经被停用，
+// 用只返回启用分组的接口会让那些分组在下拉里查不到，看着像日志丢了。
+async function loadGroupOptions() {
+  if (groupOptionsLoaded) return
+  try {
+    const list = await getAllIncludingInactive()
+    groupOptions.value = list.map((group) => ({ value: String(group.id), label: group.name }))
+    groupOptionsLoaded = true
+  } catch {
+    // 分组目录拉不到不该连累日志本身：下拉退化成只有「全部分组」，日志照常可看。
+    // 不置 groupOptionsLoaded，下次打开弹窗会再试一次。
+  }
+}
+
+// 「全部分组」用空串，与平台下拉同一约定（空串 = 不传参）。
+const groupSelectOptions = computed<SelectOption[]>(() => [
+  { value: '', label: '全部分组' },
+  ...groupOptions.value,
+])
+
+// 下拉的当前值。getter 反映 activeGroupID —— 从分组页点进来时下拉也要显示那个分组，
+// 否则下拉写着「全部分组」而列表其实被锁在一个分组上，两处自相矛盾。
+// setter 只记录选择、不自己查：查询统一交给模板的 @update:model-value，
+// 与方向 / 平台两个下拉保持同一套行为。
+const groupFilterValue = computed<string>({
+  get: () => (activeGroupID.value === null ? '' : String(activeGroupID.value)),
+  set: (value) => {
+    pickedGroup.value = true
+    const parsed = Number(value)
+    pickedGroupID.value = value === '' || !Number.isFinite(parsed) ? null : parsed
+  },
+})
+
+// chip 只在「进来时被锁定到某个分组」时出现：用户自己在下拉里选的分组
+// 已经在下拉里看得见，再冒一个 chip 是重复信息。
+const showGroupChip = computed(() => !pickedGroup.value && activeGroupID.value !== null)
+
 const columns: Column[] = [
   { key: 'run', label: '任务批次', class: 'min-w-[100px]' },
-  { key: 'changed_at', label: '切换时间', class: 'min-w-[150px]' },
+  // sortable：只排「组内批次块」的先后，不改分组顺序 —— 分组是按变更条数排的（见 sections 注释），
+  // 而分组分节是这张表的主结构，跨分组做时间排序会把归类打散。
+  // 宽度按「2026/09/23 10:00:00」这种完整日期时间给足：只给到时间的宽度会静默折行、把整行撑高。
+  { key: 'changed_at', label: '切换时间', class: 'min-w-[170px]', sortable: true },
   { key: 'account', label: '账号', class: 'min-w-[150px]' },
   { key: 'direction', label: '调度变更', class: 'min-w-[110px]' },
   { key: 'test_status', label: '测试状态', class: 'min-w-[90px]' },
@@ -316,6 +412,31 @@ const columns: Column[] = [
   { key: 'latency_ms', label: '测试用时', class: 'min-w-[90px]' },
   { key: 'reason', label: '原因', class: 'min-w-[200px]' },
 ]
+
+// 「切换时间」列当前的排序方向，默认倒序（最新在前）—— 与后端 ORDER BY changed_at DESC 同向，
+// 所以「默认」和升级前的观感完全一致，排序控件只是把这件事变得可调。
+// 作用范围是**每组内部的批次块**：表格按分组分节，组的顺序按变更条数排，
+// 跨分组做时间排序会把归类打散，所以排序只重排组内批次。
+const sortOrder = ref<'asc' | 'desc'>('desc')
+
+// 只有「切换时间」一列可排序；其余列点不动。
+function toggleSort(key: string) {
+  if (key !== 'changed_at') return
+  sortOrder.value = sortOrder.value === 'desc' ? 'asc' : 'desc'
+}
+
+// aria-sort 属于 columnheader 角色，挂到 <th> 上而不是按钮上。
+function ariaSortFor(key: string): 'ascending' | 'descending' | 'none' {
+  if (key !== 'changed_at') return 'none'
+  return sortOrder.value === 'asc' ? 'ascending' : 'descending'
+}
+
+// 按钮的 title 说清「点下去会变成什么」，而不是只描述当前状态。
+const sortTitle = computed(() => (
+  sortOrder.value === 'desc'
+    ? '每组内按切换时间倒序（最新在前），点击改为正序'
+    : '每组内按切换时间正序（最早在前），点击改为倒序'
+))
 
 // 同一次运行里可能有多个账号同时变更，run_id 会重复 —— 键必须用 run_id + account_id。
 function rowKey(log: SupplierGroupElectionChangeLog) {
@@ -368,6 +489,34 @@ function latencyText(latencyMs?: number) {
   if (!latencyMs || latencyMs <= 0) return '—'
   if (latencyMs < 1000) return `${latencyMs}ms`
   return `${(latencyMs / 1000).toFixed(1)}s`
+}
+
+// 时间流水号：把批次时间压成 20260923-100000。
+// 用它代替裸的 run_id 显示 —— run_id 是自增主键，多 worker 并发时会交错，
+// 光看号码既不知道是哪一批、也读不出先后；时间流水号一眼就能看出批次时间。
+// 用本地时间：管理员看到的其它时间列也是本地时间，两者必须能对上。
+function runSerial(changedAt: string): string {
+  const date = new Date(changedAt)
+  if (Number.isNaN(date.getTime())) return changedAt
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`
+    + `-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
+}
+
+// run_id → 变更时间。表格行与批次块自己带着时间，但「仅看批次」chip 只有批次号，
+// 得回头查它对应的时间。数据来源就是当前页 items：选中批次后 run_ids 会带上它，
+// 后端必然返回该批次的记录。
+const runChangedAt = computed(() => {
+  const map = new Map<number, string>()
+  for (const log of items.value) map.set(log.run_id, log.changed_at)
+  return map
+})
+
+// 批次在 UI 上的统一称呼。查不到时间时（该批次被其它筛选条件排空）退回裸批次号，
+// 至少不丢信息，也好过显示一个空串。
+function runLabel(runID: number): string {
+  const changedAt = runChangedAt.value.get(runID)
+  return changedAt ? runSerial(changedAt) : `#${runID}`
 }
 
 /** 组内的一块批次：同一次运行里的变更，以及该批次自己的开 / 关 / 跳过条数。 */
@@ -427,10 +576,13 @@ function whyFacts(section: LogSection, log: SupplierGroupElectionChangeLog): str
   }
 
   if (decision.scored) {
-    facts.push(
-      `综合分 ${score(decision.score)} = 次数分 ${score(decision.count_score)} × 权重 ${fixed(decision.count_weight)}`
+    const hasPriority = typeof decision.priority_weight === 'number'
+    let breakdown = `综合分 ${score(decision.score)} = 次数分 ${score(decision.count_score)} × 权重 ${fixed(decision.count_weight)}`
       + ` + 用时分 ${score(decision.latency_score)} × 权重 ${fixed(decision.latency_weight)}`
-    )
+    if (hasPriority) {
+      breakdown += ` + 优先级分 ${score(decision.priority_score)} × 权重 ${fixed(decision.priority_weight)}`
+    }
+    facts.push(breakdown)
     if (decision.count_score_cap) {
       facts.push(`次数分按封顶 ${decision.count_score_cap} 归一：连续成功次数超过该值后不再加分`)
     }
@@ -438,6 +590,13 @@ function whyFacts(section: LogSection, log: SupplierGroupElectionChangeLog): str
       facts.push('用时项取中性值 0.5：同平台可比样本不足 2 个，或各账号耗时完全相同，比不出高下')
     } else if (decision.effective_latency_ms) {
       facts.push(`评分用时 ${latencyText(decision.effective_latency_ms)}（已含成功率惩罚，在任者另按迟滞系数折算）`)
+    }
+    if (hasPriority) {
+      facts.push(
+        decision.priority_score === 0
+          ? '该分组未开启「优先级计分」：优先级没有影响本组排序'
+          : '优先级项已在同组内 min-max 归一（数值越小优先级越高，最高者得满 1 分）'
+      )
     }
     if (decision.rank && decision.rank_total) {
       const cutoff = typeof decision.winner_cutoff === 'number' ? score(decision.winner_cutoff) : '—'
@@ -542,11 +701,13 @@ const sections = computed<LogSection[]>(() => {
   const list = Array.from(groupMap.values()).sort((a, b) =>
     b.total - a.total || a.groupName.localeCompare(b.groupName, 'zh-Hans-CN')
   )
-  // 组内批次新的在前；时间解析失败时用批次号兜底，保证顺序稳定不跳。
+  // 组内批次按「切换时间」排，方向由表头那一列控制（默认倒序 = 最新在前）。
+  // 时间解析失败时用批次号兜底，保证顺序稳定不跳。
   for (const section of list) {
     section.batches.sort((a, b) => {
-      const diff = Date.parse(b.changedAt) - Date.parse(a.changedAt)
-      return Number.isFinite(diff) && diff !== 0 ? diff : b.runID - a.runID
+      const diff = Date.parse(a.changedAt) - Date.parse(b.changedAt)
+      const ascending = Number.isFinite(diff) && diff !== 0 ? diff : a.runID - b.runID
+      return sortOrder.value === 'asc' ? ascending : -ascending
     })
   }
   return list
@@ -573,7 +734,7 @@ async function load() {
     page.value = result.page
     pageSize.value = result.page_size
     // 后端每次都回全量最近批次（不随筛选变），直接整体替换即可。
-    recentRunIDs.value = result.recent_run_ids || []
+    recentRuns.value = result.recent_runs || []
   } catch (err) {
     appStore.showError(err instanceof Error ? err.message : '加载调度切换日志失败')
   } finally {
@@ -596,6 +757,10 @@ function resetFilters() {
   // 重置清筛选条件，但把「锁定到某个分组 / 账号」保留 —— 用户是冲着它点开弹窗的，
   // 一起清掉会让人误以为看到的是全局日志。换对象要点「查看全部」。
   filters.value = { direction: 'all', platform: '', search: '', startedFrom: '', startedTo: '', includeSkipped: false }
+  // 下拉里主动选的分组是筛选条件，重置一并清掉；清掉后 activeGroupID 回落到 props 锁定
+  // （进来时锁定的对象仍保留 —— 用户是冲着它点开弹窗的）。
+  pickedGroup.value = false
+  pickedGroupID.value = null
   // 批次锁定是弹窗内点出来的临时筛选，不属于「进来时的对象」，重置一并清掉。
   runFilters.value = []
   page.value = 1
@@ -646,14 +811,23 @@ watch(() => props.show, (visible) => {
   if (!visible) return
   clearedGroup.value = false
   clearedAccount.value = false
+  // 下拉里选的分组同样是本次查看的临时筛选，下次打开回到「进来时的锁定」。
+  pickedGroup.value = false
+  pickedGroupID.value = null
   runFilters.value = []
   page.value = 1
+  // 每次打开都回到默认的「最新在前」：排序方向是本次查看的临时选择，
+  // 留到下次会让「默认按时间倒序」这句话不成立。
+  sortOrder.value = 'desc'
+  void loadGroupOptions()
   void load()
 })
 
 watch(() => props.groupId, () => {
   if (!props.show) return
   clearedGroup.value = false
+  pickedGroup.value = false
+  pickedGroupID.value = null
   page.value = 1
   void load()
 })
@@ -680,10 +854,10 @@ watch(() => props.accountId, () => {
   gap: 12px;
 }
 
-/* BaseDialog 的 full 预设最宽到 max-w-7xl(1280px)，这份日志列多，再放宽到接近整屏。
-   只命中「装着本日志」的那一个 modal-content，不动其他用 full 的弹窗。 */
+/* BaseDialog 的 full 预设最宽到 max-w-7xl(1280px)，这份日志列多（8 列 + 完整日期时间），
+   按需求放宽到 95vw。只命中「装着本日志」的那一个 modal-content，不动其他用 full 的弹窗。 */
 :global(.modal-content:has(.sp-election-log-dialog)) {
-  max-width: min(1600px, 95vw);
+  max-width: 95vw;
 }
 
 /* 暗色覆盖一律写普通的 `.dark xxx`，不要写 `:global(.dark) xxx`。
@@ -715,6 +889,12 @@ watch(() => props.accountId, () => {
 
 .sp-election-log-filter {
   min-width: 120px;
+}
+
+/* 分组下拉比另外两个下拉宽一档：分组名普遍比平台名长（「TKAPI2-Codex｜应急专用｜pro号池」这种），
+   与平台下拉同宽会把名字截得看不出是哪个组。 */
+.sp-election-log-filter-group {
+  min-width: 180px;
 }
 
 .sp-election-log-search {
@@ -879,6 +1059,49 @@ watch(() => props.accountId, () => {
   white-space: nowrap;
 }
 
+/* 「切换时间」表头的排序控件。排版（字号 / 字重 / 字距 / 颜色）全部继承表头，
+   只多一个方向箭头 —— 表头其余列是纯文字，这一列多出箭头就足以说明「可以点」，
+   再加底色或边框反而会和分组标题行抢层级。 */
+.sp-election-log-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+
+.sp-election-log-sort:hover {
+  color: var(--sp-election-log-accent);
+}
+
+/* 键盘可达：outline 而不是 box-shadow，避免在 sticky 表头上糊出一块底色。 */
+.sp-election-log-sort:focus-visible {
+  outline: 2px solid var(--sp-election-log-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* 箭头指向当前排序方向：朝下 = 最新在前（默认），朝上 = 最早在前。
+   用 accent 色标出「这一列正在生效」，与页面其他可交互元素的取色一致。 */
+.sp-election-log-sort-icon {
+  display: inline-flex;
+  color: var(--sp-election-log-accent);
+}
+
+.sp-election-log-sort-icon > svg {
+  display: block;
+  fill: currentColor;
+}
+
+.sp-election-log-sort-icon.is-asc {
+  transform: rotate(180deg);
+}
+
 .sp-election-log-row > td {
   padding: 10px 12px;
   border-bottom: 1px solid color-mix(in srgb, var(--sp-election-log-line) 55%, transparent);
@@ -954,6 +1177,14 @@ watch(() => props.accountId, () => {
   margin-left: 10px;
   color: var(--sp-election-log-muted);
   font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 数据行的「切换时间」：完整日期 + 时间（年月日 时:分:秒）。
+   只给时间的话，跨天回看时分不清是哪天的变更。
+   nowrap 是必须的 —— 列宽不够时它会静默折成两行、把整行撑高（不报错、不溢出）。 */
+.sp-election-log-time {
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
