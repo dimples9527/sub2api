@@ -76,6 +76,11 @@ type SupplierAccountHealthGuardConfig struct {
 	PlatformLatencyMs        map[string]int64  `json:"account_health_guard_platform_latency_ms"`
 	AccountIntervals         map[int64]int     `json:"account_health_guard_account_intervals"`
 	AccountSchedulingChange  map[int64]bool    `json:"account_health_guard_account_scheduling_change"`
+	// 全局「修改调度」开关（缺省 true = 允许自动暂停/恢复调度，与升级前一致）。
+	// 用指针而不是 bool：JSON 里没有这个键时零值 false 会把所有账号的自动调度静默关掉，
+	// 而升级前的行为恰恰是「默认允许修改调度」，nil 必须能表达「未配置」。
+	// 账号级 AccountSchedulingChange 里存在的键覆盖它，不存在的账号跟随它。
+	SchedulingChangeEnabled *bool `json:"account_health_guard_scheduling_change_enabled"`
 	// 账号级阈值覆盖：键为本地账号 ID，未出现的账号回落到上面的全局阈值。
 	// 存独立映射而不是「账号 → 整组阈值」，是为了让同一账号只覆盖部分阈值时不会隐式冻结另外两项。
 	AccountFailureThresholds  map[int64]int `json:"account_health_guard_account_failure_thresholds"`
@@ -603,7 +608,8 @@ func (s *SupplierAccountHealthGuardService) runTarget(ctx context.Context, confi
 		item.ConsecutiveSlow = 0
 	}
 	item.SchedulableAfter, item.Action, item.Reason = supplierAccountHealthGuardNextSchedulingState(config, item)
-	if value, exists := config.AccountSchedulingChange[item.LocalAccountID]; exists && !value {
+	// 全局开关决定默认值，账号级映射里存在的键覆盖它（true/false 都是显式覆盖）。
+	if !supplierAccountHealthGuardSchedulingChangeEnabled(config, item.LocalAccountID) {
 		item.SchedulableAfter = item.SchedulableBefore
 		item.Action = SupplierAccountHealthGuardActionNone
 		item.Reason = "已关闭修改调度"
@@ -913,7 +919,21 @@ func normalizeSupplierAccountHealthGuardConfig(config SupplierAccountHealthGuard
 	if config.AccountSchedulingChange == nil {
 		config.AccountSchedulingChange = map[int64]bool{}
 	}
+	// 缺省即「允许修改调度」：升级前的配置里没有这个键，归一化后必须与旧行为一致。
+	if config.SchedulingChangeEnabled == nil {
+		enabled := true
+		config.SchedulingChangeEnabled = &enabled
+	}
 	return config
+}
+
+// supplierAccountHealthGuardSchedulingChangeEnabled 解析某个账号本轮是否允许自动暂停/恢复调度：
+// 账号级覆盖优先，未覆盖则取全局开关（缺省视为开启，与升级前一致）。
+func supplierAccountHealthGuardSchedulingChangeEnabled(config SupplierAccountHealthGuardConfig, accountID int64) bool {
+	if override, exists := config.AccountSchedulingChange[accountID]; exists {
+		return override
+	}
+	return config.SchedulingChangeEnabled == nil || *config.SchedulingChangeEnabled
 }
 
 func normalizeSupplierAccountHealthGuardAccountThresholds(values map[int64]int) map[int64]int {

@@ -82,6 +82,8 @@ type SupplierAutomationConfig struct {
 	AccountHealthGuardPlatformLatencyMs        map[string]int64  `json:"account_health_guard_platform_latency_ms"`
 	AccountHealthGuardAccountIntervals         map[int64]int     `json:"account_health_guard_account_intervals"`
 	AccountHealthGuardAccountSchedulingChange  map[int64]bool    `json:"account_health_guard_account_scheduling_change"`
+	// 全局「修改调度」开关（缺省 nil = 允许，与升级前一致）；账号级映射可覆盖它。
+	AccountHealthGuardSchedulingChangeEnabled *bool `json:"account_health_guard_scheduling_change_enabled"`
 	// 账号级阈值覆盖，未列出的账号沿用上面的全局阈值。
 	AccountHealthGuardAccountFailureThresholds  map[int64]int `json:"account_health_guard_account_failure_thresholds"`
 	AccountHealthGuardAccountSlowThresholds     map[int64]int `json:"account_health_guard_account_slow_thresholds"`
@@ -713,6 +715,7 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 			PlatformLatencyMs:                  task.Config.AccountHealthGuardPlatformLatencyMs,
 			AccountIntervals:                   task.Config.AccountHealthGuardAccountIntervals,
 			AccountSchedulingChange:            task.Config.AccountHealthGuardAccountSchedulingChange,
+			SchedulingChangeEnabled:            task.Config.AccountHealthGuardSchedulingChangeEnabled,
 			AccountFailureThresholds:           task.Config.AccountHealthGuardAccountFailureThresholds,
 			AccountSlowThresholds:              task.Config.AccountHealthGuardAccountSlowThresholds,
 			AccountRecoveryThresholds:          task.Config.AccountHealthGuardAccountRecoveryThresholds,

@@ -716,6 +716,56 @@ func TestSupplierAccountHealthGuardRunSkipsSchedulingUpdateWhenDisabled(t *testi
 	require.Equal(t, SupplierAccountHealthGuardStatusFailed, store.extraUpdates[33][supplierHealthGuardLastStatusExtraKey])
 }
 
+// 全局「修改调度」开关：账号级映射里存在该账号的键就以它为准，不存在则跟随全局；全局缺省视为开启。
+func TestSupplierAccountHealthGuardRunAppliesGlobalSchedulingChangeSwitch(t *testing.T) {
+	enabled, disabled := true, false
+	tests := []struct {
+		name        string
+		global      *bool
+		override    map[int64]bool
+		wantDisable bool
+	}{
+		{name: "全局缺省时照常修改调度", global: nil, wantDisable: true},
+		{name: "全局关闭时只检测不改调度", global: &disabled, wantDisable: false},
+		{name: "全局关闭但账号单独开启", global: &disabled, override: map[int64]bool{34: true}, wantDisable: true},
+		{name: "全局开启但账号单独关闭", global: &enabled, override: map[int64]bool{34: false}, wantDisable: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			candidate := newSupplierAccountHealthGuardCandidate(34, "global-switch-account", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 34})
+			store := &supplierAccountHealthGuardAccountStoreStub{}
+			tester := &supplierAccountHealthGuardTesterStub{
+				results: map[int64]*ScheduledTestResult{34: {Status: "failed", ErrorMessage: "upstream error"}},
+				errs:    map[int64]error{},
+			}
+			guard := NewSupplierAccountHealthGuardService(&supplierAccountHealthGuardRepoStub{candidates: []SupplierAccountHealthGuardCandidate{candidate}}, store, tester)
+
+			result, err := guard.Run(context.Background(), SupplierAccountHealthGuardConfig{
+				AccountIDs:              []int64{34},
+				FailureThreshold:        1,
+				PlatformModels:          map[string]string{"openai": "gpt-4o-mini"},
+				SchedulingChangeEnabled: tt.global,
+				AccountSchedulingChange: tt.override,
+			}, time.Now())
+
+			require.NoError(t, err)
+			require.Equal(t, 1, result.FailedCount)
+			if tt.wantDisable {
+				require.Equal(t, 1, result.DisabledCount)
+				require.False(t, result.Items[0].SchedulableAfter)
+				require.Equal(t, []supplierAccountHealthGuardSetCall{{accountID: 34, schedulable: false}}, store.setCalls)
+				return
+			}
+			require.Zero(t, result.DisabledCount)
+			require.True(t, result.Items[0].SchedulableAfter)
+			require.Equal(t, SupplierAccountHealthGuardActionNone, result.Items[0].Action)
+			require.Equal(t, "已关闭修改调度", result.Items[0].Reason)
+			require.Empty(t, store.setCalls)
+		})
+	}
+}
+
 func TestSupplierAccountHealthGuardRunUsesEffectivePlatformForDefaults(t *testing.T) {
 	candidate := newSupplierAccountHealthGuardCandidate(23, "覆盖平台账号", "openai", true, SupplierAccountHealthGuardSource{ProviderAccountID: 13})
 	candidate.PlatformOverride = "grok"
