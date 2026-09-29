@@ -751,6 +751,32 @@ export async function listGroupElectionChangeLogs(
   return data
 }
 
+/**
+ * 分组择优调度的诊断快照。
+ *
+ * 后端把「任务配置 + 各分组当前开启数 + 开启中的账号及其所属分组 + 最近几轮逐账号决策」
+ * 拼成一段纯文本，前端只负责展示与复制、不做任何拼装 —— 这些数据的口径都在后端，
+ * 前端再拼一遍必然出现两边不一致。
+ *
+ * 之所以需要它：这个任务不打印业务日志，而运行记录里的 items 只含「发生变化 / 被锁定保住 /
+ * 被闸门拦住」的账号；「某个分组当前到底开着几个」只存在于 accounts.schedulable，
+ * 以前只能手写 SQL 去查。有了它，发现分组异常时一键复制即可交给他人排查。
+ */
+export interface SupplierGroupElectionDiagnosticsResult {
+  generated_at: string
+  text: string
+}
+
+export async function getGroupElectionDiagnostics(
+  params: { run_limit?: number } = {}
+): Promise<SupplierGroupElectionDiagnosticsResult> {
+  const { data } = await apiClient.get<SupplierGroupElectionDiagnosticsResult>(
+    '/admin/supplier-management/automation/group-election-diagnostics',
+    { params }
+  )
+  return data
+}
+
 export const supplierAutomationAPI = {
   listTasks,
   updateTask,
@@ -758,6 +784,7 @@ export const supplierAutomationAPI = {
   listRuns,
   listRateGuardChangeLogs,
   listGroupElectionChangeLogs,
+  getGroupElectionDiagnostics,
   markRateGuardChangeLogHandled,
   listAccountRateGuardUnbindLogs,
   markAccountRateGuardUnbindLogHandled,

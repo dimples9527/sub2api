@@ -159,6 +159,8 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 			automation.GET("/rate-guard-change-logs", h.Admin.SupplierAutomation.ListRateGuardChangeLogs)
 			automation.GET("/account-rate-guard-unbind-logs", h.Admin.SupplierAutomation.ListAccountRateGuardUnbindLogs)
 			automation.GET("/group-election-change-logs", h.Admin.SupplierAutomation.ListGroupSchedulingElectionChangeLogs)
+			// 诊断快照：把「配置 + 分组现状 + 开启账号 + 最近几轮决策」拼成一段可直接拷走的文本。
+			automation.GET("/group-election-diagnostics", h.Admin.SupplierAutomation.GetGroupSchedulingElectionDiagnostics)
 			automation.POST("/rate-guard-change-logs/:id/handled", h.Admin.SupplierAutomation.MarkRateGuardChangeLogHandled)
 			automation.POST("/account-rate-guard-unbind-logs/:id/handled", h.Admin.SupplierAutomation.MarkAccountRateGuardUnbindLogHandled)
 			// 一键处理：路径少一段（没有 :id），与上面那条不构成 gin 的路由冲突。

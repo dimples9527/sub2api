@@ -23,6 +23,7 @@ type SupplierAutomationServicePort interface {
 	MarkAccountRateGuardUnbindLogHandled(ctx context.Context, id int64) (service.SupplierAccountRateGuardUnbindLog, error)
 	MarkAccountRateGuardUnbindLogsHandled(ctx context.Context, params service.SupplierAccountRateGuardUnbindLogListParams) (service.SupplierAccountRateGuardUnbindLogBatchHandledResult, error)
 	ListGroupSchedulingElectionChangeLogs(ctx context.Context, params service.SupplierGroupSchedulingElectionChangeLogListParams) (service.SupplierGroupSchedulingElectionChangeLogListResult, error)
+	BuildGroupSchedulingElectionDiagnostics(ctx context.Context, runLimit int) (string, error)
 }
 
 type SupplierAutomationHandler struct {
@@ -196,6 +197,34 @@ func (h *SupplierAutomationHandler) ListGroupSchedulingElectionChangeLogs(c *gin
 		return
 	}
 	response.Success(c, result)
+}
+
+// GetGroupSchedulingElectionDiagnostics 导出「分组择优调度」的诊断快照文本。
+//
+// 存在的理由：这个任务的业务执行过程一行日志都不打，排查「某组为什么开着多个账号」
+// 只能翻 result_detail，而那里的 items 又不含「没发生变化的账号」——
+// 「某组当前开着几个」这个数只存在于 accounts.schedulable。这里把它连同配置与最近几轮决策
+// 一次性拼好，管理员点一下就能拷走，不必再手写 SQL。
+// 返回 JSON 而不是 text/plain，是为了跟本模块其它接口共用同一套响应包装与错误处理。
+func (h *SupplierAutomationHandler) GetGroupSchedulingElectionDiagnostics(c *gin.Context) {
+	runLimit := 0
+	if raw := strings.TrimSpace(c.Query("run_limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			response.ErrorFrom(c, badRequest("回溯轮数必须是正整数"))
+			return
+		}
+		runLimit = parsed
+	}
+	text, err := h.service.BuildGroupSchedulingElectionDiagnostics(c.Request.Context(), runLimit)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{
+		"generated_at": time.Now(),
+		"text":         text,
+	})
 }
 
 func (h *SupplierAutomationHandler) MarkAccountRateGuardUnbindLogHandled(c *gin.Context) {

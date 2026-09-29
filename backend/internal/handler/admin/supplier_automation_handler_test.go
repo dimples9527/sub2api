@@ -84,6 +84,10 @@ func (s *supplierAutomationHandlerServiceStub) ListGroupSchedulingElectionChange
 	}, nil
 }
 
+func (s *supplierAutomationHandlerServiceStub) BuildGroupSchedulingElectionDiagnostics(context.Context, int) (string, error) {
+	return "=== 分组择优调度 · 诊断快照 ===\n", nil
+}
+
 func TestSupplierAutomationHandlerRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	stub := &supplierAutomationHandlerServiceStub{}
@@ -99,6 +103,7 @@ func TestSupplierAutomationHandlerRoutes(t *testing.T) {
 	router.POST("/automation/account-rate-guard-unbind-logs/handled-batch", handler.MarkAccountRateGuardUnbindLogsHandled)
 	router.POST("/automation/rate-guard-change-logs/:id/handled", handler.MarkRateGuardChangeLogHandled)
 	router.GET("/automation/group-election-change-logs", handler.ListGroupSchedulingElectionChangeLogs)
+	router.GET("/automation/group-election-diagnostics", handler.GetGroupSchedulingElectionDiagnostics)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/automation/tasks", nil)
@@ -177,6 +182,20 @@ func TestSupplierAutomationHandlerRoutes(t *testing.T) {
 	require.NotNil(t, stub.groupElectionLogParams.StartedFrom)
 	require.NotNil(t, stub.groupElectionLogParams.StartedTo)
 	require.Equal(t, 20*24*time.Hour, stub.groupElectionLogParams.StartedTo.Sub(*stub.groupElectionLogParams.StartedFrom))
+
+	// 诊断快照：不带参数也要能出文本；run_limit 非法时给 400 而不是静默回落 ——
+	// 否则前端传错参数会被"看起来正常"的快照掩盖，排查时又白跑一趟。
+	// 断言用 ASCII 字段名：响应是 c.JSON，中文会被转义成 \uXXXX，直接匹配中文必然失败。
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/automation/group-election-diagnostics", nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "generated_at")
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/automation/group-election-diagnostics?run_limit=abc", nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 // 一键处理的路径少一段（没有 :id），与单条处理的 /:id/handled 并存。

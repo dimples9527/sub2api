@@ -2822,6 +2822,38 @@ func normalizeSupplierGroupSchedulingElectionChangeLogListParams(params service.
 	return params
 }
 
+// ListGroupSchedulingElectionDiagnosticsRows 返回「账号 → 所属分组」的展开行，供诊断快照聚合。
+//
+// 刻意不带任何筛选、也不分页：快照要回答的第一个问题就是「有没有哪个分组开着不止 TopN 个账号」，
+// 而这个问题只有在全量视图下才看得出来 —— 跨组共享成员正是主因，分页会恰好漏掉要找的那几行。
+//
+// 两个 JOIN 都用内连接：不属于任何分组的账号根本不参与择优，放进快照只会干扰阅读。
+func (r *supplierProviderDataRepository) ListGroupSchedulingElectionDiagnosticsRows(ctx context.Context) ([]service.SupplierGroupSchedulingElectionDiagnosticsRow, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT a.id, a.name, a.platform, a.schedulable, g.id, g.name
+FROM account_groups ag
+JOIN accounts a ON a.id = ag.account_id AND a.deleted_at IS NULL
+JOIN groups g ON g.id = ag.group_id AND g.deleted_at IS NULL
+ORDER BY a.id, g.id`)
+	if err != nil {
+		return nil, fmt.Errorf("查询分组择优诊断快照失败: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	result := make([]service.SupplierGroupSchedulingElectionDiagnosticsRow, 0)
+	for rows.Next() {
+		var row service.SupplierGroupSchedulingElectionDiagnosticsRow
+		if err := rows.Scan(&row.AccountID, &row.AccountName, &row.Platform, &row.Schedulable, &row.GroupID, &row.GroupName); err != nil {
+			return nil, fmt.Errorf("扫描分组择优诊断快照失败: %w", err)
+		}
+		result = append(result, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历分组择优诊断快照失败: %w", err)
+	}
+	return result, nil
+}
+
 func (r *supplierProviderDataRepository) ListGroupSchedulingElectionChangeLogs(ctx context.Context, params service.SupplierGroupSchedulingElectionChangeLogListParams) (service.SupplierGroupSchedulingElectionChangeLogListResult, error) {
 	params = normalizeSupplierGroupSchedulingElectionChangeLogListParams(params)
 

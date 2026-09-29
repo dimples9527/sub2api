@@ -1,5 +1,6 @@
 export { default as SupplierDrawer } from './SupplierDrawer.vue'
 export { default as SupplierGroupElectionChangeLogDialog } from './SupplierGroupElectionChangeLogDialog.vue'
+export { default as SupplierGroupElectionDiagnosticsDialog } from './SupplierGroupElectionDiagnosticsDialog.vue'
 export { default as SupplierAccountRateGuardLogDialog } from './SupplierAccountRateGuardLogDialog.vue'
 export { default as SupplierAccountHealthGuardResult } from './SupplierAccountHealthGuardResult.vue'
 export { default as SupplierHealthGuardRunDialog } from './SupplierHealthGuardRunDialog.vue'

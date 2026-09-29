@@ -152,6 +152,16 @@
               >
                 调度切换日志
               </button>
+              <!-- 与「调度切换日志」同色：同属择优调度这一族，不新增色板。
+                   区别在用途——那边看「谁被拨动了」，这边看「现在到底开着几个」。 -->
+              <button
+                class="sp-button small ghost sp-election-log-entry"
+                type="button"
+                data-test="open-election-diagnostics"
+                @click="openElectionDiagnostics"
+              >
+                诊断快照
+              </button>
             </div>
           </header>
           <div class="sp-panel-body">
@@ -1581,13 +1591,20 @@
         @close="closeElectionChangeLogs"
       />
 
+      <!-- 诊断快照：把排查所需的上下文（配置 / 各分组开启数 / 开启中的账号 / 最近几轮决策）
+           拼成一段纯文本，供管理员一键复制交给他人排查，不必再手写 SQL。 -->
+      <SupplierGroupElectionDiagnosticsDialog
+        :show="electionDiagnosticsVisible"
+        @close="closeElectionDiagnostics"
+      />
+
     </div>
   </SupplierModuleLayout>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { SupplierAccountHealthGuardResult, SupplierAccountRateGuardLogDialog, SupplierGroupElectionChangeLogDialog, SupplierModuleLayout } from '@/components/admin/supplier-management'
+import { SupplierAccountHealthGuardResult, SupplierAccountRateGuardLogDialog, SupplierGroupElectionChangeLogDialog, SupplierGroupElectionDiagnosticsDialog, SupplierModuleLayout } from '@/components/admin/supplier-management'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Input from '@/components/common/Input.vue'
@@ -1652,6 +1669,7 @@ const accountRateGuardLogsVisible = ref(false)
 const accountRateGuardPendingCount = ref(0)
 // 全局视角的调度切换日志：不锁定分组，分组页那个入口才带 group-id。
 const electionChangeLogsVisible = ref(false)
+const electionDiagnosticsVisible = ref(false)
 const rateGuardGroupsVisible = ref(false)
 const rateGuardGroupSearch = ref('')
 const rateGuardGroupDisabledOnly = ref(false)
@@ -1898,6 +1916,14 @@ function openElectionChangeLogs() {
 
 function closeElectionChangeLogs() {
   electionChangeLogsVisible.value = false
+}
+
+function openElectionDiagnostics() {
+  electionDiagnosticsVisible.value = true
+}
+
+function closeElectionDiagnostics() {
+  electionDiagnosticsVisible.value = false
 }
 
 async function loadAccountRateGuardPendingCount() {
