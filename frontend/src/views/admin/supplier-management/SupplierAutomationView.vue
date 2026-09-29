@@ -1411,7 +1411,39 @@
             </div>
 
             <div v-if="loadingRateGuardGroups" class="sp-rate-guard-empty">正在加载分组...</div>
-            <div v-else-if="electionFilteredGroups.length" class="sp-rate-guard-group-list">
+            <template v-else-if="electionFilteredGroups.length">
+              <!-- 批量操作条：勾选框专门用来多选，配合这里的批量开关整批改状态。
+                   全选只作用于「当前筛选」的结果（与工具栏筛选联动）；
+                   只在有勾选时展开可执行的批量动作，避免空架子占地方。 -->
+              <div class="sp-group-election-batch-bar">
+                <label class="sp-group-election-batch-master">
+                  <input
+                    type="checkbox"
+                    :checked="electionGroupAllChecked"
+                    :aria-label="`全选当前筛选的 ${electionFilteredGroups.length} 个分组`"
+                    @change="toggleElectionGroupCheckAll"
+                  />
+                  <span>全选</span>
+                </label>
+                <span class="sp-group-election-batch-count">已选 <strong>{{ electionGroupCheckedIDs.length }}</strong> 个</span>
+                <template v-if="electionGroupCheckedIDs.length">
+                  <span class="sp-group-election-batch-divider"></span>
+                  <span class="sp-group-election-batch-label">参与择优</span>
+                  <button type="button" class="sp-group-election-batch-btn" @click="batchElectionGroupsSelect(true)">批量开启</button>
+                  <button type="button" class="sp-group-election-batch-btn" @click="batchElectionGroupsSelect(false)">批量关闭</button>
+                  <span class="sp-group-election-batch-label">健康锁定</span>
+                  <button type="button" class="sp-group-election-batch-btn" @click="batchElectionGroupsKeepHealthy(true)">批量开锁</button>
+                  <button type="button" class="sp-group-election-batch-btn" @click="batchElectionGroupsKeepHealthy(false)">批量解锁</button>
+                  <span class="sp-group-election-batch-label">演练</span>
+                  <button type="button" class="sp-group-election-batch-btn" @click="batchElectionGroupsDryRun(true)">批量开启</button>
+                  <button type="button" class="sp-group-election-batch-btn" @click="batchElectionGroupsDryRun(false)">批量关闭</button>
+                  <span class="sp-group-election-batch-label">计优先级</span>
+                  <button type="button" class="sp-group-election-batch-btn" @click="batchElectionGroupsPriority(true)">批量开启</button>
+                  <button type="button" class="sp-group-election-batch-btn" @click="batchElectionGroupsPriority(false)">批量关闭</button>
+                  <button type="button" class="sp-group-election-batch-clear" @click="clearElectionGroupChecks">清空勾选</button>
+                </template>
+              </div>
+              <div class="sp-rate-guard-group-list">
               <article
                 v-for="group in electionFilteredGroups"
                 :key="group.id"
@@ -1420,11 +1452,13 @@
                 :style="{ '--sp-group-platform-color': platformAccentColor(group.platform) }"
               >
                 <label class="sp-rate-guard-group-choice">
+                  <!-- 勾选框只负责「多选 + 批量操作」：是否参与择优改由行内「参与择优」开关控制，
+                       两者不再共用同一个框，选中不等同于参与，避免误改。 -->
                   <input
                     type="checkbox"
-                    :checked="!electionGroupIsDisabled(group.id)"
-                    :aria-label="`${electionGroupIsDisabled(group.id) ? '开启' : '关闭'}分组 ${group.name} 的择优调度`"
-                    @change="toggleElectionGroup(group.id)"
+                    :checked="electionGroupIsChecked(group.id)"
+                    :aria-label="`选择分组 ${group.name} 用于批量操作`"
+                    @change="toggleElectionGroupCheck(group.id)"
                   />
                   <span class="sp-rate-guard-group-choice-copy">
                     <strong :class="platformTextClass(group.platform)">{{ group.name }}</strong>
@@ -1443,7 +1477,7 @@
                 </span>
                 <label
                   v-else
-                  class="sp-health-guard-account-scheduling-toggle sp-election-keep-healthy-toggle"
+                  class="sp-health-guard-account-scheduling-toggle sp-election-keep-healthy-toggle sp-election-toggle-health"
                   :title="`打开后：分组「${group.name}」当前开着调度的账号测试都正常时，保留现状、跳过择优与换人；有开着的账号失败仍走正常择优`"
                 >
                   <Toggle
@@ -1455,7 +1489,7 @@
                 </label>
                 <label
                   v-if="!electionGroupIsDisabled(group.id)"
-                  class="sp-health-guard-account-scheduling-toggle sp-election-dry-run-toggle"
+                  class="sp-health-guard-account-scheduling-toggle sp-election-dry-run-toggle sp-election-toggle-dryrun"
                   :title="`打开后：分组「${group.name}」只给出建议、不真的改调度（总开关打开时全部分组都演练）`"
                 >
                   <Toggle
@@ -1477,6 +1511,19 @@
                   />
                   <span>计优先级</span>
                 </label>
+                <!-- 参与择优开关列：不参与的分组也要能直接勾回来，所以不像其它开关那样用 v-if 隐藏 ——
+                     位置固定在网格第 5 列，行与行对齐不随显隐摇晃。 -->
+                <label
+                  class="sp-health-guard-account-scheduling-toggle sp-election-participate-toggle"
+                  :title="`打开后：分组「${group.name}」参与择优调度；关闭则不参与（同时清空其健康锁定/演练/计优先级配置）`"
+                >
+                  <Toggle
+                    :model-value="electionGroupParticipates(group.id)"
+                    :aria-label="`分组 ${group.name} 是否参与择优调度`"
+                    @update:model-value="toggleElectionGroup(group.id)"
+                  />
+                  <span>参与择优</span>
+                </label>
                 <label
                   v-if="!electionGroupIsDisabled(group.id)"
                   class="sp-election-required-models"
@@ -1493,7 +1540,8 @@
                   />
                 </label>
               </article>
-            </div>
+              </div>
+            </template>
             <div v-else class="sp-rate-guard-empty">{{ electionGroupEmptyHint }}</div>
           </section>
         </div>
@@ -1616,6 +1664,10 @@ const electionGroupsVisible = ref(false)
 const electionGroupSearch = ref('')
 const electionGroupDisabledOnly = ref(false)
 const electionGroupPlatformFilter = ref<string[]>([])
+// 分组择优弹窗的勾选集合：只服务「多选 + 批量操作」，是纯界面瞬时状态，不写进任务配置。
+// 与「是否参与择优」彻底解耦 —— 旧实现让两者共用一个勾选框，
+// 结果「想批量操作先勾一下」会把分组静默改成不参与择优。
+const electionGroupCheckedIDs = ref<number[]>([])
 const healthGuardAccountsVisible = ref(false)
 const multiplierIntervalDialogVisible = ref(false)
 const healthGuardAccountPlatformFilter = ref<string[]>([])
@@ -2590,6 +2642,14 @@ const groupElectionRequiredModelsMap = computed<Record<string, string[]>>(() => 
 
 const groupElectionRequiredModelsCount = computed(() => Object.keys(groupElectionRequiredModelsMap.value).length)
 
+// 分组择优列表按倍率升序：倍率低的分组排前面，方便一眼看到最便宜的优先级。
+// 完全没有可用倍率的分组排到最后 —— 用 0 代替会把「免费(0)」和「查不到倍率」混在一起，
+// 排序键口径与行上显示的 `倍率 xx` 一致（Number + Number.isFinite，同 healthGuard 那套）。
+function groupRateMultiplierSortKey(group: AdminGroup): number {
+  const rate = Number(group.rate_multiplier)
+  return Number.isFinite(rate) ? rate : Number.POSITIVE_INFINITY
+}
+
 const electionGroupScopeSummary = computed(() => {
   const disabled = groupElectionDisabledGroupIDs.value.length
   return {
@@ -2609,13 +2669,22 @@ const electionFilteredGroups = computed(() => {
   if (electionGroupDisabledOnly.value) {
     result = result.filter(group => electionGroupIsDisabled(group.id))
   }
-  if (!keyword) {
-    return result
+  if (keyword) {
+    result = result.filter(group =>
+      group.name.toLowerCase().includes(keyword) || String(group.id).includes(keyword)
+    )
   }
-  return result.filter(group =>
-    group.name.toLowerCase().includes(keyword) || String(group.id).includes(keyword)
-  )
+  // 筛选之后再排倍率序：排序基准固定，列表顺序不随筛选/开关翻转跳变。
+  return [...result].sort((a, b) => groupRateMultiplierSortKey(a) - groupRateMultiplierSortKey(b))
 })
+
+// 全选只作用于「当前筛选」的结果（与工具栏筛选联动），不是全部可选分组 ——
+// 否则在「仅看已关闭」下点全选，会把看不见的行也一起勾上，批量动作的范围和眼前看到的对不上。
+const electionGroupAllChecked = computed(
+  () =>
+    electionFilteredGroups.value.length > 0 &&
+    electionFilteredGroups.value.every(group => electionGroupCheckedIDs.value.includes(group.id))
+)
 
 // 编辑弹窗的宽度由「最宽那一行的列数」决定，不是区块个数 ——
 // 3 列网格（健康守护 7 个输入框 / 数据保留 4 个输入框）每列都要放得下「标签 + 输入框」，
@@ -3227,6 +3296,9 @@ async function openElectionGroups() {
   electionGroupSearch.value = ''
   electionGroupDisabledOnly.value = false
   electionGroupPlatformFilter.value = []
+  // 勾选是上一次操作的残留，必须随弹窗一起重置：带着旧勾选打开，
+  // 用户看到「已选 3 个」却不知道是哪 3 个（尤其是被筛选挡住的行）。
+  electionGroupCheckedIDs.value = []
   if (rateGuardGroups.value.length > 0) {
     return
   }
@@ -3247,6 +3319,13 @@ function closeElectionGroups() {
 
 function electionGroupIsDisabled(groupID: number): boolean {
   return groupElectionDisabledGroupIDs.value.includes(groupID)
+}
+
+// 「参与择优」开关列的生效值：不在关闭名单里就是参与。
+// 独立成一个函数而不是在模板里写 `!electionGroupIsDisabled(...)`，
+// 是因为批量操作也要用同一个口径判断「是否需要改」，两处写两份迟早会分叉。
+function electionGroupParticipates(groupID: number): boolean {
+  return !electionGroupIsDisabled(groupID)
 }
 
 function toggleElectionGroup(groupID: number) {
@@ -3383,6 +3462,110 @@ function enableAllElectionGroups() {
   if (current.length > 0) {
     appStore.showSuccess(`已将 ${current.length} 个分组恢复为参与择优，保存任务后生效`)
   }
+}
+
+/* ---- 勾选与批量操作：勾选框只负责多选，不再兼任「是否参与择优」 ---- */
+
+function electionGroupIsChecked(groupID: number): boolean {
+  return electionGroupCheckedIDs.value.includes(groupID)
+}
+
+function toggleElectionGroupCheck(groupID: number) {
+  electionGroupCheckedIDs.value = electionGroupIsChecked(groupID)
+    ? electionGroupCheckedIDs.value.filter(id => id !== groupID)
+    : [...electionGroupCheckedIDs.value, groupID]
+}
+
+// 全选/取消全选都只动「当前筛选」的 id；已勾选但被筛掉的行保持原样 ——
+// 用户切换筛选正是为了分批处理，切一次筛选就把前面的勾选清掉等于白干一遍。
+function toggleElectionGroupCheckAll() {
+  const ids = electionFilteredGroups.value.map(group => group.id)
+  if (ids.length === 0) return
+  if (ids.every(id => electionGroupCheckedIDs.value.includes(id))) {
+    electionGroupCheckedIDs.value = electionGroupCheckedIDs.value.filter(id => !ids.includes(id))
+    return
+  }
+  electionGroupCheckedIDs.value = [...new Set([...electionGroupCheckedIDs.value, ...ids])]
+}
+
+function clearElectionGroupChecks() {
+  electionGroupCheckedIDs.value = []
+}
+
+// 批量操作的公共骨架：只对「当前值与目标值不一致」的分组调一次单行开关函数，
+// 复用同一套落库逻辑（该写哪个名单、该连带清哪些名单），不另写一份改配置的代码。
+// requireParticipating：不参与择优的行上根本没有「健康锁定 / 演练 / 计优先级」开关，
+// 批量时同样跳过 —— 否则会给一个不参与择优的分组写下一堆不生效的配置，摘要里还会多算一笔。
+function applyElectionGroupBatch(
+  label: string,
+  desired: boolean,
+  readCurrent: (groupID: number) => boolean,
+  apply: (groupID: number) => void,
+  requireParticipating = true
+) {
+  const targets = [...electionGroupCheckedIDs.value]
+  let changed = 0
+  let skipped = 0
+  for (const groupID of targets) {
+    if (requireParticipating && !electionGroupParticipates(groupID)) {
+      skipped += 1
+      continue
+    }
+    if (readCurrent(groupID) === desired) continue
+    apply(groupID)
+    changed += 1
+  }
+  const skipNote = skipped > 0 ? `，跳过 ${skipped} 个未参与择优的分组` : ''
+  if (changed > 0) {
+    appStore.showSuccess(
+      `已将 ${changed} 个分组的「${label}」设为${desired ? '开启' : '关闭'}${skipNote}，保存任务后生效`
+    )
+    return
+  }
+  if (skipped > 0) {
+    appStore.showError(`所选分组都不参与择优，无法设置「${label}」`)
+    return
+  }
+  appStore.showSuccess(`所选分组的「${label}」已是${desired ? '开启' : '关闭'}，无需修改`)
+}
+
+function batchElectionGroupsSelect(participates: boolean) {
+  applyElectionGroupBatch(
+    '参与择优',
+    participates,
+    groupID => electionGroupParticipates(groupID),
+    groupID => toggleElectionGroup(groupID),
+    false
+  )
+}
+
+function batchElectionGroupsKeepHealthy(enabled: boolean) {
+  applyElectionGroupBatch(
+    '健康锁定',
+    enabled,
+    groupID => electionGroupKeepHealthy(groupID),
+    groupID => toggleElectionKeepHealthyGroup(groupID)
+  )
+}
+
+function batchElectionGroupsDryRun(enabled: boolean) {
+  // 读「名单里的原始状态」而不是行上显示的生效值：总开关打开时全部分组都显示成演练中，
+  // 用生效值判断会让「批量关闭」对一个不在名单里的分组调 toggle，反倒把它加进名单。
+  applyElectionGroupBatch(
+    '演练',
+    enabled,
+    groupID => groupElectionDryRunGroupIDs.value.includes(groupID),
+    groupID => toggleElectionGroupDryRun(groupID)
+  )
+}
+
+function batchElectionGroupsPriority(enabled: boolean) {
+  applyElectionGroupBatch(
+    '计优先级',
+    enabled,
+    groupID => electionGroupPriority(groupID),
+    groupID => toggleElectionGroupPriority(groupID)
+  )
 }
 
 async function openHealthGuardAccounts() {
@@ -4744,24 +4927,27 @@ function intervalSecondsToCron(seconds: number): string | null {
   background: var(--sp-panel);
 }
 
-/* 宽度收窄到内容真正需要的尺度：这个弹窗里只有"摘要三块 + 搜索 + 单行列表"，
-   1000px 已经能把分组名、ID、倍率、状态排得疏朗，再宽只是把三段内容拉开成三座孤岛。
-   与编辑弹窗那种「多区块表单」不同 —— 那是必须铺满才能容纳两列网格的。
-   只在 >=768px 生效，窄屏沿用 BaseDialog 的 full 档表现。 */
+/* 宽度按 90% 视口给：用户要求把「配置分组」弹窗放宽到 90%。
+   这个弹窗里是"摘要三块 + 搜索 + 每组多列开关"，列宽越大越好排。
+   选择器与上方分组择优编辑弹窗那条同权重、同媒体条件，靠源码顺序取胜
+   （本块排更后面，故覆盖上面 90vw 同名选择器里不含 .sp-rate-guard-group-dialog 的部分不影响）——
+   它是真正给分组弹窗生效的那一条。
+   只 <= 100vw 生效、窄屏沿用 BaseDialog 的 full 档表现。 */
 @media (min-width: 768px) {
   :global(.modal-content:has(.sp-rate-guard-group-dialog)) {
-    width: min(1000px, calc(100vw - 2rem));
-    max-width: min(1000px, calc(100vw - 2rem));
+    width: 90vw;
+    max-width: 90vw;
   }
 }
 
-/* 高度同步收窄：宽度降到 1000px 后再顶满 100dvh 会显得又瘦又长。
-   上限按内容量给（最多几十个分组，列表自身还会滚动），
-   低于视口时才生效，屏幕不够高时仍会自动缩到视口内。 */
+/* 高度按 95% 视口给：用户要求把「配置分组」弹窗加高到 95%。
+   分组择优这个弹窗内容最多（三块摘要 + 搜索/筛选 + 每组多列开关 + 必需模型输入），
+   高度给足才能少滚动、多看几行。列表仍由 .modal-body 内部滚动承接，
+   不设固定上限、也不在窄屏缩回，直接铺到视口高度的 95%。 */
 @media (min-width: 640px) {
   :global(.modal-content:has(.sp-rate-guard-group-dialog)) {
-    height: min(760px, calc(100dvh - 2rem));
-    max-height: min(760px, calc(100dvh - 2rem));
+    height: 95vh;
+    max-height: 95vh;
   }
 }
 
@@ -5661,6 +5847,106 @@ function intervalSecondsToCron(seconds: number): string | null {
   font-variant-numeric: tabular-nums;
 }
 
+/* 批量操作条：夹在工具栏与列表之间，不随列表滚动 —— 滚到第 50 行还能直接点批量按钮。
+   动作只在有勾选时展开：没勾选时先摆一排灰按钮，用户会以为能点。 */
+.sp-group-election-batch-bar {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--sp-line);
+  background: color-mix(in srgb, var(--sp-cyan) 5%, var(--sp-panel));
+}
+
+.sp-group-election-batch-master {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--sp-text);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.sp-group-election-batch-master input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border-radius: 4px;
+  /* 与列表行里的勾选框同一套外观：两者是同一个多选模型的两个入口，
+     样式分叉会让人以为是两套互不相干的选中。 */
+  accent-color: var(--sp-cyan);
+  cursor: pointer;
+}
+
+.sp-group-election-batch-master input[type='checkbox']:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--sp-cyan) 40%, transparent);
+  outline-offset: 2px;
+}
+
+.sp-group-election-batch-count {
+  color: var(--sp-muted);
+  font-size: 12px;
+}
+
+.sp-group-election-batch-count strong {
+  color: var(--sp-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-group-election-batch-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--sp-line);
+}
+
+.sp-group-election-batch-label {
+  color: var(--sp-muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.sp-group-election-batch-btn {
+  border: 1px solid var(--sp-line);
+  border-radius: 8px;
+  padding: 0.2rem 0.6rem;
+  background: var(--sp-panel);
+  color: var(--sp-text);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 160ms ease, color 160ms ease, background-color 160ms ease;
+}
+
+.sp-group-election-batch-btn:hover {
+  border-color: color-mix(in srgb, var(--sp-cyan) 40%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-cyan) 8%, var(--sp-panel));
+  color: var(--sp-cyan);
+}
+
+.sp-group-election-batch-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--sp-cyan) 40%, transparent);
+  outline-offset: 2px;
+}
+
+/* 「清空勾选」是收尾动作、不是一次批量改配置，因此不跟批量按钮抢视觉重量：
+   贴右侧、只用文字下划线，避免被误当成第四个批量动作点下去。 */
+.sp-group-election-batch-clear {
+  margin-left: auto;
+  border: 0;
+  padding: 0.2rem 0.2rem;
+  background: transparent;
+  color: var(--sp-muted);
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.sp-group-election-batch-clear:hover {
+  color: var(--sp-text);
+}
+
 /* 平台标签独占一行（flex-basis: 100%）。三个弹窗共用同一套控件：
    分组弹窗里搜索框 + 「仅看已关闭」已经占满第一行，标签挤进去会把搜索框压到没法输入，
    而平台数量还会随分组增长；账号弹窗里更要放在 grid 容器之外（flex-basis 在 grid 里不生效）。 */
@@ -5751,6 +6037,57 @@ function intervalSecondsToCron(seconds: number): string | null {
   padding: 10px 14px;
   background: var(--sp-panel);
   transition: background-color 160ms ease, box-shadow 160ms ease;
+}
+
+/* 分组择优调度弹窗的分组行改走网格：它比倍率守护行多了「健康锁定 / 演练 / 计优先级 / 参与择优」
+   四个开关和「必需模型」输入。宽弹窗下面用 flex + space-between 时，每组名字长短、
+   徽标、ID 占比都不固定，后面的开关列位置被挤得左摇右摆 —— 这行这么多列，
+   必须把每一列宽度钉死，行与行才能对齐。
+   判据取「参与择优」开关（每行都渲染），不能取「健康锁定」：后者是 v-else 分支，
+   已关闭的行上没有它，那些行会退回 flex，同一张列表里出现两种排法。
+   这个开关类只出现在择优弹窗，倍率守护弹窗的两列行不受影响。
+   列宽：名字区不自设宽度(1fr 吃掉剩余)、四个开关各自 auto（文字/toggle 尺寸恒定，天然等宽），
+   必需模型占满整行另起一行(grid-column 1/-1)，不与开关并排。 */
+.sp-rate-guard-group-row:has(.sp-election-participate-toggle) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
+  align-items: center;
+  column-gap: 14px;
+}
+
+/* 每一列都显式定位，不靠自动排布：已关闭的行少渲染「健康锁定 / 演练 / 计优先级」三个开关，
+   自动排布会把「参与择优」顶到第 3 列，与参与中的行（第 5 列）横向错开 ——
+   而这一列正是用户扫视"哪些分组算数"的锚点，错开就白做了。 */
+.sp-rate-guard-group-row:has(.sp-election-participate-toggle) > .sp-rate-guard-group-choice {
+  grid-column: 1;
+}
+
+.sp-rate-guard-group-row:has(.sp-election-participate-toggle) > .sp-rate-guard-group-status,
+.sp-rate-guard-group-row:has(.sp-election-participate-toggle) > .sp-election-toggle-health {
+  grid-column: 2;
+}
+
+.sp-rate-guard-group-row:has(.sp-election-participate-toggle) > .sp-election-toggle-dryrun {
+  grid-column: 3;
+}
+
+.sp-rate-guard-group-row:has(.sp-election-participate-toggle) > .sp-election-toggle-priority {
+  grid-column: 4;
+}
+
+.sp-rate-guard-group-row:has(.sp-election-participate-toggle) > .sp-election-participate-toggle {
+  grid-column: 5;
+}
+
+.sp-rate-guard-group-row:has(.sp-election-participate-toggle) > .sp-election-required-models {
+  grid-column: 1 / -1;
+}
+
+/* 「参与择优」是这一行的主状态，另外三个开关都从属于它 ——
+   文字用正文色而不是次要灰，和左侧勾选框一起回答"这一行到底算不算数"。 */
+.sp-rate-guard-group-row .sp-election-participate-toggle {
+  color: var(--sp-text);
+  font-weight: 700;
 }
 
 .sp-rate-guard-group-row:last-child {
