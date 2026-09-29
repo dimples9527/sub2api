@@ -117,8 +117,8 @@ import { adminAPI } from '@/api/admin'
 import type { RechargePromoConfig } from '@/api/admin/rechargePromo'
 
 interface TierRow {
-  threshold: string
-  bonusPercent: string
+  threshold: string | number
+  bonusPercent: string | number
 }
 
 const { t } = useI18n()
@@ -196,8 +196,8 @@ async function save() {
   const payloadTiers: RechargePromoConfig['tiers'] = []
   const seen = new Set<number>()
   for (const row of tiers.value) {
-    const thresholdStr = row.threshold.trim()
-    const bonusStr = row.bonusPercent.trim()
+    const thresholdStr = String(row.threshold).trim()
+    const bonusStr = String(row.bonusPercent).trim()
     if (thresholdStr === '' && bonusStr === '') continue
     const threshold = Math.round(Number(thresholdStr) * 100) / 100
     const bonusPercent = Number(bonusStr)
