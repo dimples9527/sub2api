@@ -179,3 +179,4 @@ __tests__
 
 # git 仓库损坏时的临时备份目录（恢复验证通过后可手动删除）
 .git.bak-*/
+/tools/prod-sync
