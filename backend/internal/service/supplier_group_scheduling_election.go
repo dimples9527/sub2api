@@ -414,15 +414,26 @@ type SupplierGroupSchedulingElectionChangeLogListParams struct {
 	PageSize       int
 }
 
+// SupplierGroupSchedulingElectionRecentRun 是顶部快捷标签用的一条「最近批次」。
+// 带上 changed_at 是为了让前端显示「时间流水号」（20260923-100000）而不是裸的批次号 ——
+// 裸号既看不出是哪一批，也读不出先后，跨天回看还得回头去对时间。
+type SupplierGroupSchedulingElectionRecentRun struct {
+	RunID     int64     `json:"run_id"`
+	ChangedAt time.Time `json:"changed_at"`
+}
+
 type SupplierGroupSchedulingElectionChangeLogListResult struct {
 	Items    []SupplierGroupSchedulingElectionChangeLog `json:"items"`
 	Total    int64                                      `json:"total"`
 	Page     int                                        `json:"page"`
 	PageSize int                                        `json:"page_size"`
-	// RecentRunIDs 是最近若干次「确实拨动过开关」的批次号（新到旧），供页面顶部做快捷筛选标签。
+	// RecentRuns 是最近若干次「确实拨动过开关」的批次（新到旧），供页面顶部做快捷筛选标签。
 	// 刻意**不受页面筛选影响**：它是个来回切换的入口，若跟着筛选一起收窄，
 	// 点一下标签其余标签就消失了，反而没法用它换着看。
-	RecentRunIDs []int64 `json:"recent_run_ids,omitempty"`
+	//
+	// 「最近」按批次内的最早变更时间排，**不是**按 run_id：runs.id 是自增主键，
+	// 多个 worker 并发时会交错，按 id 排出来的「最近」在时间上并不成立。
+	RecentRuns []SupplierGroupSchedulingElectionRecentRun `json:"recent_runs,omitempty"`
 }
 
 // SupplierGroupSchedulingElectionChangeLogStore 由已注入的 dataRepo 断言得到。

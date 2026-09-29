@@ -2183,9 +2183,15 @@ func TestSupplierProviderDataRepositoryListGroupSchedulingElectionChangeLogsOrde
 		))
 
 	// 顶部快捷批次标签：只带「任务类型」这一个条件，所以参数只有 task_code。
-	mock.ExpectQuery(`(?s)SELECT DISTINCT e\.run_id FROM \(.*jsonb_array_elements.*\) e WHERE e\.schedulable_before <> e\.schedulable_after ORDER BY e\.run_id DESC LIMIT 5`).
+	// 带上 changed_at 是为了让前端显示时间流水号；排序也必须按时间 —— run_id 是自增主键，
+	// 多 worker 并发时会交错，按 id 排出来的「最近」在时间上并不成立。
+	recentNewer := time.Date(2026, 9, 23, 10, 0, 0, 0, time.UTC)
+	recentOlder := time.Date(2026, 9, 23, 9, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(`(?s)SELECT e\.run_id, MIN\(e\.changed_at\) AS changed_at FROM \(.*jsonb_array_elements.*\) e WHERE e\.schedulable_before <> e\.schedulable_after GROUP BY e\.run_id ORDER BY MIN\(e\.changed_at\) DESC, e\.run_id DESC LIMIT 5`).
 		WithArgs(service.SupplierAutomationTaskGroupElection).
-		WillReturnRows(sqlmock.NewRows([]string{"run_id"}).AddRow(int64(5001)).AddRow(int64(4998)))
+		WillReturnRows(sqlmock.NewRows([]string{"run_id", "changed_at"}).
+			AddRow(int64(5001), recentNewer).
+			AddRow(int64(4998), recentOlder))
 
 	result, err := repo.ListGroupSchedulingElectionChangeLogs(context.Background(), service.SupplierGroupSchedulingElectionChangeLogListParams{
 		GroupID:     81,
@@ -2218,7 +2224,12 @@ func TestSupplierProviderDataRepositoryListGroupSchedulingElectionChangeLogsOrde
 	require.Equal(t, "Plus", item.GroupDecisions[0].GroupName)
 	require.True(t, item.GroupDecisions[0].TestFailed)
 	require.True(t, item.GroupDecisions[0].NoAlternative)
-	// 最近批次标签由独立查询给出（只带任务类型），顺序即新到旧。
-	require.Equal(t, []int64{5001, 4998}, result.RecentRunIDs)
+	// 最近批次标签由独立查询给出（只带任务类型），顺序即新到旧；
+	// 每条还要带上变更时间，前端据此显示时间流水号而不是裸批次号。
+	require.Len(t, result.RecentRuns, 2)
+	require.Equal(t, int64(5001), result.RecentRuns[0].RunID)
+	require.True(t, result.RecentRuns[0].ChangedAt.Equal(recentNewer))
+	require.Equal(t, int64(4998), result.RecentRuns[1].RunID)
+	require.True(t, result.RecentRuns[1].ChangedAt.Equal(recentOlder))
 	require.NoError(t, mock.ExpectationsWereMet())
 }

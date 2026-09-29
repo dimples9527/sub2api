@@ -2895,24 +2895,29 @@ WHERE `+itemWhere+fmt.Sprintf(" ORDER BY e.changed_at DESC, e.run_id DESC, e.acc
 
 	// 顶部快捷批次标签。刻意只带「任务类型」这一个条件、不带页面筛选 ——
 	// 它是来回切换的入口，跟着筛选一起收窄的话，点一下标签其余标签就没了。
+	//
+	// 排序按批次内的最早变更时间，**不用 run_id**：runs.id 是自增主键，多 worker 并发时
+	// 会交错（实测 id 与时间不同序），按 id 排出来的「最近」在时间上不成立，
+	// 而标签上显示的正是时间流水号，顺序不对会一眼看出来。
 	recentSQL := fmt.Sprintf(`
-SELECT DISTINCT e.run_id
+SELECT e.run_id, MIN(e.changed_at) AS changed_at
 FROM (%s) e
 WHERE %s
-ORDER BY e.run_id DESC
+GROUP BY e.run_id
+ORDER BY MIN(e.changed_at) DESC, e.run_id DESC
 LIMIT %d`, supplierGroupSchedulingElectionChangeInnerSQL("r.task_code = $1"), supplierGroupSchedulingElectionChangeBaseCondition(params.IncludeSkipped), supplierGroupSchedulingElectionRecentRunLimit)
 	recentRows, err := r.db.QueryContext(ctx, recentSQL, args[0])
 	if err != nil {
 		return service.SupplierGroupSchedulingElectionChangeLogListResult{}, fmt.Errorf("查询分组调度切换日志的最近批次失败: %w", err)
 	}
 	defer func() { _ = recentRows.Close() }()
-	recentRunIDs := make([]int64, 0, supplierGroupSchedulingElectionRecentRunLimit)
+	recentRuns := make([]service.SupplierGroupSchedulingElectionRecentRun, 0, supplierGroupSchedulingElectionRecentRunLimit)
 	for recentRows.Next() {
-		var runID int64
-		if err := recentRows.Scan(&runID); err != nil {
+		var recent service.SupplierGroupSchedulingElectionRecentRun
+		if err := recentRows.Scan(&recent.RunID, &recent.ChangedAt); err != nil {
 			return service.SupplierGroupSchedulingElectionChangeLogListResult{}, fmt.Errorf("扫描分组调度切换日志的最近批次失败: %w", err)
 		}
-		recentRunIDs = append(recentRunIDs, runID)
+		recentRuns = append(recentRuns, recent)
 	}
 	if err := recentRows.Err(); err != nil {
 		return service.SupplierGroupSchedulingElectionChangeLogListResult{}, fmt.Errorf("遍历分组调度切换日志的最近批次失败: %w", err)
@@ -2920,6 +2925,6 @@ LIMIT %d`, supplierGroupSchedulingElectionChangeInnerSQL("r.task_code = $1"), su
 
 	return service.SupplierGroupSchedulingElectionChangeLogListResult{
 		Items: items, Total: total, Page: params.Page, PageSize: params.PageSize,
-		RecentRunIDs: recentRunIDs,
+		RecentRuns: recentRuns,
 	}, nil
 }
