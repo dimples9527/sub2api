@@ -2,6 +2,7 @@ import { apiClient, buildGatewayUrl } from '../client'
 import { ADMIN_UI_REQUEST_HEADER } from '../adminUIRequest'
 import { buildApiUrl } from '../url'
 import type { BatchAccountTestJob, GroupPlatform, SubscriptionType } from '@/types'
+import type { UpstreamModelSyncWarning } from './accounts'
 
 export type SupplierSyncScope = 'accounts' | 'groups' | 'balance' | 'cost' | 'monitor' | 'all'
 export type SupplierSyncStatus = 'success' | 'partial' | 'failed'
@@ -546,6 +547,51 @@ export async function getSupplierAccountBatchTestJob(jobID: string): Promise<Bat
 export async function cancelSupplierAccountBatchTestJob(jobID: string): Promise<BatchAccountTestJob> {
   const { data } = await apiClient.post<BatchAccountTestJob>(
     `/admin/supplier-management/accounts/batch-test/${jobID}/cancel`
+  )
+  return data
+}
+
+export type UpstreamModelBatchSyncMode = 'merge' | 'replace'
+
+export interface UpstreamModelBatchSyncItem {
+  account_id: number
+  account_name?: string
+  platform?: string
+  status: string
+  error_message?: string
+  upstream_total: number
+  added: number
+  removed: number
+  final_count: number
+  current_count: number
+  /** 同步后原样保留的手写别名映射条数（两种模式都不动它们） */
+  custom_mapping_kept: number
+  warnings?: UpstreamModelSyncWarning[]
+}
+
+export interface UpstreamModelBatchSyncResult {
+  total: number
+  success: number
+  failed: number
+  mode: UpstreamModelBatchSyncMode
+  applied: boolean
+  results: UpstreamModelBatchSyncItem[]
+}
+
+/**
+ * 批量同步所选账号的上游支持模型（入口在供应商账号页）
+ * @param payload.account_ids - 本地账号 ID
+ * @param payload.mode - 'merge' 保留现有白名单并追加，'replace' 换成上游列表
+ * @param payload.apply - false 只返回预览，不写白名单
+ */
+export async function syncUpstreamModelsBatch(payload: {
+  account_ids: number[]
+  mode: UpstreamModelBatchSyncMode
+  apply: boolean
+}): Promise<UpstreamModelBatchSyncResult> {
+  const { data } = await apiClient.post<UpstreamModelBatchSyncResult>(
+    '/admin/supplier-management/accounts/models/sync-upstream/batch',
+    payload
   )
   return data
 }

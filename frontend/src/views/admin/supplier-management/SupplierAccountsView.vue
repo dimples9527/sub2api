@@ -230,6 +230,23 @@
           >
             按分组绑定
           </button>
+          <!-- 与「测试当前筛选」同族：两者都是拿账号凭证去上游打一次真实请求，
+               共用蓝色表达这一点；区别在于这个按钮只作用于勾选到的账号。 -->
+          <button
+            class="sp-button sp-account-toolbar-btn sp-account-toolbar-sync-models"
+            type="button"
+            data-test="supplier-account-sync-upstream-models"
+            :disabled="syncModelsTargets.length === 0 || syncModelsSubmitting"
+            :title="syncModelsButtonHint"
+            @click="openSyncModelsDialog"
+          >
+            同步上游模型
+            <span
+              v-if="syncModelsTargets.length > 0"
+              class="sp-account-bind-count"
+              data-test="supplier-account-sync-upstream-models-count"
+            >{{ syncModelsTargets.length }}</span>
+          </button>
         </div>
       </div>
     </section>
@@ -1351,6 +1368,127 @@
     </BaseDialog>
 
     <BaseDialog
+      :show="showSyncModelsDialog"
+      title="批量同步上游模型"
+      width="wide"
+      @close="closeSyncModelsDialog"
+    >
+      <div class="sp-account-sync-dialog" data-test="supplier-account-sync-upstream-models-dialog">
+        <div class="sp-account-sync-metrics">
+          <div class="sp-account-sync-metric">
+            <span>已选账号</span>
+            <strong>{{ selectedAccounts.length }}</strong>
+          </div>
+          <div class="sp-account-sync-metric syncable">
+            <span>可同步</span>
+            <strong>{{ syncModelsTargets.length }}</strong>
+          </div>
+          <div v-if="selectedUnbindableAccountCount > 0" class="sp-account-sync-metric skipped">
+            <span>将跳过</span>
+            <strong>{{ selectedUnbindableAccountCount }}</strong>
+          </div>
+        </div>
+
+        <div
+          v-if="selectedUnbindableAccountCount > 0"
+          class="sp-account-sync-note warn"
+          data-test="supplier-account-sync-upstream-models-skip-note"
+        >
+          <p class="sp-account-sync-skip-title">
+            以下 {{ selectedUnbindableAccountCount }} 个账号没有匹配到本地账号，同步时会自动跳过：
+          </p>
+          <ul class="sp-account-sync-skip-list">
+            <li v-for="account in selectedUnbindableAccounts" :key="`sync-${account.id}`">
+              <strong>{{ batchBindSkipAccountLabel(account) }}</strong>
+              <span>{{ unbindableAccountReason(account) }}</span>
+            </li>
+          </ul>
+        </div>
+
+        <div class="sp-account-sync-field">
+          <span id="supplier-account-sync-mode-label" class="sp-account-sync-field-label">写入方式</span>
+          <Select
+            v-model="syncModelsMode"
+            class="w-full"
+            :options="upstreamSyncModeOptions"
+            :searchable="false"
+            aria-labelledby="supplier-account-sync-mode-label"
+          />
+        </div>
+
+        <p class="sp-account-sync-note">
+          <template v-if="syncModelsMode === 'merge'">
+            保留现有白名单，只追加上游多出来的模型；现有模型即使上游已下架也不会移除。
+          </template>
+          <template v-else>
+            先去除现有白名单，再把上游返回的模型加进来；因此上游已经下架的模型会被移除。
+          </template>
+          <strong>手写的别名映射与通配符规则不受影响，两种模式都原样保留。</strong>
+          无论选哪种，都会顺带刷新这些账号的模型能力快照。
+        </p>
+
+        <div
+          v-if="syncModelsResult"
+          class="sp-account-sync-result"
+          data-test="supplier-account-sync-upstream-models-result"
+        >
+          <p class="sp-account-sync-result-head">
+            {{ syncModelsResult.applied ? '已写入' : '预览' }}：
+            共 {{ syncModelsResult.total }} 个账号，成功 {{ syncModelsResult.success }} 个，失败 {{ syncModelsResult.failed }} 个。
+          </p>
+          <ul class="sp-account-sync-result-list">
+            <li
+              v-for="item in syncModelsResult.results"
+              :key="`sync-result-${item.account_id}`"
+              :data-test="`supplier-account-sync-upstream-models-item-${item.account_id}`"
+              :class="['sp-account-sync-result-item', item.status === 'success' ? 'ok' : 'failed']"
+            >
+              <strong>{{ syncModelsAccountLabel(item) }}</strong>
+              <span v-if="item.status === 'success'" class="sp-account-sync-result-detail">
+                上游 {{ item.upstream_total }} 个 · 新增 {{ item.added }} 个{{
+                  item.removed > 0 ? ` · 移除 ${item.removed} 个` : ''
+                }} · 同步后 {{ item.final_count }} 个{{
+                  item.custom_mapping_kept > 0 ? ` · 保留手写映射 ${item.custom_mapping_kept} 条` : ''
+                }}
+              </span>
+              <span v-else class="sp-account-sync-result-detail">
+                {{ item.error_message || '同步失败' }}
+              </span>
+            </li>
+          </ul>
+        </div>
+      </div>
+      <template #footer>
+        <button
+          class="sp-button ghost"
+          type="button"
+          :disabled="syncModelsSubmitting"
+          @click="closeSyncModelsDialog"
+        >取消</button>
+        <button
+          class="sp-button ghost"
+          type="button"
+          data-test="supplier-account-sync-upstream-models-preview"
+          :disabled="syncModelsSubmitting || syncModelsTargets.length === 0"
+          @click="runSyncUpstreamModels(false)"
+        >
+          {{ syncModelsSubmitting ? '同步中…' : '预览' }}
+        </button>
+        <button
+          class="sp-button primary"
+          type="button"
+          data-test="supplier-account-sync-upstream-models-apply"
+          :disabled="syncModelsSubmitting || syncModelsTargets.length === 0"
+          @click="runSyncUpstreamModels(true)"
+        >
+          {{ syncModelsSubmitting
+            ? '同步中…'
+            : `${syncModelsMode === 'replace' ? '去除并增加' : '保留并增加'}到 ${syncModelsTargets.length} 个账号` }}
+        </button>
+      </template>
+    </BaseDialog>
+
+    <BaseDialog
       :show="showBindByGroupDialog"
       title="按分组绑定账号"
       width="extra-wide"
@@ -1616,10 +1754,14 @@ import {
   listSupplierBindableLocalAccounts,
   setSupplierLocalAccountPlatformOverride,
   startSupplierAccountBatchTest,
+  syncUpstreamModelsBatch,
   type SupplierAccountGroupBindItemResult,
   type SupplierAccountGroupBindResult,
   type SupplierBindableLocalAccount,
   type SupplierProviderAccount,
+  type UpstreamModelBatchSyncItem,
+  type UpstreamModelBatchSyncMode,
+  type UpstreamModelBatchSyncResult,
 } from '@/api/admin/supplierProviderData'
 import Icon from '@/components/icons/Icon.vue'
 import { listAccountRateGuardUnbindLogs, listRuns, listTasks as listAutomationTasks } from '@/api/admin/supplierAutomation'
@@ -1903,6 +2045,86 @@ function closeBatchBindGroupsDialog() {
   if (batchBindSubmitting.value) return
   showBatchBindGroupsDialog.value = false
   batchBindGroupIDs.value = []
+}
+
+const upstreamSyncModeOptions: SelectOption[] = [
+  { value: 'merge', label: '保留现有并增加新的' },
+  { value: 'replace', label: '去除现有并增加新的' },
+]
+
+const showSyncModelsDialog = ref(false)
+const syncModelsMode = ref<UpstreamModelBatchSyncMode>('merge')
+const syncModelsSubmitting = ref(false)
+const syncModelsResult = ref<UpstreamModelBatchSyncResult | null>(null)
+
+// 只有匹配到本地账号的行才能同步：批量接口要的是本地 account ID。
+const syncModelsTargets = computed(() => bindableLocalAccountIDs(selectedBindableAccounts.value))
+
+const syncModelsButtonHint = computed(() => {
+  if (selectedAccounts.value.length === 0) return '先在上游账号表里勾选要同步的账号'
+  if (syncModelsTargets.value.length === 0) {
+    return '勾选的账号都没有匹配到本地账号，无法同步上游模型'
+  }
+  if (selectedUnbindableAccountCount.value > 0) {
+    return `同步已勾选的 ${syncModelsTargets.value.length} 个本地账号的上游模型`
+      + `（另有 ${selectedUnbindableAccountCount.value} 个未匹配账号会被跳过）`
+  }
+  return `同步已勾选的 ${syncModelsTargets.value.length} 个本地账号的上游模型`
+})
+
+function openSyncModelsDialog() {
+  if (syncModelsTargets.value.length === 0 || syncModelsSubmitting.value) return
+  syncModelsMode.value = 'merge'
+  syncModelsResult.value = null
+  showSyncModelsDialog.value = true
+}
+
+function closeSyncModelsDialog() {
+  if (syncModelsSubmitting.value) return
+  showSyncModelsDialog.value = false
+  syncModelsResult.value = null
+}
+
+function syncModelsAccountLabel(item: UpstreamModelBatchSyncItem): string {
+  // 后端已回传账号名，优先用它；查不到再用页面里已有的兜底命名。
+  return item.account_name || batchBindAccountLabel(item.account_id)
+}
+
+async function runSyncUpstreamModels(apply: boolean) {
+  if (syncModelsSubmitting.value || syncModelsTargets.value.length === 0) return
+  // 「去除现有并增加新的」会把白名单里上游已下架的条目删掉（手写映射不受影响），
+  // 属于不可逆的写入，所以只在真正落库且账号多于一个时才要求确认。
+  if (apply && syncModelsTargets.value.length > 1) {
+    const verb = syncModelsMode.value === 'replace' ? '去除现有白名单并增加新的' : '保留现有并增加新的'
+    const extra = syncModelsMode.value === 'replace'
+      ? '；上游已下架的模型会被移除（手写别名映射保留）'
+      : ''
+    if (!window.confirm(`将对 ${syncModelsTargets.value.length} 个账号${verb}上游模型${extra}。是否继续？`)) {
+      return
+    }
+  }
+  syncModelsSubmitting.value = true
+  try {
+    const result = await syncUpstreamModelsBatch({
+      account_ids: syncModelsTargets.value,
+      mode: syncModelsMode.value,
+      apply,
+    })
+    syncModelsResult.value = result
+    if (result.failed > 0) {
+      appStore.showError(`同步完成，但有 ${result.failed} 个账号失败，详见列表`)
+      return
+    }
+    appStore.showSuccess(
+      apply
+        ? `已完成 ${result.total} 个账号：${syncModelsMode.value === 'replace' ? '去除现有并增加新的' : '保留现有并增加新的'}`
+        : `已预览 ${result.total} 个账号，尚未写入`
+    )
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '同步上游模型失败'))
+  } finally {
+    syncModelsSubmitting.value = false
+  }
 }
 
 function openBindByGroupDialog() {
@@ -4101,6 +4323,19 @@ function formatTime(value?: string): string {
 }
 
 .sp-account-toolbar-test:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--sp-blue) 58%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-blue) 16%, var(--sp-panel));
+  color: color-mix(in srgb, var(--sp-blue) 85%, #0f172a);
+}
+
+/* 与「测试当前筛选」同族共用蓝色：两者都是拿账号凭证去上游打一次真实请求。 */
+.sp-account-toolbar-sync-models {
+  border-color: color-mix(in srgb, var(--sp-blue) 42%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-blue) 10%, var(--sp-panel));
+  color: var(--sp-blue);
+}
+
+.sp-account-toolbar-sync-models:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--sp-blue) 58%, var(--sp-line));
   background: color-mix(in srgb, var(--sp-blue) 16%, var(--sp-panel));
   color: color-mix(in srgb, var(--sp-blue) 85%, #0f172a);
@@ -7193,6 +7428,168 @@ button.sp-guard-failure-hint:hover {
 .sp-batch-bind-result {
   display: grid;
   gap: 1rem;
+}
+
+/* 独立块：不并入上面那条共享选择器组（改既有 :global() 组会打爆相邻断言）。 */
+:global(.modal-content:has(.sp-account-sync-dialog)) {
+  --sp-panel: #ffffff;
+  --sp-panel-2: #f8fafc;
+  --sp-panel-3: #eef2f7;
+  --sp-line: #d7e0ea;
+  --sp-soft: #e8eef5;
+  --sp-text: #172033;
+  --sp-muted: #607089;
+  --sp-dim: #8a99ad;
+  --sp-cyan: #0284c7;
+  --sp-green: #16835d;
+  --sp-amber: #c56a0a;
+  --sp-orange: #ea580c;
+  --sp-red: #d14343;
+  --sp-blue: #2563eb;
+  --sp-violet: #7c3aed;
+  --sp-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  border-color: #cbd7e5;
+  background: var(--sp-panel);
+  color: var(--sp-text);
+}
+
+:global(.dark .modal-content:has(.sp-account-sync-dialog)) {
+  --sp-panel: #172033;
+  --sp-panel-2: #1d293d;
+  --sp-panel-3: #243249;
+  --sp-line: #35445c;
+  --sp-soft: #2c3a51;
+  --sp-text: #edf3fb;
+  --sp-muted: #a8b6ca;
+  --sp-dim: #75849a;
+  --sp-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  border-color: #3b4b64;
+}
+
+.sp-account-sync-dialog {
+  display: grid;
+  gap: 1rem;
+}
+
+.sp-account-sync-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.sp-account-sync-metric {
+  display: grid;
+  min-width: 6.5rem;
+  gap: 0.125rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.75rem;
+  background: var(--sp-panel-2);
+}
+
+.sp-account-sync-metric span {
+  color: var(--sp-muted);
+  font-size: 0.75rem;
+}
+
+.sp-account-sync-metric strong {
+  color: var(--sp-text);
+  font-size: 1.125rem;
+}
+
+.sp-account-sync-metric.syncable {
+  border-color: color-mix(in srgb, var(--sp-blue) 40%, var(--sp-line));
+}
+
+.sp-account-sync-metric.skipped {
+  border-color: color-mix(in srgb, var(--sp-amber) 45%, var(--sp-line));
+}
+
+.sp-account-sync-note {
+  margin: 0;
+  color: var(--sp-muted);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+.sp-account-sync-note.warn {
+  padding: 0.625rem 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--sp-amber) 40%, var(--sp-line));
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--sp-amber) 8%, var(--sp-panel));
+  color: var(--sp-text);
+}
+
+.sp-account-sync-skip-title {
+  margin: 0 0 0.375rem;
+}
+
+.sp-account-sync-skip-list {
+  margin: 0;
+  padding-left: 1.125rem;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.sp-account-sync-skip-list span {
+  color: var(--sp-muted);
+}
+
+.sp-account-sync-field {
+  display: grid;
+  gap: 0.375rem;
+}
+
+.sp-account-sync-field-label {
+  color: var(--sp-muted);
+  font-size: 0.8125rem;
+}
+
+.sp-account-sync-result {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.sp-account-sync-result-head {
+  margin: 0;
+  color: var(--sp-text);
+  font-size: 0.875rem;
+}
+
+.sp-account-sync-result-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.375rem;
+}
+
+.sp-account-sync-result-item {
+  display: grid;
+  gap: 0.125rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--sp-line);
+  border-left: 3px solid var(--sp-line);
+  border-radius: 0.625rem;
+  background: var(--sp-panel-2);
+}
+
+.sp-account-sync-result-item.ok {
+  border-left-color: var(--sp-green);
+}
+
+.sp-account-sync-result-item.failed {
+  border-left-color: var(--sp-red);
+}
+
+.sp-account-sync-result-item strong {
+  color: var(--sp-text);
+  font-size: 0.8125rem;
+}
+
+.sp-account-sync-result-detail {
+  color: var(--sp-muted);
+  font-size: 0.75rem;
 }
 
 .sp-batch-bind-metrics {
