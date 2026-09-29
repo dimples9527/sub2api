@@ -309,8 +309,8 @@ describe('ModelSquareView', () => {
     expect(card()!.find('.model-detail-button').exists()).toBe(true)
     expect(card()!.find('.primary-group-chip').attributes('disabled')).toBeUndefined()
 
-    // 选中分组过滤（select[0] 是分组筛选）后：详情隐藏、胶囊禁用
-    await wrapper.findAll('select')[0].setValue('1')
+    // 选中分组过滤（select[1] 是分组筛选）后：详情隐藏、胶囊禁用
+    await wrapper.findAll('select')[1].setValue('1')
     await flushPromises()
     expect(card()!.find('.model-detail-button').exists()).toBe(false)
     expect(card()!.find('.primary-group-chip').attributes('disabled')).toBeDefined()
@@ -334,7 +334,7 @@ describe('ModelSquareView', () => {
     expect(rowText).not.toContain('Premium Group')
 
     // 顶部分组筛选下拉也过滤：监控关掉的分组不进选项
-    const groupOptionLabels = wrapper.findAll('select')[0].findAll('option').map(option => option.text())
+    const groupOptionLabels = wrapper.findAll('select')[1].findAll('option').map(option => option.text())
     expect(groupOptionLabels).toContain('Default Group')
     expect(groupOptionLabels).not.toContain('Premium Group')
   })
@@ -437,7 +437,7 @@ describe('ModelSquareView', () => {
 
     // 筛 Default Group：active 必须立刻切过去 —— detailRate 跟着 primaryGroup 走，
     // 详情弹窗里这一行的价格也是按「卡片当前代表的分组」算的，必须一致
-    await wrapper.findAll('select')[0].setValue('1')
+    await wrapper.findAll('select')[1].setValue('1')
     expect(dialog.findAll('[data-test="detail-group-row"].active')).toHaveLength(1)
     expect(dialog.findAll('[data-test="detail-group-row"].active')[0].text()).toContain('Default Group')
   })
@@ -594,13 +594,14 @@ describe('ModelSquareView', () => {
     expect(wrapper.text()).not.toContain('GPT-5.5 Flagship (gpt-5.5)')
 
     await search.setValue('')
+    // 三个 Select 依次是平台、分组、排序
     const selects = wrapper.findAll('select')
-    await selects[1].setValue('OpenAI Official')
+    await selects[0].setValue('OpenAI Official')
     expect(wrapper.text()).toContain('GPT-5.5 Flagship (gpt-5.5)')
     expect(wrapper.text()).not.toContain('Custom Model (custom-model)')
 
-    await selects[1].setValue('')
-    await selects[0].setValue('2')
+    await selects[0].setValue('')
+    await selects[1].setValue('2')
     expect(wrapper.text()).toContain('Custom Model (custom-model)')
     expect(wrapper.text()).not.toContain('GPT-5.5 Flagship (gpt-5.5)')
 
@@ -610,6 +611,33 @@ describe('ModelSquareView', () => {
     await wrapper.find('[data-test="model-row"]').trigger('click')
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('custom-model')
     expect(showSuccessMock).toHaveBeenCalledWith('Copied')
+  })
+
+  it('平台筛选收窄分组候选：只列该平台模型绑定的分组，被挤掉的选中项自动收回', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    // 三个 Select 依次是平台、分组、排序
+    const selects = () => wrapper.findAll('select')
+    const groupLabels = () => selects()[1].findAll('option').map(option => option.text())
+    expect(groupLabels()).toContain('Default Group')
+    expect(groupLabels()).toContain('Premium Group')
+
+    // OpenAI Official 下只有 gpt-5.5 绑了 Default Group(1)；Premium Group(2) 挂在另一个平台上
+    await selects()[0].setValue('OpenAI Official')
+    expect(groupLabels()).toContain('Default Group')
+    expect(groupLabels()).not.toContain('Premium Group')
+
+    // 先选 Premium Group 再切平台：该分组在新平台下没有对应模型，必须自动收回。
+    // 不收回的话列表会被一个下拉里已经看不到的条件筛空，用户只能对着空态猜原因。
+    await selects()[0].setValue('')
+    await selects()[1].setValue('2')
+    expect(wrapper.text()).toContain('Custom Model (custom-model)')
+    expect(wrapper.text()).not.toContain('GPT-5.5 Flagship (gpt-5.5)')
+
+    await selects()[0].setValue('OpenAI Official')
+    expect(wrapper.text()).toContain('GPT-5.5 Flagship (gpt-5.5)')
+    expect(wrapper.text()).toContain('Orphan Model (orphan-model)')
   })
 
   it('筛选分组后卡片改显示该分组的名字与倍率，不筛选时仍取倍率最低的', async () => {
@@ -655,7 +683,7 @@ describe('ModelSquareView', () => {
 
     // 筛了 Default Group 就必须切过去：卡片标着 A 分组却按 B 分组的倍率算钱，
     // 比不改还容易误导
-    await wrapper.findAll('select')[0].setValue('1')
+    await wrapper.findAll('select')[1].setValue('1')
     expect(groupName()).toBe('Default Group')
     expect(rate()).toBe('1x')
     // 倍率变了价格必须跟着变：10 ÷ 基准 0.5 × 当前 1 = 20，且不再有划线原价
@@ -681,7 +709,7 @@ describe('ModelSquareView', () => {
     await flushPromises()
 
     const cardTitles = () => wrapper.findAll('[data-test="model-card"] .model-title').map(node => node.text())
-    // 三个 Select 依次是分组、平台、排序
+    // 三个 Select 依次是平台、分组、排序
     const sortSelect = wrapper.findAll('select')[2]
     expect(sortSelect.attributes('aria-label')).toBe('Sort')
 

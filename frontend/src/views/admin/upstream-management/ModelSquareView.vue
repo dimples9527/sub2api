@@ -50,17 +50,17 @@
           </div>
 
           <Select
-            v-model="groupFilter"
-            :options="groupFilterOptions"
-            class="w-full sm:w-44"
-            :aria-label="t('admin.modelSquare.allGroups')"
-          />
-
-          <Select
             v-model="providerFilter"
             :options="providerFilterOptions"
             class="w-full sm:w-44"
             :aria-label="t('admin.modelSquare.allProviders')"
+          />
+
+          <Select
+            v-model="groupFilter"
+            :options="groupFilterOptions"
+            class="w-full sm:w-44"
+            :aria-label="t('admin.modelSquare.allGroups')"
           />
 
           <Select
@@ -458,7 +458,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { modelSquareAPI } from '@/api/modelSquare'
 import { listLLMMonitorGroupPlatformOverrides } from '@/api/admin/modelMonitor'
@@ -570,16 +570,46 @@ const activeFilterGroup = computed<ModelSquareGroup | null>(() =>
   groupFilter.value ? groupById.value.get(groupFilter.value) || null : null
 )
 const providers = computed(() => unique(models.value.map(model => model.provider).filter(Boolean) as string[]))
-// 分组筛选下拉选项（含“全部”占位项）。同样按「监控显示」过滤：监控里关掉的分组不进下拉。
-const groupFilterOptions = computed<SelectOption[]>(() => [
-  { value: '', label: t('admin.modelSquare.allGroups') },
-  ...filterMonitorVisibleGroups(groups.value).map(group => ({ value: String(group.id), label: group.name })),
-])
 // 平台筛选下拉选项（含“全部”占位项）
 const providerFilterOptions = computed<SelectOption[]>(() => [
   { value: '', label: t('admin.modelSquare.allProviders') },
   ...providers.value.map(item => ({ value: item, label: providerLabel(item) })),
 ])
+/*
+  筛了平台之后，该平台下的模型实际绑定过的分组 ID 集合。
+  null = 未筛平台（不做限制），与「筛了但一个分组都没绑上」区分开：
+  后者应该是只剩“全部”的空下拉，而不是退回全量分组。
+*/
+const providerScopedGroupIds = computed<Set<string> | null>(() => {
+  if (!providerFilter.value) return null
+  const ids = new Set<string>()
+  for (const model of models.value) {
+    if (model.provider !== providerFilter.value) continue
+    for (const id of model.group_ids || []) ids.add(String(id))
+  }
+  return ids
+})
+// 分组筛选下拉选项（含“全部”占位项）。同样按「监控显示」过滤：监控里关掉的分组不进下拉。
+// 平台筛选生效时只列该平台用得到的分组 —— 否则能选到一个本平台压根没有的分组，选完列表直接空掉。
+const groupFilterOptions = computed<SelectOption[]>(() => {
+  const scoped = providerScopedGroupIds.value
+  return [
+    { value: '', label: t('admin.modelSquare.allGroups') },
+    ...filterMonitorVisibleGroups(groups.value)
+      .filter(group => !scoped || scoped.has(String(group.id)))
+      .map(group => ({ value: String(group.id), label: group.name })),
+  ]
+})
+/*
+  平台一变，原先选中的分组可能已不在候选里，必须主动收回。
+  下拉里没有这一项时用户连“取消选择”的入口都没有，只能看着空列表猜原因。
+  只挂在平台值上：挂在候选列表上会把用户刚改的分组一起回退掉，表现为“点了没反应”。
+*/
+watch(providerFilter, () => {
+  if (groupFilter.value && !groupFilterOptions.value.some(option => option.value === groupFilter.value)) {
+    groupFilter.value = ''
+  }
+})
 const availableCount = computed(() => models.value.filter(isAvailable).length)
 const sortOptions = computed<SelectOption[]>(() => [
   { value: 'name', label: t('admin.modelSquare.sortName') },
