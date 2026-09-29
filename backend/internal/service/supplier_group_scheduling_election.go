@@ -693,7 +693,11 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 		locked := false
 		if keepHealthyForGroup(groupID) {
 			scheduledHealthy := make([]int64, 0) // 开着且测试成功的在任者，锁定时记为赢家
-			hasScheduledIncumbent := false       // 开着、且没到关闭阈值的在任者（含成功、含失败但未到阈值）
+			// scheduledIncumbentCount 是「开着、且没到关闭阈值的在任者」总数（含成功、含失败但未到阈值）。
+			// 锁定前必须拿它跟 TopN 比一次，理由见下方 locked 赋值的注释。
+			// 只统计已测出状态的成员：未测过的账号走「保持原状」分支、本任务关不掉它们，
+			// 把它们算进容量只会白白放弃锁定、丢掉防抖动能力，却换不来收敛。
+			scheduledIncumbentCount := 0
 			scheduledFailedPastThreshold := false
 			for _, member := range groupMembers {
 				if !member.Schedulable {
@@ -702,7 +706,7 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 				switch strings.TrimSpace(member.LastTestStatus) {
 				case SupplierGroupSchedulingElectionTestStatusSuccess:
 					scheduledHealthy = append(scheduledHealthy, member.AccountID)
-					hasScheduledIncumbent = true
+					scheduledIncumbentCount++
 				case SupplierGroupSchedulingElectionTestStatusFailed:
 					if member.FailedCount+1 >= config.FailureThreshold {
 						scheduledFailedPastThreshold = true
@@ -710,10 +714,21 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 					}
 					// 失败但没到阈值：算作仍在任、保住席位等翻盘，本轮不换人。不记为赢家——
 					// 它「失败待观察」的原因要如实进明细，保留调度靠失败闸门（闸门二）而不是这里。
-					hasScheduledIncumbent = true
+					scheduledIncumbentCount++
 				}
 			}
-			if hasScheduledIncumbent && !scheduledFailedPastThreshold {
+			// 只有当在任者数量没有超过 TopN 时，才允许锁定；超了必须让位给正常择优。
+			//
+			// 为什么必须加这道「容量」判断：锁定的动作是「把当前开着的在任者全部记为赢家」，
+			// 而 winner 是账号级、跨组取并集的（见 supplierGroupElectionAccount.winner）。
+			// 一旦多个分组共享同一批账号（例如 gpt福利 /【对接】0085分组 /【订阅】0085分组 成员完全相同），
+			// 任何一个组锁住多活，都会通过并集让这批账号在**所有**相关分组里保持开启；
+			// 而锁定本身永远不关人，于是「每组开启账号数」被永久突破，且下一轮仍满足锁定条件，
+			// 只增不减、无法自愈（实测：每 30 分钟新开一个组内 top1，旧的永不关）。
+			// 超过 TopN 说明多活已经存在（历史累积或共享成员），此时收敛优先于「不换人」：
+			// 走正常择优只保前 TopN 名，多活的组因此能自愈回 TopN。
+			// 未超过 TopN 的分组行为完全不变，仍是「绝不换人」。
+			if scheduledIncumbentCount > 0 && !scheduledFailedPastThreshold && scheduledIncumbentCount <= config.TopN {
 				for _, accountID := range scheduledHealthy {
 					recordWinner(accountID, "")
 				}

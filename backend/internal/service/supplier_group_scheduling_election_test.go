@@ -918,6 +918,69 @@ func TestGroupElectionKeepHealthyIncumbentBreaksLockAtThreshold(t *testing.T) {
 	require.Equal(t, 1, result.DisabledCount)
 }
 
+// 锁定分组里「当前开着的在任者」已经超过 TopN（多活已累积）：此时必须放弃锁定、走正常择优收敛回 TopN。
+// 不加这道容量判断的话，锁定会把多活永久固化——它只记赢家、从不关人，下一轮仍满足锁定条件，只增不减。
+func TestGroupElectionKeepHealthyIncumbentYieldsWhenOverCapacity(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, AccountID: 301, Platform: "openai", Schedulable: true, LastTestStatus: "success", HealthyCount: 1, LastTestLatencyMs: 1000},
+		{GroupID: 1, AccountID: 302, Platform: "openai", Schedulable: true, LastTestStatus: "success", HealthyCount: 5, LastTestLatencyMs: 1000},
+		{GroupID: 1, AccountID: 303, Platform: "openai", Schedulable: true, LastTestStatus: "success", HealthyCount: 10, LastTestLatencyMs: 1000},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1, KeepHealthyIncumbentGroupIDs: []int64{1}}, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, []int64{303}, result.Groups[0].WinnerIDs, "在任者超过 TopN → 放弃锁定，择优只保分数最高的 303")
+	require.Equal(t, 0, result.EnabledCount)
+	require.Equal(t, 2, result.DisabledCount, "多活的另外两个在任者被收敛关闭")
+	require.Equal(t, false, store.calls[301])
+	require.Equal(t, false, store.calls[302])
+	_, touched303 := store.calls[303]
+	require.False(t, touched303, "当选的 303 本就开着，不产生调度写库")
+}
+
+// 回归守卫（2026-09-29 生产故障）：三个分组共享同一批账号，且开启全局健康锁定。
+//
+// 旧实现下，锁定把「当前开着的 3 个在任者」全部记为赢家；而 winner 是账号级、跨组取并集，
+// 于是三个分组各显示 3 个开启，且永远关不掉——每轮再开一个组内 top1，旧的靠并集保住，只增不减。
+// 修复后：在任者超过 TopN → 锁定让位给择优 → 三个分组选出同一账号 → 并集只剩 1 个。
+func TestGroupElectionSharedMembersConvergeToTopNUnderGlobalLock(t *testing.T) {
+	members := make([]SupplierGroupSchedulingElectionMember, 0, 9)
+	for _, groupID := range []int64{1, 2, 3} {
+		for _, seed := range []struct {
+			accountID int64
+			healthy   int
+		}{{101, 1}, {102, 5}, {103, 10}} {
+			members = append(members, SupplierGroupSchedulingElectionMember{
+				GroupID: groupID, AccountID: seed.accountID, Platform: "openai",
+				Schedulable: true, LastTestStatus: "success",
+				HealthyCount: seed.healthy, LastTestLatencyMs: 1000,
+			})
+		}
+	}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(&fakeGroupElectionRepo{members: members}, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                       1,
+		KeepHealthyIncumbentGlobal: true,
+	}, time.Now())
+	require.NoError(t, err)
+
+	// 三个分组各自只认 103 → 账号级并集只有 103 开着，每组内可见的开启数都是 1。
+	require.Len(t, result.Groups, 3)
+	for _, group := range result.Groups {
+		require.Equal(t, []int64{103}, group.WinnerIDs, "分组 %d 应收敛到唯一的 103", group.GroupID)
+	}
+	require.Equal(t, 0, result.EnabledCount)
+	require.Equal(t, 2, result.DisabledCount, "多活的 101/102 被关闭")
+	require.Equal(t, false, store.calls[101])
+	require.Equal(t, false, store.calls[102])
+	_, touched103 := store.calls[103]
+	require.False(t, touched103, "当选的 103 本就开着，不产生调度写库")
+}
+
 // 全局健康锁定 + 分组级反向覆盖：全局开则默认锁定所有分组，force-off 名单可单独排除，
 // force-on 名单在全局关时单独锁定，且 force-off 优先于 force-on。
 // 两个分组的在任者(501/601)都明显弱于挑战者(502/602)，锁定与否用「有没有换人」即可区分。
