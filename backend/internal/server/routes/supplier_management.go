@@ -136,6 +136,8 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 		// 追加绑定语义：账号原有分组保留，只补齐所选分组。静态段与 /accounts/:id 系列共存，
 		// 段数不同不会与通配段冲突（见 supplier_account_group_binding_route_test.go）。
 		supplier.POST("/accounts/batch-bind-groups", h.Admin.Account.BatchBindSupplierAccountGroups)
+		// 批量同步上游模型：与上面两个批量入口同页同 group，都是静态段，彼此不冲突。
+		supplier.POST("/accounts/models/sync-upstream/batch", h.Admin.Account.SyncUpstreamModelsBatch)
 		supplier.GET("/groups", h.Admin.SupplierProviderSync.ListGroups)
 		supplier.GET("/groups/health-trends", h.Admin.SupplierProviderSync.ListGroupHealthTrends)
 		supplier.PUT("/local-groups/:id/platform-override", h.Admin.SupplierProviderSync.SetLocalGroupPlatformOverride)
