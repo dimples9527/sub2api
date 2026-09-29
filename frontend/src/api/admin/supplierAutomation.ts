@@ -57,6 +57,21 @@ export interface SupplierAutomationConfig {
   /** 分组择优调度综合分里「测试用时」的权重，默认 0.5（影响上限为次数的一半）。 */
   group_scheduling_election_latency_weight?: number
   /**
+   * 分组择优调度综合分里「账号优先级」的权重，默认 0.5。
+   * 优先级分在同一分组内 min-max 归一化：数值越小优先级越高 → 1.0，最大者 → 0；
+   * 优先级全都相同或极差为 0 时给中性分 0.5。只有开启了「优先级计分」的分组才会计入综合分。
+   */
+  group_scheduling_election_priority_weight?: number
+  /**
+   * 分组择优调度：账号优先级是否参与择优的全局默认开关，默认 false（不参与，与升级前一致）。
+   * 打开后所有分组默认计优先级；个别分组可用下面的 force-on / force-off 名单反向覆盖。
+   */
+  group_scheduling_election_priority_enabled_global?: boolean
+  /** 分组择优调度：强制开启「优先级计分」的分组 ID 列表（force-on，空=不强制，默认）。 */
+  group_scheduling_election_priority_enabled_group_ids?: number[]
+  /** 分组择优调度：强制关闭「优先级计分」的分组 ID 列表（force-off，优先级最高，空=无排除，默认）。 */
+  group_scheduling_election_priority_disabled_group_ids?: number[]
+  /**
    * 分组择优调度：测试失败的账号要连续失败多少轮才关闭调度，默认 2（一次抖动不关）。
    * 配成 1 即退回「一次失败立刻关」；分组里没有备选账号时无论阈值多少都不关。
    */
@@ -470,12 +485,14 @@ export interface SupplierGroupElectionDecisionDetail {
   scored?: boolean
   /** 是否在该组入选（择优前 N，或因覆盖必需模型被补选）。 */
   elected?: boolean
-  /** 综合分 = count_weight × count_score + latency_weight × latency_score，三项都给出来便于复核。 */
+  /** 综合分 = count_weight × count_score + latency_weight × latency_score (+ priority_weight × priority_score)，各项都给出来便于复核。 */
   score?: number
   count_score?: number
   latency_score?: number
+  priority_score?: number
   count_weight?: number
   latency_weight?: number
+  priority_weight?: number
   /** 次数分的封顶值：连续成功次数超过它之后不再加分。 */
   count_score_cap?: number
   /** 真正参与评分的延迟（含成功率惩罚与在任者迟滞折算），与日志里显示的「测试用时」不是同一个数。 */

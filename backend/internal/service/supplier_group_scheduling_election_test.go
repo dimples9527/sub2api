@@ -501,7 +501,7 @@ func TestGroupElectionScoresNormalizeWithinPlatform(t *testing.T) {
 		{AccountID: 142, Platform: "openai", HealthyCount: 5, LastTestLatencyMs: 300},
 		{AccountID: 143, Platform: "gemini", HealthyCount: 5, LastTestLatencyMs: 50},
 	}
-	scores := supplierGroupSchedulingElectionScores(members, 1.0, 0.5, DefaultSupplierGroupSchedulingElectionLatencyMinSamples, DefaultSupplierGroupSchedulingElectionSwitchMargin, DefaultSupplierGroupSchedulingElectionCountScoreCap)
+	scores := supplierGroupSchedulingElectionScores(members, 1.0, 0.5, 0.0, DefaultSupplierGroupSchedulingElectionLatencyMinSamples, DefaultSupplierGroupSchedulingElectionSwitchMargin, DefaultSupplierGroupSchedulingElectionCountScoreCap, false)
 
 	// 三者次数都是 5，归一后同为 0.5，差异全部来自用时项。
 	require.InDelta(t, 0.5+0.5*1.0, scores[141].Score, 1e-9, "同平台最快者用时归一为 1")
@@ -515,7 +515,7 @@ func TestGroupElectionScoresCapCountContribution(t *testing.T) {
 		{AccountID: 151, Platform: "openai", HealthyCount: 50, LastTestLatencyMs: 100},
 		{AccountID: 152, Platform: "openai", HealthyCount: 10, LastTestLatencyMs: 900},
 	}
-	scores := supplierGroupSchedulingElectionScores(members, 1.0, 0.5, DefaultSupplierGroupSchedulingElectionLatencyMinSamples, DefaultSupplierGroupSchedulingElectionSwitchMargin, DefaultSupplierGroupSchedulingElectionCountScoreCap)
+	scores := supplierGroupSchedulingElectionScores(members, 1.0, 0.5, 0.0, DefaultSupplierGroupSchedulingElectionLatencyMinSamples, DefaultSupplierGroupSchedulingElectionSwitchMargin, DefaultSupplierGroupSchedulingElectionCountScoreCap, false)
 
 	require.InDelta(t, 1.0+0.5*1.0, scores[151].Score, 1e-9)
 	require.InDelta(t, 1.0+0.5*0.0, scores[152].Score, 1e-9, "次数达到上限后归一为 1，不再拉开差距")
@@ -580,11 +580,74 @@ func TestGroupElectionScoresCountCapScalesContribution(t *testing.T) {
 	}
 
 	// 用时权重传 0，把这一项摘掉，只看次数分的变化。
-	capped := supplierGroupSchedulingElectionScores(members, 1.0, 0.0, DefaultSupplierGroupSchedulingElectionLatencyMinSamples, DefaultSupplierGroupSchedulingElectionSwitchMargin, 10)
+	capped := supplierGroupSchedulingElectionScores(members, 1.0, 0.0, 0.0, DefaultSupplierGroupSchedulingElectionLatencyMinSamples, DefaultSupplierGroupSchedulingElectionSwitchMargin, 10, false)
 	require.InDelta(t, 1.0, capped[161].Score, 1e-9, "封顶 10：12 次已到顶，拿满分")
 
-	loose := supplierGroupSchedulingElectionScores(members, 1.0, 0.0, DefaultSupplierGroupSchedulingElectionLatencyMinSamples, DefaultSupplierGroupSchedulingElectionSwitchMargin, 100)
+	loose := supplierGroupSchedulingElectionScores(members, 1.0, 0.0, 0.0, DefaultSupplierGroupSchedulingElectionLatencyMinSamples, DefaultSupplierGroupSchedulingElectionSwitchMargin, 100, false)
 	require.InDelta(t, 0.12, loose[161].Score, 1e-9, "封顶 100：12 次只拿 12/100")
+}
+
+// 优先级分：同一组内数值越小优先级越高，min-max 映射 — 最小者 1.0、最大者 0；
+// 该组开关关闭（priorityEnabled=false）时优先级一律取 0，不影响既有排序。
+func TestGroupElectionScoresPriorityNormalizeWithinGroup(t *testing.T) {
+	members := []SupplierGroupSchedulingElectionMember{
+		{AccountID: 171, Platform: "openai", HealthyCount: 5, LastTestLatencyMs: 100, Priority: 1},
+		{AccountID: 172, Platform: "openai", HealthyCount: 5, LastTestLatencyMs: 100, Priority: 3},
+		{AccountID: 173, Platform: "openai", HealthyCount: 5, LastTestLatencyMs: 100, Priority: 4},
+	}
+	// 次数、用时都完全相同，差异只来自优先级项；打开开关、用均衡权重 0.5。
+	scores := supplierGroupSchedulingElectionScores(members, 1.0, 0.5, 0.5, DefaultSupplierGroupSchedulingElectionLatencyMinSamples, DefaultSupplierGroupSchedulingElectionSwitchMargin, DefaultSupplierGroupSchedulingElectionCountScoreCap, true)
+	baseScore := 1.0*0.5 + 0.5*0.5 // 次数分 5/10 × 1.0 + 用时中性分 0.5 × 0.5，三者相同
+	require.InDelta(t, baseScore+0.5*1.0, scores[171].Score, 1e-9, "优先级最小者（最高优先级）映射 1.0")
+	require.InDelta(t, baseScore+0.5*0.0, scores[173].Score, 1e-9, "优先级最大者映射 0")
+	require.InDelta(t, baseScore+0.5*(float64(4-3)/float64(4-1)), scores[172].Score, 1e-9, "中间者按比例映射")
+
+	// 开关关闭时优先级不参与：三者得分完全一致（只看次数/用时）。
+	off := supplierGroupSchedulingElectionScores(members, 1.0, 0.0, 0.5, DefaultSupplierGroupSchedulingElectionLatencyMinSamples, DefaultSupplierGroupSchedulingElectionSwitchMargin, DefaultSupplierGroupSchedulingElectionCountScoreCap, false)
+	require.InDelta(t, off[171].Score, off[172].Score, 1e-9, "未开启优先级计分时优先级权重空转")
+	require.Equal(t, 0.0, off[171].PriorityScore)
+}
+
+// 优先级真正改变当选结果：都健康时，优先级越高（数值越小）越占优势。
+func TestGroupElectionPriorityChangesWinner(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		// 两个账号健康次数、用时都相同，唯一差别是优先级：131 更低（更高优先级）。
+		{GroupID: 1, Platform: "openai", AccountID: 131, Schedulable: false, LastTestStatus: "success", HealthyCount: 5, LastTestLatencyMs: 100, Priority: 1},
+		{GroupID: 1, Platform: "openai", AccountID: 132, Schedulable: false, LastTestStatus: "success", HealthyCount: 5, LastTestLatencyMs: 100, Priority: 2},
+	}}
+	// 权重故意拉大优先级话语权，验证「都健康时优先级更高者当选」。
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+	_, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                  1,
+		PriorityWeight:        DefaultSupplierGroupSchedulingElectionPriorityWeight,
+		PriorityEnabledGlobal: true,
+	}, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, true, store.calls[131], "都健康且其它维度相同时，更高优先级的 131 当选")
+	require.Equal(t, false, store.calls[132])
+
+	// 开关默认关闭：优先级不参与，回到「按 ID 兜底」的确定性结果（ID 小的 131 先）。
+	store = newFakeGroupElectionStore()
+	svc = NewSupplierGroupSchedulingElectionService(repo, store)
+	_, err = svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1}, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, true, store.calls[131], "未开启优先级时行为与升级前一致")
+	require.Equal(t, false, store.calls[132])
+}
+
+// 优先级权重的归一化缺省回落，与 Count/Latency 同规则；分组名单去重排序落库。
+func TestGroupElectionNormalizeConfigPriority(t *testing.T) {
+	cfg := normalizeSupplierGroupSchedulingElectionConfig(SupplierGroupSchedulingElectionConfig{TopN: 1})
+	require.InDelta(t, DefaultSupplierGroupSchedulingElectionPriorityWeight, cfg.PriorityWeight, 1e-9)
+	require.False(t, cfg.PriorityEnabledGlobal, "默认全局关闭，与升级前一致")
+
+	cfg = normalizeSupplierGroupSchedulingElectionConfig(SupplierGroupSchedulingElectionConfig{
+		TopN: 1, PriorityWeight: 0, PriorityEnabledGroupIDs: []int64{5, 0, -1, 5, 3}, PriorityDisabledGroupIDs: []int64{7, 2, 2, 7},
+	})
+	require.InDelta(t, DefaultSupplierGroupSchedulingElectionPriorityWeight, cfg.PriorityWeight, 1e-9, "0 视为未配置回落默认")
+	require.Equal(t, []int64{3, 5}, cfg.PriorityEnabledGroupIDs, "强制开启名单去重排序")
+	require.Equal(t, []int64{2, 7}, cfg.PriorityDisabledGroupIDs, "强制关闭名单去重排序")
 }
 
 // 把封顶做成可配，必须真的改变当选结果 —— 只改归一化、忘了把值传进评分实现时，这条会报红。

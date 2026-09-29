@@ -55,6 +55,12 @@ const (
 	// 既能让明显更快的账号翻盘，又不至于一次网络抖动换掉长期稳定的赢家。
 	DefaultSupplierGroupSchedulingElectionCountWeight   = 1.0
 	DefaultSupplierGroupSchedulingElectionLatencyWeight = 0.5
+	// DefaultSupplierGroupSchedulingElectionPriorityWeight 是「账号优先级」的默认话语权。
+	// 语义与用时一致：优先级分先归一到 [0,1] 再加权，权重比值即相对重要性。
+	// 默认 0.5（均衡）：全部健康时，优先级最高者可得满分，正好抵一半的话语权，
+	// 但不会凌驾于健康/速度之上。管理员可按分组偏好调大——用户诉求是「都健康时
+	// 优先级越高越有优势」，调到 1.0 以上即让优先级在健康账号中压过用时分。
+	DefaultSupplierGroupSchedulingElectionPriorityWeight = 0.5
 
 	// MaxSupplierGroupSchedulingElectionWeight 是权重上限，防止配置误填把某一项无限放大。
 	MaxSupplierGroupSchedulingElectionWeight = 100.0
@@ -115,6 +121,21 @@ type SupplierGroupSchedulingElectionConfig struct {
 	// 0 或缺失都回落到默认值；LatencyWeight 显式配 0 即退化为"只看次数"的旧行为。
 	CountWeight   float64 `json:"group_scheduling_election_count_weight"`
 	LatencyWeight float64 `json:"group_scheduling_election_latency_weight"`
+	// PriorityWeight 是「账号优先级」在综合分里的话语权，默认 0.5。
+	// 优先级分在同一组内 min-max 归一化（数值越小优先级越高，映射到 1.0；最大者映射 0）；
+	// 与用时同理，优先级全都相同或极差为 0 时给中性分 0.5，让这项不影响相对顺序。
+	// 它与 Count/Latency 一样遵循「0 或缺失回落默认值」；
+	// PriorityEnabledForGroup 关闭该分组时本项权重不参与计分（映射为 0）。
+	PriorityWeight float64 `json:"group_scheduling_election_priority_weight"`
+	// PriorityEnabledGlobal 是「账号优先级参与择优」的全局默认开关（默认 false=不参与，与升级前一致）。
+	// 打开后所有分组默认把优先级计入综合分；个别分组可用下面两个名单反向覆盖。
+	PriorityEnabledGlobal bool `json:"group_scheduling_election_priority_enabled_global"`
+	// PriorityEnabledGroupIDs 是「强制开启优先级计分」的网络（force-on）：无论全局开关取何值，
+	// 在此名单里的分组都计优先级。全局关闭时它等价于旧的 opt-in 名单（空=都不计，向后兼容）。
+	PriorityEnabledGroupIDs []int64 `json:"group_scheduling_election_priority_enabled_group_ids"`
+	// PriorityDisabledGroupIDs 是「强制不开启优先级计分」的网络（force-off，空=无排除，默认）。
+	// 优先级最高：在此名单内的分组无论全局开关如何都不计优先级，即便同时出现在强制开启名单里也以此为准。
+	PriorityDisabledGroupIDs []int64 `json:"group_scheduling_election_priority_disabled_group_ids"`
 	// FailureThreshold 是连续多少个调度周期都判失败才关闭调度，默认 2。
 	// 配成 1 即退回「一次失败立刻关」的旧行为；0 或缺失都按默认值处理。
 	FailureThreshold int `json:"group_scheduling_election_failure_threshold"`
@@ -171,6 +192,9 @@ type SupplierGroupSchedulingElectionMember struct {
 	LastTestStatus string
 	HealthyCount   int
 	LastTestedAt   time.Time
+	// Priority 是账号的优先级（数值越小优先级越高）。不参与择优时（开关关闭）无意义，
+	// 默认 0 表示未配置——与网关 filterByMinPriority 同源语义。
+	Priority int
 	// LastTestLatencyMs 是最近一次成功测试的耗时（毫秒），0 表示没有可用数据。
 	// 它与 LastTestStatus / LastTestedAt 同源（都由账号测试写入），失败时不覆盖旧值，
 	// 因此"筛进 success 的账号"通常都带得上耗时。
@@ -275,15 +299,17 @@ type SupplierGroupSchedulingElectionDecisionDetail struct {
 	// 账号级 reason 是 union 的：在 A 组入选、在 B 组落选时整体仍记「当选」，
 	// 只有逐组标出来才能解释「它为什么在某组没入选却依然被打开」。
 	Elected bool `json:"elected,omitempty"`
-	// 综合分 = CountWeight × CountScore + LatencyWeight × LatencyScore，三项都给出来，
-	// 管理员可以照着配置自己复算一遍。
+	// 综合分 = CountWeight × CountScore + LatencyWeight × LatencyScore
+	//        + PriorityWeight × PriorityScore，各项都给出来，管理员可以照着配置自己复算一遍。
 	// ⚠️ 这组字段刻意不带 omitempty：0 是合法取值（新账号的连续成功次数就是 0），
 	// 省略后前端只能显示「—」，会把「真的是 0」读成「没有数据」。
-	Score         float64 `json:"score"`
-	CountScore    float64 `json:"count_score"`
-	LatencyScore  float64 `json:"latency_score"`
-	CountWeight   float64 `json:"count_weight"`
-	LatencyWeight float64 `json:"latency_weight"`
+	Score          float64 `json:"score"`
+	CountScore     float64 `json:"count_score"`
+	LatencyScore   float64 `json:"latency_score"`
+	PriorityScore  float64 `json:"priority_score"`
+	CountWeight    float64 `json:"count_weight"`
+	LatencyWeight  float64 `json:"latency_weight"`
+	PriorityWeight float64 `json:"priority_weight"`
 	// CountScoreCap 是次数分的封顶值：连续成功次数超过它之后，次数分不再增长。
 	CountScoreCap int `json:"count_score_cap"`
 	// EffectiveLatencyMs 是参与评分的延迟（含成功率惩罚与在任者迟滞折算），
@@ -516,6 +542,26 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 		}
 		return config.KeepHealthyIncumbentGlobal
 	}
+	priorityIncluded := make(map[int64]struct{}, len(config.PriorityEnabledGroupIDs))
+	for _, groupID := range config.PriorityEnabledGroupIDs {
+		priorityIncluded[groupID] = struct{}{}
+	}
+	priorityExcluded := make(map[int64]struct{}, len(config.PriorityDisabledGroupIDs))
+	for _, groupID := range config.PriorityDisabledGroupIDs {
+		priorityExcluded[groupID] = struct{}{}
+	}
+	// priorityEnabledForGroup 汇总「全局默认 + 分组级覆盖」得到某分组本轮是否把账号优先级计入综合分：
+	// 强制不开启名单 → 不计；强制开启名单 → 计；两者都不在 → 跟随全局默认。
+	// 强制不开启优先于强制开启，避免两个名单误配同一分组时行为不确定（与 keepHealthyForGroup 同规则）。
+	priorityEnabledForGroup := func(groupID int64) bool {
+		if _, excluded := priorityExcluded[groupID]; excluded {
+			return false
+		}
+		if _, included := priorityIncluded[groupID]; included {
+			return true
+		}
+		return config.PriorityEnabledGlobal
+	}
 	dryRunGroups := make(map[int64]struct{}, len(config.DryRunGroupIDs))
 	for _, groupID := range config.DryRunGroupIDs {
 		dryRunGroups[groupID] = struct{}{}
@@ -634,7 +680,7 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 
 		// 综合分依赖组内上下文（同平台内谁最快），必须按组算一次——锁定路径、正常择优、
 		// 必需模型补选三处都复用它，保证「谁更优」的口径一致。
-		electionScores := supplierGroupSchedulingElectionScores(successMembers, config.CountWeight, config.LatencyWeight, config.LatencyMinSamples, config.SwitchMargin, config.CountScoreCap)
+		electionScores := supplierGroupSchedulingElectionScores(successMembers, config.CountWeight, config.LatencyWeight, config.PriorityWeight, config.LatencyMinSamples, config.SwitchMargin, config.CountScoreCap, priorityEnabledForGroup(groupID))
 
 		// 在任者健康锁定：仅对被 opt-in 的分组生效。只要该组「当前开着的账号」里没有
 		// 已经连续失败到阈值的（单次抖动不算），就保留这些在任账号、跳过择优与换人。
@@ -749,8 +795,10 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 				decision.Score = score.Score
 				decision.CountScore = score.CountScore
 				decision.LatencyScore = score.LatencyScore
+				decision.PriorityScore = score.PriorityScore
 				decision.CountWeight = config.CountWeight
 				decision.LatencyWeight = config.LatencyWeight
+				decision.PriorityWeight = config.PriorityWeight
 				decision.CountScoreCap = config.CountScoreCap
 				decision.EffectiveLatencyMs = score.EffectiveLatencyMs
 				decision.LatencyFallback = score.LatencyFallback
@@ -977,9 +1025,10 @@ func supplierGroupSchedulingElectionLatency(member SupplierGroupSchedulingElecti
 // 拆开返回而不是只给一个 float64：切换日志要把「为什么是它当选」摊开给管理员复核，
 // 只给一个综合分是没法验算的 —— 权重、封顶、归一化口径都在配置里，看不到分量就只能猜。
 type supplierGroupSchedulingElectionScore struct {
-	Score        float64
-	CountScore   float64 // 归一化后的次数分，0..1
-	LatencyScore float64 // 归一化后的用时分，0..1
+	Score         float64
+	CountScore    float64 // 归一化后的次数分，0..1
+	LatencyScore  float64 // 归一化后的用时分，0..1
+	PriorityScore float64 // 归一化后的优先级分，0..1；该组未开启优先级计分时为 0
 	// EffectiveLatencyMs 是真正参与评分的那份延迟：窗口平均（可信时）叠加成功率惩罚，
 	// 在任者再乘迟滞折算系数。与日志里显示的「测试用时」不是同一个数，必须分开标。
 	EffectiveLatencyMs int64
@@ -988,7 +1037,9 @@ type supplierGroupSchedulingElectionScore struct {
 	LatencyFallback bool
 }
 
-func supplierGroupSchedulingElectionScores(members []SupplierGroupSchedulingElectionMember, countWeight, latencyWeight float64, latencyMinSamples int, switchMargin float64, countScoreCap int) map[int64]supplierGroupSchedulingElectionScore {
+// supplierGroupSchedulingElectionScores 给同一分组内的候选账号算综合分，越大越优。
+// 分组内各候选应已同步过「是否参与优先级计分」开关（priorityEnabledForGroup 判定结果）。
+func supplierGroupSchedulingElectionScores(members []SupplierGroupSchedulingElectionMember, countWeight, latencyWeight, priorityWeight float64, latencyMinSamples int, switchMargin float64, countScoreCap int, priorityEnabled bool) map[int64]supplierGroupSchedulingElectionScore {
 	// 迟滞死区做在延迟上而不是综合分上：组内 min-max 归一化会把任意大小的延迟差放大到满量程
 	// （两个候选时分差恒为 latencyWeight），综合分层面的死区因此形同虚设。改为把「在任者(已开启)」
 	// 的评分延迟按 (1-switchMargin) 折算，让它显得更快，于是挑战者必须在延迟上快出 switchMargin 比例
@@ -1030,6 +1081,26 @@ func supplierGroupSchedulingElectionScores(members []SupplierGroupSchedulingElec
 	if countCap <= 0 {
 		countCap = float64(DefaultSupplierGroupSchedulingElectionCountScoreCap)
 	}
+
+	// 优先级分在同一组内 min-max 归一化：数值越小优先级越高（与网关 filterByMinPriority 同源），
+	// 所以最小者映射 1.0、最大者映射 0。与用时同理：优先级全都相同或极差为 0 时给中性分 0.5，
+	// 让这项不影响相对顺序。该组开关关闭（priorityEnabled=false）时一律取 0。
+	priorityMin, priorityMax, priorityHasSpread := 0, 0, false
+	if priorityEnabled {
+		for _, member := range members {
+			if !priorityHasSpread {
+				priorityMin, priorityMax = member.Priority, member.Priority
+				priorityHasSpread = true
+			}
+			if member.Priority < priorityMin {
+				priorityMin = member.Priority
+			}
+			if member.Priority > priorityMax {
+				priorityMax = member.Priority
+			}
+		}
+	}
+
 	scores := make(map[int64]supplierGroupSchedulingElectionScore, len(members))
 	for _, member := range members {
 		normalizedCount := float64(member.HealthyCount) / countCap
@@ -1046,10 +1117,20 @@ func supplierGroupSchedulingElectionScores(members []SupplierGroupSchedulingElec
 				latencyFallback = false
 			}
 		}
+		normalizedPriority := 0.0
+		if priorityEnabled {
+			if priorityMax > priorityMin {
+				normalizedPriority = float64(priorityMax-member.Priority) / float64(priorityMax-priorityMin)
+			} else {
+				// 斜率存在但大家都相同：给中性分，避免因「都设了同一个值」而一边倒。
+				normalizedPriority = 0.5
+			}
+		}
 		scores[member.AccountID] = supplierGroupSchedulingElectionScore{
-			Score:              countWeight*normalizedCount + latencyWeight*normalizedLatency,
+			Score:              countWeight*normalizedCount + latencyWeight*normalizedLatency + priorityWeight*normalizedPriority,
 			CountScore:         normalizedCount,
 			LatencyScore:       normalizedLatency,
+			PriorityScore:      normalizedPriority,
 			EffectiveLatencyMs: latency,
 			LatencyFallback:    latencyFallback,
 		}
@@ -1213,6 +1294,14 @@ func normalizeSupplierGroupSchedulingElectionConfig(config SupplierGroupScheduli
 	sort.Slice(config.KeepHealthyIncumbentExcludedGroupIDs, func(i, j int) bool {
 		return config.KeepHealthyIncumbentExcludedGroupIDs[i] < config.KeepHealthyIncumbentExcludedGroupIDs[j]
 	})
+	config.PriorityEnabledGroupIDs = uniquePositiveInt64s(config.PriorityEnabledGroupIDs)
+	sort.Slice(config.PriorityEnabledGroupIDs, func(i, j int) bool {
+		return config.PriorityEnabledGroupIDs[i] < config.PriorityEnabledGroupIDs[j]
+	})
+	config.PriorityDisabledGroupIDs = uniquePositiveInt64s(config.PriorityDisabledGroupIDs)
+	sort.Slice(config.PriorityDisabledGroupIDs, func(i, j int) bool {
+		return config.PriorityDisabledGroupIDs[i] < config.PriorityDisabledGroupIDs[j]
+	})
 	config.DryRunGroupIDs = uniquePositiveInt64s(config.DryRunGroupIDs)
 	sort.Slice(config.DryRunGroupIDs, func(i, j int) bool {
 		return config.DryRunGroupIDs[i] < config.DryRunGroupIDs[j]
@@ -1231,6 +1320,16 @@ func normalizeSupplierGroupSchedulingElectionConfig(config SupplierGroupScheduli
 	}
 	if config.LatencyWeight > MaxSupplierGroupSchedulingElectionWeight {
 		config.LatencyWeight = MaxSupplierGroupSchedulingElectionWeight
+	}
+	// 优先级权重与 Count/Latency 同理遵循「0 或缺失回落默认值」：
+	// 旧 config_json 里没有它，反序列化是 0，回落即拿到默认 0.5 —— 但只有真正
+	// 开启了「优先级参与择优」的分组（priorityEnabledForGroup）才会计入综合分，
+	// 否则权重再大也是空转，升级后不改变任何现有分组的结果。
+	if config.PriorityWeight <= 0 {
+		config.PriorityWeight = DefaultSupplierGroupSchedulingElectionPriorityWeight
+	}
+	if config.PriorityWeight > MaxSupplierGroupSchedulingElectionWeight {
+		config.PriorityWeight = MaxSupplierGroupSchedulingElectionWeight
 	}
 	// 与权重同理：旧 config_json 里没有这个字段，反序列化后是 0，一律按默认值处理。
 	// 想退回「一次失败立刻关」请显式配 1，而不是把 0 当开关用。

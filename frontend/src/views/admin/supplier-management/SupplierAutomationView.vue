@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <SupplierModuleLayout>
     <div class="sp-automation-console">
       <header class="sp-page-head sp-console-head">
@@ -391,10 +391,29 @@
                 <span>{{ electionKeepHealthyAll ? '默认锁定' : '默认不锁' }}</span>
               </label>
             </div>
+            <div class="sp-election-dry-run-card sp-election-keep-healthy-card" :class="{ 'is-on': electionPriorityAll }">
+              <div>
+                <strong>账号优先级参与择优（全局默认）</strong>
+                <span v-if="electionPriorityAll">默认对所有分组开启：综合分里计入账号优先级（数值越小优先级越高），都健康时高优先级账号更占优势。可在「配置分组」里对个别分组单独关闭。</span>
+                <span v-else>默认不把优先级计入综合分（与升级前一致）。打开后所有分组默认计优先级；仍可在「配置分组」里对个别分组单独开或关。</span>
+              </div>
+              <label
+                class="sp-election-dry-run-toggle"
+                title="打开后：默认所有分组的综合分都计入账号优先级（数值越小优先级越高）；可在配置分组里逐个覆盖"
+              >
+                <Toggle
+                  :model-value="electionPriorityAll"
+                  aria-label="是否全局开启账号优先级计分"
+                  @update:model-value="setElectionPriorityAll"
+                />
+                <span>{{ electionPriorityAll ? '默认计入' : '默认不计' }}</span>
+              </label>
+            </div>
             <div class="sp-form-grid sp-group-election-policy-grid">
               <Input :model-value="editForm.config.group_scheduling_election_top_n" type="number" label="每组开启账号数（默认 1 单活）" hint="每组最多保留几个账号处于开启调度状态，默认 1 = 单活。注意这只是「每组」的目标、不是硬上限：账号的开关记在账号上（不是记在「账号 + 分组」上），判定规则是「在所属的任一分组里最优就开」。所以同属 A、B 两个组的账号，只要它在 B 组里最优就会被开启，它落在 A 组里的那一份也跟着开着 —— A 组实际开着的数量就会超过这里填的值。要真正单活，只能让分组互不重叠、或让重叠的账号只在其中一个组里最优。填 2 以上时较慢的账号也会分摊到请求。" @update:model-value="editForm.config.group_scheduling_election_top_n = toNumber($event, editForm.config.group_scheduling_election_top_n ?? 1)" />
               <Input :model-value="editForm.config.group_scheduling_election_count_weight" type="number" step="0.1" min="0.1" label="连续成功次数权重（默认 1）" hint="连续成功次数在综合分里的话语权。次数分 = min(连续成功次数 ÷ 封顶值, 1)，即达到封顶值后一律按封顶值算——默认封顶 10 时，142 次与 190 次得分完全相同。封顶是为了防止老账号靠资历永久占位。" @update:model-value="editForm.config.group_scheduling_election_count_weight = toNumber($event, editForm.config.group_scheduling_election_count_weight ?? 1)" />
               <Input :model-value="editForm.config.group_scheduling_election_latency_weight" type="number" step="0.1" min="0.1" label="测试用时权重（默认 0.5）" hint="用时在综合分里的话语权。用时只在同一平台内比较（跨平台基线速度差数倍，比了没意义），组内最快的得 1 分、最慢的得 0 分。默认 0.5，即用时满分也只相当于次数满分的一半——封顶 10 时最快也只抵 5 次连续成功；调到比次数权重还大就变成谁快谁上。" @update:model-value="editForm.config.group_scheduling_election_latency_weight = toNumber($event, editForm.config.group_scheduling_election_latency_weight ?? 0.5)" />
+              <Input :model-value="editForm.config.group_scheduling_election_priority_weight" type="number" step="0.1" min="0.1" label="账号优先级权重（默认 0.5，需在下方开关分组内开启）" hint="账号优先级在综合分里的话语权。优先级在同一分组内比较（数值越小优先级越高），组内优先级最高的得 1 分、最低的得 0 分；全都设置相同值则这项取中性分、不改变排序。默认 0.5，即全部健康时优先级最高者恰好拿满分。注意：只有在上方/「配置分组」里开启了「优先级计分」的分组，这项才真正计入综合分；想进一步放大「都健康时高优先级占优」，可调大此值或调小次数/用时权重。" @update:model-value="editForm.config.group_scheduling_election_priority_weight = toNumber($event, editForm.config.group_scheduling_election_priority_weight ?? 0.5)" />
               <Input :model-value="editForm.config.group_scheduling_election_failure_threshold" type="number" min="1" label="连续失败关闭阈值（默认 2 次）" hint="测试失败后要连续几个执行周期都失败，才真正关闭调度。默认 2 是给单次网络抖动留翻盘机会，填 1 等于失败一次就关。另有两种情况不关：分组里已无其它成功账号（关了就成空组），或失败次数还没到阈值——都保持原状等下一轮。" @update:model-value="editForm.config.group_scheduling_election_failure_threshold = toNumber($event, editForm.config.group_scheduling_election_failure_threshold ?? 2)" />
               <Input :model-value="editForm.config.group_scheduling_election_switch_margin" type="number" step="0.05" min="0" label="切换迟滞比例（默认 0.15，挑战者要快 15% 才换人）" hint="换人的死区，比较的是延迟而不是总分。挑战者的延迟要比当前正在跑的账号快出这个比例才夺位，否则维持现状，防止两个差不多的账号来回对拍。默认 0.15 = 快 15%。填到 0.95 会让在任者几乎永不被换下。" @update:model-value="editForm.config.group_scheduling_election_switch_margin = toNumber($event, editForm.config.group_scheduling_election_switch_margin ?? 0.15)" />
               <Input :model-value="editForm.config.group_scheduling_election_latency_window_minutes" type="number" min="1" label="延迟平均窗口（分钟，默认 30）" hint="综合分用的延迟取最近这么多分钟内健康检测成功样本的平均值，避免被单次抖动带偏。注意账号列表里显示的「近 1h 均」是另一个窗口，数值可能不同，判断依据以本任务的运行记录为准。" @update:model-value="editForm.config.group_scheduling_election_latency_window_minutes = toNumber($event, editForm.config.group_scheduling_election_latency_window_minutes ?? 30)" />
@@ -403,12 +422,14 @@
             </div>
             <div class="sp-rate-guard-scope-card">
               <div>
-                <strong>分组参与择优 / 在任者健康锁定</strong>
+                <strong>分组参与择优 / 在任者健康锁定 / 优先级计分</strong>
                 <span v-if="groupElectionDisabledGroupIDs.length === 0">所有分组都参与择优。新增分组也会自动参与。</span>
                 <span v-else>已关闭 <strong class="sp-rate-guard-scope-count">{{ groupElectionDisabledGroupIDs.length }}</strong> 个分组，其余分组正常参与择优。</span>
                 <span v-if="electionKeepHealthyAll">已<strong class="sp-election-keep-healthy-count">全局</strong>开启「在任者健康锁定」：开着的账号正常就保留现状、不换人<template v-if="groupElectionKeepHealthyExcludedGroupIDs.length > 0">，其中 <strong class="sp-rate-guard-scope-count">{{ groupElectionKeepHealthyExcludedGroupIDs.length }}</strong> 个分组单独关闭</template>。</span>
                 <span v-else-if="groupElectionKeepHealthyGroupIDs.length > 0">已对 <strong class="sp-rate-guard-scope-count">{{ groupElectionKeepHealthyGroupIDs.length }}</strong> 个分组开启「在任者健康则锁定」：开着的账号正常就跳过、不换人。</span>
                 <span v-else>暂无分组开启「在任者健康锁定」。</span>
+                <span v-if="electionPriorityAll">已<strong class="sp-election-keep-healthy-count">全局</strong>开启「优先级计分」：综合分计入账号优先级，都健康时高优先级更占优势<template v-if="groupElectionPriorityDisabledGroupIDs.length > 0">，其中 <strong class="sp-rate-guard-scope-count">{{ groupElectionPriorityDisabledGroupIDs.length }}</strong> 个分组单独关闭</template>。</span>
+                <span v-else-if="groupElectionPriorityEnabledGroupIDs.length > 0">已对 <strong class="sp-rate-guard-scope-count">{{ groupElectionPriorityEnabledGroupIDs.length }}</strong> 个分组开启「优先级计分」：综合分计入账号优先级，都健康时高优先级更占优势。</span>
                 <span v-if="groupElectionRequiredModelsCount > 0">已为 <strong class="sp-rate-guard-scope-count">{{ groupElectionRequiredModelsCount }}</strong> 个分组设置必需模型：换人时保证这些模型不断供，支持者全失败则告警待恢复。</span>
                 <span v-if="electionDryRunAll">演练模式已开启：<strong class="sp-election-dry-run-count">全部分组</strong>只记录建议，不修改调度。</span>
                 <span v-else-if="groupElectionDryRunGroupIDs.length > 0">已对 <strong class="sp-election-dry-run-count">{{ groupElectionDryRunGroupIDs.length }}</strong> 个分组开启演练：这些分组只记录建议，不修改调度。</span>
@@ -1446,6 +1467,18 @@
                 </label>
                 <label
                   v-if="!electionGroupIsDisabled(group.id)"
+                  class="sp-health-guard-account-scheduling-toggle sp-election-keep-healthy-toggle sp-election-toggle-priority"
+                  :title="`打开后：分组「${group.name}」的综合分计入账号优先级（数值越小优先级越高），都健康时高优先级更占优势；默认跟随全局开关，逐个分组可覆盖`"
+                >
+                  <Toggle
+                    :model-value="electionGroupPriority(group.id)"
+                    :aria-label="`分组 ${group.name} 是否计入账号优先级`"
+                    @update:model-value="toggleElectionGroupPriority(group.id)"
+                  />
+                  <span>计优先级</span>
+                </label>
+                <label
+                  v-if="!electionGroupIsDisabled(group.id)"
                   class="sp-election-required-models"
                   :title="`分组「${group.name}」的必需模型：择优后若赢家没覆盖这些模型，会补选一个健康支持者开启；支持它的账号全失败时不硬留、只告警待恢复。逗号或空格分隔。`"
                 >
@@ -1465,7 +1498,7 @@
           </section>
         </div>
         <template #footer>
-          <span class="sp-rate-guard-group-hint">取消勾选的分组会被跳过；「健康锁定」默认跟随全局开关，逐个分组可覆盖（关掉=强制不锁定、打开=强制锁定），开着的账号正常时保留现状、不换人；「演练」只记录建议、不改调度。</span>
+          <span class="sp-rate-guard-group-hint">取消勾选的分组会被跳过；「健康锁定」默认跟随全局开关，逐个分组可覆盖（关掉=强制不锁定、打开=强制锁定），开着的账号正常时保留现状、不换人；「计优先级」默认跟随全局开关，逐个分组可覆盖（打开=强制计入、关掉=强制不计）；「演练」只记录建议、不改调度。</span>
           <button class="sp-button ghost" type="button" @click="enableAllElectionGroups">全部参与</button>
           <button class="sp-button primary" type="button" @click="closeElectionGroups">完成</button>
         </template>
@@ -1635,6 +1668,11 @@ const editForm = reactive<SupplierAutomationTask>({
     group_scheduling_election_disabled_group_ids: [],
     group_scheduling_election_count_weight: 1,
     group_scheduling_election_latency_weight: 0.5,
+    group_scheduling_election_priority_weight: 0.5,
+    // 优先级计分默认关闭：升级前的行为就是"优先级不参与择优"。
+    group_scheduling_election_priority_enabled_global: false,
+    group_scheduling_election_priority_enabled_group_ids: [],
+    group_scheduling_election_priority_disabled_group_ids: [],
     group_scheduling_election_failure_threshold: 2,
     group_scheduling_election_switch_margin: 0.15,
     group_scheduling_election_latency_window_minutes: 30,
@@ -2504,6 +2542,21 @@ const electionKeepHealthyAll = computed(
   () => editForm.config.group_scheduling_election_keep_healthy_incumbent_global === true
 )
 
+// 账号优先级计分：存"要计入优先级"的分组（force-on），空列表即不强制开启（跟随全局开关）。
+const groupElectionPriorityEnabledGroupIDs = computed(() =>
+  normalizePositiveAccountIDs(editForm.config.group_scheduling_election_priority_enabled_group_ids)
+)
+
+// 账号优先级计分的"强制关闭"名单（force-off），优先级最高：命中即不计，无论全局开关与 force-on 名单。
+const groupElectionPriorityDisabledGroupIDs = computed(() =>
+  normalizePositiveAccountIDs(editForm.config.group_scheduling_election_priority_disabled_group_ids)
+)
+
+// 优先级计分的全局默认开关，同样用 === true 收敛 undefined（旧配置没有这个键，默认不参与）。
+const electionPriorityAll = computed(
+  () => editForm.config.group_scheduling_election_priority_enabled_global === true
+)
+
 // 模型名清洗：trim、去空、按小写去重保序。必需模型的录入与展示都走它，口径与后端一致。
 function normalizeRequiredModelList(models: unknown): string[] {
   if (!Array.isArray(models)) return []
@@ -3016,6 +3069,20 @@ function applyGroupElectionDefaults() {
   const latencyWeight = Number(editForm.config.group_scheduling_election_latency_weight)
   editForm.config.group_scheduling_election_latency_weight =
     Number.isFinite(latencyWeight) && latencyWeight > 0 ? latencyWeight : 0.5
+  // 优先级权重同理：正数才有效，0 在后端被当成"未配置"回落默认 0.5。
+  const priorityWeight = Number(editForm.config.group_scheduling_election_priority_weight)
+  editForm.config.group_scheduling_election_priority_weight =
+    Number.isFinite(priorityWeight) && priorityWeight > 0 ? priorityWeight : 0.5
+  // 优先级计分的全局开关收敛成真正的布尔（旧配置没有这个键，读回来是 undefined）；
+  // 分组名单必须序列化成数组而非省略——后端整块覆盖 config_json，省略等于保留旧值。
+  editForm.config.group_scheduling_election_priority_enabled_global =
+    editForm.config.group_scheduling_election_priority_enabled_global === true
+  editForm.config.group_scheduling_election_priority_enabled_group_ids = normalizePositiveAccountIDs(
+    editForm.config.group_scheduling_election_priority_enabled_group_ids
+  )
+  editForm.config.group_scheduling_election_priority_disabled_group_ids = normalizePositiveAccountIDs(
+    editForm.config.group_scheduling_election_priority_disabled_group_ids
+  )
   // 阈值同理，且必须是正整数：0 在后端归一化里被当成"未配置"回落默认 2。
   const failureThreshold = Math.floor(Number(editForm.config.group_scheduling_election_failure_threshold))
   editForm.config.group_scheduling_election_failure_threshold =
@@ -3207,6 +3274,17 @@ function toggleElectionGroup(groupID: number) {
       editForm.config.group_scheduling_election_dry_run_group_ids =
         normalizePositiveAccountIDs(dryRun.filter(id => id !== groupID))
     }
+    // 优先级计分名单同理：不参与择优的分组不该留在"计优先级"列表里。
+    if (groupElectionPriorityEnabledGroupIDs.value.includes(groupID)) {
+      editForm.config.group_scheduling_election_priority_enabled_group_ids = normalizePositiveAccountIDs(
+        groupElectionPriorityEnabledGroupIDs.value.filter(id => id !== groupID)
+      )
+    }
+    if (groupElectionPriorityDisabledGroupIDs.value.includes(groupID)) {
+      editForm.config.group_scheduling_election_priority_disabled_group_ids = normalizePositiveAccountIDs(
+        groupElectionPriorityDisabledGroupIDs.value.filter(id => id !== groupID)
+      )
+    }
   }
 }
 
@@ -3252,6 +3330,32 @@ function toggleElectionKeepHealthyGroup(groupID: number) {
   editForm.config.group_scheduling_election_keep_healthy_incumbent_group_ids = normalizePositiveAccountIDs(included)
   editForm.config.group_scheduling_election_keep_healthy_incumbent_excluded_group_ids =
     normalizePositiveAccountIDs(excluded)
+}
+
+// 优先级计分的生效值口径与后端 priorityEnabledForGroup 一致：
+// 强制关闭→false（优先）、强制开启→true、都不在→跟随全局开关。
+function electionGroupPriority(groupID: number): boolean {
+  if (groupElectionPriorityDisabledGroupIDs.value.includes(groupID)) return false
+  if (groupElectionPriorityEnabledGroupIDs.value.includes(groupID)) return true
+  return electionPriorityAll.value
+}
+
+// 全局默认开关：只改全局位，不动分组级覆盖名单 —— 已显式覆盖的分组在全局翻转后仍保持覆盖。
+function setElectionPriorityAll(value: unknown) {
+  editForm.config.group_scheduling_election_priority_enabled_global = Boolean(value)
+}
+
+function toggleElectionGroupPriority(groupID: number) {
+  // 覆盖语义与健康锁一致：目标 = 翻转当前生效值。与全局不一致才写显式覆盖，一致则清掉覆盖、回落继承全局。
+  const desired = !electionGroupPriority(groupID)
+  let included = groupElectionPriorityEnabledGroupIDs.value.filter(id => id !== groupID)
+  let excluded = groupElectionPriorityDisabledGroupIDs.value.filter(id => id !== groupID)
+  if (desired !== electionPriorityAll.value) {
+    if (desired) included = [...included, groupID]
+    else excluded = [...excluded, groupID]
+  }
+  editForm.config.group_scheduling_election_priority_enabled_group_ids = normalizePositiveAccountIDs(included)
+  editForm.config.group_scheduling_election_priority_disabled_group_ids = normalizePositiveAccountIDs(excluded)
 }
 
 function electionGroupRequiredModelsText(groupID: number): string {
@@ -4460,6 +4564,17 @@ function intervalSecondsToCron(seconds: number): string | null {
   :global(.modal-content:has(.sp-edit-dialog[data-grid-cols="3"])) {
     width: min(1280px, calc(100vw - 2rem));
     max-width: min(1280px, calc(100vw - 2rem));
+  }
+
+  /* 分组择优调度：编辑弹窗按 90% 视口宽。
+     本走 3 列档（最宽 1280px），在宽屏上偏窄、分组择优的列与说明文字排得挤。
+     用组内唯一的类精确命中：只有分组择优的 form 里有 .sp-group-election-policy-grid，
+     不波及其它任务的编辑弹窗。
+     选择器含 :has()（2 个类），权重高于 Tailwind 的 .xl\:max-w-7xl，
+     不依赖源码顺序即可生效。只在 >=768px 生效，窄屏沿用 BaseDialog 档位，避免手机上挤掉内容。 */
+  :global(.modal-content:has(.sp-edit-dialog .sp-group-election-policy-grid)) {
+    width: 90vw;
+    max-width: 90vw;
   }
 }
 

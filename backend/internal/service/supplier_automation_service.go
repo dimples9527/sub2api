@@ -97,6 +97,15 @@ type SupplierAutomationConfig struct {
 	// 两项各自归一到 [0,1] 后加权，比值即相对话语权；缺省由归一化回落默认值。
 	GroupElectionCountWeight   float64 `json:"group_scheduling_election_count_weight"`
 	GroupElectionLatencyWeight float64 `json:"group_scheduling_election_latency_weight"`
+	// 账号优先级在综合分里的话语权（默认 0.5）：组内 min-max 归一化，数值越小优先级越高映射到 1.0。
+	// 与 Count/Latency 同理遵循「0 或缺失回落默认值」；只有开启优先级计分的分组才会计入综合分。
+	GroupElectionPriorityWeight float64 `json:"group_scheduling_election_priority_weight"`
+	// 优先级计分的全局默认开关（默认 false=不参与，与升级前一致）；分组名单可反向覆盖。
+	GroupElectionPriorityEnabledGlobal bool `json:"group_scheduling_election_priority_enabled_global"`
+	// 强制开启优先级计分的分组 ID（force-on）：无论全局开关如何都计优先级。
+	GroupElectionPriorityEnabledGroupIDs []int64 `json:"group_scheduling_election_priority_enabled_group_ids"`
+	// 强制不开启优先级计分的分组 ID（force-off，优先级最高）：即便同时出现在 force-on 名单里也以此为准。
+	GroupElectionPriorityDisabledGroupIDs []int64 `json:"group_scheduling_election_priority_disabled_group_ids"`
 	// 连续失败多少个调度周期才真正关闭调度，默认 2（一次抖动不关）；配 1 即退回"失败即关"。
 	GroupElectionFailureThreshold int `json:"group_scheduling_election_failure_threshold"`
 	// 换人迟滞死区，取延迟相对比例（默认 0.15=挑战者要快 15% 才换人），压住正常账号反复对拍的抖动。
@@ -764,6 +773,10 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 			DisabledGroupIDs:                     task.Config.GroupElectionDisabledGroupIDs,
 			CountWeight:                          task.Config.GroupElectionCountWeight,
 			LatencyWeight:                        task.Config.GroupElectionLatencyWeight,
+			PriorityWeight:                       task.Config.GroupElectionPriorityWeight,
+			PriorityEnabledGlobal:                task.Config.GroupElectionPriorityEnabledGlobal,
+			PriorityEnabledGroupIDs:              task.Config.GroupElectionPriorityEnabledGroupIDs,
+			PriorityDisabledGroupIDs:             task.Config.GroupElectionPriorityDisabledGroupIDs,
 			FailureThreshold:                     task.Config.GroupElectionFailureThreshold,
 			SwitchMargin:                         task.Config.GroupElectionSwitchMargin,
 			LatencyWindowMinutes:                 task.Config.GroupElectionLatencyWindowMinutes,
@@ -935,7 +948,9 @@ func validateSupplierAutomationTask(task SupplierAutomationTask) error {
 		if task.Config.GroupElectionCountWeight < 0 ||
 			task.Config.GroupElectionCountWeight > MaxSupplierGroupSchedulingElectionWeight ||
 			task.Config.GroupElectionLatencyWeight < 0 ||
-			task.Config.GroupElectionLatencyWeight > MaxSupplierGroupSchedulingElectionWeight {
+			task.Config.GroupElectionLatencyWeight > MaxSupplierGroupSchedulingElectionWeight ||
+			task.Config.GroupElectionPriorityWeight < 0 ||
+			task.Config.GroupElectionPriorityWeight > MaxSupplierGroupSchedulingElectionWeight {
 			return ErrSupplierProviderInvalid
 		}
 		// 阈值 0 表示未配置（归一化时回落默认 2），负数与超上限视为配置错误。
