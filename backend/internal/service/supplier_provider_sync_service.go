@@ -187,6 +187,8 @@ type SupplierCleanupPolicy struct {
 	InactiveAccountDays               int
 	InactiveGroupDays                 int
 	AccountHealthHistoryRetentionDays int
+	AuthEventRetentionDays            int
+	MonitorSampleRetentionDays        int
 }
 
 type SupplierCleanupCounts struct {
@@ -197,6 +199,8 @@ type SupplierCleanupCounts struct {
 	Accounts             int
 	Groups               int
 	AccountHealthHistory int
+	AuthEvents           int
+	MonitorSamples       int
 }
 
 type SupplierProviderDataRepository interface {

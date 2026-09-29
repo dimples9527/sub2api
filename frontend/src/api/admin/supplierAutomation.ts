@@ -406,6 +406,9 @@ export interface SupplierAutomationCleanupRunDetail {
   daily_stats: number
   accounts: number
   groups: number
+  account_health_history: number
+  auth_events: number
+  monitor_samples: number
 }
 
 export interface SupplierSyncCounts {

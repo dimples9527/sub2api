@@ -185,6 +185,8 @@ type SupplierAutomationCleanupRunDetail struct {
 	Accounts             int `json:"accounts"`
 	Groups               int `json:"groups"`
 	AccountHealthHistory int `json:"account_health_history"`
+	AuthEvents           int `json:"auth_events"`
+	MonitorSamples       int `json:"monitor_samples"`
 }
 
 type SupplierAutomationRunListParams struct {
@@ -642,11 +644,17 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 			InactiveAccountDays:               task.Config.InactiveAccountDays,
 			InactiveGroupDays:                 task.Config.InactiveGroupDays,
 			AccountHealthHistoryRetentionDays: 30,
+			// 认证审计与监控样本是同步任务每次调用上游都写的明细流水，只被页面当历史读，
+			// 保留期固定 30 天、不开放到任务配置：开放配置只是多一个把它配成 0
+			// 从而清空全表的入口（Cleanup 对 0 没有归一化兜底），而用户对这两张表
+			// 没有"留多久"的决策需求。
+			AuthEventRetentionDays:     30,
+			MonitorSampleRetentionDays: 30,
 		}, time.Now(), 1000)
 		if err != nil {
 			return err
 		}
-		run.ProcessedCount = counts.AutomationRuns + counts.SyncRuns + counts.MetricSnapshots + counts.DailyStats + counts.Accounts + counts.Groups + counts.AccountHealthHistory
+		run.ProcessedCount = counts.AutomationRuns + counts.SyncRuns + counts.MetricSnapshots + counts.DailyStats + counts.Accounts + counts.Groups + counts.AccountHealthHistory + counts.AuthEvents + counts.MonitorSamples
 		run.ResultDetail = &SupplierAutomationRunDetail{Cleanup: &SupplierAutomationCleanupRunDetail{
 			AutomationRuns:       counts.AutomationRuns,
 			SyncRuns:             counts.SyncRuns,
@@ -655,6 +663,8 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 			Accounts:             counts.Accounts,
 			Groups:               counts.Groups,
 			AccountHealthHistory: counts.AccountHealthHistory,
+			AuthEvents:           counts.AuthEvents,
+			MonitorSamples:       counts.MonitorSamples,
 		}}
 		return nil
 	case SupplierAutomationTaskRateGuard:

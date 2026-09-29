@@ -1977,6 +1977,11 @@ func (r *supplierProviderDataRepository) Cleanup(ctx context.Context, policy ser
 		{"supplier_provider_accounts", "active = FALSE AND inactive_at < $1", now.AddDate(0, 0, -policy.InactiveAccountDays), &counts.Accounts},
 		{"supplier_provider_groups", "active = FALSE AND inactive_at < $1", now.AddDate(0, 0, -policy.InactiveGroupDays), &counts.Groups},
 		{"supplier_account_health_history", "checked_at < $1", now.AddDate(0, 0, -policy.AccountHealthHistoryRetentionDays), &counts.AccountHealthHistory},
+		// 认证审计与监控样本是排障用的明细流水：同步任务每次调用上游都会各写一条，
+		// 单机实测分别约 5.6 万行/天、2.1 万行/天，不设保留期会无限增长。
+		// 两者都只被页面当历史明细读，保留期与分组监控快照的 30 天对齐即可。
+		{"supplier_provider_auth_events", "created_at < $1", now.AddDate(0, 0, -policy.AuthEventRetentionDays), &counts.AuthEvents},
+		{"supplier_provider_monitor_samples", "checked_at < $1", now.AddDate(0, 0, -policy.MonitorSampleRetentionDays), &counts.MonitorSamples},
 	}
 	for _, spec := range cleanupSpecs {
 		for {

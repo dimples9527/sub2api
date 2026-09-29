@@ -844,6 +844,9 @@
               <article><span>每日统计</span><strong>{{ detailRun.result_detail.cleanup.daily_stats }}</strong></article>
               <article><span>供应商账号</span><strong>{{ detailRun.result_detail.cleanup.accounts }}</strong></article>
               <article><span>供应商分组</span><strong>{{ detailRun.result_detail.cleanup.groups }}</strong></article>
+              <article><span>守护历史</span><strong>{{ detailRun.result_detail.cleanup.account_health_history }}</strong></article>
+              <article><span>认证事件</span><strong>{{ detailRun.result_detail.cleanup.auth_events }}</strong></article>
+              <article><span>监控样本</span><strong>{{ detailRun.result_detail.cleanup.monitor_samples }}</strong></article>
             </section>
 
             <pre v-else class="sp-message-detail">{{ detailMessage }}</pre>
@@ -2184,7 +2187,10 @@ function formatRunDetail(run: SupplierAutomationRun): string {
       `- 指标快照：${cleanup.metric_snapshots}`,
       `- 每日统计：${cleanup.daily_stats}`,
       `- 供应商账号：${cleanup.accounts}`,
-      `- 供应商分组：${cleanup.groups}`
+      `- 供应商分组：${cleanup.groups}`,
+      `- 守护历史：${cleanup.account_health_history}`,
+      `- 认证事件：${cleanup.auth_events}`,
+      `- 监控样本：${cleanup.monitor_samples}`
     )
   }
   return lines.join('\n')
