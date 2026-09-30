@@ -568,7 +568,7 @@ function whyFacts(section: LogSection, log: SupplierGroupElectionChangeLog): str
   const score = (value?: number) => (typeof value === 'number' ? value.toFixed(3) : '—')
   const requiredModels = decision.required_models || []
 
-  if (decision.locked) {
+  if (decision.locked && !decision.over_capacity) {
     facts.push('本组走在任者健康锁定：在任账号测试都正常，本轮不做择优换人（名次仅供参考）')
   }
   if (decision.no_alternative) {
@@ -608,6 +608,10 @@ function whyFacts(section: LogSection, log: SupplierGroupElectionChangeLog): str
 
   if (requiredModels.length > 0) {
     facts.push(`因分组必需模型 ${requiredModels.join('、')} 在赢家中无人支持，被按综合分补选开启（不要求名次进前 N）`)
+  } else if (decision.over_capacity) {
+    // 被容量收敛掉的账号必须与「在任者健康锁定」区分开：后者是保留，这里是关闭。
+    // 也不说「名次不在前 N」——它可能就是本组 top1，只是本组已经开够了账号。
+    facts.push('本组已开启账号数达到上限，本轮不再新开：该在任账号让位关闭（被其它分组共用的账号会由那些分组保住）')
   } else if (decision.elected) {
     facts.push('本组择优入选：综合分在前 N 名内')
   } else if (decision.scored && !decision.locked) {
@@ -624,6 +628,9 @@ function whyFacts(section: LogSection, log: SupplierGroupElectionChangeLog): str
 function groupReasonText(section: LogSection, log: SupplierGroupElectionChangeLog): string {
   const decision = decisionFor(section, log)
   if (!decision) return ''
+  // 容量收敛必须排在锁定之前：被收敛掉的账号也带 locked（本组本轮没做择优），
+  // 但它是被关闭的，写「未换人」会和同一行的「关闭」自相矛盾。
+  if (decision.over_capacity) return '本组开启数已达上限，收敛关闭'
   if (decision.locked) return '本组在任者健康锁定，未换人'
   if (decision.required_models && decision.required_models.length > 0) {
     return `本组因必需模型 ${decision.required_models.join('、')} 补选`

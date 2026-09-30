@@ -512,6 +512,12 @@ export interface SupplierGroupElectionDecisionDetail {
   top_n?: number
   /** true 表示该组本轮走「在任者健康锁定」，没做择优，此时名次只是参考。 */
   locked?: boolean
+  /**
+   * true 表示该账号在本组被「每组开启账号数」这个硬上限收敛掉了：本组当前开着的账号已经够数，
+   * 本轮不再新开，超出的在任者在这里让位关闭（多组共用的账号会由那些分组保住）。
+   * 与 locked 的分工：locked 说明「本组本轮没做择优」，over_capacity 说明「这个账号是这次收敛的代价」。
+   */
+  over_capacity?: boolean
   /** 非空表示该账号是因「分组要求这些模型、而赢家里没人支持」被补选开启的。 */
   required_models?: string[]
   /** true 表示该组一个测试成功的账号都没有，失败账号因此保持原状待人工确认。 */
